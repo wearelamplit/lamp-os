@@ -90,14 +90,8 @@ class Expression : public AnimatedBehavior {
   /**
    * @brief Generic parameter extraction utilities
    */
-  uint32_t extractUint32Parameter(const std::map<std::string, std::variant<uint32_t, float, double>>& parameters,
+  uint32_t extractUint32Parameter(const std::map<std::string, uint32_t>& parameters,
                                    const std::string& key, uint32_t defaultValue) const;
-
-  float extractFloatParameter(const std::map<std::string, std::variant<uint32_t, float, double>>& parameters,
-                              const std::string& key, float defaultValue) const;
-
-  double extractDoubleParameter(const std::map<std::string, std::variant<uint32_t, float, double>>& parameters,
-                                const std::string& key, double defaultValue) const;
 
 protected:
   /**

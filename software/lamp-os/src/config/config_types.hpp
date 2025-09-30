@@ -83,25 +83,18 @@ class ExpressionConfig {
   uint8_t target = 3;              // TARGET_SHADE=1, TARGET_BASE=2, TARGET_BOTH=3
 
   // Generic parameter storage for expression-specific values
-  std::map<std::string, std::variant<uint32_t, float, double>> parameters;
+  std::map<std::string, uint32_t> parameters;
 
   // Helper methods for parameter access
-  template<typename T>
-  T getParameter(const std::string& name, T defaultValue) const {
+  uint32_t getParameter(const std::string& name, uint32_t defaultValue) const {
     auto it = parameters.find(name);
     if (it != parameters.end()) {
-      try {
-        return std::get<T>(it->second);
-      } catch (const std::bad_variant_access&) {
-        // Type mismatch, return default
-        return defaultValue;
-      }
+      return it->second;
     }
     return defaultValue;
   }
 
-  template<typename T>
-  void setParameter(const std::string& name, T value) {
+  void setParameter(const std::string& name, uint32_t value) {
     parameters[name] = value;
   }
 };

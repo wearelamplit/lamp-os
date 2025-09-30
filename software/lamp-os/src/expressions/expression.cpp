@@ -112,65 +112,11 @@ void Expression::trigger() {
   playOnce();
 }
 
-uint32_t Expression::extractUint32Parameter(const std::map<std::string, std::variant<uint32_t, float, double>>& parameters,
+uint32_t Expression::extractUint32Parameter(const std::map<std::string, uint32_t>& parameters,
                                              const std::string& key, uint32_t defaultValue) const {
   auto it = parameters.find(key);
   if (it != parameters.end()) {
-    try {
-      return std::get<uint32_t>(it->second);
-    } catch (const std::bad_variant_access&) {
-      try {
-        return static_cast<uint32_t>(std::get<float>(it->second));
-      } catch (const std::bad_variant_access&) {
-        try {
-          return static_cast<uint32_t>(std::get<double>(it->second));
-        } catch (const std::bad_variant_access&) {
-          return defaultValue;
-        }
-      }
-    }
-  }
-  return defaultValue;
-}
-
-float Expression::extractFloatParameter(const std::map<std::string, std::variant<uint32_t, float, double>>& parameters,
-                                         const std::string& key, float defaultValue) const {
-  auto it = parameters.find(key);
-  if (it != parameters.end()) {
-    try {
-      return std::get<float>(it->second);
-    } catch (const std::bad_variant_access&) {
-      try {
-        return static_cast<float>(std::get<uint32_t>(it->second));
-      } catch (const std::bad_variant_access&) {
-        try {
-          return static_cast<float>(std::get<double>(it->second));
-        } catch (const std::bad_variant_access&) {
-          return defaultValue;
-        }
-      }
-    }
-  }
-  return defaultValue;
-}
-
-double Expression::extractDoubleParameter(const std::map<std::string, std::variant<uint32_t, float, double>>& parameters,
-                                           const std::string& key, double defaultValue) const {
-  auto it = parameters.find(key);
-  if (it != parameters.end()) {
-    try {
-      return std::get<double>(it->second);
-    } catch (const std::bad_variant_access&) {
-      try {
-        return static_cast<double>(std::get<uint32_t>(it->second));
-      } catch (const std::bad_variant_access&) {
-        try {
-          return static_cast<double>(std::get<float>(it->second));
-        } catch (const std::bad_variant_access&) {
-          return defaultValue;
-        }
-      }
-    }
+    return it->second;
   }
   return defaultValue;
 }

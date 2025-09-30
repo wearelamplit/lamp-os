@@ -185,10 +185,6 @@ lamp::ExpressionConfig parseExpressionConfig(JsonObject node) {
       expr.setParameter(keyStr, value.as<uint32_t>());
     } else if (value.is<int>()) {
       expr.setParameter(keyStr, static_cast<uint32_t>(value.as<int>()));
-    } else if (value.is<float>()) {
-      expr.setParameter(keyStr, value.as<float>());
-    } else if (value.is<double>()) {
-      expr.setParameter(keyStr, value.as<double>());
     }
 
 #ifdef LAMP_DEBUG

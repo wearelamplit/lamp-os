@@ -85,7 +85,6 @@ class ScanCallbacks : public NimBLEScanCallbacks {
 
   void onScanEnd(const NimBLEScanResults &results, int reason) override {
 #ifdef LAMP_DEBUG
-    // Serial.printf("Bluetooth scan ended\n");  // Commented out - too noisy
     std::vector<BluetoothLampRecord> lampsFound = lampBluetoothPool.getLamps();
     int i = 0;
     for (i = 0; i < lampsFound.size(); i++) {
