@@ -112,13 +112,4 @@ void Expression::trigger() {
   playOnce();
 }
 
-uint32_t Expression::extractUint32Parameter(const std::map<std::string, uint32_t>& parameters,
-                                             const std::string& key, uint32_t defaultValue) const {
-  auto it = parameters.find(key);
-  if (it != parameters.end()) {
-    return it->second;
-  }
-  return defaultValue;
-}
-
 }  // namespace lamp

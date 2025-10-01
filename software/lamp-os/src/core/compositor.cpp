@@ -7,14 +7,34 @@ namespace lamp {
 Compositor::Compositor() {};
 
 void Compositor::begin(std::vector<AnimatedBehavior*> inBehaviors, std::vector<FrameBuffer*> inFrameBuffers, bool homeMode) {
+  // Delete all behaviors we previously allocated to prevent memory leak
+  for (auto* behavior : ownedBehaviors) {
+    delete behavior;
+  }
+  ownedBehaviors.clear();
+
+  // Clear existing behaviors to prevent duplicates if begin() is called multiple times
+  behaviors.clear();
+  startupBehaviors.clear();
+  overlayBehaviors.clear();
+
   frameBuffers = inFrameBuffers;
   this->homeMode = homeMode;
 
   // Adds some basic behavior layers that are common to all framebuffers
   for (i = 0; i < frameBuffers.size(); i++) {
-    behaviors.push_back(new IdleBehavior(frameBuffers[i], 0, true));
-    startupBehaviors.push_back(new IdleBehavior(frameBuffers[i], 0, true));
-    startupBehaviors.push_back(new FadeInBehavior(frameBuffers[i], STARTUP_ANIMATION_FRAMES));
+    auto* idleBehavior = new IdleBehavior(frameBuffers[i], 0, true);
+    auto* startupIdleBehavior = new IdleBehavior(frameBuffers[i], 0, true);
+    auto* fadeInBehavior = new FadeInBehavior(frameBuffers[i], STARTUP_ANIMATION_FRAMES);
+
+    behaviors.push_back(idleBehavior);
+    startupBehaviors.push_back(startupIdleBehavior);
+    startupBehaviors.push_back(fadeInBehavior);
+
+    // Track for deletion later
+    ownedBehaviors.push_back(idleBehavior);
+    ownedBehaviors.push_back(startupIdleBehavior);
+    ownedBehaviors.push_back(fadeInBehavior);
   }
 
   // append all of the non critical behaviors

@@ -29,9 +29,9 @@ class PulseExpression : public Expression {
   /**
    * @brief Calculate blend factor for a pixel based on distance from wave center
    * @param pixelIndex Index of the pixel
-   * @return Blend factor (0.0 to 1.0)
+   * @return Blend factor (0 to 100, representing 0% to 100%)
    */
-  float calculateBlendFactor(int pixelIndex) const;
+  uint32_t calculateBlendFactor(int pixelIndex) const;
 
   /**
    * @brief Update wave position based on elapsed time
@@ -57,7 +57,7 @@ class PulseExpression : public Expression {
    * @brief Configure pulse-specific parameters from generic parameter map
    * @param parameters Map containing expression-specific parameters
    */
-  void configureFromParameters(const std::map<std::string, std::variant<uint32_t, float, double>>& parameters);
+  void configureFromParameters(const std::map<std::string, uint32_t>& parameters);
 
   void draw() override;
 

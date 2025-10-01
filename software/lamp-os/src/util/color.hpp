@@ -15,14 +15,6 @@ class Color {
   Color();
   Color(uint8_t inR, uint8_t inG, uint8_t inB, uint8_t inW);
   bool operator==(const Color &inColor) const;
-
-  /**
-   * @brief Linear interpolation between this color and another
-   * @param other Target color to interpolate towards
-   * @param t Interpolation factor (0.0 = this color, 1.0 = other color)
-   * @return Interpolated color
-   */
-  Color lerp(const Color& other, float t) const;
 };
 
 /**

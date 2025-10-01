@@ -174,15 +174,8 @@ JsonDocument Config::asJsonDocument() {
     // Serialize generic parameters
     for (const auto& param : expr.parameters) {
       const std::string& key = param.first;
-      const auto& value = param.second;
-
-      if (std::holds_alternative<uint32_t>(value)) {
-        exprNode[key] = std::get<uint32_t>(value);
-      } else if (std::holds_alternative<float>(value)) {
-        exprNode[key] = std::get<float>(value);
-      } else if (std::holds_alternative<double>(value)) {
-        exprNode[key] = std::get<double>(value);
-      }
+      const uint32_t& value = param.second;
+      exprNode[key] = value;
     }
 
     JsonArray colorsNode = exprNode["colors"].to<JsonArray>();

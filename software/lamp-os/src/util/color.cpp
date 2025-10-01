@@ -41,17 +41,4 @@ bool Color::operator==(const Color &inColor) const {
       w == inColor.w);
 };
 
-Color Color::lerp(const Color& other, float t) const {
-  // Clamp t to [0, 1] range
-  if (t < 0.0f) t = 0.0f;
-  if (t > 1.0f) t = 1.0f;
-
-  // Linear interpolation for each channel
-  uint8_t newR = static_cast<uint8_t>(r + (other.r - r) * t);
-  uint8_t newG = static_cast<uint8_t>(g + (other.g - g) * t);
-  uint8_t newB = static_cast<uint8_t>(b + (other.b - b) * t);
-  uint8_t newW = static_cast<uint8_t>(w + (other.w - w) * t);
-
-  return Color(newR, newG, newB, newW);
-}
 }  // namespace lamp

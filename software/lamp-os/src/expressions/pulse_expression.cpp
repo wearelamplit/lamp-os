@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "../util/fade.hpp"
+
 namespace lamp {
 
 // Use a large frame count to let wave position determine animation end
@@ -16,9 +18,10 @@ PulseExpression::PulseExpression(FrameBuffer* inBuffer, uint32_t inFrames)
   allowedInHomeMode = true; 
 }
 
-void PulseExpression::configureFromParameters(const std::map<std::string, std::variant<uint32_t, float, double>>& parameters) {
+void PulseExpression::configureFromParameters(const std::map<std::string, uint32_t>& parameters) {
   // Extract pulse speed parameter with default value
-  uint32_t pulseSpeed = extractUint32Parameter(parameters, "pulseSpeed", 3);
+  auto it = parameters.find("pulseSpeed");
+  uint32_t pulseSpeed = (it != parameters.end()) ? it->second : 3;
 
   // Pulse-specific configuration
   // pulseSpeed is total travel time in seconds (1-10s)
@@ -43,17 +46,17 @@ void PulseExpression::configureFromParameters(const std::map<std::string, std::v
   pulseColor = colors[0];
 }
 
-float PulseExpression::calculateBlendFactor(int pixelIndex) const {
+uint32_t PulseExpression::calculateBlendFactor(int pixelIndex) const {
   float distance = std::abs(static_cast<float>(pixelIndex) - wavePosition);
 
   // No blend if outside pulse width
   if (distance > pulseWidth) {
-    return 0.0f;
+    return 0;
   }
 
   // Special case: if very close to center (within 0.5), give full strength
   if (distance < 0.5f) {
-    return 1.0f;
+    return 100;
   }
 
   // Simplified quadratic falloff for performance
@@ -62,7 +65,8 @@ float PulseExpression::calculateBlendFactor(int pixelIndex) const {
   float factor = 1.0f - (normalizedDist * normalizedDist);  // Quadratic falloff
   factor = std::max(0.0f, factor);  // Clamp to 0
 
-  return factor;
+  // Return as integer 0-100 (percentage for fadeLinear)
+  return static_cast<uint32_t>(factor * 100.0f);
 }
 
 void PulseExpression::updateWavePosition() {
@@ -101,11 +105,6 @@ void PulseExpression::onTrigger() {
   lastUpdateMs = 0;
   selectNextColor();
 
-  // Calculate frames needed for full animation
-  // Wave needs to travel from -pulseWidth to pixelCount + pulseWidth
-  float totalDistance = fb->pixelCount + (2.0f * pulseWidth);
-  float timeNeededMs = totalDistance * pulseSpeedMs;
-
   // Set frames high enough that wave position will determine when to stop
   // The animation will complete when wave reaches pixelCount + (2 * pulseWidth)
   frames = PULSE_MAX_FRAMES;
@@ -137,11 +136,12 @@ void PulseExpression::draw() {
   // Apply pulse effect
   int pixelsAffected = 0;
   for (int i = 0; i < fb->pixelCount; i++) {
-    float blendFactor = calculateBlendFactor(i);
+    uint32_t blendFactor = calculateBlendFactor(i);
 
-    if (blendFactor > 0.001f) {  // Skip pixels with negligible blend
+    if (blendFactor > 0) {  // Skip pixels with no blend
       // Blend pulse color with current buffer
-      fb->buffer[i] = fb->buffer[i].lerp(pulseColor, blendFactor);
+      // blendFactor is 0-100 (percentage)
+      fb->buffer[i] = fadeLinear(fb->buffer[i], pulseColor, 100, blendFactor);
       pixelsAffected++;
 
     }

@@ -23,6 +23,7 @@ class SocialBehavior : public AnimatedBehavior {
   BluetoothComponent* bt;
   std::vector<BluetoothLampRecord>* foundLamps;
   bool allowedInHomeMode = false;
+  std::vector<Color> savedBuffer;  // Save buffer state before animation starts
 
   void draw() override;
 

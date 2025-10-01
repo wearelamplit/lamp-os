@@ -105,6 +105,7 @@ void initBehaviors() {
   // layers load in priority sequence {lowest, ..., highest}
   compositor.begin(allBehaviors, {&shade, &base}, calculateEffectiveHomeMode(config));
 
+  // Add overlay behaviors (compositor.begin() clears these)
   compositor.overlayBehaviors.push_back(&baseKnockoutBehavior);
 
   // Set global compositor for expressions
@@ -213,6 +214,7 @@ void handleWebSocket() {
       int percentage = doc["b"];
       if (pixelIndex >= 0 && pixelIndex < 50 && percentage >= 0 && percentage <= 100) {
         baseKnockoutBehavior.knockoutPixels[pixelIndex] = percentage;
+        config.base.knockoutPixels[pixelIndex] = percentage;
       }
     } else if (action == "base") {
       JsonArray baseColors = doc["c"];

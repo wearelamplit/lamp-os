@@ -87,12 +87,6 @@ class Expression : public AnimatedBehavior {
    */
   Color getRandomColor();
 
-  /**
-   * @brief Generic parameter extraction utilities
-   */
-  uint32_t extractUint32Parameter(const std::map<std::string, uint32_t>& parameters,
-                                   const std::string& key, uint32_t defaultValue) const;
-
 protected:
   /**
    * @brief Expression-specific setup when triggered (REQUIRED)

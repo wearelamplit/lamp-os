@@ -70,7 +70,7 @@ class ShiftyExpression : public Expression {
    * @brief Configure shifty-specific parameters from generic parameter map
    * @param parameters Map containing expression-specific parameters
    */
-  void configureFromParameters(const std::map<std::string, std::variant<uint32_t, float, double>>& parameters);
+  void configureFromParameters(const std::map<std::string, uint32_t>& parameters);
 
   void draw() override;
 

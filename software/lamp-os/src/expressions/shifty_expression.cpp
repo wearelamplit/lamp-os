@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <algorithm>
 
+#include "../util/fade.hpp"
 #include "./expression_manager.hpp"
 
 namespace lamp {
@@ -12,11 +13,16 @@ ShiftyExpression::ShiftyExpression(FrameBuffer* inBuffer, uint32_t inFrames)
   allowedInHomeMode = true;  // Shifty should work in home mode
 }
 
-void ShiftyExpression::configureFromParameters(const std::map<std::string, std::variant<uint32_t, float, double>>& parameters) {
-  // Extract parameters with default values using base class utilities
-  uint32_t shiftDurationMin = extractUint32Parameter(parameters, "shiftDurationMin", 300);  // 5 minutes
-  uint32_t shiftDurationMax = extractUint32Parameter(parameters, "shiftDurationMax", 600);  // 10 minutes
-  uint32_t fadeDuration = extractUint32Parameter(parameters, "fadeDuration", 60);           // 60 seconds
+void ShiftyExpression::configureFromParameters(const std::map<std::string, uint32_t>& parameters) {
+  // Extract parameters with default values
+  auto itMin = parameters.find("shiftDurationMin");
+  uint32_t shiftDurationMin = (itMin != parameters.end()) ? itMin->second : 300;  // 5 minutes
+
+  auto itMax = parameters.find("shiftDurationMax");
+  uint32_t shiftDurationMax = (itMax != parameters.end()) ? itMax->second : 600;  // 10 minutes
+
+  auto itFade = parameters.find("fadeDuration");
+  uint32_t fadeDuration = (itFade != parameters.end()) ? itFade->second : 60;  // 60 seconds
 
   // Apply configuration
   shiftDurationMinMs = shiftDurationMin * 1000;
@@ -143,12 +149,9 @@ void ShiftyExpression::draw() {
   switch (state) {
     case FADING_TO_PALETTE:
     case FADING_BACK: {
-      // Calculate interpolation progress
-      float progress = static_cast<float>(frame) / frames;
-
-      // Interpolate each pixel
+      // Interpolate each pixel using integer-based fade
       for (int i = 0; i < fb->pixelCount; i++) {
-        fb->buffer[i] = fadeStartColors[i].lerp(fadeTargetColors[i], progress);
+        fb->buffer[i] = fadeLinear(fadeStartColors[i], fadeTargetColors[i], frames, frame);
       }
       break;
     }
