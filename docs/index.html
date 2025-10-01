@@ -83,21 +83,33 @@
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
       }
+      a{
+        color: var(--color-text);
+      }
     </style>
   </head>
   <body>
-    <div style="padding:20px;">
-      Upload the base lamp firmware using the Chrome browser:
-      <br/><br/>
-      <ul>
-        <li>Make sure serial is enabled in the browser settings</li>
-        <li>Plug your board into a USB slot</li>
-        <li>Click the connect button and find your device</li>
-      </ul>
-      <br/><br/>
-      <esp-web-install-button
-        manifest="manifest_format.json"
-      ></esp-web-install-button>
+    <div style="display: flex; align-items: center; padding-top: 35px; flex-direction: column; background:radial-gradient(circle at 50% 30%, #1E1B4B 0%, #000000 60%); min-height: 100vh;">
+      <div style="width: 700px; align-items: left;"><h2 style="font-weight: 700;">Install LampOS</h2></div>
+      <div><img src="init-instructions.png" style="width: 700px; opacity: 0.8"/></div>
+      <div style="width: 700px; align-items: left;">
+        <h3 style="font-weight: 700;">Instructions:</h3>
+        <ol>
+          <li>Unplug your lamp's cord from any battery packs or USB chargers before starting</li>
+          <li>Plug your board into a USB slot with a USB micro cable and <a href="https://www.silabs.com/software-and-tools/usb-to-uart-bridge-vcp-drivers?tab=downloads" target="blank" >download the driver</a></li>
+          <li>Connect using the button below. Once connected, hold down the tiny boot button on your board</li>
+          <li>While holding the button, choose upload Install LampOS and check erase</li>
+          <li>Your board will start to initialize. Once finished, disconnect the USB micro cable</li>
+          <li>Reassemble your lamp and ensure it boots</li>
+        </ol>
+        <br/>
+        <p>Once your lamp has started up, you can connect to "standard-lamp" on WiFi to configure the lamp. Once connected, visit: <a href="http://192.168.4.1">http://192.168.4.1</a> to setup colors and behaviors</p>
+      </div>
+      <div style="padding-top:45px;">
+        <esp-web-install-button
+          manifest="manifest_format.json"
+        ></esp-web-install-button>
+      </div>
     </div>
   <script
     type="module"
