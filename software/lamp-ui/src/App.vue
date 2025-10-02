@@ -49,9 +49,6 @@ const disabled = ref(false);
 const originalSettings = ref<string>("");
 const saving = ref(false);
 const resetUnsavedChanges = ref(0);
-const authenticated = ref(false);
-const loginPassword = ref("");
-const showLogin = ref(false);
 const activeTab = ref("home");
 
 // Tab configuration
@@ -75,35 +72,6 @@ const wsConnected = ref(false);
 const reconnectAttempts = ref(0);
 let reconnectTimeout: number | null = null;
 let websocketDebounceTimeout: number | null = null;
-
-// Cookie management functions
-const getCookie = (name: string): string | null => {
-  const value = `; ${document.cookie}`;
-  const parts = value.split(`; ${name}=`);
-  if (parts.length === 2) return parts.pop()?.split(";").shift() || null;
-  return null;
-};
-
-const setCookie = (name: string, value: string, days: number) => {
-  const date = new Date();
-  date.setTime(date.getTime() + days * 24 * 60 * 60 * 1000);
-  const expires = `expires=${date.toUTCString()}`;
-  document.cookie = `${name}=${value};${expires};path=/`;
-};
-
-const checkAuth = () => {
-  const authCookie = getCookie("lamp-auth");
-  return authCookie === "authenticated";
-};
-
-const handleLogin = () => {
-  if (loginPassword.value === settings.value.lamp?.password) {
-    setCookie("lamp-auth", "authenticated", 30);
-    authenticated.value = true;
-    showLogin.value = false;
-    loginPassword.value = "";
-  }
-};
 
 // Computed property to check if settings have changed
 const hasChanges = computed(() => {
@@ -1018,77 +986,6 @@ textarea {
 .ws-status-indicator.connected .ws-status-dot {
   background: var(--color-success);
   box-shadow: 0 0 8px rgba(141, 205, 166, 0.5);
-}
-
-/* Login Screen Styles */
-.login-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: var(--brand-midnight-black);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2000;
-}
-
-.login-container {
-  width: 100%;
-  max-width: 400px;
-  padding: 20px;
-}
-
-.login-box {
-  background: var(--color-background-soft);
-  border-radius: 16px;
-  padding: 32px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-}
-
-.login-box h2 {
-  color: var(--brand-lamp-white);
-  margin: 0 0 24px 0;
-  font-size: 1.5rem;
-  text-align: center;
-}
-
-.login-input {
-  width: 100%;
-  padding: 14px 16px;
-  border: 2px solid var(--color-background-mute);
-  border-radius: 12px;
-  font-size: 1rem;
-  font-weight: 500;
-  background-color: var(--color-background);
-  color: var(--color-text);
-  margin-bottom: 16px;
-  transition: all 0.2s ease;
-}
-
-.login-input:focus {
-  outline: none;
-  border-color: var(--brand-aurora-blue);
-  box-shadow: 0 0 0 3px rgba(68, 108, 156, 0.1);
-}
-
-.login-button {
-  width: 100%;
-  padding: 14px;
-  background: linear-gradient(135deg, var(--brand-aurora-blue), var(--brand-glow-pink));
-  color: var(--brand-lamp-white);
-  border: none;
-  border-radius: 12px;
-  font-size: 1rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.login-button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(68, 108, 156, 0.4);
 }
 
 /* Mobile adjustments */
