@@ -28,7 +28,7 @@ void PulseExpression::configureFromParameters(const std::map<std::string, uint32
   // Convert to ms per pixel: total_time_ms / pixel_count
   if (fb && fb->pixelCount > 0) {
     pulseSpeedMs = (pulseSpeed * 1000) / fb->pixelCount;
-    pulseSpeedMs = std::max((uint32_t)10, pulseSpeedMs);  // Minimum 10ms per pixel
+    pulseSpeedMs = std::max((uint32_t)100, pulseSpeedMs);  // Minimum 100ms per pixel
   } else {
     pulseSpeedMs = 100;  // Default fallback
   }
