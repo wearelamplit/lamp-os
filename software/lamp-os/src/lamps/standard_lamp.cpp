@@ -89,17 +89,19 @@ void initBehaviors() {
   auto exprBehaviors = expressionManager.getBehaviors();
   allBehaviors.insert(allBehaviors.end(), exprBehaviors.begin(), exprBehaviors.end());
 
-  // Add configurator behaviors (middle priority - UI preview, overrides expressions)
-  allBehaviors.push_back(&shadeConfiguratorBehavior);
-  allBehaviors.push_back(&baseConfiguratorBehavior);
-
-  // Add DMX behaviors (highest priority - live control)
+  // Add DMX behaviors (middle priority - live control)
   allBehaviors.push_back(&baseDmxBehavior);
   allBehaviors.push_back(&shadeDmxBehavior);
 
-  // Add exclusive and special behaviors
+  // Add exclusive behaviors
   allBehaviors.push_back(&shadeSocialBehavior);  // Exclusive - takes over when triggered
-  allBehaviors.push_back(&baseFadeOutBehavior);  // Startup/shutdown effects
+
+  // Add configurator behaviors (highest priority - UI preview, overrides DMX and social)
+  allBehaviors.push_back(&shadeConfiguratorBehavior);
+  allBehaviors.push_back(&baseConfiguratorBehavior);
+
+  // Add fade behaviors (always last - startup/shutdown effects)
+  allBehaviors.push_back(&baseFadeOutBehavior);
   allBehaviors.push_back(&shadeFadeOutBehavior);
 
   // layers load in priority sequence {lowest, ..., highest}
