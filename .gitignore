@@ -25,3 +25,6 @@ __pycache__/
 
 # Templates and Generated Files
 src/main.py
+.vscode/settings.json
+.vscode/
+node_modules/

@@ -92,6 +92,9 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
+  'preview': [value: string]
+  'open': []
+  'close': []
 }>()
 
 const isDialogOpen = ref(false)
@@ -115,12 +118,16 @@ const hexwwValue = computed(() => {
 const openDialog = () => {
   if (props.disabled) return
   isDialogOpen.value = true
+  emit('open')
   // Store the original color before making changes
   originalColor.value = props.modelValue || '#FF0000FF'
   // Initialize the hex input with the current model value
   hexInput.value = props.modelValue || '#FF0000FF'
   // Parse the hex value to update sliders without emitting
   parseHexwwValue(props.modelValue)
+
+  // Prevent body scroll
+  document.body.style.overflow = 'hidden'
 
   // Add escape key listener
   document.addEventListener('keydown', handleEscapeKey)
@@ -132,7 +139,11 @@ const closeDialog = () => {
   hexInput.value = originalColor.value
   emit('update:modelValue', originalColor.value)
 
+  emit('close')
+
   isDialogOpen.value = false
+  // Re-enable body scroll
+  document.body.style.overflow = ''
   // Remove escape key listener
   document.removeEventListener('keydown', handleEscapeKey)
 }
@@ -151,7 +162,11 @@ const cancelDialog = () => {
   // Emit the original value to reset parent
   emit('update:modelValue', originalColor.value)
 
+  emit('close')
+
   isDialogOpen.value = false
+  // Re-enable body scroll
+  document.body.style.overflow = ''
   // Remove escape key listener
   document.removeEventListener('keydown', handleEscapeKey)
 }
@@ -160,7 +175,11 @@ const confirmDialog = () => {
   // Ensure the current color is emitted before closing
   emit('update:modelValue', hexwwValue.value)
 
+  emit('close')
+
   isDialogOpen.value = false
+  // Re-enable body scroll
+  document.body.style.overflow = ''
   // Remove escape key listener
   document.removeEventListener('keydown', handleEscapeKey)
 }
@@ -191,6 +210,8 @@ const updateColor = () => {
   // Emit real-time updates when dialog is open
   if (isDialogOpen.value) {
     emit('update:modelValue', newValue)
+    // Emit preview event for live LED preview while adjusting
+    emit('preview', newValue)
   }
   // Update the hex input to reflect the slider changes
   hexInput.value = newValue
@@ -245,6 +266,10 @@ watch(
 // Cleanup event listeners when component is unmounted
 onUnmounted(() => {
   document.removeEventListener('keydown', handleEscapeKey)
+  // Re-enable body scroll if dialog was open
+  if (isDialogOpen.value) {
+    document.body.style.overflow = ''
+  }
 })
 </script>
 

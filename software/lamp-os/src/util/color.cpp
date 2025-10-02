@@ -40,4 +40,5 @@ bool Color::operator==(const Color &inColor) const {
       b == inColor.b &&
       w == inColor.w);
 };
+
 }  // namespace lamp

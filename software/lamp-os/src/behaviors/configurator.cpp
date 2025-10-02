@@ -21,6 +21,19 @@ void ConfiguratorBehavior::draw() {
 };
 
 void ConfiguratorBehavior::control() {
+  // If disabled, fade out if needed then stop
+  if (disabled) {
+    if (animationState == PAUSED) {
+      // If we're paused (showing preview), start fading out
+      playOnce();
+    } else if (animationState == PLAYING_ONCE && frame >= frames) {
+      // Fade out complete, now stop
+      stop();
+    }
+    // Don't process normal timeout logic when disabled
+    return;
+  }
+
   uint32_t now = millis();
   if (animationState == STOPPED) {
     if (lastWebSocketUpdateTimeMs > 0 &&

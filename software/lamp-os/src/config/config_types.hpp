@@ -2,7 +2,9 @@
 #define LAMP_CONFIG_CONFIG_TYPES_H
 
 #include <cstdint>
+#include <map>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include "../util/color.hpp"
@@ -67,5 +69,43 @@ class BaseSettings {
   std::vector<uint8_t> knockoutPixels = std::vector<uint8_t>(50, (uint8_t)100);
   uint8_t ac = 0;
 };
+
+/**
+ * @brief Configuration for a single expression with generic parameter system
+ */
+class ExpressionConfig {
+ public:
+  std::string type = "";           // Expression type (e.g., "glitchy", "shifty")
+  bool enabled = false;            // Whether expression is active
+  std::vector<Color> colors;       // Color palette for expression
+  uint32_t intervalMin = 60;       // Min interval in seconds
+  uint32_t intervalMax = 900;      // Max interval in seconds
+  uint8_t target = 3;              // TARGET_SHADE=1, TARGET_BASE=2, TARGET_BOTH=3
+
+  // Generic parameter storage for expression-specific values
+  std::map<std::string, uint32_t> parameters;
+
+  // Helper methods for parameter access
+  uint32_t getParameter(const std::string& name, uint32_t defaultValue) const {
+    auto it = parameters.find(name);
+    if (it != parameters.end()) {
+      return it->second;
+    }
+    return defaultValue;
+  }
+
+  void setParameter(const std::string& name, uint32_t value) {
+    parameters[name] = value;
+  }
+};
+
+/**
+ * @brief Settings for lamp expressions
+ */
+class ExpressionSettings {
+ public:
+  std::vector<ExpressionConfig> expressions;
+};
+
 }  // namespace lamp
 #endif
