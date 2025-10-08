@@ -11,8 +11,9 @@
 #define ART_NET_PORT 6454
 #define MAX_BUFFER_ARTNET 530
 #define BLE_MAGIC_NUMBER 42007
-
 #define MIN_UPDATE_TIME 250
+#define IP_RANGE_START_ADDRESS 20
+#define TOTAL_IP_COUNT 20
 
 AsyncUDP udp;
 uint32_t lastUpdate = 0;
@@ -22,6 +23,10 @@ void onWiFiEvent(WiFiEvent_t event) {
 };
 
 void setup() {
+  // Select external antenna
+  // @see https://github.com/espressif/arduino-esp32/commit/38d6ed5f12745bb990daa2e9802c91dc11e580bb
+  digitalWrite(WIFI_ANT_CONFIG, HIGH);
+
   Serial.begin(115200);
   Serial.println("Initializing...");
   std::string coordinatorSsid = SECRET_COORDINATOR_SSID;
@@ -72,17 +77,9 @@ void setup() {
       if (now > lastUpdate + MIN_UPDATE_TIME) {
         lastUpdate = now;
         uint8_t* data = packet.data();
-        udp.writeTo(data, MAX_BUFFER_ARTNET, IPAddress(10, 0, 0, 20), ART_NET_PORT, TCPIP_ADAPTER_IF_STA);
-        udp.writeTo(data, MAX_BUFFER_ARTNET, IPAddress(10, 0, 0, 21), ART_NET_PORT, TCPIP_ADAPTER_IF_STA);
-        udp.writeTo(data, MAX_BUFFER_ARTNET, IPAddress(10, 0, 0, 22), ART_NET_PORT, TCPIP_ADAPTER_IF_STA);
-        udp.writeTo(data, MAX_BUFFER_ARTNET, IPAddress(10, 0, 0, 23), ART_NET_PORT, TCPIP_ADAPTER_IF_STA);
-        udp.writeTo(data, MAX_BUFFER_ARTNET, IPAddress(10, 0, 0, 24), ART_NET_PORT, TCPIP_ADAPTER_IF_STA);
-        udp.writeTo(data, MAX_BUFFER_ARTNET, IPAddress(10, 0, 0, 25), ART_NET_PORT, TCPIP_ADAPTER_IF_STA);
-        udp.writeTo(data, MAX_BUFFER_ARTNET, IPAddress(10, 0, 0, 26), ART_NET_PORT, TCPIP_ADAPTER_IF_STA);
-        udp.writeTo(data, MAX_BUFFER_ARTNET, IPAddress(10, 0, 0, 27), ART_NET_PORT, TCPIP_ADAPTER_IF_STA);
-        udp.writeTo(data, MAX_BUFFER_ARTNET, IPAddress(10, 0, 0, 28), ART_NET_PORT, TCPIP_ADAPTER_IF_STA);
-        udp.writeTo(data, MAX_BUFFER_ARTNET, IPAddress(10, 0, 0, 29), ART_NET_PORT, TCPIP_ADAPTER_IF_STA);
-        udp.writeTo(data, MAX_BUFFER_ARTNET, IPAddress(10, 0, 0, 30), ART_NET_PORT, TCPIP_ADAPTER_IF_STA);
+        for (int i = 0; i == TOTAL_IP_COUNT; i++) {
+          udp.writeTo(data, MAX_BUFFER_ARTNET, IPAddress(10, 0, 0, i + IP_RANGE_START_ADDRESS), ART_NET_PORT, TCPIP_ADAPTER_IF_STA);
+        }
       }
     }
   });
