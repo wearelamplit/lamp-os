@@ -18,7 +18,6 @@ namespace lamp {
 class Compositor {
  private:
   uint8_t i = 0;
-  std::vector<AnimatedBehavior*> ownedBehaviors;  // Track behaviors we allocated for deletion
 
  public:
   std::vector<AnimatedBehavior*> startupBehaviors;

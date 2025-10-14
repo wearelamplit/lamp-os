@@ -236,17 +236,6 @@ void handleWebSocket() {
         }
         shadeConfiguratorBehavior.colors = lamp::buildGradientWithStops(shade.pixelCount, updatedColors);
       }
-    } else if (action == "expressions") {
-      // Save and reload expressions
-      JsonArray exprArray = doc["expressions"];
-      if (exprArray) {
-        config.expressions.expressions.clear();
-        for (JsonObject exprNode : exprArray) {
-          config.expressions.expressions.push_back(parseExpressionConfig(exprNode));
-        }
-        // Full reload with new expressions
-        initBehaviors();
-      }
     } else if (action == "test_expression") {
       String type = String(doc["type"]);
       if (type.length() > 0) {
