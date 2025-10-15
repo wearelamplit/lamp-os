@@ -1,0 +1,155 @@
+{
+  "expressions": {
+    "glitchy": {
+      "name": "Glitchy",
+      "description": "Random visual glitches that give the lamp character",
+      "config": {
+        "colors": {
+          "type": "color_array",
+          "max": 5,
+          "default": ["#C869C8FF"],
+          "label": "Glitch Colors",
+          "help": "Colors to randomly glitch to"
+        },
+        "intervalMin": {
+          "type": "range",
+          "min": 600,
+          "max": 2700,
+          "step": 60,
+          "default": 1800,
+          "unit": "s",
+          "label": "Min Interval"
+        },
+        "intervalMax": {
+          "type": "range",
+          "min": 600,
+          "max": 2700,
+          "step": 60,
+          "default": 2700,
+          "unit": "s",
+          "label": "Max Interval"
+        },
+        "durationMin": {
+          "type": "range",
+          "min": 1,
+          "max": 60,
+          "step": 1,
+          "default": 1,
+          "unit": "frames",
+          "label": "Min Duration",
+          "help": "Minimum glitch duration (30ms - 2s)"
+        },
+        "durationMax": {
+          "type": "range",
+          "min": 1,
+          "max": 60,
+          "step": 1,
+          "default": 15,
+          "unit": "frames",
+          "label": "Max Duration",
+          "help": "Maximum glitch duration (30ms - 2s)"
+        }
+      }
+    },
+    "shifty": {
+      "name": "Shifty",
+      "description": "Smooth transitions between color palettes for ambient mood shifts",
+      "config": {
+        "colors": {
+          "type": "color_array",
+          "max": 8,
+          "default": ["#C869C8FF"],
+          "label": "Palette Colors",
+          "help": "Base colors for generating palettes"
+        },
+        "intervalMin": {
+          "type": "range",
+          "min": 60,
+          "max": 2700,
+          "step": 60,
+          "default": 300,
+          "unit": "s",
+          "label": "Min Interval"
+        },
+        "intervalMax": {
+          "type": "range",
+          "min": 60,
+          "max": 2700,
+          "step": 60,
+          "default": 900,
+          "unit": "s",
+          "label": "Max Interval"
+        },
+        "shiftDurationMin": {
+          "type": "range",
+          "min": 300,
+          "max": 1800,
+          "step": 30,
+          "default": 300,
+          "unit": "s",
+          "label": "Min Shift Duration",
+          "help": "Minimum time to stay shifted"
+        },
+        "shiftDurationMax": {
+          "type": "range",
+          "min": 300,
+          "max": 1800,
+          "step": 30,
+          "default": 600,
+          "unit": "s",
+          "label": "Max Shift Duration",
+          "help": "Maximum time to stay shifted"
+        },
+        "fadeDuration": {
+          "type": "range",
+          "min": 1,
+          "max": 30,
+          "step": 1,
+          "default": 5,
+          "unit": "s",
+          "label": "Fade Duration",
+          "help": "Transition duration in seconds"
+        }
+      }
+    },
+    "pulse": {
+      "name": "Pulse",
+      "description": "Wave that travels through the lamp with smooth color blending",
+      "config": {
+        "colors": {
+          "type": "color_array",
+          "max": 5,
+          "default": ["#C869C8FF"],
+          "label": "Pulse Colors",
+          "help": "Colors for the pulse wave (randomly selected)"
+        },
+        "intervalMin": {
+          "type": "range",
+          "min": 30,
+          "max": 1800,
+          "step": 10,
+          "unit": "s",
+          "label": "Min Interval"
+        },
+        "intervalMax": {
+          "type": "range",
+          "min": 30,
+          "max": 3600,
+          "step": 10,
+          "unit": "s",
+          "label": "Max Interval"
+        },
+        "pulseSpeed": {
+          "type": "range",
+          "min": 1,
+          "max": 10,
+          "step": 1,
+          "default": 3,
+          "unit": "s",
+          "label": "Pulse Speed",
+          "help": "Time for pulse to travel across lamp in seconds"
+        }
+      }
+    }
+  }
+}

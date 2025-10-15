@@ -17,6 +17,7 @@
 #include "./behaviors/social.hpp"
 #include "./config/config.hpp"
 #include "./core/animated_behavior.hpp"
+#include "../expressions/expression_manager.hpp"
 #include "./core/compositor.hpp"
 #include "./core/frame_buffer.hpp"
 #include "./globals.hpp"
@@ -45,8 +46,10 @@ lamp::ConfiguratorBehavior baseConfiguratorBehavior;
 lamp::FadeOutBehavior shadeFadeOutBehavior;
 lamp::FadeOutBehavior baseFadeOutBehavior;
 lamp::KnockoutBehavior baseKnockoutBehavior;
+lamp::ExpressionManager expressionManager;
 lamp::Config config;
 unsigned long lastHomeModeUpdateMs = 0;
+bool lastHomeMode = false;  // Track previous home mode state
 
 /**
  * Calculate effective home mode based on configuration and network presence
@@ -62,6 +65,7 @@ void initBehaviors() {
   baseDmxBehavior = lamp::DmxBehavior(&base, 480);
   shadeSocialBehavior = lamp::SocialBehavior(&shade, 1200);
   shadeSocialBehavior.setBluetoothComponent(&bt);
+  shadeSocialBehavior.isExclusive = true;  // Social takes exclusive control
   shadeConfiguratorBehavior = lamp::ConfiguratorBehavior(&shade, 120);
   shadeConfiguratorBehavior.colors = shade.defaultColors;
   baseConfiguratorBehavior = lamp::ConfiguratorBehavior(&base, 120);
@@ -73,18 +77,44 @@ void initBehaviors() {
   baseKnockoutBehavior = lamp::KnockoutBehavior(&base, 0, true);
   baseKnockoutBehavior.knockoutPixels = config.base.knockoutPixels;
 
-  // layers load in priority sequence {lowest, ..., highest}
-  compositor.begin({&baseDmxBehavior,
-                    &shadeDmxBehavior,
-                    &shadeSocialBehavior,
-                    &shadeConfiguratorBehavior,
-                    &baseConfiguratorBehavior,
-                    &baseFadeOutBehavior,
-                    &shadeFadeOutBehavior},
-                   {&shade, &base},
-                   calculateEffectiveHomeMode(config));
+  // Initialize expressions
+  expressionManager.begin(&shade, &base);
+  expressionManager.loadFromConfig(config.expressions);
 
+  // Build behavior vector in priority order (lowest to highest)
+  // Behaviors run in sequence, so later ones override earlier ones
+  std::vector<lamp::AnimatedBehavior*> allBehaviors = {};
+
+  // Add expression behaviors (lowest priority - automated effects)
+  auto exprBehaviors = expressionManager.getBehaviors();
+  allBehaviors.insert(allBehaviors.end(), exprBehaviors.begin(), exprBehaviors.end());
+
+  // Add DMX behaviors (middle priority - live control)
+  allBehaviors.push_back(&baseDmxBehavior);
+  allBehaviors.push_back(&shadeDmxBehavior);
+
+  // Add exclusive behaviors
+  allBehaviors.push_back(&shadeSocialBehavior);  // Exclusive - takes over when triggered
+
+  // Add configurator behaviors (highest priority - UI preview, overrides DMX and social)
+  allBehaviors.push_back(&shadeConfiguratorBehavior);
+  allBehaviors.push_back(&baseConfiguratorBehavior);
+
+  // Add fade behaviors (always last - startup/shutdown effects)
+  allBehaviors.push_back(&baseFadeOutBehavior);
+  allBehaviors.push_back(&shadeFadeOutBehavior);
+
+  // layers load in priority sequence {lowest, ..., highest}
+  compositor.begin(allBehaviors, {&shade, &base}, calculateEffectiveHomeMode(config));
+
+  // Add overlay behaviors (compositor.begin() clears these)
   compositor.overlayBehaviors.push_back(&baseKnockoutBehavior);
+
+  // Set global compositor for expressions
+  lamp::setGlobalCompositor(&compositor);
+
+  // Set global expression manager for inter-expression communication
+  lamp::setGlobalExpressionManager(&expressionManager);
 }
 
 void handleArtnet() {
@@ -117,6 +147,57 @@ void handleStageMode() {
   }
 }
 
+/**
+ * Parse ExpressionConfig from JSON object using generic parameter system
+ */
+lamp::ExpressionConfig parseExpressionConfig(JsonObject node) {
+  lamp::ExpressionConfig expr;
+  expr.type = std::string(node["type"] | "");
+  expr.enabled = node["enabled"] | false;
+  expr.intervalMin = node["intervalMin"] | 60;
+  expr.intervalMax = node["intervalMax"] | 900;
+  expr.target = node["target"] | 3;
+
+#ifdef LAMP_DEBUG
+  Serial.printf("Parsing expression: type=%s, enabled=%d, intervalMin=%lu, intervalMax=%lu\n",
+                expr.type.c_str(), expr.enabled, expr.intervalMin, expr.intervalMax);
+#endif
+
+  // Parse colors
+  JsonArray colors = node["colors"];
+  if (colors.size()) {
+    for (JsonVariant color : colors) {
+      expr.colors.push_back(lamp::hexStringToColor(color));
+    }
+  }
+
+  // Parse generic parameters - store any additional fields as parameters
+  for (JsonPair kv : node) {
+    const char* key = kv.key().c_str();
+    std::string keyStr(key);
+
+    // Skip common fields we've already handled
+    if (keyStr == "type" || keyStr == "enabled" || keyStr == "intervalMin" ||
+        keyStr == "intervalMax" || keyStr == "target" || keyStr == "colors") {
+      continue;
+    }
+
+    // Store the parameter value
+    JsonVariant value = kv.value();
+    if (value.is<uint32_t>()) {
+      expr.setParameter(keyStr, value.as<uint32_t>());
+    } else if (value.is<int>()) {
+      expr.setParameter(keyStr, static_cast<uint32_t>(value.as<int>()));
+    }
+
+#ifdef LAMP_DEBUG
+    Serial.printf("Stored parameter: %s\n", keyStr.c_str());
+#endif
+  }
+
+  return expr;
+}
+
 void handleWebSocket() {
   if (wifi.hasWebSocketData()) {
     JsonDocument doc = wifi.getWebSocketData();
@@ -135,6 +216,7 @@ void handleWebSocket() {
       int percentage = doc["b"];
       if (pixelIndex >= 0 && pixelIndex < 50 && percentage >= 0 && percentage <= 100) {
         baseKnockoutBehavior.knockoutPixels[pixelIndex] = percentage;
+        config.base.knockoutPixels[pixelIndex] = percentage;
       }
     } else if (action == "base") {
       JsonArray baseColors = doc["c"];
@@ -153,6 +235,46 @@ void handleWebSocket() {
           updatedColors.push_back(lamp::hexStringToColor(shadeColor));
         }
         shadeConfiguratorBehavior.colors = lamp::buildGradientWithStops(shade.pixelCount, updatedColors);
+      }
+    } else if (action == "test_expression") {
+      String type = String(doc["type"]);
+      if (type.length() > 0) {
+#ifdef LAMP_DEBUG
+        Serial.printf("Testing expression: %s\n", type.c_str());
+#endif
+        // Disable configurator during expression test so expression shows against actual base colors
+        shadeConfiguratorBehavior.disabled = true;
+        baseConfiguratorBehavior.disabled = true;
+        expressionManager.triggerExpression(type.c_str());
+      }
+    } else if (action == "test_expression_complete") {
+      // Re-enable configurator after test expression completes
+      shadeConfiguratorBehavior.disabled = false;
+      baseConfiguratorBehavior.disabled = false;
+      // Reset timer to keep preview active
+      shadeConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
+      baseConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
+
+      // Restore preview colors
+      if (doc["shadeColors"]) {
+        JsonArray shadeColors = doc["shadeColors"];
+        if (shadeColors.size()) {
+          std::vector<lamp::Color> updatedColors;
+          for (JsonVariant shadeColor : shadeColors) {
+            updatedColors.push_back(lamp::hexStringToColor(shadeColor));
+          }
+          shadeConfiguratorBehavior.colors = lamp::buildGradientWithStops(shade.pixelCount, updatedColors);
+        }
+      }
+      if (doc["baseColors"]) {
+        JsonArray baseColors = doc["baseColors"];
+        if (baseColors.size()) {
+          std::vector<lamp::Color> updatedColors;
+          for (JsonVariant baseColor : baseColors) {
+            updatedColors.push_back(lamp::hexStringToColor(baseColor));
+          }
+          baseConfiguratorBehavior.colors = lamp::buildGradientWithStops(base.pixelCount, updatedColors);
+        }
       }
     }
   }
@@ -179,14 +301,26 @@ void loop() {
   handleWebSocket();
   wifi.tick();
 
-  // Update compositor home mode state every 30 seconds for social behaviors
-  if (millis() - lastHomeModeUpdateMs > 30000) {
+
+  // Update compositor home mode state periodically for social behaviors
+  static constexpr uint32_t HOME_MODE_UPDATE_INTERVAL_MS = 30000;
+  if (millis() - lastHomeModeUpdateMs > HOME_MODE_UPDATE_INTERVAL_MS) {
     bool effectiveHomeMode = calculateEffectiveHomeMode(config);
     compositor.setHomeMode(effectiveHomeMode);
+
+    // Apply brightness when home mode state changes
+    if (effectiveHomeMode != lastHomeMode) {
+      uint8_t targetBrightness = effectiveHomeMode ?
+        config.lamp.homeModeBrightness : config.lamp.brightness;
+
+      shadeStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, targetBrightness));
+      baseStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, targetBrightness));
+
+      lastHomeMode = effectiveHomeMode;
+    }
+
     lastHomeModeUpdateMs = millis();
   }
-
-  // No brightness logic here - WebSocket handles everything
 
   compositor.tick();
 };

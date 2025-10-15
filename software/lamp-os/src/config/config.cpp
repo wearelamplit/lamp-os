@@ -75,6 +75,48 @@ Config::Config(Preferences* inPrefs) {
       shade.colors.push_back(hexStringToColor(shadeColor));
     }
   }
+
+  // Load expressions
+  JsonArray expressionsNode = doc["expressions"];
+  if (expressionsNode) {
+    expressions.expressions.clear();
+    for (JsonObject exprNode : expressionsNode) {
+      ExpressionConfig expr;
+      expr.type = std::string(exprNode["type"] | "");
+      expr.enabled = exprNode["enabled"] | false;
+      expr.intervalMin = exprNode["intervalMin"] | 60;
+      expr.intervalMax = exprNode["intervalMax"] | 900;
+      expr.target = exprNode["target"] | 3;
+      // Load generic parameters
+      for (JsonPair kv : exprNode) {
+        const char* key = kv.key().c_str();
+        std::string keyStr(key);
+
+        // Skip common fields we've already handled
+        if (keyStr == "type" || keyStr == "enabled" || keyStr == "intervalMin" ||
+            keyStr == "intervalMax" || keyStr == "target" || keyStr == "colors") {
+          continue;
+        }
+
+        // Store the parameter value
+        JsonVariant value = kv.value();
+        if (value.is<uint32_t>()) {
+          expr.setParameter(keyStr, value.as<uint32_t>());
+        } else if (value.is<int>()) {
+          expr.setParameter(keyStr, static_cast<uint32_t>(value.as<int>()));
+        }
+      }
+
+      JsonArray exprColors = exprNode["colors"];
+      if (exprColors.size()) {
+        for (JsonVariant color : exprColors) {
+          expr.colors.push_back(hexStringToColor(color));
+        }
+      }
+
+      expressions.expressions.push_back(expr);
+    }
+  }
 };
 
 JsonDocument Config::asJsonDocument() {
@@ -118,6 +160,28 @@ JsonDocument Config::asJsonDocument() {
   JsonArray shadeColorsNode = shadeNode["colors"].to<JsonArray>();
   for (int i = 0; i < shade.colors.size(); i++) {
     shadeColorsNode[i] = colorToHexString(shade.colors[i]);
+  }
+
+  // Serialize expressions
+  JsonArray expressionsNode = doc["expressions"].to<JsonArray>();
+  for (const auto& expr : expressions.expressions) {
+    JsonObject exprNode = expressionsNode.add<JsonObject>();
+    exprNode["type"] = expr.type;
+    exprNode["enabled"] = expr.enabled;
+    exprNode["intervalMin"] = expr.intervalMin;
+    exprNode["intervalMax"] = expr.intervalMax;
+    exprNode["target"] = expr.target;
+    // Serialize generic parameters
+    for (const auto& param : expr.parameters) {
+      const std::string& key = param.first;
+      const uint32_t& value = param.second;
+      exprNode[key] = value;
+    }
+
+    JsonArray colorsNode = exprNode["colors"].to<JsonArray>();
+    for (const auto& color : expr.colors) {
+      colorsNode.add(colorToHexString(color));
+    }
   }
 
   return doc;

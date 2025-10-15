@@ -28,6 +28,7 @@ class Compositor {
   bool behaviorsComputed = false;
   unsigned long lastDrawTimeMs = 0;
   bool homeMode = false;
+  AnimatedBehavior* activeExclusive = nullptr;  // Currently running exclusive behavior
 
   Compositor();
 
@@ -51,6 +52,12 @@ class Compositor {
    * @param [in] homeMode new home mode state
    */
   void setHomeMode(bool homeMode);
+
+  /**
+   * @brief check if an exclusive behavior is currently active
+   * @return true if an exclusive behavior is running
+   */
+  bool hasActiveExclusive() const;
 };
 }  // namespace lamp
 #endif

@@ -10,9 +10,15 @@ namespace lamp {
 void SocialBehavior::draw() {
   for (int i = 0; i < fb->pixelCount; i++) {
     if (frame < easeFrames) {
-      fb->buffer[i] = fade(fb->buffer[i], foundLampColor, easeFrames, frame);
+      fb->buffer[i] = fade(savedBuffer[i], foundLampColor, easeFrames, frame);
     } else if (frame > (frames - easeFrames)) {
-      fb->buffer[i] = fade(foundLampColor, fb->buffer[i], easeFrames, frame % easeFrames);
+      if (isLastFrame()) {
+        // On last frame, directly set to saved buffer to avoid interpolation error
+        fb->buffer[i] = savedBuffer[i];
+      } else {
+        uint32_t step = frame - (frames - easeFrames);
+        fb->buffer[i] = fade(foundLampColor, savedBuffer[i], easeFrames, step);
+      }
     } else {
       fb->buffer[i] = foundLampColor;
     }
@@ -35,6 +41,8 @@ void SocialBehavior::control() {
         revIter->acknowledged = true;
         foundLampColor = revIter->baseColor;
         nextAcknowledgeTimeMs = millis() + LAMP_TIME_BETWEEN_ACKNOWLEDGEMENT_MS;
+        // Save buffer state before starting animation
+        savedBuffer = fb->buffer;
         playOnce();
         break;
       }

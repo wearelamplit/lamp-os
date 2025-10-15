@@ -1,0 +1,14 @@
+{
+  "name": "lamp-os-root",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Root package for Lamp OS project",
+  "scripts": {
+    "dev": "cd software/lamp-ui && npm run dev",
+    "dev:monitor": "cd software/lamp-os && pio device monitor -e upesy_wroom",
+    "build": "cd software/lamp-ui && npm run build",
+    "build:firmware": "cd software/lamp-os && pio run -e upesy_wroom",
+    "flash": "cd software/lamp-ui && npm run flash",
+    "build-and-flash": "npm run build && npm run flash"
+  }
+}

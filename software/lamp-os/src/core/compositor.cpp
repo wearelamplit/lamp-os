@@ -23,14 +23,32 @@ void Compositor::begin(std::vector<AnimatedBehavior*> inBehaviors, std::vector<F
   }
 };
 
+bool Compositor::hasActiveExclusive() const {
+  return activeExclusive && activeExclusive->animationState != STOPPED;
+}
+
 void Compositor::tick() {
   if (!behaviorsComputed) {
     if (startupComplete) {
+      // Update active exclusive tracker
+      if (activeExclusive && activeExclusive->animationState == STOPPED) {
+        activeExclusive = nullptr;
+      }
+
       for (i = 0; i < behaviors.size(); i++) {
         if (!homeMode || behaviors[i]->allowedInHomeMode) {
-          behaviors[i]->control();
-          if (behaviors[i]->animationState != STOPPED) {
-            behaviors[i]->draw();
+          // Check if this behavior should run
+          bool canRun = !activeExclusive || behaviors[i]->isExclusive || behaviors[i] == activeExclusive;
+
+          if (canRun) {
+            behaviors[i]->control();
+            if (behaviors[i]->animationState != STOPPED) {
+              // Track if this is a new exclusive starting
+              if (behaviors[i]->isExclusive && behaviors[i] != activeExclusive) {
+                activeExclusive = behaviors[i];
+              }
+              behaviors[i]->draw();
+            }
           }
         }
       }
