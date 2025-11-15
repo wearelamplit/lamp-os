@@ -12,8 +12,7 @@ void Compositor::begin(std::vector<AnimatedBehavior*> inBehaviors, std::vector<F
 
   // Adds some basic behavior layers that are common to all framebuffers
   for (i = 0; i < frameBuffers.size(); i++) {
-    behaviors.push_back(new IdleBehavior(frameBuffers[i], 0, true));
-    startupBehaviors.push_back(new IdleBehavior(frameBuffers[i], 0, true));
+    underlayBehaviors.push_back(new IdleBehavior(frameBuffers[i], 0, true));
     startupBehaviors.push_back(new FadeInBehavior(frameBuffers[i], STARTUP_ANIMATION_FRAMES));
   }
 
@@ -29,6 +28,11 @@ bool Compositor::hasActiveExclusive() const {
 
 void Compositor::tick() {
   if (!behaviorsComputed) {
+    for (i = 0; i < underlayBehaviors.size(); i++) {
+      underlayBehaviors[i]->control();
+      underlayBehaviors[i]->draw();
+    }
+
     if (startupComplete) {
       // Update active exclusive tracker
       if (activeExclusive && activeExclusive->animationState == STOPPED) {

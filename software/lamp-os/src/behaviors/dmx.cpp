@@ -9,9 +9,9 @@ namespace lamp {
 void DmxBehavior::draw() {
   for (i = 0; i < fb->pixelCount; i++) {
     if (frame < easeFrames) {
-      fb->buffer[i] = fade(fb->buffer[i], currentColor, easeFrames, frame);
+      fb->buffer[i] = fade(fb->buffer[i], currentColor, easeFrames - 1, frame);
     } else if (frame > (frames - easeFrames)) {
-      fb->buffer[i] = fade(currentColor, fb->buffer[i], easeFrames, frame % easeFrames);
+      fb->buffer[i] = fade(currentColor, fb->buffer[i], easeFrames - 1, frame % easeFrames);
     } else {
       fb->buffer[i] = currentColor;
     }

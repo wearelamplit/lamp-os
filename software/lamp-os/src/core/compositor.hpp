@@ -20,6 +20,7 @@ class Compositor {
   uint8_t i = 0;
 
  public:
+  std::vector<AnimatedBehavior*> underlayBehaviors;
   std::vector<AnimatedBehavior*> startupBehaviors;
   std::vector<AnimatedBehavior*> behaviors;
   std::vector<AnimatedBehavior*> overlayBehaviors;
