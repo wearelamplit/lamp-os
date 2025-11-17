@@ -11,7 +11,8 @@
 namespace lamp {
 /**
  * @brief the frame buffer holds a copy of the current scene's pixel
- * colors for all layered draw operations
+ * colors for all layered draw operations. The lamp will only draw
+ * when the bitmap buffer or brightness is changed
  */
 class FrameBuffer {
  private:
@@ -20,8 +21,9 @@ class FrameBuffer {
  public:
   std::vector<Color> defaultColors;
   std::vector<Color> previousBuffer;
+  uint8_t previousBrightness = 0;
   uint8_t pixelCount = 0;
-  Adafruit_NeoPixel *driver = nullptr;
+  Adafruit_NeoPixel* driver = nullptr;
   std::vector<Color> buffer;
 
   FrameBuffer();
@@ -32,7 +34,7 @@ class FrameBuffer {
    * @param [in] inPixelCount the number of neopixels in use
    * @param [in] inDriver the NeoPixel instance to use
    */
-  void begin(std::vector<Color> inDefaultColors, uint8_t inPixelCount, Adafruit_NeoPixel *inDriver);
+  void begin(std::vector<Color> inDefaultColors, uint8_t inPixelCount, Adafruit_NeoPixel* inDriver);
 
   /**
    * @brief fill the framebuffer with a single color

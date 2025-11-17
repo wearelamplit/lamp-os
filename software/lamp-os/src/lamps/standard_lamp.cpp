@@ -9,6 +9,7 @@
 
 #include "../components/network/bluetooth.hpp"
 #include "../components/network/wifi.hpp"
+#include "../expressions/expression_manager.hpp"
 #include "../util/color.hpp"
 #include "./behaviors/configurator.hpp"
 #include "./behaviors/dmx.hpp"
@@ -17,7 +18,6 @@
 #include "./behaviors/social.hpp"
 #include "./config/config.hpp"
 #include "./core/animated_behavior.hpp"
-#include "../expressions/expression_manager.hpp"
 #include "./core/compositor.hpp"
 #include "./core/frame_buffer.hpp"
 #include "./globals.hpp"
@@ -55,9 +55,9 @@ bool lastHomeMode = false;  // Track previous home mode state
  * Calculate effective home mode based on configuration and network presence
  */
 bool calculateEffectiveHomeMode(lamp::Config& config) {
-  if (!config.lamp.homeMode) return false;  // Mode disabled
+  if (!config.lamp.homeMode) return false;            // Mode disabled
   if (config.lamp.homeModeSSID.empty()) return true;  // No SSID = always home
-  return wifi.isHomeNetworkVisible();  // Check if home network visible
+  return wifi.isHomeNetworkVisible();                 // Check if home network visible
 }
 
 void initBehaviors() {
@@ -65,7 +65,6 @@ void initBehaviors() {
   baseDmxBehavior = lamp::DmxBehavior(&base, 480);
   shadeSocialBehavior = lamp::SocialBehavior(&shade, 1200);
   shadeSocialBehavior.setBluetoothComponent(&bt);
-  shadeSocialBehavior.isExclusive = true;  // Social takes exclusive control
   shadeConfiguratorBehavior = lamp::ConfiguratorBehavior(&shade, 120);
   shadeConfiguratorBehavior.colors = shade.defaultColors;
   baseConfiguratorBehavior = lamp::ConfiguratorBehavior(&base, 120);
@@ -93,8 +92,7 @@ void initBehaviors() {
   allBehaviors.push_back(&baseDmxBehavior);
   allBehaviors.push_back(&shadeDmxBehavior);
 
-  // Add exclusive behaviors
-  allBehaviors.push_back(&shadeSocialBehavior);  // Exclusive - takes over when triggered
+  allBehaviors.push_back(&shadeSocialBehavior);
 
   // Add configurator behaviors (highest priority - UI preview, overrides DMX and social)
   allBehaviors.push_back(&shadeConfiguratorBehavior);
@@ -301,7 +299,6 @@ void loop() {
   handleWebSocket();
   wifi.tick();
 
-
   // Update compositor home mode state periodically for social behaviors
   static constexpr uint32_t HOME_MODE_UPDATE_INTERVAL_MS = 30000;
   if (millis() - lastHomeModeUpdateMs > HOME_MODE_UPDATE_INTERVAL_MS) {
@@ -310,8 +307,7 @@ void loop() {
 
     // Apply brightness when home mode state changes
     if (effectiveHomeMode != lastHomeMode) {
-      uint8_t targetBrightness = effectiveHomeMode ?
-        config.lamp.homeModeBrightness : config.lamp.brightness;
+      uint8_t targetBrightness = effectiveHomeMode ? config.lamp.homeModeBrightness : config.lamp.brightness;
 
       shadeStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, targetBrightness));
       baseStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, targetBrightness));

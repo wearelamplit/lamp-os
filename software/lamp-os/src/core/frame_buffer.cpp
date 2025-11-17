@@ -10,7 +10,7 @@
 namespace lamp {
 FrameBuffer::FrameBuffer() {};
 
-void FrameBuffer::begin(std::vector<Color> inDefaultColors, uint8_t inPixelCount, Adafruit_NeoPixel *inDriver) {
+void FrameBuffer::begin(std::vector<Color> inDefaultColors, uint8_t inPixelCount, Adafruit_NeoPixel* inDriver) {
   defaultColors = inDefaultColors;
   pixelCount = inPixelCount;
   buffer = std::vector<Color>(inPixelCount);
@@ -27,7 +27,7 @@ void FrameBuffer::fill(Color inColor) {
 };
 
 void FrameBuffer::flush() {
-  if (buffer == previousBuffer) {
+  if (buffer == previousBuffer && driver->getBrightness() == previousBrightness) {
     return;
   }
 
@@ -40,5 +40,6 @@ void FrameBuffer::flush() {
   }
 
   previousBuffer = buffer;
+  previousBrightness = driver->getBrightness();
 };
 }  // namespace lamp
