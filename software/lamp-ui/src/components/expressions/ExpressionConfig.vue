@@ -51,7 +51,7 @@
     </FormField>
 
     <!-- Interval Configuration -->
-    <div class="interval-section">
+    <div class="interval-section" v-if="expression.type !== 'stars'">
       <div class="interval-header">
         <span class="interval-label">Random Trigger Interval</span>
       </div>
@@ -125,7 +125,9 @@
           />
           <span class="interval-value">{{ formatDuration(localDurationMax) }}</span>
         </div>
-        <span class="interval-summary">{{ formatDuration(localDurationMin) }} - {{ formatDuration(localDurationMax) }}</span>
+        <span class="interval-summary"
+          >{{ formatDuration(localDurationMin) }} - {{ formatDuration(localDurationMax) }}</span
+        >
       </div>
     </FormField>
 
@@ -189,11 +191,7 @@
     </FormField>
 
     <!-- Pulse-specific Configuration -->
-    <FormField
-      v-if="expression.type === 'pulse'"
-      label="Pulse Speed"
-      id="expression-pulse-speed"
-    >
+    <FormField v-if="expression.type === 'pulse'" label="Pulse Speed" id="expression-pulse-speed">
       <div class="duration-container">
         <NumberSlider
           id="pulse-speed"
@@ -206,6 +204,61 @@
           prepend="time"
         />
         <span class="duration-value">{{ expression.pulseSpeed || 3 }}s</span>
+      </div>
+    </FormField>
+
+    <!-- Stars-specific Configuration -->
+    <div class="interval-section" v-if="expression.type === 'stars'">
+      <div class="interval-header">
+        <span class="interval-label">Duration</span>
+      </div>
+      <div class="interval-container">
+        <div class="interval-input">
+          <label>Min</label>
+          <input
+            type="range"
+            v-model.number="localIntervalMin"
+            @input="handleIntervalMinChange"
+            min="10"
+            max="30"
+            step="1"
+            :disabled="disabled"
+            class="interval-slider"
+          />
+          <span class="interval-value">{{ formatInterval(localIntervalMin) }}</span>
+        </div>
+
+        <div class="interval-input">
+          <label>Max</label>
+          <input
+            type="range"
+            v-model.number="localIntervalMax"
+            @input="handleIntervalMaxChange"
+            min="15"
+            max="30"
+            step="1"
+            :disabled="disabled"
+            class="interval-slider"
+          />
+          <span class="interval-value">{{ formatInterval(localIntervalMax) }}</span>
+        </div>
+      </div>
+    </div>
+
+    <FormField v-if="expression.type === 'stars'" label="Number of Stars" id="expression-num-stars">
+      <div class="interval-input">
+        <label>Stars</label>
+        <input
+          type="range"
+          v-model.number="localNumStars"
+          @input="handleNumStarsChange"
+          min="1"
+          max="10"
+          step="1"
+          :disabled="disabled"
+          class="interval-slider"
+        />
+        <span class="interval-value">{{ localNumStars }}</span>
       </div>
     </FormField>
   </div>
@@ -257,7 +310,7 @@ const emit = defineEmits<{
 const targetOptions = [
   { value: 1, label: 'Shade' },
   { value: 2, label: 'Base' },
-  { value: 3, label: 'Both' }
+  { value: 3, label: 'Both' },
 ]
 
 const minColors = computed(() => props.configSchema?.colors?.min || 1)
@@ -272,29 +325,47 @@ const localShiftDurationMin = ref(props.expression.shiftDurationMin || 300)
 const localShiftDurationMax = ref(props.expression.shiftDurationMax || 600)
 
 // Watch for external changes to sync local values
-watch(() => props.expression.intervalMin, (newVal) => {
-  localIntervalMin.value = newVal
-})
+watch(
+  () => props.expression.intervalMin,
+  (newVal) => {
+    localIntervalMin.value = newVal
+  },
+)
 
-watch(() => props.expression.intervalMax, (newVal) => {
-  localIntervalMax.value = newVal
-})
+watch(
+  () => props.expression.intervalMax,
+  (newVal) => {
+    localIntervalMax.value = newVal
+  },
+)
 
-watch(() => props.expression.durationMin, (newVal) => {
-  if (newVal !== undefined) localDurationMin.value = newVal
-})
+watch(
+  () => props.expression.durationMin,
+  (newVal) => {
+    if (newVal !== undefined) localDurationMin.value = newVal
+  },
+)
 
-watch(() => props.expression.durationMax, (newVal) => {
-  if (newVal !== undefined) localDurationMax.value = newVal
-})
+watch(
+  () => props.expression.durationMax,
+  (newVal) => {
+    if (newVal !== undefined) localDurationMax.value = newVal
+  },
+)
 
-watch(() => props.expression.shiftDurationMin, (newVal) => {
-  if (newVal !== undefined) localShiftDurationMin.value = newVal
-})
+watch(
+  () => props.expression.shiftDurationMin,
+  (newVal) => {
+    if (newVal !== undefined) localShiftDurationMin.value = newVal
+  },
+)
 
-watch(() => props.expression.shiftDurationMax, (newVal) => {
-  if (newVal !== undefined) localShiftDurationMax.value = newVal
-})
+watch(
+  () => props.expression.shiftDurationMax,
+  (newVal) => {
+    if (newVal !== undefined) localShiftDurationMax.value = newVal
+  },
+)
 
 const updateField = (field: keyof Expression, value: any) => {
   // The HTML range inputs already enforce min/max constraints through their attributes
@@ -312,7 +383,7 @@ const handleIntervalMinChange = () => {
     localIntervalMax.value = localIntervalMin.value
     emit('update', {
       intervalMin: localIntervalMin.value,
-      intervalMax: localIntervalMax.value
+      intervalMax: localIntervalMax.value,
     })
   } else {
     emit('update', { intervalMin: localIntervalMin.value })
@@ -325,7 +396,7 @@ const handleIntervalMaxChange = () => {
     localIntervalMin.value = localIntervalMax.value
     emit('update', {
       intervalMin: localIntervalMin.value,
-      intervalMax: localIntervalMax.value
+      intervalMax: localIntervalMax.value,
     })
   } else {
     emit('update', { intervalMax: localIntervalMax.value })
@@ -338,7 +409,7 @@ const handleDurationMinChange = () => {
     localDurationMax.value = localDurationMin.value
     emit('update', {
       durationMin: localDurationMin.value,
-      durationMax: localDurationMax.value
+      durationMax: localDurationMax.value,
     })
   } else {
     emit('update', { durationMin: localDurationMin.value })
@@ -351,7 +422,7 @@ const handleDurationMaxChange = () => {
     localDurationMin.value = localDurationMax.value
     emit('update', {
       durationMin: localDurationMin.value,
-      durationMax: localDurationMax.value
+      durationMax: localDurationMax.value,
     })
   } else {
     emit('update', { durationMax: localDurationMax.value })
@@ -364,7 +435,7 @@ const handleShiftDurationMinChange = () => {
     localShiftDurationMax.value = localShiftDurationMin.value
     emit('update', {
       shiftDurationMin: localShiftDurationMin.value,
-      shiftDurationMax: localShiftDurationMax.value
+      shiftDurationMax: localShiftDurationMax.value,
     })
   } else {
     emit('update', { shiftDurationMin: localShiftDurationMin.value })
@@ -377,7 +448,7 @@ const handleShiftDurationMaxChange = () => {
     localShiftDurationMin.value = Math.max(300, localShiftDurationMax.value)
     emit('update', {
       shiftDurationMin: localShiftDurationMin.value,
-      shiftDurationMax: localShiftDurationMax.value
+      shiftDurationMax: localShiftDurationMax.value,
     })
   } else {
     emit('update', { shiftDurationMax: localShiftDurationMax.value })
@@ -487,7 +558,6 @@ const formatDuration = (frames: number): string => {
   font-weight: 500;
   color: var(--brand-white);
 }
-
 
 .colors-container {
   display: flex;

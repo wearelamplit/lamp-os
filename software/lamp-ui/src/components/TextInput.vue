@@ -1,57 +1,57 @@
 <script setup lang="ts">
 interface Props {
-  modelValue: string;
-  placeholder?: string;
-  type?: string;
-  maxLength?: number;
-  minLength?: number;
-  pattern?: string;
-  autocapitalize?: boolean;
-  transform?: "lowercase" | "uppercase" | "none";
+  modelValue: string
+  placeholder?: string
+  type?: string
+  maxLength?: number
+  minLength?: number
+  pattern?: string
+  autocapitalize?: boolean
+  transform?: 'lowercase' | 'uppercase' | 'none'
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  placeholder: "",
-  type: "text",
+  placeholder: '',
+  type: 'text',
   maxLength: undefined,
   pattern: undefined,
-  transform: "none",
-});
+  transform: 'none',
+})
 
 const emit = defineEmits<{
-  "update:modelValue": [value: string];
-}>();
+  'update:modelValue': [value: string]
+}>()
 
 const updateValue = (event: Event) => {
-  const target = event.target as HTMLInputElement;
-  let value = target.value;
+  const target = event.target as HTMLInputElement
+  let value = target.value
 
   // Apply transformation first
-  if (props.transform === "lowercase") {
-    value = value.toLowerCase();
-  } else if (props.transform === "uppercase") {
-    value = value.toUpperCase();
+  if (props.transform === 'lowercase') {
+    value = value.toLowerCase()
+  } else if (props.transform === 'uppercase') {
+    value = value.toUpperCase()
   }
 
   // Apply pattern filtering after transformation
   if (props.pattern) {
-    const regex = new RegExp(props.pattern);
+    const regex = new RegExp(props.pattern)
     value = value
-      .split("")
+      .split('')
       .filter((char) => regex.test(char))
-      .join("");
+      .join('')
   }
 
   // Apply max length if specified
   if (props.maxLength && value.length > props.maxLength) {
-    value = value.substring(0, props.maxLength);
+    value = value.substring(0, props.maxLength)
   }
 
   // Update the input field's value to reflect the validated result
-  target.value = value;
+  target.value = value
 
-  emit("update:modelValue", value);
-};
+  emit('update:modelValue', value)
+}
 </script>
 
 <template>

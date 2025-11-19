@@ -328,4 +328,3 @@ describe('colorUtils', () => {
     })
   })
 })
-

@@ -150,6 +150,64 @@
           "help": "Time for pulse to travel across lamp in seconds"
         }
       }
+    },
+    "stars": {
+      "name": "Stars",
+      "description": "Continuous, randomly moving pixels that create a lava lamp effect",
+      "config": {
+        "colors": {
+          "type": "color_array",
+          "max": 5,
+          "default": ["#000000FF"],
+          "label": "Star Colors",
+          "help": "The colors of the individual stars"
+        },
+        "intervalMin": {
+          "type": "range",
+          "min": 10,
+          "max": 30,
+          "step": 1,
+          "unit": "s",
+          "label": "Min Interval"
+        },
+        "intervalMax": {
+          "type": "range",
+          "min": 15,
+          "max": 30,
+          "step": 1,
+          "unit": "s",
+          "label": "Max Interval"
+        },
+        "numStars": {
+          "type": "range",
+          "min": 1,
+          "max": 10,
+          "step": 1,
+          "default": 5,
+          "unit": "s",
+          "label": "Number of Stars",
+          "help": "The total number of pixels to show every pass"
+        },
+        "starPositionMin": {
+          "type": "range",
+          "min": 1,
+          "max": 50,
+          "step": 1,
+          "default": 0,
+          "unit": "px",
+          "label": "Preferred Pixel Start Position",
+          "help": "if set, restrict stars to only certain regions of the base/shade"
+        },
+        "starPositionMax": {
+          "type": "range",
+          "min": 5,
+          "max": 50,
+          "step": 1,
+          "default": 0,
+          "unit": "px",
+          "label": "Preferred Pixel End Position"
+        }
+      }
     }
   }
 }

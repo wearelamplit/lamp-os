@@ -22,7 +22,7 @@
     "build-only": "vite build",
     "type-check": "vue-tsc --build tsconfig.app.json",
     "lint": "eslint . --fix",
-    "format": "prettier --write src/",
+    "format": "prettier --write src/ --config .prettierrc.json",
     "build:analyze": "vite build --mode analyze"
   },
   "dependencies": {
