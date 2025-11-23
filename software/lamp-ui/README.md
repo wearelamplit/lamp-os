@@ -1,6 +1,6 @@
 # Lamp OS Embedded UI Application
 
-This application is uploaded to the board as a filesystem artifact in the Github pipeline. It is mean to run onboard all of the lamps and provide easy configuration from a mobile device
+This application is uploaded to the board as a filesystem artifact in the Github pipeline. It is meant to run onboard all of the lamps and provide easy configuration from a mobile device
 
 ## Prerequisites
 
