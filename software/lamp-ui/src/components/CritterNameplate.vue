@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import Critter from "./Critter-7.vue";
-import type { Settings } from "../types";
-const model = defineModel<Settings>({ default: { lamp: { name: "" } } });
+import Critter from './Critter-7.vue'
+import type { Settings } from '../types'
+const model = defineModel<Settings>({ default: { lamp: { name: '' } } })
 </script>
 
 <template>

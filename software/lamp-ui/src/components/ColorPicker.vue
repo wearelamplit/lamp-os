@@ -92,9 +92,9 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
-  'preview': [value: string]
-  'open': []
-  'close': []
+  preview: [value: string]
+  open: []
+  close: []
 }>()
 
 const isDialogOpen = ref(false)
