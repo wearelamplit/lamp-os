@@ -21,7 +21,9 @@
             v-if="localColors.length > 1"
             icon="star"
             variant="star"
-            :title="isActiveColor(localColors.length - 1 - index) ? 'Active color' : 'Set as active'"
+            :title="
+              isActiveColor(localColors.length - 1 - index) ? 'Active color' : 'Set as active'
+            "
             :disabled="disabled"
             :class="{ active: isActiveColor(localColors.length - 1 - index) }"
             @click="setActiveColor(localColors.length - 1 - index)"

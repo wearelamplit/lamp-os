@@ -87,7 +87,7 @@ const props = withDefaults(defineProps<Props>(), {
   disabled: false,
 })
 
-const emit = defineEmits<{
+defineEmits<{
   click: []
 }>()
 

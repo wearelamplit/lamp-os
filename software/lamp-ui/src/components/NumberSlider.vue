@@ -1,6 +1,8 @@
 <template>
   <div class="number-slider-group">
-    <span class="number-slider-value">{{ prepend === 'time' ? 'Time' : prepend + localValue + append }}</span>
+    <span class="number-slider-value">{{
+      prepend === 'time' ? 'Time' : prepend + localValue + append
+    }}</span>
     <input
       :id="id"
       v-model.number="localValue"

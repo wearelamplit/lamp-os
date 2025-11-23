@@ -179,7 +179,7 @@ wss.on('connection', (ws, req) => {
 })
 
 // Error handling
-app.use((error, req, res, next) => {
+app.use((error, req, res) => {
   log('ERROR', `Server error: ${error.message}`, {
     stack: error.stack,
     path: req.path,
