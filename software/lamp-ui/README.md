@@ -1,6 +1,6 @@
 # Lamp OS Embedded UI Application
 
-This application is uploaded to the board as a filesystem artifact in the Github pipeline. It is mean to run onboard all of the lamps and provide easy configuration from an mobile device.
+This application is uploaded to the board as a filesystem artifact in the Github pipeline. It is mean to run onboard all of the lamps and provide easy configuration from a mobile device
 
 ## Prerequisites
 
@@ -35,7 +35,7 @@ npm run build
 
 ## Usage
 
-Start the dev server by running `node dev-server.js` then run `npm run dev` to see the app in action. The Dev server provides a similar API to the actual embedded boards for easy testing of websocket and rest communication
+Start the dev server by running `node dev-server.js` then run `npm run dev` to see the app in action. The dev server provides a similar API to the actual embedded boards for easy testing of websocket and rest communication
 
 ## Contributing
 
@@ -82,7 +82,7 @@ npm run preview
 
 ### Uploading to your board
 
-You will need to follow the C++ setup guide in the lamp-os directory before starting.
+You will need to follow the C++ setup guide in the lamp-os directory before starting
 
 Plug your lamp board into a usb port
 
