@@ -1,10 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import {
-  parseHexww,
-  hexwwToRgb,
-  createGradientFromHexww,
-  type ColorComponents,
-} from '../colorUtils'
+import { parseHexww, hexwwToRgb, createGradientFromHexww } from '../colorUtils'
 
 describe('colorUtils', () => {
   describe('parseHexww', () => {

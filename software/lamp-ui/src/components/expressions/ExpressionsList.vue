@@ -210,6 +210,7 @@ const expressions = computed({
 const existingTypes = computed(() => new Set(expressions.value.map((expr) => expr.type)))
 
 const availableTypes = computed(() => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return Object.entries(expressionSchemas.expressions).map(([id, config]: [string, any]) => ({
     id,
     name: config.name,
@@ -219,6 +220,7 @@ const availableTypes = computed(() => {
 })
 
 const getExpressionName = (type: string): string => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (expressionSchemas.expressions as any)[type]?.name || type
 }
 
@@ -236,6 +238,7 @@ const getTargetLabel = (target: number): string => {
 }
 
 const getConfigSchema = (type: string) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (expressionSchemas.expressions as any)[type]?.config || {}
 }
 
@@ -267,6 +270,7 @@ const saveAndRestart = () => {
 }
 
 const addExpression = (type: string) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const schema = (expressionSchemas.expressions as any)[type]
   if (!schema) return
 
@@ -274,6 +278,7 @@ const addExpression = (type: string) => {
   if (existingTypes.value.has(type)) return
 
   // Build expression with only fields that exist in this type's config
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const newExpression: any = {
     type,
     enabled: true,
@@ -281,8 +286,10 @@ const addExpression = (type: string) => {
   }
 
   // Add fields based on what's defined in the JSON config
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   Object.entries(schema.config).forEach(([key, config]: [string, any]) => {
     if (config.default !== undefined) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ;(newExpression as any)[key] = config.default
     }
   })

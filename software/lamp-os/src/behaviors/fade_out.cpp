@@ -7,7 +7,7 @@
 namespace lamp {
 void FadeOutBehavior::draw() {
   for (int i = 0; i < fb->pixelCount; i++) {
-    fb->buffer[i] = fade(fb->buffer[i], Color(0, 0, 0, 0), frames, frame);
+    fb->buffer[i] = fade(fb->buffer[i], Color(0, 0, 0, 0), frames - 1, frame);
   }
 
   nextFrame();

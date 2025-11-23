@@ -286,12 +286,13 @@ interface Expression {
   pulseSpeed?: number
 }
 
+type Scalar = null | boolean | number | string
+
 interface ConfigSchema {
   colors?: {
     min: number
     max: number
   }
-  [key: string]: any
 }
 
 const props = defineProps<{
@@ -367,7 +368,7 @@ watch(
   },
 )
 
-const updateField = (field: keyof Expression, value: any) => {
+const updateField = (field: keyof Expression, value: Scalar) => {
   // The HTML range inputs already enforce min/max constraints through their attributes
   // No additional validation needed here
   emit('update', { [field]: value })

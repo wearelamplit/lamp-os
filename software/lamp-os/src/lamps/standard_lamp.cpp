@@ -92,11 +92,12 @@ void initBehaviors() {
   allBehaviors.push_back(&baseDmxBehavior);
   allBehaviors.push_back(&shadeDmxBehavior);
 
+  // Add social greeting behaviors (high priority)
   allBehaviors.push_back(&shadeSocialBehavior);
 
   // Add configurator behaviors (highest priority - UI preview, overrides DMX and social)
-  allBehaviors.push_back(&shadeConfiguratorBehavior);
   allBehaviors.push_back(&baseConfiguratorBehavior);
+  allBehaviors.push_back(&shadeConfiguratorBehavior);
 
   // Add fade behaviors (always last - startup/shutdown effects)
   allBehaviors.push_back(&baseFadeOutBehavior);
@@ -105,7 +106,7 @@ void initBehaviors() {
   // layers load in priority sequence {lowest, ..., highest}
   compositor.begin(allBehaviors, {&shade, &base}, calculateEffectiveHomeMode(config));
 
-  // Add overlay behaviors (compositor.begin() clears these)
+  // Add overlay behaviors
   compositor.overlayBehaviors.push_back(&baseKnockoutBehavior);
 
   // Set global compositor for expressions

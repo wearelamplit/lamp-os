@@ -1,38 +1,22 @@
-# Lamp OS Color Picker
+# Lamp OS Embedded UI Application
 
-A mobile-first Vue.js color picker component with hexww (hex + warm white) support. Built with Vue 3, TypeScript, and Vitest.
+This application is uploaded to the board as a filesystem artifact in the Github pipeline. It is meant to run onboard all of the lamps and provide easy configuration from a mobile device
 
-## Features
+## Prerequisites
 
-- **Hexww Support**: Supports 8-digit hex values with warm white component (e.g., `#FF0000FF`)
-- **Mobile-First Design**: Responsive design that works great on mobile devices
-- **Interactive Dialog**: Click-to-open color picker with sliders for RGBA and warm white
-- **Real-time Updates**: Changes to sliders update the hex value in real-time
-- **Background Shading**: Modal dialog with clickable overlay to close
-- **TypeScript Support**: Fully typed with TypeScript
-- **Comprehensive Testing**: Unit tests with Vitest
-
-## Color Format
-
-The color picker supports the hexww format:
-
-- **Standard Hex**: 6-digit hex values (e.g., `#FF0000`)
-- **Hexww**: 8-digit hex values with warm white component (e.g., `#FF0000FF`)
-
-The format is: `#RRGGBBWW` where:
-
-- `RR` = Red component (00-FF)
-- `GG` = Green component (00-FF)
-- `BB` = Blue component (00-FF)
-- `WW` = Warm White component (00-FF)
+- NodeJS v22 (you can also use NVM if installed)
+- VS Code
+  - Extensions:
+    - Vue
+    - Vue 3 Language Support
+    - Vitest
+    - Vite
+    - Prettier
+    - Eslint
 
 ## Installation
 
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd software/lamp-ui
-
 # Install dependencies
 npm ci
 
@@ -42,51 +26,29 @@ npm run dev
 # Run tests
 npm run test:unit
 
+# Run the linter
+npm run lint
+
 # Build for production
 npm run build
 ```
 
 ## Usage
 
-### Basic Usage
+Start the dev server by running `node dev-server.js` then run `npm run dev` to see the app in action. The dev server provides a similar API to the actual embedded boards for easy testing of websocket and rest communication
 
-```vue
-<template>
-  <ColorPicker v-model="selectedColor" />
-</template>
-
-<script setup>
-import { ref } from 'vue'
-import ColorPicker from '@/components/ColorPicker.vue'
-
-const selectedColor = ref('#FF0000FF')
-</script>
-```
-
-### Component Props
-
-| Prop         | Type     | Default | Description           |
-| ------------ | -------- | ------- | --------------------- |
-| `modelValue` | `string` | `''`    | The hexww color value |
-
-### Component Events
-
-| Event               | Payload  | Description                          |
-| ------------------- | -------- | ------------------------------------ |
-| `update:modelValue` | `string` | Emitted when the color value changes |
-
-## Development
+## Contributing
 
 ### Project Structure
 
-```
+```text
 src/
 ├── components/
-│   ├── ColorPicker.vue          # Main color picker component
+│   ├── ColorPicker.vue          # Component names must be at least two words
 │   └── __tests__/
 │       └── ColorPicker.test.ts  # Component tests
-├── views/
-│   └── HomeView.vue             # Demo page
+├── utils/
+│   └── colorUtils.ts            # Utility functions
 ├── App.vue                      # Root component
 └── main.ts                      # Application entry point
 ```
@@ -101,6 +63,13 @@ npm run test:unit
 npm run test:unit -- --watch
 ```
 
+### Auto formatting
+
+```bash
+# Auto format your files for submission
+npm run format
+```
+
 ### Building
 
 ```bash
@@ -112,6 +81,8 @@ npm run preview
 ```
 
 ### Uploading to your board
+
+You will need to follow the C++ setup guide in the lamp-os directory before starting
 
 Plug your lamp board into a usb port
 
@@ -129,20 +100,13 @@ This process will build a new .spiffs partition and replace it onboard your esp3
 
 ## Features in Detail
 
-### Color Picker Dialog
-
-- **Color Preview**: Large preview of the selected color
-- **Hex Input**: Direct hex value input with validation
-- **RGBA Sliders**: Individual sliders for red, green, blue, and warm white
-- **Real-time Updates**: All changes update the hex value immediately
-- **Click Outside to Close**: Click the overlay or X button to close
-
 ### Mobile Responsiveness
 
 - Optimized for touch interactions
 - Responsive layout that adapts to screen size
 - Touch-friendly sliders and buttons
 - Proper viewport handling
+- gzipped to a tiny size for embedded use on the ESP32
 
 ### Accessibility
 
@@ -150,19 +114,6 @@ This process will build a new .spiffs partition and replace it onboard your esp3
 - Keyboard navigation support
 - Focus management
 - Screen reader friendly
-
-## Example Colors
-
-The demo page includes several example colors:
-
-- **Pure Red**: `#FF0000FF`
-- **Pure Green**: `#00FF00FF`
-- **Pure Blue**: `#0000FFFF`
-- **Warm White**: `#000000FF`
-- **Purple**: `#800080FF`
-- **Orange**: `#FF8000FF`
-- **Cyan**: `#00FFFFFF`
-- **Magenta**: `#FF00FFFF`
 
 ## Technologies Used
 

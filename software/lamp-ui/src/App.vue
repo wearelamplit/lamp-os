@@ -8,8 +8,8 @@ import TextInput from '@/components/TextInput.vue'
 import BooleanInput from '@/components/BooleanInput.vue'
 import FormField from '@/components/FormField.vue'
 import TopNavigation from '@/components/TopNavigation.vue'
-import Logo from '@/components/Logo.vue'
-import Nameplate from '@/components/Nameplate.vue'
+import LamplitLogo from '@/components/LamplitLogo.vue'
+import CritterNameplate from '@/components/CritterNameplate.vue'
 import ExpressionsList from '@/components/expressions/ExpressionsList.vue'
 import type { Settings } from '@/types'
 
@@ -38,7 +38,6 @@ declare module '@/types' {
 const maxReconnectAttempts = 60
 const reconnectInterval = 2500
 const websocketDebounceInterval = 10
-const maxLedsShade = 38
 const maxLedsBase = 50
 
 // state ======================
@@ -385,7 +384,7 @@ onUnmounted(() => {
         <div class="tab-content">
           <!-- Home Tab -->
           <section v-if="activeTab === 'home'" class="tab-panel" aria-label="Home settings">
-            <Nameplate v-model="settings" id="nameplate" />
+            <CritterNameplate v-model="settings" id="nameplate" />
 
             <h1 class="gold">Lamp Brightness</h1>
             <FormField id="brightness">
@@ -564,7 +563,7 @@ onUnmounted(() => {
           <section v-if="activeTab === 'info'" class="tab-panel" aria-label="Information">
             <div class="info-content">
               <div class="logo-container">
-                <Logo />
+                <LamplitLogo />
               </div>
               <p>
                 Lamplit Art Society is a non-profit collective dedicated to sparking inspiration and
