@@ -29,3 +29,19 @@ export interface Settings {
   shade?: ShadeSettings
   base?: BaseSettings
 }
+
+export interface Expression {
+  type: string
+  enabled: boolean
+  colors: string[]
+  intervalMin: number
+  intervalMax: number
+  target: number
+  durationMin?: number
+  durationMax?: number
+  fadeDuration?: number
+  shiftDurationMin?: number
+  shiftDurationMax?: number
+  pulseSpeed?: number
+  numStars?: number
+}

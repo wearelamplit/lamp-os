@@ -25,14 +25,14 @@
             >
               {{ expandedIndex === index ? 'Hide' : 'Configure' }}
             </button>
-            <button
-              class="delete-button"
-              @click="removeExpression(index)"
+            <IconButton
+              icon="remove"
+              variant="remove"
+              title="Remove expression"
               :disabled="disabled"
-              aria-label="Delete expression"
-            >
-              ×
-            </button>
+              @click="removeExpression(index)"
+              aria-label="Remove expression"
+            />
           </div>
         </div>
 
@@ -159,22 +159,8 @@ import { ref, computed, watch } from 'vue'
 import BooleanInput from '@/components/BooleanInput.vue'
 import ExpressionConfig from './ExpressionConfig.vue'
 import expressionSchemas from '@/assets/expressions.json'
-
-interface Expression {
-  type: string
-  enabled: boolean
-  colors: string[]
-  intervalMin: number
-  intervalMax: number
-  target: number
-  durationMin?: number
-  durationMax?: number
-  fadeDuration?: number
-  shiftDurationMin?: number
-  shiftDurationMax?: number
-  pulseSpeed?: number
-  numStars?: number
-}
+import type { Expression } from '@/types'
+import IconButton from '../IconButton.vue'
 
 const props = defineProps<{
   modelValue: Expression[]
@@ -296,12 +282,17 @@ const addExpression = (type: string) => {
 
   // Ensure colors array exists
   if (!newExpression.colors) {
-    newExpression.colors = ['#FFFFFFFF']
+    newExpression.colors = ['#77777777']
   }
 
   // Set default intervals if not specified
-  if (!newExpression.intervalMin) newExpression.intervalMin = 300
-  if (!newExpression.intervalMax) newExpression.intervalMax = 900
+  if(newExpression.type === "stars") {
+    if (!newExpression.intervalMin) newExpression.intervalMin = 15
+    if (!newExpression.intervalMax) newExpression.intervalMax = 30
+  } else {
+    if (!newExpression.intervalMin) newExpression.intervalMin = 300
+    if (!newExpression.intervalMax) newExpression.intervalMax = 900
+  }
 
   expressions.value = [...expressions.value, newExpression as Expression]
   showAddModal.value = false
@@ -390,9 +381,9 @@ watch(
 
 .config-button {
   padding: 6px 12px;
-  background: rgba(64, 176, 0, 0.15);
+  background: var(--color-background-soft);
   color: var(--brand-green);
-  border: 1px solid rgba(64, 176, 0, 0.5);
+  border: 1px solid var(--brand-slate-grey);
   border-radius: 4px;
   font-size: 0.813rem;
   cursor: pointer;
@@ -401,36 +392,10 @@ watch(
 }
 
 .config-button:hover:not(:disabled) {
-  background: rgba(64, 176, 0, 0.3);
+  background: var(--brand-slate-grey);
 }
 
 .config-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.delete-button {
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  background: rgba(239, 68, 68, 0.2);
-  color: #ef4444;
-  border: 1px solid #ef4444;
-  border-radius: 4px;
-  font-size: 1.5rem;
-  line-height: 1;
-  cursor: pointer;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.delete-button:hover:not(:disabled) {
-  background: rgba(239, 68, 68, 0.3);
-}
-
-.delete-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

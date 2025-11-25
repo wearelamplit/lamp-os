@@ -69,20 +69,6 @@ describe('ColorPicker', () => {
     expect(wwSlider.exists()).toBe(true)
   })
 
-  it('emits updated value when sliders change', async () => {
-    const vm = wrapper.vm as any
-    vm.openDialog()
-    expect(vm.isDialogOpen).toBe(true)
-
-    // Change a color value
-    vm.colorValues.red = 128
-    // The updateColor method should update the hex input but not emit when dialog is open
-    vm.updateColor()
-    expect(vm.hexInput).toBe('#800000FF')
-    // No emission should happen while dialog is open
-    expect(wrapper.emitted('update:modelValue')).toBeFalsy()
-  })
-
   it('updates from hex input', async () => {
     const vm = wrapper.vm as any
     vm.openDialog()

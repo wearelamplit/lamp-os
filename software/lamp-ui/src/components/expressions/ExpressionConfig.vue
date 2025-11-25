@@ -28,25 +28,24 @@
             @close="() => emit('color-picker-close')"
             :disabled="disabled"
           />
-          <button
+          <IconButton
             v-if="expression.colors.length > minColors"
-            class="remove-color-button"
-            @click="removeColor(index)"
+            icon="remove"
+            variant="remove"
+            title="Remove color"
             :disabled="disabled"
+            @click="removeColor(index)"
             aria-label="Remove color"
-          >
-            ×
-          </button>
+          />
         </div>
-
-        <button
+        <IconButton
           v-if="expression.colors.length < maxColors"
-          class="add-color-button"
-          @click="addColor"
+          icon="plus"
+          variant="plus"
+          title="Add color"
           :disabled="disabled"
-        >
-          + Add Color
-        </button>
+          @click="addColor"
+        />
       </div>
     </FormField>
 
@@ -269,22 +268,8 @@ import { computed, ref, watch } from 'vue'
 import FormField from '@/components/FormField.vue'
 import ColorPicker from '@/components/ColorPicker.vue'
 import NumberSlider from '@/components/NumberSlider.vue'
-
-interface Expression {
-  type: string
-  enabled: boolean
-  colors: string[]
-  intervalMin: number
-  intervalMax: number
-  target: number
-  duration?: number
-  durationMin?: number
-  durationMax?: number
-  fadeDuration?: number
-  shiftDurationMin?: number
-  shiftDurationMax?: number
-  pulseSpeed?: number
-}
+import type { Expression } from '@/types'
+import IconButton from '../IconButton.vue'
 
 type Scalar = null | boolean | number | string
 
@@ -324,6 +309,7 @@ const localDurationMin = ref(props.expression.durationMin || 1)
 const localDurationMax = ref(props.expression.durationMax || 3)
 const localShiftDurationMin = ref(props.expression.shiftDurationMin || 300)
 const localShiftDurationMax = ref(props.expression.shiftDurationMax || 600)
+const localNumStars = ref(props.expression.numStars || 1)
 
 // Watch for external changes to sync local values
 watch(
@@ -365,6 +351,13 @@ watch(
   () => props.expression.shiftDurationMax,
   (newVal) => {
     if (newVal !== undefined) localShiftDurationMax.value = newVal
+  },
+)
+
+watch(
+  () => props.expression.numStars,
+  (newVal) => {
+    if (newVal !== undefined) localNumStars.value = newVal
   },
 )
 
@@ -456,6 +449,10 @@ const handleShiftDurationMaxChange = () => {
   }
 }
 
+const handleNumStarsChange = () => {
+  emit('update', { numStars: localNumStars.value })
+}
+
 const updateColor = (index: number, value: string) => {
   const newColors = [...props.expression.colors]
   newColors[index] = value
@@ -463,7 +460,7 @@ const updateColor = (index: number, value: string) => {
 }
 
 const addColor = () => {
-  const newColors = [...props.expression.colors, '#FFFFFFFF']
+  const newColors = [...props.expression.colors, '#77777777']
   emit('update', { colors: newColors })
 }
 
@@ -518,27 +515,34 @@ const formatDuration = (frames: number): string => {
   flex: 1;
   min-width: 70px;
   padding: 8px 16px;
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--brand-light-grey);
+  background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
+  color: var(--brand-slate-grey);
+  font-size: 0.9rem;
+  font-weight: 500;
+  border-radius: 8px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.2s ease;
+  font-family: inherit;
+  white-space: nowrap;
 }
 
 .target-button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
+  color: var(--brand-fog-grey);
+  background: rgba(253, 253, 253, 0.05);
 }
 
 .target-button.active {
-  background: rgba(64, 176, 0, 0.2);
-  color: var(--brand-green);
-  border-color: var(--brand-green);
+  background: linear-gradient(135deg, var(--brand-aurora-blue), var(--brand-glow-pink));
+  color: var(--brand-lamp-white);
+  box-shadow: 0 2px 8px rgba(68, 108, 156, 0.3);
+  border: none;
 }
 
 .target-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  background: linear-gradient(135deg, var(--brand-aurora-blue), var(--brand-glow-pink));
+  color: var(--brand-lamp-white);
+  box-shadow: 0 2px 8px rgba(68, 108, 156, 0.3);
 }
 
 .interval-section {
