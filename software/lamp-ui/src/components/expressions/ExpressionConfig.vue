@@ -17,7 +17,7 @@
     </FormField>
 
     <!-- Colors Configuration -->
-    <FormField label="Colors (Randomly Selected)" id="expression-colors">
+    <FormField label="Colors" id="expression-colors">
       <div class="colors-container">
         <div v-for="(color, index) in expression.colors" :key="index" class="color-item">
           <ColorPicker
@@ -243,23 +243,62 @@
         </div>
       </div>
     </div>
+    <div class="numstars-section" v-if="expression.type === 'stars'">
+      <span class="numstars-header">Number of Stars</span>
+      <FormField id="expression-num-stars">
+        <div class="interval-input">
+          <label>Stars</label>
+          <input
+            type="range"
+            v-model.number="localNumStars"
+            @input="handleNumStarsChange"
+            min="1"
+            max="10"
+            step="1"
+            :disabled="disabled"
+            class="interval-slider"
+          />
+          <span class="interval-value">{{ localNumStars }}</span>
+        </div>
+      </FormField>
+    </div>
 
-    <FormField v-if="expression.type === 'stars'" label="Number of Stars" id="expression-num-stars">
-      <div class="interval-input">
-        <label>Stars</label>
-        <input
-          type="range"
-          v-model.number="localNumStars"
-          @input="handleNumStarsChange"
-          min="1"
-          max="10"
-          step="1"
-          :disabled="disabled"
-          class="interval-slider"
-        />
-        <span class="interval-value">{{ localNumStars }}</span>
+    <div class="interval-section" v-if="expression.type === 'stars'">
+      <div class="interval-header">
+        <span class="interval-label">Position</span>
       </div>
-    </FormField>
+      <div class="interval-container">
+        <div class="interval-input">
+          <label>Min</label>
+          <input
+            type="range"
+            v-model.number="localStarPositionMin"
+            @input="handleStarPositionMinChange"
+            min="0"
+            max="50"
+            step="1"
+            :disabled="disabled"
+            class="interval-slider"
+          />
+          <span class="interval-value">{{ localStarPositionMin }}px</span>
+        </div>
+
+        <div class="interval-input">
+          <label>Max</label>
+          <input
+            type="range"
+            v-model.number="localStarPositionMax"
+            @input="handleStarPositionMaxChange"
+            min="0"
+            max="50"
+            step="1"
+            :disabled="disabled"
+            class="interval-slider"
+          />
+          <span class="interval-value">{{ localStarPositionMax }}px</span>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -310,6 +349,8 @@ const localDurationMax = ref(props.expression.durationMax || 3)
 const localShiftDurationMin = ref(props.expression.shiftDurationMin || 300)
 const localShiftDurationMax = ref(props.expression.shiftDurationMax || 600)
 const localNumStars = ref(props.expression.numStars || 1)
+const localStarPositionMin = ref(props.expression.starPositionMin || 0)
+const localStarPositionMax =  ref(props.expression.starPositionMax || 50)
 
 // Watch for external changes to sync local values
 watch(
@@ -358,6 +399,20 @@ watch(
   () => props.expression.numStars,
   (newVal) => {
     if (newVal !== undefined) localNumStars.value = newVal
+  },
+)
+
+watch(
+  () => props.expression.starPositionMin,
+  (newVal) => {
+    if (newVal !== undefined) localStarPositionMin.value = newVal
+  },
+)
+
+watch(
+  () => props.expression.starPositionMax,
+  (newVal) => {
+    if (newVal !== undefined) localStarPositionMax.value = newVal
   },
 )
 
@@ -453,6 +508,32 @@ const handleNumStarsChange = () => {
   emit('update', { numStars: localNumStars.value })
 }
 
+const handleStarPositionMinChange = () => {
+  // If min exceeds max, set max equal to min
+  if (localStarPositionMin.value > localStarPositionMax.value) {
+    localStarPositionMax.value = localStarPositionMin.value
+    emit('update', {
+      starPositionMin: localStarPositionMin.value,
+      starPositionMax: localStarPositionMax.value,
+    })
+  } else {
+    emit('update', { starPositionMin: localStarPositionMin.value })
+  }
+}
+
+const handleStarPositionMaxChange = () => {
+  // If max is less than min, set min equal to max
+  if (localStarPositionMax.value < localStarPositionMin.value) {
+    localStarPositionMin.value = localStarPositionMax.value
+    emit('update', {
+      starPositionMin: localStarPositionMin.value,
+      starPositionMax: localStarPositionMax.value,
+    })
+  } else {
+    emit('update', { starPositionMax: localStarPositionMax.value })
+  }
+}
+
 const updateColor = (index: number, value: string) => {
   const newColors = [...props.expression.colors]
   newColors[index] = value
@@ -501,8 +582,12 @@ const formatDuration = (frames: number): string => {
 .config-container {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 8px;
   padding-top: 12px;
+}
+
+.config-container > .form-field {
+  margin: 10px 0;
 }
 
 .target-selector {
@@ -527,12 +612,19 @@ const formatDuration = (frames: number): string => {
   white-space: nowrap;
 }
 
-.target-button:hover:not(:disabled) {
+.target-button:hover:not(:disabled){
   color: var(--brand-fog-grey);
   background: rgba(253, 253, 253, 0.05);
 }
 
 .target-button.active {
+  background: linear-gradient(135deg, var(--brand-aurora-blue), var(--brand-glow-pink));
+  color: var(--brand-lamp-white);
+  box-shadow: 0 2px 8px rgba(68, 108, 156, 0.3);
+  border: none;
+}
+
+.target-button.active:hover {
   background: linear-gradient(135deg, var(--brand-aurora-blue), var(--brand-glow-pink));
   color: var(--brand-lamp-white);
   box-shadow: 0 2px 8px rgba(68, 108, 156, 0.3);
@@ -564,6 +656,15 @@ const formatDuration = (frames: number): string => {
   color: var(--brand-white);
 }
 
+.numstars-section {
+  padding: 2em 0 0 0;
+}
+
+.numstars-section > .numstars-header {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--brand-white);
+}
 .colors-container {
   display: flex;
   flex-direction: column;

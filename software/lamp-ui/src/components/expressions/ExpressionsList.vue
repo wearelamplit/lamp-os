@@ -8,15 +8,13 @@
     <div v-else class="expressions-list">
       <div v-for="(expr, index) in expressions" :key="index" class="expression-item">
         <div class="expression-header">
-          <BooleanInput
-            :model-value="expr.enabled"
-            @update:model-value="(value) => updateExpression(index, { enabled: value })"
-            :disabled="disabled"
-          />
-
           <span class="expression-name">{{ getExpressionName(expr.type) }}</span>
-
           <div class="expression-actions">
+            <BooleanInput
+              :model-value="expr.enabled"
+              @update:model-value="(value) => updateExpression(index, { enabled: value })"
+              :disabled="disabled"
+            />
             <button
               class="config-button"
               @click="toggleConfig(index)"
@@ -380,15 +378,17 @@ watch(
 }
 
 .config-button {
-  padding: 6px 12px;
+  padding: 0 12px;
   background: var(--color-background-soft);
   color: var(--brand-green);
-  border: 1px solid var(--brand-slate-grey);
-  border-radius: 4px;
+  border: 2px solid var(--brand-slate-grey);
+  border-radius: 8px;
   font-size: 0.813rem;
   cursor: pointer;
   transition: all 0.2s;
   white-space: nowrap;
+  width: 7em;
+  flex-shrink: inherit;
 }
 
 .config-button:hover:not(:disabled) {

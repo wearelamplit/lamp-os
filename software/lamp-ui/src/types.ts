@@ -44,4 +44,6 @@ export interface Expression {
   shiftDurationMax?: number
   pulseSpeed?: number
   numStars?: number
+  starPositionMin?: number
+  starPositionMax?: number
 }

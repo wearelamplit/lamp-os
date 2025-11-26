@@ -98,6 +98,6 @@ const toggleValue = () => {
 
 .boolean-input--active .boolean-input-thumb {
   left: calc(100% - 26px);
-  background-color: var(--brand-soft-grey);
+  background-color: var(--brand-lumen-green);
 }
 </style>
