@@ -284,7 +284,7 @@ const addExpression = (type: string) => {
   }
 
   // Set default intervals if not specified
-  if(newExpression.type === "stars") {
+  if (newExpression.type === 'stars') {
     if (!newExpression.intervalMin) newExpression.intervalMin = 15
     if (!newExpression.intervalMax) newExpression.intervalMax = 30
   } else {

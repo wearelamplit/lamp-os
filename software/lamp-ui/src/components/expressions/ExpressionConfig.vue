@@ -350,7 +350,7 @@ const localShiftDurationMin = ref(props.expression.shiftDurationMin || 300)
 const localShiftDurationMax = ref(props.expression.shiftDurationMax || 600)
 const localNumStars = ref(props.expression.numStars || 1)
 const localStarPositionMin = ref(props.expression.starPositionMin || 0)
-const localStarPositionMax =  ref(props.expression.starPositionMax || 50)
+const localStarPositionMax = ref(props.expression.starPositionMax || 50)
 
 // Watch for external changes to sync local values
 watch(
@@ -612,7 +612,7 @@ const formatDuration = (frames: number): string => {
   white-space: nowrap;
 }
 
-.target-button:hover:not(:disabled){
+.target-button:hover:not(:disabled) {
   color: var(--brand-fog-grey);
   background: rgba(253, 253, 253, 0.05);
 }
