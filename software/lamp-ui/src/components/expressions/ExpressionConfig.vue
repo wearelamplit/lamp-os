@@ -274,13 +274,13 @@
             type="range"
             v-model.number="localStarPositionMin"
             @input="handleStarPositionMinChange"
-            min="0"
+            min="1"
             max="50"
             step="1"
             :disabled="disabled"
             class="interval-slider"
           />
-          <span class="interval-value">{{ localStarPositionMin }}px</span>
+          <span class="interval-value">LED {{ localStarPositionMin }}</span>
         </div>
 
         <div class="interval-input">
@@ -289,13 +289,13 @@
             type="range"
             v-model.number="localStarPositionMax"
             @input="handleStarPositionMaxChange"
-            min="0"
+            min="1"
             max="50"
             step="1"
             :disabled="disabled"
             class="interval-slider"
           />
-          <span class="interval-value">{{ localStarPositionMax }}px</span>
+          <span class="interval-value">LED {{ localStarPositionMax }}</span>
         </div>
       </div>
     </div>
@@ -349,7 +349,7 @@ const localDurationMax = ref(props.expression.durationMax || 3)
 const localShiftDurationMin = ref(props.expression.shiftDurationMin || 300)
 const localShiftDurationMax = ref(props.expression.shiftDurationMax || 600)
 const localNumStars = ref(props.expression.numStars || 1)
-const localStarPositionMin = ref(props.expression.starPositionMin || 0)
+const localStarPositionMin = ref(props.expression.starPositionMin || 1)
 const localStarPositionMax = ref(props.expression.starPositionMax || 50)
 
 // Watch for external changes to sync local values

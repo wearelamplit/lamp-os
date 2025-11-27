@@ -193,7 +193,7 @@
           "min": 1,
           "max": 50,
           "step": 1,
-          "default": 0,
+          "default": 1,
           "unit": "px",
           "label": "Preferred Pixel Start Position",
           "help": "if set, restrict stars to only certain regions of the base/shade"
@@ -203,7 +203,7 @@
           "min": 5,
           "max": 50,
           "step": 1,
-          "default": 0,
+          "default": 50,
           "unit": "px",
           "label": "Preferred Pixel End Position"
         }
