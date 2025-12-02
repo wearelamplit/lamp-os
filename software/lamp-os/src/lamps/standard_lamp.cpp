@@ -1,6 +1,5 @@
 #include "./standard_lamp.hpp"
 
-#include <Adafruit_NeoPixel.h>
 #include <Arduino.h>
 #include <Preferences.h>
 
@@ -25,8 +24,8 @@
 #include "./util/levels.hpp"
 #include "SPIFFS.h"
 
-Adafruit_NeoPixel shadeStrip(LAMP_MAX_STRIP_PIXELS_SHADE, LAMP_SHADE_PIN, NEO_GRBW + NEO_KHZ800);
-Adafruit_NeoPixel baseStrip(LAMP_MAX_STRIP_PIXELS_BASE, LAMP_BASE_PIN, NEO_GRBW + NEO_KHZ800);
+Adafruit_NeoPixel shadeStrip(LAMP_MAX_STRIP_PIXELS_SHADE, LAMP_SHADE_PIN, LAMP_SHADE_LED_TYPE);
+Adafruit_NeoPixel baseStrip(LAMP_MAX_STRIP_PIXELS_BASE, LAMP_BASE_PIN, LAMP_BASE_LED_TYPE);
 Preferences prefs;
 uint32_t lastStageModeCheckTimeMs = 0;
 uint32_t lastDmxCheckTimeMs = 0;
