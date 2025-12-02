@@ -20,7 +20,6 @@
 #include "./core/animated_behavior.hpp"
 #include "./core/compositor.hpp"
 #include "./core/frame_buffer.hpp"
-#include "./globals.hpp"
 #include "./util/color.hpp"
 #include "./util/gradient.hpp"
 #include "./util/levels.hpp"
