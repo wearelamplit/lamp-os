@@ -175,6 +175,7 @@ interface Expression {
   shiftDurationMin?: number
   shiftDurationMax?: number
   pulseSpeed?: number
+  breathSpeed?: number
 }
 
 const props = defineProps<{
