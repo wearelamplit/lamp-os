@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 
 interface Props {
   label: string
@@ -7,17 +7,40 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  modelValue: false,
+  modelValue: undefined,
 })
 
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
 }>()
 
+// Internal state for uncontrolled mode
+const internalExpanded = ref(false)
+
+// Check if component is in controlled mode (modelValue is explicitly passed)
+const isControlled = computed(() => props.modelValue !== undefined)
+
+// Use external state when controlled, internal state when uncontrolled
 const isExpanded = computed({
-  get: () => props.modelValue,
-  set: (value) => emit('update:modelValue', value),
+  get: () => isControlled.value ? props.modelValue : internalExpanded.value,
+  set: (value) => {
+    if (isControlled.value) {
+      emit('update:modelValue', value)
+    } else {
+      internalExpanded.value = value
+    }
+  },
 })
+
+// Sync internal state with modelValue when it changes (for controlled mode)
+watch(
+  () => props.modelValue,
+  (newValue) => {
+    if (newValue !== undefined) {
+      internalExpanded.value = newValue
+    }
+  },
+)
 
 const toggle = () => {
   isExpanded.value = !isExpanded.value
