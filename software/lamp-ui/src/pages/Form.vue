@@ -136,11 +136,20 @@ const fields = ref<FieldDefinition[]>([
   },
 ])
 
-// Form values - using transformed format to test input transformation
-// The form should automatically combine temperatureRangeMin/Max into temperatureRange array
+// Predefined form values to test that initial values are properly loaded
+// Note: temperatureRange uses transformed format (Min/Max suffix) as defined in field.transform
 const formValues = ref<FormValues>({
-  temperatureRangeMin: 30,
-  temperatureRangeMax: 70,
+  username: 'testuser',
+  password: 'chicken',
+  isEnabled: true,
+  quantity: 42,
+  hue: 270,
+  brightness: 85,
+  temperatureRangeMin: 15,
+  temperatureRangeMax: 65,
+  primaryColor: '#00AAFFFF',
+  colorPalette: ['#FF6600FF', '#00FF99FF', '#9933FFFF', '#FFCC00FF'],
+  hiddenId: 'preset-demo-456',
 })
 
 // Submitted values for display
@@ -163,10 +172,25 @@ const goHome = () => {
   router.push('/')
 }
 
-// Reset form
+// Initial values for reset functionality (using transformed format for range fields)
+const initialValues: FormValues = {
+  username: 'testuser',
+  password: 'chicken',
+  isEnabled: true,
+  quantity: 42,
+  hue: 270,
+  brightness: 85,
+  temperatureRangeMin: 15,
+  temperatureRangeMax: 65,
+  primaryColor: '#00AAFFFF',
+  colorPalette: ['#FF6600FF', '#00FF99FF', '#9933FFFF', '#FFCC00FF'],
+  hiddenId: 'preset-demo-456',
+}
+
+// Reset form to initial values
 const resetForm = () => {
   submittedValues.value = null
-  formValues.value = {}
+  formValues.value = { ...initialValues }
 }
 </script>
 
