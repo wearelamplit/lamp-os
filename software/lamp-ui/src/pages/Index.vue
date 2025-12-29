@@ -22,23 +22,23 @@ const fields = computed<FieldDefinition[]>(() => [
     label: 'Lamp Brightness',
   },
   {
+    name: 'homeModeNotice',
+    type: 'slot',
+    label: 'Home Mode Notice',
+  },
+  {
     name: 'brightness',
     type: 'brightness-slider',
     label: 'Brightness',
     default: 100,
     optional: true,
-    show: (values: FormValues) => !values.homeMode,
+    // show: (values: FormValues) => !values.homeMode,
     props: {
       min: 0,
       max: 100,
       step: 1,
       append: '%',
     },
-  },
-  {
-    name: 'homeModeNotice',
-    type: 'slot',
-    label: 'Home Mode Notice',
   },
   {
     name: 'colorHeading',
@@ -151,7 +151,7 @@ watch(
       <!-- Home mode notice slot -->
       <template #homeModeNotice>
         <InfoPanel v-if="lampStore.state.lamp?.homeMode">
-          Brightness is controlled by Home Mode settings in Setup.
+          Home Mode is on which uses it's own brightness setting.
         </InfoPanel>
       </template>
     </ComponentForm>
