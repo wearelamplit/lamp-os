@@ -1,2 +1,61 @@
+We are going to overhaul the state management and forms for the entire app.
 
-src/assets/expressions.json
+--------------------------------
+
+Example Structure:
+
+check out example-structure.json for the structure of the data that will be sent to the server.
+
+--------------------------------
+
+pinia:
+
+We need to redo the api communication (currently in src/composables/useLampState.ts) to use pinia.
+
+we need a lamp.ts store file that will handle communication, as well as clear defined functions for manipulating state. when the app loads we need to get the current data structure, and save a copy of it for resets.
+
+then we need a clearly defined functions for updating portions of the state, and potentially other things. For instance when we update the colors of the lamp in realtime () we also send an update over sockets to the api.
+
+on src/composables/useLampState.ts we have a generic set function and break out the extra actions  with a switch, but on the store we want the name to be more clear, like updateBaseColors, updateShadeColors, updateHomeMode, etc.
+
+We will need a plugin to initialize the store to fetch the current state and initialize the socket connection.
+
+Also have a state variable if the socket is connected or not.
+
+--------------------------------
+
+Expression Library:
+
+We need to restructure the expression library file (src/assets/expressions.json) to be better suited for information about each expression and the fields for an expression.
+
+lets rename src/utils to src/lib (and rewire src/utils/colorUtils.ts) and then put an expressions.json in there, where we will have an array of an objects (of epressions). each expression should have index (the current key), name, description and fields. The fields needs to be restructured to use the new form component, see a good example of the fields here: src/pages/Form.vue.
+
+I think it makes sense to have another store for the expressions, all it will do it read the new library and have getters for getting expressions ordered by index, and getting fields by expression index. All saving of state will be done in the lamp.ts store.
+
+This should also be initialized in the plugin, so the plugni needs to be generic named, like initializeState.ts or whatever
+
+--------------------------------
+
+Page Changes:
+
+We need to examine what each page is in charge of and build the forms to handle editing the state for that page. There will be some missing that we will need to rewire later, like getting the realtime color changes, but this step is large enough so I will do that later. There might also be some things that are not supported, like setup -> Per-Pixel Brightness Adjustment, which we will need to rewire later and possibly make new fields for.
+
+Each page should have one ComponentForm that lays out the page (other than Info and Epressions which we will talk about next)
+
+There are buts of content that do not belong in the forms, if they are above or below the form, add them above or below the form. If the Content is inside the form use type: 'slot' in the fields definition to specify it's location. and draw it.
+
+There are titles on the pages, sometimes they replace a fields label, and sometimes they are a title for the net gruop of fields. Use the new group-heading field type to draw them, so we use that logic to pick the colors.
+
+--------------------------------
+
+Expressions Page
+
+This page will use the exxpressions store to setup list expressions. Each expression will need a ComponentCollapsiblePanel that will open up the form for setting up that expression. Above the form we need a boolean field (src/components/fields/Boolean.vue) so turn on and off the expression. If the expression is on, show the form and add it to the expressions array in the structure. If it's off, don't show the form and remove it from the expressions array.
+
+Actually the ComponentCollapsiblePanel has a left slot that might be better for placing the boolean field.
+
+--------------------------------
+
+Some things will be broken like watching for color changes in realtime, but we will fix that later.
+
+Do these changes and if there are known issues let me know.

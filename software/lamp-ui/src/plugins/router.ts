@@ -7,7 +7,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 // Import layouts
-import LampLayout from '@/layouts/LampLayout.vue'
+import LampLayout from '@/layout/Lamp.vue'
 
 // Pages (lazy loaded)
 const IndexPage = () => import('@/pages/Index.vue')
