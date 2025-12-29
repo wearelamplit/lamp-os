@@ -243,6 +243,7 @@ onUnmounted(() => {
 
   .lamp-layout {
     padding: 20px;
+    padding-bottom: 40px !important;
   }
 
   .main-content {
