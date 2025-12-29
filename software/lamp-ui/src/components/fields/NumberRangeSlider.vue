@@ -17,7 +17,7 @@
           :step="stepValue"
           :disabled="disabled"
           class="number-range-slider"
-          :style="sliderStyle"
+          :style="sliderStyleA"
           @input="handleInput"
           @touchstart="handleTouchStart"
           @touchmove="handleTouchMove"
@@ -32,7 +32,7 @@
           :step="stepValue"
           :disabled="disabled"
           class="number-range-slider"
-          :style="sliderStyle"
+          :style="sliderStyleB"
           @input="handleInput"
           @touchstart="handleTouchStart"
           @touchmove="handleTouchMove"
@@ -99,12 +99,22 @@ const stepValue = computed(() => {
   return props.step
 })
 
-const sliderStyle = computed(() => ({
-  '--slider-thumb-color': props.color,
-  '--slider-thumb-hover-color': props.color,
+// Determine which thumb is the lower vs higher value
+const thumbAIsLower = computed(() => thumbA.value <= thumbB.value)
+
+// Style for thumb A - blue if lower, pink if higher
+const sliderStyleA = computed(() => ({
+  '--slider-thumb-color': thumbAIsLower.value ? 'var(--brand-aurora-blue)' : 'var(--brand-glow-pink)',
+  '--slider-thumb-hover-color': thumbAIsLower.value ? 'var(--brand-aurora-blue)' : 'var(--brand-glow-pink)',
 }))
 
-// Calculate the range highlight style based on sorted values
+// Style for thumb B - pink if higher, blue if lower
+const sliderStyleB = computed(() => ({
+  '--slider-thumb-color': thumbAIsLower.value ? 'var(--brand-glow-pink)' : 'var(--brand-aurora-blue)',
+  '--slider-thumb-hover-color': thumbAIsLower.value ? 'var(--brand-glow-pink)' : 'var(--brand-aurora-blue)',
+}))
+
+// Calculate the range highlight style based on sorted values - gradient from blue to pink
 const rangeStyle = computed(() => {
   const range = props.max - props.min
   const minPercent = ((sortedValues.value[0] - props.min) / range) * 100
@@ -112,7 +122,7 @@ const rangeStyle = computed(() => {
   return {
     left: `${minPercent}%`,
     width: `${maxPercent - minPercent}%`,
-    backgroundColor: props.color,
+    background: 'linear-gradient(to right, var(--brand-aurora-blue), var(--brand-glow-pink))',
   }
 })
 
