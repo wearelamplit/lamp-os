@@ -71,23 +71,33 @@ onUnmounted(() => {
       <p>Connecting to lamp...</p>
     </div>
 
-    <!-- Floating Save Button -->
+    <!-- Floating Save/Reset Buttons -->
     <div v-if="lampStore.loaded" class="floating-save-container">
-      <button
-        class="floating-save-button"
-        :class="{
-          'has-changes': lampStore.hasChanges,
-          saving: lampStore.saving,
-          'no-changes': !lampStore.hasChanges || lampStore.disabled,
-        }"
-        @click="lampStore.saveSettings"
-        :disabled="!lampStore.hasChanges || lampStore.saving || lampStore.disabled"
-      >
-        <span v-if="lampStore.disabled">Connecting...</span>
-        <span v-else-if="lampStore.saving">Saving...</span>
-        <span v-else-if="lampStore.hasChanges">Save Changes</span>
-        <span v-else>No Changes</span>
-      </button>
+      <div class="floating-buttons">
+        <button
+          class="floating-reset-button"
+          @click="lampStore.resetState"
+          :disabled="!lampStore.hasChanges || lampStore.saving || lampStore.disabled"
+          title="Reset changes"
+        >
+          ↺
+        </button>
+        <button
+          class="floating-save-button"
+          :class="{
+            'has-changes': lampStore.hasChanges,
+            saving: lampStore.saving,
+            'no-changes': !lampStore.hasChanges || lampStore.disabled,
+          }"
+          @click="lampStore.saveSettings"
+          :disabled="!lampStore.hasChanges || lampStore.saving || lampStore.disabled"
+        >
+          <span v-if="lampStore.disabled">Connecting...</span>
+          <span v-else-if="lampStore.saving">Saving...</span>
+          <span v-else-if="lampStore.hasChanges">Save Changes</span>
+          <span v-else>No Changes</span>
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -156,6 +166,46 @@ onUnmounted(() => {
   display: flex;
   justify-content: center;
   width: 100%;
+}
+
+.floating-buttons {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.floating-reset-button {
+  pointer-events: auto;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  border: 1px solid var(--color-border-hover);
+  border-radius: 50%;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.4),
+    0 8px 32px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+  background: var(--color-background-mute);
+  color: var(--brand-fog-grey);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.floating-reset-button:hover:not(:disabled) {
+  background: var(--color-background-soft);
+  border-color: var(--brand-amber-gold);
+  color: var(--brand-amber-gold);
+  transform: translateY(-2px);
+}
+
+.floating-reset-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .floating-save-button {
@@ -268,9 +318,21 @@ onUnmounted(() => {
     padding: 0 16px;
   }
 
-  .floating-save-button {
+  .floating-buttons {
     width: 100%;
-    max-width: 300px;
+    max-width: 340px;
+    justify-content: center;
+  }
+
+  .floating-reset-button {
+    width: 48px;
+    height: 48px;
+    font-size: 1.3rem;
+  }
+
+  .floating-save-button {
+    flex: 1;
+    max-width: none;
     min-width: auto;
   }
 
