@@ -68,7 +68,7 @@
 import { ref, watch, computed } from 'vue'
 import ColorPicker from './Color.vue'
 import IconButton from './IconButton.vue'
-import { createGradientFromHexww } from '@/utils/colorUtils'
+import { createGradientFromHexww } from '@/lib/colorUtils'
 import type { FieldValidationResult } from '@/types'
 
 interface Props {

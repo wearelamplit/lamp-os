@@ -1,126 +1,192 @@
 <script setup lang="ts">
+import { ref, computed } from 'vue'
+import ComponentForm from '@/components/Form.vue'
 import BrightnessSlider from '@/components/BrightnessSlider.vue'
-import NumberInput from '@/components/NumberInput.vue'
-import TextInput from '@/components/TextInput.vue'
-import BooleanInput from '@/components/BooleanInput.vue'
-import FormField from '@/components/FormField.vue'
-import InfoPanel from '@/components/InfoPanel.vue'
-import { useLampState, MAX_LEDS_BASE } from '@/composables/useLampState'
+import type { FieldDefinition, FormValues } from '@/types'
+import { useLampStore, MAX_LEDS_BASE } from '@/stores/lamp'
 
-const { settings, disabled, updateSetting, updateKnockoutPixel, getKnockoutBrightness } =
-  useLampState()
+const lampStore = useLampStore()
+
+// Field definitions for the setup page form
+const fields = ref<FieldDefinition[]>([
+  {
+    name: 'lampNameHeading',
+    type: 'group-heading',
+    label: 'Lamp Name',
+  },
+  {
+    name: 'name',
+    type: 'text',
+    label: 'Name',
+    help: 'Names must be all lowercase letters and between 3-12 characters.',
+    default: '',
+    optional: true,
+    props: {
+      placeholder: 'Enter a name for your lamp',
+      maxLength: 12,
+      minLength: 3,
+      pattern: '[a-z]+',
+      transform: 'lowercase',
+    },
+  },
+  {
+    name: 'passwordHeading',
+    type: 'group-heading',
+    label: 'Lamp Password',
+  },
+  {
+    name: 'password',
+    type: 'password',
+    label: 'Password',
+    help: 'Optional password to protect your lamp from changes. Between 8-16 characters. Leave empty for no password.',
+    default: '',
+    optional: true,
+    props: {
+      placeholder: 'Optional password',
+      maxLength: 16,
+      minLength: 8,
+    },
+  },
+  {
+    name: 'homeModeHeading',
+    type: 'group-heading',
+    label: 'At-Home Mode',
+  },
+  {
+    name: 'homeMode',
+    type: 'boolean',
+    label: 'Home Mode',
+    default: false,
+    optional: true,
+  },
+  {
+    name: 'homeModeBrightness',
+    type: 'brightness-slider',
+    label: 'Home Mode Brightness',
+    default: 80,
+    optional: true,
+    show: (values: FormValues) => values.homeMode === true,
+    props: {
+      min: 0,
+      max: 100,
+      step: 1,
+      append: '%',
+    },
+  },
+  {
+    name: 'homeModeSSID',
+    type: 'text',
+    label: 'Home Network SSID',
+    help: 'When the lamp detects this WiFi network, it will automatically activate special home-only features and behaviors.',
+    default: '',
+    optional: true,
+    show: (values: FormValues) => values.homeMode === true,
+    props: {
+      placeholder: 'Enter your home WiFi name',
+      maxLength: 32,
+    },
+  },
+  {
+    name: 'ledProfileHeading',
+    type: 'group-heading',
+    label: 'Lamp Base LED Profile',
+  },
+  {
+    name: 'basePx',
+    type: 'number',
+    label: 'Base LED Count',
+    default: 36,
+    optional: true,
+    props: {
+      min: 5,
+      max: MAX_LEDS_BASE,
+      placeholder: 'Number of LEDs',
+    },
+  },
+  {
+    name: 'knockoutPixels',
+    type: 'slot',
+    label: 'Per-Pixel Brightness Adjustment',
+  },
+])
+
+// Map store state to form values
+const formValues = computed({
+  get: () => ({
+    name: lampStore.state.lamp?.name ?? '',
+    password: lampStore.state.lamp?.password ?? '',
+    homeMode: lampStore.state.lamp?.homeMode ?? false,
+    homeModeBrightness: lampStore.state.lamp?.homeModeBrightness ?? 80,
+    homeModeSSID: lampStore.state.lamp?.homeModeSSID ?? '',
+    basePx: lampStore.state.base?.px ?? 36,
+  }),
+  set: () => {
+    // Values are updated via individual handlers
+  },
+})
+
+// Handle form value changes
+const handleFormUpdate = (values: FormValues) => {
+  if (values.name !== undefined && values.name !== formValues.value.name) {
+    lampStore.updateLampName(values.name as string)
+  }
+  if (values.password !== undefined && values.password !== formValues.value.password) {
+    lampStore.updateLampPassword(values.password as string)
+  }
+  if (values.homeMode !== undefined && values.homeMode !== formValues.value.homeMode) {
+    lampStore.updateHomeMode(values.homeMode as boolean)
+  }
+  if (values.homeModeBrightness !== undefined && values.homeModeBrightness !== formValues.value.homeModeBrightness) {
+    lampStore.updateHomeModeBrightness(values.homeModeBrightness as number)
+  }
+  if (values.homeModeSSID !== undefined && values.homeModeSSID !== formValues.value.homeModeSSID) {
+    lampStore.updateHomeModeSSID(values.homeModeSSID as string)
+  }
+  if (values.basePx !== undefined && values.basePx !== formValues.value.basePx) {
+    lampStore.updateBasePxCount(values.basePx as number)
+  }
+}
+
+// LED pixel count for knockout grid
+const ledCount = computed(() => lampStore.state.base?.px ?? 36)
 </script>
 
 <template>
   <section class="tab-panel" aria-label="Setup settings">
-    <h1 class="gold">Lamp Name</h1>
-    <FormField id="name">
-      <TextInput
-        :model-value="settings.lamp?.name || ''"
-        @update:model-value="(value) => updateSetting('lamp.name', value)"
-        placeholder="Enter a name for your lamp"
-        :disabled="disabled"
-        :max-length="12"
-        pattern="[a-z]+"
-        transform="lowercase"
-      />
-      <InfoPanel>
-        Names must be all lowercase letters and between 3-12 characters.
-      </InfoPanel>
-    </FormField>
-
-    <h1 class="yellow">Lamp Password</h1>
-    <FormField id="password">
-      <TextInput
-        :model-value="settings.lamp?.password || ''"
-        @update:model-value="(value) => updateSetting('lamp.password', value)"
-        placeholder="Optional password"
-        :disabled="disabled"
-        pattern="[ -~]+"
-        :max-length="16"
-      />
-      <InfoPanel>
-        Optional password to protect your lamp from changes. Between 8-16 characters. Leave empty
-        for no password.
-      </InfoPanel>
-    </FormField>
-
-    <h1 class="lime">At-Home Mode</h1>
-    <div class="mode-toggles">
-      <FormField label="Home Mode" id="homeMode">
-        <BooleanInput
-          :model-value="settings.lamp?.homeMode || false"
-          @update:model-value="(value) => updateSetting('lamp.homeMode', value)"
-          :disabled="disabled"
-        />
-      </FormField>
-
-      <!-- Home Mode Settings -->
-      <div v-if="settings.lamp?.homeMode" class="home-mode-settings">
-        <FormField label="Home Mode Brightness" id="homeModeBrightness">
-          <BrightnessSlider
-            :model-value="settings.lamp?.homeModeBrightness ?? 80"
-            @update:model-value="(value) => updateSetting('lamp.homeModeBrightness', value)"
-            id="homeModeBrightness"
-            :min="0"
-            :max="100"
-            append="%"
-            :disabled="disabled"
-          />
-        </FormField>
-
-        <FormField label="Home Network SSID" id="homeModeSSID">
-          <TextInput
-            :model-value="settings.lamp?.homeModeSSID || ''"
-            @update:model-value="(value) => updateSetting('lamp.homeModeSSID', value)"
-            placeholder="Enter your home WiFi name"
-            :disabled="disabled"
-            :max-length="32"
-            pattern="[ -~]+"
-          />
-          <InfoPanel>
-            When the lamp detects this WiFi network, it will automatically activate special
-            home-only features and behaviors.
-          </InfoPanel>
-        </FormField>
-      </div>
-    </div>
-
-    <h1 class="green">Lamp Base LED Profile</h1>
-    <FormField label="Base LED Count" id="baseLeds">
-      <NumberInput
-        :model-value="settings.base?.px || 36"
-        @update:model-value="(value) => updateSetting('base.px', value)"
-        :min="5"
-        :max="MAX_LEDS_BASE"
-        placeholder="Number of LEDs"
-        :disabled="disabled"
-      />
-    </FormField>
-
-    <FormField label="Per-Pixel Brightness Adjustment" id="baseKnockoutPixels" expandable>
-      <div class="pixel-grid">
-        <div
-          v-for="ledIndex in Array.from(
-            { length: settings.base?.px || 36 },
-            (_, i) => (settings.base?.px || 36) - i,
-          )"
-          :key="ledIndex - 1"
-          class="pixel-row"
-        >
-          <label class="pixel-label">LED {{ ledIndex }}</label>
-          <BrightnessSlider
-            :model-value="getKnockoutBrightness(ledIndex - 1)"
-            @update:model-value="(value) => updateKnockoutPixel(ledIndex - 1, value)"
-            :id="`knockout-pixel-${ledIndex - 1}`"
-            :min="0"
-            :max="100"
-            append="%"
-            :disabled="disabled"
-          />
-        </div>
-      </div>
-    </FormField>
+    <ComponentForm
+      :fields="fields"
+      :model-value="formValues"
+      @update:model-value="handleFormUpdate"
+      :show-button="false"
+      :disabled="lampStore.disabled"
+    >
+      <!-- Per-Pixel Brightness Adjustment slot -->
+      <template #knockoutPixels>
+        <CollapsiblePanel label="Per-Pixel Brightness Adjustment">
+          <div class="pixel-grid">
+            <div
+              v-for="ledIndex in Array.from(
+                { length: ledCount },
+                (_, i) => ledCount - i,
+              )"
+              :key="ledIndex - 1"
+              class="pixel-row"
+            >
+              <label class="pixel-label">LED {{ ledIndex }}</label>
+              <BrightnessSlider
+                :model-value="lampStore.getKnockoutBrightness(ledIndex - 1)"
+                @update:model-value="(value) => lampStore.updateKnockoutPixel(ledIndex - 1, value)"
+                :id="`knockout-pixel-\${ledIndex - 1}`"
+                :min="0"
+                :max="100"
+                append="%"
+                :disabled="lampStore.disabled"
+              />
+            </div>
+          </div>
+        </CollapsiblePanel>
+      </template>
+    </ComponentForm>
   </section>
 </template>
 
@@ -138,27 +204,6 @@ const { settings, disabled, updateSetting, updateKnockoutPixel, getKnockoutBrigh
     opacity: 1;
     transform: translateY(0);
   }
-}
-
-/* Mode Toggles Styles */
-.mode-toggles {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-
-.mode-toggles > .form-field {
-  width: 100%;
-}
-
-/* Home Mode SSID Styles */
-.home-mode-settings {
-  animation: fadeIn 0.3s ease-in-out;
-}
-
-.home-mode-settings .form-field {
-  margin-top: 8px;
-  margin-bottom: 32px;
 }
 
 /* Knockout Pixels Styles */
@@ -193,4 +238,3 @@ const { settings, disabled, updateSetting, updateKnockoutPixel, getKnockoutBrigh
   flex: 1;
 }
 </style>
-

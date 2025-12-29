@@ -44,7 +44,7 @@ const props = withDefaults(defineProps<Props>(), {
   max: 255,
   step: 1,
   steps: undefined,
-  color: '#666666',
+  color: 'var(--brand-glow-pink)',
   append: '',
   prepend: '',
   disabled: false,
@@ -165,13 +165,13 @@ defineExpose({ validate })
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
   transition: all 0.2s ease;
-  background: var(--slider-thumb-color, #666666);
+  background: var(--slider-thumb-color, var(--brand-glow-pink));
 }
 
 .number-slider::-webkit-slider-thumb:hover {
   transform: scale(1.1);
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
-  background: var(--slider-thumb-hover-color, #777777);
+  background: var(--slider-thumb-hover-color, var(--brand-glow-pink));
 }
 
 .number-slider::-moz-range-thumb {
@@ -181,7 +181,7 @@ defineExpose({ validate })
   cursor: pointer;
   border: 3px solid var(--brand-ash-grey);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-  background: var(--slider-thumb-color, #666666);
+  background: var(--slider-thumb-color, var(--brand-glow-pink));
 }
 
 /* Disabled state styles */

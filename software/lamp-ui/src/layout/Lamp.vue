@@ -2,23 +2,12 @@
 import { onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import TopNavigation from '@/components/TopNavigation.vue'
-import { useLampState, tabs } from '@/composables/useLampState'
+import { useLampStore, tabs } from '@/stores/lamp'
 
 const route = useRoute()
 const router = useRouter()
 
-const {
-  loaded,
-  disabled,
-  saving,
-  hasChanges,
-  wsConnected,
-  activeTab,
-  initialize,
-  cleanup,
-  saveSettings,
-  setActiveTab,
-} = useLampState()
+const lampStore = useLampStore()
 
 // Map route to tab ID
 const getTabIdFromRoute = (path: string): string => {
@@ -39,17 +28,17 @@ watch(
   () => route.path,
   (newPath) => {
     const tabId = getTabIdFromRoute(newPath)
-    setActiveTab(tabId)
+    lampStore.setActiveTab(tabId)
   },
   { immediate: true },
 )
 
 onMounted(() => {
-  initialize()
+  lampStore.initialize()
 })
 
 onUnmounted(() => {
-  cleanup()
+  lampStore.cleanup()
 })
 </script>
 
@@ -58,16 +47,16 @@ onUnmounted(() => {
     <!-- WebSocket Status Indicator -->
     <div
       class="ws-status-indicator"
-      :class="{ connected: wsConnected }"
-      :title="wsConnected ? 'WebSocket Connected' : 'WebSocket Disconnected'"
+      :class="{ connected: lampStore.wsConnected }"
+      :title="lampStore.wsConnected ? 'WebSocket Connected' : 'WebSocket Disconnected'"
     >
       <div class="ws-status-dot"></div>
     </div>
 
-    <div v-if="loaded" class="container">
+    <div v-if="lampStore.loaded" class="container">
       <main class="main-content">
         <!-- Tab Navigation -->
-        <TopNavigation :tabs="tabs" :active-tab="activeTab" @update:active-tab="handleTabChange" />
+        <TopNavigation :tabs="tabs" :active-tab="lampStore.activeTab" @update:active-tab="handleTabChange" />
 
         <!-- Page Content (Router View) -->
         <div class="tab-content">
@@ -83,20 +72,20 @@ onUnmounted(() => {
     </div>
 
     <!-- Floating Save Button -->
-    <div v-if="loaded" class="floating-save-container">
+    <div v-if="lampStore.loaded" class="floating-save-container">
       <button
         class="floating-save-button"
         :class="{
-          'has-changes': hasChanges,
-          saving: saving,
-          'no-changes': !hasChanges || disabled,
+          'has-changes': lampStore.hasChanges,
+          saving: lampStore.saving,
+          'no-changes': !lampStore.hasChanges || lampStore.disabled,
         }"
-        @click="saveSettings"
-        :disabled="!hasChanges || saving || disabled"
+        @click="lampStore.saveSettings"
+        :disabled="!lampStore.hasChanges || lampStore.saving || lampStore.disabled"
       >
-        <span v-if="disabled">Connecting...</span>
-        <span v-else-if="saving">Saving...</span>
-        <span v-else-if="hasChanges">Save Changes</span>
+        <span v-if="lampStore.disabled">Connecting...</span>
+        <span v-else-if="lampStore.saving">Saving...</span>
+        <span v-else-if="lampStore.hasChanges">Save Changes</span>
         <span v-else>No Changes</span>
       </button>
     </div>
@@ -290,4 +279,3 @@ onUnmounted(() => {
   }
 }
 </style>
-

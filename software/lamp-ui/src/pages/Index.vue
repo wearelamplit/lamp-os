@@ -1,50 +1,143 @@
+<!-- eslint-disable vue/multi-word-component-names -->
 <script setup lang="ts">
-import ColorGradient from '@/components/ColorGradient.vue'
-import BrightnessSlider from '@/components/BrightnessSlider.vue'
-import FormField from '@/components/FormField.vue'
+import { ref, computed, watch } from 'vue'
+import ComponentForm from '@/components/Form.vue'
 import CritterNameplate from '@/components/CritterNameplate.vue'
-import { useLampState } from '@/composables/useLampState'
+import type { FieldDefinition, FormValues } from '@/types'
+import { useLampStore } from '@/stores/lamp'
 
-const { settings, disabled, updateSetting } = useLampState()
+const lampStore = useLampStore()
+
+// Field definitions for the home page form
+const fields = ref<FieldDefinition[]>([
+  {
+    name: 'nameplate',
+    type: 'slot',
+    label: 'Nameplate',
+  },
+  {
+    name: 'brightnessHeading',
+    type: 'group-heading',
+    label: 'Lamp Brightness',
+  },
+  {
+    name: 'brightness',
+    type: 'brightness-slider',
+    label: 'Brightness',
+    default: 100,
+    optional: true,
+    show: (values: FormValues) => !values.homeMode,
+    props: {
+      min: 0,
+      max: 100,
+      step: 1,
+      append: '%',
+    },
+  },
+  {
+    name: 'homeModeNotice',
+    type: 'slot',
+    label: 'Home Mode Notice',
+  },
+  {
+    name: 'colorHeading',
+    type: 'group-heading',
+    label: 'Lamp Color Settings',
+  },
+  {
+    name: 'shadeColors',
+    type: 'color-list',
+    label: 'Shade',
+    default: ['#FF0000FF'],
+    optional: true,
+    props: {
+      max: 1,
+      showAddButton: false,
+    },
+  },
+  {
+    name: 'baseColors',
+    type: 'color-list',
+    label: 'Base',
+    default: ['#FF0000FF'],
+    optional: true,
+    props: {
+      max: 5,
+      showAddButton: true,
+    },
+  },
+])
+
+// Map store state to form values
+const formValues = computed({
+  get: () => ({
+    brightness: lampStore.state.lamp?.brightness ?? 100,
+    homeMode: lampStore.state.lamp?.homeMode ?? false,
+    shadeColors: lampStore.state.shade?.colors ?? ['#FF0000FF'],
+    baseColors: lampStore.state.base?.colors ?? ['#FF0000FF'],
+    baseActiveColor: lampStore.state.base?.ac ?? 0,
+  }),
+  set: () => {
+    // Values are updated via individual handlers
+  },
+})
+
+// Handle form value changes
+const handleFormUpdate = (values: FormValues) => {
+  if (values.brightness !== undefined && values.brightness !== formValues.value.brightness) {
+    lampStore.updateBrightness(values.brightness as number)
+  }
+  if (values.shadeColors !== undefined) {
+    lampStore.updateShadeColors(values.shadeColors as string[])
+  }
+  if (values.baseColors !== undefined) {
+    lampStore.updateBaseColors(values.baseColors as string[])
+  }
+}
+
+// Watch for color changes (for real-time updates)
+watch(
+  () => formValues.value.shadeColors,
+  (newColors) => {
+    if (newColors) {
+      lampStore.updateShadeColors(newColors)
+    }
+  },
+  { deep: true },
+)
+
+watch(
+  () => formValues.value.baseColors,
+  (newColors) => {
+    if (newColors) {
+      lampStore.updateBaseColors(newColors)
+    }
+  },
+  { deep: true },
+)
 </script>
 
 <template>
   <section class="tab-panel" aria-label="Home settings">
-    <CritterNameplate v-model="settings" id="nameplate" />
+    <ComponentForm
+      :fields="fields"
+      :model-value="formValues"
+      @update:model-value="handleFormUpdate"
+      :show-button="false"
+      :disabled="lampStore.disabled"
+    >
+      <!-- Nameplate slot -->
+      <template #nameplate>
+        <CritterNameplate v-model="lampStore.state" />
+      </template>
 
-    <h1 class="gold">Lamp Brightness</h1>
-    <FormField id="brightness">
-      <BrightnessSlider
-        :model-value="settings.lamp?.brightness || 0"
-        @update:model-value="(value) => updateSetting('lamp.brightness', value)"
-        id="brightness"
-        :min="0"
-        :max="100"
-        append="%"
-        :disabled="disabled || settings.lamp?.homeMode"
-      />
-    </FormField>
-
-    <h1 class="yellow">Lamp Color Settings</h1>
-    <FormField label="Shade" id="shadeColors">
-      <ColorGradient
-        :model-value="settings.shade?.colors || ['#FF0000FF']"
-        @update:model-value="(value) => updateSetting('shade.colors', value)"
-        :show-add-button="false"
-        :max-colors="1"
-        :disabled="disabled"
-      />
-    </FormField>
-
-    <FormField label="Base" id="baseColors">
-      <ColorGradient
-        :model-value="settings.base?.colors || ['#FF0000FF']"
-        @update:model-value="(value) => updateSetting('base.colors', value)"
-        :disabled="disabled"
-        :active-color="settings.base?.ac || 0"
-        @update:active-color="(value) => updateSetting('base.ac', value)"
-      />
-    </FormField>
+      <!-- Home mode notice slot -->
+      <template #homeModeNotice>
+        <InfoPanel v-if="lampStore.state.lamp?.homeMode">
+          Brightness is controlled by Home Mode settings in Setup.
+        </InfoPanel>
+      </template>
+    </ComponentForm>
   </section>
 </template>
 
@@ -63,5 +156,5 @@ const { settings, disabled, updateSetting } = useLampState()
     transform: translateY(0);
   }
 }
-</style>
 
+</style>

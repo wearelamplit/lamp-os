@@ -272,7 +272,7 @@ const resetForm = () => {
           <CollapsiblePanel
             v-if="submittedValues"
             label="Submitted Values"
-            :expanded="true"
+            :model-value="true"
           >
             <template #left>
               <span class="result-icon result-icon--success">✓</span>

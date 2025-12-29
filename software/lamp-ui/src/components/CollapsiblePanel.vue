@@ -1,28 +1,38 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed } from 'vue'
 
 interface Props {
   label: string
-  expanded?: boolean
+  modelValue?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  expanded: false,
+  modelValue: false,
 })
 
-const isExpanded = ref(props.expanded)
+const emit = defineEmits<{
+  'update:modelValue': [value: boolean]
+}>()
 
-// Watch for external changes to expanded prop
-watch(
-  () => props.expanded,
-  (newValue) => {
-    isExpanded.value = newValue
-  },
-)
+const isExpanded = computed({
+  get: () => props.modelValue,
+  set: (value) => emit('update:modelValue', value),
+})
 
 const toggle = () => {
   isExpanded.value = !isExpanded.value
 }
+
+// Expose methods for external control
+const open = () => {
+  isExpanded.value = true
+}
+
+const close = () => {
+  isExpanded.value = false
+}
+
+defineExpose({ open, close, toggle })
 </script>
 
 <template>

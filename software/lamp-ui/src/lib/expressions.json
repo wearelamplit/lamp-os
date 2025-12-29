@@ -1,0 +1,202 @@
+[
+  {
+    "index": "glitchy",
+    "name": "Glitchy",
+    "description": "Random visual glitches that give the lamp character",
+    "fields": [
+      {
+        "name": "target",
+        "type": "number-slider",
+        "label": "Target",
+        "help": "Where to apply the expression (1=Shade, 2=Base, 3=Both)",
+        "default": 2,
+        "optional": true,
+        "props": {
+          "min": 1,
+          "max": 3,
+          "step": 1
+        }
+      },
+      {
+        "name": "colors",
+        "type": "color-list",
+        "label": "Glitch Colors",
+        "help": "Colors to randomly glitch to",
+        "default": ["#C869C8FF"],
+        "optional": true,
+        "props": {
+          "max": 5,
+          "showAddButton": true
+        }
+      },
+      {
+        "name": "interval",
+        "type": "number-range-slider",
+        "label": "Interval Range",
+        "help": "Time between glitches (in seconds)",
+        "default": [1800, 2700],
+        "optional": true,
+        "transform": ["Min", "Max"],
+        "props": {
+          "min": 600,
+          "max": 2700,
+          "step": 60,
+          "append": "s"
+        }
+      },
+      {
+        "name": "duration",
+        "type": "number-range-slider",
+        "label": "Duration Range",
+        "help": "How long each glitch lasts (in frames, ~30ms each)",
+        "default": [1, 15],
+        "optional": true,
+        "transform": ["Min", "Max"],
+        "props": {
+          "min": 1,
+          "max": 60,
+          "step": 1,
+          "append": "f"
+        }
+      }
+    ]
+  },
+  {
+    "index": "shifty",
+    "name": "Shifty",
+    "description": "Smooth transitions between color palettes for ambient mood shifts",
+    "fields": [
+      {
+        "name": "target",
+        "type": "number-slider",
+        "label": "Target",
+        "help": "Where to apply the expression (1=Shade, 2=Base, 3=Both)",
+        "default": 2,
+        "optional": true,
+        "props": {
+          "min": 1,
+          "max": 3,
+          "step": 1
+        }
+      },
+      {
+        "name": "colors",
+        "type": "color-list",
+        "label": "Palette Colors",
+        "help": "Base colors for generating palettes",
+        "default": ["#C869C8FF"],
+        "optional": true,
+        "props": {
+          "max": 8,
+          "showAddButton": true
+        }
+      },
+      {
+        "name": "interval",
+        "type": "number-range-slider",
+        "label": "Interval Range",
+        "help": "Time between shifts (in seconds)",
+        "default": [300, 900],
+        "optional": true,
+        "transform": ["Min", "Max"],
+        "props": {
+          "min": 60,
+          "max": 2700,
+          "step": 60,
+          "append": "s"
+        }
+      },
+      {
+        "name": "shiftDuration",
+        "type": "number-range-slider",
+        "label": "Shift Duration Range",
+        "help": "How long to stay shifted (in seconds)",
+        "default": [300, 600],
+        "optional": true,
+        "transform": ["Min", "Max"],
+        "props": {
+          "min": 300,
+          "max": 1800,
+          "step": 30,
+          "append": "s"
+        }
+      },
+      {
+        "name": "fadeDuration",
+        "type": "number-slider",
+        "label": "Fade Duration",
+        "help": "Transition duration in seconds",
+        "default": 5,
+        "optional": true,
+        "props": {
+          "min": 1,
+          "max": 30,
+          "step": 1,
+          "append": "s"
+        }
+      }
+    ]
+  },
+  {
+    "index": "pulse",
+    "name": "Pulse",
+    "description": "Wave that travels through the lamp with smooth color blending",
+    "fields": [
+      {
+        "name": "target",
+        "type": "number-slider",
+        "label": "Target",
+        "help": "Where to apply the expression (1=Shade, 2=Base, 3=Both)",
+        "default": 2,
+        "optional": true,
+        "props": {
+          "min": 1,
+          "max": 3,
+          "step": 1
+        }
+      },
+      {
+        "name": "colors",
+        "type": "color-list",
+        "label": "Pulse Colors",
+        "help": "Colors for the pulse wave (randomly selected)",
+        "default": ["#C869C8FF"],
+        "optional": true,
+        "props": {
+          "max": 5,
+          "showAddButton": true
+        }
+      },
+      {
+        "name": "interval",
+        "type": "number-range-slider",
+        "label": "Interval Range",
+        "help": "Time between pulses (in seconds)",
+        "default": [300, 900],
+        "optional": true,
+        "transform": ["Min", "Max"],
+        "props": {
+          "min": 30,
+          "max": 3600,
+          "step": 10,
+          "append": "s"
+        }
+      },
+      {
+        "name": "pulseSpeed",
+        "type": "number-slider",
+        "label": "Pulse Speed",
+        "help": "Time for pulse to travel across lamp in seconds",
+        "default": 3,
+        "optional": true,
+        "props": {
+          "min": 1,
+          "max": 10,
+          "step": 1,
+          "append": "s"
+        }
+      }
+    ]
+  }
+]
+
