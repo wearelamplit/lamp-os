@@ -85,7 +85,7 @@ const toggleExpression = (expressionIndex: string, enabled: boolean) => {
               // Handle range fields - split array into Min/Max values
               const values = field.default as number[]
               field.transform.forEach((suffix, i) => {
-                defaultValues[`\${field.name}\${suffix}`] = values[i]
+                defaultValues[`${field.name}${suffix}`] = values[i]
               })
             } else {
               defaultValues[field.name as string] = field.default
@@ -297,18 +297,17 @@ const handleTestExpression = (expressionIndex: string) => {
 }
 
 .expression-description {
-  margin-bottom: 16px;
-  margin-top: 16px;
-  padding: 8px 12px;
-  background: rgba(253, 253, 253, 0.02);
-  border-radius: 6px;
+  margin-bottom: 20px;
+  margin-top: 12px;
+  padding: 0;
 }
 
 .expression-description p {
   margin: 0;
-  font-size: 0.85rem;
-  color: var(--brand-fog-grey);
-  line-height: 1.5;
+  font-size: 0.95rem;
+  color: var(--brand-lumen-green);
+  line-height: 1.6;
+  font-style: italic;
 }
 
 .test-button {
