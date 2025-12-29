@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import IconButton from './IconButton.vue'
+import type { FieldValidationResult } from '@/types'
 
 interface Props {
   modelValue: number
@@ -7,6 +8,7 @@ interface Props {
   max?: number
   placeholder?: string
   disabled?: boolean
+  required?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -14,6 +16,7 @@ const props = withDefaults(defineProps<Props>(), {
   max: 100,
   placeholder: '',
   disabled: false,
+  required: false,
 })
 
 const emit = defineEmits<{
@@ -23,7 +26,11 @@ const emit = defineEmits<{
 const updateValue = (event: Event) => {
   if (props.disabled) return
   const target = event.target as HTMLInputElement
-  const value = parseInt(target.value) || 0
+  let value = parseInt(target.value) || 0
+
+  // Clamp to min/max
+  value = Math.max(props.min, Math.min(props.max, value))
+
   emit('update:modelValue', value)
 }
 
@@ -36,6 +43,27 @@ const decrement = () => {
   if (props.disabled) return
   emit('update:modelValue', Math.max(props.modelValue - 1, props.min))
 }
+
+// Validation method exposed to form
+const validate = (): FieldValidationResult => {
+  const value = props.modelValue
+
+  if (props.required && (value === undefined || value === null)) {
+    return { valid: false, error: 'This field is required' }
+  }
+
+  if (value < props.min) {
+    return { valid: false, error: `Minimum value is ${props.min}` }
+  }
+
+  if (value > props.max) {
+    return { valid: false, error: `Maximum value is ${props.max}` }
+  }
+
+  return { valid: true }
+}
+
+defineExpose({ validate })
 </script>
 
 <template>
@@ -96,7 +124,7 @@ const decrement = () => {
   height: 52px;
 }
 
-.number-input:hover {
+.number-input:hover:not(:disabled) {
   border-color: var(--color-border-hover);
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
   background-color: var(--color-background-soft);

@@ -75,8 +75,9 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue'
-import ColorPreview from './ColorPreview.vue'
+import ColorPreview from '@/components/ColorPreview.vue'
 import NumberSlider from './NumberSlider.vue'
+import type { FieldValidationResult } from '@/types'
 
 interface ColorValues {
   red: number
@@ -88,6 +89,7 @@ interface ColorValues {
 const props = defineProps<{
   modelValue: string
   disabled?: boolean
+  required?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -252,6 +254,14 @@ const updateFromHex = () => {
   }
 }
 
+// Validation method exposed to form
+const validate = (): FieldValidationResult => {
+  if (props.required && !props.modelValue) {
+    return { valid: false, error: 'This field is required' }
+  }
+  return { valid: true }
+}
+
 // Watch for external changes
 watch(
   () => props.modelValue,
@@ -271,6 +281,8 @@ onUnmounted(() => {
     document.body.style.overflow = ''
   }
 })
+
+defineExpose({ validate })
 </script>
 
 <style scoped>

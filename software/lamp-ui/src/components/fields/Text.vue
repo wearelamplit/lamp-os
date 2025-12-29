@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { FieldValidationResult } from '@/types'
+
 interface Props {
   modelValue: string
   placeholder?: string
@@ -8,14 +10,19 @@ interface Props {
   pattern?: string
   autocapitalize?: boolean
   transform?: 'lowercase' | 'uppercase' | 'none'
+  disabled?: boolean
+  required?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   placeholder: '',
   type: 'text',
   maxLength: undefined,
+  minLength: undefined,
   pattern: undefined,
   transform: 'none',
+  disabled: false,
+  required: false,
 })
 
 const emit = defineEmits<{
@@ -52,6 +59,27 @@ const updateValue = (event: Event) => {
 
   emit('update:modelValue', value)
 }
+
+// Validation method exposed to form
+const validate = (): FieldValidationResult => {
+  const value = props.modelValue || ''
+
+  if (props.required && !value.trim()) {
+    return { valid: false, error: 'This field is required' }
+  }
+
+  if (props.minLength && value.length < props.minLength) {
+    return { valid: false, error: `Minimum ${props.minLength} characters required` }
+  }
+
+  if (props.maxLength && value.length > props.maxLength) {
+    return { valid: false, error: `Maximum ${props.maxLength} characters allowed` }
+  }
+
+  return { valid: true }
+}
+
+defineExpose({ validate })
 </script>
 
 <template>
@@ -63,7 +91,9 @@ const updateValue = (event: Event) => {
     :maxlength="props.maxLength"
     :minlength="props.minLength"
     :pattern="props.pattern"
+    :disabled="disabled"
     class="text-input"
+    :class="{ disabled: disabled }"
   />
 </template>
 
@@ -82,7 +112,7 @@ const updateValue = (event: Event) => {
   height: 52px;
 }
 
-.text-input:hover {
+.text-input:hover:not(:disabled) {
   border-color: var(--color-border-hover);
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
   background-color: var(--color-background-soft);
@@ -99,6 +129,13 @@ const updateValue = (event: Event) => {
   color: var(--color-text);
   opacity: 0.6;
   font-weight: 500;
+}
+
+.text-input.disabled,
+.text-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: var(--color-background-mute);
 }
 
 /* Mobile optimizations */

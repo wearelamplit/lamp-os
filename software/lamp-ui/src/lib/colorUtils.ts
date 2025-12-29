@@ -95,3 +95,4 @@ export function createGradientFromHexww(
   const rgbColors = colors.map((color) => hexwwToRgb(color))
   return `linear-gradient(${direction}, ${rgbColors.join(', ')})`
 }
+

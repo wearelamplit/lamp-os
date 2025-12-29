@@ -1,14 +1,13 @@
 <template>
   <div class="number-slider-group">
-    <span class="number-slider-value">{{
-      prepend === 'time' ? 'Time' : prepend + localValue + append
-    }}</span>
+    <span class="number-slider-value">{{ displayValue }}</span>
     <input
       :id="id"
       v-model.number="localValue"
       type="range"
       :min="min"
       :max="max"
+      :step="stepValue"
       :disabled="disabled"
       class="number-slider"
       :class="{ disabled: disabled }"
@@ -23,25 +22,33 @@
 
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
+import type { FieldValidationResult } from '@/types'
 
 interface Props {
   modelValue: number
-  id: string
+  id?: string
   min?: number
   max?: number
+  step?: number
+  steps?: number
   color?: string
   append?: string
   prepend?: string
   disabled?: boolean
+  required?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  id: 'slider',
   min: 0,
   max: 255,
-  color: '#666666',
+  step: 1,
+  steps: undefined,
+  color: 'var(--brand-glow-pink)',
   append: '',
   prepend: '',
   disabled: false,
+  required: false,
 })
 
 const emit = defineEmits<{
@@ -49,6 +56,18 @@ const emit = defineEmits<{
 }>()
 
 const localValue = ref(props.modelValue)
+
+// Calculate step value based on steps prop or step prop
+const stepValue = computed(() => {
+  if (props.steps !== undefined) {
+    return (props.max - props.min) / props.steps
+  }
+  return props.step
+})
+
+const displayValue = computed(() => {
+  return `${props.prepend}${localValue.value}${props.append}`
+})
 
 const sliderStyle = computed(() => {
   return {
@@ -63,18 +82,29 @@ const updateValue = () => {
 
 // Touch event handlers to prevent page swiping
 const handleTouchStart = (event: TouchEvent) => {
-  // Only prevent page swiping, don't prevent slider functionality
   event.stopPropagation()
 }
 
 const handleTouchMove = (event: TouchEvent) => {
-  // Allow the slider to work but prevent page swiping
   event.stopPropagation()
 }
 
 const handleTouchEnd = (event: TouchEvent) => {
-  // Only prevent page swiping, don't prevent slider functionality
   event.stopPropagation()
+}
+
+// Validation method exposed to form
+const validate = (): FieldValidationResult => {
+  if (props.required && (localValue.value === undefined || localValue.value === null)) {
+    return { valid: false, error: 'This field is required' }
+  }
+  if (localValue.value < props.min) {
+    return { valid: false, error: `Minimum value is ${props.min}` }
+  }
+  if (localValue.value > props.max) {
+    return { valid: false, error: `Maximum value is ${props.max}` }
+  }
+  return { valid: true }
 }
 
 watch(
@@ -87,6 +117,8 @@ watch(
 watch(localValue, (newValue) => {
   emit('update:modelValue', newValue)
 })
+
+defineExpose({ validate })
 </script>
 
 <style scoped>
@@ -102,7 +134,7 @@ watch(localValue, (newValue) => {
   font-weight: 600;
   color: var(--brand-lamp-white);
   font-size: 14px;
-  min-width: 40px;
+  min-width: 50px;
   text-align: center;
   flex-shrink: 0;
 }
@@ -133,13 +165,13 @@ watch(localValue, (newValue) => {
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
   transition: all 0.2s ease;
-  background: var(--slider-thumb-color, #666666);
+  background: var(--slider-thumb-color, var(--brand-glow-pink));
 }
 
 .number-slider::-webkit-slider-thumb:hover {
   transform: scale(1.1);
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
-  background: var(--slider-thumb-hover-color, #777777);
+  background: var(--slider-thumb-hover-color, var(--brand-glow-pink));
 }
 
 .number-slider::-moz-range-thumb {
@@ -149,7 +181,7 @@ watch(localValue, (newValue) => {
   cursor: pointer;
   border: 3px solid var(--brand-ash-grey);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-  background: var(--slider-thumb-color, #666666);
+  background: var(--slider-thumb-color, var(--brand-glow-pink));
 }
 
 /* Disabled state styles */
@@ -180,7 +212,7 @@ watch(localValue, (newValue) => {
 
   .number-slider-value {
     font-size: 13px;
-    min-width: 35px;
+    min-width: 45px;
   }
 
   .number-slider::-webkit-slider-thumb {
@@ -201,7 +233,7 @@ watch(localValue, (newValue) => {
 
   .number-slider-value {
     font-size: 12px;
-    min-width: 30px;
+    min-width: 40px;
   }
 
   .number-slider::-webkit-slider-thumb {

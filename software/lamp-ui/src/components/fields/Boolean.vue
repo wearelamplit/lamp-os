@@ -1,11 +1,15 @@
 <script setup lang="ts">
+import type { FieldValidationResult } from '@/types'
+
 interface Props {
   modelValue: boolean
   disabled?: boolean
+  required?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   disabled: false,
+  required: false,
 })
 
 const emit = defineEmits<{
@@ -17,6 +21,14 @@ const toggleValue = () => {
     emit('update:modelValue', !props.modelValue)
   }
 }
+
+// Validation method exposed to form
+const validate = (): FieldValidationResult => {
+  // Boolean fields are always valid (they have a value)
+  return { valid: true }
+}
+
+defineExpose({ validate })
 </script>
 
 <template>

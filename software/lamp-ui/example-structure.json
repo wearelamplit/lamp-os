@@ -1,0 +1,67 @@
+{
+  "lamp": {
+    "name": "snafu",
+    "brightness": 60,
+    "homeMode": true,
+    "homeModeSSID": "home-network-01",
+    "homeModeBrightness": 80,
+    "password": "my password"
+  },
+  "shade": {
+    "px": 38,
+    "colors": [
+      "#4B00634B"
+    ]
+  },
+  "base": {
+    "px": 36,
+    "colors": [
+      "#9B2E09C5",
+      "#C3520A3D",
+      "#6717005E"
+    ],
+    "ac": 1,
+    "knockout": [
+      { "p": 4, "b": 50 },
+      { "p": 5, "b": 75 }
+    ]
+  },
+  "expressions": [
+    {
+      "type": "glitchy",
+      "enabled": true,
+      "target": 2,
+      "colors": [
+        null
+      ],
+      "intervalMin": 1800,
+      "intervalMax": 2700,
+      "durationMin": 1,
+      "durationMax": 15
+    },
+    {
+      "type": "shifty",
+      "enabled": true,
+      "target": 2,
+      "colors": [
+        null
+      ],
+      "intervalMin": 300,
+      "intervalMax": 900,
+      "shiftDurationMin": 300,
+      "shiftDurationMax": 600,
+      "fadeDuration": 5
+    },
+    {
+      "type": "pulse",
+      "enabled": true,
+      "target": 2,
+      "colors": [
+        null
+      ],
+      "pulseSpeed": 3,
+      "intervalMin": 300,
+      "intervalMax": 900
+    }
+  ]
+}

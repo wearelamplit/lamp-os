@@ -52,7 +52,7 @@
           stroke-linejoin="round"
         />
         <path
-          v-else-if="icon === 'plus'"
+          v-if="icon === 'plus'"
           d="M10 3.33332V16.6667M3.33334 9.99999H16.6667"
           stroke="currentColor"
           stroke-width="2"
@@ -73,6 +73,8 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+
 interface Props {
   icon?: 'star' | 'clone' | 'remove' | 'plus' | 'minus'
   title?: string
@@ -94,10 +96,6 @@ defineEmits<{
 const buttonClass = computed(() => {
   return `${props.variant}-button`
 })
-</script>
-
-<script lang="ts">
-import { computed } from 'vue'
 </script>
 
 <style scoped>
@@ -164,3 +162,4 @@ import { computed } from 'vue'
   pointer-events: none;
 }
 </style>
+
