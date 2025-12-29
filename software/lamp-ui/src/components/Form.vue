@@ -27,9 +27,6 @@ const emit = defineEmits<{
 
 const slots = useSlots()
 
-// Internal form values
-const formValues = ref<FormValues>({ ...props.modelValue })
-
 // Field component refs for validation
 const fieldRefs = ref<Record<string, FieldComponent>>({})
 
@@ -38,6 +35,72 @@ const fieldErrors = ref<Record<string, string>>({})
 
 // Whether the form is currently submitting
 const isSubmitting = ref(false)
+
+/**
+ * Transform input values from external format to internal format
+ * For fields with transform (e.g., ['Min', 'Max']), combines:
+ *   { intervalMin: 5, intervalMax: 15 } → { interval: [5, 15] }
+ */
+const transformInputValues = (values: FormValues): FormValues => {
+  const transformed = { ...values }
+
+  for (const field of props.fields) {
+    if (field.transform && Array.isArray(field.transform) && field.transform.length > 0) {
+      const arrayValue: unknown[] = []
+      let hasAnyValue = false
+
+      for (const suffix of field.transform) {
+        const key = `${field.name}${suffix}`
+        if (key in transformed) {
+          arrayValue.push(transformed[key])
+          delete transformed[key]
+          hasAnyValue = true
+        } else {
+          arrayValue.push(undefined)
+        }
+      }
+
+      if (hasAnyValue) {
+        transformed[field.name] = arrayValue
+      }
+    }
+  }
+
+  return transformed
+}
+
+/**
+ * Transform output values from internal format to external format
+ * For fields with transform (e.g., ['Min', 'Max']), splits:
+ *   { interval: [5, 15] } → { intervalMin: 5, intervalMax: 15 }
+ */
+const transformOutputValues = (values: FormValues): FormValues => {
+  const transformed = { ...values }
+
+  for (const field of props.fields) {
+    if (field.transform && Array.isArray(field.transform) && field.transform.length > 0) {
+      const arrayValue = transformed[field.name]
+
+      if (Array.isArray(arrayValue)) {
+        // Remove the array field
+        delete transformed[field.name]
+
+        // Add the split values
+        const transformKeys = field.transform as string[]
+        for (let i = 0; i < transformKeys.length; i++) {
+          const suffix: string = transformKeys[i]
+          const key = `${field.name}${suffix}`
+          transformed[key] = arrayValue[i]
+        }
+      }
+    }
+  }
+
+  return transformed
+}
+
+// Internal form values (transformed from input)
+const formValues = ref<FormValues>(transformInputValues({ ...props.modelValue }))
 
 /**
  * Determine the value for a field
@@ -150,7 +213,8 @@ const updateFieldValue = (fieldName: string, value: unknown) => {
   formValues.value[fieldName] = value
   // Clear any error for this field
   delete fieldErrors.value[fieldName]
-  emit('update:modelValue', { ...formValues.value })
+  // Emit transformed values so parent sees external format
+  emit('update:modelValue', transformOutputValues({ ...formValues.value }))
 }
 
 /**
@@ -249,7 +313,10 @@ const handleSubmit = async () => {
       }
     }
 
-    emit('submit', submittedValues)
+    // Transform output values (split array fields back to individual values)
+    const transformedOutput = transformOutputValues(submittedValues)
+
+    emit('submit', transformedOutput)
   } finally {
     isSubmitting.value = false
   }
@@ -281,7 +348,8 @@ watch(
   () => props.modelValue,
   (newValue) => {
     if (newValue) {
-      formValues.value = { ...formValues.value, ...newValue }
+      const transformed = transformInputValues(newValue)
+      formValues.value = { ...formValues.value, ...transformed }
     }
   },
   { deep: true },

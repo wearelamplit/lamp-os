@@ -9,14 +9,12 @@ import FieldsPlugin from './plugins/fields'
 // Import layouts
 import LampLayout from './layouts/LampLayout.vue'
 
-// Import pages
-import FormDemoPage from './pages/FormDemoPage.vue'
-
-// Lamp pages (lazy loaded)
-const LampHomePage = () => import('./pages/lamp/LampHomePage.vue')
-const ExpressionsPage = () => import('./pages/lamp/ExpressionsPage.vue')
-const SetupPage = () => import('./pages/lamp/SetupPage.vue')
-const InfoPage = () => import('./pages/lamp/InfoPage.vue')
+// Pages (lazy loaded)
+const IndexPage = () => import('./pages/Index.vue')
+const ExpressionsPage = () => import('./pages/Expressions.vue')
+const SetupPage = () => import('./pages/Setup.vue')
+const InfoPage = () => import('./pages/Info.vue')
+const FormPage = () => import('./pages/Form.vue')
 
 // Create router
 const router = createRouter({
@@ -28,30 +26,30 @@ const router = createRouter({
       children: [
         {
           path: '',
-          name: 'lamp-home',
-          component: LampHomePage,
+          name: 'home',
+          component: IndexPage,
         },
         {
           path: 'expressions',
-          name: 'lamp-expressions',
+          name: 'expressions',
           component: ExpressionsPage,
         },
         {
           path: 'setup',
-          name: 'lamp-setup',
+          name: 'setup',
           component: SetupPage,
         },
         {
           path: 'info',
-          name: 'lamp-info',
+          name: 'info',
           component: InfoPage,
         },
       ],
     },
     {
       path: '/form',
-      name: 'form-demo',
-      component: FormDemoPage,
+      name: 'form',
+      component: FormPage,
     },
   ],
 })

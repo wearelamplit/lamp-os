@@ -14,6 +14,7 @@ import TextField from '@/components/fields/Text.vue'
 import NumberField from '@/components/fields/Number.vue'
 import NumberSliderField from '@/components/fields/NumberSlider.vue'
 import NumberRangeSliderField from '@/components/fields/NumberRangeSlider.vue'
+import BrightnessSliderField from '@/components/fields/BrightnessSlider.vue'
 import HiddenField from '@/components/fields/Hidden.vue'
 import ColorField from '@/components/fields/Color.vue'
 import ColorListField from '@/components/fields/ColorList.vue'
@@ -26,6 +27,7 @@ const fieldComponents = {
   'number-field': NumberField,
   'number-slider-field': NumberSliderField,
   'number-range-slider-field': NumberRangeSliderField,
+  'brightness-slider-field': BrightnessSliderField,
   'hidden-field': HiddenField,
   'color-field': ColorField,
   'color-list-field': ColorListField,

@@ -43,6 +43,7 @@ export type FieldType =
   | 'number'
   | 'number-slider'
   | 'number-range-slider'
+  | 'brightness-slider'
   | 'hidden'
   | 'color'
   | 'color-list'

@@ -45,10 +45,25 @@ const fields = ref<FieldDefinition[]>([
     },
   },
   {
-    name: 'brightness',
+    name: 'hue',
     type: 'number-slider',
+    label: 'Hue',
+    help: 'Adjust the hue angle (0-360°)',
+    default: 180,
+    optional: true,
+    props: {
+      min: 0,
+      max: 360,
+      step: 1,
+      append: '°',
+      color: 'var(--brand-glow-pink)',
+    },
+  },
+  {
+    name: 'brightness',
+    type: 'brightness-slider',
     label: 'Brightness',
-    help: 'Adjust the brightness level',
+    help: 'Adjust the brightness level (dynamic color indicator)',
     default: 75,
     optional: true,
     props: {
@@ -56,7 +71,6 @@ const fields = ref<FieldDefinition[]>([
       max: 100,
       step: 1,
       append: '%',
-      color: 'var(--brand-amber-gold)',
     },
   },
   {
@@ -109,8 +123,12 @@ const fields = ref<FieldDefinition[]>([
   },
 ])
 
-// Form values
-const formValues = ref<FormValues>({})
+// Form values - using transformed format to test input transformation
+// The form should automatically combine temperatureRangeMin/Max into temperatureRange array
+const formValues = ref<FormValues>({
+  temperatureRangeMin: 30,
+  temperatureRangeMax: 70,
+})
 
 // Submitted values for display
 const submittedValues = ref<FormValues | null>(null)

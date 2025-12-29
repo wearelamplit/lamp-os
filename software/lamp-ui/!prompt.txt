@@ -102,3 +102,11 @@ so:
 - Make sure the integrations work and are not outdated.
 - don't delete old components, there will be code duplication for a bit until everything is on this form generation
 - Add /form page
+
+---
+
+I forgot to add the details for Transform so I will add it here.
+
+some values result in an array, but because of how we handle data it needs to be split into multiple values.
+
+For instance on example-fields.json for the interval field, we have a transform: ['Min', 'Max']. This means the form needs to transform the input and output of the in preparation for the field to work. because the transform is 2 items, it needs to combine the form values initially from { intervalMin: 5, intervalMax: 15 } to { interval: [5, 15] } and then back to { intervalMin: 5, intervalMax: 15 } when the form is submitted.
