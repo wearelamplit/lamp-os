@@ -20,9 +20,13 @@ const props = withDefaults(defineProps<Props>(), {
   disabled: false,
 })
 
+// Meta values storage for field metadata (e.g., activeColor index)
+type MetaValues = Record<string, unknown>
+
 const emit = defineEmits<{
-  'update:modelValue': [value: FormValues]
-  submit: [values: FormValues]
+  'update:modelValue': [value: FormValues, meta: MetaValues]
+  submit: [values: FormValues, meta: MetaValues]
+  meta: [fieldName: string, value: unknown]
 }>()
 
 const slots = useSlots()
@@ -32,6 +36,9 @@ const fieldRefs = ref<Record<string, FieldComponent>>({})
 
 // Field errors
 const fieldErrors = ref<Record<string, string>>({})
+
+// Meta values storage for field metadata (e.g., activeColor index)
+const metaValues = ref<MetaValues>({})
 
 // Whether the form is currently submitting
 const isSubmitting = ref(false)
@@ -236,8 +243,16 @@ const updateFieldValue = (fieldName: string, value: unknown) => {
   formValues.value[fieldName] = value
   // Clear any error for this field
   delete fieldErrors.value[fieldName]
-  // Emit transformed values so parent sees external format
-  emit('update:modelValue', transformOutputValues({ ...formValues.value }))
+  // Emit transformed values so parent sees external format, include meta
+  emit('update:modelValue', transformOutputValues({ ...formValues.value }), { ...metaValues.value })
+}
+
+/**
+ * Handle meta event from a field
+ */
+const handleFieldMeta = (fieldName: string, value: unknown) => {
+  metaValues.value[fieldName] = value
+  emit('meta', fieldName, value)
 }
 
 /**
@@ -339,7 +354,7 @@ const handleSubmit = async () => {
     // Transform output values (split array fields back to individual values)
     const transformedOutput = transformOutputValues(submittedValues)
 
-    emit('submit', transformedOutput)
+    emit('submit', transformedOutput, { ...metaValues.value })
   } finally {
     isSubmitting.value = false
   }
@@ -383,6 +398,7 @@ defineExpose({
   submit: handleSubmit,
   validate: validateAllFields,
   values: formValues,
+  meta: metaValues,
 })
 </script>
 
@@ -414,6 +430,7 @@ defineExpose({
           :ref="(el: FieldComponent) => setFieldRef(field.name, el)"
           :model-value="formValues[field.name]"
           @update:model-value="(value: unknown) => updateFieldValue(field.name, value)"
+          @meta="(value: unknown) => handleFieldMeta(field.name, value)"
           v-bind="field.props"
         />
       </template>
@@ -432,6 +449,7 @@ defineExpose({
             :ref="(el: FieldComponent) => setFieldRef(field.name, el)"
             :model-value="formValues[field.name]"
             @update:model-value="(value: unknown) => updateFieldValue(field.name, value)"
+            @meta="(value: unknown) => handleFieldMeta(field.name, value)"
             v-bind="field.props"
             :disabled="disabled || field.props?.disabled"
             :required="!field.optional"

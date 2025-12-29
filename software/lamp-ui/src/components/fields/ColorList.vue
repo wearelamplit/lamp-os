@@ -1,6 +1,6 @@
 <template>
   <div class="color-gradient">
-    <div v-if="localColors.length > 1" class="gradient-preview-container">
+    <div v-if="isGradient && localColors.length > 1" class="gradient-preview-container">
       <div class="gradient-preview" :style="gradientStyle"></div>
       <span class="indicator-right">Top</span>
     </div>
@@ -18,7 +18,7 @@
           />
 
           <IconButton
-            v-if="localColors.length > 1"
+            v-if="hasActiveColor && localColors.length > 1"
             icon="star"
             variant="star"
             :title="
@@ -32,7 +32,7 @@
 
         <div class="color-actions">
           <IconButton
-            v-if="localColors.length < maxColors"
+            v-if="localColors.length < maxColorsComputed"
             icon="clone"
             variant="clone"
             title="Clone color"
@@ -57,7 +57,7 @@
         icon="plus"
         variant="plus"
         title="Add color"
-        :disabled="localColors.length >= maxColors || disabled"
+        :disabled="localColors.length >= maxColorsComputed || disabled"
         @click="addColor"
       />
     </div>
@@ -77,7 +77,9 @@ interface Props {
   maxColors?: number
   max?: number  // Alias for maxColors for form compatibility
   disabled?: boolean
-  activeColor?: number
+  activeColor?: number  // Current active color index (from parent/store)
+  hasActiveColor?: boolean  // Whether to show the star button
+  isGradient?: boolean  // Whether to show the gradient preview
   required?: boolean
 }
 
@@ -88,18 +90,21 @@ const props = withDefaults(defineProps<Props>(), {
   max: undefined,
   disabled: false,
   activeColor: 0,
+  hasActiveColor: false,
+  isGradient: false,
   required: false,
 })
 
 // Use max as alias for maxColors if provided
-const maxColors = computed(() => props.max ?? props.maxColors)
+const maxColorsComputed = computed(() => props.max ?? props.maxColors)
 
 const emit = defineEmits<{
   'update:modelValue': [value: string[]]
-  'update:activeColor': [value: number]
+  'meta': [value: { activeColor: number }]
 }>()
 
 const localColors = ref<string[]>([...props.modelValue])
+const localActiveColor = ref<number>(props.activeColor)
 
 // Ensure we always have at least one color
 if (localColors.value.length === 0) {
@@ -115,7 +120,27 @@ const gradientStyle = computed(() => {
 })
 
 const isActiveColor = (index: number) => {
-  return props.activeColor === index
+  return localActiveColor.value === index
+}
+
+/**
+ * Emit active color meta event
+ */
+const emitActiveColorMeta = (index: number) => {
+  localActiveColor.value = index
+  emit('meta', { activeColor: index })
+}
+
+/**
+ * Ensure active color is within valid range
+ * Returns the corrected index
+ */
+const ensureValidActiveColor = (colorsLength: number, currentActive: number): number => {
+  if (colorsLength === 0) return 0
+  if (colorsLength === 1) return 0
+  if (currentActive >= colorsLength) return colorsLength - 1
+  if (currentActive < 0) return 0
+  return currentActive
 }
 
 const updateColor = (index: number, value: string) => {
@@ -127,9 +152,10 @@ const addColor = () => {
   const firstColor = localColors.value[0] || '#FF0000FF'
   localColors.value.unshift(firstColor)
 
-  // If active color exists and is not at index 0, increment its index
-  if (props.activeColor !== undefined && props.activeColor >= 0) {
-    emit('update:activeColor', props.activeColor + 1)
+  // If hasActiveColor and active color exists, increment index since we added at beginning
+  if (props.hasActiveColor && localActiveColor.value >= 0) {
+    const newActive = localActiveColor.value + 1
+    emitActiveColorMeta(newActive)
   }
 
   emit('update:modelValue', [...localColors.value])
@@ -139,12 +165,21 @@ const removeColor = (index: number) => {
   if (localColors.value.length > 1) {
     localColors.value.splice(index, 1)
 
-    // If active color exists and is at or after the removed position, decrement its index
-    if (props.activeColor !== undefined && props.activeColor >= index) {
-      // If we're removing the active color itself, set it to 0 (first color)
-      // Otherwise, decrement the index
-      const newActiveIndex = props.activeColor === index ? 0 : props.activeColor - 1
-      emit('update:activeColor', newActiveIndex)
+    // Handle active color when removing
+    if (props.hasActiveColor) {
+      let newActive = localActiveColor.value
+
+      if (localActiveColor.value === index) {
+        // Removed the active color - set to the one above (or 0 if at start)
+        newActive = index > 0 ? index - 1 : 0
+      } else if (localActiveColor.value > index) {
+        // Active color was after removed one - decrement index
+        newActive = localActiveColor.value - 1
+      }
+
+      // Ensure valid range
+      newActive = ensureValidActiveColor(localColors.value.length, newActive)
+      emitActiveColorMeta(newActive)
     }
 
     emit('update:modelValue', [...localColors.value])
@@ -152,17 +187,18 @@ const removeColor = (index: number) => {
 }
 
 const setActiveColor = (index: number) => {
-  emit('update:activeColor', index)
+  emitActiveColorMeta(index)
 }
 
 const cloneColor = (index: number) => {
-  if (localColors.value.length < maxColors.value) {
+  if (localColors.value.length < maxColorsComputed.value) {
     const colorToClone = localColors.value[index]
     localColors.value.splice(index, 0, colorToClone)
 
-    // If active color exists and is at or after the cloned position, increment its index
-    if (props.activeColor !== undefined && props.activeColor >= index) {
-      emit('update:activeColor', props.activeColor + 1)
+    // If hasActiveColor and active color is at or after cloned position, increment
+    if (props.hasActiveColor && localActiveColor.value >= index) {
+      const newActive = localActiveColor.value + 1
+      emitActiveColorMeta(newActive)
     }
 
     emit('update:modelValue', [...localColors.value])
@@ -177,24 +213,31 @@ const validate = (): FieldValidationResult => {
   return { valid: true }
 }
 
-// Watch for external changes
+// Watch for external changes to colors
 watch(
   () => props.modelValue,
   (newValue) => {
     if (newValue && newValue.length > 0) {
       localColors.value = [...newValue]
+
+      // Ensure active color is still valid after external color update
+      if (props.hasActiveColor) {
+        const validActive = ensureValidActiveColor(localColors.value.length, localActiveColor.value)
+        if (validActive !== localActiveColor.value) {
+          emitActiveColorMeta(validActive)
+        }
+      }
     }
   },
   { deep: true },
 )
 
-// Watch for activeColor changes to ensure UI updates
+// Watch for external activeColor prop changes
 watch(
   () => props.activeColor,
   (newValue) => {
-    // Ensure activeColor is within valid range
-    if (newValue !== undefined && (newValue < 0 || newValue >= localColors.value.length)) {
-      console.warn(`activeColor ${newValue} is out of range for ${localColors.value.length} colors`)
+    if (newValue !== undefined && newValue !== localActiveColor.value) {
+      localActiveColor.value = ensureValidActiveColor(localColors.value.length, newValue)
     }
   },
 )

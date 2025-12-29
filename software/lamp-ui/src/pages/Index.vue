@@ -1,15 +1,16 @@
 <!-- eslint-disable vue/multi-word-component-names -->
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { computed, watch } from 'vue'
 import ComponentForm from '@/components/Form.vue'
 import CritterNameplate from '@/components/CritterNameplate.vue'
+import InfoPanel from '@/components/InfoPanel.vue'
 import type { FieldDefinition, FormValues } from '@/types'
 import { useLampStore } from '@/stores/lamp'
 
 const lampStore = useLampStore()
 
 // Field definitions for the home page form
-const fields = ref<FieldDefinition[]>([
+const fields = computed<FieldDefinition[]>(() => [
   {
     name: 'nameplate',
     type: 'slot',
@@ -53,6 +54,8 @@ const fields = ref<FieldDefinition[]>([
     props: {
       max: 1,
       showAddButton: false,
+      isGradient: false,
+      hasActiveColor: false,
     },
   },
   {
@@ -64,6 +67,9 @@ const fields = ref<FieldDefinition[]>([
     props: {
       max: 5,
       showAddButton: true,
+      isGradient: true,
+      hasActiveColor: true,
+      activeColor: lampStore.state.base?.ac ?? 0,
     },
   },
 ])
@@ -95,6 +101,16 @@ const handleFormUpdate = (values: FormValues) => {
   }
 }
 
+// Handle meta events from form fields
+const handleFormMeta = (fieldName: string, value: unknown) => {
+  if (fieldName === 'baseColors' && value && typeof value === 'object') {
+    const meta = value as { activeColor?: number }
+    if (meta.activeColor !== undefined) {
+      lampStore.updateBaseActiveColor(meta.activeColor)
+    }
+  }
+}
+
 // Watch for color changes (for real-time updates)
 watch(
   () => formValues.value.shadeColors,
@@ -123,6 +139,7 @@ watch(
       :fields="fields"
       :model-value="formValues"
       @update:model-value="handleFormUpdate"
+      @meta="handleFormMeta"
       :show-button="false"
       :disabled="lampStore.disabled"
     >

@@ -1,61 +1,50 @@
-We are going to overhaul the state management and forms for the entire app.
+Form Meta handling and Color list improvements
 
---------------------------------
+----------------------------------
 
-Example Structure:
+We need to add meta handling from the form.
 
-check out example-structure.json for the structure of the data that will be sent to the server.
+A field can emit a meta event with a value. If this happens the form needs to:
 
---------------------------------
+1) Store it in the form meta values object, meta[fieldName] = value
+2) form emits the meta event meta:[fieldName], [value]
 
-pinia:
+when a form update:modelValue emit happens also emit the meta
 
-We need to redo the api communication (currently in src/composables/useLampState.ts) to use pinia.
+on form submit:
 
-we need a lamp.ts store file that will handle communication, as well as clear defined functions for manipulating state. when the app loads we need to get the current data structure, and save a copy of it for resets.
+the meta neeta to also be emiited at emit('submit', fieldMetaObject)
 
-then we need a clearly defined functions for updating portions of the state, and potentially other things. For instance when we update the colors of the lamp in realtime () we also send an update over sockets to the api.
+----------------------------------
 
-on src/composables/useLampState.ts we have a generic set function and break out the extra actions  with a switch, but on the store we want the name to be more clear, like updateBaseColors, updateShadeColors, updateHomeMode, etc.
+Color list needs some work to be more usable in different contexts.
 
-We will need a plugin to initialize the store to fetch the current state and initialize the socket connection.
+1) Color list
 
-Also have a state variable if the socket is connected or not.
+This will be the same, just hide the gradient preview at the top of the field.
 
---------------------------------
+2) Gradient
 
-Expression Library:
+We need a setting to say if the color is a gradient. This will show the gradient preview at the top of the field.
 
-We need to restructure the expression library file (src/assets/expressions.json) to be better suited for information about each expression and the fields for an expression.
+3) active color (star)
 
-lets rename src/utils to src/lib (and rewire src/utils/colorUtils.ts) and then put an expressions.json in there, where we will have an array of an objects (of epressions). each expression should have index (the current key), name, description and fields. The fields needs to be restructured to use the new form component, see a good example of the fields here: src/pages/Form.vue.
+by default this should be disabled. If enabled (hasActiveColor is true) then the star should be enabled and the the star button should show up in the color list, if there is more than one color. If there is only one color, the star should be hidden, the active color needs to be the only option.
 
-I think it makes sense to have another store for the expressions, all it will do it read the new library and have getters for getting expressions ordered by index, and getting fields by expression index. All saving of state will be done in the lamp.ts store.
+We need to emit a meta event {activeColor: index} when the active color changes, or say a single color is added. If there are colors and the color that is active gets removed, the active color should be set to another color in the list, ,usually above the color that was removed. If there are no colors, or all the colors get deleted, the active color should be 0. basically it's 0 or an index of one of the colors in the list. This shouldn't be an issue really since the delete button only exists if there are more than one color.
 
-This should also be initialized in the plugin, so the plugni needs to be generic named, like initializeState.ts or whatever
+the current star button will select that color, and be active to indicate which color is active. this was there and needs to be checked to be working again.
 
---------------------------------
+when the active color changes we need to emit a meta event {activeColor: index}
 
-Page Changes:
+we also need a prop for the field for specifying what the current active color is. this will be used to set the active color on the lamp store.
 
-We need to examine what each page is in charge of and build the forms to handle editing the state for that page. There will be some missing that we will need to rewire later, like getting the realtime color changes, but this step is large enough so I will do that later. There might also be some things that are not supported, like setup -> Per-Pixel Brightness Adjustment, which we will need to rewire later and possibly make new fields for.
+----------------------------------
 
-Each page should have one ComponentForm that lays out the page (other than Info and Epressions which we will talk about next)
+index Page
 
-There are buts of content that do not belong in the forms, if they are above or below the form, add them above or below the form. If the Content is inside the form use type: 'slot' in the fields definition to specify it's location. and draw it.
+We need to add a new meta handler for the form on the src/pages/Index.vue page. If the active color changes we need to set it on the lamp store. the active color on the state needs to be set to base->ac (line 23 on example-structure.json)
 
-There are titles on the pages, sometimes they replace a fields label, and sometimes they are a title for the net gruop of fields. Use the new group-heading field type to draw them, so we use that logic to pick the colors.
+I am not sure if there is a method for setting the active color on the lamp store. if not we need to add it.
 
---------------------------------
-
-Expressions Page
-
-This page will use the exxpressions store to setup list expressions. Each expression will need a ComponentCollapsiblePanel that will open up the form for setting up that expression. Above the form we need a boolean field (src/components/fields/Boolean.vue) so turn on and off the expression. If the expression is on, show the form and add it to the expressions array in the structure. If it's off, don't show the form and remove it from the expressions array.
-
-Actually the ComponentCollapsiblePanel has a left slot that might be better for placing the boolean field.
-
---------------------------------
-
-Some things will be broken like watching for color changes in realtime, but we will fix that later.
-
-Do these changes and if there are known issues let me know.
+This also needs to set the prop for the active color on the base colors field.
