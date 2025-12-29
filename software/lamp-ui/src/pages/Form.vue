@@ -258,13 +258,30 @@ const resetForm = () => {
           </template>
         </ComponentForm>
 
-        <!-- Submitted Values Display -->
-        <div v-if="submittedValues" class="submitted-values">
-          <div class="submitted-header">
-            <h2>Submitted Values</h2>
-            <button class="reset-button" @click="resetForm">Reset</button>
-          </div>
-          <pre class="values-display">{{ formattedSubmittedValues }}</pre>
+        <!-- Form Results Section -->
+        <div class="form-results">
+          <!-- Current Form Values -->
+          <CollapsiblePanel label="Current Form Values">
+            <template #left>
+              <span class="result-icon result-icon--live">●</span>
+            </template>
+            <pre class="values-display">{{ JSON.stringify(formValues, null, 2) }}</pre>
+          </CollapsiblePanel>
+
+          <!-- Submitted Values (only shown after submit) -->
+          <CollapsiblePanel
+            v-if="submittedValues"
+            label="Submitted Values"
+            :expanded="true"
+          >
+            <template #left>
+              <span class="result-icon result-icon--success">✓</span>
+            </template>
+            <div class="submitted-actions">
+              <button class="reset-button" @click="resetForm">Reset</button>
+            </div>
+            <pre class="values-display">{{ formattedSubmittedValues }}</pre>
+          </CollapsiblePanel>
         </div>
       </main>
     </div>
@@ -328,24 +345,40 @@ const resetForm = () => {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
-.submitted-values {
-  margin-top: 32px;
-  padding-top: 24px;
-  border-top: 1px solid var(--color-border);
-}
-
-.submitted-header {
+.form-results {
+  margin-top: 24px;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.submitted-header h2 {
+.result-icon {
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.result-icon--live {
+  color: var(--brand-aurora-blue);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.result-icon--success {
   color: var(--brand-lumen-green);
-  font-size: 1.1rem;
-  font-weight: 600;
-  margin: 0;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.submitted-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
 }
 
 .reset-button {

@@ -22,6 +22,7 @@ import GroupHeadingField from '@/components/fields/GroupHeading.vue'
 
 // Import shared UI components
 import InfoPanel from '@/components/InfoPanel.vue'
+import CollapsiblePanel from '@/components/CollapsiblePanel.vue'
 
 // Map of field type names to components
 const fieldComponents = {
@@ -41,6 +42,7 @@ const fieldComponents = {
 // Shared UI components
 const sharedComponents = {
   'InfoPanel': InfoPanel,
+  'CollapsiblePanel': CollapsiblePanel,
 } as const
 
 export type FieldComponentName = keyof typeof fieldComponents

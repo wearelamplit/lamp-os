@@ -1,0 +1,127 @@
+<script setup lang="ts">
+import { ref, watch } from 'vue'
+
+interface Props {
+  label: string
+  expanded?: boolean
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  expanded: false,
+})
+
+const isExpanded = ref(props.expanded)
+
+// Watch for external changes to expanded prop
+watch(
+  () => props.expanded,
+  (newValue) => {
+    isExpanded.value = newValue
+  },
+)
+
+const toggle = () => {
+  isExpanded.value = !isExpanded.value
+}
+</script>
+
+<template>
+  <div class="collapsible-panel" :class="{ 'collapsible-panel--expanded': isExpanded }">
+    <button type="button" class="collapsible-panel-header" @click="toggle">
+      <span class="collapsible-panel-arrow" :class="{ 'collapsible-panel-arrow--expanded': isExpanded }">
+        ▶
+      </span>
+      <span v-if="$slots.left" class="collapsible-panel-left">
+        <slot name="left" />
+      </span>
+      <span class="collapsible-panel-label">{{ label }}</span>
+    </button>
+    <div v-show="isExpanded" class="collapsible-panel-content">
+      <slot />
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.collapsible-panel {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-background-soft);
+}
+
+.collapsible-panel--expanded {
+  border-color: var(--color-border-hover);
+}
+
+.collapsible-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--brand-lamp-white);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: left;
+  transition: background 0.2s ease;
+}
+
+.collapsible-panel-header:hover {
+  background: var(--color-background-mute);
+}
+
+.collapsible-panel-arrow {
+  font-size: 0.7rem;
+  color: var(--brand-slate-grey);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.collapsible-panel-arrow--expanded {
+  transform: rotate(90deg);
+}
+
+.collapsible-panel-left {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.collapsible-panel-label {
+  flex: 1;
+}
+
+.collapsible-panel-content {
+  padding: 0 16px 16px 16px;
+  animation: slideDown 0.2s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Mobile optimizations */
+@media (max-width: 480px) {
+  .collapsible-panel-header {
+    padding: 10px 12px;
+    font-size: 0.85rem;
+    gap: 8px;
+  }
+
+  .collapsible-panel-content {
+    padding: 0 12px 12px 12px;
+  }
+}
+</style>
+
