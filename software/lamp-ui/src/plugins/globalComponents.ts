@@ -17,6 +17,7 @@ import BrightnessSliderField from '@/components/fields/BrightnessSlider.vue'
 import HiddenField from '@/components/fields/Hidden.vue'
 import ColorField from '@/components/fields/Color.vue'
 import ColorListField from '@/components/fields/ColorList.vue'
+import PasswordField from '@/components/fields/Password.vue'
 
 // Import shared UI components
 import InfoPanel from '@/components/InfoPanel.vue'
@@ -32,6 +33,7 @@ const fieldComponents = {
   'hidden-field': HiddenField,
   'color-field': ColorField,
   'color-list-field': ColorListField,
+  'password-field': PasswordField,
 } as const
 
 // Shared UI components

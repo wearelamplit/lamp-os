@@ -40,6 +40,7 @@ export interface Settings {
 export type FieldType =
   | 'boolean'
   | 'text'
+  | 'password'
   | 'number'
   | 'number-slider'
   | 'number-range-slider'

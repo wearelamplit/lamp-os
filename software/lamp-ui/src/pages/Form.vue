@@ -24,6 +24,19 @@ const fields = ref<FieldDefinition[]>([
     },
   },
   {
+    name: 'password',
+    type: 'password',
+    label: 'Password',
+    help: 'Enter a secure password (8-32 characters)',
+    default: '',
+    optional: true,
+    props: {
+      placeholder: 'Enter password',
+      maxLength: 32,
+      minLength: 8,
+    },
+  },
+  {
     name: 'isEnabled',
     type: 'boolean',
     label: 'Enable Feature',
