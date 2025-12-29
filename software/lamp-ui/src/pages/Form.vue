@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import ComponentForm from '@/components/Form.vue'
 import type { FieldDefinition, FormValues } from '@/types'
@@ -152,6 +152,10 @@ const formValues = ref<FormValues>({
   hiddenId: 'preset-demo-456',
 })
 
+watch(formValues, (newValues) => {
+  console.log('Form values changed:', newValues)
+})
+
 // Submitted values for display
 const submittedValues = ref<FormValues | null>(null)
 
@@ -210,7 +214,8 @@ const resetForm = () => {
           :fields="fields"
           v-model="formValues"
           @submit="handleSubmit"
-          button-text="Submit Form"
+          button-text="Optional Button"
+          :show-button="true"
         >
           <!-- Custom slot content -->
           <template #customSlot>
