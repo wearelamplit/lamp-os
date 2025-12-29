@@ -32,6 +32,11 @@ const fields = ref<FieldDefinition[]>([
     optional: true,
   },
   {
+    name: 'customSlot',
+    type: 'slot',
+    label: 'Custom Slot',
+  },
+  {
     name: 'quantity',
     type: 'number',
     label: 'Quantity',
@@ -116,11 +121,6 @@ const fields = ref<FieldDefinition[]>([
     default: 'demo-form-123',
     optional: true,
   },
-  {
-    name: 'customSlot',
-    type: 'slot',
-    label: 'Custom Slot',
-  },
 ])
 
 // Form values - using transformed format to test input transformation
@@ -177,7 +177,7 @@ const resetForm = () => {
         >
           <!-- Custom slot content -->
           <template #customSlot>
-            <div class="text-caption text-blue">
+            <div style="color: var(--brand-aurora-blue);">
               This is custom slot content passed to the form.
             </div>
           </template>
