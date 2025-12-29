@@ -14,7 +14,6 @@ class KnockoutBehavior : public AnimatedBehavior {
 
  public:
   std::vector<uint8_t> knockoutPixels = std::vector<uint8_t>(50, (uint8_t)100);
-  bool allowedInHomeMode = true;
 
   void draw() override;
   void control() override;

@@ -1,11 +1,11 @@
 #include "./glitchy_expression.hpp"
+
 #include "../util/fade.hpp"
 
 namespace lamp {
 
 GlitchyExpression::GlitchyExpression(FrameBuffer* inBuffer, uint32_t inFrames)
     : Expression(inBuffer, inFrames) {
-  allowedInHomeMode = false;  // Glitchy should not work in home mode
   isExclusive = true;  // Glitchy takes exclusive control when active
 }
 
@@ -37,11 +37,9 @@ void GlitchyExpression::onTrigger() {
     std::uniform_int_distribution<uint32_t> durationDist(glitchDurationMin, glitchDurationMax);
     frames = durationDist(rng);
   }
-
 }
 
 void GlitchyExpression::draw() {
-
   if (!shouldAffectBuffer()) {
     nextFrame();
     return;

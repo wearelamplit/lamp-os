@@ -1,6 +1,7 @@
 #include "./pulse_expression.hpp"
 
 #include <Arduino.h>
+
 #include <algorithm>
 #include <cmath>
 
@@ -15,7 +16,6 @@ static constexpr uint32_t PULSE_MAX_FRAMES = 10000;
 PulseExpression::PulseExpression(FrameBuffer* inBuffer, uint32_t inFrames)
     : Expression(inBuffer, inFrames) {
   isExclusive = false;  // This can run and blend with other things
-  allowedInHomeMode = true; 
 }
 
 void PulseExpression::configureFromParameters(const std::map<std::string, uint32_t>& parameters) {
@@ -63,7 +63,7 @@ uint32_t PulseExpression::calculateBlendFactor(int pixelIndex) const {
   // Avoids expensive exp() calculation
   float normalizedDist = distance / static_cast<float>(pulseWidth);
   float factor = 1.0f - (normalizedDist * normalizedDist);  // Quadratic falloff
-  factor = std::max(0.0f, factor);  // Clamp to 0
+  factor = std::max(0.0f, factor);                          // Clamp to 0
 
   // Return as integer 0-100 (percentage for fadeLinear)
   return static_cast<uint32_t>(factor * 100.0f);
@@ -101,7 +101,7 @@ void PulseExpression::selectNextColor() {
 void PulseExpression::onTrigger() {
   // Reset wave to start position
   wavePosition = -static_cast<float>(pulseWidth);  // Start just off the strip
-  waveDirection = 1;  // Always move forward
+  waveDirection = 1;                               // Always move forward
   lastUpdateMs = 0;
   selectNextColor();
 
@@ -109,7 +109,6 @@ void PulseExpression::onTrigger() {
   // The animation will complete when wave reaches pixelCount + (2 * pulseWidth)
   frames = PULSE_MAX_FRAMES;
   frame = 0;
-
 }
 
 void PulseExpression::onUpdate() {
@@ -118,7 +117,6 @@ void PulseExpression::onUpdate() {
 }
 
 void PulseExpression::draw() {
-
   // Pause if an exclusive behavior is running
   if (shouldPause()) return;
 
@@ -143,10 +141,8 @@ void PulseExpression::draw() {
       // blendFactor is 0-100 (percentage)
       fb->buffer[i] = fadeLinear(fb->buffer[i], pulseColor, 100, blendFactor);
       pixelsAffected++;
-
     }
   }
-
 
   // Advance animation frame
   nextFrame();

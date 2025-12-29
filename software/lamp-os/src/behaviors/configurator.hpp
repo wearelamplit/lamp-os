@@ -25,7 +25,6 @@ class ConfiguratorBehavior : public AnimatedBehavior {
   uint8_t brightness = 100;
   std::vector<Color> colors;
   unsigned long lastWebSocketUpdateTimeMs = 0;
-  bool allowedInHomeMode = true;
   bool disabled = false;  // Can be disabled during expression previews
 
   void draw() override;

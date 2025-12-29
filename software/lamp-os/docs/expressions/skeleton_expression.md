@@ -25,7 +25,6 @@ public:
   SkeletonExpression(FrameBuffer* inBuffer, uint32_t inFrames = 30)
       : Expression(inBuffer, inFrames) {
     isExclusive = false;         // Can blend with other expressions
-    allowedInHomeMode = true;     // Works in home mode
   }
 
   // Configuration (add custom parameters as needed)

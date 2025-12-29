@@ -65,6 +65,7 @@ void initBehaviors() {
   baseDmxBehavior = lamp::DmxBehavior(&base, 480);
   shadeSocialBehavior = lamp::SocialBehavior(&shade, 1200);
   shadeSocialBehavior.setBluetoothComponent(&bt);
+  shadeSocialBehavior.allowedInHomeMode = false;
   shadeConfiguratorBehavior = lamp::ConfiguratorBehavior(&shade, 120);
   shadeConfiguratorBehavior.colors = shade.defaultColors;
   baseConfiguratorBehavior = lamp::ConfiguratorBehavior(&base, 120);
@@ -104,6 +105,7 @@ void initBehaviors() {
   allBehaviors.push_back(&shadeFadeOutBehavior);
 
   // layers load in priority sequence {lowest, ..., highest}
+  Serial.printf("Home Mode: %d\n", calculateEffectiveHomeMode(config));
   compositor.begin(allBehaviors, {&shade, &base}, calculateEffectiveHomeMode(config));
 
   // Add overlay behaviors

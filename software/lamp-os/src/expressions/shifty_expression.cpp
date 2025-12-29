@@ -1,6 +1,7 @@
 #include "./shifty_expression.hpp"
 
 #include <Arduino.h>
+
 #include <algorithm>
 
 #include "../util/fade.hpp"
@@ -10,7 +11,6 @@ namespace lamp {
 
 ShiftyExpression::ShiftyExpression(FrameBuffer* inBuffer, uint32_t inFrames)
     : Expression(inBuffer, inFrames) {
-  allowedInHomeMode = true;  // Shifty should work in home mode
 }
 
 void ShiftyExpression::configureFromParameters(const std::map<std::string, uint32_t>& parameters) {
@@ -28,7 +28,6 @@ void ShiftyExpression::configureFromParameters(const std::map<std::string, uint3
   shiftDurationMinMs = shiftDurationMin * 1000;
   shiftDurationMaxMs = shiftDurationMax * 1000;
   fadeDurationFrames = fadeDuration * 30;  // Convert seconds to frames at 30fps
-
 
   // If no colors configured, use current buffer colors as default
   if (colors.empty() && fb && fb->pixelCount > 0) {
@@ -79,7 +78,7 @@ void ShiftyExpression::startUnshift() {
 
 uint32_t ShiftyExpression::getRandomShiftDuration() {
   std::uniform_int_distribution<uint32_t> dist(shiftDurationMinMs,
-                                                shiftDurationMaxMs);
+                                               shiftDurationMaxMs);
   return dist(rng);
 }
 
@@ -137,7 +136,6 @@ void ShiftyExpression::onComplete() {
 }
 
 void ShiftyExpression::draw() {
-
   // Pause if an exclusive behavior is running
   if (shouldPause()) return;
 
