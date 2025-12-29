@@ -63,7 +63,7 @@ const fields = ref<FieldDefinition[]>([
     label: 'Home Mode Brightness',
     default: 80,
     optional: true,
-    show: (values: FormValues) => values.homeMode === true,
+    // show: (values: FormValues) => values.homeMode === true,
     props: {
       min: 0,
       max: 100,
