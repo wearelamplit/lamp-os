@@ -17,7 +17,6 @@ const fields = ref<FieldDefinition[]>([
   {
     name: 'name',
     type: 'text',
-    label: 'Name',
     help: 'Names must be all lowercase letters and between 3-12 characters.',
     default: '',
     optional: true,
@@ -37,7 +36,6 @@ const fields = ref<FieldDefinition[]>([
   {
     name: 'password',
     type: 'password',
-    label: 'Password',
     help: 'Optional password to protect your lamp from changes. Between 8-16 characters. Leave empty for no password.',
     default: '',
     optional: true,

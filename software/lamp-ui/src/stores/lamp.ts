@@ -183,7 +183,7 @@ export const useLampStore = defineStore('lamp', () => {
   const updateHomeMode = (enabled: boolean) => {
     if (!state.value.lamp) state.value.lamp = {}
     state.value.lamp.homeMode = enabled
-    
+
     if (enabled) {
       websocketSend({ a: 'bright', v: state.value.lamp.homeModeBrightness ?? 80 })
     } else {

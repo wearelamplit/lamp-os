@@ -101,7 +101,7 @@ export interface FieldDefinition {
   type: FieldType
 
   /** Display label for the field */
-  label: string
+  label?: string
 
   /** Help text shown below the field */
   help?: string
