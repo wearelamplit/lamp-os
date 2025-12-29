@@ -36,7 +36,7 @@ const headingColor = computed(() => {
   font-size: 1rem;
   font-weight: 800;
   margin-top: 8px;
-  margin-bottom: 0;
+  margin-bottom: 8px;
 }
 </style>
 

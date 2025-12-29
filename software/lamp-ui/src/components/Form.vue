@@ -415,9 +415,9 @@ defineExpose({
       class="dynamic-form-field"
     >
       <!-- Slot type: render named slot -->
-      <template v-if="field.type === 'slot'">
+      <div v-if="field.type === 'slot'" style="padding-bottom: 1rem;">
         <slot :name="field.name" />
-      </template>
+      </div>
 
       <!-- Group heading: render heading with rotating colors -->
       <template v-else-if="field.type === 'group-heading'">
