@@ -1,0 +1,77 @@
+[
+  {
+      "name": "target",
+      "type": "select-buttons",
+      "label": "Target",
+      "help": "Choose where the expression will show on the lamp",
+      "default": 2,
+      "props": {
+          "optionValues": [
+              1,
+              2,
+              3
+          ],
+          "optionLabels": [
+              "Shade",
+              "Base",
+              "Both"
+          ]
+      }
+  },
+  {
+    "name": "colors",
+      "type": "color-list",
+      "label": "Colors",
+      "default": [
+          "#C869C8FF"
+      ],
+      "help": "Colors to be used in the expression",
+      "props": {
+          "max": 5
+      }
+  },
+  {
+      "name": "interval",
+      "type": "number-range-slider",
+      "label": "Trigger Interval",
+      "transform": [
+          "Min",
+          "Max"
+      ],
+      "help": "Define how often the expression occurs",
+      "default": [
+          5,
+          15
+      ],
+      "props": {
+          "min": 0,
+          "max": 1000,
+          "append": "ms",
+          "steps": 60
+      }
+  },
+  {
+      "name": "duration",
+      "type": "number-slider",
+      "label": "Duration",
+      "help": "Fade duration",
+      "default": 5
+      "props": {
+          "min": 5,
+          "max": 15,
+          "steps": 1,
+          "append": "s"
+      }
+  },
+  {
+      "name": "numStars",
+      "type": "number",
+      "label": "Number of Stars",
+      "help": "The number of LEDs to use as stars",
+      "default": 3,
+      "props": {
+          "min": 0,
+          "max": 5,
+      }
+  }
+]
