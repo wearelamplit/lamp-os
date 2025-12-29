@@ -3,7 +3,7 @@
 import { ref, computed, watch, useSlots } from 'vue'
 import Field from '@/components/fields/Field.vue'
 import type { FieldDefinition, FormValues, FieldValidationResult, FieldComponent } from '@/types'
-import { getFieldComponentName, isFieldTypeSupported } from '@/plugins/fields'
+import { getFieldComponentName, isFieldTypeSupported } from '@/plugins/globalComponents'
 
 interface Props {
   fields: FieldDefinition[]

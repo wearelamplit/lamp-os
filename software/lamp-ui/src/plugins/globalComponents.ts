@@ -1,14 +1,13 @@
 /**
- * Fields Plugin
+ * Global Components Plugin
  *
- * Registers all field components globally for dynamic form rendering.
- * Field components are registered with kebab-case names matching the type
- * property in field definitions.
+ * Registers commonly used components globally for use throughout the app.
+ * Includes field components for dynamic form rendering and shared UI components.
  */
 
 import type { App } from 'vue'
 
-// Import all field components
+// Import field components
 import BooleanField from '@/components/fields/Boolean.vue'
 import TextField from '@/components/fields/Text.vue'
 import NumberField from '@/components/fields/Number.vue'
@@ -19,9 +18,11 @@ import HiddenField from '@/components/fields/Hidden.vue'
 import ColorField from '@/components/fields/Color.vue'
 import ColorListField from '@/components/fields/ColorList.vue'
 
+// Import shared UI components
+import InfoPanel from '@/components/InfoPanel.vue'
+
 // Map of field type names to components
 const fieldComponents = {
-  // Register with kebab-case names to match field type
   'boolean-field': BooleanField,
   'text-field': TextField,
   'number-field': NumberField,
@@ -31,6 +32,11 @@ const fieldComponents = {
   'hidden-field': HiddenField,
   'color-field': ColorField,
   'color-list-field': ColorListField,
+} as const
+
+// Shared UI components
+const sharedComponents = {
+  'InfoPanel': InfoPanel,
 } as const
 
 export type FieldComponentName = keyof typeof fieldComponents
@@ -51,16 +57,21 @@ export function isFieldTypeSupported(type: string): boolean {
 }
 
 /**
- * Fields plugin installer
+ * Global Components plugin installer
  */
-export const FieldsPlugin = {
+export const GlobalComponentsPlugin = {
   install(app: App) {
-    // Register each field component globally
+    // Register field components globally
     for (const [name, component] of Object.entries(fieldComponents)) {
+      app.component(name, component)
+    }
+
+    // Register shared UI components globally
+    for (const [name, component] of Object.entries(sharedComponents)) {
       app.component(name, component)
     }
   },
 }
 
-export default FieldsPlugin
+export default GlobalComponentsPlugin
 
