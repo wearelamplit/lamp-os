@@ -253,6 +253,95 @@ export const useLampStore = defineStore('lamp', () => {
     return knockout ? knockout.b : 100
   }
 
+  // Export entire lamp state configuration as JSON
+  const exportState = (): string => {
+    const exportData = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      state: state.value,
+    }
+    return JSON.stringify(exportData, null, 2)
+  }
+
+  // Validate state import structure
+  const validateStateImport = (data: unknown): { valid: boolean; error?: string } => {
+    if (!data || typeof data !== 'object') {
+      return { valid: false, error: 'Invalid JSON structure' }
+    }
+
+    const obj = data as Record<string, unknown>
+
+    if (typeof obj.version !== 'number') {
+      return { valid: false, error: 'Missing or invalid version field' }
+    }
+
+    if (!obj.state || typeof obj.state !== 'object') {
+      return { valid: false, error: 'Missing or invalid state field' }
+    }
+
+    const stateObj = obj.state as Record<string, unknown>
+
+    // Validate lamp settings if present
+    if (stateObj.lamp && typeof stateObj.lamp !== 'object') {
+      return { valid: false, error: 'Invalid lamp settings' }
+    }
+
+    // Validate shade settings if present
+    if (stateObj.shade && typeof stateObj.shade !== 'object') {
+      return { valid: false, error: 'Invalid shade settings' }
+    }
+
+    // Validate base settings if present
+    if (stateObj.base && typeof stateObj.base !== 'object') {
+      return { valid: false, error: 'Invalid base settings' }
+    }
+
+    // Validate expressions if present
+    if (stateObj.expressions && !Array.isArray(stateObj.expressions)) {
+      return { valid: false, error: 'Invalid expressions settings' }
+    }
+
+    return { valid: true }
+  }
+
+  // Restore entire state from imported data
+  const restoreState = (jsonString: string): { success: boolean; error?: string } => {
+    try {
+      const data = JSON.parse(jsonString)
+      const validation = validateStateImport(data)
+
+      if (!validation.valid) {
+        return { success: false, error: validation.error }
+      }
+
+      // Apply the imported state
+      state.value = data.state as LampState
+
+      // Send updates to preview via websocket
+      if (state.value.shade?.colors) {
+        websocketSend({ a: 'shade', c: state.value.shade.colors })
+      }
+      if (state.value.base?.colors) {
+        websocketSend({ a: 'base', c: state.value.base.colors })
+      }
+      if (state.value.base?.knockout) {
+        for (const kp of state.value.base.knockout) {
+          websocketSend({ a: 'knockout', p: kp.p, b: kp.b })
+        }
+      }
+      if (state.value.lamp) {
+        const brightness = state.value.lamp.homeMode
+          ? (state.value.lamp.homeModeBrightness ?? 80)
+          : (state.value.lamp.brightness ?? 100)
+        websocketSend({ a: 'bright', v: brightness })
+      }
+
+      return { success: true }
+    } catch {
+      return { success: false, error: 'Failed to parse JSON file' }
+    }
+  }
+
   const updateExpressions = (expressions: ExpressionSettings[]) => {
     state.value.expressions = expressions
   }
@@ -397,6 +486,10 @@ export const useLampStore = defineStore('lamp', () => {
     updateBasePxCount,
     updateKnockoutPixel,
     getKnockoutBrightness,
+
+    // Backup/Restore methods
+    exportState,
+    restoreState,
 
     // Expression methods
     updateExpressions,
