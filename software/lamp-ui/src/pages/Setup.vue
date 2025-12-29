@@ -174,7 +174,7 @@ const ledCount = computed(() => lampStore.state.base?.px ?? 36)
               <BrightnessSlider
                 :model-value="lampStore.getKnockoutBrightness(ledIndex - 1)"
                 @update:model-value="(value) => lampStore.updateKnockoutPixel(ledIndex - 1, value)"
-                :id="`knockout-pixel-\${ledIndex - 1}`"
+                :id="`knockout-pixel-${ledIndex - 1}`"
                 :min="0"
                 :max="100"
                 append="%"
