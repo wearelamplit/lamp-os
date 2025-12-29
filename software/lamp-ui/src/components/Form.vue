@@ -174,7 +174,16 @@ const visibleFields = computed(() => {
   return props.fields.filter((field) => {
     // Handle slot type
     if (field.type === 'slot') {
-      return !isSlotEmpty(field.name)
+      return !isSlotEmpty(field.name || '')
+    }
+
+    // Group headings are always visible (no value required)
+    if (field.type === 'group-heading') {
+      // Check show condition if defined
+      if (field.show && typeof field.show === 'function') {
+        return field.show(formValues.value)
+      }
+      return true
     }
 
     // Handle regular fields
@@ -204,6 +213,20 @@ const getComponentName = (type: string): string | null => {
     return null
   }
   return getFieldComponentName(type)
+}
+
+/**
+ * Get the heading index for a group-heading field (for color rotation)
+ * Counts how many group-heading fields appear before the given index
+ */
+const getHeadingIndex = (currentIndex: number): number => {
+  let count = 0
+  for (let i = 0; i < currentIndex; i++) {
+    if (visibleFields.value[i]?.type === 'group-heading') {
+      count++
+    }
+  }
+  return count
 }
 
 /**
@@ -373,6 +396,15 @@ defineExpose({
       <!-- Slot type: render named slot -->
       <template v-if="field.type === 'slot'">
         <slot :name="field.name" />
+      </template>
+
+      <!-- Group heading: render heading with rotating colors -->
+      <template v-else-if="field.type === 'group-heading'">
+        <component
+          :is="getComponentName(field.type)"
+          :label="field.label"
+          :heading-index="getHeadingIndex(index)"
+        />
       </template>
 
       <!-- Hidden fields: render without wrapper -->

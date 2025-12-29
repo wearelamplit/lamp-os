@@ -49,6 +49,7 @@ export type FieldType =
   | 'color'
   | 'color-list'
   | 'slot'
+  | 'group-heading'
 
 /**
  * Field props that can be passed to individual field components
@@ -94,7 +95,7 @@ export interface FieldProps {
  */
 export interface FieldDefinition {
   /** Unique field name - used as key in form values */
-  name: string
+  name?: string
 
   /** Field type - determines which component to render */
   type: FieldType

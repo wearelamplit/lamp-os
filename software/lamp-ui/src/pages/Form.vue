@@ -8,6 +8,12 @@ const router = useRouter()
 
 // Example field definitions showcasing all field types
 const fields = ref<FieldDefinition[]>([
+  // Group 1: Account Settings (amber-gold)
+  {
+    name: 'accountHeading',
+    type: 'group-heading',
+    label: 'Account Settings',
+  },
   {
     name: 'username',
     type: 'text',
@@ -36,6 +42,13 @@ const fields = ref<FieldDefinition[]>([
       minLength: 8,
     },
   },
+
+  // Group 2: Feature Toggles (yellow)
+  {
+    name: 'featuresHeading',
+    type: 'group-heading',
+    label: 'Feature Toggles',
+  },
   {
     name: 'isEnabled',
     type: 'boolean',
@@ -48,6 +61,13 @@ const fields = ref<FieldDefinition[]>([
     name: 'customSlot',
     type: 'slot',
     label: 'Custom Slot',
+  },
+
+  // Group 3: Numeric Values (lime)
+  {
+    name: 'numericHeading',
+    type: 'group-heading',
+    label: 'Numeric Values',
   },
   {
     name: 'quantity',
@@ -107,6 +127,13 @@ const fields = ref<FieldDefinition[]>([
       color: 'var(--brand-glow-pink)',
     },
   },
+
+  // Group 4: Color Settings (lumen-green)
+  {
+    name: 'colorHeading',
+    type: 'group-heading',
+    label: 'Color Settings',
+  },
   {
     name: 'primaryColor',
     type: 'color',
@@ -126,6 +153,12 @@ const fields = ref<FieldDefinition[]>([
       max: 5,
       showAddButton: true,
     },
+  },
+  // Group 5: Advanced Settings (glow-pink)
+  {
+    name: 'advancedHeading',
+    type: 'group-heading',
+    label: 'Advanced Settings',
   },
   {
     name: 'hiddenId',
