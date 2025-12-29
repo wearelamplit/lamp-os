@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import InfoPanel from '@/components/InfoPanel.vue'
 
 interface Props {
   label?: string
@@ -52,9 +53,9 @@ const toggleExpanded = () => {
       {{ error }}
     </div>
 
-    <div v-else-if="helpText" class="form-field-help">
+    <InfoPanel v-else-if="helpText">
       {{ helpText }}
-    </div>
+    </InfoPanel>
   </div>
 </template>
 
@@ -122,22 +123,13 @@ const toggleExpanded = () => {
   font-size: 0.8rem;
 }
 
-.form-field-help {
-  color: var(--brand-fog-grey);
-  font-size: 0.875rem;
-  font-weight: 500;
-  margin-top: 4px;
-  line-height: 1.4;
-}
-
 /* Mobile optimizations */
 @media (max-width: 768px) {
   .form-field-label {
     font-size: 0.8rem;
   }
 
-  .form-field-error,
-  .form-field-help {
+  .form-field-error {
     font-size: 0.8rem;
   }
 }

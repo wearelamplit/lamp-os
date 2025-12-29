@@ -4,6 +4,7 @@ import NumberInput from '@/components/NumberInput.vue'
 import TextInput from '@/components/TextInput.vue'
 import BooleanInput from '@/components/BooleanInput.vue'
 import FormField from '@/components/FormField.vue'
+import InfoPanel from '@/components/InfoPanel.vue'
 import { useLampState, MAX_LEDS_BASE } from '@/composables/useLampState'
 
 const { settings, disabled, updateSetting, updateKnockoutPixel, getKnockoutBrightness } =
@@ -23,9 +24,9 @@ const { settings, disabled, updateSetting, updateKnockoutPixel, getKnockoutBrigh
         pattern="[a-z]+"
         transform="lowercase"
       />
-      <div class="password-info-text">
+      <InfoPanel>
         Names must be all lowercase letters and between 3-12 characters.
-      </div>
+      </InfoPanel>
     </FormField>
 
     <h1 class="yellow">Lamp Password</h1>
@@ -38,10 +39,10 @@ const { settings, disabled, updateSetting, updateKnockoutPixel, getKnockoutBrigh
         pattern="[ -~]+"
         :max-length="16"
       />
-      <div class="password-info-text">
+      <InfoPanel>
         Optional password to protect your lamp from changes. Between 8-16 characters. Leave empty
         for no password.
-      </div>
+      </InfoPanel>
     </FormField>
 
     <h1 class="lime">At-Home Mode</h1>
@@ -77,10 +78,10 @@ const { settings, disabled, updateSetting, updateKnockoutPixel, getKnockoutBrigh
             :max-length="32"
             pattern="[ -~]+"
           />
-          <div id="home-ssid-info" class="info-text">
+          <InfoPanel>
             When the lamp detects this WiFi network, it will automatically activate special
             home-only features and behaviors.
-          </div>
+          </InfoPanel>
         </FormField>
       </div>
     </div>
@@ -158,29 +159,6 @@ const { settings, disabled, updateSetting, updateKnockoutPixel, getKnockoutBrigh
 .home-mode-settings .form-field {
   margin-top: 8px;
   margin-bottom: 32px;
-}
-
-.home-mode-settings .info-text {
-  margin-top: 12px;
-  padding: 8px 12px;
-  background: rgba(68, 108, 156, 0.08);
-  border-left: 2px solid var(--brand-aurora-blue);
-  border-radius: 4px;
-  font-size: 0.75rem;
-  line-height: 1.4;
-  color: var(--brand-slate-grey);
-}
-
-/* Password Info Text */
-.password-info-text {
-  margin-top: 12px;
-  padding: 8px 12px;
-  background: rgba(68, 108, 156, 0.08);
-  border-left: 2px solid var(--brand-aurora-blue);
-  border-radius: 4px;
-  font-size: 0.75rem;
-  line-height: 1.4;
-  color: var(--brand-slate-grey);
 }
 
 /* Knockout Pixels Styles */

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import DynamicForm from '@/components/Form.vue'
+import ComponentForm from '@/components/Form.vue'
 import type { FieldDefinition, FormValues } from '@/types'
 
 const router = useRouter()
@@ -169,7 +169,7 @@ const resetForm = () => {
       </header>
 
       <main class="main-content">
-        <DynamicForm
+        <ComponentForm
           :fields="fields"
           v-model="formValues"
           @submit="handleSubmit"
@@ -177,12 +177,11 @@ const resetForm = () => {
         >
           <!-- Custom slot content -->
           <template #customSlot>
-            <div class="custom-slot-content">
-              <p>This is custom slot content passed to the form.</p>
-              <p>You can put any Vue component or HTML here.</p>
+            <div class="text-caption text-blue">
+              This is custom slot content passed to the form.
             </div>
           </template>
-        </DynamicForm>
+        </ComponentForm>
 
         <!-- Submitted Values Display -->
         <div v-if="submittedValues" class="submitted-values">
@@ -252,24 +251,6 @@ const resetForm = () => {
   border-radius: 16px;
   padding: 24px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-}
-
-.custom-slot-content {
-  padding: 16px;
-  background: rgba(68, 108, 156, 0.1);
-  border-radius: 8px;
-  border-left: 3px solid var(--brand-aurora-blue);
-  margin: 8px 0 24px 0;
-}
-
-.custom-slot-content p {
-  margin: 0 0 8px 0;
-  font-size: 0.9rem;
-  color: var(--brand-fog-grey);
-}
-
-.custom-slot-content p:last-child {
-  margin-bottom: 0;
 }
 
 .submitted-values {
