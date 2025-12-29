@@ -52,6 +52,7 @@ const transformInputValues = (values: FormValues): FormValues => {
   const transformed = { ...values }
 
   for (const field of props.fields) {
+    if (!field.name) continue
     if (field.transform && Array.isArray(field.transform) && field.transform.length > 0) {
       const arrayValue: unknown[] = []
       let hasAnyValue = false
@@ -85,6 +86,7 @@ const transformOutputValues = (values: FormValues): FormValues => {
   const transformed = { ...values }
 
   for (const field of props.fields) {
+    if (!field.name) continue
     if (field.transform && Array.isArray(field.transform) && field.transform.length > 0) {
       const arrayValue = transformed[field.name]
 
@@ -114,6 +116,7 @@ const formValues = ref<FormValues>(transformInputValues({ ...props.modelValue })
  * Priority: modelValue > default > undefined
  */
 const getFieldValue = (field: FieldDefinition): unknown => {
+  if (!field.name) return undefined
   // If value exists in formValues, use it
   if (field.name in formValues.value && formValues.value[field.name] !== undefined) {
     return formValues.value[field.name]
@@ -203,7 +206,7 @@ const visibleFields = computed(() => {
  */
 const setDefaultValues = () => {
   props.fields.forEach((field) => {
-    if (field.type === 'slot') return
+    if (field.type === 'slot' || !field.name) return
 
     if (!(field.name in formValues.value) && field.default !== undefined) {
       formValues.value[field.name] = field.default
@@ -259,6 +262,8 @@ const handleFieldMeta = (fieldName: string, value: unknown) => {
  * Validate a single field
  */
 const validateField = async (field: FieldDefinition): Promise<FieldValidationResult> => {
+  if (!field.name) return { valid: true }
+
   const fieldRef = fieldRefs.value[field.name]
 
   if (fieldRef && typeof fieldRef.validate === 'function') {
@@ -315,7 +320,7 @@ const handleSubmit = async () => {
   try {
     // Run onSubmit for all fields with that method
     for (const field of visibleFields.value) {
-      if (field.type === 'slot') continue
+      if (field.type === 'slot' || !field.name) continue
 
       const fieldRef = fieldRefs.value[field.name]
       if (fieldRef && typeof fieldRef.onSubmit === 'function') {
@@ -344,7 +349,7 @@ const handleSubmit = async () => {
     // Collect values from visible fields only
     const submittedValues: FormValues = {}
     for (const field of visibleFields.value) {
-      if (field.type === 'slot') continue
+      if (field.type === 'slot' || !field.name) continue
 
       if (field.name in formValues.value) {
         submittedValues[field.name] = formValues.value[field.name]
@@ -424,19 +429,19 @@ defineExpose({
       </template>
 
       <!-- Hidden fields: render without wrapper -->
-      <template v-else-if="field.type === 'hidden'">
+      <template v-else-if="field.type === 'hidden' && field.name">
         <component
           :is="getComponentName(field.type)"
-          :ref="(el: FieldComponent) => setFieldRef(field.name, el)"
+          :ref="(el: FieldComponent) => setFieldRef(field.name!, el)"
           :model-value="formValues[field.name]"
-          @update:model-value="(value: unknown) => updateFieldValue(field.name, value)"
-          @meta="(value: unknown) => handleFieldMeta(field.name, value)"
+          @update:model-value="(value: unknown) => updateFieldValue(field.name!, value)"
+          @meta="(value: unknown) => handleFieldMeta(field.name!, value)"
           v-bind="field.props"
         />
       </template>
 
       <!-- Field types: render field component with wrapper -->
-      <template v-else>
+      <template v-else-if="field.name">
         <Field
           :label="field.label"
           :help="field.help"
@@ -446,10 +451,10 @@ defineExpose({
         >
           <component
             :is="getComponentName(field.type)"
-            :ref="(el: FieldComponent) => setFieldRef(field.name, el)"
+            :ref="(el: FieldComponent) => setFieldRef(field.name!, el)"
             :model-value="formValues[field.name]"
-            @update:model-value="(value: unknown) => updateFieldValue(field.name, value)"
-            @meta="(value: unknown) => handleFieldMeta(field.name, value)"
+            @update:model-value="(value: unknown) => updateFieldValue(field.name!, value)"
+            @meta="(value: unknown) => handleFieldMeta(field.name!, value)"
             v-bind="field.props"
             :disabled="disabled || field.props?.disabled"
             :required="!field.optional"

@@ -149,7 +149,7 @@ const handleTestExpression = (expressionIndex: string) => {
         :key="expr.index"
         :label="expr.name"
         :model-value="isPanelExpanded(expr.index)"
-        @update:model-value="(isOpen) => handlePanelToggle(expr.index, isOpen)"
+        @update:model-value="(v: boolean) => handlePanelToggle(expr.index, v)"
       >
         <template #left>
           <div class="expression-toggle" @click.stop>

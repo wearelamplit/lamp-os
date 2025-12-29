@@ -22,8 +22,8 @@ const isControlled = computed(() => props.modelValue !== undefined)
 
 // Use external state when controlled, internal state when uncontrolled
 const isExpanded = computed({
-  get: () => isControlled.value ? props.modelValue : internalExpanded.value,
-  set: (value) => {
+  get: (): boolean => isControlled.value ? (props.modelValue ?? false) : internalExpanded.value,
+  set: (value: boolean) => {
     if (isControlled.value) {
       emit('update:modelValue', value)
     } else {
