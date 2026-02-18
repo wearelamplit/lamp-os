@@ -244,7 +244,7 @@ void WifiComponent::updateNetworkScan() {
   if (n > 0) {
     for (int i = 0; i < n; ++i) {
       String ssid = WiFi.SSID(i);
-      if (ssid.equals(config->lamp.homeModeSSID.c_str())) {
+      if (ssid.equalsIgnoreCase(config->lamp.homeModeSSID.c_str())) {
         homeNetworkVisible = true;
         break;
       }
