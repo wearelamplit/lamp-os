@@ -11,8 +11,6 @@ class FadeInBehavior : public AnimatedBehavior {
   using AnimatedBehavior::AnimatedBehavior;
 
  public:
-  bool allowedInHomeMode = true;
-
   void draw() override;
 
   void control() override;
