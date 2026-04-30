@@ -213,6 +213,7 @@ void WifiComponent::tick() {
   // - The user is not using the web configuration tool at the moment
   // - The lamp isn't actively receiving recent artnet packets
   if (!config->lamp.homeModeSSID.empty() &&
+      !mqttStaActive &&
       ws.count() == 0 &&
       (now < 5 || now > getLastArtnetFrameTimeMs() + DMX_ARTNET_TIMEOUT_MS - 1) &&
       now > lastNetworkScanTimeMs + 30000) {

@@ -5,6 +5,8 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 
+#include "./wifi.hpp"
+
 #define MQTT_RECONNECT_INTERVAL_MS 5000
 #define WIFI_RECONNECT_INTERVAL_MS 5000
 #define MQTT_BUFFER_SIZE 512
@@ -16,10 +18,11 @@ static MqttComponent* mqttInstance = nullptr;
 
 MqttComponent::MqttComponent() : mqttClient(wifiClient) {}
 
-void MqttComponent::begin(Config* inConfig,
+void MqttComponent::begin(Config* inConfig, WifiComponent* inWifi,
                            std::function<void(uint8_t)> onBrightnessChange,
                            std::function<void(bool)> onPowerChange) {
   config = inConfig;
+  wifiComp = inWifi;
   brightnessCallback = onBrightnessChange;
   powerCallback = onPowerChange;
   mqttInstance = this;
@@ -73,6 +76,7 @@ void MqttComponent::tick(bool homeNetworkVisible) {
   if (WiFi.isConnected()) {
     if (!staConnected) {
       staConnected = true;
+      if (wifiComp) wifiComp->mqttStaActive = true;
 #ifdef LAMP_DEBUG
       Serial.printf("[MQTT] WiFi STA connected, IP: %s\n", WiFi.localIP().toString().c_str());
 #endif
@@ -113,6 +117,7 @@ void MqttComponent::disconnectAll() {
   }
   WiFi.disconnect(false, false);  // Disconnect STA only, keep AP
   staConnected = false;
+  if (wifiComp) wifiComp->mqttStaActive = false;
 }
 
 void MqttComponent::connectMqtt() {

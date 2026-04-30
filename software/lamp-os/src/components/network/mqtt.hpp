@@ -14,6 +14,9 @@
 
 namespace lamp {
 
+// Forward declare to avoid circular include
+class WifiComponent;
+
 class MqttComponent {
  public:
   MqttComponent();
@@ -21,10 +24,12 @@ class MqttComponent {
   /**
    * @brief Initialize MQTT with config and callbacks for power/brightness control
    * @param inConfig lamp configuration reference
+   * @param inWifi wifi component reference (to coordinate STA/scan)
    * @param onBrightnessChange called when HA sets brightness (0-100)
    * @param onPowerChange called when HA toggles power
    */
-  void begin(Config* inConfig, std::function<void(uint8_t)> onBrightnessChange,
+  void begin(Config* inConfig, WifiComponent* inWifi,
+             std::function<void(uint8_t)> onBrightnessChange,
              std::function<void(bool)> onPowerChange);
 
   /**
@@ -42,6 +47,7 @@ class MqttComponent {
 
  private:
   Config* config = nullptr;
+  WifiComponent* wifiComp = nullptr;
   WiFiClient wifiClient;
   PubSubClient mqttClient;
   bool staConnected = false;

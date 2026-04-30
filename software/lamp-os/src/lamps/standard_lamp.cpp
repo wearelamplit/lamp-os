@@ -305,7 +305,7 @@ void setup() {
 
 #ifdef LAMP_MQTT_ENABLED
   mqtt.begin(
-      &config,
+      &config, &wifi,
       // brightness callback - called when HA changes brightness
       [](uint8_t level) {
         shadeStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, level));
