@@ -66,7 +66,19 @@ void WifiComponent::begin(Config *inConfig) {
 #endif
   Serial.begin(115200);
   config = inConfig;
-  serializeJson(config->asJsonDocument(), doc);
+
+  // Build the settings JSON for the GET /settings API response,
+  // stripping sensitive fields that should not be exposed
+  JsonDocument settingsDoc = config->asJsonDocument();
+  if (settingsDoc["lamp"]["homeModePassword"].is<const char*>()) {
+    settingsDoc["lamp"]["homeModePassword"] = "********";
+  }
+#ifdef LAMP_MQTT_ENABLED
+  if (settingsDoc["mqtt"]["password"].is<const char*>()) {
+    settingsDoc["mqtt"]["password"] = "********";
+  }
+#endif
+  serializeJson(settingsDoc, doc);
   WiFi.setSleep(false);
   WiFi.onEvent(onWiFiEvent);
   toApMode();
@@ -128,6 +140,23 @@ void WifiComponent::begin(Config *inConfig) {
           for (size_t i = 0; i < len; i++) {
             buf.concat((char)data[i]);
           }
+
+          // Restore masked passwords with their original values before saving
+          JsonDocument incoming;
+          if (!deserializeJson(incoming, buf)) {
+            String masked = "********";
+            if (incoming["lamp"]["homeModePassword"].as<String>() == masked) {
+              incoming["lamp"]["homeModePassword"] = config->lamp.homeModePassword;
+            }
+#ifdef LAMP_MQTT_ENABLED
+            if (incoming["mqtt"]["password"].as<String>() == masked) {
+              incoming["mqtt"]["password"] = config->mqtt.password;
+            }
+#endif
+            buf = "";
+            serializeJson(incoming, buf);
+          }
+
           prefs.begin("lamp", false);
           status = prefs.putString("cfg", buf);
           prefs.end();

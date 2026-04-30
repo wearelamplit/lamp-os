@@ -522,9 +522,9 @@ onUnmounted(() => {
 
                 <FormField label="Home Network Password" id="homeModePassword">
                   <TextInput
-                    :model-value="settings.lamp?.homeModePassword || ''"
+                    :model-value="settings.lamp?.homeModePassword === '********' ? '' : (settings.lamp?.homeModePassword || '')"
                     @update:model-value="(value) => updateSetting('lamp.homeModePassword', value)"
-                    placeholder="Enter your home WiFi password"
+                    :placeholder="settings.lamp?.homeModePassword === '********' ? 'Password saved (enter to change)' : 'Enter your home WiFi password'"
                     :disabled="disabled"
                     :max-length="64"
                   />
@@ -582,9 +582,9 @@ onUnmounted(() => {
 
                   <FormField label="Password" id="mqttPassword">
                     <TextInput
-                      :model-value="settings.mqtt?.password || ''"
+                      :model-value="settings.mqtt?.password === '********' ? '' : (settings.mqtt?.password || '')"
                       @update:model-value="(value) => updateSetting('mqtt.password', value)"
-                      placeholder="Optional"
+                      :placeholder="settings.mqtt?.password === '********' ? 'Password saved (enter to change)' : 'Optional'"
                       :disabled="disabled"
                       :max-length="64"
                     />
