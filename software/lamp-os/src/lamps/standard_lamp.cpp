@@ -8,6 +8,9 @@
 #include <string>
 
 #include "../components/network/bluetooth.hpp"
+#ifdef LAMP_MQTT_ENABLED
+#include "../components/network/mqtt.hpp"
+#endif
 #include "../components/network/wifi.hpp"
 #include "../expressions/expression_manager.hpp"
 #include "../util/color.hpp"
@@ -48,6 +51,10 @@ lamp::FadeOutBehavior baseFadeOutBehavior;
 lamp::KnockoutBehavior baseKnockoutBehavior;
 lamp::ExpressionManager expressionManager;
 lamp::Config config;
+#ifdef LAMP_MQTT_ENABLED
+lamp::MqttComponent mqtt;
+bool mqttPowerState = true;
+#endif
 unsigned long lastHomeModeUpdateMs = 0;
 bool lastHomeMode = false;  // Track previous home mode state
 
@@ -210,6 +217,9 @@ void handleWebSocket() {
       // Apply immediately for real-time control
       shadeStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, level));
       baseStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, level));
+#ifdef LAMP_MQTT_ENABLED
+      mqtt.publishState();
+#endif
     } else if (action == "knockout") {
       int pixelIndex = doc["p"];
       int percentage = doc["b"];
@@ -292,6 +302,23 @@ void setup() {
   shade.begin(lamp::buildGradientWithStops(config.shade.px, config.shade.colors), config.shade.px, &shadeStrip);
   base.begin(lamp::buildGradientWithStops(config.base.px, config.base.colors), config.base.px, &baseStrip);
   initBehaviors();
+
+#ifdef LAMP_MQTT_ENABLED
+  mqtt.begin(
+      &config,
+      // brightness callback - called when HA changes brightness
+      [](uint8_t level) {
+        shadeStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, level));
+        baseStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, level));
+      },
+      // power callback - called when HA toggles power
+      [](bool on) {
+        mqttPowerState = on;
+        uint8_t level = on ? config.lamp.brightness : 0;
+        shadeStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, level));
+        baseStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, level));
+      });
+#endif
 };
 
 void loop() {
@@ -299,6 +326,10 @@ void loop() {
   handleArtnet();
   handleWebSocket();
   wifi.tick();
+
+#ifdef LAMP_MQTT_ENABLED
+  mqtt.tick(wifi.isHomeNetworkVisible());
+#endif
 
   // Update compositor home mode state periodically for social behaviors
   static constexpr uint32_t HOME_MODE_UPDATE_INTERVAL_MS = 30000;

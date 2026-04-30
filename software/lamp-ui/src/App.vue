@@ -519,6 +519,92 @@ onUnmounted(() => {
                     home-only features and behaviors.
                   </div>
                 </FormField>
+
+                <FormField label="Home Network Password" id="homeModePassword">
+                  <TextInput
+                    :model-value="settings.lamp?.homeModePassword || ''"
+                    @update:model-value="(value) => updateSetting('lamp.homeModePassword', value)"
+                    placeholder="Enter your home WiFi password"
+                    :disabled="disabled"
+                    :max-length="64"
+                  />
+                  <div class="info-text">
+                    Required for smart home features. The lamp will connect to your home WiFi to
+                    communicate with your MQTT broker.
+                  </div>
+                </FormField>
+              </div>
+            </div>
+
+            <!-- MQTT Smart Home Section (only visible when home mode is enabled) -->
+            <div v-if="settings.lamp?.homeMode" class="mqtt-settings">
+              <h1 class="teal">Smart Home (MQTT)</h1>
+              <div class="mode-toggles">
+                <FormField label="Enable MQTT" id="mqttEnabled">
+                  <BooleanInput
+                    :model-value="settings.mqtt?.enabled || false"
+                    @update:model-value="(value) => updateSetting('mqtt.enabled', value)"
+                    :disabled="disabled"
+                  />
+                </FormField>
+
+                <div v-if="settings.mqtt?.enabled" class="mqtt-connection-settings">
+                  <FormField label="Broker Host" id="mqttBrokerHost">
+                    <TextInput
+                      :model-value="settings.mqtt?.brokerHost || ''"
+                      @update:model-value="(value) => updateSetting('mqtt.brokerHost', value)"
+                      placeholder="e.g. 192.168.1.100"
+                      :disabled="disabled"
+                      :max-length="128"
+                    />
+                  </FormField>
+
+                  <FormField label="Broker Port" id="mqttBrokerPort">
+                    <NumberInput
+                      :model-value="settings.mqtt?.brokerPort ?? 1883"
+                      @update:model-value="(value) => updateSetting('mqtt.brokerPort', value)"
+                      :min="1"
+                      :max="65535"
+                      placeholder="1883"
+                      :disabled="disabled"
+                    />
+                  </FormField>
+
+                  <FormField label="Username" id="mqttUsername">
+                    <TextInput
+                      :model-value="settings.mqtt?.username || ''"
+                      @update:model-value="(value) => updateSetting('mqtt.username', value)"
+                      placeholder="Optional"
+                      :disabled="disabled"
+                      :max-length="64"
+                    />
+                  </FormField>
+
+                  <FormField label="Password" id="mqttPassword">
+                    <TextInput
+                      :model-value="settings.mqtt?.password || ''"
+                      @update:model-value="(value) => updateSetting('mqtt.password', value)"
+                      placeholder="Optional"
+                      :disabled="disabled"
+                      :max-length="64"
+                    />
+                  </FormField>
+
+                  <FormField label="Topic Prefix" id="mqttTopicPrefix">
+                    <TextInput
+                      :model-value="settings.mqtt?.topicPrefix || ''"
+                      @update:model-value="(value) => updateSetting('mqtt.topicPrefix', value)"
+                      placeholder="homeassistant"
+                      :disabled="disabled"
+                      :max-length="64"
+                    />
+                  </FormField>
+
+                  <div class="info-text">
+                    Your lamp will connect to your home WiFi and appear automatically in Home
+                    Assistant. MQTT is only active when the lamp detects your home network.
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -806,16 +892,20 @@ textarea {
 }
 
 /* Home Mode SSID Styles */
-.home-mode-settings {
+.home-mode-settings,
+.mqtt-settings,
+.mqtt-connection-settings {
   animation: fadeIn 0.3s ease-in-out;
 }
 
-.home-mode-settings .form-field {
+.home-mode-settings .form-field,
+.mqtt-connection-settings .form-field {
   margin-top: 8px;
   margin-bottom: 32px;
 }
 
-.home-mode-settings .info-text {
+.home-mode-settings .info-text,
+.mqtt-connection-settings .info-text {
   margin-top: 12px;
   padding: 8px 12px;
   background: rgba(68, 108, 156, 0.08);
