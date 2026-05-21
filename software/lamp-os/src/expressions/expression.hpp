@@ -62,6 +62,8 @@ class Expression : public AnimatedBehavior {
  public:
   using AnimatedBehavior::AnimatedBehavior;
 
+  virtual ~Expression() = default;
+
   /**
    * @brief Configure expression parameters (initial setup)
    * @param inColors Color palette for the expression

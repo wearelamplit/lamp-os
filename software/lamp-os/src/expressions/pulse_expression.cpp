@@ -37,12 +37,10 @@ void PulseExpression::configureFromParameters(const std::map<std::string, uint32
   static constexpr uint32_t PULSE_WIDTH = 15;
   pulseWidth = PULSE_WIDTH;
 
-  // Default to white if no colors provided
   if (colors.empty()) {
-    colors.push_back(Color(255, 255, 255, 255));
+    colors.push_back(Color(0, 0, 0, 255));
   }
 
-  // Start with first color
   pulseColor = colors[0];
 }
 
@@ -77,7 +75,7 @@ void PulseExpression::updateWavePosition() {
     return;
   }
 
-  uint32_t deltaMs = currentMs - lastUpdateMs;
+  uint32_t deltaMs = std::min(currentMs - lastUpdateMs, (uint32_t)100);
 
   // Calculate how far to move based on speed
   float pixelsToMove = static_cast<float>(deltaMs) / static_cast<float>(pulseSpeedMs);
@@ -157,7 +155,9 @@ void PulseExpression::draw() {
   if (wavePosition > fb->pixelCount + (2 * pulseWidth)) {
     // Wave has completely passed, safe to stop
     if (animationState != STOPPED) {
-      stop();
+      animationState = STOPPED;
+      frame = 0;
+      currentLoop += 1;
     }
   }
 

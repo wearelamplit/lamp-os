@@ -28,6 +28,7 @@ void GlitchyExpression::configureFromParameters(const std::map<std::string, uint
 }
 
 void GlitchyExpression::onTrigger() {
+  saveBufferState();
   glitchColor = getRandomColor();
 
   // Randomly pick duration between min and max

@@ -26,12 +26,10 @@ void BreathingExpression::configureFromParameters(const std::map<std::string, ui
   // Color change intervals are set by base Expression::configure() in intervalMinMs/MaxMs
   // No need to read them from parameters
 
-  // Default to white if no colors provided
   if (colors.empty()) {
-    colors.push_back(Color(255, 255, 255, 255));
+    colors.push_back(Color(0, 0, 0, 255));
   }
 
-  // Start with first color
   targetColor = colors[0];
 }
 
@@ -83,9 +81,6 @@ void BreathingExpression::updateBreathPhase() {
 }
 
 void BreathingExpression::onTrigger() {
-  // Save base colors
-  saveBufferState();
-
   // Initialize breath state
   breathPhase = 0.0f;
   lastBreathUpdateMs = 0;
@@ -108,9 +103,6 @@ void BreathingExpression::onUpdate() {
 }
 
 void BreathingExpression::control() {
-  // Pause if an exclusive behavior is running (unless we are exclusive)
-  if (shouldPause()) return;
-
   // For breathing, we want to always be running (no interval-based triggering)
   // If stopped, trigger immediately to start
   if (animationState == STOPPED) {
@@ -132,19 +124,11 @@ void BreathingExpression::draw() {
     return;
   }
 
-  // Calculate breath intensity using cosine wave
-  // Map phase (0-1) to: 0.5 - 0.5 * cos(phase * 2π)
-  // This starts at 0 (base color) and smoothly breathes to 1 (target color) and back
-  float sineValue = 0.5f - 0.5f * cos(breathPhase * 2.0f * PI);
+  float intensity = 0.5f - 0.5f * cosf(breathPhase * 2.0f * static_cast<float>(M_PI));
+  uint32_t breathIntensity = static_cast<uint32_t>(intensity * 100.0f);
 
-  // Convert to 0-100 range for fadeLinear
-  uint32_t breathIntensity = static_cast<uint32_t>(sineValue * 100.0f);
-
-  // Blend each pixel between base color and target color
   for (int i = 0; i < fb->pixelCount; i++) {
-    // savedBuffer contains the base colors
-    // targetColor is what we're breathing towards
-    fb->buffer[i] = fadeLinear(savedBuffer[i], targetColor, 100, breathIntensity);
+    fb->buffer[i] = fadeLinear(fb->buffer[i], targetColor, 100, breathIntensity);
   }
 
   nextFrame();

@@ -41,8 +41,8 @@ void ShiftyExpression::startShift() {
   if (!colors.empty()) {
     shiftedColor = getRandomColor();
   } else {
-    // Fallback to white if no colors configured
-    shiftedColor = Color(255, 255, 255, 255);
+    // Fallback to white (W channel only) if no colors configured
+    shiftedColor = Color(0, 0, 0, 255);
   }
 
   // For fade start, use current buffer state
@@ -84,6 +84,8 @@ uint32_t ShiftyExpression::getRandomShiftDuration() {
 }
 
 void ShiftyExpression::onTrigger() {
+  saveBufferState();
+
   // If we're already animating, cancel and start fresh
   // This allows manual triggers to work at any time
   if (state != IDLE) {
