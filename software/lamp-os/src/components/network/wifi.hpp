@@ -26,6 +26,7 @@ class WifiComponent {
   JsonDocument lastWebSocketData;
   bool homeNetworkVisible = false;
   unsigned long lastNetworkScanTimeMs = 0;
+  bool scanInProgress = false;
 
   WifiComponent();
 
@@ -87,11 +88,6 @@ class WifiComponent {
    * @return true if home network SSID is detected in scan results
    */
   bool isHomeNetworkVisible();
-
-  /**
-   * @brief Update network scan results to check for home SSID
-   */
-  void updateNetworkScan();
 };
 }  // namespace lamp
 #endif

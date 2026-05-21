@@ -184,11 +184,28 @@ void WifiComponent::tick() {
   // - The user is not using the web configuration tool at the moment
   // - The lamp isn't actively receiving recent artnet packets
   if (!config->lamp.homeModeSSID.empty() &&
+      !scanInProgress &&
       ws.count() == 0 &&
       (now < 5 || now > getLastArtnetFrameTimeMs() + DMX_ARTNET_TIMEOUT_MS - 1) &&
       now > lastNetworkScanTimeMs + 30000) {
-    updateNetworkScan();
+    WiFi.scanNetworks(true);
+    scanInProgress = true;
     lastNetworkScanTimeMs = now;
+  }
+
+  if (scanInProgress) {
+    int16_t result = WiFi.scanComplete();
+    if (result != WIFI_SCAN_RUNNING) {
+      homeNetworkVisible = false;
+      for (int16_t i = 0; i < result; ++i) {
+        if (WiFi.SSID(i).equalsIgnoreCase(config->lamp.homeModeSSID.c_str())) {
+          homeNetworkVisible = true;
+          break;
+        }
+      }
+      WiFi.scanDelete();
+      scanInProgress = false;
+    }
   }
 };
 
@@ -230,26 +247,5 @@ void WifiComponent::toApMode() {
 
 bool WifiComponent::isHomeNetworkVisible() {
   return homeNetworkVisible;
-};
-
-void WifiComponent::updateNetworkScan() {
-  if (config->lamp.homeModeSSID.empty()) {
-    homeNetworkVisible = false;
-    return;
-  }
-
-  homeNetworkVisible = false;
-
-  int n = WiFi.scanNetworks();
-  if (n > 0) {
-    for (int i = 0; i < n; ++i) {
-      String ssid = WiFi.SSID(i);
-      if (ssid.equalsIgnoreCase(config->lamp.homeModeSSID.c_str())) {
-        homeNetworkVisible = true;
-        break;
-      }
-    }
-  }
-  WiFi.scanDelete();
 };
 }  // namespace lamp
