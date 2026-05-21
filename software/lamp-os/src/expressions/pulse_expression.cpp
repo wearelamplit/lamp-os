@@ -71,6 +71,7 @@ void PulseExpression::updateWavePosition() {
     return;
   }
 
+  // Cap so a long pause (e.g. exclusive expression) doesn't teleport the wave on resume.
   uint32_t deltaMs = std::min(currentMs - lastUpdateMs, (uint32_t)100);
 
   // Calculate how far to move based on speed
@@ -127,38 +128,22 @@ void PulseExpression::draw() {
     updateWavePosition();
   }
 
-  // Apply pulse effect
-  int pixelsAffected = 0;
   for (int i = 0; i < fb->pixelCount; i++) {
     uint32_t blendFactor = calculateBlendFactor(i);
-
-    if (blendFactor > 0) {  // Skip pixels with no blend
-      // Blend pulse color with current buffer
-      // blendFactor is 0-100 (percentage)
+    if (blendFactor > 0) {
       fb->buffer[i] = fadeLinear(fb->buffer[i], pulseColor, 100, blendFactor);
-      pixelsAffected++;
-
     }
   }
 
-
-  // Advance animation frame
   nextFrame();
 
-  // Check if wave has completely cleared the strip
-  // Wave extends pulseWidth on both sides, so center needs to be at pixelCount + (2 * pulseWidth)
-  // for the trailing edge to clear pixelCount
+  // Wave extends pulseWidth on both sides — wait for the trailing edge to clear before stopping.
   if (wavePosition > fb->pixelCount + (2 * pulseWidth)) {
-    // Wave has completely passed, safe to stop
     if (animationState != STOPPED) {
       animationState = STOPPED;
       frame = 0;
       currentLoop += 1;
     }
-  }
-
-  // Check if animation just completed
-  if (animationState == STOPPED && frame == 0) {  // frame resets to 0 when stopped
   }
 }
 

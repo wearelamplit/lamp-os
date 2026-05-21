@@ -54,10 +54,6 @@ void GlitchyExpression::draw() {
   }
 
   nextFrame();
-
-  // Check if animation just completed
-  if (animationState == STOPPED && frame >= frames) {
-  }
 }
 
 }  // namespace lamp
