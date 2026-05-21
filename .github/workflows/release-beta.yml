@@ -1,0 +1,45 @@
+name: Release (beta)
+
+on:
+  push:
+    branches:
+      - beta
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: distribution
+      - uses: actions/download-artifact@v4
+        with:
+          name: updates
+          path: updates
+      - name: Replace rolling beta release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release delete beta --yes --cleanup-tag --repo "$GITHUB_REPOSITORY" || true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: beta
+          name: Beta build
+          prerelease: true
+          make_latest: 'false'
+          body: |
+            Rolling beta build from `beta` branch (commit ${{ github.sha }}).
+
+            Unstable, untested — use at your own risk.
+          files: |
+            distribution.bin
+            updates/bootloader.bin
+            updates/partitions.bin
+            updates/firmware.bin
+            updates/spiffs.bin
