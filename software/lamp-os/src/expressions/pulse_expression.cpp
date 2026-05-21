@@ -37,10 +37,6 @@ void PulseExpression::configureFromParameters(const std::map<std::string, uint32
   static constexpr uint32_t PULSE_WIDTH = 15;
   pulseWidth = PULSE_WIDTH;
 
-  if (colors.empty()) {
-    colors.push_back(Color(0, 0, 0, 255));
-  }
-
   pulseColor = colors[0];
 }
 

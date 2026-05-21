@@ -24,6 +24,9 @@ void Expression::configure(const std::vector<Color>& inColors,
                           uint32_t inIntervalMax,
                           ExpressionTarget inTarget) {
   colors = inColors;
+  if (colors.empty()) {
+    colors.push_back(Color(0, 0, 0, 255));
+  }
   intervalMinMs = inIntervalMin * 1000;
   intervalMaxMs = inIntervalMax * 1000;
   target = inTarget;

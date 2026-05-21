@@ -28,22 +28,10 @@ void ShiftyExpression::configureFromParameters(const std::map<std::string, uint3
   shiftDurationMinMs = shiftDurationMin * 1000;
   shiftDurationMaxMs = shiftDurationMax * 1000;
   fadeDurationFrames = fadeDuration * 30;  // Convert seconds to frames at 30fps
-
-
-  // If no colors configured, use current buffer colors as default
-  if (colors.empty() && fb && fb->pixelCount > 0) {
-    colors.push_back(fb->buffer[0]);
-  }
 }
 
 void ShiftyExpression::startShift() {
-  // Pick a random color to shift to
-  if (!colors.empty()) {
-    shiftedColor = getRandomColor();
-  } else {
-    // Fallback to white (W channel only) if no colors configured
-    shiftedColor = Color(0, 0, 0, 255);
-  }
+  shiftedColor = getRandomColor();
 
   // For fade start, use current buffer state
   fadeStartColors = fb->buffer;

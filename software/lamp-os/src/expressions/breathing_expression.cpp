@@ -26,10 +26,6 @@ void BreathingExpression::configureFromParameters(const std::map<std::string, ui
   // Color change intervals are set by base Expression::configure() in intervalMinMs/MaxMs
   // No need to read them from parameters
 
-  if (colors.empty()) {
-    colors.push_back(Color(0, 0, 0, 255));
-  }
-
   targetColor = colors[0];
 }
 
