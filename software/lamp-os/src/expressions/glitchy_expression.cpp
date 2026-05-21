@@ -31,13 +31,7 @@ void GlitchyExpression::onTrigger() {
   saveBufferState();
   glitchColor = getRandomColor();
 
-  // Randomly pick duration between min and max
-  if (glitchDurationMin == glitchDurationMax) {
-    frames = glitchDurationMin;
-  } else {
-    std::uniform_int_distribution<uint32_t> durationDist(glitchDurationMin, glitchDurationMax);
-    frames = durationDist(rng);
-  }
+  frames = randomInRange(glitchDurationMin, glitchDurationMax);
 
 }
 

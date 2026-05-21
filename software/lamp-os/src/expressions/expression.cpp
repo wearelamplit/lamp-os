@@ -31,8 +31,7 @@ void Expression::configure(const std::vector<Color>& inColors,
 }
 
 void Expression::scheduleNextTrigger() {
-  std::uniform_int_distribution<uint32_t> dist(intervalMinMs, intervalMaxMs);
-  nextTriggerMs = millis() + dist(rng);
+  nextTriggerMs = millis() + randomInRange(intervalMinMs, intervalMaxMs);
 }
 
 void Expression::saveBufferState() {
@@ -92,8 +91,7 @@ Color Expression::getRandomColor() {
   if (colors.empty()) {
     return Color(0, 0, 0, 0);
   }
-  std::uniform_int_distribution<size_t> dist(0, colors.size() - 1);
-  return colors[dist(rng)];
+  return colors[esp_random() % colors.size()];
 }
 
 void Expression::trigger() {

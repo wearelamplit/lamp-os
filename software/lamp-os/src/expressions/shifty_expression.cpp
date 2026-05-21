@@ -78,9 +78,7 @@ void ShiftyExpression::startUnshift() {
 }
 
 uint32_t ShiftyExpression::getRandomShiftDuration() {
-  std::uniform_int_distribution<uint32_t> dist(shiftDurationMinMs,
-                                                shiftDurationMaxMs);
-  return dist(rng);
+  return randomInRange(shiftDurationMinMs, shiftDurationMaxMs);
 }
 
 void ShiftyExpression::onTrigger() {

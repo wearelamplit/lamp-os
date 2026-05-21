@@ -1,9 +1,10 @@
 #ifndef LAMP_EXPRESSIONS_EXPRESSION_H
 #define LAMP_EXPRESSIONS_EXPRESSION_H
 
+#include <esp_random.h>
+
 #include <cstdint>
 #include <map>
-#include <random>
 #include <variant>
 #include <vector>
 
@@ -17,6 +18,10 @@ class Compositor;
 
 // Set global compositor for expressions to check exclusive state
 void setGlobalCompositor(Compositor* compositor);
+
+inline uint32_t randomInRange(uint32_t min, uint32_t max) {
+  return (max <= min) ? min : min + (esp_random() % (max - min + 1));
+}
 
 enum ExpressionTarget {
   TARGET_SHADE = 1,
@@ -37,7 +42,6 @@ class Expression : public AnimatedBehavior {
   uint32_t intervalMaxMs = 900000;  // 15 min default
   uint32_t lastCompletedLoop = 0;   // Track last completed animation loop
   ExpressionTarget target = TARGET_BOTH;
-  std::mt19937 rng{esp_random()};
 
   /**
    * @brief Schedule next trigger within configured interval range
