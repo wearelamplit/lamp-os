@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distribution
+      - uses: actions/download-artifact@v4
+        with:
+          name: updates
+          path: updates
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            distribution.bin
+            updates/bootloader.bin
+            updates/partitions.bin
+            updates/firmware.bin
+            updates/spiffs.bin
