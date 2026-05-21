@@ -24,6 +24,7 @@ jobs:
           path: updates
       - uses: softprops/action-gh-release@v2
         with:
+          make_latest: legacy
           files: |
             distribution.bin
             updates/bootloader.bin
