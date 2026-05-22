@@ -4,7 +4,6 @@
 #include <ArduinoJson.h>
 #include <AsyncJson.h>
 #include <AsyncTCP.h>
-#include <DNSServer.h>
 #include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
 #include <ElegantOTA.h>
@@ -23,7 +22,6 @@ static AsyncWebServer server(80);
 static AsyncWebSocketMessageHandler wsHandler;
 static AsyncWebSocket ws("/ws", wsHandler.eventHandler());
 static AsyncCorsMiddleware cors;
-static DNSServer dnsServer;
 Preferences prefs;
 
 #ifdef LAMP_DEBUG
@@ -49,24 +47,14 @@ void onWiFiEvent(WiFiEvent_t event) {
 #endif
 };
 
-// Intercepts only the well-known captive-portal-detection URLs each OS pings to
-// decide whether the WiFi has internet. Responding with a redirect triggers the
-// "Sign in to network" notification on Android and the equivalent popup on iOS.
 class CaptiveRequestHandler : public AsyncWebHandler {
  public:
-  bool canHandle(AsyncWebServerRequest *request) const override {
-    const String &u = request->url();
-    return u == "/generate_204"             // Android
-        || u == "/gen_204"                  // Android (older)
-        || u == "/hotspot-detect.html"      // iOS / macOS
-        || u == "/library/test/success.html"  // iOS
-        || u == "/connecttest.txt"          // Windows
-        || u == "/ncsi.txt"                 // Windows
-        || u == "/redirect";                // Windows
+  bool canHandle(__unused AsyncWebServerRequest *request) const override {
+    return true;
   };
 
   void handleRequest(AsyncWebServerRequest *request) {
-    request->redirect("http://192.168.4.1/");
+    request->send(SPIFFS, "/index.html.gz", String(), false);
   };
 };
 
@@ -173,16 +161,12 @@ void WifiComponent::begin(Config *inConfig) {
   });
   server.addMiddleware(&cors);
   server.addHandler(&ws);
-  server.addHandler(new CaptiveRequestHandler()).setFilter(ON_AP_FILTER);
   server.begin();
-  dnsServer.start(53, "*", WiFi.softAPIP());
   artnet.begin();
 };
 
 void WifiComponent::tick() {
   uint32_t now = millis();
-
-  dnsServer.processNextRequest();
 
   if (now > lastWebSocketCleanTimeMs + WEBSOCKET_CLEAN_TIME_MS &&
       now > lastWebSocketUpdateTimeMs + WEBSOCKET_CLEAN_TIME_MS) {
