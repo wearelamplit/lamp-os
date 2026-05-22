@@ -105,8 +105,7 @@ void Expression::trigger() {
   }
 
 
-  // Save current state and start immediately
-  saveBufferState();
+  // Start immediately
   onTrigger();            // Expression-specific setup
   scheduleNextTrigger();  // Reset next automatic trigger
   playOnce();

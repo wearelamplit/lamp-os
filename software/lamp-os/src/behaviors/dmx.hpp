@@ -42,7 +42,6 @@ class DmxBehavior : public AnimatedBehavior {
 
   // keep track if artnet input is still incoming
   uint32_t lastArtnetFrameTimeMs = 0;
-  bool allowedInHomeMode = true;
 
   void draw();
 

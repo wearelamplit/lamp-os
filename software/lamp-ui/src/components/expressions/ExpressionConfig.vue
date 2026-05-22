@@ -17,7 +17,7 @@
     </FormField>
 
     <!-- Colors Configuration -->
-    <FormField label="Colors (Randomly Selected)" id="expression-colors">
+    <FormField :label="expression.type === 'breathing' ? 'Breathing Color' : 'Colors (Randomly Selected)'" id="expression-colors">
       <div class="colors-container">
         <div v-for="(color, index) in expression.colors" :key="index" class="color-item">
           <ColorPicker
@@ -51,7 +51,7 @@
     </FormField>
 
     <!-- Interval Configuration -->
-    <div class="interval-section">
+    <div v-if="expression.type !== 'breathing'" class="interval-section">
       <div class="interval-header">
         <span class="interval-label">Random Trigger Interval</span>
       </div>
@@ -206,6 +206,27 @@
         <span class="duration-value">{{ expression.pulseSpeed || 3 }}s</span>
       </div>
     </FormField>
+
+    <!-- Breathing-specific Configuration -->
+    <FormField
+      v-if="expression.type === 'breathing'"
+      label="Breath Speed"
+      id="expression-breath-speed"
+    >
+      <div class="duration-container">
+        <NumberSlider
+          id="breath-speed"
+          :model-value="expression.breathSpeed || 10"
+          @update:model-value="(value) => updateField('breathSpeed', value)"
+          :min="5"
+          :max="30"
+          :step="1"
+          :disabled="disabled"
+          prepend="time"
+        />
+        <span class="duration-value">{{ expression.breathSpeed || 10 }}s</span>
+      </div>
+    </FormField>
   </div>
 </template>
 
@@ -229,6 +250,7 @@ interface Expression {
   shiftDurationMin?: number
   shiftDurationMax?: number
   pulseSpeed?: number
+  breathSpeed?: number
 }
 
 type Scalar = null | boolean | number | string
