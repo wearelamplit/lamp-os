@@ -10,6 +10,7 @@
 #include "./glitchy_expression.hpp"
 #include "./shifty_expression.hpp"
 #include "./pulse_expression.hpp"
+#include "./breathing_expression.hpp"
 
 namespace lamp {
 

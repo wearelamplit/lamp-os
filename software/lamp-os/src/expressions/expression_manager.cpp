@@ -63,6 +63,11 @@ void ExpressionManager::addExpression(const ExpressionConfig& config) {
       pulseExpr->configure(config.colors, config.intervalMin, config.intervalMax, target);
       pulseExpr->configureFromParameters(config.parameters);
       expr = std::move(pulseExpr);
+    } else if (config.type == "breathing") {
+      auto breathingExpr = std::make_unique<BreathingExpression>(buffer, 60);
+      breathingExpr->configure(config.colors, config.intervalMin, config.intervalMax, target);
+      breathingExpr->configureFromParameters(config.parameters);
+      expr = std::move(breathingExpr);
     }
 
     return expr;

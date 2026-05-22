@@ -197,6 +197,52 @@
         }
       }
     ]
+  },
+  {
+    "index": "breathing",
+    "name": "Breathing",
+    "description": "Continuous breathing effect that fades between base and accent color",
+    "fields": [
+      {
+        "name": "target",
+        "type": "number-slider",
+        "label": "Target",
+        "help": "Where to apply the expression (1=Shade, 2=Base, 3=Both)",
+        "default": 2,
+        "optional": true,
+        "props": {
+          "min": 1,
+          "max": 3,
+          "step": 1
+        }
+      },
+      {
+        "name": "colors",
+        "type": "color-list",
+        "label": "Breathing Colors",
+        "help": "Colors to cycle through while breathing (cycles top to bottom, then bottom to top)",
+        "default": ["#C869C8FF"],
+        "optional": true,
+        "props": {
+          "max": 8,
+          "showAddButton": true
+        }
+      },
+      {
+        "name": "breathSpeed",
+        "type": "number-slider",
+        "label": "Breath Speed",
+        "help": "Duration of one complete breath cycle",
+        "default": 10,
+        "optional": true,
+        "props": {
+          "min": 10,
+          "max": 30,
+          "step": 1,
+          "append": "s"
+        }
+      }
+    ]
   }
 ]
 
