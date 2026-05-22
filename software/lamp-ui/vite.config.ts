@@ -19,27 +19,31 @@ const inlineAssetsPlugin = () => ({
     try {
       let html = readFileSync(htmlPath, 'utf-8')
 
-      // Inline CSS
+      // Inline CSS. Use a function replacement so $ characters in the CSS
+      // (e.g. `content: "$x"`) don't get interpreted by String.replace.
       if (existsSync(cssPath)) {
         const css = readFileSync(cssPath, 'utf-8')
-        html = html.replace(/<link rel="stylesheet" href="\/index\.css">/, `<style>${css}</style>`)
-        // Remove the CSS file
+        html = html.replace(
+          /<link rel="stylesheet" href="\/index\.css">/,
+          () => `<style>${css}</style>`,
+        )
         unlinkSync(cssPath)
       }
 
-      // Inline JS. Escape </script> inside the bundle — vue-router (and other
-      // libs) ship strings like "<script ...></script>" in their code, and
-      // when those are embedded raw into an inline <script>, the HTML parser
-      // sees the embedded </script> and closes the script tag mid-bundle.
-      // <\/script> is equivalent to </script> in a JS string but does not
-      // terminate an HTML script element.
+      // Inline JS. MUST use a function replacement: vue-router's bundled code
+      // contains the literal characters `$&` (a regex backreference in
+      // `value.replace(ls, "\\$&")`), and String.replace with a string
+      // replacement treats `$&` as "the matched substring". That would
+      // inject the entire external <script ...></script> tag pattern back
+      // into the inlined JS, which the HTML parser then sees as a real
+      // closing tag and ends the script element mid-bundle — corrupting the
+      // page so the rest of the JS renders as visible text.
       if (existsSync(jsPath)) {
-        const js = readFileSync(jsPath, 'utf-8').replace(/<\/script>/g, '<\\/script>')
+        const js = readFileSync(jsPath, 'utf-8')
         html = html.replace(
           /<script type="module" crossorigin src="\/index\.js"><\/script>/,
-          `<script type="module">${js}</script>`,
+          () => `<script type="module">${js}</script>`,
         )
-        // Remove the JS file
         unlinkSync(jsPath)
       }
 
