@@ -1,3 +1,4 @@
+<!-- eslint-disable vue/multi-word-component-names -->
 <script setup lang="ts">
 import LamplitLogo from '@/components/LamplitLogo.vue'
 </script>
@@ -6,24 +7,52 @@ import LamplitLogo from '@/components/LamplitLogo.vue'
   <section class="tab-panel" aria-label="Information">
     <div class="info-content">
       <div class="logo-container">
-        <LamplitLogo />
+        <LamplitLogo style="width: 50%; max-width: 200px;" />
       </div>
-      <p>
-        Lamplit Art Society is a non-profit collective dedicated to sparking inspiration and
-        providing opportunities for people to connect, celebrate, grow, and inspire others through
-        shared creative experiences.
-      </p>
-      <p>
-        The lamps are the art project from which our society grew. Their surreal and vivid presence
-        captivates audiences, fosters unexpected connections, inspires creativity and play, and
-        illuminates spaces.
-      </p>
-      <p>
-        As stewards of this decentralized and open source project, we maintain its core vision while
-        welcoming contributors and artists to build, adopt, or share these lamps with their
-        communities.
-      </p>
-      <p>Find more info at <b>lamplit.ca</b></p>
+
+      <div class="tagline">
+        <span class="tagline-icon">✦</span>
+        Sparking inspiration through shared creative experiences
+      </div>
+
+      <div class="info-section">
+        <h3 class="section-title">
+          <span class="title-accent">About</span> Lamplit Art Society
+        </h3>
+        <p>
+          A non-profit collective dedicated to sparking inspiration and
+          providing opportunities for people to <em>connect</em>, <em>celebrate</em>,
+          <em>grow</em>, and <em>inspire</em> others through shared creative experiences.
+        </p>
+      </div>
+
+      <div class="info-section">
+        <h3 class="section-title">
+          <span class="title-accent">The</span> Lamps
+        </h3>
+        <p>
+          The art project from which our society grew. Their surreal and vivid presence
+          captivates audiences, fosters unexpected connections, inspires creativity and play,
+          and illuminates spaces.
+        </p>
+      </div>
+
+      <div class="info-section">
+        <h3 class="section-title">
+          <span class="title-accent">Open</span> Source
+        </h3>
+        <p>
+          As stewards of this decentralized project, we maintain its core vision while
+          welcoming contributors and artists to build, adopt, or share these lamps with their
+          communities.
+        </p>
+      </div>
+
+      <div class="footer-link">
+        <span class="link-decoration"></span>
+        <a href="https://lamplit.ca" target="_blank" rel="noopener">lamplit.ca</a>
+        <span class="link-decoration"></span>
+      </div>
     </div>
   </section>
 </template>
@@ -45,8 +74,7 @@ import LamplitLogo from '@/components/LamplitLogo.vue'
 }
 
 .info-content {
-  padding: 20px;
-  color: var(--brand-slate-grey);
+  padding: 16px 20px;
 }
 
 .logo-container {
@@ -55,40 +83,103 @@ import LamplitLogo from '@/components/LamplitLogo.vue'
   margin-bottom: 24px;
 }
 
-.logo {
-  width: 200px;
-  max-width: 40%;
-  height: auto;
-  border-radius: 8px;
-}
-
-.info-content h2 {
-  color: var(--brand-fog-grey);
-  margin-bottom: 16px;
-  font-size: 1.5rem;
-  font-weight: 600;
-}
-
-.info-content h3 {
-  color: var(--brand-fog-grey);
-  margin: 24px 0 12px 0;
-  font-size: 1.1rem;
-  font-weight: 500;
-}
-
-.info-content p {
-  line-height: 1.6;
-  margin-bottom: 16px;
-}
-
-.info-content ul {
-  margin: 0 0 16px 0;
-  padding-left: 20px;
-}
-
-.info-content li {
-  margin-bottom: 8px;
+.tagline {
+  text-align: center;
+  font-size: 0.95rem;
+  font-style: italic;
+  color: var(--brand-glow-pink);
+  margin-bottom: 32px;
   line-height: 1.5;
 }
-</style>
 
+.tagline-icon {
+  display: inline-block;
+  margin-right: 8px;
+  color: var(--brand-amber-gold);
+  animation: sparkle 2s ease-in-out infinite;
+}
+
+@keyframes sparkle {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(0.9);
+  }
+}
+
+.info-section {
+  margin-bottom: 24px;
+}
+
+.section-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--brand-lamp-white);
+  margin: 0 0 8px 0;
+}
+
+.title-accent {
+  color: var(--brand-lumen-green);
+  font-weight: 700;
+}
+
+.info-section p {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.7;
+  color: var(--brand-fog-grey);
+}
+
+.info-section em {
+  font-style: normal;
+  color: var(--brand-amber-gold);
+}
+
+.footer-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(141, 205, 166, 0.2);
+}
+
+.link-decoration {
+  width: 40px;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--brand-glow-pink),
+    transparent
+  );
+  border-radius: 1px;
+}
+
+.footer-link a {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--brand-aurora-blue);
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.footer-link a:hover {
+  color: var(--brand-glow-pink);
+}
+
+/* Mobile optimizations */
+@media (max-width: 480px) {
+  .info-content {
+    padding: 12px 16px;
+  }
+
+  .tagline {
+    font-size: 0.9rem;
+  }
+}
+</style>

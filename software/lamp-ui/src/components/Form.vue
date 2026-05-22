@@ -20,9 +20,13 @@ const props = withDefaults(defineProps<Props>(), {
   disabled: false,
 })
 
+// Meta values storage for field metadata (e.g., activeColor index)
+type MetaValues = Record<string, unknown>
+
 const emit = defineEmits<{
-  'update:modelValue': [value: FormValues]
-  submit: [values: FormValues]
+  'update:modelValue': [value: FormValues, meta: MetaValues]
+  submit: [values: FormValues, meta: MetaValues]
+  meta: [fieldName: string, value: unknown]
 }>()
 
 const slots = useSlots()
@@ -32,6 +36,9 @@ const fieldRefs = ref<Record<string, FieldComponent>>({})
 
 // Field errors
 const fieldErrors = ref<Record<string, string>>({})
+
+// Meta values storage for field metadata (e.g., activeColor index)
+const metaValues = ref<MetaValues>({})
 
 // Whether the form is currently submitting
 const isSubmitting = ref(false)
@@ -45,6 +52,7 @@ const transformInputValues = (values: FormValues): FormValues => {
   const transformed = { ...values }
 
   for (const field of props.fields) {
+    if (!field.name) continue
     if (field.transform && Array.isArray(field.transform) && field.transform.length > 0) {
       const arrayValue: unknown[] = []
       let hasAnyValue = false
@@ -78,6 +86,7 @@ const transformOutputValues = (values: FormValues): FormValues => {
   const transformed = { ...values }
 
   for (const field of props.fields) {
+    if (!field.name) continue
     if (field.transform && Array.isArray(field.transform) && field.transform.length > 0) {
       const arrayValue = transformed[field.name]
 
@@ -107,6 +116,7 @@ const formValues = ref<FormValues>(transformInputValues({ ...props.modelValue })
  * Priority: modelValue > default > undefined
  */
 const getFieldValue = (field: FieldDefinition): unknown => {
+  if (!field.name) return undefined
   // If value exists in formValues, use it
   if (field.name in formValues.value && formValues.value[field.name] !== undefined) {
     return formValues.value[field.name]
@@ -174,7 +184,16 @@ const visibleFields = computed(() => {
   return props.fields.filter((field) => {
     // Handle slot type
     if (field.type === 'slot') {
-      return !isSlotEmpty(field.name)
+      return !isSlotEmpty(field.name || '')
+    }
+
+    // Group headings are always visible (no value required)
+    if (field.type === 'group-heading') {
+      // Check show condition if defined
+      if (field.show && typeof field.show === 'function') {
+        return field.show(formValues.value)
+      }
+      return true
     }
 
     // Handle regular fields
@@ -187,7 +206,7 @@ const visibleFields = computed(() => {
  */
 const setDefaultValues = () => {
   props.fields.forEach((field) => {
-    if (field.type === 'slot') return
+    if (field.type === 'slot' || !field.name) return
 
     if (!(field.name in formValues.value) && field.default !== undefined) {
       formValues.value[field.name] = field.default
@@ -207,20 +226,44 @@ const getComponentName = (type: string): string | null => {
 }
 
 /**
+ * Get the heading index for a group-heading field (for color rotation)
+ * Counts how many group-heading fields appear before the given index
+ */
+const getHeadingIndex = (currentIndex: number): number => {
+  let count = 0
+  for (let i = 0; i < currentIndex; i++) {
+    if (visibleFields.value[i]?.type === 'group-heading') {
+      count++
+    }
+  }
+  return count
+}
+
+/**
  * Update a field value
  */
 const updateFieldValue = (fieldName: string, value: unknown) => {
   formValues.value[fieldName] = value
   // Clear any error for this field
   delete fieldErrors.value[fieldName]
-  // Emit transformed values so parent sees external format
-  emit('update:modelValue', transformOutputValues({ ...formValues.value }))
+  // Emit transformed values so parent sees external format, include meta
+  emit('update:modelValue', transformOutputValues({ ...formValues.value }), { ...metaValues.value })
+}
+
+/**
+ * Handle meta event from a field
+ */
+const handleFieldMeta = (fieldName: string, value: unknown) => {
+  metaValues.value[fieldName] = value
+  emit('meta', fieldName, value)
 }
 
 /**
  * Validate a single field
  */
 const validateField = async (field: FieldDefinition): Promise<FieldValidationResult> => {
+  if (!field.name) return { valid: true }
+
   const fieldRef = fieldRefs.value[field.name]
 
   if (fieldRef && typeof fieldRef.validate === 'function') {
@@ -277,7 +320,7 @@ const handleSubmit = async () => {
   try {
     // Run onSubmit for all fields with that method
     for (const field of visibleFields.value) {
-      if (field.type === 'slot') continue
+      if (field.type === 'slot' || !field.name) continue
 
       const fieldRef = fieldRefs.value[field.name]
       if (fieldRef && typeof fieldRef.onSubmit === 'function') {
@@ -306,7 +349,7 @@ const handleSubmit = async () => {
     // Collect values from visible fields only
     const submittedValues: FormValues = {}
     for (const field of visibleFields.value) {
-      if (field.type === 'slot') continue
+      if (field.type === 'slot' || !field.name) continue
 
       if (field.name in formValues.value) {
         submittedValues[field.name] = formValues.value[field.name]
@@ -316,7 +359,7 @@ const handleSubmit = async () => {
     // Transform output values (split array fields back to individual values)
     const transformedOutput = transformOutputValues(submittedValues)
 
-    emit('submit', transformedOutput)
+    emit('submit', transformedOutput, { ...metaValues.value })
   } finally {
     isSubmitting.value = false
   }
@@ -360,6 +403,7 @@ defineExpose({
   submit: handleSubmit,
   validate: validateAllFields,
   values: formValues,
+  meta: metaValues,
 })
 </script>
 
@@ -375,19 +419,29 @@ defineExpose({
         <slot :name="field.name" />
       </template>
 
-      <!-- Hidden fields: render without wrapper -->
-      <template v-else-if="field.type === 'hidden'">
+      <!-- Group heading: render heading with rotating colors -->
+      <template v-else-if="field.type === 'group-heading'">
         <component
           :is="getComponentName(field.type)"
-          :ref="(el: FieldComponent) => setFieldRef(field.name, el)"
+          :label="field.label"
+          :heading-index="getHeadingIndex(index)"
+        />
+      </template>
+
+      <!-- Hidden fields: render without wrapper -->
+      <template v-else-if="field.type === 'hidden' && field.name">
+        <component
+          :is="getComponentName(field.type)"
+          :ref="(el: FieldComponent) => setFieldRef(field.name!, el)"
           :model-value="formValues[field.name]"
-          @update:model-value="(value: unknown) => updateFieldValue(field.name, value)"
+          @update:model-value="(value: unknown) => updateFieldValue(field.name!, value)"
+          @meta="(value: unknown) => handleFieldMeta(field.name!, value)"
           v-bind="field.props"
         />
       </template>
 
       <!-- Field types: render field component with wrapper -->
-      <template v-else>
+      <template v-else-if="field.name">
         <Field
           :label="field.label"
           :help="field.help"
@@ -397,9 +451,10 @@ defineExpose({
         >
           <component
             :is="getComponentName(field.type)"
-            :ref="(el: FieldComponent) => setFieldRef(field.name, el)"
+            :ref="(el: FieldComponent) => setFieldRef(field.name!, el)"
             :model-value="formValues[field.name]"
-            @update:model-value="(value: unknown) => updateFieldValue(field.name, value)"
+            @update:model-value="(value: unknown) => updateFieldValue(field.name!, value)"
+            @meta="(value: unknown) => handleFieldMeta(field.name!, value)"
             v-bind="field.props"
             :disabled="disabled || field.props?.disabled"
             :required="!field.optional"

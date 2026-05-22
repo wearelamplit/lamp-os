@@ -1,0 +1,50 @@
+Form Meta handling and Color list improvements
+
+----------------------------------
+
+We need to add meta handling from the form.
+
+A field can emit a meta event with a value. If this happens the form needs to:
+
+1) Store it in the form meta values object, meta[fieldName] = value
+2) form emits the meta event meta:[fieldName], [value]
+
+when a form update:modelValue emit happens also emit the meta
+
+on form submit:
+
+the meta neeta to also be emiited at emit('submit', fieldMetaObject)
+
+----------------------------------
+
+Color list needs some work to be more usable in different contexts.
+
+1) Color list
+
+This will be the same, just hide the gradient preview at the top of the field.
+
+2) Gradient
+
+We need a setting to say if the color is a gradient. This will show the gradient preview at the top of the field.
+
+3) active color (star)
+
+by default this should be disabled. If enabled (hasActiveColor is true) then the star should be enabled and the the star button should show up in the color list, if there is more than one color. If there is only one color, the star should be hidden, the active color needs to be the only option.
+
+We need to emit a meta event {activeColor: index} when the active color changes, or say a single color is added. If there are colors and the color that is active gets removed, the active color should be set to another color in the list, ,usually above the color that was removed. If there are no colors, or all the colors get deleted, the active color should be 0. basically it's 0 or an index of one of the colors in the list. This shouldn't be an issue really since the delete button only exists if there are more than one color.
+
+the current star button will select that color, and be active to indicate which color is active. this was there and needs to be checked to be working again.
+
+when the active color changes we need to emit a meta event {activeColor: index}
+
+we also need a prop for the field for specifying what the current active color is. this will be used to set the active color on the lamp store.
+
+----------------------------------
+
+index Page
+
+We need to add a new meta handler for the form on the src/pages/Index.vue page. If the active color changes we need to set it on the lamp store. the active color on the state needs to be set to base->ac (line 23 on example-structure.json)
+
+I am not sure if there is a method for setting the active color on the lamp store. if not we need to add it.
+
+This also needs to set the prop for the active color on the base colors field.

@@ -21,7 +21,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { parseHexww } from '../utils/colorUtils'
+import { parseHexww } from '@/lib/colorUtils'
 
 interface Props {
   hexValue: string

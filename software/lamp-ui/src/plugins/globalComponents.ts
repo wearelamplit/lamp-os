@@ -18,9 +18,11 @@ import HiddenField from '@/components/fields/Hidden.vue'
 import ColorField from '@/components/fields/Color.vue'
 import ColorListField from '@/components/fields/ColorList.vue'
 import PasswordField from '@/components/fields/Password.vue'
+import GroupHeadingField from '@/components/fields/GroupHeading.vue'
 
 // Import shared UI components
 import InfoPanel from '@/components/InfoPanel.vue'
+import CollapsiblePanel from '@/components/CollapsiblePanel.vue'
 
 // Map of field type names to components
 const fieldComponents = {
@@ -34,11 +36,13 @@ const fieldComponents = {
   'color-field': ColorField,
   'color-list-field': ColorListField,
   'password-field': PasswordField,
+  'group-heading-field': GroupHeadingField,
 } as const
 
 // Shared UI components
 const sharedComponents = {
   'InfoPanel': InfoPanel,
+  'CollapsiblePanel': CollapsiblePanel,
 } as const
 
 export type FieldComponentName = keyof typeof fieldComponents

@@ -13,7 +13,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import NumberSlider from './NumberSlider.vue'
+import NumberSlider from '@/components/fields/NumberSlider.vue'
 
 interface Props {
   modelValue: number
