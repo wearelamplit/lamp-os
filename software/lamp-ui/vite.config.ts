@@ -27,9 +27,14 @@ const inlineAssetsPlugin = () => ({
         unlinkSync(cssPath)
       }
 
-      // Inline JS
+      // Inline JS. Escape </script> inside the bundle — vue-router (and other
+      // libs) ship strings like "<script ...></script>" in their code, and
+      // when those are embedded raw into an inline <script>, the HTML parser
+      // sees the embedded </script> and closes the script tag mid-bundle.
+      // <\/script> is equivalent to </script> in a JS string but does not
+      // terminate an HTML script element.
       if (existsSync(jsPath)) {
-        const js = readFileSync(jsPath, 'utf-8')
+        const js = readFileSync(jsPath, 'utf-8').replace(/<\/script>/g, '<\\/script>')
         html = html.replace(
           /<script type="module" crossorigin src="\/index\.js"><\/script>/,
           `<script type="module">${js}</script>`,
