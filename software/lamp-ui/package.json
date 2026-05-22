@@ -26,7 +26,8 @@
     "build:analyze": "vite build --mode analyze"
   },
   "dependencies": {
-    "vue": "3.5.18"
+    "vue": "3.5.18",
+    "vue-router": "^4.5.0"
   },
   "devDependencies": {
     "@tsconfig/node22": "22.0.2",

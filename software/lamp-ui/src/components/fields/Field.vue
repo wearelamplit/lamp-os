@@ -1,3 +1,4 @@
+<!-- eslint-disable vue/multi-word-component-names -->
 <script setup lang="ts">
 import { ref } from 'vue'
 import InfoPanel from '@/components/InfoPanel.vue'
@@ -7,13 +8,13 @@ interface Props {
   id?: string
   error?: string
   required?: boolean
-  helpText?: string
+  help?: string
   expandable?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   required: false,
-  helpText: '',
+  help: '',
   expandable: false,
 })
 
@@ -27,7 +28,7 @@ const toggleExpanded = () => {
 </script>
 
 <template>
-  <div class="form-field">
+  <div class="form-field" :class="{ 'form-field--error': error }">
     <label
       v-if="label"
       :for="id"
@@ -53,8 +54,8 @@ const toggleExpanded = () => {
       {{ error }}
     </div>
 
-    <InfoPanel v-else-if="helpText">
-      {{ helpText }}
+    <InfoPanel v-else-if="help">
+      {{ help }}
     </InfoPanel>
   </div>
 </template>
@@ -65,8 +66,14 @@ const toggleExpanded = () => {
   flex-direction: column;
   gap: 10px;
   width: 100%;
-  margin-bottom: 32px;
-  margin-top: 16px;
+  margin-bottom: 24px;
+  margin-top: 8px;
+}
+
+.form-field--error .form-field-content :deep(input),
+.form-field--error .form-field-content :deep(.boolean-input),
+.form-field--error .form-field-content :deep(.number-slider) {
+  border-color: var(--color-error);
 }
 
 .form-field-label {
@@ -110,7 +117,7 @@ const toggleExpanded = () => {
 
 .form-field-error {
   color: var(--color-error);
-  font-size: 0.875rem;
+  font-size: 0.8rem;
   font-weight: 600;
   margin-top: 4px;
   display: flex;
@@ -119,7 +126,7 @@ const toggleExpanded = () => {
 }
 
 .form-field-error::before {
-  content: '⚠️';
+  content: '⚠';
   font-size: 0.8rem;
 }
 
@@ -130,7 +137,7 @@ const toggleExpanded = () => {
   }
 
   .form-field-error {
-    font-size: 0.8rem;
+    font-size: 0.75rem;
   }
 }
 
