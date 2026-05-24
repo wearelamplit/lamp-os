@@ -9,6 +9,7 @@ interface LampSettings {
   homeMode?: boolean
   homeModeSSID?: string
   homeModeBrightness?: number
+  homeModePassword?: string
   password?: string
 }
 
@@ -24,8 +25,18 @@ interface BaseSettings {
   knockout?: KnockoutPixel[]
 }
 
+interface MqttSettings {
+  enabled?: boolean
+  brokerHost?: string
+  brokerPort?: number
+  username?: string
+  password?: string
+  topicPrefix?: string
+}
+
 export interface Settings {
   lamp?: LampSettings
   shade?: ShadeSettings
   base?: BaseSettings
+  mqtt?: MqttSettings
 }
