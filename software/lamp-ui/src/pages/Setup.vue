@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import ComponentForm from '@/components/Form.vue'
 import BrightnessSlider from '@/components/BrightnessSlider.vue'
 import type { FieldDefinition, FormValues } from '@/types'
@@ -8,7 +8,7 @@ import { useLampStore, MAX_LEDS_BASE } from '@/stores/lamp'
 const lampStore = useLampStore()
 
 // Field definitions for the setup page form
-const fields = ref<FieldDefinition[]>([
+const fields = computed<FieldDefinition[]>(() => [
   {
     name: 'lampNameHeading',
     type: 'group-heading',
@@ -89,6 +89,21 @@ const fields = ref<FieldDefinition[]>([
     type: 'group-heading',
     label: 'Lamp Base LED Profile',
   },
+  ...(lampStore.state.lamp?.advancedEnabled
+    ? [
+        {
+          name: 'baseBpp',
+          type: 'select' as const,
+          label: 'Base LED Type',
+          default: 4,
+          optional: true,
+          options: [
+            { value: 4, label: 'RGBWW' },
+            { value: 3, label: 'RGB' },
+          ],
+        },
+      ]
+    : []),
   {
     name: 'basePx',
     type: 'number',
@@ -106,6 +121,26 @@ const fields = ref<FieldDefinition[]>([
     type: 'slot',
     label: 'Per-Pixel Brightness Adjustment',
   },
+  ...(lampStore.state.lamp?.advancedEnabled
+    ? [
+        {
+          name: 'shadeProfileHeading',
+          type: 'group-heading' as const,
+          label: 'Lamp Shade LED Profile',
+        },
+        {
+          name: 'shadeBpp',
+          type: 'select' as const,
+          label: 'Shade LED Type',
+          default: 4,
+          optional: true,
+          options: [
+            { value: 4, label: 'RGBWW' },
+            { value: 3, label: 'RGB' },
+          ],
+        },
+      ]
+    : []),
 ])
 
 // Map store state to form values
@@ -117,6 +152,8 @@ const formValues = computed({
     homeModeBrightness: lampStore.state.lamp?.homeModeBrightness ?? 80,
     homeModeSSID: lampStore.state.lamp?.homeModeSSID ?? '',
     basePx: lampStore.state.base?.px ?? 36,
+    baseBpp: lampStore.state.base?.bpp ?? 4,
+    shadeBpp: lampStore.state.shade?.bpp ?? 4,
   }),
   set: () => {
     // Values are updated via individual handlers
@@ -142,6 +179,12 @@ const handleFormUpdate = (values: FormValues) => {
   }
   if (values.basePx !== undefined && values.basePx !== formValues.value.basePx) {
     lampStore.updateBasePxCount(values.basePx as number)
+  }
+  if (values.baseBpp !== undefined && values.baseBpp !== formValues.value.baseBpp) {
+    lampStore.updateBaseBpp(values.baseBpp as number)
+  }
+  if (values.shadeBpp !== undefined && values.shadeBpp !== formValues.value.shadeBpp) {
+    lampStore.updateShadeBpp(values.shadeBpp as number)
   }
 }
 
