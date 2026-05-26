@@ -1,2 +1,2 @@
 #include "./globals.hpp"
-#include "./lamps/standard_lamp.hpp"
+#include "./lamps/staff_lamp.hpp"

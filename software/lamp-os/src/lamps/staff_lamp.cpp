@@ -1,7 +1,8 @@
-#include "./standard_lamp.hpp"
+#include "./staff_lamp.hpp"
 
 #include <Adafruit_NeoPixel.h>
 #include <Arduino.h>
+#include <OneButton.h>
 #include <Preferences.h>
 
 #include <cstdint>
@@ -57,6 +58,19 @@ bool mqttPowerState = true;
 #endif
 unsigned long lastHomeModeUpdateMs = 0;
 bool lastHomeMode = false;  // Track previous home mode state
+
+lamp::Color moodColor;
+uint32_t moodWW;
+float moodHue;       // start from actual shade color
+bool moody = false;  // whether moody mode is active
+// uint32_t moodFadeStartMs = 0;                             // when the current moody fade began
+// static constexpr uint32_t MOOD_FADE_DURATION_MS = 1500;   // fade in/out duration
+static constexpr float MOOD_HUE_DEGREES_PER_TICK = 0.8f;  // hue shift speed
+
+bool stoked = false;  // Track if stoked
+
+OneButton stoke(LAMP_STOKE_PIN, true);
+// OneButton shout(LAMP_SHOUT_PIN, true);
 
 /**
  * Calculate effective home mode based on configuration and network presence
@@ -289,6 +303,45 @@ void handleWebSocket() {
   }
 }
 
+void applyMoodColorToShade() {
+  auto filled = lamp::buildGradientWithStops(shade.pixelCount, {moodColor});
+  shadeConfiguratorBehavior.colors = filled;
+  shadeConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
+}
+
+void stokePoke() {
+  if (!stoked) {
+    shadeStrip.setBrightness(LAMP_MAX_BRIGHTNESS);
+    baseStrip.setBrightness(LAMP_MAX_BRIGHTNESS);
+  } else {
+    shadeStrip.setBrightness(config.lamp.brightness);
+    baseStrip.setBrightness(config.lamp.brightness);
+  }
+  stoked = !stoked;
+}
+
+void moodToggle() {
+  moody = !moody;
+  if (moody) {
+    applyMoodColorToShade();
+  } else {
+    // Hand back to normal colors — restore config shade colors into configurator
+    auto restored = lamp::buildGradientWithStops(shade.pixelCount, config.shade.colors);
+    shadeConfiguratorBehavior.colors = restored;
+    shadeConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
+  }
+}
+
+void moodShift() {
+  moodHue += MOOD_HUE_DEGREES_PER_TICK;
+  if (moodHue >= 360.0f) moodHue -= 360.0f;
+  moodColor = lamp::hsvToColor(moodHue, moodWW);
+  if (moody) {
+    applyMoodColorToShade();  // live-update the shade if moody is already on
+    delay(10);
+  }
+}
+
 void setup() {
 #ifdef LAMP_DEBUG
   Serial.begin(115200);
@@ -319,6 +372,19 @@ void setup() {
         baseStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, level));
       });
 #endif
+
+  moodColor = config.shade.colors[0];
+  moodWW = moodColor.w;
+  moodHue = lamp::colorToHue(moodColor);  // start from actual shade color
+
+  stoke.attachClick(stokePoke);
+  stoke.attachDoubleClick(moodToggle);
+  stoke.attachDuringLongPress(moodShift);
+  stoke.setDebounceMs(80);
+
+  // shout.attachClick(shoutOut);
+
+  // shout.setDebounceTicks(80);
 };
 
 void loop() {
@@ -326,6 +392,7 @@ void loop() {
   handleArtnet();
   handleWebSocket();
   wifi.tick();
+  stoke.tick();
 
 #ifdef LAMP_MQTT_ENABLED
   mqtt.tick(wifi.isHomeNetworkVisible());

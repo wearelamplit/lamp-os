@@ -52,7 +52,7 @@ class LampSettings {
  */
 class ShadeSettings {
  public:
-  uint8_t px = 38;
+  uint8_t px = 60;
   std::vector<Color> colors = {Color(0x00, 0x00, 0x00, 0xFF)};
 };
 
@@ -76,12 +76,12 @@ class BaseSettings {
  */
 class ExpressionConfig {
  public:
-  std::string type = "";           // Expression type (e.g., "glitchy", "shifty")
-  bool enabled = false;            // Whether expression is active
-  std::vector<Color> colors;       // Color palette for expression
-  uint32_t intervalMin = 60;       // Min interval in seconds
-  uint32_t intervalMax = 900;      // Max interval in seconds
-  uint8_t target = 3;              // TARGET_SHADE=1, TARGET_BASE=2, TARGET_BOTH=3
+  std::string type = "";       // Expression type (e.g., "glitchy", "shifty")
+  bool enabled = false;        // Whether expression is active
+  std::vector<Color> colors;   // Color palette for expression
+  uint32_t intervalMin = 60;   // Min interval in seconds
+  uint32_t intervalMax = 900;  // Max interval in seconds
+  uint8_t target = 3;          // TARGET_SHADE=1, TARGET_BASE=2, TARGET_BOTH=3
 
   // Generic parameter storage for expression-specific values
   std::map<std::string, uint32_t> parameters;

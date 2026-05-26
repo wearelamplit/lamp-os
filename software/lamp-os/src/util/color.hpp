@@ -14,7 +14,7 @@ class Color {
   uint8_t r, g, b, w;
   Color();
   Color(uint8_t inR, uint8_t inG, uint8_t inB, uint8_t inW);
-  bool operator==(const Color &inColor) const;
+  bool operator==(const Color& inColor) const;
 };
 
 /**
@@ -33,5 +33,12 @@ Color hexStringToColor(std::string inHexString);
  * @brief get the Euclidean distance between 2 colors as an integer
  */
 uint32_t colorDistance(Color c1, Color c2);
+
+// Convert RGB color to HSV hue (0.0–360.0), ignoring white channel
+float colorToHue(const Color& inColor);
+
+// Convert HSV hue to RGBW Color, fading white channel toward 0 as hue shifts
+Color hsvToColor(float hue, uint32_t wht);
+
 }  // namespace lamp
 #endif

@@ -1,11 +1,13 @@
 #pragma once
-#ifndef STANDARD_LAMP_H
-#define STANDARD_LAMP_H
+#ifndef STAFF_LAMP_H
+#define STAFF_LAMP_H
 
+#define LAMP_STOKE_PIN 19
+#define LAMP_SHOUT_PIN 21
 #define LAMP_SHADE_PIN 12
 #define LAMP_BASE_PIN 14
-#define LAMP_MAX_BRIGHTNESS 180
-#define LAMP_MAX_STRIP_PIXELS_SHADE 38
+#define LAMP_MAX_BRIGHTNESS 255
+#define LAMP_MAX_STRIP_PIXELS_SHADE 80
 #define LAMP_MAX_STRIP_PIXELS_BASE 50
 
 void setup();
@@ -40,3 +42,6 @@ void handleMqtt();
 #endif
 
 #endif
+
+void stokePoke();
+void moodShift();
