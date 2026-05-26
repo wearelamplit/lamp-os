@@ -27,11 +27,13 @@ interface LampSettings {
   homeModeSSID?: string
   homeModeBrightness?: number
   password?: string
+  advancedEnabled?: boolean
 }
 
 interface ShadeSettings {
   px?: number
   colors?: string[]
+  bpp?: number
 }
 
 interface BaseSettings {
@@ -39,6 +41,7 @@ interface BaseSettings {
   colors?: string[]
   ac?: number
   knockout?: KnockoutPixel[]
+  bpp?: number
 }
 
 interface ExpressionSettings {
@@ -226,6 +229,21 @@ export const useLampStore = defineStore('lamp', () => {
     state.value.base.px = count
   }
 
+  const updateAdvancedEnabled = (enabled: boolean) => {
+    if (!state.value.lamp) state.value.lamp = {}
+    state.value.lamp.advancedEnabled = enabled
+  }
+
+  const updateShadeBpp = (bpp: number) => {
+    if (!state.value.shade) state.value.shade = {}
+    state.value.shade.bpp = bpp
+  }
+
+  const updateBaseBpp = (bpp: number) => {
+    if (!state.value.base) state.value.base = {}
+    state.value.base.bpp = bpp
+  }
+
   const updateKnockoutPixel = (ledIndex: number, brightness: number) => {
     if (!state.value.base) state.value.base = {}
     if (!state.value.base.knockout) state.value.base.knockout = []
@@ -397,6 +415,9 @@ export const useLampStore = defineStore('lamp', () => {
     updateBasePxCount,
     updateKnockoutPixel,
     getKnockoutBrightness,
+    updateAdvancedEnabled,
+    updateShadeBpp,
+    updateBaseBpp,
 
     // Expression methods
     updateExpressions,
