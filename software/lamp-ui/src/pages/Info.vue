@@ -1,12 +1,24 @@
 <!-- eslint-disable vue/multi-word-component-names -->
 <script setup lang="ts">
+import { useRouter } from 'vue-router'
 import LamplitLogo from '@/components/LamplitLogo.vue'
+import { useTapCounter } from '@/composables/useTapCounter'
+import { useLampStore } from '@/stores/lamp'
+
+const router = useRouter()
+const lampStore = useLampStore()
+
+const { recordTap } = useTapCounter(5, 3000, () => {
+  if (lampStore.state.lamp?.advancedEnabled) return
+  lampStore.updateAdvancedEnabled(true)
+  router.push('/setup')
+})
 </script>
 
 <template>
   <section class="tab-panel" aria-label="Information">
     <div class="info-content">
-      <div class="logo-container">
+      <div class="logo-container" @click="recordTap">
         <LamplitLogo style="width: 50%; max-width: 200px;" />
       </div>
 
