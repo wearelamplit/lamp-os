@@ -35,6 +35,7 @@ Config::Config(Preferences* inPrefs) {
   if (!password.empty()) {
     lamp.password = password;
   }
+  lamp.advancedEnabled = lampNode["advancedEnabled"] | false;
 
   JsonObject baseNode = doc["base"];
   base.px = baseNode["px"] | 36;
@@ -42,6 +43,10 @@ Config::Config(Preferences* inPrefs) {
     base.px = 50;
   }
   base.ac = baseNode["ac"] | 0;
+  base.bpp = baseNode["bpp"] | 4;
+  if (base.bpp != 3 && base.bpp != 4) {
+    base.bpp = 4;  // defensive: only 3 or 4 valid
+  }
 
   JsonArray baseColors = baseNode["colors"];
   int colorCollectionSize = baseColors.size();
@@ -68,6 +73,10 @@ Config::Config(Preferences* inPrefs) {
   }
 
   JsonObject shadeNode = doc["shade"];
+  shade.bpp = shadeNode["bpp"] | 4;
+  if (shade.bpp != 3 && shade.bpp != 4) {
+    shade.bpp = 4;
+  }
   JsonArray shadeColors = shadeNode["colors"];
   if (shadeColors.size()) {
     shade.colors.clear();
@@ -131,9 +140,11 @@ JsonDocument Config::asJsonDocument() {
   if (!lamp.password.empty()) {
     lampNode["password"] = lamp.password;
   }
+  lampNode["advancedEnabled"] = lamp.advancedEnabled;
   JsonObject baseNode = doc["base"].to<JsonObject>();
   baseNode["px"] = base.px;
   baseNode["ac"] = base.ac;
+  baseNode["bpp"] = base.bpp;
   JsonArray baseColorsNode = baseNode["colors"].to<JsonArray>();
   for (int i = 0; i < base.colors.size(); i++) {
     baseColorsNode[i] = colorToHexString(base.colors[i]);
@@ -157,6 +168,7 @@ JsonDocument Config::asJsonDocument() {
 
   JsonObject shadeNode = doc["shade"].to<JsonObject>();
   shadeNode["px"] = shade.px;
+  shadeNode["bpp"] = shade.bpp;
   JsonArray shadeColorsNode = shadeNode["colors"].to<JsonArray>();
   for (int i = 0; i < shade.colors.size(); i++) {
     shadeColorsNode[i] = colorToHexString(shade.colors[i]);
