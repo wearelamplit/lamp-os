@@ -456,6 +456,7 @@ defineExpose({
             @update:model-value="(value: unknown) => updateFieldValue(field.name!, value)"
             @meta="(value: unknown) => handleFieldMeta(field.name!, value)"
             v-bind="field.props"
+            :options="field.options"
             :disabled="disabled || field.props?.disabled"
             :required="!field.optional"
           />

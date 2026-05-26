@@ -50,6 +50,7 @@ export type FieldType =
   | 'color-list'
   | 'slot'
   | 'group-heading'
+  | 'select'
 
 /**
  * Field props that can be passed to individual field components
@@ -120,6 +121,9 @@ export interface FieldDefinition {
 
   /** Conditional visibility function - receives current form values */
   show?: (values: FormValues) => boolean
+
+  /** Options for select fields */
+  options?: Array<{ value: number | string; label: string }>
 }
 
 /**

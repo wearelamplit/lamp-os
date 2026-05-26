@@ -19,6 +19,7 @@ import ColorField from '@/components/fields/Color.vue'
 import ColorListField from '@/components/fields/ColorList.vue'
 import PasswordField from '@/components/fields/Password.vue'
 import GroupHeadingField from '@/components/fields/GroupHeading.vue'
+import SelectField from '@/components/fields/Select.vue'
 
 // Import shared UI components
 import InfoPanel from '@/components/InfoPanel.vue'
@@ -37,6 +38,7 @@ const fieldComponents = {
   'color-list-field': ColorListField,
   'password-field': PasswordField,
   'group-heading-field': GroupHeadingField,
+  'select-field': SelectField,
 } as const
 
 // Shared UI components
