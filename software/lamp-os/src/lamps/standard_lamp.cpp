@@ -26,8 +26,8 @@
 #include "./util/levels.hpp"
 #include "SPIFFS.h"
 
-Adafruit_NeoPixel shadeStrip(LAMP_MAX_STRIP_PIXELS_SHADE, LAMP_SHADE_PIN, NEO_GRBW + NEO_KHZ800);
-Adafruit_NeoPixel baseStrip(LAMP_MAX_STRIP_PIXELS_BASE, LAMP_BASE_PIN, NEO_GRBW + NEO_KHZ800);
+Adafruit_NeoPixel* shadeStrip = nullptr;
+Adafruit_NeoPixel* baseStrip = nullptr;
 Preferences prefs;
 uint32_t lastStageModeCheckTimeMs = 0;
 uint32_t lastDmxCheckTimeMs = 0;
@@ -209,8 +209,8 @@ void handleWebSocket() {
     if (action == "bright") {
       int level = doc["v"] | 100;
       // Apply immediately for real-time control
-      shadeStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, level));
-      baseStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, level));
+      shadeStrip->setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, level));
+      baseStrip->setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, level));
     } else if (action == "knockout") {
       int pixelIndex = doc["p"];
       int percentage = doc["b"];
@@ -288,10 +288,16 @@ void setup() {
   SPIFFS.begin(true);
   bt.begin(config.lamp.name, config.base.colors[config.base.ac], config.shade.colors[0]);
   wifi.begin(&config);
-  shadeStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, config.lamp.brightness));
-  baseStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, config.lamp.brightness));
-  shade.begin(lamp::buildGradientWithStops(config.shade.px, config.shade.colors), config.shade.px, &shadeStrip);
-  base.begin(lamp::buildGradientWithStops(config.base.px, config.base.colors), config.base.px, &baseStrip);
+  const uint16_t shadeFmt = (config.shade.bpp == 3) ? NEO_GRB : NEO_GRBW;
+  const uint16_t baseFmt = (config.base.bpp == 3) ? NEO_GRB : NEO_GRBW;
+  shadeStrip = new Adafruit_NeoPixel(LAMP_MAX_STRIP_PIXELS_SHADE, LAMP_SHADE_PIN, shadeFmt + NEO_KHZ800);
+  baseStrip = new Adafruit_NeoPixel(LAMP_MAX_STRIP_PIXELS_BASE, LAMP_BASE_PIN, baseFmt + NEO_KHZ800);
+  shadeStrip->begin();
+  baseStrip->begin();
+  shadeStrip->setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, config.lamp.brightness));
+  baseStrip->setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, config.lamp.brightness));
+  shade.begin(lamp::buildGradientWithStops(config.shade.px, config.shade.colors), config.shade.px, shadeStrip);
+  base.begin(lamp::buildGradientWithStops(config.base.px, config.base.colors), config.base.px, baseStrip);
   initBehaviors();
 };
 
@@ -311,8 +317,8 @@ void loop() {
     if (effectiveHomeMode != lastHomeMode) {
       uint8_t targetBrightness = effectiveHomeMode ? config.lamp.homeModeBrightness : config.lamp.brightness;
 
-      shadeStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, targetBrightness));
-      baseStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, targetBrightness));
+      shadeStrip->setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, targetBrightness));
+      baseStrip->setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, targetBrightness));
 
       lastHomeMode = effectiveHomeMode;
     }
