@@ -36,7 +36,7 @@ class ScanCallbacks : public NimBLEScanCallbacks {
             data[1] == ((BLE_LAMP_MAGIC_NUMBER >> 8) & 0xff));
   };
 
-  void onResult(const NimBLEAdvertisedDevice *advertisedDevice) override {
+  void onResult(const NimBLEAdvertisedDevice* advertisedDevice) override {
     if (advertisedDevice->haveName() && advertisedDevice->haveManufacturerData()) {
       std::string data = advertisedDevice->getManufacturerData();
 
@@ -83,7 +83,7 @@ class ScanCallbacks : public NimBLEScanCallbacks {
     }
   };
 
-  void onScanEnd(const NimBLEScanResults &results, int reason) override {
+  void onScanEnd(const NimBLEScanResults& results, int reason) override {
 #ifdef LAMP_DEBUG
     std::vector<BluetoothLampRecord> lampsFound = lampBluetoothPool.getLamps();
     int i = 0;
@@ -116,15 +116,15 @@ BluetoothComponent::BluetoothComponent() {};
 void BluetoothComponent::begin(std::string name, Color inBaseColor,
                                Color inShadeColor) {
 #ifdef LAMP_DEBUG
-  Serial.printf("Starting Bluetooth Async Client\n");
+  Serial.printf("Starting Bluetooth Async Client With Name %s\n", name.c_str());
 #endif
-  NimBLEDevice::init(name.substr(0, 12));
+  if (NimBLEDevice::init(name.substr(0, 12))) Serial.println("Initialized BLE Device");
   NimBLEDevice::setPower(BLE_POWER_LEVEL);
 
   // Scan for all bluetooth devices and filter the list
   // for lamps by manufacturer ID. If a lamp is found, add
   // it to the found lamps buffer
-  NimBLEScan *pScan = NimBLEDevice::getScan();
+  NimBLEScan* pScan = NimBLEDevice::getScan();
   pScan->setScanCallbacks(&scanCallbacks);
   pScan->setInterval(BLE_GAP_ADV_INTERVAL_MS);
   pScan->setWindow(BLE_GAP_SCAN_WINDOW_MS);
@@ -135,7 +135,7 @@ void BluetoothComponent::begin(std::string name, Color inBaseColor,
   // 2 bytes: lamp identifier [Manufacturer ID block]
   // 3 bytes: RGB base color (white omitted)
   // 3 bytes: RGB shade color (white omitted)
-  NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
+  NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
   pAdvertising->setName(name);
   pAdvertising->enableScanResponse(true);
   std::vector<unsigned char> data{
@@ -154,12 +154,20 @@ void BluetoothComponent::begin(std::string name, Color inBaseColor,
   pAdvertising->setMaxInterval(BLE_ADVERTISING_INTERVAL_MAX);
   pAdvertising->start();
 };
+void BluetoothComponent::end(void) {
+  if (NimBLEDevice::getAdvertising()->stop()) Serial.println("Stopped BLE Device");
+  NimBLEDevice::getScan()->stop();
+  if (NimBLEDevice::deinit(true)) Serial.println("de-initialized BLE Device");
 
-std::vector<BluetoothLampRecord> *BluetoothComponent::getLamps() {
+  // NimBLEDevice::setDeviceName("Bob");
+  // NimBLEDevice::getAdvertising()->setName("Bob");
+  // NimBLEDevice::getAdvertising()->start();
+};
+std::vector<BluetoothLampRecord>* BluetoothComponent::getLamps() {
   return &lampBluetoothPool.lampPool;
 };
 
-std::vector<BluetoothStageRecord> *BluetoothComponent::getStages() {
+std::vector<BluetoothStageRecord>* BluetoothComponent::getStages() {
   return &lampBluetoothPool.stagePool;
 };
 }  // namespace lamp

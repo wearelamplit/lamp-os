@@ -47,7 +47,7 @@ class BluetoothComponent {
    * @param [in] inShadeColor the shade color RGB value. W is ommitted
    */
   void begin(std::string name, Color inBaseColor, Color inShadeColor);
-
+  void end(void);
   /**
    * @brief get a listing of all lamps within acceptable signal strength limits
    * @return vector of all found lamps

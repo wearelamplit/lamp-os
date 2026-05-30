@@ -2,6 +2,7 @@
 
 #include <Adafruit_NeoPixel.h>
 #include <Arduino.h>
+#include <NimBLEDevice.h>
 #include <OneButton.h>
 #include <Preferences.h>
 
@@ -65,12 +66,14 @@ float moodHue;       // start from actual shade color
 bool moody = false;  // whether moody mode is active
 // uint32_t moodFadeStartMs = 0;                             // when the current moody fade began
 // static constexpr uint32_t MOOD_FADE_DURATION_MS = 1500;   // fade in/out duration
-static constexpr float MOOD_HUE_DEGREES_PER_TICK = 0.8f;  // hue shift speed
+static constexpr float MOOD_HUE_DEGREES_PER_TICK = 0.2f;  // hue shift speed
 
 bool stoked = false;  // Track if stoked
 
-OneButton stoke(LAMP_STOKE_PIN, true);
-// OneButton shout(LAMP_SHOUT_PIN, true);
+std::string alias = std::string("Bob");
+
+OneButton stoke(LAMP_STOKE_PIN, false);
+OneButton shout(LAMP_SHOUT_PIN, true);
 
 /**
  * Calculate effective home mode based on configuration and network presence
@@ -341,7 +344,14 @@ void moodShift() {
     delay(10);
   }
 }
-
+void shoutOut() {
+  bt.end();
+  config.lamp.name = std::string("Bob");
+  bt.begin(alias, moodColor, moodColor);
+  // shadeSocialBehavior.setBluetoothComponent(&bt);
+  initBehaviors();
+  Serial.println("SHOUTING");
+}
 void setup() {
 #ifdef LAMP_DEBUG
   Serial.begin(115200);
@@ -382,7 +392,7 @@ void setup() {
   stoke.attachDuringLongPress(moodShift);
   stoke.setDebounceMs(80);
 
-  // shout.attachClick(shoutOut);
+  shout.attachClick(shoutOut);
 
   // shout.setDebounceTicks(80);
 };
@@ -393,6 +403,7 @@ void loop() {
   handleWebSocket();
   wifi.tick();
   stoke.tick();
+  shout.tick();
 
 #ifdef LAMP_MQTT_ENABLED
   mqtt.tick(wifi.isHomeNetworkVisible());

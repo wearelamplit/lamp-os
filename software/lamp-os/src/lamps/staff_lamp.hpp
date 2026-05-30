@@ -45,3 +45,4 @@ void handleMqtt();
 
 void stokePoke();
 void moodShift();
+void shoutOut();
