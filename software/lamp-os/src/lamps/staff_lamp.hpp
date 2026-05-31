@@ -49,3 +49,4 @@ void handleMqtt();
 void stokePoke();
 void moodShift();
 void topTouch();
+void adjustBrightness();
