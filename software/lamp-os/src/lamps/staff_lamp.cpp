@@ -72,10 +72,10 @@ uint32_t touchThreshold = 400;
 
 OneButton stoke(LAMP_STOKE_PIN, false);
 
-auto shadeCurrentBrightness = config.lamp.brightness;
-auto baseCurrentBrightness = config.lamp.brightness;
-uint32_t shadeDimmingDir = 1;
-uint32_t baseDimmingDir = 1;
+uint8_t shadeCurrentBrightness = lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, config.lamp.brightness);
+uint8_t baseCurrentBrightness = config.lamp.brightness;
+bool shadeDimming = true;
+int8_t baseDimmingDir = 1;
 uint32_t lastBrightnessChange = 0;
 uint32_t brightnessStepTime = 100;
 /**
@@ -415,11 +415,12 @@ void loop() {
 
   if (millis() - lastBrightnessChange > brightnessStepTime) {
     if (touchRead(LAMP_TOPTOUCH_PIN) < touchThreshold) {
-      Serial.println("Yay! Pet me!!");
-      if (shadeCurrentBrightness >= 254) shadeDimmingDir = -1;
-      if (shadeCurrentBrightness <= 1) shadeDimmingDir = 1;
+      Serial.printf("Yay! Pet me!! Initial Brightness = %d\n", shadeCurrentBrightness);
+      if (shadeCurrentBrightness >= 99) shadeDimmingDir = -1;
+      if (shadeCurrentBrightness <= 5) shadeDimmingDir = 1;
       shadeCurrentBrightness += shadeDimmingDir;
       shadeStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, shadeCurrentBrightness));
+      Serial.printf("Shade Brightness Now = %d\n", shadeCurrentBrightness);
       lastBrightnessChange = millis();
       // shadeConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
       //  delay(10);
