@@ -154,15 +154,6 @@ void BluetoothComponent::begin(std::string name, Color inBaseColor,
   pAdvertising->setMaxInterval(BLE_ADVERTISING_INTERVAL_MAX);
   pAdvertising->start();
 };
-void BluetoothComponent::end(void) {
-  if (NimBLEDevice::getAdvertising()->stop()) Serial.println("Stopped BLE Device");
-  NimBLEDevice::getScan()->stop();
-  if (NimBLEDevice::deinit(true)) Serial.println("de-initialized BLE Device");
-
-  // NimBLEDevice::setDeviceName("Bob");
-  // NimBLEDevice::getAdvertising()->setName("Bob");
-  // NimBLEDevice::getAdvertising()->start();
-};
 std::vector<BluetoothLampRecord>* BluetoothComponent::getLamps() {
   return &lampBluetoothPool.lampPool;
 };

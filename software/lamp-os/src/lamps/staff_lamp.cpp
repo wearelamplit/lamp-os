@@ -62,19 +62,22 @@ bool lastHomeMode = false;  // Track previous home mode state
 
 lamp::Color moodColor;
 uint32_t moodWW;
-float moodHue;       // start from actual shade color
-bool moody = false;  // whether moody mode is active
-// uint32_t moodFadeStartMs = 0;                             // when the current moody fade began
-// static constexpr uint32_t MOOD_FADE_DURATION_MS = 1500;   // fade in/out duration
+float moodHue;                                            // start from actual shade color
 static constexpr float MOOD_HUE_DEGREES_PER_TICK = 0.2f;  // hue shift speed
 
+bool moody = false;   // whether moody mode is active
 bool stoked = false;  // Track if stoked
 
-std::string alias = std::string("Bob");
+uint32_t touchThreshold = 400;
 
 OneButton stoke(LAMP_STOKE_PIN, false);
-OneButton shout(LAMP_SHOUT_PIN, true);
 
+auto shadeCurrentBrightness = config.lamp.brightness;
+auto baseCurrentBrightness = config.lamp.brightness;
+uint32_t shadeDimmingDir = 1;
+uint32_t baseDimmingDir = 1;
+uint32_t lastBrightnessChange = 0;
+uint32_t brightnessStepTime = 100;
 /**
  * Calculate effective home mode based on configuration and network presence
  */
@@ -344,14 +347,19 @@ void moodShift() {
     delay(10);
   }
 }
-void shoutOut() {
-  bt.end();
-  config.lamp.name = std::string("Bob");
-  bt.begin(alias, moodColor, moodColor);
-  // shadeSocialBehavior.setBluetoothComponent(&bt);
-  initBehaviors();
-  Serial.println("SHOUTING");
+
+void topTouch(void) {
+  Serial.println("Touch triggered!");
+  if (millis() > 1000 && touchRead(LAMP_TOPTOUCH_PIN) < touchThreshold) {
+    Serial.println("I'm touched!");
+    moodHue = 0;
+    moodColor = lamp::hsvToColor(moodHue, moodWW);
+    applyMoodColorToShade();  // live-update the shade if moody is already on
+    moody = true;
+    delay(10);
+  }
 }
+
 void setup() {
 #ifdef LAMP_DEBUG
   Serial.begin(115200);
@@ -392,9 +400,8 @@ void setup() {
   stoke.attachDuringLongPress(moodShift);
   stoke.setDebounceMs(80);
 
-  shout.attachClick(shoutOut);
-
-  // shout.setDebounceTicks(80);
+  // touchAttachInterrupt(LAMP_TOPTOUCH_PIN, topTouch, touchThreshold);
+  // touchInterruptSetThresholdDirection(true);
 };
 
 void loop() {
@@ -403,8 +410,32 @@ void loop() {
   handleWebSocket();
   wifi.tick();
   stoke.tick();
-  shout.tick();
 
+  // Serial.printf("Top Touch: %ld, Btm Touch: %ld \n", touchRead(LAMP_TOPTOUCH_PIN), touchRead(LAMP_BTMTOUCH_PIN));
+
+  if (millis() - lastBrightnessChange > brightnessStepTime) {
+    if (touchRead(LAMP_TOPTOUCH_PIN) < touchThreshold) {
+      Serial.println("Yay! Pet me!!");
+      if (shadeCurrentBrightness >= 254) shadeDimmingDir = -1;
+      if (shadeCurrentBrightness <= 1) shadeDimmingDir = 1;
+      shadeCurrentBrightness += shadeDimmingDir;
+      shadeStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, shadeCurrentBrightness));
+      lastBrightnessChange = millis();
+      // shadeConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
+      //  delay(10);
+    }
+
+    if (touchRead(LAMP_BTMTOUCH_PIN) < touchThreshold) {
+      Serial.println("Stroke the stick, mmmmmmm yeah...");
+      if (baseCurrentBrightness >= 255 || baseCurrentBrightness <= 0) baseDimmingDir *= -1;
+      baseCurrentBrightness += baseDimmingDir;
+
+      baseStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, baseCurrentBrightness));
+      lastBrightnessChange = millis();
+      // baseConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
+      //  delay(10);
+    }
+  }
 #ifdef LAMP_MQTT_ENABLED
   mqtt.tick(wifi.isHomeNetworkVisible());
 #endif

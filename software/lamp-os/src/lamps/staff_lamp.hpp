@@ -4,6 +4,9 @@
 
 #define LAMP_STOKE_PIN 19
 #define LAMP_SHOUT_PIN 21
+#define LAMP_TOPTOUCH_PIN 4
+#define LAMP_BTMTOUCH_PIN 15
+
 #define LAMP_SHADE_PIN 12
 #define LAMP_BASE_PIN 14
 #define LAMP_MAX_BRIGHTNESS 255
@@ -45,4 +48,4 @@ void handleMqtt();
 
 void stokePoke();
 void moodShift();
-void shoutOut();
+void topTouch();
