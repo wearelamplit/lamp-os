@@ -48,5 +48,6 @@ void handleMqtt();
 
 void stokePoke();
 void moodShift();
-void topTouch();
+// void topTouch();
 void adjustBrightness();
+void unlockKey1();
