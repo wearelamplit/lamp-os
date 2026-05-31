@@ -364,7 +364,7 @@ void topTouch(void) {
 }
 
 void adjustBrightness(void) {
-  if (shadeCurrentBrightness >= 250) shadeDimmingDir = -1;
+  if (shadeCurrentBrightness >= 100) shadeDimmingDir = -1;
   if (shadeCurrentBrightness <= 5) shadeDimmingDir = 1;
   shadeCurrentBrightness += shadeDimmingDir;
   shadeStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, shadeCurrentBrightness));
@@ -446,7 +446,7 @@ void loop() {
 
     if (touchRead(LAMP_BTMTOUCH_PIN) < touchThreshold) {
       Serial.printf("Stroke the stick, mmmmmmm yeah... start = %d\n", baseCurrentBrightness);
-      if (baseCurrentBrightness >= 255 || baseCurrentBrightness <= 0) baseDimmingDir *= -1;
+      if (baseCurrentBrightness >= 100 || baseCurrentBrightness <= 0) baseDimmingDir *= -1;
       baseCurrentBrightness += baseDimmingDir;
 
       baseStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, baseCurrentBrightness));
