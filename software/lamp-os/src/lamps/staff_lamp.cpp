@@ -72,18 +72,26 @@ uint32_t key1Time = 0;
 
 bool moody = false;   // whether moody mode is active
 bool stoked = false;  // Track if stoked
-bool beingTouched = false;
+bool topBeingTouched = false;
+bool btmBeingTouched = false;
 
 uint32_t touchThreshold = 400;
 
 OneButton stoke(LAMP_STOKE_PIN, false);
 
 uint8_t shadeCurrentBrightness = lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, config.lamp.brightness);
-uint8_t baseCurrentBrightness = config.lamp.brightness;
+uint8_t baseCurrentBrightness = lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, config.lamp.brightness);
+
+uint8_t shadeStartingBrightness = shadeCurrentBrightness;
+uint8_t baseStartingBrightness = baseCurrentBrightness;
+
+uint8_t shadeBrightnessBump = 20;
+uint8_t baseBrightnessBump = 20;
 int8_t shadeDimmingDir = 1;
 int8_t baseDimmingDir = 1;
+uint32_t topTouchStartTime = 0;
+uint32_t btmTouchStartTime = 0;
 
-uint32_t touchStartTime = 0;
 uint32_t lastBrightnessChange = 0;
 uint32_t brightnessStepTime = 100;
 /**
@@ -352,12 +360,15 @@ void moodToggle() {
     unlock1 = false;
 }
 void unlockKey1() {
-  uint32_t pressedTime = millis() - pressStartTime;
-  if (2000 <= pressedTime && pressedTime <= 4000) {
-    shadeCurrentBrightness -= 30;
-    adjustBrightness();
-    Serial.println("Check1");
-    key1Time = millis();
+  if (unlock1) {
+    uint32_t pressedTime = millis() - pressStartTime;
+    if (2000 <= pressedTime && pressedTime <= 4000) {
+      shadeCurrentBrightness -= shadeBrightnessBump;
+      adjustBrightness();
+      Serial.println("Check1");
+      key1Time = millis();
+    } else
+      unlock1 = false;
   }
 }
 
@@ -371,7 +382,7 @@ void moodShift() {
       delay(10);
     }
   } else if (unlock1 == false) {  // unlock sequence start
-    shadeCurrentBrightness += 10;
+    shadeCurrentBrightness += shadeBrightnessBump;
     Serial.println("Unlock sequence start");
     adjustBrightness();
     Serial.println("blink?");
@@ -401,6 +412,18 @@ void adjustBrightness(void) {
   Serial.printf("Shade Brightness Now = %d\n", shadeCurrentBrightness);
   uint32_t now = millis();
   shadeConfiguratorBehavior.lastWebSocketUpdateTimeMs = now;
+  lastDmxCheckTimeMs = now;
+  lastStageModeCheckTimeMs = now;
+  lastBrightnessChange = now;
+}
+void pulseBaseBrightness(void) {
+  if (baseCurrentBrightness >= 100) baseDimmingDir = -2;
+  if (baseCurrentBrightness <= 60) baseDimmingDir = 2;
+  baseCurrentBrightness += baseDimmingDir;
+  baseStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, baseCurrentBrightness));
+  Serial.printf("Base Brightness Now = %d\n", baseCurrentBrightness);
+  uint32_t now = millis();
+  baseConfiguratorBehavior.lastWebSocketUpdateTimeMs = now;
   lastDmxCheckTimeMs = now;
   lastStageModeCheckTimeMs = now;
   lastBrightnessChange = now;
@@ -462,9 +485,9 @@ void loop() {
   if (!locked) {
     if (millis() > 1000) {
       if (touchRead(LAMP_TOPTOUCH_PIN) < touchThreshold) {
-        if (!beingTouched) {
-          touchStartTime = millis();
-          beingTouched = true;
+        if (!topBeingTouched) {
+          topTouchStartTime = millis();
+          topBeingTouched = true;
           Serial.printf("I feel it!! Initial Brightness = %d\n", shadeCurrentBrightness);
           adjustBrightness();
         }
@@ -472,20 +495,33 @@ void loop() {
           Serial.printf("Yay! Pet me!! Initial Brightness = %d\n", shadeCurrentBrightness);
           adjustBrightness();
         }
-        //
       }
-
+      if (touchRead(LAMP_BTMTOUCH_PIN) < touchThreshold) {
+        if (!btmBeingTouched) {
+          btmTouchStartTime = millis();
+          btmBeingTouched = true;
+          Serial.printf("I feel it!! Initial Brightness = %d\n", shadeCurrentBrightness);
+          adjustBrightness();
+        }
+        if (millis() - lastBrightnessChange > brightnessStepTime) {
+          Serial.printf("Stroke the stick, mmmmmmm yeah... start = %d\n", baseCurrentBrightness);
+          pulseBaseBrightness();
+        }
+      }
+      /*
       if (touchRead(LAMP_BTMTOUCH_PIN) < touchThreshold) {
         Serial.printf("Stroke the stick, mmmmmmm yeah... start = %d\n", baseCurrentBrightness);
-        if (baseCurrentBrightness >= 100 || baseCurrentBrightness <= 0) baseDimmingDir *= -1;
+
+        if (baseCurrentBrightness >= startingBrightness + brightnessBump || baseCurrentBrightness <= startingBrightness - brightnessBump) baseDimmingDir *= -1;
         baseCurrentBrightness += baseDimmingDir;
 
         baseStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, baseCurrentBrightness));
         Serial.printf("Thanks... End = %d\n", baseCurrentBrightness);
         lastBrightnessChange = millis();
+        startingBrightness = baseCurrentBrightness;
         // baseConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
         //  delay(10);
-      }
+      }*/
     }
   } else if (unlock1) {
     if (millis() - key1Time <= 2500 && touchRead(LAMP_TOPTOUCH_PIN) < touchThreshold) {
@@ -493,11 +529,15 @@ void loop() {
       locked = true;
       unlock1 = false;
     } else if (millis() - key1Time <= 4000 && touchRead(LAMP_TOPTOUCH_PIN) < touchThreshold) {
-      Serial.println("Check 2!");
+      Serial.println("Check 2! Unlocked!");
       locked = false;
+      unlock1 = false;
       moodColor = lamp::hsvToColor(120, 0);
       applyMoodColorToShade();
-    }
+    } /*else if (millis() - key1Time >= 4000) {
+      Serial.println("Too Late! Reset");
+      unlock1 = false;
+    }*/
   }
 
 #ifdef LAMP_MQTT_ENABLED

@@ -50,4 +50,6 @@ void stokePoke();
 void moodShift();
 // void topTouch();
 void adjustBrightness();
+void pulseBaseBrightness();
+
 void unlockKey1();
