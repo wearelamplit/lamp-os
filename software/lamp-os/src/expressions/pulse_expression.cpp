@@ -1,10 +1,10 @@
-#include "./pulse_expression.hpp"
+#include "pulse_expression.hpp"
 
 #include <Arduino.h>
 #include <algorithm>
 #include <cmath>
 
-#include "../util/fade.hpp"
+#include "util/fade.hpp"
 
 namespace lamp {
 
@@ -14,8 +14,7 @@ static constexpr uint32_t PULSE_MAX_FRAMES = 10000;
 
 PulseExpression::PulseExpression(FrameBuffer* inBuffer, uint32_t inFrames)
     : Expression(inBuffer, inFrames) {
-  isExclusive = false;  // This can run and blend with other things
-  allowedInHomeMode = true; 
+  allowedInHomeMode = true;
 }
 
 void PulseExpression::configureFromParameters(const std::map<std::string, uint32_t>& parameters) {
@@ -37,13 +36,7 @@ void PulseExpression::configureFromParameters(const std::map<std::string, uint32
   static constexpr uint32_t PULSE_WIDTH = 15;
   pulseWidth = PULSE_WIDTH;
 
-  // Default to white if no colors provided
-  if (colors.empty()) {
-    colors.push_back(Color(255, 255, 255, 255));
-  }
-
-  // Start with first color
-  pulseColor = colors[0];
+  pulseColor = firstColorOr(kSafeFallbackColor);
 }
 
 uint32_t PulseExpression::calculateBlendFactor(int pixelIndex) const {
@@ -77,7 +70,16 @@ void PulseExpression::updateWavePosition() {
     return;
   }
 
-  uint32_t deltaMs = currentMs - lastUpdateMs;
+  // Why: cap deltaMs to protect against stale lastUpdateMs across long pauses.
+  // updateWavePosition() is gated by shouldAffectBuffer() and the wisp-override
+  // path, and the same lastUpdateMs persists through STOPPED → PLAYING
+  // re-entries. Without the cap, the first tick after a long gap would
+  // teleport wavePosition past the (pixelCount + 2*pulseWidth) end-of-strip
+  // stop check in one step, flipping the animation to STOPPED before any
+  // pixels were drawn at the new position. The compositor's
+  // MINIMUM_FRAME_DRAW_TIME_MS already bounds normal frame spacing, so this
+  // ceiling only matters on the pathological-gap path.
+  uint32_t deltaMs = std::min(currentMs - lastUpdateMs, (uint32_t)100);
 
   // Calculate how far to move based on speed
   float pixelsToMove = static_cast<float>(deltaMs) / static_cast<float>(pulseSpeedMs);
@@ -92,8 +94,11 @@ void PulseExpression::updateWavePosition() {
 }
 
 void PulseExpression::selectNextColor() {
-  if (colors.size() > 1) {
-    // Pick random color from palette
+  // Capture into pulseColor on every trigger (not just when the palette
+  // has 2+ entries) so receive-side cascade overrides land correctly even
+  // for single-color invocations. getRandomColor() over a 1-element vector
+  // returns that element, so the call is safe and idempotent.
+  if (!colors.empty()) {
     pulseColor = getRandomColor();
   }
 }
@@ -118,10 +123,6 @@ void PulseExpression::onUpdate() {
 }
 
 void PulseExpression::draw() {
-
-  // Pause if an exclusive behavior is running
-  if (shouldPause()) return;
-
   // For pulse, we need to continue drawing even when "stopped" to allow fade-out
   // Only skip if we shouldn't affect this buffer based on target
   if (!shouldAffectBuffer() && animationState != STOPPED) {
@@ -133,20 +134,23 @@ void PulseExpression::draw() {
     updateWavePosition();
   }
 
-  // Apply pulse effect
-  int pixelsAffected = 0;
+  // Apply pulse effect. blendFactor is per-pixel (depends on distance to wave
+  // center), so the audit's "hoist factor once per frame" pattern doesn't fit
+  // here — but we can still avoid the 4 channel function calls per pixel by
+  // inlining the easeLinear math via mixColorLinear. End-clamp short-circuit
+  // mirrors easeLinear()'s `currentStep >= duration` branch (returns end).
   for (int i = 0; i < fb->pixelCount; i++) {
     uint32_t blendFactor = calculateBlendFactor(i);
 
-    if (blendFactor > 0) {  // Skip pixels with no blend
-      // Blend pulse color with current buffer
-      // blendFactor is 0-100 (percentage)
-      fb->buffer[i] = fadeLinear(fb->buffer[i], pulseColor, 100, blendFactor);
-      pixelsAffected++;
-
+    if (blendFactor == 0) continue;  // Skip pixels with no blend
+    if (blendFactor >= 100) {
+      fb->buffer[i] = pulseColor;
+      continue;
     }
-  }
 
+    uint32_t factor = computeLinearFactor(blendFactor, 100u);
+    fb->buffer[i] = mixColorLinear(fb->buffer[i], pulseColor, factor);
+  }
 
   // Advance animation frame
   nextFrame();
@@ -157,13 +161,12 @@ void PulseExpression::draw() {
   if (wavePosition > fb->pixelCount + (2 * pulseWidth)) {
     // Wave has completely passed, safe to stop
     if (animationState != STOPPED) {
-      stop();
+      animationState = STOPPED;
+      frame = 0;
+      currentLoop += 1;
     }
   }
 
-  // Check if animation just completed
-  if (animationState == STOPPED && frame == 0) {  // frame resets to 0 when stopped
-  }
 }
 
 }  // namespace lamp

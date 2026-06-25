@@ -1,7 +1,6 @@
-#ifndef LAMP_BEHAVIORS_KNOCKOUT_H
-#define LAMP_BEHAVIORS_KNOCKOUT_H
+#pragma once
 
-#include "../core/animated_behavior.hpp"
+#include "core/animated_behavior.hpp"
 
 /**
  * @brief selectively darken parts of the lamp to handle brightness of the
@@ -14,11 +13,8 @@ class KnockoutBehavior : public AnimatedBehavior {
 
  public:
   std::vector<uint8_t> knockoutPixels = std::vector<uint8_t>(50, (uint8_t)100);
-  bool allowedInHomeMode = true;
 
   void draw() override;
   void control() override;
 };
 }  // namespace lamp
-
-#endif

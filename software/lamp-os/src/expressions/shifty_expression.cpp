@@ -1,10 +1,10 @@
-#include "./shifty_expression.hpp"
+#include "shifty_expression.hpp"
 
 #include <Arduino.h>
 #include <algorithm>
 
-#include "../util/fade.hpp"
-#include "./expression_manager.hpp"
+#include "util/fade.hpp"
+#include "expression_manager.hpp"
 
 namespace lamp {
 
@@ -37,13 +37,10 @@ void ShiftyExpression::configureFromParameters(const std::map<std::string, uint3
 }
 
 void ShiftyExpression::startShift() {
-  // Pick a random color to shift to
-  if (!colors.empty()) {
-    shiftedColor = getRandomColor();
-  } else {
-    // Fallback to white if no colors configured
-    shiftedColor = Color(255, 255, 255, 255);
-  }
+  // Pick a random color to shift to. getRandomColor() returns
+  // Expression::kSafeFallbackColor when the palette is empty, so no explicit
+  // fallback branch needed here.
+  shiftedColor = getRandomColor();
 
   // For fade start, use current buffer state
   fadeStartColors = fb->buffer;
@@ -78,12 +75,12 @@ void ShiftyExpression::startUnshift() {
 }
 
 uint32_t ShiftyExpression::getRandomShiftDuration() {
-  std::uniform_int_distribution<uint32_t> dist(shiftDurationMinMs,
-                                                shiftDurationMaxMs);
-  return dist(rng);
+  return rng.range(shiftDurationMinMs, shiftDurationMaxMs);
 }
 
 void ShiftyExpression::onTrigger() {
+  saveBufferState();
+
   // If we're already animating, cancel and start fresh
   // This allows manual triggers to work at any time
   if (state != IDLE) {
@@ -125,22 +122,40 @@ void ShiftyExpression::onUpdate() {
     default:
       break;
   }
+
+  // Perf: precompute the per-frame fade factor here so draw() can apply it
+  // per pixel without redoing the LUT-equivalent math for every channel.
+  // (frame, frames) are frame-scoped; per-pixel work in draw() only reads
+  // fadeStartColors[i] / fadeTargetColors[i]. Only meaningful in FADING_*
+  // states; SHIFTED and IDLE branches in draw() don't consult the factor.
+  if (state == FADING_TO_PALETTE || state == FADING_BACK) {
+    cachedFadeAtEnd_ = (frame >= frames);
+    // When cachedFadeAtEnd_ is true, draw() short-circuits to the end color
+    // and never reads cachedFadeFactor_, so a divide-by-zero in
+    // computeLinearFactor (when frames == 0) is unreachable here.
+    cachedFadeFactor_ = cachedFadeAtEnd_ ? 0u : computeLinearFactor(frame, frames);
+  }
 }
 
 void ShiftyExpression::onComplete() {
   // Always trigger glitch on unshift if glitchy is available and we just finished fading back
   if (state == IDLE) {
-    if (auto* manager = getGlobalExpressionManager()) {
-      manager->triggerExpression("glitchy");
+    if (context_ && context_->expressionManager) {
+#ifdef LAMP_DEBUG
+      Serial.println("[shifty] onComplete IDLE → triggerExpression(glitchy)");
+#endif
+      context_->expressionManager->triggerExpression("glitchy");
+    } else {
+#ifdef LAMP_DEBUG
+      Serial.printf("[shifty] onComplete IDLE but no chain (context=%d mgr=%d)\n",
+                    context_ != nullptr,
+                    (context_ && context_->expressionManager) ? 1 : 0);
+#endif
     }
   }
 }
 
 void ShiftyExpression::draw() {
-
-  // Pause if an exclusive behavior is running
-  if (shouldPause()) return;
-
   if (!shouldAffectBuffer()) {
     nextFrame();
     return;
@@ -149,9 +164,18 @@ void ShiftyExpression::draw() {
   switch (state) {
     case FADING_TO_PALETTE:
     case FADING_BACK: {
-      // Interpolate each pixel using integer-based fade
-      for (int i = 0; i < fb->pixelCount; i++) {
-        fb->buffer[i] = fadeLinear(fadeStartColors[i], fadeTargetColors[i], frames, frame);
+      // Per-frame fade factor was cached in onUpdate(); apply per pixel here.
+      // End-clamp short-circuit mirrors easeLinear()'s `currentStep >= duration`
+      // branch which returns `end` regardless of start.
+      if (cachedFadeAtEnd_) {
+        for (int i = 0; i < fb->pixelCount; i++) {
+          fb->buffer[i] = fadeTargetColors[i];
+        }
+      } else {
+        for (int i = 0; i < fb->pixelCount; i++) {
+          fb->buffer[i] = mixColorLinear(fadeStartColors[i], fadeTargetColors[i],
+                                          cachedFadeFactor_);
+        }
       }
       break;
     }

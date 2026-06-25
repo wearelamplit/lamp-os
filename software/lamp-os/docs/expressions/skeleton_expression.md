@@ -1,156 +1,175 @@
 # Skeleton Expression Example
 
-This is a minimal example of creating a new expression.
+Minimal walkthrough for adding a new expression type to the firmware.
+Pairs with `docs/expressions.md` (subsystem-level architecture and
+the parameter contract) — read that first.
 
-## Header File (skeleton_expression.hpp)
+## Header (skeleton_expression.hpp)
 
 ```cpp
-#ifndef LAMP_EXPRESSIONS_SKELETON_H
-#define LAMP_EXPRESSIONS_SKELETON_H
+#pragma once
 
-#include "./expression.hpp"
+#include "expression.hpp"
+#include "primitives.hpp"  // only if you use Window/Sparsity/Size
 
 namespace lamp {
 
 class SkeletonExpression : public Expression {
-private:
-  // Your state variables
-  Color activeColor;
-  float intensity = 1.0f;
+ private:
+  Region window_;          // optional — opt in to the Window primitive
+  uint32_t myTempoMs_ = 1000;
 
-public:
+ public:
   using Expression::Expression;
 
-  // Constructor
   SkeletonExpression(FrameBuffer* inBuffer, uint32_t inFrames = 30)
       : Expression(inBuffer, inFrames) {
-    isExclusive = false;         // Can blend with other expressions
-    allowedInHomeMode = true;     // Works in home mode
+    allowedInHomeMode = true;
   }
 
-  // Configuration (add custom parameters as needed)
-  void configure(const std::vector<Color>& inColors,
-                 uint32_t inIntervalMin,
-                 uint32_t inIntervalMax,
-                 ExpressionTarget inTarget,
-                 float inIntensity = 1.0f) {
-    // Call base configuration
-    Expression::configure(inColors, inIntervalMin, inIntervalMax, inTarget);
+  // Pure type properties — override only if your expression differs
+  // from the default (false = coexists with the wisp's hold colour).
+  bool disabledDuringWispOverride() const override { return false; }
 
-    // Your custom configuration
-    intensity = inIntensity;
-  }
+  // Read your custom keys from the generic parameters map. The map is
+  // std::map<std::string, uint32_t>; use lamp::getParam to read with a
+  // default, or one of the primitive helpers (Region/Sparsity/parseSize)
+  // for spatial knobs.
+  void configureFromParameters(
+      const std::map<std::string, uint32_t>& params);
 
   void draw() override;
 
-protected:
+ protected:
   void onTrigger() override;
-  void onUpdate() override;
-  void onComplete() override;
+  void onUpdate() override;   // optional
+  void onComplete() override; // optional
 };
 
 }  // namespace lamp
-
-#endif
 ```
 
-## Implementation File (skeleton_expression.cpp)
+## Implementation (skeleton_expression.cpp)
 
 ```cpp
-#include "./skeleton_expression.hpp"
+#include "skeleton_expression.hpp"
 
 namespace lamp {
 
+void SkeletonExpression::configureFromParameters(
+    const std::map<std::string, uint32_t>& params) {
+  // Custom tempo — your own param key, your own default.
+  myTempoMs_ = lamp::getParam(params, "myTempo", 1000);
+
+  // Spatial primitive — opt in only if your expression has a Window.
+  const uint16_t pc = (fb && fb->pixelCount > 0)
+      ? static_cast<uint16_t>(fb->pixelCount) : 0;
+  window_ = Region::fromParameters(params, pc);
+}
+
 void SkeletonExpression::onTrigger() {
-  // Called when expression starts
-  // Set up your initial state
-  activeColor = getRandomColor();  // Pick random color from palette
-  frame = 0;                        // Reset animation frame
+  // Snapshot palette + any state you need for this trigger.
 }
 
 void SkeletonExpression::onUpdate() {
-  // Called every frame while animating
-  // Update any dynamic state
-  // This is optional - only implement if needed
-}
-
-void SkeletonExpression::onComplete() {
-  // Called when animation finishes
-  // Clean up or trigger other expressions
-  // This is optional - only implement if needed
+  // Per-frame state advance — runs every loop tick while PLAYING.
+  // Don't allocate here; allocate in onTrigger().
 }
 
 void SkeletonExpression::draw() {
-  // Pause if an exclusive behavior is running
-  if (shouldPause()) return;
+  if (!shouldAffectBuffer()) { nextFrame(); return; }
 
-  // Only draw to appropriate buffer
-  if (!shouldAffectBuffer()) {
-    nextFrame();
-    return;
+  for (uint16_t i = window_.posMin; i <= window_.posMax; ++i) {
+    fb->buffer[i] = getRandomColor();  // your effect goes here
   }
 
-  // Calculate animation progress (0.0 to 1.0)
-  float progress = static_cast<float>(frame) / frames;
-
-  // Apply your visual effect
-  for (int i = 0; i < fb->pixelCount; i++) {
-    // Example: Fade in the color
-    float fadeAmount = progress * intensity;
-    fb->buffer[i] = fb->buffer[i].lerp(activeColor, fadeAmount);
-  }
-
-  // Advance to next frame
   nextFrame();
+}
+
+void SkeletonExpression::onComplete() {
+  // Optional — runs the tick after animationState returns to STOPPED.
 }
 
 }  // namespace lamp
 ```
 
-## Adding to Expression Manager
+## Registering with the factory
 
-In `expression_manager.cpp`, add your expression type:
+Open `software/lamp-os/src/expressions/expression_factory.cpp` and add
+two things:
+
+1. An include near the other type includes:
 
 ```cpp
-auto createExpression = [&](FrameBuffer* buffer) -> std::unique_ptr<Expression> {
-  // ... existing expressions ...
-
-  if (config.type == "skeleton") {
-    auto expr = std::make_unique<SkeletonExpression>(buffer, config.duration);
-    expr->configure(config.colors, config.intervalMin, config.intervalMax,
-                    target, config.intensity);
-    return expr;
-  }
-
-  return nullptr;
-};
+#include "skeleton_expression.hpp"
 ```
 
-## Configuration
+2. A dispatch branch in `makeExpression`:
 
-Add to your expression config:
-
-```json
-{
-  "type": "skeleton",
-  "enabled": true,
-  "colors": [
-    {"r": 255, "g": 0, "b": 100, "w": 0}
-  ],
-  "intervalMin": 30,
-  "intervalMax": 60,
-  "target": 3,
-  "duration": 30,
-  "intensity": 0.5
+```cpp
+} else if (type == "skeleton") {
+  auto e = std::make_unique<SkeletonExpression>(buffer, 30);
+  e->configure(colors, intervalMin, intervalMax, target);
+  e->configureFromParameters(parameters);
+  expr = std::move(e);
 }
 ```
 
-## Key Points
+That's the only place in firmware that has to know about your type.
+**Do not edit `expression_manager.cpp`** — the manager is type-agnostic
+and the factory is the type registry.
 
-1. **Always check `shouldPause()`** - Respects exclusive expressions
-2. **Always check `shouldAffectBuffer()`** - Respects target configuration
-3. **Call `nextFrame()`** - Advances animation and handles completion
-4. **Use `getRandomColor()`** - Picks from configured palette
-5. **Handle re-triggers** - Expression can be triggered anytime
+## Parameter contract
 
-That's it! This skeleton provides a complete, working expression that you can customize for any effect.
+Custom parameters live in the generic
+`std::map<std::string, uint32_t>` that ExpressionConfig owns. Read them
+in `configureFromParameters` via:
+
+- `lamp::getParam(params, "key", defaultValue)` — for arbitrary per-type
+  knobs (tempo, duration, intensity, etc.)
+- `lamp::Region::fromParameters(params, pixelCount)` — for the Window
+  primitive (`posMin` / `posMax`)
+- `lamp::Sparsity::fromParameters(params, windowSize)` — for the
+  Count + Wander primitive (`count` / `wander`)
+- `lamp::parseSize(params, windowSize, defaultValue)` — for the Size
+  primitive (`size`)
+
+Every primitive helper clamps to safe bounds before returning, so
+draw() never sees an index that would walk past `fb->buffer`.
+
+Parameter keys go on the wire and into NVS unchanged. Pick stable names —
+prefix with your expression's name if there's any risk of collision
+(`pulseSpeed`, not `speed`), reuse the shared primitive keys (`posMin`,
+`posMax`, `count`, `wander`, `size`) where they apply.
+
+## App-side metadata
+
+In `software/lamp-app-flutter/lib/features/lamp_shell/domain/expression_meta.dart`,
+add an `ExpressionTypeMeta` entry to the `all` list. `key` must match
+the factory's type string verbatim. `defaultParameters` must match the
+firmware defaults so a fresh entry behaves identically to a no-params
+instance.
+
+If your expression has parameter UI (sliders, switches), add a branch
+to the type-switch in
+`software/lamp-app-flutter/lib/features/lamp_shell/presentation/widgets/expression_params_panel.dart`,
+reusing the shared widget builders (`_buildPositionRange`,
+`_buildCount`, `_buildWander`, `_buildSize`) for the primitive knobs.
+
+## Key points
+
+1. **`shouldAffectBuffer()` first** — respects target (shade/base/both)
+   and the wisp-override gate.
+2. **`nextFrame()` always** — advances `frame` and handles completion.
+   Calling it twice is not safe; calling it zero times stalls the
+   animation.
+3. **Compose, don't take over** — expressions draw AFTER the
+   configurator. Your buffer writes are the final visible state for
+   the pixels you touch. Pixels you don't touch keep whatever the
+   earlier layers (idle, fade_in) wrote.
+4. **No allocation in `onUpdate` / `draw`** — they run every loop tick.
+   Allocate in `onTrigger` and reuse.
+5. **Continuous expressions override `control()`** — the base class's
+   default `control()` auto-triggers on interval and tears down on
+   STOPPED. Continuous expressions (Breathing, Drifty) stay PLAYING
+   forever and own the wisp-override gate themselves.

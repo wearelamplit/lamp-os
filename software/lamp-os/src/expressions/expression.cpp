@@ -1,21 +1,13 @@
-#include "./expression.hpp"
+#include "expression.hpp"
 
 #include <Arduino.h>
 
-#include "../core/compositor.hpp"
-#include "./expression_manager.hpp"
-
-// Global frame buffer references (set by ExpressionManager)
-namespace lamp {
-  extern std::vector<FrameBuffer*> expressionFrameBuffers;
-
-  // Global compositor pointer (set by standard_lamp)
-  static Compositor* globalCompositor = nullptr;
-
-  void setGlobalCompositor(Compositor* compositor) {
-    globalCompositor = compositor;
-  }
-}
+#include "components/network/lamp_protocol.hpp"
+#include "components/transient_override/color_override.hpp"
+#include "core/override_aggregate.hpp"
+#include "core/behavior_context.hpp"
+#include "core/compositor.hpp"
+#include "expression_manager.hpp"
 
 namespace lamp {
 
@@ -31,20 +23,42 @@ void Expression::configure(const std::vector<Color>& inColors,
 }
 
 void Expression::scheduleNextTrigger() {
-  std::uniform_int_distribution<uint32_t> dist(intervalMinMs, intervalMaxMs);
-  nextTriggerMs = millis() + dist(rng);
+  nextTriggerMs = millis() + rng.range(intervalMinMs, intervalMaxMs);
 }
 
 void Expression::saveBufferState() {
   savedBuffer = fb->buffer;
 }
 
+// Defined out-of-line at the bottom of this file. Queries the lamp's
+// two ColorOverride globals — returns true iff the wisp is actively
+// holding either surface. Used by shouldAffectBuffer() AND control()
+// below to suppress disabled-during-wisp expressions.
+bool isWispCurrentlyOverriding();
+
 bool Expression::shouldAffectBuffer() {
-  if (expressionFrameBuffers.empty()) return false;
+  // Context is wired by Compositor::addBehavior at register time (or by
+  // ExpressionManager::setCompositor for transients). Until both are wired
+  // and ExpressionManager::begin() has published the buffer list, treat as
+  // not-yet-routable and skip — same behavior as the old empty-vector guard.
+  if (!context_ || context_->expressionFrameBuffers.size() < 2) return false;
 
   // Check if current buffer matches our target
-  bool isShade = (fb == expressionFrameBuffers[0]);  // Shade is first
-  bool isBase = (fb == expressionFrameBuffers[1]);   // Base is second
+  bool isShade = (fb == context_->expressionFrameBuffers[0]);  // Shade is first
+  bool isBase = (fb == context_->expressionFrameBuffers[1]);   // Base is second
+
+  // Wisp-override draw gate. control() already suppresses auto-trigger
+  // and (for Breathing) per-frame onUpdate while wisp paint is held, but
+  // an expression that was already PLAYING when wisp activated keeps
+  // its CACHED last frame — and draw() runs each tick regardless,
+  // stomping the wisp paint with stale data. The 2026-06-13 "jacko
+  // renders pink despite correct wisp blue at beginFade" symptom was
+  // exactly this: a frozen BreathingExpression::draw() repainting its
+  // last targetColor over the wisp gradient every frame. Suppress
+  // draw too while wisp owns the relevant surface.
+  if (disabledDuringWispOverride() && isWispCurrentlyOverriding()) {
+    return false;
+  }
 
   switch (target) {
     case TARGET_SHADE:
@@ -59,12 +73,19 @@ bool Expression::shouldAffectBuffer() {
 }
 
 void Expression::control() {
-  // Pause if an exclusive behavior is running (unless we are exclusive)
-  if (shouldPause()) return;
-
+  // Wisp-override gate: skip auto-trigger when the operator has marked
+  // this expression "pause when wisp is in control" AND a wisp paint
+  // is currently held on either surface. Pushes nextTriggerMs forward
+  // by the min interval so a long-running wisp hold doesn't queue up
+  // a backlog of triggers that all fire the instant the wisp lets go.
+  if (disabledDuringWispOverride() && animationState == STOPPED &&
+      isWispCurrentlyOverriding()) {
+    nextTriggerMs = millis() + intervalMinMs;
+    return;
+  }
 
   // Check for automatic trigger
-  if (animationState == STOPPED && millis() > nextTriggerMs) {
+  if (autoTriggerEnabled && animationState == STOPPED && millis() > nextTriggerMs) {
     trigger();
   }
 
@@ -80,36 +101,59 @@ void Expression::control() {
   }
 }
 
-bool Expression::shouldPause() const {
-  // Don't pause if this expression is exclusive
-  if (isExclusive) return false;
-
-  // Check if compositor has an active exclusive
-  return globalCompositor && globalCompositor->hasActiveExclusive();
-}
-
 Color Expression::getRandomColor() {
   if (colors.empty()) {
-    return Color(0, 0, 0, 0);
+    return kSafeFallbackColor;
   }
-  std::uniform_int_distribution<size_t> dist(0, colors.size() - 1);
-  return colors[dist(rng)];
+  return colors[rng.range(0, colors.size() - 1)];
+}
+
+Color Expression::firstColorOr(Color fallback) const {
+  return colors.empty() ? fallback : colors.front();
 }
 
 void Expression::trigger() {
-
   // Only trigger if this expression should affect this buffer
   // This ensures expressions respect their target configuration
   if (!shouldAffectBuffer()) {
     return;
   }
 
-
-  // Save current state and start immediately
-  saveBufferState();
+  // Start immediately
   onTrigger();            // Expression-specific setup
   scheduleNextTrigger();  // Reset next automatic trigger
   playOnce();
+
+  // Notify the manager so the cascade convention fires for ALL trigger paths,
+  // including the per-entry auto-trigger from control() (which previously
+  // bypassed maybeCascade entirely). triggerExpression/triggerInvocation set
+  // a suppress flag on the manager around their own loops so this callback
+  // doesn't double-cascade (or re-cascade for remote-arrived invocations).
+  if (context_ && context_->expressionManager) {
+    context_->expressionManager->onExpressionFired(this);
+  }
+}
+
+// Lives in lamp.cpp as globals; defined in lamp namespace.
+}  // namespace lamp
+
+namespace lamp {
+
+// Forward-declared in this TU above Expression::control(). Cheap query
+// — two bool reads + two enum comparisons per Expression per loop
+// tick. The override aggregate lives in override_aggregate.cpp.
+bool isWispCurrentlyOverriding() {
+  if (lamp::overrides.base.isActive() &&
+      lamp::overrides.base.activeSource() ==
+          lamp_protocol::OverrideSource::Wisp) {
+    return true;
+  }
+  if (lamp::overrides.shade.isActive() &&
+      lamp::overrides.shade.activeSource() ==
+          lamp_protocol::OverrideSource::Wisp) {
+    return true;
+  }
+  return false;
 }
 
 }  // namespace lamp

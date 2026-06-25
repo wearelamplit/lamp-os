@@ -1,8 +1,7 @@
-#ifndef LAMP_BEHAVIORS_IDLE_H
-#define LAMP_BEHAVIORS_IDLE_H
+#pragma once
 
-#include "../core/animated_behavior.hpp"
-#include "../util/color.hpp"
+#include "core/animated_behavior.hpp"
+#include "util/color.hpp"
 
 /**
  * @brief a base layer of the lamp's default color to prevent blackout
@@ -12,11 +11,8 @@ class IdleBehavior : public AnimatedBehavior {
   using AnimatedBehavior::AnimatedBehavior;
 
  public:
-  bool allowedInHomeMode = true;
-
   void draw() override;
 
   void control() override;
 };
 }  // namespace lamp
-#endif

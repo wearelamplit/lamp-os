@@ -8,8 +8,7 @@ Expressions are animated behaviors that give the lamp personality through time-t
 
 - **Expressions** - Inherit from `Expression` base class which provides timing, triggering, and lifecycle management
 - **Frame Buffers** - Each expression operates on a specific buffer (shade, base, or both)
-- **Composability** - Multiple expressions can blend together for layered effects
-- **Exclusivity** - Some expressions can take exclusive control when active
+- **Composability** - Expressions draw AFTER the configurator in the compositor's per-frame loop, so their writes naturally land on top of the base scene (wisp paint / saved colors). When an expression's `animationState` returns to `STOPPED`, the compositor skips its `draw()` and the configurator's writes become the visible state again.
 
 ### Expression Lifecycle
 

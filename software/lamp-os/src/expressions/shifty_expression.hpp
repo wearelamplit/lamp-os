@@ -1,9 +1,8 @@
-#ifndef LAMP_EXPRESSIONS_SHIFTY_H
-#define LAMP_EXPRESSIONS_SHIFTY_H
+#pragma once
 
 #include <vector>
 
-#include "./expression.hpp"
+#include "expression.hpp"
 
 namespace lamp {
 
@@ -40,6 +39,12 @@ class ShiftyExpression : public Expression {
   std::vector<Color> fadeStartColors;
   std::vector<Color> fadeTargetColors;
 
+  // Per-frame cache (perf): (frame, frames) → factor is identical for every
+  // pixel within a fade frame. Hoisted out of the per-pixel hot path in draw().
+  // Updated in onUpdate(); read-only in draw().
+  uint32_t cachedFadeFactor_ = 0;       // Precomputed linear "factor" (matches easeLinear)
+  bool cachedFadeAtEnd_ = false;        // True when frame >= frames (end-clamp short-circuit)
+
 
   /**
    * @brief Start shifting to a new color
@@ -74,6 +79,10 @@ class ShiftyExpression : public Expression {
 
   void draw() override;
 
+  // Continuous palette-shift animation — visually fights the wisp's
+  // hold colour, so must pause while wisp is overriding.
+  bool disabledDuringWispOverride() const override { return true; }
+
 protected:
   void onTrigger() override;
   void onUpdate() override;
@@ -81,5 +90,3 @@ protected:
 };
 
 }  // namespace lamp
-
-#endif

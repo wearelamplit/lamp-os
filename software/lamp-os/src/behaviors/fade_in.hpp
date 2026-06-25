@@ -1,7 +1,6 @@
-#ifndef LAMP_BEHAVIORS_FADE_IN_H
-#define LAMP_BEHAVIORS_FADE_IN_H
+#pragma once
 
-#include "../core/animated_behavior.hpp"
+#include "core/animated_behavior.hpp"
 
 /**
  * @brief animation to fade from black to the lamp default color
@@ -11,11 +10,8 @@ class FadeInBehavior : public AnimatedBehavior {
   using AnimatedBehavior::AnimatedBehavior;
 
  public:
-  bool allowedInHomeMode = true;
-
   void draw() override;
 
   void control() override;
 };
 }  // namespace lamp
-#endif

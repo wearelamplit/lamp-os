@@ -1,7 +1,6 @@
-#ifndef LAMP_EXPRESSIONS_GLITCHY_H
-#define LAMP_EXPRESSIONS_GLITCHY_H
+#pragma once
 
-#include "./expression.hpp"
+#include "expression.hpp"
 
 namespace lamp {
 
@@ -34,8 +33,7 @@ class GlitchyExpression : public Expression {
 
 protected:
   void onTrigger() override;
+  void onComplete() override;
 };
 
 }  // namespace lamp
-
-#endif

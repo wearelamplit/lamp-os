@@ -1,7 +1,6 @@
-#ifndef LAMP_EXPRESSIONS_PULSE_H
-#define LAMP_EXPRESSIONS_PULSE_H
+#pragma once
 
-#include "./expression.hpp"
+#include "expression.hpp"
 
 namespace lamp {
 
@@ -67,5 +66,3 @@ protected:
 };
 
 }  // namespace lamp
-
-#endif
