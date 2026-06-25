@@ -1,11 +1,10 @@
-#ifndef LAMP_UTIL_GRADIENT_H
-#define LAMP_UTIL_GRADIENT_H
+#pragma once
 
 #include <cstdint>
 #include <vector>
 
-#include "./color.hpp"
-#include "./fade.hpp"
+#include "color.hpp"
+#include "fade.hpp"
 
 namespace lamp {
 /**
@@ -28,5 +27,3 @@ std::vector<Color> calculateGradient(Color inColorStart, Color inColorEnd,
 std::vector<Color> buildGradientWithStops(uint8_t inNumberPixels,
                                           std::vector<Color> inColorStops);
 }  // namespace lamp
-
-#endif

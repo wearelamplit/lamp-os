@@ -1,5 +1,4 @@
-#ifndef LAMP_UTIL_COLOR_H
-#define LAMP_UTIL_COLOR_H
+#pragma once
 
 #include <cstdint>
 #include <string>
@@ -34,4 +33,3 @@ Color hexStringToColor(std::string inHexString);
  */
 uint32_t colorDistance(Color c1, Color c2);
 }  // namespace lamp
-#endif

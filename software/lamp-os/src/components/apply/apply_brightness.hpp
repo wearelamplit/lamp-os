@@ -1,0 +1,132 @@
+// software/lamp-os/src/components/apply/apply_brightness.hpp
+//
+// Brightness mutation helpers for the "always save, no preview" refactor.
+// Three entry points sharing one signature so call sites declare intent:
+//
+//   brightnessToConfig   — user-direct BLE write (slider live-preview).
+//                          Mutates config + seeds the micro-fade triple
+//                          for smooth slider drags + applies initial sample.
+//   brightnessToRender   — mesh-relayed CONTROL_OP (cascade brightness).
+//                          Render-only: applies setBrightness directly, NO
+//                          config mutation, NO fade triple. The cascade is
+//                          transient; persisting it would contaminate
+//                          CHAR_COMMIT's next persistence sweep.
+//   brightnessImmediate  — settings_blob path. Mutates config + applies
+//                          via applyEffectiveBrightness, NO fade triple
+//                          (settings_blob is a saved value, not a tick).
+//                          Resets s_userBrightnessSeeded so the next slider
+//                          drag re-seeds cleanly from the new persisted
+//                          level instead of rubber-banding from a stale
+//                          source.
+//
+// Firmware-only: the inline bodies call into Adafruit_NeoPixel
+// (`setBrightness`) so this header cannot be linked from the native
+// test env. The earlier "header-only, native-testable" framing never
+// held — Adafruit_NeoPixel is in the include list below. If native
+// coverage of the compute path becomes valuable, split into a pure
+// compute helper + .cpp-resident strip application.
+//
+// Dependencies pulled in by the include chain:
+//   util/levels.hpp        — lamp::calculateBrightnessLevel
+//   config/config.hpp      — lamp::Config (config lives at ::config in lamp.cpp)
+
+#pragma once
+
+#include <Adafruit_NeoPixel.h>
+#include <cstdint>
+
+#include "config/config.hpp"
+#include "util/levels.hpp"
+
+// Strip handles and config defined in lamp.cpp at file scope (non-lamp
+// namespace) — single-instance-per-binary invariant; see lamp.cpp
+// header comment.
+extern Adafruit_NeoPixel* shadeStrip;
+extern Adafruit_NeoPixel* baseStrip;
+// config is defined as `lamp::Config config;` at file scope in
+// lamp.cpp — i.e., it lives at ::config, not ::lamp::config.
+extern lamp::Config config;
+
+namespace lamp {
+
+// Micro-fade triple — file-static in lamp.cpp. Exposed via these
+// accessors so apply_brightness.hpp can read/write without pulling in
+// the rest of the file. Definitions live inside `namespace lamp { ... }`
+// in lamp.cpp.
+uint8_t  brightnessFadeSource();
+uint8_t  brightnessFadeTarget();
+uint32_t brightnessFadeStartMs();
+bool     brightnessFadeSeeded();
+void     setBrightnessFade(uint8_t source, uint8_t target, uint32_t startMs);
+void     clearBrightnessFadeSeed();
+uint8_t  computeUserBrightnessNow(uint32_t nowMs);
+
+// Bookkeeping the brightness drain has always done.
+void stampConfiguratorActivity(uint32_t nowMs);
+
+// Apply effective brightness immediately (no fade). Calls into the
+// existing routing/dimming logic. Used by brightnessImmediate.
+void applyEffectiveBrightness();
+
+namespace apply {
+
+// User-direct BLE write. Routes to homeMode.brightness vs lamp.brightness
+// based on isHomeMode flag; seeds the micro-fade triple; applies the
+// initial sample so the strip starts moving immediately.
+inline void brightnessToConfig(uint8_t level, bool isHomeMode, uint8_t maxBrightness) {
+  if (isHomeMode) {
+    ::config.homeMode.brightness = level;
+  } else {
+    ::config.lamp.brightness = level;
+  }
+  const uint32_t fadeNow = ::millis();
+  ::lamp::stampConfiguratorActivity(fadeNow);
+  const uint8_t source = ::lamp::brightnessFadeSeeded()
+                             ? ::lamp::computeUserBrightnessNow(fadeNow)
+                             : level;
+  ::lamp::setBrightnessFade(source, level, fadeNow);
+  // Apply initial sample so the strip starts moving this drain cycle.
+  // (The compositor's per-tick interpolation handles the rest.)
+  if (::shadeStrip) {
+    ::shadeStrip->setBrightness(
+        ::lamp::calculateBrightnessLevel(maxBrightness, source));
+  }
+  if (::baseStrip) {
+    ::baseStrip->setBrightness(
+        ::lamp::calculateBrightnessLevel(maxBrightness, source));
+  }
+}
+
+// Mesh-relayed cascade brightness. Render-only: snap setBrightness,
+// no config mutation, no fade triple. Skipping the fade gives the
+// cascade its "instant change" UX (matches today's social-greet behavior
+// for shade/base color cascades).
+inline void brightnessToRender(uint8_t level, bool isHomeMode, uint8_t maxBrightness) {
+  (void)isHomeMode;  // Cascade brightness isn't home-mode-routed.
+  if (::shadeStrip) {
+    ::shadeStrip->setBrightness(
+        ::lamp::calculateBrightnessLevel(maxBrightness, level));
+  }
+  if (::baseStrip) {
+    ::baseStrip->setBrightness(
+        ::lamp::calculateBrightnessLevel(maxBrightness, level));
+  }
+}
+
+// settings_blob path. Saved value semantics — no fade UX. Mutates
+// config, applies via applyEffectiveBrightness (which respects the
+// dimming/social-disposition multipliers), and resets the slider fade
+// seed so a subsequent slider drag starts from the new persisted level.
+inline void brightnessImmediate(uint8_t level, bool isHomeMode, uint8_t maxBrightness) {
+  (void)maxBrightness;
+  if (isHomeMode) {
+    ::config.homeMode.brightness = level;
+  } else {
+    ::config.lamp.brightness = level;
+  }
+  ::lamp::clearBrightnessFadeSeed();
+  ::lamp::applyEffectiveBrightness();
+}
+
+}  // namespace apply
+}  // namespace lamp

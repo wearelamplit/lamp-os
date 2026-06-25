@@ -1,97 +1,72 @@
-#ifndef LAMP_COMPONENTS_NETWORK_WIFI_H
-#define LAMP_COMPONENTS_NETWORK_WIFI_H
+#pragma once
 
-#include <Arduino.h>
-
+#include <cstdint>
 #include <string>
 #include <vector>
 
-#include "../../config/config.hpp"
-#include "../../util/color.hpp"
-#include "./artnet.hpp"
+namespace wifi {
 
-#define WEBSOCKET_CLEAN_TIME_MS 60000
-#define WIFI_PREFERRED_CHANNEL 6
+// State retained for the scan UI in the app. The lamp NEVER associates to
+// a home AP (presence-only mode), so CONNECTING/CONNECTED never fire — the
+// only meaningful transitions are IDLE <-> SCANNING.
+enum State { IDLE, SCANNING, FAILED };
 
-namespace lamp {
-class WifiComponent {
- public:
-  Config* config;
-  unsigned long lastWebSocketCleanTimeMs = 0;
-  std::string doc;
-  bool requiresReboot = false;
-  bool newWebSocketData = false;
-  bool stageMode = false;
-  unsigned long lastWebSocketUpdateTimeMs = 0;
-  JsonDocument lastWebSocketData;
-  bool homeNetworkVisible = false;
-  unsigned long lastNetworkScanTimeMs = 0;
-
-  WifiComponent();
-
-  /**
-   * @brief initializer for setup
-   * @param [in] config a reference to a lamp config
-   */
-  void begin(Config* inConfig);
-
-  /**
-   * @brief process to call in the main loop
-   */
-  void tick();
-
-  /**
-   * @brief get last Artnet UDP data from the buffer
-   * @return details of the 10 channels occupied by a lamp
-   */
-  ArtnetDetail getArtnetData();
-
-  /**
-   * @brief get last Artnet UDP frame time
-   * @return timestamp of last frame in milliseconds
-   */
-  unsigned long getLastArtnetFrameTimeMs();
-
-  /**
-   * @brief Check if there's new WebSocket data to consume
-   * @return true if there's recent data in the buffer
-   */
-  bool hasWebSocketData();
-
-  /**
-   * @brief get last WebSocket updates time
-   * @return timestamp of last update time in milliseconds
-   */
-  unsigned long getLastWebSocketUpdateTimeMs();
-
-  /**
-   * @brief get the json doc from the buffer
-   * @return JsonDocument
-   */
-  JsonDocument getWebSocketData();
-
-  /**
-   * @brief enable the station mode for receiving ArtNet data
-   * @param [in] inSsid the ssid advertised by the stage
-   * @param [in] inPassword the password advertised by the stage
-   */
-  void toStageMode(String inSsid, String inPassword);
-
-  /**
-   * @brief if the stage is no longer found, disconnect from the STA to restore the SoftAP
-   */
-  void toApMode();
-
-  /**
-   * @brief Check if the configured home network SSID is visible
-   * @return true if home network SSID is detected in scan results
-   */
-  bool isHomeNetworkVisible();
-
-  /**
-   * @brief Update network scan results to check for home SSID
-   */
-  void updateNetworkScan();
+struct ScanResult {
+  std::string ssid;
+  int8_t rssi;
+  bool encrypted;
 };
-}  // namespace lamp
-#endif
+
+void begin();
+
+State state();
+std::string lastError();   // "scan" | "" — only ever set when a scan fails
+
+void startScan();
+std::vector<ScanResult> consumeScanResults();  // drains; used by the UI notify
+
+using StateChangeCallback = void (*)();
+void setStateChangeCallback(StateChangeCallback cb);
+
+// Caller registers a getter for "is home-mode currently enabled in config".
+// wifi.cpp uses it to gate periodic background scans — when home-mode is off
+// there's no consumer for the scan results, so we save the radio time
+// (and avoid the boot-time scan failures that were stranding the radio off
+// LAMP_ESPNOW_CHANNEL on 2026-06-04). Returning false (or registering no
+// getter at all) disables periodic scans entirely; on-demand scans via
+// startScan() still work.
+using HomeModeEnabledGetter = bool (*)();
+void setHomeModeEnabledGetter(HomeModeEnabledGetter fn);
+
+// Caller registers a getter for "is an OTA session currently in flight".
+// wifi.cpp uses it to suppress periodic background scans during OTA — the
+// scan hops the radio for ~5s and silently drops ESP-NOW unicast in BOTH
+// directions while it runs (confirmed hardware-tested 2026-06-04: OFFER
+// retry landed but lamp's ACCEPT/REQ couldn't get back to the wisp).
+// On-demand scans (BLE op:scan) are NOT gated; user-driven scans still
+// work even if a stalled OTA never reports completion.
+using OtaInProgressGetter = bool (*)();
+void setOtaInProgressGetter(OtaInProgressGetter fn);
+
+void tick();
+
+// Home-presence detection. The lamp periodically scans (when no BT client
+// is connected — scans during BT sessions stress the shared radio) and
+// caches the visible SSIDs. `homeSsidVisible(ssid)` returns true if a
+// recent scan saw the given SSID. No association, no credentials, no
+// password ever leaves the lamp.
+bool homeSsidVisible(const std::string& ssid);
+
+// Channel coordination for ESP-NOW grid.
+// We never associate to an AP in presence-only mode, so the radio always
+// sits on the grid channel. This function is a no-op kept for ABI compat
+// but stays callable from existing call sites.
+void ensureGridChannel();
+
+// softAP shares LAMP_ESPNOW_CHANNEL so an associating phone doesn't yank
+// the radio off the grid channel.
+bool startSoftAp(const std::string& name);
+void stopSoftAp();
+bool softApActive();
+
+}  // namespace wifi

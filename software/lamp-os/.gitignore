@@ -1,6 +1,16 @@
 .pio
 .vscode
-src/main.cpp
-src/secrets.hpp
 .buildcache
-.vscode
+
+# pioarduino-as-IDF-component build artifacts. The custom_sdkconfig flow
+# in platformio.ini generates these on first build (and regenerates them
+# whenever the custom_sdkconfig content changes). sdkconfig.upesy_wroom
+# is the persisted kconfig state (kconfgen reads it as input on rebuild,
+# so stale values can pin Kconfig options); sdkconfig.defaults is the
+# merged template; the others are pulled in by ESP-IDF's component manager.
+sdkconfig.defaults
+sdkconfig.upesy_wroom*
+dependencies.lock
+CMakeLists.txt
+.dummy/
+managed_components/

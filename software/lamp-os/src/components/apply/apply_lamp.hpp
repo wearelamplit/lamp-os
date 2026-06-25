@@ -1,0 +1,65 @@
+// software/lamp-os/src/components/apply/apply_lamp.hpp
+//
+// settings_blob's `lamp` section handler. Updates config.lamp.* fields
+// in place, calls NimBLEDevice::setDeviceName on rename so the BLE
+// advertised name reflects the new value without a reboot. Mesh HELLO
+// (show_receiver.cpp) reads config.lamp.name live every 5s so peers
+// see the rename on the next tick.
+
+#pragma once
+
+#include <ArduinoJson.h>
+
+#include "config/config.hpp"
+#include "components/apply/apply_brightness.hpp"
+
+// config is defined as `lamp::Config config;` at file scope in
+// lamp.cpp — i.e., it lives at ::config, not ::lamp::config.
+extern lamp::Config config;
+
+namespace lamp {
+
+// Provided by lamp.cpp / NimBLE wiring. Call to update the
+// GAP device name advertised in scan responses without rebooting.
+// Implementation calls NimBLEDevice::setDeviceName(newName).
+void updateAdvertisedDeviceName(const char* newName);
+
+namespace apply {
+
+// Applies all writable fields in the `lamp` JSON object to config and
+// to runtime state. Missing fields are left alone (settings_blob is
+// partial-merge by design — caller omits what it doesn't want to touch).
+inline void lampLocal(JsonObject obj, uint8_t maxBrightness) {
+  if (obj.isNull()) return;
+  if (obj["name"].is<const char*>()) {
+    ::config.lamp.name = obj["name"].as<const char*>();
+    ::lamp::updateAdvertisedDeviceName(::config.lamp.name.c_str());
+  }
+  if (obj["brightness"].is<int>()) {
+    int level = obj["brightness"].as<int>();
+    if (level >= 0 && level <= 100) {
+      // Settings_blob is a "saved value" — use brightnessImmediate so
+      // we skip the slider micro-fade.
+      ::lamp::apply::brightnessImmediate(static_cast<uint8_t>(level),
+                                          /*isHomeMode=*/false, maxBrightness);
+    }
+  }
+  if (obj["advancedEnabled"].is<bool>()) {
+    ::config.lamp.advancedEnabled = obj["advancedEnabled"].as<bool>();
+  }
+  if (obj["devMode"].is<bool>()) {
+    ::config.lamp.devMode = obj["devMode"].as<bool>();
+  }
+  if (obj["webappEnabled"].is<bool>()) {
+    ::config.lamp.webappEnabled = obj["webappEnabled"].as<bool>();
+  }
+  if (obj["socialMode"].is<int>()) {
+    int mode = obj["socialMode"].as<int>();
+    if (mode >= 0 && mode <= 2) {  // Introvert / Ambivert / Extrovert
+      ::config.lamp.socialMode = static_cast<SocialMode>(mode);
+    }
+  }
+}
+
+}  // namespace apply
+}  // namespace lamp

@@ -1,12 +1,11 @@
-#ifndef LAMP_CORE_FRAME_BUFFER_H
-#define LAMP_CORE_FRAME_BUFFER_H
+#pragma once
 
 #include <Adafruit_NeoPixel.h>
 #include <Arduino.h>
 
 #include <vector>
 
-#include "./util/color.hpp"
+#include "util/color.hpp"
 
 namespace lamp {
 /**
@@ -15,9 +14,6 @@ namespace lamp {
  * when the bitmap buffer or brightness is changed
  */
 class FrameBuffer {
- private:
-  uint8_t i = 0;
-
  public:
   std::vector<Color> defaultColors;
   std::vector<Color> previousBuffer;
@@ -25,6 +21,12 @@ class FrameBuffer {
   uint8_t pixelCount = 0;
   Adafruit_NeoPixel* driver = nullptr;
   std::vector<Color> buffer;
+
+  // Rate-limit floor for the LAMP_DEBUG-gated flush log so per-frame
+  // changes during a fade don't drown the serial. Per-instance so base
+  // and shade each get their own throttled stream — set to 0 to log the
+  // next change, otherwise gated to once per ~500 ms.
+  uint32_t lastFlushLogMs_ = 0;
 
   FrameBuffer();
 
@@ -37,14 +39,8 @@ class FrameBuffer {
   void begin(std::vector<Color> inDefaultColors, uint8_t inPixelCount, Adafruit_NeoPixel* inDriver);
 
   /**
-   * @brief fill the framebuffer with a single color
-   */
-  void fill(Color inColor);
-
-  /**
    * @brief send values from buffer to the LED driver
    */
   void flush();
 };
 }  // namespace lamp
-#endif

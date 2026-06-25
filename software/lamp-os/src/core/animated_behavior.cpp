@@ -1,4 +1,4 @@
-#include "./animated_behavior.hpp"
+#include "animated_behavior.hpp"
 
 #include <cstdint>
 

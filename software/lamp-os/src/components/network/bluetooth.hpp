@@ -1,18 +1,14 @@
-#ifndef LAMP_COMPONENTS_NETWORK_BLUETOOTH_H
-#define LAMP_COMPONENTS_NETWORK_BLUETOOTH_H
+#pragma once
 
 #include <string>
 
-#include "./bluetooth_pool.hpp"
-
-// Stage manufacturer identifier
-#define BLE_STAGE_MAGIC_NUMBER 42007
+#include "config/config.hpp"
 
 // Lamp manufacturer identifier
 #define BLE_LAMP_MAGIC_NUMBER 42069
 
-// Scan every INTERVAL for WINDOW
-#define BLE_GAP_SCAN_INTERVAL_MS 400
+// BLE scan window — pScan->setWindow(BLE_GAP_SCAN_WINDOW_MS) in
+// bluetooth.cpp. Kept short under SW-coex to leave airtime for ESP-NOW.
 #define BLE_GAP_SCAN_WINDOW_MS 15
 
 // Advertise every INTERVAL
@@ -21,9 +17,10 @@
 // Scan time
 #define BLE_GAP_SCAN_TIME_MS 1000
 
-// Advertising intervals
-#define BLE_ADVERTISING_INTERVAL_MIN 400
-#define BLE_ADVERTISING_INTERVAL_MAX 650
+// Advertising intervals (BLE units of 0.625 ms). Lamp is mains-powered so
+// no reason not to advertise fast.
+#define BLE_ADVERTISING_INTERVAL_MIN 48
+#define BLE_ADVERTISING_INTERVAL_MAX 96
 
 // Tx power level in DB
 // @see platformio build flag MYNEWT_VAL_BLE_LL_TX_PWR_DBM as they must match
@@ -49,16 +46,41 @@ class BluetoothComponent {
   void begin(std::string name, Color inBaseColor, Color inShadeColor);
 
   /**
-   * @brief get a listing of all lamps within acceptable signal strength limits
-   * @return vector of all found lamps
+   * @brief register the GATT setup + control services, start the GATT server,
+   * start advertising. Must be called after begin() and after any preferences
+   * loaded. The scan-stop/restart bracket is handled internally because
+   * NimBLE's ble_gatts_mutable() returns false if any GAP procedure is
+   * active when ble_gatts_add_svcs runs (silent service registration drop).
    */
-  std::vector<BluetoothLampRecord>* getLamps();
+  void activateGattServices(Config* cfg, Preferences* prefs);
 
   /**
-   * @brief get a listing of all stages within acceptable signal strength limits
-   * @return vector of all found stages
+   * @brief record the latest base + shade colors that should be
+   * reflected in the BLE advertisement. This is a *fast setter* —
+   * it does not touch NimBLE. The actual NimBLE update happens
+   * in tickAdvertising() on a debounced schedule so rapid
+   * baseColors writes (e.g. a user dragging the color picker)
+   * cannot starve the BLE host task. Mfg payload shape is
+   * `[magic16, baseRGB, shadeRGB, version=0x02]` = 9 bytes.
+   *
+   * Synchronously calling NimBLE's setAdvertisementData() from
+   * the loop task at sub-100ms intervals corrupts the host
+   * task's pending-advertisement buffer and crashes the lamp
+   * with `_invalid_pc_placeholder`. Don't do that again.
    */
-  std::vector<BluetoothStageRecord>* getStages();
+  void setAdvertisedColors(Color base, Color shade);
+
+  /**
+   * @brief flush any pending advertisement-color update to
+   * NimBLE if at least the debounce interval has elapsed since
+   * the last flush. Call once per main-loop tick.
+   */
+  void tickAdvertising();
+
+ private:
+  Color m_pendingAdvBase;
+  Color m_pendingAdvShade;
+  bool m_advDirty = false;
+  uint32_t m_lastAdvFlushMs = 0;
 };
 }  // namespace lamp
-#endif
