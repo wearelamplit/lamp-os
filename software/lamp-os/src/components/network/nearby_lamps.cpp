@@ -507,20 +507,11 @@ std::string NearbyLamps::getWispStatusReadJson() {
     }
   }
 
-  // manualPalette is INTENTIONALLY OMITTED from this JSON now. The base64
-  // encoding inflated the served payload past ~250 B (~504 B with the
-  // wisp's roster non-empty), which the BLE NOTIFY path silently
-  // truncates at MTU-3 (≈244 B). The app's parser sees a truncated JSON,
-  // returns WispStatus.empty, and the wisp icon disappears + control
-  // flags get lost — exactly the regression observed on hardware
-  // 2026-06-13.
-  //
-  // The manualPalette is still cached in WispCache and surfaced on its
-  // own characteristic — see CHAR_WISP_PALETTE in ble_control.cpp. The
-  // characteristic READ path can carry the full payload (BLE chunked
-  // read isn't bounded by MTU), and the dedicated NOTIFY pushes a tiny
-  // dummy (or the small encoded blob if MTU allows) without inflating
-  // wispStatus.
+  // The full palette is too large for the NOTIFY leg (MTU truncation
+  // silently corrupts wispStatus), so it is served only on the READ leg,
+  // which long-reads the full value. The NOTIFY path passes
+  // includePalette=false and carries paletteIdPrefix as the "re-read me"
+  // signal.
 
   std::string out;
   serializeJson(doc, out);
