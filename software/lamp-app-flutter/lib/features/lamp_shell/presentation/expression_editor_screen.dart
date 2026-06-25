@@ -1,0 +1,822 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../../core/routing/routes.dart';
+import '../../../core/theme/brand_colors.dart';
+import '../../../core/widgets/friendly_error.dart';
+import '../../control/application/control_notifier.dart';
+import '../../control/application/control_state.dart';
+import '../../control/application/expression_draft.dart';
+import '../../control/domain/lamp_color.dart';
+import '../../control/domain/sections.dart';
+import '../../control/presentation/widgets/color_picker_sheet.dart';
+import '../../control/presentation/widgets/connecting_view.dart';
+import '../../control/presentation/widgets/connection_banner.dart';
+import '../../control/presentation/widgets/lamp_color_swatch.dart';
+import '../domain/expression_interval_math.dart';
+import '../domain/expression_meta.dart';
+import 'widgets/expression_params_panel.dart';
+
+class ExpressionEditorScreen extends ConsumerStatefulWidget {
+  const ExpressionEditorScreen({
+    super.key,
+    required this.lampId,
+    required this.typeKey,
+    required this.targetKey,
+  });
+
+  /// The expression type — locked. New entries reach this screen via the
+  /// AddExpressionPickerScreen which chose the type up front; edits
+  /// preserve whatever (type, target) the user tapped.
+  final String typeKey;
+
+  /// The expression target (1 = shade, 2 = base, 3 = both) — locked.
+  final int targetKey;
+
+  final String lampId;
+
+  @override
+  ConsumerState<ExpressionEditorScreen> createState() =>
+      _ExpressionEditorScreenState();
+}
+
+class _ExpressionEditorScreenState
+    extends ConsumerState<ExpressionEditorScreen> {
+  /// Cached at initState so `dispose()` can call into the notifier without
+  /// touching `ref` after the widget is deactivated (which Riverpod blocks).
+  late final ControlNotifier _controlNotifier;
+
+  bool _existsInState(ControlState? state) =>
+      state != null &&
+      state.expressions.expressions
+          .any((e) => e.type == widget.typeKey && e.target == widget.targetKey);
+
+  @override
+  void initState() {
+    super.initState();
+    _controlNotifier =
+        ref.read(controlNotifierProvider(widget.lampId).notifier);
+  }
+
+  @override
+  void dispose() {
+    // Tell the firmware to leave preview mode and re-enable the configurator
+    // behaviors. Without this, a `test_expression` write performed while the
+    // editor was open leaves the shade/base configurator stuck in
+    // `disabled=true`, so subsequent shade/base color writes are received
+    // by the lamp but never drawn.
+    _controlNotifier.completeExpressionTest();
+    super.dispose();
+  }
+
+  void _updateDraft(ExpressionConfig Function(ExpressionConfig d) f) {
+    ref
+        .read(expressionDraftProvider(
+                widget.lampId, widget.typeKey, widget.targetKey)
+            .notifier)
+        .update(f);
+  }
+
+  ExpressionConfig _withColors(ExpressionConfig d, List<LampColor> colors) =>
+      d.copyWith(colors: colors);
+
+  ExpressionConfig _withIntervals(ExpressionConfig d, int min, int max) =>
+      d.copyWith(intervalMin: min, intervalMax: max);
+
+  ExpressionConfig _withParameters(
+          ExpressionConfig d, Map<String, int> p) =>
+      d.copyWith(parameters: p);
+
+  /// Open the color picker with live preview wired to the lamp. While
+  /// the user drags R/G/B sliders, the picked color streams to
+  /// whichever strips the expression's target paints (shade-only →
+  /// shade, base-only → base, both → both) so the lamp preview matches
+  /// what the saved expression will actually do. On close — confirm OR
+  /// cancel — restore the lamp's main shade/base palette so the picker
+  /// session doesn't permanently contaminate it. Returns the user's
+  /// picked color, or null on cancel.
+  Future<LampColor?> _pickColorLive(
+    ControlState state,
+    ControlNotifier notifier,
+    LampColor initial,
+  ) async {
+    final t = widget.targetKey;
+    final previewShade = (t == 1 || t == 3);
+    final previewBase = (t == 2 || t == 3);
+    final originalShade = state.shade.colors;
+    final originalBase = state.base.colors;
+
+    // Stop any active expression test so the configurator is back in
+    // charge and the picker's writes are visible. Tests disable the
+    // configurator behavior, which would otherwise let the expression
+    // keep painting over our live writes.
+    unawaited(notifier.completeExpressionTest());
+
+    void writeLive(LampColor c) {
+      if (previewShade) unawaited(notifier.setShadeColor(c));
+      if (previewBase) unawaited(notifier.setBaseColors([c]));
+    }
+
+    final picked = await showColorPickerSheet(
+      context,
+      initial: initial,
+      onLive: writeLive,
+    );
+
+    // Restore whichever strips we drove regardless of confirm/cancel.
+    // The picker's writes were for preview only; the expression's
+    // palette is what should actually change (handled by the caller).
+    if (previewShade && originalShade.isNotEmpty) {
+      unawaited(notifier.setShadeColor(originalShade.first));
+    }
+    if (previewBase) {
+      unawaited(notifier.setBaseColors(originalBase));
+    }
+
+    return picked;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final async = ref.watch(controlNotifierProvider(widget.lampId));
+    final meta = ExpressionTypeMeta.byKey(widget.typeKey);
+    return Scaffold(
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            final router = GoRouter.maybeOf(context);
+            if (router != null && router.canPop()) {
+              router.pop();
+            } else {
+              Navigator.maybeOf(context)?.maybePop();
+            }
+          },
+          tooltip: 'Back',
+        ),
+        // Title carries the expression's friendly name (titlized via
+        // ExpressionTypeMeta) rather than the wire-level snake-case type.
+        title: Text(_existsInState(async.value)
+            ? (meta?.name ?? widget.typeKey)
+            : 'New ${meta?.name ?? widget.typeKey}'),
+        actions: [
+          // Test: live-preview the editor's in-flight draft. We can't pass
+          // colors/parameters in the test_expression envelope (the firmware
+          // only takes type+target and triggers whatever is in its in-memory
+          // expressionManager), so seed the draft via expressionOp first.
+          // dispose() rolls it back if the user leaves without Saving.
+          // Disabled when the BLE link is down — the writes would silently
+          // queue against a dead connection.
+          Consumer(
+            builder: (context, ref, _) {
+              final draft = ref.watch(expressionDraftProvider(
+                  widget.lampId, widget.typeKey, widget.targetKey));
+              final connected = ref.watch(controlNotifierProvider(widget.lampId)
+                  .select((a) => a.value?.connected ?? false));
+              return IconButton(
+                icon: const Icon(Icons.play_arrow_rounded),
+                tooltip: 'Test',
+                onPressed: !connected
+                    ? null
+                    : () async {
+                        final notifier = ref.read(
+                            controlNotifierProvider(widget.lampId).notifier);
+                        // Persist via upsert first so testExpression triggers
+                        // the configured entry (the lamp keys the trigger off
+                        // the entry already in expressionManager).
+                        await notifier.upsertExpression(draft);
+                        await notifier.testExpression(draft);
+                      },
+              );
+            },
+          ),
+        ],
+      ),
+      body: async.when(
+        loading: () => ConnectingView(deviceId: widget.lampId),
+        error: (e, _) => FriendlyError.page(
+          title: "Couldn't reach your lamp.",
+          subtitle:
+              "They may have wandered out of range. Bring your phone closer "
+              'and try again.',
+          rawError: e,
+          onRetry: () =>
+              ref.invalidate(controlNotifierProvider(widget.lampId)),
+        ),
+        data: (state) {
+          final notifier =
+              ref.read(controlNotifierProvider(widget.lampId).notifier);
+          final draft = ref.watch(expressionDraftProvider(
+              widget.lampId, widget.typeKey, widget.targetKey));
+          final isNew = !_existsInState(state);
+
+          // Two-row Column: scrolling form body up top, action row pinned
+          // to the bottom inside a SafeArea so it stays above the system
+          // gesture bar / nav bar on Android. Matches the layout pattern
+          // used by knockout_screen and advanced_leds_screen.
+          //
+          // Wrapped in IgnorePointer + Opacity below when the BLE link is
+          // down so the user can see the editor but can't fire writes
+          // (Save / Test / color-pick) at a dead connection. Banner up
+          // top mirrors the ControlScreen pattern.
+          final body = Column(
+            children: [
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    _Header(meta: meta),
+              const SizedBox(height: 12),
+              // Target switcher. Same chunky-pill UX as the picker so the
+              // active target reads at a glance. Tapping a different target
+              // pushReplaces the editor route for that (type, target);
+              // other-target buttons are disabled when that combo is already
+              // configured (one entry per (type, target) firmware-side).
+              _TargetRow(
+                currentTarget: widget.targetKey,
+                isTaken: (t) =>
+                    t != widget.targetKey &&
+                    state.expressions.expressions.any((e) =>
+                        e.type == widget.typeKey && e.target == t),
+                onTap: (t) {
+                  if (t == widget.targetKey) return;
+                  GoRouter.maybeOf(context)?.pushReplacement(
+                    AppRoutes.expressionEditor(
+                        widget.lampId, widget.typeKey, t),
+                  );
+                },
+              ),
+              const SizedBox(height: 20),
+
+              // Colors
+              const _Label('Colors'),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (var i = 0; i < draft.colors.length; i++)
+                    _ColorChip(
+                      color: draft.colors[i],
+                      onEdit: () async {
+                        final picked = await _pickColorLive(
+                            state, notifier, draft.colors[i]);
+                        if (picked == null) return;
+                        final next = [...draft.colors];
+                        next[i] = picked;
+                        _updateDraft((d) => _withColors(d, next));
+                      },
+                      // Last swatch is non-removable so the palette can't
+                      // end up empty (firmware would have nothing to draw).
+                      onRemove: draft.colors.length > 1
+                          ? () => _updateDraft((d) =>
+                              _withColors(d, [...d.colors]..removeAt(i)))
+                          : null,
+                    ),
+                  TextButton.icon(
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add color'),
+                    onPressed: () async {
+                      final picked = await _pickColorLive(
+                          state,
+                          notifier,
+                          const LampColor(r: 0xFF, g: 0xFF, b: 0xFF, w: 0));
+                      if (picked == null) return;
+                      _updateDraft((d) => _withColors(d, [...d.colors, picked]));
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // Trigger cadence — two 0..1 normalized sliders. The widget owns its UI
+              // state; each drag emits a fresh (intervalMin, intervalMax) pair via
+              // ExpressionIntervalMath. Hidden for breathing because it's a
+              // continuous (always-on) expression — its `intervalMin`/`Max` are
+              // ignored by the firmware; only `breathSpeed` (in the params panel
+              // below) drives its timing.
+              if (widget.typeKey != 'breathing') ...[
+                _FrequencySpread(
+                  intervalMin: draft.intervalMin,
+                  intervalMax: draft.intervalMax,
+                  onChanged: (lo, hi) =>
+                      _updateDraft((d) => _withIntervals(d, lo, hi)),
+                ),
+                const SizedBox(height: 16),
+              ],
+
+              // Per-type parameters (replaces the old JSON text field).
+              // devMode gates the cascade controls — those live behind
+              // the persisted devMode flag (separate from session-only
+              // advanced unlock so regular advanced users don't see the
+              // power-user mesh fan-out toggles).
+              ExpressionParamsPanel(
+                type: draft.type,
+                parameters: draft.parameters,
+                devMode: ref.watch(
+                  controlNotifierProvider(widget.lampId).select(
+                      (async) => async.value?.lamp.devMode ?? false),
+                ),
+                onChanged: (p) => _updateDraft((d) => _withParameters(d, p)),
+              ),
+              // Wisp-override gate (`disabledDuringWispOverride`) is no
+              // longer a user-facing toggle — the per-type default in
+              // ExpressionTypeMeta.defaultDisabledDuringWispOverride is
+              // authoritative (breathing + shifty pause during wisp
+              // control; glitchy + pulse don't). The field is still
+              // wired through the data model so a future custom-lamps
+              // power-user surface can re-expose it; expressions_screen
+              // continues to grey expressions whose default says they
+              // pause during a wisp-active session.
+              if (meta != null) ...[
+                const SizedBox(height: 20),
+                Text(
+                  meta.description,
+                  style: const TextStyle(
+                    color: BrandColors.fogGrey,
+                    fontSize: 12,
+                    fontStyle: FontStyle.italic,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+                  ],
+                ),
+              ),
+              // Action row — Cancel + Delete on the left, Add/Update on
+              // the right. Test sits on the AppBar's actions area; the
+              // back-arrow on the AppBar leading area pops without
+              // discarding the draft (so partial work survives a back
+              // tap and re-open). Cancel is the explicit "throw away"
+              // counterpart.
+              //
+              // This was previously the last child of the ListView and
+              // scrolled with the form, leaving the buttons midway down
+              // the screen on short forms. Pulling it out as a sibling
+              // under SafeArea pins it to the bottom in line with the
+              // rest of the editors. Bespoke shape (optional leading
+              // Delete + dynamic primary label) so it doesn't share
+              // EditorActionBar with the four uniform editors.
+              SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 8),
+                  child: Row(
+                    children: [
+                      TextButton.icon(
+                        icon: const Icon(Icons.close, size: 18),
+                        label: const Text('Cancel'),
+                        onPressed: () {
+                          // Discard the in-flight draft so re-opening
+                          // shows the saved state, not the abandoned
+                          // edits. dispose() handles firmware preview
+                          ref
+                              .read(expressionDraftProvider(widget.lampId,
+                                      widget.typeKey, widget.targetKey)
+                                  .notifier)
+                              .reset();
+                          GoRouter.maybeOf(context)?.pop();
+                        },
+                      ),
+                      if (!isNew)
+                        TextButton.icon(
+                          icon: const Icon(Icons.delete, size: 18),
+                          label: const Text('Delete'),
+                          style: TextButton.styleFrom(
+                              foregroundColor: Colors.redAccent),
+                          onPressed: () async {
+                            await notifier.removeExpression(
+                              type: widget.typeKey,
+                              target: widget.targetKey,
+                            );
+                            ref
+                                .read(expressionDraftProvider(widget.lampId,
+                                        widget.typeKey, widget.targetKey)
+                                    .notifier)
+                                .reset();
+                            if (context.mounted) {
+                              GoRouter.maybeOf(context)?.pop();
+                            }
+                          },
+                        ),
+                      const Spacer(),
+                      FilledButton.icon(
+                        icon:
+                            Icon(isNew ? Icons.add : Icons.check, size: 18),
+                        label: Text(isNew ? 'Add' : 'Update'),
+                        onPressed: () async {
+                          await notifier.upsertExpression(draft);
+                          ref
+                              .read(expressionDraftProvider(widget.lampId,
+                                      widget.typeKey, widget.targetKey)
+                                  .notifier)
+                              .reset();
+                          if (!context.mounted) return;
+                          // For brand-new entries the stack is
+                          // [list, picker, editor]; pop straight back
+                          // to the list so the user sees their newly-
+                          // added entry rather than the picker again.
+                          final router = GoRouter.maybeOf(context);
+                          if (isNew && router != null) {
+                            router.pop();
+                            if (context.mounted) router.pop();
+                          } else {
+                            router?.pop();
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
+          return Column(
+            children: [
+              if (!state.connected)
+                ConnectionBanner(attempt: state.reconnectAttempt),
+              Expanded(
+                child: IgnorePointer(
+                  ignoring: !state.connected,
+                  child: Opacity(
+                    opacity: state.connected ? 1.0 : 0.4,
+                    child: body,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _Label extends StatelessWidget {
+  const _Label(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: const TextStyle(color: BrandColors.lampWhite, fontSize: 14),
+    );
+  }
+}
+
+class _Header extends StatelessWidget {
+  const _Header({required this.meta});
+  final ExpressionTypeMeta? meta;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: BrandColors.lampWhite.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: BrandColors.lampWhite.withValues(alpha: 0.06),
+        ),
+      ),
+      child: Row(
+        children: [
+          if (meta != null)
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: BrandColors.auroraBlue.withValues(alpha: 0.18),
+              ),
+              child: Icon(meta!.icon, color: BrandColors.auroraBlue),
+            ),
+          if (meta != null) const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              meta?.name ?? '(unknown)',
+              style: const TextStyle(
+                color: BrandColors.lampWhite,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Big chunky pill row: Shade / Base / Both. Same visual idiom as the
+/// picker's target chooser (`add_expression_picker_screen.dart`) so the
+/// active target reads at a glance. The current target shows as
+/// selected and is a no-op on tap; other targets disable when this type
+/// is already configured for them (firmware enforces one entry per
+/// (type, target) pair, so tapping into an in-use combo would just
+/// silently replace it — disable instead so it's obvious).
+class _TargetRow extends StatelessWidget {
+  const _TargetRow({
+    required this.currentTarget,
+    required this.isTaken,
+    required this.onTap,
+  });
+
+  final int currentTarget;
+  final bool Function(int t) isTaken;
+  final ValueChanged<int> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        _TargetButton(
+          label: 'Shade',
+          icon: Icons.wb_incandescent_outlined,
+          selected: currentTarget == 1,
+          enabled: !isTaken(1),
+          onTap: () => onTap(1),
+        ),
+        const SizedBox(width: 8),
+        _TargetButton(
+          label: 'Base',
+          icon: Icons.adjust,
+          selected: currentTarget == 2,
+          enabled: !isTaken(2),
+          onTap: () => onTap(2),
+        ),
+        const SizedBox(width: 8),
+        _TargetButton(
+          label: 'Both',
+          icon: Icons.all_inclusive,
+          selected: currentTarget == 3,
+          enabled: !isTaken(3),
+          onTap: () => onTap(3),
+        ),
+      ],
+    );
+  }
+}
+
+/// Local copy of the picker's `_TargetButton`. Kept duplicated (rather
+/// than extracted) because the social-tab `_PersonalityButton` already
+/// established the pattern of file-local pills, and the three usages
+/// differ enough (3 vs 4 fields, different label semantics) that a
+/// shared abstraction would carry more weight than it earns.
+class _TargetButton extends StatelessWidget {
+  const _TargetButton({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final fill = selected ? BrandColors.glowPink : Colors.transparent;
+    final border = selected
+        ? BrandColors.glowPink
+        : BrandColors.slateGrey.withValues(alpha: 0.5);
+    final fg = !enabled
+        ? BrandColors.slateGrey.withValues(alpha: 0.5)
+        : (selected ? BrandColors.midnightBlack : BrandColors.lampWhite);
+    return Expanded(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: enabled ? onTap : null,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            height: 64,
+            decoration: BoxDecoration(
+              color: fill,
+              border: Border.all(
+                color: border,
+                width: selected ? 2 : 1,
+              ),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, color: fg, size: 22),
+                const SizedBox(height: 4),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: fg,
+                    fontSize: 13,
+                    fontWeight:
+                        selected ? FontWeight.w700 : FontWeight.w500,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Two-slider Frequency + Predictability control for an expression's
+/// random trigger interval.
+///
+/// The two 0..1 slider positions are the source of truth for the
+/// editor's UI state, seeded once in [initState] from the persisted
+/// `(intervalMin, intervalMax)` via [ExpressionIntervalMath.normsFromInterval].
+/// They are never re-derived from upstream, so dragging Predictability
+/// cannot move the Frequency thumb (and vice versa). Each drag emits a
+/// fresh deterministic `(intervalMin, intervalMax)` via
+/// [ExpressionIntervalMath.intervalFromNorms].
+class _FrequencySpread extends StatefulWidget {
+  const _FrequencySpread({
+    required this.intervalMin,
+    required this.intervalMax,
+    required this.onChanged,
+  });
+
+  final int intervalMin;
+  final int intervalMax;
+  final void Function(int min, int max) onChanged;
+
+  @override
+  State<_FrequencySpread> createState() => _FrequencySpreadState();
+}
+
+class _FrequencySpreadState extends State<_FrequencySpread> {
+  late double _freq;
+  late double _spread;
+
+  @override
+  void initState() {
+    super.initState();
+    final n = ExpressionIntervalMath.normsFromInterval(
+        widget.intervalMin, widget.intervalMax);
+    _freq = n.freq;
+    _spread = n.spread;
+  }
+
+  // didUpdateWidget intentionally omitted: the slider positions are the
+  // source of truth in the UI from initState onward. We never re-derive
+  // them from upstream, so dragging Predictability cannot shove the
+  // Frequency thumb.
+
+  static String _fmt(double seconds) {
+    if (seconds < 1) return '${(seconds * 1000).round()}ms';
+    if (seconds < 90) return '${seconds.round()}s';
+    final m = seconds / 60;
+    if (m < 90) return '${m.round()}m';
+    final h = m / 60;
+    return '${h.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '')}h';
+  }
+
+  void _emit() {
+    final r = ExpressionIntervalMath.intervalFromNorms(_freq, _spread);
+    widget.onChanged(r.min, r.max);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final r = ExpressionIntervalMath.intervalFromNorms(_freq, _spread);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(top: 8, bottom: 2),
+          child: Text('Frequency',
+              style: TextStyle(color: BrandColors.lampWhite, fontSize: 14)),
+        ),
+        Row(
+          children: [
+            const Text('rare',
+                style:
+                    TextStyle(color: BrandColors.fogGrey, fontSize: 11)),
+            Expanded(
+              child: Slider(
+                value: _freq,
+                min: 0,
+                max: 1,
+                onChanged: (v) {
+                  setState(() => _freq = v);
+                  _emit();
+                },
+              ),
+            ),
+            const Text('often',
+                style:
+                    TextStyle(color: BrandColors.fogGrey, fontSize: 11)),
+          ],
+        ),
+        const Padding(
+          padding: EdgeInsets.only(top: 12, bottom: 2),
+          child: Text('Predictability',
+              style: TextStyle(color: BrandColors.lampWhite, fontSize: 14)),
+        ),
+        Row(
+          children: [
+            const Text('less',
+                style:
+                    TextStyle(color: BrandColors.fogGrey, fontSize: 11)),
+            Expanded(
+              child: Slider(
+                value: _spread,
+                min: 0,
+                max: 1,
+                onChanged: (v) {
+                  setState(() => _spread = v);
+                  _emit();
+                },
+              ),
+            ),
+            const Text('more',
+                style:
+                    TextStyle(color: BrandColors.fogGrey, fontSize: 11)),
+          ],
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text(
+            _spread < 0.02
+                ? 'Roughly every ${_fmt(r.min.toDouble())}.'
+                : 'Between ${_fmt(r.min.toDouble())} and ${_fmt(r.max.toDouble())}.',
+            // Right-aligned to match the value chips on every other
+            // slider in the editor (Glitch duration, Hold time, Breath
+            // cycle, etc.) — consistent eye line down the right edge.
+            textAlign: TextAlign.end,
+            style: const TextStyle(
+              color: BrandColors.fogGrey,
+              fontSize: 11,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ColorChip extends StatelessWidget {
+  const _ColorChip({
+    required this.color,
+    required this.onEdit,
+    required this.onRemove,
+  });
+
+  final LampColor color;
+  final VoidCallback onEdit;
+
+  /// Null when this swatch is the last one in the palette — the X button
+  /// hides entirely so the user can't end up with an empty colors list.
+  final VoidCallback? onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        GestureDetector(
+          onTap: onEdit,
+          child: LampColorSwatch(color: color, size: 40),
+        ),
+        if (onRemove != null)
+          Positioned(
+            top: -6,
+            right: -6,
+            child: Semantics(
+              label: 'Remove color',
+              button: true,
+              child: InkWell(
+                onTap: onRemove,
+                customBorder: const CircleBorder(),
+                child: Container(
+                  width: 18,
+                  height: 18,
+                  decoration: const BoxDecoration(
+                    color: BrandColors.ashGrey,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.close,
+                    size: 12,
+                    color: BrandColors.lampWhite,
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}

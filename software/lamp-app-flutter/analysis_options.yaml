@@ -1,0 +1,32 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+  plugins:
+    - custom_lint
+  language:
+    strict-casts: true
+    strict-raw-types: true
+
+linter:
+  rules:
+    prefer_const_constructors: true
+    prefer_const_declarations: true
+    avoid_print: true
+    require_trailing_commas: true
+    use_super_parameters: true
+    # Audit cq-L: enable hygiene lints that would have caught real
+    # bugs earlier in the remediation pass:
+    #   - unawaited_futures: would have flagged Dispositions._flush
+    #     firing ref.read post-dispose (Wave 2.2 perf-C2).
+    #   - cancel_subscriptions: catches StreamSubscriptions that
+    #     escape onDispose (the scanner-stop loop in
+    #     NearbyLampsNotifier predates the audit but the rule
+    #     would have pinned it).
+    #   - close_sinks: catches StreamControllers that don't get
+    #     closed — symmetric to the above for the producer side.
+    unawaited_futures: true
+    cancel_subscriptions: true
+    close_sinks: true

@@ -1,0 +1,201 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+
+import '../../../core/app_channel.dart';
+import '../../../core/theme/brand_colors.dart';
+import '../../../core/utils/tap_counter.dart';
+import '../../../core/widgets/app_snackbar.dart';
+import '../../../core/widgets/friendly_error.dart';
+import '../../../core/widgets/info_panel.dart';
+import '../../control/application/advanced_session.dart';
+import '../../control/application/control_notifier.dart';
+import '../../control/application/control_state.dart';
+import '../../control/presentation/widgets/connecting_view.dart';
+import '../../control/presentation/widgets/disconnect_aware_body.dart';
+import '../../firmware/presentation/firmware_update_panel.dart';
+
+/// Info tab — Lamplit branding, firmware + app version footer, OTA panel,
+/// and the 5-tap-the-wordmark gesture that unlocks session-only advanced
+/// settings.
+///
+/// Lives as a dedicated tab so the About content isn't buried inside the
+/// Setup pane (where it had been folded as a Configuration drilldown
+/// item — visually cluttered, hard to find, mixed concerns).
+class InfoScreen extends ConsumerWidget {
+  const InfoScreen({super.key, required this.lampId});
+  final String lampId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(controlNotifierProvider(lampId));
+    return async.when(
+      loading: () => ConnectingView(deviceId: lampId),
+      error: (e, _) => FriendlyError.page(
+        title: "Couldn't reach your lamp.",
+        subtitle:
+            "They may have wandered out of range. Bring your phone closer "
+            'and try again.',
+        rawError: e,
+        onRetry: () => ref.invalidate(controlNotifierProvider(lampId)),
+      ),
+      data: (state) => DisconnectAwareBody(
+        lampId: lampId,
+        child: _InfoBody(lampId: lampId, state: state),
+      ),
+    );
+  }
+}
+
+class _InfoBody extends ConsumerStatefulWidget {
+  const _InfoBody({required this.lampId, required this.state});
+  final String lampId;
+  final ControlState state;
+
+  @override
+  ConsumerState<_InfoBody> createState() => _InfoBodyState();
+}
+
+class _InfoBodyState extends ConsumerState<_InfoBody> {
+  late final TapCounter _tap;
+  // Memoised once per lifetime — PackageInfo.fromPlatform is a platform-
+  // channel hop; building the future inside FutureBuilder.build would
+  // flash "App ..." on every notifier tick (audit perf-C1 carried over
+  // from when this content lived inside the Setup tab's _AboutSection).
+  late final Future<PackageInfo> _packageInfo;
+
+  @override
+  void initState() {
+    super.initState();
+    _packageInfo = PackageInfo.fromPlatform();
+    _tap = TapCounter(
+      count: 5,
+      window: const Duration(seconds: 3),
+      onTriggered: () {
+        ref.read(advancedSessionProvider(widget.lampId).notifier).enable();
+        if (mounted) {
+          AppSnackbar.info(context, 'Advanced settings unlocked');
+        }
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final v = widget.state.lamp.fwVersion;
+    final ch = widget.state.lamp.fwChannel;
+    final fwLine = (v == null || ch == null)
+        ? 'Firmware ...'
+        : 'Firmware ${formatFirmwareSemver(v)} ($ch)';
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
+      children: [
+        GestureDetector(
+          onTap: _tap.record,
+          behavior: HitTestBehavior.opaque,
+          child: const Center(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 16),
+              child: _LamplitWordmark(),
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        const Center(
+          child: Text(
+            '✦  Sparking inspiration through shared creative experiences',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: BrandColors.fogGrey, fontSize: 12),
+          ),
+        ),
+        const SizedBox(height: 16),
+        const InfoPanel(
+          child: Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                    text:
+                        'Lamplit Art Society is a non-profit collective sparking connection and creativity through shared lamp art. More at '),
+                TextSpan(
+                  text: 'lamplit.ca',
+                  style: TextStyle(
+                    color: BrandColors.auroraBlue,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                TextSpan(text: '.'),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        FirmwareUpdatePanel(
+          deviceId: widget.lampId,
+          lampType: widget.state.lamp.lampType,
+        ),
+        const SizedBox(height: 16),
+        Center(
+          child: Text(
+            fwLine,
+            style: const TextStyle(
+              color: BrandColors.fogGrey,
+              fontSize: 12,
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Center(
+          child: FutureBuilder<PackageInfo>(
+            future: _packageInfo,
+            builder: (context, snap) {
+              final info = snap.data;
+              final v = info != null
+                  ? '${info.version}+${info.buildNumber}'
+                  : '...';
+              return Text(
+                'App $v',
+                style: const TextStyle(
+                  color: BrandColors.fogGrey,
+                  fontSize: 12,
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Lamplit brand mark — SVG glyph + sub-wordmark. Tap target for the
+/// 5-tap advanced-unlock wraps the whole column at the call site.
+class _LamplitWordmark extends StatelessWidget {
+  const _LamplitWordmark();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SvgPicture.asset(
+          'assets/lamplit-logo.svg',
+          height: 140,
+          colorFilter: const ColorFilter.mode(
+              BrandColors.lampWhite, BlendMode.srcIn),
+          semanticsLabel: 'Lamplit logo',
+        ),
+        const SizedBox(height: 14),
+        const Text(
+          'Lamplit Art Society',
+          style: TextStyle(
+            color: BrandColors.headerYellow,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 4,
+          ),
+        ),
+      ],
+    );
+  }
+}

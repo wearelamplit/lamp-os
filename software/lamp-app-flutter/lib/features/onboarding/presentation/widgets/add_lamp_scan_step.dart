@@ -1,0 +1,192 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../../../core/routing/routes.dart';
+import '../../../../core/theme/brand_colors.dart';
+import '../../../../core/widgets/status_dot.dart';
+import '../../../inventory/application/inventory_notifier.dart';
+import '../../../nearby/application/nearby_lamps_notifier.dart';
+import '../../../nearby/domain/nearby_lamp.dart';
+import '../../application/add_lamp_notifier.dart';
+
+class AddLampScanStep extends ConsumerWidget {
+  const AddLampScanStep({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final all = ref.watch(nearbyLampsNotifierProvider);
+    final inventory =
+        ref.watch(inventoryNotifierProvider).value ?? const [];
+    final inventoryIds = inventory.map((l) => l.id).toSet();
+    // Hide lamps that are already in this phone's inventory — they're
+    // already addable from "My lamps", and showing them here would
+    // confuse the "tap a discovered lamp to add it" flow.
+    final lamps = all.where((l) => !inventoryIds.contains(l.id)).toList();
+    if (lamps.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Searching for a stray lamp…',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: BrandColors.lampWhite,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              SizedBox(height: 8),
+              Text(
+                'Make sure your new lamp is plugged in and glowing nearby. '
+                "If they're shy, give them a moment.",
+                textAlign: TextAlign.center,
+                style: TextStyle(color: BrandColors.fogGrey, fontSize: 13),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.all(16),
+      itemCount: lamps.length,
+      separatorBuilder: (_, index) => const SizedBox(height: 8),
+      itemBuilder: (context, i) => _LampRow(lamp: lamps[i]),
+    );
+  }
+}
+
+class _LampRow extends ConsumerWidget {
+  const _LampRow({required this.lamp});
+  final NearbyLamp lamp;
+
+  Future<void> _onTap(BuildContext context, WidgetRef ref) async {
+    // Legacy (non-mesh) firmware can't be controlled by the app — there's
+    // no GATT control service. Route to the BtOnly explanation screen
+    // instead of adopting; that page tells the user how to use the
+    // lamp's own Wi-Fi AP and how to flash current firmware. Crucially
+    // we do NOT add the lamp to inventory — adopting a lamp we can't
+    // talk to would just leave a dead tile in the picker.
+    if (!lamp.isMesh) {
+      // Fire-and-forget — we're not awaiting the routed screen's
+      // pop, just sending the user there.
+      unawaited(GoRouter.maybeOf(context)?.push(AppRoutes.btOnly(lamp.id))
+          ?? Future<void>.value());
+      return;
+    }
+    if (lamp.isFactoryDefault) {
+      // select() is synchronous — it records the deviceId and advances
+      // to Name without opening a BLE link. The link is opened in
+      // submit() so it doesn't sit idle through the form-fill and
+      // expire under LINK_SUPERVISION_TIMEOUT.
+      ref.read(addLampNotifierProvider.notifier).select(lamp.id);
+    } else {
+      // No confirm dialog — `add()` sets state.step to `done` and the
+      // AddLampShell will swap in the AddLampDoneStep ("X is home!"),
+      // which serves as the visual confirmation.
+      await ref
+          .read(addLampNotifierProvider.notifier)
+          .add(deviceId: lamp.id, name: lamp.name);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => _onTap(context, ref),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(12),
+          border:
+              Border.all(color: Colors.white.withValues(alpha: 0.06)),
+        ),
+        child: Row(
+          children: [
+            // BLE adv tells us this lamp is bluetooth-reachable; the
+            // `isMesh` flag distinguishes mesh-protocol firmware from
+            // legacy BT-only. Light green for mesh, faded blue for BT.
+            StatusDot(
+              kind: lamp.isMesh
+                  ? StatusKind.mesh
+                  : StatusKind.bluetooth,
+              size: 14,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    lamp.name.isEmpty ? '(unnamed)' : lamp.name,
+                    style: const TextStyle(
+                      color: BrandColors.lampWhite,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Text(
+                    '${lamp.id} · ${lamp.rssi} dBm',
+                    style: const TextStyle(
+                      color: BrandColors.slateGrey,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            _Pill(
+              factoryDefault: lamp.isFactoryDefault,
+              isMesh: lamp.isMesh,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Pill extends StatelessWidget {
+  const _Pill({required this.factoryDefault, required this.isMesh});
+  final bool factoryDefault;
+  final bool isMesh;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color base;
+    final String label;
+    if (!isMesh) {
+      base = BrandColors.fogGrey;
+      label = 'legacy';
+    } else if (factoryDefault) {
+      base = BrandColors.amberGold;
+      label = 'adopt';
+    } else {
+      base = BrandColors.lumenGreen;
+      label = 'add';
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: base.withValues(alpha: 0.18),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 10,
+          color: base,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
