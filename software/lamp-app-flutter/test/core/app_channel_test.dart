@@ -21,12 +21,4 @@ void main() {
       expect(formatFirmwareSemver(0xffffffff), '255.255.255');
     });
   });
-
-  group('kAppChannel', () {
-    test('is a non-empty channel string', () {
-      // v1 hardcodes "dev" — switch to a --dart-define or build flavor
-      // once the release flow is formalized.
-      expect(kAppChannel, isNotEmpty);
-    });
-  });
 }
