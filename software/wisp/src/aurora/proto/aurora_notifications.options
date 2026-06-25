@@ -1,0 +1,12 @@
+# Strings: Aurora ids are UUID-like (~37 chars); pad generously.
+aurora.Any.type_url              max_size:128
+aurora.Any.value                 max_size:2048
+aurora.NotificationEnvelope.instance_id  max_size:64
+aurora.InstanceInfo.instance_id  max_size:64
+aurora.NotificationSubscription.subscription_id  max_size:48
+aurora.NotificationSubscriptionRequest.subscriptions  max_count:24
+aurora.ZonePaletteState.active_color_palette_id  max_size:48
+aurora.ZonePaletteState.active_fx_snapshot_id    max_size:48
+aurora.PaletteState.states                        max_count:16
+aurora.PaletteState.fx_snapshot_id_preview        max_size:48
+aurora.PatternState.show_id                       max_size:48
