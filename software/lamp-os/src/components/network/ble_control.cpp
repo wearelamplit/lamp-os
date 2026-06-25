@@ -21,6 +21,7 @@
 #include "core/override_aggregate.hpp"
 #include "bluetooth.hpp"  // for BLE_GAP_SCAN_TIME_MS
 #include "crypto.hpp"
+#include "components/network/gatt_layout.hpp"  // kGattLayout, kGattSchemaVersion
 #include "expressions/expression_manager.hpp"
 #include "nearby_lamps.hpp"
 #include "show_receiver.hpp"
@@ -1244,7 +1245,39 @@ void start(lamp::Config* config, Preferences* prefs) {
                                                   NIMBLE_PROPERTY::NOTIFY);
   s_stateNotify->setValue("{}");
 
+  // Schema version — read-only, tail-appended (schema v1). The app reads this
+  // to detect the lamp's attribute-layout version; lamps predating it read as
+  // absent and the app falls back to legacy behavior. Appending at the tail
+  // keeps every existing handle in place, so deployed app installs are
+  // unaffected. See gatt_layout.hpp + the frozen-layout lock-in in CLAUDE.md.
+  static const uint8_t kSchemaVersionValue = kGattSchemaVersion;
+  s_service->createCharacteristic(CHAR_SCHEMA_VERSION, NIMBLE_PROPERTY::READ)
+      ->setValue(&kSchemaVersionValue, 1);
+
   s_service->start();
+
+  // Bind the frozen layout table to the live registration. A mismatch means a
+  // characteristic was added/removed/reordered without updating gatt_layout.hpp
+  // (and bumping kGattSchemaVersion) — which would silently stale-out paired
+  // app installs. Loud, but non-fatal: never brick a deployed lamp over a
+  // dev-time invariant.
+  {
+    const auto& liveChars = s_service->getCharacteristics();
+    bool layoutOk = liveChars.size() == kGattLayoutCount;
+    for (size_t i = 0; layoutOk && i < kGattLayoutCount; ++i) {
+      if (!liveChars[i]->getUUID().equals(
+              NimBLEUUID(std::string(kGattLayout[i].uuid)))) {
+        layoutOk = false;
+      }
+    }
+    if (!layoutOk) {
+      Serial.printf(
+          "[ble_control] GATT LAYOUT DRIFT: live registration != "
+          "gatt_layout.hpp (expected %u chars). Update the table + bump "
+          "kGattSchemaVersion.\n",
+          static_cast<unsigned>(kGattLayoutCount));
+    }
+  }
 
   // Don't touch advertising — BluetoothComponent::begin() already configures
   // the advertiser as connectable (BLE_GAP_CONN_MODE_UND) with the color-sync
