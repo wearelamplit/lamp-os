@@ -1,0 +1,14 @@
+{
+  "name": "LampOS (beta)",
+  "version": "0.0.0-beta",
+  "funding_url": "https://esphome.io/guides/supporters.html",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        { "path": "https://github.com/wearelamplit/lamp-os/releases/download/beta/distribution.bin", "offset": 0 }
+      ]
+    }
+  ]
+}
