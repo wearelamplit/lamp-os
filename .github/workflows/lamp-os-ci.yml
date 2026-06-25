@@ -3,8 +3,8 @@ name: LampOS CI
 
 on:
   push:
-    branches:
-      - '*'
+    branches-ignore:
+      - beta
   pull_request:
 
 jobs:

@@ -110,6 +110,19 @@
           manifest="manifest_format.json"
         ></esp-web-install-button>
       </div>
+      <div style="width: 700px; padding-top: 60px; border-top: 1px solid var(--color-border); margin-top: 60px;">
+        <h3 style="font-weight: 700;">Beta channel</h3>
+        <p style="background: rgba(225, 164, 74, 0.12); border-left: 3px solid var(--color-warning); padding: 12px 16px; margin: 12px 0;">
+          <strong>Warning:</strong> Beta builds are rolling, unstable, and untested.
+          They may contain bugs, break OTA, or fail to boot. Only install if you're
+          comfortable reflashing your lamp over USB to recover.
+        </p>
+        <div style="padding-top: 20px;">
+          <esp-web-install-button
+            manifest="manifest_beta.json"
+          ></esp-web-install-button>
+        </div>
+      </div>
     </div>
   <script
     type="module"

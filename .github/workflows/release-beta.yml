@@ -1,0 +1,80 @@
+name: Release (beta)
+
+on:
+  push:
+    branches:
+      - beta
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    with:
+      channel: beta
+    secrets:
+      LAMP_FIRMWARE_PRIVATE_KEY_HEX: ${{ secrets.LAMP_FIRMWARE_PRIVATE_KEY_HEX }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distribution-standard
+          path: dist/standard
+      - uses: actions/download-artifact@v4
+        with:
+          name: distribution-snafu
+          path: dist/snafu
+      - uses: actions/download-artifact@v4
+        with:
+          name: updates-standard
+          path: updates/standard
+      - uses: actions/download-artifact@v4
+        with:
+          name: updates-snafu
+          path: updates/snafu
+      - uses: actions/download-artifact@v4
+        with:
+          name: lamp-firmware-standard-signed
+          path: signed/standard
+      - uses: actions/download-artifact@v4
+        with:
+          name: lamp-firmware-snafu-signed
+          path: signed/snafu
+      - name: Rename artifacts for unique release-asset names
+        run: |
+          mkdir -p release
+          mv dist/standard/distribution.bin            release/distribution-standard.bin
+          mv dist/snafu/distribution.bin               release/distribution-snafu.bin
+          mv signed/standard/firmware-signed.bin       release/lamp-firmware-standard-signed.bin
+          mv signed/snafu/firmware-signed.bin          release/lamp-firmware-snafu-signed.bin
+          mv updates/standard/firmware.bin             release/firmware-standard.bin
+          mv updates/snafu/firmware.bin                release/firmware-snafu.bin
+          mv updates/standard/bootloader.bin           release/bootloader.bin
+          mv updates/standard/partitions.bin           release/partitions.bin
+          mv updates/standard/spiffs.bin               release/spiffs.bin
+      - name: Replace rolling beta release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release delete beta --yes --cleanup-tag --repo "$GITHUB_REPOSITORY" || true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: beta
+          name: Beta build
+          prerelease: true
+          body: |
+            Rolling beta build from `beta` branch (commit ${{ github.sha }}).
+
+            Unstable, untested — use at your own risk.
+          files: |
+            release/distribution-standard.bin
+            release/distribution-snafu.bin
+            release/bootloader.bin
+            release/partitions.bin
+            release/firmware-standard.bin
+            release/firmware-snafu.bin
+            release/spiffs.bin
+            release/lamp-firmware-standard-signed.bin
+            release/lamp-firmware-snafu-signed.bin

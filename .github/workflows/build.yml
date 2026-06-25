@@ -1,17 +1,33 @@
 # workflows adapted from the WLED project using PlatformIO
 name: LampOS Build
 
-# Only included into other workflows
+# Only included into other workflows. Caller passes the firmware signing
+# secret (release.yml + release-beta.yml) or omits it (lamp-os-ci.yml PR
+# builds) — in the latter case sign_firmware.py sees LAMP_FIRMWARE_SKIP_SIGN=1
+# and no-ops the post-build hook.
 on:
   workflow_call:
+    inputs:
+      channel:
+        description: Firmware channel — `stable` or `beta`. Composed into
+          the LSIG footer's channel slot as `{variant}-{channel}`.
+        required: false
+        type: string
+        default: stable
+    secrets:
+      LAMP_FIRMWARE_PRIVATE_KEY_HEX:
+        description: 32-byte Ed25519 firmware-signing seed as 64 hex chars
+        required: false
 
 jobs:
 
   build:
-    name: Build Environment
+    name: Build Lamp (${{ matrix.lamp_variant }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      matrix:
+        lamp_variant: [standard, snafu]
     steps:
     - uses: actions/checkout@v4
     - name: Set up Python
@@ -19,27 +35,86 @@ jobs:
       with:
           python-version: '3.12'
           cache: 'pip'
-    - name: Install PlatformIO
+    - name: Install PlatformIO + signing deps
       run: pip install -r requirements.txt
-    - name: Build firmware
-      working-directory: ./software/lamp-os
+
+    - name: Materialize firmware signing key (or set skip flag)
+      env:
+        KEY_HEX: ${{ secrets.LAMP_FIRMWARE_PRIVATE_KEY_HEX }}
       run: |
-        pio run --environment upesy_wroom
-        pio run --target buildfs --environment upesy_wroom
-    - name: Merge firmware
-      working-directory: ./software/lamp-os/.pio/build/upesy_wroom
+        if [ -n "$KEY_HEX" ]; then
+          printf '%s' "$KEY_HEX" | xxd -r -p > "$HOME/.lamp-os-firmware-key.bin"
+          chmod 600 "$HOME/.lamp-os-firmware-key.bin"
+          echo "[ci] signing enabled — key materialized at ~/.lamp-os-firmware-key.bin"
+        else
+          echo "LAMP_FIRMWARE_SKIP_SIGN=1" >> "$GITHUB_ENV"
+          echo "[ci] no signing secret available — sign_firmware.py will no-op"
+        fi
+
+    - name: Build lamp firmware (${{ matrix.lamp_variant }})
+      working-directory: ./software/lamp-os
+      env:
+        LAMP_FIRMWARE_CHANNEL: ${{ inputs.channel }}
+      run: |
+        pio run --environment upesy_wroom_${{ matrix.lamp_variant }}
+        pio run --target buildfs --environment upesy_wroom_${{ matrix.lamp_variant }}
+
+    - name: Merge lamp firmware for USB-flash distribution.bin
+      working-directory: ./software/lamp-os/.pio/build/upesy_wroom_${{ matrix.lamp_variant }}
       run: |
         esptool --chip esp32 merge-bin -o distribution.bin --flash-mode dio --flash-freq 40m --flash-size 4MB 0x1000 bootloader.bin 0x8000 partitions.bin 0x10000 firmware.bin 0x3D0000 spiffs.bin
-    - uses: actions/upload-artifact@v4
+
+    - name: Upload lamp USB-flash distribution.bin (${{ matrix.lamp_variant }})
+      uses: actions/upload-artifact@v4
       with:
-        name: distribution
+        name: distribution-${{ matrix.lamp_variant }}
         path: |
-          ./software/lamp-os/.pio/build/upesy_wroom/distribution.bin
-    - uses: actions/upload-artifact@v4
+          ./software/lamp-os/.pio/build/upesy_wroom_${{ matrix.lamp_variant }}/distribution.bin
+
+    - name: Upload lamp partition images (${{ matrix.lamp_variant }})
+      uses: actions/upload-artifact@v4
       with:
-        name: updates
+        name: updates-${{ matrix.lamp_variant }}
         path: |
-          ./software/lamp-os/.pio/build/upesy_wroom/bootloader.bin
-          ./software/lamp-os/.pio/build/upesy_wroom/partitions.bin
-          ./software/lamp-os/.pio/build/upesy_wroom/firmware.bin
-          ./software/lamp-os/.pio/build/upesy_wroom/spiffs.bin
+          ./software/lamp-os/.pio/build/upesy_wroom_${{ matrix.lamp_variant }}/bootloader.bin
+          ./software/lamp-os/.pio/build/upesy_wroom_${{ matrix.lamp_variant }}/partitions.bin
+          ./software/lamp-os/.pio/build/upesy_wroom_${{ matrix.lamp_variant }}/firmware.bin
+          ./software/lamp-os/.pio/build/upesy_wroom_${{ matrix.lamp_variant }}/spiffs.bin
+
+    - name: Upload signed lamp firmware (${{ matrix.lamp_variant }})
+      if: env.LAMP_FIRMWARE_SKIP_SIGN != '1'
+      uses: actions/upload-artifact@v4
+      with:
+        name: lamp-firmware-${{ matrix.lamp_variant }}-signed
+        path: |
+          ./software/lamp-os/.pio/build/upesy_wroom_${{ matrix.lamp_variant }}/firmware-signed.bin
+
+  build-wisp:
+    name: Build Wisp
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+          python-version: '3.12'
+          cache: 'pip'
+    - name: Install PlatformIO + signing deps
+      run: pip install -r requirements.txt
+
+    - name: Materialize firmware signing key (or set skip flag)
+      env:
+        KEY_HEX: ${{ secrets.LAMP_FIRMWARE_PRIVATE_KEY_HEX }}
+      run: |
+        if [ -n "$KEY_HEX" ]; then
+          printf '%s' "$KEY_HEX" | xxd -r -p > "$HOME/.lamp-os-firmware-key.bin"
+          chmod 600 "$HOME/.lamp-os-firmware-key.bin"
+        else
+          echo "LAMP_FIRMWARE_SKIP_SIGN=1" >> "$GITHUB_ENV"
+        fi
+
+    - name: Build wisp firmware
+      working-directory: ./software/wisp
+      env:
+        LAMP_FIRMWARE_CHANNEL: ${{ inputs.channel }}
+      run: pio run --environment seeed_xiao_esp32_c6

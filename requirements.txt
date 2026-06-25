@@ -1,2 +1,6 @@
 platformio>=6.1.17
 esptool
+# Required by scripts/sign_firmware.py — matches the firmware's libsodium
+# verifier exactly. Skip becomes a no-op via LAMP_FIRMWARE_SKIP_SIGN=1 in
+# PR builds where the private key isn't materialized.
+pynacl

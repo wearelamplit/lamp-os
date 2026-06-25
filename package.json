@@ -4,11 +4,27 @@
   "private": true,
   "description": "Root package for Lamp OS project",
   "scripts": {
-    "dev": "cd software/lamp-ui && npm run dev",
-    "dev:monitor": "cd software/lamp-os && pio device monitor -e upesy_wroom",
-    "build": "cd software/lamp-ui && npm run build",
-    "build:firmware": "cd software/lamp-os && pio run -e upesy_wroom",
-    "flash": "cd software/lamp-ui && npm run flash",
-    "build-and-flash": "npm run build && npm run flash"
+    "lamp:build": "cd software/lamp-os && pio run",
+    "lamp:build:snafu": "cd software/lamp-os && pio run -e upesy_wroom_snafu",
+    "lamp:flash": "cd software/lamp-os && pio run -t upload",
+    "lamp:flash:beta": "cd software/lamp-os && LAMP_FIRMWARE_CHANNEL=beta pio run -t upload",
+    "lamp:flash:snafu": "cd software/lamp-os && pio run -e upesy_wroom_snafu -t upload",
+    "lamp:flash:snafu:beta": "cd software/lamp-os && LAMP_FIRMWARE_CHANNEL=beta pio run -e upesy_wroom_snafu -t upload",
+    "lamp:flash:custom": "printf 'Variant (standard|snafu): ' && read VARIANT && cd software/lamp-os && pio run -e upesy_wroom_\"$VARIANT\" -t upload",
+    "lamp:test": "cd software/lamp-os && pio test -e native",
+    "lamp:monitor": "cd software/lamp-os && pio device monitor -e upesy_wroom_standard",
+    "wisp:build": "cd software/wisp && pio run -e seeed_xiao_esp32_c6",
+    "wisp:flash": "cd software/wisp && pio run -e seeed_xiao_esp32_c6 -t upload",
+    "wisp:monitor": "cd software/wisp && pio device monitor -e seeed_xiao_esp32_c6",
+    "app:run": "cd software/lamp-app-flutter && flutter run -d $(./scripts/android-id.sh)",
+    "app:install": "cd software/lamp-app-flutter && DEV=$(./scripts/android-id.sh) && flutter build apk --debug && adb -s $DEV install -r build/app/outputs/flutter-apk/app-debug.apk && adb -s $DEV shell monkey -p ca.lamplit.lamp_app -c android.intent.category.LAUNCHER 1 > /dev/null",
+    "app:launch": "cd software/lamp-app-flutter && DEV=$(./scripts/android-id.sh) && adb -s $DEV shell monkey -p ca.lamplit.lamp_app -c android.intent.category.LAUNCHER 1 > /dev/null",
+    "app:test": "cd software/lamp-app-flutter && flutter test",
+    "app:analyze": "cd software/lamp-app-flutter && flutter analyze",
+    "app:codegen": "cd software/lamp-app-flutter && dart run build_runner build --delete-conflicting-outputs",
+    "app:watch": "cd software/lamp-app-flutter && dart run build_runner watch --delete-conflicting-outputs",
+    "app:clean": "cd software/lamp-app-flutter && flutter clean && flutter pub get && dart run build_runner build --delete-conflicting-outputs",
+    "app:devices": "cd software/lamp-app-flutter && flutter devices",
+    "app:doctor": "flutter doctor"
   }
 }
