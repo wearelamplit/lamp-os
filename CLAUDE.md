@@ -86,13 +86,20 @@ The native suite covers protocol parsers, dedup ring, color math, fade
 math, cascade dedup, OTA receiver/indicator, and the GATT layout pin. Keep
 it green, currently 374/374.
 
-## Tail two lamps simultaneously
+## Tail multiple lamps simultaneously
 
-A small Python helper at `/tmp/dual_tap.py` (local-only, not in repo)
-opens both lamp serial ports and prefixes each line with the lamp name.
-Output goes to `/tmp/dual_tap.log`. Useful for diff-checking cascade
-sender vs receiver behavior across two physical lamps during firmware
-iteration.
+`scripts/bench_tap.py` tails several USB serial ports at once, prefixing
+each line with a short label so cross-lamp behavior (cascade OTA, mesh
+paint, greet handshakes) reads as one stream. Useful for diff-checking
+sender vs receiver across two physical lamps during firmware iteration.
+
+```sh
+python3 scripts/bench_tap.py /dev/cu.usbserial-0001:flora \
+                             /dev/cu.usbserial-6:gramp -o /tmp/bench.log
+```
+
+See the script's `--help` for label/log options. (Supersedes the old
+local-only `/tmp/dual_tap.py`.)
 
 ## Code conventions
 
