@@ -557,6 +557,21 @@ void FirmwareDistributor::tick(uint32_t nowMs) {
   uint32_t stateEnteredMsLocal = stateEnteredMs_;
 #endif
 
+#ifdef LAMP_DEBUG
+  // Periodic heartbeat so a distributor wedge is visible in the log: a stuck
+  // non-Idle state (a session that never returned to Idle) vs Idle-but-not-
+  // offering (considerPeerForOta not engaging) are told apart by state + dwell.
+  static uint32_t s_hbMs = 0;
+  if (nowMs - s_hbMs >= 2000) {
+    s_hbMs = nowMs;
+    static const char* const kStateName[] = {
+        "Disabled", "Idle", "OfferSent", "Streaming", "Finalizing", "Failed", "Done"};
+    FWDIST_LOGF("[fwdist] hb state=%s dwell=%ums\n",
+                kStateName[(uint8_t)s <= 6 ? (uint8_t)s : 0],
+                (unsigned)(nowMs - stateEnteredMsLocal));
+  }
+#endif
+
   switch (s) {
     case State::Idle: {
       // No scan — Idle is entirely event-driven (considerPeerForOta).
