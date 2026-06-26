@@ -28,9 +28,12 @@ Import("env")  # SCons / PIO global
 
 LSIG_CHANNEL_LEN = 16
 
-base = os.environ.get("LAMP_FIRMWARE_CHANNEL", "stable").strip()
+# Default to "beta" when unset: local dev builds and the beta CI build get
+# the beta channel (and LAMP_DEBUG, below). Only an explicit stable build
+# (release-main sets LAMP_FIRMWARE_CHANNEL=stable) opts out.
+base = os.environ.get("LAMP_FIRMWARE_CHANNEL", "beta").strip()
 if not base:
-    base = "stable"
+    base = "beta"
 
 try:
     variant = env.GetProjectOption("custom_lamp_variant")
@@ -51,3 +54,11 @@ if len(combined.encode("ascii", errors="strict")) > LSIG_CHANNEL_LEN:
 # literal (matches the inject_initial_type.py pattern).
 env.Append(CPPDEFINES=[("FIRMWARE_CHANNEL", '\\"' + combined + '\\"')])
 print(f"[inject_firmware_channel] FIRMWARE_CHANNEL={combined}")
+
+# LAMP_DEBUG gates bench-only affordances (testGreet, extra serial logging).
+# Stable firmware ships without them; every other channel — beta and local
+# dev — keeps them. Keyed off the raw channel, not the variant-prefixed slot.
+debug_on = base != "stable"
+if debug_on:
+    env.Append(CPPDEFINES=["LAMP_DEBUG"])
+print(f"[inject_firmware_channel] LAMP_DEBUG={'on' if debug_on else 'off'}")
