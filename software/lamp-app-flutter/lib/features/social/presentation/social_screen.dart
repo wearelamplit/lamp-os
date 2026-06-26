@@ -225,10 +225,9 @@ class _LampDispositionRow extends ConsumerStatefulWidget {
 }
 
 class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
-  // Hidden bench-test gesture — 3 taps on the proximity label within 2s
-  // fires `testGreet` to the connected lamp so the user can iterate on
-  // greeting waveforms without dragging physical peers in and out of BLE
-  // range. Firmware silently ignores the op in release builds.
+  // 3 taps on a peer's row within 2s fire a greeting from the connected
+  // lamp toward that peer, so the user can trigger greetings on demand
+  // without dragging physical peers in and out of BLE range.
   late final TapCounter _testGreetTaps = TapCounter(
     count: 3,
     window: const Duration(seconds: 2),
@@ -289,48 +288,49 @@ class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              CritterIcon(
-                critterIndex: row.critterIndex,
-                deviceId: row.bdAddr,
-                shade: Color(0xFF000000 | row.shadeRgb),
-                base: Color(0xFF000000 | row.baseRgb),
-                size: 22,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  row.name,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: BrandColors.lampWhite,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
+          // 3 taps anywhere on the name row fire a greeting — the whole row
+          // is the hit target (opaque) so it's easy to land, not a tiny label.
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _testGreetTaps.record,
+            child: Row(
+              children: [
+                CritterIcon(
+                  critterIndex: row.critterIndex,
+                  deviceId: row.bdAddr,
+                  shade: Color(0xFF000000 | row.shadeRgb),
+                  base: Color(0xFF000000 | row.baseRgb),
+                  size: 22,
                 ),
-              ),
-              // Proximity bucket label is the user-visible
-              // signal. Raw dBm subscript is debug-only — gated on
-              // advanced-mode session flag and rendered TO THE LEFT
-              // of the label so the row stays a tidy two lines (name
-              // row + slider row) regardless of mode.
-              if (_advancedDbm(ref, lampId, row.rssi) case final dbm?)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
+                const SizedBox(width: 10),
+                Expanded(
                   child: Text(
-                    dbm,
+                    row.name,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      color: BrandColors.headerYellow,
-                      fontSize: 10,
-                      fontFamily: 'monospace',
+                      color: BrandColors.lampWhite,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: _testGreetTaps.record,
-                child: Text(
+                // Proximity bucket label is the user-visible signal. Raw dBm
+                // subscript is debug-only — gated on advanced-mode session flag
+                // and rendered TO THE LEFT of the label so the row stays a tidy
+                // two lines (name row + slider row) regardless of mode.
+                if (_advancedDbm(ref, lampId, row.rssi) case final dbm?)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Text(
+                      dbm,
+                      style: const TextStyle(
+                        color: BrandColors.headerYellow,
+                        fontSize: 10,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ),
+                Text(
                   _proximityLabel(row.proximity),
                   style: const TextStyle(
                     color: BrandColors.fogGrey,
@@ -338,8 +338,8 @@ class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
                     fontWeight: FontWeight.w400,
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
           if (!hasBdAddr)
             const Padding(
