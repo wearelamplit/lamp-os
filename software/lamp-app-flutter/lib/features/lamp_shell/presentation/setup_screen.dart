@@ -139,18 +139,17 @@ class _SetupBody extends ConsumerWidget {
               'Shade ${state.shade.px}×${state.shade.byteOrder}',
           onTap: () => context.push(AppRoutes.advancedLeds(lampId)),
         ),
-        if (ref.watch(effectiveAdvancedProvider(lampId)))
-          SettingsRow(
-            icon: Icons.wifi_tethering,
-            title: 'Boot-time setup AP',
-            subtitle: state.lamp.webappEnabled
-                ? 'On · 2 min after every power-cycle'
-                : 'Off',
-            trailing: Switch(
-              value: state.lamp.webappEnabled,
-              onChanged: (v) => n.setLampWebappEnabled(v),
-            ),
+        SettingsRow(
+          icon: Icons.wifi_tethering,
+          title: 'Boot-time setup AP',
+          subtitle: state.lamp.webappEnabled
+              ? 'On · 2 min after every power-cycle'
+              : 'Off',
+          trailing: Switch(
+            value: state.lamp.webappEnabled,
+            onChanged: (v) => n.setLampWebappEnabled(v),
           ),
+        ),
         // Nearby lamps (debug) — same advanced gate. Pre-fix this
         // /devices route was only reachable from the empty-state
         // OnboardingPlaceholder, becoming unreachable in steady state

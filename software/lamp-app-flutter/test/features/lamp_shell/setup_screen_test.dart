@@ -103,9 +103,10 @@ void main() {
     addTearDown(c.dispose);
     await tester.pumpWidget(_wrap(c));
     await _pumpToData(tester);
-    // The "LED setup" entry point is always on now; the rows gated behind
-    // the advanced flag (e.g. Boot-time setup AP) stay hidden by default.
-    expect(find.text('Boot-time setup AP'), findsNothing);
+    // LED setup + Boot-time setup AP are always on now; the rows gated
+    // behind the advanced flag (e.g. Factory reset) stay hidden by default.
+    expect(find.text('Boot-time setup AP'), findsOneWidget);
+    expect(find.text('Factory reset'), findsNothing);
   });
 
   testWidgets('Advanced-gated row appears when session advanced is enabled',
@@ -119,7 +120,7 @@ void main() {
     addTearDown(c.dispose);
     await tester.pumpWidget(_wrap(c));
     await _pumpToData(tester);
-    expect(find.text('Boot-time setup AP'), findsOneWidget);
+    expect(find.text('Factory reset'), findsOneWidget);
   });
 
   testWidgets('Knockout row no longer on Setup (moved into LED setup)',
