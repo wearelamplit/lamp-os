@@ -312,6 +312,19 @@ bool Config::persistConfig(const char* via) {
   return written > 0;
 }
 
+bool Config::persistRawJson(const char* json) {
+  if (!prefs) return false;
+  if (!prefs->begin("lamp", false)) {
+#ifdef LAMP_DEBUG
+    Serial.println("[nvs] prefs.begin failed (persistRawJson)");
+#endif
+    return false;
+  }
+  size_t written = prefs->putString("cfg", json);
+  prefs->end();
+  return written > 0;
+}
+
 void Config::setLampType(const std::string& type) {
   lamp.lampType = type;
   if (!prefs) return;

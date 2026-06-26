@@ -8,6 +8,7 @@
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
+#include <SPIFFS.h>
 #include <WiFi.h>
 #include <esp_system.h>
 
@@ -17,7 +18,6 @@
 
 #include "components/network/wifi.hpp"
 #include "config/config_types.hpp"
-#include "index_html_gz.h"
 #include "util/color.hpp"
 
 // Same Core 0 → Core 1 drain handoff the BLE writes use; mutating config
@@ -44,12 +44,6 @@ static void bumpDeadline() {
   if (idle > s_deadlineMs) s_deadlineMs = idle;
 }
 
-static constexpr size_t kMaxColors = 5;
-
-static std::string colorAsHexww(const lamp::Color& c) {
-  return lamp::colorToHexString(c);
-}
-
 // 128 covers 5 × (9 hex + 3 quote/comma) + brackets + NUL with headroom.
 static void postColors(JsonArrayConst arr, bool base) {
   if (arr.isNull() || arr.size() == 0) return;
@@ -60,93 +54,53 @@ static void postColors(JsonArrayConst arr, bool base) {
   else      postPendingShadeColorsJson(buf, n);
 }
 
-static void writeSettingsJson(AsyncResponseStream* res) {
-  JsonDocument doc;
-  doc["name"] = s_config->lamp.name;
-  JsonArray bArr = doc["baseColors"].to<JsonArray>();
-  for (const auto& c : s_config->base.colors) bArr.add(colorAsHexww(c));
-  JsonArray sArr = doc["shadeColors"].to<JsonArray>();
-  for (const auto& c : s_config->shade.colors) sArr.add(colorAsHexww(c));
-  doc["brightness"] = s_config->lamp.brightness;
-  serializeJson(doc, *res);
-}
+// The full config snapshot served on GET, built once at begin(). Two reasons
+// to snapshot rather than call asJsonDocument() per request: (1) it's
+// non-const and walks unlocked vectors, so building it on the AsyncTCP task
+// would race Core-1 BLE mutations; (2) we strip lamp.password here —
+// asJsonDocument() emits it in plaintext and it must never reach a soft-AP
+// client.
+static String s_settingsJson;
 
-static void absorbColors(JsonArrayConst arr, std::vector<lamp::Color>& dst,
-                         bool& changedOut) {
-  if (arr.isNull() || arr.size() == 0) return;
-  const size_t n = std::min<size_t>(arr.size(), kMaxColors);
-  std::vector<lamp::Color> next;
-  next.reserve(n);
-  for (size_t i = 0; i < n; ++i) {
-    const char* h = arr[i].as<const char*>();
-    if (!h) return;  // bad payload — leave dst untouched
-    next.push_back(lamp::hexStringToColor(h));
-  }
-  if (next != dst) {
-    dst = std::move(next);
-    changedOut = true;
-  }
+static void buildSettingsSnapshot() {
+  JsonDocument doc = s_config->asJsonDocument();
+  doc["lamp"].remove("password");
+  s_settingsJson = "";
+  serializeJson(doc, s_settingsJson);
 }
 
 static void handleGetSettings(AsyncWebServerRequest* req) {
   bumpDeadline();
-  auto* res = req->beginResponseStream("application/json");
-  writeSettingsJson(res);
-  req->send(res);
+  req->send(200, "application/json", s_settingsJson);
 }
 
 static void handlePutSettings(AsyncWebServerRequest* req, JsonVariant& json) {
   bumpDeadline();
   JsonObject obj = json.as<JsonObject>();
-  bool changed = false;
-  if (obj["name"].is<const char*>()) {
-    std::string name = obj["name"].as<const char*>();
-    // 12-char ceiling matches NimBLE's truncation at bluetooth.cpp:147 —
-    // clamp here so NVS and the BLE advertised name stay in sync.
-    if (name.size() > 12) name.resize(12);
-    if (!name.empty() && name != s_config->lamp.name) {
-      s_config->lamp.name = name;
-      s_config->invalidateLampSection();
-      changed = true;
-    }
+  // Whole-document replace: the body must be the full config (the GET doc,
+  // mutated and sent back in its entirety). Reject anything without a `lamp`
+  // object so a partial/garbage body can't wipe config back to constructor
+  // defaults on the reboot below.
+  if (obj.isNull() || !obj["lamp"].is<JsonObject>()) {
+    req->send(400, "application/json", "{\"ok\":false}");
+    return;
   }
-  bool baseChanged = false;
-  bool shadeChanged = false;
-  if (obj["baseColors"].is<JsonArrayConst>()) {
-    absorbColors(obj["baseColors"].as<JsonArrayConst>(), s_config->base.colors,
-                 baseChanged);
+  // GET redacts the password, so the body won't carry it. Re-inject the
+  // server-side value (the from-scratch reload on boot only keeps a password
+  // present in the blob, so omitting it would wipe the control password).
+  const char* pw = obj["lamp"]["password"] | "";
+  if (pw[0] == '\0' && !s_config->lamp.password.empty()) {
+    obj["lamp"]["password"] = s_config->lamp.password;
   }
-  if (obj["shadeColors"].is<JsonArrayConst>()) {
-    absorbColors(obj["shadeColors"].as<JsonArrayConst>(),
-                 s_config->shade.colors, shadeChanged);
-  }
-  if (baseChanged) {
-    if (s_config->base.ac >= s_config->base.colors.size()) {
-      s_config->base.ac = 0;
-    }
-    s_config->invalidateBaseSection();
-    changed = true;
-  }
-  if (shadeChanged) {
-    s_config->invalidateShadeSection();
-    changed = true;
-  }
-  if (obj["brightness"].is<int>()) {
-    int level = obj["brightness"].as<int>();
-    if (level < 0) level = 0;
-    if (level > 100) level = 100;
-    if (s_config->lamp.brightness != static_cast<uint8_t>(level)) {
-      s_config->lamp.brightness = static_cast<uint8_t>(level);
-      s_config->invalidateLampSection();
-      changed = true;
-    }
-  }
-  if (changed && !s_config->persistConfig("webapp")) {
+  String out;
+  serializeJson(json, out);
+  if (!s_config->persistRawJson(out.c_str())) {
     req->send(500, "application/json", "{\"ok\":false}");
     return;
   }
-  // 1.5s delay so the HTTP response flushes AND any lamp.name change
-  // picks up on the BLE advert (set once at bluetooth.cpp:147).
+  // 1.5s delay so the HTTP response flushes AND any lamp.name change picks up
+  // on the BLE advert (set once at bluetooth.cpp:147). The constructor
+  // re-parses the new blob on boot.
   s_rebootAtMs = millis() + 1500;
   req->send(200, "application/json", "{\"ok\":true}");
 }
@@ -180,15 +134,6 @@ static void onWsEvent(AsyncWebSocket* /*srv*/, AsyncWebSocketClient* /*client*/,
   applyPreview(doc.as<JsonObject>());
 }
 
-static void handleIndex(AsyncWebServerRequest* req) {
-  bumpDeadline();
-  auto* res = req->beginResponse_P(
-      200, "text/html", reinterpret_cast<const uint8_t*>(kIndexHtml),
-      kIndexHtmlLen);
-  if (kIndexHtmlGzipped) res->addHeader("Content-Encoding", "gzip");
-  req->send(res);
-}
-
 void begin(lamp::Config& config) {
   if (s_running) return;
   s_config = &config;
@@ -209,18 +154,29 @@ void begin(lamp::Config& config) {
     return;
   }
 
+  SPIFFS.begin(true);
+
+  buildSettingsSnapshot();
+
   s_server = new AsyncWebServer(kHttpPort);
   s_ws = new AsyncWebSocket("/ws");
 
   s_ws->onEvent(onWsEvent);
   s_server->addHandler(s_ws);
 
-  s_server->on("/", HTTP_GET, handleIndex);
   s_server->on("/api/settings", HTTP_GET, handleGetSettings);
 
   auto* putHandler =
       new AsyncCallbackJsonWebHandler("/api/settings", handlePutSettings);
+  // Full config (expressions + dense knockout) can exceed the 16 KB default,
+  // which AsyncJson drops silently. Give it generous headroom.
+  putHandler->setMaxContentLength(32768);
   s_server->addHandler(putHandler);
+
+  // serveStatic last so the explicit /api route + /ws win; it serves the
+  // gzipped index.html.gz (Content-Encoding header auto-added) for "/" and
+  // any other asset (e.g. the logo) straight from the SPIFFS image.
+  s_server->serveStatic("/", SPIFFS, "/").setDefaultFile("index.html");
 
   s_server->begin();
   if (MDNS.begin("lamp")) {
