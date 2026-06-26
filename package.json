@@ -15,6 +15,7 @@
     "lamp:monitor": "cd software/lamp-os && pio device monitor -e upesy_wroom_standard",
     "wisp:build": "cd software/wisp && pio run -e seeed_xiao_esp32_c6",
     "wisp:flash": "cd software/wisp && pio run -e seeed_xiao_esp32_c6 -t upload",
+    "wisp:test": "cd software/wisp && pio test -e native",
     "wisp:monitor": "cd software/wisp && pio device monitor -e seeed_xiao_esp32_c6",
     "app:run": "cd software/lamp-app-flutter && flutter run -d $(./scripts/android-id.sh)",
     "app:install": "cd software/lamp-app-flutter && DEV=$(./scripts/android-id.sh) && flutter build apk --debug && adb -s $DEV install -r build/app/outputs/flutter-apk/app-debug.apk && adb -s $DEV shell monkey -p ca.lamplit.lamp_app -c android.intent.category.LAUNCHER 1 > /dev/null",
