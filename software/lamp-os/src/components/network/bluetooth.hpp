@@ -43,7 +43,8 @@ class BluetoothComponent {
    * @param [in] inBaseColor the base color RGB value. W is ommitted
    * @param [in] inShadeColor the shade color RGB value. W is ommitted
    */
-  void begin(std::string name, Color inBaseColor, Color inShadeColor);
+  void begin(std::string name, Color inBaseColor, Color inShadeColor,
+             bool configured);
 
   /**
    * @brief register the GATT setup + control services, start the GATT server,

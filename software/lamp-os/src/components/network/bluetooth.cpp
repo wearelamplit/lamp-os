@@ -48,13 +48,25 @@ static std::string s_advertisementName;
 //   bit 1 (0x02) — kBleCapMeshProtocol — speaks the v0x03 mesh wire
 //                  format. Drives the app's ControlScreen vs
 //                  BtOnlyLampScreen routing.
+//   bit 2 (0x04) — kBleCapConfigured — the lamp has been claimed/set up.
+//                  Drives the app's adopt-wizard vs open-it routing, so it
+//                  no longer relies on matching the default name/colors.
 //
-// The byte is 0x02 today — bytewise identical to the prior "firmware
-// version 0x02" sentinel. v2 apps checking `mfg[6] >= 2` still pass;
-// v3+ apps using `(mfg[6] & kBleCapMeshProtocol) != 0` get the same
-// answer.
+// The mesh bit is 0x02 — bytewise identical to the prior "firmware version
+// 0x02" sentinel. v2 apps checking `mfg[6] >= 2` still pass; v3+ apps using
+// `(mfg[6] & WANTED_BIT) != 0` read each flag independently.
 static constexpr unsigned char kBleCapMeshProtocol = 0x02;
-static constexpr unsigned char ADV_CAPABILITY_BYTE = kBleCapMeshProtocol;
+static constexpr unsigned char kBleCapConfigured   = 0x04;
+
+// Set from begin()'s `configured` arg. Only changes across a reboot (the
+// setup flag flips at adoption, which reboots), so the color-update adv
+// rebuild can safely reuse it.
+static bool s_configured = false;
+
+static unsigned char advCapabilityByte() {
+  return static_cast<unsigned char>(
+      kBleCapMeshProtocol | (s_configured ? kBleCapConfigured : 0));
+}
 
 static void applyAdvertisementPayload(NimBLEAdvertising* adv,
                                       const std::string& name,
@@ -140,7 +152,8 @@ class ScanCallbacks : public NimBLEScanCallbacks {
 BluetoothComponent::BluetoothComponent() {};
 
 void BluetoothComponent::begin(std::string name, Color inBaseColor,
-                               Color inShadeColor) {
+                               Color inShadeColor, bool configured) {
+  s_configured = configured;
 #ifdef LAMP_DEBUG
   Serial.printf("Starting Bluetooth Async Client\n");
 #endif
@@ -176,10 +189,10 @@ void BluetoothComponent::begin(std::string name, Color inBaseColor,
   pAdvertising->enableScanResponse(false);
   // Adv payload shape: [magic16(2), baseRGB(3), shadeRGB(3), capabilities(1)]
   // = 9 bytes total. byte 8 was previously a "firmware version" byte hard-
-  // coded to 0x02; it's now a forward-compatible capability bitfield
-  // (see ADV_CAPABILITY_BYTE comment above). The byte's value is still
-  // 0x02 today (only bit 1 "mesh protocol" is set), so v2 apps continue
-  // to route correctly. Legacy v1 8-byte advs (no capability byte) and
+  // coded to 0x02; it's now a forward-compatible capability bitfield (see the
+  // kBleCapMeshProtocol / kBleCapConfigured comment above). Value is 0x02
+  // (mesh only) or 0x06 (mesh + configured), so v2 apps checking `mfg[6] >= 2`
+  // still route correctly. Legacy v1 8-byte advs (no capability byte) and
   // intermediate v2 6-byte advs (no shade) are still tolerated by the
   // scanner above for cross-firmware compat.
   s_advertisementData = {
@@ -191,7 +204,7 @@ void BluetoothComponent::begin(std::string name, Color inBaseColor,
       static_cast<unsigned char>(inShadeColor.r),
       static_cast<unsigned char>(inShadeColor.g),
       static_cast<unsigned char>(inShadeColor.b),
-      ADV_CAPABILITY_BYTE,
+      advCapabilityByte(),
   };
   applyAdvertisementPayload(pAdvertising, s_advertisementName,
                             s_advertisementData);

@@ -43,9 +43,14 @@ BleAdvertisement? parseLampAdvertisement({
   // firmware; forward-compatible for v3+ firmware that sets additional
   // bits. See software/lamp-os/.../bluetooth.cpp `kBleCapMeshProtocol`.
   const kBleCapMeshProtocol = 0x02;
+  const kBleCapConfigured = 0x04;
   final hasShade = mfg.length >= 6;
   final isMesh =
       mfg.length >= 7 && (mfg[6] & kBleCapMeshProtocol) != 0;
+  // Capability bit 2: the lamp has been claimed/set up. Fresh and custom
+  // lamps advertise it clear, so the app routes them into the adopt wizard.
+  final configured =
+      mfg.length >= 7 && (mfg[6] & kBleCapConfigured) != 0;
   final name = advName.isNotEmpty ? advName : platformName;
   // Empty-name advs are noise — non-lamp devices that happen to collide
   // on the 16-bit mfg ID, lamps with a corrupted name chunk, or platform
@@ -62,6 +67,7 @@ BleAdvertisement? parseLampAdvertisement({
         : 0,
     rssi: rssi,
     isMesh: isMesh,
+    configured: configured,
   );
 }
 
@@ -74,6 +80,7 @@ class BleAdvertisement {
     required this.shadeRgb,
     required this.rssi,
     this.isMesh = false,
+    this.configured = false,
   });
 
   final String id;
@@ -93,6 +100,11 @@ class BleAdvertisement {
   /// former because they're genuinely BT-only, the latter because
   /// they won't be on the network long).
   final bool isMesh;
+
+  /// True iff the lamp's capability byte has the "configured" bit set
+  /// (`mfg[6] & 0x04`) — it has been claimed/set up. Fresh and custom lamps
+  /// advertise it clear, so the app routes them into the onboarding wizard.
+  final bool configured;
 }
 
 abstract class BleScanner {

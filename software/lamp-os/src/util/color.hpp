@@ -32,4 +32,11 @@ Color hexStringToColor(std::string inHexString);
  * @brief get the Euclidean distance between 2 colors as an integer
  */
 uint32_t colorDistance(Color c1, Color c2);
+
+/**
+ * @brief vivid RGB color for a hue in degrees. Full saturation + value,
+ * white channel 0. Used to give a fresh lamp a unique default color (the
+ * caller supplies a random hue). hue is taken mod 360.
+ */
+Color colorFromHue(uint16_t hueDeg);
 }  // namespace lamp

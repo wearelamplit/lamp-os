@@ -36,6 +36,7 @@ class Color {
 
 Color hexStringToColor(std::string inHexString);
 std::string colorToHexString(Color inColor);
+Color colorFromHue(uint16_t hueDeg);
 
 }  // namespace lamp
 
@@ -190,6 +191,30 @@ void test_color_round_trip() {
   TEST_ASSERT_TRUE(in == out);
 }
 
+// ---------------------------------------------------------------------------
+// colorFromHue — vivid HSV(hue, S=1, V=1) → RGB for fresh-lamp random colors.
+// ---------------------------------------------------------------------------
+
+void test_color_from_hue_primaries() {
+  TEST_ASSERT_TRUE(lamp::colorFromHue(0)   == lamp::Color(255, 0, 0, 0));
+  TEST_ASSERT_TRUE(lamp::colorFromHue(120) == lamp::Color(0, 255, 0, 0));
+  TEST_ASSERT_TRUE(lamp::colorFromHue(240) == lamp::Color(0, 0, 255, 0));
+}
+
+void test_color_from_hue_secondary_and_wrap() {
+  TEST_ASSERT_TRUE(lamp::colorFromHue(60) == lamp::Color(255, 255, 0, 0));
+  TEST_ASSERT_TRUE(lamp::colorFromHue(360) == lamp::colorFromHue(0));  // wraps
+}
+
+void test_color_from_hue_is_always_vivid() {
+  // Every hue maxes at least one channel and never touches white.
+  for (uint16_t h = 0; h < 360; h += 17) {
+    lamp::Color c = lamp::colorFromHue(h);
+    TEST_ASSERT_TRUE(c.r == 255 || c.g == 255 || c.b == 255);
+    TEST_ASSERT_EQUAL_UINT8(0, c.w);
+  }
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
 
@@ -217,6 +242,10 @@ int main(int, char**) {
   RUN_TEST(test_color_to_hex_all_zeros);
   RUN_TEST(test_color_to_hex_all_ff);
   RUN_TEST(test_color_round_trip);
+
+  RUN_TEST(test_color_from_hue_primaries);
+  RUN_TEST(test_color_from_hue_secondary_and_wrap);
+  RUN_TEST(test_color_from_hue_is_always_vivid);
 
   return UNITY_END();
 }
@@ -276,6 +305,22 @@ std::string colorToHexString(Color inColor) {
   char buf[10];
   std::snprintf(buf, sizeof(buf), "#%02x%02x%02x%02x", inColor.r, inColor.g, inColor.b, inColor.w);
   return std::string(buf, 9);
+}
+
+// Mirror of src/util/color.cpp::colorFromHue.
+Color colorFromHue(uint16_t hueDeg) {
+  hueDeg %= 360;
+  const uint8_t region = hueDeg / 60;
+  const uint8_t rem = (hueDeg % 60) * 255 / 60;
+  const uint8_t down = 255 - rem;
+  switch (region) {
+    case 0:  return Color(255, rem, 0, 0);
+    case 1:  return Color(down, 255, 0, 0);
+    case 2:  return Color(0, 255, rem, 0);
+    case 3:  return Color(0, down, 255, 0);
+    case 4:  return Color(rem, 0, 255, 0);
+    default: return Color(255, 0, down, 0);
+  }
 }
 
 }  // namespace lamp

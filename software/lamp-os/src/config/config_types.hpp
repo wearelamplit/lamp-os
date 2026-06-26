@@ -36,6 +36,14 @@ class LampSettings {
   std::string name = "stray";
   uint8_t brightness = 100;
   std::string password = "";
+  // True once the lamp has been claimed/configured via the app. Drives the
+  // adopt-vs-open routing (advertised as a capability bit) so the check no
+  // longer relies on matching default name/colors. Default false → a fresh
+  // or custom lamp is "unconfigured" and gets the onboarding wizard.
+  bool setup = false;
+  // True once first-boot random colors have been assigned + persisted, so we
+  // don't re-randomize on every reboot.
+  bool colorsRandomized = false;
   bool advancedEnabled = false;
   bool devMode = false;
   // Default true so existing NVS payloads without the field opt in.

@@ -72,6 +72,8 @@ Config::Config(Preferences* inPrefs) {
   if (!password.empty()) {
     lamp.password = password;
   }
+  lamp.setup = lampNode["setup"] | false;
+  lamp.colorsRandomized = lampNode["colorsRandomized"] | false;
   lamp.advancedEnabled = lampNode["advancedEnabled"] | false;
   lamp.devMode = lampNode["devMode"] | false;
   lamp.webappEnabled = lampNode["webappEnabled"] | true;
@@ -489,6 +491,8 @@ JsonDocument Config::asJsonDocument() {
   if (!lamp.password.empty()) {
     lampNode["password"] = lamp.password;
   }
+  lampNode["setup"] = lamp.setup;
+  lampNode["colorsRandomized"] = lamp.colorsRandomized;
   lampNode["advancedEnabled"] = lamp.advancedEnabled;
   lampNode["devMode"] = lamp.devMode;
   lampNode["webappEnabled"] = lamp.webappEnabled;

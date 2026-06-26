@@ -62,6 +62,7 @@
 #include "core/pending_slot_aggregate.hpp"
 #include "core/override_aggregate.hpp"
 #include "util/color.hpp"
+#include "util/fast_rng.hpp"
 #include "util/gradient.hpp"
 #include "util/levels.hpp"
 
@@ -998,6 +999,28 @@ void lamp::Lamp::setup() {
   // are NOT touched — the NVS value is authoritative.
   config.applyDefaults(defaults());
 
+  // First-ever-boot housekeeping, persisted once so it sticks across reboots:
+  //  - Random color per surface so lamps aren't visually identical out of the
+  //    box (each picks an independent hue).
+  //  - Migrate already-configured lamps (custom name OR a control password)
+  //    onto the explicit `setup` flag, so the fielded fleet isn't treated as
+  //    unconfigured after taking this firmware.
+  bool persistFirstBoot = false;
+  if (!config.lamp.colorsRandomized) {
+    FastRng rng;
+    config.base.colors = {colorFromHue(rng.range(0, 359))};
+    config.shade.colors = {colorFromHue(rng.range(0, 359))};
+    config.base.ac = 0;
+    config.lamp.colorsRandomized = true;
+    persistFirstBoot = true;
+  }
+  if (!config.lamp.setup &&
+      (config.lamp.name != defaults().name || !config.lamp.password.empty())) {
+    config.lamp.setup = true;
+    persistFirstBoot = true;
+  }
+  if (persistFirstBoot) config.persistConfig("first-boot-init");
+
   wifi::begin();
   wifi::setStateChangeCallback(onWifiStateChanged);
   wifi::setHomeModeEnabledGetter([]() { return config.homeMode.enabled; });
@@ -1006,7 +1029,8 @@ void lamp::Lamp::setup() {
   // unicast (both OFFER→lamp AND lamp→wisp ACCEPT/REQ) during that window.
   wifi::setOtaInProgressGetter([]() { return firmwareReceiver.isInProgress(); });
 
-  bt.begin(config.lamp.name, config.base.colors[config.base.ac], config.shade.colors[0]);
+  bt.begin(config.lamp.name, config.base.colors[config.base.ac],
+           config.shade.colors[0], config.lamp.setup);
   bt.activateGattServices(&config, &prefs);
 
 #if LAMP_WEBAPP_ENABLED

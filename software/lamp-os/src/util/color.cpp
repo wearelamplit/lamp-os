@@ -75,6 +75,21 @@ uint32_t colorDistance(Color c1, Color c2) {
   return uint32_t(sqrtf(powf((c2.r - c1.r), 2) + powf((c2.g - c1.g), 2) + powf((c2.b - c1.b), 2) + powf(c2.w - c1.w, 2)));
 }
 
+Color colorFromHue(uint16_t hueDeg) {
+  hueDeg %= 360;
+  const uint8_t region = hueDeg / 60;              // 0..5 sextant
+  const uint8_t rem = (hueDeg % 60) * 255 / 60;    // 0..254 rising within
+  const uint8_t down = 255 - rem;                  // 255..1 falling
+  switch (region) {
+    case 0:  return Color(255, rem, 0, 0);   // red   → yellow
+    case 1:  return Color(down, 255, 0, 0);  // yellow→ green
+    case 2:  return Color(0, 255, rem, 0);   // green → cyan
+    case 3:  return Color(0, down, 255, 0);  // cyan  → blue
+    case 4:  return Color(rem, 0, 255, 0);   // blue  → magenta
+    default: return Color(255, 0, down, 0);  // magenta→ red
+  }
+}
+
 Color::Color() { r = g = b = w = 0; }
 
 Color::Color(uint8_t inR, uint8_t inG, uint8_t inB, uint8_t inW) : r(inR), g(inG), b(inB), w(inW) {};

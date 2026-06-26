@@ -44,6 +44,11 @@ inline void lampLocal(JsonObject obj, uint8_t maxBrightness) {
                                           /*isHomeMode=*/false, maxBrightness);
     }
   }
+  // Set once at adoption (the claim blob carries "setup": true). The app
+  // never clears it; a factory reset is what returns a lamp to unconfigured.
+  if (obj["setup"].is<bool>()) {
+    ::config.lamp.setup = obj["setup"].as<bool>();
+  }
   if (obj["advancedEnabled"].is<bool>()) {
     ::config.lamp.advancedEnabled = obj["advancedEnabled"].as<bool>();
   }

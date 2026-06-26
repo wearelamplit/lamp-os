@@ -101,6 +101,23 @@ void main() {
           reason: 'capability bit 1 not set → not mesh-capable');
     });
 
+    test('configured: reads capability bit 2 (0x04)', () {
+      // Claimed lamp advertises mesh + configured (0x06).
+      final claimed =
+          _parse(mfg: [0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x06]);
+      expect(claimed!.configured, isTrue);
+
+      // Fresh lamp: mesh-capable but not yet set up (only bit 1).
+      final fresh = _parse(mfg: [0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x02]);
+      expect(fresh!.configured, isFalse,
+          reason: 'bit 2 clear → unconfigured → routes to adopt wizard');
+
+      // Legacy lamp with no capability byte → unconfigured.
+      final legacy = _parse(mfg: [0xFF, 0x00, 0x00, 0x00, 0xFF, 0x00]);
+      expect(legacy!.configured, isFalse,
+          reason: 'no capability byte → treated as unconfigured');
+    });
+
     test('drops 3-byte payload (random-beacon mfg-id collision)', () {
       // The whole H3 motivation — pre-fix, 3-byte advs were parsed as
       // lamps with garbage colors.

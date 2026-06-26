@@ -94,6 +94,7 @@ class NearbyLampsNotifier extends _$NearbyLampsNotifier {
       shadeRgb: ad.shadeRgb,
       lastSeenEpochMs: now,
       isMesh: ad.isMesh,
+      configured: ad.configured,
     );
     // Build the next-roster against whatever's MOST CURRENT — either the
     // pending list waiting to flush, or the live state if no window is

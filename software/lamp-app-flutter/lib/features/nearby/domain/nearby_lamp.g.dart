@@ -17,6 +17,7 @@ _NearbyLamp _$NearbyLampFromJson(Map<String, dynamic> json) => _NearbyLamp(
   shadeRgb: (json['shadeRgb'] as num).toInt(),
   lastSeenEpochMs: (json['lastSeenEpochMs'] as num).toInt(),
   isMesh: json['isMesh'] as bool? ?? false,
+  configured: json['configured'] as bool? ?? false,
 );
 
 Map<String, dynamic> _$NearbyLampToJson(_NearbyLamp instance) =>
@@ -29,4 +30,5 @@ Map<String, dynamic> _$NearbyLampToJson(_NearbyLamp instance) =>
       'shadeRgb': instance.shadeRgb,
       'lastSeenEpochMs': instance.lastSeenEpochMs,
       'isMesh': instance.isMesh,
+      'configured': instance.configured,
     };

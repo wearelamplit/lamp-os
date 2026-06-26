@@ -3,12 +3,6 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 part 'nearby_lamp.freezed.dart';
 part 'nearby_lamp.g.dart';
 
-/// Firmware defaults from config_types.hpp — used to detect a factory-state
-/// lamp from the BLE advertisement alone.
-const _defaultName = 'stray';
-const _defaultBaseRgb = 0x300783;
-const _defaultShadeRgb = 0x000000;
-
 @freezed
 abstract class NearbyLamp with _$NearbyLamp {
   const NearbyLamp._();
@@ -28,30 +22,19 @@ abstract class NearbyLamp with _$NearbyLamp {
     /// firmware (legacy BT-only) and transitional pre-shade-restore
     /// v2 builds both get `false`.
     @Default(false) bool isMesh,
+    /// True once the lamp has been claimed/set up — capability bit 0x04 in
+    /// the advertisement. Drives the adopt-wizard vs one-tap-add routing.
+    @Default(false) bool configured,
   }) = _NearbyLamp;
 
   factory NearbyLamp.fromJson(Map<String, dynamic> json) =>
       _$NearbyLampFromJson(json);
 
-  /// True when the advertisement still carries the firmware defaults
-  /// (name `stray`, base purple `0x300783`, shade off `0x000000`). The
-  /// AddLamp flow uses this to decide between the adopt wizard (factory
-  /// default → user must claim and personalize it) and a one-tap add
-  /// (anything else → already configured, just add to inventory).
-  ///
-  /// KNOWN LIMITATION (audit M3): a user who renames their lamp back to
-  /// 'stray', sets the base to Lamplit brand purple, and turns the shade
-  /// off is indistinguishable from a freshly-flashed lamp. Their lamp
-  /// will be routed through the adopt wizard. That's the LEAST WRONG
-  /// answer — adopt wizard prompts for the password, and a lamp that
-  /// looks factory but isn't will simply fail to claim without it; the
-  /// user can then back out and re-set their lamp's identity. We don't
-  /// add a "look-up-by-id-against-inventory" override here because the
-  /// scan list legitimately includes lamps the user wants to ADD (not
-  /// just identify); the policy choice "always run the configured-lamp
-  /// path when colors are non-default" wins on simplicity.
-  bool get isFactoryDefault =>
-      name == _defaultName &&
-      baseRgb == _defaultBaseRgb &&
-      shadeRgb == _defaultShadeRgb;
+  /// True when the lamp hasn't been set up yet — the advertised `configured`
+  /// bit is clear. Fresh AND custom lamps report this until claimed, so the
+  /// AddLamp flow routes them through the adopt wizard; a configured lamp is
+  /// added in one tap. Replaces the old fragile default name/colors match
+  /// (which never fired once the firmware defaults drifted, and could never
+  /// recognise a custom lamp at all).
+  bool get isFactoryDefault => !configured;
 }

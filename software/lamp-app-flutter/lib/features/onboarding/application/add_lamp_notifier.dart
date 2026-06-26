@@ -152,7 +152,13 @@ class AddLampNotifier extends _$AddLampNotifier {
     // claimFailed.
     try {
       final blob = jsonEncode({
-        'lamp': {'password': state.password, 'name': state.name},
+        'lamp': {
+          'password': state.password,
+          'name': state.name,
+          // Flip the lamp to "configured" so it stops advertising as a
+          // stray and the app routes it straight in next time.
+          'setup': true,
+        },
       });
       final payload = Uint8List.fromList([
         LampCrypto.magicPlaintext,
