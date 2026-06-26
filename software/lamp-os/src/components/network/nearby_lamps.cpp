@@ -24,6 +24,12 @@ std::string deriveBdAddrFromEspNowMac(const uint8_t mac[6]) {
                 static_cast<uint8_t>(mac[5] + 2));
   return std::string(buf);
 }
+
+// Most-recent sighting across either transport — the eviction + prune
+// sort key.
+uint32_t lastSeen(const NearbyLamp& e) {
+  return std::max(e.lastSeenViaBleMs, e.lastSeenViaEspNowMs);
+}
 }  // namespace
 
 NearbyLamps nearbyLamps;  // global instance
@@ -42,13 +48,9 @@ size_t NearbyLamps::findIndexLocked(const std::string& name) const {
 void NearbyLamps::evictOldestIfFullLocked() {
   if (store_.size() < MAX_NEARBY) return;
   size_t oldestIdx = 0;
-  uint32_t oldestMax = store_[0].lastSeenViaBleMs > store_[0].lastSeenViaEspNowMs
-                           ? store_[0].lastSeenViaBleMs
-                           : store_[0].lastSeenViaEspNowMs;
+  uint32_t oldestMax = lastSeen(store_[0]);
   for (size_t i = 1; i < store_.size(); i++) {
-    uint32_t m = store_[i].lastSeenViaBleMs > store_[i].lastSeenViaEspNowMs
-                     ? store_[i].lastSeenViaBleMs
-                     : store_[i].lastSeenViaEspNowMs;
+    uint32_t m = lastSeen(store_[i]);
     if (m < oldestMax) { oldestMax = m; oldestIdx = i; }
   }
   if (oldestIdx != store_.size() - 1) {
@@ -196,9 +198,7 @@ void NearbyLamps::prune(uint32_t maxAgeMs) {
   uint32_t now = millis();
   xSemaphoreTake(mutex_, portMAX_DELAY);
   for (size_t i = 0; i < store_.size(); ) {
-    uint32_t mostRecent = store_[i].lastSeenViaBleMs > store_[i].lastSeenViaEspNowMs
-                              ? store_[i].lastSeenViaBleMs
-                              : store_[i].lastSeenViaEspNowMs;
+    uint32_t mostRecent = lastSeen(store_[i]);
     if (mostRecent != 0 && (now - mostRecent) > maxAgeMs) {
       if (i != store_.size() - 1) store_[i] = store_.back();
       store_.pop_back();
