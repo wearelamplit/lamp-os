@@ -134,6 +134,13 @@ class Config {
   // which path triggered the write. Pass a constant string literal.
   bool persistConfig(const char* via);
 
+  // Writes a caller-supplied whole-config JSON string straight to the NVS
+  // "cfg" blob (the webapp's whole-document PUT path — the constructor
+  // re-parses it on the next boot). Keeps the namespace/key contract here
+  // rather than letting callers open Preferences("lamp") themselves.
+  // Returns true iff putString wrote > 0 bytes.
+  bool persistRawJson(const char* json);
+
   // Variant identity persistence. Called by main.cpp at
   // boot to resolve and persist the lampType. Stored in NVS under key
   // "lampType" in the existing "lamp" prefs namespace.

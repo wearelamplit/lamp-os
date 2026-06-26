@@ -6,6 +6,9 @@
   "scripts": {
     "lamp:build": "cd software/lamp-os && pio run",
     "lamp:build:snafu": "cd software/lamp-os && pio run -e upesy_wroom_snafu",
+    "ui:build": "cd software/lamp-ui && npm run build",
+    "lamp:buildfs": "npm run ui:build && cd software/lamp-os && pio run -t buildfs",
+    "lamp:flashfs": "npm run ui:build && cd software/lamp-os && pio run -t uploadfs",
     "lamp:flash": "cd software/lamp-os && pio run -t upload",
     "lamp:flash:beta": "cd software/lamp-os && LAMP_FIRMWARE_CHANNEL=beta pio run -t upload",
     "lamp:flash:snafu": "cd software/lamp-os && pio run -e upesy_wroom_snafu -t upload",

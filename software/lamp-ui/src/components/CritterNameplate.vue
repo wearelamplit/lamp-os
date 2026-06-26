@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import Critter from './Critter-7.vue'
-import type { Settings } from '../types'
-const model = defineModel<Settings>({ default: { lamp: { name: '' } } })
+defineProps<{ name?: string }>()
 </script>
 
 <template>
@@ -11,7 +10,7 @@ const model = defineModel<Settings>({ default: { lamp: { name: '' } } })
     </div>
     <div class="text">
       <div class="preamble">Hello my name is:</div>
-      <div class="lampname">{{ model.lamp?.name }}</div>
+      <div class="lampname">{{ name }}</div>
     </div>
   </div>
 </template>
