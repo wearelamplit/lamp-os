@@ -32,6 +32,10 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
     final lampId = widget.lampId;
     final async = ref.watch(controlNotifierProvider(lampId));
     return async.when(
+      // Render the loading branch on an explicit invalidate too (the
+      // "Try again" retry), so the tap immediately swaps to ConnectingView
+      // instead of holding the error page for the whole reconnect.
+      skipLoadingOnRefresh: false,
       loading: () => ConnectingView(deviceId: lampId),
       error: (e, _) {
         if (e is LampAuthRequiredException) {

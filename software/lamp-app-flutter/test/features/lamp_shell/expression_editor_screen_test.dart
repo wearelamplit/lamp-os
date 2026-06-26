@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:lamp_app/core/ble/ble_client.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/features/control/application/control_notifier.dart';
+import 'package:lamp_app/features/control/application/expression_draft.dart';
 import 'package:lamp_app/features/inventory/application/inventory_notifier.dart';
 import 'package:lamp_app/features/inventory/domain/inventory_lamp.dart';
 import 'package:lamp_app/features/lamp_shell/presentation/expression_editor_screen.dart';
@@ -69,11 +70,11 @@ void main() {
     // Add button (new expression — existing entries say "Save") may be
     // below the fold; scroll to reveal it.
     await tester.dragUntilVisible(
-      find.text('Add'),
+      find.text('Save'),
       find.byType(ListView),
       const Offset(0, -200),
     );
-    expect(find.text('Add'), findsOneWidget);
+    expect(find.text('Save'), findsOneWidget);
   });
 
   testWidgets('Save adds the entry to ControlState.expressions',
@@ -104,11 +105,11 @@ void main() {
     ));
     await _pumpToData(tester, 'Breathing');
     await tester.dragUntilVisible(
-      find.text('Add'),
+      find.text('Save'),
       find.byType(ListView),
       const Offset(0, -200),
     );
-    await tester.tap(find.text('Add'));
+    await tester.tap(find.text('Save'));
     // Drain microtasks for the async upsert.
     for (var i = 0; i < 30; i++) {
       await tester.pump(const Duration(milliseconds: 16));
@@ -127,6 +128,108 @@ void main() {
           .expressions,
       hasLength(1),
     );
+  });
+
+  testWidgets(
+      'switching target moves the in-progress draft in place (no reset, no duplicate)',
+      (tester) async {
+    final c = await _withEmptyState();
+    addTearDown(c.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: c,
+      child: const MaterialApp(
+        home: ExpressionEditorScreen(
+          lampId: _devId,
+          typeKey: 'breathing',
+          targetKey: 1, // Shade
+        ),
+      ),
+    ));
+    await _pumpToData(tester, 'Breathing');
+
+    // Simulate in-progress work on the Shade draft.
+    c
+        .read(expressionDraftProvider(_devId, 'breathing', 1).notifier)
+        .update((d) => d.copyWith(intervalMin: 123));
+    await tester.pump();
+
+    // Tap a different (untaken) target — should retarget in place, not
+    // navigate to a blank editor.
+    await tester.tap(find.text('Base'));
+    await tester.pump();
+
+    // Work moved onto the Base slot, retargeted…
+    final baseDraft = c.read(expressionDraftProvider(_devId, 'breathing', 2));
+    expect(baseDraft.target, 2);
+    expect(baseDraft.intervalMin, 123,
+        reason: 'in-progress edits carry to the new target');
+
+    // …and the old Shade slot was dropped (rebuilds to a fresh default),
+    // so the work moved rather than duplicating across both targets.
+    final shadeDraft = c.read(expressionDraftProvider(_devId, 'breathing', 1));
+    expect(shadeDraft.intervalMin, 60,
+        reason: 'old target slot reset — work moved, not duplicated');
+  });
+
+  testWidgets(
+      'moving an existing expression to a new target removes the old row (no duplicate)',
+      (tester) async {
+    final ble = InMemoryBleClient();
+    SharedPreferences.setMockInitialValues({});
+    await seedControlBle(
+      ble,
+      deviceId: _devId,
+      name: 'test',
+      expressionsJson:
+          '[{"type":"breathing","enabled":true,"colors":[],"intervalMin":123,"intervalMax":900,"target":1}]',
+    );
+    final c = ProviderContainer(
+      overrides: [bleClientProvider.overrideWithValue(ble)],
+    );
+    addTearDown(c.dispose);
+    await c.read(inventoryNotifierProvider.future);
+    await c.read(inventoryNotifierProvider.notifier).add(const InventoryLamp(
+          id: _devId,
+          name: 'jacko',
+          controlPassword: 'secret',
+        ));
+
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: c,
+      child: const MaterialApp(
+        home: ExpressionEditorScreen(
+          lampId: _devId,
+          typeKey: 'breathing',
+          targetKey: 1, // Shade — the existing row
+        ),
+      ),
+    ));
+    await _pumpToData(tester, 'Breathing');
+
+    // One existing entry on Shade.
+    expect(
+      c.read(controlNotifierProvider(_devId)).value!.expressions.expressions,
+      hasLength(1),
+    );
+
+    // Move it to Base, then Save.
+    await tester.tap(find.text('Base'));
+    await tester.pump();
+    await tester.dragUntilVisible(
+        find.text('Save'), find.byType(ListView), const Offset(0, -200));
+    await tester.tap(find.text('Save'));
+    for (var i = 0; i < 30; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+
+    // Still exactly one entry, now on Base — the Shade row was dropped, not
+    // duplicated. (Edit-carry across the switch is covered by the in-place
+    // test above; here the keepAlive draft seeds before the section finishes
+    // loading, so we only assert the structural move invariant.)
+    final exprs =
+        c.read(controlNotifierProvider(_devId)).value!.expressions.expressions;
+    expect(exprs, hasLength(1), reason: 'move must not duplicate');
+    expect(exprs.single.target, 2);
   });
 
   testWidgets('predictability slider labels read "less" and "more"',

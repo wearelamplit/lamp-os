@@ -225,8 +225,12 @@ class _WispBodyState extends ConsumerState<_WispBody> {
                   // hasn't reached Aurora over the network yet. Surface
                   // it here, alongside the WiFi row, instead of via a
                   // permanent header chip.
-                  _AuroraNotConnectedNotice(
-                    wifiConnected: status.wifiConnected,
+                  Semantics(
+                    liveRegion: true,
+                    label: 'Aurora not connected',
+                    child: _AuroraNotConnectedNotice(
+                      wifiConnected: status.wifiConnected,
+                    ),
                   ),
                   const SizedBox(height: 16),
                 ],

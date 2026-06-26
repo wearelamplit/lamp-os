@@ -14,33 +14,37 @@ class ConnectionBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      color: BrandColors.amberGold.withValues(alpha: 0.18),
-      child: Row(
-        children: [
-          const SizedBox(
-            width: 14,
-            height: 14,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: BrandColors.amberGold,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              attempt <= 1
-                  ? 'Lamp dropped out — reconnecting…'
-                  : 'Reconnecting (attempt $attempt)…',
-              style: const TextStyle(
+    return Semantics(
+      liveRegion: true,
+      label: 'Reconnecting to lamp',
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        color: BrandColors.amberGold.withValues(alpha: 0.18),
+        child: Row(
+          children: [
+            const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
                 color: BrandColors.amberGold,
-                fontSize: 12,
               ),
             ),
-          ),
-        ],
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                attempt <= 1
+                    ? 'Lamp dropped out — reconnecting…'
+                    : 'Reconnecting (attempt $attempt)…',
+                style: const TextStyle(
+                  color: BrandColors.amberGold,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

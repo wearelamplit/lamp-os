@@ -62,26 +62,32 @@ class NearbyLampsScreen extends ConsumerWidget {
                           ],
                         ),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(999),
-                          color: (l.isFactoryDefault
+                      Semantics(
+                        label: l.isFactoryDefault
+                            ? 'factory default lamp'
+                            : 'configured lamp',
+                        excludeSemantics: true,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(999),
+                            color: (l.isFactoryDefault
+                                    ? BrandColors.amberGold
+                                    : BrandColors.lumenGreen)
+                                .withValues(alpha: 0.18),
+                          ),
+                          child: Text(
+                            l.isFactoryDefault ? 'factory' : 'configured',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: l.isFactoryDefault
                                   ? BrandColors.amberGold
-                                  : BrandColors.lumenGreen)
-                              .withValues(alpha: 0.18),
-                        ),
-                        child: Text(
-                          l.isFactoryDefault ? 'factory' : 'configured',
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: l.isFactoryDefault
-                                ? BrandColors.amberGold
-                                : BrandColors.lumenGreen,
-                            fontWeight: FontWeight.w600,
+                                  : BrandColors.lumenGreen,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                       ),

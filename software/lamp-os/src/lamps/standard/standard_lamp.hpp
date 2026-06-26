@@ -30,8 +30,8 @@ class StandardLamp : public Lamp {
       .shadeColor = "#5A170000",
       .baseColorsEditable  = true,
       .shadeColorsEditable = true,
-      .basePx  = 36,
-      .shadePx = 32,
+      .basePx  = 35,
+      .shadePx = 38,
     };
   }
 

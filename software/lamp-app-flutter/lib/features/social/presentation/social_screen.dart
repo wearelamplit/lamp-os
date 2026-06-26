@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/ble/ble_client_provider.dart';
@@ -81,7 +82,6 @@ class SocialScreen extends ConsumerWidget {
       for (final l in nearby)
         if (l.name.isNotEmpty && l.name != selfName)
           _SocialLampRow(
-            id: l.bdAddr,
             name: inventoryById[l.bdAddr]?.name ?? l.name,
             bdAddr: l.bdAddr,
             baseRgb: _rgbwToRgb(l.baseRgbw),
@@ -189,7 +189,6 @@ class SocialScreen extends ConsumerWidget {
 
 class _SocialLampRow {
   const _SocialLampRow({
-    required this.id,
     required this.name,
     required this.bdAddr,
     required this.baseRgb,
@@ -198,14 +197,13 @@ class _SocialLampRow {
     required this.proximity,
     required this.critterIndex,
   });
-  final String id;
   final String name;
   final String bdAddr;
   final int baseRgb;
   final int shadeRgb;
   /// Persisted critter id (1..16) when this mesh peer is also in the
   /// phone's inventory; null for unknown peers (CritterIcon falls back
-  /// to a deterministic hash on `id`).
+  /// to a deterministic hash on `bdAddr`).
   final int? critterIndex;
   // TEMP DEBUG: most recent BLE-scan RSSI from the lamp's perspective.
   // Used for the small subscript next to the proximity label. Strip
@@ -244,6 +242,7 @@ class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
     if (bdAddr.isEmpty) return;
     final repo = WispRepository(ref.read(bleClientProvider), widget.lampId);
     repo.testGreet(bdAddr);
+    HapticFeedback.mediumImpact();
     setState(() => _flashing = true);
     Future<void>.delayed(const Duration(milliseconds: 120), () {
       if (mounted) setState(() => _flashing = false);
@@ -294,7 +293,7 @@ class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
             children: [
               CritterIcon(
                 critterIndex: row.critterIndex,
-                deviceId: row.id,
+                deviceId: row.bdAddr,
                 shade: Color(0xFF000000 | row.shadeRgb),
                 base: Color(0xFF000000 | row.baseRgb),
                 size: 22,
@@ -334,9 +333,9 @@ class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
                 child: Text(
                   _proximityLabel(row.proximity),
                   style: const TextStyle(
-                    color: BrandColors.lampWhite,
+                    color: BrandColors.fogGrey,
                     fontSize: 12,
-                    fontWeight: FontWeight.w500,
+                    fontWeight: FontWeight.w400,
                   ),
                 ),
               ),
@@ -378,14 +377,14 @@ class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
                 // the word changes as you drag and reveals the continuum
                 // through interaction rather than upfront labelling.
                 SizedBox(
-                  width: 64,
+                  width: 72,
                   child: Text(
                     _dispositionLabel(disposition),
                     textAlign: TextAlign.right,
                     style: const TextStyle(
-                      color: BrandColors.fogGrey,
-                      fontSize: 12,
-                      fontStyle: FontStyle.italic,
+                      color: BrandColors.lampWhite,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),

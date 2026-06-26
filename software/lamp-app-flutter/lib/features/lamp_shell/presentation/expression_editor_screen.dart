@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/routing/routes.dart';
 import '../../../core/theme/brand_colors.dart';
 import '../../../core/widgets/friendly_error.dart';
 import '../../control/application/control_notifier.dart';
@@ -49,14 +48,27 @@ class _ExpressionEditorScreenState
   /// touching `ref` after the widget is deactivated (which Riverpod blocks).
   late final ControlNotifier _controlNotifier;
 
+  /// Live target (1=shade, 2=base, 3=both). Seeded from the route's
+  /// [ExpressionEditorScreen.targetKey] but mutable: the target switcher
+  /// changes it in place (carrying the draft) instead of navigating, so the
+  /// user doesn't lose in-progress edits. All draft reads key off this.
+  late int _target;
+
+  /// Whether the editor was opened on a not-yet-existing entry (i.e. reached
+  /// via the picker, so the stack is [list, picker, editor]). Captured ONCE on
+  /// first load, before any target switch — `isNew` is dynamic and flips true
+  /// the moment you retarget, which must NOT change the back-out pop count.
+  bool? _openedNew;
+
   bool _existsInState(ControlState? state) =>
       state != null &&
       state.expressions.expressions
-          .any((e) => e.type == widget.typeKey && e.target == widget.targetKey);
+          .any((e) => e.type == widget.typeKey && e.target == _target);
 
   @override
   void initState() {
     super.initState();
+    _target = widget.targetKey;
     _controlNotifier =
         ref.read(controlNotifierProvider(widget.lampId).notifier);
   }
@@ -75,7 +87,7 @@ class _ExpressionEditorScreenState
   void _updateDraft(ExpressionConfig Function(ExpressionConfig d) f) {
     ref
         .read(expressionDraftProvider(
-                widget.lampId, widget.typeKey, widget.targetKey)
+                widget.lampId, widget.typeKey, _target)
             .notifier)
         .update(f);
   }
@@ -103,7 +115,7 @@ class _ExpressionEditorScreenState
     ControlNotifier notifier,
     LampColor initial,
   ) async {
-    final t = widget.targetKey;
+    final t = _target;
     final previewShade = (t == 1 || t == 3);
     final previewBase = (t == 2 || t == 3);
     final originalShade = state.shade.colors;
@@ -173,7 +185,7 @@ class _ExpressionEditorScreenState
           Consumer(
             builder: (context, ref, _) {
               final draft = ref.watch(expressionDraftProvider(
-                  widget.lampId, widget.typeKey, widget.targetKey));
+                  widget.lampId, widget.typeKey, _target));
               final connected = ref.watch(controlNotifierProvider(widget.lampId)
                   .select((a) => a.value?.connected ?? false));
               return IconButton(
@@ -210,8 +222,11 @@ class _ExpressionEditorScreenState
           final notifier =
               ref.read(controlNotifierProvider(widget.lampId).notifier);
           final draft = ref.watch(expressionDraftProvider(
-              widget.lampId, widget.typeKey, widget.targetKey));
+              widget.lampId, widget.typeKey, _target));
           final isNew = !_existsInState(state);
+          // Capture the open-time newness once; retargeting flips `isNew`
+          // but must not change how far we pop on back-out.
+          _openedNew ??= isNew;
 
           // Two-row Column: scrolling form body up top, action row pinned
           // to the bottom inside a SafeArea so it stays above the system
@@ -232,21 +247,33 @@ class _ExpressionEditorScreenState
               const SizedBox(height: 12),
               // Target switcher. Same chunky-pill UX as the picker so the
               // active target reads at a glance. Tapping a different target
-              // pushReplaces the editor route for that (type, target);
-              // other-target buttons are disabled when that combo is already
-              // configured (one entry per (type, target) firmware-side).
+              // retargets the current draft IN PLACE (no navigation), so the
+              // user keeps their colors/interval/params; other-target buttons
+              // are disabled when that combo is already configured (one entry
+              // per (type, target) firmware-side).
               _TargetRow(
-                currentTarget: widget.targetKey,
+                currentTarget: _target,
                 isTaken: (t) =>
-                    t != widget.targetKey &&
+                    t != _target &&
                     state.expressions.expressions.any((e) =>
                         e.type == widget.typeKey && e.target == t),
                 onTap: (t) {
-                  if (t == widget.targetKey) return;
-                  GoRouter.maybeOf(context)?.pushReplacement(
-                    AppRoutes.expressionEditor(
-                        widget.lampId, widget.typeKey, t),
-                  );
+                  if (t == _target) return;
+                  // Move the in-flight draft onto the new (type, t) slot and
+                  // retarget it, then drop the old slot — the work follows the
+                  // target instead of resetting or duplicating. isTaken
+                  // guarantees the destination slot is a fresh default.
+                  final from = _target;
+                  final current = ref.read(expressionDraftProvider(
+                      widget.lampId, widget.typeKey, from));
+                  ref
+                      .read(expressionDraftProvider(
+                              widget.lampId, widget.typeKey, t)
+                          .notifier)
+                      .update((_) => current.copyWith(target: t));
+                  ref.invalidate(expressionDraftProvider(
+                      widget.lampId, widget.typeKey, from));
+                  setState(() => _target = t);
                 },
               ),
               const SizedBox(height: 20),
@@ -375,7 +402,7 @@ class _ExpressionEditorScreenState
                           // edits. dispose() handles firmware preview
                           ref
                               .read(expressionDraftProvider(widget.lampId,
-                                      widget.typeKey, widget.targetKey)
+                                      widget.typeKey, _target)
                                   .notifier)
                               .reset();
                           GoRouter.maybeOf(context)?.pop();
@@ -390,11 +417,11 @@ class _ExpressionEditorScreenState
                           onPressed: () async {
                             await notifier.removeExpression(
                               type: widget.typeKey,
-                              target: widget.targetKey,
+                              target: _target,
                             );
                             ref
                                 .read(expressionDraftProvider(widget.lampId,
-                                        widget.typeKey, widget.targetKey)
+                                        widget.typeKey, _target)
                                     .notifier)
                                 .reset();
                             if (context.mounted) {
@@ -404,23 +431,39 @@ class _ExpressionEditorScreenState
                         ),
                       const Spacer(),
                       FilledButton.icon(
-                        icon:
-                            Icon(isNew ? Icons.add : Icons.check, size: 18),
-                        label: Text(isNew ? 'Add' : 'Update'),
+                        icon: const Icon(Icons.check, size: 18),
+                        label: const Text('Save'),
                         onPressed: () async {
+                          // Capture the active target up front: the user can
+                          // tap another target pill while the awaited writes
+                          // are in flight, which would move _target out from
+                          // under the reset() below.
+                          final savedTarget = _target;
+                          // Target changed this session → it's a move: drop
+                          // the row we opened so it doesn't linger as a
+                          // duplicate. removeExpression is a no-op when the
+                          // original row never existed (the create flow).
+                          if (savedTarget != widget.targetKey) {
+                            await notifier.removeExpression(
+                              type: widget.typeKey,
+                              target: widget.targetKey,
+                            );
+                          }
                           await notifier.upsertExpression(draft);
                           ref
                               .read(expressionDraftProvider(widget.lampId,
-                                      widget.typeKey, widget.targetKey)
+                                      widget.typeKey, savedTarget)
                                   .notifier)
                               .reset();
                           if (!context.mounted) return;
-                          // For brand-new entries the stack is
-                          // [list, picker, editor]; pop straight back
-                          // to the list so the user sees their newly-
-                          // added entry rather than the picker again.
+                          // Entries opened via the picker have the stack
+                          // [list, picker, editor]; pop twice to land back on
+                          // the list, skipping the picker. Use the open-time
+                          // flag, NOT live `isNew` — retargeting an existing
+                          // entry flips `isNew` true but didn't add a picker
+                          // to pop past.
                           final router = GoRouter.maybeOf(context);
-                          if (isNew && router != null) {
+                          if ((_openedNew ?? isNew) && router != null) {
                             router.pop();
                             if (context.mounted) router.pop();
                           } else {
