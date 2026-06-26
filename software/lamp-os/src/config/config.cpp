@@ -85,7 +85,7 @@ Config::Config(Preferences* inPrefs) {
   }
 
   JsonObject baseNode = doc["base"];
-  base.px = baseNode["px"] | 36;
+  base.px = baseNode["px"] | 0;  // 0 = key absent → unset; applyDefaults fills from variant default
   if (base.px > 50) {
     base.px = 50;
   }
@@ -132,7 +132,7 @@ Config::Config(Preferences* inPrefs) {
   }
 
   JsonObject shadeNode = doc["shade"];
-  shade.px = shadeNode["px"] | 32;
+  shade.px = shadeNode["px"] | 0;  // 0 = key absent → unset; applyDefaults fills from variant default
   if (shade.px > 50) {
     shade.px = 50;
   }
@@ -762,19 +762,15 @@ void Config::applyDefaults(const Defaults& d) {
   base.colorsEditable  = d.baseColorsEditable;
   shade.colorsEditable = d.shadeColorsEditable;
 
-  // Per-surface pixel count. Same guard pattern as colors: only overwrite
-  // when the NVS-loaded value matches a known factory baseline (class
-  // default OR loader fallback). User-saved values that differ are left
-  // alone — NVS wins. Guarded set is what makes the variant's HwConfig the
-  // single source of hardware truth for fresh lamps while keeping the
-  // promise that an existing configured lamp's settings are sacred.
-  if (d.basePx != 0 && (base.px == 35 || base.px == 36)) {
-    base.px = d.basePx;
-    base.knockoutPixels.resize(base.px, 100);
-  }
-  if (d.shadePx != 0 && (shade.px == 32 || shade.px == 38)) {
-    shade.px = d.shadePx;
-  }
+  // Per-surface pixel count. A loaded px of 0 means "unset" — a fresh lamp
+  // (loader early-returned with the class-default 0) or a doc without the
+  // key. Fill those from the variant default; any real stored value wins,
+  // so a configured lamp's px is sacred. (The old guard inferred unset from
+  // magic baseline numbers and clobbered a user who legitimately saved a
+  // value equal to one — that was the "save didn't take" bug.)
+  base.px = resolveConfiguredPx(base.px, d.basePx);
+  base.knockoutPixels.resize(base.px, 100);
+  shade.px = resolveConfiguredPx(shade.px, d.shadePx);
 }
 
 }  // namespace lamp

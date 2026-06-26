@@ -60,7 +60,7 @@ class LampSettings {
  */
 class ShadeSettings {
  public:
-  uint8_t px = 32;
+  uint8_t px = 0;  // 0 = unset; applyDefaults fills it from the variant default. See resolveConfiguredPx.
   uint8_t bpp = 4;
   std::string byteOrder = "";
   std::vector<Color> colors = {Color(0x00, 0x00, 0x00, 0xFF)};
@@ -78,7 +78,7 @@ class ShadeSettings {
  */
 class BaseSettings {
  public:
-  uint8_t px = 36;
+  uint8_t px = 0;  // 0 = unset; applyDefaults fills it from the variant default. See resolveConfiguredPx.
   uint8_t bpp = 4;
   std::string byteOrder = "";
   std::vector<Color> colors = {Color(0x30, 0x07, 0x83, 0x00)};
@@ -86,6 +86,17 @@ class BaseSettings {
   uint8_t ac = 0;
   bool colorsEditable = true;  // Emitted in asBaseJson/asShadeJson; app hides color picker when false.
 };
+
+// Resolve a loaded pixel count against a variant default. A persisted px
+// of 0 means the field was absent from NVS (the loader parses a missing
+// "px" key to 0), i.e. a fresh lamp — fill from the variant default. Any
+// real stored value wins, including one that equals a former factory
+// baseline (32/38 shade, 35/36 base) that the old applyDefaults guard
+// wrongly clobbered. Callers pass a non-zero default (the variant px, or
+// the struct class-default), so a configured lamp's choice is sacred.
+inline uint8_t resolveConfiguredPx(uint8_t stored, uint8_t dflt) {
+  return stored != 0 ? stored : dflt;
+}
 
 /**
  * @brief Configuration for a single expression with generic parameter system

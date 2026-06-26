@@ -15,6 +15,7 @@
 #include "components/apply/apply_base_knockout.hpp"
 #include "components/apply/apply_shade_colors.hpp"
 #include "components/apply/apply_base_colors.hpp"
+#include "components/apply/apply_pixel_format.hpp"
 
 namespace lamp {
 namespace apply {
@@ -40,6 +41,7 @@ inline bool settingsBlobLocal(JsonObject doc, uint8_t maxBrightness) {
   }
   if (doc["base"].is<JsonObject>()) {
     JsonObject baseObj = doc["base"].as<JsonObject>();
+    apply::pixelFormatLocal(baseObj, ::config.base);
     if (baseObj["colors"].is<JsonArray>()) {
       apply::baseColorsToConfig(baseObj["colors"].as<JsonArray>());
     }
@@ -52,6 +54,7 @@ inline bool settingsBlobLocal(JsonObject doc, uint8_t maxBrightness) {
   }
   if (doc["shade"].is<JsonObject>()) {
     JsonObject shadeObj = doc["shade"].as<JsonObject>();
+    apply::pixelFormatLocal(shadeObj, ::config.shade);
     if (shadeObj["colors"].is<JsonArray>()) {
       apply::shadeColorsToConfig(shadeObj["colors"].as<JsonArray>());
     }
