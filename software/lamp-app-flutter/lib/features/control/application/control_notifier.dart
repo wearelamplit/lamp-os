@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
@@ -461,7 +462,11 @@ class ControlNotifier extends _$ControlNotifier {
     _connSub = ble.watchConnected(deviceId).listen(_onConnectionChange);
     // Catch lamp-side link terminations fbp misses (mesh-OTA kick, etc.).
     // Self-gates: _probeLink no-ops while disconnected/reconnecting.
-    _probeTimer = Timer.periodic(_probeInterval, (_) => _probeLink());
+    // ponytail: skip under `flutter test` — there's no platform BLE and a
+    // free-running periodic timer trips the binding's pending-timer check.
+    if (!Platform.environment.containsKey('FLUTTER_TEST')) {
+      _probeTimer = Timer.periodic(_probeInterval, (_) => _probeLink());
+    }
     ref.onDispose(() {
       _connSub?.cancel();
       _reconnectTimer?.cancel();
