@@ -159,19 +159,29 @@ class FirmwareNotifier extends _$FirmwareNotifier {
     );
     _activePusher = pusher;
 
-    state = FirmwareOfferSent(footer: verified.footer);
-    final result = await pusher.start();
-    _activePusher = null;
+    // Pin this notifier alive for the duration of the stream. Without it,
+    // tabbing away from the Info screen unmounts FirmwareUpdatePanel, the
+    // provider autoDisposes, onDispose fires `_activePusher.cancel()`, and
+    // the OTA silently aborts mid-push. Released in `finally` so the notifier
+    // can dispose normally once the stream is done.
+    final keepAlive = ref.keepAlive();
+    try {
+      state = FirmwareOfferSent(footer: verified.footer);
+      final result = await pusher.start();
+      _activePusher = null;
 
-    if (result.success) {
-      state = FirmwareSucceeded(footer: verified.footer);
-      // Drop the in-memory bytes — the lamp is rebooting.
-      _pendingImage    = null;
-      _pendingVerified = null;
-    } else {
-      state = FirmwareFailed(reason: result.message);
+      if (result.success) {
+        state = FirmwareSucceeded(footer: verified.footer);
+        // Drop the in-memory bytes — the lamp is rebooting.
+        _pendingImage    = null;
+        _pendingVerified = null;
+      } else {
+        state = FirmwareFailed(reason: result.message);
+      }
+      debugPrint('[firmware] OTA result: ${result.message}');
+    } finally {
+      keepAlive.close();
     }
-    debugPrint('[firmware] OTA result: ${result.message}');
   }
 
   /// Cancel an in-flight install and return to idle.
