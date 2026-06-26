@@ -98,15 +98,17 @@ void main() {
     expect(find.textContaining('%'), findsOneWidget);
   });
 
-  testWidgets('Advanced LED row hidden by default', (tester) async {
+  testWidgets('Advanced-gated row hidden by default', (tester) async {
     final c = await _makeContainer();
     addTearDown(c.dispose);
     await tester.pumpWidget(_wrap(c));
     await _pumpToData(tester);
-    expect(find.text('Advanced LED setup'), findsNothing);
+    // The "LED setup" entry point is always on now; the rows gated behind
+    // the advanced flag (e.g. Boot-time setup AP) stay hidden by default.
+    expect(find.text('Boot-time setup AP'), findsNothing);
   });
 
-  testWidgets('Advanced LED row appears when session advanced is enabled',
+  testWidgets('Advanced-gated row appears when session advanced is enabled',
       (tester) async {
     // Advanced gating moved from persisted firmware advancedEnabled to a
     // session-only Riverpod flag so the unlock doesn't survive a
@@ -117,7 +119,7 @@ void main() {
     addTearDown(c.dispose);
     await tester.pumpWidget(_wrap(c));
     await _pumpToData(tester);
-    expect(find.text('Advanced LED setup'), findsOneWidget);
+    expect(find.text('Boot-time setup AP'), findsOneWidget);
   });
 
   testWidgets('Knockout row no longer on Setup (moved into LED setup)',
