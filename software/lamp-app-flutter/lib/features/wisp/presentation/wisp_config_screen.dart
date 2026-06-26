@@ -259,7 +259,7 @@ class _WispBodyState extends ConsumerState<_WispBody> {
               ],
               const SizedBox(height: 24),
               const SettingsGroupHeading('Painted lamps'),
-              _PaintedLampsList(status: status),
+              _PaintedLampsList(lampId: widget.lampId),
             ],
           ),
         ),
@@ -855,6 +855,26 @@ class _ManualPaletteEditorState extends ConsumerState<_ManualPaletteEditor> {
     // state changes via _bumpState.
     ref.watch(wispNotifierProvider(widget.lampId));
 
+    if (notifier.paletteLoading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 12),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 14, height: 14,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: BrandColors.fogGrey),
+            ),
+            SizedBox(width: 10),
+            Text('Reading palette from wisp…',
+                style: TextStyle(
+                    color: BrandColors.fogGrey, fontSize: 12,
+                    fontStyle: FontStyle.italic)),
+          ],
+        ),
+      );
+    }
+
     final draft = notifier.draftManualPalette;
     final atCap = draft.length >= 10;
 
@@ -1184,14 +1204,16 @@ class _WifiConfigRowState extends ConsumerState<_WifiConfigRow> {
 // physical lamp is wearing right now. The header subtitle calls this
 // out so the operator knows to trust the lamp, not the preview.
 class _PaintedLampsList extends ConsumerWidget {
-  const _PaintedLampsList({required this.status});
+  const _PaintedLampsList({required this.lampId});
 
-  final WispStatus status;
+  final String lampId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final notifier = ref.read(wispNotifierProvider(lampId).notifier);
+    ref.watch(wispNotifierProvider(lampId));
+    final palette = notifier.savedManualPalette;
     final inventoryAsync = ref.watch(inventoryNotifierProvider);
-    final palette = status.manualPalette ?? const <LampColor>[];
     return inventoryAsync.when(
       loading: () => const Padding(
         padding: EdgeInsets.symmetric(vertical: 12),

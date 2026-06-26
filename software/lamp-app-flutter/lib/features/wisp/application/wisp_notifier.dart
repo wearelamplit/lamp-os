@@ -1,10 +1,8 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../control/domain/lamp_color.dart';
 import '../../../core/ble/ble_client_provider.dart';
@@ -15,11 +13,6 @@ import '../domain/wisp_source_mode.dart';
 import '../domain/wisp_status.dart';
 
 part 'wisp_notifier.g.dart';
-
-/// SharedPreferences key prefix for the persisted manual palette.
-/// Suffixed with the lampId so each lamp's wisp keeps its own copy
-/// (multi-wisp households, lamp swaps, etc.).
-const String _manualPalettePrefsKeyPrefix = 'wisp.manualPalette.v1.';
 
 /// Owns the live [WispStatus] for a single lamp. On build it does one
 /// read of `CHAR_WISP_STATUS` and subscribes to its notify stream;
@@ -65,17 +58,13 @@ class WispNotifier extends _$WispNotifier {
   WispSourceMode? _pendingSourceMode;
   DateTime? _pendingSourceUntil;
 
-  // ── Manual palette state ─────────────────────────────────────────────
-  // The wisp does not echo the saved palette back in wispStatus (would
-  // push the JSON past CONTROL_MAX_PAYLOAD — only the 8-char paletteId
-  // prefix is shipped), so the source of truth for "what's currently
-  // saved" within the app lives here. Save flushes it to the wisp AND
-  // mirrors it to SharedPreferences (keyed by lampId) so it survives:
-  //   • tab switches (LampShell pre-emptively watches the provider, but
-  //     prefs is the belt-and-suspenders for hot-restart / app cold start)
-  //   • app cold restarts — the wisp itself keeps a NVS copy and keeps
-  //     painting, but without the prefs mirror the editor would open
-  //     empty until the next save.
+  // -- Manual palette state ------------------------------------------------
+  // The wisp's read leg (CHAR_WISP_STATUS READ) is the source of truth
+  // for the saved palette. On build the notifier reads the full status
+  // which includes the base64-packed palette under the `palette` key;
+  // that value seeds the editor. NOTIFY payloads are trimmed (no palette
+  // blob), so a changed `paletteIdPrefix` in a NOTIFY triggers a fresh
+  // READ to pull the updated palette.
   //
   // Two slots: `_savedManualPalette` is the last value the user committed
   // via [setManualPalette]; `_draftManualPalette` is the in-flight editor
@@ -84,7 +73,9 @@ class WispNotifier extends _$WispNotifier {
   List<LampColor> _savedManualPalette = const <LampColor>[];
   List<LampColor> _draftManualPalette = const <LampColor>[];
 
-  String get _prefsKey => '$_manualPalettePrefsKeyPrefix$lampId';
+  bool _currentPaletteKnown = false;
+  String _lastPaletteIdPrefix = '';
+  bool _paletteRereadInFlight = false;
 
   /// The currently-saved manual palette (last committed). Empty before
   /// the first save in a session.
@@ -104,12 +95,21 @@ class WispNotifier extends _$WispNotifier {
     return false;
   }
 
+  /// True while the wisp is present but its palette hasn't been received
+  /// from the read leg yet. Drives a loading placeholder in the editor.
+  bool get paletteLoading =>
+      (state.value?.present ?? false) && !_currentPaletteKnown;
+
   bool _disposed = false;
 
   @override
   Future<WispStatus> build(String lampId) async {
     final ble = ref.read(bleClientProvider);
     _repo = WispRepository(ble, lampId);
+
+    _currentPaletteKnown = false;
+    _lastPaletteIdPrefix = '';
+    _paletteRereadInFlight = false;
 
     ref.onDispose(() {
       _disposed = true;
@@ -118,7 +118,7 @@ class WispNotifier extends _$WispNotifier {
       _manualPaletteWriteTimer?.cancel();
     });
 
-    debugPrint('[wisp_notifier] build lamp=$lampId — waiting for connect');
+    debugPrint('[wisp_notifier] build lamp=$lampId -- waiting for connect');
 
     // Wait until the BLE link is connected before subscribing or reading.
     // `watchConnected` emits the current state immediately on listen, so
@@ -132,13 +132,13 @@ class WispNotifier extends _$WispNotifier {
     // touching `ref` after dispose throws.
     if (_disposed) {
       debugPrint(
-        '[wisp_notifier] build lamp=$lampId — disposed during connect await, bailing',
+        '[wisp_notifier] build lamp=$lampId -- disposed during connect await, bailing',
       );
       return WispStatus.empty;
     }
 
     debugPrint(
-      '[wisp_notifier] build lamp=$lampId — connected, subscribing + reading',
+      '[wisp_notifier] build lamp=$lampId -- connected, subscribing + reading',
     );
 
     // Subscribe before the initial read so we never miss a notify that
@@ -150,7 +150,8 @@ class WispNotifier extends _$WispNotifier {
       var next = WispStatus.fromBytes(bytes);
       final rawMac = next.wispMac;
       next = _applySourceWriteGuard(next);
-      _ingestWispBroadcastPalette(next.manualPalette);
+      _ingestManualPaletteFromStatus(next.currentPalette);
+      _maybeRereadForPalette(next);
       state = AsyncData(next);
       debugPrint(
         '[wisp_notifier] notify lamp=$lampId len=${bytes.length} '
@@ -162,21 +163,11 @@ class WispNotifier extends _$WispNotifier {
       debugPrint('[wisp_notifier] notify-stream done lamp=$lampId');
     });
 
-    // Hydrate the saved manual palette from disk in the background. The
-    // wisp itself keeps an authoritative NVS copy and keeps painting from
-    // it across reboots; this prefs mirror is purely so the editor opens
-    // populated (and survives a hot-restart) rather than empty.
-    //
-    // Async, fire-and-forget: the build() future is the WispStatus read,
-    // not the palette. When prefs lands later, we _bumpState() so any
-    // editor that's already on-screen rebuilds with the hydrated saved
-    // palette in hand.
-    unawaited(_hydrateManualPaletteFromPrefs());
-
     try {
       final initial = _applySourceWriteGuard(await _repo.readStatus());
       if (_disposed) return WispStatus.empty;
-      _ingestWispBroadcastPalette(initial.manualPalette);
+      _ingestManualPaletteFromStatus(initial.currentPalette);
+      _lastPaletteIdPrefix = initial.paletteIdPrefix;
       debugPrint(
         '[wisp_notifier] initial-read lamp=$lampId '
         'wispMac=${initial.wispMac} present=${initial.present} '
@@ -189,43 +180,32 @@ class WispNotifier extends _$WispNotifier {
       // doesn't hang; the notify subscription will catch it up when the
       // next status broadcast lands.
       debugPrint(
-        '[wisp_notifier] initial-read FAILED lamp=$lampId — '
+        '[wisp_notifier] initial-read FAILED lamp=$lampId -- '
         'returning empty. err=$e',
       );
       return WispStatus.empty;
     }
   }
 
-  /// Consume the manualPalette field from a fresh wispStatus payload.
-  /// When the wisp has broadcast its canonical palette (MSG_WISP_PALETTE
-  /// → cached on the lamp → served back in this JSON), it becomes the
-  /// source of truth — overriding the SharedPreferences-cached view that
-  /// previously diverged per-lampId. The SharedPreferences cache stays
-  /// as the offline fallback (a lamp may be paint-controlled by a wisp
-  /// the app can't currently reach via BLE — we want the editor to open
-  /// populated even then).
+  /// Consume the currentPalette field from a fresh wispStatus payload.
+  /// The read leg serves the full palette blob; this seeds the editor
+  /// and marks the palette as known.
   ///
   /// Doesn't touch the draft if the user is mid-edit (draft has diverged
   /// from the previous saved). The next save replaces the wisp's view
   /// anyway.
-  void _ingestWispBroadcastPalette(List<LampColor>? broadcast) {
-    if (broadcast == null || broadcast.isEmpty) return;
-    // No change? Skip the work.
-    if (_palettesEqual(_savedManualPalette, broadcast)) return;
-    // Capture pristine-vs-OLD-saved BEFORE we overwrite — the pristine
-    // check is "did the user touch the draft since the last save". If
-    // we computed it after the overwrite, a divergent broadcast would
-    // always look dirty and we'd never refresh the editor view, which
-    // was the on-hardware repro the user hit on 2026-06-13.
+  void _ingestManualPaletteFromStatus(List<LampColor>? palette) {
+    if (palette == null || palette.isEmpty) return;
+    _currentPaletteKnown = true;
+    if (_palettesEqual(_savedManualPalette, palette)) return;
+    // Capture pristine-vs-OLD-saved BEFORE we overwrite -- the pristine
+    // check is "did the user touch the draft since the last save".
     final wasDraftPristine = _draftManualPalette.isEmpty ||
         _palettesEqual(_draftManualPalette, _savedManualPalette);
-    _savedManualPalette = List<LampColor>.unmodifiable(broadcast);
+    _savedManualPalette = List<LampColor>.unmodifiable(palette);
     if (wasDraftPristine) {
       _draftManualPalette = List<LampColor>.from(_savedManualPalette);
     }
-    // Mirror to SharedPreferences for the next cold-start before the
-    // wisp's next broadcast lands.
-    unawaited(_persistManualPaletteToPrefs());
   }
 
   static bool _palettesEqual(List<LampColor> a, List<LampColor> b) {
@@ -236,70 +216,27 @@ class WispNotifier extends _$WispNotifier {
     return true;
   }
 
-  /// Load the last persisted manual palette for this lamp. No-op if the
-  /// prefs entry is missing or unparseable. Safe to call before the
-  /// first wispStatus read returns — we don't touch [state] unless we
-  /// actually loaded something, so a stale AsyncLoading isn't blown
-  /// away by an empty hydrate.
-  Future<void> _hydrateManualPaletteFromPrefs() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_prefsKey);
-      if (raw == null || raw.isEmpty) return;
-      final dynamic decoded;
+  // NOTIFY is trimmed (no palette); a changed paletteIdPrefix means the
+  // wisp's palette moved, so pull the full status from the READ leg.
+  void _maybeRereadForPalette(WispStatus next) {
+    final prefix = next.paletteIdPrefix;
+    if (prefix.isEmpty || prefix == _lastPaletteIdPrefix) return;
+    _lastPaletteIdPrefix = prefix;
+    if (_paletteRereadInFlight) return;
+    _paletteRereadInFlight = true;
+    unawaited(() async {
       try {
-        decoded = jsonDecode(raw);
-      } on FormatException {
-        // Corrupt payload — silently drop. The wisp's own NVS copy is
-        // authoritative anyway; next setManualPalette will overwrite.
-        return;
-      }
-      if (decoded is! List) return;
-      final colors = <LampColor>[];
-      for (final entry in decoded) {
-        if (entry is! String) continue;
-        final c = LampColor.tryFromHex(entry);
-        if (c != null) colors.add(c);
-      }
-      if (colors.isEmpty) return;
-      _savedManualPalette = List<LampColor>.unmodifiable(colors);
-      // Mirror saved → draft on hydrate so the editor opens populated
-      // and the save button stays clean (dirty == draft != saved). The
-      // pane-level post-frame `resetManualPaletteDraft()` would do the
-      // same on next render, but seeding now avoids a one-frame flash
-      // of "dirty + empty draft" and keeps tests deterministic without
-      // having to pump frames.
-      //
-      // Don't clobber an in-progress edit: if the user has already
-      // started touching the draft (e.g. hydrate raced a fast tap),
-      // their work wins.
-      if (_draftManualPalette.isEmpty) {
-        _draftManualPalette = List<LampColor>.from(_savedManualPalette);
-      }
-      // If state has already settled into AsyncData, rebroadcast so any
-      // editor currently on screen picks up the hydrated saved palette.
-      // If state is still AsyncLoading (the BLE read hasn't returned),
-      // skip — the eventual read result will publish a fresh AsyncData
-      // that consumers will receive in the normal flow.
-      if (state is AsyncData<WispStatus>) {
+        final full = _applySourceWriteGuard(await _repo.readStatus());
+        if (_disposed) return;
+        _ingestManualPaletteFromStatus(full.currentPalette);
+        _lastPaletteIdPrefix = full.paletteIdPrefix;
         _bumpState();
+      } catch (e, st) {
+        debugPrint('WispNotifier palette re-read failed: $e\n$st');
+      } finally {
+        _paletteRereadInFlight = false;
       }
-    } catch (e, st) {
-      debugPrint('WispNotifier._hydrateManualPaletteFromPrefs failed: $e\n$st');
-    }
-  }
-
-  /// Write the current saved palette to SharedPreferences. Called from
-  /// [setManualPalette] after a successful BLE write so prefs always
-  /// reflects what the wisp has in NVS.
-  Future<void> _persistManualPaletteToPrefs() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final hex = [for (final c in _savedManualPalette) c.toHex()];
-      await prefs.setString(_prefsKey, jsonEncode(hex));
-    } catch (e, st) {
-      debugPrint('WispNotifier._persistManualPaletteToPrefs failed: $e\n$st');
-    }
+    }());
   }
 
   /// Pin the wisp to [zoneId]. Optimistically updates local state to
@@ -309,7 +246,7 @@ class WispNotifier extends _$WispNotifier {
   /// On BLE write failure, rolls the optimistic state back to its
   /// pre-call snapshot before rethrowing (audit perf-M8). Without the
   /// rollback the user sees the chip "stick" on the failed selection
-  /// even though the wisp never received the op — and there's no notify
+  /// even though the wisp never received the op -- and there's no notify
   /// coming to reconcile it.
   Future<void> setZone(int zoneId) async {
     final prev = state;
@@ -336,7 +273,7 @@ class WispNotifier extends _$WispNotifier {
     final prev = state;
     final cur = state.value ?? WispStatus.empty;
     state = AsyncData(cur.copyWith(
-      // Don't optimistically null currentZone — the wisp may keep
+      // Don't optimistically null currentZone -- the wisp may keep
       // following whatever it was on until firstSeen kicks in. Just
       // flip the source so the "Clear selection" button hides.
       zoneSource: ZoneSource.firstSeen,
@@ -357,7 +294,7 @@ class WispNotifier extends _$WispNotifier {
   /// `WispStatus.wifiConnected` on the next status notify (typically
   /// within ~2s of the wisp's STA association completing).
   ///
-  /// We don't optimistically flip `wifiConnected` to true — the wisp
+  /// We don't optimistically flip `wifiConnected` to true -- the wisp
   /// may fail to associate (wrong password, AP out of range) and a
   /// "Connected" badge that doesn't budge would mislead the operator.
   /// The UI surfaces the "save sent" state via its own local flag.
@@ -371,14 +308,14 @@ class WispNotifier extends _$WispNotifier {
   }
 
   /// Pick the color the wisp renders on its OWN 30-pixel ring while
-  /// sourceMode is Off. Does not broadcast to lamps — Off mode keeps
+  /// sourceMode is Off. Does not broadcast to lamps -- Off mode keeps
   /// PaintDistributor held off. Optimistically reflects in local state
   /// so the swatch updates instantly; the BLE write itself is debounced
   /// at [_offColorDebounce] so a continuous picker drag tops out at
   /// ~4 writes/sec instead of one per drag tick (which would saturate
   /// the wispOp link and chew through NVS writes on the wisp's side).
   ///
-  /// No rollback on failure — the user expects realtime, not
+  /// No rollback on failure -- the user expects realtime, not
   /// reconcile-and-revert. The wisp's next status notify will correct
   /// local state if the write actually missed.
   Future<void> setOffColor(LampColor color) async {
@@ -420,7 +357,7 @@ class WispNotifier extends _$WispNotifier {
       state = prev;
       // On failure, clear the guard rather than restoring its prior
       // value. The optimistic state is also being rolled back, so
-      // suppression of "stale" notifies should stop — the user needs
+      // suppression of "stale" notifies should stop -- the user needs
       // to see ground truth (whatever the wisp is actually reporting).
       _pendingSourceMode = null;
       _pendingSourceUntil = null;
@@ -452,7 +389,7 @@ class WispNotifier extends _$WispNotifier {
     return incoming.copyWith(source: pendingMode);
   }
 
-  // ── Manual palette editor state-mutators ─────────────────────────────
+  // -- Manual palette editor state-mutators --------------------------------
   // Each helper rebuilds the draft list and rebroadcasts state so any
   // ConsumerWidget watching the notifier rebuilds. We rebuild rather
   // than mutate in place so equality-based diffs (e.g. flutter_riverpod's
@@ -465,7 +402,7 @@ class WispNotifier extends _$WispNotifier {
     _bumpState();
   }
 
-  /// Append a swatch to the draft. Caps at 10 — anything beyond is
+  /// Append a swatch to the draft. Caps at 10 -- anything beyond is
   /// silently ignored so the UI's `+` button can be permissive.
   void appendManualPaletteColor(LampColor color) {
     if (_draftManualPalette.length >= 10) return;
@@ -495,7 +432,7 @@ class WispNotifier extends _$WispNotifier {
   }
 
   /// Drag-to-reorder. Standard "move item at [oldIndex] to [newIndex]"
-  /// semantics — newIndex is the index in the list AFTER removal.
+  /// semantics -- newIndex is the index in the list AFTER removal.
   void reorderManualPaletteColor(int oldIndex, int newIndex) {
     if (oldIndex < 0 || oldIndex >= _draftManualPalette.length) return;
     final next = List<LampColor>.from(_draftManualPalette);
@@ -509,7 +446,7 @@ class WispNotifier extends _$WispNotifier {
 
   /// Trailing-edge debounced write of the current draft palette to the
   /// wisp. Called from every editor mutation. Operator-facing semantics:
-  /// every edit is "saved" — no Save button to remember. On the wire,
+  /// every edit is "saved" -- no Save button to remember. On the wire,
   /// continuous edits collapse into one write per [_manualPaletteDebounce]
   /// window so NVS wear stays bounded.
   ///
@@ -523,8 +460,8 @@ class WispNotifier extends _$WispNotifier {
       try {
         await _repo.setManualPalette(committed);
         _savedManualPalette = committed;
+        _currentPaletteKnown = true;
         _bumpState();
-        unawaited(_persistManualPaletteToPrefs());
       } catch (e, st) {
         debugPrint('WispNotifier.setManualPalette write failed: $e\n$st');
       }
@@ -533,21 +470,15 @@ class WispNotifier extends _$WispNotifier {
 
   /// Commit the draft palette to the wisp. Updates the saved snapshot
   /// so [manualPaletteDirty] goes back to false on success. Throws on
-  /// the underlying BLE write failure (no optimism — UI surfaces the
+  /// the underlying BLE write failure (no optimism -- UI surfaces the
   /// error and leaves the draft in place so the user can retry).
-  ///
-  /// Also mirrors the committed palette to SharedPreferences so the
-  /// editor can re-hydrate on a cold app restart (the wisp keeps its
-  /// own NVS copy; this mirror is purely for app-side UI continuity).
-  /// Prefs write is fire-and-forget — a prefs failure does not roll
-  /// back the successful BLE write.
   Future<void> setManualPalette() async {
     final committed = List<LampColor>.from(_draftManualPalette);
     try {
       await _repo.setManualPalette(committed);
       _savedManualPalette = committed;
+      _currentPaletteKnown = true;
       _bumpState();
-      unawaited(_persistManualPaletteToPrefs());
     } catch (e, st) {
       debugPrint('WispNotifier.setManualPalette() failed: $e\n$st');
       rethrow;
@@ -560,12 +491,12 @@ class WispNotifier extends _$WispNotifier {
   /// read [draftManualPalette] / [manualPaletteDirty] via the notifier.
   ///
   /// PERF (audit perf-H7, deferred): this defeats Riverpod's equality
-  /// dedup — `AsyncData(cur)` is a new wrapper around the same value,
+  /// dedup -- `AsyncData(cur)` is a new wrapper around the same value,
   /// so consumers that `ref.watch` rebuild even when nothing they read
   /// has changed. The clean fix is to move `_draftManualPalette` into
   /// its own `StateProvider` so consumers can `.select` to just the
-  /// palette slice. That refactor's wider than this remediation pass —
-  /// the gradient-bar resolution drop (256 → 30, this commit) cuts the
+  /// palette slice. That refactor's wider than this remediation pass --
+  /// the gradient-bar resolution drop (256 -> 30, this commit) cuts the
   /// downstream cost so the visible jank is gone even with the
   /// over-broad notify.
   void _bumpState() {

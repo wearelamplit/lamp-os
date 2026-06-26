@@ -440,7 +440,7 @@ void NearbyLamps::cacheWispMacFromPaint(const uint8_t mac[6]) {
   xSemaphoreGive(mutex_);
 }
 
-std::string NearbyLamps::getWispStatusReadJson() {
+std::string NearbyLamps::getWispStatusReadJson(bool includePalette) {
   // Bounded take matches getWispCache — a BLE on-read callback runs on
   // Core 0 and can't afford to block behind a long writer. The loop-task
   // writer holds the mutex only for the snapshot copy below, so 2 ms is
@@ -540,6 +540,11 @@ std::string NearbyLamps::getWispStatusReadJson() {
   // which long-reads the full value. The NOTIFY path passes
   // includePalette=false and carries paletteIdPrefix as the "re-read me"
   // signal.
+  if (includePalette && snap.manualPaletteCount > 0) {
+    doc["palette"] = lamp::base64::encode(
+        snap.manualPaletteRgb,
+        static_cast<size_t>(snap.manualPaletteCount) * 3);
+  }
 
   std::string out;
   serializeJson(doc, out);

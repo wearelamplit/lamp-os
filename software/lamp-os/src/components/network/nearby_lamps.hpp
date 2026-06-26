@@ -125,11 +125,10 @@ struct WispCache {
   uint32_t lastStatusMs = 0;
   // Latest MSG_WISP_PALETTE the lamp has heard from this wisp. The wisp
   // emits this alongside wispStatus every 30 s + on-change so the app's
-  // wisp editor can read the canonical manualPalette through any
-  // connected lamp instead of relying on its own per-lampId
-  // SharedPreferences cache. Served base64-encoded inside
-  // getWispStatusReadJson()'s `manualPalette` field. Capacity matches
-  // lamp_protocol::kMaxWispPaletteColors * 3 = 150 bytes.
+  // wisp editor can read the canonical palette through any connected
+  // lamp. Served base64-encoded as getWispStatusReadJson()'s `palette`
+  // field, on the READ leg only (the NOTIFY leg omits it — MTU).
+  // Capacity matches lamp_protocol::kMaxWispPaletteColors * 3 = 150 bytes.
   uint8_t manualPaletteRgb[150] = {0};
   uint8_t manualPaletteCount = 0;
   uint32_t lastPaletteMs = 0;
@@ -247,7 +246,7 @@ class NearbyLamps {
   // Build and return the JSON to serve on CHAR_WISP_STATUS reads.
   // Merges the cached wispStatus payload with the last MSG_WISP_HELLO
   // data. Returns "{}" if nothing has been cached for either path.
-  std::string getWispStatusReadJson();
+  std::string getWispStatusReadJson(bool includePalette = false);
 
   // Snapshot of "is this lamp currently following a wisp on each
   // surface, and what's the most recently painted wisp color." The Flutter

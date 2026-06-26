@@ -237,154 +237,55 @@ void main() {
     });
   });
 
-  // ── Saved palette persistence across notifier rebuilds ───────────────
-  // The wisp does not echo the saved palette back in wispStatus (payload
-  // budget — only the 8-char ID prefix fits). Before this change, the
-  // notifier-instance `_savedManualPalette` was the only copy, so a tab
-  // switch (which auto-dispose-tears the notifier down) wiped it. The
-  // fix mirrors the saved palette to SharedPreferences keyed by lampId
-  // and hydrates from disk on every build.
-  group('WispNotifier saved palette persistence', () {
-    test('setManualPalette writes the committed colors to SharedPreferences',
+  group('WispNotifier currentPalette from read', () {
+    String paletteJson(List<List<int>> rgb, {String mac = 'AA:BB:CC:DD:EE:FF',
+        String prefix = 'abc12345'}) {
+      final bytes = [for (final c in rgb) ...c];
+      final b64 = base64Encode(bytes);
+      return '{"wispMac":"$mac","paletteIdPrefix":"$prefix","palette":"$b64"}';
+    }
+
+    test('read seeds the editor from the wisp palette (source of truth)',
         () async {
       final ble = InMemoryBleClient();
-      await primeStatus(ble, '{"wispMac":"AA:BB:CC:DD:EE:FF"}');
+      await primeStatus(ble, paletteJson([[255, 0, 0], [0, 128, 64]]));
       final c = makeContainer(ble: ble);
 
       await c.read(wispNotifierProvider(lampId).future);
       final n = c.read(wispNotifierProvider(lampId).notifier);
 
-      n.appendManualPaletteColor(
-        const LampColor(r: 255, g: 0, b: 0, w: 0),
-      );
-      n.appendManualPaletteColor(
-        const LampColor(r: 0, g: 128, b: 64, w: 0),
-      );
-      await n.setManualPalette();
-
-      // Drain pending microtasks so the fire-and-forget prefs write
-      // settles before we read it back.
-      // SharedPreferences.getInstance + getString chain through multiple
-      // microtasks; pump the event queue until they settle.
-      for (var i = 0; i < 10; i++) {
-        await Future<void>.delayed(Duration.zero);
-      }
-
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString('wisp.manualPalette.v1.$lampId');
-      expect(raw, isNotNull);
-      final decoded = jsonDecode(raw!) as List;
-      expect(decoded, ['#FF000000', '#00804000']);
-    });
-
-    test('hydrates the saved palette from SharedPreferences on build',
-        () async {
-      // Pre-seed prefs as if a previous app session had committed a
-      // palette. A fresh notifier should pick it up so the editor opens
-      // populated rather than empty.
-      SharedPreferences.setMockInitialValues({
-        'wisp.manualPalette.v1.$lampId': jsonEncode([
-          '#11223300',
-          '#44556600',
-        ]),
-      });
-
-      final ble = InMemoryBleClient();
-      await primeStatus(ble, '{"wispMac":"AA:BB:CC:DD:EE:FF"}');
-      final c = makeContainer(ble: ble);
-
-      // Hold a listener so the autoDispose provider doesn't tear down
-      // between our read() calls — without this the second .notifier
-      // read could trigger a fresh build, racing the hydrate.
-      final sub = c.listen(wispNotifierProvider(lampId), (_, _) {});
-      addTearDown(sub.close);
-
-      await c.read(wispNotifierProvider(lampId).future);
-      // Let the fire-and-forget hydrate complete.
-      // SharedPreferences.getInstance + getString chain through multiple
-      // microtasks; pump the event queue until they settle.
-      for (var i = 0; i < 10; i++) {
-        await Future<void>.delayed(Duration.zero);
-      }
-
-      final n = c.read(wispNotifierProvider(lampId).notifier);
       expect(n.savedManualPalette.length, 2);
-      expect(n.savedManualPalette[0].r, 0x11);
-      expect(n.savedManualPalette[0].g, 0x22);
-      expect(n.savedManualPalette[0].b, 0x33);
-      expect(n.savedManualPalette[1].r, 0x44);
-      expect(n.savedManualPalette[1].g, 0x55);
-      expect(n.savedManualPalette[1].b, 0x66);
-      // Draft is auto-seeded from the hydrated saved palette so the
-      // editor opens populated and the save button stays clean.
+      expect(n.savedManualPalette[0].r, 255);
+      expect(n.savedManualPalette[1].g, 128);
       expect(n.draftManualPalette.length, 2);
       expect(n.manualPaletteDirty, isFalse);
+      expect(n.paletteLoading, isFalse);
     });
 
-    test(
-        'ignores a corrupt prefs payload — no throw, saved stays empty',
+    test('present wisp with no palette yet → paletteLoading, no swatches',
         () async {
-      SharedPreferences.setMockInitialValues({
-        'wisp.manualPalette.v1.$lampId': 'not-json',
-      });
-
       final ble = InMemoryBleClient();
       await primeStatus(ble, '{"wispMac":"AA:BB:CC:DD:EE:FF"}');
       final c = makeContainer(ble: ble);
 
       await c.read(wispNotifierProvider(lampId).future);
-      // SharedPreferences.getInstance + getString chain through multiple
-      // microtasks; pump the event queue until they settle.
-      for (var i = 0; i < 10; i++) {
-        await Future<void>.delayed(Duration.zero);
-      }
-
       final n = c.read(wispNotifierProvider(lampId).notifier);
+
+      expect(n.paletteLoading, isTrue);
       expect(n.savedManualPalette, isEmpty);
+      expect(n.draftManualPalette, isEmpty);
     });
 
-    test('per-lamp keying — palettes for different lamps don\'t collide',
-        () async {
-      // One lamp's saved palette must not leak into another's editor.
-      SharedPreferences.setMockInitialValues({
-        'wisp.manualPalette.v1.lamp-a': jsonEncode(['#AABBCC00']),
-        'wisp.manualPalette.v1.lamp-b': jsonEncode(['#DDEEFF00']),
-      });
-
+    test('no SharedPreferences key is written for the palette', () async {
       final ble = InMemoryBleClient();
-      await ble.connect('lamp-a');
-      await ble.connect('lamp-b');
-      await ble.write(
-        'lamp-a',
-        BleUuids.controlService,
-        BleUuids.wispStatus,
-        Uint8List.fromList(utf8.encode('{}')),
-      );
-      await ble.write(
-        'lamp-b',
-        BleUuids.controlService,
-        BleUuids.wispStatus,
-        Uint8List.fromList(utf8.encode('{}')),
-      );
+      await primeStatus(ble, paletteJson([[1, 2, 3]]));
       final c = makeContainer(ble: ble);
-      // Hold listeners on both so neither autoDisposes between reads.
-      final subA = c.listen(wispNotifierProvider('lamp-a'), (_, _) {});
-      addTearDown(subA.close);
-      final subB = c.listen(wispNotifierProvider('lamp-b'), (_, _) {});
-      addTearDown(subB.close);
-
-      await c.read(wispNotifierProvider('lamp-a').future);
-      await c.read(wispNotifierProvider('lamp-b').future);
-      // SharedPreferences.getInstance + getString chain through multiple
-      // microtasks; pump the event queue until they settle.
+      await c.read(wispNotifierProvider(lampId).future);
       for (var i = 0; i < 10; i++) {
         await Future<void>.delayed(Duration.zero);
       }
-
-      final a = c.read(wispNotifierProvider('lamp-a').notifier);
-      final b = c.read(wispNotifierProvider('lamp-b').notifier);
-      expect(a.savedManualPalette.single.r, 0xAA);
-      expect(b.savedManualPalette.single.r, 0xDD);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('wisp.manualPalette.v1.$lampId'), isNull);
     });
   });
 }

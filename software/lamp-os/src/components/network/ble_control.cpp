@@ -634,13 +634,13 @@ class WispStatusCallback : public NimBLECharacteristicCallbacks {
       c->setValue("");
       return;
     }
-    c->setValue(lamp::nearbyLamps.getWispStatusReadJson());
+    c->setValue(lamp::nearbyLamps.getWispStatusReadJson(true));
   }
 };
 
 void notifyWispStatus() {
   if (!s_wispStatusChar) return;
-  auto json = lamp::nearbyLamps.getWispStatusReadJson();
+  auto json = lamp::nearbyLamps.getWispStatusReadJson(false);
 #ifdef LAMP_DEBUG
   // Diagnostic for the 2026-06-13 "wisp icon doesn't show even though the
   // lamp IS being wisp-painted" report. Print the actual JSON length and
