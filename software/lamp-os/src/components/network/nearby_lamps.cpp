@@ -107,7 +107,9 @@ void NearbyLamps::addOrUpdateFromBle(const std::string& name,
 void NearbyLamps::addOrUpdateFromEspNow(const std::string& name, const uint8_t mac[6],
                                         const Color& base, const Color& shade,
                                         uint32_t firmwareVersion,
-                                        int8_t rssi) {
+                                        int8_t rssi,
+                                        uint8_t otaState,
+                                        uint8_t protocolVersion) {
   uint32_t now = millis();
   // Derive the BD_ADDR outside the lock — depends only on `mac`, no shared
   // state. snprintf + heap alloc happen here so the bounded critical
@@ -149,6 +151,8 @@ void NearbyLamps::addOrUpdateFromEspNow(const std::string& name, const uint8_t m
     e.bdAddr = derivedBdAddr;
     e.lastSeenViaEspNowMs = now;
     e.firmwareVersion = firmwareVersion;
+    e.otaState = otaState;
+    e.protocolVersion = protocolVersion;
     store_.push_back(e);
   } else {
     store_[idx].baseColor = base;
@@ -164,6 +168,16 @@ void NearbyLamps::addOrUpdateFromEspNow(const std::string& name, const uint8_t m
     // Don't clobber a known version with a 0 — pre-HELLO BLE-only callers
     // pass the default; we only refresh once we actually got a HELLO.
     if (firmwareVersion != 0) store_[idx].firmwareVersion = firmwareVersion;
+    // OTA state always overwrites — it's an instantaneous status flag,
+    // not a "best-known" cumulative value, so the latest HELLO wins
+    // outright. BLE-only callers pass 0 (idle) which is the correct
+    // default for "I have no information."
+    store_[idx].otaState = otaState;
+    // Don't clobber a known protocolVersion with a 0 — same rationale
+    // as firmwareVersion above (BLE-only callers default to 0).
+    if (protocolVersion != 0) {
+      store_[idx].protocolVersion = protocolVersion;
+    }
   }
   xSemaphoreGive(mutex_);
 }
@@ -243,6 +257,20 @@ bool NearbyLamps::findByBdAddr(const std::string& bdAddr, NearbyLamp& out) {
   xSemaphoreTake(mutex_, portMAX_DELAY);
   for (const auto& e : store_) {
     if (e.bdAddr == bdAddr) {
+      out = e;
+      xSemaphoreGive(mutex_);
+      return true;
+    }
+  }
+  xSemaphoreGive(mutex_);
+  return false;
+}
+
+bool NearbyLamps::findByMac(const uint8_t mac[6], NearbyLamp& out) {
+  if (mac == nullptr) return false;
+  xSemaphoreTake(mutex_, portMAX_DELAY);
+  for (const auto& e : store_) {
+    if (e.hasMac && std::memcmp(e.mac, mac, 6) == 0) {
       out = e;
       xSemaphoreGive(mutex_);
       return true;

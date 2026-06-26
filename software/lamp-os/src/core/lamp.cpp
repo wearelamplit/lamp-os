@@ -56,6 +56,7 @@
 #include "core/behavior_context.hpp"
 #include "core/compositor.hpp"
 #include "core/frame_buffer.hpp"
+#include "core/ota_quiet_mode.hpp"
 #include "core/pending_json_slot.hpp"
 #include "core/pending_typed_slot.hpp"
 #include "core/pending_slot_aggregate.hpp"
@@ -1181,11 +1182,15 @@ void lamp::Lamp::tick() {
   // race that panics the lamp on rapid color picker drags.
   bt.tickAdvertising();
 
-  if (pendingApplyEffectiveBrightness) {
+  if (pendingApplyEffectiveBrightness && !ota_quiet_mode::isQuiet()) {
     pendingApplyEffectiveBrightness = false;
     // Preview enter/exit (cmd 0x01/0x00) and live home-brightness writes
     // (cmd 0x02) all funnel here — refresh the compositor homeMode gate
     // and the strip brightness together.
+    // Held off during OTA quiet-mode so the crowd-dim micro-fade math
+    // doesn't snap-apply 5 minutes of accumulated wall-clock drift in
+    // one frame when quiet-mode exits. The pending flag stays set; it
+    // drains on the next non-quiet tick.
     reapplyHomeModeState();
   }
 

@@ -13,11 +13,10 @@
 #include "util/fade.hpp"
 #include "version.hpp"
 
-// Defined in lamp.cpp at global scope (the
-// `lamp::firmwareReceiver` pattern isn't used because firmware_receiver.hpp
-// doesn't expose an extern decl). Referenced from the OTA-hold draw
-// branch below to extend the greeting animation while we're mid-OTA
-// to the greeted peer.
+// firmwareReceiver lives at file scope in lamp.cpp — the receiver
+// header doesn't expose an extern itself (matching the established
+// pattern in ota_indicator.cpp); declare it here so the receive-first
+// gate in the OTA gossip tick can read its isInProgress().
 extern lamp::FirmwareReceiver firmwareReceiver;
 
 namespace lamp {
@@ -86,32 +85,13 @@ void SocialBehavior::draw() {
       } else {
         out = foundLampColor;
       }
-    } else if (fadeOut > 0 && frame < easeIn + hold + fadeOut &&
-               !(otaHoldActive_ &&
-                 firmwareDistributor.isDistributingTo(otaHoldPeerMac_))) {
+    } else if (fadeOut > 0 && frame < easeIn + hold + fadeOut) {
       // Phase 3 — ease out back to the underlying expression's pixel.
-      // Skipped when OTA-hold is live: fading back to `buf` here would
-      // be immediately overwritten by phase 4's snap to `foundLampColor`
-      // on the next frame, producing a visible flash.
       const uint32_t fadeFrame = frame - (easeIn + hold);
       out = fade(foundLampColor, buf, fadeOut - 1, fadeFrame);
-    } else if (otaHoldActive_ &&
-               firmwareDistributor.isDistributingTo(otaHoldPeerMac_)) {
-      // Phase 4 (OTA-hold) — past the normal fadeOut window AND we're
-      // mid-OTA to the peer we just greeted. Hold the peer's color so
-      // the brightness pulse modulates on a meaningful hue rather than
-      // snapping back to the underlying expression mid-update. The
-      // distributor's session naturally terminates (success / fail /
-      // pivot) — `isDistributingTo` flips false at that point and we
-      // fall through to the else below, returning the shade to the
-      // underlying buffer.
-      out = foundLampColor;
     } else {
       // Past the explicit window — leave buffer alone (playOnce will stop
-      // us at `frames` regardless). Also clear the OTA-hold flag here so
-      // the next greeting starts with a fresh state regardless of how
-      // this session ended.
-      if (otaHoldActive_) otaHoldActive_ = false;
+      // us at `frames` regardless).
       out = buf;
     }
     fb->buffer[i] = out;
@@ -121,14 +101,14 @@ void SocialBehavior::draw() {
 };
 
 void SocialBehavior::control() {
-  if (animationState != STOPPED) return;
   const uint32_t now = millis();
 
   // -- Gossip OTA tick ---------------------------------------------------
-  // Fires INDEPENDENTLY of the social cooldowns/dispositions below. The
-  // user's intent (locked in the design): "personality controls the
-  // visual greeting, not whether firmware propagates. Version updates
-  // outrank social preference." So this loop runs even when:
+  // Fires INDEPENDENTLY of the social greeting state. The user's intent
+  // (locked in the design): "personality controls the visual greeting,
+  // not whether firmware propagates. Version updates outrank social
+  // preference." So this loop runs even when:
+  //   - The behavior is mid-greeting animation (animationState != STOPPED)
   //   - The greeting cooldown gate (just below) would skip greeting
   //   - The Introvert fatigue window blocks greeting
   //
@@ -146,20 +126,48 @@ void SocialBehavior::control() {
   //
   // Iterates ESP-NOW-reachable peers (not BLE) because firmwareVersion is
   // only populated by ESP-NOW HELLO; BLE-only sightings carry no version.
+  //
+  // Receive-first policy: skip the outbound loop entirely if either
+  //   (a) we're currently RECEIVING an OTA — finish receiving before
+  //       burning Core 1 + airtime on outbound chunks that may be
+  //       obsolete the moment we reboot into the new image, OR
+  //   (b) any reachable peer reports a higher firmware version than
+  //       ours — we're about to be the receiver, so any outbound we
+  //       start now is just chunks we'd have to re-send under the
+  //       new image.
   if (!firmwareDistributor.isInProgress() &&
+      !::firmwareReceiver.isInProgress() &&
       (lastOtaScanMs_ == 0 ||
        static_cast<int32_t>(now - lastOtaScanMs_) >=
            static_cast<int32_t>(kOtaScanIntervalMs))) {
     lastOtaScanMs_ = now;
     std::vector<NearbyLamp> espNowPeers =
         nearbyLamps.getReachableViaEspNow(LAMP_PRUNE_TIME_MS);
+    bool peerHigherSeen = false;
     for (const auto& p : espNowPeers) {
       if (!p.hasMac) continue;
       if (p.firmwareVersion == 0) continue;
-      if (p.firmwareVersion >= lamp::FIRMWARE_VERSION) continue;
-      firmwareDistributor.considerPeerForOta(p.mac, p.firmwareVersion, now);
+      if (p.firmwareVersion > lamp::FIRMWARE_VERSION) {
+        peerHigherSeen = true;
+        break;
+      }
+    }
+    if (!peerHigherSeen) {
+      for (const auto& p : espNowPeers) {
+        if (!p.hasMac) continue;
+        if (p.firmwareVersion == 0) continue;
+        if (p.firmwareVersion >= lamp::FIRMWARE_VERSION) continue;
+        firmwareDistributor.considerPeerForOta(p.mac, p.firmwareVersion,
+                                                p.protocolVersion, now);
+      }
     }
   }
+
+  // Greeting / cooldown logic below only runs when the previous
+  // greeting animation finished. This early-return USED to be at the
+  // top of control() — which silently gated the OTA tick above on the
+  // greeting state, the opposite of the comment's stated intent.
+  if (animationState != STOPPED) return;
 
   // Wraparound-safe time comparison (millis() rolls over at ~49 days).
   // The re-greet check below uses the same idiom for consistency.
@@ -218,21 +226,6 @@ void SocialBehavior::control() {
     pulseBackStrength = tuning.pulseBackStrength;
     pulseBackCount    = tuning.pulseBackCount;
     frames            = tuning.totalFrames;
-
-    // OTA-hold: if we're mid-OTA to the peer we're about to greet, extend
-    // the animation lifetime to give the OTA-hold draw branch room to
-    // run. Distributor session lifetime is ~15-45s for a 1.5 MB image;
-    // kOtaHoldFrameBudget (~60s at 60fps) covers that with slack.
-    if (it->hasMac && firmwareDistributor.isDistributingTo(it->mac)) {
-      otaHoldActive_ = true;
-      std::memcpy(otaHoldPeerMac_, it->mac, 6);
-      frames += kOtaHoldFrameBudget;
-    } else {
-      // Defensive: clear any stale flag from a prior greeting whose OTA
-      // already finished but where the next greeting fired before the
-      // draw-side clear ran (e.g. greeting cooldown is short).
-      otaHoldActive_ = false;
-    }
 
     // Record into our persistent (in-memory) greeting log.
     lastGreetedAtMs_[it->name] = now;

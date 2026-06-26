@@ -5,6 +5,7 @@
 #include "firmware_receiver.hpp"  // FirmwareTransport interface
 #include "firmware_signature.hpp"  // kLsigFooterLen
 #include "../network/ble_control.hpp"  // pauseRadioForOta / resumeRadioAfterOta
+#include "core/ota_quiet_mode.hpp"     // enterQuiet / exitQuiet
 #include "../network/lamp_protocol.hpp"
 #include "../../version.hpp"
 
@@ -464,7 +465,8 @@ int FirmwareDistributor::streamOneChunk(uint32_t nowMs) {
   const size_t framed = lamp_protocol::buildFwChunk(
       buf, sizeof(buf), seq,
       cachedSrcMac_, targetMacLocal,
-      chunkIdx, offset, scratch, static_cast<uint16_t>(want));
+      chunkIdx, offset, scratch, static_cast<uint16_t>(want),
+      targetProtocolVersion_);
   if (!framed) return 1;
 
   // Send OUTSIDE the mux. The transport's sendFrame queues to the ESP-NOW
@@ -511,6 +513,13 @@ int FirmwareDistributor::streamOneChunk(uint32_t nowMs) {
       resumeChunkIdx_   = 0;
       reqEndIdx_        = 0;
       resumedToFwd      = true;
+    }
+    // Track monotonic high water for the indicator. Both the post-send
+    // increment and the jump-forward above can be the new max; the
+    // rewind paths (REQ + stall recovery) intentionally don't touch
+    // this — the indicator should show forward progress only.
+    if (nextChunkIdx_ > sentChunkHighWater_) {
+      sentChunkHighWater_ = nextChunkIdx_;
     }
     if (lastBurstSentChunks_ >= kStreamProgressLogEvery) {
       emittedCount = nextChunkIdx_;
@@ -559,6 +568,26 @@ void FirmwareDistributor::tick(uint32_t nowMs) {
   switch (s) {
     case State::Idle: {
       // No scan — Idle is entirely event-driven (considerPeerForOta).
+      // But: if we entered Idle from a recent Done/Failed and still hold
+      // OTA quiet mode (inter-session hold so the indicator stays solid
+      // through the gap to the next OTA in the wave), expire the hold
+      // when nothing new has armed us within kInterSessionQuietHoldMs.
+      //
+      // quietHoldUntilMs_ == 0 is the "no exit pending" sentinel set
+      // at session start in emitOffer. We MUST guard the comparison
+      // here — without the != 0 check, nowMs >= 0 is always true, and
+      // any tick that observes Idle while a session is active (e.g.
+      // a transient Done→Idle race or a streaming-task wake mid-tick)
+      // would call exitQuiet prematurely. The compositor on the next
+      // tick would then run the normal pipeline → IdleBehavior writes
+      // defaultColors over the indicator → strip flickers between
+      // progress and full base color (observed 2026-06-25).
+      if (quietHeld_ && quietHoldUntilMs_ != 0 && nowMs >= quietHoldUntilMs_) {
+        ::lamp::ota_quiet_mode::exitQuiet();
+        quietHeld_         = false;
+        quietHoldUntilMs_  = 0;
+        lastSessionValid_  = false;
+      }
       break;
     }
 
@@ -668,6 +697,15 @@ void FirmwareDistributor::tick(uint32_t nowMs) {
     case State::Done:
       // Tombstone: return to Idle on the next tick. No scan/timing reset
       // bookkeeping is needed since Idle is event-driven now.
+      //
+      // Capture last-session identity BEFORE resetSession() blanks the
+      // targetMac/totalChunks fields. ota_indicator reads this through
+      // getLastSession() so the strip keeps painting a held "completed
+      // bar" for this peer during the inter-session quiet hold rather
+      // than flashing back to normal animation between OTAs in a wave.
+      std::memcpy(lastSessionPeerMac_, targetMac_, 6);
+      lastSessionTotalChunks_ = totalChunks_;
+      lastSessionValid_       = true;
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
       portENTER_CRITICAL(&stateMux_);
       resetSession();
@@ -679,10 +717,13 @@ void FirmwareDistributor::tick(uint32_t nowMs) {
       state_ = State::Idle;
       stateEnteredMs_ = nowMs;
 #endif
-      // Single unified resume point: every Failed/Done session arrives
-      // here on the next tick. Paired with the pause() in emitOffer().
-      // No-op if pause() was never called this session.
-      ::ble_control::resumeRadioAfterOta();
+      // Defer exitQuiet — keep the strip showing the OTA indicator
+      // through the gap to the next session. The Idle case expires the
+      // hold if no new session arms us within kInterSessionQuietHoldMs.
+      // If a new emitOffer fires inside the window, it inherits the
+      // already-held quiet (no enterQuiet call needed) and clears the
+      // pending exit, so OTAs in a wave look continuous on the strip.
+      quietHoldUntilMs_ = nowMs + kInterSessionQuietHoldMs;
       break;
 
     case State::Disabled:
@@ -696,6 +737,7 @@ void FirmwareDistributor::tick(uint32_t nowMs) {
 
 void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
                                              uint32_t peerVersion,
+                                             uint8_t peerProtocolVersion,
                                              uint32_t nowMs) {
   if (state_ != State::Idle) {
     FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X v=0x%08X skip: "
@@ -706,6 +748,20 @@ void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
     return;
   }
   if (!transport_) return;
+  // Peer protocol version is zero until we've heard a HELLO from them
+  // — skip the consider entirely so we never emit OFFERs at an unknown
+  // version. Once we hear a HELLO this gate opens.
+  if (peerProtocolVersion < lamp_protocol::PROTOCOL_VERSION_RX_MIN ||
+      peerProtocolVersion > lamp_protocol::PROTOCOL_VERSION_RX_MAX) {
+    FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X v=0x%08X skip: "
+                "peer protocol=0x%02X outside [0x%02X, 0x%02X]\n",
+                peerMac[0], peerMac[1], peerMac[2],
+                peerMac[3], peerMac[4], peerMac[5],
+                (unsigned)peerVersion, (unsigned)peerProtocolVersion,
+                (unsigned)lamp_protocol::PROTOCOL_VERSION_RX_MIN,
+                (unsigned)lamp_protocol::PROTOCOL_VERSION_RX_MAX);
+    return;
+  }
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   if (!runningPartition_ || !shaPrefixReady_) {
     FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X v=0x%08X skip: "
@@ -736,6 +792,7 @@ void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
   // result in no ACCEPT, the OFFER times out, and the peer lands in our
   // 10-minute backoff ring — which is the right outcome (we won't badger
   // a cross-channel neighbour).
+  targetProtocolVersion_ = peerProtocolVersion;
   emitOffer(peerMac, peerVersion, nowMs);
 }
 
@@ -745,8 +802,10 @@ void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
 
 void FirmwareDistributor::resetSession() {
   std::memset(targetMac_, 0, 6);
+  targetProtocolVersion_ = 0;
   totalChunks_     = 0;
   nextChunkIdx_    = 0;
+  sentChunkHighWater_ = 0;
   lastSentChunk_   = 0;
   lastSentMs_      = 0;
   currentChunkRetries_ = 0;
@@ -759,6 +818,17 @@ void FirmwareDistributor::resetSession() {
   reqCountThisSession_ = 0;
   resumeChunkIdx_  = 0;
   reqEndIdx_       = 0;
+}
+
+bool FirmwareDistributor::getLastSession(uint8_t outMac[6],
+                                        uint16_t& outTotalChunks) const {
+  // ota_indicator probes this during the inter-session quiet hold so
+  // the strip can render a held "we just finished" full bar instead
+  // of falling back to the dim-background no-session branch.
+  if (!lastSessionValid_) return false;
+  std::memcpy(outMac, lastSessionPeerMac_, 6);
+  outTotalChunks = lastSessionTotalChunks_;
+  return true;
 }
 
 bool FirmwareDistributor::peerIsInBackoff(const uint8_t mac[6],
@@ -854,14 +924,21 @@ void FirmwareDistributor::emitOffer(const uint8_t targetMac[6],
   portEXIT_CRITICAL(&stateMux_);
 #endif
 
-  // Pause BLE adv + scan for the duration of the OTA session. The shared
-  // 2.4 GHz radio's SW coex round-robins BLE-busy windows against
-  // ESP-NOW transmits/receives; under sustained back-pressure those
-  // windows align with our ACCEPT/REQ broadcasts and lose 100% of them
-  // (hardware-observed 2026-06-24: 27/27 ACCEPTs dropped across 9 OFFER
-  // retries with BLE adv+scan active on the sender). Resumed on every
-  // session-end path (Idle/Failed transitions).
-  ::ble_control::pauseRadioForOta();
+  // Enter OTA quiet mode for the duration of the session. Distributor
+  // side is always EspNow (no BLE-initiated outbound OTA) so we
+  // unconditionally tear down the GATT connection + pause adv/scan +
+  // suspend behaviors. Exited on the unified Idle/Failed tombstone
+  // below, with an inter-session hold so OTA waves don't flicker the
+  // strip between sessions. quietHeld_ tracks our share of the
+  // refcount: if the prior session's exit was deferred, just inherit
+  // the hold and clear the pending expiry — we never went un-quiet,
+  // so we don't bump the count again.
+  if (!quietHeld_) {
+    ::lamp::ota_quiet_mode::enterQuiet(/*tearDownRadio=*/true);
+    quietHeld_ = true;
+  }
+  quietHoldUntilMs_ = 0;
+  lastSessionValid_ = false;  // new session takes over the indicator
 
   if (!sendOfferFrame(targetMac, nowMs, /*isRetry=*/false)) {
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
@@ -873,7 +950,13 @@ void FirmwareDistributor::emitOffer(const uint8_t targetMac[6],
     resetSession();
     state_ = State::Idle;
 #endif
-    ::ble_control::resumeRadioAfterOta();
+    // OFFER frame send failed — we never got the session off the
+    // ground, so don't bother holding quiet for the next attempt
+    // (probably a transport problem, not a peer-cadence one). Drop
+    // straight back to normal animations.
+    ::lamp::ota_quiet_mode::exitQuiet();
+    quietHeld_ = false;
+    quietHoldUntilMs_ = 0;
     return;
   }
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
@@ -911,7 +994,8 @@ bool FirmwareDistributor::sendOfferFrame(const uint8_t targetMac[6],
       cachedSrcMac_, targetMac,
       sessionVersionLocal, sessionTotalLenLocal, lamp_protocol::FW_CHUNK_SIZE,
       channel, channelLen,
-      sha, kFwFooterLenV1, totalChunksLocal);
+      sha, kFwFooterLenV1, totalChunksLocal,
+      targetProtocolVersion_);
   if (!n) {
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
     FWDIST_LOGLN("[fwdist] buildFwOffer failed (defensive)");
@@ -978,7 +1062,7 @@ void FirmwareDistributor::emitDone(uint32_t nowMs) {
       buf, sizeof(buf), seq,
       cachedSrcMac_, targetMacLocal,
       sessionVersionLocal, sessionTotalLenLocal,
-      sha, kFwFooterLenV1);
+      sha, kFwFooterLenV1, targetProtocolVersion_);
   if (!n) return;
 
   // First attempt + up to kMaxDoneRetries follow-ups. Bail early if the

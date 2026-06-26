@@ -61,13 +61,6 @@ class SocialBehavior : public AnimatedBehavior {
   // No setter = behaves as Ambivert (the spec's pre-personality default).
   void setConfig(Config* config) { config_ = config; }
 
-  // OTA-hold extends the greeting animation lifetime so the shade stays
-  // on the peer's base color while the distributor is mid-flow sending
-  // to that peer. ~60s ceiling — a 1.5 MB image at 50 chunks/s lands in
-  // ~30s, so 60s gives generous slack for retries without painting a
-  // stale color forever. AnimatedBehavior frame budget at ~60fps.
-  static constexpr uint32_t kOtaHoldFrameBudget = 60 * 60;
-
   // Throttle the gossip-OTA peer scan to this cadence. Lamps emit HELLO
   // every 1-2s, so 500 ms catches every fresh sighting while saving the
   // ~60 Hz vector allocation that control() would otherwise do per
@@ -99,15 +92,6 @@ class SocialBehavior : public AnimatedBehavior {
   std::map<std::string, uint32_t> lastGreetedAtMs_;
   std::vector<uint32_t> recentGreetMs_;
   uint32_t tiredUntilMs_ = 0;
-
-  // OTA-hold: when we greet a peer AND the distributor is mid-flow to
-  // that same peer, we extend the greeting's color hold past the normal
-  // fadeOut window so the OTA pulse modulates on the peer's color rather
-  // than snapping back to the lamp's own shade. Cleared when the
-  // distributor stops targeting otaHoldPeerMac_ (success, fail, or
-  // pivoted to another peer).
-  bool    otaHoldActive_       = false;
-  uint8_t otaHoldPeerMac_[6]   = {0};
 
   // Last time the OTA peer-scan block in control() actually walked the
   // ESP-NOW roster. Throttled by kOtaScanIntervalMs to amortize the

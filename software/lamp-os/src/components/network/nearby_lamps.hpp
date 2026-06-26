@@ -71,6 +71,17 @@ struct NearbyLamp {
   // Only set via the ESP-NOW path; BLE adv doesn't carry it. Zero until
   // we've heard at least one HELLO from this peer.
   uint32_t firmwareVersion = 0;
+  // OTA state from HELLO_TLV_OTA_STATE. 0/1/2 = idle/sending/receiving.
+  // Only set via the ESP-NOW path (peers' BLE adv doesn't carry it).
+  // Defaults to idle, matches the protocol's "no TLV present = idle"
+  // semantics.
+  uint8_t otaState = 0;
+  // Protocol version byte from the HELLO frame header (`data[2]`). Used
+  // by the OTA distributor to build OFFER/CHUNK/DONE at the peer's
+  // version — see lamp_protocol's PROTOCOL_VERSION_EMIT doc block.
+  // Zero until we've heard a HELLO; that just means "don't OTA them
+  // yet, we don't know which protocol version they understand."
+  uint8_t protocolVersion = 0;
   // Most recent BLE-scan RSSI (dBm) reported by the NimBLE callback for
   // any adv from this peer. `getReachableViaBle()` returns its result
   // sorted by lastRssi descending so consumers (PersonalityEngine's
@@ -143,7 +154,9 @@ class NearbyLamps {
   void addOrUpdateFromEspNow(const std::string& name, const uint8_t mac[6],
                              const Color& base, const Color& shade,
                              uint32_t firmwareVersion = 0,
-                             int8_t rssi = -127);
+                             int8_t rssi = -127,
+                             uint8_t otaState = 0,
+                             uint8_t protocolVersion = 0);
 
   // Drop entries whose most-recent sighting (max of the two transports)
   // is older than `maxAgeMs`.
@@ -164,6 +177,13 @@ class NearbyLamps {
   // [out] untouched. Snapshot-style copy under the same mutex pattern as
   // getAll(); the caller owns the copy.
   bool findByBdAddr(const std::string& bdAddr, NearbyLamp& out);
+
+  // Look up a peer by ESP-NOW MAC. Returns true and fills [out] on hit;
+  // false on miss with [out] untouched. Only matches entries whose
+  // hasMac is true — BLE-only entries (HELLO never received) are
+  // invisible here by design. Used by the OTA visual indicator to fetch
+  // the active OTA peer's base color for the progress overlay.
+  bool findByMac(const uint8_t mac[6], NearbyLamp& out);
 
   // Mark a lamp as acknowledged. SocialBehavior calls this once per peer
   // so a re-trigger doesn't re-greet the same lamp until it prunes.

@@ -33,6 +33,7 @@
 #include "components/network/show_receiver.hpp"
 #include "components/network/wifi.hpp"
 #include "config/config.hpp"
+#include "core/ota_quiet_mode.hpp"
 #include "core/override_aggregate.hpp"
 #include "core/pending_slot_aggregate.hpp"
 
@@ -457,6 +458,19 @@ void Lamp::drainOverrideColors() {
                     (unsigned)cmd.surface, (unsigned)cmd.numColors,
                     (unsigned)cmd.fadeDurationMs);
 #endif
+      // OTA quiet mode wins: drop the override on the floor (drain
+      // consumed the slot above so it doesn't pile up). The compositor
+      // is exclusively painting the OTA indicator while quiet, so
+      // applying a wisp/app paint here just queues a fade that we
+      // can't render and would compete with the indicator the moment
+      // quiet exits. Slot was a single-mailbox newest-wins anyway, so
+      // dropping one frame of paint is the existing semantic.
+      if (lamp::ota_quiet_mode::isQuiet()) {
+#ifdef LAMP_DEBUG
+        Serial.printf("[loop] drop overrideColors (ota quiet)\n");
+#endif
+        return;
+      }
       // Pin the wisp identity BEFORE the apply() calls. apply() can
       // edge-trigger the wisp-active transition callback, which calls
       // notifyWispStatus → reads getWispStatusReadJson. If the cache is

@@ -166,8 +166,13 @@ class FirmwareDistributor {
   // The wiring layer is responsible for additional gates (e.g. mesh
   // quiesce — don't start an OTA mid-cascade — and the receiver-busy
   // check — don't distribute while we're receiving).
+  // peerProtocolVersion is the byte from data[2] of the peer's HELLO
+  // (recorded in NearbyLamp::protocolVersion). The distributor uses it
+  // for every outbound OTA frame in this session so old-protocol peers
+  // can process our OFFER/CHUNK/DONE at their version. Zero means
+  // "unknown" — we skip the peer (we haven't heard a HELLO yet).
   void considerPeerForOta(const uint8_t peerMac[6], uint32_t peerVersion,
-                          uint32_t nowMs);
+                          uint8_t peerProtocolVersion, uint32_t nowMs);
 
   // Inbound packet hooks — show_receiver dispatches MSG_FW_ACCEPT/REQ/
   // RESULT from its WiFi recv task. Idempotent on irrelevant packets
@@ -194,6 +199,37 @@ class FirmwareDistributor {
   bool isDistributingTo(const uint8_t mac[6]) const;
 
   State state() const { return state_; }
+
+  // Snapshot the active OTA target's MAC into out[6]. Returns true when
+  // a session is mid-flow (OfferSent / Streaming / Finalizing). Used by
+  // the OTA quiet-mode visual indicator to look up the receiver's base
+  // color from NearbyLamps for the progress overlay.
+  bool getPeerMac(uint8_t out[6]) const {
+    if (!isInProgress()) return false;
+    for (int i = 0; i < 6; i++) out[i] = targetMac_[i];
+    return true;
+  }
+
+  // Chunks the streaming task has advanced past for the current session.
+  // Read by the OTA visual indicator. Returns the HIGH-WATER MARK of
+  // nextChunkIdx_, not nextChunkIdx_ itself — when the receiver REQs
+  // a hole in its bitmap (very common near the end of a session),
+  // the smart-REQ path rewinds nextChunkIdx_ back to the requested
+  // chunk to re-stream it. Using nextChunkIdx_ directly caused the
+  // indicator's bar to flash from near-100% down to near-0% every
+  // REQ rewind (observed 2026-06-25 — "bar pixels flickering to dim").
+  // The high water mark tracks our forward progress monotonically so
+  // the indicator shows the user the actual delivered position without
+  // visual stutter from the REQ-rewind mechanic underneath.
+  uint32_t sentChunksCount() const {
+    return nextChunkIdx_ > sentChunkHighWater_ ? nextChunkIdx_
+                                              : sentChunkHighWater_;
+  }
+
+  // Total chunks for the running image, computed once at begin() from
+  // the discovered image length. Stable for the distributor's lifetime
+  // (the running partition doesn't change). Zero until begin() runs.
+  uint16_t totalChunks() const { return firmwareTotalChunks_; }
 
   // --- Tunables (constexpr; tests static_assert against these). ---
   // Streaming task cadence. Push one chunk, then vTaskDelay between
@@ -355,8 +391,19 @@ class FirmwareDistributor {
 
   // --- Active session ---
   uint8_t  targetMac_[6]          = {0};
+  // Wire-format version we emit for THIS target. Captured from the
+  // peer's HELLO (see NearbyLamp::protocolVersion) at considerPeerForOta
+  // time, then used for every outbound OFFER/CHUNK/DONE in this
+  // session. Reset to 0 in resetSession().
+  uint8_t  targetProtocolVersion_ = 0;
   uint16_t totalChunks_           = 0;
   uint16_t nextChunkIdx_           = 0;
+  // Monotonic max of nextChunkIdx_ for the current session. Read by
+  // sentChunksCount() so the OTA indicator's bar never visually
+  // regresses when nextChunkIdx_ rewinds to serve a smart-REQ. Reset
+  // to 0 in resetSession(); updated wherever nextChunkIdx_ moves
+  // forward (streaming task post-send + REQ-served jump-forward).
+  uint16_t sentChunkHighWater_     = 0;
   uint16_t lastSentChunk_          = 0;
   uint32_t lastSentMs_             = 0;
   uint8_t  currentChunkRetries_    = 0;
@@ -409,6 +456,33 @@ class FirmwareDistributor {
   // --- Backoff bookkeeping ---
   PeerPenalty penalties_[kPenaltyRingSize] = {};
   size_t      penaltyHead_                 = 0;
+
+  // --- Inter-session quiet hold ---
+  // The distributor handles one peer at a time but during a fleet OTA
+  // wave there are usually several below-version peers queued. Without
+  // this latch, each session pair (enterQuiet on emitOffer, exitQuiet
+  // on Done) leaves a window where the compositor runs the normal
+  // behavior pipeline and the strip momentarily shows fade/wisp paint
+  // between progress indicators — observed as a flicker on the
+  // distributor lamp. Hold quiet through the gap: keep the refcount up
+  // until kInterSessionQuietHoldMs of true idle has passed with no new
+  // session, and remember the last completed peer so the indicator can
+  // paint a held "we just finished sending to X" full bar through the
+  // gap rather than a flicker of normal animation.
+  static constexpr uint32_t kInterSessionQuietHoldMs = 10000;
+  bool     quietHeld_                   = false;
+  uint32_t quietHoldUntilMs_            = 0;
+  // Last completed session's identity — used by ota_indicator to keep
+  // painting the FROM-us TO-them bar at 100% during the held gap.
+  uint8_t  lastSessionPeerMac_[6]       = {0};
+  uint16_t lastSessionTotalChunks_      = 0;
+  bool     lastSessionValid_            = false;
+
+ public:
+  // For ota_indicator's inter-session hold render. Returns true and
+  // fills mac+total if a recent session ended within the quiet-hold
+  // window. False once the hold expires or we never sent.
+  bool getLastSession(uint8_t outMac[6], uint16_t& outTotalChunks) const;
 };
 
 // Single global instance, defined in lamp.cpp. SocialBehavior +

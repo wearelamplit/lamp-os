@@ -129,7 +129,13 @@ void ShowReceiver::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
         Color(h.base[0],  h.base[1],  h.base[2],  h.base[3]),
         Color(h.shade[0], h.shade[1], h.shade[2], h.shade[3]),
         h.firmwareVersion,
-        rssi);
+        rssi,
+        h.otaState,
+        // Protocol version byte from the frame header — used by the
+        // distributor to build OTA OFFER/CHUNK/DONE at the peer's
+        // version. parseHello already validated data[2] is in our
+        // accepted range (via inspect()).
+        data[2]);
     link_.broadcast(data, len);
   } else if (msgType == lamp_protocol::MSG_CONTROL_OP) {
     lamp_protocol::ParsedControlOp op;
@@ -409,6 +415,7 @@ void ShowReceiver::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     PendingFirmwareControl slot{};
     slot.msgType = lamp_protocol::MSG_FW_OFFER;
     slot.seq = p.seq;
+    slot.wireVersion = data[2];
     std::memcpy(slot.sourceMac, p.sourceMac, 6);
     std::memcpy(slot.targetMac, p.targetMac, 6);
     slot.offer.version       = p.version;
@@ -444,6 +451,7 @@ void ShowReceiver::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     PendingFirmwareControl slot{};
     slot.msgType = lamp_protocol::MSG_FW_DONE;
     slot.seq = p.seq;
+    slot.wireVersion = data[2];
     std::memcpy(slot.sourceMac, p.sourceMac, 6);
     std::memcpy(slot.targetMac, p.targetMac, 6);
     slot.done.version  = p.version;
@@ -513,10 +521,22 @@ void ShowReceiver::emitHello() {
                            ? lamp_protocol::HELLO_MAX_NAME
                            : name.size();
 
+  // OTA state for HELLO_TLV_OTA_STATE. Receiver wins if both somehow
+  // report true — matches the precedence the old shade-pulse code used
+  // pre-removal. Default kOtaStateIdle when neither side is in a flow
+  // (which is the common case for most lamps most of the time, and
+  // buildHello omits the TLV entirely in that case).
+  uint8_t otaState = lamp_protocol::kOtaStateIdle;
+  if (firmwareReceiver_ && firmwareReceiver_->isInProgress()) {
+    otaState = lamp_protocol::kOtaStateReceiving;
+  } else if (firmwareDistributor_ && firmwareDistributor_->isInProgress()) {
+    otaState = lamp_protocol::kOtaStateSending;
+  }
+
   uint8_t buf[lamp_protocol::HELLO_MAX_SIZE];
   size_t n = lamp_protocol::buildHello(buf, sizeof(buf), helloSeq_++, myMac_,
                                        shade, base, FIRMWARE_VERSION,
-                                       name.data(), nameLen);
+                                       name.data(), nameLen, otaState);
   if (n) {
     link_.broadcast(buf, n);
   }

@@ -28,13 +28,130 @@ namespace lamp_protocol {
 
 constexpr uint8_t MAGIC_0 = 'L';
 constexpr uint8_t MAGIC_1 = 'M';
-// v0x04 widens FW_CHANNEL_LEN 8→16 (and WISP_HELLO_FW_CHANNEL_LEN with it)
-// so the channel slot can carry `{lampType}-{channel}` and the existing
-// silent-drop on channel-mismatch enforces per-variant OTA gating. MSG_FW_OFFER
-// grows 48→56 and MSG_WISP_HELLO grows 37→45. inspect() rejects mismatched
-// versions before any field reads, so v0x03 peers drop v0x04 frames cleanly
-// (no buffer underflow against the wider parse).
-constexpr uint8_t PROTOCOL_VERSION = 0x04;
+
+// =============================================================================
+// Protocol versioning
+// =============================================================================
+//
+// The version byte at `data[2]` of every frame discriminates wire
+// formats. inspect() gates incoming frames against this byte before any
+// field read so an older parser running against a newer-format frame
+// can't underflow.
+//
+// Two constants intentionally — not one. Splitting "what we emit" from
+// "what we accept on receive" is what makes cross-version rollouts
+// possible at all. With a single PROTOCOL_VERSION constant a fleet
+// migration becomes impossible: old lamps drop the new version, new
+// lamps drop the old version, and there's no path from any one to any
+// other except a manual USB re-flash of every device.
+//
+//   PROTOCOL_VERSION_EMIT   — what we put on the wire (broadcast HELLO,
+//                             default outbound frames). Held at the
+//                             OLDEST supported version so older fleet
+//                             members can still see us. New features
+//                             landed via TLV trailers ride along
+//                             regardless.
+//
+//   PROTOCOL_VERSION_RX_MAX — newest version we know how to parse.
+//                             inspect() accepts data[2] in
+//                             [EMIT, RX_MAX] inclusive. We can grow our
+//                             receive range ahead of our emit range so
+//                             new-version peers see us responsive
+//                             before we start emitting the new version
+//                             ourselves.
+//
+// -----------------------------------------------------------------------------
+// Upgrade workflow
+// -----------------------------------------------------------------------------
+//
+// Bumps come in two shapes — TLV-additive (most of them, by design) and
+// genuine layout-breaking. Treat them differently:
+//
+// (a) TLV-additive bump — adding a new field that fits inside an
+//     existing HELLO/WISP_HELLO TLV trailer:
+//       - Bump PROTOCOL_VERSION_RX_MAX to the new value.
+//       - That's it. Old parsers ignore unknown TLV types by length;
+//         new parsers handle the new type. No new code paths needed.
+//
+// (b) Layout-breaking bump — a fixed-offset field changes width,
+//     position, or meaning in any of these messages: MSG_FW_OFFER,
+//     MSG_FW_CHUNK, MSG_FW_DONE, MSG_FW_ACCEPT, MSG_FW_REQ,
+//     MSG_FW_RESULT, MSG_HELLO (fixed part), MSG_WISP_HELLO (fixed
+//     part). Steps:
+//       1. Bump PROTOCOL_VERSION_RX_MAX. Don't yet touch EMIT.
+//       2. Add a `legacy_v0xNN::` namespace next to lamp_protocol's
+//          top-level builders/parsers (NN = the OLD version we're
+//          leaving behind). Move the existing implementation of the
+//          7 OTA-related functions into it (see below). The new
+//          version's implementation becomes the top-level one.
+//       3. Modify the top-level builders for the 7 OTA messages to
+//          take an explicit `version` argument; default it to
+//          PROTOCOL_VERSION_EMIT. The distributor passes the target
+//          peer's version when known (learned from their HELLO).
+//       4. Ship the transitional release. Fleet receives + propagates
+//          OTAs. Old peers stay reachable because OFFER/CHUNK/DONE
+//          are routed through `legacy_v0xNN::` for them.
+//       5. After the fleet is fully migrated, the NEXT release bumps
+//          PROTOCOL_VERSION_EMIT and deletes the `legacy_v0xNN::`
+//          namespace.
+//
+// -----------------------------------------------------------------------------
+// Legacy OTA support — required surface
+// -----------------------------------------------------------------------------
+//
+// A `legacy_v0xNN::` namespace only needs the messages required to OTA
+// an older-version peer. Everything else can be skipped — once the OTA
+// completes the peer reboots into the new firmware and speaks the new
+// protocol natively. The required surface, in both directions:
+//
+//   parse legacy_v0xNN::parseHello       (incoming, learn peer + version)
+//   parse legacy_v0xNN::parseFwAccept    (incoming, OTA handshake)
+//   parse legacy_v0xNN::parseFwReq       (incoming, chunk retransmit)
+//   parse legacy_v0xNN::parseFwResult    (incoming, OTA outcome)
+//   build legacy_v0xNN::buildFwOffer     (outgoing, initiate OTA)
+//   build legacy_v0xNN::buildFwChunk     (outgoing, send bytes)
+//   build legacy_v0xNN::buildFwDone      (outgoing, signal end of stream)
+//
+// What the legacy namespace does NOT need:
+//   - Override colors / paint distribution / cascade gossip relays
+//   - Wisp claims / wisp paint / wisp HELLO
+//   - Event messages / dedup ring entries
+//   - Any non-OTA message type
+//
+// All of those just don't get sent to the legacy peer in their old
+// format. The old peer never sees them. After the OTA they land at the
+// new version and the new code paths handle everything natively.
+//
+// -----------------------------------------------------------------------------
+// Current state
+// -----------------------------------------------------------------------------
+//
+// EMIT=0x04, RX_MAX=0x05. v0x04 is the broadly-deployed fleet version;
+// v0x05 added a TLV trailer to HELLO/WISP_HELLO. Because that addition
+// is forward-compatible (old parsers stop at the name field), v0x04
+// and v0x05 wire formats are byte-identical for every other message
+// type. No `legacy_v0x04::` namespace exists yet — we can emit at
+// 0x04 and v0x05 peers' inspect would accept it iff their inspect range
+// extends down to 0x04 (which this build does; pre-existing v0x05-only
+// lamps may not).
+
+// What we emit by default on broadcast frames (HELLO etc).
+constexpr uint8_t PROTOCOL_VERSION_EMIT   = 0x05;
+
+// inspect() accepts frames in [RX_MIN, RX_MAX]. RX_MIN is the oldest
+// version we still know how to parse on receive. Set BELOW EMIT to
+// keep seeing old-fleet HELLOs — that lets us populate
+// NearbyLamp.protocolVersion for those peers, which then drives
+// per-peer OTA-OFFER routing at THEIR version. When a future release
+// drops legacy receive support, raise RX_MIN to current EMIT.
+constexpr uint8_t PROTOCOL_VERSION_RX_MIN = 0x04;
+constexpr uint8_t PROTOCOL_VERSION_RX_MAX = 0x05;
+
+// Back-compat alias for code paths that still reference a single
+// "PROTOCOL_VERSION". The intent is for callers to migrate to EMIT
+// (when building) or check the range (when validating); this alias
+// keeps the obvious thing working during the migration.
+constexpr uint8_t PROTOCOL_VERSION = PROTOCOL_VERSION_EMIT;
 
 enum MsgType : uint8_t {
   MSG_HELLO               = 0x01,
@@ -134,7 +251,30 @@ constexpr size_t HEADER_SIZE = 6;
 // is verbatim-mirrored.
 constexpr size_t HELLO_FIXED_SIZE = 24;
 constexpr size_t HELLO_MAX_NAME = 32;
-constexpr size_t HELLO_MAX_SIZE = HELLO_FIXED_SIZE + 1 + HELLO_MAX_NAME;  // +1 for name length byte
+// HELLO TLV trailer (v0x05+). After the variable name field, the frame
+// carries:
+//   [tlv_count 1 byte] [type 1][len 1][value len bytes] x tlv_count
+// Each TLV's len byte limits its value to 255 bytes. Parsers skip
+// unknown types by advancing 2 + len, so future TLV types can land
+// without bumping PROTOCOL_VERSION.
+//
+// HELLO_MAX_SIZE jumped 57 → 128 to give the trailer room for ~7 TLVs
+// of average size 10 bytes (1 byte type + 1 byte len + ~8 byte value),
+// plus the existing fixed + name fields. ESP-NOW MTU is 250, so we
+// still have ~120 bytes of headroom over the new ceiling.
+constexpr uint8_t HELLO_TLV_OTA_STATE = 0x01;  // value: 1 byte, 0=idle 1=sending 2=receiving
+
+// Compact OTA-state enum carried in HELLO_TLV_OTA_STATE. Maps to:
+//   firmwareDistributor.isInProgress() → kOtaStateSending
+//   firmwareReceiver.isInProgress()    → kOtaStateReceiving
+//   neither                            → kOtaStateIdle
+// Receiver wins when both somehow report true (matches the local
+// otaPulse precedence used by SocialBehavior pre-pulse-removal).
+constexpr uint8_t kOtaStateIdle      = 0;
+constexpr uint8_t kOtaStateSending   = 1;
+constexpr uint8_t kOtaStateReceiving = 2;
+
+constexpr size_t HELLO_MAX_SIZE = 128;  // see TLV trailer note above
 
 // MSG_CONTROL_OP frame: header(6) + targetMac(6) + sourceMac(6) + payloadLen(2) + payload(N).
 // ESP-NOW max frame is 250 bytes; subtract the 20-byte fixed prefix.
@@ -154,6 +294,19 @@ constexpr size_t WISP_HELLO_FIXED_SIZE            = HEADER_SIZE + 6 + 4 + 1 +
 constexpr uint8_t WISP_HELLO_FLAG_PAINT_MODE        = 0x01;
 constexpr uint8_t WISP_HELLO_FLAG_WIFI_CONNECTED    = 0x02;
 constexpr uint8_t WISP_HELLO_FLAG_AURORA_CONNECTED  = 0x04;
+// WISP_HELLO TLV trailer (v0x05+). Same shape as HELLO's:
+//   [tlv_count 1] [type 1][len 1][value len] x tlv_count
+// Bumped 45 → 96 to leave room for ~6-7 future TLVs without ever
+// needing another PROTOCOL_VERSION bump. The wisp doesn't currently
+// emit any TLVs (it always sends tlv_count=0), but the parser tolerates
+// + skips unknowns identically to HELLO, so future additions land
+// cleanly on both sides.
+constexpr size_t WISP_HELLO_MAX_SIZE              = 96;
+// TLV-type registry for WISP_HELLO. Currently empty; reserved 0x01-0x1F
+// for future use. Shares its 1-byte type-space namespace with HELLO,
+// which is why HELLO_TLV_OTA_STATE (also 0x01) is fine here — these
+// types appear in separate frames and HELLO_TLV_OTA_STATE doesn't
+// make sense for a wisp.
 
 // MSG_WISP_CLAIM: header(6) + sourceMac(6) + count(1) + entries[count*7].
 // Each entry: lampMac(6) + signed int8 rssi(1) = 7 bytes.
@@ -253,6 +406,10 @@ struct ParsedHello {
   uint32_t firmwareVersion;
   uint8_t nameLen;
   char name[HELLO_MAX_NAME + 1];  // null-terminated copy
+  // TLV-derived fields. Defaults apply when the corresponding TLV is
+  // absent from the frame, so a sender that doesn't yet emit a given
+  // TLV looks indistinguishable from "default value" to the receiver.
+  uint8_t otaState = kOtaStateIdle;  // HELLO_TLV_OTA_STATE
 };
 
 struct ParsedControlOp {
@@ -371,10 +528,15 @@ inline bool isValidOverrideSourceByte(uint8_t b) {
 }
 
 // Write the 6-byte header (magic + version + msgType + seq LE) to `buf`.
-inline void writeHeader(uint8_t* buf, uint8_t msgType, uint16_t seq) {
+// `wireVersion` defaults to PROTOCOL_VERSION_EMIT; OTA-specific builders
+// (FW_OFFER/CHUNK/DONE/ACCEPT/REQ/RESULT) pass an explicit version to
+// emit at the peer's protocol version — see the doc block above
+// PROTOCOL_VERSION_EMIT for the per-peer-version OTA model.
+inline void writeHeader(uint8_t* buf, uint8_t msgType, uint16_t seq,
+                        uint8_t wireVersion = PROTOCOL_VERSION_EMIT) {
   buf[0] = MAGIC_0;
   buf[1] = MAGIC_1;
-  buf[2] = PROTOCOL_VERSION;
+  buf[2] = wireVersion;
   buf[3] = msgType;
   buf[4] = static_cast<uint8_t>(seq & 0xFF);
   buf[5] = static_cast<uint8_t>((seq >> 8) & 0xFF);
@@ -384,15 +546,23 @@ inline void writeHeader(uint8_t* buf, uint8_t msgType, uint16_t seq) {
 
 // Build a HELLO frame into `buf`. `name` is utf-8, NOT null-terminated on the wire.
 // `nameLen` clamped to HELLO_MAX_NAME. `firmwareVersion` is the sender's packed
-// semver (see version.hpp). Returns 0 on bad args, total bytes written on success.
+// semver (see version.hpp). `otaState` lands in HELLO_TLV_OTA_STATE — pass
+// kOtaStateIdle to omit the TLV entirely (more compact for the common case).
+// Returns 0 on bad args, total bytes written on success.
 inline size_t buildHello(uint8_t* buf, size_t bufLen, uint16_t seq,
                          const uint8_t sourceMac[6],
                          const uint8_t shadeRGBW[4], const uint8_t baseRGBW[4],
                          uint32_t firmwareVersion,
-                         const char* name, size_t nameLen) {
+                         const char* name, size_t nameLen,
+                         uint8_t otaState = kOtaStateIdle) {
   if (!buf || !sourceMac || !shadeRGBW || !baseRGBW) return 0;
   if (nameLen > HELLO_MAX_NAME) nameLen = HELLO_MAX_NAME;
-  const size_t total = HELLO_FIXED_SIZE + 1 + nameLen;  // +1 for nameLen byte
+  // TLV trailer: tlv_count(1) + (type(1) + len(1) + value(1)) per non-default TLV.
+  // Currently the only TLV is OTA_STATE (3 wire bytes including type+len), and
+  // we only emit it when non-Idle to keep the common case minimum-sized.
+  const bool emitOtaState = (otaState != kOtaStateIdle);
+  const size_t tlvBytes = 1 + (emitOtaState ? 3 : 0);
+  const size_t total = HELLO_FIXED_SIZE + 1 + nameLen + tlvBytes;
   if (bufLen < total) return 0;
   buf[0] = MAGIC_0;
   buf[1] = MAGIC_1;
@@ -411,6 +581,14 @@ inline size_t buildHello(uint8_t* buf, size_t bufLen, uint16_t seq,
   buf[23] = static_cast<uint8_t>((firmwareVersion >> 24) & 0xFF);
   buf[24] = static_cast<uint8_t>(nameLen);
   if (nameLen && name) std::memcpy(&buf[25], name, nameLen);
+  // TLV trailer starts here.
+  size_t off = HELLO_FIXED_SIZE + 1 + nameLen;
+  buf[off++] = emitOtaState ? 1 : 0;  // tlv_count
+  if (emitOtaState) {
+    buf[off++] = HELLO_TLV_OTA_STATE;
+    buf[off++] = 1;          // len
+    buf[off++] = otaState;   // value
+  }
   return total;
 }
 
@@ -530,7 +708,11 @@ inline size_t buildWispHello(uint8_t* buf, size_t bufLen, uint16_t seq,
   buf[fwOff + 1] = static_cast<uint8_t>((carriedFwVersion >> 8) & 0xFF);
   buf[fwOff + 2] = static_cast<uint8_t>((carriedFwVersion >> 16) & 0xFF);
   buf[fwOff + 3] = static_cast<uint8_t>((carriedFwVersion >> 24) & 0xFF);
-  return WISP_HELLO_FIXED_SIZE;
+  // v0x05 TLV trailer. Wisp doesn't emit any TLVs yet; future fields
+  // can be added by extending this builder and parseWispHello in lockstep.
+  if (bufLen < WISP_HELLO_FIXED_SIZE + 1) return 0;
+  buf[WISP_HELLO_FIXED_SIZE] = 0;  // tlv_count
+  return WISP_HELLO_FIXED_SIZE + 1;
 }
 
 // Build a MSG_OVERRIDE_COLORS frame. `numColors` must be 1..kMaxOverrideColorsPerFrame.
@@ -677,7 +859,11 @@ inline size_t buildEvent(uint8_t* buf, size_t bufLen, uint16_t seq,
 inline uint8_t inspect(const uint8_t* data, size_t len) {
   if (!data || len < HEADER_SIZE) return 0;
   if (data[0] != MAGIC_0 || data[1] != MAGIC_1) return 0;
-  if (data[2] != PROTOCOL_VERSION) return 0;
+  // Accept any version in [RX_MIN, RX_MAX]. See the doc block above
+  // PROTOCOL_VERSION_EMIT for the legacy receive model.
+  if (data[2] < PROTOCOL_VERSION_RX_MIN || data[2] > PROTOCOL_VERSION_RX_MAX) {
+    return 0;
+  }
   return data[3];
 }
 
@@ -710,6 +896,29 @@ inline bool parseHello(const uint8_t* data, size_t len, ParsedHello& out) {
   out.nameLen = nameLen;
   if (nameLen) std::memcpy(out.name, &data[25], nameLen);
   out.name[nameLen] = '\0';
+  // TLV trailer. v0x05 mandates at least a tlv_count byte, but be
+  // tolerant of frames that omit it (some future buggy sender that
+  // builds the prefix correctly but forgets the trailer) — those just
+  // get default TLV-derived fields.
+  out.otaState = kOtaStateIdle;
+  size_t off = HELLO_FIXED_SIZE + 1 + nameLen;
+  if (len <= off) return true;
+  const uint8_t tlvCount = data[off++];
+  for (uint8_t i = 0; i < tlvCount; ++i) {
+    // Need at least type+len bytes to advance.
+    if (len < off + 2) return false;
+    const uint8_t tlvType = data[off++];
+    const uint8_t tlvLen  = data[off++];
+    if (len < off + tlvLen) return false;
+    // Known TLV types update structured fields; unknowns are
+    // intentionally skipped via the length byte (this is the
+    // forward-compat hinge — adding a new TLV type doesn't break
+    // existing parsers).
+    if (tlvType == HELLO_TLV_OTA_STATE && tlvLen == 1) {
+      out.otaState = data[off];
+    }
+    off += tlvLen;
+  }
   return true;
 }
 
@@ -769,6 +978,22 @@ inline bool parseWispHello(const uint8_t* data, size_t len, ParsedWispHello& out
      | (static_cast<uint32_t>(data[fwOff + 1]) << 8)
      | (static_cast<uint32_t>(data[fwOff + 2]) << 16)
      | (static_cast<uint32_t>(data[fwOff + 3]) << 24);
+  // TLV trailer (v0x05+). Tolerant of frames that omit it for the
+  // same reason parseHello is — keep the older fixed-size still
+  // parseable until every wisp ships v0x05. No known TLV types yet
+  // for WISP_HELLO; the loop walks + skips by length so future
+  // additions don't need to change parseWispHello.
+  size_t off = WISP_HELLO_FIXED_SIZE;
+  if (len <= off) return true;
+  const uint8_t tlvCount = data[off++];
+  for (uint8_t i = 0; i < tlvCount; ++i) {
+    if (len < off + 2) return false;
+    const uint8_t tlvLen = data[off + 1];
+    if (len < off + 2 + tlvLen) return false;
+    // No known WISP_HELLO TLV types route into ParsedWispHello yet —
+    // walk past unknowns by length.
+    off += 2 + tlvLen;
+  }
   return true;
 }
 
@@ -1069,10 +1294,11 @@ inline size_t buildFwOffer(uint8_t* buf, size_t bufLen, uint16_t seq,
                            uint32_t version, uint32_t totalLen, uint16_t chunkSize,
                            const char* channel, size_t channelLen,
                            const uint8_t sha256Prefix[FW_SHA256_PREFIX_LEN],
-                           uint16_t footerLen, uint16_t totalChunks) {
+                           uint16_t footerLen, uint16_t totalChunks,
+                           uint8_t wireVersion = PROTOCOL_VERSION_EMIT) {
   if (!buf || !sourceMac || !targetMac || !sha256Prefix) return 0;
   if (bufLen < FW_OFFER_FIXED_SIZE) return 0;
-  detail::writeHeader(buf, MSG_FW_OFFER, seq);
+  detail::writeHeader(buf, MSG_FW_OFFER, seq, wireVersion);
   std::memcpy(&buf[6], sourceMac, 6);
   std::memcpy(&buf[12], targetMac, 6);
   buf[FW_OFFER_OFF_VERSION    ] = static_cast<uint8_t>(version & 0xFF);
@@ -1117,11 +1343,12 @@ inline size_t buildFwOffer(uint8_t* buf, size_t bufLen, uint16_t seq,
 inline size_t buildFwAccept(uint8_t* buf, size_t bufLen, uint16_t seq,
                             const uint8_t sourceMac[6], const uint8_t targetMac[6],
                             uint16_t offerSeq, uint32_t version,
-                            FwAcceptStatus status, uint32_t resumeOffset) {
+                            FwAcceptStatus status, uint32_t resumeOffset,
+                            uint8_t wireVersion = PROTOCOL_VERSION_EMIT) {
   if (!buf || !sourceMac || !targetMac) return 0;
   if (bufLen < FW_ACCEPT_FIXED_SIZE) return 0;
   (void)resumeOffset;  // reserved-zero in v1; pinned by the layout note above
-  detail::writeHeader(buf, MSG_FW_ACCEPT, seq);
+  detail::writeHeader(buf, MSG_FW_ACCEPT, seq, wireVersion);
   std::memcpy(&buf[6], sourceMac, 6);
   std::memcpy(&buf[12], targetMac, 6);
   buf[18] = static_cast<uint8_t>(offerSeq & 0xFF);
@@ -1142,13 +1369,14 @@ inline size_t buildFwAccept(uint8_t* buf, size_t bufLen, uint16_t seq,
 inline size_t buildFwChunk(uint8_t* buf, size_t bufLen, uint16_t seq,
                            const uint8_t sourceMac[6], const uint8_t targetMac[6],
                            uint16_t chunkIdx, uint32_t offset,
-                           const uint8_t* bytes, uint16_t len) {
+                           const uint8_t* bytes, uint16_t len,
+                           uint8_t wireVersion = PROTOCOL_VERSION_EMIT) {
   if (!buf || !sourceMac || !targetMac) return 0;
   if (len == 0 || len > FW_CHUNK_SIZE) return 0;
   if (len > 0 && !bytes) return 0;
   const size_t total = FW_CHUNK_FIXED_SIZE + static_cast<size_t>(len);
   if (bufLen < total) return 0;
-  detail::writeHeader(buf, MSG_FW_CHUNK, seq);
+  detail::writeHeader(buf, MSG_FW_CHUNK, seq, wireVersion);
   std::memcpy(&buf[6], sourceMac, 6);
   std::memcpy(&buf[12], targetMac, 6);
   buf[18] = static_cast<uint8_t>(chunkIdx & 0xFF);
@@ -1168,12 +1396,13 @@ inline size_t buildFwChunk(uint8_t* buf, size_t bufLen, uint16_t seq,
 inline size_t buildFwReq(uint8_t* buf, size_t bufLen, uint16_t seq,
                          const uint8_t sourceMac[6], const uint8_t targetMac[6],
                          uint16_t firstChunkIdx, uint16_t chunkCount,
-                         FwReqReason reason) {
+                         FwReqReason reason,
+                         uint8_t wireVersion = PROTOCOL_VERSION_EMIT) {
   if (!buf || !sourceMac || !targetMac) return 0;
   if (bufLen < FW_REQ_FIXED_SIZE) return 0;
   // chunkCount cap: 1..32 to prevent re-stream-all abuse per reconciliation doc.
   if (chunkCount == 0 || chunkCount > 32) return 0;
-  detail::writeHeader(buf, MSG_FW_REQ, seq);
+  detail::writeHeader(buf, MSG_FW_REQ, seq, wireVersion);
   std::memcpy(&buf[6], sourceMac, 6);
   std::memcpy(&buf[12], targetMac, 6);
   buf[18] = static_cast<uint8_t>(firstChunkIdx & 0xFF);
@@ -1192,10 +1421,11 @@ inline size_t buildFwDone(uint8_t* buf, size_t bufLen, uint16_t seq,
                           const uint8_t sourceMac[6], const uint8_t targetMac[6],
                           uint32_t version, uint32_t totalLen,
                           const uint8_t sha256Prefix[FW_SHA256_PREFIX_LEN],
-                          uint16_t footerLen) {
+                          uint16_t footerLen,
+                          uint8_t wireVersion = PROTOCOL_VERSION_EMIT) {
   if (!buf || !sourceMac || !targetMac || !sha256Prefix) return 0;
   if (bufLen < FW_DONE_FIXED_SIZE) return 0;
-  detail::writeHeader(buf, MSG_FW_DONE, seq);
+  detail::writeHeader(buf, MSG_FW_DONE, seq, wireVersion);
   std::memcpy(&buf[6], sourceMac, 6);
   std::memcpy(&buf[12], targetMac, 6);
   buf[18] = static_cast<uint8_t>(version & 0xFF);
@@ -1218,10 +1448,11 @@ inline size_t buildFwDone(uint8_t* buf, size_t bufLen, uint16_t seq,
 //   hdr(6) + src(6) + tgt(6) + status(1) + detail(1) + version(4 LE)
 inline size_t buildFwResult(uint8_t* buf, size_t bufLen, uint16_t seq,
                             const uint8_t sourceMac[6], const uint8_t targetMac[6],
-                            FwResultStatus status, uint8_t detail, uint32_t version) {
+                            FwResultStatus status, uint8_t detail, uint32_t version,
+                            uint8_t wireVersion = PROTOCOL_VERSION_EMIT) {
   if (!buf || !sourceMac || !targetMac) return 0;
   if (bufLen < FW_RESULT_FIXED_SIZE) return 0;
-  detail::writeHeader(buf, MSG_FW_RESULT, seq);
+  detail::writeHeader(buf, MSG_FW_RESULT, seq, wireVersion);
   std::memcpy(&buf[6], sourceMac, 6);
   std::memcpy(&buf[12], targetMac, 6);
   buf[18] = static_cast<uint8_t>(status);

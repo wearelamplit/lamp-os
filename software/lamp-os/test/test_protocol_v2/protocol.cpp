@@ -20,17 +20,32 @@ void tearDown(void) {}
 
 namespace lp = lamp_protocol;
 
-// v0x04 lock-in pin: widens FW_CHANNEL_LEN 8→16 so the channel slot can
-// carry `{lampType}-{channel}` (e.g. "standard-stable") and the existing
-// silent-drop on channel-mismatch enforces per-variant OTA gating. MSG_FW_OFFER
-// grows 48→56, MSG_WISP_HELLO grows 37→45. If a future change wants to bump
-// 0x04, it has to update THIS line — which forces a thoughtful answer to
-// "have we re-flashed all peers + the wisp?" since inspect() rejects
-// mismatched-version frames.
-static_assert(lp::PROTOCOL_VERSION == 0x04,
-              "PROTOCOL_VERSION lock-in for v0x04 (typed-channel OTA gating). "
-              "Bumping this constant requires re-flashing all lamps + wisp "
-              "before redeploy — inspect() rejects mismatches.");
+// v0x05 lock-in pin: introduces TLV trailers on HELLO + WISP_HELLO so
+// future fields land as new TLV types (parsers skip unknowns by length)
+// rather than bumping PROTOCOL_VERSION again. This is designed to be
+// the LAST additive bump: anything that fits into a TLV doesn't touch
+// this constant.
+//
+// If a future change wants to bump 0x05, it has to update THIS line —
+// which forces a thoughtful answer to "is this actually a behavioral
+// contract change (DedupRing capacity, HELLO interval, MSG_FW_*
+// layout, semantic redefinition) and not just a new field that could
+// have been a TLV?" since inspect() rejects mismatched-version frames
+// and a bump splits the mesh.
+// Pin both ends of the supported version range. Bumping EMIT or
+// RX_MAX is a real deploy-affecting change — see the upgrade-workflow
+// doc block above PROTOCOL_VERSION_EMIT in lamp_protocol.hpp.
+static_assert(lp::PROTOCOL_VERSION_EMIT == 0x05,
+              "EMIT lock-in. Advance only after the fleet's RX_MAX has "
+              "already moved up — the transitional release must accept "
+              "the new version before any release starts emitting it.");
+static_assert(lp::PROTOCOL_VERSION_RX_MAX == 0x05,
+              "RX_MAX lock-in. Range [RX_MIN, RX_MAX] = {0x04, 0x05} today; "
+              "v0x04 legacy support remains via per-peer wireVersion on "
+              "OTA OFFER/CHUNK/DONE/ACCEPT/REQ/RESULT (see lamp_protocol).");
+static_assert(lp::PROTOCOL_VERSION_RX_MIN == 0x04,
+              "RX_MIN lock-in. Dropping this floor evicts v0x04 lamps from "
+              "the mesh — only do so once the whole fleet has rolled past it.");
 
 // v0x03 lock-in pin: DedupRing capacity grew 32 → 64 because at 20-50 lamps
 // each gossiping (sourceMac, seq) the 32-slot ring wrapped fast enough that
@@ -59,7 +74,8 @@ void test_wisp_hello_roundtrip() {
       palette, 8,
       channel, 15,
       /*carriedFwVersion=*/0xCAFEF00D);
-  TEST_ASSERT_EQUAL_UINT32(lp::WISP_HELLO_FIXED_SIZE, n);
+  // v0x05 appends a 1-byte tlv_count=0 after the fixed prefix; total = 46.
+  TEST_ASSERT_EQUAL_UINT32(lp::WISP_HELLO_FIXED_SIZE + 1, n);
   TEST_ASSERT_EQUAL_UINT8(lp::MSG_WISP_HELLO, lp::inspect(buf, n));
 
   lp::ParsedWispHello out;
@@ -75,12 +91,14 @@ void test_wisp_hello_roundtrip() {
 }
 
 void test_wisp_hello_too_short_rejected() {
-  uint8_t buf[lp::WISP_HELLO_FIXED_SIZE];
+  // Need room for the v0x05 tlv_count byte (FIXED_SIZE + 1).
+  uint8_t buf[lp::WISP_HELLO_FIXED_SIZE + 1];
   std::memset(buf, 0, sizeof(buf));
-  // Valid frame
-  TEST_ASSERT_EQUAL_UINT32(lp::WISP_HELLO_FIXED_SIZE,
+  // Valid frame builds to FIXED_SIZE + 1 (the trailing tlv_count=0).
+  TEST_ASSERT_EQUAL_UINT32(lp::WISP_HELLO_FIXED_SIZE + 1,
       lp::buildWispHello(buf, sizeof(buf), 1, kSrcMac, 0, 0, "", 0, "", 0, 0));
   lp::ParsedWispHello out;
+  // Parser still rejects anything shorter than the fixed prefix.
   TEST_ASSERT_FALSE(lp::parseWispHello(buf, lp::WISP_HELLO_FIXED_SIZE - 1, out));
 }
 
@@ -588,18 +606,149 @@ static void test_wisp_palette_short_frame_rejected_by_parser() {
   TEST_ASSERT_FALSE(lp::parseWispPalette(buf, n - 1, out));
 }
 
-// Cross-version safety: v0x04 lamps must silently drop v0x03 frames at
-// inspect() before any field read. Without this, a wider v0x04 parser
-// running against a narrower v0x03 frame underflows.
-void test_inspect_rejects_wrong_protocol_version() {
+// Cross-version safety: inspect() accepts any version in [EMIT, RX_MAX]
+// and rejects anything outside that range BEFORE any field read.
+// Without this, a wider parser running against a narrower frame
+// underflows.
+void test_inspect_rejects_version_above_rx_max() {
   uint8_t buf[lp::WISP_HELLO_FIXED_SIZE];
   std::memset(buf, 0, sizeof(buf));
   buf[0] = lp::MAGIC_0;
   buf[1] = lp::MAGIC_1;
-  buf[2] = 0x03;  // pre-v0x04 frame
+  buf[2] = lp::PROTOCOL_VERSION_RX_MAX + 1;  // newer than we can parse
   buf[3] = lp::MSG_WISP_HELLO;
-  // inspect() rejects on version mismatch BEFORE any field read.
   TEST_ASSERT_EQUAL_UINT8(0, lp::inspect(buf, sizeof(buf)));
+}
+
+void test_inspect_rejects_version_below_rx_min() {
+  uint8_t buf[lp::WISP_HELLO_FIXED_SIZE];
+  std::memset(buf, 0, sizeof(buf));
+  buf[0] = lp::MAGIC_0;
+  buf[1] = lp::MAGIC_1;
+  buf[2] = lp::PROTOCOL_VERSION_RX_MIN - 1;  // older than we still parse
+  buf[3] = lp::MSG_WISP_HELLO;
+  TEST_ASSERT_EQUAL_UINT8(0, lp::inspect(buf, sizeof(buf)));
+}
+
+// Both ends of the accepted range work for inspect.
+void test_inspect_accepts_rx_min_version() {
+  uint8_t buf[lp::WISP_HELLO_FIXED_SIZE];
+  std::memset(buf, 0, sizeof(buf));
+  buf[0] = lp::MAGIC_0;
+  buf[1] = lp::MAGIC_1;
+  buf[2] = lp::PROTOCOL_VERSION_RX_MIN;
+  buf[3] = lp::MSG_WISP_HELLO;
+  TEST_ASSERT_EQUAL_UINT8(lp::MSG_WISP_HELLO, lp::inspect(buf, sizeof(buf)));
+}
+
+void test_inspect_accepts_rx_max_version() {
+  uint8_t buf[lp::WISP_HELLO_FIXED_SIZE];
+  std::memset(buf, 0, sizeof(buf));
+  buf[0] = lp::MAGIC_0;
+  buf[1] = lp::MAGIC_1;
+  buf[2] = lp::PROTOCOL_VERSION_RX_MAX;
+  buf[3] = lp::MSG_WISP_HELLO;
+  TEST_ASSERT_EQUAL_UINT8(lp::MSG_WISP_HELLO, lp::inspect(buf, sizeof(buf)));
+}
+
+// --- MSG_HELLO TLV trailer (v0x05+) ---
+//
+// The TLV trailer is the forward-compat hinge: future fields land as
+// new TLV types and parsers skip unknowns by length. These tests pin
+// the contract so a future regression that re-introduces strict-size
+// behavior fails loudly.
+
+static const uint8_t kHelloShade[4] = {0x10, 0x20, 0x30, 0x40};
+static const uint8_t kHelloBase[4]  = {0x50, 0x60, 0x70, 0x80};
+
+void test_hello_idle_state_emits_compact_tlv_count_zero() {
+  // The idle case (kOtaStateIdle) omits the OTA_STATE TLV entirely
+  // and emits tlv_count=0. Anything else would bloat every HELLO with
+  // 3 redundant bytes since most lamps are Idle most of the time.
+  uint8_t buf[lp::HELLO_MAX_SIZE];
+  const size_t n = lp::buildHello(buf, sizeof(buf), 0x1234, kSrcMac,
+                                  kHelloShade, kHelloBase, 0xCAFE,
+                                  "flora", 5, lp::kOtaStateIdle);
+  // 24 fixed + 1 nameLen + 5 name + 1 tlv_count = 31 bytes total.
+  TEST_ASSERT_EQUAL_UINT32(lp::HELLO_FIXED_SIZE + 1 + 5 + 1, n);
+  // tlv_count byte sits right after the name.
+  TEST_ASSERT_EQUAL_UINT8(0, buf[lp::HELLO_FIXED_SIZE + 1 + 5]);
+  // Parse round-trip yields the same idle state.
+  lp::ParsedHello out;
+  TEST_ASSERT_TRUE(lp::parseHello(buf, n, out));
+  TEST_ASSERT_EQUAL_UINT8(lp::kOtaStateIdle, out.otaState);
+  TEST_ASSERT_EQUAL_STRING("flora", out.name);
+}
+
+void test_hello_sending_state_round_trip() {
+  uint8_t buf[lp::HELLO_MAX_SIZE];
+  const size_t n = lp::buildHello(buf, sizeof(buf), 7, kSrcMac,
+                                  kHelloShade, kHelloBase, 0xBEEF,
+                                  "jacko", 5, lp::kOtaStateSending);
+  // Non-idle adds 3 bytes (type + len + value).
+  TEST_ASSERT_EQUAL_UINT32(lp::HELLO_FIXED_SIZE + 1 + 5 + 1 + 3, n);
+  lp::ParsedHello out;
+  TEST_ASSERT_TRUE(lp::parseHello(buf, n, out));
+  TEST_ASSERT_EQUAL_UINT8(lp::kOtaStateSending, out.otaState);
+}
+
+void test_hello_receiving_state_round_trip() {
+  uint8_t buf[lp::HELLO_MAX_SIZE];
+  const size_t n = lp::buildHello(buf, sizeof(buf), 9, kSrcMac,
+                                  kHelloShade, kHelloBase, 0xBEEF,
+                                  "anonymou", 8, lp::kOtaStateReceiving);
+  lp::ParsedHello out;
+  TEST_ASSERT_TRUE(lp::parseHello(buf, n, out));
+  TEST_ASSERT_EQUAL_UINT8(lp::kOtaStateReceiving, out.otaState);
+}
+
+// Forward-compat: an unknown TLV type must be skipped (by length),
+// the known OTA_STATE TLV that follows must still parse cleanly, and
+// no fields beyond what we know about should be affected.
+void test_hello_unknown_tlv_is_skipped() {
+  // Hand-assemble a HELLO with two trailing TLVs:
+  //   1) unknown type 0xEE, value len 4 (gibberish)
+  //   2) OTA_STATE = kOtaStateReceiving
+  uint8_t buf[lp::HELLO_MAX_SIZE];
+  const size_t n = lp::buildHello(buf, sizeof(buf), 1, kSrcMac,
+                                  kHelloShade, kHelloBase, 0,
+                                  "x", 1, lp::kOtaStateIdle);
+  // Overwrite the trailer (tlv_count=0 at offset 26): rewrite it as
+  // tlv_count=2 then two TLVs.
+  const size_t trailerOff = lp::HELLO_FIXED_SIZE + 1 + 1;  // 24 + 1 nameLen + 1 name
+  TEST_ASSERT_EQUAL_UINT32(trailerOff + 1, n);  // sanity: idle build ends at trailerOff+1
+  uint8_t* p = buf + trailerOff;
+  *p++ = 2;            // tlv_count
+  *p++ = 0xEE;         // unknown type
+  *p++ = 4;            // value len
+  *p++ = 0xAA; *p++ = 0xBB; *p++ = 0xCC; *p++ = 0xDD;
+  *p++ = lp::HELLO_TLV_OTA_STATE;
+  *p++ = 1;
+  *p++ = lp::kOtaStateReceiving;
+  const size_t totalLen = static_cast<size_t>(p - buf);
+
+  lp::ParsedHello out;
+  TEST_ASSERT_TRUE(lp::parseHello(buf, totalLen, out));
+  // Unknown TLV skipped; OTA_STATE found and applied.
+  TEST_ASSERT_EQUAL_UINT8(lp::kOtaStateReceiving, out.otaState);
+}
+
+// A malformed trailer (TLV claims more bytes than the frame holds)
+// must be rejected, not crash.
+void test_hello_tlv_with_oversized_length_is_rejected() {
+  uint8_t buf[lp::HELLO_MAX_SIZE];
+  const size_t n = lp::buildHello(buf, sizeof(buf), 1, kSrcMac,
+                                  kHelloShade, kHelloBase, 0,
+                                  "x", 1, lp::kOtaStateIdle);
+  const size_t trailerOff = lp::HELLO_FIXED_SIZE + 1 + 1;
+  TEST_ASSERT_EQUAL_UINT32(trailerOff + 1, n);
+  uint8_t* p = buf + trailerOff;
+  *p++ = 1;            // tlv_count=1
+  *p++ = 0xEE;
+  *p++ = 200;          // claimed len > remaining frame bytes
+  const size_t totalLen = static_cast<size_t>(p - buf);
+  lp::ParsedHello out;
+  TEST_ASSERT_FALSE(lp::parseHello(buf, totalLen, out));
 }
 
 int main(int argc, char** argv) {
@@ -609,7 +758,15 @@ int main(int argc, char** argv) {
 
   RUN_TEST(test_wisp_hello_roundtrip);
   RUN_TEST(test_wisp_hello_too_short_rejected);
-  RUN_TEST(test_inspect_rejects_wrong_protocol_version);
+  RUN_TEST(test_inspect_rejects_version_above_rx_max);
+  RUN_TEST(test_inspect_rejects_version_below_rx_min);
+  RUN_TEST(test_inspect_accepts_rx_min_version);
+  RUN_TEST(test_inspect_accepts_rx_max_version);
+  RUN_TEST(test_hello_idle_state_emits_compact_tlv_count_zero);
+  RUN_TEST(test_hello_sending_state_round_trip);
+  RUN_TEST(test_hello_receiving_state_round_trip);
+  RUN_TEST(test_hello_unknown_tlv_is_skipped);
+  RUN_TEST(test_hello_tlv_with_oversized_length_is_rejected);
 
   RUN_TEST(test_override_colors_roundtrip_min_and_max);
   RUN_TEST(test_override_colors_zero_numcolors_rejected_by_builder);

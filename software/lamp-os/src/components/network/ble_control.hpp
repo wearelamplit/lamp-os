@@ -212,6 +212,15 @@ void pauseRadioForOta();
  */
 void resumeRadioAfterOta();
 
+/**
+ * @brief Force-disconnect any active GATT client. Called from
+ *        ota_quiet_mode::enterQuiet when tearDownRadio=true (mesh OTA
+ *        path). Keeps the GATT server up; only kicks the connected
+ *        peer so it can't send writes that compete for radio time with
+ *        the chunk stream. Idempotent.
+ */
+void disconnectGattClientsForOta();
+
 // Posts a commit signal from the BLE callback (Core 0) to the loop
 // task (Core 1). Loop drain debounces and calls config.persistConfig.
 // Signature matches WriteRouter::PostFn — the data/len bytes are

@@ -3,6 +3,10 @@
 #include <cstring>
 #include <memory>
 
+#if defined(ARDUINO) || defined(ESP_PLATFORM)
+#include <Arduino.h>
+#endif
+
 // mbedTLS for streaming SHA-256: init/starts/update/finish/free. We stream
 // the signed region in 4 KB blocks via the FirmwareByteReader and feed
 // each block straight into mbedtls_sha256_update so we never have to
@@ -81,6 +85,21 @@ bool verifySignedFirmware(FirmwareByteReader reader, size_t imageLen,
   // against the full image length so a malformed footer can't direct
   // verify() to walk out of bounds.
   const uint32_t signedRegionLen = readU32LE(footer + kLsigSignedLenOffset);
+#if defined(ARDUINO) || defined(ESP_PLATFORM) && defined(LAMP_DEBUG)
+  Serial.printf("[fw_sig] verify: imageLen=%u signedRegionLen=%u "
+                "footerOffset=%u\n",
+                (unsigned)imageLen, (unsigned)signedRegionLen,
+                (unsigned)footerOffset);
+  // Hex-dump the first 16 bytes of the footer (magic+channel start) and
+  // the last 16 bytes (last quarter of the ed25519 signature). Tells us
+  // if the footer itself is intact.
+  Serial.print("[fw_sig] verify: footer[0..16) =");
+  for (size_t i = 0; i < 16; ++i) Serial.printf(" %02X", footer[i]);
+  Serial.println();
+  Serial.print("[fw_sig] verify: footer[80..96) =");
+  for (size_t i = 80; i < 96; ++i) Serial.printf(" %02X", footer[i]);
+  Serial.println();
+#endif
   if (signedRegionLen == 0) return false;
   if (static_cast<size_t>(signedRegionLen) > imageLen - kLsigFooterLen) {
     return false;
@@ -139,6 +158,19 @@ bool verifySignedFirmware(FirmwareByteReader reader, size_t imageLen,
   }
   mbedtls_sha256_free(&shaCtx);
 
+#if defined(ARDUINO) || defined(ESP_PLATFORM) && defined(LAMP_DEBUG)
+  // Dump the computed digest. Compare to the signer's
+  // `[sign] sha256(signed_region)=...` line emitted at build time.
+  // - DIGESTS MATCH but verify still fails  -> signature in footer is
+  //   wrong (or pubkey on the lamp doesn't match the signing key).
+  // - DIGESTS DIFFER                        -> bytes in flash don't
+  //   match what the signer hashed; corruption is in the write path
+  //   somewhere in [0, signedRegionLen).
+  Serial.print("[fw_sig] verify: computed sha256(signed_region) =");
+  for (size_t i = 0; i < 32; ++i) Serial.printf(" %02X", digest[i]);
+  Serial.println();
+#endif
+
   // Step 3: ed25519-verify the signature against the SHA-256 digest.
   // The signing tool (scripts/sign_firmware.py) signs SHA256(signed
   // region) — not the raw region — so verify_detached's message
@@ -149,10 +181,24 @@ bool verifySignedFirmware(FirmwareByteReader reader, size_t imageLen,
   const uint8_t* signature = footer + kLsigSignatureOffset;
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
+#ifdef LAMP_DEBUG
+  // Dump the signature + pubkey so we can compare to the at-rest binary
+  // and the matching key on disk. If kFirmwarePubkey is zeros here, the
+  // constexpr array isn't surviving the link.
+  Serial.print("[fw_sig] verify: footer signature =");
+  for (size_t i = 0; i < 64; ++i) Serial.printf(" %02X", signature[i]);
+  Serial.println();
+  Serial.print("[fw_sig] verify: kFirmwarePubkey =");
+  for (size_t i = 0; i < 32; ++i) Serial.printf(" %02X", kFirmwarePubkey[i]);
+  Serial.println();
+#endif
   // Ed25519 verify on production. crypto_sign_ed25519_verify_detached
   // returns 0 on success, -1 on failure.
   const int rc = crypto_sign_ed25519_verify_detached(
       signature, digest, sizeof(digest), kFirmwarePubkey);
+#ifdef LAMP_DEBUG
+  Serial.printf("[fw_sig] verify: ed25519 rc=%d\n", rc);
+#endif
   if (rc != 0) return false;
 #else
   // Native test rig path: the test file provides its own

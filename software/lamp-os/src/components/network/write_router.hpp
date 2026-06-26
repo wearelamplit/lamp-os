@@ -38,6 +38,8 @@
 #include <cstdint>
 #include <string>
 
+#include "core/ota_quiet_mode.hpp"
+
 namespace ble_control {
 
 // The post hop is the single bytes-into-pending-slot call defined in
@@ -127,6 +129,14 @@ class WriteRouter : public NimBLECharacteristicCallbacks {
   }
 
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& info) override {
+    // Silent-drop every live-control write while OTA is in progress.
+    // The OTA characteristics (CHAR_FW_CONTROL / CHAR_FW_CHUNK) have
+    // their own callbacks and bypass WriteRouter, so they keep working
+    // for the BLE-pushed OTA chunk transport. Everything else (color,
+    // shade, brightness, expression, settings, page) is gated here so
+    // the phone can't fight the OTA for radio time / config state.
+    if (lamp::ota_quiet_mode::isQuiet()) return;
+
     const uint16_t handle = info.getConnHandle();
     const std::string raw = c->getValue();
 

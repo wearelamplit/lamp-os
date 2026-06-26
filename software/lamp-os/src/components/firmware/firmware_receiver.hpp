@@ -6,21 +6,32 @@
 // verifies the ed25519 signature on the LSIG footer, and reboots into the
 // new image.
 //
-// Cross-core safety (per wisp-OTA reconciliation doc + 2026-06-05 JIT-erase
-// follow-up):
+// Cross-core safety:
 //
 //   - State machine runs on Core 1 (Arduino loop task). On OFFER:
-//     allocates publishedPartition_ + sectorState_ vector, then arms the
-//     publishedOtaHandle_ gate via release-store. No pre-erase. ACCEPT
-//     leaves the wire within milliseconds of the OFFER landing on Core 1.
+//     allocates publishedPartition_ + sectorState_ vector, erases the
+//     head window of sectors synchronously (so the first chunks land in
+//     pre-erased flash and don't pay JIT-erase latency on Core 0), then
+//     arms the publishedOtaHandle_ gate via release-store. The first
+//     ACCEPT goes out synchronously; the remaining four in the burst are
+//     queued for tick() to drain at 400 ms cadence so the loop task isn't
+//     blocked for 1.6 s freezing the renderer.
+//   - tick() (Core 1) continues draining the tail of the pre-erase: each
+//     tick erases up to kBgEraseBatchSectors more sectors. The cache-
+//     disable burst of each erase blocks the loop task — NOT the WiFi
+//     recv task on Core 0 — so chunks keep landing while we burn through
+//     the tail. tick yields between batches to guarantee Core 1 turn.
 //   - Chunk writes run on Core 0 (WiFi recv task) via handleChunkOnRecvTask.
 //     For each chunk: read armed gate (acquire); compute sectorIdx from
-//     p.offset / SPI_FLASH_SEC_SIZE; call ensureSectorErasedOnRecvTask
-//     to JIT-erase the chunk's sector if not yet done; then esp_partition_write.
+//     p.offset / SPI_FLASH_SEC_SIZE; if the pre-erase tail hasn't reached
+//     this sector yet ensureSectorErasedOnRecvTask JIT-erases it as a
+//     fallback; then esp_partition_write. Steady state: the pre-erase
+//     tail outruns the chunk stream, JIT-erase is dead path.
 //   - sectorState_ is std::vector<uint8_t>; one byte per partition sector
-//     in tristate Idle/InProgress/Done. Core 0 mutates it under eraseMux_
-//     (interrupts disabled, scoped tightly to read-check-CAS only — NOT
-//     the erase itself). erasedSectorsCount_ is a diagnostic atomic.
+//     in tristate Idle/InProgress/Done. Both cores mutate it under
+//     eraseMux_ (interrupts disabled, scoped tightly to read-check-CAS
+//     only — NOT the erase itself). erasedSectorsCount_ is a diagnostic
+//     atomic.
 //   - **Vector storage invariant**: sectorState_ MUST NOT reallocate while
 //     Core 0 might touch it. Achieved via the publishedOtaHandle_ gate:
 //     Core 1 only resizes sectorState_ BEFORE arming the gate (so no Core
@@ -103,6 +114,11 @@ struct PendingFirmwareControl {
   uint8_t sourceMac[6];
   uint8_t targetMac[6];
   uint16_t seq;
+  // Wire-format version of the incoming frame (data[2]). The receiver
+  // captures this on OFFER and replies (ACCEPT/REQ/RESULT) at the same
+  // version — matching the peer's protocol so v0x04 distributors get
+  // v0x04 responses from a v0x05-emitting receiver.
+  uint8_t wireVersion = 0;
   // Transport context — populated by whichever dispatcher posted this
   // slot. Mesh path sets EspNow + bleConnHandle=0; BLE path sets Ble +
   // bleConnHandle=<the writer's NimBLE conn handle>.
@@ -200,6 +216,28 @@ class FirmwareReceiver {
     return state_ != State::Idle && state_ != State::Failed;
   }
 
+  // Snapshot the active OTA peer's MAC into out[6]. Returns true when an
+  // ESP-NOW OTA flow is in progress (so the OTA quiet-mode visual
+  // indicator can look up the peer's base color from NearbyLamps).
+  // Returns false for BLE OTA flows — the chunk source is the phone,
+  // not a mesh peer; no lookup possible — and when isInProgress() is
+  // false. Read-only; safe from the loop task.
+  bool getPeerMac(uint8_t out[6]) const {
+    if (!isInProgress()) return false;
+    if (activeTransportKind_ != FirmwareTransportKind::EspNow) return false;
+    for (int i = 0; i < 6; i++) out[i] = wispMac_[i];
+    return true;
+  }
+
+  // Total chunks expected for the in-flight OFFER. Zero outside Streaming.
+  uint16_t totalChunks() const { return offerTotalChunks_; }
+
+  // Count of chunks received so far in the current OTA. Resets to 0 on
+  // each new OFFER. Diagnostic counter — incremented by Core 0 on every
+  // landed chunk; reads from Core 1 are coherent enough for a visual
+  // progress bar (a one-frame stale read just lags one tick).
+  uint32_t recvChunksCount() const { return recvChunksCount_; }
+
  private:
   // --- Helpers -----------------------------------------------------------
 
@@ -216,6 +254,28 @@ class FirmwareReceiver {
   // the bitmap is fully set. Linear scan; the bitmap is typically only
   // 1-2 KB so this is fast (~1.6 ms worst case at 8000 chunks).
   uint16_t firstMissingChunk() const;
+  // Returns the length of the contiguous run of missing chunks starting
+  // at firstMissing. Used to batch a single REQ for a whole run of
+  // holes — single REQ for count=M consecutive misses instead of M
+  // round trips at count=1. Capped at kMaxReqRunChunks so an early-
+  // stream "everything missing" run doesn't dwarf forward progress.
+  uint16_t firstMissingRunLen(uint16_t firstMissing) const;
+  // Cap on the per-REQ run length. Pinned at 1 (the pre-perf-commits
+  // baseline) 2026-06-25 after `f52f72f` (longest-run, cap 64) and
+  // `d6c46a5` (window-span, cap 64) regressed the receive path: a
+  // 64-chunk burst spans 3-4 flash sectors, JIT-erase blocks Core 0
+  // for 50-400ms per sector, ESP-NOW's RX queue overflows during the
+  // erase window → chunks drop at the WiFi layer, session loops
+  // forever on early-stream gaps. Hardware-validated cap=20 (one
+  // sector's worth) does recover the broken session, but the converged
+  // fleet had been running at cap=1 with no user-visible throughput
+  // problem, so leave it at 1 until we explicitly stability-test a
+  // higher value (see mesh-debug-app-todo.md §23).
+  //
+  // The windowed-REQ logic in `firstMissingRunLen` is preserved (it
+  // degenerates to "return 1" when this cap is 1) so flipping this
+  // back up is a one-constant change — no code-shape revert needed.
+  static constexpr uint16_t kMaxReqRunChunks = 1;
 
   // Transmit helpers. All FW_* sends route through `transport_->sendFrame`.
   // For the ESP-NOW transport, that's `broadcastRaw` (wisp filters via
@@ -280,6 +340,10 @@ class FirmwareReceiver {
   // (DeclineBusy). Set at offer-accept time; cleared by abortOta / on
   // transition back to Idle.
   FirmwareTransportKind activeTransportKind_ = FirmwareTransportKind::EspNow;
+  // Wire-format version of the incoming OFFER (data[2] of the frame).
+  // Used as the wire version for every outbound ACCEPT/REQ/RESULT in
+  // this session so we reply at the peer's protocol version.
+  uint8_t activeWireVersion_ = lamp_protocol::PROTOCOL_VERSION_EMIT;
   uint16_t activeBleConnHandle_ = 0;
   uint32_t offerVersion_ = 0;
   uint32_t offerTotalLen_ = 0;
@@ -312,6 +376,15 @@ class FirmwareReceiver {
   uint32_t lastReqMs_       = 0;
   uint32_t streamingStartMs_ = 0;
 
+  // Queued ACCEPT retries. The first ACCEPT is sent synchronously from
+  // onOfferOnLoop; the rest are scheduled here for tick() to drain so
+  // the loop task isn't blocked for ~1.6 s freezing the renderer
+  // between sleeps. Quenched as soon as a chunk arrives — that's
+  // proof the ACCEPT got through, no point burning more airtime.
+  PendingFirmwareControl pendingAcceptCtrl_ = {};
+  uint8_t                pendingAcceptCount_ = 0;
+  uint32_t               nextAcceptMs_       = 0;
+
   // Diagnostic: Core 0 increments on every received chunk; Core 1's tick
   // periodically logs. Compares to the wisp's stream-progress log to
   // localise loss (RF vs. wisp-side throughput).
@@ -330,6 +403,19 @@ class FirmwareReceiver {
   //   - Core 1 store(0, relaxed) BEFORE clearing publishedPartition_
   //     prevents a late Core 0 write from racing the teardown.
   std::atomic<uint32_t> publishedOtaHandle_{0};
+
+  // Counter of in-flight esp_partition_write calls on Core 0. Incremented
+  // by handleChunkOnRecvTask BEFORE the armed-gate check and decremented
+  // AFTER the write (or on any early-return inside the function). Core 1's
+  // verifyAndApply spins-with-yield until this drops to 0 before reading
+  // back from the partition — guarantees no Core 0 write is still landing
+  // bytes when verify starts the sha256 stream. Without this barrier,
+  // exchange(0) on publishedOtaHandle_ is atomic but NOT synchronous:
+  // Core 0 could have read armed=nonzero microseconds earlier, started
+  // its esp_partition_write, and not yet completed when Core 1's
+  // esp_partition_read begins — verify reads stale bytes, sigverify
+  // FAILS even though every chunk was written successfully.
+  std::atomic<int> writesInFlight_{0};
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   // Active OTA partition pointer, accessed by both Core 1 (set during
@@ -350,7 +436,11 @@ class FirmwareReceiver {
   // performs the erase OUTSIDE the mux to avoid extending the
   // interrupts-disabled window across the (up-to-400 ms) erase op.
   std::vector<uint8_t> sectorState_;
-  portMUX_TYPE         eraseMux_ = portMUX_INITIALIZER_UNLOCKED;
+  // mutable so const accessors (isBitmapFull / firstMissingChunk) can
+  // take the spinlock around their reads. Synchronization is a logical
+  // no-op WRT observed value — it just makes the read coherent against
+  // Core 0's concurrent RMW.
+  mutable portMUX_TYPE eraseMux_ = portMUX_INITIALIZER_UNLOCKED;
 
   // Diagnostic: incremented by Core 0 after each successful sector erase.
   // verifyAndApply logs this vs ceil(offerTotalLen / SPI_FLASH_SEC_SIZE)
@@ -358,22 +448,33 @@ class FirmwareReceiver {
   // chunk's sector somehow wasn't erased) and FAILS verifyAndApply
   // rather than silently flipping the boot partition.
   std::atomic<uint32_t> erasedSectorsCount_{0};
-
-  // Background pre-erase cursor. Set in onOfferOnLoop() to point at the
-  // first sector AFTER the synchronous head-erase window
-  // ([0..kPreEraseHeadSectors)). tick() drains [bgEraseNextSector_,
-  // bgEraseEndSector_) at kBgEraseBatchSectors per iteration with a
-  // cooperative yield between batches so Core 0 keeps servicing
-  // ESP-NOW chunk receives while Core 1 burns the trailing erases.
-  // Core 1-only — no cross-core access — so plain size_t is safe.
-  size_t bgEraseNextSector_ = 0;
-  size_t bgEraseEndSector_  = 0;
 #endif
 
   // OFFER/DONE control intake uses standard_lamp's PendingTypedSlot<
   // PendingFirmwareControl> + postPendingFirmwareControl forwarder, in
   // line with the other Core 0 → Core 1 typed slots. The Core 1 drain in
   // lamp.cpp calls handleControlOnLoop() with the drained slot.
+
+  // --- Inter-session quiet hold (mesh-only, multi-distributor case) ---
+  // In a 3+ lamp mesh, a below-version receiver can be OFFERed by more
+  // than one distributor in quick succession. If session A (from peer B)
+  // times out / aborts, state goes Idle and without latching we'd
+  // exitQuiet → compositor runs normal pipeline → IdleBehavior writes
+  // defaultColors → strip flashes the lamp's base colour → then peer
+  // C's OFFER arrives a moment later → re-enter quiet → indicator paints
+  // again. That's the flash visible on receivers between back-to-back
+  // OFFERs from different distributors. Defer exitQuiet by
+  // kInterSessionQuietHoldMs so the gap is bridged invisibly when a
+  // retry/handoff lands inside that window; if nothing arrives, the
+  // hold expires and we resume normal animation.
+  //
+  // This is the receiver-side mirror of the proven distributor cooldown,
+  // but minimal — we don't track a "last session" for the indicator's
+  // hold render because the receive case is much shorter than a multi-
+  // peer distribute wave (only the failure-then-retry gap matters).
+  static constexpr uint32_t kInterSessionQuietHoldMs = 10000;
+  bool     quietHeld_              = false;
+  uint32_t quietHoldUntilMs_       = 0;
 };
 
 }  // namespace lamp

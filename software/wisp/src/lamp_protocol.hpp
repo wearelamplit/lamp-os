@@ -42,7 +42,19 @@ constexpr uint8_t MAGIC_1 = 'M';
 // grows 48→56 and MSG_WISP_HELLO grows 37→45. inspect() rejects mismatched
 // versions before any field reads, so v0x03 peers drop v0x04 frames cleanly
 // (no buffer underflow against the wider parse).
-constexpr uint8_t PROTOCOL_VERSION = 0x04;
+//
+// Split into EMIT + RX_MAX to support cross-version fleet migrations.
+// See the doc block above PROTOCOL_VERSION_EMIT in
+// software/lamp-os/src/components/network/lamp_protocol.hpp for the
+// full design (upgrade workflow, legacy OTA surface, etc.). This file
+// is the wisp's byte-identical mirror.
+
+constexpr uint8_t PROTOCOL_VERSION_EMIT   = 0x05;
+constexpr uint8_t PROTOCOL_VERSION_RX_MIN = 0x04;
+constexpr uint8_t PROTOCOL_VERSION_RX_MAX = 0x05;
+
+// Back-compat alias for code paths still referencing a single constant.
+constexpr uint8_t PROTOCOL_VERSION = PROTOCOL_VERSION_EMIT;
 
 enum MsgType : uint8_t {
   MSG_HELLO               = 0x01,
@@ -139,7 +151,20 @@ constexpr size_t HEADER_SIZE = 6;
 // is verbatim-mirrored.
 constexpr size_t HELLO_FIXED_SIZE = 24;
 constexpr size_t HELLO_MAX_NAME = 32;
-constexpr size_t HELLO_MAX_SIZE = HELLO_FIXED_SIZE + 1 + HELLO_MAX_NAME;  // +1 for name length byte
+// HELLO TLV trailer (v0x05+). After the variable name field, the frame
+// carries:
+//   [tlv_count 1 byte] [type 1][len 1][value len bytes] x tlv_count
+// Each TLV's len byte limits its value to 255 bytes. Parsers skip
+// unknown types by advancing 2 + len, so future TLV types can land
+// without bumping PROTOCOL_VERSION.
+constexpr uint8_t HELLO_TLV_OTA_STATE = 0x01;  // value: 1 byte, 0=idle 1=sending 2=receiving
+
+// Compact OTA-state enum carried in HELLO_TLV_OTA_STATE.
+constexpr uint8_t kOtaStateIdle      = 0;
+constexpr uint8_t kOtaStateSending   = 1;
+constexpr uint8_t kOtaStateReceiving = 2;
+
+constexpr size_t HELLO_MAX_SIZE = 128;  // see TLV trailer note above
 
 // MSG_CONTROL_OP frame: header(6) + targetMac(6) + sourceMac(6) + payloadLen(2) + payload(N).
 // ESP-NOW max frame is 250 bytes; subtract the 20-byte fixed prefix.
@@ -159,6 +184,11 @@ constexpr size_t WISP_HELLO_FIXED_SIZE            = HEADER_SIZE + 6 + 4 + 1 +
 constexpr uint8_t WISP_HELLO_FLAG_PAINT_MODE        = 0x01;
 constexpr uint8_t WISP_HELLO_FLAG_WIFI_CONNECTED    = 0x02;
 constexpr uint8_t WISP_HELLO_FLAG_AURORA_CONNECTED  = 0x04;
+// WISP_HELLO TLV trailer (v0x05+). Same shape as HELLO's:
+//   [tlv_count 1] [type 1][len 1][value len] x tlv_count
+// Bumped 45 → 96 to leave room for ~6-7 future TLVs without ever
+// needing another PROTOCOL_VERSION bump.
+constexpr size_t WISP_HELLO_MAX_SIZE              = 96;
 
 // MSG_WISP_CLAIM: header(6) + sourceMac(6) + count(1) + entries[count*7].
 // Each entry: lampMac(6) + signed int8 rssi(1) = 7 bytes.
@@ -260,6 +290,9 @@ struct ParsedHello {
   uint32_t firmwareVersion;
   uint8_t nameLen;
   char name[HELLO_MAX_NAME + 1];  // null-terminated copy
+  // TLV-derived fields. Defaults apply when the corresponding TLV is
+  // absent from the frame.
+  uint8_t otaState = kOtaStateIdle;  // HELLO_TLV_OTA_STATE
 };
 
 struct ParsedControlOp {
@@ -397,10 +430,13 @@ inline size_t buildHello(uint8_t* buf, size_t bufLen, uint16_t seq,
                          const uint8_t sourceMac[6],
                          const uint8_t shadeRGBW[4], const uint8_t baseRGBW[4],
                          uint32_t firmwareVersion,
-                         const char* name, size_t nameLen) {
+                         const char* name, size_t nameLen,
+                         uint8_t otaState = kOtaStateIdle) {
   if (!buf || !sourceMac || !shadeRGBW || !baseRGBW) return 0;
   if (nameLen > HELLO_MAX_NAME) nameLen = HELLO_MAX_NAME;
-  const size_t total = HELLO_FIXED_SIZE + 1 + nameLen;  // +1 for nameLen byte
+  const bool emitOtaState = (otaState != kOtaStateIdle);
+  const size_t tlvBytes = 1 + (emitOtaState ? 3 : 0);
+  const size_t total = HELLO_FIXED_SIZE + 1 + nameLen + tlvBytes;
   if (bufLen < total) return 0;
   buf[0] = MAGIC_0;
   buf[1] = MAGIC_1;
@@ -411,14 +447,20 @@ inline size_t buildHello(uint8_t* buf, size_t bufLen, uint16_t seq,
   std::memcpy(&buf[6], sourceMac, 6);
   std::memcpy(&buf[12], shadeRGBW, 4);
   std::memcpy(&buf[16], baseRGBW, 4);
-  // Little-endian on the wire; matches every ESP32 we ship and matches the
-  // memcpy-into-uint32 pattern parseHello uses on the receive side.
   buf[20] = static_cast<uint8_t>(firmwareVersion & 0xFF);
   buf[21] = static_cast<uint8_t>((firmwareVersion >> 8) & 0xFF);
   buf[22] = static_cast<uint8_t>((firmwareVersion >> 16) & 0xFF);
   buf[23] = static_cast<uint8_t>((firmwareVersion >> 24) & 0xFF);
   buf[24] = static_cast<uint8_t>(nameLen);
   if (nameLen && name) std::memcpy(&buf[25], name, nameLen);
+  // TLV trailer.
+  size_t off = HELLO_FIXED_SIZE + 1 + nameLen;
+  buf[off++] = emitOtaState ? 1 : 0;  // tlv_count
+  if (emitOtaState) {
+    buf[off++] = HELLO_TLV_OTA_STATE;
+    buf[off++] = 1;
+    buf[off++] = otaState;
+  }
   return total;
 }
 
@@ -492,7 +534,10 @@ inline size_t buildWispHello(uint8_t* buf, size_t bufLen, uint16_t seq,
   buf[fwOff + 1] = static_cast<uint8_t>((carriedFwVersion >> 8) & 0xFF);
   buf[fwOff + 2] = static_cast<uint8_t>((carriedFwVersion >> 16) & 0xFF);
   buf[fwOff + 3] = static_cast<uint8_t>((carriedFwVersion >> 24) & 0xFF);
-  return WISP_HELLO_FIXED_SIZE;
+  // v0x05 TLV trailer. Wisp doesn't emit any TLVs yet.
+  if (bufLen < WISP_HELLO_FIXED_SIZE + 1) return 0;
+  buf[WISP_HELLO_FIXED_SIZE] = 0;  // tlv_count
+  return WISP_HELLO_FIXED_SIZE + 1;
 }
 
 // Build a MSG_WISP_CLAIM frame. `entries` is `count` packed records, each
@@ -685,7 +730,9 @@ inline size_t buildEvent(uint8_t* buf, size_t bufLen, uint16_t seq,
 inline uint8_t inspect(const uint8_t* data, size_t len) {
   if (!data || len < HEADER_SIZE) return 0;
   if (data[0] != MAGIC_0 || data[1] != MAGIC_1) return 0;
-  if (data[2] != PROTOCOL_VERSION) return 0;
+  if (data[2] < PROTOCOL_VERSION_RX_MIN || data[2] > PROTOCOL_VERSION_RX_MAX) {
+    return 0;
+  }
   return data[3];
 }
 
@@ -718,6 +765,21 @@ inline bool parseHello(const uint8_t* data, size_t len, ParsedHello& out) {
   out.nameLen = nameLen;
   if (nameLen) std::memcpy(out.name, &data[25], nameLen);
   out.name[nameLen] = '\0';
+  // TLV trailer walk (v0x05+).
+  out.otaState = kOtaStateIdle;
+  size_t off = HELLO_FIXED_SIZE + 1 + nameLen;
+  if (len <= off) return true;
+  const uint8_t tlvCount = data[off++];
+  for (uint8_t i = 0; i < tlvCount; ++i) {
+    if (len < off + 2) return false;
+    const uint8_t tlvType = data[off++];
+    const uint8_t tlvLen  = data[off++];
+    if (len < off + tlvLen) return false;
+    if (tlvType == HELLO_TLV_OTA_STATE && tlvLen == 1) {
+      out.otaState = data[off];
+    }
+    off += tlvLen;
+  }
   return true;
 }
 
@@ -777,6 +839,16 @@ inline bool parseWispHello(const uint8_t* data, size_t len, ParsedWispHello& out
      | (static_cast<uint32_t>(data[fwOff + 1]) << 8)
      | (static_cast<uint32_t>(data[fwOff + 2]) << 16)
      | (static_cast<uint32_t>(data[fwOff + 3]) << 24);
+  // TLV trailer (v0x05+). No known WISP_HELLO TLV types yet; walk + skip.
+  size_t off = WISP_HELLO_FIXED_SIZE;
+  if (len <= off) return true;
+  const uint8_t tlvCount = data[off++];
+  for (uint8_t i = 0; i < tlvCount; ++i) {
+    if (len < off + 2) return false;
+    const uint8_t tlvLen = data[off + 1];
+    if (len < off + 2 + tlvLen) return false;
+    off += 2 + tlvLen;
+  }
   return true;
 }
 

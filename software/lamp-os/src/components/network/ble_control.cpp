@@ -19,6 +19,7 @@
 #include "util/proximity.hpp"
 #include "core/pending_slot_aggregate.hpp"
 #include "core/override_aggregate.hpp"
+#include "core/ota_quiet_mode.hpp"  // isQuiet() gate on live-control writes
 #include "bluetooth.hpp"  // for BLE_GAP_SCAN_TIME_MS
 #include "crypto.hpp"
 #include "components/network/gatt_layout.hpp"  // kGattLayout, kGattSchemaVersion
@@ -430,6 +431,7 @@ class AuthCallback : public NimBLECharacteristicCallbacks {
 class BrightnessCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
+    if (lamp::ota_quiet_mode::isQuiet()) return;
     std::string val = c->getValue();
     if (val.empty()) return;
     uint8_t level = static_cast<uint8_t>(val[0]);
@@ -474,6 +476,7 @@ class BrightnessCallback : public NimBLECharacteristicCallbacks {
 class EditSessionCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
+    if (lamp::ota_quiet_mode::isQuiet()) return;
     std::string val = c->getValue();
     if (val.size() < 2) return;
     const uint8_t surface = static_cast<uint8_t>(val[0]);
@@ -491,6 +494,7 @@ class EditSessionCallback : public NimBLECharacteristicCallbacks {
 class HomeModeFocusCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
+    if (lamp::ota_quiet_mode::isQuiet()) return;
     std::string val = c->getValue();
     if (val.empty()) return;
     const bool active = val[0] != 0;
@@ -505,6 +509,7 @@ class HomeModeFocusCallback : public NimBLECharacteristicCallbacks {
 class BaseKnockoutCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
+    if (lamp::ota_quiet_mode::isQuiet()) return;
     std::string val = c->getValue();
     if (val.size() < 2) return;
     uint8_t pixelIndex = static_cast<uint8_t>(val[0]);
@@ -573,6 +578,12 @@ static std::string buildNearbyLampsJson() {
     sh.add(p.shadeColor.r); sh.add(p.shadeColor.g); sh.add(p.shadeColor.b); sh.add(p.shadeColor.w);
     JsonArray ba = o["base"].to<JsonArray>();
     ba.add(p.baseColor.r);  ba.add(p.baseColor.g);  ba.add(p.baseColor.b);  ba.add(p.baseColor.w);
+    // Mesh-debug fields: firmware version (packed semver) + current
+    // OTA state (0=idle, 1=sending, 2=receiving) as seen in the last
+    // HELLO from this peer. Both omitted when zero/idle to keep the
+    // JSON compact in the common case (most peers most of the time).
+    if (p.firmwareVersion != 0) o["fwVersion"] = p.firmwareVersion;
+    if (p.otaState != 0) o["otaState"] = p.otaState;
   }
   std::string out;
   serializeJson(doc, out);
@@ -593,6 +604,7 @@ class SocialDispositionsCallback : public NimBLECharacteristicCallbacks {
   }
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
+    if (lamp::ota_quiet_mode::isQuiet()) return;
     std::string val = c->getValue();
     if (val.size() > lamp::kPendingJsonOp) return;
 #ifdef LAMP_DEBUG
@@ -730,6 +742,7 @@ class SettingsBlobCallback : public NimBLECharacteristicCallbacks {
   // (CHAR_PAGE_CTRL + CHAR_PAGE_DATA); CHAR_SETTINGS_BLOB is the
   // write-and-reboot save target only.
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
+    if (lamp::ota_quiet_mode::isQuiet()) return;
     static const auto uuid = uuidSaltLE(CHAR_SETTINGS_BLOB);
     const uint16_t handle = connInfo.getConnHandle();
     const std::string raw = c->getValue();
@@ -962,6 +975,7 @@ class FwControlCallback : public NimBLECharacteristicCallbacks {
     lamp::PendingFirmwareControl slot{};
     slot.transportKind  = lamp::FirmwareTransportKind::Ble;
     slot.bleConnHandle  = connInfo.getConnHandle();
+    slot.wireVersion    = static_cast<uint8_t>(raw.size() >= 3 ? raw[2] : 0);
 
     if (msgType == lamp_protocol::MSG_FW_OFFER) {
       lamp_protocol::ParsedFwOffer p;
@@ -1336,6 +1350,26 @@ void pauseRadioForOta() {
 #endif
 #ifdef LAMP_DEBUG
   Serial.println("[ble_control] paused adv + scan + softAP for OTA");
+#endif
+}
+
+// Kick any active GATT client. Used by ota_quiet_mode on the mesh-OTA
+// path so a connected phone can't keep sending writes that fight the
+// chunk stream for radio time. The GATT server stays up — only the
+// connection is killed; the phone will reconnect after RESULT/abort
+// or the OTA-driven reboot once advertising restarts.
+//
+// Safe to call from any task: NimBLEServer::disconnect serialises via
+// the NimBLE host task's event queue.
+//
+// Idempotent: if no client is connected, this is a no-op.
+void disconnectGattClientsForOta() {
+  if (s_currentConnHandle == 0xFFFF) return;
+  if (!s_server) return;
+  s_server->disconnect(s_currentConnHandle);
+#ifdef LAMP_DEBUG
+  Serial.printf("[ble_control] kicked GATT client handle=%u for OTA\n",
+                s_currentConnHandle);
 #endif
 }
 

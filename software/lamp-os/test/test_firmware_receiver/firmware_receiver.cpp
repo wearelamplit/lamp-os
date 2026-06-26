@@ -210,6 +210,9 @@ class FirmwareReceiver {
   State state() const { return state_; }
   bool isBitmapFullForTest() const { return isBitmapFull(); }
   uint16_t firstMissingForTest() const { return firstMissingChunk(); }
+  uint16_t firstMissingRunLenForTest(uint16_t firstMissing) const {
+    return firstMissingRunLen(firstMissing);
+  }
   void setMockNow(uint32_t now) { mockNow_ = now; }
 
   // Test helpers
@@ -241,6 +244,27 @@ class FirmwareReceiver {
       if ((bitmap_[byteIdx] & bit) == 0) return static_cast<uint16_t>(i);
     }
     return UINT16_MAX;
+  }
+  // Mirror of the real receiver's firstMissingRunLen — window-based
+  // last-missing scan over kMaxReqRunChunksTest chunks. See the
+  // production comment for why this returns the window span rather
+  // than the longest contiguous run.
+  static constexpr uint16_t kMaxReqRunChunksTest = 64;
+  uint16_t firstMissingRunLen(uint16_t firstMissing) const {
+    if (firstMissing == UINT16_MAX) return 0;
+    uint16_t lastMissingInWindow = firstMissing;
+    const size_t windowEnd =
+        static_cast<size_t>(firstMissing) + kMaxReqRunChunksTest;
+    for (size_t i = firstMissing;
+         i < bitmapTotalChunks_ && i < windowEnd; ++i) {
+      const size_t byteIdx = i / 8;
+      const uint8_t bit = static_cast<uint8_t>(1u << (i % 8));
+      if (byteIdx >= bitmap_.size()) break;
+      if ((bitmap_[byteIdx] & bit) == 0) {
+        lastMissingInWindow = static_cast<uint16_t>(i);
+      }
+    }
+    return static_cast<uint16_t>(lastMissingInWindow - firstMissing + 1);
   }
 
  private:
@@ -790,6 +814,106 @@ void test_failed_state_resets_on_next_tick() {
                     static_cast<int>(fr.state()));
 }
 
+// --- firstMissingRunLen ---
+
+// Returns 0 when there is no missing chunk (sentinel UINT16_MAX in).
+void test_firstMissingRunLen_returns_zero_when_no_missing() {
+  test::FirmwareReceiver fr;
+  fr.resetBitmap(100);
+  // Mark every chunk as received.
+  for (uint16_t i = 0; i < 100; ++i) fr.markChunkReceived(i);
+  TEST_ASSERT_EQUAL_UINT16(0, fr.firstMissingRunLenForTest(UINT16_MAX));
+}
+
+// Returns 1 when only the first-missing chunk is unset and the next
+// is set — the optimisation degrades to "behaves like count=1".
+void test_firstMissingRunLen_returns_one_for_isolated_hole() {
+  test::FirmwareReceiver fr;
+  fr.resetBitmap(100);
+  // Mark 0-49, skip 50, mark 51-99 → isolated hole at 50.
+  for (uint16_t i = 0; i < 50; ++i) fr.markChunkReceived(i);
+  for (uint16_t i = 51; i < 100; ++i) fr.markChunkReceived(i);
+  TEST_ASSERT_EQUAL_UINT16(50, fr.firstMissingForTest());
+  TEST_ASSERT_EQUAL_UINT16(1, fr.firstMissingRunLenForTest(50));
+}
+
+// Returns the run length for a contiguous run — this is where the
+// optimisation pays for itself versus count=1.
+void test_firstMissingRunLen_returns_run_length_for_contiguous() {
+  test::FirmwareReceiver fr;
+  fr.resetBitmap(100);
+  // Mark 0-29, skip 30..49 (20-chunk run), mark 50-99.
+  for (uint16_t i = 0; i < 30; ++i) fr.markChunkReceived(i);
+  for (uint16_t i = 50; i < 100; ++i) fr.markChunkReceived(i);
+  TEST_ASSERT_EQUAL_UINT16(30, fr.firstMissingForTest());
+  TEST_ASSERT_EQUAL_UINT16(20, fr.firstMissingRunLenForTest(30));
+}
+
+// Caps at kMaxReqRunChunks so an early-stream "everything missing"
+// session doesn't dwarf the distributor's forward-stream cursor.
+void test_firstMissingRunLen_caps_at_kMaxReqRunChunks() {
+  test::FirmwareReceiver fr;
+  fr.resetBitmap(500);
+  // Mark nothing — every chunk missing. Should cap at 64 (the
+  // mirrored kMaxReqRunChunksTest constant) regardless of how
+  // many actual missing chunks follow.
+  TEST_ASSERT_EQUAL_UINT16(0, fr.firstMissingForTest());
+  TEST_ASSERT_EQUAL_UINT16(64, fr.firstMissingRunLenForTest(0));
+}
+
+// Run ends at the bitmap boundary even when shorter than the cap.
+void test_firstMissingRunLen_stops_at_bitmap_end() {
+  test::FirmwareReceiver fr;
+  fr.resetBitmap(40);
+  // Mark 0-29 → chunks 30..39 missing (10-chunk tail run, below cap).
+  for (uint16_t i = 0; i < 30; ++i) fr.markChunkReceived(i);
+  TEST_ASSERT_EQUAL_UINT16(30, fr.firstMissingForTest());
+  TEST_ASSERT_EQUAL_UINT16(10, fr.firstMissingRunLenForTest(30));
+}
+
+// The window approach: scattered holes within a single window get
+// covered by ONE REQ — the count spans first..last-missing inclusive,
+// even if some chunks in between are already received. This is the
+// real-world win versus a contiguous-only scan.
+void test_firstMissingRunLen_covers_scattered_holes_in_window() {
+  test::FirmwareReceiver fr;
+  fr.resetBitmap(100);
+  // Mark 0-29 received. Then 30 missing, 31-32 received, 33 missing,
+  // 34-35 received, 36 missing, then 37-99 received.
+  // Within the 64-chunk window starting at 30: last missing is 36,
+  // so count = 36 - 30 + 1 = 7.
+  for (uint16_t i = 0; i < 30; ++i) fr.markChunkReceived(i);
+  fr.markChunkReceived(31);
+  fr.markChunkReceived(32);
+  fr.markChunkReceived(34);
+  fr.markChunkReceived(35);
+  for (uint16_t i = 37; i < 100; ++i) fr.markChunkReceived(i);
+  TEST_ASSERT_EQUAL_UINT16(30, fr.firstMissingForTest());
+  TEST_ASSERT_EQUAL_UINT16(7, fr.firstMissingRunLenForTest(30));
+}
+
+// If the only missing chunk is far away inside the window, we still
+// cap at kMaxReqRunChunks — covering the full window is the worst
+// case in terms of duplicate re-stream, but it's still one REQ per
+// 64 chunks instead of one per missing chunk.
+void test_firstMissingRunLen_caps_when_scattered_beyond_window() {
+  test::FirmwareReceiver fr;
+  fr.resetBitmap(200);
+  // Mark everything except 30 and 150. firstMissing = 30. The window
+  // [30, 94) contains only one missing chunk (30), so count = 1.
+  // The function does NOT reach chunk 150 — that's a later REQ.
+  for (uint16_t i = 0; i < 200; ++i) fr.markChunkReceived(i);
+  // Now selectively unset 30 and 150.
+  // (test::FirmwareReceiver has no unset; rebuild the bitmap by hand.)
+  fr.resetBitmap(200);
+  for (uint16_t i = 0; i < 200; ++i) {
+    if (i == 30 || i == 150) continue;
+    fr.markChunkReceived(i);
+  }
+  TEST_ASSERT_EQUAL_UINT16(30, fr.firstMissingForTest());
+  TEST_ASSERT_EQUAL_UINT16(1, fr.firstMissingRunLenForTest(30));
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
@@ -812,5 +936,12 @@ int main(int argc, char** argv) {
   RUN_TEST(test_bitmap_full_at_non_multiple_of_8);
   RUN_TEST(test_bitmap_full_at_exact_multiple_of_8);
   RUN_TEST(test_failed_state_resets_on_next_tick);
+  RUN_TEST(test_firstMissingRunLen_returns_zero_when_no_missing);
+  RUN_TEST(test_firstMissingRunLen_returns_one_for_isolated_hole);
+  RUN_TEST(test_firstMissingRunLen_returns_run_length_for_contiguous);
+  RUN_TEST(test_firstMissingRunLen_caps_at_kMaxReqRunChunks);
+  RUN_TEST(test_firstMissingRunLen_stops_at_bitmap_end);
+  RUN_TEST(test_firstMissingRunLen_covers_scattered_holes_in_window);
+  RUN_TEST(test_firstMissingRunLen_caps_when_scattered_beyond_window);
   return UNITY_END();
 }
