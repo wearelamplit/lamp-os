@@ -101,7 +101,7 @@ Config::Config(Preferences* inPrefs) {
   }
   // byteOrder is the source of truth for strip type. When absent (legacy
   // payloads), default-derive from bpp so behavior is unchanged for
-  // existing lamps. See docs/firmware-proposals/2026-05-29-neo-bgr-byte-order.md.
+  // existing lamps.
   const char* baseBoCstr = baseNode["byteOrder"] | "";
   base.byteOrder = baseBoCstr;
   if (base.byteOrder.empty()) {

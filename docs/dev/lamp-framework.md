@@ -8,29 +8,29 @@ firmware: BLE GATT characteristics for real-time settings (brightness, color)
 and the JSON section protocol for non-volatile personality storage (name, visual
 behaviors, mood settings). The framework wires mesh discovery, pending-slot
 multitasking, color/brightness overrides, and a pluggable behavior stack. It
-does NOT include visual algorithms (animations, gradients, palette cycling) —
+does NOT include visual algorithms (animations, gradients, palette cycling), 
 that's your `AnimatedBehavior` subclass's domain.
 
-**Unified firmware model (Phase H).** A single PIO environment (`upesy_wroom`)
-produces one binary containing every variant's code. The runtime factory in
-`main.cpp` reads `Config::lampType` from NVS at boot and instantiates the right
-subclass — no per-variant envs, no `build_src_filter` gymnastics. OSS forks get
-per-fork ed25519 signing: cross-fork OTA is cryptographically impossible.
-
-Reference spec:
-`docs/superpowers/specs/2026-06-22-lamp-framework-phase-h-unified-firmware-design.md`
+**Per-variant builds.** Each lamp variant has its own PIO environment
+(`upesy_wroom_standard`, `upesy_wroom_snafu`). A `build_src_filter` compiles
+only that variant's `lamps/<variant>/` code, and a `-D LAMP_BUILD_VARIANT_*`
+flag seeds the variant on a fresh NVS. At boot, `resolveLampType()` in
+`main.cpp` reads `Config::lampType` from NVS (falling back to the build-flag
+seed on first boot), then `createLampByType()` instantiates the matching
+subclass. Per-variant ed25519-signed binaries keep cross-variant and cross-fork
+OTA cryptographically separated.
 
 ## Single-instance invariant
 
 The framework assumes ONE Lamp subclass instance per firmware binary,
 selected at boot by the `core/lamp_variants.cpp` factory (per NVS `lampType`).
-This is deliberate — it lets compositor, config, frame buffers, NimBLE handles,
+This is deliberate, it lets compositor, config, frame buffers, NimBLE handles,
 and aggregate state (pendingSlots, overrides) live at file scope without
 coordination overhead. Two Lamp instances in one binary is unsupported.
 
 Practical consequence: framework-level state in `core/lamp.cpp` is
 file-scope-static, not `Lamp` private members. If you find a comment suggesting
-"Lamp base will own this later," that's stale — single-instance IS the design.
+"Lamp base will own this later," that's stale, single-instance IS the design.
 
 ## The contract (what your custom lamp must implement)
 
@@ -40,30 +40,30 @@ The app communicates with firmware via standard NimBLE GATT characteristics.
 Two sections of the `LAMP_SECTION` characteristic carry personality settings and
 color/expression data:
 
-- **`lampSection`** — read/write JSON blob containing the lamp's identity
+- **`lampSection`**, read/write JSON blob containing the lamp's identity
   (name, `colorsEditable` flags per surface, `lampType`, etc.).
-- **`colorSection`** — page-protocol JSON subset for storing expressions,
+- **`colorSection`**, page-protocol JSON subset for storing expressions,
   overrides, and visual configuration.
 
-Refer to **[`docs/mesh-api.md`](mesh-api.md)** for the complete wire-format
-spec and all message types. The code is authoritative — update that doc when
+Refer to **[`docs/dev/mesh-api.md`](mesh-api.md)** for the complete wire-format
+spec and all message types. The code is authoritative, update that doc when
 behavior diverges.
 
 ### Protocol version lock
 
-`PROTOCOL_VERSION = 0x03` (frozen as of 2026-06 mesh deploy). Mixed-fleet
-operation across protocol versions does not interoperate — peers reject frames
+`PROTOCOL_VERSION = 0x04`. Mixed-fleet
+operation across protocol versions does not interoperate, peers reject frames
 from mismatched versions, surfacing as a loud, diagnosable failure (missing
 neighbors in the app's nearby-lamp list). Do not bump without coordinating a
 re-flash of all 22 lamps in the deployed fleet.
 
-## Adding a custom lamp — 3-step recipe
+## Adding a custom lamp: 3-step recipe
 
 ### Step 1: Create `src/lamps/<name>/<name>.{hpp,cpp}`
 
 Subclass `lamp::Lamp`, provide `HwConfig` in the constructor, override
 `defaults()`, `featuresEnabled()`, and `createBehaviors()`. Add any custom
-`AnimatedBehavior` subclasses in the same directory. Real example —
+`AnimatedBehavior` subclasses in the same directory. Real example, 
 `SnafuLamp`:
 
 ```cpp
@@ -72,8 +72,8 @@ class SnafuLamp : public Lamp {
  public:
   SnafuLamp() : Lamp(HwConfig{
     .surfaces = {
-      {.id=Surface::Shade, .pin=12,  .byteOrder=ByteOrder::GRBW},
-      {.id=Surface::Base,  .pin=14,  .byteOrder=ByteOrder::GRBW},
+      {.id=Surface::Shade, .pin=12, .byteOrder=ByteOrder::GRBW},
+      {.id=Surface::Base, .pin=14, .byteOrder=ByteOrder::GRBW},
     },
     .maxBrightness = 180,
   }) {}
@@ -88,8 +88,8 @@ class SnafuLamp : public Lamp {
   Config::Defaults defaults() const override {
     return {
       .name              = "snafu",
-      .baseColor         = "#300783",   // purple stem — user-editable
-      .shadeColor        = "#781000",   // amanita red — picker hidden in app
+      .baseColor         = "#300783",  // purple stem, user-editable
+      .shadeColor        = "#781000",  // amanita red, picker hidden in app
       .baseColorsEditable  = true,
       .shadeColorsEditable = false,
     };
@@ -115,7 +115,7 @@ bitmask enum.
 
 ### Step 2: Register in the variant array
 
-Edit `software/lamp-os/src/core/lamp_variants.cpp` — three lines:
+Edit `software/lamp-os/src/core/lamp_variants.cpp`, three lines:
 
 ```cpp
 // 1. Add the include near the top
@@ -129,8 +129,8 @@ inline std::unique_ptr<Lamp> make<Name>() {
 // 3. Append to kLampVariants
 constexpr std::array<NamedFactory, N+1> kLampVariants = {{
   {"standard", makeStandard},
-  {"snafu",    makeSnafu},
-  {"<name>",   make<Name>},   // ← add here
+  {"snafu",   makeSnafu},
+  {"<name>",  make<Name>},  // ← add here
 }};
 ```
 
@@ -140,25 +140,28 @@ file needs to change.
 ### Step 3: Build
 
 ```sh
-cd software/lamp-os && pio run -e upesy_wroom
+npm run lamp:build          # standard variant
+npm run lamp:build:snafu    # snafu variant
+# (or directly: cd software/lamp-os && pio run -e upesy_wroom_<variant>)
 ```
 
-A single env compiles every variant into one binary. The runtime factory picks
-the variant at boot.
+Each variant has its own env, so `build_src_filter` compiles only that variant's
+sources into its own binary. The runtime factory still resolves the type from
+NVS at boot.
 
 ## Provisioning a fresh hardware lamp
 
 ### Command-line (scripted provisioning)
 
 ```sh
-LAMP_TYPE=snafu pio run -e upesy_wroom -t upload \
-  --upload-port /dev/cu.usbserial-XXX
+pio run -e upesy_wroom_snafu -t upload --upload-port /dev/cu.usbserial-XXX
+# or, from the repo root: npm run lamp:flash:snafu
 ```
 
-The `LAMP_TYPE` env var is consumed by
-`software/lamp-os/scripts/inject_initial_type.py` (wired as a PIO pre-build
-hook). It injects `-D LAMP_INITIAL_TYPE="snafu"` using the SCons `CPPDEFINES`
-tuple form, bypassing shell-quoting hazards. On first boot, `main.cpp` seeds
+The per-variant env declares `custom_lamp_variant = snafu`, which
+`software/lamp-os/scripts/inject_initial_type.py` (a PIO pre-build hook) reads
+via `env.GetProjectOption()` and turns into `-D LAMP_INITIAL_TYPE="snafu"`
+(SCons `CPPDEFINES` tuple form, bypassing shell-quoting hazards). On first boot, `main.cpp` seeds
 NVS with this value; subsequent OTAs preserve identity.
 
 ### Serial CLI (interactive)
@@ -178,15 +181,15 @@ rejects unknown types (with the known-names list printed to serial).
 
 `main.cpp`'s `resolveLampType()` priority order:
 
-1. **NVS `lampType`** — set on a previous boot or via serial CLI
-2. **`LAMP_INITIAL_TYPE` build flag** — first-boot seed from `LAMP_TYPE` env
-   var; persists to NVS on first use
-3. **Serial CLI prompt** — 10-second window on USB serial when both above are
+1. **NVS `lampType`**, set on a previous boot or via serial CLI
+2. **`LAMP_INITIAL_TYPE` build flag**, first-boot seed injected from the env's
+   `custom_lamp_variant`; persists to NVS on first use
+3. **Serial CLI prompt**, 10-second window on USB serial when both above are
    absent
-4. **Default `"standard"`** — canonical fallback
+4. **Default `"standard"`**, canonical fallback
 
 The resolved type is always logged: `[lamp] resolved lampType="X"`. On an
-unknown type, `main.cpp` calls `haltVisible()` — an infinite LED blink — rather
+unknown type, `main.cpp` calls `haltVisible()`, an infinite LED blink, rather
 than silently falling back. A lamp that boots healthy but drives wrong hardware
 is the worst failure mode.
 
@@ -220,7 +223,7 @@ void snafu::Greeting::control() {
 }
 ```
 
-## Arrival edge detection — firstSeenMs
+## Arrival edge detection: firstSeenMs
 
 Detecting when a peer first appears on the mesh maps to Python's
 `await network.arrived()`. Use the 3-line pattern:
@@ -228,7 +231,7 @@ Detecting when a peer first appears on the mesh maps to Python's
 ```cpp
 for (const auto& p : context_->nearbyLamps->getReachableViaBle(/*maxAgeMs=*/5000)) {
   if (p.firstSeenMs >= lastTickMs_ && p.bdAddr != lastGreetedBdAddr_) {
-    // peer just arrived — this fires exactly once per arrival
+    // peer just arrived, this fires exactly once per arrival
   }
 }
 lastTickMs_ = millis();
@@ -250,14 +253,14 @@ override:
 Config::Defaults defaults() const override {
   return {
     .name              = "snafu",
-    .shadeColor        = "#781000",   // amanita red
-    .shadeColorsEditable = false,     // app hides picker for shade
+    .shadeColor        = "#781000",  // amanita red
+    .shadeColorsEditable = false,    // app hides picker for shade
     // ...
   };
 }
 ```
 
-The flag is firmware-owned — set at construction time, read by the app from the
+The flag is firmware-owned, set at construction time, read by the app from the
 lamp's JSON, and not updatable via settings-blob write. Absent field defaults to
 `true` for backward compatibility with older firmware.
 
@@ -273,7 +276,7 @@ attacks:
    python3 scripts/gen_firmware_keys.py --force
    ```
    This generates an ed25519 keypair. The private key lands at
-   `~/.lamp-os-firmware-key.bin` — never commit it. The public key is rewritten
+   `~/.lamp-os-firmware-key.bin`, never commit it. The public key is rewritten
    into `software/lamp-os/src/components/firmware/firmware_pubkey.h`, which you
    DO commit. Building without running this step first fails.
 
@@ -284,25 +287,25 @@ attacks:
    validation and is rejected.
 
 This is the fork-isolation mechanism. Cross-fork OTA is cryptographically
-impossible — no registry or allowlist needed. The signing chain enforces it.
+impossible, no registry or allowlist needed. The signing chain enforces it.
 
 ## Stability matrix
 
-### Stable API — third-party lamps may rely on
+### Stable API: third-party lamps may rely on
 
 | Header | Stability guarantee |
 |---|---|
-| `core/lamp.hpp` | STABLE — the 3 virtuals (`defaults`, `featuresEnabled`, `createBehaviors`) are versioned API |
-| `core/hw_config.hpp` | STABLE — POD, additive fields only |
-| `core/lamp_features.hpp` | STABLE — flag values frozen; bits 3–4 unused. Do not reuse without consulting deployed clients |
-| `core/behavior_stack_builder.hpp` | STABLE — use const `behaviors()` accessor |
-| `core/animated_behavior.hpp` | STABLE — base class for custom behaviors |
-| `core/behavior_context.hpp` | STABLE-ADDITIVE — new nullable pointers may be added; existing pointers won't be removed |
-| `core/personality_engine.hpp` | STABLE — personality gate for expression suppression |
-| `components/network/nearby_lamps.hpp` | STABLE — read by custom behaviors |
-| `config/config.hpp` | STABLE — read-only surface for custom behaviors |
+| `core/lamp.hpp` | STABLE, the 3 virtuals (`defaults`, `featuresEnabled`, `createBehaviors`) are versioned API |
+| `core/hw_config.hpp` | STABLE, POD, additive fields only |
+| `core/lamp_features.hpp` | STABLE, flag values frozen; bits 3–4 unused. Do not reuse without consulting deployed clients |
+| `core/behavior_stack_builder.hpp` | STABLE, use const `behaviors()` accessor |
+| `core/animated_behavior.hpp` | STABLE, base class for custom behaviors |
+| `core/behavior_context.hpp` | STABLE-ADDITIVE, new nullable pointers may be added; existing pointers won't be removed |
+| `core/personality_engine.hpp` | STABLE, personality gate for expression suppression |
+| `components/network/nearby_lamps.hpp` | STABLE, read by custom behaviors |
+| `config/config.hpp` | STABLE, read-only surface for custom behaviors |
 
-### Internal headers — may change without notice
+### Internal headers: may change without notice
 
 | Header | Why internal |
 |---|---|
@@ -310,7 +313,7 @@ impossible — no registry or allowlist needed. The signing chain enforces it.
 | `core/override_aggregate.hpp` | framework transient-override state |
 | `core/pending_json_slot.hpp` | JSON-typed variant of the pending slot |
 | `core/pending_typed_slot.hpp` | typed variant of the pending slot |
-| `behaviors/` | built-in `AnimatedBehavior` subclasses (SocialBehavior, FadeOutBehavior, KnockoutBehavior, FadeInBehavior, IdleBehavior, ConfiguratorBehavior) — internal, subject to change |
+| `behaviors/` | built-in `AnimatedBehavior` subclasses (SocialBehavior, FadeOutBehavior, KnockoutBehavior, FadeInBehavior, IdleBehavior, ConfiguratorBehavior), internal, subject to change |
 | `components/network/show_receiver.hpp` | wire-protocol dispatch |
 
 ## Testing pattern for contributed variants
@@ -320,13 +323,13 @@ Adafruit_NeoPixel. Use the inline-mirror pattern: re-implement just the
 predicate or emit logic in the test, verify against expected output. Existing
 examples:
 
-- `test/test_hw_config_validate/hw_config_validate.cpp` — validates
+- `test/test_hw_config_validate/hw_config_validate.cpp`, validates
   `validateHwConfig()` predicate (empty surfaces, zero pixelCount, duplicate
   pins) without touching Arduino.
-- `test/test_lamp_type_emit/lamp_type_emit.cpp` — mirrors the `lampType` JSON
+- `test/test_lamp_type_emit/lamp_type_emit.cpp`, mirrors the `lampType` JSON
   emit line from `config.cpp::asLampJson`; verifies shape without linking
   `Config`.
-- `test/test_section_emit_colors_editable/` — mirrors
+- `test/test_section_emit_colors_editable/`, mirrors
   `BaseSettings`/`ShadeSettings` colorsEditable emit; verifies the JSON field
   shape.
 
@@ -343,7 +346,7 @@ Arduino) and call `validateHwConfig()`.
 ## Key rotation
 
 Losing the ed25519 private key (`~/.lamp-os-firmware-key.bin`) means the
-deployed fleet can never accept new OTAs — the embedded pubkey is baked into
+deployed fleet can never accept new OTAs, the embedded pubkey is baked into
 each lamp's flash and `firmware_signature.cpp` will reject anything signed with
 the new key. Recovery requires USB-reflashing every lamp.
 
@@ -361,16 +364,18 @@ Relevant files: `scripts/sign_firmware.py` (signer),
 
 ## PIO build setup
 
-Single env: `upesy_wroom`. Default builds compile every variant's sources into
-one binary.
+Per-variant envs: `upesy_wroom_standard`, `upesy_wroom_snafu` (both extend
+`env_base_upesy`). Each declares `custom_lamp_variant = <name>` and a
+`build_src_filter` that compiles **only** that variant's `lamps/<variant>/`
+sources, the other variant is never built.
 
 **`inject_initial_type.py` hook** is wired as a PIO pre-build script
-(`extra_scripts = pre:scripts/inject_initial_type.py`). It reads the `LAMP_TYPE`
-shell env var and, if set, appends
-`-D LAMP_INITIAL_TYPE="<name>"` to `CPPDEFINES` using SCons tuple form — no
+(`extra_scripts = pre:scripts/inject_initial_type.py` in `env_base_upesy`). It
+reads the env's `custom_lamp_variant` option and appends
+`-D LAMP_INITIAL_TYPE="<name>"` to `CPPDEFINES` using SCons tuple form, no
 shell-quoting hazards.
 
-**SemVer source-of-truth.** The three build_flags in `[env:upesy_wroom]` of
+**SemVer source-of-truth.** The three build_flags in `[env_base_upesy]` of
 `platformio.ini` are the canonical version:
 
 ```ini
@@ -382,7 +387,7 @@ shell-quoting hazards.
 `FIRMWARE_VERSION_STR` is derived from these via preprocessor stringify.
 Bumping a release = edit three integers; no other file needs to change.
 
-## Lifecycle — Core 0 vs Core 1
+## Lifecycle: Core 0 vs Core 1
 
 The ESP32 runs dual cores. Understanding which runs where is critical for safe
 multitasking:
@@ -412,7 +417,7 @@ or allocate directly on the host task. Instead, use
 **DO NOT do on Core 0 (inside BLE callbacks or ESP-NOW handlers):**
 - Allocate heap memory.
 - Call blocking functions.
-- Mutate Compositor or Lamp state directly — queue to pending slots instead.
+- Mutate Compositor or Lamp state directly, queue to pending slots instead.
 
 ## File index
 
@@ -421,7 +426,7 @@ or allocate directly on the host task. Instead, use
 | `software/lamp-os/src/core/lamp.hpp` | Base class: setup/tick entry points, hw config accessor |
 | `software/lamp-os/src/core/lamp.cpp` | Implementation: BLE GATT wiring, mesh init, OTA health checks |
 | `software/lamp-os/src/core/lamp_variants.hpp` | `createLampByType()` + `knownLampTypes()` declarations |
-| `software/lamp-os/src/core/lamp_variants.cpp` | `kLampVariants` array — append new variants here |
+| `software/lamp-os/src/core/lamp_variants.cpp` | `kLampVariants` array, append new variants here |
 | `software/lamp-os/src/core/hw_config.hpp` | `HwConfig`, `SurfaceSpec`, `Surface`, `ByteOrder` PODs + `validateHwConfig()` |
 | `software/lamp-os/src/core/lamp_features.hpp` | `Features` bitmask enum for built-in behavior opt-in/out |
 | `software/lamp-os/src/core/behavior_stack_builder.hpp` | `BehaviorStackBuilder` helper for registering behaviors |
@@ -437,7 +442,7 @@ or allocate directly on the host task. Instead, use
 | `software/lamp-os/src/lamps/snafu/greeting.hpp/.cpp` | Peer-arrival watcher with glitch + fade response |
 | `software/lamp-os/src/main.cpp` | Unified entry point: variant resolution + factory + FATAL halt |
 | `software/lamp-os/scripts/inject_initial_type.py` | PIO pre-build hook for `LAMP_TYPE` provisioning |
-| `software/lamp-os/platformio.ini` | Single env `upesy_wroom` + SemVer build_flags |
+| `software/lamp-os/platformio.ini` | Per-variant envs (`upesy_wroom_standard`/`_snafu`) extending `env_base_upesy`; SemVer build_flags |
 | `scripts/gen_firmware_keys.py` | Per-fork ed25519 keypair generation |
 | `scripts/sign_firmware.py` | Build-time firmware signer |
 | `software/lamp-os/src/components/firmware/firmware_signature.cpp` | Boot-time signature verifier |

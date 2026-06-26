@@ -15,7 +15,7 @@ namespace lamp {
 // base or shade surface. Defined in expression.cpp. Used by
 // Expression::control() and any continuous subclass that overrides
 // control() to honour `disabledDuringWispOverride`. See
-// `docs/expressions.md` for the semantics.
+// `docs/dev/expressions.md` for the semantics.
 bool isWispCurrentlyOverriding();
 
 enum ExpressionTarget {

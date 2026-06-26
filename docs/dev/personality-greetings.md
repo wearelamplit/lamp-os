@@ -8,26 +8,26 @@ The code wins ties; update this doc when it doesn't.
 
 Implementation lives in:
 
-- `software/lamp-os/src/core/personality_engine.{hpp,cpp}` — profile
+- `software/lamp-os/src/core/personality_engine.{hpp,cpp}`, profile
   constants, `(SocialMode × Disposition) → Profile` mapping,
   `GreetingTuning` struct.
-- `software/lamp-os/src/behaviors/social.{hpp,cpp}` — waveform renderer,
+- `software/lamp-os/src/behaviors/social.{hpp,cpp}`, waveform renderer,
   cooldown gating, per-peer regreet tracking, fatigue.
 
 ## Concepts
 
-**SocialMode** (per lamp, persisted in NVS) — `Introvert` / `Ambivert` /
+**SocialMode** (per lamp, persisted in NVS), `Introvert` / `Ambivert` /
 `Extrovert`. The lamp's own personality.
 
 **Disposition** (per peer, per lamp, asymmetric, persisted in NVS keyed
-by peer BD_ADDR) — `1=Salty`, `2=Wary`, `3=Neutral`, `4=Fond`,
+by peer BD_ADDR), `1=Salty`, `2=Wary`, `3=Neutral`, `4=Fond`,
 `5=Smitten`. How this lamp feels about that peer.
 
-**Greeting profile** — a named waveform shape with five parameters:
+**Greeting profile**, a named waveform shape with five parameters:
 total duration, ease-in duration, hold duration, fade-out duration, and
 optional pulse-back (depth + count) during the hold phase.
 
-**Pulse-back** — during the hold phase, the peer color can dim toward a
+**Pulse-back**, during the hold phase, the peer color can dim toward a
 darker version of itself in one or more cycles, then snap back. The
 remainder of the hold is steady at the peer color. Pulse rate is fixed
 at ~750 ms per breath (`kSlowPulseCycleFrames = 45` at 60 fps); explicit
@@ -35,7 +35,7 @@ counts (`pulseBackCount = 1, 2, …`) run exactly N cycles, and
 `pulseBackCount = kPulseCountContinuous` fills the entire hold with
 back-to-back cycles.
 
-**Snub** — a high-strength pulse-back (255 = full darken to black, 128
+**Snub**, a high-strength pulse-back (255 = full darken to black, 128
 = partial darken to ~50% retention) on a short profile. The negative
 side of the disposition spectrum, structurally identical to the warm
 side but with deeper dips and shorter durations.
@@ -65,7 +65,7 @@ Frame counts at ~60 fps. Strength is the `darken()` input (0 = no dim,
 
 **Ease-in inverts with warmth.** Slow ease-in (Minimal, 500 ms) reads as
 hesitant recognition; fast ease-in (Effusive, 100 ms) reads as eager
-lock-on. Fade-out grows with warmth — extended lingering on the warm
+lock-on. Fade-out grows with warmth, extended lingering on the warm
 side, quick let-go on the cold side.
 
 **Pulse depth deepens with warmth on the affectionate side.** Warm dips
@@ -85,8 +85,8 @@ window (no greetings during rest).
 |---|---|---|---|---|---|---|---|
 | Salty (1) | Snub | 1.0s | 0.3s | 0.4s | 0.3s | 1× → 0% | Snub in their color |
 | Wary (2) | PartialSnub | 1.0s | 0.3s | 0.4s | 0.3s | 1× → 50% | Partial snub in their color |
-| Neutral (3) | Minimal | 1.0s | 0.5s | 0.2s | 0.3s | — | Hold in their color |
-| Fond (4) | Gentle | 2.0s | 0.3s | 0.6s | 1.1s | — | Hold in their color |
+| Neutral (3) | Minimal | 1.0s | 0.5s | 0.2s | 0.3s | | Hold in their color |
+| Fond (4) | Gentle | 2.0s | 0.3s | 0.6s | 1.1s | | Hold in their color |
 | Smitten (5) | Warm | 3.0s | 0.2s | 1.1s | 1.7s | 1× → 60% | One subtle pulse in their color |
 
 ### Ambivert mode
@@ -98,7 +98,7 @@ window. No fatigue.
 |---|---|---|---|---|---|---|---|
 | Salty (1) | Snub | 1.0s | 0.3s | 0.4s | 0.3s | 1× → 0% | Snub in their color |
 | Wary (2) | PartialSnub | 1.0s | 0.3s | 0.4s | 0.3s | 1× → 50% | Partial snub in their color |
-| Neutral (3) | Standard | 2.5s | 0.25s | 0.85s | 1.4s | — | Hold in their color |
+| Neutral (3) | Standard | 2.5s | 0.25s | 0.85s | 1.4s | | Hold in their color |
 | Fond (4) | Warm | 3.0s | 0.2s | 1.1s | 1.7s | 1× → 60% | One subtle pulse in their color |
 | Smitten (5) | Enthused | 4.0s | 0.2s | 1.5s | 2.3s | 2× → 50% | Two pulses in their color |
 
@@ -111,7 +111,7 @@ window. No fatigue.
 |---|---|---|---|---|---|---|---|
 | Salty (1) | Snub-Quick | 1.5s | 0.4s | 0.6s | 0.5s | 1× → 0% | Snub in their color |
 | Wary (2) | PartialSnub-Quick | 1.5s | 0.4s | 0.6s | 0.5s | 1× → 50% | Partial snub in their color |
-| Neutral (3) | Standard | 2.5s | 0.25s | 0.85s | 1.4s | — | Hold in their color |
+| Neutral (3) | Standard | 2.5s | 0.25s | 0.85s | 1.4s | | Hold in their color |
 | Fond (4) | Enthused | 4.0s | 0.2s | 1.5s | 2.3s | 2× → 50% | Two pulses in their color |
 | Smitten (5) | Effusive | 5.0s | 0.1s | 2.0s | 2.9s | continuous → 40% | Continuous pulsing in their color |
 
@@ -128,26 +128,26 @@ can drain the lamp.
 
 Introvert is the personality that gets drained; Ambivert is balanced;
 Extrovert is eager but bounded. Snub and PartialSnub greetings are
-gated by the same cooldown as warm greetings — no bypass paths.
+gated by the same cooldown as warm greetings, no bypass paths.
 
 ## Effect glossary
 
-- **Snub** — ease into peer color, dim through that color all the way
+- **Snub**, ease into peer color, dim through that color all the way
   to black on one slow breath, return to peer color, fade out. The
   observer sees a brief flash of the peer's color sandwiching a
   blackout, identifying who the snub is aimed at.
-- **Partial snub** — same shape as Snub but dims only to ~50% of the
+- **Partial snub**, same shape as Snub but dims only to ~50% of the
   peer color. Reads as a hesitant pullback rather than a hard
   blackout.
-- **Hold** — ease into peer color, hold steady at peer color, fade
+- **Hold**, ease into peer color, hold steady at peer color, fade
   out. No pulse. The duration distinguishes a quick Neutral
   acknowledgement from a lingering Fond settle.
-- **Subtle pulse** — one slow breath dipping to ~60% retention then
+- **Subtle pulse**, one slow breath dipping to ~60% retention then
   returning to peer color. Used by Smitten Introvert and Fond Ambivert.
-- **Pulses (count > 1)** — two or more back-to-back breaths at the
+- **Pulses (count > 1)**, two or more back-to-back breaths at the
   slow cycle rate. Dip depth deepens with warmth (50% for Enthused,
   40% for Effusive).
-- **Continuous pulsing** — back-to-back breaths filling the entire
+- **Continuous pulsing**, back-to-back breaths filling the entire
   hold phase. Reserved for Smitten Extrovert; reads as "fully lit up
   in affection."
 
@@ -155,14 +155,14 @@ gated by the same cooldown as warm greetings — no bypass paths.
 
 Each greeting plays as a four-phase animation on the shade:
 
-1. **Ease-in** — interpolate from whatever the shade was drawing →
+1. **Ease-in**, interpolate from whatever the shade was drawing →
    `foundLampColor` (the peer's base color).
-2. **Hold** — stay at `foundLampColor`. If pulse-back is active, run
+2. **Hold**, stay at `foundLampColor`. If pulse-back is active, run
    the specified number of slow pulse cycles back-to-back at the
    start of the hold; any remaining hold time stays steady.
-3. **Fade-out** — interpolate `foundLampColor` → whatever the shade
+3. **Fade-out**, interpolate `foundLampColor` → whatever the shade
    would now be drawing.
-4. **OTA-hold** (optional) — if the lamp is mid-OTA-distribution to
+4. **OTA-hold** (optional), if the lamp is mid-OTA-distribution to
    this same peer when the greeting fires, the animation lifetime is
    extended (~60 s ceiling) so the shade stays on the peer color
    while the OTA pulse modulates brightness on a meaningful hue.
@@ -170,15 +170,15 @@ Each greeting plays as a four-phase animation on the shade:
 Each pulse cycle is half-down then half-up around
 `darken(foundLampColor, pulseBackStrength)`, where `darken(c, 255)` is
 black and `darken(c, 0)` is unchanged. The cycle rate is fixed at
-~750 ms (`kSlowPulseCycleFrames = 45`), a slow-breath cadence — clearly
+~750 ms (`kSlowPulseCycleFrames = 45`), a slow-breath cadence, clearly
 visible, not flicker-fast.
 
 ## What this doc doesn't cover
 
 - The crowd-aware brightness damping in `PersonalityEngine` (Introvert
-  only) — separate subsystem, weights peers by disposition.
-- The 45-second closest-Smitten recurring pulse — separate from the
+  only), separate subsystem, weights peers by disposition.
+- The 45-second closest-Smitten recurring pulse, separate from the
   greeting waveform, fired through `ExpressionManager` not `SocialBehavior`.
 - The dispositions storage + sync surfaces (NVS, `CHAR_SOCIAL_DISPOSITIONS`
-  BLE characteristic) — see `personality_engine.hpp` and
+  BLE characteristic), see `personality_engine.hpp` and
   `config.{hpp,cpp}`.

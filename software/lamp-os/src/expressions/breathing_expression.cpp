@@ -129,7 +129,7 @@ void BreathingExpression::control() {
   // ourselves. While the wisp is overriding, we skip both the trigger
   // path AND the per-frame onUpdate. The wisp's hold colour is what
   // the strip shows; our animation effectively pauses mid-cycle and
-  // resumes when the wisp lets go. See docs/expressions.md.
+  // resumes when the wisp lets go. See docs/dev/expressions.md.
   if (disabledDuringWispOverride() && isWispCurrentlyOverriding()) {
     // Audit (2026-06-13): reset lastBreathUpdateMs so the first tick
     // after wisp releases recomputes phase from now()-not-stale-now.
