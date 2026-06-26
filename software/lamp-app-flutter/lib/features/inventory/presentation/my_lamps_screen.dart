@@ -138,24 +138,6 @@ class _LampTile extends ConsumerWidget {
     );
   }
 
-  Future<void> _confirmRemove(BuildContext context, WidgetRef ref) async {
-    final ok = await _confirmRemoveDialog(context, lamp.name);
-    if (ok != true) return;
-    final activeBefore = ref.read(activeLampNotifierProvider).value;
-    await ref.read(inventoryNotifierProvider.notifier).remove(lamp.id);
-    ref.invalidate(controlNotifierProvider(lamp.id));
-    if (lamp.id == activeBefore) {
-      final remaining = ref.read(inventoryNotifierProvider).value ?? const [];
-      if (remaining.isEmpty) {
-        await ref.read(activeLampNotifierProvider.notifier).clear();
-      } else {
-        await ref
-            .read(activeLampNotifierProvider.notifier)
-            .set(remaining.first.id);
-      }
-    }
-  }
-
   Future<void> _showLampActions(BuildContext context, WidgetRef ref) async {
     final action = await showModalBottomSheet<_LampAction>(
       context: context,
@@ -174,21 +156,12 @@ class _LampTile extends ConsumerWidget {
               ),
               onTap: () => Navigator.pop(ctx, _LampAction.resetPassword),
             ),
-            ListTile(
-              leading: const Icon(Icons.delete_outline,
-                  color: BrandColors.error),
-              title: const Text('Forget lamp',
-                  style: TextStyle(color: BrandColors.lampWhite)),
-              onTap: () => Navigator.pop(ctx, _LampAction.forget),
-            ),
           ],
         ),
       ),
     );
     if (action == null || !context.mounted) return;
     switch (action) {
-      case _LampAction.forget:
-        await _confirmRemove(context, ref);
       case _LampAction.resetPassword:
         await ref
             .read(inventoryNotifierProvider.notifier)
@@ -256,8 +229,23 @@ class _LampTile extends ConsumerWidget {
         return await _confirmRemoveDialog(context, lamp.name);
       },
       onDismissed: (_) async {
+        // Swipe is the only remove path. confirmDismiss already prompted, so
+        // no dialog here — just remove and, if this was the active lamp,
+        // repoint activeLampNotifier so nothing dangles at a deleted id.
+        final activeBefore = ref.read(activeLampNotifierProvider).value;
         await ref.read(inventoryNotifierProvider.notifier).remove(lamp.id);
         ref.invalidate(controlNotifierProvider(lamp.id));
+        if (lamp.id == activeBefore) {
+          final remaining =
+              ref.read(inventoryNotifierProvider).value ?? const [];
+          if (remaining.isEmpty) {
+            await ref.read(activeLampNotifierProvider.notifier).clear();
+          } else {
+            await ref
+                .read(activeLampNotifierProvider.notifier)
+                .set(remaining.first.id);
+          }
+        }
       },
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
@@ -462,4 +450,4 @@ Future<bool> _confirmRemoveDialog(BuildContext context, String lampName) async {
   return ok == true;
 }
 
-enum _LampAction { resetPassword, forget }
+enum _LampAction { resetPassword }
