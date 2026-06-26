@@ -8,47 +8,34 @@
 //
 // Cross-core safety:
 //
-//   - State machine runs on Core 1 (Arduino loop task). On OFFER:
-//     allocates publishedPartition_ + sectorState_ vector, erases the
-//     head window of sectors synchronously (so the first chunks land in
-//     pre-erased flash and don't pay JIT-erase latency on Core 0), then
-//     arms the publishedOtaHandle_ gate via release-store. The first
-//     ACCEPT goes out synchronously; the remaining four in the burst are
-//     queued for tick() to drain at 400 ms cadence so the loop task isn't
-//     blocked for 1.6 s freezing the renderer.
-//   - tick() (Core 1) continues draining the tail of the pre-erase: each
-//     tick erases up to kBgEraseBatchSectors more sectors. The cache-
-//     disable burst of each erase blocks the loop task — NOT the WiFi
-//     recv task on Core 0 — so chunks keep landing while we burn through
-//     the tail. tick yields between batches to guarantee Core 1 turn.
-//   - Chunk writes run on Core 0 (WiFi recv task) via handleChunkOnRecvTask.
-//     For each chunk: read armed gate (acquire); compute sectorIdx from
-//     p.offset / SPI_FLASH_SEC_SIZE; if the pre-erase tail hasn't reached
-//     this sector yet ensureSectorErasedOnRecvTask JIT-erases it as a
-//     fallback; then esp_partition_write. Steady state: the pre-erase
-//     tail outruns the chunk stream, JIT-erase is dead path.
-//   - sectorState_ is std::vector<uint8_t>; one byte per partition sector
-//     in tristate Idle/InProgress/Done. Both cores mutate it under
-//     eraseMux_ (interrupts disabled, scoped tightly to read-check-CAS
-//     only — NOT the erase itself). erasedSectorsCount_ is a diagnostic
-//     atomic.
-//   - **Vector storage invariant**: sectorState_ MUST NOT reallocate while
-//     Core 0 might touch it. Achieved via the publishedOtaHandle_ gate:
-//     Core 1 only resizes sectorState_ BEFORE arming the gate (so no Core
-//     0 chunk handler observes a partial vector), and Core 1 must disarm
-//     the gate (store 0) BEFORE any subsequent resize or sectorState_
-//     reset. abortOta() enforces this: disarm first, then reset state.
-//   - On any abort path (signature fail, chunk-loss-exceeds-retries),
-//     Core 1 first stores 0 into publishedOtaHandle_ (so Core 0 drops
-//     chunks silently), then nulls publishedPartition_, then resets
-//     sectorState_. The release-store on disarm pairs with the acquire-
-//     load on Core 0; once Core 0 sees armed=0 it touches nothing further.
-//   - On DONE (Core 1): the state machine waits for the chunk bitmap to be
-//     fully set, then disarms the gate via exchange and runs verifyAndApply
-//     (esp_partition_read + signature verify + esp_ota_set_boot_partition).
-//     verifyAndApply also logs erasedSectorsCount_ vs expected sectors as a
-//     coverage sanity check; mismatch means partition corruption (some
-//     chunk's sector was never erased) and should not silently succeed.
+//   - State machine runs on Core 1 (Arduino loop task). On OFFER: pick the
+//     inactive OTA partition, then erase the ENTIRE image region
+//     synchronously (64 KB block erases) BEFORE arming the
+//     publishedOtaHandle_ gate or sending ACCEPT. The sender hasn't been
+//     ACCEPTed, so nothing is in flight during the erase; and the gate is
+//     disarmed, so Core 0 would drop any chunk anyway. Once the erase
+//     succeeds, publish the partition pointer and arm the gate (release-
+//     store). The first ACCEPT goes out synchronously; the remaining four in
+//     the burst are queued for tick() to drain at 400 ms cadence so the loop
+//     task isn't blocked freezing the renderer.
+//   - Chunk writes run on Core 0 (WiFi recv task) via handleChunkOnRecvTask:
+//     read the armed gate (acquire), then a pure esp_partition_write — NO
+//     erase on the recv path. The region was erased upfront, so the
+//     cache+IRQ-off erase stalls that used to overflow the ESP-NOW RX queue
+//     mid-stream are gone; a <=200-byte write is sub-millisecond.
+//   - eraseMux_ (named for history) now guards ONLY the receive bitmap_ RMW
+//     in markChunkReceived against the const accessors (isBitmapFull /
+//     firstMissingChunk). There is no erase on the recv path to serialize.
+//   - On any abort path Core 1 disarms the gate (store 0, so Core 0 drops
+//     chunks), then nulls publishedPartition_ and clears erasedForLen_. The
+//     release-store on disarm pairs with Core 0's acquire-load.
+//   - erasedForLen_ latch: set to the image length only after every block
+//     erase returned ESP_OK. verifyAndApply checks it equals the offered
+//     length before flipping the boot partition, so a re-OFFER at a different
+//     length without re-erasing fails loud instead of booting a partial image.
+//   - On DONE (Core 1): wait for the chunk bitmap to be fully set, disarm the
+//     gate, then verifyAndApply (esp_partition_read + signature verify +
+//     esp_ota_set_boot_partition).
 //
 // Channel mismatch is a SILENT DROP — no ACCEPT, no RESULT — per the locked
 // scope decision. The lamp drops the offer at the handleControlOnLoop path
@@ -59,6 +46,7 @@
 #include <vector>
 
 #include "../network/lamp_protocol.hpp"
+#include "util/high_water.hpp"
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 #include <esp_ota_ops.h>
@@ -236,7 +224,15 @@ class FirmwareReceiver {
   // each new OFFER. Diagnostic counter — incremented by Core 0 on every
   // landed chunk; reads from Core 1 are coherent enough for a visual
   // progress bar (a one-frame stale read just lags one tick).
-  uint32_t recvChunksCount() const { return recvChunksCount_; }
+  // Monotonic progress for the OTA indicator — the receiver's analog of the
+  // distributor's send-side high-water. Tracks UNIQUE chunks (uniqueChunks_),
+  // not total writes: the dup-heavy recovery tail re-writes already-received
+  // chunks, and feeding the bar raw writes races it past 100% (early
+  // saturation + freeze/jump). uniqueChunks_ resets to 0 on every (re-)OFFER,
+  // so a stalled session that aborts + re-offers the SAME image would collapse
+  // the bar; the high-water only rises, and is reset only for a genuinely
+  // different image (see onOfferOnLoop).
+  uint32_t recvChunksCount() const { return recvProgress_.peek(); }
 
  private:
   // --- Helpers -----------------------------------------------------------
@@ -260,22 +256,18 @@ class FirmwareReceiver {
   // round trips at count=1. Capped at kMaxReqRunChunks so an early-
   // stream "everything missing" run doesn't dwarf forward progress.
   uint16_t firstMissingRunLen(uint16_t firstMissing) const;
-  // Cap on the per-REQ run length. Pinned at 1 (the pre-perf-commits
-  // baseline) 2026-06-25 after `f52f72f` (longest-run, cap 64) and
-  // `d6c46a5` (window-span, cap 64) regressed the receive path: a
-  // 64-chunk burst spans 3-4 flash sectors, JIT-erase blocks Core 0
-  // for 50-400ms per sector, ESP-NOW's RX queue overflows during the
-  // erase window → chunks drop at the WiFi layer, session loops
-  // forever on early-stream gaps. Hardware-validated cap=20 (one
-  // sector's worth) does recover the broken session, but the converged
-  // fleet had been running at cap=1 with no user-visible throughput
-  // problem, so leave it at 1 until we explicitly stability-test a
-  // higher value (see mesh-debug-app-todo.md §23).
+  // Cap on the per-REQ run length. One REQ spans first..last-missing within
+  // this many chunks (firstMissingRunLen), so scattered single-chunk drops
+  // recover in one round trip instead of one-chunk-per-round.
   //
-  // The windowed-REQ logic in `firstMissingRunLen` is preserved (it
-  // degenerates to "return 1" when this cap is 1) so flipping this
-  // back up is a one-constant change — no code-shape revert needed.
-  static constexpr uint16_t kMaxReqRunChunks = 1;
+  // 20 = one flash sector. cap=1 does NOT converge under real ESP-NOW loss —
+  // the receiver claws holes back one at a time and the session times out
+  // before the bitmap fills (observed on flora). The old upper bound was the
+  // JIT erase: a run spanning multiple sectors stalled Core 0 (cache+IRQs off)
+  // long enough to overflow the RX queue mid-erase. Upfront-erase removes that
+  // stall, so widening this is now safe and is the #18 recovery lever — it
+  // stays at 20 (one sector) until that's stability-tested.
+  static constexpr uint16_t kMaxReqRunChunks = 20;
 
   // Transmit helpers. All FW_* sends route through `transport_->sendFrame`.
   // For the ESP-NOW transport, that's `broadcastRaw` (wisp filters via
@@ -291,22 +283,6 @@ class FirmwareReceiver {
   // OTA. Safe to call from Core 1 only.
   void abortOta();
 
-#if defined(ARDUINO) || defined(ESP_PLATFORM)
-  // JIT sector-erase helper, called from Core 0's chunk handler before
-  // esp_partition_write. Tristate sectorState_[sectorIdx]:
-  //   0 (Idle)       → CAS to InProgress under eraseMux_, drop the mux,
-  //                    erase the sector, store Done on success / restore
-  //                    Idle on failure. Returns true on success.
-  //   1 (InProgress) → another chunk for the same sector is racing the
-  //                    erase. Return false; caller drops the chunk; the
-  //                    wisp's stall watchdog re-requests after 2 s.
-  //   2 (Done)       → no work; return true.
-  // The portMUX brackets ONLY the load + CAS of the single byte. The
-  // esp_partition_erase_range call happens OUTSIDE the critical section
-  // so we don't extend the interrupts-disabled window across the erase
-  // (which would defeat the whole point of moving away from pre-erase).
-  bool ensureSectorErasedOnRecvTask(size_t sectorIdx);
-#endif
 
   // Run the verify + apply sequence. Called on DONE arrival with full
   // bitmap. Reads the partition back into a buffer (via
@@ -390,6 +366,15 @@ class FirmwareReceiver {
   // localise loss (RF vs. wisp-side throughput).
   uint32_t recvChunksCount_  = 0;
   uint32_t recvChunksLastLog_ = 0;
+  // Unique chunks landed this image (0→1 bitmap transitions). Feeds the
+  // progress high-water; bounded by totalChunks, unlike recvChunksCount_.
+  uint32_t uniqueChunks_     = 0;
+
+  // Monotonic progress for the indicator (see recvChunksCount()). Survives
+  // session restarts; progressForLen_ tracks the image it was built for so a
+  // genuinely different image resets it.
+  HighWaterMark recvProgress_;
+  uint32_t      progressForLen_ = 0;
 
   // Cross-core-published "armed" gate. Non-zero = streaming is armed, the
   // partition has been pre-erased, and Core 0's chunk handler may write
@@ -427,27 +412,20 @@ class FirmwareReceiver {
   // publishedOtaHandle_ before nulling this pointer.
   std::atomic<const esp_partition_t*> publishedPartition_{nullptr};
 
-  // Per-sector erase state. One byte per partition sector:
-  //   0 = Idle (not yet erased), 1 = InProgress (one chunk handler is
-  //   currently erasing it), 2 = Done (erased, writes can proceed).
-  // Sized in onOfferOnLoop() to ceil(offerTotalLen / SPI_FLASH_SEC_SIZE)
-  // BEFORE the publishedOtaHandle_ gate is armed; never resized while
-  // the gate is armed. Core 0 reads + CAS under eraseMux_; Core 0
-  // performs the erase OUTSIDE the mux to avoid extending the
-  // interrupts-disabled window across the (up-to-400 ms) erase op.
-  std::vector<uint8_t> sectorState_;
+  // Guards the receive bitmap_ RMW (markChunkReceived) against the const
+  // accessors (isBitmapFull / firstMissingChunk) — named eraseMux_ for
+  // history; there is no erase on the recv path anymore (full-upfront erase).
   // mutable so const accessors (isBitmapFull / firstMissingChunk) can
   // take the spinlock around their reads. Synchronization is a logical
   // no-op WRT observed value — it just makes the read coherent against
   // Core 0's concurrent RMW.
   mutable portMUX_TYPE eraseMux_ = portMUX_INITIALIZER_UNLOCKED;
 
-  // Diagnostic: incremented by Core 0 after each successful sector erase.
-  // verifyAndApply logs this vs ceil(offerTotalLen / SPI_FLASH_SEC_SIZE)
-  // as a coverage sanity check. Mismatch = partition corruption (a
-  // chunk's sector somehow wasn't erased) and FAILS verifyAndApply
-  // rather than silently flipping the boot partition.
-  std::atomic<uint32_t> erasedSectorsCount_{0};
+  // Erase-coverage latch: set to offerTotalLen_ after the full upfront
+  // partition erase succeeds in onOfferOnLoop, checked in verifyAndApply,
+  // cleared in abortOta. A mismatch at verify = a re-OFFER changed the image
+  // length without re-erasing → fail loud, don't flip to a partial image.
+  uint32_t erasedForLen_ = 0;
 #endif
 
   // OFFER/DONE control intake uses standard_lamp's PendingTypedSlot<

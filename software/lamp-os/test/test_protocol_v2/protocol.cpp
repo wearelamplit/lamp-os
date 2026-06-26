@@ -702,6 +702,46 @@ void test_hello_receiving_state_round_trip() {
   TEST_ASSERT_EQUAL_UINT8(lp::kOtaStateReceiving, out.otaState);
 }
 
+void test_hello_fw_channel_round_trip() {
+  uint8_t buf[lp::HELLO_MAX_SIZE];
+  const size_t n = lp::buildHello(buf, sizeof(buf), 11, kSrcMac,
+                                  kHelloShade, kHelloBase, 0xBEEF,
+                                  "jacko", 5, lp::kOtaStateIdle,
+                                  "standard-beta");
+  // Idle (no OTA_STATE TLV) + FW_CHANNEL TLV: tlv_count(1) + type(1) + len(1)
+  // + value(16).
+  TEST_ASSERT_EQUAL_UINT32(
+      lp::HELLO_FIXED_SIZE + 1 + 5 + 1 + (2 + lp::HELLO_FW_CHANNEL_LEN), n);
+  lp::ParsedHello out;
+  TEST_ASSERT_TRUE(lp::parseHello(buf, n, out));
+  TEST_ASSERT_EQUAL_STRING("standard-beta", out.fwChannel);
+  TEST_ASSERT_EQUAL_UINT8(lp::kOtaStateIdle, out.otaState);
+}
+
+void test_hello_fw_channel_and_ota_state_both_emit() {
+  uint8_t buf[lp::HELLO_MAX_SIZE];
+  const size_t n = lp::buildHello(buf, sizeof(buf), 12, kSrcMac,
+                                  kHelloShade, kHelloBase, 0xBEEF,
+                                  "snafu1", 6, lp::kOtaStateSending,
+                                  "snafu-stable");
+  lp::ParsedHello out;
+  TEST_ASSERT_TRUE(lp::parseHello(buf, n, out));
+  TEST_ASSERT_EQUAL_STRING("snafu-stable", out.fwChannel);
+  TEST_ASSERT_EQUAL_UINT8(lp::kOtaStateSending, out.otaState);
+}
+
+void test_hello_absent_fw_channel_is_empty() {
+  uint8_t buf[lp::HELLO_MAX_SIZE];
+  // No fwChannel arg → no TLV emitted → parsed channel stays empty (the
+  // "older peer" case the distributor treats as unknown).
+  const size_t n = lp::buildHello(buf, sizeof(buf), 13, kSrcMac,
+                                  kHelloShade, kHelloBase, 0xBEEF,
+                                  "old", 3, lp::kOtaStateIdle);
+  lp::ParsedHello out;
+  TEST_ASSERT_TRUE(lp::parseHello(buf, n, out));
+  TEST_ASSERT_EQUAL_STRING("", out.fwChannel);
+}
+
 // Forward-compat: an unknown TLV type must be skipped (by length),
 // the known OTA_STATE TLV that follows must still parse cleanly, and
 // no fields beyond what we know about should be affected.
@@ -765,6 +805,9 @@ int main(int argc, char** argv) {
   RUN_TEST(test_hello_idle_state_emits_compact_tlv_count_zero);
   RUN_TEST(test_hello_sending_state_round_trip);
   RUN_TEST(test_hello_receiving_state_round_trip);
+  RUN_TEST(test_hello_fw_channel_round_trip);
+  RUN_TEST(test_hello_fw_channel_and_ota_state_both_emit);
+  RUN_TEST(test_hello_absent_fw_channel_is_empty);
   RUN_TEST(test_hello_unknown_tlv_is_skipped);
   RUN_TEST(test_hello_tlv_with_oversized_length_is_rejected);
 

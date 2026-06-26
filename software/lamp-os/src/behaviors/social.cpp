@@ -158,7 +158,8 @@ void SocialBehavior::control() {
         if (p.firmwareVersion == 0) continue;
         if (p.firmwareVersion >= lamp::FIRMWARE_VERSION) continue;
         firmwareDistributor.considerPeerForOta(p.mac, p.firmwareVersion,
-                                                p.protocolVersion, now);
+                                                p.protocolVersion, now,
+                                                p.fwChannel);
       }
     }
   }

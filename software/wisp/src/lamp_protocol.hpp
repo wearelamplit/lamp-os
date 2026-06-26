@@ -158,6 +158,11 @@ constexpr size_t HELLO_MAX_NAME = 32;
 // unknown types by advancing 2 + len, so future TLV types can land
 // without bumping PROTOCOL_VERSION.
 constexpr uint8_t HELLO_TLV_OTA_STATE = 0x01;  // value: 1 byte, 0=idle 1=sending 2=receiving
+// value: 16 bytes, the lamp's `{type}-{channel}` identity (zero-padded).
+// Lamp-side only carries the OTA gate that consumes this; the wisp mirrors
+// the parse so the two copies stay byte-compatible.
+constexpr uint8_t HELLO_TLV_FW_CHANNEL = 0x02;
+constexpr size_t  HELLO_FW_CHANNEL_LEN = 16;  // == FW_CHANNEL_LEN
 
 // Compact OTA-state enum carried in HELLO_TLV_OTA_STATE.
 constexpr uint8_t kOtaStateIdle      = 0;
@@ -293,6 +298,8 @@ struct ParsedHello {
   // TLV-derived fields. Defaults apply when the corresponding TLV is
   // absent from the frame.
   uint8_t otaState = kOtaStateIdle;  // HELLO_TLV_OTA_STATE
+  // HELLO_TLV_FW_CHANNEL — the peer's `{type}-{channel}`. Empty when absent.
+  char fwChannel[HELLO_FW_CHANNEL_LEN + 1] = {0};
 };
 
 struct ParsedControlOp {
@@ -431,11 +438,14 @@ inline size_t buildHello(uint8_t* buf, size_t bufLen, uint16_t seq,
                          const uint8_t shadeRGBW[4], const uint8_t baseRGBW[4],
                          uint32_t firmwareVersion,
                          const char* name, size_t nameLen,
-                         uint8_t otaState = kOtaStateIdle) {
+                         uint8_t otaState = kOtaStateIdle,
+                         const char* fwChannel = nullptr) {
   if (!buf || !sourceMac || !shadeRGBW || !baseRGBW) return 0;
   if (nameLen > HELLO_MAX_NAME) nameLen = HELLO_MAX_NAME;
-  const bool emitOtaState = (otaState != kOtaStateIdle);
-  const size_t tlvBytes = 1 + (emitOtaState ? 3 : 0);
+  const bool emitOtaState  = (otaState != kOtaStateIdle);
+  const bool emitFwChannel = (fwChannel != nullptr && fwChannel[0] != '\0');
+  const size_t tlvBytes = 1 + (emitOtaState ? 3 : 0) +
+                          (emitFwChannel ? (2 + HELLO_FW_CHANNEL_LEN) : 0);
   const size_t total = HELLO_FIXED_SIZE + 1 + nameLen + tlvBytes;
   if (bufLen < total) return 0;
   buf[0] = MAGIC_0;
@@ -455,11 +465,21 @@ inline size_t buildHello(uint8_t* buf, size_t bufLen, uint16_t seq,
   if (nameLen && name) std::memcpy(&buf[25], name, nameLen);
   // TLV trailer.
   size_t off = HELLO_FIXED_SIZE + 1 + nameLen;
-  buf[off++] = emitOtaState ? 1 : 0;  // tlv_count
+  buf[off++] = static_cast<uint8_t>((emitOtaState ? 1 : 0) +
+                                    (emitFwChannel ? 1 : 0));  // tlv_count
   if (emitOtaState) {
     buf[off++] = HELLO_TLV_OTA_STATE;
     buf[off++] = 1;
     buf[off++] = otaState;
+  }
+  if (emitFwChannel) {
+    buf[off++] = HELLO_TLV_FW_CHANNEL;
+    buf[off++] = static_cast<uint8_t>(HELLO_FW_CHANNEL_LEN);
+    std::memset(&buf[off], 0, HELLO_FW_CHANNEL_LEN);
+    for (size_t n = 0; fwChannel[n] != '\0' && n < HELLO_FW_CHANNEL_LEN; ++n) {
+      buf[off + n] = static_cast<uint8_t>(fwChannel[n]);
+    }
+    off += HELLO_FW_CHANNEL_LEN;
   }
   return total;
 }
@@ -767,6 +787,7 @@ inline bool parseHello(const uint8_t* data, size_t len, ParsedHello& out) {
   out.name[nameLen] = '\0';
   // TLV trailer walk (v0x05+).
   out.otaState = kOtaStateIdle;
+  out.fwChannel[0] = '\0';
   size_t off = HELLO_FIXED_SIZE + 1 + nameLen;
   if (len <= off) return true;
   const uint8_t tlvCount = data[off++];
@@ -777,6 +798,10 @@ inline bool parseHello(const uint8_t* data, size_t len, ParsedHello& out) {
     if (len < off + tlvLen) return false;
     if (tlvType == HELLO_TLV_OTA_STATE && tlvLen == 1) {
       out.otaState = data[off];
+    } else if (tlvType == HELLO_TLV_FW_CHANNEL &&
+               tlvLen == HELLO_FW_CHANNEL_LEN) {
+      std::memcpy(out.fwChannel, &data[off], HELLO_FW_CHANNEL_LEN);
+      out.fwChannel[HELLO_FW_CHANNEL_LEN] = '\0';
     }
     off += tlvLen;
   }

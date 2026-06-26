@@ -309,42 +309,50 @@ struct DistAlgo {
   }
 };
 
-// --- discoverImageLength helper: scan-backward for LSIG magic
+// --- discoverImageLength helper: scan-FORWARD for LSIG magic
 //
-// Mirror of the production helper. Hardware testing on 2026-06-10
-// found that the original "last non-0xFF byte" approach was wrong:
-// esptool's flash-write doesn't erase the partition tail, so a
-// re-flashed lamp whose prior firmware was larger leaves stale bytes
-// past the new image's end. The current production helper scans
-// backward for the "LSIG" magic and validates by reading the footer's
-// signedRegionLen field — which must equal the footer's offset (the
-// LSIG sits immediately after the signed region). This test mirror
+// Mirror of the production helper. esptool's app-only flash doesn't erase
+// the partition tail, so a lamp re-flashed with an image SMALLER than its
+// predecessor keeps the OLD image's footer in the tail at a HIGHER offset —
+// and that stale footer is self-consistent, so signedRegionLen can't reject
+// it. The helper therefore scans FORWARD and returns the FIRST (lowest)
+// valid footer: a larger new image fully overwrites a smaller predecessor,
+// so no stale footer ever survives BELOW the running image. This mirror
 // implements that contract over a buffer (simulating a partition).
-bool discoverImageLengthScanBackward(const uint8_t* buf, size_t bufLen,
-                                     uint32_t* outLen) {
+bool discoverImageLengthScanForward(const uint8_t* buf, size_t bufLen,
+                                    uint32_t* outLen) {
   if (!buf || !outLen || bufLen < 96) return false;
+  // Mirrors production's 256-byte sliding window + (kMagicLen-1) overlap so
+  // this test also exercises the window-boundary math (a magic straddling a
+  // window edge), not just the lowest-valid-footer contract.
   constexpr size_t kFwFooterLenV1 = 96;
-  // Walk backward looking for "LSIG"; require at least 4 bytes left
-  // for the magic and 96 bytes total for the footer.
-  for (size_t i = bufLen; i >= kFwFooterLenV1; --i) {
-    const size_t off = i - kFwFooterLenV1;
-    if (buf[off]     == 'L' && buf[off + 1] == 'S' &&
-        buf[off + 2] == 'I' && buf[off + 3] == 'G') {
-      // Read signedRegionLen at footer offset 16 (4 bytes LE).
-      const uint32_t signedRegionLen =
-          static_cast<uint32_t>(buf[off + 16]) |
-          (static_cast<uint32_t>(buf[off + 17]) << 8) |
-          (static_cast<uint32_t>(buf[off + 18]) << 16) |
-          (static_cast<uint32_t>(buf[off + 19]) << 24);
-      // Validate: signedRegionLen must equal the footer's offset (the
-      // LSIG sits at the END of the signed region). Coincidental
-      // ascii 'LSIG' inside a string literal in the prior firmware
-      // would fail this check.
-      if (signedRegionLen == static_cast<uint32_t>(off)) {
-        *outLen = static_cast<uint32_t>(off + kFwFooterLenV1);
-        return true;
+  constexpr size_t kWindow = 256;
+  constexpr size_t kMagicLen = 4;
+  size_t scanStart = 0;
+  while (scanStart < bufLen) {
+    const size_t take = (bufLen - scanStart > kWindow) ? kWindow
+                                                       : (bufLen - scanStart);
+    const size_t extra = (scanStart + take + kMagicLen - 1 <= bufLen)
+                             ? (kMagicLen - 1)
+                             : 0;
+    for (size_t off = 0; off < take; ++off) {
+      if (off + kMagicLen > take + extra) break;
+      const size_t a = scanStart + off;  // absolute footer offset
+      if (buf[a] == 'L' && buf[a + 1] == 'S' &&
+          buf[a + 2] == 'I' && buf[a + 3] == 'G') {
+        if (a + 20 > bufLen) continue;  // need the signedRegionLen field
+        const uint32_t signedRegionLen =
+            static_cast<uint32_t>(buf[a + 16]) |
+            (static_cast<uint32_t>(buf[a + 17]) << 8) |
+            (static_cast<uint32_t>(buf[a + 18]) << 16) |
+            (static_cast<uint32_t>(buf[a + 19]) << 24);
+        if (signedRegionLen == static_cast<uint32_t>(a)) {
+          *outLen = static_cast<uint32_t>(a + kFwFooterLenV1);
+          return true;
+        }
       }
     }
+    scanStart += take;
   }
   return false;
 }
@@ -797,7 +805,7 @@ void test_discoverImageLength_finds_LSIG_footer(void) {
   auto buf = makeSignedImage(1024);
   uint32_t outLen = 0;
   TEST_ASSERT_TRUE(
-      discoverImageLengthScanBackward(buf.data(), buf.size(), &outLen));
+      discoverImageLengthScanForward(buf.data(), buf.size(), &outLen));
   TEST_ASSERT_EQUAL_UINT32(1024 + 96, outLen);
 }
 
@@ -809,7 +817,7 @@ void test_discoverImageLength_handles_no_LSIG(void) {
   std::vector<uint8_t> buf(1024, 0xAB);
   uint32_t outLen = 99;
   TEST_ASSERT_FALSE(
-      discoverImageLengthScanBackward(buf.data(), buf.size(), &outLen));
+      discoverImageLengthScanForward(buf.data(), buf.size(), &outLen));
   TEST_ASSERT_EQUAL_UINT32(99, outLen);  // unchanged on failure
 }
 
@@ -817,7 +825,7 @@ void test_discoverImageLength_handles_all_FF(void) {
   std::vector<uint8_t> buf(1024, 0xFF);
   uint32_t outLen = 99;
   TEST_ASSERT_FALSE(
-      discoverImageLengthScanBackward(buf.data(), buf.size(), &outLen));
+      discoverImageLengthScanForward(buf.data(), buf.size(), &outLen));
   TEST_ASSERT_EQUAL_UINT32(99, outLen);
 }
 
@@ -825,7 +833,7 @@ void test_discoverImageLength_handles_too_small_buffer(void) {
   std::vector<uint8_t> buf(50);
   uint32_t outLen = 99;
   TEST_ASSERT_FALSE(
-      discoverImageLengthScanBackward(buf.data(), buf.size(), &outLen));
+      discoverImageLengthScanForward(buf.data(), buf.size(), &outLen));
 }
 
 void test_discoverImageLength_rejects_coincidental_LSIG(void) {
@@ -841,17 +849,51 @@ void test_discoverImageLength_rejects_coincidental_LSIG(void) {
   buf[500 + 18] = 0;    buf[500 + 19] = 0;
   uint32_t outLen = 0;
   TEST_ASSERT_TRUE(
-      discoverImageLengthScanBackward(buf.data(), buf.size(), &outLen));
+      discoverImageLengthScanForward(buf.data(), buf.size(), &outLen));
   // Should find the REAL footer at offset 2000, not the fake at 500.
   TEST_ASSERT_EQUAL_UINT32(2000 + 96, outLen);
 }
 
+// Regression: a lamp app-only-reflashed with a SMALLER image keeps the prior
+// LARGER image's (self-consistent) footer in the un-erased tail, at a HIGHER
+// offset. The forward scan must return the LOWER (running) footer; the old
+// backward scan returned the stale one and streamed the wrong image.
+void test_discoverImageLength_ignores_stale_higher_footer(void) {
+  auto buf = makeSignedImage(1024);   // running image: footer at offset 1024
+  buf.resize(2000 + 96, 0x5A);        // un-erased tail from the larger predecessor
+  // Self-consistent stale footer at offset 2000 (signedRegionLen == 2000).
+  buf[2000] = 'L'; buf[2001] = 'S'; buf[2002] = 'I'; buf[2003] = 'G';
+  buf[2000 + 16] = static_cast<uint8_t>(2000 & 0xFF);
+  buf[2000 + 17] = static_cast<uint8_t>((2000 >> 8) & 0xFF);
+  buf[2000 + 18] = 0; buf[2000 + 19] = 0;
+  uint32_t outLen = 0;
+  TEST_ASSERT_TRUE(
+      discoverImageLengthScanForward(buf.data(), buf.size(), &outLen));
+  TEST_ASSERT_EQUAL_UINT32(1024 + 96, outLen);  // the running footer, not 2000+96
+}
+
+// Boundary: a footer whose LSIG magic straddles the 256-byte window edge
+// must still be found via the (kMagicLen-1) overlap read. Magic at offset
+// 255 → bytes [255..258] cross the window-0/window-1 boundary; without the
+// overlap, window-0 (off<256) breaks before checking off=255 and window-1
+// starts at 256 (sees 'S', not 'L'), so the footer would be missed.
+void test_discoverImageLength_finds_footer_straddling_window_boundary(void) {
+  std::vector<uint8_t> buf(255 + 96, 0x33);
+  buf[255] = 'L'; buf[256] = 'S'; buf[257] = 'I'; buf[258] = 'G';
+  buf[255 + 16] = 255 & 0xFF;  // signedRegionLen = 255 == footerStart
+  buf[255 + 17] = 0; buf[255 + 18] = 0; buf[255 + 19] = 0;
+  uint32_t outLen = 0;
+  TEST_ASSERT_TRUE(
+      discoverImageLengthScanForward(buf.data(), buf.size(), &outLen));
+  TEST_ASSERT_EQUAL_UINT32(255 + 96, outLen);
+}
+
 void test_discoverImageLength_rejects_null_args(void) {
   uint32_t outLen = 99;
-  TEST_ASSERT_FALSE(discoverImageLengthScanBackward(nullptr, 1024, &outLen));
+  TEST_ASSERT_FALSE(discoverImageLengthScanForward(nullptr, 1024, &outLen));
   std::vector<uint8_t> buf(1024);
   TEST_ASSERT_FALSE(
-      discoverImageLengthScanBackward(buf.data(), 1024, nullptr));
+      discoverImageLengthScanForward(buf.data(), 1024, nullptr));
 }
 
 // =============================================================================
@@ -903,6 +945,8 @@ int main(int, char**) {
   RUN_TEST(test_discoverImageLength_handles_all_FF);
   RUN_TEST(test_discoverImageLength_handles_too_small_buffer);
   RUN_TEST(test_discoverImageLength_rejects_coincidental_LSIG);
+  RUN_TEST(test_discoverImageLength_ignores_stale_higher_footer);
+  RUN_TEST(test_discoverImageLength_finds_footer_straddling_window_boundary);
   RUN_TEST(test_discoverImageLength_rejects_null_args);
   return UNITY_END();
 }

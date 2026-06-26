@@ -135,7 +135,8 @@ void ShowReceiver::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
         // distributor to build OTA OFFER/CHUNK/DONE at the peer's
         // version. parseHello already validated data[2] is in our
         // accepted range (via inspect()).
-        data[2]);
+        data[2],
+        h.fwChannel);
     link_.broadcast(data, len);
   } else if (msgType == lamp_protocol::MSG_CONTROL_OP) {
     lamp_protocol::ParsedControlOp op;
@@ -536,7 +537,8 @@ void ShowReceiver::emitHello() {
   uint8_t buf[lamp_protocol::HELLO_MAX_SIZE];
   size_t n = lamp_protocol::buildHello(buf, sizeof(buf), helloSeq_++, myMac_,
                                        shade, base, FIRMWARE_VERSION,
-                                       name.data(), nameLen, otaState);
+                                       name.data(), nameLen, otaState,
+                                       FIRMWARE_CHANNEL_STR);
   if (n) {
     link_.broadcast(buf, n);
   }

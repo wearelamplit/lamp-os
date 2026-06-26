@@ -11,7 +11,7 @@
 // change required. For the SHA-256 streaming hash we use mbedTLS
 // (which is available + has a clean init/update/finish API).
 //
-// Streaming verify (2026-06-05):
+// Streaming verify:
 //
 // The lamp's free heap budget (~280 KB) can't fit a 1.4 MB firmware
 // image for verification, so we cannot buffer the signed region and

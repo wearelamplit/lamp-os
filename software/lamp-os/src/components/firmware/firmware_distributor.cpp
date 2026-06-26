@@ -85,11 +85,11 @@ void FirmwareDistributor::begin(FirmwareTransport* transport) {
   // SHA wouldn't match what the receiver computes over its own newly-
   // written image.
   //
-  // Discovery strategy: scan backward from the partition's last page for
-  // the first non-0xFF byte. The signed image ends right there (the LSIG
-  // footer ends at the last non-erased byte). Backward scan is cheap —
-  // typical signed image leaves at most ~10s of KB of trailing erased
-  // flash, so a few page reads pin the boundary precisely.
+  // Discovery strategy: scan FORWARD for the lowest valid LSIG footer (the
+  // running image's) and trust the signed length it reports. Forward, not
+  // backward, is load-bearing — a smaller image re-flashed over a larger one
+  // leaves a stale higher footer that a backward scan would grab first (see
+  // discoverImageLength).
   if (!discoverImageLength(&firmwareTotalLen_)) {
     state_ = State::Disabled;
     FWDIST_LOGLN("[fwdist] disabled (could not discover image length)");
@@ -188,43 +188,47 @@ bool FirmwareDistributor::readPartitionBytes(uint32_t offset, size_t len,
 
 bool FirmwareDistributor::discoverImageLength(uint32_t* outLen) const {
   if (!runningPartition_ || !outLen) return false;
-  // Scan backward from end-of-partition for the LSIG footer magic
-  // ("LSIG" at the FOOTER's offset 0). The signed image's authoritative
-  // length is whatever the footer says, NOT the last-non-0xFF byte:
-  // esptool's flash-write doesn't erase the partition tail, so a
-  // re-flashed lamp whose prior firmware was LARGER than the current
-  // one will have stale tail bytes past the new image's end. Scanning
-  // for LSIG locates the real footer regardless of trailing leftovers.
+  // Locate the LSIG footer of the image at the START of the partition — the
+  // running image — by scanning FORWARD and returning the FIRST valid footer
+  // (lowest offset). The signed length is whatever the footer says
+  // (signedRegionLen == footerStart), not the last-non-0xFF byte.
   //
-  // Window pattern mirrors the original scan: 256-byte sliding window,
-  // with an extra (kMagicLen - 1) overlap between iterations so a magic
-  // that straddles a window boundary isn't missed.
+  // Forward, not backward, is load-bearing. esptool's app-only flash erases
+  // only the bytes it writes, so a lamp re-flashed with an image SMALLER than
+  // its predecessor keeps the OLD image's footer in the un-erased tail, at a
+  // HIGHER offset than the current footer — and that stale footer is
+  // internally self-consistent (it was a real image once), so the
+  // signedRegionLen sanity check can't reject it. A backward scan finds the
+  // stale footer first and streams the wrong image. The lowest valid footer
+  // is always the running image's: a LARGER new image fully overwrites a
+  // smaller predecessor (footer included), so no stale footer ever survives
+  // BELOW the current one. (A normal mesh OTA erases a fixed sector span that
+  // masks this, which is why it only bit esptool-flashed lamps.)
+  //
+  // 256-byte sliding window with a (kMagicLen - 1) overlap so a magic that
+  // straddles a window boundary isn't missed. Called once at init, so the
+  // forward read up to the footer is a one-time cost.
   constexpr size_t  kWindow   = 256;
   constexpr size_t  kMagicLen = 4;  // "LSIG"
   static const uint8_t kMagic[kMagicLen] = {'L', 'S', 'I', 'G'};
   uint8_t buf[kWindow + kMagicLen - 1];
-  uint32_t scanEnd = runningPartition_->size;
-  while (scanEnd > 0) {
-    const size_t take = (scanEnd > kWindow) ? kWindow : scanEnd;
-    const uint32_t scanStart = scanEnd - take;
-    // Read overlapping region: [scanStart .. scanStart + take + extra)
-    // so a magic split across the boundary is captured intact. The
-    // extra bytes are inside the previous window — safe to re-read.
-    const size_t extra = (scanEnd + kMagicLen - 1 <= runningPartition_->size)
+  const uint32_t partSize = runningPartition_->size;
+  uint32_t scanStart = 0;
+  while (scanStart < partSize) {
+    const size_t take = (partSize - scanStart > kWindow) ? kWindow
+                                                         : (partSize - scanStart);
+    // Read (kMagicLen - 1) past the window so a magic straddling the top
+    // boundary is captured intact; those bytes belong to the next window.
+    const size_t extra = (scanStart + take + kMagicLen - 1 <= partSize)
                             ? (kMagicLen - 1)
                             : 0;
     if (!readPartitionBytes(scanStart, take + extra, buf)) return false;
-    for (size_t i = take; i > 0; --i) {
-      const size_t off = i - 1;
-      if (off + kMagicLen > take + extra) continue;
+    for (size_t off = 0; off < take; ++off) {
+      if (off + kMagicLen > take + extra) break;
       if (buf[off]     == kMagic[0] &&
           buf[off + 1] == kMagic[1] &&
           buf[off + 2] == kMagic[2] &&
           buf[off + 3] == kMagic[3]) {
-        // Found "LSIG". The footer is exactly kFwFooterLenV1 bytes
-        // starting here. Read the signedRegionLen from the footer to
-        // get the authoritative image length. signedRegionLen lives
-        // at footer offset kLsigSignedLenOffset (4 bytes LE).
         const uint32_t footerStart = scanStart + off;
         uint8_t lenBytes[4];
         if (!readPartitionBytes(footerStart + ::lamp::firmware::kLsigSignedLenOffset,
@@ -234,19 +238,15 @@ bool FirmwareDistributor::discoverImageLength(uint32_t* outLen) const {
             (static_cast<uint32_t>(lenBytes[1]) << 8) |
             (static_cast<uint32_t>(lenBytes[2]) << 16) |
             (static_cast<uint32_t>(lenBytes[3]) << 24);
-        // Sanity: signedRegionLen must equal footerStart (the LSIG
-        // sits immediately after the signed region). If they disagree
-        // we're looking at coincidental "LSIG" bytes inside the prior
-        // firmware's data, not the real footer — keep scanning.
+        // Real footer sits immediately after its signed region. A
+        // coincidental "LSIG" inside firmware data won't satisfy this.
         if (signedRegionLen == footerStart) {
           *outLen = footerStart + kFwFooterLenV1;
           return true;
         }
-        // Otherwise: bogus match (e.g. ascii 'LSIG' inside a string
-        // literal), continue the backward scan past this hit.
       }
     }
-    scanEnd = scanStart;
+    scanStart += take;
   }
   return false;
 }
@@ -475,7 +475,7 @@ int FirmwareDistributor::streamOneChunk(uint32_t nowMs) {
   if (!transport_->sendFrame(buf, framed)) {
 #ifdef LAMP_DEBUG
     // Rate-limit failure log so a sustained queue-full doesn't drown the UART
-    // (at ~130 chunks/s the flood would obscure the rest of the OTA state).
+    // (at ~33 chunks/s the flood would obscure the rest of the OTA state).
     static uint32_t lastSendFailLogMs = 0;
     static uint32_t failCount = 0;
     failCount++;
@@ -518,9 +518,7 @@ int FirmwareDistributor::streamOneChunk(uint32_t nowMs) {
     // increment and the jump-forward above can be the new max; the
     // rewind paths (REQ + stall recovery) intentionally don't touch
     // this — the indicator should show forward progress only.
-    if (nextChunkIdx_ > sentChunkHighWater_) {
-      sentChunkHighWater_ = nextChunkIdx_;
-    }
+    sentProgress_.observe(nextChunkIdx_);
     if (lastBurstSentChunks_ >= kStreamProgressLogEvery) {
       emittedCount = nextChunkIdx_;
       lastBurstSentChunks_ = 0;
@@ -581,7 +579,7 @@ void FirmwareDistributor::tick(uint32_t nowMs) {
       // would call exitQuiet prematurely. The compositor on the next
       // tick would then run the normal pipeline → IdleBehavior writes
       // defaultColors over the indicator → strip flickers between
-      // progress and full base color (observed 2026-06-25).
+      // progress and full base color.
       if (quietHeld_ && quietHoldUntilMs_ != 0 && nowMs >= quietHoldUntilMs_) {
         ::lamp::ota_quiet_mode::exitQuiet();
         quietHeld_         = false;
@@ -738,7 +736,8 @@ void FirmwareDistributor::tick(uint32_t nowMs) {
 void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
                                              uint32_t peerVersion,
                                              uint8_t peerProtocolVersion,
-                                             uint32_t nowMs) {
+                                             uint32_t nowMs,
+                                             const char* peerFwChannel) {
   if (state_ != State::Idle) {
     FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X v=0x%08X skip: "
                 "state=%u (not Idle)\n",
@@ -774,6 +773,21 @@ void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
   }
 #endif
   if (peerVersion >= lamp::FIRMWARE_VERSION) return;
+  // Type/channel gate: when we know the peer's {type}-{channel} (from its
+  // HELLO_TLV_FW_CHANNEL) and it differs from ours, don't OFFER — a snafu
+  // lamp can't run a standard image and channels must not cross. An unknown
+  // (empty) channel means an older peer that doesn't emit the TLV; fall
+  // through and let the receiver's onOfferOnLoop silent-drop be the backstop.
+  if (peerFwChannel && peerFwChannel[0] != '\0' &&
+      std::strncmp(peerFwChannel, lamp::FIRMWARE_CHANNEL_STR,
+                   lamp_protocol::FW_CHANNEL_LEN) != 0) {
+    FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X skip: "
+                "peer channel=%s != ours=%s\n",
+                peerMac[0], peerMac[1], peerMac[2],
+                peerMac[3], peerMac[4], peerMac[5],
+                peerFwChannel, lamp::FIRMWARE_CHANNEL_STR);
+    return;
+  }
   if (peerIsInBackoff(peerMac, nowMs)) {
     FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X v=0x%08X skip: "
                 "peer in backoff\n",
@@ -787,11 +801,10 @@ void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
               peerMac[0], peerMac[1], peerMac[2],
               peerMac[3], peerMac[4], peerMac[5],
               (unsigned)peerVersion, (unsigned)lamp::FIRMWARE_VERSION);
-  // Channel filter is enforced by the peer's own onOfferOnLoop silent-drop
-  // (firmware_receiver.cpp::channelMatchesOurs). Cross-channel offers
-  // result in no ACCEPT, the OFFER times out, and the peer lands in our
-  // 10-minute backoff ring — which is the right outcome (we won't badger
-  // a cross-channel neighbour).
+  // Known cross-type/channel peers were filtered above. An unknown-channel
+  // peer (older firmware, no TLV) can still reach here; its own onOfferOnLoop
+  // silent-drop (firmware_receiver.cpp::channelMatchesOurs) is the backstop —
+  // the OFFER times out and it lands in our 10-minute backoff ring.
   targetProtocolVersion_ = peerProtocolVersion;
   emitOffer(peerMac, peerVersion, nowMs);
 }
@@ -805,7 +818,7 @@ void FirmwareDistributor::resetSession() {
   targetProtocolVersion_ = 0;
   totalChunks_     = 0;
   nextChunkIdx_    = 0;
-  sentChunkHighWater_ = 0;
+  sentProgress_.reset();
   lastSentChunk_   = 0;
   lastSentMs_      = 0;
   currentChunkRetries_ = 0;

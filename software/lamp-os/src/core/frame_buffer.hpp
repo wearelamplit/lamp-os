@@ -22,12 +22,6 @@ class FrameBuffer {
   Adafruit_NeoPixel* driver = nullptr;
   std::vector<Color> buffer;
 
-  // Rate-limit floor for the LAMP_DEBUG-gated flush log so per-frame
-  // changes during a fade don't drown the serial. Per-instance so base
-  // and shade each get their own throttled stream — set to 0 to log the
-  // next change, otherwise gated to once per ~500 ms.
-  uint32_t lastFlushLogMs_ = 0;
-
   FrameBuffer();
 
   /**

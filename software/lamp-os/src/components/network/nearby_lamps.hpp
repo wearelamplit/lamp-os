@@ -82,6 +82,12 @@ struct NearbyLamp {
   // Zero until we've heard a HELLO; that just means "don't OTA them
   // yet, we don't know which protocol version they understand."
   uint8_t protocolVersion = 0;
+  // The peer's `{type}-{channel}` identity from HELLO_TLV_FW_CHANNEL (e.g.
+  // "standard-beta"). Empty until we've heard the TLV (older peers don't
+  // emit it). The OTA distributor uses it to skip OFFERs at a peer of a
+  // different lamp-type/channel; empty = "unknown → offer anyway and let the
+  // receiver's silent-drop gate". 16 bytes + NUL, matching FW_CHANNEL_LEN.
+  char fwChannel[17] = {0};
   // Most recent BLE-scan RSSI (dBm) reported by the NimBLE callback for
   // any adv from this peer. `getReachableViaBle()` returns its result
   // sorted by lastRssi descending so consumers (PersonalityEngine's
@@ -155,7 +161,8 @@ class NearbyLamps {
                              uint32_t firmwareVersion = 0,
                              int8_t rssi = -127,
                              uint8_t otaState = 0,
-                             uint8_t protocolVersion = 0);
+                             uint8_t protocolVersion = 0,
+                             const char* fwChannel = nullptr);
 
   // Drop entries whose most-recent sighting (max of the two transports)
   // is older than `maxAgeMs`.

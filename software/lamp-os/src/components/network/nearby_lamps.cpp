@@ -109,7 +109,8 @@ void NearbyLamps::addOrUpdateFromEspNow(const std::string& name, const uint8_t m
                                         uint32_t firmwareVersion,
                                         int8_t rssi,
                                         uint8_t otaState,
-                                        uint8_t protocolVersion) {
+                                        uint8_t protocolVersion,
+                                        const char* fwChannel) {
   uint32_t now = millis();
   // Derive the BD_ADDR outside the lock — depends only on `mac`, no shared
   // state. snprintf + heap alloc happen here so the bounded critical
@@ -153,6 +154,10 @@ void NearbyLamps::addOrUpdateFromEspNow(const std::string& name, const uint8_t m
     e.firmwareVersion = firmwareVersion;
     e.otaState = otaState;
     e.protocolVersion = protocolVersion;
+    if (fwChannel && fwChannel[0] != '\0') {
+      std::strncpy(e.fwChannel, fwChannel, sizeof(e.fwChannel) - 1);
+      e.fwChannel[sizeof(e.fwChannel) - 1] = '\0';
+    }
     store_.push_back(e);
   } else {
     store_[idx].baseColor = base;
@@ -177,6 +182,13 @@ void NearbyLamps::addOrUpdateFromEspNow(const std::string& name, const uint8_t m
     // as firmwareVersion above (BLE-only callers default to 0).
     if (protocolVersion != 0) {
       store_[idx].protocolVersion = protocolVersion;
+    }
+    // Don't clobber a known channel with empty (older peers / BLE-only
+    // callers pass nullptr); a peer's {type}-{channel} is stable.
+    if (fwChannel && fwChannel[0] != '\0') {
+      std::strncpy(store_[idx].fwChannel, fwChannel,
+                   sizeof(store_[idx].fwChannel) - 1);
+      store_[idx].fwChannel[sizeof(store_[idx].fwChannel) - 1] = '\0';
     }
   }
   xSemaphoreGive(mutex_);

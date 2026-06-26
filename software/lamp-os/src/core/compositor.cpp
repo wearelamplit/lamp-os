@@ -67,15 +67,11 @@ void Compositor::tick() {
 #ifdef LAMP_DEBUG
     s_quietCount++;
 #endif
-    // Gate the indicator paint + flush on the same MINIMUM_FRAME_DRAW_TIME_MS
-    // cadence the normal pipeline uses. Without this gate the quiet branch
-    // runs at the bare loop rate (~1700 Hz observed on jacko) and we hammer
-    // the WS281x strip with paint/show at >25× the IC's reliable reset
-    // cadence — back-to-back show() calls land inside the strip's reset
-    // gap and the ICs latch wrong bits mid-frame. Observed as a frame-by-
-    // frame "flicker" between the indicator bar and full base colours.
-    // Match the normal pipeline's 60 Hz cap so the strip has the same
-    // reset budget during OTA as during normal animation.
+    // Cap the indicator repaint to the normal pipeline's ~60 Hz frame rate
+    // (MINIMUM_FRAME_DRAW_TIME_MS). FrameBuffer::flush() already content-dedups
+    // and gates the strip write on the driver's reset window, so this is a CPU
+    // cap, not an LED-timing fix — without it the quiet branch re-runs the
+    // paint every loop iteration for no visible gain.
     if (millis() < lastDrawTimeMs + MINIMUM_FRAME_DRAW_TIME_MS) {
       return;
     }

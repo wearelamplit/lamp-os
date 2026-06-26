@@ -3,6 +3,7 @@
 #include <math.h>
 
 #include <cstdint>
+#include <cstring>
 
 #include "components/firmware/firmware_distributor.hpp"
 #include "components/firmware/firmware_receiver.hpp"
@@ -37,21 +38,8 @@ inline Color scaleColor(const Color& c, uint8_t num) {
 constexpr uint8_t kDimScale255 = 51;
 
 // No pulse — earlier versions used a 20%↔100% then 60%↔100% sine to
-// signal "I'm alive". Hardware-observed 2026-06-25: even a tight pulse
-// range reads as flicker on saturated peer colors. The bar GROWING
-// left-to-right is the live signal — no need for an additional
-// brightness oscillation.
-
-// Resolve the active OTA peer's base color via NearbyLamps. Falls back to
-// white (255,255,255,0) when no entry matches (peer dropped from cache,
-// haven't received a HELLO yet, etc.).
-Color resolvePeerBase(const uint8_t mac[6]) {
-  NearbyLamp peer;
-  if (nearbyLamps.findByMac(mac, peer)) {
-    return peer.baseColor;
-  }
-  return Color(255, 255, 255, 0);
-}
+// signal "I'm alive". The bar growing left-to-right is the live signal; a
+// brightness oscillation on top of it is redundant.
 
 }  // namespace
 
@@ -142,9 +130,28 @@ void paint(FrameBuffer* fb, const Color& localBase, uint32_t nowMs) {
   (void)inHoldRender;  // currently identical render path; future visual
                        // tweak (e.g. a subtle dim-down) can use this flag.
 
-  // Solid peer color — no pulse. The bar growing left-to-right is the
-  // live signal; pulsing on top of that read as flicker.
-  const Color peerSolid = resolvePeerBase(peerMac);
+  // Session-stable peer color. The bar paints in the SENDER's base color so
+  // the strip reads as "who's flashing me". findByMac can miss — NearbyLamps
+  // is cold right after a flash, and HELLO processing is starved while the
+  // lamp sits in OTA quiet mode — so resolving every frame made the color
+  // oscillate between the sender's color and the fallback, which IS the
+  // flicker. Resolve ONCE per session: latch the first hit and hold it; until
+  // then show the lamp's OWN base color (stable), never a jarring white.
+  static uint8_t s_latchMac[6] = {0};
+  static bool    s_latched     = false;
+  static Color   s_peerColor;
+  if (std::memcmp(s_latchMac, peerMac, 6) != 0) {
+    std::memcpy(s_latchMac, peerMac, 6);
+    s_latched = false;
+  }
+  if (!s_latched) {
+    NearbyLamp peer;
+    if (nearbyLamps.findByMac(peerMac, peer)) {
+      s_peerColor = peer.baseColor;
+      s_latched   = true;
+    }
+  }
+  const Color peerSolid = s_latched ? s_peerColor : localBase;
 
   // Clamp done at total — if the wisp/sender races ahead of the receiver
   // briefly we don't want progress > 100%.

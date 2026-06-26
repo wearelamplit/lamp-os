@@ -118,6 +118,8 @@
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 #include <esp_partition.h>
+
+#include "util/high_water.hpp"
 #endif
 
 namespace lamp_protocol {
@@ -171,8 +173,13 @@ class FirmwareDistributor {
   // for every outbound OTA frame in this session so old-protocol peers
   // can process our OFFER/CHUNK/DONE at their version. Zero means
   // "unknown" — we skip the peer (we haven't heard a HELLO yet).
+  // peerFwChannel: the peer's `{type}-{channel}` from HELLO_TLV_FW_CHANNEL,
+  // or nullptr/"" when unknown (older peer). When known and != ours, we skip
+  // the OFFER (no point flashing a snafu lamp a standard image, or crossing
+  // channels). Unknown → offer anyway; the receiver's silent-drop still gates.
   void considerPeerForOta(const uint8_t peerMac[6], uint32_t peerVersion,
-                          uint8_t peerProtocolVersion, uint32_t nowMs);
+                          uint8_t peerProtocolVersion, uint32_t nowMs,
+                          const char* peerFwChannel = nullptr);
 
   // Inbound packet hooks — show_receiver dispatches MSG_FW_ACCEPT/REQ/
   // RESULT from its WiFi recv task. Idempotent on irrelevant packets
@@ -217,13 +224,13 @@ class FirmwareDistributor {
   // the smart-REQ path rewinds nextChunkIdx_ back to the requested
   // chunk to re-stream it. Using nextChunkIdx_ directly caused the
   // indicator's bar to flash from near-100% down to near-0% every
-  // REQ rewind (observed 2026-06-25 — "bar pixels flickering to dim").
+  // REQ rewind (the bar pixels flickered toward dim).
   // The high water mark tracks our forward progress monotonically so
   // the indicator shows the user the actual delivered position without
   // visual stutter from the REQ-rewind mechanic underneath.
   uint32_t sentChunksCount() const {
-    return nextChunkIdx_ > sentChunkHighWater_ ? nextChunkIdx_
-                                              : sentChunkHighWater_;
+    const uint32_t hw = sentProgress_.peek();
+    return nextChunkIdx_ > hw ? nextChunkIdx_ : hw;
   }
 
   // Total chunks for the running image, computed once at begin() from
@@ -232,22 +239,21 @@ class FirmwareDistributor {
   uint16_t totalChunks() const { return firmwareTotalChunks_; }
 
   // --- Tunables (constexpr; tests static_assert against these). ---
-  // Streaming task cadence. Push one chunk, then vTaskDelay between
-  // them to let the WiFi task drain the TX queue. On NO_MEM back from
-  // the send call we delay kStreamingQueueBackoffMs and try the same
-  // chunk again. The task runs at priority kStreamingTaskPriority (above
-  // the Arduino loop's priority 1, well below WiFi/IDF at 18+).
+  // Streaming task cadence. Push one chunk, then vTaskDelay between them to
+  // let the WiFi task drain the TX queue. On NO_MEM from the send call we
+  // delay kStreamingQueueBackoffMs and retry the same chunk. Runs at
+  // kStreamingTaskPriority (above the Arduino loop, well below WiFi/IDF).
   //
-  // Hardware-tested per wisp's notes 2026-06-05: a 1ms spacing pushed
-  // ~130 chunks/sec but overwhelmed the RECEIVING lamp (loopTask starved
-  // by Core 0's esp_ota_write_with_offset flash-bus contention; lamp
-  // task_wdt panics around chunk 500). A 10ms spacing paces at ~80
-  // chunks/sec (200B chunk × 80 → ~16 KB/s sustained), still well over
-  // the 50 chunks/sec floor in the success criteria, with enough
-  // receiver breathing room for the loop task to keep yielding. Same
-  // constraint applies here — the peer we're streaming to is also a
-  // lamp running this same firmware.
-  static constexpr uint32_t kStreamingChunkSpacingMs   = 10;
+  // Locked at 30ms (~33 chunks/sec). With the receiver erasing its whole
+  // partition upfront, a chunk no longer triggers a mid-stream JIT erase, so
+  // faster cadences (15-25ms) also complete on the bench. But below ~15ms the
+  // ESP-NOW RX queue itself overruns under real RF loss (heavy recovery
+  // thrash, no net speed gain), and faster cadences raise on-air burst
+  // density — which tracks with visible LED flicker during OTA. 30ms keeps
+  // the most RX-queue margin and runs flicker-free; the speed below it is
+  // marginal and thinly sampled. Sender-side only — retune via OTA without
+  // fleet lockstep.
+  static constexpr uint32_t kStreamingChunkSpacingMs   = 30;
   static constexpr uint32_t kStreamingQueueBackoffMs   = 5;
   static constexpr uint32_t kStreamingTaskStackSize    = 4096;
   static constexpr uint32_t kStreamingTaskPriority     = 5;
@@ -258,17 +264,16 @@ class FirmwareDistributor {
   static constexpr uint16_t kStreamProgressLogEvery    = 256;
   // OFFER retry. ESP-NOW unicast over a BLE-coex'd radio drops packets
   // intermittently; the wisp's send-callback data showed ~50% of initial
-  // OFFER attempts MAC-layer FAIL (hardware-confirmed 2026-06-04). Resend
+  // OFFER attempts MAC-layer FAIL (hardware-confirmed). Resend
   // up to N times spaced kOfferRetryIntervalMs apart, reusing the same
   // sessionOfferSeq_ so the peer's firmwareDedup_ collapses dupes.
   //
-  // Interval is 200ms specifically to NOT resonate with BLE advert
-  // intervals (commonly 100-200ms) — at 500ms we observed both tries
-  // landing in the same coex busy window. 200ms shifts across multiple
-  // advert slots per retry burst.
+  // 200ms between retries: short enough to recover a dropped OFFER within
+  // the receiver's ACCEPT window, long enough to let the WiFi TX queue drain
+  // between attempts.
   static constexpr uint8_t  kMaxOfferRetries    = 8;
   static constexpr uint32_t kOfferRetryIntervalMs = 200;
-  static constexpr uint32_t kAcceptTimeoutMs    = 5000;
+  static constexpr uint32_t kAcceptTimeoutMs    = 15000;  // covers the receiver's full upfront partition erase before it ACCEPTs
   static constexpr uint32_t kFinalizeTimeoutMs  = 30000;
   // DONE retry. The lamp-side receiver's onDoneOnLoop is naturally
   // idempotent (state-guarded on Streaming) so a duplicate DONE arriving
@@ -356,11 +361,10 @@ class FirmwareDistributor {
   int         streamOneChunk(uint32_t nowMs);
   // Signal the streaming task to wake. Safe from recv task + tick().
   void        wakeStreamingTask();
-  // Scan backward through the running partition to find the actual end
-  // of the signed image. The partition is larger than the image; sending
-  // partition->size would stream erased flash garbage. Sets *outLen to
-  // the position just past the last non-0xFF byte (i.e., signed-image-
-  // length including the LSIG footer). Returns false on partition read
+  // Forward-scan the running partition for the lowest valid LSIG footer and
+  // return its signed length (the partition is larger than the image; sending
+  // partition->size would stream erased flash garbage). Forward, not backward,
+  // is load-bearing — see the .cpp body. Returns false on partition read
   // failure.
   bool        discoverImageLength(uint32_t* outLen) const;
 #endif
@@ -398,12 +402,11 @@ class FirmwareDistributor {
   uint8_t  targetProtocolVersion_ = 0;
   uint16_t totalChunks_           = 0;
   uint16_t nextChunkIdx_           = 0;
-  // Monotonic max of nextChunkIdx_ for the current session. Read by
-  // sentChunksCount() so the OTA indicator's bar never visually
-  // regresses when nextChunkIdx_ rewinds to serve a smart-REQ. Reset
-  // to 0 in resetSession(); updated wherever nextChunkIdx_ moves
-  // forward (streaming task post-send + REQ-served jump-forward).
-  uint16_t sentChunkHighWater_     = 0;
+  // Monotonic max of nextChunkIdx_ for the current session — read by
+  // sentChunksCount() so the indicator bar never regresses when
+  // nextChunkIdx_ rewinds to serve a smart-REQ. observe()'d wherever
+  // nextChunkIdx_ moves forward; reset() in resetSession().
+  HighWaterMark sentProgress_;
   uint16_t lastSentChunk_          = 0;
   uint32_t lastSentMs_             = 0;
   uint8_t  currentChunkRetries_    = 0;

@@ -97,9 +97,15 @@ Every frame starts with the same 6-byte header:
 **`MSG_HELLO` (0x01)**, Lamp presence beacon. Broadcast by every lamp every 5 s (v0x03; was 2s). Pruned from `nearbyLamps` after 120 s of silence.
 ```
 header(6) + sourceMac(6) + shade[4 RGBW] + base[4 RGBW] +
-firmwareVersion(4 LE) + nameLen(1) + name[0..32]
-= 25..57 bytes
+firmwareVersion(4 LE) + nameLen(1) + name[0..32] +
+tlv_count(1) + TLV trailer (v0x05+)
+= 26..~79 bytes
 ```
+TLV trailer (v0x05+): `tlv_count(1)`, then per TLV `type(1) + len(1) + value(len)`:
+- `HELLO_TLV_OTA_STATE` (0x01), len 1: 0=idle / 1=sending / 2=receiving. Emitted only when non-idle.
+- `HELLO_TLV_FW_CHANNEL` (0x02), len 16: this lamp's `{type}-{channel}` identity (e.g. `standard-beta`, zero-padded) — same string as the LSIG footer + `MSG_FW_OFFER` channel. The distributor reads it to skip OFFERs at a wrong-type/channel peer.
+
+Unknown TLV types are skipped by length (forward-compat); a receiver that doesn't know a type just gets the default for that field.
 
 **`MSG_WISP_HELLO` (0x20)**, Wisp presence beacon. Broadcast by wisp every 2 s via a FreeRTOS software timer (so HELLO cadence survives WiFi/WebSocket blocks).
 ```

@@ -263,6 +263,12 @@ constexpr size_t HELLO_MAX_NAME = 32;
 // plus the existing fixed + name fields. ESP-NOW MTU is 250, so we
 // still have ~120 bytes of headroom over the new ceiling.
 constexpr uint8_t HELLO_TLV_OTA_STATE = 0x01;  // value: 1 byte, 0=idle 1=sending 2=receiving
+// value: 16 bytes, the lamp's `{type}-{channel}` identity (zero-padded),
+// same string as the LSIG footer + MSG_FW_OFFER channel field. Lets the
+// distributor skip OFFERs at a peer of a different lamp-type or channel
+// instead of relying solely on the receiver's silent-drop.
+constexpr uint8_t HELLO_TLV_FW_CHANNEL = 0x02;
+constexpr size_t  HELLO_FW_CHANNEL_LEN = 16;  // == FW_CHANNEL_LEN
 
 // Compact OTA-state enum carried in HELLO_TLV_OTA_STATE. Maps to:
 //   firmwareDistributor.isInProgress() → kOtaStateSending
@@ -410,6 +416,10 @@ struct ParsedHello {
   // absent from the frame, so a sender that doesn't yet emit a given
   // TLV looks indistinguishable from "default value" to the receiver.
   uint8_t otaState = kOtaStateIdle;  // HELLO_TLV_OTA_STATE
+  // HELLO_TLV_FW_CHANNEL — the peer's `{type}-{channel}` identity. Empty
+  // when the peer doesn't emit the TLV (older firmware); the distributor
+  // treats empty as "unknown → offer anyway and let the receiver gate".
+  char fwChannel[HELLO_FW_CHANNEL_LEN + 1] = {0};
 };
 
 struct ParsedControlOp {
@@ -554,14 +564,18 @@ inline size_t buildHello(uint8_t* buf, size_t bufLen, uint16_t seq,
                          const uint8_t shadeRGBW[4], const uint8_t baseRGBW[4],
                          uint32_t firmwareVersion,
                          const char* name, size_t nameLen,
-                         uint8_t otaState = kOtaStateIdle) {
+                         uint8_t otaState = kOtaStateIdle,
+                         const char* fwChannel = nullptr) {
   if (!buf || !sourceMac || !shadeRGBW || !baseRGBW) return 0;
   if (nameLen > HELLO_MAX_NAME) nameLen = HELLO_MAX_NAME;
-  // TLV trailer: tlv_count(1) + (type(1) + len(1) + value(1)) per non-default TLV.
-  // Currently the only TLV is OTA_STATE (3 wire bytes including type+len), and
-  // we only emit it when non-Idle to keep the common case minimum-sized.
-  const bool emitOtaState = (otaState != kOtaStateIdle);
-  const size_t tlvBytes = 1 + (emitOtaState ? 3 : 0);
+  // TLV trailer: tlv_count(1) + (type(1) + len(1) + value(N)) per emitted TLV.
+  // OTA_STATE (3 wire bytes) is emitted only when non-Idle; FW_CHANNEL (18
+  // wire bytes: type+len+16) is emitted whenever a channel string is passed
+  // (so peers can read our {type}-{channel} for the distributor's gate).
+  const bool emitOtaState  = (otaState != kOtaStateIdle);
+  const bool emitFwChannel = (fwChannel != nullptr && fwChannel[0] != '\0');
+  const size_t tlvBytes = 1 + (emitOtaState ? 3 : 0) +
+                          (emitFwChannel ? (2 + HELLO_FW_CHANNEL_LEN) : 0);
   const size_t total = HELLO_FIXED_SIZE + 1 + nameLen + tlvBytes;
   if (bufLen < total) return 0;
   buf[0] = MAGIC_0;
@@ -583,11 +597,21 @@ inline size_t buildHello(uint8_t* buf, size_t bufLen, uint16_t seq,
   if (nameLen && name) std::memcpy(&buf[25], name, nameLen);
   // TLV trailer starts here.
   size_t off = HELLO_FIXED_SIZE + 1 + nameLen;
-  buf[off++] = emitOtaState ? 1 : 0;  // tlv_count
+  buf[off++] = static_cast<uint8_t>((emitOtaState ? 1 : 0) +
+                                    (emitFwChannel ? 1 : 0));  // tlv_count
   if (emitOtaState) {
     buf[off++] = HELLO_TLV_OTA_STATE;
     buf[off++] = 1;          // len
     buf[off++] = otaState;   // value
+  }
+  if (emitFwChannel) {
+    buf[off++] = HELLO_TLV_FW_CHANNEL;
+    buf[off++] = static_cast<uint8_t>(HELLO_FW_CHANNEL_LEN);  // len = 16
+    std::memset(&buf[off], 0, HELLO_FW_CHANNEL_LEN);
+    for (size_t n = 0; fwChannel[n] != '\0' && n < HELLO_FW_CHANNEL_LEN; ++n) {
+      buf[off + n] = static_cast<uint8_t>(fwChannel[n]);
+    }
+    off += HELLO_FW_CHANNEL_LEN;
   }
   return total;
 }
@@ -901,6 +925,7 @@ inline bool parseHello(const uint8_t* data, size_t len, ParsedHello& out) {
   // builds the prefix correctly but forgets the trailer) — those just
   // get default TLV-derived fields.
   out.otaState = kOtaStateIdle;
+  out.fwChannel[0] = '\0';
   size_t off = HELLO_FIXED_SIZE + 1 + nameLen;
   if (len <= off) return true;
   const uint8_t tlvCount = data[off++];
@@ -916,6 +941,10 @@ inline bool parseHello(const uint8_t* data, size_t len, ParsedHello& out) {
     // existing parsers).
     if (tlvType == HELLO_TLV_OTA_STATE && tlvLen == 1) {
       out.otaState = data[off];
+    } else if (tlvType == HELLO_TLV_FW_CHANNEL &&
+               tlvLen == HELLO_FW_CHANNEL_LEN) {
+      std::memcpy(out.fwChannel, &data[off], HELLO_FW_CHANNEL_LEN);
+      out.fwChannel[HELLO_FW_CHANNEL_LEN] = '\0';
     }
     off += tlvLen;
   }
@@ -1146,6 +1175,10 @@ constexpr uint8_t  MSG_FW_RESULT = 0x45;
 // (e.g. "standard-stable", "snafu-beta") so the existing silent-drop on
 // mismatch enforces per-variant OTA gating without a separate type field.
 constexpr size_t   FW_CHANNEL_LEN       = 16;
+// The HELLO fw-channel TLV carries the same {type}-{channel} identity, so its
+// width must match or the distributor's gate compares mismatched lengths.
+static_assert(FW_CHANNEL_LEN == HELLO_FW_CHANNEL_LEN,
+              "HELLO_TLV_FW_CHANNEL width must equal the OFFER/footer channel");
 // First 8 bytes of sha256(signed region) — image fingerprint, NOT signature
 // prefix. The signature itself is 64 bytes inside the LSIG footer.
 constexpr size_t   FW_SHA256_PREFIX_LEN = 8;
