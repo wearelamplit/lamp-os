@@ -35,10 +35,16 @@ counts (`pulseBackCount = 1, 2, …`) run exactly N cycles, and
 `pulseBackCount = kPulseCountContinuous` fills the entire hold with
 back-to-back cycles.
 
-**Snub**, a high-strength pulse-back (255 = full darken to black, 128
-= partial darken to ~50% retention) on a short profile. The negative
-side of the disposition spectrum, structurally identical to the warm
-side but with deeper dips and shorter durations.
+**Snub**, the negative side of the disposition spectrum, on a short
+profile. Unlike a warm greeting (which reaches full peer color and
+optionally pulses during the hold), a snub *folds the dim into the
+fades*: the ease-in fades shade → peer color while simultaneously
+dropping brightness to the snub depth, the hold sits dark-in-their-color,
+and the ease-out reverses (rising from dark back through their color to
+the shade). Depth is set by `pulseBackStrength`, 255 = full darken to
+black (Snub), 128 = partial darken to ~50% retention (PartialSnub).
+`pulseBackCount` is unused on snubs — the dim is one continuous ramp, not
+a count of breaths.
 
 The waveform renders on the **shade** surface. The base keeps drawing
 whatever expression is configured.
@@ -51,22 +57,28 @@ Frame counts at ~60 fps. Strength is the `darken()` input (0 = no dim,
 
 | Profile | Total | Ease-in | Hold | Fade-out | Strength | Count |
 |---|---|---|---|---|---|---|
-| `kProfileMinimal` | 1.0s | 0.5s | 0.2s | 0.3s | 0 | 0 |
-| `kProfileQuick` | 1.5s | 0.4s | 0.4s | 0.7s | 0 | 0 |
-| `kProfileGentle` | 2.0s | 0.3s | 0.6s | 1.1s | 0 | 0 |
-| `kProfileStandard` | 2.5s | 0.25s | 0.85s | 1.4s | 0 | 0 |
-| `kProfileWarm` | 3.0s | 0.2s | 1.1s | 1.7s | 100 (~60% retention) | 1 |
-| `kProfileEnthused` | 4.0s | 0.2s | 1.5s | 2.3s | 128 (~50% retention) | 2 |
-| `kProfileEffusive` | 5.0s | 0.1s | 2.0s | 2.9s | 153 (~40% retention) | continuous (≈3 breaths) |
-| `kProfileSnub` | 1.0s | 0.3s | 0.4s | 0.3s | 255 (to black) | 1 |
-| `kProfilePartialSnub` | 1.0s | 0.3s | 0.4s | 0.3s | 128 (~50% retention) | 1 |
-| `kProfileSnubQuick` | 1.5s | 0.4s | 0.6s | 0.5s | 255 (to black) | 1 |
-| `kProfilePartialSnubQuick` | 1.5s | 0.4s | 0.6s | 0.5s | 128 (~50% retention) | 1 |
+| `kProfileMinimal` | 17.0s | 2.5s | 13.0s | 1.5s | 0 | 0 |
+| `kProfileGentle` | 18.5s | 2.0s | 14.0s | 2.5s | 0 | 0 |
+| `kProfileStandard` | 20.0s | 2.0s | 16.0s | 2.0s | 0 | 0 |
+| `kProfileWarm` | 21.5s | 1.5s | 17.0s | 3.0s | 100 (~60% retention) | 1 |
+| `kProfileEnthused` | 22.5s | 1.0s | 18.0s | 3.5s | 128 (~50% retention) | 2 |
+| `kProfileEffusive` | 23.75s | 0.75s | 19.0s | 4.0s | 153 (~40% retention) | continuous |
+| `kProfileSnub` | 4.5s | 1.0s | 2.5s | 1.0s | 255 (to black) | 1 |
+| `kProfilePartialSnub` | 6.0s | 1.0s | 3.5s | 1.5s | 128 (~50% retention) | 1 |
+| `kProfileSnubQuick` | 5.5s | 1.0s | 3.0s | 1.5s | 255 (to black) | 1 |
+| `kProfilePartialSnubQuick` | 6.5s | 1.0s | 4.0s | 1.5s | 128 (~50% retention) | 1 |
 
-**Ease-in inverts with warmth.** Slow ease-in (Minimal, 500 ms) reads as
-hesitant recognition; fast ease-in (Effusive, 100 ms) reads as eager
+`kProfileStandard` (Ambivert greeting a Neutral peer) is the anchor —
+2s in / 16s hold / 2s out. Every other profile is a subtle variation off
+it; a real greeting stays in the ~17-24s band, and the personality tell
+is the asymmetry, not the length.
+
+**Ease-in inverts with warmth.** Slow ease-in (Minimal, 2.5s) reads as
+hesitant recognition; fast ease-in (Effusive, 0.75s) reads as eager
 lock-on. Fade-out grows with warmth, extended lingering on the warm
-side, quick let-go on the cold side.
+side (Effusive, 4s), quick let-go on the cold side (Minimal, 1.5s). So a
+warm greeting pops in and reluctantly leaves; a cold one eases in and is
+gone quickly.
 
 **Pulse depth deepens with warmth on the affectionate side.** Warm dips
 gently to 60%, Enthused dips more visibly to 50%, Effusive dips
@@ -83,11 +95,11 @@ window (no greetings during rest).
 
 | Disposition | Profile | Total | Ease-in | Hold | Fade-out | Slow Pulse | Effect |
 |---|---|---|---|---|---|---|---|
-| Salty (1) | Snub | 1.0s | 0.3s | 0.4s | 0.3s | 1× → 0% | Snub in their color |
-| Wary (2) | PartialSnub | 1.0s | 0.3s | 0.4s | 0.3s | 1× → 50% | Partial snub in their color |
-| Neutral (3) | Minimal | 1.0s | 0.5s | 0.2s | 0.3s | | Hold in their color |
-| Fond (4) | Gentle | 2.0s | 0.3s | 0.6s | 1.1s | | Hold in their color |
-| Smitten (5) | Warm | 3.0s | 0.2s | 1.1s | 1.7s | 1× → 60% | One subtle pulse in their color |
+| Salty (1) | Snub | 4.5s | 1.0s | 2.5s | 1.0s | — (dim → 0%) | Snub in their color |
+| Wary (2) | PartialSnub | 6.0s | 1.0s | 3.5s | 1.5s | — (dim → 50%) | Partial snub in their color |
+| Neutral (3) | Minimal | 17.0s | 2.5s | 13.0s | 1.5s | | Hold in their color |
+| Fond (4) | Gentle | 18.5s | 2.0s | 14.0s | 2.5s | | Hold in their color |
+| Smitten (5) | Warm | 21.5s | 1.5s | 17.0s | 3.0s | 1× → 60% | One subtle pulse in their color |
 
 ### Ambivert mode
 
@@ -96,24 +108,24 @@ window. No fatigue.
 
 | Disposition | Profile | Total | Ease-in | Hold | Fade-out | Slow Pulse | Effect |
 |---|---|---|---|---|---|---|---|
-| Salty (1) | Snub | 1.0s | 0.3s | 0.4s | 0.3s | 1× → 0% | Snub in their color |
-| Wary (2) | PartialSnub | 1.0s | 0.3s | 0.4s | 0.3s | 1× → 50% | Partial snub in their color |
-| Neutral (3) | Standard | 2.5s | 0.25s | 0.85s | 1.4s | | Hold in their color |
-| Fond (4) | Warm | 3.0s | 0.2s | 1.1s | 1.7s | 1× → 60% | One subtle pulse in their color |
-| Smitten (5) | Enthused | 4.0s | 0.2s | 1.5s | 2.3s | 2× → 50% | Two pulses in their color |
+| Salty (1) | Snub | 4.5s | 1.0s | 2.5s | 1.0s | — (dim → 0%) | Snub in their color |
+| Wary (2) | PartialSnub | 6.0s | 1.0s | 3.5s | 1.5s | — (dim → 50%) | Partial snub in their color |
+| Neutral (3) | Standard | 20.0s | 2.0s | 16.0s | 2.0s | | Hold in their color |
+| Fond (4) | Warm | 21.5s | 1.5s | 17.0s | 3.0s | 1× → 60% | One subtle pulse in their color |
+| Smitten (5) | Enthused | 22.5s | 1.0s | 18.0s | 3.5s | 2× → 50% | Two pulses in their color |
 
 ### Extrovert mode
 
-**Cooldown**: 15 s base between greetings; no per-peer regreet window
+**Cooldown**: 26 s base between greetings; no per-peer regreet window
 (eagerly re-greets returning peers each cooldown cycle). No fatigue.
 
 | Disposition | Profile | Total | Ease-in | Hold | Fade-out | Slow Pulse | Effect |
 |---|---|---|---|---|---|---|---|
-| Salty (1) | Snub-Quick | 1.5s | 0.4s | 0.6s | 0.5s | 1× → 0% | Snub in their color |
-| Wary (2) | PartialSnub-Quick | 1.5s | 0.4s | 0.6s | 0.5s | 1× → 50% | Partial snub in their color |
-| Neutral (3) | Standard | 2.5s | 0.25s | 0.85s | 1.4s | | Hold in their color |
-| Fond (4) | Enthused | 4.0s | 0.2s | 1.5s | 2.3s | 2× → 50% | Two pulses in their color |
-| Smitten (5) | Effusive | 5.0s | 0.1s | 2.0s | 2.9s | continuous → 40% | Continuous pulsing in their color |
+| Salty (1) | Snub-Quick | 5.5s | 1.0s | 3.0s | 1.5s | — (dim → 0%) | Snub in their color |
+| Wary (2) | PartialSnub-Quick | 6.5s | 1.0s | 4.0s | 1.5s | — (dim → 50%) | Partial snub in their color |
+| Neutral (3) | Standard | 20.0s | 2.0s | 16.0s | 2.0s | | Hold in their color |
+| Fond (4) | Enthused | 22.5s | 1.0s | 18.0s | 3.5s | 2× → 50% | Two pulses in their color |
+| Smitten (5) | Effusive | 23.75s | 0.75s | 19.0s | 4.0s | continuous → 40% | Continuous pulsing in their color |
 
 ## Cooldown comparison
 
@@ -122,7 +134,7 @@ can drain the lamp.
 
 | Aspect | Introvert | Ambivert | Extrovert |
 |---|---|---|---|
-| Base cooldown | 60 s | 30 s | 15 s |
+| Base cooldown | 60 s | 30 s | 26 s |
 | Per-peer regreet window | 10 min | 5 min | none |
 | Fatigue | 3 greets / 5 min → 5 min rest | none | none |
 
@@ -132,13 +144,14 @@ gated by the same cooldown as warm greetings, no bypass paths.
 
 ## Effect glossary
 
-- **Snub**, ease into peer color, dim through that color all the way
-  to black on one slow breath, return to peer color, fade out. The
-  observer sees a brief flash of the peer's color sandwiching a
-  blackout, identifying who the snub is aimed at.
-- **Partial snub**, same shape as Snub but dims only to ~50% of the
-  peer color. Reads as a hesitant pullback rather than a hard
-  blackout.
+- **Snub**, ease from the shade toward the peer color while dimming all
+  the way to black, hold dark, then reverse (rise from black back
+  through the peer color to the shade). The observer sees the peer's hue
+  swallowed into a blackout and spat back out, identifying who the snub
+  is aimed at.
+- **Partial snub**, same shape as Snub but the dim bottoms out at ~50%
+  of the peer color instead of full black. Reads as a hesitant pullback
+  rather than a hard blackout.
 - **Hold**, ease into peer color, hold steady at peer color, fade
   out. No pulse. The duration distinguishes a quick Neutral
   acknowledgement from a lingering Fond settle.
@@ -156,24 +169,34 @@ gated by the same cooldown as warm greetings, no bypass paths.
 Each greeting plays as a four-phase animation on the shade:
 
 1. **Ease-in**, interpolate from whatever the shade was drawing →
-   `foundLampColor` (the peer's base color).
-2. **Hold**, stay at `foundLampColor`. If pulse-back is active, run
-   the specified number of slow pulse cycles back-to-back at the
-   start of the hold; any remaining hold time stays steady.
+   `foundLampColor` (the peer's base color). On a **snub**, the dim
+   ramps 0 → `pulseBackStrength` across this phase too, so the ease-in
+   lands dark-in-their-color.
+2. **Hold**, stay at `foundLampColor`. On a **snub**, hold at
+   `darken(foundLampColor, pulseBackStrength)` (black / ~50%) instead —
+   the pointed dark pause. Otherwise, if pulse-back is active, run the
+   specified number of slow pulse cycles back-to-back at the start of
+   the hold; any remaining hold time stays steady.
 3. **Fade-out**, interpolate `foundLampColor` → whatever the shade
-   would now be drawing.
+   would now be drawing. On a **snub**, the dim ramps back
+   `pulseBackStrength` → 0 over this phase, mirroring the ease-in.
 4. **OTA-hold** (optional), if the lamp is mid-OTA-distribution to
    this same peer when the greeting fires, the animation lifetime is
    extended (~60 s ceiling) so the shade stays on the peer color
    while the OTA pulse modulates brightness on a meaningful hue.
 
-Each pulse cycle is half-down then half-up around
-`darken(foundLampColor, pulseBackStrength)`, where `darken(c, 255)` is
-black and `darken(c, 0)` is unchanged. The cycle rate is fixed at
-~750 ms (`kSlowPulseCycleFrames = 45`), a slow-breath cadence, clearly
-visible, not flicker-fast.
+`darken(c, s)` scales each channel by `(255 - s)/255` — `darken(c, 255)`
+is black, `darken(c, 0)` is unchanged — preserving hue while dropping
+brightness. Warm-side **pulse** cycles are half-down then half-up around
+`darken(foundLampColor, pulseBackStrength)` at a fixed ~750 ms cadence
+(`kSlowPulseCycleFrames = 45`), a slow breath, clearly visible, not
+flicker-fast. **Snubs** don't pulse — they use `darken` once as a
+brightness envelope folded into the ease-in/hold/fade-out.
 
 ## What this doc doesn't cover
+
+For how greetings fit alongside the other social subsystems, see the
+overview in [`social.md`](social.md). This doc is greetings only:
 
 - The crowd-aware brightness damping in `PersonalityEngine` (Introvert
   only), separate subsystem, weights peers by disposition.

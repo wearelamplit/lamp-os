@@ -78,6 +78,7 @@ struct GreetingTuning {
   uint32_t fadeOutFrames = 0;
   uint8_t  pulseBackStrength = 0;
   uint8_t  pulseBackCount    = 0;
+  bool     snub              = false;
 };
 
 struct CrowdComposition {
@@ -216,7 +217,8 @@ class PersonalityEngine {
  private:
   static GreetingTuning profileToTuning_(uint32_t total, uint32_t easeIn,
                                           uint32_t hold, uint32_t fadeOut,
-                                          uint8_t pulseBack, uint8_t pulseCount) {
+                                          uint8_t pulseBack, uint8_t pulseCount,
+                                          bool snub = false) {
     GreetingTuning t;
     t.totalFrames = total;
     t.easeInFrames = easeIn;
@@ -224,36 +226,37 @@ class PersonalityEngine {
     t.fadeOutFrames = fadeOut;
     t.pulseBackStrength = pulseBack;
     t.pulseBackCount    = pulseCount;
+    t.snub              = snub;
     return t;
   }
   static GreetingTuning profileForCell_(SocialMode mode, uint8_t disp) {
     switch (disp) {
       case 1:  // Salty
         if (mode == SocialMode::Extrovert)
-          return profileToTuning_(90, 24, 36, 30, 255, 1);          // SnubQuick
-        return profileToTuning_(60, 18, 24, 18, 255, 1);            // Snub
+          return profileToTuning_(330, 60, 180, 90, 255, 1, true);   // SnubQuick
+        return profileToTuning_(270, 60, 150, 60, 255, 1, true);     // Snub
       case 2:  // Wary
         if (mode == SocialMode::Extrovert)
-          return profileToTuning_(90, 24, 36, 30, 128, 1);          // PartialSnubQuick
-        return profileToTuning_(60, 18, 24, 18, 128, 1);            // PartialSnub
+          return profileToTuning_(390, 60, 240, 90, 128, 1, true);   // PartialSnubQuick
+        return profileToTuning_(360, 60, 210, 90, 128, 1, true);     // PartialSnub
       case 4:  // Fond
         if (mode == SocialMode::Introvert)
-          return profileToTuning_(120, 18, 36, 66, 0, 0);           // Gentle
+          return profileToTuning_(1110, 120, 840, 150, 0, 0);        // Gentle
         if (mode == SocialMode::Ambivert)
-          return profileToTuning_(180, 12, 66, 102, 100, 1);        // Warm
-        return profileToTuning_(240, 12, 90, 138, 128, 2);          // Enthused
+          return profileToTuning_(1290, 90, 1020, 180, 100, 1);      // Warm
+        return profileToTuning_(1350, 60, 1080, 210, 128, 2);        // Enthused
       case 5:  // Smitten
         if (mode == SocialMode::Introvert)
-          return profileToTuning_(180, 12, 66, 102, 100, 1);        // Warm
+          return profileToTuning_(1290, 90, 1020, 180, 100, 1);      // Warm
         if (mode == SocialMode::Ambivert)
-          return profileToTuning_(240, 12, 90, 138, 128, 2);        // Enthused
-        return profileToTuning_(300,  6,120, 174, 153,
-                                kPulseCountContinuous);              // Effusive
+          return profileToTuning_(1350, 60, 1080, 210, 128, 2);      // Enthused
+        return profileToTuning_(1425, 45, 1140, 240, 153,
+                                kPulseCountContinuous);               // Effusive
       case 3:
       default:  // Neutral / unknown
         if (mode == SocialMode::Introvert)
-          return profileToTuning_(60, 30, 12, 18, 0, 0);            // Minimal
-        return profileToTuning_(150, 15, 51, 84, 0, 0);             // Standard
+          return profileToTuning_(1020, 150, 780, 90, 0, 0);         // Minimal
+        return profileToTuning_(1200, 120, 960, 120, 0, 0);          // Standard
     }
   }
 
@@ -750,28 +753,29 @@ void test_greeting_tuning_matrix() {
     uint32_t expectedTotal;
     uint8_t  expectedPulseBack;
     uint8_t  expectedPulseCount;
+    bool     expectedSnub;
   };
   const Row rows[] = {
     // Salty — Snub (Introvert/Ambivert) or SnubQuick (Extrovert)
-    {SocialMode::Introvert, 1,  60, 255, 1},
-    {SocialMode::Ambivert,  1,  60, 255, 1},
-    {SocialMode::Extrovert, 1,  90, 255, 1},
+    {SocialMode::Introvert, 1,  270, 255, 1, true},
+    {SocialMode::Ambivert,  1,  270, 255, 1, true},
+    {SocialMode::Extrovert, 1,  330, 255, 1, true},
     // Wary — PartialSnub (Introvert/Ambivert) or PartialSnubQuick (Extrovert)
-    {SocialMode::Introvert, 2,  60, 128, 1},
-    {SocialMode::Ambivert,  2,  60, 128, 1},
-    {SocialMode::Extrovert, 2,  90, 128, 1},
+    {SocialMode::Introvert, 2,  360, 128, 1, true},
+    {SocialMode::Ambivert,  2,  360, 128, 1, true},
+    {SocialMode::Extrovert, 2,  390, 128, 1, true},
     // Neutral
-    {SocialMode::Introvert, 3,  60,   0, 0},
-    {SocialMode::Ambivert,  3, 150,   0, 0},
-    {SocialMode::Extrovert, 3, 150,   0, 0},
+    {SocialMode::Introvert, 3, 1020,   0, 0, false},
+    {SocialMode::Ambivert,  3, 1200,   0, 0, false},
+    {SocialMode::Extrovert, 3, 1200,   0, 0, false},
     // Fond
-    {SocialMode::Introvert, 4, 120,   0, 0},
-    {SocialMode::Ambivert,  4, 180, 100, 1},
-    {SocialMode::Extrovert, 4, 240, 128, 2},
+    {SocialMode::Introvert, 4, 1110,   0, 0, false},
+    {SocialMode::Ambivert,  4, 1290, 100, 1, false},
+    {SocialMode::Extrovert, 4, 1350, 128, 2, false},
     // Smitten
-    {SocialMode::Introvert, 5, 180, 100, 1},
-    {SocialMode::Ambivert,  5, 240, 128, 2},
-    {SocialMode::Extrovert, 5, 300, 153, kPulseCountContinuous},
+    {SocialMode::Introvert, 5, 1290, 100, 1, false},
+    {SocialMode::Ambivert,  5, 1350, 128, 2, false},
+    {SocialMode::Extrovert, 5, 1425, 153, kPulseCountContinuous, false},
   };
 
   const std::string peerAddr = bdAddrFor("peer");
@@ -783,6 +787,7 @@ void test_greeting_tuning_matrix() {
     TEST_ASSERT_EQUAL_UINT32(r.expectedTotal, t.totalFrames);
     TEST_ASSERT_EQUAL_UINT8(r.expectedPulseBack, t.pulseBackStrength);
     TEST_ASSERT_EQUAL_UINT8(r.expectedPulseCount, t.pulseBackCount);
+    TEST_ASSERT_EQUAL(r.expectedSnub, t.snub);
   }
 }
 
@@ -797,19 +802,19 @@ void test_greeting_for_salty_is_snub_in_all_modes() {
 
   cfg.socialMode = SocialMode::Introvert;
   GreetingTuning t = eng.greetingFor(nemesisAddr);
-  TEST_ASSERT_EQUAL_UINT32(60, t.totalFrames);
+  TEST_ASSERT_EQUAL_UINT32(270, t.totalFrames);
   TEST_ASSERT_EQUAL_UINT8(255, t.pulseBackStrength);
   TEST_ASSERT_EQUAL_UINT8(1, t.pulseBackCount);
 
   cfg.socialMode = SocialMode::Ambivert;
   t = eng.greetingFor(nemesisAddr);
-  TEST_ASSERT_EQUAL_UINT32(60, t.totalFrames);
+  TEST_ASSERT_EQUAL_UINT32(270, t.totalFrames);
   TEST_ASSERT_EQUAL_UINT8(255, t.pulseBackStrength);
   TEST_ASSERT_EQUAL_UINT8(1, t.pulseBackCount);
 
   cfg.socialMode = SocialMode::Extrovert;
   t = eng.greetingFor(nemesisAddr);
-  TEST_ASSERT_EQUAL_UINT32(90, t.totalFrames);
+  TEST_ASSERT_EQUAL_UINT32(330, t.totalFrames);
   TEST_ASSERT_EQUAL_UINT8(255, t.pulseBackStrength);
   TEST_ASSERT_EQUAL_UINT8(1, t.pulseBackCount);
 }
@@ -839,7 +844,7 @@ void test_greeting_for_smitten_extrovert_is_effusive_continuous() {
   cfg.socialMode = SocialMode::Extrovert;
   const GreetingTuning t = eng.greetingFor(crushAddr);
   TEST_ASSERT_EQUAL_UINT8(kPulseCountContinuous, t.pulseBackCount);
-  TEST_ASSERT_EQUAL_UINT32(300, t.totalFrames);
+  TEST_ASSERT_EQUAL_UINT32(1425, t.totalFrames);
 }
 
 // 16d. test_greeting_for_smitten_ambivert_is_enthused_two_pulses
@@ -852,11 +857,14 @@ void test_greeting_for_smitten_ambivert_is_enthused_two_pulses() {
   cfg.socialMode = SocialMode::Ambivert;
   const GreetingTuning t = eng.greetingFor(crushAddr);
   TEST_ASSERT_EQUAL_UINT8(2, t.pulseBackCount);
-  TEST_ASSERT_EQUAL_UINT32(240, t.totalFrames);
+  TEST_ASSERT_EQUAL_UINT32(1350, t.totalFrames);
 }
 
 // 16e. test_greeting_profile_easeins_invert_with_warmth
-// Design intent: warmer dispositions ease in FASTER (smaller easeIn).
+// Design intent: among the warm/neutral greeting profiles, a warmer
+// relationship eases in FASTER (smaller easeIn) — eager hello. Snubs are
+// a separate gesture (uniform snappy ease-in) and aren't part of this
+// gradient.
 void test_greeting_profile_easeins_invert_with_warmth() {
   FakeConfig cfg;
   PersonalityEngine eng;
@@ -868,18 +876,24 @@ void test_greeting_profile_easeins_invert_with_warmth() {
     return eng.greetingFor(peerAddr).easeInFrames;
   };
   const uint32_t minimal  = easeFor(SocialMode::Introvert, 3);
-  const uint32_t quick    = easeFor(SocialMode::Extrovert, 2);  // PartialSnubQuick == Quick easeIn
   const uint32_t gentle   = easeFor(SocialMode::Introvert, 4);
   const uint32_t standard = easeFor(SocialMode::Ambivert,  3);
   const uint32_t warm     = easeFor(SocialMode::Introvert, 5);
   const uint32_t enthused = easeFor(SocialMode::Ambivert,  5);
   const uint32_t effusive = easeFor(SocialMode::Extrovert, 5);
+  const uint32_t snub     = easeFor(SocialMode::Ambivert,  1);  // Salty → Snub
+  // Warmth gradient: warmest pops in fastest, coldest neutral is slowest.
   TEST_ASSERT_TRUE(effusive < enthused);
-  TEST_ASSERT_TRUE(enthused <= warm);
+  TEST_ASSERT_TRUE(enthused < warm);
   TEST_ASSERT_TRUE(warm     < standard);
-  TEST_ASSERT_TRUE(standard < gentle);
-  TEST_ASSERT_TRUE(gentle   < quick);
-  TEST_ASSERT_TRUE(quick    < minimal);
+  TEST_ASSERT_TRUE(standard < minimal);
+  // Gentle (Introvert+Fond): warmer disposition than Standard but a less
+  // eager personality, so it lands between Warm and Standard.
+  TEST_ASSERT_TRUE(warm   < gentle);
+  TEST_ASSERT_TRUE(gentle <= standard);
+  // Snubs ease in snappily — faster than even the most hesitant neutral
+  // greeting (Minimal), so a dismissal reads as curt, not reluctant.
+  TEST_ASSERT_TRUE(snub < minimal);
 }
 
 // 17. test_greeting_for_unknown_peer_is_neutral — peer not in store
@@ -890,11 +904,11 @@ void test_greeting_for_unknown_peer_is_neutral() {
   resetEngine(eng, cfg);
   cfg.socialMode = SocialMode::Ambivert;
   const GreetingTuning t = eng.greetingFor(bdAddrFor("stranger"));
-  // Ambivert × Neutral → standard (150, 15, 51, 84, 0, 0).
-  TEST_ASSERT_EQUAL_UINT32(150, t.totalFrames);
-  TEST_ASSERT_EQUAL_UINT32(15, t.easeInFrames);
-  TEST_ASSERT_EQUAL_UINT32(51, t.holdFrames);
-  TEST_ASSERT_EQUAL_UINT32(84, t.fadeOutFrames);
+  // Ambivert × Neutral → standard (1200, 120, 960, 120, 0, 0) — the anchor.
+  TEST_ASSERT_EQUAL_UINT32(1200, t.totalFrames);
+  TEST_ASSERT_EQUAL_UINT32(120, t.easeInFrames);
+  TEST_ASSERT_EQUAL_UINT32(960, t.holdFrames);
+  TEST_ASSERT_EQUAL_UINT32(120, t.fadeOutFrames);
   TEST_ASSERT_EQUAL_UINT8(0, t.pulseBackStrength);
   TEST_ASSERT_EQUAL_UINT8(0, t.pulseBackCount);
 }

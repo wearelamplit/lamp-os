@@ -35,6 +35,18 @@ Color darken(const Color& c, uint8_t strength) {
 
 }  // namespace
 
+void SocialBehavior::applyTuning(const GreetingTuning& t) {
+  easeInFrames      = t.easeInFrames;
+  holdFrames        = t.holdFrames;
+  fadeOutFrames     = t.fadeOutFrames;
+  pulseBackStrength = t.pulseBackStrength;
+  pulseBackCount    = t.pulseBackCount;
+  snub              = t.snub;
+  // AnimatedBehavior's playOnce/nextFrame drive `frames` — keep it in
+  // lockstep with totalFrames.
+  frames            = t.totalFrames;
+}
+
 void SocialBehavior::draw() {
   // Waveform: ease-in → hold (steady or pulsed depending on
   // pulseBackStrength + pulseBackCount) → ease-out.
@@ -42,8 +54,9 @@ void SocialBehavior::draw() {
   const uint32_t hold    = holdFrames;
   const uint32_t fadeOut = fadeOutFrames;
 
-  // Resolve pulse parameters once per draw call.
-  const bool pulseEnabled = (pulseBackStrength > 0 && pulseBackCount > 0 && hold > 0);
+  // Resolve pulse parameters once per draw call. Snubs don't use the
+  // in-hold pulse machinery — they fold the dim into the ease-in/out.
+  const bool pulseEnabled = (!snub && pulseBackStrength > 0 && pulseBackCount > 0 && hold > 0);
   uint32_t pulseSpan = 0;
   uint32_t cycleFrames = 0;
   if (pulseEnabled) {
@@ -68,10 +81,20 @@ void SocialBehavior::draw() {
     const Color buf = fb->buffer[i];
     Color out;
     if (easeIn > 0 && frame < easeIn) {
+      // Phase 1 — ease in toward the peer color. A snub also ramps the
+      // dim from 0 → full strength across the ease-in, so it arrives at
+      // the hold already dark-in-their-color (black for a full snub).
       out = fade(buf, foundLampColor, easeIn - 1, frame);
+      if (snub) {
+        // Ramp the dim 0 → full strength across the ease-in.
+        out = darken(out, easeLinear(0, pulseBackStrength, easeIn - 1, frame));
+      }
     } else if (frame < easeIn + hold) {
       const uint32_t holdFrame = frame - easeIn;
-      if (pulseEnabled && holdFrame < pulseSpan && cycleFrames > 0) {
+      if (snub) {
+        // Hold steady at the dark target — the snub's pointed pause.
+        out = darken(foundLampColor, pulseBackStrength);
+      } else if (pulseEnabled && holdFrame < pulseSpan && cycleFrames > 0) {
         const Color dimmed = darken(foundLampColor, pulseBackStrength);
         const uint32_t cyclePos = holdFrame % cycleFrames;
         const uint32_t halfCycle = cycleFrames / 2;
@@ -86,9 +109,15 @@ void SocialBehavior::draw() {
         out = foundLampColor;
       }
     } else if (fadeOut > 0 && frame < easeIn + hold + fadeOut) {
-      // Phase 3 — ease out back to the underlying expression's pixel.
+      // Phase 3 — ease out back to the underlying expression's pixel. A
+      // snub ramps the dim back from full strength → 0 over the same
+      // span, mirroring the ease-in (rises from dark through their color).
       const uint32_t fadeFrame = frame - (easeIn + hold);
       out = fade(foundLampColor, buf, fadeOut - 1, fadeFrame);
+      if (snub) {
+        // Ramp the dim full strength → 0, mirroring the ease-in.
+        out = darken(out, easeLinear(pulseBackStrength, 0, fadeOut - 1, fadeFrame));
+      }
     } else {
       // Past the explicit window — leave buffer alone (playOnce will stop
       // us at `frames` regardless).
@@ -218,15 +247,7 @@ void SocialBehavior::control() {
 #endif
     nearbyLamps.acknowledge(it->name);
     foundLampColor = it->baseColor;
-
-    // Copy the engine's waveform into our draw-side fields. AnimatedBehavior's
-    // `frames` drives playOnce / nextFrame — keep it in lockstep with totalFrames.
-    easeInFrames      = tuning.easeInFrames;
-    holdFrames        = tuning.holdFrames;
-    fadeOutFrames     = tuning.fadeOutFrames;
-    pulseBackStrength = tuning.pulseBackStrength;
-    pulseBackCount    = tuning.pulseBackCount;
-    frames            = tuning.totalFrames;
+    applyTuning(tuning);
 
     // Record into our persistent (in-memory) greeting log.
     lastGreetedAtMs_[it->name] = now;

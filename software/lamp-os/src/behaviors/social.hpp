@@ -11,6 +11,7 @@
 namespace lamp {
 
 class Config;  // fwd-decl — full include is heavy and only the .cpp uses it.
+struct GreetingTuning;  // fwd-decl — defined in core/personality_engine.hpp.
 
 /**
  * @brief social color exchange — reads the unified nearbyLamps store directly,
@@ -50,12 +51,23 @@ class SocialBehavior : public AnimatedBehavior {
   uint32_t fadeOutFrames = 30;
   uint8_t  pulseBackStrength = 0;
   uint8_t  pulseBackCount    = 0;
+  // Snub waveform — see GreetingTuning::snub. When set, draw() folds the
+  // pulseBackStrength dim into the ease-in/out (shade → dark-in-their-
+  // color → shade) instead of running in-hold pulses.
+  bool     snub              = false;
 
   // Per-cycle frame budget for the in-hold pulse loop (~750ms at 60fps).
   static constexpr uint32_t kSlowPulseCycleFrames = 45;
 
   void draw() override;
   void control() override;
+
+  // Copy a greeting waveform from the engine into the draw-side fields
+  // (including `frames`, which AnimatedBehavior's playOnce/nextFrame
+  // drive). Single seam so adding a GreetingTuning field touches one
+  // place, not every caller. foundLampColor is the peer color, set
+  // separately by the caller.
+  void applyTuning(const GreetingTuning& t);
 
   // Wires the live Config so control() can read the current socialMode.
   // No setter = behaves as Ambivert (the spec's pre-personality default).
@@ -79,7 +91,13 @@ class SocialBehavior : public AnimatedBehavior {
 
  private:
   static constexpr size_t MAX_GREETED_TRACKED = 32;
-  static constexpr uint32_t EXTROVERT_COOLDOWN_MS = 15000;
+  // Must exceed the longest greeting animation (~23.75s for Effusive) or
+  // the cooldown is inert — it's clocked from greeting start and the
+  // animationState!=STOPPED gate already blocks until the animation ends,
+  // so a value below the animation length leaves zero gap between
+  // greetings. 26s keeps extroverts the eagerest mode (small post-greet
+  // gap) while still pacing them.
+  static constexpr uint32_t EXTROVERT_COOLDOWN_MS = 26000;
   static constexpr uint32_t AMBIVERT_BASE_COOLDOWN_MS = 30000;
   static constexpr uint32_t AMBIVERT_REGREET_WINDOW_MS = 300000;
   static constexpr uint32_t INTROVERT_BASE_COOLDOWN_MS = 60000;

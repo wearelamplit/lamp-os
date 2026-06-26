@@ -107,9 +107,14 @@ CrowdComposition PersonalityEngine::crowdComposition() const {
 
 namespace {
 
-// Waveform profiles at 60 fps. easeIn intentionally INVERTS with the
-// warmth of the relationship — the warmer the disposition, the FASTER
-// the lamp jumps to the peer's color (a more eager hello).
+// Waveform profiles at 60 fps. Anchored on kProfileStandard
+// (Ambivert greeting a Neutral peer) = 2s in / 16s hold / 2s out, the
+// neutral baseline. Variations are deliberately subtle in total length
+// (~17-24s for a real greeting); the body language is carried by
+// ASYMMETRY, not duration: warmer/more-extrovert greetings pop in fast
+// and linger on the way out (eager hello, reluctant goodbye), colder/
+// introvert ones ease in slowly and leave quickly. Snubs are the one
+// outlier — short by design so a brush-off reads as dismissal.
 struct Profile {
   uint32_t total;
   uint32_t easeIn;
@@ -117,20 +122,20 @@ struct Profile {
   uint32_t fadeOut;
   uint8_t  pulseBackStrength;
   uint8_t  pulseBackCount;
+  bool     snub;
 };
 
-constexpr Profile kProfileMinimal           = {60,  30, 12, 18,    0, 0};
-constexpr Profile kProfileQuick             = {90,  24, 24, 42,    0, 0};
-constexpr Profile kProfileGentle            = {120, 18, 36, 66,    0, 0};
-constexpr Profile kProfileStandard          = {150, 15, 51, 84,    0, 0};
-constexpr Profile kProfileWarm              = {180, 12, 66, 102, 100, 1};
-constexpr Profile kProfileEnthused          = {240, 12, 90, 138, 128, 2};
-constexpr Profile kProfileEffusive          = {300,  6,120, 174, 153,
-                                                kPulseCountContinuous};
-constexpr Profile kProfileSnub              = {60,  18, 24, 18,  255, 1};
-constexpr Profile kProfilePartialSnub       = {60,  18, 24, 18,  128, 1};
-constexpr Profile kProfileSnubQuick         = {90,  24, 36, 30,  255, 1};
-constexpr Profile kProfilePartialSnubQuick  = {90,  24, 36, 30,  128, 1};
+constexpr Profile kProfileMinimal           = {1020, 150,  780,  90,   0, 0, false};
+constexpr Profile kProfileGentle            = {1110, 120,  840, 150,   0, 0, false};
+constexpr Profile kProfileStandard          = {1200, 120,  960, 120,   0, 0, false};
+constexpr Profile kProfileWarm              = {1290,  90, 1020, 180, 100, 1, false};
+constexpr Profile kProfileEnthused          = {1350,  60, 1080, 210, 128, 2, false};
+constexpr Profile kProfileEffusive          = {1425,  45, 1140, 240, 153,
+                                                kPulseCountContinuous, false};
+constexpr Profile kProfileSnub              = {270,  60, 150, 60, 255, 1, true};
+constexpr Profile kProfilePartialSnub       = {360,  60, 210, 90, 128, 1, true};
+constexpr Profile kProfileSnubQuick         = {330,  60, 180, 90, 255, 1, true};
+constexpr Profile kProfilePartialSnubQuick  = {390,  60, 240, 90, 128, 1, true};
 
 GreetingTuning toTuning(const Profile& p) {
   GreetingTuning t;
@@ -140,6 +145,7 @@ GreetingTuning toTuning(const Profile& p) {
   t.fadeOutFrames     = p.fadeOut;
   t.pulseBackStrength = p.pulseBackStrength;
   t.pulseBackCount    = p.pulseBackCount;
+  t.snub              = p.snub;
   return t;
 }
 

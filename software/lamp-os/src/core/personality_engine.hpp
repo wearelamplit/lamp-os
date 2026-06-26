@@ -51,6 +51,11 @@ struct GreetingTuning {
   uint32_t fadeOutFrames   = 0;
   uint8_t  pulseBackStrength = 0;
   uint8_t  pulseBackCount    = 0;
+  // Snub waveform: the ease-in fades shade → peer color while dimming
+  // brightness to pulseBackStrength depth (255 = black), holds dark, and
+  // reverses on the way out. Warm greetings (snub=false) instead reach
+  // full peer color and use pulseBackStrength/Count for in-hold pulses.
+  bool     snub              = false;
 };
 
 // Counts of currently-visible BLE peers grouped by disposition.

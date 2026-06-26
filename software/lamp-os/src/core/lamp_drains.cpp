@@ -661,13 +661,8 @@ void Lamp::drainWispOp() {
               return;
             }
             const GreetingTuning tuning = personalityEngine.greetingFor(peer.bdAddr);
-            shadeSocialBehavior.foundLampColor    = peer.baseColor;
-            shadeSocialBehavior.easeInFrames      = tuning.easeInFrames;
-            shadeSocialBehavior.holdFrames        = tuning.holdFrames;
-            shadeSocialBehavior.fadeOutFrames     = tuning.fadeOutFrames;
-            shadeSocialBehavior.pulseBackStrength = tuning.pulseBackStrength;
-            shadeSocialBehavior.pulseBackCount    = tuning.pulseBackCount;
-            shadeSocialBehavior.frames            = tuning.totalFrames;
+            shadeSocialBehavior.foundLampColor = peer.baseColor;
+            shadeSocialBehavior.applyTuning(tuning);
             shadeSocialBehavior.playOnce();
             nearbyLamps.acknowledge(peer.name);
             shadeSocialBehavior.markGreeted(peer.name, millis());
