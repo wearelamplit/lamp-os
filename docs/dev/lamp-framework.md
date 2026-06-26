@@ -419,6 +419,17 @@ or allocate directly on the host task. Instead, use
 - Call blocking functions.
 - Mutate Compositor or Lamp state directly, queue to pending slots instead.
 
+### Home mode
+
+"Home mode" is the lamp's idle/resting state, dimmed, quiet, no active
+expressions, entered when nothing is going on. The Compositor tracks it
+(`Compositor::setHomeMode(bool)`) and gates each behavior on the
+`allowedInHomeMode` flag on `AnimatedBehavior` (default `true`): the
+render rule is `!homeMode || allowedInHomeMode`, so by default a behavior
+keeps drawing even while the lamp rests. Set `allowedInHomeMode = false`
+to suppress your behavior during the idle/resting state, the framework
+then skips its `draw()` until home mode releases.
+
 ## File index
 
 | File | Purpose |
@@ -435,6 +446,8 @@ or allocate directly on the host task. Instead, use
 | `software/lamp-os/src/core/personality_engine.hpp/.cpp` | Personality gate for expression suppression |
 | `software/lamp-os/src/core/behavior_context.hpp` | `BehaviorContext` struct: service pointers for behaviors |
 | `software/lamp-os/src/core/animated_behavior.hpp` | `AnimatedBehavior` base class: control/draw interface |
+| `software/lamp-os/src/core/frame_buffer.hpp/.cpp` | `FrameBuffer`: the per-surface pixel buffer `draw()` writes into |
+| `software/lamp-os/src/core/compositor.hpp/.cpp` | `Compositor`: blends behavior layers, home-mode gate, dynamic add/remove |
 | `software/lamp-os/src/lamps/standard/standard_lamp.hpp/.cpp` | Production fleet lamp (built-in social, expressions, idle) |
 | `software/lamp-os/src/lamps/snafu/snafu_lamp.hpp/.cpp` | Amanita mushroom lamp: reference variant |
 | `software/lamp-os/src/lamps/snafu/background_fade.hpp/.cpp` | Shade palette-cycle behavior (12 scenes, 45 s per scene) |

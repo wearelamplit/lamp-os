@@ -64,6 +64,9 @@ hood); the Flutter toolchain setup is in the [root README](../../README.md).
   greeting animations (how lamps acknowledge peers they meet on the mesh).
 - [`personality-signals.md`](personality-signals.md), the signals a custom
   lamp can react to (crowd weight/composition, presence, time, etc.).
+- [`utilities.md`](utilities.md), the mechanical helper toolbox
+  expression/behavior authors call (color math, fades, randomness, the pixel
+  buffer, peer queries, disposition lookups).
 
 ### Protocol reference
 - [`mesh-api.md`](mesh-api.md), the authoritative ESP-NOW wire-format spec for
@@ -73,7 +76,8 @@ hood); the Flutter toolchain setup is in the [root README](../../README.md).
 Building your own variant or behaviour? Start with
 [`lamp-framework.md`](lamp-framework.md) (the runtime you plug into) and
 [`personality-signals.md`](personality-signals.md) (what you can react to), then
-[`expressions.md`](expressions.md) for custom animations. We'd love you to
+[`expressions.md`](expressions.md) for custom animations and
+[`utilities.md`](utilities.md) for the helper toolbox they're built from. We'd love you to
 upstream it, see [Contributing](../../README.md#contributing).
 
 ---
