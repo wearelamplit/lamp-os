@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:lamp_app/core/ble/ble_client.dart';
+import 'in_memory_ble_client.dart';
 
 /// Seeds every named section the lamp's page protocol serves so
 /// `controlNotifierProvider`'s build() can read them via
