@@ -73,9 +73,17 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
       count: 5,
       window: const Duration(seconds: 3),
       onTriggered: () {
-        ref.read(advancedSessionProvider(widget.lampId).notifier).enable();
+        // Toggle, not enable: a second 5-tap re-hides advanced UI without
+        // needing a disconnect. Session-only — devMode lamps keep advanced
+        // on regardless (effectiveAdvancedProvider), so reflect the session
+        // flag we actually flipped.
+        final p = advancedSessionProvider(widget.lampId);
+        ref.read(p.notifier).toggle();
         if (mounted) {
-          AppSnackbar.info(context, 'Advanced settings unlocked');
+          AppSnackbar.info(
+            context,
+            ref.read(p) ? 'Advanced settings unlocked' : 'Advanced settings hidden',
+          );
         }
       },
     );
