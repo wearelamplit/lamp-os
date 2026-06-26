@@ -3,7 +3,7 @@ name: Release (beta)
 on:
   push:
     branches:
-      - beta
+      - dev
 
 jobs:
   build:
@@ -65,7 +65,7 @@ jobs:
           name: Beta build
           prerelease: true
           body: |
-            Rolling beta build from `beta` branch (commit ${{ github.sha }}).
+            Rolling beta build from `dev` branch (commit ${{ github.sha }}).
 
             Unstable, untested — use at your own risk.
           files: |
