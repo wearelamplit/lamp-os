@@ -82,6 +82,16 @@ class ControlNotifier extends _$ControlNotifier {
   /// `{}` and the parser leaves `previewActive` at its default `false`.
   StreamSubscription<Uint8List>? _stateNotifySub;
   Timer? _reconnectTimer;
+  /// Periodic liveness probe. fbp's connectionState stream doesn't reliably
+  /// emit the `false` edge when the lamp terminates the link itself — e.g.
+  /// it kicks the GATT client when a mesh OTA starts (ble_control
+  /// disconnectGattClientsForOta). Without this we'd sit on a zombie
+  /// "connected" state until the user's next write fails. _probeLink forces
+  /// a real GATT round-trip; a dead link throws and routes to the reconnect
+  /// ladder, same as the foreground-resume probe.
+  Timer? _probeTimer;
+  // ponytail: 3s is the detection-latency vs battery/radio knob; tune on hardware.
+  static const _probeInterval = Duration(seconds: 3);
   /// Single-slot guard against concurrent reconnect attempts. Set true at
   /// the top of `_tryReconnect`, cleared in `finally`. Lets us safely
   /// kick `_tryReconnect` from BOTH the scheduled timer (`_scheduleReconnect`)
@@ -449,9 +459,13 @@ class ControlNotifier extends _$ControlNotifier {
     // `true` (we just connected); _onConnectionChange(true) when already
     // connected is a no-op.
     _connSub = ble.watchConnected(deviceId).listen(_onConnectionChange);
+    // Catch lamp-side link terminations fbp misses (mesh-OTA kick, etc.).
+    // Self-gates: _probeLink no-ops while disconnected/reconnecting.
+    _probeTimer = Timer.periodic(_probeInterval, (_) => _probeLink());
     ref.onDispose(() {
       _connSub?.cancel();
       _reconnectTimer?.cancel();
+      _probeTimer?.cancel();
     });
 
     // Watch CHAR_STATE_NOTIFY. Used today only for the previewActive bit
