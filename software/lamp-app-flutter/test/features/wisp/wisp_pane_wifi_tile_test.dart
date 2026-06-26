@@ -52,16 +52,23 @@ Future<ProviderContainer> _makeContainer({
   return c;
 }
 
-/// Pump until the WiFi config row has rendered. Mirrors the previous
-/// form-test's polling pattern — pumpAndSettle would spin forever on
-/// the wisp pane's 1Hz stale-tick timer.
-Future<void> _pumpToWifiRow(WidgetTester tester) async {
-  // wispNotifier needs an `await watchConnected.firstWhere(true)` to
-  // resolve, then the initial readStatus + first state emission, before
-  // the aurora-branch wifi row even has a chance to render. 200 frames
-  // (~3.2s) is the conservative ceiling for the InMemoryBleClient's
-  // microtask scheduling under flutter_test.
-  for (var i = 0; i < 200; i++) {
+/// Resolve the wispNotifier's build() future in the REAL-async zone, THEN
+/// build the widget tree, then pump until the WiFi config row renders.
+///
+/// Order is load-bearing: the notifier's build() awaits real BLE futures
+/// (watchConnected + initial readStatus) that never drain under the
+/// FakeAsync zone testWidgets installs. If pumpWidget runs first it kicks
+/// that build off inside FakeAsync where it wedges, and a later runAsync
+/// just awaits the same wedged future. Kicking the build off via
+/// `c.read(...future)` inside runAsync first lets it reach AsyncData; the
+/// subsequent pumpWidget then builds straight from cache. Same pattern as
+/// the source=off/manual tests below.
+Future<void> _pumpScreen(WidgetTester tester, ProviderContainer c) async {
+  await tester.runAsync(() async {
+    await c.read(wispNotifierProvider(_devId).future);
+  });
+  await tester.pumpWidget(_wrap(c));
+  for (var i = 0; i < 20; i++) {
     await tester.pump(const Duration(milliseconds: 16));
     if (find.byKey(const Key('wifi-config-row')).evaluate().isNotEmpty) {
       return;
@@ -85,8 +92,7 @@ void main() {
           '{"wispMac":"AA:BB:CC:DD:EE:FF","wifiConnected":false,"source":"aurora"}',
     );
     addTearDown(c.dispose);
-    await tester.pumpWidget(_wrap(c));
-    await _pumpToWifiRow(tester);
+    await _pumpScreen(tester, c);
 
     expect(find.byKey(const Key('wifi-config-row')), findsOneWidget);
     expect(find.text('WiFi'), findsOneWidget);
@@ -104,8 +110,7 @@ void main() {
           '{"wispMac":"AA:BB:CC:DD:EE:FF","wifiConnected":true,"source":"aurora"}',
     );
     addTearDown(c.dispose);
-    await tester.pumpWidget(_wrap(c));
-    await _pumpToWifiRow(tester);
+    await _pumpScreen(tester, c);
 
     expect(find.byKey(const Key('wifi-config-row')), findsOneWidget);
     expect(find.textContaining('Connected'), findsWidgets);
@@ -115,8 +120,7 @@ void main() {
       (tester) async {
     final c = await _makeContainer();
     addTearDown(c.dispose);
-    await tester.pumpWidget(_wrap(c));
-    await _pumpToWifiRow(tester);
+    await _pumpScreen(tester, c);
 
     await tester.tap(find.byKey(const Key('wifi-config-row')));
     // Give the modal a couple of frames to slide in.
@@ -163,8 +167,7 @@ void main() {
           controlPassword: 'secret',
         ));
 
-    await tester.pumpWidget(_wrap(c));
-    await _pumpToWifiRow(tester);
+    await _pumpScreen(tester, c);
 
     // Open the picker.
     await tester.tap(find.byKey(const Key('wifi-config-row')));
@@ -230,8 +233,7 @@ void main() {
           controlPassword: 'secret',
         ));
 
-    await tester.pumpWidget(_wrap(c));
-    await _pumpToWifiRow(tester);
+    await _pumpScreen(tester, c);
 
     await tester.tap(find.byKey(const Key('wifi-config-row')));
     for (var i = 0; i < 20; i++) {
