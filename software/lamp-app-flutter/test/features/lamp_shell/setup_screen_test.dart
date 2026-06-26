@@ -120,13 +120,14 @@ void main() {
     expect(find.text('Advanced LED setup'), findsOneWidget);
   });
 
-  testWidgets('Knockout row is always visible on Setup', (tester) async {
+  testWidgets('Knockout row no longer on Setup (moved into LED setup)',
+      (tester) async {
     final c = await _makeContainer();
     addTearDown(c.dispose);
     await tester.pumpWidget(_wrap(c));
     await _pumpToData(tester);
 
-    expect(find.text('Per-pixel knockout'), findsOneWidget);
+    expect(find.text('Per-pixel knockout'), findsNothing);
   });
 
   testWidgets('tapping Name row opens a rename dialog that updates the notifier',

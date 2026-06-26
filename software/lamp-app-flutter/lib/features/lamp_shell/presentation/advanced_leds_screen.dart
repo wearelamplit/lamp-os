@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../core/routing/routes.dart';
 import '../../../core/theme/brand_colors.dart';
 import '../../../core/widgets/back_button_leading.dart';
 import '../../../core/widgets/friendly_error.dart';
@@ -106,45 +108,8 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    const Text(
-                      'Base strip',
-                      style: TextStyle(
-                        color: BrandColors.headerYellow,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.8,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    _PixelCountField(
-                      initial: state.base.px,
-                      label: 'Base LED count',
-                      onChanged: notifier.setBasePx,
-                    ),
-                    if (showByteOrder) ...[
-                      const SizedBox(height: 12),
-                      SegmentedButton<String>(
-                        showSelectedIcon: false,
-                        segments: const [
-                          ButtonSegment(value: 'GRBW', label: Text('GRBW')),
-                          ButtonSegment(value: 'GRB', label: Text('GRB')),
-                          ButtonSegment(value: 'BGR', label: Text('BGR')),
-                        ],
-                        selected: {state.base.byteOrder},
-                        onSelectionChanged: (s) =>
-                            notifier.setBaseByteOrder(s.first),
-                      ),
-                    ],
-                    const SizedBox(height: 24),
-                    const Text(
-                      'Shade strip',
-                      style: TextStyle(
-                        color: BrandColors.headerYellow,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.8,
-                      ),
-                    ),
+                    // Shade strip first — it sits physically above the base.
+                    const _StripHeader('Shade strip'),
                     const SizedBox(height: 8),
                     _PixelCountField(
                       initial: state.shade.px,
@@ -165,6 +130,41 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
                             notifier.setShadeByteOrder(s.first),
                       ),
                     ],
+                    const SizedBox(height: 24),
+                    const _StripHeader('Base strip'),
+                    const SizedBox(height: 8),
+                    _PixelCountField(
+                      initial: state.base.px,
+                      label: 'Base LED count',
+                      onChanged: notifier.setBasePx,
+                    ),
+                    if (showByteOrder) ...[
+                      const SizedBox(height: 12),
+                      SegmentedButton<String>(
+                        showSelectedIcon: false,
+                        segments: const [
+                          ButtonSegment(value: 'GRBW', label: Text('GRBW')),
+                          ButtonSegment(value: 'GRB', label: Text('GRB')),
+                          ButtonSegment(value: 'BGR', label: Text('BGR')),
+                        ],
+                        selected: {state.base.byteOrder},
+                        onSelectionChanged: (s) =>
+                            notifier.setBaseByteOrder(s.first),
+                      ),
+                    ],
+                    // Knockout masks base pixels only, so it nests under the
+                    // base strip rather than living as its own Setup tile.
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.grid_on,
+                          color: BrandColors.headerYellow),
+                      title: const Text('Per-pixel knockout'),
+                      subtitle: Text(
+                          '${state.base.knockout.length} pixel(s) masked'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () =>
+                          context.push(AppRoutes.knockout(widget.lampId)),
+                    ),
                   ],
                 ),
               ),
@@ -219,6 +219,24 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
           ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _StripHeader extends StatelessWidget {
+  const _StripHeader(this.label);
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      label,
+      style: const TextStyle(
+        color: BrandColors.headerYellow,
+        fontSize: 13,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.8,
       ),
     );
   }

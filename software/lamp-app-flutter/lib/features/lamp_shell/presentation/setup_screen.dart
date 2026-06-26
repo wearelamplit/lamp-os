@@ -126,12 +126,8 @@ class _SetupBody extends ConsumerWidget {
           onTap: () => context.push(AppRoutes.homeMode(lampId)),
         ),
         const SettingsGroupHeading('LEDs'),
-        SettingsRow(
-          icon: Icons.grid_on,
-          title: 'Per-pixel knockout',
-          subtitle: '${state.base.knockout.length} pixel(s) masked',
-          onTap: () => context.push(AppRoutes.knockout(lampId)),
-        ),
+        // Per-pixel knockout now nests inside LED setup (under the base
+        // strip) — it only masks base pixels.
         // Always-on entry point: LED count is always editable, byte-order
         // pickers (wiring-corruption footgun) are gated inside the
         // destination screen on the raw session-advanced flag.
