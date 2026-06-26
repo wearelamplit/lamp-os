@@ -197,16 +197,6 @@ class FirmwareDistributor {
   // peer doesn't get rejected just because we haven't ticked yet.
   bool isInProgress() const;
 
-  // True iff we're currently mid-flow AND `mac` matches the active
-  // session target. Used by SocialBehavior to decide whether to extend
-  // the greeting fade-back hold so the OTA progress pulse modulates on
-  // the greeting color (peer's base) rather than the lamp's own shade.
-  // Returns false for sessions targeting a different peer, even if
-  // isInProgress() is true overall.
-  bool isDistributingTo(const uint8_t mac[6]) const;
-
-  State state() const { return state_; }
-
   // Snapshot the active OTA target's MAC into out[6]. Returns true when
   // a session is mid-flow (OfferSent / Streaming / Finalizing). Used by
   // the OTA quiet-mode visual indicator to look up the receiver's base

@@ -53,7 +53,7 @@ class BluetoothComponent {
    * NimBLE's ble_gatts_mutable() returns false if any GAP procedure is
    * active when ble_gatts_add_svcs runs (silent service registration drop).
    */
-  void activateGattServices(Config* cfg, Preferences* prefs);
+  void activateGattServices(Config* cfg);
 
   /**
    * @brief record the latest base + shade colors that should be

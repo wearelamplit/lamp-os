@@ -57,16 +57,9 @@ void tick();
 // password ever leaves the lamp.
 bool homeSsidVisible(const std::string& ssid);
 
-// Channel coordination for ESP-NOW grid.
-// We never associate to an AP in presence-only mode, so the radio always
-// sits on the grid channel. This function is a no-op kept for ABI compat
-// but stays callable from existing call sites.
-void ensureGridChannel();
-
 // softAP shares LAMP_ESPNOW_CHANNEL so an associating phone doesn't yank
 // the radio off the grid channel.
 bool startSoftAp(const std::string& name);
 void stopSoftAp();
-bool softApActive();
 
 }  // namespace wifi

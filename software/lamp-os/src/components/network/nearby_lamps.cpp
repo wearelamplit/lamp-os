@@ -107,7 +107,6 @@ void NearbyLamps::addOrUpdateFromBle(const std::string& name,
 void NearbyLamps::addOrUpdateFromEspNow(const std::string& name, const uint8_t mac[6],
                                         const Color& base, const Color& shade,
                                         uint32_t firmwareVersion,
-                                        int8_t rssi,
                                         uint8_t otaState,
                                         uint8_t protocolVersion,
                                         const char* fwChannel) {
@@ -135,11 +134,10 @@ void NearbyLamps::addOrUpdateFromEspNow(const std::string& name, const uint8_t m
 #endif
     return;
   }
-  // rssi parameter retained for ABI stability; lastRssi is sourced from
-  // BLE adv (see addOrUpdateFromBle + nearby_lamps.hpp's lastRssi doc
-  // comment). The HELLO path's RSSI reading is intentionally dropped
-  // here to avoid cross-transport contamination of PersonalityEngine's
-  // closest-peer hysteresis check.
+  // lastRssi is sourced solely from BLE adv (see addOrUpdateFromBle +
+  // nearby_lamps.hpp's lastRssi doc). The HELLO path's RSSI reading is
+  // intentionally not consumed here to avoid cross-transport
+  // contamination of PersonalityEngine's closest-peer hysteresis check.
   size_t idx = findIndexLocked(name);
   if (idx == store_.size()) {
     evictOldestIfFullLocked();

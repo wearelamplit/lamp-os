@@ -131,7 +131,7 @@ inline constexpr const char* CHAR_COMMIT_UUID = "48537d49-11a7-4f54-a69a-9425b92
 /**
  * @brief Start the BLE GATT control service.
  */
-void start(lamp::Config* config, Preferences* prefs);
+void start(lamp::Config* config);
 
 void stop();
 bool isRunning();

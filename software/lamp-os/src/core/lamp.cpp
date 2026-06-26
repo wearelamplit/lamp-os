@@ -1031,7 +1031,7 @@ void lamp::Lamp::setup() {
 
   bt.begin(config.lamp.name, config.base.colors[config.base.ac],
            config.shade.colors[0], config.lamp.setup);
-  bt.activateGattServices(&config, &prefs);
+  bt.activateGattServices(&config);
 
 #if LAMP_WEBAPP_ENABLED
   if (config.lamp.webappEnabled) webapp::begin(config);
@@ -1081,12 +1081,6 @@ void lamp::Lamp::setup() {
       compositor.addBehavior(b);
     }
   }
-
-  // Presence-only home mode — the lamp never associates to an AP. The
-  // radio sits on LAMP_ESPNOW_CHANNEL (set in wifi::begin) for grid
-  // peers, and a periodic background scan in wifi::tick checks whether
-  // the user's saved home SSID is currently visible.
-  wifi::ensureGridChannel();
 
   // Route inbound CONTROL_OP payloads (addressed to us or broadcast) into a
   // pending slot. WiFi-task safe: pure memcpy under portMUX, no heap work.

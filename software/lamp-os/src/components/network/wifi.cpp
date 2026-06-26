@@ -157,12 +157,6 @@ bool homeSsidVisible(const std::string& ssid) {
   return (millis() - lastMs) <= SCAN_STALENESS_MS;
 }
 
-void ensureGridChannel() {
-  // No-op now that we never associate to a home AP — the radio stays on
-  // LAMP_ESPNOW_CHANNEL set during begin(). Kept callable for existing
-  // call sites.
-}
-
 static bool s_softApUp = false;
 
 bool startSoftAp(const std::string& name) {
@@ -207,8 +201,6 @@ void stopSoftAp() {
   Serial.println("[wifi] softAP down");
 #endif
 }
-
-bool softApActive() { return s_softApUp; }
 
 void tick() {
   // 1. Drain a completed scan (whether UI-triggered or background).

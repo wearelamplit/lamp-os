@@ -292,8 +292,6 @@ void FirmwareReceiver::tick(uint32_t nowMs) {
       return;
     }
 
-    case State::OfferReceived:
-    case State::Accepted:
     case State::Verify:
       // These are transient or synchronously-handled in
       // handleControlOnLoop. tick() doesn't drive transitions out of them.
@@ -406,16 +404,10 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
   activeTransportKind_ = ctrl.transportKind;
   activeBleConnHandle_ = ctrl.bleConnHandle;
   activeWireVersion_   = ctrl.wireVersion;
-  offerSeq_           = ctrl.seq;
   offerVersion_       = ctrl.offer.version;
   offerTotalLen_      = ctrl.offer.totalLen;
   offerChunkSize_     = ctrl.offer.chunkSize;
-  offerFooterLen_     = ctrl.offer.footerLen;
   offerTotalChunks_   = ctrl.offer.totalChunks;
-  std::memcpy(offerSha256Prefix_, ctrl.offer.sha256Prefix,
-              lamp_protocol::FW_SHA256_PREFIX_LEN);
-  std::memcpy(offerChannel_, ctrl.offer.channel, lamp_protocol::FW_CHANNEL_LEN);
-  offerChannel_[lamp_protocol::FW_CHANNEL_LEN] = '\0';
 
   // Derive expected chunk count from totalLen when totalChunks is zero
   // (forward-compat); otherwise prefer the wire value (catches off-by-one

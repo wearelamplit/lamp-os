@@ -17,10 +17,10 @@ using EspNowRecvFn = void (*)(const uint8_t* mac, const uint8_t* data, size_t le
 
 class EspNowLink {
  public:
-  // Bring up Wi-Fi (STA mode, no AP join), pin the channel, init ESP-NOW,
-  // register the broadcast peer, and route incoming frames to `recv`.
-  // Returns true on success.
-  bool begin(uint8_t channel, EspNowRecvFn recv);
+  // Init ESP-NOW, register the broadcast peer, and route incoming frames
+  // to `recv`. The radio channel is owned by the wifi module (peer.channel=0
+  // tracks the current channel). Returns true on success.
+  bool begin(EspNowRecvFn recv);
 
   // Broadcast to FF:FF:FF:FF:FF:FF. Returns true if send queued.
   bool broadcast(const uint8_t* data, size_t len);

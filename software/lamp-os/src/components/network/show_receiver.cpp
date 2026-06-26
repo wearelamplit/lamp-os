@@ -21,7 +21,7 @@ void ShowReceiver::onRecv(const uint8_t* mac, const uint8_t* data, size_t len,
 void ShowReceiver::begin(Config* cfg) {
   config_ = cfg;
   s_instance = this;
-  if (!link_.begin(LAMP_ESPNOW_CHANNEL, &ShowReceiver::onRecv)) {
+  if (!link_.begin(&ShowReceiver::onRecv)) {
     Serial.println("[show] ESP-NOW init failed");
     return;
   }
@@ -129,7 +129,6 @@ void ShowReceiver::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
         Color(h.base[0],  h.base[1],  h.base[2],  h.base[3]),
         Color(h.shade[0], h.shade[1], h.shade[2], h.shade[3]),
         h.firmwareVersion,
-        rssi,
         h.otaState,
         // Protocol version byte from the frame header — used by the
         // distributor to build OTA OFFER/CHUNK/DONE at the peer's

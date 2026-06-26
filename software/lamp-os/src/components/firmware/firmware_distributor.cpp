@@ -170,12 +170,6 @@ bool FirmwareDistributor::isInProgress() const {
          state_ == State::Finalizing;
 }
 
-bool FirmwareDistributor::isDistributingTo(const uint8_t mac[6]) const {
-  if (!mac) return false;
-  if (!isInProgress()) return false;
-  return macsEqual(targetMac_, mac);
-}
-
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 
 bool FirmwareDistributor::readPartitionBytes(uint32_t offset, size_t len,

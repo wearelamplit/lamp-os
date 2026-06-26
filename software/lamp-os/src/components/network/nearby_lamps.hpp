@@ -159,7 +159,6 @@ class NearbyLamps {
   void addOrUpdateFromEspNow(const std::string& name, const uint8_t mac[6],
                              const Color& base, const Color& shade,
                              uint32_t firmwareVersion = 0,
-                             int8_t rssi = -127,
                              uint8_t otaState = 0,
                              uint8_t protocolVersion = 0,
                              const char* fwChannel = nullptr);

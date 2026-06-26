@@ -42,10 +42,6 @@ bool deriveKey(const uint8_t* salt, size_t saltLen,
 
 }  // namespace
 
-bool isPrefixed(const uint8_t* p, size_t n) {
-  return n >= 1 && (p[0] == MAGIC_PLAINTEXT || p[0] == MAGIC_CIPHERTEXT);
-}
-
 uint8_t magicByte(const uint8_t* p, size_t n) {
   return n ? p[0] : 0;
 }

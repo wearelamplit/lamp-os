@@ -44,9 +44,6 @@ bool decryptOp(const uint8_t* payload, size_t payloadLen,
                PerConnState& conn,
                std::string& out);
 
-/// True if first byte is one of the new-format magic bytes.
-bool isPrefixed(const uint8_t* payload, size_t payloadLen);
-
 /// Returns the first byte, or 0 if empty.
 uint8_t magicByte(const uint8_t* payload, size_t payloadLen);
 

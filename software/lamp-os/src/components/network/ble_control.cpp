@@ -1078,9 +1078,8 @@ void notifyStateChange() {
   s_stateNotify->notify();
 }
 
-void start(lamp::Config* config, Preferences* prefs) {
+void start(lamp::Config* config) {
   if (s_running) return;
-  (void)prefs;  // kept in signature for ABI stability; ble_control no longer reads NVS directly
 
   s_config = config;
 

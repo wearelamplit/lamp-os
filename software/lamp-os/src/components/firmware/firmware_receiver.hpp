@@ -144,12 +144,10 @@ class FirmwareReceiver {
   // handleControlOnLoop().
   enum class State : uint8_t {
     Idle             = 0,
-    OfferReceived    = 1,  // ephemeral; transitions to Accepted same tick
-    Accepted         = 2,  // esp_ota_begin OK; published otaHandle
-    Streaming        = 3,
-    Verify           = 4,  // signature check in progress
-    Apply            = 5,  // boot partition set; awaiting reboot
-    Failed           = 6,  // terminal error; reset to Idle on next tick
+    Streaming        = 1,  // onOfferOnLoop erased + armed the gate; chunks flowing
+    Verify           = 2,  // signature check in progress
+    Apply            = 3,  // boot partition set; awaiting reboot
+    Failed           = 4,  // terminal error; reset to Idle on next tick
   };
 
   // Wire up. The receiver can service OTA flows over both ESP-NOW (wisp →
@@ -305,11 +303,10 @@ class FirmwareReceiver {
 
   State state_ = State::Idle;
 
-  // Snapshot of the in-flight OFFER. Set on transition into Accepted;
+  // Snapshot of the in-flight OFFER. Set in onOfferOnLoop;
   // referenced for the duration of Streaming + Verify.
   uint8_t  wispMac_[6] = {0};      // sourceMac of the OFFER (target of our ACCEPT/REQ/RESULT)
   uint8_t  myMac_[6]   = {0};      // our MAC (sourceMac of ACCEPT/REQ/RESULT)
-  uint16_t offerSeq_   = 0;        // header seq from the OFFER (echoed in ACCEPT)
   // Active-flow transport context. Used by the onOfferOnLoop busy-check
   // to distinguish "same source re-offering" (idempotent ACCEPT) from
   // "different source trying to start a new OTA while one is in flight"
@@ -324,10 +321,7 @@ class FirmwareReceiver {
   uint32_t offerVersion_ = 0;
   uint32_t offerTotalLen_ = 0;
   uint16_t offerChunkSize_ = 0;
-  uint16_t offerFooterLen_ = 0;
   uint16_t offerTotalChunks_ = 0;
-  uint8_t  offerSha256Prefix_[lamp_protocol::FW_SHA256_PREFIX_LEN] = {0};
-  char     offerChannel_[lamp_protocol::FW_CHANNEL_LEN + 1] = {0};
 
   // Sequence counters for our outbound FW frames (ACCEPT/REQ/RESULT).
   uint16_t fwOutSeq_ = 0;

@@ -51,13 +51,13 @@ static void sendTrampoline(const esp_now_send_info_t* /*info*/,
 #endif
 }
 
-bool EspNowLink::begin(uint8_t channel, EspNowRecvFn recv) {
+bool EspNowLink::begin(EspNowRecvFn recv) {
   s_recv = recv;
 
   // WiFi STA mode is already up via wifi::begin() in standard_lamp setup;
   // do NOT call WiFi.mode/disconnect/setSleep here — that would clobber the
   // radio state the wifi module relies on for periodic presence scans.
-  // Channel coordination is wifi::ensureGridChannel()'s job; we just set
+  // Channel coordination is the wifi module's job; we just set
   // peer.channel=0 below so the peer record tracks "whatever channel the
   // radio is on right now".
 
@@ -82,7 +82,6 @@ bool EspNowLink::begin(uint8_t channel, EspNowRecvFn recv) {
     return false;
   }
 
-  (void)channel;  // accepted for API symmetry; channel set by wifi module
   return true;
 }
 

@@ -275,7 +275,7 @@ void BluetoothComponent::tickAdvertising() {
 #endif
 }
 
-void BluetoothComponent::activateGattServices(Config* cfg, Preferences* prefs) {
+void BluetoothComponent::activateGattServices(Config* cfg) {
   // NimBLE's ble_gatts_mutable() returns false if any GAP procedure is
   // active, and ble_gatts_add_svcs() silently drops services if so. Pause
   // the central scan while registering services + starting advertising.
@@ -292,7 +292,7 @@ void BluetoothComponent::activateGattServices(Config* cfg, Preferences* prefs) {
   // the initial claim write unauthenticated; after the password is set
   // the GCM handshake is required for every subsequent write. One
   // service, one auth model.
-  ble_control::start(cfg, prefs);
+  ble_control::start(cfg);
 
   NimBLEDevice::getServer()->start();
   Serial.printf("[ble] server.start() done (GATT services registered)\n");
