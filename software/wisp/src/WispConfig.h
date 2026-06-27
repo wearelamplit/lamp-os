@@ -56,9 +56,7 @@ struct ManualPaletteColor {
 
 // Bound aligned with lamp_protocol::kMaxWispPaletteColors so the wisp's
 // stored palette and the on-wire MSG_WISP_PALETTE broadcast share one
-// ceiling. Was 10 (matched a wispStatus JSON budget concern); replaced
-// by the separate MSG_WISP_PALETTE broadcast at 2026-06-13. Aurora
-// palettes can be larger than 50; setManualPalette truncates.
+// ceiling. Aurora palettes can be larger than 50; setManualPalette truncates.
 inline constexpr size_t kManualPaletteMaxColors = 50;
 
 class WispConfig {

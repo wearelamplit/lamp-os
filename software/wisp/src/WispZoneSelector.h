@@ -66,9 +66,8 @@ class ZoneSelector {
   void observe(int zone);
 
   // Snapshot up to `outCap` observed zones into `out`. Returns the count
-  // written. Thread-safe — takes the internal mux. Use this from any task
-  // other than the loop task (e.g. StatusBeacon's timer-service heartbeat)
-  // to avoid iterator invalidation if observe() reallocates concurrently.
+  // written. Thread-safe — takes the internal mux so this never reads a
+  // half-shifted array mid-memmove inside observe().
   size_t copyObserved(int* out, size_t outCap) const;
 
   // Returns true if the first-seen latch actually changed state (caller can

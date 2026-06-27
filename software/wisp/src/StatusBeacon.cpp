@@ -1,7 +1,6 @@
 #include "StatusBeacon.h"
 
 #include <Arduino.h>
-#include <ArduinoJson.h>
 #include <WiFi.h>
 
 #include <cstring>
@@ -178,8 +177,7 @@ void StatusBeacon::emit() {
   // the only path that observes radio state on a fast cadence; without this
   // diff, a connect/disconnect would wait up to 30s for the next heartbeat
   // to be reported in wispStatus. emitStatus() takes its own portMUX and is
-  // re-entrant-safe from this task. Stack budget on the timer-service task
-  // (~3 KB) is comfortable for the JsonDocument-on-stack build.
+  // re-entrant-safe from this task.
   const bool helloFlagsChanged =
       haveLastHelloConn_ &&
       (wifiNow != lastHelloWifi_ || auroraNow != lastHelloAurora_);

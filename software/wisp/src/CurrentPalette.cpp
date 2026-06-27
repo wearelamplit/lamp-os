@@ -19,7 +19,6 @@ inline void xSemaphoreGive(SemaphoreHandle_t) {}
 inline void vSemaphoreDelete(SemaphoreHandle_t) {}
 #endif
 
-#include <algorithm>
 #include <cmath>
 #include <cstring>
 
