@@ -44,6 +44,9 @@ const cfg = ref<Config>(defaultConfig())
 const ready = ref(false)
 const saving = ref(false)
 const activeTab = ref('home')
+// Build-time version, injected by the lamp-ui build (VITE_FW_VERSION). Shown
+// in the info tab; doubles as a visible signal of which build's UI is live.
+const fwVersion = import.meta.env.VITE_FW_VERSION || 'dev'
 const wsConnected = ref(false)
 
 // Password is write-only: GET never returns it, so this starts empty. Only a
@@ -362,6 +365,7 @@ onUnmounted(() => {
                 lamps with their communities.
               </p>
               <p>Find more info at <b>lamplit.ca</b></p>
+              <p class="version">Firmware {{ fwVersion }}</p>
             </div>
           </section>
         </div>
