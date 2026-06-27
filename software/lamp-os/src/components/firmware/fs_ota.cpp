@@ -1,5 +1,3 @@
-#if LAMP_FS_OTA_ENABLED
-
 #include "components/firmware/fs_ota.hpp"
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
@@ -252,10 +250,6 @@ void tick(uint32_t nowMs) {
   s_fsDistributor.tick(nowMs);
 }
 
-bool isActive() {
-  return s_fsReceiver.isInProgress() || s_fsDistributor.isInProgress();
-}
-
 const uint8_t* localDigestPrefix() {
   return s_localDigestReady ? s_localDigest : nullptr;
 }
@@ -309,4 +303,3 @@ void onResult(const lp::ParsedFwResult& r) { s_fsDistributor.onResultOnRecvTask(
 }  // namespace fs_ota
 
 #endif  // ARDUINO || ESP_PLATFORM
-#endif  // LAMP_FS_OTA_ENABLED

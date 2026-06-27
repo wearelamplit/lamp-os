@@ -274,8 +274,8 @@ constexpr size_t  HELLO_FW_CHANNEL_LEN = 16;  // == FW_CHANNEL_LEN
 // fs_signature.cpp logical-content digest, NOT a raw-partition SHA). Lets the
 // FS distributor decide whether a same-firmware-version peer has a stale UI
 // image (peerFsDigest != myFsDigest) without offering blindly. Absent on
-// lamps built with LAMP_FS_OTA_ENABLED=0 → distributor treats absent as "don't
-// offer FS" (an FS-disabled peer can't receive it anyway).
+// older lamps that predate FS OTA → distributor treats absent as "don't offer
+// FS" (such a peer can't receive it anyway).
 constexpr uint8_t HELLO_TLV_FS_STATE  = 0x03;
 constexpr size_t  HELLO_FS_DIGEST_LEN = 8;  // == FW_SHA256_PREFIX_LEN
 

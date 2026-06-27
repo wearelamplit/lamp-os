@@ -339,17 +339,6 @@ class FirmwareReceiver {
     return meshTransport_;
   }
 
-  // Outbound msgType for ACCEPT/REQ/RESULT — MSG_FS_* when an FS flow is
-  // active (fsHooks_ set), MSG_FW_* otherwise.
-  uint8_t acceptMsgType() const {
-    return fsHooks_ ? fsHooks_->acceptType : lamp_protocol::MSG_FW_ACCEPT;
-  }
-  uint8_t reqMsgType() const {
-    return fsHooks_ ? fsHooks_->reqType : lamp_protocol::MSG_FW_REQ;
-  }
-  uint8_t resultMsgType() const {
-    return fsHooks_ ? fsHooks_->resultType : lamp_protocol::MSG_FW_RESULT;
-  }
 
   // --- State -------------------------------------------------------------
 

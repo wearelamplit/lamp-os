@@ -191,7 +191,6 @@ void SocialBehavior::control() {
                                                 p.protocolVersion, now,
                                                 p.fwChannel);
       }
-#if LAMP_FS_OTA_ENABLED
       // FS-image OTA: offer our UI image to same-firmware-version peers whose
       // FS digest differs from ours. fs_ota::considerPeer does the staleness +
       // busy gating internally.
@@ -200,7 +199,6 @@ void SocialBehavior::control() {
         fs_ota::considerPeer(p.mac, p.firmwareVersion, p.protocolVersion, now,
                              p.fwChannel, p.fsDigest, p.hasFsDigest);
       }
-#endif
     }
   }
 

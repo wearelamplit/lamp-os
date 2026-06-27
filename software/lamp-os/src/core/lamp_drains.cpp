@@ -745,13 +745,10 @@ void Lamp::drainFirmwareControl() {
       Serial.printf("[loop] drain fwControl msgType=0x%02X seq=%u\n",
                     (unsigned)cmd.msgType, (unsigned)cmd.seq);
 #endif
-#if LAMP_FS_OTA_ENABLED
       if (cmd.msgType == lamp_protocol::MSG_FS_OFFER ||
           cmd.msgType == lamp_protocol::MSG_FS_DONE) {
         fs_ota::handleControl(cmd);
-      } else
-#endif
-      {
+      } else {
         firmwareReceiver.handleControlOnLoop(cmd);
       }
     }

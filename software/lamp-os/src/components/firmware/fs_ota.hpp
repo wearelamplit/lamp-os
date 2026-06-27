@@ -1,17 +1,14 @@
 #pragma once
 
-// FS-image OTA — the flag-gated module that delivers the SPIFFS web-UI image
-// over the mesh to the spiffs partition, reusing the firmware OTA engine via
-// FsReceiverHooks / FsDistributorHooks. Compiled only when LAMP_FS_OTA_ENABLED;
-// when off, none of this exists and the firmware OTA path is unchanged.
+// FS-image OTA — delivers the SPIFFS web-UI image over the mesh to the spiffs
+// partition, reusing the firmware OTA engine via FsReceiverHooks /
+// FsDistributorHooks.
 //
 // It owns a second FirmwareReceiver + FirmwareDistributor wired to the spiffs
 // partition + the FS verify (mount + manifest digest + ed25519 against
 // fw.lsig). Inbound MSG_FS_* frames are routed here by show_receiver; outbound
 // MSG_FS_* are emitted by the FS instances. A cross-OTA busy guard keeps the
 // FS and firmware paths from running concurrently (shared erase machinery).
-
-#if LAMP_FS_OTA_ENABLED
 
 #include <cstddef>
 #include <cstdint>
@@ -43,10 +40,6 @@ void begin(lamp::FirmwareTransport* meshTransport,
 // Core 1 tick — drives the FS receiver + distributor state machines.
 void tick(uint32_t nowMs);
 
-// True while an FS OTA session (receive or distribute) is mid-flow. Used by
-// the firmware path's cross-OTA guard and to suppress the web window.
-bool isActive();
-
 // 8-byte prefix of our local FS manifest digest for HELLO_TLV_FS_STATE, or
 // nullptr if not yet computed (SPIFFS unmountable / empty).
 const uint8_t* localDigestPrefix();
@@ -71,5 +64,3 @@ void onReq(const lamp_protocol::ParsedFwReq& r);
 void onResult(const lamp_protocol::ParsedFwResult& r);
 
 }  // namespace fs_ota
-
-#endif  // LAMP_FS_OTA_ENABLED

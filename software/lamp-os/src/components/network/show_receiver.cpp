@@ -486,7 +486,6 @@ void ShowReceiver::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FW_RESULT, p.seq)) return;
     if (!addressedToUs(p.targetMac, myMac_)) return;
     if (firmwareDistributor_) firmwareDistributor_->onResultOnRecvTask(p);
-#if LAMP_FS_OTA_ENABLED
   } else if (msgType == lamp_protocol::MSG_FS_OFFER) {
     lamp_protocol::ParsedFwOffer p;
     if (!lamp_protocol::parseFwOffer(data, len, p, lamp_protocol::MSG_FS_OFFER)) return;
@@ -548,7 +547,6 @@ void ShowReceiver::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FS_RESULT, p.seq)) return;
     if (!addressedToUs(p.targetMac, myMac_)) return;
     fs_ota::onResult(p);
-#endif
   }
 }
 
@@ -603,11 +601,8 @@ void ShowReceiver::emitHello() {
   size_t n = lamp_protocol::buildHello(buf, sizeof(buf), helloSeq_++, myMac_,
                                        shade, base, FIRMWARE_VERSION,
                                        name.data(), nameLen, otaState,
-                                       FIRMWARE_CHANNEL_STR
-#if LAMP_FS_OTA_ENABLED
-                                       , fs_ota::localDigestPrefix()
-#endif
-  );
+                                       FIRMWARE_CHANNEL_STR,
+                                       fs_ota::localDigestPrefix());
   if (n) {
     link_.broadcast(buf, n);
   }
