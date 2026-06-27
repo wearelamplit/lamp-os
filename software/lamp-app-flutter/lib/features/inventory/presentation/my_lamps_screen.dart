@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/routing/routes.dart';
 import '../../../core/ble/ble_client_provider.dart';
+import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/brand_colors.dart';
 import '../../../core/widgets/critter_icon.dart';
 import '../../../core/widgets/status_dot.dart';
@@ -55,7 +56,8 @@ class MyLampsScreen extends ConsumerWidget {
       ),
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          padding: const EdgeInsets.fromLTRB(
+              AppSpace.lg, AppSpace.sm, AppSpace.lg, AppSpace.xl),
           children: [
             for (final lamp in ordered)
               _LampTile(
@@ -64,9 +66,9 @@ class MyLampsScreen extends ConsumerWidget {
                 isCurrent: lamp.id == activeId,
                 inScanGrace: inScanGrace,
               ),
-            const SizedBox(height: 8),
-            const Divider(color: BrandColors.slateGrey, height: 1),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpace.sm),
+            const Divider(height: 1),
+            const SizedBox(height: AppSpace.sm),
             const _AddLampTile(),
           ],
         ),
@@ -140,18 +142,15 @@ class _LampTile extends ConsumerWidget {
   Future<void> _showLampActions(BuildContext context, WidgetRef ref) async {
     final action = await showModalBottomSheet<_LampAction>(
       context: context,
-      backgroundColor: BrandColors.midnightBlack,
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.lock_reset, color: BrandColors.fogGrey),
-              title: const Text('Reset connection password',
-                  style: TextStyle(color: BrandColors.lampWhite)),
+              leading: const Icon(Icons.lock_reset),
+              title: const Text('Reset connection password'),
               subtitle: const Text(
                 'Use if Save / rename keeps reverting on this lamp.',
-                style: TextStyle(color: BrandColors.slateGrey, fontSize: 12),
               ),
               onTap: () => Navigator.pop(ctx, _LampAction.resetPassword),
             ),
@@ -199,6 +198,8 @@ class _LampTile extends ConsumerWidget {
     );
     final hit = nearbyById[lamp.id];
     final colors = resolveLampColors(inv: lamp, near: hit);
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
 
     // Discoverable delete via swipe-left (audit ux-H3) + long-press for
     // back-compat with users who learned that gesture.
@@ -207,17 +208,17 @@ class _LampTile extends ConsumerWidget {
       direction: DismissDirection.endToStart,
       background: Container(
         alignment: Alignment.centerRight,
-        padding: const EdgeInsets.symmetric(horizontal: 24),
-        color: BrandColors.error,
-        child: const Row(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpace.xl),
+        color: colorScheme.error,
+        child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.delete_outline, color: BrandColors.lampWhite),
-            SizedBox(width: 8),
+            Icon(Icons.delete_outline, color: colorScheme.onError),
+            const SizedBox(width: AppSpace.sm),
             Text(
               'Remove',
               style: TextStyle(
-                color: BrandColors.lampWhite,
+                color: colorScheme.onError,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -247,18 +248,18 @@ class _LampTile extends ConsumerWidget {
         }
       },
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadius.card),
         // Every tile is tappable, even offline ones — the user may want
         // to navigate to a lamp's screen to wait for its reconnect or
         // see its last-known state, even when not currently in range.
         onTap: () => _onTap(context, ref),
         onLongPress: () => _showLampActions(context, ref),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: AppSpace.sm, vertical: AppSpace.md),
           child: Row(
             children: [
               StatusDot(kind: status, size: 14),
-              const SizedBox(width: 12),
+              const SizedBox(width: AppSpace.md),
               CritterIcon(
                 critterIndex: lamp.critterIndex,
                 deviceId: lamp.id,
@@ -272,11 +273,7 @@ class _LampTile extends ConsumerWidget {
                   lamp.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: BrandColors.lampWhite,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: textTheme.titleMedium,
                 ),
               ),
               // Right-side detail. In advanced mode (session-unlock for
@@ -296,10 +293,7 @@ class _LampTile extends ConsumerWidget {
                   _subtitle(status, lamp),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: BrandColors.slateGrey,
-                    fontSize: 12,
-                  ),
+                  style: textTheme.bodySmall,
                 ),
             ],
           ),
@@ -370,10 +364,7 @@ class _FirmwareInfo extends StatelessWidget {
       buf.toString(),
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
-      style: const TextStyle(
-        color: BrandColors.slateGrey,
-        fontSize: 12,
-      ),
+      style: Theme.of(context).textTheme.bodySmall,
     );
   }
 }
@@ -384,34 +375,31 @@ class _AddLampTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return InkWell(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(AppRadius.card),
       onTap: () => GoRouter.maybeOf(context)?.push(AppRoutes.addLamp),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpace.sm, vertical: 14),
         child: Row(
           children: [
             Container(
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: BrandColors.slateGrey.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(8),
+                color: colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(AppSpace.sm),
               ),
-              child: const Icon(Icons.add, color: BrandColors.lampWhite),
+              child: Icon(Icons.add, color: colorScheme.onSurface),
             ),
             const SizedBox(width: 14),
-            const Expanded(
+            Expanded(
               child: Text(
                 'Adopt a lamp',
-                style: TextStyle(
-                  color: BrandColors.lampWhite,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: Theme.of(context).textTheme.titleMedium,
               ),
             ),
-            const Icon(Icons.chevron_right, color: BrandColors.slateGrey),
+            Icon(Icons.chevron_right, color: colorScheme.onSurfaceVariant),
           ],
         ),
       ),
@@ -424,13 +412,11 @@ Future<bool> _confirmRemoveDialog(BuildContext context, String lampName) async {
   final ok = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
-      title: const Text('Remove this lamp?',
-          style: TextStyle(color: BrandColors.lampWhite)),
+      title: const Text('Remove this lamp?'),
       content: Text(
         '$lampName will be removed from your lamps on this phone. '
         "The lamp itself keeps its name, password, and Wi-Fi — you can "
         'add it back later from the picker.',
-        style: const TextStyle(color: BrandColors.fogGrey),
       ),
       actions: [
         TextButton(
@@ -438,7 +424,9 @@ Future<bool> _confirmRemoveDialog(BuildContext context, String lampName) async {
           child: const Text('Cancel'),
         ),
         FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: BrandColors.error),
+          style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+              foregroundColor: Theme.of(ctx).colorScheme.onError),
           onPressed: () => Navigator.pop(ctx, true),
           child: const Text('Remove'),
         ),

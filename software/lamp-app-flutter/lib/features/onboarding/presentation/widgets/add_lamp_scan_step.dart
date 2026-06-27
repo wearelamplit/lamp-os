@@ -5,7 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/routing/routes.dart';
+import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/brand_colors.dart';
+import '../../../../core/widgets/lamp_card.dart';
 import '../../../../core/widgets/status_dot.dart';
 import '../../../inventory/application/inventory_notifier.dart';
 import '../../../nearby/application/nearby_lamps_notifier.dart';
@@ -26,27 +28,23 @@ class AddLampScanStep extends ConsumerWidget {
     // confuse the "tap a discovered lamp to add it" flow.
     final lamps = all.where((l) => !inventoryIds.contains(l.id)).toList();
     if (lamps.isEmpty) {
-      return const Center(
+      return Center(
         child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: 32),
+          padding: const EdgeInsets.symmetric(horizontal: AppSpace.xxl),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
                 'Searching for a stray lamp…',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: BrandColors.lampWhite,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: Theme.of(context).textTheme.titleMedium,
               ),
-              SizedBox(height: 8),
+              const SizedBox(height: AppSpace.sm),
               Text(
                 'Make sure your new lamp is plugged in and glowing nearby. '
                 "If they're shy, give them a moment.",
                 textAlign: TextAlign.center,
-                style: TextStyle(color: BrandColors.fogGrey, fontSize: 13),
+                style: Theme.of(context).textTheme.bodyMedium,
               ),
             ],
           ),
@@ -54,9 +52,9 @@ class AddLampScanStep extends ConsumerWidget {
       );
     }
     return ListView.separated(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppSpace.lg),
       itemCount: lamps.length,
-      separatorBuilder: (_, index) => const SizedBox(height: 8),
+      separatorBuilder: (_, index) => const SizedBox(height: AppSpace.sm),
       itemBuilder: (context, i) => _LampRow(lamp: lamps[i]),
     );
   }
@@ -99,16 +97,10 @@ class _LampRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return InkWell(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(AppRadius.card),
       onTap: () => _onTap(context, ref),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.04),
-          borderRadius: BorderRadius.circular(12),
-          border:
-              Border.all(color: Colors.white.withValues(alpha: 0.06)),
-        ),
+      child: LampCard(
+        padding: const EdgeInsets.all(AppSpace.md),
         child: Row(
           children: [
             // BLE adv tells us this lamp is bluetooth-reachable; the
@@ -120,22 +112,18 @@ class _LampRow extends ConsumerWidget {
                   : StatusKind.bluetooth,
               size: 14,
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: AppSpace.md),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     lamp.name.isEmpty ? '(unnamed)' : lamp.name,
-                    style: const TextStyle(
-                      color: BrandColors.lampWhite,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: Theme.of(context).textTheme.titleMedium,
                   ),
                   Text(
                     '${lamp.id} · ${lamp.rssi} dBm',
-                    style: const TextStyle(
-                      color: BrandColors.slateGrey,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       fontSize: 11,
                     ),
                   ),
@@ -173,7 +161,7 @@ class _Pill extends StatelessWidget {
       label = 'add';
     }
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpace.sm, vertical: 4),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
         color: base.withValues(alpha: 0.18),
@@ -189,4 +177,3 @@ class _Pill extends StatelessWidget {
     );
   }
 }
-

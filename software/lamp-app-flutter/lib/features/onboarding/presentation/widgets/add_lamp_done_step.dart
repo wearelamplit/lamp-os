@@ -4,7 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../../core/theme/brand_colors.dart';
+import '../../../../core/theme/app_spacing.dart';
+import '../../../../core/theme/brand_extras.dart';
 import '../../../control/application/control_notifier.dart';
 import '../../../inventory/application/inventory_notifier.dart';
 import '../../../nearby/application/lamp_route_resolver.dart';
@@ -33,42 +34,40 @@ class AddLampDoneStep extends ConsumerWidget {
             ?.isMesh ??
         false;
     final name = state.name.isEmpty ? 'Your lamp' : state.name;
+    final textTheme = Theme.of(context).textTheme;
+    final colorScheme = Theme.of(context).colorScheme;
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(AppSpace.xl),
       child: SizedBox(
         width: double.infinity,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            const Icon(
+            Icon(
               Icons.favorite,
-              color: BrandColors.glowPink,
+              color: colorScheme.primary,
               size: 64,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: AppSpace.lg),
             Text(
               '$name is home!',
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: BrandColors.lampWhite,
-                fontSize: 22,
-                fontWeight: FontWeight.w600,
-              ),
+              style: textTheme.headlineSmall,
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpace.sm),
             Text(
               isMesh
                   ? "They're already chatting with your other lamps."
                   : "They're tethered to your phone for now.",
-              style: const TextStyle(color: BrandColors.fogGrey),
+              style: textTheme.bodyMedium,
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: AppSpace.xl),
             // Wi-Fi instructions only for legacy lamps that aren't on
             // the mesh — mesh-capable lamps don't need the user to
             // chase the AP.
             if (!isMesh) const _WifiSetupCard(),
-            if (!isMesh) const SizedBox(height: 24),
+            if (!isMesh) const SizedBox(height: AppSpace.xl),
             FilledButton(
               onPressed: () {
                 ref.read(addLampNotifierProvider.notifier).reset();
@@ -82,7 +81,7 @@ class AddLampDoneStep extends ConsumerWidget {
               },
               child: Text('Say hi to $name'),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: AppSpace.lg),
             _WhatsNextCard(name: name),
           ],
         ),
@@ -102,64 +101,59 @@ class _WifiSetupCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppSpace.lg),
       decoration: BoxDecoration(
-        color: BrandColors.lampWhite.withValues(alpha: 0.04),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: BrandColors.lampWhite.withValues(alpha: 0.06),
-        ),
+        color: colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(AppRadius.card),
       ),
-      child: const Column(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.wifi, color: BrandColors.auroraBlue, size: 20),
-              SizedBox(width: 8),
+              Icon(Icons.wifi, color: colorScheme.tertiary, size: 20),
+              const SizedBox(width: AppSpace.sm),
               Text(
                 'Want them to make friends?',
-                style: TextStyle(
-                  color: BrandColors.lampWhite,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: textTheme.titleMedium,
               ),
             ],
           ),
-          SizedBox(height: 8),
+          const SizedBox(height: AppSpace.sm),
           Text(
             "Put this lamp on Wi-Fi and they'll join the mesh — chatting "
             'with your other lamps and accepting wireless updates.',
-            style: TextStyle(color: BrandColors.fogGrey, fontSize: 13),
+            style: textTheme.bodySmall,
           ),
-          SizedBox(height: 14),
-          _NumberedStep(
+          const SizedBox(height: 14),
+          const _NumberedStep(
             n: 1,
             text:
                 "On your phone's Wi-Fi settings, join the lamp's access "
                 "point (its SSID matches the lamp's name).",
           ),
-          _NumberedStep(
+          const _NumberedStep(
             n: 2,
             text: "Open a browser and visit http://192.168.4.1 — that's "
                 "the lamp's own setup page.",
           ),
-          _NumberedStep(
+          const _NumberedStep(
             n: 3,
             text:
                 'Enter your home Wi-Fi credentials. The lamp will slip onto '
                 'the mesh once they reconnect.',
           ),
-          SizedBox(height: 10),
+          const SizedBox(height: 10),
           Text.rich(
             TextSpan(
               children: [
                 TextSpan(
                   text: 'Tip: ',
                   style: TextStyle(
-                    color: BrandColors.lumenGreen,
+                    color: context.brandExtras.success,
                     fontWeight: FontWeight.w600,
                     fontSize: 12,
                   ),
@@ -167,19 +161,19 @@ class _WifiSetupCard extends StatelessWidget {
                 TextSpan(
                   text:
                       "while you're there, freshen them up with the latest firmware at ",
-                  style: TextStyle(color: BrandColors.fogGrey, fontSize: 12),
+                  style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12),
                 ),
                 TextSpan(
                   text: 'update.lamplit.ca',
                   style: TextStyle(
-                    color: BrandColors.auroraBlue,
+                    color: colorScheme.tertiary,
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
                 TextSpan(
                   text: '.',
-                  style: TextStyle(color: BrandColors.fogGrey, fontSize: 12),
+                  style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12),
                 ),
               ],
             ),
@@ -197,8 +191,9 @@ class _NumberedStep extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: AppSpace.sm),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -208,12 +203,12 @@ class _NumberedStep extends StatelessWidget {
             alignment: Alignment.center,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: BrandColors.auroraBlue.withValues(alpha: 0.18),
+              color: colorScheme.tertiary.withValues(alpha: 0.18),
             ),
             child: Text(
               '$n',
-              style: const TextStyle(
-                color: BrandColors.auroraBlue,
+              style: TextStyle(
+                color: colorScheme.tertiary,
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
               ),
@@ -223,10 +218,9 @@ class _NumberedStep extends StatelessWidget {
           Expanded(
             child: Text(
               text,
-              style: const TextStyle(
-                color: BrandColors.lampWhite,
-                fontSize: 13,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 height: 1.35,
+                fontSize: 13,
               ),
             ),
           ),
@@ -245,30 +239,25 @@ class _WhatsNextCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppSpace.lg),
       decoration: BoxDecoration(
-        color: BrandColors.lampWhite.withValues(alpha: 0.04),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: BrandColors.lampWhite.withValues(alpha: 0.06),
-        ),
+        color: colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(AppRadius.card),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.auto_awesome,
-                  color: BrandColors.glowPink, size: 20),
-              const SizedBox(width: 8),
+              Icon(Icons.auto_awesome,
+                  color: colorScheme.primary, size: 20),
+              const SizedBox(width: AppSpace.sm),
               Text(
                 'First moves with $name',
-                style: const TextStyle(
-                  color: BrandColors.lampWhite,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: textTheme.titleMedium,
               ),
             ],
           ),
@@ -296,17 +285,17 @@ class _NextStep extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(
-            padding: EdgeInsets.only(top: 6, right: 8),
-            child: Icon(Icons.circle, color: BrandColors.glowPink, size: 5),
+          Padding(
+            padding: const EdgeInsets.only(top: 6, right: AppSpace.sm),
+            child: Icon(Icons.circle,
+                color: Theme.of(context).colorScheme.primary, size: 5),
           ),
           Expanded(
             child: Text(
               text,
-              style: const TextStyle(
-                color: BrandColors.fogGrey,
-                fontSize: 13,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 height: 1.4,
+                fontSize: 13,
               ),
             ),
           ),

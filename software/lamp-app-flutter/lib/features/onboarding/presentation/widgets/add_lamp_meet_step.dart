@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
-import '../../../../core/theme/brand_colors.dart';
+import '../../../../core/theme/app_spacing.dart';
 import '../../../control/presentation/widgets/critter_asset.dart';
 import '../../application/add_lamp_notifier.dart';
 
@@ -26,31 +26,28 @@ class AddLampMeetStep extends ConsumerWidget {
       deviceId: state.deviceId,
     );
     final name = state.name.isEmpty ? 'your lamp' : state.name;
+    final textTheme = Theme.of(context).textTheme;
     return Padding(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(AppSpace.xl),
       child: SizedBox(
         width: double.infinity,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             SvgPicture.asset(critter, width: 96, height: 96),
-            const SizedBox(height: 12),
+            const SizedBox(height: AppSpace.md),
             Text(
               'Meet $name',
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: BrandColors.lampWhite,
-                fontSize: 20,
-                fontWeight: FontWeight.w600,
-              ),
+              style: textTheme.headlineSmall,
             ),
             const SizedBox(height: 6),
-            const Text(
+            Text(
               "They're yours to shape from here on.",
               textAlign: TextAlign.center,
-              style: TextStyle(color: BrandColors.fogGrey, fontSize: 13),
+              style: textTheme.bodyMedium,
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: AppSpace.xl),
             Expanded(
               child: SingleChildScrollView(
                 child: Text(
@@ -61,15 +58,11 @@ class AddLampMeetStep extends ConsumerWidget {
                   "now; it's all a tap away in $name's tabs, whenever you're "
                   'ready.',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: BrandColors.lampWhite,
-                    fontSize: 14,
-                    height: 1.55,
-                  ),
+                  style: textTheme.bodyLarge?.copyWith(height: 1.55),
                 ),
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: AppSpace.lg),
             Row(
               children: [
                 TextButton(

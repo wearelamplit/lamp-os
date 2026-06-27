@@ -1,43 +1,40 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/theme/brand_colors.dart';
+import '../../../core/theme/app_spacing.dart';
 
 class OnboardingPlaceholder extends StatelessWidget {
   const OnboardingPlaceholder({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
     return Scaffold(
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
+            Text(
               'No lamps in your care yet',
-              style: TextStyle(
-                color: BrandColors.lampWhite,
-                fontWeight: FontWeight.w600,
-                fontSize: 18,
-              ),
+              style: textTheme.titleLarge,
             ),
-            const SizedBox(height: 12),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 32),
+            const SizedBox(height: AppSpace.md),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpace.xxl),
               child: Text(
                 'Find a stray nearby and bring them home.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: BrandColors.fogGrey),
+                style: textTheme.bodyMedium,
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: AppSpace.xl),
             FilledButton.icon(
               // `push` so the add-lamp wizard's back/cancel returns here.
               onPressed: () => context.push('/onboarding/add'),
               icon: const Icon(Icons.favorite),
               label: const Text('Adopt a lamp'),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: AppSpace.md),
             TextButton(
               // `push` so the debug scan screen's back arrow returns here.
               onPressed: () => context.push('/devices'),

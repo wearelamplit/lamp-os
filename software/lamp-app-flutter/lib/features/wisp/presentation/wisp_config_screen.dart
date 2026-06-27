@@ -3,11 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/brand_colors.dart';
 import '../../../core/widgets/app_snackbar.dart';
 import '../../../core/widgets/empty_state_pane.dart';
 import '../../../core/widgets/friendly_error.dart';
 import '../../../core/widgets/password_prompt_dialog.dart';
+import '../../../core/widgets/section_header.dart';
 import '../../../core/widgets/settings_row.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/domain/lamp_color.dart';
@@ -198,10 +200,10 @@ class _WispBodyState extends ConsumerState<_WispBody> {
         ),
         Expanded(
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+            padding: const EdgeInsets.fromLTRB(AppSpace.lg, AppSpace.lg, AppSpace.lg, AppSpace.xxl),
             children: [
               _WispHeader(status: status, staleSeconds: stale),
-              const SizedBox(height: 16),
+              const SizedBox(height: AppSpace.lg),
               _SourcePicker(
                 current: source,
                 auroraEnabled: auroraEnabled,
@@ -219,7 +221,7 @@ class _WispBodyState extends ConsumerState<_WispBody> {
                 _ManualPaletteEditor(lampId: widget.lampId),
               ],
               if (source == WispSourceMode.aurora) ...[
-                const SizedBox(height: 24),
+                const SizedBox(height: AppSpace.xl),
                 if (!status.auroraConnected) ...[
                   // Aurora is the selected palette source but the wisp
                   // hasn't reached Aurora over the network yet. Surface
@@ -232,22 +234,22 @@ class _WispBodyState extends ConsumerState<_WispBody> {
                       wifiConnected: status.wifiConnected,
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: AppSpace.lg),
                 ],
                 // Wi-Fi only matters under Aurora — Off and Manual modes
                 // are mesh-only and don't need an internet backend. This
                 // row used to live at the bottom of the pane unconditionally
                 // (and that bottom slot now hosts the painted-lamps list).
                 _WifiConfigRow(lampId: widget.lampId, status: status),
-                const SizedBox(height: 16),
+                const SizedBox(height: AppSpace.lg),
                 _CurrentZone(status: status),
-                const SizedBox(height: 16),
+                const SizedBox(height: AppSpace.lg),
                 _ObservedZonesPicker(
                   status: status,
                   onPickZone: (z) => _runWispOp(() => notifier.setZone(z)),
                 ),
                 if (_canClearSelection(status)) ...[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: AppSpace.lg),
                   Align(
                     alignment: Alignment.centerLeft,
                     child: TextButton.icon(
@@ -255,13 +257,13 @@ class _WispBodyState extends ConsumerState<_WispBody> {
                       icon: const Icon(Icons.close, size: 16),
                       label: const Text('Clear selection'),
                       style: TextButton.styleFrom(
-                        foregroundColor: BrandColors.fogGrey,
+                        foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ),
                 ],
               ],
-              const SizedBox(height: 24),
+              const SizedBox(height: AppSpace.xl),
               const SettingsGroupHeading('Painted lamps'),
               _PaintedLampsList(lampId: widget.lampId),
             ],
@@ -315,15 +317,15 @@ class _WispLoading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
+    return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          CircularProgressIndicator(color: BrandColors.fogGrey),
-          SizedBox(height: 12),
+          const CircularProgressIndicator(),
+          const SizedBox(height: AppSpace.md),
           Text(
             'Connecting to wisp…',
-            style: TextStyle(color: BrandColors.fogGrey, fontSize: 13),
+            style: Theme.of(context).textTheme.bodySmall,
           ),
         ],
       ),
@@ -415,12 +417,14 @@ class _WispHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     if (!status.present) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 16),
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: AppSpace.lg),
         child: Text(
           'No wisp detected.',
-          style: TextStyle(color: BrandColors.fogGrey, fontSize: 14),
+          style: textTheme.bodyMedium,
         ),
       );
     }
@@ -434,20 +438,18 @@ class _WispHeader extends StatelessWidget {
       children: [
         Row(
           children: [
-            const Icon(
+            Icon(
               Icons.bubble_chart,
               color: BrandColors.auroraBlue,
               size: 22,
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: AppSpace.sm),
             Expanded(
               child: Text(
                 mac,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: BrandColors.lampWhite,
+                style: textTheme.titleMedium?.copyWith(
                   fontSize: 16,
-                  fontWeight: FontWeight.w600,
                   letterSpacing: 0.5,
                 ),
               ),
@@ -457,9 +459,8 @@ class _WispHeader extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           freshnessLabel,
-          style: TextStyle(
-            color: stale ? BrandColors.error : BrandColors.fogGrey,
-            fontSize: 12,
+          style: textTheme.bodySmall?.copyWith(
+            color: stale ? colorScheme.error : colorScheme.onSurfaceVariant,
             fontStyle: stale ? FontStyle.italic : FontStyle.normal,
           ),
         ),
@@ -485,13 +486,13 @@ class _AuroraNotConnectedNotice extends StatelessWidget {
         ? "Wi-Fi is up but Aurora hasn't been reached yet."
         : "The wisp isn't on Wi-Fi — configure it below.";
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(AppSpace.md),
       decoration: BoxDecoration(
         color: BrandColors.amberGold.withValues(alpha: 0.10),
         border: Border.all(
           color: BrandColors.amberGold.withValues(alpha: 0.40),
         ),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(AppSpace.sm),
       ),
       child: Row(
         children: [
@@ -500,14 +501,11 @@ class _AuroraNotConnectedNotice extends StatelessWidget {
             size: 16,
             color: BrandColors.amberGold,
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: AppSpace.sm),
           Expanded(
             child: Text(
               'Aurora not connected.\n$detail',
-              style: const TextStyle(
-                color: BrandColors.lampWhite,
-                fontSize: 12,
-              ),
+              style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
         ],
@@ -522,6 +520,7 @@ class _CurrentZone extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
     final String headline;
     final String? subhead;
     // The wisp publishes a -1 sentinel for "no current zone heard yet"
@@ -543,33 +542,17 @@ class _CurrentZone extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'CURRENT ZONE',
-          style: TextStyle(
-            color: BrandColors.headerYellow,
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1.2,
-          ),
-        ),
-        const SizedBox(height: 8),
+        const SectionHeader('Current zone'),
+        const SizedBox(height: AppSpace.sm),
         Text(
           headline,
-          style: const TextStyle(
-            color: BrandColors.lampWhite,
-            fontSize: 24,
-            fontWeight: FontWeight.w700,
-          ),
+          style: textTheme.displaySmall,
         ),
         if (subhead != null) ...[
           const SizedBox(height: 4),
           Text(
             subhead,
-            style: const TextStyle(
-              color: BrandColors.fogGrey,
-              fontSize: 12,
-              fontStyle: FontStyle.italic,
-            ),
+            style: textTheme.bodySmall?.copyWith(fontStyle: FontStyle.italic),
           ),
         ],
       ],
@@ -604,26 +587,18 @@ class _ObservedZonesPicker extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'OBSERVED ZONES',
-          style: TextStyle(
-            color: BrandColors.headerYellow,
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1.2,
-          ),
-        ),
-        const SizedBox(height: 8),
+        const SectionHeader('Observed zones'),
+        const SizedBox(height: AppSpace.sm),
         if (zones.isEmpty)
-          const Text(
+          Text(
             "No zones heard yet. Once Aurora starts publishing zone "
             "palettes on the mesh, they'll appear here.",
-            style: TextStyle(color: BrandColors.fogGrey, fontSize: 12),
+            style: Theme.of(context).textTheme.bodySmall,
           )
         else
           Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            spacing: AppSpace.sm,
+            runSpacing: AppSpace.sm,
             children: [
               for (final z in zones)
                 _ZoneChip(
@@ -650,18 +625,17 @@ class _ZoneChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fill = selected ? BrandColors.glowPink : Colors.transparent;
-    final border = selected
-        ? BrandColors.glowPink
-        : BrandColors.slateGrey.withValues(alpha: 0.5);
-    final fg = selected ? BrandColors.midnightBlack : BrandColors.lampWhite;
+    final colorScheme = Theme.of(context).colorScheme;
+    final fill = selected ? colorScheme.primary : Colors.transparent;
+    final border = selected ? colorScheme.primary : colorScheme.outline;
+    final fg = selected ? colorScheme.onPrimary : colorScheme.onSurface;
     return Material(
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(999),
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: AppSpace.lg, vertical: 10),
           decoration: BoxDecoration(
             color: fill,
             borderRadius: BorderRadius.circular(999),
@@ -704,11 +678,8 @@ class _SourcePicker extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Palette source',
-          style: TextStyle(color: BrandColors.lampWhite, fontSize: 14),
-        ),
-        const SizedBox(height: 8),
+        const SectionHeader('Palette source'),
+        const SizedBox(height: AppSpace.sm),
         Row(
           children: [
             _SourcePill(
@@ -718,7 +689,7 @@ class _SourcePicker extends StatelessWidget {
               enabled: true,
               onTap: () => onSelect(WispSourceMode.off),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: AppSpace.sm),
             _SourcePill(
               label: 'Manual',
               icon: Icons.palette_outlined,
@@ -726,7 +697,7 @@ class _SourcePicker extends StatelessWidget {
               enabled: true,
               onTap: () => onSelect(WispSourceMode.manual),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: AppSpace.sm),
             _SourcePill(
               label: 'Aurora',
               icon: Icons.auto_awesome,
@@ -738,14 +709,12 @@ class _SourcePicker extends StatelessWidget {
         ),
         if (!auroraEnabled) ...[
           const SizedBox(height: 6),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 2),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
             child: Text(
               "No Aurora zone heard yet. Once a zone shows up on the "
               "mesh, you'll be able to follow it.",
-              style: TextStyle(
-                color: BrandColors.fogGrey,
-                fontSize: 11,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 fontStyle: FontStyle.italic,
               ),
             ),
@@ -774,26 +743,27 @@ class _SourcePill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // Visual contract mirrors the Social tab's _PersonalityButton:
-    // selected → solid glowPink fill on midnight text; idle → slateGrey
-    // outline on lampWhite. Disabled drops opacity instead of changing
+    // selected → solid primary fill on onPrimary text; idle → outline
+    // border on onSurface. Disabled drops opacity instead of changing
     // hue so the row reads as "not for you right now" rather than
     // "broken".
+    final colorScheme = Theme.of(context).colorScheme;
     final Color fill = enabled && selected
-        ? BrandColors.glowPink
+        ? colorScheme.primary
         : Colors.transparent;
     final Color border = enabled && selected
-        ? BrandColors.glowPink
-        : BrandColors.slateGrey.withValues(alpha: enabled ? 0.5 : 0.25);
+        ? colorScheme.primary
+        : colorScheme.outline.withValues(alpha: enabled ? 1.0 : 0.4);
     final Color fg = enabled && selected
-        ? BrandColors.midnightBlack
-        : BrandColors.lampWhite.withValues(alpha: enabled ? 1.0 : 0.4);
+        ? colorScheme.onPrimary
+        : colorScheme.onSurface.withValues(alpha: enabled ? 1.0 : 0.4);
 
     return Expanded(
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: enabled ? onTap : null,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppRadius.card),
           child: Container(
             height: 72,
             decoration: BoxDecoration(
@@ -802,7 +772,7 @@ class _SourcePill extends StatelessWidget {
                 color: border,
                 width: selected && enabled ? 2 : 1,
               ),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(AppRadius.card),
             ),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -860,20 +830,19 @@ class _ManualPaletteEditorState extends ConsumerState<_ManualPaletteEditor> {
     ref.watch(wispNotifierProvider(widget.lampId));
 
     if (notifier.paletteLoading) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 12),
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: AppSpace.md),
         child: Row(
           children: [
-            SizedBox(
+            const SizedBox(
               width: 14, height: 14,
-              child: CircularProgressIndicator(
-                  strokeWidth: 2, color: BrandColors.fogGrey),
+              child: CircularProgressIndicator(strokeWidth: 2),
             ),
-            SizedBox(width: 10),
+            const SizedBox(width: 10),
             Text('Reading palette from wisp…',
-                style: TextStyle(
-                    color: BrandColors.fogGrey, fontSize: 12,
-                    fontStyle: FontStyle.italic)),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontStyle: FontStyle.italic,
+                )),
           ],
         ),
       );
@@ -885,19 +854,11 @@ class _ManualPaletteEditorState extends ConsumerState<_ManualPaletteEditor> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'MANUAL PALETTE',
-          style: TextStyle(
-            color: BrandColors.headerYellow,
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1.2,
-          ),
-        ),
-        const SizedBox(height: 8),
+        const SectionHeader('Manual palette'),
+        const SizedBox(height: AppSpace.sm),
         Wrap(
-          spacing: 8,
-          runSpacing: 8,
+          spacing: AppSpace.sm,
+          runSpacing: AppSpace.sm,
           children: [
             for (var i = 0; i < draft.length; i++)
               _WispColorChip(
@@ -915,11 +876,9 @@ class _ManualPaletteEditorState extends ConsumerState<_ManualPaletteEditor> {
         ),
         if (atCap) ...[
           const SizedBox(height: 4),
-          const Text(
+          Text(
             'Palette is at the 10-color cap. Remove a swatch to add another.',
-            style: TextStyle(
-              color: BrandColors.fogGrey,
-              fontSize: 11,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
               fontStyle: FontStyle.italic,
             ),
           ),
@@ -991,22 +950,14 @@ class _OffColorPickerState extends ConsumerState<_OffColorPicker> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'WISP COLOR',
-          style: TextStyle(
-            color: BrandColors.headerYellow,
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1.2,
-          ),
-        ),
-        const SizedBox(height: 8),
-        const Padding(
-          padding: EdgeInsets.only(bottom: 12),
+        const SectionHeader('Wisp color'),
+        const SizedBox(height: AppSpace.sm),
+        Padding(
+          padding: const EdgeInsets.only(bottom: AppSpace.md),
           child: Text(
             "Off doesn't broadcast a palette — your lamps stay on their "
             "own behaviour. Pick the color the wisp itself shows.",
-            style: TextStyle(color: BrandColors.fogGrey, fontSize: 12),
+            style: Theme.of(context).textTheme.bodySmall,
           ),
         ),
         Row(
@@ -1015,13 +966,11 @@ class _OffColorPickerState extends ConsumerState<_OffColorPicker> {
               onTap: _pick,
               child: LampColorSwatch(color: widget.current, size: 48),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: AppSpace.md),
             Expanded(
               child: Text(
                 widget.current.toHex().toUpperCase(),
-                style: const TextStyle(
-                  color: BrandColors.lampWhite,
-                  fontSize: 14,
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                   fontFamily: 'monospace',
                 ),
               ),
@@ -1075,6 +1024,7 @@ class _WispColorChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Stack(
       clipBehavior: Clip.none,
       children: [
@@ -1094,14 +1044,14 @@ class _WispColorChip extends StatelessWidget {
               child: Container(
                 width: 18,
                 height: 18,
-                decoration: const BoxDecoration(
-                  color: BrandColors.ashGrey,
+                decoration: BoxDecoration(
+                  color: colorScheme.surfaceContainerHighest,
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.close,
                   size: 12,
-                  color: BrandColors.lampWhite,
+                  color: colorScheme.onSurface,
                 ),
               ),
             ),
@@ -1219,27 +1169,27 @@ class _PaintedLampsList extends ConsumerWidget {
     final palette = notifier.savedManualPalette;
     final inventoryAsync = ref.watch(inventoryNotifierProvider);
     return inventoryAsync.when(
-      loading: () => const Padding(
-        padding: EdgeInsets.symmetric(vertical: 12),
+      loading: () => Padding(
+        padding: const EdgeInsets.symmetric(vertical: AppSpace.md),
         child: Text(
           'Loading…',
-          style: TextStyle(color: BrandColors.fogGrey, fontSize: 12),
+          style: Theme.of(context).textTheme.bodySmall,
         ),
       ),
-      error: (_, _) => const Padding(
-        padding: EdgeInsets.symmetric(vertical: 12),
+      error: (_, _) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: AppSpace.md),
         child: Text(
           "Couldn't load inventory.",
-          style: TextStyle(color: BrandColors.fogGrey, fontSize: 12),
+          style: Theme.of(context).textTheme.bodySmall,
         ),
       ),
       data: (lamps) {
         if (lamps.isEmpty) {
-          return const Padding(
-            padding: EdgeInsets.symmetric(vertical: 12),
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppSpace.md),
             child: Text(
               "No lamps in your inventory yet.",
-              style: TextStyle(color: BrandColors.fogGrey, fontSize: 12),
+              style: Theme.of(context).textTheme.bodySmall,
             ),
           );
         }
@@ -1247,16 +1197,14 @@ class _PaintedLampsList extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
-              padding: const EdgeInsets.only(top: 4, bottom: 12),
+              padding: const EdgeInsets.only(top: 4, bottom: AppSpace.md),
               child: Text(
                 palette.isEmpty
                     ? "The wisp hasn't published a palette yet — once it "
                         "does, this will preview each lamp's two colors."
                     : "App-side preview from the wisp's published palette. "
                         "The physical lamps are the source of truth.",
-                style: const TextStyle(
-                  color: BrandColors.fogGrey,
-                  fontSize: 11,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   fontStyle: FontStyle.italic,
                 ),
               ),
@@ -1292,18 +1240,17 @@ class _PaintedLampRow extends StatelessWidget {
           Expanded(
             child: Text(
               lamp.name,
-              style: const TextStyle(
-                color: BrandColors.lampWhite,
-                fontSize: 14,
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                 fontWeight: FontWeight.w500,
+                fontSize: 14,
               ),
               overflow: TextOverflow.ellipsis,
             ),
           ),
           if (prediction == null)
-            const Text(
+            Text(
               '—',
-              style: TextStyle(color: BrandColors.fogGrey, fontSize: 12),
+              style: Theme.of(context).textTheme.bodySmall,
             )
           else ...[
             // Tooltip surfaces the hex code on long-press so color-blind

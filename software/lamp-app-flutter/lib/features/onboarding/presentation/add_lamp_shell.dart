@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/routing/routes.dart';
-import '../../../core/theme/brand_colors.dart';
+import '../../../core/theme/app_spacing.dart';
 import '../../control/presentation/widgets/connecting_view.dart';
 import '../application/add_lamp_notifier.dart';
 import '../domain/add_lamp_state.dart';
@@ -119,8 +119,9 @@ class _ProgressDots extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: AppSpace.sm),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: List.generate(5, (i) {
@@ -132,8 +133,8 @@ class _ProgressDots extends StatelessWidget {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(999),
               color: active
-                  ? BrandColors.glowPink
-                  : BrandColors.slateGrey.withValues(alpha: 0.5),
+                  ? colorScheme.primary
+                  : colorScheme.outline.withValues(alpha: 0.5),
             ),
           );
         }),

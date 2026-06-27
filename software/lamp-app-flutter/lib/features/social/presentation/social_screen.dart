@@ -3,9 +3,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/ble/ble_client_provider.dart';
-import '../../../core/theme/brand_colors.dart';
+import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/tap_counter.dart';
 import '../../../core/widgets/critter_icon.dart';
+import '../../../core/widgets/empty_state_pane.dart';
+import '../../../core/widgets/section_header.dart';
 import '../../control/application/advanced_session.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/presentation/widgets/disconnect_aware_body.dart';
@@ -50,7 +52,7 @@ class SocialScreen extends ConsumerWidget {
     }));
     if (!ctl.hasState) {
       return const Center(
-        child: CircularProgressIndicator(color: BrandColors.fogGrey),
+        child: CircularProgressIndicator(),
       );
     }
     final notifier = ref.read(controlNotifierProvider(lampId).notifier);
@@ -99,17 +101,15 @@ class SocialScreen extends ConsumerWidget {
       return a.name.toLowerCase().compareTo(b.name.toLowerCase());
     });
 
+    final colorScheme = Theme.of(context).colorScheme;
+
     return DisconnectAwareBody(
       lampId: lampId,
       child: ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+      padding: const EdgeInsets.fromLTRB(AppSpace.lg, AppSpace.lg, AppSpace.lg, AppSpace.xxl),
       children: [
-        const Text(
-          'Personality',
-          style: TextStyle(
-              color: BrandColors.lampWhite, fontSize: 14),
-        ),
-        const SizedBox(height: 8),
+        const SectionHeader('Personality'),
+        const SizedBox(height: AppSpace.sm),
         Row(
           children: [
             _PersonalityButton(
@@ -118,14 +118,14 @@ class SocialScreen extends ConsumerWidget {
               selected: mode == SocialMode.introvert,
               onTap: () => notifier.setLampSocialMode(SocialMode.introvert),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: AppSpace.sm),
             _PersonalityButton(
               label: 'Ambivert',
               icon: Icons.balance,
               selected: mode == SocialMode.ambivert,
               onTap: () => notifier.setLampSocialMode(SocialMode.ambivert),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: AppSpace.sm),
             _PersonalityButton(
               label: 'Extrovert',
               icon: Icons.celebration_outlined,
@@ -134,48 +134,40 @@ class SocialScreen extends ConsumerWidget {
             ),
           ],
         ),
-        const SizedBox(height: 16),
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 4),
+        const SizedBox(height: AppSpace.lg),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
           child: Text(
             'Lamps notice the company they keep. How this one greets, '
             'glows, and settles shifts a little with the lamps it meets — '
             'and with how it feels about each of them.',
-            style: TextStyle(
-              color: BrandColors.fogGrey,
-              fontSize: 12,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
               fontStyle: FontStyle.italic,
               height: 1.4,
             ),
           ),
         ),
-        const SizedBox(height: 16),
-        const Text(
-          'Nearby lamps',
-          style: TextStyle(color: BrandColors.lampWhite, fontSize: 14),
-        ),
+        const SizedBox(height: AppSpace.lg),
+        const SectionHeader('Nearby lamps'),
         const SizedBox(height: 4),
         if (!nearbyLoaded)
           const Padding(
-            padding: EdgeInsets.symmetric(vertical: 24),
+            padding: EdgeInsets.symmetric(vertical: AppSpace.xl),
             child: Center(
-              child: CircularProgressIndicator(
-                color: BrandColors.fogGrey,
-                strokeWidth: 2,
-              ),
+              child: CircularProgressIndicator(strokeWidth: 2),
             ),
           )
         else if (rows.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 24),
-            child: Center(
-              child: Text(
-                'No lamps nearby right now. Once others wander by, '
-                "they'll show up here.",
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    color: BrandColors.fogGrey, fontSize: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppSpace.xl),
+            child: EmptyStatePane(
+              icon: Icon(
+                Icons.sensors_off,
+                size: 40,
+                color: colorScheme.onSurfaceVariant,
               ),
+              title: 'No lamps nearby',
+              subtitle: "Once others wander by, they'll show up here.",
             ),
           )
         else
@@ -275,12 +267,15 @@ class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
     final disposition =
         (hasBdAddr && dispositionsLoaded) ? dispNotifier!.get(row.bdAddr) : 3;
 
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       curve: Curves.easeOut,
       decoration: BoxDecoration(
         color: _flashing
-            ? BrandColors.headerYellow.withValues(alpha: 0.25)
+            ? colorScheme.secondary.withValues(alpha: 0.25)
             : Colors.transparent,
         borderRadius: BorderRadius.circular(6),
       ),
@@ -307,11 +302,7 @@ class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
                   child: Text(
                     row.name,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: BrandColors.lampWhite,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: textTheme.titleMedium?.copyWith(fontSize: 14),
                   ),
                 ),
                 // Proximity bucket label is the user-visible signal. Raw dBm
@@ -320,11 +311,11 @@ class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
                 // two lines (name row + slider row) regardless of mode.
                 if (_advancedDbm(ref, lampId, row.rssi) case final dbm?)
                   Padding(
-                    padding: const EdgeInsets.only(right: 8),
+                    padding: const EdgeInsets.only(right: AppSpace.sm),
                     child: Text(
                       dbm,
-                      style: const TextStyle(
-                        color: BrandColors.headerYellow,
+                      style: textTheme.bodySmall?.copyWith(
+                        color: colorScheme.secondary,
                         fontSize: 10,
                         fontFamily: 'monospace',
                       ),
@@ -332,23 +323,17 @@ class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
                   ),
                 Text(
                   _proximityLabel(row.proximity),
-                  style: const TextStyle(
-                    color: BrandColors.fogGrey,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w400,
-                  ),
+                  style: textTheme.bodySmall,
                 ),
               ],
             ),
           ),
           if (!hasBdAddr)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 6),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
               child: Text(
                 'Waiting for peer info…',
-                style: TextStyle(
-                  color: BrandColors.fogGrey,
-                  fontSize: 12,
+                style: textTheme.bodySmall?.copyWith(
                   fontStyle: FontStyle.italic,
                 ),
               ),
@@ -371,7 +356,7 @@ class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
                         dispNotifier!.set(row.bdAddr, v.round()),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: AppSpace.sm),
                 // Single active-position label — deliberately breaks the
                 // usual "endpoint legend" pattern. Whimsical-by-design:
                 // the word changes as you drag and reveals the continuum
@@ -381,11 +366,7 @@ class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
                   child: Text(
                     _dispositionLabel(disposition),
                     textAlign: TextAlign.right,
-                    style: const TextStyle(
-                      color: BrandColors.lampWhite,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                    ),
+                    style: textTheme.titleMedium?.copyWith(fontSize: 13),
                   ),
                 ),
               ],
@@ -398,7 +379,7 @@ class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
 
 /// Big chunky pill — same visual style as `_TargetButton` in
 /// `add_expression_picker_screen.dart` (shade/base/both). Renders the
-/// active mode with a glowPink fill so it reads at a glance.
+/// active mode with a primary fill so it reads at a glance.
 class _PersonalityButton extends StatelessWidget {
   const _PersonalityButton({
     required this.label,
@@ -414,18 +395,18 @@ class _PersonalityButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fill = selected ? BrandColors.glowPink : Colors.transparent;
+    final colorScheme = Theme.of(context).colorScheme;
+    final fill = selected ? colorScheme.primary : Colors.transparent;
     final border = selected
-        ? BrandColors.glowPink
-        : BrandColors.slateGrey.withValues(alpha: 0.5);
-    final fg =
-        selected ? BrandColors.midnightBlack : BrandColors.lampWhite;
+        ? colorScheme.primary
+        : colorScheme.outline;
+    final fg = selected ? colorScheme.onPrimary : colorScheme.onSurface;
     return Expanded(
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppRadius.card),
           child: Container(
             height: 72,
             decoration: BoxDecoration(
@@ -434,7 +415,7 @@ class _PersonalityButton extends StatelessWidget {
                 color: border,
                 width: selected ? 2 : 1,
               ),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(AppRadius.card),
             ),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,

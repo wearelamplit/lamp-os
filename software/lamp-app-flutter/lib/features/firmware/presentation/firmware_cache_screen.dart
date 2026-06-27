@@ -6,7 +6,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/brand_colors.dart';
+import '../../../core/theme/app_spacing.dart';
 import '../application/cached_firmware_notifier.dart';
 import '../data/cached_firmware.dart';
 
@@ -16,22 +16,20 @@ class FirmwareCacheScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final asyncCache = ref.watch(cachedFirmwareNotifierProvider);
+    final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: BrandColors.midnightBlack,
       appBar: AppBar(
         title: const Text('Cached firmwares'),
-        backgroundColor: BrandColors.midnightBlack,
-        foregroundColor: BrandColors.lampWhite,
       ),
       body: asyncCache.when(
         loading: () =>
             const Center(child: CircularProgressIndicator(strokeWidth: 2)),
         error: (e, _) => Center(
           child: Padding(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(AppSpace.xxl),
             child: Text(
               'Cache index could not be loaded: $e',
-              style: const TextStyle(color: BrandColors.fogGrey),
+              style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
         ),
@@ -39,21 +37,21 @@ class FirmwareCacheScreen extends ConsumerWidget {
           final entries = cache.values.toList()
             ..sort((a, b) => a.key.compareTo(b.key));
           if (entries.isEmpty) {
-            return const Padding(
-              padding: EdgeInsets.all(24),
+            return Padding(
+              padding: const EdgeInsets.all(AppSpace.xxl),
               child: Text(
                 'No firmware binaries cached yet. The app fetches one per '
                 'lamp variant + channel you own; sync runs in the '
                 'background when you adopt a lamp or open the app online.',
-                style: TextStyle(color: BrandColors.fogGrey, fontSize: 13),
+                style: Theme.of(context).textTheme.bodyMedium,
               ),
             );
           }
           return ListView.separated(
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
             itemCount: entries.length,
-            separatorBuilder: (_, _) => const Divider(
-              color: BrandColors.midnightBlack,
+            separatorBuilder: (_, _) => Divider(
+              color: colorScheme.outline,
               height: 1,
             ),
             itemBuilder: (context, i) => _CacheRow(entry: entries[i]),
@@ -86,22 +84,20 @@ class _CacheRow extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final textTheme = Theme.of(context).textTheme;
+    final colorScheme = Theme.of(context).colorScheme;
     return ListTile(
       title: Text(
         '${entry.lampType} · ${entry.channel.name}',
-        style: const TextStyle(
-          color: BrandColors.lampWhite,
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-        ),
+        style: textTheme.titleMedium,
       ),
       subtitle: Text(
         'v${entry.versionString} · ${_formatSize(entry.byteLength)} · '
         'fetched ${_formatAge(entry.fetchedAtMs)}',
-        style: const TextStyle(color: BrandColors.slateGrey, fontSize: 12),
+        style: textTheme.bodySmall,
       ),
       trailing: IconButton(
-        icon: const Icon(Icons.delete_outline, color: BrandColors.slateGrey),
+        icon: Icon(Icons.delete_outline, color: colorScheme.onSurfaceVariant),
         tooltip: 'Remove from cache',
         onPressed: () => ref
             .read(cachedFirmwareNotifierProvider.notifier)

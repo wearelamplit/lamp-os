@@ -15,7 +15,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/brand_colors.dart';
+import '../../../core/theme/brand_extras.dart';
 import '../../../core/widgets/info_panel.dart';
 import '../../inventory/application/inventory_notifier.dart';
 import '../application/firmware_notifier.dart';
@@ -115,12 +115,12 @@ class _IdleView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        const Icon(Icons.system_update_alt, color: BrandColors.fogGrey),
+        Icon(Icons.system_update_alt, color: Theme.of(context).colorScheme.onSurfaceVariant),
         const SizedBox(width: 12),
-        const Expanded(
+        Expanded(
           child: Text(
             'Check for new firmware',
-            style: TextStyle(color: BrandColors.lampWhite),
+            style: Theme.of(context).textTheme.bodyLarge,
           ),
         ),
         TextButton(
@@ -148,7 +148,7 @@ class _BusyView extends StatelessWidget {
         Expanded(
           child: Text(
             label,
-            style: const TextStyle(color: BrandColors.lampWhite),
+            style: Theme.of(context).textTheme.bodyLarge,
           ),
         ),
       ],
@@ -178,15 +178,12 @@ class _ReadyView extends StatelessWidget {
       children: [
         Text(
           'Update available: v$versionString ($channel)',
-          style: const TextStyle(
-            color: BrandColors.lampWhite,
-            fontWeight: FontWeight.w600,
-          ),
+          style: Theme.of(context).textTheme.titleMedium,
         ),
         const SizedBox(height: 4),
         Text(
           'Signed image $mb MB. Push will take ~30 seconds.',
-          style: const TextStyle(color: BrandColors.fogGrey, fontSize: 12),
+          style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(height: 12),
         Row(
@@ -225,10 +222,7 @@ class _StreamingView extends StatelessWidget {
             Expanded(
               child: Text(
                 'Installing… $pct%',
-                style: const TextStyle(
-                  color: BrandColors.lampWhite,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: Theme.of(context).textTheme.titleMedium,
               ),
             ),
             TextButton(onPressed: onCancel, child: const Text('Cancel')),
@@ -239,7 +233,7 @@ class _StreamingView extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           '$chunksSent / $totalChunks chunks',
-          style: const TextStyle(color: BrandColors.fogGrey, fontSize: 12),
+          style: Theme.of(context).textTheme.bodySmall,
         ),
       ],
     );
@@ -255,12 +249,12 @@ class _SucceededView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        const Icon(Icons.check_circle, color: BrandColors.auroraBlue),
+        Icon(Icons.check_circle, color: context.brandExtras.success),
         const SizedBox(width: 12),
         Expanded(
           child: Text(
             'Installed v$versionString. The lamp is rebooting.',
-            style: const TextStyle(color: BrandColors.lampWhite),
+            style: Theme.of(context).textTheme.bodyLarge,
           ),
         ),
         TextButton(onPressed: onDismiss, child: const Text('OK')),
@@ -278,12 +272,12 @@ class _FailedView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        const Icon(Icons.error_outline, color: BrandColors.headerYellow),
+        Icon(Icons.error_outline, color: Theme.of(context).colorScheme.secondary),
         const SizedBox(width: 12),
         Expanded(
           child: Text(
             reason,
-            style: const TextStyle(color: BrandColors.lampWhite),
+            style: Theme.of(context).textTheme.bodyLarge,
           ),
         ),
         TextButton(onPressed: onRetry, child: const Text('Dismiss')),

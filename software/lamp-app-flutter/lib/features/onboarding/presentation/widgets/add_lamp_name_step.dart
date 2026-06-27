@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/theme/brand_colors.dart';
+import '../../../../core/theme/app_spacing.dart';
 import '../../application/add_lamp_notifier.dart';
 
 class AddLampNameStep extends ConsumerStatefulWidget {
@@ -26,8 +26,9 @@ class _AddLampNameStepState extends ConsumerState<AddLampNameStep> {
   Widget build(BuildContext context) {
     final notifier = ref.read(addLampNotifierProvider.notifier);
     final state = ref.watch(addLampNotifierProvider);
+    final textTheme = Theme.of(context).textTheme;
     return Padding(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(AppSpace.xl),
       // SizedBox.expand fills the Padding's width so `crossAxisAlignment
       // .center` lands the heading at screen-center (a bare Column shrinks
       // to its widest child and pins to the left edge of the Padding).
@@ -36,22 +37,18 @@ class _AddLampNameStepState extends ConsumerState<AddLampNameStep> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-          const Text(
+          Text(
             'What will you call them?',
             textAlign: TextAlign.center,
-            style: TextStyle(
-              color: BrandColors.lampWhite,
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-            ),
+            style: textTheme.headlineSmall,
           ),
           const SizedBox(height: 6),
-          const Text(
+          Text(
             "Every lamp deserves a name. They'll wear it proudly.",
             textAlign: TextAlign.center,
-            style: TextStyle(color: BrandColors.fogGrey, fontSize: 13),
+            style: textTheme.bodyMedium,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: AppSpace.lg),
           TextField(
             controller: _controller,
             autofocus: true,

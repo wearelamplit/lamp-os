@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/theme/brand_colors.dart';
+import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/widgets/friendly_error.dart';
 import '../../application/add_lamp_notifier.dart';
 import '../../domain/add_lamp_state.dart';
@@ -20,13 +20,11 @@ Future<void> _confirmSkip(BuildContext context, AddLampNotifier notifier) async 
   final ok = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
-      title: const Text('Adopt without a password?',
-          style: TextStyle(color: BrandColors.lampWhite)),
+      title: const Text('Adopt without a password?'),
       content: const Text(
         "Anyone within Bluetooth range will be able to play with this lamp. "
         "You can set a password later from the Setup tab — but it's safer to "
         'pick one now.',
-        style: TextStyle(color: BrandColors.fogGrey),
       ),
       actions: [
         TextButton(
@@ -34,8 +32,6 @@ Future<void> _confirmSkip(BuildContext context, AddLampNotifier notifier) async 
           child: const Text('Pick one'),
         ),
         FilledButton(
-          style: FilledButton.styleFrom(
-              backgroundColor: BrandColors.slateGrey),
           onPressed: () => Navigator.of(ctx).pop(true),
           child: const Text('Skip anyway'),
         ),
@@ -64,13 +60,15 @@ class _AddLampPasswordStepState extends ConsumerState<AddLampPasswordStep> {
   Widget build(BuildContext context) {
     final notifier = ref.read(addLampNotifierProvider.notifier);
     final state = ref.watch(addLampNotifierProvider);
+    final textTheme = Theme.of(context).textTheme;
+    final colorScheme = Theme.of(context).colorScheme;
     final showMismatch =
         _confirm.text.isNotEmpty && _confirm.text != state.password;
     final canContinue = state.password.isNotEmpty &&
         _confirm.text == state.password;
     final isVerifying = state.step == AddLampStep.verifying;
     return Padding(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(AppSpace.xl),
       // SizedBox.expand fills the Padding's width so `crossAxisAlignment
       // .center` lands the heading at screen-center (a bare Column shrinks
       // to its widest child and pins to the left edge of the Padding).
@@ -79,30 +77,26 @@ class _AddLampPasswordStepState extends ConsumerState<AddLampPasswordStep> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-          const Text(
+          Text(
             'Set a password',
             textAlign: TextAlign.center,
-            style: TextStyle(
-              color: BrandColors.lampWhite,
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-            ),
+            style: textTheme.headlineSmall,
           ),
-          const SizedBox(height: 8),
-          const Text(
+          const SizedBox(height: AppSpace.sm),
+          Text(
             "Only phones with this password will be able to control this lamp.",
             textAlign: TextAlign.center,
-            style: TextStyle(color: BrandColors.fogGrey),
+            style: textTheme.bodyMedium,
           ),
           if (state.error == AddLampError.wrongPassword) ...[
-            const SizedBox(height: 8),
-            const Text(
+            const SizedBox(height: AppSpace.sm),
+            Text(
               "That password didn't match — try once more.",
-              style: TextStyle(color: BrandColors.error),
+              style: textTheme.bodyMedium?.copyWith(color: colorScheme.error),
               textAlign: TextAlign.center,
             ),
           ],
-          const SizedBox(height: 16),
+          const SizedBox(height: AppSpace.lg),
           TextField(
             controller: _pwd,
             autofocus: true,
@@ -116,7 +110,7 @@ class _AddLampPasswordStepState extends ConsumerState<AddLampPasswordStep> {
               border: OutlineInputBorder(),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpace.md),
           TextField(
             controller: _confirm,
             obscureText: true,
@@ -130,12 +124,12 @@ class _AddLampPasswordStepState extends ConsumerState<AddLampPasswordStep> {
           const Spacer(),
           if (isVerifying) ...[
             const _VerifyingTips(),
-            const SizedBox(height: 16),
+            const SizedBox(height: AppSpace.lg),
           ],
           if (state.status == AddLampStatus.error &&
               state.error != AddLampError.wrongPassword)
             Padding(
-              padding: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.only(bottom: AppSpace.md),
               child: FriendlyError.inline(
                 title: state.error == AddLampError.connectFailed
                     ? "Your lamp drifted off — bring your phone closer "
@@ -159,10 +153,10 @@ class _AddLampPasswordStepState extends ConsumerState<AddLampPasswordStep> {
                     ? () => _confirmSkip(context, notifier)
                     : null,
                 style: TextButton.styleFrom(
-                    foregroundColor: BrandColors.slateGrey),
+                    foregroundColor: colorScheme.onSurfaceVariant),
                 child: const Text('Skip'),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: AppSpace.sm),
               FilledButton(
                 onPressed: (canContinue &&
                         state.status != AddLampStatus.working &&
@@ -178,7 +172,7 @@ class _AddLampPasswordStepState extends ConsumerState<AddLampPasswordStep> {
                             height: 16,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           ),
-                          SizedBox(width: 8),
+                          SizedBox(width: AppSpace.sm),
                           Text('Settling in…'),
                         ],
                       )
@@ -235,13 +229,11 @@ class _VerifyingTipsState extends State<_VerifyingTips> {
       duration: const Duration(milliseconds: 350),
       child: Padding(
         key: ValueKey(_i),
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpace.lg),
         child: Text(
           _tips[_i],
           textAlign: TextAlign.center,
-          style: const TextStyle(
-            color: BrandColors.fogGrey,
-            fontSize: 13,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
             letterSpacing: 0.3,
             height: 1.4,
           ),

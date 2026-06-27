@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/brand_colors.dart';
 import '../../../core/widgets/back_button_leading.dart';
+import '../../../core/widgets/lamp_card.dart';
 import '../application/nearby_lamps_notifier.dart';
 
 class NearbyLampsScreen extends ConsumerWidget {
@@ -11,33 +13,27 @@ class NearbyLampsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final lamps = ref.watch(nearbyLampsNotifierProvider);
+    final textTheme = Theme.of(context).textTheme;
     return Scaffold(
       appBar: AppBar(
         leading: const BackButtonLeading(),
         title: const Text('Nearby lamps (debug)'),
       ),
       body: lamps.isEmpty
-          ? const Center(
+          ? Center(
               child: Text(
                 'Scanning...',
-                style: TextStyle(color: BrandColors.fogGrey),
+                style: textTheme.bodyMedium,
               ),
             )
           : ListView.separated(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppSpace.lg),
               itemCount: lamps.length,
-              separatorBuilder: (_, index) => const SizedBox(height: 8),
+              separatorBuilder: (_, index) => const SizedBox(height: AppSpace.sm),
               itemBuilder: (context, i) {
                 final l = lamps[i];
-                return Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.04),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.06),
-                    ),
-                  ),
+                return LampCard(
+                  padding: const EdgeInsets.all(AppSpace.md),
                   child: Row(
                     children: [
                       Expanded(
@@ -46,17 +42,13 @@ class NearbyLampsScreen extends ConsumerWidget {
                           children: [
                             Text(
                               l.name.isEmpty ? '(unnamed)' : l.name,
-                              style: const TextStyle(
-                                color: BrandColors.lampWhite,
-                                fontWeight: FontWeight.w600,
-                              ),
+                              style: textTheme.titleMedium,
                             ),
                             Text(
                               '${l.id} · ${l.rssi} dBm',
-                              style: const TextStyle(
-                                color: BrandColors.slateGrey,
-                                fontSize: 11,
+                              style: textTheme.bodySmall?.copyWith(
                                 fontFamily: 'monospace',
+                                fontSize: 11,
                               ),
                             ),
                           ],
@@ -69,7 +61,7 @@ class NearbyLampsScreen extends ConsumerWidget {
                         excludeSemantics: true,
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
+                            horizontal: AppSpace.sm,
                             vertical: 4,
                           ),
                           decoration: BoxDecoration(
