@@ -31,8 +31,11 @@ Future<void> _confirmSkip(BuildContext context, AddLampNotifier notifier) async 
           onPressed: () => Navigator.of(ctx).pop(false),
           child: const Text('Pick one'),
         ),
-        FilledButton(
+        TextButton(
           onPressed: () => Navigator.of(ctx).pop(true),
+          style: TextButton.styleFrom(
+            foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
           child: const Text('Skip anyway'),
         ),
       ],

@@ -26,7 +26,7 @@ class FirmwareCacheScreen extends ConsumerWidget {
             const Center(child: CircularProgressIndicator(strokeWidth: 2)),
         error: (e, _) => Center(
           child: Padding(
-            padding: const EdgeInsets.all(AppSpace.xxl),
+            padding: const EdgeInsets.all(AppSpace.xl),
             child: Text(
               'Cache index could not be loaded: $e',
               style: Theme.of(context).textTheme.bodySmall,
@@ -38,7 +38,7 @@ class FirmwareCacheScreen extends ConsumerWidget {
             ..sort((a, b) => a.key.compareTo(b.key));
           if (entries.isEmpty) {
             return Padding(
-              padding: const EdgeInsets.all(AppSpace.xxl),
+              padding: const EdgeInsets.all(AppSpace.xl),
               child: Text(
                 'No firmware binaries cached yet. The app fetches one per '
                 'lamp variant + channel you own; sync runs in the '
