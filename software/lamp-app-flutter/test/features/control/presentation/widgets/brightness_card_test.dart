@@ -1,8 +1,11 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import '../../../../_support/in_memory_ble_client.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
+import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/core/theme/app_theme.dart';
 import 'package:lamp_app/core/widgets/lamp_card.dart';
 import 'package:lamp_app/features/control/application/control_notifier.dart';
@@ -56,21 +59,28 @@ void main() {
     expect(find.byType(Slider), findsOneWidget);
   });
 
-  testWidgets('drag updates state via onChanged and onChangeEnd',
+  testWidgets('drag commits the released brightness value on release',
       (tester) async {
     final c = await _buildContainer(brightness: 50);
     addTearDown(c.dispose);
     await tester.pumpWidget(_wrap(c));
     await tester.pumpAndSettle();
 
-    final slider = find.byType(Slider);
-    await tester.drag(slider, const Offset(50, 0));
-    // Pump past the 500ms commit debounce so no pending timers remain.
+    // Drag far right — clamps deterministically to max value 100.
+    await tester.drag(find.byType(Slider), const Offset(10000, 0));
+    // Pump past the 500ms commit debounce.
     await tester.pump(const Duration(milliseconds: 600));
 
-    // onChanged fires during drag → state diverges from initial 50
+    // State reflects the exact released value.
     final brightness =
         c.read(controlNotifierProvider(_devId)).value!.lamp.brightness;
-    expect(brightness, isNot(50));
+    expect(brightness, equals(100));
+
+    // CHAR_COMMIT was written exactly once — proves scheduleBrightnessCommit
+    // fired on release. A broken onChangeEnd path would leave this empty.
+    final ble = c.read(bleClientProvider) as InMemoryBleClient;
+    final commits = ble.writesTo(_devId, BleUuids.commit);
+    expect(commits, hasLength(1));
+    expect(commits.first, equals(Uint8List.fromList([0x01])));
   });
 }
