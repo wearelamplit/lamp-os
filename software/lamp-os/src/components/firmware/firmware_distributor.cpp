@@ -71,6 +71,33 @@ void FirmwareDistributor::begin(FirmwareTransport* transport) {
   transport_->getMyMac(cachedSrcMac_);
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
+  if (fsHooks_) {
+    // FS: stream the spiffs partition; fixed length + manifest digest prefix
+    // (no LSIG footer to scan; mkspiffs pads the image to the partition size,
+    // and a raw-partition SHA differs per lamp so the digest comes from
+    // fw.lsig via the hook).
+    runningPartition_ =
+        static_cast<const esp_partition_t*>(fsHooks_->partition());
+    if (!runningPartition_) {
+      state_ = State::Disabled;
+      FWDIST_LOGLN("[fsdist] disabled (no spiffs partition)");
+      return;
+    }
+    if (!fsHooks_->lengthAndDigest(&firmwareTotalLen_, sha256Prefix_)) {
+      state_ = State::Disabled;
+      FWDIST_LOGLN("[fsdist] disabled (length/digest)");
+      return;
+    }
+    shaPrefixReady_ = true;
+    firmwareTotalChunks_ = static_cast<uint16_t>(
+        (firmwareTotalLen_ + lamp_protocol::FW_CHUNK_SIZE - 1) /
+        lamp_protocol::FW_CHUNK_SIZE);
+    if (firmwareTotalChunks_ == 0) {
+      state_ = State::Disabled;
+      FWDIST_LOGLN("[fsdist] disabled (empty fs image)");
+      return;
+    }
+  } else {
   runningPartition_ = esp_ota_get_running_partition();
   if (!runningPartition_) {
     state_ = State::Disabled;
@@ -114,6 +141,7 @@ void FirmwareDistributor::begin(FirmwareTransport* transport) {
     FWDIST_LOGLN("[fwdist] disabled (sha256 prefix compute failed)");
     return;
   }
+  }  // else: firmware distribution
 #else
   // Native test path — leave the partition/sha state at construction
   // defaults; the test harness is expected to bypass begin() or stub
@@ -460,7 +488,8 @@ int FirmwareDistributor::streamOneChunk(uint32_t nowMs) {
       buf, sizeof(buf), seq,
       cachedSrcMac_, targetMacLocal,
       chunkIdx, offset, scratch, static_cast<uint16_t>(want),
-      targetProtocolVersion_);
+      targetProtocolVersion_,
+      fsHooks_ ? fsHooks_->chunkType : lamp_protocol::MSG_FW_CHUNK);
   if (!framed) return 1;
 
   // Send OUTSIDE the mux. The transport's sendFrame queues to the ESP-NOW
@@ -781,7 +810,12 @@ void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
     return;
   }
 #endif
-  if (peerVersion >= lamp::FIRMWARE_VERSION) return;
+  // Peer-stale gate. Firmware: skip peers already at/above our version. FS:
+  // fs_ota pre-decides staleness (peer at our firmware version with a
+  // different FS digest) before calling, so the distributor does not re-apply
+  // the version gate — the FS image's version equals our firmware version, so
+  // a `>=` test would reject every eligible peer.
+  if (!fsHooks_ && peerVersion >= lamp::FIRMWARE_VERSION) return;
   // Type/channel gate: when we know the peer's {type}-{channel} (from its
   // HELLO_TLV_FW_CHANNEL) and it differs from ours, don't OFFER — a snafu
   // lamp can't run a standard image and channels must not cross. An unknown
@@ -1017,7 +1051,8 @@ bool FirmwareDistributor::sendOfferFrame(const uint8_t targetMac[6],
       sessionVersionLocal, sessionTotalLenLocal, lamp_protocol::FW_CHUNK_SIZE,
       channel, channelLen,
       sha, kFwFooterLenV1, totalChunksLocal,
-      targetProtocolVersion_);
+      targetProtocolVersion_,
+      fsHooks_ ? fsHooks_->offerType : lamp_protocol::MSG_FW_OFFER);
   if (!n) {
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
     FWDIST_LOGLN("[fwdist] buildFwOffer failed (defensive)");
@@ -1084,7 +1119,8 @@ void FirmwareDistributor::emitDone(uint32_t nowMs) {
       buf, sizeof(buf), seq,
       cachedSrcMac_, targetMacLocal,
       sessionVersionLocal, sessionTotalLenLocal,
-      sha, kFwFooterLenV1, targetProtocolVersion_);
+      sha, kFwFooterLenV1, targetProtocolVersion_,
+      fsHooks_ ? fsHooks_->doneType : lamp_protocol::MSG_FW_DONE);
   if (!n) return;
 
   // First attempt + up to kMaxDoneRetries follow-ups. Bail early if the
