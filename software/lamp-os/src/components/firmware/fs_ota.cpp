@@ -36,6 +36,11 @@ lamp::FirmwareDistributor* s_fwDist = nullptr;
 const esp_partition_t* s_spiffsPart   = nullptr;
 uint8_t                s_localDigest[32] = {0};
 bool                   s_localDigestReady = false;
+// Version stamped in our fw.lsig. Distribution self-gate: we only OFFER our FS
+// image when this equals our running firmware version (a firmware-OTA'd lamp
+// whose SPIFFS is still the stale older image must NOT push it back, or it
+// corrupts the seed before the receiver's verify can reject it).
+uint32_t               s_localFsVersion = 0;
 
 // --- SPIFFS manifest enumeration ------------------------------------------
 
@@ -86,11 +91,19 @@ bool enumerateManifest(std::vector<std::vector<uint8_t>>& contents,
 
 void computeLocalDigest() {
   s_localDigestReady = false;
+  s_localFsVersion = 0;
   if (!SPIFFS.begin(/*formatOnFail=*/false)) return;
   std::vector<std::vector<uint8_t>> contents;
   std::vector<lamp::firmware::FsManifestFile> files;
   std::vector<uint8_t> lsig;
   if (!enumerateManifest(contents, files, lsig)) return;
+  if (lsig.size() == lamp::firmware::kFsSigLen) {
+    const uint8_t* v = lsig.data() + lamp::firmware::kFsSigVersionOffset;
+    s_localFsVersion = static_cast<uint32_t>(v[0]) |
+                       (static_cast<uint32_t>(v[1]) << 8) |
+                       (static_cast<uint32_t>(v[2]) << 16) |
+                       (static_cast<uint32_t>(v[3]) << 24);
+  }
   if (lamp::firmware::computeFsManifestDigest(files, s_localDigest)) {
     s_localDigestReady = true;
   }
@@ -237,6 +250,12 @@ void considerPeer(const uint8_t peerMac[6], uint32_t peerFwVersion,
                   const char* peerFwChannel, const uint8_t* peerFsDigest,
                   bool peerHasFsDigest) {
   if (!peerHasFsDigest || !s_localDigestReady) return;
+  // Self-version gate: only distribute an FS image that matches our running
+  // firmware. A lamp firmware-OTA'd to vN whose SPIFFS is still the stale vN-1
+  // image must not push it (the OFFER advertises the firmware version, so a
+  // peer can't tell the content is stale until verify — by which point it has
+  // already overwritten its good image). Keeps FS distribution directional.
+  if (s_localFsVersion != lamp::FIRMWARE_VERSION) return;
   // Version coupling: the peer must be running our firmware version.
   if (peerFwVersion != lamp::FIRMWARE_VERSION) return;
   // Peer already has our exact image → nothing to send.
