@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/brand_colors.dart';
+import 'friendly_error.dart';
 
 /// Generic password-prompt dialog. Returns the entered password on
 /// confirm, or `null` if the user cancels (or pops the dialog).
@@ -10,9 +11,12 @@ import '../theme/brand_colors.dart';
 /// button + submit-on-enter wiring every time. Pure UI — the caller owns
 /// what to do with the result (e.g. ship it as a wispOp arg).
 ///
-/// Distinct from [ConnectPasswordPrompt] which is BLE-auth-specific and
-/// owns its own busy/error state tied to controlNotifier. This dialog is
-/// stateless from the caller's POV: it just asks for a string.
+/// When [onSubmit] is provided the dialog drives an async operation:
+/// the callback receives the typed password and should return `null` on
+/// success (dialog pops, returning the password to the caller) or a
+/// `(errorMessage, rawError)` record to show an inline error and keep
+/// the dialog open. Buttons and field are disabled while the call is
+/// in flight.
 Future<String?> showPasswordPromptDialog(
   BuildContext context, {
   required String title,
@@ -20,16 +24,22 @@ Future<String?> showPasswordPromptDialog(
   String? initialValue,
   String confirmLabel = 'Save',
   String cancelLabel = 'Cancel',
+  bool barrierDismissible = true,
+  /// Called on submit. Return null on success (dialog pops).
+  /// Return `(errorMessage, rawError)` to show an inline error and
+  /// keep the dialog open. rawError may be null.
+  Future<(String, Object?)?> Function(String pw)? onSubmit,
 }) {
   return showDialog<String>(
     context: context,
-    barrierDismissible: true,
+    barrierDismissible: barrierDismissible,
     builder: (ctx) => _PasswordPromptDialog(
       title: title,
       subtitle: subtitle,
       initialValue: initialValue,
       confirmLabel: confirmLabel,
       cancelLabel: cancelLabel,
+      onSubmit: onSubmit,
     ),
   );
 }
@@ -41,6 +51,7 @@ class _PasswordPromptDialog extends StatefulWidget {
     this.initialValue,
     required this.confirmLabel,
     required this.cancelLabel,
+    this.onSubmit,
   });
 
   final String title;
@@ -48,6 +59,7 @@ class _PasswordPromptDialog extends StatefulWidget {
   final String? initialValue;
   final String confirmLabel;
   final String cancelLabel;
+  final Future<(String, Object?)?> Function(String pw)? onSubmit;
 
   @override
   State<_PasswordPromptDialog> createState() => _PasswordPromptDialogState();
@@ -57,6 +69,9 @@ class _PasswordPromptDialogState extends State<_PasswordPromptDialog> {
   late final TextEditingController _ctrl =
       TextEditingController(text: widget.initialValue ?? '');
   bool _obscured = true;
+  bool _busy = false;
+  String? _errorMsg;
+  Object? _rawError;
 
   @override
   void dispose() {
@@ -64,10 +79,29 @@ class _PasswordPromptDialogState extends State<_PasswordPromptDialog> {
     super.dispose();
   }
 
-  void _confirm() {
+  Future<void> _confirm() async {
     final value = _ctrl.text;
-    if (value.isEmpty) return;
-    Navigator.of(context).pop(value);
+    if (value.isEmpty || _busy) return;
+    if (widget.onSubmit == null) {
+      Navigator.of(context).pop(value);
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _errorMsg = null;
+      _rawError = null;
+    });
+    final result = await widget.onSubmit!(value);
+    if (!mounted) return;
+    if (result == null) {
+      Navigator.of(context).pop(value);
+    } else {
+      setState(() {
+        _busy = false;
+        _errorMsg = result.$1;
+        _rawError = result.$2;
+      });
+    }
   }
 
   void _cancel() => Navigator.of(context).pop();
@@ -101,6 +135,7 @@ class _PasswordPromptDialogState extends State<_PasswordPromptDialog> {
             obscureText: _obscured,
             autocorrect: false,
             enableSuggestions: false,
+            enabled: !_busy,
             onSubmitted: (_) => _confirm(),
             decoration: InputDecoration(
               labelText: 'Password',
@@ -115,17 +150,24 @@ class _PasswordPromptDialogState extends State<_PasswordPromptDialog> {
             ),
             style: const TextStyle(color: BrandColors.lampWhite),
           ),
+          if (_errorMsg != null) ...[
+            const SizedBox(height: 12),
+            FriendlyError.inline(
+              title: _errorMsg!,
+              rawError: _rawError,
+            ),
+          ],
         ],
       ),
       actions: [
         TextButton(
           key: const Key('password-prompt-cancel'),
-          onPressed: _cancel,
+          onPressed: _busy ? null : _cancel,
           child: Text(widget.cancelLabel),
         ),
         FilledButton(
           key: const Key('password-prompt-confirm'),
-          onPressed: _confirm,
+          onPressed: _busy ? null : _confirm,
           child: Text(widget.confirmLabel),
         ),
       ],

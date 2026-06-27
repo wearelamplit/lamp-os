@@ -103,7 +103,14 @@ class _SetupBody extends ConsumerWidget {
           icon: Icons.lock_outline,
           title: 'Password',
           subtitle: 'Tap to change',
-          onTap: () => _showPasswordDialog(context, lampId, n.setLampPassword),
+          onTap: () async {
+            final pw = await showPasswordPromptDialog(
+              context,
+              title: 'Change password',
+              confirmLabel: 'Save',
+            );
+            if (pw != null) n.setLampPassword(pw);
+          },
         ),
         const SettingsGroupHeading('Connectivity'),
         SettingsRow(
@@ -238,80 +245,6 @@ class _RenameDialogState extends State<_RenameDialog> {
         FilledButton(
           onPressed: () {
             widget.onSave(_ctrl.text.trim());
-            Navigator.of(context).pop();
-          },
-          child: const Text('Save'),
-        ),
-      ],
-    );
-  }
-}
-
-/// Password change modal — same shape as the rename dialog, but the field
-/// is obscured by default with an eye-toggle reveal. No old-password
-/// confirmation: the user is already authenticated for this BLE session,
-/// that's the gate. Empty passwords are rejected by the firmware path the
-/// same way they would be at onboarding, so we guard for non-empty here.
-Future<void> _showPasswordDialog(
-  BuildContext context,
-  String lampId,
-  Future<void> Function(String) onSave,
-) =>
-    showDialog<void>(
-      context: context,
-      builder: (_) => _PasswordDialog(onSave: onSave),
-    );
-
-class _PasswordDialog extends StatefulWidget {
-  const _PasswordDialog({required this.onSave});
-  final Future<void> Function(String) onSave;
-
-  @override
-  State<_PasswordDialog> createState() => _PasswordDialogState();
-}
-
-class _PasswordDialogState extends State<_PasswordDialog> {
-  final _ctrl = TextEditingController();
-  bool _obscured = true;
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: BrandColors.midnightBlack,
-      title: const Text('Change password',
-          style: TextStyle(color: BrandColors.lampWhite)),
-      content: TextField(
-        controller: _ctrl,
-        autofocus: true,
-        obscureText: _obscured,
-        decoration: InputDecoration(
-          labelText: 'New password',
-          suffixIcon: IconButton(
-            icon: Icon(_obscured ? Icons.visibility : Icons.visibility_off),
-            onPressed: () => setState(() => _obscured = !_obscured),
-          ),
-        ),
-        style: const TextStyle(color: BrandColors.lampWhite),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () {
-            final pw = _ctrl.text;
-            if (pw.isEmpty) return;
-            // Fire-and-forget — setLampPassword drives lampSaveStatus, so
-            // the user sees the "Saving changes…" overlay while the lamp
-            // reboots and reconnects.
-            widget.onSave(pw);
             Navigator.of(context).pop();
           },
           child: const Text('Save'),

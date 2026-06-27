@@ -92,4 +92,56 @@ void main() {
     expect(find.byKey(const Key('password-prompt-field')), findsOneWidget);
     expect(resolved, isFalse);
   });
+
+  testWidgets('onSubmit: shows error inline on failure, pops on success',
+      (tester) async {
+    String? captured;
+    int callCount = 0;
+
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(builder: (ctx) {
+        return TextButton(
+          onPressed: () async {
+            final v = await showPasswordPromptDialog(
+              ctx,
+              title: 'Auth',
+              confirmLabel: 'Connect',
+              onSubmit: (pw) async {
+                callCount++;
+                if (pw == 'wrong') return ('Bad password', null);
+                return null; // success
+              },
+            );
+            captured = v;
+          },
+          child: const Text('open'),
+        );
+      }),
+    ));
+
+    await tester.tap(find.text('open'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+
+    // First attempt: wrong password → error shown, dialog stays open.
+    await tester.enterText(
+        find.byKey(const Key('password-prompt-field')), 'wrong');
+    await tester.tap(find.byKey(const Key('password-prompt-confirm')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+
+    expect(find.text('Bad password'), findsOneWidget);
+    expect(find.byKey(const Key('password-prompt-field')), findsOneWidget);
+    expect(captured, isNull); // not resolved yet
+
+    // Second attempt: correct password → dialog closes.
+    await tester.enterText(
+        find.byKey(const Key('password-prompt-field')), 'correct');
+    await tester.tap(find.byKey(const Key('password-prompt-confirm')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('password-prompt-field')), findsNothing);
+    expect(captured, 'correct');
+    expect(callCount, 2);
+  });
 }
