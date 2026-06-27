@@ -5,7 +5,7 @@ import 'core/ble/ble_permissions.dart';
 import 'core/lifecycle/app_lifecycle.dart';
 import 'core/routing/router.dart';
 import 'core/theme/app_theme.dart';
-import 'core/theme/brand_colors.dart';
+import 'core/theme/brand.dart';
 
 class LampApp extends ConsumerStatefulWidget {
   const LampApp({super.key, BlePermissions? permissions})
@@ -114,7 +114,9 @@ class _LampAppState extends ConsumerState<LampApp>
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'LampOS',
-      theme: AppTheme.dark(),
+      theme: appTheme,
+      darkTheme: appTheme,
+      themeMode: ThemeMode.dark,
       debugShowCheckedModeBanner: false,
       home: FutureBuilder<bool>(
         future: _granted,
@@ -133,7 +135,7 @@ class _LampAppState extends ConsumerState<LampApp>
                     const Text(
                       'Bluetooth permission needed',
                       style: TextStyle(
-                        color: BrandColors.lampWhite,
+                        color: Brand.lampWhite,
                         fontWeight: FontWeight.w600,
                         fontSize: 18,
                       ),
@@ -141,7 +143,7 @@ class _LampAppState extends ConsumerState<LampApp>
                     const SizedBox(height: 12),
                     const Text(
                       'LampOS talks to your lamps over Bluetooth.',
-                      style: TextStyle(color: BrandColors.fogGrey),
+                      style: TextStyle(color: Brand.fogGrey),
                     ),
                     const SizedBox(height: 24),
                     FilledButton(
@@ -156,7 +158,9 @@ class _LampAppState extends ConsumerState<LampApp>
           final router = ref.watch(appRouterProvider);
           return MaterialApp.router(
             title: 'LampOS',
-            theme: AppTheme.dark(),
+            theme: appTheme,
+            darkTheme: appTheme,
+            themeMode: ThemeMode.dark,
             routerConfig: router,
             debugShowCheckedModeBanner: false,
           );
