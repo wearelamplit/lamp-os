@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/theme/brand_colors.dart';
 import '../../../../core/widgets/app_sheet.dart';
+import '../../application/warm_white_blend.dart';
 import '../../domain/lamp_color.dart';
-import 'lamp_color_swatch.dart';
 
 /// Opens a modal bottom sheet to pick a color via R/G/B (and Warm White when
 /// the strip is 4 bpp). Returns the picked [LampColor] or null on cancel.
@@ -157,7 +157,13 @@ class _ColorPickerSheetState extends State<_ColorPickerSheet> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  LampColorSwatch(color: _current, size: 48),
+                  _PreviewSwatch(
+                r: _r,
+                g: _g,
+                b: _b,
+                w: _w,
+                bpp: widget.bpp,
+              ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: TextField(
@@ -204,6 +210,7 @@ class _ColorPickerSheetState extends State<_ColorPickerSheet> {
               ),
               if (widget.bpp == 4)
                 _ChannelSlider(
+                  key: const Key('ww-slider'),
                   label: 'Warm White',
                   value: _w,
                   trackColor: BrandColors.warmWhite,
@@ -233,6 +240,7 @@ class _ColorPickerSheetState extends State<_ColorPickerSheet> {
 
 class _ChannelSlider extends StatelessWidget {
   const _ChannelSlider({
+    super.key,
     required this.label,
     required this.value,
     required this.trackColor,
@@ -289,6 +297,40 @@ class _ChannelSlider extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Circular preview swatch for the color picker. When bpp==4 the warm-white
+/// channel is screen-blended in; when bpp==3 plain RGB is shown.
+class _PreviewSwatch extends StatelessWidget {
+  const _PreviewSwatch({
+    required this.r,
+    required this.g,
+    required this.b,
+    required this.w,
+    required this.bpp,
+  });
+
+  final int r;
+  final int g;
+  final int b;
+  final int w;
+  final int bpp;
+
+  @override
+  Widget build(BuildContext context) {
+    final rgb = Color.fromARGB(255, r, g, b);
+    final fill = bpp == 4 ? blendWarmWhite(rgb, w) : rgb;
+    return Container(
+      key: const Key('preview-swatch'),
+      width: 48,
+      height: 48,
+      decoration: BoxDecoration(
+        color: fill,
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
       ),
     );
   }
