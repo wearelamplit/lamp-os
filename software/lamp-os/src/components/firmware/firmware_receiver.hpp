@@ -156,6 +156,13 @@ struct FsReceiverHooks {
   // the receiver reboots into the freshly-written image.
   lamp_protocol::FwResultStatus (*verify)(const void* partition,
                                           uint32_t expectedVersion);
+  // Post-verify apply for FS. Called instead of the firmware path's
+  // esp_restart() on success: the FS image is read-only at runtime (only the
+  // onboarding webapp reads it, and only while it's down), so there's no need
+  // to reboot — remount SPIFFS + recompute the local digest so the new UI is
+  // live and HELLO advertises the new fingerprint. nullptr → fall back to
+  // reboot.
+  void (*finalize)();
   uint8_t acceptType;
   uint8_t reqType;
   uint8_t resultType;

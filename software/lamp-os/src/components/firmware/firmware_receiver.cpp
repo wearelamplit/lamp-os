@@ -668,11 +668,17 @@ void FirmwareReceiver::onDoneOnLoop(const PendingFirmwareControl& ctrl,
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
     // Pause so the broadcast leaves the radio before the CPU resets.
     delay(kPostResultPauseMs);
-    // Symmetry — exit quiet-mode before reboot. The chip restarts
-    // milliseconds later so the lamp wouldn't see the un-quiet state
-    // anyway, but a future code path that returns from success without
-    // rebooting won't leave the lamp stranded in quiet-mode.
+    // Exit quiet-mode before reboot OR before returning to Idle (the FS path
+    // below returns without rebooting, so this is load-bearing there).
     ::lamp::ota_quiet_mode::exitQuiet();
+    // FS image OTA finalizes WITHOUT a reboot: SPIFFS is only read by the
+    // (currently-down) onboarding webapp, so a remount makes the new UI live.
+    // Firmware OTA still reboots into the freshly-booted image.
+    if (fsHooks_ && fsHooks_->finalize) {
+      fsHooks_->finalize();
+      state_ = State::Idle;
+      return;
+    }
     esp_restart();
 #endif
     return;

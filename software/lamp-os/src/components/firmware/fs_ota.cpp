@@ -155,6 +155,18 @@ lp::FwResultStatus fsVerify(const void* /*partition*/, uint32_t expectedVersion)
   return lp::FwResultStatus::Success;
 }
 
+// Post-verify, no reboot: drop the verify mount and remount cleanly so the new
+// files are live for the webapp, then refresh our local digest so HELLO
+// advertises the new fingerprint (peers observe convergence).
+void fsFinalize() {
+  SPIFFS.end();
+  computeLocalDigest();  // remounts (begin false) + recomputes digest/version
+#ifdef LAMP_DEBUG
+  Serial.printf("[fs_ota] applied (no reboot); digestReady=%d version=0x%08lx\n",
+                (int)s_localDigestReady, (unsigned long)s_localFsVersion);
+#endif
+}
+
 // --- Distributor hooks -----------------------------------------------------
 
 // Read-only source; SPIFFS files don't change at runtime so no unmount needed.
@@ -183,6 +195,7 @@ const lamp::FsReceiverHooks kRecvHooks = {
     /*partition=*/   &fsRecvPartition,
     /*shouldAccept=*/&fsShouldAccept,
     /*verify=*/      &fsVerify,
+    /*finalize=*/    &fsFinalize,
     /*acceptType=*/  lp::MSG_FS_ACCEPT,
     /*reqType=*/     lp::MSG_FS_REQ,
     /*resultType=*/  lp::MSG_FS_RESULT,
