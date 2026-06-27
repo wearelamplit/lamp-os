@@ -148,11 +148,13 @@ Restructure `lib/core/theme/`:
 - **bpp-aware RGBW color picker** — keep the four-slider concept (R/G/B/W on
   themed sliders + hex field + live streaming `onLive` + snapshot/rollback
   session), fixing two things:
-  - **Warm-white made honest:** the preview swatch composites the **W channel as
-    a screen-blend of the warm-white reference (`#FABB3E`) at the W intensity over
-    the RGB base**, so warm-white visibly warms/brightens the preview (matches the
-    physical pixel; restores the Vue `ColorPreview` behavior the Flutter swatch
-    lost).
+  - **Warm-white visualization:** the preview swatch uses `LampColorSwatch`'s
+    **alpha-overlay (room-factor) path** — the W channel is composited as a
+    warm-white tint (`#FABB3E`) alpha-blended over the RGB base at the W
+    intensity, consistent with the app-wide warm-white visualization. On 3bpp
+    strips the W channel is gated to 0, so no phantom warmth appears. This is
+    the canonical rendering path for the whole app; the spec's earlier
+    screen-blend description was inaccurate.
   - **bpp-gated:** the **W slider and its preview contribution appear only when
     the strip has a white channel (4bpp); both vanish for 3bpp strips** — no dead
     control, no phantom warmth.

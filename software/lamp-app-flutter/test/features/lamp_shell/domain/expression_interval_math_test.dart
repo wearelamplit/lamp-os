@@ -1,54 +1,54 @@
+import 'dart:math' as math;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lamp_app/features/lamp_shell/domain/expression_interval_math.dart';
 
 void main() {
-  group('ExpressionIntervalMath.intervalFromNorms', () {
-    test('freq=0 spread=0 → (3600,3600)', () {
-      final r = ExpressionIntervalMath.intervalFromNorms(0, 0);
-      expect(r.min, 3600); expect(r.max, 3600);
+  group('ExpressionIntervalMath constants', () {
+    test('minSec = 10', () => expect(ExpressionIntervalMath.minSec, 10));
+    test('maxSec = 3600', () => expect(ExpressionIntervalMath.maxSec, 3600));
+  });
+
+  group('ExpressionIntervalMath.secToPos', () {
+    test('10 s → log10(10) = 1.0', () {
+      expect(ExpressionIntervalMath.secToPos(10), closeTo(1.0, 1e-9));
     });
-    test('freq=1 spread=0 → (10,10)', () {
-      final r = ExpressionIntervalMath.intervalFromNorms(1, 0);
-      expect(r.min, 10); expect(r.max, 10);
+    test('60 s → log10(60) ≈ 1.778', () {
+      expect(ExpressionIntervalMath.secToPos(60), closeTo(math.log(60) / math.ln10, 1e-9));
     });
-    test('freq=0.5 spread=0 → ~190 (geometric mid)', () {
-      final r = ExpressionIntervalMath.intervalFromNorms(0.5, 0);
-      expect(r.min, inInclusiveRange(185, 195));
-      expect(r.min, r.max);
+    test('3600 s → log10(3600) ≈ 3.556', () {
+      expect(ExpressionIntervalMath.secToPos(3600), closeTo(math.log(3600) / math.ln10, 1e-9));
     });
-    test('freq=0.5 spread=1 → wide range around 190', () {
-      final r = ExpressionIntervalMath.intervalFromNorms(0.5, 1);
-      expect(r.max, greaterThan(r.min * 4));
-      expect(r.min, greaterThanOrEqualTo(10));
-      expect(r.max, lessThanOrEqualTo(3600));
-    });
-    test('clamping does not throw at extremes', () {
-      expect(() => ExpressionIntervalMath.intervalFromNorms(0, 1), returnsNormally);
-      expect(() => ExpressionIntervalMath.intervalFromNorms(1, 1), returnsNormally);
+    test('60 s pos sits above linear midpoint of [1.0, 3.556]', () {
+      // log10(60) ≈ 1.778; linear midpoint ≈ 2.278 — 60 s is in the lower half
+      // of the log range, confirming the log scale compresses the high end.
+      final pos60 = ExpressionIntervalMath.secToPos(60);
+      final posMin = ExpressionIntervalMath.secToPos(ExpressionIntervalMath.minSec);
+      final posMax = ExpressionIntervalMath.secToPos(ExpressionIntervalMath.maxSec);
+      expect(pos60, greaterThan(posMin));
+      expect(pos60, lessThan((posMin + posMax) / 2));
     });
   });
 
-  group('ExpressionIntervalMath.normsFromInterval', () {
-    test('(10,3600) → freq≈0.5 spread≈1.0', () {
-      final n = ExpressionIntervalMath.normsFromInterval(10, 3600);
-      expect(n.freq, closeTo(0.5, 0.02));
-      expect(n.spread, closeTo(1.0, 0.02));
+  group('ExpressionIntervalMath.posToSec', () {
+    test('clamps below minSec', () {
+      expect(ExpressionIntervalMath.posToSec(0.0), ExpressionIntervalMath.minSec);
     });
-    test('tolerates min>max', () {
-      final a = ExpressionIntervalMath.normsFromInterval(900, 60);
-      final b = ExpressionIntervalMath.normsFromInterval(60, 900);
-      expect(a.freq, closeTo(b.freq, 1e-6));
-      expect(a.spread, closeTo(b.spread, 1e-6));
+    test('clamps above maxSec', () {
+      expect(ExpressionIntervalMath.posToSec(5.0), ExpressionIntervalMath.maxSec);
     });
-    test('round-trip interior values within ±0.02', () {
-      for (final f in [0.25, 0.5, 0.75]) {
-        for (final s in [0.25, 0.5, 0.75]) {
-          final r = ExpressionIntervalMath.intervalFromNorms(f, s);
-          final back = ExpressionIntervalMath.normsFromInterval(r.min, r.max);
-          expect(back.freq, closeTo(f, 0.02));
-          expect(back.spread, closeTo(s, 0.02));
-        }
-      }
-    });
+  });
+
+  group('secToPos/posToSec round-trip', () {
+    void roundTrip(int sec) {
+      final pos = ExpressionIntervalMath.secToPos(sec);
+      final back = ExpressionIntervalMath.posToSec(pos);
+      expect(back, sec,
+          reason: 'round-trip failed for ${sec}s: pos=$pos → $back');
+    }
+
+    test('10 s round-trips exactly', () => roundTrip(10));
+    test('60 s round-trips exactly', () => roundTrip(60));
+    test('3600 s round-trips exactly', () => roundTrip(3600));
   });
 }
