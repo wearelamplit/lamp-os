@@ -24,6 +24,10 @@ namespace {
 
 namespace lp = lamp_protocol;
 
+// Upper bound on a single SPIFFS asset (the partition is 192 KB). Guards the
+// boot-time enumeration against a bogus file size aborting a vector resize.
+constexpr size_t kMaxAssetBytes = 262144;
+
 // The FS receiver + distributor reuse the firmware OTA engine via hooks; they
 // target the spiffs partition and emit MSG_FS_*.
 lamp::FirmwareReceiver    s_fsReceiver;
@@ -44,18 +48,17 @@ uint32_t               s_localFsVersion = 0;
 
 // --- SPIFFS manifest enumeration ------------------------------------------
 
-// SPIFFS must be mounted. Fills `files` (excluding fw.lsig) with whole-content
-// readers backed by `contents`, and `lsig` with the fw.lsig bytes. Returns
-// true iff fw.lsig was present. The `contents` vectors must outlive any use of
-// `files` (the readers point into them).
-bool enumerateManifest(std::vector<std::vector<uint8_t>>& contents,
-                       std::vector<lamp::firmware::FsManifestFile>& files,
+// SPIFFS must be mounted. Fills `files` (excluding fw.lsig) with STREAMING
+// readers (each re-opens its file per read) and `lsig` with the fw.lsig bytes.
+// Returns true iff fw.lsig was present. Streaming, not whole-file buffering, is
+// deliberate: a ~44 KB contiguous vector resize can fail under heap
+// fragmentation (WiFi + BLE + AsyncWebServer all resident) and abort() under
+// -fno-exceptions — a boot-time crash loop. Re-opening per 4 KB read is slow
+// but allocation-free and only runs once at boot / once post-OTA.
+bool enumerateManifest(std::vector<lamp::firmware::FsManifestFile>& files,
                        std::vector<uint8_t>& lsig) {
   File root = SPIFFS.open("/");
   if (!root) return false;
-  // Reserve so emplace_back never reallocates (which would dangle the readers'
-  // captured data pointers).
-  contents.reserve(16);
   bool haveLsig = false;
   for (File f = root.openNextFile(); f; f = root.openNextFile()) {
     if (f.isDirectory()) continue;
@@ -65,24 +68,25 @@ bool enumerateManifest(std::vector<std::vector<uint8_t>>& contents,
     std::string name = raw ? raw : "";
     if (!name.empty() && name[0] == '/') name.erase(0, 1);
     const size_t sz = f.size();
+    // A real UI asset can't be empty or exceed the partition; skip ghosts.
+    if (name.empty() || sz == 0 || sz > kMaxAssetBytes) continue;
     if (name == lamp::firmware::kFsSigName) {
       lsig.resize(sz);
-      if (sz && f.read(lsig.data(), sz) != static_cast<int>(sz)) return false;
+      if (f.read(lsig.data(), sz) != static_cast<int>(sz)) return false;
       haveLsig = true;
       continue;
     }
-    contents.emplace_back();
-    std::vector<uint8_t>& buf = contents.back();
-    buf.resize(sz);
-    if (sz && f.read(buf.data(), sz) != static_cast<int>(sz)) return false;
+    const std::string path = "/" + name;
     lamp::firmware::FsManifestFile mf;
     mf.name = name;
     mf.contentLen = sz;
-    const uint8_t* data = buf.data();
-    mf.read = [data, sz](size_t off, size_t want, uint8_t* out) -> int {
-      if (off + want > sz) return -1;
-      std::memcpy(out, data + off, want);
-      return static_cast<int>(want);
+    mf.read = [path](size_t off, size_t want, uint8_t* out) -> int {
+      File ff = SPIFFS.open(path.c_str(), "r");
+      if (!ff) return -1;
+      if (!ff.seek(off)) { ff.close(); return -1; }
+      const int n = ff.read(out, want);
+      ff.close();
+      return n;
     };
     files.push_back(std::move(mf));
   }
@@ -93,10 +97,9 @@ void computeLocalDigest() {
   s_localDigestReady = false;
   s_localFsVersion = 0;
   if (!SPIFFS.begin(/*formatOnFail=*/false)) return;
-  std::vector<std::vector<uint8_t>> contents;
   std::vector<lamp::firmware::FsManifestFile> files;
   std::vector<uint8_t> lsig;
-  if (!enumerateManifest(contents, files, lsig)) return;
+  if (!enumerateManifest(files, lsig)) return;
   if (lsig.size() == lamp::firmware::kFsSigLen) {
     const uint8_t* v = lsig.data() + lamp::firmware::kFsSigVersionOffset;
     s_localFsVersion = static_cast<uint32_t>(v[0]) |
@@ -135,10 +138,9 @@ lp::FwResultStatus fsVerify(const void* /*partition*/, uint32_t expectedVersion)
   if (!SPIFFS.begin(/*formatOnFail=*/false)) {
     return lp::FwResultStatus::FsMountFail;
   }
-  std::vector<std::vector<uint8_t>> contents;
   std::vector<lamp::firmware::FsManifestFile> files;
   std::vector<uint8_t> lsig;
-  if (!enumerateManifest(contents, files, lsig) ||
+  if (!enumerateManifest(files, lsig) ||
       lsig.size() != lamp::firmware::kFsSigLen) {
     return lp::FwResultStatus::FsDigestMismatch;
   }
