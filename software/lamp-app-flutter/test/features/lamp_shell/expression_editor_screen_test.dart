@@ -232,76 +232,27 @@ void main() {
     expect(exprs.single.target, 2);
   });
 
-  testWidgets('predictability slider labels read "less" and "more"',
+  testWidgets('interval range slider renders for trigger-based expressions',
       (tester) async {
     final c = await _withEmptyState();
     addTearDown(c.dispose);
     await tester.pumpWidget(UncontrolledProviderScope(
       container: c,
       child: const MaterialApp(
-        // glitchy is a trigger-based expression that surfaces the
-        // FrequencySpread widget. Breathing is continuous and hides it.
+        // glitchy is trigger-based; breathing hides the interval slider.
         home: ExpressionEditorScreen(
             lampId: _devId, typeKey: 'glitchy', targetKey: 3),
       ),
     ));
     await _pumpToData(tester, 'Glitchy');
     await tester.dragUntilVisible(
-      find.text('less'), find.byType(ListView), const Offset(0, -200));
-    expect(find.text('less'), findsOneWidget);
-    expect(find.text('more'), findsOneWidget);
-    expect(find.text('exact'), findsNothing);
-    expect(find.text('varied'), findsNothing);
-  });
-
-  testWidgets('frequency slider labels read "rare" and "often"',
-      (tester) async {
-    final c = await _withEmptyState();
-    addTearDown(c.dispose);
-    await tester.pumpWidget(UncontrolledProviderScope(
-      container: c,
-      child: const MaterialApp(
-        // FrequencySpread is only rendered for trigger-based expressions.
-        home: ExpressionEditorScreen(
-            lampId: _devId, typeKey: 'glitchy', targetKey: 3),
-      ),
-    ));
-    await _pumpToData(tester, 'Glitchy');
-    await tester.dragUntilVisible(
-      find.text('rare'), find.byType(ListView), const Offset(0, -200));
-    expect(find.text('rare'), findsOneWidget);
-    expect(find.text('often'), findsOneWidget);
-  });
-
-  testWidgets('frequency thumb does not move when predictability changes',
-      (tester) async {
-    final c = await _withEmptyState();
-    addTearDown(c.dispose);
-    await tester.pumpWidget(UncontrolledProviderScope(
-      container: c,
-      child: const MaterialApp(
-        // FrequencySpread is only rendered for trigger-based expressions.
-        home: ExpressionEditorScreen(
-            lampId: _devId, typeKey: 'glitchy', targetKey: 3),
-      ),
-    ));
-    await _pumpToData(tester, 'Glitchy');
-    await tester.dragUntilVisible(
-      find.text('Predictability'),
+      find.text('Trigger interval'),
       find.byType(ListView),
       const Offset(0, -200),
     );
-    // Find the two 0..1 sliders (freq + spread) — filtering out any other
-    // sliders (e.g. the speed/duration slider in ExpressionParamsPanel).
-    final normSliders = find.byWidgetPredicate(
-        (w) => w is Slider && w.min == 0.0 && w.max == 1.0);
-    expect(normSliders, findsNWidgets(2));
-    final freqBefore = tester.widget<Slider>(normSliders.at(0)).value;
-    // Drag the predictability slider (second 0..1 one) to the right.
-    await tester.drag(normSliders.at(1), const Offset(120, 0));
-    await tester.pump();
-    final freqAfter = tester.widget<Slider>(normSliders.at(0)).value;
-    expect(freqAfter, freqBefore,
-        reason: 'Frequency thumb must not move when predictability drags');
+    expect(find.text('Trigger interval'), findsOneWidget);
+    final rangeSlider = find.byWidgetPredicate(
+        (w) => w is RangeSlider && w.min == 10.0 && w.max == 3600.0);
+    expect(rangeSlider, findsOneWidget);
   });
 }

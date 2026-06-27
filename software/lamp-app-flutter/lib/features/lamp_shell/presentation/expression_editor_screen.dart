@@ -15,6 +15,7 @@ import '../../control/presentation/widgets/color_picker_sheet.dart';
 import '../../control/presentation/widgets/connecting_view.dart';
 import '../../control/presentation/widgets/connection_banner.dart';
 import '../../control/presentation/widgets/lamp_color_swatch.dart';
+import '../../../core/widgets/interval_range_slider.dart';
 import '../domain/expression_interval_math.dart';
 import '../domain/expression_meta.dart';
 import 'widgets/expression_params_panel.dart';
@@ -319,18 +320,22 @@ class _ExpressionEditorScreenState
               ),
               const SizedBox(height: 16),
 
-              // Trigger cadence — two 0..1 normalized sliders. The widget owns its UI
-              // state; each drag emits a fresh (intervalMin, intervalMax) pair via
-              // ExpressionIntervalMath. Hidden for breathing because it's a
-              // continuous (always-on) expression — its `intervalMin`/`Max` are
-              // ignored by the firmware; only `breathSpeed` (in the params panel
-              // below) drives its timing.
+              // Hidden for breathing: continuous expressions ignore intervalMin/Max;
+              // only breathSpeed (in the params panel) drives their timing.
               if (widget.typeKey != 'breathing') ...[
-                _FrequencySpread(
-                  intervalMin: draft.intervalMin,
-                  intervalMax: draft.intervalMax,
-                  onChanged: (lo, hi) =>
-                      _updateDraft((d) => _withIntervals(d, lo, hi)),
+                const Text('Trigger interval',
+                    style: TextStyle(
+                        color: BrandColors.lampWhite, fontSize: 14)),
+                IntervalRangeSlider(
+                  values: RangeValues(
+                    draft.intervalMin.toDouble(),
+                    draft.intervalMax.toDouble(),
+                  ),
+                  min: ExpressionIntervalMath.minSec.toDouble(),
+                  max: ExpressionIntervalMath.maxSec.toDouble(),
+                  labelFor: _fmtSeconds,
+                  onChanged: (v) => _updateDraft(
+                      (d) => _withIntervals(d, v.start.round(), v.end.round())),
                 ),
                 const SizedBox(height: 16),
               ],
@@ -674,140 +679,13 @@ class _TargetButton extends StatelessWidget {
   }
 }
 
-/// Two-slider Frequency + Predictability control for an expression's
-/// random trigger interval.
-///
-/// The two 0..1 slider positions are the source of truth for the
-/// editor's UI state, seeded once in [initState] from the persisted
-/// `(intervalMin, intervalMax)` via [ExpressionIntervalMath.normsFromInterval].
-/// They are never re-derived from upstream, so dragging Predictability
-/// cannot move the Frequency thumb (and vice versa). Each drag emits a
-/// fresh deterministic `(intervalMin, intervalMax)` via
-/// [ExpressionIntervalMath.intervalFromNorms].
-class _FrequencySpread extends StatefulWidget {
-  const _FrequencySpread({
-    required this.intervalMin,
-    required this.intervalMax,
-    required this.onChanged,
-  });
-
-  final int intervalMin;
-  final int intervalMax;
-  final void Function(int min, int max) onChanged;
-
-  @override
-  State<_FrequencySpread> createState() => _FrequencySpreadState();
-}
-
-class _FrequencySpreadState extends State<_FrequencySpread> {
-  late double _freq;
-  late double _spread;
-
-  @override
-  void initState() {
-    super.initState();
-    final n = ExpressionIntervalMath.normsFromInterval(
-        widget.intervalMin, widget.intervalMax);
-    _freq = n.freq;
-    _spread = n.spread;
-  }
-
-  // didUpdateWidget intentionally omitted: the slider positions are the
-  // source of truth in the UI from initState onward. We never re-derive
-  // them from upstream, so dragging Predictability cannot shove the
-  // Frequency thumb.
-
-  static String _fmt(double seconds) {
-    if (seconds < 1) return '${(seconds * 1000).round()}ms';
-    if (seconds < 90) return '${seconds.round()}s';
-    final m = seconds / 60;
-    if (m < 90) return '${m.round()}m';
-    final h = m / 60;
-    return '${h.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '')}h';
-  }
-
-  void _emit() {
-    final r = ExpressionIntervalMath.intervalFromNorms(_freq, _spread);
-    widget.onChanged(r.min, r.max);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final r = ExpressionIntervalMath.intervalFromNorms(_freq, _spread);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const Padding(
-          padding: EdgeInsets.only(top: 8, bottom: 2),
-          child: Text('Frequency',
-              style: TextStyle(color: BrandColors.lampWhite, fontSize: 14)),
-        ),
-        Row(
-          children: [
-            const Text('rare',
-                style:
-                    TextStyle(color: BrandColors.fogGrey, fontSize: 11)),
-            Expanded(
-              child: Slider(
-                value: _freq,
-                min: 0,
-                max: 1,
-                onChanged: (v) {
-                  setState(() => _freq = v);
-                  _emit();
-                },
-              ),
-            ),
-            const Text('often',
-                style:
-                    TextStyle(color: BrandColors.fogGrey, fontSize: 11)),
-          ],
-        ),
-        const Padding(
-          padding: EdgeInsets.only(top: 12, bottom: 2),
-          child: Text('Predictability',
-              style: TextStyle(color: BrandColors.lampWhite, fontSize: 14)),
-        ),
-        Row(
-          children: [
-            const Text('less',
-                style:
-                    TextStyle(color: BrandColors.fogGrey, fontSize: 11)),
-            Expanded(
-              child: Slider(
-                value: _spread,
-                min: 0,
-                max: 1,
-                onChanged: (v) {
-                  setState(() => _spread = v);
-                  _emit();
-                },
-              ),
-            ),
-            const Text('more',
-                style:
-                    TextStyle(color: BrandColors.fogGrey, fontSize: 11)),
-          ],
-        ),
-        Padding(
-          padding: const EdgeInsets.only(top: 6),
-          child: Text(
-            _spread < 0.02
-                ? 'Roughly every ${_fmt(r.min.toDouble())}.'
-                : 'Between ${_fmt(r.min.toDouble())} and ${_fmt(r.max.toDouble())}.',
-            // Right-aligned to match the value chips on every other
-            // slider in the editor (Glitch duration, Hold time, Breath
-            // cycle, etc.) — consistent eye line down the right edge.
-            textAlign: TextAlign.end,
-            style: const TextStyle(
-              color: BrandColors.fogGrey,
-              fontSize: 11,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
+String _fmtSeconds(double seconds) {
+  if (seconds < 1) return '${(seconds * 1000).round()}ms';
+  if (seconds < 90) return '${seconds.round()}s';
+  final m = seconds / 60;
+  if (m < 90) return '${m.round()}m';
+  final h = m / 60;
+  return '${h.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '')}h';
 }
 
 class _ColorChip extends StatelessWidget {
