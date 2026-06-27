@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:lamp_app/features/control/application/warm_white_blend.dart';
 import 'package:lamp_app/features/control/domain/lamp_color.dart';
 import 'package:lamp_app/features/control/presentation/widgets/color_picker_sheet.dart';
+import 'package:lamp_app/features/control/presentation/widgets/lamp_color_swatch.dart';
 
 Widget _harness({required int bpp, required LampColor initial}) {
   return MaterialApp(
@@ -103,33 +103,29 @@ void main() {
     expect(lastLive!.r, greaterThan(0));
   });
 
-  testWidgets('4bpp: ww-slider key present; preview color equals blendWarmWhite', (tester) async {
+  testWidgets('4bpp: ww-slider key present; preview swatch has correct W', (tester) async {
     const initial = LampColor(r: 100, g: 50, b: 30, w: 200);
     await tester.pumpWidget(_harness(bpp: 4, initial: initial));
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('ww-slider')), findsOneWidget);
+    expect(find.byKey(const Key('preview-swatch')), findsOneWidget);
 
-    final container = tester.widget<Container>(find.byKey(const Key('preview-swatch')));
-    final previewColor = (container.decoration as BoxDecoration).color;
-    final expectedColor = blendWarmWhite(
-      Color.fromARGB(255, initial.r, initial.g, initial.b),
-      initial.w,
-    );
-    expect(previewColor, equals(expectedColor));
+    final swatch = tester.widget<LampColorSwatch>(find.byKey(const Key('preview-swatch')));
+    expect(swatch.color.w, equals(initial.w));
   });
 
-  testWidgets('3bpp: ww-slider absent; preview color is plain rgb', (tester) async {
+  testWidgets('3bpp: ww-slider absent; preview swatch W is 0', (tester) async {
     const initial = LampColor(r: 100, g: 50, b: 30, w: 200);
     await tester.pumpWidget(_harness(bpp: 3, initial: initial));
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('ww-slider')), findsNothing);
+    expect(find.byKey(const Key('preview-swatch')), findsOneWidget);
 
-    final container = tester.widget<Container>(find.byKey(const Key('preview-swatch')));
-    final previewColor = (container.decoration as BoxDecoration).color;
-    expect(previewColor, equals(Color.fromARGB(255, initial.r, initial.g, initial.b)));
+    final swatch = tester.widget<LampColorSwatch>(find.byKey(const Key('preview-swatch')));
+    expect(swatch.color.w, equals(0));
   });
 }
