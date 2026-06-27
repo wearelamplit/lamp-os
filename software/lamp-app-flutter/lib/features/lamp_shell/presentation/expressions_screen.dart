@@ -7,7 +7,6 @@ import '../../../core/theme/brand_colors.dart';
 import '../../../core/widgets/app_snackbar.dart';
 import '../../../core/widgets/empty_state_pane.dart';
 import '../../../core/widgets/friendly_error.dart';
-import '../../../core/widgets/inactive_backdrop_scrim.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/domain/sections.dart';
 import '../../control/presentation/widgets/connecting_view.dart';
@@ -143,7 +142,7 @@ class ExpressionsScreen extends ConsumerWidget {
 /// Shows the confirmation dialog for deleting an expression. Returns `true`
 /// if the user confirmed the delete.
 Future<bool> _confirmDelete(BuildContext context, String type) async {
-  final result = await showBlurredDialog<bool>(
+  final result = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
       title: Text(type.isEmpty

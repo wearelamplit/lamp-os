@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/theme/brand_colors.dart';
-import '../../../../core/widgets/inactive_backdrop_scrim.dart';
+import '../../../../core/widgets/app_sheet.dart';
 import '../../domain/lamp_color.dart';
 import 'lamp_color_swatch.dart';
 
@@ -20,9 +20,8 @@ Future<LampColor?> showColorPickerSheet(
   int bpp = 4,
   ValueChanged<LampColor>? onLive,
 }) {
-  return showBlurredModalBottomSheet<LampColor>(
-    context: context,
-    isScrollControlled: true,
+  return showAppSheet<LampColor>(
+    context,
     backgroundColor: BrandColors.midnightBlack,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(16)),

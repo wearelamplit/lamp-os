@@ -8,7 +8,6 @@ import '../../../core/routing/routes.dart';
 import '../../../core/ble/ble_client_provider.dart';
 import '../../../core/theme/brand_colors.dart';
 import '../../../core/widgets/critter_icon.dart';
-import '../../../core/widgets/inactive_backdrop_scrim.dart';
 import '../../../core/widgets/status_dot.dart';
 import '../../control/application/advanced_session.dart';
 import '../../control/application/control_notifier.dart';
@@ -422,7 +421,7 @@ class _AddLampTile extends StatelessWidget {
 
 /// Confirmation dialog used by both the swipe and long-press delete paths.
 Future<bool> _confirmRemoveDialog(BuildContext context, String lampName) async {
-  final ok = await showBlurredDialog<bool>(
+  final ok = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
       backgroundColor: BrandColors.midnightBlack,

@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/brand_colors.dart';
-import '../../../../core/widgets/inactive_backdrop_scrim.dart';
+import '../../../../core/widgets/app_sheet.dart';
 import '../../application/control_notifier.dart';
 import '../../domain/lamp_color.dart';
 import 'color_picker_sheet.dart';
@@ -293,9 +293,8 @@ Future<void> showBaseEditorSheet(
   BuildContext context, {
   required String lampId,
 }) {
-  return showBlurredModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
+  return showAppSheet<void>(
+    context,
     backgroundColor: BrandColors.midnightBlack,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(16)),

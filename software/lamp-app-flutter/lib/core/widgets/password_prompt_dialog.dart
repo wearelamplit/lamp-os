@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../theme/brand_colors.dart';
-import 'inactive_backdrop_scrim.dart';
 
 /// Generic password-prompt dialog. Returns the entered password on
 /// confirm, or `null` if the user cancels (or pops the dialog).
@@ -22,7 +21,7 @@ Future<String?> showPasswordPromptDialog(
   String confirmLabel = 'Save',
   String cancelLabel = 'Cancel',
 }) {
-  return showBlurredDialog<String>(
+  return showDialog<String>(
     context: context,
     barrierDismissible: true,
     builder: (ctx) => _PasswordPromptDialog(

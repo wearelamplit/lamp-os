@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/brand_colors.dart';
-import '../../../../core/widgets/inactive_backdrop_scrim.dart';
+import '../../../../core/widgets/app_sheet.dart';
 import '../../application/wifi_notifier.dart';
 import '../../domain/wifi_state.dart';
 
@@ -187,9 +187,8 @@ Future<WifiScanResult?> showWifiPickerSheet(
   required String lampId,
   String? currentSsid,
 }) {
-  return showBlurredModalBottomSheet<WifiScanResult>(
-    context: context,
-    isScrollControlled: true,
+  return showAppSheet<WifiScanResult>(
+    context,
     backgroundColor: BrandColors.midnightBlack,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(16)),

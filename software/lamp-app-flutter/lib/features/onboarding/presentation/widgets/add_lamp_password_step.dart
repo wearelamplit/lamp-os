@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/brand_colors.dart';
 import '../../../../core/widgets/friendly_error.dart';
-import '../../../../core/widgets/inactive_backdrop_scrim.dart';
 import '../../application/add_lamp_notifier.dart';
 import '../../domain/add_lamp_state.dart';
 
@@ -18,7 +17,7 @@ class AddLampPasswordStep extends ConsumerStatefulWidget {
 }
 
 Future<void> _confirmSkip(BuildContext context, AddLampNotifier notifier) async {
-  final ok = await showBlurredDialog<bool>(
+  final ok = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
       backgroundColor: BrandColors.midnightBlack,
