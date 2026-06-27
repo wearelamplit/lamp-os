@@ -88,6 +88,11 @@ struct NearbyLamp {
   // different lamp-type/channel; empty = "unknown → offer anyway and let the
   // receiver's silent-drop gate". 16 bytes + NUL, matching FW_CHANNEL_LEN.
   char fwChannel[17] = {0};
+  // The peer's FS-image manifest digest prefix from HELLO_TLV_FS_STATE.
+  // hasFsDigest=false until heard (older / FS-OTA-disabled peer). The FS OTA
+  // distributor compares it to our own to decide whether to offer the UI image.
+  bool    hasFsDigest = false;
+  uint8_t fsDigest[8] = {0};
   // Most recent BLE-scan RSSI (dBm) reported by the NimBLE callback for
   // any adv from this peer. `getReachableViaBle()` returns its result
   // sorted by lastRssi descending so consumers (PersonalityEngine's
@@ -161,7 +166,9 @@ class NearbyLamps {
                              uint32_t firmwareVersion = 0,
                              uint8_t otaState = 0,
                              uint8_t protocolVersion = 0,
-                             const char* fwChannel = nullptr);
+                             const char* fwChannel = nullptr,
+                             const uint8_t* fsDigest = nullptr,
+                             bool hasFsDigest = false);
 
   // Drop entries whose most-recent sighting (max of the two transports)
   // is older than `maxAgeMs`.

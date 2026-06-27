@@ -132,6 +132,23 @@ namespace lamp {
 
 class FirmwareTransport;
 
+// FS-image OTA distributor behavior. Default (fsHooks_ == nullptr) = firmware
+// distribution (path unchanged); the FS distributor instance injects these.
+// Native-safe (void* partition, function pointers).
+struct FsDistributorHooks {
+  // Source partition to stream (really const esp_partition_t* — the spiffs
+  // partition).
+  const void* (*partition)();
+  // Fixed image length (the spiffs partition size — mkspiffs pads the image to
+  // fill it) + the FS manifest digest prefix advertised in OFFER. Replaces the
+  // LSIG forward-scan + signed-region SHA (an FS image has no footer, and a
+  // raw-partition SHA differs per lamp). Returns false → distributor Disabled.
+  bool (*lengthAndDigest)(uint32_t* outLen, uint8_t outDigestPrefix[8]);
+  uint8_t offerType;
+  uint8_t chunkType;
+  uint8_t doneType;
+};
+
 class FirmwareDistributor {
  public:
   enum class State : uint8_t {
@@ -150,6 +167,11 @@ class FirmwareDistributor {
   // here (esp_ota_get_running_partition) and the SHA-256 prefix of its
   // signed region is computed once and cached.
   void begin(FirmwareTransport* transport);
+
+  // Inject FS-image OTA behavior (see FsDistributorHooks). Call BEFORE begin()
+  // so begin() resolves the spiffs source instead of the running app
+  // partition. nullptr (default) = firmware distribution, path unchanged.
+  void setFsHooks(const FsDistributorHooks* hooks) { fsHooks_ = hooks; }
 
   // Drive the state machine. Called every loop() iteration on Core 1.
   // Cheap when state == Idle (early-out).
@@ -372,6 +394,9 @@ class FirmwareDistributor {
 
   // --- Wiring ---
   FirmwareTransport* transport_ = nullptr;
+  // FS-image OTA hooks. nullptr = firmware distribution (default). Set only on
+  // the FS distributor instance by fs_ota::begin().
+  const FsDistributorHooks* fsHooks_ = nullptr;
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   // Cached pointer to our running partition. Resolved in begin(); used by
   // readPartitionBytes for every chunk read. Lifetime-stable for the

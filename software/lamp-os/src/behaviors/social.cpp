@@ -7,6 +7,7 @@
 #include "components/network/nearby_lamps.hpp"
 #include "core/personality_engine.hpp"
 #include "components/firmware/firmware_distributor.hpp"
+#include "components/firmware/fs_ota.hpp"
 #include "components/firmware/firmware_receiver.hpp"
 #include "config/config.hpp"
 #include "util/color.hpp"
@@ -189,6 +190,14 @@ void SocialBehavior::control() {
         firmwareDistributor.considerPeerForOta(p.mac, p.firmwareVersion,
                                                 p.protocolVersion, now,
                                                 p.fwChannel);
+      }
+      // FS-image OTA: offer our UI image to same-firmware-version peers whose
+      // FS digest differs from ours. fs_ota::considerPeer does the staleness +
+      // busy gating internally.
+      for (const auto& p : espNowPeers) {
+        if (!p.hasMac) continue;
+        fs_ota::considerPeer(p.mac, p.firmwareVersion, p.protocolVersion, now,
+                             p.fwChannel, p.fsDigest, p.hasFsDigest);
       }
     }
   }

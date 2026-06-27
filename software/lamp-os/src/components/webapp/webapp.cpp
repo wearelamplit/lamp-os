@@ -154,7 +154,10 @@ void begin(lamp::Config& config) {
     return;
   }
 
-  SPIFFS.begin(true);
+  // Never auto-format: an FS-OTA'd image that mounts inconsistent must not be
+  // silently wiped. A genuinely blank/corrupt partition just yields no UI
+  // (BLE still works); production USB flash always lays down a valid image.
+  SPIFFS.begin(/*formatOnFail=*/false);
 
   buildSettingsSnapshot();
 
