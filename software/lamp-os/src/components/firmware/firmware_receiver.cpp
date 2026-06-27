@@ -344,12 +344,18 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
     sendAccept(ctrl, lamp_protocol::FwAcceptStatus::DeclineBusy);
     return;
   }
-  // Version <= ours → already-current decline. The wisp moves the lamp
-  // out of its "needs update" set.
-  if (ctrl.offer.version <= FIRMWARE_VERSION) {
+  // Already-current decline. Firmware: version <= ours. FS: the FS hook
+  // declines when the offer isn't our running firmware version OR the offered
+  // image digest matches what we already have (same UI → nothing to do). The
+  // wisp/peer then moves us out of its "needs update" set.
+  const bool declineCurrent =
+      fsHooks_
+          ? !fsHooks_->shouldAccept(ctrl.offer.version, ctrl.offer.sha256Prefix)
+          : (ctrl.offer.version <= FIRMWARE_VERSION);
+  if (declineCurrent) {
 #ifdef LAMP_DEBUG
-    Serial.printf("[fw_receiver] OFFER v=0x%08X <= ours=0x%08X, decline-current\n",
-                  (unsigned)ctrl.offer.version, (unsigned)FIRMWARE_VERSION);
+    Serial.printf("[fw_receiver] OFFER v=0x%08X declined (already current)\n",
+                  (unsigned)ctrl.offer.version);
 #endif
     sendAccept(ctrl, lamp_protocol::FwAcceptStatus::DeclineAlreadyCurrent);
     return;
@@ -422,8 +428,11 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
   resetBitmap(expectedChunks);
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-  // Pick the inactive OTA partition.
-  const esp_partition_t* part = esp_ota_get_next_update_partition(nullptr);
+  // Pick the target partition: firmware → the inactive OTA slot; FS → the
+  // single live spiffs partition (via the FS hook).
+  const esp_partition_t* part =
+      fsHooks_ ? static_cast<const esp_partition_t*>(fsHooks_->partition())
+               : esp_ota_get_next_update_partition(nullptr);
   if (part == nullptr) {
     sendResult(lamp_protocol::FwResultStatus::OtaBeginFail, 0xFF);
     state_ = State::Failed;
@@ -951,7 +960,7 @@ bool FirmwareReceiver::sendAccept(const PendingFirmwareControl& ctrl,
   const size_t n = lamp_protocol::buildFwAccept(
       buf, sizeof(buf), fwOutSeq_++, myMac_, ctrl.sourceMac,
       ctrl.seq, ctrl.offer.version, status, /*resumeOffset=*/0,
-      ctrl.wireVersion);
+      ctrl.wireVersion, acceptMsgType());
   if (!n) return false;
   return t->sendFrame(buf, n);
 }
@@ -964,7 +973,7 @@ bool FirmwareReceiver::sendReq(uint16_t firstChunkIdx, uint16_t chunkCount,
   uint8_t buf[lamp_protocol::FW_REQ_FIXED_SIZE];
   const size_t n = lamp_protocol::buildFwReq(
       buf, sizeof(buf), fwOutSeq_++, myMac_, wispMac_,
-      firstChunkIdx, chunkCount, reason, activeWireVersion_);
+      firstChunkIdx, chunkCount, reason, activeWireVersion_, reqMsgType());
   if (!n) return false;
   return t->sendFrame(buf, n);
 }
@@ -978,7 +987,7 @@ bool FirmwareReceiver::sendResult(lamp_protocol::FwResultStatus status,
   uint8_t buf[lamp_protocol::FW_RESULT_FIXED_SIZE];
   const size_t n = lamp_protocol::buildFwResult(
       buf, sizeof(buf), fwOutSeq_++, myMac_, wispMac_,
-      status, detail, offerVersion_, activeWireVersion_);
+      status, detail, offerVersion_, activeWireVersion_, resultMsgType());
   if (!n) return false;
   return t->sendFrame(buf, n);
 }
@@ -1093,6 +1102,18 @@ lamp_protocol::FwResultStatus FirmwareReceiver::verifyAndApply() {
                   (unsigned)erasedForLen_, (unsigned)offerTotalLen_);
 #endif
     return lamp_protocol::FwResultStatus::PartitionWriteFail;
+  }
+  // FS-image OTA: the FS hook mounts the freshly-written spiffs partition,
+  // recomputes the manifest digest, ed25519-verifies it against fw.lsig, and
+  // checks the version. There is NO boot-partition flip — the caller reboots
+  // into the new image (the spiffs partition is read at runtime, not booted).
+  // This is post-write verification (the single live partition was already
+  // overwritten), so a bad image is detected here but the old UI is already
+  // gone — the accepted no-A/B-rollback tradeoff. Firmware OTA falls through
+  // to the streaming LSIG verify + boot-partition flip below.
+  if (fsHooks_) {
+    return fsHooks_->verify(static_cast<const void*>(otaPartition),
+                            offerVersion_);
   }
   // Streaming verify: the lamp's ~280 KB free heap can't
   // fit a 1.4 MB firmware image, so we feed firmware_signature's

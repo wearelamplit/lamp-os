@@ -136,6 +136,31 @@ struct PendingFirmwareControl {
 // call this from the WiFi task to publish OFFER/DONE control frames.
 void postPendingFirmwareControl(const PendingFirmwareControl& src);
 
+// FS-image OTA reuses this receiver's transfer machinery (upfront erase, the
+// Core0/Core1 write barrier, the chunk bitmap + gap-fill REQ) but targets the
+// spiffs partition with a different verify + accept rule and the MSG_FS_*
+// frames. The firmware-specific behavior is the default (fsHooks_ == nullptr);
+// the FS receiver instance injects these hooks at begin(). Plain function
+// pointers (not std::function) keep this native-compilable and heap-free; the
+// partition is passed as void* because esp_partition_t is ESP-only and this
+// header also compiles host-side.
+struct FsReceiverHooks {
+  // The spiffs partition to write into (really const esp_partition_t*).
+  const void* (*partition)();
+  // Accept a fresh offer? FS rule: offer.version == FIRMWARE_VERSION AND the
+  // offered digest prefix differs from our local FS digest. (Channel /
+  // chunkSize / busy are handled by the receiver before this is consulted.)
+  bool (*shouldAccept)(uint32_t offerVersion, const uint8_t* offerDigestPrefix);
+  // Verify the fully-written partition (mount + manifest digest + ed25519 +
+  // version match). Returns Success or an FS failure code. No commit step —
+  // the receiver reboots into the freshly-written image.
+  lamp_protocol::FwResultStatus (*verify)(const void* partition,
+                                          uint32_t expectedVersion);
+  uint8_t acceptType;
+  uint8_t reqType;
+  uint8_t resultType;
+};
+
 class FirmwareReceiver {
  public:
   // Reciever lifecycle states. STREAMING is the only state in which
@@ -171,6 +196,11 @@ class FirmwareReceiver {
   void setBleTransport(FirmwareTransport* bleTransport) {
     bleTransport_ = bleTransport;
   }
+
+  // Inject FS-image OTA behavior (see FsReceiverHooks). nullptr (the default)
+  // = firmware OTA. Set once by fs_ota::begin() on the FS receiver instance;
+  // never set on the firmware receiver, so the firmware path is unchanged.
+  void setFsHooks(const FsReceiverHooks* hooks) { fsHooks_ = hooks; }
 
   // Called from main loop on Core 1. Drains internal control queue,
   // runs stall/timeout watchdogs, generates MSG_FW_REQ on gaps. Cheap
@@ -296,10 +326,26 @@ class FirmwareReceiver {
     return meshTransport_;
   }
 
+  // Outbound msgType for ACCEPT/REQ/RESULT — MSG_FS_* when an FS flow is
+  // active (fsHooks_ set), MSG_FW_* otherwise.
+  uint8_t acceptMsgType() const {
+    return fsHooks_ ? fsHooks_->acceptType : lamp_protocol::MSG_FW_ACCEPT;
+  }
+  uint8_t reqMsgType() const {
+    return fsHooks_ ? fsHooks_->reqType : lamp_protocol::MSG_FW_REQ;
+  }
+  uint8_t resultMsgType() const {
+    return fsHooks_ ? fsHooks_->resultType : lamp_protocol::MSG_FW_RESULT;
+  }
+
   // --- State -------------------------------------------------------------
 
   FirmwareTransport* meshTransport_ = nullptr;
   FirmwareTransport* bleTransport_  = nullptr;
+
+  // FS-image OTA hooks. nullptr = firmware OTA (default, firmware path
+  // unchanged). Set only on the FS receiver instance by fs_ota::begin().
+  const FsReceiverHooks* fsHooks_ = nullptr;
 
   State state_ = State::Idle;
 
