@@ -175,7 +175,7 @@ void StatusBeacon::emit() {
   const size_t carriedFwChannelLen = 0;
   const uint32_t carriedFwVersion = 0;
 
-  uint8_t buf[lamp_protocol::WISP_HELLO_FIXED_SIZE];
+  uint8_t buf[lamp_protocol::WISP_HELLO_MAX_SIZE];
   size_t n = 0;
   uint16_t seq = 0;
   STATUS_BEACON_PORTMUX_ENTER(&emitMux_);
