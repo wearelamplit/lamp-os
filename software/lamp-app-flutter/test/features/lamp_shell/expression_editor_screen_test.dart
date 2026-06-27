@@ -1,3 +1,5 @@
+import 'dart:math' show log, ln10, pow;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -251,8 +253,36 @@ void main() {
       const Offset(0, -200),
     );
     expect(find.text('Trigger interval'), findsOneWidget);
-    final rangeSlider = find.byWidgetPredicate(
-        (w) => w is RangeSlider && w.min == 10.0 && w.max == 3600.0);
+    // Slider now lives in log10 space: min≈1.0, max≈3.556.
+    final rangeSlider = find.byWidgetPredicate((w) =>
+        w is RangeSlider &&
+        (w.min - 1.0).abs() < 0.01 &&
+        (w.max - 3.556).abs() < 0.01);
     expect(rangeSlider, findsOneWidget);
+  });
+
+  test('log-scale helpers round-trip common intervals and expand the low band',
+      () {
+    // Mirror the call-site helpers for isolated verification.
+    double secToPos(int sec) => log(sec) / ln10;
+    int posToSec(double pos) =>
+        pow(10, pos).round().clamp(10, 3600) as int;
+
+    // Round-trips within rounding error.
+    expect(posToSec(secToPos(10)), 10);
+    expect(posToSec(secToPos(60)), 60);
+    expect(posToSec(secToPos(3600)), 3600);
+
+    // 60 s sits at a much higher track position in log scale than it would
+    // occupy on a linear 10–3600 track mapped to the same [1.0, 3.556] range,
+    // demonstrating the common 10–60 s band gets proportionally more track.
+    const trackMin = 1.0;   // log10(10)
+    const trackMax = 3.556; // log10(3600) ≈
+    final logPos60 = secToPos(60); // ≈ 1.778
+    final linearPos60 =
+        trackMin + (60 - 10) / (3600 - 10) * (trackMax - trackMin); // ≈ 1.036
+    expect(logPos60, greaterThan(linearPos60),
+        reason:
+            '60 s occupies more track in log scale; common band is not squished');
   });
 }

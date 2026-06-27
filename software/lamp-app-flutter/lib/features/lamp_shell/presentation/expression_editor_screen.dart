@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' show log, ln10, pow;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -328,14 +329,17 @@ class _ExpressionEditorScreenState
                         color: BrandColors.lampWhite, fontSize: 14)),
                 IntervalRangeSlider(
                   values: RangeValues(
-                    draft.intervalMin.toDouble(),
-                    draft.intervalMax.toDouble(),
+                    _secToPos(draft.intervalMin),
+                    _secToPos(draft.intervalMax),
                   ),
-                  min: ExpressionIntervalMath.minSec.toDouble(),
-                  max: ExpressionIntervalMath.maxSec.toDouble(),
-                  labelFor: _fmtSeconds,
-                  onChanged: (v) => _updateDraft(
-                      (d) => _withIntervals(d, v.start.round(), v.end.round())),
+                  min: _secToPos(ExpressionIntervalMath.minSec),
+                  max: _secToPos(ExpressionIntervalMath.maxSec),
+                  labelFor: (pos) => _fmtSeconds(_posToSec(pos).toDouble()),
+                  onChanged: (rv) {
+                    final lo = _posToSec(rv.start);
+                    final hi = _posToSec(rv.end);
+                    _updateDraft((d) => _withIntervals(d, lo, hi));
+                  },
                 ),
                 const SizedBox(height: 16),
               ],
@@ -687,6 +691,12 @@ String _fmtSeconds(double seconds) {
   final h = m / 60;
   return '${h.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '')}h';
 }
+
+// Log10 ↔ seconds converters for the interval slider call site.
+// The slider track is log-scaled so the common 10–60 s band occupies
+// proportional space instead of <2% of a linear 10–3600 s track.
+double _secToPos(int sec) => log(sec) / ln10;
+int _posToSec(double pos) => pow(10, pos).round().clamp(10, 3600);
 
 class _ColorChip extends StatelessWidget {
   const _ColorChip({
