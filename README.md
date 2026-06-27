@@ -16,9 +16,9 @@ With these sorts of subtle changes, people may begin to realize things are not a
 
 ## Build Tutorials
 
-[<img src="hardware/build/images/assembly-guide.jpg" alt="Assembly Guide" width="50%">](hardware/build/files/lamp-build-instructions.pdf)
+[![Assembly Guide](hardware/build/images/assembly-guide.jpg)](hardware/build/files/lamp-build-instructions.pdf)
 
-[<img src="hardware/build/images/conversion-kit.jpg" alt="Build a Conversion Kit" width="50%">](hardware/build/README.md)
+[![Conversion kit Guide](hardware/build/images/conversion-kit.jpg)](hardware/build/README.md)
 
 ## Lamp OS
 
