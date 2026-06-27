@@ -3,10 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/routing/routes.dart';
-import '../../../core/theme/brand_colors.dart';
+import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/back_button_leading.dart';
 import '../../../core/widgets/friendly_error.dart';
 import '../../../core/widgets/info_panel.dart';
+import '../../../core/widgets/nav_row.dart';
+import '../../../core/widgets/section_header.dart';
 import '../../control/application/advanced_session.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/presentation/widgets/connecting_view.dart';
@@ -97,7 +99,7 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
             children: [
               Expanded(
                 child: ListView(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(AppSpace.lg),
                   children: [
                     const InfoPanel(
                       child: Text(
@@ -107,17 +109,17 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
                         'partially-lit segments.',
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: AppSpace.lg),
                     // Shade strip first — it sits physically above the base.
-                    const _StripHeader('Shade strip'),
-                    const SizedBox(height: 8),
+                    const SectionHeader('Shade strip'),
+                    const SizedBox(height: AppSpace.sm),
                     _PixelCountField(
                       initial: state.shade.px,
                       label: 'Shade LED count',
                       onChanged: notifier.setShadePx,
                     ),
                     if (showByteOrder) ...[
-                      const SizedBox(height: 12),
+                      const SizedBox(height: AppSpace.md),
                       SegmentedButton<String>(
                         showSelectedIcon: false,
                         segments: const [
@@ -130,16 +132,16 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
                             notifier.setShadeByteOrder(s.first),
                       ),
                     ],
-                    const SizedBox(height: 24),
-                    const _StripHeader('Base strip'),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: AppSpace.xl),
+                    const SectionHeader('Base strip'),
+                    const SizedBox(height: AppSpace.sm),
                     _PixelCountField(
                       initial: state.base.px,
                       label: 'Base LED count',
                       onChanged: notifier.setBasePx,
                     ),
                     if (showByteOrder) ...[
-                      const SizedBox(height: 12),
+                      const SizedBox(height: AppSpace.md),
                       SegmentedButton<String>(
                         showSelectedIcon: false,
                         segments: const [
@@ -154,14 +156,10 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
                     ],
                     // Knockout masks base pixels only, so it nests under the
                     // base strip rather than living as its own Setup tile.
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.grid_on,
-                          color: BrandColors.headerYellow),
-                      title: const Text('Per-pixel knockout'),
-                      subtitle: Text(
-                          '${state.base.knockout.length} pixel(s) masked'),
-                      trailing: const Icon(Icons.chevron_right),
+                    NavRow(
+                      icon: Icons.grid_on,
+                      title: 'Per-pixel knockout',
+                      subtitle: '${state.base.knockout.length} pixel(s) masked',
                       onTap: () =>
                           context.push(AppRoutes.knockout(widget.lampId)),
                     ),
@@ -171,7 +169,7 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
               SafeArea(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 8),
+                      horizontal: AppSpace.lg, vertical: AppSpace.sm),
                   child: Row(
                     children: [
                       TextButton.icon(
@@ -224,24 +222,6 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
   }
 }
 
-class _StripHeader extends StatelessWidget {
-  const _StripHeader(this.label);
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      label,
-      style: const TextStyle(
-        color: BrandColors.headerYellow,
-        fontSize: 13,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 0.8,
-      ),
-    );
-  }
-}
-
 class _PixelCountField extends StatefulWidget {
   const _PixelCountField({
     required this.initial,
@@ -278,7 +258,6 @@ class _PixelCountFieldState extends State<_PixelCountField> {
     return TextField(
       controller: _ctrl,
       keyboardType: TextInputType.number,
-      style: const TextStyle(color: BrandColors.lampWhite),
       decoration: InputDecoration(labelText: widget.label),
       onChanged: (v) {
         final n = int.tryParse(v);

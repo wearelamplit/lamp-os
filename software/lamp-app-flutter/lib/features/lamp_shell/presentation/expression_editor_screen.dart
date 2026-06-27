@@ -5,8 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/theme/brand_colors.dart';
+import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/friendly_error.dart';
+import '../../../core/widgets/section_header.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/application/control_state.dart';
 import '../../control/application/expression_draft.dart';
@@ -243,10 +244,10 @@ class _ExpressionEditorScreenState
             children: [
               Expanded(
                 child: ListView(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(AppSpace.lg),
                   children: [
                     _Header(meta: meta),
-              const SizedBox(height: 12),
+              const SizedBox(height: AppSpace.md),
               // Target switcher. Same chunky-pill UX as the picker so the
               // active target reads at a glance. Tapping a different target
               // retargets the current draft IN PLACE (no navigation), so the
@@ -281,11 +282,11 @@ class _ExpressionEditorScreenState
               const SizedBox(height: 20),
 
               // Colors
-              const _Label('Colors'),
-              const SizedBox(height: 8),
+              const SectionHeader('Colors'),
+              const SizedBox(height: AppSpace.sm),
               Wrap(
-                spacing: 8,
-                runSpacing: 8,
+                spacing: AppSpace.sm,
+                runSpacing: AppSpace.sm,
                 children: [
                   for (var i = 0; i < draft.colors.length; i++)
                     _ColorChip(
@@ -319,14 +320,12 @@ class _ExpressionEditorScreenState
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: AppSpace.lg),
 
               // Hidden for breathing: continuous expressions ignore intervalMin/Max;
               // only breathSpeed (in the params panel) drives their timing.
               if (widget.typeKey != 'breathing') ...[
-                const Text('Trigger interval',
-                    style: TextStyle(
-                        color: BrandColors.lampWhite, fontSize: 14)),
+                const SectionHeader('Trigger interval'),
                 IntervalRangeSlider(
                   values: RangeValues(
                     _secToPos(draft.intervalMin),
@@ -341,7 +340,7 @@ class _ExpressionEditorScreenState
                     _updateDraft((d) => _withIntervals(d, lo, hi));
                   },
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: AppSpace.lg),
               ],
 
               // Per-type parameters (replaces the old JSON text field).
@@ -371,9 +370,8 @@ class _ExpressionEditorScreenState
                 const SizedBox(height: 20),
                 Text(
                   meta.description,
-                  style: const TextStyle(
-                    color: BrandColors.fogGrey,
-                    fontSize: 12,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                     fontStyle: FontStyle.italic,
                     height: 1.35,
                   ),
@@ -399,7 +397,7 @@ class _ExpressionEditorScreenState
               SafeArea(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 8),
+                      horizontal: AppSpace.lg, vertical: AppSpace.sm),
                   child: Row(
                     children: [
                       TextButton.icon(
@@ -422,7 +420,9 @@ class _ExpressionEditorScreenState
                           icon: const Icon(Icons.delete, size: 18),
                           label: const Text('Delete'),
                           style: TextButton.styleFrom(
-                              foregroundColor: Colors.redAccent),
+                            foregroundColor:
+                                Theme.of(context).colorScheme.error,
+                          ),
                           onPressed: () async {
                             await notifier.removeExpression(
                               type: widget.typeKey,
@@ -507,33 +507,19 @@ class _ExpressionEditorScreenState
   }
 }
 
-class _Label extends StatelessWidget {
-  const _Label(this.text);
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: const TextStyle(color: BrandColors.lampWhite, fontSize: 14),
-    );
-  }
-}
-
 class _Header extends StatelessWidget {
   const _Header({required this.meta});
   final ExpressionTypeMeta? meta;
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: BrandColors.lampWhite.withValues(alpha: 0.04),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: BrandColors.lampWhite.withValues(alpha: 0.06),
-        ),
+        color: colorScheme.surfaceContainer,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Row(
         children: [
@@ -543,19 +529,15 @@ class _Header extends StatelessWidget {
               height: 40,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: BrandColors.auroraBlue.withValues(alpha: 0.18),
+                color: colorScheme.primaryContainer,
               ),
-              child: Icon(meta!.icon, color: BrandColors.auroraBlue),
+              child: Icon(meta!.icon, color: colorScheme.primary),
             ),
-          if (meta != null) const SizedBox(width: 12),
+          if (meta != null) const SizedBox(width: AppSpace.md),
           Expanded(
             child: Text(
               meta?.name ?? '(unknown)',
-              style: const TextStyle(
-                color: BrandColors.lampWhite,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
+              style: Theme.of(context).textTheme.titleMedium,
             ),
           ),
         ],
@@ -593,7 +575,7 @@ class _TargetRow extends StatelessWidget {
           enabled: !isTaken(1),
           onTap: () => onTap(1),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: AppSpace.sm),
         _TargetButton(
           label: 'Base',
           icon: Icons.adjust,
@@ -601,7 +583,7 @@ class _TargetRow extends StatelessWidget {
           enabled: !isTaken(2),
           onTap: () => onTap(2),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: AppSpace.sm),
         _TargetButton(
           label: 'Both',
           icon: Icons.all_inclusive,
@@ -636,19 +618,18 @@ class _TargetButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fill = selected ? BrandColors.glowPink : Colors.transparent;
-    final border = selected
-        ? BrandColors.glowPink
-        : BrandColors.slateGrey.withValues(alpha: 0.5);
+    final colorScheme = Theme.of(context).colorScheme;
+    final fill = selected ? colorScheme.primary : Colors.transparent;
+    final border = selected ? colorScheme.primary : colorScheme.outlineVariant;
     final fg = !enabled
-        ? BrandColors.slateGrey.withValues(alpha: 0.5)
-        : (selected ? BrandColors.midnightBlack : BrandColors.lampWhite);
+        ? colorScheme.onSurfaceVariant
+        : (selected ? colorScheme.onPrimary : colorScheme.onSurface);
     return Expanded(
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: enabled ? onTap : null,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppRadius.card),
           child: Container(
             height: 64,
             decoration: BoxDecoration(
@@ -657,13 +638,13 @@ class _TargetButton extends StatelessWidget {
                 color: border,
                 width: selected ? 2 : 1,
               ),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(AppRadius.card),
             ),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(icon, color: fg, size: 22),
-                const SizedBox(height: 4),
+                const SizedBox(height: AppSpace.xs),
                 Text(
                   label,
                   style: TextStyle(
@@ -714,6 +695,7 @@ class _ColorChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Stack(
       clipBehavior: Clip.none,
       children: [
@@ -734,14 +716,14 @@ class _ColorChip extends StatelessWidget {
                 child: Container(
                   width: 18,
                   height: 18,
-                  decoration: const BoxDecoration(
-                    color: BrandColors.ashGrey,
+                  decoration: BoxDecoration(
+                    color: colorScheme.surfaceContainerHigh,
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.close,
                     size: 12,
-                    color: BrandColors.lampWhite,
+                    color: colorScheme.onSurface,
                   ),
                 ),
               ),

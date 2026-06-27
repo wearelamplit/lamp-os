@@ -3,7 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/routing/routes.dart';
-import '../../../core/theme/brand_colors.dart';
+import '../../../core/theme/app_spacing.dart';
+import '../../../core/theme/brand_extras.dart';
 import '../../../core/widgets/app_snackbar.dart';
 import '../../../core/widgets/empty_state_pane.dart';
 import '../../../core/widgets/friendly_error.dart';
@@ -51,19 +52,20 @@ class ExpressionsScreen extends ConsumerWidget {
         data: (exprSection) {
           final notifier =
               ref.read(controlNotifierProvider(lampId).notifier);
+          final colorScheme = Theme.of(context).colorScheme;
           final Widget content = exprSection.expressions.isEmpty
-              ? const EmptyStatePane(
+              ? EmptyStatePane(
                   icon: Icon(
                     Icons.auto_awesome,
                     size: 56,
-                    color: BrandColors.slateGrey,
+                    color: colorScheme.onSurfaceVariant,
                   ),
                   title: 'No expressions yet',
                   subtitle:
                       'Tap + to add a Glitch, Pulse, Breath or Shift effect.',
                 )
               : ListView.builder(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
                   itemCount: exprSection.expressions.length,
                   itemBuilder: (ctx, i) {
                     final e = exprSection.expressions[i];
@@ -130,7 +132,9 @@ class ExpressionsScreen extends ConsumerWidget {
                         AppRoutes.addExpression(lampId),
                       )
                   : null,
-              backgroundColor: connected ? null : BrandColors.slateGrey,
+              backgroundColor: connected
+                  ? null
+                  : Theme.of(context).colorScheme.onSurfaceVariant,
               tooltip: 'Add expression',
               child: const Icon(Icons.add),
             )
@@ -157,7 +161,9 @@ Future<bool> _confirmDelete(BuildContext context, String type) async {
           child: const Text('Cancel'),
         ),
         FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+          style: FilledButton.styleFrom(
+            backgroundColor: Theme.of(ctx).colorScheme.error,
+          ),
           onPressed: () => Navigator.pop(ctx, true),
           child: const Text('Delete'),
         ),
@@ -207,14 +213,16 @@ class _ExpressionTile extends ConsumerWidget {
     );
     final muted =
         (meta?.defaultDisabledDuringWispOverride ?? false) && wispControlling;
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     return Dismissible(
       key: ValueKey('${expression.type}-${expression.target}'),
       direction: DismissDirection.endToStart,
       background: Container(
         alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 24),
-        color: Colors.redAccent.withValues(alpha: 0.3),
-        child: const Icon(Icons.delete, color: Colors.redAccent),
+        padding: const EdgeInsets.only(right: AppSpace.xl),
+        color: colorScheme.error.withValues(alpha: 0.3),
+        child: Icon(Icons.delete, color: colorScheme.error),
       ),
       confirmDismiss: (_) => onConfirmDelete(),
       onDismissed: (_) => onDelete(),
@@ -229,12 +237,13 @@ class _ExpressionTile extends ConsumerWidget {
                         lampId, expression.type, expression.target),
                   ),
           child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            padding: const EdgeInsets.all(16),
+            margin: const EdgeInsets.symmetric(
+                horizontal: AppSpace.lg, vertical: AppSpace.xs),
+            padding: const EdgeInsets.all(AppSpace.lg),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.04),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+              color: colorScheme.surfaceContainer,
+              borderRadius: BorderRadius.circular(AppRadius.card),
+              border: Border.all(color: colorScheme.outlineVariant),
             ),
             child: Row(
               children: [
@@ -244,30 +253,22 @@ class _ExpressionTile extends ConsumerWidget {
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: BrandColors.auroraBlue.withValues(alpha: 0.16),
+                    color: colorScheme.primaryContainer,
                   ),
                   child: Icon(meta?.icon ?? Icons.auto_awesome,
-                      size: 18, color: BrandColors.auroraBlue),
+                      size: 18, color: colorScheme.primary),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        title,
-                        style: const TextStyle(
-                          color: BrandColors.lampWhite,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
+                      Text(title, style: textTheme.titleMedium),
+                      const SizedBox(height: AppSpace.xs),
                       Text(
                         _targetLabel,
-                        style: const TextStyle(
-                          color: BrandColors.fogGrey,
-                          fontSize: 12,
+                        style: textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ],
@@ -275,8 +276,8 @@ class _ExpressionTile extends ConsumerWidget {
                 ),
                 IconButton(
                   tooltip: 'Trigger now',
-                  icon: const Icon(Icons.play_arrow,
-                      color: BrandColors.lumenGreen),
+                  icon: Icon(Icons.play_arrow,
+                      color: context.brandExtras.success),
                   onPressed: muted ? null : onTrigger,
                 ),
                 Switch(

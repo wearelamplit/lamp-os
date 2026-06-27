@@ -6,7 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/routing/routes.dart';
-import '../../../core/theme/brand_colors.dart';
+import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/tap_counter.dart';
 import '../../../core/widgets/app_snackbar.dart';
 import '../../../core/widgets/friendly_error.dart';
@@ -90,7 +90,7 @@ class _SetupBody extends ConsumerWidget {
       homeSubtitle = hasSsid ? 'Off · ${state.home.ssid} saved' : 'Off';
     }
     return ListView(
-      padding: const EdgeInsets.only(top: 8, bottom: 32),
+      padding: const EdgeInsets.only(top: AppSpace.sm, bottom: AppSpace.xxl),
       children: [
         const SettingsGroupHeading('Lamp'),
         SettingsRow(
@@ -228,14 +228,11 @@ class _RenameDialogState extends State<_RenameDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      backgroundColor: BrandColors.midnightBlack,
-      title: const Text('Rename lamp',
-          style: TextStyle(color: BrandColors.lampWhite)),
+      title: const Text('Rename lamp'),
       content: TextField(
         controller: _ctrl,
         autofocus: true,
         decoration: const InputDecoration(labelText: 'Name'),
-        style: const TextStyle(color: BrandColors.lampWhite),
       ),
       actions: [
         TextButton(
@@ -370,6 +367,7 @@ class _FactoryResetDialogState extends ConsumerState<_FactoryResetDialog> {
 
   @override
   Widget build(BuildContext dialogCtx) {
+    final colorScheme = Theme.of(dialogCtx).colorScheme;
     // Everything lives in `content:` rather than splitting into
     // `actions:`. AlertDialog's actions slot lays out via OverflowBar
     // with unbounded-width intrinsic constraints, which is incompatible
@@ -377,18 +375,18 @@ class _FactoryResetDialogState extends ConsumerState<_FactoryResetDialog> {
     // hotspot. Content area uses normal bounded Flex constraints, so
     // Expanded + Row + buttons layout correctly.
     return AlertDialog(
-      backgroundColor: BrandColors.midnightBlack,
-      title: const Text('Factory reset?',
-          style: TextStyle(color: BrandColors.lampWhite)),
+      title: const Text('Factory reset?'),
       contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text(
+          Text(
             "This wipes all settings on this lamp and returns it to its "
             "out-of-box state. You'll need to onboard it again.",
-            style: TextStyle(color: BrandColors.fogGrey),
+            style: Theme.of(dialogCtx).textTheme.bodyMedium?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
           ),
           const SizedBox(height: 20),
           Row(
@@ -404,10 +402,10 @@ class _FactoryResetDialogState extends ConsumerState<_FactoryResetDialog> {
                 onPressed: () => Navigator.of(dialogCtx).pop(),
                 child: const Text('Cancel'),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: AppSpace.sm),
               FilledButton(
                 style: FilledButton.styleFrom(
-                  backgroundColor: BrandColors.error,
+                  backgroundColor: colorScheme.error,
                 ),
                 onPressed: () async {
                   await widget.notifier.factoryReset();

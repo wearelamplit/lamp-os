@@ -248,11 +248,11 @@ void main() {
     ));
     await _pumpToData(tester, 'Glitchy');
     await tester.dragUntilVisible(
-      find.text('Trigger interval'),
+      find.text('TRIGGER INTERVAL'),
       find.byType(ListView),
       const Offset(0, -200),
     );
-    expect(find.text('Trigger interval'), findsOneWidget);
+    expect(find.text('TRIGGER INTERVAL'), findsOneWidget);
     // Slider now lives in log10 space: min≈1.0, max≈3.556.
     final rangeSlider = find.byWidgetPredicate((w) =>
         w is RangeSlider &&

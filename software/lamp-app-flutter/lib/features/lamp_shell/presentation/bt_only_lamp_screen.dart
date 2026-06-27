@@ -6,7 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/routing/routes.dart';
-import '../../../core/theme/brand_colors.dart';
+import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/app_snackbar.dart';
 import '../../inventory/application/inventory_notifier.dart';
 import '../../nearby/application/nearby_lamps_notifier.dart';
@@ -107,20 +107,19 @@ class _BtOnlyLampScreenState extends ConsumerState<BtOnlyLampScreen> {
       ),
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-          children: const [
+          padding: const EdgeInsets.fromLTRB(
+              AppSpace.lg, AppSpace.lg, AppSpace.lg, AppSpace.xl),
+          children: [
             Text(
               "This lamp is in Bluetooth range but the app can't talk to "
               "it directly — its firmware doesn't speak the app's mesh "
               "protocol yet.",
-              style: TextStyle(
-                color: BrandColors.lampWhite,
-                fontSize: 15,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 height: 1.4,
               ),
             ),
-            SizedBox(height: 24),
-            _ActionCard(
+            const SizedBox(height: AppSpace.xl),
+            const _ActionCard(
               icon: Icons.wifi,
               title: 'Configure it now',
               body:
@@ -130,8 +129,8 @@ class _BtOnlyLampScreenState extends ConsumerState<BtOnlyLampScreen> {
               url: 'http://192.168.4.1',
               launch: false,
             ),
-            SizedBox(height: 16),
-            _ActionCard(
+            const SizedBox(height: AppSpace.lg),
+            const _ActionCard(
               icon: Icons.system_update_alt,
               title: 'Get app + mesh features',
               body:
@@ -169,44 +168,36 @@ class _ActionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppSpace.lg),
       decoration: BoxDecoration(
-        color: BrandColors.slateGrey.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: BrandColors.slateGrey.withValues(alpha: 0.3),
-        ),
+        color: colorScheme.surfaceContainer,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(icon, color: BrandColors.glowPink, size: 22),
+              Icon(icon, color: colorScheme.primary, size: 22),
               const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    color: BrandColors.lampWhite,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+                child: Text(title, style: textTheme.titleMedium),
               ),
             ],
           ),
           const SizedBox(height: 10),
           Text(
             body,
-            style: const TextStyle(
-              color: BrandColors.fogGrey,
-              fontSize: 13,
+            style: textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
               height: 1.4,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpace.md),
           InkWell(
             onTap: () async {
               if (launch) {
@@ -230,15 +221,14 @@ class _ActionCard extends StatelessWidget {
                 }
               }
             },
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(AppSpace.sm),
             child: Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 10, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: AppSpace.sm),
               decoration: BoxDecoration(
-                color: BrandColors.midnightBlack,
-                borderRadius: BorderRadius.circular(8),
+                color: colorScheme.surface,
+                borderRadius: BorderRadius.circular(AppSpace.sm),
                 border: Border.all(
-                  color: BrandColors.glowPink.withValues(alpha: 0.5),
+                  color: colorScheme.primary.withValues(alpha: 0.5),
                 ),
               ),
               child: Row(
@@ -246,8 +236,8 @@ class _ActionCard extends StatelessWidget {
                   Expanded(
                     child: Text(
                       url,
-                      style: const TextStyle(
-                        color: BrandColors.glowPink,
+                      style: TextStyle(
+                        color: colorScheme.primary,
                         fontSize: 13,
                         fontFamily: 'monospace',
                       ),
@@ -255,7 +245,7 @@ class _ActionCard extends StatelessWidget {
                   ),
                   Icon(
                     launch ? Icons.open_in_new : Icons.copy,
-                    color: BrandColors.slateGrey,
+                    color: colorScheme.onSurfaceVariant,
                     size: 16,
                   ),
                 ],

@@ -32,7 +32,7 @@ Future<ProviderContainer> _makeContainer() async {
 Future<void> _pumpToData(WidgetTester tester) async {
   for (var i = 0; i < 30; i++) {
     await tester.pump(const Duration(milliseconds: 16));
-    if (find.text('Shade strip').evaluate().isNotEmpty) return;
+    if (find.text('SHADE STRIP').evaluate().isNotEmpty) return;
   }
 }
 
@@ -50,11 +50,11 @@ void main() {
     await tester.pumpWidget(_wrap(c));
     await _pumpToData(tester);
 
-    expect(find.text('Shade strip'), findsOneWidget);
-    expect(find.text('Base strip'), findsOneWidget);
+    expect(find.text('SHADE STRIP'), findsOneWidget);
+    expect(find.text('BASE STRIP'), findsOneWidget);
     expect(
-      tester.getCenter(find.text('Shade strip')).dy,
-      lessThan(tester.getCenter(find.text('Base strip')).dy),
+      tester.getCenter(find.text('SHADE STRIP')).dy,
+      lessThan(tester.getCenter(find.text('BASE STRIP')).dy),
     );
   });
 
@@ -77,7 +77,7 @@ void main() {
     // Knockout masks base pixels only, so its entry belongs below the
     // Base strip header, not the Shade one.
     expect(
-      tester.getCenter(find.text('Base strip')).dy,
+      tester.getCenter(find.text('BASE STRIP')).dy,
       lessThan(tester.getCenter(find.text('Per-pixel knockout')).dy),
     );
   });

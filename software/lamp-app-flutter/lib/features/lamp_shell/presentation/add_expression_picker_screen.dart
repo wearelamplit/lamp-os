@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/routing/routes.dart';
-import '../../../core/theme/brand_colors.dart';
+import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/friendly_error.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/domain/sections.dart';
@@ -112,14 +112,16 @@ class _Body extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      padding: const EdgeInsets.fromLTRB(
+          AppSpace.lg, AppSpace.sm, AppSpace.lg, AppSpace.xl),
       children: [
-        const Padding(
-          padding: EdgeInsets.only(top: 8, bottom: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
           child: Text(
             'Where should this expression play?',
-            style: TextStyle(color: BrandColors.lampWhite, fontSize: 15),
+            style: textTheme.bodyLarge,
           ),
         ),
         Row(
@@ -131,7 +133,7 @@ class _Body extends StatelessWidget {
               enabled: !_targetFull(1),
               onTap: () => onTargetChanged(1),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: AppSpace.sm),
             _TargetButton(
               label: 'Base',
               icon: Icons.adjust,
@@ -139,7 +141,7 @@ class _Body extends StatelessWidget {
               enabled: !_targetFull(2),
               onTap: () => onTargetChanged(2),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: AppSpace.sm),
             _TargetButton(
               label: 'Both',
               icon: Icons.all_inclusive,
@@ -149,12 +151,12 @@ class _Body extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 24),
-        const Padding(
-          padding: EdgeInsets.only(bottom: 8, left: 4),
+        const SizedBox(height: AppSpace.xl),
+        Padding(
+          padding: const EdgeInsets.only(bottom: AppSpace.sm, left: AppSpace.xs),
           child: Text(
             'Pick an expression',
-            style: TextStyle(color: BrandColors.lampWhite, fontSize: 15),
+            style: textTheme.bodyLarge,
           ),
         ),
         for (final meta in ExpressionTypeMeta.all)
@@ -185,22 +187,22 @@ class _ExpressionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     final disabledOpacity = taken ? 0.35 : 1.0;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Material(
-        color: BrandColors.lampWhite.withValues(alpha: 0.04),
-        borderRadius: BorderRadius.circular(12),
+        color: colorScheme.surfaceContainer,
+        borderRadius: BorderRadius.circular(AppRadius.card),
         child: InkWell(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppRadius.card),
           onTap: taken ? null : onTap,
           child: Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(AppSpace.lg),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: BrandColors.lampWhite.withValues(alpha: 0.06),
-              ),
+              borderRadius: BorderRadius.circular(AppRadius.card),
+              border: Border.all(color: colorScheme.outlineVariant),
             ),
             child: Opacity(
               opacity: disabledOpacity,
@@ -211,12 +213,9 @@ class _ExpressionCard extends StatelessWidget {
                     height: 44,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: BrandColors.auroraBlue.withValues(alpha: 0.18),
+                      color: colorScheme.primaryContainer,
                     ),
-                    child: Icon(
-                      meta.icon,
-                      color: BrandColors.auroraBlue,
-                    ),
+                    child: Icon(meta.icon, color: colorScheme.primary),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -225,29 +224,22 @@ class _ExpressionCard extends StatelessWidget {
                       children: [
                         Row(
                           children: [
-                            Text(
-                              meta.name,
-                              style: const TextStyle(
-                                color: BrandColors.lampWhite,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
+                            Text(meta.name, style: textTheme.titleMedium),
                             if (taken) ...[
-                              const SizedBox(width: 8),
+                              const SizedBox(width: AppSpace.sm),
                               Container(
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 6, vertical: 2),
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(999),
-                                  color: BrandColors.slateGrey
+                                  color: colorScheme.onSurfaceVariant
                                       .withValues(alpha: 0.2),
                                 ),
-                                child: const Text(
+                                child: Text(
                                   'in use',
                                   style: TextStyle(
                                     fontSize: 10,
-                                    color: BrandColors.slateGrey,
+                                    color: colorScheme.onSurfaceVariant,
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
@@ -258,17 +250,16 @@ class _ExpressionCard extends StatelessWidget {
                         const SizedBox(height: 2),
                         Text(
                           meta.tagline,
-                          style: const TextStyle(
-                            color: BrandColors.fogGrey,
-                            fontSize: 12,
+                          style: textTheme.bodySmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
                           ),
                         ),
                       ],
                     ),
                   ),
                   if (!taken)
-                    const Icon(Icons.chevron_right,
-                        color: BrandColors.slateGrey),
+                    Icon(Icons.chevron_right,
+                        color: colorScheme.onSurfaceVariant),
                 ],
               ),
             ),
@@ -300,19 +291,18 @@ class _TargetButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fill = selected ? BrandColors.glowPink : Colors.transparent;
-    final border = selected
-        ? BrandColors.glowPink
-        : BrandColors.slateGrey.withValues(alpha: 0.5);
+    final colorScheme = Theme.of(context).colorScheme;
+    final fill = selected ? colorScheme.primary : Colors.transparent;
+    final border = selected ? colorScheme.primary : colorScheme.outlineVariant;
     final fg = !enabled
-        ? BrandColors.slateGrey.withValues(alpha: 0.5)
-        : (selected ? BrandColors.midnightBlack : BrandColors.lampWhite);
+        ? colorScheme.onSurfaceVariant
+        : (selected ? colorScheme.onPrimary : colorScheme.onSurface);
     return Expanded(
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: enabled ? onTap : null,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppRadius.card),
           child: Container(
             height: 72,
             decoration: BoxDecoration(
@@ -321,13 +311,13 @@ class _TargetButton extends StatelessWidget {
                 color: border,
                 width: selected ? 2 : 1,
               ),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(AppRadius.card),
             ),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(icon, color: fg, size: 24),
-                const SizedBox(height: 4),
+                const SizedBox(height: AppSpace.xs),
                 Text(
                   label,
                   style: TextStyle(

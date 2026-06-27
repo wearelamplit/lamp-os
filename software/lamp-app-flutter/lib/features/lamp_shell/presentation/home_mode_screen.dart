@@ -8,9 +8,10 @@ import 'package:go_router/go_router.dart';
 import '../../../core/ble/ble_client.dart';
 import '../../../core/ble/ble_client_provider.dart';
 import '../../../core/ble/uuids.dart';
-import '../../../core/theme/brand_colors.dart';
+import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/friendly_error.dart';
 import '../../../core/widgets/info_panel.dart';
+import '../../../core/widgets/section_header.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/presentation/widgets/connecting_view.dart';
 import '../../control/presentation/widgets/disconnect_aware_body.dart';
@@ -133,7 +134,7 @@ class _HomeModeScreenState extends ConsumerState<HomeModeScreen> {
           return DisconnectAwareBody(
             lampId: widget.lampId,
             child: ListView(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(AppSpace.lg),
             children: [
               const InfoPanel(
                 child: Text(
@@ -144,14 +145,14 @@ class _HomeModeScreenState extends ConsumerState<HomeModeScreen> {
                   'password — it just listens for the name in the air.',
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: AppSpace.lg),
 
               if (hasSaved) ...[
                 _ConnectionStatusRow(
                   label: 'Home network: ${home.ssid}',
                   onForget: _onForget,
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: AppSpace.md),
               ] else ...[
                 WifiNetworkPicker(
                   lampId: widget.lampId,
@@ -163,16 +164,8 @@ class _HomeModeScreenState extends ConsumerState<HomeModeScreen> {
               // routes CHAR_BRIGHTNESS to home.brightness while this page
               // is open (via CHAR_HOME_MODE_FOCUS), so dragging the
               // slider previews the home brightness live on the lamp.
-              const SizedBox(height: 24),
-              const Text(
-                'Home Mode brightness',
-                style: TextStyle(
-                  color: BrandColors.headerYellow,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.8,
-                ),
-              ),
+              const SizedBox(height: AppSpace.xl),
+              const SectionHeader('Home Mode brightness'),
               Row(
                 children: [
                   Expanded(
@@ -192,9 +185,8 @@ class _HomeModeScreenState extends ConsumerState<HomeModeScreen> {
                     child: Text(
                       '${home.brightness}%',
                       textAlign: TextAlign.right,
-                      style: const TextStyle(
-                        color: BrandColors.fogGrey,
-                        fontSize: 12,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                         fontFamily: 'monospace',
                       ),
                     ),
@@ -227,8 +219,7 @@ class _ConnectionStatusRow extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: Text(label,
-              style: const TextStyle(color: BrandColors.lampWhite)),
+          child: Text(label),
         ),
         TextButton.icon(
           icon: const Icon(Icons.wifi_off, size: 16),
@@ -239,4 +230,3 @@ class _ConnectionStatusRow extends StatelessWidget {
     );
   }
 }
-

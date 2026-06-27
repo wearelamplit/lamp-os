@@ -4,7 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/routing/routes.dart';
-import '../../../core/theme/brand_colors.dart';
+import '../../../core/theme/app_spacing.dart';
+import '../../../core/theme/brand_extras.dart';
 import '../../../core/widgets/lamp_chip.dart';
 import '../../../features/control/application/control_notifier.dart';
 import '../../../features/control/presentation/control_screen.dart';
@@ -14,15 +15,6 @@ import '../../social/presentation/social_screen.dart';
 import '../../wisp/application/wisp_notifier.dart';
 import 'expressions_screen.dart';
 import 'info_screen.dart';
-
-/// Diagonal aurora-blue → glow-pink gradient used on the active tab
-/// indicator and the AppBar Save action. Ported from the prior Vue app's
-/// `TopNavigation.vue` and `Lamp.vue` chrome.
-const _brandGradient = LinearGradient(
-  begin: Alignment.topLeft,
-  end: Alignment.bottomRight,
-  colors: [BrandColors.auroraBlue, BrandColors.glowPink],
-);
 
 /// Bottom-nav tabs for the lamp shell. Wisp used to be a bottom-nav
 /// destination but moved out: when only one wisp is painting a given
@@ -48,6 +40,33 @@ class LampShell extends ConsumerStatefulWidget {
 
 class _LampShellState extends ConsumerState<LampShell> {
   late LampTab _tab = widget.initialTab;
+
+  NavigationDestination _destination(
+      IconData icon, String label, bool selected) {
+    final iconWidget = Icon(icon, size: 22);
+    if (!selected) return NavigationDestination(icon: iconWidget, label: label);
+    final gradient = context.brandExtras.chromeGradient;
+    final primary = Theme.of(context).colorScheme.primary;
+    return NavigationDestination(
+      icon: Container(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpace.lg, vertical: AppSpace.xs),
+        decoration: BoxDecoration(
+          gradient: gradient,
+          borderRadius: BorderRadius.circular(999),
+          boxShadow: [
+            BoxShadow(
+              color: primary.withValues(alpha: 0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: iconWidget,
+      ),
+      label: label,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -93,6 +112,8 @@ class _LampShellState extends ConsumerState<LampShell> {
     final status =
         connected ? StatusKind.mesh : StatusKind.searching;
 
+    final cs = Theme.of(context).colorScheme;
+
     return Scaffold(
       appBar: AppBar(
         // The LampChip in `title` routes to My Lamps for the picker — that's
@@ -131,22 +152,19 @@ class _LampShellState extends ConsumerState<LampShell> {
           indicatorShape: const StadiumBorder(),
           labelTextStyle: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.selected)) {
-              return const TextStyle(
-                color: BrandColors.lampWhite,
+              return TextStyle(
+                color: cs.onSurface,
                 fontWeight: FontWeight.w600,
                 fontSize: 12,
               );
             }
-            return const TextStyle(
-              color: BrandColors.slateGrey,
-              fontSize: 12,
-            );
+            return TextStyle(color: cs.onSurfaceVariant, fontSize: 12);
           }),
           iconTheme: WidgetStateProperty.resolveWith((states) {
             return IconThemeData(
               color: states.contains(WidgetState.selected)
-                  ? BrandColors.lampWhite
-                  : BrandColors.slateGrey,
+                  ? cs.onSurface
+                  : cs.onSurfaceVariant,
             );
           }),
         ),
@@ -160,12 +178,12 @@ class _LampShellState extends ConsumerState<LampShell> {
           onDestinationSelected: (i) =>
               setState(() => _tab = LampTab.values[i]),
           destinations: [
-            _gradientDestination(Icons.tune, 'Setup', _tab == LampTab.control),
-            _gradientDestination(
+            _destination(Icons.tune, 'Setup', _tab == LampTab.control),
+            _destination(
                 Icons.auto_awesome, 'Expressions', _tab == LampTab.expressions),
-            _gradientDestination(Icons.handshake_outlined, 'Social',
+            _destination(Icons.handshake_outlined, 'Social',
                 _tab == LampTab.social),
-            _gradientDestination(
+            _destination(
                 Icons.info_outline, 'Info', _tab == LampTab.info),
           ],
         ),
@@ -175,29 +193,3 @@ class _LampShellState extends ConsumerState<LampShell> {
     );
   }
 }
-
-NavigationDestination _gradientDestination(
-    IconData icon, String label, bool selected) {
-  final iconWidget = Icon(icon, size: 22);
-  return NavigationDestination(
-    icon: selected
-        ? Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            decoration: BoxDecoration(
-              gradient: _brandGradient,
-              borderRadius: BorderRadius.circular(999),
-              boxShadow: [
-                BoxShadow(
-                  color: BrandColors.auroraBlue.withValues(alpha: 0.3),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: iconWidget,
-          )
-        : iconWidget,
-    label: label,
-  );
-}
-

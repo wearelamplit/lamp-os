@@ -4,7 +4,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../../core/app_channel.dart';
-import '../../../core/theme/brand_colors.dart';
+import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/tap_counter.dart';
 import '../../../core/widgets/app_snackbar.dart';
 import '../../../core/widgets/friendly_error.dart';
@@ -91,68 +91,72 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     final v = widget.state.lamp.fwVersion;
     final ch = widget.state.lamp.fwChannel;
     final fwLine = (v == null || ch == null)
         ? 'Firmware ...'
         : 'Firmware ${formatFirmwareSemver(v)} ($ch)';
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
+      padding: const EdgeInsets.fromLTRB(
+          AppSpace.lg, AppSpace.xl, AppSpace.lg, AppSpace.xxl),
       children: [
         GestureDetector(
           onTap: _tap.record,
           behavior: HitTestBehavior.opaque,
           child: const Center(
             child: Padding(
-              padding: EdgeInsets.symmetric(vertical: 16),
+              padding: EdgeInsets.symmetric(vertical: AppSpace.lg),
               child: _LamplitWordmark(),
             ),
           ),
         ),
-        const SizedBox(height: 4),
-        const Center(
+        const SizedBox(height: AppSpace.xs),
+        Center(
           child: Text(
             '✦  Sparking inspiration through shared creative experiences',
             textAlign: TextAlign.center,
-            style: TextStyle(color: BrandColors.fogGrey, fontSize: 12),
+            style: textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
           ),
         ),
-        const SizedBox(height: 16),
-        const InfoPanel(
+        const SizedBox(height: AppSpace.lg),
+        InfoPanel(
           child: Text.rich(
             TextSpan(
               children: [
-                TextSpan(
+                const TextSpan(
                     text:
                         'Lamplit Art Society is a non-profit collective sparking connection and creativity through shared lamp art. More at '),
                 TextSpan(
                   text: 'lamplit.ca',
                   style: TextStyle(
-                    color: BrandColors.auroraBlue,
+                    color: colorScheme.primary,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                TextSpan(text: '.'),
+                const TextSpan(text: '.'),
               ],
             ),
           ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: AppSpace.xl),
         FirmwareUpdatePanel(
           deviceId: widget.lampId,
           lampType: widget.state.lamp.lampType,
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: AppSpace.lg),
         Center(
           child: Text(
             fwLine,
-            style: const TextStyle(
-              color: BrandColors.fogGrey,
-              fontSize: 12,
+            style: textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
             ),
           ),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: AppSpace.xs),
         Center(
           child: FutureBuilder<PackageInfo>(
             future: _packageInfo,
@@ -163,9 +167,8 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
                   : '...';
               return Text(
                 'App $v',
-                style: const TextStyle(
-                  color: BrandColors.fogGrey,
-                  fontSize: 12,
+                style: textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
                 ),
               );
             },
@@ -183,21 +186,21 @@ class _LamplitWordmark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         SvgPicture.asset(
           'assets/lamplit-logo.svg',
           height: 140,
-          colorFilter: const ColorFilter.mode(
-              BrandColors.lampWhite, BlendMode.srcIn),
+          colorFilter: ColorFilter.mode(colorScheme.onSurface, BlendMode.srcIn),
           semanticsLabel: 'Lamplit logo',
         ),
         const SizedBox(height: 14),
-        const Text(
+        Text(
           'Lamplit Art Society',
           style: TextStyle(
-            color: BrandColors.headerYellow,
+            color: colorScheme.secondary,
             fontSize: 12,
             fontWeight: FontWeight.w600,
             letterSpacing: 4,
