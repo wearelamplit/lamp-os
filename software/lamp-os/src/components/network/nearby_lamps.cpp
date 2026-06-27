@@ -573,4 +573,60 @@ std::string NearbyLamps::getWispStatusReadJson(bool includePalette) {
   return out;
 }
 
+// Stale threshold for CHAR_WISP_CLAIMS. Matches the wisp-pairing window:
+// the wisp retransmits MSG_WISP_CLAIM every 2 s during pairing, which lasts
+// up to 60 s. After 60 s of silence, any cached roster is meaningless.
+static constexpr uint32_t kWispClaimStaleMs = 60000;
+
+void NearbyLamps::cacheWispClaim(const uint8_t mac[6],
+                                  const uint8_t lampMacs[][6], uint8_t count,
+                                  uint32_t nowMs) {
+  xSemaphoreTake(mutex_, portMAX_DELAY);
+  if (wispCache_.present && std::memcmp(wispCache_.mac, mac, 6) != 0) {
+    wispCache_.claimedCount = 0;
+    wispCache_.lastClaimMs = 0;
+  }
+  std::memcpy(wispCache_.mac, mac, 6);
+  wispCache_.present = true;
+  const uint8_t safeCount =
+      count > lamp_protocol::kMaxWispClaimEntries
+          ? static_cast<uint8_t>(lamp_protocol::kMaxWispClaimEntries)
+          : count;
+  if (safeCount > 0 && lampMacs) {
+    std::memcpy(wispCache_.claimedLampMacs, lampMacs,
+                static_cast<size_t>(safeCount) * 6);
+  }
+  wispCache_.claimedCount = safeCount;
+  wispCache_.lastClaimMs = nowMs;
+  xSemaphoreGive(mutex_);
+}
+
+size_t NearbyLamps::buildWispClaimsBlob(uint8_t* out, size_t outCap,
+                                         uint32_t nowMs) {
+  if (!out || outCap == 0) return 0;
+  WispCache snap;
+  if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(2)) != pdTRUE) {
+    out[0] = 0;
+    return 1;
+  }
+  snap = wispCache_;
+  xSemaphoreGive(mutex_);
+
+  const bool stale = snap.lastClaimMs == 0 ||
+                     (nowMs - snap.lastClaimMs) > kWispClaimStaleMs;
+  const uint8_t count = stale ? 0 : snap.claimedCount;
+  const size_t needed = 1 + static_cast<size_t>(count) * 6;
+  if (needed > outCap) {
+    out[0] = 0;
+    return 1;
+  }
+  out[0] = count;
+  if (count > 0) {
+    std::memcpy(out + 1, snap.claimedLampMacs,
+                static_cast<size_t>(count) * 6);
+  }
+  return needed;
+}
+
+
 }  // namespace lamp

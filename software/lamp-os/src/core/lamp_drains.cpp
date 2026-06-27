@@ -628,6 +628,18 @@ void Lamp::drainWispPalette() {
   }
 }
 
+// Drain pendingSlots.wispClaim — MSG_WISP_CLAIM roster from the wisp. Caches
+// the claimed lamp MACs so the app can read them via CHAR_WISP_CLAIMS.
+void Lamp::drainWispClaim() {
+  {
+    lamp::PendingWispClaim cmd;
+    if (lamp::pendingSlots.wispClaim.drain(pendingMux, cmd)) {
+      lamp::nearbyLamps.cacheWispClaim(cmd.sourceMac, cmd.lampMacs, cmd.count,
+                                       millis());
+    }
+  }
+}
+
 // Drain pendingSlots.wispOp — app wrote a wispOp via CHAR_WISP_OP; we
 // broadcast it as MSG_CONTROL_OP so the wisp(s) on the mesh pick it up.
 // NEVER applied locally — wispOp is wisp-only (lamps don't have a zone

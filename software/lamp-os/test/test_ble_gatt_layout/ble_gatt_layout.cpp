@@ -39,6 +39,7 @@ static uint32_t layoutHash() {
 static bool expectedHash(uint8_t version, uint32_t& out) {
   switch (version) {
     case 1: out = 0x8386B522u; return true;
+    case 2: out = 0xBE2909BFu; return true;
     default: return false;
   }
 }
@@ -67,8 +68,9 @@ void test_layout_matches_pinned_hash() {
 }
 
 void test_schema_version_char_is_tail() {
-  // The version char must be last; the app relies on append-only growth.
-  TEST_ASSERT_EQUAL_STRING(CHAR_SCHEMA_VERSION,
+  // The most-recently-appended characteristic must be last; the app relies
+  // on append-only growth to preserve handle positions.
+  TEST_ASSERT_EQUAL_STRING(CHAR_WISP_CLAIMS,
                            kGattLayout[kGattLayoutCount - 1].uuid);
 }
 
