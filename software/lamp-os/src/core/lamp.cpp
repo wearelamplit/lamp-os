@@ -28,6 +28,7 @@
 #include "components/apply/apply_settings_blob.hpp"
 #include "components/firmware/firmware_receiver.hpp"
 #include "components/firmware/firmware_distributor.hpp"
+#include "components/firmware/fs_ota.hpp"
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 #include <NimBLEDevice.h>
 #include <esp_ota_ops.h>
@@ -1123,6 +1124,11 @@ void lamp::Lamp::setup() {
   // for ACCEPT/REQ/RESULT via show_receiver's new dispatch ladder).
   lamp::firmwareDistributor.begin(&meshFwTransport);
   showReceiver.setFirmwareDistributor(&lamp::firmwareDistributor);
+#if LAMP_FS_OTA_ENABLED
+  // FS-image OTA: a second receiver/distributor pair targeting the spiffs
+  // partition (shares the mesh transport; cross-OTA guard prevents overlap).
+  fs_ota::begin(&meshFwTransport, &firmwareReceiver, &lamp::firmwareDistributor);
+#endif
 
   // Arm the post-OTA self-health timer. esp_ota_get_state_partition
   // returns the ota-image-state of the running partition. If we just
@@ -1334,6 +1340,9 @@ void lamp::Lamp::tick() {
   // Cheap when state == Idle (single switch + return).
   firmwareReceiver.tick(millis());
   lamp::firmwareDistributor.tick(millis());
+#if LAMP_FS_OTA_ENABLED
+  fs_ota::tick(millis());
+#endif
   // Post-OTA self-health check. After 30 seconds of steady-state
   // loop iteration, if BLE is up and the loop has been iterating (we're
   // inside it now so trivially true), call mark_app_valid so the next OTA

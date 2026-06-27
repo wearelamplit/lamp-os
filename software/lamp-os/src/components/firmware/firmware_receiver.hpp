@@ -202,6 +202,12 @@ class FirmwareReceiver {
   // never set on the firmware receiver, so the firmware path is unchanged.
   void setFsHooks(const FsReceiverHooks* hooks) { fsHooks_ = hooks; }
 
+  // Cross-OTA guard. Returns true if the *other* OTA path (FS vs firmware) is
+  // mid-flow — they share the erase + quiet-mode machinery, so only one may
+  // run at a time. nullptr (default) = no cross-check. fs_ota::begin() wires
+  // each receiver's guard to the other path's instances.
+  void setBusyGuard(bool (*fn)()) { busyGuard_ = fn; }
+
   // Called from main loop on Core 1. Drains internal control queue,
   // runs stall/timeout watchdogs, generates MSG_FW_REQ on gaps. Cheap
   // when state == Idle.
@@ -346,6 +352,9 @@ class FirmwareReceiver {
   // FS-image OTA hooks. nullptr = firmware OTA (default, firmware path
   // unchanged). Set only on the FS receiver instance by fs_ota::begin().
   const FsReceiverHooks* fsHooks_ = nullptr;
+
+  // Cross-OTA busy guard (see setBusyGuard). nullptr = no cross-check.
+  bool (*busyGuard_)() = nullptr;
 
   State state_ = State::Idle;
 

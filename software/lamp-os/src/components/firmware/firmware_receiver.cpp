@@ -385,6 +385,14 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
     return;
   }
 
+  // Cross-OTA guard: don't start a new flow while the other OTA path (FS vs
+  // firmware) is mid-write — they share the upfront-erase + quiet-mode
+  // machinery. Decline-busy so the peer backs off and retries after.
+  if (busyGuard_ && busyGuard_()) {
+    sendAccept(ctrl, lamp_protocol::FwAcceptStatus::DeclineBusy);
+    return;
+  }
+
   // Begin a new OTA flow. Full-upfront erase: erase the ENTIRE image region
   // synchronously here on Core 1 before arming the gate or sending ACCEPT, so
   // the recv path is a pure write (no erase) — see the file-scope comment.

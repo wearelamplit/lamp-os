@@ -7,6 +7,7 @@
 
 #include "../firmware/firmware_receiver.hpp"
 #include "../firmware/firmware_distributor.hpp"
+#include "../firmware/fs_ota.hpp"
 #include "../../version.hpp"
 
 namespace lamp {
@@ -135,7 +136,9 @@ void ShowReceiver::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
         // version. parseHello already validated data[2] is in our
         // accepted range (via inspect()).
         data[2],
-        h.fwChannel);
+        h.fwChannel,
+        h.fsDigest,
+        h.hasFsDigest);
     link_.broadcast(data, len);
   } else if (msgType == lamp_protocol::MSG_CONTROL_OP) {
     lamp_protocol::ParsedControlOp op;
@@ -483,6 +486,69 @@ void ShowReceiver::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FW_RESULT, p.seq)) return;
     if (!addressedToUs(p.targetMac, myMac_)) return;
     if (firmwareDistributor_) firmwareDistributor_->onResultOnRecvTask(p);
+#if LAMP_FS_OTA_ENABLED
+  } else if (msgType == lamp_protocol::MSG_FS_OFFER) {
+    lamp_protocol::ParsedFwOffer p;
+    if (!lamp_protocol::parseFwOffer(data, len, p, lamp_protocol::MSG_FS_OFFER)) return;
+    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FS_OFFER, p.seq)) return;
+    if (!addressedToUs(p.targetMac, myMac_)) return;
+    PendingFirmwareControl slot{};
+    slot.msgType = lamp_protocol::MSG_FS_OFFER;
+    slot.seq = p.seq;
+    slot.wireVersion = data[2];
+    std::memcpy(slot.sourceMac, p.sourceMac, 6);
+    std::memcpy(slot.targetMac, p.targetMac, 6);
+    slot.offer.version   = p.version;
+    slot.offer.totalLen  = p.totalLen;
+    slot.offer.chunkSize = p.chunkSize;
+    std::memcpy(slot.offer.channel, p.channel, lamp_protocol::FW_CHANNEL_LEN);
+    std::memcpy(slot.offer.sha256Prefix, p.sha256Prefix,
+                lamp_protocol::FW_SHA256_PREFIX_LEN);
+    slot.offer.footerLen   = p.footerLen;
+    slot.offer.totalChunks = p.totalChunks;
+    postPendingFirmwareControl(slot);
+  } else if (msgType == lamp_protocol::MSG_FS_CHUNK) {
+    lamp_protocol::ParsedFwChunk p;
+    if (!lamp_protocol::parseFwChunk(data, len, p, lamp_protocol::MSG_FS_CHUNK)) return;
+    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FS_CHUNK, p.seq)) return;
+    if (!addressedToUs(p.targetMac, myMac_)) return;
+    fs_ota::onChunk(p);
+  } else if (msgType == lamp_protocol::MSG_FS_DONE) {
+    lamp_protocol::ParsedFwDone p;
+    if (!lamp_protocol::parseFwDone(data, len, p, lamp_protocol::MSG_FS_DONE)) return;
+    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FS_DONE, p.seq)) return;
+    if (!addressedToUs(p.targetMac, myMac_)) return;
+    PendingFirmwareControl slot{};
+    slot.msgType = lamp_protocol::MSG_FS_DONE;
+    slot.seq = p.seq;
+    slot.wireVersion = data[2];
+    std::memcpy(slot.sourceMac, p.sourceMac, 6);
+    std::memcpy(slot.targetMac, p.targetMac, 6);
+    slot.done.version   = p.version;
+    slot.done.totalLen  = p.totalLen;
+    std::memcpy(slot.done.sha256Prefix, p.sha256Prefix,
+                lamp_protocol::FW_SHA256_PREFIX_LEN);
+    slot.done.footerLen = p.footerLen;
+    postPendingFirmwareControl(slot);
+  } else if (msgType == lamp_protocol::MSG_FS_ACCEPT) {
+    lamp_protocol::ParsedFwAccept p;
+    if (!lamp_protocol::parseFwAccept(data, len, p, lamp_protocol::MSG_FS_ACCEPT)) return;
+    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FS_ACCEPT, p.seq)) return;
+    if (!addressedToUs(p.targetMac, myMac_)) return;
+    fs_ota::onAccept(p);
+  } else if (msgType == lamp_protocol::MSG_FS_REQ) {
+    lamp_protocol::ParsedFwReq p;
+    if (!lamp_protocol::parseFwReq(data, len, p, lamp_protocol::MSG_FS_REQ)) return;
+    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FS_REQ, p.seq)) return;
+    if (!addressedToUs(p.targetMac, myMac_)) return;
+    fs_ota::onReq(p);
+  } else if (msgType == lamp_protocol::MSG_FS_RESULT) {
+    lamp_protocol::ParsedFwResult p;
+    if (!lamp_protocol::parseFwResult(data, len, p, lamp_protocol::MSG_FS_RESULT)) return;
+    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FS_RESULT, p.seq)) return;
+    if (!addressedToUs(p.targetMac, myMac_)) return;
+    fs_ota::onResult(p);
+#endif
   }
 }
 
@@ -537,7 +603,11 @@ void ShowReceiver::emitHello() {
   size_t n = lamp_protocol::buildHello(buf, sizeof(buf), helloSeq_++, myMac_,
                                        shade, base, FIRMWARE_VERSION,
                                        name.data(), nameLen, otaState,
-                                       FIRMWARE_CHANNEL_STR);
+                                       FIRMWARE_CHANNEL_STR
+#if LAMP_FS_OTA_ENABLED
+                                       , fs_ota::localDigestPrefix()
+#endif
+  );
   if (n) {
     link_.broadcast(buf, n);
   }
