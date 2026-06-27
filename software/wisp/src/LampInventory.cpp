@@ -81,7 +81,9 @@ void LampInventory::recordHello(const uint8_t mac[6], const std::string& name,
 void LampInventory::prune(uint32_t nowMs, uint32_t maxAgeMs) {
   xSemaphoreTake(asHandle(mutex_), portMAX_DELAY);
   for (size_t i = 0; i < entries_.size(); ) {
-    if (entries_[i].lastSeenMs != 0 && (nowMs - entries_[i].lastSeenMs) > maxAgeMs) {
+    const uint32_t last = entries_[i].lastSeenMs;
+    const uint32_t age  = (nowMs >= last) ? nowMs - last : 0;
+    if (last != 0 && age > maxAgeMs) {
       if (i != entries_.size() - 1) entries_[i] = entries_.back();
       entries_.pop_back();
       continue;

@@ -4,6 +4,8 @@
 #include "pb_encode.h"
 #include "aurora_notifications.pb.h"
 #include "NotificationCodec.h"
+#include "Compression.h"
+#include "miniz.h"
 
 // Build a real PALETTE_STATE envelope (uncompressed) to feed the codec.
 static std::vector<uint8_t> buildPaletteEnvelope() {
@@ -41,8 +43,21 @@ void test_decodes_palette_state(void) {
                              d.palette.states[0].active_color_palette_id);
 }
 
+void test_rejects_oversized_inflate(void) {
+    std::vector<uint8_t> big(64 * 1024, 0);
+    mz_ulong zlen = mz_compressBound(static_cast<mz_ulong>(big.size()));
+    std::vector<uint8_t> z(zlen);
+    TEST_ASSERT_EQUAL(MZ_OK, mz_compress(z.data(), &zlen, big.data(),
+                                         static_cast<mz_ulong>(big.size())));
+    std::vector<uint8_t> out;
+    bool ok = Compression::maybeInflate(z.data(), static_cast<size_t>(zlen),
+                                        aurora_NotificationEnvelope_size, out);
+    TEST_ASSERT_FALSE(ok);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_decodes_palette_state);
+    RUN_TEST(test_rejects_oversized_inflate);
     return UNITY_END();
 }

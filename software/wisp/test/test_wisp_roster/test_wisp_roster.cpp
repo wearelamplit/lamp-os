@@ -212,6 +212,17 @@ void test_rssi_jitter_inside_hysteresis_no_flap(void) {
   }
 }
 
+void test_peer_not_pruned_when_lastseen_ahead_of_now(void) {
+  wisp::WispRoster r;
+  r.setSelfMac(kSelfMac);
+  uint8_t entries[7];
+  packEntry(entries, kLampX, -65);
+  r.recordPeerClaim(kPeerHighMac, entries, 1, /*nowMs=*/5000);
+  auto lamps = obs(kLampX, -75);                // peer is closer → owns X
+  r.recomputeClaims(&lamps, 1, /*nowMs=*/4000); // nowMs < lastSeenMs by 1s
+  TEST_ASSERT_FALSE(r.claims(kLampX));          // buggy code prunes & adopts
+}
+
 void test_never_measured_rssi_skips_claim(void) {
   wisp::WispRoster r;
   r.setSelfMac(kSelfMac);
@@ -254,6 +265,7 @@ int main(int, char**) {
   RUN_TEST(test_peer_silence_ages_out_and_we_adopt);
   RUN_TEST(test_rssi_jitter_inside_hysteresis_no_flap);
   RUN_TEST(test_never_measured_rssi_skips_claim);
+  RUN_TEST(test_peer_not_pruned_when_lastseen_ahead_of_now);
   RUN_TEST(test_snapshot_for_broadcast_packs_correctly);
   return UNITY_END();
 }

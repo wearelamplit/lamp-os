@@ -3,7 +3,7 @@
 
 namespace {
 bool inflateInto(const uint8_t* d, size_t n, bool parseZlibHeader,
-                 std::vector<uint8_t>& out) {
+                 size_t maxOut, std::vector<uint8_t>& out) {
     tinfl_decompressor inflator;
     tinfl_init(&inflator);
     out.clear();
@@ -21,6 +21,7 @@ bool inflateInto(const uint8_t* d, size_t n, bool parseZlibHeader,
         inOfs += inBytes;
         out.insert(out.end(), dict.data() + dictOfs,
                    dict.data() + dictOfs + outBytes);
+        if (out.size() > maxOut) return false;
         dictOfs = (dictOfs + outBytes) & (TINFL_LZ_DICT_SIZE - 1);
         if (st == TINFL_STATUS_DONE) return true;
         if (st < TINFL_STATUS_DONE) return false;
@@ -46,15 +47,18 @@ bool isLikelyZlib(const uint8_t* d, size_t n) {
 }
 }  // namespace
 
-bool maybeInflate(const uint8_t* d, size_t n, std::vector<uint8_t>& out) {
+bool maybeInflate(const uint8_t* d, size_t n, size_t maxOut, std::vector<uint8_t>& out) {
     if (isGzip(d, n)) {
         if (n <= 10) return false;
-        return inflateInto(d + 10, n - 10, false, out);
+        return inflateInto(d + 10, n - 10, false, maxOut, out);
     }
     if (isLikelyZlib(d, n)) {
-        if (inflateInto(d, n, true, out)) return true;
+        if (inflateInto(d, n, true, maxOut, out)) return true;
+        if (out.size() > maxOut) return false;
     }
-    if (inflateInto(d, n, false, out)) return true;
+    if (inflateInto(d, n, false, maxOut, out)) return true;
+    if (out.size() > maxOut) return false;
+    if (n > maxOut) return false;
     out.assign(d, d + n);
     return true;
 }

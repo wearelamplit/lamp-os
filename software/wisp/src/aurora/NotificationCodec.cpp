@@ -10,7 +10,7 @@ DecodedNotification decode(const uint8_t* frame, size_t len) {
     DecodedNotification out;
 
     std::vector<uint8_t> raw;
-    if (!Compression::maybeInflate(frame, len, raw)) return out;
+    if (!Compression::maybeInflate(frame, len, aurora_NotificationEnvelope_size, raw)) return out;
 
     aurora_NotificationEnvelope env = aurora_NotificationEnvelope_init_zero;
     pb_istream_t es = pb_istream_from_buffer(raw.data(), raw.size());
