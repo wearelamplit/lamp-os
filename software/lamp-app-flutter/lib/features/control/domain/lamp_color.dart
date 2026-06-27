@@ -74,7 +74,7 @@ class LampColor {
   /// Low RGB + high W → strong warm glow.
   /// Pure warm-white (W=255, RGB=0) → fully tinted swatch.
   ({int r, int g, int b}) get blendedRgb {
-    // Warm-white sRGB approximation. Matches BrandColors.warmWhite.
+    // Warm-white sRGB approximation. Matches Brand.warmWhite (#FABB3E).
     // Hardcoded here so the domain layer doesn't depend on theme.
     const tintR = 0xFA;
     const tintG = 0xBB;

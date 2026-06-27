@@ -6,7 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/routing/routes.dart';
 import '../../../../core/theme/app_spacing.dart';
-import '../../../../core/theme/brand_colors.dart';
+import '../../../../core/theme/brand_extras.dart';
 import '../../../../core/widgets/lamp_card.dart';
 import '../../../../core/widgets/status_dot.dart';
 import '../../../inventory/application/inventory_notifier.dart';
@@ -148,16 +148,18 @@ class _Pill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final extras = context.brandExtras;
     final Color base;
     final String label;
     if (!isMesh) {
-      base = BrandColors.fogGrey;
+      base = colorScheme.onSurfaceVariant;
       label = 'legacy';
     } else if (factoryDefault) {
-      base = BrandColors.amberGold;
+      base = colorScheme.secondary;
       label = 'adopt';
     } else {
-      base = BrandColors.lumenGreen;
+      base = extras.success;
       label = 'add';
     }
     return Container(

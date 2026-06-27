@@ -28,7 +28,7 @@ import 'dart:ui' show Color;
 /// (sourceMode=Off, or Manual/Aurora with an empty palette). Same R/G/B
 /// values as `kWarmWhiteR/G/B` in `StatusRing.h` — tuned to read as a
 /// tungsten bulb on a NEO_GRB WS2812 strip, slightly amber, no blue
-/// bias. Defined here (not pulled from BrandColors.warmWhite) so the
+/// bias. Defined here (not pulled from Brand.warmWhite, #FABB3E) so the
 /// math stays decoupled from theme — the indicator is meant to mirror
 /// what the LED ring is actually showing, not the app's editorial palette.
 const Color kWarmWhite = Color.fromARGB(0xFF, 255, 180, 100);

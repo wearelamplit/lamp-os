@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../theme/brand_colors.dart';
 import 'status_dot.dart';
 
 class LampChip extends StatelessWidget {
@@ -17,6 +16,7 @@ class LampChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return InkWell(
       borderRadius: BorderRadius.circular(999),
       onTap: onTap,
@@ -24,9 +24,9 @@ class LampChip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(999),
-          color: BrandColors.auroraBlue.withValues(alpha: 0.18),
+          color: colorScheme.primary.withValues(alpha: 0.18),
           border: Border.all(
-            color: BrandColors.auroraBlue.withValues(alpha: 0.4),
+            color: colorScheme.primary.withValues(alpha: 0.4),
           ),
         ),
         child: Row(
@@ -36,14 +36,14 @@ class LampChip extends StatelessWidget {
             const SizedBox(width: 8),
             Text(
               name,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
-                color: BrandColors.lampWhite,
+                color: colorScheme.onSurface,
               ),
             ),
             const SizedBox(width: 6),
-            const Icon(Icons.arrow_drop_down, size: 16, color: BrandColors.slateGrey),
+            Icon(Icons.arrow_drop_down, size: 16, color: colorScheme.onSurfaceVariant),
           ],
         ),
       ),

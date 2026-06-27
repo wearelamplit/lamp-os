@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/theme/brand_colors.dart';
+import '../../../../core/theme/brand_extras.dart';
 import '../../../../core/widgets/app_sheet.dart';
 import '../../application/wifi_notifier.dart';
 import '../../domain/wifi_state.dart';
@@ -58,16 +58,18 @@ class _WifiNetworkPickerState extends ConsumerState<WifiNetworkPicker> {
       });
     }
 
+    final colorScheme = Theme.of(context).colorScheme;
+    final extras = context.brandExtras;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            const Expanded(
+            Expanded(
               child: Text(
                 'Pick a network',
                 style: TextStyle(
-                  color: BrandColors.fogGrey,
+                  color: colorScheme.onSurfaceVariant,
                   fontWeight: FontWeight.w600,
                   fontSize: 13,
                   letterSpacing: 0.5,
@@ -98,7 +100,7 @@ class _WifiNetworkPickerState extends ConsumerState<WifiNetworkPicker> {
             padding: const EdgeInsets.symmetric(vertical: 16),
             child: Text(
               widget.emptyHint ?? 'Tap refresh to scan for networks.',
-              style: const TextStyle(color: BrandColors.fogGrey),
+              style: TextStyle(color: colorScheme.onSurfaceVariant),
               textAlign: TextAlign.center,
             ),
           ),
@@ -114,17 +116,17 @@ class _WifiNetworkPickerState extends ConsumerState<WifiNetworkPicker> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (r.encrypted)
-                  const Icon(
+                  Icon(
                     Icons.lock_outline,
                     size: 16,
-                    color: BrandColors.slateGrey,
+                    color: colorScheme.onSurfaceVariant,
                   ),
                 if (isCurrent) ...[
                   const SizedBox(width: 6),
-                  const Icon(
+                  Icon(
                     Icons.check,
                     size: 16,
-                    color: BrandColors.lumenGreen,
+                    color: extras.success,
                   ),
                 ],
               ],
@@ -162,14 +164,16 @@ class RssiBars extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: List.generate(4, (i) {
           final filled = i < _bars;
+          final extras = context.brandExtras;
+          final colorScheme = Theme.of(context).colorScheme;
           return Container(
             width: 3,
             height: 6.0 + i * 4,
             margin: const EdgeInsets.symmetric(horizontal: 1),
             decoration: BoxDecoration(
               color: filled
-                  ? BrandColors.lumenGreen
-                  : BrandColors.slateGrey.withValues(alpha: 0.35),
+                  ? extras.success
+                  : colorScheme.onSurfaceVariant.withValues(alpha: 0.35),
               borderRadius: BorderRadius.circular(1),
             ),
           );
@@ -195,6 +199,7 @@ Future<WifiScanResult?> showWifiPickerSheet(
       maxChildSize: 0.9,
       expand: false,
       builder: (sheetCtx, scrollController) {
+        final sheetColorScheme = Theme.of(sheetCtx).colorScheme;
         return Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
           child: Column(
@@ -207,15 +212,15 @@ Future<WifiScanResult?> showWifiPickerSheet(
                   height: 4,
                   margin: const EdgeInsets.only(bottom: 12),
                   decoration: BoxDecoration(
-                    color: BrandColors.slateGrey.withValues(alpha: 0.5),
+                    color: sheetColorScheme.onSurfaceVariant.withValues(alpha: 0.5),
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
               ),
-              const Text(
+              Text(
                 'WiFi networks',
                 style: TextStyle(
-                  color: BrandColors.lampWhite,
+                  color: sheetColorScheme.onSurface,
                   fontSize: 18,
                   fontWeight: FontWeight.w600,
                 ),

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../theme/brand_colors.dart';
 import '../utils/tap_counter.dart';
 
 /// Friendly error surface used wherever a Riverpod AsyncError or a caught
@@ -68,11 +67,12 @@ class _FriendlyErrorState extends State<FriendlyError> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final children = <Widget>[];
     if (!widget._inline) {
-      children.add(const Icon(
+      children.add(Icon(
         Icons.cloud_off_outlined,
-        color: BrandColors.fogGrey,
+        color: colorScheme.onSurfaceVariant,
         size: 48,
       ));
       children.add(const SizedBox(height: 12));
@@ -84,7 +84,7 @@ class _FriendlyErrorState extends State<FriendlyError> {
         widget.title,
         textAlign: TextAlign.center,
         style: TextStyle(
-          color: widget._inline ? BrandColors.error : BrandColors.lampWhite,
+          color: widget._inline ? colorScheme.error : colorScheme.onSurface,
           fontSize: widget._inline ? 13 : 16,
           fontWeight: FontWeight.w600,
         ),
@@ -95,7 +95,7 @@ class _FriendlyErrorState extends State<FriendlyError> {
       children.add(Text(
         widget.subtitle!,
         textAlign: TextAlign.center,
-        style: const TextStyle(color: BrandColors.fogGrey, fontSize: 13),
+        style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 13),
       ));
     }
     if (_revealed && widget.rawError != null) {
@@ -103,8 +103,8 @@ class _FriendlyErrorState extends State<FriendlyError> {
       children.add(SelectableText(
         widget.rawError.toString(),
         textAlign: TextAlign.center,
-        style: const TextStyle(
-          color: BrandColors.slateGrey,
+        style: TextStyle(
+          color: colorScheme.onSurfaceVariant,
           fontSize: 11,
           fontFamily: 'monospace',
           height: 1.4,

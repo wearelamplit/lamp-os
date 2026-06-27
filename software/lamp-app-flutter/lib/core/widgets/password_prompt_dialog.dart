@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../theme/brand_colors.dart';
 import 'friendly_error.dart';
 
 /// Generic password-prompt dialog. Returns the entered password on
@@ -108,11 +107,12 @@ class _PasswordPromptDialogState extends State<_PasswordPromptDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return AlertDialog(
-      backgroundColor: BrandColors.midnightBlack,
+      backgroundColor: colorScheme.surface,
       title: Text(
         widget.title,
-        style: const TextStyle(color: BrandColors.lampWhite),
+        style: TextStyle(color: colorScheme.onSurface),
       ),
       content: Column(
         mainAxisSize: MainAxisSize.min,
@@ -121,8 +121,8 @@ class _PasswordPromptDialogState extends State<_PasswordPromptDialog> {
           if (widget.subtitle != null) ...[
             Text(
               widget.subtitle!,
-              style: const TextStyle(
-                color: BrandColors.fogGrey,
+              style: TextStyle(
+                color: colorScheme.onSurfaceVariant,
                 fontSize: 13,
               ),
             ),
@@ -139,16 +139,16 @@ class _PasswordPromptDialogState extends State<_PasswordPromptDialog> {
             onSubmitted: (_) => _confirm(),
             decoration: InputDecoration(
               labelText: 'Password',
-              labelStyle: const TextStyle(color: BrandColors.fogGrey),
+              labelStyle: TextStyle(color: colorScheme.onSurfaceVariant),
               suffixIcon: IconButton(
                 icon: Icon(
                   _obscured ? Icons.visibility : Icons.visibility_off,
-                  color: BrandColors.fogGrey,
+                  color: colorScheme.onSurfaceVariant,
                 ),
                 onPressed: () => setState(() => _obscured = !_obscured),
               ),
             ),
-            style: const TextStyle(color: BrandColors.lampWhite),
+            style: TextStyle(color: colorScheme.onSurface),
           ),
           if (_errorMsg != null) ...[
             const SizedBox(height: 12),

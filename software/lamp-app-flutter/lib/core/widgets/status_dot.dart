@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../theme/brand_colors.dart';
+import '../theme/brand_extras.dart';
 
 enum StatusKind { offline, bluetooth, mesh, searching }
 
@@ -52,6 +52,7 @@ class _StatusDotState extends State<StatusDot>
     // Searching is the "we've started scanning but haven't heard back yet"
     // state — render an indeterminate spinner rather than a dot so the
     // user can distinguish it from a true Offline.
+    final colorScheme = Theme.of(context).colorScheme;
     if (widget.kind == StatusKind.searching) {
       return Semantics(
         label: 'Searching',
@@ -61,7 +62,7 @@ class _StatusDotState extends State<StatusDot>
           child: CircularProgressIndicator(
             strokeWidth: (widget.size * 0.18).clamp(1.5, 3.0),
             valueColor: AlwaysStoppedAnimation<Color>(
-              BrandColors.slateGrey.withValues(alpha: 0.85),
+              colorScheme.onSurfaceVariant.withValues(alpha: 0.85),
             ),
           ),
         ),
@@ -69,15 +70,15 @@ class _StatusDotState extends State<StatusDot>
     }
 
     // Mesh-connected lamps glow brand green (mesh is the live, healthy
-    // state). BT-only is auroraBlue at ~70 % so it reads as "online but not
+    // state). BT-only is tertiary at ~70 % so it reads as "online but not
     // the live link." Offline is a dimmed grey — must read as more muted
     // than bluetooth so the inactive state isn't louder than the active one.
     final color = switch (widget.kind) {
-      StatusKind.offline => BrandColors.slateGrey.withValues(alpha: 0.35),
-      StatusKind.bluetooth => BrandColors.auroraBlue.withValues(alpha: 0.7),
-      StatusKind.mesh => BrandColors.lumenGreen,
+      StatusKind.offline => colorScheme.onSurfaceVariant.withValues(alpha: 0.35),
+      StatusKind.bluetooth => colorScheme.tertiary.withValues(alpha: 0.7),
+      StatusKind.mesh => context.brandExtras.success,
       StatusKind.searching =>
-        BrandColors.slateGrey.withValues(alpha: 0.35), // unreachable
+        colorScheme.onSurfaceVariant.withValues(alpha: 0.35), // unreachable
     };
 
     // Screen-readers see only the visual dot otherwise — name it (audit

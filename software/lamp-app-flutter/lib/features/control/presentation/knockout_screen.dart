@@ -1,7 +1,6 @@
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../core/theme/brand_colors.dart';
 import '../../../core/widgets/back_button_leading.dart';
 import '../../../core/widgets/friendly_error.dart';
 import '../../inventory/application/inventory_notifier.dart';
@@ -153,8 +152,8 @@ class _KnockoutScreenState extends ConsumerState<KnockoutScreen> {
               child: Center(
                 child: Text(
                   '$knockoutCount edited',
-                  style: const TextStyle(
-                    color: BrandColors.fogGrey,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                     fontSize: 12,
                   ),
                 ),
@@ -302,6 +301,7 @@ class _PixelBar extends ConsumerWidget {
       (a) => a.value?.base.knockout[index] ?? 100,
     ));
     final fraction = (brightness / 100).clamp(0.0, 1.0);
+    final colorScheme = Theme.of(context).colorScheme;
     return SizedBox(
       height: _KnockoutScreenState._rowHeight,
       child: Padding(
@@ -313,8 +313,8 @@ class _PixelBar extends ConsumerWidget {
               width: _KnockoutScreenState._labelWidth,
               child: Text(
                 '#$index',
-                style: const TextStyle(
-                  color: BrandColors.slateGrey,
+                style: TextStyle(
+                  color: colorScheme.onSurfaceVariant,
                   fontSize: 11,
                   fontFamily: 'monospace',
                 ),
@@ -331,7 +331,7 @@ class _PixelBar extends ConsumerWidget {
                 child: Container(
                   height: 8,
                   decoration: BoxDecoration(
-                    color: BrandColors.slateGrey.withValues(alpha: 0.35),
+                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.35),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   alignment: Alignment.centerLeft,
@@ -339,7 +339,7 @@ class _PixelBar extends ConsumerWidget {
                     widthFactor: fraction,
                     child: Container(
                       decoration: BoxDecoration(
-                        color: BrandColors.glowPink,
+                        color: colorScheme.primary,
                         borderRadius: BorderRadius.circular(4),
                       ),
                     ),
@@ -352,8 +352,8 @@ class _PixelBar extends ConsumerWidget {
               child: Text(
                 '$brightness%',
                 textAlign: TextAlign.right,
-                style: const TextStyle(
-                  color: BrandColors.fogGrey,
+                style: TextStyle(
+                  color: colorScheme.onSurfaceVariant,
                   fontSize: 11,
                   fontFamily: 'monospace',
                 ),

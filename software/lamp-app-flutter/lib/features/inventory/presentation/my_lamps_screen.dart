@@ -7,7 +7,6 @@ import 'package:go_router/go_router.dart';
 import '../../../core/routing/routes.dart';
 import '../../../core/ble/ble_client_provider.dart';
 import '../../../core/theme/app_spacing.dart';
-import '../../../core/theme/brand_colors.dart';
 import '../../../core/widgets/critter_icon.dart';
 import '../../../core/widgets/status_dot.dart';
 import '../../control/application/advanced_session.dart';
@@ -263,8 +262,8 @@ class _LampTile extends ConsumerWidget {
               CritterIcon(
                 critterIndex: lamp.critterIndex,
                 deviceId: lamp.id,
-                shade: colors.shade ?? BrandColors.slateGrey,
-                base: colors.base ?? BrandColors.slateGrey,
+                shade: colors.shade ?? colorScheme.onSurfaceVariant,
+                base: colors.base ?? colorScheme.onSurfaceVariant,
                 size: 44,
               ),
               const SizedBox(width: 14),

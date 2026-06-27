@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_spacing.dart';
-import '../../../core/theme/brand_colors.dart';
+import '../../../core/theme/brand_extras.dart';
 import '../../../core/widgets/back_button_leading.dart';
 import '../../../core/widgets/lamp_card.dart';
 import '../application/nearby_lamps_notifier.dart';
@@ -67,8 +67,8 @@ class NearbyLampsScreen extends ConsumerWidget {
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(999),
                             color: (l.isFactoryDefault
-                                    ? BrandColors.amberGold
-                                    : BrandColors.lumenGreen)
+                                    ? Theme.of(context).colorScheme.secondary
+                                    : context.brandExtras.success)
                                 .withValues(alpha: 0.18),
                           ),
                           child: Text(
@@ -76,8 +76,8 @@ class NearbyLampsScreen extends ConsumerWidget {
                             style: TextStyle(
                               fontSize: 10,
                               color: l.isFactoryDefault
-                                  ? BrandColors.amberGold
-                                  : BrandColors.lumenGreen,
+                                  ? Theme.of(context).colorScheme.secondary
+                                  : context.brandExtras.success,
                               fontWeight: FontWeight.w600,
                             ),
                           ),

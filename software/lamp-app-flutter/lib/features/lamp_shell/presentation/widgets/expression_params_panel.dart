@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../../../core/theme/brand_colors.dart';
-
 /// Renders the per-type parameter UI for an expression. Replaces the
 /// previous raw JSON text field — each parameter the firmware accepts now
 /// has a labelled slider with the right units and clamp range.
@@ -115,7 +113,7 @@ class _SectionLabel extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 4, top: 8),
       child: Text(
         text,
-        style: const TextStyle(color: BrandColors.lampWhite, fontSize: 14),
+        style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14),
       ),
     );
   }
@@ -132,8 +130,8 @@ class _ValueChip extends StatelessWidget {
       child: Text(
         text,
         textAlign: TextAlign.right,
-        style: const TextStyle(
-          color: BrandColors.fogGrey,
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
           fontSize: 12,
           fontFamily: 'monospace',
         ),
@@ -198,6 +196,7 @@ class _ParamSlider extends StatelessWidget {
               cb(stored);
             },
     );
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -209,12 +208,12 @@ class _ParamSlider extends StatelessWidget {
           Row(
             children: [
               Text(leftLabel!,
-                  style: const TextStyle(
-                      color: BrandColors.fogGrey, fontSize: 11)),
+                  style: TextStyle(
+                      color: muted, fontSize: 11)),
               Expanded(child: slider),
               Text(rightLabel!,
-                  style: const TextStyle(
-                      color: BrandColors.fogGrey, fontSize: 11)),
+                  style: TextStyle(
+                      color: muted, fontSize: 11)),
             ],
           ),
           Align(
@@ -223,8 +222,8 @@ class _ParamSlider extends StatelessWidget {
               padding: const EdgeInsets.only(right: 4),
               child: Text(
                 format(value),
-                style: const TextStyle(
-                  color: BrandColors.fogGrey,
+                style: TextStyle(
+                  color: muted,
                   fontSize: 12,
                   fontFamily: 'monospace',
                 ),
@@ -279,6 +278,7 @@ class _RangeParamSlider extends StatelessWidget {
       onChanged: (v) => onChanged(v.start.round(), v.end.round()),
     );
     final valueText = '${format(loClamp)}–${format(hiClamp)}';
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -287,12 +287,12 @@ class _RangeParamSlider extends StatelessWidget {
           Row(
             children: [
               Text(leftLabel!,
-                  style: const TextStyle(
-                      color: BrandColors.fogGrey, fontSize: 11)),
+                  style: TextStyle(
+                      color: muted, fontSize: 11)),
               Expanded(child: slider),
               Text(rightLabel!,
-                  style: const TextStyle(
-                      color: BrandColors.fogGrey, fontSize: 11)),
+                  style: TextStyle(
+                      color: muted, fontSize: 11)),
             ],
           ),
           Align(
@@ -301,8 +301,8 @@ class _RangeParamSlider extends StatelessWidget {
               padding: const EdgeInsets.only(right: 4),
               child: Text(
                 valueText,
-                style: const TextStyle(
-                  color: BrandColors.fogGrey,
+                style: TextStyle(
+                  color: muted,
                   fontSize: 12,
                   fontFamily: 'monospace',
                 ),

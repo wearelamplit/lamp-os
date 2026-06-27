@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_spacing.dart';
-import '../../../core/theme/brand_colors.dart';
 import '../../../core/widgets/app_snackbar.dart';
 import '../../../core/widgets/empty_state_pane.dart';
 import '../../../core/widgets/friendly_error.dart';
@@ -368,13 +367,16 @@ class _TwoOrbsIcon extends StatelessWidget {
     return SizedBox.square(
       dimension: size,
       child: CustomPaint(
-        painter: _TwoOrbsPainter(),
+        painter: _TwoOrbsPainter(Theme.of(context).colorScheme.onSurfaceVariant),
       ),
     );
   }
 }
 
 class _TwoOrbsPainter extends CustomPainter {
+  const _TwoOrbsPainter(this.color);
+  final Color color;
+
   @override
   void paint(Canvas canvas, Size size) {
     final cx = size.width / 2;
@@ -386,7 +388,7 @@ class _TwoOrbsPainter extends CustomPainter {
     // empty-state visual language — the live indicator uses the wisp's
     // actual paint colors here.
     final paint = Paint()
-      ..color = BrandColors.slateGrey
+      ..color = color
       ..style = PaintingStyle.fill;
     final rShade = size.width * 0.22;
     final rBase = size.width * 0.16;
@@ -405,7 +407,7 @@ class _TwoOrbsPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_TwoOrbsPainter old) => false;
+  bool shouldRepaint(_TwoOrbsPainter old) => old.color != color;
 }
 
 class _WispHeader extends StatelessWidget {
@@ -440,7 +442,7 @@ class _WispHeader extends StatelessWidget {
           children: [
             Icon(
               Icons.bubble_chart,
-              color: BrandColors.auroraBlue,
+              color: Theme.of(context).colorScheme.tertiary,
               size: 22,
             ),
             const SizedBox(width: AppSpace.sm),
@@ -485,21 +487,22 @@ class _AuroraNotConnectedNotice extends StatelessWidget {
     final detail = wifiConnected
         ? "Wi-Fi is up but Aurora hasn't been reached yet."
         : "The wisp isn't on Wi-Fi — configure it below.";
+    final secondary = Theme.of(context).colorScheme.secondary;
     return Container(
       padding: const EdgeInsets.all(AppSpace.md),
       decoration: BoxDecoration(
-        color: BrandColors.amberGold.withValues(alpha: 0.10),
+        color: secondary.withValues(alpha: 0.10),
         border: Border.all(
-          color: BrandColors.amberGold.withValues(alpha: 0.40),
+          color: secondary.withValues(alpha: 0.40),
         ),
         borderRadius: BorderRadius.circular(AppSpace.sm),
       ),
       child: Row(
         children: [
-          const Icon(
+          Icon(
             Icons.auto_awesome,
             size: 16,
-            color: BrandColors.amberGold,
+            color: secondary,
           ),
           const SizedBox(width: AppSpace.sm),
           Expanded(

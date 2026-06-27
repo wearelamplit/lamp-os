@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../../../core/theme/brand_colors.dart';
+import '../../../../core/theme/brand_extras.dart';
 import '../../../../core/widgets/app_sheet.dart';
 import '../../domain/lamp_color.dart';
 import 'lamp_color_swatch.dart';
@@ -147,8 +147,8 @@ class _ColorPickerSheetState extends State<_ColorPickerSheet> {
             children: [
               Text(
                 widget.title,
-                style: const TextStyle(
-                  color: BrandColors.lampWhite,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface,
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
                 ),
@@ -172,16 +172,16 @@ class _ColorPickerSheetState extends State<_ColorPickerSheet> {
                       controller: _hexCtrl,
                       onChanged: _onHexChanged,
                       textCapitalization: TextCapitalization.characters,
-                      style: const TextStyle(
-                        color: BrandColors.lampWhite,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurface,
                         fontSize: 14,
                         fontFamily: 'monospace',
                       ),
                       decoration: InputDecoration(
                         isDense: true,
                         labelText: 'Hex',
-                        labelStyle: const TextStyle(
-                          color: BrandColors.fogGrey,
+                        labelStyle: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                           fontSize: 12,
                         ),
                         errorText: _hexError,
@@ -215,7 +215,7 @@ class _ColorPickerSheetState extends State<_ColorPickerSheet> {
                   key: const Key('ww-slider'),
                   label: 'Warm White',
                   value: _w,
-                  trackColor: BrandColors.warmWhite,
+                  trackColor: context.brandExtras.warmWhite,
                   onChanged: _setW,
                 ),
               const SizedBox(height: 12),
@@ -264,8 +264,8 @@ class _ChannelSlider extends StatelessWidget {
             width: 72,
             child: Text(
               label,
-              style: const TextStyle(
-                color: BrandColors.lampWhite,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface,
                 fontSize: 13,
               ),
             ),
@@ -274,8 +274,8 @@ class _ChannelSlider extends StatelessWidget {
             child: SliderTheme(
               data: SliderTheme.of(context).copyWith(
                 activeTrackColor: trackColor,
-                thumbColor: BrandColors.lampWhite,
-                inactiveTrackColor: BrandColors.slateGrey.withValues(alpha: 0.4),
+                thumbColor: Theme.of(context).colorScheme.onSurface,
+                inactiveTrackColor: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
               ),
               child: Slider(
                 min: 0,
@@ -291,8 +291,8 @@ class _ChannelSlider extends StatelessWidget {
             child: Text(
               '$value',
               textAlign: TextAlign.right,
-              style: const TextStyle(
-                color: BrandColors.fogGrey,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
                 fontSize: 12,
                 fontFamily: 'monospace',
               ),

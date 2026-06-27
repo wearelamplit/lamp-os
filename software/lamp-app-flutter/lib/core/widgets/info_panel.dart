@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../theme/brand_colors.dart';
-
 /// Small inline callout used to surface contextual help / explanations
 /// inside settings forms. Ported from the Vue app's `InfoPanel.vue`:
 /// linear gradient on aurora-blue, left border accent, fog-grey body text.
@@ -11,11 +9,12 @@ class InfoPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
@@ -24,9 +23,9 @@ class InfoPanel extends StatelessWidget {
           ],
         ),
         border: Border(
-          left: BorderSide(color: BrandColors.auroraBlue, width: 3),
+          left: BorderSide(color: colorScheme.tertiary, width: 3),
         ),
-        borderRadius: BorderRadius.only(
+        borderRadius: const BorderRadius.only(
           topLeft: Radius.circular(2),
           topRight: Radius.circular(6),
           bottomRight: Radius.circular(6),
@@ -34,8 +33,8 @@ class InfoPanel extends StatelessWidget {
         ),
       ),
       child: DefaultTextStyle.merge(
-        style: const TextStyle(
-          color: BrandColors.fogGrey,
+        style: TextStyle(
+          color: colorScheme.onSurfaceVariant,
           fontSize: 12,
           height: 1.5,
           letterSpacing: 0.1,
