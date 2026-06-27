@@ -3,8 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart' as gr;
 
 import '../../../core/routing/routes.dart';
-import '../../../core/theme/brand_colors.dart';
+import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/friendly_error.dart';
+import '../../../core/widgets/nav_row.dart';
 import '../application/control_notifier.dart';
 import '../application/lamp_auth_required_exception.dart';
 import 'widgets/base_card.dart';
@@ -54,51 +55,42 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
       data: (state) {
         final notifier =
             ref.read(controlNotifierProvider(lampId).notifier);
+        final cs = Theme.of(context).colorScheme;
+        final tt = Theme.of(context).textTheme;
         return Column(
           children: [
             if (!state.connected)
               ConnectionBanner(attempt: state.reconnectAttempt),
             Expanded(
               child: ListView(
-                padding: const EdgeInsets.symmetric(vertical: 8),
+                padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
                 children: [
-                  // "Hello my name is:" nameplate beside the live critter
-                  // — ports `CritterNameplate.vue` from the old UI.
                   Padding(
                     padding: const EdgeInsets.symmetric(
-                        vertical: 24, horizontal: 16),
+                        vertical: AppSpace.xl, horizontal: AppSpace.lg),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        // LampPreview watches its own (shade, base) slice
-                        // — only rebuilds when those change, not when the
-                        // surrounding state churns from coalesced writes
-                        // or inventory writebacks.
                         LampPreview(
                           deviceId: lampId,
-                          // Smaller than the previous centred 140 so the
-                          // name text gets enough room to the right.
                           size: 100,
                         ),
-                        const SizedBox(width: 24),
+                        const SizedBox(width: AppSpace.xl),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Text(
+                              Text(
                                 'Hello, my name is:',
-                                style: TextStyle(
-                                  color: BrandColors.nameplateGrey,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w300,
+                                style: tt.bodySmall?.copyWith(
+                                  color: cs.onSurfaceVariant,
                                 ),
                               ),
                               Text(
                                 state.lamp.name,
-                                style: const TextStyle(
-                                  color: BrandColors.lampWhite,
-                                  fontSize: 28,
+                                style: tt.displaySmall?.copyWith(
+                                  color: cs.onSurface,
                                   fontWeight: FontWeight.w800,
                                   height: 1.0,
                                 ),
@@ -106,18 +98,10 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
                             ],
                           ),
                         ),
-                        // Top-right wisp indicator. Hides itself when no
-                        // wisp is currently controlling either surface;
-                        // pops on with a soft glow + drift when wisp
-                        // takes over (firmware sends a CHAR_WISP_STATUS
-                        // notify on every override transition).
                         WispIndicator(lampId: lampId, size: 56),
                       ],
                     ),
                   ),
-                  // ShadeCard / BaseCard watch their own slices; ControlScreen
-                  // hands them lampId + the edit-session callback. The
-                  // onChanged write path is internalised in the card.
                   ShadeCard(
                     lampId: lampId,
                     onEditSessionChanged: (open) =>
@@ -128,14 +112,19 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
                     onTap: () =>
                         showBaseEditorSheet(context, lampId: lampId),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: AppSpace.md),
                   BrightnessCard(
                     lampId: lampId,
                     onEditSessionChanged: (open) => notifier
                         .setEditSession(EditSurface.brightness, open),
                   ),
-                  const SizedBox(height: 8),
-                  _ConfigurationRow(lampId: lampId),
+                  const SizedBox(height: AppSpace.sm),
+                  NavRow(
+                    icon: Icons.settings,
+                    title: 'Configuration',
+                    onTap: () => gr.GoRouter.maybeOf(context)
+                        ?.push(AppRoutes.setup(lampId)),
+                  ),
                 ],
               ),
             ),
@@ -146,52 +135,3 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
   }
 }
 
-/// Inline "Lamp configuration" row at the bottom of the Setup tab body.
-/// Replaces the AppBar gear that used to live on every tab — the gear
-/// felt like chrome bolted on top; an inline row reads as "this is just
-/// the next thing in Setup, after the colour cards." Navigates to the
-/// same `/lamp/:id/setup` route (lamp name, password, home mode,
-/// advanced LEDs, About / firmware update / version footer).
-class _ConfigurationRow extends StatelessWidget {
-  const _ConfigurationRow({required this.lampId});
-
-  final String lampId;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () =>
-            gr.GoRouter.maybeOf(context)?.push(AppRoutes.setup(lampId)),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.04),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
-          ),
-          child: const Row(
-            children: [
-              Icon(Icons.settings, color: BrandColors.lampWhite, size: 22),
-              SizedBox(width: 16),
-              Expanded(
-                child: Text(
-                  'Configuration',
-                  style: TextStyle(
-                    color: BrandColors.lampWhite,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.4,
-                  ),
-                ),
-              ),
-              Icon(Icons.chevron_right, color: BrandColors.slateGrey),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}

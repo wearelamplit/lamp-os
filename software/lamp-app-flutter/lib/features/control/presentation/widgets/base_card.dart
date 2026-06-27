@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/theme/brand_colors.dart';
+import '../../../../core/theme/app_spacing.dart';
 import '../../application/control_notifier.dart';
 import '../../domain/lamp_color.dart';
 
@@ -57,18 +57,20 @@ class BaseCard extends ConsumerWidget {
         );
       }),
     );
+    final cs = Theme.of(context).colorScheme;
     return InkWell(
       // Gate the tap: if the firmware marks base as non-editable, the card
       // is still visible (shows the current gradient) but tapping does nothing.
       onTap: slice.colorsEditable ? onTap : null,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(AppRadius.card),
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        padding: const EdgeInsets.all(16),
+        margin: const EdgeInsets.symmetric(
+            horizontal: AppSpace.lg, vertical: AppSpace.sm),
+        padding: const EdgeInsets.all(AppSpace.lg),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.04),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+          color: cs.surfaceContainer,
+          borderRadius: BorderRadius.circular(AppRadius.card),
+          border: Border.all(color: cs.outlineVariant),
         ),
         child: Row(
           children: [
@@ -84,25 +86,15 @@ class BaseCard extends ConsumerWidget {
                 ),
               ),
             ),
-            const SizedBox(width: 16),
-            const Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Base',
-                    style: TextStyle(
-                      color: BrandColors.lampWhite,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.4,
-                    ),
-                  ),
-                ],
+            const SizedBox(width: AppSpace.lg),
+            Expanded(
+              child: Text(
+                'Base',
+                style: Theme.of(context).textTheme.titleMedium,
               ),
             ),
             if (slice.colorsEditable)
-              const Icon(Icons.chevron_right, color: BrandColors.slateGrey),
+              Icon(Icons.chevron_right, color: cs.onSurfaceVariant),
           ],
         ),
       ),

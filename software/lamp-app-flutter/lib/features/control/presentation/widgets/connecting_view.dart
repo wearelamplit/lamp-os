@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
-import '../../../../core/theme/brand_colors.dart';
+import '../../../../core/theme/app_spacing.dart';
 import '../../../inventory/application/inventory_notifier.dart';
 import '../../application/lamp_save_status.dart';
 import 'critter_asset.dart';
@@ -75,14 +75,13 @@ class _ConnectingViewState extends ConsumerState<ConnectingView>
               height: 160,
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: AppSpace.xl),
           Text(
             message,
-            style: const TextStyle(
-              color: BrandColors.fogGrey,
-              fontSize: 14,
-              letterSpacing: 0.5,
-            ),
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  letterSpacing: 0.5,
+                ),
           ),
         ],
       ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/theme/brand.dart';
 import '../../domain/lamp_color.dart';
 
 /// A swatch that visualizes a [LampColor] — including the separate
@@ -52,9 +53,10 @@ class LampColorSwatch extends StatelessWidget {
   Widget build(BuildContext context) {
     final isCircle = shape == LampSwatchShape.circle;
     final baseRgb = Color.fromARGB(0xFF, color.r, color.g, color.b);
-    // Same warm tint as the Vue ColorPreview component (#FABB3E).
-    const warmTint = Color(0xFFFABB3E);
+    const warmTint = Brand.warmWhite;
     final overlayOpacity = warmWhiteOpacity(color);
+    final defaultBorder =
+        Theme.of(context).colorScheme.outlineVariant;
 
     BoxDecoration decoration({required Color fill, bool drawBorder = false}) {
       return BoxDecoration(
@@ -63,9 +65,7 @@ class LampColorSwatch extends StatelessWidget {
         borderRadius:
             isCircle ? null : BorderRadius.circular(borderRadius),
         border: drawBorder
-            ? Border.all(
-                color: borderColor ?? Colors.white.withValues(alpha: 0.12),
-              )
+            ? Border.all(color: borderColor ?? defaultBorder)
             : null,
       );
     }

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../../../core/theme/brand_colors.dart';
+import '../../../../core/theme/app_spacing.dart';
 
 /// Small amber banner shown at the top of the Control screen when the BLE
 /// link to the lamp has dropped. Local edits keep working — the writes just
@@ -14,33 +14,35 @@ class ConnectionBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final warn = Theme.of(context).colorScheme.secondary;
     return Semantics(
       liveRegion: true,
       label: 'Reconnecting to lamp',
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        color: BrandColors.amberGold.withValues(alpha: 0.18),
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpace.lg, vertical: AppSpace.sm),
+        color: warn.withValues(alpha: 0.18),
         child: Row(
           children: [
-            const SizedBox(
+            SizedBox(
               width: 14,
               height: 14,
               child: CircularProgressIndicator(
                 strokeWidth: 2,
-                color: BrandColors.amberGold,
+                color: warn,
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: AppSpace.md),
             Expanded(
               child: Text(
                 attempt <= 1
                     ? 'Lamp dropped out — reconnecting…'
                     : 'Reconnecting (attempt $attempt)…',
-                style: const TextStyle(
-                  color: BrandColors.amberGold,
-                  fontSize: 12,
-                ),
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: warn),
               ),
             ),
           ],

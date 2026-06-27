@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/theme/brand_colors.dart';
+import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/widgets/app_sheet.dart';
 import '../../application/control_notifier.dart';
 import '../../domain/lamp_color.dart';
@@ -133,22 +133,18 @@ class _ShadeEditorSheetState extends ConsumerState<ShadeEditorSheet> {
       },
       child: SafeArea(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppSpace.lg),
         child: Column(
           children: [
-            const Row(
+            Row(
               children: [
                 Text(
                   'Shade colors',
-                  style: TextStyle(
-                    color: BrandColors.lampWhite,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: Theme.of(context).textTheme.titleMedium,
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: AppSpace.md),
             Expanded(
               child: ReorderableListView.builder(
                 itemCount: colors.length,
@@ -156,13 +152,14 @@ class _ShadeEditorSheetState extends ConsumerState<ShadeEditorSheet> {
                 buildDefaultDragHandles: false,
                 itemBuilder: (ctx, i) {
                   final stop = colors[i];
+                  final cs = Theme.of(ctx).colorScheme;
                   return ListTile(
                     key: ValueKey('shade-stop-$i'),
                     onTap: () => editStop(i),
                     leading: ReorderableDragStartListener(
                       index: i,
-                      child: const Icon(Icons.drag_indicator,
-                          color: BrandColors.slateGrey),
+                      child: Icon(Icons.drag_indicator,
+                          color: cs.onSurfaceVariant),
                     ),
                     title: Row(
                       children: [
@@ -173,19 +170,18 @@ class _ShadeEditorSheetState extends ConsumerState<ShadeEditorSheet> {
                             color: stop.toSwatch(),
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.12),
+                              color: cs.outlineVariant,
                               width: 1,
                             ),
                           ),
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: AppSpace.md),
                         Text(
                           '#${stop.toHex().substring(1, 7)}',
-                          style: const TextStyle(
-                            color: BrandColors.fogGrey,
-                            fontSize: 12,
-                            fontFamily: 'monospace',
-                          ),
+                          style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                                color: cs.onSurfaceVariant,
+                                fontFamily: 'monospace',
+                              ),
                         ),
                       ],
                     ),
@@ -194,8 +190,7 @@ class _ShadeEditorSheetState extends ConsumerState<ShadeEditorSheet> {
                           ? 'A gradient needs at least one stop'
                           : 'Remove stop',
                       child: IconButton(
-                        icon: const Icon(Icons.close,
-                            color: BrandColors.slateGrey),
+                        icon: Icon(Icons.close, color: cs.onSurfaceVariant),
                         onPressed: colors.length <= 1
                             ? null
                             : () => removeStop(i),
@@ -210,7 +205,7 @@ class _ShadeEditorSheetState extends ConsumerState<ShadeEditorSheet> {
                 onPressed: addStop,
                 child: const Text('+ Add stop'),
               ),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpace.sm),
             Row(
               children: [
                 TextButton(
