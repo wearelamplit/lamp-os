@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import '../../control/domain/lamp_color.dart';
 import '../../../core/ble/ble_client.dart';
 import '../../../core/ble/uuids.dart';
+import '../domain/wisp_claims.dart';
 import '../domain/wisp_source_mode.dart';
 import '../domain/wisp_status.dart';
 
@@ -31,6 +32,17 @@ class WispRepository {
       BleUuids.wispStatus,
     );
     return WispStatus.fromBytes(bytes);
+  }
+
+  /// One-shot read of CHAR_WISP_CLAIMS. Returns the set of lamp mesh MACs
+  /// the wisp currently claims, or an empty set on any error/empty payload.
+  Future<Set<String>> readClaims() async {
+    final bytes = await _ble.read(
+      _deviceId,
+      BleUuids.controlService,
+      BleUuids.wispClaims,
+    );
+    return parseClaimedMacs(bytes);
   }
 
   /// Pin the wisp to [zoneId]. Persisted in wisp NVS — survives reboot.

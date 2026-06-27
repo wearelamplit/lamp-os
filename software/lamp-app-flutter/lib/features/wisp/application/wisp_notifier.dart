@@ -77,6 +77,14 @@ class WispNotifier extends _$WispNotifier {
   String _lastPaletteIdPrefix = '';
   bool _paletteRereadInFlight = false;
 
+  Set<String>? _claimedMacs;
+  bool _claimsReadInFlight = false;
+
+  /// The set of lamp mesh MACs the wisp currently claims, or null while
+  /// the first CHAR_WISP_CLAIMS read is in flight. Empty set means the
+  /// wisp reported count=0 (no claims / stale).
+  Set<String>? get claimedMacs => _claimedMacs;
+
   /// The currently-saved manual palette (last committed). Empty before
   /// the first save in a session.
   List<LampColor> get savedManualPalette => _savedManualPalette;
@@ -110,6 +118,9 @@ class WispNotifier extends _$WispNotifier {
     _currentPaletteKnown = false;
     _lastPaletteIdPrefix = '';
     _paletteRereadInFlight = false;
+
+    _claimedMacs = null;
+    _claimsReadInFlight = false;
 
     ref.onDispose(() {
       _disposed = true;
@@ -152,6 +163,7 @@ class WispNotifier extends _$WispNotifier {
       next = _applySourceWriteGuard(next);
       _ingestManualPaletteFromStatus(next.currentPalette);
       _maybeRereadForPalette(next);
+      unawaited(_loadClaims());
       state = AsyncData(next);
       debugPrint(
         '[wisp_notifier] notify lamp=$lampId len=${bytes.length} '
@@ -168,6 +180,7 @@ class WispNotifier extends _$WispNotifier {
       if (_disposed) return WispStatus.empty;
       _ingestManualPaletteFromStatus(initial.currentPalette);
       _lastPaletteIdPrefix = initial.paletteIdPrefix;
+      unawaited(_loadClaims());
       debugPrint(
         '[wisp_notifier] initial-read lamp=$lampId '
         'wispMac=${initial.wispMac} present=${initial.present} '
@@ -214,6 +227,21 @@ class WispNotifier extends _$WispNotifier {
       if (a[i] != b[i]) return false;
     }
     return true;
+  }
+
+  Future<void> _loadClaims() async {
+    if (_claimsReadInFlight || _disposed) return;
+    _claimsReadInFlight = true;
+    try {
+      final macs = await _repo.readClaims();
+      if (_disposed) return;
+      _claimedMacs = macs;
+      _bumpState();
+    } catch (e) {
+      debugPrint('[wisp_notifier] claims read failed lamp=$lampId: $e');
+    } finally {
+      _claimsReadInFlight = false;
+    }
   }
 
   // NOTIFY is trimmed (no palette); a changed paletteIdPrefix means the

@@ -20,6 +20,7 @@ import '../../inventory/domain/inventory_lamp.dart';
 import '../../lamp_shell/presentation/widgets/wifi_network_picker.dart';
 import '../application/wisp_notifier.dart';
 import '../domain/tuple_sampler.dart';
+import '../domain/wisp_claims.dart';
 import '../domain/wisp_source_mode.dart';
 import '../domain/wisp_status.dart';
 import '../domain/zone_source.dart';
@@ -1192,13 +1193,10 @@ class _WifiConfigRowState extends ConsumerState<_WifiConfigRow> {
 }
 
 // ── Painted lamps list ────────────────────────────────────────────────
-// Lists every inventory lamp alongside the two colors the wisp is
-// painting on it (base + shade), computed locally by re-running the
-// wisp's `sampleTupleForMac` algorithm against the wisp's published
-// palette. The wisp itself does not broadcast a per-lamp paint roster
-// — adding that would mean a new mesh message + BLE cache surface;
-// the local prediction is good enough for the operator to confirm
-// "the fleet is mixed within the palette" without that firmware work.
+// Lists inventory lamps the wisp currently claims, alongside the two
+// colors the wisp is painting on each (base + shade). The claimed set
+// comes from CHAR_WISP_CLAIMS (binary [count][mac*6]); the color
+// prediction re-runs the wisp's `sampleTupleForMac` algorithm locally.
 //
 // Accuracy caveat: on Android `InventoryLamp.id` IS the lamp's BLE MAC,
 // which differs from the lamp's ESP-NOW MAC by one byte (ESP32 derives
@@ -1217,6 +1215,7 @@ class _PaintedLampsList extends ConsumerWidget {
     final notifier = ref.read(wispNotifierProvider(lampId).notifier);
     ref.watch(wispNotifierProvider(lampId));
     final palette = notifier.savedManualPalette;
+    final claimedMacs = notifier.claimedMacs;
     final inventoryAsync = ref.watch(inventoryNotifierProvider);
     return inventoryAsync.when(
       loading: () => const Padding(
@@ -1243,6 +1242,28 @@ class _PaintedLampsList extends ConsumerWidget {
             ),
           );
         }
+        if (claimedMacs == null) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Text(
+              'Loading…',
+              style: TextStyle(color: BrandColors.fogGrey, fontSize: 12),
+            ),
+          );
+        }
+        final claimed = lamps.where((l) {
+          final mac = parseMacFromBleId(l.id);
+          return mac != null && claimedMacs.contains(macBytesToString(mac));
+        }).toList();
+        if (claimed.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Text(
+              'No lamps claimed by this wisp right now.',
+              style: TextStyle(color: BrandColors.fogGrey, fontSize: 12),
+            ),
+          );
+        }
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -1261,7 +1282,7 @@ class _PaintedLampsList extends ConsumerWidget {
                 ),
               ),
             ),
-            for (final lamp in lamps)
+            for (final lamp in claimed)
               _PaintedLampRow(
                 lamp: lamp,
                 palette: palette,
