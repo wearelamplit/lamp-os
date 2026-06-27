@@ -189,10 +189,6 @@ Future<WifiScanResult?> showWifiPickerSheet(
 }) {
   return showAppSheet<WifiScanResult>(
     context,
-    backgroundColor: BrandColors.midnightBlack,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-    ),
     builder: (ctx) => DraggableScrollableSheet(
       initialChildSize: 0.6,
       minChildSize: 0.4,

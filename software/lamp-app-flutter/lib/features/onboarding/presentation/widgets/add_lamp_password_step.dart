@@ -20,7 +20,6 @@ Future<void> _confirmSkip(BuildContext context, AddLampNotifier notifier) async 
   final ok = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
-      backgroundColor: BrandColors.midnightBlack,
       title: const Text('Adopt without a password?',
           style: TextStyle(color: BrandColors.lampWhite)),
       content: const Text(

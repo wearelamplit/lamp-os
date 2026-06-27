@@ -22,10 +22,6 @@ Future<LampColor?> showColorPickerSheet(
 }) {
   return showAppSheet<LampColor>(
     context,
-    backgroundColor: BrandColors.midnightBlack,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-    ),
     builder: (ctx) => _ColorPickerSheet(
       initial: initial,
       title: title,

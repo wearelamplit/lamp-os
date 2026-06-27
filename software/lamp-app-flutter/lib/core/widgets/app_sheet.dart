@@ -5,13 +5,9 @@ import 'package:flutter/material.dart';
 Future<T?> showAppSheet<T>(
   BuildContext context, {
   required WidgetBuilder builder,
-  Color? backgroundColor,
-  ShapeBorder? shape,
 }) =>
     showModalBottomSheet<T>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: backgroundColor,
-      shape: shape,
       builder: builder,
     );

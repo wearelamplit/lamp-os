@@ -295,10 +295,6 @@ Future<void> showBaseEditorSheet(
 }) {
   return showAppSheet<void>(
     context,
-    backgroundColor: BrandColors.midnightBlack,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-    ),
     builder: (ctx) => FractionallySizedBox(
       heightFactor: 0.6,
       child: BaseEditorSheet(lampId: lampId),

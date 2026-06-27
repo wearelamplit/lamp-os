@@ -424,7 +424,6 @@ Future<bool> _confirmRemoveDialog(BuildContext context, String lampName) async {
   final ok = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
-      backgroundColor: BrandColors.midnightBlack,
       title: const Text('Remove this lamp?',
           style: TextStyle(color: BrandColors.lampWhite)),
       content: Text(
