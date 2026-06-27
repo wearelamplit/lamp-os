@@ -45,6 +45,10 @@ class CurrentPalette {
   // header can stay framework-free).
   void update(const Palette& p, uint32_t nowMs);
 
+  // Drop the held palette so paint/ring fall back to empty. Loop-task only,
+  // same as update(); takes the mutex around paletteId_ for copyPaletteIdPrefix.
+  void clear();
+
   const std::string& paletteId() const { return paletteId_; }
   uint32_t lastChangeMs() const { return lastChangeMs_; }
   const std::vector<RGBW>& colors() const { return colors_; }

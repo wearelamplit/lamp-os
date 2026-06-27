@@ -153,6 +153,10 @@ void renderRing() {
   uint8_t pixels[wisp::kStatusRingPixelCount * 3];
 
   const wisp::WispSourceMode mode = wispConfig.sourceMode();
+  // Aurora is only a live source while its stream is up. With no stream we
+  // render as Off rather than whatever stale palette the buffer last held.
+  const bool auroraLive =
+      mode == wisp::WispSourceMode::Aurora && auroraClient.isStreaming();
   if (mode == wisp::WispSourceMode::Manual) {
     const auto& cols = wispConfig.manualPalette();
     const size_t n = cols.size() > wisp::kManualPaletteMaxColors
@@ -164,7 +168,7 @@ void renderRing() {
       stopsRgb[i * 3 + 2] = cols[i].b;
     }
     numStops = n;
-  } else if (mode == wisp::WispSourceMode::Aurora) {
+  } else if (auroraLive) {
     const auto& cols = currentPalette.colors();
     const size_t n = cols.size() > wisp::kManualPaletteMaxColors
                          ? wisp::kManualPaletteMaxColors
@@ -179,11 +183,11 @@ void renderRing() {
     }
     numStops = n;
   }
-  // Off, or Manual/Aurora with no palette yet, falls through with
-  // numStops == 0. Off uses the operator-chosen single color; Manual/
-  // Aurora with empty palette still get warm-white (their config is
-  // "missing", not "I chose a color").
-  if (mode == wisp::WispSourceMode::Off) {
+  // Off — and Aurora with no live stream — show the operator-chosen off
+  // color. Manual with an empty palette falls through to warm-white (its
+  // config is "missing", not "I chose to be off").
+  if (mode == wisp::WispSourceMode::Off ||
+      (mode == wisp::WispSourceMode::Aurora && !auroraLive)) {
     const wisp::ManualPaletteColor offColor = wispConfig.offColor();
     for (size_t i = 0; i < wisp::kStatusRingPixelCount; ++i) {
       pixels[i * 3 + 0] = offColor.r;
@@ -231,8 +235,15 @@ void applySourceModeTransition(wisp::WispSourceMode mode) {
       Serial.println("[wisp] source=Manual — using stored manual palette");
       break;
     case wisp::WispSourceMode::Aurora:
-      paintDistributor.setPaintMode(true);
-      Serial.println("[wisp] source=Aurora — awaiting Aurora callback");
+      // Drop any stale (manual) palette so we never paint/ring it while
+      // waiting on Aurora. Paint only when the stream is already live;
+      // onAuroraPalette turns it on when a palette actually arrives, and the
+      // loop's liveness check turns it back off if the stream drops.
+      currentPalette.clear();
+      paintDistributor.setPaintMode(auroraClient.isStreaming());
+      Serial.printf("[wisp] source=Aurora — %s\n",
+                    auroraClient.isStreaming() ? "stream live"
+                                               : "no stream, holding off");
       break;
   }
   // Reflect the new mode on the indicator ring. Off → warm white,
@@ -402,8 +413,9 @@ void onAuroraPalette(int zone, const Palette& p) {
     Serial.printf("  [%u] r=%u g=%u b=%u w=%u\n",
                   (unsigned)i, cols[i].r, cols[i].g, cols[i].b, cols[i].w);
   }
-  // Notify the paint distributor; it only acts if paintMode is on.
-  paintDistributor.onPaletteChanged();
+  // A live Aurora palette arrived — ensure paint is on (the mode transition
+  // leaves it off when the stream wasn't up yet) and fan the new colors out.
+  paintDistributor.setPaintMode(true);
   artnetEmitter.onPaletteChanged();
   // Reflect the new Aurora palette on the indicator ring.
   renderRing();
@@ -419,6 +431,18 @@ void processSerialCommand(const String& cmd) {
   } else if (cmd == "paint:off") {
     paintDistributor.setPaintMode(false);
     Serial.println("[wisp.cmd] paint mode OFF");
+  } else if (cmd == "src:off" || cmd == "src:manual" || cmd == "src:aurora") {
+    // Bench affordance: source mode is otherwise only settable via the app's
+    // setSourceMode wispOp. Route through the same WispConfig + transition the
+    // dispatcher uses so serial and BLE-op paths converge.
+    const wisp::WispSourceMode m =
+        cmd.endsWith("off")    ? wisp::WispSourceMode::Off
+      : cmd.endsWith("manual") ? wisp::WispSourceMode::Manual
+                               : wisp::WispSourceMode::Aurora;
+    wispConfig.setSourceMode(m);
+    applySourceModeTransition(m);
+    statusBeacon.triggerOnChange();
+    Serial.printf("[wisp.cmd] source mode = %s\n", cmd.c_str() + 4);
   } else if (cmd == "artnet:on") {
     artnetEmitter.setEnabled(true);
   } else if (cmd == "artnet:off") {
@@ -631,7 +655,7 @@ void setup() {
 
   Serial.println("[wisp] paint distributor + status beacon online");
   Serial.println("[wisp] cmds: paint:on/off  artnet:on/off  stage:on/off");
-  Serial.println("[wisp] cmds: wifi:set <ssid> <pass>  wifi:show");
+  Serial.println("[wisp] cmds: src:off/manual/aurora  wifi:set <ssid> <pass>  wifi:show");
 }
 
 void loop() {
@@ -659,6 +683,24 @@ void loop() {
     }
     wispRoster.recomputeClaims(obs, n, now);
   }
+  // Aurora liveness: if the stream drops while Aurora is the source, fall
+  // back to Off (RESTORE peers + clear the buffer) instead of leaving the
+  // lamps on the last Aurora palette. Reconnect is handled by onAuroraPalette
+  // when a fresh palette arrives. Edge-triggered so we don't re-walk the
+  // roster every loop.
+  static bool auroraWasStreaming = false;
+  if (wispConfig.sourceMode() == wisp::WispSourceMode::Aurora) {
+    const bool streaming = auroraClient.isStreaming();
+    if (auroraWasStreaming && !streaming) {
+      currentPalette.clear();
+      paintDistributor.setPaintMode(false);
+      renderRing();
+      statusBeacon.triggerOnChange();
+      Serial.println("[wisp] Aurora stream dropped — holding off");
+    }
+    auroraWasStreaming = streaming;
+  }
+
   paintDistributor.tick(now);
   artnetEmitter.tick(now);
 

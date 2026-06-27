@@ -85,6 +85,16 @@ void CurrentPalette::update(const Palette& p, uint32_t nowMs) {
   }
 }
 
+void CurrentPalette::clear() {
+  colors_.clear();
+  lastChangeMs_ = 0;
+  // paletteId_.clear() can free the heap buffer for non-SSO ids — same reason
+  // update() holds the mutex around the assignment.
+  xSemaphoreTake(asHandle(mux_), portMAX_DELAY);
+  paletteId_.clear();
+  xSemaphoreGive(asHandle(mux_));
+}
+
 size_t CurrentPalette::copyPaletteIdPrefix(char* out, size_t outCap) const {
   if (!out || outCap == 0) return 0;
   size_t n = 0;
