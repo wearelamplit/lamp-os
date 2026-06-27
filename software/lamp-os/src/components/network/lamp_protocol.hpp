@@ -1171,6 +1171,22 @@ constexpr uint8_t  MSG_FW_REQ    = 0x43;
 constexpr uint8_t  MSG_FW_DONE   = 0x44;
 constexpr uint8_t  MSG_FW_RESULT = 0x45;
 
+// Filesystem-image OTA (the SPIFFS web-UI image → the spiffs partition).
+// Same frame layouts and single-hop convention as MSG_FW_*; the distinct
+// msgType is what routes a frame to the FS receiver/distributor (and to the
+// spiffs partition) instead of the firmware path — so the builders/parsers
+// below are parameterized by msgType and shared, not duplicated. Additive
+// type IDs (< kReservedMsgTypeHighBit): an old lamp that doesn't know them
+// silently drops them — no PROTOCOL_VERSION bump.
+constexpr uint8_t  MSG_FS_OFFER  = 0x46;
+constexpr uint8_t  MSG_FS_ACCEPT = 0x47;
+constexpr uint8_t  MSG_FS_CHUNK  = 0x48;
+constexpr uint8_t  MSG_FS_REQ    = 0x49;
+constexpr uint8_t  MSG_FS_DONE   = 0x4A;
+constexpr uint8_t  MSG_FS_RESULT = 0x4B;
+static_assert(MSG_FS_RESULT < kReservedMsgTypeHighBit,
+              "MSG_FS_* must stay below the reserved high-bit type space");
+
 // Channel string is zero-padded ASCII, fixed-width. Carries `{type}-{channel}`
 // (e.g. "standard-stable", "snafu-beta") so the existing silent-drop on
 // mismatch enforces per-variant OTA gating without a separate type field.
@@ -1245,7 +1261,11 @@ enum class FwResultStatus : uint8_t {
   OtaEndFail         = 6,
   SetBootFail        = 7,
   OfferShaMismatch   = 8,  // sha256Prefix mismatch on verify
-  // 9..255 reserved
+  // FS-image OTA reuses this status byte (MSG_FS_RESULT shares the RESULT
+  // frame). These take values from the firmware enum's reserved 9..255 range.
+  FsMountFail        = 9,   // spiffs unmountable after write → can't recompute digest
+  FsDigestMismatch   = 10,  // recomputed manifest digest != fw.lsig signature
+  // 11..255 reserved
 };
 
 // --- Parsed structs -------------------------------------------------------
@@ -1328,10 +1348,11 @@ inline size_t buildFwOffer(uint8_t* buf, size_t bufLen, uint16_t seq,
                            const char* channel, size_t channelLen,
                            const uint8_t sha256Prefix[FW_SHA256_PREFIX_LEN],
                            uint16_t footerLen, uint16_t totalChunks,
-                           uint8_t wireVersion = PROTOCOL_VERSION_EMIT) {
+                           uint8_t wireVersion = PROTOCOL_VERSION_EMIT,
+                           uint8_t msgType = MSG_FW_OFFER) {
   if (!buf || !sourceMac || !targetMac || !sha256Prefix) return 0;
   if (bufLen < FW_OFFER_FIXED_SIZE) return 0;
-  detail::writeHeader(buf, MSG_FW_OFFER, seq, wireVersion);
+  detail::writeHeader(buf, msgType, seq, wireVersion);
   std::memcpy(&buf[6], sourceMac, 6);
   std::memcpy(&buf[12], targetMac, 6);
   buf[FW_OFFER_OFF_VERSION    ] = static_cast<uint8_t>(version & 0xFF);
@@ -1377,11 +1398,12 @@ inline size_t buildFwAccept(uint8_t* buf, size_t bufLen, uint16_t seq,
                             const uint8_t sourceMac[6], const uint8_t targetMac[6],
                             uint16_t offerSeq, uint32_t version,
                             FwAcceptStatus status, uint32_t resumeOffset,
-                            uint8_t wireVersion = PROTOCOL_VERSION_EMIT) {
+                            uint8_t wireVersion = PROTOCOL_VERSION_EMIT,
+                            uint8_t msgType = MSG_FW_ACCEPT) {
   if (!buf || !sourceMac || !targetMac) return 0;
   if (bufLen < FW_ACCEPT_FIXED_SIZE) return 0;
   (void)resumeOffset;  // reserved-zero in v1; pinned by the layout note above
-  detail::writeHeader(buf, MSG_FW_ACCEPT, seq, wireVersion);
+  detail::writeHeader(buf, msgType, seq, wireVersion);
   std::memcpy(&buf[6], sourceMac, 6);
   std::memcpy(&buf[12], targetMac, 6);
   buf[18] = static_cast<uint8_t>(offerSeq & 0xFF);
@@ -1403,13 +1425,14 @@ inline size_t buildFwChunk(uint8_t* buf, size_t bufLen, uint16_t seq,
                            const uint8_t sourceMac[6], const uint8_t targetMac[6],
                            uint16_t chunkIdx, uint32_t offset,
                            const uint8_t* bytes, uint16_t len,
-                           uint8_t wireVersion = PROTOCOL_VERSION_EMIT) {
+                           uint8_t wireVersion = PROTOCOL_VERSION_EMIT,
+                           uint8_t msgType = MSG_FW_CHUNK) {
   if (!buf || !sourceMac || !targetMac) return 0;
   if (len == 0 || len > FW_CHUNK_SIZE) return 0;
   if (len > 0 && !bytes) return 0;
   const size_t total = FW_CHUNK_FIXED_SIZE + static_cast<size_t>(len);
   if (bufLen < total) return 0;
-  detail::writeHeader(buf, MSG_FW_CHUNK, seq, wireVersion);
+  detail::writeHeader(buf, msgType, seq, wireVersion);
   std::memcpy(&buf[6], sourceMac, 6);
   std::memcpy(&buf[12], targetMac, 6);
   buf[18] = static_cast<uint8_t>(chunkIdx & 0xFF);
@@ -1430,12 +1453,13 @@ inline size_t buildFwReq(uint8_t* buf, size_t bufLen, uint16_t seq,
                          const uint8_t sourceMac[6], const uint8_t targetMac[6],
                          uint16_t firstChunkIdx, uint16_t chunkCount,
                          FwReqReason reason,
-                         uint8_t wireVersion = PROTOCOL_VERSION_EMIT) {
+                         uint8_t wireVersion = PROTOCOL_VERSION_EMIT,
+                         uint8_t msgType = MSG_FW_REQ) {
   if (!buf || !sourceMac || !targetMac) return 0;
   if (bufLen < FW_REQ_FIXED_SIZE) return 0;
   // chunkCount cap: 1..32 to prevent re-stream-all abuse per reconciliation doc.
   if (chunkCount == 0 || chunkCount > 32) return 0;
-  detail::writeHeader(buf, MSG_FW_REQ, seq, wireVersion);
+  detail::writeHeader(buf, msgType, seq, wireVersion);
   std::memcpy(&buf[6], sourceMac, 6);
   std::memcpy(&buf[12], targetMac, 6);
   buf[18] = static_cast<uint8_t>(firstChunkIdx & 0xFF);
@@ -1455,10 +1479,11 @@ inline size_t buildFwDone(uint8_t* buf, size_t bufLen, uint16_t seq,
                           uint32_t version, uint32_t totalLen,
                           const uint8_t sha256Prefix[FW_SHA256_PREFIX_LEN],
                           uint16_t footerLen,
-                          uint8_t wireVersion = PROTOCOL_VERSION_EMIT) {
+                          uint8_t wireVersion = PROTOCOL_VERSION_EMIT,
+                          uint8_t msgType = MSG_FW_DONE) {
   if (!buf || !sourceMac || !targetMac || !sha256Prefix) return 0;
   if (bufLen < FW_DONE_FIXED_SIZE) return 0;
-  detail::writeHeader(buf, MSG_FW_DONE, seq, wireVersion);
+  detail::writeHeader(buf, msgType, seq, wireVersion);
   std::memcpy(&buf[6], sourceMac, 6);
   std::memcpy(&buf[12], targetMac, 6);
   buf[18] = static_cast<uint8_t>(version & 0xFF);
@@ -1482,10 +1507,11 @@ inline size_t buildFwDone(uint8_t* buf, size_t bufLen, uint16_t seq,
 inline size_t buildFwResult(uint8_t* buf, size_t bufLen, uint16_t seq,
                             const uint8_t sourceMac[6], const uint8_t targetMac[6],
                             FwResultStatus status, uint8_t detail, uint32_t version,
-                            uint8_t wireVersion = PROTOCOL_VERSION_EMIT) {
+                            uint8_t wireVersion = PROTOCOL_VERSION_EMIT,
+                            uint8_t msgType = MSG_FW_RESULT) {
   if (!buf || !sourceMac || !targetMac) return 0;
   if (bufLen < FW_RESULT_FIXED_SIZE) return 0;
-  detail::writeHeader(buf, MSG_FW_RESULT, seq, wireVersion);
+  detail::writeHeader(buf, msgType, seq, wireVersion);
   std::memcpy(&buf[6], sourceMac, 6);
   std::memcpy(&buf[12], targetMac, 6);
   buf[18] = static_cast<uint8_t>(status);
@@ -1499,8 +1525,9 @@ inline size_t buildFwResult(uint8_t* buf, size_t bufLen, uint16_t seq,
 
 // --- Parsers --------------------------------------------------------------
 
-inline bool parseFwOffer(const uint8_t* data, size_t len, ParsedFwOffer& out) {
-  if (inspect(data, len) != MSG_FW_OFFER) return false;
+inline bool parseFwOffer(const uint8_t* data, size_t len, ParsedFwOffer& out,
+                         uint8_t expectType = MSG_FW_OFFER) {
+  if (inspect(data, len) != expectType) return false;
   if (len < FW_OFFER_FIXED_SIZE) return false;
   out.seq = static_cast<uint16_t>(data[4]) | (static_cast<uint16_t>(data[5]) << 8);
   std::memcpy(out.sourceMac, &data[6], 6);
@@ -1530,8 +1557,9 @@ inline bool parseFwOffer(const uint8_t* data, size_t len, ParsedFwOffer& out) {
   return true;
 }
 
-inline bool parseFwAccept(const uint8_t* data, size_t len, ParsedFwAccept& out) {
-  if (inspect(data, len) != MSG_FW_ACCEPT) return false;
+inline bool parseFwAccept(const uint8_t* data, size_t len, ParsedFwAccept& out,
+                          uint8_t expectType = MSG_FW_ACCEPT) {
+  if (inspect(data, len) != expectType) return false;
   if (len < FW_ACCEPT_FIXED_SIZE) return false;
   out.seq = static_cast<uint16_t>(data[4]) | (static_cast<uint16_t>(data[5]) << 8);
   std::memcpy(out.sourceMac, &data[6], 6);
@@ -1552,8 +1580,9 @@ inline bool parseFwAccept(const uint8_t* data, size_t len, ParsedFwAccept& out) 
   return true;
 }
 
-inline bool parseFwChunk(const uint8_t* data, size_t len, ParsedFwChunk& out) {
-  if (inspect(data, len) != MSG_FW_CHUNK) return false;
+inline bool parseFwChunk(const uint8_t* data, size_t len, ParsedFwChunk& out,
+                         uint8_t expectType = MSG_FW_CHUNK) {
+  if (inspect(data, len) != expectType) return false;
   if (len < FW_CHUNK_FIXED_SIZE) return false;
   const uint16_t payloadLen =
        static_cast<uint16_t>(data[24])
@@ -1583,8 +1612,9 @@ inline bool parseFwChunk(const uint8_t* data, size_t len, ParsedFwChunk& out) {
   return true;
 }
 
-inline bool parseFwReq(const uint8_t* data, size_t len, ParsedFwReq& out) {
-  if (inspect(data, len) != MSG_FW_REQ) return false;
+inline bool parseFwReq(const uint8_t* data, size_t len, ParsedFwReq& out,
+                       uint8_t expectType = MSG_FW_REQ) {
+  if (inspect(data, len) != expectType) return false;
   if (len < FW_REQ_FIXED_SIZE) return false;
   out.seq = static_cast<uint16_t>(data[4]) | (static_cast<uint16_t>(data[5]) << 8);
   std::memcpy(out.sourceMac, &data[6], 6);
@@ -1600,8 +1630,9 @@ inline bool parseFwReq(const uint8_t* data, size_t len, ParsedFwReq& out) {
   return true;
 }
 
-inline bool parseFwDone(const uint8_t* data, size_t len, ParsedFwDone& out) {
-  if (inspect(data, len) != MSG_FW_DONE) return false;
+inline bool parseFwDone(const uint8_t* data, size_t len, ParsedFwDone& out,
+                        uint8_t expectType = MSG_FW_DONE) {
+  if (inspect(data, len) != expectType) return false;
   if (len < FW_DONE_FIXED_SIZE) return false;
   out.seq = static_cast<uint16_t>(data[4]) | (static_cast<uint16_t>(data[5]) << 8);
   std::memcpy(out.sourceMac, &data[6], 6);
@@ -1623,8 +1654,9 @@ inline bool parseFwDone(const uint8_t* data, size_t len, ParsedFwDone& out) {
   return true;
 }
 
-inline bool parseFwResult(const uint8_t* data, size_t len, ParsedFwResult& out) {
-  if (inspect(data, len) != MSG_FW_RESULT) return false;
+inline bool parseFwResult(const uint8_t* data, size_t len, ParsedFwResult& out,
+                          uint8_t expectType = MSG_FW_RESULT) {
+  if (inspect(data, len) != expectType) return false;
   if (len < FW_RESULT_FIXED_SIZE) return false;
   out.seq = static_cast<uint16_t>(data[4]) | (static_cast<uint16_t>(data[5]) << 8);
   std::memcpy(out.sourceMac, &data[6], 6);
