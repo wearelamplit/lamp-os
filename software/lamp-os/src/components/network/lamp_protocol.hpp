@@ -270,6 +270,15 @@ constexpr uint8_t HELLO_TLV_OTA_STATE = 0x01;  // value: 1 byte, 0=idle 1=sendin
 constexpr uint8_t HELLO_TLV_FW_CHANNEL = 0x02;
 constexpr size_t  HELLO_FW_CHANNEL_LEN = 16;  // == FW_CHANNEL_LEN
 
+// value: 8 bytes, a prefix of the lamp's FS-image manifest digest (the
+// fs_signature.cpp logical-content digest, NOT a raw-partition SHA). Lets the
+// FS distributor decide whether a same-firmware-version peer has a stale UI
+// image (peerFsDigest != myFsDigest) without offering blindly. Absent on
+// lamps built with LAMP_FS_OTA_ENABLED=0 → distributor treats absent as "don't
+// offer FS" (an FS-disabled peer can't receive it anyway).
+constexpr uint8_t HELLO_TLV_FS_STATE  = 0x03;
+constexpr size_t  HELLO_FS_DIGEST_LEN = 8;  // == FW_SHA256_PREFIX_LEN
+
 // Compact OTA-state enum carried in HELLO_TLV_OTA_STATE. Maps to:
 //   firmwareDistributor.isInProgress() → kOtaStateSending
 //   firmwareReceiver.isInProgress()    → kOtaStateReceiving
@@ -420,6 +429,11 @@ struct ParsedHello {
   // when the peer doesn't emit the TLV (older firmware); the distributor
   // treats empty as "unknown → offer anyway and let the receiver gate".
   char fwChannel[HELLO_FW_CHANNEL_LEN + 1] = {0};
+  // HELLO_TLV_FS_STATE — prefix of the peer's FS-image manifest digest.
+  // hasFsDigest=false when absent (FS-disabled or older peer) → the FS
+  // distributor won't offer to that peer.
+  bool    hasFsDigest = false;
+  uint8_t fsDigest[HELLO_FS_DIGEST_LEN] = {0};
 };
 
 struct ParsedControlOp {
@@ -565,7 +579,8 @@ inline size_t buildHello(uint8_t* buf, size_t bufLen, uint16_t seq,
                          uint32_t firmwareVersion,
                          const char* name, size_t nameLen,
                          uint8_t otaState = kOtaStateIdle,
-                         const char* fwChannel = nullptr) {
+                         const char* fwChannel = nullptr,
+                         const uint8_t* fsDigest = nullptr) {
   if (!buf || !sourceMac || !shadeRGBW || !baseRGBW) return 0;
   if (nameLen > HELLO_MAX_NAME) nameLen = HELLO_MAX_NAME;
   // TLV trailer: tlv_count(1) + (type(1) + len(1) + value(N)) per emitted TLV.
@@ -574,8 +589,10 @@ inline size_t buildHello(uint8_t* buf, size_t bufLen, uint16_t seq,
   // (so peers can read our {type}-{channel} for the distributor's gate).
   const bool emitOtaState  = (otaState != kOtaStateIdle);
   const bool emitFwChannel = (fwChannel != nullptr && fwChannel[0] != '\0');
+  const bool emitFsDigest  = (fsDigest != nullptr);
   const size_t tlvBytes = 1 + (emitOtaState ? 3 : 0) +
-                          (emitFwChannel ? (2 + HELLO_FW_CHANNEL_LEN) : 0);
+                          (emitFwChannel ? (2 + HELLO_FW_CHANNEL_LEN) : 0) +
+                          (emitFsDigest ? (2 + HELLO_FS_DIGEST_LEN) : 0);
   const size_t total = HELLO_FIXED_SIZE + 1 + nameLen + tlvBytes;
   if (bufLen < total) return 0;
   buf[0] = MAGIC_0;
@@ -598,7 +615,8 @@ inline size_t buildHello(uint8_t* buf, size_t bufLen, uint16_t seq,
   // TLV trailer starts here.
   size_t off = HELLO_FIXED_SIZE + 1 + nameLen;
   buf[off++] = static_cast<uint8_t>((emitOtaState ? 1 : 0) +
-                                    (emitFwChannel ? 1 : 0));  // tlv_count
+                                    (emitFwChannel ? 1 : 0) +
+                                    (emitFsDigest ? 1 : 0));  // tlv_count
   if (emitOtaState) {
     buf[off++] = HELLO_TLV_OTA_STATE;
     buf[off++] = 1;          // len
@@ -612,6 +630,12 @@ inline size_t buildHello(uint8_t* buf, size_t bufLen, uint16_t seq,
       buf[off + n] = static_cast<uint8_t>(fwChannel[n]);
     }
     off += HELLO_FW_CHANNEL_LEN;
+  }
+  if (emitFsDigest) {
+    buf[off++] = HELLO_TLV_FS_STATE;
+    buf[off++] = static_cast<uint8_t>(HELLO_FS_DIGEST_LEN);  // len = 8
+    std::memcpy(&buf[off], fsDigest, HELLO_FS_DIGEST_LEN);
+    off += HELLO_FS_DIGEST_LEN;
   }
   return total;
 }
@@ -945,6 +969,10 @@ inline bool parseHello(const uint8_t* data, size_t len, ParsedHello& out) {
                tlvLen == HELLO_FW_CHANNEL_LEN) {
       std::memcpy(out.fwChannel, &data[off], HELLO_FW_CHANNEL_LEN);
       out.fwChannel[HELLO_FW_CHANNEL_LEN] = '\0';
+    } else if (tlvType == HELLO_TLV_FS_STATE &&
+               tlvLen == HELLO_FS_DIGEST_LEN) {
+      std::memcpy(out.fsDigest, &data[off], HELLO_FS_DIGEST_LEN);
+      out.hasFsDigest = true;
     }
     off += tlvLen;
   }

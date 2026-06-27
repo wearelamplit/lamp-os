@@ -103,8 +103,38 @@ static void test_fs_result_roundtrip() {
   TEST_ASSERT_EQUAL_UINT32(0x000100A5, out.version);
 }
 
+// HELLO_TLV_FS_STATE round-trips the FS digest prefix and coexists with the
+// existing OTA-state + fw-channel TLVs. Absent TLV → hasFsDigest=false.
+static void test_hello_fs_digest_tlv() {
+  const uint8_t shade[4] = {1, 2, 3, 4};
+  const uint8_t base[4] = {5, 6, 7, 8};
+  const uint8_t digest[lp::HELLO_FS_DIGEST_LEN] = {0xAA, 0xBB, 0xCC, 0xDD,
+                                                   0xEE, 0xFF, 0x11, 0x22};
+  uint8_t buf[lp::HELLO_MAX_SIZE];
+
+  // All three TLVs emitted together (non-idle ota, channel, fs digest).
+  size_t n = lp::buildHello(buf, sizeof(buf), 1, kSrc, shade, base, 0x000100A5,
+                            "gramp", 5, lp::kOtaStateSending, "standard-stable",
+                            digest);
+  TEST_ASSERT_TRUE(n > 0);
+  lp::ParsedHello out;
+  TEST_ASSERT_TRUE(lp::parseHello(buf, n, out));
+  TEST_ASSERT_TRUE(out.hasFsDigest);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(digest, out.fsDigest, lp::HELLO_FS_DIGEST_LEN);
+  TEST_ASSERT_EQUAL_UINT8(lp::kOtaStateSending, out.otaState);
+  TEST_ASSERT_EQUAL_STRING("standard-stable", out.fwChannel);
+
+  // No fs digest passed → absent → hasFsDigest false.
+  n = lp::buildHello(buf, sizeof(buf), 1, kSrc, shade, base, 0x000100A5, "g", 1,
+                     lp::kOtaStateIdle, nullptr, nullptr);
+  lp::ParsedHello out2;
+  TEST_ASSERT_TRUE(lp::parseHello(buf, n, out2));
+  TEST_ASSERT_FALSE(out2.hasFsDigest);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
+  RUN_TEST(test_hello_fs_digest_tlv);
   RUN_TEST(test_fs_offer_roundtrip_and_dispatch);
   RUN_TEST(test_fs_offer_not_parsed_as_fw);
   RUN_TEST(test_fw_offer_not_parsed_as_fs);
