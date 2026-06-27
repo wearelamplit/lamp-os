@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../theme/brand_colors.dart';
-
 /// Mobile-style settings row: leading icon, title + optional subtitle,
 /// optional trailing widget (toggle / chevron). Used everywhere on the
 /// Setup tab to give it the iOS/Android-Settings look from the old Vue
@@ -24,6 +22,8 @@ class SettingsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -33,7 +33,7 @@ class SettingsRow extends StatelessWidget {
           decoration: BoxDecoration(
             border: Border(
               bottom: BorderSide(
-                color: BrandColors.lampWhite.withValues(alpha: 0.06),
+                color: colorScheme.onSurface.withValues(alpha: 0.06),
                 width: 1,
               ),
             ),
@@ -46,32 +46,19 @@ class SettingsRow extends StatelessWidget {
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: BrandColors.auroraBlue.withValues(alpha: 0.16),
+                  color: colorScheme.primaryContainer.withValues(alpha: 0.16),
                 ),
-                child: Icon(icon, size: 18, color: BrandColors.auroraBlue),
+                child: Icon(icon, size: 18, color: colorScheme.onPrimaryContainer),
               ),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        color: BrandColors.lampWhite,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                    Text(title, style: textTheme.titleMedium),
                     if (subtitle != null) ...[
                       const SizedBox(height: 2),
-                      Text(
-                        subtitle!,
-                        style: const TextStyle(
-                          color: BrandColors.fogGrey,
-                          fontSize: 12,
-                        ),
-                      ),
+                      Text(subtitle!, style: textTheme.bodySmall),
                     ],
                   ],
                 ),
@@ -81,8 +68,8 @@ class SettingsRow extends StatelessWidget {
                 trailing!,
               ],
               if (onTap != null && trailing == null)
-                const Icon(Icons.chevron_right,
-                    color: BrandColors.slateGrey, size: 22),
+                Icon(Icons.chevron_right,
+                    color: colorScheme.onSurfaceVariant, size: 22),
             ],
           ),
         ),
@@ -98,15 +85,15 @@ class SettingsGroupHeading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
       child: Text(
         text.toUpperCase(),
-        style: const TextStyle(
-          color: BrandColors.headerYellow,
-          fontSize: 11,
+        style: textTheme.labelLarge?.copyWith(
+          color: colorScheme.secondary,
           fontWeight: FontWeight.w700,
-          letterSpacing: 1.2,
         ),
       ),
     );

@@ -11,6 +11,8 @@ import 'package:lamp_app/features/control/application/advanced_session.dart';
 import 'package:lamp_app/features/control/application/control_notifier.dart';
 import 'package:lamp_app/features/lamp_shell/presentation/setup_screen.dart';
 
+import 'package:lamp_app/core/theme/app_theme.dart';
+
 import '../../_support/seed.dart';
 
 const _devId = 'lamp-x';
@@ -59,6 +61,7 @@ Future<void> _pumpToData(WidgetTester tester) async {
 Widget _wrap(ProviderContainer c) => UncontrolledProviderScope(
       container: c,
       child: MaterialApp(
+        theme: appTheme,
         // GoRouter's context.push needs a Router; we don't need one for these
         // row-rendering tests since taps fire onTap callbacks not navigation.
         // The dialog path uses Navigator, which a plain MaterialApp provides.
