@@ -14,12 +14,12 @@ class InfoPanel extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
+        gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Color(0x1F446C9C), // auroraBlue at ~12% alpha
-            Color(0x0F446C9C), // auroraBlue at ~6% alpha
+            colorScheme.tertiary.withValues(alpha: 0.12),
+            colorScheme.tertiary.withValues(alpha: 0.06),
           ],
         ),
         border: Border(
