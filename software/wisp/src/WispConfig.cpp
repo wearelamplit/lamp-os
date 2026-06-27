@@ -2,9 +2,32 @@
 
 #include <algorithm>
 
+#if defined(ARDUINO) || defined(ESP_PLATFORM)
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#else
+// Native test build — stub the FreeRTOS surface to no-ops. Single-thread
+// test harness has no concurrent access; the mutex acts solely as a
+// sequence point on hardware, so dropping it for native is safe.
+#include <cstddef>
+typedef void* SemaphoreHandle_t;
+#define pdTRUE         1
+#define portMAX_DELAY  0xFFFFFFFFu
+inline SemaphoreHandle_t xSemaphoreCreateMutex() {
+  return reinterpret_cast<SemaphoreHandle_t>(0x1);
+}
+inline int xSemaphoreTake(SemaphoreHandle_t, unsigned) { return pdTRUE; }
+inline void xSemaphoreGive(SemaphoreHandle_t) {}
+inline void vSemaphoreDelete(SemaphoreHandle_t) {}
+#endif
+
 namespace wisp {
 
 namespace {
+inline SemaphoreHandle_t asHandle(void* m) {
+  return reinterpret_cast<SemaphoreHandle_t>(m);
+}
+
 constexpr const char* kNamespace      = "wisp";
 constexpr const char* kKeyZone        = "selZone";
 constexpr const char* kKeySsid        = "wifiSsid";
@@ -37,6 +60,9 @@ WispSourceMode coerceSourceMode(int raw) {
   }
 }
 }  // namespace
+
+WispConfig::WispConfig()  { mutex_ = xSemaphoreCreateMutex(); }
+WispConfig::~WispConfig() { if (mutex_) vSemaphoreDelete(asHandle(mutex_)); }
 
 void WispConfig::begin() {
   if (opened_) return;
@@ -169,7 +195,9 @@ void WispConfig::setManualPalette(
   // budgeted size — keeps the wispStatus JSON within CONTROL_MAX_PAYLOAD
   // regardless of what the app pushed.
   const size_t n = std::min<size_t>(colors.size(), kManualPaletteMaxColors);
+  xSemaphoreTake(asHandle(mutex_), portMAX_DELAY);
   manualPalette_.assign(colors.begin(), colors.begin() + n);
+  xSemaphoreGive(asHandle(mutex_));
   if (opened_) {
     if (n == 0) {
       prefs_.remove(kKeyManualPalette);
@@ -193,6 +221,19 @@ void WispConfig::setOffColor(ManualPaletteColor c) {
     prefs_.putBytes(kKeyOffColor, buf, 3);
   }
   Serial.printf("[wisp.cfg] offColor <= %u,%u,%u\n", c.r, c.g, c.b);
+}
+
+size_t WispConfig::copyManualPalette(uint8_t* out, size_t maxColors) const {
+  if (!out || !maxColors) return 0;
+  xSemaphoreTake(asHandle(mutex_), portMAX_DELAY);
+  size_t n = std::min(manualPalette_.size(), maxColors);
+  for (size_t i = 0; i < n; ++i) {
+    out[i * 3 + 0] = manualPalette_[i].r;
+    out[i * 3 + 1] = manualPalette_[i].g;
+    out[i * 3 + 2] = manualPalette_[i].b;
+  }
+  xSemaphoreGive(asHandle(mutex_));
+  return n;
 }
 
 }  // namespace wisp

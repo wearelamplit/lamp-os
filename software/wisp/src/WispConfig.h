@@ -64,6 +64,9 @@ inline constexpr size_t kManualPaletteMaxColors = 50;
 
 class WispConfig {
  public:
+  WispConfig();
+  ~WispConfig();
+
   // Open the `wisp` Preferences namespace in RW mode and cache the values.
   // Safe to call once at boot from setup().
   void begin();
@@ -114,6 +117,12 @@ class WispConfig {
   }
   void setManualPalette(const std::vector<ManualPaletteColor>& colors);
 
+  // Snapshot the manual palette as packed RGB into the caller's buffer
+  // (needs maxColors*3 bytes). Returns the color count written. Lock-guarded:
+  // the only manualPalette accessor safe to call off the loop task (the
+  // StatusBeacon timer-service emit path).
+  size_t copyManualPalette(uint8_t* outRgb, size_t maxColors) const;
+
   // Off-mode color. When sourceMode is Off, the wisp does NOT broadcast
   // a palette to the lamp grid (PaintDistributor stays held off) — but
   // it still has its own 30-pixel ring to drive. This color is what
@@ -124,6 +133,10 @@ class WispConfig {
   void setOffColor(ManualPaletteColor c);
 
  private:
+  // Mutex handle — opaque to keep FreeRTOS out of the header. Cast
+  // back to SemaphoreHandle_t in the .cpp. Same pattern as WispRoster.
+  void* mutex_ = nullptr;
+
   Preferences prefs_;
   bool        opened_ = false;
 
