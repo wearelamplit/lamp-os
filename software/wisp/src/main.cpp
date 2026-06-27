@@ -526,7 +526,7 @@ void dumpInventory(uint32_t /*nowMs*/) {
   Serial.printf("[wisp] zone=%d source=%s observed=%u\n",
                 zoneSelector.currentZone(),
                 wisp::zoneSourceName(zoneSelector.source()),
-                (unsigned)zoneSelector.observed().size());
+                (unsigned)zoneSelector.observedCount());
 }
 
 // Build a stable instance id from the chip MAC's low 24 bits. Aurora uses it

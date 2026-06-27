@@ -6,14 +6,12 @@
 // here is RAM.
 //
 // THREADING: observe() and copyObserved() are thread-safe via internal
-// portMUX; other methods (currentZone, source, etc.) are read-only after
-// construction *as far as the loop task is concerned* — they are scalar
-// reads that tolerate a torn snapshot under the assumption that mutators
-// (latchFirstSeen / setFromOp / clearFromOp / setFromNvs) all run on the
-// loop task too. StatusBeacon::emitStatus reads currentZone/source from
-// the timer task; the worst case is one stale heartbeat, which the next
-// triggerOnChange will correct. The observed-vector path is the only one
-// that needs the mux because vector relocation can corrupt the snapshot.
+// portMUX. Other methods (currentZone, source, etc.) are read-only after
+// construction as far as the loop task is concerned — scalar reads that
+// tolerate a torn snapshot because all mutators (latchFirstSeen / setFromOp /
+// clearFromOp / setFromNvs) run on the loop task. The portMUX guards
+// observedZones_ / observedCount_ because copyObserved() (timer task) must
+// not see a half-shifted array during the FIFO memmove in observe().
 //
 // The `ZoneSource` discriminator tells the app pane where the current
 // selection came from. The string form is camelCase to match the
@@ -23,7 +21,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <vector>
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 #include <freertos/FreeRTOS.h>
@@ -58,7 +55,7 @@ class ZoneSelector {
  public:
   int currentZone() const { return currentZone_; }
   ZoneSource source() const { return source_; }
-  const std::vector<int>& observed() const { return observedZones_; }
+  size_t observedCount() const { return observedCount_; }
 
   void observe(int zone);
 
@@ -81,10 +78,9 @@ class ZoneSelector {
  private:
   int currentZone_ = -1;
   ZoneSource source_ = ZoneSource::None;
-  std::vector<int> observedZones_;  // FIFO, uniqued on insert
+  int    observedZones_[kMaxObservedZones];
+  size_t observedCount_ = 0;
 
-  // Guards observedZones_ so cross-task copyObserved() reads can't race a
-  // loop-task observe() that erases/pushes/reallocates the vector.
   mutable WISP_ZONE_PORTMUX_TYPE observedMux_ = WISP_ZONE_PORTMUX_INIT;
 };
 
