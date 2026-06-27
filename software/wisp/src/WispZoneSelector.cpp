@@ -15,6 +15,7 @@ const char* zoneSourceName(ZoneSource s) {
 }
 
 void ZoneSelector::observe(int zone) {
+  if (!isValidZone(zone)) return;
   WISP_ZONE_PORTMUX_ENTER(&observedMux_);
   bool present = false;
   for (size_t i = 0; i < observedCount_; ++i)
@@ -41,6 +42,7 @@ size_t ZoneSelector::copyObserved(int* out, size_t outCap) const {
 }
 
 bool ZoneSelector::latchFirstSeen(int zone) {
+  if (!isValidZone(zone)) return false;
   if (source_ != ZoneSource::None || currentZone_ >= 0) return false;
   currentZone_ = zone;
   source_ = ZoneSource::FirstSeen;
@@ -48,6 +50,7 @@ bool ZoneSelector::latchFirstSeen(int zone) {
 }
 
 void ZoneSelector::setFromOp(int zone) {
+  if (!isValidZone(zone)) return;
   currentZone_ = zone;
   source_ = ZoneSource::AppOp;
 }
@@ -58,6 +61,7 @@ void ZoneSelector::clearFromOp() {
 }
 
 void ZoneSelector::setFromNvs(int zone) {
+  if (!isValidZone(zone)) return;
   currentZone_ = zone;
   source_ = ZoneSource::Nvs;
 }

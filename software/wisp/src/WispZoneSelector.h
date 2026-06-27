@@ -51,6 +51,12 @@ const char* zoneSourceName(ZoneSource s);
 // upper bound is the single source of truth for the budget.
 constexpr size_t kMaxObservedZones = 16;
 
+// Sane upper bound for zone ids sourced from the mesh, NVS, or app ops.
+// 4 digits is generous for any real venue stage-index count and bounds
+// the JSON digit width, restoring headroom above the greedy-cap guarantee.
+constexpr int kMaxZoneId = 9999;
+inline bool isValidZone(int z) { return z >= 0 && z <= kMaxZoneId; }
+
 class ZoneSelector {
  public:
   int currentZone() const { return currentZone_; }

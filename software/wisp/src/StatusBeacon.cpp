@@ -14,6 +14,7 @@
 #include "WispZoneSelector.h"
 #include "aurora/AuroraPaletteClient.h"
 #include "lamp_protocol.hpp"
+#include "status_json.hpp"
 
 namespace wisp {
 
@@ -22,47 +23,6 @@ namespace {
 // FF:FF:FF:FF:FF:FF broadcast target for the CONTROL_OP frame. Matches the
 // targetMac convention every other broadcast CONTROL_OP uses on the wire.
 constexpr uint8_t kBroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-
-// Worst-case wispStatus JSON size, computed by hand so the buffer sizing
-// stays defensible.
-//
-// Layout (ArduinoJson default: no whitespace):
-//   {"char":"wispStatus","currentZone":N,"zoneSource":"firstSeen",
-//    "observedZones":[...],
-//    "wifiConnected":true,"auroraConnected":true,
-//    "paletteIdPrefix":"abcdef12","lastSeenMs":4294967295}
-//
-// Fixed-cost tally (no commas yet):
-//   '{'                       = 1
-//   "char":"wispStatus"       = 19
-//   "currentZone":N           = 14 + digits(N)   (realistic ≤ 2 digits → 16)
-//   "zoneSource":"firstSeen"  = 24 (longest enum value: "firstSeen")
-//   "observedZones":[…]       = 17 + payload     (16 ints, 1–3 digits each)
-//   "wifiConnected":true      = 20
-//   "auroraConnected":true    = 22
-//   "paletteIdPrefix":"abcdef12" = 27 (8-char prefix is the protocol cap)
-//   "lastSeenMs":4294967295   = 23
-//   '}'                       = 1
-//   7 field-separator commas  = 7
-//
-// observedZones payload, 16 entries, k-digit ids: 16*k + 15 commas.
-//   k=1: 16+15 = 31  (zones 0..9 — won't all fit)
-//   k=2: 32+15 = 47  (typical: zones 0..15, 6 one-digit + 10 two-digit = 28 + 9 commas... easier: 16*2 + 15 = 47 cap)
-//   k=3: 48+15 = 63
-//
-// Realistic case (zones 0..15, two-digit ids dominate, currentZone two
-// digits, both flags true, 8-char palette prefix, lastSeenMs near
-// UINT32_MAX): 1+19+16+24+17+47+20+22+27+23+1+7 = 224 bytes. Comfortably
-// under 230.
-//
-// Three-digit zone ids push past 230 by ~10 bytes. Not impossible: a future
-// Aurora deployment could number zones in the hundreds. The runtime guard
-// below (jsonLen > kPayloadCap → drop + log) is the defense; we'd then
-// need to either tighten kMaxObservedZones, switch to a more compact
-// encoding, or accept that the wisp doesn't broadcast its full status on
-// large deployments. The current 22-lamp / few-zone setup is far from
-// this boundary.
-constexpr size_t kPayloadCap = lamp_protocol::CONTROL_MAX_PAYLOAD;
 
 // Take up to N characters of the palette id as the on-wire prefix. Matches
 // the MSG_WISP_HELLO 8-byte slot convention so the app sees the same id
@@ -289,37 +249,23 @@ void StatusBeacon::emitStatus() {
     }
   }
 
-  // Build the JSON. JsonDocument on the stack is fine here — these fields
-  // are small.
-  JsonDocument doc;
-  doc["char"]            = "wispStatus";
-  doc["currentZone"]     = currentZone;
-  doc["zoneSource"]      = zoneSrc;
-  JsonArray zonesArr     = doc["observedZones"].to<JsonArray>();
-  for (size_t i = 0; i < obsCount; ++i) zonesArr.add(obsBuf[i]);
-  doc["wifiConnected"]   = wifiConn;
-  doc["auroraConnected"] = auroraConn;
-  doc["paletteIdPrefix"] = paletteIdPrefix;
-  doc["lastSeenMs"]      = lastSeenMs;
-  doc["source"]          = sourceName;
-  // Off-mode wisp-ring color. Three integers in [0..255]. Small enough
-  // (~25 bytes JSON) to ride alongside the other fields without
-  // jeopardising the CONTROL_MAX_PAYLOAD budget. Defaults are baked into
-  // WispConfig so a pre-feature wisp still emits sensible bytes when
-  // upgraded.
+  uint8_t offR = 0, offG = 0, offB = 0;
+  bool hasOffColor = false;
   if (config_) {
     const auto off = config_->offColor();
-    JsonArray offArr = doc["offColor"].to<JsonArray>();
-    offArr.add(off.r);
-    offArr.add(off.g);
-    offArr.add(off.b);
+    offR = off.r; offG = off.g; offB = off.b;
+    hasOffColor = true;
   }
+  const WispStatusFields fields{
+      currentZone, zoneSrc, obsBuf, obsCount,
+      wifiConn, auroraConn, paletteIdPrefix, lastSeenMs,
+      sourceName, offR, offG, offB, hasOffColor };
 
   char jsonBuf[kStatusJsonBufLen];
-  const size_t jsonLen = serializeJson(doc, jsonBuf, sizeof(jsonBuf));
-  if (jsonLen == 0 || jsonLen > kPayloadCap) {
-    Serial.printf("[wisp.beacon] wispStatus JSON oversize: %u (cap %u)\n",
-                  (unsigned)jsonLen, (unsigned)kPayloadCap);
+  const size_t jsonLen = buildWispStatusJson(
+      fields, jsonBuf, sizeof(jsonBuf), lamp_protocol::CONTROL_MAX_PAYLOAD);
+  if (jsonLen == 0) {
+    Serial.println("[wisp.beacon] wispStatus JSON build failed");
     return;
   }
 

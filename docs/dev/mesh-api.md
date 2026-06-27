@@ -149,15 +149,19 @@ After the MSG_EVENT cascade migration, CONTROL_OP no longer carries `triggerExpr
   "wifiConnected": true,
   "auroraConnected": true,
   "paletteIdPrefix": "abc12345",
-  "lastSeenMs": 14823
+  "lastSeenMs": 14823,
+  "source": "aurora",
+  "offColor": [255, 180, 60]
 }
 ```
 - **Sender**: wisp(s) only. Lamps gossip-relay (per the v0x03 relay rule for `MSG_CONTROL_OP`) but never originate.
 - **Cadence**: on-change + 30s heartbeat. Change triggers: zone change, WiFi connect/disconnect, Aurora connect/disconnect. `MSG_WISP_PALETTE` is emitted in the same tick (see Tier 1) so the app's view of the palette converges on the same cadence.
 - **`zoneSource`**: `"nvs"` | `"firstSeen"` | `"appOp"` | `"none"`.
-- **`observedZones`**: capped at 16 entries (oldest-eviction FIFO).
+- **`source`**: `"aurora"` | `"manual"` | `"off"`. Consumed by the Flutter app to surface and round-trip the source-toggle state.
+- **`offColor`**: `[R, G, B]` in 0–255, the ring color used in Off mode. Consumed by the Flutter app.
+- **`observedZones`**: capped at 16 entries (oldest-eviction FIFO). When the serialized payload would exceed `CONTROL_MAX_PAYLOAD`, trailing zones are dropped greedily until it fits — the fixed fields and `source`/`offColor` are always preserved.
 - **`lastSeenMs`**: wisp-local `millis()` at emission. Does not survive wisp reboot, the app does local-epoch math for "X seconds ago" UI rather than trusting this value across reconnects.
-- **Payload budget**: under 230 B (`CONTROL_MAX_PAYLOAD`). Runtime guard drops oversize frames rather than truncating. `manualPalette` is intentionally NOT carried here, it ships via the separate `MSG_WISP_PALETTE` broadcast.
+- **Payload budget**: guaranteed ≤ 230 B (`CONTROL_MAX_PAYLOAD`) by construction — the builder adds observed zones one at a time and stops before the cap. `manualPalette` is intentionally NOT carried here, it ships via the separate `MSG_WISP_PALETTE` broadcast.
 - **Lamp-side cache**: each lamp keeps the latest `wispStatus` per wisp MAC in `NearbyLamps`. `CHAR_WISP_STATUS` reads merge this cache with the last `MSG_WISP_HELLO` snapshot AND the cached manualPalette (base64-encoded `manualPalette` field in the served JSON) for the same MAC.
 
 `wispOp`, app → wisp, control writes proxied through any nearby lamp.

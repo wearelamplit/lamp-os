@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "WispZoneSelector.h"
+
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -140,9 +142,9 @@ void WispConfig::begin() {
 }
 
 void WispConfig::setSelectedZone(int zone) {
-  if (zone < 0) {
-    Serial.printf("[wisp.cfg] setSelectedZone(%d) rejected — use clearSelectedZone()\n",
-                  zone);
+  if (!isValidZone(zone)) {
+    Serial.printf("[wisp.cfg] setSelectedZone(%d) rejected — use clearSelectedZone() for <0, or zone must be 0..%d\n",
+                  zone, kMaxZoneId);
     return;
   }
   selectedZone_ = zone;
