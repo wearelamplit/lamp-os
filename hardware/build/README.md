@@ -28,6 +28,8 @@ As part of the lamp assembly, you'll need to make a few items ahead of assembly.
 - Wire nuts - Blue 18ga
 - Large size freezer bags
 
+Looking to buy parts? check out our [BOM and sourcing sheet](https://docs.google.com/spreadsheets/d/13LMiKESsMFRVg8935Jd-dmCTtnCKnP0fI2C8PypP58M/edit?usp=sharing)
+
 ### Tools
 
 - Wire cutter
