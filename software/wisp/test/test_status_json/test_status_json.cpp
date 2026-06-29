@@ -62,11 +62,32 @@ void test_zero_shuffle_seed_is_omitted() {
   TEST_ASSERT_TRUE(d["shuffleSeed"].isNull());
 }
 
+// Regression: a non-zero shuffleSeed at pathological field widths must NOT
+// fail the frame. Before the fix the seed pushed the zero-zone base past CAP
+// and buildWispStatusJson returned 0 -- the wisp stopped broadcasting status +
+// palette and vanished from the app. The seed is dropped to fit; the frame is
+// always produced and essential fields survive.
+void test_nonzero_seed_worst_case_does_not_fail() {
+  int zones[16];
+  for (int i = 0; i < 16; ++i) zones[i] = 2147483647;
+  wisp::WispStatusFields f{ 2147483647, "firstSeen", zones, 16,
+                            true, true, "abcdef12", 4294967295u, "aurora",
+                            255, 255, 255, true, /*shuffleSeed=*/255 };
+  char out[256];
+  size_t n = wisp::buildWispStatusJson(f, out, sizeof(out), CAP);
+  TEST_ASSERT_TRUE(n > 0);          // frame produced (was 0 before the fix)
+  TEST_ASSERT_TRUE(n <= CAP);
+  JsonDocument d;
+  TEST_ASSERT_FALSE(deserializeJson(d, out));
+  TEST_ASSERT_FALSE(d["source"].isNull());   // essential field preserved
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_worst_case_stays_under_cap);
   RUN_TEST(test_empty_observed_fits);
   RUN_TEST(test_nonzero_shuffle_seed_is_emitted);
   RUN_TEST(test_zero_shuffle_seed_is_omitted);
+  RUN_TEST(test_nonzero_seed_worst_case_does_not_fail);
   return UNITY_END();
 }
