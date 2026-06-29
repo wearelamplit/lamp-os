@@ -184,8 +184,21 @@ class WispNotifier extends _$WispNotifier {
     });
 
     try {
-      final initial = _applySourceWriteGuard(await _repo.readStatus());
+      // The lamp gates the CHAR_WISP_STATUS read on the AES-GCM auth
+      // handshake, which completes a beat after the `connected` edge; a
+      // pre-auth read comes back empty (present == false). Retry across the
+      // auth window so a status only readable post-auth isn't lost: the
+      // wispStatus notify is edge-triggered (fires when the wisp starts or
+      // stops controlling a surface) and won't fire to correct it while the
+      // wisp paints steadily.
+      var initial = _applySourceWriteGuard(await _repo.readStatus());
       if (_disposed) return WispStatus.empty;
+      for (var attempt = 0; !initial.present && attempt < 8; attempt++) {
+        await Future.delayed(const Duration(milliseconds: 1500));
+        if (_disposed) return WispStatus.empty;
+        initial = _applySourceWriteGuard(await _repo.readStatus());
+        if (_disposed) return WispStatus.empty;
+      }
       _ingestManualPaletteFromStatus(initial.currentPalette);
       _lastPaletteIdPrefix = initial.paletteIdPrefix;
       unawaited(_loadClaims());
