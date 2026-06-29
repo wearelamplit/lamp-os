@@ -1,9 +1,10 @@
 # workflows adapted from the WLED project using PlatformIO
 name: LampOS Build
 
-# Only included into other workflows
+# Manual, explicit distribution build — run from the Actions tab. The image is
+# unsigned (USB-flash / web-update only), so releases stay a deliberate action.
 on:
-  workflow_call:
+  workflow_dispatch:
 
 jobs:
 
