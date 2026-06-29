@@ -6,14 +6,7 @@
 // per-lamp color preview without requiring a firmware-side per-lamp
 // roster broadcast.
 //
-// Accuracy caveat: on Android, the BLE device id IS the lamp's MAC, but
-// it's the BLE MAC — the ESP-NOW MAC differs by one byte (the ESP32 derives
-// the WiFi-STA / ESP-NOW MAC by incrementing the BLE base). So this preview
-// gives the right "shape" — varied per-lamp colors picked from the
-// authored palette, with ~50/50 base/shade swap distribution — but the
-// exact colors will not byte-match what the wisp actually paints. The UI
-// notes this so the operator isn't surprised when their physical lamp
-// shows different shades than the app preview.
+// iOS returns a UUID (not a bdAddr), so those lamps get no preview.
 
 import 'dart:typed_data';
 
