@@ -1,165 +1,198 @@
-# Lamp Build Guide
+# Build a Lamp Conversion Kit
 
-As part of the process for making a lamp using Lamp OS, you'll need to convert the lamp to use a DC power source and add LEDs to the shade and base. This guide shows how we usually convert a lamp as an illustrated guide
+As part of the lamp assembly, you'll need to make a few items ahead of assembly. We refer to this collection of parts as a lamp kit. This guide is technical and needs a few specialized tools and supplies
 
 ## Prerequisites
 
-To begin your build, you'll need a number of parts and tools ready to go
+![Main Lamp Components](images/important-lamp-parts.jpg)
 
-### Lamp Parts
+### Parts List
 
-More technical details of the parts you'll need to purchase can be found on the [main readme](../../README.md)
+- USB Type A connector
+- SPT-1 18ga lamp cord - we encourage reuse of existing lamp cords where possible. Simply cut the AC plug off the end of existing cords
+- An ESP32 board compatible with Lamp OS and our [pinout](https://lastminuteengineers.com/esp32-pinout-reference/)
+  - 30 pin ESP32 DEVKIT-V1 style
+  - Dual core/4MB Flash/520k SRAM/Wifi + BT
+  - Unsoldered/Unwelded pins. Clipping pins off is no fun!
+- 5V Neopixel style LED strip. It is critical to use 4 channel RGB + Warm White LEDs for this project to avoid incompatibility:
+  - RGBWW (SK6812 chipset)
+  - White PCB
+  - 60 LEDs/m
+  - Silicone Jacketed - IP67
+- 24ga stranded hookup wire in blue, red, black and yellow
+- [3D printed bulb and optional diffuser](../3dprint/bulb/)
+- heat shrink tubing: 10mm diameter for the USB connector
+- 4" white/clear zip ties
+- 1/8 IPS lamp nuts
+- Wire nuts - Grey 22ga
+- Wire nuts - Blue 18ga
+- Large size freezer bags
 
-- A working lamp and shade
-- USB Type A plug
-- Some 4in cable ties
-- An ESP32 board programmed with Lamp OS
-- about 1.5m of 5V Neopixel style LED strip
-- Some 24ga hookup wire in blue, red, black and yellow
-- 3D printed bulb (optional)
-- a pack of 24ga marettes (optional)
-- a pack of lamp hardware (extra nuts/bolts/washers)
-- a multimeter
-- heat shrink tubing: 2, 3 and 10mm diameter
-- a USB power bank (10000mAh or more)
+Looking to buy parts? check out our [BOM and sourcing sheet](https://docs.google.com/spreadsheets/d/13LMiKESsMFRVg8935Jd-dmCTtnCKnP0fI2C8PypP58M/edit?usp=sharing)
 
 ### Tools
 
-- hand drill and some assorted metal drill sizes
-- wire cutters and strippers
-- soldering iron
-- some locking pliers/Visegrips for removing lamp hardware
-- screwdrivers for lamp hardware (small phillips and slot head)
-- 3d printer (optional)
+- Wire cutter
+- Wire stripper
+- Wire crimper
+- Heat gun
+- Scissors
+- Soldering iron with temperature control - chisel tip - 750F for leaded solder
+- Solder - eutectic rosin core - Tin 63% / Lead 37% / 0.025"
+- Silicone sealant - neutral cure type
+- Gorilla brand Crystal Clear tape
+- 3D printer
+- [3D printed tools](../3dprint/tools/)
 
-## Parts of a Lamp
+### Using silicone sealant
 
-![Basic lamp terminology](images/lamp-wiring-socket.png)
+Note that sealant may take up to a day to cure, so prepare a spot that will be protected from movement and lined with cardboard so the sealant can't accidentally get on clothes or furniture
 
-## Disassembly
+## Wiring up the Board
 
-To begin, you'll have to disassemble your lamp. The easiest way I've found to do this:
+Cut 4 24ga wires to 6" length:
 
- 1. remove the lampshade and light bulb
- 2. unscrew the locking screw just below the bulb socket if it's there
- 3. grab the base of the lamp and the socket and gently rotate them to loosen the entire internal assembly.
- 4. The socket should completely unscrew from the rest of lamp hardware with enough turns
- 5. clip the lamp cord at the socket side (shown in the figure above). Once the lamp cord is cut, you can pull it out of the lamp. It'll be reused in a later step
- 6. take all the rest of the hardware apart and take some photos of the order that the parts go together
- 7. put all the glass aside in a safe spot until final assembly
+- Red
+- Black
+- Yellow
+- Blue
 
-## Things to Build Ahead of Time
+Strip the wires to 2mm and tin the board and wiring. Connect the wires in a surface mounted fashion as follows
 
-### Build a 3d printed shade bulb
+- Red - Vin
+- Black - GND
+- Yellow - D12
+- Blue - D14
 
-Cut 35 LEDs from the strip and solder 3 wires - you may need to pull the LED strip out a little:
+Collect the wires and zip tie them to the side of the board
 
-- black -> gnd
-- yellow -> Din
-- red -> +5V
+![Board wiring](images/board-1.jpg)
 
-![Soldering the Shade LEDs](images/shade-led-1.jpg)
+Make sure to program the board at the [board programmer utility](https://update.lamplit.ca) before you continue
 
-Push the wires through the lower hole and clean up the 3d print so it's square as possible
+## Preparing the Base LEDs
 
-![Push wires into the bulb](images/shade-led-2.jpg)
+Cut 3 24ga wires to 36" length:
 
-Wrap the LEDs around the bulb and tuck them into the top hole
+- Black
+- Blue
+- Red
 
-![The bulb should hold the LEDs in place](images/shade-led-3.jpg)
+Strip the wires to 2-3mm and tin the board and wiring. Connect the wires in a surface mounted fashion as follows:
 
-Once the LEDs are in place, wrap them in clear tape to fasten them for good
+- Black - GND
+- Blue - Din
+- Red - 5V
 
-![Wrap the LEDs with a couple layers of tape](images/shade-led-4.jpg)
+Cut 30 LEDs from the reel along the line on the pads
 
-### Build the PCB
+![Base LED wiring](images/base-led-1.jpg)
 
-Cut 4 wires around 6" each
+In order to protect the wiring, silicone the LED strip squarely inside the jacketing
 
-- black -> GND
-- red -> +5v/VIN
-- yellow -> D12
-- blue -> D14
+![Silicone the base LED strip](images/base-led-2.jpg)
 
-You can zip tie these wires from any of the board's screw holes next to the D32 or EN pins.
+The finished LED strip should be fully covered by the jacket
 
-![PCB wiring](images/pcb-1.jpg)
-![PCB Wiring](images/pcb-2.jpg)
+![Ensure the strip is completely surrounded by the isulator](images/base-led-3.jpg)
 
-## Assembly
+Roll up the LEDs to protect them until assembly
 
-Now the lamp is in pieces, we can begin converting it. The goal of the lamp conversion is to wire it up like this
+![Ensure the strip is completely surrounded by the isulator](images/base-led-4.jpg)
 
-![Assembly plan](images/Lamp-wiring-dc.png)
+## Preparing the Bulb
 
-### Build Steps
+Cut 3 24ga wires to 8" length:
 
-Begin by drilling a few holes in the base. These holes should be as close to the lower locknut as possible.
+- Black
+- Yellow
+- Red
 
-![Drilling the lamp base](images/photo_2025-04-13_17-59-24.jpg)
+Strip the wires to 2-3mm and tin the board and wiring. Connect the wires in a surface mounted fashion as follows:
 
-Place a zip tie through the two smaller holes
+- Black - GND
+- Yellow - Din
+- Red - 5V
 
-![Cord zip tie](images/photo_2025-04-13_17-59-26.jpg)
+Cut exactly 30 LEDs from the strip reel along the line on the pads
 
-Install the lamp pipe into the lamp base and install a top and bottom nut and bottom lock washer to secure the pipe in place. You may need to test fit the base glass a few times to ensure the pipe is in the right position
+![Bulb wiring](images/shade-led-1.jpg)
 
-![Install the lamp pipe](images/photo_2025-04-13_17-59-37.jpg)
+Feed the wires into the bulb's bottom window
 
-Cut and remove the lamp cord from the socket
+![Inserting the LED strip into the bulb](images/shade-led-2.jpg)
 
-![Cut the lamp cord to prepare to convert it to USB](images/photo_2025-04-13_17-59-28.jpg)
+Wrap the LEDs around the bulb and tuck the end of the jacketing into the top window
 
-Strip the cable and solder it to the USB connector. The ribbed or striped side of the cable should be ground. Keep the solder as low profile as possible so it doesn't touch the metal on the top side of the connector. Close the connector by clipping in the top metal can part.
+![Wrapping the LED strip](images/shade-led-3.jpg)
 
-![Solder the USB connector](images/photo_2025-04-13_17-59-30.jpg)
+Use clear tape to secure and protect the silicone jacketing from dust
 
-Double check your work on soldering the connector with a multimeter. Plug the connector into the battery. Connect the black lead to the ribbed/striped side of the lamp cord and the red lead to the other. In DC voltage mode, make sure 2-5V is coming out of the connector and in the right polarity
+![Securing the strip with tape](images/shade-led-4.jpg)
 
-![Check for 2-5V on the other end of the lamp cord](images/photo_2025-04-13_17-59-32.jpg)
+Cut the tape slightly to get good nozzle placement and inject silicone into the bottom and top window to completely seal the LED strip from weather
 
-Crimp the connector firmly to the wire using locking pliers or a crimp tool. Retest the connector once assembled and crimped. Apply heat shrink tubing (10mm diameter) up to about the midpoint of the usb connector and heat til it's tight. The lamp cord is now complete
+![Silicone the LED strip ends](images/shade-led-5.jpg)
 
-![finishing touches for the lamp plug](images/lamp-cord-finished.jpg)
+Tuck in the wires to complete the bulb assembly
 
-On the base LED strip, solder 3 wires:
+![Tidying the bulb wiring](images/shade-led-6.jpg)
 
-- black -> gnd
-- blue -> Din
-- red -> +5V
+## Preparing the USB Lamp Cord
 
-And wrap it around the lamp pipe to the top of the base glass. It's generally about 30-40 LEDs
+Cut around 7 feet of lamp cord or use a recycled cord from an older lamp. Strip around 4mm from the ends of the lamp cord and tin them.
 
-![Wrap the LEDs around the pipe](images/photo_2025-04-13_17-59-39.jpg)
+![Strip and tin the lamp wire](images/lamp-wire-1.jpg)
 
-Tie off the base LEDs with a couple of wire ties
+Tin the two edges of the connector. You can use a clip to add a little weight for stabilization while soldering. Keep the amount of tinning light
 
-![More wire ties](images/photo_2025-04-13_17-59-41.jpg)
+![Tin the connector pads](images/lamp-wire-2.jpg)
 
-We can now begin putting the lamp glass and socket back together. Cut another 3 red, black and blue wires to feed down from the bottom of the socket down to the bottom of the base
+Bend the wires a little so they're parallel to the pads and heat the tinned surface until they sink into the connector and bond. Note that the ribbed or striped side of the wire (traditionally AC Neutral) will connect to USB GND
 
-![Data and power routed back to the base](images/photo_2025-04-13_17-59-43.jpg)
+![Bond the wires](images/lamp-wire-3.jpg)
 
-Put the top of the socket back into place and place the lamp PCB into the socket
+With your thumb over the wire, pinch the lamp cord so the two windows are visible
 
-![Socket PCB wiring](images/photo_2025-04-13_17-59-45.jpg)
+![Pinch the jacketing to ensure the shell snaps in place](images/lamp-wire-4.jpg)
 
-Use marettes to connect all the like colored wires together
+Clamp the top shell to the wire and ensure the clips fit into the windows
 
-![Strip and connect all the wires](images/photo_2025-04-13_17-59-50.jpg)
+![Clip on the shell](images/lamp-wire-5.jpg)
 
-Once all the connections are made, clip the bulb onto the socket by pushing all the wires into the 3d printed bulb and then pushing down until it clicks into place. If you don't have a 3d printer, you can wrap the LEDs around the harp instead
+Using the blue crimper setting (18-16ga), fully crimp the connector
 
-![Clip on the 3d printed bulb](images/photo_2025-04-13_17-59-56.jpg)
+![Crimp the connector](images/lamp-wire-6.jpg)
 
-Now to wire the base. Connect the striped or ridged lamp cord to the black wire. The red to the other lamp cord. Also add the red wire and black wires from the base LEDs and use a marette or solder/heatshrink to connect them all. the blue and blue wire will connect in the same way. Plug in the lamp and make sure it turns on. If it works, then strap them all to the base using the wire tie placed earlier
+Cut about 2" of heat shrink tubing and slide it over the connector
 
-![Base wiring](images/photo_2025-04-13_17-59-47.jpg)
+![Prep the heatshrink](images/lamp-wire-7.jpg)
 
-> Note: this build includes DMX wiring, the large black cable, which is based on an optional prototype
+Aim for slightly above the top shell and use the heat gun to shrink it to fit
 
-Add the lampshade and plug the lamp in! With any luck, it'll spin up with the built in colors. From here, you can update your lamp by finding `lamp-configurable` in your wifi list and visiting <http://192.168.4.1> from any web browser to configure the lamp's name and colors.
+![Position and heat the tubing](images/lamp-wire-8.jpg)
 
-![Finished lamp](images/IMG_9844.jpg)
+The completed cord should look something like this. Tidy it into a loop for bagging.
 
-This ends the tutorial for the basic build for the lamps
+![Completed lamp cord](images/lamp-wire-9.jpg)
+
+## Completing a kit
+
+With all of the soldering done, you can now assemble the rest of the kit
+
+![Kit contents illustration](images/kit-content-illustration.jpg)
+
+- 1x assembled bulb
+- 1x assembled board
+- 1x assembled USB lamp cord
+- 1x assembled base LED strip
+- 6x 4" white zip ties
+- 2x grey wire nuts
+- 2x blue wire nuts
+- 1x 1/8 IPS lamp nut
+
+If you're preparing for a workshop, put all of these items into a freezer bag for later assembly
+
+![Kit contents bagged](images/lamp-kit-complete.jpg)
+
+That's the end of this tutorial. If you're looking to build immediately, check out our simplified [Assembly Guide](files/lamp-build-instructions.pdf)

@@ -14,28 +14,11 @@ With these sorts of subtle changes, people may begin to realize things are not a
 
 ![Preferred lamp guidelines](hardware/build/images/Lamp-Selection-Guide.jpg)
 
-## Lamp Hardware Requirements
+## Build Tutorials
 
-![Main Lamp Components](hardware/build/images/important-lamp-parts.jpg)
+[![Assembly Guide](hardware/build/images/assembly-guide.jpg)](hardware/build/files/lamp-build-instructions.pdf)
 
-This software is intended for the ESP32 platform. Our preferred dev board is an ESP32-WROOM32 30 Pin board variant measuring no wider than 28mm with a chip antenna. Unsoldered/unwelded pins are preferred if possible. This space requirement is so the board can fit comfortably into a standard lamp socket. The boards can be had easily from Amazon and AliExpress for $5-10. The model we use has this pinout <https://lastminuteengineers.com/esp32-pinout-reference/>
-
-The USB connector is a USB type A metal shell crimp on connector. These tend to be the most robust.
-
-By default, a lamp will use about 80 LEDs. The limiting factor at the moment is current draw. generally over 100 LEDs you may have stability issues with a conventional USB source. We recommend purchasing LEDs strips with the following specs:
-
-- Around 2m in length
-- SK6812 chipset
-- IP67 waterproof
-- 5VDC
-- RGBWW (warm white) LED Strips
-- Spacing of 60 LEDs/m
-
-A 10000mAh battery pack with USB will run this device portably for around 7 hours
-
-You'll also need some basic workshop tools, heat shrink, wire connectors, a soldering iron and a way to print the plastic bulb
-
-There's a handy [build guide with images here](hardware/build/README.md)
+[![Conversion kit Guide](hardware/build/images/conversion-kit.jpg)](hardware/build/README.md)
 
 ## Lamp OS
 
