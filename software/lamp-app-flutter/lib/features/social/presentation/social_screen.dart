@@ -23,8 +23,8 @@ import '../domain/social_mode.dart';
 /// Top: a row of chunky personality pills (Introvert / Ambivert /
 /// Extrovert), same visual style as the Shade/Base/Both picker in the
 /// add-expression flow. Bound to ControlNotifier.setLampSocialMode —
-/// change rides through the next Save Changes. No timings exposed,
-/// whimsical-by-design.
+/// persists immediately via `writeSettingsBlob` (`reboot:false`). No timings
+/// exposed, whimsical-by-design.
 ///
 /// Below: every lamp currently nearby (live BLE). Disposition is only
 /// meaningful when the peer is actually here — historical "seen" lamps

@@ -54,11 +54,10 @@ class WifiNotifier extends _$WifiNotifier {
 
   Future<void> scan() => _writeOp({'op': 'scan'});
 
-  // SSID operations live on controlNotifier (setHomeSsid) and ride the
-  // unified draft + Save Changes path — settings_blob carries
-  // `homeMode.ssid` and the firmware applies it on save. No "live"
-  // firmware effect to preview for an SSID, so no wifiOp channel is
-  // needed for setHomeSsid/forget anymore.
+  // SSID operations live on controlNotifier (setHomeSsid), which writes
+  // immediately via writeSettingsBlob (reboot:false). No "live" firmware
+  // effect to preview for an SSID — home-mode detection runs off the saved
+  // value — so no wifiOp channel is needed for setHomeSsid/forget.
 
   Future<void> _writeOp(Map<String, dynamic> op) async {
     final ble = ref.read(bleClientProvider);

@@ -940,9 +940,9 @@ class ControlNotifier extends _$ControlNotifier {
   }
 
   // ---------------------------------------------------------------------------
-  // Setup-screen mutators — on lamps with CHAR_COMMIT: immediate
-  // writeSettingsBlob commit; on older firmware: state-only, ride the
-  // global Save → settingsBlob path.
+  // Setup-screen mutators — each call writes immediately via
+  // writeSettingsBlob. name / SSID / devMode use reboot:false (instant);
+  // password / advanced-LED use reboot:true (triggers reboot + ~8–12s reconnect).
   // ---------------------------------------------------------------------------
 
   Future<void> setLampName(String name) async {
@@ -1012,10 +1012,9 @@ class ControlNotifier extends _$ControlNotifier {
     );
   }
 
-  /// Personality pill. On lamps with CHAR_COMMIT, commits immediately
-  /// via writeSettingsBlob (reboot: false). On older firmware,
-  /// state-only — rides the global Save → settings_blob path. The lamp
-  /// picks up the new mode after the post-save reboot.
+  /// Personality pill. Commits immediately via `writeSettingsBlob`
+  /// (`reboot: false`) — no reboot required; the firmware picks up the new
+  /// social mode without disconnecting.
   Future<void> setLampSocialMode(SocialMode mode) async {
     await _mutate(
       (s) => s.copyWith(
@@ -1437,10 +1436,9 @@ class ControlNotifier extends _$ControlNotifier {
   // Expressions
   // ---------------------------------------------------------------------------
 
-  /// Add or update an expression. Live-previews via CHAR_EXPRESSION_OP — the
-  /// firmware updates its in-memory expressionManager (not NVS); persistence
-  /// to NVS happens on the next global Save via the settings_blob payload
-  /// which carries the full expressions array.
+  /// Add or update an expression. Writes via CHAR_EXPRESSION_OP — the
+  /// firmware's expressionOp handler calls applyExpressionOpLocal + persistConfig,
+  /// persisting the change to NVS immediately (no settings_blob write needed).
   Future<void> upsertExpression(ExpressionConfig entry) async {
     final cur = state.value;
     if (cur == null) return;

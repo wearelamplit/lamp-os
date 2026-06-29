@@ -82,18 +82,16 @@ class _HomeModeScreenState extends ConsumerState<HomeModeScreen> {
   }
 
   void _selectSsid(String ssid) {
-    // Draft-only: hold the SSID in controlNotifier state and let global
-    // Save Changes persist it via settings_blob (the firmware merges
-    // homeMode.ssid on blob writes). No live firmware effect to preview
-    // for an SSID — home-mode detection runs off the saved value.
+    // setHomeSsid writes immediately via writeSettingsBlob (reboot:false).
+    // No live firmware effect to preview for an SSID — home-mode detection
+    // runs off the saved value.
     ref.read(controlNotifierProvider(widget.lampId).notifier)
         .setHomeSsid(ssid);
   }
 
   void _onForget() {
-    // Same draft-only flow: clear the SSID in app state; Save Changes
-    // persists. Users who want the lamp to drop home mode *immediately*
-    // can hit Save Changes after Forget.
+    // Same immediate-write flow: clears homeMode.ssid via writeSettingsBlob
+    // (reboot:false). The lamp drops home mode on its next detection cycle.
     ref.read(controlNotifierProvider(widget.lampId).notifier)
         .setHomeSsid('');
   }

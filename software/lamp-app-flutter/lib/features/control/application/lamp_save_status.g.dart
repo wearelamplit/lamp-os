@@ -8,30 +8,33 @@ part of 'lamp_save_status.dart';
 
 // GENERATED CODE - DO NOT MODIFY BY HAND
 // ignore_for_file: type=lint, type=warning
-/// Tracks whether a global Save Changes is currently in flight for a given
-/// lamp. `control_notifier.save()` flips this true just before transitioning
-/// state to AsyncLoading, and back to false once the post-reboot reconnect
-/// resolves (or errors). `ConnectingView` watches it to switch its message
-/// from "Connecting…" to "Saving changes…" during the post-save window so
-/// the user knows the gap is intentional, not a connection problem.
+/// Tracks whether a `reboot:true` `writeSettingsBlob` is currently in flight
+/// for a given lamp (e.g. password or advanced-LED changes that trigger a
+/// firmware reboot). Flipped true just before state transitions to
+/// AsyncLoading, back to false once the post-reboot reconnect resolves (or
+/// errors). `ConnectingView` watches it to switch its message from
+/// "Connecting…" to "Saving changes…" during the reconnect window so the
+/// user knows the gap is intentional, not a connection problem.
 
 @ProviderFor(LampSaveStatus)
 final lampSaveStatusProvider = LampSaveStatusFamily._();
 
-/// Tracks whether a global Save Changes is currently in flight for a given
-/// lamp. `control_notifier.save()` flips this true just before transitioning
-/// state to AsyncLoading, and back to false once the post-reboot reconnect
-/// resolves (or errors). `ConnectingView` watches it to switch its message
-/// from "Connecting…" to "Saving changes…" during the post-save window so
-/// the user knows the gap is intentional, not a connection problem.
+/// Tracks whether a `reboot:true` `writeSettingsBlob` is currently in flight
+/// for a given lamp (e.g. password or advanced-LED changes that trigger a
+/// firmware reboot). Flipped true just before state transitions to
+/// AsyncLoading, back to false once the post-reboot reconnect resolves (or
+/// errors). `ConnectingView` watches it to switch its message from
+/// "Connecting…" to "Saving changes…" during the reconnect window so the
+/// user knows the gap is intentional, not a connection problem.
 final class LampSaveStatusProvider
     extends $NotifierProvider<LampSaveStatus, bool> {
-  /// Tracks whether a global Save Changes is currently in flight for a given
-  /// lamp. `control_notifier.save()` flips this true just before transitioning
-  /// state to AsyncLoading, and back to false once the post-reboot reconnect
-  /// resolves (or errors). `ConnectingView` watches it to switch its message
-  /// from "Connecting…" to "Saving changes…" during the post-save window so
-  /// the user knows the gap is intentional, not a connection problem.
+  /// Tracks whether a `reboot:true` `writeSettingsBlob` is currently in flight
+  /// for a given lamp (e.g. password or advanced-LED changes that trigger a
+  /// firmware reboot). Flipped true just before state transitions to
+  /// AsyncLoading, back to false once the post-reboot reconnect resolves (or
+  /// errors). `ConnectingView` watches it to switch its message from
+  /// "Connecting…" to "Saving changes…" during the reconnect window so the
+  /// user knows the gap is intentional, not a connection problem.
   LampSaveStatusProvider._({
     required LampSaveStatusFamily super.from,
     required String super.argument,
@@ -78,12 +81,13 @@ final class LampSaveStatusProvider
 
 String _$lampSaveStatusHash() => r'9c4ee0158d0c4774127ff48c1028863ec09d02f0';
 
-/// Tracks whether a global Save Changes is currently in flight for a given
-/// lamp. `control_notifier.save()` flips this true just before transitioning
-/// state to AsyncLoading, and back to false once the post-reboot reconnect
-/// resolves (or errors). `ConnectingView` watches it to switch its message
-/// from "Connecting…" to "Saving changes…" during the post-save window so
-/// the user knows the gap is intentional, not a connection problem.
+/// Tracks whether a `reboot:true` `writeSettingsBlob` is currently in flight
+/// for a given lamp (e.g. password or advanced-LED changes that trigger a
+/// firmware reboot). Flipped true just before state transitions to
+/// AsyncLoading, back to false once the post-reboot reconnect resolves (or
+/// errors). `ConnectingView` watches it to switch its message from
+/// "Connecting…" to "Saving changes…" during the reconnect window so the
+/// user knows the gap is intentional, not a connection problem.
 
 final class LampSaveStatusFamily extends $Family
     with $ClassFamilyOverride<LampSaveStatus, bool, bool, bool, String> {
@@ -96,12 +100,13 @@ final class LampSaveStatusFamily extends $Family
         isAutoDispose: false,
       );
 
-  /// Tracks whether a global Save Changes is currently in flight for a given
-  /// lamp. `control_notifier.save()` flips this true just before transitioning
-  /// state to AsyncLoading, and back to false once the post-reboot reconnect
-  /// resolves (or errors). `ConnectingView` watches it to switch its message
-  /// from "Connecting…" to "Saving changes…" during the post-save window so
-  /// the user knows the gap is intentional, not a connection problem.
+  /// Tracks whether a `reboot:true` `writeSettingsBlob` is currently in flight
+  /// for a given lamp (e.g. password or advanced-LED changes that trigger a
+  /// firmware reboot). Flipped true just before state transitions to
+  /// AsyncLoading, back to false once the post-reboot reconnect resolves (or
+  /// errors). `ConnectingView` watches it to switch its message from
+  /// "Connecting…" to "Saving changes…" during the reconnect window so the
+  /// user knows the gap is intentional, not a connection problem.
 
   LampSaveStatusProvider call(String lampId) =>
       LampSaveStatusProvider._(argument: lampId, from: this);
@@ -110,12 +115,13 @@ final class LampSaveStatusFamily extends $Family
   String toString() => r'lampSaveStatusProvider';
 }
 
-/// Tracks whether a global Save Changes is currently in flight for a given
-/// lamp. `control_notifier.save()` flips this true just before transitioning
-/// state to AsyncLoading, and back to false once the post-reboot reconnect
-/// resolves (or errors). `ConnectingView` watches it to switch its message
-/// from "Connecting…" to "Saving changes…" during the post-save window so
-/// the user knows the gap is intentional, not a connection problem.
+/// Tracks whether a `reboot:true` `writeSettingsBlob` is currently in flight
+/// for a given lamp (e.g. password or advanced-LED changes that trigger a
+/// firmware reboot). Flipped true just before state transitions to
+/// AsyncLoading, back to false once the post-reboot reconnect resolves (or
+/// errors). `ConnectingView` watches it to switch its message from
+/// "Connecting…" to "Saving changes…" during the reconnect window so the
+/// user knows the gap is intentional, not a connection problem.
 
 abstract class _$LampSaveStatus extends $Notifier<bool> {
   late final _$args = ref.$arg as String;

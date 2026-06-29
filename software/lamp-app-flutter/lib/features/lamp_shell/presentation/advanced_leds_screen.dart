@@ -27,12 +27,11 @@ import '../../control/presentation/widgets/disconnect_aware_body.dart';
 ///   - **BGR**  — 3 bpp NeoPixel (`NEO_BGR`). For strips whose hardware
 ///     ships red and blue swapped from the GRB norm.
 ///
-/// The bottom Cancel/Update action row mirrors the editor pattern used
-/// elsewhere (knockout, expression editor, base editor). Update just
-/// pops — the actual persistence still rides the global "Save Changes"
-/// pill on the control screen, which triggers a reboot. Cancel rewinds
-/// the four fields (base.px, base.byteOrder, shade.px, shade.byteOrder)
-/// to their pre-screen-open values.
+/// The bottom Cancel/Update action row: Update calls
+/// `applyAdvancedLedsAndReboot` → `writeSettingsBlob(reboot:true)` → firmware
+/// reboots and reconnects (~8–12 s), then pops on success. Cancel rewinds
+/// the four fields (base.px, base.byteOrder, shade.px, shade.byteOrder) to
+/// their pre-screen-open values without writing to the lamp.
 class AdvancedLedsScreen extends ConsumerStatefulWidget {
   const AdvancedLedsScreen({super.key, required this.lampId});
   final String lampId;
