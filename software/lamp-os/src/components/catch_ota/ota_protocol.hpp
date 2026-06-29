@@ -94,9 +94,7 @@ enum class FwResultStatus : uint8_t {
     OfferShaMismatch   = 8,
 };
 
-// ---------------------------------------------------------------------------
 // Parsed structs
-// ---------------------------------------------------------------------------
 
 struct ParsedHello {
     uint16_t seq;
@@ -143,9 +141,7 @@ struct ParsedFwDone {
     uint16_t footerLen;
 };
 
-// ---------------------------------------------------------------------------
 // Internal helpers
-// ---------------------------------------------------------------------------
 namespace detail {
 
 inline void writeHeader(uint8_t* buf, uint8_t msgType, uint16_t seq) {
@@ -159,9 +155,7 @@ inline void writeHeader(uint8_t* buf, uint8_t msgType, uint16_t seq) {
 
 }  // namespace detail
 
-// ---------------------------------------------------------------------------
 // inspect(): validate magic + version byte, return msgType or 0 on failure.
-// ---------------------------------------------------------------------------
 inline uint8_t inspect(const uint8_t* data, size_t len) {
     if (!data || len < HEADER_SIZE) return 0;
     if (data[0] != MAGIC_0 || data[1] != MAGIC_1) return 0;
@@ -169,9 +163,7 @@ inline uint8_t inspect(const uint8_t* data, size_t len) {
     return data[3];
 }
 
-// ---------------------------------------------------------------------------
 // Builders
-// ---------------------------------------------------------------------------
 
 // buildHello: emits a v0x05 HELLO with tlv_count=0 when otaState=kOtaStateIdle
 // and fwChannel=nullptr (the catch_ota use case).
@@ -325,9 +317,7 @@ inline size_t buildFwResult(uint8_t* buf, size_t bufLen, uint16_t seq,
     return FW_RESULT_FIXED_SIZE;
 }
 
-// ---------------------------------------------------------------------------
 // Parsers
-// ---------------------------------------------------------------------------
 
 inline bool parseHello(const uint8_t* data, size_t len, ParsedHello& out) {
     if (inspect(data, len) != MSG_HELLO) return false;

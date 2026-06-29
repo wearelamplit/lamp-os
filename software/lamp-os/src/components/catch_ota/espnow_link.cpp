@@ -9,7 +9,6 @@
 
 namespace catch_ota {
 
-// ---------------------------------------------------------------------------
 // SPSC ring — 64 slots × 250 bytes (~2s of buffer at the ~30ms chunk cadence).
 //
 // Single producer: WiFi task (recvTrampoline) writes a frame then publishes
@@ -17,7 +16,6 @@ namespace catch_ota {
 // reads the frame, then publishes s_tail with release. Release/acquire (not bare
 // compiler barriers) is required across Core 0 / Core 1: the consumer must see
 // the slot body before it observes the index advance, or it reads a torn slot.
-// ---------------------------------------------------------------------------
 
 static constexpr size_t   kSlotCount = 64;
 static constexpr size_t   kSlotBytes = 250;
@@ -37,10 +35,8 @@ static std::atomic<uint32_t> s_tail{0};  // published by loop task
 
 static RecvFn s_recv = nullptr;
 
-// ---------------------------------------------------------------------------
 // Recv trampoline — runs on the WiFi task.
 // ONLY copies the frame into the ring; never calls s_recv, never touches flash.
-// ---------------------------------------------------------------------------
 static void recvTrampoline(const esp_now_recv_info_t* info,
                            const uint8_t* data, int len) {
     if (info == nullptr || data == nullptr) return;
@@ -75,9 +71,6 @@ static bool addBroadcastPeer() {
     return esp_now_add_peer(&peer) == ESP_OK;
 }
 
-// ---------------------------------------------------------------------------
-// espnowBegin
-// ---------------------------------------------------------------------------
 bool espnowBegin(RecvFn recv) {
     s_recv = recv;
 
@@ -100,11 +93,9 @@ bool espnowBegin(RecvFn recv) {
     return true;
 }
 
-// ---------------------------------------------------------------------------
 // espnowReinit — re-establish ESP-NOW after radioEnterOtaMode's WiFi mode switch
 // clobbers the driver's peer table / interface binding (esp_now ops fail until
 // re-init). Caller re-adds the unicast sender peer after this.
-// ---------------------------------------------------------------------------
 void espnowReinit() {
     esp_now_deinit();
     if (esp_now_init() != ESP_OK) {
@@ -115,10 +106,8 @@ void espnowReinit() {
     addBroadcastPeer();
 }
 
-// ---------------------------------------------------------------------------
 // espnowAddPeer — register a unicast sender MAC before the first unicast send.
 // Guarding against ESP_ERR_ESPNOW_NOT_FOUND on esp_now_send.
-// ---------------------------------------------------------------------------
 void espnowAddPeer(const uint8_t mac[6]) {
     if (esp_now_is_peer_exist(mac)) return;
     esp_now_peer_info_t peer = {};
@@ -131,16 +120,11 @@ void espnowAddPeer(const uint8_t mac[6]) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// espnowSend
-// ---------------------------------------------------------------------------
 bool espnowSend(const uint8_t mac[6], const uint8_t* data, size_t len) {
     return esp_now_send(mac, data, len) == ESP_OK;
 }
 
-// ---------------------------------------------------------------------------
 // espnowPoll — drain the SPSC ring on the loop task.
-// ---------------------------------------------------------------------------
 void espnowPoll() {
     if (s_recv == nullptr) return;
 
