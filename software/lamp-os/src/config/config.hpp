@@ -1,12 +1,12 @@
 #pragma once
 #include <Arduino.h>
 #include <ArduinoJson.h>
-#include <Preferences.h>
 
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "config_store.hpp"
 #include "config_types.hpp"
 
 namespace lamp {
@@ -64,7 +64,7 @@ class DispositionDebouncer {
  */
 class Config {
  private:
-  Preferences* prefs;
+  ConfigStore* store_ = nullptr;
 
  public:
   // First-boot defaults that a Lamp subclass can inject before NVS load.
@@ -94,17 +94,16 @@ class Config {
   Config() {};
 
   /**
-   * @brief create a config based on information in the user's storage
-   * @param [in] inPrefs preferences container for nvs values
+   * @brief create a config, loading the persisted blob from the store
+   * @param [in] inStore persistence backend for NVS-backed values
    */
-  Config(Preferences* inPrefs);
+  Config(ConfigStore* inStore);
 
-  // Attach a Preferences* to a default-constructed Config without
-  // running the NVS-load constructor. Used by main.cpp to enable
-  // loadLampType() / setLampType() during the variant-resolution chain
-  // that runs BEFORE Lamp::setup() reconstructs Config via the
-  // Preferences* ctor.
-  void setPrefs(Preferences* p) { prefs = p; }
+  // Attach a store to a default-constructed Config without running the
+  // load constructor. Used by main.cpp to enable loadLampType() /
+  // setLampType() during the variant-resolution chain that runs BEFORE
+  // Lamp::setup() reconstructs Config via the store ctor.
+  void setStore(ConfigStore* s) { store_ = s; }
 
   // Apply first-boot defaults AFTER the NVS blob has been loaded. Only
   // fields that NVS left at their factory value are overwritten;
@@ -125,9 +124,8 @@ class Config {
    * fade-out-and-reboot. The runtime state has already been applied by
    * the caller; this just writes the canonical JSON to NVS.
    *
-   * Returns true iff prefs.begin() succeeded and putString wrote > 0
-   * bytes. On failure the in-memory state is unchanged — the next call
-   * may succeed.
+   * Returns true iff the store wrote > 0 bytes. On failure the in-memory
+   * state is unchanged — the next call may succeed.
    */
   // `via` is a short tag like "commit" / "settings_blob" / "expressionOp"
   // included in the success log so fleet debugging can disambiguate
@@ -138,8 +136,12 @@ class Config {
   // "cfg" blob (the webapp's whole-document PUT path — the constructor
   // re-parses it on the next boot). Keeps the namespace/key contract here
   // rather than letting callers open Preferences("lamp") themselves.
-  // Returns true iff putString wrote > 0 bytes.
+  // Returns true iff the store wrote > 0 bytes.
   bool persistRawJson(const char* json);
+
+  // Wipe persisted state (factory reset). Returns true on success. The caller
+  // reboots afterward so defaults reload; in-memory state is left as-is.
+  bool factoryReset();
 
   // Variant identity persistence. Called by main.cpp at
   // boot to resolve and persist the lampType. Stored in NVS under key
@@ -252,7 +254,7 @@ class Config {
   std::vector<std::pair<std::string, uint8_t>> dispositions_;
   DispositionDebouncer dispositionsDebouncer_{kDispositionFlushIdleMs};
   void loadDispositionsFromPrefs_();
-  // Returns true when the NVS write succeeded; false if prefs.begin() failed
+  // Returns true when the store write succeeded; false on a store failure
   // (NVS full / partition corrupt). Callers should leave the dirty flag set
   // on failure so the next flush attempt retries.
   bool persistDispositions_();

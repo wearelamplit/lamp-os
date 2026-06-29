@@ -13,7 +13,6 @@
 
 #include <Adafruit_NeoPixel.h>
 #include <Arduino.h>
-#include <Preferences.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -53,6 +52,7 @@
 #include "behaviors/social.hpp"
 #include "config/config.hpp"
 #include "config/config_types.hpp"
+#include "config/nvs_config_store.hpp"
 #include "core/animated_behavior.hpp"
 #include "core/behavior_context.hpp"
 #include "core/compositor.hpp"
@@ -69,7 +69,7 @@
 
 Adafruit_NeoPixel* shadeStrip = nullptr;
 Adafruit_NeoPixel* baseStrip = nullptr;
-Preferences prefs;
+lamp::NvsConfigStore configStore;
 
 // Zero-allocation pending slots. BLE callbacks on the NimBLE host task
 // (Core 0) only do a fixed-size memcpy under portMUX into these slots. The
@@ -989,7 +989,7 @@ void lamp::Lamp::setup() {
 #endif
   lamp_register_panic_handler();
 
-  config = lamp::Config(&prefs);
+  config = lamp::Config(&configStore);
   // Re-populate the in-memory lampType from NVS — Config::Config loads
   // the JSON blob, but lampType lives under its own NVS key (set by
   // main.cpp's resolveLampType chain before this setup() runs).
@@ -1179,7 +1179,7 @@ void lamp::Lamp::setup() {
 //     lands in the same tick the app gets notified.
 //
 //   * drainSocialDispositions runs AFTER drainSettingsBlob so both NVS
-//     writers serialise against the shared `prefs` instance on this core.
+//     writers serialise against the shared config store on this core.
 //
 //   * Transient-override drains (overrideColors / restoreColors /
 //     overrideBrightness / restoreBrightness) run BEFORE the override

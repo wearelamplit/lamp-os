@@ -14,6 +14,7 @@
 #include <string>
 
 #include "config/config.hpp"
+#include "config/nvs_config_store.hpp"
 #include "core/lamp.hpp"
 #include "core/lamp_variants.hpp"
 
@@ -21,8 +22,8 @@
 #define LAMP_INITIAL_TYPE ""  // empty = no build-flag seed
 #endif
 
-extern lamp::Config config;  // file-scope singleton, defined in lamp.cpp
-extern Preferences prefs;    // file-scope NVS handle, defined in lamp.cpp
+extern lamp::Config config;            // file-scope singleton, defined in lamp.cpp
+extern lamp::NvsConfigStore configStore;  // file-scope NVS store, defined in lamp.cpp
 
 static std::unique_ptr<lamp::Lamp> g_lamp;
 
@@ -99,12 +100,12 @@ void setup() {
   // Small delay so the boot log isn't lost while the host opens the port.
   delay(50);
 
-  // Attach prefs to the file-scope Config so loadLampType / setLampType
+  // Attach the store to the file-scope Config so loadLampType / setLampType
   // can hit NVS during the variant-resolution chain below. Lamp::setup()
-  // later replaces this Config via the Preferences* ctor (which loads
-  // the JSON blob); the lampType field is loaded separately by
-  // setup()'s explicit loadLampType() call.
-  config.setPrefs(&prefs);
+  // later replaces this Config via the store ctor (which loads the JSON
+  // blob); the lampType field is loaded separately by setup()'s explicit
+  // loadLampType() call.
+  config.setStore(&configStore);
 
   const std::string t = resolveLampType();
   g_lamp = lamp::createLampByType(t);

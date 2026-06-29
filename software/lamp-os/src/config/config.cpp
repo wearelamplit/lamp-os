@@ -1,7 +1,6 @@
 #include "config.hpp"
 
 #include <ArduinoJson.h>
-#include <Preferences.h>
 
 #include <algorithm>
 
@@ -21,13 +20,11 @@ inline bool dispositionEntryLess(
   return a.first < b;
 }
 }  // namespace
-Config::Config(Preferences* inPrefs) {
+Config::Config(ConfigStore* inStore) {
   JsonDocument doc;
-  prefs = inPrefs;
-  prefs->begin("lamp", true);
-  String json = prefs->getString("cfg", "{}");
+  store_ = inStore;
+  std::string json = store_->read("cfg", "{}");
   DeserializationError error = deserializeJson(doc, json);
-  prefs->end();
 
 #ifdef LAMP_DEBUG
   // Print a compact, secret-free summary instead of the raw NVS JSON.
@@ -235,16 +232,13 @@ Config::Config(Preferences* inPrefs) {
     base.ac = 0;
   }
 
-  // Per-peer dispositions live in a separate NVS key — loaded last so the
-  // main blob's prefs->begin/end pair above doesn't conflict.
+  // Per-peer dispositions live in a separate NVS key.
   loadDispositionsFromPrefs_();
 };
 
 void Config::loadDispositionsFromPrefs_() {
-  if (!prefs) return;
-  prefs->begin("lamp", true);
-  String json = prefs->getString("dispositions", "{}");
-  prefs->end();
+  if (!store_) return;
+  std::string json = store_->read("dispositions", "{}");
 
   JsonDocument doc;
   if (deserializeJson(doc, json) != DeserializationError::Ok) return;
@@ -284,26 +278,17 @@ void Config::loadDispositionsFromPrefs_() {
 }
 
 bool Config::persistConfig(const char* via) {
-  if (!prefs) return false;
+  if (!store_) return false;
   JsonDocument doc = asJsonDocument();
   String out;
   serializeJson(doc, out);
-  // Match persistDispositions_'s defensive pattern — prefs.begin can fail
-  // when NVS is full or the partition is corrupt; a putString against an
-  // unopened handle silently writes nothing. Skip the write and let the
-  // caller decide (callers today just move on; expression edits stay in
-  // RAM and the next persistConfig attempt may succeed).
-  if (!prefs->begin("lamp", false)) {
-#ifdef LAMP_DEBUG
-    Serial.println("[nvs] prefs.begin failed (persistConfig)");
-#endif
-    return false;
-  }
-  size_t written = prefs->putString("cfg", out.c_str());
-  prefs->end();
+  // A store write returns 0 bytes when NVS is full or the partition is
+  // corrupt; the caller decides what to do (callers today just move on;
+  // expression edits stay in RAM and the next attempt may succeed).
+  size_t written = store_->write("cfg", out.c_str());
 #ifdef LAMP_DEBUG
   if (written == 0) {
-    Serial.println("[nvs] persistConfig putString wrote 0 bytes");
+    Serial.println("[nvs] persistConfig wrote 0 bytes");
   } else {
     Serial.printf("[nvs] persistConfig via=%s wrote %u bytes\n",
                   via, (unsigned)written);
@@ -313,64 +298,34 @@ bool Config::persistConfig(const char* via) {
 }
 
 bool Config::persistRawJson(const char* json) {
-  if (!prefs) return false;
-  if (!prefs->begin("lamp", false)) {
-#ifdef LAMP_DEBUG
-    Serial.println("[nvs] prefs.begin failed (persistRawJson)");
-#endif
-    return false;
-  }
-  size_t written = prefs->putString("cfg", json);
-  prefs->end();
-  return written > 0;
+  if (!store_) return false;
+  return store_->write("cfg", json) > 0;
 }
+
+bool Config::factoryReset() { return store_ ? store_->clear() : false; }
 
 void Config::setLampType(const std::string& type) {
   lamp.lampType = type;
-  if (!prefs) return;
-  if (!prefs->begin("lamp", false)) {
-#ifdef LAMP_DEBUG
-    Serial.println("[nvs] prefs.begin failed (setLampType)");
-#endif
-    return;
-  }
-  prefs->putString("lampType", String(type.c_str()));
-  prefs->end();
+  if (!store_) return;
+  store_->write("lampType", type.c_str());
 }
 
 std::string Config::loadLampType() {
   lamp.lampType = "";
-  if (!prefs) return "";
-  if (!prefs->begin("lamp", true)) {
-#ifdef LAMP_DEBUG
-    Serial.println("[nvs] prefs.begin failed (loadLampType)");
-#endif
-    return "";
-  }
-  String t = prefs->getString("lampType", "");
-  prefs->end();
-  lamp.lampType = std::string(t.c_str());
+  if (!store_) return "";
+  lamp.lampType = store_->read("lampType", "");
   return lamp.lampType;
 }
 
 bool Config::persistDispositions_() {
-  if (!prefs) return false;
+  if (!store_) return false;
   String out = asDispositionsJson();
-  // prefs.begin returns false when NVS is full or the partition
-  // is corrupt. A subsequent putString against an unopened handle silently
-  // writes to nothing. Skip the write and let the debouncer keep its dirty
-  // flag so the next flush attempt retries.
-  if (!prefs->begin("lamp", false)) {
-#ifdef LAMP_DEBUG
-    Serial.println("[nvs] prefs.begin failed (dispositions persist)");
-#endif
-    return false;
-  }
-  size_t written = prefs->putString("dispositions", out.c_str());
-  prefs->end();
+  // A 0-byte write means NVS is full or corrupt; leave the debouncer's dirty
+  // flag set so the next flush attempt retries.
+  size_t written = store_->write("dispositions", out.c_str());
 #ifdef LAMP_DEBUG
   if (written == 0) {
-    Serial.println("[nvs] dispositions putString wrote 0 bytes");
+    Serial.println("[nvs] dispositions wrote 0 bytes");
   }
 #endif
   return written > 0;
@@ -744,7 +699,7 @@ void Config::invalidateAllSections() {
 }
 
 void Config::applyDefaults(const Defaults& d) {
-  // Called AFTER Config::Config(Preferences*) loads from NVS so that NVS
+  // Called AFTER Config::Config(ConfigStore*) loads from NVS so that NVS
   // values are authoritative and only truly-factory-default fields are
   // overwritten. Subclass defaults() returns values that are used as
   // first-boot baselines.
