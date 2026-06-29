@@ -1,10 +1,12 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/widgets/app_sheet.dart';
+import '../../../../core/widgets/confirm_discard.dart';
 import '../../application/control_notifier.dart';
 import '../../domain/lamp_color.dart';
 import 'color_picker_sheet.dart';
@@ -17,15 +19,9 @@ const int _kMaxShadeStops = 6;
 /// Modal sheet for editing the shade gradient stops. Mirrors
 /// `BaseEditorSheet`'s session pattern — live-previews via the
 /// controlNotifier as the user picks, snapshots the colors it opened
-/// with, and either commits (Update just closes — state already
-/// mirrors edits) or rolls back the live-preview channel (Cancel
-/// re-writes the snapshot) before popping. Persistence still goes
-/// through the AppBar's Save Changes (settings_blob).
-///
-/// Shade has no `ac` (active color index) concept — the shade gradient
-/// has no per-pixel picker the way base does, so it's just stops with
-/// even interpolation. Editor is simpler than `BaseEditorSheet` for the
-/// same reason.
+/// with, and either commits (Save writes BLE + closes) or reverts the
+/// live-preview channel (Cancel/discard re-writes the snapshot). A
+/// discard-guard dialog blocks accidental dismissal when edits are pending.
 class ShadeEditorSheet extends ConsumerStatefulWidget {
   const ShadeEditorSheet({super.key, required this.lampId});
 
@@ -36,13 +32,45 @@ class ShadeEditorSheet extends ConsumerStatefulWidget {
 }
 
 class _ShadeEditorSheetState extends ConsumerState<ShadeEditorSheet> {
-  /// Captured at first build when state is non-null. Cancel restores it.
   List<LampColor>? _originalColors;
 
-  /// Set true ONLY when the user explicitly taps Save. Any other dismiss
-  /// path (Cancel button, backdrop tap, system back) is treated as a
-  /// revert.
-  bool _committed = false;
+  /// True once we've signalled PopScope to allow the pop. Set just before
+  /// the addPostFrameCallback-deferred Navigator.pop so the route doesn't
+  /// get blocked by canPop=false on the same frame.
+  bool _allowPop = false;
+
+  bool _hasUnsavedChanges(List<LampColor> colors) =>
+      _originalColors != null && !listEquals(colors, _originalColors);
+
+  void _close({required bool revert}) {
+    if (revert && _originalColors != null) {
+      ref
+          .read(controlNotifierProvider(widget.lampId).notifier)
+          .setShadeColors(_originalColors!);
+    }
+    setState(() => _allowPop = true);
+    // Pop after the frame so PopScope picks up _allowPop=true (setState +
+    // synchronous Navigator.pop would still see the old canPop=false).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Navigator.of(context).pop();
+    });
+  }
+
+  Future<void> _save() async {
+    final notifier =
+        ref.read(controlNotifierProvider(widget.lampId).notifier);
+    try {
+      await notifier.commit();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Couldn't save — disconnected")),
+      );
+      return;
+    }
+    if (!mounted) return;
+    _close(revert: false);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -117,131 +145,107 @@ class _ShadeEditorSheetState extends ConsumerState<ShadeEditorSheet> {
       notifier.setShadeColors(next);
     }
 
-    void cancel() {
-      // Roll back to the session baseline.
-      final origColors = _originalColors;
-      if (origColors != null) notifier.setShadeColors(origColors);
-      Navigator.pop(context);
-    }
-
     return PopScope(
-      canPop: true,
-      onPopInvokedWithResult: (didPop, _) {
-        if (didPop && !_committed && _originalColors != null) {
-          notifier.setShadeColors(_originalColors!);
-        }
+      canPop: _allowPop || !_hasUnsavedChanges(colors),
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return; // no unsaved changes — already popped
+        final discard = await confirmDiscard(context);
+        if (discard) _close(revert: true);
       },
       child: SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpace.lg),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                Text(
-                  'Shade colors',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpace.md),
-            Expanded(
-              child: ReorderableListView.builder(
-                itemCount: colors.length,
-                onReorderItem: reorder,
-                buildDefaultDragHandles: false,
-                itemBuilder: (ctx, i) {
-                  final stop = colors[i];
-                  final cs = Theme.of(ctx).colorScheme;
-                  return ListTile(
-                    key: ValueKey('shade-stop-$i'),
-                    onTap: () => editStop(i),
-                    leading: ReorderableDragStartListener(
-                      index: i,
-                      child: Icon(Icons.drag_indicator,
-                          color: cs.onSurfaceVariant),
-                    ),
-                    title: Row(
-                      children: [
-                        Container(
-                          width: 28,
-                          height: 28,
-                          decoration: BoxDecoration(
-                            color: stop.toSwatch(),
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: cs.outlineVariant,
-                              width: 1,
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpace.lg),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Text(
+                    'Shade colors',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpace.md),
+              Expanded(
+                child: ReorderableListView.builder(
+                  itemCount: colors.length,
+                  onReorderItem: reorder,
+                  buildDefaultDragHandles: false,
+                  itemBuilder: (ctx, i) {
+                    final stop = colors[i];
+                    final cs = Theme.of(ctx).colorScheme;
+                    return ListTile(
+                      key: ValueKey('shade-stop-$i'),
+                      onTap: () => editStop(i),
+                      leading: ReorderableDragStartListener(
+                        index: i,
+                        child: Icon(Icons.drag_indicator,
+                            color: cs.onSurfaceVariant),
+                      ),
+                      title: Row(
+                        children: [
+                          Container(
+                            width: 28,
+                            height: 28,
+                            decoration: BoxDecoration(
+                              color: stop.toSwatch(),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: cs.outlineVariant,
+                                width: 1,
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: AppSpace.md),
-                        Text(
-                          '#${stop.toHex().substring(1, 7)}',
-                          style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                                color: cs.onSurfaceVariant,
-                                fontFamily: 'monospace',
-                              ),
-                        ),
-                      ],
-                    ),
-                    trailing: Tooltip(
-                      message: colors.length <= 1
-                          ? 'A gradient needs at least one stop'
-                          : 'Remove stop',
-                      child: IconButton(
-                        icon: Icon(Icons.close, color: cs.onSurfaceVariant),
-                        onPressed: colors.length <= 1
-                            ? null
-                            : () => removeStop(i),
+                          const SizedBox(width: AppSpace.md),
+                          Text(
+                            '#${stop.toHex().substring(1, 7)}',
+                            style:
+                                Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                                      color: cs.onSurfaceVariant,
+                                      fontFamily: 'monospace',
+                                    ),
+                          ),
+                        ],
                       ),
-                    ),
-                  );
-                },
-              ),
-            ),
-            if (colors.length < _kMaxShadeStops)
-              TextButton(
-                onPressed: addStop,
-                child: const Text('+ Add stop'),
-              ),
-            const SizedBox(height: AppSpace.sm),
-            Row(
-              children: [
-                TextButton(
-                  onPressed: cancel,
-                  child: const Text('Cancel'),
-                ),
-                const Spacer(),
-                FilledButton.icon(
-                  icon: const Icon(Icons.check, size: 18),
-                  label: const Text('Save'),
-                  onPressed: () async {
-                    final notifier = ref.read(
-                      controlNotifierProvider(widget.lampId).notifier,
-                    );
-                    _committed = true;
-                    try {
-                      await notifier.commit();
-                    } catch (e) {
-                      if (!context.mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text("Couldn't save — disconnected"),
+                      trailing: Tooltip(
+                        message: colors.length <= 1
+                            ? 'A gradient needs at least one stop'
+                            : 'Remove stop',
+                        child: IconButton(
+                          icon: Icon(Icons.close, color: cs.onSurfaceVariant),
+                          onPressed: colors.length <= 1
+                              ? null
+                              : () => removeStop(i),
                         ),
-                      );
-                      return;
-                    }
-                    if (!context.mounted) return;
-                    Navigator.of(context).pop();
+                      ),
+                    );
                   },
                 ),
-              ],
-            ),
-          ],
+              ),
+              if (colors.length < _kMaxShadeStops)
+                TextButton(
+                  onPressed: addStop,
+                  child: const Text('+ Add stop'),
+                ),
+              const SizedBox(height: AppSpace.sm),
+              Row(
+                children: [
+                  TextButton(
+                    onPressed: () => _close(revert: true),
+                    child: const Text('Cancel'),
+                  ),
+                  const Spacer(),
+                  FilledButton.icon(
+                    icon: const Icon(Icons.check, size: 18),
+                    label: const Text('Save'),
+                    onPressed: _save,
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
-    ),
     );
   }
 }
