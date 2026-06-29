@@ -99,5 +99,7 @@ with tight spinlocks + a published-handle gate.**
 - `software/lamp-os/src/components/firmware/firmware_receiver.{hpp,cpp}` —
   the published-handle gate, `eraseMux_`, `writesInFlight_`, the typed-slot intake.
 - `software/lamp-os/src/components/firmware/firmware_distributor.{hpp,cpp}` —
-  Core 0 recv-task parse vs Core 1 `tick()`/streaming-task split.
+  Core 0 recv-task parse vs the Core 1 `tick()` state machine, plus the chunk
+  **streaming task** which is deliberately *unpinned* (`xTaskCreate`, not
+  `…PinnedToCore`) so the scheduler runs it on whichever core has slack.
 - ADR 0002 — why flash erase moved off the receive path.

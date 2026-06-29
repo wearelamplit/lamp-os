@@ -17,7 +17,7 @@ ESP32-based smart-lamp fleet. Three components:
 
 Read these before changing networking, protocol, or BLE behavior:
 
-- **[`docs/dev/mesh-api.md`](docs/dev/mesh-api.md)**, wire-format spec for every
+- **[`docs/dev/networking.md`](docs/dev/networking.md)**, wire-format spec for every
   message type. The code wins ties; update this doc when it doesn't.
 
 The full developer handbook (architecture, expressions, personality, security)

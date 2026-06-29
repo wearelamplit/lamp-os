@@ -2,7 +2,7 @@
 // software/lamp-os/src/components/network/lamp_protocol.hpp. Keep field
 // orderings + LE-encoding in lockstep with the lamp side — a byte slip
 // here is a silent-drop in the receiver's parser, which is the
-// canonical example of "the code wins ties; update docs/mesh-api.md
+// canonical example of "the code wins ties; update docs/dev/networking.md
 // when it doesn't."
 //
 // The lamp-side BLE OTA path (Phase 5a, commit 162fbd2) accepts the

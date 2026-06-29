@@ -12,12 +12,15 @@ does NOT include visual algorithms (animations, gradients, palette cycling),
 that's your `AnimatedBehavior` subclass's domain.
 
 **Per-variant builds.** Each lamp variant has its own PIO environment
-(`upesy_wroom_standard`, `upesy_wroom_snafu`). A `build_src_filter` compiles
-only that variant's `lamps/<variant>/` code, and a `-D LAMP_BUILD_VARIANT_*`
-flag seeds the variant on a fresh NVS. At boot, `resolveLampType()` in
-`main.cpp` reads `Config::lampType` from NVS (falling back to the build-flag
-seed on first boot), then `createLampByType()` instantiates the matching
-subclass. Per-variant ed25519-signed binaries keep cross-variant and cross-fork
+(`upesy_wroom_standard`, `upesy_wroom_snafu`). Two distinct build flags do two
+jobs: `-D LAMP_BUILD_VARIANT_*` is the **compile-selection** flag (it picks
+which variant's factory + sources compile into the binary, via `#ifdef` +
+`build_src_filter`), while `-D LAMP_INITIAL_TYPE` is the **first-boot NVS seed**
+(injected from the env's `custom_lamp_variant` by `inject_initial_type.py`). At
+boot, `resolveLampType()` in `main.cpp` reads `Config::lampType` from NVS
+(falling back to the `LAMP_INITIAL_TYPE` seed on first boot), then
+`createLampByType()` instantiates the matching subclass — which, in a per-variant
+binary, is the single compiled-in variant. Per-variant ed25519-signed binaries keep cross-variant and cross-fork
 OTA cryptographically separated.
 
 ## Single-instance invariant
@@ -45,17 +48,20 @@ color/expression data:
 - **`colorSection`**, page-protocol JSON subset for storing expressions,
   overrides, and visual configuration.
 
-Refer to **[`docs/dev/mesh-api.md`](mesh-api.md)** for the complete wire-format
+Refer to **[`docs/dev/networking.md`](networking.md)** for the complete wire-format
 spec and all message types. The code is authoritative, update that doc when
 behavior diverges.
 
 ### Protocol version lock
 
-`PROTOCOL_VERSION = 0x04`. Mixed-fleet
-operation across protocol versions does not interoperate, peers reject frames
-from mismatched versions, surfacing as a loud, diagnosable failure (missing
-neighbors in the app's nearby-lamp list). Do not bump without coordinating a
-re-flash of all 22 lamps in the deployed fleet.
+The wire carries a **receive range**, not a single version: a lamp broadcasts
+`PROTOCOL_VERSION_EMIT` (`0x05`) but parses any frame in `[RX_MIN, RX_MAX]`
+(`0x04`..`0x05`). The split lets the fleet *receive* a newer format before it
+*emits* one — the safe path through a multi-version OTA wave. A frame whose
+version falls outside the range is rejected, surfacing as a loud, diagnosable
+failure (missing neighbors in the app's nearby-lamp list). Bump the version only
+for a genuine parser-contract change — additive fields ride as TLVs (TLV-first
+rule). See the protocol lock-in in `CLAUDE.md` and [`networking.md`](networking.md).
 
 ## Adding a custom lamp: 3-step recipe
 
@@ -88,8 +94,8 @@ class SnafuLamp : public Lamp {
   Config::Defaults defaults() const override {
     return {
       .name              = "snafu",
-      .baseColor         = "#300783",  // purple stem, user-editable
-      .shadeColor        = "#781000",  // amanita red, picker hidden in app
+      .baseColor         = "#30078300",  // purple stem, user-editable (RGBW)
+      .shadeColor        = "#78100000",  // amanita red, picker hidden in app
       .baseColorsEditable  = true,
       .shadeColorsEditable = false,
     };
@@ -113,29 +119,38 @@ See `software/lamp-os/src/core/hw_config.hpp` for the full `HwConfig` /
 `SurfaceSpec` POD definitions. See `core/lamp_features.hpp` for the `Features`
 bitmask enum.
 
-### Step 2: Register in the variant array
+### Step 2: Register the variant (four sites, in lockstep)
 
-Edit `software/lamp-os/src/core/lamp_variants.cpp`, three lines:
+This is a **per-variant build**: exactly one `LAMP_BUILD_VARIANT_<TYPE>` is
+defined per binary, and `build_src_filter` excludes the other variants'
+sources. So `kLampVariants` is a **single-entry** array holding only the
+compiled-in variant — a `standard` binary can only ever instantiate
+`StandardLamp`. Adding a variant means updating four sites together (the header
+of `core/lamp_variants.cpp` lists them):
 
 ```cpp
-// 1. Add the include near the top
+// In software/lamp-os/src/core/lamp_variants.cpp — all guarded by the build flag:
+
+// 2. conditional include
+#ifdef LAMP_BUILD_VARIANT_<TYPE>
 #include "lamps/<name>/<name>.hpp"
+#endif
 
-// 2. Add a factory inline function
-inline std::unique_ptr<Lamp> make<Name>() {
-  return std::make_unique<<Name>Lamp>();
-}
+// (extend the one-of invariant)
+#if (defined(LAMP_BUILD_VARIANT_STANDARD) + defined(LAMP_BUILD_VARIANT_SNAFU) \
+     + defined(LAMP_BUILD_VARIANT_<TYPE>)) != 1
+#error "Exactly one LAMP_BUILD_VARIANT_* must be defined"
+#endif
 
-// 3. Append to kLampVariants
-constexpr std::array<NamedFactory, N+1> kLampVariants = {{
-  {"standard", makeStandard},
-  {"snafu",   makeSnafu},
-  {"<name>",  make<Name>},  // ← add here
-}};
+// 3. conditional factory arm in kLampVariants
+#elif defined(LAMP_BUILD_VARIANT_<TYPE>)
+  {"<name>", make<Name>},
 ```
 
-`main.cpp` calls `createLampByType()` which iterates `kLampVariants`. No other
-file needs to change.
+The remaining site is **1. the `[env:upesy_wroom_<type>]` block in
+`platformio.ini`** — it defines `LAMP_BUILD_VARIANT_<TYPE>`, sets
+`custom_lamp_variant = <name>`, and adds a `build_src_filter` arm that includes
+`lamps/<name>/`. Without that env there's no way to compile the variant.
 
 ### Step 3: Build
 
@@ -253,7 +268,7 @@ override:
 Config::Defaults defaults() const override {
   return {
     .name              = "snafu",
-    .shadeColor        = "#781000",  // amanita red
+    .shadeColor        = "#78100000",  // amanita red (RGBW)
     .shadeColorsEditable = false,    // app hides picker for shade
     // ...
   };
@@ -297,7 +312,7 @@ impossible, no registry or allowlist needed. The signing chain enforces it.
 |---|---|
 | `core/lamp.hpp` | STABLE, the 3 virtuals (`defaults`, `featuresEnabled`, `createBehaviors`) are versioned API |
 | `core/hw_config.hpp` | STABLE, POD, additive fields only |
-| `core/lamp_features.hpp` | STABLE, flag values frozen; bits 3–4 unused. Do not reuse without consulting deployed clients |
+| `core/lamp_features.hpp` | STABLE, flag values frozen; bits 2–4 unused. Do not reuse without consulting deployed clients |
 | `core/behavior_stack_builder.hpp` | STABLE, use const `behaviors()` accessor |
 | `core/animated_behavior.hpp` | STABLE, base class for custom behaviors |
 | `core/behavior_context.hpp` | STABLE-ADDITIVE, new nullable pointers may be added; existing pointers won't be removed |
@@ -324,8 +339,9 @@ predicate or emit logic in the test, verify against expected output. Existing
 examples:
 
 - `test/test_hw_config_validate/hw_config_validate.cpp`, validates
-  `validateHwConfig()` predicate (empty surfaces, zero pixelCount, duplicate
-  pins) without touching Arduino.
+  `validateHwConfig()` predicate (empty surfaces, duplicate pins) without
+  touching Arduino. (Pixel counts live in `Config::Defaults`, not `HwConfig`,
+  so they aren't part of this predicate.)
 - `test/test_lamp_type_emit/lamp_type_emit.cpp`, mirrors the `lampType` JSON
   emit line from `config.cpp::asLampJson`; verifies shape without linking
   `Config`.
@@ -381,7 +397,7 @@ shell-quoting hazards.
 ```ini
 -D LAMP_FW_MAJOR=1
 -D LAMP_FW_MINOR=0
--D LAMP_FW_PATCH=82
+-D LAMP_FW_PATCH=165
 ```
 
 `FIRMWARE_VERSION_STR` is derived from these via preprocessor stringify.
@@ -458,5 +474,5 @@ then skips its `draw()` until home mode releases.
 | `software/lamp-os/platformio.ini` | Per-variant envs (`upesy_wroom_standard`/`_snafu`) extending `env_base_upesy`; SemVer build_flags |
 | `scripts/gen_firmware_keys.py` | Per-fork ed25519 keypair generation |
 | `scripts/sign_firmware.py` | Build-time firmware signer |
-| `software/lamp-os/src/components/firmware/firmware_signature.cpp` | Boot-time signature verifier |
+| `software/lamp-os/src/components/firmware/firmware_signature.cpp` | OTA-receive-time signature verifier (streams the image from flash before `esp_ota_set_boot_partition`) |
 | `software/lamp-os/src/components/firmware/firmware_pubkey.h` | Embedded public key (committed; fork-specific) |

@@ -25,9 +25,12 @@ any nearby peer running an older version. No central scheduler.
 ### Distribution model
 - **Event-driven targeting** (not scan-based): `SocialBehavior` already iterates
   nearby peers each tick; when the distributor is `Idle` and a peer's version <
-  ours, it calls `considerPeerForOta(peerMac, peerVersion, ...)`. Single peer per
-  session; the fleet propagates by gossip (whoever-is-higher offers
-  whoever-is-lower, in range).
+  ours, it calls `considerPeerForOta(peerMac, peerVersion, ...)` — throttled to
+  `kOtaScanIntervalMs` (500 ms) and gated by a **receive-first policy**: a lamp
+  skips all outbound offers while it is itself receiving, or while any reachable
+  peer advertises a *higher* version (let the newest image flow inward first).
+  Single peer per session; the fleet propagates by gossip (whoever-is-higher
+  offers whoever-is-lower, in range).
 - **Sender-side type/channel gate**: a distributor skips offering to a peer whose
   `{type}-{channel}` (carried in a HELLO TLV) differs from its own — a `snafu`
   lamp is never offered a `standard` image, channels never cross. The receiver's
@@ -124,5 +127,11 @@ and (with upfront-erase) reliable at speed without the erase-stall failure class
 
 - `software/lamp-os/src/components/firmware/firmware_distributor.{hpp,cpp}`,
   `firmware_receiver.{hpp,cpp}`, `firmware_signature.{hpp,cpp}`.
-- `scripts/sign_firmware.py`, `scripts/inject_firmware_channel.py`.
+- `scripts/sign_firmware.py`, `software/lamp-os/scripts/inject_firmware_channel.py`.
 - ADR 0001 (mesh), ADR 0003 (dual-core concurrency).
+
+> **Currency note.** A sibling **filesystem-image OTA** (`fs_ota`, signed via
+> `scripts/sign_fs.py`, state carried in `HELLO_TLV_FS_STATE`) now rides the same
+> `SocialBehavior` targeting path and chunk transport described here. This ADR
+> covers the firmware-image case; the FS-image path is the same shape applied to
+> the SPIFFS partition.

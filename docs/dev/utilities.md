@@ -29,9 +29,9 @@ RGBW pixel value. The unit every buffer and helper traffics in.
 ```cpp
 Color(uint8_t r, uint8_t g, uint8_t b, uint8_t w);
 bool operator==(const Color&) const;
-std::string colorToHexString(Color);          // -> "rrggbbww"
-Color       hexStringToColor(std::string);     // parse the above
-uint32_t    colorDistance(Color a, Color b);   // squared Euclidean, for "are these close?"
+std::string colorToHexString(Color);          // -> "#rrggbbww" (9 chars, leading '#')
+Color       hexStringToColor(std::string);     // parse the above; requires the '#'
+uint32_t    colorDistance(Color a, Color b);   // Euclidean (sqrt'd), for "are these close?"
 ```
 
 ### Fades & easing — `util/fade.hpp`

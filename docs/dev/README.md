@@ -28,7 +28,7 @@ Flutter / adb calls so the scripts stay exercised.
 
 ```sh
 # Lamp firmware
-npm run lamp:test         # native unit tests (344 cases)
+npm run lamp:test         # native unit tests (374 cases)
 npm run lamp:build        # build (standard variant)
 npm run lamp:flash        # flash a connected lamp (standard)
 npm run lamp:flash:snafu  # flash the snafu variant
@@ -46,7 +46,7 @@ npm run app:install       # build + adb install -r (no data wipe) + launch
 npm run app:codegen       # regenerate freezed / riverpod / json
 ```
 
-Native firmware tests run in CI and must stay green (lamp 344, wisp 40). Build
+Native firmware tests run in CI and must stay green (lamp 374, wisp 40). Build
 PlatformIO via `pip install platformio` (the npm tasks call `pio` under the
 hood); the Flutter toolchain setup is in the [root README](../../README.md).
 
@@ -78,8 +78,15 @@ hood); the Flutter toolchain setup is in the [root README](../../README.md).
   buffer, peer queries, disposition lookups).
 
 ### Protocol reference
-- [`mesh-api.md`](mesh-api.md), the authoritative ESP-NOW wire-format spec for
-  every mesh message. **The code wins ties**, update this doc when it doesn't.
+- [`networking.md`](networking.md), the authoritative wire-format spec for the
+  ESP-NOW mesh **and** the BLE GATT link. **The code wins ties**, update this
+  doc when it doesn't.
+
+### Decisions
+- [`../adrs/`](../adrs/README.md), the **Architecture Decision Records** — the
+  significant, hard-to-reverse choices that shape the firmware (ESP-NOW mesh,
+  OTA over mesh, the dual-core concurrency model, …) and the alternatives they
+  rejected. Read these for the *why* behind the lock-ins.
 
 ### Custom lamps
 Building your own variant or behaviour? Start with
