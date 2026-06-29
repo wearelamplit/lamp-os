@@ -2,29 +2,16 @@
 
 #include <ArduinoJson.h>
 
-#include <algorithm>
-
 #include "config/config_codec.hpp"
-
-#include "util/bd_addr.hpp"
 #include "util/color.hpp"
 #include "version.hpp"
 
 namespace lamp {
 
-namespace {
-// Comparator for std::lower_bound over the sorted dispositions vector.
-// Compares an existing entry's name against the target lookup key.
-// Used by getDisposition and setDisposition to find the insertion point
-// in O(log N) while keeping the vector contiguous and cache-friendly.
-inline bool dispositionEntryLess(
-    const std::pair<std::string, uint8_t>& a, const std::string& b) {
-  return a.first < b;
-}
-}  // namespace
 Config::Config(ConfigStore* inStore) {
   JsonDocument doc;
   store_ = inStore;
+  dispositions_.attachStore(store_);
   std::string json = store_->read("cfg", "{}");
   DeserializationError error = deserializeJson(doc, json);
 
@@ -65,49 +52,8 @@ Config::Config(ConfigStore* inStore) {
                          homeMode);
 
   // Per-peer dispositions live in a separate NVS key.
-  loadDispositionsFromPrefs_();
+  dispositions_.load();
 };
-
-void Config::loadDispositionsFromPrefs_() {
-  if (!store_) return;
-  std::string json = store_->read("dispositions", "{}");
-
-  JsonDocument doc;
-  if (deserializeJson(doc, json) != DeserializationError::Ok) return;
-
-  // Two-pass load: gather into a fresh vector, then sort once. This is
-  // O(N log N) vs O(N^2) if we used setDisposition() in a loop (each
-  // call would memmove the tail on insert). Reserve to skip reallocation
-  // for typical loads.
-  dispositions_.clear();
-  dispositions_.reserve(kDispositionsMax);
-  for (JsonPair kv : doc.as<JsonObject>()) {
-    if (dispositions_.size() >= kDispositionsMax) break;
-    const char* key = kv.key().c_str();
-    // Dispositions are keyed by BD_ADDR. Legacy name-keyed entries
-    // (from older firmware) fail this filter and are silently dropped.
-    // The next disposition write naturally overwrites the NVS blob in
-    // the new shape (no separate migration code path).
-    if (!isValidBdAddr(key)) continue;
-    uint32_t v = kv.value() | (uint32_t)kDispositionDefault;
-    if (v < 1) v = 1;
-    if (v > 5) v = 5;
-    dispositions_.emplace_back(std::string(key), static_cast<uint8_t>(v));
-  }
-  std::sort(dispositions_.begin(), dispositions_.end(),
-            [](const std::pair<std::string, uint8_t>& a,
-               const std::pair<std::string, uint8_t>& b) {
-              return a.first < b.first;
-            });
-  // Dedupe defensively — JSON objects don't have duplicate keys per spec,
-  // but ArduinoJson is permissive on bad input. Last write wins, matching
-  // the prior std::map behaviour.
-  auto last = std::unique(
-      dispositions_.begin(), dispositions_.end(),
-      [](const std::pair<std::string, uint8_t>& a,
-         const std::pair<std::string, uint8_t>& b) { return a.first == b.first; });
-  dispositions_.erase(last, dispositions_.end());
-}
 
 bool Config::persistConfig(const char* via) {
   if (!store_) return false;
@@ -149,138 +95,27 @@ std::string Config::loadLampType() {
   return lamp.lampType;
 }
 
-bool Config::persistDispositions_() {
-  if (!store_) return false;
-  String out = asDispositionsJson();
-  // A 0-byte write means NVS is full or corrupt; leave the debouncer's dirty
-  // flag set so the next flush attempt retries.
-  size_t written = store_->write("dispositions", out.c_str());
-#ifdef LAMP_DEBUG
-  if (written == 0) {
-    Serial.println("[nvs] dispositions wrote 0 bytes");
-  }
-#endif
-  return written > 0;
-}
-
 uint8_t Config::getDisposition(const std::string& bdAddr) const {
-  // Binary search on the sorted vector. lower_bound returns the first
-  // entry >= bdAddr; we must still compare keys because lower_bound
-  // can land on a strictly-greater neighbour (e.g. looking up "BB..." in
-  // {AA..., CC...} returns the iterator to CC...).
-  auto it = std::lower_bound(dispositions_.begin(), dispositions_.end(),
-                             bdAddr, dispositionEntryLess);
-  if (it == dispositions_.end() || it->first != bdAddr) {
-    return kDispositionDefault;
-  }
-  return it->second;
+  return dispositions_.get(bdAddr);
 }
 
 void Config::setDisposition(const std::string& bdAddr, uint8_t value) {
-  if (bdAddr.empty()) return;
-  if (value < 1) value = 1;
-  if (value > 5) value = 5;
-  auto it = std::lower_bound(dispositions_.begin(), dispositions_.end(),
-                             bdAddr, dispositionEntryLess);
-  if (it != dispositions_.end() && it->first == bdAddr) {
-    // Update in place — no resize, no shift, no eviction. Preserves sort
-    // order trivially.
-    it->second = value;
-  } else {
-    if (dispositions_.size() >= kDispositionsMax) {
-      // Evict the lowest-by-key entry to match the historical std::map
-      // iteration-order eviction policy. Disposition tracking is
-      // best-effort at the cap; users typically have <100 paired lamps.
-      dispositions_.erase(dispositions_.begin());
-      // The insertion point may have shifted by one after erase; recompute.
-      it = std::lower_bound(dispositions_.begin(), dispositions_.end(),
-                            bdAddr, dispositionEntryLess);
-    }
-    dispositions_.insert(it, std::make_pair(bdAddr, value));
-  }
-  // Do NOT persist here. The slider-drag UX produced ~20 writes per
-  // peer per drag; multiplied across multiple peers and years of
-  // ownership, the 100k-write-per-page NVS budget is reachable.
-  // The loop drain on Core 1 polls maybeFlushDispositions and writes
-  // once the user stops touching the slider for kDispositionFlushIdleMs.
-  // BLE disconnect path force-flushes via flushDispositionsNow. Factory
-  // reset doesn't need a flush — it erases NVS wholesale.
-  dispositionsDebouncer_.markDirty(millis());
+  dispositions_.set(bdAddr, value, millis());
 }
 
 String Config::asDispositionsJson() const {
-  // Sorted-vector iteration yields keys in lexicographic order — stable
-  // round-trips across reads (the prior std::map also iterated in sorted
-  // order, so on-disk byte shape is unchanged).
-  JsonDocument doc;
-  for (const auto& kv : dispositions_) {
-    doc[kv.first.c_str()] = kv.second;
-  }
-  String out;
-  serializeJson(doc, out);
-  return out;
+  return String(dispositions_.asJson().c_str());
 }
 
 bool Config::setDispositionsFromJson(const char* json, size_t len) {
-  JsonDocument doc;
-  if (deserializeJson(doc, json, len) != DeserializationError::Ok) {
-    return false;
-  }
-  if (!doc.is<JsonObject>()) return false;
-  // Bulk replace: stage into a fresh local vector, then sort once. Same
-  // O(N log N) strategy as loadDispositionsFromPrefs_ — avoids repeated
-  // O(N) shifts that an N-call sequence of setDisposition() would incur.
-  std::vector<std::pair<std::string, uint8_t>> next;
-  next.reserve(kDispositionsMax);
-  for (JsonPair kv : doc.as<JsonObject>()) {
-    if (next.size() >= kDispositionsMax) break;
-    const char* key = kv.key().c_str();
-    // BD_ADDR-only keys. Reject anything that doesn't look like
-    // "AA:BB:CC:DD:EE:FF" — covers the edge case of a stale app writing
-    // a name-keyed map, plus any malformed user input via reverse-engineered
-    // BLE write paths.
-    if (!isValidBdAddr(key)) continue;
-    uint32_t v = kv.value() | (uint32_t)kDispositionDefault;
-    if (v < 1) v = 1;
-    if (v > 5) v = 5;
-    next.emplace_back(std::string(key), static_cast<uint8_t>(v));
-  }
-  std::sort(next.begin(), next.end(),
-            [](const std::pair<std::string, uint8_t>& a,
-               const std::pair<std::string, uint8_t>& b) {
-              return a.first < b.first;
-            });
-  auto last = std::unique(
-      next.begin(), next.end(),
-      [](const std::pair<std::string, uint8_t>& a,
-         const std::pair<std::string, uint8_t>& b) { return a.first == b.first; });
-  next.erase(last, next.end());
-  dispositions_ = std::move(next);
-  // Defer persistence. CHAR_SOCIAL_DISPOSITIONS bulk writes
-  // arrive on every slider drag from the app, each re-serialising the
-  // full blob — the worst case for NVS wear. The Core 1 loop drain
-  // (maybeFlushDispositions) commits once idle; the BLE onDisconnect
-  // post forces a synchronous commit when the phone walks away.
-  dispositionsDebouncer_.markDirty(millis());
-  return true;
+  return dispositions_.setFromJson(json, len, millis());
 }
 
 void Config::maybeFlushDispositions(uint32_t nowMs) {
-  if (!dispositionsDebouncer_.shouldFlush(nowMs)) return;
-  // Only clear the debouncer on a successful write; on failure leave it
-  // dirty so the next flush attempt retries (safer default — the user's
-  // slider input has nowhere else to go).
-  if (persistDispositions_()) {
-    dispositionsDebouncer_.clear();
-  }
+  dispositions_.maybeFlush(nowMs);
 }
 
-void Config::flushDispositionsNow() {
-  if (!dispositionsDebouncer_.dirty()) return;
-  if (persistDispositions_()) {
-    dispositionsDebouncer_.clear();
-  }
-}
+void Config::flushDispositionsNow() { dispositions_.flushNow(); }
 
 JsonDocument Config::asJsonDocument() {
   JsonDocument doc;

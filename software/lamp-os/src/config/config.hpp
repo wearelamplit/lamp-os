@@ -8,52 +8,9 @@
 
 #include "config_store.hpp"
 #include "config_types.hpp"
+#include "disposition_store.hpp"
 
 namespace lamp {
-
-// Pure clock-only "should I flush?" helper used by Config to debounce
-// NVS writes during disposition slider drags. NO NVS access, no I/O —
-// just a dirty flag and the timestamp of the most recent mutation.
-//
-// Audit context: setDisposition + setDispositionsFromJson used to call
-// persistDispositions_ on every update, so a single slider drag (~20
-// values per peer) could chew through NVS page wear in years not
-// decades. We now mark dirty + record now() and let the loop drain on
-// Core 1 flush once the user stops fiddling for kDispositionFlushIdleMs.
-//
-// Tested in test/test_disposition_debounce — the shape is mirrored
-// inline there to keep the native env free of Arduino/NVS dependencies.
-// If you change the API here, mirror the test class.
-class DispositionDebouncer {
- public:
-  explicit DispositionDebouncer(uint32_t idleMs) : idleMs_(idleMs) {}
-
-  void markDirty(uint32_t nowMs) {
-    dirty_ = true;
-    lastMarkMs_ = nowMs;
-  }
-
-  bool dirty() const { return dirty_; }
-
-  // Returns true iff dirty AND the idle window has elapsed since the
-  // most recent markDirty. Caller is responsible for the actual flush
-  // and then calling clear(). Subtraction-based comparison so millis()
-  // wraparound (every ~49 days) doesn't strand the dirty flag forever.
-  bool shouldFlush(uint32_t nowMs) const {
-    if (!dirty_) return false;
-    return (nowMs - lastMarkMs_) >= idleMs_;
-  }
-
-  void clear() {
-    dirty_ = false;
-    lastMarkMs_ = 0;
-  }
-
- private:
-  bool dirty_ = false;
-  uint32_t lastMarkMs_ = 0;
-  uint32_t idleMs_;
-};
 
 /**
  * @brief configurations file for the lamp that can be modified on the web
@@ -103,7 +60,10 @@ class Config {
   // load constructor. Used by main.cpp to enable loadLampType() /
   // setLampType() during the variant-resolution chain that runs BEFORE
   // Lamp::setup() reconstructs Config via the store ctor.
-  void setStore(ConfigStore* s) { store_ = s; }
+  void setStore(ConfigStore* s) {
+    store_ = s;
+    dispositions_.attachStore(s);
+  }
 
   // Apply first-boot defaults AFTER the NVS blob has been loaded. Only
   // fields that NVS left at their factory value are overwritten;
@@ -203,10 +163,8 @@ class Config {
   // dropped on load via lamp::isValidBdAddr in util/bd_addr.hpp.
   // Bounded to ~100 entries. Per-lamp metadata — never synced
   // cross-mesh; each lamp has its own view.
-  static constexpr uint8_t kDispositionDefault = 3;
-  static constexpr size_t kDispositionsMax = 100;
   // Idle window before debounced disposition writes are committed to NVS.
-  // See DispositionDebouncer and audit finding #5 (NVS write amplification).
+  // See DispositionStore and audit finding #5 (NVS write amplification).
   // 5s comfortably exceeds a worst-case slider-drag cadence (~20 Hz BLE
   // writes) while still feeling snappy if the user closes the app right
   // after touching the slider (the BLE disconnect path forces a flush).
@@ -245,19 +203,7 @@ class Config {
   void flushDispositionsNow();
 
  private:
-  // Sorted vector instead of std::map. Saves ~1.5 KB
-  // at full capacity (100 entries) by dropping red-black-tree node overhead
-  // (~32 B per node + pointer chasing) for contiguous storage. Lookups use
-  // std::lower_bound; mutators preserve sort order. Invariant: entries are
-  // ALWAYS sorted by name (lexicographic) — every mutation site must
-  // preserve this so getDisposition's binary search stays correct.
-  std::vector<std::pair<std::string, uint8_t>> dispositions_;
-  DispositionDebouncer dispositionsDebouncer_{kDispositionFlushIdleMs};
-  void loadDispositionsFromPrefs_();
-  // Returns true when the store write succeeded; false on a store failure
-  // (NVS full / partition corrupt). Callers should leave the dirty flag set
-  // on failure so the next flush attempt retries.
-  bool persistDispositions_();
+  DispositionStore dispositions_{kDispositionFlushIdleMs};
 
   // ── Cached JSON per BLE section ───────────────────────────────────────
   // Defaults: all dirty=true so the first cached() call computes and
