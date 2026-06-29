@@ -57,6 +57,12 @@ hood); the Flutter toolchain setup is in the [root README](../../README.md).
   stack, compositor/overrides, the per-variant build model, and the single-
   instance + boot invariants.
 
+### Conventions
+- [`code-smells.md`](code-smells.md), a catalog of code smells as
+  *heuristics* (with the "when it's actually fine" cases), to reason about
+  refactors. Pairs with the comment policy and conventions in
+  [`CLAUDE.md`](../../CLAUDE.md).
+
 ### Subsystems
 - [`expressions.md`](expressions.md), the auto-triggered animation subsystem:
   how to write a new expression, the wisp-override gate, the testing pattern.

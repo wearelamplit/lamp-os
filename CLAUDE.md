@@ -139,6 +139,13 @@ Don't expose API without a current-day consumer:
 
 When a feature actually ships, the API surface lands in the same commit.
 
+This is the *speculative-generality* smell, and like the others it's a
+heuristic, not a law — an interface whose second implementation is a test fake,
+or one that inverts a dependency on a volatile boundary (NVS, network, clock),
+earns its keep today and isn't speculative. See
+[`docs/dev/code-smells.md`](docs/dev/code-smells.md) for the catalog and the
+"when it's actually fine" cases; judge against it, don't wield it.
+
 ### Variant-include hygiene
 
 Framework code (`core/`, `components/`, `behaviors/`, `config/`,
