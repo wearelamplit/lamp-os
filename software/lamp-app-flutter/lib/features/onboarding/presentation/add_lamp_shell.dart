@@ -8,6 +8,7 @@ import '../application/add_lamp_notifier.dart';
 import '../domain/add_lamp_state.dart';
 import 'widgets/add_lamp_done_step.dart';
 import 'widgets/add_lamp_name_step.dart';
+import 'widgets/adopt_confirm_step.dart';
 import 'widgets/add_lamp_password_step.dart';
 import 'widgets/add_lamp_scan_step.dart';
 
@@ -64,8 +65,7 @@ class _AddLampShellState extends ConsumerState<AddLampShell> {
     final step = state.step;
     final body = switch (step) {
       AddLampStep.scan => const AddLampScanStep(),
-      // ponytail: stub replaced by AdoptConfirmStep in Task 4
-      AddLampStep.adoptConfirm => const SizedBox.shrink(),
+      AddLampStep.adoptConfirm => const AdoptConfirmStep(),
       AddLampStep.name => const AddLampNameStep(),
       AddLampStep.password => const AddLampPasswordStep(),
       AddLampStep.verifying => const AddLampPasswordStep(),
