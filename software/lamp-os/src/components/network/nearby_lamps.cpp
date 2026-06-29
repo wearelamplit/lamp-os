@@ -582,10 +582,6 @@ void NearbyLamps::cacheWispClaim(const uint8_t mac[6],
                                   const uint8_t lampMacs[][6], uint8_t count,
                                   uint32_t nowMs) {
   xSemaphoreTake(mutex_, portMAX_DELAY);
-  if (wispCache_.present && std::memcmp(wispCache_.mac, mac, 6) != 0) {
-    wispCache_.claimedCount = 0;
-    wispCache_.lastClaimMs = 0;
-  }
   std::memcpy(wispCache_.mac, mac, 6);
   wispCache_.present = true;
   const uint8_t safeCount =
@@ -627,6 +623,5 @@ size_t NearbyLamps::buildWispClaimsBlob(uint8_t* out, size_t outCap,
   }
   return needed;
 }
-
 
 }  // namespace lamp
