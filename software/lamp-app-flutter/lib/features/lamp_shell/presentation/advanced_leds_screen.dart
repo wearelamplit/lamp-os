@@ -170,7 +170,14 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
                       horizontal: AppSpace.lg, vertical: AppSpace.sm),
-                  child: Row(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Saving restarts the lamp (~10s).',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      Row(
                     children: [
                       TextButton.icon(
                         icon: const Icon(Icons.close, size: 18),
@@ -209,6 +216,8 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
                           }
                         },
                       ),
+                    ],
+                  ),
                     ],
                   ),
                 ),

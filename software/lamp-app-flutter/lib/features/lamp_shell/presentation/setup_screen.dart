@@ -107,6 +107,7 @@ class _SetupBody extends ConsumerWidget {
             final pw = await showPasswordPromptDialog(
               context,
               title: 'Change password',
+              subtitle: 'Saving restarts the lamp (~10s).',
               confirmLabel: 'Save',
             );
             if (pw != null) n.setLampPassword(pw);

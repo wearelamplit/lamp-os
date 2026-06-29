@@ -81,4 +81,13 @@ void main() {
       lessThan(tester.getCenter(find.text('Per-pixel knockout')).dy),
     );
   });
+
+  testWidgets('reboot warning is visible near the Update action', (tester) async {
+    final c = await _makeContainer();
+    addTearDown(c.dispose);
+    await tester.pumpWidget(_wrap(c));
+    await _pumpToData(tester);
+
+    expect(find.textContaining('restarts the lamp'), findsOneWidget);
+  });
 }
