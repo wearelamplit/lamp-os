@@ -296,7 +296,7 @@ class _WispBodyState extends ConsumerState<_WispBody> {
                 ],
               ],
               const SizedBox(height: 24),
-              const SettingsGroupHeading('Painted lamps'),
+              const SettingsGroupHeading('Lamps'),
               _PaintedLampsList(lampId: widget.lampId),
             ],
           ),
@@ -1268,7 +1268,7 @@ class _PaintedLampsList extends ConsumerWidget {
 
     if (entries.isEmpty) {
       return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 12),
+        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Text('No lamps claimed by this wisp right now.',
             style: TextStyle(color: BrandColors.fogGrey, fontSize: 12)),
       );
@@ -1276,21 +1276,6 @@ class _PaintedLampsList extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(top: 4, bottom: 12),
-          child: Text(
-            palette.isEmpty
-                ? "The wisp hasn't published a palette yet — once it "
-                    "does, this will preview each lamp's two colors."
-                : "App-side preview from the wisp's published palette. "
-                    "The physical lamps are the source of truth.",
-            style: const TextStyle(
-              color: BrandColors.fogGrey,
-              fontSize: 11,
-              fontStyle: FontStyle.italic,
-            ),
-          ),
-        ),
         for (final e in entries)
           _PaintedLampRow(bdAddr: e.bdAddr, name: e.name, palette: palette),
       ],
@@ -1316,7 +1301,7 @@ class _PaintedLampRow extends StatelessWidget {
         ? null
         : predictTuple(mac: mac, palette: palette);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: Row(
         children: [
           Expanded(
