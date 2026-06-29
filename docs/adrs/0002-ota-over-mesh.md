@@ -1,8 +1,5 @@
 # ADR 0002 — Firmware OTA over the ESP-NOW mesh
 
-**Status:** Accepted. Upfront-erase landed; cadence locked at 30 ms (see
-`EXPERIMENTS.md`). Gossip + signing + chunking decisions are settled.
-
 ## Context
 
 The fleet must update its own firmware without USB or physical access, over the

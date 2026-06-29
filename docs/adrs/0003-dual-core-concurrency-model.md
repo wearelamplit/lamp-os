@@ -1,7 +1,5 @@
 # ADR 0003 — Dual-core concurrency model (Core 0 radio / Core 1 loop)
 
-**Status:** Accepted (current system)
-
 ## Context
 
 The lamp runs on an ESP32-WROOM, which is **dual-core** (PRO_CPU = Core 0,

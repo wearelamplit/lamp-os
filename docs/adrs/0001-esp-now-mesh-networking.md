@@ -1,6 +1,6 @@
 # ADR 0001 — ESP-NOW broadcast mesh for lamp-to-lamp networking
 
-**Status:** Accepted (current system; supersedes the old `main` system's networking)
+*Supersedes the old `main`-branch system's networking.*
 
 ## Context
 
