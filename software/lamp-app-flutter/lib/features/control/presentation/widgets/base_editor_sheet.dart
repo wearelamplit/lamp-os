@@ -1,10 +1,12 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/widgets/app_sheet.dart';
+import '../../../../core/widgets/confirm_discard.dart';
 import '../../application/control_notifier.dart';
 import '../../domain/lamp_color.dart';
 import 'color_picker_sheet.dart';
@@ -21,10 +23,9 @@ const int _kMaxBaseStops = 6;
 /// session: every in-sheet change live-previews via the controlNotifier
 /// (so the lamp tracks the gradient as the user picks), but the sheet
 /// keeps a snapshot of the colors/ac it opened with and either commits
-/// (Save just closes — state already mirrors edits) or rolls back the
-/// live-preview channel (Cancel re-writes the snapshot) before popping.
-/// The user's "what's actually persisted" still comes from global
-/// Save Changes via settings_blob.
+/// (Save writes BLE + closes) or rolls back the live-preview channel
+/// (Cancel/discard re-writes the snapshot). A discard-guard dialog blocks
+/// accidental dismissal when edits are pending.
 class BaseEditorSheet extends ConsumerStatefulWidget {
   const BaseEditorSheet({super.key, required this.lampId});
 
@@ -35,14 +36,55 @@ class BaseEditorSheet extends ConsumerStatefulWidget {
 }
 
 class _BaseEditorSheetState extends ConsumerState<BaseEditorSheet> {
-  /// Captured at first build when state is non-null. Cancel restores both.
+  /// Captured at first build when state is non-null. Revert restores both.
   List<LampColor>? _originalColors;
   int? _originalAc;
 
-  /// Set true ONLY when the user explicitly taps Save. Any other dismiss
-  /// path (Cancel button, backdrop tap, system back) is treated as a
-  /// revert.
-  bool _committed = false;
+  /// True once we've signalled PopScope to allow the pop. Set just before
+  /// the addPostFrameCallback-deferred Navigator.pop so the route doesn't
+  /// get blocked by canPop=false on the same frame.
+  bool _allowPop = false;
+
+  bool _hasUnsavedChanges(List<LampColor> colors, int ac) =>
+      (_originalColors != null && !listEquals(colors, _originalColors)) ||
+      (_originalAc != null && ac != _originalAc);
+
+  void _close({required bool revert}) {
+    if (revert) {
+      final n = ref.read(controlNotifierProvider(widget.lampId).notifier);
+      if (_originalColors != null) n.setBaseColors(_originalColors!);
+      if (_originalAc != null) n.setBaseAc(_originalAc!);
+    }
+    setState(() => _allowPop = true);
+    // Pop after the frame so PopScope picks up _allowPop=true (setState +
+    // synchronous Navigator.pop would still see the old canPop=false).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Navigator.of(context).pop();
+    });
+  }
+
+  Future<void> _save() async {
+    final notifier =
+        ref.read(controlNotifierProvider(widget.lampId).notifier);
+    try {
+      final cur = ref.read(controlNotifierProvider(widget.lampId)).value;
+      if (cur != null && _originalAc != null && cur.base.ac != _originalAc) {
+        await notifier.writeSettingsBlob(
+          {'base': {'ac': cur.base.ac}},
+          reboot: false,
+        );
+      }
+      await notifier.commit();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Couldn't save — disconnected")),
+      );
+      return;
+    }
+    if (!mounted) return;
+    _close(revert: false);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -131,27 +173,12 @@ class _BaseEditorSheetState extends ConsumerState<BaseEditorSheet> {
       }
     }
 
-    void cancel() {
-      // Roll back to the session baseline: re-write the live-preview channel
-      // so the lamp visually reverts, and restore the active-stop index.
-      // Subtle: setBaseColors mutates app state too, so this also clears any
-      // edits the user made in this session from the global draft.
-      final origColors = _originalColors;
-      final origAc = _originalAc;
-      if (origColors != null) notifier.setBaseColors(origColors);
-      if (origAc != null) notifier.setBaseAc(origAc);
-      Navigator.pop(context);
-    }
-
     return PopScope(
-      canPop: true,
-      onPopInvokedWithResult: (didPop, _) {
-        if (didPop && !_committed) {
-          if (_originalColors != null) {
-            notifier.setBaseColors(_originalColors!);
-          }
-          if (_originalAc != null) notifier.setBaseAc(_originalAc!);
-        }
+      canPop: _allowPop || !_hasUnsavedChanges(colors, activeIndex),
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return; // no unsaved changes — already popped
+        final discard = await confirmDiscard(context);
+        if (discard) _close(revert: true);
       },
       child: SafeArea(
       child: Padding(
@@ -236,43 +263,14 @@ class _BaseEditorSheetState extends ConsumerState<BaseEditorSheet> {
             Row(
               children: [
                 TextButton(
-                  onPressed: cancel,
+                  onPressed: () => _close(revert: true),
                   child: const Text('Cancel'),
                 ),
                 const Spacer(),
                 FilledButton.icon(
                   icon: const Icon(Icons.check, size: 18),
                   label: const Text('Save'),
-                  onPressed: () async {
-                    final notifier = ref.read(
-                      controlNotifierProvider(widget.lampId).notifier,
-                    );
-                    _committed = true;
-                    try {
-                      final cur = ref
-                          .read(controlNotifierProvider(widget.lampId))
-                          .value;
-                      if (cur != null &&
-                          _originalAc != null &&
-                          cur.base.ac != _originalAc) {
-                        await notifier.writeSettingsBlob(
-                          {'base': {'ac': cur.base.ac}},
-                          reboot: false,
-                        );
-                      }
-                      await notifier.commit();
-                    } catch (e) {
-                      if (!context.mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text("Couldn't save — disconnected"),
-                        ),
-                      );
-                      return;
-                    }
-                    if (!context.mounted) return;
-                    Navigator.of(context).pop();
-                  },
+                  onPressed: _save,
                 ),
               ],
             ),
