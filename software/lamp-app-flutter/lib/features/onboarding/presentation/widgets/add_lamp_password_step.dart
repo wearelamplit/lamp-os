@@ -47,10 +47,16 @@ Future<void> _confirmSkip(BuildContext context, AddLampNotifier notifier) async 
 }
 
 class _AddLampPasswordStepState extends ConsumerState<AddLampPasswordStep> {
-  late final TextEditingController _pwd = TextEditingController(
-    text: ref.read(addLampNotifierProvider).password,
-  );
+  late final TextEditingController _pwd;
   final _confirm = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _pwd = TextEditingController(
+      text: ref.read(addLampNotifierProvider).password,
+    );
+  }
 
   @override
   void dispose() {
@@ -91,98 +97,110 @@ class _AddLampPasswordStepState extends ConsumerState<AddLampPasswordStep> {
             textAlign: TextAlign.center,
             style: textTheme.bodyMedium,
           ),
-          if (state.error == AddLampError.wrongPassword) ...[
-            const SizedBox(height: AppSpace.sm),
-            Text(
-              "That password didn't match — try once more.",
-              style: textTheme.bodyMedium?.copyWith(color: colorScheme.error),
-              textAlign: TextAlign.center,
-            ),
-          ],
-          const SizedBox(height: AppSpace.lg),
-          TextField(
-            controller: _pwd,
-            autofocus: true,
-            obscureText: true,
-            onChanged: (v) {
-              notifier.setPassword(v);
-              setState(() {}); // re-evaluate the mismatch banner + button
-            },
-            decoration: const InputDecoration(
-              labelText: 'Password',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: AppSpace.md),
-          TextField(
-            controller: _confirm,
-            obscureText: true,
-            onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(
-              labelText: 'Confirm password',
-              border: const OutlineInputBorder(),
-              errorText: showMismatch ? "Doesn't match" : null,
-            ),
-          ),
-          const Spacer(),
           if (isVerifying) ...[
+            const Spacer(),
             const _VerifyingTips(),
             const SizedBox(height: AppSpace.lg),
-          ],
-          if (state.status == AddLampStatus.error &&
-              state.error != AddLampError.wrongPassword)
-            Padding(
-              padding: const EdgeInsets.only(bottom: AppSpace.md),
-              child: FriendlyError.inline(
-                title: state.error == AddLampError.connectFailed
-                    ? "Your lamp drifted off — bring your phone closer "
-                        'and try again.'
-                    : "Adoption didn't go through — try once more.",
-                rawError: state.errorMessage,
-              ),
+            const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                SizedBox(width: AppSpace.sm),
+                Text('Settling in…'),
+              ],
             ),
-          Row(
-            children: [
-              TextButton(
-                onPressed: state.status == AddLampStatus.working
-                    ? null
-                    : notifier.previous,
-                child: const Text('Back'),
-              ),
-              const Spacer(),
-              TextButton(
-                onPressed: (state.status != AddLampStatus.working &&
-                        !isVerifying)
-                    ? () => _confirmSkip(context, notifier)
-                    : null,
-                style: TextButton.styleFrom(
-                    foregroundColor: colorScheme.onSurfaceVariant),
-                child: const Text('Skip'),
-              ),
-              const SizedBox(width: AppSpace.sm),
-              FilledButton(
-                onPressed: (canContinue &&
-                        state.status != AddLampStatus.working &&
-                        !isVerifying)
-                    ? notifier.submit
-                    : null,
-                child: (state.status == AddLampStatus.working || isVerifying)
-                    ? const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                          SizedBox(width: AppSpace.sm),
-                          Text('Settling in…'),
-                        ],
-                      )
-                    : const Text('Welcome them home'),
+          ] else ...[
+            if (state.error == AddLampError.wrongPassword) ...[
+              const SizedBox(height: AppSpace.sm),
+              Text(
+                "That password didn't match — try once more.",
+                style: textTheme.bodyMedium?.copyWith(color: colorScheme.error),
+                textAlign: TextAlign.center,
               ),
             ],
-          ),
+            const SizedBox(height: AppSpace.lg),
+            TextField(
+              controller: _pwd,
+              autofocus: true,
+              obscureText: true,
+              onChanged: (v) {
+                notifier.setPassword(v);
+                setState(() {}); // re-evaluate the mismatch banner + button
+              },
+              decoration: const InputDecoration(
+                labelText: 'Password',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: AppSpace.md),
+            TextField(
+              controller: _confirm,
+              obscureText: true,
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(
+                labelText: 'Confirm password',
+                border: const OutlineInputBorder(),
+                errorText: showMismatch ? "Doesn't match" : null,
+              ),
+            ),
+            const Spacer(),
+            if (state.status == AddLampStatus.error &&
+                state.error != AddLampError.wrongPassword)
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpace.md),
+                child: FriendlyError.inline(
+                  title: state.error == AddLampError.connectFailed
+                      ? "Your lamp drifted off — bring your phone closer "
+                          'and try again.'
+                      : "Adoption didn't go through — try once more.",
+                  rawError: state.errorMessage,
+                ),
+              ),
+            Row(
+              children: [
+                TextButton(
+                  onPressed: state.status == AddLampStatus.working
+                      ? null
+                      : notifier.previous,
+                  child: const Text('Back'),
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: state.status != AddLampStatus.working
+                      ? () => _confirmSkip(context, notifier)
+                      : null,
+                  style: TextButton.styleFrom(
+                      foregroundColor: colorScheme.onSurfaceVariant),
+                  child: const Text('Skip'),
+                ),
+                const SizedBox(width: AppSpace.sm),
+                FilledButton(
+                  onPressed: (canContinue &&
+                          state.status != AddLampStatus.working)
+                      ? notifier.submit
+                      : null,
+                  child: state.status == AddLampStatus.working
+                      ? const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                            SizedBox(width: AppSpace.sm),
+                            Text('Settling in…'),
+                          ],
+                        )
+                      : const Text('Welcome them home'),
+                ),
+              ],
+            ),
+          ],
           ],
         ),
       ),
