@@ -12,10 +12,7 @@ enum class Features : uint32_t {
   None                = 0,
   SocialBehavior      = 1u << 0,
   DefaultExpressions  = 1u << 1,  // load Expressions from NVS on boot
-  // Bits 2-4 deliberately unused. Bit 2 previously gated PersonalityEngine
-  // init, but the engine runs unconditionally now. Bits 3-4 previously held
-  // FadeInBehavior + IdleBehavior flags, but the compositor unconditionally
-  // constructs both regardless of subclass mask, so flag-gating was misleading.
+  // Bits 2-4 unused.
   FadeOutBehavior     = 1u << 5,
   KnockoutBehavior    = 1u << 6,
   All                 = 0xFFFFFFFFu,

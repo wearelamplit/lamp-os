@@ -16,12 +16,7 @@
 #include <mbedtls/sha256.h>
 #endif
 
-// Debug logging macros. The codebase convention is to gate every
-// `Serial.*` call on LAMP_DEBUG so release builds (where Serial may
-// never have been Serial.begin()'d) don't block on UART. Every
-// diagnostic print in this file routes through these macros — they
-// collapse to no-op on host builds (no Serial) and on release builds
-// (no LAMP_DEBUG).
+// Gate Serial on LAMP_DEBUG; collapses to no-op on host + release builds.
 #if defined(LAMP_DEBUG) && (defined(ARDUINO) || defined(ESP_PLATFORM))
 #define FWDIST_LOGF(...) Serial.printf(__VA_ARGS__)
 #define FWDIST_LOGLN(s)  Serial.println(s)
@@ -32,10 +27,6 @@
 
 namespace lamp {
 
-// Single global instance — the extern declaration lives in
-// firmware_distributor.hpp so SocialBehavior (and any other consumer)
-// can `#include "components/firmware/firmware_distributor.hpp"` and
-// reference `lamp::firmwareDistributor` directly.
 FirmwareDistributor firmwareDistributor;
 
 namespace {
@@ -51,10 +42,6 @@ constexpr uint16_t kFwFooterLenV1 =
     static_cast<uint16_t>(::lamp::firmware::kLsigFooterLen);
 
 }  // namespace
-
-// =============================================================================
-// Lifecycle
-// =============================================================================
 
 void FirmwareDistributor::begin(FirmwareTransport* transport) {
   transport_ = transport;
@@ -72,10 +59,9 @@ void FirmwareDistributor::begin(FirmwareTransport* transport) {
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   if (fsHooks_) {
-    // FS: stream the spiffs partition; fixed length + manifest digest prefix
-    // (no LSIG footer to scan; mkspiffs pads the image to the partition size,
-    // and a raw-partition SHA differs per lamp so the digest comes from
-    // fw.lsig via the hook).
+    // FS: stream the spiffs partition with a fixed length + manifest digest
+    // prefix (no LSIG footer to scan; the digest comes from fw.lsig via hook
+    // since a raw-partition SHA differs per lamp).
     runningPartition_ =
         static_cast<const esp_partition_t*>(fsHooks_->partition());
     if (!runningPartition_) {
@@ -104,19 +90,10 @@ void FirmwareDistributor::begin(FirmwareTransport* transport) {
     FWDIST_LOGLN("[fwdist] disabled (no running partition)");
     return;
   }
-  // Total length to distribute is the actual signed image size, NOT the
-  // partition capacity. The running partition is sized in partitions.csv
-  // to be larger than the image (~1.5 MB partition, ~1.35 MB signed
-  // image), with the tail erased to 0xFF. Sending `partition->size`
-  // bytes would stream 1.4 MB of mostly-erased flash garbage, and the
-  // SHA wouldn't match what the receiver computes over its own newly-
-  // written image.
-  //
-  // Discovery strategy: scan FORWARD for the lowest valid LSIG footer (the
-  // running image's) and trust the signed length it reports. Forward, not
-  // backward, is load-bearing — a smaller image re-flashed over a larger one
-  // leaves a stale higher footer that a backward scan would grab first (see
-  // discoverImageLength).
+  // Distribute the actual signed image size, not the partition capacity (the
+  // partition is larger, tail erased to 0xFF; sending it would stream garbage
+  // and break the receiver's SHA). Scan FORWARD for the lowest valid LSIG
+  // footer: forward, not backward, is load-bearing (see discoverImageLength).
   if (!discoverImageLength(&firmwareTotalLen_)) {
     state_ = State::Disabled;
     FWDIST_LOGLN("[fwdist] disabled (could not discover image length)");
@@ -131,11 +108,8 @@ void FirmwareDistributor::begin(FirmwareTransport* transport) {
     return;
   }
 
-  // Pre-compute the sha256 prefix over the signed region (everything
-  // before the 96-byte footer). Same scheme as the wisp's FirmwareCarrier
-  // prep: stream the signed region through mbedtls SHA-256, take the
-  // first 8 bytes of the digest. This is the image fingerprint we
-  // advertise in OFFER + echo in DONE.
+  // Pre-compute the sha256 prefix over the signed region (before the footer):
+  // the image fingerprint advertised in OFFER and echoed in DONE.
   if (!computeShaPrefixOnce(firmwareTotalLen_)) {
     state_ = State::Disabled;
     FWDIST_LOGLN("[fwdist] disabled (sha256 prefix compute failed)");
@@ -143,9 +117,7 @@ void FirmwareDistributor::begin(FirmwareTransport* transport) {
   }
   }  // else: firmware distribution
 #else
-  // Native test path — leave the partition/sha state at construction
-  // defaults; the test harness is expected to bypass begin() or stub
-  // these fields directly.
+  // Native test path: tests bypass begin() or stub these fields directly.
 #endif
 
   state_         = State::Idle;
@@ -158,9 +130,7 @@ void FirmwareDistributor::begin(FirmwareTransport* transport) {
     state_ = State::Disabled;
     return;
   }
-  // Streaming task. Unpinned (xTaskCreate, not xTaskCreatePinnedToCore) —
-  // the scheduler can place it on whichever core has slack. Priority 5
-  // sits above the Arduino loop (1) but well below WiFi/IDF (18+).
+  // Unpinned so the scheduler can place it on whichever core has slack.
   const BaseType_t ok = xTaskCreate(
       &FirmwareDistributor::streamingTaskTrampoline,
       "fwdist",
@@ -177,12 +147,8 @@ void FirmwareDistributor::begin(FirmwareTransport* transport) {
                 (unsigned long)lamp::FIRMWARE_VERSION,
                 (unsigned)firmwareTotalChunks_,
                 (unsigned)firmwareTotalLen_);
-  // Stack high-water-mark for the loop task — this begin() runs from
-  // setup(), and discoverImageLength + computeShaPrefixOnce both stack-
-  // allocate 4 KB scratch buffers. The loop task's stack is 8 KB by
-  // default; we want to confirm empirically that the 4 KB buffers fit
-  // without painting near the redline. Reported in 32-bit words per the
-  // FreeRTOS API; multiply by 4 for bytes-free.
+  // Loop-task stack HWM: discoverImageLength + computeShaPrefixOnce each
+  // stack-allocate 4 KB scratch on the 8 KB loop stack. Words; x4 for bytes.
   const UBaseType_t hwmWords = uxTaskGetStackHighWaterMark(nullptr);
   FWDIST_LOGF("[fwdist] loop-task stack HWM: %u words (%u bytes free)\n",
                 (unsigned)hwmWords, (unsigned)(hwmWords * 4));
@@ -190,10 +156,6 @@ void FirmwareDistributor::begin(FirmwareTransport* transport) {
 }
 
 bool FirmwareDistributor::isInProgress() const {
-  // Mid-flow = OfferSent / Streaming / Finalizing. Failed + Done are
-  // tombstone states; the next tick reaps them back to Idle. We report
-  // them as NOT in-progress so a follow-up considerPeerForOta for a
-  // different peer can fire immediately after a Done/Failed tick boundary.
   return state_ == State::OfferSent || state_ == State::Streaming ||
          state_ == State::Finalizing;
 }
@@ -210,22 +172,20 @@ bool FirmwareDistributor::readPartitionBytes(uint32_t offset, size_t len,
 
 bool FirmwareDistributor::discoverImageLength(uint32_t* outLen) const {
   if (!runningPartition_ || !outLen) return false;
-  // Locate the LSIG footer of the image at the START of the partition — the
-  // running image — by scanning FORWARD and returning the FIRST valid footer
-  // (lowest offset). The signed length is whatever the footer says
-  // (signedRegionLen == footerStart), not the last-non-0xFF byte.
+  // Locate the running image's LSIG footer (at the START of the partition) by
+  // scanning FORWARD and returning the FIRST valid footer (lowest offset). The
+  // signed length is whatever the footer says (signedRegionLen == footerStart).
   //
   // Forward, not backward, is load-bearing. esptool's app-only flash erases
   // only the bytes it writes, so a lamp re-flashed with an image SMALLER than
-  // its predecessor keeps the OLD image's footer in the un-erased tail, at a
-  // HIGHER offset than the current footer — and that stale footer is
-  // internally self-consistent (it was a real image once), so the
+  // its predecessor keeps the OLD image's footer in the un-erased tail at a
+  // HIGHER offset, and that stale footer is internally self-consistent so the
   // signedRegionLen sanity check can't reject it. A backward scan finds the
-  // stale footer first and streams the wrong image. The lowest valid footer
-  // is always the running image's: a LARGER new image fully overwrites a
-  // smaller predecessor (footer included), so no stale footer ever survives
-  // BELOW the current one. (A normal mesh OTA erases a fixed sector span that
-  // masks this, which is why it only bit esptool-flashed lamps.)
+  // stale footer first and streams the wrong image. The lowest valid footer is
+  // always the running image's: a LARGER new image fully overwrites a smaller
+  // predecessor (footer included), so no stale footer survives BELOW the
+  // current one. (A normal mesh OTA erases a fixed sector span that masks this,
+  // which is why it only bit esptool-flashed lamps.)
   //
   // 256-byte sliding window with a (kMagicLen - 1) overlap so a magic that
   // straddles a window boundary isn't missed. Called once at init, so the
@@ -286,10 +246,8 @@ bool FirmwareDistributor::computeShaPrefixOnce(uint32_t totalLen) {
     return false;
   }
 
-  // Stream the signed region through SHA-256 in 4 KB blocks. We can't
-  // mbedtls_sha256_update from a memory-mapped flash region directly
-  // because the partition is at a physical offset, not a CPU address.
-  // 4 KB is sector-sized and a reasonable stack buffer.
+  // Stream the signed region through SHA-256 in 4 KB blocks: the partition is
+  // at a physical offset, not a CPU address, so it can't be hashed in place.
   constexpr size_t kBlock = 4096;
   uint8_t buf[kBlock];
   uint32_t cursor = 0;
@@ -332,20 +290,16 @@ void FirmwareDistributor::streamingTaskTrampoline(void* arg) {
   static_cast<FirmwareDistributor*>(arg)->streamingTaskLoop();
 }
 
-// Task body. Blocks on the wake semaphore until there's work, then drains
-// streamingTaskStep() until the state machine transitions out of an active
-// state. The semaphore is a token-bucket of one; we give from state-
-// transition sites (initial OFFER, ACCEPT rx, REQ rewind) so the task
-// can preempt the loop without waiting on the next idle poll boundary.
+// Blocks on the wake semaphore until there's work, then drains
+// streamingTaskStep() until the state machine leaves an active state. Given
+// from state-transition sites (initial OFFER, ACCEPT rx, REQ rewind) so the
+// task can preempt the loop without waiting on the next idle poll boundary.
 void FirmwareDistributor::streamingTaskLoop() {
   for (;;) {
     xSemaphoreTake(wakeSem_, pdMS_TO_TICKS(kStreamingIdlePollMs));
     while (streamingTaskStep(millis())) {
-      // Cooperative yield between iterations. The send call is non-
-      // blocking (queues to a shallow ring); a 10-tick delay gives the
-      // WiFi task time to push frames over the air before we shove the
-      // next one in. The 10ms cadence is the receiver-friendly value
-      // tuned on hardware (see kStreamingChunkSpacingMs comment).
+      // Yield so the WiFi task can push frames over the air before the next
+      // one is queued (see kStreamingChunkSpacingMs).
       vTaskDelay(pdMS_TO_TICKS(kStreamingChunkSpacingMs));
     }
   }
@@ -371,14 +325,12 @@ bool FirmwareDistributor::streamingTaskStep(uint32_t nowMs) {
 
   if (s == State::OfferSent) {
     if (offerRetriesLocal >= kMaxOfferRetries) {
-      // No more retries — wait for the recv task (ACCEPT) or tick()
-      // (kAcceptTimeoutMs) to break us out. Idle until then.
+      // Out of retries; wait for ACCEPT (recv task) or kAcceptTimeoutMs (tick).
       return false;
     }
     const uint32_t sinceLast = nowMs - lastOfferLocal;
     if (sinceLast >= kOfferRetryIntervalMs) {
-      // Bump retry count under mux BEFORE sending so a fast Accept-rx
-      // interleave reads the updated value.
+      // Bump under mux BEFORE sending so a fast Accept-rx interleave reads it.
       portENTER_CRITICAL(&stateMux_);
       offerRetryCount_++;
       portEXIT_CRITICAL(&stateMux_);
@@ -386,19 +338,15 @@ bool FirmwareDistributor::streamingTaskStep(uint32_t nowMs) {
       return true;
     }
     const uint32_t waitMs = kOfferRetryIntervalMs - sinceLast;
-    // xSemaphoreTake instead of vTaskDelay so an ACCEPT (or REQ, or any
-    // state-pivoting recv event) wakes us immediately. Otherwise we'd
-    // burn up to ~200 ms of dead air after ACCEPT before the next
-    // iteration finds the state moved to Streaming. wakeStreamingTask
-    // gives the semaphore from onAccept, onReq, onResult.
+    // xSemaphoreTake (not vTaskDelay) so a state-pivoting recv event wakes us
+    // immediately instead of burning ~200ms of dead air after ACCEPT.
     xSemaphoreTake(wakeSem_, pdMS_TO_TICKS(waitMs));
     return true;
   }
 
   if (s == State::Streaming) {
     if (nextChunkLocal >= totalChunksLocal) {
-      // Drained — transition to Finalizing and emit DONE. Take mux to
-      // commit the state change; emitDone sends OUTSIDE the mux.
+      // Drained: transition to Finalizing and emit DONE outside the mux.
       bool needFinalize = false;
       portENTER_CRITICAL(&stateMux_);
       if (state_ == State::Streaming &&
@@ -409,18 +357,18 @@ bool FirmwareDistributor::streamingTaskStep(uint32_t nowMs) {
       }
       portEXIT_CRITICAL(&stateMux_);
       if (needFinalize) emitDone(nowMs);
-      // Streaming task has no more chunk work — let it idle. tick() owns
-      // the FINALIZE timeout; the recv task wakes us on RESULT.
+      // No more chunk work; idle. tick() owns the FINALIZE timeout, the recv
+      // task wakes us on RESULT.
       return false;
     }
     const int rc = streamOneChunk(nowMs);
     if (rc == 1) {
-      // NO_MEM — back off, then try same chunk next iteration.
+      // NO_MEM: back off, retry same chunk next iteration.
       vTaskDelay(pdMS_TO_TICKS(kStreamingQueueBackoffMs));
       return true;
     }
     if (rc == 2) {
-      // Partition read failure aborted the session inside streamOneChunk.
+      // Partition read failure already aborted the session.
       return false;
     }
     return true;
@@ -429,15 +377,11 @@ bool FirmwareDistributor::streamingTaskStep(uint32_t nowMs) {
   return false;
 }
 
-// Single-chunk emit + index advance with mux discipline. Returns:
-//   0 → chunk queued for send, indices advanced.
-//   1 → ESP-NOW NO_MEM; caller should delay + retry.
-//   2 → partition read failure; session aborted in-place.
+// Single-chunk emit + index advance. Returns 0 = queued, advanced; 1 = NO_MEM,
+// caller delays + retries; 2 = partition read failure, session aborted.
 int FirmwareDistributor::streamOneChunk(uint32_t nowMs) {
-  // Snapshot the chunk index + target under mux. We must NOT advance
-  // nextChunkIdx_ until the frame is queued; if a concurrent onReq
-  // rewinds nextChunkIdx_ between our snapshot and the send, we re-read
-  // on the next iteration.
+  // Snapshot index + target under mux. Don't advance nextChunkIdx_ until the
+  // frame is queued: a concurrent onReq may rewind it before the send.
   uint16_t chunkIdx;
   uint8_t  targetMacLocal[6];
   portENTER_CRITICAL(&stateMux_);
@@ -457,7 +401,6 @@ int FirmwareDistributor::streamOneChunk(uint32_t nowMs) {
   // Last chunk is short when totalLen isn't a multiple of FW_CHUNK_SIZE.
   size_t want = lamp_protocol::FW_CHUNK_SIZE;
   if (offset >= firmwareTotalLen_) {
-    // Defensive — should never happen (drain transition is guarded above).
     return 2;
   }
   if (offset + want > firmwareTotalLen_) {
@@ -492,13 +435,10 @@ int FirmwareDistributor::streamOneChunk(uint32_t nowMs) {
       fsHooks_ ? fsHooks_->chunkType : lamp_protocol::MSG_FW_CHUNK);
   if (!framed) return 1;
 
-  // Send OUTSIDE the mux. The transport's sendFrame queues to the ESP-NOW
-  // TX ring (or BLE notify queue); a returned false maps to NO_MEM/queue-
-  // full and the caller backs off.
+  // Send outside the mux. sendFrame returns false on NO_MEM/queue-full.
   if (!transport_->sendFrame(buf, framed)) {
 #ifdef LAMP_DEBUG
-    // Rate-limit failure log so a sustained queue-full doesn't drown the UART
-    // (at ~33 chunks/s the flood would obscure the rest of the OTA state).
+    // Rate-limit so a sustained queue-full doesn't drown the UART.
     static uint32_t lastSendFailLogMs = 0;
     static uint32_t failCount = 0;
     failCount++;
@@ -512,9 +452,9 @@ int FirmwareDistributor::streamOneChunk(uint32_t nowMs) {
     return 1;
   }
 
-  // Commit: advance nextChunkIdx_ IF it still points at the chunk we just
-  // sent. If a concurrent onReq rewound it elsewhere, leave that value
-  // alone — next iteration sends from there.
+  // Advance nextChunkIdx_ only if it still points at the chunk just sent; a
+  // concurrent onReq may have rewound it, in which case the next iteration
+  // sends from there.
   uint16_t emittedCount = 0;
   bool     resumedToFwd  = false;
   uint16_t resumeToLog   = 0;
@@ -525,10 +465,9 @@ int FirmwareDistributor::streamOneChunk(uint32_t nowMs) {
     currentChunkRetries_ = 0;
     lastSentMs_ = nowMs;
     lastBurstSentChunks_++;
-    // Smart-REQ resume: if we just finished serving the requested
-    // chunks for a rewind, jump nextChunkIdx_ back to the forward-
-    // progress position so we don't re-stream chunks the receiver
-    // already has. See onReq for the comment that sets this up.
+    // Smart-REQ resume: after serving the requested chunks, jump back to the
+    // forward-progress position so we don't re-stream what the receiver has
+    // (set up in onReq).
     if (resumeChunkIdx_ != 0 && nextChunkIdx_ >= reqEndIdx_ &&
         nextChunkIdx_ < resumeChunkIdx_) {
       resumeToLog       = resumeChunkIdx_;
@@ -537,10 +476,8 @@ int FirmwareDistributor::streamOneChunk(uint32_t nowMs) {
       reqEndIdx_        = 0;
       resumedToFwd      = true;
     }
-    // Track monotonic high water for the indicator. Both the post-send
-    // increment and the jump-forward above can be the new max; the
-    // rewind paths (REQ + stall recovery) intentionally don't touch
-    // this — the indicator should show forward progress only.
+    // Monotonic high water for the indicator. The rewind paths (REQ + stall
+    // recovery) intentionally don't touch this; forward progress only.
     sentProgress_.observe(nextChunkIdx_);
     if (lastBurstSentChunks_ >= kStreamProgressLogEvery) {
       emittedCount = nextChunkIdx_;
@@ -561,16 +498,12 @@ int FirmwareDistributor::streamOneChunk(uint32_t nowMs) {
 
 #endif  // ARDUINO || ESP_PLATFORM
 
-// =============================================================================
-// tick — drives ACCEPT/FINALIZE timeouts + stall watchdog + tombstone reaper
-// =============================================================================
-
+// Drives ACCEPT/FINALIZE timeouts, the stall watchdog, and the tombstone reaper.
 void FirmwareDistributor::tick(uint32_t nowMs) {
   if (state_ == State::Disabled) return;
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-  // Refresh nowMs from millis() — the caller passed a value captured
-  // BEFORE potentially-slow loop work. Stale nowMs underflows uint32_t
-  // subtractions and fires timeouts instantly.
+  // Refresh from millis(); the passed nowMs predates slow loop work and a stale
+  // value underflows the uint32_t subtractions, firing timeouts instantly.
   nowMs = millis();
 #endif
 
@@ -587,9 +520,8 @@ void FirmwareDistributor::tick(uint32_t nowMs) {
 #endif
 
 #ifdef LAMP_DEBUG
-  // Periodic heartbeat so a distributor wedge is visible in the log: a stuck
-  // non-Idle state (a session that never returned to Idle) vs Idle-but-not-
-  // offering (considerPeerForOta not engaging) are told apart by state + dwell.
+  // Heartbeat: state + dwell distinguishes a stuck session from Idle-but-not-
+  // offering when diagnosing a wedge.
   static uint32_t s_hbMs = 0;
   if (nowMs - s_hbMs >= 2000) {
     s_hbMs = nowMs;
@@ -603,21 +535,12 @@ void FirmwareDistributor::tick(uint32_t nowMs) {
 
   switch (s) {
     case State::Idle: {
-      // No scan — Idle is entirely event-driven (considerPeerForOta).
-      // But: if we entered Idle from a recent Done/Failed and still hold
-      // OTA quiet mode (inter-session hold so the indicator stays solid
-      // through the gap to the next OTA in the wave), expire the hold
-      // when nothing new has armed us within kInterSessionQuietHoldMs.
-      //
-      // quietHoldUntilMs_ == 0 is the "no exit pending" sentinel set
-      // at session start in emitOffer. We MUST guard the comparison
-      // here — without the != 0 check, nowMs >= 0 is always true, and
-      // any tick that observes Idle while a session is active (e.g.
-      // a transient Done→Idle race or a streaming-task wake mid-tick)
-      // would call exitQuiet prematurely. The compositor on the next
-      // tick would then run the normal pipeline → IdleBehavior writes
-      // defaultColors over the indicator → strip flickers between
-      // progress and full base color.
+      // Idle is event-driven (considerPeerForOta). If a recent Done/Failed
+      // still holds the inter-session quiet, expire it once nothing new arms
+      // within kInterSessionQuietHoldMs. The != 0 guard is load-bearing:
+      // quietHoldUntilMs_ == 0 is the "no exit pending" sentinel, and without
+      // it a tick observing Idle mid-session would exitQuiet early and flicker
+      // the strip between the indicator and the base color.
       if (quietHeld_ && quietHoldUntilMs_ != 0 && nowMs >= quietHoldUntilMs_) {
         ::lamp::ota_quiet_mode::exitQuiet();
         quietHeld_         = false;
@@ -628,8 +551,8 @@ void FirmwareDistributor::tick(uint32_t nowMs) {
     }
 
     case State::OfferSent: {
-      // OFFER retry cadence is handled inside the streaming task. tick()
-      // only watches the overall ACCEPT-timeout window.
+      // OFFER retry cadence lives in the streaming task; tick() only watches
+      // the overall ACCEPT-timeout window.
       if (nowMs >= stateEnteredMsLocal &&
           (nowMs - stateEnteredMsLocal) > kAcceptTimeoutMs) {
         FWDIST_LOGLN("[fwdist] OFFER timeout; backing off peer");
@@ -651,9 +574,9 @@ void FirmwareDistributor::tick(uint32_t nowMs) {
     }
 
     case State::Streaming: {
-      // Streaming runs on the dedicated task. tick() only checks the
-      // stall watchdog (no forward progress in kChunkResendMs → bump
-      // retry counter; exceeded → fail the peer).
+      // Streaming runs on the dedicated task; tick() only checks the stall
+      // watchdog (no progress in kChunkResendMs bumps the retry counter;
+      // exceeded fails the peer).
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
       uint32_t lastSentMsLocal = 0;
       uint8_t  currentRetriesLocal = 0;
@@ -731,14 +654,10 @@ void FirmwareDistributor::tick(uint32_t nowMs) {
 
     case State::Failed:
     case State::Done:
-      // Tombstone: return to Idle on the next tick. No scan/timing reset
-      // bookkeeping is needed since Idle is event-driven now.
-      //
-      // Capture last-session identity BEFORE resetSession() blanks the
-      // targetMac/totalChunks fields. ota_indicator reads this through
-      // getLastSession() so the strip keeps painting a held "completed
-      // bar" for this peer during the inter-session quiet hold rather
-      // than flashing back to normal animation between OTAs in a wave.
+      // Tombstone: return to Idle on the next tick. Capture last-session
+      // identity BEFORE resetSession() blanks targetMac/totalChunks so
+      // ota_indicator can keep painting a held completed bar through the
+      // inter-session quiet hold.
       std::memcpy(lastSessionPeerMac_, targetMac_, 6);
       lastSessionTotalChunks_ = totalChunks_;
       lastSessionValid_       = true;
@@ -753,12 +672,10 @@ void FirmwareDistributor::tick(uint32_t nowMs) {
       state_ = State::Idle;
       stateEnteredMs_ = nowMs;
 #endif
-      // Defer exitQuiet — keep the strip showing the OTA indicator
-      // through the gap to the next session. The Idle case expires the
-      // hold if no new session arms us within kInterSessionQuietHoldMs.
-      // If a new emitOffer fires inside the window, it inherits the
-      // already-held quiet (no enterQuiet call needed) and clears the
-      // pending exit, so OTAs in a wave look continuous on the strip.
+      // Defer exitQuiet to keep the indicator up through the gap to the next
+      // session. The Idle case expires the hold if nothing arms within
+      // kInterSessionQuietHoldMs; a new emitOffer inside the window inherits
+      // the held quiet and clears the pending exit.
       quietHoldUntilMs_ = nowMs + kInterSessionQuietHoldMs;
       break;
 
@@ -766,10 +683,6 @@ void FirmwareDistributor::tick(uint32_t nowMs) {
       break;
   }
 }
-
-// =============================================================================
-// Peer trigger (event-driven, replaces wisp's scan loop)
-// =============================================================================
 
 void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
                                              uint32_t peerVersion,
@@ -785,9 +698,8 @@ void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
     return;
   }
   if (!transport_) return;
-  // Peer protocol version is zero until we've heard a HELLO from them
-  // — skip the consider entirely so we never emit OFFERs at an unknown
-  // version. Once we hear a HELLO this gate opens.
+  // Skip until we've heard a HELLO (peerProtocolVersion 0), so we never OFFER
+  // at an unknown version.
   if (peerProtocolVersion < lamp_protocol::PROTOCOL_VERSION_RX_MIN ||
       peerProtocolVersion > lamp_protocol::PROTOCOL_VERSION_RX_MAX) {
     FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X v=0x%08X skip: "
@@ -810,17 +722,13 @@ void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
     return;
   }
 #endif
-  // Peer-stale gate. Firmware: skip peers already at/above our version. FS:
-  // fs_ota pre-decides staleness (peer at our firmware version with a
-  // different FS digest) before calling, so the distributor does not re-apply
-  // the version gate — the FS image's version equals our firmware version, so
-  // a `>=` test would reject every eligible peer.
+  // Peer-stale gate. Firmware: skip peers at/above our version. FS skips it:
+  // fs_ota pre-decides staleness, and the FS image's version equals our
+  // firmware version so a >= test would reject every eligible peer.
   if (!fsHooks_ && peerVersion >= lamp::FIRMWARE_VERSION) return;
-  // Type/channel gate: when we know the peer's {type}-{channel} (from its
-  // HELLO_TLV_FW_CHANNEL) and it differs from ours, don't OFFER — a snafu
-  // lamp can't run a standard image and channels must not cross. An unknown
-  // (empty) channel means an older peer that doesn't emit the TLV; fall
-  // through and let the receiver's onOfferOnLoop silent-drop be the backstop.
+  // Type/channel gate: a known peer {type}-{channel} that differs from ours
+  // doesn't OFFER (no cross-variant/channel flash). Unknown (empty) channel is
+  // an older peer; fall through to the receiver's silent-drop backstop.
   if (peerFwChannel && peerFwChannel[0] != '\0' &&
       std::strncmp(peerFwChannel, lamp::FIRMWARE_CHANNEL_STR,
                    lamp_protocol::FW_CHANNEL_LEN) != 0) {
@@ -844,17 +752,11 @@ void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
               peerMac[0], peerMac[1], peerMac[2],
               peerMac[3], peerMac[4], peerMac[5],
               (unsigned)peerVersion, (unsigned)lamp::FIRMWARE_VERSION);
-  // Known cross-type/channel peers were filtered above. An unknown-channel
-  // peer (older firmware, no TLV) can still reach here; its own onOfferOnLoop
-  // silent-drop (firmware_receiver.cpp::channelMatchesOurs) is the backstop —
-  // the OFFER times out and it lands in our 10-minute backoff ring.
+  // An unknown-channel peer can still reach here; the receiver's onOfferOnLoop
+  // silent-drop is the backstop (the OFFER times out into our backoff ring).
   targetProtocolVersion_ = peerProtocolVersion;
   emitOffer(peerMac, peerVersion, nowMs);
 }
-
-// =============================================================================
-// Session bookkeeping
-// =============================================================================
 
 void FirmwareDistributor::resetSession() {
   std::memset(targetMac_, 0, 6);
@@ -878,9 +780,6 @@ void FirmwareDistributor::resetSession() {
 
 bool FirmwareDistributor::getLastSession(uint8_t outMac[6],
                                         uint16_t& outTotalChunks) const {
-  // ota_indicator probes this during the inter-session quiet hold so
-  // the strip can render a held "we just finished" full bar instead
-  // of falling back to the dim-background no-session branch.
   if (!lastSessionValid_) return false;
   std::memcpy(outMac, lastSessionPeerMac_, 6);
   outTotalChunks = lastSessionTotalChunks_;
@@ -928,10 +827,6 @@ void FirmwareDistributor::recordPeerFailureFinalize(uint32_t nowMs) {
   if (nonzero) notePeerBackoff(targetMac_, nowMs, kPeerFinalizeBackoffMs);
 }
 
-// =============================================================================
-// OFFER + DONE emit
-// =============================================================================
-
 void FirmwareDistributor::emitOffer(const uint8_t targetMac[6],
                                     uint32_t peerVersion, uint32_t nowMs) {
   if (!transport_) return;
@@ -941,14 +836,9 @@ void FirmwareDistributor::emitOffer(const uint8_t targetMac[6],
   if (firmwareTotalLen_ == 0 || firmwareTotalChunks_ == 0) return;
   (void)peerVersion;
 
-  // Init session state under the mux so the recv task + streaming task see
-  // a consistent snapshot.
-  //
-  // Re-check `state_ == Idle` INSIDE
-  // the mux to close the considerPeerForOta TOCTOU race. Without this,
-  // two consecutive ticks could each see Idle outside the mux, both
-  // proceed to emitOffer, and the second would overwrite the first's
-  // session state mid-flow.
+  // Init session state under the mux so recv + streaming tasks see a consistent
+  // snapshot. Re-check state_ == Idle INSIDE the mux to close the
+  // considerPeerForOta TOCTOU race (two ticks could both see Idle outside it).
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   portENTER_CRITICAL(&stateMux_);
 #endif
@@ -971,24 +861,19 @@ void FirmwareDistributor::emitOffer(const uint8_t targetMac[6],
   lastOfferSendMs_  = nowMs;
   lastBurstSentChunks_ = 0;
   reqCountThisSession_ = 0;
-  // Tentative OfferSent BEFORE the send so a near-instant ACCEPT arriving
-  // on the recv task pre-transition is correctly matched. If the send
-  // fails we roll back below.
+  // Tentative OfferSent BEFORE the send so a near-instant ACCEPT on the recv
+  // task is matched; rolled back below if the send fails.
   state_ = State::OfferSent;
   stateEnteredMs_ = nowMs;
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   portEXIT_CRITICAL(&stateMux_);
 #endif
 
-  // Enter OTA quiet mode for the duration of the session. Distributor
-  // side is always EspNow (no BLE-initiated outbound OTA) so we
-  // unconditionally tear down the GATT connection + pause adv/scan +
-  // suspend behaviors. Exited on the unified Idle/Failed tombstone
-  // below, with an inter-session hold so OTA waves don't flicker the
-  // strip between sessions. quietHeld_ tracks our share of the
-  // refcount: if the prior session's exit was deferred, just inherit
-  // the hold and clear the pending expiry — we never went un-quiet,
-  // so we don't bump the count again.
+  // Enter OTA quiet mode for the session: distributor side is always EspNow,
+  // so unconditionally tear down GATT + pause adv/scan + suspend behaviors.
+  // Exited on the Idle/Failed tombstone, with an inter-session hold so OTA
+  // waves don't flicker. quietHeld_ tracks our refcount share: a deferred prior
+  // exit is inherited (don't re-enter, don't double-count).
   if (!quietHeld_) {
     ::lamp::ota_quiet_mode::enterQuiet(/*tearDownRadio=*/true);
     quietHeld_ = true;
@@ -1006,17 +891,15 @@ void FirmwareDistributor::emitOffer(const uint8_t targetMac[6],
     resetSession();
     state_ = State::Idle;
 #endif
-    // OFFER frame send failed — we never got the session off the
-    // ground, so don't bother holding quiet for the next attempt
-    // (probably a transport problem, not a peer-cadence one). Drop
-    // straight back to normal animations.
+    // Send failed before the session got off the ground (likely transport, not
+    // peer cadence); drop straight back to normal animations.
     ::lamp::ota_quiet_mode::exitQuiet();
     quietHeld_ = false;
     quietHoldUntilMs_ = 0;
     return;
   }
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-  // Kick the streaming task — it owns OFFER retries from here on.
+  // The streaming task owns OFFER retries from here.
   wakeStreamingTask();
 #endif
 }
@@ -1060,11 +943,9 @@ bool FirmwareDistributor::sendOfferFrame(const uint8_t targetMac[6],
     return false;
   }
   const bool sent = transport_->sendFrame(buf, n);
-  // Bump lastOfferSendMs_ regardless
-  // of send success. Without this, a transient transport NO_MEM failure
-  // would leave lastOfferSendMs_ unchanged, so the next streaming task
-  // tick would see `sinceLast >= kOfferRetryIntervalMs` immediately and
-  // burn the retry budget in a tight loop. Apply the cooldown either way.
+  // Bump lastOfferSendMs_ regardless of send success: a transient NO_MEM that
+  // left it unchanged would make the next streaming tick burn the retry budget
+  // in a tight loop. Apply the cooldown either way.
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   portENTER_CRITICAL(&stateMux_);
 #endif
@@ -1123,10 +1004,8 @@ void FirmwareDistributor::emitDone(uint32_t nowMs) {
       fsHooks_ ? fsHooks_->doneType : lamp_protocol::MSG_FW_DONE);
   if (!n) return;
 
-  // First attempt + up to kMaxDoneRetries follow-ups. Bail early if the
-  // state pivots out of Finalizing — onResult (Done/Failed), onReq (back
-  // to Streaming for late gap fill), or the tick() finalize-timeout path
-  // can all change state under us.
+  // First attempt + up to kMaxDoneRetries follow-ups. Bail if state pivots out
+  // of Finalizing (onResult, onReq, or the tick() finalize timeout).
   const uint8_t budget = 1 + kMaxDoneRetries;
   for (uint8_t attempt = 0; attempt < budget; ++attempt) {
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
@@ -1151,22 +1030,15 @@ void FirmwareDistributor::emitDone(uint32_t nowMs) {
                   targetMacLocal[3], targetMacLocal[4], targetMacLocal[5],
                   (unsigned)(attempt + 1), (unsigned)budget);
     if (attempt + 1 < budget) {
-      // Yield the CPU so the WiFi task can deliver the queued frame, the
-      // peer can process it, and a RESULT can arrive and pivot state_ →
-      // Done/Failed before our next loop iteration. xSemaphoreTake (vs
-      // vTaskDelay) so onResult's wakeStreamingTask preempts our wait
-      // — otherwise we'd send up to 3 more DONE frames after RESULT
-      // already landed, just because we were mid-sleep when it arrived.
+      // xSemaphoreTake (not vTaskDelay) so onResult's wakeStreamingTask
+      // preempts the wait once RESULT lands, instead of sending more DONE
+      // frames while mid-sleep.
       xSemaphoreTake(wakeSem_, pdMS_TO_TICKS(kDoneRetryIntervalMs));
     }
 #endif
   }
   (void)nowMs;
 }
-
-// =============================================================================
-// Inbound dispatchers — Core 0 (WiFi recv task)
-// =============================================================================
 
 void FirmwareDistributor::onAcceptOnRecvTask(
     const lamp_protocol::ParsedFwAccept& a) {
@@ -1216,7 +1088,7 @@ void FirmwareDistributor::onAccept(const lamp_protocol::ParsedFwAccept& a,
       !macsEqual(a.sourceMac, targetMac_) ||
       a.offerSeq != sessionOfferSeq_ ||
       a.version != sessionVersion_) {
-    // Snapshot reasons under the mux so the post-exit log is consistent.
+    // Snapshot reasons under the mux for a consistent post-exit log.
     const uint8_t  logState        = static_cast<uint8_t>(state_);
     const bool     logMacMismatch  = !macsEqual(a.sourceMac, targetMac_);
     const uint16_t logRxSeq        = a.offerSeq;
@@ -1225,8 +1097,7 @@ void FirmwareDistributor::onAccept(const lamp_protocol::ParsedFwAccept& a,
     const uint32_t logExpectedVer  = sessionVersion_;
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
     portEXIT_CRITICAL(&stateMux_);
-    // Only log when state is OfferSent — that's when we're actually
-    // expecting an ACCEPT. Drops in Idle/Failed/etc are routine.
+    // Log only in OfferSent, when an ACCEPT is expected; drops elsewhere are routine.
     if (logState == static_cast<uint8_t>(State::OfferSent)) {
       FWDIST_LOGF("[fwdist] ACCEPT drop: state=%u macMismatch=%d "
                   "seq(rx=%u expect=%u) version(rx=0x%08X expect=0x%08X)\n",
@@ -1250,16 +1121,10 @@ void FirmwareDistributor::onAccept(const lamp_protocol::ParsedFwAccept& a,
   } else {
     state_ = State::Streaming;
     stateEnteredMs_ = nowMs;
-    // Stamp lastSentMs_ to now so the tick() stall watchdog gives the
-    // streaming task a fair kChunkResendMs window to actually send the
-    // first chunk before bumping the retry counter. resetSession() set
-    // lastSentMs_ to 0; without this re-stamp, tick() sees
-    // (nowMs - 0) > kChunkResendMs as true immediately after ACCEPT
-    // and exhausts the retry budget within milliseconds (4 increments
-    // fire in tight tick iterations before the streaming task on its
-    // own FreeRTOS task has had a chance to call sendFrame even once).
-    // Bites hard under BLE coex pressure when sendFrame transiently
-    // fails.
+    // Stamp lastSentMs_ to now so the tick() stall watchdog gives the streaming
+    // task a fair kChunkResendMs window for the first chunk. resetSession() left
+    // it 0, which tick() reads as instantly stalled and burns the retry budget
+    // before the streaming task sends once (worst under BLE coex).
     lastSentMs_ = nowMs;
     wake = true;
     logAccept = true;
@@ -1296,7 +1161,7 @@ void FirmwareDistributor::onReq(const lamp_protocol::ParsedFwReq& r,
   if ((state_ != State::Streaming && state_ != State::Finalizing) ||
       !macsEqual(r.sourceMac, targetMac_) ||
       r.firstChunkIdx >= totalChunks_) {
-    // Snapshot reasons under the mux so the post-exit log is consistent.
+    // Snapshot reasons under the mux for a consistent post-exit log.
     const uint8_t  logState         = static_cast<uint8_t>(state_);
     const bool     logMacMismatch   = !macsEqual(r.sourceMac, targetMac_);
     const bool     logIdxOob        = r.firstChunkIdx >= totalChunks_;
@@ -1313,13 +1178,9 @@ void FirmwareDistributor::onReq(const lamp_protocol::ParsedFwReq& r,
 #endif
     return;
   }
-  // Per-session REQ budget. A receiver that REQs many times in one
-  // session is either suffering catastrophic packet loss (in which case
-  // restarting the session via peer backoff is correct) or attempting to
-  // pin the sender in a rewind loop (malicious / buggy). Either way:
-  // record peer failure (10-minute backoff) and tombstone the session.
-  // Order matters: recordPeerFailure reads targetMac_, so it MUST run
-  // before resetSession() clears it.
+  // Per-session REQ budget. Excess REQs mean catastrophic loss or a rewind-loop
+  // attempt; either way, back off the peer and tombstone the session.
+  // recordPeerFailure reads targetMac_, so it MUST run before resetSession().
   if (reqCountThisSession_ >= kMaxReqPerSession) {
     recordPeerFailure(nowMs);
     resetSession();
@@ -1337,28 +1198,19 @@ void FirmwareDistributor::onReq(const lamp_protocol::ParsedFwReq& r,
     return;
   }
   ++reqCountThisSession_;
-  // Smart rewind: save the forward-progress position in resumeChunkIdx_
-  // so the streaming task can JUMP BACK to forward emit after it sends
-  // the requested chunk(s). Without this, naive rewind re-streams every
-  // chunk from `firstChunkIdx` to `totalChunks_`, most of which the
-  // receiver already has — wasted RF time + BLE coex pressure that turns
-  // a 1-minute OTA into 5+ minutes. We only save resumeChunkIdx_ on the
-  // FIRST rewind after a forward-progress run; subsequent REQs during
-  // an in-flight rewind don't reset the saved forward cursor but DO
-  // extend the rewind window's end-index so the new REQ's range is
-  // covered before the jump-forward fires.
+  // Smart rewind: save the forward-progress position in resumeChunkIdx_ so the
+  // streaming task can jump back to forward emit after serving the requested
+  // chunks, instead of re-streaming everything from firstChunkIdx the receiver
+  // already has. Saved only on the FIRST rewind after a forward run.
   const uint16_t newReqEnd = r.firstChunkIdx + r.chunkCount;
   if (resumeChunkIdx_ == 0 &&
       nextChunkIdx_ > newReqEnd) {
     resumeChunkIdx_ = nextChunkIdx_;
     reqEndIdx_      = newReqEnd;
   } else if (resumeChunkIdx_ != 0 && newReqEnd > reqEndIdx_) {
-    // Stacked REQ during an in-flight rewind. Extend the window's end
-    // so the jump-forward in streamOneChunk doesn't fire until the new
-    // REQ's tail has been served. Without this, a stacked REQ
-    // overwrites nextChunkIdx_ but the OLD reqEndIdx_ still gates the
-    // forward jump — chunks between the two ranges get re-REQ'd by
-    // the receiver's stall watchdog instead of served in this round.
+    // Stacked REQ during an in-flight rewind: extend the window end so the
+    // jump-forward waits for the new REQ's tail, otherwise the gap between
+    // ranges gets re-REQ'd by the receiver's stall watchdog.
     reqEndIdx_ = newReqEnd;
   }
   nextChunkIdx_        = r.firstChunkIdx;

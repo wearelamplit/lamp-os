@@ -12,10 +12,8 @@
 namespace lamp {
 
 namespace {
-// Comparator for std::lower_bound over the sorted dispositions vector.
-// Compares an existing entry's name against the target lookup key.
-// Used by getDisposition and setDisposition to find the insertion point
-// in O(log N) while keeping the vector contiguous and cache-friendly.
+// Comparator for std::lower_bound over the sorted dispositions vector:
+// an existing entry's key vs the target lookup key.
 inline bool dispositionEntryLess(
     const std::pair<std::string, uint8_t>& a, const std::string& b) {
   return a.first < b;
@@ -34,7 +32,7 @@ Config::Config(Preferences* inPrefs) {
   // The raw payload would leak `lamp.password` to anyone on the serial
   // console (USB physical access). If you need the full shape while
   // debugging a parse bug, attach a temporary `Serial.println(json)`
-  // for that session — don't roll back this redaction.
+  // for that session; don't roll back this redaction.
   {
     JsonDocument peek;
     if (deserializeJson(peek, json) == DeserializationError::Ok) {
@@ -63,9 +61,9 @@ Config::Config(Preferences* inPrefs) {
   }
 
   JsonObject lampNode = doc["lamp"];
-  // lampType is firmware-owned (see Config::setLampType).
-  // Inbound settings_blob writes intentionally do not update it — the
-  // app can read but not write the variant identity.
+  // lampType is firmware-owned (see Config::setLampType). Inbound
+  // settings_blob writes intentionally do not update it; the app can read
+  // but not write the variant identity.
   lamp.name = std::string(lampNode["name"] | "stray");
   lamp.brightness = lampNode["brightness"] | 100;
   std::string password = std::string(lampNode["password"] | "");
@@ -99,11 +97,10 @@ Config::Config(Preferences* inPrefs) {
   base.ac = baseNode["ac"] | 0;
   base.bpp = baseNode["bpp"] | 4;
   if (base.bpp != 3 && base.bpp != 4) {
-    base.bpp = 4;  // defensive: only 3 or 4 valid
+    base.bpp = 4;  // only 3 or 4 are valid strip formats
   }
-  // byteOrder is the source of truth for strip type. When absent (legacy
-  // payloads), default-derive from bpp so behavior is unchanged for
-  // existing lamps.
+  // byteOrder is the source of truth for strip type. When absent, derive
+  // from bpp.
   const char* baseBoCstr = baseNode["byteOrder"] | "";
   base.byteOrder = baseBoCstr;
   if (base.byteOrder.empty()) {
@@ -168,24 +165,19 @@ Config::Config(Preferences* inPrefs) {
       expr.intervalMin = exprNode["intervalMin"] | 60;
       expr.intervalMax = exprNode["intervalMax"] | 900;
       expr.target = exprNode["target"] | 3;
-      // (Refactor 2026-06-13: disabledDuringWispOverride parse removed —
-      // now a pure type-property on the Expression subclass; nothing to
-      // load from NVS. Old NVS blobs with the key are tolerated; the
-      // skip-list below drops it from the generic parameter loop so it
-      // isn't accidentally captured as a parameter value.)
-      // Load generic parameters
+      // disabledDuringWispOverride is a pure type-property, not loaded from
+      // NVS. The skip-list below drops it so a stale NVS key isn't captured
+      // as a generic parameter value.
       for (JsonPair kv : exprNode) {
         const char* key = kv.key().c_str();
         std::string keyStr(key);
 
-        // Skip common fields we've already handled
         if (keyStr == "type" || keyStr == "enabled" || keyStr == "intervalMin" ||
             keyStr == "intervalMax" || keyStr == "target" || keyStr == "colors" ||
             keyStr == "disabledDuringWispOverride") {
           continue;
         }
 
-        // Store the parameter value
         JsonVariant value = kv.value();
         if (value.is<uint32_t>()) {
           expr.setParameter(keyStr, value.as<uint32_t>());
@@ -205,19 +197,16 @@ Config::Config(Preferences* inPrefs) {
     }
   }
 
-  // Load home mode. Legacy NVS may still carry a "password" field — we
-  // silently ignore it (presence-only home mode doesn't store passwords).
+  // Presence-only home mode stores no password; a "password" field in an
+  // older NVS blob is ignored.
   JsonObject homeModeNode = doc["homeMode"];
   if (homeModeNode) {
     homeMode.ssid = std::string(homeModeNode["ssid"] | "");
     homeMode.brightness = homeModeNode["brightness"] | 60;
-    // Migration: lamps configured before `enabled` existed have no
-    // "enabled" key in their NVS-stored JSON. Treat "has SSID" as proxy
-    // for "user wanted home mode on" so they keep working post-update.
+    // Lamps that predate the `enabled` key have no "enabled" in NVS; treat
+    // "has SSID" as the proxy for "home mode on" so they keep working.
     homeMode.enabled = homeModeNode["enabled"] | !homeMode.ssid.empty();
   }
-
-  // (MQTT removed — legacy NVS "mqtt" block is silently ignored.)
 
   // Ensure both color vectors have at least one entry. Empty NVS (or NVS
   // erased / corrupted) returns "{}" with no colors arrays; downstream code
@@ -235,7 +224,7 @@ Config::Config(Preferences* inPrefs) {
     base.ac = 0;
   }
 
-  // Per-peer dispositions live in a separate NVS key — loaded last so the
+  // Per-peer dispositions live in a separate NVS key, loaded last so the
   // main blob's prefs->begin/end pair above doesn't conflict.
   loadDispositionsFromPrefs_();
 };
@@ -249,19 +238,17 @@ void Config::loadDispositionsFromPrefs_() {
   JsonDocument doc;
   if (deserializeJson(doc, json) != DeserializationError::Ok) return;
 
-  // Two-pass load: gather into a fresh vector, then sort once. This is
-  // O(N log N) vs O(N^2) if we used setDisposition() in a loop (each
-  // call would memmove the tail on insert). Reserve to skip reallocation
-  // for typical loads.
+  // Two-pass load: gather into a fresh vector, then sort once. O(N log N)
+  // vs the O(N^2) of calling setDisposition() in a loop (each insert would
+  // memmove the tail). Reserve to skip reallocation for typical loads.
   dispositions_.clear();
   dispositions_.reserve(kDispositionsMax);
   for (JsonPair kv : doc.as<JsonObject>()) {
     if (dispositions_.size() >= kDispositionsMax) break;
     const char* key = kv.key().c_str();
-    // Dispositions are keyed by BD_ADDR. Legacy name-keyed entries
-    // (from older firmware) fail this filter and are silently dropped.
-    // The next disposition write naturally overwrites the NVS blob in
-    // the new shape (no separate migration code path).
+    // Dispositions are keyed by BD_ADDR; non-BD_ADDR keys fail this filter
+    // and are dropped. The next write rewrites the NVS blob in the valid
+    // shape, so no separate migration path is needed.
     if (!isValidBdAddr(key)) continue;
     uint32_t v = kv.value() | (uint32_t)kDispositionDefault;
     if (v < 1) v = 1;
@@ -273,9 +260,8 @@ void Config::loadDispositionsFromPrefs_() {
                const std::pair<std::string, uint8_t>& b) {
               return a.first < b.first;
             });
-  // Dedupe defensively — JSON objects don't have duplicate keys per spec,
-  // but ArduinoJson is permissive on bad input. Last write wins, matching
-  // the prior std::map behaviour.
+  // Dedupe: JSON spec forbids duplicate keys but ArduinoJson is permissive
+  // on bad input. Last write wins.
   auto last = std::unique(
       dispositions_.begin(), dispositions_.end(),
       [](const std::pair<std::string, uint8_t>& a,
@@ -288,11 +274,10 @@ bool Config::persistConfig(const char* via) {
   JsonDocument doc = asJsonDocument();
   String out;
   serializeJson(doc, out);
-  // Match persistDispositions_'s defensive pattern — prefs.begin can fail
-  // when NVS is full or the partition is corrupt; a putString against an
-  // unopened handle silently writes nothing. Skip the write and let the
-  // caller decide (callers today just move on; expression edits stay in
-  // RAM and the next persistConfig attempt may succeed).
+  // prefs.begin can fail when NVS is full or the partition is corrupt; a
+  // putString against an unopened handle silently writes nothing. Skip the
+  // write and let the caller decide (expression edits stay in RAM and the
+  // next persistConfig attempt may succeed).
   if (!prefs->begin("lamp", false)) {
 #ifdef LAMP_DEBUG
     Serial.println("[nvs] prefs.begin failed (persistConfig)");
@@ -377,10 +362,10 @@ bool Config::persistDispositions_() {
 }
 
 uint8_t Config::getDisposition(const std::string& bdAddr) const {
-  // Binary search on the sorted vector. lower_bound returns the first
-  // entry >= bdAddr; we must still compare keys because lower_bound
-  // can land on a strictly-greater neighbour (e.g. looking up "BB..." in
-  // {AA..., CC...} returns the iterator to CC...).
+  // Binary search on the sorted vector. lower_bound returns the first entry
+  // >= bdAddr; the key still needs comparing because lower_bound can land on
+  // a strictly-greater neighbour (looking up "BB..." in {AA..., CC...}
+  // returns the iterator to CC...).
   auto it = std::lower_bound(dispositions_.begin(), dispositions_.end(),
                              bdAddr, dispositionEntryLess);
   if (it == dispositions_.end() || it->first != bdAddr) {
@@ -396,14 +381,12 @@ void Config::setDisposition(const std::string& bdAddr, uint8_t value) {
   auto it = std::lower_bound(dispositions_.begin(), dispositions_.end(),
                              bdAddr, dispositionEntryLess);
   if (it != dispositions_.end() && it->first == bdAddr) {
-    // Update in place — no resize, no shift, no eviction. Preserves sort
-    // order trivially.
+    // Update in place; preserves sort order trivially.
     it->second = value;
   } else {
     if (dispositions_.size() >= kDispositionsMax) {
-      // Evict the lowest-by-key entry to match the historical std::map
-      // iteration-order eviction policy. Disposition tracking is
-      // best-effort at the cap; users typically have <100 paired lamps.
+      // Evict the lowest-by-key entry. Disposition tracking is best-effort
+      // at the cap; users typically have <100 paired lamps.
       dispositions_.erase(dispositions_.begin());
       // The insertion point may have shifted by one after erase; recompute.
       it = std::lower_bound(dispositions_.begin(), dispositions_.end(),
@@ -411,20 +394,17 @@ void Config::setDisposition(const std::string& bdAddr, uint8_t value) {
     }
     dispositions_.insert(it, std::make_pair(bdAddr, value));
   }
-  // Do NOT persist here. The slider-drag UX produced ~20 writes per
-  // peer per drag; multiplied across multiple peers and years of
-  // ownership, the 100k-write-per-page NVS budget is reachable.
-  // The loop drain on Core 1 polls maybeFlushDispositions and writes
-  // once the user stops touching the slider for kDispositionFlushIdleMs.
-  // BLE disconnect path force-flushes via flushDispositionsNow. Factory
-  // reset doesn't need a flush — it erases NVS wholesale.
+  // Do NOT persist here. A slider drag produces ~20 writes per peer; across
+  // peers and years of ownership the 100k-write-per-page NVS budget is
+  // reachable. The Core 1 loop drain (maybeFlushDispositions) writes once
+  // the slider has been idle for kDispositionFlushIdleMs; the BLE disconnect
+  // path force-flushes via flushDispositionsNow.
   dispositionsDebouncer_.markDirty(millis());
 }
 
 String Config::asDispositionsJson() const {
-  // Sorted-vector iteration yields keys in lexicographic order — stable
-  // round-trips across reads (the prior std::map also iterated in sorted
-  // order, so on-disk byte shape is unchanged).
+  // Sorted-vector iteration yields keys in lexicographic order, so reads
+  // round-trip to a stable on-disk byte shape.
   JsonDocument doc;
   for (const auto& kv : dispositions_) {
     doc[kv.first.c_str()] = kv.second;
@@ -441,17 +421,16 @@ bool Config::setDispositionsFromJson(const char* json, size_t len) {
   }
   if (!doc.is<JsonObject>()) return false;
   // Bulk replace: stage into a fresh local vector, then sort once. Same
-  // O(N log N) strategy as loadDispositionsFromPrefs_ — avoids repeated
-  // O(N) shifts that an N-call sequence of setDisposition() would incur.
+  // O(N log N) strategy as loadDispositionsFromPrefs_; avoids the repeated
+  // O(N) shifts of an N-call setDisposition() sequence.
   std::vector<std::pair<std::string, uint8_t>> next;
   next.reserve(kDispositionsMax);
   for (JsonPair kv : doc.as<JsonObject>()) {
     if (next.size() >= kDispositionsMax) break;
     const char* key = kv.key().c_str();
     // BD_ADDR-only keys. Reject anything that doesn't look like
-    // "AA:BB:CC:DD:EE:FF" — covers the edge case of a stale app writing
-    // a name-keyed map, plus any malformed user input via reverse-engineered
-    // BLE write paths.
+    // "AA:BB:CC:DD:EE:FF" (a stale app writing a name-keyed map, or
+    // malformed input via reverse-engineered BLE write paths).
     if (!isValidBdAddr(key)) continue;
     uint32_t v = kv.value() | (uint32_t)kDispositionDefault;
     if (v < 1) v = 1;
@@ -469,11 +448,11 @@ bool Config::setDispositionsFromJson(const char* json, size_t len) {
          const std::pair<std::string, uint8_t>& b) { return a.first == b.first; });
   next.erase(last, next.end());
   dispositions_ = std::move(next);
-  // Defer persistence. CHAR_SOCIAL_DISPOSITIONS bulk writes
-  // arrive on every slider drag from the app, each re-serialising the
-  // full blob — the worst case for NVS wear. The Core 1 loop drain
-  // (maybeFlushDispositions) commits once idle; the BLE onDisconnect
-  // post forces a synchronous commit when the phone walks away.
+  // Defer persistence. CHAR_SOCIAL_DISPOSITIONS bulk writes arrive on every
+  // slider drag, each re-serialising the full blob (worst case for NVS
+  // wear). The Core 1 loop drain (maybeFlushDispositions) commits once idle;
+  // the BLE onDisconnect post forces a synchronous commit when the phone
+  // walks away.
   dispositionsDebouncer_.markDirty(millis());
   return true;
 }
@@ -481,8 +460,8 @@ bool Config::setDispositionsFromJson(const char* json, size_t len) {
 void Config::maybeFlushDispositions(uint32_t nowMs) {
   if (!dispositionsDebouncer_.shouldFlush(nowMs)) return;
   // Only clear the debouncer on a successful write; on failure leave it
-  // dirty so the next flush attempt retries (safer default — the user's
-  // slider input has nowhere else to go).
+  // dirty so the next flush attempt retries (the user's slider input has
+  // nowhere else to go).
   if (persistDispositions_()) {
     dispositionsDebouncer_.clear();
   }
@@ -519,8 +498,8 @@ JsonDocument Config::asJsonDocument() {
   for (int i = 0; i < base.colors.size(); i++) {
     baseColorsNode[i] = colorToHexString(base.colors[i]);
   }
-  // Positional uint8 array, same shape as asBaseJson — keeps the on-disk
-  // NVS format consistent with the BLE per-section read.
+  // Positional uint8 array, same shape as asBaseJson; keeps the on-disk NVS
+  // format consistent with the BLE per-section read.
   JsonArray baseKnockoutNode = baseNode["knockout"].to<JsonArray>();
   for (int i = 0; i < base.knockoutPixels.size(); i++) {
     baseKnockoutNode.add((int)base.knockoutPixels[i]);
@@ -535,7 +514,6 @@ JsonDocument Config::asJsonDocument() {
     shadeColorsNode[i] = colorToHexString(shade.colors[i]);
   }
 
-  // Serialize expressions
   JsonArray expressionsNode = doc["expressions"].to<JsonArray>();
   for (const auto& expr : expressions.expressions) {
     JsonObject exprNode = expressionsNode.add<JsonObject>();
@@ -544,8 +522,6 @@ JsonDocument Config::asJsonDocument() {
     exprNode["intervalMin"] = expr.intervalMin;
     exprNode["intervalMax"] = expr.intervalMax;
     exprNode["target"] = expr.target;
-    // disabledDuringWispOverride is no longer persisted — pure type-property.
-    // Serialize generic parameters
     for (const auto& param : expr.parameters) {
       const std::string& key = param.first;
       const uint32_t& value = param.second;
@@ -582,9 +558,9 @@ String Config::asLampJson() {
   doc["devMode"] = lamp.devMode;
   doc["webappEnabled"] = lamp.webappEnabled;
   doc["socialMode"] = static_cast<uint8_t>(lamp.socialMode);
-  // Firmware identity (packed semver + release channel string). Constant
-  // at boot, so no extra invalidation hook is needed — the existing lamp
-  // section cache picks these up the first time it's built.
+  // Firmware identity (packed semver + release channel string). Constant at
+  // boot, so no extra invalidation hook is needed; the lamp section cache
+  // picks these up the first time it's built.
   doc["fwVersion"] = FIRMWARE_VERSION;
   doc["fwChannel"] = FIRMWARE_CHANNEL_STR;
   // lampType is firmware-owned; the app can read it but settings_blob
@@ -651,7 +627,6 @@ String Config::asExpressionsJson() {
     exprNode["intervalMin"] = expr.intervalMin;
     exprNode["intervalMax"] = expr.intervalMax;
     exprNode["target"] = expr.target;
-    // disabledDuringWispOverride is no longer serialised — pure type-property.
     for (const auto& param : expr.parameters) {
       exprNode[param.first] = param.second;
     }
@@ -675,22 +650,11 @@ String Config::asHomeModeJson() {
   return out;
 }
 
-// ── Per-section JSON cache ───────────────────────────────────────────────
-//
-// Each accessor:
-//   - If the section is clean, returns the existing cached std::string ref
-//     in O(1) — no JsonDocument allocation, no vector walk.
-//   - If dirty, calls the existing asXJson() builder (which itself builds
-//     a JsonDocument + walks colors/knockoutPixels/etc.), copies into the
-//     member std::string, clears the dirty flag.
-//
-// Thread safety: the page-protocol path on Core 0 calls the cached
-// accessors from `PageCtrlCallback::onWrite` (NimBLE host task). Core 1
-// mutates source data via drains and calls `invalidateXSection()` /
-// proactively rebuilds via `ble_control::tick`. The portMUX below
-// serialises the rebuild itself so two cores can't `.assign()` the same
-// string concurrently. Source-data reads inside the rebuild lambda are
-// taken under the same mux so a torn read can't slip into the JSON.
+// Per-section JSON cache accessors. Clean section: return the cached string
+// in O(1). Dirty: rebuild via asXJson(), copy into the member string, clear
+// the flag. The portMUX serialises the rebuild so two cores can't .assign()
+// the same string concurrently, and source-data reads inside the rebuild are
+// taken under it so a torn read can't slip into the JSON.
 static portMUX_TYPE s_cacheMux = portMUX_INITIALIZER_UNLOCKED;
 
 #define LAMP_DEFINE_SECTION_CACHED(NAME, BUILDER)                          \
@@ -744,27 +708,22 @@ void Config::invalidateAllSections() {
 }
 
 void Config::applyDefaults(const Defaults& d) {
-  // Called AFTER Config::Config(Preferences*) loads from NVS so that NVS
-  // values are authoritative and only truly-factory-default fields are
-  // overwritten. Subclass defaults() returns values that are used as
-  // first-boot baselines.
-  //
-  // Name: the Config class default is "stray". If NVS had no name (empty
-  // NVS) the loaded value is still "stray". We replace it with the subclass
-  // preferred name.
+  // Runs AFTER Config::Config(Preferences*) so NVS values are authoritative;
+  // only truly-factory-default fields get the subclass first-boot baseline.
+  // Name: class default is "stray"; empty NVS also loads as "stray", so a
+  // still-"stray" name is replaced with the subclass preferred name.
   if (!d.name.empty() && lamp.name == "stray") {
     lamp.name = d.name;
   }
-  // Colors: apply subclass default when the vector contains only a single
-  // entry that matches either the class-member default or the defensive
-  // white fallback inserted by Config::Config(Preferences*) for unconfigured
-  // lamps (empty NVS). A lamp that has had its colors configured by the user
-  // will have a different color saved in NVS and won't match these guards.
+  // Colors: apply the subclass default only when the vector holds a single
+  // entry matching either the class-member default or the white fallback
+  // that Config::Config inserts for unconfigured lamps (empty NVS). A
+  // user-configured lamp has a different saved color and won't match.
   //
   // Class-member defaults:
   //   BaseSettings:  Color(0x30, 0x07, 0x83, 0x00)
   //   ShadeSettings: Color(0x00, 0x00, 0x00, 0xFF)
-  // Defensive NVS fallback (after empty NVS load): Color{255, 255, 255, 0}
+  // White fallback (after empty NVS load): Color{255, 255, 255, 0}
   static const Color kBaseClassDefault(0x30, 0x07, 0x83, 0x00);
   static const Color kShadeClassDefault(0x00, 0x00, 0x00, 0xFF);
   static const Color kNvsFallback(0xFF, 0xFF, 0xFF, 0x00);
@@ -779,12 +738,9 @@ void Config::applyDefaults(const Defaults& d) {
   base.colorsEditable  = d.baseColorsEditable;
   shade.colorsEditable = d.shadeColorsEditable;
 
-  // Per-surface pixel count. A loaded px of 0 means "unset" — a fresh lamp
-  // (loader early-returned with the class-default 0) or a doc without the
-  // key. Fill those from the variant default; any real stored value wins,
-  // so a configured lamp's px is sacred. (The old guard inferred unset from
-  // magic baseline numbers and clobbered a user who legitimately saved a
-  // value equal to one — that was the "save didn't take" bug.)
+  // Per-surface pixel count. A loaded px of 0 means "unset" (a fresh lamp,
+  // or a doc without the key). Fill those from the variant default; any real
+  // stored value wins, so a configured lamp's px is sacred.
   base.px = resolveConfiguredPx(base.px, d.basePx);
   base.knockoutPixels.resize(base.px, 100);
   shade.px = resolveConfiguredPx(shade.px, d.shadePx);

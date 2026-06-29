@@ -1,45 +1,19 @@
 #pragma once
 
-// Lamp-side OTA state machine. Receives MSG_FW_OFFER/CHUNK/DONE from a
-// wisp (per the canonical wire format in lamp_protocol.hpp), validates,
-// writes chunks to the inactive OTA partition via esp_ota_write_with_offset,
-// verifies the ed25519 signature on the LSIG footer, and reboots into the
-// new image.
+// Lamp-side OTA state machine. Receives MSG_FW_OFFER/CHUNK/DONE, writes chunks
+// to the inactive OTA partition, verifies the ed25519 LSIG-footer signature,
+// and reboots into the new image.
 //
-// Cross-core safety:
+// Cross-core barrier: Core 1 (loop) handles OFFER by erasing the entire image
+// region synchronously, THEN publishing publishedPartition_ and arming the
+// publishedOtaHandle_ gate (release-store). Core 0 (WiFi recv) writes chunks
+// only while the gate reads non-zero (acquire) via a pure esp_partition_write,
+// no erase on the recv path, so a write is sub-millisecond. Abort/teardown
+// disarms the gate (store 0) before nulling the partition. erasedForLen_ holds
+// the erased image length; verifyAndApply rejects a re-OFFER at a different
+// length so a partial image never boots.
 //
-//   - State machine runs on Core 1 (Arduino loop task). On OFFER: pick the
-//     inactive OTA partition, then erase the ENTIRE image region
-//     synchronously (64 KB block erases) BEFORE arming the
-//     publishedOtaHandle_ gate or sending ACCEPT. The sender hasn't been
-//     ACCEPTed, so nothing is in flight during the erase; and the gate is
-//     disarmed, so Core 0 would drop any chunk anyway. Once the erase
-//     succeeds, publish the partition pointer and arm the gate (release-
-//     store). The first ACCEPT goes out synchronously; the remaining four in
-//     the burst are queued for tick() to drain at 400 ms cadence so the loop
-//     task isn't blocked freezing the renderer.
-//   - Chunk writes run on Core 0 (WiFi recv task) via handleChunkOnRecvTask:
-//     read the armed gate (acquire), then a pure esp_partition_write — NO
-//     erase on the recv path. The region was erased upfront, so the
-//     cache+IRQ-off erase stalls that used to overflow the ESP-NOW RX queue
-//     mid-stream are gone; a <=200-byte write is sub-millisecond.
-//   - eraseMux_ (named for history) now guards ONLY the receive bitmap_ RMW
-//     in markChunkReceived against the const accessors (isBitmapFull /
-//     firstMissingChunk). There is no erase on the recv path to serialize.
-//   - On any abort path Core 1 disarms the gate (store 0, so Core 0 drops
-//     chunks), then nulls publishedPartition_ and clears erasedForLen_. The
-//     release-store on disarm pairs with Core 0's acquire-load.
-//   - erasedForLen_ latch: set to the image length only after every block
-//     erase returned ESP_OK. verifyAndApply checks it equals the offered
-//     length before flipping the boot partition, so a re-OFFER at a different
-//     length without re-erasing fails loud instead of booting a partial image.
-//   - On DONE (Core 1): wait for the chunk bitmap to be fully set, disarm the
-//     gate, then verifyAndApply (esp_partition_read + signature verify +
-//     esp_ota_set_boot_partition).
-//
-// Channel mismatch is a SILENT DROP — no ACCEPT, no RESULT — per the locked
-// scope decision. The lamp drops the offer at the handleControlOnLoop path
-// before any side effects.
+// Channel mismatch is a silent drop (no ACCEPT, no RESULT), at handleControlOnLoop.
 
 #include <atomic>
 #include <cstdint>
@@ -56,65 +30,46 @@ namespace lamp {
 
 class ShowReceiver;
 
-// Transport abstraction for outbound MSG_FW_* responses (ACCEPT / REQ /
-// RESULT). FirmwareReceiver doesn't know whether the OTA flow it's
-// servicing came in over ESP-NOW (wisp → lamp mesh) or BLE (app → lamp
-// direct); it just hands a serialized MSG_FW_* frame to its bound
-// transport and asks for the lamp's own MAC for the sourceMac field.
-//
-// Production implementations:
-//   - EspNowFirmwareTransport — wraps ShowReceiver::broadcastRaw, sends
-//     to the mesh on channel LAMP_ESPNOW_CHANNEL. Used for the existing
-//     wisp-driven OTA path.
-//   - BleFirmwareTransport — notifies on CHAR_FW_STATUS to the BLE
-//     connection that initiated the flow. Used for app-driven BLE OTA.
-//
-// Tests inject a MockFirmwareTransport that records calls for assertion.
+// Transport abstraction for outbound MSG_FW_* responses (ACCEPT/REQ/RESULT).
+// FirmwareReceiver hands a serialized frame to its bound transport without
+// knowing whether the flow came in over ESP-NOW (mesh) or BLE (app direct).
+// Production: EspNowFirmwareTransport (wraps ShowReceiver::broadcastRaw) and
+// BleFirmwareTransport (notifies CHAR_FW_STATUS). Tests inject a mock.
 class FirmwareTransport {
  public:
   virtual ~FirmwareTransport() = default;
 
-  // Snapshot the lamp's own 6-byte MAC into out[6]. Called once during
-  // FirmwareReceiver::begin() to populate the sourceMac field on every
-  // outbound ACCEPT/REQ/RESULT.
+  // Snapshot the lamp's own 6-byte MAC into out[6]. Called once during begin()
+  // to populate sourceMac on every outbound ACCEPT/REQ/RESULT.
   virtual void getMyMac(uint8_t out[6]) const = 0;
 
-  // Send a pre-serialized MSG_FW_* frame. Returns true if the send was
-  // accepted (queued / notified successfully).
+  // Send a pre-serialized MSG_FW_* frame. Returns true if queued/notified.
   virtual bool sendFrame(const uint8_t* data, size_t len) = 0;
 };
 
-// Where did this control frame come from? Used by the FirmwareReceiver
-// busy-check to enforce single-source-at-a-time semantics — a mesh OTA
-// from the wisp can't be interrupted mid-flow by an app pushing over BLE
-// (or vice versa), and an idempotent re-offer must come from the SAME
-// transport + SAME source as the current flow to be accepted.
+// Source of a control frame, for the single-source-at-a-time busy check: a mesh
+// OTA can't be interrupted mid-flow by a BLE one (or vice versa), and an
+// idempotent re-offer must come from the same transport + source.
 enum class FirmwareTransportKind : uint8_t {
-  EspNow = 0,  // mesh — sourceMac identifies the wisp
-  Ble    = 1,  // BLE  — bleConnHandle identifies the app's connection
+  EspNow = 0,  // mesh: sourceMac identifies the wisp
+  Ble    = 1,  // BLE: bleConnHandle identifies the app's connection
 };
 
-// Slot payload that ShowReceiver's WiFi recv task posts (via
-// postPendingFirmwareControl) and standard_lamp's Core 1 drain consumes.
-// Discriminated by msgType (MSG_FW_OFFER / MSG_FW_DONE).
+// Slot posted by ShowReceiver's WiFi recv task (postPendingFirmwareControl) and
+// consumed by Core 1's drain. Discriminated by msgType.
 struct PendingFirmwareControl {
   uint8_t msgType;          // MSG_FW_OFFER or MSG_FW_DONE
   uint8_t sourceMac[6];
   uint8_t targetMac[6];
   uint16_t seq;
-  // Wire-format version of the incoming frame (data[2]). The receiver
-  // captures this on OFFER and replies (ACCEPT/REQ/RESULT) at the same
-  // version — matching the peer's protocol so v0x04 distributors get
-  // v0x04 responses from a v0x05-emitting receiver.
+  // Wire version of the incoming frame (data[2]), captured on OFFER and used
+  // for every reply so a peer gets responses at its own protocol version.
   uint8_t wireVersion = 0;
-  // Transport context — populated by whichever dispatcher posted this
-  // slot. Mesh path sets EspNow + bleConnHandle=0; BLE path sets Ble +
-  // bleConnHandle=<the writer's NimBLE conn handle>.
+  // Set by the posting dispatcher: mesh path EspNow + bleConnHandle=0; BLE path
+  // Ble + the writer's NimBLE conn handle.
   FirmwareTransportKind transportKind = FirmwareTransportKind::EspNow;
   uint16_t bleConnHandle = 0;
-  // Union by msgType. Keeping struct flat (not actually a union) costs a
-  // handful of bytes on the wire vs. an anonymous union, and trivially-
-  // copyable types stay PendingTypedSlot-friendly.
+  // Flat (not a union) to stay trivially-copyable for PendingTypedSlot.
   struct {
     uint32_t version;
     uint32_t totalLen;
@@ -137,31 +92,25 @@ struct PendingFirmwareControl {
 void postPendingFirmwareControl(const PendingFirmwareControl& src);
 
 // FS-image OTA reuses this receiver's transfer machinery (upfront erase, the
-// Core0/Core1 write barrier, the chunk bitmap + gap-fill REQ) but targets the
-// spiffs partition with a different verify + accept rule and the MSG_FS_*
-// frames. The firmware-specific behavior is the default (fsHooks_ == nullptr);
-// the FS receiver instance injects these hooks at begin(). Plain function
-// pointers (not std::function) keep this native-compilable and heap-free; the
-// partition is passed as void* because esp_partition_t is ESP-only and this
-// header also compiles host-side.
+// Core0/Core1 write barrier, chunk bitmap + gap-fill REQ) but targets the
+// spiffs partition with a different verify/accept rule and MSG_FS_* frames.
+// nullptr (default) = firmware OTA; the FS receiver instance injects these at
+// begin(). Function pointers (not std::function) keep this heap-free and
+// native-compilable; partition is void* since esp_partition_t is ESP-only.
 struct FsReceiverHooks {
   // The spiffs partition to write into (really const esp_partition_t*).
   const void* (*partition)();
   // Accept a fresh offer? FS rule: offer.version == FIRMWARE_VERSION AND the
-  // offered digest prefix differs from our local FS digest. (Channel /
-  // chunkSize / busy are handled by the receiver before this is consulted.)
+  // offered digest differs from our local FS digest. (Channel/chunkSize/busy
+  // are checked by the receiver first.)
   bool (*shouldAccept)(uint32_t offerVersion, const uint8_t* offerDigestPrefix);
-  // Verify the fully-written partition (mount + manifest digest + ed25519 +
-  // version match). Returns Success or an FS failure code. No commit step —
-  // the receiver reboots into the freshly-written image.
+  // Verify the written partition (mount + manifest digest + ed25519 + version).
+  // Returns Success or an FS failure code; no commit step.
   lamp_protocol::FwResultStatus (*verify)(const void* partition,
                                           uint32_t expectedVersion);
-  // Post-verify apply for FS. Called instead of the firmware path's
-  // esp_restart() on success: the FS image is read-only at runtime (only the
-  // onboarding webapp reads it, and only while it's down), so there's no need
-  // to reboot — remount SPIFFS + recompute the local digest so the new UI is
-  // live and HELLO advertises the new fingerprint. nullptr → fall back to
-  // reboot.
+  // Post-verify apply for FS, in place of the firmware path's esp_restart():
+  // the FS image is read-only at runtime, so remount SPIFFS + recompute the
+  // local digest instead of rebooting. nullptr -> fall back to reboot.
   void (*finalize)();
   uint8_t acceptType;
   uint8_t reqType;
@@ -170,10 +119,9 @@ struct FsReceiverHooks {
 
 class FirmwareReceiver {
  public:
-  // Reciever lifecycle states. STREAMING is the only state in which
-  // handleChunkOnRecvTask does anything; every other state drops chunks
-  // silently. Transitions happen on Core 1 inside tick() or
-  // handleControlOnLoop().
+  // STREAMING is the only state in which handleChunkOnRecvTask writes; every
+  // other state drops chunks silently. Transitions on Core 1 (tick() /
+  // handleControlOnLoop()).
   enum class State : uint8_t {
     Idle             = 0,
     Streaming        = 1,  // onOfferOnLoop erased + armed the gate; chunks flowing
@@ -182,75 +130,54 @@ class FirmwareReceiver {
     Failed           = 4,  // terminal error; reset to Idle on next tick
   };
 
-  // Wire up. The receiver can service OTA flows over both ESP-NOW (wisp →
-  // lamp via the mesh) and BLE (app → lamp direct) simultaneously, with
-  // the single-source mutex enforcing only one active flow at a time.
-  // `meshTransport` is required; `bleTransport` is optional (pass nullptr
-  // if BLE OTA isn't wired in this build, e.g. a wisp using only the mesh
-  // path). Caller retains ownership.
-  //
-  // Responses are routed per-call:
-  //   - ACCEPT goes back to the OFFER's source transport (ctrl.transportKind)
-  //   - REQ + RESULT during streaming go to the in-flight flow's transport
-  //     (activeTransportKind_, captured at offer-accept time)
+  // Services OTA over ESP-NOW (mesh) and BLE (app direct) simultaneously, with
+  // the single-source mutex enforcing one active flow. meshTransport required;
+  // bleTransport optional (nullptr when BLE OTA isn't wired). Caller retains
+  // ownership. ACCEPT routes to the OFFER's source transport; REQ + RESULT
+  // route to the in-flight flow's transport (captured at offer-accept time).
   void begin(FirmwareTransport* meshTransport,
              FirmwareTransport* bleTransport = nullptr);
 
-  // Late-bind the BLE transport. The BLE GATT server is set up by
-  // ble_control::start() AFTER firmwareReceiver.begin(), so its transport
-  // adapter can't be passed at begin() time. ble_control::setFirmwareReceiver
-  // calls this once the GATT chars are created. Caller retains ownership.
+  // Late-bind the BLE transport: the GATT server is set up by
+  // ble_control::start() AFTER begin(), so it can't be passed at begin() time.
   void setBleTransport(FirmwareTransport* bleTransport) {
     bleTransport_ = bleTransport;
   }
 
-  // Inject FS-image OTA behavior (see FsReceiverHooks). nullptr (the default)
-  // = firmware OTA. Set once by fs_ota::begin() on the FS receiver instance;
-  // never set on the firmware receiver, so the firmware path is unchanged.
+  // Inject FS-image OTA behavior (see FsReceiverHooks). nullptr (default) =
+  // firmware OTA; set only on the FS receiver instance by fs_ota::begin().
   void setFsHooks(const FsReceiverHooks* hooks) { fsHooks_ = hooks; }
 
-  // Cross-OTA guard. Returns true if the *other* OTA path (FS vs firmware) is
-  // mid-flow — they share the erase + quiet-mode machinery, so only one may
-  // run at a time. nullptr (default) = no cross-check. fs_ota::begin() wires
-  // each receiver's guard to the other path's instances.
+  // Cross-OTA guard: true if the OTHER OTA path (FS vs firmware) is mid-flow;
+  // they share the erase + quiet-mode machinery, so only one runs at a time.
+  // nullptr (default) = no cross-check. Wired by fs_ota::begin().
   void setBusyGuard(bool (*fn)()) { busyGuard_ = fn; }
 
-  // Called from main loop on Core 1. Drains internal control queue,
-  // runs stall/timeout watchdogs, generates MSG_FW_REQ on gaps. Cheap
-  // when state == Idle.
+  // Core 1 main loop. Drains the control queue, runs stall/timeout watchdogs,
+  // generates MSG_FW_REQ on gaps. Cheap when Idle.
   void tick(uint32_t nowMs);
 
-  // Called from standard_lamp's Core 1 drain after pulling a
-  // PendingFirmwareControl out of the pending slot. Dispatches by
-  // msgType to the appropriate offer/done handler.
+  // Core 1 drain entry: dispatches a PendingFirmwareControl by msgType to the
+  // offer/done handler.
   void handleControlOnLoop(const PendingFirmwareControl& ctrl);
 
-  // Called DIRECTLY from ShowReceiver's WiFi recv task (Core 0). Writes
-  // the chunk payload to flash via esp_ota_write_with_offset and marks
-  // the chunk-received bit in the bitmap. Bounded IO + bitmap set, no
-  // heap, no JSON, no FreeRTOS blocking. Drops the chunk silently when
-  // the receiver isn't in Streaming state (e.g. between Accepted and
-  // first chunk after a state transition).
+  // Called DIRECTLY from the WiFi recv task (Core 0). Writes the chunk to flash
+  // and marks its bitmap bit. Bounded IO + bitmap set, no heap/JSON/blocking.
+  // Drops the chunk silently outside Streaming.
   void handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk& p);
 
-  // Read-only state accessors (for tests + diagnostic logging).
   State state() const { return state_; }
 
-  // True while an OTA session is mid-flow (anywhere between accepting
-  // an OFFER and finishing verify/apply). Used by wifi.cpp to gate
-  // periodic background scans so the radio stays pinned to
-  // LAMP_ESPNOW_CHANNEL while ESP-NOW unicast in both directions is
-  // load-bearing for ACCEPT/REQ/CHUNK/RESULT delivery.
+  // True while a session is mid-flow (OFFER accepted through verify/apply).
+  // wifi.cpp gates background scans on this so the radio stays pinned to
+  // LAMP_ESPNOW_CHANNEL while ESP-NOW unicast carries ACCEPT/REQ/CHUNK/RESULT.
   bool isInProgress() const {
     return state_ != State::Idle && state_ != State::Failed;
   }
 
-  // Snapshot the active OTA peer's MAC into out[6]. Returns true when an
-  // ESP-NOW OTA flow is in progress (so the OTA quiet-mode visual
-  // indicator can look up the peer's base color from NearbyLamps).
-  // Returns false for BLE OTA flows — the chunk source is the phone,
-  // not a mesh peer; no lookup possible — and when isInProgress() is
-  // false. Read-only; safe from the loop task.
+  // Snapshot the active OTA peer's MAC into out[6]. True only for an in-flight
+  // ESP-NOW flow (the indicator looks up the peer's base color); false for BLE
+  // (chunk source is the phone) and when not in progress.
   bool getPeerMac(uint8_t out[6]) const {
     if (!isInProgress()) return false;
     if (activeTransportKind_ != FirmwareTransportKind::EspNow) return false;
@@ -261,92 +188,60 @@ class FirmwareReceiver {
   // Total chunks expected for the in-flight OFFER. Zero outside Streaming.
   uint16_t totalChunks() const { return offerTotalChunks_; }
 
-  // Count of chunks received so far in the current OTA. Resets to 0 on
-  // each new OFFER. Diagnostic counter — incremented by Core 0 on every
-  // landed chunk; reads from Core 1 are coherent enough for a visual
-  // progress bar (a one-frame stale read just lags one tick).
-  // Monotonic progress for the OTA indicator — the receiver's analog of the
-  // distributor's send-side high-water. Tracks UNIQUE chunks (uniqueChunks_),
-  // not total writes: the dup-heavy recovery tail re-writes already-received
-  // chunks, and feeding the bar raw writes races it past 100% (early
-  // saturation + freeze/jump). uniqueChunks_ resets to 0 on every (re-)OFFER,
-  // so a stalled session that aborts + re-offers the SAME image would collapse
-  // the bar; the high-water only rises, and is reset only for a genuinely
-  // different image (see onOfferOnLoop).
+  // Monotonic progress for the OTA indicator (receiver-side high-water). Tracks
+  // UNIQUE chunks, not total writes: the dup-heavy recovery tail re-writes
+  // received chunks, and feeding the bar raw writes races it past 100%. Only
+  // rises; reset only for a genuinely different image (see onOfferOnLoop).
   uint32_t recvChunksCount() const { return recvProgress_.peek(); }
 
  private:
-  // --- Helpers -----------------------------------------------------------
-
-  // Offer handling — called from handleControlOnLoop on Core 1.
+  // Offer handling, called from handleControlOnLoop on Core 1.
   void onOfferOnLoop(const PendingFirmwareControl& ctrl, uint32_t nowMs);
   void onDoneOnLoop(const PendingFirmwareControl& ctrl, uint32_t nowMs);
 
-  // Bitmap helpers. The bitmap tracks one bit per expected chunk; sized
-  // off the OFFER's totalChunks (or derived from totalLen/chunkSize).
+  // One bit per expected chunk, sized off the OFFER's totalChunks.
   void resetBitmap(size_t totalChunks);
   void markChunkReceived(uint16_t chunkIdx);
   bool isBitmapFull() const;
-  // Returns the first chunkIdx that is NOT received, or UINT16_MAX if
-  // the bitmap is fully set. Linear scan; the bitmap is typically only
-  // 1-2 KB so this is fast (~1.6 ms worst case at 8000 chunks).
+  // First un-received chunkIdx, or UINT16_MAX if full. Linear scan over a
+  // 1-2 KB bitmap (~1.6 ms worst case at 8000 chunks).
   uint16_t firstMissingChunk() const;
-  // Returns the length of the contiguous run of missing chunks starting
-  // at firstMissing. Used to batch a single REQ for a whole run of
-  // holes — single REQ for count=M consecutive misses instead of M
-  // round trips at count=1. Capped at kMaxReqRunChunks so an early-
-  // stream "everything missing" run doesn't dwarf forward progress.
+  // Length of the contiguous missing run at firstMissing, so one REQ batches a
+  // whole run of holes instead of one round trip per chunk. Capped at
+  // kMaxReqRunChunks.
   uint16_t firstMissingRunLen(uint16_t firstMissing) const;
-  // Cap on the per-REQ run length. One REQ spans first..last-missing within
-  // this many chunks (firstMissingRunLen), so scattered single-chunk drops
-  // recover in one round trip instead of one-chunk-per-round.
-  //
-  // 20 = one flash sector. cap=1 does NOT converge under real ESP-NOW loss —
-  // the receiver claws holes back one at a time and the session times out
-  // before the bitmap fills (observed on flora). The old upper bound was the
-  // JIT erase: a run spanning multiple sectors stalled Core 0 (cache+IRQs off)
-  // long enough to overflow the RX queue mid-erase. Upfront-erase removes that
-  // stall, so widening this is now safe and is the #18 recovery lever — it
-  // stays at 20 (one sector) until that's stability-tested.
+  // Cap on the per-REQ run length so scattered drops recover in one round trip.
+  // cap=1 does NOT converge under real ESP-NOW loss (session times out before
+  // the bitmap fills). 20 = one flash sector; held here until a wider value is
+  // stability-tested.
   static constexpr uint16_t kMaxReqRunChunks = 20;
 
-  // Transmit helpers. All FW_* sends route through `transport_->sendFrame`.
-  // For the ESP-NOW transport, that's `broadcastRaw` (wisp filters via
-  // addressedToUs); for the BLE transport, it's a notify on the firmware-
-  // status characteristic to the originating connection.
+  // All FW_* sends route through transport_->sendFrame (ESP-NOW broadcastRaw or
+  // a BLE notify on the firmware-status characteristic).
   bool sendAccept(const PendingFirmwareControl& ctrl,
                   lamp_protocol::FwAcceptStatus status);
   bool sendReq(uint16_t firstChunkIdx, uint16_t chunkCount,
                lamp_protocol::FwReqReason reason);
   bool sendResult(lamp_protocol::FwResultStatus status, uint8_t detail);
 
-  // Abort path — clears published otaHandle, drains briefly, aborts the
-  // OTA. Safe to call from Core 1 only.
+  // Clears the published handle, drains briefly, aborts the OTA. Core 1 only.
   void abortOta();
 
-
-  // Run the verify + apply sequence. Called on DONE arrival with full
-  // bitmap. Reads the partition back into a buffer (via
-  // esp_partition_read), parses LSIG footer, verifies signature, sets
-  // boot partition, and triggers esp_restart. Returns the RESULT status
-  // code (Success on full success, or the first failure encountered).
+  // Verify + apply, on DONE with a full bitmap: read the partition back, parse
+  // the LSIG footer, verify the signature, set the boot partition, esp_restart.
+  // Returns Success or the first failure encountered.
   lamp_protocol::FwResultStatus verifyAndApply();
 
-  // Look up the FirmwareTransport instance bound to a given kind. Returns
-  // nullptr if that transport wasn't wired at begin() time.
+  // Transport for a kind, or nullptr if it wasn't wired at begin().
   FirmwareTransport* transportForKind(FirmwareTransportKind kind) const {
     if (kind == FirmwareTransportKind::Ble) return bleTransport_;
     return meshTransport_;
   }
 
-
-  // --- State -------------------------------------------------------------
-
   FirmwareTransport* meshTransport_ = nullptr;
   FirmwareTransport* bleTransport_  = nullptr;
 
-  // FS-image OTA hooks. nullptr = firmware OTA (default, firmware path
-  // unchanged). Set only on the FS receiver instance by fs_ota::begin().
+  // nullptr = firmware OTA (default). Set on the FS receiver by fs_ota::begin().
   const FsReceiverHooks* fsHooks_ = nullptr;
 
   // Cross-OTA busy guard (see setBusyGuard). nullptr = no cross-check.
@@ -354,19 +249,14 @@ class FirmwareReceiver {
 
   State state_ = State::Idle;
 
-  // Snapshot of the in-flight OFFER. Set in onOfferOnLoop;
-  // referenced for the duration of Streaming + Verify.
+  // Snapshot of the in-flight OFFER, set in onOfferOnLoop.
   uint8_t  wispMac_[6] = {0};      // sourceMac of the OFFER (target of our ACCEPT/REQ/RESULT)
   uint8_t  myMac_[6]   = {0};      // our MAC (sourceMac of ACCEPT/REQ/RESULT)
-  // Active-flow transport context. Used by the onOfferOnLoop busy-check
-  // to distinguish "same source re-offering" (idempotent ACCEPT) from
-  // "different source trying to start a new OTA while one is in flight"
-  // (DeclineBusy). Set at offer-accept time; cleared by abortOta / on
-  // transition back to Idle.
+  // Distinguishes a same-source re-offer (idempotent ACCEPT) from a different
+  // source starting an OTA mid-flow (DeclineBusy). Set at offer-accept time.
   FirmwareTransportKind activeTransportKind_ = FirmwareTransportKind::EspNow;
-  // Wire-format version of the incoming OFFER (data[2] of the frame).
-  // Used as the wire version for every outbound ACCEPT/REQ/RESULT in
-  // this session so we reply at the peer's protocol version.
+  // Wire version of the OFFER, used for every reply so we answer at the peer's
+  // protocol version.
   uint8_t activeWireVersion_ = lamp_protocol::PROTOCOL_VERSION_EMIT;
   uint16_t activeBleConnHandle_ = 0;
   uint32_t offerVersion_ = 0;
@@ -377,124 +267,79 @@ class FirmwareReceiver {
   // Sequence counters for our outbound FW frames (ACCEPT/REQ/RESULT).
   uint16_t fwOutSeq_ = 0;
 
-  // Chunk-received bitmap. One bit per chunk; bit set means received.
-  // Backed by std::vector<uint8_t> sized to ceil(totalChunks/8).
+  // One bit per chunk (set = received), ceil(totalChunks/8).
   std::vector<uint8_t> bitmap_;
   size_t bitmapTotalChunks_ = 0;
 
-  // Timeouts:
-  //   lastChunkMs_       — wall-clock of last successful chunk write
-  //                        (drives stall-REQ; failed writes must trigger REQ)
-  //   lastChunkSeenMs_   — wall-clock of last chunk that arrived at all,
-  //                        irrespective of write outcome (drives the
-  //                        no-progress abort; a stream where writes fail
-  //                        is NOT a session-dead condition — chunks are
-  //                        still flowing and the stall-REQ will recover)
-  //   lastReqMs_         — wall-clock of last MSG_FW_REQ sent (rate-limit)
-  //   streamingStartMs_  — wall-clock when we entered Streaming (60s budget)
+  //   lastChunkMs_       last successful chunk write (drives stall-REQ)
+  //   lastChunkSeenMs_   last chunk to arrive regardless of write outcome
+  //                      (drives the no-progress abort; failed writes still
+  //                      flow chunks and the stall-REQ recovers them)
+  //   lastReqMs_         last MSG_FW_REQ sent (rate-limit)
+  //   streamingStartMs_  entered Streaming (60s budget)
   uint32_t lastChunkMs_     = 0;
   uint32_t lastChunkSeenMs_ = 0;
   uint32_t lastReqMs_       = 0;
   uint32_t streamingStartMs_ = 0;
 
-  // Queued ACCEPT retries. The first ACCEPT is sent synchronously from
-  // onOfferOnLoop; the rest are scheduled here for tick() to drain so
-  // the loop task isn't blocked for ~1.6 s freezing the renderer
-  // between sleeps. Quenched as soon as a chunk arrives — that's
-  // proof the ACCEPT got through, no point burning more airtime.
+  // Queued ACCEPT retries: the first ACCEPT is synchronous, the rest drain in
+  // tick() so the loop task isn't blocked ~1.6s. Quenched once a chunk arrives
+  // (proof the ACCEPT got through).
   PendingFirmwareControl pendingAcceptCtrl_ = {};
   uint8_t                pendingAcceptCount_ = 0;
   uint32_t               nextAcceptMs_       = 0;
 
-  // Diagnostic: Core 0 increments on every received chunk; Core 1's tick
-  // periodically logs. Compares to the wisp's stream-progress log to
-  // localise loss (RF vs. wisp-side throughput).
+  // Diagnostic: Core 0 increments per chunk, Core 1 logs periodically; compared
+  // to the sender's progress log to localise loss (RF vs sender throughput).
   uint32_t recvChunksCount_  = 0;
   uint32_t recvChunksLastLog_ = 0;
-  // Unique chunks landed this image (0→1 bitmap transitions). Feeds the
-  // progress high-water; bounded by totalChunks, unlike recvChunksCount_.
+  // Unique chunks this image (0->1 bitmap transitions); feeds the high-water,
+  // bounded by totalChunks unlike recvChunksCount_.
   uint32_t uniqueChunks_     = 0;
 
-  // Monotonic progress for the indicator (see recvChunksCount()). Survives
-  // session restarts; progressForLen_ tracks the image it was built for so a
-  // genuinely different image resets it.
+  // Monotonic progress for the indicator (see recvChunksCount()).
+  // progressForLen_ tracks the image it was built for so a different image resets it.
   HighWaterMark recvProgress_;
   uint32_t      progressForLen_ = 0;
 
-  // Cross-core-published "armed" gate. Non-zero = streaming is armed, the
-  // partition has been pre-erased, and Core 0's chunk handler may write
-  // directly via esp_partition_write(publishedPartition_, ...). Zero =
-  // no OTA in progress; Core 0 drops the chunk silently.
-  //
-  // Per the reconciliation doc's cross-core invariant section:
-  //   - Core 1 writes via store(1, relaxed) after the manual pre-erase
-  //     completes (which sets publishedPartition_ as well).
-  //   - Core 0 reads via load(relaxed); 0 → drop the chunk silently.
-  //   - Core 1 store(0, relaxed) BEFORE clearing publishedPartition_
-  //     prevents a late Core 0 write from racing the teardown.
+  // Cross-core armed gate. Non-zero = partition pre-erased and Core 0 may write
+  // via esp_partition_write(publishedPartition_, ...); zero = drop the chunk.
+  // Core 1 stores 1 after the pre-erase (and after setting publishedPartition_),
+  // and stores 0 BEFORE clearing publishedPartition_ so a late Core 0 write
+  // can't race teardown.
   std::atomic<uint32_t> publishedOtaHandle_{0};
 
-  // Counter of in-flight esp_partition_write calls on Core 0. Incremented
-  // by handleChunkOnRecvTask BEFORE the armed-gate check and decremented
-  // AFTER the write (or on any early-return inside the function). Core 1's
-  // verifyAndApply spins-with-yield until this drops to 0 before reading
-  // back from the partition — guarantees no Core 0 write is still landing
-  // bytes when verify starts the sha256 stream. Without this barrier,
-  // exchange(0) on publishedOtaHandle_ is atomic but NOT synchronous:
-  // Core 0 could have read armed=nonzero microseconds earlier, started
-  // its esp_partition_write, and not yet completed when Core 1's
-  // esp_partition_read begins — verify reads stale bytes, sigverify
-  // FAILS even though every chunk was written successfully.
+  // In-flight Core 0 esp_partition_write count. Incremented before the
+  // armed-gate check, decremented after the write (or any early return). Core 1
+  // verifyAndApply spins-with-yield until it hits 0 before reading the partition
+  // back: exchange(0) on the gate is atomic but not synchronous, so a write that
+  // started microseconds earlier could still be landing bytes and make verify
+  // read stale data and fail sigverify.
   std::atomic<int> writesInFlight_{0};
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-  // Active OTA partition pointer, accessed by both Core 1 (set during
-  // OFFER handling, cleared during abort/finalize) and Core 0 (read by
-  // handleChunkOnRecvTask to target esp_partition_write). Aligned 32-bit
-  // load/stores on Xtensa are atomic; the publishedOtaHandle_ gate above
-  // provides the happens-before ordering — Core 0 never reads this
-  // pointer unless publishedOtaHandle_ != 0, and Core 1 always zeroes
-  // publishedOtaHandle_ before nulling this pointer.
+  // Active OTA partition. Core 1 sets/clears it; Core 0 reads it to target
+  // esp_partition_write. Aligned 32-bit access is atomic on Xtensa, and the
+  // publishedOtaHandle_ gate orders it (Core 0 reads only when the gate is
+  // non-zero; Core 1 zeroes the gate before nulling this).
   std::atomic<const esp_partition_t*> publishedPartition_{nullptr};
 
-  // Guards the receive bitmap_ RMW (markChunkReceived) against the const
-  // accessors (isBitmapFull / firstMissingChunk) — named eraseMux_ for
-  // history; there is no erase on the recv path anymore (full-upfront erase).
-  // mutable so const accessors (isBitmapFull / firstMissingChunk) can
-  // take the spinlock around their reads. Synchronization is a logical
-  // no-op WRT observed value — it just makes the read coherent against
-  // Core 0's concurrent RMW.
+  // Guards the bitmap_ RMW (markChunkReceived) against the const accessors
+  // (isBitmapFull / firstMissingChunk); mutable so they can take it around
+  // their reads. There is no erase on the recv path (full upfront erase).
   mutable portMUX_TYPE eraseMux_ = portMUX_INITIALIZER_UNLOCKED;
 
-  // Erase-coverage latch: set to offerTotalLen_ after the full upfront
-  // partition erase succeeds in onOfferOnLoop, checked in verifyAndApply,
-  // cleared in abortOta. A mismatch at verify = a re-OFFER changed the image
-  // length without re-erasing → fail loud, don't flip to a partial image.
+  // Set to offerTotalLen_ after the upfront erase succeeds, checked in
+  // verifyAndApply, cleared in abortOta. A mismatch means a re-OFFER changed
+  // the image length without re-erasing: fail loud, don't flip a partial image.
   uint32_t erasedForLen_ = 0;
 #endif
 
-  // OFFER/DONE control intake uses standard_lamp's PendingTypedSlot<
-  // PendingFirmwareControl> + postPendingFirmwareControl forwarder, in
-  // line with the other Core 0 → Core 1 typed slots. The Core 1 drain in
-  // lamp.cpp calls handleControlOnLoop() with the drained slot.
-
-  // --- Inter-session quiet hold (mesh-only, multi-distributor case) ---
-  // In a 3+ lamp mesh, a below-version receiver can be OFFERed by more
-  // than one distributor in quick succession. If session A (from peer B)
-  // times out / aborts, state goes Idle and without latching we'd
-  // exitQuiet → compositor runs normal pipeline → IdleBehavior writes
-  // defaultColors → strip flashes the lamp's base colour → then peer
-  // C's OFFER arrives a moment later → re-enter quiet → indicator paints
-  // again. That's the flash visible on receivers between back-to-back
-  // OFFERs from different distributors. Defer exitQuiet by
-  // kInterSessionQuietHoldMs so the gap is bridged invisibly when a
-  // retry/handoff lands inside that window; if nothing arrives, the
-  // hold expires and we resume normal animation.
-  //
-  // This is the receiver-side mirror of the proven distributor cooldown,
-  // but minimal — we don't track a "last session" for the indicator's
-  // hold render because the receive case is much shorter than a multi-
-  // peer distribute wave (only the failure-then-retry gap matters).
+  // Inter-session quiet hold. In a 3+ lamp mesh a receiver can be OFFERed by
+  // several distributors in quick succession; if one session aborts, exiting
+  // quiet immediately flashes the base color before the next OFFER lands. Defer
+  // exitQuiet by kInterSessionQuietHoldMs to bridge that gap. Receiver-side
+  // mirror of the distributor cooldown, minus the last-session indicator hold.
   static constexpr uint32_t kInterSessionQuietHoldMs = 10000;
   bool     quietHeld_              = false;
   uint32_t quietHoldUntilMs_       = 0;

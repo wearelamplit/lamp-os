@@ -8,17 +8,13 @@
 
 namespace lamp {
 
-// Amanita mushroom lamp — fully custom visual stack.
-// Replaces built-in SocialBehavior + DefaultExpressions with three custom
-// AnimatedBehavior subclasses. Ported from origin/legacy-python:src/lamps/snafu.py.
+// Amanita mushroom lamp, fully custom visual stack. Replaces built-in
+// SocialBehavior + DefaultExpressions with three custom AnimatedBehavior
+// subclasses.
 //
 // Surface layout (matches physical Amanita hardware):
 //   Shade (cap): pin 12, 40 pixels, GRBW
 //   Base (stem): pin 14, 40 pixels, GRBW
-//
-// createBehaviors() wires snafu::BackgroundFade, snafu::PaintSpots, and
-// snafu::Greeting onto the shade FrameBuffer. The stem (base) receives
-// built-in configurator behavior for the user-settable base color.
 class SnafuLamp : public Lamp {
  public:
   SnafuLamp() : Lamp(HwConfig{
@@ -49,7 +45,6 @@ class SnafuLamp : public Lamp {
   }
 
   void createBehaviors(BehaviorStackBuilder& b) override {
-    // All three behaviors operate on the shade FrameBuffer.
     // The framework wires the BehaviorContext (including nearbyLamps) before
     // any control() runs, so snafu::Greeting's context_ is valid at runtime.
     if (shadeFb()) {
