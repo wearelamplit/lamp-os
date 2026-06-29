@@ -46,18 +46,4 @@ void main() {
       expect(result, {'0A:0B:0C:0D:0E:0F'});
     });
   });
-
-  group('macBytesToString', () {
-    test('matches parseClaimedMacs output format', () {
-      // parseMacFromBleId('AA:BB:CC:DD:EE:FF') would give these bytes;
-      // macBytesToString must produce the same string for the filter to work.
-      final mac = [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF];
-      expect(macBytesToString(mac), 'AA:BB:CC:DD:EE:FF');
-    });
-
-    test('low-nibble bytes get leading zero', () {
-      final mac = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06];
-      expect(macBytesToString(mac), '01:02:03:04:05:06');
-    });
-  });
 }

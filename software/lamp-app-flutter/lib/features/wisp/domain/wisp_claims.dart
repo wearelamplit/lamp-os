@@ -17,12 +17,6 @@ Set<String> parseClaimedMacs(List<int> blob) {
   return Set.unmodifiable(out);
 }
 
-/// Converts 6 bytes starting at [offset] in [bytes] to an uppercase
-/// colon-separated MAC string matching the format parseClaimedMacs produces.
-/// Callers that already have a `List<int>` MAC from parseMacFromBleId use
-/// this to get a key into the claimed set.
-String macBytesToString(List<int> mac) => _macAt(mac, 0);
-
 String _macAt(List<int> bytes, int offset) => [
       for (var i = offset; i < offset + 6; i++)
         (bytes[i] & 0xFF).toRadixString(16).padLeft(2, '0').toUpperCase(),

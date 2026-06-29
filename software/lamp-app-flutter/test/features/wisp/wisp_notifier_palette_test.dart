@@ -262,7 +262,7 @@ void main() {
       expect(n.paletteLoading, isFalse);
     });
 
-    test('present wisp with no palette yet → paletteLoading, no swatches',
+    test('present wisp, empty palette → not loading, empty editor (no hang)',
         () async {
       final ble = InMemoryBleClient();
       await primeStatus(ble, '{"wispMac":"AA:BB:CC:DD:EE:FF"}');
@@ -271,7 +271,10 @@ void main() {
       await c.read(wispNotifierProvider(lampId).future);
       final n = c.read(wispNotifierProvider(lampId).notifier);
 
-      expect(n.paletteLoading, isTrue);
+      // A completed read marks the palette known even when empty, so the
+      // editor renders an empty (populatable) palette instead of hanging
+      // on "reading from wisp" forever.
+      expect(n.paletteLoading, isFalse);
       expect(n.savedManualPalette, isEmpty);
       expect(n.draftManualPalette, isEmpty);
     });

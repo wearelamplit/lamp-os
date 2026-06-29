@@ -80,7 +80,7 @@ class WispNotifier extends _$WispNotifier {
   Set<String>? _claimedMacs;
   bool _claimsReadInFlight = false;
 
-  /// The set of lamp mesh MACs the wisp currently claims, or null while
+  /// The set of lamp bdAddrs the wisp currently claims, or null while
   /// the first CHAR_WISP_CLAIMS read is in flight. Empty set means the
   /// wisp reported count=0 (no claims / stale).
   Set<String>? get claimedMacs => _claimedMacs;
@@ -186,16 +186,22 @@ class WispNotifier extends _$WispNotifier {
     try {
       // The lamp gates the CHAR_WISP_STATUS read on the AES-GCM auth
       // handshake, which completes a beat after the `connected` edge; a
-      // pre-auth read comes back empty (present == false). Retry across the
-      // auth window so a status only readable post-auth isn't lost: the
-      // wispStatus notify is edge-triggered (fires when the wisp starts or
-      // stops controlling a surface) and won't fire to correct it while the
-      // wisp paints steadily.
+      // pre-auth read comes back empty (present == false). Retry briefly to
+      // cover that window. Kept tight (2x1.5s) so a genuinely wisp-less lamp
+      // resolves fast rather than sitting in loading; the notify subscription
+      // (already attached above) catches anything slower.
       var initial = _applySourceWriteGuard(await _repo.readStatus());
       if (_disposed) return WispStatus.empty;
-      for (var attempt = 0; !initial.present && attempt < 8; attempt++) {
+      for (var attempt = 0; !initial.present && attempt < 2; attempt++) {
         await Future.delayed(const Duration(milliseconds: 1500));
         if (_disposed) return WispStatus.empty;
+        // A notify may have landed a present status while we waited; prefer it
+        // so the retry's stale empty read can't clobber it.
+        final live = state.value;
+        if (live != null && live.present) {
+          initial = live;
+          break;
+        }
         initial = _applySourceWriteGuard(await _repo.readStatus());
         if (_disposed) return WispStatus.empty;
       }
