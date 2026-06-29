@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lamp_app/features/social/domain/lamp_nearby_peer.dart';
-import 'package:lamp_app/features/wisp/presentation/wisp_config_screen.dart'
+import 'package:lamp_app/features/wisp/presentation/widgets/wisp_painted_lamps.dart'
     show resolvePaintedLamps;
 
 void main() {
