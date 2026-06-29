@@ -83,7 +83,12 @@ LSIG_VERSION_OFFSET = 20
 LSIG_SIGNED_LEN_OFFSET = 24
 LSIG_SIGNATURE_OFFSET = 32
 
-DEFAULT_CHANNEL = "stable"
+# Must match inject_firmware_channel.py's default: that hook sets the compiled
+# FIRMWARE_CHANNEL, this one sets the LSIG footer channel. If the two defaults
+# diverge, an unset build (plain `lamp:flash`) compiles for one channel but is
+# signed for another — which is exactly how a beta build ended up footer-signed
+# "stable". Only an explicit LAMP_FIRMWARE_CHANNEL=stable opts out.
+DEFAULT_CHANNEL = "beta"
 
 
 def _read_private_key(path: Path) -> bytes:
