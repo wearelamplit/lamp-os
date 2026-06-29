@@ -21,6 +21,16 @@ void main() {
     expect(out.first.name, 'grady');
   });
 
+  test('connected lamp names itself (never in its own peer list)', () {
+    final out = resolvePaintedLamps(
+      claimed: {'FC:B4:67:F1:DD:A6'},
+      peers: const [],
+      selfBdAddr: 'FC:B4:67:F1:DD:A6',
+      selfName: 'betty',
+    );
+    expect(out.single.name, 'betty');
+  });
+
   test('every claimed bdAddr appears; name from peers when present', () {
     final peers = [peer('FC:B4:67:F1:DD:A6', 'grady')];
     final out = resolvePaintedLamps(

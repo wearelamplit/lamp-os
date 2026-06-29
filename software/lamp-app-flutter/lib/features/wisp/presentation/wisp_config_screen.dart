@@ -15,6 +15,8 @@ import '../../control/presentation/widgets/color_picker_sheet.dart';
 import '../../control/presentation/widgets/connecting_view.dart';
 import '../../control/presentation/widgets/disconnect_aware_body.dart';
 import '../../control/presentation/widgets/lamp_color_swatch.dart';
+import '../../inventory/application/inventory_notifier.dart';
+import '../../inventory/domain/inventory_lamp.dart';
 import '../../lamp_shell/presentation/widgets/wifi_network_picker.dart';
 import '../../social/application/lamp_nearby_peers_notifier.dart';
 import '../../social/domain/lamp_nearby_peer.dart';
@@ -32,14 +34,20 @@ class PaintedLampEntry {
 }
 
 // Membership is the claimed bdAddr set (all claimed lamps show). Name is
-// resolved from the connected lamp's nearby peers; an unresolved claim shows
-// with its last two bdAddr octets so it is never dropped.
+// resolved from the connected lamp's nearby peers; a lamp never lists itself
+// as a peer, so the connected lamp's own (selfBdAddr, selfName) is seeded too.
+// An unresolved claim shows with its last two bdAddr octets, never dropped.
 List<PaintedLampEntry> resolvePaintedLamps({
   required Set<String>? claimed,
   required List<LampNearbyPeer> peers,
+  String? selfBdAddr,
+  String? selfName,
 }) {
   if (claimed == null) return const [];
   final byBd = {for (final p in peers) p.bdAddr.toUpperCase(): p.name};
+  if (selfBdAddr != null && selfName != null && selfName.isNotEmpty) {
+    byBd[selfBdAddr.toUpperCase()] = selfName;
+  }
   return [
     for (final bd in claimed)
       PaintedLampEntry(
@@ -1234,11 +1242,29 @@ class _PaintedLampsList extends ConsumerWidget {
     final peersAsync = ref.watch(lampNearbyPeersNotifierProvider(lampId));
     final peers = peersAsync.value ?? const <LampNearbyPeer>[];
 
+    // The connected lamp never lists itself as a nearby peer, so supply its
+    // own name from inventory (on Android lampId IS the bdAddr) — otherwise
+    // its own claimed entry would render as a bare bdAddr label.
+    final inventory =
+        ref.watch(inventoryNotifierProvider).value ?? const <InventoryLamp>[];
+    String? selfName;
+    for (final l in inventory) {
+      if (l.id == lampId) {
+        selfName = l.name;
+        break;
+      }
+    }
+
     // claimedMacs == null: claims unavailable (legacy lamp / timeout) -> show
     // every nearby peer rather than blocking or hiding.
     final entries = claimedMacs == null
         ? [for (final p in peers) PaintedLampEntry(bdAddr: p.bdAddr, name: p.name)]
-        : resolvePaintedLamps(claimed: claimedMacs, peers: peers);
+        : resolvePaintedLamps(
+            claimed: claimedMacs,
+            peers: peers,
+            selfBdAddr: lampId,
+            selfName: selfName,
+          );
 
     if (entries.isEmpty) {
       return const Padding(

@@ -97,7 +97,12 @@ class LampNearbyPeersNotifier extends _$LampNearbyPeersNotifier {
 
   Future<List<LampNearbyPeer>> _readOnce() async {
     final bytes = await _ble.readSection(lampId, 'nearby');
-    if (bytes.isEmpty) return const [];
+    // A zero-byte read is a transient glitch (a genuinely empty list
+    // serializes as "[]"). Throw so callers keep the last good snapshot
+    // instead of flashing an empty list and dropping every peer's name.
+    if (bytes.isEmpty) {
+      throw const FormatException('empty nearby section read');
+    }
     final decoded = jsonDecode(utf8.decode(bytes));
     if (decoded is! List) return const [];
     return decoded
