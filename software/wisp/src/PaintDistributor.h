@@ -46,6 +46,10 @@ class PaintDistributor {
   void setPaintMode(bool on);
   bool paintMode() const { return paintMode_; }
 
+  // Shuffle seed passed through to TupleSampler. Changing it re-rolls
+  // per-lamp color assignments on the next paint walk.
+  void setShuffleSeed(uint8_t s) { shuffleSeed_ = s; }
+
   // Aurora palette callback hook. Called from the main loop task when a new
   // palette resolves. Snapshots the roster and starts the paced fan-out.
   void onPaletteChanged();
@@ -71,6 +75,7 @@ class PaintDistributor {
   LampInventory* inventory_ = nullptr;
   MeshLink* mesh_ = nullptr;
   CurrentPalette* palette_ = nullptr;
+  uint8_t shuffleSeed_ = 0;
   // Roster is nullable for back-compat with code paths that haven't been
   // wired through (mainly tests). When null, every in-range lamp gets
   // painted (legacy behavior).

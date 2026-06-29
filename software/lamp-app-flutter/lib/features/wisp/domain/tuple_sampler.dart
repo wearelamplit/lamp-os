@@ -96,9 +96,14 @@ List<int>? meshMacFromBdAddr(String bdAddr) {
 
 /// Run the same per-MAC sampling the wisp runs. Returns null when the
 /// palette is empty (no authored colors to pick from).
+///
+/// [shuffleSeed] defaults to 0 (matches the firmware default). Pass the
+/// wisp's current `shuffleSeed` from [WispStatus] so the preview stays in
+/// lock-step with what the wisp actually broadcasts.
 TuplePrediction? predictTuple({
   required List<int> mac,
   required List<LampColor> palette,
+  int shuffleSeed = 0,
 }) {
   if (mac.length != 6) return null;
   if (palette.isEmpty) return null;
@@ -108,10 +113,10 @@ TuplePrediction? predictTuple({
   const int kGolden   = 0x9E3779B9;
   const int kSwapSalt = 0xCAFEBABE;
   final int n = stops.length;
-  int idxA = _hashMac(mac, 0)        % n;
-  int idxB = _hashMac(mac, kGolden)  % n;
+  int idxA = _hashMac(mac, 0          ^ shuffleSeed) % n;
+  int idxB = _hashMac(mac, kGolden    ^ shuffleSeed) % n;
   if (n >= 2 && idxA == idxB) idxB = (idxB + 1) % n;
-  final swap = (_hashMac(mac, kSwapSalt) & 1) != 0;
+  final swap = (_hashMac(mac, kSwapSalt ^ shuffleSeed) & 1) != 0;
   final base  = swap ? stops[idxB] : stops[idxA];
   final shade = swap ? stops[idxA] : stops[idxB];
   return TuplePrediction(base: base, shade: shade);

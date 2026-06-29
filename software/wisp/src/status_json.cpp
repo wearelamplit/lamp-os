@@ -19,6 +19,10 @@ size_t buildWispStatusJson(const WispStatusFields& f, char* out,
     JsonArray o = doc["offColor"].to<JsonArray>();
     o.add(f.offR); o.add(f.offG); o.add(f.offB);
   }
+  // Only emit when non-zero: seed=0 is the default; omitting it keeps the
+  // zero-zones base JSON within CONTROL_MAX_PAYLOAD even at pathological field
+  // widths. The app side defaults to 0 when the key is absent.
+  if (f.shuffleSeed) doc["shuffleSeed"] = f.shuffleSeed;
   // ponytail: O(n * measureJson), n <= 16 — trivial, and it gives a
   // by-construction guarantee the serialized doc never exceeds cap.
   for (size_t i = 0; i < f.observedCount; ++i) {

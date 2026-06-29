@@ -360,6 +360,18 @@ class WispNotifier extends _$WispNotifier {
     });
   }
 
+  /// Shuffle: tell the wisp to bump its seed and re-roll per-lamp color
+  /// assignments. The updated seed rides back in the next wispStatus so
+  /// the app preview re-rolls in lock-step without optimistic state here.
+  Future<void> shuffle() async {
+    try {
+      await _repo.shuffle();
+    } catch (e, st) {
+      debugPrint('WispNotifier.shuffle() failed: $e\n$st');
+      rethrow;
+    }
+  }
+
   /// Set the wisp source mode (Off / Manual / Aurora).
   /// Optimistically reflects in local state so the pill picker doesn't
   /// lag the tap; the wispStatus notify reconciles within ~2s. Rolls

@@ -132,6 +132,32 @@ void main() {
           reason: 'swap bit must keep base=blue within 30-70%');
     });
 
+    test('shuffleSeed=0 equals the default (no-seed) call', () {
+      const mac = [0x42, 0x42, 0x42, 0x42, 0x42, 0x42];
+      const palette = [red, blue, green, yellow];
+      final a = predictTuple(mac: mac, palette: palette);
+      final b = predictTuple(mac: mac, palette: palette, shuffleSeed: 0);
+      expect(a, isNotNull);
+      expect(b, isNotNull);
+      expect(a!.base, equals(b!.base));
+      expect(a.shade, equals(b.shade));
+    });
+
+    test('different shuffleSeed yields different tuple for at least one MAC', () {
+      const palette = [red, blue, green, yellow];
+      bool foundDiff = false;
+      for (var i = 0; i < 256 && !foundDiff; i++) {
+        final mac = [i & 0xFF, (i >> 8) & 0xFF, 0xAA, 0xBB, 0xCC, 0xDD];
+        final p0 = predictTuple(mac: mac, palette: palette, shuffleSeed: 0);
+        final p1 = predictTuple(mac: mac, palette: palette, shuffleSeed: 1);
+        if (p0 != null && p1 != null) {
+          if (p0.base != p1.base || p0.shade != p1.shade) foundDiff = true;
+        }
+      }
+      expect(foundDiff, isTrue,
+          reason: 'shuffleSeed=1 must yield a different result for at least one MAC');
+    });
+
     test('dedupe collapses near-identical adjacent stops before picking', () {
       // Three "colors" but the first two are within the 8/255 delta —
       // dedupe drops the second, leaving n=2 effective colors.

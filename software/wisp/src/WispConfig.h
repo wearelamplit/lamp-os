@@ -129,6 +129,12 @@ class WispConfig {
   ManualPaletteColor offColor() const { return offColor_; }
   void setOffColor(ManualPaletteColor c);
 
+  // Shuffle seed. Mixed into TupleSampler's three hash salts via XOR so
+  // bumping it re-rolls per-lamp color assignments across the fleet.
+  // Persisted as a u8 in NVS ("shufSeed"); default 0.
+  uint8_t shuffleSeed() const { return shuffleSeed_; }
+  void bumpShuffleSeed();
+
  private:
   // Mutex handle — opaque to keep FreeRTOS out of the header. Cast
   // back to SemaphoreHandle_t in the .cpp. Same pattern as WispRoster.
@@ -143,6 +149,7 @@ class WispConfig {
   WispSourceMode sourceMode_ = WispSourceMode::Off;
   std::vector<ManualPaletteColor> manualPalette_;
   ManualPaletteColor offColor_ = {255, 150, 50};
+  uint8_t shuffleSeed_ = 0;
 };
 
 }  // namespace wisp

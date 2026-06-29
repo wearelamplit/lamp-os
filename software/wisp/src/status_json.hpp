@@ -17,6 +17,7 @@ struct WispStatusFields {
   const char*  source;
   uint8_t      offR, offG, offB;
   bool         hasOffColor;
+  uint8_t      shuffleSeed;
 };
 
 // Serialize a wispStatus JSON into `out` (capacity `outCap`), truncating

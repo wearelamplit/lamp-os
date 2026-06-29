@@ -56,12 +56,15 @@ struct ColorTuple {
 };
 
 // Pure function. Determinism property: same `palette.colors()` snapshot +
-// same `mac` always returns the same tuple. Edge cases:
+// same `mac` + same `shuffleSeed` always returns the same tuple. Edge cases:
 //   - Empty palette → {0,0,0,0} for both colors.
 //   - Single-color palette (post-dedupe) → that color for both surfaces.
 //   - 2+ colors → discrete picks; each surface gets one of the authored
 //     stops verbatim (no blending).
+// `shuffleSeed` defaults to 0 (legacy behavior unchanged). Bumping it
+// re-rolls per-lamp color assignment while keeping intra-seed determinism.
 ColorTuple sampleTupleForMac(const CurrentPalette& palette,
-                             const uint8_t mac[6]);
+                             const uint8_t mac[6],
+                             uint32_t shuffleSeed = 0);
 
 }  // namespace wisp

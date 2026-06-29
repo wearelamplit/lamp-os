@@ -183,6 +183,20 @@ void main() {
       expect(s.currentPalette, isNull);
     });
 
+    test('shuffleSeed parses from JSON', () {
+      final s = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","shuffleSeed":7}',
+      ));
+      expect(s.shuffleSeed, 7);
+    });
+
+    test('shuffleSeed defaults to 0 when absent', () {
+      final s = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF"}',
+      ));
+      expect(s.shuffleSeed, 0);
+    });
+
     test('currentPalette truncates partial trailing triple', () {
       // 7 bytes = 2 full triples + 1 stray byte. The stray byte is
       // dropped; parser surfaces 2 colors. Defends against the wisp

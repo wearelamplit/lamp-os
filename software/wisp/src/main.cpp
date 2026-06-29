@@ -328,6 +328,11 @@ void drainPendingWispOp() {
       }
       statusBeacon.triggerOnChange();
       break;
+    case wisp::DispatchResult::AppliedShuffle:
+      paintDistributor.setShuffleSeed(wispConfig.shuffleSeed());
+      paintDistributor.onPaletteChanged();
+      statusBeacon.triggerOnChange();
+      break;
     case wisp::DispatchResult::Ignored:
     case wisp::DispatchResult::Malformed:
       // Nothing to do; dispatcher already logged what mattered.
@@ -639,6 +644,7 @@ void setup() {
   // to walk peers and unicast tuples. Status beacon broadcasts MSG_WISP_HELLO
   // every 2s on a FreeRTOS timer so cadence survives Aurora loop() stalls.
   paintDistributor.begin(&inventory, &mesh, &currentPalette, &wispRoster);
+  paintDistributor.setShuffleSeed(wispConfig.shuffleSeed());
 
   // Wisp no longer participates in OTA — lamps gossip firmware to each
   // other peer-to-peer. MSG_WISP_HELLO's carriedFw* fields zero-fill

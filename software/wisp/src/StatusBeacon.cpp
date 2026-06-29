@@ -249,15 +249,17 @@ void StatusBeacon::emitStatus() {
 
   uint8_t offR = 0, offG = 0, offB = 0;
   bool hasOffColor = false;
+  uint8_t shuffleSeed = 0;
   if (config_) {
     const auto off = config_->offColor();
     offR = off.r; offG = off.g; offB = off.b;
     hasOffColor = true;
+    shuffleSeed = config_->shuffleSeed();
   }
   const WispStatusFields fields{
       currentZone, zoneSrc, obsBuf, obsCount,
       wifiConn, auroraConn, paletteIdPrefix, lastSeenMs,
-      sourceName, offR, offG, offB, hasOffColor };
+      sourceName, offR, offG, offB, hasOffColor, shuffleSeed };
 
   char jsonBuf[kStatusJsonBufLen];
   const size_t jsonLen = buildWispStatusJson(

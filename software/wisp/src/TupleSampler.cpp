@@ -78,7 +78,8 @@ std::vector<RGBW> dedupe(const std::vector<RGBW>& in) {
 }  // namespace
 
 ColorTuple sampleTupleForMac(const CurrentPalette& palette,
-                             const uint8_t mac[6]) {
+                             const uint8_t mac[6],
+                             uint32_t shuffleSeed) {
   ColorTuple out;
   if (!mac) return out;
 
@@ -92,8 +93,8 @@ ColorTuple sampleTupleForMac(const CurrentPalette& palette,
   constexpr uint32_t kSwapSalt = 0xCAFEBABEu;  // independent third hash space
 
   const uint32_t n = static_cast<uint32_t>(stops.size());
-  uint32_t idxA = hashMac(mac, 0u)       % n;
-  uint32_t idxB = hashMac(mac, kGolden)  % n;
+  uint32_t idxA = hashMac(mac, 0u          ^ shuffleSeed) % n;
+  uint32_t idxB = hashMac(mac, kGolden     ^ shuffleSeed) % n;
 
   // If there's more than one distinct color and the hashes collided, nudge
   // idxB so each surface gets a different authored color. Deterministic per
@@ -107,7 +108,7 @@ ColorTuple sampleTupleForMac(const CurrentPalette& palette,
   // pivoted around whichever direction the hash distributions happened to
   // bias, producing patterns like "all blue tops, all red bottoms" on a
   // 2-color palette. Splitting ~50/50 across the fleet breaks that.
-  const bool swap = (hashMac(mac, kSwapSalt) & 1u) != 0u;
+  const bool swap = (hashMac(mac, kSwapSalt ^ shuffleSeed) & 1u) != 0u;
   const RGBW& base  = swap ? stops[idxB] : stops[idxA];
   const RGBW& shade = swap ? stops[idxA] : stops[idxB];
 

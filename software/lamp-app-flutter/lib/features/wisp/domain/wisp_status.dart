@@ -47,6 +47,7 @@ class WispStatus {
     this.baseWispColor,
     this.shadeWispColor,
     this.currentPalette,
+    this.shuffleSeed = 0,
   });
 
   /// Sentinel for "no wisp has been heard on this lamp yet" (lamp
@@ -130,6 +131,11 @@ class WispStatus {
   /// round-trip partially with a `[wisp.beacon] manualPalette truncated:`
   /// log on the wisp side.
   final List<LampColor>? currentPalette;
+
+  /// Current shuffle seed. Mixed into the TupleSampler hash salts so the
+  /// app preview stays in lock-step with the wisp's color assignments.
+  /// Defaults to 0 (matches the firmware default and pre-feature wisps).
+  final int shuffleSeed;
 
   /// Convenience: are we currently being wisp-painted on either surface?
   bool get controlling => controllingBase || controllingShade;
@@ -283,6 +289,7 @@ class WispStatus {
       baseWispColor: parseWispHexColor(json['baseWispColor']),
       shadeWispColor: parseWispHexColor(json['shadeWispColor']),
       currentPalette: parseCurrentPalette(json['palette']),
+      shuffleSeed: asInt(json['shuffleSeed']) ?? 0,
     );
   }
 
@@ -315,6 +322,7 @@ class WispStatus {
       baseWispColor: baseWispColor,
       shadeWispColor: shadeWispColor,
       currentPalette: currentPalette ?? this.currentPalette,
+      shuffleSeed: shuffleSeed,
     );
   }
 
@@ -343,7 +351,8 @@ class WispStatus {
           shadeWispColor == other.shadeWispColor &&
           _currentPaletteEq.equals(
               currentPalette ?? const <LampColor>[],
-              other.currentPalette ?? const <LampColor>[]);
+              other.currentPalette ?? const <LampColor>[]) &&
+          shuffleSeed == other.shuffleSeed;
 
   @override
   int get hashCode => Object.hash(
@@ -365,5 +374,6 @@ class WispStatus {
         currentPalette == null
             ? 0
             : _currentPaletteEq.hash(currentPalette!),
+        shuffleSeed,
       );
 }

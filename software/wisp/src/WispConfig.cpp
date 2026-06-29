@@ -47,6 +47,8 @@ constexpr const char* kKeyManualPalette = "manualPal";
 // rather than three individual int slots so the wire format / NVS
 // footprint is identical to one ManualPaletteColor.
 constexpr const char* kKeyOffColor      = "offColor";
+// Shuffle seed — single u8 stored as int. Bumped on every "shuffle" op.
+constexpr const char* kKeyShuffleSeed   = "shufSeed";
 
 WispSourceMode coerceSourceMode(int raw) {
   switch (raw) {
@@ -132,13 +134,16 @@ void WispConfig::begin() {
     }
   }
 
+  shuffleSeed_ = static_cast<uint8_t>(prefs_.getInt(kKeyShuffleSeed, 0) & 0xFF);
+
   Serial.printf("[wisp.cfg] loaded selZone=%d ssid='%s' pw=%s "
-                "srcMode=%d manualColors=%u offColor=%u,%u,%u\n",
+                "srcMode=%d manualColors=%u offColor=%u,%u,%u shuffleSeed=%u\n",
                 selectedZone_, wifiSsid_.c_str(),
                 wifiPw_.length() ? "<set>" : "<empty>",
                 static_cast<int>(sourceMode_),
                 (unsigned)manualPalette_.size(),
-                offColor_.r, offColor_.g, offColor_.b);
+                offColor_.r, offColor_.g, offColor_.b,
+                (unsigned)shuffleSeed_);
 }
 
 void WispConfig::setSelectedZone(int zone) {
@@ -223,6 +228,14 @@ void WispConfig::setOffColor(ManualPaletteColor c) {
     prefs_.putBytes(kKeyOffColor, buf, 3);
   }
   Serial.printf("[wisp.cfg] offColor <= %u,%u,%u\n", c.r, c.g, c.b);
+}
+
+void WispConfig::bumpShuffleSeed() {
+  shuffleSeed_ = (shuffleSeed_ + 1) & 0xFF;
+  if (opened_) {
+    prefs_.putInt(kKeyShuffleSeed, shuffleSeed_);
+  }
+  Serial.printf("[wisp.cfg] shuffleSeed <= %u\n", (unsigned)shuffleSeed_);
 }
 
 size_t WispConfig::copyManualPalette(uint8_t* out, size_t maxColors) const {

@@ -296,7 +296,34 @@ class _WispBodyState extends ConsumerState<_WispBody> {
                 ],
               ],
               const SizedBox(height: 24),
-              const SettingsGroupHeading('Lamps'),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
+                child: Row(
+                  children: [
+                    const Text(
+                      'LAMPS',
+                      style: TextStyle(
+                        color: BrandColors.headerYellow,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.shuffle,
+                          size: 18, color: BrandColors.headerYellow),
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      tooltip: 'Shuffle colours',
+                      onPressed: () => ref
+                          .read(wispNotifierProvider(widget.lampId).notifier)
+                          .shuffle(),
+                    ),
+                  ],
+                ),
+              ),
               _PaintedLampsList(lampId: widget.lampId),
             ],
           ),
@@ -1238,6 +1265,8 @@ class _PaintedLampsList extends ConsumerWidget {
     final notifier = ref.read(wispNotifierProvider(lampId).notifier);
     ref.watch(wispNotifierProvider(lampId));
     final palette = notifier.savedManualPalette;
+    final shuffleSeed =
+        ref.watch(wispNotifierProvider(lampId)).value?.shuffleSeed ?? 0;
     final claimedMacs = notifier.claimedMacs; // Set<String>? of bdAddrs
     final peersAsync = ref.watch(lampNearbyPeersNotifierProvider(lampId));
     final peers = peersAsync.value ?? const <LampNearbyPeer>[];
@@ -1277,7 +1306,11 @@ class _PaintedLampsList extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         for (final e in entries)
-          _PaintedLampRow(bdAddr: e.bdAddr, name: e.name, palette: palette),
+          _PaintedLampRow(
+              bdAddr: e.bdAddr,
+              name: e.name,
+              palette: palette,
+              shuffleSeed: shuffleSeed),
       ],
     );
   }
@@ -1288,18 +1321,20 @@ class _PaintedLampRow extends StatelessWidget {
     required this.bdAddr,
     required this.name,
     required this.palette,
+    required this.shuffleSeed,
   });
 
   final String bdAddr;
   final String name;
   final List<LampColor> palette;
+  final int shuffleSeed;
 
   @override
   Widget build(BuildContext context) {
     final mac = meshMacFromBdAddr(bdAddr); // bdAddr - 2 = mesh MAC
     final prediction = (mac == null || palette.isEmpty)
         ? null
-        : predictTuple(mac: mac, palette: palette);
+        : predictTuple(mac: mac, palette: palette, shuffleSeed: shuffleSeed);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: Row(

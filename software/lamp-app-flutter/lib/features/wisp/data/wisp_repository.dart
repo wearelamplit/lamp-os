@@ -137,6 +137,16 @@ class WispRepository {
     });
   }
 
+  /// Re-roll per-lamp color assignments. The wisp bumps its shuffle seed,
+  /// re-paints the fleet with the new assignments, and broadcasts a fresh
+  /// wispStatus so the app preview re-rolls in lock-step.
+  Future<void> shuffle() async {
+    await _writeOp({
+      'char': 'wispOp',
+      'op': 'shuffle',
+    });
+  }
+
   /// Hidden bench-test hook (firmware-gated on LAMP_DEBUG). Tells the
   /// connected lamp to fire a social-greeting waveform for the peer at
   /// [bdAddr] as if that peer had just walked into BLE range. Bypasses
