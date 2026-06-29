@@ -25,10 +25,7 @@ static void onEspnowRecv(const uint8_t mac[6], const uint8_t* data, size_t len) 
         if (!parseFwOffer(data, len, offer)) return;
         if (offer.version <= kOurVersion) return;                         // version gate
         if (!shouldAttempt(offer.sha256Prefix)) return;                   // circuit breaker
-        // onOffer counts the attempt itself, at the commit point — every
-        // committed attempt is recorded so a deterministic post-commit failure
-        // (which now reboots) can't loop forever.
-        ota_receiver::onOffer(offer, mac);
+        ota_receiver::onOffer(offer, mac);  // records the breaker attempt at commit
     } else if (msgType == MSG_FW_CHUNK) {
         ParsedFwChunk chunk{};
         if (!parseFwChunk(data, len, chunk)) return;
@@ -40,7 +37,9 @@ static void onEspnowRecv(const uint8_t mac[6], const uint8_t* data, size_t len) 
     }
 }
 
-void begin() {
+void begin(const char* name, const uint8_t baseRGBW[4],
+           const uint8_t shadeRGBW[4]) {
+    helloSetIdentity(name, baseRGBW, shadeRGBW);
     radioBeginDiscovery();
     espnowBegin(onEspnowRecv);
 }

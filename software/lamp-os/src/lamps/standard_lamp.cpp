@@ -289,7 +289,11 @@ void setup() {
   bt.begin(config.lamp.name, config.base.colors[config.base.ac], config.shade.colors[0]);
   wifi.begin(&config);
 #if CATCH_OTA_ENABLED
-  catch_ota::begin();
+  const auto& baseC  = config.base.colors[config.base.ac];
+  const auto& shadeC = config.shade.colors[0];
+  const uint8_t baseRGBW[4]  = {baseC.r, baseC.g, baseC.b, baseC.w};
+  const uint8_t shadeRGBW[4] = {shadeC.r, shadeC.g, shadeC.b, shadeC.w};
+  catch_ota::begin(config.lamp.name.c_str(), baseRGBW, shadeRGBW);
 #endif
   shadeStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, config.lamp.brightness));
   baseStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, config.lamp.brightness));
