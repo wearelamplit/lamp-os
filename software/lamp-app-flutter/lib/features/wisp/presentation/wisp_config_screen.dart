@@ -1192,19 +1192,12 @@ class _WifiConfigRowState extends ConsumerState<_WifiConfigRow> {
   }
 }
 
-// ── Painted lamps list ────────────────────────────────────────────────
-// Lists inventory lamps the wisp currently claims, alongside the two
-// colors the wisp is painting on each (base + shade). The claimed set
-// comes from CHAR_WISP_CLAIMS (binary [count][mac*6]); the color
-// prediction re-runs the wisp's `sampleTupleForMac` algorithm locally.
-//
-// Accuracy caveat: on Android `InventoryLamp.id` IS the lamp's BLE MAC,
-// which differs from the lamp's ESP-NOW MAC by one byte (ESP32 derives
-// the WiFi-STA MAC by incrementing the BLE base). So the colors shown
-// here will follow the same pattern the wisp picks — varied across the
-// fleet, with ~50/50 base/shade swap — but won't byte-match what the
-// physical lamp is wearing right now. The header subtitle calls this
-// out so the operator knows to trust the lamp, not the preview.
+// Lists inventory lamps the wisp currently claims, with the two colors it
+// paints on each (base + shade). The claimed set comes from CHAR_WISP_CLAIMS
+// ([count][mac*6]); the preview re-runs sampleTupleForMac locally. Both key on
+// the lamp's mesh MAC via meshMacFromBleId. iOS exposes an opaque BLE UUID, not
+// a MAC, so the mesh MAC can't be derived there and the lamp is dropped from
+// the filter and preview.
 class _PaintedLampsList extends ConsumerWidget {
   const _PaintedLampsList({required this.lampId});
 
@@ -1242,20 +1235,16 @@ class _PaintedLampsList extends ConsumerWidget {
             ),
           );
         }
-        if (claimedMacs == null) {
-          return const Padding(
-            padding: EdgeInsets.symmetric(vertical: 12),
-            child: Text(
-              'Loading…',
-              style: TextStyle(color: BrandColors.fogGrey, fontSize: 12),
-            ),
-          );
-        }
-        final claimed = lamps.where((l) {
-          final mac = parseMacFromBleId(l.id);
-          return mac != null && claimedMacs.contains(macBytesToString(mac));
-        }).toList();
-        if (claimed.isEmpty) {
+        // Null = the lamp can't report claims (legacy firmware, or not yet
+        // read): show the full inventory rather than filtering or blocking.
+        final claimed = claimedMacs == null
+            ? lamps
+            : lamps.where((l) {
+                final mac = meshMacFromBleId(l.id);
+                return mac != null &&
+                    claimedMacs.contains(macBytesToString(mac));
+              }).toList();
+        if (claimedMacs != null && claimed.isEmpty) {
           return const Padding(
             padding: EdgeInsets.symmetric(vertical: 12),
             child: Text(
@@ -1302,7 +1291,7 @@ class _PaintedLampRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final mac = parseMacFromBleId(lamp.id);
+    final mac = meshMacFromBleId(lamp.id);
     final prediction = (mac == null || palette.isEmpty)
         ? null
         : predictTuple(mac: mac, palette: palette);

@@ -229,16 +229,16 @@ class WispNotifier extends _$WispNotifier {
     return true;
   }
 
+  // Serialized against the palette re-read: FbpBleClient has no internal lock,
+  // so two concurrent characteristic reads stall the GATT flow on Android.
   Future<void> _loadClaims() async {
-    if (_claimsReadInFlight || _disposed) return;
+    if (_claimsReadInFlight || _paletteRereadInFlight || _disposed) return;
     _claimsReadInFlight = true;
     try {
       final macs = await _repo.readClaims();
       if (_disposed) return;
       _claimedMacs = macs;
       _bumpState();
-    } catch (e) {
-      debugPrint('[wisp_notifier] claims read failed lamp=$lampId: $e');
     } finally {
       _claimsReadInFlight = false;
     }
@@ -249,8 +249,9 @@ class WispNotifier extends _$WispNotifier {
   void _maybeRereadForPalette(WispStatus next) {
     final prefix = next.paletteIdPrefix;
     if (prefix.isEmpty || prefix == _lastPaletteIdPrefix) return;
+    // Don't consume the prefix if a read is busy; retry on the next notify.
+    if (_paletteRereadInFlight || _claimsReadInFlight) return;
     _lastPaletteIdPrefix = prefix;
-    if (_paletteRereadInFlight) return;
     _paletteRereadInFlight = true;
     unawaited(() async {
       try {

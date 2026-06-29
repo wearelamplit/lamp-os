@@ -34,15 +34,20 @@ class WispRepository {
     return WispStatus.fromBytes(bytes);
   }
 
-  /// One-shot read of CHAR_WISP_CLAIMS. Returns the set of lamp mesh MACs
-  /// the wisp currently claims, or an empty set on any error/empty payload.
-  Future<Set<String>> readClaims() async {
-    final bytes = await _ble.read(
-      _deviceId,
-      BleUuids.controlService,
-      BleUuids.wispClaims,
-    );
-    return parseClaimedMacs(bytes);
+  /// Best-effort read of CHAR_WISP_CLAIMS. Returns the claimed mesh MACs, or
+  /// null when the lamp can't answer (legacy firmware without the
+  /// characteristic, timeout, transient error). Null means "unknown, don't
+  /// filter"; the caller shows all lamps. Time-bounded so it can't stall the
+  /// shared BLE flow.
+  Future<Set<String>?> readClaims() async {
+    try {
+      final bytes = await _ble
+          .read(_deviceId, BleUuids.controlService, BleUuids.wispClaims)
+          .timeout(const Duration(seconds: 4));
+      return parseClaimedMacs(bytes);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Pin the wisp to [zoneId]. Persisted in wisp NVS — survives reboot.

@@ -84,6 +84,23 @@ List<int>? parseMacFromBleId(String id) {
   return out;
 }
 
+/// The lamp's mesh (ESP-NOW / WiFi-STA) MAC, derived from its BLE id. ESP32
+/// makes the BLE MAC the STA base + 2, so the mesh MAC is the BLE MAC minus 2
+/// (full 48-bit, with borrow). This is the MAC the wisp keys its per-lamp
+/// colour pick and claim roster on, so use it (not the raw BLE id) to match or
+/// predict against wisp data.
+List<int>? meshMacFromBleId(String id) {
+  final out = parseMacFromBleId(id);
+  if (out == null) return null;
+  var borrow = 2;
+  for (var i = 5; i >= 0 && borrow > 0; i--) {
+    final v = out[i] - borrow;
+    out[i] = v < 0 ? v + 256 : v;
+    borrow = v < 0 ? 1 : 0;
+  }
+  return out;
+}
+
 /// Run the same per-MAC sampling the wisp runs. Returns null when the
 /// palette is empty (no authored colors to pick from).
 TuplePrediction? predictTuple({
