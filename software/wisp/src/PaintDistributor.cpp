@@ -24,8 +24,8 @@ void PaintDistributor::begin(LampInventory* inventory, MeshLink* mesh,
 
 void PaintDistributor::setPaintMode(bool on) {
   if (on == paintMode_) {
-    // Idempotent: paint:on while already on still kicks a fresh walk so
-    // the user sees instant feedback if a lamp joined since last paint.
+    // paint:on while already on still kicks a fresh walk so a lamp that
+    // joined since last paint gets picked up.
     if (on) beginWalk(Mode::Paint);
     return;
   }
@@ -34,9 +34,9 @@ void PaintDistributor::setPaintMode(bool on) {
     lastBackstopMs_ = millis();
     beginWalk(Mode::Paint);
   } else {
-    // Walk every currently-known peer with a RESTORE so they fall back to
-    // their authored personality. We deliberately keep paintMode_ false so
-    // tick() doesn't re-trigger backstop refreshes.
+    // RESTORE every known peer so they fall back to their authored
+    // personality. paintMode_ stays false so tick() won't re-trigger backstop
+    // refreshes.
     beginWalk(Mode::Restore);
   }
 }
@@ -47,8 +47,8 @@ void PaintDistributor::onPaletteChanged() {
 }
 
 void PaintDistributor::tick(uint32_t nowMs) {
-  // Drain the paced queue first; backstop logic only fires when idle so we
-  // don't double-up sends.
+  // Drain the paced queue first; backstop fires only when idle to avoid
+  // double sends.
   if (walkMode_ != Mode::Idle && walkIdx_ < walkCount_) {
     if (nowMs - lastSendMs_ < kPerPeerPaceMs) return;
     lastSendMs_ = nowMs;
@@ -77,12 +77,9 @@ void PaintDistributor::beginWalk(Mode mode) {
   walkCount_ = 0;
   for (const auto& e : inventorySnap) {
     if (walkCount_ >= kMaxWalkPeers) break;
-    // Multi-wisp coordination: only paint lamps THIS wisp claims via
-    // the shared WispRoster view. Without the roster (legacy / test
-    // path) every lamp gets painted (regression baseline). With it,
-    // lamps owned by a closer peer wisp get skipped — the peer paints
-    // them; we don't, so the lamp is only painted by one wisp at a
-    // time.
+    // Only paint lamps THIS wisp claims via the shared WispRoster view.
+    // Without a roster (tests) every lamp is painted. Lamps owned by a closer
+    // peer wisp are skipped so each lamp is painted by only one wisp.
     if (roster_ && !roster_->claims(e.mac)) continue;
     std::memcpy(walkMacs_[walkCount_], e.mac, 6);
     walkCount_++;
@@ -91,7 +88,6 @@ void PaintDistributor::beginWalk(Mode mode) {
   walkMode_ = walkCount_ ? mode : Mode::Idle;
   // Force the first send through immediately (lastSendMs_ in the past).
   lastSendMs_ = millis() - kPerPeerPaceMs;
-  // Debug-session telemetry: walk start gives a per-cycle health view.
   Serial.printf("[paint] walk %s peers=%u\n",
                 mode == Mode::Paint ? "Paint" : "Restore",
                 (unsigned)walkCount_);
@@ -99,31 +95,14 @@ void PaintDistributor::beginWalk(Mode mode) {
 
 void PaintDistributor::sendPaintToPeer(const uint8_t mac[6]) {
   if (!mesh_ || !palette_) return;
-  // Defensive: don't blast a peer with a zero-palette paint frame.
-  // The Aurora-default boot path flips paintMode on BEFORE any
-  // Aurora callback has populated currentPalette — without this
-  // gate the 10 s backstop walks every peer with an all-zero
-  // (black, fade=1500 ms) OVERRIDE_COLORS frame, which on the lamp
-  // side fights every BLE base-color edit the operator makes.
+  // Don't paint a zero-palette frame: the Aurora-default boot path flips
+  // paintMode on before any Aurora callback populates currentPalette.
+  // Without this gate the backstop blasts an all-zero (black) OVERRIDE that
+  // fights every BLE base-color edit on the lamp side.
   if (palette_->colors().empty()) return;
 
-  // TupleSampler picks two distinct authored palette colors per peer —
-  // FNV-1a + Stafford finalizer over (mac XOR salt), one salt per output
-  // (idxA, idxB, swap). t[0] → base, t[1] → shade; ~50% of MACs hit the
-  // swap branch so the (base, shade) order varies across the fleet.
-  //
-  // Send both as ONE combined frame using surface=BaseAndShade,
-  // numColors=2 (colors[0]=base, colors[1]=shade). This halves the
-  // ESP-NOW frame count per lamp per cycle vs the prior split-into-
-  // two-frames design, which became the dominant source of per-surface
-  // loss under BLE coex pressure (Base lost ~31%, Shade lost ~15% with
-  // 22-lamp fleet + BLE-connected app). Now both surfaces deliver
-  // atomically — either both colors land or both are lost — so the
-  // base-flicker pattern (base losing while shade keeps painting) is
-  // gone by construction.
-  //
-  // The prior 10ms inter-frame delay + the ESP_NOW_SEND_FAIL workaround
-  // it documented are no longer relevant.
+  // t[0] → base, t[1] → shade as ONE combined frame (surface=BaseAndShade,
+  // numColors=2) so both surfaces deliver atomically.
   ColorTuple t = sampleTupleForMac(*palette_, mac);
   uint8_t srcMac[6] = {0};
   mesh_->getMac(srcMac);
@@ -154,10 +133,8 @@ void PaintDistributor::sendRestoreToPeer(const uint8_t mac[6]) {
   uint8_t srcMac[6] = {0};
   mesh_->getMac(srcMac);
 
-  // One combined restore frame using surface=BaseAndShade. The lamp's
-  // handler dispatches it to BOTH per-surface ColorOverrides. Matches
-  // the sendPaintToPeer combined-frame model — one ESP-NOW packet per
-  // peer per cycle, atomic delivery.
+  // One combined restore frame (surface=BaseAndShade); the lamp dispatches it
+  // to both per-surface ColorOverrides. One packet per peer, atomic.
   uint8_t buf[lamp_protocol::RESTORE_FIXED_SIZE];
   size_t n = lamp_protocol::buildRestoreColors(
       buf, sizeof(buf), seqCounter_++,

@@ -1,26 +1,12 @@
-// PaintDistributor — fans out the active Aurora palette to every lamp in
-// the mesh roster as MSG_OVERRIDE_COLORS unicast frames.
+// PaintDistributor — fans out the active palette to every claimed lamp as
+// MSG_OVERRIDE_COLORS unicast frames. Triggers: palette change, paint:on,
+// a kBackstopRefreshMs refresh while on, and paint:off (which sends
+// MSG_RESTORE_COLORS instead).
 //
-// Triggers:
-//   - On palette change (Aurora callback) → walk roster, paint everyone.
-//   - On paint:on toggle (serial cmd, later: BLE MSG_WISP_OP) → same.
-//   - Every kBackstopRefreshMs while paintMode is on → refresh, in case
-//     a lamp missed a frame or just joined.
-//   - On paint:off → walk roster sending MSG_RESTORE_COLORS,
-//     surface=BaseAndShade, source=Wisp.
-//
-// Wire format (since 2026-06-11): each peer gets ONE combined
-// MSG_OVERRIDE_COLORS frame per cycle with `surface=BaseAndShade` and
-// `numColors=2` (colors[0]=base, colors[1]=shade). Halves ESP-NOW
-// unicast traffic per peer compared to the prior split-into-two-frames
-// design (Base then Shade with 10 ms delay between). Atomic delivery
-// for both surfaces — eliminates the asymmetric loss pattern measured
-// at ~31% Base / ~15% Shade under BLE coex pressure.
-//
-// Pacing: kPerPeerPaceMs (5 ms) between unicasts so ESP-NOW's send queue
-// doesn't back up with a single-shot fan-out of 12+ frames. The pacing
-// queue is just a "next peer index" cursor; tick() drains one peer per
-// pace interval.
+// Each peer gets ONE combined frame per cycle (surface=BaseAndShade,
+// numColors=2: colors[0]=base, colors[1]=shade) so both surfaces deliver
+// atomically. Sends are paced kPerPeerPaceMs apart so the ESP-NOW send queue
+// doesn't back up on a single-shot fan-out; tick() drains one peer per pace.
 
 #pragma once
 
@@ -71,9 +57,7 @@ class PaintDistributor {
   LampInventory* inventory_ = nullptr;
   MeshLink* mesh_ = nullptr;
   CurrentPalette* palette_ = nullptr;
-  // Roster is nullable for back-compat with code paths that haven't been
-  // wired through (mainly tests). When null, every in-range lamp gets
-  // painted (legacy behavior).
+  // Nullable (mainly tests). When null, every in-range lamp gets painted.
   WispRoster* roster_ = nullptr;
   bool paintMode_ = false;
   uint32_t lastBackstopMs_ = 0;
