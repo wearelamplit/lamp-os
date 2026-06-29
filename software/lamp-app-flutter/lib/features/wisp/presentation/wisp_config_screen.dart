@@ -141,20 +141,14 @@ class _WispBodyState extends ConsumerState<_WispBody> {
     final async = ref.watch(wispNotifierProvider(widget.lampId));
     return async.when(
       loading: () => const _WispLoading(),
-      // A read error here almost always means "this lamp doesn't have
-      // the wisp characteristic" — pre-FriendlyError, this dead-ended
-      // a user on a non-wisp lamp who switched to the Wisp tab. Now
-      // we render the no-wisp empty state, which surfaces the "No wisp
-      // detected" guidance and keeps the tab usable. Audit ux-H4.
+      // A read error almost always means this lamp has no wisp
+      // characteristic. Rendering the no-wisp empty state keeps the tab
+      // usable and surfaces "No wisp detected" guidance.
       error: (_, _) => const _NoWispEmpty(),
       data: (status) {
-        // Three-state UX: until the lamp's wispStatus is populated
-        // (mac populated → present == true), don't render the source
-        // picker or the manual-palette editor. Pre-fix, this fell
-        // through to _buildBody and showed the SharedPreferences-
-        // mirrored manual palette from a prior session — confusing
-        // because that palette was NOT what the wisp was actually
-        // painting (or there was no wisp at all).
+        // Gate on present: without it, an absent wisp would show the
+        // locally-mirrored manual palette from a prior session, which
+        // isn't what the wisp is actually painting.
         if (!status.present) {
           return const _NoWispEmpty();
         }
@@ -234,9 +228,7 @@ class _WispBodyState extends ConsumerState<_WispBody> {
                   const SizedBox(height: AppSpace.lg),
                 ],
                 // Wi-Fi only matters under Aurora — Off and Manual modes
-                // are mesh-only and don't need an internet backend. This
-                // row used to live at the bottom of the pane unconditionally
-                // (and that bottom slot now hosts the painted-lamps list).
+                // are mesh-only and don't need an internet backend.
                 WifiConfigRow(lampId: widget.lampId, status: status),
                 const SizedBox(height: AppSpace.lg),
                 CurrentZone(status: status),
@@ -262,7 +254,7 @@ class _WispBodyState extends ConsumerState<_WispBody> {
               ],
               const SizedBox(height: AppSpace.xl),
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
+                padding: const EdgeInsets.fromLTRB(16, 24, 16, AppSpace.sm),
                 child: Row(
                   children: [
                     Text(

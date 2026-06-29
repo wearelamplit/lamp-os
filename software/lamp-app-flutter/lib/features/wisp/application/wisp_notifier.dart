@@ -79,6 +79,7 @@ class WispNotifier extends _$WispNotifier {
 
   Set<String>? _claimedMacs;
   bool _claimsReadInFlight = false;
+  DateTime? _lastClaimsReadAt;
 
   /// The set of lamp bdAddrs the wisp currently claims, or null while
   /// the first CHAR_WISP_CLAIMS read is in flight. Empty set means the
@@ -121,6 +122,7 @@ class WispNotifier extends _$WispNotifier {
 
     _claimedMacs = null;
     _claimsReadInFlight = false;
+    _lastClaimsReadAt = null;
 
     ref.onDispose(() {
       _disposed = true;
@@ -171,7 +173,15 @@ class WispNotifier extends _$WispNotifier {
       next = _applySourceWriteGuard(next);
       _ingestManualPaletteFromStatus(next.currentPalette);
       _maybeRereadForPalette(next);
-      unawaited(_loadClaims());
+      // Throttle: claims change rarely; re-read at most once per ~3 s so we
+      // don't issue a BLE read on every ~2 s wispStatus notify.
+      final notifyNow = DateTime.now();
+      final lastRead = _lastClaimsReadAt;
+      if (lastRead == null ||
+          notifyNow.difference(lastRead) >= const Duration(seconds: 3)) {
+        _lastClaimsReadAt = notifyNow;
+        unawaited(_loadClaims());
+      }
       state = AsyncData(next);
       debugPrint(
         '[wisp_notifier] notify lamp=$lampId len=${bytes.length} '

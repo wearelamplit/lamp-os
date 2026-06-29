@@ -1,4 +1,4 @@
-// Phase C/D: BD_ADDR-keyed disposition cross-reference + lamp-emitted
+// BD_ADDR-keyed disposition cross-reference + lamp-emitted
 // nearby peer list.
 //
 // Three scenarios:
@@ -83,7 +83,7 @@ class _FakeControl extends ControlNotifier {
   }
 }
 
-/// Phase D: stub for lampNearbyPeersNotifierProvider that returns a
+/// Stub for lampNearbyPeersNotifierProvider that returns a
 /// static list without doing any BLE polling. Bypasses the
 /// Timer.periodic that the production notifier installs, so tests
 /// don't trip the framework's `!timersPending` invariant on dispose.
