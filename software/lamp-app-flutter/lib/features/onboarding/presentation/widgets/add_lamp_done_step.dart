@@ -256,7 +256,7 @@ class _WhatsNextCard extends StatelessWidget {
                   color: colorScheme.primary, size: 20),
               const SizedBox(width: AppSpace.sm),
               Text(
-                'First moves with $name',
+                'Getting to know $name',
                 style: textTheme.titleMedium,
               ),
             ],

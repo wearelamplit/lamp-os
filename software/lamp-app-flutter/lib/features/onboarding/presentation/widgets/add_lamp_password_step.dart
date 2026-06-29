@@ -76,6 +76,7 @@ class _AddLampPasswordStepState extends ConsumerState<AddLampPasswordStep> {
     final canContinue = state.password.isNotEmpty &&
         _confirm.text == state.password;
     final isVerifying = state.step == AddLampStep.verifying;
+    final name = state.name.isEmpty ? 'your lamp' : state.name;
     return Padding(
       padding: const EdgeInsets.all(AppSpace.xl),
       // SizedBox.expand fills the Padding's width so `crossAxisAlignment
@@ -196,7 +197,7 @@ class _AddLampPasswordStepState extends ConsumerState<AddLampPasswordStep> {
                             Text('Settling in…'),
                           ],
                         )
-                      : const Text('Welcome them home'),
+                      : Text('Take $name home'),
                 ),
               ],
             ),

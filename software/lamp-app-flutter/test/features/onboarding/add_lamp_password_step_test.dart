@@ -21,6 +21,24 @@ void main() {
         ),
       );
 
+  testWidgets('submit button label interpolates name as Take {name} home',
+      (tester) async {
+    final c = makeContainer();
+    addTearDown(c.dispose);
+
+    final notifier = c.read(addLampNotifierProvider.notifier);
+    notifier.select('test-lamp');
+    notifier.next(); // adoptConfirm → name
+    notifier.setName('Sparky');
+    notifier.next(); // name → password
+
+    await tester.pumpWidget(wrap(c));
+    await tester.pump();
+
+    expect(find.text('Take Sparky home'), findsOneWidget);
+    expect(find.text('Welcome them home'), findsNothing);
+  });
+
   testWidgets('hides password fields and shows Settling in… during verifying',
       (tester) async {
     final c = makeContainer();
