@@ -26,7 +26,7 @@ void main() {
     AddLampNotifier.verifyOpTimeout = const Duration(seconds: 10);
   });
 
-  test('select(deviceId) sets the id and advances to name step', () async {
+  test('select(deviceId) sets the id and advances to adoptConfirm step', () async {
     final ble = InMemoryBleClient();
     final c = ProviderContainer(
       overrides: [bleClientProvider.overrideWithValue(ble)],
@@ -35,7 +35,48 @@ void main() {
     c.read(addLampNotifierProvider.notifier).select('dev1');
     final s = c.read(addLampNotifierProvider);
     expect(s.deviceId, 'dev1');
-    expect(s.step, AddLampStep.name);
+    expect(s.step, AddLampStep.adoptConfirm);
+  });
+
+  test('next() from adoptConfirm goes to name', () {
+    final c = ProviderContainer(
+      overrides: [bleClientProvider.overrideWithValue(InMemoryBleClient())],
+    );
+    addTearDown(c.dispose);
+    final n = c.read(addLampNotifierProvider.notifier);
+    n.select('lamp-x');
+    n.next();
+    expect(c.read(addLampNotifierProvider).step, AddLampStep.name);
+  });
+
+  test('previous() from adoptConfirm goes to scan', () {
+    final c = ProviderContainer(
+      overrides: [bleClientProvider.overrideWithValue(InMemoryBleClient())],
+    );
+    addTearDown(c.dispose);
+    final n = c.read(addLampNotifierProvider.notifier);
+    n.select('lamp-x');
+    n.previous();
+    expect(c.read(addLampNotifierProvider).step, AddLampStep.scan);
+  });
+
+  test('previous() from name goes to scan', () {
+    final c = ProviderContainer(
+      overrides: [bleClientProvider.overrideWithValue(InMemoryBleClient())],
+    );
+    addTearDown(c.dispose);
+    final n = c.read(addLampNotifierProvider.notifier);
+    n.select('lamp-x');
+    n.next(); // adoptConfirm → name
+    n.previous();
+    expect(c.read(addLampNotifierProvider).step, AddLampStep.scan);
+  });
+
+  test('meet is gone and adoptConfirm is present in AddLampStep', () {
+    final names = AddLampStep.values.map((e) => e.name).toList();
+    expect(names, contains('adoptConfirm'));
+    expect(names, isNot(contains('meet')));
+    expect(names, isNot(contains('connecting')));
   });
 
   test('setName and setPassword update fields', () {

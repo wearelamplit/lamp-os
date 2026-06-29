@@ -4,11 +4,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/routing/routes.dart';
 import '../../../core/theme/app_spacing.dart';
-import '../../control/presentation/widgets/connecting_view.dart';
 import '../application/add_lamp_notifier.dart';
 import '../domain/add_lamp_state.dart';
 import 'widgets/add_lamp_done_step.dart';
-import 'widgets/add_lamp_meet_step.dart';
 import 'widgets/add_lamp_name_step.dart';
 import 'widgets/add_lamp_password_step.dart';
 import 'widgets/add_lamp_scan_step.dart';
@@ -66,18 +64,15 @@ class _AddLampShellState extends ConsumerState<AddLampShell> {
     final step = state.step;
     final body = switch (step) {
       AddLampStep.scan => const AddLampScanStep(),
-      AddLampStep.connecting => ConnectingView(deviceId: state.deviceId),
+      // ponytail: stub replaced by AdoptConfirmStep in Task 4
+      AddLampStep.adoptConfirm => const SizedBox.shrink(),
       AddLampStep.name => const AddLampNameStep(),
-      AddLampStep.meet => const AddLampMeetStep(),
       AddLampStep.password => const AddLampPasswordStep(),
       AddLampStep.verifying => const AddLampPasswordStep(),
       AddLampStep.done => const AddLampDoneStep(),
     };
-    // Hide progress dots while the user is on Scan (no process to track
-    // yet) or Connecting (transient, no user input). They appear once
-    // we land on Name and stay through Done.
-    final showDots =
-        step != AddLampStep.scan && step != AddLampStep.connecting;
+    // Hide progress dots on Scan; show from adoptConfirm through Done.
+    final showDots = step != AddLampStep.scan;
     return Scaffold(
       appBar: AppBar(
         // Explicit back affordance for the Scan step — pre-fix the user
@@ -101,10 +96,10 @@ class _AddLampShellState extends ConsumerState<AddLampShell> {
         bottom: showDots
             ? PreferredSize(
                 preferredSize: const Size.fromHeight(8),
-                // Name = 2 in the enum, but it's the first user-visible
-                // dot — subtract 2 so name=>0, meet=>1, password=>2,
+                // adoptConfirm=1 maps to dot 0; subtract 1 so
+                // adoptConfirm=>0, name=>1, password=>2,
                 // verifying=>3, done=>4 against the 5-dot row below.
-                child: _ProgressDots(currentIndex: step.index - 2),
+                child: _ProgressDots(currentIndex: step.index - 1),
               )
             : null,
       ),

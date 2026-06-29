@@ -56,17 +56,14 @@ class AddLampNotifier extends _$AddLampNotifier {
   AddLampState build() => const AddLampState();
 
   void select(String deviceId) {
-    // Record the picked device + jump to the Name form. We deliberately
-    // do NOT open the BLE link here: the user spends 30+ seconds in the
-    // Name + Password forms, and any idle link gets killed by Android's
-    // LINK_SUPERVISION_TIMEOUT, after which the next direct connect
-    // tends to fail with android-code 133. submit() opens the link
-    // immediately before the setup writes that need it, which is the
-    // same pattern ControlNotifier uses (connect-then-immediately-use,
-    // never sit idle on an open link).
+    // Record the picked device and jump to the adopt-confirm step. We
+    // deliberately do NOT open the BLE link here — the AdoptConfirmStep
+    // widget owns the connection pulse. submit() opens the link
+    // immediately before the setup writes that need it (connect-then-
+    // immediately-use, same pattern as ControlNotifier).
     state = state.copyWith(
       deviceId: deviceId,
-      step: AddLampStep.name,
+      step: AddLampStep.adoptConfirm,
     );
   }
 
@@ -75,10 +72,9 @@ class AddLampNotifier extends _$AddLampNotifier {
 
   void next() {
     state = state.copyWith(step: switch (state.step) {
-      AddLampStep.scan => AddLampStep.connecting,
-      AddLampStep.connecting => AddLampStep.name,
-      AddLampStep.name => AddLampStep.meet,
-      AddLampStep.meet => AddLampStep.password,
+      AddLampStep.scan => AddLampStep.scan,
+      AddLampStep.adoptConfirm => AddLampStep.name,
+      AddLampStep.name => AddLampStep.password,
       AddLampStep.password => AddLampStep.verifying,
       AddLampStep.verifying => AddLampStep.done,
       AddLampStep.done => AddLampStep.done,
@@ -88,10 +84,9 @@ class AddLampNotifier extends _$AddLampNotifier {
   void previous() {
     state = state.copyWith(step: switch (state.step) {
       AddLampStep.scan => AddLampStep.scan,
-      AddLampStep.connecting => AddLampStep.scan,
+      AddLampStep.adoptConfirm => AddLampStep.scan,
       AddLampStep.name => AddLampStep.scan,
-      AddLampStep.meet => AddLampStep.name,
-      AddLampStep.password => AddLampStep.meet,
+      AddLampStep.password => AddLampStep.name,
       AddLampStep.verifying => AddLampStep.password,
       AddLampStep.done => AddLampStep.password,
     });
