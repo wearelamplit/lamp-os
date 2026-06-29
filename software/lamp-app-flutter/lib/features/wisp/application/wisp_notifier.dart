@@ -200,6 +200,11 @@ class WispNotifier extends _$WispNotifier {
         if (_disposed) return WispStatus.empty;
       }
       _ingestManualPaletteFromStatus(initial.currentPalette);
+      // A full READ of the status completed, so the palette is now known --
+      // even when the wisp's manual palette is empty. Without this, an empty
+      // palette leaves _ingest's early-return path with _currentPaletteKnown
+      // false and the editor stuck on "reading from wisp" forever.
+      _currentPaletteKnown = true;
       _lastPaletteIdPrefix = initial.paletteIdPrefix;
       unawaited(_loadClaims());
       debugPrint(
