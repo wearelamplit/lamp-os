@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "components/network/wisp_claims_addr.hpp"
 #include "util/base64.hpp"
 #include "util/proximity.hpp"
 
@@ -617,9 +618,8 @@ size_t NearbyLamps::buildWispClaimsBlob(uint8_t* out, size_t outCap,
     return 1;
   }
   out[0] = count;
-  if (count > 0) {
-    std::memcpy(out + 1, snap.claimedLampMacs,
-                static_cast<size_t>(count) * 6);
+  for (uint8_t i = 0; i < count; ++i) {
+    ble_control::bdAddrFromMeshMac(snap.claimedLampMacs[i], out + 1 + static_cast<size_t>(i) * 6);
   }
   return needed;
 }
