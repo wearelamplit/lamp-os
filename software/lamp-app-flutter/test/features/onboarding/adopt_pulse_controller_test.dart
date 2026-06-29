@@ -59,6 +59,31 @@ void main() {
       });
     });
 
+    test('double start does not double pulse cadence', () {
+      fakeAsync((async) {
+        final ble = InMemoryBleClient();
+        final ctrl = AdoptPulseController(ble);
+
+        ctrl.start(deviceId, base);
+        async.flushMicrotasks();
+
+        // Second start cancels the first timer; only one timer should be active
+        ctrl.start(deviceId, base);
+        async.flushMicrotasks();
+
+        final countBefore = ble.writesTo(deviceId, BleUuids.expressionTest).length;
+
+        async.elapse(const Duration(milliseconds: 1500));
+
+        final delta = ble.writesTo(deviceId, BleUuids.expressionTest).length - countBefore;
+        // Single timer fires once per interval — not twice
+        expect(delta, 1);
+
+        ctrl.stop();
+        async.flushMicrotasks();
+      });
+    });
+
     test('stop is idempotent — second call does not throw', () {
       fakeAsync((async) {
         final ble = InMemoryBleClient();

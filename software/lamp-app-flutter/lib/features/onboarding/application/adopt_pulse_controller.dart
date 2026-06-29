@@ -23,13 +23,14 @@ class AdoptPulseController {
   bool _stopped = false;
 
   Future<void> start(String deviceId, LampColor baseColor) async {
+    _timer?.cancel();
     _deviceId = deviceId;
     _stopped = false;
     final washed = washedOutBright(baseColor);
     await _ble.connect(deviceId);
     await _writePulse(deviceId, washed);
     _timer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
-      _writePulse(deviceId, washed);
+      unawaited(_writePulse(deviceId, washed));
     });
   }
 
