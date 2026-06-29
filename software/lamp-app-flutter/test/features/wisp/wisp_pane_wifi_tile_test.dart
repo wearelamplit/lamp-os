@@ -12,10 +12,19 @@ import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/features/inventory/application/inventory_notifier.dart';
 import 'package:lamp_app/features/inventory/domain/inventory_lamp.dart';
+import 'package:lamp_app/features/social/application/lamp_nearby_peers_notifier.dart';
+import 'package:lamp_app/features/social/domain/lamp_nearby_peer.dart';
 import 'package:lamp_app/features/wisp/application/wisp_notifier.dart';
 import 'package:lamp_app/features/wisp/presentation/wisp_config_screen.dart';
 
 import '../../_support/seed.dart';
+
+// Stub that returns an empty peer list without starting the 1Hz polling
+// timer, so the FakeAsync zone in testWidgets stays timer-clean.
+class _FakeLampNearbyPeers extends LampNearbyPeersNotifier {
+  @override
+  Future<List<LampNearbyPeer>> build(String lampId) async => const [];
+}
 
 const _devId = 'lamp-x';
 
@@ -41,7 +50,11 @@ Future<ProviderContainer> _makeContainer({
     Uint8List.fromList(utf8.encode(wifiStateJson)),
   );
   final c = ProviderContainer(
-    overrides: [bleClientProvider.overrideWithValue(ble)],
+    overrides: [
+      bleClientProvider.overrideWithValue(ble),
+      lampNearbyPeersNotifierProvider(_devId)
+          .overrideWith(() => _FakeLampNearbyPeers()),
+    ],
   );
   await c.read(inventoryNotifierProvider.future);
   await c.read(inventoryNotifierProvider.notifier).add(const InventoryLamp(
@@ -157,7 +170,11 @@ void main() {
     );
     SharedPreferences.setMockInitialValues({});
     final c = ProviderContainer(
-      overrides: [bleClientProvider.overrideWithValue(ble)],
+      overrides: [
+        bleClientProvider.overrideWithValue(ble),
+        lampNearbyPeersNotifierProvider(_devId)
+            .overrideWith(() => _FakeLampNearbyPeers()),
+      ],
     );
     addTearDown(c.dispose);
     await c.read(inventoryNotifierProvider.future);
@@ -223,7 +240,11 @@ void main() {
     );
     SharedPreferences.setMockInitialValues({});
     final c = ProviderContainer(
-      overrides: [bleClientProvider.overrideWithValue(ble)],
+      overrides: [
+        bleClientProvider.overrideWithValue(ble),
+        lampNearbyPeersNotifierProvider(_devId)
+            .overrideWith(() => _FakeLampNearbyPeers()),
+      ],
     );
     addTearDown(c.dispose);
     await c.read(inventoryNotifierProvider.future);

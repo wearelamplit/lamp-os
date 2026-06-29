@@ -15,16 +15,40 @@ import '../../control/presentation/widgets/color_picker_sheet.dart';
 import '../../control/presentation/widgets/connecting_view.dart';
 import '../../control/presentation/widgets/disconnect_aware_body.dart';
 import '../../control/presentation/widgets/lamp_color_swatch.dart';
-import '../../inventory/application/inventory_notifier.dart';
-import '../../inventory/domain/inventory_lamp.dart';
 import '../../lamp_shell/presentation/widgets/wifi_network_picker.dart';
+import '../../social/application/lamp_nearby_peers_notifier.dart';
+import '../../social/domain/lamp_nearby_peer.dart';
 import '../application/wisp_notifier.dart';
 import '../domain/tuple_sampler.dart';
-import '../domain/wisp_claims.dart';
 import '../domain/wisp_source_mode.dart';
 import '../domain/wisp_status.dart';
 import '../domain/zone_source.dart';
 import 'palette_gradient_bar.dart';
+
+class PaintedLampEntry {
+  const PaintedLampEntry({required this.bdAddr, required this.name});
+  final String bdAddr;
+  final String name;
+}
+
+// Membership is the claimed bdAddr set (all claimed lamps show). Name is
+// resolved from the connected lamp's nearby peers; an unresolved claim shows
+// with its last two bdAddr octets so it is never dropped.
+List<PaintedLampEntry> resolvePaintedLamps({
+  required Set<String>? claimed,
+  required List<LampNearbyPeer> peers,
+}) {
+  if (claimed == null) return const [];
+  final byBd = {for (final p in peers) p.bdAddr.toUpperCase(): p.name};
+  return [
+    for (final bd in claimed)
+      PaintedLampEntry(
+        bdAddr: bd,
+        name: byBd[bd.toUpperCase()] ??
+            'Lamp ${bd.length >= 5 ? bd.substring(bd.length - 5) : bd}',
+      ),
+  ];
+}
 
 /// Wisp config — controls how the wisp drives the lamp grid's paint.
 ///
@@ -1192,12 +1216,9 @@ class _WifiConfigRowState extends ConsumerState<_WifiConfigRow> {
   }
 }
 
-// Lists inventory lamps the wisp currently claims, with the two colors it
-// paints on each (base + shade). The claimed set comes from CHAR_WISP_CLAIMS
-// ([count][mac*6]); the preview re-runs sampleTupleForMac locally. Both key on
-// the lamp's mesh MAC via meshMacFromBleId. iOS exposes an opaque BLE UUID, not
-// a MAC, so the mesh MAC can't be derived there and the lamp is dropped from
-// the filter and preview.
+// Lists lamps the wisp currently claims, with the two colors it paints on each
+// (base + shade). Membership comes from CHAR_WISP_CLAIMS (bdAddr set); names
+// resolve from the connected lamp's nearby-peer report.
 class _PaintedLampsList extends ConsumerWidget {
   const _PaintedLampsList({required this.lampId});
 
@@ -1208,90 +1229,62 @@ class _PaintedLampsList extends ConsumerWidget {
     final notifier = ref.read(wispNotifierProvider(lampId).notifier);
     ref.watch(wispNotifierProvider(lampId));
     final palette = notifier.savedManualPalette;
-    final claimedMacs = notifier.claimedMacs;
-    final inventoryAsync = ref.watch(inventoryNotifierProvider);
-    return inventoryAsync.when(
-      loading: () => const Padding(
+    final claimedMacs = notifier.claimedMacs; // Set<String>? of bdAddrs
+    final peersAsync = ref.watch(lampNearbyPeersNotifierProvider(lampId));
+    final peers = peersAsync.value ?? const <LampNearbyPeer>[];
+
+    // claimedMacs == null: claims unavailable (legacy lamp / timeout) -> show
+    // every nearby peer rather than blocking or hiding.
+    final entries = claimedMacs == null
+        ? [for (final p in peers) PaintedLampEntry(bdAddr: p.bdAddr, name: p.name)]
+        : resolvePaintedLamps(claimed: claimedMacs, peers: peers);
+
+    if (entries.isEmpty) {
+      return const Padding(
         padding: EdgeInsets.symmetric(vertical: 12),
-        child: Text(
-          'Loading…',
-          style: TextStyle(color: BrandColors.fogGrey, fontSize: 12),
+        child: Text('No lamps claimed by this wisp right now.',
+            style: TextStyle(color: BrandColors.fogGrey, fontSize: 12)),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 4, bottom: 12),
+          child: Text(
+            palette.isEmpty
+                ? "The wisp hasn't published a palette yet — once it "
+                    "does, this will preview each lamp's two colors."
+                : "App-side preview from the wisp's published palette. "
+                    "The physical lamps are the source of truth.",
+            style: const TextStyle(
+              color: BrandColors.fogGrey,
+              fontSize: 11,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
         ),
-      ),
-      error: (_, _) => const Padding(
-        padding: EdgeInsets.symmetric(vertical: 12),
-        child: Text(
-          "Couldn't load inventory.",
-          style: TextStyle(color: BrandColors.fogGrey, fontSize: 12),
-        ),
-      ),
-      data: (lamps) {
-        if (lamps.isEmpty) {
-          return const Padding(
-            padding: EdgeInsets.symmetric(vertical: 12),
-            child: Text(
-              "No lamps in your inventory yet.",
-              style: TextStyle(color: BrandColors.fogGrey, fontSize: 12),
-            ),
-          );
-        }
-        // Null = the lamp can't report claims (legacy firmware, or not yet
-        // read): show the full inventory rather than filtering or blocking.
-        final claimed = claimedMacs == null
-            ? lamps
-            : lamps.where((l) {
-                final mac = meshMacFromBleId(l.id);
-                return mac != null &&
-                    claimedMacs.contains(macBytesToString(mac));
-              }).toList();
-        if (claimedMacs != null && claimed.isEmpty) {
-          return const Padding(
-            padding: EdgeInsets.symmetric(vertical: 12),
-            child: Text(
-              'No lamps claimed by this wisp right now.',
-              style: TextStyle(color: BrandColors.fogGrey, fontSize: 12),
-            ),
-          );
-        }
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(top: 4, bottom: 12),
-              child: Text(
-                palette.isEmpty
-                    ? "The wisp hasn't published a palette yet — once it "
-                        "does, this will preview each lamp's two colors."
-                    : "App-side preview from the wisp's published palette. "
-                        "The physical lamps are the source of truth.",
-                style: const TextStyle(
-                  color: BrandColors.fogGrey,
-                  fontSize: 11,
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-            ),
-            for (final lamp in claimed)
-              _PaintedLampRow(
-                lamp: lamp,
-                palette: palette,
-              ),
-          ],
-        );
-      },
+        for (final e in entries)
+          _PaintedLampRow(bdAddr: e.bdAddr, name: e.name, palette: palette),
+      ],
     );
   }
 }
 
 class _PaintedLampRow extends StatelessWidget {
-  const _PaintedLampRow({required this.lamp, required this.palette});
+  const _PaintedLampRow({
+    required this.bdAddr,
+    required this.name,
+    required this.palette,
+  });
 
-  final InventoryLamp lamp;
+  final String bdAddr;
+  final String name;
   final List<LampColor> palette;
 
   @override
   Widget build(BuildContext context) {
-    final mac = meshMacFromBleId(lamp.id);
+    final mac = meshMacFromBleId(bdAddr); // bdAddr - 2 = mesh MAC
     final prediction = (mac == null || palette.isEmpty)
         ? null
         : predictTuple(mac: mac, palette: palette);
@@ -1301,7 +1294,7 @@ class _PaintedLampRow extends StatelessWidget {
         children: [
           Expanded(
             child: Text(
-              lamp.name,
+              name,
               style: const TextStyle(
                 color: BrandColors.lampWhite,
                 fontSize: 14,
