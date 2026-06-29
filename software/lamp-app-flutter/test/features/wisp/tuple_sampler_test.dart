@@ -33,19 +33,19 @@ void main() {
     });
   });
 
-  group('meshMacFromBleId', () {
+  group('meshMacFromBdAddr', () {
     test('subtracts 2 (ESP32 BLE -> STA/mesh)', () {
-      expect(meshMacFromBleId('FC:B4:67:F1:DD:A6'),
+      expect(meshMacFromBdAddr('FC:B4:67:F1:DD:A6'),
           equals([0xFC, 0xB4, 0x67, 0xF1, 0xDD, 0xA4]));
     });
 
     test('borrows across the octet boundary', () {
-      expect(meshMacFromBleId('AA:BB:CC:DD:EE:01'),
+      expect(meshMacFromBdAddr('AA:BB:CC:DD:EE:01'),
           equals([0xAA, 0xBB, 0xCC, 0xDD, 0xED, 0xFF]));
     });
 
     test('null for non-MAC ids', () {
-      expect(meshMacFromBleId('opaque-uuid'), isNull);
+      expect(meshMacFromBdAddr('opaque-uuid'), isNull);
     });
   });
 

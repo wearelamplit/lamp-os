@@ -1285,7 +1285,7 @@ class _PaintedLampRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final mac = meshMacFromBleId(bdAddr); // bdAddr - 2 = mesh MAC
+    final mac = meshMacFromBdAddr(bdAddr); // bdAddr - 2 = mesh MAC
     final prediction = (mac == null || palette.isEmpty)
         ? null
         : predictTuple(mac: mac, palette: palette);
