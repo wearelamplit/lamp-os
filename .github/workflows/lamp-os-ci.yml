@@ -1,6 +1,8 @@
 # workflows adapted from the WLED project using PlatformIO
 name: LampOS CI
 
+# Compile + native-test gate for PRs and non-dev branch pushes. The full
+# distribution build (build.yml) is reserved for releases — not run per PR.
 on:
   push:
     branches-ignore:
@@ -8,5 +10,19 @@ on:
   pull_request:
 
 jobs:
-  lamp_os_build:
-    uses: ./.github/workflows/build.yml
+  check:
+    name: Compile + native tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - name: Install PlatformIO
+        run: pip install -r requirements.txt
+      - name: Compile firmware
+        run: npm run lamp:build
+      - name: Native tests
+        run: npm run lamp:test
