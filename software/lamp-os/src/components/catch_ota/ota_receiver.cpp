@@ -15,12 +15,9 @@
 #include <esp_task_wdt.h>
 #include <esp_wifi.h>
 #include <spi_flash_mmap.h>  // SPI_FLASH_SEC_SIZE
-// Low-level IWDT (Interrupt-Watchdog) control. A W25Q block erase can hold
-// interrupts off for 50-750 ms under cache-disable bursts, well past the
-// IWDT stage timeout that the IDF tick_hook re-applies every FreeRTOS tick.
-// We widen the stage timeout right before each block erase using the
-// "not public api" hal surface, the least-bad option until upstream exposes
-// a runtime IWDT reconfigure call.
+// Low-level IWDT control via the non-public hal surface (the IDF exposes no
+// runtime IWDT reconfigure). A 64 KB block erase holds interrupts off long
+// enough to trip the IWDT stage timeout, so we widen it before each erase.
 #include "hal/wdt_hal.h"
 #include "hal/mwdt_ll.h"
 #include "soc/timer_group_reg.h"
@@ -88,13 +85,9 @@ void restoreDefaultWdt() {
   esp_task_wdt_reconfigure(&wdtDefault);
 }
 
-// Post-commit failure recovery. radioEnterOtaMode() tore down softAP/BLE at the
-// committed OFFER and no failure path restores main's normal radio — the lamp is
-// left with no web-config AP until a manual power-cycle. Reboot instead: a
-// clean boot brings back the AP, ch11 discovery, and BLE. Loop-safety comes
-// from the breaker — every committed attempt is counted at the commit point,
-// so a deterministically-failing image gives up after kMaxAttempts. The short
-// settle lets the in-flight ESP-NOW RESULT frame actually transmit first.
+// Post-commit failures have no path back to main's normal radio (softAP + BLE
+// were torn down at commit), so reboot — a clean boot restores them. The
+// breaker bounds the loop; the settle lets the in-flight RESULT frame transmit.
 [[noreturn]] void rebootAfterOtaFailure() {
   delay(150);
   esp_restart();
@@ -362,11 +355,9 @@ void onOffer(const ParsedFwOffer& offer, const uint8_t devMac[6]) {
   espnowReinit();
   espnowAddPeer(devMac);
 #endif
-  // Count the attempt at the commit point, not after a successful erase: any
-  // post-commit failure below reboots to restore the radio, so the breaker must
-  // have already counted this attempt or a deterministic failure loops forever.
-  // Re-OFFERs of an in-progress session hit the busy/re-ACK path above and
-  // never reach here, so this still fires exactly once per genuine attempt.
+  // Count the attempt now, at commit: every post-commit failure below reboots,
+  // so the breaker must have counted before then or a deterministic failure
+  // loops forever. Re-OFFERs of a live session take the busy path above.
   recordAttempt(offer.sha256Prefix);
 
   // Begin a new flow. Snapshot the OFFER first.
@@ -418,12 +409,9 @@ void onOffer(const ParsedFwOffer& offer, const uint8_t devMac[6]) {
   };
   esp_task_wdt_reconfigure(&wdtWide);
 
-  // Upfront full-region erase: erase the ENTIRE image region NOW, before
-  // ACCEPT goes out. Nothing is in flight yet (the distributor hasn't been
-  // ACCEPTed), so the recv path that follows is a pure write — no per-chunk
-  // erase. 64 KB block granularity uses the chip's faster block-erase opcode;
-  // we re-widen the IWDT before each block because a block holds interrupts
-  // off for its whole duration.
+  // Erase the whole image region up front, before ACCEPT — nothing is in flight
+  // yet, so the recv path is pure write. 64 KB block granularity; re-widen the
+  // IWDT per block since each erase holds interrupts off for its duration.
   {
     constexpr size_t kBlock = 64u * 1024u;
     const size_t eraseLen = numSectors * kSector;

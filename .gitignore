@@ -33,3 +33,7 @@ node_modules/
 software/lamp-os/managed_components/
 software/lamp-os/.dummy/
 software/lamp-os/sdkconfig.*
+
+# superpowers planning artifacts (kept local, not committed)
+docs/superpowers/
+.superpowers/

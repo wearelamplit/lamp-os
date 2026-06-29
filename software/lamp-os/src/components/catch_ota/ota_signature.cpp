@@ -7,19 +7,12 @@
 #include <Arduino.h>
 #endif
 
-// mbedTLS for streaming SHA-256: init/starts/update/finish/free. We stream
-// the signed region in 4 KB blocks via the FirmwareByteReader and feed
-// each block straight into mbedtls_sha256_update so we never have to
-// buffer the full firmware image (1.4 MB) on the lamp's ~280 KB heap.
+// mbedTLS streaming SHA-256 over the signed region (4 KB blocks via the
+// FirmwareByteReader) so the 1.4 MB image is never resident on the ~280 KB heap.
 #include <mbedtls/sha256.h>
 
-// libsodium is unconditionally available in framework-arduinoespressif32-libs;
-// the header lives under `sodium/` in the SDK include path. No `lib_deps`
-// change is required — the prebuilt lib auto-links when the header is
-// included from a translation unit.
-//
-// Native test rig overrides the verify call (see test/test_catch_ota_signature/)
-// so we don't have to vendor libsodium for the host toolchain.
+// ed25519 verify via libsodium (prebuilt in the Arduino framework libs,
+// auto-links on include). The native test rig substitutes its own verify shim.
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 #include <sodium/crypto_sign_ed25519.h>
 #endif
@@ -30,13 +23,9 @@ namespace catch_ota {
 
 namespace {
 
-// Static buffer for the channel string returned via outChannel.
-// kLsigChannelLen bytes + 1 null terminator. This is intentionally
-// module-static so callers can hold a pointer without worrying about
-// lifetime — but they MUST consume the value before another thread
-// re-enters verifySignedFirmware. In the lamp's actual flow, verify is
-// called from the Core 1 state machine only, so concurrent re-entry is
-// structurally impossible.
+// Module-static so the returned pointer outlives the call; the caller must
+// consume it before the next verifySignedFirmware (serial on the loop task,
+// no concurrent re-entry).
 char g_channelOut[kLsigChannelLen + 1] = {0};
 
 inline uint32_t readU32LE(const uint8_t* p) {
@@ -46,16 +35,11 @@ inline uint32_t readU32LE(const uint8_t* p) {
        | (static_cast<uint32_t>(p[3]) << 24);
 }
 
-// Block size for the streaming SHA-256 pass. Sized to one flash sector
-// so the reader's call cadence matches the natural esp_partition_read
-// granularity on the lamp's W25Q. The buffer is heap-allocated inside
-// verifySignedFirmware — keeping it on the Arduino loopTask stack
-// (8 KB total) blew the stack canary in combination with the mbedtls
-// SHA-256 context + libsodium ed25519 verify scratch (~several KB) +
-// regular call-frame overhead. Hardware capture showed a "Stack canary
-// watchpoint triggered (loopTask)" Guru Meditation immediately after
-// the verify path opened this buffer. Heap path keeps total resident
-// RAM identical (~4 KB) without consuming the verify task's stack.
+// Block size for the streaming SHA-256 pass — one flash sector, matching
+// esp_partition_read granularity. verifySignedFirmware heap-allocates this, NOT
+// on the loopTask's 8 KB stack: stack-allocating it alongside the mbedtls
+// SHA-256 + libsodium ed25519 scratch overflows the stack canary. Same ~4 KB
+// resident either way.
 constexpr size_t kStreamBlockBytes = 4096;
 
 }  // namespace
@@ -65,17 +49,13 @@ bool verifySignedFirmware(FirmwareByteReader reader, size_t imageLen,
   if (!reader) return false;
   if (imageLen < kLsigFooterLen) return false;
 
-  // Step 1: read the 96-byte LSIG footer up-front. The footer fields
-  // (magic, channel, version, signedRegionLen, signature) drive every
-  // subsequent decision; reading them first means we can short-circuit
-  // bad-magic / bad-length rejections before doing any hash math.
+  // Footer first: its fields gate every later step, so bad magic / length
+  // reject before any hash math.
   uint8_t footer[kLsigFooterLen] = {0};
   const size_t footerOffset = imageLen - kLsigFooterLen;
   const int footerRead = reader(footerOffset, kLsigFooterLen, footer);
   if (footerRead != static_cast<int>(kLsigFooterLen)) return false;
 
-  // Magic check — short-circuits the cheap rejections before we touch
-  // the hash + signature math.
   if (std::memcmp(footer + kLsigMagicOffset, "LSIG", kLsigMagicLen) != 0) {
     return false;
   }
@@ -103,12 +83,7 @@ bool verifySignedFirmware(FirmwareByteReader reader, size_t imageLen,
     return false;
   }
 
-  // Step 2: stream-compute SHA-256 over the signed region. We read in
-  // kStreamBlockBytes (4 KB) chunks from the reader, feeding each
-  // chunk straight into mbedtls_sha256_update. Total RAM footprint
-  // for the verify pass: ~200 B of SHA context + 4 KB stack block
-  // buffer + 96 B footer + 32 B digest. The full ~1.4 MB firmware is
-  // never resident in heap.
+  // Stream SHA-256 over the signed region in kStreamBlockBytes chunks.
   mbedtls_sha256_context shaCtx;
   mbedtls_sha256_init(&shaCtx);
   // mbedTLS API: 0 = SHA-256 (not SHA-224). Returns 0 on success.
@@ -117,11 +92,7 @@ bool verifySignedFirmware(FirmwareByteReader reader, size_t imageLen,
     return false;
   }
 
-  // Heap-allocated read buffer — see kStreamBlockBytes comment for why
-  // this can't live on the loopTask stack. std::unique_ptr<uint8_t[]>
-  // gives us RAII cleanup on every return path below (including the
-  // mbedtls_sha256_update failure path) without dancing around manual
-  // free() calls.
+  // Heap, not stack — see kStreamBlockBytes. unique_ptr frees on every return.
   auto blockBuf = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[kStreamBlockBytes]);
   if (!blockBuf) {
     mbedtls_sha256_free(&shaCtx);
@@ -158,12 +129,9 @@ bool verifySignedFirmware(FirmwareByteReader reader, size_t imageLen,
   Serial.println();
 #endif
 
-  // Step 3: ed25519-verify the signature against the SHA-256 digest.
-  // The signing tool signs SHA256(signed region) — not the raw region —
-  // so verify_detached's message argument is the 32-byte digest, fully
-  // constant-size, regardless of the firmware image size.
-  //
-  // Signature lives at bytes [32..96) of the footer.
+  // ed25519-verify the signature over the 32-byte SHA-256 digest (the signer
+  // signs the digest, not the raw region) — constant-size message.
+  // Signature lives at footer bytes [32..96).
   const uint8_t* signature = footer + kLsigSignatureOffset;
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)

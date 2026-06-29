@@ -27,14 +27,8 @@ void espnowReinit();
 // Call espnowAddPeer for any unicast target before the first send.
 bool espnowSend(const uint8_t mac[6], const uint8_t* data, size_t len);
 
-// Drain all frames queued by the WiFi-task trampoline and invoke RecvFn for
-// each one. Must be called from the loop task only.
-//
-// SPSC contract: the WiFi-task trampoline is the sole producer — it writes
-// frames into the ring and advances head. espnowPoll is the sole consumer —
-// it reads frames and advances tail. No locking is required; std::atomic
-// head/tail with release/acquire ordering enforce slot-body visibility across
-// the two cores.
+// Drain all frames the WiFi-task trampoline queued, invoking RecvFn for each.
+// Loop task only. SPSC ring; see espnow_link.cpp for the release/acquire detail.
 void espnowPoll();
 
 }  // namespace catch_ota

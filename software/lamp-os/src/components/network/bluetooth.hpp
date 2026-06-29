@@ -37,7 +37,6 @@ namespace lamp {
 // Stop BLE scan and suppress the automatic restart in onScanEnd.
 void bleStopScanNoRestart();
 
-// Stop BLE advertising.
 void bleStopAdvertising();
 
 /**

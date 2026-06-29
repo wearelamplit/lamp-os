@@ -2,14 +2,8 @@
 
 // Ed25519 signature verification for OTA-received firmware images.
 //
-// Backend: libsodium's `crypto_sign_ed25519_verify_detached`. We use
-// libsodium (not mbedTLS) for the ed25519 verify because pioarduino's
-// prebuilt mbedTLS does NOT ship with the Everest Ed25519 module
-// compiled in — see the wisp-OTA reconciliation doc's "Ed25519 backend"
-// section. libsodium is unconditionally present in
-// framework-arduinoespressif32-libs and links cleanly; no `lib_deps`
-// change required. For the SHA-256 streaming hash we use mbedTLS
-// (which is available + has a clean init/update/finish API).
+// Backend: libsodium for the ed25519 verify (pioarduino's prebuilt mbedTLS has
+// no Everest Ed25519 module compiled in); mbedTLS for the streaming SHA-256.
 //
 // Streaming verify:
 //
