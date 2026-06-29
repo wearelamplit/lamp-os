@@ -264,6 +264,14 @@ void StatusBeacon::emitStatus() {
   char jsonBuf[kStatusJsonBufLen];
   const size_t jsonLen = buildWispStatusJson(
       fields, jsonBuf, sizeof(jsonBuf), lamp_protocol::CONTROL_MAX_PAYLOAD);
+
+  // Broadcast the manualPalette first, independent of the wispStatus frame: a
+  // wispStatus build/overflow failure below must not also take the palette
+  // down (the app reads both off CHAR_WISP_STATUS). emitPalette() is broken
+  // out so WispOpDispatcher can also call it on a setManualPalette write for
+  // sub-30-s convergence.
+  emitPalette();
+
   if (jsonLen == 0) {
     Serial.println("[wisp.beacon] wispStatus JSON build failed");
     return;
@@ -303,11 +311,6 @@ void StatusBeacon::emitStatus() {
     return;
   }
   mesh_->broadcast(frame, frameLen);
-
-  // Piggyback the manualPalette broadcast on the same wispStatus tick.
-  // emitPalette() is broken out so WispOpDispatcher can also call it on a
-  // setManualPalette write for sub-30-s convergence.
-  emitPalette();
 }
 
 void StatusBeacon::emitPalette() {
