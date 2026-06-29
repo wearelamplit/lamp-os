@@ -11,42 +11,25 @@ part 'nearby_lamps_notifier.g.dart';
 
 const _staleAfter = Duration(seconds: 30);
 
-/// How often to sweep the roster and prune stale entries. Without this,
-/// a lamp that goes silently out of range while no other lamp emits an
-/// adv would stick in `state` forever — `_onAd` is the only thing that
-/// rebuilds the list, and it only fires when an adv lands.
+/// How often to sweep the roster and prune stale entries. Without it, a lamp
+/// that goes silently out of range while no other lamp emits an adv would
+/// stick in `state` forever (`_onAd` only rebuilds when an adv lands).
 const _pruneInterval = Duration(seconds: 5);
 
-/// Minimum gap between back-to-back pre-warm requests for the same
-/// device id. Scanner emits the same lamp's adv ~16-30 times per
-/// second; without a debounce we'd hammer `BleClient.prewarm` 16-30
-/// times per second per paired lamp. 10 seconds is comfortably long
-/// enough to cover the BLE connect handshake + service discovery
-/// without re-triggering until well after the work has completed.
+/// Minimum gap between back-to-back prewarm requests for the same device id.
+/// 10 s comfortably covers the BLE connect handshake + service discovery so a
+/// lamp's 16-30 Hz adv stream doesn't re-trigger prewarm before it completes.
 const _prewarmDebounce = Duration(seconds: 10);
 
-/// Maximum rate at which `state` is re-emitted to consumers. A 22-lamp
-/// fleet emits ~44 advs/sec; without this throttle every consumer that
-/// `ref.watch`es the roster (My Lamps tile list, social screen, picker
-/// sheet, ...) would rebuild at 44 Hz. The leading-edge debounce below
-/// emits the FIRST change in any window immediately (so a new lamp
-/// appears in the UI within ~16 ms of its first adv) and coalesces
-/// subsequent changes inside the window into a single trailing emit.
-///
-/// Window grew from 500 → 1000 ms after bench feedback that the
-/// resulting ~4 Hz rebuild rate produced subtle UI shimmer on the
-/// social tab. 1000 ms gives ~2 Hz steady state — visibly calm without
-/// making new-lamp arrivals feel laggy (worst case ~1 s from first
-/// adv to first render, still inside "appeared as soon as the user
-/// looked").
+/// Max rate `state` is re-emitted to consumers. Leading-edge: the first change
+/// in a window emits immediately (a new lamp appears within ~16 ms); later
+/// changes coalesce into one trailing emit. 1000 ms keeps a 22-lamp fleet's
+/// ~44 advs/sec from rebuilding every roster watcher at 44 Hz.
 const _stateEmitWindow = Duration(milliseconds: 1000);
 
-// Scoped to consumers — when no screen watches `nearbyLampsNotifierProvider`
-// (the only legitimate consumer of the BLE scanner now that LampShell and
-// Control screen no longer read it), the notifier auto-disposes and the
-// `ref.onDispose` in its build() calls `scanner.stop()`. That hands the
-// scan budget back to Android instead of holding it through screens that
-// don't need it. See plan: /Users/jerrett/.claude/plans/gleaming-swimming-avalanche.md
+// Scoped to consumers: when no screen watches `nearbyLampsNotifierProvider`
+// the notifier auto-disposes and its `ref.onDispose` calls `scanner.stop()`,
+// handing the scan budget back to Android.
 @Riverpod(name: 'bleScannerProvider')
 BleScanner bleScanner(Ref ref) => FbpBleScanner();
 
@@ -58,12 +41,10 @@ class NearbyLampsNotifier extends _$NearbyLampsNotifier {
   // value is the wall-clock ms of the last prewarm dispatch.
   final Map<String, int> _lastPrewarmMsById = {};
   // Latest computed roster waiting to be flushed to `state`. Null when
-  // there's nothing pending. Used by the leading-edge emit throttle.
+  // nothing is pending. Used by the leading-edge emit throttle.
   List<NearbyLamp>? _pendingRoster;
-  // True while the throttle window is "open" — within this window we
-  // accumulate into `_pendingRoster` instead of emitting immediately.
-  // The trailing-edge timer below flushes whatever's pending when the
-  // window closes.
+  // True while the throttle window is open: accumulate into `_pendingRoster`
+  // instead of emitting. The trailing-edge timer flushes when it closes.
   Timer? _emitWindowTimer;
 
   @override
@@ -110,25 +91,17 @@ class NearbyLampsNotifier extends _$NearbyLampsNotifier {
     ];
     _sortRoster(next);
     _scheduleStateEmit(next);
-    // Lazy-start the prune timer on first adv. Widget tests that don't
-    // pipe through the scanner stream never create a timer and so don't
-    // trip the test framework's `!timersPending` invariant check; in
-    // production this fires on the very first lamp adv (well under a
-    // second after build()), so the periodic-prune semantics are
-    // effectively unchanged.
+    // Lazy-start the prune timer on first adv. Widget tests that don't pipe
+    // through the scanner never create a timer, so they don't trip the test
+    // framework's `!timersPending` check.
     _pruneTimer ??= Timer.periodic(_pruneInterval, (_) => _prune());
     _maybePrewarm(ad, now);
   }
 
-  /// Leading-edge emit throttle (audit M1). Without this, every adv on
-  /// a 22-lamp fleet (~44 Hz) triggered a `state =` assignment which
-  /// rebuilt every consumer that wasn't using `.select()`. With this:
-  ///   - First adv in any 500 ms window emits immediately (so a new
-  ///     lamp shows up in the UI within ~16 ms of its first adv).
-  ///   - Subsequent advs in the same window land in `_pendingRoster`.
-  ///   - When the window closes, if `_pendingRoster` is non-null and
-  ///     differs from the current `state`, flush it. If nothing has
-  ///     changed materially, we silently skip the emit.
+  /// Leading-edge emit throttle. Without it, every adv on a 22-lamp fleet
+  /// (~44 Hz) reassigned `state` and rebuilt every consumer not using
+  /// `.select()`. First adv in a window emits immediately; later advs land in
+  /// `_pendingRoster` and flush when the window closes (skipped if unchanged).
   void _scheduleStateEmit(List<NearbyLamp> next) {
     if (_emitWindowTimer == null) {
       // Leading edge: emit + open the window.
@@ -136,8 +109,7 @@ class NearbyLampsNotifier extends _$NearbyLampsNotifier {
       _pendingRoster = null;
       _emitWindowTimer = Timer(_stateEmitWindow, _onEmitWindowClose);
     } else {
-      // Inside the window: stash the latest computed roster. We don't
-      // emit until the window closes.
+      // Inside the window: stash the latest roster; flush when it closes.
       _pendingRoster = next;
     }
   }
@@ -147,36 +119,19 @@ class NearbyLampsNotifier extends _$NearbyLampsNotifier {
     final pending = _pendingRoster;
     if (pending == null) return;
     _pendingRoster = null;
-    // Defensive equality check (audit cq/perf C3): in steady state with
-    // a 22-lamp fleet, every adv mutates rssi → every flush emits → every
-    // unselect-watching consumer rebuilds. NearbyLamp is @freezed so ==
-    // compares all fields. If the trailing-edge pending matches what we
-    // already emitted (e.g. _prune ran inside the window but found
-    // nothing to drop and _onAd's last update matched the leading-edge
-    // emit), skip the redundant state assignment.
+    // In steady state every adv mutates rssi, so every flush would emit and
+    // rebuild every unselect-watching consumer. NearbyLamp is @freezed (== on
+    // all fields); skip the assignment when the pending roster already matches.
     if (_listEquals(pending, state)) return;
     state = pending;
   }
 
-  /// Stable sort for the roster. Pre-fix, `_onAd` appended the just-
-  /// heard lamp to the end of the list — two lamps adverting at similar
-  /// rates ping-ponged positions every ~100 ms because RSSI didn't even
-  /// enter the sort. Now: bucket by RSSI tier (20 dBm bands so lamps
-  /// "in the same general area" group together — typical RSSI jitter
-  /// is ±5 dBm and would otherwise flip neighbours at the boundary),
-  /// then alphabetical by name within bucket (stable even when RSSI
-  /// wobbles inside a bucket). Recency would re-flip on every adv
-  /// arrival, defeating the stability goal — name is the right
-  /// tiebreaker even when the user notices the order isn't strictly
-  /// closest-first.
-  ///
-  /// Bucket size grew from 10 → 20 dBm after bench feedback: a small
-  /// in-room fleet (~all peers in the -60..-80 dBm band) had every
-  /// peer near a bucket boundary at 10 dBm, and ±5 dBm jitter flipped
-  /// adjacent peers on every adv. 20 dBm collapses "in your room or
-  /// one wall over" into a single bucket where alphabetical wins;
-  /// proximity ordering still kicks in for "far end of the house"
-  /// peers (>20 dBm apart from your in-room cluster).
+  /// Stable roster order: bucket by RSSI tier (20 dBm bands so typical ±5 dBm
+  /// jitter doesn't flip neighbours at a boundary), then alphabetical by name
+  /// within a bucket. Name beats recency/raw-RSSI as the tiebreaker because
+  /// those re-flip on every adv, defeating stability. 20 dBm collapses "same
+  /// room or one wall over" into one bucket; proximity ordering still
+  /// separates far-end-of-house peers.
   static void _sortRoster(List<NearbyLamp> list) {
     list.sort((a, b) {
       // RSSI is negative; less-negative = closer. Bucket by 20 dBm,
@@ -200,20 +155,15 @@ class NearbyLampsNotifier extends _$NearbyLampsNotifier {
     return true;
   }
 
-  /// Pre-warm a GATT connection to a paired lamp as soon as we see its
-  /// adv. By the time the user taps the lamp in the UI, the BLE connect
-  /// handshake + service discovery are already done — `control_notifier`
-  /// short-circuits its own `connect()` call when `isConnected` is
-  /// already true. Saves ~300-900 ms off the perceived tap-to-interactive
-  /// latency.
-  ///
-  /// Rate-limited per device id by `_prewarmDebounce`, and the underlying
-  /// `BleClient.prewarm` enforces a single-slot mutex across ALL device
-  /// ids so we never burn the radio on more than one prewarm at a time.
+  /// Prewarm a GATT connection to a paired lamp as soon as we see its adv, so
+  /// by tap time the connect handshake + service discovery are already done
+  /// (`control_notifier` short-circuits its `connect()` when `isConnected`).
+  /// Saves ~300-900 ms of perceived tap-to-interactive latency. Rate-limited
+  /// per device id by `_prewarmDebounce`; `BleClient.prewarm` also enforces a
+  /// single-slot mutex across all ids.
   void _maybePrewarm(BleAdvertisement ad, int nowMs) {
-    // Use the adv fields directly. The previous version did `state.firstWhere
-    // ((l) => l.id == ad.id)` which threw StateError when the adv had landed
-    // in `_pendingRoster` but not yet `state` during the 500 ms emit throttle.
+    // Use the adv fields directly; the adv may have landed in `_pendingRoster`
+    // but not yet `state` during the emit throttle.
     final deviceId = ad.id;
     final inv = ref.read(inventoryNotifierProvider).value;
     if (inv == null) return;

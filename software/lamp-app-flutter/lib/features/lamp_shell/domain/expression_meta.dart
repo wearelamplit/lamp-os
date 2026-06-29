@@ -42,7 +42,7 @@ class ExpressionTypeMeta {
   /// continuously and visibly fight the wisp's hold colour (breathing,
   /// shifty); false for brief / discrete expressions that coexist
   /// nicely with a held colour (glitchy, pulse). Operator can flip the
-  /// flag per-expression in the editor. See `docs/expressions.md`.
+  /// flag per-expression in the editor. See `docs/dev/expressions.md`.
   final bool defaultDisabledDuringWispOverride;
 
   /// True for expressions that run until explicitly stopped (breathing,

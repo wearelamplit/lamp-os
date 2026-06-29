@@ -201,8 +201,8 @@ class _LampTile extends ConsumerWidget {
     final hit = nearbyById[lamp.id];
     final colors = resolveLampColors(inv: lamp, near: hit);
 
-    // Discoverable delete via swipe-left (audit ux-H3) + long-press for
-    // back-compat with users who learned that gesture.
+    // Discoverable delete via swipe-left + long-press for users who learned
+    // that gesture.
     return Dismissible(
       key: ValueKey(lamp.id),
       direction: DismissDirection.endToStart,
