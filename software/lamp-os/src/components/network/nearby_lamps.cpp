@@ -19,10 +19,11 @@ namespace {
 // (WROOM, C6). Format matches addOrUpdateFromBle: canonical uppercase
 // colon-hex.
 std::string deriveBdAddrFromEspNowMac(const uint8_t mac[6]) {
+  uint8_t bd[6];
+  ble_control::bdAddrFromMeshMac(mac, bd);
   char buf[18];
   std::snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X",
-                mac[0], mac[1], mac[2], mac[3], mac[4],
-                static_cast<uint8_t>(mac[5] + 2));
+                bd[0], bd[1], bd[2], bd[3], bd[4], bd[5]);
   return std::string(buf);
 }
 
