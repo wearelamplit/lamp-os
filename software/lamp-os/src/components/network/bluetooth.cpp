@@ -21,6 +21,8 @@
 #include "./bluetooth_pool.hpp"
 
 namespace lamp {
+static volatile bool g_suppressBleRestart = false;
+
 BluetoothPool lampBluetoothPool;
 
 class ScanCallbacks : public NimBLEScanCallbacks {
@@ -107,7 +109,9 @@ class ScanCallbacks : public NimBLEScanCallbacks {
 #endif
     lampBluetoothPool.pruneLamps();
     lampBluetoothPool.pruneStages();
-    NimBLEDevice::getScan()->start(BLE_GAP_SCAN_TIME_MS);
+    if (!g_suppressBleRestart) {
+      NimBLEDevice::getScan()->start(BLE_GAP_SCAN_TIME_MS);
+    }
   }
 } scanCallbacks;
 
@@ -162,4 +166,13 @@ std::vector<BluetoothLampRecord> *BluetoothComponent::getLamps() {
 std::vector<BluetoothStageRecord> *BluetoothComponent::getStages() {
   return &lampBluetoothPool.stagePool;
 };
+
+void bleStopScanNoRestart() {
+  g_suppressBleRestart = true;
+  NimBLEDevice::getScan()->stop();
+}
+
+void bleStopAdvertising() {
+  NimBLEDevice::getAdvertising()->stop();
+}
 }  // namespace lamp

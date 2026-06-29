@@ -17,6 +17,8 @@
 #include "SPIFFS.h"
 
 namespace lamp {
+volatile bool otaInProgress = false;
+
 ArtnetWifi artnet;
 static AsyncWebServer server(80);
 static AsyncWebSocketMessageHandler wsHandler;
@@ -225,7 +227,13 @@ void WifiComponent::toApMode() {
   WiFi.softAP(
       config->lamp.name.substr(0, 12).append("-lamp").c_str(),
       String(config->lamp.password.c_str()),
+#if defined(CATCH_OTA_ENABLED)
+      // The AP owns its channel; bring it up directly on the ESP-NOW channel so
+      // unicast OFFER RX works (a ch6 AP nudged to ch11 drops directed frames).
+      LAMP_ESPNOW_CHANNEL);
+#else
       WIFI_PREFERRED_CHANNEL);
+#endif
 };
 
 bool WifiComponent::isHomeNetworkVisible() {
@@ -233,6 +241,7 @@ bool WifiComponent::isHomeNetworkVisible() {
 };
 
 void WifiComponent::updateNetworkScan() {
+  if (otaInProgress) return;
   if (config->lamp.homeModeSSID.empty()) {
     homeNetworkVisible = false;
     return;

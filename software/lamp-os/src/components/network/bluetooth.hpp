@@ -33,6 +33,13 @@
 #define BLE_MINIMUM_RSSI_VALUE -94
 
 namespace lamp {
+
+// Stop BLE scan and suppress the automatic restart in onScanEnd.
+void bleStopScanNoRestart();
+
+// Stop BLE advertising.
+void bleStopAdvertising();
+
 /**
  * @brief Entrypoint class to advertise and track lamps by Bluetooth LE
  */
