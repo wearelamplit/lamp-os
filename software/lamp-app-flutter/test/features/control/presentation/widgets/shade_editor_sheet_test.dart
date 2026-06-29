@@ -109,6 +109,25 @@ void main() {
     expect(colors.length, 1);
   });
 
+  testWidgets('System-back with no changes closes immediately without dialog',
+      (tester) async {
+    final (:container, :ble) = await _buildContainer();
+    addTearDown(container.dispose);
+    final sub = container.listen(controlNotifierProvider(_devId), (_, __) {});
+    addTearDown(sub.close);
+
+    await tester.pumpWidget(_wrap(container));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    // No edits — sheet is clean.
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Discard changes?'), findsNothing);
+    expect(find.byType(ShadeEditorSheet), findsNothing);
+  });
+
   testWidgets(
       'System-back with unsaved changes shows discard dialog; Discard reverts+closes',
       (tester) async {
