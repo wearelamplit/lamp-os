@@ -98,13 +98,11 @@ class _LampPreviewState extends ConsumerState<LampPreview> {
   String? _memoFor; // the template the cached result was rendered against
 
   // Bounded LRU of built SvgPicture widgets keyed by their rendered-color
-  // signature. The audit (perf-H5) noted that even with the string-memo
-  // above, every rebuild constructed a fresh `SvgPicture.string(...)` —
-  // and flutter_svg re-decodes the SVG XML on each mount. Caching the
-  // widget itself lets us hand back the SAME instance across rebuilds for
-  // a color set we already built. 16 entries is enough headroom for a
-  // smooth drag (typical drag visits ~8-12 unique color samples) without
-  // letting an inadvertent leak grow unbounded.
+  // signature. Even with the string-memo above, every rebuild constructed a
+  // fresh `SvgPicture.string(...)` and flutter_svg re-decodes the SVG XML on
+  // each mount; caching the widget hands back the SAME instance across
+  // rebuilds for a color set already built. 16 entries covers a smooth drag
+  // (~8-12 unique color samples) without growing unbounded.
   static const int _svgCacheSize = 16;
   final Map<String, SvgPicture> _svgWidgetCache = {};
   final List<String> _svgCacheOrder = [];
@@ -213,13 +211,12 @@ class _LampPreviewState extends ConsumerState<LampPreview> {
     }
     final cacheKey =
         '${slice.shadeColors.map((c) => c.toHex()).join(",")}|${slice.baseColors.map((c) => c.toHex()).join(",")}';
-    // Reuse an already-built SvgPicture widget for this cacheKey (audit
-    // perf-H5). Pre-fix every shade/base hex change rebuilt SvgPicture
-    // with a fresh ValueKey, which forced flutter_svg to re-decode the
-    // SVG source from scratch — measurable jank during continuous color
-    // drags (~17 Hz with the 60 ms coalescer). Now we keep up to
-    // _svgCacheSize recently-built widgets keyed by the rendered-color
-    // signature; same-signature rebuilds return the cached widget.
+    // Reuse an already-built SvgPicture widget for this cacheKey. Without it,
+    // every shade/base hex change rebuilds SvgPicture with a fresh ValueKey,
+    // forcing flutter_svg to re-decode the SVG from scratch (measurable jank
+    // during continuous color drags). Keep up to _svgCacheSize recently-built
+    // widgets keyed by the rendered-color signature; same-signature rebuilds
+    // return the cached widget.
     SvgPicture? cached = _svgWidgetCache[cacheKey];
     if (cached == null) {
       String rendered;

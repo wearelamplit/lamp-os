@@ -61,7 +61,6 @@ class _LampAppState extends ConsumerState<LampApp>
     // Future still resolves to false until we re-check. Without this,
     // the user grants the permission, switches back to the app, and
     // the screen still says "Allow Bluetooth" until they tap it.
-    // (audit ux-C1)
     //
     // But: we ONLY re-check when we don't already know the permission
     // is granted. Once `_knownGranted` is true, the user can't have

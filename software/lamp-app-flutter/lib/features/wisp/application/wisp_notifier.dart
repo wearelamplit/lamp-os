@@ -244,10 +244,9 @@ class WispNotifier extends _$WispNotifier {
   /// notify will replace this with the wisp's authoritative view.
   ///
   /// On BLE write failure, rolls the optimistic state back to its
-  /// pre-call snapshot before rethrowing (audit perf-M8). Without the
-  /// rollback the user sees the chip "stick" on the failed selection
-  /// even though the wisp never received the op -- and there's no notify
-  /// coming to reconcile it.
+  /// pre-call snapshot before rethrowing. Without the rollback the user sees
+  /// the chip "stick" on the failed selection even though the wisp never
+  /// received the op, with no notify coming to reconcile it.
   Future<void> setZone(int zoneId) async {
     final prev = state;
     final cur = state.value ?? WispStatus.empty;
@@ -334,7 +333,7 @@ class WispNotifier extends _$WispNotifier {
   /// Set the wisp source mode (Off / Manual / Aurora).
   /// Optimistically reflects in local state so the pill picker doesn't
   /// lag the tap; the wispStatus notify reconciles within ~2s. Rolls
-  /// back the optimistic state on BLE write failure (audit perf-M8).
+  /// back the optimistic state on BLE write failure.
   ///
   /// Arms the source-write guard so stale wispStatus echoes from the
   /// relay lamp between the BLE write and the wisp's triggerOnChange
@@ -490,15 +489,10 @@ class WispNotifier extends _$WispNotifier {
   /// rebroadcasting the existing value is enough to nudge widgets that
   /// read [draftManualPalette] / [manualPaletteDirty] via the notifier.
   ///
-  /// PERF (audit perf-H7, deferred): this defeats Riverpod's equality
-  /// dedup -- `AsyncData(cur)` is a new wrapper around the same value,
-  /// so consumers that `ref.watch` rebuild even when nothing they read
-  /// has changed. The clean fix is to move `_draftManualPalette` into
-  /// its own `StateProvider` so consumers can `.select` to just the
-  /// palette slice. That refactor's wider than this remediation pass --
-  /// the gradient-bar resolution drop (256 -> 30, this commit) cuts the
-  /// downstream cost so the visible jank is gone even with the
-  /// over-broad notify.
+  /// This defeats Riverpod's equality dedup: `AsyncData(cur)` is a new wrapper
+  /// around the same value, so `ref.watch` consumers rebuild even when nothing
+  /// they read changed. The clean fix is to move `_draftManualPalette` into
+  /// its own `StateProvider` so consumers can `.select` the palette slice.
   void _bumpState() {
     final hadValue = state.value != null;
     final cur = state.value ?? WispStatus.empty;

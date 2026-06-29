@@ -22,18 +22,13 @@ uint8_t floatToByte(float v) {
 }  // namespace
 
 void CurrentPalette::update(const Palette& p, uint32_t nowMs) {
-  // Take the mux around the paletteId_ assignment so a concurrent
-  // copyPaletteIdPrefix() on the timer-service task can't read a torn .data()
-  // mid-reallocation. The rest of the update (colors_, lastChangeMs_) is
-  // loop-task-only, so we keep the critical section minimal.
   CURRENT_PALETTE_PORTMUX_ENTER(&mux_);
   paletteId_ = p.id;
   CURRENT_PALETTE_PORTMUX_EXIT(&mux_);
   lastChangeMs_ = nowMs;
   colors_.clear();
 
-  // hexColors is the simpler shape (24-bit packed RGB). When present we use
-  // it directly with w=0; this is how the read-only built-in palettes arrive.
+  // hexColors: 24-bit packed RGB, used directly with w=0 (built-in palettes).
   if (!p.hexColors.empty()) {
     colors_.reserve(p.hexColors.size());
     for (uint64_t hex : p.hexColors) {
@@ -48,8 +43,7 @@ void CurrentPalette::update(const Palette& p, uint32_t nowMs) {
     return;
   }
 
-  // colors[] carries float channels. amber and uv are intentionally dropped —
-  // wisp paints the lamp grid in RGBW and has no place for those channels.
+  // colors[] float channels; amber and uv dropped.
   colors_.reserve(p.colors.size());
   for (const auto& src : p.colors) {
     RGBW c;

@@ -44,8 +44,8 @@ class InventoryNotifier extends _$InventoryNotifier {
   }
 
   /// Invalidate every `keepAlive: true` per-lamp family provider so the
-  /// removed lamp doesn't leave orphaned state pinned forever (audit
-  /// cq-C2). The non-keepAlive families (controlNotifier, wispNotifier,
+  /// removed lamp doesn't leave orphaned state pinned forever. The
+  /// non-keepAlive families (controlNotifier, wispNotifier,
   /// firmwareNotifier) auto-dispose when their last consumer unmounts,
   /// so no explicit invalidation is required for them.
   ///
@@ -212,8 +212,8 @@ class InventoryNotifier extends _$InventoryNotifier {
 
   /// Mirror the lamp's reported firmware version + channel onto inventory
   /// so My Lamps can render `v1.0.82 · stable` per tile even when the
-  /// lamp is offline. Both args nullable — pre-Phase-H lamps that don't
-  /// emit fwVersion/fwChannel just keep their last-known values.
+  /// lamp is offline. Both args nullable: lamps that don't emit
+  /// fwVersion/fwChannel keep their last-known values.
   Future<void> updateFirmwareInfo(
     String id, {
     int? fwVersion,

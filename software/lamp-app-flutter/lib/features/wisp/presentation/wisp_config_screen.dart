@@ -25,36 +25,17 @@ import '../domain/wisp_status.dart';
 import '../domain/zone_source.dart';
 import 'palette_gradient_bar.dart';
 
-/// Wisp config — controls how the wisp drives the lamp grid's paint.
+/// Wisp config: controls how the wisp drives the lamp grid's paint. Reached
+/// from the WispIndicator's 5-tap-orbs gesture (the only entry point).
 ///
-/// Pushed from the WispIndicator's 5-tap-orbs gesture on a wisp-painted
-/// lamp. The bottom-nav Wisp tab is gone; the orbs are the only entry
-/// point (same gesture style as the Lamplit-wordmark advanced-unlock).
+/// The wisp is a separate ESP32-C6 node that either follows an Aurora zone or
+/// repaints the mesh from an operator palette. The app talks to it through the
+/// lamp's BLE control service, which proxies wispOps onto the mesh and caches
+/// the wisp's status back. `lampId` is that BLE proxy.
 ///
-/// The wisp is a separate ESP32-C6 node that can either follow an Aurora
-/// zone (subscription palette) or repaint the mesh from an operator-
-/// defined palette. From the lamp app's perspective it's an opaque peer;
-/// we talk to it through the lamp's BLE control service which proxies
-/// wispOps onto the mesh and caches the wisp's status broadcasts back
-/// at us. The lamp parameter is the BLE proxy — same lamp the user is
-/// connected to in LampShell.
-///
-/// Layout (top-down):
-///   0. Palette gradient bar — full-width, no padding, mirrors the wisp's
-///      30-pixel NeoPixel ring. Off/Aurora-without-palette fall back to
-///      warm-white; Manual previews the editor's current draft live.
-///   1. Header — wisp MAC + last-seen freshness
-///   2. Source pill picker — Off / Manual / Aurora (Aurora disabled
-///      until at least one zone has been observed)
-///   3. Per-mode body:
-///       Off    → off-color picker
-///       Manual → palette editor (up to 10 colors)
-///       Aurora → not-connected notice (when applicable), Wi-Fi config,
-///                current-zone callout, observed-zones picker, clear-
-///                selection button. Wi-Fi lives here — and only here —
-///                because the wisp only needs internet under Aurora.
-///   4. Painted lamps — every inventory lamp the wisp is sending paint
-///      to, plus a preview of the two colors it's painting on each.
+/// Layout: gradient bar (mirrors the wisp ring), header, source picker
+/// (Off/Manual/Aurora), per-mode body, painted-lamps list. Wi-Fi config lives
+/// under Aurora only, since that's the only mode needing internet.
 class WispConfigScreen extends ConsumerWidget {
   const WispConfigScreen({super.key, required this.lampId});
 
@@ -97,17 +78,14 @@ class _WispBody extends ConsumerStatefulWidget {
 }
 
 class _WispBodyState extends ConsumerState<_WispBody> {
-  /// Phone-local epoch ms at the most recent wispStatus notify. Used to
-  /// derive a "Xs ago" indicator without trusting the wisp's own
-  /// `lastSeenMs` (which is wisp millis, resets on wisp reboot, and is
-  /// useless for the human-time "is the wisp still alive?" question).
-  ///
-  /// Seeded eagerly on first non-empty status; refreshed by the
-  /// `ref.listen` below on every subsequent state change.
+  /// Phone-local epoch ms at the most recent wispStatus notify. Drives the
+  /// "Xs ago" indicator without trusting the wisp's own `lastSeenMs` (wisp
+  /// millis, resets on reboot). Seeded on first non-empty status, refreshed
+  /// by the `ref.listen` below.
   int? _lastNotifyEpochMs;
 
-  /// 1Hz heartbeat that rebuilds the "Xs ago" label so it counts up
-  /// even while no new notifies are arriving. Cancelled on dispose.
+  /// 1Hz heartbeat that rebuilds the "Xs ago" label so it counts up even with
+  /// no new notifies. Cancelled on dispose.
   Timer? _staleTickTimer;
 
   @override
@@ -127,9 +105,9 @@ class _WispBodyState extends ConsumerState<_WispBody> {
   @override
   Widget build(BuildContext context) {
     // Stamp the local clock whenever a new status lands so the "Xs ago"
-    // computation has a fresh anchor. Tracking it here (rather than in
-    // the notifier) keeps the phone-local time concern out of the
-    // domain layer — the notifier holds only what the wisp reported.
+    // computation has a fresh anchor. Tracking it here (not in the notifier)
+    // keeps phone-local time out of the domain layer; the notifier holds only
+    // what the wisp reported.
     ref.listen<AsyncValue<WispStatus>>(wispNotifierProvider(widget.lampId), (
       _,
       next,
@@ -142,20 +120,14 @@ class _WispBodyState extends ConsumerState<_WispBody> {
     final async = ref.watch(wispNotifierProvider(widget.lampId));
     return async.when(
       loading: () => const _WispLoading(),
-      // A read error here almost always means "this lamp doesn't have
-      // the wisp characteristic" — pre-FriendlyError, this dead-ended
-      // a user on a non-wisp lamp who switched to the Wisp tab. Now
-      // we render the no-wisp empty state, which surfaces the "No wisp
-      // detected" guidance and keeps the tab usable. Audit ux-H4.
+      // A read error here almost always means "this lamp has no wisp
+      // characteristic"; render the no-wisp empty state so a non-wisp lamp
+      // keeps the tab usable instead of dead-ending the user.
       error: (_, _) => const _NoWispEmpty(),
       data: (status) {
-        // Three-state UX: until the lamp's wispStatus is populated
-        // (mac populated → present == true), don't render the source
-        // picker or the manual-palette editor. Pre-fix, this fell
-        // through to _buildBody and showed the SharedPreferences-
-        // mirrored manual palette from a prior session — confusing
-        // because that palette was NOT what the wisp was actually
-        // painting (or there was no wisp at all).
+        // Until the lamp's wispStatus is populated (mac set -> present), don't
+        // render the source picker or palette editor: the mirrored manual
+        // palette from a prior session isn't what the wisp is painting.
         if (!status.present) {
           return const _NoWispEmpty();
         }
@@ -178,8 +150,8 @@ class _WispBodyState extends ConsumerState<_WispBody> {
     if (source == WispSourceMode.manual &&
         notifier.draftManualPalette.isEmpty &&
         notifier.savedManualPalette.isNotEmpty) {
-      // Schedule on the next frame so we don't mutate notifier state
-      // mid-build (Riverpod would assert).
+      // Schedule next frame: mutating notifier state mid-build asserts in
+      // Riverpod.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         notifier.resetManualPaletteDraft();
       });
@@ -234,10 +206,8 @@ class _WispBodyState extends ConsumerState<_WispBody> {
                   ),
                   const SizedBox(height: 16),
                 ],
-                // Wi-Fi only matters under Aurora — Off and Manual modes
-                // are mesh-only and don't need an internet backend. This
-                // row used to live at the bottom of the pane unconditionally
-                // (and that bottom slot now hosts the painted-lamps list).
+                // Wi-Fi only matters under Aurora; Off and Manual are
+                // mesh-only and need no internet backend.
                 _WifiConfigRow(lampId: widget.lampId, status: status),
                 const SizedBox(height: 16),
                 _CurrentZone(status: status),
@@ -281,16 +251,14 @@ class _WispBodyState extends ConsumerState<_WispBody> {
     return delta ~/ 1000;
   }
 
-  /// Only show the "Clear selection" button when the operator actually
-  /// has a pin to clear — clearing a `firstSeen` or `none` source is a
-  /// no-op on the wisp side and would just confuse the UI.
+  /// Only show "Clear selection" when there's a pin to clear; clearing a
+  /// `firstSeen` or `none` source is a no-op on the wisp and just confuses.
   bool _canClearSelection(WispStatus s) =>
       s.zoneSource == ZoneSource.appOp || s.zoneSource == ZoneSource.nvs;
 
-  /// Runs a wispOp (setZone/clearZone) and surfaces failures as a
-  /// SnackBar. Without this the notifier's optimistic update would
-  /// stick around forever on a failed write — no status notify is
-  /// coming back to reconcile it.
+  /// Runs a wispOp and surfaces failures as a SnackBar. Without this the
+  /// notifier's optimistic update would stick forever on a failed write (no
+  /// status notify comes back to reconcile it).
   Future<void> _runWispOp(Future<void> Function() op) async {
     try {
       await op();
@@ -301,15 +269,10 @@ class _WispBodyState extends ConsumerState<_WispBody> {
   }
 }
 
-/// Loading state shown while the wisp tab is doing its first
-/// `readStatus()` after the user opens it. The control screen has
-/// already confirmed the lamp is connected (we're past
-/// `controlAsync.when`); what we're waiting on here is purely the
-/// BLE round-trip for `CHAR_WISP_STATUS`. Tagged "Connecting to wisp"
-/// rather than "Loading" so the user can tell apart "still hearing
-/// from the lamp" (which would have shown a different ConnectingView
-/// outside this widget) from "lamp is connected, asking it about the
-/// wisp."
+/// Shown during the first `readStatus()` after opening the wisp tab. The lamp
+/// is already connected; this waits only on the CHAR_WISP_STATUS round-trip.
+/// Labelled "Connecting to wisp" to distinguish it from the lamp-level
+/// ConnectingView.
 class _WispLoading extends StatelessWidget {
   const _WispLoading();
 
@@ -331,12 +294,9 @@ class _WispLoading extends StatelessWidget {
   }
 }
 
-/// Shown when the lamp returned `WispStatus.empty` (no wispMac
-/// populated) — either no wisp has been heard on the mesh from this
-/// lamp's perspective, or the lamp itself doesn't carry the wisp
-/// characteristic (legacy / standalone deployment). No source picker,
-/// no editor — those would only let the user accidentally configure
-/// a wisp they're not actually talking to.
+/// Shown when the lamp returned `WispStatus.empty` (no wispMac): no wisp heard
+/// on the mesh, or the lamp lacks the wisp characteristic. No picker or
+/// editor, to avoid configuring a wisp that isn't there.
 class _NoWispEmpty extends StatelessWidget {
   const _NoWispEmpty();
 
@@ -351,12 +311,9 @@ class _NoWispEmpty extends StatelessWidget {
   }
 }
 
-/// Static two-orb glyph for the no-wisp / loading affordances. Mirrors
-/// the live [WispIndicator] (base + shade orbs) without animation, so
-/// the empty state reads as "the thing that would be here." Material's
-/// nearest off-the-shelf option was `bubble_chart` — three circles —
-/// which broke the metaphor; the wisp paints exactly two surfaces, so
-/// two orbs it is.
+/// Static two-orb glyph for the no-wisp / loading states (base + shade orbs,
+/// no animation). Custom-painted because the wisp paints exactly two surfaces
+/// and Material's `bubble_chart` shows three.
 class _TwoOrbsIcon extends StatelessWidget {
   const _TwoOrbsIcon({required this.size});
   final double size;
@@ -377,24 +334,19 @@ class _TwoOrbsPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final cx = size.width / 2;
     final cy = size.height / 2;
-    // Mid-drift snapshot of the live WispIndicator: orbs arranged
-    // diagonally (upper-right + lower-left) rather than vertically
-    // stacked, with the shade orb visibly larger than the base orb so
-    // they read as two distinct entities at a glance. Greyscale per
-    // empty-state visual language — the live indicator uses the wisp's
-    // actual paint colors here.
+    // Orbs arranged diagonally (upper-right shade larger than lower-left
+    // base) so they read as two distinct entities. Greyscale for the empty
+    // state.
     final paint = Paint()
       ..color = BrandColors.slateGrey
       ..style = PaintingStyle.fill;
     final rShade = size.width * 0.22;
     final rBase = size.width * 0.16;
-    // Upper-right: bigger (shade)
     canvas.drawCircle(
       Offset(cx + size.width * 0.13, cy - size.height * 0.16),
       rShade,
       paint,
     );
-    // Lower-left: smaller (base)
     canvas.drawCircle(
       Offset(cx - size.width * 0.13, cy + size.height * 0.16),
       rBase,
@@ -468,13 +420,9 @@ class _WispHeader extends StatelessWidget {
   }
 }
 
-/// Inline notice shown under the Aurora source pill when Aurora is
-/// selected but the wisp hasn't reached Aurora's network yet. Replaces
-/// the old permanent "Aurora: Disconnected" status chip — the chip was
-/// noise when Aurora wasn't the active mode, and silent at the worst
-/// time (when Aurora WAS selected and not reachable). Wi-Fi state lives
-/// in the "Wisp setup" row at the bottom of the pane; if Wi-Fi is also
-/// down, this notice points the operator there.
+/// Inline notice under the Aurora pill when Aurora is selected but not yet
+/// reached over the network. Points the operator at the Wi-Fi row below if
+/// Wi-Fi is also down.
 class _AuroraNotConnectedNotice extends StatelessWidget {
   const _AuroraNotConnectedNotice({required this.wifiConnected});
   final bool wifiConnected;
@@ -681,13 +629,9 @@ class _ZoneChip extends StatelessWidget {
   }
 }
 
-// ── Source picker ─────────────────────────────────────────────────────
-// Chunky pill picker matching the Social tab's personality picker
-// (see features/social/presentation/social_screen.dart's
-// _PersonalityButton). Aurora is disabled until the wisp has actually
-// observed a zone — otherwise the operator could flip to Aurora and
-// stare at an unexplained-blank screen for ~minutes while the wisp
-// discovers an Aurora server.
+// Chunky pill picker matching the Social tab's personality picker. Aurora is
+// disabled until the wisp has observed a zone, so the operator can't flip to
+// Aurora and stare at a blank screen while it discovers a server.
 class _SourcePicker extends StatelessWidget {
   const _SourcePicker({
     required this.current,
@@ -774,10 +718,9 @@ class _SourcePill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // Visual contract mirrors the Social tab's _PersonalityButton:
-    // selected → solid glowPink fill on midnight text; idle → slateGrey
-    // outline on lampWhite. Disabled drops opacity instead of changing
-    // hue so the row reads as "not for you right now" rather than
-    // "broken".
+    // selected is solid glowPink fill on midnight text; idle is slateGrey
+    // outline on lampWhite. Disabled drops opacity instead of changing hue so
+    // the row reads as "not for you right now" rather than "broken".
     final Color fill = enabled && selected
         ? BrandColors.glowPink
         : Colors.transparent;
@@ -829,19 +772,10 @@ class _SourcePill extends StatelessWidget {
   }
 }
 
-// ── Manual palette editor ─────────────────────────────────────────────
-// Wrap of swatches with an inline Add button — same UX as the
-// expression-editor color list (`_ColorChip` in
-// features/lamp_shell/presentation/expression_editor_screen.dart). The
-// older bespoke editor used a horizontally-scrolling ReorderableListView
-// with swipe-to-delete; one source-of-truth across the two color-list
-// surfaces is easier to learn and easier to maintain.
-//
-// Reorder was dropped intentionally — the palette is rendered by the
-// wisp as a left→right gradient between equally-spaced color stops, so
-// swatch order DOES matter visually. The expressions UX has the same
-// constraint and users rebuild rather than reorder; the editor matches
-// that workflow.
+// Wrap of swatches with an inline Add button, matching the expression-editor
+// color list. Reorder is intentionally omitted: the wisp renders the palette
+// as a left->right gradient between equally-spaced stops, so swatch order
+// matters visually and users rebuild rather than reorder.
 class _ManualPaletteEditor extends ConsumerStatefulWidget {
   const _ManualPaletteEditor({required this.lampId});
   final String lampId;
@@ -930,14 +864,14 @@ class _ManualPaletteEditorState extends ConsumerState<_ManualPaletteEditor> {
 
   Future<void> _addNew() async {
     final notifier = ref.read(wispNotifierProvider(widget.lampId).notifier);
-    // Default new swatch — pure white (RGB=255). Hue-saturated would feel
-    // editorial; white reads as "blank slate, pick me".
+    // Default new swatch: pure white. Hue-saturated would feel editorial;
+    // white reads as "blank slate, pick me".
     const initial = LampColor(r: 255, g: 255, b: 255, w: 0);
     final picked = await showColorPickerSheet(
       context,
       initial: initial,
       title: 'Add palette color',
-      bpp: 3, // RGB only — wisp manual palette has no W channel.
+      bpp: 3, // RGB only: wisp manual palette has no W channel.
     );
     if (picked == null) return;
     notifier.appendManualPaletteColor(picked);
@@ -947,12 +881,10 @@ class _ManualPaletteEditorState extends ConsumerState<_ManualPaletteEditor> {
     final notifier = ref.read(wispNotifierProvider(widget.lampId).notifier);
     final draft = notifier.draftManualPalette;
     if (index < 0 || index >= draft.length) return;
-    // onLive streams the picker's in-progress color into the notifier on
-    // every drag tick. The notifier debounces the BLE write internally so
-    // the wisp doesn't get saturated; the gradient bar at the top updates
-    // immediately. If the user cancels, the picker returns null and we
-    // restore the original colour (the wisp will get one trailing write
-    // with the restored value).
+    // onLive streams the picker's in-progress color into the notifier on each
+    // drag tick. The notifier debounces the BLE write so the wisp isn't
+    // saturated; the gradient bar updates immediately. Cancel restores the
+    // original color (one trailing write).
     final original = draft[index];
     final picked = await showColorPickerSheet(
       context,
@@ -969,12 +901,9 @@ class _ManualPaletteEditorState extends ConsumerState<_ManualPaletteEditor> {
   }
 }
 
-/// Off-mode swatch picker. In Off mode the wisp doesn't broadcast a
-/// palette to the lamps (PaintDistributor is held off); the operator
-/// can still pick a color for the wisp's own 30-pixel ring so it
-/// "operates like a lamp" rather than sitting on the default candle-
-/// amber. Tap the swatch to open the same color picker the manual
-/// editor uses; the wisp persists the choice in NVS.
+/// Off-mode swatch picker. In Off mode the wisp broadcasts no palette
+/// (PaintDistributor held off); the operator can still pick the color for the
+/// wisp's own 30-pixel ring. The wisp persists the choice in NVS.
 class _OffColorPicker extends ConsumerStatefulWidget {
   const _OffColorPicker({required this.lampId, required this.current});
 
@@ -1039,9 +968,9 @@ class _OffColorPickerState extends ConsumerState<_OffColorPicker> {
 
   Future<void> _pick() async {
     final notifier = ref.read(wispNotifierProvider(widget.lampId).notifier);
-    // onLive streams every drag tick into setOffColor; the notifier
-    // debounces the BLE write so the wisp doesn't get flooded. Cancel
-    // restores the original colour (one trailing write).
+    // onLive streams every drag tick into setOffColor; the notifier debounces
+    // the BLE write so the wisp isn't flooded. Cancel restores the original
+    // color (one trailing write).
     final original = widget.current;
     final picked = await showColorPickerSheet(
       context,
@@ -1058,10 +987,9 @@ class _OffColorPickerState extends ConsumerState<_OffColorPicker> {
   }
 }
 
-/// Expressions-style swatch chip: tap to edit, top-right X to remove.
-/// Distinct from the editor's `_ColorChip` only in that the X is always
-/// shown (the wisp's manual palette is allowed to be empty — the wisp
-/// falls back to warm white on the ring). Visual treatment is the same.
+/// Expressions-style swatch chip: tap to edit, top-right X to remove. The X is
+/// always shown (the wisp's manual palette may be empty; it falls back to warm
+/// white on the ring).
 class _WispColorChip extends StatelessWidget {
   const _WispColorChip({
     required this.color,
@@ -1112,16 +1040,11 @@ class _WispColorChip extends StatelessWidget {
   }
 }
 
-// ── WiFi config row ───────────────────────────────────────────────────
-// Tappable settings row that opens the lamp's network-picker sheet
-// (shared with Home Mode — the lamp owns the scan radio, the wisp does
-// not). Picking a network opens a password prompt; on confirm the
-// credentials ship through the existing `setWifi` wispOp.
-//
-// No optimistic UI: a wrong password or out-of-range AP would leave a
-// permanent "Connected" badge if we flipped state ourselves. The row
-// subtitle echoes `WispStatus.wifiConnected` so the operator sees the
-// authoritative state without scrolling back up to the chip.
+// Tappable settings row that opens the lamp's network-picker sheet (the lamp
+// owns the scan radio, the wisp doesn't). Picking a network prompts for a
+// password, then ships credentials via the `setWifi` wispOp. No optimistic
+// UI: a wrong password would otherwise leave a permanent "Connected" badge,
+// so the subtitle echoes `WispStatus.wifiConnected`.
 class _WifiConfigRow extends ConsumerStatefulWidget {
   const _WifiConfigRow({required this.lampId, required this.status});
   final String lampId;
@@ -1157,9 +1080,9 @@ class _WifiConfigRowState extends ConsumerState<_WifiConfigRow> {
     );
     if (picked == null) return;
     if (!mounted) return;
-    // Prompt for the password. Open networks could theoretically skip
-    // this, but in practice we still want a confirm step before shipping
-    // the creds — and the wisp's wifi op takes a `pw` field regardless.
+    // Prompt for the password. Open networks could skip this, but a confirm
+    // step before shipping creds is still wanted, and the wisp's wifi op takes
+    // a `pw` field regardless.
     final pw = await showPasswordPromptDialog(
       context,
       title: 'Password for ${picked.ssid}',
@@ -1191,22 +1114,15 @@ class _WifiConfigRowState extends ConsumerState<_WifiConfigRow> {
   }
 }
 
-// ── Painted lamps list ────────────────────────────────────────────────
-// Lists every inventory lamp alongside the two colors the wisp is
-// painting on it (base + shade), computed locally by re-running the
-// wisp's `sampleTupleForMac` algorithm against the wisp's published
-// palette. The wisp itself does not broadcast a per-lamp paint roster
-// — adding that would mean a new mesh message + BLE cache surface;
-// the local prediction is good enough for the operator to confirm
-// "the fleet is mixed within the palette" without that firmware work.
+// Lists every inventory lamp with the two colors the wisp paints on it
+// (base + shade), computed locally by re-running the wisp's
+// `sampleTupleForMac` against the published palette. The wisp broadcasts no
+// per-lamp roster.
 //
-// Accuracy caveat: on Android `InventoryLamp.id` IS the lamp's BLE MAC,
-// which differs from the lamp's ESP-NOW MAC by one byte (ESP32 derives
-// the WiFi-STA MAC by incrementing the BLE base). So the colors shown
-// here will follow the same pattern the wisp picks — varied across the
-// fleet, with ~50/50 base/shade swap — but won't byte-match what the
-// physical lamp is wearing right now. The header subtitle calls this
-// out so the operator knows to trust the lamp, not the preview.
+// Accuracy caveat: on Android `InventoryLamp.id` is the BLE MAC, which differs
+// from the ESP-NOW MAC by one byte, so colors follow the wisp's pattern
+// (varied, ~50/50 base/shade swap) but won't byte-match the physical lamp.
+// The header subtitle says to trust the lamp, not the preview.
 class _PaintedLampsList extends ConsumerWidget {
   const _PaintedLampsList({required this.lampId});
 
@@ -1306,11 +1222,9 @@ class _PaintedLampRow extends StatelessWidget {
               style: TextStyle(color: BrandColors.fogGrey, fontSize: 12),
             )
           else ...[
-            // Tooltip surfaces the hex code on long-press so color-blind
-            // operators can still distinguish base from shade without
-            // relying on the swatch alone. RGB-only — the wisp's wire
-            // palette has no W channel, so the W byte would always be
-            // 00 and just add noise to the tooltip.
+            // Tooltip surfaces the hex on long-press so color-blind operators
+            // can distinguish base from shade without the swatch alone. RGB
+            // only: the wisp's wire palette has no W channel.
             Tooltip(
               message: 'base #${prediction.base.toRgbHex()}',
               child: LampColorSwatch(

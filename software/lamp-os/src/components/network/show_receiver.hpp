@@ -16,40 +16,19 @@
 #include "../firmware/firmware_receiver.hpp"  // FirmwareTransport interface
 
 #ifndef LAMP_ESPNOW_CHANNEL
-// Moved 1 → 11 on 2026-06-10. Keep in lockstep with the wisp's
-// MeshLink.h — see that header for the rationale.
+// ESP-NOW channel; must match the wisp's MeshLink.h or the mesh won't form.
 #define LAMP_ESPNOW_CHANNEL 11
 #endif
 
-// v0x03 mesh-deploy lock-in: bumped from 2000 → 5000 ms to reduce baseline
-// HELLO mesh traffic by ~60% for the 20-50 lamp deployment. HELLO + its
-// gossip-relay across N lamps was the largest source of channel use; at
-// 50 lamps × 2s × 1 gossip-relay/peer = ~50 broadcasts/s on the channel
-// before any other traffic. Bumping to 5s drops that to ~20/s, leaving
-// substantially more airtime for MSG_EVENT cascades (which now also
-// gossip-relay per Commit E) and the OVERRIDE/RESTORE family.
-//
-// Sanity-checked against existing presence semantics:
-//   - LAMP_PRUNE_TIME_MS = 120000 (nearby_lamps.hpp:16): we prune a peer
-//     if we don't hear from them for 120s. 5s HELLO is well within that
-//     window (24 emits before prune); even a 50% packet loss leaves
-//     plenty of headroom to keep the roster populated.
-//   - Home-presence UX updates within ~10s of boot at 5s — acceptable
-//     since the Flutter app already polls + the BLE notification on
-//     CHAR_NEARBY_LAMPS fires whenever the roster mutates.
-//   - Cascade-stagger ordering depends on RSSI from recent HELLOs; the
-//     sender's stagger plan is freshest right after a HELLO, but it
-//     degrades gracefully: stale RSSI is "good enough" for ordering and
-//     missing peers tail-fire (show_receiver.cpp::handleRecv MSG_EVENT
-//     branch).
-// why: scale-fix per validated plan §"Layer 2".
+// HELLO broadcast interval. Higher = less baseline mesh traffic; the
+// fleet-scale airtime budget (HELLO gossip-relays across N lamps) drove
+// this to 5s. Must stay well under LAMP_PRUNE_TIME_MS (120s) so peers
+// aren't pruned between emits.
 #define LAMP_HELLO_INTERVAL_MS 5000
 
-// Compile-time pin so a future change has to explicitly update this line —
-// the new interval is a calibrated trade-off (see comment above) and a
-// drift back to 2s would re-introduce the airtime pressure the v0x03
-// lock-in addresses.
-// why: prevents silent regression of the airtime budget.
+// Pin so a drift back below 5s can't silently re-introduce the airtime
+// pressure; bumping it down requires re-validating the fleet-size airtime
+// budget.
 static_assert(LAMP_HELLO_INTERVAL_MS == 5000,
               "LAMP_HELLO_INTERVAL_MS lock-in for v0x03 (5s baseline). "
               "Bumping back below 5000 must come with a re-validation "
@@ -67,18 +46,14 @@ namespace lamp {
 using ControlOpHandler = std::function<void(const uint8_t* payload, size_t len,
                                             const uint8_t srcMac[6])>;
 
-// --- Transient override / wisp / event pending-slot payloads -----------
-//
 // POD-by-construction so PendingTypedSlot<T>'s portMUX-protected memcpy
-// post/drain has well-defined semantics across the WiFi-task → loop-task
+// post/drain has well-defined semantics across the WiFi-task -> loop-task
 // hand-off. ShowReceiver::handleRecv populates these on the WiFi task
-// (Core 0); standard_lamp's loop drain reads them on Core 1 and
-// dispatches into the ColorOverride / BrightnessOverride / NearbyLamps
-// modules.
+// (Core 0); standard_lamp's loop drain reads them on Core 1 and dispatches
+// into the ColorOverride / BrightnessOverride / NearbyLamps modules.
 //
-// Colors here use the Color struct directly (4 bytes / pixel — RGBW)
-// since the loop drain hands them to ColorOverride::apply which expects
-// `const Color* colors`.
+// Colors use the Color struct directly (4 bytes/pixel, RGBW) since the loop
+// drain hands them to ColorOverride::apply which expects `const Color*`.
 
 struct PendingOverrideColors {
   uint8_t sourceMac[6];
@@ -131,15 +106,13 @@ struct PendingWispPalette {
 };
 
 // MSG_EVENT pending slot. ShowReceiver's WiFi-task recv path does the
-// stagger-list lookup (own MAC → delayMs) and memcpys the result here;
+// stagger-list lookup (own MAC -> delayMs) and memcpys the result here;
 // the Core 1 drain calls ExpressionManager::tryHandleExpressionEvent
-// which does the expensive JSON parse + cascade-config check + dedup +
-// trigger. Buffer sized to maxEventPayloadFor(0) = 234 — the absolute
-// best-case payload when no stagger entries ride the wire. Lower
-// stagger counts on small meshes get larger payloads, and the slot has
-// to hold whatever the parser accepted (otherwise we'd silently drop
-// frames at the recv-side memcpy boundary — the bug glitchy hit in the
-// field on 2026-06-03 before this slot was widened).
+// (JSON parse + cascade-config check + dedup + trigger). Buffer sized to
+// maxEventPayloadFor(0) = 234, the best-case payload with no stagger
+// entries. Lower stagger counts get larger payloads, and the slot must
+// hold whatever the parser accepted or frames get silently dropped at the
+// recv-side memcpy boundary.
 struct PendingEvent {
   uint8_t  sourceMac[6];
   uint16_t delayMs;          // already resolved by recv-side stagger lookup
@@ -147,10 +120,10 @@ struct PendingEvent {
   uint8_t  payload[lamp_protocol::maxEventPayloadFor(0)];
 };
 
-// Forwarders implemented in lamp.cpp. ShowReceiver's WiFi-task
-// recv path calls these — they own posting into the loop-task pending
-// slots so the receiver's handleRecv stays a thin parse-and-route layer
-// with no knowledge of which slot a given message type lands in.
+// Forwarders implemented in lamp.cpp. ShowReceiver's WiFi-task recv path
+// calls these; they own posting into the loop-task pending slots so
+// handleRecv stays a thin parse-and-route layer with no knowledge of which
+// slot a message type lands in.
 void postPendingOverrideColors(const PendingOverrideColors& src);
 void postPendingRestoreColors(const PendingRestoreColors& src);
 void postPendingOverrideBrightness(const PendingOverrideBrightness& src);
@@ -159,15 +132,15 @@ void postPendingWispHello(const PendingWispHello& src);
 void postPendingWispPalette(const PendingWispPalette& src);
 void postPendingEvent(const PendingEvent& src);
 
-// Forward decl — full type lives in components/firmware/firmware_receiver.hpp.
-// ShowReceiver only needs the pointer + the chunk handler member function
-// (which it calls DIRECTLY on the WiFi task — no slot indirection for the
-// high-frequency chunk path, per the lamp-side plan §5).
+// Forward decl; full type lives in components/firmware/firmware_receiver.hpp.
+// ShowReceiver only needs the pointer + the chunk handler, which it calls
+// directly on the WiFi task (no slot indirection for the high-frequency
+// chunk path).
 class FirmwareReceiver;
 class FirmwareDistributor;
 
 // Receives HELLO + CONTROL_OP frames over ESP-NOW, and announces this
-// lamp's presence (HELLO) so peers can populate their registry with our
+// lamp's presence (HELLO) so peers can populate their registry with its
 // MAC + name + colors. Maintains the grid peer list (incoming HELLOs)
 // and dispatches MSG_CONTROL_OP via the registered handler.
 //
@@ -188,7 +161,7 @@ class ShowReceiver {
   void getMyMac(uint8_t out[6]) const;
 
   // Register a handler for MSG_CONTROL_OP addressed to this lamp or
-  // broadcast. Called on the WiFi recv task — handler must be fast and
+  // broadcast. Called on the WiFi recv task; handler must be fast and
   // non-blocking (typically posts to a pending slot).
   void setControlOpHandler(ControlOpHandler h);
 
@@ -211,25 +184,25 @@ class ShowReceiver {
   // Wire a FirmwareReceiver into the dispatch ladder. handleRecv calls
   // its handleChunkOnRecvTask directly on the WiFi task (Core 0) for
   // MSG_FW_CHUNK; OFFER and DONE go through the PendingFirmwareControl
-  // slot to be drained on Core 1. Set BEFORE begin() — the recv
-  // callback registers inside begin().
+  // slot to be drained on Core 1. Set BEFORE begin(); the recv callback
+  // registers inside begin().
   void setFirmwareReceiver(FirmwareReceiver* r) { firmwareReceiver_ = r; }
 
   // Wire a FirmwareDistributor into the dispatch ladder. handleRecv calls
   // its onAcceptOnRecvTask / onReqOnRecvTask / onResultOnRecvTask on the
   // WiFi task (Core 0) for MSG_FW_ACCEPT / MSG_FW_REQ / MSG_FW_RESULT
-  // addressed to this lamp's MAC. Set BEFORE begin() — same lifecycle as
+  // addressed to this lamp's MAC. Set BEFORE begin(); same lifecycle as
   // setFirmwareReceiver.
   void setFirmwareDistributor(FirmwareDistributor* d) { firmwareDistributor_ = d; }
 
   // True if either receive- or send-side OTA is mid-flight. Used by mesh
   // emit sites (HELLO tick, cascade broadcast, override forwards) to
   // suppress non-OTA traffic during gossip OTA, freeing channel airtime
-  // for the chunk stream. Inbound dispatch is NOT gated — receiving is
+  // for the chunk stream. Inbound dispatch is NOT gated; receiving is
   // always safe.
   bool isOtaInProgress() const;
 
-  // Static recv glue (the EspNowLink hands us a C function pointer).
+  // Static recv glue (EspNowLink hands back a C function pointer).
   static ShowReceiver* s_instance;
   static void onRecv(const uint8_t* mac, const uint8_t* data, size_t len,
                      int8_t rssi);
@@ -249,19 +222,17 @@ class ShowReceiver {
   lamp_protocol::DedupRing overrideBrightnessDedup_;
   lamp_protocol::DedupRing restoreBrightnessDedup_;
   lamp_protocol::DedupRing wispHelloDedup_;
-  // Wisp-to-wisp claim broadcasts. Same dedup pattern as wispHello so
-  // the gossip relay doesn't echo a frame back to its origin. Lamps
-  // don't otherwise act on MSG_WISP_CLAIM — pure pass-through.
+  // Wisp-to-wisp claim broadcasts. Dedup so a relayed echo can't
+  // repeat-fire. Lamps don't act on MSG_WISP_CLAIM (pure pass-through).
   lamp_protocol::DedupRing wispClaimDedup_;
-  // Wisp manualPalette broadcasts. Same dedup + gossip-relay pattern as
-  // wispHello/wispClaim. Lamps DO act on the payload — cache it for the
-  // app to read via CHAR_WISP_STATUS.
+  // Wisp manualPalette broadcasts. Dedup + gossip-relay like wispHello.
+  // Lamps DO act on the payload: cache it for the app to read via
+  // CHAR_WISP_STATUS.
   lamp_protocol::DedupRing wispPaletteDedup_;
   lamp_protocol::DedupRing eventDedup_;
-  // Single shared dedup for MSG_FW_OFFER/CHUNK/DONE per lamp-side plan §5.
-  // One wisp owns all outbound FW seqs; the 6 msgTypes in this family
-  // share one seq counter on the sender so seq collisions across msgTypes
-  // can't happen. 64 slots is more than enough for a single in-flight OTA.
+  // Single shared dedup for the MSG_FW_* family. One sender owns all
+  // outbound FW seqs; the 6 msgTypes share one seq counter so cross-msgType
+  // collisions can't happen. 64 slots is ample for a single in-flight OTA.
   lamp_protocol::DedupRing firmwareDedup_;
 
   uint32_t lastHelloMs_ = 0;
@@ -278,11 +249,10 @@ class ShowReceiver {
 };
 
 // FirmwareTransport adapter for the ESP-NOW mesh path. Thin wrapper over
-// ShowReceiver — used for the existing wisp-driven OTA flow where the
-// lamp accepts MSG_FW_OFFER over the mesh and emits ACCEPT/REQ/RESULT
-// the same way. The BLE-driven OTA flow uses a sibling
-// `BleFirmwareTransport` (in ble_control.hpp) that notifies on
-// CHAR_FW_STATUS instead.
+// ShowReceiver for the wisp-driven OTA flow: the lamp accepts MSG_FW_OFFER
+// over the mesh and emits ACCEPT/REQ/RESULT the same way. The BLE-driven
+// flow uses the sibling `BleFirmwareTransport` (ble_control.hpp) that
+// notifies on CHAR_FW_STATUS.
 class EspNowFirmwareTransport : public FirmwareTransport {
  public:
   explicit EspNowFirmwareTransport(ShowReceiver* link) : link_(link) {}

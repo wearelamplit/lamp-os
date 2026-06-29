@@ -1,25 +1,17 @@
 // WispOpDispatcher — parse + route a MSG_CONTROL_OP payload (JSON) on the
-// wisp side. The wisp acts as a CONTROL_OP receiver
-// (BLE-app-pane → lamp → mesh → wisp).
+// wisp side (BLE app pane → lamp → mesh → wisp).
 //
-// The dispatcher owns references to the WispConfig store plus the two
-// downstream consumers of WiFi creds — WifiLink (which manages the STA
-// association) and StageBeacon (which broadcasts the same creds over BLE
-// for pre-mesh lamps). On a setWifi op the dispatcher persists once via
-// WispConfig and then kicks both consumers to re-read.
+// On a setWifi op the dispatcher persists once via WispConfig then kicks both
+// downstream consumers (WifiLink for the STA association, StageBeacon for the
+// BLE creds advert). Those two are pointers so tests exercising only
+// zone/source/palette flows can pass nullptr; only the setWifi path derefs
+// them, and a null there logs and skips the kick without aborting persistence.
 //
-// WifiLink + StageBeacon are pointers (not references) so unit-tests that
-// only exercise zone/source/palette flows can pass nullptr. The setWifi
-// path is the only one that derefs them; a null on that path logs and
-// skips the kick without aborting the persistence step.
-//
-// Wire format: payload bytes are plaintext JSON like
+// Wire format: plaintext JSON like
 //   {"char":"wispOp","op":"setZone","zoneId":3}
-//   {"char":"wispOp","op":"clearZone"}
 //   {"char":"wispOp","op":"setWifi","ssid":"foo","pw":"bar"}
-// Any other "char" value (including this wisp's own gossip-relayed wispStatus
-// echoes) returns Ignored silently — no warning log, since those are
-// expected.
+// Any other "char" (including gossip-relayed wispStatus echoes) returns
+// Ignored silently.
 
 #pragma once
 

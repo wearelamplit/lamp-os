@@ -38,8 +38,8 @@ class SocialScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     // .select() so this screen only rebuilds when (mode, selfName, hasState)
-    // changes — NOT on every slider tick or color drag that goes through
-    // controlNotifierProvider (audit perf-H1).
+    // changes, NOT on every slider tick or color drag that goes through
+    // controlNotifierProvider.
     final ctl = ref.watch(controlNotifierProvider(lampId).select((a) {
       final lamp = a.value?.lamp;
       return (

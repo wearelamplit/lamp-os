@@ -1,16 +1,13 @@
 // wisp — palette bridge + maintenance carrier.
 //
-// Zone-selection. The wisp is a MSG_CONTROL_OP receiver. Selection
-// can come from three places, in priority order:
-//   (1) NVS-persisted choice from a prior `setZone` op (WispConfig);
-//   (2) first-seen Aurora zone latch (legacy default, kept so an unconfigured
-//       wisp still does something useful out of the box);
-//   (3) a runtime `setZone` op from the Flutter app pane (BLE → mesh →
-//       MSG_CONTROL_OP → here), which write-throughs into NVS.
-//
-// The wisp also keeps an `observedZones` set so the app pane can offer the
-// list of zones currently advertising on the Aurora bus, even ones whose
-// palettes haven't resolved yet.
+// Zone selection comes from three places, in priority order:
+//   (1) NVS-persisted choice from a prior setZone op (WispConfig);
+//   (2) first-seen Aurora zone latch (default so an unconfigured wisp still
+//       does something out of the box);
+//   (3) a runtime setZone op from the Flutter app pane (BLE → mesh →
+//       MSG_CONTROL_OP → here), write-through into NVS.
+// observedZones tracks every zone advertising on the Aurora bus (even
+// unresolved) so the app pane can offer the full list.
 
 #include <Arduino.h>
 #include <Adafruit_NeoPixel.h>
@@ -50,50 +47,37 @@ wisp::WifiLink wifi;
 wisp::StageBeacon stageBeacon;
 wisp::ArtnetEmitter artnetEmitter;
 
-// 30-pixel NeoPixel ring on GPIO 1 (D1 on the Xiao C6). Live status
-// indicator that mirrors the current source/palette state:
-//   Off    → warm-white fill (tungsten bulb look)
-//   Manual → manualPalette() stretched left→right with gradient interp
-//   Aurora → CurrentPalette stretched left→right with gradient interp
-// D1 was picked over D0 because GPIO 0 is the BOOT strap pin — leaving
-// it free means USB-recover (download mode) still works without
-// unplugging the strip. D1 has no shared peripheral function on the
-// C6 variant. Update is event-driven (renderRing()), not loop-paced.
+// 30-pixel NeoPixel ring on GPIO 1 (D1 on the Xiao C6). Live indicator of
+// the current source/palette state (Off/Manual/Aurora). D1 over D0 because
+// GPIO 0 is the BOOT strap pin: leaving it free keeps USB-recover (download
+// mode) working without unplugging the strip. D1 has no shared peripheral
+// function on the C6. Update is event-driven (renderRing()).
 constexpr uint8_t  kTestStripPin        = 1;
 Adafruit_NeoPixel testStrip(wisp::kStatusRingPixelCount, kTestStripPin,
                             NEO_GRB + NEO_KHZ800);
-// Global brightness scale for the ring. WS2812 at full power is dazzling
-// at desk distance; 40/255 ≈ 16% reads as a clear indicator without
-// overwhelming the room. Tunable later via serial cmd if needed.
+// Ring brightness scale. WS2812 at full power is dazzling at desk distance;
+// 40/255 ≈ 16% reads as a clear indicator without overwhelming the room.
 constexpr uint8_t  kStatusRingBrightness = 40;
 
 wisp::WispConfig wispConfig;
 wisp::WispOpDispatcher wispOpDispatcher(wispConfig);
 
-// Per-msgType dedup ring for MSG_CONTROL_OP. The wisp now joins the
-// gossip-relay mesh as a receiver of CONTROL_OP frames, so the same op will
-// reach us multiple times by design (sender + 1-hop relays). The 64-slot
-// portMUX-guarded ring keyed on (sourceMac, msgType, seq) drops the
-// re-arrivals before they hit the dispatcher.
-// Single-purpose ring (CONTROL_OP only) — no need to shard per-msgType like
-// ShowReceiver on the lamp side, which juggles HELLO/CONTROL_OP/OVERRIDE/EVENT
-// through one queue.
+// Dedup ring for MSG_CONTROL_OP. The wisp receives CONTROL_OP frames off the
+// gossip-relay mesh, so the same op arrives multiple times by design (sender
+// + 1-hop relays); the ring (keyed on sourceMac+seq) drops re-arrivals before
+// the dispatcher sees them.
 lamp_protocol::DedupRing controlOpDedup;
 
-// ZoneSelector now lives in WispZoneSelector.{h,cpp} (extracted so
-// StatusBeacon can read it to emit wispStatus JSON).
 wisp::ZoneSelector zoneSelector;
 
 // Bench-only serial command buffer. The runtime BLE proxy
 // (MSG_WISP_OP from the app pane) is the production path.
 String serialLineBuf;
 
-// --- Pending wispOp slot (recv-task → loop-task hand-off) ----------------
-// The MSG_CONTROL_OP recv handler fires on the WiFi recv task (Core 0). We
-// can't run ArduinoJson or touch Preferences from there: Preferences writes
-// stall the radio, and a long parse window will drop subsequent ESP-NOW
-// frames. Mirror the lamp-os pending-slot pattern — fixed-size memcpy under
-// a portMUX, drain in loop().
+// Pending wispOp slot (recv-task → loop-task hand-off). The MSG_CONTROL_OP
+// recv handler fires on the WiFi recv task; running ArduinoJson or touching
+// Preferences there stalls the radio and drops subsequent ESP-NOW frames.
+// Fixed-size memcpy under a portMUX, drain in loop().
 portMUX_TYPE pendingMux = portMUX_INITIALIZER_UNLOCKED;
 // CONTROL_OP payloads are bounded by CONTROL_MAX_PAYLOAD; using that as the
 // slot size means a worst-case op fits without allocating.
@@ -101,9 +85,9 @@ uint8_t pendingWispOpBuf[lamp_protocol::CONTROL_MAX_PAYLOAD] = {0};
 uint16_t pendingWispOpLen = 0;
 bool pendingWispOpValid = false;
 
-// Recv-task safe: bounded memcpy + flag flip under portMUX. No heap, no
-// logging. If a previous op is still pending (drain hasn't run yet) the new
-// one wins — single-slot semantics, latest intent matters most.
+// Recv-task safe: bounded memcpy + flag flip under portMUX, no heap, no
+// logging. If a previous op is still pending the new one wins (single-slot,
+// latest intent matters most).
 void postPendingWispOp(const uint8_t* payload, uint16_t payloadLen) {
   if (payloadLen > lamp_protocol::CONTROL_MAX_PAYLOAD) return;
   portENTER_CRITICAL(&pendingMux);
@@ -113,18 +97,10 @@ void postPendingWispOp(const uint8_t* payload, uint16_t payloadLen) {
   portEXIT_CRITICAL(&pendingMux);
 }
 
-// Push the operator-defined manual palette through CurrentPalette so the
-// PaintDistributor's existing painting path (which only knows about
-// CurrentPalette) can paint the lamps without any new code path. Caller
-// is responsible for tearing or honoring paintMode appropriately; this
-// helper is shape-only.
-//
-// When the manual palette is empty we deliberately skip the update —
-// CurrentPalette holds onto its prior contents which lets the operator
-// flip Manual → empty without zeroing the lamps' fall-back color.
-// PaintDistributor still walks the roster on the on-mode-change kick;
-// with no palette the per-peer fan-out will fade-to-nothing, which is
-// the same end state.
+// Push the manual palette through CurrentPalette so PaintDistributor's
+// existing path paints it. Empty palette skips the update deliberately:
+// CurrentPalette keeps its prior contents so flipping Manual → empty
+// doesn't zero the lamps' fallback color.
 void pushManualPaletteToCurrent() {
   const auto& cols = wispConfig.manualPalette();
   if (cols.empty()) return;
@@ -141,12 +117,9 @@ void pushManualPaletteToCurrent() {
   paintDistributor.onPaletteChanged();
 }
 
-// Push the current source/palette state to the 30-pixel ring. Event-
-// driven — called from each spot in main.cpp that already runs on a
-// state transition (mode flip, manual palette edit, Aurora callback),
-// plus once at boot. NOT called from loop(). The function does no
-// allocation: stops + pixels live on the stack in fixed-size buffers
-// sized to kManualPaletteMaxColors and kStatusRingPixelCount.
+// Render the current source/palette state to the ring. Event-driven (called
+// on each state transition + once at boot), never from loop(). No heap:
+// stops + pixels are fixed-size stack buffers.
 void renderRing() {
   uint8_t stopsRgb[wisp::kManualPaletteMaxColors * 3];
   size_t numStops = 0;
@@ -179,10 +152,8 @@ void renderRing() {
     }
     numStops = n;
   }
-  // Off, or Manual/Aurora with no palette yet, falls through with
-  // numStops == 0. Off uses the operator-chosen single color; Manual/
-  // Aurora with empty palette still get warm-white (their config is
-  // "missing", not "I chose a color").
+  // numStops == 0 here means Off or empty palette. Off shows the
+  // operator-chosen color; empty Manual/Aurora fall to warm-white.
   if (mode == wisp::WispSourceMode::Off) {
     const wisp::ManualPaletteColor offColor = wispConfig.offColor();
     for (size_t i = 0; i < wisp::kStatusRingPixelCount; ++i) {
@@ -205,23 +176,13 @@ void renderRing() {
 }
 
 // Apply the side-effects of a source-mode transition. Called after the
-// dispatcher persists the new mode, and once at boot so the freshly-
-// loaded NVS mode actually drives behavior. Idempotent: safe to call
-// repeatedly with the same mode.
-//
-//   Off    → broadcast RESTORE_COLORS to every peer (PaintDistributor's
-//            existing setPaintMode(false) path), then hold off.
-//   Manual → push the stored palette into CurrentPalette and flip paint
-//            mode on. If the palette is empty, the kick still happens
-//            but with whatever CurrentPalette already held (Aurora's
-//            last value if any) — operator can fix by adding colors.
-//   Aurora → flip paint mode on and let onAuroraPalette repopulate
-//            CurrentPalette on the next subscription tick.
+// dispatcher persists a new mode, and once at boot so the NVS mode drives
+// behavior. Idempotent.
 void applySourceModeTransition(wisp::WispSourceMode mode) {
   switch (mode) {
     case wisp::WispSourceMode::Off:
-      // setPaintMode(false) is the existing "broadcast RESTORE to every
-      // known peer" path. It also stops the 10s backstop refresh.
+      // setPaintMode(false) broadcasts RESTORE to every peer and stops the
+      // backstop refresh.
       paintDistributor.setPaintMode(false);
       Serial.println("[wisp] source=Off — broadcast RESTORE; paintMode off");
       break;
@@ -235,9 +196,6 @@ void applySourceModeTransition(wisp::WispSourceMode mode) {
       Serial.println("[wisp] source=Aurora — awaiting Aurora callback");
       break;
   }
-  // Reflect the new mode on the indicator ring. Off → warm white,
-  // Manual → manual palette, Aurora → whatever CurrentPalette already
-  // holds (next Aurora callback will repaint it).
   renderRing();
 }
 
@@ -266,16 +224,13 @@ void drainPendingWispOp() {
       break;
     }
     case wisp::DispatchResult::AppliedManualPalette: {
-      // If we're currently in Manual, push the new palette through right
-      // away so the lamps repaint without waiting for a mode flip. In
-      // Off / Aurora we still persist the palette (the dispatcher already
-      // did) but don't touch CurrentPalette — Aurora's callback owns it
-      // when Aurora is the source.
+      // In Manual, push the new palette through immediately so lamps repaint
+      // without a mode flip. In Off/Aurora it stays persisted-only;
+      // CurrentPalette belongs to Aurora's callback there.
       if (wispConfig.sourceMode() == wisp::WispSourceMode::Manual) {
         pushManualPaletteToCurrent();
-        // Indicator ring reflects the manual palette only when Manual is
-        // the active source; in Off/Aurora the persisted palette is
-        // background state and shouldn't redraw the ring.
+        // Ring reflects the manual palette only in Manual; in Off/Aurora the
+        // persisted palette is background state.
         renderRing();
       }
       statusBeacon.triggerOnChange();
@@ -294,24 +249,19 @@ void drainPendingWispOp() {
         zoneSelector.clearFromOp();
         Serial.println("[wisp] zone cleared by app op (source=none)");
       }
-      // Push a fresh wispStatus right away so the app sees the new state
-      // without waiting for the 30s heartbeat. Resets the heartbeat phase.
       statusBeacon.triggerOnChange();
       break;
     }
     case wisp::DispatchResult::AppliedWifiChange:
-      // Dispatcher already persisted creds via WispConfig and kicked
-      // WifiLink::reconnect() + StageBeacon::refreshAdvert(). All that's
-      // left on this side is the wispStatus broadcast so the app sees
-      // the wifiConnected transition (driven off WiFi.isConnected()
-      // inside StatusBeacon) without waiting up to 30s for the heartbeat.
+      // Dispatcher already persisted creds + kicked reconnect/refreshAdvert.
+      // Only the wispStatus broadcast remains so the app sees the
+      // wifiConnected transition without waiting for the 30s heartbeat.
       Serial.println("[wisp] wifi creds updated; STA reconnect + advert refresh kicked");
       statusBeacon.triggerOnChange();
       break;
     case wisp::DispatchResult::AppliedOffColor:
-      // Off-mode wisp-ring color stored. Only repaint the ring if we're
-      // actually in Off mode right now; otherwise the new color is
-      // background state that takes effect on the next Off transition.
+      // Off-mode ring color stored. Repaint only if currently in Off;
+      // otherwise it's background state until the next Off transition.
       if (wispConfig.sourceMode() == wisp::WispSourceMode::Off) {
         renderRing();
       }
@@ -324,9 +274,8 @@ void drainPendingWispOp() {
   }
 }
 
-// HELLO + CONTROL_OP recv handler. Fires on the WiFi task — keep
-// it tight; only protocol parse + bounded memcpy. No logging, no Preferences,
-// no ArduinoJson.
+// HELLO + CONTROL_OP recv handler. Fires on the WiFi task; keep it tight:
+// protocol parse + bounded memcpy only, no logging/Preferences/ArduinoJson.
 void onMeshPacket(const uint8_t* /*srcMac*/, const uint8_t* data, size_t len,
                   int8_t rssi) {
   const uint8_t msgType = lamp_protocol::inspect(data, len);
@@ -340,9 +289,9 @@ void onMeshPacket(const uint8_t* /*srcMac*/, const uint8_t* data, size_t len,
     return;
   }
   if (msgType == lamp_protocol::MSG_WISP_CLAIM) {
-    // Peer wisp's claim broadcast (also gossip-relayed by lamps from
-    // wisps we can't directly hear). Stash it into the WispRoster's
-    // shared view; the claim computation runs on the loop task.
+    // Peer wisp's claim broadcast (also gossip-relayed by lamps for wisps
+    // out of direct range). Stash into WispRoster; claim computation runs on
+    // the loop task.
     lamp_protocol::ParsedWispClaim wc;
     if (!lamp_protocol::parseWispClaim(data, len, wc)) return;
     wispRoster.recordPeerClaim(wc.sourceMac, wc.entries, wc.count, millis());
@@ -364,16 +313,14 @@ void onMeshPacket(const uint8_t* /*srcMac*/, const uint8_t* data, size_t len,
 
 // Aurora palette callback. Runs from auroraClient.loop() on the main task.
 void onAuroraPalette(int zone, const Palette& p) {
-  // (Observed-zones is added separately via onZoneObserved_ — that fires
-  //  on every state announcement, not just resolved palettes. Still safe
-  //  to also record here in case a resolve outpaces the announce path.)
+  // observe() also runs via onZoneObserved_ on every announcement; recording
+  // here too is safe if a resolve outpaces the announce path.
   zoneSelector.observe(zone);
 
   // First-seen latch: only when neither NVS nor an app op has chosen a zone.
   if (zoneSelector.latchFirstSeen(zone)) {
     Serial.printf("[wisp] claimed Aurora zone %d (source=firstSeen)\n", zone);
-    // First-seen latch is a zone change too — fan it out so the app pane
-    // can show "the wisp picked zone N".
+    // Zone change: fan out so the app pane shows the picked zone.
     statusBeacon.triggerOnChange();
   }
 
@@ -384,11 +331,9 @@ void onAuroraPalette(int zone, const Palette& p) {
     return;
   }
 
-  // Source-mode gate: only the Aurora mode lets Aurora callbacks drive
-  // CurrentPalette. Manual / Off keep whatever palette the source-mode
-  // transition installed (or none, for Off). Skipping here also keeps
-  // PaintDistributor::onPaletteChanged() quiet so the operator's manual
-  // palette doesn't get bulldozed on the next Aurora notify.
+  // Only Aurora mode lets Aurora callbacks drive CurrentPalette. Skipping in
+  // Manual/Off keeps onPaletteChanged() quiet so a manual palette isn't
+  // bulldozed on the next Aurora notify.
   if (wispConfig.sourceMode() != wisp::WispSourceMode::Aurora) {
     return;
   }
@@ -402,15 +347,12 @@ void onAuroraPalette(int zone, const Palette& p) {
     Serial.printf("  [%u] r=%u g=%u b=%u w=%u\n",
                   (unsigned)i, cols[i].r, cols[i].g, cols[i].b, cols[i].w);
   }
-  // Notify the paint distributor; it only acts if paintMode is on.
   paintDistributor.onPaletteChanged();
   artnetEmitter.onPaletteChanged();
-  // Reflect the new Aurora palette on the indicator ring.
   renderRing();
 }
 
-// Serial command handler (bench / debug). Parses one stripped line at a time.
-// Returns nothing — anything unknown logs back, anything known logs ack.
+// Serial command handler (bench/debug). One stripped line at a time.
 void processSerialCommand(const String& cmd) {
   if (cmd.length() == 0) return;
   if (cmd == "paint:on") {
@@ -424,9 +366,8 @@ void processSerialCommand(const String& cmd) {
   } else if (cmd == "artnet:off") {
     artnetEmitter.setEnabled(false);
   } else if (cmd == "stage:on") {
-    // Refresh re-reads creds from WispConfig and starts advertising. If
-    // creds are empty, it stops — same shape as before but without the
-    // explicit ssid/password args.
+    // Re-reads creds from WispConfig and starts advertising; stops if creds
+    // are empty.
     stageBeacon.refreshAdvert();
   } else if (cmd == "stage:off") {
     stageBeacon.stop();
@@ -435,12 +376,10 @@ void processSerialCommand(const String& cmd) {
                   wifi.ssid().c_str(), wifi.isConnected() ? 1 : 0,
                   WiFi.localIP().toString().c_str());
   } else if (cmd == "wifi:clear") {
-    // Drop stored creds + disconnect + re-pin the radio to
-    // LAMP_ESPNOW_CHANNEL. Used for debugging the ESP-NOW channel coex
-    // story: once associated to a venue AP, the radio sits on the AP's
-    // channel and the wisp's mesh broadcasts miss peers pinned to
-    // LAMP_ESPNOW_CHANNEL. WiFi.disconnect alone doesn't reset the
-    // channel — we need esp_wifi_set_channel to snap it back.
+    // Drop creds + disconnect + re-pin the radio to LAMP_ESPNOW_CHANNEL.
+    // Once associated to a venue AP the radio sits on the AP's channel and
+    // mesh broadcasts miss peers; WiFi.disconnect alone doesn't reset it,
+    // esp_wifi_set_channel snaps it back.
     wispConfig.setWifi("", "");
     wifi.reconnect();
     esp_wifi_set_channel(LAMP_ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
@@ -458,9 +397,8 @@ void processSerialCommand(const String& cmd) {
     }
     String ssid = cmd.substring(9, sp);
     String pass = cmd.substring(sp + 1);
-    // Route through the same WispConfig source-of-truth that the setWifi
-    // op uses, then kick the two downstream consumers. Mirrors the
-    // dispatcher's setWifi chain so serial and BLE-op paths converge.
+    // Route through WispConfig (same source-of-truth as the setWifi op), then
+    // kick the two downstream consumers so serial and BLE-op paths converge.
     wispConfig.setWifi(ssid, pass);
     wifi.reconnect();
     if (stageBeacon.isAdvertising()) {
@@ -472,9 +410,9 @@ void processSerialCommand(const String& cmd) {
   }
 }
 
-// Drain whatever is in the Serial RX FIFO into serialLineBuf, dispatching
-// on newline. Kept inside loop() so we don't need a dedicated task — the
-// FreeRTOS timer handles HELLO emission so loop() pacing here is fine.
+// Drain the Serial RX FIFO into serialLineBuf, dispatching on newline. Lives
+// in loop() (no dedicated task needed); HELLO emission is on a FreeRTOS timer
+// so loop() pacing here is fine.
 void pumpSerial() {
   while (Serial.available() > 0) {
     int ch = Serial.read();
@@ -502,35 +440,31 @@ String formatVersion(uint32_t v) {
 }
 
 void dumpInventory(uint32_t /*nowMs*/) {
-  // Re-sample millis() here rather than trusting the loop()-top nowMs.
-  // HELLOs can arrive between the loop-top sample and this dump call
-  // (auroraClient.loop() can run for hundreds of ms between them), and
-  // lastSeenMs gets stamped with the recv-time millis(). If lastSeenMs
-  // is fresher than the captured nowMs, the unsigned subtraction wraps
-  // and we'd print age=4294965031ms instead of 18ms.
+  // Re-sample millis() rather than trusting the loop-top nowMs: HELLOs can
+  // arrive between the loop-top sample and here (auroraClient.loop() can run
+  // hundreds of ms), and a lastSeenMs fresher than nowMs wraps the unsigned
+  // subtraction into a bogus age.
   const uint32_t nowMs = millis();
   auto roster = inventory.snapshot();
   Serial.printf("[wisp] roster (%u lamp%s):\n",
                 (unsigned)roster.size(), roster.size() == 1 ? "" : "s");
   for (const auto& e : roster) {
-    // Defensive: if lastSeenMs is still somehow ahead of now (e.g. millis()
-    // overflow boundary), clamp to 0 instead of wrapping.
+    // Clamp if lastSeenMs is ahead of now (millis() overflow boundary)
+    // instead of wrapping.
     const uint32_t ageMs = (nowMs >= e.lastSeenMs) ? nowMs - e.lastSeenMs : 0;
     Serial.printf("  %02X:%02X:%02X:%02X:%02X:%02X  %-12s  fw=%s  age=%lums\n",
                   e.mac[0], e.mac[1], e.mac[2], e.mac[3], e.mac[4], e.mac[5],
                   e.name.c_str(), formatVersion(e.firmwareVersion).c_str(),
                   (unsigned long)ageMs);
   }
-  // Log the ZoneSelector state alongside the roster so the dump is
-  // one-stop for "what's this wisp doing?".
   Serial.printf("[wisp] zone=%d source=%s observed=%u\n",
                 zoneSelector.currentZone(),
                 wisp::zoneSourceName(zoneSelector.source()),
                 (unsigned)zoneSelector.observed().size());
 }
 
-// Build a stable instance id from the chip MAC's low 24 bits. Aurora uses it
-// to recognize a returning subscriber; we want it consistent across reboots.
+// Stable instance id from the chip MAC's low 24 bits. Aurora uses it to
+// recognize a returning subscriber, so it must be consistent across reboots.
 String buildInstanceId() {
   uint64_t mac = ESP.getEfuseMac();
   char buf[32];
@@ -548,10 +482,8 @@ void setup() {
   delay(200);
   Serial.println("wisp: boot");
 
-  // Indicator ring: bring the strip up with the global brightness scale
-  // applied, then show a warm-white "starting up" state. The first real
-  // render() happens after wispConfig.begin() so the cached sourceMode
-  // can drive the layout.
+  // Bring the strip up at the brightness scale and show warm-white. First
+  // real render happens after wispConfig.begin() so sourceMode drives it.
   testStrip.begin();
   testStrip.setBrightness(kStatusRingBrightness);
   testStrip.clear();
@@ -561,8 +493,8 @@ void setup() {
                 (unsigned)kTestStripPin,
                 (unsigned)kStatusRingBrightness);
 
-  // Bring NVS up before anything that might want to read selZone. The
-  // ZoneSelector seeds itself from the cached value here.
+  // Bring NVS up before anything reads selZone; ZoneSelector seeds from the
+  // cached value here.
   wispConfig.begin();
   if (wispConfig.hasSelectedZone()) {
     const int z = wispConfig.selectedZone();
@@ -577,56 +509,48 @@ void setup() {
     Serial.println("[wisp] mesh init failed; will retry in 5s");
   }
 
-  // WifiLink + StageBeacon + ArtnetEmitter — the pre-mesh-compat ArtNet bridge.
-  // Both WifiLink and StageBeacon read SSID/password from the shared
-  // WispConfig store (single source of truth) and re-read on every
-  // reconnect()/refreshAdvert() call. The setWifi op chain
-  // (WispOpDispatcher → WifiLink::reconnect + StageBeacon::refreshAdvert)
-  // is wired below via wispOpDispatcher.setWifiSinks. StageBeacon and
-  // ArtnetEmitter are gated off by default and require an explicit
-  // `stage:on` / `artnet:on` serial command (or a setWifi op for the
-  // stage advert) to actually start broadcasting.
+  // ArtNet bridge. WifiLink + StageBeacon read creds from the shared
+  // WispConfig store and re-read on reconnect()/refreshAdvert().
+  // StageBeacon + ArtnetEmitter are gated off until an explicit stage:on /
+  // artnet:on command (or a setWifi op for the stage advert).
   wifi.begin(&wispConfig);
   stageBeacon.begin(buildInstanceId().c_str(), &wispConfig);
   artnetEmitter.begin(&currentPalette, &wifi);
-  // Hand the dispatcher the two sinks it needs to chain a setWifi op into
-  // an actual STA reconnect + BLE advert refresh. main.cpp owns the
-  // globals; the dispatcher just borrows pointers.
+  // Hand the dispatcher the sinks for chaining a setWifi op into STA
+  // reconnect + advert refresh. main.cpp owns the globals; dispatcher borrows.
   wispOpDispatcher.setWifiSinks(&wifi, &stageBeacon);
 
   auroraClient.setInstanceId(buildInstanceId().c_str());
   auroraClient.onActivePalette(onAuroraPalette);
-  // Capture every zone we hear about, not just ones whose palettes
-  // resolve. This fires on the main task from inside auroraClient.loop().
+  // Capture every announced zone, not just ones whose palettes resolve.
+  // Fires on the main task from auroraClient.loop().
   auroraClient.onZoneObserved([](int zone) { zoneSelector.observe(zone); });
   auroraClient.begin();
   Serial.printf("[wisp] aurora client started as %s\n",
                 buildInstanceId().c_str());
 
-  // Multi-wisp coordination wiring. WispRoster owns the peer-claim
-  // shared view + claim-decision logic; PaintDistributor filters its
-  // walk by it; StatusBeacon broadcasts our claims every 2 s alongside
-  // MSG_WISP_HELLO. Self-MAC is needed for the lower-MAC tiebreaker.
+  // Multi-wisp coordination. WispRoster owns the peer-claim view +
+  // claim-decision logic; PaintDistributor filters its walk by it;
+  // StatusBeacon broadcasts claims every 2s. Self-MAC drives the lower-MAC
+  // tiebreaker.
   uint8_t selfMac[6] = {0};
   mesh.getMac(selfMac);
   wispRoster.setSelfMac(selfMac);
 
-  // Paint distributor needs the inventory + mesh + palette
-  // to walk peers and unicast tuples. Status beacon broadcasts MSG_WISP_HELLO
-  // every 2s on a FreeRTOS timer so cadence survives Aurora loop() stalls.
+  // Status beacon broadcasts MSG_WISP_HELLO every 2s on a FreeRTOS timer so
+  // cadence survives Aurora loop() stalls.
   paintDistributor.begin(&inventory, &mesh, &currentPalette, &wispRoster);
 
-  // Wisp no longer participates in OTA — lamps gossip firmware to each
-  // other peer-to-peer. MSG_WISP_HELLO's carriedFw* fields zero-fill
-  // (wire layout unchanged for back-compat with older lamps).
+  // Wisp doesn't participate in OTA (lamps gossip firmware peer-to-peer).
+  // MSG_WISP_HELLO's carriedFw* fields zero-fill; wire layout retained for
+  // back-compat with older lamps.
   statusBeacon.begin(&mesh, &paintDistributor, &currentPalette,
                      &zoneSelector, &auroraClient, &wispConfig, &wispRoster);
   statusBeacon.startTimer();
 
-  // Apply the persisted source mode now that everything it touches
-  // (paintDistributor, currentPalette) is up. This is what makes a
-  // Manual-mode wisp start painting from the stored palette on boot
-  // without waiting for an app connection.
+  // Apply the persisted source mode now that everything it touches is up.
+  // Makes a Manual-mode wisp paint from the stored palette on boot without
+  // waiting for an app connection.
   applySourceModeTransition(wispConfig.sourceMode());
 
   Serial.println("[wisp] paint distributor + status beacon online");
@@ -641,12 +565,9 @@ void loop() {
 
   auroraClient.loop();
   pumpSerial();
-  // Drain any pending MSG_CONTROL_OP payload posted by the recv task. Cheap
-  // when empty (one portMUX read + bool check), so safe to call every loop.
   drainPendingWispOp();
-  // Multi-wisp coordination: recompute our claim set from the current
-  // peer-RSSI view + lamp inventory snapshot before the paint walk so
-  // PaintDistributor's filter sees the latest decisions.
+  // Recompute the claim set from the peer-RSSI view + inventory before the
+  // paint walk so PaintDistributor's filter sees the latest decisions.
   {
     auto inv = inventory.snapshot();
     wisp::WispRoster::LampObservation obs[wisp::WISP_ROSTER_MAX_LAMPS];
@@ -667,8 +588,8 @@ void loop() {
     dumpInventory(now);
   }
 
-  // Prune at half the prune window so a dropped lamp leaves the roster
-  // within roughly one extra dump cycle. Cheap; just a linear scan.
+  // Prune at half the prune window so a dropped lamp clears within ~one extra
+  // dump cycle.
   if (now - lastPruneMs > 30000) {
     lastPruneMs = now;
     inventory.prune(now, LAMP_PRUNE_TIME_MS);

@@ -16,31 +16,16 @@ import 'package:flutter/foundation.dart';
 ///   - info = "lamp-v1" + 0x00 + charShortName
 ///   - IKM  = UTF-8 bytes of the lamp's controlPassword
 ///
-/// See `software/lamp-os/src/components/network/crypto.{hpp,cpp}` for the
-/// firmware counterpart.
+/// Firmware counterpart: `software/lamp-os/src/components/network/crypto.{hpp,cpp}`.
 ///
-/// SECURITY (audit sec-H3, deferred): two lamps with the same
-/// controlPassword derive the IDENTICAL 256-bit AES key for each
-/// characteristic because the HKDF info doesn't include a per-device
-/// identifier. Captured ciphertext from lamp A's CHAR_X can be
-/// replayed against lamp B's CHAR_X iff both share the password.
-/// Fix would mix the lamp's WiFi STA MAC into the info, bump prefix
-/// to "lamp-v2" — but the lamp firmware must mirror the change AND
-/// the app needs the lamp's STA MAC at connect time (Android can
-/// derive from BLE MAC, iOS cannot — would need a new BLE
-/// characteristic exposing it). Tracked in
-/// docs/accepted-security-threats.md.
-/// Threat is bounded by operator deliberately reusing passwords.
+/// Accepted threat: lamps sharing a controlPassword derive identical
+/// per-characteristic keys (the HKDF info has no per-device id), so ciphertext
+/// replays between them. Bounded by operators reusing passwords.
 class LampCrypto {
-  /// SECURITY (accepted threats T1+T2): the plaintext byte signals to
-  /// the lamp firmware "this payload is unauthenticated/unencrypted, but
-  /// accept it because the lamp is factory-fresh (empty password) or
-  /// the operation is one of the wisp-relay ops where the wisp can't
-  /// decrypt anyway." Plaintext writes leak any embedded secrets — the
-  /// Wi-Fi PSK in `setWifi` and the new admin credential in first-
-  /// claim are the two cases where this matters. Fleet-wide mesh
-  /// authentication would close both, but is deliberately rejected.
-  /// See docs/accepted-security-threats.md.
+  /// Accepted threat: the plaintext byte tells the lamp to accept an
+  /// unencrypted payload (factory-fresh empty password, or wisp-relay ops the
+  /// wisp can't decrypt). Leaks embedded secrets (the Wi-Fi PSK in setWifi,
+  /// the first-claim admin credential); fleet-wide mesh auth is rejected.
   static const int magicPlaintext = 0x01;
   static const int magicCiphertext = 0x02;
   static const int nonceLen = 12;

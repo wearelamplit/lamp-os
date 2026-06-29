@@ -1,23 +1,15 @@
 // WispZoneSelector — process-local zone-selection state for the wisp.
+// StatusBeacon reads currentZone/source/observedZones to emit wispStatus.
+// Only currentZone is persistent (in WispConfig); the rest is RAM.
 //
-// Extracted from main.cpp because StatusBeacon needs to read
-// currentZone / source / observedZones to emit wispStatus broadcasts.
-// Only `currentZone` is persistent (and that lives in WispConfig); everything
-// here is RAM.
+// Mutators (latchFirstSeen/setFromOp/clearFromOp/setFromNvs) run on the loop
+// task. observe()/copyObserved() are mux-guarded because vector relocation
+// can corrupt a cross-task snapshot; the scalar reads (currentZone/source)
+// tolerate a torn read from the timer task, worst case one stale heartbeat
+// that the next triggerOnChange corrects.
 //
-// THREADING: observe() and copyObserved() are thread-safe via internal
-// portMUX; other methods (currentZone, source, etc.) are read-only after
-// construction *as far as the loop task is concerned* — they are scalar
-// reads that tolerate a torn snapshot under the assumption that mutators
-// (latchFirstSeen / setFromOp / clearFromOp / setFromNvs) all run on the
-// loop task too. StatusBeacon::emitStatus reads currentZone/source from
-// the timer task; the worst case is one stale heartbeat, which the next
-// triggerOnChange will correct. The observed-vector path is the only one
-// that needs the mux because vector relocation can corrupt the snapshot.
-//
-// The `ZoneSource` discriminator tells the app pane where the current
-// selection came from. The string form is camelCase to match the
-// `char:"wispOp"` JSON naming convention on the wire.
+// ZoneSource tells the app pane where the selection came from; the string
+// form is camelCase to match the char:"wispOp" JSON convention.
 
 #pragma once
 
@@ -48,10 +40,9 @@ enum class ZoneSource : uint8_t { None, FirstSeen, Nvs, AppOp };
 // there's one mapping to chase.
 const char* zoneSourceName(ZoneSource s);
 
-// 16 matches Aurora's per-notification states cap; oldest-eviction FIFO
-// keeps the set bounded without leaking memory if a noisy Aurora keeps
-// rotating zone ids. The wispStatus JSON also caps at 16 entries, so this
-// upper bound is the single source of truth for the budget.
+// 16 matches Aurora's per-notification states cap; FIFO eviction bounds the
+// set if a noisy Aurora rotates zone ids. Single source of truth for the
+// wispStatus observedZones budget.
 constexpr size_t kMaxObservedZones = 16;
 
 class ZoneSelector {
@@ -62,10 +53,9 @@ class ZoneSelector {
 
   void observe(int zone);
 
-  // Snapshot up to `outCap` observed zones into `out`. Returns the count
-  // written. Thread-safe — takes the internal mux. Use this from any task
-  // other than the loop task (e.g. StatusBeacon's timer-service heartbeat)
-  // to avoid iterator invalidation if observe() reallocates concurrently.
+  // Snapshot up to outCap observed zones into out; returns count written.
+  // Takes the mux; use from any non-loop task to avoid iterator invalidation
+  // if observe() reallocates.
   size_t copyObserved(int* out, size_t outCap) const;
 
   // Returns true if the first-seen latch actually changed state (caller can

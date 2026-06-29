@@ -99,9 +99,9 @@ class _HomeModeScreenState extends ConsumerState<HomeModeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // .select to just the home section (audit perf-H3). HomeMode reads
-    // only home.{ssid, brightness}; brightness sliders on the
-    // active lamp's ControlNotifier no longer rebuild this whole tree.
+    // .select to just the home section. HomeMode reads only
+    // home.{ssid, brightness}; brightness sliders on the active lamp's
+    // ControlNotifier don't rebuild this whole tree.
     final controlAsync = ref.watch(controlNotifierProvider(widget.lampId)
         .select((a) => a.whenData((s) => s.home)));
 

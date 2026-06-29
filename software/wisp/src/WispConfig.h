@@ -1,18 +1,14 @@
-// WispConfig — thin NVS wrapper for wisp-side persistent settings.
+// WispConfig — thin NVS wrapper for wisp-side persistent settings (zone +
+// WiFi creds, pushed by the app pane via MSG_CONTROL_OP and dispatched by
+// WispOpDispatcher).
 //
-// Persistent wisp state: the Flutter app pane (a) picks which Aurora zone
-// this wisp follows, and (b) pushes WiFi credentials over BLE. Both ride
-// in MSG_CONTROL_OP payloads (JSON), are dispatched by WispOpDispatcher,
-// and land here for persistence.
-//
-// Storage: Arduino-ESP32 `Preferences` (NVS), namespace `"wisp"`. Keys are
-// kept short because NVS imposes a 15-byte key length limit:
-//   selZone   int32   selected Aurora zone, -1 = unset (0 is a valid zone)
+// Storage: Preferences (NVS), namespace "wisp". Keys kept short (NVS caps key
+// length at 15 bytes):
+//   selZone   int32   selected Aurora zone, -1 = unset (0 is valid)
 //   wifiSsid  String  WiFi SSID for STA bring-up
 //   wifiPw    String  WiFi password for STA bring-up
-//
-// The class caches the values in RAM after `begin()` so the read path doesn't
-// hit NVS on every Aurora palette notification.
+// Values cache in RAM after begin() so the read path skips NVS on every
+// Aurora notification.
 
 #pragma once
 
@@ -24,42 +20,31 @@
 
 namespace wisp {
 
-// Where the wisp gets its paint palette from. The mode controls which
-// branch in main.cpp is allowed to feed CurrentPalette and whether the
-// PaintDistributor is on or off.
-//
-//   Off    — no override broadcasts. The PaintDistributor is held off,
-//            and a transition into Off triggers a one-shot RESTORE walk
-//            so lamps drop any prior wisp-sourced override.
-//   Manual — push the operator-defined manual palette into
-//            CurrentPalette; Aurora's onActivePalette callback is
-//            ignored while in this mode.
-//   Aurora — Aurora subscription drives CurrentPalette as before.
-//
+// Where the wisp gets its paint palette. Controls which branch in main.cpp
+// feeds CurrentPalette and whether PaintDistributor runs.
+//   Off    no override broadcasts; PaintDistributor held off, and a
+//          transition into Off triggers a one-shot RESTORE walk.
+//   Manual push the operator's manual palette into CurrentPalette; Aurora
+//          callbacks are ignored.
+//   Aurora Aurora subscription drives CurrentPalette.
 // Wire encoding (NVS u8 + wispOp + wispStatus): 0=Off, 1=Manual, 2=Aurora.
-// Default is Aurora to preserve legacy first-boot behavior (a fresh wisp
-// follows Aurora's first-seen zone without operator intervention).
 enum class WispSourceMode : uint8_t {
   Off    = 0,
   Manual = 1,
   Aurora = 2,
 };
 
-// Single color slot used by the manual palette. Plain RGB (no W) — the
-// app picker emits W=0 for manual colors and the lamp grid handles the
-// W channel locally based on its own headroom math.
+// Single manual-palette color slot. Plain RGB (no W); the app picker emits
+// W=0 and the lamp grid derives W locally from its own headroom math.
 struct ManualPaletteColor {
   uint8_t r = 0;
   uint8_t g = 0;
   uint8_t b = 0;
 };
 
-// Bound aligned with lamp_protocol::kMaxWispPaletteColors so the wisp's
-// stored palette and the on-wire MSG_WISP_PALETTE broadcast share one
-// ceiling. Was 10 (matched a wispStatus JSON budget concern); replaced
-// by the separate MSG_WISP_PALETTE broadcast at 2026-06-13. Aurora
-// palettes can be larger than 50; setManualPalette truncates and the
-// emit-side logs once on oversize.
+// Aligned with lamp_protocol::kMaxWispPaletteColors so the stored palette and
+// the MSG_WISP_PALETTE broadcast share one ceiling. setManualPalette
+// truncates larger Aurora palettes (emit-side logs once on oversize).
 inline constexpr size_t kManualPaletteMaxColors = 50;
 
 class WispConfig {
@@ -68,8 +53,8 @@ class WispConfig {
   // Safe to call once at boot from setup().
   void begin();
 
-  // -1 sentinel means "no zone selected yet". 0 is a valid Aurora zone, so we
-  // can't use 0 as the unset sentinel.
+  // -1 = no zone selected. 0 is a valid Aurora zone, so 0 can't be the
+  // unset sentinel.
   int selectedZone() const { return selectedZone_; }
   bool hasSelectedZone() const { return selectedZone_ >= 0; }
 
@@ -79,47 +64,35 @@ class WispConfig {
   // Removes the key from NVS and resets the cache to -1.
   void clearSelectedZone();
 
-  // WiFi credential storage. Consumed by WifiLink (STA bring-up via
-  // WiFi.mode(WIFI_STA) + WiFi.begin(ssid, pw)) — WispOpDispatcher
-  // calls setWifi() on a setWifi op, then triggers wifiLink_->reconnect()
-  // and stageBeacon_->refreshAdvert() so the new creds take effect
+  // WiFi creds consumed by WifiLink (STA bring-up). WispOpDispatcher calls
+  // setWifi() then kicks reconnect() + refreshAdvert() so new creds apply
   // without a reboot.
   //
-  // SECURITY: stored in plaintext NVS. ESP32 NVS is not encrypted by
-  // default; anyone with flash-dump access can read these. Acceptable
-  // for the current installation threat model; if we ever need to harden
-  // this, options are: enable NVS encryption (esp_partition +
-  // esp_secure_boot) or move credentials to a separate encrypted
-  // partition.
+  // Stored in plaintext NVS (not encrypted by default; a flash dump reveals
+  // them). Acceptable for the current threat model; hardening options are NVS
+  // encryption or a separate encrypted partition.
   const String& wifiSsid() const { return wifiSsid_; }
   const String& wifiPw() const { return wifiPw_; }
   bool hasWifi() const { return wifiSsid_.length() > 0; }
   void setWifi(const String& ssid, const String& pw);
   void clearWifi();
 
-  // Source mode — Off / Manual / Aurora. See enum doc above. Default
-  // remains Aurora so a fresh wisp boots into the legacy first-seen-wins
-  // behavior; persisted state survives reboots.
+  // Source mode (Off/Manual/Aurora). See enum doc above; persisted across
+  // reboots.
   WispSourceMode sourceMode() const { return sourceMode_; }
   void setSourceMode(WispSourceMode mode);
 
-  // Operator-defined manual palette. Up to kManualPaletteMaxColors
-  // colors; replace-only semantics (no per-color edit, matches the
-  // Manual editor's "Save" gating in the app UI). Empty palette is
-  // valid: while in Manual mode and empty, the wisp simply emits no
-  // palette (lamps stay on their own behavior). NVS-persisted as a
-  // packed RGB byte blob.
+  // Operator manual palette, up to kManualPaletteMaxColors, replace-only.
+  // Empty is valid (Manual + empty emits no palette; lamps keep their own
+  // behavior). NVS-persisted as a packed RGB blob.
   const std::vector<ManualPaletteColor>& manualPalette() const {
     return manualPalette_;
   }
   void setManualPalette(const std::vector<ManualPaletteColor>& colors);
 
-  // Off-mode color. When sourceMode is Off, the wisp does NOT broadcast
-  // a palette to the lamp grid (PaintDistributor stays held off) — but
-  // it still has its own 30-pixel ring to drive. This color is what
-  // that ring shows in Off. Defaults to a warm-white candle-amber tint
-  // matching the pre-existing fallback so a fresh wisp boots
-  // identically. Persisted as 3 NVS bytes.
+  // Off-mode ring color. In Off the wisp broadcasts no palette but still
+  // drives its 30-pixel ring; this is what the ring shows. Defaults to a
+  // warm candle-amber. Persisted as 3 NVS bytes.
   ManualPaletteColor offColor() const { return offColor_; }
   void setOffColor(ManualPaletteColor c);
 
