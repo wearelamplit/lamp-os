@@ -159,6 +159,14 @@ class WispNotifier extends _$WispNotifier {
         .listen((bytes) {
       if (_disposed) return;
       var next = WispStatus.fromBytes(bytes);
+      // A frame that decodes to "no wisp" while we already hold a present
+      // status is a transient empty/short BLE notify, not the wisp actually
+      // vanishing. Dropping it keeps the icon, source, and palette from
+      // blinking out for a tick whenever a frame lands empty. A genuine
+      // wisp-gone is re-established by the next build/read of the status.
+      if (!next.present && (state.value?.present ?? false)) {
+        return;
+      }
       final rawMac = next.wispMac;
       next = _applySourceWriteGuard(next);
       _ingestManualPaletteFromStatus(next.currentPalette);
