@@ -130,6 +130,14 @@ struct PendingWispPalette {
               lamp_protocol::WISP_PALETTE_ENTRY_SIZE];
 };
 
+// MSG_WISP_CLAIM pending slot. Holds the wisp's claimed-lamp roster until
+// the Core 1 drain forwards it into NearbyLamps::cacheWispClaim.
+struct PendingWispClaim {
+  uint8_t sourceMac[6];
+  uint8_t count;
+  uint8_t lampMacs[lamp_protocol::kMaxWispClaimEntries][6];
+};
+
 // MSG_EVENT pending slot. ShowReceiver's WiFi-task recv path does the
 // stagger-list lookup (own MAC → delayMs) and memcpys the result here;
 // the Core 1 drain calls ExpressionManager::tryHandleExpressionEvent
@@ -157,6 +165,7 @@ void postPendingOverrideBrightness(const PendingOverrideBrightness& src);
 void postPendingRestoreBrightness(const PendingRestoreBrightness& src);
 void postPendingWispHello(const PendingWispHello& src);
 void postPendingWispPalette(const PendingWispPalette& src);
+void postPendingWispClaim(const PendingWispClaim& src);
 void postPendingEvent(const PendingEvent& src);
 
 // Forward decl — full type lives in components/firmware/firmware_receiver.hpp.

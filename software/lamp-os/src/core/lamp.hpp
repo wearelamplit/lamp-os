@@ -67,6 +67,7 @@ class Lamp {
   void drainRestoreBrightness();
   void drainWispHello();
   void drainWispPalette();
+  void drainWispClaim();
   void drainWispOp();
   void drainWispStatus();
   void drainEvent();

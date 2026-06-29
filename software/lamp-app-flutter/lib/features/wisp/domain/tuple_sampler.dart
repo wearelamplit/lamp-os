@@ -6,14 +6,7 @@
 // per-lamp color preview without requiring a firmware-side per-lamp
 // roster broadcast.
 //
-// Accuracy caveat: on Android, the BLE device id IS the lamp's MAC, but
-// it's the BLE MAC — the ESP-NOW MAC differs by one byte (the ESP32 derives
-// the WiFi-STA / ESP-NOW MAC by incrementing the BLE base). So this preview
-// gives the right "shape" — varied per-lamp colors picked from the
-// authored palette, with ~50/50 base/shade swap distribution — but the
-// exact colors will not byte-match what the wisp actually paints. The UI
-// notes this so the operator isn't surprised when their physical lamp
-// shows different shades than the app preview.
+// iOS returns a UUID (not a bdAddr), so those lamps get no preview.
 
 import 'dart:typed_data';
 
@@ -84,11 +77,33 @@ List<int>? parseMacFromBleId(String id) {
   return out;
 }
 
+/// The lamp's mesh (ESP-NOW / WiFi-STA) MAC, derived from its lamp-reported
+/// bdAddr. ESP32 makes the BLE MAC the STA base + 2, so the mesh MAC is the
+/// BLE MAC minus 2 (full 48-bit, with borrow). This is the MAC the wisp keys
+/// its per-lamp colour pick and claim roster on, so use it (not the raw BLE id)
+/// to match or predict against wisp data.
+List<int>? meshMacFromBdAddr(String bdAddr) {
+  final out = parseMacFromBleId(bdAddr);
+  if (out == null) return null;
+  var borrow = 2;
+  for (var i = 5; i >= 0 && borrow > 0; i--) {
+    final v = out[i] - borrow;
+    out[i] = v < 0 ? v + 256 : v;
+    borrow = v < 0 ? 1 : 0;
+  }
+  return out;
+}
+
 /// Run the same per-MAC sampling the wisp runs. Returns null when the
 /// palette is empty (no authored colors to pick from).
+///
+/// [shuffleSeed] defaults to 0 (matches the firmware default). Pass the
+/// wisp's current `shuffleSeed` from [WispStatus] so the preview stays in
+/// lock-step with what the wisp actually broadcasts.
 TuplePrediction? predictTuple({
   required List<int> mac,
   required List<LampColor> palette,
+  int shuffleSeed = 0,
 }) {
   if (mac.length != 6) return null;
   if (palette.isEmpty) return null;
@@ -98,10 +113,10 @@ TuplePrediction? predictTuple({
   const int kGolden   = 0x9E3779B9;
   const int kSwapSalt = 0xCAFEBABE;
   final int n = stops.length;
-  int idxA = _hashMac(mac, 0)        % n;
-  int idxB = _hashMac(mac, kGolden)  % n;
+  int idxA = _hashMac(mac, 0          ^ shuffleSeed) % n;
+  int idxB = _hashMac(mac, kGolden    ^ shuffleSeed) % n;
   if (n >= 2 && idxA == idxB) idxB = (idxB + 1) % n;
-  final swap = (_hashMac(mac, kSwapSalt) & 1) != 0;
+  final swap = (_hashMac(mac, kSwapSalt ^ shuffleSeed) & 1) != 0;
   final base  = swap ? stops[idxB] : stops[idxA];
   final shade = swap ? stops[idxA] : stops[idxB];
   return TuplePrediction(base: base, shade: shade);

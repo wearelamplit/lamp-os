@@ -206,8 +206,23 @@ void ShowReceiver::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     // (currently absent) downstream handlers if a future change adds one.
     lamp_protocol::ParsedWispClaim wc;
     if (!lamp_protocol::parseWispClaim(data, len, wc)) return;
-    (void)wispClaimDedup_.record(wc.sourceMac,
-                                 lamp_protocol::MSG_WISP_CLAIM, wc.seq);
+    if (!wispClaimDedup_.record(wc.sourceMac,
+                                lamp_protocol::MSG_WISP_CLAIM, wc.seq)) {
+      return;
+    }
+    PendingWispClaim slot;
+    std::memcpy(slot.sourceMac, wc.sourceMac, 6);
+    const uint8_t safeCount = wc.count > lamp_protocol::kMaxWispClaimEntries
+                                  ? static_cast<uint8_t>(lamp_protocol::kMaxWispClaimEntries)
+                                  : wc.count;
+    slot.count = safeCount;
+    for (uint8_t i = 0; i < safeCount; ++i) {
+      // Each entry is 7 bytes: lampMac[6] + int8 rssi. Copy only the MAC.
+      std::memcpy(slot.lampMacs[i],
+                  wc.entries + static_cast<size_t>(i) * lamp_protocol::WISP_CLAIM_ENTRY_SIZE,
+                  6);
+    }
+    postPendingWispClaim(slot);
   } else if (msgType == lamp_protocol::MSG_WISP_PALETTE) {
     // Wisp's manualPalette broadcast. Lamps cache + gossip-relay; the
     // cache feeds CHAR_WISP_STATUS so the app sees a converged palette

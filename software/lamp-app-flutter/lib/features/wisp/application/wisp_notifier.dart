@@ -77,6 +77,14 @@ class WispNotifier extends _$WispNotifier {
   String _lastPaletteIdPrefix = '';
   bool _paletteRereadInFlight = false;
 
+  Set<String>? _claimedMacs;
+  bool _claimsReadInFlight = false;
+
+  /// The set of lamp mesh MACs the wisp currently claims, or null while
+  /// the first CHAR_WISP_CLAIMS read is in flight. Empty set means the
+  /// wisp reported count=0 (no claims / stale).
+  Set<String>? get claimedMacs => _claimedMacs;
+
   /// The currently-saved manual palette (last committed). Empty before
   /// the first save in a session.
   List<LampColor> get savedManualPalette => _savedManualPalette;
@@ -110,6 +118,9 @@ class WispNotifier extends _$WispNotifier {
     _currentPaletteKnown = false;
     _lastPaletteIdPrefix = '';
     _paletteRereadInFlight = false;
+
+    _claimedMacs = null;
+    _claimsReadInFlight = false;
 
     ref.onDispose(() {
       _disposed = true;
@@ -152,6 +163,7 @@ class WispNotifier extends _$WispNotifier {
       next = _applySourceWriteGuard(next);
       _ingestManualPaletteFromStatus(next.currentPalette);
       _maybeRereadForPalette(next);
+      unawaited(_loadClaims());
       state = AsyncData(next);
       debugPrint(
         '[wisp_notifier] notify lamp=$lampId len=${bytes.length} '
@@ -168,6 +180,7 @@ class WispNotifier extends _$WispNotifier {
       if (_disposed) return WispStatus.empty;
       _ingestManualPaletteFromStatus(initial.currentPalette);
       _lastPaletteIdPrefix = initial.paletteIdPrefix;
+      unawaited(_loadClaims());
       debugPrint(
         '[wisp_notifier] initial-read lamp=$lampId '
         'wispMac=${initial.wispMac} present=${initial.present} '
@@ -216,13 +229,29 @@ class WispNotifier extends _$WispNotifier {
     return true;
   }
 
+  // Serialized against the palette re-read: FbpBleClient has no internal lock,
+  // so two concurrent characteristic reads stall the GATT flow on Android.
+  Future<void> _loadClaims() async {
+    if (_claimsReadInFlight || _paletteRereadInFlight || _disposed) return;
+    _claimsReadInFlight = true;
+    try {
+      final macs = await _repo.readClaims();
+      if (_disposed) return;
+      _claimedMacs = macs;
+      _bumpState();
+    } finally {
+      _claimsReadInFlight = false;
+    }
+  }
+
   // NOTIFY is trimmed (no palette); a changed paletteIdPrefix means the
   // wisp's palette moved, so pull the full status from the READ leg.
   void _maybeRereadForPalette(WispStatus next) {
     final prefix = next.paletteIdPrefix;
     if (prefix.isEmpty || prefix == _lastPaletteIdPrefix) return;
+    // Don't consume the prefix if a read is busy; retry on the next notify.
+    if (_paletteRereadInFlight || _claimsReadInFlight) return;
     _lastPaletteIdPrefix = prefix;
-    if (_paletteRereadInFlight) return;
     _paletteRereadInFlight = true;
     unawaited(() async {
       try {
@@ -329,6 +358,18 @@ class WispNotifier extends _$WispNotifier {
         debugPrint('WispNotifier.setOffColor write failed: $e\n$st');
       }
     });
+  }
+
+  /// Shuffle: tell the wisp to bump its seed and re-roll per-lamp color
+  /// assignments. The updated seed rides back in the next wispStatus so
+  /// the app preview re-rolls in lock-step without optimistic state here.
+  Future<void> shuffle() async {
+    try {
+      await _repo.shuffle();
+    } catch (e, st) {
+      debugPrint('WispNotifier.shuffle() failed: $e\n$st');
+      rethrow;
+    }
   }
 
   /// Set the wisp source mode (Off / Manual / Aurora).

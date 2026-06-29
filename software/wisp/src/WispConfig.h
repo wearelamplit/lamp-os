@@ -56,14 +56,14 @@ struct ManualPaletteColor {
 
 // Bound aligned with lamp_protocol::kMaxWispPaletteColors so the wisp's
 // stored palette and the on-wire MSG_WISP_PALETTE broadcast share one
-// ceiling. Was 10 (matched a wispStatus JSON budget concern); replaced
-// by the separate MSG_WISP_PALETTE broadcast at 2026-06-13. Aurora
-// palettes can be larger than 50; setManualPalette truncates and the
-// emit-side logs once on oversize.
+// ceiling. Aurora palettes can be larger than 50; setManualPalette truncates.
 inline constexpr size_t kManualPaletteMaxColors = 50;
 
 class WispConfig {
  public:
+  WispConfig();
+  ~WispConfig();
+
   // Open the `wisp` Preferences namespace in RW mode and cache the values.
   // Safe to call once at boot from setup().
   void begin();
@@ -114,6 +114,12 @@ class WispConfig {
   }
   void setManualPalette(const std::vector<ManualPaletteColor>& colors);
 
+  // Snapshot the manual palette as packed RGB into the caller's buffer
+  // (needs maxColors*3 bytes). Returns the color count written. Lock-guarded:
+  // the only manualPalette accessor safe to call off the loop task (the
+  // StatusBeacon timer-service emit path).
+  size_t copyManualPalette(uint8_t* outRgb, size_t maxColors) const;
+
   // Off-mode color. When sourceMode is Off, the wisp does NOT broadcast
   // a palette to the lamp grid (PaintDistributor stays held off) — but
   // it still has its own 30-pixel ring to drive. This color is what
@@ -123,7 +129,17 @@ class WispConfig {
   ManualPaletteColor offColor() const { return offColor_; }
   void setOffColor(ManualPaletteColor c);
 
+  // Shuffle seed. Mixed into TupleSampler's three hash salts via XOR so
+  // bumping it re-rolls per-lamp color assignments across the fleet.
+  // Persisted as a u8 in NVS ("shufSeed"); default 0.
+  uint8_t shuffleSeed() const { return shuffleSeed_; }
+  void bumpShuffleSeed();
+
  private:
+  // Mutex handle — opaque to keep FreeRTOS out of the header. Cast
+  // back to SemaphoreHandle_t in the .cpp. Same pattern as WispRoster.
+  void* mutex_ = nullptr;
+
   Preferences prefs_;
   bool        opened_ = false;
 
@@ -133,6 +149,7 @@ class WispConfig {
   WispSourceMode sourceMode_ = WispSourceMode::Off;
   std::vector<ManualPaletteColor> manualPalette_;
   ManualPaletteColor offColor_ = {255, 150, 50};
+  uint8_t shuffleSeed_ = 0;
 };
 
 }  // namespace wisp

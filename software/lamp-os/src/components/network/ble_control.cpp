@@ -74,6 +74,7 @@ static NimBLEService*        s_service         = nullptr;
 static NimBLECharacteristic* s_stateNotify     = nullptr;
 static NimBLECharacteristic* s_wifiStateChar   = nullptr;
 static NimBLECharacteristic* s_wispStatusChar  = nullptr;
+static NimBLECharacteristic* s_wispClaimsChar  = nullptr;
 static lamp::Config*         s_config      = nullptr;
 static bool                  s_running     = false;
 
@@ -1258,14 +1259,37 @@ void start(lamp::Config* config) {
                                                   NIMBLE_PROPERTY::NOTIFY);
   s_stateNotify->setValue("{}");
 
-  // Schema version — read-only, tail-appended (schema v1). The app reads this
-  // to detect the lamp's attribute-layout version; lamps predating it read as
-  // absent and the app falls back to legacy behavior. Appending at the tail
-  // keeps every existing handle in place, so deployed app installs are
-  // unaffected. See gatt_layout.hpp + the frozen-layout lock-in in CLAUDE.md.
+  // Schema version — read-only. The app reads this to detect the lamp's
+  // attribute-layout version; lamps predating it read as absent and the app
+  // falls back to legacy behavior. See gatt_layout.hpp.
   static const uint8_t kSchemaVersionValue = kGattSchemaVersion;
   s_service->createCharacteristic(CHAR_SCHEMA_VERSION, NIMBLE_PROPERTY::READ)
       ->setValue(&kSchemaVersionValue, 1);
+
+  // Wisp claimed-lamp set — read-only, tail-appended (schema v2). Binary blob:
+  // [count:1][lampMac:6]*count. Stale = count 0 when no claim heard in 60 s.
+  // Separate from CHAR_WISP_STATUS because the status payload is already at
+  // the MTU soft budget (466/509 B).
+  class WispClaimsCallback : public NimBLECharacteristicCallbacks {
+    void onRead(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
+      if (!isAuthed(connInfo.getConnHandle())) {
+        static const uint8_t kEmpty[1] = {0};
+        c->setValue(kEmpty, 1);
+        return;
+      }
+      static uint8_t buf[1 + lamp_protocol::kMaxWispClaimEntries * 6];
+      size_t n = lamp::nearbyLamps.buildWispClaimsBlob(buf, sizeof(buf),
+                                                        millis());
+      c->setValue(buf, n);
+    }
+  };
+  s_wispClaimsChar = s_service->createCharacteristic(CHAR_WISP_CLAIMS,
+                                                      NIMBLE_PROPERTY::READ);
+  s_wispClaimsChar->setCallbacks(new WispClaimsCallback());
+  {
+    static const uint8_t kInitial[1] = {0};
+    s_wispClaimsChar->setValue(kInitial, 1);
+  }
 
   s_service->start();
 
@@ -1316,6 +1340,7 @@ void stop() {
     s_stateNotify    = nullptr;
     s_wifiStateChar  = nullptr;
     s_wispStatusChar = nullptr;
+    s_wispClaimsChar = nullptr;
   }
 
   s_server  = nullptr;

@@ -12,31 +12,17 @@
 // call site, not here.
 //
 // THREADING: update() runs on the loop task; the read accessors paletteId() /
-// colors() are loop-task only. copyPaletteIdPrefix() is portMUX-guarded and
-// can be called from the FreeRTOS timer-service task (StatusBeacon::emit /
-// emitStatus). The .cpp is excluded from the native build because the mux is
-// FreeRTOS-only.
+// colors() are loop-task only. copyPaletteIdPrefix() is mutex-guarded and can
+// be called from the FreeRTOS timer-service task (StatusBeacon::emit /
+// emitStatus). A mutex (not a spinlock) is required because paletteId_
+// assignment heap-allocates and malloc cannot run with interrupts disabled.
+// The .cpp is excluded from the native build because the mutex is FreeRTOS-only.
 
 #pragma once
 
 #include <cstdint>
 #include <string>
 #include <vector>
-
-#if defined(ARDUINO) || defined(ESP_PLATFORM)
-#include <freertos/FreeRTOS.h>
-#include <portmacro.h>
-#define CURRENT_PALETTE_PORTMUX_TYPE       portMUX_TYPE
-#define CURRENT_PALETTE_PORTMUX_INIT       portMUX_INITIALIZER_UNLOCKED
-#define CURRENT_PALETTE_PORTMUX_ENTER(mux) portENTER_CRITICAL(mux)
-#define CURRENT_PALETTE_PORTMUX_EXIT(mux)  portEXIT_CRITICAL(mux)
-#else
-struct CurrentPaletteNullMux {};
-#define CURRENT_PALETTE_PORTMUX_TYPE       CurrentPaletteNullMux
-#define CURRENT_PALETTE_PORTMUX_INIT       {}
-#define CURRENT_PALETTE_PORTMUX_ENTER(mux) ((void)(mux))
-#define CURRENT_PALETTE_PORTMUX_EXIT(mux)  ((void)(mux))
-#endif
 
 #include "aurora/PaletteList.h"  // Palette, PaletteColor
 
@@ -51,10 +37,17 @@ struct RGBW {
 
 class CurrentPalette {
  public:
+  CurrentPalette();
+  ~CurrentPalette();
+
   // Replace the held palette with the resolved Aurora colors. `nowMs` is the
   // wall-clock at the time of replacement (caller supplies millis() so the
   // header can stay framework-free).
   void update(const Palette& p, uint32_t nowMs);
+
+  // Drop the held palette so paint/ring fall back to empty. Loop-task only,
+  // same as update(); takes the mutex around paletteId_ for copyPaletteIdPrefix.
+  void clear();
 
   const std::string& paletteId() const { return paletteId_; }
   uint32_t lastChangeMs() const { return lastChangeMs_; }
@@ -72,10 +65,10 @@ class CurrentPalette {
   uint32_t lastChangeMs_ = 0;
   std::vector<RGBW> colors_;
 
-  // Guards paletteId_ so timer-task snapshots don't tear against a loop-task
-  // update(). colors_ and lastChangeMs_ are intentionally NOT guarded — only
-  // the loop task touches those today.
-  mutable CURRENT_PALETTE_PORTMUX_TYPE mux_ = CURRENT_PALETTE_PORTMUX_INIT;
+  // Mutex handle — opaque to keep FreeRTOS out of the header. Cast back to
+  // SemaphoreHandle_t in the .cpp. Same pattern as WispRoster / WispConfig.
+  // colors_ and lastChangeMs_ are NOT guarded — only the loop task touches those.
+  void* mux_ = nullptr;
 };
 
 }  // namespace wisp

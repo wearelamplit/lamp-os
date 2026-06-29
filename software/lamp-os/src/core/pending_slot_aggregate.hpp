@@ -51,6 +51,7 @@ struct PendingSlotAggregate {
   PendingTypedSlot<PendingRestoreBrightness>  restoreBrightness;
   PendingTypedSlot<PendingWispHello>          wispHello;
   PendingTypedSlot<PendingWispPalette>        wispPalette;
+  PendingTypedSlot<PendingWispClaim>          wispClaim;
   PendingTypedSlot<PendingEvent>              event;
   PendingTypedSlot<PendingFirmwareControl>    firmwareControl;
 };

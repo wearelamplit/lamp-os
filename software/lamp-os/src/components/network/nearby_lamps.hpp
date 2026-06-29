@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "lamp_protocol.hpp"
 #include "util/color.hpp"
 #include "util/proximity.hpp"
 
@@ -143,6 +144,11 @@ struct WispCache {
   uint8_t manualPaletteRgb[150] = {0};
   uint8_t manualPaletteCount = 0;
   uint32_t lastPaletteMs = 0;
+  // Latest MSG_WISP_CLAIM roster. Served via CHAR_WISP_CLAIMS as a binary
+  // blob so the app can filter its painted-lamps list.
+  uint8_t claimedLampMacs[lamp_protocol::kMaxWispClaimEntries][6] = {};
+  uint8_t claimedCount = 0;
+  uint32_t lastClaimMs = 0;
 };
 
 /**
@@ -233,6 +239,20 @@ class NearbyLamps {
   // of pendingWispPalette on Core 1); portMAX_DELAY take.
   void cacheWispPalette(const uint8_t mac[6],
                         const uint8_t* rgb, uint8_t count);
+
+  // Cache the latest MSG_WISP_CLAIM roster for a given wisp MAC.
+  // `lampMacs` is a 2-D array of [count][6] MAC bytes. `nowMs` is millis()
+  // at drain time — used for staleness in buildWispClaimsBlob. Loop-task-
+  // only writer; portMAX_DELAY take.
+  void cacheWispClaim(const uint8_t mac[6],
+                      const uint8_t lampMacs[][6], uint8_t count,
+                      uint32_t nowMs);
+
+  // Build the binary blob served on CHAR_WISP_CLAIMS: [count:1][lampMac:6]*count.
+  // Returns count=0 when the cached claim is stale (nowMs - lastClaimMs >
+  // kWispClaimStaleMs). Returns the number of bytes written to `out`.
+  // Max output = 1 + kMaxWispClaimEntries * 6 = 193 bytes.
+  size_t buildWispClaimsBlob(uint8_t* out, size_t outCap, uint32_t nowMs);
 
   // Light-touch presence ping: assert that we received a wisp-sourced
   // paint frame from [mac]. Same single-slot semantics as cacheWispHello

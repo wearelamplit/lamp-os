@@ -229,7 +229,9 @@ size_t WispRoster::peerCount() const {
 
 void WispRoster::prunePeersLocked(uint32_t nowMs) {
   for (size_t i = 0; i < peerCount_; ) {
-    if (nowMs - peers_[i].lastSeenMs > WISP_ROSTER_PEER_AGE_MS) {
+    const uint32_t last = peers_[i].lastSeenMs;
+    const uint32_t age  = (nowMs >= last) ? nowMs - last : 0;
+    if (age > WISP_ROSTER_PEER_AGE_MS) {
       // Swap-with-back-and-pop.
       if (i != peerCount_ - 1) {
         peers_[i] = peers_[peerCount_ - 1];

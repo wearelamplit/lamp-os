@@ -24,7 +24,10 @@ namespace ble_control {
 // fall back gracefully on legacy lamps that predate the characteristic.
 constexpr const char* CHAR_SCHEMA_VERSION = "5f64f4ea-d6d9-4a44-9b3f-3a8d6f7e6b40";
 
-constexpr uint8_t kGattSchemaVersion = 1;
+// New in schema v2 (tail). Binary blob of claimed lamp MACs from the wisp.
+constexpr const char* CHAR_WISP_CLAIMS    = "5f64f4eb-d6d9-4a44-9b3f-3a8d6f7e6b40";
+
+constexpr uint8_t kGattSchemaVersion = 2;
 
 // Property bits — local mirror of the NimBLE flags so this header stays
 // dependency-free. Only the bits that affect the handle layout matter
@@ -66,7 +69,8 @@ constexpr GattCharDef kGattLayout[] = {
     {"5f64f4e7-d6d9-4a44-9b3f-3a8d6f7e6b40", GP_WRITE | GP_NOTIFY},     // fwControl
     {"5f64f4e8-d6d9-4a44-9b3f-3a8d6f7e6b40", GP_WRITE | GP_WRITE_NR},   // fwChunk
     {"5f64f4d8-d6d9-4a44-9b3f-3a8d6f7e6b40", GP_NOTIFY},                // stateNotify
-    {CHAR_SCHEMA_VERSION,                    GP_READ},                  // schemaVersion (v1, tail)
+    {CHAR_SCHEMA_VERSION,                    GP_READ},                  // schemaVersion
+    {CHAR_WISP_CLAIMS,                       GP_READ},                  // wispClaims (v2, tail)
 };
 
 constexpr size_t kGattLayoutCount = sizeof(kGattLayout) / sizeof(kGattLayout[0]);

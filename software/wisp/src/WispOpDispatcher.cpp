@@ -201,6 +201,12 @@ DispatchResult WispOpDispatcher::dispatch(const uint8_t* payload, size_t len) {
     return DispatchResult::AppliedWifiChange;
   }
 
+  if (strcmp(op, "shuffle") == 0) {
+    Serial.println("[wisp.op] shuffle");
+    config_.bumpShuffleSeed();
+    return DispatchResult::AppliedShuffle;
+  }
+
   Serial.printf("[wisp.op] unknown wispOp op='%s'\n", op);
   return DispatchResult::Malformed;
 }

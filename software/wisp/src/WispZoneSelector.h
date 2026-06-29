@@ -6,14 +6,12 @@
 // here is RAM.
 //
 // THREADING: observe() and copyObserved() are thread-safe via internal
-// portMUX; other methods (currentZone, source, etc.) are read-only after
-// construction *as far as the loop task is concerned* — they are scalar
-// reads that tolerate a torn snapshot under the assumption that mutators
-// (latchFirstSeen / setFromOp / clearFromOp / setFromNvs) all run on the
-// loop task too. StatusBeacon::emitStatus reads currentZone/source from
-// the timer task; the worst case is one stale heartbeat, which the next
-// triggerOnChange will correct. The observed-vector path is the only one
-// that needs the mux because vector relocation can corrupt the snapshot.
+// portMUX. Other methods (currentZone, source, etc.) are read-only after
+// construction as far as the loop task is concerned — scalar reads that
+// tolerate a torn snapshot because all mutators (latchFirstSeen / setFromOp /
+// clearFromOp / setFromNvs) run on the loop task. The portMUX guards
+// observedZones_ / observedCount_ because copyObserved() (timer task) must
+// not see a half-shifted array during the FIFO memmove in observe().
 //
 // The `ZoneSource` discriminator tells the app pane where the current
 // selection came from. The string form is camelCase to match the
@@ -23,7 +21,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <vector>
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 #include <freertos/FreeRTOS.h>
@@ -54,18 +51,23 @@ const char* zoneSourceName(ZoneSource s);
 // upper bound is the single source of truth for the budget.
 constexpr size_t kMaxObservedZones = 16;
 
+// Sane upper bound for zone ids sourced from the mesh, NVS, or app ops.
+// 4 digits is generous for any real venue stage-index count and bounds
+// the JSON digit width, restoring headroom above the greedy-cap guarantee.
+constexpr int kMaxZoneId = 9999;
+inline bool isValidZone(int z) { return z >= 0 && z <= kMaxZoneId; }
+
 class ZoneSelector {
  public:
   int currentZone() const { return currentZone_; }
   ZoneSource source() const { return source_; }
-  const std::vector<int>& observed() const { return observedZones_; }
+  size_t observedCount() const { return observedCount_; }
 
   void observe(int zone);
 
   // Snapshot up to `outCap` observed zones into `out`. Returns the count
-  // written. Thread-safe — takes the internal mux. Use this from any task
-  // other than the loop task (e.g. StatusBeacon's timer-service heartbeat)
-  // to avoid iterator invalidation if observe() reallocates concurrently.
+  // written. Thread-safe — takes the internal mux so this never reads a
+  // half-shifted array mid-memmove inside observe().
   size_t copyObserved(int* out, size_t outCap) const;
 
   // Returns true if the first-seen latch actually changed state (caller can
@@ -81,10 +83,9 @@ class ZoneSelector {
  private:
   int currentZone_ = -1;
   ZoneSource source_ = ZoneSource::None;
-  std::vector<int> observedZones_;  // FIFO, uniqued on insert
+  int    observedZones_[kMaxObservedZones];
+  size_t observedCount_ = 0;
 
-  // Guards observedZones_ so cross-task copyObserved() reads can't race a
-  // loop-task observe() that erases/pushes/reallocates the vector.
   mutable WISP_ZONE_PORTMUX_TYPE observedMux_ = WISP_ZONE_PORTMUX_INIT;
 };
 

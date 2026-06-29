@@ -19,12 +19,45 @@ import '../../control/presentation/widgets/lamp_color_swatch.dart';
 import '../../inventory/application/inventory_notifier.dart';
 import '../../inventory/domain/inventory_lamp.dart';
 import '../../lamp_shell/presentation/widgets/wifi_network_picker.dart';
+import '../../social/application/lamp_nearby_peers_notifier.dart';
+import '../../social/domain/lamp_nearby_peer.dart';
 import '../application/wisp_notifier.dart';
 import '../domain/tuple_sampler.dart';
 import '../domain/wisp_source_mode.dart';
 import '../domain/wisp_status.dart';
 import '../domain/zone_source.dart';
 import 'palette_gradient_bar.dart';
+
+class PaintedLampEntry {
+  const PaintedLampEntry({required this.bdAddr, required this.name});
+  final String bdAddr;
+  final String name;
+}
+
+// Membership is the claimed bdAddr set (all claimed lamps show). Name is
+// resolved from the connected lamp's nearby peers; a lamp never lists itself
+// as a peer, so the connected lamp's own (selfBdAddr, selfName) is seeded too.
+// An unresolved claim shows with its last two bdAddr octets, never dropped.
+List<PaintedLampEntry> resolvePaintedLamps({
+  required Set<String>? claimed,
+  required List<LampNearbyPeer> peers,
+  String? selfBdAddr,
+  String? selfName,
+}) {
+  if (claimed == null) return const [];
+  final byBd = {for (final p in peers) p.bdAddr.toUpperCase(): p.name};
+  if (selfBdAddr != null && selfName != null && selfName.isNotEmpty) {
+    byBd[selfBdAddr.toUpperCase()] = selfName;
+  }
+  return [
+    for (final bd in claimed)
+      PaintedLampEntry(
+        bdAddr: bd,
+        name: byBd[bd.toUpperCase()] ??
+            'Lamp ${bd.length >= 5 ? bd.substring(bd.length - 5) : bd}',
+      ),
+  ];
+}
 
 /// Wisp config — controls how the wisp drives the lamp grid's paint.
 ///
@@ -54,8 +87,9 @@ import 'palette_gradient_bar.dart';
 ///                current-zone callout, observed-zones picker, clear-
 ///                selection button. Wi-Fi lives here — and only here —
 ///                because the wisp only needs internet under Aurora.
-///   4. Painted lamps — every inventory lamp the wisp is sending paint
-///      to, plus a preview of the two colors it's painting on each.
+///   4. Lamps — all lamps the wisp claims by bdAddr, with a two-color
+///      preview for each + a shuffle control. Names resolve from the
+///      connected lamp's nearby-peer list; unresolved show a short tail.
 class WispConfigScreen extends ConsumerWidget {
   const WispConfigScreen({super.key, required this.lampId});
 
@@ -263,7 +297,33 @@ class _WispBodyState extends ConsumerState<_WispBody> {
                 ],
               ],
               const SizedBox(height: AppSpace.xl),
-              const SettingsGroupHeading('Painted lamps'),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
+                child: Row(
+                  children: [
+                    Text(
+                      'LAMPS',
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                            color: Theme.of(context).colorScheme.secondary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: Icon(Icons.shuffle,
+                          size: 18,
+                          color: Theme.of(context).colorScheme.secondary),
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      tooltip: 'Shuffle colours',
+                      onPressed: () => ref
+                          .read(wispNotifierProvider(widget.lampId).notifier)
+                          .shuffle(),
+                    ),
+                  ],
+                ),
+              ),
               _PaintedLampsList(lampId: widget.lampId),
             ],
           ),
@@ -1144,22 +1204,9 @@ class _WifiConfigRowState extends ConsumerState<_WifiConfigRow> {
   }
 }
 
-// ── Painted lamps list ────────────────────────────────────────────────
-// Lists every inventory lamp alongside the two colors the wisp is
-// painting on it (base + shade), computed locally by re-running the
-// wisp's `sampleTupleForMac` algorithm against the wisp's published
-// palette. The wisp itself does not broadcast a per-lamp paint roster
-// — adding that would mean a new mesh message + BLE cache surface;
-// the local prediction is good enough for the operator to confirm
-// "the fleet is mixed within the palette" without that firmware work.
-//
-// Accuracy caveat: on Android `InventoryLamp.id` IS the lamp's BLE MAC,
-// which differs from the lamp's ESP-NOW MAC by one byte (ESP32 derives
-// the WiFi-STA MAC by incrementing the BLE base). So the colors shown
-// here will follow the same pattern the wisp picks — varied across the
-// fleet, with ~50/50 base/shade swap — but won't byte-match what the
-// physical lamp is wearing right now. The header subtitle calls this
-// out so the operator knows to trust the lamp, not the preview.
+// Lists lamps the wisp currently claims, with the two colors it paints on each
+// (base + shade). Membership comes from CHAR_WISP_CLAIMS (bdAddr set); names
+// resolve from the connected lamp's nearby-peer report.
 class _PaintedLampsList extends ConsumerWidget {
   const _PaintedLampsList({required this.lampId});
 
@@ -1170,79 +1217,85 @@ class _PaintedLampsList extends ConsumerWidget {
     final notifier = ref.read(wispNotifierProvider(lampId).notifier);
     ref.watch(wispNotifierProvider(lampId));
     final palette = notifier.savedManualPalette;
-    final inventoryAsync = ref.watch(inventoryNotifierProvider);
-    return inventoryAsync.when(
-      loading: () => Padding(
-        padding: const EdgeInsets.symmetric(vertical: AppSpace.md),
-        child: Text(
-          'Loading…',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-      ),
-      error: (_, _) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: AppSpace.md),
-        child: Text(
-          "Couldn't load inventory.",
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-      ),
-      data: (lamps) {
-        if (lamps.isEmpty) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: AppSpace.md),
-            child: Text(
-              "No lamps in your inventory yet.",
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
+    final shuffleSeed =
+        ref.watch(wispNotifierProvider(lampId)).value?.shuffleSeed ?? 0;
+    final claimedMacs = notifier.claimedMacs; // Set<String>? of bdAddrs
+    final peersAsync = ref.watch(lampNearbyPeersNotifierProvider(lampId));
+    final peers = peersAsync.value ?? const <LampNearbyPeer>[];
+
+    // The connected lamp never lists itself as a nearby peer, so supply its
+    // own name from inventory (on Android lampId IS the bdAddr) — otherwise
+    // its own claimed entry would render as a bare bdAddr label.
+    final inventory =
+        ref.watch(inventoryNotifierProvider).value ?? const <InventoryLamp>[];
+    String? selfName;
+    for (final l in inventory) {
+      if (l.id == lampId) {
+        selfName = l.name;
+        break;
+      }
+    }
+
+    // claimedMacs == null: claims unavailable (legacy lamp / timeout) -> show
+    // every nearby peer rather than blocking or hiding.
+    final entries = claimedMacs == null
+        ? [for (final p in peers) PaintedLampEntry(bdAddr: p.bdAddr, name: p.name)]
+        : resolvePaintedLamps(
+            claimed: claimedMacs,
+            peers: peers,
+            selfBdAddr: lampId,
+            selfName: selfName,
           );
-        }
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(top: 4, bottom: AppSpace.md),
-              child: Text(
-                palette.isEmpty
-                    ? "The wisp hasn't published a palette yet — once it "
-                        "does, this will preview each lamp's two colors."
-                    : "App-side preview from the wisp's published palette. "
-                        "The physical lamps are the source of truth.",
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-            ),
-            for (final lamp in lamps)
-              _PaintedLampRow(
-                lamp: lamp,
-                palette: palette,
-              ),
-          ],
-        );
-      },
+
+    if (entries.isEmpty) {
+      return Padding(
+        padding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: AppSpace.md),
+        child: Text('No lamps claimed by this wisp right now.',
+            style: Theme.of(context).textTheme.bodySmall),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final e in entries)
+          _PaintedLampRow(
+            bdAddr: e.bdAddr,
+            name: e.name,
+            palette: palette,
+            shuffleSeed: shuffleSeed,
+          ),
+      ],
     );
   }
 }
 
 class _PaintedLampRow extends StatelessWidget {
-  const _PaintedLampRow({required this.lamp, required this.palette});
+  const _PaintedLampRow({
+    required this.bdAddr,
+    required this.name,
+    required this.palette,
+    required this.shuffleSeed,
+  });
 
-  final InventoryLamp lamp;
+  final String bdAddr;
+  final String name;
   final List<LampColor> palette;
+  final int shuffleSeed;
 
   @override
   Widget build(BuildContext context) {
-    final mac = parseMacFromBleId(lamp.id);
+    final mac = meshMacFromBdAddr(bdAddr); // bdAddr - 2 = mesh MAC
     final prediction = (mac == null || palette.isEmpty)
         ? null
-        : predictTuple(mac: mac, palette: palette);
+        : predictTuple(mac: mac, palette: palette, shuffleSeed: shuffleSeed);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: Row(
         children: [
           Expanded(
             child: Text(
-              lamp.name,
+              name,
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                 fontWeight: FontWeight.w500,
                 fontSize: 14,

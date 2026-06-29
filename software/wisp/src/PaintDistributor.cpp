@@ -124,7 +124,7 @@ void PaintDistributor::sendPaintToPeer(const uint8_t mac[6]) {
   //
   // The prior 10ms inter-frame delay + the ESP_NOW_SEND_FAIL workaround
   // it documented are no longer relevant.
-  ColorTuple t = sampleTupleForMac(*palette_, mac);
+  ColorTuple t = sampleTupleForMac(*palette_, mac, shuffleSeed_);
   uint8_t srcMac[6] = {0};
   mesh_->getMac(srcMac);
 

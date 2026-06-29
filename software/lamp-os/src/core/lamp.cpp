@@ -224,6 +224,7 @@ void postPendingOverrideBrightness(const PendingOverrideBrightness& src) { pendi
 void postPendingRestoreBrightness(const PendingRestoreBrightness& src)   { pendingSlots.restoreBrightness.post(pendingMux, src); }
 void postPendingWispHello(const PendingWispHello& src)                   { pendingSlots.wispHello.post(pendingMux, src); }
 void postPendingWispPalette(const PendingWispPalette& src)               { pendingSlots.wispPalette.post(pendingMux, src); }
+void postPendingWispClaim(const PendingWispClaim& src)                   { pendingSlots.wispClaim.post(pendingMux, src); }
 void postPendingEvent(const PendingEvent& src)                           { pendingSlots.event.post(pendingMux, src); }
 void postPendingFirmwareControl(const PendingFirmwareControl& src)       { pendingSlots.firmwareControl.post(pendingMux, src); }
 
@@ -1257,6 +1258,7 @@ void lamp::Lamp::tick() {
   drainRestoreBrightness();
   drainWispHello();
   drainWispPalette();
+  drainWispClaim();
   drainWispOp();
   drainWispStatus();
   drainEvent();

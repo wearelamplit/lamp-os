@@ -2,9 +2,34 @@
 
 #include <algorithm>
 
+#include "WispZoneSelector.h"
+
+#if defined(ARDUINO) || defined(ESP_PLATFORM)
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#else
+// Native test build — stub the FreeRTOS surface to no-ops. Single-thread
+// test harness has no concurrent access; the mutex acts solely as a
+// sequence point on hardware, so dropping it for native is safe.
+#include <cstddef>
+typedef void* SemaphoreHandle_t;
+#define pdTRUE         1
+#define portMAX_DELAY  0xFFFFFFFFu
+inline SemaphoreHandle_t xSemaphoreCreateMutex() {
+  return reinterpret_cast<SemaphoreHandle_t>(0x1);
+}
+inline int xSemaphoreTake(SemaphoreHandle_t, unsigned) { return pdTRUE; }
+inline void xSemaphoreGive(SemaphoreHandle_t) {}
+inline void vSemaphoreDelete(SemaphoreHandle_t) {}
+#endif
+
 namespace wisp {
 
 namespace {
+inline SemaphoreHandle_t asHandle(void* m) {
+  return reinterpret_cast<SemaphoreHandle_t>(m);
+}
+
 constexpr const char* kNamespace      = "wisp";
 constexpr const char* kKeyZone        = "selZone";
 constexpr const char* kKeySsid        = "wifiSsid";
@@ -22,6 +47,8 @@ constexpr const char* kKeyManualPalette = "manualPal";
 // rather than three individual int slots so the wire format / NVS
 // footprint is identical to one ManualPaletteColor.
 constexpr const char* kKeyOffColor      = "offColor";
+// Shuffle seed — single u8 stored as int. Bumped on every "shuffle" op.
+constexpr const char* kKeyShuffleSeed   = "shufSeed";
 
 WispSourceMode coerceSourceMode(int raw) {
   switch (raw) {
@@ -37,6 +64,9 @@ WispSourceMode coerceSourceMode(int raw) {
   }
 }
 }  // namespace
+
+WispConfig::WispConfig()  { mutex_ = xSemaphoreCreateMutex(); }
+WispConfig::~WispConfig() { if (mutex_) vSemaphoreDelete(asHandle(mutex_)); }
 
 void WispConfig::begin() {
   if (opened_) return;
@@ -104,19 +134,22 @@ void WispConfig::begin() {
     }
   }
 
+  shuffleSeed_ = static_cast<uint8_t>(prefs_.getInt(kKeyShuffleSeed, 0) & 0xFF);
+
   Serial.printf("[wisp.cfg] loaded selZone=%d ssid='%s' pw=%s "
-                "srcMode=%d manualColors=%u offColor=%u,%u,%u\n",
+                "srcMode=%d manualColors=%u offColor=%u,%u,%u shuffleSeed=%u\n",
                 selectedZone_, wifiSsid_.c_str(),
                 wifiPw_.length() ? "<set>" : "<empty>",
                 static_cast<int>(sourceMode_),
                 (unsigned)manualPalette_.size(),
-                offColor_.r, offColor_.g, offColor_.b);
+                offColor_.r, offColor_.g, offColor_.b,
+                (unsigned)shuffleSeed_);
 }
 
 void WispConfig::setSelectedZone(int zone) {
-  if (zone < 0) {
-    Serial.printf("[wisp.cfg] setSelectedZone(%d) rejected — use clearSelectedZone()\n",
-                  zone);
+  if (!isValidZone(zone)) {
+    Serial.printf("[wisp.cfg] setSelectedZone(%d) rejected — use clearSelectedZone() for <0, or zone must be 0..%d\n",
+                  zone, kMaxZoneId);
     return;
   }
   selectedZone_ = zone;
@@ -169,7 +202,9 @@ void WispConfig::setManualPalette(
   // budgeted size — keeps the wispStatus JSON within CONTROL_MAX_PAYLOAD
   // regardless of what the app pushed.
   const size_t n = std::min<size_t>(colors.size(), kManualPaletteMaxColors);
+  xSemaphoreTake(asHandle(mutex_), portMAX_DELAY);
   manualPalette_.assign(colors.begin(), colors.begin() + n);
+  xSemaphoreGive(asHandle(mutex_));
   if (opened_) {
     if (n == 0) {
       prefs_.remove(kKeyManualPalette);
@@ -193,6 +228,27 @@ void WispConfig::setOffColor(ManualPaletteColor c) {
     prefs_.putBytes(kKeyOffColor, buf, 3);
   }
   Serial.printf("[wisp.cfg] offColor <= %u,%u,%u\n", c.r, c.g, c.b);
+}
+
+void WispConfig::bumpShuffleSeed() {
+  shuffleSeed_ = (shuffleSeed_ + 1) & 0xFF;
+  if (opened_) {
+    prefs_.putInt(kKeyShuffleSeed, shuffleSeed_);
+  }
+  Serial.printf("[wisp.cfg] shuffleSeed <= %u\n", (unsigned)shuffleSeed_);
+}
+
+size_t WispConfig::copyManualPalette(uint8_t* out, size_t maxColors) const {
+  if (!out || !maxColors) return 0;
+  xSemaphoreTake(asHandle(mutex_), portMAX_DELAY);
+  size_t n = std::min(manualPalette_.size(), maxColors);
+  for (size_t i = 0; i < n; ++i) {
+    out[i * 3 + 0] = manualPalette_[i].r;
+    out[i * 3 + 1] = manualPalette_[i].g;
+    out[i * 3 + 2] = manualPalette_[i].b;
+  }
+  xSemaphoreGive(asHandle(mutex_));
+  return n;
 }
 
 }  // namespace wisp

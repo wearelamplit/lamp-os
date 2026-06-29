@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import '../../control/domain/lamp_color.dart';
 import '../../../core/ble/ble_client.dart';
 import '../../../core/ble/uuids.dart';
+import '../domain/wisp_claims.dart';
 import '../domain/wisp_source_mode.dart';
 import '../domain/wisp_status.dart';
 
@@ -31,6 +32,22 @@ class WispRepository {
       BleUuids.wispStatus,
     );
     return WispStatus.fromBytes(bytes);
+  }
+
+  /// Best-effort read of CHAR_WISP_CLAIMS. Returns the claimed mesh MACs, or
+  /// null when the lamp can't answer (legacy firmware without the
+  /// characteristic, timeout, transient error). Null means "unknown, don't
+  /// filter"; the caller shows all lamps. Time-bounded so it can't stall the
+  /// shared BLE flow.
+  Future<Set<String>?> readClaims() async {
+    try {
+      final bytes = await _ble
+          .read(_deviceId, BleUuids.controlService, BleUuids.wispClaims)
+          .timeout(const Duration(seconds: 4));
+      return parseClaimedMacs(bytes);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Pin the wisp to [zoneId]. Persisted in wisp NVS — survives reboot.
@@ -117,6 +134,16 @@ class WispRepository {
       'op': 'setWifi',
       'ssid': ssid,
       'pw': password,
+    });
+  }
+
+  /// Re-roll per-lamp color assignments. The wisp bumps its shuffle seed,
+  /// re-paints the fleet with the new assignments, and broadcasts a fresh
+  /// wispStatus so the app preview re-rolls in lock-step.
+  Future<void> shuffle() async {
+    await _writeOp({
+      'char': 'wispOp',
+      'op': 'shuffle',
     });
   }
 

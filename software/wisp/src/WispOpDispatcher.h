@@ -39,6 +39,7 @@ enum class DispatchResult {
   AppliedSourceChange, // setSource applied (Off/Manual/Aurora)
   AppliedManualPalette,// setManualPalette stored
   AppliedOffColor,     // setOffColor stored (Off-mode wisp-ring color)
+  AppliedShuffle,      // shuffle: bumped shuffleSeed, re-roll queued
   Malformed,           // JSON parse failed or required field missing
 };
 

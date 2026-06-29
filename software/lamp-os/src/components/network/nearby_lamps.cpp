@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "components/network/wisp_claims_addr.hpp"
 #include "util/base64.hpp"
 #include "util/proximity.hpp"
 
@@ -18,10 +19,11 @@ namespace {
 // (WROOM, C6). Format matches addOrUpdateFromBle: canonical uppercase
 // colon-hex.
 std::string deriveBdAddrFromEspNowMac(const uint8_t mac[6]) {
+  uint8_t bd[6];
+  ble_control::bdAddrFromMeshMac(mac, bd);
   char buf[18];
   std::snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X",
-                mac[0], mac[1], mac[2], mac[3], mac[4],
-                static_cast<uint8_t>(mac[5] + 2));
+                bd[0], bd[1], bd[2], bd[3], bd[4], bd[5]);
   return std::string(buf);
 }
 
@@ -571,6 +573,56 @@ std::string NearbyLamps::getWispStatusReadJson(bool includePalette) {
   std::string out;
   serializeJson(doc, out);
   return out;
+}
+
+// Stale threshold for CHAR_WISP_CLAIMS. Matches the wisp-pairing window:
+// the wisp retransmits MSG_WISP_CLAIM every 2 s during pairing, which lasts
+// up to 60 s. After 60 s of silence, any cached roster is meaningless.
+static constexpr uint32_t kWispClaimStaleMs = 60000;
+
+void NearbyLamps::cacheWispClaim(const uint8_t mac[6],
+                                  const uint8_t lampMacs[][6], uint8_t count,
+                                  uint32_t nowMs) {
+  xSemaphoreTake(mutex_, portMAX_DELAY);
+  std::memcpy(wispCache_.mac, mac, 6);
+  wispCache_.present = true;
+  const uint8_t safeCount =
+      count > lamp_protocol::kMaxWispClaimEntries
+          ? static_cast<uint8_t>(lamp_protocol::kMaxWispClaimEntries)
+          : count;
+  if (safeCount > 0 && lampMacs) {
+    std::memcpy(wispCache_.claimedLampMacs, lampMacs,
+                static_cast<size_t>(safeCount) * 6);
+  }
+  wispCache_.claimedCount = safeCount;
+  wispCache_.lastClaimMs = nowMs;
+  xSemaphoreGive(mutex_);
+}
+
+size_t NearbyLamps::buildWispClaimsBlob(uint8_t* out, size_t outCap,
+                                         uint32_t nowMs) {
+  if (!out || outCap == 0) return 0;
+  WispCache snap;
+  if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(2)) != pdTRUE) {
+    out[0] = 0;
+    return 1;
+  }
+  snap = wispCache_;
+  xSemaphoreGive(mutex_);
+
+  const bool stale = snap.lastClaimMs == 0 ||
+                     (nowMs - snap.lastClaimMs) > kWispClaimStaleMs;
+  const uint8_t count = stale ? 0 : snap.claimedCount;
+  const size_t needed = 1 + static_cast<size_t>(count) * 6;
+  if (needed > outCap) {
+    out[0] = 0;
+    return 1;
+  }
+  out[0] = count;
+  for (uint8_t i = 0; i < count; ++i) {
+    ble_control::bdAddrFromMeshMac(snap.claimedLampMacs[i], out + 1 + static_cast<size_t>(i) * 6);
+  }
+  return needed;
 }
 
 }  // namespace lamp
