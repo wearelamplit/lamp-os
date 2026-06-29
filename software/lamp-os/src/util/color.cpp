@@ -90,16 +90,4 @@ Color colorFromHue(uint16_t hueDeg) {
   }
 }
 
-Color::Color() { r = g = b = w = 0; }
-
-Color::Color(uint8_t inR, uint8_t inG, uint8_t inB, uint8_t inW) : r(inR), g(inG), b(inB), w(inW) {};
-
-bool Color::operator==(const Color &inColor) const {
-  return (
-      r == inColor.r &&
-      g == inColor.g &&
-      b == inColor.b &&
-      w == inColor.w);
-};
-
 }  // namespace lamp

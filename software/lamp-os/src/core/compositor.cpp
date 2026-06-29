@@ -83,8 +83,10 @@ void Compositor::tick() {
       // "primary" color (gradient stop 0). Use that as the local-side
       // dim base for this surface so a multi-color gradient lamp still
       // reads as itself during OTA.
+      // Empty defaultColors is a should-not-happen guard; fall back to a
+      // low-power blue, never full white, which would peg the PSU.
       const Color localBase = fb->defaultColors.empty()
-                                  ? Color(255, 255, 255, 0)
+                                  ? Color(0, 0, 255, 0)
                                   : fb->defaultColors.front();
       ota_indicator::paint(fb, localBase, nowMs);
     }

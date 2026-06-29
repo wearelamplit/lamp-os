@@ -160,8 +160,8 @@ using lamp::computeUserBrightnessNow;
 // it and calls applyEffectiveBrightness so the strip transitions cleanly.
 volatile bool pendingApplyEffectiveBrightness = false;
 // Flag set from Core 0 (BLE ServerCallbacks::onDisconnect) when the phone
-// walks away — forces a synchronous disposition NVS commit so the user's
-// final slider value survives even if power is yanked before the debounce
+// walks away. Forces a synchronous flush of debounced disposition-slider
+// edits so the final values survive even if power is yanked before the idle
 // window elapses. Core 1 drain calls config.flushDispositionsNow().
 // See DispositionDebouncer in config.hpp for the NVS-wear rationale.
 volatile bool pendingFlushDispositionsRequested = false;

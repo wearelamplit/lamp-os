@@ -223,13 +223,13 @@ Config::Config(Preferences* inPrefs) {
   // erased / corrupted) returns "{}" with no colors arrays; downstream code
   // (e.g. bt.begin in lamp.cpp uses base.colors[ac] and shade.colors[0])
   // calls operator[] on a std::vector, which is UB on empty and crashes boot
-  // with an invalid-PC fault. Default to a visible white so the lamp at least
-  // boots and the user can adjust colors via the app.
+  // with an invalid-PC fault. Fall back to the low-power class defaults so a
+  // guard hit can't blast the strip at full-white max PSU draw.
   if (base.colors.empty()) {
-    base.colors.push_back(Color{255, 255, 255, 0});
+    base.colors.push_back(kBaseDefaultColor);
   }
   if (shade.colors.empty()) {
-    shade.colors.push_back(Color{255, 255, 255, 0});
+    shade.colors.push_back(kShadeDefaultColor);
   }
   if (base.ac >= base.colors.size()) {
     base.ac = 0;
@@ -755,25 +755,15 @@ void Config::applyDefaults(const Defaults& d) {
   if (!d.name.empty() && lamp.name == "stray") {
     lamp.name = d.name;
   }
-  // Colors: apply subclass default when the vector contains only a single
-  // entry that matches either the class-member default or the defensive
-  // white fallback inserted by Config::Config(Preferences*) for unconfigured
-  // lamps (empty NVS). A lamp that has had its colors configured by the user
-  // will have a different color saved in NVS and won't match these guards.
-  //
-  // Class-member defaults:
-  //   BaseSettings:  Color(0x30, 0x07, 0x83, 0x00)
-  //   ShadeSettings: Color(0x00, 0x00, 0x00, 0xFF)
-  // Defensive NVS fallback (after empty NVS load): Color{255, 255, 255, 0}
-  static const Color kBaseClassDefault(0x30, 0x07, 0x83, 0x00);
-  static const Color kShadeClassDefault(0x00, 0x00, 0x00, 0xFF);
-  static const Color kNvsFallback(0xFF, 0xFF, 0xFF, 0x00);
+  // Colors: apply the variant's injected default when the vector still holds
+  // only the single class-default entry. A user-configured lamp has a
+  // different saved color and won't match, so its choice is preserved.
   if (!d.baseColor.empty() && base.colors.size() == 1 &&
-      (base.colors[0] == kBaseClassDefault || base.colors[0] == kNvsFallback)) {
+      base.colors[0] == kBaseDefaultColor) {
     base.colors[0] = hexStringToColor(d.baseColor.c_str());
   }
   if (!d.shadeColor.empty() && shade.colors.size() == 1 &&
-      (shade.colors[0] == kShadeClassDefault || shade.colors[0] == kNvsFallback)) {
+      shade.colors[0] == kShadeDefaultColor) {
     shade.colors[0] = hexStringToColor(d.shadeColor.c_str());
   }
   base.colorsEditable  = d.baseColorsEditable;

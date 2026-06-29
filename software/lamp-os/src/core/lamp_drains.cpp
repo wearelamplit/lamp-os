@@ -62,7 +62,7 @@ namespace {
 bool      commitDirty = false;
 uint32_t  lastCommitSignalMs = 0;
 uint32_t  lastPersistedHash = 0;  // FNV-1a of last successfully persisted serialized JSON
-constexpr uint32_t kCommitFlushIdleMs = 1500;
+constexpr uint32_t kCommitFlushIdleMs = 2500;
 
 uint32_t fnv1aHash(const String& s) {
   uint32_t h = 2166136261u;
@@ -216,7 +216,7 @@ void Lamp::drainExpressionOp() {
   }
 }
 
-// CHAR_COMMIT drain. Debounced 1500 ms after the last commit signal, with
+// CHAR_COMMIT drain. Debounced 2500 ms after the last commit signal, with
 // hash-dedup against the last persisted snapshot and a force-flush path for
 // BLE disconnect. Must run AFTER all live-preview drains so the snapshot it
 // hashes is current; runs BEFORE the section-cache push at the tail.
