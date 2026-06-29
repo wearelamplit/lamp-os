@@ -56,18 +56,16 @@ static const uint8_t kGoldenDigest[32] = {
     0xac, 0x84, 0xce, 0x57, 0x96, 0xc4, 0xf5, 0xc7, 0x2c, 0xcf, 0x1f,
     0x58, 0x41, 0xec, 0xbe, 0x62, 0x78, 0x07, 0xce, 0xf4, 0x45};
 
-static std::vector<std::vector<uint8_t>>* g_contents = nullptr;
-
 static FsManifestFile makeFile(const std::string& name, const std::string& body) {
-  g_contents->emplace_back(body.begin(), body.end());
-  const std::vector<uint8_t>& buf = g_contents->back();
   FsManifestFile f;
   f.name = name;
-  f.contentLen = buf.size();
-  const uint8_t* data = buf.data();
-  f.read = [data, &buf](size_t offset, size_t want, uint8_t* out) -> int {
+  f.contentLen = body.size();
+  // Lambda owns its bytes by value so it survives the caller's file vector
+  // reallocating between makeFile calls.
+  std::vector<uint8_t> buf(body.begin(), body.end());
+  f.read = [buf](size_t offset, size_t want, uint8_t* out) -> int {
     if (offset + want > buf.size()) return -1;
-    std::memcpy(out, data + offset, want);
+    std::memcpy(out, buf.data() + offset, want);
     return static_cast<int>(want);
   };
   return f;
@@ -87,9 +85,6 @@ static std::vector<uint8_t> makeFwLsig(uint32_t version) {
 void setUp() {
   g_calls.clear();
   g_verifyRc = 0;
-  static std::vector<std::vector<uint8_t>> contents;
-  contents.clear();
-  g_contents = &contents;
 }
 void tearDown() {}
 
