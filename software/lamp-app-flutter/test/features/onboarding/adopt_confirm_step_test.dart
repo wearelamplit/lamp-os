@@ -106,6 +106,57 @@ void main() {
   );
 
   testWidgets(
+    'system-back sends complete-write and disconnects',
+    (tester) async {
+      final ble = InMemoryBleClient();
+      final c = makeContainer(ble);
+      addTearDown(c.dispose);
+      c.read(addLampNotifierProvider.notifier).select(deviceId);
+
+      await tester.pumpWidget(wrap(c));
+      await tester.pump();
+
+      // Simulate system back — PopScope(canPop:false) fires
+      // onPopInvokedWithResult(didPop:false) which calls _cancel → _ctrl.stop().
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+
+      final writes = ble.writesTo(deviceId, BleUuids.expressionTest);
+      final last =
+          jsonDecode(utf8.decode(writes.last)) as Map<String, dynamic>;
+      expect(last['a'], 'test_expression_complete');
+      expect(ble.isConnected(deviceId), isFalse);
+    },
+  );
+
+  testWidgets(
+    'widget dispose sends complete-write and disconnects',
+    (tester) async {
+      final ble = InMemoryBleClient();
+      final c = makeContainer(ble);
+      addTearDown(c.dispose);
+      c.read(addLampNotifierProvider.notifier).select(deviceId);
+
+      await tester.pumpWidget(wrap(c));
+      await tester.pump(); // let _startPulse connect + write initial pulse
+
+      // Swap out the widget tree — AdoptConfirmStep.dispose() fires
+      // unawaited(_ctrl.stop()).
+      await tester.pumpWidget(
+        const MaterialApp(home: Scaffold(body: SizedBox())),
+      );
+      await tester.pump(); // drain stop()'s async write + disconnect
+
+      final writes = ble.writesTo(deviceId, BleUuids.expressionTest);
+      expect(writes, isNotEmpty);
+      final last =
+          jsonDecode(utf8.decode(writes.last)) as Map<String, dynamic>;
+      expect(last['a'], 'test_expression_complete');
+      expect(ble.isConnected(deviceId), isFalse);
+    },
+  );
+
+  testWidgets(
     'Adopt sends complete-write, disconnects, advances to name',
     (tester) async {
       final ble = InMemoryBleClient();

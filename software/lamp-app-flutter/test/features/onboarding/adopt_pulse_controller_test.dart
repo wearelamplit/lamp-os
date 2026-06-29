@@ -84,6 +84,31 @@ void main() {
       });
     });
 
+    test('stop before timer installs does not leak timer', () {
+      fakeAsync((async) {
+        final ble = InMemoryBleClient();
+        final ctrl = AdoptPulseController(ble);
+
+        // start() awaits connect(), so its continuation (writePulse + timer
+        // install) is a scheduled microtask — stop() runs first and sets
+        // _stopped=true before that continuation fires.
+        ctrl.start(deviceId, base);
+        ctrl.stop();
+        async.flushMicrotasks(); // start continuation: if (_stopped) return;
+
+        final countAfterStop =
+            ble.writesTo(deviceId, BleUuids.expressionTest).length;
+
+        // Advance 3 × 1500 ms — a leaked timer would fire here.
+        async.elapse(const Duration(milliseconds: 4500));
+
+        expect(
+          ble.writesTo(deviceId, BleUuids.expressionTest).length,
+          equals(countAfterStop),
+        );
+      });
+    });
+
     test('stop is idempotent — second call does not throw', () {
       fakeAsync((async) {
         final ble = InMemoryBleClient();

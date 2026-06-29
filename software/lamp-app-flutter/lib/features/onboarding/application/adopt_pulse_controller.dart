@@ -28,7 +28,9 @@ class AdoptPulseController {
     _stopped = false;
     final washed = washedOutBright(baseColor);
     await _ble.connect(deviceId);
+    if (_stopped) return;
     await _writePulse(deviceId, washed);
+    if (_stopped) return;
     _timer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
       unawaited(_writePulse(deviceId, washed));
     });

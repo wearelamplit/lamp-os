@@ -18,7 +18,7 @@ import '../domain/add_lamp_state.dart';
 part 'add_lamp_notifier.g.dart';
 
 /// Pick a 1..16 critter index. Each lamp keeps its own random pick across
-/// the connecting view and the lamp preview so users associate the lamp
+/// the adopt-confirm view and the lamp preview so users associate the lamp
 /// with a consistent little friend.
 int _pickCritterIndex() => Random().nextInt(16) + 1;
 

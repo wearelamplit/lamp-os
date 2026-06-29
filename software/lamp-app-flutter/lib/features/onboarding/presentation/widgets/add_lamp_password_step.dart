@@ -87,17 +87,6 @@ class _AddLampPasswordStepState extends ConsumerState<AddLampPasswordStep> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-          Text(
-            'Set a password',
-            textAlign: TextAlign.center,
-            style: textTheme.headlineSmall,
-          ),
-          const SizedBox(height: AppSpace.sm),
-          Text(
-            "Only phones with this password will be able to control this lamp.",
-            textAlign: TextAlign.center,
-            style: textTheme.bodyMedium,
-          ),
           if (isVerifying) ...[
             const Spacer(),
             const _VerifyingTips(),
@@ -115,6 +104,17 @@ class _AddLampPasswordStepState extends ConsumerState<AddLampPasswordStep> {
               ],
             ),
           ] else ...[
+            Text(
+              'Set a password',
+              textAlign: TextAlign.center,
+              style: textTheme.headlineSmall,
+            ),
+            const SizedBox(height: AppSpace.sm),
+            Text(
+              "Only phones with this password will be able to control this lamp.",
+              textAlign: TextAlign.center,
+              style: textTheme.bodyMedium,
+            ),
             if (state.error == AddLampError.wrongPassword) ...[
               const SizedBox(height: AppSpace.sm),
               Text(
