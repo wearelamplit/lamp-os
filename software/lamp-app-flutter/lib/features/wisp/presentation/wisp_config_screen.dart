@@ -78,8 +78,9 @@ List<PaintedLampEntry> resolvePaintedLamps({
 ///                current-zone callout, observed-zones picker, clear-
 ///                selection button. Wi-Fi lives here — and only here —
 ///                because the wisp only needs internet under Aurora.
-///   4. Painted lamps — every inventory lamp the wisp is sending paint
-///      to, plus a preview of the two colors it's painting on each.
+///   4. Painted lamps — all lamps the wisp claims by bdAddr, with a
+///      two-color preview for each. Names resolved from the connected
+///      lamp's nearby-peer list; unresolved addresses show a short tail.
 class WispConfigScreen extends ConsumerWidget {
   const WispConfigScreen({super.key, required this.lampId});
 
