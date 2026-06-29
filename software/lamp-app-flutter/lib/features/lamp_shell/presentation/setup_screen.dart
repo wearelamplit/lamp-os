@@ -40,7 +40,7 @@ Future<bool> _devModePasswordMatches(String input) async {
 /// sub-pane (HomeWifi, HomeMode, AdvancedLeds, Knockout). The Home Wi-Fi
 /// row has a tap-toggle that flips the SSID between "" and a placeholder
 /// without leaving the screen; tapping the chevron-y area drills in to
-/// pick the network / enter the password.
+/// pick the network.
 class SetupScreen extends ConsumerWidget {
   const SetupScreen({super.key, required this.lampId});
   final String lampId;
