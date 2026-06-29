@@ -12,8 +12,7 @@
 namespace lamp {
 
 namespace {
-// Comparator for std::lower_bound over the sorted dispositions vector:
-// an existing entry's key vs the target lookup key.
+// Keyed comparator for lower_bound over the key-sorted dispositions vector.
 inline bool dispositionEntryLess(
     const std::pair<std::string, uint8_t>& a, const std::string& b) {
   return a.first < b;
@@ -97,7 +96,7 @@ Config::Config(Preferences* inPrefs) {
   base.ac = baseNode["ac"] | 0;
   base.bpp = baseNode["bpp"] | 4;
   if (base.bpp != 3 && base.bpp != 4) {
-    base.bpp = 4;  // only 3 or 4 are valid strip formats
+    base.bpp = 4;
   }
   // byteOrder is the source of truth for strip type. When absent, derive
   // from bpp.

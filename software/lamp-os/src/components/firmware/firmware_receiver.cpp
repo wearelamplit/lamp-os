@@ -236,8 +236,7 @@ void FirmwareReceiver::tick(uint32_t nowMs) {
     }
 
     case State::Verify:
-      // Transient or handled synchronously in handleControlOnLoop; tick()
-      // doesn't drive transitions out of Verify.
+      // Verify resolves synchronously in handleControlOnLoop, not from tick().
       return;
   }
 }
@@ -601,8 +600,7 @@ void FirmwareReceiver::handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk&
   };
   WritesInFlightGuard guard{&writesInFlight_};
 #endif
-  // Gate: armed==0 means no OTA in progress (Core 1 cleared the slot in
-  // teardown). Drop the chunk.
+  // publishedOtaHandle_ reads 0 once Core 1 clears the slot in teardown.
   const uint32_t armed = publishedOtaHandle_.load(std::memory_order_acquire);
   if (armed == 0) {
 #ifdef LAMP_DEBUG

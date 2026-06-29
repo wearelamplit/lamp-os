@@ -16,7 +16,6 @@
 #include <mbedtls/sha256.h>
 #endif
 
-// Gate Serial on LAMP_DEBUG; collapses to no-op on host + release builds.
 #if defined(LAMP_DEBUG) && (defined(ARDUINO) || defined(ESP_PLATFORM))
 #define FWDIST_LOGF(...) Serial.printf(__VA_ARGS__)
 #define FWDIST_LOGLN(s)  Serial.println(s)
@@ -60,8 +59,8 @@ void FirmwareDistributor::begin(FirmwareTransport* transport) {
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   if (fsHooks_) {
     // FS: stream the spiffs partition with a fixed length + manifest digest
-    // prefix (no LSIG footer to scan; the digest comes from fw.lsig via hook
-    // since a raw-partition SHA differs per lamp).
+    // prefix. Digest comes from fw.lsig via hook because a raw-partition SHA
+    // differs per lamp.
     runningPartition_ =
         static_cast<const esp_partition_t*>(fsHooks_->partition());
     if (!runningPartition_) {
@@ -108,8 +107,6 @@ void FirmwareDistributor::begin(FirmwareTransport* transport) {
     return;
   }
 
-  // Pre-compute the sha256 prefix over the signed region (before the footer):
-  // the image fingerprint advertised in OFFER and echoed in DONE.
   if (!computeShaPrefixOnce(firmwareTotalLen_)) {
     state_ = State::Disabled;
     FWDIST_LOGLN("[fwdist] disabled (sha256 prefix compute failed)");
@@ -363,7 +360,7 @@ bool FirmwareDistributor::streamingTaskStep(uint32_t nowMs) {
     }
     const int rc = streamOneChunk(nowMs);
     if (rc == 1) {
-      // NO_MEM: back off, retry same chunk next iteration.
+      // NO_MEM.
       vTaskDelay(pdMS_TO_TICKS(kStreamingQueueBackoffMs));
       return true;
     }
@@ -438,7 +435,6 @@ int FirmwareDistributor::streamOneChunk(uint32_t nowMs) {
   // Send outside the mux. sendFrame returns false on NO_MEM/queue-full.
   if (!transport_->sendFrame(buf, framed)) {
 #ifdef LAMP_DEBUG
-    // Rate-limit so a sustained queue-full doesn't drown the UART.
     static uint32_t lastSendFailLogMs = 0;
     static uint32_t failCount = 0;
     failCount++;
@@ -535,12 +531,9 @@ void FirmwareDistributor::tick(uint32_t nowMs) {
 
   switch (s) {
     case State::Idle: {
-      // Idle is event-driven (considerPeerForOta). If a recent Done/Failed
-      // still holds the inter-session quiet, expire it once nothing new arms
-      // within kInterSessionQuietHoldMs. The != 0 guard is load-bearing:
-      // quietHoldUntilMs_ == 0 is the "no exit pending" sentinel, and without
-      // it a tick observing Idle mid-session would exitQuiet early and flicker
-      // the strip between the indicator and the base color.
+      // quietHoldUntilMs_ == 0 is the "no exit pending" sentinel; without the
+      // != 0 guard a tick during a live session would exitQuiet early and
+      // flicker the strip between the indicator and the base color.
       if (quietHeld_ && quietHoldUntilMs_ != 0 && nowMs >= quietHoldUntilMs_) {
         ::lamp::ota_quiet_mode::exitQuiet();
         quietHeld_         = false;
@@ -551,8 +544,6 @@ void FirmwareDistributor::tick(uint32_t nowMs) {
     }
 
     case State::OfferSent: {
-      // OFFER retry cadence lives in the streaming task; tick() only watches
-      // the overall ACCEPT-timeout window.
       if (nowMs >= stateEnteredMsLocal &&
           (nowMs - stateEnteredMsLocal) > kAcceptTimeoutMs) {
         FWDIST_LOGLN("[fwdist] OFFER timeout; backing off peer");
@@ -654,10 +645,9 @@ void FirmwareDistributor::tick(uint32_t nowMs) {
 
     case State::Failed:
     case State::Done:
-      // Tombstone: return to Idle on the next tick. Capture last-session
-      // identity BEFORE resetSession() blanks targetMac/totalChunks so
-      // ota_indicator can keep painting a held completed bar through the
-      // inter-session quiet hold.
+      // Capture last-session identity BEFORE resetSession() blanks
+      // targetMac/totalChunks so ota_indicator can keep painting a held
+      // completed bar through the inter-session quiet hold.
       std::memcpy(lastSessionPeerMac_, targetMac_, 6);
       lastSessionTotalChunks_ = totalChunks_;
       lastSessionValid_       = true;
@@ -727,8 +717,8 @@ void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
   // firmware version so a >= test would reject every eligible peer.
   if (!fsHooks_ && peerVersion >= lamp::FIRMWARE_VERSION) return;
   // Type/channel gate: a known peer {type}-{channel} that differs from ours
-  // doesn't OFFER (no cross-variant/channel flash). Unknown (empty) channel is
-  // an older peer; fall through to the receiver's silent-drop backstop.
+  // doesn't OFFER. An unknown/empty channel is an older peer; fall through to
+  // the receiver's silent-drop backstop.
   if (peerFwChannel && peerFwChannel[0] != '\0' &&
       std::strncmp(peerFwChannel, lamp::FIRMWARE_CHANNEL_STR,
                    lamp_protocol::FW_CHANNEL_LEN) != 0) {

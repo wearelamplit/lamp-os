@@ -64,8 +64,6 @@ class FirmwareDistributor {
 
   // Call once in setup() AFTER show_receiver is begin()'d so the transport's
   // MAC snapshot is valid. nullptr transport leaves the distributor Disabled.
-  // Resolves the running partition and caches the SHA-256 prefix of its
-  // signed region.
   void begin(FirmwareTransport* transport);
 
   // Inject FS-image OTA behavior (see FsDistributorHooks). Call BEFORE begin()
@@ -84,9 +82,8 @@ class FirmwareDistributor {
   // peerProtocolVersion (peer's HELLO data[2]) is the wire version used for
   // every outbound OTA frame this session so old-protocol peers can parse it;
   // 0 = unknown HELLO, peer skipped. peerFwChannel is the peer's
-  // {type}-{channel} from HELLO_TLV_FW_CHANNEL: known and != ours -> skip (no
-  // cross-variant/channel flash); unknown -> offer anyway, receiver silent-drop
-  // is the backstop.
+  // {type}-{channel} from HELLO_TLV_FW_CHANNEL: known and != ours skips the
+  // peer (no cross-variant/channel flash); unknown offers anyway.
   void considerPeerForOta(const uint8_t peerMac[6], uint32_t peerVersion,
                           uint8_t peerProtocolVersion, uint32_t nowMs,
                           const char* peerFwChannel = nullptr);
@@ -125,7 +122,7 @@ class FirmwareDistributor {
   // Total chunks for the running image, computed once at begin(). Zero until then.
   uint16_t totalChunks() const { return firmwareTotalChunks_; }
 
-  // Tunables (constexpr; tests static_assert against these).
+  // Streaming and retry tunables.
   // Streaming cadence: push one chunk, then vTaskDelay to let the WiFi task
   // drain the TX queue. Below ~15ms the ESP-NOW RX queue overruns under RF
   // loss and burst density drives LED flicker. Sender-side only.
@@ -198,9 +195,7 @@ class FirmwareDistributor {
   int         streamOneChunk(uint32_t nowMs);
   // Wake the streaming task. Safe from recv task + tick().
   void        wakeStreamingTask();
-  // Forward-scan the running partition for the lowest valid LSIG footer and
-  // return its signed length (partition > image; partition->size would stream
-  // erased garbage). Forward, not backward, is load-bearing: see the .cpp body.
+  // Signed length of the running image into outLen. False if no valid footer.
   bool        discoverImageLength(uint32_t* outLen) const;
 #endif
 
@@ -292,7 +287,6 @@ class FirmwareDistributor {
   bool getLastSession(uint8_t outMac[6], uint16_t& outTotalChunks) const;
 };
 
-// Single global instance, defined in lamp.cpp.
 extern FirmwareDistributor firmwareDistributor;
 
 }  // namespace lamp

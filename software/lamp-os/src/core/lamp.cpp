@@ -325,13 +325,9 @@ void renderShadeColors(JsonArray arr) {
   std::vector<lamp::Color> colors = jsonArrayToColors(arr);
   std::vector<lamp::Color> gradient =
       lamp::buildGradientWithStops(shade.pixelCount, colors);
-  // Drive the change through beginFade() so the BLE color picker keeps its
-  // fade UX (~250ms ease). Mid-fade interrupts (rapid writes during a drag)
-  // are handled inside ConfiguratorBehavior::beginFade: it computes the
-  // in-progress lerp value as the new fade-from endpoint, so successive
-  // writes rubber-band smoothly without re-snapshotting the post-overlay
-  // buffer (which on Base contains knockout dimming and would otherwise
-  // flicker on dimmed pixels).
+  // beginFade keeps the color-picker's ~250ms ease. On a rapid write mid-fade
+  // it re-anchors fade-from to the in-progress lerp value, so drags
+  // rubber-band smoothly instead of snapping.
   shadeConfiguratorBehavior.beginFade(gradient, lamp::kDefaultFadeMs);
   lamp::overrides.shade.rebaseline(gradient);
   // Reflect the new shade in the BLE adv so phones and v1 neighbours see it

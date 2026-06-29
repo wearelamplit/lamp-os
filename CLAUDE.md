@@ -131,17 +131,29 @@ Register: terse, like a senior dev, not a narrator.
 - No attention labels: `Note:`, `NB:`, `Why:`, `Defensive:`, `Rationale:`,
   `THREADING:`. State the fact; the label is noise.
 - No "we"; state the fact or use the imperative.
-- No em-dashes; use a period, colon, or parentheses.
+- Prefer a period. A colon only before an actual list, never to splice two
+  clauses; no em-dashes; a parenthetical only for a genuine aside, never to
+  smuggle in an implementation detail.
 - No heading or section-divider comments.
+- Don't narrate control flow. A comment restating what an `if` / `else` /
+  `switch` / loop does is noise; the branch condition already says it.
+- No `X not Y` antithesis, no `(is/isn't) load-bearing` framing. State what
+  the code does, not what it's being contrasted against.
 
 Length and placement:
 
 - ~2 lines inline. State an invariant ONCE, on the primary `.h` declaration;
   don't restate it in the member comment and again in the `.cpp` body.
+- A header comments the *contract* — what the declaration is for, what a
+  caller must honor. Never how it works; implementation notes live in the
+  `.cpp`, or in `docs/dev/` if longer than a line.
 - An algorithm/flow walkthrough, a byte-budget tally, or anything past a few
   lines goes in a `docs/dev/` README with a one-line pointer-comment, not
   inlined. A `.cpp` stays comment-light; no file-top contents block.
-- A magic-number constant gets at most a one-line "what breaks if it's wrong".
+- Prefer a self-documenting name over a comment: if a comment exists only to
+  say what a literal or flag *means*, make it a named constant or enum. A
+  genuine magic-number constant gets at most a one-line "what breaks if it's
+  wrong".
 - No fixed per-file comment count.
 
 `// TODO:` / `// FIXME:` (concrete, tagged) and `// ponytail:` markers are
@@ -157,6 +169,8 @@ Forbidden patterns:
 - Hedge-as-content: a comment whose substance is `defensive` / `shouldn't
   happen` / `just in case` / `for now`. State the guard's real reason or cut it.
 - Tombstones for moved code; restatements of what well-named code already says.
+- Commentary on debug scaffolding (`LAMP_DEBUG` guards, log lines). The log
+  string is the message; don't annotate it.
 - Forward-leaning prose with no actionable tag: `will add later`,
   `reserved for`, `future phases can`, `deferred`, `stub`, `placeholder`.
 - Provenance breadcrumbs: `Ported from legacy X`, `Mirrors the wisp's X`.

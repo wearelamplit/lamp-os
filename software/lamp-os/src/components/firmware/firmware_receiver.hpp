@@ -153,8 +153,8 @@ class FirmwareReceiver {
   // nullptr (default) = no cross-check. Wired by fs_ota::begin().
   void setBusyGuard(bool (*fn)()) { busyGuard_ = fn; }
 
-  // Core 1 main loop. Drains the control queue, runs stall/timeout watchdogs,
-  // generates MSG_FW_REQ on gaps. Cheap when Idle.
+  // Periodic Core 1 pump: call every loop. Advances OTA timeouts and gap
+  // recovery. Cheap when Idle.
   void tick(uint32_t nowMs);
 
   // Core 1 drain entry: dispatches a PendingFirmwareControl by msgType to the
@@ -163,14 +163,13 @@ class FirmwareReceiver {
 
   // Called DIRECTLY from the WiFi recv task (Core 0). Writes the chunk to flash
   // and marks its bitmap bit. Bounded IO + bitmap set, no heap/JSON/blocking.
-  // Drops the chunk silently outside Streaming.
   void handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk& p);
 
   State state() const { return state_; }
 
   // True while a session is mid-flow (OFFER accepted through verify/apply).
-  // wifi.cpp gates background scans on this so the radio stays pinned to
-  // LAMP_ESPNOW_CHANNEL while ESP-NOW unicast carries ACCEPT/REQ/CHUNK/RESULT.
+  // wifi.cpp gates background scans on this to keep the radio pinned to the
+  // ESP-NOW channel for the duration.
   bool isInProgress() const {
     return state_ != State::Idle && state_ != State::Failed;
   }
@@ -249,14 +248,10 @@ class FirmwareReceiver {
 
   State state_ = State::Idle;
 
-  // Snapshot of the in-flight OFFER, set in onOfferOnLoop.
+  // Snapshot of the in-flight OFFER.
   uint8_t  wispMac_[6] = {0};      // sourceMac of the OFFER (target of our ACCEPT/REQ/RESULT)
   uint8_t  myMac_[6]   = {0};      // our MAC (sourceMac of ACCEPT/REQ/RESULT)
-  // Distinguishes a same-source re-offer (idempotent ACCEPT) from a different
-  // source starting an OTA mid-flow (DeclineBusy). Set at offer-accept time.
   FirmwareTransportKind activeTransportKind_ = FirmwareTransportKind::EspNow;
-  // Wire version of the OFFER, used for every reply so we answer at the peer's
-  // protocol version.
   uint8_t activeWireVersion_ = lamp_protocol::PROTOCOL_VERSION_EMIT;
   uint16_t activeBleConnHandle_ = 0;
   uint32_t offerVersion_ = 0;
@@ -297,10 +292,8 @@ class FirmwareReceiver {
   // bounded by totalChunks unlike recvChunksCount_.
   uint32_t uniqueChunks_     = 0;
 
-  // Monotonic progress for the indicator (see recvChunksCount()).
-  // progressForLen_ tracks the image it was built for so a different image resets it.
-  HighWaterMark recvProgress_;
-  uint32_t      progressForLen_ = 0;
+  HighWaterMark recvProgress_;       // monotonic indicator progress (see recvChunksCount())
+  uint32_t      progressForLen_ = 0; // image length it was built for; reset when it differs
 
   // Cross-core armed gate. Non-zero = partition pre-erased and Core 0 may write
   // via esp_partition_write(publishedPartition_, ...); zero = drop the chunk.

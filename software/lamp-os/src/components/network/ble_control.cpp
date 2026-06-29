@@ -335,7 +335,6 @@ class ControlServerCallbacks : public NimBLEServerCallbacks {
     lamp::overrides.base.reassertHold();
     lamp::overrides.shade.reassertHold();
     s_currentConnHandle = 0xFFFF;
-    // Recompute effective home mode: gate switches back to presence-based.
     postPendingApplyEffectiveBrightness();
     // Phone walked away: force-commit any pending disposition writes so the
     // user's final slider value survives a power loss before the 5s debounce
@@ -838,20 +837,9 @@ class PageDataCallback : public NimBLECharacteristicCallbacks {
   }
 };
 
-// Firmware OTA: CHAR_FW_CONTROL (write+notify) + CHAR_FW_CHUNK (write).
-//
-// BLE-driven OTA flow:
-//   1. App writes MSG_FW_OFFER (lamp_protocol wire format) to CHAR_FW_CONTROL.
-//      FwControlCallback parses + posts a PendingFirmwareControl with
-//      transportKind=Ble to the Core 1 drain.
-//   2. Core 1 drains, calls FirmwareReceiver::handleControlOnLoop.
-//   3. The receiver decides Accept/Decline; the response routes back via
-//      the BleFirmwareTransport's sendFrame(): a notify on CHAR_FW_CONTROL.
-//   4. App streams MSG_FW_CHUNK frames to CHAR_FW_CHUNK. FwChunkCallback
-//      calls FirmwareReceiver::handleChunkOnRecvTask directly on the BLE
-//      host task (same fast path as the ESP-NOW chunk handler).
-//   5. App writes MSG_FW_DONE to CHAR_FW_CONTROL. Receiver verifies +
-//      reboots. Final MSG_FW_RESULT notify lets the app know.
+// Firmware OTA characteristics: CHAR_FW_CONTROL (write+notify) carries the
+// MSG_FW_* control frames, CHAR_FW_CHUNK (write) carries chunk payloads.
+// Wire format: docs/dev/mesh-api.md.
 
 static NimBLECharacteristic*  s_fwControlChar = nullptr;
 static lamp::FirmwareReceiver* s_firmwareReceiver = nullptr;
