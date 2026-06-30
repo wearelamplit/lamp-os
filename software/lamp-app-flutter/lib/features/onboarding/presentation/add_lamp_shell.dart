@@ -80,11 +80,9 @@ class _AddLampShellState extends ConsumerState<AddLampShell> {
         step != AddLampStep.scan && step != AddLampStep.connecting;
     return Scaffold(
       appBar: AppBar(
-        // Explicit back affordance for the Scan step — pre-fix the user
-        // had no way out (GoRouter auto-leading shows up only when
-        // canPop is true, which fails on deep-link entry, and the
-        // in-flow Back button only appears once the user advances to
-        // Name). Audit ux-H2.
+        // Explicit back affordance for the Scan step: GoRouter auto-leading
+        // shows only when canPop is true (fails on deep-link entry), and the
+        // in-flow Back button only appears once the user advances to Name.
         leading: IconButton(
           icon: const Icon(Icons.close),
           onPressed: () {

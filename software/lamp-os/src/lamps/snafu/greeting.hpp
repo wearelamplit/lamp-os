@@ -6,12 +6,9 @@
 
 namespace lamp { namespace snafu {
 
-// Replaces built-in SocialBehavior for SnafuLamp. Watches NearbyLamps for
-// new arrivals via firstSeenMs edge detection; on first sighting plays a
-// glitch phase then fades in the arriving peer's base color, holds, then
-// fades out. Ported from legacy snafu.py::GlitchedSocialGreeting.
-//
-// Uses NearbyLamp::firstSeenMs instead of Python's `await network.arrived()`.
+// Replaces built-in SocialBehavior for SnafuLamp. On a peer's first sighting
+// plays a glitch phase, fades in the arriving peer's base color, holds, then
+// fades out.
 // Edge condition: if (peer.firstSeenMs >= lastTickMs_) the peer just appeared.
 class Greeting : public AnimatedBehavior {
  public:
@@ -26,8 +23,8 @@ class Greeting : public AnimatedBehavior {
   static constexpr uint32_t kEaseFrames   = 60;
   static constexpr uint32_t kFadeInFrames = kGlitchFrames + kEaseFrames;
 
-  // Glitch gradient: precomputed once on first control() from
-  // (0,45,200,0) → (180,0,60,0) matching legacy snafu.py::GlitchedSocialGreeting.
+  // Glitch gradient, precomputed once on first control() from
+  // (0,45,200,0) to (180,0,60,0).
   std::vector<Color> glitchColors_;
   uint32_t glitchOffset_ = 0;
 

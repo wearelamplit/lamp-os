@@ -58,10 +58,7 @@ class WispStatus {
   /// it forwards). `null` when [zoneSource] is `"none"`.
   final int? currentZone;
 
-  /// Where [currentZone] came from. See [ZoneSource] for the enum
-  /// semantics. Audit cq-H: pre-enum this field was a `String` and
-  /// every comparison site spelled out the literal — brittle to typos
-  /// and impossible to exhaustive-switch over.
+  /// Where [currentZone] came from. See [ZoneSource] for the enum semantics.
   final ZoneSource zoneSource;
 
   /// Zone IDs the wisp has heard recently on the mesh. Drives the

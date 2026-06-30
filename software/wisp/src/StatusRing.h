@@ -1,19 +1,14 @@
-// StatusRing — pure helpers for rendering the wisp's 30-pixel NeoPixel ring
-// as a live indicator of the current source/palette state. The Arduino-side
-// strip control lives in main.cpp (where testStrip, wispConfig and
-// currentPalette are already globals); only the palette→pixels gradient
-// math lives here so it stays host-testable from the `native` env.
+// StatusRing — pure helpers rendering the wisp's 30-pixel ring as a live
+// indicator of source/palette state. Strip control lives in main.cpp; only
+// the palette→pixels gradient math is here so it stays host-testable.
 //
-// Layout: the input palette is treated as a series of equally-spaced color
-// stops which we stretch across `pixelCount` output pixels with linear
-// interpolation between adjacent stops. With N stops:
+// The palette is treated as equally-spaced color stops stretched across
+// pixelCount pixels with linear interpolation:
 //   - N == 0: no-op, caller falls back to warm-white.
-//   - N == 1: every pixel takes that single color.
-//   - N >= 2: pixel i maps to fractional stop position
-//             t = (i / (pixelCount - 1)) * (N - 1)
-//             with lerp between floor(t) and ceil(t) stops.
-//
-// No heap, no Arduino headers — safe to include from native tests.
+//   - N == 1: every pixel takes that color.
+//   - N >= 2: pixel i maps to t = (i / (pixelCount-1)) * (N-1), lerp between
+//             floor(t) and ceil(t).
+// No heap, no Arduino headers.
 
 #pragma once
 
@@ -25,25 +20,17 @@ namespace wisp {
 // Fixed ring length. Kept here so tests and production share one constant.
 inline constexpr size_t kStatusRingPixelCount = 30;
 
-// Warm-white fallback used when the ring has no palette to display
-// (sourceMode=Off, or Manual/Aurora with an empty palette). Pulled
-// noticeably warmer than "Adafruit warm white" because the WS2812 ring
-// runs at kStatusRingBrightness=40 (~16% of full scale), which
-// compresses the R:G:B ratio and washes out a too-pale warm-white tint.
-// At brightness 40 these values scale to approximately (40, 24, 8) on
-// the LEDs — a clear candle-amber that reads as warm rather than
-// near-white.
+// Warm-white fallback when the ring has no palette (Off, or empty Manual/
+// Aurora). Pulled warmer than a neutral warm-white because at brightness 40
+// (~16% scale) the WS2812 compresses the R:G:B ratio and washes a paler tint
+// out; these scale to roughly (40, 24, 8) on the LEDs, a clear candle-amber.
 inline constexpr uint8_t kWarmWhiteR = 255;
 inline constexpr uint8_t kWarmWhiteG = 150;
 inline constexpr uint8_t kWarmWhiteB = 50;
 
-// Render `numStops` RGB stops into `outRgb` (3 bytes per pixel, length
-// pixelCount*3) using linear interpolation. Returns false (and leaves
-// outRgb untouched) when numStops == 0 — caller is expected to fill the
-// ring with warm-white in that case.
-//
-// `stopsRgb` is a flat array of length numStops*3 in RGB byte order.
-// `outRgb` is filled left-to-right in RGB byte order.
+// Render numStops RGB stops into outRgb (3 bytes/pixel, length pixelCount*3)
+// with linear interpolation. Returns false and leaves outRgb untouched when
+// numStops == 0 (caller fills warm-white). stopsRgb is flat numStops*3 RGB.
 inline bool computeRingGradient(const uint8_t* stopsRgb,
                                 size_t numStops,
                                 uint8_t* outRgb,
@@ -65,11 +52,9 @@ inline bool computeRingGradient(const uint8_t* stopsRgb,
     return true;
   }
 
-  // numStops >= 2. Map each pixel to a fractional stop position and lerp.
-  // Using fixed-point Q16.16 so the algorithm matches between host (where
-  // float is fine) and any future MCU-side recomputation without rounding
-  // drift. Range fits: (pixelCount-1) * (numStops-1) <= 30 * 10 = 300, and
-  // we shift by 16, so the intermediate stays well under 2^32.
+  // numStops >= 2: map each pixel to a fractional stop position and lerp in
+  // Q16.16 fixed-point (deterministic across host/MCU). Range fits:
+  // (pixelCount-1)*(numStops-1) <= 300, shifted by 16 stays under 2^32.
   const uint32_t denom = static_cast<uint32_t>(pixelCount - 1);
   const uint32_t span  = static_cast<uint32_t>(numStops - 1);
   for (size_t i = 0; i < pixelCount; ++i) {
@@ -104,10 +89,10 @@ inline void fillRingWarmWhite(uint8_t* outRgb, size_t pixelCount) {
   }
 }
 
-// Fold an Aurora RGBW sample down to RGB for the NEO_GRB ring (which has no
-// W channel). The W contribution biases warm — most of it lands on R, some
-// on G, almost none on B — so a palette that's mostly "white" still reads
-// as warm rather than washed-out. Each channel is clamped to 255.
+// Fold an Aurora RGBW sample to RGB for the NEO_GRB ring (no W channel). The
+// W contribution biases warm (most lands on R, some on G, almost none on B)
+// so a mostly-white palette still reads warm rather than washed-out. Each
+// channel clamps to 255.
 inline void rgbwToRgbWarmBias(uint8_t inR, uint8_t inG, uint8_t inB,
                               uint8_t inW,
                               uint8_t& outR, uint8_t& outG, uint8_t& outB) {

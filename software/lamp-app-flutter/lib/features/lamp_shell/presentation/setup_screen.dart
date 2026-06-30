@@ -47,11 +47,10 @@ class SetupScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Not narrowed via .select: SetupBody consumes 6+ separate state
-    // fields (home.*, lamp.name, base.*, shade.*). Building a record
-    // for .select would touch every changed field anyway. Audit
-    // perf-H3 noted this is the "less hot" of the three .select
-    // candidates — knockout is the actual exploitable case (W5.2).
+    // Not narrowed via .select: SetupBody consumes 6+ separate state fields
+    // (home.*, lamp.name, base.*, shade.*), so a record for .select would
+    // touch every changed field anyway. This is the "less hot" of the .select
+    // candidates; knockout is the actual exploitable case.
     final async = ref.watch(controlNotifierProvider(lampId));
     return async.when(
       loading: () => ConnectingView(deviceId: lampId),
@@ -157,10 +156,8 @@ class _SetupBody extends ConsumerWidget {
             onChanged: (v) => n.setLampWebappEnabled(v),
           ),
         ),
-        // Nearby lamps (debug) — same advanced gate. Pre-fix this
-        // /devices route was only reachable from the empty-state
-        // OnboardingPlaceholder, becoming unreachable in steady state
-        // once a lamp was adopted. Audit ux-H1.
+        // Nearby lamps (debug), behind the advanced gate so the /devices
+        // route stays reachable once a lamp is adopted.
         if (ref.watch(effectiveAdvancedProvider(lampId)))
           SettingsRow(
             icon: Icons.bluetooth_searching,

@@ -21,10 +21,9 @@ void AuroraPaletteClient::loop() {
     switch (state_) {
         case State::Discovering:
             // Skip mDNS until STA is up. Without this gate the wisp issues
-            // `MDNS.queryService("aurora","tcp")` every ~3s even when ssid=''
-            // — each query blocks the WiFi task ~50-300ms and starves the
-            // ESP-NOW send-callback path, causing bursty paint FAILs (root
-            // cause A in docs/.../overnight analysis from 2026-06-13).
+            // MDNS.queryService("aurora","tcp") every ~3s even when ssid='';
+            // each query blocks the WiFi task ~50-300ms and starves the
+            // ESP-NOW send-callback path, causing bursty paint FAILs.
             if (!WiFi.isConnected()) break;
             if (discovery_.discover()) {
                 ws_.setTarget(discovery_.ip(), discovery_.port());
@@ -37,7 +36,7 @@ void AuroraPaletteClient::loop() {
             ws_.loop();
             if (ws_.isConnected()) state_ = State::Streaming;
             // Repeated WS failures likely mean the device moved (DHCP) or went
-            // away — fall back to mDNS. (Nothing to re-discover with a static host.)
+            // away; fall back to mDNS (nothing to re-discover with a static host).
             if (!staticHost_ && ws_.consecutiveFailures() >= kRediscoverFails) {
                 Serial.println("[client] too many WS failures; re-discovering");
                 state_ = State::Discovering;
@@ -126,9 +125,8 @@ void AuroraPaletteClient::handleFrame(const uint8_t* data, size_t len) {
             const auto& z = d.palette.states[i];
             if (z.has_active_color_palette_id) {
                 const int zoneNum = z.has_zone ? z.zone : 0;
-                // Notify observed-zones tracking BEFORE setDesired
-                // so the wisp's ZoneSelector sees every zone announced on the
-                // wire, not just ones we manage to resolve colors for.
+                // Notify observed-zones tracking BEFORE setDesired so the
+                // ZoneSelector sees every announced zone, not just resolved ones.
                 if (onZoneObserved_) onZoneObserved_(zoneNum);
                 setDesired(zoneNum, z.active_color_palette_id);
             }

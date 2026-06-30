@@ -25,18 +25,18 @@ part 'router.g.dart';
 
 @Riverpod(keepAlive: true, name: 'appRouterProvider')
 GoRouter appRouter(Ref ref) {
-  // Re-run the router's redirect when the inventory provider changes —
+  // Re-run the router's redirect when the inventory provider changes.
   // GoRouter doesn't watch Riverpod itself, so without this the redirect
   // fires once on initial navigation and never again. Without the
-  // listener, the very first frame (inventory still loading → redirect
+  // listener, the very first frame (inventory still loading, redirect
   // returns null) freezes the route until the user navigates manually.
   final refresh = ValueNotifier<int>(0);
   ref.listen(inventoryNotifierProvider, (_, next) {
     refresh.value++;
-    // Background-fetch the per-variant firmware for each lamp the user
-    // owns so a venue without internet can still push updates. The cache
-    // notifier coalesces concurrent triggers and ignores network errors
-    // — failure leaves the previous cached copy in place.
+    // Background-fetch the per-variant firmware for each lamp the user owns
+    // so a venue without internet can still push updates. The cache notifier
+    // coalesces concurrent triggers and ignores network errors (failure
+    // leaves the previous cached copy in place).
     final list = next?.value;
     if (list != null && list.isNotEmpty) {
       ref.read(cachedFirmwareNotifierProvider.notifier).syncForInventory(list);
@@ -47,27 +47,27 @@ GoRouter appRouter(Ref ref) {
   return GoRouter(
     // Start on /onboarding so the empty-inventory case lands directly on
     // OnboardingPlaceholder without briefly mounting MyLampsScreen (which
-    // would kick the BLE scanner — an unwelcome side effect during the
-    // loading window AND in widget tests that don't override fbp).
-    // Non-empty inventories bounce to /lamps via the redirect below
-    // once the inventory provider's first emission arrives.
+    // would kick the BLE scanner, unwelcome during the loading window and in
+    // widget tests that don't override fbp). Non-empty inventories bounce to
+    // /lamps via the redirect below once the inventory provider's first
+    // emission arrives.
     initialLocation: AppRoutes.onboarding,
     refreshListenable: refresh,
     redirect: (context, state) {
       final inv = ref.read(inventoryNotifierProvider).value;
       if (inv == null) return null; // still loading
       final loc = state.uri.toString();
-      // Empty inventory → land on onboarding, but allow the user to
-      // navigate forward into the AddLamp flow and the debug devices view.
+      // Empty inventory: land on onboarding, but allow forward navigation
+      // into the AddLamp flow and the debug devices view.
       if (inv.isEmpty) {
         if (loc.startsWith('/onboarding') || loc.startsWith('/devices')) {
           return null;
         }
         return AppRoutes.onboarding;
       }
-      // Non-empty inventory: an explicit landing on /onboarding (e.g.
-      // legacy deep link or the empty-state placeholder) should bounce
-      // to /lamps. Everywhere else, leave navigation alone.
+      // Non-empty inventory: an explicit landing on /onboarding (e.g. a deep
+      // link or the empty-state placeholder) bounces to /lamps. Everywhere
+      // else, leave navigation alone.
       if (loc == AppRoutes.onboarding) {
         return AppRoutes.myLamps;
       }
@@ -103,12 +103,9 @@ GoRouter appRouter(Ref ref) {
           initialTab: LampTab.expressions,
         ),
       ),
-      // Configuration drilldown — pushed from the gear icon in the
-      // LampShell AppBar (so it stacks on top of the shell instead of
-      // mode-replacing). Bundles the old standalone "Setup" tab body +
-      // the old "Info" tab content as an About section at the bottom.
-      // Bottom nav no longer carries Setup/Info; this route is the
-      // single point of entry.
+      // Configuration drilldown, pushed from the gear icon in the LampShell
+      // AppBar so it stacks on top of the shell. Bundles the Setup body and
+      // the About (Info) content as a section at the bottom.
       GoRoute(
         path: '/lamp/:id/setup',
         builder: (_, state) => Scaffold(
@@ -119,17 +116,14 @@ GoRouter appRouter(Ref ref) {
           body: SetupScreen(lampId: state.pathParameters['id']!),
         ),
       ),
-      // /info kept as a redirect to /setup — there's no separate Info
-      // screen any more; About content lives at the bottom of /setup.
-      // Pre-existing routes / deep-links still resolve.
+      // /info redirects to /setup; About content lives at the bottom of /setup.
       GoRoute(
         path: '/lamp/:id/info',
         redirect: (_, state) =>
             '/lamp/${state.pathParameters['id']}/setup',
       ),
-      // /setup/wifi was the old Home Wi-Fi pane; its UI was merged into
-      // the Home Mode pane below. Keep the route pointed at HomeModeScreen
-      // so any external bookmarks / deep links continue to resolve.
+      // /setup/wifi routes to HomeModeScreen (Home Wi-Fi config lives in the
+      // Home Mode pane).
       GoRoute(
         path: '/lamp/:id/setup/wifi',
         builder: (_, state) =>

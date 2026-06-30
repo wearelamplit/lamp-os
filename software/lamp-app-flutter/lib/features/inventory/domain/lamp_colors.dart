@@ -4,35 +4,17 @@ import '../../control/domain/lamp_color.dart';
 import '../../nearby/domain/nearby_lamp.dart';
 import 'inventory_lamp.dart';
 
-/// Single source of truth for "what colors should this lamp's tile
-/// display". Combines two sources:
+/// Single source of truth for a lamp tile's colors. Combines two sources:
 ///
-/// - **Live BLE adv** (`near.baseRgb` / `near.shadeRgb`) — always
-///   authoritative for the **RGB** triplet. Updates regardless of
-///   which device drove the change (this phone, another phone, a
-///   remote, an autonomous expression). The adv carries no W byte
-///   today (the 9-byte mfg payload is `[magic, baseRGB, shadeRGB,
-///   version]` — see `ble_scanner.dart:94-97`).
-/// - **Inventory cache** (`InventoryLamp.last{Shade,Base}Color`) —
-///   populated by `controlNotifier._updateSeen` on every successful
-///   connect-and-read and every live slider tick. Stored as RGBW
-///   (4 ints). Supplies the W byte the adv can't carry; also
-///   covers the offline case when there's no recent BLE sighting.
+/// - Live BLE adv (`near.baseRgb`/`near.shadeRgb`): authoritative for RGB,
+///   regardless of which device drove the change. Carries no W byte.
+/// - Inventory cache (`InventoryLamp.last{Shade,Base}Color`): RGBW, written
+///   by `controlNotifier._updateSeen`; supplies W and covers the offline case.
 ///
-/// Resolution policy:
-///   - Adv present → use adv RGB + cached W (if any), blended for screen.
-///   - Adv absent → use full cached RGBW.
-///   - Both absent → null (consumer renders neutral grey fallback).
-///
-/// One exception: a `NearbyLamp.shadeRgb` of `0` is treated as
-/// "missing data" rather than "actually black" — transitional v2
-/// firmware in the field (post-mesh-flag, pre-shade-restore) ships
-/// `0` as a sentinel, and we'd rather fall through to cache than
-/// paint a real black where we have a known-good cached value.
-///
-/// Length-3 legacy cache entries (written before this layer learned
-/// to store W) are tolerated — they parse as W=0, which renders the
-/// same as the previous behaviour.
+/// Policy: adv present -> adv RGB + cached W; adv absent -> cached RGBW; both
+/// absent -> null. A `shadeRgb` of 0 is treated as "missing" not "black"
+/// (transitional v2 firmware ships 0 as a sentinel), so it falls through to
+/// cache. Length-3 legacy cache entries parse as W=0.
 class LampColors {
   const LampColors({this.shade, this.base});
   final Color? shade;
