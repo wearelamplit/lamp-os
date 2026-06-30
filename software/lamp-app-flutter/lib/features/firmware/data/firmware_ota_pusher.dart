@@ -1,5 +1,5 @@
-// BLE OTA pusher — drives one signed firmware image into one connected
-// lamp using the Phase 5a CHAR_FW_CONTROL + CHAR_FW_CHUNK characteristics.
+// BLE OTA pusher: drives one signed firmware image into one connected
+// lamp using the CHAR_FW_CONTROL + CHAR_FW_CHUNK characteristics.
 //
 // State machine (mirrors the lamp-side distributor enum but lives on the
 // SENDER side):
@@ -22,11 +22,10 @@
 //       facing message
 //
 // Streaming pacing:
-//   - 10 ms gap between chunks (kStreamingChunkSpacingMs on the lamp).
-//     Goes hand-in-hand with the receiver's loop-task starvation
-//     concern (esp_ota_write_with_offset flash-bus contention) — same
-//     as the gossip-OTA mesh streaming cadence. Tested on hardware via
-//     Phase 5a hand-flash; ~80 chunks/sec sustained for the full image.
+//   - 10 ms gap between chunks (kStreamingChunkSpacingMs on the lamp),
+//     matching the receiver's loop-task starvation concern
+//     (esp_ota_write_with_offset flash-bus contention) and the gossip-OTA
+//     mesh streaming cadence. ~80 chunks/sec sustained for the full image.
 //   - chunkSize = 200 bytes (FW_CHUNK_SIZE locked in v1).
 
 import 'dart:async';
@@ -106,9 +105,7 @@ class FirmwareOtaPusher {
   // Target MAC. The lamp dedups frames by (sourceMac, targetMac) — the
   // sender (us, the app) doesn't know the lamp's MAC up front. The BLE
   // path on the lamp uses the BLE connection handle for routing rather
-  // than the targetMac field, so we can ship zeros here without
-  // affecting correctness (mirror of how the lamp-side BLE OTA pusher
-  // populates targetMac in Phase 5a).
+  // than the targetMac field, so zeros here don't affect correctness.
   static final Uint8List _zeroMac = Uint8List(6);
 
   /// Start the OTA push. Returns a future that completes when the lamp
@@ -253,9 +250,8 @@ class FirmwareOtaPusher {
         if (onProgress != null) onProgress!(_chunksSent, _totalChunks);
       }
       // Pace. Without this gap the BLE radio backs up on the receiving
-      // side; tested on hardware in Phase 5a. 10 ms = ~100 chunks/sec
-      // ceiling, well above the ~50 chunks/sec floor a clean session
-      // hits in practice once the receiver's flash IO settles.
+      // side. 10 ms = ~100 chunks/sec ceiling, above the ~50 chunks/sec
+      // floor a clean session hits once the receiver's flash IO settles.
       if (chunkSpacingMs > 0) {
         await Future<void>.delayed(Duration(milliseconds: chunkSpacingMs));
       }

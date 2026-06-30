@@ -1,11 +1,32 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lamp_app/features/control/domain/lamp_color.dart';
 import 'package:lamp_app/features/social/domain/lamp_nearby_peer.dart';
-import 'package:lamp_app/features/wisp/presentation/wisp_config_screen.dart'
-    show resolvePaintedLamps;
+import 'package:lamp_app/features/wisp/domain/wisp_source_mode.dart';
+import 'package:lamp_app/features/wisp/presentation/widgets/wisp_painted_lamps.dart'
+    show resolvePaintedLamps, previewPaletteFor;
 
 void main() {
   LampNearbyPeer peer(String bd, String name) =>
       LampNearbyPeer(name: name, bdAddr: bd);
+
+  group('previewPaletteFor (only Manual paints a predictable grid palette)', () {
+    const manual = [
+      LampColor(r: 255, g: 0, b: 0, w: 0),
+      LampColor(r: 0, g: 0, b: 255, w: 0),
+    ];
+    test('manual -> the manual palette', () {
+      expect(previewPaletteFor(WispSourceMode.manual, manual), manual);
+    });
+    test('off -> empty (offColor is on the wisp ring, not the grid)', () {
+      expect(previewPaletteFor(WispSourceMode.off, manual), isEmpty);
+    });
+    test('aurora -> empty (no app-side aurora palette)', () {
+      expect(previewPaletteFor(WispSourceMode.aurora, manual), isEmpty);
+    });
+    test('null source -> empty', () {
+      expect(previewPaletteFor(null, manual), isEmpty);
+    });
+  });
 
   test('null claimed -> empty (show-all handled by caller, not here)', () {
     expect(resolvePaintedLamps(claimed: null, peers: const []), isEmpty);

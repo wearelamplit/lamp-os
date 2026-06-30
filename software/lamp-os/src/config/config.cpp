@@ -20,7 +20,7 @@ Config::Config(ConfigStore* inStore) {
   // The raw payload would leak `lamp.password` to anyone on the serial
   // console (USB physical access). If you need the full shape while
   // debugging a parse bug, attach a temporary `Serial.println(json)`
-  // for that session — don't roll back this redaction.
+  // for that session; don't roll back this redaction.
   {
     JsonDocument peek;
     if (deserializeJson(peek, json) == DeserializationError::Ok) {
@@ -140,9 +140,9 @@ String Config::asLampJson() {
   doc["devMode"] = lamp.devMode;
   doc["webappEnabled"] = lamp.webappEnabled;
   doc["socialMode"] = static_cast<uint8_t>(lamp.socialMode);
-  // Firmware identity (packed semver + release channel string). Constant
-  // at boot, so no extra invalidation hook is needed — the existing lamp
-  // section cache picks these up the first time it's built.
+  // Firmware identity (packed semver + release channel string). Constant at
+  // boot, so no extra invalidation hook is needed; the lamp section cache
+  // picks these up the first time it's built.
   doc["fwVersion"] = FIRMWARE_VERSION;
   doc["fwChannel"] = FIRMWARE_CHANNEL_STR;
   // lampType is firmware-owned; the app can read it but settings_blob
@@ -209,7 +209,6 @@ String Config::asExpressionsJson() {
     exprNode["intervalMin"] = expr.intervalMin;
     exprNode["intervalMax"] = expr.intervalMax;
     exprNode["target"] = expr.target;
-    // disabledDuringWispOverride is no longer serialised — pure type-property.
     for (const auto& param : expr.parameters) {
       exprNode[param.first] = param.second;
     }
@@ -233,22 +232,11 @@ String Config::asHomeModeJson() {
   return out;
 }
 
-// ── Per-section JSON cache ───────────────────────────────────────────────
-//
-// Each accessor:
-//   - If the section is clean, returns the existing cached std::string ref
-//     in O(1) — no JsonDocument allocation, no vector walk.
-//   - If dirty, calls the existing asXJson() builder (which itself builds
-//     a JsonDocument + walks colors/knockoutPixels/etc.), copies into the
-//     member std::string, clears the dirty flag.
-//
-// Thread safety: the page-protocol path on Core 0 calls the cached
-// accessors from `PageCtrlCallback::onWrite` (NimBLE host task). Core 1
-// mutates source data via drains and calls `invalidateXSection()` /
-// proactively rebuilds via `ble_control::tick`. The portMUX below
-// serialises the rebuild itself so two cores can't `.assign()` the same
-// string concurrently. Source-data reads inside the rebuild lambda are
-// taken under the same mux so a torn read can't slip into the JSON.
+// Per-section JSON cache accessors. Clean section: return the cached string
+// in O(1). Dirty: rebuild via asXJson(), copy into the member string, clear
+// the flag. The portMUX serialises the rebuild so two cores can't .assign()
+// the same string concurrently, and source-data reads inside the rebuild are
+// taken under it so a torn read can't slip into the JSON.
 static portMUX_TYPE s_cacheMux = portMUX_INITIALIZER_UNLOCKED;
 
 #define LAMP_DEFINE_SECTION_CACHED(NAME, BUILDER)                          \
@@ -327,12 +315,9 @@ void Config::applyDefaults(const Defaults& d) {
   base.colorsEditable  = d.baseColorsEditable;
   shade.colorsEditable = d.shadeColorsEditable;
 
-  // Per-surface pixel count. A loaded px of 0 means "unset" — a fresh lamp
-  // (loader early-returned with the class-default 0) or a doc without the
-  // key. Fill those from the variant default; any real stored value wins,
-  // so a configured lamp's px is sacred. (The old guard inferred unset from
-  // magic baseline numbers and clobbered a user who legitimately saved a
-  // value equal to one — that was the "save didn't take" bug.)
+  // Per-surface pixel count. A loaded px of 0 means "unset" (a fresh lamp,
+  // or a doc without the key). Fill those from the variant default; any real
+  // stored value wins, so a configured lamp's px is sacred.
   base.px = resolveConfiguredPx(base.px, d.basePx);
   base.knockoutPixels.resize(base.px, 100);
   shade.px = resolveConfiguredPx(shade.px, d.shadePx);

@@ -79,8 +79,9 @@ class WispNotifier extends _$WispNotifier {
 
   Set<String>? _claimedMacs;
   bool _claimsReadInFlight = false;
+  DateTime? _lastClaimsReadAt;
 
-  /// The set of lamp mesh MACs the wisp currently claims, or null while
+  /// The set of lamp bdAddrs the wisp currently claims, or null while
   /// the first CHAR_WISP_CLAIMS read is in flight. Empty set means the
   /// wisp reported count=0 (no claims / stale).
   Set<String>? get claimedMacs => _claimedMacs;
@@ -121,6 +122,7 @@ class WispNotifier extends _$WispNotifier {
 
     _claimedMacs = null;
     _claimsReadInFlight = false;
+    _lastClaimsReadAt = null;
 
     ref.onDispose(() {
       _disposed = true;
@@ -159,11 +161,27 @@ class WispNotifier extends _$WispNotifier {
         .listen((bytes) {
       if (_disposed) return;
       var next = WispStatus.fromBytes(bytes);
+      // A frame that decodes to "no wisp" while we already hold a present
+      // status is a transient empty/short BLE notify, not the wisp actually
+      // vanishing. Dropping it keeps the icon, source, and palette from
+      // blinking out for a tick whenever a frame lands empty. A genuine
+      // wisp-gone is re-established by the next build/read of the status.
+      if (!next.present && (state.value?.present ?? false)) {
+        return;
+      }
       final rawMac = next.wispMac;
       next = _applySourceWriteGuard(next);
       _ingestManualPaletteFromStatus(next.currentPalette);
       _maybeRereadForPalette(next);
-      unawaited(_loadClaims());
+      // Throttle: claims change rarely; re-read at most once per ~3 s so we
+      // don't issue a BLE read on every ~2 s wispStatus notify.
+      final notifyNow = DateTime.now();
+      final lastRead = _lastClaimsReadAt;
+      if (lastRead == null ||
+          notifyNow.difference(lastRead) >= const Duration(seconds: 3)) {
+        _lastClaimsReadAt = notifyNow;
+        unawaited(_loadClaims());
+      }
       state = AsyncData(next);
       debugPrint(
         '[wisp_notifier] notify lamp=$lampId len=${bytes.length} '
@@ -176,9 +194,33 @@ class WispNotifier extends _$WispNotifier {
     });
 
     try {
-      final initial = _applySourceWriteGuard(await _repo.readStatus());
+      // The lamp gates the CHAR_WISP_STATUS read on the AES-GCM auth
+      // handshake, which completes a beat after the `connected` edge; a
+      // pre-auth read comes back empty (present == false). Retry briefly to
+      // cover that window. Kept tight (2x1.5s) so a genuinely wisp-less lamp
+      // resolves fast rather than sitting in loading; the notify subscription
+      // (already attached above) catches anything slower.
+      var initial = _applySourceWriteGuard(await _repo.readStatus());
       if (_disposed) return WispStatus.empty;
+      for (var attempt = 0; !initial.present && attempt < 2; attempt++) {
+        await Future.delayed(const Duration(milliseconds: 1500));
+        if (_disposed) return WispStatus.empty;
+        // A notify may have landed a present status while we waited; prefer it
+        // so the retry's stale empty read can't clobber it.
+        final live = state.value;
+        if (live != null && live.present) {
+          initial = live;
+          break;
+        }
+        initial = _applySourceWriteGuard(await _repo.readStatus());
+        if (_disposed) return WispStatus.empty;
+      }
       _ingestManualPaletteFromStatus(initial.currentPalette);
+      // A full READ of the status completed, so the palette is now known --
+      // even when the wisp's manual palette is empty. Without this, an empty
+      // palette leaves _ingest's early-return path with _currentPaletteKnown
+      // false and the editor stuck on "reading from wisp" forever.
+      _currentPaletteKnown = true;
       _lastPaletteIdPrefix = initial.paletteIdPrefix;
       unawaited(_loadClaims());
       debugPrint(
@@ -273,10 +315,9 @@ class WispNotifier extends _$WispNotifier {
   /// notify will replace this with the wisp's authoritative view.
   ///
   /// On BLE write failure, rolls the optimistic state back to its
-  /// pre-call snapshot before rethrowing (audit perf-M8). Without the
-  /// rollback the user sees the chip "stick" on the failed selection
-  /// even though the wisp never received the op -- and there's no notify
-  /// coming to reconcile it.
+  /// pre-call snapshot before rethrowing. Without the rollback the user sees
+  /// the chip "stick" on the failed selection even though the wisp never
+  /// received the op, with no notify coming to reconcile it.
   Future<void> setZone(int zoneId) async {
     final prev = state;
     final cur = state.value ?? WispStatus.empty;
@@ -375,7 +416,7 @@ class WispNotifier extends _$WispNotifier {
   /// Set the wisp source mode (Off / Manual / Aurora).
   /// Optimistically reflects in local state so the pill picker doesn't
   /// lag the tap; the wispStatus notify reconciles within ~2s. Rolls
-  /// back the optimistic state on BLE write failure (audit perf-M8).
+  /// back the optimistic state on BLE write failure.
   ///
   /// Arms the source-write guard so stale wispStatus echoes from the
   /// relay lamp between the BLE write and the wisp's triggerOnChange
@@ -531,15 +572,10 @@ class WispNotifier extends _$WispNotifier {
   /// rebroadcasting the existing value is enough to nudge widgets that
   /// read [draftManualPalette] / [manualPaletteDirty] via the notifier.
   ///
-  /// PERF (audit perf-H7, deferred): this defeats Riverpod's equality
-  /// dedup -- `AsyncData(cur)` is a new wrapper around the same value,
-  /// so consumers that `ref.watch` rebuild even when nothing they read
-  /// has changed. The clean fix is to move `_draftManualPalette` into
-  /// its own `StateProvider` so consumers can `.select` to just the
-  /// palette slice. That refactor's wider than this remediation pass --
-  /// the gradient-bar resolution drop (256 -> 30, this commit) cuts the
-  /// downstream cost so the visible jank is gone even with the
-  /// over-broad notify.
+  /// This defeats Riverpod's equality dedup: `AsyncData(cur)` is a new wrapper
+  /// around the same value, so `ref.watch` consumers rebuild even when nothing
+  /// they read changed. The clean fix is to move `_draftManualPalette` into
+  /// its own `StateProvider` so consumers can `.select` the palette slice.
   void _bumpState() {
     final hadValue = state.value != null;
     final cur = state.value ?? WispStatus.empty;

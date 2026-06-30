@@ -16,10 +16,8 @@ enum ZoneSource {
   unknown,
 }
 
-/// Decode the wire-format string into the enum. Audit cq-H (string-
-/// keyed enums are brittle): pre-enum the call sites scattered
-/// `s.zoneSource == 'appOp'` literals; now everyone goes through this
-/// one parser and uses the enum value.
+/// Decode the wire-format string into the enum, so call sites switch on the
+/// enum value rather than scattering `s.zoneSource == 'appOp'` literals.
 ZoneSource parseZoneSource(String? raw) {
   switch (raw) {
     case 'none':

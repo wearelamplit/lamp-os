@@ -65,8 +65,8 @@ class FbpBleClient implements BleClient {
     final device = fbp.BluetoothDevice(
       remoteId: fbp.DeviceIdentifier(deviceId),
     );
-    // NOTE on scan/connect coex (audit L2): we do NOT explicitly pause
-    // the background scan here. flutter_blue_plus serializes scan and
+    // Scan/connect coex: we do NOT explicitly pause the background scan
+    // here. flutter_blue_plus serializes scan and
     // connect operations internally on both Android (BluetoothLeScanner
     // pause during gatt.connect) and iOS (CoreBluetooth's
     // centralManager will defer scan callbacks during a connect-in-
@@ -150,7 +150,7 @@ class FbpBleClient implements BleClient {
   /// Inspect an fbp exception and rethrow it as one of our typed
   /// exceptions when the shape is unambiguous. Centralised so the
   /// string-match for fbp's reworded error messages lives in exactly
-  /// ONE place at the platform boundary (audit cq-H / W7.8).
+  /// ONE place at the platform boundary.
   Never _classifyAndRethrow(String deviceId, Object e) {
     final msg = e.toString().toLowerCase();
     if (msg.contains('encryption')) {
@@ -167,10 +167,9 @@ class FbpBleClient implements BleClient {
     try {
       final ch = await _resolve(d, s, c);
       final bytes = await ch.read();
-      // Size cap (audit sec-M3) — refuses payloads > kBleMaxReadBytes
-      // before they reach any jsonDecode path. Protects the app from a
-      // hostile lamp or a runaway firmware notification that would
-      // otherwise burn unbounded memory.
+      // Size cap: refuses payloads > kBleMaxReadBytes before they reach any
+      // jsonDecode path, bounding memory against a hostile lamp or a runaway
+      // firmware notification.
       if (bytes.length > kBleMaxReadBytes) {
         throw BleReadTooLarge(d, bytes.length, kBleMaxReadBytes);
       }

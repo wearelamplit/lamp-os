@@ -30,10 +30,9 @@ StatusKind statusFor({
   return _kindFromHit(hit, inScanGrace);
 }
 
-/// Map-keyed overload — call this when the caller already has an
-/// id→NearbyLamp index materialised at a higher scope (e.g. screen-
-/// level for a list of inventory tiles). Saves the linear scan in
-/// [statusFor] (audit perf-H6).
+/// Map-keyed overload: call this when the caller already has an
+/// id->NearbyLamp index materialised at a higher scope (e.g. screen-level
+/// for a list of inventory tiles). Saves the linear scan in [statusFor].
 StatusKind statusForById({
   required String lampId,
   required Map<String, NearbyLamp> nearbyById,

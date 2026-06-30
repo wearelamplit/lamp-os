@@ -81,8 +81,8 @@ class _StatusDotState extends State<StatusDot>
         colorScheme.onSurfaceVariant.withValues(alpha: 0.35), // unreachable
     };
 
-    // Screen-readers see only the visual dot otherwise — name it (audit
-    // W8): "Mesh connected" / "Bluetooth only" / "Offline".
+    // Screen-readers see only the visual dot otherwise; name it:
+    // "Mesh connected" / "Bluetooth only" / "Offline".
     final semanticsLabel = switch (widget.kind) {
       StatusKind.offline => 'Offline',
       StatusKind.bluetooth => 'Bluetooth only',

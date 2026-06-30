@@ -6,10 +6,8 @@
 namespace lamp { namespace snafu {
 
 // Gradient palette cycle constrained to the spot pixel sub-region.
-// Ported from legacy snafu.py::PaintSpots. Operates only on
-// indices [startPx_, endPx_] (inclusive) within the shade FrameBuffer.
-// For Amanita hardware: startPx=24, endPx=32 (9 spots matching the Python
-// `range(24, 33)` — exclusive end → 9 pixels).
+// Operates only on indices [startPx_, endPx_] (inclusive) within the shade
+// FrameBuffer. Amanita hardware: startPx=24, endPx=32 (9 spots).
 class PaintSpots : public AnimatedBehavior {
  public:
   PaintSpots(FrameBuffer* inFb, uint16_t startPx, uint16_t endPx,
@@ -22,7 +20,6 @@ class PaintSpots : public AnimatedBehavior {
 
  private:
   static constexpr size_t kSceneCount = 12;
-  // Verbatim port of legacy snafu.py::spot_colors.
   static const Color kSpotPalettes[kSceneCount][2];
 
   uint16_t startPx_;

@@ -21,11 +21,10 @@ class ExpressionsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // .select to the expressions slice (audit perf-H2). The brightness /
-    // shade / base slider drags on ControlNotifier no longer rebuild
-    // this whole list of expression rows — only mutations to the
-    // expressions section (add / edit / reorder / delete / enable
-    // toggle) do.
+    // .select to the expressions slice so brightness / shade / base slider
+    // drags on ControlNotifier don't rebuild this whole list of rows; only
+    // mutations to the expressions section (add / edit / reorder / delete /
+    // enable toggle) do.
     final async = ref.watch(controlNotifierProvider(lampId).select(
       (a) => a.whenData((s) => s.expressions),
     ));

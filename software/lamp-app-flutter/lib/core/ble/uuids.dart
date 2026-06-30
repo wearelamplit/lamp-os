@@ -65,8 +65,8 @@ abstract class BleUuids {
   // data. See features/wisp/data/wisp_repository.dart for the parsed shape.
   static const wispStatus = '5f64f4e2-d6d9-4a44-9b3f-3a8d6f7e6b40';
 
-  // wisp_claims (read-only, binary): the set of lamp mesh MACs the wisp
-  // currently claims. Format: [count:1][mac:6]*count, count ≤ 32.
+  // wisp_claims (read-only, binary): the set of lamp bdAddrs the wisp
+  // currently claims. Format: [count:1][bdAddr:6]*count, count ≤ 32.
   // count=0 means no claims / wisp stale. See parseClaimedMacs().
   static const wispClaims = '5f64f4eb-d6d9-4a44-9b3f-3a8d6f7e6b40';
 

@@ -9,9 +9,9 @@ part 'lamp_nearby_peer.g.dart';
 /// by the Social tab so dispositions are scoped to peers the connected
 /// lamp can actually greet.
 ///
-/// Backward compatibility: pre-Phase-D firmware doesn't emit `rssi`
-/// or `proximity`. Missing rssi defaults to -127 (sentinel); missing
-/// proximity defaults to 2 (Far) — the safe-display fallback.
+/// Backward compatibility: legacy firmware doesn't emit `rssi` or
+/// `proximity`. Missing rssi defaults to -127 (sentinel); missing proximity
+/// defaults to 2 (Far), the safe-display fallback.
 @freezed
 abstract class LampNearbyPeer with _$LampNearbyPeer {
   const factory LampNearbyPeer({
@@ -23,9 +23,8 @@ abstract class LampNearbyPeer with _$LampNearbyPeer {
     /// `-127` means "no reading yet" (older firmware that doesn't emit
     /// RSSI, or a fresh peer not yet seen via BLE).
     @Default(-127) int rssi,
-    /// Proximity bucket: 0=Near, 1=Around, 2=Far. Default 2 keeps
-    /// pre-Phase-D peers in a safe "Far" bucket rather than
-    /// mis-classifying them as Near.
+    /// Proximity bucket: 0=Near, 1=Around, 2=Far. Default 2 keeps legacy
+    /// peers in a safe "Far" bucket rather than mis-classifying them as Near.
     @Default(2) int proximity,
     /// 4-channel RGBW for the lamp's base and shade. Used to render
     /// the lamp icon next to the row.

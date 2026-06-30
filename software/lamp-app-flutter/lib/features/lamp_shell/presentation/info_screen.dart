@@ -59,10 +59,9 @@ class _InfoBody extends ConsumerStatefulWidget {
 
 class _InfoBodyState extends ConsumerState<_InfoBody> {
   late final TapCounter _tap;
-  // Memoised once per lifetime — PackageInfo.fromPlatform is a platform-
-  // channel hop; building the future inside FutureBuilder.build would
-  // flash "App ..." on every notifier tick (audit perf-C1 carried over
-  // from when this content lived inside the Setup tab's _AboutSection).
+  // Memoised once per lifetime: PackageInfo.fromPlatform is a platform-
+  // channel hop; building the future inside FutureBuilder.build would flash
+  // "App ..." on every notifier tick.
   late final Future<PackageInfo> _packageInfo;
 
   @override

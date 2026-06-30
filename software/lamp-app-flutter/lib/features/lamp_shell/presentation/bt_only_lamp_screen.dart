@@ -37,14 +37,14 @@ class BtOnlyLampScreen extends ConsumerStatefulWidget {
   ConsumerState<BtOnlyLampScreen> createState() => _BtOnlyLampScreenState();
 }
 
-/// Process-global set of lamp IDs that have already had a BtOnly →
+/// Process-global set of lamp IDs that have already had a BtOnly to
 /// Control auto-route fire this app session. Survives remounts of
-/// [BtOnlyLampScreen] so the audit-H4 ping-pong (lamp flaps `isMesh`,
-/// auto-route to Control, Control bounces back to BtOnly, BtOnly
-/// auto-routes back to Control, ad infinitum) can't happen — once a
-/// lamp's auto-route fires, every subsequent BtOnly mount for that
-/// lamp ignores the fresh-adv signal. The user keeps full manual
-/// navigation via the AppBar back button. Reset only on app restart;
+/// [BtOnlyLampScreen] so the ping-pong (lamp flaps `isMesh`, auto-route to
+/// Control, Control bounces back to BtOnly, BtOnly auto-routes back to
+/// Control, ad infinitum) can't happen: once a lamp's auto-route fires, every
+/// subsequent BtOnly mount for that lamp ignores the fresh-adv signal. The
+/// user keeps full manual navigation via the AppBar back button. Reset only
+/// on app restart;
 /// the auto-route is one-shot convenience, not a steady-state poll.
 final Set<String> _btOnlyAlreadyAutoRouted = <String>{};
 
@@ -62,7 +62,7 @@ class _BtOnlyLampScreenState extends ConsumerState<BtOnlyLampScreen> {
     // just came online with new firmware). Bounce to ControlScreen so
     // the user isn't trapped on a screen that no longer applies.
     //
-    // ONE-SHOT GLOBALLY (audit H4 fix): the "already routed" flag lives
+    // One-shot globally: the "already routed" flag lives
     // in `_btOnlyAutoRoutedProvider` so a remount of this screen
     // (e.g. ControlScreen bounces back to BtOnly on a flaky link) does
     // NOT re-fire the auto-route. The user can navigate manually via

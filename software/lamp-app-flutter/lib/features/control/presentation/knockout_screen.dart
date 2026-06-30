@@ -238,13 +238,11 @@ class _KnockoutScreenState extends ConsumerState<KnockoutScreen> {
                         horizontal: 16, vertical: 8),
                     child: Row(
                       children: [
-                        // Mental-model fix (audit ux-H5): the OLD "Cancel"
-                        // button does real work (rewrites every drifted
-                        // pixel back to its original) and the OLD "Update"
-                        // was a no-op pop (changes already live-applied).
-                        // Renamed to match what they do:
-                        //   "Discard changes" — actively reverts.
-                        //   "Done"            — closes the screen.
+                        // Button labels match what they do (changes are
+                        // live-applied during the drag):
+                        //   "Discard changes" rewrites every drifted pixel
+                        //   back to its original.
+                        //   "Done" just closes the screen.
                         TextButton.icon(
                           icon: const Icon(Icons.undo, size: 18),
                           label: const Text('Discard changes'),
@@ -285,10 +283,8 @@ class _KnockoutScreenState extends ConsumerState<KnockoutScreen> {
 /// non-interactive; the parent's `Listener` handles all gestures.
 ///
 /// Each row is its OWN `ConsumerWidget` and `.select`s on just its index's
-/// knockout value (audit perf-H4). Pre-fix, 144 rows all rebuilt + relaid-
-/// out at ~33 Hz during a drag because the parent's `data: (state) {...}`
-/// rebuilt the entire `Column` on every state change. Now only the rows
-/// whose pixel value actually changed rebuild — typically one per drag tick.
+/// knockout value, so a drag rebuilds only the rows whose pixel value changed
+/// (typically one per tick) rather than relaying out all 144 rows at ~33 Hz.
 class _PixelBar extends ConsumerWidget {
   const _PixelBar({required this.lampId, required this.index});
 

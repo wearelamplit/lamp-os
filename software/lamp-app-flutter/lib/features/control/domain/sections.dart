@@ -8,7 +8,7 @@ const _mapEq = MapEquality<Object?, Object?>();
 
 /// CHAR_LAMP_SECTION payload, see firmware Config::asLampJson.
 ///
-/// Manually-overridden `==` / `hashCode` (audit cq-H / W7.7): Riverpod's
+/// Manually-overridden `==` / `hashCode`: Riverpod's
 /// `.select` and AsyncValue equality short-circuit on `prev == next`.
 /// Without explicit equality the default identity compare always misses
 /// — every notifier rebuild propagated to every consumer even when no

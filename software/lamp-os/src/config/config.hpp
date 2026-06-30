@@ -24,10 +24,10 @@ class Config {
   ConfigStore* store_ = nullptr;
 
  public:
-  // First-boot defaults that a Lamp subclass can inject before NVS load.
-  // Fields left empty/default are not applied; the existing NVS value (or
-  // the Config class-default) wins. colorsEditable is emitted in
-  // asBaseJson/asShadeJson — the app hides the color picker when false.
+  // First-boot defaults a Lamp subclass injects before NVS load. Fields left
+  // empty/default are not applied; the existing NVS value (or the Config
+  // class-default) wins. colorsEditable is emitted in asBaseJson/asShadeJson
+  // (the app hides the color picker when false).
   struct Defaults {
     std::string name;
     std::string baseColor;        // hex like "#300783"
@@ -37,7 +37,7 @@ class Config {
     // Per-surface pixel count for a first-boot lamp. 0 = no override
     // (leave whatever the loader / class default produced). When non-zero,
     // applyDefaults only overwrites NVS-loaded values that still match a
-    // known factory baseline — same guard pattern as the color fields.
+    // known factory baseline (same guard pattern as the color fields).
     uint8_t basePx  = 0;
     uint8_t shadePx = 0;
   };
@@ -93,7 +93,7 @@ class Config {
   bool persistConfig(const char* via);
 
   // Writes a caller-supplied whole-config JSON string straight to the NVS
-  // "cfg" blob (the webapp's whole-document PUT path — the constructor
+  // "cfg" blob (the webapp's whole-document PUT path; the constructor
   // re-parses it on the next boot). Keeps the namespace/key contract here
   // rather than letting callers open Preferences("lamp") themselves.
   // Returns true iff the store wrote > 0 bytes.
@@ -109,7 +109,7 @@ class Config {
   void setLampType(const std::string& type);     // persists + updates in-memory
   std::string loadLampType();                     // reads NVS, returns empty if unset
 
-  // Per-section serializers — each returns a String of just the JSON for
+  // Per-section serializers, each returning a String of just the JSON for
   // that section. Internal helpers backing the *JsonCached() accessors
   // below; the BLE onRead path always goes through the cache.
   String asLampJson();
@@ -118,40 +118,27 @@ class Config {
   String asExpressionsJson();
   String asHomeModeJson();
 
-  // ── Per-section JSON cache ────────────────────────────────────────────
-  //
-  // Each section keeps a cached std::string of its serialised JSON plus
-  // a dirty flag. The CHAR_*_SECTION read path on Core 0 just hands
-  // back the cached string via c->setValue(...); NimBLE copies the
-  // bytes into its own internal value buffer, so a subsequent GATT
-  // read returns NimBLE's copy without re-touching Config at all.
-  //
-  // Invalidation is the responsibility of mutation paths on Core 1 —
-  // call invalidateXSection() AFTER mutating any field that feeds
-  // asXJson(). The cache rebuilds lazily inside xSectionJsonCached()
-  // the next time it's read.
-  //
-  // Thread safety: safe to call from either core. A portMUX in
-  // config.cpp serialises the rebuild itself; the page-protocol path
-  // on Core 0 reads cached strings, Core 1 proactively rebuilds dirty
-  // sections from ble_control::tick() so Core 0 finds them already
-  // populated in the steady state.
+  // Per-section JSON cache. Each section caches its serialised JSON plus a
+  // dirty flag; the CHAR_*_SECTION read on Core 0 hands back the cached
+  // string and NimBLE copies it, so reads never re-touch Config. Mutation
+  // paths on Core 1 must call invalidateXSection() after touching any field
+  // that feeds asXJson(); the cache rebuilds lazily on next read. Safe from
+  // either core (a portMUX in config.cpp serialises the rebuild).
   const std::string& lampSectionJsonCached();
   const std::string& baseSectionJsonCached();
   const std::string& shadeSectionJsonCached();
   const std::string& expressionsSectionJsonCached();
   const std::string& homeSectionJsonCached();
 
-  // Mark a section's cache dirty. Cheap — just a bool flip. Call
-  // immediately AFTER mutating any field that contributes to the
-  // section's JSON shape.
+  // Mark a section's cache dirty (a bool flip). Call after mutating any
+  // field that contributes to the section's JSON shape.
   void invalidateLampSection();
   void invalidateBaseSection();
   void invalidateShadeSection();
   void invalidateExpressionsSection();
   void invalidateHomeSection();
-  // Convenience: invalidate every section + the settings blob. Used by
-  // bulk-write paths (settings_blob drain).
+  // Invalidate every section + the settings blob. Used by bulk-write paths
+  // (settings_blob drain).
   void invalidateAllSections();
 
   // Per-peer social disposition (1=Salty, 2=Wary, 3=Neutral, 4=Fond,
@@ -174,39 +161,34 @@ class Config {
   // `bdAddr` is canonical-form colon-hex (e.g. "AA:BB:CC:DD:EE:FF").
   // See lamp::isValidBdAddr in util/bd_addr.hpp.
   uint8_t getDisposition(const std::string& bdAddr) const;
-  // Clamps `value` to [1,5]. Marks the debouncer dirty — the actual NVS
-  // write happens later via maybeFlushDispositions() or
-  // flushDispositionsNow(). Evicts the lowest-by-key entry if at
-  // kDispositionsMax and the BD_ADDR is new. (Historical note: this used to
-  // be a std::map; eviction was "first by iteration order" which is
-  // alphabetical-by-key. The sorted-vector replacement preserves the
-  // same policy — entries[0] is the lowest-by-key. Fine for an
-  // at-capacity scenario that shouldn't be reached in practice.)
+  // Clamps `value` to [1,5] and marks the debouncer dirty; the NVS write
+  // happens later via maybeFlushDispositions() or flushDispositionsNow().
+  // Evicts the lowest-by-key entry when at kDispositionsMax and the BD_ADDR
+  // is new.
   void setDisposition(const std::string& bdAddr, uint8_t value);
   // Full JSON serialization for the CHAR_SOCIAL_DISPOSITIONS read path.
   String asDispositionsJson() const;
   // Bulk replace from the CHAR_SOCIAL_DISPOSITIONS write path. Caller
-  // provides a JSON object; we parse, clamp, mark dirty. The actual NVS
-  // commit is deferred to the next maybeFlushDispositions/flushDispositionsNow
-  // call. Returns true on success.
+  // provides a JSON object; parse, clamp, mark dirty. The NVS commit is
+  // deferred to the next maybeFlushDispositions/flushDispositionsNow call.
+  // Returns true on success.
   bool setDispositionsFromJson(const char* json, size_t len);
 
   // Called from the loop drain on Core 1 every iteration. Cheap when no
-  // disposition writes have happened — just a dirty-flag check + a
-  // subtraction. Triggers persistDispositions_() once the user has been
-  // idle for kDispositionFlushIdleMs and clears the dirty flag.
+  // disposition writes have happened (a dirty-flag check + a subtraction).
+  // Triggers persistDispositions_() once the user has been idle for
+  // kDispositionFlushIdleMs and clears the dirty flag.
   void maybeFlushDispositions(uint32_t nowMs);
-  // Synchronous flush for situations where deferring is unsafe (BLE
-  // disconnect — phone is gone, we may lose power before the next loop
-  // tick). Must be called on Core 1 (NVS is not Core-0-safe). No-op when
-  // not dirty so onDisconnect can call it unconditionally.
+  // Synchronous flush for when deferring is unsafe (BLE disconnect: phone is
+  // gone, power may drop before the next loop tick). Must run on Core 1 (NVS
+  // is not Core-0-safe). No-op when not dirty so onDisconnect can call it
+  // unconditionally.
   void flushDispositionsNow();
 
  private:
   DispositionStore dispositions_{kDispositionFlushIdleMs};
 
-  // ── Cached JSON per BLE section ───────────────────────────────────────
-  // Defaults: all dirty=true so the first cached() call computes and
+  // All dirty=true initially so the first cached() call computes and
   // populates the string. After that, mutations on Core 1 must call
   // invalidateXSection() before reading the cached value again.
   std::string lampSectionJson_;

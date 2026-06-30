@@ -6,10 +6,8 @@
 
 namespace ble_control {
 
-// ── Service UUID ──────────────────────────────────────────────────────────
 constexpr const char* SERVICE_UUID          = "5f64f4d0-d6d9-4a44-9b3f-3a8d6f7e6b40";
 
-// ── Characteristic UUIDs ──────────────────────────────────────────────────
 // auth (write-with-response): send lamp.password to unlock the connection
 constexpr const char* CHAR_AUTH            = "5f64f4d1-d6d9-4a44-9b3f-3a8d6f7e6b40";
 // brightness (write-without-response): single u8 value 0-100. Firmware
@@ -32,21 +30,18 @@ constexpr const char* CHAR_STATE_NOTIFY    = "5f64f4d8-d6d9-4a44-9b3f-3a8d6f7e6b
 //   {"op":"upsert","entry":{...full expression config...}}
 //   {"op":"remove","type":"<type>","target":<1|2|3>}
 constexpr const char* CHAR_EXPRESSION_OP   = "5f64f4d9-d6d9-4a44-9b3f-3a8d6f7e6b40";
-// wifi_op (write-with-response): JSON op for WiFi management. Reduced to:
-//   {"op":"scan"}    — kick off an async scan (results notified via
-//                       CHAR_WIFI_STATE).
-// setHomeSsid + forget moved into the unified settings_blob path; the
-// only remaining wifi_op operation is `scan`. Presence-only mode means
-// the lamp never associates, so there's no "connect" op either.
+// wifi_op (write-with-response): JSON op for WiFi management. Only op is
+//   {"op":"scan"}: kick off an async scan (results notified via
+//                  CHAR_WIFI_STATE).
+// Presence-only mode means the lamp never associates, so there's no
+// "connect" op; setHomeSsid + forget live in the settings_blob path.
 constexpr const char* CHAR_WIFI_OP         = "5f64f4da-d6d9-4a44-9b3f-3a8d6f7e6b40";
 // wifi_state (read + notify): JSON snapshot of WiFi state
 constexpr const char* CHAR_WIFI_STATE      = "5f64f4db-d6d9-4a44-9b3f-3a8d6f7e6b40";
 // Page protocol (auth-gated): paginated lamp→app reads of named sections.
-// Replaces the previous per-section read characteristics (lamp/base/shade/
-// expr/home/nearby), which were each capped at 512 B by NimBLE's vendored
-// ble_att.h spec ceiling — jacko's 3-expression config serialized to 579
-// B and rejected at boot-time setValue. The CTRL+DATA pair sidesteps the
-// cap by streaming MTU-sized chunks from a per-connection snapshot.
+// A section's JSON can exceed the 512 B NimBLE ATT ceiling (a 3-expression
+// config serializes to 579 B and is rejected at boot-time setValue), so the
+// CTRL+DATA pair streams MTU-sized chunks from a per-connection snapshot.
 //
 //   CHAR_PAGE_CTRL (write): app writes a UTF-8 section name (e.g. "expr").
 //     Lamp snapshots that section's cached JSON into the connection slot
@@ -71,7 +66,7 @@ constexpr const char* CHAR_REMOTE_OP       = "5f64f4e4-d6d9-4a44-9b3f-3a8d6f7e6b
 // TRUE (so the user can preview home brightness / behavior) AND
 // routes incoming CHAR_BRIGHTNESS writes to config.homeMode.brightness
 // instead of config.lamp.brightness. While 0 (and a BT client is
-// connected), effectiveHomeMode is forced FALSE — the BT session is
+// connected), effectiveHomeMode is forced FALSE: the BT session is
 // the "configurator" and shouldn't be in home mode. When no BT client
 // is connected, effectiveHomeMode is presence-based: home.enabled +
 // home.ssid + wifi::homeSsidVisible(). Cleared automatically on BT
@@ -81,10 +76,10 @@ constexpr const char* CHAR_HOME_MODE_FOCUS = "5f64f4e5-d6d9-4a44-9b3f-3a8d6f7e6b
 // disposition 1..5 (salty .. neutral .. smitten). Read returns the full
 // map; write replaces it. Auth-gated like the other write characteristics.
 // Stored separately from the main config blob in NVS namespace "lamp",
-// key "dispositions" — survives reboots, doesn't bloat CHAR_LAMP_SECTION.
+// key "dispositions"; survives reboots, doesn't bloat the config blob.
 constexpr const char* CHAR_SOCIAL_DISPOSITIONS = "5f64f4e6-d6d9-4a44-9b3f-3a8d6f7e6b40";
 // wisp_op (write-with-response, plaintext JSON): forward a wisp-bound op
-// from the app over ESP-NOW. The lamp does NOT apply this locally — it
+// from the app over ESP-NOW. The lamp does NOT apply this locally; it
 // only broadcasts a MSG_CONTROL_OP carrying the payload, and the wisp(s)
 // on the mesh consume it. Open-set by design: the wire format is
 // {"char":"wispOp","op":"setZone","zoneId":N,...} and the wisp owns the
@@ -97,8 +92,6 @@ constexpr const char* CHAR_WISP_OP         = "5f64f4e1-d6d9-4a44-9b3f-3a8d6f7e6b
 // updates (drain of pendingWispStatus).
 constexpr const char* CHAR_WISP_STATUS     = "5f64f4e2-d6d9-4a44-9b3f-3a8d6f7e6b40";
 
-// ── Firmware OTA (Phase 5a) ───────────────────────────────────────────────
-//
 // fw_control (write + notify): app pushes MSG_FW_OFFER and MSG_FW_DONE
 // frames (lamp_protocol wire format, no envelope) and receives
 // MSG_FW_ACCEPT, MSG_FW_REQ, and MSG_FW_RESULT back as notifications.
@@ -109,7 +102,7 @@ constexpr const char* CHAR_FW_CONTROL      = "5f64f4e7-d6d9-4a44-9b3f-3a8d6f7e6b
 // fw_chunk (write-without-response): app streams MSG_FW_CHUNK payloads.
 // Auth-gated. Frequency is high (~one chunk per BLE PDU); the write
 // callback parses the frame on the BLE host task and calls
-// FirmwareReceiver::handleChunkOnRecvTask directly — same fast path as
+// FirmwareReceiver::handleChunkOnRecvTask directly, same fast path as
 // the ESP-NOW chunk handler.
 constexpr const char* CHAR_FW_CHUNK        = "5f64f4e8-d6d9-4a44-9b3f-3a8d6f7e6b40";
 
@@ -120,10 +113,10 @@ constexpr const char* CHAR_FW_CHUNK        = "5f64f4e8-d6d9-4a44-9b3f-3a8d6f7e6b
 //   surface: 0x01 = Base, 0x02 = Shade, 0x04 = Brightness
 //   state:   0x00 = closed (clear flag), 0x01 = open (set flag)
 // Multiple-surface picker sessions are handled by sending one frame
-// per surface. Cleared on BLE disconnect as a defensive sweep.
+// per surface. Cleared on BLE disconnect.
 constexpr const char* CHAR_EDIT_SESSION    = "5f64f4e9-d6d9-4a44-9b3f-3a8d6f7e6b40";
 // CHAR_COMMIT (write-with-response, auth-gated): parameterless commit
-// signal. Payload bytes are semantically ignored — the arrival of the
+// signal. Payload bytes are semantically ignored: the arrival of the
 // write IS the signal. Firmware persists the current in-memory config
 // to NVS, debounced 1500ms, OTA-gated, FNV-1a hash-deduped.
 inline constexpr const char* CHAR_COMMIT_UUID = "48537d49-11a7-4f54-a69a-9425b9288c50";
@@ -137,24 +130,16 @@ void stop();
 bool isRunning();
 
 /**
- * @brief Per-loop housekeeping on Core 1. For each section whose JSON
- *        cache (on Config) is dirty, rebuild it and push the bytes into
- *        the corresponding NimBLE characteristic via setValue() — so
- *        Core 0 BLE reads are served from NimBLE's own internal buffer
- *        without re-walking config vectors on the hot path.
- *
- *        Cheap when nothing is dirty: six bool checks. Should be called
- *        once per main-loop iteration from lamp.cpp::loop().
- *
- *        Closes the cross-core race between BLE GATT reads on Core 0
- *        and config-mutating loop drains on Core 1, and eliminates the
- *        per-read JSON re-serialisation cost.
+ * @brief Per-loop housekeeping on Core 1. Rebuilds any dirty section JSON
+ *        cache so a CHAR_PAGE_CTRL page read on Core 0 finds it populated
+ *        and never serializes JSON inside the NimBLE callback. Cheap when
+ *        nothing is dirty. Call once per main-loop iteration.
  */
 void tick();
 
 /**
  * @brief Send a state-change notification to all subscribed clients.
- *        Payload is `{"previewActive":<bool>}` — used by the app's Test
+ *        Payload is `{"previewActive":<bool>}`, used by the app's Test
  *        button to debounce its label without an app-side timer.
  */
 void notifyStateChange();
@@ -221,10 +206,10 @@ void resumeRadioAfterOta();
  */
 void disconnectGattClientsForOta();
 
-// Posts a commit signal from the BLE callback (Core 0) to the loop
-// task (Core 1). Loop drain debounces and calls config.persistConfig.
-// Signature matches WriteRouter::PostFn — the data/len bytes are
-// semantically ignored (the arrival of the write IS the signal).
+// Posts a commit signal from the BLE callback (Core 0) to the loop task
+// (Core 1). Loop drain debounces and calls config.persistConfig. Signature
+// matches WriteRouter::PostFn; the data/len bytes are semantically ignored
+// (the arrival of the write IS the signal).
 void postPendingCommit(const char* data, size_t len);
 
 }  // namespace ble_control
