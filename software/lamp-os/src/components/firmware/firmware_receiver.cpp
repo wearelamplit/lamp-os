@@ -200,7 +200,7 @@ void FirmwareReceiver::tick(uint32_t nowMs) {
       // onOfferOnLoop, so Core 0 chunk writes are pure (no per-chunk erase
       // stall). The OTA converges via REQs for any RF-dropped chunks.
 #endif
-      // Hard cap: 60s budget from Accepted → DONE-fully-applied. Beyond
+      // Hard cap: 10 min (600 s) budget from Accepted → DONE-fully-applied. Beyond
       // that, we abort and report PartitionWriteFail with a sentinel
       // detail byte so the wisp can distinguish "stream stalled" from
       // an actual flash write error.

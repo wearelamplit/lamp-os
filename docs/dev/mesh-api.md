@@ -85,7 +85,7 @@ Every frame starts with the same 6-byte header:
 [MAGIC_0='L'(1)] [MAGIC_1='M'(1)] [PROTOCOL_VERSION(1)] [msgType(1)] [seq(2 LE)]
 ```
 
-`PROTOCOL_VERSION` is currently `0x04`. The v0x03 lock-in established the core wire contract, MSG_EVENT gossip-relays, DedupRing capacity 64, HELLO interval 5s, and the version byte is bumped for each wire-incompatible change. `inspect()` rejects on version mismatch, so a lamp on a different protocol version silently stops receiving frames from the rest of the fleet, a loud, diagnosable failure by design. Every node must run the same `PROTOCOL_VERSION`; re-flash the whole fleet before redeploy, **including the wisp** (which is OTA-excluded, so it never moves forward on its own and goes invisible on the mesh after a bump until hand-flashed).
+`PROTOCOL_VERSION_EMIT` is currently `0x05`; the receive window is `[0x04, 0x05]`. The v0x03 lock-in established the core wire contract, MSG_EVENT gossip-relays, DedupRing capacity 64, HELLO interval 5s, and the version byte is bumped for each wire-incompatible change. `inspect()` rejects frames outside the receive window, so a lamp on an incompatible version silently stops receiving frames from the rest of the fleet — a loud, diagnosable failure by design. Re-flash the whole fleet before redeploy, **including the wisp** (which is OTA-excluded, so it never moves forward on its own and goes invisible on the mesh after a bump until hand-flashed).
 
 **Reserved bits** (must be 0; receivers reject any frame that sets them):
 
@@ -104,6 +104,7 @@ tlv_count(1) + TLV trailer (v0x05+)
 TLV trailer (v0x05+): `tlv_count(1)`, then per TLV `type(1) + len(1) + value(len)`:
 - `HELLO_TLV_OTA_STATE` (0x01), len 1: 0=idle / 1=sending / 2=receiving. Emitted only when non-idle.
 - `HELLO_TLV_FW_CHANNEL` (0x02), len 16: this lamp's `{type}-{channel}` identity (e.g. `standard-beta`, zero-padded) — same string as the LSIG footer + `MSG_FW_OFFER` channel. The distributor reads it to skip OFFERs at a wrong-type/channel peer.
+- `HELLO_TLV_FS_STATE` (0x03), len 8: first 8 bytes of the peer's FS-image manifest digest. Used by FS-OTA to detect peers whose filesystem image differs from the distributor's.
 
 Unknown TLV types are skipped by length (forward-compat); a receiver that doesn't know a type just gets the default for that field.
 
@@ -111,8 +112,8 @@ Unknown TLV types are skipped by length (forward-compat); a receiver that doesn'
 ```
 header(6) + sourceMac(6) + wispVersion(4 LE) + flags(1) +
 paletteIdPrefix(8 utf-8, null-padded) +
-carriedFwChannel(8 utf-8, null-padded) + carriedFwVersion(4 LE)
-= 37 bytes
+carriedFwChannel(16 utf-8, null-padded) + carriedFwVersion(4 LE)
+= 45 bytes  (WISP_HELLO_FIXED_SIZE; channel slot widened 8→16 in v0x04)
 flags bit 0 = paintMode, bit 1 = wifiConnected, bit 2 = auroraConnected
 ```
 

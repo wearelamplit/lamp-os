@@ -126,14 +126,12 @@ constexpr uint8_t MAGIC_1 = 'M';
 // Current state
 // -----------------------------------------------------------------------------
 //
-// EMIT=0x04, RX_MAX=0x05. v0x04 is the broadly-deployed fleet version;
-// v0x05 added a TLV trailer to HELLO/WISP_HELLO. Because that addition
-// is forward-compatible (old parsers stop at the name field), v0x04
-// and v0x05 wire formats are byte-identical for every other message
-// type. No `legacy_v0x04::` namespace exists yet — we can emit at
-// 0x04 and v0x05 peers' inspect would accept it iff their inspect range
-// extends down to 0x04 (which this build does; pre-existing v0x05-only
-// lamps may not).
+// EMIT=0x05, RX 0x04..0x05. v0x05 added a TLV trailer to HELLO/WISP_HELLO.
+// We accept v0x04 frames on receive so old-fleet peers remain visible
+// (NearbyLamp.protocolVersion drives per-peer OTA-OFFER routing at their
+// version). No `legacy_v0x04::` namespace is needed — the v0x04 and v0x05
+// wire formats are byte-identical for every message other than the TLV
+// trailer appended in v0x05.
 
 // What we emit by default on broadcast frames (HELLO etc).
 constexpr uint8_t PROTOCOL_VERSION_EMIT   = 0x05;

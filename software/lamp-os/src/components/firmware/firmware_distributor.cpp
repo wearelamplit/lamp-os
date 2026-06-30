@@ -344,7 +344,7 @@ void FirmwareDistributor::streamingTaskLoop() {
       // Cooperative yield between iterations. The send call is non-
       // blocking (queues to a shallow ring); a 10-tick delay gives the
       // WiFi task time to push frames over the air before we shove the
-      // next one in. The 10ms cadence is the receiver-friendly value
+      // next one in. The 30ms cadence is the receiver-friendly value
       // tuned on hardware (see kStreamingChunkSpacingMs comment).
       vTaskDelay(pdMS_TO_TICKS(kStreamingChunkSpacingMs));
     }
