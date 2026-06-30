@@ -23,6 +23,10 @@ jobs:
       - name: Install PlatformIO
         run: pip install -r requirements.txt
       - name: Compile firmware
+        # No signing key in CI; sign_firmware.py no-ops on this flag (the PR
+        # gate only needs a clean compile, not a signed image).
+        env:
+          LAMP_FIRMWARE_SKIP_SIGN: '1'
         run: npm run lamp:build
       - name: Native tests
         run: npm run lamp:test
