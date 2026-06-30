@@ -46,7 +46,7 @@ void DispositionStore::load() {
                const std::pair<std::string, uint8_t>& b) {
               return a.first < b.first;
             });
-  // Dedupe defensively — JSON objects shouldn't have duplicate keys, but
+  // Dedupe defensively. JSON objects shouldn't have duplicate keys, but
   // ArduinoJson is permissive on bad input. Last write wins.
   auto last = std::unique(
       entries_.begin(), entries_.end(),
@@ -73,7 +73,7 @@ void DispositionStore::set(const std::string& bdAddr, uint8_t value,
   if (value > 5) value = 5;
   auto it = std::lower_bound(entries_.begin(), entries_.end(), bdAddr, entryLess);
   if (it != entries_.end() && it->first == bdAddr) {
-    // Update in place — no resize, no shift; sort order preserved.
+    // Update in place. No resize, no shift; sort order preserved.
     it->second = value;
   } else {
     if (entries_.size() >= kMax) {
@@ -85,13 +85,13 @@ void DispositionStore::set(const std::string& bdAddr, uint8_t value,
     }
     entries_.insert(it, std::make_pair(bdAddr, value));
   }
-  // Defer the write — see DispositionDebouncer's audit note. The Core 1 drain
-  // flushes once the slider goes idle; BLE disconnect force-flushes.
+  // Defer the write (see DispositionDebouncer). The Core 1 drain flushes
+  // once the slider goes idle; BLE disconnect force-flushes.
   debouncer_.markDirty(nowMs);
 }
 
 std::string DispositionStore::asJson() const {
-  // Sorted-vector iteration yields keys in lexicographic order — a stable
+  // Sorted-vector iteration yields keys in lexicographic order, a stable
   // on-disk byte shape across reads.
   JsonDocument doc;
   for (const auto& kv : entries_) {

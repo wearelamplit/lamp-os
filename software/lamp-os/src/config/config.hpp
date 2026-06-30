@@ -85,7 +85,7 @@ class Config {
    * the caller; this just writes the canonical JSON to NVS.
    *
    * Returns true iff the store wrote > 0 bytes. On failure the in-memory
-   * state is unchanged — the next call may succeed.
+   * state is unchanged; the next call may succeed.
    */
   // `via` is a short tag like "commit" / "settings_blob" / "expressionOp"
   // included in the success log so fleet debugging can disambiguate
@@ -145,10 +145,10 @@ class Config {
   // 5=Smitten). Lives in a SEPARATE NVS key ("dispositions") from the
   // main config blob so the peer list can grow without bloating
   // CHAR_LAMP_SECTION / settings_blob. Stored as JSON object
-  // { "AA:BB:CC:DD:EE:FF": 1..5 } — keys are canonical-form BD_ADDR
+  // { "AA:BB:CC:DD:EE:FF": 1..5 }; keys are canonical-form BD_ADDR
   // strings. Legacy name-keyed entries (older firmware) are silently
   // dropped on load via lamp::isValidBdAddr in util/bd_addr.hpp.
-  // Bounded to ~100 entries. Per-lamp metadata — never synced
+  // Bounded to ~100 entries. Per-lamp metadata, never synced
   // cross-mesh; each lamp has its own view.
   // Idle window before debounced disposition writes are committed to NVS.
   // See DispositionStore and audit finding #5 (NVS write amplification).

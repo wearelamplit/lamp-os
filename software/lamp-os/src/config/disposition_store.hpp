@@ -9,17 +9,16 @@
 
 namespace lamp {
 
-// Pure clock-only "should I flush?" helper. NO NVS, no I/O — just a dirty flag
+// Pure clock-only "should I flush?" helper. NO NVS, no I/O, just a dirty flag
 // and the timestamp of the most recent mutation.
 //
-// Audit context: disposition writes used to hit NVS on every update, so a
-// single slider drag (~20 values per peer) could chew through page wear in
-// years not decades. The store marks dirty + records now() and lets the Core 1
-// loop drain flush once the user stops fiddling for the idle window.
+// Persisting on every disposition write is a flash-wear hazard: a single
+// slider drag is ~20 writes per peer. The store marks dirty + records now()
+// instead, and the Core 1 loop drain flushes once the slider goes idle.
 //
-// Tested in test/test_disposition_debounce — the shape is mirrored inline
-// there to keep the native env free of Arduino/NVS deps. If you change the API
-// here, mirror the test class.
+// Tested in test/test_disposition_debounce; that test mirrors this shape
+// inline to keep the native env free of Arduino/NVS deps. If you change the
+// API here, mirror the test class.
 class DispositionDebouncer {
  public:
   explicit DispositionDebouncer(uint32_t idleMs) : idleMs_(idleMs) {}

@@ -10,8 +10,8 @@ void fromJson(JsonObject root, LampSettings& lamp, BaseSettings& base,
               HomeModeSettings& homeMode) {
   JsonObject lampNode = root["lamp"];
   // lampType is firmware-owned (see Config::setLampType).
-  // Inbound settings_blob writes intentionally do not update it — the
-  // app can read but not write the variant identity.
+  // Inbound settings_blob writes intentionally do not update it; the app
+  // can read but not write the variant identity.
   lamp.name = std::string(lampNode["name"] | "stray");
   lamp.brightness = lampNode["brightness"] | 100;
   std::string password = std::string(lampNode["password"] | "");
@@ -114,9 +114,9 @@ void fromJson(JsonObject root, LampSettings& lamp, BaseSettings& base,
       expr.intervalMin = exprNode["intervalMin"] | 60;
       expr.intervalMax = exprNode["intervalMax"] | 900;
       expr.target = exprNode["target"] | 3;
-      // disabledDuringWispOverride is a pure type-property now; nothing to
-      // load from NVS. Old blobs carrying the key are tolerated — the
-      // skip-list below drops it from the generic parameter loop.
+      // disabledDuringWispOverride is a pure type-property, not loaded from
+      // NVS. Old blobs carrying the key are tolerated; the skip-list below
+      // drops it from the generic parameter loop.
       // Load generic parameters
       for (JsonPair kv : exprNode) {
         const char* key = kv.key().c_str();
@@ -149,8 +149,8 @@ void fromJson(JsonObject root, LampSettings& lamp, BaseSettings& base,
     }
   }
 
-  // Load home mode. Legacy NVS may still carry a "password" field — we
-  // silently ignore it (presence-only home mode doesn't store passwords).
+  // Load home mode. A legacy "password" field in NVS is silently ignored
+  // (presence-only home mode stores no password).
   JsonObject homeModeNode = root["homeMode"];
   if (homeModeNode) {
     homeMode.ssid = std::string(homeModeNode["ssid"] | "");
@@ -202,7 +202,7 @@ void toJson(JsonObject root, const LampSettings& lamp, const BaseSettings& base,
   for (int i = 0; i < base.colors.size(); i++) {
     baseColorsNode[i] = colorToHexString(base.colors[i]);
   }
-  // Positional uint8 array, same shape as asBaseJson — keeps the on-disk
+  // Positional uint8 array, same shape as asBaseJson. Keeps the on-disk
   // NVS format consistent with the BLE per-section read.
   JsonArray baseKnockoutNode = baseNode["knockout"].to<JsonArray>();
   for (int i = 0; i < base.knockoutPixels.size(); i++) {
@@ -227,7 +227,7 @@ void toJson(JsonObject root, const LampSettings& lamp, const BaseSettings& base,
     exprNode["intervalMin"] = expr.intervalMin;
     exprNode["intervalMax"] = expr.intervalMax;
     exprNode["target"] = expr.target;
-    // disabledDuringWispOverride is no longer persisted — pure type-property.
+    // disabledDuringWispOverride is a pure type-property, not persisted.
     // Serialize generic parameters
     for (const auto& param : expr.parameters) {
       const std::string& key = param.first;

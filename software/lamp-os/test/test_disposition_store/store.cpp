@@ -1,7 +1,6 @@
-// Native-host tests for DispositionStore — the per-peer disposition sub-domain
-// lifted out of Config. Exercises get/set/clamp/eviction, the JSON bulk
-// replace, and a persist→reload round trip through an InMemoryConfigStore (the
-// store seam paying off: real persistence logic, no flash).
+// Native-host tests for DispositionStore: get/set/clamp/eviction, the JSON
+// bulk replace, and a persist/reload round trip through an InMemoryConfigStore
+// (real persistence logic, no flash).
 
 #include <unity.h>
 
@@ -79,7 +78,7 @@ void test_debounced_persist_and_reload_round_trip() {
 
 void test_flush_now_writes_immediately() {
   InMemoryConfigStore backing;
-  DispositionStore ds(100000);  // long window — only flushNow should write
+  DispositionStore ds(100000);  // long window; only flushNow should write
   ds.attachStore(&backing);
   ds.set("AA:BB:CC:DD:EE:09", 3, 0);
   ds.flushNow();

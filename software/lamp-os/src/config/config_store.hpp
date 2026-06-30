@@ -5,8 +5,8 @@
 
 namespace lamp {
 
-// Persistence seam for Config. Owns the key/value backing — NVS on device,
-// in-memory in tests — so Config carries no platform dependency and its
+// Persistence seam for Config. Owns the key/value backing (NVS on device,
+// in-memory in tests), so Config carries no platform dependency and its
 // serialization/policy logic can be exercised in the native suite.
 //
 // Reads return defaultValue when the key is absent or the backing is
@@ -22,9 +22,9 @@ class ConfigStore {
   virtual bool clear() = 0;
 };
 
-// std::map-backed ConfigStore for the native suite — no Arduino/flash. The
-// second implementation that makes ConfigStore a test seam rather than
-// speculative indirection (see docs/dev/code-smells.md).
+// In-memory ConfigStore for the native suite (no Arduino/flash). The second
+// implementation that makes ConfigStore a test seam rather than speculative
+// indirection (see docs/dev/code-smells.md).
 class InMemoryConfigStore : public ConfigStore {
  public:
   std::string read(const char* key, const char* defaultValue) override {

@@ -961,9 +961,9 @@ void lamp::Lamp::setup() {
   lamp_register_panic_handler();
 
   config = lamp::Config(&configStore);
-  // Re-populate the in-memory lampType from NVS — Config::Config loads
-  // the JSON blob, but lampType lives under its own NVS key (set by
-  // main.cpp's resolveLampType chain before this setup() runs).
+  // Re-populate the in-memory lampType from NVS. Config::Config loads the
+  // JSON blob, but lampType lives under its own NVS key (set by main.cpp's
+  // resolveLampType chain before this setup() runs).
   config.loadLampType();
 
   // Apply subclass defaults AFTER NVS load. Fields that NVS left at their

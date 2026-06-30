@@ -1,7 +1,6 @@
-// Native-host tests for config_codec — the JSON ↔ model parse/serialize that
-// used to be inlined in Config's constructor and asJsonDocument. Covers field
-// defaults, clamps, byte-order derivation, the home-mode migration, and a full
-// serialize→parse round trip.
+// Native-host tests for config_codec: the JSON <-> model parse/serialize for
+// the persisted cfg blob. Covers field defaults, clamps, byte-order
+// derivation, the home-mode migration, and a full serialize/parse round trip.
 
 #include <unity.h>
 
@@ -12,7 +11,7 @@
 #include "config/config_codec.hpp"
 
 // Native tests don't build src/, so compile the real implementation (and its
-// color dependency) into this TU — same pattern as test_firmware_signature.
+// color dependency) into this TU, same pattern as test_firmware_signature.
 #include "../../src/util/color.cpp"
 #include "../../src/config/config_codec.cpp"
 

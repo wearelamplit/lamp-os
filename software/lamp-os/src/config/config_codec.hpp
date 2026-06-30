@@ -5,7 +5,7 @@
 #include "config_types.hpp"
 
 // JSON codec for the persisted "cfg" blob. Pure functions over the config
-// model structs — no NVS, no Serial — so the parse/serialize logic runs in
+// model structs (no NVS, no Serial), so the parse/serialize logic runs in
 // the native suite (round-trip tested in test/test_config_codec). Config owns
 // the store, the section cache, and logging; the byte shape lives here.
 namespace lamp {
