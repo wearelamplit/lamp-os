@@ -128,7 +128,7 @@ class _WifiSetupCard extends StatelessWidget {
             'with your other lamps and accepting wireless updates.',
             style: textTheme.bodySmall,
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: AppSpace.md),
           const _NumberedStep(
             n: 1,
             text:
@@ -146,7 +146,7 @@ class _WifiSetupCard extends StatelessWidget {
                 'Enter your home Wi-Fi credentials. The lamp will slip onto '
                 'the mesh once they reconnect.',
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: AppSpace.md),
           Text.rich(
             TextSpan(
               children: [
@@ -198,7 +198,7 @@ class _NumberedStep extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 22,
+            width: 22, // deliberate dimension, not spacing
             height: 22,
             alignment: Alignment.center,
             decoration: BoxDecoration(
@@ -214,7 +214,7 @@ class _NumberedStep extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: AppSpace.md),
           Expanded(
             child: Text(
               text,
@@ -261,7 +261,7 @@ class _WhatsNextCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: AppSpace.md),
           const _NextStep(text: 'Pick their colors in the Colors tab.'),
           const _NextStep(
               text:
@@ -281,12 +281,12 @@ class _NextStep extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.only(bottom: AppSpace.sm),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.only(top: 6, right: AppSpace.sm),
+            padding: const EdgeInsets.only(top: AppSpace.sm, right: AppSpace.sm),
             child: Icon(Icons.circle,
                 color: Theme.of(context).colorScheme.primary, size: 5),
           ),

@@ -42,7 +42,7 @@ class _AddLampNameStepState extends ConsumerState<AddLampNameStep> {
             textAlign: TextAlign.center,
             style: textTheme.headlineSmall,
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: AppSpace.sm),
           Text(
             "Every lamp deserves a name. They'll wear it proudly.",
             textAlign: TextAlign.center,

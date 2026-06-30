@@ -163,9 +163,9 @@ class _Pill extends StatelessWidget {
       label = 'add';
     }
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: AppSpace.sm, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpace.sm, vertical: AppSpace.xs),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(999), // pill shape, not spacing
         color: base.withValues(alpha: 0.18),
       ),
       child: Text(
