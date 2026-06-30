@@ -10,6 +10,7 @@ import '../../../social/application/lamp_nearby_peers_notifier.dart';
 import '../../../social/domain/lamp_nearby_peer.dart';
 import '../../application/wisp_notifier.dart';
 import '../../domain/tuple_sampler.dart';
+import '../../domain/wisp_source_mode.dart';
 
 class PaintedLampEntry {
   const PaintedLampEntry({required this.bdAddr, required this.name});
@@ -42,6 +43,15 @@ List<PaintedLampEntry> resolvePaintedLamps({
   ];
 }
 
+/// The palette the per-lamp preview should sample. Only Manual mode paints a
+/// palette the app can predict per lamp: Off paints nothing to the grid (the
+/// offColor lives only on the wisp's own ring) and the Aurora palette isn't
+/// carried to the app, so both yield an empty palette and the rows render
+/// dashes -- accurately showing the grid is getting nothing the app can read.
+List<LampColor> previewPaletteFor(
+        WispSourceMode? source, List<LampColor> manual) =>
+    source == WispSourceMode.manual ? manual : const <LampColor>[];
+
 // Lists lamps the wisp currently claims, with the two colors it paints on each
 // (base + shade). Membership comes from CHAR_WISP_CLAIMS (bdAddr set); names
 // resolve from the connected lamp's nearby-peer report.
@@ -53,10 +63,9 @@ class PaintedLampsList extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final notifier = ref.read(wispNotifierProvider(lampId).notifier);
-    ref.watch(wispNotifierProvider(lampId));
-    final palette = notifier.savedManualPalette;
-    final shuffleSeed =
-        ref.watch(wispNotifierProvider(lampId)).value?.shuffleSeed ?? 0;
+    final status = ref.watch(wispNotifierProvider(lampId)).value;
+    final shuffleSeed = status?.shuffleSeed ?? 0;
+    final palette = previewPaletteFor(status?.source, notifier.savedManualPalette);
     final claimedMacs = notifier.claimedMacs; // Set<String>? of bdAddrs
     final peersAsync = ref.watch(lampNearbyPeersNotifierProvider(lampId));
     final peers = peersAsync.value ?? const <LampNearbyPeer>[];
