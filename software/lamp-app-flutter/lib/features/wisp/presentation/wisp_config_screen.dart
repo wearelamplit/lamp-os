@@ -209,14 +209,14 @@ class _WispBodyState extends ConsumerState<_WispBody> {
                 onSelect: (m) => _runWispOp(() => notifier.setSource(m)),
               ),
               if (source == WispSourceMode.off) ...[
-                const SizedBox(height: 20),
+                const SizedBox(height: AppSpace.xl),
                 _OffColorPicker(
                   lampId: widget.lampId,
                   current: status.offColor,
                 ),
               ],
               if (source == WispSourceMode.manual) ...[
-                const SizedBox(height: 20),
+                const SizedBox(height: AppSpace.xl),
                 _ManualPaletteEditor(lampId: widget.lampId),
               ],
               if (source == WispSourceMode.aurora) ...[
@@ -458,7 +458,7 @@ class _WispHeader extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: AppSpace.xs),
         Text(
           freshnessLabel,
           style: textTheme.bodySmall?.copyWith(
@@ -552,7 +552,7 @@ class _CurrentZone extends StatelessWidget {
           style: textTheme.displaySmall,
         ),
         if (subhead != null) ...[
-          const SizedBox(height: 4),
+          const SizedBox(height: AppSpace.xs),
           Text(
             subhead,
             style: textTheme.bodySmall?.copyWith(fontStyle: FontStyle.italic),
@@ -635,14 +635,14 @@ class _ZoneChip extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(999), // deliberate dimension, not spacing
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpace.lg, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: AppSpace.lg, vertical: AppSpace.md),
           decoration: BoxDecoration(
             color: fill,
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: border, width: selected ? 2 : 1),
+            borderRadius: BorderRadius.circular(999), // deliberate dimension, not spacing
+            border: Border.all(color: border, width: selected ? 2 : 1), // deliberate dimension, not spacing
           ),
           child: Text(
             'Zone $zoneId',
@@ -711,7 +711,7 @@ class _SourcePicker extends StatelessWidget {
           ],
         ),
         if (!auroraEnabled) ...[
-          const SizedBox(height: 6),
+          const SizedBox(height: AppSpace.sm),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 2),
             child: Text(
@@ -773,7 +773,7 @@ class _SourcePill extends StatelessWidget {
               color: fill,
               border: Border.all(
                 color: border,
-                width: selected && enabled ? 2 : 1,
+                width: selected && enabled ? 2 : 1, // deliberate dimension, not spacing
               ),
               borderRadius: BorderRadius.circular(AppRadius.card),
             ),
@@ -781,7 +781,7 @@ class _SourcePill extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(icon, color: fg, size: 22),
-                const SizedBox(height: 4),
+                const SizedBox(height: AppSpace.xs),
                 Text(
                   label,
                   style: TextStyle(
@@ -841,7 +841,7 @@ class _ManualPaletteEditorState extends ConsumerState<_ManualPaletteEditor> {
               width: 14, height: 14,
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: AppSpace.md),
             Text('Reading palette from wisp…',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   fontStyle: FontStyle.italic,
@@ -878,7 +878,7 @@ class _ManualPaletteEditorState extends ConsumerState<_ManualPaletteEditor> {
           ],
         ),
         if (atCap) ...[
-          const SizedBox(height: 4),
+          const SizedBox(height: AppSpace.xs),
           Text(
             'Palette is at the 10-color cap. Remove a swatch to add another.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -1200,7 +1200,7 @@ class _PaintedLampsList extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
-              padding: const EdgeInsets.only(top: 4, bottom: AppSpace.md),
+              padding: const EdgeInsets.only(top: AppSpace.xs, bottom: AppSpace.md),
               child: Text(
                 palette.isEmpty
                     ? "The wisp hasn't published a palette yet — once it "
@@ -1237,7 +1237,7 @@ class _PaintedLampRow extends StatelessWidget {
         ? null
         : predictTuple(mac: mac, palette: palette);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
       child: Row(
         children: [
           Expanded(
@@ -1270,7 +1270,7 @@ class _PaintedLampRow extends StatelessWidget {
                 borderRadius: 6,
               ),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: AppSpace.sm),
             Tooltip(
               message: 'shade #${prediction.shade.toRgbHex()}',
               child: LampColorSwatch(
