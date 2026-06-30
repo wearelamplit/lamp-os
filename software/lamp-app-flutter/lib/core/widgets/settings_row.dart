@@ -12,6 +12,7 @@ class SettingsRow extends StatelessWidget {
     this.subtitle,
     this.trailing,
     this.onTap,
+    this.drillChevron = false,
   });
 
   final IconData icon;
@@ -19,6 +20,7 @@ class SettingsRow extends StatelessWidget {
   final String? subtitle;
   final Widget? trailing;
   final VoidCallback? onTap;
+  final bool drillChevron;
 
   @override
   Widget build(BuildContext context) {
@@ -67,9 +69,11 @@ class SettingsRow extends StatelessWidget {
                 const SizedBox(width: 8),
                 trailing!,
               ],
-              if (onTap != null && trailing == null)
+              if (onTap != null && (trailing == null || drillChevron)) ...[
+                if (trailing != null) const SizedBox(width: 4),
                 Icon(Icons.chevron_right,
                     color: colorScheme.onSurfaceVariant, size: 22),
+              ],
             ],
           ),
         ),

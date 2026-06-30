@@ -60,4 +60,40 @@ void main() {
     ));
     expect(find.text('GENERAL'), findsOneWidget);
   });
+
+  testWidgets('drillChevron shows chevron alongside a trailing widget', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: appTheme,
+      home: Scaffold(body: SettingsRow(
+        icon: Icons.home_outlined, title: 'Home Mode',
+        trailing: Switch(value: true, onChanged: (_) {}),
+        onTap: () {}, drillChevron: true,
+      )),
+    ));
+    expect(find.byType(Switch), findsOneWidget);
+    expect(find.byIcon(Icons.chevron_right), findsOneWidget);
+  });
+
+  testWidgets('without drillChevron a trailing widget suppresses the chevron', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: appTheme,
+      home: Scaffold(body: SettingsRow(
+        icon: Icons.wifi_tethering, title: 'Toggle only',
+        trailing: Switch(value: false, onChanged: (_) {}),
+        onTap: () {},
+      )),
+    ));
+    expect(find.byType(Switch), findsOneWidget);
+    expect(find.byIcon(Icons.chevron_right), findsNothing);
+  });
+
+  testWidgets('a plain drill row still shows the chevron', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: appTheme,
+      home: Scaffold(body: SettingsRow(
+        icon: Icons.memory, title: 'Drill', onTap: () {},
+      )),
+    ));
+    expect(find.byIcon(Icons.chevron_right), findsOneWidget);
+  });
 }
