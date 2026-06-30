@@ -4,6 +4,7 @@
 #include <esp_now.h>
 #include <esp_wifi.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 
@@ -64,7 +65,7 @@ static void recvTrampoline(const esp_now_recv_info_t* info,
 // on when esp_now_send fires.
 static bool addBroadcastPeer() {
     esp_now_peer_info_t peer = {};
-    std::memset(peer.peer_addr, 0xFF, 6);
+    std::fill_n(peer.peer_addr, 6, 0xFF);
     peer.channel = 0;
     peer.ifidx   = WIFI_IF_STA;
     peer.encrypt = false;

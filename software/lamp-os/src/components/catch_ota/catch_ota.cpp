@@ -37,9 +37,8 @@ static void onEspnowRecv(const uint8_t mac[6], const uint8_t* data, size_t len) 
     }
 }
 
-void begin(const char* name, const uint8_t baseRGBW[4],
-           const uint8_t shadeRGBW[4]) {
-    helloSetIdentity(name, baseRGBW, shadeRGBW);
+void begin(const char* name, const lamp::Color& base, const lamp::Color& shade) {
+    helloSetIdentity(name, base, shade);
     radioBeginDiscovery();
     espnowBegin(onEspnowRecv);
 }

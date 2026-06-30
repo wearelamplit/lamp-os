@@ -1,5 +1,6 @@
 #include "hello_emitter.hpp"
 #include "ota_protocol.hpp"
+#include "../../util/color.hpp"
 
 #include <cstring>
 
@@ -22,14 +23,16 @@ static uint8_t sBaseRGBW[4]  = {0, 0, 0, 0};
 static uint8_t sShadeRGBW[4] = {0, 0, 0, 0};
 }  // namespace
 
-void helloSetIdentity(const char* name, const uint8_t baseRGBW[4],
-                      const uint8_t shadeRGBW[4]) {
+void helloSetIdentity(const char* name, const lamp::Color& base,
+                      const lamp::Color& shade) {
     if (name) {
         std::strncpy(sName, name, HELLO_MAX_NAME);
         sName[HELLO_MAX_NAME] = '\0';
     }
-    if (baseRGBW)  std::memcpy(sBaseRGBW, baseRGBW, 4);
-    if (shadeRGBW) std::memcpy(sShadeRGBW, shadeRGBW, 4);
+    sBaseRGBW[0]  = base.r;  sBaseRGBW[1]  = base.g;
+    sBaseRGBW[2]  = base.b;  sBaseRGBW[3]  = base.w;
+    sShadeRGBW[0] = shade.r; sShadeRGBW[1] = shade.g;
+    sShadeRGBW[2] = shade.b; sShadeRGBW[3] = shade.w;
 }
 
 size_t composeHello(uint8_t* buf, const uint8_t mac[6], const char* name) {

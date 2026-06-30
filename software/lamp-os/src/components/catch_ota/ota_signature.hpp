@@ -54,10 +54,10 @@
 //     missing pubkey, etc.) returns false and leaves out-params
 //     unchanged.
 //
-// The function does NOT enforce channel-string matching against
-// FIRMWARE_CHANNEL_STR — that's the caller's job (the receive state
-// machine silently drops cross-channel offers BEFORE accepting; this
-// verify is the cryptographic gate, not the routing gate).
+// The function does NOT enforce channel-string matching against the expected
+// channel — that's the caller's job. The receive state machine type-gates on the
+// verified footer channel before flipping the boot partition; this verify is the
+// cryptographic gate, not the type gate.
 
 #include <cstddef>
 #include <cstdint>
