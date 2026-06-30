@@ -278,7 +278,7 @@ class _ExpressionEditorScreenState
                   setState(() => _target = t);
                 },
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: AppSpace.xl),
 
               // Colors
               const SectionHeader('Colors'),
@@ -366,7 +366,7 @@ class _ExpressionEditorScreenState
               // continues to grey expressions whose default says they
               // pause during a wisp-active session.
               if (meta != null) ...[
-                const SizedBox(height: 20),
+                const SizedBox(height: AppSpace.xl),
                 Text(
                   meta.description,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -514,7 +514,7 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(AppSpace.md),
       decoration: BoxDecoration(
         color: colorScheme.surfaceContainer,
         borderRadius: BorderRadius.circular(AppRadius.card),
@@ -524,7 +524,7 @@ class _Header extends StatelessWidget {
         children: [
           if (meta != null)
             Container(
-              width: 40,
+              width: 40, // deliberate dimension, not spacing
               height: 40,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,

@@ -122,11 +122,11 @@ class _ProgressDots extends StatelessWidget {
         children: List.generate(5, (i) {
           final active = i == currentIndex;
           return Container(
-            margin: const EdgeInsets.symmetric(horizontal: 4),
-            width: active ? 24 : 8,
-            height: 8,
+            margin: const EdgeInsets.symmetric(horizontal: AppSpace.xs),
+            width: active ? 24 : 8, // deliberate dimension, not spacing
+            height: 8, // deliberate dimension, not spacing
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(999),
+              borderRadius: BorderRadius.circular(999), // pill shape, not spacing
               color: active
                   ? colorScheme.primary
                   : colorScheme.outline.withValues(alpha: 0.5),

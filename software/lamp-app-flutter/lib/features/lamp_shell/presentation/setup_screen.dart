@@ -375,7 +375,7 @@ class _FactoryResetDialogState extends ConsumerState<_FactoryResetDialog> {
     // Expanded + Row + buttons layout correctly.
     return AlertDialog(
       title: const Text('Factory reset?'),
-      contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
+      contentPadding: const EdgeInsets.fromLTRB(AppSpace.xl, AppSpace.xl, AppSpace.xl, AppSpace.xl),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -387,14 +387,14 @@ class _FactoryResetDialogState extends ConsumerState<_FactoryResetDialog> {
               color: colorScheme.onSurfaceVariant,
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: AppSpace.xl),
           Row(
             children: [
               Expanded(
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: _tap.record,
-                  child: const SizedBox(height: 36),
+                  child: const SizedBox(height: 36), // deliberate dimension, not spacing
                 ),
               ),
               TextButton(
