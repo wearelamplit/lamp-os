@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lamp_app/core/theme/app_spacing.dart';
 import 'package:lamp_app/core/theme/app_theme.dart';
 import 'package:lamp_app/core/widgets/settings_row.dart';
 
@@ -95,5 +96,22 @@ void main() {
       )),
     ));
     expect(find.byIcon(Icons.chevron_right), findsOneWidget);
+  });
+
+  testWidgets('SettingsRow content container uses AppSpace tokens for padding', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: appTheme,
+      home: const Scaffold(body: SettingsRow(icon: Icons.wifi, title: 'Network')),
+    ));
+    final containers = tester.widgetList<Container>(
+      find.descendant(of: find.byType(SettingsRow), matching: find.byType(Container)),
+    ).toList();
+    final contentContainer = containers.firstWhere(
+      (c) => c.decoration is BoxDecoration && (c.decoration as BoxDecoration).border != null,
+    );
+    expect(
+      contentContainer.padding,
+      const EdgeInsets.symmetric(horizontal: AppSpace.lg, vertical: AppSpace.lg),
+    );
   });
 }

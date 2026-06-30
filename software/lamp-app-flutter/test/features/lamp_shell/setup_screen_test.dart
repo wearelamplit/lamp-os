@@ -122,6 +122,7 @@ void main() {
     addTearDown(c.dispose);
     await tester.pumpWidget(_wrap(c));
     await _pumpToData(tester);
+    await tester.scrollUntilVisible(find.text('Factory reset'), 50);
     expect(find.text('Factory reset'), findsOneWidget);
   });
 
