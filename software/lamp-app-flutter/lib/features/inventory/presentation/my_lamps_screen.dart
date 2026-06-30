@@ -257,7 +257,7 @@ class _LampTile extends ConsumerWidget {
           padding: const EdgeInsets.symmetric(horizontal: AppSpace.sm, vertical: AppSpace.md),
           child: Row(
             children: [
-              StatusDot(kind: status, size: 14),
+              StatusDot(kind: status, size: 14), // deliberate dimension, not spacing
               const SizedBox(width: AppSpace.md),
               CritterIcon(
                 critterIndex: lamp.critterIndex,
@@ -266,7 +266,7 @@ class _LampTile extends ConsumerWidget {
                 base: colors.base ?? colorScheme.onSurfaceVariant,
                 size: 44,
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: AppSpace.md),
               Expanded(
                 child: Text(
                   lamp.name,
@@ -379,11 +379,11 @@ class _AddLampTile extends StatelessWidget {
       borderRadius: BorderRadius.circular(AppRadius.card),
       onTap: () => GoRouter.maybeOf(context)?.push(AppRoutes.addLamp),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: AppSpace.sm, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpace.sm, vertical: AppSpace.md),
         child: Row(
           children: [
             Container(
-              width: 44,
+              width: 44, // deliberate dimension, not spacing
               height: 44,
               decoration: BoxDecoration(
                 color: colorScheme.surfaceContainerHighest,
@@ -391,7 +391,7 @@ class _AddLampTile extends StatelessWidget {
               ),
               child: Icon(Icons.add, color: colorScheme.onSurface),
             ),
-            const SizedBox(width: 14),
+            const SizedBox(width: AppSpace.md),
             Expanded(
               child: Text(
                 'Adopt a lamp',

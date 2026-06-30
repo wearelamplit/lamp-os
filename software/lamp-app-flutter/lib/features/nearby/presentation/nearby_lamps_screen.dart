@@ -62,10 +62,10 @@ class NearbyLampsScreen extends ConsumerWidget {
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: AppSpace.sm,
-                            vertical: 4,
+                            vertical: AppSpace.xs,
                           ),
                           decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(999),
+                            borderRadius: BorderRadius.circular(999), // pill shape, not spacing
                             color: (l.isFactoryDefault
                                     ? Theme.of(context).colorScheme.secondary
                                     : context.brandExtras.success)

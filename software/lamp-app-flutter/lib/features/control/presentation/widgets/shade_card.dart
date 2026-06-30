@@ -93,7 +93,7 @@ class ShadeCard extends ConsumerWidget {
         child: Row(
           children: [
             Container(
-              width: 56,
+              width: 56, // deliberate dimension, not spacing
               height: 56,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(14),

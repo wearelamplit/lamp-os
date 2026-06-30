@@ -53,7 +53,7 @@ class _LampShellState extends ConsumerState<LampShell> {
             horizontal: AppSpace.lg, vertical: AppSpace.xs),
         decoration: BoxDecoration(
           gradient: gradient,
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(999), // pill shape, not spacing
           boxShadow: [
             BoxShadow(
               color: primary.withValues(alpha: 0.3),
