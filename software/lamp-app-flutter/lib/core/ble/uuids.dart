@@ -24,9 +24,8 @@ abstract class BleUuids {
   //
   // Use BleClient.readSection(deviceId, sectionName) — not the raw chars
   // — for any section read. Known names: "lamp", "base", "shade",
-  // "expr", "home", "nearby". Chunk size is pinned to kPageChunkSize
-  // (244 bytes = ATT_MTU 247 - 3 ATT header) on both sides; a read
-  // returning fewer than that signals "done".
+  // "expr", "home", "nearby". The reader pulls DATA chunks until an
+  // empty one (the lamp's end-of-snapshot signal) — MTU-agnostic.
   static const pageCtrl       = '5f64f4dc-d6d9-4a44-9b3f-3a8d6f7e6b40';
   static const pageData       = '5f64f4dd-d6d9-4a44-9b3f-3a8d6f7e6b40';
   static const remoteOp       = '5f64f4e4-d6d9-4a44-9b3f-3a8d6f7e6b40';

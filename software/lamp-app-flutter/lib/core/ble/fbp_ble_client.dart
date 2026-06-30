@@ -221,8 +221,11 @@ class FbpBleClient implements BleClient {
         BleUuids.pageCtrl,
         Uint8List.fromList(utf8.encode(name)),
       );
-      // Pull DATA chunks until one comes back short (< kPageChunkSize),
-      // which signals the cursor has reached the end of the snapshot.
+      // Pull DATA chunks until an EMPTY one arrives — the lamp's
+      // end-of-snapshot signal. Reading until empty is MTU-agnostic: a
+      // sub-247-MTU link just serves more, smaller chunks, and a short
+      // NON-final chunk must not be mistaken for the end (the bug when
+      // this keyed off a hardcoded 244-byte "short = done" threshold).
       // fbp 2.x serializes GATT ops per-device internally, so writes
       // and reads can't interleave on the wire even if our awaits are
       // back-to-back.
@@ -233,10 +236,10 @@ class FbpBleClient implements BleClient {
           BleUuids.controlService,
           BleUuids.pageData,
         );
-        out.add(chunk);
-        if (chunk.length < kPageChunkSize) {
+        if (chunk.isEmpty) {
           return out.toBytes();
         }
+        out.add(chunk);
       }
     } on BleDisconnectedException {
       // Mid-stream drop. Partial bytes are discarded; the surrounding

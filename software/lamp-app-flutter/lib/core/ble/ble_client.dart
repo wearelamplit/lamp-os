@@ -133,8 +133,8 @@ abstract class BleClient {
 
   /// Reads a named section from the lamp via the page protocol. Writes
   /// the section name to CHAR_PAGE_CTRL, then loops reading CHAR_PAGE_DATA
-  /// until a short chunk (< kPageChunkSize) arrives. Returns the
-  /// concatenated bytes; the caller jsonDecodes them.
+  /// until an empty chunk arrives (the lamp's end-of-snapshot signal).
+  /// Returns the concatenated bytes; the caller jsonDecodes them.
   ///
   /// Known section names match the lamp's dispatch table: "lamp", "base",
   /// "shade", "expr", "home", "nearby". An unknown name results in
@@ -174,11 +174,3 @@ abstract class BleClient {
   /// never actually cycles the slot. Implementations must override.
   Future<void> cycleAdapter(String deviceId);
 }
-
-/// Per-chunk payload size on the BLE page protocol. Pinned to ATT_MTU
-/// 247 minus the 3-byte ATT header. Both sides have this hardcoded so
-/// the helper's "short chunk = done" heuristic doesn't need to thread
-/// the negotiated MTU through the app — flutter_blue_plus 2.x doesn't
-/// reliably surface that value anyway. If the firmware-side
-/// kPageMaxChunkSize ever changes, this constant moves in lockstep.
-const int kPageChunkSize = 244;
