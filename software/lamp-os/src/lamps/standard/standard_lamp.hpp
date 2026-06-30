@@ -25,11 +25,14 @@ class StandardLamp : public Lamp {
 
   Config::Defaults defaults() const override {
     return {
-      .name = "anonymous-lamp",
-      .baseColor  = "#30078300",
+      // name omitted-no: kept as "stray" because lamp.cpp's first-boot
+      // setup-flag detection compares config.lamp.name == defaults().name.
+      .name = "stray",
+      // baseColor + *ColorsEditable omitted: they equal the Config class
+      // defaults, and first-boot randomization (lamp.cpp) overwrites the
+      // colors anyway. shadeColor differs from the class default, so it
+      // stays as the pre-randomization baseline.
       .shadeColor = "#5A170000",
-      .baseColorsEditable  = true,
-      .shadeColorsEditable = true,
       .basePx  = 35,
       .shadePx = 38,
     };

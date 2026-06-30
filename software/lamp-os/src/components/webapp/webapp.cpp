@@ -138,15 +138,9 @@ void begin(lamp::Config& config) {
   if (s_running) return;
   s_config = &config;
 
-  // Don't double-suffix when the configured name already ends in "-lamp"
-  // (the unconfigured "anonymous-lamp" default would otherwise yield
-  // "anonymous-lamp-lamp").
-  std::string ssid = config.lamp.name;
-  const std::string suffix = "-lamp";
-  if (ssid.size() < suffix.size() ||
-      ssid.compare(ssid.size() - suffix.size(), suffix.size(), suffix) != 0) {
-    ssid += suffix;
-  }
+  // SoftAP SSID is the lamp's name + "-lamp" so it's recognizable as a
+  // lamp's setup network in a Wi-Fi scan.
+  const std::string ssid = config.lamp.name + "-lamp";
   if (!wifi::startSoftAp(ssid)) {
 #ifdef LAMP_DEBUG
     Serial.println("[webapp] softAP failed; webapp not started");
