@@ -114,7 +114,7 @@ struct NearbyLamp {
 /**
  * @brief Wisp presence cache populated from MSG_WISP_HELLO. Single global
  *        slot — the most recent hello wins. The brightness-floor check in
- *        ShowReceiver reads from this struct to decide whether an incoming
+ *        MeshLink reads from this struct to decide whether an incoming
  *        brightness-override below kBrightnessOverrideMin is allowed (yes
  *        if a recent hello from the same MAC is on file).
  */

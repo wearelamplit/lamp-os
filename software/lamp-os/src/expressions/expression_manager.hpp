@@ -26,7 +26,7 @@ static constexpr uint32_t kCascadeDedupWindowMs = 250;
 
 class Compositor;
 class ExpressionManager;
-class ShowReceiver;
+class MeshLink;
 
 // Forwarder implemented in lamp.cpp. tryHandleExpressionEvent
 // uses this to push a delayed invocation into the loop-task pendingTriggers
@@ -54,7 +54,7 @@ class ExpressionManager {
   std::vector<ExpressionEntry> expressions;
   FrameBuffer* shadeBuffer = nullptr;
   FrameBuffer* baseBuffer = nullptr;
-  ShowReceiver* showReceiver_ = nullptr;
+  MeshLink* meshLink_ = nullptr;
   Compositor* compositor_ = nullptr;
   // Set during the manager's own trigger* loops so per-entry Expression::trigger()
   // callbacks don't fan out a cascade we're already handling explicitly (or
@@ -138,7 +138,7 @@ class ExpressionManager {
 
   // Send the cascade fan-out for an expression that just fired locally,
   // if its config opts in via the cascadeEnabled parameter. No-op when
-  // no ShowReceiver has been wired in. Never called for remote-arrived
+  // no MeshLink has been wired in. Never called for remote-arrived
   // triggers — that's the structural loop break.
   //
   // Internally gates on recentCascades_ to enforce the "cascade once per
@@ -160,7 +160,7 @@ class ExpressionManager {
    *        when unset, cascade is silently disabled (boot before mesh ready,
    *        or test environments).
    */
-  void setShowReceiver(ShowReceiver* receiver);
+  void setMeshLink(MeshLink* link);
 
   /**
    * @brief Wire up the compositor so triggerInvocation can register transient

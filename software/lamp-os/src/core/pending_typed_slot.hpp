@@ -6,7 +6,7 @@
 // payload instead of a byte buffer.
 //
 // Used by transient override + wisp-hello ingest paths:
-//   - ShowReceiver::handleRecv (WiFi recv task / Core 0) does a single
+//   - MeshLink::handleRecv (WiFi recv task / Core 0) does a single
 //     T copy under portMUX, no heap, no parsing.
 //   - The loop task on Core 1 drains the typed payload via drain() and
 //     dispatches into the override / wisp-cache modules.

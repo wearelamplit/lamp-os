@@ -66,7 +66,7 @@
 //        FirmwareTransport abstraction (defined in firmware_receiver.hpp)
 //        so MSG_FW_OFFER/CHUNK/DONE go out through the same broadcastRaw
 //        path the receiver uses for ACCEPT/REQ/RESULT. Production wiring
-//        is EspNowFirmwareTransport in show_receiver.hpp.
+//        is EspNowFirmwareTransport in mesh_link.hpp.
 //
 //   4. Dual-core lamp vs unicore wisp.
 //        Wisp is ESP32-C6 (unicore). Lamp is ESP32-WROOM (dual-core):
@@ -93,7 +93,7 @@
 // different cores).
 //
 //   - onAcceptOnRecvTask / onReqOnRecvTask / onResultOnRecvTask — called
-//     from Core 0 (WiFi recv task) via show_receiver dispatch. Parses
+//     from Core 0 (WiFi recv task) via mesh_link dispatch. Parses
 //     ACCEPT/REQ/RESULT and pivots state under stateMux_. Never sends
 //     mesh frames; never blocks.
 //   - considerPeerForOta / tick — called from Core 1 (Arduino loop).
@@ -161,7 +161,7 @@ class FirmwareDistributor {
     Done,
   };
 
-  // Wire up. Call once in setup() AFTER show_receiver is begin()'d so the
+  // Wire up. Call once in setup() AFTER mesh_link is begin()'d so the
   // transport's MAC snapshot is valid. transport is required; nullptr
   // leaves the distributor Disabled. The running partition is resolved
   // here (esp_ota_get_running_partition) and the SHA-256 prefix of its
@@ -203,7 +203,7 @@ class FirmwareDistributor {
                           uint8_t peerProtocolVersion, uint32_t nowMs,
                           const char* peerFwChannel = nullptr);
 
-  // Inbound packet hooks — show_receiver dispatches MSG_FW_ACCEPT/REQ/
+  // Inbound packet hooks — mesh_link dispatches MSG_FW_ACCEPT/REQ/
   // RESULT from its WiFi recv task. Idempotent on irrelevant packets
   // (wrong target MAC, wrong state, wrong session). Keep work tight: parse
   // + a state-machine pivot + an optional wake-semaphore give. No mesh

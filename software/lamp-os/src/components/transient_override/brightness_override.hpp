@@ -70,7 +70,7 @@ class BrightnessOverride {
   bool operatorEditing() const { return operatorEditing_; }
 
   // Was an override-MSG-WISP-HELLO seen recently from `mac`? Used by
-  // the show_receiver brightness-floor check to allow Wisp-paired
+  // the mesh_link brightness-floor check to allow Wisp-paired
   // sources to ignore the kBrightnessOverrideMin floor (e.g. during
   // a Lobby mode where the wisp wants full-dark hold). The window
   // matches the watchdog so a silent wisp loses its pairing too.

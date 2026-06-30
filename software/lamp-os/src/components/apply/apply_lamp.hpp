@@ -3,7 +3,7 @@
 // settings_blob's `lamp` section handler. Updates config.lamp.* fields
 // in place, calls NimBLEDevice::setDeviceName on rename so the BLE
 // advertised name reflects the new value without a reboot. Mesh HELLO
-// (show_receiver.cpp) reads config.lamp.name live every 5s so peers
+// (mesh_link.cpp) reads config.lamp.name live every 5s so peers
 // see the rename on the next tick.
 
 #pragma once

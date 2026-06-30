@@ -54,7 +54,7 @@
 
 namespace lamp {
 
-class ShowReceiver;
+class MeshLink;
 
 // Transport abstraction for outbound MSG_FW_* responses (ACCEPT / REQ /
 // RESULT). FirmwareReceiver doesn't know whether the OTA flow it's
@@ -63,7 +63,7 @@ class ShowReceiver;
 // transport and asks for the lamp's own MAC for the sourceMac field.
 //
 // Production implementations:
-//   - EspNowFirmwareTransport — wraps ShowReceiver::broadcastRaw, sends
+//   - EspNowFirmwareTransport — wraps MeshLink::broadcastRaw, sends
 //     to the mesh on channel LAMP_ESPNOW_CHANNEL. Used for the existing
 //     wisp-driven OTA path.
 //   - BleFirmwareTransport — notifies on CHAR_FW_STATUS to the BLE
@@ -94,7 +94,7 @@ enum class FirmwareTransportKind : uint8_t {
   Ble    = 1,  // BLE  — bleConnHandle identifies the app's connection
 };
 
-// Slot payload that ShowReceiver's WiFi recv task posts (via
+// Slot payload that MeshLink's WiFi recv task posts (via
 // postPendingFirmwareControl) and standard_lamp's Core 1 drain consumes.
 // Discriminated by msgType (MSG_FW_OFFER / MSG_FW_DONE).
 struct PendingFirmwareControl {
@@ -132,7 +132,7 @@ struct PendingFirmwareControl {
   } done;
 };
 
-// Forwarder defined in lamp.cpp; ShowReceiver's recv branches
+// Forwarder defined in lamp.cpp; MeshLink's recv branches
 // call this from the WiFi task to publish OFFER/DONE control frames.
 void postPendingFirmwareControl(const PendingFirmwareControl& src);
 
@@ -225,7 +225,7 @@ class FirmwareReceiver {
   // msgType to the appropriate offer/done handler.
   void handleControlOnLoop(const PendingFirmwareControl& ctrl);
 
-  // Called DIRECTLY from ShowReceiver's WiFi recv task (Core 0). Writes
+  // Called DIRECTLY from MeshLink's WiFi recv task (Core 0). Writes
   // the chunk payload to flash via esp_ota_write_with_offset and marks
   // the chunk-received bit in the bitmap. Bounded IO + bitmap set, no
   // heap, no JSON, no FreeRTOS blocking. Drops the chunk silently when

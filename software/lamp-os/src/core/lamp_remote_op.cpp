@@ -25,7 +25,7 @@
 #include "components/apply/apply_brightness.hpp"
 #include "components/apply/apply_expressions.hpp"
 #include "components/apply/apply_shade_colors.hpp"
-#include "components/network/show_receiver.hpp"
+#include "components/network/mesh_link.hpp"
 #include "config/config.hpp"
 #include "core/pending_slot_aggregate.hpp"
 #include "expressions/expression_manager.hpp"
@@ -46,7 +46,7 @@ static void postPendingWispStatusJson(const uint8_t srcMac[6],
 // Apply a remote-op payload locally (either from BLE remoteOp drain when
 // targetMac==self/broadcast, or from an incoming ESP-NOW MSG_CONTROL_OP).
 // Both call sites run on the loop task (Core 1) — the BLE remoteOp drain
-// runs in loop() directly, and the ESP-NOW path goes via ShowReceiver's
+// runs in loop() directly, and the ESP-NOW path goes via MeshLink's
 // WiFi-task handler which only does memcpy into pendingInboundOpJson; the
 // loop drain then calls this function. Because we're already on Core 1, we
 // mutate state directly via the applyXxxLocal helpers above instead of
@@ -132,7 +132,7 @@ static void applyRemoteOpLocal(const char* payloadJson, size_t len,
     // don't APPLY anything locally (lamps don't have a zone state to
     // mutate); we just cache + notify so the phone-paired lamp's
     // CHAR_WISP_STATUS read/notify surface stays current. srcMac is the
-    // wisp's MAC (preserved through gossip relay by ShowReceiver, which
+    // wisp's MAC (preserved through gossip relay by MeshLink, which
     // copies op.sourceMac into the inbound slot).
     postPendingWispStatusJson(srcMac, payloadJson, len);
   }
@@ -154,7 +154,7 @@ static void applyRemoteOpLocal(const char* payloadJson, size_t len,
 // Inputs:
 //   `payloadJson`  : NUL-terminated JSON. For BLE this is the raw GATT
 //                    write payload; for ESP-NOW it's the CONTROL_OP payload
-//                    that ShowReceiver already passed through MAC + dedup
+//                    that MeshLink already passed through MAC + dedup
 //                    filtering on the WiFi task.
 //   `srcMac`       : Sender's MAC. For ESP-NOW this is the original CONTROL_OP
 //                    `sourceMac`. For BLE there is no real network source —
@@ -175,7 +175,7 @@ static void applyRemoteOpLocal(const char* payloadJson, size_t len,
 //     forwards over ESP-NOW (broadcast or unicast) when not-self.
 //   - For EspNow the addressed-to-us check (`forUs`) and the once-only
 //     grid rebroadcast already happened on the WiFi task inside
-//     ShowReceiver::handleRecv (kept there for latency: rebroadcast doesn't
+//     MeshLink::handleRecv (kept there for latency: rebroadcast doesn't
 //     wait on the loop drain). By the time the slot is drained the payload
 //     is unconditionally for-us, so the router just applies locally.
 //
@@ -183,7 +183,7 @@ void applyRemoteOpRouted(const char* payloadJson, size_t len,
                          const uint8_t srcMac[6],
                          RemoteOpTransport origin) {
   if (origin == RemoteOpTransport::EspNow) {
-    // ShowReceiver::handleRecv (WiFi task) already gated on targetMac == myMac
+    // MeshLink::handleRecv (WiFi task) already gated on targetMac == myMac
     // || broadcast, and already rebroadcast once for grid relay. Nothing for
     // the router to decide — just dispatch locally on Core 1.
     applyRemoteOpLocal(payloadJson, len, srcMac);
@@ -207,7 +207,7 @@ void applyRemoteOpRouted(const char* payloadJson, size_t len,
                       &targetMac[0], &targetMac[1], &targetMac[2],
                       &targetMac[3], &targetMac[4], &targetMac[5]) == 6) {
       uint8_t myMac[6];
-      showReceiver.getMyMac(myMac);
+      meshLink.getMyMac(myMac);
       isSelf = (memcmp(targetMac, myMac, 6) == 0);
     }
   }
@@ -224,9 +224,9 @@ void applyRemoteOpRouted(const char* payloadJson, size_t len,
     // session — `srcMac` was already populated with selfMac by the caller.
     applyRemoteOpLocal(payload.data(), payload.size(), srcMac);
   }
-  if (!isSelf && !showReceiver.isOtaInProgress()) {
+  if (!isSelf && !meshLink.isOtaInProgress()) {
     // Forward over ESP-NOW. broadcast => fan out to all peers; unicast =>
-    // targets the specific MAC. ShowReceiver::sendControlOp also records
+    // targets the specific MAC. MeshLink::sendControlOp also records
     // its own seq into controlOpDedup_ so the rebroadcast we'll get back
     // doesn't loop in as an "apply locally".
     //
@@ -234,7 +234,7 @@ void applyRemoteOpRouted(const char* payloadJson, size_t len,
     // chunk stream for ESP-NOW airtime under BLE coex. Dropped forwards
     // are recoverable — the app retries on its next loop drain — but a
     // dropped chunk needs a stall-watchdog REQ round trip to recover.
-    showReceiver.sendControlOp(
+    meshLink.sendControlOp(
         targetMac,
         reinterpret_cast<const uint8_t*>(payload.data()),
         payload.size());

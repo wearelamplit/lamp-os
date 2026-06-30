@@ -1,5 +1,5 @@
 // Native-host unit tests for the FirmwareReceiver state machine + chunk
-// bitmap. The production cpp depends on ShowReceiver (Arduino-coupled)
+// bitmap. The production cpp depends on MeshLink (Arduino-coupled)
 // and ESP-IDF (esp_ota_*), so we mirror the testable surface here per the
 // codebase convention (see test_personality_engine for the larger
 // precedent).
@@ -96,7 +96,7 @@ struct ParsedFwChunk {
   uint16_t len;
 };
 
-// --- Mock ShowReceiver ---------------------------------------------------
+// --- Mock MeshLink -------------------------------------------------------
 
 struct AcceptRecord {
   uint16_t offerSeq;
@@ -113,7 +113,7 @@ struct ResultRecord {
   uint8_t detail;
 };
 
-class MockShowReceiver {
+class MockMeshLink {
  public:
   std::vector<AcceptRecord> accepts;
   std::vector<ReqRecord> reqs;
@@ -157,7 +157,7 @@ class FirmwareReceiver {
     Failed          = 6,
   };
 
-  void begin(MockShowReceiver* receiver, MockOta* ota) {
+  void begin(MockMeshLink* receiver, MockOta* ota) {
     receiver_ = receiver;
     ota_ = ota;
     state_ = State::Idle;
@@ -386,7 +386,7 @@ class FirmwareReceiver {
     receiver_->results.push_back({status, detail});
   }
 
-  MockShowReceiver* receiver_ = nullptr;
+  MockMeshLink* receiver_ = nullptr;
   MockOta* ota_ = nullptr;
   State state_ = State::Idle;
   uint32_t publishedHandle_ = 0;
@@ -455,7 +455,7 @@ void tearDown(void) {}
 // --- Tests --------------------------------------------------------------
 
 void test_offer_accept_transitions_to_streaming() {
-  test::MockShowReceiver mock;
+  test::MockMeshLink mock;
   test::MockOta ota;
   test::FirmwareReceiver fr;
   fr.begin(&mock, &ota);
@@ -477,7 +477,7 @@ void test_offer_accept_transitions_to_streaming() {
 }
 
 void test_offer_channel_mismatch_silent_drop() {
-  test::MockShowReceiver mock;
+  test::MockMeshLink mock;
   test::MockOta ota;
   test::FirmwareReceiver fr;
   fr.begin(&mock, &ota);
@@ -493,7 +493,7 @@ void test_offer_channel_mismatch_silent_drop() {
 }
 
 void test_offer_version_not_greater_declined() {
-  test::MockShowReceiver mock;
+  test::MockMeshLink mock;
   test::MockOta ota;
   test::FirmwareReceiver fr;
   fr.begin(&mock, &ota);
@@ -511,7 +511,7 @@ void test_offer_version_not_greater_declined() {
 }
 
 void test_offer_chunk_size_mismatch_declined() {
-  test::MockShowReceiver mock;
+  test::MockMeshLink mock;
   test::MockOta ota;
   test::FirmwareReceiver fr;
   fr.begin(&mock, &ota);
@@ -526,7 +526,7 @@ void test_offer_chunk_size_mismatch_declined() {
 }
 
 void test_chunks_fill_bitmap() {
-  test::MockShowReceiver mock;
+  test::MockMeshLink mock;
   test::MockOta ota;
   test::FirmwareReceiver fr;
   fr.begin(&mock, &ota);
@@ -555,7 +555,7 @@ void test_chunks_fill_bitmap() {
 }
 
 void test_done_with_gap_emits_req_no_state_change() {
-  test::MockShowReceiver mock;
+  test::MockMeshLink mock;
   test::MockOta ota;
   test::FirmwareReceiver fr;
   fr.begin(&mock, &ota);
@@ -579,7 +579,7 @@ void test_done_with_gap_emits_req_no_state_change() {
 }
 
 void test_done_with_full_bitmap_success_path() {
-  test::MockShowReceiver mock;
+  test::MockMeshLink mock;
   test::MockOta ota;
   test::FirmwareReceiver fr;
   fr.begin(&mock, &ota);
@@ -603,7 +603,7 @@ void test_done_with_full_bitmap_success_path() {
 }
 
 void test_done_version_mismatch_emits_version_mismatch() {
-  test::MockShowReceiver mock;
+  test::MockMeshLink mock;
   test::MockOta ota;
   test::FirmwareReceiver fr;
   fr.begin(&mock, &ota);
@@ -630,7 +630,7 @@ void test_done_version_mismatch_emits_version_mismatch() {
 }
 
 void test_done_signature_fail_emits_signature_fail() {
-  test::MockShowReceiver mock;
+  test::MockMeshLink mock;
   test::MockOta ota;
   test::FirmwareReceiver fr;
   fr.begin(&mock, &ota);
@@ -652,7 +652,7 @@ void test_done_signature_fail_emits_signature_fail() {
 }
 
 void test_chunks_dropped_when_not_streaming() {
-  test::MockShowReceiver mock;
+  test::MockMeshLink mock;
   test::MockOta ota;
   test::FirmwareReceiver fr;
   fr.begin(&mock, &ota);
@@ -663,7 +663,7 @@ void test_chunks_dropped_when_not_streaming() {
 }
 
 void test_chunks_out_of_bounds_dropped() {
-  test::MockShowReceiver mock;
+  test::MockMeshLink mock;
   test::MockOta ota;
   test::FirmwareReceiver fr;
   fr.begin(&mock, &ota);
@@ -680,7 +680,7 @@ void test_chunks_out_of_bounds_dropped() {
 }
 
 void test_stall_watchdog_emits_req() {
-  test::MockShowReceiver mock;
+  test::MockMeshLink mock;
   test::MockOta ota;
   test::FirmwareReceiver fr;
   fr.begin(&mock, &ota);
@@ -707,7 +707,7 @@ void test_stall_watchdog_emits_req() {
 }
 
 void test_hard_cap_aborts_streaming() {
-  test::MockShowReceiver mock;
+  test::MockMeshLink mock;
   test::MockOta ota;
   test::FirmwareReceiver fr;
   fr.begin(&mock, &ota);
@@ -729,7 +729,7 @@ void test_hard_cap_aborts_streaming() {
 }
 
 void test_reoffer_same_version_idempotent_accept() {
-  test::MockShowReceiver mock;
+  test::MockMeshLink mock;
   test::MockOta ota;
   test::FirmwareReceiver fr;
   fr.begin(&mock, &ota);
@@ -746,7 +746,7 @@ void test_reoffer_same_version_idempotent_accept() {
 }
 
 void test_offer_busy_while_streaming_different_version() {
-  test::MockShowReceiver mock;
+  test::MockMeshLink mock;
   test::MockOta ota;
   test::FirmwareReceiver fr;
   fr.begin(&mock, &ota);
@@ -765,7 +765,7 @@ void test_offer_busy_while_streaming_different_version() {
 }
 
 void test_bitmap_full_at_non_multiple_of_8() {
-  test::MockShowReceiver mock;
+  test::MockMeshLink mock;
   test::MockOta ota;
   test::FirmwareReceiver fr;
   fr.begin(&mock, &ota);
@@ -780,7 +780,7 @@ void test_bitmap_full_at_non_multiple_of_8() {
 }
 
 void test_bitmap_full_at_exact_multiple_of_8() {
-  test::MockShowReceiver mock;
+  test::MockMeshLink mock;
   test::MockOta ota;
   test::FirmwareReceiver fr;
   fr.begin(&mock, &ota);
@@ -794,7 +794,7 @@ void test_bitmap_full_at_exact_multiple_of_8() {
 }
 
 void test_failed_state_resets_on_next_tick() {
-  test::MockShowReceiver mock;
+  test::MockMeshLink mock;
   test::MockOta ota;
   test::FirmwareReceiver fr;
   fr.begin(&mock, &ota);

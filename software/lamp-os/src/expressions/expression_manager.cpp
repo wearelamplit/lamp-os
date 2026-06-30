@@ -6,7 +6,7 @@
 
 #include "components/network/lamp_protocol.hpp"
 #include "components/network/nearby_lamps.hpp"
-#include "components/network/show_receiver.hpp"
+#include "components/network/mesh_link.hpp"
 #include "core/behavior_context.hpp"
 #include "core/compositor.hpp"
 
@@ -97,8 +97,8 @@ void ExpressionManager::addExpression(const ExpressionConfig& config) {
   }
 }
 
-void ExpressionManager::setShowReceiver(ShowReceiver* receiver) {
-  showReceiver_ = receiver;
+void ExpressionManager::setMeshLink(MeshLink* link) {
+  meshLink_ = link;
 }
 
 void ExpressionManager::setCompositor(Compositor* compositor) {
@@ -117,10 +117,10 @@ void ExpressionManager::setCompositor(Compositor* compositor) {
 }
 
 void ExpressionManager::maybeCascade(const ExpressionEntry& entry) {
-  if (!showReceiver_ || !entry.expression) {
+  if (!meshLink_ || !entry.expression) {
 #ifdef LAMP_DEBUG
-    Serial.printf("[cascade] %s: skip (no showReceiver=%d no expression=%d)\n",
-                  entry.config.type.c_str(), !showReceiver_, !entry.expression);
+    Serial.printf("[cascade] %s: skip (no meshLink=%d no expression=%d)\n",
+                  entry.config.type.c_str(), !meshLink_, !entry.expression);
 #endif
     return;
   }
@@ -175,7 +175,7 @@ void ExpressionManager::maybeCascade(const ExpressionEntry& entry) {
   // frame stays bounded.
   auto peers = nearbyLamps.getReachableViaEspNow(LAMP_PRUNE_TIME_MS);
   uint8_t myMac[6];
-  showReceiver_->getMyMac(myMac);
+  meshLink_->getMyMac(myMac);
   std::vector<NearbyLamp> targets;
   targets.reserve(peers.size());
   for (const auto& p : peers) {
@@ -254,7 +254,7 @@ void ExpressionManager::maybeCascade(const ExpressionEntry& entry) {
   // receivers'. Back-to-back (no delay) loses the across-RF-window
   // spread but keeps the "two TX attempts" resilience and doesn't block.
   uint8_t frame[lamp_protocol::EVENT_MAX_SIZE];
-  const uint16_t seq = showReceiver_->nextEventSeq();
+  const uint16_t seq = meshLink_->nextEventSeq();
   const size_t frameLen = lamp_protocol::buildEvent(
       frame, sizeof(frame), seq, myMac,
       static_cast<uint8_t>(lamp_protocol::EventKind::ExpressionTriggered),
@@ -272,15 +272,15 @@ void ExpressionManager::maybeCascade(const ExpressionEntry& entry) {
   // BLE coex; suppress MSG_EVENT cascade broadcasts while we're mid-flow
   // so the chunk stream gets the channel time. The cascade resumes once
   // the OTA flow exits (Done/Failed → Idle).
-  if (showReceiver_->isOtaInProgress()) {
+  if (meshLink_->isOtaInProgress()) {
 #ifdef LAMP_DEBUG
     Serial.printf("[cascade] %s: suppressed during OTA flow\n",
                   entry.config.type.c_str());
 #endif
     return;
   }
-  showReceiver_->broadcastRaw(frame, frameLen);
-  showReceiver_->broadcastRaw(frame, frameLen);
+  meshLink_->broadcastRaw(frame, frameLen);
+  meshLink_->broadcastRaw(frame, frameLen);
 }
 
 std::vector<AnimatedBehavior*> ExpressionManager::getBehaviors() {

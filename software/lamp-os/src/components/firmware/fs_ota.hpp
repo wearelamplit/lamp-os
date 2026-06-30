@@ -6,7 +6,7 @@
 //
 // It owns a second FirmwareReceiver + FirmwareDistributor wired to the spiffs
 // partition + the FS verify (mount + manifest digest + ed25519 against
-// fw.lsig). Inbound MSG_FS_* frames are routed here by show_receiver; outbound
+// fw.lsig). Inbound MSG_FS_* frames are routed here by mesh_link; outbound
 // MSG_FS_* are emitted by the FS instances. A cross-OTA busy guard keeps the
 // FS and firmware paths from running concurrently (shared erase machinery).
 
@@ -52,7 +52,7 @@ void considerPeer(const uint8_t peerMac[6], uint32_t peerFwVersion,
                   const char* peerFwChannel, const uint8_t* peerFsDigest,
                   bool peerHasFsDigest);
 
-// --- Inbound dispatch (called from show_receiver's WiFi recv task) ---------
+// --- Inbound dispatch (called from mesh_link's WiFi recv task) -------------
 // MSG_FS_OFFER / MSG_FS_DONE — posted to the Core 1 drain (like firmware).
 // handleControl is the Core 1 side (called by the lamp.cpp drain).
 void handleControl(const lamp::PendingFirmwareControl& ctrl);

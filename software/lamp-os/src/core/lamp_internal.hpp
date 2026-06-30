@@ -19,7 +19,7 @@
 #include "behaviors/configurator.hpp"
 #include "components/firmware/firmware_receiver.hpp"
 #include "components/network/bluetooth.hpp"
-#include "components/network/show_receiver.hpp"
+#include "components/network/mesh_link.hpp"
 #include "config/config.hpp"
 #include "expressions/expression_manager.hpp"
 
@@ -55,7 +55,7 @@ extern portMUX_TYPE pendingMux;
 extern Preferences prefs;
 extern lamp::BluetoothComponent bt;
 extern lamp::FirmwareReceiver firmwareReceiver;
-extern lamp::ShowReceiver showReceiver;
+extern lamp::MeshLink meshLink;
 extern lamp::ExpressionManager expressionManager;
 extern lamp::ConfiguratorBehavior shadeConfiguratorBehavior;
 extern lamp::ConfiguratorBehavior baseConfiguratorBehavior;

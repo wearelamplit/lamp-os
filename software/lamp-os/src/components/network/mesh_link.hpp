@@ -40,7 +40,7 @@
 //   - Cascade-stagger ordering depends on RSSI from recent HELLOs; the
 //     sender's stagger plan is freshest right after a HELLO, but it
 //     degrades gracefully: stale RSSI is "good enough" for ordering and
-//     missing peers tail-fire (show_receiver.cpp::handleRecv MSG_EVENT
+//     missing peers tail-fire (mesh_link.cpp::handleRecv MSG_EVENT
 //     branch).
 // why: scale-fix per validated plan §"Layer 2".
 #define LAMP_HELLO_INTERVAL_MS 5000
@@ -71,7 +71,7 @@ using ControlOpHandler = std::function<void(const uint8_t* payload, size_t len,
 //
 // POD-by-construction so PendingTypedSlot<T>'s portMUX-protected memcpy
 // post/drain has well-defined semantics across the WiFi-task → loop-task
-// hand-off. ShowReceiver::handleRecv populates these on the WiFi task
+// hand-off. MeshLink::handleRecv populates these on the WiFi task
 // (Core 0); standard_lamp's loop drain reads them on Core 1 and
 // dispatches into the ColorOverride / BrightnessOverride / NearbyLamps
 // modules.
@@ -130,7 +130,7 @@ struct PendingWispPalette {
               lamp_protocol::WISP_PALETTE_ENTRY_SIZE];
 };
 
-// MSG_EVENT pending slot. ShowReceiver's WiFi-task recv path does the
+// MSG_EVENT pending slot. MeshLink's WiFi-task recv path does the
 // stagger-list lookup (own MAC → delayMs) and memcpys the result here;
 // the Core 1 drain calls ExpressionManager::tryHandleExpressionEvent
 // which does the expensive JSON parse + cascade-config check + dedup +
@@ -147,7 +147,7 @@ struct PendingEvent {
   uint8_t  payload[lamp_protocol::maxEventPayloadFor(0)];
 };
 
-// Forwarders implemented in lamp.cpp. ShowReceiver's WiFi-task
+// Forwarders implemented in lamp.cpp. MeshLink's WiFi-task
 // recv path calls these — they own posting into the loop-task pending
 // slots so the receiver's handleRecv stays a thin parse-and-route layer
 // with no knowledge of which slot a given message type lands in.
@@ -160,7 +160,7 @@ void postPendingWispPalette(const PendingWispPalette& src);
 void postPendingEvent(const PendingEvent& src);
 
 // Forward decl — full type lives in components/firmware/firmware_receiver.hpp.
-// ShowReceiver only needs the pointer + the chunk handler member function
+// MeshLink only needs the pointer + the chunk handler member function
 // (which it calls DIRECTLY on the WiFi task — no slot indirection for the
 // high-frequency chunk path, per the lamp-side plan §5).
 class FirmwareReceiver;
@@ -174,7 +174,7 @@ class FirmwareDistributor;
 // Recv runs on the Wi-Fi task; the DedupRing instances guard themselves
 // with portMUX internally so the Arduino loop task can call sendControlOp
 // concurrently without racing the recv path.
-class ShowReceiver {
+class MeshLink {
  public:
   // `cfg` is used to read the lamp's friendly name and current configured
   // shade/base colors at HELLO time. Caller retains ownership.
@@ -230,7 +230,7 @@ class ShowReceiver {
   bool isOtaInProgress() const;
 
   // Static recv glue (the EspNowLink hands us a C function pointer).
-  static ShowReceiver* s_instance;
+  static MeshLink* s_instance;
   static void onRecv(const uint8_t* mac, const uint8_t* data, size_t len,
                      int8_t rssi);
 
@@ -278,20 +278,20 @@ class ShowReceiver {
 };
 
 // FirmwareTransport adapter for the ESP-NOW mesh path. Thin wrapper over
-// ShowReceiver — used for the existing wisp-driven OTA flow where the
+// MeshLink — used for the existing wisp-driven OTA flow where the
 // lamp accepts MSG_FW_OFFER over the mesh and emits ACCEPT/REQ/RESULT
 // the same way. The BLE-driven OTA flow uses a sibling
 // `BleFirmwareTransport` (in ble_control.hpp) that notifies on
 // CHAR_FW_STATUS instead.
 class EspNowFirmwareTransport : public FirmwareTransport {
  public:
-  explicit EspNowFirmwareTransport(ShowReceiver* link) : link_(link) {}
+  explicit EspNowFirmwareTransport(MeshLink* link) : link_(link) {}
   void getMyMac(uint8_t out[6]) const override { link_->getMyMac(out); }
   bool sendFrame(const uint8_t* data, size_t len) override {
     return link_->broadcastRaw(data, len);
   }
  private:
-  ShowReceiver* link_;
+  MeshLink* link_;
 };
 
 }  // namespace lamp

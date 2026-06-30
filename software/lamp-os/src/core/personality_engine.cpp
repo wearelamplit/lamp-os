@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-#include "components/network/show_receiver.hpp"
+#include "components/network/mesh_link.hpp"
 #include "config/config.hpp"
 #include "expressions/expression_invocation.hpp"
 #include "expressions/expression_manager.hpp"
@@ -14,10 +14,10 @@ PersonalityEngine personalityEngine;
 
 void PersonalityEngine::begin(Config* config,
                               ExpressionManager* expressionManager,
-                              ShowReceiver* showReceiver) {
+                              MeshLink* meshLink) {
   config_ = config;
   expressionManager_ = expressionManager;
-  showReceiver_ = showReceiver;
+  meshLink_ = meshLink;
   if (config_) {
     lastSocialMode_ = config_->lamp.socialMode;
   }
@@ -345,14 +345,14 @@ void PersonalityEngine::sampleAndSmoothCrowd_(
 // --- Smitten closest cycle ----------------------------------------------
 
 void PersonalityEngine::firePulse_(const Color& color) {
-  if (!expressionManager_ || !showReceiver_) return;
+  if (!expressionManager_ || !meshLink_) return;
   ExpressionInvocation inv;
   inv.type = "pulse";
   inv.colors = {color};
   inv.target = 3;  // BOTH
   inv.parameters["cycles"] = 2;
   uint8_t myMac[6] = {0};
-  showReceiver_->getMyMac(myMac);
+  meshLink_->getMyMac(myMac);
   (void)expressionManager_->triggerInvocation(inv, myMac);
 }
 

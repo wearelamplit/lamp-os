@@ -36,7 +36,7 @@
 #include "components/network/bluetooth.hpp"
 #include "components/network/ble_control.hpp"
 #include "components/network/nearby_lamps.hpp"
-#include "components/network/show_receiver.hpp"
+#include "components/network/mesh_link.hpp"
 #include "components/network/wifi.hpp"
 #if LAMP_WEBAPP_ENABLED
 #include "components/webapp/webapp.hpp"
@@ -215,7 +215,7 @@ void postPendingSocialDispositionsJson(const char* data, size_t len){ lamp::pend
 void postPendingWispOpJson(const char* data, size_t len)            { lamp::pendingSlots.wispOp.post(pendingMux, data, len); }
 
 namespace lamp {
-// Typed-payload posts called from ShowReceiver's WiFi recv task.
+// Typed-payload posts called from MeshLink's WiFi recv task.
 // Same Core 0 → Core 1 hand-off discipline as the JSON slots above —
 // memcpy under portMUX, no heap, no parsing on the recv task.
 void postPendingOverrideColors(const PendingOverrideColors& src)         { pendingSlots.overrideColors.post(pendingMux, src); }
@@ -275,8 +275,8 @@ lamp::FadeOutBehavior baseFadeOutBehavior;
 lamp::KnockoutBehavior baseKnockoutBehavior;
 lamp::ExpressionManager expressionManager;
 lamp::Config config;
-lamp::ShowReceiver showReceiver;
-// Lamp-side OTA receiver. Bound to showReceiver via
+lamp::MeshLink meshLink;
+// Lamp-side OTA receiver. Bound to meshLink via
 // setFirmwareReceiver() in setup() so the WiFi recv path can hand
 // MSG_FW_CHUNK directly to handleChunkOnRecvTask (Core 0). OFFER/DONE
 // arrive via pendingFirmwareControl and are drained on Core 1.
@@ -623,9 +623,9 @@ void initBehaviors(lamp::Features features) {
   // share the same NeoPixel setBrightness entry point.
   lamp::overrides.brightness.setOnChangeCallback([]() { applyEffectiveBrightness(); });
 
-  // Init order: needs config + expressionManager + showReceiver — all
+  // Init order: needs config + expressionManager + meshLink — all
   // constructed above. See personality_engine.hpp for behavior details.
-  lamp::personalityEngine.begin(&config, &expressionManager, &showReceiver);
+  lamp::personalityEngine.begin(&config, &expressionManager, &meshLink);
 }
 
 /**
@@ -1085,31 +1085,31 @@ void lamp::Lamp::setup() {
 
   // Route inbound CONTROL_OP payloads (addressed to us or broadcast) into a
   // pending slot. WiFi-task safe: pure memcpy under portMUX, no heap work.
-  // MUST be installed BEFORE showReceiver.begin() — otherwise any CONTROL_OP
+  // MUST be installed BEFORE meshLink.begin() — otherwise any CONTROL_OP
   // that arrives in the gap is dropped because controlOpHandler_ is null.
-  showReceiver.setControlOpHandler(
+  meshLink.setControlOpHandler(
       [](const uint8_t* payload, size_t len, const uint8_t srcMac[6]) {
         lamp::pendingSlots.inboundOp.post(
             pendingMux, reinterpret_cast<const char*>(payload), len, srcMac);
       });
-  // Install the OTA receiver BEFORE showReceiver.begin() so the
+  // Install the OTA receiver BEFORE meshLink.begin() so the
   // chunk fast-path is wired by the time MSG_FW_* frames start arriving.
-  // FirmwareReceiver::begin captures myMac via showReceiver.getMyMac(),
+  // FirmwareReceiver::begin captures myMac via meshLink.getMyMac(),
   // which is populated after the EspNowLink::begin() call inside
-  // showReceiver.begin() — so receiver-side init has to run AFTER
-  // showReceiver.begin(). The setFirmwareReceiver() call can happen any
+  // meshLink.begin() — so receiver-side init has to run AFTER
+  // meshLink.begin(). The setFirmwareReceiver() call can happen any
   // time before the first MSG_FW_OFFER arrives, but installing it right
   // here keeps the wiring co-located.
-  showReceiver.setFirmwareReceiver(&firmwareReceiver);
+  meshLink.setFirmwareReceiver(&firmwareReceiver);
   // Bring up ESP-NOW grid presence (HELLO + COLORS). Independent of home
   // WiFi — runs on whatever channel the radio is on. See lamp_protocol.hpp.
-  showReceiver.begin(&config);
+  meshLink.begin(&config);
   // Wire the ESP-NOW transport adapter onto the FirmwareReceiver. The
   // mesh path (wisp → lamp MSG_FW_*) emits via this transport. The BLE
   // transport is late-bound by ble_control::setFirmwareReceiver() below
   // (which uses the static BleFirmwareTransport instance internal to
   // ble_control.cpp).
-  static lamp::EspNowFirmwareTransport meshFwTransport(&showReceiver);
+  static lamp::EspNowFirmwareTransport meshFwTransport(&meshLink);
   firmwareReceiver.begin(&meshFwTransport);
 
   // Wire app-driven BLE OTA: registers FirmwareReceiver with ble_control so
@@ -1121,9 +1121,9 @@ void lamp::Lamp::setup() {
   // Gossip OTA: the lamp can ALSO originate offers to peers
   // it meets via the social system. Wire the distributor through the same
   // EspNowFirmwareTransport (it emits MSG_FW_OFFER/CHUNK/DONE and listens
-  // for ACCEPT/REQ/RESULT via show_receiver's new dispatch ladder).
+  // for ACCEPT/REQ/RESULT via mesh_link's dispatch ladder).
   lamp::firmwareDistributor.begin(&meshFwTransport);
-  showReceiver.setFirmwareDistributor(&lamp::firmwareDistributor);
+  meshLink.setFirmwareDistributor(&lamp::firmwareDistributor);
   // FS-image OTA: a second receiver/distributor pair targeting the spiffs
   // partition (shares the mesh transport; cross-OTA guard prevents overlap).
   fs_ota::begin(&meshFwTransport, &firmwareReceiver, &lamp::firmwareDistributor);
@@ -1152,8 +1152,8 @@ void lamp::Lamp::setup() {
     }
   }
   // Wire the cascade fan-out path. The manager only sends after this; before
-  // begin/setShowReceiver, local triggers fire but never cascade.
-  expressionManager.setShowReceiver(&showReceiver);
+  // begin/setMeshLink, local triggers fire but never cascade.
+  expressionManager.setMeshLink(&meshLink);
   // Compositor wired so the manager can lazy-upsert a transient entry when a
   // remote cascade arrives for an expression type that's not configured on
   // this lamp — receivers no longer need to pre-configure every type.
@@ -1333,7 +1333,7 @@ void lamp::Lamp::tick() {
 #if LAMP_WEBAPP_ENABLED
   webapp::tick();
 #endif
-  showReceiver.tick();
+  meshLink.tick();
   // Drive OTA stall watchdog + REQ generation + 60s hard cap.
   // Cheap when state == Idle (single switch + return).
   firmwareReceiver.tick(millis());

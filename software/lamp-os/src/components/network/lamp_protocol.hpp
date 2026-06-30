@@ -1705,8 +1705,8 @@ inline bool parseFwResult(const uint8_t* data, size_t len, ParsedFwResult& out,
 // seen recently. Drops duplicates so re-broadcasts terminate.
 //
 // Concurrency: record() can be called from BOTH the ESP-NOW recv task
-// (Core 0, via ShowReceiver::handleRecv) AND the Arduino loop task
-// (Core 1, via ShowReceiver::sendControlOp recording our own sent ops
+// (Core 0, via MeshLink::handleRecv) AND the Arduino loop task
+// (Core 1, via MeshLink::sendControlOp recording our own sent ops
 // so the inbound re-broadcast doesn't loop back). The critical section
 // is the compare loop + slot write — kept SHORT: no allocations, no
 // network calls, no logging. See audit finding #7 / Stability #3.
@@ -1719,7 +1719,7 @@ class DedupRing {
   // gossip-relay (Commit E). 64 slots give sufficient headroom: at 50
   // lamps emitting one cascade each within a small window, we still hold
   // ~24 unique (mac, seq) entries past the ring's age horizon. Per-msgType
-  // dedup (ShowReceiver has separate rings per message type) means EVENT
+  // dedup (MeshLink has separate rings per message type) means EVENT
   // entries never get evicted by HELLO traffic etc.
   // why: scale-fix per validated plan §"Layer 2".
   static constexpr size_t CAPACITY = 64;

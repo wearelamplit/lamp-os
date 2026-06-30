@@ -12,7 +12,7 @@
 // can hear each other. Since we never associate to a home AP anymore,
 // the radio sits on this channel permanently (modulo brief scan windows).
 #ifndef LAMP_ESPNOW_CHANNEL
-// Moved 1 → 11 on 2026-06-10. Mirror of show_receiver.hpp / MeshLink.h.
+// Moved 1 → 11 on 2026-06-10. Mirror of mesh_link.hpp / MeshLink.h.
 #define LAMP_ESPNOW_CHANNEL 11
 #endif
 

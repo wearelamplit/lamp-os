@@ -31,7 +31,7 @@
 #include "components/firmware/fs_ota.hpp"
 #include "components/network/ble_control.hpp"
 #include "components/network/nearby_lamps.hpp"
-#include "components/network/show_receiver.hpp"
+#include "components/network/mesh_link.hpp"
 #include "components/network/wifi.hpp"
 #include "config/config.hpp"
 #include "core/ota_quiet_mode.hpp"
@@ -416,7 +416,7 @@ void Lamp::drainWifiOp() {
   }
 }
 
-// Drain inbound ESP-NOW CONTROL_OP (deferred from ShowReceiver's WiFi task)
+// Drain inbound ESP-NOW CONTROL_OP (deferred from MeshLink's WiFi task)
 // — JSON parse + local dispatch via the unified cascade router.
 void Lamp::drainInboundOp() {
   if (lamp::pendingSlots.inboundOp.valid) {
@@ -442,7 +442,7 @@ void Lamp::drainRemoteOp() {
     Serial.printf("[loop] drain remoteOp len=%u\n", (unsigned)len);
 #endif
     uint8_t selfMac[6];
-    showReceiver.getMyMac(selfMac);
+    meshLink.getMyMac(selfMac);
     applyRemoteOpRouted(buf, len, selfMac, RemoteOpTransport::BLE);
   }
 }
@@ -610,7 +610,7 @@ void Lamp::drainWispHello() {
 // new palette without round-tripping a read of CHAR_WISP_STATUS.
 void Lamp::drainWispPalette() {
   {
-    // Wisp manualPalette drain. ShowReceiver's recv branch parsed +
+    // Wisp manualPalette drain. MeshLink's recv branch parsed +
     // deduped + posted; here on Core 1 we update the NearbyLamps cache
     // and push a BLE notify so subscribed apps see the new palette
     // without round-tripping a read of CHAR_WISP_STATUS.
@@ -631,7 +631,7 @@ void Lamp::drainWispPalette() {
 // Drain pendingSlots.wispOp — app wrote a wispOp via CHAR_WISP_OP; we
 // broadcast it as MSG_CONTROL_OP so the wisp(s) on the mesh pick it up.
 // NEVER applied locally — wispOp is wisp-only (lamps don't have a zone
-// state). ShowReceiver::sendControlOp records its own seq into
+// state). MeshLink::sendControlOp records its own seq into
 // controlOpDedup_ before the broadcast, so the reflected copy we get back
 // from the gossip rebroadcast doesn't try to apply locally.
 void Lamp::drainWispOp() {
@@ -683,7 +683,7 @@ void Lamp::drainWispOp() {
       // user taps Save. The applyRemoteOpRouted() quiesce stays in place
       // because that forward path is gossip-relay (much higher volume).
       static const uint8_t kBroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-      showReceiver.sendControlOp(kBroadcastMac,
+      meshLink.sendControlOp(kBroadcastMac,
                                  reinterpret_cast<const uint8_t*>(buf),
                                  len);
     }
@@ -733,10 +733,10 @@ void Lamp::drainEvent() {
   }
 }
 
-// MSG_FW_OFFER / MSG_FW_DONE drain. ShowReceiver's WiFi recv path populates
+// MSG_FW_OFFER / MSG_FW_DONE drain. MeshLink's WiFi recv path populates
 // the slot; FirmwareReceiver does the heavy work on Core 1 (esp_ota_begin,
 // signature verify, set_boot_partition). The chunk fast-path bypasses this
-// slot — see show_receiver.cpp MSG_FW_CHUNK branch.
+// slot — see mesh_link.cpp MSG_FW_CHUNK branch.
 void Lamp::drainFirmwareControl() {
   {
     lamp::PendingFirmwareControl cmd;

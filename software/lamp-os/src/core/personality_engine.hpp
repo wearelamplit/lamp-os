@@ -36,7 +36,7 @@ namespace lamp {
 
 class Config;            // fwd-decl
 class ExpressionManager; // fwd-decl
-class ShowReceiver;      // fwd-decl (for myMac)
+class MeshLink;          // fwd-decl (for myMac)
 
 // Sentinel for GreetingTuning::pulseBackCount meaning "fill the entire
 // hold window with back-to-back cycles" instead of a fixed cycle count.
@@ -72,11 +72,11 @@ struct CrowdComposition {
 class PersonalityEngine {
  public:
   // Wire dependencies. Call once during boot, after the wired modules
-  // have themselves been begin()'d. ExpressionManager + ShowReceiver
+  // have themselves been begin()'d. ExpressionManager + MeshLink
   // power the closest-Smitten recurring pulse cycle.
   void begin(Config* config,
              ExpressionManager* expressionManager = nullptr,
-             ShowReceiver* showReceiver = nullptr);
+             MeshLink* meshLink = nullptr);
 
   // Drive the engine. Called every loop iteration on Core 1. Most internal
   // work is gated behind a 1 Hz sample tick.
@@ -192,7 +192,7 @@ class PersonalityEngine {
                                  const std::vector<NearbyLamp>& peers);
 
   // Fire one `pulse` ExpressionInvocation in `color` via expressionManager_.
-  // No-op if expressionManager_/showReceiver_ aren't wired. Receive-side
+  // No-op if expressionManager_/meshLink_ aren't wired. Receive-side
   // terminus — never cascades.
   void firePulse_(const Color& color);
 
@@ -200,7 +200,7 @@ class PersonalityEngine {
 
   Config* config_ = nullptr;
   ExpressionManager* expressionManager_ = nullptr;
-  ShowReceiver* showReceiver_ = nullptr;
+  MeshLink* meshLink_ = nullptr;
 
   uint32_t lastSampleMs_ = 0;
   // Rolling buffer of W samples; we take the median to absorb the

@@ -1,7 +1,7 @@
 // Native-host unit tests for the MSG_EVENT cascade migration (C.3).
 //
 // Pins the data-shape behaviors that the production code in
-// ShowReceiver::handleRecv (MSG_EVENT branch) and
+// MeshLink::handleRecv (MSG_EVENT branch) and
 // ExpressionManager::maybeCascade rely on:
 //
 //   1. Stagger-list lookup: receiver finds its own MAC in the
@@ -44,7 +44,7 @@ namespace lamp_test {
 static constexpr size_t   kMaxStaggerEntries  = 12;
 static constexpr uint32_t kMaxDelayMs         = 10000;
 // Receiver-side tail-fire fallback. Must match the constant in
-// show_receiver.cpp's MSG_EVENT branch.
+// mesh_link.cpp's MSG_EVENT branch.
 static constexpr uint16_t kTailFireStaggerMs  = 50;
 
 struct StaggerEntry {
@@ -80,7 +80,7 @@ static std::vector<StaggerEntry> buildStaggerList(std::vector<Peer> peers,
   return out;
 }
 
-// Receiver-side lookup (matches show_receiver.cpp's MSG_EVENT branch).
+// Receiver-side lookup (matches mesh_link.cpp's MSG_EVENT branch).
 // Returns the supplied delayMs if our MAC appears in the list; otherwise
 // the tail-fire default = numStaggerEntries * kTailFireStaggerMs.
 static uint16_t lookupOwnDelay(const std::vector<StaggerEntry>& list,

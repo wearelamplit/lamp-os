@@ -1,4 +1,4 @@
-#include "show_receiver.hpp"
+#include "mesh_link.hpp"
 
 #include <Arduino.h>
 
@@ -12,17 +12,17 @@
 
 namespace lamp {
 
-ShowReceiver* ShowReceiver::s_instance = nullptr;
+MeshLink* MeshLink::s_instance = nullptr;
 
-void ShowReceiver::onRecv(const uint8_t* mac, const uint8_t* data, size_t len,
+void MeshLink::onRecv(const uint8_t* mac, const uint8_t* data, size_t len,
                           int8_t rssi) {
   if (s_instance) s_instance->handleRecv(mac, data, len, rssi);
 }
 
-void ShowReceiver::begin(Config* cfg) {
+void MeshLink::begin(Config* cfg) {
   config_ = cfg;
   s_instance = this;
-  if (!link_.begin(&ShowReceiver::onRecv)) {
+  if (!link_.begin(&MeshLink::onRecv)) {
     Serial.println("[show] ESP-NOW init failed");
     return;
   }
@@ -31,7 +31,7 @@ void ShowReceiver::begin(Config* cfg) {
                 myMac_[0], myMac_[1], myMac_[2], myMac_[3], myMac_[4], myMac_[5]);
 }
 
-void ShowReceiver::tick() {
+void MeshLink::tick() {
   uint32_t now = millis();
   if (now - lastHelloMs_ < LAMP_HELLO_INTERVAL_MS && lastHelloMs_ != 0) return;
   lastHelloMs_ = now;
@@ -42,21 +42,21 @@ void ShowReceiver::tick() {
   emitHello();
 }
 
-bool ShowReceiver::isOtaInProgress() const {
+bool MeshLink::isOtaInProgress() const {
   const bool rx = firmwareReceiver_ ? firmwareReceiver_->isInProgress() : false;
   const bool tx = firmwareDistributor_ ? firmwareDistributor_->isInProgress() : false;
   return rx || tx;
 }
 
-void ShowReceiver::getMyMac(uint8_t out[6]) const {
+void MeshLink::getMyMac(uint8_t out[6]) const {
   std::memcpy(out, myMac_, 6);
 }
 
-void ShowReceiver::setControlOpHandler(ControlOpHandler h) {
+void MeshLink::setControlOpHandler(ControlOpHandler h) {
   controlOpHandler_ = std::move(h);
 }
 
-bool ShowReceiver::sendControlOp(const uint8_t targetMac[6],
+bool MeshLink::sendControlOp(const uint8_t targetMac[6],
                                  const uint8_t* payload, size_t payloadLen) {
   if (payloadLen > lamp_protocol::CONTROL_MAX_PAYLOAD) return false;
   uint8_t buf[lamp_protocol::CONTROL_MAX_SIZE];
@@ -72,11 +72,11 @@ bool ShowReceiver::sendControlOp(const uint8_t targetMac[6],
   return link_.broadcast(buf, n);
 }
 
-bool ShowReceiver::broadcastRaw(const uint8_t* data, size_t len) {
+bool MeshLink::broadcastRaw(const uint8_t* data, size_t len) {
   return link_.broadcast(data, len);
 }
 
-uint16_t ShowReceiver::nextEventSeq() {
+uint16_t MeshLink::nextEventSeq() {
   return eventSeq_++;
 }
 
@@ -88,7 +88,7 @@ static bool addressedToUs(const uint8_t targetMac[6], const uint8_t myMac[6]) {
          std::memcmp(targetMac, bcast, 6) == 0;
 }
 
-void ShowReceiver::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
+void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
                               size_t len, int8_t rssi) {
   const uint8_t msgType = lamp_protocol::inspect(data, len);
   if (msgType == lamp_protocol::MSG_HELLO) {
@@ -550,7 +550,7 @@ void ShowReceiver::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
   }
 }
 
-void ShowReceiver::emitHello() {
+void MeshLink::emitHello() {
   if (!config_) return;
 #ifdef LAMP_DEBUG
   // Rate-limited to one per 10s so this doesn't dominate the UART. Confirms

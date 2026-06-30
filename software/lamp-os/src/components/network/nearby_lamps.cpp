@@ -346,7 +346,7 @@ void NearbyLamps::cacheWispHello(const uint8_t mac[6],
 }
 
 WispCache NearbyLamps::getWispCache() {
-  // Bounded take: ShowReceiver's MSG_OVERRIDE_BRIGHTNESS branch on the
+  // Bounded take: MeshLink's MSG_OVERRIDE_BRIGHTNESS branch on the
   // WiFi recv task (Core 0) reads this synchronously to decide whether
   // a below-floor brightness is wisp-paired. A long wait would stall the
   // recv task; on contention we return a "not present" snapshot — the

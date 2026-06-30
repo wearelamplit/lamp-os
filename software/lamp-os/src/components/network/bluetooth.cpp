@@ -114,7 +114,7 @@ class ScanCallbacks : public NimBLEScanCallbacks {
     // its own NearbyLamps list and surface in the app's Social tab as a
     // "seen" peer. Match by BLE address (the lamp's name is user-set and
     // can collide; the address is unique). ESP-NOW already does the
-    // equivalent filter in show_receiver.cpp:175 via sourceMac vs myMac_.
+    // equivalent filter in mesh_link.cpp:175 via sourceMac vs myMac_.
     if (advertisedDevice->getAddress() == NimBLEDevice::getAddress()) return;
 
     Color base(data[2], data[3], data[4], 0);

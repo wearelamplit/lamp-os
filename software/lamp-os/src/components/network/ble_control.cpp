@@ -25,7 +25,7 @@
 #include "components/network/gatt_layout.hpp"  // kGattLayout, kGattSchemaVersion
 #include "expressions/expression_manager.hpp"
 #include "nearby_lamps.hpp"
-#include "show_receiver.hpp"
+#include "mesh_link.hpp"
 #include "wifi.hpp"
 #include "write_router.hpp"
 
@@ -1030,7 +1030,7 @@ class FwChunkCallback : public NimBLECharacteristicCallbacks {
       return;
     }
     // Direct fast-path call on the BLE host task — mirrors how
-    // show_receiver.cpp dispatches the ESP-NOW chunk path. The
+    // mesh_link.cpp dispatches the ESP-NOW chunk path. The
     // receiver's handler is bounded (~0.5 ms: one OTA partition write +
     // bitmap set). Dropping a chunk here just means the receiver's
     // stall watchdog will REQ for it next tick.

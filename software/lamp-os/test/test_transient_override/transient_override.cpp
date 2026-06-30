@@ -717,14 +717,14 @@ void test_brightness_override_change_driven_callback_only_on_int_change() {
 }
 
 void test_brightness_override_floor_rejects_below_min_unless_wisp_paired() {
-  // This is the contract enforced by ShowReceiver, NOT by
+  // This is the contract enforced by MeshLink, NOT by
   // BrightnessOverride itself — but the test pins the rule: brightness <
   // kBrightnessOverrideMin from a non-Wisp-paired source is dropped;
   // from a Wisp-paired source it's accepted.
   //
   // The "wisp paired" check looks up the source MAC in a recent WispCache
   // entry. Here we re-implement the floor predicate inline so the test
-  // documents the rule without needing to drag in show_receiver.cpp.
+  // documents the rule without needing to drag in mesh_link.cpp.
   struct WispCache {
     bool present;
     uint8_t mac[6];
