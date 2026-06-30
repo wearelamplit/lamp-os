@@ -5,10 +5,10 @@ import 'package:go_router/go_router.dart';
 import '../../../core/routing/routes.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/back_button_leading.dart';
+import '../../../core/widgets/form_section.dart';
 import '../../../core/widgets/friendly_error.dart';
 import '../../../core/widgets/info_panel.dart';
 import '../../../core/widgets/nav_row.dart';
-import '../../../core/widgets/section_header.dart';
 import '../../control/application/advanced_session.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/presentation/widgets/connecting_view.dart';
@@ -110,57 +110,71 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
                     ),
                     const SizedBox(height: AppSpace.lg),
                     // Shade strip first — it sits physically above the base.
-                    const SectionHeader('Shade strip'),
-                    const SizedBox(height: AppSpace.sm),
-                    _PixelCountField(
-                      initial: state.shade.px,
-                      label: 'Shade LED count',
-                      onChanged: notifier.setShadePx,
+                    FormSection(
+                      title: 'Shade strip',
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.all(AppSpace.lg),
+                          child: _PixelCountField(
+                            initial: state.shade.px,
+                            label: 'Shade LED count',
+                            onChanged: notifier.setShadePx,
+                          ),
+                        ),
+                        if (showByteOrder)
+                          Padding(
+                            padding: const EdgeInsets.all(AppSpace.lg),
+                            child: SegmentedButton<String>(
+                              showSelectedIcon: false,
+                              segments: const [
+                                ButtonSegment(value: 'GRBW', label: Text('GRBW')),
+                                ButtonSegment(value: 'GRB', label: Text('GRB')),
+                                ButtonSegment(value: 'BGR', label: Text('BGR')),
+                              ],
+                              selected: {state.shade.byteOrder},
+                              onSelectionChanged: (s) =>
+                                  notifier.setShadeByteOrder(s.first),
+                            ),
+                          ),
+                      ],
                     ),
-                    if (showByteOrder) ...[
-                      const SizedBox(height: AppSpace.md),
-                      SegmentedButton<String>(
-                        showSelectedIcon: false,
-                        segments: const [
-                          ButtonSegment(value: 'GRBW', label: Text('GRBW')),
-                          ButtonSegment(value: 'GRB', label: Text('GRB')),
-                          ButtonSegment(value: 'BGR', label: Text('BGR')),
-                        ],
-                        selected: {state.shade.byteOrder},
-                        onSelectionChanged: (s) =>
-                            notifier.setShadeByteOrder(s.first),
-                      ),
-                    ],
-                    const SizedBox(height: AppSpace.xl),
-                    const SectionHeader('Base strip'),
-                    const SizedBox(height: AppSpace.sm),
-                    _PixelCountField(
-                      initial: state.base.px,
-                      label: 'Base LED count',
-                      onChanged: notifier.setBasePx,
-                    ),
-                    if (showByteOrder) ...[
-                      const SizedBox(height: AppSpace.md),
-                      SegmentedButton<String>(
-                        showSelectedIcon: false,
-                        segments: const [
-                          ButtonSegment(value: 'GRBW', label: Text('GRBW')),
-                          ButtonSegment(value: 'GRB', label: Text('GRB')),
-                          ButtonSegment(value: 'BGR', label: Text('BGR')),
-                        ],
-                        selected: {state.base.byteOrder},
-                        onSelectionChanged: (s) =>
-                            notifier.setBaseByteOrder(s.first),
-                      ),
-                    ],
+                    const SizedBox(height: AppSpace.lg),
                     // Knockout masks base pixels only, so it nests under the
                     // base strip rather than living as its own Setup tile.
-                    NavRow(
-                      icon: Icons.grid_on,
-                      title: 'Per-pixel knockout',
-                      subtitle: '${state.base.knockout.length} pixel(s) masked',
-                      onTap: () =>
-                          context.push(AppRoutes.knockout(widget.lampId)),
+                    FormSection(
+                      title: 'Base strip',
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.all(AppSpace.lg),
+                          child: _PixelCountField(
+                            initial: state.base.px,
+                            label: 'Base LED count',
+                            onChanged: notifier.setBasePx,
+                          ),
+                        ),
+                        if (showByteOrder)
+                          Padding(
+                            padding: const EdgeInsets.all(AppSpace.lg),
+                            child: SegmentedButton<String>(
+                              showSelectedIcon: false,
+                              segments: const [
+                                ButtonSegment(value: 'GRBW', label: Text('GRBW')),
+                                ButtonSegment(value: 'GRB', label: Text('GRB')),
+                                ButtonSegment(value: 'BGR', label: Text('BGR')),
+                              ],
+                              selected: {state.base.byteOrder},
+                              onSelectionChanged: (s) =>
+                                  notifier.setBaseByteOrder(s.first),
+                            ),
+                          ),
+                        NavRow(
+                          icon: Icons.grid_on,
+                          title: 'Per-pixel knockout',
+                          subtitle: '${state.base.knockout.length} pixel(s) masked',
+                          onTap: () =>
+                              context.push(AppRoutes.knockout(widget.lampId)),
+                        ),
+                      ],
                     ),
                   ],
                 ),

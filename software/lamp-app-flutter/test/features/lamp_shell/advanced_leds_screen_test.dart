@@ -5,6 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../_support/in_memory_ble_client.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
+import 'package:lamp_app/core/widgets/form_section.dart';
+import 'package:lamp_app/features/control/application/advanced_session.dart';
 import 'package:lamp_app/features/inventory/application/inventory_notifier.dart';
 import 'package:lamp_app/features/inventory/domain/inventory_lamp.dart';
 import 'package:lamp_app/features/lamp_shell/presentation/advanced_leds_screen.dart';
@@ -89,5 +91,35 @@ void main() {
     await _pumpToData(tester);
 
     expect(find.textContaining('restarts the lamp'), findsOneWidget);
+  });
+
+  testWidgets('renders two FormSection cards with correct titles', (tester) async {
+    final c = await _makeContainer();
+    addTearDown(c.dispose);
+    await tester.pumpWidget(_wrap(c));
+    await _pumpToData(tester);
+
+    // SectionHeader uppercases the title, so find by the rendered text.
+    expect(find.widgetWithText(FormSection, 'SHADE STRIP'), findsOneWidget);
+    expect(find.widgetWithText(FormSection, 'BASE STRIP'), findsOneWidget);
+  });
+
+  testWidgets('byte-order pickers hidden when advanced is locked', (tester) async {
+    final c = await _makeContainer();
+    addTearDown(c.dispose);
+    await tester.pumpWidget(_wrap(c));
+    await _pumpToData(tester);
+
+    expect(find.text('GRBW'), findsNothing);
+  });
+
+  testWidgets('byte-order pickers visible when advanced is unlocked', (tester) async {
+    final c = await _makeContainer();
+    addTearDown(c.dispose);
+    c.read(advancedSessionProvider(_devId).notifier).enable();
+    await tester.pumpWidget(_wrap(c));
+    await _pumpToData(tester);
+
+    expect(find.text('GRBW'), findsWidgets);
   });
 }
