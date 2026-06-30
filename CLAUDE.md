@@ -146,6 +146,30 @@ earns its keep today and isn't speculative. See
 [`docs/dev/code-smells.md`](docs/dev/code-smells.md) for the catalog and the
 "when it's actually fine" cases; judge against it, don't wield it.
 
+### Naming and C++ style
+
+- **No Hungarian notation.** Type things for the compiler; name them for
+  humans. No type-encoding prefixes (`szName`, `pBuf`, `dwCount`, `nLen`).
+  Scope markers are not Hungarian and stay: trailing `_` on members
+  (`store_`, `entries_`), `s_` / `g_` for file-statics / globals.
+- **Reuse before you build.** Reach for an existing type or helper before a
+  new one (`Color` for an RGBW value, the existing DedupRing, etc.), and
+  check the stdlib / framework before hand-rolling. Reinventing what already
+  lives here is the most common slop — see
+  [`docs/dev/code-smells.md`](docs/dev/code-smells.md).
+- **Definitions go in the `.cpp`.** Declarations in the header, definitions in
+  the `.cpp` by default. Header-only needs a reason: templates, `constexpr`, a
+  one-line accessor, or a native-test seam (a test that `#include`s the
+  `.cpp`). A header full of function bodies is the smell.
+- **Prefer modern C++ over C idioms.** `{}`-init / `std::array` / `std::fill`
+  over `memset`; a class or `std::` container over a hand-rolled struct + loose
+  functions. Exception: a genuine raw byte buffer or a tight embedded hot path
+  where the C idiom is measurably clearer or faster — then say so in a comment.
+
+These are defaults to judge against, not absolutes (e.g. wire-format
+`static_assert`s on fixed offsets are a feature, not over-assertion; keep
+them). When a default doesn't fit, the reason goes in the diff or a comment.
+
 ### Variant-include hygiene
 
 Framework code (`core/`, `components/`, `behaviors/`, `config/`,
