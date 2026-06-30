@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/brand_extras.dart';
 import '../../../../core/widgets/app_sheet.dart';
 import '../../application/wifi_notifier.dart';
@@ -81,7 +82,7 @@ class _WifiNetworkPickerState extends ConsumerState<WifiNetworkPicker> {
               height: 36,
               child: isScanning
                   ? const Padding(
-                      padding: EdgeInsets.all(8),
+                      padding: EdgeInsets.all(AppSpace.sm),
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : IconButton(
@@ -94,10 +95,10 @@ class _WifiNetworkPickerState extends ConsumerState<WifiNetworkPicker> {
             ),
           ],
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: AppSpace.xs),
         if (wifi.scanResults.isEmpty && !isScanning)
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16),
+            padding: const EdgeInsets.symmetric(vertical: AppSpace.lg),
             child: Text(
               widget.emptyHint ?? 'Tap refresh to scan for networks.',
               style: TextStyle(color: colorScheme.onSurfaceVariant),
@@ -122,7 +123,7 @@ class _WifiNetworkPickerState extends ConsumerState<WifiNetworkPicker> {
                     color: colorScheme.onSurfaceVariant,
                   ),
                 if (isCurrent) ...[
-                  const SizedBox(width: 6),
+                  const SizedBox(width: AppSpace.sm),
                   Icon(
                     Icons.check,
                     size: 16,
@@ -167,14 +168,14 @@ class RssiBars extends StatelessWidget {
           final extras = context.brandExtras;
           final colorScheme = Theme.of(context).colorScheme;
           return Container(
-            width: 3,
-            height: 6.0 + i * 4,
-            margin: const EdgeInsets.symmetric(horizontal: 1),
+            width: 3, // deliberate dimension, not spacing
+            height: 6.0 + i * 4, // deliberate dimension, not spacing
+            margin: const EdgeInsets.symmetric(horizontal: 1), // deliberate dimension, not spacing
             decoration: BoxDecoration(
               color: filled
                   ? extras.success
                   : colorScheme.onSurfaceVariant.withValues(alpha: 0.35),
-              borderRadius: BorderRadius.circular(1),
+              borderRadius: BorderRadius.circular(1), // deliberate dimension, not spacing
             ),
           );
         }),
@@ -201,19 +202,19 @@ Future<WifiScanResult?> showWifiPickerSheet(
       builder: (sheetCtx, scrollController) {
         final sheetColorScheme = Theme.of(sheetCtx).colorScheme;
         return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+          padding: const EdgeInsets.fromLTRB(AppSpace.lg, AppSpace.md, AppSpace.lg, AppSpace.lg),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Drag handle for affordance.
               Center(
                 child: Container(
-                  width: 40,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 12),
+                  width: 40, // deliberate dimension, not spacing
+                  height: 4, // deliberate dimension, not spacing
+                  margin: const EdgeInsets.only(bottom: AppSpace.md),
                   decoration: BoxDecoration(
                     color: sheetColorScheme.onSurfaceVariant.withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(2),
+                    borderRadius: BorderRadius.circular(2), // deliberate dimension, not spacing
                   ),
                 ),
               ),
@@ -225,7 +226,7 @@ Future<WifiScanResult?> showWifiPickerSheet(
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: AppSpace.sm),
               Expanded(
                 child: SingleChildScrollView(
                   controller: scrollController,
