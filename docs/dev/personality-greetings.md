@@ -166,7 +166,7 @@ gated by the same cooldown as warm greetings, no bypass paths.
 
 ## Waveform mechanics
 
-Each greeting plays as a four-phase animation on the shade:
+Each greeting plays as a three-phase animation on the shade:
 
 1. **Ease-in**, interpolate from whatever the shade was drawing →
    `foundLampColor` (the peer's base color). On a **snub**, the dim
@@ -180,10 +180,6 @@ Each greeting plays as a four-phase animation on the shade:
 3. **Fade-out**, interpolate `foundLampColor` → whatever the shade
    would now be drawing. On a **snub**, the dim ramps back
    `pulseBackStrength` → 0 over this phase, mirroring the ease-in.
-4. **OTA-hold** (optional), if the lamp is mid-OTA-distribution to
-   this same peer when the greeting fires, the animation lifetime is
-   extended (~60 s ceiling) so the shade stays on the peer color
-   while the OTA pulse modulates brightness on a meaningful hue.
 
 `darken(c, s)` scales each channel by `(255 - s)/255` — `darken(c, 255)`
 is black, `darken(c, 0)` is unchanged — preserving hue while dropping
@@ -199,7 +195,8 @@ For how greetings fit alongside the other social subsystems, see the
 overview in [`social.md`](social.md). This doc is greetings only:
 
 - The crowd-aware brightness damping in `PersonalityEngine` (Introvert
-  only), separate subsystem, weights peers by disposition.
+  and Ambivert; Extrovert is unaffected), separate subsystem, weights
+  peers by disposition.
 - The 45-second closest-Smitten recurring pulse, separate from the
   greeting waveform, fired through `ExpressionManager` not `SocialBehavior`.
 - The dispositions storage + sync surfaces (NVS, `CHAR_SOCIAL_DISPOSITIONS`

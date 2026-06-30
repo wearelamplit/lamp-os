@@ -1,8 +1,9 @@
 // Dart mirror of the MSG_FW_* wire format from
 // software/lamp-os/src/components/network/lamp_protocol.hpp. Keep field
-// orderings + LE-encoding in lockstep with the lamp side: a byte slip here is
-// a silent-drop in the receiver's parser, the canonical example of "the code
-// wins ties; update docs/dev/mesh-api.md when it doesn't."
+// orderings + LE-encoding in lockstep with the lamp side — a byte slip
+// here is a silent-drop in the receiver's parser, which is the
+// canonical example of "the code wins ties; update docs/dev/networking.md
+// when it doesn't."
 //
 // The lamp-side BLE OTA path accepts the SAME wire format as the ESP-NOW mesh
 // path (no envelope, no re-wrapping), so these frames can be hand-built in

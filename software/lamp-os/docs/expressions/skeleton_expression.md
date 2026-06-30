@@ -1,7 +1,7 @@
 # Skeleton Expression Example
 
 Minimal walkthrough for adding a new expression type to the firmware.
-Pairs with `docs/expressions.md` (subsystem-level architecture and
+Pairs with `docs/dev/expressions.md` (subsystem-level architecture and
 the parameter contract) — read that first.
 
 ## Header (skeleton_expression.hpp)
@@ -10,31 +10,25 @@ the parameter contract) — read that first.
 #pragma once
 
 #include "expression.hpp"
-#include "primitives.hpp"  // only if you use Window/Sparsity/Size
 
 namespace lamp {
 
 class SkeletonExpression : public Expression {
  private:
-  Region window_;          // optional — opt in to the Window primitive
-  uint32_t myTempoMs_ = 1000;
+  uint32_t myTempoMs_ = 1000;   // a custom per-type knob
 
  public:
-  using Expression::Expression;
-
   SkeletonExpression(FrameBuffer* inBuffer, uint32_t inFrames = 30)
       : Expression(inBuffer, inFrames) {
     allowedInHomeMode = true;
   }
 
-  // Pure type properties — override only if your expression differs
-  // from the default (false = coexists with the wisp's hold colour).
+  // Pure type property — override only if your expression differs from the
+  // default (false = coexists with the wisp's hold colour).
   bool disabledDuringWispOverride() const override { return false; }
 
-  // Read your custom keys from the generic parameters map. The map is
-  // std::map<std::string, uint32_t>; use lamp::getParam to read with a
-  // default, or one of the primitive helpers (Region/Sparsity/parseSize)
-  // for spatial knobs.
+  // Read your custom keys out of the generic parameters map (the map is
+  // std::map<std::string, uint32_t>; read each key with parameters.find()).
   void configureFromParameters(
       const std::map<std::string, uint32_t>& params);
 
@@ -49,6 +43,10 @@ class SkeletonExpression : public Expression {
 }  // namespace lamp
 ```
 
+The base class already gives you `colors` (the configured palette,
+`std::vector<Color>`), `getRandomColor()`, a per-instance `rng` (`FastRng`),
+`fb` (your `FrameBuffer*`), `shouldAffectBuffer()`, and `nextFrame()`.
+
 ## Implementation (skeleton_expression.cpp)
 
 ```cpp
@@ -58,13 +56,10 @@ namespace lamp {
 
 void SkeletonExpression::configureFromParameters(
     const std::map<std::string, uint32_t>& params) {
-  // Custom tempo — your own param key, your own default.
-  myTempoMs_ = lamp::getParam(params, "myTempo", 1000);
-
-  // Spatial primitive — opt in only if your expression has a Window.
-  const uint16_t pc = (fb && fb->pixelCount > 0)
-      ? static_cast<uint16_t>(fb->pixelCount) : 0;
-  window_ = Region::fromParameters(params, pc);
+  // Custom tempo — your own param key, your own default. Read each key
+  // with find() and fall back to a default when it's absent.
+  auto it = params.find("myTempo");
+  myTempoMs_ = (it != params.end()) ? it->second : 1000;
 }
 
 void SkeletonExpression::onTrigger() {
@@ -79,7 +74,7 @@ void SkeletonExpression::onUpdate() {
 void SkeletonExpression::draw() {
   if (!shouldAffectBuffer()) { nextFrame(); return; }
 
-  for (uint16_t i = window_.posMin; i <= window_.posMax; ++i) {
+  for (int i = 0; i < fb->pixelCount; ++i) {
     fb->buffer[i] = getRandomColor();  // your effect goes here
   }
 
@@ -95,8 +90,8 @@ void SkeletonExpression::onComplete() {
 
 ## Registering with the factory
 
-Open `software/lamp-os/src/expressions/expression_factory.cpp` and add
-two things:
+Open `software/lamp-os/src/expressions/expression_manager.cpp` and add two
+things to the `makeExpression()` static factory:
 
 1. An include near the other type includes:
 
@@ -115,46 +110,36 @@ two things:
 }
 ```
 
-That's the only place in firmware that has to know about your type.
-**Do not edit `expression_manager.cpp`** — the manager is type-agnostic
-and the factory is the type registry.
+`makeExpression()` is the one place in firmware that knows the full
+expression-type list — it lives in `expression_manager.cpp` itself (there is
+no separate factory translation unit).
 
 ## Parameter contract
 
-Custom parameters live in the generic
-`std::map<std::string, uint32_t>` that ExpressionConfig owns. Read them
-in `configureFromParameters` via:
-
-- `lamp::getParam(params, "key", defaultValue)` — for arbitrary per-type
-  knobs (tempo, duration, intensity, etc.)
-- `lamp::Region::fromParameters(params, pixelCount)` — for the Window
-  primitive (`posMin` / `posMax`)
-- `lamp::Sparsity::fromParameters(params, windowSize)` — for the
-  Count + Wander primitive (`count` / `wander`)
-- `lamp::parseSize(params, windowSize, defaultValue)` — for the Size
-  primitive (`size`)
-
-Every primitive helper clamps to safe bounds before returning, so
-draw() never sees an index that would walk past `fb->buffer`.
+Custom parameters live in the generic `std::map<std::string, uint32_t>` that
+`ExpressionConfig` owns. Read them in `configureFromParameters` with
+`params.find("key")`, falling back to a default when the key is absent
+(integer-only — store floats as fixed-point and document the units).
 
 Parameter keys go on the wire and into NVS unchanged. Pick stable names —
 prefix with your expression's name if there's any risk of collision
-(`pulseSpeed`, not `speed`), reuse the shared primitive keys (`posMin`,
-`posMax`, `count`, `wander`, `size`) where they apply.
+(`pulseSpeed`, not `speed`). If a key is a dedicated top-level field rather
+than a free parameter, it must be added to the reserved-keys skip-chain in
+`config_codec.cpp::fromJson` **and** the app's `_reservedKeys` set in
+`sections.dart` (see `docs/dev/expressions.md`).
 
 ## App-side metadata
 
 In `software/lamp-app-flutter/lib/features/lamp_shell/domain/expression_meta.dart`,
-add an `ExpressionTypeMeta` entry to the `all` list. `key` must match
-the factory's type string verbatim. `defaultParameters` must match the
-firmware defaults so a fresh entry behaves identically to a no-params
-instance.
+add an `ExpressionTypeMeta` entry to the `all` list. `key` must match the
+factory's type string verbatim. `defaultParameters` must match the firmware
+defaults so a fresh entry behaves identically to a no-params instance.
 
-If your expression has parameter UI (sliders, switches), add a branch
-to the type-switch in
-`software/lamp-app-flutter/lib/features/lamp_shell/presentation/widgets/expression_params_panel.dart`,
-reusing the shared widget builders (`_buildPositionRange`,
-`_buildCount`, `_buildWander`, `_buildSize`) for the primitive knobs.
+If your expression has parameter UI (sliders, switches), add a `case` to the
+`switch (type)` in
+`software/lamp-app-flutter/lib/features/lamp_shell/presentation/widgets/expression_params_panel.dart`
+returning a per-type widget (the shipped ones are `_BreathingParams`,
+`_PulseParams`, `_ShiftyParams`, `_GlitchyParams`).
 
 ## Key points
 
@@ -171,5 +156,6 @@ reusing the shared widget builders (`_buildPositionRange`,
    Allocate in `onTrigger` and reuse.
 5. **Continuous expressions override `control()`** — the base class's
    default `control()` auto-triggers on interval and tears down on
-   STOPPED. Continuous expressions (Breathing, Drifty) stay PLAYING
-   forever and own the wisp-override gate themselves.
+   STOPPED. A continuous expression (e.g. `BreathingExpression`) stays
+   PLAYING forever and, if it wants to honour the wisp-override flag,
+   checks `isWispCurrentlyOverriding()` itself.

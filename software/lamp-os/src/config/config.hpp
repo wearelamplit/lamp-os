@@ -1,50 +1,16 @@
 #pragma once
 #include <Arduino.h>
 #include <ArduinoJson.h>
-#include <Preferences.h>
 
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "config_store.hpp"
 #include "config_types.hpp"
+#include "disposition_store.hpp"
 
 namespace lamp {
-
-// Clock-only debounce helper for disposition NVS writes: a dirty flag plus
-// the timestamp of the most recent mutation. No NVS access, no I/O.
-// The test mirror in test/test_disposition_debounce reimplements this shape;
-// keep it in sync when the API changes.
-class DispositionDebouncer {
- public:
-  explicit DispositionDebouncer(uint32_t idleMs) : idleMs_(idleMs) {}
-
-  void markDirty(uint32_t nowMs) {
-    dirty_ = true;
-    lastMarkMs_ = nowMs;
-  }
-
-  bool dirty() const { return dirty_; }
-
-  // Returns true iff dirty AND the idle window has elapsed since the
-  // most recent markDirty. Caller is responsible for the actual flush
-  // and then calling clear(). Subtraction-based comparison so millis()
-  // wraparound (every ~49 days) doesn't strand the dirty flag forever.
-  bool shouldFlush(uint32_t nowMs) const {
-    if (!dirty_) return false;
-    return (nowMs - lastMarkMs_) >= idleMs_;
-  }
-
-  void clear() {
-    dirty_ = false;
-    lastMarkMs_ = 0;
-  }
-
- private:
-  bool dirty_ = false;
-  uint32_t lastMarkMs_ = 0;
-  uint32_t idleMs_;
-};
 
 /**
  * @brief configurations file for the lamp that can be modified on the web
@@ -55,7 +21,7 @@ class DispositionDebouncer {
  */
 class Config {
  private:
-  Preferences* prefs;
+  ConfigStore* store_ = nullptr;
 
  public:
   // First-boot defaults a Lamp subclass injects before NVS load. Fields left
@@ -85,17 +51,19 @@ class Config {
   Config() {};
 
   /**
-   * @brief create a config based on information in the user's storage
-   * @param [in] inPrefs preferences container for nvs values
+   * @brief create a config, loading the persisted blob from the store
+   * @param [in] inStore persistence backend for NVS-backed values
    */
-  Config(Preferences* inPrefs);
+  Config(ConfigStore* inStore);
 
-  // Attach a Preferences* to a default-constructed Config without
-  // running the NVS-load constructor. Used by main.cpp to enable
-  // loadLampType() / setLampType() during the variant-resolution chain
-  // that runs BEFORE Lamp::setup() reconstructs Config via the
-  // Preferences* ctor.
-  void setPrefs(Preferences* p) { prefs = p; }
+  // Attach a store to a default-constructed Config without running the
+  // load constructor. Used by main.cpp to enable loadLampType() /
+  // setLampType() during the variant-resolution chain that runs BEFORE
+  // Lamp::setup() reconstructs Config via the store ctor.
+  void setStore(ConfigStore* s) {
+    store_ = s;
+    dispositions_.attachStore(s);
+  }
 
   // Apply first-boot defaults AFTER the NVS blob has been loaded. Only
   // fields that NVS left at their factory value are overwritten;
@@ -116,9 +84,8 @@ class Config {
    * fade-out-and-reboot. The runtime state has already been applied by
    * the caller; this just writes the canonical JSON to NVS.
    *
-   * Returns true iff prefs.begin() succeeded and putString wrote > 0
-   * bytes. On failure the in-memory state is unchanged; the next call
-   * may succeed.
+   * Returns true iff the store wrote > 0 bytes. On failure the in-memory
+   * state is unchanged; the next call may succeed.
    */
   // `via` is a short tag like "commit" / "settings_blob" / "expressionOp"
   // included in the success log so fleet debugging can disambiguate
@@ -129,8 +96,12 @@ class Config {
   // "cfg" blob (the webapp's whole-document PUT path; the constructor
   // re-parses it on the next boot). Keeps the namespace/key contract here
   // rather than letting callers open Preferences("lamp") themselves.
-  // Returns true iff putString wrote > 0 bytes.
+  // Returns true iff the store wrote > 0 bytes.
   bool persistRawJson(const char* json);
+
+  // Wipe persisted state (factory reset). Returns true on success. The caller
+  // reboots afterward so defaults reload; in-memory state is left as-is.
+  bool factoryReset();
 
   // Variant identity persistence. Called by main.cpp at
   // boot to resolve and persist the lampType. Stored in NVS under key
@@ -175,15 +146,15 @@ class Config {
   // main config blob so the peer list can grow without bloating
   // CHAR_LAMP_SECTION / settings_blob. Stored as JSON object
   // { "AA:BB:CC:DD:EE:FF": 1..5 }; keys are canonical-form BD_ADDR
-  // strings (non-BD_ADDR keys are dropped on load via lamp::isValidBdAddr
-  // in util/bd_addr.hpp). Bounded to ~100 entries. Per-lamp metadata, never
-  // synced cross-mesh; each lamp has its own view.
-  static constexpr uint8_t kDispositionDefault = 3;
-  static constexpr size_t kDispositionsMax = 100;
-  // Idle window before debounced disposition writes commit to NVS. 5s
-  // exceeds a worst-case slider-drag cadence (~20 Hz BLE writes) while still
-  // feeling snappy if the user closes the app right after the slider (the
-  // BLE disconnect path forces a flush).
+  // strings. Legacy name-keyed entries (older firmware) are silently
+  // dropped on load via lamp::isValidBdAddr in util/bd_addr.hpp.
+  // Bounded to ~100 entries. Per-lamp metadata, never synced
+  // cross-mesh; each lamp has its own view.
+  // Idle window before debounced disposition writes are committed to NVS.
+  // See DispositionStore and audit finding #5 (NVS write amplification).
+  // 5s comfortably exceeds a worst-case slider-drag cadence (~20 Hz BLE
+  // writes) while still feeling snappy if the user closes the app right
+  // after touching the slider (the BLE disconnect path forces a flush).
   static constexpr uint32_t kDispositionFlushIdleMs = 5000;
 
   // Returns kDispositionDefault when the peer isn't in the store.
@@ -215,16 +186,7 @@ class Config {
   void flushDispositionsNow();
 
  private:
-  // Sorted vector; lookups use std::lower_bound. Invariant: entries are
-  // ALWAYS sorted by key (lexicographic); every mutation site must preserve
-  // this so getDisposition's binary search stays correct.
-  std::vector<std::pair<std::string, uint8_t>> dispositions_;
-  DispositionDebouncer dispositionsDebouncer_{kDispositionFlushIdleMs};
-  void loadDispositionsFromPrefs_();
-  // Returns true when the NVS write succeeded; false if prefs.begin() failed
-  // (NVS full / partition corrupt). Callers should leave the dirty flag set
-  // on failure so the next flush attempt retries.
-  bool persistDispositions_();
+  DispositionStore dispositions_{kDispositionFlushIdleMs};
 
   // All dirty=true initially so the first cached() call computes and
   // populates the string. After that, mutations on Core 1 must call

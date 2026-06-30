@@ -59,9 +59,16 @@ constexpr uint32_t kPostResultPauseMs  = 100;    // pre-restart delay
 constexpr uint8_t  kAcceptBurstCount   = 5;
 constexpr uint32_t kAcceptSpreadMs     = 400;
 
-// Full-upfront erase: the whole image region is erased once on Core 1 in
-// onOfferOnLoop before the gate arms, so each Core 0 chunk arrival is a pure
-// esp_partition_write with no erase on the recv path.
+// Full-upfront erase. The whole image region is erased once on Core 1 in
+// onOfferOnLoop before the gate arms, so each chunk arrival on Core 0 is a
+// pure esp_partition_write. No erase on the recv path.
+//
+// The erase is synchronous and stalls the main loop for ~1-2 s (longer on a
+// slow W25Q). That stall is intentional. It runs before ACCEPT, so no stream
+// is starved, and an erase-free recv path keeps cache+IRQ-off stalls from
+// overflowing the ESP-NOW RX queue mid-stream. The lamp stops animating for
+// that window and resumes normally after. A brief freeze buys the
+// reliability of a sensitive flash operation.
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 // IWDT widening for the OTA erase window. Prebuilt arduino-esp32 bakes

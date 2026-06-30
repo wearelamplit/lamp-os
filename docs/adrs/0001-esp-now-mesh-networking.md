@@ -1,6 +1,6 @@
 # ADR 0001 — ESP-NOW broadcast mesh for lamp-to-lamp networking
 
-**Status:** Accepted (current system; supersedes the old `main` system's networking)
+*Supersedes the old `main`-branch system's networking.*
 
 ## Context
 
@@ -39,12 +39,15 @@ protocol layered on top.
   (palette/claim), `FW_*` (OTA). Every frame carries a 2-byte magic + a
   protocol-version byte + a message-type byte.
 - **Gossip relay** for the message types that need fleet-wide reach beyond a
-  single hop (`MSG_EVENT`, palette): a lamp re-broadcasts on first sight,
-  deduped by a 64-slot `DedupRing` keyed on `(sourceMac, seq)`. Presence
-  (`HELLO`) is *not* relayed — it's single-hop by design (you only care about
-  who's actually near you).
-- **Receive-range protocol versioning** (see ADR 0003-adjacent work and
-  `mesh-api.md`): we broadcast `PROTOCOL_VERSION_EMIT` but parse a *range*
+  single hop: a lamp re-broadcasts a relayable frame on first sight, deduped by
+  **per-message-type** 64-slot `DedupRing`s keyed on `(sourceMac, msgType,
+  seq)`. Relayed: `MSG_HELLO`, `MSG_CONTROL_OP`, `MSG_WISP_HELLO`,
+  `MSG_WISP_PALETTE`, `MSG_EVENT` — so presence and beacons reach lamps beyond
+  direct radio range, not just immediate neighbours. *Not* relayed (single-hop):
+  the transient unicast `OVERRIDE_*`/`RESTORE_*` paint frames (addressed, with
+  driver-level retries) and `WISP_CLAIM`.
+- **Receive-range protocol versioning** (see `networking.md` and the protocol
+  lock-in in `CLAUDE.md`): we broadcast `PROTOCOL_VERSION_EMIT` but parse a *range*
   `[RX_MIN, RX_MAX]`, so the fleet can receive a newer wire format before it
   emits one — the safe path for a multi-version OTA wave.
 
@@ -78,7 +81,8 @@ protocol layered on top.
   any reliable transfer (OTA) needs its own recovery (REQ/NAK) + dedup. Loss is
   scattered and silent.
 - **No routing.** Reach beyond one hop is *only* via explicit gossip relay
-  (dedup-ringed), which we apply sparingly (events, palette) — not to presence.
+  (dedup-ringed), applied per message type — presence, control ops, wisp
+  beacons, and events relay; the transient unicast paint frames do not.
 - **BLE coexistence on one radio.** ESP-NOW airtime competes with BLE; during
   OTA we explicitly pause the BLE radio (quiet mode) to give the transfer the
   antenna.
@@ -88,6 +92,6 @@ protocol layered on top.
 
 ## References
 
-- `docs/dev/mesh-api.md` — authoritative wire-format reference.
+- `docs/dev/networking.md` — authoritative wire-format reference.
 - `software/lamp-os/src/components/network/lamp_protocol.hpp` (+ wisp mirror).
 - ADR 0002 — OTA over this mesh.

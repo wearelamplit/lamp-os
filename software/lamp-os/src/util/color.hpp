@@ -11,9 +11,12 @@ namespace lamp {
 class Color {
  public:
   uint8_t r, g, b, w;
-  Color();
-  Color(uint8_t inR, uint8_t inG, uint8_t inB, uint8_t inW);
-  bool operator==(const Color &inColor) const;
+  constexpr Color() : r(0), g(0), b(0), w(0) {}
+  constexpr Color(uint8_t inR, uint8_t inG, uint8_t inB, uint8_t inW)
+      : r(inR), g(inG), b(inB), w(inW) {}
+  constexpr bool operator==(const Color &inColor) const {
+    return r == inColor.r && g == inColor.g && b == inColor.b && w == inColor.w;
+  }
 };
 
 /**

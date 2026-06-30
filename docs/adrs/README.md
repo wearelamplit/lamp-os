@@ -6,17 +6,19 @@ the old `main`-branch system. Each records the *context/forces*, the *decision*,
 the *alternatives rejected*, and the *consequences we live with* — so future
 changes start from "why was it this way," not a blank slate.
 
-Format: one file per decision, numbered `NNNN-short-title.md`. Status is
-`Accepted` / `Superseded by NNNN` / `Proposed`. Keep them short and honest about
-the costs, not just the wins.
+Format: one file per decision, numbered `NNNN-short-title.md`. An ADR is
+accepted by definition — that's what a decision record is — so there's no
+status line; if one is later superseded, note it inline and link the
+replacement. Keep them short and honest about the costs, not just the wins.
 
 ## Index
 
-| # | Title | Status |
-|---|---|---|
-| [0001](0001-esp-now-mesh-networking.md) | ESP-NOW broadcast mesh for lamp-to-lamp networking | Accepted |
-| [0002](0002-ota-over-mesh.md) | Firmware OTA over the ESP-NOW mesh (signed gossip + upfront-erase) | Accepted |
-| [0003](0003-dual-core-concurrency-model.md) | Dual-core concurrency model (Core 0 radio / Core 1 loop) | Accepted |
+| # | Title |
+|---|---|
+| [0001](0001-esp-now-mesh-networking.md) | ESP-NOW broadcast mesh for lamp-to-lamp networking |
+| [0002](0002-ota-over-mesh.md) | Firmware OTA over the ESP-NOW mesh (signed gossip + upfront-erase) |
+| [0003](0003-dual-core-concurrency-model.md) | Dual-core concurrency model (Core 0 radio / Core 1 loop) |
+| [0004](0004-config-decomposition.md) | Config decomposition: model / codec / store / façade |
 
 ## Candidate ADRs (not yet written — pick which are worth capturing)
 

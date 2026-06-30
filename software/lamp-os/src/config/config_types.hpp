@@ -10,6 +10,14 @@
 
 namespace lamp {
 
+// Class-default colors for an unconfigured lamp (empty or corrupt NVS). Both
+// are low-power: a purple base stem, and a warm white driven by the shade's
+// dedicated W channel rather than full RGB. applyDefaults() overwrites a
+// single-entry vector still holding one of these with the variant's injected
+// color, so a configured lamp never matches.
+constexpr Color kBaseDefaultColor(0x30, 0x07, 0x83, 0x00);
+constexpr Color kShadeDefaultColor(0x00, 0x00, 0x00, 0xFF);
+
 /**
  * @brief Social personality mode — tunes how often + how eagerly the lamp
  *        greets nearby peers via SocialBehavior. Stored as uint8_t for
@@ -71,7 +79,7 @@ class ShadeSettings {
   uint8_t px = 0;  // 0 = unset; applyDefaults fills it from the variant default. See resolveConfiguredPx.
   uint8_t bpp = 4;
   std::string byteOrder = "";
-  std::vector<Color> colors = {Color(0x00, 0x00, 0x00, 0xFF)};
+  std::vector<Color> colors = {kShadeDefaultColor};
   bool colorsEditable = true;  // Emitted in asBaseJson/asShadeJson; app hides color picker when false.
 };
 
@@ -89,7 +97,7 @@ class BaseSettings {
   uint8_t px = 0;  // 0 = unset; applyDefaults fills it from the variant default. See resolveConfiguredPx.
   uint8_t bpp = 4;
   std::string byteOrder = "";
-  std::vector<Color> colors = {Color(0x30, 0x07, 0x83, 0x00)};
+  std::vector<Color> colors = {kBaseDefaultColor};
   std::vector<uint8_t> knockoutPixels = std::vector<uint8_t>(50, (uint8_t)100);
   uint8_t ac = 0;
   bool colorsEditable = true;  // Emitted in asBaseJson/asShadeJson; app hides color picker when false.

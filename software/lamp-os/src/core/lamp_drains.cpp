@@ -62,7 +62,7 @@ namespace {
 bool      commitDirty = false;
 uint32_t  lastCommitSignalMs = 0;
 uint32_t  lastPersistedHash = 0;  // FNV-1a of last successfully persisted serialized JSON
-constexpr uint32_t kCommitFlushIdleMs = 1500;
+constexpr uint32_t kCommitFlushIdleMs = 2500;
 
 uint32_t fnv1aHash(const String& s) {
   uint32_t h = 2166136261u;
@@ -216,7 +216,7 @@ void Lamp::drainExpressionOp() {
   }
 }
 
-// CHAR_COMMIT drain. Debounced 1500 ms after the last commit signal, with
+// CHAR_COMMIT drain. Debounced 2500 ms after the last commit signal, with
 // hash-dedup against the last persisted snapshot and a force-flush path for
 // BLE disconnect. Must run AFTER all live-preview drains so the snapshot it
 // hashes is current; runs BEFORE the section-cache push at the tail.
@@ -301,17 +301,13 @@ void Lamp::drainSettingsBlob() {
 #ifdef LAMP_DEBUG
       Serial.println("[loop] settingsBlob: factoryReset sentinel, wiping NVS");
 #endif
-      if (!prefs.begin("lamp", false)) {
-#ifdef LAMP_DEBUG
-        Serial.println("[nvs] prefs.begin failed (factory reset)");
-#endif
+      if (config.factoryReset()) {
+        ble_control::notifyStateChange();
+        lamp::fadeOutRebootRequested = true;
       } else {
-        bool cleared = prefs.clear();
-        prefs.end();
-        if (cleared) {
-          ble_control::notifyStateChange();
-          lamp::fadeOutRebootRequested = true;
-        }
+#ifdef LAMP_DEBUG
+        Serial.println("[nvs] factory reset failed");
+#endif
       }
     } else if (firmwareReceiver.isInProgress()) {
       // OTA in progress — a NVS write here would compete with the OTA
@@ -340,7 +336,7 @@ void Lamp::drainSettingsBlob() {
 }
 
 // Disposition map writes — drained AFTER settings_blob so both writers
-// serialise against the shared `prefs` instance on this core. The BLE
+// serialise against the shared config store on this core. The BLE
 // callback only memcpys into the pending slot (Core 0); persistence +
 // map rebuild happen here on Core 1. No reboot, no auth re-check — the
 // BLE callback already verified isAuthed before posting.

@@ -60,7 +60,7 @@ void main() {
     test('encryptOp → decryptOpForTesting yields the original JSON', () async {
       final salt = uuidSaltLE16(BleUuids.wifiOp);
       final ct = await LampCrypto.encryptOp(
-          op: {'op': 'connect', 'ssid': 'home', 'password': 'pw'},
+          op: {'op': 'scan', 'ssid': 'home'},
           password: 'sekret',
           saltUuid16: salt,
           charShortName: 'wifiOp');
@@ -70,7 +70,7 @@ void main() {
           saltUuid16: salt,
           charShortName: 'wifiOp');
       expect(jsonDecode(utf8.decode(plain)),
-          {'op': 'connect', 'ssid': 'home', 'password': 'pw'});
+          {'op': 'scan', 'ssid': 'home'});
     });
 
     test('wrong password fails to decrypt', () async {
