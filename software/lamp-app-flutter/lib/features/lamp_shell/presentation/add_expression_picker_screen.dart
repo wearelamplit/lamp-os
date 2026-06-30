@@ -191,7 +191,7 @@ class _ExpressionCard extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
     final disabledOpacity = taken ? 0.35 : 1.0;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
       child: Material(
         color: colorScheme.surfaceContainer,
         borderRadius: BorderRadius.circular(AppRadius.card),
@@ -209,7 +209,7 @@ class _ExpressionCard extends StatelessWidget {
               child: Row(
                 children: [
                   Container(
-                    width: 44,
+                    width: 44, // deliberate dimension, not spacing
                     height: 44,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
@@ -217,7 +217,7 @@ class _ExpressionCard extends StatelessWidget {
                     ),
                     child: Icon(meta.icon, color: colorScheme.primary),
                   ),
-                  const SizedBox(width: 14),
+                  const SizedBox(width: AppSpace.md),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -229,9 +229,9 @@ class _ExpressionCard extends StatelessWidget {
                               const SizedBox(width: AppSpace.sm),
                               Container(
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 2),
+                                    horizontal: AppSpace.sm, vertical: 2),
                                 decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(999),
+                                  borderRadius: BorderRadius.circular(999), // pill shape, not spacing
                                   color: colorScheme.onSurfaceVariant
                                       .withValues(alpha: 0.2),
                                 ),

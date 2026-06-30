@@ -183,13 +183,13 @@ class _ActionCard extends StatelessWidget {
           Row(
             children: [
               Icon(icon, color: colorScheme.primary, size: 22),
-              const SizedBox(width: 10),
+              const SizedBox(width: AppSpace.md),
               Expanded(
                 child: Text(title, style: textTheme.titleMedium),
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: AppSpace.md),
           Text(
             body,
             style: textTheme.bodySmall?.copyWith(
@@ -223,7 +223,7 @@ class _ActionCard extends StatelessWidget {
             },
             borderRadius: BorderRadius.circular(AppSpace.sm),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: AppSpace.sm),
+              padding: const EdgeInsets.symmetric(horizontal: AppSpace.md, vertical: AppSpace.sm),
               decoration: BoxDecoration(
                 color: colorScheme.surface,
                 borderRadius: BorderRadius.circular(AppSpace.sm),

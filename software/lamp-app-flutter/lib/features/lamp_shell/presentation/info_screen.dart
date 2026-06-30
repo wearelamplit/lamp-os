@@ -196,7 +196,7 @@ class _LamplitWordmark extends StatelessWidget {
           colorFilter: ColorFilter.mode(colorScheme.onSurface, BlendMode.srcIn),
           semanticsLabel: 'Lamplit logo',
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: AppSpace.md),
         Text(
           'Lamplit Art Society',
           style: TextStyle(
