@@ -248,7 +248,7 @@ class _ExpressionTile extends ConsumerWidget {
             child: Row(
               children: [
                 Container(
-                  width: 36,
+                  width: 36, // deliberate dimension, not spacing
                   height: 36,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
@@ -258,7 +258,7 @@ class _ExpressionTile extends ConsumerWidget {
                   child: Icon(meta?.icon ?? Icons.auto_awesome,
                       size: 18, color: colorScheme.primary),
                 ),
-                const SizedBox(width: 14),
+                const SizedBox(width: AppSpace.md),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,

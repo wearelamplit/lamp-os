@@ -136,7 +136,7 @@ class SocialScreen extends ConsumerWidget {
         ),
         const SizedBox(height: AppSpace.lg),
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
+          padding: const EdgeInsets.symmetric(horizontal: AppSpace.xs),
           child: Text(
             'Lamps notice the company they keep. How this one greets, '
             'glows, and settles shifts a little with the lamps it meets — '
@@ -149,7 +149,7 @@ class SocialScreen extends ConsumerWidget {
         ),
         const SizedBox(height: AppSpace.lg),
         const SectionHeader('Nearby lamps'),
-        const SizedBox(height: 4),
+        const SizedBox(height: AppSpace.xs),
         if (!nearbyLoaded)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: AppSpace.xl),
@@ -279,7 +279,7 @@ class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
             : Colors.transparent,
         borderRadius: BorderRadius.circular(6),
       ),
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+      padding: const EdgeInsets.symmetric(vertical: AppSpace.md, horizontal: AppSpace.sm),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -297,7 +297,7 @@ class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
                   base: Color(0xFF000000 | row.baseRgb),
                   size: 22,
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: AppSpace.md),
                 Expanded(
                   child: Text(
                     row.name,
@@ -342,7 +342,7 @@ class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
             // BLE read of CHAR_SOCIAL_DISPOSITIONS still in flight —
             // hold the slider in its slot but blank until value lands,
             // so the row doesn't paint at neutral then snap to actual.
-            const SizedBox(height: 48)
+            const SizedBox(height: 48) // deliberate dimension, not spacing
           else
             Row(
               children: [
@@ -421,7 +421,7 @@ class _PersonalityButton extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(icon, color: fg, size: 24),
-                const SizedBox(height: 4),
+                const SizedBox(height: AppSpace.xs),
                 Text(
                   label,
                   style: TextStyle(

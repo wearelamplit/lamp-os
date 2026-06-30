@@ -1,6 +1,7 @@
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/back_button_leading.dart';
 import '../../../core/widgets/friendly_error.dart';
 import '../../inventory/application/inventory_notifier.dart';
@@ -148,7 +149,7 @@ class _KnockoutScreenState extends ConsumerState<KnockoutScreen> {
           title: Text('Pixel Knockout · $name'),
           actions: [
             Padding(
-              padding: const EdgeInsets.only(right: 16),
+              padding: const EdgeInsets.only(right: AppSpace.lg),
               child: Center(
                 child: Text(
                   '$knockoutCount edited',
@@ -235,7 +236,7 @@ class _KnockoutScreenState extends ConsumerState<KnockoutScreen> {
                 SafeArea(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 8),
+                        horizontal: AppSpace.lg, vertical: AppSpace.sm),
                     child: Row(
                       children: [
                         // Mental-model fix (audit ux-H5): the OLD "Cancel"
@@ -306,7 +307,7 @@ class _PixelBar extends ConsumerWidget {
       height: _KnockoutScreenState._rowHeight,
       child: Padding(
         padding: const EdgeInsets.symmetric(
-            horizontal: _KnockoutScreenState._hPadding, vertical: 4),
+            horizontal: _KnockoutScreenState._hPadding, vertical: AppSpace.xs),
         child: Row(
           children: [
             SizedBox(
