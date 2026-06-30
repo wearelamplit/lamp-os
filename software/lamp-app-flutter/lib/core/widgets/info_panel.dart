@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_spacing.dart';
+
 /// Small inline callout used to surface contextual help / explanations
 /// inside settings forms. Ported from the Vue app's `InfoPanel.vue`:
 /// linear gradient on aurora-blue, left border accent, fog-grey body text.
+///
+/// No horizontal margin: callers place it inside an already-padded list, so
+/// it inherits the parent inset and stays flush with sibling cards/content.
 class InfoPanel extends StatelessWidget {
   const InfoPanel({super.key, required this.child});
   final Widget child;
@@ -11,8 +16,9 @@ class InfoPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      margin: const EdgeInsets.symmetric(vertical: AppSpace.sm),
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpace.md, vertical: AppSpace.md),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
