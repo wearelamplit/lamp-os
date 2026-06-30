@@ -12,6 +12,7 @@ ESP32-based smart-lamp fleet. Three components:
   status beacon. Build env `seeed_xiao_esp32_c6`.
 - **`software/lamp-app-flutter/`**, iOS/Android control app (Flutter).
   Talks BLE GATT to lamps; no direct mesh participation.
+  Form spacing + grouping convention: [`software/lamp-app-flutter/docs/FORM_STYLING.md`](software/lamp-app-flutter/docs/FORM_STYLING.md).
 
 ## Authoritative references
 

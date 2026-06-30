@@ -2,6 +2,11 @@ import 'package:flutter/material.dart';
 import 'lamp_card.dart';
 import 'section_header.dart';
 
+/// Groups mixed-type controls that edit one config object (e.g. count field +
+/// segmented button + nav row for one LED section). For homogeneous tap-rows
+/// use [SettingsRow] under [SettingsGroupHeading]; for a single control or
+/// full-bleed selector use loose [SectionHeader] + tokenized spacing.
+/// See `docs/FORM_STYLING.md` for the full grouping idiom and spacing rules.
 class FormSection extends StatelessWidget {
   const FormSection({required this.title, required this.children, super.key});
 
