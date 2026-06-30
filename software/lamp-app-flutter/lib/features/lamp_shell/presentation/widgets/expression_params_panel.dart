@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/theme/app_spacing.dart';
+
 /// Renders the per-type parameter UI for an expression. Replaces the
 /// previous raw JSON text field — each parameter the firmware accepts now
 /// has a labelled slider with the right units and clamp range.
@@ -110,7 +112,7 @@ class _SectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 4, top: 8),
+      padding: const EdgeInsets.only(bottom: AppSpace.xs, top: AppSpace.sm),
       child: Text(
         text,
         style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 14),
@@ -219,7 +221,7 @@ class _ParamSlider extends StatelessWidget {
           Align(
             alignment: Alignment.centerRight,
             child: Padding(
-              padding: const EdgeInsets.only(right: 4),
+              padding: const EdgeInsets.only(right: AppSpace.xs),
               child: Text(
                 format(value),
                 style: TextStyle(
@@ -298,7 +300,7 @@ class _RangeParamSlider extends StatelessWidget {
           Align(
             alignment: Alignment.centerRight,
             child: Padding(
-              padding: const EdgeInsets.only(right: 4),
+              padding: const EdgeInsets.only(right: AppSpace.xs),
               child: Text(
                 valueText,
                 style: TextStyle(

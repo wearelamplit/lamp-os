@@ -15,6 +15,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/brand_extras.dart';
 import '../../../core/widgets/info_panel.dart';
 import '../../inventory/application/inventory_notifier.dart';
@@ -116,7 +117,7 @@ class _IdleView extends StatelessWidget {
     return Row(
       children: [
         Icon(Icons.system_update_alt, color: Theme.of(context).colorScheme.onSurfaceVariant),
-        const SizedBox(width: 12),
+        const SizedBox(width: AppSpace.md),
         Expanded(
           child: Text(
             'Check for new firmware',
@@ -141,10 +142,10 @@ class _BusyView extends StatelessWidget {
     return Row(
       children: [
         const SizedBox(
-          width: 18, height: 18,
+          width: 18, height: 18, // deliberate dimension, not spacing
           child: CircularProgressIndicator(strokeWidth: 2),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: AppSpace.md),
         Expanded(
           child: Text(
             label,
@@ -180,17 +181,17 @@ class _ReadyView extends StatelessWidget {
           'Update available: v$versionString ($channel)',
           style: Theme.of(context).textTheme.titleMedium,
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: AppSpace.xs),
         Text(
           'Signed image $mb MB. Push will take ~30 seconds.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: AppSpace.md),
         Row(
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
             TextButton(onPressed: onCancel, child: const Text('Not now')),
-            const SizedBox(width: 8),
+            const SizedBox(width: AppSpace.sm),
             FilledButton(onPressed: onInstall, child: const Text('Install')),
           ],
         ),
@@ -228,9 +229,9 @@ class _StreamingView extends StatelessWidget {
             TextButton(onPressed: onCancel, child: const Text('Cancel')),
           ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: AppSpace.sm),
         LinearProgressIndicator(value: progress),
-        const SizedBox(height: 4),
+        const SizedBox(height: AppSpace.xs),
         Text(
           '$chunksSent / $totalChunks chunks',
           style: Theme.of(context).textTheme.bodySmall,
@@ -250,7 +251,7 @@ class _SucceededView extends StatelessWidget {
     return Row(
       children: [
         Icon(Icons.check_circle, color: context.brandExtras.success),
-        const SizedBox(width: 12),
+        const SizedBox(width: AppSpace.md),
         Expanded(
           child: Text(
             'Installed v$versionString. The lamp is rebooting.',
@@ -273,7 +274,7 @@ class _FailedView extends StatelessWidget {
     return Row(
       children: [
         Icon(Icons.error_outline, color: Theme.of(context).colorScheme.secondary),
-        const SizedBox(width: 12),
+        const SizedBox(width: AppSpace.md),
         Expanded(
           child: Text(
             reason,

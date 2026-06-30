@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/brand_extras.dart';
 import '../../../../core/widgets/app_sheet.dart';
 import '../../domain/lamp_color.dart';
@@ -140,7 +141,7 @@ class _ColorPickerSheetState extends State<_ColorPickerSheet> {
       ),
       child: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(AppSpace.lg),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -153,7 +154,7 @@ class _ColorPickerSheetState extends State<_ColorPickerSheet> {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: AppSpace.lg),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
@@ -166,7 +167,7 @@ class _ColorPickerSheetState extends State<_ColorPickerSheet> {
                       w: widget.bpp == 4 ? _w : 0,
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: AppSpace.md),
                   Expanded(
                     child: TextField(
                       controller: _hexCtrl,
@@ -191,7 +192,7 @@ class _ColorPickerSheetState extends State<_ColorPickerSheet> {
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: AppSpace.lg),
               _ChannelSlider(
                 label: 'Red',
                 value: _r,
@@ -218,7 +219,7 @@ class _ColorPickerSheetState extends State<_ColorPickerSheet> {
                   trackColor: context.brandExtras.warmWhite,
                   onChanged: _setW,
                 ),
-              const SizedBox(height: 12),
+              const SizedBox(height: AppSpace.md),
               Row(
                 children: [
                   TextButton(
@@ -257,11 +258,11 @@ class _ChannelSlider extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: AppSpace.xs),
       child: Row(
         children: [
           SizedBox(
-            width: 72,
+            width: 72, // deliberate dimension, not spacing
             child: Text(
               label,
               style: TextStyle(
@@ -287,7 +288,7 @@ class _ChannelSlider extends StatelessWidget {
             ),
           ),
           SizedBox(
-            width: 36,
+            width: 36, // deliberate dimension, not spacing
             child: Text(
               '$value',
               textAlign: TextAlign.right,
