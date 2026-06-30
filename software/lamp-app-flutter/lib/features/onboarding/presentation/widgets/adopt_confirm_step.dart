@@ -46,16 +46,19 @@ class _AdoptConfirmStepState extends ConsumerState<AdoptConfirmStep> {
     final lamp = ref
         .read(nearbyLampsNotifierProvider)
         .firstWhereOrNull((l) => l.id == deviceId);
-    final baseColor = lamp != null
+    // Pulse the lamp's SHADE colour (rendered on the base strip in the
+    // controller) — the shade is the more visible surface, so it reads
+    // more clearly as "this is the one".
+    final pulseColor = lamp != null
         ? LampColor(
-            r: (lamp.baseRgb >> 16) & 0xFF,
-            g: (lamp.baseRgb >> 8) & 0xFF,
-            b: lamp.baseRgb & 0xFF,
+            r: (lamp.shadeRgb >> 16) & 0xFF,
+            g: (lamp.shadeRgb >> 8) & 0xFF,
+            b: lamp.shadeRgb & 0xFF,
             w: 0,
           )
         : LampColor.black;
     try {
-      await _ctrl.start(deviceId, baseColor);
+      await _ctrl.start(deviceId, pulseColor);
       if (mounted && _error != null) setState(() => _error = null);
     } catch (e) {
       if (!mounted) return;
