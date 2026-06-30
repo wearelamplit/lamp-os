@@ -102,7 +102,11 @@ class _SetupBody extends ConsumerWidget {
         SettingsRow(
           icon: Icons.lock_outline,
           title: 'Password',
-          subtitle: 'Tap to change',
+          subtitle: switch (state.lamp.hasPassword) {
+            true => 'Protected',
+            false => 'Open · no password',
+            null => null,
+          },
           onTap: () async {
             final pw = await showPasswordPromptDialog(
               context,
@@ -118,6 +122,7 @@ class _SetupBody extends ConsumerWidget {
           icon: Icons.home_outlined,
           title: 'Home Mode',
           subtitle: homeSubtitle,
+          drillChevron: true,
           trailing: Switch(
             value: enabled,
             // Soft toggle: flips the enabled flag without wiping the saved
@@ -133,30 +138,23 @@ class _SetupBody extends ConsumerWidget {
           ),
           onTap: () => context.push(AppRoutes.homeMode(lampId)),
         ),
-        const SettingsGroupHeading('LEDs'),
-        // Per-pixel knockout now nests inside LED setup (under the base
-        // strip) — it only masks base pixels.
-        // Always-on entry point: LED count is always editable, byte-order
-        // pickers (wiring-corruption footgun) are gated inside the
-        // destination screen on the raw session-advanced flag.
         SettingsRow(
-          icon: Icons.memory,
-          title: 'LED setup',
-          subtitle:
-              'Base ${state.base.px}×${state.base.byteOrder} · '
-              'Shade ${state.shade.px}×${state.shade.byteOrder}',
-          onTap: () => context.push(AppRoutes.advancedLeds(lampId)),
-        ),
-        SettingsRow(
-          icon: Icons.wifi_tethering,
-          title: 'Boot-time setup AP',
+          icon: Icons.router_outlined,
+          title: 'Setup hotspot',
           subtitle: state.lamp.webappEnabled
-              ? 'On · 2 min after every power-cycle'
+              ? 'Broadcasts a setup network for 2 min after each power-on'
               : 'Off',
           trailing: Switch(
             value: state.lamp.webappEnabled,
             onChanged: (v) => n.setLampWebappEnabled(v),
           ),
+        ),
+        const SettingsGroupHeading('LEDs'),
+        SettingsRow(
+          icon: Icons.lightbulb_outline,
+          title: 'LED setup',
+          subtitle: 'Base ${state.base.px} · Shade ${state.shade.px} LEDs',
+          onTap: () => context.push(AppRoutes.advancedLeds(lampId)),
         ),
         // Nearby lamps (debug) — same advanced gate. Pre-fix this
         // /devices route was only reachable from the empty-state

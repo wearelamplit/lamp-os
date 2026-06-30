@@ -34,6 +34,9 @@ Future<void> seedControlBle(
   // keep their previous, narrower CHAR_LAMP_SECTION shape.
   int? fwVersion,
   String? fwChannel,
+  // Whether the lamp NVS has a password set. Null = older firmware that
+  // doesn't emit the field.
+  bool? hasPassword,
 }) async {
   // Build the firmware identity JSON tail only when both fields are set.
   // Either both should be present (post-Phase-C firmware) or both absent
@@ -41,12 +44,14 @@ Future<void> seedControlBle(
   final fwTail = (fwVersion != null && fwChannel != null)
       ? ',"fwVersion":$fwVersion,"fwChannel":"$fwChannel"'
       : '';
+  final hpTail =
+      hasPassword != null ? ',"hasPassword":$hasPassword' : '';
   ble.seedSection(
     deviceId,
     'lamp',
     Uint8List.fromList(utf8.encode(
       '{"name":"$name","brightness":$brightness,'
-      '"advancedEnabled":$advancedEnabled$fwTail}',
+      '"advancedEnabled":$advancedEnabled$fwTail$hpTail}',
     )),
   );
   ble.seedSection(

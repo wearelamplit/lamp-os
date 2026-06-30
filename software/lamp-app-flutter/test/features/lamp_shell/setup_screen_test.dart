@@ -17,25 +17,24 @@ import '../../_support/seed.dart';
 
 const _devId = 'lamp-x';
 
-Future<void> _seed(
-  InMemoryBleClient ble, {
-  String homeSsid = '',
-  bool advancedEnabled = false,
-}) =>
-    seedControlBle(
-      ble,
-      deviceId: _devId,
-      homeSsid: homeSsid,
-      advancedEnabled: advancedEnabled,
-    );
-
 Future<ProviderContainer> _makeContainer({
   String homeSsid = '',
   bool advancedEnabled = false,
+  bool? hasPassword,
+  int basePx = 35,
+  int shadePx = 38,
 }) async {
   SharedPreferences.setMockInitialValues({});
   final ble = InMemoryBleClient();
-  await _seed(ble, homeSsid: homeSsid, advancedEnabled: advancedEnabled);
+  await seedControlBle(
+    ble,
+    deviceId: _devId,
+    homeSsid: homeSsid,
+    advancedEnabled: advancedEnabled,
+    hasPassword: hasPassword,
+    basePx: basePx,
+    shadePx: shadePx,
+  );
   final c = ProviderContainer(
     overrides: [bleClientProvider.overrideWithValue(ble)],
   );
@@ -106,9 +105,9 @@ void main() {
     addTearDown(c.dispose);
     await tester.pumpWidget(_wrap(c));
     await _pumpToData(tester);
-    // LED setup + Boot-time setup AP are always on now; the rows gated
-    // behind the advanced flag (e.g. Factory reset) stay hidden by default.
-    expect(find.text('Boot-time setup AP'), findsOneWidget);
+    // LED setup + Setup hotspot are always on; rows gated on advanced
+    // (e.g. Factory reset) stay hidden by default.
+    expect(find.text('Setup hotspot'), findsOneWidget);
     expect(find.text('Factory reset'), findsNothing);
   });
 
@@ -181,5 +180,98 @@ void main() {
     // Soft toggle preserves credentials — Forget Network lives inside the
     // Home Mode pane.
     expect(home.ssid, 'home');
+  });
+
+  // --- Password status ---
+
+  testWidgets('Password row shows "Protected" when hasPassword is true',
+      (tester) async {
+    final c = await _makeContainer(hasPassword: true);
+    addTearDown(c.dispose);
+    await tester.pumpWidget(_wrap(c));
+    await _pumpToData(tester);
+    expect(find.text('Protected'), findsOneWidget);
+  });
+
+  testWidgets('Password row shows "Open · no password" when hasPassword is false',
+      (tester) async {
+    final c = await _makeContainer(hasPassword: false);
+    addTearDown(c.dispose);
+    await tester.pumpWidget(_wrap(c));
+    await _pumpToData(tester);
+    expect(find.text('Open · no password'), findsOneWidget);
+  });
+
+  testWidgets('Password row shows no status when hasPassword is null',
+      (tester) async {
+    final c = await _makeContainer(); // hasPassword defaults to null
+    addTearDown(c.dispose);
+    await tester.pumpWidget(_wrap(c));
+    await _pumpToData(tester);
+    expect(find.text('Protected'), findsNothing);
+    expect(find.text('Open · no password'), findsNothing);
+  });
+
+  // --- De-jargon ---
+
+  testWidgets('shows "Setup hotspot", not "Boot-time setup AP"', (tester) async {
+    final c = await _makeContainer();
+    addTearDown(c.dispose);
+    await tester.pumpWidget(_wrap(c));
+    await _pumpToData(tester);
+    expect(find.text('Setup hotspot'), findsOneWidget);
+    expect(find.textContaining('Boot-time setup AP'), findsNothing);
+  });
+
+  testWidgets('LED subtitle uses px counts, no byteOrder / GRB jargon',
+      (tester) async {
+    final c = await _makeContainer(basePx: 40, shadePx: 60);
+    addTearDown(c.dispose);
+    await tester.pumpWidget(_wrap(c));
+    await _pumpToData(tester);
+    expect(find.text('Base 40 · Shade 60 LEDs'), findsOneWidget);
+    expect(find.textContaining('GRB'), findsNothing);
+  });
+
+  // --- Home Mode drill chevron ---
+
+  testWidgets('Home Mode row shows both Switch and chevron_right', (tester) async {
+    final c = await _makeContainer();
+    addTearDown(c.dispose);
+    await tester.pumpWidget(_wrap(c));
+    await _pumpToData(tester);
+
+    final homeModeRow = find.ancestor(
+      of: find.text('Home Mode'),
+      matching: find.byType(Material),
+    ).first;
+
+    expect(find.descendant(of: homeModeRow, matching: find.byType(Switch)),
+        findsOneWidget);
+    expect(
+      find.descendant(
+        of: homeModeRow,
+        matching: find.byIcon(Icons.chevron_right),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  // --- Grouping order ---
+
+  testWidgets('"Setup hotspot" sits under CONNECTIVITY and above LEDS',
+      (tester) async {
+    final c = await _makeContainer();
+    addTearDown(c.dispose);
+    await tester.pumpWidget(_wrap(c));
+    await _pumpToData(tester);
+
+    final connectivityDy =
+        tester.getTopLeft(find.text('CONNECTIVITY')).dy;
+    final hotspotDy = tester.getTopLeft(find.text('Setup hotspot')).dy;
+    final ledsDy = tester.getTopLeft(find.text('LEDS')).dy;
+
+    expect(hotspotDy, greaterThan(connectivityDy));
+    expect(hotspotDy, lessThan(ledsDy));
   });
 }
