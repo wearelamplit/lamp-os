@@ -32,7 +32,7 @@ All gaps, padding, and margins use `AppSpace` tokens. All card radii use `AppRad
 
 Pick the **first** primitive that fits the content:
 
-### `FormSection(title, children)` — mixed controls, one config object
+### `FormSection(title:, children:)` — mixed controls, one config object
 Use when the card contains a cluster of different control types (text field + segmented button + nav row) that all edit one config object, e.g. the LED setup screen's Shade/Base strips.
 
 > **Gotcha:** `FormSection`'s `LampCard` has `padding: EdgeInsets.zero`. Wrap each non-self-padding child in `Padding(EdgeInsets.all(AppSpace.lg))`. Self-padding primitives (`NavRow`, `SettingsRow`) need no extra wrapper.
@@ -40,13 +40,13 @@ Use when the card contains a cluster of different control types (text field + se
 ```dart
 // ✓ DO
 FormSection(
-  'LED Setup',
-  [
+  title: 'LED Setup',
+  children: [
     Padding(
       padding: EdgeInsets.all(AppSpace.lg),
       child: CountField(...),
     ),
-    NavRow(label: 'Personality', ...),  // self-padding, no wrapper needed
+    NavRow(title: 'Personality', ...),  // self-padding, no wrapper needed
   ],
 )
 

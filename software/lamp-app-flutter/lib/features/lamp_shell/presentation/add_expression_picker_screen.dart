@@ -247,7 +247,7 @@ class _ExpressionCard extends StatelessWidget {
                             ],
                           ],
                         ),
-                        const SizedBox(height: 2),
+                        const SizedBox(height: 2), // deliberate dimension, not spacing
                         Text(
                           meta.tagline,
                           style: textTheme.bodySmall?.copyWith(

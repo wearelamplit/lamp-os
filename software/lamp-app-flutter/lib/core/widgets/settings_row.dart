@@ -60,7 +60,7 @@ class SettingsRow extends StatelessWidget {
                   children: [
                     Text(title, style: textTheme.titleMedium),
                     if (subtitle != null) ...[
-                      const SizedBox(height: 2),
+                      const SizedBox(height: 2), // deliberate dimension, not spacing
                       Text(subtitle!, style: textTheme.bodySmall),
                     ],
                   ],

@@ -330,7 +330,7 @@ class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
           ),
           if (!hasBdAddr)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
+              padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
               child: Text(
                 'Waiting for peer info…',
                 style: textTheme.bodySmall?.copyWith(

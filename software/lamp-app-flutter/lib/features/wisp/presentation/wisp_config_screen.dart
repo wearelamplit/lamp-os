@@ -713,7 +713,7 @@ class _SourcePicker extends StatelessWidget {
         if (!auroraEnabled) ...[
           const SizedBox(height: AppSpace.sm),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 2), // deliberate dimension, not spacing
             child: Text(
               "No Aurora zone heard yet. Once a zone shows up on the "
               "mesh, you'll be able to follow it.",
