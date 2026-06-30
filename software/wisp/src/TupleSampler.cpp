@@ -62,8 +62,8 @@ bool nearlyEqualColor(const RGBW& a, const RGBW& b) {
          chDelta(a.w, b.w) < kDeltaThreshold;
 }
 
-// Dedupe adjacent near-identical stops. No padding/interpolation — discrete
-// picking means each surface gets one of the authored colors verbatim.
+// Dedupe adjacent near-identical stops. Stops are gradient control points;
+// colors between them are interpolated when sampling.
 std::vector<RGBW> dedupe(const std::vector<RGBW>& in) {
   std::vector<RGBW> out;
   out.reserve(in.size());
@@ -72,6 +72,32 @@ std::vector<RGBW> dedupe(const std::vector<RGBW>& in) {
       out.push_back(c);
     }
   }
+  return out;
+}
+
+// Linear-interpolate two 0-255 channels at fixed-point fraction frac in
+// [0, 2^32). All-unsigned so the Dart port matches byte for byte.
+uint8_t lerp8(uint8_t a, uint8_t b, uint32_t frac) {
+  const uint64_t inv = 0x100000000ULL - static_cast<uint64_t>(frac);
+  return static_cast<uint8_t>(
+      ((static_cast<uint64_t>(a) * inv +
+        static_cast<uint64_t>(b) * static_cast<uint64_t>(frac)) >> 32));
+}
+
+// Sample the palette as a continuous gradient at fixed-point position pos in
+// [0, 2^32): stops are control points, colors between them are interpolated.
+RGBW sampleGradientAt(const std::vector<RGBW>& stops, uint32_t pos) {
+  const uint32_t n = static_cast<uint32_t>(stops.size());
+  if (n == 1) return stops[0];
+  const uint64_t scaled = static_cast<uint64_t>(pos) * (n - 1);
+  const uint32_t i = static_cast<uint32_t>(scaled >> 32);
+  const uint32_t frac = static_cast<uint32_t>(scaled & 0xFFFFFFFFu);
+  if (i >= n - 1) return stops[n - 1];
+  RGBW out;
+  out.r = lerp8(stops[i].r, stops[i + 1].r, frac);
+  out.g = lerp8(stops[i].g, stops[i + 1].g, frac);
+  out.b = lerp8(stops[i].b, stops[i + 1].b, frac);
+  out.w = lerp8(stops[i].w, stops[i + 1].w, frac);
   return out;
 }
 
@@ -89,28 +115,23 @@ ColorTuple sampleTupleForMac(const CurrentPalette& palette,
   auto stops = dedupe(raw);
   if (stops.empty()) return out;
 
-  constexpr uint32_t kGolden   = 0x9E3779B9u;  // idxB salt (decorrelates from idxA)
+  constexpr uint32_t kGolden   = 0x9E3779B9u;  // posB salt (decorrelates from posA)
   constexpr uint32_t kSwapSalt = 0xCAFEBABEu;  // independent third hash space
+  constexpr uint32_t kMinGap   = 0x40000000u;  // 0.25 of the gradient span
 
-  const uint32_t n = static_cast<uint32_t>(stops.size());
-  uint32_t idxA = hashMac(mac, 0u          ^ shuffleSeed) % n;
-  uint32_t idxB = hashMac(mac, kGolden     ^ shuffleSeed) % n;
+  uint32_t posA = hashMac(mac, 0u       ^ shuffleSeed);
+  uint32_t posB = hashMac(mac, kGolden  ^ shuffleSeed);
 
-  // If there's more than one distinct color and the hashes collided, nudge
-  // idxB so each surface gets a different authored color. Deterministic per
-  // MAC because (idxB + 1) % n is purely a function of n and idxB.
-  if (n >= 2 && idxA == idxB) {
-    idxB = (idxB + 1) % n;
+  // Keep the two positions >= kMinGap apart so base and shade are visually
+  // distinct. Deterministic per MAC.
+  const uint32_t d = posA > posB ? posA - posB : posB - posA;
+  if (d < kMinGap) {
+    posB = (posA <= 0xFFFFFFFFu - kMinGap) ? posA + kMinGap : posA - kMinGap;
   }
 
-  // Per-MAC swap of base/shade assignment. Without this, surface[0] always
-  // got the idxA color and surface[1] always got idxB — visually, the fleet
-  // pivoted around whichever direction the hash distributions happened to
-  // bias, producing patterns like "all blue tops, all red bottoms" on a
-  // 2-color palette. Splitting ~50/50 across the fleet breaks that.
   const bool swap = (hashMac(mac, kSwapSalt ^ shuffleSeed) & 1u) != 0u;
-  const RGBW& base  = swap ? stops[idxB] : stops[idxA];
-  const RGBW& shade = swap ? stops[idxA] : stops[idxB];
+  const RGBW base  = sampleGradientAt(stops, swap ? posB : posA);
+  const RGBW shade = sampleGradientAt(stops, swap ? posA : posB);
 
   out.r[0] = base.r;  out.g[0] = base.g;  out.b[0] = base.b;  out.w[0] = base.w;
   out.r[1] = shade.r; out.g[1] = shade.g; out.b[1] = shade.b; out.w[1] = shade.w;

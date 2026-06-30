@@ -94,6 +94,26 @@ List<int>? meshMacFromBdAddr(String bdAddr) {
   return out;
 }
 
+int _lerp8(int a, int b, int frac) {
+  final inv = 0x100000000 - frac;
+  return (a * inv + b * frac) >> 32;
+}
+
+LampColor _sampleGradientAt(List<LampColor> stops, int pos) {
+  final n = stops.length;
+  if (n == 1) return stops[0];
+  final scaled = pos * (n - 1);
+  final i = scaled >> 32;
+  final frac = scaled & 0xFFFFFFFF;
+  if (i >= n - 1) return stops[n - 1];
+  return LampColor(
+    r: _lerp8(stops[i].r, stops[i + 1].r, frac),
+    g: _lerp8(stops[i].g, stops[i + 1].g, frac),
+    b: _lerp8(stops[i].b, stops[i + 1].b, frac),
+    w: _lerp8(stops[i].w, stops[i + 1].w, frac),
+  );
+}
+
 /// Run the same per-MAC sampling the wisp runs. Returns null when the
 /// palette is empty (no authored colors to pick from).
 ///
@@ -112,12 +132,16 @@ TuplePrediction? predictTuple({
 
   const int kGolden   = 0x9E3779B9;
   const int kSwapSalt = 0xCAFEBABE;
-  final int n = stops.length;
-  int idxA = _hashMac(mac, 0          ^ shuffleSeed) % n;
-  int idxB = _hashMac(mac, kGolden    ^ shuffleSeed) % n;
-  if (n >= 2 && idxA == idxB) idxB = (idxB + 1) % n;
+  const int kMinGap   = 0x40000000;
+
+  int posA = _hashMac(mac, 0       ^ shuffleSeed);
+  int posB = _hashMac(mac, kGolden ^ shuffleSeed);
+  final d = posA > posB ? posA - posB : posB - posA;
+  if (d < kMinGap) {
+    posB = (posA <= 0xFFFFFFFF - kMinGap) ? posA + kMinGap : posA - kMinGap;
+  }
   final swap = (_hashMac(mac, kSwapSalt ^ shuffleSeed) & 1) != 0;
-  final base  = swap ? stops[idxB] : stops[idxA];
-  final shade = swap ? stops[idxA] : stops[idxB];
+  final base  = _sampleGradientAt(stops, swap ? posB : posA);
+  final shade = _sampleGradientAt(stops, swap ? posA : posB);
   return TuplePrediction(base: base, shade: shade);
 }
