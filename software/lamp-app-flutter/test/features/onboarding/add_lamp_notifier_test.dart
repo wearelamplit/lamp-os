@@ -299,6 +299,77 @@ void main() {
         reason: 'timeout must surface as recoverable connectFailed');
   });
 
+  test('reset() cancels the in-flight verify — no state write after leaving',
+      () async {
+    // Regression for the orphaned-verify bug: the provider is keepAlive, so
+    // `ref.mounted` never trips in production. Leaving the wizard mid-reconnect
+    // fires reset() (via the shell's dispose); the fire-and-forget verify must
+    // observe that and bail, not write ready/error onto — or keep hammering
+    // BLE for — a wizard the user already left.
+    AddLampNotifier.verifyConnectTimeout = const Duration(milliseconds: 20);
+    final ble = _HangingBleClient(hangOn: _HangOp.connect);
+    final c = ProviderContainer(
+      overrides: [bleClientProvider.overrideWithValue(ble)],
+    );
+    addTearDown(c.dispose);
+    await c.read(inventoryNotifierProvider.future);
+    await c.read(activeLampNotifierProvider.future);
+
+    final n = c.read(addLampNotifierProvider.notifier);
+    n.select('dev1');
+    n.setName('jacko');
+    n.setPassword(''); // skip path: the reconnect is the whole verify
+    await n.submit();
+    final inFlight = n.verifyDone; // capture before reset() nulls it
+
+    // User backs out mid-reconnect → shell dispose → reset().
+    n.reset();
+    await inFlight; // orphan must bail cleanly, not resurrect state
+
+    final s = c.read(addLampNotifierProvider);
+    expect(s.status, AddLampStatus.idle,
+        reason: 'cancelled verify must not flip status to ready/error');
+    expect(s.step, AddLampStep.scan);
+    expect(s.deviceId, isEmpty,
+        reason: 'reset cleared the wizard; the orphan must not un-reset it');
+  });
+
+  test('retryVerify recovers to ready once the lamp comes back', () async {
+    // The QA-flagged recoverable path: first verify exhausts to connectFailed,
+    // then the lamp answers and the user taps Retry → status reaches ready.
+    AddLampNotifier.verifyConnectTimeout = const Duration(milliseconds: 20);
+    AddLampNotifier.reconnectAttempts = 3;
+    addTearDown(() => AddLampNotifier.reconnectAttempts = 12);
+    final ble = _RecoveringBleClient();
+    final c = ProviderContainer(
+      overrides: [bleClientProvider.overrideWithValue(ble)],
+    );
+    addTearDown(c.dispose);
+    await c.read(inventoryNotifierProvider.future);
+    await c.read(activeLampNotifierProvider.future);
+
+    final n = c.read(addLampNotifierProvider.notifier);
+    n.select('dev1');
+    n.setName('jacko');
+    n.setPassword(''); // skip path
+    await n.submit();
+    await n.verifyDone!.timeout(const Duration(seconds: 5));
+
+    var s = c.read(addLampNotifierProvider);
+    expect(s.status, AddLampStatus.error);
+    expect(s.error, AddLampError.connectFailed);
+
+    // Lamp is back; Retry must reach ready.
+    ble.recovered = true;
+    n.retryVerify();
+    await n.verifyDone!.timeout(const Duration(seconds: 5));
+
+    s = c.read(addLampNotifierProvider);
+    expect(s.status, AddLampStatus.ready,
+        reason: 'Retry after the lamp recovers must reach ready');
+    expect(s.error, AddLampError.none);
+  });
+
   test('add(deviceId, name) skips wizard and adds to inventory', () async {
     final ble = InMemoryBleClient();
     final c = ProviderContainer(
@@ -371,6 +442,65 @@ class _HangingBleClient implements BleClient {
     if (hangOn == _HangOp.read) return Completer<Uint8List>().future;
     return Future.value(Uint8List(0));
   }
+
+  @override
+  Future<void> write(
+    String d,
+    String s,
+    String c,
+    Uint8List v, {
+    bool withoutResponse = false,
+    bool allowLongWrite = false,
+  }) async {}
+
+  @override
+  Stream<Uint8List> subscribe(String d, String s, String c) =>
+      const Stream.empty();
+
+  @override
+  Stream<bool> watchConnected(String deviceId) =>
+      Stream.value(_connected.contains(deviceId));
+
+  @override
+  Future<void> cycleAdapter(String deviceId) async {
+    _connected.remove(deviceId);
+  }
+}
+
+/// Fails every verify-phase reconnect until [recovered] is set, then connects
+/// cleanly — models the lamp finally coming back after the user taps Retry.
+/// The step-0 claim connect (first call) always succeeds.
+class _RecoveringBleClient implements BleClient {
+  bool recovered = false;
+  int _connectCount = 0;
+  final Set<String> _connected = {};
+
+  @override
+  Future<void> prewarm(String deviceId) async {}
+
+  @override
+  Future<void> connect(String deviceId) async {
+    _connectCount++;
+    if (_connectCount > 1 && !recovered) {
+      throw const BleDisconnectedException('dev1');
+    }
+    _connected.add(deviceId);
+  }
+
+  @override
+  Future<void> disconnect(String deviceId) async {
+    _connected.remove(deviceId);
+  }
+
+  @override
+  bool isConnected(String deviceId) => _connected.contains(deviceId);
+
+  @override
+  Future<Uint8List> read(String d, String s, String c) async => Uint8List(0);
+
+  @override
+  Future<Uint8List> readSection(String deviceId, String name) async =>
+      Uint8List(0);
 
   @override
   Future<void> write(

@@ -70,6 +70,18 @@ class AddLampNotifier extends _$AddLampNotifier {
   @visibleForTesting
   Future<void>? verifyDone;
 
+  /// Cancellation token for the fire-and-forget verify. The provider is
+  /// `keepAlive: true`, so `ref.mounted` never trips in production — leaving
+  /// the wizard fires `reset()` (via the shell's dispose), which bumps this
+  /// generation so any in-flight reconnect loop bails instead of writing
+  /// state onto — or hammering BLE for — a wizard the user already left.
+  int _verifyGen = 0;
+
+  /// Still the live verify generation AND the provider is mounted. Checked at
+  /// every await boundary in the background verify so a cancelled or
+  /// superseded run stops touching state and the BLE stack.
+  bool _active(int gen) => ref.mounted && gen == _verifyGen;
+
   @override
   AddLampState build() => const AddLampState();
 
@@ -216,19 +228,21 @@ class AddLampNotifier extends _$AddLampNotifier {
     // their lamp while it restarts. The pane's Continue enables when status
     // flips to `ready`; failures surface inline (or route back for a wrong
     // password).
-    verifyDone = _reconnectAndVerify();
+    verifyDone = _reconnectAndVerify(++_verifyGen);
   }
 
   /// Reboot-wait → reconnect-with-retry → (password path only) auth + a
   /// section-read probe to confirm the password stuck. Success flips status to
   /// `ready`. A wrong password routes back to the password step; an
   /// unreachable lamp stays on the Meet pane with a recoverable error + Retry.
-  Future<void> _reconnectAndVerify() async {
+  Future<void> _reconnectAndVerify(int gen) async {
     final ble = ref.read(bleClientProvider);
     final isSkipPath = state.password.isEmpty;
     try {
       await Future<void>.delayed(isSkipPath ? verifySkipDelay : verifyDelay);
-      await _reconnectWithRetry(ble);
+      if (!_active(gen)) return;
+      await _reconnectWithRetry(ble, gen);
+      if (!_active(gen)) return;
       if (!isSkipPath) {
         // Empty-password lamps are open-access, so there's nothing to verify.
         // For a real password, auth then read the auth-gated lamp section:
@@ -244,7 +258,7 @@ class AddLampNotifier extends _$AddLampNotifier {
         if (j['name'] == null) throw const FormatException('auth-rejected');
       }
     } on FormatException catch (_) {
-      if (!ref.mounted) return;
+      if (!_active(gen)) return;
       state = state.copyWith(
         status: AddLampStatus.error,
         step: AddLampStep.password,
@@ -255,23 +269,23 @@ class AddLampNotifier extends _$AddLampNotifier {
     } catch (_) {
       // Couldn't get the lamp back within the retry window — stay on the Meet
       // pane and let the user Retry rather than dumping them out.
-      if (!ref.mounted) return;
+      if (!_active(gen)) return;
       state = state.copyWith(
         status: AddLampStatus.error,
         error: AddLampError.connectFailed,
       );
       return;
     }
-    if (!ref.mounted) return;
+    if (!_active(gen)) return;
     state = state.copyWith(status: AddLampStatus.ready);
   }
 
   /// Disconnect the stale handle, then connect with backoff until the rebooted
   /// lamp answers or we exhaust [reconnectAttempts]. A single connect fires
   /// while the lamp is still down and fails GATT-133; the loop is the fix.
-  Future<void> _reconnectWithRetry(BleClient ble) async {
+  Future<void> _reconnectWithRetry(BleClient ble, int gen) async {
     for (var attempt = 0;; attempt++) {
-      if (!ref.mounted) return;
+      if (!_active(gen)) return;
       // flutter_blue_plus may still believe the pre-reboot link is up (it only
       // notices via LINK_SUPERVISION_TIMEOUT). Drop it so connect() isn't a
       // no-op against a dead handle.
@@ -298,7 +312,7 @@ class AddLampNotifier extends _$AddLampNotifier {
       error: AddLampError.none,
       errorMessage: null,
     );
-    verifyDone = _reconnectAndVerify();
+    verifyDone = _reconnectAndVerify(++_verifyGen);
   }
 
   /// Meet-pane Continue: persist the lamp to inventory, make it active, and
@@ -349,5 +363,12 @@ class AddLampNotifier extends _$AddLampNotifier {
     }
   }
 
-  void reset() => state = const AddLampState();
+  void reset() {
+    // Cancel any in-flight background verify (via the generation bump) so it
+    // can't write state onto — or keep hammering BLE for — the wizard the
+    // user just left. Fired from the shell's dispose on every exit path.
+    _verifyGen++;
+    verifyDone = null;
+    state = const AddLampState();
+  }
 }
