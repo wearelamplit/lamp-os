@@ -208,5 +208,27 @@ void main() {
       expect(s.currentPalette, isNotNull);
       expect(s.currentPalette!.length, 2);
     });
+
+    test('driftIntervalMs and driftFadePct parse from JSON', () {
+      final s = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","driftIntervalMs":90000,"driftFadePct":40}',
+      ));
+      expect(s.driftIntervalMs, 90000);
+      expect(s.driftFadePct, 40);
+    });
+
+    test('driftIntervalMs defaults to 120000 when absent', () {
+      final s = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF"}',
+      ));
+      expect(s.driftIntervalMs, 120000);
+    });
+
+    test('driftFadePct defaults to 50 when absent', () {
+      final s = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF"}',
+      ));
+      expect(s.driftFadePct, 50);
+    });
   });
 }
