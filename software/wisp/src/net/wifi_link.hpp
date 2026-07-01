@@ -1,13 +1,10 @@
-// WifiLink — WiFi role that follows the source mode. STA joins the external AP
-// whose creds live in the shared WispConfig store (Aurora); softAP hosts the
-// wisp's own network on the mesh channel (Manual). The ArtNet emitter gates on
-// canBroadcast() and targets broadcastIp().
+// WifiLink — hosts the wisp's softAP for pre-mesh lamps. Brought up once at
+// boot on the mesh channel and left up; the ArtNet emitter gates on
+// canBroadcast() and pins the egress netif off isAp().
 //
 // Coex: the mesh pins the radio to LAMP_ESPNOW_CHANNEL and sends ESP-NOW on
-// WIFI_IF_STA. softAP runs in WIFI_AP_STA on the same channel so the STA netif
-// (and the mesh) stays up. STA association to an external AP moves the radio to
-// that AP's channel, so mesh peers pinned to channel 11 only see broadcasts
-// when the venue AP is also on 11.
+// WIFI_IF_STA. The softAP runs in WIFI_AP_STA on the same channel, so the STA
+// netif (and the mesh) stays up and same-channel WiFi doesn't disturb ESP-NOW.
 
 #pragma once
 
@@ -32,16 +29,9 @@ class WifiLink {
   // after a setWifi op persists new creds. No-ops (with a log) if creds empty.
   void reconnect();
 
-  // STA role: drop any softAP, re-read WispConfig creds, reconnect.
-  void startSta();
-
   // softAP role on the mesh channel (WIFI_AP_STA so ESP-NOW keeps working).
   // ssid/pass are the wisp's own network, not the WispConfig STA creds.
   void startSoftAp(const char* ssid, const char* pass);
-
-  // Drop any softAP and STA association; keep the radio pinned to the mesh
-  // channel so ESP-NOW survives. canBroadcast() reads false afterwards.
-  void stop();
 
   // True when ArtNet frames can egress: STA associated, or softAP up.
   bool canBroadcast() const;
@@ -53,9 +43,6 @@ class WifiLink {
   // leases), returning the count. Zero outside AP mode. ArtNet unicasts to each
   // because WiFi broadcast is unreliable to sleepy lamps.
   size_t apClientIps(IPAddress* out, size_t maxOut) const;
-
-  // Stations currently joined to the softAP; zero outside AP mode.
-  uint8_t apStationCount() const;
 
   // Snapshot accessors. Cheap. Callable from any task.
   bool isConnected() const;

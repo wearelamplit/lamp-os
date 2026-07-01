@@ -8,25 +8,10 @@
 #include "config/zone_selector.hpp"
 #include "paint/paint_distributor.hpp"
 #include "artnet/artnet_emitter.hpp"
-#include "net/lamp_scanner.hpp"
-#include "net/stage_beacon.hpp"
-#include "net/wifi_link.hpp"
 #include "status/status_emitter.hpp"
 #include "status/status_ring.hpp"
 
 namespace wisp {
-
-namespace {
-// WPA2 needs a >=8 char password; ssid+pass+2 NULs must fit StageBeacon's
-// 26-byte budget.
-constexpr char kApSsid[] = "wisp-stage";
-constexpr char kApPass[] = "lamplight";
-
-// Old-lamp serving gate. Serve only while an old lamp is present; drop back to
-// pure mesh once it's been gone long enough.
-constexpr uint32_t kOldLampRecencyMs = 10000;
-constexpr uint32_t kOldLampTeardownMs = 45000;
-}  // namespace
 
 // Empty palette deliberately skips the update so flipping Manual -> empty
 // doesn't zero the lamps' fallback color.
@@ -109,27 +94,14 @@ void WispController::applySourceModeTransition(wisp::WispSourceMode mode) {
   switch (mode) {
     case wisp::WispSourceMode::Off:
       paint_.setPaintMode(false);
-      scanner_.stopScan();
-      serveState_ = ServeState::Idle;
-      oldLampAbsentSinceMs_ = 0;
-      wifi_.stop();
-      stage_.stop();
       Serial.println("[wisp] source=Off — broadcast RESTORE; paintMode off");
       break;
     case wisp::WispSourceMode::Manual:
       paint_.setPaintMode(true);
-      serveState_ = ServeState::Idle;
-      oldLampAbsentSinceMs_ = 0;
-      scanner_.startScan();
       pushManualPaletteToCurrent();
-      Serial.println("[wisp] source=Manual — idle, scanning for old lamps");
+      Serial.println("[wisp] source=Manual — paintMode on");
       break;
     case wisp::WispSourceMode::Aurora:
-      scanner_.stopScan();
-      serveState_ = ServeState::Idle;
-      oldLampAbsentSinceMs_ = 0;
-      wifi_.startSta();
-      stage_.refreshAdvert();
       // Clear stale palette; onAuroraPalette enables paint when a live
       // palette arrives; loop's liveness check disables it if stream drops.
       palette_.clear();
@@ -140,39 +112,6 @@ void WispController::applySourceModeTransition(wisp::WispSourceMode mode) {
       break;
   }
   renderRing();
-}
-
-void WispController::tick(uint32_t now) {
-  if (config_.sourceMode() != wisp::WispSourceMode::Manual) return;
-
-  switch (serveState_) {
-    case ServeState::Idle:
-      if (!scanner_.sawOldLampWithin(kOldLampRecencyMs)) break;
-      wifi_.startSoftAp(kApSsid, kApPass);
-      stage_.advertiseCreds(kApSsid, kApPass);
-      scanner_.stopScan();
-      serveState_ = ServeState::Serving;
-      oldLampAbsentSinceMs_ = 0;
-      Serial.println("[wisp] old lamp seen — serving softAP + stage beacon");
-      break;
-    case ServeState::Serving: {
-      const bool present = scanner_.sawOldLampWithin(kOldLampRecencyMs) ||
-                           wifi_.apStationCount() > 0;
-      if (present) {
-        oldLampAbsentSinceMs_ = 0;
-        break;
-      }
-      if (oldLampAbsentSinceMs_ == 0) oldLampAbsentSinceMs_ = now;
-      if (now - oldLampAbsentSinceMs_ < kOldLampTeardownMs) break;
-      stage_.stop();
-      wifi_.stop();
-      scanner_.startScan();
-      serveState_ = ServeState::Idle;
-      oldLampAbsentSinceMs_ = 0;
-      Serial.println("[wisp] old lamp gone — teardown softAP; pure mesh + scan");
-      break;
-    }
-  }
 }
 
 void WispController::onAuroraPalette(int zone, const Palette& p) {

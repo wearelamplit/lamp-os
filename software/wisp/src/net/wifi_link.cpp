@@ -18,12 +18,23 @@ void WifiLink::begin(WispConfig* config) {
   WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
 
-  WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t /*info*/) {
+  WiFi.onEvent([](WiFiEvent_t event, [[maybe_unused]] WiFiEventInfo_t info) {
     if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
       Serial.printf("[wifi] got IP: %s\n",
                     WiFi.localIP().toString().c_str());
     } else if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
       Serial.println("[wifi] disconnected");
+#ifdef LAMP_DEBUG
+    } else if (event == ARDUINO_EVENT_WIFI_AP_STACONNECTED) {
+      const uint8_t* m = info.wifi_ap_staconnected.mac;
+      Serial.printf("[wifi] AP station joined %02X:%02X:%02X:%02X:%02X:%02X\n",
+                    m[0], m[1], m[2], m[3], m[4], m[5]);
+    } else if (event == ARDUINO_EVENT_WIFI_AP_STAIPASSIGNED) {
+      Serial.printf("[wifi] AP station got IP %s\n",
+                    IPAddress(info.wifi_ap_staipassigned.ip.addr).toString().c_str());
+    } else if (event == ARDUINO_EVENT_WIFI_AP_STADISCONNECTED) {
+      Serial.println("[wifi] AP station left");
+#endif
     }
   });
 
@@ -57,14 +68,6 @@ void WifiLink::reconnect() {
   WiFi.begin(s.c_str(), p.c_str());
 }
 
-void WifiLink::startSta() {
-  WiFi.softAPdisconnect(false);
-  apUp_ = false;
-  WiFi.mode(WIFI_STA);
-  mode_ = Mode::Sta;
-  reconnect();
-}
-
 void WifiLink::startSoftAp(const char* ssid, const char* pass) {
   WiFi.mode(WIFI_AP_STA);
   apUp_ = WiFi.softAP(ssid, pass, LAMP_ESPNOW_CHANNEL);
@@ -75,15 +78,6 @@ void WifiLink::startSoftAp(const char* ssid, const char* pass) {
   } else {
     Serial.printf("[wifi] softAP start FAILED ssid=%s\n", ssid);
   }
-}
-
-void WifiLink::stop() {
-  WiFi.softAPdisconnect(false);
-  apUp_ = false;
-  WiFi.mode(WIFI_STA);
-  WiFi.disconnect(false);
-  esp_wifi_set_channel(LAMP_ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
-  mode_ = Mode::Off;
 }
 
 bool WifiLink::canBroadcast() const {
@@ -104,10 +98,6 @@ size_t WifiLink::apClientIps(IPAddress* out, size_t maxOut) const {
     out[count++] = IPAddress(base[0], base[1], base[2], 2 + i);
   }
   return count;
-}
-
-uint8_t WifiLink::apStationCount() const {
-  return mode_ == Mode::Ap ? WiFi.softAPgetStationNum() : 0;
 }
 
 bool WifiLink::isConnected() const {

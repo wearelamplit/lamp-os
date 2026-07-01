@@ -31,7 +31,10 @@ class ArtnetEmitter {
   void emitNow();
 
   static constexpr uint16_t kArtnetPort = 6454;
+  // Old lamps are low priority and tolerate lag, so feed them at ~1 Hz. A
+  // faster stream steals TX airtime from ESP-NOW mesh RX on the shared radio.
   static constexpr uint32_t kBackstopMs = 1000;
+  static constexpr size_t kMaxStageLamps = 16;
 
   CurrentPalette* palette_ = nullptr;
   WifiLink* wifi_ = nullptr;
@@ -39,6 +42,9 @@ class ArtnetEmitter {
   bool udpReady_ = false;
   uint8_t seq_ = 0;
   uint32_t lastEmitMs_ = 0;
+#ifdef LAMP_DEBUG
+  size_t lastClientCount_ = SIZE_MAX;
+#endif
 };
 
 }  // namespace wisp

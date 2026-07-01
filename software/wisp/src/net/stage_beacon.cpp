@@ -12,6 +12,9 @@ namespace wisp {
 namespace {
 constexpr uint16_t kStageMagic = 42007;
 constexpr size_t kMaxAdvertBytes = 28;  // matches Gen 1 repeater
+// Short so the name AD plus the creds fit one 31-byte advert. Lamps require a
+// name to be present but only use it as a display label.
+constexpr char kBeaconName[] = "wisp";
 }  // namespace
 
 void StageBeacon::begin(const std::string& deviceName, WispConfig* config) {
@@ -59,11 +62,11 @@ void StageBeacon::startAdvert(const std::string& ssid,
 
   NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
   adv->stop();
-  adv->setName(deviceName_);
-  adv->enableScanResponse(true);
+  adv->setName(kBeaconName);
+  adv->enableScanResponse(false);
   adv->setConnectableMode(0);  // non-connectable
-  adv->setMinInterval(650);
-  adv->setMaxInterval(800);
+  adv->setMinInterval(1600);
+  adv->setMaxInterval(2000);
 
   std::vector<uint8_t> data;
   data.reserve(kMaxAdvertBytes);

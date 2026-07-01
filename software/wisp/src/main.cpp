@@ -20,7 +20,6 @@
 #include "aurora/AuroraPaletteClient.h"
 
 #include "artnet/artnet_emitter.hpp"
-#include "net/lamp_scanner.hpp"
 #include "net/stage_beacon.hpp"
 #include "net/wifi_link.hpp"
 #include "console/serial_console.hpp"
@@ -38,8 +37,13 @@ wisp::WispRoster wispRoster;
 AuroraPaletteClient auroraClient;
 wisp::WifiLink wifi;
 wisp::StageBeacon stageBeacon;
-wisp::LampScanner lampScanner;
 wisp::ArtnetEmitter artnetEmitter;
+
+// Pre-mesh lamps join this softAP (advertised over the stage beacon) to receive
+// ArtNet. Hosted unconditionally on the mesh channel: same-radio, same-channel
+// WiFi doesn't disturb ESP-NOW, so serving costs the mesh nothing.
+constexpr char kStageApSsid[] = "wisp-stage";
+constexpr char kStageApPass[] = "lamplight";
 
 // GPIO 1 (D1): D0 = GPIO 0 = BOOT strap pin; leaving it free keeps
 // USB-recover (download mode) working without unplugging the strip.
@@ -55,8 +59,7 @@ wisp::ZoneSelector zoneSelector;
 
 wisp::WispController controller(currentPalette, paintDistributor, wispConfig,
                                 zoneSelector, auroraClient, statusEmitter,
-                                artnetEmitter, wifi, stageBeacon, lampScanner,
-                                testStrip);
+                                artnetEmitter, testStrip);
 
 wisp::MeshRouter meshRouter(
     inventory, wispRoster, wispOpDispatcher,
@@ -114,7 +117,8 @@ void setup() {
 
   wifi.begin(&wispConfig);
   stageBeacon.begin(buildInstanceId().c_str(), &wispConfig);
-  lampScanner.begin();
+  wifi.startSoftAp(kStageApSsid, kStageApPass);
+  stageBeacon.advertiseCreds(kStageApSsid, kStageApPass);
   artnetEmitter.begin(&currentPalette, &wifi);
   wispOpDispatcher.setWifiSinks(&wifi, &stageBeacon);
 
@@ -143,7 +147,8 @@ void setup() {
 
   controller.applySourceModeTransition(wispConfig.sourceMode());
 
-  Serial.println("[wisp] paint distributor + status beacon online");
+  Serial.printf("[wisp] paint distributor + status beacon online; softAP '%s' up\n",
+                kStageApSsid);
   Serial.println("[wisp] cmds: paint:on/off  stage:on/off");
   Serial.println("[wisp] cmds: src:off/manual/aurora  wifi:set <ssid> <pass>  wifi:show");
 }
@@ -169,7 +174,6 @@ void loop() {
     wispRoster.recomputeClaims(obs, n, now);
   }
   controller.tickAuroraLiveness();
-  controller.tick(now);
 
   paintDistributor.tick(now);
   artnetEmitter.tick(now);

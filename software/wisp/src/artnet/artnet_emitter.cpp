@@ -48,11 +48,34 @@ void ArtnetEmitter::emitNow() {
     return;
   }
 
-  size_t sent = udp_.writeTo(buf, n, wifi_->broadcastIp(), kArtnetPort);
   lastEmitMs_ = millis();
+
+  // WiFi broadcast has no MAC-layer ack/retry and is dropped by lamps; unicast
+  // to each joined station instead. STA mode keeps the directed broadcast.
+  if (wifi_->isAp()) {
+    IPAddress clients[kMaxStageLamps];
+    const size_t count = wifi_->apClientIps(clients, kMaxStageLamps);
+#ifdef LAMP_DEBUG
+    if (count != lastClientCount_) {
+      lastClientCount_ = count;
+      if (count == 0) {
+        Serial.println("[artnet] AP up, 0 stations joined; nothing to serve");
+      } else {
+        Serial.printf("[artnet] serving %u station(s), first=%s\n",
+                      (unsigned)count, clients[0].toString().c_str());
+      }
+    }
+#endif
+    for (size_t i = 0; i < count; ++i) {
+      udp_.writeTo(buf, n, clients[i], kArtnetPort, TCPIP_ADAPTER_IF_AP);
+    }
+    return;
+  }
+
+  size_t sent = udp_.writeTo(buf, n, IPAddress(255, 255, 255, 255), kArtnetPort,
+                             TCPIP_ADAPTER_IF_STA);
   if (sent != n) {
-    Serial.printf("[artnet] short write %u/%u\n",
-                  (unsigned)sent, (unsigned)n);
+    Serial.printf("[artnet] short write %u/%u\n", (unsigned)sent, (unsigned)n);
   }
 }
 
