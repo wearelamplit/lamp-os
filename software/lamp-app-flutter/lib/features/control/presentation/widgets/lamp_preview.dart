@@ -27,17 +27,10 @@ class LampPreview extends ConsumerStatefulWidget {
     super.key,
     required this.deviceId,
     this.size = 140,
-    this.shadeColors,
-    this.baseColors,
   });
 
   final String deviceId;
   final double size;
-  /// If both [shadeColors] and [baseColors] are non-null the provider watch
-  /// is skipped entirely — lets unclaimed lamps (no control state) drive
-  /// the preview from caller-supplied colours (e.g. adopt-confirm pulse).
-  final List<LampColor>? shadeColors;
-  final List<LampColor>? baseColors;
 
   @override
   ConsumerState<LampPreview> createState() => _LampPreviewState();
@@ -198,16 +191,10 @@ class _LampPreviewState extends ConsumerState<LampPreview> {
     // Targeted watch on the control state — only the slice that affects
     // the rendered SVG. Sibling state changes (brightness, expressions,
     // home, etc.) and the inventory writeback storm during a slider drag
-    // don't rebuild this widget. Skipped when the caller supplies explicit
-    // colours (e.g. adopt-confirm pulse on an unclaimed lamp with no session).
-    final _PreviewSlice slice;
-    if (widget.shadeColors != null && widget.baseColors != null) {
-      slice = _PreviewSlice(widget.shadeColors!, widget.baseColors!);
-    } else {
-      slice = ref.watch(
-        controlNotifierProvider(widget.deviceId).select(_previewSliceFrom),
-      );
-    }
+    // don't rebuild this widget.
+    final slice = ref.watch(
+      controlNotifierProvider(widget.deviceId).select(_previewSliceFrom),
+    );
     final asset = critterAssetFor(
       critterIndex: critterIndex,
       deviceId: widget.deviceId,

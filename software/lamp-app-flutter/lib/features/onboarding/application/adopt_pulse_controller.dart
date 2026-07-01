@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 import 'dart:typed_data';
 
 import '../../../core/ble/ble_client.dart';
@@ -8,45 +7,30 @@ import '../../../core/ble/uuids.dart';
 import '../../control/domain/lamp_color.dart';
 import 'identify_color.dart';
 
-/// Connects to an unclaimed lamp and pulses its BASE strip in a washed-out
-/// version of the lamp's SHADE colour, to identify it during adopt-confirm.
-/// Drives the base-colours characteristic directly (a factory lamp accepts it
-/// unauthenticated) and claims the base edit-session so a wisp's paint doesn't
-/// override the pulse. Restores the original base colour + releases the
-/// session on [stop]. All writes best-effort; [stop] idempotent.
+/// Connects to an unclaimed lamp and re-fires a `pulse` test_expression in a
+/// washed-out version of the lamp's shade colour on the BASE strip, so the
+/// physical lamp pulses for identification. The firmware runs a transient
+/// colored pulse expression from the payload (composes on top of wisp paint).
+/// All writes best-effort; [stop] idempotent.
 class AdoptPulseController {
   AdoptPulseController(this._ble);
   final BleClient _ble;
 
-  static const int _editBaseBit = 0x01;
-
   String? _deviceId;
-  LampColor? _restoreBase;
   Timer? _timer;
   bool _stopped = false;
 
-  Future<void> start(
-      String deviceId, LampColor shadeColor, LampColor baseColor) async {
+  Future<void> start(String deviceId, LampColor shadeColor) async {
     _timer?.cancel();
     _deviceId = deviceId;
-    _restoreBase = baseColor;
     _stopped = false;
-    final bright = washedOutBright(shadeColor);
+    final color = washedOutBright(shadeColor);
     await _connectWithRetry(deviceId);
     if (_stopped) return;
-    // Claim the base surface so a wisp's paint doesn't override the pulse.
-    await _writeEditSession(deviceId, open: true);
+    await _writePulse(deviceId, color);
     if (_stopped) return;
-    const periodMs = 3000;
-    const stepMs = 150;
-    var elapsed = 0;
-    await _writeBase(deviceId, _scale(bright, 0.2));
-    _timer = Timer.periodic(const Duration(milliseconds: stepMs), (_) {
-      if (_stopped) return;
-      elapsed += stepMs;
-      final phase = (elapsed % periodMs) / periodMs;
-      final f = 0.2 + 0.8 * (0.5 - 0.5 * cos(2 * pi * phase));
-      unawaited(_writeBase(deviceId, _scale(bright, f)));
+    _timer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
+      unawaited(_writePulse(deviceId, color));
     });
   }
 
@@ -57,11 +41,10 @@ class AdoptPulseController {
     _timer = null;
     final deviceId = _deviceId;
     if (deviceId == null) return;
-    final restore = _restoreBase;
-    if (restore != null) {
-      try { await _writeBase(deviceId, restore); } catch (_) {}
-    }
-    try { await _writeEditSession(deviceId, open: false); } catch (_) {}
+    try {
+      await _ble.write(deviceId, BleUuids.controlService, BleUuids.expressionTest,
+          Uint8List.fromList(utf8.encode('{"a":"test_expression_complete"}')));
+    } catch (_) {}
     try { await _ble.disconnect(deviceId); } catch (_) {}
   }
 
@@ -71,35 +54,24 @@ class AdoptPulseController {
     const attempts = 4;
     for (var i = 0; i < attempts; i++) {
       if (_stopped) return;
-      try {
-        await _ble.connect(deviceId);
-        return;
-      } catch (_) {
+      try { await _ble.connect(deviceId); return; }
+      catch (_) {
         if (i == attempts - 1) rethrow;
         await Future<void>.delayed(const Duration(milliseconds: 1200));
       }
     }
   }
 
-  Future<void> _writeBase(String deviceId, LampColor c) async {
+  Future<void> _writePulse(String deviceId, LampColor color) async {
     try {
-      final payload = utf8.encode(jsonEncode([c.toHex()]));
-      await _ble.write(deviceId, BleUuids.controlService, BleUuids.baseColors,
-          Uint8List.fromList(payload), withoutResponse: true);
+      final payload = jsonEncode({
+        'a': 'test_expression',
+        'type': 'pulse',
+        'target': 2,                 // base strip
+        'colors': [color.toHex()],   // firmware seeds a transient pulse with these
+      });
+      await _ble.write(deviceId, BleUuids.controlService, BleUuids.expressionTest,
+          Uint8List.fromList(utf8.encode(payload)), withoutResponse: true);
     } catch (_) {}
   }
-
-  Future<void> _writeEditSession(String deviceId, {required bool open}) async {
-    try {
-      await _ble.write(deviceId, BleUuids.controlService, BleUuids.editSession,
-          Uint8List.fromList([_editBaseBit, open ? 1 : 0]),
-          withoutResponse: true);
-    } catch (_) {}
-  }
-
-  LampColor _scale(LampColor c, double f) => LampColor(
-      r: (c.r * f).round().clamp(0, 255),
-      g: (c.g * f).round().clamp(0, 255),
-      b: (c.b * f).round().clamp(0, 255),
-      w: (c.w * f).round().clamp(0, 255));
 }

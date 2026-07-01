@@ -1,16 +1,14 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../_support/in_memory_ble_client.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/core/theme/app_theme.dart';
-import 'package:lamp_app/features/control/presentation/widgets/lamp_preview.dart';
+import 'package:lamp_app/features/control/presentation/widgets/recolored_critter.dart';
 import 'package:lamp_app/features/nearby/application/nearby_lamps_notifier.dart';
 import 'package:lamp_app/features/nearby/domain/nearby_lamp.dart';
 import 'package:lamp_app/features/onboarding/application/add_lamp_notifier.dart';
@@ -18,8 +16,6 @@ import 'package:lamp_app/features/onboarding/domain/add_lamp_state.dart';
 import 'package:lamp_app/features/onboarding/presentation/widgets/adopt_confirm_step.dart';
 
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({}));
-
   const deviceId = 'lamp-adopt-01';
 
   final seededLamp = NearbyLamp(
@@ -49,23 +45,18 @@ void main() {
         ),
       );
 
-  // Seeded lamp: baseRgb=0xFF8000 → #FF800000, shadeRgb=0x000000 → black.
-  // stop() restores base → last baseColors write is '["#FF800000"]'.
-  // stop() closes editSession → last editSession write is [0x01, 0].
+  // stop() writes test_expression_complete to expressionTest, then disconnects.
   void expectCleanStop(InMemoryBleClient ble) {
-    final sessions = ble.writesTo(deviceId, BleUuids.editSession);
-    expect(sessions, isNotEmpty);
-    expect(sessions.last, equals(Uint8List.fromList([0x01, 0])));
-
-    final bases = ble.writesTo(deviceId, BleUuids.baseColors);
-    expect(bases, isNotEmpty);
-    final lastBase = jsonDecode(utf8.decode(bases.last)) as List;
-    expect(lastBase.first, equals('#FF800000'));
+    final writes = ble.writesTo(deviceId, BleUuids.expressionTest);
+    expect(writes, isNotEmpty);
+    final last = jsonDecode(utf8.decode(writes.last)) as Map<String, dynamic>;
+    expect(last['a'], equals('test_expression_complete'));
 
     expect(ble.isConnected(deviceId), isFalse);
   }
 
-  testWidgets('renders title, body, and Adopt/Cancel buttons', (tester) async {
+  testWidgets('renders title, body, Adopt/Cancel buttons, and RecoloredCritter',
+      (tester) async {
     final ble = InMemoryBleClient();
     final c = makeContainer(ble);
     addTearDown(c.dispose);
@@ -83,10 +74,10 @@ void main() {
     );
     expect(find.text('Adopt'), findsOneWidget);
     expect(find.text('Cancel'), findsOneWidget);
-    expect(find.byType(LampPreview), findsOneWidget);
+    expect(find.byType(RecoloredCritter), findsOneWidget);
   });
 
-  testWidgets('baseColors write fires on first frame — pulse started',
+  testWidgets('expressionTest pulse write fires on first frame — pulse started',
       (tester) async {
     final ble = InMemoryBleClient();
     final c = makeContainer(ble);
@@ -96,14 +87,15 @@ void main() {
     await tester.pumpWidget(wrap(c));
     await tester.pump();
 
-    final writes = ble.writesTo(deviceId, BleUuids.baseColors);
+    final writes = ble.writesTo(deviceId, BleUuids.expressionTest);
     expect(writes, isNotEmpty);
-    final payload = jsonDecode(utf8.decode(writes.first)) as List;
-    expect(payload.first, isA<String>());
+    final payload = jsonDecode(utf8.decode(writes.first)) as Map<String, dynamic>;
+    expect(payload['a'], equals('test_expression'));
+    expect(payload['colors'], isA<List<dynamic>>());
   });
 
   testWidgets(
-    'Cancel restores base, closes editSession, disconnects, returns to scan',
+    'Cancel writes test_expression_complete, disconnects, returns to scan',
     (tester) async {
       final ble = InMemoryBleClient();
       final c = makeContainer(ble);
@@ -122,7 +114,7 @@ void main() {
   );
 
   testWidgets(
-    'system-back restores base, closes editSession, disconnects',
+    'system-back writes test_expression_complete, disconnects',
     (tester) async {
       final ble = InMemoryBleClient();
       final c = makeContainer(ble);
@@ -132,8 +124,6 @@ void main() {
       await tester.pumpWidget(wrap(c));
       await tester.pump();
 
-      // Simulate system back — PopScope(canPop:false) fires
-      // onPopInvokedWithResult(didPop:false) which calls _cancel → _ctrl.stop().
       await tester.binding.handlePopRoute();
       await tester.pump();
 
@@ -142,7 +132,7 @@ void main() {
   );
 
   testWidgets(
-    'widget dispose restores base, closes editSession, disconnects',
+    'widget dispose writes test_expression_complete, disconnects',
     (tester) async {
       final ble = InMemoryBleClient();
       final c = makeContainer(ble);
@@ -150,21 +140,19 @@ void main() {
       c.read(addLampNotifierProvider.notifier).select(deviceId);
 
       await tester.pumpWidget(wrap(c));
-      await tester.pump(); // let _startPulse connect + write initial pulse
+      await tester.pump();
 
-      // Swap out the widget tree — AdoptConfirmStep.dispose() fires
-      // unawaited(_ctrl.stop()).
       await tester.pumpWidget(
         const MaterialApp(home: Scaffold(body: SizedBox())),
       );
-      await tester.pump(); // drain stop()'s async write + disconnect
+      await tester.pump();
 
       expectCleanStop(ble);
     },
   );
 
   testWidgets(
-    'Adopt restores base, closes editSession, disconnects, advances to name',
+    'Adopt writes test_expression_complete, disconnects, advances to name',
     (tester) async {
       final ble = InMemoryBleClient();
       final c = makeContainer(ble);

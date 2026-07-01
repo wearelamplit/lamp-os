@@ -8,7 +8,7 @@ import '../../../../core/ble/ble_client_provider.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/widgets/friendly_error.dart';
 import '../../../control/domain/lamp_color.dart';
-import '../../../control/presentation/widgets/lamp_preview.dart';
+import '../../../control/presentation/widgets/recolored_critter.dart';
 import '../../../nearby/application/nearby_lamps_notifier.dart';
 import '../../application/add_lamp_notifier.dart';
 import '../../application/adopt_pulse_controller.dart';
@@ -53,16 +53,8 @@ class _AdoptConfirmStepState extends ConsumerState<AdoptConfirmStep> {
             w: 0,
           )
         : LampColor.black;
-    final baseColor = lamp != null
-        ? LampColor(
-            r: (lamp.baseRgb >> 16) & 0xFF,
-            g: (lamp.baseRgb >> 8) & 0xFF,
-            b: lamp.baseRgb & 0xFF,
-            w: 0,
-          )
-        : LampColor.black;
     try {
-      await _ctrl.start(deviceId, shadeColor, baseColor);
+      await _ctrl.start(deviceId, shadeColor);
       if (mounted && _error != null) setState(() => _error = null);
     } catch (e) {
       if (!mounted) return;
@@ -89,19 +81,19 @@ class _AdoptConfirmStepState extends ConsumerState<AdoptConfirmStep> {
     final lamp = ref
         .watch(nearbyLampsNotifierProvider)
         .firstWhereOrNull((l) => l.id == deviceId);
-    final baseSwatchColor = lamp != null
-        ? LampColor(
-            r: (lamp.baseRgb >> 16) & 0xFF,
-            g: (lamp.baseRgb >> 8) & 0xFF,
-            b: lamp.baseRgb & 0xFF,
-            w: 0,
-          )
-        : LampColor.black;
-    final shadeSwatchColor = lamp != null
+    final shadeColor = lamp != null
         ? LampColor(
             r: (lamp.shadeRgb >> 16) & 0xFF,
             g: (lamp.shadeRgb >> 8) & 0xFF,
             b: lamp.shadeRgb & 0xFF,
+            w: 0,
+          )
+        : LampColor.black;
+    final baseColor = lamp != null
+        ? LampColor(
+            r: (lamp.baseRgb >> 16) & 0xFF,
+            g: (lamp.baseRgb >> 8) & 0xFF,
+            b: lamp.baseRgb & 0xFF,
             w: 0,
           )
         : LampColor.black;
@@ -119,10 +111,10 @@ class _AdoptConfirmStepState extends ConsumerState<AdoptConfirmStep> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              LampPreview(
+              RecoloredCritter(
                 deviceId: deviceId,
-                shadeColors: [shadeSwatchColor],
-                baseColors: [baseSwatchColor],
+                shadeColors: [shadeColor],
+                baseColors: [baseColor],
                 size: 120,
               ),
               const SizedBox(height: AppSpace.md),
