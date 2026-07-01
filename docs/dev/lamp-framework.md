@@ -329,7 +329,7 @@ impossible, no registry or allowlist needed. The signing chain enforces it.
 | `core/pending_json_slot.hpp` | JSON-typed variant of the pending slot |
 | `core/pending_typed_slot.hpp` | typed variant of the pending slot |
 | `behaviors/` | built-in `AnimatedBehavior` subclasses (SocialBehavior, FadeOutBehavior, KnockoutBehavior, FadeInBehavior, IdleBehavior, ConfiguratorBehavior), internal, subject to change |
-| `components/network/show_receiver.hpp` | wire-protocol dispatch |
+| `components/network/mesh/mesh_link.hpp` | wire-protocol dispatch |
 
 ## Testing pattern for contributed variants
 
