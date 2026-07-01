@@ -5,7 +5,9 @@ part 'add_lamp_state.g.dart';
 
 enum AddLampStep { scan, adoptConfirm, name, password, verifying, done }
 
-enum AddLampStatus { idle, working, error }
+// `ready` = the post-claim reconnect succeeded and the Meet-your-lamp pane's
+// Continue button should enable. `working` covers the background reconnect.
+enum AddLampStatus { idle, working, ready, error }
 
 enum AddLampError { none, wrongPassword, claimFailed, connectFailed }
 
@@ -16,6 +18,11 @@ abstract class AddLampState with _$AddLampState {
     @Default('') String deviceId,
     @Default('') String name,
     @Default('') String password,
+    // Snapshotted from the nearby scan at select() — the lamp has left the
+    // scan list by the Meet pane (it's rebooting), so carry its colours
+    // through for the critter recolor.
+    @Default(0) int baseRgb,
+    @Default(0) int shadeRgb,
     @Default(AddLampStatus.idle) AddLampStatus status,
     @Default(AddLampError.none) AddLampError error,
     String? errorMessage,

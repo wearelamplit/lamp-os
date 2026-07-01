@@ -15,7 +15,7 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$AddLampState {
 
- AddLampStep get step; String get deviceId; String get name; String get password; AddLampStatus get status; AddLampError get error; String? get errorMessage;
+ AddLampStep get step; String get deviceId; String get name; String get password; int get baseRgb; int get shadeRgb; AddLampStatus get status; AddLampError get error; String? get errorMessage;
 /// Create a copy of AddLampState
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -28,16 +28,16 @@ $AddLampStateCopyWith<AddLampState> get copyWith => _$AddLampStateCopyWithImpl<A
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is AddLampState&&(identical(other.step, step) || other.step == step)&&(identical(other.deviceId, deviceId) || other.deviceId == deviceId)&&(identical(other.name, name) || other.name == name)&&(identical(other.password, password) || other.password == password)&&(identical(other.status, status) || other.status == status)&&(identical(other.error, error) || other.error == error)&&(identical(other.errorMessage, errorMessage) || other.errorMessage == errorMessage));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is AddLampState&&(identical(other.step, step) || other.step == step)&&(identical(other.deviceId, deviceId) || other.deviceId == deviceId)&&(identical(other.name, name) || other.name == name)&&(identical(other.password, password) || other.password == password)&&(identical(other.baseRgb, baseRgb) || other.baseRgb == baseRgb)&&(identical(other.shadeRgb, shadeRgb) || other.shadeRgb == shadeRgb)&&(identical(other.status, status) || other.status == status)&&(identical(other.error, error) || other.error == error)&&(identical(other.errorMessage, errorMessage) || other.errorMessage == errorMessage));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,step,deviceId,name,password,status,error,errorMessage);
+int get hashCode => Object.hash(runtimeType,step,deviceId,name,password,baseRgb,shadeRgb,status,error,errorMessage);
 
 @override
 String toString() {
-  return 'AddLampState(step: $step, deviceId: $deviceId, name: $name, password: $password, status: $status, error: $error, errorMessage: $errorMessage)';
+  return 'AddLampState(step: $step, deviceId: $deviceId, name: $name, password: $password, baseRgb: $baseRgb, shadeRgb: $shadeRgb, status: $status, error: $error, errorMessage: $errorMessage)';
 }
 
 
@@ -48,7 +48,7 @@ abstract mixin class $AddLampStateCopyWith<$Res>  {
   factory $AddLampStateCopyWith(AddLampState value, $Res Function(AddLampState) _then) = _$AddLampStateCopyWithImpl;
 @useResult
 $Res call({
- AddLampStep step, String deviceId, String name, String password, AddLampStatus status, AddLampError error, String? errorMessage
+ AddLampStep step, String deviceId, String name, String password, int baseRgb, int shadeRgb, AddLampStatus status, AddLampError error, String? errorMessage
 });
 
 
@@ -65,13 +65,15 @@ class _$AddLampStateCopyWithImpl<$Res>
 
 /// Create a copy of AddLampState
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? step = null,Object? deviceId = null,Object? name = null,Object? password = null,Object? status = null,Object? error = null,Object? errorMessage = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? step = null,Object? deviceId = null,Object? name = null,Object? password = null,Object? baseRgb = null,Object? shadeRgb = null,Object? status = null,Object? error = null,Object? errorMessage = freezed,}) {
   return _then(_self.copyWith(
 step: null == step ? _self.step : step // ignore: cast_nullable_to_non_nullable
 as AddLampStep,deviceId: null == deviceId ? _self.deviceId : deviceId // ignore: cast_nullable_to_non_nullable
 as String,name: null == name ? _self.name : name // ignore: cast_nullable_to_non_nullable
 as String,password: null == password ? _self.password : password // ignore: cast_nullable_to_non_nullable
-as String,status: null == status ? _self.status : status // ignore: cast_nullable_to_non_nullable
+as String,baseRgb: null == baseRgb ? _self.baseRgb : baseRgb // ignore: cast_nullable_to_non_nullable
+as int,shadeRgb: null == shadeRgb ? _self.shadeRgb : shadeRgb // ignore: cast_nullable_to_non_nullable
+as int,status: null == status ? _self.status : status // ignore: cast_nullable_to_non_nullable
 as AddLampStatus,error: null == error ? _self.error : error // ignore: cast_nullable_to_non_nullable
 as AddLampError,errorMessage: freezed == errorMessage ? _self.errorMessage : errorMessage // ignore: cast_nullable_to_non_nullable
 as String?,
@@ -159,10 +161,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( AddLampStep step,  String deviceId,  String name,  String password,  AddLampStatus status,  AddLampError error,  String? errorMessage)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( AddLampStep step,  String deviceId,  String name,  String password,  int baseRgb,  int shadeRgb,  AddLampStatus status,  AddLampError error,  String? errorMessage)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _AddLampState() when $default != null:
-return $default(_that.step,_that.deviceId,_that.name,_that.password,_that.status,_that.error,_that.errorMessage);case _:
+return $default(_that.step,_that.deviceId,_that.name,_that.password,_that.baseRgb,_that.shadeRgb,_that.status,_that.error,_that.errorMessage);case _:
   return orElse();
 
 }
@@ -180,10 +182,10 @@ return $default(_that.step,_that.deviceId,_that.name,_that.password,_that.status
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( AddLampStep step,  String deviceId,  String name,  String password,  AddLampStatus status,  AddLampError error,  String? errorMessage)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( AddLampStep step,  String deviceId,  String name,  String password,  int baseRgb,  int shadeRgb,  AddLampStatus status,  AddLampError error,  String? errorMessage)  $default,) {final _that = this;
 switch (_that) {
 case _AddLampState():
-return $default(_that.step,_that.deviceId,_that.name,_that.password,_that.status,_that.error,_that.errorMessage);case _:
+return $default(_that.step,_that.deviceId,_that.name,_that.password,_that.baseRgb,_that.shadeRgb,_that.status,_that.error,_that.errorMessage);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -200,10 +202,10 @@ return $default(_that.step,_that.deviceId,_that.name,_that.password,_that.status
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( AddLampStep step,  String deviceId,  String name,  String password,  AddLampStatus status,  AddLampError error,  String? errorMessage)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( AddLampStep step,  String deviceId,  String name,  String password,  int baseRgb,  int shadeRgb,  AddLampStatus status,  AddLampError error,  String? errorMessage)?  $default,) {final _that = this;
 switch (_that) {
 case _AddLampState() when $default != null:
-return $default(_that.step,_that.deviceId,_that.name,_that.password,_that.status,_that.error,_that.errorMessage);case _:
+return $default(_that.step,_that.deviceId,_that.name,_that.password,_that.baseRgb,_that.shadeRgb,_that.status,_that.error,_that.errorMessage);case _:
   return null;
 
 }
@@ -215,13 +217,15 @@ return $default(_that.step,_that.deviceId,_that.name,_that.password,_that.status
 @JsonSerializable()
 
 class _AddLampState implements AddLampState {
-  const _AddLampState({this.step = AddLampStep.scan, this.deviceId = '', this.name = '', this.password = '', this.status = AddLampStatus.idle, this.error = AddLampError.none, this.errorMessage});
+  const _AddLampState({this.step = AddLampStep.scan, this.deviceId = '', this.name = '', this.password = '', this.baseRgb = 0, this.shadeRgb = 0, this.status = AddLampStatus.idle, this.error = AddLampError.none, this.errorMessage});
   factory _AddLampState.fromJson(Map<String, dynamic> json) => _$AddLampStateFromJson(json);
 
 @override@JsonKey() final  AddLampStep step;
 @override@JsonKey() final  String deviceId;
 @override@JsonKey() final  String name;
 @override@JsonKey() final  String password;
+@override@JsonKey() final  int baseRgb;
+@override@JsonKey() final  int shadeRgb;
 @override@JsonKey() final  AddLampStatus status;
 @override@JsonKey() final  AddLampError error;
 @override final  String? errorMessage;
@@ -239,16 +243,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _AddLampState&&(identical(other.step, step) || other.step == step)&&(identical(other.deviceId, deviceId) || other.deviceId == deviceId)&&(identical(other.name, name) || other.name == name)&&(identical(other.password, password) || other.password == password)&&(identical(other.status, status) || other.status == status)&&(identical(other.error, error) || other.error == error)&&(identical(other.errorMessage, errorMessage) || other.errorMessage == errorMessage));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _AddLampState&&(identical(other.step, step) || other.step == step)&&(identical(other.deviceId, deviceId) || other.deviceId == deviceId)&&(identical(other.name, name) || other.name == name)&&(identical(other.password, password) || other.password == password)&&(identical(other.baseRgb, baseRgb) || other.baseRgb == baseRgb)&&(identical(other.shadeRgb, shadeRgb) || other.shadeRgb == shadeRgb)&&(identical(other.status, status) || other.status == status)&&(identical(other.error, error) || other.error == error)&&(identical(other.errorMessage, errorMessage) || other.errorMessage == errorMessage));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,step,deviceId,name,password,status,error,errorMessage);
+int get hashCode => Object.hash(runtimeType,step,deviceId,name,password,baseRgb,shadeRgb,status,error,errorMessage);
 
 @override
 String toString() {
-  return 'AddLampState(step: $step, deviceId: $deviceId, name: $name, password: $password, status: $status, error: $error, errorMessage: $errorMessage)';
+  return 'AddLampState(step: $step, deviceId: $deviceId, name: $name, password: $password, baseRgb: $baseRgb, shadeRgb: $shadeRgb, status: $status, error: $error, errorMessage: $errorMessage)';
 }
 
 
@@ -259,7 +263,7 @@ abstract mixin class _$AddLampStateCopyWith<$Res> implements $AddLampStateCopyWi
   factory _$AddLampStateCopyWith(_AddLampState value, $Res Function(_AddLampState) _then) = __$AddLampStateCopyWithImpl;
 @override @useResult
 $Res call({
- AddLampStep step, String deviceId, String name, String password, AddLampStatus status, AddLampError error, String? errorMessage
+ AddLampStep step, String deviceId, String name, String password, int baseRgb, int shadeRgb, AddLampStatus status, AddLampError error, String? errorMessage
 });
 
 
@@ -276,13 +280,15 @@ class __$AddLampStateCopyWithImpl<$Res>
 
 /// Create a copy of AddLampState
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? step = null,Object? deviceId = null,Object? name = null,Object? password = null,Object? status = null,Object? error = null,Object? errorMessage = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? step = null,Object? deviceId = null,Object? name = null,Object? password = null,Object? baseRgb = null,Object? shadeRgb = null,Object? status = null,Object? error = null,Object? errorMessage = freezed,}) {
   return _then(_AddLampState(
 step: null == step ? _self.step : step // ignore: cast_nullable_to_non_nullable
 as AddLampStep,deviceId: null == deviceId ? _self.deviceId : deviceId // ignore: cast_nullable_to_non_nullable
 as String,name: null == name ? _self.name : name // ignore: cast_nullable_to_non_nullable
 as String,password: null == password ? _self.password : password // ignore: cast_nullable_to_non_nullable
-as String,status: null == status ? _self.status : status // ignore: cast_nullable_to_non_nullable
+as String,baseRgb: null == baseRgb ? _self.baseRgb : baseRgb // ignore: cast_nullable_to_non_nullable
+as int,shadeRgb: null == shadeRgb ? _self.shadeRgb : shadeRgb // ignore: cast_nullable_to_non_nullable
+as int,status: null == status ? _self.status : status // ignore: cast_nullable_to_non_nullable
 as AddLampStatus,error: null == error ? _self.error : error // ignore: cast_nullable_to_non_nullable
 as AddLampError,errorMessage: freezed == errorMessage ? _self.errorMessage : errorMessage // ignore: cast_nullable_to_non_nullable
 as String?,

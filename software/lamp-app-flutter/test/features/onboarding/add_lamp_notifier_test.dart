@@ -18,12 +18,16 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     AddLampNotifier.verifyDelay = Duration.zero;
     AddLampNotifier.verifySkipDelay = Duration.zero;
+    AddLampNotifier.reconnectSettleDelay = Duration.zero;
+    AddLampNotifier.reconnectBackoff = Duration.zero;
   });
   tearDown(() {
     AddLampNotifier.verifyDelay = const Duration(seconds: 5);
     AddLampNotifier.verifySkipDelay = const Duration(seconds: 2);
     AddLampNotifier.verifyConnectTimeout = const Duration(seconds: 15);
     AddLampNotifier.verifyOpTimeout = const Duration(seconds: 10);
+    AddLampNotifier.reconnectSettleDelay = const Duration(milliseconds: 500);
+    AddLampNotifier.reconnectBackoff = const Duration(milliseconds: 1500);
   });
 
   test('select(deviceId) sets the id and advances to adoptConfirm step', () async {
@@ -115,11 +119,19 @@ void main() {
     n.setName('jacko');
     n.setPassword('secret');
     await n.submit();
+    await n.verifyDone;
 
-    final s = c.read(addLampNotifierProvider);
+    // Claim done + verified: the Meet pane is up with Continue enabled.
+    var s = c.read(addLampNotifierProvider);
+    expect(s.step, AddLampStep.verifying);
+    expect(s.status, AddLampStatus.ready);
+    expect(s.error, AddLampError.none);
+
+    // Continue persists + advances.
+    await n.finishAdoption();
+    s = c.read(addLampNotifierProvider);
     expect(s.step, AddLampStep.done);
     expect(s.status, AddLampStatus.idle);
-    expect(s.error, AddLampError.none);
 
     final inv = await c.read(inventoryNotifierProvider.future);
     expect(inv.map((l) => l.id).toList(), ['dev1']);
@@ -150,6 +162,7 @@ void main() {
     n.setName('jacko');
     n.setPassword('wrong');
     await n.submit();
+    await n.verifyDone;
 
     final s = c.read(addLampNotifierProvider);
     expect(s.step, AddLampStep.password);
@@ -181,6 +194,7 @@ void main() {
     n.setName('jacko');
     n.setPassword('secret');
     await n.submit();
+    await n.verifyDone;
 
     final s = c.read(addLampNotifierProvider);
     expect(s.step, AddLampStep.password);
@@ -209,23 +223,32 @@ void main() {
     n.setName('jacko');
     n.setPassword(''); // explicit Skip
     await n.submit();
+    await n.verifyDone;
 
-    final s = c.read(addLampNotifierProvider);
-    expect(s.step, AddLampStep.done,
-        reason: 'Skip path must complete, not hang on verify probe');
-    expect(s.status, AddLampStatus.idle);
+    var s = c.read(addLampNotifierProvider);
+    expect(s.step, AddLampStep.verifying,
+        reason: 'Skip path must reconnect and enable Continue, not hang');
+    expect(s.status, AddLampStatus.ready);
     expect(s.error, AddLampError.none);
+
+    await n.finishAdoption();
+    s = c.read(addLampNotifierProvider);
+    expect(s.step, AddLampStep.done);
+    expect(s.status, AddLampStatus.idle);
 
     final inv = await c.read(inventoryNotifierProvider.future);
     expect(inv.map((l) => l.id).toList(), ['dev1']);
     expect(inv.first.controlPassword, '');
   });
 
-  test('submit() Skip path surfaces friendly error on connect timeout',
+  test('Skip path surfaces recoverable error when the lamp never reconnects',
       () async {
-    // Skip path with a stalled connect → must time out cleanly and bounce
-    // back to the password step with a non-"Wrong password" message.
-    AddLampNotifier.verifyConnectTimeout = const Duration(milliseconds: 50);
+    // Skip path where every post-reboot connect stalls → the retry loop
+    // exhausts and the Meet pane shows a recoverable connectFailed with a
+    // Retry, rather than trapping the user or dumping them out.
+    AddLampNotifier.verifyConnectTimeout = const Duration(milliseconds: 20);
+    AddLampNotifier.reconnectAttempts = 3;
+    addTearDown(() => AddLampNotifier.reconnectAttempts = 12);
     final ble = _HangingBleClient(hangOn: _HangOp.connect);
     final c = ProviderContainer(
       overrides: [bleClientProvider.overrideWithValue(ble)],
@@ -238,15 +261,14 @@ void main() {
     n.select('dev1');
     n.setName('jacko');
     n.setPassword('');
-    await n.submit().timeout(const Duration(seconds: 5));
+    await n.submit();
+    await n.verifyDone!.timeout(const Duration(seconds: 5));
 
     final s = c.read(addLampNotifierProvider);
-    expect(s.step, AddLampStep.password,
-        reason: 'timeout must bounce, not hang');
+    expect(s.step, AddLampStep.verifying,
+        reason: 'stays on the Meet pane so the user can Retry');
     expect(s.status, AddLampStatus.error);
     expect(s.error, AddLampError.connectFailed);
-    expect(s.errorMessage, contains("Setup didn't fully apply"),
-        reason: 'Skip path should not say "Wrong password"');
     final inv = await c.read(inventoryNotifierProvider.future);
     expect(inv, isEmpty);
   });
@@ -266,10 +288,12 @@ void main() {
     n.select('dev1');
     n.setName('jacko');
     n.setPassword('secret');
-    await n.submit().timeout(const Duration(seconds: 5));
+    await n.submit();
+    await n.verifyDone!.timeout(const Duration(seconds: 5));
 
     final s = c.read(addLampNotifierProvider);
-    expect(s.step, AddLampStep.password);
+    expect(s.step, AddLampStep.verifying,
+        reason: 'stays on the Meet pane so the user can Retry');
     expect(s.status, AddLampStatus.error);
     expect(s.error, AddLampError.connectFailed,
         reason: 'timeout must surface as recoverable connectFailed');

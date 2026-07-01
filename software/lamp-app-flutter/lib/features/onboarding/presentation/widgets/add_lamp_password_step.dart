@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -75,7 +73,6 @@ class _AddLampPasswordStepState extends ConsumerState<AddLampPasswordStep> {
         _confirm.text.isNotEmpty && _confirm.text != state.password;
     final canContinue = state.password.isNotEmpty &&
         _confirm.text == state.password;
-    final isVerifying = state.step == AddLampStep.verifying;
     final name = state.name.isEmpty ? 'your lamp' : state.name;
     return Padding(
       padding: const EdgeInsets.all(AppSpace.xl),
@@ -87,23 +84,6 @@ class _AddLampPasswordStepState extends ConsumerState<AddLampPasswordStep> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-          if (isVerifying) ...[
-            const Spacer(),
-            const _VerifyingTips(),
-            const SizedBox(height: AppSpace.lg),
-            const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                SizedBox(width: AppSpace.sm),
-                Text('Settling in…'),
-              ],
-            ),
-          ] else ...[
             Text(
               'Set a password',
               textAlign: TextAlign.center,
@@ -202,63 +182,6 @@ class _AddLampPasswordStepState extends ConsumerState<AddLampPasswordStep> {
               ],
             ),
           ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Rotates through whimsical "what your lamp is doing right now" tips during
-/// the 8-second post-claim verify window. Replaces the dead-air spinner with
-/// something readable. Cancels its timer on dispose so it doesn't leak past
-/// the verifying step.
-class _VerifyingTips extends StatefulWidget {
-  const _VerifyingTips();
-
-  @override
-  State<_VerifyingTips> createState() => _VerifyingTipsState();
-}
-
-class _VerifyingTipsState extends State<_VerifyingTips> {
-  static const _tips = [
-    'Saving your password…',
-    'Picking out a critter friend…',
-    'Stretching after the long sleep…',
-    'Almost settled in…',
-  ];
-  int _i = 0;
-  Timer? _timer;
-
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer.periodic(const Duration(milliseconds: 2200), (_) {
-      if (!mounted) return;
-      setState(() => _i = (_i + 1) % _tips.length);
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 350),
-      child: Padding(
-        key: ValueKey(_i),
-        padding: const EdgeInsets.symmetric(horizontal: AppSpace.lg),
-        child: Text(
-          _tips[_i],
-          textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-            letterSpacing: 0.3,
-            height: 1.4,
-          ),
         ),
       ),
     );

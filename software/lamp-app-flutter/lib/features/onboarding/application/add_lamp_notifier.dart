@@ -52,17 +52,40 @@ class AddLampNotifier extends _$AddLampNotifier {
   @visibleForTesting
   static Duration verifyOpTimeout = const Duration(seconds: 10);
 
+  /// Post-reboot reconnect is a retry loop, not a single shot: the lamp isn't
+  /// connectable for ~5-12s after the claim, so the first connect reliably
+  /// hits GATT-133 and a lone attempt bounces the user to an error. Retry with
+  /// a settle delay between attempts until the lamp comes back or we hit the
+  /// attempt ceiling. 12 × (0.5 + 1.5)s ≈ 24s window.
+  @visibleForTesting
+  static int reconnectAttempts = 12;
+  @visibleForTesting
+  static Duration reconnectSettleDelay = const Duration(milliseconds: 500);
+  @visibleForTesting
+  static Duration reconnectBackoff = const Duration(milliseconds: 1500);
+
+  /// The in-flight background reconnect+verify, exposed so tests can await it
+  /// (production fires it and forgets). Null before the first claim.
+  @visibleForTesting
+  Future<void>? verifyDone;
+
   @override
   AddLampState build() => const AddLampState();
 
-  void select(String deviceId) {
+  void select(String deviceId, {int baseRgb = 0, int shadeRgb = 0}) {
     // Record the picked device and jump to the adopt-confirm step. We
     // deliberately do NOT open the BLE link here — the AdoptConfirmStep
     // widget owns the connection pulse. submit() opens the link
     // immediately before the setup writes that need it (connect-then-
     // immediately-use, same pattern as ControlNotifier).
+    //
+    // The scan step passes the lamp's advertised colours through so the
+    // Meet-your-lamp pane can still show them after the lamp reboots off the
+    // scan list.
     state = state.copyWith(
       deviceId: deviceId,
+      baseRgb: baseRgb,
+      shadeRgb: shadeRgb,
       step: AddLampStep.adoptConfirm,
     );
   }
@@ -93,7 +116,12 @@ class AddLampNotifier extends _$AddLampNotifier {
   }
 
   Future<void> submit() async {
+    // Leave the password page immediately — its fields are still editable and
+    // a spinner sitting on top of them reads as confusing. The Meet pane owns
+    // the whole "claiming + rebooting + reconnecting" wait; a claim-phase
+    // failure below routes back to the password step so the user can retry.
     state = state.copyWith(
+      step: AddLampStep.verifying,
       status: AddLampStatus.working,
       error: AddLampError.none,
       errorMessage: null,
@@ -116,6 +144,7 @@ class AddLampNotifier extends _$AddLampNotifier {
     } catch (e) {
       if (!ref.mounted) return;
       state = state.copyWith(
+        step: AddLampStep.password,
         status: AddLampStatus.error,
         error: AddLampError.connectFailed,
         errorMessage: e.toString(),
@@ -175,6 +204,7 @@ class AddLampNotifier extends _$AddLampNotifier {
     } catch (e) {
       if (!ref.mounted) return;
       state = state.copyWith(
+        step: AddLampStep.password,
         status: AddLampStatus.error,
         error: AddLampError.claimFailed,
         errorMessage: e.toString(),
@@ -183,66 +213,37 @@ class AddLampNotifier extends _$AddLampNotifier {
     }
     if (!ref.mounted) return;
 
-    // Step 2: wait for the lamp to reboot, then reconnect + authenticate
-    // + probe a section read to confirm the password stuck. The lampSection
-    // characteristic is gated by auth; an unauthenticated read returns
-    // empty bytes (or fails to decode) which we treat as a password mismatch.
-    //
-    // Every await below has an explicit timeout. Without them, a half-open
-    // BLE link (Android hasn't yet noticed the reboot-driven disconnect,
-    // flutter_blue_plus connect() no-ops against a stale handle) would
-    // leave the wizard "Settling in…" forever — the reported "Skip hangs"
-    // bug. Timeouts bounce the user back to the password step with a
-    // recoverable error instead of trapping them.
-    //
-    // Skip path (empty password) takes a shortcut: there's no auth to
-    // verify, so we use a shorter reboot wait and skip the auth+read probe
-    // entirely. The lamp's `isAuthed()` early-returns true for empty
-    // passwords, so a probe would always succeed if reachable — adding 8s
-    // of dead air for no diagnostic value.
-    state = state.copyWith(
-      step: AddLampStep.verifying,
-      status: AddLampStatus.working,
-    );
+    // Step 2: claim landed; the lamp is rebooting. We're already on the Meet
+    // pane — reconnect + verify in the BACKGROUND so the user reads about
+    // their lamp while it restarts. The pane's Continue enables when status
+    // flips to `ready`; failures surface inline (or route back for a wrong
+    // password).
+    verifyDone = _reconnectAndVerify();
+  }
+
+  /// Reboot-wait → reconnect-with-retry → (password path only) auth + a
+  /// section-read probe to confirm the password stuck. Success flips status to
+  /// `ready`. A wrong password routes back to the password step; an
+  /// unreachable lamp stays on the Meet pane with a recoverable error + Retry.
+  Future<void> _reconnectAndVerify() async {
+    final ble = ref.read(bleClientProvider);
     final isSkipPath = state.password.isEmpty;
     try {
       await Future<void>.delayed(isSkipPath ? verifySkipDelay : verifyDelay);
-      // Force a fresh BLE link. After setupApply the firmware fades + reboots,
-      // but flutter_blue_plus typically still believes it's connected (it only
-      // notices via LINK_SUPERVISION_TIMEOUT, which can take >1s). Calling
-      // connect() in that stale state is a no-op, so the next write fires
-      // into a dead handle and Android returns GATT_ERROR (133). Explicitly
-      // disconnecting first guarantees a real reconnect against the rebooted
-      // lamp.
-      try {
-        await ble.disconnect(state.deviceId);
-      } catch (_) {
-        // already-disconnected is fine
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-      await ble.connect(state.deviceId).timeout(verifyConnectTimeout);
-      if (isSkipPath) {
-        // Empty-password lamps are open-access. Skipping the auth+read probe
-        // shaves ~3-5s off the Skip flow and avoids the "Wrong password"
-        // error path firing on a successful-but-slow probe (which is
-        // nonsense UX when the user just chose to have no password).
-      } else {
+      await _reconnectWithRetry(ble);
+      if (!isSkipPath) {
+        // Empty-password lamps are open-access, so there's nothing to verify.
+        // For a real password, auth then read the auth-gated lamp section:
+        // empty/undecodable bytes mean the password didn't take.
         await AuthClient(ble: ble)
-            .authenticate(
-              deviceId: state.deviceId,
-              password: state.password,
-            )
+            .authenticate(deviceId: state.deviceId, password: state.password)
             .timeout(verifyOpTimeout);
         final bytes = await ble
             .readSection(state.deviceId, 'lamp')
             .timeout(verifyOpTimeout);
-        if (bytes.isEmpty) {
-          throw const FormatException('auth-rejected');
-        }
+        if (bytes.isEmpty) throw const FormatException('auth-rejected');
         final j = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
-        if (j['name'] == null) {
-          throw const FormatException('auth-rejected');
-        }
+        if (j['name'] == null) throw const FormatException('auth-rejected');
       }
     } on FormatException catch (_) {
       if (!ref.mounted) return;
@@ -253,32 +254,58 @@ class AddLampNotifier extends _$AddLampNotifier {
         errorMessage: "Wrong password — the lamp did not accept it.",
       );
       return;
-    } on TimeoutException catch (e) {
+    } catch (_) {
+      // Couldn't get the lamp back within the retry window — stay on the Meet
+      // pane and let the user Retry rather than dumping them out.
       if (!ref.mounted) return;
       state = state.copyWith(
         status: AddLampStatus.error,
-        step: AddLampStep.password,
         error: AddLampError.connectFailed,
-        errorMessage: isSkipPath
-            ? "Setup didn't fully apply — try again."
-            : "The lamp took too long to answer — try again. ($e)",
-      );
-      return;
-    } catch (e) {
-      if (!ref.mounted) return;
-      state = state.copyWith(
-        status: AddLampStatus.error,
-        step: AddLampStep.password,
-        error: AddLampError.connectFailed,
-        errorMessage: isSkipPath
-            ? "Setup didn't fully apply — try again."
-            : e.toString(),
       );
       return;
     }
     if (!ref.mounted) return;
+    state = state.copyWith(status: AddLampStatus.ready);
+  }
 
-    // Step 3: success — persist and advance.
+  /// Disconnect the stale handle, then connect with backoff until the rebooted
+  /// lamp answers or we exhaust [reconnectAttempts]. A single connect fires
+  /// while the lamp is still down and fails GATT-133; the loop is the fix.
+  Future<void> _reconnectWithRetry(BleClient ble) async {
+    for (var attempt = 0;; attempt++) {
+      if (!ref.mounted) return;
+      // flutter_blue_plus may still believe the pre-reboot link is up (it only
+      // notices via LINK_SUPERVISION_TIMEOUT). Drop it so connect() isn't a
+      // no-op against a dead handle.
+      try {
+        await ble.disconnect(state.deviceId);
+      } catch (_) {
+        // already-disconnected is fine
+      }
+      await Future<void>.delayed(reconnectSettleDelay);
+      try {
+        await ble.connect(state.deviceId).timeout(verifyConnectTimeout);
+        return;
+      } catch (_) {
+        if (attempt >= reconnectAttempts - 1) rethrow;
+        await Future<void>.delayed(reconnectBackoff);
+      }
+    }
+  }
+
+  /// Meet-pane Retry after a reconnect failure.
+  void retryVerify() {
+    state = state.copyWith(
+      status: AddLampStatus.working,
+      error: AddLampError.none,
+      errorMessage: null,
+    );
+    verifyDone = _reconnectAndVerify();
+  }
+
+  /// Meet-pane Continue: persist the lamp to inventory, make it active, and
+  /// advance to the done screen. Only reachable once status is `ready`.
+  Future<void> finishAdoption() async {
     await ref.read(inventoryNotifierProvider.notifier).add(
           InventoryLamp(
             id: state.deviceId,
@@ -288,14 +315,9 @@ class AddLampNotifier extends _$AddLampNotifier {
           ),
         );
     if (!ref.mounted) return;
-    await ref
-        .read(activeLampNotifierProvider.notifier)
-        .set(state.deviceId);
+    await ref.read(activeLampNotifierProvider.notifier).set(state.deviceId);
     if (!ref.mounted) return;
-    state = state.copyWith(
-      step: AddLampStep.done,
-      status: AddLampStatus.idle,
-    );
+    state = state.copyWith(step: AddLampStep.done, status: AddLampStatus.idle);
   }
 
   Future<void> add({

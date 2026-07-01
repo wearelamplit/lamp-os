@@ -83,7 +83,11 @@ class _LampRow extends ConsumerWidget {
       // to Name without opening a BLE link. The link is opened in
       // submit() so it doesn't sit idle through the form-fill and
       // expire under LINK_SUPERVISION_TIMEOUT.
-      ref.read(addLampNotifierProvider.notifier).select(lamp.id);
+      ref.read(addLampNotifierProvider.notifier).select(
+            lamp.id,
+            baseRgb: lamp.baseRgb,
+            shadeRgb: lamp.shadeRgb,
+          );
     } else {
       // No confirm dialog — `add()` sets state.step to `done` and the
       // AddLampShell will swap in the AddLampDoneStep ("X is home!"),

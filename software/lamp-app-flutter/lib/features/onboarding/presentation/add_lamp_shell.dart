@@ -7,6 +7,7 @@ import '../../../core/theme/app_spacing.dart';
 import '../application/add_lamp_notifier.dart';
 import '../domain/add_lamp_state.dart';
 import 'widgets/add_lamp_done_step.dart';
+import 'widgets/add_lamp_meet_step.dart';
 import 'widgets/add_lamp_name_step.dart';
 import 'widgets/adopt_confirm_step.dart';
 import 'widgets/add_lamp_password_step.dart';
@@ -68,7 +69,7 @@ class _AddLampShellState extends ConsumerState<AddLampShell> {
       AddLampStep.adoptConfirm => const AdoptConfirmStep(),
       AddLampStep.name => const AddLampNameStep(),
       AddLampStep.password => const AddLampPasswordStep(),
-      AddLampStep.verifying => const AddLampPasswordStep(),
+      AddLampStep.verifying => const AddLampMeetStep(),
       AddLampStep.done => const AddLampDoneStep(),
     };
     // Hide progress dots on Scan; show from adoptConfirm through Done.

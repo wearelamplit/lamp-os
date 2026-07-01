@@ -14,6 +14,8 @@ _AddLampState _$AddLampStateFromJson(Map<String, dynamic> json) =>
       deviceId: json['deviceId'] as String? ?? '',
       name: json['name'] as String? ?? '',
       password: json['password'] as String? ?? '',
+      baseRgb: (json['baseRgb'] as num?)?.toInt() ?? 0,
+      shadeRgb: (json['shadeRgb'] as num?)?.toInt() ?? 0,
       status:
           $enumDecodeNullable(_$AddLampStatusEnumMap, json['status']) ??
           AddLampStatus.idle,
@@ -29,6 +31,8 @@ Map<String, dynamic> _$AddLampStateToJson(_AddLampState instance) =>
       'deviceId': instance.deviceId,
       'name': instance.name,
       'password': instance.password,
+      'baseRgb': instance.baseRgb,
+      'shadeRgb': instance.shadeRgb,
       'status': _$AddLampStatusEnumMap[instance.status]!,
       'error': _$AddLampErrorEnumMap[instance.error]!,
       'errorMessage': instance.errorMessage,
@@ -46,6 +50,7 @@ const _$AddLampStepEnumMap = {
 const _$AddLampStatusEnumMap = {
   AddLampStatus.idle: 'idle',
   AddLampStatus.working: 'working',
+  AddLampStatus.ready: 'ready',
   AddLampStatus.error: 'error',
 };
 

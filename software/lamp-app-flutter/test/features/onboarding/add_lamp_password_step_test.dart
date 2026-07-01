@@ -38,38 +38,4 @@ void main() {
     expect(find.text('Take Sparky home'), findsOneWidget);
     expect(find.text('Welcome them home'), findsNothing);
   });
-
-  testWidgets('hides heading during verifying', (tester) async {
-    final c = makeContainer();
-    addTearDown(c.dispose);
-
-    final notifier = c.read(addLampNotifierProvider.notifier);
-    notifier.select('test-lamp');
-    notifier.next(); // adoptConfirm → name
-    notifier.next(); // name → password
-    notifier.next(); // password → verifying
-
-    await tester.pumpWidget(wrap(c));
-    await tester.pump();
-
-    expect(find.text('Set a password'), findsNothing);
-  });
-
-  testWidgets('hides password fields and shows Settling in… during verifying',
-      (tester) async {
-    final c = makeContainer();
-    addTearDown(c.dispose);
-
-    final notifier = c.read(addLampNotifierProvider.notifier);
-    notifier.select('test-lamp');
-    notifier.next(); // adoptConfirm → name
-    notifier.next(); // name → password
-    notifier.next(); // password → verifying
-
-    await tester.pumpWidget(wrap(c));
-    await tester.pump();
-
-    expect(find.byType(TextField), findsNothing);
-    expect(find.text('Settling in…'), findsOneWidget);
-  });
 }
