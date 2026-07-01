@@ -16,8 +16,8 @@
 #include "../firmware/firmware_receiver.hpp"  // FirmwareTransport interface
 
 #ifndef LAMP_ESPNOW_CHANNEL
-// ESP-NOW channel; must match the wisp's MeshLink.h or the mesh won't form.
-#define LAMP_ESPNOW_CHANNEL 11
+// ESP-NOW channel; must match the wisp's mesh_link.hpp or the mesh won't form.
+#define LAMP_ESPNOW_CHANNEL 6
 #endif
 
 // HELLO broadcast interval. Higher = less baseline mesh traffic; the

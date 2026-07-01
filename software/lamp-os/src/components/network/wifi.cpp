@@ -12,8 +12,8 @@
 // can hear each other. Since we never associate to a home AP anymore,
 // the radio sits on this channel permanently (modulo brief scan windows).
 #ifndef LAMP_ESPNOW_CHANNEL
-// Moved 1 → 11 on 2026-06-10. Mirror of show_receiver.hpp / MeshLink.h.
-#define LAMP_ESPNOW_CHANNEL 11
+// Must match show_receiver.hpp and the wisp mesh_link.hpp or the mesh won't form.
+#define LAMP_ESPNOW_CHANNEL 6
 #endif
 
 namespace wifi {

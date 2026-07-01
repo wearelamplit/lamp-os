@@ -14,10 +14,11 @@ namespace wisp {
 // software/lamp-os/src/components/network/wifi.cpp. If the lamp side ever
 // moves, mirror here.
 #ifndef LAMP_ESPNOW_CHANNEL
-// Channel 11: least-utilized of the non-overlapping NA channels (1/6/11),
-// dodges channel-1 congestion (consumer-router default). A mixed-channel
-// fleet does NOT interoperate; peers on another channel are invisible.
-#define LAMP_ESPNOW_CHANNEL 11
+// Channel 6 is what pre-mesh lamps hardcode for their ArtNet WiFi, so the
+// mesh, the wisp stage softAP, and old lamps all share one channel. A
+// mixed-channel fleet does NOT interoperate; peers on another channel are
+// invisible.
+#define LAMP_ESPNOW_CHANNEL 6
 #endif
 
 // Handler signature for inbound frames. Fires from the WiFi recv task: no
