@@ -14,8 +14,6 @@ DispatchResult WispOpDispatcher::dispatch(const uint8_t* payload, size_t len) {
     return DispatchResult::Malformed;
   }
 
-  // ArduinoJson v7: unified JsonDocument. Aurora-stack budget is comfortable
-  // with a small doc for these short ops (well under 256 bytes typical).
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, payload, len);
   if (err) {
@@ -25,13 +23,9 @@ DispatchResult WispOpDispatcher::dispatch(const uint8_t* payload, size_t len) {
 
   const char* charField = doc["char"];
   if (!charField) {
-    // No "char" field at all — could be a different envelope shape. Don't
-    // warn loudly; this is the same "not for us" bucket as a foreign char.
     return DispatchResult::Ignored;
   }
 
-  // Anything other than "wispOp" is something we don't speak. wispStatus
-  // gossip-relay echoes land here and get silently dropped, per spec.
   if (strcmp(charField, "wispOp") != 0) {
     return DispatchResult::Ignored;
   }
@@ -43,16 +37,11 @@ DispatchResult WispOpDispatcher::dispatch(const uint8_t* payload, size_t len) {
   }
 
   if (strcmp(op, "setZone") == 0) {
-    // zoneId is required and must be an int. ArduinoJson's is<int>() check
-    // covers numeric type compatibility (rejects strings/floats/missing).
     if (!doc["zoneId"].is<int>()) {
       Serial.println("[wisp.op] setZone missing/invalid 'zoneId'");
       return DispatchResult::Malformed;
     }
     const int zoneId = doc["zoneId"].as<int>();
-    // Negative-zoneId rejection lives in WispConfig::setSelectedZone — the
-    // storage layer owns that invariant, so the dispatcher doesn't duplicate
-    // the check here.
     Serial.printf("[wisp.op] setZone zoneId=%d\n", zoneId);
     config_.setSelectedZone(zoneId);
     return DispatchResult::AppliedZoneChange;
@@ -65,11 +54,8 @@ DispatchResult WispOpDispatcher::dispatch(const uint8_t* payload, size_t len) {
   }
 
   if (strcmp(op, "setSource") == 0) {
-    // Accept either "mode":"off|manual|aurora" (preferred, app-emitted
-    // shape) or "mode":0|1|2 (numeric fallback). Anything else is
-    // malformed. Don't trust the wire to constrain values — coerce
-    // server-side so a future app that emits something unexpected
-    // doesn't strand the wisp in an unknown mode.
+    // Accept "mode":"off|manual|aurora" or numeric 0|1|2. Coerce server-side
+    // so an unexpected wire value doesn't strand the wisp in an unknown mode.
     WispSourceMode resolved = WispSourceMode::Aurora;
     bool resolvedOk = false;
     JsonVariant modeVar = doc["mode"];
@@ -102,9 +88,7 @@ DispatchResult WispOpDispatcher::dispatch(const uint8_t* payload, size_t len) {
   }
 
   if (strcmp(op, "setOffColor") == 0) {
-    // Wisp-only color shown on the ring when sourceMode == Off. Does not
-    // touch the manual palette and does not broadcast to lamps. Accepts
-    // the tuple shape `"color":[r,g,b]` or the flat fields `"r"/"g"/"b"`.
+    // Accepts "color":[r,g,b] tuple or flat "r"/"g"/"b" fields.
     ManualPaletteColor c;
     bool ok = false;
     JsonVariantConst v = doc["color"];
@@ -132,10 +116,7 @@ DispatchResult WispOpDispatcher::dispatch(const uint8_t* payload, size_t len) {
   }
 
   if (strcmp(op, "setManualPalette") == 0) {
-    // Accept "colors":[[r,g,b],[r,g,b],...] OR "colors":[{"r":..,"g":..,"b":..}]
-    // The Flutter side emits the tuple shape; the object shape is
-    // tolerated so a curl-test or future client doesn't have to remember
-    // which one wins.
+    // Accepts "colors":[[r,g,b],...] tuple or [{"r":..,"g":..,"b":..}] object shape.
     JsonArrayConst arr = doc["colors"].as<JsonArrayConst>();
     if (arr.isNull()) {
       Serial.println("[wisp.op] setManualPalette missing 'colors'");
@@ -175,16 +156,6 @@ DispatchResult WispOpDispatcher::dispatch(const uint8_t* payload, size_t len) {
       Serial.println("[wisp.op] setWifi missing 'ssid' or 'pw'");
       return DispatchResult::Malformed;
     }
-    // End-to-end chain: persist into WispConfig (single source of truth),
-    // then kick the two downstream consumers so they re-read.
-    //   1. WifiLink::reconnect() — drops the current STA association and
-    //      tries WiFi.begin() with the new creds.
-    //   2. StageBeacon::refreshAdvert() — rebuilds the mfgData payload so
-    //      pre-mesh lamps scanning for the magic-42007 advert see the
-    //      updated SSID/password on their next scan cycle.
-    // Either sink may be null in tests; we skip the kick and let the
-    // persistence still happen so the next reboot (or wired-in main)
-    // picks up the new creds.
     Serial.printf("[wisp.op] setWifi ssid='%s' pw=<%u chars>\n",
                   ssid, (unsigned)strlen(pw));
     config_.setWifi(String(ssid), String(pw));
@@ -199,6 +170,12 @@ DispatchResult WispOpDispatcher::dispatch(const uint8_t* payload, size_t len) {
       Serial.println("[wisp.op] setWifi: no StageBeacon bound; skipping refresh");
     }
     return DispatchResult::AppliedWifiChange;
+  }
+
+  if (strcmp(op, "shuffle") == 0) {
+    Serial.println("[wisp.op] shuffle");
+    config_.bumpShuffleSeed();
+    return DispatchResult::AppliedShuffle;
   }
 
   Serial.printf("[wisp.op] unknown wispOp op='%s'\n", op);

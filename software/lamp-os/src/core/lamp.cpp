@@ -1,19 +1,16 @@
-// software/lamp-os/src/core/lamp.cpp
-//
 // Framework heart: file-scope state (singletons, pending slots, mutexes),
 // Lamp::setup() boot wiring, Lamp::tick() orchestrator, initBehaviors,
 // brightness/home-mode helpers, dispatchLampAction.
 //
 // Sibling TUs share file-scope state via core/lamp_internal.hpp:
-//   - core/lamp_drains.cpp    — 22 Lamp::drainX() method bodies
-//   - core/lamp_remote_op.cpp — cascade-receive routing
+// core/lamp_drains.cpp holds the drainX() bodies, core/lamp_remote_op.cpp
+// the cascade-receive routing.
 
 #include "lamp.hpp"
 #include "lamp_internal.hpp"
 
 #include <Adafruit_NeoPixel.h>
 #include <Arduino.h>
-#include <Preferences.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -53,6 +50,7 @@
 #include "behaviors/social.hpp"
 #include "config/config.hpp"
 #include "config/config_types.hpp"
+#include "config/nvs_config_store.hpp"
 #include "core/animated_behavior.hpp"
 #include "core/behavior_context.hpp"
 #include "core/compositor.hpp"
@@ -69,36 +67,32 @@
 
 Adafruit_NeoPixel* shadeStrip = nullptr;
 Adafruit_NeoPixel* baseStrip = nullptr;
-Preferences prefs;
+lamp::NvsConfigStore configStore;
 
 // Zero-allocation pending slots. BLE callbacks on the NimBLE host task
 // (Core 0) only do a fixed-size memcpy under portMUX into these slots. The
-// loop task (Core 1) drains them and does ALL heap work — JSON parsing,
-// vector building, state mutation. Single-core memory pattern.
+// loop task (Core 1) drains them and does ALL heap work (JSON parsing,
+// vector building, state mutation).
 //
 // Each post-helper below is a one-line forwarder into a slot's `post()`;
 // the matching drain body lives in core/lamp_drains.cpp.
 
 volatile int8_t pendingBrightness = -1;
 
-// ── User brightness micro-fade ─────────────────────────────────────────────
-// The pendingBrightness drain (live-preview from CHAR_BRIGHTNESS) used to
-// call shadeStrip->setBrightness directly on every write. Each WriteCoalescer
-// window delivers a write every ~60-100 ms, so a sustained slider drag landed
-// as visibly stepped brightness changes — user described it as "not smooth".
-//
-// This small fade state interpolates between successive user writes over
-// kUserBrightnessFadeMs (~80 ms — slightly longer than the coalescer floor so
+// User brightness micro-fade. A sustained slider drag delivers a write every
+// ~60-100 ms (WriteCoalescer window); applying each directly reads as visibly
+// stepped brightness. This state interpolates between successive writes over
+// kUserBrightnessFadeMs (~80 ms, slightly longer than the coalescer floor so
 // each step bleeds into the next without overshooting). Drain stamps a new
 // (source, target, start) triple per write; the loop tick interpolates and
-// applies. Tick is gated to brightnessOverride.isActive() == false so an
-// active wisp override owns the strip uncontested via the existing
-// applyEffectiveBrightness change-callback path.
+// applies. Gated to brightnessOverride.isActive() == false so an active wisp
+// override owns the strip uncontested via the applyEffectiveBrightness
+// change-callback path.
 //
-// Source initialisation: drain reads the current visual level by lerping the
-// previous fade in flight, so an immediate re-write picks up wherever the
-// strip actually is. Cold-start (no prior write) seeds source = target so the
-// very first write snaps without a black-up ramp.
+// Source init: drain reads the current visual level by lerping the in-flight
+// fade, so an immediate re-write picks up where the strip actually is.
+// Cold-start (no prior write) seeds source = target so the first write snaps
+// without a black-up ramp.
 static constexpr uint16_t kUserBrightnessFadeMs = 80;
 static uint8_t  s_userBrightnessSource = 0;
 static uint8_t  s_userBrightnessTarget = 0;
@@ -129,9 +123,9 @@ uint8_t computeUserBrightnessNow(uint32_t nowMs) {
           static_cast<int32_t>(kUserBrightnessFadeMs));
 }
 
-// Accessors for src/components/apply/apply_brightness.hpp — exposed
-// here so the apply module can drive the micro-fade triple without
-// re-exposing it globally.
+// Accessors for components/apply/apply_brightness.hpp, exposed here so the
+// apply module can drive the micro-fade triple without re-exposing it
+// globally.
 uint8_t  brightnessFadeSource()    { return s_userBrightnessSource; }
 uint8_t  brightnessFadeTarget()    { return s_userBrightnessTarget; }
 uint32_t brightnessFadeStartMs()   { return s_userBrightnessFadeStartMs; }
@@ -149,26 +143,25 @@ void clearBrightnessFadeSeed() {
 }
 
 }  // namespace lamp
-// Bring apply_brightness helpers into file scope so existing unqualified
-// call sites (applyEffectiveBrightness, computeUserBrightnessNow) continue
-// to resolve without touching every call site individually.
+// Bring apply_brightness helpers into file scope so unqualified call sites
+// (applyEffectiveBrightness, computeUserBrightnessNow) resolve.
 using lamp::applyEffectiveBrightness;
 using lamp::computeUserBrightnessNow;
 // Flag set from Core 0 (BLE callbacks) when the home-mode preview state
-// changes — either the flag itself flipped, or homeMode.brightness was
-// updated via CHAR_HOME_PREVIEW cmd 0x02. The loop task on Core 1 drains
-// it and calls applyEffectiveBrightness so the strip transitions cleanly.
+// changes (the flag flipped, or homeMode.brightness updated via
+// CHAR_HOME_PREVIEW cmd 0x02). The loop task on Core 1 drains it and calls
+// applyEffectiveBrightness so the strip transitions cleanly.
 volatile bool pendingApplyEffectiveBrightness = false;
 // Flag set from Core 0 (BLE ServerCallbacks::onDisconnect) when the phone
-// walks away — forces a synchronous disposition NVS commit so the user's
-// final slider value survives even if power is yanked before the debounce
+// walks away. Forces a synchronous flush of debounced disposition-slider
+// edits so the final values survive even if power is yanked before the idle
 // window elapses. Core 1 drain calls config.flushDispositionsNow().
 // See DispositionDebouncer in config.hpp for the NVS-wear rationale.
 volatile bool pendingFlushDispositionsRequested = false;
 
 PendingKnockoutUpdate pendingKnockout;
 
-// Pending triggerExpression invocations whose delayMs > 0 — drained from the
+// Pending triggerExpression invocations whose delayMs > 0, drained from the
 // loop task once millis() reaches fireAtMs. Loop-task only (the WiFi-task
 // CONTROL_OP handler just posts JSON into lamp::pendingSlots.inboundOp, and
 // the drain that parses it into this queue runs on the loop task), so no mutex.
@@ -183,16 +176,16 @@ std::vector<DelayedInvocation> pendingTriggers;
 portMUX_TYPE pendingMux = portMUX_INITIALIZER_UNLOCKED;
 
 // Thin forwarders into the template. Each slot's bounds check + mux
-// discipline lives inside PendingJsonSlot::post — these helpers exist
-// only so ble_control.cpp (and the ESP-NOW recv callback) can stay
-// blissfully unaware of which slot a particular char's payload lands in.
+// discipline lives inside PendingJsonSlot::post; these helpers exist only so
+// ble_control.cpp (and the ESP-NOW recv callback) stay unaware of which slot
+// a particular char's payload lands in.
 void postPendingShadeColorsJson(const char* data, size_t len) { lamp::pendingSlots.shadeColors.post(pendingMux, data, len); }
 void postPendingBaseColorsJson(const char* data, size_t len)  { lamp::pendingSlots.baseColors.post(pendingMux, data, len); }
 void postPendingBrightness(int8_t level) { pendingBrightness = level; }
 void postPendingApplyEffectiveBrightness() { pendingApplyEffectiveBrightness = true; }
 // Single-bit post called from the NimBLE host task (Core 0) inside
-// ServerCallbacks::onDisconnect — NVS is NOT Core-0-safe so we cannot
-// call config.flushDispositionsNow() there directly. The loop drain on
+// ServerCallbacks::onDisconnect. NVS is NOT Core-0-safe, so
+// config.flushDispositionsNow() can't run there directly; the loop drain on
 // Core 1 picks this up next iteration and runs the synchronous flush.
 void postPendingFlushDispositions() { pendingFlushDispositionsRequested = true; }
 void postPendingKnockout(uint8_t pixel, uint8_t brightness) {
@@ -215,15 +208,16 @@ void postPendingSocialDispositionsJson(const char* data, size_t len){ lamp::pend
 void postPendingWispOpJson(const char* data, size_t len)            { lamp::pendingSlots.wispOp.post(pendingMux, data, len); }
 
 namespace lamp {
-// Typed-payload posts called from MeshLink's WiFi recv task.
-// Same Core 0 → Core 1 hand-off discipline as the JSON slots above —
-// memcpy under portMUX, no heap, no parsing on the recv task.
+// Typed-payload posts called from MeshLink's WiFi recv task. Same
+// Core 0 → Core 1 hand-off as the JSON slots above: memcpy under portMUX,
+// no heap, no parsing on the recv task.
 void postPendingOverrideColors(const PendingOverrideColors& src)         { pendingSlots.overrideColors.post(pendingMux, src); }
 void postPendingRestoreColors(const PendingRestoreColors& src)           { pendingSlots.restoreColors.post(pendingMux, src); }
 void postPendingOverrideBrightness(const PendingOverrideBrightness& src) { pendingSlots.overrideBrightness.post(pendingMux, src); }
 void postPendingRestoreBrightness(const PendingRestoreBrightness& src)   { pendingSlots.restoreBrightness.post(pendingMux, src); }
 void postPendingWispHello(const PendingWispHello& src)                   { pendingSlots.wispHello.post(pendingMux, src); }
 void postPendingWispPalette(const PendingWispPalette& src)               { pendingSlots.wispPalette.post(pendingMux, src); }
+void postPendingWispClaim(const PendingWispClaim& src)                   { pendingSlots.wispClaim.post(pendingMux, src); }
 void postPendingEvent(const PendingEvent& src)                           { pendingSlots.event.post(pendingMux, src); }
 void postPendingFirmwareControl(const PendingFirmwareControl& src)       { pendingSlots.firmwareControl.post(pendingMux, src); }
 
@@ -231,8 +225,8 @@ void postPendingFirmwareControl(const PendingFirmwareControl& src)       { pendi
 // legacy triggerExpression CONTROL_OP recv path) to schedule a future
 // triggerInvocation without each call site having to know the queue
 // storage lives here. Runs on Core 1 (drain task); the pendingTriggers
-// vector is loop-task-only so no mutex needed. FIFO eviction on overflow
-// — most-recent intent wins, dropping the newest would lose the user's
+// vector is loop-task-only so no mutex needed. FIFO eviction on overflow:
+// most-recent intent wins, since dropping the newest would lose the user's
 // latest cascade in a mesh storm.
 void enqueueDelayedInvocation(const ExpressionInvocation& inv,
                               const uint8_t srcMac[6],
@@ -283,36 +277,33 @@ lamp::MeshLink meshLink;
 lamp::FirmwareReceiver    firmwareReceiver;
 // firmwareDistributor's global instance lives in firmware_distributor.cpp
 // (extern decl in firmware_distributor.hpp) so SocialBehavior can reference
-// it as `lamp::firmwareDistributor` from any TU — matches the pattern used
-// by `lamp::nearbyLamps` and `lamp::personalityEngine`.
+// it as `lamp::firmwareDistributor` from any TU.
 
 // Post-OTA "mark this app valid" state.
 //
 // CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=1 ships in pioarduino's prebuilt
-// sdkconfig. After the first OTA reboot, the new partition is in
-// ESP_OTA_IMG_PENDING_VERIFY state; a second esp_ota_begin against that
-// partition returns ESP_ERR_OTA_ROLLBACK_INVALID_STATE — every subsequent
-// OTA fails until the new firmware calls
-// esp_ota_mark_app_valid_cancel_rollback().
+// sdkconfig. After the first OTA reboot the new partition is in
+// ESP_OTA_IMG_PENDING_VERIFY state; a second esp_ota_begin against it
+// returns ESP_ERR_OTA_ROLLBACK_INVALID_STATE, so every subsequent OTA fails
+// until the new firmware calls esp_ota_mark_app_valid_cancel_rollback().
 //
-// We arm a 30-second timer in setup() iff we boot in pending-verify
-// state. The loop tick checks the timer; on fire, we re-confirm basic
-// health (BLE running, loop has iterated) and call mark_app_valid.
-// Otherwise: do nothing — the bootloader will revert on the next reset.
-// These globals live alongside the framework Lamp class — they are a
-// framework concern (OTA self-health), not per-variant state.
+// A 30-second timer is armed in setup() iff booting in pending-verify state.
+// The loop tick checks it; on fire, re-confirm basic health (BLE running,
+// loop has iterated) and call mark_app_valid. Otherwise do nothing and the
+// bootloader reverts on the next reset. These globals are a framework
+// concern (OTA self-health), not per-variant state.
 bool g_pendingVerify = false;
 uint32_t g_markValidDeadlineMs = 0;
 
-// ----- Local appliers for mesh-received ops --------------------------------
+// Local appliers for mesh-received ops, shared between the slot drains
+// (lamp_drains.cpp) and the cascade-receive router (lamp_remote_op.cpp):
+// apply a JSON colors array / expression op to configurator + advert +
+// section cache in one shot.
 //
-// Shared between the slot drains (lamp_drains.cpp) and the cascade-receive
-// router (lamp_remote_op.cpp): apply a JSON colors array / expression op to
-// configurator + advert + section cache in one shot.
-//
-// INVARIANT: loop task (Core 1) only. Touch compositor behaviors, bluetooth
-// advert state, and config sections — none Core-0-safe. The BLE host-task
-// path stays on the post-to-pending-slot pattern (see ble_control.cpp).
+// INVARIANT: loop task (Core 1) only. These touch compositor behaviors,
+// bluetooth advert state, and config sections, none of which are
+// Core-0-safe. The BLE host-task path stays on the post-to-pending-slot
+// pattern (see ble_control.cpp).
 
 // Walk a JsonArray of hex strings into a std::vector<Color>. Shared between
 // the two color helpers below.
@@ -325,8 +316,7 @@ static std::vector<lamp::Color> jsonArrayToColors(JsonArray arr) {
   return colors;
 }
 
-// renderShadeColors / renderBaseColors — the render-only core of the former
-// applyShadeColorsLocal / applyBaseColorsLocal helpers. Exposed in
+// renderShadeColors / renderBaseColors: the render-only core, exposed in
 // namespace lamp so apply_shade_colors.hpp and apply_base_colors.hpp can
 // call them without pulling in the rest of this file. Callers handle the
 // bookkeeping (configurator timestamps + section invalidate).
@@ -336,47 +326,43 @@ void renderShadeColors(JsonArray arr) {
   std::vector<lamp::Color> colors = jsonArrayToColors(arr);
   std::vector<lamp::Color> gradient =
       lamp::buildGradientWithStops(shade.pixelCount, colors);
-  // Drive the change through beginFade() so the BLE color picker
-  // keeps its fade UX (~250ms ease). Mid-fade interrupts (rapid writes
-  // during a drag) are handled inside ConfiguratorBehavior::beginFade —
-  // it computes the in-progress lerp value as the new fade-from endpoint,
-  // so successive writes rubber-band smoothly without re-snapshotting the
-  // post-overlay buffer (which on Base contains knockout dimming and
-  // would otherwise flicker on dimmed pixels).
+  // beginFade keeps the color-picker's ~250ms ease. On a rapid write mid-fade
+  // it re-anchors fade-from to the in-progress lerp value, so drags
+  // rubber-band smoothly instead of snapping.
   shadeConfiguratorBehavior.beginFade(gradient, lamp::kDefaultFadeMs);
   lamp::overrides.shade.rebaseline(gradient);
   // Reflect the new shade in the BLE adv so phones and v1 neighbours see it
-  // without having to connect. Use the first stop — shade in this build is
-  // a single color.
+  // without connecting. Use the first stop (shade in this build is a single
+  // color).
   bt.setAdvertisedColors(config.base.colors[config.base.ac], colors[0]);
 }
 
-// renderBaseColors — counterpart to renderShadeColors.
-// See the bookkeeping note above — callers handle timestamps + invalidate.
+// renderBaseColors: counterpart to renderShadeColors. As above, callers
+// handle timestamps + invalidate.
 void renderBaseColors(JsonArray arr) {
   if (arr.isNull() || arr.size() == 0) return;
   std::vector<lamp::Color> colors = jsonArrayToColors(arr);
   std::vector<lamp::Color> gradient =
       lamp::buildGradientWithStops(base.pixelCount, colors);
-  // See renderShadeColors: the fade-snapshot-from-buffer flicker on
-  // knockout pixels is now handled at the ConfiguratorBehavior::beginFade
-  // call site itself (snapshots from `colors` / in-progress lerp, not
-  // fb->buffer). No mid-fade guard needed here.
+  // See renderShadeColors: the fade-snapshot-from-buffer flicker on knockout
+  // pixels is handled inside ConfiguratorBehavior::beginFade (it snapshots
+  // from `colors` / in-progress lerp, not fb->buffer). No mid-fade guard
+  // needed here.
   baseConfiguratorBehavior.beginFade(gradient, lamp::kDefaultFadeMs);
   lamp::overrides.base.rebaseline(gradient);
-  // Reflect the new base in the BLE adv — first stop is what the adv carries
-  // (we don't know the user's active-stop index from this drain, and the
-  // first stop is what bt.begin used initially).
+  // Reflect the new base in the BLE adv; the first stop is what the adv
+  // carries (the user's active-stop index isn't known from this drain, and
+  // bt.begin used the first stop initially).
   bt.setAdvertisedColors(colors[0], config.shade.colors[0]);
 }
 }  // namespace lamp
 
 namespace lamp {
 // Internal helper for the apply_expressions.hpp split. mutateConfig=true is
-// the user-source path (BLE expressionOp drain) — drives expressionManager
+// the user-source path (BLE expressionOp drain): drives expressionManager
 // AND mirrors into config.expressions so persistConfig() captures it.
 // mutateConfig=false is the remote-source path (applyRemoteOpLocal for a
-// cascade-relayed CONTROL_OP) — drives expressionManager only so the
+// cascade-relayed CONTROL_OP): drives expressionManager only so the
 // cascade's transient state never becomes persistable.
 void runExpressionOp(JsonObject doc, bool mutateConfig) {
   if (doc.isNull()) return;
@@ -392,8 +378,8 @@ void runExpressionOp(JsonObject doc, bool mutateConfig) {
     for (JsonPair kv : entry) {
       std::string key(kv.key().c_str());
       // `disabledDuringWispOverride` is tolerated from older app payloads
-      // but ignored — it's now a pure type-property on the Expression
-      // subclass, not config-driven.
+      // but ignored: it's a pure type-property on the Expression subclass,
+      // not config-driven.
       if (key == "type" || key == "enabled" ||
           key == "disabledDuringWispOverride" ||
           key == "intervalMin" || key == "intervalMax" ||
@@ -403,9 +389,8 @@ void runExpressionOp(JsonObject doc, bool mutateConfig) {
       else if (v.is<int>()) cfg.setParameter(key, static_cast<uint32_t>(v.as<int>()));
     }
     // Store the JsonArray in a local so iteration doesn't reference a
-    // temporary that's destroyed at the end of the full expression
-    // (ArduinoJson 7.4.x tightened lifetime semantics on chained calls;
-    // before this the same code happened to work).
+    // temporary destroyed at the end of the full expression (ArduinoJson
+    // 7.4.x tightened lifetime semantics on chained calls).
     JsonArray colorsArr = entry["colors"].as<JsonArray>();
     for (JsonVariant cv : colorsArr) {
       cfg.colors.push_back(lamp::hexStringToColor(cv));
@@ -444,23 +429,21 @@ void runExpressionOp(JsonObject doc, bool mutateConfig) {
       }
     }
   }
-  // NOTE: callers invalidate the expressions section themselves so that the
-  // drain block preserves its prior behavior of always marking dirty (even
-  // on parse failure where nothing actually changed).
+  // Callers invalidate the expressions section themselves so the drain block
+  // always marks dirty, even on a parse failure where nothing changed.
 }
 }  // namespace lamp
 
-// Forward decl — defined later, alongside effectiveBrightness which
-// shares the same gate. initBehaviors uses it to seed compositor.begin.
+// Forward decl (defined later, alongside effectiveBrightness which shares
+// the same gate). initBehaviors uses it to seed compositor.begin.
 static bool calculateEffectiveHomeMode();
-// Forward decl — same reasoning. The BrightnessOverride callback wired
-// in initBehaviors needs to reach the same brightness applier the rest
-// of the lamp uses. Defined below alongside effectiveBrightness.
+// Forward decl. The BrightnessOverride callback wired in initBehaviors needs
+// the same brightness applier the rest of the lamp uses. Defined below
+// alongside effectiveBrightness.
 namespace lamp { void applyEffectiveBrightness(); }
 static uint8_t effectiveBrightness();
 
 void initBehaviors(lamp::Features features) {
-  // ── Unconditional: framework-essential behaviors ──────────────────────────
   // Configurators are always needed (they hold saved colors + wisp paint).
   shadeConfiguratorBehavior = lamp::ConfiguratorBehavior(&shade, 120);
   shadeConfiguratorBehavior.colors = shade.defaultColors;
@@ -471,7 +454,6 @@ void initBehaviors(lamp::Features features) {
   // compositor). Whether it loads saved expressions is gated below.
   expressionManager.begin(&shade, &base);
 
-  // ── Feature-gated behavior construction ──────────────────────────────────
   if (lamp::any(features, lamp::Features::SocialBehavior)) {
     shadeSocialBehavior = lamp::SocialBehavior(&shade, 1200);
     // Live config pointer so SocialBehavior::control reads the current
@@ -479,9 +461,9 @@ void initBehaviors(lamp::Features features) {
     // change rides through settings_blob save + reboot, but the wiring
     // is per-instance regardless).
     shadeSocialBehavior.setConfig(&config);
-    // Pause social greetings when the lamp is in home mode — home mode is
-    // the user's "I'm home, calm down" mode. Compositor gates this via
-    // the homeMode flag, kept in sync by reapplyHomeModeState().
+    // Pause social greetings in home mode (the user's "I'm home, calm down"
+    // mode). Compositor gates this via the homeMode flag, kept in sync by
+    // reapplyHomeModeState().
     shadeSocialBehavior.allowedInHomeMode = false;
   }
 
@@ -502,26 +484,22 @@ void initBehaviors(lamp::Features features) {
     expressionManager.loadFromConfig(config.expressions);
   }
 
-  // ── Assemble behavior stack ───────────────────────────────────────────────
   // Draw order = registration order, last-writer-wins on the surface buffer.
   //
-  // Configurator (wisp paint + saved colors) goes FIRST — it's the base
-  // scene. Social greetings overlay next. Expressions come LAST so brief
-  // transient effects (glitchy / pulse / breathing / shifty) compose on
-  // top of everything else and naturally yield when their animation
-  // completes (animationState=STOPPED → Compositor skips them →
-  // configurator's writes are the final state).
+  // Configurator (wisp paint + saved colors) goes FIRST (the base scene).
+  // Social greetings overlay next. Expressions come LAST so brief transient
+  // effects (glitchy / pulse / breathing / shifty) compose on top and yield
+  // when their animation completes (animationState=STOPPED, Compositor skips
+  // them, configurator's writes are the final state).
   //
-  // The configurator must register BEFORE the expressions so that
-  // expressions compose ON TOP of whatever the configurator writes.
-  // (Reversing the order would let the configurator overwrite per-pixel
-  // expression writes every frame, making non-exclusive expressions
-  // invisible during wisp paint — the prior bug that the now-removed
-  // `configurator.disabled` flag papered over.)
+  // The configurator must register BEFORE the expressions so expressions
+  // compose ON TOP of whatever the configurator writes. Reversing the order
+  // would let the configurator overwrite per-pixel expression writes every
+  // frame, making non-exclusive expressions invisible during wisp paint.
 
   std::vector<lamp::AnimatedBehavior*> allBehaviors = {};
 
-  // Configurator (base scene — saved colors + wisp paint via beginFade)
+  // Configurator (base scene: saved colors + wisp paint via beginFade)
   allBehaviors.push_back(&baseConfiguratorBehavior);
   allBehaviors.push_back(&shadeConfiguratorBehavior);
 
@@ -530,10 +508,9 @@ void initBehaviors(lamp::Features features) {
     allBehaviors.push_back(&shadeSocialBehavior);
   }
 
-  // Expression behaviors LAST — transient effects compose on top of
-  // everything below. When their animationState transitions to STOPPED
-  // the compositor skips them and the configurator's base scene shows
-  // through (no recovery needed).
+  // Expression behaviors LAST: transient effects compose on top. When their
+  // animationState transitions to STOPPED the compositor skips them and the
+  // configurator's base scene shows through.
   auto exprBehaviors = expressionManager.getBehaviors();
   allBehaviors.insert(allBehaviors.end(), exprBehaviors.begin(), exprBehaviors.end());
 
@@ -564,10 +541,10 @@ void initBehaviors(lamp::Features features) {
   }
 
   // Finish wiring the shared BehaviorContext. The Compositor self-publishes
-  // in its constructor; we publish the ExpressionManager + frame buffer list
-  // here so the expressions just registered by compositor.begin() can reach
-  // both from this point onward. (setCompositor() later in setup() repeats
-  // these writes idempotently — they're cheap pointer assignments.)
+  // in its constructor; publishing the ExpressionManager + frame buffer list
+  // here lets the expressions just registered by compositor.begin() reach
+  // both from this point on. (setCompositor() later in setup() repeats these
+  // writes idempotently; they're cheap pointer assignments.)
   auto& behaviorCtx = compositor.behaviorContext();
   behaviorCtx.expressionManager = &expressionManager;
   behaviorCtx.expressionFrameBuffers.clear();
@@ -623,7 +600,7 @@ void initBehaviors(lamp::Features features) {
   // share the same NeoPixel setBrightness entry point.
   lamp::overrides.brightness.setOnChangeCallback([]() { applyEffectiveBrightness(); });
 
-  // Init order: needs config + expressionManager + meshLink — all
+  // Init order: needs config + expressionManager + meshLink, all
   // constructed above. See personality_engine.hpp for behavior details.
   lamp::personalityEngine.begin(&config, &expressionManager, &meshLink);
 }
@@ -650,7 +627,7 @@ lamp::ExpressionConfig parseExpressionConfig(JsonObject node) {
     const char* key = kv.key().c_str();
     std::string keyStr(key);
     // `disabledDuringWispOverride` tolerated from older payloads but
-    // ignored — pure type-property now.
+    // ignored: a pure type-property, not config-driven.
     if (keyStr == "type" || keyStr == "enabled" ||
         keyStr == "disabledDuringWispOverride" ||
         keyStr == "intervalMin" || keyStr == "intervalMax" ||
@@ -816,34 +793,32 @@ extern void lamp_register_panic_handler();
 static uint8_t effectiveBrightness();
 static bool calculateEffectiveHomeMode();
 
-// ── Crowd-dim micro-fade ───────────────────────────────────────────────────
-// PersonalityEngine commits a new crowdDimFactor() when its smoothed
-// weighted-peer count crosses the deadband (≥ 2/100 change). The factor
-// is a hard step — without interpolation, a deadband crossing snaps
-// brightness by ≥ 2 levels in one frame, visible at low overall
-// brightness. This triple interpolates between successive engine targets
-// over kCrowdDimFadeMs so the transition reads as smooth.
+// Crowd-dim micro-fade. PersonalityEngine commits a new crowdDimFactor()
+// when its smoothed weighted-peer count crosses the deadband (>= 2/100
+// change). The factor is a hard step: without interpolation a deadband
+// crossing snaps brightness by >= 2 levels in one frame, visible at low
+// overall brightness. This triple interpolates between successive engine
+// targets over kCrowdDimFadeMs so the transition reads smooth.
 //
-// Distinct from the user-write triple (s_userBrightness*) because that
-// path only runs while no transient override is active and is driven by
-// a different trigger (BLE writes). Crowd-dim fades happen on the engine
-// tick path, runs every frame inside effectiveBrightness(), and stays
-// out of the OTA pulse multiplier's way by only re-arming when the
-// engine's TARGET factor changes (not when raw brightness changes).
+// Distinct from the user-write triple (s_userBrightness*): that path only
+// runs while no transient override is active and is driven by BLE writes.
+// Crowd-dim fades run every frame inside effectiveBrightness() and stay out
+// of the OTA pulse multiplier's way by only re-arming when the engine's
+// TARGET factor changes (not when raw brightness changes).
 static constexpr uint16_t kCrowdDimFadeMs = 80;
 static float    s_crowdAppliedFactor = 1.0f;
 static float    s_crowdTargetFactor  = 1.0f;
 static uint32_t s_crowdFadeStartMs   = 0;
 static bool     s_crowdFadeActive    = false;
 
-// Current interpolated crowd-dim factor. Detects target changes against
-// the engine and (re)starts a fade from wherever we are now, so a
-// mid-fade retrigger glides instead of snapping.
+// Current interpolated crowd-dim factor. Detects target changes against the
+// engine and (re)starts a fade from the current value, so a mid-fade
+// retrigger glides instead of snapping.
 static float currentCrowdDimFactor(uint32_t nowMs) {
   const float engineTarget = lamp::personalityEngine.crowdDimFactor();
   if (engineTarget != s_crowdTargetFactor) {
-    // Snapshot the currently-interpolated value before swapping the
-    // target so the new fade starts from where we visibly are.
+    // Snapshot the currently-interpolated value before swapping the target
+    // so the new fade starts from the current visible value.
     float startFrom = s_crowdAppliedFactor;
     if (s_crowdFadeActive) {
       const uint32_t elapsed = nowMs - s_crowdFadeStartMs;
@@ -879,9 +854,9 @@ static uint8_t effectiveBrightness() {
                                                     : config.lamp.brightness;
   // PersonalityEngine crowd-dim (Introvert / Ambivert + smoothed peer weight).
   // Applied BEFORE the transient brightnessOverride.effective() so paint /
-  // wisp overrides continue to work normally over the dimmed baseline.
-  // The engine reports a target factor; we interpolate between successive
-  // targets over kCrowdDimFadeMs so deadband-crossing commits don't snap.
+  // wisp overrides keep working over the dimmed baseline. The engine reports
+  // a target factor, interpolated between successive targets over
+  // kCrowdDimFadeMs so deadband-crossing commits don't snap.
   const float factor = currentCrowdDimFactor(millis());
   uint8_t afterCrowd;
   if (factor >= 0.999f) {
@@ -907,13 +882,12 @@ void applyEffectiveBrightness() {
 namespace lamp {
 
 void updateAdvertisedDeviceName(const char* newName) {
-  // Update the GAP device name AND rebuild the active advertisement
-  // payload so the new name surfaces to mid-scan phones without a
-  // reboot. NimBLE caches the advertisement frame; the stop/start
-  // pair forces it to re-emit with the freshly-set device name on
-  // the very next advertising tick. Existing GATT connections are
-  // unaffected (advertising and connections are separate state
-  // machines in NimBLE). The brief gap (~50ms — well under the
+  // Update the GAP device name AND rebuild the active advertisement payload
+  // so the new name surfaces to mid-scan phones without a reboot. NimBLE
+  // caches the advertisement frame; the stop/start pair forces it to re-emit
+  // with the freshly-set device name on the next advertising tick. Existing
+  // GATT connections are unaffected (advertising and connections are
+  // separate state machines in NimBLE). The brief gap (~50ms, well under the
   // advertising interval) is below human perception.
   NimBLEDevice::setDeviceName(newName);
   auto* adv = NimBLEDevice::getAdvertising();
@@ -932,10 +906,9 @@ void applyKnockoutPixel(uint8_t pixel, uint8_t brightness) {
   if (pixel < ::config.base.px && brightness <= 100) {
     ::baseKnockoutBehavior.knockoutPixels[pixel] = brightness;
     ::config.base.knockoutPixels[pixel] = brightness;
-    // Live per-pixel knockout — does NOT invalidate the base section
-    // cache. See the architectural invariant comment at the brightness
-    // drain — CHAR_COMMIT is what invalidates the cache, not per-pixel
-    // knockout writes.
+    // Live per-pixel knockout; does NOT invalidate the base section cache.
+    // See the invariant at the brightness drain: CHAR_COMMIT invalidates the
+    // cache, not per-pixel knockout writes.
   }
 }
 
@@ -949,7 +922,7 @@ void applyKnockoutPixel(uint8_t pixel, uint8_t brightness) {
 //      BT disconnect.
 //   2. No BT client connected: presence-based. Home mode iff the user
 //      has enabled it AND has a saved SSID AND the most recent wifi scan
-//      saw that SSID nearby. The lamp never associates — just sniffs
+//      saw that SSID nearby. The lamp never associates, just sniffs
 //      beacons. No password ever leaves the lamp.
 static bool calculateEffectiveHomeMode() {
   if (ble_control::isClientConnected()) {
@@ -960,9 +933,9 @@ static bool calculateEffectiveHomeMode() {
       && wifi::homeSsidVisible(config.homeMode.ssid);
 }
 
-// Single funnel for "home mode state may have changed" — keeps the
-// compositor's behavior gate and the strip brightness in lockstep so
-// the lamp transitions cleanly when preview flips or WiFi associates /
+// Single funnel for "home mode state may have changed". Keeps the
+// compositor's behavior gate and the strip brightness in lockstep so the
+// lamp transitions cleanly when preview flips or WiFi associates /
 // disassociates.
 static void reapplyHomeModeState() {
   compositor.setHomeMode(calculateEffectiveHomeMode());
@@ -970,7 +943,7 @@ static void reapplyHomeModeState() {
 }
 
 static void onWifiStateChanged() {
-  // This callback fires from Arduino-ESP32's WiFi event task — NOT Core 1.
+  // This callback fires from Arduino-ESP32's WiFi event task, NOT Core 1.
   // Calling into compositor.setHomeMode / shadeStrip->setBrightness from
   // here races Core 1's compositor.tick + frame_buffer.flush, corrupting
   // the NeoPixel byte buffer and the behavior vector. Symptom: lamp
@@ -983,7 +956,6 @@ static void onWifiStateChanged() {
   ble_control::notifyWifiState();
 }
 
-// ── FrameBuffer accessors (for lamp.hpp's shadeFb()/baseFb()) ─────────────
 lamp::FrameBuffer* lamp::Lamp::shadeFb() { return &::shade; }
 lamp::FrameBuffer* lamp::Lamp::baseFb()  { return &::base; }
 
@@ -1015,16 +987,16 @@ void lamp::Lamp::setup() {
 #endif
   lamp_register_panic_handler();
 
-  config = lamp::Config(&prefs);
-  // Re-populate the in-memory lampType from NVS — Config::Config loads
-  // the JSON blob, but lampType lives under its own NVS key (set by
-  // main.cpp's resolveLampType chain before this setup() runs).
+  config = lamp::Config(&configStore);
+  // Re-populate the in-memory lampType from NVS. Config::Config loads the
+  // JSON blob, but lampType lives under its own NVS key (set by main.cpp's
+  // resolveLampType chain before this setup() runs).
   config.loadLampType();
 
   // Apply subclass defaults AFTER NVS load. Fields that NVS left at their
   // factory value (e.g. name="stray", colors empty) get the subclass's
-  // preferred first-boot value. Fields the user has already saved in NVS
-  // are NOT touched — the NVS value is authoritative.
+  // preferred first-boot value. Fields the user has already saved in NVS are
+  // NOT touched; the NVS value is authoritative.
   config.applyDefaults(defaults());
 
   // First-ever-boot housekeeping, persisted once so it sticks across reboots:
@@ -1055,9 +1027,9 @@ void lamp::Lamp::setup() {
   wifi::begin();
   wifi::setStateChangeCallback(onWifiStateChanged);
   wifi::setHomeModeEnabledGetter([]() { return config.homeMode.enabled; });
-  // Suspend WiFi background scans while OTA is in flight — the scan hops
-  // the radio across 11+ channels for ~5s and silently drops ESP-NOW
-  // unicast (both OFFER→lamp AND lamp→wisp ACCEPT/REQ) during that window.
+  // Suspend WiFi background scans while OTA is in flight: the scan hops the
+  // radio across 11+ channels for ~5s and silently drops ESP-NOW unicast
+  // (both OFFER→lamp AND lamp→wisp ACCEPT/REQ) during that window.
   wifi::setOtaInProgressGetter([]() { return firmwareReceiver.isInProgress(); });
 
   bt.begin(config.lamp.name, config.base.colors[config.base.ac],
@@ -1069,9 +1041,9 @@ void lamp::Lamp::setup() {
 #endif
 
   // Map the section's byteOrder string to the NeoPixel format flag. The
-  // bpp-derived fallback covers lamps that didn't carry the new field in
-  // their NVS payload (see config.cpp's loader — byteOrder is back-filled
-  // there, so this branch shouldn't fire in practice).
+  // bpp-derived fallback covers lamps whose NVS payload lacks the field (see
+  // config.cpp's loader: byteOrder is back-filled there, so this branch
+  // shouldn't fire in practice).
   auto pickStripFmt = [](const std::string& order, uint8_t bpp) -> uint16_t {
     if (order == "GRBW") return NEO_GRBW;
     if (order == "GRB")  return NEO_GRB;
@@ -1113,26 +1085,25 @@ void lamp::Lamp::setup() {
     }
   }
 
-  // Route inbound CONTROL_OP payloads (addressed to us or broadcast) into a
-  // pending slot. WiFi-task safe: pure memcpy under portMUX, no heap work.
-  // MUST be installed BEFORE meshLink.begin() — otherwise any CONTROL_OP
-  // that arrives in the gap is dropped because controlOpHandler_ is null.
+  // Route inbound CONTROL_OP payloads (addressed to this lamp or broadcast)
+  // into a pending slot. WiFi-task safe: pure memcpy under portMUX, no heap
+  // work. MUST be installed BEFORE meshLink.begin(), or any CONTROL_OP
+  // arriving in the gap is dropped because controlOpHandler_ is null.
   meshLink.setControlOpHandler(
       [](const uint8_t* payload, size_t len, const uint8_t srcMac[6]) {
         lamp::pendingSlots.inboundOp.post(
             pendingMux, reinterpret_cast<const char*>(payload), len, srcMac);
       });
-  // Install the OTA receiver BEFORE meshLink.begin() so the
-  // chunk fast-path is wired by the time MSG_FW_* frames start arriving.
+  // Install the OTA receiver BEFORE meshLink.begin() so the chunk
+  // fast-path is wired by the time MSG_FW_* frames start arriving.
   // FirmwareReceiver::begin captures myMac via meshLink.getMyMac(),
-  // which is populated after the EspNowLink::begin() call inside
-  // meshLink.begin() — so receiver-side init has to run AFTER
-  // meshLink.begin(). The setFirmwareReceiver() call can happen any
-  // time before the first MSG_FW_OFFER arrives, but installing it right
-  // here keeps the wiring co-located.
+  // populated after the EspNowLink::begin() inside meshLink.begin(), so
+  // receiver-side init has to run AFTER meshLink.begin(). The
+  // setFirmwareReceiver() call can happen any time before the first
+  // MSG_FW_OFFER arrives; installing it here keeps the wiring co-located.
   meshLink.setFirmwareReceiver(&firmwareReceiver);
   // Bring up ESP-NOW grid presence (HELLO + COLORS). Independent of home
-  // WiFi — runs on whatever channel the radio is on. See lamp_protocol.hpp.
+  // WiFi; runs on whatever channel the radio is on. See lamp_protocol.hpp.
   meshLink.begin(&config);
   // Wire the ESP-NOW transport adapter onto the FirmwareReceiver. The
   // mesh path (wisp → lamp MSG_FW_*) emits via this transport. The BLE
@@ -1148,26 +1119,25 @@ void lamp::Lamp::setup() {
   // that only one transport (mesh OR BLE) drives an active OTA at a time.
   ble_control::setFirmwareReceiver(&firmwareReceiver);
 
-  // Gossip OTA: the lamp can ALSO originate offers to peers
-  // it meets via the social system. Wire the distributor through the same
-  // EspNowFirmwareTransport (it emits MSG_FW_OFFER/CHUNK/DONE and listens
-  // for ACCEPT/REQ/RESULT via mesh_link's dispatch ladder).
+  // Gossip OTA: the lamp can ALSO originate offers to peers it meets via the
+  // social system. Wire the distributor through the same
+  // EspNowFirmwareTransport (it emits MSG_FW_OFFER/CHUNK/DONE and listens for
+  // ACCEPT/REQ/RESULT via mesh_link's dispatch ladder).
   lamp::firmwareDistributor.begin(&meshFwTransport);
   meshLink.setFirmwareDistributor(&lamp::firmwareDistributor);
   // FS-image OTA: a second receiver/distributor pair targeting the spiffs
   // partition (shares the mesh transport; cross-OTA guard prevents overlap).
   fs_ota::begin(&meshFwTransport, &firmwareReceiver, &lamp::firmwareDistributor);
 
-  // Arm the post-OTA self-health timer. esp_ota_get_state_partition
-  // returns the ota-image-state of the running partition. If we just
-  // booted from a freshly-OTA'd image, state == ESP_OTA_IMG_PENDING_VERIFY
-  // and the bootloader will auto-rollback on the next reset unless we
-  // explicitly mark the partition valid. We give the lamp 30 seconds of
-  // steady-state runtime before declaring it healthy — long enough to
-  // surface any boot-time crashes that would justify a rollback.
+  // Arm the post-OTA self-health timer. esp_ota_get_state_partition returns
+  // the ota-image-state of the running partition. A freshly-OTA'd image
+  // boots in ESP_OTA_IMG_PENDING_VERIFY, and the bootloader auto-rollbacks on
+  // the next reset unless the partition is explicitly marked valid. The lamp
+  // gets 30 seconds of steady-state runtime before being declared healthy,
+  // long enough to surface boot-time crashes that would justify a rollback.
   //
-  // Without this code path, the SECOND OTA permanently fails (esp_ota_begin
-  // returns ESP_ERR_OTA_ROLLBACK_INVALID_STATE). One-shot-OTA trap.
+  // Without this, the SECOND OTA permanently fails (esp_ota_begin returns
+  // ESP_ERR_OTA_ROLLBACK_INVALID_STATE).
   {
     esp_ota_img_states_t state;
     const esp_partition_t* running = esp_ota_get_running_partition();
@@ -1185,30 +1155,30 @@ void lamp::Lamp::setup() {
   // begin/setMeshLink, local triggers fire but never cascade.
   expressionManager.setMeshLink(&meshLink);
   // Compositor wired so the manager can lazy-upsert a transient entry when a
-  // remote cascade arrives for an expression type that's not configured on
-  // this lamp — receivers no longer need to pre-configure every type.
+  // remote cascade arrives for an expression type not configured on this
+  // lamp, so receivers don't need to pre-configure every type.
   expressionManager.setCompositor(&compositor);
   // One-shot reservation so the loop-task drain never reallocates mid-frame.
   pendingTriggers.reserve(MAX_PENDING_TRIGGERS);
 }
 
-// Drain order matters — the per-slot drains below run in a fixed sequence
+// Drain order matters: the per-slot drains below run in a fixed sequence
 // each loop tick on Core 1. Invariants to preserve when reordering:
 //
-//   * drainExpressionOp must run BEFORE drainSettingsBlob — settings_blob
+//   * drainExpressionOp must run BEFORE drainSettingsBlob: settings_blob
 //     re-applies the canonical config snapshot, and the just-arrived
 //     expression edits must already be mirrored into config.expressions
 //     before that dispatch.
 //
 //   * drainCommit runs AFTER all live-preview drains (brightness,
-//     shadeColors, baseColors, knockout, expressionOp) — those mutate
+//     shadeColors, baseColors, knockout, expressionOp): those mutate
 //     config in RAM and the commit hash-dedups against the resulting
 //     snapshot. It runs BEFORE the section-cache push at the tail
 //     (ble_control::tick) so a successful commit's invalidateAllSections
 //     lands in the same tick the app gets notified.
 //
 //   * drainSocialDispositions runs AFTER drainSettingsBlob so both NVS
-//     writers serialise against the shared `prefs` instance on this core.
+//     writers serialise against the shared config store on this core.
 //
 //   * Transient-override drains (overrideColors / restoreColors /
 //     overrideBrightness / restoreBrightness) run BEFORE the override
@@ -1217,10 +1187,9 @@ void lamp::Lamp::setup() {
 //
 // See each drain helper's body for the per-slot detail.
 void lamp::Lamp::tick() {
-  // `config` shadowing kept for source fidelity with the pre-extraction
-  // tick() body — the bt.tickAdvertising / maybeFlushDispositions /
-  // flushDispositionsNow calls below reference it as `config`. Drain
-  // helpers each re-bind locally where they need it.
+  // `config` local reference so the bt.tickAdvertising / maybeFlushDispositions
+  // / flushDispositionsNow calls below can use it unqualified. Drain helpers
+  // each re-bind locally where they need it.
   lamp::Config& config = ::config;
 
   // Drain pending BLE actions on the loop task (Core 1). All heap allocation
@@ -1237,20 +1206,18 @@ void lamp::Lamp::tick() {
   if (pendingApplyEffectiveBrightness && !ota_quiet_mode::isQuiet()) {
     pendingApplyEffectiveBrightness = false;
     // Preview enter/exit (cmd 0x01/0x00) and live home-brightness writes
-    // (cmd 0x02) all funnel here — refresh the compositor homeMode gate
-    // and the strip brightness together.
+    // (cmd 0x02) all funnel here: refresh the compositor homeMode gate and
+    // the strip brightness together.
     // Held off during OTA quiet-mode so the crowd-dim micro-fade math
-    // doesn't snap-apply 5 minutes of accumulated wall-clock drift in
-    // one frame when quiet-mode exits. The pending flag stays set; it
-    // drains on the next non-quiet tick.
+    // doesn't snap-apply 5 minutes of accumulated wall-clock drift in one
+    // frame when quiet-mode exits. The pending flag stays set; it drains on
+    // the next non-quiet tick.
     reapplyHomeModeState();
   }
 
-  // NVS write amplification on disposition slider drag was eliminated by
-  // replacing the eager persist inside Config::setDisposition with a
-  // dirty-flag + timestamp. This poll runs the actual commit when the
-  // user has been idle for kDispositionFlushIdleMs (5s). Cheap when
-  // nothing is dirty — single bool check + uint32_t subtraction.
+  // Debounced disposition commit: runs the actual NVS write once the user
+  // has been idle for kDispositionFlushIdleMs (5s). Cheap when nothing is
+  // dirty (single bool check + uint32_t subtraction).
   config.maybeFlushDispositions(millis());
   if (pendingFlushDispositionsRequested) {
     // Phone disconnected (set on Core 0 in ble_control's onDisconnect).
@@ -1287,6 +1254,7 @@ void lamp::Lamp::tick() {
   drainRestoreBrightness();
   drainWispHello();
   drainWispPalette();
+  drainWispClaim();
   drainWispOp();
   drainWispStatus();
   drainEvent();
@@ -1303,17 +1271,16 @@ void lamp::Lamp::tick() {
     lamp::overrides.brightness.tick(now, effectiveBrightness());
 
     // User brightness micro-fade tick. Only runs when no transient
-    // brightness override is active — applyEffectiveBrightness's
+    // brightness override is active (applyEffectiveBrightness's
     // change-callback path owns the strip while a wisp override is
-    // animating. Without this gate the two would race on every frame.
+    // animating; without this gate the two would race every frame).
     //
-    // During the 80ms fade window this path writes `level` directly
-    // and intentionally bypasses both the crowd-dim factor and the OTA
-    // pulse multiplier. Slider drags need to land instantly on the
-    // commanded value; layering crowd-dim or OTA pulse mid-drag would
-    // make the slider feel laggy and disconnected. Once the fade
-    // window elapses the next applyEffectiveBrightness call reapplies
-    // both multipliers cleanly.
+    // During the 80ms fade window this path writes `level` directly and
+    // intentionally bypasses both the crowd-dim factor and the OTA pulse
+    // multiplier. Slider drags need to land instantly on the commanded
+    // value; layering crowd-dim or OTA pulse mid-drag would make the slider
+    // feel laggy and disconnected. Once the window elapses the next
+    // applyEffectiveBrightness call reapplies both multipliers cleanly.
     if (!lamp::overrides.brightness.isActive() && s_userBrightnessSeeded &&
         s_userBrightnessSource != s_userBrightnessTarget) {
       const uint8_t level = computeUserBrightnessNow(now);
@@ -1330,11 +1297,11 @@ void lamp::Lamp::tick() {
       }
     }
 
-    // Personality engine — runs after the transient-override block so it
+    // Personality engine. Runs after the transient-override block so it
     // reads a consistent post-fade view this tick. Cheap when nothing's
     // changed (1 Hz internal cadence). consumePendingApply() trips the
-    // existing applyEffectiveBrightness pump when the crowd-dim factor
-    // crosses the deadband, or when SocialMode changes the dim regime.
+    // applyEffectiveBrightness pump when the crowd-dim factor crosses the
+    // deadband, or when SocialMode changes the dim regime.
     lamp::personalityEngine.tick(now);
     if (lamp::personalityEngine.consumePendingApply()) {
       pendingApplyEffectiveBrightness = true;
@@ -1343,7 +1310,7 @@ void lamp::Lamp::tick() {
 
   // Fire any delayed triggerExpression invocations whose deadline has passed.
   // Bounded queue (MAX_PENDING_TRIGGERS) keeps this O(1) amortised; ordering
-  // is INSERTION-order, not deadline-order — if a short-delayMs invocation
+  // is INSERTION-order, not deadline-order: if a short-delayMs invocation
   // arrives after a long-delayMs one, the long one fires first when its
   // deadline hits. Best-effort by design; the cascade UX tolerates the
   // jitter and avoiding a priority queue keeps the drain trivial.
@@ -1369,11 +1336,11 @@ void lamp::Lamp::tick() {
   firmwareReceiver.tick(millis());
   lamp::firmwareDistributor.tick(millis());
   fs_ota::tick(millis());
-  // Post-OTA self-health check. After 30 seconds of steady-state
-  // loop iteration, if BLE is up and the loop has been iterating (we're
-  // inside it now so trivially true), call mark_app_valid so the next OTA
-  // can succeed. If the lamp crashes before the deadline, the bootloader
-  // auto-rollbacks on the next reset.
+  // Post-OTA self-health check. After 30 seconds of steady-state loop
+  // iteration, if BLE is up and the loop has been iterating (trivially true
+  // inside it), call mark_app_valid so the next OTA can succeed. If the lamp
+  // crashes before the deadline, the bootloader auto-rollbacks on the next
+  // reset.
   if (g_pendingVerify && static_cast<int32_t>(millis() - g_markValidDeadlineMs) >= 0) {
     if (ble_control::isRunning()) {
       const esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
@@ -1386,7 +1353,7 @@ void lamp::Lamp::tick() {
         Serial.printf("[ota] mark_app_valid failed: 0x%X\n", (unsigned)err);
 #endif
       }
-      g_pendingVerify = false;  // one-shot — even on failure don't retry
+      g_pendingVerify = false;  // one-shot: even on failure don't retry
     } else {
       // BLE isn't running; defer another tick. If BLE never comes up,
       // the lamp's broken anyway and rollback is the right move.
@@ -1408,16 +1375,13 @@ void lamp::Lamp::tick() {
   // Reap the active-test set (entries fired via dispatchLampAction
   // "test_expression"). When the last one transitions to STOPPED, flip
   // CHAR_STATE_NOTIFY previewActive=false so the app's Test button
-  // re-enables. AFTER tick so the just-completed STOPPED state is the
-  // one we read.
+  // re-enables. AFTER tick so the just-completed STOPPED state is read.
   if (expressionManager.reapCompletedTests()) {
     ble_control::notifyStateChange();
   }
 }
 
-// =============================================================================
-// Per-slot tick() drain helpers — definitions live in core/lamp_drains.cpp.
-// Method declarations are on the Lamp class in core/lamp.hpp. Shared file-
-// scope state (pendingMux, pendingKnockout, configurator behaviors, etc.)
-// is wired across the two TUs via core/lamp_internal.hpp.
-// =============================================================================
+// Per-slot tick() drain helpers: definitions live in core/lamp_drains.cpp.
+// Method declarations are on the Lamp class in core/lamp.hpp. Shared
+// file-scope state (pendingMux, pendingKnockout, configurator behaviors,
+// etc.) is wired across the two TUs via core/lamp_internal.hpp.

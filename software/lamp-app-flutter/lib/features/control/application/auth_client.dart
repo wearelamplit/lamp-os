@@ -17,17 +17,12 @@ class AuthClient {
     required String? password,
   }) async {
     if (password == null || password.isEmpty) return;
-    // SECURITY (audit sec-H2, deferred): the encrypted payload is a
-    // CONSTANT plaintext (`{auth: true}`) with a random GCM nonce. A
-    // passive BLE sniffer who captures one CHAR_AUTH write can replay
-    // the captured frame verbatim from their own phone and the lamp
-    // accepts it. The real fix needs a lamp-side per-connection
-    // challenge characteristic (read returns a fresh nonce; client
-    // mixes it into the payload; lamp rejects reuse) — a firmware-
-    // coordinated change. Tracked in
-    // docs/accepted-security-threats.md.
-    // Ciphertext body is opaque — firmware's CHAR_AUTH dispatcher only
-    // cares that the GCM tag verifies. Send a tiny constant JSON.
+    // Accepted threat: the encrypted payload is a CONSTANT plaintext
+    // (`{auth: true}`) with a random GCM nonce, so a passive sniffer can
+    // replay a captured CHAR_AUTH write verbatim and the lamp accepts it. The
+    // fix needs a lamp-side per-connection challenge characteristic.
+    // Ciphertext body is opaque; firmware's CHAR_AUTH dispatcher only cares
+    // that the GCM tag verifies. Send a tiny constant JSON.
     final bytes = await LampCrypto.encryptOp(
       op: const {'auth': true},
       password: password,

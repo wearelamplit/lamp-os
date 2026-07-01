@@ -1,19 +1,8 @@
-// Dart port of wisp/src/TupleSampler.cpp — local prediction of the two
-// colors the wisp would paint onto a lamp with the given MAC, given the
-// wisp's current palette.
+// Local prediction of the colors the wisp paints per lamp. Must match the
+// firmware's TupleSampler algorithm exactly or the "Painted lamps" preview
+// will diverge from what the wisp actually broadcasts.
 //
-// Used by the wisp config screen's "Painted lamps" section to show a
-// per-lamp color preview without requiring a firmware-side per-lamp
-// roster broadcast.
-//
-// Accuracy caveat: on Android, the BLE device id IS the lamp's MAC, but
-// it's the BLE MAC — the ESP-NOW MAC differs by one byte (the ESP32 derives
-// the WiFi-STA / ESP-NOW MAC by incrementing the BLE base). So this preview
-// gives the right "shape" — varied per-lamp colors picked from the
-// authored palette, with ~50/50 base/shade swap distribution — but the
-// exact colors will not byte-match what the wisp actually paints. The UI
-// notes this so the operator isn't surprised when their physical lamp
-// shows different shades than the app preview.
+// iOS returns a UUID instead of a bdAddr, so those lamps get no preview.
 
 import 'dart:typed_data';
 
@@ -26,9 +15,7 @@ class TuplePrediction {
 }
 
 int _fnv1a(Uint8List bytes) {
-  // Use ints; Dart on a 64-bit VM holds these in native int (mod 2^64),
-  // so we mask back to 32 bits after each multiply to mirror the C++
-  // uint32_t behaviour exactly.
+  // Mask to 32 bits after each multiply to match C++ uint32_t overflow.
   int h = 0x811C9DC5;
   for (int i = 0; i < bytes.length; ++i) {
     h ^= bytes[i];
@@ -84,11 +71,52 @@ List<int>? parseMacFromBleId(String id) {
   return out;
 }
 
+/// The lamp's mesh MAC derived from its bdAddr. ESP32 BLE MAC = STA base + 2,
+/// so mesh MAC = BLE MAC - 2 (full 48-bit, with borrow). The wisp keys
+/// per-lamp color picks and claim roster on the mesh MAC; use this, not the
+/// raw BLE id, when matching or predicting against wisp data.
+List<int>? meshMacFromBdAddr(String bdAddr) {
+  final out = parseMacFromBleId(bdAddr);
+  if (out == null) return null;
+  var borrow = 2;
+  for (var i = 5; i >= 0 && borrow > 0; i--) {
+    final v = out[i] - borrow;
+    out[i] = v < 0 ? v + 256 : v;
+    borrow = v < 0 ? 1 : 0;
+  }
+  return out;
+}
+
+int _lerp8(int a, int b, int frac) {
+  final inv = 0x100000000 - frac;
+  return (a * inv + b * frac) >> 32;
+}
+
+LampColor _sampleGradientAt(List<LampColor> stops, int pos) {
+  final n = stops.length;
+  if (n == 1) return stops[0];
+  final scaled = pos * (n - 1);
+  final i = scaled >> 32;
+  final frac = scaled & 0xFFFFFFFF;
+  if (i >= n - 1) return stops[n - 1];
+  return LampColor(
+    r: _lerp8(stops[i].r, stops[i + 1].r, frac),
+    g: _lerp8(stops[i].g, stops[i + 1].g, frac),
+    b: _lerp8(stops[i].b, stops[i + 1].b, frac),
+    w: _lerp8(stops[i].w, stops[i + 1].w, frac),
+  );
+}
+
 /// Run the same per-MAC sampling the wisp runs. Returns null when the
 /// palette is empty (no authored colors to pick from).
+///
+/// [shuffleSeed] defaults to 0 (matches the firmware default). Pass the
+/// wisp's current `shuffleSeed` from [WispStatus] so the preview stays in
+/// lock-step with what the wisp actually broadcasts.
 TuplePrediction? predictTuple({
   required List<int> mac,
   required List<LampColor> palette,
+  int shuffleSeed = 0,
 }) {
   if (mac.length != 6) return null;
   if (palette.isEmpty) return null;
@@ -97,12 +125,16 @@ TuplePrediction? predictTuple({
 
   const int kGolden   = 0x9E3779B9;
   const int kSwapSalt = 0xCAFEBABE;
-  final int n = stops.length;
-  int idxA = _hashMac(mac, 0)        % n;
-  int idxB = _hashMac(mac, kGolden)  % n;
-  if (n >= 2 && idxA == idxB) idxB = (idxB + 1) % n;
-  final swap = (_hashMac(mac, kSwapSalt) & 1) != 0;
-  final base  = swap ? stops[idxB] : stops[idxA];
-  final shade = swap ? stops[idxA] : stops[idxB];
+  const int kMinGap   = 0x40000000;
+
+  int posA = _hashMac(mac, 0       ^ shuffleSeed);
+  int posB = _hashMac(mac, kGolden ^ shuffleSeed);
+  final d = posA > posB ? posA - posB : posB - posA;
+  if (d < kMinGap) {
+    posB = (posA <= 0xFFFFFFFF - kMinGap) ? posA + kMinGap : posA - kMinGap;
+  }
+  final swap = (_hashMac(mac, kSwapSalt ^ shuffleSeed) & 1) != 0;
+  final base  = _sampleGradientAt(stops, swap ? posB : posA);
+  final shade = _sampleGradientAt(stops, swap ? posA : posB);
   return TuplePrediction(base: base, shade: shade);
 }

@@ -5,17 +5,17 @@ import 'dart:typed_data';
 import '../../control/domain/lamp_color.dart';
 import '../../../core/ble/ble_client.dart';
 import '../../../core/ble/uuids.dart';
+import '../domain/wisp_claims.dart';
 import '../domain/wisp_source_mode.dart';
 import '../domain/wisp_status.dart';
 
-/// Thin wrapper around the two Phase-D wisp BLE characteristics. The
-/// notifier layer owns lifetime/state; this class is just IO.
+/// Thin wrapper around the two wisp BLE characteristics. The notifier layer
+/// owns lifetime/state; this class is just IO.
 ///
-/// `CHAR_WISP_OP` accepts plaintext JSON (the WriteRouter on the lamp
-/// is plaintext-flavored — see `software/lamp-os/src/components/network/
-/// ble_control.cpp`, search `CHAR_WISP_OP`). Auth is still gated by the
-/// connection-level `isAuthed` check, which the BLE session already
-/// satisfies by the time the user reaches the Wisp tab.
+/// `CHAR_WISP_OP` accepts plaintext JSON (the lamp's WriteRouter is
+/// plaintext-flavored). Auth is still gated by the connection-level
+/// `isAuthed` check, which the BLE session already satisfies by the time the
+/// user reaches the Wisp tab.
 class WispRepository {
   WispRepository(this._ble, this._deviceId);
 
@@ -31,6 +31,22 @@ class WispRepository {
       BleUuids.wispStatus,
     );
     return WispStatus.fromBytes(bytes);
+  }
+
+  /// Best-effort read of CHAR_WISP_CLAIMS. Returns the claimed mesh MACs, or
+  /// null when the lamp can't answer (legacy firmware without the
+  /// characteristic, timeout, transient error). Null means "unknown, don't
+  /// filter"; the caller shows all lamps. Time-bounded so it can't stall the
+  /// shared BLE flow.
+  Future<Set<String>?> readClaims() async {
+    try {
+      final bytes = await _ble
+          .read(_deviceId, BleUuids.controlService, BleUuids.wispClaims)
+          .timeout(const Duration(seconds: 4));
+      return parseClaimedMacs(bytes);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Pin the wisp to [zoneId]. Persisted in wisp NVS — survives reboot.
@@ -65,7 +81,7 @@ class WispRepository {
   /// list in NVS and, if currently in Manual mode, pushes it into
   /// CurrentPalette so the lamps repaint without a mode flip. Palette is
   /// emitted as a list of `[r,g,b]` integer triples; W is intentionally
-  /// dropped — the lamp's headroom math handles warm tinting locally.
+  /// dropped (the lamp's headroom math handles warm tinting locally).
   /// The cap aligns with `lamp_protocol::kMaxWispPaletteColors` on the
   /// firmware side so the MSG_WISP_PALETTE broadcast that follows can
   /// carry the whole palette without truncation.
@@ -101,22 +117,26 @@ class WispRepository {
   /// their next scan). The wisp's own connection state surfaces back
   /// through `WispStatus.wifiConnected` on the next status notify.
   ///
-  /// SECURITY (accepted threat T1): the WiFi PSK leaks in TWO places —
-  /// (a) here on the BLE write to `CHAR_WISP_OP`, and (b) downstream
-  /// when the lamp re-broadcasts the wispOp as plaintext MSG_CONTROL_OP
-  /// on the ESP-NOW mesh for the wisp to ingest. The mesh-leg leak is
-  /// the more concerning one — ESP-NOW range is ~30 m LoS so a sniffer
-  /// doesn't have to be visually near the user. The only real fix is
-  /// fleet-wide mesh authentication (shared PSK distributed at
-  /// provisioning), which was deliberately rejected — see
-  /// docs/accepted-security-threats.md.
-  /// Threat is bounded by physical proximity at configuration time.
+  /// Accepted threat: the WiFi PSK leaks both here on the BLE write to
+  /// `CHAR_WISP_OP` and downstream when the lamp re-broadcasts the wispOp as
+  /// plaintext MSG_CONTROL_OP on the mesh (ESP-NOW range ~30 m LoS). Fleet-wide
+  /// mesh auth would close it but is rejected; bounded by physical proximity.
   Future<void> setWifi(String ssid, String password) async {
     await _writeOp({
       'char': 'wispOp',
       'op': 'setWifi',
       'ssid': ssid,
       'pw': password,
+    });
+  }
+
+  /// Re-roll per-lamp color assignments. The wisp bumps its shuffle seed,
+  /// re-paints the fleet with the new assignments, and broadcasts a fresh
+  /// wispStatus so the app preview re-rolls in lock-step.
+  Future<void> shuffle() async {
+    await _writeOp({
+      'char': 'wispOp',
+      'op': 'shuffle',
     });
   }
 

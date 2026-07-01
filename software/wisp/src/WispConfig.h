@@ -1,18 +1,6 @@
-// WispConfig — thin NVS wrapper for wisp-side persistent settings.
-//
-// Persistent wisp state: the Flutter app pane (a) picks which Aurora zone
-// this wisp follows, and (b) pushes WiFi credentials over BLE. Both ride
-// in MSG_CONTROL_OP payloads (JSON), are dispatched by WispOpDispatcher,
-// and land here for persistence.
-//
-// Storage: Arduino-ESP32 `Preferences` (NVS), namespace `"wisp"`. Keys are
-// kept short because NVS imposes a 15-byte key length limit:
-//   selZone   int32   selected Aurora zone, -1 = unset (0 is a valid zone)
-//   wifiSsid  String  WiFi SSID for STA bring-up
-//   wifiPw    String  WiFi password for STA bring-up
-//
-// The class caches the values in RAM after `begin()` so the read path doesn't
-// hit NVS on every Aurora palette notification.
+// WispConfig — NVS-backed persistent settings, namespace "wisp".
+// NVS keys are short (15-byte limit): selZone, wifiSsid, wifiPw, srcMode,
+// manualPal, offColor, shufSeed. Values are cached in RAM after begin().
 
 #pragma once
 
@@ -24,46 +12,28 @@
 
 namespace wisp {
 
-// Where the wisp gets its paint palette from. The mode controls which
-// branch in main.cpp is allowed to feed CurrentPalette and whether the
-// PaintDistributor is on or off.
-//
-//   Off    — no override broadcasts. The PaintDistributor is held off,
-//            and a transition into Off triggers a one-shot RESTORE walk
-//            so lamps drop any prior wisp-sourced override.
-//   Manual — push the operator-defined manual palette into
-//            CurrentPalette; Aurora's onActivePalette callback is
-//            ignored while in this mode.
-//   Aurora — Aurora subscription drives CurrentPalette as before.
-//
 // Wire encoding (NVS u8 + wispOp + wispStatus): 0=Off, 1=Manual, 2=Aurora.
-// Default is Aurora to preserve legacy first-boot behavior (a fresh wisp
-// follows Aurora's first-seen zone without operator intervention).
 enum class WispSourceMode : uint8_t {
   Off    = 0,
   Manual = 1,
   Aurora = 2,
 };
 
-// Single color slot used by the manual palette. Plain RGB (no W) — the
-// app picker emits W=0 for manual colors and the lamp grid handles the
-// W channel locally based on its own headroom math.
+// Plain RGB; the lamp grid handles W locally.
 struct ManualPaletteColor {
   uint8_t r = 0;
   uint8_t g = 0;
   uint8_t b = 0;
 };
 
-// Bound aligned with lamp_protocol::kMaxWispPaletteColors so the wisp's
-// stored palette and the on-wire MSG_WISP_PALETTE broadcast share one
-// ceiling. Was 10 (matched a wispStatus JSON budget concern); replaced
-// by the separate MSG_WISP_PALETTE broadcast at 2026-06-13. Aurora
-// palettes can be larger than 50; setManualPalette truncates and the
-// emit-side logs once on oversize.
+// Aligned with lamp_protocol::kMaxWispPaletteColors; setManualPalette truncates.
 inline constexpr size_t kManualPaletteMaxColors = 50;
 
 class WispConfig {
  public:
+  WispConfig();
+  ~WispConfig();
+
   // Open the `wisp` Preferences namespace in RW mode and cache the values.
   // Safe to call once at boot from setup().
   void begin();
@@ -79,51 +49,38 @@ class WispConfig {
   // Removes the key from NVS and resets the cache to -1.
   void clearSelectedZone();
 
-  // WiFi credential storage. Consumed by WifiLink (STA bring-up via
-  // WiFi.mode(WIFI_STA) + WiFi.begin(ssid, pw)) — WispOpDispatcher
-  // calls setWifi() on a setWifi op, then triggers wifiLink_->reconnect()
-  // and stageBeacon_->refreshAdvert() so the new creds take effect
-  // without a reboot.
-  //
-  // SECURITY: stored in plaintext NVS. ESP32 NVS is not encrypted by
-  // default; anyone with flash-dump access can read these. Acceptable
-  // for the current installation threat model; if we ever need to harden
-  // this, options are: enable NVS encryption (esp_partition +
-  // esp_secure_boot) or move credentials to a separate encrypted
-  // partition.
+  // SECURITY: stored in plaintext NVS (not encrypted by default). Anyone with
+  // flash-dump access can read these. Harden via NVS encryption if needed.
   const String& wifiSsid() const { return wifiSsid_; }
   const String& wifiPw() const { return wifiPw_; }
   bool hasWifi() const { return wifiSsid_.length() > 0; }
   void setWifi(const String& ssid, const String& pw);
   void clearWifi();
 
-  // Source mode — Off / Manual / Aurora. See enum doc above. Default
-  // remains Aurora so a fresh wisp boots into the legacy first-seen-wins
-  // behavior; persisted state survives reboots.
   WispSourceMode sourceMode() const { return sourceMode_; }
   void setSourceMode(WispSourceMode mode);
 
-  // Operator-defined manual palette. Up to kManualPaletteMaxColors
-  // colors; replace-only semantics (no per-color edit, matches the
-  // Manual editor's "Save" gating in the app UI). Empty palette is
-  // valid: while in Manual mode and empty, the wisp simply emits no
-  // palette (lamps stay on their own behavior). NVS-persisted as a
-  // packed RGB byte blob.
+  // Replace-only; empty is valid (lamps revert to their own behavior).
   const std::vector<ManualPaletteColor>& manualPalette() const {
     return manualPalette_;
   }
   void setManualPalette(const std::vector<ManualPaletteColor>& colors);
 
-  // Off-mode color. When sourceMode is Off, the wisp does NOT broadcast
-  // a palette to the lamp grid (PaintDistributor stays held off) — but
-  // it still has its own 30-pixel ring to drive. This color is what
-  // that ring shows in Off. Defaults to a warm-white candle-amber tint
-  // matching the pre-existing fallback so a fresh wisp boots
-  // identically. Persisted as 3 NVS bytes.
+  // Lock-guarded: safe to call from the StatusBeacon timer-service task.
+  size_t copyManualPalette(uint8_t* outRgb, size_t maxColors) const;
+
+  // Ring color in Off mode (PaintDistributor stays idle). Persisted as 3 NVS bytes.
   ManualPaletteColor offColor() const { return offColor_; }
   void setOffColor(ManualPaletteColor c);
 
+  // Bumping re-rolls per-lamp color assignments fleet-wide (XORed into TupleSampler salts).
+  uint8_t shuffleSeed() const { return shuffleSeed_; }
+  void bumpShuffleSeed();
+
  private:
+  // Opaque to keep FreeRTOS out of the header; cast to SemaphoreHandle_t in .cpp.
+  void* mutex_ = nullptr;
+
   Preferences prefs_;
   bool        opened_ = false;
 
@@ -133,6 +90,7 @@ class WispConfig {
   WispSourceMode sourceMode_ = WispSourceMode::Off;
   std::vector<ManualPaletteColor> manualPalette_;
   ManualPaletteColor offColor_ = {255, 150, 50};
+  uint8_t shuffleSeed_ = 0;
 };
 
 }  // namespace wisp

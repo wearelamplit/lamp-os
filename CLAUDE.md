@@ -18,8 +18,12 @@ ESP32-based smart-lamp fleet. Three components:
 
 Read these before changing networking, protocol, or BLE behavior:
 
-- **[`docs/dev/mesh-api.md`](docs/dev/mesh-api.md)**, wire-format spec for every
+- **[`docs/dev/networking.md`](docs/dev/networking.md)**, wire-format spec for every
   message type. The code wins ties; update this doc when it doesn't.
+
+**Keep docs current.** Before calling work done, check whether anything under
+`docs/dev/` describes the behavior you changed; if so, update it in the same
+change. A doc that contradicts shipped code is a bug.
 
 The full developer handbook (architecture, expressions, personality, security)
 lives in [`docs/dev/`](docs/dev/).
@@ -87,6 +91,17 @@ The native suite covers protocol parsers, dedup ring, color math, fade
 math, cascade dedup, OTA receiver/indicator, and the GATT layout pin. Keep
 it green, currently 374/374.
 
+## Plugins this workflow assumes
+
+Contributors using Claude Code should have two plugins installed; several
+conventions here reference them:
+
+- **ponytail** — laziness / over-engineering review mode plus the `/ponytail-*`
+  commands. The `// ponytail:` comment convention and the `ponytail-debt`
+  ledger depend on it.
+- **superpowers** — the skills library (brainstorming, writing-plans,
+  subagent-driven-development, TDD, code review) the dev flow leans on.
+
 ## Tail multiple lamps simultaneously
 
 `scripts/bench_tap.py` tails several USB serial ports at once, prefixing
@@ -108,26 +123,67 @@ Phase I cleanup hardened these. Don't reintroduce.
 
 ### Comments
 
-Default to NO comment. Only write one when the WHY is non-obvious, a
-hidden constraint, a subtle invariant, a workaround for a specific bug.
+Default to NO comment. Write one only for a non-obvious WHY: a hidden
+constraint, a subtle invariant, a bug workaround. Code that says what it does
+in its name gets nothing.
+
+Register: terse, like a senior dev, not a narrator.
+
+- No attention labels: `Note:`, `NB:`, `Why:`, `Defensive:`, `Rationale:`,
+  `THREADING:`. State the fact; the label is noise.
+- No "we"; state the fact or use the imperative.
+- Prefer a period. A colon only before an actual list, never to splice two
+  clauses; no em-dashes; a parenthetical only for a genuine aside, never to
+  smuggle in an implementation detail.
+- No heading or section-divider comments.
+- Don't narrate control flow. A comment restating what an `if` / `else` /
+  `switch` / loop does is noise; the branch condition already says it.
+- No `X not Y` antithesis, no `(is/isn't) load-bearing` framing. State what
+  the code does, not what it's being contrasted against.
+
+Length and placement:
+
+- ~2 lines inline. State an invariant ONCE, on the primary `.h` declaration;
+  don't restate it in the member comment and again in the `.cpp` body.
+- A header comments the *contract* — what the declaration is for, what a
+  caller must honor. Never how it works; implementation notes live in the
+  `.cpp`, or in `docs/dev/` if longer than a line.
+- An algorithm/flow walkthrough, a byte-budget tally, or anything past a few
+  lines goes in a `docs/dev/` README with a one-line pointer-comment, not
+  inlined. A `.cpp` stays comment-light; no file-top contents block.
+- Prefer a self-documenting name over a comment: if a comment exists only to
+  say what a literal or flag *means*, make it a named constant or enum. A
+  genuine magic-number constant gets at most a one-line "what breaks if it's
+  wrong".
+- No fixed per-file comment count.
+
+`// TODO:` / `// FIXME:` (concrete, tagged) and `// ponytail:` markers are
+allowed: honest tracked debt, not vague forward-leaning prose.
 
 Forbidden patterns:
 
-- Internal vocabulary: `Phase X.Y`, `Audit fix #N`, `audit fix [HIGH]`,
-  `Per YYYY-MM-DD code review bug #N`, `PHASE C`, ticket numbers, commit
-  SHAs in source comments.
-- Calendar-date archaeology: `Pre-2026-06-12 behavior was X`, rationale
-  must stand on its own; previous state is irrelevant.
-- Tombstones for moved code: `// X was moved to Y.cpp`. Anyone grepping
-  finds the symbol where it lives.
-- Restatements of what well-named code already says.
-- Meta-framing: "this handler still serves a purpose", "(none expected, 
-  they share the snapshot)".
-- Forward-leaning text: `will add later`, `reserved for`, `TODO when`,
-  `future phases can`, `deferred`, `stub`, `placeholder`.
+- Internal vocabulary: `Phase X.Y`, `audit fix #N`, ticket numbers, commit SHAs.
+- History narration: how the code used to behave or how a value was tuned —
+  `previously`, `no longer`, `originally N, bumped to M`, `grew from X to Y
+  after bench`, `since/as of <date>`, comparisons to a superseded design.
+  Git holds the past.
+- Hedge-as-content: a comment whose substance is `defensive` / `shouldn't
+  happen` / `just in case` / `for now`. State the guard's real reason or cut it.
+- Tombstones for moved code; restatements of what well-named code already says.
+- Commentary on debug scaffolding (`LAMP_DEBUG` guards, log lines). The log
+  string is the message; don't annotate it.
+- Forward-leaning prose with no actionable tag: `will add later`,
+  `reserved for`, `future phases can`, `deferred`, `stub`, `placeholder`.
+- Provenance breadcrumbs: `Ported from legacy X`, `Mirrors the wisp's X`.
+  State the shared constraint, not the lineage.
 
-When a wire-format enum or API is removed, sweep ALL comments mentioning
-it (lamp + wisp mirror copies of `lamp_protocol.hpp` included).
+References: point only to authoritative in-repo docs (`docs/dev/…`), and the
+target must resolve. No planning docs, review rounds, labeled work-units
+(`Commit E`, `plan §5`, `cq-H`), porting briefs, or machine-local paths
+(`/Users/…`, `~/…`).
+
+When a wire-format enum or API is removed, sweep ALL comments mentioning it
+(lamp + wisp mirror copies of `lamp_protocol.hpp` included).
 
 ### No speculative API surface
 
@@ -139,6 +195,37 @@ Don't expose API without a current-day consumer:
 - No template helpers introduced for hypothetical reuse.
 
 When a feature actually ships, the API surface lands in the same commit.
+
+This is the *speculative-generality* smell, and like the others it's a
+heuristic, not a law — an interface whose second implementation is a test fake,
+or one that inverts a dependency on a volatile boundary (NVS, network, clock),
+earns its keep today and isn't speculative. See
+[`docs/dev/code-smells.md`](docs/dev/code-smells.md) for the catalog and the
+"when it's actually fine" cases; judge against it, don't wield it.
+
+### Naming and C++ style
+
+- **No Hungarian notation.** Type things for the compiler; name them for
+  humans. No type-encoding prefixes (`szName`, `pBuf`, `dwCount`, `nLen`).
+  Scope markers are not Hungarian and stay: trailing `_` on members
+  (`store_`, `entries_`), `s_` / `g_` for file-statics / globals.
+- **Reuse before you build.** Reach for an existing type or helper before a
+  new one (`Color` for an RGBW value, the existing DedupRing, etc.), and
+  check the stdlib / framework before hand-rolling. Reinventing what already
+  lives here is the most common slop — see
+  [`docs/dev/code-smells.md`](docs/dev/code-smells.md).
+- **Definitions go in the `.cpp`.** Declarations in the header, definitions in
+  the `.cpp` by default. Header-only needs a reason: templates, `constexpr`, a
+  one-line accessor, or a native-test seam (a test that `#include`s the
+  `.cpp`). A header full of function bodies is the smell.
+- **Prefer modern C++ over C idioms.** `{}`-init / `std::array` / `std::fill`
+  over `memset`; a class or `std::` container over a hand-rolled struct + loose
+  functions. Exception: a genuine raw byte buffer or a tight embedded hot path
+  where the C idiom is measurably clearer or faster — then say so in a comment.
+
+These are defaults to judge against, not absolutes (e.g. wire-format
+`static_assert`s on fixed offsets are a feature, not over-assertion; keep
+them). When a default doesn't fit, the reason goes in the diff or a comment.
 
 ### Variant-include hygiene
 

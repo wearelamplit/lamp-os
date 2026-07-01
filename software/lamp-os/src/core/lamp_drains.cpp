@@ -1,13 +1,3 @@
-// core/lamp_drains.cpp — Lamp class drain-method definitions.
-//
-// Split out from core/lamp.cpp purely for readability — lamp.cpp was
-// over 2000 lines mostly because of these. The drain bodies are
-// otherwise unchanged from their inline form; the call site
-// (Lamp::tick) lives in lamp.cpp.
-//
-// Each drain reads one pending slot and applies the payload to lamp
-// state. Drain order + invariants are documented above Lamp::tick().
-
 #include "core/lamp.hpp"
 #include "core/lamp_internal.hpp"
 
@@ -39,30 +29,18 @@
 #include "core/pending_slot_aggregate.hpp"
 
 #ifdef LAMP_DEBUG
-// shadeSocialBehavior lives at file scope in lamp.cpp (not the lamp
-// namespace). drainWispOp reaches into it on the LAMP_DEBUG testGreet
-// branch to force a greeting waveform from the bench without waiting for
-// a peer to walk in/out of BLE range.
 extern lamp::SocialBehavior shadeSocialBehavior;
 #endif
 
 namespace lamp {
 
-// Forward declaration of the helper that posts a wispStatus payload into
-// the pending slot. Defined in lamp.cpp at file scope as `static` — see
-// the corresponding call site (`applyRemoteOpLocal`) for the rationale.
-// Drains don't call it directly; it's referenced indirectly via the
-// applyRemoteOpRouted helper that's declared in lamp_internal.hpp.
-
 namespace {
 
-// CHAR_COMMIT drain TU-local state — only drainCommit reads or writes
-// these. Moved here with the drain so lamp.cpp's anonymous namespace
-// stays focused on the rest of its file-scope helpers.
+// Local state for drainCommit only.
 bool      commitDirty = false;
 uint32_t  lastCommitSignalMs = 0;
 uint32_t  lastPersistedHash = 0;  // FNV-1a of last successfully persisted serialized JSON
-constexpr uint32_t kCommitFlushIdleMs = 1500;
+constexpr uint32_t kCommitFlushIdleMs = 2500;
 
 uint32_t fnv1aHash(const String& s) {
   uint32_t h = 2166136261u;
@@ -75,18 +53,7 @@ uint32_t fnv1aHash(const String& s) {
 
 }  // namespace
 
-// =============================================================================
-// Per-slot tick() drain helpers
-// =============================================================================
-//
-// One method per pending slot drained on Core 1. Bodies were extracted
-// verbatim from the original inline tick() blocks — see the invariant
-// comment above tick() for the ordering contract between them.
-
-// Drain pendingBrightness (CHAR_BRIGHTNESS live-preview write). Updates the
-// in-memory effective brightness ONLY — never invalidates the section cache.
-// See the architectural-invariant block inside for the section-cache
-// rationale.
+// Live-preview only; does not invalidate the section cache.
 void Lamp::drainBrightness() {
   if (pendingBrightness >= 0) {
     uint8_t level = static_cast<uint8_t>(pendingBrightness);
@@ -97,15 +64,13 @@ void Lamp::drainBrightness() {
                   (int)ble_control::isHomeModePageActive());
 #endif
     lamp::apply::brightnessToConfig(level, ble_control::isHomeModePageActive(), hw_.maxBrightness);
-    // Invariant: live-preview drains update in-memory config but DO NOT
-    // invalidate the section cache. Section JSON represents the persisted
-    // snapshot; only the commit / settings_blob persist paths invalidate.
-    // Mirror this in drainShadeColors, drainBaseColors, drainKnockout.
+    // Live-preview drains update in-memory config but not the section cache.
+    // The cache reflects the persisted snapshot; only commit/settings_blob
+    // paths invalidate it.
   }
 }
 
-// Drain pendingSlots.shadeColors (CHAR_SHADE_COLORS live-preview write).
-// User-source mutation of config.shade.colors — preview only, no NVS write.
+// Live-preview; updates config.shade.colors without NVS persist.
 void Lamp::drainShadeColors() {
   if (lamp::pendingSlots.shadeColors.valid) {
     char buf[lamp::kPendingJsonBase + 1];
@@ -126,13 +91,10 @@ void Lamp::drainShadeColors() {
     }
     shadeConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
     baseConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
-    // Live preview only — does NOT invalidate the shade section cache.
-    // See the architectural invariant comment at the brightness drain.
   }
 }
 
-// Drain pendingSlots.baseColors (CHAR_BASE_COLORS live-preview write).
-// User-source mutation of config.base.colors — preview only, no NVS write.
+// Live-preview; updates config.base.colors without NVS persist.
 void Lamp::drainBaseColors() {
   if (lamp::pendingSlots.baseColors.valid) {
     char buf[lamp::kPendingJsonBase + 1];
@@ -153,13 +115,10 @@ void Lamp::drainBaseColors() {
     }
     shadeConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
     baseConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
-    // Live preview only — does NOT invalidate the base section cache.
-    // See the architectural invariant comment at the brightness drain.
   }
 }
 
-// Drain the single-pixel knockout slot (debug/test path that dims one LED).
-// Preview only — does not touch NVS.
+// Preview only; does not touch NVS.
 void Lamp::drainKnockout() {
   if (pendingKnockout.valid) {
     uint8_t pixel, brightness;
@@ -175,10 +134,8 @@ void Lamp::drainKnockout() {
   }
 }
 
-// Drain pendingSlots.expressionOp (Update/Add/Delete from the expression
-// editor). Mirrors the change into config.expressions AND persists to NVS
-// immediately — must run BEFORE drainSettingsBlob and BEFORE drainCommit so
-// the commit-time hash sees the new snapshot.
+// Persists immediately. Must run before drainSettingsBlob and drainCommit
+// so the commit-time hash sees the updated snapshot.
 void Lamp::drainExpressionOp() {
   lamp::Config& config = ::config;
   if (lamp::pendingSlots.expressionOp.valid) {
@@ -199,27 +156,16 @@ void Lamp::drainExpressionOp() {
     }
     config.invalidateExpressionsSection();
 
-    // Immediate NVS persist after the runtime mutation. Diverges from the
-    // architectural invariant documented at the brightness drain above
-    // ("live-preview drains do NOT write NVS — only settings_blob does")
-    // because the expression editor UX has no global Save step: the user
-    // taps Update/Add/Delete and expects the change to survive a reboot,
-    // matching the setup-service UX. expressionOpToConfig has already
-    // mirrored the change into config.expressions, so config.asJsonDocument()
-    // serializes the new authoritative state — no merge needed, no reboot
-    // needed. (If we later extend this pattern to baseColors/shadeColors/
-    // brightness, those will need a debounce because slider drags can fire
-    // ~4 BLE writes/sec and we don't want one NVS write per drag tick.)
+    // Persist immediately: expression edits have no global Save step,
+    // so each op must survive a reboot on its own.
     if (applied) {
       config.persistConfig("expressionOp");
     }
   }
 }
 
-// CHAR_COMMIT drain. Debounced 1500 ms after the last commit signal, with
-// hash-dedup against the last persisted snapshot and a force-flush path for
-// BLE disconnect. Must run AFTER all live-preview drains so the snapshot it
-// hashes is current; runs BEFORE the section-cache push at the tail.
+// Debounced 2500 ms; hash-dedup skips redundant NVS writes.
+// Force-flush path on BLE disconnect. Runs after live-preview drains.
 void Lamp::drainCommit() {
   lamp::Config& config = ::config;
   if (lamp::pendingSlots.pendingCommit) {
@@ -238,7 +184,7 @@ void Lamp::drainCommit() {
        (millis() - lastCommitSignalMs) >= kCommitFlushIdleMs)) {
     lamp::pendingSlots.forceCommitFlush = false;
     if (firmwareReceiver.isInProgress()) {
-      // Defer — recheck next tick. Don't clear commitDirty.
+      // OTA in progress; defer. commitDirty stays set.
 #ifdef LAMP_DEBUG
       Serial.println("[loop] commit drain: OTA in progress, deferred");
 #endif
@@ -259,18 +205,14 @@ void Lamp::drainCommit() {
           config.invalidateAllSections();
           commitDirty = false;
         }
-        // On persist failure, commitDirty stays set so the next tick
-        // retries. No app-side surfacing — the previous notify path was
-        // never plumbed past a debugPrint.
+        // Persist failure leaves commitDirty set; next tick retries.
       }
     }
   }
 }
 
-// settings_blob drain — bulk apply of a JSON config blob (factory reset,
-// per-section dispatch, opt-in reboot). Runs AFTER drainExpressionOp so any
-// just-arrived expression edits are already mirrored before dispatch. OTA-
-// in-progress guard discards the write rather than racing chunk-writes.
+// Bulk JSON config apply (factory reset, per-section dispatch, opt-in reboot).
+// Runs after drainExpressionOp. OTA-in-progress guard discards the write.
 void Lamp::drainSettingsBlob() {
   lamp::Config& config = ::config;
   if (lamp::pendingSlots.settingsBlob.valid) {
@@ -287,12 +229,8 @@ void Lamp::drainSettingsBlob() {
       Serial.printf("[loop] settingsBlob: incoming JSON parse failed\n");
 #endif
     } else if (incomingDoc["factoryReset"].as<bool>()) {
-      // Factory reset sentinel — wipe NVS + reboot, bypass the apply
-      // orchestrator entirely.
-      // The co-shipping warning is UNCONDITIONAL (not LAMP_DEBUG-gated):
-      // this is forward defense against an app that accidentally bundles
-      // factoryReset with other fields. The app guard makes it impossible
-      // in normal flow, but fleet logs must surface the unexpected case.
+      // Warning is unconditional: factoryReset co-shipped with other keys
+      // must surface in fleet logs regardless of debug mode.
       if (incomingDoc.as<JsonObject>().size() > 1) {
         Serial.println(
             "[loop] settingsBlob WARNING: factoryReset co-shipped with "
@@ -301,22 +239,16 @@ void Lamp::drainSettingsBlob() {
 #ifdef LAMP_DEBUG
       Serial.println("[loop] settingsBlob: factoryReset sentinel, wiping NVS");
 #endif
-      if (!prefs.begin("lamp", false)) {
-#ifdef LAMP_DEBUG
-        Serial.println("[nvs] prefs.begin failed (factory reset)");
-#endif
+      if (config.factoryReset()) {
+        ble_control::notifyStateChange();
+        lamp::fadeOutRebootRequested = true;
       } else {
-        bool cleared = prefs.clear();
-        prefs.end();
-        if (cleared) {
-          ble_control::notifyStateChange();
-          lamp::fadeOutRebootRequested = true;
-        }
+#ifdef LAMP_DEBUG
+        Serial.println("[nvs] factory reset failed");
+#endif
       }
     } else if (firmwareReceiver.isInProgress()) {
-      // OTA in progress — a NVS write here would compete with the OTA
-      // chunk-write subsystem. Discard the blob; app will re-issue
-      // when OTA finishes.
+      // NVS write during OTA risks chunk-write contention; discard the blob.
 #ifdef LAMP_DEBUG
       Serial.println(
           "[loop] settingsBlob: OTA in progress, discarding write");
@@ -339,11 +271,8 @@ void Lamp::drainSettingsBlob() {
   }
 }
 
-// Disposition map writes — drained AFTER settings_blob so both writers
-// serialise against the shared `prefs` instance on this core. The BLE
-// callback only memcpys into the pending slot (Core 0); persistence +
-// map rebuild happen here on Core 1. No reboot, no auth re-check — the
-// BLE callback already verified isAuthed before posting.
+// Runs after drainSettingsBlob; BLE callback already verified isAuthed.
+// Persistence and map rebuild run here on Core 1.
 void Lamp::drainSocialDispositions() {
   lamp::Config& config = ::config;
   if (lamp::pendingSlots.socialDispositions.valid) {
@@ -356,9 +285,7 @@ void Lamp::drainSocialDispositions() {
   }
 }
 
-// Drain pendingSlots.testAction — manual triggers from the test panel.
-// Translates either a JSON action or a raw expression-type string into the
-// dispatchLampAction router.
+// Manual test triggers; routes to dispatchLampAction.
 void Lamp::drainTestAction() {
   if (lamp::pendingSlots.testAction.valid) {
     char buf[lamp::kPendingJsonOp + 1];
@@ -392,8 +319,7 @@ void Lamp::drainTestAction() {
   }
 }
 
-// Drain pendingSlots.wifiOp — currently scan-only (setHomeSsid/forget moved
-// to the unified settings_blob path).
+// WiFi op drain; scan-only.
 void Lamp::drainWifiOp() {
   if (lamp::pendingSlots.wifiOp.valid) {
     char buf[lamp::kPendingJsonOp + 1];
@@ -409,15 +335,11 @@ void Lamp::drainWifiOp() {
       if (op && strcmp(op, "scan") == 0) {
         wifi::startScan();
       }
-      // setHomeSsid + forget moved to the unified draft + settings_blob
-      // path. The app holds the SSID locally and persists it via the blob
-      // along with everything else — wifiOp is now scan-only.
     }
   }
 }
 
-// Drain inbound ESP-NOW CONTROL_OP (deferred from MeshLink's WiFi task)
-// — JSON parse + local dispatch via the unified cascade router.
+// JSON parse and dispatch via the cascade router.
 void Lamp::drainInboundOp() {
   if (lamp::pendingSlots.inboundOp.valid) {
     char buf[lamp::kPendingJsonOp + 1];
@@ -430,10 +352,7 @@ void Lamp::drainInboundOp() {
   }
 }
 
-// Drain BLE CHAR_REMOTE_OP writes through the same router — it decides
-// apply-locally / forward / both from the payload's targetMac field. BLE
-// has no real network source MAC; pass selfMac so app-driven rapid triggers
-// coalesce against each other on the receive side.
+// BLE has no network source MAC; selfMac lets app-driven triggers coalesce.
 void Lamp::drainRemoteOp() {
   if (lamp::pendingSlots.remoteOp.valid) {
     char buf[lamp::kPendingJsonOp + 1];
@@ -447,9 +366,8 @@ void Lamp::drainRemoteOp() {
   }
 }
 
-// Drain pendingSlots.overrideColors — transient color override from wisp
-// paint or app preview. Pins the wisp identity BEFORE apply() so the very
-// first paint-triggered notifyWispStatus carries the truth instead of "{}".
+// Pin wisp identity before apply() so the first paint-triggered
+// notifyWispStatus carries non-empty status.
 void Lamp::drainOverrideColors() {
   {
     lamp::PendingOverrideColors cmd;
@@ -459,42 +377,21 @@ void Lamp::drainOverrideColors() {
                     (unsigned)cmd.surface, (unsigned)cmd.numColors,
                     (unsigned)cmd.fadeDurationMs);
 #endif
-      // OTA quiet mode wins: drop the override on the floor (drain
-      // consumed the slot above so it doesn't pile up). The compositor
-      // is exclusively painting the OTA indicator while quiet, so
-      // applying a wisp/app paint here just queues a fade that we
-      // can't render and would compete with the indicator the moment
-      // quiet exits. Slot was a single-mailbox newest-wins anyway, so
-      // dropping one frame of paint is the existing semantic.
+      // OTA quiet mode: compositor owns the display for the progress indicator;
+      // drop paint frames to avoid competing with it.
       if (lamp::ota_quiet_mode::isQuiet()) {
 #ifdef LAMP_DEBUG
         Serial.printf("[loop] drop overrideColors (ota quiet)\n");
 #endif
         return;
       }
-      // Pin the wisp identity BEFORE the apply() calls. apply() can
-      // edge-trigger the wisp-active transition callback, which calls
-      // notifyWispStatus → reads getWispStatusReadJson. If the cache is
-      // still "{}" at that moment, the notify carries an empty payload
-      // and the app shows "No wisp detected" until the next wisp hello
-      // (≤30s) populates the cache. Setting mac/present here first
-      // makes the very first paint-triggered notify carry the truth.
-      //
-      // Without this fix: on a freshly-joined lamp that hears
-      // OVERRIDE_COLORS (unicast paint, no relay) but hasn't yet heard
-      // a WISP_HELLO (gossip-broadcast, 30s heartbeat), the app sees
-      // "No wisp detected" even though the lamp is actively wisp-
-      // painted — the "bytes=0 puzzle" observed in the field.
+      // Cache the wisp MAC before apply() so the transition callback's
+      // notifyWispStatus sees non-empty status immediately.
       if (cmd.sourceKind == lamp_protocol::OverrideSource::Wisp) {
         lamp::nearbyLamps.cacheWispMacFromPaint(cmd.sourceMac);
       }
-      // Surface routing.
-      // - Base: colors → base only.
-      // - Shade: colors → shade only.
-      // - BaseAndShade: colors[0] → base, colors[1] → shade (paired wisp
-      //   paint, halves ESP-NOW traffic vs the prior two-frame design).
-      //   Must have numColors >= 2; if only 1 color arrived, treat it as
-      //   the base colour and skip shade (defensive, shouldn't happen).
+      // BaseAndShade: colors[0] to base, colors[1] to shade.
+      // If numColors < 2 only base is updated.
       if (cmd.surface == lamp_protocol::OverrideSurface::BaseAndShade) {
         lamp::overrides.base.apply(cmd.sourceMac, cmd.sourceKind,
                                 &cmd.colors[0], /*numColors=*/1,
@@ -516,13 +413,10 @@ void Lamp::drainOverrideColors() {
                                    cmd.fadeDurationMs);
         }
       }
-      // Wisp paint ships Base + Shade 10 ms apart per peer but both land
-      // in a single-slot mailbox — newest-writer-wins. When Core 1 lags
-      // past 10 ms (BLE scan + render contention is enough), the Shade
-      // frame drops the Base frame on the floor and Base's watchdog
-      // expires after 60 s. Treat the surviving frame as proof of mesh
-      // liveness on both surfaces. Only Wisp paints both surfaces in
-      // a pair, so guard on Wisp.
+      // Base + Shade arrive 10 ms apart but share a single-slot mailbox.
+      // If Core 1 lags, the second frame drops the first and only one
+      // surface's watchdog is refreshed. Touch both so the watchdog
+      // doesn't expire on the dropped surface.
       if (cmd.sourceKind == lamp_protocol::OverrideSource::Wisp) {
         const uint32_t now = millis();
         lamp::overrides.base.touchApply(now);
@@ -532,8 +426,7 @@ void Lamp::drainOverrideColors() {
   }
 }
 
-// Drain pendingSlots.restoreColors — paired with drainOverrideColors;
-// releases the transient override on the matching surface(s).
+// Releases the transient override on the matching surface(s).
 void Lamp::drainRestoreColors() {
   {
     lamp::PendingRestoreColors cmd;
@@ -542,7 +435,7 @@ void Lamp::drainRestoreColors() {
       Serial.printf("[loop] drain restoreColors surface=0x%02X fadeMs=%u\n",
                     (unsigned)cmd.surface, (unsigned)cmd.fadeDurationMs);
 #endif
-      // BaseAndShade restores both surfaces in one frame (mirrors paint).
+      // BaseAndShade: restore both surfaces.
       if (cmd.surface == lamp_protocol::OverrideSurface::Base ||
           cmd.surface == lamp_protocol::OverrideSurface::BaseAndShade) {
         lamp::overrides.base.restore(cmd.sourceMac, cmd.sourceKind,
@@ -557,8 +450,7 @@ void Lamp::drainRestoreColors() {
   }
 }
 
-// Drain pendingSlots.overrideBrightness — transient brightness override
-// (single global instance in v1; surface byte carried for forward compat).
+// Transient brightness override.
 void Lamp::drainOverrideBrightness() {
   {
     lamp::PendingOverrideBrightness cmd;
@@ -573,7 +465,6 @@ void Lamp::drainOverrideBrightness() {
   }
 }
 
-// Drain pendingSlots.restoreBrightness — paired with drainOverrideBrightness.
 void Lamp::drainRestoreBrightness() {
   {
     lamp::PendingRestoreBrightness cmd;
@@ -588,8 +479,7 @@ void Lamp::drainRestoreBrightness() {
   }
 }
 
-// Drain pendingSlots.wispHello — gossip-broadcast WISP_HELLO beacons. Caches
-// version/flags/palette-id for the nearby-lamps view.
+// Cache wisp hello fields (version, flags, palette-id prefix).
 void Lamp::drainWispHello() {
   {
     lamp::PendingWispHello cmd;
@@ -605,15 +495,9 @@ void Lamp::drainWispHello() {
   }
 }
 
-// Drain pendingSlots.wispPalette — manualPalette frames from a wisp. Updates
-// the NearbyLamps cache and pushes a BLE notify so subscribed apps see the
-// new palette without round-tripping a read of CHAR_WISP_STATUS.
+// Cache the wisp palette and push a BLE notify so apps see it immediately.
 void Lamp::drainWispPalette() {
   {
-    // Wisp manualPalette drain. MeshLink's recv branch parsed +
-    // deduped + posted; here on Core 1 we update the NearbyLamps cache
-    // and push a BLE notify so subscribed apps see the new palette
-    // without round-tripping a read of CHAR_WISP_STATUS.
     lamp::PendingWispPalette cmd;
     if (lamp::pendingSlots.wispPalette.drain(pendingMux, cmd)) {
 #ifdef LAMP_DEBUG
@@ -628,12 +512,19 @@ void Lamp::drainWispPalette() {
   }
 }
 
-// Drain pendingSlots.wispOp — app wrote a wispOp via CHAR_WISP_OP; we
-// broadcast it as MSG_CONTROL_OP so the wisp(s) on the mesh pick it up.
-// NEVER applied locally — wispOp is wisp-only (lamps don't have a zone
-// state). MeshLink::sendControlOp records its own seq into
-// controlOpDedup_ before the broadcast, so the reflected copy we get back
-// from the gossip rebroadcast doesn't try to apply locally.
+// Cache the wisp-claimed lamp MACs for CHAR_WISP_CLAIMS.
+void Lamp::drainWispClaim() {
+  {
+    lamp::PendingWispClaim cmd;
+    if (lamp::pendingSlots.wispClaim.drain(pendingMux, cmd)) {
+      lamp::nearbyLamps.cacheWispClaim(cmd.sourceMac, cmd.lampMacs, cmd.count,
+                                       millis());
+    }
+  }
+}
+
+// Broadcasts wispOp as MSG_CONTROL_OP to reach the wisp. Not applied
+// locally; sendControlOp pre-records the seq so the echoed relay is deduped.
 void Lamp::drainWispOp() {
   if (lamp::pendingSlots.wispOp.valid) {
     char buf[lamp::kPendingJsonOp + 1];
@@ -643,10 +534,6 @@ void Lamp::drainWispOp() {
 #endif
     if (len > 0) {
 #ifdef LAMP_DEBUG
-      // testGreet — bench-only handler. The app triple-taps the proximity
-      // label and we force a greeting waveform without waiting on a peer
-      // to physically arrive on BLE adv. Intercepted here so the wispOp
-      // does NOT get broadcast onto the mesh; it's purely local.
       {
         JsonDocument peek;
         auto err = deserializeJson(peek, buf, len);
@@ -674,14 +561,9 @@ void Lamp::drainWispOp() {
         }
       }
 #endif
-      // Removed the !isOtaInProgress() gate on 2026-06-13 after a sub-agent
-      // audit confirmed it silently dropped user-driven wispOps (e.g.
-      // `setSource off`) whenever a background gossip-OTA was in flight,
-      // and the wisp never received the broadcast. Config ops are low-rate
-      // and small; a few extra mesh bytes during OTA is acceptable in
-      // exchange for the ops actually reaching the wisp every time the
-      // user taps Save. The applyRemoteOpRouted() quiesce stays in place
-      // because that forward path is gossip-relay (much higher volume).
+      // No OTA gate here: wispOps are low-rate config; they reach the wisp
+      // even during OTA. applyRemoteOpRouted() still quiesces (gossip-relay,
+      // much higher volume).
       static const uint8_t kBroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
       meshLink.sendControlOp(kBroadcastMac,
                                  reinterpret_cast<const uint8_t*>(buf),
@@ -690,10 +572,7 @@ void Lamp::drainWispOp() {
   }
 }
 
-// Drain pendingSlots.wispStatus — applyRemoteOpLocal saw a wispStatus
-// payload and posted it here with the wisp's source MAC. Cache into
-// NearbyLamps and push a BLE notification so any app subscribed to
-// CHAR_WISP_STATUS picks up the change without round-tripping a read.
+// Cache wispStatus and notify CHAR_WISP_STATUS subscribers.
 void Lamp::drainWispStatus() {
   if (lamp::pendingSlots.wispStatus.valid) {
     char buf[lamp::kPendingJsonOp + 1];
@@ -711,11 +590,8 @@ void Lamp::drainWispStatus() {
   }
 }
 
-// MSG_EVENT drain. The recv side already resolved our delayMs from the
-// stagger entries list and copied the payload bytes into the slot;
-// tryHandleExpressionEvent does the (cheap-peek → RecentCascade dedup →
-// full parse → trigger) dance on Core 1. No local-config consult —
-// cascade is sender-authoritative.
+// delayMs already resolved on the recv side.
+// Cascade is sender-authoritative; no local-config consult.
 void Lamp::drainEvent() {
   {
     lamp::PendingEvent cmd;
@@ -733,10 +609,7 @@ void Lamp::drainEvent() {
   }
 }
 
-// MSG_FW_OFFER / MSG_FW_DONE drain. MeshLink's WiFi recv path populates
-// the slot; FirmwareReceiver does the heavy work on Core 1 (esp_ota_begin,
-// signature verify, set_boot_partition). The chunk fast-path bypasses this
-// slot — see mesh_link.cpp MSG_FW_CHUNK branch.
+// FW_OFFER/DONE: heavy work (esp_ota_begin, sig verify) runs on Core 1.
 void Lamp::drainFirmwareControl() {
   {
     lamp::PendingFirmwareControl cmd;

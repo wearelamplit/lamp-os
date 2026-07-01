@@ -10,10 +10,8 @@ import '../domain/lamp_nearby_peer.dart';
 part 'lamp_nearby_peers_notifier.g.dart';
 
 /// Polling interval for the lamp's nearby JSON. The page-protocol
-/// section has no NOTIFY path (per ble_control.cpp:838-845's history
-/// of deprecating per-section notify chars), so we poll. 1 Hz is a
-/// balance between freshness on rename/disposition changes and
-/// battery cost.
+/// section has no NOTIFY path, so polling is required. 1 Hz balances
+/// freshness on rename/disposition changes against battery cost.
 const _pollInterval = Duration(seconds: 1);
 
 /// Per-lamp view of peers the connected lamp can hear. Reads the
@@ -48,9 +46,8 @@ class LampNearbyPeersNotifier extends _$LampNearbyPeersNotifier {
       _connSub = null;
     });
 
-    // Subscribe to the connection state. When connected, kick off
-    // polling. When disconnected, pause but keep the last good
-    // snapshot visible so the UI doesn't churn during reconnect.
+    // Keep the last good snapshot while disconnected so the UI doesn't
+    // churn during reconnect.
     _connSub = _ble.watchConnected(lampId).listen((isConnected) {
       _connected = isConnected;
       if (isConnected) {
@@ -61,9 +58,8 @@ class LampNearbyPeersNotifier extends _$LampNearbyPeersNotifier {
       }
     });
 
-    // Best-effort initial read. If we're already connected, this lands
-    // the first snapshot before any poll tick. If we're disconnected,
-    // it throws and we wait for the watchConnected stream to flip.
+    // Best-effort initial read; throws when disconnected and the
+    // watchConnected stream handles resumption.
     try {
       final peers = await _readOnce();
       _lastGood = peers;
@@ -89,15 +85,18 @@ class LampNearbyPeersNotifier extends _$LampNearbyPeersNotifier {
         state = AsyncData(peers);
       }
     } catch (_) {
-      // Keep last good snapshot. Most likely transient: a BLE
-      // disconnect raced the poll, or the section read returned
-      // an empty/malformed payload for one tick. Next tick retries.
+      // Keep last good snapshot on transient error; next tick retries.
     }
   }
 
   Future<List<LampNearbyPeer>> _readOnce() async {
     final bytes = await _ble.readSection(lampId, 'nearby');
-    if (bytes.isEmpty) return const [];
+    // A zero-byte read is a transient glitch (a genuinely empty list
+    // serializes as "[]"). Throw so callers keep the last good snapshot
+    // instead of flashing an empty list and dropping every peer's name.
+    if (bytes.isEmpty) {
+      throw const FormatException('empty nearby section read');
+    }
     final decoded = jsonDecode(utf8.decode(bytes));
     if (decoded is! List) return const [];
     return decoded

@@ -19,4 +19,4 @@ Wisp has no BLE. The app talks to wisp via any nearby lamp acting as a proxy: th
 
 ## Wire format
 
-Wisp/lamp message types (`MSG_WISP_HELLO`, `MSG_WISP_PAINT`, `MSG_WISP_RELEASE`, `MSG_WISP_OP`) and the OTA exchange (`MSG_FW_OFFER` … `MSG_FW_RESULT`) are documented in [`docs/mesh-api.md`](../../docs/mesh-api.md). LSIG signed-firmware footer format lives alongside the build scripts at [`scripts/README.md`](../../scripts/README.md).
+Wisp/lamp message types (`MSG_WISP_HELLO`, `MSG_WISP_PALETTE`, `MSG_OVERRIDE_COLORS`/`MSG_RESTORE_COLORS`, `MSG_CONTROL_OP` wisp envelopes) and the OTA exchange (`MSG_FW_OFFER` … `MSG_FW_RESULT`) are documented in [`docs/dev/networking.md`](../../docs/dev/networking.md). LSIG signed-firmware footer format lives alongside the build scripts at [`scripts/README.md`](../../scripts/README.md).

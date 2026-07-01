@@ -35,9 +35,7 @@ void MeshLink::tick() {
   uint32_t now = millis();
   if (now - lastHelloMs_ < LAMP_HELLO_INTERVAL_MS && lastHelloMs_ != 0) return;
   lastHelloMs_ = now;
-  // Mesh quiesce during gossip OTA: while either the distributor or the
-  // receiver is mid-flow, suppress HELLO emits so the chunk stream gets
-  // the channel time. Inbound HELLO is still processed.
+  // Suppress HELLO during gossip OTA so the chunk stream gets channel time.
   if (isOtaInProgress()) return;
   emitHello();
 }
@@ -60,14 +58,13 @@ bool MeshLink::sendControlOp(const uint8_t targetMac[6],
                                  const uint8_t* payload, size_t payloadLen) {
   if (payloadLen > lamp_protocol::CONTROL_MAX_PAYLOAD) return false;
   uint8_t buf[lamp_protocol::CONTROL_MAX_SIZE];
-  // sourceMac is THIS lamp — peers and the originator can dedup our own
-  // re-broadcasts based on it.
+  // sourceMac is this lamp so peers and the originator can dedup re-broadcasts.
   const size_t n = lamp_protocol::buildControlOp(buf, sizeof(buf), controlOpSeq_++,
                                                  targetMac, myMac_,
                                                  payload, payloadLen);
   if (!n) return false;
-  // Record in our own dedup ring so the inbound re-broadcast (from a peer)
-  // doesn't loop back as an "apply locally".
+  // Record in the dedup ring so the inbound re-broadcast (from a peer)
+  // doesn't loop back as an apply-locally.
   controlOpDedup_.record(myMac_, lamp_protocol::MSG_CONTROL_OP, controlOpSeq_ - 1);
   return link_.broadcast(buf, n);
 }
@@ -80,8 +77,7 @@ uint16_t MeshLink::nextEventSeq() {
   return eventSeq_++;
 }
 
-// Decide whether `targetMac` addresses this lamp. Single helper so the
-// per-message-type branches below stay readable. Broadcast = all-FF.
+// Broadcast is all-FF.
 static bool addressedToUs(const uint8_t targetMac[6], const uint8_t myMac[6]) {
   static const uint8_t bcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
   return std::memcmp(targetMac, myMac, 6) == 0 ||
@@ -95,12 +91,9 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     lamp_protocol::ParsedHello h;
     if (!lamp_protocol::parseHello(data, len, h)) return;
     if (!helloDedup_.record(h.sourceMac, lamp_protocol::MSG_HELLO, h.seq)) return;
-    // Don't rebroadcast our OWN hellos.
+    // Don't rebroadcast own hellos.
     if (std::memcmp(h.sourceMac, myMac_, 6) == 0) return;
 #ifdef LAMP_DEBUG
-    // Rate-limited per peer-MAC: log once per ~10s so we can see WHICH
-    // peers are actually reaching this lamp's recv path, vs. silently
-    // dropped by RF or the nearbyLamps mutex timeout.
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
     {
       static uint32_t lastHelloRxLogMs = 0;
@@ -119,10 +112,7 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     }
 #endif
 #endif
-    // Record into the unified nearbyLamps store so the BLE CHAR_NEARBY_LAMPS
-    // read + SocialBehavior + any other consumer all see this lamp. RSSI
-    // feeds the cascade sort so peers physically closer to the originator
-    // fire first when a MSG_EVENT cascade comes through.
+    // RSSI feeds the cascade sort so physically closer peers fire first.
     const std::string peerName = h.nameLen ? std::string(h.name, h.nameLen) : std::string();
     nearbyLamps.addOrUpdateFromEspNow(
         peerName,
@@ -131,10 +121,7 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
         Color(h.shade[0], h.shade[1], h.shade[2], h.shade[3]),
         h.firmwareVersion,
         h.otaState,
-        // Protocol version byte from the frame header — used by the
-        // distributor to build OTA OFFER/CHUNK/DONE at the peer's
-        // version. parseHello already validated data[2] is in our
-        // accepted range (via inspect()).
+        // data[2] = protocol version, validated by inspect() before reaching here.
         data[2],
         h.fwChannel,
         h.fsDigest,
@@ -145,10 +132,8 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     if (!lamp_protocol::parseControlOp(data, len, op)) return;
     // Dedup by (sourceMac, seq) so a loop-relayed copy doesn't fire twice.
     if (!controlOpDedup_.record(op.sourceMac, lamp_protocol::MSG_CONTROL_OP, op.seq)) return;
-    // Rebroadcast for grid relay — extends mesh reach beyond direct radio
-    // range. The cascade no longer rides this path (MSG_EVENT broadcast
-    // replaces the per-peer unicast hack), so CONTROL_OP is unconditionally
-    // gossip-relayed now.
+    // Rebroadcast for grid relay: extends mesh reach beyond direct radio
+    // range. CONTROL_OP is unconditionally gossip-relayed.
     link_.broadcast(data, len);
     // Apply locally if addressed to us or broadcast.
     static const uint8_t bcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
@@ -164,10 +149,8 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
       controlOpHandler_(op.payload, op.payloadLen, op.sourceMac);
     }
   } else if (msgType == lamp_protocol::MSG_WISP_HELLO) {
-    // Wisp presence beacon. Parse → dedup → forward to NearbyLamps via a
-    // pending slot (loop drain on Core 1 calls cacheWispHello). Keep
-    // recv-task work to memcpy + dedup so the WiFi task can return
-    // quickly to its next frame.
+    // Parse and dedup on the WiFi task; cacheWispHello runs on Core 1 via
+    // the pending slot so recv-task work stays bounded to memcpy + dedup.
     lamp_protocol::ParsedWispHello h;
     if (!lamp_protocol::parseWispHello(data, len, h)) return;
     if (!wispHelloDedup_.record(h.sourceMac, lamp_protocol::MSG_WISP_HELLO, h.seq)) return;
@@ -181,38 +164,33 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
                 lamp_protocol::WISP_HELLO_FW_CHANNEL_LEN);
     slot.carriedFwVersion = h.carriedFwVersion;
     postPendingWispHello(slot);
-    // Rebroadcast so wisps in adjacent rooms (no direct line of sight to
-    // this room) still propagate. Same gossip semantics as MSG_HELLO.
+    // Gossip-relay so wisps beyond direct range propagate.
     link_.broadcast(data, len);
   } else if (msgType == lamp_protocol::MSG_WISP_CLAIM) {
-    // Wisp-to-wisp coordination. Lamps don't act on the payload.
-    //
-    // Stopped gossip-relaying on 2026-06-13 after a sub-agent traffic audit
-    // showed CLAIM relay was the single biggest new broadcast load — every
-    // claim is rebroadcast by every lamp every 2 s, which adds ~900 B per
-    // 30 s of pure relay overhead in a 2-lamp room. With BLE coex (IDF
-    // #14904) already starving ESP-NOW under load, this was contributing
-    // to wispOps occasionally getting lost on the mesh.
-    //
-    // The original rationale for relaying (so a wisp on the other side of
-    // the mesh hears about claims from wisps it can't directly hear) only
-    // matters in multi-wisp deployments where two wisps can't hear each
-    // other directly but can via a lamp. Single-wisp setups never need
-    // the relay; even multi-wisp setups in the same room hear each other
-    // directly. If/when a true multi-room multi-wisp deployment surfaces,
-    // we can re-enable selectively.
-    //
-    // Still dedup so the wisp's own gossip back doesn't repeat-fire the
-    // (currently absent) downstream handlers if a future change adds one.
+    // No relay: CLAIM relay was the dominant broadcast-load source.
+    // Dedup still runs to prevent repeat-fire on direct reception.
     lamp_protocol::ParsedWispClaim wc;
     if (!lamp_protocol::parseWispClaim(data, len, wc)) return;
-    (void)wispClaimDedup_.record(wc.sourceMac,
-                                 lamp_protocol::MSG_WISP_CLAIM, wc.seq);
+    if (!wispClaimDedup_.record(wc.sourceMac,
+                                lamp_protocol::MSG_WISP_CLAIM, wc.seq)) {
+      return;
+    }
+    PendingWispClaim slot;
+    std::memcpy(slot.sourceMac, wc.sourceMac, 6);
+    const uint8_t safeCount = wc.count > lamp_protocol::kMaxWispClaimEntries
+                                  ? static_cast<uint8_t>(lamp_protocol::kMaxWispClaimEntries)
+                                  : wc.count;
+    slot.count = safeCount;
+    for (uint8_t i = 0; i < safeCount; ++i) {
+      // Each entry is 7 bytes: lampMac[6] + int8 rssi. Copy only the MAC.
+      std::memcpy(slot.lampMacs[i],
+                  wc.entries + static_cast<size_t>(i) * lamp_protocol::WISP_CLAIM_ENTRY_SIZE,
+                  6);
+    }
+    postPendingWispClaim(slot);
   } else if (msgType == lamp_protocol::MSG_WISP_PALETTE) {
-    // Wisp's manualPalette broadcast. Lamps cache + gossip-relay; the
-    // cache feeds CHAR_WISP_STATUS so the app sees a converged palette
-    // through any lamp it connects to. Dedup-before-relay so the gossip
-    // storm dies out instead of cycling.
+    // Cache and gossip-relay; cache feeds CHAR_WISP_STATUS so the app sees
+    // the palette through any connected lamp. Dedup gates the relay.
     lamp_protocol::ParsedWispPalette wp;
     if (!lamp_protocol::parseWispPalette(data, len, wp)) return;
     if (!wispPaletteDedup_.record(wp.sourceMac,
@@ -235,13 +213,8 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     if (!overrideColorsDedup_.record(p.sourceMac,
                                      lamp_protocol::MSG_OVERRIDE_COLORS,
                                      p.seq)) return;
-    // OVERRIDE/RESTORE messages do NOT relay (per design: unicast paint,
-    // no gossip). Reach is whatever direct radio delivers — keeps wisp's
-    // paint scoped to "lamps the wisp can hear" without spillover.
+    // No relay: unicast paint scoped to direct radio range (no spillover).
     if (!addressedToUs(p.targetMac, myMac_)) return;
-    // Debug-session telemetry: record every per-surface arrival so we can
-    // diagnose base-flicker (paired Base+Shade sends, Base loses ESP-NOW
-    // races more often per PaintDistributor.cpp:130-139).
     Serial.printf("[recv] OVERRIDE_COLORS surface=0x%02X src=%02X:%02X:%02X:%02X:%02X:%02X seq=%u fade=%ums kind=%u\n",
                   (unsigned)p.surface,
                   p.sourceMac[0], p.sourceMac[1], p.sourceMac[2],
@@ -265,7 +238,7 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     if (!restoreColorsDedup_.record(p.sourceMac,
                                     lamp_protocol::MSG_RESTORE_COLORS,
                                     p.seq)) return;
-    // No relay — see OVERRIDE_COLORS branch.
+    // No relay.
     if (!addressedToUs(p.targetMac, myMac_)) return;
     Serial.printf("[recv] RESTORE_COLORS surface=0x%02X src=%02X:%02X:%02X:%02X:%02X:%02X seq=%u kind=%u\n",
                   (unsigned)p.surface,
@@ -284,25 +257,19 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     if (!overrideBrightnessDedup_.record(p.sourceMac,
                                          lamp_protocol::MSG_OVERRIDE_BRIGHTNESS,
                                          p.seq)) return;
-    // No relay — see OVERRIDE_COLORS branch.
+    // No relay.
     if (!addressedToUs(p.targetMac, myMac_)) return;
-    // Anti-defeat brightness floor: a peer-swap or random source can't
-    // drag brightness arbitrarily low. Wisp-paired sources bypass the
-    // floor (the wisp owns a lobby "go dark" scenario) — check by
-    // matching sourceMac against the cached MSG_WISP_HELLO sender within
-    // the watchdog window.
+    // Wisp-paired sources bypass the brightness floor (wisp owns go-dark scenes);
+    // match sourceMac against the cached hello sender within the pairing window.
     if (p.brightness < lamp_protocol::kBrightnessOverrideMin) {
       const auto wisp = nearbyLamps.getWispCache();
       const uint32_t now = millis();
-      // 60s pairing window — matches the override watchdog. A wisp that
-      // hasn't beaconed in this long loses the floor-bypass; defeat-by-
-      // silent-source is then the same risk as for any other unknown
-      // sender (i.e. dropped).
+      // 60 s matches the override watchdog; a wisp silent this long loses the bypass.
       constexpr uint32_t kWispPairingWindowMs = 60000;
       const bool wispPaired = wisp.present &&
                               std::memcmp(wisp.mac, p.sourceMac, 6) == 0 &&
                               (now - wisp.lastHelloMs) < kWispPairingWindowMs;
-      if (!wispPaired) return;  // drop silently — defeat-the-defeat
+      if (!wispPaired) return;  // drop silently (defeat-the-defeat)
     }
     PendingOverrideBrightness slot;
     std::memcpy(slot.sourceMac, p.sourceMac, 6);
@@ -317,7 +284,7 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     if (!restoreBrightnessDedup_.record(p.sourceMac,
                                         lamp_protocol::MSG_RESTORE_BRIGHTNESS,
                                         p.seq)) return;
-    // No relay — see OVERRIDE_COLORS branch.
+    // No relay.
     if (!addressedToUs(p.targetMac, myMac_)) return;
     PendingRestoreBrightness slot;
     std::memcpy(slot.sourceMac, p.sourceMac, 6);
@@ -331,61 +298,18 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     // Dedup by (sourceMac, seq). The cascade sender emits two back-to-back
     // copies of MSG_EVENT for broadcast-loss resilience (ESP-NOW broadcasts
     // are not link-layer ACK'd); both share the same seq so the second
-    // copy collapses here. Also collapses any future relay (we don't relay
-    // MSG_EVENT today, but a peer's stack might).
+    // copy collapses here. Also collapses any relayed copy.
     if (!eventDedup_.record(ev.sourceMac, lamp_protocol::MSG_EVENT, ev.seq)) return;
-    // Drop our own broadcast — would otherwise re-trigger us locally.
-    // The cascade originator is firing on its own clock already; no need
-    // to round-trip through the wire.
+    // Drop self-originated broadcast: would otherwise re-trigger locally.
+    // The originator already fires on its own clock; no wire round-trip.
     if (std::memcmp(ev.sourceMac, myMac_, 6) == 0) return;
-    // v0x03 lock-in: gossip-relay MSG_EVENT.
-    //
-    // Old semantics (pre-v0x03): MSG_EVENT was single-hop. The cascade
-    // originator's broadcast (×2 back-to-back) reached whatever was in
-    // direct radio range, full stop. When the originator was BLE-coex'd
-    // — common case: the app was open on the triggerer's phone — IDF
-    // #14904's SW-coex packet loss dropped reliability to ~22% in the
-    // field. No relay meant no other lamp could help.
-    //
-    // New semantics: every lamp that successfully receives a MSG_EVENT
-    // for the first time (dedup gate above) AND isn't the originator
-    // (self-MAC gate above) rebroadcasts the frame verbatim. Three things
-    // bound the storm:
-    //   1. eventDedup_.record() (64-slot ring per the v0x03 capacity bump)
-    //      collapses any (sourceMac, seq) we've already seen. Total
-    //      airborne copies per cascade ≤ N + 1 in an N-lamp mesh, not
-    //      N² — each lamp emits at most one relay.
-    //   2. The self-MAC gate at line 275 prevents the originator from
-    //      re-firing its own gossip. The originator only emits its
-    //      explicit broadcast pair from ExpressionManager::maybeCascade.
-    //   3. Reach saturates at the dedup horizon: a frame arriving on
-    //      lamp X after X already relayed it gets dropped before re-relay.
-    //
-    // Why BEFORE the eventKind filter below: forward-compat. If a future
-    // EventKind (0x02..0xFF) ships on a newer fleet member, v0x03 lamps
-    // still relay it (helping its propagation) while individually dropping
-    // it from local application. That keeps the mesh from being a
-    // single-version straightjacket — unknown-but-well-formed events still
-    // hitchhike through the grid.
-    //
-    // The mode change from "best-effort sender re-emit" to "gossip-cascade
-    // through all peers" is the primary cascade-reliability fix in the
-    // production lock-in. Combined with HW coex (Commit F), targeted ≥90%
-    // cascade reception on a 2-lamp BT-connected source.
-    // why: cascade reliability fix per validated plan §"Layer 1".
+    // Gossip-relay. Dedup ring bounds the storm to N+1 copies in an N-lamp mesh.
+    // Relay runs before the eventKind filter for forward-compat with unknown kinds.
     link_.broadcast(data, len);
-    // Built-in event kinds: today only ExpressionTriggered. Drop unknown
-    // kinds silently (forward-compat with user-defined kinds in 0x10+).
-    // NOTE: this filter runs AFTER the gossip-relay above — see rationale.
+    // Drop unknown event kinds silently for forward-compat.
     if (ev.eventKind != lamp_protocol::EventKind::ExpressionTriggered) return;
-    // Look up our own MAC in the stagger entries. If present, take the
-    // supplied delayMs; if absent (sender's peer list was truncated past
-    // kMaxStaggerEntries, or we just joined the mesh between the sender's
-    // last HELLO scrape and the cascade emit), tail-fire at
-    // numStaggerEntries * kTailFireStaggerMs so we still participate but
-    // don't pile onto the wavefront. 50 ms matches the typical
-    // cascadeStaggerMs the app sets — a sensible default for "we missed
-    // the wave; fall in behind."
+    // Tail-fire at numStaggerEntries * kTailFireStaggerMs when this lamp
+    // is absent from the stagger list (truncated or late-join).
     constexpr uint16_t kTailFireStaggerMs = 50;
     uint16_t delayMs = static_cast<uint16_t>(ev.numStaggerEntries) * kTailFireStaggerMs;
     for (uint8_t i = 0; i < ev.numStaggerEntries; ++i) {
@@ -394,11 +318,7 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
         break;
       }
     }
-    // Payload is already capped at maxEventPayloadFor(numStaggerEntries)
-    // by the parser; the PendingEvent.payload buffer is sized to the
-    // zero-stagger best case so this memcpy can never overrun for any
-    // valid frame. Defensive check anyway so a future protocol drift
-    // can't silently overflow the slot.
+    // Guards against a future payload expansion overflowing PendingEvent.payload.
     if (ev.payloadLen > lamp_protocol::maxEventPayloadFor(ev.numStaggerEntries)) return;
     PendingEvent slot;
     std::memcpy(slot.sourceMac, ev.sourceMac, 6);
@@ -410,7 +330,7 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     postPendingEvent(slot);
   } else if (msgType == lamp_protocol::MSG_FW_OFFER) {
     // Single-hop unicast; no gossip relay. The shared firmwareDedup_
-    // ring guards against the wisp re-sending the OFFER while we drain.
+    // ring guards against the wisp re-sending the OFFER mid-drain.
     lamp_protocol::ParsedFwOffer p;
     if (!lamp_protocol::parseFwOffer(data, len, p)) return;
     if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FW_OFFER, p.seq)) return;
@@ -431,16 +351,9 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     slot.offer.totalChunks = p.totalChunks;
     postPendingFirmwareControl(slot);
   } else if (msgType == lamp_protocol::MSG_FW_CHUNK) {
-    // High-frequency payload-carrying frame. Per lamp-side plan §5
-    // (Option 1, confirmed by spike at 16.6% WiFi-task-busy / 0% drops):
-    // direct handoff to FirmwareReceiver::handleChunkOnRecvTask on this
-    // recv task. No pending slot — the single-slot pattern can't keep
-    // up with 250 chunks/s and the slot's "newest writer wins" semantics
-    // would silently drop most of the stream.
-    //
-    // The receiver's chunk handler is bounded: ~0.5 ms for the
-    // esp_ota_write_with_offset call + a bitmap set under portMUX. No
-    // heap, no JSON, no FreeRTOS blocking.
+    // Direct handoff to handleChunkOnRecvTask: a pending single-slot
+    // mailbox can't keep up with 250 chunks/s. The handler is bounded
+    // (~0.5 ms esp_ota_write_with_offset, portMUX only, no heap/blocking).
     lamp_protocol::ParsedFwChunk p;
     if (!lamp_protocol::parseFwChunk(data, len, p)) return;
     if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FW_CHUNK, p.seq)) return;
@@ -464,11 +377,8 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     slot.done.footerLen = p.footerLen;
     postPendingFirmwareControl(slot);
   } else if (msgType == lamp_protocol::MSG_FW_ACCEPT) {
-    // ACCEPT is the lamp's own distributor response to a peer's OFFER.
-    // (Lamps both originate and receive offers via gossip OTA.) Route
-    // addressed-to-me ACCEPT/REQ/RESULT into the
-    // FirmwareDistributor on this recv task — the distributor's state
-    // machine handles them under its own portMUX.
+    // Route distributor-protocol frames (ACCEPT/REQ/RESULT) to FirmwareDistributor
+    // on this recv task; its state machine handles them under portMUX.
     lamp_protocol::ParsedFwAccept p;
     if (!lamp_protocol::parseFwAccept(data, len, p)) return;
     if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FW_ACCEPT, p.seq)) return;
@@ -553,10 +463,6 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
 void MeshLink::emitHello() {
   if (!config_) return;
 #ifdef LAMP_DEBUG
-  // Rate-limited to one per 10s so this doesn't dominate the UART. Confirms
-  // the lamp is actually broadcasting HELLOs (vs. emitHello never being
-  // called due to OTA-in-progress suppression at tick():40 or the
-  // interval gate above).
   static uint32_t lastEmitLogMs = 0;
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   uint32_t nowMsLog = millis();
@@ -585,11 +491,8 @@ void MeshLink::emitHello() {
                            ? lamp_protocol::HELLO_MAX_NAME
                            : name.size();
 
-  // OTA state for HELLO_TLV_OTA_STATE. Receiver wins if both somehow
-  // report true — matches the precedence the old shade-pulse code used
-  // pre-removal. Default kOtaStateIdle when neither side is in a flow
-  // (which is the common case for most lamps most of the time, and
-  // buildHello omits the TLV entirely in that case).
+  // HELLO_TLV_OTA_STATE: receiver status takes priority over distributor.
+  // buildHello omits the TLV entirely when kOtaStateIdle.
   uint8_t otaState = lamp_protocol::kOtaStateIdle;
   if (firmwareReceiver_ && firmwareReceiver_->isInProgress()) {
     otaState = lamp_protocol::kOtaStateReceiving;

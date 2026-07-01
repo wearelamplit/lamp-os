@@ -13,22 +13,13 @@
 #include <esp_partition.h>
 #include <esp_task_wdt.h>
 #include <spi_flash_mmap.h>  // SPI_FLASH_SEC_SIZE
-// Low-level IWDT (Interrupt-Watchdog) control. We need to widen the IWDT's
-// stage timeouts around each block erase in the upfront partition erase,
-// because a W25Q erase can take 50-750 ms under cache-disable bursts while
-// the IWDT's configured stage timeout is shorter — which fires `rst:0x8
-// (TG1WDT_SYS_RESET)` mid-erase if we don't widen first.
-//
-// We DO set CONFIG_ESP_INT_WDT_TIMEOUT_MS=1000 via platformio.ini's
-// custom_sdkconfig (see [env:upesy_wroom]), which raises the baseline.
-// That alone isn't sufficient: the IDF tick_hook re-applies the
-// baked-in timeout literal on every FreeRTOS tick (its
-// wdt_hal_config_stage call uses CONFIG_ESP_INT_WDT_TIMEOUT_MS as a
-// compile-time constant), so a runtime erase that exceeds the original
-// budget can still trip the watchdog between ticks. We use the
-// hal/wdt_hal.h "not public api" surface to widen the stage timeout
-// mid-erase, then restore it. Least-bad option until upstream exposes
-// a runtime IWDT reconfigure API.
+// Low-level IWDT (Interrupt-Watchdog) control. A W25Q block erase can take
+// 50-750 ms under cache-disable bursts, longer than the IWDT stage timeout,
+// firing rst:0x8 (TG1WDT_SYS_RESET) mid-erase unless widened first.
+// custom_sdkconfig raises CONFIG_ESP_INT_WDT_TIMEOUT_MS to 1000, but IDF's
+// tick_hook re-applies that compile-time literal every FreeRTOS tick, so a
+// runtime erase exceeding the budget can still trip between ticks. These
+// hal/wdt_hal.h (not-public-api) calls widen the stage timeout mid-erase.
 #include "hal/wdt_hal.h"
 #include "hal/mwdt_ll.h"
 #include "soc/timer_group_reg.h"
@@ -39,16 +30,10 @@ namespace lamp {
 namespace {
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-// Restore the default TWDT timeout when an OTA flow exits. Matches the
-// sdkconfig-baked pre-OTA configuration (5 s timeout, IDLE0 subscribed).
-// Critically: we do NOT subscribe the loop task — arduino-esp32 leaves
-// `loopTaskWDTEnabled = false` by default (see
-// framework-arduinoespressif32/cores/esp32/main.cpp), so the Arduino loop
-// body never calls esp_task_wdt_reset(). Subscribing the loop task to
-// the TWDT under those conditions guarantees a panic the moment the
-// configured timeout elapses, regardless of how busy the loop is.
-//
-// Called from every flow-exit path (abort, OtaBeginFail, verifyAndApply).
+// Restore the default TWDT (5 s, IDLE0 subscribed) on every OTA flow exit.
+// Don't subscribe the Arduino loop task: arduino-esp32 leaves
+// loopTaskWDTEnabled=false and never calls esp_task_wdt_reset() from the loop
+// body, so subscribing it would panic the instant the timeout elapsed.
 void restoreDefaultWdt() {
   esp_task_wdt_config_t wdtDefault = {
       .timeout_ms     = 5000,
@@ -59,55 +44,42 @@ void restoreDefaultWdt() {
 }
 #endif
 
-// Streaming budgets / cadences.
 constexpr uint32_t kChunkStallReqMs    = 2000;   // emit REQ after 2s gap
 constexpr uint32_t kStreamingHardCapMs = 600000; // total OTA budget (10 min)
-// If no chunk arrives for this long, the offerer has likely failed or gone
-// away. Abort the local Streaming state so we drop back to Idle and start
-// broadcasting HELLOs again, letting either the same peer re-OFFER or any
-// other higher-version peer take over. Without this, a fleet ends up with
-// receivers permanently locked to dead offerers until the 5-minute hard
-// cap fires — a long deadlock window during which the receiver is invisible
-// to every other potential source.
+// If no chunk arrives for this long the offerer has likely died; abort the
+// Streaming state back to Idle and resume HELLOs so any peer can re-OFFER.
+// Without it, receivers stay locked to dead offerers until the 5-min hard cap.
 constexpr uint32_t kNoProgressAbortMs  = 60000;  // 1 min no-chunk abort
 constexpr uint32_t kPostResultPauseMs  = 100;    // pre-restart delay
 
-// ACCEPT burst spread tunables. The first ACCEPT goes out synchronously
-// from onOfferOnLoop; the remaining (kAcceptBurstCount - 1) are
-// scheduled at kAcceptSpreadMs intervals and drained from tick(). The
-// total spread (1.6 s at 5 × 400 ms) easily overlaps 8+ BLE adv
-// intervals on the sender so at least one ACCEPT lands in a
-// WiFi-RX-allowed coex window. Quenched as soon as we receive our
-// first chunk — that's empirical proof an earlier ACCEPT got through.
+// ACCEPT burst spread. First ACCEPT goes out synchronously from onOfferOnLoop;
+// the rest are scheduled at kAcceptSpreadMs and drained from tick(). The ~1.6 s
+// spread overlaps enough BLE adv intervals that one ACCEPT lands in a WiFi-RX
+// coex window. Quenched on the first chunk (proof an ACCEPT got through).
 constexpr uint8_t  kAcceptBurstCount   = 5;
 constexpr uint32_t kAcceptSpreadMs     = 400;
 
-// Full-upfront erase: the whole image region is erased once on Core 1 in
+// Full-upfront erase. The whole image region is erased once on Core 1 in
 // onOfferOnLoop before the gate arms, so each chunk arrival on Core 0 is a
-// pure esp_partition_write — no erase on the recv path.
+// pure esp_partition_write. No erase on the recv path.
+//
+// The erase is synchronous and stalls the main loop for ~1-2 s (longer on a
+// slow W25Q). That stall is intentional. It runs before ACCEPT, so no stream
+// is starved, and an erase-free recv path keeps cache+IRQ-off stalls from
+// overflowing the ESP-NOW RX queue mid-stream. The lamp stops animating for
+// that window and resumes normally after. A brief freeze buys the
+// reliability of a sensitive flash operation.
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-// IWDT widening for the entire OTA window. The prebuilt arduino-esp32
-// libs bake in CONFIG_ESP_INT_WDT_TIMEOUT_MS=300; the tick_hook in IDF's
-// int_wdt.c re-applies that 300 ms ceiling every FreeRTOS tick. A W25Q
-// sector erase can take 50-750 ms (chip variability + cache-disable
-// burst tails) and would trip IWDT mid-erase.
-//
-// Strategy: re-widen on the OFFER path AND on every chunk handler. The
-// tick_hook keeps clobbering us back to 300 ms between widens, but we
-// replace it again before each erase — net effect is the IWDT timeout
-// sits at our wide value for the cache-disabled erase window. There
-// IS a sub-millisecond race window where the tick_hook can clamp
-// between our widenIwdt() and `esp_partition_erase_range` actually
-// disabling interrupts; safe in practice because (a) the CONFIG_
-// ESP_INT_WDT_TIMEOUT_MS=1000 baseline (custom_sdkconfig) already
-// gives 1 s of slack — enough for a worst-case 750 ms erase — and
-// (b) interrupts go off the instant the erase actually starts, so
-// the tick_hook can't clamp once we're inside the cache-disabled
-// window.
-//
-// `mwdt_dev = &TIMERG1` matches int_wdt.c's `IWDT_INSTANCE=WDT_MWDT1`
-// for ESP32 (the H/W on TG1 is the IWDT; TG0 holds the task watchdog).
+// IWDT widening for the OTA erase window. Prebuilt arduino-esp32 bakes
+// CONFIG_ESP_INT_WDT_TIMEOUT_MS=300 and IDF's tick_hook re-applies that ceiling
+// every FreeRTOS tick; a 50-750 ms W25Q erase would trip it. Re-widen before
+// each erase. The tick_hook can clamp back in the sub-ms window before
+// esp_partition_erase_range disables interrupts, but the 1000 ms sdkconfig
+// baseline covers a worst-case erase and interrupts go off once the erase
+// starts, so the tick_hook can't clamp inside the cache-disabled window.
+// mwdt_dev = &TIMERG1 matches int_wdt.c's IWDT_INSTANCE=WDT_MWDT1 (TG1 is the
+// IWDT; TG0 holds the task watchdog).
 constexpr uint32_t kIwdtEraseStageMs  = 8000;  // stage 0 (interrupt) widen
 constexpr uint32_t kIwdtEraseResetMs  = 16000; // stage 1 (system reset) widen
 constexpr uint32_t kIwdtTicksPerUs    = 500;   // matches IDF's IWDT_TICKS_PER_US
@@ -142,16 +114,12 @@ bool channelMatchesOurs(const char* offerChannel /* FW_CHANNEL_LEN bytes */) {
 
 }  // namespace
 
-// =============================================================================
-// Lifecycle
-// =============================================================================
-
 void FirmwareReceiver::begin(FirmwareTransport* meshTransport,
                              FirmwareTransport* bleTransport) {
   meshTransport_ = meshTransport;
   bleTransport_  = bleTransport;
-  // Snapshot the lamp's MAC from whichever transport is wired (both should
-  // report the same identity — it's the lamp's chip MAC, transport-agnostic).
+  // Snapshot the lamp's chip MAC from whichever transport is wired (both report
+  // the same transport-agnostic identity).
   if (meshTransport_) {
     meshTransport_->getMyMac(myMac_);
   } else if (bleTransport_) {
@@ -164,12 +132,10 @@ void FirmwareReceiver::begin(FirmwareTransport* meshTransport,
 void FirmwareReceiver::tick(uint32_t nowMs) {
   switch (state_) {
     case State::Idle:
-      // Inter-session quiet hold expiry: a prior session deferred its
-      // exitQuiet (see abortOta / State::Failed) so the strip doesn't
-      // flash defaultColors between back-to-back OFFERs from different
-      // distributors in a 3+ lamp mesh. quietHoldUntilMs_ == 0 is the
-      // sentinel — without the `!= 0` guard, `nowMs >= 0` is always
-      // true and any Idle tick would exitQuiet prematurely.
+      // Inter-session quiet hold expiry: a prior session deferred its exitQuiet
+      // (abortOta / State::Failed) so the strip doesn't flash between
+      // back-to-back OFFERs. quietHoldUntilMs_==0 is the sentinel; without the
+      // !=0 guard, nowMs>=0 is always true and any Idle tick exits prematurely.
       if (quietHeld_ && quietHoldUntilMs_ != 0 && nowMs >= quietHoldUntilMs_) {
         ::lamp::ota_quiet_mode::exitQuiet();
         quietHeld_        = false;
@@ -181,11 +147,10 @@ void FirmwareReceiver::tick(uint32_t nowMs) {
 
     case State::Streaming: {
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-      // Queued ACCEPT retries. Drain at most one per tick — the spread
-      // is the whole point — and quench the queue as soon as a chunk
-      // arrives (the ACCEPT clearly got through). recvChunksCount_
-      // is reset to 0 at session start (see onOfferOnLoop), so a
-      // non-zero value here means we've received our first chunk.
+      // Drain at most one queued ACCEPT retry per tick (the spread is the
+      // point) and quench the queue once a chunk arrives. recvChunksCount_
+      // resets to 0 at session start, so non-zero here means the first chunk
+      // landed.
       if (pendingAcceptCount_ != 0 && recvChunksCount_ != 0) {
         pendingAcceptCount_ = 0;
       }
@@ -196,14 +161,12 @@ void FirmwareReceiver::tick(uint32_t nowMs) {
         nextAcceptMs_ = nowMs + kAcceptSpreadMs;
       }
 
-      // No erase work here — the whole image region was erased upfront in
-      // onOfferOnLoop, so Core 0 chunk writes are pure (no per-chunk erase
-      // stall). The OTA converges via REQs for any RF-dropped chunks.
+      // No per-chunk erase: the image region was erased upfront in
+      // onOfferOnLoop. Lost chunks converge via REQs.
 #endif
-      // Hard cap: 10 min (600 s) budget from Accepted → DONE-fully-applied. Beyond
-      // that, we abort and report PartitionWriteFail with a sentinel
-      // detail byte so the wisp can distinguish "stream stalled" from
-      // an actual flash write error.
+      // Hard cap on the whole Accepted -> DONE window. On exceed, abort and
+      // report PartitionWriteFail with sentinel detail 0xFE so the wisp can
+      // distinguish a stalled stream from a real flash write error.
       if (nowMs - streamingStartMs_ > kStreamingHardCapMs) {
 #ifdef LAMP_DEBUG
         Serial.println("[fw_receiver] streaming hard cap exceeded, aborting");
@@ -213,26 +176,15 @@ void FirmwareReceiver::tick(uint32_t nowMs) {
         state_ = State::Idle;
         return;
       }
-      // No-progress timeout: if no chunks have arrived for kNoProgressAbortMs,
-      // the offerer has likely failed or moved out of range. Abort so we
-      // drop back to Idle and start broadcasting HELLOs again, letting any
-      // peer (the same one re-trying, or a different higher-version one)
-      // offer fresh. Without this, fleet-wide OTA stalls on the first lost
-      // session per receiver — the receiver suppresses HELLO in Streaming,
-      // so no other peer can find it again until the 5-minute hard cap.
-      //
-      // Gated on lastChunkSeenMs_ (any arrival, including failed writes)
-      // rather than lastChunkMs_ (successful write). A stream where writes
-      // are temporarily failing but chunks keep arriving is NOT a dead
-      // session — the per-chunk stall watchdog will REQ the holes and the
-      // sender will resend. Killing the session here on a write-failure
-      // streak is what aborted in-flight OTAs on first observation.
-      //
-      // Signed cast because Core 0's chunk handler races our tick-entry
-      // nowMs across the vTaskDelay yield in the background-erase block
-      // above — it can bump lastChunkSeenMs_ to a value a few ms PAST
-      // our captured nowMs, and unsigned subtraction wraps to ~4 billion
-      // (> 60000 → spurious abort).
+      // No-progress abort: if no chunk has arrived for kNoProgressAbortMs the
+      // offerer likely died; abort to Idle and resume HELLOs so a peer can
+      // re-OFFER (Streaming suppresses HELLO, so otherwise no peer finds this
+      // receiver until the 5-min hard cap).
+      // Gated on lastChunkSeenMs_ (any arrival) not lastChunkMs_ (successful
+      // write): a write-failure streak with chunks still arriving is not a dead
+      // session, the stall watchdog will REQ the holes. Signed cast because
+      // Core 0 can bump lastChunkSeenMs_ a few ms past our captured nowMs, and
+      // unsigned subtraction would wrap to ~4 billion (spurious abort).
       const int32_t elapsedSeen =
           static_cast<int32_t>(nowMs - lastChunkSeenMs_);
       if (lastChunkSeenMs_ != 0 &&
@@ -263,9 +215,9 @@ void FirmwareReceiver::tick(uint32_t nowMs) {
           lastReqMs_ = nowMs;
         }
       }
-      // Throughput diagnostic: every 256 newly-received chunks, log the
-      // running total. Compare against wisp's "stream progress" log to
-      // localise where chunks are getting lost (RF vs. wisp throughput).
+      // Every 256 newly-received chunks, log the running total to compare
+      // against the wisp's stream-progress log (localises RF loss vs wisp
+      // throughput).
       if (recvChunksCount_ - recvChunksLastLog_ >= 256) {
 #ifdef LAMP_DEBUG
         Serial.printf("[fw_receiver] recv progress: %u chunks received\n",
@@ -277,15 +229,13 @@ void FirmwareReceiver::tick(uint32_t nowMs) {
     }
 
     case State::Failed: {
-      // Reset to Idle on the next tick after a failure. The Failed state
-      // is just a one-tick latch so tests can observe the failure had
-      // occurred without us immediately flipping back to Idle.
+      // One-tick latch so tests can observe a failure before flipping back to
+      // Idle.
       state_ = State::Idle;
-      // Defense in depth: most failure paths route through abortOta()
-      // which already deferred the exit. The verify-fail branch in
-      // handleDoneOnLoop sets State::Failed directly; defer the exit
-      // here too so the strip stays in indicator mode through a quick
-      // multi-distributor handoff. Idle tick expires the hold.
+      // Most failure paths route through abortOta() which already deferred the
+      // exit. The verify-fail branch in handleDoneOnLoop sets State::Failed
+      // directly, so defer here too to keep the strip in indicator mode through
+      // a fast multi-distributor handoff. The Idle tick expires the hold.
       if (quietHeld_) {
         quietHoldUntilMs_ = nowMs + kInterSessionQuietHoldMs;
       }
@@ -293,15 +243,10 @@ void FirmwareReceiver::tick(uint32_t nowMs) {
     }
 
     case State::Verify:
-      // These are transient or synchronously-handled in
-      // handleControlOnLoop. tick() doesn't drive transitions out of them.
+      // Verify resolves synchronously in handleControlOnLoop, not from tick().
       return;
   }
 }
-
-// =============================================================================
-// Inbound control plane (Core 1)
-// =============================================================================
 
 void FirmwareReceiver::handleControlOnLoop(const PendingFirmwareControl& ctrl) {
   const uint32_t nowMs =
@@ -319,10 +264,8 @@ void FirmwareReceiver::handleControlOnLoop(const PendingFirmwareControl& ctrl) {
 
 void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
                                      uint32_t nowMs) {
-  // Channel mismatch → silent drop. No ACCEPT, no RESULT. Per the locked
-  // scope decision: cross-channel offers are a wisp-side bug (its target-
-  // picker should filter by channel against HELLO inventory) and shouldn't
-  // generate ack-stream noise on the air.
+  // Channel mismatch: silent drop, no ACCEPT or RESULT. Cross-channel offers
+  // are a wisp-side target-picker bug and shouldn't add ack-stream noise.
   if (!channelMatchesOurs(ctrl.offer.channel)) {
 #ifdef LAMP_DEBUG
     char ch[lamp_protocol::FW_CHANNEL_LEN + 1] = {0};
@@ -332,9 +275,8 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
 #endif
     return;
   }
-  // Chunk size mismatch → decline-busy (we don't negotiate; v1 is locked
-  // to 200). Could equally well be a silent drop, but DeclineBusy gives
-  // the wisp a clear "won't accept this" signal so it stops retrying.
+  // Chunk size mismatch: decline-busy (no negotiation, locked to 200).
+  // DeclineBusy signals the wisp to stop retrying.
   if (ctrl.offer.chunkSize != lamp_protocol::FW_CHUNK_SIZE) {
 #ifdef LAMP_DEBUG
     Serial.printf("[fw_receiver] OFFER chunkSize=%u != %u, declining\n",
@@ -344,10 +286,10 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
     sendAccept(ctrl, lamp_protocol::FwAcceptStatus::DeclineBusy);
     return;
   }
-  // Already-current decline. Firmware: version <= ours. FS: the FS hook
-  // declines when the offer isn't our running firmware version OR the offered
-  // image digest matches what we already have (same UI → nothing to do). The
-  // wisp/peer then moves us out of its "needs update" set.
+  // Already-current decline. Firmware: version <= ours. FS: the hook declines
+  // when the offer isn't the running firmware version OR the offered digest
+  // matches the installed image. The peer then drops this lamp from its
+  // needs-update set.
   const bool declineCurrent =
       fsHooks_
           ? !fsHooks_->shouldAccept(ctrl.offer.version, ctrl.offer.sha256Prefix)
@@ -360,13 +302,11 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
     sendAccept(ctrl, lamp_protocol::FwAcceptStatus::DeclineAlreadyCurrent);
     return;
   }
-  // Already mid-flow → enforce single-source-at-a-time. An idempotent
-  // re-OFFER (same version AND same transport AND same source identity)
-  // re-ACKs so a wisp that missed our first ACCEPT can restart cleanly.
-  // Anything else (different version, different transport — e.g. BLE
-  // app trying to interrupt a mesh OTA in progress — or different source
-  // on the same transport) is DeclineBusy. The mutex prevents two
-  // concurrent flows writing the same OTA partition.
+  // Single-source-at-a-time. An idempotent re-OFFER (same version, transport,
+  // and source) re-ACKs so a wisp that missed the first ACCEPT can restart.
+  // Anything else (different version/transport/source, e.g. a BLE app trying to
+  // interrupt a mesh OTA) is DeclineBusy, which stops two concurrent flows
+  // writing the same OTA partition.
   if (state_ == State::Streaming || state_ == State::Verify) {
     const bool sameTransport = ctrl.transportKind == activeTransportKind_;
     bool sameSource = false;
@@ -385,36 +325,27 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
     return;
   }
 
-  // Cross-OTA guard: don't start a new flow while the other OTA path (FS vs
-  // firmware) is mid-write — they share the upfront-erase + quiet-mode
-  // machinery. Decline-busy so the peer backs off and retries after.
+  // Cross-OTA guard: don't start while the other OTA path (FS vs firmware) is
+  // mid-write; they share the upfront-erase + quiet-mode machinery. Decline-busy
+  // so the peer backs off and retries.
   if (busyGuard_ && busyGuard_()) {
     sendAccept(ctrl, lamp_protocol::FwAcceptStatus::DeclineBusy);
     return;
   }
 
-  // Begin a new OTA flow. Full-upfront erase: erase the ENTIRE image region
-  // synchronously here on Core 1 before arming the gate or sending ACCEPT, so
-  // the recv path is a pure write (no erase) — see the file-scope comment.
-  //
-  // Sequencing on the Core 1 OFFER path:
-  //   1. Snapshot ALL OFFER fields into members FIRST (so Core 0 sees
-  //      offerTotalLen_/offerChunkSize_ when the gate arms).
-  //   2. Resize bitmap_.
-  //   3. Pick partition; widen the WDTs; erase the whole region in 64 KB
-  //      blocks; latch erasedForLen_.
-  //   4. Publish partition pointer, then arm the gate via release-store.
-  //   5. Send the first ACCEPT synchronously; queue the rest of the ACCEPT
-  //      burst for tick() to drain (don't block the loop task with vTaskDelay).
+  // Begin a new OTA flow. Erase the entire image region synchronously here on
+  // Core 1 before arming the gate or sending ACCEPT, so the recv path is a pure
+  // write. Order matters: snapshot all OFFER fields into members first (Core 0
+  // reads offerTotalLen_/offerChunkSize_ once the gate arms), resize the bitmap,
+  // erase, publish the partition pointer, release-store the gate, then ACCEPT.
 
-  // (1) Snapshot OFFER fields BEFORE anything that could be observed by
-  // Core 0. Critically, offerTotalLen_ is read by handleChunkOnRecvTask's
-  // bounds check — if it's still zero when a chunk arrives, the bounds
-  // check passes spuriously and we silently drop writes past the offer's
-  // declared length.
+  // Snapshot OFFER fields before anything Core 0 can observe. offerTotalLen_
+  // feeds handleChunkOnRecvTask's bounds check; if it's still zero when a chunk
+  // arrives the check passes spuriously and writes land past the declared
+  // length.
   std::memcpy(wispMac_, ctrl.sourceMac, 6);
-  // Snapshot transport context for the active flow — the busy-check on
-  // any subsequent OFFER uses these to enforce single-source semantics.
+  // Transport context for the active flow; the busy-check on a later OFFER uses
+  // these to enforce single-source semantics.
   activeTransportKind_ = ctrl.transportKind;
   activeBleConnHandle_ = ctrl.bleConnHandle;
   activeWireVersion_   = ctrl.wireVersion;
@@ -432,12 +363,11 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
                      ctrl.offer.chunkSize;
   }
 
-  // (2) Init the chunk bitmap.
   resetBitmap(expectedChunks);
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-  // Pick the target partition: firmware → the inactive OTA slot; FS → the
-  // single live spiffs partition (via the FS hook).
+  // Target partition: firmware -> the inactive OTA slot; FS -> the live spiffs
+  // partition (via the hook).
   const esp_partition_t* part =
       fsHooks_ ? static_cast<const esp_partition_t*>(fsHooks_->partition())
                : esp_ota_get_next_update_partition(nullptr);
@@ -446,8 +376,7 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
     state_ = State::Failed;
     return;
   }
-  // Bound check: the image (rounded up to a sector) must fit in the
-  // partition before we erase that whole span.
+  // The image (rounded up to a sector) must fit in the partition before erasing.
   const size_t kSector = SPI_FLASH_SEC_SIZE;
   const size_t numSectors =
       (static_cast<size_t>(offerTotalLen_) + kSector - 1u) / kSector;
@@ -457,12 +386,9 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
     return;
   }
 
-  // Widen the TWDT for the whole OTA window. IDLE0 must still run at least
-  // every 30 s; the block-erase loop re-enables interrupts between blocks
-  // (so IDLE0 is serviced) and per-chunk writes are sub-millisecond, so
-  // 30 s is ample. We do NOT subscribe the Arduino loop task to the TWDT
-  // (arduino-esp32 leaves loopTaskWDTEnabled=false and never resets it from
-  // the loop body), so a busy loop task can't trip it.
+  // Widen the TWDT for the whole OTA window. The block-erase loop re-enables
+  // interrupts between blocks so IDLE0 still runs (well within 30 s), and
+  // per-chunk writes are sub-ms. The Arduino loop task stays unsubscribed.
   esp_task_wdt_config_t wdtWide = {
       .timeout_ms     = 30000,
       .idle_core_mask = (1u << 0),
@@ -470,20 +396,13 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
   };
   esp_task_wdt_reconfigure(&wdtWide);
 
-  // Full-upfront erase: erase the entire image region NOW, synchronously on
-  // Core 1, before the gate is armed and before ACCEPT goes out. The gate is
-  // disarmed (publishedOtaHandle_==0) so Core 0 drops any chunk until we
-  // finish — and the sender hasn't been ACCEPTed, so there's no stream to
-  // drop yet. The recv path that follows is then a pure write (no erase),
-  // which is what stops the cache+IRQ-off erase stalls from overflowing the
-  // ESP-NOW RX queue mid-stream.
-  //
-  // 64 KB block granularity: esp_partition_erase_range issues the chip's
-  // block-erase opcode for 64 KB-aligned/sized ranges (~5x faster than 4 KB
-  // sector erases). We drive the loop ourselves so we can re-widen the IWDT
-  // before each block — a block holds interrupts off for its whole duration,
-  // and the IDF tick_hook re-clamps the IWDT to its baked-in ceiling whenever
-  // interrupts are briefly on between blocks.
+  // Erase the entire image region now, synchronously, before arming the gate or
+  // sending ACCEPT: the gate is disarmed and no ACCEPT has gone out, so no chunk
+  // stream exists yet. This makes the recv path a pure write, which is what
+  // stops cache+IRQ-off erase stalls from overflowing the ESP-NOW RX queue.
+  // 64 KB block erase is ~5x faster than 4 KB sectors; the loop is hand-driven
+  // to re-widen the IWDT before each block (a block holds interrupts off for its
+  // whole duration and the tick_hook re-clamps the IWDT between blocks).
   {
     const uint32_t eraseT0 = millis();
     constexpr size_t kBlock = 64u * 1024u;
@@ -520,9 +439,9 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
   // fire a spurious stall-REQ for chunk 0).
   nowMs = millis();
 
-  // Publish partition pointer FIRST, then arm the gate. Core 0 checks
-  // publishedOtaHandle_ before touching publishedPartition_. The release-
-  // store on arm pairs with Core 0's acquire-load.
+  // Publish the partition pointer before arming the gate. Core 0 checks
+  // publishedOtaHandle_ before touching publishedPartition_; the release-store
+  // on arm pairs with Core 0's acquire-load.
   publishedPartition_.store(part, std::memory_order_release);
   publishedOtaHandle_.store(1, std::memory_order_release);
 #ifdef LAMP_DEBUG
@@ -543,35 +462,26 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
                               // before the first stall-REQ would fire
   lastChunkSeenMs_  = nowMs;  // and 60s before the no-progress abort fires
   lastReqMs_        = 0;
-  // recvChunksCount_ is cumulative-across-boot in name but the per-session
-  // log delta (recvChunksLastLog_ ≥ 256 trigger) needs both to reset so
-  // the "recv progress: N chunks received" line reflects THIS session's
-  // count rather than carrying over from a prior failed attempt.
+  // Reset both so the per-session "recv progress" log delta reflects this
+  // session, not a prior failed attempt.
   recvChunksCount_    = 0;
   recvChunksLastLog_  = 0;
-  // Indicator progress high-water survives a same-image restart so the bar
-  // doesn't collapse to 0 and refill (the flashing). Reset it only when a
-  // genuinely different image is offered.
+  // Indicator high-water survives a same-image restart so the bar doesn't
+  // collapse and refill. Reset only when a genuinely different image is offered.
   if (offerTotalLen_ != progressForLen_) {
     recvProgress_.reset();
     progressForLen_ = offerTotalLen_;
   }
   state_            = State::Streaming;
 
-  // Enter OTA quiet mode for the duration of the streaming window.
-  // Suspends behaviors / expression draw / non-OTA BLE writes; if this
-  // is a mesh OTA (EspNow) the radio is also paused and any connected
-  // GATT client is kicked. For BLE-pushed OTA we keep the GATT
-  // connection alive — the phone IS the chunk transport — but we still
-  // silently drop writes to non-OTA characteristics so the user can't
-  // fiddle with controls mid-upload. Exited in abortOta() (failure
-  // paths), the Failed-state tombstone in tick(), and at the end of
-  // verifyAndApply() (success path).
-  //
-  // Inter-session hold: skip enterQuiet when quietHeld_ is already
-  // true (a previous session deferred its exit and we're inside the
-  // hold window). Clear quietHoldUntilMs_ so the Idle tick won't
-  // expire-and-exit while this new session is live.
+  // Enter OTA quiet mode for the streaming window: suspends behaviors / draw /
+  // non-OTA BLE writes. Mesh (EspNow) OTA also pauses the radio and kicks any
+  // GATT client; BLE-pushed OTA keeps the connection (the phone is the chunk
+  // transport) but still drops non-OTA writes. Exited in abortOta, the Failed
+  // tick, and verifyAndApply.
+  // Inter-session hold: skip enterQuiet when quietHeld_ is already set (a prior
+  // session deferred its exit). Clear quietHoldUntilMs_ so the Idle tick won't
+  // expire-and-exit mid-session.
   if (!quietHeld_) {
     ::lamp::ota_quiet_mode::enterQuiet(
         activeTransportKind_ == FirmwareTransportKind::EspNow);
@@ -588,16 +498,11 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
                 (unsigned)expectedChunks);
 #endif
 
-  // ACCEPT goes via ESP-NOW broadcast; broadcast frames don't get MAC-
-  // layer ACK + retry, so individual frame loss under BLE coex
-  // contention is real. Spread kAcceptBurstCount ACCEPTs across
-  // kAcceptBurstCount * kAcceptSpreadMs (~1.6 s) so at least one
-  // overlaps a WiFi-RX-allowed coex window on the sender. The sender's
-  // onAccept state-guard silently drops dupes after the first.
-  //
-  // First ACCEPT goes out synchronously; the rest are queued for tick()
-  // to drain at kAcceptSpreadMs intervals so the loop task isn't blocked
-  // for the burst duration freezing the renderer.
+  // ACCEPT goes via ESP-NOW broadcast, which gets no MAC-layer ACK/retry, so
+  // frame loss under BLE coex is real. Spread the burst (~1.6 s) so one ACCEPT
+  // overlaps a WiFi-RX coex window; the sender drops dupes after the first.
+  // First ACCEPT synchronous, the rest queued for tick() so the loop task (and
+  // renderer) isn't blocked for the burst.
   sendAccept(ctrl, lamp_protocol::FwAcceptStatus::Accept);
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   pendingAcceptCtrl_  = ctrl;
@@ -609,12 +514,11 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
 void FirmwareReceiver::onDoneOnLoop(const PendingFirmwareControl& ctrl,
                                     uint32_t /*nowMs*/) {
   if (state_ != State::Streaming) {
-    // DONE arriving in any other state is benign; ignore. Could be a
-    // late retry from the wisp after we already verified+rebooted, or
-    // a DONE for a different OTA flow.
+    // DONE in any other state is benign (late retry after verify+reboot, or a
+    // DONE for a different flow). Ignore.
     return;
   }
-  // Version sanity: DONE.version must match the OFFER we accepted.
+  // DONE.version must match the accepted OFFER.
   if (ctrl.done.version != offerVersion_) {
 #ifdef LAMP_DEBUG
     Serial.printf("[fw_receiver] DONE version mismatch (offer=0x%08X done=0x%08X)\n",
@@ -625,8 +529,8 @@ void FirmwareReceiver::onDoneOnLoop(const PendingFirmwareControl& ctrl,
     state_ = State::Failed;
     return;
   }
-  // Bitmap not yet full → REQ the first missing run and stay in
-  // Streaming. The wisp will fill the run and re-send DONE.
+  // Bitmap not yet full: REQ the first missing run and stay in Streaming. The
+  // wisp fills the run and re-sends DONE.
   if (!isBitmapFull()) {
     const uint16_t missing = firstMissingChunk();
     if (missing != UINT16_MAX) {
@@ -636,14 +540,9 @@ void FirmwareReceiver::onDoneOnLoop(const PendingFirmwareControl& ctrl,
     return;
   }
 #ifdef LAMP_DEBUG
-  // Diagnostic before verify: compare the bitmap popcount against
-  // recvChunksCount_ and bitmapTotalChunks_. If popcount <
-  // bitmapTotalChunks_ here we have a race-induced lost bit-set
-  // (isBitmapFull observed a torn byte and falsely returned true).
-  // recvChunksCount_ is the on-the-wire arrival count (incremented
-  // unconditionally per chunk after a successful partition_write);
-  // popcount is what isBitmapFull / firstMissingChunk read. The two
-  // should match if bitmap RMWs aren't being lost.
+  // Compare bitmap popcount against bitmapTotalChunks_ / recvChunksCount_. A
+  // popcount below bitmapTotalChunks_ here means a race lost a bit-set
+  // (isBitmapFull saw a torn byte and falsely returned true).
   {
     uint32_t popcount = 0;
     for (size_t i = 0; i < bitmap_.size(); ++i) {
@@ -656,10 +555,9 @@ void FirmwareReceiver::onDoneOnLoop(const PendingFirmwareControl& ctrl,
                   (unsigned)recvChunksCount_);
   }
 #endif
-  // Verify + apply. verifyAndApply() drives esp_ota_end + signature
-  // check + esp_ota_set_boot_partition + esp_restart. It returns the
-  // RESULT status code so we can emit MSG_FW_RESULT and (on success)
-  // pause briefly before reboot for the broadcast to clear the radio.
+  // verifyAndApply drives esp_ota_end + signature check + set_boot_partition +
+  // esp_restart, returning the RESULT code; emit MSG_FW_RESULT and, on success,
+  // pause before reboot so the broadcast clears the radio.
   state_ = State::Verify;
   const lamp_protocol::FwResultStatus rc = verifyAndApply();
   if (rc == lamp_protocol::FwResultStatus::Success) {
@@ -671,9 +569,9 @@ void FirmwareReceiver::onDoneOnLoop(const PendingFirmwareControl& ctrl,
     // Exit quiet-mode before reboot OR before returning to Idle (the FS path
     // below returns without rebooting, so this is load-bearing there).
     ::lamp::ota_quiet_mode::exitQuiet();
-    // FS image OTA finalizes WITHOUT a reboot: SPIFFS is only read by the
-    // (currently-down) onboarding webapp, so a remount makes the new UI live.
-    // Firmware OTA still reboots into the freshly-booted image.
+    // FS image OTA finalizes without a reboot: SPIFFS is only read by the
+    // onboarding webapp, so a remount makes the new UI live. Firmware OTA
+    // reboots.
     if (fsHooks_ && fsHooks_->finalize) {
       fsHooks_->finalize();
       state_ = State::Idle;
@@ -683,10 +581,9 @@ void FirmwareReceiver::onDoneOnLoop(const PendingFirmwareControl& ctrl,
 #endif
     return;
   }
-  // Verify or apply failed. Surface the failure code, restore the WDT
-  // (verifyAndApply widened it; the success path reboots so it doesn't
-  // matter, but the fail path leaves us running and we must put the
-  // watchdog back), then drop to Failed for the tick() tombstone path.
+  // Verify or apply failed. Surface the code and restore the WDT (the success
+  // path reboots so it doesn't matter, but the fail path keeps running), then
+  // drop to Failed for the tick() tombstone path.
   sendResult(rc, 0);
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   restoreDefaultWdt();
@@ -694,19 +591,12 @@ void FirmwareReceiver::onDoneOnLoop(const PendingFirmwareControl& ctrl,
   state_ = State::Failed;
 }
 
-// =============================================================================
-// Inbound chunk plane (Core 0 — WiFi recv task)
-// =============================================================================
-
 void FirmwareReceiver::handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk& p) {
-  // Bump writesInFlight_ BEFORE reading the armed gate so Core 1's
-  // verifyAndApply barrier sees us. If we increment after reading armed,
-  // Core 1 could observe armed=disarmed AND writesInFlight_=0 between
-  // our load and increment, miss us in the wait-loop, and start verify
-  // while our write is still landing. The fetch_add acquire fence
-  // pairs with Core 1's exchange(0, acq_rel) on publishedOtaHandle_:
-  // if we observe armed nonzero AFTER incrementing, Core 1 will observe
-  // our increment after its disarm.
+  // Bump writesInFlight_ before reading the armed gate so Core 1's
+  // verifyAndApply barrier sees this write. The acquire fetch_add pairs with
+  // Core 1's exchange(0, acq_rel) on publishedOtaHandle_: observing armed!=0
+  // after the increment guarantees Core 1 observes the increment after its
+  // disarm, so verify can't start while this write is still landing.
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   writesInFlight_.fetch_add(1, std::memory_order_acquire);
   struct WritesInFlightGuard {
@@ -717,15 +607,11 @@ void FirmwareReceiver::handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk&
   };
   WritesInFlightGuard guard{&writesInFlight_};
 #endif
-  // Drop chunks while not streaming. The published armed-flag is the
-  // gate: 0 means "no OTA in progress" — Core 1 cleared the slot during
-  // teardown.
+  // publishedOtaHandle_ reads 0 once Core 1 clears the slot in teardown.
   const uint32_t armed = publishedOtaHandle_.load(std::memory_order_acquire);
   if (armed == 0) {
-    // Even unarmed-drop counts as "the air still has chunks for us" — but
-    // there's no session to keep alive, so just leave the log and return.
 #ifdef LAMP_DEBUG
-    // Rate-limited: at ~130 chunks/s of "not armed" we'd flood the UART.
+    // Rate-limited: at ~130 chunks/s of "not armed" this would flood the UART.
     // Throttle to once per second.
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
     static uint32_t lastUnarmedLogMs = 0;
@@ -739,20 +625,17 @@ void FirmwareReceiver::handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk&
 #endif
     return;
   }
-  // Chunk arrived AND we're armed for a session — bump the seen-stamp
-  // now, BEFORE any subsequent validation / erase / write that may
-  // abort early. Pairs with the no-progress watchdog on Core 1 (see
-  // tick()). Gated on source-MAC == active-session source (wispMac_)
-  // so a rogue/buggy lamp blasting CHUNK frames at us can't keep this
-  // session's watchdog perpetually fresh while no real progress lands.
+  // Bump the seen-stamp before any validation/write that may abort early; pairs
+  // with Core 1's no-progress watchdog. Gated on source-MAC == active session
+  // (wispMac_) so a rogue lamp blasting CHUNK frames can't keep the watchdog
+  // falsely fresh while no real progress lands.
   if (std::memcmp(p.sourceMac, wispMac_, 6) == 0) {
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
     lastChunkSeenMs_ = millis();
 #endif
   }
-  // Bounds check: offset + len must fit within the offer's totalLen.
-  // Without this guard, a malformed chunk could direct esp_partition_write
-  // past the erased range.
+  // offset + len must fit within the offer's totalLen, else a malformed chunk
+  // could direct esp_partition_write past the erased range.
   if (p.offset + p.len > offerTotalLen_) {
 #ifdef LAMP_DEBUG
     Serial.printf("[fw_receiver] chunk drop: oob chunkIdx=%u off=%u len=%u "
@@ -774,8 +657,8 @@ void FirmwareReceiver::handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk&
     return;
   }
 #ifdef LAMP_DEBUG
-  // First chunk + every 256th — confirms chunks are actually arriving without
-  // flooding the UART at 130 chunks/s.
+  // First chunk + every 256th, so chunk arrival is visible without flooding
+  // the UART at 130 chunks/s.
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   if (p.chunkIdx == 0 || (p.chunkIdx % 256) == 0) {
     Serial.printf("[fw_receiver] chunk recv chunkIdx=%u off=%u len=%u\n",
@@ -784,44 +667,35 @@ void FirmwareReceiver::handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk&
 #endif
 #endif
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-  // Paired with the release-store of publishedOtaHandle_ on Core 1; we
-  // have a valid partition pointer by the time we get here.
+  // Paired with Core 1's release-store of publishedOtaHandle_, the partition
+  // pointer is valid here. Pure write: the region was erased upfront, and an
+  // esp_partition_write of <=200 bytes holds cache/interrupts off for <1 ms,
+  // far under the IWDT ceiling, so no per-chunk widen is needed.
   const esp_partition_t* part =
       publishedPartition_.load(std::memory_order_relaxed);
   if (part == nullptr) return;
-  // Pure write — the whole image region was erased upfront in onOfferOnLoop
-  // before the gate armed, so the recv path never erases. esp_partition_write
-  // of <=200 bytes disables cache/interrupts for <1 ms, far under the IWDT
-  // ceiling, so no per-chunk widen is needed.
   const esp_err_t err = esp_partition_write(part, p.offset, p.bytes, p.len);
   if (err != ESP_OK) {
-    // Latch the write error so Core 1's stall watchdog can pick it up.
-    // We don't send RESULT from Core 0 — broadcastRaw isn't WiFi-task-
-    // safe in this codebase (the dedup ring + send queue are designed
-    // around Core 1 calls). Core 1 will notice the bitmap stops filling
-    // and the hard-cap timer will fire, sending PartitionWriteFail.
+    // Latch the write error for Core 1's stall watchdog. Don't send RESULT from
+    // Core 0: broadcastRaw isn't WiFi-task-safe (the dedup ring + send queue
+    // are Core 1 only). Core 1 sees the bitmap stop filling and the hard cap
+    // fires PartitionWriteFail.
     return;
   }
 #endif
   // markChunkReceived takes eraseMux_ around the byte RMW; Core 1's
-  // isBitmapFull() / firstMissingChunk() take the same mux around their
-  // reads so they see a consistent picture and never a torn byte.
+  // isBitmapFull / firstMissingChunk take the same mux so they never see a torn
+  // byte.
   markChunkReceived(p.chunkIdx);
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-  // Stamp last-chunk-ms for the stall watchdog. Core 1 reads this
-  // unsynchronised; uint32_t read/write is atomic on 32-bit Xtensa.
+  // Stamp last-chunk-ms for the stall watchdog (Core 1 reads it unsynchronised;
+  // uint32_t read/write is atomic on 32-bit Xtensa). Bump the recv counter for
+  // the throughput log.
   lastChunkMs_ = millis();
-  // Throughput diagnostic — bump a recv counter so Core 1's tick can
-  // periodically log "lamp received N chunks" to compare against the
-  // wisp's stream-progress log. uint32_t atomic on Xtensa.
   recvChunksCount_++;
   recvProgress_.observe(uniqueChunks_);
 #endif
 }
-
-// =============================================================================
-// Bitmap helpers
-// =============================================================================
 
 void FirmwareReceiver::resetBitmap(size_t totalChunks) {
   bitmapTotalChunks_ = totalChunks;
@@ -830,19 +704,14 @@ void FirmwareReceiver::resetBitmap(size_t totalChunks) {
   uniqueChunks_ = 0;
 }
 
-// All three bitmap accessors must take eraseMux_ — markChunkReceived
-// runs on Core 0 (WiFi recv task) and does a non-atomic byte RMW
-// (`bitmap_[byteIdx] |= bit`); isBitmapFull / firstMissingChunk run on
-// Core 1 (loop task) and walk the same vector. Xtensa LX6's per-core
-// data caches have weak ordering and no per-byte atomicity guarantee —
-// without the mux, two chunks whose indices share a byte can race RMW
-// and silently lose a bit, AND Core 1 can observe a torn byte mid-RMW
-// and falsely conclude isBitmapFull() while a bit is still 0. The
-// latter is the smoking-gun sigverify-FAILED-with-complete-bitmap
-// pattern: the receiver advances to verifyAndApply with a chunk's
-// worth of bytes still 0xFF (erased, never written) inside the signed
-// region. eraseMux_ (IRQ-disabled, scoped tightly to the byte op) serializes
-// this bitmap RMW against the const accessors.
+// All three bitmap accessors must take eraseMux_. markChunkReceived runs on
+// Core 0 (WiFi recv) doing a non-atomic byte RMW (bitmap_[byteIdx] |= bit);
+// isBitmapFull / firstMissingChunk run on Core 1 and walk the same vector.
+// Xtensa LX6 per-core caches are weakly ordered with no per-byte atomicity, so
+// without the mux two chunks sharing a byte can race-lose a bit, and Core 1 can
+// read a torn byte and falsely conclude isBitmapFull while a bit is still 0:
+// the sigverify-FAILED-with-complete-bitmap pattern, where verify runs with a
+// chunk's bytes still 0xFF (erased, never written) inside the signed region.
 
 void FirmwareReceiver::markChunkReceived(uint16_t chunkIdx) {
   const size_t byteIdx = chunkIdx / 8;
@@ -851,10 +720,9 @@ void FirmwareReceiver::markChunkReceived(uint16_t chunkIdx) {
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   portENTER_CRITICAL(&eraseMux_);
 #endif
-  // Count the 0→1 transition only, so uniqueChunks_ is true unique progress.
-  // recvChunksCount_ counts every write (dups included) and is throughput
-  // diagnostics; the progress bar must track uniques or it races past 100%
-  // during the dup-heavy recovery tail. Same mux as the RMW.
+  // Count only the 0->1 transition so uniqueChunks_ tracks true progress.
+  // recvChunksCount_ counts every write (dups included) for throughput; the
+  // progress bar must track uniques or it races past 100% in the recovery tail.
   if ((bitmap_[byteIdx] & bit) == 0) ++uniqueChunks_;
   bitmap_[byteIdx] |= bit;
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
@@ -913,28 +781,13 @@ uint16_t FirmwareReceiver::firstMissingChunk() const {
 }
 
 uint16_t FirmwareReceiver::firstMissingRunLen(uint16_t firstMissing) const {
-  // Returns the smallest count value that asks the distributor for ALL
-  // missing chunks within a kMaxReqRunChunks-wide window starting at
-  // firstMissing. Concretely: scan chunks [first, first+window), find
-  // the LAST unset bit, return (last - first + 1).
-  //
-  // This is NOT "longest contiguous run". When chunks are scattered
-  // (e.g., the BLE-coex single-chunk-drop pattern observed on bench:
-  // 6559, 6563, 6578, 6580, 6590, 6591, 6595, 6600, 6605 all missing),
-  // a contiguous scan returns 1 and we pay one round trip per missing
-  // chunk — at ~130 chunks/s burst rate and 8 missing per cycle that's
-  // 8 round trips to net 8 chunks. The window approach returns 47
-  // (last missing = 6605, first = 6559), one REQ asks the distributor
-  // to re-stream 6559..6605, the receiver catches all 8 misses in one
-  // pass. The distributor's smart-REQ path streams exactly `count`
-  // chunks then jumps back to forward progress — already-received
-  // duplicates in the span are re-written to flash (NOR 0→0 / 1→1 is
-  // a no-op physical write, just a few µs of bus time). The waste of
-  // re-streaming 39 already-received chunks is dramatically less than
-  // the savings of 7 round trips at ~50 ms each.
-  //
-  // Capped at kMaxReqRunChunks so an early-stream "everything missing"
-  // session doesn't dwarf the forward-stream cursor.
+  // Smallest count covering ALL missing chunks in a kMaxReqRunChunks window
+  // from firstMissing (scan the window, return last-unset - first + 1), NOT the
+  // longest contiguous run. Scattered single-chunk drops (the BLE-coex pattern)
+  // would otherwise cost one round trip each; one windowed REQ re-streams the
+  // span and catches them in a pass. Re-streamed dups are no-op NOR writes, far
+  // cheaper than the saved round trips. Capped so an early all-missing session
+  // doesn't dwarf the forward cursor.
   if (firstMissing == UINT16_MAX) return 0;
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   portENTER_CRITICAL(&eraseMux_);
@@ -957,20 +810,15 @@ uint16_t FirmwareReceiver::firstMissingRunLen(uint16_t firstMissing) const {
   return static_cast<uint16_t>(lastMissingInWindow - firstMissing + 1);
 }
 
-// =============================================================================
-// Outbound send helpers
-// =============================================================================
-
 bool FirmwareReceiver::sendAccept(const PendingFirmwareControl& ctrl,
                                   lamp_protocol::FwAcceptStatus status) {
-  // ACCEPT goes back to the source of the OFFER, NOT the in-flight flow's
-  // transport — if a BLE app is trying to start an OTA and we're busy
-  // mid-mesh, the DeclineBusy needs to reach the app, not the wisp.
+  // ACCEPT goes back to the OFFER's source, not the in-flight flow's transport:
+  // a DeclineBusy for a BLE app trying to start an OTA while a mesh OTA is
+  // mid-flight must reach the app, not the wisp.
   FirmwareTransport* t = transportForKind(ctrl.transportKind);
   if (!t) return false;
   uint8_t buf[lamp_protocol::FW_ACCEPT_FIXED_SIZE];
-  // Reply at the version the OFFER came in on so old-protocol senders
-  // can process our ACCEPT.
+  // Reply at the version the OFFER arrived on so old-protocol senders can parse.
   const size_t n = lamp_protocol::buildFwAccept(
       buf, sizeof(buf), fwOutSeq_++, myMac_, ctrl.sourceMac,
       ctrl.seq, ctrl.offer.version, status, /*resumeOffset=*/0,
@@ -982,7 +830,7 @@ bool FirmwareReceiver::sendAccept(const PendingFirmwareControl& ctrl,
 
 bool FirmwareReceiver::sendReq(uint16_t firstChunkIdx, uint16_t chunkCount,
                                lamp_protocol::FwReqReason reason) {
-  // REQ is part of the in-flight flow — route to the active transport.
+  // REQ belongs to the in-flight flow; route to the active transport.
   FirmwareTransport* t = transportForKind(activeTransportKind_);
   if (!t) return false;
   uint8_t buf[lamp_protocol::FW_REQ_FIXED_SIZE];
@@ -996,8 +844,7 @@ bool FirmwareReceiver::sendReq(uint16_t firstChunkIdx, uint16_t chunkCount,
 
 bool FirmwareReceiver::sendResult(lamp_protocol::FwResultStatus status,
                                   uint8_t detail) {
-  // RESULT is the final ACK at end of the flow — same transport that
-  // streamed the chunks.
+  // RESULT is the final ACK; same transport that streamed the chunks.
   FirmwareTransport* t = transportForKind(activeTransportKind_);
   if (!t) return false;
   uint8_t buf[lamp_protocol::FW_RESULT_FIXED_SIZE];
@@ -1009,42 +856,30 @@ bool FirmwareReceiver::sendResult(lamp_protocol::FwResultStatus status,
   return t->sendFrame(buf, n);
 }
 
-// =============================================================================
-// Abort + verify
-// =============================================================================
-
 void FirmwareReceiver::abortOta() {
-  // Clear the armed flag FIRST so any in-flight Core 0 chunk write
-  // bails on the gate check. Then null the partition pointer. The
-  // release-store on disarm pairs with the acquire-load on Core 0 so
-  // the partition pointer can be safely cleared afterwards.
+  // Clear the armed flag first so any in-flight Core 0 chunk write bails on the
+  // gate check, then null the partition pointer. The release-store on disarm
+  // pairs with Core 0's acquire-load.
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   publishedOtaHandle_.store(0, std::memory_order_release);
   publishedPartition_.store(nullptr, std::memory_order_release);
-  // Clear the erase-coverage latch so a re-OFFER must re-erase the region
-  // before verify will accept the assembled image.
+  // Clear the erase-coverage latch so a re-OFFER must re-erase before verify.
   erasedForLen_ = 0;
-  // Drop any queued ACCEPT retries — the session is dead, no point
-  // spreading more ACCEPTs at an offerer that's also given up.
+  // Drop queued ACCEPT retries; the session is dead.
   pendingAcceptCount_ = 0;
   nextAcceptMs_       = 0;
-  // Because we drove the partition prep ourselves (no esp_ota_begin was
-  // called), there is no esp_ota_handle_t to esp_ota_abort. The erased
-  // region stays erased; the next OFFER re-erases the whole region anyway.
-  // otadata is untouched (only esp_ota_set_boot_partition flips it).
-  //
-  // The wide WDT was held active across streaming so the loop task
-  // wouldn't trip while Core 0 hammered flash writes; restore now.
+  // No esp_ota_begin was called, so there's no handle to esp_ota_abort. The
+  // erased region stays erased (the next OFFER re-erases anyway) and otadata is
+  // untouched. Restore the wide WDT held across streaming.
   restoreDefaultWdt();
 #else
   publishedOtaHandle_.store(0, std::memory_order_release);
   publishedPartition_.store(nullptr, std::memory_order_release);
 #endif
-  // Defer exitQuiet — keep the strip in indicator mode through a quick
-  // multi-distributor handoff (the very next OFFER from a different
-  // peer can land within milliseconds and we don't want a defaultColors
-  // flash between). Idle tick expires the hold and exits quiet for
-  // real if no retry arrives within kInterSessionQuietHoldMs.
+  // Defer exitQuiet to keep the strip in indicator mode through a fast
+  // multi-distributor handoff (the next OFFER can land within ms; avoid a
+  // defaultColors flash). The Idle tick exits for real if no retry arrives
+  // within kInterSessionQuietHoldMs.
   if (quietHeld_) {
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
     quietHoldUntilMs_ = millis() + kInterSessionQuietHoldMs;
@@ -1056,15 +891,12 @@ void FirmwareReceiver::abortOta() {
 
 lamp_protocol::FwResultStatus FirmwareReceiver::verifyAndApply() {
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-  // Streaming phase is over (chunk floods stopped before DONE arrived) —
-  // restore the normal WDT timeout. esp_partition_read + signature
-  // verify don't hammer the bus the way the chunk plane did, so a 5s
-  // window is safe.
+  // Streaming is over (chunk floods stopped before DONE). Restore the normal
+  // WDT; esp_partition_read + verify don't hammer the bus, so 5 s is safe.
   restoreDefaultWdt();
-  // Disarm the gate so no late Core 0 chunk can race verify/apply.
-  // exchange(0) is atomic but NOT synchronous — any Core 0 chunk handler
-  // that already passed the gate-check is still in flight. The
-  // writesInFlight_ counter below is the synchronous barrier.
+  // Disarm the gate so no late Core 0 chunk races verify/apply. exchange(0) is
+  // atomic but not synchronous: a handler already past the gate-check is still
+  // in flight. writesInFlight_ below is the synchronous barrier.
   const uint32_t armed =
       publishedOtaHandle_.exchange(0, std::memory_order_acq_rel);
   const esp_partition_t* otaPartition =
@@ -1072,17 +904,11 @@ lamp_protocol::FwResultStatus FirmwareReceiver::verifyAndApply() {
   if (armed == 0 || otaPartition == nullptr) {
     return lamp_protocol::FwResultStatus::OtaEndFail;
   }
-  // Barrier: wait for any in-flight Core 0 chunk write to complete. A
-  // chunk handler that read armed=nonzero microseconds before our
-  // exchange is still executing esp_partition_write somewhere. Without
-  // this wait, esp_partition_read below races the write — the verify
-  // streamer reads pre-write bytes for that region, sha256 doesn't
-  // match what the signer hashed, ed25519 verify FAILS even though the
-  // bitmap honestly reports complete and every chunk landed correctly.
-  // This was the smoking-gun bug for "sigverify FAILED with full
-  // bitmap". Yield rather than tight-spin while the last few Core 0
-  // writes drain (pure esp_partition_writes — the region was erased
-  // upfront, so no per-write erase).
+  // Wait for any in-flight Core 0 chunk write to finish. A handler that read
+  // armed!=0 just before the exchange is still in esp_partition_write; without
+  // this wait, esp_partition_read races it and reads pre-write bytes, so the
+  // SHA-256 mismatches and ed25519 verify FAILS despite a complete bitmap (the
+  // "sigverify FAILED with full bitmap" bug). Yield rather than spin.
   {
     uint32_t waitMs = 0;
     while (writesInFlight_.load(std::memory_order_acquire) > 0) {
@@ -1093,8 +919,7 @@ lamp_protocol::FwResultStatus FirmwareReceiver::verifyAndApply() {
         Serial.printf("[fw_receiver] verify: writesInFlight_ stuck non-zero "
                       "after 5s, proceeding anyway\n");
 #endif
-        break;  // Safety valve — shouldn't fire; if it does we'd rather
-                // surface the sigverify fail than deadlock forever.
+        break;  // Bail rather than deadlock; surface the sigverify fail instead.
       }
     }
 #ifdef LAMP_DEBUG
@@ -1104,11 +929,10 @@ lamp_protocol::FwResultStatus FirmwareReceiver::verifyAndApply() {
     }
 #endif
   }
-  // Erase-coverage check (recast for full-upfront erase): erasedForLen_ is set
-  // ONLY after every block erase in onOfferOnLoop returned ESP_OK, and an
-  // OFFER whose erase failed never armed the gate. Reaching verify with a
-  // mismatch means a re-OFFER changed the image length without re-erasing —
-  // fail loud instead of flipping the boot pointer to a partial image.
+  // Erase-coverage check: erasedForLen_ is set only after every block erase
+  // succeeded, and a failed-erase OFFER never armed the gate. A mismatch here
+  // means a re-OFFER changed the image length without re-erasing; fail loud
+  // rather than boot a partial image.
 #ifdef LAMP_DEBUG
   Serial.printf("[fw_receiver] verify: erasedForLen=%u offerTotalLen=%u\n",
                 (unsigned)erasedForLen_, (unsigned)offerTotalLen_);
@@ -1120,33 +944,21 @@ lamp_protocol::FwResultStatus FirmwareReceiver::verifyAndApply() {
 #endif
     return lamp_protocol::FwResultStatus::PartitionWriteFail;
   }
-  // FS-image OTA: the FS hook mounts the freshly-written spiffs partition,
-  // recomputes the manifest digest, ed25519-verifies it against fw.lsig, and
-  // checks the version. There is NO boot-partition flip — the caller reboots
-  // into the new image (the spiffs partition is read at runtime, not booted).
-  // This is post-write verification (the single live partition was already
-  // overwritten), so a bad image is detected here but the old UI is already
-  // gone — the accepted no-A/B-rollback tradeoff. Firmware OTA falls through
-  // to the streaming LSIG verify + boot-partition flip below.
+  // FS-image OTA: the hook mounts the freshly-written spiffs partition,
+  // recomputes the manifest digest, ed25519-verifies against fw.lsig, and checks
+  // the version. No boot-partition flip (the partition is read at runtime, not
+  // booted). Post-write verification, so a bad image is caught here but the old
+  // UI is already gone (the accepted no-A/B-rollback tradeoff). Firmware OTA
+  // falls through to the streaming LSIG verify + boot flip below.
   if (fsHooks_) {
     return fsHooks_->verify(static_cast<const void*>(otaPartition),
                             offerVersion_);
   }
-  // Streaming verify: the lamp's ~280 KB free heap can't
-  // fit a 1.4 MB firmware image, so we feed firmware_signature's
-  // streaming reader API straight from the OTA partition via
-  // esp_partition_read. The reader pulls bytes in 4 KB blocks into a
-  // stack-local buffer inside firmware_signature.cpp; total RAM
-  // footprint for the verify pass is ~4 KB of stack instead of 1.4 MB
-  // of heap. Producer side: scripts/sign_firmware.py signs SHA-256 of
-  // the signed region (not the raw region), so the ed25519 verify
-  // operates on a constant-size 32-byte digest computed by streaming
-  // mbedtls SHA-256 in firmware_signature.cpp. The LSIG byte layout
-  // on disk is unchanged.
-  //
-  // We capture otaPartition by value in the lambda; it's a stable
-  // pointer for the duration of the verify call (we already swapped
-  // it out of the atomic above, so no Core 0 chunk can race).
+  // Streaming verify: the lamp's ~280 KB heap can't hold a 1.4 MB image, so feed
+  // firmware_signature's streaming reader from the OTA partition via
+  // esp_partition_read (~4 KB stack per call vs 1.4 MB heap). otaPartition is
+  // captured by value; it was swapped out of the atomic above, so no Core 0
+  // chunk can race.
   auto reader = [otaPartition](size_t offset, size_t wantBytes,
                                uint8_t* out) -> int {
     const esp_err_t err = esp_partition_read(
@@ -1165,17 +977,14 @@ lamp_protocol::FwResultStatus FirmwareReceiver::verifyAndApply() {
     return lamp_protocol::FwResultStatus::SignatureFail;
   }
   if (outVersion != offerVersion_) {
-    // Footer version disagrees with the offer's claim. Treat as offer-
-    // sha-mismatch (the firmware bytes don't correspond to the offered
-    // version).
+    // Footer version disagrees with the offer's claim; the bytes don't match
+    // the offered version.
     return lamp_protocol::FwResultStatus::OfferShaMismatch;
   }
-  // Defense-in-depth: the OFFER-time channelMatchesOurs already rejected
-  // cross-variant binaries before any chunks transferred. Re-check the
-  // verified footer's channel string against our own here, before we
-  // flip the boot partition — closes the gap against (a) a CI asset
-  // swap that makes it through the app's check, (b) a future code path
-  // that bypasses the OFFER gate.
+  // Re-check the verified footer's channel before flipping the boot partition.
+  // The OFFER-time channelMatchesOurs already rejected cross-variant binaries;
+  // this closes the gap against a CI asset swap or a future path that bypasses
+  // the OFFER gate.
   const char* ours = FIRMWARE_CHANNEL_STR ? FIRMWARE_CHANNEL_STR : "";
   if (!outChannel || std::strcmp(outChannel, ours) != 0) {
 #ifdef LAMP_DEBUG
@@ -1185,10 +994,9 @@ lamp_protocol::FwResultStatus FirmwareReceiver::verifyAndApply() {
 #endif
     return lamp_protocol::FwResultStatus::OfferShaMismatch;
   }
-  // Set boot partition to the inactive slot. Next reboot lands in the
-  // new firmware in PENDING_VERIFY state; the post-boot self-health
-  // path in lamp.cpp (g_pendingVerify / mark_app_valid) handles the
-  // health check.
+  // Set boot to the inactive slot. Next reboot lands PENDING_VERIFY; the
+  // post-boot self-health path in lamp.cpp (g_pendingVerify / mark_app_valid)
+  // handles the health check.
   const esp_err_t bootErr = esp_ota_set_boot_partition(otaPartition);
   if (bootErr != ESP_OK) {
 #ifdef LAMP_DEBUG
@@ -1198,11 +1006,9 @@ lamp_protocol::FwResultStatus FirmwareReceiver::verifyAndApply() {
   }
   return lamp_protocol::FwResultStatus::Success;
 #else
-  // Native test path: the test rig mirrors the state machine in its own
-  // class (see test_firmware_receiver/firmware_receiver.cpp) and never
-  // calls into this verifyAndApply directly. The production receiver is
-  // arduino/IDF-only — host tests cover bitmap + state transitions, not
-  // the partition-read + signature pass. Returning Success keeps any
+  // Native test path: the test rig mirrors the state machine in its own class
+  // and never calls this directly. Host tests cover bitmap + state transitions,
+  // not the partition-read + signature pass. Returning Success keeps an
   // accidental host path from regressing into a hard fail.
   publishedOtaHandle_.store(0, std::memory_order_relaxed);
   return lamp_protocol::FwResultStatus::Success;

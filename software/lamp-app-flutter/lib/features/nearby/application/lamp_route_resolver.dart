@@ -37,7 +37,7 @@ String routeForLamp(
       }
     }
   }
-  // Not in range AND no cached isMesh hint says BT-only → fall through
+  // Not in range AND no cached isMesh hint says BT-only: fall through
   // to control + ConnectingView (the lamp will land here when it comes
   // back into range, and the user sees "Connecting…" briefly rather
   // than a separate offline screen).

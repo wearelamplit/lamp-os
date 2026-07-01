@@ -14,9 +14,9 @@
 //   - The first N pixels = the OTHER lamp's base color (looked up via
 //     NearbyLamps::findByMac on the active OTA peer), pulsing 20%↔100% on
 //     a 1.5 s sine. N = chunks-done * pixelCount / totalChunks.
-//   - Peer base color falls back to white (255,255,255,0) when the peer
+//   - Peer base color falls back to the lamp's own localBase when the peer
 //     isn't in NearbyLamps yet (we shouldn't be in OTA without HELLO
-//     contact, but defensively).
+//     contact, but defensively). Never a jarring white.
 //
 // Sender vs receiver: same shape; `paint()` reads the in-flight side from
 // the global firmwareReceiver / firmwareDistributor. If neither is in

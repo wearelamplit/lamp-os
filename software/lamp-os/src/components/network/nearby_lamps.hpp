@@ -8,9 +8,9 @@
 #include <string>
 #include <vector>
 
+#include "lamp_protocol.hpp"
 #include "util/color.hpp"
 #include "util/proximity.hpp"
-#include "wisp_cache.hpp"
 
 // Default prune age (milliseconds) shared between callers. NimBLE scan
 // timer uses this when it runs onScanEnd; if a lamp hasn't been heard on
@@ -22,12 +22,11 @@
 namespace lamp {
 
 /**
- * @brief One nearby lamp — observed via BLE manufacturer-data scan,
- *        ESP-NOW HELLO, or both. PRIMARY KEY is `name` (user-set + capped
- *        12 chars) — preserves pre-mesh / BLE-only lamp compatibility.
- *        `bdAddr` is a stable secondary identifier used for the
- *        disposition cross-reference (renaming a lamp keeps the same
- *        BD_ADDR, so dispositions don't orphan).
+ * @brief One nearby lamp observed via BLE manufacturer-data scan,
+ *        ESP-NOW HELLO, or both. Primary key is `name` (user-set, capped
+ *        12 chars); preserves BLE-only lamp compatibility.
+ *        `bdAddr` is a stable secondary identifier: renaming a lamp keeps
+ *        the same BD_ADDR, so dispositions don't orphan.
  *
  *        Per-transport `lastSeenVia*Ms` track when we last heard from
  *        this lamp on each channel so consumers can filter:
@@ -47,69 +46,78 @@ struct NearbyLamp {
   Color baseColor = Color();
   Color shadeColor = Color();
   uint8_t mac[6] = {0};
-  // Canonical uppercase colon-hex BLE Device Address (e.g.
-  // "AA:BB:CC:DD:EE:FF") captured from the BLE scan callback. Stable
-  // for the entry's lifetime (BD_ADDR doesn't change on rename).
-  // Used as the per-peer disposition key — see Config::setDisposition.
-  // Empty string until the first BLE advert from this peer has been
-  // processed (in practice every entry is BLE-sourced; this is
-  // defensive).
+  // Canonical uppercase colon-hex BLE Device Address (e.g. "AA:BB:CC:DD:EE:FF").
+  // Stable for the entry's lifetime (BD_ADDR doesn't change on rename).
+  // Used as the per-peer disposition key. Empty until the first BLE advert.
   std::string bdAddr;
   bool hasMac = false;
   uint32_t lastSeenViaBleMs = 0;
   uint32_t lastSeenViaEspNowMs = 0;
 
-  // Stamped on the FIRST addOrUpdateFromBle for this BD_ADDR. Stable for
-  // the entry's lifetime — never overwritten on subsequent sightings.
-  // Used by custom AnimatedBehavior::control() implementations to detect
-  // peer arrivals as a 3-liner:
-  //   if (peer.firstSeenMs >= lastTickMs_) { /* just arrived */ }
-  // C++ equivalent of the legacy Python `await network.arrived()` idiom.
+  // Stamped on the first sighting; stable for the entry's lifetime.
+  // Arrival detection: if (peer.firstSeenMs >= lastTickMs_) { /* just arrived */ }
   uint32_t firstSeenMs = 0;
 
   bool acknowledged = false;  // SocialBehavior's per-name greeting state
-  // Packed semver (major<<16|minor<<8|patch) — extracted from MSG_HELLO.
-  // Only set via the ESP-NOW path; BLE adv doesn't carry it. Zero until
-  // we've heard at least one HELLO from this peer.
+  // Packed semver (major<<16|minor<<8|patch) from MSG_HELLO.
+  // Zero until the first HELLO (BLE adv doesn't carry it).
   uint32_t firmwareVersion = 0;
   // OTA state from HELLO_TLV_OTA_STATE. 0/1/2 = idle/sending/receiving.
   // Only set via the ESP-NOW path (peers' BLE adv doesn't carry it).
   // Defaults to idle, matches the protocol's "no TLV present = idle"
   // semantics.
   uint8_t otaState = 0;
-  // Protocol version byte from the HELLO frame header (`data[2]`). Used
-  // by the OTA distributor to build OFFER/CHUNK/DONE at the peer's
-  // version — see lamp_protocol's PROTOCOL_VERSION_EMIT doc block.
-  // Zero until we've heard a HELLO; that just means "don't OTA them
-  // yet, we don't know which protocol version they understand."
+  // Protocol version byte from the HELLO frame header. Used by the OTA
+  // distributor to build OFFER/CHUNK/DONE at the peer's version.
+  // Zero until a HELLO arrives (no OTA until the peer's version is known).
   uint8_t protocolVersion = 0;
-  // The peer's `{type}-{channel}` identity from HELLO_TLV_FW_CHANNEL (e.g.
-  // "standard-beta"). Empty until we've heard the TLV (older peers don't
-  // emit it). The OTA distributor uses it to skip OFFERs at a peer of a
-  // different lamp-type/channel; empty = "unknown → offer anyway and let the
-  // receiver's silent-drop gate". 16 bytes + NUL, matching FW_CHANNEL_LEN.
+  // Peer's `{type}-{channel}` slot from HELLO_TLV_FW_CHANNEL (e.g. "standard-beta").
+  // Empty on older peers that predate the TLV; OTA distributor skips cross-type OFFERs.
+  // 16 bytes + NUL matching FW_CHANNEL_LEN.
   char fwChannel[17] = {0};
-  // The peer's FS-image manifest digest prefix from HELLO_TLV_FS_STATE.
-  // hasFsDigest=false until heard (older / FS-OTA-disabled peer). The FS OTA
-  // distributor compares it to our own to decide whether to offer the UI image.
+  // Peer's FS-image digest prefix from HELLO_TLV_FS_STATE.
+  // hasFsDigest=false on older peers. The FS OTA distributor compares
+  // this to the local digest to decide whether to offer the UI image.
   bool    hasFsDigest = false;
   uint8_t fsDigest[8] = {0};
-  // Most recent BLE-scan RSSI (dBm) reported by the NimBLE callback for
-  // any adv from this peer. `getReachableViaBle()` returns its result
-  // sorted by lastRssi descending so consumers (PersonalityEngine's
-  // closest-peer tracking) can do `peers.front()` for the physically
-  // nearest lamp. `getReachableViaEspNow()` does NOT sort — the cascade
-  // path in ExpressionManager does its own sort after filtering self +
-  // naming. -127 means "unknown" (no BLE adv seen yet, or stored before
-  // the BLE scan callback updates it); sorts to the back.
-  //
-  // SOURCE OF TRUTH: written ONLY by addOrUpdateFromBle from the BLE
-  // scan callback's getRSSI() reading. The ESP-NOW HELLO path
-  // (addOrUpdateFromEspNow) used to also write here; that was removed
-  // so RSSI has a single source — see proximity.hpp. Single-source
-  // RSSI means PersonalityEngine's hysteresis comparison
-  // (kRssiHysteresisDb) never crosses transports.
+  // BLE-scan RSSI (dBm). Written only by addOrUpdateFromBle (single-transport
+  // invariant for PersonalityEngine hysteresis). -127 = unknown, sorts to back.
+  // getReachableViaBle() sorts descending; getReachableViaEspNow() does not.
   int8_t lastRssi = -127;
+};
+
+/**
+ * @brief Wisp presence cache from MSG_WISP_HELLO. Single global slot; most
+ *        recent hello wins. The brightness-floor check in MeshLink
+ *        reads this to decide whether a below-floor brightness override is
+ *        allowed (requires a recent hello from the same MAC).
+ */
+struct WispCache {
+  bool present = false;
+  uint8_t mac[6] = {0};
+  uint32_t lastHelloMs = 0;
+  uint32_t wispVersion = 0;
+  uint8_t flags = 0;
+  // +1 for trailing NUL; on-wire slot is 8 bytes opaque (not ASCII-enforced).
+  char paletteIdPrefix[9] = {0};
+  char carriedFwChannel[9] = {0};
+  uint32_t carriedFwVersion = 0;
+  // Last wispStatus JSON broadcast for this wisp (verbatim
+  // payload). Served on CHAR_WISP_STATUS reads merged with the hello
+  // fields above. Empty until the first wispStatus has been seen.
+  std::string lastStatusJson;
+  uint32_t lastStatusMs = 0;
+  // Latest MSG_WISP_PALETTE from this wisp. Served base64-encoded as
+  // getWispStatusReadJson()'s `palette` field on READ only (NOTIFY omits
+  // it; MTU truncation would corrupt it). 150 bytes = 50 colors * 3.
+  uint8_t manualPaletteRgb[150] = {0};
+  uint8_t manualPaletteCount = 0;
+  uint32_t lastPaletteMs = 0;
+  // Latest MSG_WISP_CLAIM roster. Served via CHAR_WISP_CLAIMS as a binary
+  // blob so the app can filter its painted-lamps list.
+  uint8_t claimedLampMacs[lamp_protocol::kMaxWispClaimEntries][6] = {};
+  uint8_t claimedCount = 0;
+  uint32_t lastClaimMs = 0;
 };
 
 /**
@@ -148,28 +156,23 @@ class NearbyLamps {
   // is within maxAgeMs.
   std::vector<NearbyLamp> getReachableViaEspNow(uint32_t maxAgeMs);
 
-  // Full snapshot — used by CHAR_NEARBY_LAMPS for the app's unified list.
+  // Full snapshot, used by CHAR_NEARBY_LAMPS for the app's unified list.
   std::vector<NearbyLamp> getAll();
 
-  // Look up a peer by BD_ADDR (uppercase colon-hex, matches `NearbyLamp::
-  // bdAddr`). Returns true and fills [out] on hit; false on miss with
-  // [out] untouched. Snapshot-style copy under the same mutex pattern as
-  // getAll(); the caller owns the copy.
+  // Look up a peer by BD_ADDR (uppercase colon-hex). Returns true and fills
+  // [out] on hit; false on miss with [out] untouched.
   bool findByBdAddr(const std::string& bdAddr, NearbyLamp& out);
 
-  // Look up a peer by ESP-NOW MAC. Returns true and fills [out] on hit;
-  // false on miss with [out] untouched. Only matches entries whose
-  // hasMac is true — BLE-only entries (HELLO never received) are
-  // invisible here by design. Used by the OTA visual indicator to fetch
-  // the active OTA peer's base color for the progress overlay.
+  // Returns true and fills [out] on hit; false on miss. Only matches entries
+  // with hasMac=true; BLE-only entries (no HELLO received) are excluded.
+  // Used by the OTA progress overlay to fetch the active peer's color.
   bool findByMac(const uint8_t mac[6], NearbyLamp& out);
 
   // Mark a lamp as acknowledged. SocialBehavior calls this once per peer
   // so a re-trigger doesn't re-greet the same lamp until it prunes.
   void acknowledge(const std::string& name);
 
-  // Wisp presence — populated by the MSG_WISP_HELLO drain in the loop
-  // task. Single global slot; most recent hello wins.
+  // Cache wisp presence from MSG_WISP_HELLO; most recent hello wins.
   void cacheWispHello(const uint8_t mac[6],
                       uint32_t wispVersion,
                       uint8_t flags,
@@ -183,44 +186,34 @@ class NearbyLamps {
   WispCache getWispCache();
 
   // Cache the latest wispStatus JSON broadcast for a given wisp MAC.
-  // Loop-task-only writer (drain of pendingWispStatus on Core 1);
-  // portMAX_DELAY take. If [mac] differs from the cached hello mac, the
-  // cache mac is updated and `present` is asserted — a status broadcast
-  // from a previously-unseen wisp is itself proof the wisp is on the
-  // mesh, regardless of whether a hello has arrived yet.
+  // Loop-task-only writer (Core 1). A status broadcast from a
+  // previously-unseen wisp asserts presence even before a hello arrives.
   void cacheWispStatus(const uint8_t mac[6],
                        const char* json, size_t jsonLen);
 
-  // Cache the latest MSG_WISP_PALETTE broadcast for a given wisp MAC.
-  // Same single-slot semantics as cacheWispStatus — a different MAC
-  // overwrites and clears stale per-wisp data. `rgb` is `count * 3`
-  // bytes of packed R, G, B. `count` is clamped to the on-wire cap
-  // (kMaxWispPaletteColors) so an oversized payload silently truncates
-  // rather than overflowing the cache slot. Loop-task-only writer (drain
-  // of pendingWispPalette on Core 1); portMAX_DELAY take.
+  // Cache the latest MSG_WISP_PALETTE for a given wisp MAC.
+  // `rgb` is `count * 3` packed R,G,B bytes; `count` is clamped to
+  // kMaxWispPaletteColors. Loop-task-only writer (Core 1).
   void cacheWispPalette(const uint8_t mac[6],
                         const uint8_t* rgb, uint8_t count);
 
-  // Light-touch presence ping: assert that we received a wisp-sourced
-  // paint frame from [mac]. Same single-slot semantics as cacheWispHello
-  // (different mac → clear stale per-wisp data), but does NOT set
-  // lastHelloMs or any hello-derived fields — we never received a hello
-  // in this code path. The merge in getWispStatusReadJson() guards on
-  // those fields' specific timestamps before publishing them.
-  //
-  // Why this exists: without it, a lamp that hears a wisp's
-  // MSG_OVERRIDE_COLORS (unicast paint, no relay) but not its
-  // MSG_WISP_HELLO (gossip-broadcast, ≤30s heartbeat) returns "{}" for
-  // wispStatus until the next hello lands — the app shows "No wisp
-  // detected" even though the lamp is being actively wisp-painted.
-  // Observed on hardware as the "bytes=0 puzzle".
-  //
-  // Called from the loop-task drain of pendingOverrideColors on Core 1,
-  // but uses bounded-take (2 ms) because the BLE on-read of
-  // CHAR_WISP_STATUS runs on Core 0 and takes the same mutex — without
-  // the bounded-take, a contended read could be starved by a
-  // back-to-back paint-frame update. On timeout we drop the update;
-  // the next paint frame retries.
+  // Cache the latest MSG_WISP_CLAIM roster for a given wisp MAC.
+  // `lampMacs` is [count][6] MAC bytes. `nowMs` feeds the staleness
+  // check in buildWispClaimsBlob. Loop-task-only writer (Core 1).
+  void cacheWispClaim(const uint8_t mac[6],
+                      const uint8_t lampMacs[][6], uint8_t count,
+                      uint32_t nowMs);
+
+  // Build the binary blob served on CHAR_WISP_CLAIMS: [count:1][lampMac:6]*count.
+  // Returns count=0 when the cached claim is stale (nowMs - lastClaimMs >
+  // kWispClaimStaleMs). Returns the number of bytes written to `out`.
+  // Max output = 1 + kMaxWispClaimEntries * 6 = 193 bytes.
+  size_t buildWispClaimsBlob(uint8_t* out, size_t outCap, uint32_t nowMs);
+
+  // Assert wisp presence from a paint frame. Unicast OVERRIDE_COLORS
+  // can arrive before gossip WISP_HELLO; this pins the MAC so wispStatus
+  // is non-empty on the first BLE read. hello-derived fields are not set.
+  // 2 ms bounded take: CHAR_WISP_STATUS reads on Core 0 share this mutex.
   void cacheWispMacFromPaint(const uint8_t mac[6]);
 
   // Build and return the JSON to serve on CHAR_WISP_STATUS reads.
@@ -228,14 +221,9 @@ class NearbyLamps {
   // data. Returns "{}" if nothing has been cached for either path.
   std::string getWispStatusReadJson(bool includePalette = false);
 
-  // Snapshot of "is this lamp currently following a wisp on each
-  // surface, and what's the most recently painted wisp color." The Flutter
-  // app reads these through wispStatus to render the will-o'-wisp
-  // indicator widget in the control screen header and to grey out
-  // expressions that opt into `disabledDuringWispOverride`. RGB+W hex
-  // color string; empty when the surface has never received a wisp
-  // paint. Set via setLampWispStateProvider() so the depencency on the
-  // ColorOverride globals stays in lamp.cpp.
+  // Current wisp-control state per surface: whether each surface is
+  // actively wisp-painted and the most recent paint color.
+  // Set via setLampWispStateProvider() to keep ColorOverride coupling in lamp.cpp.
   struct LampWispState {
     bool        controllingBase = false;
     bool        controllingShade = false;

@@ -52,8 +52,13 @@ void main() {
     n.select('dev1', baseRgb: 0xFF8000, shadeRgb: 0x2244FF);
     n.setName('jacko');
     n.setPassword('secret');
-    await n.submit();
-    await n.verifyDone;
+    // Drive the claim + background reconnect under real async — verifyDone
+    // awaits Timer-based delays/timeouts that never fire under the widget
+    // tester's fake clock without a pump.
+    await tester.runAsync(() async {
+      await n.submit();
+      await n.verifyDone;
+    });
 
     await tester.pumpWidget(
       UncontrolledProviderScope(

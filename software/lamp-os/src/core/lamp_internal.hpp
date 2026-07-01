@@ -12,7 +12,6 @@
 #pragma once
 
 #include <Arduino.h>
-#include <Preferences.h>
 
 #include <cstdint>
 
@@ -21,6 +20,7 @@
 #include "components/network/bluetooth.hpp"
 #include "components/network/mesh_link.hpp"
 #include "config/config.hpp"
+#include "config/nvs_config_store.hpp"
 #include "expressions/expression_manager.hpp"
 
 // ── File-scope statics owned by lamp.cpp ─────────────────────────────────
@@ -52,7 +52,7 @@ extern uint8_t s_hwMaxBrightness;
 extern portMUX_TYPE pendingMux;
 
 // Singletons owned by lamp.cpp.
-extern Preferences prefs;
+extern lamp::NvsConfigStore configStore;
 extern lamp::BluetoothComponent bt;
 extern lamp::FirmwareReceiver firmwareReceiver;
 extern lamp::MeshLink meshLink;

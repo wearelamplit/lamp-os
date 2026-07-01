@@ -9,5 +9,5 @@
 namespace Compression {
     // isGzip / isLikelyZlib are file-local in Compression.cpp; they're only
     // ever called from maybeInflate.
-    bool maybeInflate(const uint8_t* d, size_t n, std::vector<uint8_t>& out);
+    bool maybeInflate(const uint8_t* d, size_t n, size_t maxOut, std::vector<uint8_t>& out);
 }

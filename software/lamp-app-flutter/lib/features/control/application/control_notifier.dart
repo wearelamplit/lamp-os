@@ -100,8 +100,8 @@ class ControlNotifier extends _$ControlNotifier {
   /// stacking ble.connect + auth + canary calls on top of each other.
   bool _reconnectInFlight = false;
   static const _reconnectDelays = [500, 1000, 2000, 4000, 8000]; // ms, capped
-  /// Max number of consecutive reconnect attempts before we give up and
-  /// surface an error state instead of polling forever (audit perf-M4).
+  /// Max consecutive reconnect attempts before giving up and surfacing an
+  /// error state instead of polling forever.
   /// 30 attempts × the capped 8 s delay = ~4 minutes of background
   /// reconnect work. Past that, the lamp is almost certainly out of
   /// range and continuing to retry just keeps the radio warm + drains
@@ -842,8 +842,8 @@ class ControlNotifier extends _$ControlNotifier {
       ),
     ));
     // ac is part of the base settings blob, not its own characteristic; the
-    // firmware picks it up on the next CHAR_SETTINGS_BLOB save (Phase 5's
-    // Setup screen). Updating locally is enough for the visible session.
+    // firmware picks it up on the next CHAR_SETTINGS_BLOB save. Updating
+    // locally is enough for the visible session.
   }
 
   Future<void> setKnockoutPixel(int index, int brightness) async {
@@ -1184,14 +1184,11 @@ class ControlNotifier extends _$ControlNotifier {
     final blob = <String, dynamic>{'lamp': {'password': newPassword}};
     final blobJson = jsonEncode(blob);
     final pw = oldPassword ?? '';
-    // SECURITY (accepted threat T2): when no prior password exists
-    // (factory state, post-reset), the new password is written in
-    // plaintext. There's no shared secret yet to derive an AES key
-    // from. A passive BLE sniffer in range at adoption captures this
-    // lamp's new admin credential. The only real fix — fleet-wide
-    // mesh authentication — was deliberately rejected. See
-    // docs/accepted-security-threats.md.
-    // Threat is bounded by physical proximity at adoption time.
+    // Accepted threat: with no prior password (factory state, post-reset) the
+    // new password is written in plaintext (no shared secret yet to derive an
+    // AES key), so a passive sniffer at adoption captures the new admin
+    // credential. Fleet-wide mesh auth is rejected; bounded by physical
+    // proximity at adoption time.
     final payload = pw.isEmpty
         ? Uint8List.fromList([
             LampCrypto.magicPlaintext,
@@ -1663,10 +1660,9 @@ class ControlNotifier extends _$ControlNotifier {
     final cur = state.value;
     if (cur == null) return;
     final attempt = cur.reconnectAttempt;
-    // Park after the cap (audit perf-M4). The reconnect loop ran
-    // forever pre-fix — a wandered-off lamp would keep polling every
-    // 8s indefinitely, draining battery for nothing. User can re-tap
-    // the lamp in MyLamps to reset the attempt counter.
+    // Park after the cap: without it a wandered-off lamp keeps polling every
+    // 8s indefinitely, draining battery. User can re-tap the lamp in MyLamps
+    // to reset the attempt counter.
     if (attempt >= _maxReconnectAttempts) {
       state = AsyncError(
         const BleNotConnected('reconnect cap reached'),

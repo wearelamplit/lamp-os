@@ -169,8 +169,7 @@ void test_rgbw_warm_bias_clamps_to_255(void) {
 }
 
 void test_ten_stops_no_buffer_overrun(void) {
-  // Exercises the max-stops case (kManualPaletteMaxColors == 10) and
-  // confirms the fixed-point path doesn't drift over a longer palette.
+  // 10 stops; exercises fixed-point path drift across a longer palette.
   uint8_t stops[30];
   for (size_t i = 0; i < 10; ++i) {
     stops[i * 3 + 0] = static_cast<uint8_t>(i * 25);

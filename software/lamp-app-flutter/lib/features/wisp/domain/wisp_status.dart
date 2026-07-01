@@ -15,16 +15,14 @@ const _currentPaletteEq = ListEquality<LampColor>();
 /// payload pre-dates the offColor field.
 const LampColor _defaultOffColor = LampColor(r: 255, g: 150, b: 50, w: 0);
 
-/// Parsed `CHAR_WISP_STATUS` payload. The lamp serves a merged JSON that
-/// combines the last `wispStatus` MSG_CONTROL_OP broadcast (from the
-/// wisp) with the last MSG_WISP_HELLO data — see
-/// `software/lamp-os/src/components/network/nearby_lamps.cpp` for the
-/// merge shape. When no wisp has been seen the lamp returns the empty
-/// object `"{}"`; that round-trips into [WispStatus.empty] here.
+/// Parsed `CHAR_WISP_STATUS` payload. The lamp serves a merged JSON
+/// combining the last `wispStatus` MSG_CONTROL_OP broadcast (from the
+/// wisp) with the last MSG_WISP_HELLO data. When no wisp has been seen
+/// the lamp returns `"{}"`, which round-trips into [WispStatus.empty].
 ///
 /// Some hello fields may be absent when a status broadcast lands before
-/// the first hello (or vice-versa) — every getter handles missing keys
-/// gracefully so the UI never has to null-check field by field.
+/// the first hello (or vice-versa); every getter handles missing keys
+/// gracefully.
 class WispStatus {
   const WispStatus({
     this.currentZone,
@@ -47,6 +45,7 @@ class WispStatus {
     this.baseWispColor,
     this.shadeWispColor,
     this.currentPalette,
+    this.shuffleSeed = 0,
   });
 
   /// Sentinel for "no wisp has been heard on this lamp yet" (lamp
@@ -57,10 +56,7 @@ class WispStatus {
   /// it forwards). `null` when [zoneSource] is `"none"`.
   final int? currentZone;
 
-  /// Where [currentZone] came from. See [ZoneSource] for the enum
-  /// semantics. Audit cq-H: pre-enum this field was a `String` and
-  /// every comparison site spelled out the literal — brittle to typos
-  /// and impossible to exhaustive-switch over.
+  /// Where [currentZone] came from. See [ZoneSource] for the enum semantics.
   final ZoneSource zoneSource;
 
   /// Zone IDs the wisp has heard recently on the mesh. Drives the
@@ -131,13 +127,17 @@ class WispStatus {
   /// log on the wisp side.
   final List<LampColor>? currentPalette;
 
+  /// Current shuffle seed. Mixed into the TupleSampler hash salts so the
+  /// app preview stays in lock-step with the wisp's color assignments.
+  /// Defaults to 0 (matches the firmware default and pre-feature wisps).
+  final int shuffleSeed;
+
   /// Convenience: are we currently being wisp-painted on either surface?
   bool get controlling => controllingBase || controllingShade;
 
   /// Source-mode: off / manual / aurora. Drives the top-of-pane pill
-  /// picker. Defaults to [WispSourceMode.aurora] when missing so older
-  /// wisps that don't emit the field and `{}` payloads land on the
-  /// legacy default.
+  /// picker. Parsed via `parseWispSourceMode`; defaults to `off` when
+  /// the key is absent or unknown.
   final WispSourceMode source;
 
   /// Color the wisp renders on its own 30-pixel ring when sourceMode is
@@ -147,15 +147,10 @@ class WispStatus {
   /// (or `{}` payloads) land on a sensible value.
   final LampColor offColor;
 
-  /// True iff Aurora has ever been observed on the mesh from this wisp's
-  /// perspective. The Aurora pill in the source picker is enabled only
-  /// when this is true — selecting Aurora before the wisp has heard a
-  /// real zone would just produce an empty palette.
-  ///
-  /// We treat "Aurora detected" as either:
-  ///   • `auroraConnected == true` right now, OR
-  ///   • the wisp has logged at least one [observedZones] entry.
-  /// Either is sufficient evidence that there's a zone to follow.
+  /// True when Aurora is viable: either `auroraConnected` is true or at
+  /// least one zone has been observed. Either is sufficient evidence that
+  /// there's a zone to follow. Selecting Aurora with no zones produces
+  /// an empty palette.
   bool get auroraDetected =>
       auroraConnected || observedZones.isNotEmpty || currentZone != null;
 
@@ -274,8 +269,7 @@ class WispStatus {
           : null,
       helloLastSeenMs: asInt(json['helloLastSeenMs']),
       statusLastSeenMs: asInt(json['statusLastSeenMs']),
-      // parseWispSourceMode tolerates null + unknown strings; the default
-      // is aurora, matching the wisp-side coercion.
+      // parseWispSourceMode tolerates null + unknown strings; defaults to off.
       source: parseWispSourceMode(sourceRaw is String ? sourceRaw : null),
       offColor: parseOffColor(json['offColor']),
       controllingBase: asBool(json['controllingBase']),
@@ -283,6 +277,7 @@ class WispStatus {
       baseWispColor: parseWispHexColor(json['baseWispColor']),
       shadeWispColor: parseWispHexColor(json['shadeWispColor']),
       currentPalette: parseCurrentPalette(json['palette']),
+      shuffleSeed: asInt(json['shuffleSeed']) ?? 0,
     );
   }
 
@@ -315,6 +310,7 @@ class WispStatus {
       baseWispColor: baseWispColor,
       shadeWispColor: shadeWispColor,
       currentPalette: currentPalette ?? this.currentPalette,
+      shuffleSeed: shuffleSeed,
     );
   }
 
@@ -343,7 +339,8 @@ class WispStatus {
           shadeWispColor == other.shadeWispColor &&
           _currentPaletteEq.equals(
               currentPalette ?? const <LampColor>[],
-              other.currentPalette ?? const <LampColor>[]);
+              other.currentPalette ?? const <LampColor>[]) &&
+          shuffleSeed == other.shuffleSeed;
 
   @override
   int get hashCode => Object.hash(
@@ -365,5 +362,6 @@ class WispStatus {
         currentPalette == null
             ? 0
             : _currentPaletteEq.hash(currentPalette!),
+        shuffleSeed,
       );
 }

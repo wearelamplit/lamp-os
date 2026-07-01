@@ -161,12 +161,10 @@ class AddLampNotifier extends _$AddLampNotifier {
     // the lamp, every future write requires GCM auth keyed off the new
     // password.
     //
-    // SECURITY (accepted threat T2): the password chosen here is the
-    // new admin credential and goes on the wire in plaintext. A passive
-    // BLE sniffer in range at adoption captures it. The only real fix —
-    // fleet-wide mesh authentication — was deliberately rejected. See
-    // docs/accepted-security-threats.md.
-    // Threat is bounded by physical proximity at the adoption moment.
+    // Accepted threat: the password chosen here is the new admin credential
+    // and goes on the wire in plaintext, so a passive sniffer at adoption
+    // captures it. Fleet-wide mesh auth is rejected; bounded by physical
+    // proximity at the adoption moment.
     //
     // The lamp tears down its BLE link mid-write as part of fade-out +
     // reboot; the write throws a "not connected" / "disconnected"

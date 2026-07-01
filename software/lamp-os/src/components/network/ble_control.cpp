@@ -11,30 +11,26 @@
 #include <unordered_set>
 
 #include "config/config.hpp"
-#include "behaviors/fade_out.hpp"  // fadeOutRebootRequested flag
+#include "behaviors/fade_out.hpp"
 #include "components/transient_override/brightness_override.hpp"
 #include "components/transient_override/color_override.hpp"
-#include "components/webapp/webapp.hpp"  // shutdownForOta during OTA
+#include "components/webapp/webapp.hpp"
 #include "util/color.hpp"
 #include "util/proximity.hpp"
 #include "core/pending_slot_aggregate.hpp"
 #include "core/override_aggregate.hpp"
-#include "core/ota_quiet_mode.hpp"  // isQuiet() gate on live-control writes
-#include "bluetooth.hpp"  // for BLE_GAP_SCAN_TIME_MS
+#include "core/ota_quiet_mode.hpp"
+#include "bluetooth.hpp"
 #include "crypto.hpp"
-#include "components/network/gatt_layout.hpp"  // kGattLayout, kGattSchemaVersion
+#include "components/network/gatt_layout.hpp"
 #include "expressions/expression_manager.hpp"
 #include "nearby_lamps.hpp"
 #include "mesh_link.hpp"
 #include "wifi.hpp"
 #include "write_router.hpp"
 
-// Defined in lamp.cpp. Each BLE callback does ONLY a fixed-size
-// byte copy into a pending slot — zero heap allocation on Core 0. The loop
-// task on Core 1 drains the slots and does all heap work (JSON parse,
-// vector build, gradient construction, timestamp updates). This restores
-// the single-core memory pattern the lamp used to have when the only
-// transport was AsyncTCP+WebSocket (everything ran on Core 1).
+// Defined in lamp.cpp. Each BLE callback does a fixed-size byte copy into a
+// pending slot (zero heap on Core 0). Core 1 drains and does all heap work.
 void postPendingBrightness(int8_t level);
 void postPendingShadeColorsJson(const char* data, size_t len);
 void postPendingBaseColorsJson(const char* data, size_t len);
@@ -45,68 +41,41 @@ void postPendingTestActionJson(const char* data, size_t len);
 void postPendingRemoteOpJson(const char* data, size_t len);
 void postPendingSettingsBlobJson(const char* data, size_t len);
 void postPendingSocialDispositionsJson(const char* data, size_t len);
-// CHAR_WISP_OP — plaintext JSON, app-originated, dedicated slot whose
-// drain broadcasts as MSG_CONTROL_OP. Bypasses applyRemoteOpLocal so a
-// gossip-relayed wispOp does NOT get re-applied on every lamp; only the
-// wisp(s) on the mesh consume it.
+// CHAR_WISP_OP. drain broadcasts as MSG_CONTROL_OP. Bypasses
+// applyRemoteOpLocal so a gossip-relayed wispOp is not re-applied on
+// every lamp; only the wisp(s) consume it.
 void postPendingWispOpJson(const char* data, size_t len);
 void postPendingApplyEffectiveBrightness();
-// NVS commits cannot run on Core 0 (NimBLE host task). onDisconnect
-// posts this flag; the loop drain on Core 1 force-flushes dispositions
-// so a phone walk-off still persists the user's slider value.
+// NVS commits cannot run on Core 0 (NimBLE host task). onDisconnect posts
+// this flag; Core 1 force-flushes dispositions so a phone walk-off persists
+// the user's slider value.
 void postPendingFlushDispositions();
-// CHAR_COMMIT volatile state — now in lamp::pendingSlots (pending_slot_aggregate.hpp).
-// Written from Core 0 BLE callbacks here; drained on Core 1 in lamp.cpp.
 
-// Owned by lamp.cpp. Read by notifyStateChange() to populate the
-// previewActive bit so the app can disable / morph its Test button
-// without an app-side timer.
+// Read by notifyStateChange() to populate previewActive so the app can
+// reflect test state without its own timer.
 extern lamp::ExpressionManager expressionManager;
 
 namespace ble_control {
-
-// ---------------------------------------------------------------------------
-// Module-level state
-// ---------------------------------------------------------------------------
 
 static NimBLEServer*         s_server          = nullptr;
 static NimBLEService*        s_service         = nullptr;
 static NimBLECharacteristic* s_stateNotify     = nullptr;
 static NimBLECharacteristic* s_wifiStateChar   = nullptr;
 static NimBLECharacteristic* s_wispStatusChar  = nullptr;
+static NimBLECharacteristic* s_wispClaimsChar  = nullptr;
 static lamp::Config*         s_config      = nullptr;
 static bool                  s_running     = false;
 
-// Cross-core flags driven from BLE callbacks (Core 0) and read from the
-// loop task (Core 1) via the public accessors below. volatile because
-// the compiler can otherwise cache the read in a register on Core 1 and
-// miss the flip.
-//   s_clientConnected   — a BT client (the app) is currently connected.
-//                         Used by wifi::tick to skip background scans
-//                         during BT sessions, and by the effective-home
-//                         -mode gate to swap to "configurator" semantics.
-//   s_homeModePageActive — the app has signalled (via CHAR_HOME_MODE_FOCUS)
-//                         that the user is on the Home Mode setup page.
-//                         Forces effectiveHomeMode TRUE while BT is up,
-//                         and routes incoming CHAR_BRIGHTNESS writes to
-//                         home.brightness instead of lamp.brightness.
+// volatile: written by BLE host task (Core 0), read from Core 1 and scan
+// callbacks. Compiler would otherwise cache reads in a register and miss flips.
 static volatile bool         s_clientConnected   = false;
+// Forces effectiveHomeMode TRUE while set; routes CHAR_BRIGHTNESS to
+// home.brightness instead of lamp.brightness.
 static volatile bool         s_homeModePageActive = false;
-// Set true on GATT connect, cleared on GATT disconnect. Queried by
-// bluetooth.cpp's onScanEnd via isScanPaused() so the central scan
-// doesn't auto-restart while a phone is using the GATT control service.
-// volatile because it's written from the BLE host task (Core 0) and read
-// from the scan callback (also Core 0 today, but treat as cross-task).
+// Prevents the central scan from auto-restarting while a phone holds a
+// GATT connection (queried by isScanPaused()).
 static volatile bool         s_scanPausedForGattClient = false;
 
-// BLE connection interval — request 15-30 ms (TIGHT) on connect and hold
-// it for the duration of the BT session. Earlier code adaptively widened
-// to 100-200 ms after 2s of write-idle to free ESP-NOW airtime under
-// IDF #14904 SW coex, but bench instrumentation 2026-06-23 showed the
-// widen→tighten renegotiation introduced 190 ms cluster gaps during the
-// very gestures the link needed to be snappy for. The fleet now relies
-// on ESP-NOW HELLO / MSG_EVENT being resilient to coex-driven drops
-// rather than starving live-preview throughput to feed the mesh.
 static          uint16_t     s_currentConnHandle = 0xFFFF;
 
 static constexpr uint16_t kTightMinUnits = 12;   //  15.0 ms (units of 1.25 ms)
@@ -117,24 +86,10 @@ bool isClientConnected()   { return s_clientConnected;   }
 bool isHomeModePageActive() { return s_homeModePageActive; }
 bool isScanPaused()        { return s_scanPausedForGattClient; }
 
-// Per-connection state. NimBLE caps simultaneous connections at
-// CONFIG_BT_NIMBLE_MAX_CONNECTIONS=3, so a fixed-size array beats the
-// red-black-tree overhead of std::map for 1-3 entries — saves ~200 B
-// per active conn and avoids heap fragmentation on the BLE hot path.
-// Linear search over 3 entries is ~3 comparisons — cheaper than a RB-tree
-// lookup, and touched on every encrypted BLE write.
-//
-//   handle == kUnusedHandle → slot is free
-//   authed                  → set true on plaintext auth success or after
-//                             a successful GCM decrypt (GCM tag IS auth)
-//   crypto                  → per-connection nonce replay window, lazy-init
-//                             on first ciphertext write
-//   pageSnapshot/Cursor/Mtu → per-conn paginated read state. snapshot is
-//                             populated on CHAR_PAGE_CTRL onWrite; cursor
-//                             advances on CHAR_PAGE_DATA onRead. assign()
-//                             keeps the std::string's existing capacity
-//                             across sections so the heap sees growth-only,
-//                             not churn.
+// Per-connection state. NimBLE caps at CONFIG_BT_NIMBLE_MAX_CONNECTIONS=3,
+// so a fixed-size array beats std::map overhead for 1-3 entries (linear
+// search over 3 slots is cheaper than a red-black-tree lookup on the
+// per-write hot path).
 struct ConnSlot {
   uint16_t                    handle;
   bool                        authed;
@@ -151,18 +106,14 @@ static std::array<ConnSlot, kMaxConns> s_conn{{
   {kUnusedHandle, false, {}, {}, 0, 0},
 }};
 
-// Hard ceiling on the chunk size returned by CHAR_PAGE_DATA. We pin this
-// to the app's requested ATT_MTU 247 minus the 3-byte ATT header, rather
-// than reading the per-conn negotiated MTU at runtime — flutter_blue_plus
-// 2.x doesn't reliably surface the negotiated value, and pinning a wire
-// constant means the helper can hardcode "short = done" without threading
-// MTU state. If the negotiated MTU is smaller for a given conn, we use
-// that instead (see PageDataCallback::onRead below).
+// Pinned to ATT_MTU 247 minus the 3-byte ATT header rather than reading
+// the per-conn negotiated MTU: flutter_blue_plus 2.x doesn't reliably
+// surface the negotiated value, so a wire constant lets the app hardcode
+// "short = done" without threading MTU state per connection.
 static constexpr uint16_t kPageMaxChunkSize = 244;
 
-// Find the slot owned by [handle], or nullptr if none. Linear scan over
-// kMaxConns (=3) entries. static so the compiler can inline it into every
-// BLE callback below — this is on the per-write hot path.
+// static so the compiler can inline this into every BLE callback; it is on
+// the per-write hot path.
 static ConnSlot* findSlot(uint16_t handle) {
   for (auto& s : s_conn) {
     if (s.handle == handle) return &s;
@@ -170,10 +121,9 @@ static ConnSlot* findSlot(uint16_t handle) {
   return nullptr;
 }
 
-// Find the slot for [handle], allocating the first unused slot if there's
-// no match. Returns nullptr only if all 3 slots are taken by other handles
-// (shouldn't happen given NimBLE's connection cap, but defensive). Newly
-// allocated slots have authed=false and an empty crypto state.
+// Find the slot for [handle], allocating the first unused slot if none
+// matches. Returns nullptr only if all 3 slots are taken (unreachable given
+// NimBLE's connection cap). New slots start with authed=false.
 static ConnSlot* findOrAllocSlot(uint16_t handle) {
   ConnSlot* freeSlot = nullptr;
   for (auto& s : s_conn) {
@@ -191,8 +141,7 @@ static ConnSlot* findOrAllocSlot(uint16_t handle) {
   return freeSlot;
 }
 
-// Release the slot owned by [handle] back to the pool. Mirrors the previous
-// std::map::erase semantics — no-op if [handle] isn't tracked.
+// Release the slot owned by [handle]. No-op if not tracked.
 static void freeSlot(uint16_t handle) {
   if (auto* s = findSlot(handle)) {
     s->handle = kUnusedHandle;
@@ -204,7 +153,7 @@ static void freeSlot(uint16_t handle) {
   }
 }
 
-// Reset every slot — used on stop() to mirror std::map::clear().
+// Reset all slots on stop().
 static void clearAllSlots() {
   for (auto& s : s_conn) {
     s.handle = kUnusedHandle;
@@ -216,12 +165,7 @@ static void clearAllSlots() {
   }
 }
 
-// Target MTU requested on every new connection
 static constexpr uint16_t TARGET_MTU = 512;
-
-// ---------------------------------------------------------------------------
-// Auth helper
-// ---------------------------------------------------------------------------
 
 static bool isAuthed(uint16_t connHandle) {
   if (s_config->lamp.password.empty()) return true;  // No password — open access
@@ -229,14 +173,9 @@ static bool isAuthed(uint16_t connHandle) {
   return s && s->authed;
 }
 
-// ---------------------------------------------------------------------------
-// UUID → little-endian 16-byte salt (matches Dart uuidSaltLE16)
-// ---------------------------------------------------------------------------
-
-// Parse a UUID string like "5f64f4d1-d6d9-4a44-9b3f-3a8d6f7e6b40" into 16
-// bytes in **reversed hex order** so it matches the Dart side's
-// `uuidSaltLE16(...)`. The HKDF salt is opaque — both sides just need to
-// agree on the bytes.
+// Parse a UUID string into 16 bytes in reversed (LE) order to match the
+// Dart side's uuidSaltLE16(). The HKDF salt is opaque; both sides just
+// need the same bytes.
 static std::array<uint8_t, 16> uuidSaltLE(const char* uuid) {
   std::array<uint8_t, 16> out{};
   uint8_t bytes[16];
@@ -259,19 +198,13 @@ static std::array<uint8_t, 16> uuidSaltLE(const char* uuid) {
   return out;
 }
 
-// ---------------------------------------------------------------------------
-// Incoming write dispatcher — magic-byte routing
-// ---------------------------------------------------------------------------
-
-// Decode an inbound write payload. Dispatches on the magic-byte prefix:
-//   - 0x02 → AES-GCM ciphertext via lamp::crypto::decryptOp.
-//     Successful decrypt implicitly authenticates the connection
-//     (GCM auth-tag has already verified the lamp password).
-//   - 0x01 → explicit plaintext prefix; strip it and pass through.
-//   - anything else (legacy unprefixed JSON, including the webapp's bare
-//     '{' first byte) → treat the whole payload as plaintext JSON.
+// Decode an inbound write payload. Magic-byte dispatch:
+//   0x02 → AES-GCM ciphertext; successful decrypt implicitly authenticates
+//          (GCM tag verifies the lamp password).
+//   0x01 → explicit plaintext prefix, stripped before passing through.
+//   other → bare JSON (including legacy webapp '{' first byte), passed as-is.
 // Plaintext writes still require a prior CHAR_AUTH success to be authed.
-// Returns true on success (json populated); false to silently reject.
+// Returns true on success; false to silently reject.
 static bool decodeIncomingOp(const std::string& raw,
                              uint16_t handle,
                              const uint8_t* charUuidLE16,
@@ -301,29 +234,19 @@ static bool decodeIncomingOp(const std::string& raw,
   return true;
 }
 
-// ---------------------------------------------------------------------------
-// Server callbacks — track connections for auth state and negotiate MTU
-// ---------------------------------------------------------------------------
-
 class ControlServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer* server, NimBLEConnInfo& connInfo) override {
     uint16_t handle = connInfo.getConnHandle();
-    // Allocate the per-conn slot up front so plaintext auth attempts (which
-    // assign authed=true on accept) have a place to land. If allocation
-    // fails (all 3 slots taken — defensive), the connection simply stays
-    // unauthed; isAuthed() returns false and all writes are rejected.
+    // Allocate up front so a plaintext CHAR_AUTH write has a slot to land
+    // in. If all 3 slots are taken, the connection stays unauthed.
     findOrAllocSlot(handle);
 
     server->setDataLen(handle, 251);
     NimBLEDevice::setMTU(TARGET_MTU);
 
-    // Request a tighter connection interval for live-preview throughput.
-    // Android may decline (it weighs power saving), but when accepted
-    // this widens the link from ~20 writes/sec at the default ~49ms
-    // interval to ~33-66 writes/sec at 15-30ms — eliminating the queue
-    // backpressure that made continuous slider drags lag.
-    //   minInterval = 12 (15.0 ms), maxInterval = 24 (30.0 ms),
-    //   latency = 0, supervision timeout = 400 (4.0 s).
+    // Request a tight interval for live-preview throughput. Android may
+    // decline, but when accepted this raises write throughput from ~20/sec
+    // at the default ~49ms interval to ~33-66/sec, eliminating slider lag.
     server->updateConnParams(handle, kTightMinUnits, kTightMaxUnits, 0,
                              kSupervisionTimeoutUnits);
     s_currentConnHandle = handle;
@@ -331,14 +254,10 @@ class ControlServerCallbacks : public NimBLEServerCallbacks {
     s_scanPausedForGattClient = true;
     NimBLEDevice::getScan()->stop();
 
-    // Track BT-session state. The lamp no longer associates to WiFi
-    // (presence-only home mode), so there's no STA to pause. wifi::tick
-    // skips its background scans while this flag is set so the radio
-    // can stay focused on BT.
+    // wifi::tick skips background scans while a client is connected so the
+    // radio stays focused on BT.
     s_clientConnected = true;
     s_homeModePageActive = false;
-    // Recompute effective home mode now that the BT session is up — the
-    // gate switches from presence-based to focus-based.
     postPendingApplyEffectiveBrightness();
 
 #ifdef LAMP_DEBUG
@@ -350,40 +269,28 @@ class ControlServerCallbacks : public NimBLEServerCallbacks {
     uint16_t handle = connInfo.getConnHandle();
     freeSlot(handle);
 
-    // Resume the central scan now that the phone is gone.
     s_scanPausedForGattClient = false;
     NimBLEDevice::getScan()->start(BLE_GAP_SCAN_TIME_MS);
 
     s_clientConnected = false;
     s_homeModePageActive = false;
-    // Defensive sweep: clear all operator-editing flags so a stale flag
-    // from a crashed / backgrounded app can't keep the wisp's overrides
-    // locked out for this surface forever. Reconnected sessions can
-    // re-open whatever they actually want via CHAR_EDIT_SESSION.
+    // Clear editing flags so a crashed/backgrounded app can't keep the
+    // wisp's overrides locked out; reconnected sessions re-open via
+    // CHAR_EDIT_SESSION.
     lamp::overrides.base.setOperatorEditing(false);
     lamp::overrides.shade.setOperatorEditing(false);
     lamp::overrides.brightness.setOperatorEditing(false);
-    // Defensive sweep #2 (reduced): re-assert wisp paint into the
-    // configurators in case a mid-test BLE write stomped the wisp's
-    // target gradient before disconnecting. Configurator.disabled is
-    // gone since the 2026-06-12 reorder — test_expression no longer
-    // pauses the configurator, so there's no "test mode" state left to
-    // recover from. The reassertHold calls below are belt-and-suspenders.
+    // Re-assert wisp paint in case a BLE write stomped the target gradient
+    // before disconnecting.
     lamp::overrides.base.reassertHold();
     lamp::overrides.shade.reassertHold();
     s_currentConnHandle = 0xFFFF;
-    // Recompute effective home mode — gate switches back to presence-based.
     postPendingApplyEffectiveBrightness();
-    // Phone walked away — force-commit any pending disposition writes
-    // so the user's final slider value survives a power loss before
-    // the 5s debounce window elapses. No-op if not
-    // dirty (the common case for disconnects unrelated to social tab).
-    // The flush runs on Core 1 from the loop drain; we just post a flag.
+    // Force-flush dispositions so the user's final slider value persists
+    // if the lamp loses power before the debounce window elapses.
     postPendingFlushDispositions();
-    // Force-flush a pending commit on disconnect so a quick edit-then-
-    // disconnect doesn't lose the user's last change. The loop drain
-    // sees g_forceCommitFlush and flushes immediately (skips the idle
-    // window).
+    // Skip the commit idle window so a quick edit-then-disconnect doesn't
+    // lose the user's last change.
     lamp::pendingSlots.forceCommitFlush = true;
 
 #ifdef LAMP_DEBUG
@@ -391,10 +298,6 @@ class ControlServerCallbacks : public NimBLEServerCallbacks {
 #endif
   }
 };
-
-// ---------------------------------------------------------------------------
-// Auth characteristic — write-with-response
-// ---------------------------------------------------------------------------
 
 class AuthCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
@@ -424,10 +327,6 @@ class AuthCallback : public NimBLECharacteristicCallbacks {
   }
 };
 
-// ---------------------------------------------------------------------------
-// Brightness — write-without-response, single u8 0-100
-// ---------------------------------------------------------------------------
-
 class BrightnessCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
@@ -437,41 +336,12 @@ class BrightnessCallback : public NimBLECharacteristicCallbacks {
     uint8_t level = static_cast<uint8_t>(val[0]);
     if (level > 100) level = 100;
 #ifdef LAMP_DEBUG
-    // Pair with [drain] brightness t_us=... in lamp.cpp to
-    // measure BLE→loop latency under continuous slider drag.
     Serial.printf("[ble] brightness recv level=%u t_us=%lu\n",
                   level, (unsigned long)micros());
 #endif
-    // Zero-alloc on Core 0. The drain in lamp.cpp::loop() reads
-    // pendingBrightness on Core 1, updates config + timestamps + strip
-    // brightness all on Core 1.
     postPendingBrightness(static_cast<int8_t>(level & 0x7F));
   }
 };
-
-// ---------------------------------------------------------------------------
-// Shade colors / Base colors — plaintext JSON arrays of hex strings.
-// Routed through WriteRouter; instantiated below in start().
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Base knockout — write-without-response, 2 bytes: [pixelIndex u8, brightness% u8]
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Home Mode focus — write-without-response, single u8 bool. The app
-// writes 1 while the user is on the Home Mode setup page and 0 when
-// they leave. Forces effectiveHomeMode TRUE while BT is up (so the user
-// can preview), and routes incoming CHAR_BRIGHTNESS writes to
-// homeMode.brightness. Cleared automatically on BT disconnect (in
-// ControlServerCallbacks::onDisconnect).
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Edit-session callback — operator-priority lockout for wisp overrides.
-// 2-byte payload: [surface, state]. See CHAR_EDIT_SESSION docstring in
-// the .hpp for the bitmask values.
-// ---------------------------------------------------------------------------
 
 class EditSessionCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
@@ -522,26 +392,9 @@ class BaseKnockoutCallback : public NimBLECharacteristicCallbacks {
   }
 };
 
-// ExpressionOp (plaintext JSON), WifiOp + RemoteOp (AES-GCM ciphertext) are
-// routed through WriteRouter; instantiated in start() below.
-
-// ── Nearby lamps: read+notify the unified per-transport list ────────────
-// Pulls from nearbyLamps.getAll() and tags each entry with viaBle /
-// viaEspNow flags reflecting whether the transport has carried at least
-// one sighting in this entry's current lifetime. The list itself prunes
-// after LAMP_PRUNE_TIME_MS, so stale entries disappear rather than going
-// badge-less — using a separate per-flag recency window would make rows
-// appear in the list with no badges between the recency cutoff and the
-// prune cutoff (the user-visible "ghost row" bug).
-//
-// No size cap: the page protocol (CTRL+DATA chunking, lines 877-964)
-// streams arbitrarily long sections via successive 244 B chunks, so
-// MTU is not the constraint. The natural ceiling is
-// NearbyLamps::MAX_NEARBY = 32 peers, which at ~200 B per entry caps
-// the JSON at ~6.4 KB — well under the page protocol's uint16_t
-// cursor (~65 KB) and a trivial fraction of available heap. No MTU
-// clamp is applied here; the page-protocol chunker downstream handles
-// any size up to the cursor limit.
+// No separate per-flag recency window: a recency cutoff shorter than the
+// prune cutoff produces "ghost rows" (entry visible, both badges gone)
+// between the two deadlines.
 static std::string buildNearbyLampsJson() {
   auto lamps = lamp::nearbyLamps.getAll();
   // Sort by name for stable rendering.
@@ -554,8 +407,7 @@ static std::string buildNearbyLampsJson() {
   for (const auto& p : lamps) {
     JsonObject o = arr.add<JsonObject>();
     o["name"] = p.name;
-    // Use the freshest transport's timestamp as a single "lastSeen" for the
-    // app's display sort / age cue.
+    // Take the max of both transport timestamps as the canonical lastSeen.
     o["lastSeenMs"] = (p.lastSeenViaEspNowMs > p.lastSeenViaBleMs)
                           ? p.lastSeenViaEspNowMs
                           : p.lastSeenViaBleMs;
@@ -578,10 +430,7 @@ static std::string buildNearbyLampsJson() {
     sh.add(p.shadeColor.r); sh.add(p.shadeColor.g); sh.add(p.shadeColor.b); sh.add(p.shadeColor.w);
     JsonArray ba = o["base"].to<JsonArray>();
     ba.add(p.baseColor.r);  ba.add(p.baseColor.g);  ba.add(p.baseColor.b);  ba.add(p.baseColor.w);
-    // Mesh-debug fields: firmware version (packed semver) + current
-    // OTA state (0=idle, 1=sending, 2=receiving) as seen in the last
-    // HELLO from this peer. Both omitted when zero/idle to keep the
-    // JSON compact in the common case (most peers most of the time).
+    // Omit zero/idle values to keep the JSON compact.
     if (p.firmwareVersion != 0) o["fwVersion"] = p.firmwareVersion;
     if (p.otaState != 0) o["otaState"] = p.otaState;
   }
@@ -590,10 +439,8 @@ static std::string buildNearbyLampsJson() {
   return out;
 }
 
-// Social dispositions — read returns the full per-peer map; write replaces
-// it. Auth-gated on both directions: even though the disposition values
-// aren't sensitive (they're not credentials), exposing the friendship map
-// to an unauthenticated scanner would leak the lamp's peer relationships.
+// Auth-gated on read and write: the disposition map reveals peer
+// relationships that an unauthenticated scanner shouldn't see.
 class SocialDispositionsCallback : public NimBLECharacteristicCallbacks {
   void onRead(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) {
@@ -611,23 +458,16 @@ class SocialDispositionsCallback : public NimBLECharacteristicCallbacks {
     Serial.printf("[ble_control] WRITE socialDispositions len=%u\n",
                   (unsigned)val.size());
 #endif
-    // Memcpy-only on Core 0; loop task drains + parses + persists so the
-    // NVS write serialises against the settings_blob drain on Core 1
-    // (shared `prefs` instance can't tolerate concurrent begin/end).
+    // NVS write runs on Core 1 so it serialises against the settings_blob
+    // drain (shared `prefs` instance can't tolerate concurrent begin/end).
     postPendingSocialDispositionsJson(val.data(), val.size());
   }
 };
 
-// ── Wisp status: read+notify the cached wispStatus JSON merged with the
-// last MSG_WISP_HELLO payload. Auth-gated — a wisp's runtime state
-// (current zone, palette progress, etc.) shouldn't be readable to an
-// unauthenticated scanner that happens to know the service UUID.
-//
-// Build path lives entirely inside NearbyLamps::getWispStatusReadJson so
-// both the on-read callback and the notify helper hand back the same
-// bytes. Returns "{}" when nothing has been cached yet (no wispHello,
-// no wispStatus) — the app treats empty/object-only payloads as
-// "no wisp on this mesh yet".
+// Both the onRead callback and notifyWispStatus() call
+// getWispStatusReadJson() so they always hand back the same bytes.
+// Auth-gated: a wisp's runtime state shouldn't be readable to an
+// unauthenticated scanner.
 class WispStatusCallback : public NimBLECharacteristicCallbacks {
   void onRead(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) {
@@ -642,13 +482,6 @@ void notifyWispStatus() {
   if (!s_wispStatusChar) return;
   auto json = lamp::nearbyLamps.getWispStatusReadJson(false);
 #ifdef LAMP_DEBUG
-  // Diagnostic for the 2026-06-13 "wisp icon doesn't show even though the
-  // lamp IS being wisp-painted" report. Print the actual JSON length and
-  // peek at the controllingBase/controllingShade values so we can confirm
-  // whether the LAMP is reporting them as true at notify-out time, which
-  // pins the regression to either the firmware state machine
-  // (isWispActive returns false) or the app (parses the JSON but doesn't
-  // render the icon).
   const bool sawCB = json.find("\"controllingBase\":true") != std::string::npos;
   const bool sawCS = json.find("\"controllingShade\":true") != std::string::npos;
   Serial.printf("[wisp_state] notify len=%u controllingBase=%d controllingShade=%d preview=%.220s\n",
@@ -671,9 +504,6 @@ static const char* wifiStateName(wifi::State s) {
 static std::string buildWifiStateJson(bool includeScanResults) {
   JsonDocument doc;
   doc["state"] = wifiStateName(wifi::state());
-  // (No more "ssid" / "ip" — the lamp never associates in presence-only
-  // mode. App reads home.ssid from CHAR_HOME_SECTION; "is the lamp
-  // currently in home mode" is implicit in the BT-session UX.)
   if (!wifi::lastError().empty()) {
     doc["lastError"] = wifi::lastError();
   }
@@ -725,40 +555,20 @@ void notifyWifiState() {
   s_wifiStateChar->notify();
 }
 
-// ExpressionTest (plaintext) is routed through WriteRouter. Unique flag:
-// empty-payload writes (the "test complete" sentinel) MUST reach the drain,
-// so the router is constructed with allowEmpty(true).
-
-// ---------------------------------------------------------------------------
-// Settings blob — read + write-with-response
-//   Read:  returns full config JSON (no auth required — app needs it to
-//          determine if a password exists before it can auth).
-//   Write: replaces config and persists to NVS; then reboots (same semantics
-//          as HTTP PUT /settings).
-// ---------------------------------------------------------------------------
-
 class SettingsBlobCallback : public NimBLECharacteristicCallbacks {
-  // Write-only path. App reads sections via the page protocol
-  // (CHAR_PAGE_CTRL + CHAR_PAGE_DATA); CHAR_SETTINGS_BLOB is the
-  // write-and-reboot save target only.
+  // Write-and-reboot save target; reads go through the page protocol.
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (lamp::ota_quiet_mode::isQuiet()) return;
     static const auto uuid = uuidSaltLE(CHAR_SETTINGS_BLOB);
     const uint16_t handle = connInfo.getConnHandle();
     const std::string raw = c->getValue();
-    // Settings blob can be larger than the op bound; add 64 for ciphertext overhead.
-    // NimBLE already enforces MTU on the link; this is a sanity ceiling only.
+    // Settings blob can exceed the standard op bound; +64 for ciphertext
+    // overhead. NimBLE enforces MTU on the link; this is a sanity ceiling.
     if (raw.size() > 4096 + 64) return;
     std::string json;
     bool authed = false;
     if (!decodeIncomingOp(raw, handle, uuid.data(), "settingsBlob", json, authed)) {
 #ifdef LAMP_DEBUG
-      // Diagnostic: dump password length (not content) and wire magic byte
-      // so we can tell whether the lamp/app password-state diverged. A
-      // common cause of "decrypt/decode failed" on a settings_blob write
-      // is the app encrypting with a non-empty cached password against a
-      // lamp whose NVS password is actually empty — decryptOp short-
-      // circuits at password.empty() and returns false.
       const uint8_t firstByte = raw.empty() ? 0 : (uint8_t)raw[0];
       Serial.printf("[ble_control] settings_blob write: decrypt/decode failed "
                     "(lamp_pw_len=%u, wire_magic=0x%02x, wire_len=%u)\n",
@@ -780,10 +590,8 @@ class SettingsBlobCallback : public NimBLECharacteristicCallbacks {
     Serial.printf("[ble_control] WRITE settingsBlob len=%u (decoded)\n", (unsigned)json.size());
 #endif
 
-    // Hand off to Core 1's loop drain — runs AFTER expressionOp drain so
-    // any just-arrived expression edits are mirrored into
-    // config.expressions before settings_blob serializes + persists.
-    // See lamp.cpp's settings_blob drain block.
+    // Runs after the expressionOp drain so just-arrived expression edits
+    // are in config.expressions before settings_blob persists.
     if (json.size() > lamp::kPendingJsonOp) {
 #ifdef LAMP_DEBUG
       Serial.printf("[ble_control] settings_blob too large for pending slot: %u > %u\n",
@@ -795,32 +603,18 @@ class SettingsBlobCallback : public NimBLECharacteristicCallbacks {
   }
 };
 
-// ---------------------------------------------------------------------------
-// Page protocol — paginated lamp→app section reads.
-// ---------------------------------------------------------------------------
+// Page protocol: CHAR_PAGE_CTRL onWrite snapshots a named section into the
+// connection slot and resets a cursor; CHAR_PAGE_DATA onRead returns the next
+// chunk. The app reads until a short chunk arrives.
 //
-// Replaces the per-section read characteristics that used to live here
-// (lamp/base/shade/expr/home/nearby). Each of those exposed its full
-// JSON via a single NimBLE characteristic value, capped at the BLE 4.x
-// ATT spec ceiling of 512 bytes — the vendored ble_att.h `#define
-// BLE_ATT_ATTR_MAX_LEN 512` overrides our `-D BLE_ATT_ATTR_MAX_LEN=1024`
-// build flag because it has no `#ifndef` guard. A 3-expression lamp
-// serialises the expressions section to 579 bytes; setValue() rejected
-// it at boot and the characteristic came up empty.
+// This sidesteps the vendored ble_att.h 512-byte ceiling (no #ifndef guard,
+// so it overrides -D BLE_ATT_ATTR_MAX_LEN=1024): the expressions section
+// on a 3-expression lamp serialises to ~579 bytes and came up empty via a
+// single characteristic setValue().
 //
-// The CTRL+DATA pair sidesteps the cap by streaming MTU-sized chunks
-// from a per-connection snapshot. The wire mechanic relies on NimBLE's
-// onRead firing once per app-level GATT_READ_REQ (not once per ATT PDU
-// — the host stack continues long values via ATT_READ_BLOB_REQ against
-// the cached AttValue without re-firing onRead). By seeding the
-// AttValue with ≤ kPageMaxChunkSize bytes, the host has no
-// continuation to do, the next app `read()` re-fires onRead, the
-// cursor advances.
-//
-// CHAR_WISP_STATUS still has its own read+notify path — the notify
-// channel is live (lamp.cpp calls notifyWispStatus()) and
-// retiring the char would delete a working push surface. Its payload
-// also fits comfortably under 512.
+// NimBLE fires onRead once per GATT_READ_REQ; seeding the AttValue with
+// <=kPageMaxChunkSize bytes forces the app to issue a new read per chunk
+// rather than using ATT_READ_BLOB_REQ against a cached value.
 
 using SectionSerializer = void(*)(std::string&);
 
@@ -829,12 +623,10 @@ struct SectionEntry {
   SectionSerializer fn;
 };
 
-// Six paginatable sections. Lambdas capture only globals → decay to
-// plain function pointers, no std::function footprint. ble_control::tick
-// proactively rebuilds dirty section caches on Core 1, so the steady-
-// state CTRL onWrite body is just a string copy on Core 0; the portMUX
-// inside Config::*SectionJsonCached() covers the race if a CTRL-write
-// arrives before tick fires after an invalidate.
+// Lambdas capture only globals so they decay to plain function pointers
+// (no std::function footprint). tick() proactively rebuilds dirty caches on
+// Core 1; the portMUX inside *SectionJsonCached() covers the race if a
+// CTRL-write arrives before tick fires.
 static const std::array<SectionEntry, 6> kSections = {{
   {"lamp",   [](std::string& out) { out = s_config->lampSectionJsonCached(); }},
   {"base",   [](std::string& out) { out = s_config->baseSectionJsonCached(); }},
@@ -856,16 +648,13 @@ class PageCtrlCallback : public NimBLECharacteristicCallbacks {
 
     for (const auto& entry : kSections) {
       if (name == entry.name) {
-        // Reuse the std::string's capacity across sections — heap sees
-        // growth, not churn. Capture the negotiated MTU at snapshot
-        // time so the chunk size is stable for this read sweep even if
-        // the conn-params shift mid-stream.
+        // assign() reuses the string's existing capacity (heap growth, not
+        // churn). Capture MTU at snapshot time so the chunk size is stable
+        // even if conn-params shift mid-stream.
         entry.fn(slot->pageSnapshot);
         slot->pageCursor = 0;
-        // connInfo.getMTU() returns the negotiated ATT MTU. Floor it
-        // against our hardcoded wire constant so the app's "short =
-        // done" heuristic stays correct even on peers that negotiate
-        // higher than 247.
+        // Floor against the wire constant: peers that negotiate higher than
+        // 247 must still satisfy the app's "short = done" heuristic.
         const uint16_t mtu = connInfo.getMTU();
         const uint16_t cap = mtu > 3 ? mtu - 3 : 0;
         slot->pageMtu = (cap > 0 && cap < kPageMaxChunkSize) ? cap
@@ -879,9 +668,8 @@ class PageCtrlCallback : public NimBLECharacteristicCallbacks {
       }
     }
 
-    // Unknown section name — clear any prior snapshot so the next
-    // DATA read returns empty (the app will interpret as "section
-    // not found" downstream).
+    // Unknown section: clear so the next DATA read returns empty, which
+    // the app treats as "section not found".
     slot->pageSnapshot.clear();
     slot->pageCursor = 0;
     slot->pageMtu    = 0;
@@ -902,9 +690,7 @@ class PageDataCallback : public NimBLECharacteristicCallbacks {
     ConnSlot* slot = findSlot(handle);
     if (!slot || slot->pageMtu == 0 ||
         slot->pageCursor >= slot->pageSnapshot.size()) {
-      // No active page session, or cursor already past the end. Empty
-      // response — the app's "short chunk = done" heuristic interprets
-      // 0 bytes as the end.
+      // Empty response signals end-of-section to the app ("short chunk = done").
       c->setValue("");
       return;
     }
@@ -924,22 +710,10 @@ class PageDataCallback : public NimBLECharacteristicCallbacks {
   }
 };
 
-// ---------------------------------------------------------------------------
-// Firmware OTA — CHAR_FW_CONTROL (write+notify) + CHAR_FW_CHUNK (write)
-// ---------------------------------------------------------------------------
-//
-// BLE-driven OTA flow:
-//   1. App writes MSG_FW_OFFER (lamp_protocol wire format) to CHAR_FW_CONTROL.
-//      FwControlCallback parses + posts a PendingFirmwareControl with
-//      transportKind=Ble to the Core 1 drain.
-//   2. Core 1 drains, calls FirmwareReceiver::handleControlOnLoop.
-//   3. The receiver decides Accept/Decline; the response routes back via
-//      the BleFirmwareTransport's sendFrame() — a notify on CHAR_FW_CONTROL.
-//   4. App streams MSG_FW_CHUNK frames to CHAR_FW_CHUNK. FwChunkCallback
-//      calls FirmwareReceiver::handleChunkOnRecvTask directly on the BLE
-//      host task (same fast path as the ESP-NOW chunk handler).
-//   5. App writes MSG_FW_DONE to CHAR_FW_CONTROL. Receiver verifies +
-//      reboots. Final MSG_FW_RESULT notify lets the app know.
+// BLE OTA: CHAR_FW_CONTROL carries the OFFER/DONE/ACCEPT/REQ/RESULT control
+// plane (write+notify); CHAR_FW_CHUNK carries the high-frequency chunk stream
+// (write-without-response). FwChunkCallback calls handleChunkOnRecvTask
+// directly on the BLE host task — bounded ~0.5 ms per chunk.
 
 static NimBLECharacteristic*  s_fwControlChar = nullptr;
 static lamp::FirmwareReceiver* s_firmwareReceiver = nullptr;
@@ -947,9 +721,8 @@ static lamp::FirmwareReceiver* s_firmwareReceiver = nullptr;
 class BleFirmwareTransport : public lamp::FirmwareTransport {
  public:
   void getMyMac(uint8_t out[6]) const override {
-    // Same chip MAC as ESP-NOW on ESP32 (the BT controller and Wi-Fi share
-    // the OUI; for our use as a sourceMac identifier on the wire, either
-    // is fine since both are stable across reboots).
+    // BT and Wi-Fi share the OUI on ESP32; either address works as a stable
+    // sourceMac identifier on the wire.
     const ble_addr_t* a = NimBLEDevice::getAddress().getBase();
     if (a) std::memcpy(out, a->val, 6);
     else   std::memset(out, 0, 6);
@@ -1029,44 +802,24 @@ class FwChunkCallback : public NimBLECharacteristicCallbacks {
             reinterpret_cast<const uint8_t*>(raw.data()), raw.size(), p)) {
       return;
     }
-    // Direct fast-path call on the BLE host task — mirrors how
-    // mesh_link.cpp dispatches the ESP-NOW chunk path. The
-    // receiver's handler is bounded (~0.5 ms: one OTA partition write +
-    // bitmap set). Dropping a chunk here just means the receiver's
-    // stall watchdog will REQ for it next tick.
+    // Direct call on the BLE host task; bounded ~0.5 ms (one OTA write +
+    // bitmap set). A missed chunk triggers the receiver's REQ watchdog.
     s_firmwareReceiver->handleChunkOnRecvTask(p);
   }
 };
 
-// Per-loop housekeeping on Core 1. Sections are now served via the page
-// protocol — the section's JSON is built on-demand at CHAR_PAGE_CTRL
-// onWrite time and held in the connection's snapshot. tick() no longer
-// pushes cached section values into NimBLE characteristics; the
-// per-section dirty flags still mark Config state but the cache itself
-// is rebuilt lazily by the next `*SectionJsonCached()` call (typically
-// from a CTRL-write triggered by the app's next section sweep).
-//
-// Adaptive conn-interval housekeeping stays — see block comment at
-// s_lastBleWriteMs declaration for the why.
 void tick() {
   if (!s_running || !s_config) return;
 
-  // Proactively rebuild any dirty section caches on Core 1 so the BLE
-  // host task (Core 0) page-protocol read finds them already populated
-  // and never has to serialize JSON inside the NimBLE callback. The
-  // Cached() accessors return immediately when not dirty (cheap flag
-  // check), and the portMUX inside makes the rebuild safe if Core 0
-  // races in via a CTRL-write before tick fires.
+  // Proactively rebuild dirty section caches on Core 1 so the BLE host
+  // task (Core 0) never serialises JSON inside a NimBLE callback.
+  // Cached() accessors are no-ops when the cache is clean.
   s_config->lampSectionJsonCached();
   s_config->baseSectionJsonCached();
   s_config->shadeSectionJsonCached();
   s_config->expressionsSectionJsonCached();
   s_config->homeSectionJsonCached();
 }
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
 
 void notifyStateChange() {
   if (!s_stateNotify) return;
@@ -1087,42 +840,35 @@ void start(lamp::Config* config) {
     NimBLEDevice::init(config->lamp.name.substr(0, 12));
   }
 
-  // NimBLE supports only one server per device.  createServer() returns the
-  // existing instance on subsequent calls, so this is safe to call even if
-  // ble_setup already created a server.
+  // createServer() returns the existing instance if one was already created
+  // (NimBLE supports only one server per device).
   s_server = NimBLEDevice::createServer();
   // Pass deleteCallbacks=false: the callbacks object lives for the process
   // lifetime and must not be freed by NimBLE.
   s_server->setCallbacks(new ControlServerCallbacks(), false);
 
-  // NimBLE 2.x default is FALSE — advertising does NOT auto-restart after a
-  // client disconnects (per CHANGELOG). Without this, the first phone disconnect
-  // makes the lamp permanently undiscoverable until reboot.
+  // NimBLE 2.x default is FALSE: advertising does not auto-restart on
+  // disconnect. Without this the lamp goes undiscoverable until reboot.
   s_server->advertiseOnDisconnect(true);
 
   s_service = s_server->createService(SERVICE_UUID);
 
-  // Auth — write-with-response so the app receives a GATT ack.
-  // App-layer crypto: AES-GCM (0x02 prefix) auto-authenticates via the
-  // GCM tag; legacy plaintext writes still compare against lamp.password.
-  // Bonding is no longer required at the link layer.
+  // write-with-response so the app receives a GATT ack. AES-GCM (0x02
+  // prefix) auto-authenticates via the GCM tag; plaintext writes compare
+  // against lamp.password. No link-layer bonding required.
   s_service->createCharacteristic(CHAR_AUTH,
       NIMBLE_PROPERTY::WRITE)
       ->setCallbacks(new AuthCallback());
 
-  // Live-preview characteristics — slider-rate writes. Declare BOTH
-  // WRITE and WRITE_NR so the client can choose write-without-response
-  // (the app does, via fbp_ble_client.write(withoutResponse: true)).
-  // WRITE alone forces a GATT ACK round trip per write, which capped
-  // throughput at ~5 Hz on the test phone at the ~49ms connection
-  // interval — visibly laggy slider drag.
+  // WRITE_NR lets the app skip the per-write GATT ACK round-trip. WRITE
+  // alone capped throughput at ~5 Hz at the default ~49ms interval
+  // (visibly laggy slider drag). WRITE is retained so older builds pass
+  // the GATT property check.
   static constexpr uint32_t LIVE_WRITE_PROPS =
       NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR;
 
   s_service->createCharacteristic(CHAR_BRIGHTNESS, LIVE_WRITE_PROPS)
       ->setCallbacks(new BrightnessCallback());
-  // Plaintext live-preview JSON chars — collapsed into WriteRouter.
-  // Each instance captures its own (slot cap, post helper, debug tag).
   s_service->createCharacteristic(CHAR_SHADE_COLORS, LIVE_WRITE_PROPS)
       ->setCallbacks((new WriteRouter(
           lamp::kPendingJsonBase, postPendingShadeColorsJson, isAuthed))
@@ -1131,18 +877,8 @@ void start(lamp::Config* config) {
       ->setCallbacks((new WriteRouter(
           lamp::kPendingJsonBase, postPendingBaseColorsJson, isAuthed))
               ->setDebugTag("baseColors"));
-  // CHAR_COMMIT — parameterless commit signal. Plaintext WriteRouter; auth
-  // is the existing isAuthed() gate. allowEmpty=true so the app can send
-  // a single sentinel byte OR an empty payload — both are treated as the
-  // commit signal (the bytes are ignored, the arrival IS the signal).
-  //
-  // Properties = WRITE | WRITE_NR. The app uses WRITE_NR (commit() calls
-  // ble.write(..., withoutResponse: true)) so the BLE FIFO doesn't stall
-  // on the ACK round-trip during the NVS persist; the commit-success
-  // notification is delivered via the existing CHAR_STATE_NOTIFY
-  // {"commit":"ok"|"err"} payload (Batch 4) instead. WRITE is retained
-  // on the property mask so older app builds that still issue WRITE-
-  // with-response don't fail the GATT property check.
+  // Parameterless commit signal: payload is ignored, arrival is the signal.
+  // allowEmpty(true) so both an empty write and a sentinel byte work.
   s_service->createCharacteristic(CHAR_COMMIT_UUID, LIVE_WRITE_PROPS)
       ->setCallbacks((new WriteRouter(
           /*maxSize=*/4, postPendingCommit, isAuthed))
@@ -1150,19 +886,12 @@ void start(lamp::Config* config) {
               ->setAllowEmpty(true));
   s_service->createCharacteristic(CHAR_BASE_KNOCKOUT, LIVE_WRITE_PROPS)
       ->setCallbacks(new BaseKnockoutCallback());
-  // Home-mode focus: app signals whether the user is on the Home Mode
-  // setup page. See HomeModeFocusCallback above.
   s_service->createCharacteristic(CHAR_HOME_MODE_FOCUS, LIVE_WRITE_PROPS)
       ->setCallbacks(new HomeModeFocusCallback());
-  // Operator-priority lockout signal — see EditSessionCallback above.
   s_service->createCharacteristic(CHAR_EDIT_SESSION, LIVE_WRITE_PROPS)
       ->setCallbacks(new EditSessionCallback());
-  // CHAR_EXPRESSION_TEST: live-preview semantics — best-effort writes
-  // that don't need delivery guarantee. Exposes WRITE | WRITE_NR so the
-  // app can pick withoutResponse to bypass the per-write ACK round-trip
-  // (which under WIDE conn params + heavy notify load can stall the
-  // FBP queue). Empty payload is the "test complete" sentinel and MUST
-  // reach the loop drain — allowEmpty(true) on the router.
+  // Empty payload is the "test complete" sentinel and must reach the drain;
+  // allowEmpty(true) on the router.
   s_service->createCharacteristic(CHAR_EXPRESSION_TEST, LIVE_WRITE_PROPS)
       ->setCallbacks((new WriteRouter(
           lamp::kPendingJsonOp, postPendingTestActionJson, isAuthed))
@@ -1172,8 +901,8 @@ void start(lamp::Config* config) {
       ->setCallbacks((new WriteRouter(
           lamp::kPendingJsonOp, postPendingExpressionOpJson, isAuthed))
               ->setDebugTag("expressionOp"));
-  // WiFi op — AES-GCM ciphertext. Salt array lives function-local-static
-  // so the router can hold a stable pointer for the life of the service.
+  // Salt is function-local-static so the router holds a stable pointer
+  // for the lifetime of the service.
   static const auto kWifiOpSalt = uuidSaltLE(CHAR_WIFI_OP);
   s_service->createCharacteristic(CHAR_WIFI_OP,
       NIMBLE_PROPERTY::WRITE)
@@ -1187,25 +916,17 @@ void start(lamp::Config* config) {
   s_wifiStateChar->setCallbacks(new WifiStateCallback());
   s_wifiStateChar->setValue(buildWifiStateJson(false));
 
-  // Page protocol: paginated lamp→app section reads (replaces the
-  // previous per-section read characteristics). CHAR_PAGE_CTRL onWrite
-  // snapshots the named section into the connection's slot + resets a
-  // cursor; CHAR_PAGE_DATA onRead returns the next chunk. App reads
-  // CHAR_PAGE_DATA until a short chunk (< kPageMaxChunkSize) lands.
-  // See the block comment above PageCtrlCallback for the why.
   s_service->createCharacteristic(CHAR_PAGE_CTRL, NIMBLE_PROPERTY::WRITE)
       ->setCallbacks(new PageCtrlCallback());
   s_service->createCharacteristic(CHAR_PAGE_DATA, NIMBLE_PROPERTY::READ)
       ->setCallbacks(new PageDataCallback());
 
-  // Social dispositions — read + write, both auth-gated. Initial seed
-  // shows whatever was loaded from NVS at boot.
+  // Social dispositions: read + write, both auth-gated.
   s_service->createCharacteristic(
       CHAR_SOCIAL_DISPOSITIONS,
       NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE)
       ->setCallbacks(new SocialDispositionsCallback());
 
-  // Remote op — AES-GCM ciphertext, same shape as wifi op.
   static const auto kRemoteOpSalt = uuidSaltLE(CHAR_REMOTE_OP);
   s_service->createCharacteristic(CHAR_REMOTE_OP,
       NIMBLE_PROPERTY::WRITE)
@@ -1214,38 +935,24 @@ void start(lamp::Config* config) {
           decodeIncomingOp, kRemoteOpSalt.data(), "remoteOp"))
               ->setDebugTag("remoteOp"));
 
-  // Wisp op — plaintext JSON. The wispOp wire format is open-set
-  // ({"char":"wispOp","op":"setZone","zoneId":N}) and
-  // the wisp owns the vocabulary; encrypting it would force a firmware
-  // bump on the lamp every time the wisp gains a new op. App-layer auth
-  // still gates writes via the standard isAuthed() check.
+  // wispOp is plaintext: the wisp owns the vocabulary and it is open-set,
+  // so encrypting it would force a lamp firmware bump for every new wisp op.
   s_service->createCharacteristic(CHAR_WISP_OP, NIMBLE_PROPERTY::WRITE)
       ->setCallbacks((new WriteRouter(
           lamp::kPendingJsonOp, postPendingWispOpJson, isAuthed))
               ->setDebugTag("wispOp"));
 
-  // Wisp status — read + notify. Same shape as nearby_lamps: build JSON
-  // from the cached wispStatus payload merged with the last
-  // MSG_WISP_HELLO data. Notify fires whenever the loop drain caches a
-  // new wispStatus (see lamp.cpp::loop).
   s_wispStatusChar = s_service->createCharacteristic(
       CHAR_WISP_STATUS, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
   s_wispStatusChar->setCallbacks(new WispStatusCallback());
   s_wispStatusChar->setValue(lamp::nearbyLamps.getWispStatusReadJson());
 
-  // Settings blob — write-only. Reads now go through the per-section
-  // characteristics (CHAR_LAMP_SECTION etc.), each well under MTU. The
-  // single-blob read path was dropped because the full config grew past 512
-  // bytes after homeMode was added; see commit da5d4d9.
-  // App-layer crypto: full config save is AES-GCM encrypted; no link-layer
-  // bonding required.
+  // Write-only: reads go through the page protocol. Full config save is
+  // AES-GCM encrypted; no link-layer bonding required.
   s_service->createCharacteristic(CHAR_SETTINGS_BLOB,
       NIMBLE_PROPERTY::WRITE)
       ->setCallbacks(new SettingsBlobCallback());
 
-  // Firmware OTA (Phase 5a) — write + notify on CHAR_FW_CONTROL for the
-  // OFFER/DONE/ACCEPT/REQ/RESULT control plane; write-without-response on
-  // CHAR_FW_CHUNK for the high-frequency 200-byte chunk stream.
   s_fwControlChar = s_service->createCharacteristic(
       CHAR_FW_CONTROL,
       NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
@@ -1253,27 +960,46 @@ void start(lamp::Config* config) {
   s_service->createCharacteristic(CHAR_FW_CHUNK, LIVE_WRITE_PROPS)
       ->setCallbacks(new FwChunkCallback());
 
-  // State notify — notify only; no write/read needed
   s_stateNotify = s_service->createCharacteristic(CHAR_STATE_NOTIFY,
                                                   NIMBLE_PROPERTY::NOTIFY);
   s_stateNotify->setValue("{}");
 
-  // Schema version — read-only, tail-appended (schema v1). The app reads this
-  // to detect the lamp's attribute-layout version; lamps predating it read as
-  // absent and the app falls back to legacy behavior. Appending at the tail
-  // keeps every existing handle in place, so deployed app installs are
-  // unaffected. See gatt_layout.hpp + the frozen-layout lock-in in CLAUDE.md.
+  // Schema version — read-only. The app reads this to detect the lamp's
+  // attribute-layout version; lamps predating it read as absent and the app
+  // falls back to legacy behavior. See gatt_layout.hpp.
   static const uint8_t kSchemaVersionValue = kGattSchemaVersion;
   s_service->createCharacteristic(CHAR_SCHEMA_VERSION, NIMBLE_PROPERTY::READ)
       ->setValue(&kSchemaVersionValue, 1);
 
+  // Binary blob: [count:1][lampMac:6]*count. count=0 when no claim heard
+  // in 60 s. Separate from CHAR_WISP_STATUS because that payload is already
+  // at the MTU soft budget (466/509 B).
+  class WispClaimsCallback : public NimBLECharacteristicCallbacks {
+    void onRead(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
+      if (!isAuthed(connInfo.getConnHandle())) {
+        static const uint8_t kEmpty[1] = {0};
+        c->setValue(kEmpty, 1);
+        return;
+      }
+      static uint8_t buf[1 + lamp_protocol::kMaxWispClaimEntries * 6];
+      size_t n = lamp::nearbyLamps.buildWispClaimsBlob(buf, sizeof(buf),
+                                                        millis());
+      c->setValue(buf, n);
+    }
+  };
+  s_wispClaimsChar = s_service->createCharacteristic(CHAR_WISP_CLAIMS,
+                                                      NIMBLE_PROPERTY::READ);
+  s_wispClaimsChar->setCallbacks(new WispClaimsCallback());
+  {
+    static const uint8_t kInitial[1] = {0};
+    s_wispClaimsChar->setValue(kInitial, 1);
+  }
+
   s_service->start();
 
-  // Bind the frozen layout table to the live registration. A mismatch means a
-  // characteristic was added/removed/reordered without updating gatt_layout.hpp
-  // (and bumping kGattSchemaVersion) — which would silently stale-out paired
-  // app installs. Loud, but non-fatal: never brick a deployed lamp over a
-  // dev-time invariant.
+  // Mismatch means a characteristic was added/removed/reordered without
+  // updating gatt_layout.hpp, which silently stales paired app installs.
+  // Non-fatal: do not brick a deployed lamp over a dev-time invariant.
   {
     const auto& liveChars = s_service->getCharacteristics();
     bool layoutOk = liveChars.size() == kGattLayoutCount;
@@ -1292,11 +1018,10 @@ void start(lamp::Config* config) {
     }
   }
 
-  // Don't touch advertising — BluetoothComponent::begin() already configures
-  // the advertiser as connectable (BLE_GAP_CONN_MODE_UND) with the color-sync
-  // manufacturer data the app scans for. The control GATT service attaches to
-  // the GATT server and is discovered AFTER connection, not advertised in the
-  // packet (a 128-bit service UUID would overflow the 31-byte adv limit).
+  // Do not touch advertising: BluetoothComponent::begin() already configured
+  // it with the color-sync manufacturer data. The GATT service is discovered
+  // after connection, not in the adv packet (a 128-bit UUID overflows the
+  // 31-byte limit).
 
   s_running = true;
 
@@ -1316,6 +1041,7 @@ void stop() {
     s_stateNotify    = nullptr;
     s_wifiStateChar  = nullptr;
     s_wispStatusChar = nullptr;
+    s_wispClaimsChar = nullptr;
   }
 
   s_server  = nullptr;
@@ -1352,16 +1078,10 @@ void pauseRadioForOta() {
 #endif
 }
 
-// Kick any active GATT client. Used by ota_quiet_mode on the mesh-OTA
-// path so a connected phone can't keep sending writes that fight the
-// chunk stream for radio time. The GATT server stays up — only the
-// connection is killed; the phone will reconnect after RESULT/abort
-// or the OTA-driven reboot once advertising restarts.
-//
-// Safe to call from any task: NimBLEServer::disconnect serialises via
-// the NimBLE host task's event queue.
-//
-// Idempotent: if no client is connected, this is a no-op.
+// Kills the active connection so the phone can't fight the OTA chunk stream
+// for radio time. The GATT server stays up; the phone reconnects after
+// RESULT/abort or the OTA reboot. Safe to call from any task:
+// NimBLEServer::disconnect serialises via the NimBLE host task's event queue.
 void disconnectGattClientsForOta() {
   if (s_currentConnHandle == 0xFFFF) return;
   if (!s_server) return;
@@ -1375,8 +1095,8 @@ void disconnectGattClientsForOta() {
 void resumeRadioAfterOta() {
   if (!s_otaRadioPaused) return;
   s_otaRadioPaused = false;
-  // Only restart scan if the GATT-client pause path doesn't have it
-  // suppressed (a connected phone holds scan paused independently).
+  // Two independent scan-pause flags: OTA and active GATT client. Only
+  // restart if the client flag isn't also holding the scan down.
   if (!s_scanPausedForGattClient) {
     NimBLEDevice::getScan()->start(BLE_GAP_SCAN_TIME_MS);
   }
@@ -1386,9 +1106,8 @@ void resumeRadioAfterOta() {
 #endif
 }
 
-// Register the FirmwareReceiver instance + bind the BLE transport to it
-// so notifications on CHAR_FW_CONTROL come back via the right path. Called
-// from lamp.cpp::setup() after firmwareReceiver.begin().
+// Bind the BLE transport so CHAR_FW_CONTROL notifications route back through
+// BleFirmwareTransport::sendFrame().
 void setFirmwareReceiver(lamp::FirmwareReceiver* receiver) {
   s_firmwareReceiver = receiver;
   if (receiver) {
@@ -1396,11 +1115,9 @@ void setFirmwareReceiver(lamp::FirmwareReceiver* receiver) {
   }
 }
 
-// Signature matches WriteRouter::PostFn; data/len are semantically ignored —
-// the arrival of the write IS the commit signal. lamp::pendingSlots.pendingCommit
-// is now in PendingSlotAggregate (pending_slot_aggregate.hpp).
+// data/len are ignored; the arrival of the write is the commit signal.
 void postPendingCommit(const char* /*data*/, size_t /*len*/) {
-  // Single-bool naturally atomic on Xtensa — no portMUX.
+  // Single bool is naturally atomic on Xtensa; no portMUX needed.
   lamp::pendingSlots.pendingCommit = true;
 }
 

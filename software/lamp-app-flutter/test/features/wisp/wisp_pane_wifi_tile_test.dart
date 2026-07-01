@@ -12,10 +12,19 @@ import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/features/inventory/application/inventory_notifier.dart';
 import 'package:lamp_app/features/inventory/domain/inventory_lamp.dart';
+import 'package:lamp_app/features/social/application/lamp_nearby_peers_notifier.dart';
+import 'package:lamp_app/features/social/domain/lamp_nearby_peer.dart';
 import 'package:lamp_app/features/wisp/application/wisp_notifier.dart';
 import 'package:lamp_app/features/wisp/presentation/wisp_config_screen.dart';
 
 import '../../_support/seed.dart';
+
+// Stub that returns an empty peer list without starting the 1Hz polling
+// timer, so the FakeAsync zone in testWidgets stays timer-clean.
+class _FakeLampNearbyPeers extends LampNearbyPeersNotifier {
+  @override
+  Future<List<LampNearbyPeer>> build(String lampId) async => const [];
+}
 
 const _devId = 'lamp-x';
 
@@ -41,7 +50,11 @@ Future<ProviderContainer> _makeContainer({
     Uint8List.fromList(utf8.encode(wifiStateJson)),
   );
   final c = ProviderContainer(
-    overrides: [bleClientProvider.overrideWithValue(ble)],
+    overrides: [
+      bleClientProvider.overrideWithValue(ble),
+      lampNearbyPeersNotifierProvider(_devId)
+          .overrideWith(() => _FakeLampNearbyPeers()),
+    ],
   );
   await c.read(inventoryNotifierProvider.future);
   await c.read(inventoryNotifierProvider.notifier).add(const InventoryLamp(
@@ -52,17 +65,10 @@ Future<ProviderContainer> _makeContainer({
   return c;
 }
 
-/// Resolve the wispNotifier's build() future in the REAL-async zone, THEN
-/// build the widget tree, then pump until the WiFi config row renders.
-///
-/// Order is load-bearing: the notifier's build() awaits real BLE futures
-/// (watchConnected + initial readStatus) that never drain under the
-/// FakeAsync zone testWidgets installs. If pumpWidget runs first it kicks
-/// that build off inside FakeAsync where it wedges, and a later runAsync
-/// just awaits the same wedged future. Kicking the build off via
-/// `c.read(...future)` inside runAsync first lets it reach AsyncData; the
-/// subsequent pumpWidget then builds straight from cache. Same pattern as
-/// the source=off/manual tests below.
+/// Resolve the wispNotifier's build() future in the real-async zone before
+/// building the widget tree. The notifier awaits real BLE futures that
+/// never drain under FakeAsync; resolving via `c.read(...future)` inside
+/// runAsync first lets it reach AsyncData, then pumpWidget builds from cache.
 Future<void> _pumpScreen(WidgetTester tester, ProviderContainer c) async {
   await tester.runAsync(() async {
     await c.read(wispNotifierProvider(_devId).future);
@@ -157,7 +163,11 @@ void main() {
     );
     SharedPreferences.setMockInitialValues({});
     final c = ProviderContainer(
-      overrides: [bleClientProvider.overrideWithValue(ble)],
+      overrides: [
+        bleClientProvider.overrideWithValue(ble),
+        lampNearbyPeersNotifierProvider(_devId)
+            .overrideWith(() => _FakeLampNearbyPeers()),
+      ],
     );
     addTearDown(c.dispose);
     await c.read(inventoryNotifierProvider.future);
@@ -223,7 +233,11 @@ void main() {
     );
     SharedPreferences.setMockInitialValues({});
     final c = ProviderContainer(
-      overrides: [bleClientProvider.overrideWithValue(ble)],
+      overrides: [
+        bleClientProvider.overrideWithValue(ble),
+        lampNearbyPeersNotifierProvider(_devId)
+            .overrideWith(() => _FakeLampNearbyPeers()),
+      ],
     );
     addTearDown(c.dispose);
     await c.read(inventoryNotifierProvider.future);
@@ -258,16 +272,9 @@ void main() {
     );
   });
 
-  // Negative tests: the WiFi config row is now Aurora-only. Confirm it's
-  // absent under both Off and Manual modes — flipping back to the old
-  // "always-rendered" behaviour would silently break this guarantee.
-  //
-  // The wispNotifier's build() awaits real BLE futures that don't drain
-  // under FakeAsync (which testWidgets installs by default), so the
-  // existing pump-and-poll pattern at the top of this file races. Use
-  // `tester.runAsync` to escape FakeAsync long enough to resolve the
-  // notifier's future — then pump the widget tree once, by which point
-  // the state is AsyncData and the pane builds synchronously.
+  // The WiFi row is Aurora-only; confirm it's absent in Off and Manual modes.
+  // Use tester.runAsync to escape FakeAsync so the notifier's BLE futures
+  // resolve before pumpWidget.
   for (final mode in <String>['off', 'manual']) {
     testWidgets('WiFi row is NOT rendered when source=$mode', (tester) async {
       final c = await _makeContainer(

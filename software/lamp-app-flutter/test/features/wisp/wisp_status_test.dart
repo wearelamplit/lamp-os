@@ -29,8 +29,8 @@ void main() {
     });
 
     test('invalid UTF-8 bytes → empty status (no throw)', () {
-      // 0xC3 is a UTF-8 lead byte with no continuation — utf8.decode
-      // throws on this in strict mode. Parser must catch it.
+      // 0xC3 is a UTF-8 lead byte with no continuation; utf8.decode
+      // throws in strict mode. Parser must catch it.
       final bytes = Uint8List.fromList([0xC3, 0x28]);
       final s = WispStatus.fromBytes(bytes);
       expect(s.present, isFalse);
@@ -183,11 +183,23 @@ void main() {
       expect(s.currentPalette, isNull);
     });
 
+    test('shuffleSeed parses from JSON', () {
+      final s = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","shuffleSeed":7}',
+      ));
+      expect(s.shuffleSeed, 7);
+    });
+
+    test('shuffleSeed defaults to 0 when absent', () {
+      final s = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF"}',
+      ));
+      expect(s.shuffleSeed, 0);
+    });
+
     test('currentPalette truncates partial trailing triple', () {
-      // 7 bytes = 2 full triples + 1 stray byte. The stray byte is
-      // dropped; parser surfaces 2 colors. Defends against the wisp
-      // sending an odd payload length (shouldn't happen, but the
-      // parser is the defense-in-depth line if it does).
+      // 7 bytes = 2 full triples + 1 stray byte; stray byte is dropped.
+      // Guards against odd payload lengths from the wisp.
       final raw = [10, 20, 30, 40, 50, 60, 70];
       final b64 = base64Encode(raw);
       final s = WispStatus.fromBytes(_b(

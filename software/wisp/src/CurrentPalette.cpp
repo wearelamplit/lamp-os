@@ -1,12 +1,33 @@
 #include "CurrentPalette.h"
 
-#include <algorithm>
+#if defined(ARDUINO) || defined(ESP_PLATFORM)
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#else
+// Native test build — no-op FreeRTOS stubs. Single-threaded; mutex is
+// a sequence point on hardware only, safe to drop here.
+#include <cstddef>
+typedef void* SemaphoreHandle_t;
+#define pdTRUE         1
+#define portMAX_DELAY  0xFFFFFFFFu
+inline SemaphoreHandle_t xSemaphoreCreateMutex() {
+  return reinterpret_cast<SemaphoreHandle_t>(0x1);
+}
+inline int xSemaphoreTake(SemaphoreHandle_t, unsigned) { return pdTRUE; }
+inline void xSemaphoreGive(SemaphoreHandle_t) {}
+inline void vSemaphoreDelete(SemaphoreHandle_t) {}
+#endif
+
 #include <cmath>
 #include <cstring>
 
 namespace wisp {
 
 namespace {
+
+inline SemaphoreHandle_t asHandle(void* m) {
+  return reinterpret_cast<SemaphoreHandle_t>(m);
+}
 
 uint8_t floatToByte(float v) {
   // Clamp to [0,1] then scale. lroundf rounds half-away-from-zero, which is
@@ -21,19 +42,18 @@ uint8_t floatToByte(float v) {
 
 }  // namespace
 
+CurrentPalette::CurrentPalette()  { mux_ = xSemaphoreCreateMutex(); }
+CurrentPalette::~CurrentPalette() { if (mux_) vSemaphoreDelete(asHandle(mux_)); }
+
 void CurrentPalette::update(const Palette& p, uint32_t nowMs) {
-  // Take the mux around the paletteId_ assignment so a concurrent
-  // copyPaletteIdPrefix() on the timer-service task can't read a torn .data()
-  // mid-reallocation. The rest of the update (colors_, lastChangeMs_) is
-  // loop-task-only, so we keep the critical section minimal.
-  CURRENT_PALETTE_PORTMUX_ENTER(&mux_);
+  // Must hold mutex (not spinlock): heap-alloc for non-SSO ids; malloc
+  // cannot run with IRQs off (portENTER_CRITICAL would starve the ESP-NOW ISR).
+  xSemaphoreTake(asHandle(mux_), portMAX_DELAY);
   paletteId_ = p.id;
-  CURRENT_PALETTE_PORTMUX_EXIT(&mux_);
+  xSemaphoreGive(asHandle(mux_));
   lastChangeMs_ = nowMs;
   colors_.clear();
 
-  // hexColors is the simpler shape (24-bit packed RGB). When present we use
-  // it directly with w=0; this is how the read-only built-in palettes arrive.
   if (!p.hexColors.empty()) {
     colors_.reserve(p.hexColors.size());
     for (uint64_t hex : p.hexColors) {
@@ -48,8 +68,6 @@ void CurrentPalette::update(const Palette& p, uint32_t nowMs) {
     return;
   }
 
-  // colors[] carries float channels. amber and uv are intentionally dropped —
-  // wisp paints the lamp grid in RGBW and has no place for those channels.
   colors_.reserve(p.colors.size());
   for (const auto& src : p.colors) {
     RGBW c;
@@ -61,14 +79,23 @@ void CurrentPalette::update(const Palette& p, uint32_t nowMs) {
   }
 }
 
+void CurrentPalette::clear() {
+  colors_.clear();
+  lastChangeMs_ = 0;
+  // Same IRQ-safety constraint as update().
+  xSemaphoreTake(asHandle(mux_), portMAX_DELAY);
+  paletteId_.clear();
+  xSemaphoreGive(asHandle(mux_));
+}
+
 size_t CurrentPalette::copyPaletteIdPrefix(char* out, size_t outCap) const {
   if (!out || outCap == 0) return 0;
   size_t n = 0;
-  CURRENT_PALETTE_PORTMUX_ENTER(&mux_);
+  xSemaphoreTake(asHandle(mux_), portMAX_DELAY);
   n = paletteId_.size();
   if (n > outCap) n = outCap;
   if (n) std::memcpy(out, paletteId_.data(), n);
-  CURRENT_PALETTE_PORTMUX_EXIT(&mux_);
+  xSemaphoreGive(asHandle(mux_));
   return n;
 }
 

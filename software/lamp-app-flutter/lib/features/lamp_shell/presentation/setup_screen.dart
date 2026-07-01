@@ -40,18 +40,17 @@ Future<bool> _devModePasswordMatches(String input) async {
 /// sub-pane (HomeWifi, HomeMode, AdvancedLeds, Knockout). The Home Wi-Fi
 /// row has a tap-toggle that flips the SSID between "" and a placeholder
 /// without leaving the screen; tapping the chevron-y area drills in to
-/// pick the network / enter the password.
+/// pick the network.
 class SetupScreen extends ConsumerWidget {
   const SetupScreen({super.key, required this.lampId});
   final String lampId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Not narrowed via .select: SetupBody consumes 6+ separate state
-    // fields (home.*, lamp.name, base.*, shade.*). Building a record
-    // for .select would touch every changed field anyway. Audit
-    // perf-H3 noted this is the "less hot" of the three .select
-    // candidates — knockout is the actual exploitable case (W5.2).
+    // Not narrowed via .select: SetupBody consumes 6+ separate state fields
+    // (home.*, lamp.name, base.*, shade.*), so a record for .select would
+    // touch every changed field anyway. This is the "less hot" of the .select
+    // candidates; knockout is the actual exploitable case.
     final async = ref.watch(controlNotifierProvider(lampId));
     return async.when(
       loading: () => ConnectingView(deviceId: lampId),
@@ -156,10 +155,8 @@ class _SetupBody extends ConsumerWidget {
           subtitle: 'Base ${state.base.px} · Shade ${state.shade.px} LEDs',
           onTap: () => context.push(AppRoutes.advancedLeds(lampId)),
         ),
-        // Nearby lamps (debug) — same advanced gate. Pre-fix this
-        // /devices route was only reachable from the empty-state
-        // OnboardingPlaceholder, becoming unreachable in steady state
-        // once a lamp was adopted. Audit ux-H1.
+        // Nearby lamps (debug), behind the advanced gate so the /devices
+        // route stays reachable once a lamp is adopted.
         if (ref.watch(effectiveAdvancedProvider(lampId)))
           SettingsRow(
             icon: Icons.bluetooth_searching,

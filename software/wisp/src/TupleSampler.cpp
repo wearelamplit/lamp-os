@@ -7,8 +7,7 @@ namespace wisp {
 
 namespace {
 
-// FNV-1a 32-bit. Tiny, fast, inlinable. Good enough for "spread MACs across
-// a small integer set"; we are NOT depending on it for security.
+// FNV-1a 32-bit. Not cryptographic; used only to spread MACs across a small index set.
 uint32_t fnv1a(const uint8_t* bytes, size_t n) {
   uint32_t h = 0x811C9DC5u;
   for (size_t i = 0; i < n; ++i) {
@@ -18,19 +17,10 @@ uint32_t fnv1a(const uint8_t* bytes, size_t n) {
   return h;
 }
 
-// Hash a MAC with a 32-bit salt XORed in before hashing. The salt lets us
-// derive uncorrelated outputs (one for idxA, one for idxB, one for the
-// swap bit) from a single MAC.
-//
-// Two-stage mix:
-//   1. FNV-1a over the salt-XORed bytes — spreads salt across the state.
-//   2. Stafford variant-13 finalizer — FNV-1a alone has poor low-bit
-//      avalanche for inputs that differ only in their low bytes (which is
-//      the production case: the 22 lamps' MACs differ mostly in byte 5).
-//      Without the finalizer, bit 0 of the output (used by the swap path)
-//      and (h % n) for small n both bias hard, defeating the per-lamp
-//      randomization. The finalizer is two multiplies + three xor-shifts —
-//      cheaper than re-rolling, decisive on avalanche.
+// FNV-1a over salt-XORed MAC bytes, then Stafford-13 finalizer. FNV-1a alone
+// has poor low-bit avalanche when inputs differ only in their low byte (fleet
+// MACs), which biases bit-0 (swap) and (h % n) for small n. The finalizer
+// fixes this with two multiplies + three xor-shifts.
 uint32_t hashMac(const uint8_t mac[6], uint32_t salt) {
   uint8_t buf[6];
   buf[0] = mac[0] ^ static_cast<uint8_t>(salt & 0xFF);
@@ -49,9 +39,7 @@ uint32_t hashMac(const uint8_t mac[6], uint32_t salt) {
 }
 
 bool nearlyEqualColor(const RGBW& a, const RGBW& b) {
-  // ~8/255 per channel — about the smallest step the lamp eye can perceive
-  // on the WS2812 family. If adjacent authored stops are this close, treat
-  // them as one so we don't waste a "discrete" pick on a near-duplicate.
+  // 8/255 ≈ smallest perceptible step on WS2812; collapse near-duplicates.
   constexpr int kDeltaThreshold = 8;
   auto chDelta = [](uint8_t x, uint8_t y) {
     return std::abs(static_cast<int>(x) - static_cast<int>(y));
@@ -62,8 +50,6 @@ bool nearlyEqualColor(const RGBW& a, const RGBW& b) {
          chDelta(a.w, b.w) < kDeltaThreshold;
 }
 
-// Dedupe adjacent near-identical stops. No padding/interpolation — discrete
-// picking means each surface gets one of the authored colors verbatim.
 std::vector<RGBW> dedupe(const std::vector<RGBW>& in) {
   std::vector<RGBW> out;
   out.reserve(in.size());
@@ -75,10 +61,34 @@ std::vector<RGBW> dedupe(const std::vector<RGBW>& in) {
   return out;
 }
 
+// All-unsigned arithmetic keeps the result byte-identical to the Dart implementation.
+uint8_t lerp8(uint8_t a, uint8_t b, uint32_t frac) {
+  const uint64_t inv = 0x100000000ULL - static_cast<uint64_t>(frac);
+  return static_cast<uint8_t>(
+      ((static_cast<uint64_t>(a) * inv +
+        static_cast<uint64_t>(b) * static_cast<uint64_t>(frac)) >> 32));
+}
+
+RGBW sampleGradientAt(const std::vector<RGBW>& stops, uint32_t pos) {
+  const uint32_t n = static_cast<uint32_t>(stops.size());
+  if (n == 1) return stops[0];
+  const uint64_t scaled = static_cast<uint64_t>(pos) * (n - 1);
+  const uint32_t i = static_cast<uint32_t>(scaled >> 32);
+  const uint32_t frac = static_cast<uint32_t>(scaled & 0xFFFFFFFFu);
+  if (i >= n - 1) return stops[n - 1];
+  RGBW out;
+  out.r = lerp8(stops[i].r, stops[i + 1].r, frac);
+  out.g = lerp8(stops[i].g, stops[i + 1].g, frac);
+  out.b = lerp8(stops[i].b, stops[i + 1].b, frac);
+  out.w = lerp8(stops[i].w, stops[i + 1].w, frac);
+  return out;
+}
+
 }  // namespace
 
 ColorTuple sampleTupleForMac(const CurrentPalette& palette,
-                             const uint8_t mac[6]) {
+                             const uint8_t mac[6],
+                             uint32_t shuffleSeed) {
   ColorTuple out;
   if (!mac) return out;
 
@@ -88,28 +98,23 @@ ColorTuple sampleTupleForMac(const CurrentPalette& palette,
   auto stops = dedupe(raw);
   if (stops.empty()) return out;
 
-  constexpr uint32_t kGolden   = 0x9E3779B9u;  // idxB salt (decorrelates from idxA)
+  constexpr uint32_t kGolden   = 0x9E3779B9u;  // posB salt (decorrelates from posA)
   constexpr uint32_t kSwapSalt = 0xCAFEBABEu;  // independent third hash space
+  constexpr uint32_t kMinGap   = 0x40000000u;  // 0.25 of the gradient span
 
-  const uint32_t n = static_cast<uint32_t>(stops.size());
-  uint32_t idxA = hashMac(mac, 0u)       % n;
-  uint32_t idxB = hashMac(mac, kGolden)  % n;
+  uint32_t posA = hashMac(mac, 0u       ^ shuffleSeed);
+  uint32_t posB = hashMac(mac, kGolden  ^ shuffleSeed);
 
-  // If there's more than one distinct color and the hashes collided, nudge
-  // idxB so each surface gets a different authored color. Deterministic per
-  // MAC because (idxB + 1) % n is purely a function of n and idxB.
-  if (n >= 2 && idxA == idxB) {
-    idxB = (idxB + 1) % n;
+  // Keep the two positions >= kMinGap apart so base and shade are visually
+  // distinct. Deterministic per MAC.
+  const uint32_t d = posA > posB ? posA - posB : posB - posA;
+  if (d < kMinGap) {
+    posB = (posA <= 0xFFFFFFFFu - kMinGap) ? posA + kMinGap : posA - kMinGap;
   }
 
-  // Per-MAC swap of base/shade assignment. Without this, surface[0] always
-  // got the idxA color and surface[1] always got idxB — visually, the fleet
-  // pivoted around whichever direction the hash distributions happened to
-  // bias, producing patterns like "all blue tops, all red bottoms" on a
-  // 2-color palette. Splitting ~50/50 across the fleet breaks that.
-  const bool swap = (hashMac(mac, kSwapSalt) & 1u) != 0u;
-  const RGBW& base  = swap ? stops[idxB] : stops[idxA];
-  const RGBW& shade = swap ? stops[idxA] : stops[idxB];
+  const bool swap = (hashMac(mac, kSwapSalt ^ shuffleSeed) & 1u) != 0u;
+  const RGBW base  = sampleGradientAt(stops, swap ? posB : posA);
+  const RGBW shade = sampleGradientAt(stops, swap ? posA : posB);
 
   out.r[0] = base.r;  out.g[0] = base.g;  out.b[0] = base.b;  out.w[0] = base.w;
   out.r[1] = shade.r; out.g[1] = shade.g; out.b[1] = shade.b; out.w[1] = shade.w;

@@ -1,16 +1,7 @@
-// Full-width palette gradient bar shown at the very top of the wisp
-// pane. Drives its colors through `renderPaletteRamp` so the on-screen
-// gradient matches what the wisp's 30-pixel NeoPixel ring is showing
-// pixel-for-pixel. See `domain/palette_gradient.dart` for the math.
-//
-// The Aurora source mode currently has no app-side palette: the wisp
-// only publishes a paletteId prefix over BLE, not the stops themselves
-// (carrying them would push the wispStatus JSON past CONTROL_MAX_PAYLOAD).
-// So Aurora mode falls back to warm-white here, exactly like the LED
-// ring does at boot before its first Aurora callback. Once we extend
-// the wire format to carry stops (separate, future work),
-// this widget will start rendering them automatically — no UI change
-// needed beyond wiring the new state into `stops`.
+// Full-width palette gradient bar at the top of the wisp pane.
+// Aurora mode falls back to warm-white: the wisp publishes only a
+// paletteId prefix over BLE, not the full stops (carrying them would
+// exceed CONTROL_MAX_PAYLOAD). See domain/palette_gradient.dart for math.
 
 import 'package:flutter/material.dart';
 
@@ -36,39 +27,28 @@ class PaletteGradientBar extends StatelessWidget {
     required this.manualPalette,
     required this.offColor,
     this.height = 36,
-    // Dropped 256 → 30 (audit perf-H7). The bar is a representation of
-    // what the wisp's ring shows; the ring HAS 30 pixels, so anything
-    // finer is a visual lie AND ~8× the computation per repaint. At a
-    // 36 px height the eye can't resolve >30 samples horizontally
-    // anyway. Kept as a parameter so debug screens can crank it back up
-    // when comparing against the firmware ramp.
+    // 30 matches the wisp ring's pixel count; finer is a visual lie and
+    // ~8x the per-repaint cost, and the eye can't resolve >30 samples at
+    // 36 px height. A parameter so debug screens can crank it back up to
+    // compare against the firmware ramp.
     this.pixelCount = 30,
   });
 
   /// Current wisp source mode. Drives which palette feeds the bar.
   final WispSourceMode sourceMode;
 
-  /// Manual palette to render when [sourceMode] is
-  /// [WispSourceMode.manual]. Ignored in Off/Aurora modes. We pass the
-  /// editor draft (not the saved snapshot) so the bar updates live as
-  /// the operator adds/edits swatches — same idea as the swatch row
-  /// directly below it.
+  /// Manual palette to render when [sourceMode] is [WispSourceMode.manual].
+  /// Pass the editor draft so the bar updates live on every swatch edit.
   final List<LampColor> manualPalette;
 
-  /// Operator-chosen color rendered on the wisp's own 30-pixel ring
-  /// while [sourceMode] is [WispSourceMode.off]. Mirrors the wisp-side
-  /// `offColor` NVS field; previewed here as a single solid stop so the
-  /// gradient bar at the top of the pane stays a faithful mirror of the
-  /// ring across all three modes.
+  /// Operator-chosen color for the wisp ring when [sourceMode] is
+  /// [WispSourceMode.off]. Rendered as a single solid stop.
   final LampColor offColor;
 
   /// Vertical extent of the bar in logical pixels.
   final double height;
 
-  /// Number of sample points across the bar. 256 keeps the gradient
-  /// smooth on phone screens without churning through more colors than
-  /// the eye can resolve at this height. The same math runs at the
-  /// firmware's 30-pixel ring resolution.
+  /// Number of sample points across the bar.
   final int pixelCount;
 
   @override
@@ -94,7 +74,7 @@ class PaletteGradientBar extends StatelessWidget {
       case WispSourceMode.manual:
         return [for (final c in manual) Color.fromARGB(0xFF, c.r, c.g, c.b)];
       case WispSourceMode.aurora:
-        // No app-side Aurora palette today — see file-level comment.
+        // No app-side Aurora palette; see file-level comment.
         return const <Color>[];
       case WispSourceMode.off:
         return [Color.fromARGB(0xFF, offColor.r, offColor.g, offColor.b)];
@@ -102,10 +82,8 @@ class PaletteGradientBar extends StatelessWidget {
   }
 }
 
-/// Paints a pre-computed ramp as `pixelCount` equal-width vertical
-/// stripes across the canvas. Cheaper than building a Flutter
-/// `LinearGradient` with N stops (which would have to re-interpolate)
-/// and pixel-exact with the firmware's integer pipeline.
+/// Paints a pre-computed ramp as equal-width vertical stripes.
+/// Pixel-exact with the firmware integer pipeline at the same sample count.
 class _RampPainter extends CustomPainter {
   _RampPainter(this.ramp);
 
@@ -116,9 +94,8 @@ class _RampPainter extends CustomPainter {
     if (ramp.isEmpty || size.width <= 0 || size.height <= 0) return;
     final stripeWidth = size.width / ramp.length;
     final paint = Paint();
-    // One stripe per pixel of the precomputed ramp. We pad each rect by
-    // a hair so adjacent stripes overlap by ~0.5 px and the canvas
-    // doesn't show 1-px gaps from fractional widths on high-DPI screens.
+    // Pad each rect by 0.5 px so adjacent stripes overlap and fractional
+    // widths don't leave 1-px gaps on high-DPI screens.
     for (var i = 0; i < ramp.length; i++) {
       paint.color = ramp[i];
       final left = i * stripeWidth;

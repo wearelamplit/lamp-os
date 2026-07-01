@@ -1,9 +1,5 @@
-// Native tests for TupleSampler (wisp paint distribution).
-//
-// Self-contained: the algorithm is redeclared here as a local helper rather
-// than linking the production .cpp. This keeps the test portable (no
-// CurrentPalette / aurora pull-in) and pins the algorithm — if production
-// drifts the test still expresses the spec.
+// Algorithm redeclared locally (no CurrentPalette / aurora pull-in) to pin
+// the contract independently of the production .cpp.
 
 #include <unity.h>
 
@@ -25,8 +21,6 @@ struct ColorTuple {
   uint8_t b[2] = {0, 0};
   uint8_t w[2] = {0, 0};
 };
-
-// --- Mirror of TupleSampler.cpp internals ---
 
 uint32_t fnv1a(const uint8_t* bytes, size_t n) {
   uint32_t h = 0x811C9DC5u;
@@ -74,40 +68,55 @@ std::vector<RGBW> dedupe(const std::vector<RGBW>& in) {
   return out;
 }
 
+uint8_t lerp8(uint8_t a, uint8_t b, uint32_t frac) {
+  const uint64_t inv = 0x100000000ULL - static_cast<uint64_t>(frac);
+  return static_cast<uint8_t>(
+      ((static_cast<uint64_t>(a) * inv +
+        static_cast<uint64_t>(b) * static_cast<uint64_t>(frac)) >> 32));
+}
+
+RGBW sampleGradientAt(const std::vector<RGBW>& stops, uint32_t pos) {
+  const uint32_t n = static_cast<uint32_t>(stops.size());
+  if (n == 1) return stops[0];
+  const uint64_t scaled = static_cast<uint64_t>(pos) * (n - 1);
+  const uint32_t i = static_cast<uint32_t>(scaled >> 32);
+  const uint32_t frac = static_cast<uint32_t>(scaled & 0xFFFFFFFFu);
+  if (i >= n - 1) return stops[n - 1];
+  RGBW out;
+  out.r = lerp8(stops[i].r, stops[i + 1].r, frac);
+  out.g = lerp8(stops[i].g, stops[i + 1].g, frac);
+  out.b = lerp8(stops[i].b, stops[i + 1].b, frac);
+  out.w = lerp8(stops[i].w, stops[i + 1].w, frac);
+  return out;
+}
+
 constexpr uint32_t kGolden   = 0x9E3779B9u;
 constexpr uint32_t kSwapSalt = 0xCAFEBABEu;
+constexpr uint32_t kMinGap   = 0x40000000u;
 
-ColorTuple sampleTuple(const std::vector<RGBW>& raw, const uint8_t mac[6]) {
+ColorTuple sampleTuple(const std::vector<RGBW>& raw, const uint8_t mac[6],
+                       uint32_t shuffleSeed = 0) {
   ColorTuple out;
   if (raw.empty()) return out;
   auto stops = dedupe(raw);
   if (stops.empty()) return out;
 
-  const uint32_t n = static_cast<uint32_t>(stops.size());
-  uint32_t idxA = hashMac(mac, 0u)      % n;
-  uint32_t idxB = hashMac(mac, kGolden) % n;
-  if (n >= 2 && idxA == idxB) idxB = (idxB + 1) % n;
+  uint32_t posA = hashMac(mac, 0u      ^ shuffleSeed);
+  uint32_t posB = hashMac(mac, kGolden ^ shuffleSeed);
+  const uint32_t d = posA > posB ? posA - posB : posB - posA;
+  if (d < kMinGap) {
+    posB = (posA <= 0xFFFFFFFFu - kMinGap) ? posA + kMinGap : posA - kMinGap;
+  }
 
-  const bool swap = (hashMac(mac, kSwapSalt) & 1u) != 0u;
-  const RGBW& base  = swap ? stops[idxB] : stops[idxA];
-  const RGBW& shade = swap ? stops[idxA] : stops[idxB];
+  const bool swap = (hashMac(mac, kSwapSalt ^ shuffleSeed) & 1u) != 0u;
+  const RGBW base  = sampleGradientAt(stops, swap ? posB : posA);
+  const RGBW shade = sampleGradientAt(stops, swap ? posA : posB);
   out.r[0] = base.r;  out.g[0] = base.g;  out.b[0] = base.b;  out.w[0] = base.w;
   out.r[1] = shade.r; out.g[1] = shade.g; out.b[1] = shade.b; out.w[1] = shade.w;
   return out;
 }
 
-// Returns true if `c` is byte-exactly one of the authored stops.
-bool isOneOfAuthoredStops(const std::vector<RGBW>& stops, uint8_t r, uint8_t g,
-                          uint8_t b, uint8_t w) {
-  for (const auto& s : stops) {
-    if (s.r == r && s.g == g && s.b == b && s.w == w) return true;
-  }
-  return false;
-}
-
 }  // namespace
-
-// --- Tests ---
 
 void test_empty_palette_returns_black(void) {
   std::vector<RGBW> raw;
@@ -127,47 +136,29 @@ void test_single_color_palette_returns_color_for_both(void) {
   ColorTuple t = sampleTuple(raw, mac);
   TEST_ASSERT_EQUAL_UINT8(200, t.r[0]);
   TEST_ASSERT_EQUAL_UINT8(100, t.g[0]);
-  TEST_ASSERT_EQUAL_UINT8(50, t.b[0]);
+  TEST_ASSERT_EQUAL_UINT8(50,  t.b[0]);
   TEST_ASSERT_EQUAL_UINT8(200, t.r[1]);
   TEST_ASSERT_EQUAL_UINT8(100, t.g[1]);
-  TEST_ASSERT_EQUAL_UINT8(50, t.b[1]);
+  TEST_ASSERT_EQUAL_UINT8(50,  t.b[1]);
 }
 
-void test_two_color_palette_picks_pure_endpoints_no_blending(void) {
-  // The headline behavioural change: a 2-color palette must produce
-  // tuples where BOTH colors are byte-exact authored stops — no
-  // interpolation, no mid-tone blends. Each lamp gets {red, red},
-  // {red, blue}, {blue, red}, or {blue, blue}.
-  std::vector<RGBW> raw{{255, 0, 0, 0}, {0, 0, 255, 0}};
-  for (uint32_t i = 0; i < 200; ++i) {
+void test_two_color_palette_produces_interpolated_colors(void) {
+  // Gradient sampling: a 2-stop palette should produce in-between colors,
+  // not just the two authored endpoints.
+  const std::vector<RGBW> raw{{255, 128, 0, 0}, {0, 200, 80, 0}};  // orange, green
+  bool foundBlend = false;
+  for (uint32_t i = 0; i < 200 && !foundBlend; ++i) {
     uint8_t mac[6] = {static_cast<uint8_t>(i & 0xFF),
                       static_cast<uint8_t>((i >> 8) & 0xFF),
                       0x11, 0x22, 0x33, 0x44};
     ColorTuple t = sampleTuple(raw, mac);
-    TEST_ASSERT_TRUE_MESSAGE(
-        isOneOfAuthoredStops(raw, t.r[0], t.g[0], t.b[0], t.w[0]),
-        "base surface must be a byte-exact authored stop");
-    TEST_ASSERT_TRUE_MESSAGE(
-        isOneOfAuthoredStops(raw, t.r[1], t.g[1], t.b[1], t.w[1]),
-        "shade surface must be a byte-exact authored stop");
+    // Check base
+    const bool baseIsOrange = (t.r[0]==255 && t.g[0]==128 && t.b[0]==0 && t.w[0]==0);
+    const bool baseIsGreen  = (t.r[0]==0   && t.g[0]==200 && t.b[0]==80 && t.w[0]==0);
+    if (!baseIsOrange && !baseIsGreen) foundBlend = true;
   }
-}
-
-void test_distinct_pair_when_palette_has_two_or_more_colors(void) {
-  // For a multi-color palette, every lamp should get two DIFFERENT
-  // authored colors (the idxA==idxB collision bump guarantees it).
-  std::vector<RGBW> raw{{255, 0, 0, 0}, {0, 255, 0, 0}, {0, 0, 255, 0},
-                        {255, 255, 0, 0}, {0, 255, 255, 0}};
-  for (uint32_t i = 0; i < 200; ++i) {
-    uint8_t mac[6] = {static_cast<uint8_t>(i & 0xFF),
-                      static_cast<uint8_t>((i >> 8) & 0xFF),
-                      0xAA, 0xBB, 0xCC, 0xDD};
-    ColorTuple t = sampleTuple(raw, mac);
-    const bool same = t.r[0] == t.r[1] && t.g[0] == t.g[1] &&
-                      t.b[0] == t.b[1] && t.w[0] == t.w[1];
-    TEST_ASSERT_FALSE_MESSAGE(
-        same, "with >=2 distinct stops, base and shade must differ");
-  }
+  TEST_ASSERT_TRUE_MESSAGE(foundBlend,
+      "gradient sampling must produce interpolated (non-stop) colors");
 }
 
 void test_same_mac_returns_same_tuple(void) {
@@ -184,40 +175,43 @@ void test_same_mac_returns_same_tuple(void) {
   }
 }
 
-void test_swap_distribution_breaks_fixed_order(void) {
-  // The other headline change: roughly half of all MACs should get the
-  // swap bit set, meaning idxA goes to shade (not base). Without this
-  // the fleet visually clamps to e.g. "all base = first-hash color".
-  // Test: across a large MAC sweep on a 2-color palette, the count of
-  // (base = red) lamps and (base = blue) lamps should each be within
-  // 20% of half — i.e. neither dominates.
-  std::vector<RGBW> raw{{255, 0, 0, 0}, {0, 0, 255, 0}};
-  int baseRed = 0, baseBlue = 0;
-  constexpr uint32_t kSweep = 1024;
-  for (uint32_t i = 0; i < kSweep; ++i) {
+void test_different_shuffle_seed_changes_result(void) {
+  std::vector<RGBW> raw{{255, 128, 0, 0}, {0, 200, 80, 0}};
+  bool foundDiff = false;
+  for (uint32_t i = 0; i < 256 && !foundDiff; ++i) {
     uint8_t mac[6] = {static_cast<uint8_t>(i & 0xFF),
                       static_cast<uint8_t>((i >> 8) & 0xFF),
-                      static_cast<uint8_t>((i >> 16) & 0xFF),
-                      0x99, 0x77, 0x55};
-    ColorTuple t = sampleTuple(raw, mac);
-    if (t.r[0] == 255 && t.b[0] == 0) baseRed++;
-    if (t.r[0] == 0 && t.b[0] == 255) baseBlue++;
+                      0xAA, 0xBB, 0xCC, 0xDD};
+    ColorTuple a = sampleTuple(raw, mac, 0);
+    ColorTuple b = sampleTuple(raw, mac, 1);
+    if (a.r[0] != b.r[0] || a.g[0] != b.g[0] ||
+        a.b[0] != b.b[0] || a.r[1] != b.r[1]) {
+      foundDiff = true;
+    }
   }
-  const int total = baseRed + baseBlue;
-  TEST_ASSERT_EQUAL_INT_MESSAGE(static_cast<int>(kSweep), total,
-      "every MAC should resolve to one authored stop on each surface");
-  const int low = (kSweep * 30) / 100;   // 30% floor
-  const int hi  = (kSweep * 70) / 100;   // 70% ceiling
-  TEST_ASSERT_TRUE_MESSAGE(baseRed >= low && baseRed <= hi,
-      "base=red share should be within 30-70% (swap bit breaks the bias)");
-  TEST_ASSERT_TRUE_MESSAGE(baseBlue >= low && baseBlue <= hi,
-      "base=blue share should be within 30-70%");
+  TEST_ASSERT_TRUE_MESSAGE(foundDiff,
+      "shuffleSeed=1 must yield a different result for at least one MAC");
+}
+
+void test_golden_parity(void) {
+  // mac={0x10,0x20,0x30,0x40,0x50,0x60}, orange+green palette, seed=0.
+  // Must match the Dart golden in tuple_sampler_test.dart byte-for-byte.
+  const std::vector<RGBW> raw{{255, 128, 0, 0}, {0, 200, 80, 0}};
+  const uint8_t mac[6] = {0x10, 0x20, 0x30, 0x40, 0x50, 0x60};
+  ColorTuple t = sampleTuple(raw, mac, 0);
+  TEST_ASSERT_EQUAL_UINT8_MESSAGE(178, t.r[0], "base.r");
+  TEST_ASSERT_EQUAL_UINT8_MESSAGE(149, t.g[0], "base.g");
+  TEST_ASSERT_EQUAL_UINT8_MESSAGE( 23, t.b[0], "base.b");
+  TEST_ASSERT_EQUAL_UINT8_MESSAGE(  0, t.w[0], "base.w");
+  TEST_ASSERT_EQUAL_UINT8_MESSAGE(114, t.r[1], "shade.r");
+  TEST_ASSERT_EQUAL_UINT8_MESSAGE(167, t.g[1], "shade.g");
+  TEST_ASSERT_EQUAL_UINT8_MESSAGE( 43, t.b[1], "shade.b");
+  TEST_ASSERT_EQUAL_UINT8_MESSAGE(  0, t.w[1], "shade.w");
 }
 
 void test_dedupe_drops_adjacent_near_identical_stops(void) {
   // Two near-identical stops followed by a distinct one. Dedupe collapses
-  // them; no padding/interpolation happens, so the effective palette size
-  // is exactly 2 distinct colors.
+  // them; the effective palette size is exactly 2 distinct colors.
   std::vector<RGBW> raw{
       {100, 100, 100, 0},
       {103, 102, 101, 0},  // within 8/255 of previous → dropped
@@ -232,41 +226,14 @@ void test_dedupe_drops_adjacent_near_identical_stops(void) {
   TEST_ASSERT_EQUAL_UINT8(0, deduped.back().b);
 }
 
-void test_picked_index_distance_varies_across_fleet(void) {
-  // User complaint pre-fix: "always the same distance between colors
-  // picked". With independent FNV hashes on idxA and idxB, the |idxA-idxB|
-  // distribution across many MACs on a wide palette should hit at least
-  // 3 distinct distances — not clamp to a single delta.
-  std::vector<RGBW> raw{
-      {255, 0, 0, 0}, {255, 128, 0, 0}, {255, 255, 0, 0},
-      {0, 255, 0, 0}, {0, 255, 255, 0}, {0, 0, 255, 0},
-      {128, 0, 255, 0}, {255, 0, 255, 0}};
-  const uint32_t n = static_cast<uint32_t>(raw.size());
-  std::vector<bool> seenDelta(n, false);
-  for (uint32_t i = 0; i < 256; ++i) {
-    uint8_t mac[6] = {static_cast<uint8_t>(i & 0xFF), 0x55, 0x66, 0x77, 0x88, 0x99};
-    uint32_t idxA = hashMac(mac, 0u)      % n;
-    uint32_t idxB = hashMac(mac, kGolden) % n;
-    if (n >= 2 && idxA == idxB) idxB = (idxB + 1) % n;
-    const uint32_t delta = idxA > idxB ? idxA - idxB : idxB - idxA;
-    if (delta < n) seenDelta[delta] = true;
-  }
-  int distinctDeltas = 0;
-  for (bool s : seenDelta) if (s) ++distinctDeltas;
-  TEST_ASSERT_GREATER_OR_EQUAL_INT_MESSAGE(
-      3, distinctDeltas,
-      "expected at least 3 distinct |idxA-idxB| values across a MAC sweep");
-}
-
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_empty_palette_returns_black);
   RUN_TEST(test_single_color_palette_returns_color_for_both);
-  RUN_TEST(test_two_color_palette_picks_pure_endpoints_no_blending);
-  RUN_TEST(test_distinct_pair_when_palette_has_two_or_more_colors);
+  RUN_TEST(test_two_color_palette_produces_interpolated_colors);
   RUN_TEST(test_same_mac_returns_same_tuple);
-  RUN_TEST(test_swap_distribution_breaks_fixed_order);
+  RUN_TEST(test_different_shuffle_seed_changes_result);
+  RUN_TEST(test_golden_parity);
   RUN_TEST(test_dedupe_drops_adjacent_near_identical_stops);
-  RUN_TEST(test_picked_index_distance_varies_across_fleet);
   return UNITY_END();
 }
