@@ -261,6 +261,32 @@ void main() {
     expect(rangeSlider, findsOneWidget);
   });
 
+  testWidgets('back with unsaved edits prompts to discard', (tester) async {
+    final c = await _withEmptyState();
+    addTearDown(c.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: c,
+      child: const MaterialApp(
+        home: ExpressionEditorScreen(
+          lampId: _devId,
+          typeKey: 'breathing',
+          targetKey: 3,
+        ),
+      ),
+    ));
+    await _pumpToData(tester, 'Breathing');
+
+    // Dirty the draft by retargeting, then hit the AppBar back arrow.
+    await tester.tap(find.text('Base'));
+    await tester.pump();
+    await tester.tap(find.byIcon(Icons.arrow_back));
+    await tester.pump();
+    await tester.pump();
+
+    // The shared discard-guard dialog (base/shade editors) appears.
+    expect(find.text('Discard changes?'), findsOneWidget);
+  });
+
   test('log-scale helpers round-trip common intervals and expand the low band',
       () {
     // Mirror the call-site helpers for isolated verification.

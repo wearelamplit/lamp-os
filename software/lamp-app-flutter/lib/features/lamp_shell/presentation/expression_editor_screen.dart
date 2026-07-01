@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_spacing.dart';
+import '../../../core/widgets/confirm_discard.dart';
 import '../../../core/widgets/friendly_error.dart';
 import '../../../core/widgets/section_header.dart';
 import '../../control/application/control_notifier.dart';
@@ -62,6 +63,11 @@ class _ExpressionEditorScreenState
   /// the moment you retarget, which must NOT change the back-out pop count.
   bool? _openedNew;
 
+  /// True once the user has touched the draft this session (color / interval /
+  /// param edit or a target switch). Gates the discard guard: a clean back-out
+  /// pops straight through, a dirty one confirms first.
+  bool _dirty = false;
+
   bool _existsInState(ControlState? state) =>
       state != null &&
       state.expressions.expressions
@@ -87,11 +93,40 @@ class _ExpressionEditorScreenState
   }
 
   void _updateDraft(ExpressionConfig Function(ExpressionConfig d) f) {
+    _dirty = true;
     ref
         .read(expressionDraftProvider(
                 widget.lampId, widget.typeKey, _target)
             .notifier)
         .update(f);
+  }
+
+  void _resetDraft() {
+    ref
+        .read(expressionDraftProvider(widget.lampId, widget.typeKey, _target)
+            .notifier)
+        .reset();
+  }
+
+  void _pop() {
+    final router = GoRouter.maybeOf(context);
+    if (router != null && router.canPop()) {
+      router.pop();
+    } else {
+      Navigator.maybeOf(context)?.maybePop();
+    }
+  }
+
+  /// Back-out handler for the AppBar arrow and system back. Confirms before
+  /// discarding when the draft has unsaved edits; a clean draft pops straight
+  /// through. Reuses the base/shade editors' [confirmDiscard] dialog.
+  Future<void> _leaveGuarded() async {
+    if (_dirty) {
+      final discard = await confirmDiscard(context);
+      if (!discard || !mounted) return;
+      _resetDraft();
+    }
+    if (mounted) _pop();
   }
 
   ExpressionConfig _withColors(ExpressionConfig d, List<LampColor> colors) =>
@@ -157,18 +192,20 @@ class _ExpressionEditorScreenState
   Widget build(BuildContext context) {
     final async = ref.watch(controlNotifierProvider(widget.lampId));
     final meta = ExpressionTypeMeta.byKey(widget.typeKey);
-    return Scaffold(
+    return PopScope(
+      canPop: !_dirty,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return; // clean draft — already popped
+        final discard = await confirmDiscard(context);
+        if (!discard || !mounted) return;
+        _resetDraft();
+        if (mounted) _pop();
+      },
+      child: Scaffold(
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            final router = GoRouter.maybeOf(context);
-            if (router != null && router.canPop()) {
-              router.pop();
-            } else {
-              Navigator.maybeOf(context)?.maybePop();
-            }
-          },
+          onPressed: _leaveGuarded,
           tooltip: 'Back',
         ),
         // Title carries the expression's friendly name (titlized via
@@ -275,7 +312,10 @@ class _ExpressionEditorScreenState
                       .update((_) => current.copyWith(target: t));
                   ref.invalidate(expressionDraftProvider(
                       widget.lampId, widget.typeKey, from));
-                  setState(() => _target = t);
+                  setState(() {
+                    _target = t;
+                    _dirty = true;
+                  });
                 },
               ),
               const SizedBox(height: AppSpace.xl),
@@ -381,10 +421,10 @@ class _ExpressionEditorScreenState
               ),
               // Action row — Cancel + Delete on the left, Add/Update on
               // the right. Test sits on the AppBar's actions area; the
-              // back-arrow on the AppBar leading area pops without
-              // discarding the draft (so partial work survives a back
-              // tap and re-open). Cancel is the explicit "throw away"
-              // counterpart.
+              // back-arrow on the AppBar leading area (and system back)
+              // confirm before discarding when the draft has unsaved
+              // edits. Cancel is the explicit "throw away" counterpart —
+              // it discards without a prompt.
               //
               // This was previously the last child of the ListView and
               // scrolled with the form, leaving the buttons midway down
@@ -502,6 +542,7 @@ class _ExpressionEditorScreenState
           );
         },
       ),
+    ),
     );
   }
 }
@@ -530,7 +571,7 @@ class _Header extends StatelessWidget {
                 shape: BoxShape.circle,
                 color: colorScheme.primaryContainer,
               ),
-              child: Icon(meta!.icon, color: colorScheme.primary),
+              child: Icon(meta!.icon, color: colorScheme.onPrimaryContainer),
             ),
           if (meta != null) const SizedBox(width: AppSpace.md),
           Expanded(

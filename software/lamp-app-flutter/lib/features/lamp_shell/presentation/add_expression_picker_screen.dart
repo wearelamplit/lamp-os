@@ -215,7 +215,7 @@ class _ExpressionCard extends StatelessWidget {
                       shape: BoxShape.circle,
                       color: colorScheme.primaryContainer,
                     ),
-                    child: Icon(meta.icon, color: colorScheme.primary),
+                    child: Icon(meta.icon, color: colorScheme.onPrimaryContainer),
                   ),
                   const SizedBox(width: AppSpace.md),
                   Expanded(
