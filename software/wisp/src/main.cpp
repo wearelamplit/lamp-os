@@ -7,7 +7,9 @@
 #include "fleet/lamp_inventory.hpp"
 #include "net/mesh_link.hpp"
 #include "paint/paint_distributor.hpp"
-#include "status/status_beacon.hpp"
+#include "status/presence_beacon.hpp"
+#include "status/status_emitter.hpp"
+#include "status/seq_source.hpp"
 #include "fleet/wisp_roster.hpp"
 #include "status/status_ring.hpp"
 #include "config/wisp_config.hpp"
@@ -27,7 +29,9 @@ wisp::MeshLink mesh;
 wisp::LampInventory inventory;
 wisp::CurrentPalette currentPalette;
 wisp::PaintDistributor paintDistributor;
-wisp::StatusBeacon statusBeacon;
+wisp::SeqSource wispSeq;
+wisp::StatusEmitter statusEmitter;
+wisp::PresenceBeacon presenceBeacon;
 wisp::WispRoster wispRoster;
 AuroraPaletteClient auroraClient;
 wisp::WifiLink wifi;
@@ -190,7 +194,7 @@ void drainPendingWispOp() {
   switch (res) {
     case wisp::DispatchResult::AppliedSourceChange: {
       applySourceModeTransition(wispConfig.sourceMode());
-      statusBeacon.triggerOnChange();
+      statusEmitter.triggerOnChange();
       break;
     }
     case wisp::DispatchResult::AppliedManualPalette: {
@@ -198,7 +202,7 @@ void drainPendingWispOp() {
         pushManualPaletteToCurrent();
         renderRing();
       }
-      statusBeacon.triggerOnChange();
+      statusEmitter.triggerOnChange();
       break;
     }
     case wisp::DispatchResult::AppliedZoneChange: {
@@ -211,23 +215,23 @@ void drainPendingWispOp() {
         zoneSelector.clearFromOp();
         Serial.println("[wisp] zone cleared by app op (source=none)");
       }
-      statusBeacon.triggerOnChange();
+      statusEmitter.triggerOnChange();
       break;
     }
     case wisp::DispatchResult::AppliedWifiChange:
       Serial.println("[wisp] wifi creds updated; STA reconnect + advert refresh kicked");
-      statusBeacon.triggerOnChange();
+      statusEmitter.triggerOnChange();
       break;
     case wisp::DispatchResult::AppliedOffColor:
       if (wispConfig.sourceMode() == wisp::WispSourceMode::Off) {
         renderRing();
       }
-      statusBeacon.triggerOnChange();
+      statusEmitter.triggerOnChange();
       break;
     case wisp::DispatchResult::AppliedShuffle:
       paintDistributor.setShuffleSeed(wispConfig.shuffleSeed());
       paintDistributor.onPaletteChanged();
-      statusBeacon.triggerOnChange();
+      statusEmitter.triggerOnChange();
       break;
     case wisp::DispatchResult::Ignored:
     case wisp::DispatchResult::Malformed:
@@ -275,7 +279,7 @@ void onAuroraPalette(int zone, const Palette& p) {
   // First-seen latch: only when neither NVS nor an app op has chosen a zone.
   if (zoneSelector.latchFirstSeen(zone)) {
     Serial.printf("[wisp] claimed Aurora zone %d (source=firstSeen)\n", zone);
-    statusBeacon.triggerOnChange();
+    statusEmitter.triggerOnChange();
   }
 
   if (zone != zoneSelector.currentZone()) {
@@ -316,7 +320,7 @@ String buildInstanceId() {
 
 wisp::SerialConsole serialConsole(
     paintDistributor, wispConfig, artnetEmitter, stageBeacon,
-    wifi, statusBeacon, inventory, zoneSelector,
+    wifi, statusEmitter, inventory, zoneSelector,
     [](wisp::WispSourceMode m) { applySourceModeTransition(m); });
 
 }  // namespace
@@ -372,9 +376,12 @@ void setup() {
   paintDistributor.setShuffleSeed(wispConfig.shuffleSeed());
 
   // carriedFw* zero-fill; wire layout retained for back-compat with older lamps.
-  statusBeacon.begin(&mesh, &paintDistributor, &currentPalette,
-                     &zoneSelector, &auroraClient, &wispConfig, &wispRoster);
-  statusBeacon.startTimer();
+  statusEmitter.begin(&mesh, &zoneSelector, &auroraClient, &wispConfig,
+                      &currentPalette, &wispSeq);
+  presenceBeacon.begin(&mesh, &paintDistributor, &currentPalette,
+                       &auroraClient, &wispRoster, &wispSeq, &statusEmitter);
+  statusEmitter.startTimer();
+  presenceBeacon.startTimer();
 
   applySourceModeTransition(wispConfig.sourceMode());
 
@@ -412,7 +419,7 @@ void loop() {
       currentPalette.clear();
       paintDistributor.setPaintMode(false);
       renderRing();
-      statusBeacon.triggerOnChange();
+      statusEmitter.triggerOnChange();
       Serial.println("[wisp] Aurora stream dropped — holding off");
     }
     auroraWasStreaming = streaming;

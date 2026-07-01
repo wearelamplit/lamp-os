@@ -11,13 +11,13 @@
 #include "net/wifi_link.hpp"
 #include "artnet/artnet_emitter.hpp"
 #include "paint/paint_distributor.hpp"
-#include "status/status_beacon.hpp"
+#include "status/status_emitter.hpp"
 
 namespace wisp {
 
 SerialConsole::SerialConsole(PaintDistributor& paint, WispConfig& config,
                              ArtnetEmitter& artnet, StageBeacon& stage,
-                             WifiLink& wifi, StatusBeacon& status,
+                             WifiLink& wifi, StatusEmitter& status,
                              LampInventory& inventory, ZoneSelector& zones,
                              SourceTransitionFn onSourceTransition)
     : paint_(paint),

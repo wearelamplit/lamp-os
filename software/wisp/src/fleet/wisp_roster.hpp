@@ -72,7 +72,7 @@ class WispRoster {
   // Recompute the own-claim set from the current peer view + the
   // provided lamp observations. Ages out stale peers along the way.
   // Should run before each tick where the result is consumed
-  // (PaintDistributor walk + StatusBeacon broadcast build).
+  // (PaintDistributor walk + PresenceBeacon broadcast build).
   //
   // The observations array is borrowed for the duration of the call;
   // the roster doesn't retain it.

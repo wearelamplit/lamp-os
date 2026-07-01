@@ -44,7 +44,7 @@ struct InventoryEntry {
  * Consumers:
  *   - serial dump every 10s for bench debug;
  *   - PaintDistributor walks the snapshot to fan out paint;
- *   - StatusBeacon includes the count in HELLO + surfaces the snapshot
+ *   - PresenceBeacon includes the count in HELLO + surfaces the snapshot
  *     to the app via the BLE proxy.
  */
 class LampInventory {

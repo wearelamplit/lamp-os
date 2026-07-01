@@ -9,7 +9,7 @@ class PaintDistributor;
 class ArtnetEmitter;
 class StageBeacon;
 class WifiLink;
-class StatusBeacon;
+class StatusEmitter;
 class LampInventory;
 class ZoneSelector;
 class WispConfig;
@@ -21,7 +21,7 @@ public:
 
   SerialConsole(PaintDistributor& paint, WispConfig& config,
                 ArtnetEmitter& artnet, StageBeacon& stage,
-                WifiLink& wifi, StatusBeacon& status,
+                WifiLink& wifi, StatusEmitter& status,
                 LampInventory& inventory, ZoneSelector& zones,
                 SourceTransitionFn onSourceTransition);
 
@@ -40,7 +40,7 @@ private:
   ArtnetEmitter& artnet_;
   StageBeacon& stage_;
   WifiLink& wifi_;
-  StatusBeacon& status_;
+  StatusEmitter& status_;
   LampInventory& inventory_;
   ZoneSelector& zones_;
   SourceTransitionFn onSourceTransition_;

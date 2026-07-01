@@ -66,7 +66,7 @@ class WispConfig {
   }
   void setManualPalette(const std::vector<ManualPaletteColor>& colors);
 
-  // Lock-guarded: safe to call from the StatusBeacon timer-service task.
+  // Lock-guarded: safe to call from the StatusEmitter timer-service task.
   size_t copyManualPalette(uint8_t* outRgb, size_t maxColors) const;
 
   // Ring color in Off mode (PaintDistributor stays idle). Persisted as 3 NVS bytes.

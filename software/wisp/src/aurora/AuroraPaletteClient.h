@@ -32,7 +32,7 @@ public:
     void begin();
     void loop();
 
-    // StatusBeacon needs to mirror this into the wispStatus JSON
+    // StatusEmitter needs to mirror this into the wispStatus JSON
     // payload's `auroraConnected` field. "Streaming" is the only state where
     // we've actually established a WS session and are processing announcements;
     // earlier states (discovering / connecting) are best reported as not yet
