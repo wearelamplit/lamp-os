@@ -18,7 +18,7 @@
 #include <cstdint>
 #include <cstring>
 
-#include "StatusRing.h"
+#include "status/status_ring.hpp"
 
 namespace {
 

@@ -12,8 +12,11 @@
 // can hear each other. Since we never associate to a home AP anymore,
 // the radio sits on this channel permanently (modulo brief scan windows).
 #ifndef LAMP_ESPNOW_CHANNEL
-// Moved 1 → 11 on 2026-06-10. Mirror of mesh_link.hpp / MeshLink.h.
-#define LAMP_ESPNOW_CHANNEL 11
+// Channel 6: the channel pre-mesh lamps hardcode for their ArtNet WiFi, so
+// new mesh lamps, the wisp stage softAP, and old lamps all share one channel.
+// Mirror of mesh_link.hpp and the wisp's mesh_link.hpp; a mixed-channel fleet
+// does NOT interoperate (peers on another channel are invisible).
+#define LAMP_ESPNOW_CHANNEL 6
 #endif
 
 namespace wifi {

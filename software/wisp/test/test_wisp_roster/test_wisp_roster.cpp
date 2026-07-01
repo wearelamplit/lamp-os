@@ -16,7 +16,7 @@
 #include <cstdint>
 #include <cstring>
 
-#include "WispRoster.h"
+#include "fleet/wisp_roster.hpp"
 
 namespace {
 

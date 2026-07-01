@@ -34,7 +34,7 @@ updated.
                               │ESP-NOW            
                               ▼                  
             ╔════════════════════════════════════════=================
-            ║                  ESP-NOW grid mesh        channel 11   ║
+            ║                  ESP-NOW grid mesh        channel 6    ║
             ╠════════════╦═══════════════════════╦═══════════════════╣
             ║   Lamp 1   ║       Lamp 2          ║      Lamp N       ║
             ║ ESP32-WROOM║      ESP32-WROOM      ║    ESP32-WROOM    ║

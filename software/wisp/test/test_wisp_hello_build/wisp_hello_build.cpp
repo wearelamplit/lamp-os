@@ -1,6 +1,6 @@
 #include <unity.h>
 #include <cstring>
-#include "lamp_protocol.hpp"
+#include "wire/lamp_protocol.hpp"
 
 using namespace lamp_protocol;
 
