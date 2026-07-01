@@ -763,13 +763,6 @@ class ControlNotifier extends _$ControlNotifier {
     _scheduleCommitDebounced();
   }
 
-  /// Called from the knockout screen after each per-pixel edit (and on
-  /// screen-back force-flush) to schedule a debounced commit. Same
-  /// debounce window as brightness.
-  void scheduleKnockoutCommit() {
-    _scheduleCommitDebounced();
-  }
-
   /// Synchronous force-flush exposed for the knockout screen's
   /// PopScope hook. The debounce timer may not have fired yet and the
   /// notifier's onDispose may not fire at route-pop if the notifier
