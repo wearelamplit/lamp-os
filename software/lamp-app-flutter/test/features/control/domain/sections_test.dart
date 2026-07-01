@@ -124,8 +124,7 @@ void main() {
   });
 
   group('ExpressionConfig drops legacy disabledDuringWispOverride', () {
-    // The field was a per-instance config until commit 3575f43 (UI toggle
-    // removed), and was deleted entirely on 2026-06-13 — it's now a pure
+    // The field is no longer a per-instance config — it's now a pure
     // type-property looked up via ExpressionTypeMeta. fromJson/toJson must
     // tolerate the legacy key (older firmware/payloads may still ship it)
     // but never surface it as a parameter or carry it forward.
@@ -155,7 +154,7 @@ void main() {
     });
   });
 
-  group('value-class equality (audit cq-H / W7.7)', () {
+  group('value-class equality', () {
     // The point of overriding ==/hashCode on these is so Riverpod's
     // `.select` and AsyncValue equality can short-circuit on unchanged
     // sections. The tests pin that behaviour against accidental

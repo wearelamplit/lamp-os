@@ -572,9 +572,9 @@ void ExpressionManager::tryHandleExpressionEvent(const uint8_t sourceMac[6],
   // parameters), and triggerInvocation builds a fresh transient Expression
   // from it. The receiver's own `expressions` vector is intentionally
   // irrelevant — keeps the cascade behavior matching the legacy CONTROL_OP
-  // model ("execute this expression once and forget it"). C.3's brief
-  // receiver-side cascadeEnabled gate (commit cb7e6fd → removed
-  // 2026-06-03 after user-observed regression) silently broke this.
+  // model ("execute this expression once and forget it"). A receiver-side
+  // cascadeEnabled gate that filters on the receiver's own expressions
+  // silently breaks this — don't reintroduce one.
   char type[64] = {0};
   if (!peekJsonStringField(payload, payloadLen, "type", type, sizeof(type))) {
 #ifdef LAMP_DEBUG

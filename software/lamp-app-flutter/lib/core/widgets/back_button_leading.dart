@@ -7,7 +7,7 @@ import '../routing/routes.dart';
 /// possible, falling back to [AppRoutes.myLamps] when there's no back
 /// stack (deep-link entries, or the auto-route in BtOnlyLampScreen
 /// having erased history). Centralised so every inner-screen AppBar
-/// shares the same affordance (audit ux-M7) instead of either relying
+/// shares the same affordance instead of either relying
 /// on GoRouter's unreliable auto-leading or each screen rolling its
 /// own.
 ///

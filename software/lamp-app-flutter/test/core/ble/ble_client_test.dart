@@ -25,7 +25,7 @@ void main() {
   });
 
   test('subscribe streams simulated notifications', () async {
-    // Production semantics (post-audit cq-C1): real BLE peripherals
+    // Production semantics: real BLE peripherals
     // DON'T echo our own writes to subscribers — only explicit lamp-
     // pushed notifications fire. The fake honors that contract. Tests
     // that want to observe pushes use simulateNotify().

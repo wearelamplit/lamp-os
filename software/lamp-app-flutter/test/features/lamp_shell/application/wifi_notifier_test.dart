@@ -95,7 +95,7 @@ void main() {
 
     // Push a notify with state "connected" and NO scanResults. Use
     // simulateNotify rather than write() because production fbp does
-    // NOT echo writes to subscribers (audit cq-C1).
+    // NOT echo writes to subscribers.
     final ble = c.read(bleClientProvider) as InMemoryBleClient;
     ble.simulateNotify(
       _devId,

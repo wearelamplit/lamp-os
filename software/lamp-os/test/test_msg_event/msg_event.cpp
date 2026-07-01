@@ -255,16 +255,12 @@ void test_clampDelayMs_passthrough_and_cap() {
 // triggerInvocation builds a fresh transient Expression directly from it.
 // Receiver behavior is sender-authoritative.
 //
-// Pre-fix (commit cb7e6fd, C.3): tryHandleExpressionEvent had a step-2
-// `typeOptedIn` gate that scanned the receiver's `expressions` vector for
-// a matching `type` with `cascadeEnabled=1`, dropping otherwise — silently
-// breaking the legacy "execute this cascade once and forget it" model
-// observed via live tap on 2026-06-03 (`[event] type=glitchy not cascaded
-// locally, drop` on a melonie lamp whose glitchy had no local cascade
-// config).
-//
-// This test mirrors the post-fix gating logic so a future change that
-// reintroduces a receiver-side opt-in fails loudly here.
+// A receiver-side `typeOptedIn` gate — scanning the receiver's own
+// `expressions` vector for a matching `type` with `cascadeEnabled=1` and
+// dropping otherwise — silently breaks this sender-authoritative model: a
+// lamp whose `glitchy` has no local cascade config would wrongly drop a
+// glitchy invocation. This test mirrors the gating logic so a future change
+// that reintroduces a receiver-side opt-in fails loudly here.
 namespace {
 // Mirror of the post-fix tryHandleExpressionEvent gate sequence (minus
 // the JSON-parse and trigger steps which need ArduinoJson + compositor).

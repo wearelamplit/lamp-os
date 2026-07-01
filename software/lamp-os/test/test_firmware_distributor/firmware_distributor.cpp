@@ -20,7 +20,7 @@
 //   ✓ OFFER retry interval + cap
 //   ✓ Streaming chunk-cursor advance + currentChunkRetries_ + stall
 //   ✓ FW_REQ rewind cursor + reqCountThisSession_ budget hardening
-//     (Phase 5b' hardening — new on the lamp side, not in the wisp test)
+//     (lamp-side hardening — new, not in the wisp test)
 //   ✓ Full happy path OFFER → ACCEPT → CHUNK× → DONE → RESULT(success)
 //   ✓ discoverImageLength scan-backward logic (lamp-specific; replaces
 //     the wisp's "totalLen = carrier.size" assumption)
@@ -52,7 +52,7 @@ constexpr uint8_t  kMaxOfferRetries       = 8;
 constexpr uint32_t kOfferRetryIntervalMs  = 200;
 constexpr uint8_t  kMaxDoneRetries        = 4;
 constexpr uint32_t kDoneRetryIntervalMs   = 300;
-// Phase 5b' lamp-side hardening — caps how many MSG_FW_REQ a peer can
+// Lamp-side hardening — caps how many MSG_FW_REQ a peer can
 // send in one session before we tombstone the session with peer backoff.
 constexpr uint16_t kMaxReqPerSession      = 32;
 
@@ -232,7 +232,7 @@ struct DistAlgo {
     stateEnteredMs_ = nowMs;
   }
 
-  // Mirror of the Phase 5b' lamp-side hardening: reqCountThisSession_ is
+  // Mirror of the lamp-side hardening: reqCountThisSession_ is
   // bumped per accepted REQ; exceeding kMaxReqPerSession aborts the
   // session with a full peer-backoff penalty (not the short
   // Finalize-timeout backoff — a REQ flood is treated as a hostile or
@@ -569,7 +569,7 @@ void test_fw_req_out_of_range_is_ignored(void) {
 }
 
 void test_fw_req_budget_overrun_aborts_with_backoff(void) {
-  // Phase 5b' lamp-side hardening: a peer sending kMaxReqPerSession REQs
+  // Lamp-side hardening: a peer sending kMaxReqPerSession REQs
   // in one session is tombstoned with a 10-minute backoff.
   auto d = makeAlgo(0x00010005u, 100);
   uint8_t mac[6]; macFromTail(mac, 1);
@@ -755,7 +755,7 @@ void test_backoff_ring_holds_distinct_peers(void) {
 }
 
 // =============================================================================
-// isDistributingTo (Phase 5b'.4 fade-back delay support)
+// isDistributingTo (fade-back delay support)
 // =============================================================================
 
 void test_isDistributingTo_true_for_active_target(void) {

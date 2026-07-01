@@ -124,7 +124,7 @@ class InMemoryBleClient implements BleClient {
     // subscribers — the only thing that triggers a notification is when
     // the lamp explicitly pushes. The fake used to echo here, which let
     // subscribe-then-write-and-expect-the-write-back patterns pass tests
-    // while breaking on real hardware. Audit cq-C1. Tests that want to
+    // while breaking on real hardware. Tests that want to
     // observe writes use `simulateNotify` (see notifyable_ble_client
     // patterns in firmware_ota_pusher_test).
     // Append to write log so tests can query full write history.
