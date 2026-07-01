@@ -44,7 +44,7 @@ void main() {
       });
     });
 
-    test('timer alternates bright/dim every 600ms', () {
+    test('timer writes baseColors on 150ms cadence', () {
       fakeAsync((async) {
         final ble = InMemoryBleClient();
         final ctrl = AdoptPulseController(ble);
@@ -52,12 +52,12 @@ void main() {
         ctrl.start(deviceId, shade, base);
         async.flushMicrotasks();
 
-        final after0 = baseWrites(ble).length; // 1 (initial bright)
+        final after0 = baseWrites(ble).length; // 1 (initial dim write)
 
-        async.elapse(const Duration(milliseconds: 600));
+        async.elapse(const Duration(milliseconds: 150));
         expect(baseWrites(ble).length, greaterThan(after0));
 
-        async.elapse(const Duration(milliseconds: 600));
+        async.elapse(const Duration(milliseconds: 150));
         expect(baseWrites(ble).length, greaterThan(after0 + 1));
 
         ctrl.stop();
@@ -121,7 +121,7 @@ void main() {
 
         final countAfterStop = baseWrites(ble).length;
 
-        // Advance 5 × 600ms — a leaked timer would fire here.
+        // Advance 3s (20 × 150ms) — a leaked timer would fire here.
         async.elapse(const Duration(milliseconds: 3000));
 
         expect(baseWrites(ble).length, equals(countAfterStop));
@@ -145,8 +145,8 @@ void main() {
         async.elapse(const Duration(milliseconds: 600));
 
         final delta = baseWrites(ble).length - countBefore;
-        // Single timer fires once per interval — not twice.
-        expect(delta, 1);
+        // Single 150ms timer fires 4 times in 600ms — not 8 (double timer).
+        expect(delta, 4);
 
         ctrl.stop();
         async.flushMicrotasks();

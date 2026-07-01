@@ -3,14 +3,12 @@ import 'dart:async';
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../../../core/ble/ble_client_provider.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/widgets/friendly_error.dart';
 import '../../../control/domain/lamp_color.dart';
-import '../../../control/presentation/widgets/critter_asset.dart';
-import '../../../control/presentation/widgets/lamp_color_swatch.dart';
+import '../../../control/presentation/widgets/lamp_preview.dart';
 import '../../../nearby/application/nearby_lamps_notifier.dart';
 import '../../application/add_lamp_notifier.dart';
 import '../../application/adopt_pulse_controller.dart';
@@ -108,7 +106,6 @@ class _AdoptConfirmStepState extends ConsumerState<AdoptConfirmStep> {
           )
         : LampColor.black;
     final textTheme = Theme.of(context).textTheme;
-    final critter = critterAssetFor(critterIndex: null, deviceId: deviceId);
 
     return PopScope(
       canPop: false,
@@ -122,16 +119,11 @@ class _AdoptConfirmStepState extends ConsumerState<AdoptConfirmStep> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              SvgPicture.asset(critter, width: 96, height: 96),
-              const SizedBox(height: AppSpace.sm),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  LampColorSwatch(color: baseSwatchColor, size: 20),
-                  const SizedBox(width: AppSpace.sm),
-                  LampColorSwatch(color: shadeSwatchColor, size: 20),
-                ],
+              LampPreview(
+                deviceId: deviceId,
+                shadeColors: [shadeSwatchColor],
+                baseColors: [baseSwatchColor],
+                size: 120,
               ),
               const SizedBox(height: AppSpace.md),
               Text(

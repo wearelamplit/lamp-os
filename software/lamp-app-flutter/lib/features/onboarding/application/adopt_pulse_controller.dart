@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 
 import '../../../core/ble/ble_client.dart';
@@ -31,17 +32,21 @@ class AdoptPulseController {
     _restoreBase = baseColor;
     _stopped = false;
     final bright = washedOutBright(shadeColor);
-    final dim = _dim(bright);
     await _connectWithRetry(deviceId);
     if (_stopped) return;
     // Claim the base surface so a wisp's paint doesn't override the pulse.
     await _writeEditSession(deviceId, open: true);
     if (_stopped) return;
-    var on = true;
-    await _writeBase(deviceId, bright);
-    _timer = Timer.periodic(const Duration(milliseconds: 600), (_) {
-      on = !on;
-      unawaited(_writeBase(deviceId, on ? bright : dim));
+    const periodMs = 3000;
+    const stepMs = 150;
+    var elapsed = 0;
+    await _writeBase(deviceId, _scale(bright, 0.2));
+    _timer = Timer.periodic(const Duration(milliseconds: stepMs), (_) {
+      if (_stopped) return;
+      elapsed += stepMs;
+      final phase = (elapsed % periodMs) / periodMs;
+      final f = 0.2 + 0.8 * (0.5 - 0.5 * cos(2 * pi * phase));
+      unawaited(_writeBase(deviceId, _scale(bright, f)));
     });
   }
 
@@ -92,9 +97,9 @@ class AdoptPulseController {
     } catch (_) {}
   }
 
-  LampColor _dim(LampColor c) => LampColor(
-      r: (c.r * 0.15).round(),
-      g: (c.g * 0.15).round(),
-      b: (c.b * 0.15).round(),
-      w: (c.w * 0.15).round());
+  LampColor _scale(LampColor c, double f) => LampColor(
+      r: (c.r * f).round().clamp(0, 255),
+      g: (c.g * f).round().clamp(0, 255),
+      b: (c.b * f).round().clamp(0, 255),
+      w: (c.w * f).round().clamp(0, 255));
 }
