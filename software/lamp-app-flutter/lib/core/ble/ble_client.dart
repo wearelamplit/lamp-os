@@ -65,6 +65,34 @@ bool isBleDisconnectError(Object e) {
   return msg.contains('disconnect') || msg.contains('not connected');
 }
 
+/// Runaway guard on a whole page-protocol section (the sum of its DATA
+/// chunks), distinct from the per-chunk [kBleMaxReadBytes]. A section is
+/// heap-built firmware-side with no fixed cap, so this sits well above any
+/// real section (the largest, an expr list, is a few KB); it exists only to
+/// bound an unbounded accumulate if the lamp never sends the empty terminator,
+/// not to validate size.
+const int kBleMaxSectionBytes = 65536;
+
+/// Read page-protocol DATA chunks from [nextChunk] until an empty chunk (the
+/// lamp's end-of-snapshot signal), concatenating them. Reading-until-empty is
+/// MTU-agnostic: a short NON-final chunk must NOT be mistaken for the end (the
+/// bug when this keyed off a hardcoded "short = done" threshold). Throws
+/// [BleReadTooLarge] if the total passes [cap] before the terminator arrives —
+/// a wedged firmware cursor otherwise loops forever / OOMs the caller.
+Future<Uint8List> readPagesUntilEmpty(
+  String deviceId,
+  Future<Uint8List> Function() nextChunk, {
+  int cap = kBleMaxSectionBytes,
+}) async {
+  final out = BytesBuilder(copy: false);
+  while (true) {
+    final chunk = await nextChunk();
+    if (chunk.isEmpty) return out.toBytes();
+    out.add(chunk);
+    if (out.length > cap) throw BleReadTooLarge(deviceId, out.length, cap);
+  }
+}
+
 abstract class BleClient {
   Future<void> connect(String deviceId);
   Future<void> disconnect(String deviceId);

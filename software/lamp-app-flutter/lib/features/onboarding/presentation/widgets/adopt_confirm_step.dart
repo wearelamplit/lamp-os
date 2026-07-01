@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -9,7 +8,6 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/widgets/friendly_error.dart';
 import '../../../control/domain/lamp_color.dart';
 import '../../../control/presentation/widgets/recolored_critter.dart';
-import '../../../nearby/application/nearby_lamps_notifier.dart';
 import '../../application/add_lamp_notifier.dart';
 import '../../application/adopt_pulse_controller.dart';
 
@@ -23,10 +21,10 @@ class AdoptConfirmStep extends ConsumerStatefulWidget {
 class _AdoptConfirmStepState extends ConsumerState<AdoptConfirmStep>
     with WidgetsBindingObserver {
   late final AdoptPulseController _ctrl;
-  // Snapshot the lamp's colours once, up front: connecting for the pulse
-  // stops the lamp advertising, so it ages out of the nearby-scan list and a
-  // live re-read would collapse to black. The pulse captures its colour the
-  // same way.
+  // Colours the scan step captured at tap-time (AddLampState). We connect for
+  // the pulse right after this, which stops the lamp advertising — it then
+  // ages out of the nearby-scan list, so re-reading colours from there would
+  // collapse to black. The wizard snapshot survives that.
   late final LampColor _shadeColor;
   late final LampColor _baseColor;
   Object? _error;
@@ -36,18 +34,14 @@ class _AdoptConfirmStepState extends ConsumerState<AdoptConfirmStep>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _ctrl = AdoptPulseController(ref.read(bleClientProvider));
-    final deviceId = ref.read(addLampNotifierProvider).deviceId;
-    final lamp = ref
-        .read(nearbyLampsNotifierProvider)
-        .firstWhereOrNull((l) => l.id == deviceId);
-    _shadeColor = _rgbToColor(lamp?.shadeRgb);
-    _baseColor = _rgbToColor(lamp?.baseRgb);
+    final add = ref.read(addLampNotifierProvider);
+    _shadeColor = _rgbToColor(add.shadeRgb);
+    _baseColor = _rgbToColor(add.baseRgb);
     _startPulse();
   }
 
-  static LampColor _rgbToColor(int? rgb) => rgb == null
-      ? LampColor.black
-      : LampColor(r: (rgb >> 16) & 0xFF, g: (rgb >> 8) & 0xFF, b: rgb & 0xFF, w: 0);
+  static LampColor _rgbToColor(int rgb) =>
+      LampColor(r: (rgb >> 16) & 0xFF, g: (rgb >> 8) & 0xFF, b: rgb & 0xFF, w: 0);
 
   @override
   void dispose() {

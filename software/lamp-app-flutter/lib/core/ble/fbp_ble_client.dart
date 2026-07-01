@@ -220,26 +220,15 @@ class FbpBleClient implements BleClient {
         BleUuids.pageCtrl,
         Uint8List.fromList(utf8.encode(name)),
       );
-      // Pull DATA chunks until an EMPTY one arrives — the lamp's
-      // end-of-snapshot signal. Reading until empty is MTU-agnostic: a
-      // sub-247-MTU link just serves more, smaller chunks, and a short
-      // NON-final chunk must not be mistaken for the end (the bug when
-      // this keyed off a hardcoded 244-byte "short = done" threshold).
-      // fbp 2.x serializes GATT ops per-device internally, so writes
-      // and reads can't interleave on the wire even if our awaits are
-      // back-to-back.
-      final out = BytesBuilder(copy: false);
-      while (true) {
-        final chunk = await read(
-          deviceId,
-          BleUuids.controlService,
-          BleUuids.pageData,
-        );
-        if (chunk.isEmpty) {
-          return out.toBytes();
-        }
-        out.add(chunk);
-      }
+      // Pull DATA chunks until the lamp's empty end-of-snapshot chunk. The
+      // read-until-empty accumulation (and its runaway cap) lives in
+      // readPagesUntilEmpty so it's unit-testable without a live link. fbp 2.x
+      // serializes GATT ops per-device, so our back-to-back write/reads can't
+      // interleave on the wire.
+      return readPagesUntilEmpty(
+        deviceId,
+        () => read(deviceId, BleUuids.controlService, BleUuids.pageData),
+      );
     } on BleDisconnectedException {
       // Mid-stream drop. Partial bytes are discarded; the surrounding
       // reconnect ladder re-runs the section sweep.
