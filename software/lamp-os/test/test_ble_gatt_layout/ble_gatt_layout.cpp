@@ -13,7 +13,7 @@
 
 #include <cstdio>
 
-#include "components/network/gatt_layout.hpp"
+#include "components/network/ble/gatt_layout.hpp"
 
 using namespace ble_control;
 

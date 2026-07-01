@@ -30,11 +30,11 @@
 #include <NimBLEDevice.h>
 #include <esp_ota_ops.h>
 #endif
-#include "components/network/bluetooth.hpp"
-#include "components/network/ble_control.hpp"
-#include "components/network/nearby_lamps.hpp"
-#include "components/network/mesh_link.hpp"
-#include "components/network/wifi.hpp"
+#include "components/network/ble/bluetooth.hpp"
+#include "components/network/ble/ble_control.hpp"
+#include "components/network/mesh/nearby_lamps.hpp"
+#include "components/network/mesh/mesh_link.hpp"
+#include "components/network/transport/wifi.hpp"
 #if LAMP_WEBAPP_ENABLED
 #include "components/webapp/webapp.hpp"
 #endif

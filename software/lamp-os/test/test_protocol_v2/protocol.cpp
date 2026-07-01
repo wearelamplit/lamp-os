@@ -13,7 +13,7 @@
 #include <cstring>
 #include <vector>
 
-#include "components/network/lamp_protocol.hpp"
+#include "components/network/protocol/lamp_protocol.hpp"
 
 void setUp(void) {}
 void tearDown(void) {}

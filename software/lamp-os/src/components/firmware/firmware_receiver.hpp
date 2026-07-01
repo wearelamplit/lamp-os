@@ -19,7 +19,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "../network/lamp_protocol.hpp"
+#include "components/network/protocol/lamp_protocol.hpp"
 #include "util/high_water.hpp"
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)

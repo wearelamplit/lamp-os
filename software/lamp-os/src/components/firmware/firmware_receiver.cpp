@@ -3,9 +3,9 @@
 #include <cstring>
 
 #include "firmware_signature.hpp"
-#include "../network/ble_control.hpp"  // pauseRadioForOta / resumeRadioAfterOta
+#include "components/network/ble/ble_control.hpp"  // pauseRadioForOta / resumeRadioAfterOta
 #include "core/ota_quiet_mode.hpp"     // enterQuiet / exitQuiet
-#include "../network/mesh_link.hpp"
+#include "components/network/mesh/mesh_link.hpp"
 #include "../../version.hpp"
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)

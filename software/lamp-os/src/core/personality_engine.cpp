@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-#include "components/network/mesh_link.hpp"
+#include "components/network/mesh/mesh_link.hpp"
 #include "config/config.hpp"
 #include "expressions/expression_invocation.hpp"
 #include "expressions/expression_manager.hpp"

@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <cstring>
 
-#include "components/network/nearby_lamps.hpp"
+#include "components/network/mesh/nearby_lamps.hpp"
 #include "core/personality_engine.hpp"
 #include "components/firmware/firmware_distributor.hpp"
 #include "components/firmware/fs_ota.hpp"

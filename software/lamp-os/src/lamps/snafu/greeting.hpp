@@ -1,7 +1,7 @@
 #pragma once
 #include <string>
 #include "core/animated_behavior.hpp"
-#include "components/network/nearby_lamps.hpp"
+#include "components/network/mesh/nearby_lamps.hpp"
 #include "util/color.hpp"
 
 namespace lamp { namespace snafu {

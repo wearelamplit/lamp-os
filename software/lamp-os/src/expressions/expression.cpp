@@ -2,7 +2,7 @@
 
 #include <Arduino.h>
 
-#include "components/network/lamp_protocol.hpp"
+#include "components/network/protocol/lamp_protocol.hpp"
 #include "components/transient_override/color_override.hpp"
 #include "core/override_aggregate.hpp"
 #include "core/behavior_context.hpp"

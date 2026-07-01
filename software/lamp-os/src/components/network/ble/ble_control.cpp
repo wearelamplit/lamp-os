@@ -22,11 +22,11 @@
 #include "core/ota_quiet_mode.hpp"
 #include "bluetooth.hpp"
 #include "crypto.hpp"
-#include "components/network/gatt_layout.hpp"
+#include "components/network/ble/gatt_layout.hpp"
 #include "expressions/expression_manager.hpp"
-#include "nearby_lamps.hpp"
-#include "mesh_link.hpp"
-#include "wifi.hpp"
+#include "components/network/mesh/nearby_lamps.hpp"
+#include "components/network/mesh/mesh_link.hpp"
+#include "components/network/transport/wifi.hpp"
 #include "write_router.hpp"
 
 // Defined in lamp.cpp. Each BLE callback does a fixed-size byte copy into a

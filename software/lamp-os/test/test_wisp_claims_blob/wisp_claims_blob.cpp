@@ -1,6 +1,6 @@
 #include <unity.h>
 #include <cstdint>
-#include "components/network/wisp_claims_addr.hpp"
+#include "components/network/mesh/wisp_claims_addr.hpp"
 
 void setUp() {}
 void tearDown() {}

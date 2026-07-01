@@ -8,7 +8,7 @@
 #include <cstring>
 
 #include "util/base64.hpp"
-#include "components/network/wisp_claims_addr.hpp"
+#include "components/network/mesh/wisp_claims_addr.hpp"
 
 namespace lamp {
 

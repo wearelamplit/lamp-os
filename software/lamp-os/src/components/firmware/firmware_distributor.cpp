@@ -4,9 +4,9 @@
 
 #include "firmware_receiver.hpp"  // FirmwareTransport interface
 #include "firmware_signature.hpp"  // kLsigFooterLen
-#include "../network/ble_control.hpp"  // pauseRadioForOta / resumeRadioAfterOta
+#include "components/network/ble/ble_control.hpp"  // pauseRadioForOta / resumeRadioAfterOta
 #include "core/ota_quiet_mode.hpp"     // enterQuiet / exitQuiet
-#include "../network/lamp_protocol.hpp"
+#include "components/network/protocol/lamp_protocol.hpp"
 #include "../../version.hpp"
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)

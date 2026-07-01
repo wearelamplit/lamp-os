@@ -13,7 +13,7 @@
 #include "components/firmware/firmware_distributor.hpp"
 #include "components/firmware/firmware_receiver.hpp"
 #include "components/firmware/fs_signature.hpp"
-#include "components/network/lamp_protocol.hpp"
+#include "components/network/protocol/lamp_protocol.hpp"
 #include "components/webapp/webapp.hpp"
 #include "version.hpp"
 

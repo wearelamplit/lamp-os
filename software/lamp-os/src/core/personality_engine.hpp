@@ -28,7 +28,7 @@
 #include <string>
 #include <vector>
 
-#include "components/network/nearby_lamps.hpp"
+#include "components/network/mesh/nearby_lamps.hpp"
 #include "config/config_types.hpp"
 #include "util/color.hpp"
 

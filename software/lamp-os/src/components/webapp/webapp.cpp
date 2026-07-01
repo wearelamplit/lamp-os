@@ -16,7 +16,7 @@
 #include <cstdio>
 #include <string>
 
-#include "components/network/wifi.hpp"
+#include "components/network/transport/wifi.hpp"
 #include "config/config_types.hpp"
 #include "util/color.hpp"
 

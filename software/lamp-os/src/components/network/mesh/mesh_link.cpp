@@ -5,10 +5,10 @@
 #include <algorithm>
 #include <cstring>
 
-#include "../firmware/firmware_receiver.hpp"
-#include "../firmware/firmware_distributor.hpp"
-#include "../firmware/fs_ota.hpp"
-#include "../../version.hpp"
+#include "components/firmware/firmware_receiver.hpp"
+#include "components/firmware/firmware_distributor.hpp"
+#include "components/firmware/fs_ota.hpp"
+#include "version.hpp"
 
 namespace lamp {
 

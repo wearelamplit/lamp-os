@@ -1,7 +1,7 @@
 #include "ota_quiet_mode.hpp"
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-#include "components/network/ble_control.hpp"
+#include "components/network/ble/ble_control.hpp"
 #endif
 
 namespace lamp {

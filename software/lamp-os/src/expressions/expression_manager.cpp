@@ -4,9 +4,9 @@
 #include <algorithm>
 #include <cstring>
 
-#include "components/network/lamp_protocol.hpp"
-#include "components/network/nearby_lamps.hpp"
-#include "components/network/mesh_link.hpp"
+#include "components/network/protocol/lamp_protocol.hpp"
+#include "components/network/mesh/nearby_lamps.hpp"
+#include "components/network/mesh/mesh_link.hpp"
 #include "core/behavior_context.hpp"
 #include "core/compositor.hpp"
 

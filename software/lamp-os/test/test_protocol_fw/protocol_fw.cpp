@@ -14,7 +14,7 @@
 #include <cstring>
 #include <initializer_list>
 
-#include "components/network/lamp_protocol.hpp"
+#include "components/network/protocol/lamp_protocol.hpp"
 
 void setUp(void) {}
 void tearDown(void) {}

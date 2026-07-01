@@ -25,7 +25,7 @@
 #include "components/apply/apply_brightness.hpp"
 #include "components/apply/apply_expressions.hpp"
 #include "components/apply/apply_shade_colors.hpp"
-#include "components/network/mesh_link.hpp"
+#include "components/network/mesh/mesh_link.hpp"
 #include "config/config.hpp"
 #include "core/pending_slot_aggregate.hpp"
 #include "expressions/expression_manager.hpp"

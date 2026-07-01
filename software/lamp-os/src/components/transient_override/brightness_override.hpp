@@ -20,7 +20,7 @@
 #include <functional>
 
 #include "color_override.hpp"  // FadeState enum
-#include "components/network/lamp_protocol.hpp"
+#include "components/network/protocol/lamp_protocol.hpp"
 
 namespace lamp {
 

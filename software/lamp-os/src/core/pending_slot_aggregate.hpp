@@ -13,7 +13,7 @@
 
 #include "core/pending_json_slot.hpp"
 #include "core/pending_typed_slot.hpp"
-#include "components/network/pending_slots.hpp"
+#include "components/network/mesh/pending_slots.hpp"
 #include "components/firmware/firmware_receiver.hpp"
 
 namespace lamp {

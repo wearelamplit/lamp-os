@@ -9,12 +9,12 @@
 
 #include "config/config.hpp"
 #include "expressions/expression_invocation.hpp"
-#include "espnow_link.hpp"
-#include "lamp_protocol.hpp"
+#include "components/network/transport/espnow_link.hpp"
+#include "components/network/protocol/lamp_protocol.hpp"
 #include "nearby_lamps.hpp"
 #include "pending_slots.hpp"
 #include "util/color.hpp"
-#include "../firmware/firmware_receiver.hpp"  // FirmwareTransport interface
+#include "components/firmware/firmware_receiver.hpp"  // FirmwareTransport interface
 
 #ifndef LAMP_ESPNOW_CHANNEL
 // ESP-NOW channel; must match the wisp's MeshLink.h or the mesh won't form.

@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "lamp_protocol.hpp"
+#include "components/network/protocol/lamp_protocol.hpp"
 #include "util/color.hpp"
 
 namespace lamp {

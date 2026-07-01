@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <cstring>
 
-#include "components/network/wisp_claims_addr.hpp"
+#include "components/network/mesh/wisp_claims_addr.hpp"
 #include "util/proximity.hpp"
 
 namespace lamp {

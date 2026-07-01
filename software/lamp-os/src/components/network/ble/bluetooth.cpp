@@ -24,7 +24,7 @@ extern "C" bool btInUse() { return true; }
 #include "config/config.hpp"
 #include "util/color.hpp"
 #include "ble_control.hpp"
-#include "nearby_lamps.hpp"
+#include "components/network/mesh/nearby_lamps.hpp"
 
 namespace lamp {
 

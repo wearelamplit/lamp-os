@@ -7,7 +7,7 @@
 
 #include "components/firmware/firmware_distributor.hpp"
 #include "components/firmware/firmware_receiver.hpp"
-#include "components/network/nearby_lamps.hpp"
+#include "components/network/mesh/nearby_lamps.hpp"
 #include "core/frame_buffer.hpp"
 #include "util/color.hpp"
 

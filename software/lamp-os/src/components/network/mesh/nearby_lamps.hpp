@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "lamp_protocol.hpp"
+#include "components/network/protocol/lamp_protocol.hpp"
 #include "util/color.hpp"
 #include "util/proximity.hpp"
 #include "wisp_cache.hpp"

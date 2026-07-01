@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-#include "lamp_protocol.hpp"
+#include "components/network/protocol/lamp_protocol.hpp"
 
 namespace lamp {
 

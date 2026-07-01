@@ -17,8 +17,8 @@
 
 #include "behaviors/configurator.hpp"
 #include "components/firmware/firmware_receiver.hpp"
-#include "components/network/bluetooth.hpp"
-#include "components/network/mesh_link.hpp"
+#include "components/network/ble/bluetooth.hpp"
+#include "components/network/mesh/mesh_link.hpp"
 #include "config/config.hpp"
 #include "config/nvs_config_store.hpp"
 #include "expressions/expression_manager.hpp"
