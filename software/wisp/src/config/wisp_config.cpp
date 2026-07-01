@@ -1,8 +1,8 @@
-#include "WispConfig.h"
+#include "config/wisp_config.hpp"
 
 #include <algorithm>
 
-#include "WispZoneSelector.h"
+#include "config/zone_selector.hpp"
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 #include <freertos/FreeRTOS.h>

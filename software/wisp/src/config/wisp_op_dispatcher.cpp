@@ -1,11 +1,11 @@
-#include "WispOpDispatcher.h"
+#include "config/wisp_op_dispatcher.hpp"
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
-#include "StageBeacon.h"
-#include "WifiLink.h"
-#include "WispConfig.h"
+#include "net/stage_beacon.hpp"
+#include "net/wifi_link.hpp"
+#include "config/wisp_config.hpp"
 
 namespace wisp {
 

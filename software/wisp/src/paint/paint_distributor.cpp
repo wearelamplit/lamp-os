@@ -1,16 +1,16 @@
-#include "PaintDistributor.h"
+#include "paint/paint_distributor.hpp"
 
-#include "WispRoster.h"
+#include "fleet/wisp_roster.hpp"
 
 #include <Arduino.h>
 
 #include <cstring>
 
-#include "CurrentPalette.h"
-#include "LampInventory.h"
-#include "MeshLink.h"
-#include "TupleSampler.h"
-#include "lamp_protocol.hpp"
+#include "paint/current_palette.hpp"
+#include "fleet/lamp_inventory.hpp"
+#include "net/mesh_link.hpp"
+#include "paint/tuple_sampler.hpp"
+#include "wire/lamp_protocol.hpp"
 
 namespace wisp {
 

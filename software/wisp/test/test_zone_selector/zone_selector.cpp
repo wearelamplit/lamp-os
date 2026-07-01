@@ -1,5 +1,5 @@
 #include <unity.h>
-#include "WispZoneSelector.h"
+#include "config/zone_selector.hpp"
 
 void setUp() {}
 void tearDown() {}

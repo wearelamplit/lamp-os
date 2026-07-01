@@ -1,12 +1,12 @@
-#include "ArtnetEmitter.h"
+#include "artnet/artnet_emitter.hpp"
 
 #include <Arduino.h>
 #include <IPAddress.h>
 #include <WiFi.h>
 
-#include "CurrentPalette.h"
-#include "WifiLink.h"
-#include "artnet_frame.h"
+#include "paint/current_palette.hpp"
+#include "net/wifi_link.hpp"
+#include "artnet/artnet_frame.hpp"
 
 namespace wisp {
 

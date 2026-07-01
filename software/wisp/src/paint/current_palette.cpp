@@ -1,4 +1,4 @@
-#include "CurrentPalette.h"
+#include "paint/current_palette.hpp"
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 #include <freertos/FreeRTOS.h>

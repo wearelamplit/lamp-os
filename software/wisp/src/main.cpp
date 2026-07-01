@@ -3,25 +3,25 @@
 
 #include <cstring>
 
-#include "CurrentPalette.h"
-#include "LampInventory.h"
-#include "MeshLink.h"
-#include "PaintDistributor.h"
-#include "StatusBeacon.h"
-#include "WispRoster.h"
-#include "StatusRing.h"
-#include "WispConfig.h"
-#include "WispOpDispatcher.h"
-#include "WispZoneSelector.h"
+#include "paint/current_palette.hpp"
+#include "fleet/lamp_inventory.hpp"
+#include "net/mesh_link.hpp"
+#include "paint/paint_distributor.hpp"
+#include "status/status_beacon.hpp"
+#include "fleet/wisp_roster.hpp"
+#include "status/status_ring.hpp"
+#include "config/wisp_config.hpp"
+#include "config/wisp_op_dispatcher.hpp"
+#include "config/zone_selector.hpp"
 #include "aurora/AuroraPaletteClient.h"
-#include "lamp_protocol.hpp"
+#include "wire/lamp_protocol.hpp"
 
 #include <WiFi.h>
 #include <esp_wifi.h>
 
-#include "ArtnetEmitter.h"
-#include "StageBeacon.h"
-#include "WifiLink.h"
+#include "artnet/artnet_emitter.hpp"
+#include "net/stage_beacon.hpp"
+#include "net/wifi_link.hpp"
 
 namespace {
 

@@ -1,8 +1,8 @@
-#include "artnet_frame.h"
+#include "artnet/artnet_frame.hpp"
 
 #include <cstring>
 
-#include "TupleSampler.h"
+#include "paint/tuple_sampler.hpp"
 
 namespace wisp {
 

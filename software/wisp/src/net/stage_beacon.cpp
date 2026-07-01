@@ -1,11 +1,11 @@
-#include "StageBeacon.h"
+#include "net/stage_beacon.hpp"
 
 #include <Arduino.h>
 #include <NimBLEDevice.h>
 
 #include <vector>
 
-#include "WispConfig.h"
+#include "config/wisp_config.hpp"
 
 namespace wisp {
 

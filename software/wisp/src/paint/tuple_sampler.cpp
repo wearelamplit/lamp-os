@@ -1,4 +1,4 @@
-#include "TupleSampler.h"
+#include "paint/tuple_sampler.hpp"
 
 #include <cstdint>
 #include <vector>

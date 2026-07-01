@@ -1,4 +1,4 @@
-#include "status_json.hpp"
+#include "status/status_json.hpp"
 #include <ArduinoJson.h>
 
 namespace wisp {

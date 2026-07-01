@@ -9,7 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "CurrentPalette.h"
+#include "paint/current_palette.hpp"
 
 namespace wisp {
 

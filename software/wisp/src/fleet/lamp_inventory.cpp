@@ -1,4 +1,4 @@
-#include "LampInventory.h"
+#include "fleet/lamp_inventory.hpp"
 
 #include <Arduino.h>
 #include <freertos/FreeRTOS.h>

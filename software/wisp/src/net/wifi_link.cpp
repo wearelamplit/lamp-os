@@ -1,8 +1,8 @@
-#include "WifiLink.h"
+#include "net/wifi_link.hpp"
 
 #include <WiFi.h>
 
-#include "WispConfig.h"
+#include "config/wisp_config.hpp"
 
 namespace wisp {
 

@@ -1,19 +1,19 @@
-#include "StatusBeacon.h"
+#include "status/status_beacon.hpp"
 
 #include <Arduino.h>
 #include <WiFi.h>
 
 #include <cstring>
 
-#include "CurrentPalette.h"
-#include "MeshLink.h"
-#include "PaintDistributor.h"
-#include "WispConfig.h"
-#include "WispRoster.h"
-#include "WispZoneSelector.h"
+#include "paint/current_palette.hpp"
+#include "net/mesh_link.hpp"
+#include "paint/paint_distributor.hpp"
+#include "config/wisp_config.hpp"
+#include "fleet/wisp_roster.hpp"
+#include "config/zone_selector.hpp"
 #include "aurora/AuroraPaletteClient.h"
-#include "lamp_protocol.hpp"
-#include "status_json.hpp"
+#include "wire/lamp_protocol.hpp"
+#include "status/status_json.hpp"
 
 namespace wisp {
 
