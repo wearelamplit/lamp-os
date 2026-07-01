@@ -14,11 +14,9 @@ import '../../control/application/control_notifier.dart';
 import '../../control/application/control_state.dart';
 import '../../control/presentation/widgets/connecting_view.dart';
 import '../../control/presentation/widgets/disconnect_aware_body.dart';
-import '../../firmware/presentation/firmware_update_panel.dart';
 
-/// Info tab — Lamplit branding, firmware + app version footer, OTA panel,
-/// and the 5-tap-the-wordmark gesture that unlocks session-only advanced
-/// settings.
+/// Info tab — Lamplit branding, firmware + app version footer, and the
+/// 5-tap-the-wordmark gesture that unlocks session-only advanced settings.
 ///
 /// Lives as a dedicated tab so the About content isn't buried inside the
 /// Setup pane (where it had been folded as a Configuration drilldown
@@ -142,11 +140,8 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
           ),
         ),
         const SizedBox(height: AppSpace.xl),
-        FirmwareUpdatePanel(
-          deviceId: widget.lampId,
-          lampType: widget.state.lamp.lampType,
-        ),
-        const SizedBox(height: AppSpace.lg),
+        // Firmware OTA update panel is hidden while the push flow isn't
+        // reliable; the version line below still reports current firmware.
         Center(
           child: Text(
             fwLine,
