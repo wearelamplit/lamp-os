@@ -20,7 +20,7 @@
 #include "core/pending_slot_aggregate.hpp"
 #include "core/override_aggregate.hpp"
 #include "core/ota_quiet_mode.hpp"
-#include "bluetooth.hpp"
+#include "ble_gap.hpp"
 #include "crypto.hpp"
 #include "components/network/ble/gatt_layout.hpp"
 #include "expressions/expression_manager.hpp"
