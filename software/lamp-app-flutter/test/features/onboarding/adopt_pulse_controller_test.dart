@@ -37,8 +37,8 @@ void main() {
         expect(payload['a'], equals('test_expression'));
         expect(payload['type'], equals('pulse'));
         expect(payload['target'], equals(2));
-        expect(payload['colors'], isA<List<dynamic>>());
-        expect((payload['colors'] as List<dynamic>).first, isA<String>());
+        // Full shade colour, not a washed-out version — visibility.
+        expect((payload['colors'] as List<dynamic>).first, equals(shade.toHex()));
 
         ctrl.stop();
         async.flushMicrotasks();

@@ -5,13 +5,13 @@ import 'dart:typed_data';
 import '../../../core/ble/ble_client.dart';
 import '../../../core/ble/uuids.dart';
 import '../../control/domain/lamp_color.dart';
-import 'identify_color.dart';
 
-/// Connects to an unclaimed lamp and re-fires a `pulse` test_expression in a
-/// washed-out version of the lamp's shade colour on the BASE strip, so the
-/// physical lamp pulses for identification. The firmware runs a transient
-/// colored pulse expression from the payload (composes on top of wisp paint).
-/// All writes best-effort; [stop] idempotent.
+/// Connects to an unclaimed lamp and re-fires a `pulse` test_expression in the
+/// lamp's own shade colour on the BASE strip, so the physical lamp pulses for
+/// identification. Pulse is used (not breathing) because it doesn't yield to
+/// wisp paint — the identify has to win over an active show. The firmware runs
+/// a transient colored pulse from the payload. All writes best-effort; [stop]
+/// idempotent.
 class AdoptPulseController {
   AdoptPulseController(this._ble);
   final BleClient _ble;
@@ -24,13 +24,12 @@ class AdoptPulseController {
     _timer?.cancel();
     _deviceId = deviceId;
     _stopped = false;
-    final color = washedOutBright(shadeColor);
     await _connectWithRetry(deviceId);
     if (_stopped) return;
-    await _writePulse(deviceId, color);
+    await _writePulse(deviceId, shadeColor);
     if (_stopped) return;
     _timer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
-      unawaited(_writePulse(deviceId, color));
+      unawaited(_writePulse(deviceId, shadeColor));
     });
   }
 
@@ -66,7 +65,7 @@ class AdoptPulseController {
     try {
       final payload = jsonEncode({
         'a': 'test_expression',
-        'type': 'pulse',
+        'type': 'pulse',             // pulse draws over wisp paint; breathing yields to it
         'target': 2,                 // base strip
         'colors': [color.toHex()],   // firmware seeds a transient pulse with these
       });
@@ -74,4 +73,5 @@ class AdoptPulseController {
           Uint8List.fromList(utf8.encode(payload)), withoutResponse: true);
     } catch (_) {}
   }
+
 }

@@ -68,7 +68,7 @@ void main() {
     expect(find.text('Found your stray?'), findsOneWidget);
     expect(
       find.text(
-        'The one blinking at you is the stray you tapped. Take it in?',
+        'The one glowing at you is the stray you tapped. Take it in?',
       ),
       findsOneWidget,
     );
