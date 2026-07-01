@@ -107,7 +107,7 @@ uint32_t range(uint32_t lo, uint32_t hi); // unbiased, inclusive [lo, hi]
 
 ## Mesh / peer queries
 
-### `NearbyLamps` — `components/network/nearby_lamps.hpp`
+### `NearbyLamps` — `components/network/mesh/nearby_lamps.hpp`
 Live roster of lamps this one can currently see. Global singleton
 `lamp::nearbyLamps`; also reachable as `behaviorContext()->nearbyLamps`
 (null-check that pointer). Use this for "who's around" / "react when a

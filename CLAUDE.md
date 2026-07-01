@@ -37,7 +37,8 @@ The mesh wire format carries a **receive range**, not a single version:
 multi-version OTA wave. MSG_EVENT gossip-relays, DedupRing capacity is 64,
 HELLO interval is 5 s. v0x04 widened the FW channel slot to 16 bytes for
 per-variant OTA gating (`{type}-{channel}`); v0x05 added a TLV trailer to
-HELLO + WISP_HELLO (current TLV: `HELLO_TLV_OTA_STATE`). Unknown TLVs are
+HELLO + WISP_HELLO (TLVs: `HELLO_TLV_OTA_STATE`, `HELLO_TLV_FW_CHANNEL`,
+`HELLO_TLV_FS_STATE`). Unknown TLVs are
 silently skipped (forward-compat). Cross-version mismatch fails loud (peers
 don't show up).
 
@@ -60,7 +61,7 @@ conflicts with our app-layer AES-GCM auth, and `clearGattCache()` /
 instead:
 
 - `kGattLayout` / `kGattSchemaVersion` in
-  `components/network/gatt_layout.hpp` are the single source of truth.
+  `components/network/ble/gatt_layout.hpp` are the single source of truth.
   `CHAR_SCHEMA_VERSION` exposes the version on the wire (read-only, single
   byte; absent on legacy lamps that predate it). No app consumer reads it
   yet — that lands with the first feature that gates on the version.

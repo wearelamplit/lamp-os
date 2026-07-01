@@ -93,5 +93,5 @@ protocol layered on top.
 ## References
 
 - `docs/dev/networking.md` — authoritative wire-format reference.
-- `software/lamp-os/src/components/network/lamp_protocol.hpp` (+ wisp mirror).
+- `software/lamp-os/src/components/network/protocol/lamp_protocol.hpp` (+ wisp mirror).
 - ADR 0002 — OTA over this mesh.

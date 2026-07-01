@@ -317,7 +317,7 @@ impossible, no registry or allowlist needed. The signing chain enforces it.
 | `core/animated_behavior.hpp` | STABLE, base class for custom behaviors |
 | `core/behavior_context.hpp` | STABLE-ADDITIVE, new nullable pointers may be added; existing pointers won't be removed |
 | `core/personality_engine.hpp` | STABLE, personality gate for expression suppression |
-| `components/network/nearby_lamps.hpp` | STABLE, read by custom behaviors |
+| `components/network/mesh/nearby_lamps.hpp` | STABLE, read by custom behaviors |
 | `config/config.hpp` | STABLE, read-only surface for custom behaviors |
 
 ### Internal headers: may change without notice
