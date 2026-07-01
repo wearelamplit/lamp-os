@@ -130,8 +130,8 @@ class WispRepository {
     });
   }
 
-  /// Color Drift: commit a new drift interval and fade percentage. The wisp
-  /// persists both in NVS and restarts the drift engine at the new rate.
+  /// Commit a new drift interval and fade percentage. The wisp persists both
+  /// in NVS and restarts the drift engine at the new rate.
   Future<void> setDrift(int intervalMs, int fadePct) async {
     await _writeOp({
       'char': 'wispOp',

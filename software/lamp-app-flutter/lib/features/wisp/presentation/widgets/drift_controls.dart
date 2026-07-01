@@ -16,9 +16,8 @@ int posToMs(double p) =>
 /// Inverse of [posToMs]: milliseconds → slider position [0..1].
 double msToPos(int ms) => log(ms / 30000.0) / log(120.0);
 
-/// Two-slider panel for drift settings: "How often" (log scale) and
-/// "Fade" (linear 0–100%). Seeded from the current [WispStatus] in
-/// initState; wires to notifier.setDrift / flushDrift.
+/// Two-slider drift panel. Pass the wisp's current [status] for initial
+/// slider positions and [lampId] to route writes.
 class DriftControls extends ConsumerStatefulWidget {
   const DriftControls({
     super.key,
@@ -34,6 +33,9 @@ class DriftControls extends ConsumerStatefulWidget {
 }
 
 class _DriftControlsState extends ConsumerState<DriftControls> {
+  // Local slider state is authoritative after mount; the wisp echoes back
+  // what we write, so a re-seed on every status change would fight an
+  // in-progress drag.
   late double _pos;
   late int _fadePct;
 

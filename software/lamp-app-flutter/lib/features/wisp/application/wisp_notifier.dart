@@ -396,16 +396,15 @@ class WispNotifier extends _$WispNotifier {
     }
   }
 
-  /// Store the pending drift pair and (re)start a [_driftDebounce] trailing-edge
-  /// timer. Continuous slider drags collapse to one write per window.
+  /// Debounce slider drags to one write per [_driftDebounce] window.
   void setDrift(int intervalMs, int fadePct) {
     _pendingDrift = (intervalMs, fadePct);
     _driftWriteTimer?.cancel();
     _driftWriteTimer = Timer(_driftDebounce, () => unawaited(_flushDrift()));
   }
 
-  /// Cancel the pending timer and write immediately. Call on slider release
-  /// so the final value lands without waiting for the debounce window.
+  /// Call on slider release so the final value lands without waiting for the
+  /// debounce window.
   void flushDrift() {
     _driftWriteTimer?.cancel();
     _driftWriteTimer = null;
