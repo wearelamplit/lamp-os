@@ -190,6 +190,23 @@ void test_override_colors_reserved_source_byte_rejected_by_parser() {
   TEST_ASSERT_FALSE(lp::parseOverrideColors(buf, n, out));
 }
 
+void test_override_colors_fade_uint32_roundtrip() {
+  uint8_t buf[lp::OVERRIDE_COLORS_FIXED_SIZE + 8];
+  const uint8_t two[8] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};
+  const size_t n = lp::buildOverrideColors(buf, sizeof(buf), 5, kSrcMac, kTargetMac,
+                                           lp::OverrideSurface::BaseAndShade,
+                                           lp::OverrideSource::Wisp,
+                                           200000u,
+                                           two, 2);
+  TEST_ASSERT_GREATER_THAN_UINT32(0, n);
+  lp::ParsedOverrideColors out;
+  TEST_ASSERT_TRUE(lp::parseOverrideColors(buf, n, out));
+  TEST_ASSERT_EQUAL_UINT32(200000u, out.fadeDurationMs);
+  TEST_ASSERT_EQUAL_UINT8(2, out.numColors);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(two,      out.colors[0], 4);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(&two[4],  out.colors[1], 4);
+}
+
 void test_override_colors_length_mismatch_rejected_by_parser() {
   uint8_t buf[lp::OVERRIDE_COLORS_FIXED_SIZE + 8];
   const uint8_t two[8] = {1, 2, 3, 4, 5, 6, 7, 8};
@@ -812,6 +829,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_hello_tlv_with_oversized_length_is_rejected);
 
   RUN_TEST(test_override_colors_roundtrip_min_and_max);
+  RUN_TEST(test_override_colors_fade_uint32_roundtrip);
   RUN_TEST(test_override_colors_zero_numcolors_rejected_by_builder);
   RUN_TEST(test_override_colors_over_max_rejected_by_builder);
   RUN_TEST(test_override_colors_unknown_surface_byte_rejected_by_parser);

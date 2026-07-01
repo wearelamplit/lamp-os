@@ -185,14 +185,15 @@ All four override/restore messages share the same header layout (`sourceMac + ta
 **`MSG_OVERRIDE_COLORS` (0x21)**, Push transient colors onto a renderable surface.
 ```
 header(6) + sourceMac(6) + targetMac(6) +
-surface(1) + sourceKind(1) + fadeDurationMs(2 LE) +
+surface(1) + sourceKind(1) + fadeDurationMs(4 LE) +
 numColors(1) + colors[numColors × 4 RGBW]
-= 23 + 4N bytes (= 31 for N=2)
+= 25 + 4N bytes (= 33 for N=2)
 
 surface:        0x01 Base, 0x02 Shade, 0x03 BaseAndShade
 sourceKind:     0x01 Wisp, 0x10+ user-defined
-fadeDurationMs: u16 0..65535. 0 = instant snap; otherwise lamp-side
+fadeDurationMs: u32 LE. 0 = instant snap; otherwise lamp-side
                 duration-controlled fade via ConfiguratorBehavior.
+                Range up to ~1hr (3,600,000 ms) for wisp color-drift fades.
 numColors:      1..8 (kMaxOverrideColorsPerFrame, single source of truth)
 
 surface = 0x03 (BaseAndShade) carries TWO RGBW colors in a single frame:
