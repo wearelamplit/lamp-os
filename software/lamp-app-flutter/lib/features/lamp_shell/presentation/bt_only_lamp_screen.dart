@@ -112,7 +112,7 @@ class _BtOnlyLampScreenState extends ConsumerState<BtOnlyLampScreen> {
           children: [
             Text(
               "This lamp is in Bluetooth range but the app can't talk to "
-              "it directly — its firmware doesn't speak the app's mesh "
+              "it directly. Its firmware doesn't speak the app's mesh "
               "protocol yet.",
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 height: 1.4,
@@ -210,7 +210,7 @@ class _ActionCard extends StatelessWidget {
                   await Clipboard.setData(ClipboardData(text: url));
                   if (context.mounted) {
                     AppSnackbar.info(
-                      context, "Couldn't open — copied $url instead",
+                      context, "Couldn't open. Copied $url instead",
                     );
                   }
                 }

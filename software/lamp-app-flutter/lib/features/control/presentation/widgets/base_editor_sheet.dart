@@ -78,7 +78,7 @@ class _BaseEditorSheetState extends ConsumerState<BaseEditorSheet> {
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Couldn't save — disconnected")),
+        const SnackBar(content: Text("Couldn't save: disconnected")),
       );
       return;
     }

@@ -352,7 +352,7 @@ class _FirmwareInfo extends StatelessWidget {
 
     final buf = StringBuffer();
     if (version.isEmpty) {
-      buf.write('—');
+      buf.write('-');
     } else {
       buf.write(version);
       if (channel.isNotEmpty) buf..write('-')..write(channel);
@@ -414,7 +414,7 @@ Future<bool> _confirmRemoveDialog(BuildContext context, String lampName) async {
       title: const Text('Remove this lamp?'),
       content: Text(
         '$lampName will be removed from your lamps on this phone. '
-        "The lamp itself keeps its name, password, and Wi-Fi — you can "
+        "The lamp itself keeps its name, password, and Wi-Fi. You can "
         'add it back later from the picker.',
       ),
       actions: [

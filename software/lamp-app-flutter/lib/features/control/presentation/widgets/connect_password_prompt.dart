@@ -47,7 +47,7 @@ class _ConnectPasswordPromptState
               .submitConnectPassword(pw);
           return null; // success — notifier triggers a rebuild
         } on LampAuthRequiredException {
-          return ('Wrong password — try again.', null);
+          return ('Wrong password. Try again.', null);
         } catch (e) {
           return (
             "Your lamp didn't answer. Bring your phone closer and try again.",

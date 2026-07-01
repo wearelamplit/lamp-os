@@ -270,7 +270,7 @@ class AddLampNotifier extends _$AddLampNotifier {
         status: AddLampStatus.error,
         step: AddLampStep.password,
         error: AddLampError.wrongPassword,
-        errorMessage: "Wrong password — the lamp did not accept it.",
+        errorMessage: "Wrong password. The lamp did not accept it.",
       );
       return;
     } catch (_) {

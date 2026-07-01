@@ -21,7 +21,7 @@ Future<void> _confirmSkip(BuildContext context, AddLampNotifier notifier) async 
       title: const Text('Adopt without a password?'),
       content: const Text(
         "Anyone within Bluetooth range will be able to play with this lamp. "
-        "You can set a password later from the Setup tab — but it's safer to "
+        "You can set a password later from the Setup tab, but it's safer to "
         'pick one now.',
       ),
       actions: [
@@ -98,7 +98,7 @@ class _AddLampPasswordStepState extends ConsumerState<AddLampPasswordStep> {
             if (state.error == AddLampError.wrongPassword) ...[
               const SizedBox(height: AppSpace.sm),
               Text(
-                "That password didn't match — try once more.",
+                "That password didn't match. Try once more.",
                 style: textTheme.bodyMedium?.copyWith(color: colorScheme.error),
                 textAlign: TextAlign.center,
               ),
@@ -135,9 +135,9 @@ class _AddLampPasswordStepState extends ConsumerState<AddLampPasswordStep> {
                 padding: const EdgeInsets.only(bottom: AppSpace.md),
                 child: FriendlyError.inline(
                   title: state.error == AddLampError.connectFailed
-                      ? "Your lamp drifted off — bring your phone closer "
+                      ? "Your lamp drifted off. Bring your phone closer "
                           'and try again.'
-                      : "Adoption didn't go through — try once more.",
+                      : "Adoption didn't go through. Try once more.",
                   rawError: state.errorMessage,
                 ),
               ),

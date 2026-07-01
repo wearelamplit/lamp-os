@@ -136,11 +136,11 @@ class _HomeModeScreenState extends ConsumerState<HomeModeScreen> {
             children: [
               const InfoPanel(
                 child: Text(
-                  'Home Mode quiets the lamp for everyday use — when the '
+                  'Home Mode quiets the lamp for everyday use. When the '
                   'lamp sees your home Wi-Fi nearby it pauses social '
                   'greetings and switches to a calmer brightness. The '
                   "lamp doesn't connect to the network or store its "
-                  'password — it just listens for the name in the air.',
+                  'password. It just listens for the name in the air.',
                 ),
               ),
               const SizedBox(height: AppSpace.lg),

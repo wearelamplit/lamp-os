@@ -64,7 +64,7 @@ class _ShadeEditorSheetState extends ConsumerState<ShadeEditorSheet> {
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Couldn't save — disconnected")),
+        const SnackBar(content: Text("Couldn't save: disconnected")),
       );
       return;
     }

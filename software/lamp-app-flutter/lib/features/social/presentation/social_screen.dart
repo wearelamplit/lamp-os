@@ -139,7 +139,7 @@ class SocialScreen extends ConsumerWidget {
           padding: const EdgeInsets.symmetric(horizontal: AppSpace.xs),
           child: Text(
             'Lamps notice the company they keep. How this one greets, '
-            'glows, and settles shifts a little with the lamps it meets — '
+            'glows, and settles shifts a little with the lamps it meets, '
             'and with how it feels about each of them.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               fontStyle: FontStyle.italic,

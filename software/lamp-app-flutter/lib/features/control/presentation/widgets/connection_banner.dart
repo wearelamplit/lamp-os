@@ -37,7 +37,7 @@ class ConnectionBanner extends StatelessWidget {
             Expanded(
               child: Text(
                 attempt <= 1
-                    ? 'Lamp dropped out — reconnecting…'
+                    ? 'Lamp dropped out. Reconnecting…'
                     : 'Reconnecting (attempt $attempt)…',
                 style: Theme.of(context)
                     .textTheme

@@ -124,7 +124,7 @@ class _WifiSetupCard extends StatelessWidget {
           ),
           const SizedBox(height: AppSpace.sm),
           Text(
-            "Put this lamp on Wi-Fi and they'll join the mesh — chatting "
+            "Put this lamp on Wi-Fi and they'll join the mesh, chatting "
             'with your other lamps and accepting wireless updates.',
             style: textTheme.bodySmall,
           ),
@@ -137,7 +137,7 @@ class _WifiSetupCard extends StatelessWidget {
           ),
           const _NumberedStep(
             n: 2,
-            text: "Open a browser and visit http://192.168.4.1 — that's "
+            text: "Open a browser and visit http://192.168.4.1. That's "
                 "the lamp's own setup page.",
           ),
           const _NumberedStep(

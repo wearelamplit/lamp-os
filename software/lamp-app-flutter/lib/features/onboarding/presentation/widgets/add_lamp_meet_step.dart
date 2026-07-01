@@ -50,7 +50,7 @@ class AddLampMeetStep extends ConsumerWidget {
             ),
             const SizedBox(height: AppSpace.md),
             Text(
-              "Your stray's waking up — give it a few seconds to find its feet.",
+              "Your stray's waking up. Give it a few seconds to find its feet.",
               textAlign: TextAlign.center,
               style: textTheme.bodyMedium,
             ),
@@ -58,7 +58,7 @@ class AddLampMeetStep extends ConsumerWidget {
             Text(
               "From here it's in your care. Help it find its colors, base and "
               'shade, and coax out the little moods and pulses it likes to move '
-              "through. Introduce it around, too — it'll make its own friends "
+              "through. Introduce it around, too. It'll make its own friends "
               'among the other lamps, warming from salty to smitten in its own '
               'time.',
               textAlign: TextAlign.center,
@@ -67,7 +67,7 @@ class AddLampMeetStep extends ConsumerWidget {
             const Spacer(),
             if (failed) ...[
               FriendlyError.inline(
-                title: "This is taking longer than expected — make sure the "
+                title: "This is taking longer than expected. Make sure the "
                     "lamp has power and your phone's close.",
                 rawError: state.errorMessage,
               ),

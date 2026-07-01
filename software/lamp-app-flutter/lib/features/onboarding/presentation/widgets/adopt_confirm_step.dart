@@ -127,7 +127,7 @@ class _AdoptConfirmStepState extends ConsumerState<AdoptConfirmStep>
               if (_error != null) ...[
                 const SizedBox(height: AppSpace.md),
                 FriendlyError.inline(
-                  title: "Couldn't reach it — move closer",
+                  title: "Couldn't reach it. Move closer",
                   rawError: _error,
                 ),
                 const SizedBox(height: AppSpace.sm),
