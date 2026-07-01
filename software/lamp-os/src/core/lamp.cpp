@@ -1029,15 +1029,18 @@ void lamp::Lamp::setup() {
 
   // First-ever-boot housekeeping, persisted once so it sticks across reboots:
   //  - Random color per surface so lamps aren't visually identical out of the
-  //    box (each picks an independent hue).
+  //    box. Shade hue is offset from base by [60,300]°, keeping the two at
+  //    least 60° apart on the wheel so a lamp never boots base≈shade.
   //  - Migrate already-configured lamps (custom name OR a control password)
   //    onto the explicit `setup` flag, so the fielded fleet isn't treated as
   //    unconfigured after taking this firmware.
   bool persistFirstBoot = false;
   if (!config.lamp.colorsRandomized) {
     FastRng rng;
-    config.base.colors = {colorFromHue(rng.range(0, 359))};
-    config.shade.colors = {colorFromHue(rng.range(0, 359))};
+    int baseHue = rng.range(0, 359);
+    int shadeHue = (baseHue + rng.range(60, 300)) % 360;
+    config.base.colors = {colorFromHue(baseHue)};
+    config.shade.colors = {colorFromHue(shadeHue)};
     config.base.ac = 0;
     config.lamp.colorsRandomized = true;
     persistFirstBoot = true;
