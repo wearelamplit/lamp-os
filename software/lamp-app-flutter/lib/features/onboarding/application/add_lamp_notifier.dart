@@ -77,9 +77,10 @@ class AddLampNotifier extends _$AddLampNotifier {
   /// state onto — or hammering BLE for — a wizard the user already left.
   int _verifyGen = 0;
 
-  /// Still the live verify generation AND the provider is mounted. Checked at
-  /// every await boundary in the background verify so a cancelled or
-  /// superseded run stops touching state and the BLE stack.
+  /// Still the live generation AND the provider is mounted. Checked after every
+  /// await in submit()/the background verify so a cancelled or superseded run
+  /// stops writing state (an already-issued BLE op may still resolve, but its
+  /// continuation bails at the next check).
   bool _active(int gen) => ref.mounted && gen == _verifyGen;
 
   @override
@@ -139,6 +140,12 @@ class AddLampNotifier extends _$AddLampNotifier {
       error: AddLampError.none,
       errorMessage: null,
     );
+    // One generation for the whole claim→verify chain. reset() (fired from the
+    // shell's dispose when the user leaves) bumps it, so a leave mid-claim
+    // bails at the next _active(gen) check — before building the claim blob
+    // from reset state (which would write a blank-password {setup:true} to the
+    // lamp) or re-arming the verify.
+    final gen = ++_verifyGen;
     final ble = ref.read(bleClientProvider);
 
     // Step 0: open the BLE link. select() deliberately doesn't connect
@@ -154,7 +161,7 @@ class AddLampNotifier extends _$AddLampNotifier {
         backoff: const Duration(milliseconds: 1500),
       );
     } catch (e) {
-      if (!ref.mounted) return;
+      if (!_active(gen)) return;
       state = state.copyWith(
         step: AddLampStep.password,
         status: AddLampStatus.error,
@@ -163,7 +170,7 @@ class AddLampNotifier extends _$AddLampNotifier {
       );
       return;
     }
-    if (!ref.mounted) return;
+    if (!_active(gen)) return;
 
     // Step 1: claim. Writes a single plaintext settings_blob to the
     // control service carrying the new lamp.password + lamp.name. The
@@ -212,7 +219,7 @@ class AddLampNotifier extends _$AddLampNotifier {
         if (!isBleDisconnectError(e)) rethrow;
       }
     } catch (e) {
-      if (!ref.mounted) return;
+      if (!_active(gen)) return;
       state = state.copyWith(
         step: AddLampStep.password,
         status: AddLampStatus.error,
@@ -221,14 +228,14 @@ class AddLampNotifier extends _$AddLampNotifier {
       );
       return;
     }
-    if (!ref.mounted) return;
+    if (!_active(gen)) return;
 
     // Step 2: claim landed; the lamp is rebooting. We're already on the Meet
     // pane — reconnect + verify in the BACKGROUND so the user reads about
     // their lamp while it restarts. The pane's Continue enables when status
     // flips to `ready`; failures surface inline (or route back for a wrong
     // password).
-    verifyDone = _reconnectAndVerify(++_verifyGen);
+    verifyDone = _reconnectAndVerify(gen);
   }
 
   /// Reboot-wait → reconnect-with-retry → (password path only) auth + a

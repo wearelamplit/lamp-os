@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lamp_app/core/ble/ble_client.dart';
 import '../../_support/in_memory_ble_client.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
+import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/features/inventory/application/active_lamp_notifier.dart';
 import 'package:lamp_app/features/inventory/application/inventory_notifier.dart';
 import 'package:lamp_app/features/onboarding/application/add_lamp_notifier.dart';
@@ -299,6 +300,35 @@ void main() {
         reason: 'timeout must surface as recoverable connectFailed');
   });
 
+  test('leaving mid-claim aborts before the claim write — no blank blob',
+      () async {
+    // The user taps Close during the ~1-3s claim window. reset() (via the
+    // shell's dispose) fires while submit() awaits the step-0 connect; submit
+    // must bail before building the claim blob from the now-empty state, which
+    // would otherwise write {password:'', name:'', setup:true} to the lamp.
+    late AddLampNotifier n;
+    final ble = _ResetDuringClaimBleClient(() => n.reset());
+    final c = ProviderContainer(
+      overrides: [bleClientProvider.overrideWithValue(ble)],
+    );
+    addTearDown(c.dispose);
+    await c.read(inventoryNotifierProvider.future);
+    await c.read(activeLampNotifierProvider.future);
+
+    n = c.read(addLampNotifierProvider.notifier);
+    n.select('dev1');
+    n.setName('jacko');
+    n.setPassword('secret');
+    await n.submit();
+
+    expect(ble.writes, isNot(contains(BleUuids.settingsBlob)),
+        reason: 'must not write the claim blob after the user left');
+    final s = c.read(addLampNotifierProvider);
+    expect(s.step, AddLampStep.scan,
+        reason: 'reset returned the wizard to scan; submit must not clobber it');
+    expect(s.deviceId, isEmpty);
+  });
+
   test('reset() cancels the in-flight verify — no state write after leaving',
       () async {
     // Regression for the orphaned-verify bug: the provider is keepAlive, so
@@ -465,6 +495,65 @@ class _HangingBleClient implements BleClient {
   Future<void> cycleAdapter(String deviceId) async {
     _connected.remove(deviceId);
   }
+}
+
+/// Fires [onFirstConnect] during the step-0 claim connect, so a test can
+/// simulate the user leaving the wizard (reset()) mid-claim. Records the
+/// characteristic UUIDs written so the test can assert the claim blob was
+/// never sent.
+class _ResetDuringClaimBleClient implements BleClient {
+  _ResetDuringClaimBleClient(this.onFirstConnect);
+
+  final void Function() onFirstConnect;
+  int _connectCount = 0;
+  final List<String> writes = [];
+  final Set<String> _connected = {};
+
+  @override
+  Future<void> prewarm(String deviceId) async {}
+
+  @override
+  Future<void> connect(String deviceId) async {
+    _connectCount++;
+    if (_connectCount == 1) onFirstConnect();
+    _connected.add(deviceId);
+  }
+
+  @override
+  Future<void> disconnect(String deviceId) async => _connected.remove(deviceId);
+
+  @override
+  bool isConnected(String deviceId) => _connected.contains(deviceId);
+
+  @override
+  Future<Uint8List> read(String d, String s, String c) async => Uint8List(0);
+
+  @override
+  Future<Uint8List> readSection(String deviceId, String name) async =>
+      Uint8List(0);
+
+  @override
+  Future<void> write(
+    String d,
+    String s,
+    String c,
+    Uint8List v, {
+    bool withoutResponse = false,
+    bool allowLongWrite = false,
+  }) async {
+    writes.add(c);
+  }
+
+  @override
+  Stream<Uint8List> subscribe(String d, String s, String c) =>
+      const Stream.empty();
+
+  @override
+  Stream<bool> watchConnected(String deviceId) =>
+      Stream.value(_connected.contains(deviceId));
+
+  @override
+  Future<void> cycleAdapter(String deviceId) async => _connected.remove(deviceId);
 }
 
 /// Fails every verify-phase reconnect until [recovered] is set, then connects
