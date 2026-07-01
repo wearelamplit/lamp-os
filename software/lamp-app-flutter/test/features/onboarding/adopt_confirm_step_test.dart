@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -44,6 +45,22 @@ void main() {
         ),
       );
 
+  // Seeded lamp: baseRgb=0xFF8000 → #FF800000, shadeRgb=0x000000 → black.
+  // stop() restores base → last baseColors write is '["#FF800000"]'.
+  // stop() closes editSession → last editSession write is [0x01, 0].
+  void expectCleanStop(InMemoryBleClient ble) {
+    final sessions = ble.writesTo(deviceId, BleUuids.editSession);
+    expect(sessions, isNotEmpty);
+    expect(sessions.last, equals(Uint8List.fromList([0x01, 0])));
+
+    final bases = ble.writesTo(deviceId, BleUuids.baseColors);
+    expect(bases, isNotEmpty);
+    final lastBase = jsonDecode(utf8.decode(bases.last)) as List;
+    expect(lastBase.first, equals('#FF800000'));
+
+    expect(ble.isConnected(deviceId), isFalse);
+  }
+
   testWidgets('renders title, body, and Adopt/Cancel buttons', (tester) async {
     final ble = InMemoryBleClient();
     final c = makeContainer(ble);
@@ -64,7 +81,7 @@ void main() {
     expect(find.text('Cancel'), findsOneWidget);
   });
 
-  testWidgets('expressionTest write fires on first frame — pulse started',
+  testWidgets('baseColors write fires on first frame — pulse started',
       (tester) async {
     final ble = InMemoryBleClient();
     final c = makeContainer(ble);
@@ -74,16 +91,14 @@ void main() {
     await tester.pumpWidget(wrap(c));
     await tester.pump();
 
-    final writes = ble.writesTo(deviceId, BleUuids.expressionTest);
+    final writes = ble.writesTo(deviceId, BleUuids.baseColors);
     expect(writes, isNotEmpty);
-    final payload =
-        jsonDecode(utf8.decode(writes.first)) as Map<String, dynamic>;
-    expect(payload['a'], 'test_expression');
-    expect(payload['type'], 'pulse');
+    final payload = jsonDecode(utf8.decode(writes.first)) as List;
+    expect(payload.first, isA<String>());
   });
 
   testWidgets(
-    'Cancel sends complete-write, disconnects, returns to scan',
+    'Cancel restores base, closes editSession, disconnects, returns to scan',
     (tester) async {
       final ble = InMemoryBleClient();
       final c = makeContainer(ble);
@@ -96,17 +111,13 @@ void main() {
       await tester.tap(find.text('Cancel'));
       await tester.pump();
 
-      final writes = ble.writesTo(deviceId, BleUuids.expressionTest);
-      final last =
-          jsonDecode(utf8.decode(writes.last)) as Map<String, dynamic>;
-      expect(last['a'], 'test_expression_complete');
-      expect(ble.isConnected(deviceId), isFalse);
+      expectCleanStop(ble);
       expect(c.read(addLampNotifierProvider).step, AddLampStep.scan);
     },
   );
 
   testWidgets(
-    'system-back sends complete-write and disconnects',
+    'system-back restores base, closes editSession, disconnects',
     (tester) async {
       final ble = InMemoryBleClient();
       final c = makeContainer(ble);
@@ -121,16 +132,12 @@ void main() {
       await tester.binding.handlePopRoute();
       await tester.pump();
 
-      final writes = ble.writesTo(deviceId, BleUuids.expressionTest);
-      final last =
-          jsonDecode(utf8.decode(writes.last)) as Map<String, dynamic>;
-      expect(last['a'], 'test_expression_complete');
-      expect(ble.isConnected(deviceId), isFalse);
+      expectCleanStop(ble);
     },
   );
 
   testWidgets(
-    'widget dispose sends complete-write and disconnects',
+    'widget dispose restores base, closes editSession, disconnects',
     (tester) async {
       final ble = InMemoryBleClient();
       final c = makeContainer(ble);
@@ -147,17 +154,12 @@ void main() {
       );
       await tester.pump(); // drain stop()'s async write + disconnect
 
-      final writes = ble.writesTo(deviceId, BleUuids.expressionTest);
-      expect(writes, isNotEmpty);
-      final last =
-          jsonDecode(utf8.decode(writes.last)) as Map<String, dynamic>;
-      expect(last['a'], 'test_expression_complete');
-      expect(ble.isConnected(deviceId), isFalse);
+      expectCleanStop(ble);
     },
   );
 
   testWidgets(
-    'Adopt sends complete-write, disconnects, advances to name',
+    'Adopt restores base, closes editSession, disconnects, advances to name',
     (tester) async {
       final ble = InMemoryBleClient();
       final c = makeContainer(ble);
@@ -170,11 +172,7 @@ void main() {
       await tester.tap(find.text('Adopt'));
       await tester.pump();
 
-      final writes = ble.writesTo(deviceId, BleUuids.expressionTest);
-      final last =
-          jsonDecode(utf8.decode(writes.last)) as Map<String, dynamic>;
-      expect(last['a'], 'test_expression_complete');
-      expect(ble.isConnected(deviceId), isFalse);
+      expectCleanStop(ble);
       expect(c.read(addLampNotifierProvider).step, AddLampStep.name);
     },
   );

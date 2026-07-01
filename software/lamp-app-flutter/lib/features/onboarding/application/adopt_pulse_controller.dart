@@ -7,40 +7,61 @@ import '../../../core/ble/uuids.dart';
 import '../../control/domain/lamp_color.dart';
 import 'identify_color.dart';
 
-/// Connects to an unclaimed lamp, fires a washed-out `pulse` expression on a
-/// repeat timer so the physical lamp pulses for identification, and cleans up
-/// on [stop].
-///
-/// All BLE writes are best-effort — a dropped write does not crash the
-/// controller. [stop] is idempotent.
+/// Connects to an unclaimed lamp and pulses its BASE strip in a washed-out
+/// version of the lamp's SHADE colour, to identify it during adopt-confirm.
+/// Drives the base-colours characteristic directly (a factory lamp accepts it
+/// unauthenticated) and claims the base edit-session so a wisp's paint doesn't
+/// override the pulse. Restores the original base colour + releases the
+/// session on [stop]. All writes best-effort; [stop] idempotent.
 class AdoptPulseController {
   AdoptPulseController(this._ble);
-
   final BleClient _ble;
 
+  static const int _editBaseBit = 0x01;
+
   String? _deviceId;
+  LampColor? _restoreBase;
   Timer? _timer;
   bool _stopped = false;
 
-  Future<void> start(String deviceId, LampColor baseColor) async {
+  Future<void> start(
+      String deviceId, LampColor shadeColor, LampColor baseColor) async {
     _timer?.cancel();
     _deviceId = deviceId;
+    _restoreBase = baseColor;
     _stopped = false;
-    final washed = washedOutBright(baseColor);
+    final bright = washedOutBright(shadeColor);
+    final dim = _dim(bright);
     await _connectWithRetry(deviceId);
     if (_stopped) return;
-    await _writePulse(deviceId, washed);
+    // Claim the base surface so a wisp's paint doesn't override the pulse.
+    await _writeEditSession(deviceId, open: true);
     if (_stopped) return;
-    _timer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
-      unawaited(_writePulse(deviceId, washed));
+    var on = true;
+    await _writeBase(deviceId, bright);
+    _timer = Timer.periodic(const Duration(milliseconds: 600), (_) {
+      on = !on;
+      unawaited(_writeBase(deviceId, on ? bright : dim));
     });
   }
 
-  /// Android intermittently fails a GATT connect with GATT_ERROR(133),
-  /// especially right after scanning in a crowded BLE environment (many
-  /// lamps advertising + mesh). The same race [AddLampNotifier.submit]
-  /// handles with a single retry — the pulse is best-effort identification,
-  /// so retry a few times with a short backoff, bailing if [stop] ran.
+  Future<void> stop() async {
+    if (_stopped) return;
+    _stopped = true;
+    _timer?.cancel();
+    _timer = null;
+    final deviceId = _deviceId;
+    if (deviceId == null) return;
+    final restore = _restoreBase;
+    if (restore != null) {
+      try { await _writeBase(deviceId, restore); } catch (_) {}
+    }
+    try { await _writeEditSession(deviceId, open: false); } catch (_) {}
+    try { await _ble.disconnect(deviceId); } catch (_) {}
+  }
+
+  /// Android throws GATT_ERROR(133) on connect intermittently in a crowded
+  /// BLE environment; retry a few times with backoff, bailing if stop() ran.
   Future<void> _connectWithRetry(String deviceId) async {
     const attempts = 4;
     for (var i = 0; i < attempts; i++) {
@@ -55,46 +76,25 @@ class AdoptPulseController {
     }
   }
 
-  Future<void> stop() async {
-    if (_stopped) return;
-    _stopped = true;
-    _timer?.cancel();
-    _timer = null;
-    final deviceId = _deviceId;
-    if (deviceId == null) return;
+  Future<void> _writeBase(String deviceId, LampColor c) async {
     try {
-      await _ble.write(
-        deviceId,
-        BleUuids.controlService,
-        BleUuids.expressionTest,
-        Uint8List.fromList(utf8.encode('{"a":"test_expression_complete"}')),
-      );
-    } catch (_) {}
-    try {
-      await _ble.disconnect(deviceId);
+      final payload = utf8.encode(jsonEncode([c.toHex()]));
+      await _ble.write(deviceId, BleUuids.controlService, BleUuids.baseColors,
+          Uint8List.fromList(payload), withoutResponse: true);
     } catch (_) {}
   }
 
-  Future<void> _writePulse(String deviceId, LampColor color) async {
+  Future<void> _writeEditSession(String deviceId, {required bool open}) async {
     try {
-      final payload = jsonEncode({
-        'a': 'test_expression',
-        'type': 'pulse',
-        // 2 = base strip (the more visible surface), pulsed with the lamp's
-        // shade colour for a clearer "this is the one" identification.
-        'target': 2,
-        // ponytail: #RRGGBBWW hex strings — matches ExpressionConfig/baseColors encoding
-        'colors': [color.toHex()],
-      });
-      await _ble.write(
-        deviceId,
-        BleUuids.controlService,
-        BleUuids.expressionTest,
-        Uint8List.fromList(utf8.encode(payload)),
-        withoutResponse: true,
-      );
-    } catch (_) {
-      // best-effort — dropped writes are expected if the lamp is slow to connect
-    }
+      await _ble.write(deviceId, BleUuids.controlService, BleUuids.editSession,
+          Uint8List.fromList([_editBaseBit, open ? 1 : 0]),
+          withoutResponse: true);
+    } catch (_) {}
   }
+
+  LampColor _dim(LampColor c) => LampColor(
+      r: (c.r * 0.15).round(),
+      g: (c.g * 0.15).round(),
+      b: (c.b * 0.15).round(),
+      w: (c.w * 0.15).round());
 }

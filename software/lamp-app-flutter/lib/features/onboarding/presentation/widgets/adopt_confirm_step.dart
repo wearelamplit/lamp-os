@@ -10,6 +10,7 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/widgets/friendly_error.dart';
 import '../../../control/domain/lamp_color.dart';
 import '../../../control/presentation/widgets/critter_asset.dart';
+import '../../../control/presentation/widgets/lamp_color_swatch.dart';
 import '../../../nearby/application/nearby_lamps_notifier.dart';
 import '../../application/add_lamp_notifier.dart';
 import '../../application/adopt_pulse_controller.dart';
@@ -46,10 +47,7 @@ class _AdoptConfirmStepState extends ConsumerState<AdoptConfirmStep> {
     final lamp = ref
         .read(nearbyLampsNotifierProvider)
         .firstWhereOrNull((l) => l.id == deviceId);
-    // Pulse the lamp's SHADE colour (rendered on the base strip in the
-    // controller) — the shade is the more visible surface, so it reads
-    // more clearly as "this is the one".
-    final pulseColor = lamp != null
+    final shadeColor = lamp != null
         ? LampColor(
             r: (lamp.shadeRgb >> 16) & 0xFF,
             g: (lamp.shadeRgb >> 8) & 0xFF,
@@ -57,8 +55,16 @@ class _AdoptConfirmStepState extends ConsumerState<AdoptConfirmStep> {
             w: 0,
           )
         : LampColor.black;
+    final baseColor = lamp != null
+        ? LampColor(
+            r: (lamp.baseRgb >> 16) & 0xFF,
+            g: (lamp.baseRgb >> 8) & 0xFF,
+            b: lamp.baseRgb & 0xFF,
+            w: 0,
+          )
+        : LampColor.black;
     try {
-      await _ctrl.start(deviceId, pulseColor);
+      await _ctrl.start(deviceId, shadeColor, baseColor);
       if (mounted && _error != null) setState(() => _error = null);
     } catch (e) {
       if (!mounted) return;
@@ -82,6 +88,25 @@ class _AdoptConfirmStepState extends ConsumerState<AdoptConfirmStep> {
   Widget build(BuildContext context) {
     final deviceId =
         ref.watch(addLampNotifierProvider.select((s) => s.deviceId));
+    final lamp = ref
+        .watch(nearbyLampsNotifierProvider)
+        .firstWhereOrNull((l) => l.id == deviceId);
+    final baseSwatchColor = lamp != null
+        ? LampColor(
+            r: (lamp.baseRgb >> 16) & 0xFF,
+            g: (lamp.baseRgb >> 8) & 0xFF,
+            b: lamp.baseRgb & 0xFF,
+            w: 0,
+          )
+        : LampColor.black;
+    final shadeSwatchColor = lamp != null
+        ? LampColor(
+            r: (lamp.shadeRgb >> 16) & 0xFF,
+            g: (lamp.shadeRgb >> 8) & 0xFF,
+            b: lamp.shadeRgb & 0xFF,
+            w: 0,
+          )
+        : LampColor.black;
     final textTheme = Theme.of(context).textTheme;
     final critter = critterAssetFor(critterIndex: null, deviceId: deviceId);
 
@@ -98,6 +123,16 @@ class _AdoptConfirmStepState extends ConsumerState<AdoptConfirmStep> {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               SvgPicture.asset(critter, width: 96, height: 96),
+              const SizedBox(height: AppSpace.sm),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  LampColorSwatch(color: baseSwatchColor, size: 20),
+                  const SizedBox(width: AppSpace.sm),
+                  LampColorSwatch(color: shadeSwatchColor, size: 20),
+                ],
+              ),
               const SizedBox(height: AppSpace.md),
               Text(
                 'Found your stray?',

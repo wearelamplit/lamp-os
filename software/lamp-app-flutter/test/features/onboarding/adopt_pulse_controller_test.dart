@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -10,102 +11,79 @@ import '../../_support/in_memory_ble_client.dart';
 
 void main() {
   const deviceId = 'lamp-test-01';
-  const base = LampColor(r: 0x40, g: 0x80, b: 0xFF, w: 0);
+  const shade = LampColor(r: 0x40, g: 0x80, b: 0xFF, w: 0);
+  const base = LampColor(r: 0x20, g: 0x40, b: 0x60, w: 0);
+
+  List<Uint8List> baseWrites(InMemoryBleClient ble) =>
+      ble.writesTo(deviceId, BleUuids.baseColors);
+  List<Uint8List> sessionWrites(InMemoryBleClient ble) =>
+      ble.writesTo(deviceId, BleUuids.editSession);
 
   group('AdoptPulseController', () {
-    test('start connects and pulses on each 1500ms tick', () {
+    test('start connects, opens editSession, writes bright baseColor', () {
       fakeAsync((async) {
         final ble = InMemoryBleClient();
         final ctrl = AdoptPulseController(ble);
 
-        ctrl.start(deviceId, base);
+        ctrl.start(deviceId, shade, base);
         async.flushMicrotasks();
 
-        // Immediate pulse on connect
-        final writes1 = ble.writesTo(deviceId, BleUuids.expressionTest);
-        expect(writes1.length, 1);
-        final p1 = jsonDecode(utf8.decode(writes1.first)) as Map<String, dynamic>;
-        expect(p1['a'], 'test_expression');
-        expect(p1['type'], 'pulse');
+        expect(ble.isConnected(deviceId), isTrue);
 
-        // Second tick
-        async.elapse(const Duration(milliseconds: 1500));
-        expect(ble.writesTo(deviceId, BleUuids.expressionTest).length, greaterThanOrEqualTo(2));
+        // editSession open: [0x01, 1]
+        expect(sessionWrites(ble), hasLength(1));
+        expect(sessionWrites(ble).first, equals([0x01, 1]));
 
-        // Third tick
-        async.elapse(const Duration(milliseconds: 1500));
-        expect(ble.writesTo(deviceId, BleUuids.expressionTest).length, greaterThanOrEqualTo(3));
+        // baseColors: a JSON array of one hex string
+        expect(baseWrites(ble), hasLength(1));
+        final decoded = jsonDecode(utf8.decode(baseWrites(ble).first)) as List;
+        expect(decoded.first, isA<String>());
 
         ctrl.stop();
         async.flushMicrotasks();
       });
     });
 
-    test('stop sends test_expression_complete and disconnects', () {
+    test('timer alternates bright/dim every 600ms', () {
       fakeAsync((async) {
         final ble = InMemoryBleClient();
         final ctrl = AdoptPulseController(ble);
 
-        ctrl.start(deviceId, base);
+        ctrl.start(deviceId, shade, base);
+        async.flushMicrotasks();
+
+        final after0 = baseWrites(ble).length; // 1 (initial bright)
+
+        async.elapse(const Duration(milliseconds: 600));
+        expect(baseWrites(ble).length, greaterThan(after0));
+
+        async.elapse(const Duration(milliseconds: 600));
+        expect(baseWrites(ble).length, greaterThan(after0 + 1));
+
+        ctrl.stop();
+        async.flushMicrotasks();
+      });
+    });
+
+    test('stop restores base, closes editSession, disconnects', () {
+      fakeAsync((async) {
+        final ble = InMemoryBleClient();
+        final ctrl = AdoptPulseController(ble);
+
+        ctrl.start(deviceId, shade, base);
         async.flushMicrotasks();
 
         ctrl.stop();
         async.flushMicrotasks();
 
-        final writes = ble.writesTo(deviceId, BleUuids.expressionTest);
-        final last = jsonDecode(utf8.decode(writes.last)) as Map<String, dynamic>;
-        expect(last['a'], 'test_expression_complete');
+        // editSession close written last: [0x01, 0]
+        expect(sessionWrites(ble).last, equals([0x01, 0]));
+
+        // base restore written: original base color hex
+        final lastBase = jsonDecode(utf8.decode(baseWrites(ble).last)) as List;
+        expect(lastBase.first, equals(base.toHex()));
+
         expect(ble.isConnected(deviceId), isFalse);
-      });
-    });
-
-    test('double start does not double pulse cadence', () {
-      fakeAsync((async) {
-        final ble = InMemoryBleClient();
-        final ctrl = AdoptPulseController(ble);
-
-        ctrl.start(deviceId, base);
-        async.flushMicrotasks();
-
-        // Second start cancels the first timer; only one timer should be active
-        ctrl.start(deviceId, base);
-        async.flushMicrotasks();
-
-        final countBefore = ble.writesTo(deviceId, BleUuids.expressionTest).length;
-
-        async.elapse(const Duration(milliseconds: 1500));
-
-        final delta = ble.writesTo(deviceId, BleUuids.expressionTest).length - countBefore;
-        // Single timer fires once per interval — not twice
-        expect(delta, 1);
-
-        ctrl.stop();
-        async.flushMicrotasks();
-      });
-    });
-
-    test('stop before timer installs does not leak timer', () {
-      fakeAsync((async) {
-        final ble = InMemoryBleClient();
-        final ctrl = AdoptPulseController(ble);
-
-        // start() awaits connect(), so its continuation (writePulse + timer
-        // install) is a scheduled microtask — stop() runs first and sets
-        // _stopped=true before that continuation fires.
-        ctrl.start(deviceId, base);
-        ctrl.stop();
-        async.flushMicrotasks(); // start continuation: if (_stopped) return;
-
-        final countAfterStop =
-            ble.writesTo(deviceId, BleUuids.expressionTest).length;
-
-        // Advance 3 × 1500 ms — a leaked timer would fire here.
-        async.elapse(const Duration(milliseconds: 4500));
-
-        expect(
-          ble.writesTo(deviceId, BleUuids.expressionTest).length,
-          equals(countAfterStop),
-        );
       });
     });
 
@@ -114,14 +92,64 @@ void main() {
         final ble = InMemoryBleClient();
         final ctrl = AdoptPulseController(ble);
 
-        ctrl.start(deviceId, base);
+        ctrl.start(deviceId, shade, base);
         async.flushMicrotasks();
 
         ctrl.stop();
         async.flushMicrotasks();
 
-        // Second stop must not throw
-        expect(() { ctrl.stop(); async.flushMicrotasks(); }, returnsNormally);
+        expect(
+            () {
+              ctrl.stop();
+              async.flushMicrotasks();
+            },
+            returnsNormally);
+      });
+    });
+
+    test('stop before timer installs does not leak timer', () {
+      fakeAsync((async) {
+        final ble = InMemoryBleClient();
+        final ctrl = AdoptPulseController(ble);
+
+        // start() awaits connect(), so its continuation (editSession + baseColors
+        // + timer install) is a scheduled microtask — stop() runs first and sets
+        // _stopped=true before that continuation fires.
+        ctrl.start(deviceId, shade, base);
+        ctrl.stop();
+        async.flushMicrotasks(); // start continuation: if (_stopped) return;
+
+        final countAfterStop = baseWrites(ble).length;
+
+        // Advance 5 × 600ms — a leaked timer would fire here.
+        async.elapse(const Duration(milliseconds: 3000));
+
+        expect(baseWrites(ble).length, equals(countAfterStop));
+      });
+    });
+
+    test('double start does not double pulse cadence', () {
+      fakeAsync((async) {
+        final ble = InMemoryBleClient();
+        final ctrl = AdoptPulseController(ble);
+
+        ctrl.start(deviceId, shade, base);
+        async.flushMicrotasks();
+
+        // Second start cancels the first timer; only one timer should be active.
+        ctrl.start(deviceId, shade, base);
+        async.flushMicrotasks();
+
+        final countBefore = baseWrites(ble).length;
+
+        async.elapse(const Duration(milliseconds: 600));
+
+        final delta = baseWrites(ble).length - countBefore;
+        // Single timer fires once per interval — not twice.
+        expect(delta, 1);
+
+        ctrl.stop();
+        async.flushMicrotasks();
       });
     });
   });
