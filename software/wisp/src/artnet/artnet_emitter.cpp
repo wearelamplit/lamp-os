@@ -27,9 +27,9 @@ void ArtnetEmitter::tick(uint32_t nowMs) {
 
 void ArtnetEmitter::emitNow() {
   if (!palette_ || !wifi_) return;
-  if (!wifi_->isConnected()) {
+  if (!wifi_->canBroadcast()) {
     // Stamp lastEmitMs_ so tick() backs off to backstop cadence instead of
-    // re-entering emitNow() on every loop iteration while we wait for STA.
+    // re-entering emitNow() on every loop iteration while the link comes up.
     lastEmitMs_ = millis();
     return;
   }
@@ -48,8 +48,7 @@ void ArtnetEmitter::emitNow() {
     return;
   }
 
-  IPAddress bcast(255, 255, 255, 255);
-  size_t sent = udp_.writeTo(buf, n, bcast, kArtnetPort);
+  size_t sent = udp_.writeTo(buf, n, wifi_->broadcastIp(), kArtnetPort);
   lastEmitMs_ = millis();
   if (sent != n) {
     Serial.printf("[artnet] short write %u/%u\n",

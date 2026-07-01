@@ -31,13 +31,27 @@ void StageBeacon::refreshAdvert() {
     Serial.println("[stage] refreshAdvert() before begin(); ignoring");
     return;
   }
-  // Pull the current creds straight from the source-of-truth. Empty
-  // strings (no creds saved) collapse to a stop() so pre-mesh lamps
-  // don't try to join an empty/garbage advert.
+  // Pull the current creds straight from the source-of-truth.
   const std::string ssid =
       config_ ? std::string(config_->wifiSsid().c_str()) : std::string();
   const std::string password =
       config_ ? std::string(config_->wifiPw().c_str()) : std::string();
+  startAdvert(ssid, password);
+}
+
+void StageBeacon::advertiseCreds(const std::string& ssid,
+                                 const std::string& password) {
+  if (!initialized_) {
+    Serial.println("[stage] advertiseCreds() before begin(); ignoring");
+    return;
+  }
+  startAdvert(ssid, password);
+}
+
+void StageBeacon::startAdvert(const std::string& ssid,
+                              const std::string& password) {
+  // Empty strings (no creds) collapse to a stop() so pre-mesh lamps don't try
+  // to join an empty/garbage advert.
   if (ssid.empty() || password.empty()) {
     stop();
     return;

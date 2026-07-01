@@ -35,12 +35,18 @@ class StageBeacon {
   // begin(); a no-op (with log) before begin().
   void refreshAdvert();
 
+  // Advertise explicit creds instead of the WispConfig STA creds, so Manual
+  // mode points pre-mesh lamps at the wisp's own softAP. Same byte budget.
+  void advertiseCreds(const std::string& ssid, const std::string& password);
+
   // Stop advertising. Safe to call before begin().
   void stop();
 
   bool isAdvertising() const { return advertising_; }
 
  private:
+  void startAdvert(const std::string& ssid, const std::string& password);
+
   bool initialized_ = false;
   bool advertising_ = false;
   std::string deviceName_;

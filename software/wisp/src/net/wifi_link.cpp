@@ -1,8 +1,10 @@
 #include "net/wifi_link.hpp"
 
 #include <WiFi.h>
+#include <esp_wifi.h>
 
 #include "config/wisp_config.hpp"
+#include "net/mesh_link.hpp"  // LAMP_ESPNOW_CHANNEL
 
 namespace wisp {
 
@@ -10,6 +12,7 @@ void WifiLink::begin(WispConfig* config) {
   if (started_) return;
   started_ = true;
   config_ = config;
+  mode_ = Mode::Sta;
 
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
@@ -52,6 +55,46 @@ void WifiLink::reconnect() {
   // now holds.
   WiFi.disconnect(false, false);
   WiFi.begin(s.c_str(), p.c_str());
+}
+
+void WifiLink::startSta() {
+  WiFi.softAPdisconnect(false);
+  apUp_ = false;
+  WiFi.mode(WIFI_STA);
+  mode_ = Mode::Sta;
+  reconnect();
+}
+
+void WifiLink::startSoftAp(const char* ssid, const char* pass) {
+  WiFi.mode(WIFI_AP_STA);
+  apUp_ = WiFi.softAP(ssid, pass, LAMP_ESPNOW_CHANNEL);
+  mode_ = Mode::Ap;
+  if (apUp_) {
+    Serial.printf("[wifi] softAP up ssid=%s ch=%d ip=%s\n", ssid,
+                  LAMP_ESPNOW_CHANNEL, WiFi.softAPIP().toString().c_str());
+  } else {
+    Serial.printf("[wifi] softAP start FAILED ssid=%s\n", ssid);
+  }
+}
+
+void WifiLink::stop() {
+  WiFi.softAPdisconnect(false);
+  apUp_ = false;
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect(false);
+  esp_wifi_set_channel(LAMP_ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
+  mode_ = Mode::Off;
+}
+
+bool WifiLink::canBroadcast() const {
+  if (mode_ == Mode::Ap) return apUp_;
+  if (mode_ == Mode::Sta) return WiFi.status() == WL_CONNECTED;
+  return false;
+}
+
+IPAddress WifiLink::broadcastIp() const {
+  if (mode_ == Mode::Ap) return WiFi.softAPBroadcastIP();
+  return IPAddress(255, 255, 255, 255);
 }
 
 bool WifiLink::isConnected() const {

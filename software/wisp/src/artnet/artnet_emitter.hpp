@@ -1,7 +1,7 @@
 // ArtnetEmitter — broadcasts ArtNet DMX universe-1 frames over UDP/6454
 // so pre-mesh lamps get the same palette the mesh lamps receive.
-// Emits whenever WiFi is up; a cheap no-op when it isn't.
-// Pure frame construction lives in artnet_frame.{h,cpp}.
+// Emits whenever WifiLink::canBroadcast() (STA associated or softAP up);
+// a cheap no-op otherwise. Pure frame construction lives in artnet_frame.{h,cpp}.
 
 #pragma once
 

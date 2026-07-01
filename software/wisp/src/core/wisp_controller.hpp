@@ -21,6 +21,8 @@ class WispConfig;
 class ZoneSelector;
 class StatusEmitter;
 class ArtnetEmitter;
+class WifiLink;
+class StageBeacon;
 enum class WispSourceMode : uint8_t;
 
 class WispController {
@@ -28,7 +30,8 @@ class WispController {
   WispController(CurrentPalette& palette, PaintDistributor& paint,
                  WispConfig& config, ZoneSelector& zones,
                  AuroraPaletteClient& aurora, StatusEmitter& status,
-                 ArtnetEmitter& artnet, Adafruit_NeoPixel& strip)
+                 ArtnetEmitter& artnet, WifiLink& wifi, StageBeacon& stage,
+                 Adafruit_NeoPixel& strip)
       : palette_(palette),
         paint_(paint),
         config_(config),
@@ -36,6 +39,8 @@ class WispController {
         aurora_(aurora),
         status_(status),
         artnet_(artnet),
+        wifi_(wifi),
+        stage_(stage),
         strip_(strip) {}
 
   // Idempotent: safe at boot (from NVS) and on every mode flip.
@@ -61,6 +66,8 @@ class WispController {
   AuroraPaletteClient& aurora_;
   StatusEmitter& status_;
   ArtnetEmitter& artnet_;
+  WifiLink& wifi_;
+  StageBeacon& stage_;
   Adafruit_NeoPixel& strip_;
 
   bool auroraWasStreaming_ = false;

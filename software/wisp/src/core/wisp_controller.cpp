@@ -8,10 +8,19 @@
 #include "config/zone_selector.hpp"
 #include "paint/paint_distributor.hpp"
 #include "artnet/artnet_emitter.hpp"
+#include "net/stage_beacon.hpp"
+#include "net/wifi_link.hpp"
 #include "status/status_emitter.hpp"
 #include "status/status_ring.hpp"
 
 namespace wisp {
+
+namespace {
+// WPA2 needs a >=8 char password; ssid+pass+2 NULs must fit StageBeacon's
+// 26-byte budget.
+constexpr char kApSsid[] = "wisp-stage";
+constexpr char kApPass[] = "lamplight";
+}  // namespace
 
 // Empty palette deliberately skips the update so flipping Manual -> empty
 // doesn't zero the lamps' fallback color.
@@ -94,14 +103,20 @@ void WispController::applySourceModeTransition(wisp::WispSourceMode mode) {
   switch (mode) {
     case wisp::WispSourceMode::Off:
       paint_.setPaintMode(false);
+      wifi_.stop();
+      stage_.stop();
       Serial.println("[wisp] source=Off — broadcast RESTORE; paintMode off");
       break;
     case wisp::WispSourceMode::Manual:
       paint_.setPaintMode(true);
+      wifi_.startSoftAp(kApSsid, kApPass);
+      stage_.advertiseCreds(kApSsid, kApPass);
       pushManualPaletteToCurrent();
-      Serial.println("[wisp] source=Manual — using stored manual palette");
+      Serial.println("[wisp] source=Manual — softAP hosting; stored manual palette");
       break;
     case wisp::WispSourceMode::Aurora:
+      wifi_.startSta();
+      stage_.refreshAdvert();
       // Clear stale palette; onAuroraPalette enables paint when a live
       // palette arrives; loop's liveness check disables it if stream drops.
       palette_.clear();

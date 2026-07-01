@@ -53,7 +53,7 @@ wisp::ZoneSelector zoneSelector;
 
 wisp::WispController controller(currentPalette, paintDistributor, wispConfig,
                                 zoneSelector, auroraClient, statusEmitter,
-                                artnetEmitter, testStrip);
+                                artnetEmitter, wifi, stageBeacon, testStrip);
 
 wisp::MeshRouter meshRouter(
     inventory, wispRoster, wispOpDispatcher,
