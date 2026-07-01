@@ -10,11 +10,9 @@ import 'package:lamp_app/features/wisp/application/wisp_notifier.dart';
 import 'package:lamp_app/features/wisp/domain/wisp_source_mode.dart';
 import 'package:lamp_app/features/wisp/domain/zone_source.dart';
 
-/// Audit perf-M8: when a wispOp write rejects, the optimistic state we
-/// painted before the write needs to roll back to its pre-call value.
-/// Without rollback, the chip / pill / radio shows the failed selection
-/// even though the wisp never received the op — and no notify is coming
-/// to reconcile it.
+/// When a wispOp write rejects, optimistic state must roll back to its
+/// pre-call value. Failed writes have no incoming notify to reconcile
+/// the chip / pill / radio.
 void main() {
   const lampId = 'rollback-lamp';
 

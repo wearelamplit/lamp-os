@@ -58,18 +58,9 @@ class WispNotifier extends _$WispNotifier {
   WispSourceMode? _pendingSourceMode;
   DateTime? _pendingSourceUntil;
 
-  // -- Manual palette state ------------------------------------------------
-  // The wisp's read leg (CHAR_WISP_STATUS READ) is the source of truth
-  // for the saved palette. On build the notifier reads the full status
-  // which includes the base64-packed palette under the `palette` key;
-  // that value seeds the editor. NOTIFY payloads are trimmed (no palette
-  // blob), so a changed `paletteIdPrefix` in a NOTIFY triggers a fresh
-  // READ to pull the updated palette.
-  //
-  // Two slots: `_savedManualPalette` is the last value the user committed
-  // via [setManualPalette]; `_draftManualPalette` is the in-flight editor
-  // state. The UI gates the save button on `_draftManualPalette !=
-  // _savedManualPalette`.
+  // READ leg carries the full palette blob; NOTIFY payloads omit it.
+  // A changed `paletteIdPrefix` in a NOTIFY triggers a fresh READ.
+  // _savedManualPalette: last committed; _draftManualPalette: in-flight editor.
   List<LampColor> _savedManualPalette = const <LampColor>[];
   List<LampColor> _draftManualPalette = const <LampColor>[];
 
@@ -133,11 +124,9 @@ class WispNotifier extends _$WispNotifier {
 
     debugPrint('[wisp_notifier] build lamp=$lampId -- waiting for connect');
 
-    // Wait until the BLE link is connected before subscribing or reading.
-    // `watchConnected` emits the current state immediately on listen, so
-    // this is a no-op when we're already connected. If the lamp_shell
-    // mounted us mid-connect, we await the first `true` emission rather
-    // than racing the GATT layer and failing with BleNotFound.
+    // Wait until connected before subscribing or reading.
+    // `watchConnected` emits the current state on listen; this awaits the
+    // first `true` to avoid racing the GATT layer with a BleNotFound.
     await ble.watchConnected(lampId).firstWhere((connected) => connected);
 
     // If the notifier was disposed during the await (user navigated to a
@@ -154,18 +143,16 @@ class WispNotifier extends _$WispNotifier {
       '[wisp_notifier] build lamp=$lampId -- connected, subscribing + reading',
     );
 
-    // Subscribe before the initial read so we never miss a notify that
+    // Subscribe before the initial read to never miss a notify that
     // fires between the read returning and the listener attaching.
     _sub = ble
         .subscribe(lampId, BleUuids.controlService, BleUuids.wispStatus)
         .listen((bytes) {
       if (_disposed) return;
       var next = WispStatus.fromBytes(bytes);
-      // A frame that decodes to "no wisp" while we already hold a present
-      // status is a transient empty/short BLE notify, not the wisp actually
-      // vanishing. Dropping it keeps the icon, source, and palette from
-      // blinking out for a tick whenever a frame lands empty. A genuine
-      // wisp-gone is re-established by the next build/read of the status.
+      // A frame that decodes to "no wisp" while already holding a present
+      // status is a transient empty/short BLE notify. Drop it to prevent
+      // the icon, source, and palette from blinking out for a tick.
       if (!next.present && (state.value?.present ?? false)) {
         return;
       }
@@ -205,7 +192,7 @@ class WispNotifier extends _$WispNotifier {
       for (var attempt = 0; !initial.present && attempt < 2; attempt++) {
         await Future.delayed(const Duration(milliseconds: 1500));
         if (_disposed) return WispStatus.empty;
-        // A notify may have landed a present status while we waited; prefer it
+        // A notify may have landed a present status during the wait; prefer it
         // so the retry's stale empty read can't clobber it.
         final live = state.value;
         if (live != null && live.present) {
@@ -230,10 +217,9 @@ class WispNotifier extends _$WispNotifier {
       );
       return initial;
     } catch (e) {
-      // After connected==true, GATT can still fail if the link drops
-      // between the connected-edge and our read. Return empty so the UI
-      // doesn't hang; the notify subscription will catch it up when the
-      // next status broadcast lands.
+      // GATT can still fail after connected==true if the link drops.
+      // Return empty so the UI doesn't hang; the notify subscription catches
+      // it up when the next status broadcast lands.
       debugPrint(
         '[wisp_notifier] initial-read FAILED lamp=$lampId -- '
         'returning empty. err=$e',
@@ -357,17 +343,13 @@ class WispNotifier extends _$WispNotifier {
     }
   }
 
-  /// Push WiFi credentials to the wisp. The wisp persists into NVS, calls
-  /// `WifiLink::reconnect()` to associate with the new AP, and refreshes
-  /// the BLE manufacturer-data advert so pre-mesh lamps see the new SSID
-  /// on their next scan. The connection state surfaces back through
-  /// `WispStatus.wifiConnected` on the next status notify (typically
-  /// within ~2s of the wisp's STA association completing).
+  /// Push WiFi credentials to the wisp. The wisp persists into NVS and
+  /// kicks `WifiLink::reconnect()`; connection state surfaces back through
+  /// `WispStatus.wifiConnected` on the next status notify.
   ///
-  /// We don't optimistically flip `wifiConnected` to true -- the wisp
-  /// may fail to associate (wrong password, AP out of range) and a
-  /// "Connected" badge that doesn't budge would mislead the operator.
-  /// The UI surfaces the "save sent" state via its own local flag.
+  /// No optimistic flip of `wifiConnected`: the wisp may fail to associate
+  /// (wrong password, AP out of range), so the badge reflects only what
+  /// the wisp reports. The UI tracks "save sent" via its own local flag.
   Future<void> setWifi(String ssid, String password) async {
     try {
       await _repo.setWifi(ssid, password);
@@ -377,17 +359,14 @@ class WispNotifier extends _$WispNotifier {
     }
   }
 
-  /// Pick the color the wisp renders on its OWN 30-pixel ring while
-  /// sourceMode is Off. Does not broadcast to lamps -- Off mode keeps
-  /// PaintDistributor held off. Optimistically reflects in local state
-  /// so the swatch updates instantly; the BLE write itself is debounced
-  /// at [_offColorDebounce] so a continuous picker drag tops out at
-  /// ~4 writes/sec instead of one per drag tick (which would saturate
-  /// the wispOp link and chew through NVS writes on the wisp's side).
+  /// Pick the color the wisp renders on its own 30-pixel ring while
+  /// sourceMode is Off. Off mode keeps PaintDistributor held off;
+  /// this color exists only on the wisp ring. Optimistically reflects
+  /// in local state; BLE write is debounced at [_offColorDebounce]
+  /// (~4 writes/sec) to bound NVS wear.
   ///
-  /// No rollback on failure -- the user expects realtime, not
-  /// reconcile-and-revert. The wisp's next status notify will correct
-  /// local state if the write actually missed.
+  /// No rollback on failure; the wisp's next status notify corrects
+  /// local state if the write missed.
   Future<void> setOffColor(LampColor color) async {
     final cur = state.value ?? WispStatus.empty;
     state = AsyncData(cur.copyWith(offColor: color));
@@ -471,11 +450,8 @@ class WispNotifier extends _$WispNotifier {
     return incoming.copyWith(source: pendingMode);
   }
 
-  // -- Manual palette editor state-mutators --------------------------------
-  // Each helper rebuilds the draft list and rebroadcasts state so any
-  // ConsumerWidget watching the notifier rebuilds. We rebuild rather
-  // than mutate in place so equality-based diffs (e.g. flutter_riverpod's
-  // selectors) actually fire.
+  // Each helper rebuilds the draft list and rebroadcasts state.
+  // Rebuild rather than mutate in place so equality-based diffs fire.
 
   /// Seed the draft from the saved snapshot. Called by the UI on first
   /// open of the editor so the swatches reflect what was last committed.
@@ -526,15 +502,10 @@ class WispNotifier extends _$WispNotifier {
     _scheduleManualPaletteWrite();
   }
 
-  /// Trailing-edge debounced write of the current draft palette to the
-  /// wisp. Called from every editor mutation. Operator-facing semantics:
-  /// every edit is "saved" -- no Save button to remember. On the wire,
-  /// continuous edits collapse into one write per [_manualPaletteDebounce]
-  /// window so NVS wear stays bounded.
-  ///
-  /// Errors are logged and swallowed (no UI-visible failure path); the
-  /// next wispStatus notify will let us know if the wisp is still
-  /// receiving. Realtime UX trumps reconcile-and-revert here.
+  /// Trailing-edge debounced write of the draft palette. Continuous
+  /// edits collapse into one write per [_manualPaletteDebounce] window
+  /// to bound NVS wear. Errors are swallowed; the next status notify
+  /// corrects state if the wisp missed a write.
   void _scheduleManualPaletteWrite() {
     _manualPaletteWriteTimer?.cancel();
     final committed = List<LampColor>.from(_draftManualPalette);
@@ -567,15 +538,11 @@ class WispNotifier extends _$WispNotifier {
     }
   }
 
-  /// Force a state-rebuild so consumers redraw. We don't have any new
-  /// WispStatus to publish (the palette state is held outside it), but
-  /// rebroadcasting the existing value is enough to nudge widgets that
-  /// read [draftManualPalette] / [manualPaletteDirty] via the notifier.
-  ///
-  /// This defeats Riverpod's equality dedup: `AsyncData(cur)` is a new wrapper
-  /// around the same value, so `ref.watch` consumers rebuild even when nothing
-  /// they read changed. The clean fix is to move `_draftManualPalette` into
-  /// its own `StateProvider` so consumers can `.select` the palette slice.
+  /// Rebroadcasts the current [WispStatus] so consumers watching
+  /// [draftManualPalette] / [manualPaletteDirty] rebuild. Defeats
+  /// Riverpod's equality dedup: `AsyncData(cur)` is a new wrapper
+  /// even when the value didn't change.
+  // ponytail: _draftManualPalette belongs in its own StateProvider; add when per-slice selects matter.
   void _bumpState() {
     final hadValue = state.value != null;
     final cur = state.value ?? WispStatus.empty;

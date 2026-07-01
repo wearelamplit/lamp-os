@@ -244,11 +244,7 @@ void test_snapshot_for_broadcast_packs_correctly(void) {
   uint8_t buf[14];  // 2 entries × 7 bytes
   const size_t n = r.snapshotClaimsForBroadcast(buf, sizeof(buf));
   TEST_ASSERT_EQUAL_size_t(2, n);
-  // Each entry is (mac[6], rssi[1]). The order in `buf` matches insertion
-  // order — claims are appended as ownClaims_ is filled.
-  // We don't pin which lamp ended up at index 0 vs 1 (recomputeClaims
-  // iterates observations in caller order, so the order here will match
-  // the input observations[0] then [1]).
+  // Insertion order; matches observations[0] then [1].
   TEST_ASSERT_EQUAL_INT8(-60, static_cast<int8_t>(buf[6]));
   TEST_ASSERT_EQUAL_INT8(-70, static_cast<int8_t>(buf[13]));
 }

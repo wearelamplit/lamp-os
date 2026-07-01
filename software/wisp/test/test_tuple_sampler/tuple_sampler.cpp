@@ -1,9 +1,5 @@
-// Native tests for TupleSampler (wisp paint distribution).
-//
-// Self-contained: the algorithm is redeclared here as a local helper rather
-// than linking the production .cpp. This keeps the test portable (no
-// CurrentPalette / aurora pull-in) and pins the algorithm — if production
-// drifts the test still expresses the spec.
+// Algorithm redeclared locally (no CurrentPalette / aurora pull-in) to pin
+// the contract independently of the production .cpp.
 
 #include <unity.h>
 
@@ -25,8 +21,6 @@ struct ColorTuple {
   uint8_t b[2] = {0, 0};
   uint8_t w[2] = {0, 0};
 };
-
-// --- Mirror of TupleSampler.cpp internals ---
 
 uint32_t fnv1a(const uint8_t* bytes, size_t n) {
   uint32_t h = 0x811C9DC5u;
@@ -123,8 +117,6 @@ ColorTuple sampleTuple(const std::vector<RGBW>& raw, const uint8_t mac[6],
 }
 
 }  // namespace
-
-// --- Tests ---
 
 void test_empty_palette_returns_black(void) {
   std::vector<RGBW> raw;

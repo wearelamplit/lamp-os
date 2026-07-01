@@ -85,8 +85,7 @@ class _ManualPaletteEditorState extends ConsumerState<ManualPaletteEditor> {
 
   Future<void> _addNew() async {
     final notifier = ref.read(wispNotifierProvider(widget.lampId).notifier);
-    // Default new swatch — pure white (RGB=255). Hue-saturated would feel
-    // editorial; white reads as "blank slate, pick me".
+    // White as the default: neutral starting point for a new swatch.
     const initial = LampColor(r: 255, g: 255, b: 255, w: 0);
     final picked = await showColorPickerSheet(
       context,
@@ -102,12 +101,8 @@ class _ManualPaletteEditorState extends ConsumerState<ManualPaletteEditor> {
     final notifier = ref.read(wispNotifierProvider(widget.lampId).notifier);
     final draft = notifier.draftManualPalette;
     if (index < 0 || index >= draft.length) return;
-    // onLive streams the picker's in-progress color into the notifier on
-    // every drag tick. The notifier debounces the BLE write internally so
-    // the wisp doesn't get saturated; the gradient bar at the top updates
-    // immediately. If the user cancels, the picker returns null and we
-    // restore the original colour (the wisp will get one trailing write
-    // with the restored value).
+    // onLive feeds every drag tick into the notifier (debounced internally).
+    // On cancel the picker returns null; restore the original color.
     final original = draft[index];
     final picked = await showColorPickerSheet(
       context,
@@ -124,10 +119,8 @@ class _ManualPaletteEditorState extends ConsumerState<ManualPaletteEditor> {
   }
 }
 
-/// Expressions-style swatch chip: tap to edit, top-right X to remove.
-/// Distinct from the editor's `_ColorChip` only in that the X is always
-/// shown (the wisp's manual palette is allowed to be empty — the wisp
-/// falls back to warm white on the ring). Visual treatment is the same.
+/// Swatch chip: tap to edit, top-right X to remove.
+/// X is always shown because an empty manual palette is valid.
 class _WispColorChip extends StatelessWidget {
   const _WispColorChip({
     required this.color,

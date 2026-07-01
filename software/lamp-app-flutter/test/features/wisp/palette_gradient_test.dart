@@ -3,13 +3,10 @@ import 'dart:ui' show Color;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lamp_app/features/wisp/domain/palette_gradient.dart';
 
-/// Pure-Dart tests for the palette-ramp helper. Mirror the scenarios
-/// covered by `software/wisp/test/test_status_ring/test_status_ring.cpp`
-/// so any drift between the on-screen bar and the LED ring shows up here.
-///
-/// We use 30 pixels (matching `wisp::kStatusRingPixelCount`) for the
-/// shape-equivalent tests so the per-pixel expectations land exactly
-/// where the firmware tests expect them.
+/// Tests for the palette-ramp helper. Results must stay in sync with the
+/// firmware's StatusRing gradient math; divergence means the on-screen
+/// bar drifts from the LED ring. Shape tests use 30 pixels to match
+/// `wisp::kStatusRingPixelCount`.
 
 void main() {
   // Channel-extraction helpers. Flutter 3.27+ exposes `.r/.g/.b` as
@@ -43,7 +40,6 @@ void main() {
 
     test('two stops anchor exactly at the endpoints', () {
       // Black → white. Pixel 0 must be pure black, pixel 29 pure white.
-      // Mirrors `test_two_stops_endpoints_and_midpoint` in StatusRing.
       final stops = <Color>[
         const Color.fromARGB(0xFF, 0, 0, 0),
         const Color.fromARGB(0xFF, 255, 255, 255),
@@ -58,8 +54,7 @@ void main() {
     });
 
     test('two stops produce a symmetric black↔white ramp', () {
-      // Opposite pixels should sum to 255 within 1 LSB rounding tolerance
-      // per channel. Same shape assertion StatusRing's C++ test makes.
+      // Opposite pixels must sum to 255 within 1 LSB rounding tolerance per channel.
       final stops = <Color>[
         const Color.fromARGB(0xFF, 0, 0, 0),
         const Color.fromARGB(0xFF, 255, 255, 255),
@@ -81,7 +76,6 @@ void main() {
 
     test('two-stop red→blue ramp is monotonic per channel', () {
       // Red drops monotonically, blue rises monotonically, green stays 0.
-      // Mirrors `test_two_stops_pure_red_to_blue`.
       final stops = <Color>[
         const Color.fromARGB(0xFF, 255, 0, 0),
         const Color.fromARGB(0xFF, 0, 0, 255),
@@ -196,7 +190,6 @@ void main() {
     });
 
     test('W=100 → +70 R, +40 G, B unchanged', () {
-      // Mirrors `test_rgbw_warm_bias_adds_warm`.
       final out = foldRgbwWarmBias(10, 20, 30, 100);
       expect(r(out), 80);
       expect(g(out), 60);
@@ -204,7 +197,6 @@ void main() {
     });
 
     test('W=255 clamps R and G to 255 without touching B', () {
-      // Mirrors `test_rgbw_warm_bias_clamps_to_255`.
       final out = foldRgbwWarmBias(250, 240, 50, 255);
       expect(r(out), 255);
       expect(g(out), 255);

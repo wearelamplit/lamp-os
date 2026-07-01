@@ -1,21 +1,9 @@
-// WispZoneSelector — process-local zone-selection state for the wisp.
+// WispZoneSelector — in-RAM zone-selection state (persistence lives in WispConfig).
 //
-// Extracted from main.cpp because StatusBeacon needs to read
-// currentZone / source / observedZones to emit wispStatus broadcasts.
-// Only `currentZone` is persistent (and that lives in WispConfig); everything
-// here is RAM.
-//
-// THREADING: observe() and copyObserved() are thread-safe via internal
-// portMUX. Other methods (currentZone, source, etc.) are read-only after
-// construction as far as the loop task is concerned — scalar reads that
-// tolerate a torn snapshot because all mutators (latchFirstSeen / setFromOp /
-// clearFromOp / setFromNvs) run on the loop task. The portMUX guards
-// observedZones_ / observedCount_ because copyObserved() (timer task) must
-// not see a half-shifted array during the FIFO memmove in observe().
-//
-// The `ZoneSource` discriminator tells the app pane where the current
-// selection came from. The string form is camelCase to match the
-// `char:"wispOp"` JSON naming convention on the wire.
+// observe() and copyObserved() are guarded by portMUX: copyObserved() runs on
+// the timer task and must not read a half-shifted array during observe()'s
+// FIFO memmove. All mutators run on the loop task; scalar reads tolerate torn
+// snapshots from that task.
 
 #pragma once
 
@@ -41,19 +29,12 @@ namespace wisp {
 
 enum class ZoneSource : uint8_t { None, FirstSeen, Nvs, AppOp };
 
-// camelCase wire form. The serial dump and JSON broadcast both use this so
-// there's one mapping to chase.
 const char* zoneSourceName(ZoneSource s);
 
-// 16 matches Aurora's per-notification states cap; oldest-eviction FIFO
-// keeps the set bounded without leaking memory if a noisy Aurora keeps
-// rotating zone ids. The wispStatus JSON also caps at 16 entries, so this
-// upper bound is the single source of truth for the budget.
+// Matches Aurora's per-notification cap; also the wispStatus JSON zone-array cap.
 constexpr size_t kMaxObservedZones = 16;
 
-// Sane upper bound for zone ids sourced from the mesh, NVS, or app ops.
-// 4 digits is generous for any real venue stage-index count and bounds
-// the JSON digit width, restoring headroom above the greedy-cap guarantee.
+// 4-digit bound caps JSON digit width and keeps frame size predictable.
 constexpr int kMaxZoneId = 9999;
 inline bool isValidZone(int z) { return z >= 0 && z <= kMaxZoneId; }
 
@@ -65,19 +46,13 @@ class ZoneSelector {
 
   void observe(int zone);
 
-  // Snapshot up to `outCap` observed zones into `out`. Returns the count
-  // written. Thread-safe — takes the internal mux so this never reads a
-  // half-shifted array mid-memmove inside observe().
   size_t copyObserved(int* out, size_t outCap) const;
 
-  // Returns true if the first-seen latch actually changed state (caller can
-  // log accordingly). No-op when a Nvs/AppOp selection is already in force.
+  // Returns true if state changed. No-op when Nvs/AppOp selection is in force.
   bool latchFirstSeen(int zone);
 
   void setFromOp(int zone);
   void clearFromOp();
-
-  // Seed from NVS at boot. Used by main.cpp before the recv path is alive.
   void setFromNvs(int zone);
 
  private:

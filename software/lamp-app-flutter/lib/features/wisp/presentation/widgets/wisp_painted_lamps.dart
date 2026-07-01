@@ -132,7 +132,7 @@ class _PaintedLampRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final mac = meshMacFromBdAddr(bdAddr); // bdAddr - 2 = mesh MAC
+    final mac = meshMacFromBdAddr(bdAddr);
     final prediction = (mac == null || palette.isEmpty)
         ? null
         : predictTuple(mac: mac, palette: palette, shuffleSeed: shuffleSeed);
@@ -156,11 +156,8 @@ class _PaintedLampRow extends StatelessWidget {
               style: Theme.of(context).textTheme.bodySmall,
             )
           else ...[
-            // Tooltip surfaces the hex code on long-press so color-blind
-            // operators can still distinguish base from shade without
-            // relying on the swatch alone. RGB-only — the wisp's wire
-            // palette has no W channel, so the W byte would always be
-            // 00 and just add noise to the tooltip.
+            // Tooltip hex for color-blind operators; RGB-only because
+            // the wisp wire palette has no W channel.
             Tooltip(
               message: 'base #${prediction.base.toRgbHex()}',
               child: LampColorSwatch(

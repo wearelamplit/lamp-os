@@ -9,8 +9,7 @@ static const uint8_t kMac[6] = {0xDE,0xAD,0xBE,0xEF,0x00,0x01};
 void setUp() {}
 void tearDown() {}
 
-// The exact trap that bit StatusBeacon: a FIXED_SIZE buffer is too small for
-// the v0x05 tlv_count trailer, so the builder refuses and returns 0.
+// FIXED_SIZE is insufficient for the v0x05 tlv_count trailer.
 void test_fixed_size_buffer_is_insufficient() {
   uint8_t tooSmall[WISP_HELLO_FIXED_SIZE];
   size_t n = buildWispHello(tooSmall, sizeof(tooSmall), 1, kMac,

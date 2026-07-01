@@ -8,11 +8,10 @@ import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/features/wisp/application/wisp_notifier.dart';
 
-/// Notifier-level coverage for the Phase-F WiFi config wireup.
+/// Notifier-level coverage for the WiFi config path.
 ///
-/// The setWifi path is a pure pass-through to the repository (no
-/// optimistic state mutation — see WispNotifier.setWifi doc), so we just
-/// need to verify the BLE write produced the expected JSON envelope.
+/// setWifi is a pure pass-through to the repository with no optimistic
+/// state mutation; tests verify the BLE write produces the correct JSON.
 void main() {
   const lampId = 'test-lamp';
 

@@ -1,13 +1,7 @@
-// Native tests for the shuffleSeed parameter on sampleTupleForMac.
-//
-// Self-contained: algorithm redeclared locally (same pattern as
-// test_tuple_sampler) so the test pins the contract without pulling in
-// CurrentPalette / ESP-IDF headers.
-//
-// Two invariants:
-//   1. seed=0 reproduces the pre-shuffle result (backward compat).
-//   2. A non-zero seed produces a different (base,shade) pair for at least
-//      one representative MAC + palette (the shuffle actually does something).
+// Tests for shuffleSeed on sampleTupleForMac. Algorithm redeclared locally
+// (no CurrentPalette pull-in). Two invariants:
+//   1. seed=0 reproduces the no-seed result (backward compat).
+//   2. A non-zero seed changes the tuple for at least one MAC + palette.
 
 #include <unity.h>
 

@@ -8,9 +8,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #else
-// Native test build — stub the FreeRTOS surface to no-ops. Single-thread
-// test harness has no concurrent access; the mutex acts solely as a
-// sequence point on hardware, so dropping it for native is safe.
+// Native test build — no-op FreeRTOS stubs. Single-threaded; mutex is
+// a sequence point on hardware only, safe to drop here.
 #include <cstddef>
 typedef void* SemaphoreHandle_t;
 #define pdTRUE         1
@@ -34,20 +33,10 @@ constexpr const char* kNamespace      = "wisp";
 constexpr const char* kKeyZone        = "selZone";
 constexpr const char* kKeySsid        = "wifiSsid";
 constexpr const char* kKeyPw          = "wifiPw";
-// Source-mode persistence. Single u8: 0=Off, 1=Manual, 2=Aurora.
-// Stored as int to match the Preferences API; the runtime cast clamps
-// out-of-range values to Aurora.
 constexpr const char* kKeySourceMode  = "srcMode";
-// Manual palette persistence. Packed RGB bytes — 3 bytes per
-// color, up to kManualPaletteMaxColors. Stored as a blob so the count is
-// implicit in the byte length (length % 3 == 0). Empty blob → empty
-// palette.
+// Packed RGB bytes: count implicit in blob length (length % 3 == 0).
 constexpr const char* kKeyManualPalette = "manualPal";
-// Off-mode color — three bytes (R, G, B). Stored as a fixed-3-byte blob
-// rather than three individual int slots so the wire format / NVS
-// footprint is identical to one ManualPaletteColor.
 constexpr const char* kKeyOffColor      = "offColor";
-// Shuffle seed — single u8 stored as int. Bumped on every "shuffle" op.
 constexpr const char* kKeyShuffleSeed   = "shufSeed";
 
 WispSourceMode coerceSourceMode(int raw) {
@@ -57,9 +46,8 @@ WispSourceMode coerceSourceMode(int raw) {
     case static_cast<int>(WispSourceMode::Aurora):
       return static_cast<WispSourceMode>(raw);
     default:
-      // Any unknown / corrupted persisted value falls back to Aurora so
-      // a partially-flashed wisp doesn't drop into a stranded "Off" mode
-      // with no operator nearby to fix it.
+      // Unknown / corrupted NVS value: fall back to Aurora so a partially-
+      // flashed wisp doesn't strand itself in Off with no operator nearby.
       return WispSourceMode::Aurora;
   }
 }
@@ -70,9 +58,6 @@ WispConfig::~WispConfig() { if (mutex_) vSemaphoreDelete(asHandle(mutex_)); }
 
 void WispConfig::begin() {
   if (opened_) return;
-  // Preferences::begin(name, readonly=false). The Arduino-ESP32 API auto-
-  // creates the namespace on first write, but opening RW ensures subsequent
-  // sets won't have to reopen.
   opened_ = prefs_.begin(kNamespace, /*readOnly=*/false);
   if (!opened_) {
     Serial.println("[wisp.cfg] Preferences::begin('wisp') failed");
@@ -81,24 +66,15 @@ void WispConfig::begin() {
     wifiPw_       = String();
     return;
   }
-  // getInt second arg is the default returned when key is missing.
   selectedZone_ = prefs_.getInt(kKeyZone, -1);
   wifiSsid_     = prefs_.getString(kKeySsid, String());
   wifiPw_       = prefs_.getString(kKeyPw, String());
-  // Default to Off when the key is missing. The pre-Phase-E behaviour
-  // was Aurora-for-everyone, but that pretended an event was in progress
-  // on a fresh wisp with no Aurora bus on the network, which (combined
-  // with the empty-palette zero-broadcast) fought every BLE base-colour
-  // edit the operator made. A fresh wisp staying quiet until the
-  // operator picks Manual + a palette OR explicitly flips Aurora on for
-  // a show is the right default. Fielded wisps with NVS-saved values
-  // are unaffected.
+  // Off default: a fresh wisp with no Aurora bus otherwise broadcasts
+  // empty-palette frames that fight operator BLE color edits.
   sourceMode_   = coerceSourceMode(
       prefs_.getInt(kKeySourceMode,
                     static_cast<int>(WispSourceMode::Off)));
 
-  // Manual palette: bytes blob, 3 bytes per color, capped at the
-  // protocol max. getBytesLength returns 0 for missing keys.
   manualPalette_.clear();
   const size_t paletteLen = prefs_.getBytesLength(kKeyManualPalette);
   if (paletteLen > 0 && paletteLen % 3 == 0) {
@@ -122,8 +98,6 @@ void WispConfig::begin() {
                   (unsigned)paletteLen);
   }
 
-  // Off-mode color: 3 bytes. Missing or wrong-sized blob falls back to the
-  // pre-existing warm-white default already set in the field initialiser.
   const size_t offColorLen = prefs_.getBytesLength(kKeyOffColor);
   if (offColorLen == 3) {
     uint8_t buf[3];
@@ -198,9 +172,6 @@ void WispConfig::setSourceMode(WispSourceMode mode) {
 
 void WispConfig::setManualPalette(
     const std::vector<ManualPaletteColor>& colors) {
-  // Cap at the protocol max so the persisted blob never grows past the
-  // budgeted size — keeps the wispStatus JSON within CONTROL_MAX_PAYLOAD
-  // regardless of what the app pushed.
   const size_t n = std::min<size_t>(colors.size(), kManualPaletteMaxColors);
   xSemaphoreTake(asHandle(mutex_), portMAX_DELAY);
   manualPalette_.assign(colors.begin(), colors.begin() + n);

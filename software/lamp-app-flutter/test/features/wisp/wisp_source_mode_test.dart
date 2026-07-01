@@ -16,11 +16,8 @@ void main() {
     });
 
     test('null defaults to off (legacy / missing key)', () {
-      // The pre-Phase-E wispStatus payload didn't carry a `source` field.
-      // Defaulting to off is the safe choice: the wisp only emits paint
-      // frames when source is Manual or Aurora, so falling back to Off
-      // can never accidentally override the lamps. The operator has to
-      // explicitly opt in.
+      // Off is safe: the wisp only emits paint frames in Manual or Aurora
+      // mode, so Off can never accidentally override the lamps.
       expect(parseWispSourceMode(null), WispSourceMode.off);
     });
 

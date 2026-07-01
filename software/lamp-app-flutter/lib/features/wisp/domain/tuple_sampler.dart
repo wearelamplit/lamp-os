@@ -1,12 +1,8 @@
-// Dart port of wisp/src/TupleSampler.cpp — local prediction of the two
-// colors the wisp would paint onto a lamp with the given MAC, given the
-// wisp's current palette.
+// Local prediction of the colors the wisp paints per lamp. Must match the
+// firmware's TupleSampler algorithm exactly or the "Painted lamps" preview
+// will diverge from what the wisp actually broadcasts.
 //
-// Used by the wisp config screen's "Painted lamps" section to show a
-// per-lamp color preview without requiring a firmware-side per-lamp
-// roster broadcast.
-//
-// iOS returns a UUID (not a bdAddr), so those lamps get no preview.
+// iOS returns a UUID instead of a bdAddr, so those lamps get no preview.
 
 import 'dart:typed_data';
 
@@ -19,9 +15,7 @@ class TuplePrediction {
 }
 
 int _fnv1a(Uint8List bytes) {
-  // Use ints; Dart on a 64-bit VM holds these in native int (mod 2^64),
-  // so we mask back to 32 bits after each multiply to mirror the C++
-  // uint32_t behaviour exactly.
+  // Mask to 32 bits after each multiply to match C++ uint32_t overflow.
   int h = 0x811C9DC5;
   for (int i = 0; i < bytes.length; ++i) {
     h ^= bytes[i];
@@ -77,11 +71,10 @@ List<int>? parseMacFromBleId(String id) {
   return out;
 }
 
-/// The lamp's mesh (ESP-NOW / WiFi-STA) MAC, derived from its lamp-reported
-/// bdAddr. ESP32 makes the BLE MAC the STA base + 2, so the mesh MAC is the
-/// BLE MAC minus 2 (full 48-bit, with borrow). This is the MAC the wisp keys
-/// its per-lamp colour pick and claim roster on, so use it (not the raw BLE id)
-/// to match or predict against wisp data.
+/// The lamp's mesh MAC derived from its bdAddr. ESP32 BLE MAC = STA base + 2,
+/// so mesh MAC = BLE MAC - 2 (full 48-bit, with borrow). The wisp keys
+/// per-lamp color picks and claim roster on the mesh MAC; use this, not the
+/// raw BLE id, when matching or predicting against wisp data.
 List<int>? meshMacFromBdAddr(String bdAddr) {
   final out = parseMacFromBleId(bdAddr);
   if (out == null) return null;

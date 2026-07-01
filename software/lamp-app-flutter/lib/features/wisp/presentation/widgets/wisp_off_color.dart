@@ -68,9 +68,8 @@ class _OffColorPickerState extends ConsumerState<OffColorPicker> {
 
   Future<void> _pick() async {
     final notifier = ref.read(wispNotifierProvider(widget.lampId).notifier);
-    // onLive streams every drag tick into setOffColor; the notifier
-    // debounces the BLE write so the wisp doesn't get flooded. Cancel
-    // restores the original colour (one trailing write).
+    // onLive feeds every drag tick into setOffColor (debounced internally).
+    // On cancel restore the original color.
     final original = widget.current;
     final picked = await showColorPickerSheet(
       context,

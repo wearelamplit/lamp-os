@@ -55,10 +55,7 @@ class CurrentZone extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
     final String headline;
     final String? subhead;
-    // The wisp publishes a -1 sentinel for "no current zone heard yet"
-    // (firmware-side equivalent of null when ZoneSelector hasn't latched).
-    // Show that as a human-readable "None detected" instead of the
-    // literal "Zone -1" the operator was seeing.
+    // Wisp publishes -1 when no zone has been heard yet; show as "None detected".
     final zone = status.currentZone;
     final zoneHeard = zone != null && zone >= 0;
     if (!zoneHeard) {
@@ -91,8 +88,7 @@ class CurrentZone extends StatelessWidget {
     );
   }
 
-  /// Maps the `zoneSource` enum to the parenthetical "where did this
-  /// come from?" sub-label on the current-zone card.
+  /// Human-readable source label for the current-zone card.
   static String _zoneSourceLabel(ZoneSource source) {
     switch (source) {
       case ZoneSource.appOp:

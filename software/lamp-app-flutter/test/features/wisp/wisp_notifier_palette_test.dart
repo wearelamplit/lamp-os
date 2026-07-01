@@ -11,18 +11,11 @@ import 'package:lamp_app/features/wisp/application/wisp_notifier.dart';
 import 'package:lamp_app/features/wisp/domain/wisp_source_mode.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Helpers + setup for the notifier-level palette tests.
+/// Tests for notifier-level palette state.
 ///
-/// The notifier reads CHAR_WISP_STATUS on build and subscribes to its
-/// notify stream. The fake BLE client (InMemoryBleClient) needs a value
-/// seeded for the initial read or the build path returns [WispStatus.empty]
-/// via the catch-all (which is also fine for these tests — we don't care
-/// about the status field, only the palette draft helpers).
-///
-/// The notifier also mirrors the saved palette to SharedPreferences (so
-/// the editor can re-hydrate after a hot/cold restart). Tests use the
-/// flutter_test `setMockInitialValues` shim so prefs operations resolve
-/// against an in-memory map instead of throwing MissingPluginException.
+/// Seed CHAR_WISP_STATUS before building the container; the notifier
+/// reads it on build. Tests use `setMockInitialValues` so prefs
+/// operations resolve in-memory instead of throwing MissingPluginException.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   const lampId = 'test-lamp';

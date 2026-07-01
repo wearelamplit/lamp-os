@@ -8,15 +8,10 @@ import '../../../lamp_shell/presentation/widgets/wifi_network_picker.dart';
 import '../../application/wisp_notifier.dart';
 import '../../domain/wisp_status.dart';
 
-// Tappable settings row that opens the lamp's network-picker sheet
-// (shared with Home Mode — the lamp owns the scan radio, the wisp does
-// not). Picking a network opens a password prompt; on confirm the
-// credentials ship through the existing `setWifi` wispOp.
-//
+// Tappable settings row for WiFi config. The lamp owns the scan radio;
+// picking a network prompts for a password, then ships via `setWifi` wispOp.
 // No optimistic UI: a wrong password or out-of-range AP would leave a
-// permanent "Connected" badge if we flipped state ourselves. The row
-// subtitle echoes `WispStatus.wifiConnected` so the operator sees the
-// authoritative state without scrolling back up to the chip.
+// sticky "Connected" badge with nothing to reconcile it.
 class WifiConfigRow extends ConsumerStatefulWidget {
   const WifiConfigRow({super.key, required this.lampId, required this.status});
   final String lampId;
@@ -52,9 +47,8 @@ class _WifiConfigRowState extends ConsumerState<WifiConfigRow> {
     );
     if (picked == null) return;
     if (!mounted) return;
-    // Prompt for the password. Open networks could theoretically skip
-    // this, but in practice we still want a confirm step before shipping
-    // the creds — and the wisp's wifi op takes a `pw` field regardless.
+    // Always prompt for a password; the wispOp takes a `pw` field
+    // regardless, and a confirm step prevents accidental credential sends.
     final pw = await showPasswordPromptDialog(
       context,
       title: 'Password for ${picked.ssid}',

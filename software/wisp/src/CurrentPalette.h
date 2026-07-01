@@ -1,22 +1,9 @@
-// CurrentPalette — the most recently resolved Aurora palette for the zone wisp
-// is shadowing. PaintDistributor pipes these colors to the lamp grid as
-// the painting source.
+// CurrentPalette — most recently resolved Aurora palette for the shadowed zone.
 //
-// Storage is uint8_t RGBW. Aurora carries two color shapes:
-//   - hexColors: 24-bit packed RGB (w=0).
-//   - colors[]:  float channels 0..1 (r,g,b,w + amber/uv we ignore).
-// The amber + uv channels are dropped — wisp's downstream consumers are the
-// lamp grid (RGBW), so chromatic remap of those would be lossy and confusing.
-//
-// Header is host-portable (no Arduino includes). The .cpp uses millis() at the
-// call site, not here.
-//
-// THREADING: update() runs on the loop task; the read accessors paletteId() /
-// colors() are loop-task only. copyPaletteIdPrefix() is mutex-guarded and can
-// be called from the FreeRTOS timer-service task (StatusBeacon::emit /
-// emitStatus). A mutex (not a spinlock) is required because paletteId_
-// assignment heap-allocates and malloc cannot run with interrupts disabled.
-// The .cpp is excluded from the native build because the mutex is FreeRTOS-only.
+// Aurora's amber/uv channels are dropped (no lamp-grid consumer).
+// update() and paletteId()/colors() are loop-task only. copyPaletteIdPrefix()
+// is mutex-guarded for timer-task callers. A mutex (not spinlock) is required
+// because paletteId_ assignment heap-allocates; malloc cannot run with IRQs off.
 
 #pragma once
 
@@ -45,8 +32,6 @@ class CurrentPalette {
   // header can stay framework-free).
   void update(const Palette& p, uint32_t nowMs);
 
-  // Drop the held palette so paint/ring fall back to empty. Loop-task only,
-  // same as update(); takes the mutex around paletteId_ for copyPaletteIdPrefix.
   void clear();
 
   const std::string& paletteId() const { return paletteId_; }
@@ -65,9 +50,8 @@ class CurrentPalette {
   uint32_t lastChangeMs_ = 0;
   std::vector<RGBW> colors_;
 
-  // Mutex handle — opaque to keep FreeRTOS out of the header. Cast back to
-  // SemaphoreHandle_t in the .cpp. Same pattern as WispRoster / WispConfig.
-  // colors_ and lastChangeMs_ are NOT guarded — only the loop task touches those.
+  // Opaque to keep FreeRTOS out of the header; cast to SemaphoreHandle_t in .cpp.
+  // colors_ and lastChangeMs_ are loop-task only; not guarded.
   void* mux_ = nullptr;
 };
 

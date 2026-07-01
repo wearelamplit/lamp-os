@@ -1,16 +1,9 @@
 // StatusBeacon — broadcasts wisp presence + state to the lamp grid.
 //
-// MSG_WISP_HELLO (binary, 37 B) every 2s: compact presence beacon for the
-// wisp inventory + paint-mode gating. MSG_CONTROL_OP (JSON "wispStatus")
-// on-change + 30s heartbeat: zone/source/observedZones/wifi/aurora/palette
-// state for the Flutter app pane (proxied via a lamp's CHAR_WISP_STATUS).
-// The 30s cadence keeps gossip-relayed wispStatus frames from competing with
-// operator CONTROL_OPs for dedup-ring capacity; on-change keeps the UI live.
-//
-// Both fire from FreeRTOS timers, not loop(), since the Aurora client's
-// loop() can stall 1s+ on bad WiFi. emit()/emitStatus() run from either the
-// timer task or the loop task (triggerOnChange); a portMUX guards seqCounter_
-// and the emission bodies.
+// MSG_WISP_HELLO every 2s; MSG_CONTROL_OP (wispStatus JSON) on-change + 30s
+// heartbeat. Both fire from FreeRTOS timers because Aurora's loop() can stall
+// 1s+ on bad WiFi. emit()/emitStatus() run from timer task or loop task
+// (triggerOnChange); portMUX guards seqCounter_ and emission bodies.
 
 #pragma once
 
@@ -51,10 +44,6 @@ class ZoneSelector;
 
 class StatusBeacon {
  public:
-  // zone/aurora feed the wispStatus path; config is optional (when non-null
-  // the wispStatus emit includes the source enum for the app to round-trip).
-  // carriedFw* zero-fill: the wisp doesn't distribute firmware; wire layout
-  // retained for back-compat with older lamps.
   void begin(MeshLink* mesh, PaintDistributor* paint,
              CurrentPalette* palette, ZoneSelector* zone,
              AuroraPaletteClient* aurora,
@@ -95,24 +84,19 @@ class StatusBeacon {
   bool lastAuroraConnected_ = false;
   bool haveLastConnState_   = false;
 
-  // Diff-state for the 2s HELLO path, separate from the emitStatus vars so
-  // the two on-change paths don't interfere. On a WiFi/Aurora flip the hello
-  // timer drives an immediate emitStatus() so radio events propagate within
-  // ~2s instead of waiting for the 30s heartbeat.
+  // HELLO-path diff-state kept separate from emitStatus vars: a WiFi/Aurora
+  // flip in HELLO triggers emitStatus() within 2s rather than waiting 30s.
   bool lastHelloWifi_      = false;
   bool lastHelloAurora_    = false;
   bool haveLastHelloConn_  = false;
 
-  // Don't log inside the lock; critical sections stay short (build frame on
-  // stack, hand to MeshLink::broadcast).
+  // No logging inside the lock; critical section builds frame on stack only.
   STATUS_BEACON_PORTMUX_TYPE emitMux_ = STATUS_BEACON_PORTMUX_INIT;
 
   static constexpr uint32_t kHelloIntervalMs  = 2000;
   static constexpr uint32_t kStatusIntervalMs = 30000;
   static constexpr uint32_t kWispVersion      = 0x00010000u;  // 1.0.0
 
-  // wispStatus JSON buffer. CONTROL_MAX_PAYLOAD is 230; worst-case
-  // observedZones[16] with two-digit ids fits under that.
   static constexpr size_t kStatusJsonBufLen = 256;
 };
 

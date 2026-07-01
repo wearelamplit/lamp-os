@@ -1,17 +1,6 @@
-// WispOpDispatcher — parse + route a MSG_CONTROL_OP payload (JSON) on the
-// wisp side (BLE app pane → lamp → mesh → wisp).
-//
-// On a setWifi op the dispatcher persists once via WispConfig then kicks both
-// downstream consumers (WifiLink for the STA association, StageBeacon for the
-// BLE creds advert). Those two are pointers so tests exercising only
-// zone/source/palette flows can pass nullptr; only the setWifi path derefs
-// them, and a null there logs and skips the kick without aborting persistence.
-//
-// Wire format: plaintext JSON like
-//   {"char":"wispOp","op":"setZone","zoneId":3}
-//   {"char":"wispOp","op":"setWifi","ssid":"foo","pw":"bar"}
-// Any other "char" (including gossip-relayed wispStatus echoes) returns
-// Ignored silently.
+// WispOpDispatcher — parse + route a MSG_CONTROL_OP payload (JSON).
+// Wire: {"char":"wispOp","op":"setZone","zoneId":3} etc.
+// WifiLink/StageBeacon pointers are nullable for tests that skip the setWifi path.
 
 #pragma once
 

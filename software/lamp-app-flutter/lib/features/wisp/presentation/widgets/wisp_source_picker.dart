@@ -85,11 +85,8 @@ class _SourcePill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Visual contract mirrors the Social tab's _PersonalityButton:
-    // selected → solid primary fill on onPrimary text; idle → outline
-    // border on onSurface. Disabled drops opacity instead of changing
-    // hue so the row reads as "not for you right now" rather than
-    // "broken".
+    // selected → solid primary fill; idle → outline border.
+    // Disabled drops opacity to signal "unavailable" without looking broken.
     final colorScheme = Theme.of(context).colorScheme;
     final Color fill = enabled && selected
         ? colorScheme.primary

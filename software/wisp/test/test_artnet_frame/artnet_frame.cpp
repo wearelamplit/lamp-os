@@ -1,8 +1,4 @@
-// Native tests for the wisp ArtNet frame builder.
-//
-// Pins the on-the-wire layout that
-// software/lamp-os/src/components/network/artnet.cpp decodes. If production
-// drifts, these tests still express the spec.
+// Pins the ArtNet frame wire layout decoded by lamp-os/src/components/network/artnet.cpp.
 
 #include <unity.h>
 
@@ -30,21 +26,18 @@ constexpr size_t kDmxStart = 18;
 constexpr size_t kBytesPerFixture = 10;
 constexpr size_t kNumFixtures = 8;
 
-// Tuple sampler stub: deterministic, returns fixture-index-derived colors.
 ColorTuple sampleTupleForFixture(const std::vector<RGBW>& palette,
                                  uint8_t fixtureIndex) {
   ColorTuple t;
   if (palette.empty()) return t;
   const auto& base = palette[fixtureIndex % palette.size()];
   const auto& shade = palette[(fixtureIndex + 1) % palette.size()];
-  // Convention (mirrors TupleSampler.h:32): [0] → base, [1] → shade.
+  // [0] → base, [1] → shade (matches TupleSampler contract).
   t.r[0] = base.r;  t.g[0] = base.g;  t.b[0] = base.b;  t.w[0] = base.w;
   t.r[1] = shade.r; t.g[1] = shade.g; t.b[1] = shade.b; t.w[1] = shade.w;
   return t;
 }
 
-// Mirror of artnet_frame.cpp build logic.
-// Returns bytes written, or 0 on insufficient buffer.
 size_t buildFrame(const std::vector<RGBW>& palette,
                   uint8_t seq,
                   uint8_t* out, size_t outLen) {

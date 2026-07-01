@@ -19,13 +19,7 @@ namespace wisp {
 
 namespace {
 
-// FF:FF:FF:FF:FF:FF broadcast target for the CONTROL_OP frame. Matches the
-// targetMac convention every other broadcast CONTROL_OP uses on the wire.
 constexpr uint8_t kBroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-
-// Take up to N characters of the palette id as the on-wire prefix. Matches
-// the MSG_WISP_HELLO 8-byte slot convention so the app sees the same id
-// from both paths.
 constexpr size_t kPaletteIdPrefixLen = lamp_protocol::WISP_HELLO_PALETTE_ID_PREFIX_LEN;
 
 }  // namespace
@@ -81,14 +75,9 @@ void StatusBeacon::startTimer() {
 }
 
 void StatusBeacon::triggerOnChange() {
-  // Emit immediately AND reschedule the heartbeat from now. Order matters:
-  // if we reset the timer first and emitStatus is slow (it isn't, but the
-  // future could change that), the next heartbeat would land mid-emit. By
-  // emitting first we capture a consistent snapshot, then re-zero the
-  // 30s clock.
+  // Emit first, then reset: snapshot is consistent before the 30s clock restarts.
   emitStatus();
   if (statusTimer_) {
-    // xTimerReset from the loop task is safe; uses the timer command queue.
     xTimerReset(statusTimer_, 0);
   }
 }
@@ -99,11 +88,7 @@ void StatusBeacon::emit() {
   uint8_t srcMac[6] = {0};
   mesh_->getMac(srcMac);
 
-  // Flags. WISP_HELLO carries paintMode + wifi + aurora as three single
-  // bits; mirrors what wispStatus carries in JSON. Snapshot wifi/aurora into
-  // locals once so the same values feed both the HELLO frame and the
-  // on-change diff below — otherwise a flip between the two reads could
-  // race and produce a stale diff comparison.
+  // Snapshot once so the HELLO frame and on-change diff see the same values.
   const bool wifiNow   = WiFi.isConnected();
   const bool auroraNow = aurora_ && aurora_->isStreaming();
   uint8_t flags = 0;
@@ -117,9 +102,7 @@ void StatusBeacon::emit() {
     flags |= lamp_protocol::WISP_HELLO_FLAG_AURORA_CONNECTED;
   }
 
-  // paletteIdPrefix: low 8 bytes of the active palette id (or zeros). Use
-  // the mux-guarded snapshot so this timer-task read doesn't race a loop-task
-  // CurrentPalette::update() reassigning paletteId_.
+  // mux-guarded snapshot: this timer task can race a loop-task update().
   char paletteIdPrefix[lamp_protocol::WISP_HELLO_PALETTE_ID_PREFIX_LEN] = {0};
   size_t paletteIdPrefixLen = 0;
   if (palette_) {
@@ -127,9 +110,7 @@ void StatusBeacon::emit() {
         paletteIdPrefix, sizeof(paletteIdPrefix));
   }
 
-  // carriedFwChannel / carriedFwVersion zero-fill: wisp no longer
-  // distributes firmware. Wire layout retained so older lamps that read
-  // these fields don't malform-drop the HELLO.
+  // carriedFw* zero-fill; wire layout retained so older lamps don't malform-drop.
   const char* carriedFwChannel = nullptr;
   const size_t carriedFwChannelLen = 0;
   const uint32_t carriedFwVersion = 0;
@@ -147,14 +128,8 @@ void StatusBeacon::emit() {
       carriedFwVersion);
   STATUS_BEACON_PORTMUX_EXIT(&emitMux_);
   if (!n) return;
-  // broadcast() ends in esp_now_send which is itself queued — safe to call
-  // outside the mux. The seq is already committed.
   mesh_->broadcast(buf, n);
 
-  // MSG_WISP_CLAIM — broadcast our current claim set so peers can build
-  // the shared view. Same 2 s cadence as MSG_WISP_HELLO; lamps gossip-
-  // relay it the same way. Roster is optional during init (legacy
-  // construction paths may pass nullptr).
   if (roster_) {
     uint8_t claimEntries[lamp_protocol::kMaxWispClaimEntries *
                          lamp_protocol::WISP_CLAIM_ENTRY_SIZE] = {0};
@@ -173,11 +148,7 @@ void StatusBeacon::emit() {
     }
   }
 
-  // On-change trigger for passive WiFi/Aurora flips. The 2s HELLO timer is
-  // the only path that observes radio state on a fast cadence; without this
-  // diff, a connect/disconnect would wait up to 30s for the next heartbeat
-  // to be reported in wispStatus. emitStatus() takes its own portMUX and is
-  // re-entrant-safe from this task.
+  // WiFi/Aurora flips would otherwise wait up to 30s for the wispStatus heartbeat.
   const bool helloFlagsChanged =
       haveLastHelloConn_ &&
       (wifiNow != lastHelloWifi_ || auroraNow != lastHelloAurora_);
@@ -196,30 +167,20 @@ void StatusBeacon::emitStatus() {
   uint8_t srcMac[6] = {0};
   mesh_->getMac(srcMac);
 
-  // Snapshot the fields BEFORE the JSON build so the snapshot is
-  // consistent within one emission. Reading WiFi + Aurora flags here is
-  // cheap (one bool each); doing it inside the lock would needlessly
-  // hold the mux during external library calls.
   const bool wifiConn   = WiFi.isConnected();
   const bool auroraConn = aurora_ && aurora_->isStreaming();
   const int  currentZone = zone_ ? zone_->currentZone() : -1;
   const char* zoneSrc    = zone_ ? zoneSourceName(zone_->source())
                                  : zoneSourceName(ZoneSource::None);
 
-  // Snapshot observedZones into a fixed stack buffer via the mux-guarded
-  // accessor. Taking a reference to the underlying vector here would race
-  // ZoneSelector::observe() on the loop task — push_back can relocate the
-  // backing storage, and erase() invalidates iterators. Buffer is sized
-  // to kMaxObservedZones so we capture the full set without truncation.
+  // copyObserved is mux-guarded: a direct reference would race observe()'s
+  // push_back (which can relocate backing storage) on the loop task.
   int obsBuf[kMaxObservedZones];
   size_t obsCount = 0;
   if (zone_) {
     obsCount = zone_->copyObserved(obsBuf, kMaxObservedZones);
   }
 
-  // paletteIdPrefix — first 8 chars of the active palette id (or empty).
-  // copyPaletteIdPrefix snapshots under the CurrentPalette mux, so this
-  // timer-task call won't tear against a loop-task update().
   char paletteIdPrefix[kPaletteIdPrefixLen + 1] = {0};
   if (palette_) {
     const size_t n = palette_->copyPaletteIdPrefix(paletteIdPrefix,
@@ -229,15 +190,7 @@ void StatusBeacon::emitStatus() {
 
   const uint32_t lastSeenMs = millis();
 
-  // Source-mode field. Stringified so the app side doesn't have to
-  // dual-decode int / string forms. Older app versions that don't
-  // recognize this field ignore it, so this is back-compat. The manualPalette
-  // is deliberately NOT included — at 10 colors it would push the JSON
-  // past CONTROL_MAX_PAYLOAD (230 B) once observedZones is non-trivial.
-  // The Flutter side keeps its own per-session copy of the saved palette;
-  // a fresh app open after a wisp reboot will read empty until the
-  // operator re-edits and saves (the wisp keeps painting from NVS in the
-  // meantime). Acceptable trade per the spec audit.
+  // manualPalette excluded: at 10 colors it can push JSON past CONTROL_MAX_PAYLOAD.
   const char* sourceName = "aurora";  // safe default for nullptr config
   if (config_) {
     switch (config_->sourceMode()) {
@@ -265,11 +218,7 @@ void StatusBeacon::emitStatus() {
   const size_t jsonLen = buildWispStatusJson(
       fields, jsonBuf, sizeof(jsonBuf), lamp_protocol::CONTROL_MAX_PAYLOAD);
 
-  // Broadcast the manualPalette first, independent of the wispStatus frame: a
-  // wispStatus build/overflow failure below must not also take the palette
-  // down (the app reads both off CHAR_WISP_STATUS). emitPalette() is broken
-  // out so WispOpDispatcher can also call it on a setManualPalette write for
-  // sub-30-s convergence.
+  // Emit palette first: a wispStatus build failure must not suppress it.
   emitPalette();
 
   if (jsonLen == 0) {
@@ -277,8 +226,6 @@ void StatusBeacon::emitStatus() {
     return;
   }
 
-  // Update the diff cache + log transitions. Transitions only trigger a
-  // log line; the broadcast itself is unconditional on the timer tick.
   if (!haveLastConnState_) {
     haveLastConnState_ = true;
   } else {
@@ -294,8 +241,7 @@ void StatusBeacon::emitStatus() {
   lastWifiConnected_   = wifiConn;
   lastAuroraConnected_ = auroraConn;
 
-  // Build CONTROL_OP frame around the JSON. seq under the mux so a parallel
-  // emit() / emitStatus() can't share a seq.
+  // seq under the mux: parallel emit() / emitStatus() must not share a seq.
   uint8_t frame[lamp_protocol::CONTROL_MAX_SIZE];
   size_t frameLen = 0;
   uint16_t seq = 0;
@@ -319,8 +265,6 @@ void StatusBeacon::emitPalette() {
   uint8_t srcMac[6] = {0};
   mesh_->getMac(srcMac);
 
-  // Palette snapshotted under WispConfig's mutex — safe to call from the
-  // timer-service task while setManualPalette runs on the loop task.
   uint8_t rgb[lamp_protocol::kMaxWispPaletteColors * 3];
   size_t count = 0;
   if (config_) {

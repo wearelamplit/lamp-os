@@ -7,8 +7,7 @@ namespace wisp {
 
 namespace {
 
-// FNV-1a 32-bit. Tiny, fast, inlinable. Good enough for "spread MACs across
-// a small integer set"; we are NOT depending on it for security.
+// FNV-1a 32-bit. Not cryptographic; used only to spread MACs across a small index set.
 uint32_t fnv1a(const uint8_t* bytes, size_t n) {
   uint32_t h = 0x811C9DC5u;
   for (size_t i = 0; i < n; ++i) {
@@ -18,19 +17,10 @@ uint32_t fnv1a(const uint8_t* bytes, size_t n) {
   return h;
 }
 
-// Hash a MAC with a 32-bit salt XORed in before hashing. The salt lets us
-// derive uncorrelated outputs (one for idxA, one for idxB, one for the
-// swap bit) from a single MAC.
-//
-// Two-stage mix:
-//   1. FNV-1a over the salt-XORed bytes — spreads salt across the state.
-//   2. Stafford variant-13 finalizer — FNV-1a alone has poor low-bit
-//      avalanche for inputs that differ only in their low bytes (which is
-//      the production case: the 22 lamps' MACs differ mostly in byte 5).
-//      Without the finalizer, bit 0 of the output (used by the swap path)
-//      and (h % n) for small n both bias hard, defeating the per-lamp
-//      randomization. The finalizer is two multiplies + three xor-shifts —
-//      cheaper than re-rolling, decisive on avalanche.
+// FNV-1a over salt-XORed MAC bytes, then Stafford-13 finalizer. FNV-1a alone
+// has poor low-bit avalanche when inputs differ only in their low byte (fleet
+// MACs), which biases bit-0 (swap) and (h % n) for small n. The finalizer
+// fixes this with two multiplies + three xor-shifts.
 uint32_t hashMac(const uint8_t mac[6], uint32_t salt) {
   uint8_t buf[6];
   buf[0] = mac[0] ^ static_cast<uint8_t>(salt & 0xFF);
@@ -49,9 +39,7 @@ uint32_t hashMac(const uint8_t mac[6], uint32_t salt) {
 }
 
 bool nearlyEqualColor(const RGBW& a, const RGBW& b) {
-  // ~8/255 per channel — about the smallest step the lamp eye can perceive
-  // on the WS2812 family. If adjacent authored stops are this close, treat
-  // them as one so we don't waste a "discrete" pick on a near-duplicate.
+  // 8/255 ≈ smallest perceptible step on WS2812; collapse near-duplicates.
   constexpr int kDeltaThreshold = 8;
   auto chDelta = [](uint8_t x, uint8_t y) {
     return std::abs(static_cast<int>(x) - static_cast<int>(y));
@@ -62,8 +50,6 @@ bool nearlyEqualColor(const RGBW& a, const RGBW& b) {
          chDelta(a.w, b.w) < kDeltaThreshold;
 }
 
-// Dedupe adjacent near-identical stops. Stops are gradient control points;
-// colors between them are interpolated when sampling.
 std::vector<RGBW> dedupe(const std::vector<RGBW>& in) {
   std::vector<RGBW> out;
   out.reserve(in.size());
@@ -75,8 +61,7 @@ std::vector<RGBW> dedupe(const std::vector<RGBW>& in) {
   return out;
 }
 
-// Linear-interpolate two 0-255 channels at fixed-point fraction frac in
-// [0, 2^32). All-unsigned so the Dart port matches byte for byte.
+// All-unsigned arithmetic keeps the result byte-identical to the Dart implementation.
 uint8_t lerp8(uint8_t a, uint8_t b, uint32_t frac) {
   const uint64_t inv = 0x100000000ULL - static_cast<uint64_t>(frac);
   return static_cast<uint8_t>(
@@ -84,8 +69,6 @@ uint8_t lerp8(uint8_t a, uint8_t b, uint32_t frac) {
         static_cast<uint64_t>(b) * static_cast<uint64_t>(frac)) >> 32));
 }
 
-// Sample the palette as a continuous gradient at fixed-point position pos in
-// [0, 2^32): stops are control points, colors between them are interpolated.
 RGBW sampleGradientAt(const std::vector<RGBW>& stops, uint32_t pos) {
   const uint32_t n = static_cast<uint32_t>(stops.size());
   if (n == 1) return stops[0];

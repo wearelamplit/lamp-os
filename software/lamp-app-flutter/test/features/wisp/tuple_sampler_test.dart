@@ -1,11 +1,6 @@
-// Parity / regression tests for the Dart port of the wisp's
-// `sampleTupleForMac` algorithm.
-//
-// The C++ implementation lives at `software/wisp/src/TupleSampler.cpp`
-// and the Dart port mirrors it at `lib/features/wisp/domain/tuple_sampler.dart`.
-// If either drifts, the wisp config screen's "Painted lamps" preview
-// will diverge from what the wisp actually paints — a silent UX bug.
-// These tests pin the contract.
+// Regression tests for the TupleSampler algorithm.
+// The Dart implementation must stay byte-for-byte in sync with the
+// firmware's TupleSampler.cpp or the "Painted lamps" preview silently diverges.
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lamp_app/features/control/domain/lamp_color.dart';
@@ -130,7 +125,7 @@ void main() {
     });
 
     test('golden parity: mac=10:20:30:40:50:60, orange+green, seed=0', () {
-      // Must match the C++ golden in test_tuple_sampler/tuple_sampler.cpp byte-for-byte.
+      // Golden values must match the firmware's test_tuple_sampler.cpp byte-for-byte.
       const mac = [0x10, 0x20, 0x30, 0x40, 0x50, 0x60];
       const palette = [orange, wispGreen];
       final p = predictTuple(mac: mac, palette: palette, shuffleSeed: 0);

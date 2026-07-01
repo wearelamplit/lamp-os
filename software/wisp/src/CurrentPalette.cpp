@@ -4,9 +4,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #else
-// Native test build — stub the FreeRTOS surface to no-ops. Single-thread
-// test harness has no concurrent access; the mutex acts solely as a
-// sequence point on hardware, so dropping it for native is safe.
+// Native test build — no-op FreeRTOS stubs. Single-threaded; mutex is
+// a sequence point on hardware only, safe to drop here.
 #include <cstddef>
 typedef void* SemaphoreHandle_t;
 #define pdTRUE         1
@@ -47,17 +46,14 @@ CurrentPalette::CurrentPalette()  { mux_ = xSemaphoreCreateMutex(); }
 CurrentPalette::~CurrentPalette() { if (mux_) vSemaphoreDelete(asHandle(mux_)); }
 
 void CurrentPalette::update(const Palette& p, uint32_t nowMs) {
-  // paletteId_ assignment heap-allocates for non-SSO ids; running it inside
-  // a spinlock (portENTER_CRITICAL) calls malloc with interrupts disabled and
-  // starves the ESP-NOW ISR. A mutex lets the scheduler run during the alloc.
+  // Must hold mutex (not spinlock): heap-alloc for non-SSO ids; malloc
+  // cannot run with IRQs off (portENTER_CRITICAL would starve the ESP-NOW ISR).
   xSemaphoreTake(asHandle(mux_), portMAX_DELAY);
   paletteId_ = p.id;
   xSemaphoreGive(asHandle(mux_));
   lastChangeMs_ = nowMs;
   colors_.clear();
 
-  // hexColors is the simpler shape (24-bit packed RGB). When present we use
-  // it directly with w=0; this is how the read-only built-in palettes arrive.
   if (!p.hexColors.empty()) {
     colors_.reserve(p.hexColors.size());
     for (uint64_t hex : p.hexColors) {
@@ -72,8 +68,6 @@ void CurrentPalette::update(const Palette& p, uint32_t nowMs) {
     return;
   }
 
-  // colors[] carries float channels. amber and uv are intentionally dropped —
-  // wisp paints the lamp grid in RGBW and has no place for those channels.
   colors_.reserve(p.colors.size());
   for (const auto& src : p.colors) {
     RGBW c;
@@ -88,8 +82,7 @@ void CurrentPalette::update(const Palette& p, uint32_t nowMs) {
 void CurrentPalette::clear() {
   colors_.clear();
   lastChangeMs_ = 0;
-  // paletteId_.clear() can free the heap buffer for non-SSO ids — same reason
-  // update() holds the mutex around the assignment.
+  // Same IRQ-safety constraint as update().
   xSemaphoreTake(asHandle(mux_), portMAX_DELAY);
   paletteId_.clear();
   xSemaphoreGive(asHandle(mux_));
