@@ -164,16 +164,6 @@ class _SetupBody extends ConsumerWidget {
             subtitle: 'Live BLE adv stream',
             onTap: () => context.push('/devices'),
           ),
-        // Dev-mode-only — the per-variant firmware cache inspector is
-        // useful for fleet operators debugging OTA pipelines, not for
-        // an advanced-but-not-dev user.
-        if (state.lamp.devMode)
-          SettingsRow(
-            icon: Icons.folder_zip_outlined,
-            title: 'Cached firmwares',
-            subtitle: 'Per-variant binaries on this phone',
-            onTap: () => context.push(AppRoutes.firmwareCache),
-          ),
         // Factory reset — also gated on session-advanced. Destructive:
         // wipes NVS and re-adopts. Dialog confirms before firing.
         if (ref.watch(effectiveAdvancedProvider(lampId)))

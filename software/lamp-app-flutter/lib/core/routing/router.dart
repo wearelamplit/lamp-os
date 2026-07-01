@@ -4,7 +4,6 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../features/control/presentation/knockout_screen.dart';
 import '../../features/firmware/application/cached_firmware_notifier.dart';
-import '../../features/firmware/presentation/firmware_cache_screen.dart';
 import '../../features/inventory/application/inventory_notifier.dart';
 import '../../features/inventory/presentation/my_lamps_screen.dart';
 import '../../features/lamp_shell/presentation/add_expression_picker_screen.dart';
@@ -81,10 +80,6 @@ GoRouter appRouter(Ref ref) {
       GoRoute(
         path: AppRoutes.myLamps,
         builder: (_, _) => const MyLampsScreen(),
-      ),
-      GoRoute(
-        path: AppRoutes.firmwareCache,
-        builder: (_, _) => const FirmwareCacheScreen(),
       ),
       GoRoute(
         path: '/lamp/:id/control',

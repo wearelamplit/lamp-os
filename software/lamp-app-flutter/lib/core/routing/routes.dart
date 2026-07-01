@@ -22,7 +22,4 @@ abstract class AppRoutes {
   static String homeWifi(String id) => '/lamp/$id/setup/wifi';
   static String homeMode(String id) => '/lamp/$id/setup/home-mode';
   static String advancedLeds(String id) => '/lamp/$id/setup/advanced-leds';
-  /// Advanced-only listing of firmware binaries cached on this phone.
-  /// App-wide content; reachable from any lamp's advanced setup row.
-  static const firmwareCache = '/firmware-cache';
 }
