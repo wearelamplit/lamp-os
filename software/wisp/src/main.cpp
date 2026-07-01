@@ -16,12 +16,10 @@
 #include "aurora/AuroraPaletteClient.h"
 #include "wire/lamp_protocol.hpp"
 
-#include <WiFi.h>
-#include <esp_wifi.h>
-
 #include "artnet/artnet_emitter.hpp"
 #include "net/stage_beacon.hpp"
 #include "net/wifi_link.hpp"
+#include "console/serial_console.hpp"
 
 namespace {
 
@@ -52,8 +50,6 @@ wisp::WispOpDispatcher wispOpDispatcher(wispConfig);
 lamp_protocol::DedupRing controlOpDedup;
 
 wisp::ZoneSelector zoneSelector;
-
-String serialLineBuf;
 
 // MSG_CONTROL_OP recv handler fires on the WiFi task (Core 0). ArduinoJson
 // and Preferences are not safe there; fixed-size memcpy under portMUX,
@@ -309,111 +305,6 @@ void onAuroraPalette(int zone, const Palette& p) {
   renderRing();
 }
 
-void processSerialCommand(const String& cmd) {
-  if (cmd.length() == 0) return;
-  if (cmd == "paint:on") {
-    paintDistributor.setPaintMode(true);
-    Serial.println("[wisp.cmd] paint mode ON");
-  } else if (cmd == "paint:off") {
-    paintDistributor.setPaintMode(false);
-    Serial.println("[wisp.cmd] paint mode OFF");
-  } else if (cmd == "src:off" || cmd == "src:manual" || cmd == "src:aurora") {
-    const wisp::WispSourceMode m =
-        cmd.endsWith("off")    ? wisp::WispSourceMode::Off
-      : cmd.endsWith("manual") ? wisp::WispSourceMode::Manual
-                               : wisp::WispSourceMode::Aurora;
-    wispConfig.setSourceMode(m);
-    applySourceModeTransition(m);
-    statusBeacon.triggerOnChange();
-    Serial.printf("[wisp.cmd] source mode = %s\n", cmd.c_str() + 4);
-  } else if (cmd == "artnet:on") {
-    artnetEmitter.setEnabled(true);
-  } else if (cmd == "artnet:off") {
-    artnetEmitter.setEnabled(false);
-  } else if (cmd == "stage:on") {
-    stageBeacon.refreshAdvert();
-  } else if (cmd == "stage:off") {
-    stageBeacon.stop();
-  } else if (cmd == "wifi:show") {
-    Serial.printf("[wifi] ssid='%s' connected=%d ip=%s\n",
-                  wifi.ssid().c_str(), wifi.isConnected() ? 1 : 0,
-                  WiFi.localIP().toString().c_str());
-  } else if (cmd == "wifi:clear") {
-    // WiFi.disconnect alone doesn't reset the radio channel; need
-    // esp_wifi_set_channel to snap back to LAMP_ESPNOW_CHANNEL.
-    wispConfig.setWifi("", "");
-    wifi.reconnect();
-    esp_wifi_set_channel(LAMP_ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
-    if (stageBeacon.isAdvertising()) {
-      stageBeacon.refreshAdvert();
-    }
-    Serial.printf("[wisp.cmd] wifi creds cleared; radio pinned to channel %d\n",
-                  LAMP_ESPNOW_CHANNEL);
-  } else if (cmd.startsWith("wifi:set ")) {
-    // Format: "wifi:set <ssid> <pass>" — split on first space after prefix.
-    int sp = cmd.indexOf(' ', 9);
-    if (sp < 0 || sp == 9 || sp == (int)cmd.length() - 1) {
-      Serial.println("[wisp.cmd] usage: wifi:set <ssid> <pass>");
-      return;
-    }
-    String ssid = cmd.substring(9, sp);
-    String pass = cmd.substring(sp + 1);
-    wispConfig.setWifi(ssid, pass);
-    wifi.reconnect();
-    if (stageBeacon.isAdvertising()) {
-      stageBeacon.refreshAdvert();
-    }
-    Serial.println("[wisp.cmd] wifi creds saved");
-  } else {
-    Serial.printf("[wisp.cmd] unknown command: %s\n", cmd.c_str());
-  }
-}
-
-void pumpSerial() {
-  while (Serial.available() > 0) {
-    int ch = Serial.read();
-    if (ch < 0) break;
-    if (ch == '\r') continue;  // strip CR; macOS / Linux send LF only
-    if (ch == '\n') {
-      String cmd = serialLineBuf;
-      cmd.trim();
-      serialLineBuf = String();
-      processSerialCommand(cmd);
-      continue;
-    }
-    if (serialLineBuf.length() < 128) serialLineBuf += static_cast<char>(ch);
-  }
-}
-
-String formatVersion(uint32_t v) {
-  uint8_t major = (v >> 16) & 0xFF;
-  uint8_t minor = (v >> 8) & 0xFF;
-  uint8_t patch = v & 0xFF;
-  char buf[16];
-  snprintf(buf, sizeof(buf), "%u.%u.%u", major, minor, patch);
-  return String(buf);
-}
-
-void dumpInventory(uint32_t /*nowMs*/) {
-  // Re-sample: HELLOs can arrive during auroraClient.loop(); a stale nowMs
-  // causes unsigned-subtraction wraparound on (nowMs - lastSeenMs).
-  const uint32_t nowMs = millis();
-  auto roster = inventory.snapshot();
-  Serial.printf("[wisp] roster (%u lamp%s):\n",
-                (unsigned)roster.size(), roster.size() == 1 ? "" : "s");
-  for (const auto& e : roster) {
-    const uint32_t ageMs = (nowMs >= e.lastSeenMs) ? nowMs - e.lastSeenMs : 0;
-    Serial.printf("  %02X:%02X:%02X:%02X:%02X:%02X  %-12s  fw=%s  age=%lums\n",
-                  e.mac[0], e.mac[1], e.mac[2], e.mac[3], e.mac[4], e.mac[5],
-                  e.name.c_str(), formatVersion(e.firmwareVersion).c_str(),
-                  (unsigned long)ageMs);
-  }
-  Serial.printf("[wisp] zone=%d source=%s observed=%u\n",
-                zoneSelector.currentZone(),
-                wisp::zoneSourceName(zoneSelector.source()),
-                (unsigned)zoneSelector.observedCount());
-}
-
 // Stable across reboots; Aurora uses it to recognize returning subscribers.
 String buildInstanceId() {
   uint64_t mac = ESP.getEfuseMac();
@@ -422,6 +313,11 @@ String buildInstanceId() {
            (unsigned long)(mac & 0xFFFFFFul));
   return String(buf);
 }
+
+wisp::SerialConsole serialConsole(
+    paintDistributor, wispConfig, artnetEmitter, stageBeacon,
+    wifi, statusBeacon, inventory, zoneSelector,
+    [](wisp::WispSourceMode m) { applySourceModeTransition(m); });
 
 }  // namespace
 
@@ -493,7 +389,7 @@ void loop() {
   const uint32_t now = millis();
 
   auroraClient.loop();
-  pumpSerial();
+  serialConsole.pump();
   drainPendingWispOp();
   {
     auto inv = inventory.snapshot();
@@ -527,7 +423,7 @@ void loop() {
 
   if (now - lastDumpMs > 10000) {
     lastDumpMs = now;
-    dumpInventory(now);
+    serialConsole.dumpInventory();
   }
 
   if (now - lastPruneMs > 30000) {
