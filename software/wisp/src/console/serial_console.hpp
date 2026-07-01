@@ -6,7 +6,6 @@
 namespace wisp {
 
 class PaintDistributor;
-class ArtnetEmitter;
 class StageBeacon;
 class WifiLink;
 class StatusEmitter;
@@ -20,8 +19,7 @@ public:
   using SourceTransitionFn = std::function<void(WispSourceMode)>;
 
   SerialConsole(PaintDistributor& paint, WispConfig& config,
-                ArtnetEmitter& artnet, StageBeacon& stage,
-                WifiLink& wifi, StatusEmitter& status,
+                StageBeacon& stage, WifiLink& wifi, StatusEmitter& status,
                 LampInventory& inventory, ZoneSelector& zones,
                 SourceTransitionFn onSourceTransition);
 
@@ -37,7 +35,6 @@ private:
 
   PaintDistributor& paint_;
   WispConfig& config_;
-  ArtnetEmitter& artnet_;
   StageBeacon& stage_;
   WifiLink& wifi_;
   StatusEmitter& status_;

@@ -69,7 +69,7 @@ String buildInstanceId() {
 }
 
 wisp::SerialConsole serialConsole(
-    paintDistributor, wispConfig, artnetEmitter, stageBeacon,
+    paintDistributor, wispConfig, stageBeacon,
     wifi, statusEmitter, inventory, zoneSelector,
     [](wisp::WispSourceMode m) { controller.applySourceModeTransition(m); });
 
@@ -140,7 +140,7 @@ void setup() {
   controller.applySourceModeTransition(wispConfig.sourceMode());
 
   Serial.println("[wisp] paint distributor + status beacon online");
-  Serial.println("[wisp] cmds: paint:on/off  artnet:on/off  stage:on/off");
+  Serial.println("[wisp] cmds: paint:on/off  stage:on/off");
   Serial.println("[wisp] cmds: src:off/manual/aurora  wifi:set <ssid> <pass>  wifi:show");
 }
 

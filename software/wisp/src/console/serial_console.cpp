@@ -9,20 +9,18 @@
 #include "net/mesh_link.hpp"
 #include "net/stage_beacon.hpp"
 #include "net/wifi_link.hpp"
-#include "artnet/artnet_emitter.hpp"
 #include "paint/paint_distributor.hpp"
 #include "status/status_emitter.hpp"
 
 namespace wisp {
 
 SerialConsole::SerialConsole(PaintDistributor& paint, WispConfig& config,
-                             ArtnetEmitter& artnet, StageBeacon& stage,
-                             WifiLink& wifi, StatusEmitter& status,
-                             LampInventory& inventory, ZoneSelector& zones,
+                             StageBeacon& stage, WifiLink& wifi,
+                             StatusEmitter& status, LampInventory& inventory,
+                             ZoneSelector& zones,
                              SourceTransitionFn onSourceTransition)
     : paint_(paint),
       config_(config),
-      artnet_(artnet),
       stage_(stage),
       wifi_(wifi),
       status_(status),
@@ -92,10 +90,6 @@ void SerialConsole::handleCommand(const String& cmd) {
     onSourceTransition_(m);
     status_.triggerOnChange();
     Serial.printf("[wisp.cmd] source mode = %s\n", cmd.c_str() + 4);
-  } else if (cmd == "artnet:on") {
-    artnet_.setEnabled(true);
-  } else if (cmd == "artnet:off") {
-    artnet_.setEnabled(false);
   } else if (cmd == "stage:on") {
     stage_.refreshAdvert();
   } else if (cmd == "stage:off") {

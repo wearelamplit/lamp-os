@@ -13,27 +13,14 @@ namespace wisp {
 void ArtnetEmitter::begin(CurrentPalette* palette, WifiLink* wifi) {
   palette_ = palette;
   wifi_ = wifi;
-  // UDP socket is opened lazily on first emit; until then we don't know
-  // if WiFi is connected.
-}
-
-void ArtnetEmitter::setEnabled(bool on) {
-  enabled_ = on;
-  if (on) {
-    lastEmitMs_ = 0;  // force first emit on next tick
-    Serial.println("[artnet] enabled");
-  } else {
-    Serial.println("[artnet] disabled");
-  }
+  lastEmitMs_ = 0;  // force first tick to emit promptly once WiFi is up
 }
 
 void ArtnetEmitter::onPaletteChanged() {
-  if (!enabled_) return;
   emitNow();
 }
 
 void ArtnetEmitter::tick(uint32_t nowMs) {
-  if (!enabled_) return;
   if (nowMs - lastEmitMs_ < kBackstopMs) return;
   emitNow();
 }

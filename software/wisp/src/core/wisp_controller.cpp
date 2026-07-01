@@ -29,6 +29,7 @@ void WispController::pushManualPaletteToCurrent() {
   }
   palette_.update(p, millis());
   paint_.onPaletteChanged();
+  artnet_.onPaletteChanged();
 }
 
 // Event-driven; never called from loop() steady state. Stack-only.
