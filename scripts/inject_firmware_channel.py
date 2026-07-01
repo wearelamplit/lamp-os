@@ -16,9 +16,12 @@ When the env doesn't declare `custom_lamp_variant` (e.g. the native test
 env), the raw channel is injected without a prefix — same shape as
 before so any cross-env build paths keep working.
 
-Wired from software/lamp-os/platformio.ini as:
+Shared build hook (repo-root scripts/), wired from each component's
+platformio.ini as:
   extra_scripts =
-    pre:scripts/inject_firmware_channel.py
+    pre:../../scripts/inject_firmware_channel.py
+The wisp has no `custom_lamp_variant`, so the channel injects without a
+prefix and only LAMP_DEBUG matters there.
 """
 
 import os
