@@ -301,17 +301,12 @@ void setup() {
 
 void loop() {
   catch_ota::tick(millis());
-  // While a transfer is live, dedicate the loop to draining the ESP-NOW ring +
-  // writing chunks — skip rendering / net handlers so the ~30ms chunk cadence
-  // can't overflow the ring.
+  // A live transfer seizes the radio (STA-only on the ESP-NOW channel); skip
+  // rendering / net handlers so the ~30ms chunk cadence can't overflow the ring.
   if (catch_ota::isInProgress()) {
     return;
   }
-  // catch_ota owns the radio from boot (STA-only on the ESP-NOW channel), so
-  // stage mode must not run — it would bring the softAP back and move the channel.
-  if (!lamp::otaInProgress) {
-    handleStageMode();
-  }
+  handleStageMode();
   handleArtnet();
   handleWebSocket();
   wifi.tick();

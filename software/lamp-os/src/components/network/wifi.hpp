@@ -15,9 +15,6 @@
 
 namespace lamp {
 
-// Set true by radioBeginDiscovery(); causes updateNetworkScan() to early-return.
-extern volatile bool otaInProgress;
-
 class WifiComponent {
  public:
   Config* config;

@@ -23,6 +23,10 @@ void espnowAddPeer(const uint8_t mac[6]);
 // peer; the caller re-adds unicast peers afterward.
 void espnowReinit();
 
+// Tear ESP-NOW down (deinit driver, clear recv) to return to the dormant state
+// so the radio stops camping and BLE scanning recovers.
+void espnowStop();
+
 // Submit len bytes to mac via esp_now_send. Returns true if queued to driver.
 // Call espnowAddPeer for any unicast target before the first send.
 bool espnowSend(const uint8_t mac[6], const uint8_t* data, size_t len);

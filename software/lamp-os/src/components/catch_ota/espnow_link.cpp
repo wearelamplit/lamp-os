@@ -107,6 +107,11 @@ void espnowReinit() {
     addBroadcastPeer();
 }
 
+void espnowStop() {
+    esp_now_deinit();
+    s_recv = nullptr;
+}
+
 // espnowAddPeer — register a unicast sender MAC before the first unicast send.
 // Guarding against ESP_ERR_ESPNOW_NOT_FOUND on esp_now_send.
 void espnowAddPeer(const uint8_t mac[6]) {

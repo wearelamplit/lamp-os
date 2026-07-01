@@ -5,21 +5,18 @@
 #include <esp_wifi.h>
 
 #include "../network/bluetooth.hpp"
-#include "../network/wifi.hpp"
 #endif
 
 namespace catch_ota {
 
 void radioBeginDiscovery() {
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-    // Stay a normal main lamp during discovery: the softAP is up on the ESP-NOW
-    // channel (toApMode brings it up there for CATCH_OTA) so the web config page
-    // keeps working — that is the only control path on main. Just freeze
-    // stage-mode / network-scan so nothing moves the radio off the channel, and
-    // keep modem sleep off so ESP-NOW RX stays live. The softAP + BLE come down
-    // only when a transfer commits (radioEnterOtaMode); a reboot restores them.
-    lamp::otaInProgress = true;
+    // Called when ESP-NOW listening comes up (a mesh sender is nearby). Keep
+    // modem sleep off so OFFER/CHUNK RX isn't missed, and pin the ESP-NOW channel
+    // in case we woke while stage mode had moved the radio. The radio is fully
+    // seized (radioEnterOtaMode) only when a transfer commits.
     WiFi.setSleep(false);
+    esp_wifi_set_channel(LAMP_ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
 #endif
 }
 

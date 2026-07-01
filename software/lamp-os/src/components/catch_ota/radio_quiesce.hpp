@@ -2,10 +2,9 @@
 
 namespace catch_ota {
 
-// Boot/discovery: keep the lamp a normal main lamp — softAP stays up on
-// LAMP_ESPNOW_CHANNEL (web config, the only control path on main) — and just
-// freeze stage-mode / network-scan so the radio stays on channel for ESP-NOW
-// discovery. Called once from catch_ota::begin().
+// Boot: keep modem sleep off so ESP-NOW RX stays live while idle. The softAP is
+// up on LAMP_ESPNOW_CHANNEL (toApMode under CATCH_OTA), so web config and mesh
+// RX coexist. Called once from catch_ota::begin().
 void radioBeginDiscovery();
 
 // On the first committed OFFER: tear down softAP + BLE → STA-only on
