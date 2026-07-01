@@ -679,26 +679,53 @@ void dispatchLampAction(JsonDocument& doc, unsigned long updateTimeMs) {
       lamp::ExpressionTarget target = doc["target"].is<int>()
         ? static_cast<lamp::ExpressionTarget>(doc["target"].as<int>())
         : lamp::TARGET_BOTH;
+      std::vector<lamp::Color> payloadColors =
+          jsonArrayToColors(doc["colors"].as<JsonArray>());
+      if (!payloadColors.empty()) {
+        // Colors provided → run a transient one-shot seeded with those colors.
+        // Works on factory lamps with zero configured expressions (no lookup).
+        // Zero MAC is the local-test sentinel; triggerInvocation coalesces
+        // rapid re-fires from the same (srcMac, type) pair so spam-tapping
+        // Test doesn't pile up transients.
+        static const uint8_t kLocalTestMac[6] = {0, 0, 0, 0, 0, 0};
+        lamp::ExpressionInvocation inv;
+        inv.type = type.c_str();
+        inv.target = static_cast<uint8_t>(target);
+        inv.colors = std::move(payloadColors);
 #ifdef LAMP_DEBUG
-      auto colors = expressionManager.getExpressionColors(type.c_str());
-      String colorList;
-      for (const auto& c : colors) {
-        if (colorList.length() > 0) colorList += " ";
-        colorList += lamp::colorToHexString(c).c_str();
-      }
-      Serial.printf("Testing expression: %s target=%d [%s]\n",
-                    type.c_str(), static_cast<int>(target), colorList.c_str());
+        Serial.printf("[test] transient pulse colors=%zu type=%s target=%d\n",
+                      inv.colors.size(), inv.type.c_str(),
+                      static_cast<int>(target));
 #endif
-      // Just trigger the expression. No configurator gating needed:
-      // expressions draw AFTER the configurator in the behavior list, so
-      // they compose on top of wisp paint naturally and yield (via
-      // animationState=STOPPED) when their one-shot animation completes.
-      expressionManager.triggerExpression(type.c_str(), target);
-      // Track the just-fired entries as active previews so the loop drain's
-      // reapCompletedTests() can flip previewActive=false the instant they
-      // STOP. Emit the previewActive=true edge if this was the first one.
-      if (expressionManager.markTestActive(type.c_str(), target)) {
-        ble_control::notifyStateChange();
+        expressionManager.triggerInvocation(inv, kLocalTestMac);
+        // markTestActive scans configured expressions; for transients it's a
+        // no-op (returns false), so notifyStateChange is not called here.
+        // The transient self-cleans on animation complete, no reap needed.
+        expressionManager.markTestActive(type.c_str(), target);
+      } else {
+        // No colors payload → trigger an already-configured expression by name.
+        // This is the expression-editor "test a saved expression" flow.
+#ifdef LAMP_DEBUG
+        auto cfgColors = expressionManager.getExpressionColors(type.c_str());
+        String colorList;
+        for (const auto& c : cfgColors) {
+          if (colorList.length() > 0) colorList += " ";
+          colorList += lamp::colorToHexString(c).c_str();
+        }
+        Serial.printf("[test] configured trigger: %s target=%d [%s]\n",
+                      type.c_str(), static_cast<int>(target), colorList.c_str());
+#endif
+        // Just trigger the expression. No configurator gating needed:
+        // expressions draw AFTER the configurator in the behavior list, so
+        // they compose on top of wisp paint naturally and yield (via
+        // animationState=STOPPED) when their one-shot animation completes.
+        expressionManager.triggerExpression(type.c_str(), target);
+        // Track the just-fired entries as active previews so the loop drain's
+        // reapCompletedTests() can flip previewActive=false the instant they
+        // STOP. Emit the previewActive=true edge if this was the first one.
+        if (expressionManager.markTestActive(type.c_str(), target)) {
+          ble_control::notifyStateChange();
+        }
       }
     }
   } else if (action == "test_expression_complete") {
