@@ -18,11 +18,14 @@ inline size_t nextDriftIdx(size_t idx, size_t n) {
   return n ? (idx + 1) % n : 0;
 }
 
-// Map a raw 32-bit random to the drift fade range [6000, 23000] ms.
-inline uint16_t rollDriftFadeMs(uint32_t rnd) {
-  constexpr uint16_t kLo = 6000, kHi = 23000;
-  constexpr uint32_t kSpan = static_cast<uint32_t>(kHi - kLo) + 1;
-  return static_cast<uint16_t>(kLo + (rnd % kSpan));
+// Fade duration within [20000, fadeMax] where fadeMax = 20000 + (intervalMs-20000)*fadePct/100.
+inline uint32_t driftFadeMs(uint32_t intervalMs, uint8_t fadePct, uint32_t rnd) {
+  const uint32_t lo = 20000;
+  const uint32_t hi = intervalMs > lo
+      ? lo + static_cast<uint32_t>((uint64_t)(intervalMs - lo) * fadePct / 100)
+      : lo;
+  const uint32_t span = hi - lo + 1;
+  return lo + (rnd % span);
 }
 
 }  // namespace wisp
