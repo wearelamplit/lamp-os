@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import '../../../core/ble/ble_client.dart';
 import '../../../core/ble/uuids.dart';
 import '../../control/domain/lamp_color.dart';
+import 'connect_with_retry.dart';
 
 /// Connects to an unclaimed lamp and re-fires a `pulse` test_expression in the
 /// lamp's own shade colour on the BASE strip, so the physical lamp pulses for
@@ -24,7 +25,7 @@ class AdoptPulseController {
     _timer?.cancel();
     _deviceId = deviceId;
     _stopped = false;
-    await _connectWithRetry(deviceId);
+    await connectWithRetry(_ble, deviceId, shouldAbort: () => _stopped);
     if (_stopped) return;
     await _writePulse(deviceId, shadeColor);
     if (_stopped) return;
@@ -45,20 +46,6 @@ class AdoptPulseController {
           Uint8List.fromList(utf8.encode('{"a":"test_expression_complete"}')));
     } catch (_) {}
     try { await _ble.disconnect(deviceId); } catch (_) {}
-  }
-
-  /// Android throws GATT_ERROR(133) on connect intermittently in a crowded
-  /// BLE environment; retry a few times with backoff, bailing if stop() ran.
-  Future<void> _connectWithRetry(String deviceId) async {
-    const attempts = 4;
-    for (var i = 0; i < attempts; i++) {
-      if (_stopped) return;
-      try { await _ble.connect(deviceId); return; }
-      catch (_) {
-        if (i == attempts - 1) rethrow;
-        await Future<void>.delayed(const Duration(milliseconds: 1200));
-      }
-    }
   }
 
   Future<void> _writePulse(String deviceId, LampColor color) async {

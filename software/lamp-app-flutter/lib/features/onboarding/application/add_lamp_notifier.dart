@@ -14,6 +14,7 @@ import '../../inventory/application/active_lamp_notifier.dart';
 import '../../inventory/application/inventory_notifier.dart';
 import '../../inventory/domain/inventory_lamp.dart';
 import '../domain/add_lamp_state.dart';
+import 'connect_with_retry.dart';
 
 part 'add_lamp_notifier.g.dart';
 
@@ -133,14 +134,13 @@ class AddLampNotifier extends _$AddLampNotifier {
     // where the link gets established. Retry once on the
     // android-code 133 / deviceIsDisconnected race that Android throws
     // when the previous link's cleanup is still in flight.
-    Future<void> doConnect() => ble.connect(state.deviceId);
     try {
-      try {
-        await doConnect();
-      } catch (_) {
-        await Future<void>.delayed(const Duration(milliseconds: 1500));
-        await doConnect();
-      }
+      await connectWithRetry(
+        ble,
+        state.deviceId,
+        attempts: 2,
+        backoff: const Duration(milliseconds: 1500),
+      );
     } catch (e) {
       if (!ref.mounted) return;
       state = state.copyWith(
