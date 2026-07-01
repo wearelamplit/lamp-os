@@ -45,10 +45,17 @@ class WifiLink {
 
   // True when ArtNet frames can egress: STA associated, or softAP up.
   bool canBroadcast() const;
-  // Broadcast target for the active role: STA subnet directed-broadcast is the
-  // global 255.255.255.255; AP uses the softAP subnet broadcast so frames
-  // reach lamps joined to the wisp's own netif.
-  IPAddress broadcastIp() const;
+  // A UDP send left to default routing in WIFI_AP_STA can egress the wrong
+  // netif, so ArtNet pins the interface per role off this.
+  bool isAp() const { return mode_ == Mode::Ap; }
+
+  // Fill out[] with the IPs of stations currently joined to the softAP (DHCP
+  // leases), returning the count. Zero outside AP mode. ArtNet unicasts to each
+  // because WiFi broadcast is unreliable to sleepy lamps.
+  size_t apClientIps(IPAddress* out, size_t maxOut) const;
+
+  // Stations currently joined to the softAP; zero outside AP mode.
+  uint8_t apStationCount() const;
 
   // Snapshot accessors. Cheap. Callable from any task.
   bool isConnected() const;

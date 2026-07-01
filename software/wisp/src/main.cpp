@@ -20,6 +20,7 @@
 #include "aurora/AuroraPaletteClient.h"
 
 #include "artnet/artnet_emitter.hpp"
+#include "net/lamp_scanner.hpp"
 #include "net/stage_beacon.hpp"
 #include "net/wifi_link.hpp"
 #include "console/serial_console.hpp"
@@ -37,6 +38,7 @@ wisp::WispRoster wispRoster;
 AuroraPaletteClient auroraClient;
 wisp::WifiLink wifi;
 wisp::StageBeacon stageBeacon;
+wisp::LampScanner lampScanner;
 wisp::ArtnetEmitter artnetEmitter;
 
 // GPIO 1 (D1): D0 = GPIO 0 = BOOT strap pin; leaving it free keeps
@@ -53,7 +55,8 @@ wisp::ZoneSelector zoneSelector;
 
 wisp::WispController controller(currentPalette, paintDistributor, wispConfig,
                                 zoneSelector, auroraClient, statusEmitter,
-                                artnetEmitter, wifi, stageBeacon, testStrip);
+                                artnetEmitter, wifi, stageBeacon, lampScanner,
+                                testStrip);
 
 wisp::MeshRouter meshRouter(
     inventory, wispRoster, wispOpDispatcher,
@@ -111,6 +114,7 @@ void setup() {
 
   wifi.begin(&wispConfig);
   stageBeacon.begin(buildInstanceId().c_str(), &wispConfig);
+  lampScanner.begin();
   artnetEmitter.begin(&currentPalette, &wifi);
   wispOpDispatcher.setWifiSinks(&wifi, &stageBeacon);
 
@@ -165,6 +169,7 @@ void loop() {
     wispRoster.recomputeClaims(obs, n, now);
   }
   controller.tickAuroraLiveness();
+  controller.tick(now);
 
   paintDistributor.tick(now);
   artnetEmitter.tick(now);

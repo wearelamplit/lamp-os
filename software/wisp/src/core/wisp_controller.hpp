@@ -23,6 +23,7 @@ class StatusEmitter;
 class ArtnetEmitter;
 class WifiLink;
 class StageBeacon;
+class LampScanner;
 enum class WispSourceMode : uint8_t;
 
 class WispController {
@@ -31,7 +32,7 @@ class WispController {
                  WispConfig& config, ZoneSelector& zones,
                  AuroraPaletteClient& aurora, StatusEmitter& status,
                  ArtnetEmitter& artnet, WifiLink& wifi, StageBeacon& stage,
-                 Adafruit_NeoPixel& strip)
+                 LampScanner& scanner, Adafruit_NeoPixel& strip)
       : palette_(palette),
         paint_(paint),
         config_(config),
@@ -41,10 +42,15 @@ class WispController {
         artnet_(artnet),
         wifi_(wifi),
         stage_(stage),
+        scanner_(scanner),
         strip_(strip) {}
 
   // Idempotent: safe at boot (from NVS) and on every mode flip.
   void applySourceModeTransition(WispSourceMode mode);
+
+  // Loop-task old-lamp serving gate. Manual-only: scans in IDLE, brings up
+  // softAP + stage beacon when an old lamp appears, tears down once it's gone.
+  void tick(uint32_t now);
 
   // Aurora active-palette callback. Zone latch + filter + palette push + ring.
   void onAuroraPalette(int zone, const Palette& p);
@@ -68,9 +74,14 @@ class WispController {
   ArtnetEmitter& artnet_;
   WifiLink& wifi_;
   StageBeacon& stage_;
+  LampScanner& scanner_;
   Adafruit_NeoPixel& strip_;
 
   bool auroraWasStreaming_ = false;
+
+  enum class ServeState : uint8_t { Idle, Serving };
+  ServeState serveState_ = ServeState::Idle;
+  uint32_t oldLampAbsentSinceMs_ = 0;
 };
 
 }  // namespace wisp

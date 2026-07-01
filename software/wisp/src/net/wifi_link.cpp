@@ -92,9 +92,22 @@ bool WifiLink::canBroadcast() const {
   return false;
 }
 
-IPAddress WifiLink::broadcastIp() const {
-  if (mode_ == Mode::Ap) return WiFi.softAPBroadcastIP();
-  return IPAddress(255, 255, 255, 255);
+size_t WifiLink::apClientIps(IPAddress* out, size_t maxOut) const {
+  if (mode_ != Mode::Ap) return 0;
+  // ponytail: softAP DHCP leases run sequentially from .2, so derive client
+  // IPs from the station count. A lease gap after disconnect/reconnect churn
+  // would misaddress a lamp; swap for a real lease enumeration if that bites.
+  const uint8_t num = WiFi.softAPgetStationNum();
+  const IPAddress base = WiFi.softAPIP();
+  size_t count = 0;
+  for (uint8_t i = 0; i < num && count < maxOut; ++i) {
+    out[count++] = IPAddress(base[0], base[1], base[2], 2 + i);
+  }
+  return count;
+}
+
+uint8_t WifiLink::apStationCount() const {
+  return mode_ == Mode::Ap ? WiFi.softAPgetStationNum() : 0;
 }
 
 bool WifiLink::isConnected() const {
