@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/widgets/friendly_error.dart';
 import '../../../control/domain/lamp_color.dart';
 import '../../../control/presentation/widgets/recolored_critter.dart';
+import '../../../inventory/application/inventory_notifier.dart';
+import '../../../nearby/application/lamp_route_resolver.dart';
+import '../../../nearby/application/nearby_lamps_notifier.dart';
 import '../../application/add_lamp_notifier.dart';
 import '../../domain/add_lamp_state.dart';
 
@@ -83,7 +87,23 @@ class AddLampMeetStep extends ConsumerWidget {
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
-                  onPressed: ready ? notifier.finishAdoption : null,
+                  // Adopt lamps are always mesh — no Wi-Fi setup to show — so
+                  // skip the done screen and open the lamp directly.
+                  onPressed: ready
+                      ? () async {
+                          await notifier.finishAdoption();
+                          if (!context.mounted) return;
+                          notifier.reset();
+                          final inv =
+                              ref.read(inventoryNotifierProvider).value;
+                          final nearby =
+                              ref.read(nearbyLampsNotifierProvider);
+                          context.go(
+                            routeForLamp(state.deviceId, nearby,
+                                inventory: inv),
+                          );
+                        }
+                      : null,
                   child: ready
                       ? const Text('Continue')
                       : Row(
