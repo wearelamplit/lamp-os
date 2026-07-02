@@ -28,10 +28,10 @@ Flutter / adb calls so the scripts stay exercised.
 
 ```sh
 # Lamp firmware
-npm run lamp:test         # native unit tests (374 cases)
-npm run lamp:build        # build (standard variant)
-npm run lamp:flash        # flash a connected lamp (standard)
-npm run lamp:flash:snafu  # flash the snafu variant
+npm run lamp:test         # native unit tests
+npm run lamp:build        # build (standard variant; VARIANT=snafu for others)
+npm run lamp:flash        # flash a connected lamp (standard, beta channel)
+                          # VARIANT / CHANNEL / PORT env params override each
 npm run lamp:monitor      # serial monitor
 
 # Wisp firmware
@@ -46,7 +46,7 @@ npm run app:install       # build + adb install -r (no data wipe) + launch
 npm run app:codegen       # regenerate freezed / riverpod / json
 ```
 
-Native firmware tests run in CI and must stay green (lamp 374, wisp 40). Build
+Native firmware tests run in CI and must stay green. Build
 PlatformIO via `pip install platformio` (the npm tasks call `pio` under the
 hood); the Flutter toolchain setup is in the [root README](../../README.md).
 

@@ -160,9 +160,9 @@ Common commands (npm tasks, run from the repo root, see [`package.json`](package
 ```sh
 # Lamp (ESP32-WROOM)
 npm run lamp:test         # native unit tests (344 cases)
-npm run lamp:build        # build (standard variant)
-npm run lamp:flash        # flash a connected lamp (standard variant)
-npm run lamp:flash:snafu  # flash the snafu variant
+npm run lamp:build        # build (standard variant; VARIANT=snafu for others)
+npm run lamp:flash        # flash a connected lamp (standard, beta channel)
+                          # VARIANT / CHANNEL / PORT env params override each
 npm run lamp:monitor      # serial monitor
 
 # Wisp (Seeed XIAO ESP32-C6)

@@ -155,8 +155,8 @@ The remaining site is **1. the `[env:upesy_wroom_<type>]` block in
 ### Step 3: Build
 
 ```sh
-npm run lamp:build          # standard variant
-npm run lamp:build:snafu    # snafu variant
+npm run lamp:build              # standard variant
+VARIANT=snafu npm run lamp:build   # any other variant
 # (or directly: cd software/lamp-os && pio run -e upesy_wroom_<variant>)
 ```
 
@@ -170,7 +170,7 @@ NVS at boot.
 
 ```sh
 pio run -e upesy_wroom_snafu -t upload --upload-port /dev/cu.usbserial-XXX
-# or, from the repo root: npm run lamp:flash:snafu
+# or, from the repo root: VARIANT=snafu PORT=/dev/cu.usbserial-XXX npm run lamp:flash
 ```
 
 The per-variant env declares `custom_lamp_variant = snafu`, which

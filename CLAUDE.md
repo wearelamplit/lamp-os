@@ -84,13 +84,18 @@ contract CI and bench-verify run against; bypassing them silently desyncs
 ```sh
 npm run lamp:test          # native unit tests (runs in CI)
 npm run lamp:build         # lamp firmware, standard variant (default)
-npm run lamp:build:snafu   # snafu variant
+VARIANT=snafu npm run lamp:build   # any other variant
 npm run wisp:build         # wisp firmware
 ```
 
+`lamp:flash` and `lamp:build` take three optional env params: `VARIANT`
+(default `standard`), `CHANNEL` (flash defaults to `beta`), and `PORT` (flash
+only, passed to `--upload-port` for when more than one board is attached).
+`VARIANT=snafu CHANNEL=stable PORT=/dev/cu.usbserial-6 npm run lamp:flash`.
+
 The native suite covers protocol parsers, dedup ring, color math, fade
 math, cascade dedup, OTA receiver/indicator, and the GATT layout pin. Keep
-it green, currently 374/374.
+it green.
 
 ## Plugins this workflow assumes
 
