@@ -8,7 +8,7 @@
     "ui:build": "cd software/lamp-ui && npm run build",
     "lamp:buildfs": "npm run ui:build && cd software/lamp-os && pio run -t buildfs",
     "lamp:flashfs": "npm run ui:build && cd software/lamp-os && pio run -t uploadfs",
-    "lamp:flash": "cd software/lamp-os && LAMP_FIRMWARE_CHANNEL=${CHANNEL:-beta} pio run -e upesy_wroom_${VARIANT:-standard} -t upload${PORT:+ --upload-port \"$PORT\"}",
+    "lamp:flash": "cd software/lamp-os && LAMP_FIRMWARE_CHANNEL=${CHANNEL:-beta} ${PORT:+env PLATFORMIO_UPLOAD_PORT=$PORT} pio run -e upesy_wroom_${VARIANT:-standard} -t upload",
     "lamp:test": "cd software/lamp-os && pio test -e native",
     "lamp:monitor": "cd software/lamp-os && pio device monitor -e upesy_wroom_standard",
     "wisp:build": "cd software/wisp && pio run -e seeed_xiao_esp32_c6",
