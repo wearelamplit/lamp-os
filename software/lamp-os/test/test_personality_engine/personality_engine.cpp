@@ -407,7 +407,7 @@ class PersonalityEngine {
   }
 
   // Constants (mirror production).
-  static constexpr uint32_t kClosestPulsePeriodMs = 45000;
+  static constexpr uint32_t kClosestPulsePeriodMs = 60000;
   static constexpr uint8_t  kRssiHysteresisDb     = 3;
 
   FakeConfig* config_ = nullptr;
@@ -915,8 +915,8 @@ void test_greeting_for_unknown_peer_is_neutral() {
 
 // --- Closest-Smitten cycle tests ----------------------------------------
 
-// test_smitten_closest_pulse_fires_on_transition_and_every_45s
-void test_smitten_closest_pulse_fires_on_transition_and_every_45s() {
+// test_smitten_closest_pulse_fires_on_transition_and_every_60s
+void test_smitten_closest_pulse_fires_on_transition_and_every_60s() {
   FakeConfig cfg;
   MockExpressionManager em;
   PersonalityEngine eng;
@@ -930,22 +930,22 @@ void test_smitten_closest_pulse_fires_on_transition_and_every_45s() {
   eng.tick(g_nowMs);
   TEST_ASSERT_EQUAL_INT(1, (int)em.invocations.size());
 
-  // 30s < 45s closest cadence — no new pulses expected.
-  for (int t = 0; t < 30; ++t) {
+  // 45s < 60s closest cadence — no new pulses expected.
+  for (int t = 0; t < 45; ++t) {
     g_nowMs += 1000;
     eng.tick(g_nowMs);
   }
   TEST_ASSERT_EQUAL_INT(1, (int)em.invocations.size());
 
-  // Advance another 16s (total 46s since the transition). Cadence fires.
+  // Advance another 16s (total 61s since the transition). Cadence fires.
   for (int t = 0; t < 16; ++t) {
     g_nowMs += 1000;
     eng.tick(g_nowMs);
   }
   TEST_ASSERT_EQUAL_INT(2, (int)em.invocations.size());
 
-  // Another 45s of ticks → another pulse.
-  for (int t = 0; t < 45; ++t) {
+  // Another 60s of ticks → another pulse.
+  for (int t = 0; t < 60; ++t) {
     g_nowMs += 1000;
     eng.tick(g_nowMs);
   }
@@ -1056,7 +1056,7 @@ void test_smitten_closest_cadence_resets_after_disposition_demotion() {
   eng.tick(g_nowMs);
   TEST_ASSERT_EQUAL_INT(1, (int)em.invocations.size());
 
-  // Re-promote within the 45s cadence window — a fresh transition fires.
+  // Re-promote within the 60s cadence window — a fresh transition fires.
   cfg.dispositions[bdAddrFor("crush")] = 5;
   g_nowMs += 1000;
   eng.tick(g_nowMs);
@@ -1068,8 +1068,8 @@ void test_smitten_closest_cadence_resets_after_disposition_demotion() {
   eng.tick(g_nowMs);
   TEST_ASSERT_EQUAL_INT(2, (int)em.invocations.size());
 
-  // 2s later (46s since re-promotion): cadence fires.
-  g_nowMs += 2000;
+  // 16s later (60s since re-promotion): cadence fires.
+  g_nowMs += 16000;
   eng.tick(g_nowMs);
   TEST_ASSERT_EQUAL_INT(3, (int)em.invocations.size());
 }
@@ -1231,7 +1231,7 @@ int main(int, char**) {
   RUN_TEST(test::test_greeting_for_smitten_ambivert_is_enthused_two_pulses);
   RUN_TEST(test::test_greeting_profile_easeins_invert_with_warmth);
   RUN_TEST(test::test_greeting_for_unknown_peer_is_neutral);
-  RUN_TEST(test::test_smitten_closest_pulse_fires_on_transition_and_every_45s);
+  RUN_TEST(test::test_smitten_closest_pulse_fires_on_transition_and_every_60s);
   RUN_TEST(test::test_smitten_closest_pulse_resets_when_closest_changes);
   RUN_TEST(test::test_smitten_closest_pulse_does_not_fire_if_closest_is_non_smitten);
   RUN_TEST(test::test_smitten_closest_picks_highest_rssi_regardless_of_insertion_order);

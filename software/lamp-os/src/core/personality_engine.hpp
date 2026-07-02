@@ -132,7 +132,7 @@ class PersonalityEngine {
   static constexpr uint8_t kDeadbandLevels = 2;  // ≥ 2/100 change to commit
 
   // Smitten closest-peer recurring pulse.
-  static constexpr uint32_t kClosestPulsePeriodMs = 45000;
+  static constexpr uint32_t kClosestPulsePeriodMs = 60000;
   // Hysteresis margin (dBm) for closest-peer swaps. RSSI on ESP-NOW
   // typically wobbles ±3–5 dB even with a stationary peer; without this
   // guard, two Smitten peers with similar signal would flap "closest"
