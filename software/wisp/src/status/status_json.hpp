@@ -18,6 +18,8 @@ struct WispStatusFields {
   uint8_t      offR, offG, offB;
   bool         hasOffColor;
   uint8_t      shuffleSeed;
+  uint32_t     driftIntervalMs;
+  uint8_t      driftFadePct;
 };
 
 // Serialize a wispStatus JSON into `out` (capacity `outCap`), truncating

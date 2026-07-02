@@ -25,6 +25,10 @@ size_t buildWispStatusJson(const WispStatusFields& f, char* out,
     doc["shuffleSeed"] = f.shuffleSeed;
     if (measureJson(doc) > cap) doc.remove("shuffleSeed");
   }
+  doc["driftIntervalMs"] = f.driftIntervalMs;
+  if (measureJson(doc) > cap) doc.remove("driftIntervalMs");
+  doc["driftFadePct"] = f.driftFadePct;
+  if (measureJson(doc) > cap) doc.remove("driftFadePct");
   // ponytail: O(n * measureJson), n <= 16 — trivial, and it gives a
   // by-construction guarantee the serialized doc never exceeds cap.
   for (size_t i = 0; i < f.observedCount; ++i) {
