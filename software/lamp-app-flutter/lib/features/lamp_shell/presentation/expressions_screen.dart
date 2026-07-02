@@ -252,7 +252,7 @@ class _ExpressionTile extends ConsumerWidget {
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: colorScheme.primaryContainer,
+                    color: colorScheme.onPrimaryContainer,
                   ),
                   child: Icon(meta?.icon ?? Icons.auto_awesome,
                       size: 18, color: colorScheme.onPrimary),

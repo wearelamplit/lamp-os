@@ -571,7 +571,7 @@ class _Header extends StatelessWidget {
               height: 40,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: colorScheme.primaryContainer,
+                color: colorScheme.onPrimaryContainer,
               ),
               child: Icon(meta!.icon, color: colorScheme.onPrimary),
             ),
