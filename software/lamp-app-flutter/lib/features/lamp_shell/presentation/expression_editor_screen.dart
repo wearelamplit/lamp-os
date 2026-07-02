@@ -373,6 +373,8 @@ class _ExpressionEditorScreenState
                   min: ExpressionIntervalMath.secToPos(ExpressionIntervalMath.minSec),
                   max: ExpressionIntervalMath.secToPos(ExpressionIntervalMath.maxSec),
                   labelFor: (pos) => _fmtSeconds(ExpressionIntervalMath.posToSec(pos).toDouble()),
+                  leftLabel: 'often',
+                  rightLabel: 'rare',
                   onChanged: (rv) {
                     final lo = ExpressionIntervalMath.posToSec(rv.start);
                     final hi = ExpressionIntervalMath.posToSec(rv.end);
