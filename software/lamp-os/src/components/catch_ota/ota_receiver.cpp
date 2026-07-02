@@ -291,7 +291,8 @@ FwResultStatus verifyAndApply() {
     return FwResultStatus::OfferShaMismatch;
   }
   // Type gate: the verified footer channel must be exactly ours before we flip
-  // the boot partition. This is the gate (no OFFER-time channel drop anymore).
+  // the boot partition. Authoritative gate; onOffer also fast-drops a mismatched
+  // (unsigned) OFFER channel upfront, but this signed check is the real one.
   if (!outChannel || std::strcmp(outChannel, kExpectChannel) != 0) {
 #ifdef LAMP_DEBUG
     Serial.printf("[catch_ota.rx] type-gate REJECT: footer channel=\"%s\" "
@@ -317,6 +318,19 @@ FwResultStatus verifyAndApply() {
 // =============================================================================
 
 void onOffer(const ParsedFwOffer& offer, const uint8_t devMac[6]) {
+  // Channel type-gate on the OFFER's channel: silently drop a mismatch (no
+  // ACCEPT, no erase, no stream, no breaker attempt). A standard lamp never
+  // catches a beta or other-channel image. The signed LSIG footer in
+  // verifyAndApply stays the authoritative gate; this refuses upfront so a
+  // wrong-channel image is never streamed.
+  if (std::strcmp(offer.channel, kExpectChannel) != 0) {
+#ifdef LAMP_DEBUG
+    Serial.printf("[catch_ota.rx] OFFER channel=\"%s\" != \"%s\", drop\n",
+                  offer.channel, kExpectChannel);
+#endif
+    return;
+  }
+
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   // Register the OFFER source as a unicast peer so ACCEPT/REQ/RESULT can be
   // sent back to it (declines included).
