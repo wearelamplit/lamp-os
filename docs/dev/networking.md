@@ -142,6 +142,24 @@ After the MSG_EVENT cascade migration, CONTROL_OP no longer carries `triggerExpr
 **Wisp envelopes** (plaintext JSON, broadcast):
 
 `wispStatus`, wisp → fleet, periodic state report.
+
+Off mode (source == "off") — carries `offColor`, no drift fields:
+```json
+{
+  "char":"wispStatus",
+  "currentZone": 3,
+  "zoneSource": "nvs",
+  "observedZones": [0, 3, 7],
+  "wifiConnected": true,
+  "auroraConnected": true,
+  "paletteIdPrefix": "abc12345",
+  "lastSeenMs": 14823,
+  "source": "off",
+  "offColor": [255, 180, 60]
+}
+```
+
+Manual/Aurora mode — carries drift fields, no `offColor`:
 ```json
 {
   "char":"wispStatus",
@@ -153,15 +171,19 @@ After the MSG_EVENT cascade migration, CONTROL_OP no longer carries `triggerExpr
   "paletteIdPrefix": "abc12345",
   "lastSeenMs": 14823,
   "source": "aurora",
-  "offColor": [255, 180, 60]
+  "driftIntervalMs": 120000,
+  "driftFadePct": 50
 }
 ```
 - **Sender**: wisp(s) only. Lamps gossip-relay (per the v0x03 relay rule for `MSG_CONTROL_OP`) but never originate.
 - **Cadence**: on-change + 30s heartbeat. Change triggers: zone change, WiFi connect/disconnect, Aurora connect/disconnect. `MSG_WISP_PALETTE` is emitted in the same tick (see Tier 1) so the app's view of the palette converges on the same cadence.
 - **`zoneSource`**: `"nvs"` | `"firstSeen"` | `"appOp"` | `"none"`.
 - **`source`**: `"aurora"` | `"manual"` | `"off"`. Consumed by the Flutter app to surface and round-trip the source-toggle state.
-- **`offColor`**: `[R, G, B]` in 0–255, the ring color used in Off mode. Consumed by the Flutter app.
-- **`observedZones`**: capped at 16 entries (oldest-eviction FIFO). When the serialized payload would exceed `CONTROL_MAX_PAYLOAD`, trailing zones are dropped greedily until it fits — the fixed fields and `source`/`offColor` are always preserved.
+- **`offColor`**: `[R, G, B]` in 0–255, the ring color used in Off mode. Present only when `source == "off"`. App defaults to warm amber when absent.
+- **`driftIntervalMs`**: how often the wisp re-targets each lamp, in milliseconds. Present only when `source != "off"`. App defaults to 120000 when absent.
+- **`driftFadePct`**: fade length as a percentage of the drift interval [0..100]. Present only when `source != "off"`. App defaults to 50 when absent.
+- **`offColor` / `driftIntervalMs` / `driftFadePct` are mutually exclusive** by mode: the Off-mode offColor picker and the Manual/Aurora drift sliders never appear together in the UI, and this ensures both fit within the 230 B cap.
+- **`observedZones`**: capped at 16 entries (oldest-eviction FIFO). When the serialized payload would exceed `CONTROL_MAX_PAYLOAD`, trailing zones are dropped greedily until it fits.
 - **`lastSeenMs`**: wisp-local `millis()` at emission. Does not survive wisp reboot, the app does local-epoch math for "X seconds ago" UI rather than trusting this value across reconnects.
 - **Payload budget**: guaranteed ≤ 230 B (`CONTROL_MAX_PAYLOAD`) by construction — the builder adds observed zones one at a time and stops before the cap. `manualPalette` is intentionally NOT carried here, it ships via the separate `MSG_WISP_PALETTE` broadcast.
 - **Lamp-side cache**: each lamp keeps the latest `wispStatus` per wisp MAC in `NearbyLamps`. `CHAR_WISP_STATUS` reads merge this cache with the last `MSG_WISP_HELLO` snapshot AND the cached manualPalette (base64-encoded `manualPalette` field in the served JSON) for the same MAC.
@@ -171,12 +193,14 @@ After the MSG_EVENT cascade migration, CONTROL_OP no longer carries `triggerExpr
 {"char":"wispOp","op":"setZone","zoneId":3}
 {"char":"wispOp","op":"clearZone"}
 {"char":"wispOp","op":"setWifi","ssid":"...","pw":"..."}
+{"char":"wispOp","op":"setDrift","intervalMs":120000,"fadePct":50}
 ```
 - **Sender**: the Flutter app writes the JSON to `CHAR_WISP_OP` on any paired lamp; the lamp broadcasts it verbatim as `MSG_CONTROL_OP` for the wisp(s) to consume.
 - **Receiver**: wisp(s) only. Lamps gossip-relay but do NOT apply locally, there is no `wispOp` branch in `applyRemoteOpLocal`, by design.
 - **Wisp dedup**: the wisp runs its own 64-slot `controlOpDedup_` ring keyed on `(sourceMac, msgType, seq)` so gossip-relayed copies of the same op don't re-apply.
 - **NVS persistence**: `setZone` and `clearZone` persist via `WispConfig` (NVS namespace `"wisp"`, key `selZone`). The wisp boots into the persisted zone if one is set.
 - **`setWifi`**: parsed wisp-side; no-op.
+- **`setDrift`**: sets the color-drift cadence. `intervalMs` [30000..3600000] — how often each lamp is re-targeted in milliseconds. `fadePct` [0..100] — fade length as a percentage of the interval. Persisted to NVS; reflected in the next `wispStatus` broadcast under `driftIntervalMs`/`driftFadePct`.
 
 ### Tier 3: Transient overrides
 

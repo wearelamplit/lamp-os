@@ -70,6 +70,13 @@ void PaintDistributor::tick(uint32_t nowMs) {
     sendDriftToPeer(driftIdx_ % driftCount_);
     driftIdx_ = nextDriftIdx(driftIdx_, driftCount_);
   }
+
+  // Fold in lamps that joined or left during steady paint without waiting
+  // for a mode change or interval update.
+  if (paintMode_ && (nowMs - lastDriftRosterMs_) >= 5000) {
+    lastDriftRosterMs_ = nowMs;
+    refreshDriftRoster();
+  }
 }
 
 void PaintDistributor::beginWalk(Mode mode) {

@@ -73,13 +73,14 @@ class PaintDistributor {
   size_t walkCount_ = 0;
   size_t walkIdx_ = 0;
 
-  uint32_t driftIntervalMs_  = 120000;
-  uint8_t  driftFadePct_     = 50;
+  uint32_t driftIntervalMs_    = 120000;
+  uint8_t  driftFadePct_       = 50;
   uint8_t  driftMacs_[kMaxWalkPeers][6];
-  size_t   driftCount_       = 0;
-  size_t   driftIdx_         = 0;
-  uint32_t driftSlotMs_      = 0;
-  uint32_t lastDriftFireMs_  = 0;
+  size_t   driftCount_         = 0;
+  size_t   driftIdx_           = 0;
+  uint32_t driftSlotMs_        = 0;
+  uint32_t lastDriftFireMs_    = 0;
+  uint32_t lastDriftRosterMs_  = 0;
 
   static constexpr uint32_t kPerPeerPaceMs        = 5;
   static constexpr uint16_t kDefaultFadeDurationMs = 1500;
