@@ -255,7 +255,7 @@ class _ExpressionTile extends ConsumerWidget {
                     color: colorScheme.primaryContainer,
                   ),
                   child: Icon(meta?.icon ?? Icons.auto_awesome,
-                      size: 18, color: colorScheme.onPrimaryContainer),
+                      size: 18, color: colorScheme.onPrimary),
                 ),
                 const SizedBox(width: AppSpace.md),
                 Expanded(

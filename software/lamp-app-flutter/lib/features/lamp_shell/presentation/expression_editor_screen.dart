@@ -571,7 +571,7 @@ class _Header extends StatelessWidget {
                 shape: BoxShape.circle,
                 color: colorScheme.primaryContainer,
               ),
-              child: Icon(meta!.icon, color: colorScheme.onPrimaryContainer),
+              child: Icon(meta!.icon, color: colorScheme.onPrimary),
             ),
           if (meta != null) const SizedBox(width: AppSpace.md),
           Expanded(
