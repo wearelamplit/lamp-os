@@ -77,7 +77,7 @@ struct FakeConfigurator {
   std::vector<Color> colors;            // current "target" the configurator holds
   std::vector<Color> lastFadeFrom;      // snapshot at last beginFade call
   uint32_t fadeStartMs_ = 0;
-  uint16_t fadeDurationMs_ = 0;
+  uint32_t fadeDurationMs_ = 0;
   int beginFadeCount = 0;
   // Mirrors ConfiguratorBehavior::lastWebSocketUpdateTimeMs. ColorOverride
   // bumps this from apply() + restore() so the production configurator
@@ -86,9 +86,9 @@ struct FakeConfigurator {
   uint32_t lastWebSocketUpdateTimeMs = 0;
 
   uint32_t fadeStartMs() const { return fadeStartMs_; }
-  uint16_t fadeDurationMs() const { return fadeDurationMs_; }
+  uint32_t fadeDurationMs() const { return fadeDurationMs_; }
 
-  void beginFade(const std::vector<Color>& target, uint16_t durationMs) {
+  void beginFade(const std::vector<Color>& target, uint32_t durationMs) {
     // Snapshot the "current" view as a stand-in for the buffer. In the
     // production code the snapshot reads the frame buffer; here we use
     // the previous target as a proxy so the mid-fade-interrupt test can
@@ -124,10 +124,10 @@ class ColorOverride {
   uint8_t activeMac_[6] = {0};
 
   uint32_t lastApplyMs_ = 0;
-  uint16_t currentFadeDurationMs_ = 0;
+  uint32_t currentFadeDurationMs_ = 0;
 
   uint32_t restoreStartMs_ = 0;
-  uint16_t restoreDurationMs_ = 0;
+  uint32_t restoreDurationMs_ = 0;
 
   std::vector<Color> savedColors_;
 
@@ -153,7 +153,7 @@ class ColorOverride {
   void apply(const uint8_t sourceMac[6],
              lamp_protocol::OverrideSource source,
              const Color* colors, uint8_t numColors,
-             uint16_t fadeDurationMs) {
+             uint32_t fadeDurationMs) {
     if (!configurator_ || numColors == 0) return;
     if (state_ == FadeState::Idle) {
       savedColors_ = configurator_->colors;
@@ -173,7 +173,7 @@ class ColorOverride {
 
   void restore(const uint8_t sourceMac[6],
                lamp_protocol::OverrideSource source,
-               uint16_t fadeDurationMs) {
+               uint32_t fadeDurationMs) {
     (void)sourceMac;
     if (!configurator_ || state_ == FadeState::Idle) return;
     if (source != lamp_protocol::OverrideSource::Any &&
@@ -434,7 +434,7 @@ void test_color_override_apply_transitions_fading_then_holding() {
            &target, 1, /*fadeDurationMs=*/100);
   TEST_ASSERT_EQUAL(test::FadeState::FadingIn, ov.state());
   TEST_ASSERT_EQUAL(1, cfg.beginFadeCount);
-  TEST_ASSERT_EQUAL_UINT16(100, cfg.fadeDurationMs());
+  TEST_ASSERT_EQUAL_UINT32(100u, cfg.fadeDurationMs());
 
   // Mid-fade: still FadingIn.
   test::g_nowMs = 50;
@@ -640,17 +640,41 @@ void test_color_override_mid_fade_interrupt_restarts_fade() {
   test::Color first(255, 0, 0, 0);
   ov.apply(kMacWisp, test::lamp_protocol::OverrideSource::Wisp, &first, 1, 200);
   TEST_ASSERT_EQUAL(1, cfg.beginFadeCount);
-  TEST_ASSERT_EQUAL_UINT16(200, cfg.fadeDurationMs());
+  TEST_ASSERT_EQUAL_UINT32(200u, cfg.fadeDurationMs());
 
   // Mid-fade re-apply.
   test::g_nowMs = 50;
   test::Color second(0, 255, 0, 0);
   ov.apply(kMacWisp, test::lamp_protocol::OverrideSource::Wisp, &second, 1, 300);
   TEST_ASSERT_EQUAL(2, cfg.beginFadeCount);
-  TEST_ASSERT_EQUAL_UINT16(300, cfg.fadeDurationMs());
+  TEST_ASSERT_EQUAL_UINT32(300u, cfg.fadeDurationMs());
   TEST_ASSERT_EQUAL(test::FadeState::FadingIn, ov.state());
   // fadeStartMs_ moved to the second-apply timestamp.
   TEST_ASSERT_EQUAL_UINT32(50u, cfg.fadeStartMs());
+}
+
+void test_color_override_uint32_fade_duration_no_truncation() {
+  // A 30-minute fade (1,800,000 ms) must survive apply() without truncation.
+  // Before this fix, fadeDurationMs_ was uint16: 1,800,000 & 0xFFFF = 50,752.
+  test::FakeConfigurator cfg;
+  cfg.colors.resize(4, test::Color());
+  test::ColorOverride ov;
+  ov.bind(&cfg, 4);
+
+  test::Color target(200, 100, 50, 0);
+  ov.apply(kMacWisp, test::lamp_protocol::OverrideSource::Wisp,
+           &target, 1, /*fadeDurationMs=*/1800000u);
+
+  TEST_ASSERT_EQUAL_UINT32(1800000u, cfg.fadeDurationMs());
+  TEST_ASSERT_EQUAL_UINT32(1800000u, ov.currentFadeDurationMs_);
+
+  // The critical product in ease() at the midpoint: 900,000 * 511 = 459,900,000.
+  // Must stay below UINT32_MAX (~4.29e9) so no uint64 intermediate is needed.
+  const uint32_t elapsed = 1800000u / 2;
+  const uint32_t product = elapsed * 511u;
+  TEST_ASSERT_EQUAL_UINT32(459900000u, product);  // no overflow → exact value
+  // LUT index at midpoint: 459,900,000 / 1,800,000 * 511 / 511 = 255.
+  TEST_ASSERT_EQUAL_UINT32(255u, (product / 1800000u * 511u) / 511u);
 }
 
 // ============================================================================
@@ -798,6 +822,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_color_override_rebaseline_updates_saved_colors_mid_holding);
   RUN_TEST(test_color_override_rebaseline_noop_when_idle);
   RUN_TEST(test_color_override_mid_fade_interrupt_restarts_fade);
+  RUN_TEST(test_color_override_uint32_fade_duration_no_truncation);
 
   RUN_TEST(test_brightness_override_apply_transitions_to_holding);
   RUN_TEST(test_brightness_override_restore_returns_to_baseline);

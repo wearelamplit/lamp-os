@@ -34,7 +34,7 @@ void ColorOverride::bind(BehaviorContext& ctx, lamp_protocol::OverrideSurface su
 void ColorOverride::apply(const uint8_t sourceMac[6],
                           lamp_protocol::OverrideSource source,
                           const Color* colors, uint8_t numColors,
-                          uint16_t fadeDurationMs) {
+                          uint32_t fadeDurationMs) {
   if (!configurator_ || numColors == 0 || !colors) return;
   // Operator-priority lockout: while the app has the colour picker /
   // brightness slider for this surface open, wisp paints lose.
@@ -128,7 +128,7 @@ void ColorOverride::apply(const uint8_t sourceMac[6],
 
 void ColorOverride::restore(const uint8_t sourceMac[6],
                             lamp_protocol::OverrideSource source,
-                            uint16_t fadeDurationMs) {
+                            uint32_t fadeDurationMs) {
   (void)sourceMac;  // not used for the dedup decision in v1 — see source
                     // ownership rules below.
   if (!configurator_ || state_ == FadeState::Idle) return;

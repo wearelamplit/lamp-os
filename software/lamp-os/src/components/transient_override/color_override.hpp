@@ -65,14 +65,14 @@ class ColorOverride {
   void apply(const uint8_t sourceMac[6],
              lamp_protocol::OverrideSource source,
              const Color* colors, uint8_t numColors,
-             uint16_t fadeDurationMs);
+             uint32_t fadeDurationMs);
 
   // Restore to the saved baseline. Drops silently if the call doesn't
   // own this override (sourceKind mismatch and not Any). When state is
   // Idle this is a no-op — restore-without-prior-apply is benign.
   void restore(const uint8_t sourceMac[6],
                lamp_protocol::OverrideSource source,
-               uint16_t fadeDurationMs);
+               uint32_t fadeDurationMs);
 
   // Drives the state machine: FadingIn→Holding, Holding→Restoring
   // (watchdog), Restoring→Idle. Cheap when state == Idle. Call from the
@@ -165,11 +165,11 @@ class ColorOverride {
   // transition (when elapsed >= currentFadeDurationMs_) and the
   // Holding→Restoring watchdog (when elapsed >= kPaintWatchdogMs).
   uint32_t lastApplyMs_ = 0;
-  uint16_t currentFadeDurationMs_ = 0;
+  uint32_t currentFadeDurationMs_ = 0;
 
   // Timestamp of the restore() — drives the Restoring→Idle transition.
   uint32_t restoreStartMs_ = 0;
-  uint16_t restoreDurationMs_ = 0;
+  uint32_t restoreDurationMs_ = 0;
 
   // The baseline we'll restore to. Snapshotted from the configurator's
   // `colors` at apply() time, and replaced by rebaseline() during Holding.

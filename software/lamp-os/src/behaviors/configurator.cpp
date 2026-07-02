@@ -15,7 +15,7 @@ bool ConfiguratorBehavior::fadeActive(uint32_t nowMs) const {
 }
 
 void ConfiguratorBehavior::beginFade(const std::vector<Color>& targetColors,
-                                     uint16_t fadeDurationMs) {
+                                     uint32_t fadeDurationMs) {
   // Snapshot the fade-FROM endpoint from the configurator's PREVIOUS
   // intended output (the `colors` field, optionally lerped if we're
   // interrupting a fade in flight) — NOT from fb->buffer. fb->buffer
@@ -92,9 +92,6 @@ void ConfiguratorBehavior::draw() {
       fb->buffer[i] = colors[i];
     }
   } else {
-    // 16-bit math is fine — fadeDurationMs_ ≤ 65535 and elapsed is bounded
-    // by that. The fade() helper takes (start, end, steps, currentStep),
-    // matches the existing easeFrames-based call site.
     const uint32_t elapsed = now - fadeStartMs_;
     const uint32_t duration = fadeDurationMs_;
     for (int i = 0; i < fb->pixelCount; i++) {
