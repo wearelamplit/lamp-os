@@ -98,7 +98,7 @@ class ColorOverride {
   // a healthy mesh and keeps both surfaces' watchdogs honest.
   void touchApply(uint32_t nowMs) {
     if (state_ == FadeState::FadingIn || state_ == FadeState::Holding) {
-      lastApplyMs_ = nowMs;
+      lastWispSeenMs_ = nowMs;
     }
   }
 
@@ -161,11 +161,16 @@ class ColorOverride {
   FadeState state_ = FadeState::Idle;
   lamp_protocol::OverrideSource activeSource_ = lamp_protocol::OverrideSource::None;
 
-  // Timestamp of the last apply() — drives both the FadingIn→Holding
-  // transition (when elapsed >= currentFadeDurationMs_) and the
-  // Holding→Restoring watchdog (when elapsed >= kPaintWatchdogMs).
+  // Timestamp of the last apply() — drives the FadingIn→Holding transition
+  // (when elapsed >= currentFadeDurationMs_).
   uint32_t lastApplyMs_ = 0;
   uint32_t currentFadeDurationMs_ = 0;
+
+  // Last time the wisp was seen (an apply, or a paint-mode HELLO keepalive).
+  // Drives the auto-restore watchdog independent of fade timing, so a long
+  // drift fade holds while the wisp is present but reverts within
+  // kPaintWatchdogMs of it going silent — in any active fade state.
+  uint32_t lastWispSeenMs_ = 0;
 
   // Timestamp of the restore() — drives the Restoring→Idle transition.
   uint32_t restoreStartMs_ = 0;

@@ -54,8 +54,10 @@ class PaintDistributor {
   void sendDriftToPeer(size_t idx);
 
   // Rebuilds driftMacs_ from claimed inventory, sorts by MAC, recomputes slot.
-  // Call on roster changes and on setDriftInterval.
-  void refreshDriftRoster();
+  // Call on roster changes and on setDriftInterval. With paintNewcomers, any
+  // lamp new since the last refresh gets an immediate paint (steady-state
+  // join path; the setup callers leave it false since they already walk-paint).
+  void refreshDriftRoster(bool paintNewcomers = false);
 
   LampInventory* inventory_ = nullptr;
   MeshLink* mesh_ = nullptr;

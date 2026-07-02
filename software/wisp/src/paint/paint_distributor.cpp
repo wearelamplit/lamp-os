@@ -75,7 +75,7 @@ void PaintDistributor::tick(uint32_t nowMs) {
   // for a mode change or interval update.
   if (paintMode_ && (nowMs - lastDriftRosterMs_) >= 5000) {
     lastDriftRosterMs_ = nowMs;
-    refreshDriftRoster();
+    refreshDriftRoster(/*paintNewcomers=*/true);
   }
 }
 
@@ -103,8 +103,12 @@ void PaintDistributor::setDriftInterval(uint32_t intervalMs, uint8_t fadePct) {
   refreshDriftRoster();
 }
 
-void PaintDistributor::refreshDriftRoster() {
+void PaintDistributor::refreshDriftRoster(bool paintNewcomers) {
   if (!inventory_) return;
+  uint8_t prev[kMaxWalkPeers][6];
+  const size_t prevCount = driftCount_;
+  for (size_t i = 0; i < prevCount; i++) std::memcpy(prev[i], driftMacs_[i], 6);
+
   auto snap = inventory_->snapshot();
   std::array<uint8_t, 6> tmp[kMaxWalkPeers];
   driftCount_ = 0;
@@ -120,6 +124,22 @@ void PaintDistributor::refreshDriftRoster() {
   for (size_t i = 0; i < driftCount_; i++) std::memcpy(driftMacs_[i], tmp[i].data(), 6);
   driftSlotMs_ = driftSlotMs(driftIntervalMs_, driftCount_);
   driftIdx_    = driftCount_ ? driftIdx_ % driftCount_ : 0;
+
+  // A lamp that joins mid-run would otherwise wait a full interval for its
+  // drift slot; paint it immediately (snappy) so it catches up within one
+  // refresh, then it folds into the rotation.
+  // ponytail: direct unpaced sends. Typically 0-1 joiners per refresh; a mass
+  // simultaneous rejoin is bounded at kMaxWalkPeers and self-heals — a dropped
+  // immediate paint just waits for that lamp's normal drift slot.
+  if (paintNewcomers && paintMode_) {
+    for (size_t i = 0; i < driftCount_; i++) {
+      bool known = false;
+      for (size_t j = 0; j < prevCount; j++) {
+        if (std::memcmp(driftMacs_[i], prev[j], 6) == 0) { known = true; break; }
+      }
+      if (!known) sendPaintToPeer(driftMacs_[i]);
+    }
+  }
 }
 
 void PaintDistributor::sendDriftToPeer(size_t idx) {
