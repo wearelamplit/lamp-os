@@ -31,7 +31,7 @@ namespace {
   constexpr uint8_t  kBasePin         = 14;
   constexpr uint16_t kBasePixelCount  = 40;
   constexpr uint8_t  kMaxBrightness   = 180;
-  // Spot region within shade: Python range(24,33) → 9 pixels, indices 24..32.
+  // Spot region within shade: 9 pixels, indices 24..32.
   constexpr uint16_t kSpotStart       = 24;
   constexpr uint16_t kSpotEnd         = 32;
   constexpr uint8_t  kSpotCount       = kSpotEnd - kSpotStart + 1;  // 9
@@ -67,8 +67,7 @@ void test_snafu_max_brightness_is_180() {
   TEST_ASSERT_EQUAL_UINT8(180, kMaxBrightness);
 }
 
-void test_snafu_spot_region_matches_python_range_24_33() {
-  // Python: range(24, 33) = indices 24, 25, 26, 27, 28, 29, 30, 31, 32
+void test_snafu_spot_region_is_indices_24_to_32() {
   TEST_ASSERT_EQUAL_UINT(24, kSpotStart);
   TEST_ASSERT_EQUAL_UINT(32, kSpotEnd);
   TEST_ASSERT_EQUAL_UINT(9, kSpotCount);
@@ -88,7 +87,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_snafu_base_pin_is_14);
   RUN_TEST(test_snafu_base_pixel_count_is_40);
   RUN_TEST(test_snafu_max_brightness_is_180);
-  RUN_TEST(test_snafu_spot_region_matches_python_range_24_33);
+  RUN_TEST(test_snafu_spot_region_is_indices_24_to_32);
   RUN_TEST(test_snafu_palette_scene_count_is_12);
   return UNITY_END();
 }

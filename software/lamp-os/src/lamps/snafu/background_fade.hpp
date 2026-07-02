@@ -7,8 +7,6 @@ namespace lamp { namespace snafu {
 
 // Slow palette-cycle on the shade FrameBuffer. 12 gradient-pair scenes;
 // picks one at random, fades over `frames` ticks, holds, picks another.
-// Ported verbatim (palettes + visual contract) from legacy snafu.py
-// BackgroundColorFade.
 class BackgroundFade : public AnimatedBehavior {
  public:
   BackgroundFade(FrameBuffer* inFb, uint32_t inFrames = 2700)
@@ -19,8 +17,7 @@ class BackgroundFade : public AnimatedBehavior {
 
  private:
   static constexpr size_t kSceneCount = 12;
-  // Verbatim port of legacy snafu.py::shade_colors. Each entry is a
-  // gradient pair {start, end}. The cap visual cycles through these.
+  // Each entry is a gradient pair {start, end}; the cap visual cycles through these.
   static const Color kPalettes[kSceneCount][2];
 
   size_t currentScene_ = 0;

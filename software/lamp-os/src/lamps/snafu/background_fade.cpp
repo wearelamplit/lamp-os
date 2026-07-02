@@ -5,7 +5,6 @@
 
 namespace lamp::snafu {
 
-// Verbatim palette port from legacy snafu.py::shade_colors
 const Color BackgroundFade::kPalettes[BackgroundFade::kSceneCount][2] = {
   { Color(5,100,15,0),   Color(70,50,2,0)    },
   { Color(50,0,43,0),    Color(120,25,15,0)  },

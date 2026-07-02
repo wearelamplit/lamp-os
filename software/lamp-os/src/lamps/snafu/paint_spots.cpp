@@ -5,7 +5,6 @@
 
 namespace lamp::snafu {
 
-// Verbatim palette port from legacy snafu.py::spot_colors
 const Color PaintSpots::kSpotPalettes[PaintSpots::kSceneCount][2] = {
   { Color(34,16,43,0),    Color(97,45,44,0)   },
   { Color(120,16,0,0),    Color(98,0,12,0)    },
@@ -36,9 +35,8 @@ void PaintSpots::draw() {
   const uint8_t sc = spotCount();
   if (sc == 0 || fb->buffer.size() <= endPx_) { nextFrame(); return; }
 
-  // Lazy-init on first draw: seed current scene pixels from the initial
-  // shade gradient (matching the Python init using shade_colors[0]).
-  // If currentScene_ is still the sentinel, pick scene 0 now.
+  // Lazy-init on first draw: seed current scene pixels from scene 0 when
+  // currentScene_ is still the sentinel.
   if (currentScenePixels_.empty()) {
     if (currentScene_ == static_cast<size_t>(-1)) {
       currentScene_ = 0;

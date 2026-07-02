@@ -48,7 +48,7 @@ void Greeting::draw() {
   const auto pixelCount = static_cast<uint8_t>(fb->buffer.size());
   if (pixelCount == 0) { nextFrame(); return; }
 
-  // Lazy-build glitch gradient: (0,45,200,0) → (180,0,60,0) matching Python.
+  // Lazy-build glitch gradient: (0,45,200,0) → (180,0,60,0).
   if (glitchColors_.empty()) {
     glitchColors_ = calculateGradient(Color(0,45,200,0), Color(180,0,60,0),
                                       pixelCount);
@@ -57,8 +57,7 @@ void Greeting::draw() {
   const uint32_t f = frame;
 
   if (f < kGlitchFrames) {
-    // Glitch phase: rotate the precomputed gradient by a random offset per frame,
-    // matching the Python `self.glitch()` which picks a random start slice.
+    // Glitch phase: rotate the precomputed gradient by a random offset per frame.
     glitchOffset_ = gGreetRng.range(0, pixelCount - 1);
     for (uint8_t i = 0; i < pixelCount; ++i) {
       const uint8_t src = static_cast<uint8_t>((i + glitchOffset_) % pixelCount);

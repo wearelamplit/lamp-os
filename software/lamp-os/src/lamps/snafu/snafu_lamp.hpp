@@ -37,7 +37,6 @@ class SnafuLamp : public Lamp {
       .name              = "snafu",
       .baseColor         = "#30078300", // purple stem — user-editable
       .shadeColor        = "#78100000", // amanita red — picker hidden in app
-      .baseColorsEditable  = true,
       .shadeColorsEditable = false,
       .basePx  = 40,                    // matches HwConfig stem
       .shadePx = 40,                    // matches HwConfig cap
