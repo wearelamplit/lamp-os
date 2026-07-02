@@ -178,6 +178,15 @@ DispatchResult WispOpDispatcher::dispatch(const uint8_t* payload, size_t len) {
     return DispatchResult::AppliedShuffle;
   }
 
+  if (strcmp(op, "setDrift") == 0) {
+    if (!doc["intervalMs"].is<int>() || !doc["fadePct"].is<int>()) return DispatchResult::Malformed;
+    const int iv = doc["intervalMs"].as<int>();
+    const int fp = doc["fadePct"].as<int>();
+    if (iv < 30000 || iv > 3600000 || fp < 0 || fp > 100) return DispatchResult::Malformed;
+    config_.setDrift(static_cast<uint32_t>(iv), static_cast<uint8_t>(fp));
+    return DispatchResult::AppliedDriftChange;
+  }
+
   Serial.printf("[wisp.op] unknown wispOp op='%s'\n", op);
   return DispatchResult::Malformed;
 }

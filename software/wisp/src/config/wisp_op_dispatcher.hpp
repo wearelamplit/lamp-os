@@ -21,6 +21,7 @@ enum class DispatchResult {
   AppliedManualPalette,// setManualPalette stored
   AppliedOffColor,     // setOffColor stored (Off-mode wisp-ring color)
   AppliedShuffle,      // shuffle: bumped shuffleSeed, re-roll queued
+  AppliedDriftChange,  // setDrift applied (interval + fadePct)
   Malformed,           // JSON parse failed or required field missing
 };
 
