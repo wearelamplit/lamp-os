@@ -413,10 +413,10 @@ void Lamp::drainOverrideColors() {
                                    cmd.fadeDurationMs);
         }
       }
-      // Base + Shade arrive 10 ms apart but share a single-slot mailbox.
-      // If Core 1 lags, the second frame drops the first and only one
-      // surface's watchdog is refreshed. Touch both so the watchdog
-      // doesn't expire on the dropped surface.
+      // Wisp paint is a combined Base+Shade frame, so both apply() above
+      // already refreshed their watchdogs; touching both also covers the
+      // single-surface frame path, keeping the other surface's prior wisp
+      // override from expiring.
       if (cmd.sourceKind == lamp_protocol::OverrideSource::Wisp) {
         const uint32_t now = millis();
         lamp::overrides.base.touchApply(now);
@@ -491,6 +491,14 @@ void Lamp::drainWispHello() {
       lamp::nearbyLamps.cacheWispHello(cmd.sourceMac, cmd.wispVersion, cmd.flags,
                                        cmd.paletteIdPrefix, cmd.carriedFwChannel,
                                        cmd.carriedFwVersion);
+      // Hold the override while the wisp is actively painting (PAINT_MODE) so a
+      // long drift fade doesn't trip the 60s watchdog; paint:off still reverts.
+      // ponytail: single-wisp fleet — scope to the painter's MAC if a 2nd ships.
+      if (cmd.flags & lamp_protocol::WISP_HELLO_FLAG_PAINT_MODE) {
+        const uint32_t nowMs = millis();
+        if (lamp::overrides.base.isWispActive()) lamp::overrides.base.touchApply(nowMs);
+        if (lamp::overrides.shade.isWispActive()) lamp::overrides.shade.touchApply(nowMs);
+      }
     }
   }
 }

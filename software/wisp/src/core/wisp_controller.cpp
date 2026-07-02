@@ -193,6 +193,10 @@ void WispController::applyOpResult(DispatchResult res) {
       paint_.onPaletteChanged();
       status_.triggerOnChange();
       break;
+    case wisp::DispatchResult::AppliedDriftChange:
+      paint_.setDriftInterval(config_.driftIntervalMs(), config_.driftFadePct());
+      status_.triggerOnChange();
+      break;
     case wisp::DispatchResult::Ignored:
     case wisp::DispatchResult::Malformed:
       break;

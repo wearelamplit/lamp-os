@@ -38,6 +38,8 @@ constexpr const char* kKeySourceMode  = "srcMode";
 constexpr const char* kKeyManualPalette = "manualPal";
 constexpr const char* kKeyOffColor      = "offColor";
 constexpr const char* kKeyShuffleSeed   = "shufSeed";
+constexpr const char* kKeyDriftIntv     = "driftIntv";
+constexpr const char* kKeyDriftFade     = "driftFade";
 
 WispSourceMode coerceSourceMode(int raw) {
   switch (raw) {
@@ -110,14 +112,20 @@ void WispConfig::begin() {
 
   shuffleSeed_ = static_cast<uint8_t>(prefs_.getInt(kKeyShuffleSeed, 0) & 0xFF);
 
+  driftIntervalMs_ = prefs_.getUInt(kKeyDriftIntv, 120000);
+  driftFadePct_ = static_cast<uint8_t>(prefs_.getUChar(kKeyDriftFade, 50));
+
   Serial.printf("[wisp.cfg] loaded selZone=%d ssid='%s' pw=%s "
-                "srcMode=%d manualColors=%u offColor=%u,%u,%u shuffleSeed=%u\n",
+                "srcMode=%d manualColors=%u offColor=%u,%u,%u shuffleSeed=%u "
+                "driftIntv=%u ms driftFade=%u%%\n",
                 selectedZone_, wifiSsid_.c_str(),
                 wifiPw_.length() ? "<set>" : "<empty>",
                 static_cast<int>(sourceMode_),
                 (unsigned)manualPalette_.size(),
                 offColor_.r, offColor_.g, offColor_.b,
-                (unsigned)shuffleSeed_);
+                (unsigned)shuffleSeed_,
+                (unsigned)driftIntervalMs_,
+                (unsigned)driftFadePct_);
 }
 
 void WispConfig::setSelectedZone(int zone) {
@@ -207,6 +215,16 @@ void WispConfig::bumpShuffleSeed() {
     prefs_.putInt(kKeyShuffleSeed, shuffleSeed_);
   }
   Serial.printf("[wisp.cfg] shuffleSeed <= %u\n", (unsigned)shuffleSeed_);
+}
+
+void WispConfig::setDrift(uint32_t intervalMs, uint8_t fadePct) {
+  driftIntervalMs_ = intervalMs;
+  driftFadePct_ = fadePct;
+  if (opened_) {
+    prefs_.putUInt(kKeyDriftIntv, intervalMs);
+    prefs_.putUChar(kKeyDriftFade, fadePct);
+  }
+  Serial.printf("[wisp.cfg] drift <= %lu ms, %u%% fade\n", intervalMs, fadePct);
 }
 
 size_t WispConfig::copyManualPalette(uint8_t* out, size_t maxColors) const {

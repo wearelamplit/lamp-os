@@ -24,7 +24,7 @@ struct PendingOverrideColors {
   uint8_t sourceMac[6];
   lamp_protocol::OverrideSurface surface;
   lamp_protocol::OverrideSource sourceKind;
-  uint16_t fadeDurationMs;
+  uint32_t fadeDurationMs;
   uint8_t numColors;
   Color colors[lamp_protocol::kMaxOverrideColorsPerFrame];
 };
@@ -33,7 +33,7 @@ struct PendingRestoreColors {
   uint8_t sourceMac[6];
   lamp_protocol::OverrideSurface surface;
   lamp_protocol::OverrideSource sourceKind;
-  uint16_t fadeDurationMs;
+  uint32_t fadeDurationMs;
 };
 
 struct PendingOverrideBrightness {

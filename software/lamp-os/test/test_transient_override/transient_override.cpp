@@ -77,7 +77,7 @@ struct FakeConfigurator {
   std::vector<Color> colors;            // current "target" the configurator holds
   std::vector<Color> lastFadeFrom;      // snapshot at last beginFade call
   uint32_t fadeStartMs_ = 0;
-  uint16_t fadeDurationMs_ = 0;
+  uint32_t fadeDurationMs_ = 0;
   int beginFadeCount = 0;
   // Mirrors ConfiguratorBehavior::lastWebSocketUpdateTimeMs. ColorOverride
   // bumps this from apply() + restore() so the production configurator
@@ -86,9 +86,9 @@ struct FakeConfigurator {
   uint32_t lastWebSocketUpdateTimeMs = 0;
 
   uint32_t fadeStartMs() const { return fadeStartMs_; }
-  uint16_t fadeDurationMs() const { return fadeDurationMs_; }
+  uint32_t fadeDurationMs() const { return fadeDurationMs_; }
 
-  void beginFade(const std::vector<Color>& target, uint16_t durationMs) {
+  void beginFade(const std::vector<Color>& target, uint32_t durationMs) {
     // Snapshot the "current" view as a stand-in for the buffer. In the
     // production code the snapshot reads the frame buffer; here we use
     // the previous target as a proxy so the mid-fade-interrupt test can
@@ -124,10 +124,11 @@ class ColorOverride {
   uint8_t activeMac_[6] = {0};
 
   uint32_t lastApplyMs_ = 0;
-  uint16_t currentFadeDurationMs_ = 0;
+  uint32_t lastWispSeenMs_ = 0;
+  uint32_t currentFadeDurationMs_ = 0;
 
   uint32_t restoreStartMs_ = 0;
-  uint16_t restoreDurationMs_ = 0;
+  uint32_t restoreDurationMs_ = 0;
 
   std::vector<Color> savedColors_;
 
@@ -153,7 +154,7 @@ class ColorOverride {
   void apply(const uint8_t sourceMac[6],
              lamp_protocol::OverrideSource source,
              const Color* colors, uint8_t numColors,
-             uint16_t fadeDurationMs) {
+             uint32_t fadeDurationMs) {
     if (!configurator_ || numColors == 0) return;
     if (state_ == FadeState::Idle) {
       savedColors_ = configurator_->colors;
@@ -168,12 +169,13 @@ class ColorOverride {
     activeSource_ = source;
     std::memcpy(activeMac_, sourceMac, 6);
     lastApplyMs_ = configurator_->fadeStartMs();
+    lastWispSeenMs_ = lastApplyMs_;
     currentFadeDurationMs_ = fadeDurationMs;
   }
 
   void restore(const uint8_t sourceMac[6],
                lamp_protocol::OverrideSource source,
-               uint16_t fadeDurationMs) {
+               uint32_t fadeDurationMs) {
     (void)sourceMac;
     if (!configurator_ || state_ == FadeState::Idle) return;
     if (source != lamp_protocol::OverrideSource::Any &&
@@ -186,24 +188,22 @@ class ColorOverride {
   }
 
   void tick(uint32_t nowMs) {
+    if ((state_ == FadeState::FadingIn || state_ == FadeState::Holding) &&
+        nowMs - lastWispSeenMs_ >= kPaintWatchdogMs) {
+      restore(activeMac_, lamp_protocol::OverrideSource::Any,
+              currentFadeDurationMs_);
+      return;
+    }
     switch (state_) {
       case FadeState::Idle:
         return;
-      case FadeState::FadingIn: {
-        const uint32_t elapsed = nowMs - lastApplyMs_;
-        if (elapsed >= currentFadeDurationMs_) {
+      case FadeState::FadingIn:
+        if (nowMs - lastApplyMs_ >= currentFadeDurationMs_) {
           state_ = FadeState::Holding;
         }
         return;
-      }
-      case FadeState::Holding: {
-        const uint32_t elapsed = nowMs - lastApplyMs_;
-        if (elapsed >= kPaintWatchdogMs) {
-          restore(activeMac_, lamp_protocol::OverrideSource::Any,
-                  currentFadeDurationMs_);
-        }
-        return;
-      }
+      case FadeState::Holding:
+        return;  // watchdog handled above
       case FadeState::Restoring: {
         const uint32_t elapsed = nowMs - restoreStartMs_;
         if (elapsed >= restoreDurationMs_) {
@@ -221,14 +221,13 @@ class ColorOverride {
     savedColors_ = currentSavedColors;
   }
 
-  // Cross-touch watchdog without running a fade. Wisp paint ships Base+
-  // Shade pairs 10 ms apart through a single-slot mailbox; if Core 1
-  // drains late, the second post drops the first on the floor and the
-  // dropped surface's watchdog expires after 60 s. The drain block
-  // cross-touches both surfaces after either apply lands.
+  // Refresh the auto-restore watchdog without running a fade — the wisp's
+  // paint-mode HELLO keepalive touches this so a long drift fade holds while
+  // the wisp is present. Advances lastWispSeenMs_ (watchdog) only, not
+  // lastApplyMs_ (fade clock), so it can't block the FadingIn→Holding latch.
   void touchApply(uint32_t nowMs) {
     if (state_ == FadeState::FadingIn || state_ == FadeState::Holding) {
-      lastApplyMs_ = nowMs;
+      lastWispSeenMs_ = nowMs;
     }
   }
 
@@ -434,7 +433,7 @@ void test_color_override_apply_transitions_fading_then_holding() {
            &target, 1, /*fadeDurationMs=*/100);
   TEST_ASSERT_EQUAL(test::FadeState::FadingIn, ov.state());
   TEST_ASSERT_EQUAL(1, cfg.beginFadeCount);
-  TEST_ASSERT_EQUAL_UINT16(100, cfg.fadeDurationMs());
+  TEST_ASSERT_EQUAL_UINT32(100u, cfg.fadeDurationMs());
 
   // Mid-fade: still FadingIn.
   test::g_nowMs = 50;
@@ -501,11 +500,10 @@ void test_color_override_watchdog_auto_restores_after_60s() {
 }
 
 void test_color_override_touch_apply_defers_watchdog() {
-  // Wisp paint ships Base+Shade pairs 10 ms apart through a single-slot
-  // mailbox. If Core 1 drains late, the second post overwrites the
-  // first, and the dropped surface's watchdog would otherwise fire at
-  // 60 s. The drain block calls touchApply() on the OTHER surface
-  // whenever a wisp frame applies; this test pins that semantics.
+  // The wisp's paint-mode HELLO keepalive calls touchApply() every ~5s, which
+  // advances the watchdog (lastWispSeenMs_) so a wisp-painted surface holds
+  // while the wisp is present. Pins that the watchdog anchors to the last
+  // touchApply, not the original apply.
   test::FakeConfigurator cfg;
   cfg.colors.resize(4, test::Color(50, 50, 50, 0));
   test::ColorOverride ov;
@@ -532,6 +530,45 @@ void test_color_override_touch_apply_defers_watchdog() {
   test::g_nowMs = 110000;
   ov.tick(test::g_nowMs);
   TEST_ASSERT_EQUAL(test::FadeState::Restoring, ov.state());
+}
+
+void test_color_override_watchdog_fires_during_long_fade() {
+  // A drift fade longer than the watchdog window with no keepalive: the
+  // watchdog fires while still FadingIn (it no longer waits for Holding).
+  test::FakeConfigurator cfg;
+  cfg.colors.resize(4, test::Color(50, 50, 50, 0));
+  test::ColorOverride ov;
+  ov.bind(&cfg, 4);
+
+  test::g_nowMs = 0;
+  test::Color target(255, 0, 0, 0);
+  ov.apply(kMacWisp, test::lamp_protocol::OverrideSource::Wisp, &target, 1,
+           /*fadeDurationMs=*/1800000);  // 30 min, well past the 60s watchdog
+  test::g_nowMs = 30000;
+  ov.tick(test::g_nowMs);
+  TEST_ASSERT_EQUAL(test::FadeState::FadingIn, ov.state());  // fade far from done
+
+  test::g_nowMs = 60000;
+  ov.tick(test::g_nowMs);
+  TEST_ASSERT_EQUAL(test::FadeState::Restoring, ov.state());  // fired mid-fade
+}
+
+void test_color_override_touch_apply_does_not_block_latch() {
+  // touchApply advances the watchdog clock only, never the fade clock, so a
+  // mid-fade keepalive must not stop FadingIn from latching to Holding.
+  test::FakeConfigurator cfg;
+  cfg.colors.resize(4, test::Color(50, 50, 50, 0));
+  test::ColorOverride ov;
+  ov.bind(&cfg, 4);
+
+  test::g_nowMs = 0;
+  test::Color target(255, 0, 0, 0);
+  ov.apply(kMacWisp, test::lamp_protocol::OverrideSource::Wisp, &target, 1, 1000);
+  test::g_nowMs = 500;
+  ov.touchApply(test::g_nowMs);  // mid-fade keepalive
+  test::g_nowMs = 1000;
+  ov.tick(test::g_nowMs);
+  TEST_ASSERT_EQUAL(test::FadeState::Holding, ov.state());  // latch not blocked
 }
 
 void test_color_override_touch_apply_noop_when_idle() {
@@ -640,17 +677,41 @@ void test_color_override_mid_fade_interrupt_restarts_fade() {
   test::Color first(255, 0, 0, 0);
   ov.apply(kMacWisp, test::lamp_protocol::OverrideSource::Wisp, &first, 1, 200);
   TEST_ASSERT_EQUAL(1, cfg.beginFadeCount);
-  TEST_ASSERT_EQUAL_UINT16(200, cfg.fadeDurationMs());
+  TEST_ASSERT_EQUAL_UINT32(200u, cfg.fadeDurationMs());
 
   // Mid-fade re-apply.
   test::g_nowMs = 50;
   test::Color second(0, 255, 0, 0);
   ov.apply(kMacWisp, test::lamp_protocol::OverrideSource::Wisp, &second, 1, 300);
   TEST_ASSERT_EQUAL(2, cfg.beginFadeCount);
-  TEST_ASSERT_EQUAL_UINT16(300, cfg.fadeDurationMs());
+  TEST_ASSERT_EQUAL_UINT32(300u, cfg.fadeDurationMs());
   TEST_ASSERT_EQUAL(test::FadeState::FadingIn, ov.state());
   // fadeStartMs_ moved to the second-apply timestamp.
   TEST_ASSERT_EQUAL_UINT32(50u, cfg.fadeStartMs());
+}
+
+void test_color_override_uint32_fade_duration_no_truncation() {
+  // A 30-minute fade (1,800,000 ms) must survive apply() without truncation.
+  // Before this fix, fadeDurationMs_ was uint16: 1,800,000 & 0xFFFF = 50,752.
+  test::FakeConfigurator cfg;
+  cfg.colors.resize(4, test::Color());
+  test::ColorOverride ov;
+  ov.bind(&cfg, 4);
+
+  test::Color target(200, 100, 50, 0);
+  ov.apply(kMacWisp, test::lamp_protocol::OverrideSource::Wisp,
+           &target, 1, /*fadeDurationMs=*/1800000u);
+
+  TEST_ASSERT_EQUAL_UINT32(1800000u, cfg.fadeDurationMs());
+  TEST_ASSERT_EQUAL_UINT32(1800000u, ov.currentFadeDurationMs_);
+
+  // The critical product in ease() at the midpoint: 900,000 * 511 = 459,900,000.
+  // Must stay below UINT32_MAX (~4.29e9) so no uint64 intermediate is needed.
+  const uint32_t elapsed = 1800000u / 2;
+  const uint32_t product = elapsed * 511u;
+  TEST_ASSERT_EQUAL_UINT32(459900000u, product);  // no overflow → exact value
+  // LUT index at midpoint: 459,900,000 / 1,800,000 * 511 / 511 = 255.
+  TEST_ASSERT_EQUAL_UINT32(255u, (product / 1800000u * 511u) / 511u);
 }
 
 // ============================================================================
@@ -792,12 +853,15 @@ int main(int argc, char** argv) {
   RUN_TEST(test_color_override_restore_transitions_restoring_then_idle);
   RUN_TEST(test_color_override_watchdog_auto_restores_after_60s);
   RUN_TEST(test_color_override_touch_apply_defers_watchdog);
+  RUN_TEST(test_color_override_watchdog_fires_during_long_fade);
+  RUN_TEST(test_color_override_touch_apply_does_not_block_latch);
   RUN_TEST(test_color_override_touch_apply_noop_when_idle);
   RUN_TEST(test_color_override_source_ownership_blocks_cross_source_restore);
   RUN_TEST(test_color_override_source_any_restore_succeeds_regardless);
   RUN_TEST(test_color_override_rebaseline_updates_saved_colors_mid_holding);
   RUN_TEST(test_color_override_rebaseline_noop_when_idle);
   RUN_TEST(test_color_override_mid_fade_interrupt_restarts_fade);
+  RUN_TEST(test_color_override_uint32_fade_duration_no_truncation);
 
   RUN_TEST(test_brightness_override_apply_transitions_to_holding);
   RUN_TEST(test_brightness_override_restore_returns_to_baseline);

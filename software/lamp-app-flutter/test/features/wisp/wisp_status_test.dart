@@ -208,5 +208,48 @@ void main() {
       expect(s.currentPalette, isNotNull);
       expect(s.currentPalette!.length, 2);
     });
+
+    test('driftIntervalMs and driftFadePct parse from JSON', () {
+      final s = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","driftIntervalMs":90000,"driftFadePct":40}',
+      ));
+      expect(s.driftIntervalMs, 90000);
+      expect(s.driftFadePct, 40);
+    });
+
+    test('driftIntervalMs defaults to 120000 when absent', () {
+      final s = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF"}',
+      ));
+      expect(s.driftIntervalMs, 120000);
+    });
+
+    test('driftFadePct defaults to 50 when absent', () {
+      final s = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF"}',
+      ));
+      expect(s.driftFadePct, 50);
+    });
+
+    // Option A: the wisp emits offColor only in off mode and drift fields only
+    // in manual/aurora. Both sets must round-trip even when the other is absent.
+    test('off-mode frame carries offColor; manual-mode frame carries drift fields', () {
+      final off = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"off","offColor":[200,100,50]}',
+      ));
+      expect(off.offColor.r, 200);
+      expect(off.offColor.g, 100);
+      expect(off.offColor.b, 50);
+      expect(off.driftIntervalMs, 120000); // absent → default
+      expect(off.driftFadePct, 50);        // absent → default
+
+      final manual = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual"'
+        ',"driftIntervalMs":90000,"driftFadePct":40}',
+      ));
+      expect(manual.offColor.r, 255); // absent → _defaultOffColor
+      expect(manual.driftIntervalMs, 90000);
+      expect(manual.driftFadePct, 40);
+    });
   });
 }

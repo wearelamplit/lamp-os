@@ -34,7 +34,7 @@ void ColorOverride::bind(BehaviorContext& ctx, lamp_protocol::OverrideSurface su
 void ColorOverride::apply(const uint8_t sourceMac[6],
                           lamp_protocol::OverrideSource source,
                           const Color* colors, uint8_t numColors,
-                          uint16_t fadeDurationMs) {
+                          uint32_t fadeDurationMs) {
   if (!configurator_ || numColors == 0 || !colors) return;
   // Operator-priority lockout: while the app has the colour picker /
   // brightness slider for this surface open, wisp paints lose.
@@ -112,6 +112,7 @@ void ColorOverride::apply(const uint8_t sourceMac[6],
   activeSource_ = source;
   (void)sourceMac;  // not used post-apply; ownership check is by source kind, not MAC
   lastApplyMs_ = configurator_->fadeStartMs();
+  lastWispSeenMs_ = lastApplyMs_;
   currentFadeDurationMs_ = fadeDurationMs;
 
   // Debug-session telemetry: every apply is a state-transition into
@@ -128,7 +129,7 @@ void ColorOverride::apply(const uint8_t sourceMac[6],
 
 void ColorOverride::restore(const uint8_t sourceMac[6],
                             lamp_protocol::OverrideSource source,
-                            uint16_t fadeDurationMs) {
+                            uint32_t fadeDurationMs) {
   (void)sourceMac;  // not used for the dedup decision in v1 — see source
                     // ownership rules below.
   if (!configurator_ || state_ == FadeState::Idle) return;
@@ -161,49 +162,40 @@ void ColorOverride::restore(const uint8_t sourceMac[6],
 }
 
 void ColorOverride::tick(uint32_t nowMs) {
+  // Auto-restore watchdog. In any active fade state, if the wisp hasn't been
+  // seen (an apply, or a paint-mode HELLO keepalive) within the window, revert
+  // so a silent wisp can't keep us painted forever. Any-source so restore()'s
+  // ownership check doesn't bounce it. Keyed off lastWispSeenMs_, not the fade
+  // clock, so a long drift fade holds while the wisp is present.
+  if ((state_ == FadeState::FadingIn || state_ == FadeState::Holding) &&
+      nowMs - lastWispSeenMs_ >= kPaintWatchdogMs) {
+    Serial.printf("[override] watchdog FIRE surface=0x%02X age=%ums src=%d\n",
+                  (unsigned)surface_, (unsigned)(nowMs - lastWispSeenMs_),
+                  (int)activeSource_);
+    static const uint8_t kZeroMac[6] = {0};
+    restore(kZeroMac, lamp_protocol::OverrideSource::Any,
+            /*fadeDurationMs=*/currentFadeDurationMs_);
+    return;
+  }
+
   switch (state_) {
     case FadeState::Idle:
       return;
-    case FadeState::FadingIn: {
-      // Once the fade-in window has elapsed, transition to Holding.
-      // currentFadeDurationMs_ == 0 (instant snap) lands here on the
-      // very next tick too.
-      const uint32_t elapsed = nowMs - lastApplyMs_;
-      if (elapsed >= currentFadeDurationMs_) {
+    case FadeState::FadingIn:
+      // currentFadeDurationMs_ == 0 (instant snap) also lands here next tick.
+      if (nowMs - lastApplyMs_ >= currentFadeDurationMs_) {
         state_ = FadeState::Holding;
       }
       return;
-    }
-    case FadeState::Holding: {
-      // Watchdog: if the source hasn't re-applied within the window,
-      // auto-restore so a silent wisp can't keep us painted forever.
-      // Use Any as the synthetic source so the source-ownership check
-      // in restore() doesn't bounce us.
-      const uint32_t elapsed = nowMs - lastApplyMs_;
-      if (elapsed >= kPaintWatchdogMs) {
-        // Debug-session telemetry: this firing IS the base-flicker
-        // we've been chasing — log it loudly with the silent gap.
-        Serial.printf("[override] watchdog FIRE surface=0x%02X age=%ums src=%d\n",
-                      (unsigned)surface_, (unsigned)elapsed,
-                      (int)activeSource_);
-        // restore() does (void)sourceMac internally; pass a zero MAC.
-        static const uint8_t kZeroMac[6] = {0};
-        restore(kZeroMac, lamp_protocol::OverrideSource::Any,
-                /*fadeDurationMs=*/currentFadeDurationMs_);
-      }
-      return;
-    }
-    case FadeState::Restoring: {
-      // Settle to Idle once the restore fade window has elapsed.
-      const uint32_t elapsed = nowMs - restoreStartMs_;
-      if (elapsed >= restoreDurationMs_) {
+    case FadeState::Holding:
+      return;  // watchdog handled above
+    case FadeState::Restoring:
+      if (nowMs - restoreStartMs_ >= restoreDurationMs_) {
         state_ = FadeState::Idle;
         activeSource_ = lamp_protocol::OverrideSource::None;
-        // Final transition out of wisp-active state fires the notify.
         maybeNotifyWispStateChange();
       }
       return;
-    }
   }
 }
 

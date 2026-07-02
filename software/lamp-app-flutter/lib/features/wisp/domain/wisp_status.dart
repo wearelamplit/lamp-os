@@ -46,6 +46,8 @@ class WispStatus {
     this.shadeWispColor,
     this.currentPalette,
     this.shuffleSeed = 0,
+    this.driftIntervalMs = 120000,
+    this.driftFadePct = 50,
   });
 
   /// Sentinel for "no wisp has been heard on this lamp yet" (lamp
@@ -131,6 +133,14 @@ class WispStatus {
   /// app preview stays in lock-step with the wisp's color assignments.
   /// Defaults to 0 (matches the firmware default and pre-feature wisps).
   final int shuffleSeed;
+
+  /// How often the wisp advances the drift color, in milliseconds.
+  /// Defaults to 120000 (2 min) matching the firmware default.
+  final int driftIntervalMs;
+
+  /// Fade depth for drift transitions, as a percentage of the color delta.
+  /// Defaults to 50 matching the firmware default.
+  final int driftFadePct;
 
   /// Convenience: are we currently being wisp-painted on either surface?
   bool get controlling => controllingBase || controllingShade;
@@ -278,6 +288,8 @@ class WispStatus {
       shadeWispColor: parseWispHexColor(json['shadeWispColor']),
       currentPalette: parseCurrentPalette(json['palette']),
       shuffleSeed: asInt(json['shuffleSeed']) ?? 0,
+      driftIntervalMs: asInt(json['driftIntervalMs']) ?? 120000,
+      driftFadePct: asInt(json['driftFadePct']) ?? 50,
     );
   }
 
@@ -288,6 +300,8 @@ class WispStatus {
     WispSourceMode? source,
     LampColor? offColor,
     List<LampColor>? currentPalette,
+    int? driftIntervalMs,
+    int? driftFadePct,
   }) {
     return WispStatus(
       currentZone: currentZone ?? this.currentZone,
@@ -311,6 +325,8 @@ class WispStatus {
       shadeWispColor: shadeWispColor,
       currentPalette: currentPalette ?? this.currentPalette,
       shuffleSeed: shuffleSeed,
+      driftIntervalMs: driftIntervalMs ?? this.driftIntervalMs,
+      driftFadePct: driftFadePct ?? this.driftFadePct,
     );
   }
 
@@ -340,7 +356,9 @@ class WispStatus {
           _currentPaletteEq.equals(
               currentPalette ?? const <LampColor>[],
               other.currentPalette ?? const <LampColor>[]) &&
-          shuffleSeed == other.shuffleSeed;
+          shuffleSeed == other.shuffleSeed &&
+          driftIntervalMs == other.driftIntervalMs &&
+          driftFadePct == other.driftFadePct;
 
   @override
   int get hashCode => Object.hash(
@@ -363,5 +381,7 @@ class WispStatus {
             ? 0
             : _currentPaletteEq.hash(currentPalette!),
         shuffleSeed,
+        driftIntervalMs,
+        driftFadePct,
       );
 }

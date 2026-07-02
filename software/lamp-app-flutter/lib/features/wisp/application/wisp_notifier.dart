@@ -38,8 +38,11 @@ class WispNotifier extends _$WispNotifier {
       Duration(milliseconds: 250);
   static const Duration _manualPaletteDebounce =
       Duration(milliseconds: 250);
+  static const Duration _driftDebounce = Duration(milliseconds: 300);
   Timer? _offColorWriteTimer;
   Timer? _manualPaletteWriteTimer;
+  Timer? _driftWriteTimer;
+  (int, int)? _pendingDrift; // (intervalMs, fadePct)
 
   /// Optimistic-write guard for [setSource]. The wisp's response chain
   /// is: app BLE-writes wispOp → relay lamp forwards via MSG_CONTROL_OP
@@ -120,6 +123,7 @@ class WispNotifier extends _$WispNotifier {
       _sub?.cancel();
       _offColorWriteTimer?.cancel();
       _manualPaletteWriteTimer?.cancel();
+      _driftWriteTimer?.cancel();
     });
 
     debugPrint('[wisp_notifier] build lamp=$lampId -- waiting for connect');
@@ -389,6 +393,32 @@ class WispNotifier extends _$WispNotifier {
     } catch (e, st) {
       debugPrint('WispNotifier.shuffle() failed: $e\n$st');
       rethrow;
+    }
+  }
+
+  /// Debounce slider drags to one write per [_driftDebounce] window.
+  void setDrift(int intervalMs, int fadePct) {
+    _pendingDrift = (intervalMs, fadePct);
+    _driftWriteTimer?.cancel();
+    _driftWriteTimer = Timer(_driftDebounce, () => unawaited(_flushDrift()));
+  }
+
+  /// Call on slider release so the final value lands without waiting for the
+  /// debounce window.
+  void flushDrift() {
+    _driftWriteTimer?.cancel();
+    _driftWriteTimer = null;
+    unawaited(_flushDrift());
+  }
+
+  Future<void> _flushDrift() async {
+    final pending = _pendingDrift;
+    if (pending == null) return;
+    _pendingDrift = null;
+    try {
+      await _repo.setDrift(pending.$1, pending.$2);
+    } catch (e, st) {
+      debugPrint('WispNotifier.setDrift write failed: $e\n$st');
     }
   }
 

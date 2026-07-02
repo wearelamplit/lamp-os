@@ -101,16 +101,21 @@ void StatusEmitter::emitStatus() {
   uint8_t offR = 0, offG = 0, offB = 0;
   bool hasOffColor = false;
   uint8_t shuffleSeed = 0;
+  uint32_t driftIntervalMs = 0;
+  uint8_t driftFadePct = 0;
   if (config_) {
     const auto off = config_->offColor();
     offR = off.r; offG = off.g; offB = off.b;
     hasOffColor = true;
     shuffleSeed = config_->shuffleSeed();
+    driftIntervalMs = config_->driftIntervalMs();
+    driftFadePct = config_->driftFadePct();
   }
   const WispStatusFields fields{
       currentZone, zoneSrc, obsBuf, obsCount,
       wifiConn, auroraConn, paletteIdPrefix, lastSeenMs,
-      sourceName, offR, offG, offB, hasOffColor, shuffleSeed };
+      sourceName, offR, offG, offB, hasOffColor, shuffleSeed,
+      driftIntervalMs, driftFadePct };
 
   char jsonBuf[kStatusJsonBufLen];
   const size_t jsonLen = buildWispStatusJson(

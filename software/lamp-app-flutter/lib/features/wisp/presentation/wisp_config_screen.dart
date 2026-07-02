@@ -15,6 +15,7 @@ import '../domain/wisp_source_mode.dart';
 import '../domain/wisp_status.dart';
 import '../domain/zone_source.dart';
 import 'palette_gradient_bar.dart';
+import 'widgets/drift_controls.dart';
 import 'widgets/wisp_header.dart';
 import 'widgets/wisp_manual_palette.dart';
 import 'widgets/wisp_off_color.dart';
@@ -174,6 +175,8 @@ class _WispBodyState extends ConsumerState<_WispBody> {
               if (source == WispSourceMode.manual) ...[
                 const SizedBox(height: 20),
                 ManualPaletteEditor(lampId: widget.lampId),
+                const SizedBox(height: AppSpace.lg),
+                DriftControls(lampId: widget.lampId, status: status),
               ],
               if (source == WispSourceMode.aurora) ...[
                 const SizedBox(height: AppSpace.xl),
@@ -210,6 +213,8 @@ class _WispBodyState extends ConsumerState<_WispBody> {
                     ),
                   ),
                 ],
+                const SizedBox(height: AppSpace.lg),
+                DriftControls(lampId: widget.lampId, status: status),
               ],
               const SizedBox(height: AppSpace.xl),
               Padding(

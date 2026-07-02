@@ -223,11 +223,12 @@ constexpr size_t WISP_PALETTE_MAX_SIZE     = WISP_PALETTE_FIXED_PREFIX +
 
 // MSG_OVERRIDE_COLORS fixed prefix:
 //   header(6) + sourceMac(6) + targetMac(6) + surface(1) + sourceKind(1)
-//   + fadeDurationMs(2) + numColors(1)
-// = 23 bytes; colors[numColors * 4] follow. Min numColors=1 → 27 total.
-constexpr size_t OVERRIDE_COLORS_FIXED_SIZE = HEADER_SIZE + 6 + 6 + 1 + 1 + 2 + 1;  // 23
+//   + fadeDurationMs(4) + numColors(1)
+// = 25 bytes; colors[numColors * 4] follow. Min numColors=1 → 29 total.
+// fadeDurationMs u32 LE; range up to ~1hr (3,600,000 ms) for wisp color-drift fades.
+constexpr size_t OVERRIDE_COLORS_FIXED_SIZE = HEADER_SIZE + 6 + 6 + 1 + 1 + 4 + 1;  // 25
 constexpr size_t OVERRIDE_COLORS_MAX_SIZE   = OVERRIDE_COLORS_FIXED_SIZE +
-                                              kMaxOverrideColorsPerFrame * 4;       // 55
+                                              kMaxOverrideColorsPerFrame * 4;       // 57
 
 // MSG_RESTORE_COLORS / MSG_RESTORE_BRIGHTNESS:
 //   header(6) + sourceMac(6) + targetMac(6) + surface(1) + sourceKind(1)
@@ -352,7 +353,7 @@ struct ParsedOverrideColors {
   uint8_t         targetMac[6];
   OverrideSurface surface;
   OverrideSource  sourceKind;
-  uint16_t        fadeDurationMs;
+  uint32_t        fadeDurationMs;
   uint8_t         numColors;
   uint8_t         colors[kMaxOverrideColorsPerFrame][4];  // RGBW per entry
 };
@@ -613,7 +614,7 @@ inline size_t buildOverrideColors(uint8_t* buf, size_t bufLen, uint16_t seq,
                                   const uint8_t targetMac[6],
                                   OverrideSurface surface,
                                   OverrideSource sourceKind,
-                                  uint16_t fadeDurationMs,
+                                  uint32_t fadeDurationMs,
                                   const uint8_t* colorsRGBW,
                                   uint8_t numColors) {
   if (!buf || !sourceMac || !targetMac || !colorsRGBW) return 0;
@@ -629,7 +630,9 @@ inline size_t buildOverrideColors(uint8_t* buf, size_t bufLen, uint16_t seq,
   buf[19] = static_cast<uint8_t>(sourceKind);
   buf[20] = static_cast<uint8_t>(fadeDurationMs & 0xFF);
   buf[21] = static_cast<uint8_t>((fadeDurationMs >> 8) & 0xFF);
-  buf[22] = numColors;
+  buf[22] = static_cast<uint8_t>((fadeDurationMs >> 16) & 0xFF);
+  buf[23] = static_cast<uint8_t>((fadeDurationMs >> 24) & 0xFF);
+  buf[24] = numColors;
   std::memcpy(&buf[OVERRIDE_COLORS_FIXED_SIZE], colorsRGBW, numColors * 4u);
   return total;
 }
@@ -883,7 +886,7 @@ inline bool parseOverrideColors(const uint8_t* data, size_t len,
   if (len < OVERRIDE_COLORS_FIXED_SIZE) return false;
   if (!detail::isValidOverrideSurfaceByte(data[18])) return false;
   if (!detail::isValidOverrideSourceByte(data[19])) return false;
-  const uint8_t numColors = data[22];
+  const uint8_t numColors = data[24];
   if (numColors < 1 || numColors > kMaxOverrideColorsPerFrame) return false;
   const size_t expected = OVERRIDE_COLORS_FIXED_SIZE + numColors * 4u;
   if (len != expected) return false;  // exact-match — silent drop on length mismatch
@@ -893,8 +896,10 @@ inline bool parseOverrideColors(const uint8_t* data, size_t len,
   out.surface    = static_cast<OverrideSurface>(data[18]);
   out.sourceKind = static_cast<OverrideSource>(data[19]);
   out.fadeDurationMs =
-       static_cast<uint16_t>(data[20])
-     | (static_cast<uint16_t>(data[21]) << 8);
+       static_cast<uint32_t>(data[20])
+     | (static_cast<uint32_t>(data[21]) << 8)
+     | (static_cast<uint32_t>(data[22]) << 16)
+     | (static_cast<uint32_t>(data[23]) << 24);
   out.numColors = numColors;
   std::memcpy(out.colors, &data[OVERRIDE_COLORS_FIXED_SIZE], numColors * 4u);
   return true;

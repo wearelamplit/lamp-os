@@ -65,14 +65,14 @@ class ColorOverride {
   void apply(const uint8_t sourceMac[6],
              lamp_protocol::OverrideSource source,
              const Color* colors, uint8_t numColors,
-             uint16_t fadeDurationMs);
+             uint32_t fadeDurationMs);
 
   // Restore to the saved baseline. Drops silently if the call doesn't
   // own this override (sourceKind mismatch and not Any). When state is
   // Idle this is a no-op — restore-without-prior-apply is benign.
   void restore(const uint8_t sourceMac[6],
                lamp_protocol::OverrideSource source,
-               uint16_t fadeDurationMs);
+               uint32_t fadeDurationMs);
 
   // Drives the state machine: FadingIn→Holding, Holding→Restoring
   // (watchdog), Restoring→Idle. Cheap when state == Idle. Call from the
@@ -98,7 +98,7 @@ class ColorOverride {
   // a healthy mesh and keeps both surfaces' watchdogs honest.
   void touchApply(uint32_t nowMs) {
     if (state_ == FadeState::FadingIn || state_ == FadeState::Holding) {
-      lastApplyMs_ = nowMs;
+      lastWispSeenMs_ = nowMs;
     }
   }
 
@@ -161,15 +161,20 @@ class ColorOverride {
   FadeState state_ = FadeState::Idle;
   lamp_protocol::OverrideSource activeSource_ = lamp_protocol::OverrideSource::None;
 
-  // Timestamp of the last apply() — drives both the FadingIn→Holding
-  // transition (when elapsed >= currentFadeDurationMs_) and the
-  // Holding→Restoring watchdog (when elapsed >= kPaintWatchdogMs).
+  // Timestamp of the last apply() — drives the FadingIn→Holding transition
+  // (when elapsed >= currentFadeDurationMs_).
   uint32_t lastApplyMs_ = 0;
-  uint16_t currentFadeDurationMs_ = 0;
+  uint32_t currentFadeDurationMs_ = 0;
+
+  // Last time the wisp was seen (an apply, or a paint-mode HELLO keepalive).
+  // Drives the auto-restore watchdog independent of fade timing, so a long
+  // drift fade holds while the wisp is present but reverts within
+  // kPaintWatchdogMs of it going silent — in any active fade state.
+  uint32_t lastWispSeenMs_ = 0;
 
   // Timestamp of the restore() — drives the Restoring→Idle transition.
   uint32_t restoreStartMs_ = 0;
-  uint16_t restoreDurationMs_ = 0;
+  uint32_t restoreDurationMs_ = 0;
 
   // The baseline we'll restore to. Snapshotted from the configurator's
   // `colors` at apply() time, and replaced by rebaseline() during Holding.

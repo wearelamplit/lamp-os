@@ -50,14 +50,14 @@ class ConfiguratorBehavior : public AnimatedBehavior {
   // start). When `fadeDurationMs == 0` (or `targetColors` is empty) this
   // is effectively an instant set.
   void beginFade(const std::vector<Color>& targetColors,
-                 uint16_t fadeDurationMs);
+                 uint32_t fadeDurationMs);
 
   // ColorOverride/BLE color writes need to read back the
   // fade-tracking state to decide whether the configurator is mid-fade.
   // Exposed publicly so the override modules can drive the transition
   // without owning their own per-pixel interpolation.
   uint32_t fadeStartMs() const { return fadeStartMs_; }
-  uint16_t fadeDurationMs() const { return fadeDurationMs_; }
+  uint32_t fadeDurationMs() const { return fadeDurationMs_; }
   bool fadeActive(uint32_t nowMs) const;
 
  private:
@@ -67,7 +67,7 @@ class ConfiguratorBehavior : public AnimatedBehavior {
   // pixel count changes (rare — only on configuration boot).
   std::vector<Color> fadeFromColors_;
   uint32_t fadeStartMs_ = 0;
-  uint16_t fadeDurationMs_ = 0;
+  uint32_t fadeDurationMs_ = 0;
 };
 
 }  // namespace lamp

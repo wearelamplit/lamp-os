@@ -130,6 +130,17 @@ class WispRepository {
     });
   }
 
+  /// Commit a new drift interval and fade percentage. The wisp persists both
+  /// in NVS and restarts the drift engine at the new rate.
+  Future<void> setDrift(int intervalMs, int fadePct) async {
+    await _writeOp({
+      'char': 'wispOp',
+      'op': 'setDrift',
+      'intervalMs': intervalMs,
+      'fadePct': fadePct,
+    });
+  }
+
   /// Re-roll per-lamp color assignments. The wisp bumps its shuffle seed,
   /// re-paints the fleet with the new assignments, and broadcasts a fresh
   /// wispStatus so the app preview re-rolls in lock-step.

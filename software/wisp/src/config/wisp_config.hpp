@@ -77,6 +77,11 @@ class WispConfig {
   uint8_t shuffleSeed() const { return shuffleSeed_; }
   void bumpShuffleSeed();
 
+  // Color drift interval (ms) and fade strength (0..100%).
+  uint32_t driftIntervalMs() const { return driftIntervalMs_; }
+  uint8_t driftFadePct() const { return driftFadePct_; }
+  void setDrift(uint32_t intervalMs, uint8_t fadePct);
+
  private:
   // Opaque to keep FreeRTOS out of the header; cast to SemaphoreHandle_t in .cpp.
   void* mutex_ = nullptr;
@@ -91,6 +96,8 @@ class WispConfig {
   std::vector<ManualPaletteColor> manualPalette_;
   ManualPaletteColor offColor_ = {255, 150, 50};
   uint8_t shuffleSeed_ = 0;
+  uint32_t driftIntervalMs_ = 120000;
+  uint8_t driftFadePct_ = 50;
 };
 
 }  // namespace wisp
