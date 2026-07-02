@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <string>
 
+#include "../components/catch_ota/catch_ota.hpp"
 #include "../components/network/bluetooth.hpp"
 #include "../components/network/wifi.hpp"
 #include "../expressions/expression_manager.hpp"
@@ -287,6 +288,10 @@ void setup() {
   SPIFFS.begin(true);
   bt.begin(config.lamp.name, config.base.colors[config.base.ac], config.shade.colors[0]);
   wifi.begin(&config);
+#if CATCH_OTA_ENABLED
+  catch_ota::begin(config.lamp.name.c_str(), config.base.colors[config.base.ac],
+                   config.shade.colors[0]);
+#endif
   shadeStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, config.lamp.brightness));
   baseStrip.setBrightness(lamp::calculateBrightnessLevel(LAMP_MAX_BRIGHTNESS, config.lamp.brightness));
   shade.begin(lamp::buildGradientWithStops(config.shade.px, config.shade.colors), config.shade.px, &shadeStrip);
@@ -295,6 +300,12 @@ void setup() {
 };
 
 void loop() {
+  catch_ota::tick(millis());
+  // A live transfer seizes the radio (STA-only on the ESP-NOW channel); skip
+  // rendering / net handlers so the ~30ms chunk cadence can't overflow the ring.
+  if (catch_ota::isInProgress()) {
+    return;
+  }
   handleStageMode();
   handleArtnet();
   handleWebSocket();

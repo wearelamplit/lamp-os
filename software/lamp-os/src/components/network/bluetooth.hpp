@@ -11,6 +11,10 @@
 // Lamp manufacturer identifier
 #define BLE_LAMP_MAGIC_NUMBER 42069
 
+// Capability-byte bit: the lamp speaks the mesh wire and can send an OTA
+// (kBleCapMeshProtocol on the sender side). Present only on 6/9-byte beacons.
+#define BLE_CAP_MESH_PROTOCOL 0x02
+
 // Scan every INTERVAL for WINDOW
 #define BLE_GAP_SCAN_INTERVAL_MS 400
 #define BLE_GAP_SCAN_WINDOW_MS 15
@@ -33,6 +37,18 @@
 #define BLE_MINIMUM_RSSI_VALUE -94
 
 namespace lamp {
+
+// True if a mesh-capable lamp beacon (caps byte has BLE_CAP_MESH_PROTOCOL) was
+// seen recently over BLE. Latched with hysteresis so a single missed scan window
+// doesn't drop it. catch_ota gates its ESP-NOW OTA listener on this, so a lamp
+// stays a normal BLE/stage lamp until a sender is actually nearby.
+bool meshLampPresent();
+
+// Stop BLE scan and suppress the automatic restart in onScanEnd.
+void bleStopScanNoRestart();
+
+void bleStopAdvertising();
+
 /**
  * @brief Entrypoint class to advertise and track lamps by Bluetooth LE
  */

@@ -21,6 +21,13 @@
 #include "./bluetooth_pool.hpp"
 
 namespace lamp {
+static volatile bool g_suppressBleRestart = false;
+
+// millis() of the last mesh-capable lamp beacon seen; 0 = never. meshLampPresent()
+// latches on this so a single missed scan window doesn't drop the signal.
+static uint32_t s_lastMeshLampSeenMs = 0;
+static constexpr uint32_t kMeshLampLatchMs = 15000;
+
 BluetoothPool lampBluetoothPool;
 
 class ScanCallbacks : public NimBLEScanCallbacks {
@@ -34,6 +41,20 @@ class ScanCallbacks : public NimBLEScanCallbacks {
     return (data.length() == 8 &&
             data[0] == (BLE_LAMP_MAGIC_NUMBER & 0xff) &&
             data[1] == ((BLE_LAMP_MAGIC_NUMBER >> 8) & 0xff));
+  };
+
+  // A mesh-capable lamp (can send OTA): a lamp beacon whose caps byte has the
+  // mesh bit. Caps position depends on beacon shape; the 8-byte old-lamp shape
+  // has no caps byte, so it is never mesh.
+  bool isMeshLamp(std::string data) {
+    if (data.length() < 2 ||
+        data[0] != (BLE_LAMP_MAGIC_NUMBER & 0xff) ||
+        data[1] != ((BLE_LAMP_MAGIC_NUMBER >> 8) & 0xff)) {
+      return false;
+    }
+    if (data.length() == 9) return (data[8] & BLE_CAP_MESH_PROTOCOL) != 0;
+    if (data.length() == 6) return (data[5] & BLE_CAP_MESH_PROTOCOL) != 0;
+    return false;
   };
 
   void onResult(const NimBLEAdvertisedDevice *advertisedDevice) override {
@@ -80,6 +101,10 @@ class ScanCallbacks : public NimBLEScanCallbacks {
             millis());
         lampBluetoothPool.addOrUpdateLamp(lamp);
       }
+
+      if (advertisedDevice->getRSSI() > BLE_MINIMUM_RSSI_VALUE && isMeshLamp(data)) {
+        s_lastMeshLampSeenMs = millis();
+      }
     }
   };
 
@@ -107,7 +132,9 @@ class ScanCallbacks : public NimBLEScanCallbacks {
 #endif
     lampBluetoothPool.pruneLamps();
     lampBluetoothPool.pruneStages();
-    NimBLEDevice::getScan()->start(BLE_GAP_SCAN_TIME_MS);
+    if (!g_suppressBleRestart) {
+      NimBLEDevice::getScan()->start(BLE_GAP_SCAN_TIME_MS);
+    }
   }
 } scanCallbacks;
 
@@ -162,4 +189,18 @@ std::vector<BluetoothLampRecord> *BluetoothComponent::getLamps() {
 std::vector<BluetoothStageRecord> *BluetoothComponent::getStages() {
   return &lampBluetoothPool.stagePool;
 };
+
+bool meshLampPresent() {
+  if (s_lastMeshLampSeenMs == 0) return false;
+  return (millis() - s_lastMeshLampSeenMs) < kMeshLampLatchMs;
+}
+
+void bleStopScanNoRestart() {
+  g_suppressBleRestart = true;
+  NimBLEDevice::getScan()->stop();
+}
+
+void bleStopAdvertising() {
+  NimBLEDevice::getAdvertising()->stop();
+}
 }  // namespace lamp

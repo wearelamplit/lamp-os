@@ -4,9 +4,25 @@ name: LampOS CI
 on:
   push:
     branches:
-      - '*'
+      - main
   pull_request:
 
 jobs:
-  lamp_os_build:
-    uses: ./.github/workflows/build.yml
+  check:
+    name: Compile + native tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - name: Install PlatformIO
+        run: pip install -r requirements.txt
+      - name: Compile firmware
+        working-directory: ./software/lamp-os
+        run: pio run --environment upesy_wroom
+      - name: Native tests
+        working-directory: ./software/lamp-os
+        run: pio test --environment native

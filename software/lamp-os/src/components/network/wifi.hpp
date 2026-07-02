@@ -14,6 +14,7 @@
 #define WIFI_PREFERRED_CHANNEL 6
 
 namespace lamp {
+
 class WifiComponent {
  public:
   Config* config;

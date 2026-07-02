@@ -9,6 +9,9 @@
     "build": "cd software/lamp-ui && npm run build",
     "build:firmware": "cd software/lamp-os && pio run -e upesy_wroom",
     "flash": "cd software/lamp-ui && npm run flash",
-    "build-and-flash": "npm run build && npm run flash"
+    "build-and-flash": "npm run build && npm run flash",
+    "lamp:build": "cd software/lamp-os && pio run -e upesy_wroom",
+    "lamp:test": "cd software/lamp-os && pio test -e native",
+    "lamp:flash": "cd software/lamp-os && pio run -e upesy_wroom -t upload"
   }
 }

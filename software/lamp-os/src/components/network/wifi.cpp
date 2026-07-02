@@ -225,7 +225,13 @@ void WifiComponent::toApMode() {
   WiFi.softAP(
       config->lamp.name.substr(0, 12).append("-lamp").c_str(),
       String(config->lamp.password.c_str()),
+#if defined(CATCH_OTA_ENABLED)
+      // Bring the AP up directly on the ESP-NOW channel so unicast OFFER RX
+      // works. An AP on a different channel drops directed frames.
+      LAMP_ESPNOW_CHANNEL);
+#else
       WIFI_PREFERRED_CHANNEL);
+#endif
 };
 
 bool WifiComponent::isHomeNetworkVisible() {
