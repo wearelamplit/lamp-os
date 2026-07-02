@@ -34,6 +34,9 @@ docs/distribution.bin
 
 # Linked git worktrees
 .worktrees/
+# Claude Code local scaffolding (git worktrees under .claude/worktrees,
+# settings, caches) — machine-local, never tracked.
+.claude/
 
 # Superpowers local skill cache + parked notes — never tracked
 .superpowers/
