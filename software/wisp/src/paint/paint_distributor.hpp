@@ -32,6 +32,10 @@ class PaintDistributor {
   // per-lamp color assignments on the next paint walk.
   void setShuffleSeed(uint8_t s) { shuffleSeed_ = s; }
 
+  // intervalMs: how often each lamp is re-targeted [30000..3600000].
+  // fadePct: fade length as % of interval [0..100].
+  void setDriftInterval(uint32_t intervalMs, uint8_t fadePct);
+
   void onPaletteChanged();
   void tick(uint32_t nowMs);
 
@@ -47,6 +51,11 @@ class PaintDistributor {
 
   void sendPaintToPeer(const uint8_t mac[6]);
   void sendRestoreToPeer(const uint8_t mac[6]);
+  void sendDriftToPeer(size_t idx);
+
+  // Rebuilds driftMacs_ from claimed inventory, sorts by MAC, recomputes slot.
+  // Call on roster changes and on setDriftInterval.
+  void refreshDriftRoster();
 
   LampInventory* inventory_ = nullptr;
   MeshLink* mesh_ = nullptr;
@@ -55,7 +64,6 @@ class PaintDistributor {
   // Null roster: every lamp gets painted (used in tests).
   WispRoster* roster_ = nullptr;
   bool paintMode_ = false;
-  uint32_t lastBackstopMs_ = 0;
   uint32_t lastSendMs_ = 0;
   uint16_t seqCounter_ = 0;
 
@@ -65,8 +73,15 @@ class PaintDistributor {
   size_t walkCount_ = 0;
   size_t walkIdx_ = 0;
 
-  static constexpr uint32_t kPerPeerPaceMs       = 5;
-  static constexpr uint32_t kBackstopRefreshMs   = 10000;
+  uint32_t driftIntervalMs_  = 120000;
+  uint8_t  driftFadePct_     = 50;
+  uint8_t  driftMacs_[kMaxWalkPeers][6];
+  size_t   driftCount_       = 0;
+  size_t   driftIdx_         = 0;
+  uint32_t driftSlotMs_      = 0;
+  uint32_t lastDriftFireMs_  = 0;
+
+  static constexpr uint32_t kPerPeerPaceMs        = 5;
   static constexpr uint16_t kDefaultFadeDurationMs = 1500;
 };
 

@@ -3,10 +3,14 @@
 #include "fleet/wisp_roster.hpp"
 
 #include <Arduino.h>
+#include <esp_random.h>
 
+#include <algorithm>
+#include <array>
 #include <cstring>
 
 #include "paint/current_palette.hpp"
+#include "paint/drift.hpp"
 #include "fleet/lamp_inventory.hpp"
 #include "net/mesh_link.hpp"
 #include "paint/tuple_sampler.hpp"
@@ -20,6 +24,7 @@ void PaintDistributor::begin(LampInventory* inventory, MeshLink* mesh,
   mesh_ = mesh;
   palette_ = palette;
   roster_ = roster;
+  refreshDriftRoster();
 }
 
 void PaintDistributor::setPaintMode(bool on) {
@@ -30,12 +35,9 @@ void PaintDistributor::setPaintMode(bool on) {
   }
   paintMode_ = on;
   if (on) {
-    lastBackstopMs_ = millis();
     beginWalk(Mode::Paint);
+    refreshDriftRoster();
   } else {
-    // Walk every currently-known peer with a RESTORE so they fall back to
-    // their authored personality. We deliberately keep paintMode_ false so
-    // tick() doesn't re-trigger backstop refreshes.
     beginWalk(Mode::Restore);
   }
 }
@@ -46,8 +48,6 @@ void PaintDistributor::onPaletteChanged() {
 }
 
 void PaintDistributor::tick(uint32_t nowMs) {
-  // Drain the paced queue first; backstop logic only fires when idle so we
-  // don't double-up sends.
   if (walkMode_ != Mode::Idle && walkIdx_ < walkCount_) {
     if (nowMs - lastSendMs_ < kPerPeerPaceMs) return;
     lastSendMs_ = nowMs;
@@ -62,10 +62,13 @@ void PaintDistributor::tick(uint32_t nowMs) {
     return;
   }
 
-  // Backstop: lamp may have missed a frame or joined between palette changes.
-  if (paintMode_ && (nowMs - lastBackstopMs_) >= kBackstopRefreshMs) {
-    lastBackstopMs_ = nowMs;
-    beginWalk(Mode::Paint);
+  // Drift rotation replaces the global backstop — each lamp is re-targeted
+  // on its slot, so every lamp sees a refresh within one interval.
+  if (paintMode_ && driftSlotMs_ > 0 && driftCount_ > 0 &&
+      (nowMs - lastDriftFireMs_) >= driftSlotMs_) {
+    lastDriftFireMs_ = nowMs;
+    sendDriftToPeer(driftIdx_ % driftCount_);
+    driftIdx_ = nextDriftIdx(driftIdx_, driftCount_);
   }
 }
 
@@ -85,6 +88,60 @@ void PaintDistributor::beginWalk(Mode mode) {
   Serial.printf("[paint] walk %s peers=%u\n",
                 mode == Mode::Paint ? "Paint" : "Restore",
                 (unsigned)walkCount_);
+}
+
+void PaintDistributor::setDriftInterval(uint32_t intervalMs, uint8_t fadePct) {
+  driftIntervalMs_ = intervalMs;
+  driftFadePct_    = fadePct;
+  refreshDriftRoster();
+}
+
+void PaintDistributor::refreshDriftRoster() {
+  if (!inventory_) return;
+  auto snap = inventory_->snapshot();
+  std::array<uint8_t, 6> tmp[kMaxWalkPeers];
+  driftCount_ = 0;
+  for (const auto& e : snap) {
+    if (driftCount_ >= kMaxWalkPeers) break;
+    if (roster_ && !roster_->claims(e.mac)) continue;
+    std::memcpy(tmp[driftCount_].data(), e.mac, 6);
+    driftCount_++;
+  }
+  std::stable_sort(tmp, tmp + driftCount_, [](const auto& a, const auto& b) {
+    return std::memcmp(a.data(), b.data(), 6) < 0;
+  });
+  for (size_t i = 0; i < driftCount_; i++) std::memcpy(driftMacs_[i], tmp[i].data(), 6);
+  driftSlotMs_ = driftSlotMs(driftIntervalMs_, driftCount_);
+  driftIdx_    = driftCount_ ? driftIdx_ % driftCount_ : 0;
+}
+
+void PaintDistributor::sendDriftToPeer(size_t idx) {
+  if (!mesh_ || !palette_) return;
+  if (palette_->colors().empty()) return;
+
+  const uint8_t* mac = driftMacs_[idx];
+  ColorTuple t = sampleTupleForMac(*palette_, mac, shuffleSeed_);
+  uint8_t srcMac[6] = {0};
+  mesh_->getMac(srcMac);
+
+  uint8_t colorsRGBW[2 * 4] = {
+      t.r[0], t.g[0], t.b[0], t.w[0],
+      t.r[1], t.g[1], t.b[1], t.w[1],
+  };
+  const uint32_t fadeDurationMs = driftFadeMs(driftIntervalMs_, driftFadePct_, esp_random());
+  uint8_t buf[lamp_protocol::OVERRIDE_COLORS_MAX_SIZE];
+  const uint16_t seq = seqCounter_++;
+  size_t n = lamp_protocol::buildOverrideColors(
+      buf, sizeof(buf), seq,
+      srcMac, mac,
+      lamp_protocol::OverrideSurface::BaseAndShade,
+      lamp_protocol::OverrideSource::Wisp,
+      fadeDurationMs,
+      colorsRGBW, /*numColors=*/2);
+  if (n) mesh_->send(mac, buf, n);
+  Serial.printf("[drift] send Pair->%02X:%02X:%02X:%02X:%02X:%02X seq=%u fade=%ums\n",
+                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+                (unsigned)seq, (unsigned)fadeDurationMs);
 }
 
 void PaintDistributor::sendPaintToPeer(const uint8_t mac[6]) {
