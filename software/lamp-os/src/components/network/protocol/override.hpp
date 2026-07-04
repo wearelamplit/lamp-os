@@ -79,6 +79,15 @@ constexpr size_t RESTORE_FIXED_SIZE = HEADER_SIZE + 6 + 6 + 1 + 1 + 2;  // 22
 // = 23 bytes fixed.
 constexpr size_t OVERRIDE_BRIGHTNESS_FIXED_SIZE = HEADER_SIZE + 6 + 6 + 1 + 1 + 2 + 1;  // 23
 
+// Wire-offset locks. A field-width change that shifts a parsed byte fails
+// to compile here rather than silently misparsing between fleet versions
+// that advertise the same PROTOCOL_VERSION.
+static_assert(OVERRIDE_COLORS_FIXED_SIZE == 25, "OVERRIDE_COLORS fixed size lock (fade 4 LE at 20..23, numColors at 24)");
+static_assert(OVERRIDE_COLORS_MAX_SIZE == 57, "OVERRIDE_COLORS max frame lock");
+static_assert(OVERRIDE_COLORS_MAX_SIZE <= 250, "ESP-NOW frame cap");
+static_assert(RESTORE_FIXED_SIZE == 22, "RESTORE fixed size (fadeDurationMs 2 LE at 20..21)");
+static_assert(OVERRIDE_BRIGHTNESS_FIXED_SIZE == 23, "OVERRIDE_BRIGHTNESS fixed size (fade 2 LE at 20..21, brightness at 22)");
+
 struct ParsedOverrideColors {
   uint16_t        seq;
   uint8_t         sourceMac[6];

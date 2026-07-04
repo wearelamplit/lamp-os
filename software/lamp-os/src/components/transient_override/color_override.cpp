@@ -41,11 +41,7 @@ void ColorOverride::apply(const uint8_t sourceMac[6],
   if (operatorEditing_ &&
       source == lamp_protocol::OverrideSource::Wisp) {
 #ifdef LAMP_DEBUG
-    // Diagnostic for "lamp stopped listening to wisp" — fires when the
-    // operatorEditing flag is stuck true (e.g. ungraceful BLE
-    // disconnect skipped the defensive sweep in ControlServerCallbacks::
-    // onDisconnect at ble_control.cpp:376-378). If you see this line
-    // while no app is connected, the flag is stranded.
+    // This line with no app connected means operatorEditing stranded true.
     Serial.printf("[override] DROP wisp surface=0x%02X (operatorEditing=true)\n",
                   (unsigned)surface_);
 #endif
@@ -174,7 +170,7 @@ void ColorOverride::tick(uint32_t nowMs) {
                   (int)activeSource_);
     static const uint8_t kZeroMac[6] = {0};
     restore(kZeroMac, lamp_protocol::OverrideSource::Any,
-            /*fadeDurationMs=*/currentFadeDurationMs_);
+            /*fadeDurationMs=*/kWatchdogRestoreFadeMs);
     return;
   }
 
@@ -193,6 +189,7 @@ void ColorOverride::tick(uint32_t nowMs) {
       if (nowMs - restoreStartMs_ >= restoreDurationMs_) {
         state_ = FadeState::Idle;
         activeSource_ = lamp_protocol::OverrideSource::None;
+        hasLastWispColor_ = false;
         maybeNotifyWispStateChange();
       }
       return;

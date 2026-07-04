@@ -132,7 +132,12 @@ class ColorOverride {
 
   std::vector<Color> savedColors_;
 
+  bool operatorEditing_ = false;
+  Color lastWispColor_;
+  bool hasLastWispColor_ = false;
+
   static constexpr uint32_t kPaintWatchdogMs = 60000;
+  static constexpr uint32_t kWatchdogRestoreFadeMs = 1500;
 
   void bind(FakeConfigurator* cfg, uint8_t pixelCount) {
     configurator_ = cfg;
@@ -156,10 +161,15 @@ class ColorOverride {
              const Color* colors, uint8_t numColors,
              uint32_t fadeDurationMs) {
     if (!configurator_ || numColors == 0) return;
+    if (operatorEditing_ && source == lamp_protocol::OverrideSource::Wisp) return;
     if (state_ == FadeState::Idle) {
       savedColors_ = configurator_->colors;
     }
     std::vector<Color> target = expandToPixelCount(colors, numColors);
+    if (source == lamp_protocol::OverrideSource::Wisp) {
+      lastWispColor_ = colors[0];
+      hasLastWispColor_ = true;
+    }
     configurator_->beginFade(target, fadeDurationMs);
     // Mirror production: bump the configurator's wake-up timestamp so it
     // doesn't lapse to STOPPED while an override is active. See
@@ -191,7 +201,7 @@ class ColorOverride {
     if ((state_ == FadeState::FadingIn || state_ == FadeState::Holding) &&
         nowMs - lastWispSeenMs_ >= kPaintWatchdogMs) {
       restore(activeMac_, lamp_protocol::OverrideSource::Any,
-              currentFadeDurationMs_);
+              kWatchdogRestoreFadeMs);
       return;
     }
     switch (state_) {
@@ -209,6 +219,7 @@ class ColorOverride {
         if (elapsed >= restoreDurationMs_) {
           state_ = FadeState::Idle;
           activeSource_ = lamp_protocol::OverrideSource::None;
+          hasLastWispColor_ = false;
           std::memset(activeMac_, 0, 6);
         }
         return;
@@ -234,6 +245,8 @@ class ColorOverride {
   bool isActive() const { return state_ != FadeState::Idle; }
   lamp_protocol::OverrideSource activeSource() const { return activeSource_; }
   FadeState state() const { return state_; }
+  void setOperatorEditing(bool editing) { operatorEditing_ = editing; }
+  bool hasLastWispColor() const { return hasLastWispColor_; }
 };
 
 // --- BrightnessOverride: native mirror -----------------------------------
@@ -714,6 +727,74 @@ void test_color_override_uint32_fade_duration_no_truncation() {
   TEST_ASSERT_EQUAL_UINT32(255u, (product / 1800000u * 511u) / 511u);
 }
 
+void test_color_override_watchdog_restore_uses_short_fade() {
+  // A long drift fade goes silent → the watchdog reverts over the short
+  // fixed kWatchdogRestoreFadeMs, NOT the (possibly hour-long) drift fade.
+  test::FakeConfigurator cfg;
+  cfg.colors.resize(4, test::Color(50, 50, 50, 0));
+  test::ColorOverride ov;
+  ov.bind(&cfg, 4);
+
+  test::g_nowMs = 0;
+  test::Color target(255, 0, 0, 0);
+  ov.apply(kMacWisp, test::lamp_protocol::OverrideSource::Wisp, &target, 1,
+           /*fadeDurationMs=*/1800000u);  // 30 min drift fade
+
+  test::g_nowMs = 60000;
+  ov.tick(test::g_nowMs);
+  TEST_ASSERT_EQUAL(test::FadeState::Restoring, ov.state());
+  TEST_ASSERT_EQUAL_UINT32(test::ColorOverride::kWatchdogRestoreFadeMs,
+                           cfg.fadeDurationMs());
+}
+
+void test_color_override_clears_wisp_color_on_idle() {
+  // hasLastWispColor stays true through Holding + Restoring (the app renders
+  // the color during fade-out) but clears when the surface lands back on Idle
+  // so the app stops showing a wisp color the LED no longer displays.
+  test::FakeConfigurator cfg;
+  cfg.colors.resize(4, test::Color(10, 20, 30, 0));
+  test::ColorOverride ov;
+  ov.bind(&cfg, 4);
+
+  test::Color target(200, 100, 50, 0);
+  ov.apply(kMacWisp, test::lamp_protocol::OverrideSource::Wisp, &target, 1, 0);
+  test::g_nowMs = 1;
+  ov.tick(test::g_nowMs);
+  TEST_ASSERT_EQUAL(test::FadeState::Holding, ov.state());
+  TEST_ASSERT_TRUE(ov.hasLastWispColor());
+
+  test::g_nowMs = 500;
+  ov.restore(kMacWisp, test::lamp_protocol::OverrideSource::Wisp,
+             /*fadeDurationMs=*/100);
+  TEST_ASSERT_EQUAL(test::FadeState::Restoring, ov.state());
+  TEST_ASSERT_TRUE(ov.hasLastWispColor());  // still shown mid-fade
+
+  test::g_nowMs = 700;
+  ov.tick(test::g_nowMs);
+  TEST_ASSERT_EQUAL(test::FadeState::Idle, ov.state());
+  TEST_ASSERT_FALSE(ov.hasLastWispColor());  // cleared on Idle
+}
+
+void test_color_override_operator_editing_drops_wisp() {
+  // While the operator holds the picker open, wisp paints drop on the floor;
+  // clearing the flag (as the BLE disconnect sweep does) re-admits them.
+  test::FakeConfigurator cfg;
+  cfg.colors.resize(4, test::Color());
+  test::ColorOverride ov;
+  ov.bind(&cfg, 4);
+
+  ov.setOperatorEditing(true);
+  test::Color target(200, 100, 50, 0);
+  ov.apply(kMacWisp, test::lamp_protocol::OverrideSource::Wisp, &target, 1, 0);
+  TEST_ASSERT_EQUAL(test::FadeState::Idle, ov.state());
+  TEST_ASSERT_EQUAL(0, cfg.beginFadeCount);
+
+  ov.setOperatorEditing(false);
+  ov.apply(kMacWisp, test::lamp_protocol::OverrideSource::Wisp, &target, 1, 0);
+  TEST_ASSERT_EQUAL(test::FadeState::FadingIn, ov.state());
+  TEST_ASSERT_EQUAL(1, cfg.beginFadeCount);
+}
+
 // ============================================================================
 // BrightnessOverride tests
 // ============================================================================
@@ -862,6 +943,9 @@ int main(int argc, char** argv) {
   RUN_TEST(test_color_override_rebaseline_noop_when_idle);
   RUN_TEST(test_color_override_mid_fade_interrupt_restarts_fade);
   RUN_TEST(test_color_override_uint32_fade_duration_no_truncation);
+  RUN_TEST(test_color_override_watchdog_restore_uses_short_fade);
+  RUN_TEST(test_color_override_clears_wisp_color_on_idle);
+  RUN_TEST(test_color_override_operator_editing_drops_wisp);
 
   RUN_TEST(test_brightness_override_apply_transitions_to_holding);
   RUN_TEST(test_brightness_override_restore_returns_to_baseline);

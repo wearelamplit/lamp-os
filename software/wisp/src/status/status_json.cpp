@@ -2,6 +2,15 @@
 #include <ArduinoJson.h>
 #include <cstring>
 
+#ifdef LAMP_DEBUG
+#include <Arduino.h>
+#define WISP_STATUS_DROP_LOG(field) \
+  Serial.printf("[wisp.beacon] wispStatus dropped %s (over %uB cap)\n", \
+                (field), (unsigned)cap)
+#else
+#define WISP_STATUS_DROP_LOG(field) ((void)0)
+#endif
+
 namespace wisp {
 
 size_t buildWispStatusJson(const WispStatusFields& f, char* out,
@@ -23,23 +32,30 @@ size_t buildWispStatusJson(const WispStatusFields& f, char* out,
     JsonArray o = doc["offColor"].to<JsonArray>();
     o.add(f.offR); o.add(f.offG); o.add(f.offB);
   }
-  // Drop shuffleSeed if it pushes the frame over cap; a failed frame stops
-  // all status broadcasts. App defaults to 0 when the key is absent.
+  // shuffleSeed is priority: without it the app's predictTuple() desyncs from
+  // the wisp's paint. The lower-value drift fields and observedZones absorb
+  // truncation first; the seed is dropped only as a last resort below.
   if (f.shuffleSeed) {
     doc["shuffleSeed"] = f.shuffleSeed;
-    if (measureJson(doc) > cap) doc.remove("shuffleSeed");
   }
   if (!isOff) {
     doc["driftIntervalMs"] = f.driftIntervalMs;
-    if (measureJson(doc) > cap) doc.remove("driftIntervalMs");
+    if (measureJson(doc) > cap) { doc.remove("driftIntervalMs"); WISP_STATUS_DROP_LOG("driftIntervalMs"); }
     doc["driftFadePct"] = f.driftFadePct;
-    if (measureJson(doc) > cap) doc.remove("driftFadePct");
+    if (measureJson(doc) > cap) { doc.remove("driftFadePct"); WISP_STATUS_DROP_LOG("driftFadePct"); }
   }
   // ponytail: O(n * measureJson), n <= 16 — trivial, and it gives a
   // by-construction guarantee the serialized doc never exceeds cap.
   for (size_t i = 0; i < f.observedCount; ++i) {
     z.add(f.observedZones[i]);
-    if (measureJson(doc) > cap) { z.remove(z.size() - 1); break; }
+    if (measureJson(doc) > cap) { z.remove(z.size() - 1); WISP_STATUS_DROP_LOG("observedZones"); break; }
+  }
+  // Last resort: a produced frame beats a perfect one (a 0-length frame stops
+  // all broadcasts, vanishing the wisp from the app). Only reached when no
+  // lower-value field remained to cut, e.g. off mode with a long-uptime lastSeenMs.
+  if (f.shuffleSeed && measureJson(doc) > cap) {
+    doc.remove("shuffleSeed");
+    WISP_STATUS_DROP_LOG("shuffleSeed");
   }
   size_t n = serializeJson(doc, out, outCap);
   return (n > 0 && n <= cap) ? n : 0;

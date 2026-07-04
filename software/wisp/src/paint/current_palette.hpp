@@ -1,6 +1,7 @@
 // CurrentPalette — most recently resolved Aurora palette for the shadowed zone.
 //
-// Aurora's amber/uv channels are dropped (no lamp-grid consumer).
+// Aurora's amber channel folds into the warm-white W channel (the grid's
+// dedicated warm emitter).
 // update() and paletteId()/colors() are loop-task only. copyPaletteIdPrefix()
 // is mutex-guarded for timer-task callers. A mutex (not spinlock) is required
 // because paletteId_ assignment heap-allocates; malloc cannot run with IRQs off.

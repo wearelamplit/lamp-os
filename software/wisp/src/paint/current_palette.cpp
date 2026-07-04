@@ -70,11 +70,14 @@ void CurrentPalette::update(const Palette& p, uint32_t nowMs) {
 
   colors_.reserve(p.colors.size());
   for (const auto& src : p.colors) {
+    // W is warm white, the grid's warm emitter, so an amber-encoded palette's
+    // warmth folds into W; dropping amber renders warm palettes cold. Tune the
+    // balance on hardware.
     RGBW c;
     c.r = floatToByte(src.r);
     c.g = floatToByte(src.g);
     c.b = floatToByte(src.b);
-    c.w = floatToByte(src.w);
+    c.w = floatToByte(src.w + src.am);
     colors_.push_back(c);
   }
 }

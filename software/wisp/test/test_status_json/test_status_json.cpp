@@ -87,6 +87,40 @@ void test_nonzero_seed_worst_case_does_not_fail() {
   TEST_ASSERT_FALSE(d["source"].isNull());   // essential field preserved
 }
 
+// shuffleSeed is a priority field: at pathological widths the lower-value
+// drift fields and observedZones are dropped first, so the seed survives and
+// the app's predictTuple() stays in sync with the wisp's paint.
+void test_shuffle_seed_survives_worst_case() {
+  int zones[16];
+  for (int i = 0; i < 16; ++i) zones[i] = 2147483647;
+  wisp::WispStatusFields f{ 2147483647, "firstSeen", zones, 16,
+                            true, true, "abcdef12", 4294967295u, "aurora",
+                            255, 255, 255, true, /*shuffleSeed=*/255,
+                            /*driftIntervalMs=*/120000, /*driftFadePct=*/50 };
+  char out[256];
+  size_t n = wisp::buildWispStatusJson(f, out, sizeof(out), CAP);
+  TEST_ASSERT_TRUE(n > 0 && n <= CAP);
+  JsonDocument d;
+  TEST_ASSERT_FALSE(deserializeJson(d, out));
+  TEST_ASSERT_EQUAL_INT(255, d["shuffleSeed"].as<int>());   // never dropped
+}
+
+// Off mode + long-uptime lastSeenMs + non-zero seed overflows the cap with no
+// drift/zones to shed. The seed is priority but must still yield last so the
+// frame is produced (a 0-length frame stops all broadcasts).
+void test_off_mode_longuptime_seed_still_produces_frame() {
+  wisp::WispStatusFields f{ 15, "nvs", nullptr, 0,
+                            true, true, "abcdef12", 4294967295u, "off",
+                            255, 255, 255, true, /*shuffleSeed=*/255,
+                            /*driftIntervalMs=*/120000, /*driftFadePct=*/50 };
+  char out[256];
+  size_t n = wisp::buildWispStatusJson(f, out, sizeof(out), CAP);
+  TEST_ASSERT_TRUE(n > 0 && n <= CAP);          // frame always produced
+  JsonDocument d;
+  TEST_ASSERT_FALSE(deserializeJson(d, out));
+  TEST_ASSERT_FALSE(d["offColor"].isNull());    // off-mode essential kept
+}
+
 void test_drift_fields_are_emitted() {
   // Production-shaped manual frame: hasOffColor=true, a few zones, realistic
   // field widths. Option A suppresses offColor (source != "off") so both drift
@@ -129,6 +163,8 @@ int main(int, char**) {
   RUN_TEST(test_nonzero_shuffle_seed_is_emitted);
   RUN_TEST(test_zero_shuffle_seed_is_omitted);
   RUN_TEST(test_nonzero_seed_worst_case_does_not_fail);
+  RUN_TEST(test_shuffle_seed_survives_worst_case);
+  RUN_TEST(test_off_mode_longuptime_seed_still_produces_frame);
   RUN_TEST(test_drift_fields_are_emitted);
   RUN_TEST(test_off_mode_emits_offcolor_not_drift);
   return UNITY_END();

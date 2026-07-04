@@ -153,6 +153,11 @@ class ColorOverride {
   // the wisp's expected refresh cadence with margin.
   static constexpr uint32_t kPaintWatchdogMs = 60000;
 
+  // Fade the watchdog's own revert uses. Fixed and short so a stranded
+  // paint reverts promptly instead of inheriting the wisp's drift fade,
+  // which can run tens of minutes.
+  static constexpr uint32_t kWatchdogRestoreFadeMs = 1500;
+
  private:
   ConfiguratorBehavior* configurator_ = nullptr;
   lamp_protocol::OverrideSurface surface_ = lamp_protocol::OverrideSurface::Base;

@@ -205,7 +205,7 @@ Manual/Aurora mode — carries drift fields, no `offColor`:
 
 ### Tier 3: Transient overrides
 
-All four override/restore messages share the same header layout (`sourceMac + targetMac + surface + sourceKind + fadeDurationMs`). Only the tail differs.
+All four override/restore messages share the same prefix through `sourceKind` (bytes 0..19). `fadeDurationMs` follows at offset 20: **4 LE bytes** for `MSG_OVERRIDE_COLORS`, **2 LE bytes** for the other three. Only the tail after the fade differs.
 
 **`MSG_OVERRIDE_COLORS` (0x21)**, Push transient colors onto a renderable surface.
 ```

@@ -414,6 +414,7 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
     t.type = inv.type;
     std::memcpy(t.srcMac, srcMac, 6);
     t.expression = std::move(expr);
+    t.createdMs = millis();
     transientExpressions_.push_back(std::move(t));
     raw->trigger();
     triggered = true;
@@ -423,10 +424,17 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
   return triggered;
 }
 
+// Evict a one-shot cascade even when isAnimationComplete() never fires; a
+// stuck completion signal would otherwise latch it on the compositor forever.
+static constexpr uint32_t kTransientMaxLifetimeMs = 180000;
+
 void ExpressionManager::gcTransients() {
   if (transientExpressions_.empty()) return;
+  const uint32_t nowMs = millis();
   for (auto it = transientExpressions_.begin(); it != transientExpressions_.end();) {
-    if (it->expression && it->expression->isAnimationComplete()) {
+    const bool complete = it->expression && it->expression->isAnimationComplete();
+    const bool expired = nowMs - it->createdMs >= kTransientMaxLifetimeMs;
+    if (complete || expired) {
       if (compositor_) compositor_->removeBehavior(it->expression.get());
       it = transientExpressions_.erase(it);
     } else {
