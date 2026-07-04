@@ -1,5 +1,6 @@
 #include "paint/tuple_sampler.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -84,7 +85,30 @@ RGBW sampleGradientAt(const std::vector<RGBW>& stops, uint32_t pos) {
   return out;
 }
 
+constexpr uint32_t kGolden   = 0x9E3779B9u;  // posB salt (decorrelates from posA)
+constexpr uint32_t kSwapSalt = 0xCAFEBABEu;  // independent third hash space
+constexpr uint32_t kMinGap   = 0x40000000u;  // 0.25 of the gradient span
+
 }  // namespace
+
+ColorTuple sampleTupleAtPositions(const std::vector<RGBW>& colors,
+                                  uint32_t posA, uint32_t posB) {
+  ColorTuple out;
+  auto stops = dedupe(colors);
+  if (stops.empty()) return out;
+
+  // Keep base and shade >= kMinGap apart so they stay visually distinct.
+  const uint32_t d = posA > posB ? posA - posB : posB - posA;
+  if (d < kMinGap) {
+    posB = (posA <= 0xFFFFFFFFu - kMinGap) ? posA + kMinGap : posA - kMinGap;
+  }
+
+  const RGBW base  = sampleGradientAt(stops, posA);
+  const RGBW shade = sampleGradientAt(stops, posB);
+  out.r[0] = base.r;  out.g[0] = base.g;  out.b[0] = base.b;  out.w[0] = base.w;
+  out.r[1] = shade.r; out.g[1] = shade.g; out.b[1] = shade.b; out.w[1] = shade.w;
+  return out;
+}
 
 ColorTuple sampleTupleForMac(const CurrentPalette& palette,
                              const uint8_t mac[6],
@@ -92,32 +116,19 @@ ColorTuple sampleTupleForMac(const CurrentPalette& palette,
   ColorTuple out;
   if (!mac) return out;
 
-  const auto& raw = palette.colors();
-  if (raw.empty()) return out;
+  const uint32_t posA = hashMac(mac, 0u      ^ shuffleSeed);
+  const uint32_t posB = hashMac(mac, kGolden ^ shuffleSeed);
+  out = sampleTupleAtPositions(palette.colors(), posA, posB);
 
-  auto stops = dedupe(raw);
-  if (stops.empty()) return out;
-
-  constexpr uint32_t kGolden   = 0x9E3779B9u;  // posB salt (decorrelates from posA)
-  constexpr uint32_t kSwapSalt = 0xCAFEBABEu;  // independent third hash space
-  constexpr uint32_t kMinGap   = 0x40000000u;  // 0.25 of the gradient span
-
-  uint32_t posA = hashMac(mac, 0u       ^ shuffleSeed);
-  uint32_t posB = hashMac(mac, kGolden  ^ shuffleSeed);
-
-  // Keep the two positions >= kMinGap apart so base and shade are visually
-  // distinct. Deterministic per MAC.
-  const uint32_t d = posA > posB ? posA - posB : posB - posA;
-  if (d < kMinGap) {
-    posB = (posA <= 0xFFFFFFFFu - kMinGap) ? posA + kMinGap : posA - kMinGap;
-  }
-
+  // Swap picks which position lands on base vs shade. Applied after gap
+  // enforcement so the pair stays byte-identical to the app's predictTuple.
   const bool swap = (hashMac(mac, kSwapSalt ^ shuffleSeed) & 1u) != 0u;
-  const RGBW base  = sampleGradientAt(stops, swap ? posB : posA);
-  const RGBW shade = sampleGradientAt(stops, swap ? posA : posB);
-
-  out.r[0] = base.r;  out.g[0] = base.g;  out.b[0] = base.b;  out.w[0] = base.w;
-  out.r[1] = shade.r; out.g[1] = shade.g; out.b[1] = shade.b; out.w[1] = shade.w;
+  if (swap) {
+    std::swap(out.r[0], out.r[1]);
+    std::swap(out.g[0], out.g[1]);
+    std::swap(out.b[0], out.b[1]);
+    std::swap(out.w[0], out.w[1]);
+  }
   return out;
 }
 

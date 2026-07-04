@@ -1,5 +1,7 @@
-// Algorithm redeclared locally (no CurrentPalette / aurora pull-in) to pin
-// the contract independently of the production .cpp.
+// A local copy of the algorithm pins the contract independently (no
+// CurrentPalette / aurora pull-in). The production sampleTupleAtPositions is
+// also exercised directly, including a golden-parity check that guards the
+// sampleTupleForMac refactor against the same golden bytes.
 
 #include <unity.h>
 
@@ -8,6 +10,8 @@
 #include <cstdint>
 #include <cstring>
 #include <vector>
+
+#include "paint/tuple_sampler.hpp"  // production sampleTupleAtPositions
 
 namespace {
 
@@ -226,6 +230,76 @@ void test_dedupe_drops_adjacent_near_identical_stops(void) {
   TEST_ASSERT_EQUAL_UINT8(0, deduped.back().b);
 }
 
+// Random drift path: sampleTupleAtPositions samples base/shade at two explicit
+// positions. Exercised with fixed positions here; production feeds esp_random().
+static std::vector<wisp::RGBW> orangeGreen() {
+  return {{255, 128, 0, 0}, {0, 200, 80, 0}};
+}
+
+void test_at_positions_samples_base_at_posA(void) {
+  // posA=0 on a 2-stop palette lands exactly on the first stop.
+  wisp::ColorTuple t = wisp::sampleTupleAtPositions(orangeGreen(), 0u, 0xFFFFFFFFu);
+  TEST_ASSERT_EQUAL_UINT8(255, t.r[0]);
+  TEST_ASSERT_EQUAL_UINT8(128, t.g[0]);
+  TEST_ASSERT_EQUAL_UINT8(0,   t.b[0]);
+  TEST_ASSERT_EQUAL_UINT8(0,   t.w[0]);
+  const bool baseDiffersFromShade =
+      t.r[0] != t.r[1] || t.g[0] != t.g[1] || t.b[0] != t.b[1];
+  TEST_ASSERT_TRUE(baseDiffersFromShade);
+}
+
+void test_at_positions_different_inputs_differ(void) {
+  wisp::ColorTuple a = wisp::sampleTupleAtPositions(orangeGreen(), 0u, 0xFFFFFFFFu);
+  wisp::ColorTuple b = wisp::sampleTupleAtPositions(orangeGreen(), 0x20000000u, 0xC0000000u);
+  const bool differ = a.r[0] != b.r[0] || a.g[0] != b.g[0] || a.b[0] != b.b[0] ||
+                      a.r[1] != b.r[1] || a.g[1] != b.g[1] || a.b[1] != b.b[1];
+  TEST_ASSERT_TRUE_MESSAGE(differ,
+      "distinct positions (a random drift slot) must yield a distinct pair");
+}
+
+void test_at_positions_gap_enforced_for_equal_inputs(void) {
+  // Identical positions collapse to gap 0; the >= kMinGap separation must move
+  // shade so base and shade stay visually distinct.
+  wisp::ColorTuple t = wisp::sampleTupleAtPositions(orangeGreen(), 0x80000000u, 0x80000000u);
+  const bool separated = t.r[0] != t.r[1] || t.g[0] != t.g[1] || t.b[0] != t.b[1];
+  TEST_ASSERT_TRUE_MESSAGE(separated,
+      "base/shade must stay >= kMinGap apart even for identical positions");
+}
+
+void test_golden_parity_production(void) {
+  // Guard the sampleTupleForMac refactor: drive the golden mac's positions
+  // through the PRODUCTION sampleTupleAtPositions (+ the swap sampleTupleForMac
+  // applies) and assert the same golden bytes as the local-copy golden above.
+  const uint8_t mac[6] = {0x10, 0x20, 0x30, 0x40, 0x50, 0x60};
+  const uint32_t posA = hashMac(mac, 0u);
+  const uint32_t posB = hashMac(mac, kGolden);
+  wisp::ColorTuple t =
+      wisp::sampleTupleAtPositions({{255, 128, 0, 0}, {0, 200, 80, 0}}, posA, posB);
+  if ((hashMac(mac, kSwapSalt) & 1u) != 0u) {
+    std::swap(t.r[0], t.r[1]); std::swap(t.g[0], t.g[1]);
+    std::swap(t.b[0], t.b[1]); std::swap(t.w[0], t.w[1]);
+  }
+  TEST_ASSERT_EQUAL_UINT8_MESSAGE(178, t.r[0], "base.r");
+  TEST_ASSERT_EQUAL_UINT8_MESSAGE(149, t.g[0], "base.g");
+  TEST_ASSERT_EQUAL_UINT8_MESSAGE( 23, t.b[0], "base.b");
+  TEST_ASSERT_EQUAL_UINT8_MESSAGE(  0, t.w[0], "base.w");
+  TEST_ASSERT_EQUAL_UINT8_MESSAGE(114, t.r[1], "shade.r");
+  TEST_ASSERT_EQUAL_UINT8_MESSAGE(167, t.g[1], "shade.g");
+  TEST_ASSERT_EQUAL_UINT8_MESSAGE( 43, t.b[1], "shade.b");
+  TEST_ASSERT_EQUAL_UINT8_MESSAGE(  0, t.w[1], "shade.w");
+}
+
+void test_at_positions_empty_palette_returns_black(void) {
+  std::vector<wisp::RGBW> empty;
+  wisp::ColorTuple t = wisp::sampleTupleAtPositions(empty, 123u, 456u);
+  for (int i = 0; i < 2; ++i) {
+    TEST_ASSERT_EQUAL_UINT8(0, t.r[i]);
+    TEST_ASSERT_EQUAL_UINT8(0, t.g[i]);
+    TEST_ASSERT_EQUAL_UINT8(0, t.b[i]);
+    TEST_ASSERT_EQUAL_UINT8(0, t.w[i]);
+  }
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_empty_palette_returns_black);
@@ -235,5 +309,10 @@ int main(int, char**) {
   RUN_TEST(test_different_shuffle_seed_changes_result);
   RUN_TEST(test_golden_parity);
   RUN_TEST(test_dedupe_drops_adjacent_near_identical_stops);
+  RUN_TEST(test_golden_parity_production);
+  RUN_TEST(test_at_positions_samples_base_at_posA);
+  RUN_TEST(test_at_positions_different_inputs_differ);
+  RUN_TEST(test_at_positions_gap_enforced_for_equal_inputs);
+  RUN_TEST(test_at_positions_empty_palette_returns_black);
   return UNITY_END();
 }

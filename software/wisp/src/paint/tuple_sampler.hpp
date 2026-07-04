@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include "paint/current_palette.hpp"
 
@@ -25,5 +26,12 @@ struct ColorTuple {
 ColorTuple sampleTupleForMac(const CurrentPalette& palette,
                              const uint8_t mac[6],
                              uint32_t shuffleSeed = 0);
+
+// Sample base/shade at two explicit gradient positions (full uint32 span).
+// Dedupes the palette, enforces the >= kMinGap base/shade separation on posB,
+// then samples. Empty palette → zeros. sampleTupleForMac and the random drift
+// path share this tail; feed it esp_random() for a fresh random pair.
+ColorTuple sampleTupleAtPositions(const std::vector<RGBW>& colors,
+                                  uint32_t posA, uint32_t posB);
 
 }  // namespace wisp
