@@ -136,6 +136,8 @@ void setup() {
 
   paintDistributor.begin(&inventory, &mesh, &currentPalette, &wispRoster);
   paintDistributor.setShuffleSeed(wispConfig.shuffleSeed());
+  paintDistributor.setDriftInterval(wispConfig.driftIntervalMs(),
+                                    wispConfig.driftFadePct());
 
   // carriedFw* zero-fill; wire layout retained for back-compat with older lamps.
   statusEmitter.begin(&mesh, &zoneSelector, &auroraClient, &wispConfig,
