@@ -131,6 +131,7 @@ class ColorOverride {
   uint32_t restoreDurationMs_ = 0;
 
   std::vector<Color> savedColors_;
+  std::vector<Color> targetGradient_;
 
   bool operatorEditing_ = false;
   Color lastWispColor_;
@@ -166,6 +167,7 @@ class ColorOverride {
       savedColors_ = configurator_->colors;
     }
     std::vector<Color> target = expandToPixelCount(colors, numColors);
+    targetGradient_ = target;
     if (source == lamp_protocol::OverrideSource::Wisp) {
       lastWispColor_ = colors[0];
       hasLastWispColor_ = true;
@@ -239,7 +241,26 @@ class ColorOverride {
   void touchApply(uint32_t nowMs) {
     if (state_ == FadeState::FadingIn || state_ == FadeState::Holding) {
       lastWispSeenMs_ = nowMs;
+      // Mirror production: sparse per-lamp drift re-applies can exceed the
+      // 60s configurator idle-stop; keep it drawing between drift slots.
+      if (configurator_) configurator_->lastWebSocketUpdateTimeMs = mockMillis();
     }
+  }
+
+  // Mirror of ColorOverride::reassertHold(). Holding snaps (0ms); FadingIn
+  // continues the remaining ease so a re-install mid-drift doesn't lurch to
+  // the end color.
+  void reassertHold() {
+    if (!configurator_) return;
+    if (state_ != FadeState::FadingIn && state_ != FadeState::Holding) return;
+    if (targetGradient_.empty()) return;
+    uint32_t fadeMs = 0;
+    if (state_ == FadeState::FadingIn) {
+      const uint32_t elapsed = mockMillis() - lastApplyMs_;
+      fadeMs = elapsed < currentFadeDurationMs_ ? currentFadeDurationMs_ - elapsed : 0;
+    }
+    configurator_->beginFade(targetGradient_, fadeMs);
+    configurator_->lastWebSocketUpdateTimeMs = mockMillis();
   }
 
   bool isActive() const { return state_ != FadeState::Idle; }
@@ -598,6 +619,71 @@ void test_color_override_touch_apply_noop_when_idle() {
   TEST_ASSERT_EQUAL(test::FadeState::Idle, ov.state());
 }
 
+void test_color_override_touch_apply_bumps_configurator_websocket_timestamp() {
+  // touchApply keeps the configurator awake in FadingIn/Holding, mirroring
+  // apply()/restore(). The default wisp drift interval (120s) re-applies each
+  // lamp only once per sweep, so ~60s after each drift paint the configurator
+  // would idle-stop and the surface would snap to defaultColors — the
+  // keepalive here is what prevents that. Idle touchApply must NOT bump.
+  test::FakeConfigurator cfg;
+  cfg.colors.resize(4, test::Color());
+  test::ColorOverride ov;
+  ov.bind(&cfg, 4);
+
+  // Idle: no-op, no bump.
+  test::g_nowMs = 5000;
+  ov.touchApply(test::g_nowMs);
+  TEST_ASSERT_EQUAL_UINT32(0u, cfg.lastWebSocketUpdateTimeMs);
+
+  test::Color target(100, 100, 100, 0);
+  test::g_nowMs = 10000;
+  ov.apply(kMacWisp, test::lamp_protocol::OverrideSource::Wisp, &target, 1, 50);
+
+  // FadingIn: bump.
+  test::g_nowMs = 10020;
+  ov.touchApply(test::g_nowMs);
+  TEST_ASSERT_EQUAL_UINT32(10020u, cfg.lastWebSocketUpdateTimeMs);
+
+  // Latch to Holding.
+  test::g_nowMs = 10050;
+  ov.tick(test::g_nowMs);
+  TEST_ASSERT_EQUAL(test::FadeState::Holding, ov.state());
+
+  // Holding: a keepalive ~60s later bumps the stamp forward so the
+  // configurator never lapses between sparse drift slots.
+  test::g_nowMs = 70000;
+  ov.touchApply(test::g_nowMs);
+  TEST_ASSERT_EQUAL_UINT32(70000u, cfg.lastWebSocketUpdateTimeMs);
+}
+
+void test_color_override_reassert_hold_continues_fadingin_snaps_holding() {
+  // reassertHold during FadingIn must request the REMAINING fade (not a 0ms
+  // snap that lurches to the drift end-color); during Holding it snaps (0ms)
+  // because the surface is already at the target.
+  test::FakeConfigurator cfg;
+  cfg.colors.resize(4, test::Color(10, 20, 30, 0));
+  test::ColorOverride ov;
+  ov.bind(&cfg, 4);
+
+  test::g_nowMs = 0;
+  test::Color target(200, 100, 50, 0);
+  ov.apply(kMacWisp, test::lamp_protocol::OverrideSource::Wisp, &target, 1,
+           /*fadeDurationMs=*/1000);
+
+  // 400ms into a 1000ms fade → remaining 600ms.
+  test::g_nowMs = 400;
+  ov.reassertHold();
+  TEST_ASSERT_EQUAL(test::FadeState::FadingIn, ov.state());
+  TEST_ASSERT_EQUAL_UINT32(600u, cfg.fadeDurationMs());
+
+  // Latch to Holding, then reassertHold snaps.
+  test::g_nowMs = 1000;
+  ov.tick(test::g_nowMs);
+  TEST_ASSERT_EQUAL(test::FadeState::Holding, ov.state());
+  ov.reassertHold();
+  TEST_ASSERT_EQUAL_UINT32(0u, cfg.fadeDurationMs());
+}
+
 void test_color_override_source_ownership_blocks_cross_source_restore() {
   // Wisp-owned override + non-Wisp restore → no-op (state unchanged).
   test::FakeConfigurator cfg;
@@ -937,6 +1023,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_color_override_watchdog_fires_during_long_fade);
   RUN_TEST(test_color_override_touch_apply_does_not_block_latch);
   RUN_TEST(test_color_override_touch_apply_noop_when_idle);
+  RUN_TEST(test_color_override_touch_apply_bumps_configurator_websocket_timestamp);
+  RUN_TEST(test_color_override_reassert_hold_continues_fadingin_snaps_holding);
   RUN_TEST(test_color_override_source_ownership_blocks_cross_source_restore);
   RUN_TEST(test_color_override_source_any_restore_succeeds_regardless);
   RUN_TEST(test_color_override_rebaseline_updates_saved_colors_mid_holding);

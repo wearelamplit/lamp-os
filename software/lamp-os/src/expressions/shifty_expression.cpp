@@ -181,6 +181,11 @@ void ShiftyExpression::draw() {
     }
 
     case SHIFTED:
+      // Re-snapshot the live base (configurator drew it this frame, before
+      // shifty) so startUnshift fades back to the CURRENT base, not the one
+      // captured at onTrigger — an operator base change mid-hold otherwise
+      // pops in one frame when shifty releases.
+      savedBuffer = fb->buffer;
       // Display the shifted color on all pixels
       for (int i = 0; i < fb->pixelCount; i++) {
         fb->buffer[i] = shiftedColor;

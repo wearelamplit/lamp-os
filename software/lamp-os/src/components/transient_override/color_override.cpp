@@ -196,6 +196,16 @@ void ColorOverride::tick(uint32_t nowMs) {
   }
 }
 
+void ColorOverride::touchApply(uint32_t nowMs) {
+  if (state_ == FadeState::FadingIn || state_ == FadeState::Holding) {
+    lastWispSeenMs_ = nowMs;
+    // Sparse per-lamp drift re-applies can exceed the 60s configurator
+    // idle-stop; keep it drawing so the surface never lapses to
+    // defaultColors between drift slots.
+    if (configurator_) configurator_->lastWebSocketUpdateTimeMs = millis();
+  }
+}
+
 void ColorOverride::reassertHold() {
   // Snap the wisp's target gradient back into the configurator after
   // something else (test_expression_complete's saved-colors payload)
@@ -209,9 +219,15 @@ void ColorOverride::reassertHold() {
     return;
   }
   if (targetGradient_.empty()) return;
-  // Snap-in (0 ms fade): the surface is already supposed to be at these
-  // colors. We're just restoring what was momentarily stomped.
-  configurator_->beginFade(targetGradient_, /*fadeDurationMs=*/0);
+  // Holding snaps (already at these colors). FadingIn continues the
+  // REMAINING ease instead of jumping to the drift end-color, so a
+  // re-install mid-fade doesn't lurch forward.
+  uint32_t fadeMs = 0;
+  if (state_ == FadeState::FadingIn) {
+    const uint32_t elapsed = millis() - lastApplyMs_;
+    fadeMs = elapsed < currentFadeDurationMs_ ? currentFadeDurationMs_ - elapsed : 0;
+  }
+  configurator_->beginFade(targetGradient_, fadeMs);
   // Keep the configurator's animation state machine alive — same reason
   // as apply()'s bump. Without this, a STOPPED configurator would skip
   // its draw() and the wisp paint we just re-installed wouldn't reach

@@ -96,11 +96,7 @@ class ColorOverride {
   // savedColors_, leaving the lamp visibly "stopped listening" to wisp.
   // Cross-touch from the Shade-side drain (and vice versa) is proof of
   // a healthy mesh and keeps both surfaces' watchdogs honest.
-  void touchApply(uint32_t nowMs) {
-    if (state_ == FadeState::FadingIn || state_ == FadeState::Holding) {
-      lastWispSeenMs_ = nowMs;
-    }
-  }
+  void touchApply(uint32_t nowMs);
 
   bool isActive() const { return state_ != FadeState::Idle; }
   lamp_protocol::OverrideSource activeSource() const { return activeSource_; }
@@ -136,9 +132,9 @@ class ColorOverride {
   // Used by test_expression_complete after the app's payload overwrites
   // `configurator.colors` with the lamp's saved colors — without this
   // call, the wisp paint wouldn't visually return until the wisp's next
-  // backstop paint cycle (~10s gap). Snap-in (0ms fade) because the
-  // surface is already supposed to be at these colors; we're just
-  // restoring what was momentarily stomped.
+  // backstop paint cycle (~10s gap). Holding snaps in (0ms) since the
+  // surface is already at these colors; FadingIn continues the remaining
+  // ease so a re-install mid-drift doesn't lurch to the end color.
   void reassertHold();
 
   // Operator-priority lockout. While set, apply() drops wisp-sourced
