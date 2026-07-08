@@ -113,7 +113,11 @@ void AuroraPaletteClient::serviceFetches() {
 
 void AuroraPaletteClient::handleFrame(const uint8_t* data, size_t len) {
     DecodedNotification d = NotificationCodec::decode(data, len);
-    if (!d.ok) return;
+    if (!d.ok) {
+        Serial.printf("[client] ws frame decode failed (len=%u), dropped\n",
+                      (unsigned)len);
+        return;
+    }
 
     if (d.type == aurora_NotificationType_CACHE_INVALIDATE) {
         // A palette's colors may have changed; force re-resolution of all zones.

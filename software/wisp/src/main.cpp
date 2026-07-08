@@ -163,6 +163,9 @@ void loop() {
   auroraClient.loop();
   serialConsole.pump();
   meshRouter.drainPendingOps();
+  // Beacon work runs here on the 8KB loop stack; the FreeRTOS timers only flag.
+  presenceBeacon.pump();
+  statusEmitter.pump();
   {
     auto inv = inventory.snapshot();
     wisp::WispRoster::LampObservation obs[wisp::WISP_ROSTER_MAX_LAMPS];

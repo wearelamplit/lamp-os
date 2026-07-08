@@ -36,13 +36,19 @@ void PresenceBeacon::startTimer() {
         this,
         [](TimerHandle_t t) {
           auto* self = static_cast<PresenceBeacon*>(pvTimerGetTimerID(t));
-          if (self) self->emit();
+          if (self) self->helloDue_.store(true, std::memory_order_relaxed);
         });
     if (timer_) {
       xTimerStart(timer_, 0);
     } else {
       Serial.println("[wisp.beacon] xTimerCreate(hello) failed");
     }
+  }
+}
+
+void PresenceBeacon::pump() {
+  if (helloDue_.exchange(false, std::memory_order_relaxed)) {
+    emit();
   }
 }
 

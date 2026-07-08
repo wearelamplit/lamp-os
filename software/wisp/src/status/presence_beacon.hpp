@@ -2,11 +2,12 @@
 //
 // Broadcasts MSG_WISP_HELLO then MSG_WISP_CLAIM (roster snapshot). A WiFi/Aurora
 // flag flip triggers StatusEmitter's on-change path so the app sees it within 2s
-// rather than waiting on the 30s heartbeat. Runs from its timer task; the
-// SeqSource mux guards seq bump + frame build.
+// rather than waiting on the 30s heartbeat. The timer only flags the emit due;
+// pump() runs the build + broadcast on the loop task, off the 2KB timer stack.
 
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -38,10 +39,13 @@ class PresenceBeacon {
   // One-shot wiring of the 2s HELLO timer. Call once after begin().
   void startTimer();
 
-  // Public so the C-style timer trampoline can reach it; not a sanctioned API.
-  void emit();  // MSG_WISP_HELLO + MSG_WISP_CLAIM (2s cadence)
+  // Runs the due HELLO emit on the loop task. Cheap when nothing is due.
+  void pump();
 
  private:
+  // Emit body runs only from pump() on the loop task.
+  void emit();  // MSG_WISP_HELLO + MSG_WISP_CLAIM (2s cadence)
+
   MeshLink* mesh_ = nullptr;
   PaintDistributor* paint_ = nullptr;
   CurrentPalette* palette_ = nullptr;
@@ -50,6 +54,10 @@ class PresenceBeacon {
   SeqSource* seq_ = nullptr;
   StatusEmitter* statusEmitter_ = nullptr;
   PresenceBeaconTimerHandle timer_ = nullptr;
+
+  // Set from the timer task, cleared in pump() on the loop task, so the HELLO
+  // build + broadcast never runs on the 2KB timer daemon stack.
+  std::atomic<bool> helloDue_{false};
 
   // A WiFi/Aurora flip in HELLO triggers StatusEmitter within 2s rather than
   // waiting 30s.

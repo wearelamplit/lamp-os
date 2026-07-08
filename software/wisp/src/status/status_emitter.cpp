@@ -41,7 +41,7 @@ void StatusEmitter::startTimer() {
         this,
         [](TimerHandle_t t) {
           auto* self = static_cast<StatusEmitter*>(pvTimerGetTimerID(t));
-          if (self) self->emitStatus();
+          if (self) self->statusDue_.store(true, std::memory_order_relaxed);
         });
     if (statusTimer_) {
       xTimerStart(statusTimer_, 0);
@@ -52,10 +52,15 @@ void StatusEmitter::startTimer() {
 }
 
 void StatusEmitter::triggerOnChange() {
-  // Emit first, then reset: snapshot is consistent before the 30s clock restarts.
-  emitStatus();
+  statusDue_.store(true, std::memory_order_relaxed);
   if (statusTimer_) {
     xTimerReset(statusTimer_, 0);
+  }
+}
+
+void StatusEmitter::pump() {
+  if (statusDue_.exchange(false, std::memory_order_relaxed)) {
+    emitStatus();
   }
 }
 

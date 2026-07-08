@@ -8,8 +8,10 @@
 
 #pragma once
 
+#include <climits>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 
 #include "wire/lamp_protocol.hpp"
@@ -19,6 +21,17 @@ namespace wisp {
 
 class LampInventory;
 class WispRoster;
+
+// RSSI is trustworthy only from a direct reception. Lamps gossip-relay HELLOs
+// verbatim, so a relayed frame pairs the relayer's radio RSSI with the
+// originator's payload MAC; record INT8_MIN (the never-measured sentinel
+// recordHello preserves) for those so a relay can't corrupt claim decisions.
+inline int8_t helloRssiForRecord(const uint8_t* radioSrcMac,
+                                 const uint8_t sourceMac[6], int8_t rssi) {
+  const bool direct =
+      radioSrcMac && std::memcmp(radioSrcMac, sourceMac, 6) == 0;
+  return direct ? rssi : INT8_MIN;
+}
 
 class MeshRouter {
  public:

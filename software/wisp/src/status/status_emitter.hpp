@@ -1,11 +1,12 @@
 // StatusEmitter — wispStatus heartbeat on a 30s FreeRTOS timer.
 //
-// Broadcasts MSG_CONTROL_OP (wispStatus JSON) then MSG_WISP_PALETTE. Fires from
-// its timer task and from the loop task (triggerOnChange); the SeqSource mux
-// guards seq bump + frame build.
+// Broadcasts MSG_CONTROL_OP (wispStatus JSON) then MSG_WISP_PALETTE. The timer
+// (and triggerOnChange) only flag the emit due; pump() runs the build +
+// broadcast on the loop task so nothing heavy touches the 2KB timer stack.
 
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -35,16 +36,20 @@ class StatusEmitter {
   // One-shot wiring of the 30s heartbeat timer. Call once after begin().
   void startTimer();
 
-  // Force an immediate wispStatus emit AND reschedule the heartbeat from now.
-  // Call after applying a setZone/clearZone/setWifi op so the app sees the new
-  // state without waiting up to 30s. Safe from the loop task.
+  // Mark a wispStatus emit due AND reschedule the heartbeat from now. Call
+  // after applying a setZone/clearZone/setWifi op so the app sees the new state
+  // without waiting up to 30s. The emit runs from pump() on the loop task, so
+  // this is safe from any task and does no heavy work itself.
   void triggerOnChange();
 
-  // Public so the C-style timer trampoline can reach them; not a sanctioned API.
+  // Runs the due wispStatus emit on the loop task. Cheap when nothing is due.
+  void pump();
+
+ private:
+  // Emit bodies run only from pump() on the loop task.
   void emitStatus();   // MSG_CONTROL_OP wispStatus path (30s heartbeat)
   void emitPalette();  // MSG_WISP_PALETTE (piggybacked on emitStatus)
 
- private:
   MeshLink* mesh_ = nullptr;
   ZoneSelector* zone_ = nullptr;
   AuroraPaletteClient* aurora_ = nullptr;
@@ -52,6 +57,11 @@ class StatusEmitter {
   CurrentPalette* palette_ = nullptr;
   SeqSource* seq_ = nullptr;
   StatusEmitterTimerHandle statusTimer_ = nullptr;
+
+  // Set from the timer task / triggerOnChange, cleared in pump() on the loop
+  // task, so the ~750B JSON build + broadcast never runs on the 2KB timer
+  // daemon stack.
+  std::atomic<bool> statusDue_{false};
 
   bool lastWifiConnected_   = false;
   bool lastAuroraConnected_ = false;

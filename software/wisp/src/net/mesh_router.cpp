@@ -19,7 +19,7 @@ void MeshRouter::postPendingWispOp(const uint8_t* payload, uint16_t payloadLen) 
   LAMP_PROTOCOL_PORTMUX_EXIT(&pendingMux_);
 }
 
-void MeshRouter::onPacket(const uint8_t* /*srcMac*/, const uint8_t* data,
+void MeshRouter::onPacket(const uint8_t* srcMac, const uint8_t* data,
                           size_t len, int8_t rssi) {
   const uint8_t msgType = lamp_protocol::inspect(data, len);
   if (msgType == lamp_protocol::MSG_HELLO) {
@@ -28,7 +28,8 @@ void MeshRouter::onPacket(const uint8_t* /*srcMac*/, const uint8_t* data,
     const std::string peerName =
         h.nameLen ? std::string(h.name, h.nameLen) : std::string();
     inventory_.recordHello(h.sourceMac, peerName, h.base, h.shade,
-                           h.firmwareVersion, millis(), rssi);
+                           h.firmwareVersion, millis(),
+                           helloRssiForRecord(srcMac, h.sourceMac, rssi));
     return;
   }
   if (msgType == lamp_protocol::MSG_WISP_CLAIM) {
