@@ -27,6 +27,7 @@ class WifiComponent {
   JsonDocument lastWebSocketData;
   bool homeNetworkVisible = false;
   unsigned long lastNetworkScanTimeMs = 0;
+  bool mqttStaActive = false;  // Set by MqttComponent to prevent scans during STA
 
   WifiComponent();
 
