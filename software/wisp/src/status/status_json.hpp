@@ -20,6 +20,9 @@ struct WispStatusFields {
   uint8_t      shuffleSeed;
   uint32_t     driftIntervalMs;
   uint8_t      driftFadePct;
+  // Emitted before the droppable fields; max 20 chars enforced by WispConfig::setName.
+  const char*  name;
+  bool         hasPassword;
 };
 
 // Serialize a wispStatus JSON into `out` (capacity `outCap`), truncating

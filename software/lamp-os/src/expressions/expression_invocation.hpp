@@ -12,9 +12,8 @@
 namespace lamp {
 
 // A one-shot "fire this expression now" payload. Subset of ExpressionConfig
-// (no enabled / intervalMin / intervalMax). The same struct is used both as
-// the in-firmware shape for ExpressionManager::triggerInvocation and as the
-// wire shape for `char:"triggerExpression"` ESP-NOW CONTROL_OP messages.
+// (no enabled / intervalMin / intervalMax). Carried as the JSON body of
+// MSG_COMMAND (cascade + greeting) and MSG_EVENT (announce) frames.
 //
 // `colors` is an optional palette override — empty means "use the configured
 // palette for this type." `delayMs` is interpreted by the receiver as
@@ -54,15 +53,14 @@ uint32_t clampDelayMs(uint32_t v);
 std::map<std::string, uint32_t> parametersWithoutCascadeKeys(
     const std::map<std::string, uint32_t>& parameters);
 
-// Serialize `inv` into the standard `{char:"triggerExpression", ...}` JSON
-// payload that goes over ESP-NOW MSG_CONTROL_OP. `out` is set to the
-// serialized string. Always succeeds.
+// Serialize `inv` to JSON for MSG_COMMAND and MSG_EVENT payloads. `out` is
+// set to the serialized string. Always succeeds.
 void serializeInvocation(const ExpressionInvocation& inv, std::string& out);
 
-// Parse a triggerExpression payload (an ArduinoJson object already extracted
-// from the incoming CONTROL_OP payload) into `out`. Returns false if `type`
-// is missing or empty. Unknown keys are ignored. `colors` array uses the
-// same hex-string format (e.g. "#FF234212") as the rest of the API.
+// Parse an ExpressionInvocation payload (an ArduinoJson object extracted from
+// an incoming MSG_COMMAND or MSG_EVENT frame) into `out`. Returns false if
+// `type` is missing or empty. Unknown keys are ignored. `colors` uses
+// "#RRGGBBWW" hex strings.
 bool parseInvocation(JsonObjectConst doc, ExpressionInvocation& out);
 
 }  // namespace lamp

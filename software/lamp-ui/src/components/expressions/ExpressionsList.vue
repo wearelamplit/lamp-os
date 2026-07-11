@@ -2,11 +2,17 @@
 import { computed, ref } from 'vue'
 import BooleanInput from '../BooleanInput.vue'
 import ExpressionConfig from './ExpressionConfig.vue'
-import schemas from '../../assets/expressions.json'
-import type { Expression } from '../../types'
+import { resolveBound } from './catalog'
+import type { Expression, ExpressionDescriptor } from '../../types'
 
 const props = withDefaults(
-  defineProps<{ modelValue: Expression[]; disabled?: boolean }>(),
+  defineProps<{
+    modelValue: Expression[]
+    catalog: ExpressionDescriptor[]
+    basePx: number
+    shadePx: number
+    disabled?: boolean
+  }>(),
   { disabled: false },
 )
 
@@ -15,12 +21,7 @@ const emit = defineEmits<{
   preview: [colors: string[]]
 }>()
 
-type SchemaEntry = {
-  name: string
-  description: string
-  config: Record<string, { type: string; max?: number; default?: unknown }>
-}
-const expressionSchemas = schemas.expressions as Record<string, SchemaEntry>
+const byId = computed(() => new Map(props.catalog.map((d) => [d.id, d])))
 
 const expandedIndex = ref<number | null>(null)
 const showAdd = ref(false)
@@ -28,19 +29,20 @@ const showAdd = ref(false)
 const existingTypes = computed(() => new Set(props.modelValue.map((e) => e.type)))
 
 const availableTypes = computed(() =>
-  Object.entries(expressionSchemas).map(([id, s]) => ({
-    id,
-    name: s.name,
-    description: s.description,
-    added: existingTypes.value.has(id),
+  props.catalog.map((d) => ({
+    id: d.id,
+    name: d.name,
+    added: existingTypes.value.has(d.id),
   })),
 )
 
-const nameOf = (type: string) => expressionSchemas[type]?.name ?? type
-const maxColorsFor = (type: string) => expressionSchemas[type]?.config?.colors?.max ?? 5
+const nameOf = (type: string) => byId.value.get(type)?.name ?? type
+const descriptorOf = (type: string) => byId.value.get(type)
 
 const update = (next: Expression[]) => emit('update:modelValue', next)
 
+// Overlay only the changed keys onto the existing instance so any key the web
+// UI never renders (zones, per-type params the app set) survives the save.
 const updateExpression = (index: number, updates: Partial<Expression>) => {
   const next = [...props.modelValue]
   next[index] = { ...next[index], ...updates }
@@ -56,25 +58,25 @@ const toggleConfig = (index: number) => {
   expandedIndex.value = expandedIndex.value === index ? null : index
 }
 
+// Seed every catalog default so per-type params (durationMin, pulseSpeed, …)
+// exist for the firmware even though the web UI doesn't render them all.
 const addExpression = (type: string) => {
-  const schema = expressionSchemas[type]
-  if (!schema || existingTypes.value.has(type)) return
+  const d = byId.value.get(type)
+  if (!d || existingTypes.value.has(type)) return
 
-  // Seed every field the schema defines so per-type params (durationMin,
-  // pulseSpeed, …) exist for the firmware even though we don't render them.
+  // New instances default to the base surface (target 2).
   const expr: Expression = {
     type,
     enabled: true,
     target: 2,
-    intervalMin: 300,
-    intervalMax: 900,
-    colors: ['#FF0000FF'],
+    intervalMin: d.interval?.default[0] ?? 300,
+    intervalMax: d.interval?.default[1] ?? 900,
+    colors: d.colors.inheritsSurface ? [] : ['#FF0000FF'],
   }
-  for (const [key, cfg] of Object.entries(schema.config)) {
-    if (cfg.default !== undefined) expr[key] = cfg.default
-  }
-  if (!Array.isArray(expr.colors) || expr.colors.length === 0) {
-    expr.colors = ['#FF0000FF']
+  if (d.duration?.minKey) expr[d.duration.minKey] = d.duration.default[0]
+  if (d.duration?.maxKey) expr[d.duration.maxKey] = d.duration.default[1]
+  for (const p of d.params ?? []) {
+    expr[p.key] = resolveBound(p.default, props.basePx, p.min ?? 0)
   }
 
   update([...props.modelValue, expr])
@@ -84,7 +86,10 @@ const addExpression = (type: string) => {
 
 <template>
   <div class="expressions">
-    <p v-if="modelValue.length === 0" class="empty">No expressions yet.</p>
+    <p v-if="catalog.length === 0" class="empty">
+      Expression configuration isn't available on this firmware.
+    </p>
+    <p v-else-if="modelValue.length === 0" class="empty">No expressions yet.</p>
 
     <div v-for="(expr, index) in modelValue" :key="index" class="item">
       <div class="header">
@@ -94,7 +99,13 @@ const addExpression = (type: string) => {
           @update:model-value="(value) => updateExpression(index, { enabled: value })"
         />
         <span class="name">{{ nameOf(expr.type) }}</span>
-        <button type="button" class="cfg" :disabled="disabled" @click="toggleConfig(index)">
+        <button
+          v-if="descriptorOf(expr.type)"
+          type="button"
+          class="cfg"
+          :disabled="disabled"
+          @click="toggleConfig(index)"
+        >
           {{ expandedIndex === index ? 'Hide' : 'Configure' }}
         </button>
         <button
@@ -108,10 +119,12 @@ const addExpression = (type: string) => {
         </button>
       </div>
 
-      <div v-if="expandedIndex === index" class="body">
+      <div v-if="expandedIndex === index && descriptorOf(expr.type)" class="body">
         <ExpressionConfig
           :expression="expr"
-          :max-colors="maxColorsFor(expr.type)"
+          :descriptor="descriptorOf(expr.type)!"
+          :base-px="basePx"
+          :shade-px="shadePx"
           :disabled="disabled"
           @update="(updates) => updateExpression(index, updates)"
           @preview="(colors) => emit('preview', colors)"
@@ -119,24 +132,25 @@ const addExpression = (type: string) => {
       </div>
     </div>
 
-    <button v-if="!showAdd" type="button" class="add" :disabled="disabled" @click="showAdd = true">
-      + Add expression
-    </button>
-
-    <div v-else class="picker">
-      <button
-        v-for="t in availableTypes"
-        :key="t.id"
-        type="button"
-        class="type"
-        :disabled="disabled || t.added"
-        @click="addExpression(t.id)"
-      >
-        <span class="type-name">{{ t.name }}<span v-if="t.added"> ✓</span></span>
-        <span class="type-desc">{{ t.description }}</span>
+    <template v-if="catalog.length > 0">
+      <button v-if="!showAdd" type="button" class="add" :disabled="disabled" @click="showAdd = true">
+        + Add expression
       </button>
-      <button type="button" class="cancel" @click="showAdd = false">Cancel</button>
-    </div>
+
+      <div v-else class="picker">
+        <button
+          v-for="t in availableTypes"
+          :key="t.id"
+          type="button"
+          class="type"
+          :disabled="disabled || t.added"
+          @click="addExpression(t.id)"
+        >
+          <span class="type-name">{{ t.name }}<span v-if="t.added"> ✓</span></span>
+        </button>
+        <button type="button" class="cancel" @click="showAdd = false">Cancel</button>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -230,12 +244,6 @@ const addExpression = (type: string) => {
 .type-name {
   display: block;
   font-weight: 500;
-}
-
-.type-desc {
-  display: block;
-  font-size: 0.85rem;
-  color: var(--brand-slate-grey);
 }
 
 .cancel {

@@ -46,16 +46,11 @@ namespace lamp_protocol {
 // network calls, no logging. See audit finding #7 / Stability #3.
 class DedupRing {
  public:
-  // v0x03 mesh-deploy lock-in: bumped from 32 to 64. At 20-50 lamps each
-  // gossiping every unique (sourceMac, seq), the 32-slot ring wrapped
-  // fast enough that a late-arriving relayed copy could re-fire a
-  // receiver — specifically a problem now that MSG_EVENT itself gains
-  // gossip-relay (Commit E). 64 slots give sufficient headroom: at 50
-  // lamps emitting one cascade each within a small window, we still hold
-  // ~24 unique (mac, seq) entries past the ring's age horizon. Per-msgType
-  // dedup (MeshLink has separate rings per message type) means EVENT
-  // entries never get evicted by HELLO traffic etc.
-  // why: scale-fix per validated plan §"Layer 2".
+  // 64 slots: at 20-50 lamps each gossiping a unique (sourceMac, seq), the
+  // previous 32-slot ring wrapped fast enough that a late-arriving relay could
+  // re-fire a receiver. Per-msgType dedup (MeshLink has separate rings per
+  // message type) prevents HELLO traffic from evicting command or control
+  // entries.
   static constexpr size_t CAPACITY = 64;
 
   // Returns true if (mac, msgType, seq) is new (and records it); false if seen.

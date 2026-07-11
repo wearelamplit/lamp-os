@@ -38,7 +38,7 @@
 #include <cstdint>
 #include <string>
 
-#include "core/ota_quiet_mode.hpp"
+#include "components/firmware/ota_quiet_mode.hpp"
 
 namespace ble_control {
 

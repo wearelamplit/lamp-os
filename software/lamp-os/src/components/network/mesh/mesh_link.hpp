@@ -62,6 +62,8 @@ void postPendingRestoreBrightness(const PendingRestoreBrightness& src);
 void postPendingWispHello(const PendingWispHello& src);
 void postPendingWispPalette(const PendingWispPalette& src);
 void postPendingWispClaim(const PendingWispClaim& src);
+void postPendingWispPaint(const PendingWispPaint& src);
+void postPendingCommand(const PendingCommand& src);
 void postPendingEvent(const PendingEvent& src);
 
 // Forward decl; full type lives in components/firmware/firmware_receiver.hpp.
@@ -102,16 +104,19 @@ class MeshLink {
   bool sendControlOp(const uint8_t targetMac[6], const uint8_t* payload,
                      size_t payloadLen);
 
-  // Broadcast a raw pre-built ESP-NOW frame onto the grid. Used by the
-  // MSG_EVENT cascade path which builds the frame in ExpressionManager.
-  // Caller is responsible for size limits.
-  bool broadcastRaw(const uint8_t* data, size_t len);
+  // Broadcast a MSG_COMMAND frame targeting a specific nearby lamp.
+  // `invocationJson` is the ExpressionInvocation JSON; `len` must be
+  // 1..COMMAND_MAX_PAYLOAD. Deduped so a loop-back broadcast doesn't
+  // re-trigger locally.
+  bool sendCommand(const uint8_t targetMac[6], const uint8_t* invocationJson,
+                   size_t len);
 
-  // Allocate the next outbound event sequence number. The cascade path
-  // emits two back-to-back copies of the same MSG_EVENT for broadcast-loss
-  // resilience; both share the same seq so receivers' eventDedup_
-  // collapses the second copy after applying the first.
-  uint16_t nextEventSeq();
+  // Broadcast a MSG_EVENT frame; payload is the ExpressionInvocation JSON.
+  bool sendEvent(const uint8_t* payloadJson, size_t len);
+
+  // Broadcast a raw pre-built ESP-NOW frame onto the grid. Used by
+  // EspNowFirmwareTransport. Caller is responsible for size limits.
+  bool broadcastRaw(const uint8_t* data, size_t len);
 
   // Wire a FirmwareReceiver into the dispatch ladder. handleRecv calls
   // its handleChunkOnRecvTask directly on the WiFi task (Core 0) for
@@ -161,6 +166,10 @@ class MeshLink {
   // Lamps DO act on the payload: cache it for the app to read via
   // CHAR_WISP_STATUS.
   lamp_protocol::DedupRing wispPaletteDedup_;
+  // Per-lamp paint colors from the wisp. Dedup + gossip-relay; cached for
+  // CHAR_WISP_CLAIMS to serve the app's painted-lamps preview.
+  lamp_protocol::DedupRing wispPaintDedup_;
+  lamp_protocol::DedupRing commandDedup_;
   lamp_protocol::DedupRing eventDedup_;
   // Single shared dedup for the MSG_FW_* family. One sender owns all
   // outbound FW seqs; the 6 msgTypes share one seq counter so cross-msgType
@@ -170,7 +179,8 @@ class MeshLink {
   uint32_t lastHelloMs_ = 0;
   uint16_t helloSeq_ = 0;
   uint16_t controlOpSeq_ = 0;
-  uint16_t eventSeq_ = 0;
+  uint16_t commandSeq_ = 0;
+  uint16_t eventSeq_   = 0;
 
   ControlOpHandler controlOpHandler_;
   FirmwareReceiver*    firmwareReceiver_    = nullptr;

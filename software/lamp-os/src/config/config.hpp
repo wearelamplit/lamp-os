@@ -28,6 +28,16 @@ class Config {
   // empty/default are not applied; the existing NVS value (or the Config
   // class-default) wins. colorsEditable is emitted in asBaseJson/asShadeJson
   // (the app hides the color picker when false).
+  // Per-segment first-boot seed for a multi-segment role. Names the segment,
+  // its pixel count, and a hex color list ("#RRGGBBWW,#…"). A variant supplies
+  // one per physical strip; applyDefaults seeds the whole role's segment list
+  // when NVS is still factory.
+  struct SegmentDefault {
+    std::string name;
+    uint8_t px;
+    std::string colors;
+  };
+
   struct Defaults {
     std::string name;
     std::string baseColor;        // hex like "#300783"
@@ -40,6 +50,14 @@ class Config {
     // known factory baseline (same guard pattern as the color fields).
     uint8_t basePx  = 0;
     uint8_t shadePx = 0;
+    // Force the lamp adopted at boot, skipping onboarding and the first-boot
+    // random color roll. For fixed-install variants that ship curated colors.
+    bool setup = false;
+    // Multi-segment roles. Empty = single-segment scalar path (baseColor /
+    // shadeColor + basePx / shadePx). Non-empty seeds every segment of the
+    // role; the scalar fields are then unused for that role.
+    std::vector<SegmentDefault> baseSegments;
+    std::vector<SegmentDefault> shadeSegments;
   };
 
   LampSettings lamp;

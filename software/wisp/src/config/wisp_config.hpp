@@ -1,6 +1,5 @@
 // WispConfig — NVS-backed persistent settings, namespace "wisp".
-// NVS keys are short (15-byte limit): selZone, wifiSsid, wifiPw, srcMode,
-// manualPal, offColor, shufSeed. Values are cached in RAM after begin().
+// Values are cached in RAM after begin(); setters write-through to NVS.
 
 #pragma once
 
@@ -82,6 +81,14 @@ class WispConfig {
   uint8_t driftFadePct() const { return driftFadePct_; }
   void setDrift(uint32_t intervalMs, uint8_t fadePct);
 
+  // Display name shown in wispStatus. Clamped to ≤20 chars on write.
+  const String& name() const { return name_; }
+  void setName(const String& name);
+
+  // Control password for sealing wispOps. Empty = open access.
+  const String& password() const { return password_; }
+  void setPassword(const String& pw);
+
  private:
   // Opaque to keep FreeRTOS out of the header; cast to SemaphoreHandle_t in .cpp.
   void* mutex_ = nullptr;
@@ -98,6 +105,8 @@ class WispConfig {
   uint8_t shuffleSeed_ = 0;
   uint32_t driftIntervalMs_ = 120000;
   uint8_t driftFadePct_ = 50;
+  String name_;
+  String password_;
 };
 
 }  // namespace wisp

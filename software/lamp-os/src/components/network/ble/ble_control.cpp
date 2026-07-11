@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <functional>
 #include <string>
 #include <unordered_set>
 
@@ -19,7 +20,7 @@
 #include "util/proximity.hpp"
 #include "core/pending_slot_aggregate.hpp"
 #include "core/override_aggregate.hpp"
-#include "core/ota_quiet_mode.hpp"
+#include "components/firmware/ota_quiet_mode.hpp"
 #include "ble_gap.hpp"
 #include "crypto.hpp"
 #include "components/network/ble/gatt_layout.hpp"
@@ -50,6 +51,7 @@ void postPendingApplyEffectiveBrightness();
 // this flag; Core 1 force-flushes dispositions so a phone walk-off persists
 // the user's slider value.
 void postPendingFlushDispositions();
+void resetZonePreviewOnDisconnect();
 
 // Read by notifyStateChange() to populate previewActive so the app can
 // reflect test state without its own timer.
@@ -77,6 +79,8 @@ static volatile bool         s_homeModePageActive = false;
 static volatile bool         s_scanPausedForGattClient = false;
 
 static          uint16_t     s_currentConnHandle = 0xFFFF;
+
+static std::function<lamp::GreetingState()> s_greetingStateProvider;
 
 static constexpr uint16_t kTightMinUnits = 12;   //  15.0 ms (units of 1.25 ms)
 static constexpr uint16_t kTightMaxUnits = 24;   //  30.0 ms
@@ -280,6 +284,7 @@ class ControlServerCallbacks : public NimBLEServerCallbacks {
     lamp::overrides.base.setOperatorEditing(false);
     lamp::overrides.shade.setOperatorEditing(false);
     lamp::overrides.brightness.setOperatorEditing(false);
+    resetZonePreviewOnDisconnect();
     // Re-assert wisp paint in case a BLE write stomped the target gradient
     // before disconnecting.
     lamp::overrides.base.reassertHold();
@@ -625,15 +630,17 @@ struct SectionEntry {
 
 // Lambdas capture only globals so they decay to plain function pointers
 // (no std::function footprint). tick() proactively rebuilds dirty caches on
-// Core 1; the portMUX inside *SectionJsonCached() covers the race if a
-// CTRL-write arrives before tick fires.
-static const std::array<SectionEntry, 6> kSections = {{
-  {"lamp",   [](std::string& out) { out = s_config->lampSectionJsonCached(); }},
-  {"base",   [](std::string& out) { out = s_config->baseSectionJsonCached(); }},
-  {"shade",  [](std::string& out) { out = s_config->shadeSectionJsonCached(); }},
-  {"expr",   [](std::string& out) { out = s_config->expressionsSectionJsonCached(); }},
-  {"home",   [](std::string& out) { out = s_config->homeSectionJsonCached(); }},
-  {"nearby", [](std::string& out) { out = buildNearbyLampsJson(); }},
+// Core 1; a CTRL-write rebuild here on Core 0 is safe because sections go
+// dirty only at commit/boot, never mid-live-write, so the source is quiescent.
+// exprcat is immutable (built once), so it has no race regardless.
+static const std::array<SectionEntry, 7> kSections = {{
+  {"lamp",    [](std::string& out) { out = s_config->lampSectionJsonCached(); }},
+  {"base",    [](std::string& out) { out = s_config->baseSectionJsonCached(); }},
+  {"shade",   [](std::string& out) { out = s_config->shadeSectionJsonCached(); }},
+  {"expr",    [](std::string& out) { out = s_config->expressionsSectionJsonCached(); }},
+  {"home",    [](std::string& out) { out = s_config->homeSectionJsonCached(); }},
+  {"nearby",  [](std::string& out) { out = buildNearbyLampsJson(); }},
+  {"exprcat", [](std::string& out) { out = lamp::expressionCatalogJson(); }},
 }};
 
 class PageCtrlCallback : public NimBLECharacteristicCallbacks {
@@ -819,15 +826,42 @@ void tick() {
   s_config->shadeSectionJsonCached();
   s_config->expressionsSectionJsonCached();
   s_config->homeSectionJsonCached();
+
+  // Build the immutable catalog once here so the first client read doesn't
+  // serialize it inside a Core 0 NimBLE callback.
+  lamp::expressionCatalogJson();
+}
+
+void setGreetingStateProvider(std::function<lamp::GreetingState()> fn) {
+  s_greetingStateProvider = std::move(fn);
 }
 
 void notifyStateChange() {
   if (!s_stateNotify) return;
-  // previewActive is the firmware-truth bit for the app's Test button.
-  char buf[32];
-  snprintf(buf, sizeof(buf), "{\"previewActive\":%s}",
-           ::expressionManager.isAnyTestActive() ? "true" : "false");
-  s_stateNotify->setValue(buf);
+  const bool preview = ::expressionManager.isAnyTestActive();
+  std::string payload;
+  if (s_greetingStateProvider) {
+    const lamp::GreetingState gs = s_greetingStateProvider();
+    // Byte budget: ~80B worst case (active + 17B bdAddr + 8B kind).
+    char buf[128];
+    if (gs.active) {
+      snprintf(buf, sizeof(buf),
+               "{\"previewActive\":%s,\"greeting\":{\"active\":true,\"peer\":\"%s\",\"kind\":\"%s\"}}",
+               preview ? "true" : "false",
+               gs.peerBdAddr.c_str(),
+               gs.kind.c_str());
+    } else {
+      snprintf(buf, sizeof(buf),
+               "{\"previewActive\":%s,\"greeting\":{\"active\":false}}",
+               preview ? "true" : "false");
+    }
+    payload = buf;
+  } else {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "{\"previewActive\":%s}", preview ? "true" : "false");
+    payload = buf;
+  }
+  s_stateNotify->setValue(payload);
   s_stateNotify->notify();
 }
 
@@ -981,7 +1015,7 @@ void start(lamp::Config* config) {
         c->setValue(kEmpty, 1);
         return;
       }
-      static uint8_t buf[1 + lamp_protocol::kMaxWispClaimEntries * 6];
+      static uint8_t buf[1 + lamp_protocol::kMaxWispClaimEntries * 12];
       size_t n = lamp::nearbyLamps.buildWispClaimsBlob(buf, sizeof(buf),
                                                         millis());
       c->setValue(buf, n);

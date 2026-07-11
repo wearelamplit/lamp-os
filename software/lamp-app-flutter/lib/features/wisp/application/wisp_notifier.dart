@@ -7,6 +7,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../control/domain/lamp_color.dart';
 import '../../../core/ble/ble_client_provider.dart';
 import '../../../core/ble/uuids.dart';
+import '../data/wisp_password_store.dart';
 import '../data/wisp_repository.dart';
 import '../domain/zone_source.dart';
 import '../domain/wisp_source_mode.dart';
@@ -28,6 +29,10 @@ part 'wisp_notifier.g.dart';
 class WispNotifier extends _$WispNotifier {
   StreamSubscription<Uint8List>? _sub;
   late WispRepository _repo;
+  final _store = WispPasswordStore();
+  // In-memory password cache; seeded from WispPasswordStore on build once
+  // the wispMac is known.
+  String? _cachedPassword;
 
   /// Debounce window for the realtime wispOp writes that fire on every
   /// Off-mode color-picker drag tick or manual-palette editor mutation.
@@ -72,6 +77,7 @@ class WispNotifier extends _$WispNotifier {
   bool _paletteRereadInFlight = false;
 
   Set<String>? _claimedMacs;
+  Map<String, ({LampColor base, LampColor shade})> _livePaint = const {};
   bool _claimsReadInFlight = false;
   DateTime? _lastClaimsReadAt;
 
@@ -79,6 +85,11 @@ class WispNotifier extends _$WispNotifier {
   /// the first CHAR_WISP_CLAIMS read is in flight. Empty set means the
   /// wisp reported count=0 (no claims / stale).
   Set<String>? get claimedMacs => _claimedMacs;
+
+  /// Live paint colors keyed by uppercase colon-hex MAC, as broadcast by the
+  /// wisp and relayed via CHAR_WISP_CLAIMS. A MAC absent from this map has
+  /// no live color yet; callers fall back to predictTuple.
+  Map<String, ({LampColor base, LampColor shade})> get livePaint => _livePaint;
 
   /// The currently-saved manual palette (last committed). Empty before
   /// the first save in a session.
@@ -108,6 +119,7 @@ class WispNotifier extends _$WispNotifier {
   @override
   Future<WispStatus> build(String lampId) async {
     final ble = ref.read(bleClientProvider);
+    _cachedPassword = null;
     _repo = WispRepository(ble, lampId);
 
     _currentPaletteKnown = false;
@@ -115,6 +127,7 @@ class WispNotifier extends _$WispNotifier {
     _paletteRereadInFlight = false;
 
     _claimedMacs = null;
+    _livePaint = const {};
     _claimsReadInFlight = false;
     _lastClaimsReadAt = null;
 
@@ -213,6 +226,17 @@ class WispNotifier extends _$WispNotifier {
       // false and the editor stuck on "reading from wisp" forever.
       _currentPaletteKnown = true;
       _lastPaletteIdPrefix = initial.paletteIdPrefix;
+      // Seed the in-memory password cache from persistent storage.
+      final mac = initial.wispMac;
+      if (mac != null) {
+        try {
+          _cachedPassword = await _store.load(mac);
+          _repo.updatePassword(_cachedPassword);
+        } catch (_) {
+          // SharedPreferences unavailable (test env without mock setup);
+          // password stays null, ops go plaintext.
+        }
+      }
       unawaited(_loadClaims());
       debugPrint(
         '[wisp_notifier] initial-read lamp=$lampId '
@@ -267,9 +291,10 @@ class WispNotifier extends _$WispNotifier {
     if (_claimsReadInFlight || _paletteRereadInFlight || _disposed) return;
     _claimsReadInFlight = true;
     try {
-      final macs = await _repo.readClaims();
+      final parsed = await _repo.readClaims();
       if (_disposed) return;
-      _claimedMacs = macs;
+      _claimedMacs = parsed?.macs;
+      _livePaint = parsed?.colors ?? const {};
       _bumpState();
     } finally {
       _claimsReadInFlight = false;
@@ -382,6 +407,58 @@ class WispNotifier extends _$WispNotifier {
         debugPrint('WispNotifier.setOffColor write failed: $e\n$st');
       }
     });
+  }
+
+  /// Set the wisp's human-readable name. No optimistic state: the wisp
+  /// echoes the new name back through wispStatus on the next notify.
+  Future<void> setName(String name) async {
+    try {
+      await _repo.setName(name);
+    } catch (e, st) {
+      debugPrint('WispNotifier.setName() failed: $e\n$st');
+      rethrow;
+    }
+  }
+
+  /// Set or change the wisp password. The op is sealed under the CURRENT
+  /// cached password; plaintext when the wisp is factory-fresh (no password).
+  /// On success, the new password is cached in memory and persisted.
+  Future<void> setPassword(String newPassword) async {
+    final mac = state.value?.wispMac;
+    try {
+      await _repo.setPassword(newPassword);
+    } catch (e, st) {
+      debugPrint('WispNotifier.setPassword() failed: $e\n$st');
+      rethrow;
+    }
+    _cachedPassword = newPassword;
+    _repo.updatePassword(newPassword);
+    if (mac != null) await _store.save(mac, newPassword);
+  }
+
+  /// Remove the wisp password (sets it to empty). The op is sealed under
+  /// the current password. On success, the local cache and persisted entry
+  /// are cleared.
+  Future<void> clearPassword() async {
+    final mac = state.value?.wispMac;
+    try {
+      await _repo.setPassword('');
+    } catch (e, st) {
+      debugPrint('WispNotifier.clearPassword() failed: $e\n$st');
+      rethrow;
+    }
+    _cachedPassword = null;
+    _repo.updatePassword(null);
+    if (mac != null) await _store.clear(mac);
+  }
+
+  /// Inject a known password into the in-memory cache and repository,
+  /// and persist it. Called when the user enters the password via the UI
+  /// or from tests.
+  Future<void> cachePassword(String wispMac, String password) async {
+    _cachedPassword = password;
+    _repo.updatePassword(password);
+    await _store.save(wispMac, password);
   }
 
   /// Shuffle: tell the wisp to bump its seed and re-roll per-lamp color

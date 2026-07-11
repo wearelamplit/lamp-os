@@ -2,11 +2,44 @@
 
 #include <ArduinoJson.h>
 
+#include <sstream>
+
 #include "config/config_codec.hpp"
+#include "core/lamp.hpp"
 #include "util/color.hpp"
 #include "version.hpp"
 
 namespace lamp {
+
+// Split csv on commas, parse each trimmed token as a #RRGGBBWW hex color,
+// return the non-empty results.
+static std::vector<Color> parseColorList(const std::string& csv) {
+  std::vector<Color> out;
+  std::istringstream stream(csv);
+  std::string token;
+  while (std::getline(stream, token, ',')) {
+    size_t start = token.find_first_not_of(' ');
+    size_t end   = token.find_last_not_of(' ');
+    if (start == std::string::npos) continue;
+    out.push_back(hexStringToColor(token.substr(start, end - start + 1)));
+  }
+  return out;
+}
+
+// Seed every segment of a role from the variant defaults, but only while NVS
+// still holds the single class-default segment. A configured lamp (NVS parsed
+// its own segment list) keeps its saved segments untouched.
+static void seedRoleSegments(std::vector<SegmentSettings>& segs,
+                             const std::vector<Config::SegmentDefault>& seeds,
+                             const Color& factory) {
+  const bool factoryUnconfigured =
+      segs.size() == 1 && segs[0].colors.size() == 1 && segs[0].colors[0] == factory;
+  if (!factoryUnconfigured) return;
+  segs.clear();
+  for (const auto& s : seeds) {
+    segs.push_back({s.name, s.px, parseColorList(s.colors)});
+  }
+}
 
 Config::Config(ConfigStore* inStore) {
   JsonDocument doc;
@@ -137,7 +170,6 @@ String Config::asLampJson() {
   // the plaintext branch instead of failing decrypt silently.
   doc["hasPassword"] = !lamp.password.empty();
   doc["advancedEnabled"] = lamp.advancedEnabled;
-  doc["devMode"] = lamp.devMode;
   doc["webappEnabled"] = lamp.webappEnabled;
   doc["socialMode"] = static_cast<uint8_t>(lamp.socialMode);
   // Firmware identity (packed semver + release channel string). Constant at
@@ -153,16 +185,28 @@ String Config::asLampJson() {
   return out;
 }
 
+// Role sections advertise topology: a role-level `px` = Σ segment px (the
+// app's scalar readers size off it) alongside the per-segment list. Both are
+// emitted; the app reads whichever it needs.
+static void emitRoleTopology(JsonDocument& doc,
+                             const std::vector<SegmentSettings>& segs) {
+  doc["px"] = segmentsSumPx(segs);
+  JsonArray colorsNode = doc["colors"].to<JsonArray>();
+  for (const auto& c : segs.front().colors) colorsNode.add(colorToHexString(c));
+  JsonArray segsNode = doc["segments"].to<JsonArray>();
+  for (const auto& s : segs) {
+    JsonObject o = segsNode.add<JsonObject>();
+    o["name"] = s.name;
+    o["px"] = s.px;
+    JsonArray sc = o["colors"].to<JsonArray>();
+    for (const auto& c : s.colors) sc.add(colorToHexString(c));
+  }
+}
+
 String Config::asBaseJson() {
   JsonDocument doc;
-  doc["px"] = base.px;
+  emitRoleTopology(doc, base.segments);
   doc["ac"] = base.ac;
-  doc["bpp"] = base.bpp;
-  doc["byteOrder"] = base.byteOrder;
-  JsonArray colorsNode = doc["colors"].to<JsonArray>();
-  for (size_t i = 0; i < base.colors.size(); i++) {
-    colorsNode.add(colorToHexString(base.colors[i]));
-  }
   // Knockout: positional uint8 array, one entry per pixel.
   //   wire shape: "knockout":[100,100,6,9,...] (length = knockoutPixels.size())
   // Index = pixel; value = brightness % (0..100). Caps the base section at
@@ -183,13 +227,7 @@ String Config::asBaseJson() {
 
 String Config::asShadeJson() {
   JsonDocument doc;
-  doc["px"] = shade.px;
-  doc["bpp"] = shade.bpp;
-  doc["byteOrder"] = shade.byteOrder;
-  JsonArray colorsNode = doc["colors"].to<JsonArray>();
-  for (size_t i = 0; i < shade.colors.size(); i++) {
-    colorsNode.add(colorToHexString(shade.colors[i]));
-  }
+  emitRoleTopology(doc, shade.segments);
   // colorsEditable is firmware-owned (set by Lamp subclass via applyDefaults).
   // Emitted so the app can hide the color picker for surfaces the subclass
   // has opted out of (e.g. SnafuLamp shade).
@@ -235,8 +273,9 @@ String Config::asHomeModeJson() {
 // Per-section JSON cache accessors. Clean section: return the cached string
 // in O(1). Dirty: rebuild via asXJson(), copy into the member string, clear
 // the flag. The portMUX serialises the rebuild so two cores can't .assign()
-// the same string concurrently, and source-data reads inside the rebuild are
-// taken under it so a torn read can't slip into the JSON.
+// the same string concurrently. Torn source reads are avoided by discipline,
+// not the mux: a section is invalidated only at commit/boot (quiescent), never
+// mid-live-write, so the rebuild never reads a source another core is mutating.
 static portMUX_TYPE s_cacheMux = portMUX_INITIALIZER_UNLOCKED;
 
 #define LAMP_DEFINE_SECTION_CACHED(NAME, BUILDER)                          \
@@ -303,24 +342,32 @@ void Config::applyDefaults(const Defaults& d) {
   }
   // Colors: apply the variant's injected default when the vector still holds
   // only the single class-default entry. A user-configured lamp has a
-  // different saved color and won't match, so its choice is preserved.
-  if (!d.baseColor.empty() && base.colors.size() == 1 &&
-      base.colors[0] == kBaseDefaultColor) {
-    base.colors[0] = hexStringToColor(d.baseColor.c_str());
+  // different saved color and won't match, so its choice is preserved. A
+  // multi-segment variant seeds its whole segment list instead of the scalar
+  // single-color path.
+  if (!d.baseSegments.empty()) {
+    seedRoleSegments(base.segments, d.baseSegments, kBaseDefaultColor);
+  } else if (!d.baseColor.empty() && base.broadcastColors().size() == 1 &&
+             base.broadcastColors()[0] == kBaseDefaultColor) {
+    base.broadcastColors() = parseColorList(d.baseColor);
   }
-  if (!d.shadeColor.empty() && shade.colors.size() == 1 &&
-      shade.colors[0] == kShadeDefaultColor) {
-    shade.colors[0] = hexStringToColor(d.shadeColor.c_str());
+  if (!d.shadeSegments.empty()) {
+    seedRoleSegments(shade.segments, d.shadeSegments, kShadeDefaultColor);
+  } else if (!d.shadeColor.empty() && shade.broadcastColors().size() == 1 &&
+             shade.broadcastColors()[0] == kShadeDefaultColor) {
+    shade.broadcastColors() = parseColorList(d.shadeColor);
   }
   base.colorsEditable  = d.baseColorsEditable;
   shade.colorsEditable = d.shadeColorsEditable;
+  if (d.setup) lamp.setup = true;
 
-  // Per-surface pixel count. A loaded px of 0 means "unset" (a fresh lamp,
-  // or a doc without the key). Fill those from the variant default; any real
-  // stored value wins, so a configured lamp's px is sacred.
-  base.px = resolveConfiguredPx(base.px, d.basePx);
-  base.knockoutPixels.resize(base.px, 100);
-  shade.px = resolveConfiguredPx(shade.px, d.shadePx);
+  // Per-segment pixel count. A loaded px of 0 means "unset" (a fresh lamp, or
+  // a doc without the key). Fill those from the variant default; any real
+  // stored value wins, so a configured lamp's px is sacred. The scalar
+  // basePx/shadePx default seeds the role's first segment.
+  base.segments.front().px = resolveConfiguredPx(base.segments.front().px, d.basePx);
+  base.knockoutPixels.resize(base.sumPx(), 100);
+  shade.segments.front().px = resolveConfiguredPx(shade.segments.front().px, d.shadePx);
 }
 
 }  // namespace lamp

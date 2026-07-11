@@ -17,9 +17,13 @@ namespace lamp {
  */
 class Compositor {
  private:
-  // End-of-expression-band index in `behaviors`. Set by the lamp after
-  // pushing initial expressions; runtime adds/removes maintain it so new
-  // expressions land before higher-priority behaviors (configurator etc).
+  // Expression-band bounds in `behaviors`, [start, end). Set by the lamp
+  // after pushing the initial stack; runtime adds/removes maintain them.
+  // addBehavior inserts at `end` (new expressions join the band top);
+  // addBaseBehavior inserts at `start` (base-scene behaviours draw below
+  // the whole band). Everything below `start` (configurators, base scenes)
+  // draws first; expressions compose on top.
+  size_t expressionBandStart = 0;
   size_t expressionBandEnd = 0;
 
   // The shared per-behavior context. We own it; every behavior we register
@@ -72,17 +76,24 @@ class Compositor {
   void setHomeMode(bool homeMode);
 
   /**
-   * @brief mark the position where runtime-added expression behaviors
-   *        should be inserted, keeping the expression band contiguous
-   *        within the larger behavior list.
+   * @brief mark the expression band bounds [start, end) within the
+   *        behavior list, keeping the band contiguous as behaviors are
+   *        added or removed at runtime.
    */
-  void setExpressionBandEnd(size_t end);
+  void setExpressionBand(size_t start, size_t end);
 
   /**
    * @brief insert a new expression behavior at the expression-band end.
    *        Increments the band-end index.
    */
   void addBehavior(AnimatedBehavior* b);
+
+  /**
+   * @brief insert a base-scene behavior at the expression-band start so it
+   *        draws below every expression (a variant's custom base scene, e.g.
+   *        snafu's dots). Shifts the whole band up by one.
+   */
+  void addBaseBehavior(AnimatedBehavior* b);
 
   /**
    * @brief remove a behavior pointer. If it was within the expression band,

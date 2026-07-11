@@ -1,6 +1,3 @@
-import 'dart:convert';
-
-import 'package:cryptography/cryptography.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -15,26 +12,9 @@ import '../../../core/widgets/settings_row.dart';
 import '../../control/application/advanced_session.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/application/control_state.dart';
+import '../../control/application/dev_mode.dart';
 import '../../control/presentation/widgets/connecting_view.dart';
 import '../../control/presentation/widgets/disconnect_aware_body.dart';
-import '../../inventory/application/inventory_notifier.dart';
-
-/// SHA-256 of the dev-mode unlock password. The password itself isn't
-/// stored anywhere in the app binary — only this hash — so a reverse-
-/// engineer pulling strings from the APK doesn't get the secret. They'd
-/// need a rainbow-table or dictionary match against this hash, which the
-/// uncommon word at the source makes slow but not impossible. "Relatively
-/// secure" — gates casual discovery, not a determined adversary.
-const _kDevModePasswordHashHex =
-    'f7bc3d20eccd3fe6522c1c59e8752e7d85a33d66a560506dc0c83858bf4c2156';
-
-Future<bool> _devModePasswordMatches(String input) async {
-  final hash = await Sha256().hash(utf8.encode(input));
-  final hex = hash.bytes
-      .map((b) => b.toRadixString(16).padLeft(2, '0'))
-      .join();
-  return hex == _kDevModePasswordHashHex;
-}
 
 /// Setup tab — mobile-style row list. Tapping a row drills into a
 /// sub-pane (HomeWifi, HomeMode, AdvancedLeds, Knockout). The Home Wi-Fi
@@ -246,7 +226,7 @@ class _RenameDialogState extends State<_RenameDialog> {
 /// hang on the reboot-disconnect.
 ///
 /// The content area carries a hidden 5-tap zone to the LEFT of the
-/// action buttons that toggles the lamp's persisted `devMode` flag.
+/// action buttons that enables app-global dev mode (password-gated).
 /// Only registers when the user already has session-unlocked advanced
 /// mode — keeps the feature undiscoverable without going through the
 /// Info-wordmark gesture first.
@@ -296,58 +276,27 @@ class _FactoryResetDialogState extends ConsumerState<_FactoryResetDialog> {
   }
 
   Future<void> _onDevModeTap() async {
-    // Gate the whole gesture on session-advanced (NOT effective). The
-    // user must have come through the Info-wordmark 5-tap this session;
-    // we don't want a devMode-on lamp to expose the toggle to anyone
-    // who picks up the phone.
+    // Gate on session-advanced (NOT effective). The user must have come
+    // through the Info-wordmark 5-tap this session; we don't want a
+    // devMode-on app to expose this to anyone who picks up the phone.
     if (!ref.read(advancedSessionProvider(widget.lampId))) return;
-    final async = ref.read(controlNotifierProvider(widget.lampId));
-    final cur = async.value?.lamp.devMode ?? false;
-    final next = !cur;
-    // Enabling requires the password — relatively secure gate on top of
-    // the 5-tap-hotspot + advanced-session prerequisites. Disable is
-    // free so a stuck-on lamp can always be returned to safe state.
-    if (next) {
-      final input = await showPasswordPromptDialog(
-        context,
-        title: 'Dev mode',
-        subtitle: 'Enter the dev-mode password to unlock this lamp.',
-        confirmLabel: 'Unlock',
-      );
-      if (input == null) return;
-      if (!await _devModePasswordMatches(input)) {
-        if (!mounted) return;
-        AppSnackbar.info(context, 'Wrong password');
-        return;
-      }
-    }
-    try {
-      await widget.notifier
-          .writeSettingsBlob({'lamp': {'devMode': next}}, reboot: false);
-    } catch (_) {
+    final input = await showPasswordPromptDialog(
+      context,
+      title: 'Dev mode',
+      subtitle: 'Enter the dev-mode password to unlock developer features.',
+      confirmLabel: 'Unlock',
+    );
+    if (input == null) return;
+    if (!await devModePasswordMatches(input)) {
       if (!mounted) return;
-      AppSnackbar.info(context, 'Dev mode toggle failed');
+      AppSnackbar.info(context, 'Wrong password');
       return;
     }
-    // Mirror to inventory immediately so `effectiveAdvancedProvider`
-    // (which reads from inventory, not control state) reflects the new
-    // value without waiting for a reconnect-driven section reload.
-    await ref
-        .read(inventoryNotifierProvider.notifier)
-        .updateDevMode(widget.lampId, next);
+    await ref.read(devModeProvider.notifier).enable();
     if (!mounted) return;
-    // On enable, close the factory reset modal — the user is done with
-    // it; leaving it open after a successful unlock looks like the tap
-    // did nothing. The snackbar shows on the parent route so it stays
-    // visible after the pop.
-    if (next) {
-      Navigator.of(context).pop();
-    }
+    Navigator.of(context).pop();
     if (widget.outerContext.mounted) {
-      AppSnackbar.info(
-        widget.outerContext,
-        next ? 'Dev mode enabled' : 'Dev mode disabled',
-      );
+      AppSnackbar.info(widget.outerContext, 'Dev mode enabled');
     }
   }
 

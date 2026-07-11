@@ -69,16 +69,17 @@ Future<ProviderContainer> _makeContainer({
 /// building the widget tree. The notifier awaits real BLE futures that
 /// never drain under FakeAsync; resolving via `c.read(...future)` inside
 /// runAsync first lets it reach AsyncData, then pumpWidget builds from cache.
+///
+/// Default tab is Sources; wifi-config-row lives there under Aurora mode.
 Future<void> _pumpScreen(WidgetTester tester, ProviderContainer c) async {
   await tester.runAsync(() async {
     await c.read(wispNotifierProvider(_devId).future);
   });
   await tester.pumpWidget(_wrap(c));
+  // Wait for the tab bar to render (Sources is the default tab).
   for (var i = 0; i < 20; i++) {
     await tester.pump(const Duration(milliseconds: 16));
-    if (find.byKey(const Key('wifi-config-row')).evaluate().isNotEmpty) {
-      return;
-    }
+    if (find.text('Sources').evaluate().isNotEmpty) break;
   }
 }
 

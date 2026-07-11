@@ -1,93 +1,71 @@
-// Native smoke test for SnafuLamp hardware configuration constants.
+// Native-host test: snafu boots with the roles/segments hardware map.
 //
-// Why not instantiate SnafuLamp directly:
-//   snafu_lamp.hpp -> lamp.hpp -> config/config.hpp -> <Arduino.h>
-//   snafu_greeting.hpp -> nearby_lamps.hpp -> <Arduino.h>/<freertos/...>
-//   animated_behavior.hpp -> frame_buffer.hpp -> <Adafruit_NeoPixel.h>/<Arduino.h>
-// None of these headers are available in the native test env.
-//
-// Pattern: mirror the relevant constants from snafu_lamp.hpp directly in
-// this file and assert their expected values. This pins the hardware config
-// shape so a mistaken change to pin assignments or pixel counts gets caught
-// immediately. The full instantiation path is exercised by the upesy_wroom
-// firmware build (G.9).
-//
-// If snafu_lamp.hpp's SnafuLamp constructor changes, update the mirrored
-// constants below to match.
+// snafu_lamp.hpp can't compile natively (pulls the full framework), so the
+// HwConfig it declares is mirrored here and checked against the real
+// validateHwConfig (src/core/hw_config.hpp is Arduino-free). Keep in sync with
+// src/lamps/snafu/snafu_lamp.hpp.
+//   Shade role: Small Dots(16,pin14) + Medium(12,pin27) + Big(9,pin26).
+//   Base role:  Stem(24,pin12), the broadcast segment.
 
 #include <unity.h>
-#include <cstdint>
 
-void setUp(void) {}
-void tearDown(void) {}
+#include "core/hw_config.hpp"
 
-// Mirror of SnafuLamp's HwConfig{} initializer.
-// Amanita hardware: shade cap on pin 12, stem base on pin 14.
-namespace {
-  constexpr uint8_t  kShadeSurface    = 0;  // Surface::Shade
-  constexpr uint8_t  kBaseSurface     = 1;  // Surface::Base
-  constexpr uint8_t  kShadePin        = 12;
-  constexpr uint16_t kShadePixelCount = 40;
-  constexpr uint8_t  kBasePin         = 14;
-  constexpr uint16_t kBasePixelCount  = 40;
-  constexpr uint8_t  kMaxBrightness   = 180;
-  // Spot region within shade: 9 pixels, indices 24..32.
-  constexpr uint16_t kSpotStart       = 24;
-  constexpr uint16_t kSpotEnd         = 32;
-  constexpr uint8_t  kSpotCount       = kSpotEnd - kSpotStart + 1;  // 9
-  // Scene count shared by BackgroundFade and PaintSpots (12 palettes each).
-  constexpr size_t   kSceneCount      = 12;
+using namespace lamp;
+
+static HwConfig snafuHwConfig() {
+  return HwConfig{
+    .strips = {
+      {.role=Surface::Shade, .pin=14, .byteOrder=ByteOrder::GRBW, .pixelCount=16, .name="Small Dots"},
+      {.role=Surface::Shade, .pin=27, .byteOrder=ByteOrder::GRBW, .pixelCount=12, .name="Medium Dots"},
+      {.role=Surface::Shade, .pin=26, .byteOrder=ByteOrder::GRBW, .pixelCount=9,  .name="Big Dots"},
+      {.role=Surface::Base,  .pin=12, .byteOrder=ByteOrder::GRBW, .pixelCount=24, .name="Stem", .broadcast=1},
+    },
+    .maxBrightness = 180,
+  };
 }
 
-void test_snafu_shade_surface_is_index_zero() {
-  TEST_ASSERT_EQUAL_UINT8(0, kShadeSurface);
+void setUp() {}
+void tearDown() {}
+
+void test_snafu_map_is_valid() {
+  TEST_ASSERT_TRUE(validateHwConfig(snafuHwConfig()));
 }
 
-void test_snafu_base_surface_is_index_one() {
-  TEST_ASSERT_EQUAL_UINT8(1, kBaseSurface);
+void test_snafu_role_geometry() {
+  HwConfig hw = snafuHwConfig();
+  uint16_t shadePx = 0, basePx = 0;
+  int shadeSegs = 0, baseSegs = 0, broadcast = 0;
+  for (const auto& s : hw.strips) {
+    if (s.role == Surface::Shade) { shadePx += s.pixelCount; shadeSegs++; }
+    else { basePx += s.pixelCount; baseSegs++; }
+    if (s.broadcast) broadcast++;
+  }
+  TEST_ASSERT_EQUAL_INT(3, shadeSegs);
+  TEST_ASSERT_EQUAL_INT(1, baseSegs);
+  TEST_ASSERT_EQUAL_UINT16(37, shadePx);   // 16 + 12 + 9
+  TEST_ASSERT_EQUAL_UINT16(24, basePx);
+  TEST_ASSERT_EQUAL_INT(1, broadcast);     // exactly one (the Stem)
 }
 
-void test_snafu_shade_pin_is_12() {
-  TEST_ASSERT_EQUAL_UINT8(12, kShadePin);
+// A dup-pin or missing-role map must fail the fatal gate.
+void test_dup_pin_rejected() {
+  HwConfig hw = snafuHwConfig();
+  hw.strips[1].pin = 14;  // collide Medium Dots with Small Dots
+  TEST_ASSERT_FALSE(validateHwConfig(hw));
 }
 
-void test_snafu_shade_pixel_count_is_40() {
-  TEST_ASSERT_EQUAL_UINT(40, kShadePixelCount);
+void test_missing_base_rejected() {
+  HwConfig hw = snafuHwConfig();
+  hw.strips.pop_back();  // drop the only Base strip
+  TEST_ASSERT_FALSE(validateHwConfig(hw));
 }
 
-void test_snafu_base_pin_is_14() {
-  TEST_ASSERT_EQUAL_UINT8(14, kBasePin);
-}
-
-void test_snafu_base_pixel_count_is_40() {
-  TEST_ASSERT_EQUAL_UINT(40, kBasePixelCount);
-}
-
-void test_snafu_max_brightness_is_180() {
-  TEST_ASSERT_EQUAL_UINT8(180, kMaxBrightness);
-}
-
-void test_snafu_spot_region_is_indices_24_to_32() {
-  TEST_ASSERT_EQUAL_UINT(24, kSpotStart);
-  TEST_ASSERT_EQUAL_UINT(32, kSpotEnd);
-  TEST_ASSERT_EQUAL_UINT(9, kSpotCount);
-}
-
-void test_snafu_palette_scene_count_is_12() {
-  TEST_ASSERT_EQUAL_UINT(12, kSceneCount);
-}
-
-int main(int argc, char** argv) {
-  (void)argc; (void)argv;
+int main(int, char**) {
   UNITY_BEGIN();
-  RUN_TEST(test_snafu_shade_surface_is_index_zero);
-  RUN_TEST(test_snafu_base_surface_is_index_one);
-  RUN_TEST(test_snafu_shade_pin_is_12);
-  RUN_TEST(test_snafu_shade_pixel_count_is_40);
-  RUN_TEST(test_snafu_base_pin_is_14);
-  RUN_TEST(test_snafu_base_pixel_count_is_40);
-  RUN_TEST(test_snafu_max_brightness_is_180);
-  RUN_TEST(test_snafu_spot_region_is_indices_24_to_32);
-  RUN_TEST(test_snafu_palette_scene_count_is_12);
+  RUN_TEST(test_snafu_map_is_valid);
+  RUN_TEST(test_snafu_role_geometry);
+  RUN_TEST(test_dup_pin_rejected);
+  RUN_TEST(test_missing_base_rejected);
   return UNITY_END();
 }

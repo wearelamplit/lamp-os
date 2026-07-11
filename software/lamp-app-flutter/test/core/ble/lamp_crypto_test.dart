@@ -121,6 +121,39 @@ void main() {
     });
   });
 
+  group('LampCrypto cross-language vector', () {
+    // Vector from software/wisp/test/test_wisp_crypto/test_wisp_crypto.cpp.
+    // Produced by Python cryptography (HKDF-SHA256 + AES-256-GCM), decrypted by
+    // mbedTLS on the C++ side. Dart decrypting the same bytes confirms both
+    // impls agree on the wire format and key-derivation construction.
+    test('decrypts C++-verified wispOp wire bytes to expected JSON', () async {
+      // password="testpass", nonce=00..0B,
+      // plaintext='{"op":"setName","name":"testwisp"}'
+      final wire = Uint8List.fromList([
+        0x02,
+        // nonce
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x08, 0x09, 0x0a, 0x0b,
+        // tag
+        0x8c, 0x0b, 0xd0, 0x14, 0xb0, 0xca, 0x8a, 0xd0,
+        0x26, 0x07, 0x3f, 0x43, 0x6e, 0x36, 0xbe, 0x11,
+        // ciphertext
+        0x7a, 0xe8, 0x91, 0x52, 0xf5, 0x7e, 0xff, 0xe6,
+        0x07, 0xdf, 0xb8, 0x30, 0x2c, 0xfc, 0x7d, 0x09,
+        0x39, 0x12, 0xfe, 0x29, 0xb4, 0x08, 0xce, 0x82,
+        0x43, 0xd2, 0xf0, 0xf2, 0xde, 0xcc, 0x5f, 0x3b,
+        0x1e, 0x84,
+      ]);
+      final plain = await LampCrypto.decryptOpForTesting(
+        wire,
+        password: 'testpass',
+        saltUuid16: uuidSaltLE16(BleUuids.wispOp),
+        charShortName: 'wispOp',
+      );
+      expect(utf8.decode(plain), '{"op":"setName","name":"testwisp"}');
+    });
+  });
+
   group('LampCrypto.decryptOpForTesting error paths', () {
     test('rejects short payload', () {
       expect(

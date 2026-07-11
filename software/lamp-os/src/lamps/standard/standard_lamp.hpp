@@ -13,9 +13,9 @@ namespace lamp {
 class StandardLamp : public Lamp {
  public:
   StandardLamp() : Lamp(HwConfig{
-    .surfaces = {
-      {.id=Surface::Shade, .pin=LAMP_SHADE_PIN, .byteOrder=ByteOrder::GRBW},
-      {.id=Surface::Base,  .pin=LAMP_BASE_PIN,  .byteOrder=ByteOrder::GRBW},
+    .strips = {
+      {.role=Surface::Shade, .pin=LAMP_SHADE_PIN, .byteOrder=ByteOrder::GRBW, .name="Shade", .broadcast=1},
+      {.role=Surface::Base,  .pin=LAMP_BASE_PIN,  .byteOrder=ByteOrder::GRBW, .name="Base"},
     },
     .maxBrightness = LAMP_MAX_BRIGHTNESS,
   }) {}

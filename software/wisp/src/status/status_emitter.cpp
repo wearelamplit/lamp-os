@@ -108,6 +108,8 @@ void StatusEmitter::emitStatus() {
   uint8_t shuffleSeed = 0;
   uint32_t driftIntervalMs = 0;
   uint8_t driftFadePct = 0;
+  const char* wispName = "";
+  bool hasPassword = false;
   if (config_) {
     const auto off = config_->offColor();
     offR = off.r; offG = off.g; offB = off.b;
@@ -115,12 +117,14 @@ void StatusEmitter::emitStatus() {
     shuffleSeed = config_->shuffleSeed();
     driftIntervalMs = config_->driftIntervalMs();
     driftFadePct = config_->driftFadePct();
+    wispName = config_->name().c_str();
+    hasPassword = config_->password().length() > 0;
   }
   const WispStatusFields fields{
       currentZone, zoneSrc, obsBuf, obsCount,
       wifiConn, auroraConn, paletteIdPrefix, lastSeenMs,
       sourceName, offR, offG, offB, hasOffColor, shuffleSeed,
-      driftIntervalMs, driftFadePct };
+      driftIntervalMs, driftFadePct, wispName, hasPassword };
 
   char jsonBuf[kStatusJsonBufLen];
   const size_t jsonLen = buildWispStatusJson(

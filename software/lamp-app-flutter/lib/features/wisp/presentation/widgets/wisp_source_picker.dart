@@ -51,7 +51,7 @@ class SourcePicker extends StatelessWidget {
           ],
         ),
         if (!auroraEnabled) ...[
-          const SizedBox(height: 6),
+          const SizedBox(height: AppSpace.sm),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 2),
             child: Text(

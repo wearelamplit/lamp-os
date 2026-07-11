@@ -116,6 +116,24 @@ void PresenceBeacon::emit() {
     if (claimLen) {
       mesh_->broadcast(claimBuf, claimLen);
     }
+
+    uint8_t paintEntries[lamp_protocol::WISP_PAINT_MAX_ENTRIES *
+                         lamp_protocol::WISP_PAINT_ENTRY_SIZE] = {0};
+    const size_t paintCount = roster_->snapshotPaintForBroadcast(
+        paintEntries, sizeof(paintEntries));
+    if (paintCount > 0) {
+      uint8_t paintBuf[lamp_protocol::WISP_PAINT_MAX_SIZE];
+      uint16_t paintSeq = 0;
+      WISP_SEQ_PORTMUX_ENTER(&seq_->mux);
+      paintSeq = seq_->next();
+      WISP_SEQ_PORTMUX_EXIT(&seq_->mux);
+      const size_t paintLen = lamp_protocol::buildWispPaint(
+          paintBuf, sizeof(paintBuf), paintSeq, srcMac,
+          paintEntries, static_cast<uint8_t>(paintCount));
+      if (paintLen) {
+        mesh_->broadcast(paintBuf, paintLen);
+      }
+    }
   }
 
   // WiFi/Aurora flips would otherwise wait up to 30s for the wispStatus heartbeat.

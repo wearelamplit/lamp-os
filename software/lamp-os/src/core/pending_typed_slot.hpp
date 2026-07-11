@@ -52,7 +52,7 @@ struct PendingTypedSlot {
     // slot, meaning the previous event will be silently lost. Added
     // 2026-06-04 to measure how often this happens in practice during
     // rapid cascade triggers. sizeof(T) discriminates which slot
-    // (PendingEvent ≈ 244, PendingWispHello small, etc.) without needing
+    // (PendingWispHello small, PendingCommand large, etc.) without needing
     // a per-slot tag parameter that would touch every forwarder.
     if (overwriting) {
       Serial.printf("[slot.overwrite] size=%u\n", (unsigned)sizeof(T));

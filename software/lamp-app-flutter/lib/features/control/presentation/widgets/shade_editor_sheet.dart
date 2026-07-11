@@ -8,6 +8,7 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/widgets/app_sheet.dart';
 import '../../../../core/widgets/confirm_discard.dart';
 import '../../application/control_notifier.dart';
+import '../../application/control_state.dart';
 import '../../domain/lamp_color.dart';
 import 'color_picker_sheet.dart';
 
@@ -16,6 +17,29 @@ import 'color_picker_sheet.dart';
 /// cap is UX-only so the modal stays scannable.
 const int _kMaxShadeStops = 6;
 
+/// Which color list a shared color editor drives.
+class ColorChannelSpec {
+  const ColorChannelSpec({
+    required this.title,
+    required this.selectColors,
+    required this.setLive,
+  });
+
+  final String title;
+  final List<LampColor> Function(ControlState) selectColors;
+  final void Function(ControlNotifier, List<LampColor>) setLive;
+}
+
+/// Spec for shade segment [segIdx]. Every segment live-previews over
+/// CHAR_SHADE_COLORS and persists through CHAR_COMMIT on Save.
+ColorChannelSpec shadeSegmentSpec(int segIdx, String title) => ColorChannelSpec(
+      title: title,
+      selectColors: (s) => segIdx < s.shade.segments.length
+          ? s.shade.segments[segIdx].colors
+          : s.shade.colors,
+      setLive: (n, c) => n.setShadeSegmentColors(segIdx, c),
+    );
+
 /// Modal sheet for editing the shade gradient stops. Mirrors
 /// `BaseEditorSheet`'s session pattern — live-previews via the
 /// controlNotifier as the user picks, snapshots the colors it opened
@@ -23,9 +47,14 @@ const int _kMaxShadeStops = 6;
 /// live-preview channel (Cancel/discard re-writes the snapshot). A
 /// discard-guard dialog blocks accidental dismissal when edits are pending.
 class ShadeEditorSheet extends ConsumerStatefulWidget {
-  const ShadeEditorSheet({super.key, required this.lampId});
+  const ShadeEditorSheet({
+    super.key,
+    required this.lampId,
+    required this.spec,
+  });
 
   final String lampId;
+  final ColorChannelSpec spec;
 
   @override
   ConsumerState<ShadeEditorSheet> createState() => _ShadeEditorSheetState();
@@ -44,9 +73,10 @@ class _ShadeEditorSheetState extends ConsumerState<ShadeEditorSheet> {
 
   void _close({required bool revert}) {
     if (revert && _originalColors != null) {
-      ref
-          .read(controlNotifierProvider(widget.lampId).notifier)
-          .setShadeColors(_originalColors!);
+      widget.spec.setLive(
+        ref.read(controlNotifierProvider(widget.lampId).notifier),
+        _originalColors!,
+      );
     }
     setState(() => _allowPop = true);
     // Pop after the frame so PopScope picks up _allowPop=true (setState +
@@ -74,57 +104,46 @@ class _ShadeEditorSheetState extends ConsumerState<ShadeEditorSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final shade = ref.watch(
-      controlNotifierProvider(widget.lampId)
-          .select((async) => async.value?.shade),
+    final state = ref.watch(
+      controlNotifierProvider(widget.lampId).select((async) => async.value),
     );
-    if (shade == null) return const SizedBox.shrink();
+    if (state == null) return const SizedBox.shrink();
 
-    _originalColors ??= List.of(shade.colors);
+    final spec = widget.spec;
+    _originalColors ??= List.of(spec.selectColors(state));
 
-    final colors = shade.colors;
+    final colors = spec.selectColors(state);
     final notifier =
         ref.read(controlNotifierProvider(widget.lampId).notifier);
 
     Future<void> editStop(int i) async {
-      // Tell the lamp we're operator-editing the shade surface so wisp
-      // overrides get dropped for the picker's lifetime. Always pair
-      // with a close call in `finally`.
-      notifier.setEditSession(EditSurface.shade, true);
-      try {
-        final picked = await showColorPickerSheet(
-          context,
-          initial: colors[i],
-          title: 'Stop ${i + 1}',
-          bpp: shade.bpp,
-          onLive: (live) {
-            // Read fresh each tick so concurrent state changes don't
-            // get clobbered.
-            final current =
-                ref.read(controlNotifierProvider(widget.lampId)).value;
-            if (current == null) return;
-            final next = [...current.shade.colors];
-            if (i >= next.length) return; // stop removed while picker open
-            next[i] = live;
-            notifier.setShadeColors(next);
-          },
-        );
-        if (picked == null) {
-          // Cancelled — restore whatever the snapshot was at the moment
-          // editStop opened. State already mirrors the live picks, so
-          // we re-push the original list to roll back.
-          final reverted = [...colors];
-          notifier.setShadeColors(reverted);
-        }
-      } finally {
-        notifier.setEditSession(EditSurface.shade, false);
+      // The wisp edit-session spans the whole sheet (opened by ShadeCard around
+      // showShadeEditorSheet), so per-stop pick doesn't touch it.
+      final picked = await showColorPickerSheet(
+        context,
+        initial: colors[i],
+        title: 'Stop ${i + 1}',
+        bpp: state.shade.bpp,
+        onLive: (live) {
+          final current =
+              ref.read(controlNotifierProvider(widget.lampId)).value;
+          if (current == null) return;
+          final next = [...spec.selectColors(current)];
+          if (i >= next.length) return; // stop removed while picker open
+          next[i] = live;
+          spec.setLive(notifier, next);
+        },
+      );
+      if (picked == null) {
+        final reverted = [...colors];
+        spec.setLive(notifier, reverted);
       }
     }
 
     void removeStop(int i) {
       if (colors.length <= 1) return;
       final next = [...colors]..removeAt(i);
-      notifier.setShadeColors(next);
+      spec.setLive(notifier, next);
     }
 
     void addStop() {
@@ -135,14 +154,14 @@ class _ShadeEditorSheetState extends ConsumerState<ShadeEditorSheet> {
       final seed = colors.isNotEmpty
           ? colors.last
           : const LampColor(r: 0xFF, g: 0xFF, b: 0xFF, w: 0);
-      notifier.setShadeColors([...colors, seed]);
+      spec.setLive(notifier, [...colors, seed]);
     }
 
     void reorder(int oldIndex, int newIndex) {
       final next = [...colors];
       final picked = next.removeAt(oldIndex);
       next.insert(newIndex, picked);
-      notifier.setShadeColors(next);
+      spec.setLive(notifier, next);
     }
 
     return PopScope(
@@ -160,7 +179,7 @@ class _ShadeEditorSheetState extends ConsumerState<ShadeEditorSheet> {
               Row(
                 children: [
                   Text(
-                    'Shade colors',
+                    spec.title,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ],
@@ -253,12 +272,13 @@ class _ShadeEditorSheetState extends ConsumerState<ShadeEditorSheet> {
 Future<void> showShadeEditorSheet(
   BuildContext context, {
   required String lampId,
+  required ColorChannelSpec spec,
 }) {
   return showAppSheet<void>(
     context,
     builder: (ctx) => FractionallySizedBox(
       heightFactor: 0.6,
-      child: ShadeEditorSheet(lampId: lampId),
+      child: ShadeEditorSheet(lampId: lampId, spec: spec),
     ),
   );
 }

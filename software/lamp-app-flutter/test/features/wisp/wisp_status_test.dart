@@ -251,5 +251,40 @@ void main() {
       expect(manual.driftIntervalMs, 90000);
       expect(manual.driftFadePct, 40);
     });
+
+    test('name parses from JSON', () {
+      final s = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","name":"living room"}',
+      ));
+      expect(s.name, 'living room');
+    });
+
+    test('name defaults to empty string when absent', () {
+      final s = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF"}',
+      ));
+      expect(s.name, '');
+    });
+
+    test('hasPassword parses true from JSON', () {
+      final s = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","hasPassword":true}',
+      ));
+      expect(s.hasPassword, isTrue);
+    });
+
+    test('hasPassword defaults to false when absent', () {
+      final s = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF"}',
+      ));
+      expect(s.hasPassword, isFalse);
+    });
+
+    test('hasPassword parses false from JSON', () {
+      final s = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","hasPassword":false}',
+      ));
+      expect(s.hasPassword, isFalse);
+    });
   });
 }

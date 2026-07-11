@@ -40,6 +40,9 @@ constexpr const char* kKeyOffColor      = "offColor";
 constexpr const char* kKeyShuffleSeed   = "shufSeed";
 constexpr const char* kKeyDriftIntv     = "driftIntv";
 constexpr const char* kKeyDriftFade     = "driftFade";
+constexpr const char* kKeyName          = "wispName";
+constexpr size_t      kMaxNameLen       = 20;
+constexpr const char* kKeyPassword      = "wispPassword";
 
 WispSourceMode coerceSourceMode(int raw) {
   switch (raw) {
@@ -115,9 +118,18 @@ void WispConfig::begin() {
   driftIntervalMs_ = prefs_.getUInt(kKeyDriftIntv, 120000);
   driftFadePct_ = static_cast<uint8_t>(prefs_.getUChar(kKeyDriftFade, 50));
 
+  {
+    String raw = prefs_.getString(kKeyName, String());
+    name_ = raw.length() > kMaxNameLen
+        ? String(raw.c_str(), kMaxNameLen)
+        : raw;
+  }
+
+  password_ = prefs_.getString(kKeyPassword, String());
+
   Serial.printf("[wisp.cfg] loaded selZone=%d ssid='%s' pw=%s "
                 "srcMode=%d manualColors=%u offColor=%u,%u,%u shuffleSeed=%u "
-                "driftIntv=%u ms driftFade=%u%%\n",
+                "driftIntv=%u ms driftFade=%u%% name='%s' hasPassword=%d\n",
                 selectedZone_, wifiSsid_.c_str(),
                 wifiPw_.length() ? "<set>" : "<empty>",
                 static_cast<int>(sourceMode_),
@@ -125,7 +137,8 @@ void WispConfig::begin() {
                 offColor_.r, offColor_.g, offColor_.b,
                 (unsigned)shuffleSeed_,
                 (unsigned)driftIntervalMs_,
-                (unsigned)driftFadePct_);
+                (unsigned)driftFadePct_,
+                name_.c_str(), (int)(password_.length() > 0));
 }
 
 void WispConfig::setSelectedZone(int zone) {
@@ -225,6 +238,26 @@ void WispConfig::setDrift(uint32_t intervalMs, uint8_t fadePct) {
     prefs_.putUChar(kKeyDriftFade, fadePct);
   }
   Serial.printf("[wisp.cfg] drift <= %lu ms, %u%% fade\n", intervalMs, fadePct);
+}
+
+void WispConfig::setName(const String& name) {
+  name_ = name.length() > kMaxNameLen ? String(name.c_str(), kMaxNameLen) : name;
+  if (opened_) {
+    prefs_.putString(kKeyName, name_);
+  }
+  Serial.printf("[wisp.cfg] name <= '%s'\n", name_.c_str());
+}
+
+void WispConfig::setPassword(const String& pw) {
+  password_ = pw;
+  if (opened_) {
+    if (pw.length() == 0) {
+      prefs_.remove(kKeyPassword);
+    } else {
+      prefs_.putString(kKeyPassword, pw);
+    }
+  }
+  Serial.printf("[wisp.cfg] password <= <%u chars>\n", (unsigned)pw.length());
 }
 
 size_t WispConfig::copyManualPalette(uint8_t* out, size_t maxColors) const {

@@ -1,10 +1,10 @@
 // Framework heart: file-scope state (singletons, pending slots, mutexes),
-// Lamp::setup() boot wiring, Lamp::tick() orchestrator, initBehaviors,
-// brightness/home-mode helpers, dispatchLampAction.
+// Lamp::setup() boot wiring, Lamp::tick() orchestrator.
 //
 // Sibling TUs share file-scope state via core/lamp_internal.hpp:
-// core/lamp_drains.cpp holds the drainX() bodies, core/lamp_remote_op.cpp
-// the cascade-receive routing.
+// lamp_drains.cpp: drain bodies; lamp_remote_op.cpp: cascade routing;
+// lamp_brightness.cpp: brightness/home-mode; lamp_behaviors.cpp: initBehaviors;
+// lamp_test_action.cpp: dispatchLampAction.
 
 #include "lamp.hpp"
 #include "lamp_internal.hpp"
@@ -29,6 +29,7 @@
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 #include <NimBLEDevice.h>
 #include <esp_ota_ops.h>
+#include <esp_mac.h>
 #endif
 #include "components/network/ble/bluetooth.hpp"
 #include "components/network/ble/ble_control.hpp"
@@ -43,19 +44,15 @@
 #include "components/transient_override/color_override.hpp"
 #include "expressions/expression_manager.hpp"
 #include "behaviors/configurator.hpp"
-#include "behaviors/fade_in.hpp"
 #include "behaviors/fade_out.hpp"
-#include "behaviors/idle.hpp"
 #include "behaviors/knockout.hpp"
 #include "behaviors/social.hpp"
 #include "config/config.hpp"
 #include "config/config_types.hpp"
 #include "config/nvs_config_store.hpp"
-#include "core/animated_behavior.hpp"
-#include "core/behavior_context.hpp"
 #include "core/compositor.hpp"
 #include "core/frame_buffer.hpp"
-#include "core/ota_quiet_mode.hpp"
+#include "components/firmware/ota_quiet_mode.hpp"
 #include "core/pending_json_slot.hpp"
 #include "core/pending_typed_slot.hpp"
 #include "core/pending_slot_aggregate.hpp"
@@ -65,8 +62,6 @@
 #include "util/gradient.hpp"
 #include "util/levels.hpp"
 
-Adafruit_NeoPixel* shadeStrip = nullptr;
-Adafruit_NeoPixel* baseStrip = nullptr;
 lamp::NvsConfigStore configStore;
 
 // Zero-allocation pending slots. BLE callbacks on the NimBLE host task
@@ -79,70 +74,11 @@ lamp::NvsConfigStore configStore;
 
 volatile int8_t pendingBrightness = -1;
 
-// User brightness micro-fade. A sustained slider drag delivers a write every
-// ~60-100 ms (WriteCoalescer window); applying each directly reads as visibly
-// stepped brightness. This state interpolates between successive writes over
-// kUserBrightnessFadeMs (~80 ms, slightly longer than the coalescer floor so
-// each step bleeds into the next without overshooting). Drain stamps a new
-// (source, target, start) triple per write; the loop tick interpolates and
-// applies. Gated to brightnessOverride.isActive() == false so an active wisp
-// override owns the strip uncontested via the applyEffectiveBrightness
-// change-callback path.
-//
-// Source init: drain reads the current visual level by lerping the in-flight
-// fade, so an immediate re-write picks up where the strip actually is.
-// Cold-start (no prior write) seeds source = target so the first write snaps
-// without a black-up ramp.
-static constexpr uint16_t kUserBrightnessFadeMs = 80;
-static uint8_t  s_userBrightnessSource = 0;
-static uint8_t  s_userBrightnessTarget = 0;
-static uint32_t s_userBrightnessFadeStartMs = 0;
-static bool     s_userBrightnessSeeded = false;
-
 // HwConfig-sourced brightness cap. Set in Lamp::setup() from hw_.maxBrightness
 // so free functions across this TU + sibling TUs use the correct variant
 // ceiling without importing a variant header.
 uint8_t s_hwMaxBrightness = 180;
 
-// Compute the current interpolated brightness for the live user-write fade.
-// Returns target once the fade window has elapsed.
-namespace lamp {
-uint8_t computeUserBrightnessNow(uint32_t nowMs) {
-  if (s_userBrightnessSource == s_userBrightnessTarget) {
-    return s_userBrightnessTarget;
-  }
-  const uint32_t elapsed = nowMs - s_userBrightnessFadeStartMs;
-  if (elapsed >= kUserBrightnessFadeMs) {
-    return s_userBrightnessTarget;
-  }
-  const int32_t span =
-      static_cast<int32_t>(s_userBrightnessTarget) - s_userBrightnessSource;
-  return static_cast<uint8_t>(
-      s_userBrightnessSource +
-      (span * static_cast<int32_t>(elapsed)) /
-          static_cast<int32_t>(kUserBrightnessFadeMs));
-}
-
-// Accessors for components/apply/apply_brightness.hpp, exposed here so the
-// apply module can drive the micro-fade triple without re-exposing it
-// globally.
-uint8_t  brightnessFadeSource()    { return s_userBrightnessSource; }
-uint8_t  brightnessFadeTarget()    { return s_userBrightnessTarget; }
-uint32_t brightnessFadeStartMs()   { return s_userBrightnessFadeStartMs; }
-bool     brightnessFadeSeeded()    { return s_userBrightnessSeeded; }
-
-void setBrightnessFade(uint8_t source, uint8_t target, uint32_t startMs) {
-  s_userBrightnessSource      = source;
-  s_userBrightnessTarget      = target;
-  s_userBrightnessFadeStartMs = startMs;
-  s_userBrightnessSeeded      = true;
-}
-
-void clearBrightnessFadeSeed() {
-  s_userBrightnessSeeded = false;
-}
-
-}  // namespace lamp
 // Bring apply_brightness helpers into file scope so unqualified call sites
 // (applyEffectiveBrightness, computeUserBrightnessNow) resolve.
 using lamp::applyEffectiveBrightness;
@@ -218,16 +154,15 @@ void postPendingRestoreBrightness(const PendingRestoreBrightness& src)   { pendi
 void postPendingWispHello(const PendingWispHello& src)                   { pendingSlots.wispHello.post(pendingMux, src); }
 void postPendingWispPalette(const PendingWispPalette& src)               { pendingSlots.wispPalette.post(pendingMux, src); }
 void postPendingWispClaim(const PendingWispClaim& src)                   { pendingSlots.wispClaim.post(pendingMux, src); }
+void postPendingWispPaint(const PendingWispPaint& src)                   { pendingSlots.wispPaint.post(pendingMux, src); }
+void postPendingCommand(const PendingCommand& src)                       { pendingSlots.command.post(pendingMux, src); }
 void postPendingEvent(const PendingEvent& src)                           { pendingSlots.event.post(pendingMux, src); }
 void postPendingFirmwareControl(const PendingFirmwareControl& src)       { pendingSlots.firmwareControl.post(pendingMux, src); }
 
-// Forwarder used by ExpressionManager::tryHandleExpressionEvent (and the
-// legacy triggerExpression CONTROL_OP recv path) to schedule a future
-// triggerInvocation without each call site having to know the queue
-// storage lives here. Runs on Core 1 (drain task); the pendingTriggers
-// vector is loop-task-only so no mutex needed. FIFO eviction on overflow:
-// most-recent intent wins, since dropping the newest would lose the user's
-// latest cascade in a mesh storm.
+// Schedules a future triggerInvocation without each call site having to
+// know the queue storage lives here. Runs on Core 1 (drain task);
+// pendingTriggers is loop-task-only so no mutex needed. FIFO eviction on
+// overflow: most-recent intent wins.
 void enqueueDelayedInvocation(const ExpressionInvocation& inv,
                               const uint8_t srcMac[6],
                               uint32_t delayMs) {
@@ -268,6 +203,7 @@ lamp::FadeOutBehavior shadeFadeOutBehavior;
 lamp::FadeOutBehavior baseFadeOutBehavior;
 lamp::KnockoutBehavior baseKnockoutBehavior;
 lamp::ExpressionManager expressionManager;
+lamp::ExpressionObserverRegistry expressionObserverRegistry;
 lamp::Config config;
 lamp::MeshLink meshLink;
 // Lamp-side OTA receiver. Bound to meshLink via
@@ -334,7 +270,7 @@ void renderShadeColors(JsonArray arr) {
   // Reflect the new shade in the BLE adv so phones and v1 neighbours see it
   // without connecting. Use the first stop (shade in this build is a single
   // color).
-  bt.setAdvertisedColors(config.base.colors[config.base.ac], colors[0]);
+  bt.setAdvertisedColors(config.base.broadcastColors()[config.base.ac], colors[0]);
 }
 
 // renderBaseColors: counterpart to renderShadeColors. As above, callers
@@ -353,7 +289,7 @@ void renderBaseColors(JsonArray arr) {
   // Reflect the new base in the BLE adv; the first stop is what the adv
   // carries (the user's active-stop index isn't known from this drain, and
   // bt.begin used the first stop initially).
-  bt.setAdvertisedColors(colors[0], config.shade.colors[0]);
+  bt.setAdvertisedColors(colors[0], config.shade.broadcastColors()[0]);
 }
 }  // namespace lamp
 
@@ -434,449 +370,10 @@ void runExpressionOp(JsonObject doc, bool mutateConfig) {
 }
 }  // namespace lamp
 
-// Forward decl (defined later, alongside effectiveBrightness which shares
-// the same gate). initBehaviors uses it to seed compositor.begin.
-static bool calculateEffectiveHomeMode();
-// Forward decl. The BrightnessOverride callback wired in initBehaviors needs
-// the same brightness applier the rest of the lamp uses. Defined below
-// alongside effectiveBrightness.
-namespace lamp { void applyEffectiveBrightness(); }
-static uint8_t effectiveBrightness();
-
-void initBehaviors(lamp::Features features) {
-  // Configurators are always needed (they hold saved colors + wisp paint).
-  shadeConfiguratorBehavior = lamp::ConfiguratorBehavior(&shade, 120);
-  shadeConfiguratorBehavior.colors = shade.defaultColors;
-  baseConfiguratorBehavior = lamp::ConfiguratorBehavior(&base, 120);
-  baseConfiguratorBehavior.colors = base.defaultColors;
-
-  // ExpressionManager always begins (it owns the expression band in the
-  // compositor). Whether it loads saved expressions is gated below.
-  expressionManager.begin(&shade, &base);
-
-  if (lamp::any(features, lamp::Features::SocialBehavior)) {
-    shadeSocialBehavior = lamp::SocialBehavior(&shade, 1200);
-    // Live config pointer so SocialBehavior::control reads the current
-    // socialMode each tick (user can change personality at runtime; the
-    // change rides through settings_blob save + reboot, but the wiring
-    // is per-instance regardless).
-    shadeSocialBehavior.setConfig(&config);
-    // Pause social greetings in home mode (the user's "I'm home, calm down"
-    // mode). Compositor gates this via the homeMode flag, kept in sync by
-    // reapplyHomeModeState().
-    shadeSocialBehavior.allowedInHomeMode = false;
-  }
-
-  if (lamp::any(features, lamp::Features::FadeOutBehavior)) {
-    shadeFadeOutBehavior = lamp::FadeOutBehavior(&shade, REBOOT_ANIMATION_FRAMES);
-    baseFadeOutBehavior = lamp::FadeOutBehavior(&base, REBOOT_ANIMATION_FRAMES);
-  }
-
-  if (lamp::any(features, lamp::Features::KnockoutBehavior)) {
-    baseKnockoutBehavior = lamp::KnockoutBehavior(&base, 0, true);
-    baseKnockoutBehavior.knockoutPixels = config.base.knockoutPixels;
-  }
-
-  // Features::DefaultExpressions gates whether saved NVS expressions are
-  // loaded on boot. Subclasses that replace the expression set skip this
-  // so their own expressions aren't shadowed by stale NVS data.
-  if (lamp::any(features, lamp::Features::DefaultExpressions)) {
-    expressionManager.loadFromConfig(config.expressions);
-  }
-
-  // Draw order = registration order, last-writer-wins on the surface buffer.
-  //
-  // Configurator (wisp paint + saved colors) goes FIRST (the base scene).
-  // Social greetings overlay next. Expressions come LAST so brief transient
-  // effects (glitchy / pulse / breathing / shifty) compose on top and yield
-  // when their animation completes (animationState=STOPPED, Compositor skips
-  // them, configurator's writes are the final state).
-  //
-  // The configurator must register BEFORE the expressions so expressions
-  // compose ON TOP of whatever the configurator writes. Reversing the order
-  // would let the configurator overwrite per-pixel expression writes every
-  // frame, making non-exclusive expressions invisible during wisp paint.
-
-  std::vector<lamp::AnimatedBehavior*> allBehaviors = {};
-
-  // Configurator (base scene: saved colors + wisp paint via beginFade)
-  allBehaviors.push_back(&baseConfiguratorBehavior);
-  allBehaviors.push_back(&shadeConfiguratorBehavior);
-
-  // Social greeting behaviors
-  if (lamp::any(features, lamp::Features::SocialBehavior)) {
-    allBehaviors.push_back(&shadeSocialBehavior);
-  }
-
-  // Expression behaviors LAST: transient effects compose on top. When their
-  // animationState transitions to STOPPED the compositor skips them and the
-  // configurator's base scene shows through.
-  auto exprBehaviors = expressionManager.getBehaviors();
-  allBehaviors.insert(allBehaviors.end(), exprBehaviors.begin(), exprBehaviors.end());
-
-  // Fade-out behaviors run last so reboot animation is on top of everything
-  if (lamp::any(features, lamp::Features::FadeOutBehavior)) {
-    allBehaviors.push_back(&baseFadeOutBehavior);
-    allBehaviors.push_back(&shadeFadeOutBehavior);
-  }
-
-  std::vector<lamp::AnimatedBehavior*> underlayBehaviors;
-  std::vector<lamp::AnimatedBehavior*> startupBehaviors;
-  for (auto* fb : std::vector<lamp::FrameBuffer*>{&shade, &base}) {
-    underlayBehaviors.push_back(new lamp::IdleBehavior(fb, 0, true));
-    startupBehaviors.push_back(new lamp::FadeInBehavior(fb, STARTUP_ANIMATION_FRAMES));
-  }
-  compositor.begin(allBehaviors, {&shade, &base}, underlayBehaviors, startupBehaviors, calculateEffectiveHomeMode());
-  // Mark where the initial expression band ends so runtime-added transient
-  // invocations are inserted into the expression block (preserves "all
-  // expressions draw together, late in the list" ordering).
-  // Offset accounts for the fade-out behaviors appended after the expression
-  // band (2 when FadeOutBehavior is enabled, 0 otherwise).
-  const size_t fadeOutCount =
-      lamp::any(features, lamp::Features::FadeOutBehavior) ? 2u : 0u;
-  compositor.setExpressionBandEnd(allBehaviors.size() - fadeOutCount);
-
-  if (lamp::any(features, lamp::Features::KnockoutBehavior)) {
-    compositor.overlayBehaviors.push_back(&baseKnockoutBehavior);
-  }
-
-  // Finish wiring the shared BehaviorContext. The Compositor self-publishes
-  // in its constructor; publishing the ExpressionManager + frame buffer list
-  // here lets the expressions just registered by compositor.begin() reach
-  // both from this point on. (setCompositor() later in setup() repeats these
-  // writes idempotently; they're cheap pointer assignments.)
-  auto& behaviorCtx = compositor.behaviorContext();
-  behaviorCtx.expressionManager = &expressionManager;
-  behaviorCtx.expressionFrameBuffers.clear();
-  behaviorCtx.expressionFrameBuffers.push_back(&shade);
-  behaviorCtx.expressionFrameBuffers.push_back(&base);
-  // Publish the two configurator pointers so the per-surface
-  // ColorOverride instances can resolve their target configurator via
-  // bind() without grabbing globals.
-  behaviorCtx.baseConfigurator = &baseConfiguratorBehavior;
-  behaviorCtx.shadeConfigurator = &shadeConfiguratorBehavior;
-  // Mesh + identity surface for custom behaviors
-  behaviorCtx.nearbyLamps = &lamp::nearbyLamps;
-  // bind() the override instances. From here on apply()/restore() will
-  // drive the right configurator's beginFade.
-  lamp::overrides.base.bind(behaviorCtx, lamp_protocol::OverrideSurface::Base);
-  lamp::overrides.shade.bind(behaviorCtx, lamp_protocol::OverrideSurface::Shade);
-  // Wisp-state change callbacks. Each surface's ColorOverride fires
-  // when wisp goes from un-controlling → controlling or vice versa
-  // (edge-triggered inside maybeNotifyWispStateChange). The Flutter
-  // app subscribes to CHAR_WISP_STATUS so a notify lands the moment
-  // a surface transitions; the indicator widget pops on / off without
-  // having to poll.
-  lamp::overrides.base.setOnWispStateChangeCallback(
-      []() { ble_control::notifyWispStatus(); });
-  lamp::overrides.shade.setOnWispStateChangeCallback(
-      []() { ble_control::notifyWispStatus(); });
-  // Provider that the CHAR_WISP_STATUS read merges into the JSON. Lives
-  // here so the ColorOverride globals stay out of the network layer.
-  lamp::nearbyLamps.setLampWispStateProvider([]() {
-    lamp::NearbyLamps::LampWispState ws;
-    ws.controllingBase  = lamp::overrides.base.isWispActive();
-    ws.controllingShade = lamp::overrides.shade.isWispActive();
-    if (lamp::overrides.base.hasLastWispColor()) {
-      ws.baseWispColor = lamp::colorToHexString(
-          lamp::overrides.base.lastWispColor());
-    }
-    if (lamp::overrides.shade.hasLastWispColor()) {
-      ws.shadeWispColor = lamp::colorToHexString(
-          lamp::overrides.shade.lastWispColor());
-    }
-#ifdef LAMP_DEBUG
-    // Provider-side view; pair with [wisp_state] notify in ble_control.cpp.
-    Serial.printf("[wisp_state] provider isWispActive base=%d shade=%d hasBaseC=%d hasShadeC=%d\n",
-                  ws.controllingBase ? 1 : 0,
-                  ws.controllingShade ? 1 : 0,
-                  lamp::overrides.base.hasLastWispColor() ? 1 : 0,
-                  lamp::overrides.shade.hasLastWispColor() ? 1 : 0);
-#endif
-    return ws;
-  });
-  // BrightnessOverride routes its change-driven callback into the
-  // existing applyEffectiveBrightness path so master-brightness fades
-  // share the same NeoPixel setBrightness entry point.
-  lamp::overrides.brightness.setOnChangeCallback([]() { applyEffectiveBrightness(); });
-
-  // Init order: needs config + expressionManager + meshLink, all
-  // constructed above. See personality_engine.hpp for behavior details.
-  lamp::personalityEngine.begin(&config, &expressionManager, &meshLink);
-}
-
-/**
- * Parse ExpressionConfig from JSON object using generic parameter system
- */
-lamp::ExpressionConfig parseExpressionConfig(JsonObject node) {
-  lamp::ExpressionConfig expr;
-  expr.type = std::string(node["type"] | "");
-  expr.enabled = node["enabled"] | false;
-  expr.intervalMin = node["intervalMin"] | 60;
-  expr.intervalMax = node["intervalMax"] | 900;
-  expr.target = node["target"] | 3;
-
-  JsonArray colors = node["colors"];
-  if (colors.size()) {
-    for (JsonVariant color : colors) {
-      expr.colors.push_back(lamp::hexStringToColor(color));
-    }
-  }
-
-  for (JsonPair kv : node) {
-    const char* key = kv.key().c_str();
-    std::string keyStr(key);
-    // `disabledDuringWispOverride` tolerated from older payloads but
-    // ignored: a pure type-property, not config-driven.
-    if (keyStr == "type" || keyStr == "enabled" ||
-        keyStr == "disabledDuringWispOverride" ||
-        keyStr == "intervalMin" || keyStr == "intervalMax" ||
-        keyStr == "target" || keyStr == "colors") {
-      continue;
-    }
-    JsonVariant value = kv.value();
-    if (value.is<uint32_t>()) {
-      expr.setParameter(keyStr, value.as<uint32_t>());
-    } else if (value.is<int>()) {
-      expr.setParameter(keyStr, static_cast<uint32_t>(value.as<int>()));
-    }
-  }
-
-  return expr;
-}
-
-void dispatchLampAction(JsonDocument& doc, unsigned long updateTimeMs) {
-  shadeConfiguratorBehavior.lastWebSocketUpdateTimeMs = updateTimeMs;
-  baseConfiguratorBehavior.lastWebSocketUpdateTimeMs = updateTimeMs;
-
-  String action = String(doc["a"]);
-  if (action == "test_expression") {
-    String type = String(doc["type"]);
-    if (type.length() > 0) {
-      lamp::ExpressionTarget target = doc["target"].is<int>()
-        ? static_cast<lamp::ExpressionTarget>(doc["target"].as<int>())
-        : lamp::TARGET_BOTH;
-      std::vector<lamp::Color> payloadColors =
-          jsonArrayToColors(doc["colors"].as<JsonArray>());
-      if (!payloadColors.empty()) {
-        // Colors provided → run a transient one-shot seeded with those colors.
-        // Works on factory lamps with zero configured expressions (no lookup).
-        // Zero MAC is the local-test sentinel; triggerInvocation coalesces
-        // rapid re-fires from the same (srcMac, type) pair so spam-tapping
-        // Test doesn't pile up transients.
-        static const uint8_t kLocalTestMac[6] = {0, 0, 0, 0, 0, 0};
-        lamp::ExpressionInvocation inv;
-        inv.type = type.c_str();
-        inv.target = static_cast<uint8_t>(target);
-        inv.colors = std::move(payloadColors);
-#ifdef LAMP_DEBUG
-        Serial.printf("[test] transient pulse colors=%zu type=%s target=%d\n",
-                      inv.colors.size(), inv.type.c_str(),
-                      static_cast<int>(target));
-#endif
-        expressionManager.triggerInvocation(inv, kLocalTestMac);
-        // markTestActive scans configured expressions; for transients it's a
-        // no-op (returns false), so notifyStateChange is not called here.
-        // The transient self-cleans on animation complete, no reap needed.
-        expressionManager.markTestActive(type.c_str(), target);
-      } else {
-        // No colors payload → trigger an already-configured expression by name.
-        // This is the expression-editor "test a saved expression" flow.
-#ifdef LAMP_DEBUG
-        auto cfgColors = expressionManager.getExpressionColors(type.c_str());
-        String colorList;
-        for (const auto& c : cfgColors) {
-          if (colorList.length() > 0) colorList += " ";
-          colorList += lamp::colorToHexString(c).c_str();
-        }
-        Serial.printf("[test] configured trigger: %s target=%d [%s]\n",
-                      type.c_str(), static_cast<int>(target), colorList.c_str());
-#endif
-        // Just trigger the expression. No configurator gating needed:
-        // expressions draw AFTER the configurator in the behavior list, so
-        // they compose on top of wisp paint naturally and yield (via
-        // animationState=STOPPED) when their one-shot animation completes.
-        expressionManager.triggerExpression(type.c_str(), target);
-        // Track the just-fired entries as active previews so the loop drain's
-        // reapCompletedTests() can flip previewActive=false the instant they
-        // STOP. Emit the previewActive=true edge if this was the first one.
-        if (expressionManager.markTestActive(type.c_str(), target)) {
-          ble_control::notifyStateChange();
-        }
-      }
-    }
-  } else if (action == "test_expression_complete") {
-    // Clear the active-test set first so the immediate state-notify carries
-    // previewActive=false. Stops continuous expressions (breathing, shifty)
-    // is the responsibility of the configurator re-asserting baseline below.
-    if (expressionManager.clearAllTestActive()) {
-      ble_control::notifyStateChange();
-    }
-    // App may have edited saved colors during the test; snap configurator
-    // to the new values + re-assert any active wisp paint so the new
-    // baseline doesn't briefly stomp it.
-    shadeConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
-    baseConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
-
-    if (doc["shadeColors"]) {
-      JsonArray shadeColors = doc["shadeColors"];
-      if (shadeColors.size()) {
-        std::vector<lamp::Color> updatedColors;
-        for (JsonVariant shadeColor : shadeColors) {
-          updatedColors.push_back(lamp::hexStringToColor(shadeColor));
-        }
-        shadeConfiguratorBehavior.colors = lamp::buildGradientWithStops(shade.pixelCount, updatedColors);
-      }
-    }
-    if (doc["baseColors"]) {
-      JsonArray baseColors = doc["baseColors"];
-      if (baseColors.size()) {
-        std::vector<lamp::Color> updatedColors;
-        for (JsonVariant baseColor : baseColors) {
-          updatedColors.push_back(lamp::hexStringToColor(baseColor));
-        }
-        baseConfiguratorBehavior.colors = lamp::buildGradientWithStops(base.pixelCount, updatedColors);
-      }
-    }
-    // If the wisp was painting either surface before the expression
-    // test, the configurator-color writes just above stomped the wisp's
-    // target gradient with the lamp's saved colors. Re-assert the wisp
-    // paint immediately so the surface returns to what it was showing
-    // pre-test, rather than waiting up to ~10s for the wisp's next
-    // backstop paint cycle. No-op when the override isn't in Holding.
-    lamp::overrides.shade.reassertHold();
-    lamp::overrides.base.reassertHold();
-  }
-#ifdef LAMP_DEBUG
-  // Personality dev-injection hook: replaces nearbyLamps view inside
-  // PersonalityEngine so a developer can simulate a crowd from one
-  // physical lamp + the Flutter app's test-action button. Without this,
-  // verifying the 50% crowd-dim floor would need 10 lamps in BLE range
-  // simultaneously.
-  //
-  // Payload:
-  //   {"a":"inject_nearby","peers":[
-  //     {"name":"red","baseColor":"#FF0000FF","disposition":5},
-  //     {"name":"blue","baseColor":"#0000FFFF","disposition":1}
-  //   ]}
-  // Pair with {"a":"clear_nearby"} to drop back to live data.
-  else if (action == "inject_nearby") {
-    std::vector<lamp::NearbyLamp> peers;
-    JsonArray arr = doc["peers"];
-    for (JsonVariant v : arr) {
-      lamp::NearbyLamp p;
-      p.name = String(v["name"] | "").c_str();
-      if (p.name.empty()) continue;
-      const String baseHex = String(v["baseColor"] | "#FFFFFFFF");
-      p.baseColor = lamp::hexStringToColor(baseHex.c_str());
-      p.lastRssi = v["rssi"].is<int>() ? static_cast<int8_t>(v["rssi"].as<int>()) : -50;
-      const int disp = v["disposition"] | 3;
-      if (disp >= 1 && disp <= 5 && !p.name.empty()) {
-        config.setDisposition(p.name, static_cast<uint8_t>(disp));
-      }
-      peers.push_back(p);
-    }
-    Serial.printf("[personality] inject_nearby count=%u\n", (unsigned)peers.size());
-    lamp::personalityEngine.setNearbyOverride(std::move(peers));
-  } else if (action == "clear_nearby") {
-    Serial.println("[personality] clear_nearby");
-    lamp::personalityEngine.clearNearbyOverride();
-  }
-#endif
-}
 
 extern void lamp_register_panic_handler();
 
-// Effective brightness, mirroring calculateEffectiveHomeMode() so the
-// brightness value and the compositor's homeMode gate stay in lockstep.
-// See calculateEffectiveHomeMode below for the rule.
-static uint8_t effectiveBrightness();
-static bool calculateEffectiveHomeMode();
 
-// Crowd-dim micro-fade. PersonalityEngine commits a new crowdDimFactor()
-// when its smoothed weighted-peer count crosses the deadband (>= 2/100
-// change). The factor is a hard step: without interpolation a deadband
-// crossing snaps brightness by >= 2 levels in one frame, visible at low
-// overall brightness. This triple interpolates between successive engine
-// targets over kCrowdDimFadeMs so the transition reads smooth.
-//
-// Distinct from the user-write triple (s_userBrightness*): that path only
-// runs while no transient override is active and is driven by BLE writes.
-// Crowd-dim fades run every frame inside effectiveBrightness() and stay out
-// of the OTA pulse multiplier's way by only re-arming when the engine's
-// TARGET factor changes (not when raw brightness changes).
-static constexpr uint16_t kCrowdDimFadeMs = 80;
-static float    s_crowdAppliedFactor = 1.0f;
-static float    s_crowdTargetFactor  = 1.0f;
-static uint32_t s_crowdFadeStartMs   = 0;
-static bool     s_crowdFadeActive    = false;
-
-// Current interpolated crowd-dim factor. Detects target changes against the
-// engine and (re)starts a fade from the current value, so a mid-fade
-// retrigger glides instead of snapping.
-static float currentCrowdDimFactor(uint32_t nowMs) {
-  const float engineTarget = lamp::personalityEngine.crowdDimFactor();
-  if (engineTarget != s_crowdTargetFactor) {
-    // Snapshot the currently-interpolated value before swapping the target
-    // so the new fade starts from the current visible value.
-    float startFrom = s_crowdAppliedFactor;
-    if (s_crowdFadeActive) {
-      const uint32_t elapsed = nowMs - s_crowdFadeStartMs;
-      if (elapsed >= kCrowdDimFadeMs) {
-        startFrom = s_crowdTargetFactor;
-      } else {
-        const float span = s_crowdTargetFactor - s_crowdAppliedFactor;
-        startFrom = s_crowdAppliedFactor +
-                    span * (static_cast<float>(elapsed) /
-                            static_cast<float>(kCrowdDimFadeMs));
-      }
-    }
-    s_crowdAppliedFactor = startFrom;
-    s_crowdTargetFactor  = engineTarget;
-    s_crowdFadeStartMs   = nowMs;
-    s_crowdFadeActive    = true;
-  }
-  if (!s_crowdFadeActive) return s_crowdTargetFactor;
-  const uint32_t elapsed = nowMs - s_crowdFadeStartMs;
-  if (elapsed >= kCrowdDimFadeMs) {
-    s_crowdAppliedFactor = s_crowdTargetFactor;
-    s_crowdFadeActive = false;
-    return s_crowdTargetFactor;
-  }
-  const float span = s_crowdTargetFactor - s_crowdAppliedFactor;
-  return s_crowdAppliedFactor +
-         span * (static_cast<float>(elapsed) /
-                 static_cast<float>(kCrowdDimFadeMs));
-}
-
-static uint8_t effectiveBrightness() {
-  const uint8_t raw = calculateEffectiveHomeMode() ? config.homeMode.brightness
-                                                    : config.lamp.brightness;
-  // PersonalityEngine crowd-dim (Introvert / Ambivert + smoothed peer weight).
-  // Applied BEFORE the transient brightnessOverride.effective() so paint /
-  // wisp overrides keep working over the dimmed baseline. The engine reports
-  // a target factor, interpolated between successive targets over
-  // kCrowdDimFadeMs so deadband-crossing commits don't snap.
-  const float factor = currentCrowdDimFactor(millis());
-  uint8_t afterCrowd;
-  if (factor >= 0.999f) {
-    afterCrowd = raw;
-  } else {
-    const float scaled = static_cast<float>(raw) * factor;
-    afterCrowd = static_cast<uint8_t>(scaled + 0.5f);
-    if (afterCrowd < 1) afterCrowd = 1;  // never blank from personality alone
-  }
-  return afterCrowd;
-}
-
-namespace lamp {
-void applyEffectiveBrightness() {
-  uint8_t baseline = effectiveBrightness();
-  uint8_t level = lamp::overrides.brightness.effective(millis(), baseline);
-  if (shadeStrip) shadeStrip->setBrightness(lamp::calculateBrightnessLevel(s_hwMaxBrightness, level));
-  if (baseStrip) baseStrip->setBrightness(lamp::calculateBrightnessLevel(s_hwMaxBrightness, level));
-}
-}  // namespace lamp
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 namespace lamp {
@@ -903,7 +400,7 @@ void updateAdvertisedDeviceName(const char* newName) {
 namespace lamp {
 
 void applyKnockoutPixel(uint8_t pixel, uint8_t brightness) {
-  if (pixel < ::config.base.px && brightness <= 100) {
+  if (pixel < ::config.base.sumPx() && brightness <= 100) {
     ::baseKnockoutBehavior.knockoutPixels[pixel] = brightness;
     ::config.base.knockoutPixels[pixel] = brightness;
     // Live per-pixel knockout; does NOT invalidate the base section cache.
@@ -914,37 +411,10 @@ void applyKnockoutPixel(uint8_t pixel, uint8_t brightness) {
 
 }  // namespace lamp
 
-// Two regimes:
-//   1. BT client connected (the app is the "configurator"): home mode is
-//      forced OFF unless the user is on the Home Mode page, in which case
-//      it's forced ON so they can preview brightness / behavior changes.
-//      The flag is set by the app via CHAR_HOME_MODE_FOCUS and cleared on
-//      BT disconnect.
-//   2. No BT client connected: presence-based. Home mode iff the user
-//      has enabled it AND has a saved SSID AND the most recent wifi scan
-//      saw that SSID nearby. The lamp never associates, just sniffs
-//      beacons. No password ever leaves the lamp.
-static bool calculateEffectiveHomeMode() {
-  if (ble_control::isClientConnected()) {
-    return ble_control::isHomeModePageActive();
-  }
-  return config.homeMode.enabled
-      && !config.homeMode.ssid.empty()
-      && wifi::homeSsidVisible(config.homeMode.ssid);
-}
-
-// Single funnel for "home mode state may have changed". Keeps the
-// compositor's behavior gate and the strip brightness in lockstep so the
-// lamp transitions cleanly when preview flips or WiFi associates /
-// disassociates.
-static void reapplyHomeModeState() {
-  compositor.setHomeMode(calculateEffectiveHomeMode());
-  applyEffectiveBrightness();
-}
 
 static void onWifiStateChanged() {
   // This callback fires from Arduino-ESP32's WiFi event task, NOT Core 1.
-  // Calling into compositor.setHomeMode / shadeStrip->setBrightness from
+  // Calling into compositor.setHomeMode / setAllStripsBrightness from
   // here races Core 1's compositor.tick + frame_buffer.flush, corrupting
   // the NeoPixel byte buffer and the behavior vector. Symptom: lamp
   // crash-loops with rst:0x3 (SW_RESET) + _invalid_pc_placeholder during
@@ -958,6 +428,26 @@ static void onWifiStateChanged() {
 
 lamp::FrameBuffer* lamp::Lamp::shadeFb() { return &::shade; }
 lamp::FrameBuffer* lamp::Lamp::baseFb()  { return &::base; }
+
+// Per-lamp seed for the first-boot color roll. The efuse base MAC is unique
+// per unit and readable this early in boot, before wifi::begin() brings RF up
+// and makes esp_random() actually random — seeding from esp_random() here
+// would hand every lamp the same value and roll every lamp the same color.
+static uint32_t seedFromMac() {
+  uint8_t mac[6] = {0};
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
+  return (uint32_t(mac[2]) << 24) | (uint32_t(mac[3]) << 16) |
+         (uint32_t(mac[4]) << 8) | uint32_t(mac[5]);
+}
+
+static uint16_t neoFmt(lamp::ByteOrder b) {
+  switch (b) {
+    case lamp::ByteOrder::GRBW: return NEO_GRBW;
+    case lamp::ByteOrder::GRB:  return NEO_GRB;
+    case lamp::ByteOrder::BGR:  return NEO_BGR;
+  }
+  return NEO_GRBW;
+}
 
 void lamp::Lamp::setup() {
   // Validate HwConfig before any hardware init. Malformed configs halt
@@ -989,8 +479,7 @@ void lamp::Lamp::setup() {
 
   config = lamp::Config(&configStore);
   // Re-populate the in-memory lampType from NVS. Config::Config loads the
-  // JSON blob, but lampType lives under its own NVS key (set by main.cpp's
-  // resolveLampType chain before this setup() runs).
+  // JSON blob, but lampType lives under its own NVS key.
   config.loadLampType();
 
   // Apply subclass defaults AFTER NVS load. Fields that NVS left at their
@@ -999,31 +488,47 @@ void lamp::Lamp::setup() {
   // NOT touched; the NVS value is authoritative.
   config.applyDefaults(defaults());
 
-  // First-ever-boot housekeeping, persisted once so it sticks across reboots:
-  //  - Random color per surface so lamps aren't visually identical out of the
-  //    box. Shade hue is offset from base by [60,300]°, keeping the two at
-  //    least 60° apart on the wheel so a lamp never boots base≈shade.
-  //  - Migrate already-configured lamps (custom name OR a control password)
-  //    onto the explicit `setup` flag, so the fielded fleet isn't treated as
-  //    unconfigured after taking this firmware.
+  // First-ever-boot housekeeping, persisted once so it sticks across reboots.
+  // Migrate a lamp configured under firmware that predated the `setup` flag
+  // (custom name OR a control password) onto the flag first, so the roll below
+  // sees it as adopted. Then, only while still unadopted, give it a random
+  // per-surface hue so units aren't visually identical out of the box. Shade
+  // hue is offset from base by [60,300]° so a lamp never boots base≈shade;
+  // seeded from the MAC so each unit lands on a distinct hue. Guarded on
+  // `!setup` and the single-color variant default, so it fires once and never
+  // on an adopted lamp; a variant that forces `setup=true` (curated colors)
+  // skips it entirely.
   bool persistFirstBoot = false;
-  if (!config.lamp.colorsRandomized) {
-    FastRng rng;
-    int baseHue = rng.range(0, 359);
-    int shadeHue = (baseHue + rng.range(60, 300)) % 360;
-    config.base.colors = {colorFromHue(baseHue)};
-    config.shade.colors = {colorFromHue(shadeHue)};
-    config.base.ac = 0;
-    config.lamp.colorsRandomized = true;
-    persistFirstBoot = true;
-  }
   if (!config.lamp.setup &&
       (config.lamp.name != defaults().name || !config.lamp.password.empty())) {
     config.lamp.setup = true;
     persistFirstBoot = true;
   }
+  if (!config.lamp.setup) {
+    const Color baseDefault = hexStringToColor(defaults().baseColor.c_str());
+    const Color shadeDefault = hexStringToColor(defaults().shadeColor.c_str());
+    const bool colorsUnconfigured =
+        config.base.broadcastColors().size() == 1 &&
+        config.base.broadcastColors()[0] == baseDefault &&
+        config.shade.broadcastColors().size() == 1 &&
+        config.shade.broadcastColors()[0] == shadeDefault;
+    if (colorsUnconfigured) {
+      FastRng rng(seedFromMac());
+      int baseHue = rng.range(0, 359);
+      int shadeHue = (baseHue + rng.range(60, 300)) % 360;
+      config.base.broadcastColors() = {colorFromHue(baseHue)};
+      config.shade.broadcastColors() = {colorFromHue(shadeHue)};
+      config.base.ac = 0;
+      persistFirstBoot = true;
+    }
+  }
   if (persistFirstBoot) config.persistConfig("first-boot-init");
 
+  // Space the radio bring-ups so their init inrush spikes don't stack into one
+  // brownout-tripping surge on marginal USB power. Sub-100ms total, invisible
+  // against a multi-second boot.
+  constexpr uint32_t kRadioStaggerMs = 40;
+  delay(kRadioStaggerMs);
   wifi::begin();
   wifi::setStateChangeCallback(onWifiStateChanged);
   wifi::setHomeModeEnabledGetter([]() { return config.homeMode.enabled; });
@@ -1032,51 +537,47 @@ void lamp::Lamp::setup() {
   // (both OFFER→lamp AND lamp→wisp ACCEPT/REQ) during that window.
   wifi::setOtaInProgressGetter([]() { return firmwareReceiver.isInProgress(); });
 
-  bt.begin(config.lamp.name, config.base.colors[config.base.ac],
-           config.shade.colors[0], config.lamp.setup);
-  bt.activateGattServices(&config);
+  delay(kRadioStaggerMs);
+  bt.begin(config.lamp.name, config.base.broadcastColors()[config.base.ac],
+           config.shade.broadcastColors()[0], config.lamp.setup);
 
 #if LAMP_WEBAPP_ENABLED
   if (config.lamp.webappEnabled) webapp::begin(config);
 #endif
 
-  // Map the section's byteOrder string to the NeoPixel format flag. The
-  // bpp-derived fallback covers lamps whose NVS payload lacks the field (see
-  // config.cpp's loader: byteOrder is back-filled there, so this branch
-  // shouldn't fire in practice).
-  auto pickStripFmt = [](const std::string& order, uint8_t bpp) -> uint16_t {
-    if (order == "GRBW") return NEO_GRBW;
-    if (order == "GRB")  return NEO_GRB;
-    if (order == "BGR")  return NEO_BGR;
-    return (bpp == 4) ? NEO_GRBW : NEO_GRB;
+  // Build role FrameBuffers. Each role groups its hw_.strips in declaration
+  // order into one composite buffer: per strip a NeoPixel driver (pin +
+  // byte order from HwConfig) and a StripSegment at the running offset. A
+  // strip pixelCount of 0 resolves from the role's Config px (core
+  // single-strip roles, seeded first-boot from defaults()::{base,shade}Px);
+  // a custom variant sets an explicit per-strip count.
+  auto buildRole = [&](lamp::Surface role, uint8_t configPx,
+                       const std::vector<lamp::Color>& colors,
+                       lamp::FrameBuffer& fb) {
+    std::vector<lamp::StripSegment> segments;
+    uint16_t offset = 0;
+    for (const auto& s : hw_.strips) {
+      if (s.role != role) continue;
+      const uint16_t px = s.pixelCount ? s.pixelCount : configPx;
+      auto* driver =
+          new Adafruit_NeoPixel(px, s.pin, neoFmt(s.byteOrder) + NEO_KHZ800);
+      segments.push_back({driver, s.name, offset, px});
+      offset += px;
+    }
+    fb.begin(lamp::buildGradientWithStops(offset, colors), std::move(segments));
   };
+  buildRole(lamp::Surface::Shade, config.shade.sumPx(), config.shade.broadcastColors(), shade);
+  buildRole(lamp::Surface::Base,  config.base.sumPx(),  config.base.broadcastColors(),  base);
 
-  // Build NeoPixel strips. Pin comes from HwConfig (hardware-immutable
-  // per variant). Pixel count comes from Config (NVS-loaded, app-editable,
-  // seeded on first boot by the variant's defaults()::{base,shade}Px).
-  // Byte-order/bpp likewise come from Config so saved overrides survive.
-  const uint16_t shadeFmt = pickStripFmt(config.shade.byteOrder, config.shade.bpp);
-  const uint16_t baseFmt  = pickStripFmt(config.base.byteOrder,  config.base.bpp);
-
-  uint8_t shadePin = 0;
-  uint8_t basePin = 0;
-  for (const auto& s : hw_.surfaces) {
-    if      (s.id == lamp::Surface::Shade) shadePin = s.pin;
-    else if (s.id == lamp::Surface::Base)  basePin  = s.pin;
-  }
-
-  shadeStrip = new Adafruit_NeoPixel(config.shade.px, shadePin, shadeFmt + NEO_KHZ800);
-  baseStrip  = new Adafruit_NeoPixel(config.base.px,  basePin,  baseFmt  + NEO_KHZ800);
+  // Cap every segment at maxBrightness before the first content flush, else a
+  // strip runs at the NeoPixel full-bright default.
   applyEffectiveBrightness();
-  shade.begin(lamp::buildGradientWithStops(config.shade.px, config.shade.colors), config.shade.px, shadeStrip);
-  base.begin(lamp::buildGradientWithStops(config.base.px, config.base.colors), config.base.px, baseStrip);
-  initBehaviors(featuresEnabled());
+
+  initBehaviors(featuresEnabled(), *this);
 
   // Give the subclass a chance to register any extra behaviors not covered
   // by the Feature flags. StandardLamp's createBehaviors is empty since all
-  // its behaviors are Feature-flag driven; SnafuLamp adds its three custom
-  // AnimatedBehavior subclasses (BackgroundFade, PaintSpots, Greeting) on
-  // the shade frame buffer.
+  // its behaviors are Feature-flag driven.
   {
     BehaviorStackBuilder builder;
     createBehaviors(builder);
@@ -1084,6 +585,7 @@ void lamp::Lamp::setup() {
       compositor.addBehavior(b);
     }
   }
+  bt.activateGattServices(&config);
 
   // Route inbound CONTROL_OP payloads (addressed to this lamp or broadcast)
   // into a pending slot. WiFi-task safe: pure memcpy under portMUX, no heap
@@ -1255,8 +757,10 @@ void lamp::Lamp::tick() {
   drainWispHello();
   drainWispPalette();
   drainWispClaim();
+  drainWispPaint();
   drainWispOp();
   drainWispStatus();
+  drainCommand();
   drainEvent();
   drainFirmwareControl();
 
@@ -1281,19 +785,13 @@ void lamp::Lamp::tick() {
     // value; layering crowd-dim or OTA pulse mid-drag would make the slider
     // feel laggy and disconnected. Once the window elapses the next
     // applyEffectiveBrightness call reapplies both multipliers cleanly.
-    if (!lamp::overrides.brightness.isActive() && s_userBrightnessSeeded &&
-        s_userBrightnessSource != s_userBrightnessTarget) {
+    if (!lamp::overrides.brightness.isActive() && lamp::brightnessFadeSeeded() &&
+        lamp::brightnessFadeSource() != lamp::brightnessFadeTarget()) {
       const uint8_t level = computeUserBrightnessNow(now);
-      if (shadeStrip)
-        shadeStrip->setBrightness(
-            lamp::calculateBrightnessLevel(hw_.maxBrightness, level));
-      if (baseStrip)
-        baseStrip->setBrightness(
-            lamp::calculateBrightnessLevel(hw_.maxBrightness, level));
-      // Mark the fade complete so subsequent frames are no-ops once
-      // the window has elapsed.
-      if (level == s_userBrightnessTarget) {
-        s_userBrightnessSource = s_userBrightnessTarget;
+      lamp::setAllStripsBrightness(
+          lamp::calculateBrightnessLevel(hw_.maxBrightness, level));
+      if (level == lamp::brightnessFadeTarget()) {
+        lamp::settleBrightnessFade();
       }
     }
 

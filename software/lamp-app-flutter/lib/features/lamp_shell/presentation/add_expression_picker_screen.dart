@@ -4,12 +4,14 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/routing/routes.dart';
 import '../../../core/theme/app_spacing.dart';
+import '../../../core/widgets/empty_state_pane.dart';
 import '../../../core/widgets/friendly_error.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/domain/sections.dart';
 import '../../control/presentation/widgets/connecting_view.dart';
 import '../../control/presentation/widgets/connection_banner.dart';
-import '../domain/expression_meta.dart';
+import '../domain/expression_catalog.dart';
+import '../domain/expression_presentation.dart';
 
 /// Entry point for adding a new expression. Replaces the previous "open the
 /// editor with a blank draft" flow: now the user picks Target first
@@ -77,6 +79,7 @@ class _AddExpressionPickerScreenState
                       target: _target,
                       onTargetChanged: (t) => setState(() => _target = t),
                       existing: state.expressions.expressions,
+                      catalog: state.catalog,
                     ),
                   ),
                 ),
@@ -95,24 +98,52 @@ class _Body extends StatelessWidget {
     required this.target,
     required this.onTargetChanged,
     required this.existing,
+    required this.catalog,
   });
 
   final String lampId;
   final int target;
   final ValueChanged<int> onTargetChanged;
   final List<ExpressionConfig> existing;
+  final ExpressionCatalog? catalog;
+
+  List<ExpressionDescriptor> get _types => catalog?.expressions ?? const [];
 
   bool _isTaken(String type, int t) =>
       existing.any((e) => e.type == type && e.target == t);
 
+  bool _excluded(ExpressionDescriptor d, int t) {
+    final ex = d.excludeTargets;
+    return switch (t) {
+      1 => ex.contains('shade'),
+      2 => ex.contains('base'),
+      _ => ex.contains('shade') || ex.contains('base'),
+    };
+  }
+
   bool _targetFull(int t) {
-    // Disable a target only when every expression type already uses it.
-    return ExpressionTypeMeta.all.every((m) => _isTaken(m.key, t));
+    // Disable a target only when every expression type already uses it (or
+    // can't target it).
+    return _types.isNotEmpty &&
+        _types.every((d) => _isTaken(d.id, t) || _excluded(d, t));
   }
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    if (catalog == null) {
+      return EmptyStatePane(
+        icon: Icon(
+          Icons.system_update,
+          size: 56,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+        title: 'No configurable expressions',
+        subtitle:
+            "This lamp's firmware doesn't advertise configurable expressions "
+            'yet. Update its firmware to add them.',
+      );
+    }
     return ListView(
       padding: const EdgeInsets.fromLTRB(
           AppSpace.lg, AppSpace.sm, AppSpace.lg, AppSpace.xl),
@@ -159,13 +190,15 @@ class _Body extends StatelessWidget {
             style: textTheme.bodyLarge,
           ),
         ),
-        for (final meta in ExpressionTypeMeta.all)
+        for (final d in _types)
           _ExpressionCard(
-            meta: meta,
-            taken: _isTaken(meta.key, target),
+            name: d.name,
+            tagline: ExpressionPresentation.forId(d.id).tagline,
+            icon: ExpressionPresentation.forId(d.id).icon,
+            taken: _isTaken(d.id, target) || _excluded(d, target),
             onTap: () {
               GoRouter.maybeOf(context)?.push(
-                AppRoutes.expressionEditor(lampId, meta.key, target),
+                AppRoutes.expressionEditor(lampId, d.id, target),
               );
             },
           ),
@@ -176,12 +209,16 @@ class _Body extends StatelessWidget {
 
 class _ExpressionCard extends StatelessWidget {
   const _ExpressionCard({
-    required this.meta,
+    required this.name,
+    required this.tagline,
+    required this.icon,
     required this.taken,
     required this.onTap,
   });
 
-  final ExpressionTypeMeta meta;
+  final String name;
+  final String tagline;
+  final IconData icon;
   final bool taken;
   final VoidCallback onTap;
 
@@ -215,7 +252,7 @@ class _ExpressionCard extends StatelessWidget {
                       shape: BoxShape.circle,
                       color: colorScheme.primaryContainer,
                     ),
-                    child: Icon(meta.icon, color: colorScheme.onPrimaryContainer),
+                    child: Icon(icon, color: colorScheme.onPrimaryContainer),
                   ),
                   const SizedBox(width: AppSpace.md),
                   Expanded(
@@ -224,7 +261,7 @@ class _ExpressionCard extends StatelessWidget {
                       children: [
                         Row(
                           children: [
-                            Text(meta.name, style: textTheme.titleMedium),
+                            Text(name, style: textTheme.titleMedium),
                             if (taken) ...[
                               const SizedBox(width: AppSpace.sm),
                               Container(
@@ -249,7 +286,7 @@ class _ExpressionCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 2), // deliberate dimension, not spacing
                         Text(
-                          meta.tagline,
+                          tagline,
                           style: textTheme.bodySmall?.copyWith(
                             color: colorScheme.onSurfaceVariant,
                           ),

@@ -79,7 +79,9 @@ class SnafuLamp : public Lamp {
   SnafuLamp() : Lamp(HwConfig{
     .surfaces = {
       {.id=Surface::Shade, .pin=12, .byteOrder=ByteOrder::GRBW},
-      {.id=Surface::Base, .pin=14, .byteOrder=ByteOrder::GRBW},
+      {.id=Surface::Base,  .pin=14, .byteOrder=ByteOrder::GRBW},
+      {.id=Surface::Aux0,  .pin=27, .byteOrder=ByteOrder::GRBW, .pixelCount=12},
+      {.id=Surface::Aux1,  .pin=26, .byteOrder=ByteOrder::GRBW, .pixelCount=9},
     },
     .maxBrightness = 180,
   }) {}
@@ -93,23 +95,32 @@ class SnafuLamp : public Lamp {
 
   Config::Defaults defaults() const override {
     return {
-      .name              = "snafu",
-      .baseColor         = "#30078300",  // purple stem, user-editable (RGBW)
-      .shadeColor        = "#78100000",  // amanita red, picker hidden in app
-      .baseColorsEditable  = true,
-      .shadeColorsEditable = false,
+      .name       = "snafu",
+      .baseColor  = "#30078300", // purple stem
+      .shadeColor = "#78100000", // amanita red — Small Dots
+      .basePx  = 32,
+      .shadePx = 16,
+    };
+  }
+
+  std::vector<AuxSlotSpec> auxSlots() const override {
+    return {
+      {.name="Medium Dots", .defaultColor="#78100000"},
+      {.name="Big Dots",    .defaultColor="#78100000"},
     };
   }
 
   void createBehaviors(BehaviorStackBuilder& b) override {
     if (shadeFb()) {
-      bgFade_     = std::make_unique<snafu::BackgroundFade>(shadeFb());
-      paintSpots_ = std::make_unique<snafu::PaintSpots>(shadeFb(), 24, 32);
-      greeting_   = std::make_unique<snafu::Greeting>(shadeFb());
+      bgFade_   = std::make_unique<snafu::BackgroundFade>(shadeFb());
+      greeting_ = std::make_unique<snafu::Greeting>(shadeFb());
       b.add(bgFade_.get());
-      b.add(paintSpots_.get());
-      b.add(greeting_.get());
     }
+    if (auto* m = fbForSurface(Surface::Aux0))
+      { medium_  = std::make_unique<behaviors::AuxDotsBehavior>(m, 0); b.add(medium_.get()); }
+    if (auto* big = fbForSurface(Surface::Aux1))
+      { bigDots_ = std::make_unique<behaviors::AuxDotsBehavior>(big, 1); b.add(bigDots_.get()); }
+    if (greeting_) b.add(greeting_.get());
   }
   // ...
 };
@@ -163,6 +174,47 @@ VARIANT=snafu npm run lamp:build   # any other variant
 Each variant has its own env, so `build_src_filter` compiles only that variant's
 sources into its own binary. The runtime factory still resolves the type from
 NVS at boot.
+
+## Color slots
+
+Every lamp has two **core** slots, always present:
+
+- **Shade** (primary surface): its `colors` feed the BLE advertisement and the shade field in HELLO. Configured via `Config::Defaults::shadeColor` and `shadePx`; app visibility controlled by `shadeColorsEditable`.
+- **Base** (secondary surface): its `colors` drive peer greeting handshakes. Configured via `Config::Defaults::baseColor` and `basePx`; app visibility controlled by `baseColorsEditable`.
+
+A slot with exactly 1 color renders static; 2 or more animate.
+
+First-boot randomization only touches surfaces whose variant left `baseColor` / `shadeColor` empty in `Config::Defaults`. A non-empty default survives randomization unchanged.
+
+### Aux slots (local, variant-declared)
+
+A variant declares named color slots by overriding `auxSlots()` — one entry per slot, in wire-index order:
+
+```cpp
+std::vector<AuxSlotSpec> auxSlots() const override {
+  return {
+    {.name="Medium Dots", .defaultColor="#78100000"},
+    {.name="Big Dots",    .defaultColor="#78100000"},
+  };
+}
+```
+
+The framework seeds first-boot colors (`seedAuxSlots`), stores them indexed in `config.auxSlotColors`, and exposes the slot list as a read-only `aux` page section (returned as `[{name, colors}]`). The app renders one labeled color picker per slot dynamically, with no per-variant app code. Writes go to `CHAR_AUX_COLORS` with an indexed payload `{"slot": i, "colors": ["RRGGBBWW", ...]}` — one characteristic serves any number of slots, so the frozen GATT layout does not grow per slot. Aux is local-only: not meshed, not advertised.
+
+#### N-surface layout
+
+`HwConfig.surfaces` lists every physical NeoPixel strip. The framework allocates a `FrameBuffer` and strip for each entry. Core Shade (index 0) and Base (index 1) carry the full configurator/override/wisp stack; each additional entry (`Aux0 = 2`, `Aux1 = 3`) is a local strip with a framebuffer and pixel output, but no configurator, override, or wisp involvement.
+
+Aux surfaces declare their pixel count via `SurfaceSpec::pixelCount` (core Shade/Base use `config.shade.px`/`config.base.px`). Render via `lamp::behaviors::AuxDotsBehavior(fb, slotIndex)`, which reads `config.auxSlotColors[slotIndex]` each tick and paints the framebuffer (1 color = static, 2 or more = animated). Snafu wires one `AuxDotsBehavior` per aux surface:
+
+```cpp
+if (auto* m = fbForSurface(Surface::Aux0))
+  { medium_  = std::make_unique<behaviors::AuxDotsBehavior>(m, 0); b.add(medium_.get()); }
+if (auto* big = fbForSurface(Surface::Aux1))
+  { bigDots_ = std::make_unique<behaviors::AuxDotsBehavior>(big, 1); b.add(bigDots_.get()); }
+```
+
+Each aux slot currently maps to its own physical strip. Painting a sub-region of an existing strip is not implemented (`AuxDotsBehavior` would need a start/count range).
 
 ## Provisioning a fresh hardware lamp
 
@@ -260,16 +312,16 @@ fire again next cycle.
 
 ## The colorsEditable flag
 
-Per-section flag. When `false` (e.g., snafu's shade), the app hides the color
-picker for that surface. Set via `Config::Defaults` in your lamp's `defaults()`
-override:
+Per-section flag for a lamp whose surface color is fixed by design. When
+`false`, the app hides the color picker for that surface. Set via
+`Config::Defaults` in your lamp's `defaults()` override:
 
 ```cpp
 Config::Defaults defaults() const override {
   return {
-    .name              = "snafu",
-    .shadeColor        = "#78100000",  // amanita red (RGBW)
-    .shadeColorsEditable = false,    // app hides picker for shade
+    .name                = "mylamp",
+    .shadeColor          = "#78100000",
+    .shadeColorsEditable = false,    // app hides the shade picker
     // ...
   };
 }
@@ -467,7 +519,7 @@ then skips its `draw()` until home mode releases.
 | `software/lamp-os/src/lamps/standard/standard_lamp.hpp/.cpp` | Production fleet lamp (built-in social, expressions, idle) |
 | `software/lamp-os/src/lamps/snafu/snafu_lamp.hpp/.cpp` | Amanita mushroom lamp: reference variant |
 | `software/lamp-os/src/lamps/snafu/background_fade.hpp/.cpp` | Shade palette-cycle behavior (12 scenes, 45 s per scene) |
-| `software/lamp-os/src/lamps/snafu/paint_spots.hpp/.cpp` | Sub-region palette cycle (9 white spots, pixels 24–32) |
+| `software/lamp-os/src/behaviors/aux_dots.hpp/.cpp` | `AuxDotsBehavior`: paints an aux surface framebuffer from `config.auxSlotColors[slotIndex]`; static for 1 color, animated for 2+ |
 | `software/lamp-os/src/lamps/snafu/greeting.hpp/.cpp` | Peer-arrival watcher with glitch + fade response |
 | `software/lamp-os/src/main.cpp` | Unified entry point: variant resolution + factory + FATAL halt |
 | `software/lamp-os/scripts/inject_initial_type.py` | PIO pre-build hook for `LAMP_TYPE` provisioning |

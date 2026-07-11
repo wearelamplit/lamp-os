@@ -7,6 +7,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "config/crypto.hpp"
+
 namespace wisp {
 
 class WispConfig;
@@ -22,7 +24,10 @@ enum class DispatchResult {
   AppliedOffColor,     // setOffColor stored (Off-mode wisp-ring color)
   AppliedShuffle,      // shuffle: bumped shuffleSeed, re-roll queued
   AppliedDriftChange,  // setDrift applied (interval + fadePct)
-  Malformed,           // JSON parse failed or required field missing
+  AppliedNameChange,     // setName applied
+  AppliedPasswordChange, // setPassword applied
+  Malformed,             // JSON parse failed or required field missing
+  Rejected,              // auth gate blocked (password set, plaintext not allowed)
 };
 
 class WispOpDispatcher {
@@ -37,14 +42,21 @@ class WispOpDispatcher {
     stageBeacon_ = stage;
   }
 
+  // Inject a nonce ring for replay detection. The ring is owned by the caller
+  // (main.cpp or test). Pass nullptr to skip replay detection (open-access mode).
+  void setNonces(crypto::RecentNonces* nonces) { nonces_ = nonces; }
+
   // payload + len point into the recv buffer. The function copies what it
   // needs and returns; the caller is free to release the buffer after.
   DispatchResult dispatch(const uint8_t* payload, size_t len);
 
  private:
+  DispatchResult dispatchJson(const char* json, size_t len);
+
   WispConfig& config_;
   WifiLink*    wifiLink_   = nullptr;
   StageBeacon* stageBeacon_ = nullptr;
+  crypto::RecentNonces* nonces_ = nullptr;
 };
 
 }  // namespace wisp

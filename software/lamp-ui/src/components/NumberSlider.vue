@@ -9,6 +9,7 @@
       type="range"
       :min="min"
       :max="max"
+      :step="step"
       :disabled="disabled"
       class="number-slider"
       :class="{ disabled: disabled }"
@@ -29,6 +30,7 @@ interface Props {
   id: string
   min?: number
   max?: number
+  step?: number
   color?: string
   append?: string
   prepend?: string
@@ -38,6 +40,7 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   min: 0,
   max: 255,
+  step: 1,
   color: '#666666',
   append: '',
   prepend: '',

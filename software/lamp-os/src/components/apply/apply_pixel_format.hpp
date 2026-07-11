@@ -1,10 +1,10 @@
 // software/lamp-os/src/components/apply/apply_pixel_format.hpp
 //
-// Applies a surface's strip format (px / bpp / byteOrder) from an incoming
-// settings_blob section. Only keys actually present in the blob are
-// touched; absent keys leave the current value. These take effect on the
-// reboot the settings_blob triggers — the strip is rebuilt from them at
-// boot, so there's no live re-init here.
+// Applies per-segment pixel counts from an incoming settings_blob role
+// section. Positional against the role's existing segments; extra entries
+// are ignored (segment count is variant-fixed, not app-editable). Takes
+// effect on the reboot the blob triggers, where fromJson re-clamps Σ≤255
+// and the strips rebuild. No live re-init here.
 //
 // Templated on the surface type so the one body serves both BaseSettings
 // and ShadeSettings (and lets the native test exercise the real code).
@@ -20,17 +20,16 @@ namespace apply {
 
 template <typename Surface>
 inline void pixelFormatLocal(JsonObjectConst section, Surface& surf) {
-  if (section["px"].is<int>()) {
-    int px = section["px"].as<int>();
-    if (px > 50) px = 50;  // clamp to the loader's bound (config.cpp)
-    if (px >= 1) surf.px = static_cast<uint8_t>(px);  // ignore nonsense <= 0
-  }
-  if (section["bpp"].is<int>()) {
-    int bpp = section["bpp"].as<int>();
-    if (bpp == 3 || bpp == 4) surf.bpp = static_cast<uint8_t>(bpp);
-  }
-  if (section["byteOrder"].is<const char*>()) {
-    surf.byteOrder = section["byteOrder"].as<const char*>();
+  JsonArrayConst segs = section["segments"];
+  if (segs.isNull()) return;
+  size_t k = 0;
+  for (JsonObjectConst seg : segs) {
+    if (k >= surf.segments.size()) break;
+    if (seg["px"].is<int>()) {
+      int px = seg["px"].as<int>();
+      if (px >= 1 && px <= 255) surf.segments[k].px = static_cast<uint8_t>(px);
+    }
+    ++k;
   }
 }
 

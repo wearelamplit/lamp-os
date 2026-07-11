@@ -20,9 +20,8 @@ mixin _$LampNearbyPeer {
  String get bdAddr;/// Raw BLE-scan RSSI in dBm as observed by the connected lamp.
 /// `-127` means "no reading yet" (older firmware that doesn't emit
 /// RSSI, or a fresh peer not yet seen via BLE).
- int get rssi;/// Proximity bucket: 0=Near, 1=Around, 2=Far. Default 2 keeps
-/// pre-Phase-D peers in a safe "Far" bucket rather than
-/// mis-classifying them as Near.
+ int get rssi;/// Proximity bucket: 0=Near, 1=Around, 2=Far. Default 2 keeps legacy
+/// peers in a safe "Far" bucket rather than mis-classifying them as Near.
  int get proximity;/// 4-channel RGBW for the lamp's base and shade. Used to render
 /// the lamp icon next to the row.
 @JsonKey(name: 'base') List<int> get baseRgbw;@JsonKey(name: 'shade') List<int> get shadeRgbw; bool get viaBle; bool get viaEspNow; int get lastSeenMs;
@@ -238,9 +237,8 @@ class _LampNearbyPeer implements LampNearbyPeer {
 /// `-127` means "no reading yet" (older firmware that doesn't emit
 /// RSSI, or a fresh peer not yet seen via BLE).
 @override@JsonKey() final  int rssi;
-/// Proximity bucket: 0=Near, 1=Around, 2=Far. Default 2 keeps
-/// pre-Phase-D peers in a safe "Far" bucket rather than
-/// mis-classifying them as Near.
+/// Proximity bucket: 0=Near, 1=Around, 2=Far. Default 2 keeps legacy
+/// peers in a safe "Far" bucket rather than mis-classifying them as Near.
 @override@JsonKey() final  int proximity;
 /// 4-channel RGBW for the lamp's base and shade. Used to render
 /// the lamp icon next to the row.

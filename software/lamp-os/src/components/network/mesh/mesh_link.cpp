@@ -69,12 +69,30 @@ bool MeshLink::sendControlOp(const uint8_t targetMac[6],
   return link_.broadcast(buf, n);
 }
 
-bool MeshLink::broadcastRaw(const uint8_t* data, size_t len) {
-  return link_.broadcast(data, len);
+bool MeshLink::sendCommand(const uint8_t targetMac[6],
+                              const uint8_t* invocationJson, size_t len) {
+  if (len == 0 || len > lamp_protocol::COMMAND_MAX_PAYLOAD) return false;
+  uint8_t buf[lamp_protocol::COMMAND_FIXED_SIZE + lamp_protocol::COMMAND_MAX_PAYLOAD];
+  const size_t n = lamp_protocol::buildCommand(buf, sizeof(buf), commandSeq_++,
+                                               myMac_, targetMac,
+                                               invocationJson, len);
+  if (!n) return false;
+  commandDedup_.record(myMac_, lamp_protocol::MSG_COMMAND, commandSeq_ - 1);
+  return link_.broadcast(buf, n);
 }
 
-uint16_t MeshLink::nextEventSeq() {
-  return eventSeq_++;
+bool MeshLink::sendEvent(const uint8_t* payloadJson, size_t len) {
+  if (len == 0 || len > lamp_protocol::EVENT_MAX_PAYLOAD) return false;
+  uint8_t buf[lamp_protocol::EVENT_FIXED_SIZE + lamp_protocol::EVENT_MAX_PAYLOAD];
+  const size_t n = lamp_protocol::buildEvent(buf, sizeof(buf), eventSeq_++,
+                                             myMac_, payloadJson, len);
+  if (!n) return false;
+  eventDedup_.record(myMac_, lamp_protocol::MSG_EVENT, eventSeq_ - 1);
+  return link_.broadcast(buf, n);
+}
+
+bool MeshLink::broadcastRaw(const uint8_t* data, size_t len) {
+  return link_.broadcast(data, len);
 }
 
 // Broadcast is all-FF.
@@ -207,6 +225,23 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     }
     postPendingWispPalette(slot);
     link_.broadcast(data, len);
+  } else if (msgType == lamp_protocol::MSG_WISP_PAINT) {
+    lamp_protocol::ParsedWispPaint wp;
+    if (!lamp_protocol::parseWispPaint(data, len, wp)) return;
+    if (!wispPaintDedup_.record(wp.sourceMac,
+                                lamp_protocol::MSG_WISP_PAINT, wp.seq)) {
+      return;
+    }
+    PendingWispPaint slot;
+    std::memcpy(slot.sourceMac, wp.sourceMac, 6);
+    slot.count = wp.count;
+    if (wp.count > 0 && wp.entries) {
+      std::memcpy(slot.entries, wp.entries,
+                  static_cast<size_t>(wp.count) *
+                      lamp_protocol::WISP_PAINT_ENTRY_SIZE);
+    }
+    postPendingWispPaint(slot);
+    link_.broadcast(data, len);
   } else if (msgType == lamp_protocol::MSG_OVERRIDE_COLORS) {
     lamp_protocol::ParsedOverrideColors p;
     if (!lamp_protocol::parseOverrideColors(data, len, p)) return;
@@ -292,41 +327,26 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     slot.sourceKind = p.sourceKind;
     slot.fadeDurationMs = p.fadeDurationMs;
     postPendingRestoreBrightness(slot);
+  } else if (msgType == lamp_protocol::MSG_COMMAND) {
+    lamp_protocol::ParsedCommand p;
+    if (!lamp_protocol::parseCommand(data, len, p)) return;
+    if (!commandDedup_.record(p.sourceMac, lamp_protocol::MSG_COMMAND, p.seq)) return;
+    // No relay.
+    if (!addressedToUs(p.targetMac, myMac_)) return;
+    PendingCommand slot;
+    std::memcpy(slot.sourceMac, p.sourceMac, 6);
+    slot.payloadLen = static_cast<uint16_t>(p.payloadLen);
+    std::memcpy(slot.payload, p.payload, p.payloadLen);
+    postPendingCommand(slot);
   } else if (msgType == lamp_protocol::MSG_EVENT) {
-    lamp_protocol::ParsedEvent ev;
-    if (!lamp_protocol::parseEvent(data, len, ev)) return;
-    // Dedup by (sourceMac, seq). The cascade sender emits two back-to-back
-    // copies of MSG_EVENT for broadcast-loss resilience (ESP-NOW broadcasts
-    // are not link-layer ACK'd); both share the same seq so the second
-    // copy collapses here. Also collapses any relayed copy.
-    if (!eventDedup_.record(ev.sourceMac, lamp_protocol::MSG_EVENT, ev.seq)) return;
-    // Drop self-originated broadcast: would otherwise re-trigger locally.
-    // The originator already fires on its own clock; no wire round-trip.
-    if (std::memcmp(ev.sourceMac, myMac_, 6) == 0) return;
-    // Gossip-relay. Dedup ring bounds the storm to N+1 copies in an N-lamp mesh.
-    // Relay runs before the eventKind filter for forward-compat with unknown kinds.
-    link_.broadcast(data, len);
-    // Drop unknown event kinds silently for forward-compat.
-    if (ev.eventKind != lamp_protocol::EventKind::ExpressionTriggered) return;
-    // Tail-fire at numStaggerEntries * kTailFireStaggerMs when this lamp
-    // is absent from the stagger list (truncated or late-join).
-    constexpr uint16_t kTailFireStaggerMs = 50;
-    uint16_t delayMs = static_cast<uint16_t>(ev.numStaggerEntries) * kTailFireStaggerMs;
-    for (uint8_t i = 0; i < ev.numStaggerEntries; ++i) {
-      if (std::memcmp(ev.staggerEntries[i].mac, myMac_, 6) == 0) {
-        delayMs = ev.staggerEntries[i].delayMs;
-        break;
-      }
-    }
-    // Guards against a future payload expansion overflowing PendingEvent.payload.
-    if (ev.payloadLen > lamp_protocol::maxEventPayloadFor(ev.numStaggerEntries)) return;
+    lamp_protocol::ParsedEvent p;
+    if (!lamp_protocol::parseEvent(data, len, p)) return;
+    if (!eventDedup_.record(p.sourceMac, lamp_protocol::MSG_EVENT, p.seq)) return;
+    // No relay.
     PendingEvent slot;
-    std::memcpy(slot.sourceMac, ev.sourceMac, 6);
-    slot.delayMs = delayMs;
-    slot.payloadLen = ev.payloadLen;
-    if (ev.payloadLen && ev.payload) {
-      std::memcpy(slot.payload, ev.payload, ev.payloadLen);
-    }
+    std::memcpy(slot.sourceMac, p.sourceMac, 6);
+    slot.payloadLen = static_cast<uint16_t>(p.payloadLen);
+    std::memcpy(slot.payload, p.payload, p.payloadLen);
     postPendingEvent(slot);
   } else if (msgType == lamp_protocol::MSG_FW_OFFER) {
     // Single-hop unicast; no gossip relay. The shared firmwareDedup_
@@ -475,14 +495,14 @@ void MeshLink::emitHello() {
 #endif
   uint8_t shade[4] = {0, 0, 0, 0};
   uint8_t base[4]  = {0, 0, 0, 0};
-  if (!config_->shade.colors.empty()) {
-    const Color& c = config_->shade.colors[0];
+  if (!config_->shade.broadcastColors().empty()) {
+    const Color& c = config_->shade.broadcastColors()[0];
     shade[0] = c.r; shade[1] = c.g; shade[2] = c.b; shade[3] = c.w;
   }
-  if (!config_->base.colors.empty()) {
+  if (!config_->base.broadcastColors().empty()) {
     size_t ac = config_->base.ac;
-    if (ac >= config_->base.colors.size()) ac = 0;
-    const Color& c = config_->base.colors[ac];
+    if (ac >= config_->base.broadcastColors().size()) ac = 0;
+    const Color& c = config_->base.broadcastColors()[ac];
     base[0] = c.r; base[1] = c.g; base[2] = c.b; base[3] = c.w;
   }
 

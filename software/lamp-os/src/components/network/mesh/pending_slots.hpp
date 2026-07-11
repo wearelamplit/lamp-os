@@ -78,19 +78,30 @@ struct PendingWispClaim {
   uint8_t lampMacs[lamp_protocol::kMaxWispClaimEntries][6];
 };
 
-// MSG_EVENT pending slot. MeshLink's WiFi-task recv path does the
-// stagger-list lookup (own MAC -> delayMs) and memcpys the result here;
-// the Core 1 drain calls ExpressionManager::tryHandleExpressionEvent
-// (JSON parse + cascade-config check + dedup + trigger). Buffer sized to
-// maxEventPayloadFor(0) = 234, the best-case payload with no stagger
-// entries. Lower stagger counts get larger payloads, and the slot must
-// hold whatever the parser accepted or frames get silently dropped at the
-// recv-side memcpy boundary.
+// MSG_WISP_PAINT pending slot. Holds per-lamp paint entries until the
+// Core 1 drain forwards them into NearbyLamps::cacheWispPaint.
+struct PendingWispPaint {
+  uint8_t sourceMac[6];
+  uint8_t count;
+  uint8_t entries[lamp_protocol::WISP_PAINT_MAX_ENTRIES *
+                  lamp_protocol::WISP_PAINT_ENTRY_SIZE];
+};
+
+// MSG_COMMAND pending slot. Carries an ExpressionInvocation JSON payload
+// from the WiFi recv task to the Core 1 drain. sourceMac is used for cascade
+// coalescing.
+struct PendingCommand {
+  uint8_t  sourceMac[6];
+  uint16_t payloadLen;
+  uint8_t  payload[lamp_protocol::COMMAND_MAX_PAYLOAD];
+};
+
+// MSG_EVENT pending slot. Carries an expression-fired announce payload from
+// the WiFi recv task to the Core 1 drain.
 struct PendingEvent {
   uint8_t  sourceMac[6];
-  uint16_t delayMs;          // already resolved by recv-side stagger lookup
   uint16_t payloadLen;
-  uint8_t  payload[lamp_protocol::maxEventPayloadFor(0)];
+  uint8_t  payload[lamp_protocol::EVENT_MAX_PAYLOAD];
 };
 
 }  // namespace lamp

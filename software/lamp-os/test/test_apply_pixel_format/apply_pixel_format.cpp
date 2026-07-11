@@ -1,32 +1,30 @@
-// Native-host test for apply::pixelFormatLocal — the settings_blob path
-// that applies a surface's px / bpp / byteOrder. Regression guard for the
-// bug where the app wrote shade.px (and base.px/bpp/byteOrder) but the
-// firmware never applied them, so the lamp rebooted with the old strip.
+// Native-host test for apply::pixelFormatLocal — the settings_blob path that
+// applies per-segment pixel counts. Regression guard for the bug where the
+// app wrote a segment px but the firmware never applied it, so the lamp
+// rebooted with the old strip.
 //
 // pixelFormatLocal is a template, so this exercises the REAL production
-// function body. The surface is a local stand-in with the same fields as
-// Base/ShadeSettings — the native env can't link Color's out-of-line ctor
-// (color.cpp), so the full structs can't be constructed here. Same
-// mirror-class discipline as the other apply tests.
+// function body. The surface is a local stand-in with the same `segments`
+// shape as Base/ShadeSettings — the native env can't link Color's out-of-line
+// ctor (color.cpp), so the segment mirror carries only px. Same mirror-class
+// discipline as the other apply tests.
 
 #include <unity.h>
 
 #include <cstdint>
-#include <string>
+#include <vector>
 
 #include <ArduinoJson.h>
 
 #include "components/apply/apply_pixel_format.hpp"
 
 namespace lamp {
-// Mirrors the px/bpp/byteOrder fields of Base/ShadeSettings (config_types.hpp).
-struct Surface {
-  uint8_t px = 32;
-  uint8_t bpp = 4;
-  std::string byteOrder = "";
+struct Seg {
+  uint8_t px = 0;
 };
-using ShadeSettings = Surface;  // class default px = 32 (set per test)
-using BaseSettings = Surface;   // class default px = 36 (set per test)
+struct Surface {
+  std::vector<Seg> segments;
+};
 }  // namespace lamp
 
 void setUp(void) {}
@@ -38,71 +36,60 @@ static JsonDocument blob(const char* json) {
   return doc;
 }
 
-void test_shade_px_applied_from_blob() {
-  lamp::ShadeSettings shade;  // class default px = 32
-  JsonDocument doc = blob("{\"px\":40}");
-  lamp::apply::pixelFormatLocal(doc.as<JsonObjectConst>(), shade);
-  TEST_ASSERT_EQUAL_UINT8(40, shade.px);
+static lamp::Surface twoSeg(uint8_t a, uint8_t b) {
+  lamp::Surface s;
+  s.segments = {{a}, {b}};
+  return s;
 }
 
-void test_base_px_applied_from_blob() {
-  lamp::BaseSettings base;  // class default px = 36
-  JsonDocument doc = blob("{\"px\":35}");
-  lamp::apply::pixelFormatLocal(doc.as<JsonObjectConst>(), base);
-  TEST_ASSERT_EQUAL_UINT8(35, base.px);
+void test_segment_px_applied_from_blob() {
+  lamp::Surface s = twoSeg(16, 12);
+  JsonDocument doc = blob("{\"segments\":[{\"px\":20},{\"px\":9}]}");
+  lamp::apply::pixelFormatLocal(doc.as<JsonObjectConst>(), s);
+  TEST_ASSERT_EQUAL_UINT8(20, s.segments[0].px);
+  TEST_ASSERT_EQUAL_UINT8(9, s.segments[1].px);
 }
 
-void test_absent_px_leaves_current() {
-  lamp::ShadeSettings shade;
-  JsonDocument doc = blob("{\"bpp\":3}");  // no px key
-  lamp::apply::pixelFormatLocal(doc.as<JsonObjectConst>(), shade);
-  TEST_ASSERT_EQUAL_UINT8(32, shade.px);
+void test_absent_segments_leaves_current() {
+  lamp::Surface s = twoSeg(16, 12);
+  JsonDocument doc = blob("{\"colors\":[]}");  // no segments key
+  lamp::apply::pixelFormatLocal(doc.as<JsonObjectConst>(), s);
+  TEST_ASSERT_EQUAL_UINT8(16, s.segments[0].px);
+  TEST_ASSERT_EQUAL_UINT8(12, s.segments[1].px);
 }
 
-void test_px_clamped_to_50() {
-  lamp::ShadeSettings shade;
-  JsonDocument doc = blob("{\"px\":99}");
-  lamp::apply::pixelFormatLocal(doc.as<JsonObjectConst>(), shade);
-  TEST_ASSERT_EQUAL_UINT8(50, shade.px);
+void test_absent_px_on_segment_leaves_current() {
+  lamp::Surface s = twoSeg(16, 12);
+  JsonDocument doc = blob("{\"segments\":[{\"name\":\"x\"},{\"px\":9}]}");
+  lamp::apply::pixelFormatLocal(doc.as<JsonObjectConst>(), s);
+  TEST_ASSERT_EQUAL_UINT8(16, s.segments[0].px);
+  TEST_ASSERT_EQUAL_UINT8(9, s.segments[1].px);
 }
 
 void test_px_zero_ignored() {
-  lamp::ShadeSettings shade;  // 32
-  JsonDocument doc = blob("{\"px\":0}");  // invalid — a strip has >=1 pixel
-  lamp::apply::pixelFormatLocal(doc.as<JsonObjectConst>(), shade);
-  TEST_ASSERT_EQUAL_UINT8(32, shade.px);
+  lamp::Surface s = twoSeg(16, 12);
+  JsonDocument doc = blob("{\"segments\":[{\"px\":0},{\"px\":0}]}");
+  lamp::apply::pixelFormatLocal(doc.as<JsonObjectConst>(), s);
+  TEST_ASSERT_EQUAL_UINT8(16, s.segments[0].px);
+  TEST_ASSERT_EQUAL_UINT8(12, s.segments[1].px);
 }
 
-void test_bpp_applied_when_valid() {
-  lamp::ShadeSettings shade;  // 4
-  JsonDocument doc = blob("{\"bpp\":3}");
-  lamp::apply::pixelFormatLocal(doc.as<JsonObjectConst>(), shade);
-  TEST_ASSERT_EQUAL_UINT8(3, shade.bpp);
-}
-
-void test_bpp_ignored_when_invalid() {
-  lamp::ShadeSettings shade;  // 4
-  JsonDocument doc = blob("{\"bpp\":7}");
-  lamp::apply::pixelFormatLocal(doc.as<JsonObjectConst>(), shade);
-  TEST_ASSERT_EQUAL_UINT8(4, shade.bpp);
-}
-
-void test_byte_order_applied() {
-  lamp::ShadeSettings shade;  // ""
-  JsonDocument doc = blob("{\"byteOrder\":\"BGR\"}");
-  lamp::apply::pixelFormatLocal(doc.as<JsonObjectConst>(), shade);
-  TEST_ASSERT_EQUAL_STRING("BGR", shade.byteOrder.c_str());
+void test_extra_blob_segments_ignored() {
+  lamp::Surface s = twoSeg(16, 12);
+  JsonDocument doc =
+      blob("{\"segments\":[{\"px\":20},{\"px\":9},{\"px\":30}]}");
+  lamp::apply::pixelFormatLocal(doc.as<JsonObjectConst>(), s);
+  TEST_ASSERT_EQUAL_UINT(2, s.segments.size());
+  TEST_ASSERT_EQUAL_UINT8(20, s.segments[0].px);
+  TEST_ASSERT_EQUAL_UINT8(9, s.segments[1].px);
 }
 
 int main(int, char**) {
   UNITY_BEGIN();
-  RUN_TEST(test_shade_px_applied_from_blob);
-  RUN_TEST(test_base_px_applied_from_blob);
-  RUN_TEST(test_absent_px_leaves_current);
-  RUN_TEST(test_px_clamped_to_50);
+  RUN_TEST(test_segment_px_applied_from_blob);
+  RUN_TEST(test_absent_segments_leaves_current);
+  RUN_TEST(test_absent_px_on_segment_leaves_current);
   RUN_TEST(test_px_zero_ignored);
-  RUN_TEST(test_bpp_applied_when_valid);
-  RUN_TEST(test_bpp_ignored_when_invalid);
-  RUN_TEST(test_byte_order_applied);
+  RUN_TEST(test_extra_blob_segments_ignored);
   return UNITY_END();
 }

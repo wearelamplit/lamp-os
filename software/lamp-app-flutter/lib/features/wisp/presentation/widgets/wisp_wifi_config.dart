@@ -29,8 +29,8 @@ class _WifiConfigRowState extends ConsumerState<WifiConfigRow> {
     final subtitle = _busy
         ? 'Sending credentials to wisp…'
         : (widget.status.wifiConnected
-            ? 'Connected — tap to change network'
-            : 'Not connected — tap to configure');
+            ? 'Connected. Tap to change network.'
+            : 'Not connected. Tap to configure.');
     return SettingsRow(
       key: const Key('wifi-config-row'),
       icon: Icons.wifi,
@@ -72,7 +72,7 @@ class _WifiConfigRowState extends ConsumerState<WifiConfigRow> {
     } catch (_) {
       if (!mounted) return;
       AppSnackbar.error(
-        context, "Couldn't reach the wisp — try again.",
+        context, "Couldn't reach the wisp. Try again.",
       );
     } finally {
       if (mounted) setState(() => _busy = false);

@@ -89,6 +89,18 @@ class WispRoster {
   // written (NOT the byte count). Caps at WISP_ROSTER_MAX_LAMPS.
   size_t snapshotClaimsForBroadcast(uint8_t* outBuf, size_t outCapacity) const;
 
+  // Store the paint pick for a currently-claimed lamp. No-op if mac is
+  // not in the current own-claim set (the caller may have picked before
+  // the claim was established).
+  void setLampPaint(const uint8_t mac[6], const uint8_t base[3],
+                    const uint8_t shade[3]);
+
+  // Pack own-claim paint colors for `MSG_WISP_PAINT` broadcasting.
+  // Each entry is lampMac(6)+base(3)+shade(3) = 12 bytes. Capped at
+  // WISP_PAINT_MAX_ENTRIES; `cap` limits the output byte budget.
+  // Returns the entry count written (not bytes).
+  size_t snapshotPaintForBroadcast(uint8_t* out, size_t cap) const;
+
   // Diagnostics. Both take the mutex briefly.
   size_t claimedCount() const;
   size_t peerCount() const;
@@ -115,6 +127,8 @@ class WispRoster {
   struct OwnClaim {
     uint8_t lampMac[6];
     int8_t  rssi;
+    uint8_t base[3];
+    uint8_t shade[3];
   };
   OwnClaim ownClaims_[WISP_ROSTER_MAX_LAMPS];
   size_t   ownCount_ = 0;

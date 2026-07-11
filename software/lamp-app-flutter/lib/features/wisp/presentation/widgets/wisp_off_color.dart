@@ -35,7 +35,7 @@ class _OffColorPickerState extends ConsumerState<OffColorPicker> {
         Padding(
           padding: const EdgeInsets.only(bottom: AppSpace.md),
           child: Text(
-            "Off doesn't broadcast a palette — your lamps stay on their "
+            "Off doesn't broadcast a palette. Your lamps stay on their "
             "own behaviour. Pick the color the wisp itself shows.",
             style: Theme.of(context).textTheme.bodySmall,
           ),

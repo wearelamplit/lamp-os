@@ -1,7 +1,9 @@
 #pragma once
 #include <Arduino.h>
 #include <Preferences.h>
+#include <functional>
 
+#include "behaviors/greetable.hpp"
 #include "config/config.hpp"
 
 namespace ble_control {
@@ -205,6 +207,14 @@ void resumeRadioAfterOta();
  *        the chunk stream. Idempotent.
  */
 void disconnectGattClientsForOta();
+
+/**
+ * @brief Register a provider for the current greeting state. Called from
+ *        lamp_behaviors.cpp after the greeting behavior is wired. The
+ *        provider is called inside notifyStateChange() to include greeting
+ *        in the stateNotify payload.
+ */
+void setGreetingStateProvider(std::function<lamp::GreetingState()> fn);
 
 // Posts a commit signal from the BLE callback (Core 0) to the loop task
 // (Core 1). Loop drain debounces and calls config.persistConfig. Signature

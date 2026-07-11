@@ -27,9 +27,10 @@ const int _kMaxBaseStops = 6;
 /// (Cancel/discard re-writes the snapshot). A discard-guard dialog blocks
 /// accidental dismissal when edits are pending.
 class BaseEditorSheet extends ConsumerStatefulWidget {
-  const BaseEditorSheet({super.key, required this.lampId});
+  const BaseEditorSheet({super.key, required this.lampId, this.title = 'Base'});
 
   final String lampId;
+  final String title;
 
   @override
   ConsumerState<BaseEditorSheet> createState() => _BaseEditorSheetState();
@@ -188,7 +189,7 @@ class _BaseEditorSheetState extends ConsumerState<BaseEditorSheet> {
             Row(
               children: [
                 Text(
-                  'Base colors',
+                  '${widget.title} colors',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
               ],
@@ -285,12 +286,13 @@ class _BaseEditorSheetState extends ConsumerState<BaseEditorSheet> {
 Future<void> showBaseEditorSheet(
   BuildContext context, {
   required String lampId,
+  String title = 'Base',
 }) {
   return showAppSheet<void>(
     context,
     builder: (ctx) => FractionallySizedBox(
       heightFactor: 0.6,
-      child: BaseEditorSheet(lampId: lampId),
+      child: BaseEditorSheet(lampId: lampId, title: title),
     ),
   );
 }

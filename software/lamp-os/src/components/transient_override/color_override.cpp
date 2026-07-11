@@ -73,7 +73,9 @@ void ColorOverride::apply(const uint8_t sourceMac[6],
   // Cache the wisp paint's first stop for the app's indicator. Only
   // record on wisp-sourced applies so a hypothetical future producer
   // can't pollute the "last wisp color" view.
+  bool wispColorChanged = false;
   if (source == lamp_protocol::OverrideSource::Wisp) {
+    wispColorChanged = !hasLastWispColor_ || !(lastWispColor_ == stops[0]);
     lastWispColor_ = stops[0];
     hasLastWispColor_ = true;
   }
@@ -117,10 +119,13 @@ void ColorOverride::apply(const uint8_t sourceMac[6],
                 (unsigned)surface_, (int)source,
                 (unsigned)fadeDurationMs, (unsigned)numColors);
 
-  // Edge-trigger the BLE notify so the app's wispStatus subscriber sees
-  // the indicator turn on / off as the override gains or loses Wisp
-  // sourcing.
-  maybeNotifyWispStateChange();
+  // Notify the app's wispStatus subscriber on the active-state edge
+  // (indicator on/off) and, while already active, on a new wisp paint
+  // colour so drift updates reach the app instead of the indicator
+  // freezing on the colour control began with.
+  if (!maybeNotifyWispStateChange() && wispColorChanged && isWispActive()) {
+    if (wispStateCb_) wispStateCb_();
+  }
 }
 
 void ColorOverride::restore(const uint8_t sourceMac[6],

@@ -1,40 +1,40 @@
 #pragma once
 
 #include <Adafruit_NeoPixel.h>
-#include <Arduino.h>
 
+#include <cstdint>
 #include <vector>
 
 #include "util/color.hpp"
 
 namespace lamp {
-/**
- * @brief the frame buffer holds a copy of the current scene's pixel
- * colors for all layered draw operations. The lamp will only draw
- * when the bitmap buffer or brightness is changed
- */
+
+// Geometry-only strip segment. Palettes live in Config.
+struct StripSegment {
+  Adafruit_NeoPixel* driver;
+  const char* name;
+  uint16_t offset;     // start index in the logical buffer
+  uint16_t pixelCount;
+};
+
 class FrameBuffer {
  public:
   std::vector<Color> defaultColors;
   std::vector<Color> previousBuffer;
   uint8_t previousBrightness = 0;
   uint8_t pixelCount = 0;
-  Adafruit_NeoPixel* driver = nullptr;
   std::vector<Color> buffer;
+  std::vector<StripSegment> segments;
 
   FrameBuffer();
 
-  /**
-   * @brief Setup initializer
-   * @param [in] inDefaultColors The user's default lamp colors {Color, ..., n} n <= 50
-   * @param [in] inPixelCount the number of neopixels in use
-   * @param [in] inDriver the NeoPixel instance to use
-   */
+  // Primary form: sizes buffer to Σ seg.pixelCount; initializes every segment driver.
+  // Σ pixelCount must fit in uint8_t (enforced upstream in validateHwConfig/config_codec).
+  void begin(std::vector<Color> inDefaultColors, std::vector<StripSegment> inSegments);
+
   void begin(std::vector<Color> inDefaultColors, uint8_t inPixelCount, Adafruit_NeoPixel* inDriver);
 
-  /**
-   * @brief send values from buffer to the LED driver
-   */
   void flush();
 };
+
 }  // namespace lamp

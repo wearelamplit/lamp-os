@@ -12,6 +12,7 @@ class ConfiguratorBehavior;
 class ExpressionManager;
 class FrameBuffer;
 class NearbyLamps;
+struct Greetable;
 
 /**
  * @brief Per-behavior context wired by the Compositor at register time.
@@ -44,6 +45,9 @@ struct BehaviorContext {
   // must null-check (consistent with existing field policy —
   // expressionManager nullability is the precedent).
   NearbyLamps* nearbyLamps = nullptr;
+  // Active greeting behavior, or null when the lamp has none. The triggerGreet
+  // handler routes here so dispatch never switches on lamp type.
+  Greetable* greeting = nullptr;
 };
 
 }  // namespace lamp

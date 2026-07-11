@@ -147,11 +147,12 @@ void PaintDistributor::sendDriftToPeer(size_t idx) {
   if (palette_->colors().empty()) return;
 
   const uint8_t* mac = driftMacs_[idx];
-  // Fresh random pair each slot so the lamp wanders the palette. The long fade
-  // cross-fades from its prior color. The app's predictTuple mirrors only the
-  // deterministic newcomer paint, so the fleet list shows a drifting lamp's live
-  // color via the lamp-relayed lastWispColor_, not a predicted value.
   ColorTuple t = sampleTupleAtPositions(palette_->colors(), esp_random(), esp_random());
+  if (roster_) {
+    const uint8_t base[3]  = {t.r[0], t.g[0], t.b[0]};
+    const uint8_t shade[3] = {t.r[1], t.g[1], t.b[1]};
+    roster_->setLampPaint(mac, base, shade);
+  }
   uint8_t srcMac[6] = {0};
   mesh_->getMac(srcMac);
 
@@ -182,6 +183,11 @@ void PaintDistributor::sendPaintToPeer(const uint8_t mac[6]) {
   if (palette_->colors().empty()) return;
 
   ColorTuple t = sampleTupleForMac(*palette_, mac, shuffleSeed_);
+  if (roster_) {
+    const uint8_t base[3]  = {t.r[0], t.g[0], t.b[0]};
+    const uint8_t shade[3] = {t.r[1], t.g[1], t.b[1]};
+    roster_->setLampPaint(mac, base, shade);
+  }
   uint8_t srcMac[6] = {0};
   mesh_->getMac(srcMac);
 
@@ -208,6 +214,10 @@ void PaintDistributor::sendPaintToPeer(const uint8_t mac[6]) {
 
 void PaintDistributor::sendRestoreToPeer(const uint8_t mac[6]) {
   if (!mesh_) return;
+  if (roster_) {
+    constexpr uint8_t kZero[3] = {0, 0, 0};
+    roster_->setLampPaint(mac, kZero, kZero);
+  }
   uint8_t srcMac[6] = {0};
   mesh_->getMac(srcMac);
 

@@ -8,54 +8,27 @@ part of 'advanced_session.dart';
 
 // GENERATED CODE - DO NOT MODIFY BY HAND
 // ignore_for_file: type=lint, type=warning
-/// Session-only "advanced mode" flag per lamp. Holds whether the user has
-/// unlocked advanced UI in the current connection session.
-///
-/// Distinct from the firmware-persisted `LampSettings.advancedEnabled`
-/// which the lamp itself stores in NVS — this provider is purely
-/// app-side state, scoped to the current BLE connection session, and
-/// resets to `false` whenever that session ends (handled by
-/// `ControlNotifier._onConnectionChange(false)`).
-///
-/// Gates visibility of advanced UI like the expression cascade controls
-/// and the Setup Hub's Advanced LED setup row. The actual feature state
-/// (cascade params, LED config) lives in the lamp config and persists
-/// across sessions independently of this flag — this only controls
-/// whether the controls are visible.
+/// Session-only "advanced mode" flag per lamp: whether the user has unlocked
+/// advanced UI in the current connection session. Distinct from the
+/// app-global persistent `devModeProvider`; this is per-lamp, session-scoped,
+/// and resets to false when the session ends (via
+/// `ControlNotifier._onConnectionChange(false)`). Gates visibility only.
 
 @ProviderFor(AdvancedSession)
 final advancedSessionProvider = AdvancedSessionFamily._();
 
-/// Session-only "advanced mode" flag per lamp. Holds whether the user has
-/// unlocked advanced UI in the current connection session.
-///
-/// Distinct from the firmware-persisted `LampSettings.advancedEnabled`
-/// which the lamp itself stores in NVS — this provider is purely
-/// app-side state, scoped to the current BLE connection session, and
-/// resets to `false` whenever that session ends (handled by
-/// `ControlNotifier._onConnectionChange(false)`).
-///
-/// Gates visibility of advanced UI like the expression cascade controls
-/// and the Setup Hub's Advanced LED setup row. The actual feature state
-/// (cascade params, LED config) lives in the lamp config and persists
-/// across sessions independently of this flag — this only controls
-/// whether the controls are visible.
+/// Session-only "advanced mode" flag per lamp: whether the user has unlocked
+/// advanced UI in the current connection session. Distinct from the
+/// app-global persistent `devModeProvider`; this is per-lamp, session-scoped,
+/// and resets to false when the session ends (via
+/// `ControlNotifier._onConnectionChange(false)`). Gates visibility only.
 final class AdvancedSessionProvider
     extends $NotifierProvider<AdvancedSession, bool> {
-  /// Session-only "advanced mode" flag per lamp. Holds whether the user has
-  /// unlocked advanced UI in the current connection session.
-  ///
-  /// Distinct from the firmware-persisted `LampSettings.advancedEnabled`
-  /// which the lamp itself stores in NVS — this provider is purely
-  /// app-side state, scoped to the current BLE connection session, and
-  /// resets to `false` whenever that session ends (handled by
-  /// `ControlNotifier._onConnectionChange(false)`).
-  ///
-  /// Gates visibility of advanced UI like the expression cascade controls
-  /// and the Setup Hub's Advanced LED setup row. The actual feature state
-  /// (cascade params, LED config) lives in the lamp config and persists
-  /// across sessions independently of this flag — this only controls
-  /// whether the controls are visible.
+  /// Session-only "advanced mode" flag per lamp: whether the user has unlocked
+  /// advanced UI in the current connection session. Distinct from the
+  /// app-global persistent `devModeProvider`; this is per-lamp, session-scoped,
+  /// and resets to false when the session ends (via
+  /// `ControlNotifier._onConnectionChange(false)`). Gates visibility only.
   AdvancedSessionProvider._({
     required AdvancedSessionFamily super.from,
     required String super.argument,
@@ -102,20 +75,11 @@ final class AdvancedSessionProvider
 
 String _$advancedSessionHash() => r'aa5f5735731487ad8cd991b03ffd6212e4c13e11';
 
-/// Session-only "advanced mode" flag per lamp. Holds whether the user has
-/// unlocked advanced UI in the current connection session.
-///
-/// Distinct from the firmware-persisted `LampSettings.advancedEnabled`
-/// which the lamp itself stores in NVS — this provider is purely
-/// app-side state, scoped to the current BLE connection session, and
-/// resets to `false` whenever that session ends (handled by
-/// `ControlNotifier._onConnectionChange(false)`).
-///
-/// Gates visibility of advanced UI like the expression cascade controls
-/// and the Setup Hub's Advanced LED setup row. The actual feature state
-/// (cascade params, LED config) lives in the lamp config and persists
-/// across sessions independently of this flag — this only controls
-/// whether the controls are visible.
+/// Session-only "advanced mode" flag per lamp: whether the user has unlocked
+/// advanced UI in the current connection session. Distinct from the
+/// app-global persistent `devModeProvider`; this is per-lamp, session-scoped,
+/// and resets to false when the session ends (via
+/// `ControlNotifier._onConnectionChange(false)`). Gates visibility only.
 
 final class AdvancedSessionFamily extends $Family
     with $ClassFamilyOverride<AdvancedSession, bool, bool, bool, String> {
@@ -128,20 +92,11 @@ final class AdvancedSessionFamily extends $Family
         isAutoDispose: false,
       );
 
-  /// Session-only "advanced mode" flag per lamp. Holds whether the user has
-  /// unlocked advanced UI in the current connection session.
-  ///
-  /// Distinct from the firmware-persisted `LampSettings.advancedEnabled`
-  /// which the lamp itself stores in NVS — this provider is purely
-  /// app-side state, scoped to the current BLE connection session, and
-  /// resets to `false` whenever that session ends (handled by
-  /// `ControlNotifier._onConnectionChange(false)`).
-  ///
-  /// Gates visibility of advanced UI like the expression cascade controls
-  /// and the Setup Hub's Advanced LED setup row. The actual feature state
-  /// (cascade params, LED config) lives in the lamp config and persists
-  /// across sessions independently of this flag — this only controls
-  /// whether the controls are visible.
+  /// Session-only "advanced mode" flag per lamp: whether the user has unlocked
+  /// advanced UI in the current connection session. Distinct from the
+  /// app-global persistent `devModeProvider`; this is per-lamp, session-scoped,
+  /// and resets to false when the session ends (via
+  /// `ControlNotifier._onConnectionChange(false)`). Gates visibility only.
 
   AdvancedSessionProvider call(String lampId) =>
       AdvancedSessionProvider._(argument: lampId, from: this);
@@ -150,20 +105,11 @@ final class AdvancedSessionFamily extends $Family
   String toString() => r'advancedSessionProvider';
 }
 
-/// Session-only "advanced mode" flag per lamp. Holds whether the user has
-/// unlocked advanced UI in the current connection session.
-///
-/// Distinct from the firmware-persisted `LampSettings.advancedEnabled`
-/// which the lamp itself stores in NVS — this provider is purely
-/// app-side state, scoped to the current BLE connection session, and
-/// resets to `false` whenever that session ends (handled by
-/// `ControlNotifier._onConnectionChange(false)`).
-///
-/// Gates visibility of advanced UI like the expression cascade controls
-/// and the Setup Hub's Advanced LED setup row. The actual feature state
-/// (cascade params, LED config) lives in the lamp config and persists
-/// across sessions independently of this flag — this only controls
-/// whether the controls are visible.
+/// Session-only "advanced mode" flag per lamp: whether the user has unlocked
+/// advanced UI in the current connection session. Distinct from the
+/// app-global persistent `devModeProvider`; this is per-lamp, session-scoped,
+/// and resets to false when the session ends (via
+/// `ControlNotifier._onConnectionChange(false)`). Gates visibility only.
 
 abstract class _$AdvancedSession extends $Notifier<bool> {
   late final _$args = ref.$arg as String;

@@ -38,11 +38,7 @@
 #include "config/config.hpp"
 #include "util/levels.hpp"
 
-// Strip handles and config defined in lamp.cpp at file scope (non-lamp
-// namespace) — single-instance-per-binary invariant; see lamp.cpp
-// header comment.
-extern Adafruit_NeoPixel* shadeStrip;
-extern Adafruit_NeoPixel* baseStrip;
+namespace lamp { void setAllStripsBrightness(uint8_t scaledLevel); }
 // config is defined as `lamp::Config config;` at file scope in
 // lamp.cpp — i.e., it lives at ::config, not ::lamp::config.
 extern lamp::Config config;
@@ -59,6 +55,7 @@ uint32_t brightnessFadeStartMs();
 bool     brightnessFadeSeeded();
 void     setBrightnessFade(uint8_t source, uint8_t target, uint32_t startMs);
 void     clearBrightnessFadeSeed();
+void     settleBrightnessFade();
 uint8_t  computeUserBrightnessNow(uint32_t nowMs);
 
 // Bookkeeping the brightness drain has always done.
@@ -87,14 +84,8 @@ inline void brightnessToConfig(uint8_t level, bool isHomeMode, uint8_t maxBright
   ::lamp::setBrightnessFade(source, level, fadeNow);
   // Apply initial sample so the strip starts moving this drain cycle.
   // (The compositor's per-tick interpolation handles the rest.)
-  if (::shadeStrip) {
-    ::shadeStrip->setBrightness(
-        ::lamp::calculateBrightnessLevel(maxBrightness, source));
-  }
-  if (::baseStrip) {
-    ::baseStrip->setBrightness(
-        ::lamp::calculateBrightnessLevel(maxBrightness, source));
-  }
+  ::lamp::setAllStripsBrightness(
+      ::lamp::calculateBrightnessLevel(maxBrightness, source));
 }
 
 // Mesh-relayed cascade brightness. Render-only: snap setBrightness,
@@ -103,14 +94,8 @@ inline void brightnessToConfig(uint8_t level, bool isHomeMode, uint8_t maxBright
 // for shade/base color cascades).
 inline void brightnessToRender(uint8_t level, bool isHomeMode, uint8_t maxBrightness) {
   (void)isHomeMode;  // Cascade brightness isn't home-mode-routed.
-  if (::shadeStrip) {
-    ::shadeStrip->setBrightness(
-        ::lamp::calculateBrightnessLevel(maxBrightness, level));
-  }
-  if (::baseStrip) {
-    ::baseStrip->setBrightness(
-        ::lamp::calculateBrightnessLevel(maxBrightness, level));
-  }
+  ::lamp::setAllStripsBrightness(
+      ::lamp::calculateBrightnessLevel(maxBrightness, level));
 }
 
 // settings_blob path. Saved value semantics — no fade UX. Mutates

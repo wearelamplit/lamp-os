@@ -26,6 +26,13 @@ class Color {
 std::string colorToHexString(Color inColor);
 
 /**
+ * @brief True iff `s` is exactly a 9-char "#RRGGBBWW" string with hex digits
+ * (upper or lower case). Payload bytes are attacker-reachable over BLE + ESP-NOW;
+ * validate before calling hexStringToColor.
+ */
+bool isValidColorHex(const char* s);
+
+/**
  * @brief transform a 32 bit color string prefixed with a # to a color object
  * eg: "#FF234212" -> r:0xFF, g:0x23, b:0x42, w:0x12
  */

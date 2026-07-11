@@ -1,3 +1,4 @@
+import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -15,15 +16,10 @@ class _ShadeSlice {
   final bool colorsEditable;
 
   @override
-  bool operator ==(Object other) {
-    if (other is! _ShadeSlice) return false;
-    if (colorsEditable != other.colorsEditable) return false;
-    if (colors.length != other.colors.length) return false;
-    for (var i = 0; i < colors.length; i++) {
-      if (colors[i] != other.colors[i]) return false;
-    }
-    return true;
-  }
+  bool operator ==(Object other) =>
+      other is _ShadeSlice &&
+      colorsEditable == other.colorsEditable &&
+      const ListEquality<LampColor>().equals(colors, other.colors);
 
   @override
   int get hashCode => Object.hash(Object.hashAll(colors), colorsEditable);
@@ -33,16 +29,20 @@ class ShadeCard extends ConsumerWidget {
   const ShadeCard({
     super.key,
     required this.lampId,
+    this.title = 'Shade',
+    required this.spec,
     this.onEditSessionChanged,
   });
 
   final String lampId;
+  final String title;
 
-  /// Fires `true` when the editor opens and `false` when it closes. The
-  /// editor still wraps each per-stop pick in its own setEditSession
-  /// scope (so wisp overrides drop only during the actual color picker
-  /// drag); this callback is the outer sheet-open/close signal that
-  /// callers (ControlScreen) use to drive their own UI affordances.
+  /// Which color list this card previews and edits.
+  final ColorChannelSpec spec;
+
+  /// Fires `true` when the editor opens and `false` when it closes. Spans the
+  /// whole sheet; ControlScreen drives the shade wisp edit-session from it so
+  /// overrides drop for the entire edit, not just each picker drag.
   final ValueChanged<bool>? onEditSessionChanged;
 
   /// Returns a gradient-safe list: LinearGradient requires ≥2 stops, so a
@@ -58,7 +58,7 @@ class ShadeCard extends ConsumerWidget {
   Future<void> _onTap(BuildContext context) async {
     onEditSessionChanged?.call(true);
     try {
-      await showShadeEditorSheet(context, lampId: lampId);
+      await showShadeEditorSheet(context, lampId: lampId, spec: spec);
     } finally {
       onEditSessionChanged?.call(false);
     }
@@ -70,8 +70,8 @@ class ShadeCard extends ConsumerWidget {
       controlNotifierProvider(lampId).select((async) {
         final state = async.value;
         return _ShadeSlice(
-          state?.shade.colors ?? const [],
-          colorsEditable: state?.shade.colorsEditable ?? true,
+          state == null ? const [] : spec.selectColors(state),
+          colorsEditable: state == null || state.shade.colorsEditable,
         );
       }),
     );
@@ -107,7 +107,7 @@ class ShadeCard extends ConsumerWidget {
             const SizedBox(width: AppSpace.lg),
             Expanded(
               child: Text(
-                'Shade',
+                title,
                 style: Theme.of(context).textTheme.titleMedium,
               ),
             ),

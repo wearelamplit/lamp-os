@@ -10,7 +10,7 @@ import '../domain/palette_gradient.dart';
 import '../domain/wisp_source_mode.dart';
 
 /// Horizontal bar at the very top of the wisp pane. Stretches edge-to-
-/// edge (no padding), 36 px tall by default — enough that the gradient
+/// edge (no padding), 36 px tall by default: enough that the gradient
 /// reads as a band rather than a hairline, low enough that it doesn't
 /// crowd the header below.
 ///

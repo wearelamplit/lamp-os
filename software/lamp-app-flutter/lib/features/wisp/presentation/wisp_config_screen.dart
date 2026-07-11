@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -16,15 +14,15 @@ import '../domain/wisp_status.dart';
 import '../domain/zone_source.dart';
 import 'palette_gradient_bar.dart';
 import 'widgets/drift_controls.dart';
-import 'widgets/wisp_header.dart';
 import 'widgets/wisp_manual_palette.dart';
 import 'widgets/wisp_off_color.dart';
 import 'widgets/wisp_painted_lamps.dart';
+import 'widgets/wisp_password_field.dart';
 import 'widgets/wisp_source_picker.dart';
 import 'widgets/wisp_wifi_config.dart';
 import 'widgets/wisp_zones.dart';
 
-/// Wisp config — controls how the wisp drives the lamp grid's paint.
+/// Wisp config screen. Controls how the wisp drives the lamp grid's paint.
 ///
 /// The wisp is a separate ESP32-C6 node; the app talks to it through
 /// the relay lamp's BLE control service which proxies wispOps onto the
@@ -38,9 +36,24 @@ class WispConfigScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final controlAsync = ref.watch(controlNotifierProvider(lampId));
+    final wispName = ref
+            .watch(wispNotifierProvider(lampId))
+            .value
+            ?.name ??
+        '';
+    final appBarTitle = wispName.isNotEmpty
+        ? Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const _TwoOrbsIcon(size: 20),
+              const SizedBox(width: 8),
+              Text(wispName),
+            ],
+          )
+        : const Text('Wisp');
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Wisp'),
+        title: appBarTitle,
       ),
       body: controlAsync.when(
         loading: () => ConnectingView(deviceId: lampId),
@@ -71,47 +84,24 @@ class _WispBody extends ConsumerStatefulWidget {
   ConsumerState<_WispBody> createState() => _WispBodyState();
 }
 
-class _WispBodyState extends ConsumerState<_WispBody> {
-  /// Phone-local epoch ms at the most recent wispStatus notify. Used to
-  /// derive a "Xs ago" indicator without trusting the wisp's own
-  /// `lastSeenMs` (which is wisp millis, resets on wisp reboot, and is
-  /// useless for the human-time "is the wisp still alive?" question).
-  ///
-  /// Seeded eagerly on first non-empty status; refreshed by the
-  /// `ref.listen` below on every subsequent state change.
-  int? _lastNotifyEpochMs;
-
-  /// 1Hz heartbeat that rebuilds the "Xs ago" label so it counts up
-  /// even while no new notifies are arriving. Cancelled on dispose.
-  Timer? _staleTickTimer;
+class _WispBodyState extends ConsumerState<_WispBody>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabController;
 
   @override
   void initState() {
     super.initState();
-    _staleTickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() {});
-    });
+    _tabController = TabController(length: 3, vsync: this);
   }
 
   @override
   void dispose() {
-    _staleTickTimer?.cancel();
+    _tabController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // Phone-local timestamp for "Xs ago" freshness; keeping it here
-    // avoids leaking wall-clock time into the domain layer.
-    ref.listen<AsyncValue<WispStatus>>(wispNotifierProvider(widget.lampId), (
-      _,
-      next,
-    ) {
-      if (next is AsyncData<WispStatus> && next.value.present) {
-        _lastNotifyEpochMs = DateTime.now().millisecondsSinceEpoch;
-      }
-    });
-
     final async = ref.watch(wispNotifierProvider(widget.lampId));
     return async.when(
       loading: () => const _WispLoading(),
@@ -119,7 +109,6 @@ class _WispBodyState extends ConsumerState<_WispBody> {
       // render the no-wisp empty state.
       error: (_, _) => const _NoWispEmpty(),
       data: (status) {
-        // Guard: absent wisp would show the prior session's local palette.
         if (!status.present) {
           return const _NoWispEmpty();
         }
@@ -130,17 +119,13 @@ class _WispBodyState extends ConsumerState<_WispBody> {
 
   Widget _buildBody(BuildContext context, WispStatus status) {
     final notifier = ref.read(wispNotifierProvider(widget.lampId).notifier);
-    final stale = _staleSeconds(status);
     final source = status.source;
     final auroraEnabled = status.auroraDetected;
 
-    // Seed the draft from saved on first Manual render; idempotent if
-    // already in sync (re-seeding the same list is a no-op for dirty check).
+    // Schedule on the next frame to avoid mutating notifier state mid-build.
     if (source == WispSourceMode.manual &&
         notifier.draftManualPalette.isEmpty &&
         notifier.savedManualPalette.isNotEmpty) {
-      // Schedule on the next frame to avoid mutating notifier state
-      // mid-build (Riverpod asserts).
       WidgetsBinding.instance.addPostFrameCallback((_) {
         notifier.resetManualPaletteDraft();
       });
@@ -149,76 +134,225 @@ class _WispBodyState extends ConsumerState<_WispBody> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(icon: Icon(Icons.palette_outlined), text: 'Sources'),
+            Tab(icon: Icon(Icons.tune), text: 'Settings'),
+            Tab(icon: Icon(Icons.lightbulb_outline), text: 'Lamps'),
+          ],
+        ),
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              _SourcesTab(
+                lampId: widget.lampId,
+                status: status,
+                notifier: notifier,
+                source: source,
+                auroraEnabled: auroraEnabled,
+              ),
+              _SettingsTab(
+                lampId: widget.lampId,
+                status: status,
+              ),
+              _LampsTab(
+                lampId: widget.lampId,
+                status: status,
+                notifier: notifier,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SourcesTab extends StatefulWidget {
+  const _SourcesTab({
+    required this.lampId,
+    required this.status,
+    required this.notifier,
+    required this.source,
+    required this.auroraEnabled,
+  });
+
+  final String lampId;
+  final WispStatus status;
+  final WispNotifier notifier;
+  final WispSourceMode source;
+  final bool auroraEnabled;
+
+  @override
+  State<_SourcesTab> createState() => _SourcesTabState();
+}
+
+class _SourcesTabState extends State<_SourcesTab> {
+  Future<void> _runWispOp(Future<void> Function() op) async {
+    try {
+      await op();
+    } catch (_) {
+      if (!mounted) return;
+      AppSnackbar.error(context, "Couldn't reach the wisp. Try again.");
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final source = widget.source;
+    final status = widget.status;
+    final notifier = widget.notifier;
+    final lampId = widget.lampId;
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(
+          AppSpace.lg, AppSpace.lg, AppSpace.lg, AppSpace.xxl),
+      children: [
+        SourcePicker(
+          current: source,
+          auroraEnabled: widget.auroraEnabled,
+          onSelect: (m) => _runWispOp(() => notifier.setSource(m)),
+        ),
+        if (source == WispSourceMode.off) ...[
+          const SizedBox(height: AppSpace.xl),
+          OffColorPicker(
+            lampId: lampId,
+            current: status.offColor,
+          ),
+        ],
+        if (source == WispSourceMode.manual) ...[
+          const SizedBox(height: AppSpace.xl),
+          ManualPaletteEditor(lampId: lampId),
+        ],
+        if (source == WispSourceMode.aurora) ...[
+          const SizedBox(height: AppSpace.xl),
+          if (!status.auroraConnected) ...[
+            Semantics(
+              liveRegion: true,
+              label: 'Aurora not connected',
+              child: AuroraNotConnectedNotice(
+                wifiConnected: status.wifiConnected,
+              ),
+            ),
+            const SizedBox(height: AppSpace.lg),
+          ],
+          WifiConfigRow(lampId: lampId, status: status),
+          const SizedBox(height: AppSpace.lg),
+          CurrentZone(status: status),
+          const SizedBox(height: AppSpace.lg),
+          ObservedZonesPicker(
+            status: status,
+            onPickZone: (z) => _runWispOp(() => notifier.setZone(z)),
+          ),
+          if (_canClearSelection(status)) ...[
+            const SizedBox(height: AppSpace.lg),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => _runWispOp(notifier.clearZone),
+                icon: const Icon(Icons.close, size: 16),
+                label: const Text('Clear selection'),
+                style: TextButton.styleFrom(
+                  foregroundColor:
+                      Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ],
+    );
+  }
+
+  bool _canClearSelection(WispStatus s) =>
+      s.zoneSource == ZoneSource.appOp || s.zoneSource == ZoneSource.nvs;
+}
+
+class _SettingsTab extends StatefulWidget {
+  const _SettingsTab({
+    required this.lampId,
+    required this.status,
+  });
+
+  final String lampId;
+  final WispStatus status;
+
+  @override
+  State<_SettingsTab> createState() => _SettingsTabState();
+}
+
+class _SettingsTabState extends State<_SettingsTab> {
+  late final TextEditingController _nameCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl = TextEditingController(text: widget.status.name);
+  }
+
+  @override
+  void didUpdateWidget(_SettingsTab old) {
+    super.didUpdateWidget(old);
+    // Sync name field if the wisp echoes back a new name and the field
+    // is not focused (user not mid-edit).
+    if (old.status.name != widget.status.name &&
+        !_nameCtrl.selection.isValid) {
+      _nameCtrl.text = widget.status.name;
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(
+          AppSpace.lg, AppSpace.lg, AppSpace.lg, AppSpace.xxl),
+      children: [
+        _WispNameField(lampId: widget.lampId, ctrl: _nameCtrl),
+        const SizedBox(height: AppSpace.lg),
+        WispPasswordField(lampId: widget.lampId),
+        const SizedBox(height: AppSpace.xl),
+        DriftControls(lampId: widget.lampId, status: widget.status),
+      ],
+    );
+  }
+}
+
+class _LampsTab extends ConsumerWidget {
+  const _LampsTab({
+    required this.lampId,
+    required this.status,
+    required this.notifier,
+  });
+
+  final String lampId;
+  final WispStatus status;
+  final WispNotifier notifier;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
         PaletteGradientBar(
-          sourceMode: source,
+          sourceMode: status.source,
           manualPalette: notifier.draftManualPalette,
           offColor: status.offColor,
         ),
         Expanded(
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(AppSpace.lg, AppSpace.lg, AppSpace.lg, AppSpace.xxl),
+            padding: const EdgeInsets.fromLTRB(
+                AppSpace.lg, AppSpace.lg, AppSpace.lg, AppSpace.xxl),
             children: [
-              WispHeader(status: status, staleSeconds: stale),
-              const SizedBox(height: AppSpace.lg),
-              SourcePicker(
-                current: source,
-                auroraEnabled: auroraEnabled,
-                onSelect: (m) => _runWispOp(() => notifier.setSource(m)),
-              ),
-              if (source == WispSourceMode.off) ...[
-                const SizedBox(height: 20),
-                OffColorPicker(
-                  lampId: widget.lampId,
-                  current: status.offColor,
-                ),
-              ],
-              if (source == WispSourceMode.manual) ...[
-                const SizedBox(height: 20),
-                ManualPaletteEditor(lampId: widget.lampId),
-                const SizedBox(height: AppSpace.lg),
-                DriftControls(lampId: widget.lampId, status: status),
-              ],
-              if (source == WispSourceMode.aurora) ...[
-                const SizedBox(height: AppSpace.xl),
-                if (!status.auroraConnected) ...[
-                  Semantics(
-                    liveRegion: true,
-                    label: 'Aurora not connected',
-                    child: AuroraNotConnectedNotice(
-                      wifiConnected: status.wifiConnected,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpace.lg),
-                ],
-                // Wi-Fi only needed under Aurora.
-                WifiConfigRow(lampId: widget.lampId, status: status),
-                const SizedBox(height: AppSpace.lg),
-                CurrentZone(status: status),
-                const SizedBox(height: AppSpace.lg),
-                ObservedZonesPicker(
-                  status: status,
-                  onPickZone: (z) => _runWispOp(() => notifier.setZone(z)),
-                ),
-                if (_canClearSelection(status)) ...[
-                  const SizedBox(height: AppSpace.lg),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      onPressed: () => _runWispOp(notifier.clearZone),
-                      icon: const Icon(Icons.close, size: 16),
-                      label: const Text('Clear selection'),
-                      style: TextButton.styleFrom(
-                        foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: AppSpace.lg),
-                DriftControls(lampId: widget.lampId, status: status),
-              ],
-              const SizedBox(height: AppSpace.xl),
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 24, 16, AppSpace.sm),
+                padding: const EdgeInsets.fromLTRB(0, AppSpace.sm, 0, AppSpace.sm),
                 child: Row(
                   children: [
                     Text(
@@ -238,43 +372,57 @@ class _WispBodyState extends ConsumerState<_WispBody> {
                       constraints: const BoxConstraints(),
                       tooltip: 'Shuffle colours',
                       onPressed: () => ref
-                          .read(wispNotifierProvider(widget.lampId).notifier)
+                          .read(wispNotifierProvider(lampId).notifier)
                           .shuffle(),
                     ),
                   ],
                 ),
               ),
-              PaintedLampsList(lampId: widget.lampId),
+              PaintedLampsList(lampId: lampId),
             ],
           ),
         ),
       ],
     );
   }
+}
 
-  /// Seconds since the last notify in phone-local time, or null when no
-  /// notify has arrived yet.
-  int? _staleSeconds(WispStatus status) {
-    if (!status.present) return null;
-    if (_lastNotifyEpochMs == null) return null;
-    final delta = DateTime.now().millisecondsSinceEpoch - _lastNotifyEpochMs!;
-    return delta ~/ 1000;
-  }
+/// Name text field. Submits via `setName` on submit/done; clamped to 20 chars
+/// matching the firmware limit.
+class _WispNameField extends ConsumerWidget {
+  const _WispNameField({required this.lampId, required this.ctrl});
 
-  /// Only true when the user has an explicit zone pin (appOp or nvs);
-  /// clearing a firstSeen/none source is a no-op on the wisp side.
-  bool _canClearSelection(WispStatus s) =>
-      s.zoneSource == ZoneSource.appOp || s.zoneSource == ZoneSource.nvs;
+  final String lampId;
+  final TextEditingController ctrl;
 
-  /// Surfaces wispOp errors as a SnackBar. Failed writes have no
-  /// incoming notify to reconcile the optimistic state.
-  Future<void> _runWispOp(Future<void> Function() op) async {
-    try {
-      await op();
-    } catch (_) {
-      if (!mounted) return;
-      AppSnackbar.error(context, "Couldn't reach the wisp — try again.");
-    }
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpace.xs),
+      child: TextField(
+        key: const Key('wisp-name-field'),
+        controller: ctrl,
+        maxLength: 20,
+        decoration: const InputDecoration(
+          labelText: 'Wisp name',
+          counterText: '',
+          hintText: 'Unnamed',
+        ),
+        textInputAction: TextInputAction.done,
+        onSubmitted: (v) {
+          final name = v.trim();
+          if (name.isEmpty) return;
+          ref
+              .read(wispNotifierProvider(lampId).notifier)
+              .setName(name)
+              .catchError((_) {
+            if (context.mounted) {
+              AppSnackbar.error(context, "Couldn't set name. Try again.");
+            }
+          });
+        },
+      ),
+    );
   }
 }
 
@@ -293,7 +441,7 @@ class _WispLoading extends StatelessWidget {
           const CircularProgressIndicator(),
           const SizedBox(height: AppSpace.md),
           Text(
-            'Connecting to wisp…',
+            'Connecting to wisp...',
             style: Theme.of(context).textTheme.bodySmall,
           ),
         ],
@@ -330,7 +478,8 @@ class _TwoOrbsIcon extends StatelessWidget {
     return SizedBox.square(
       dimension: size,
       child: CustomPaint(
-        painter: _TwoOrbsPainter(Theme.of(context).colorScheme.onSurfaceVariant),
+        painter:
+            _TwoOrbsPainter(Theme.of(context).colorScheme.onSurfaceVariant),
       ),
     );
   }

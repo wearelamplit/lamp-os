@@ -247,6 +247,53 @@ void NearbyLamps::cacheWispClaim(const uint8_t mac[6],
   xSemaphoreGive(mutex_);
 }
 
+void NearbyLamps::cacheWispPaint(const uint8_t srcMac[6],
+                                  const uint8_t* entries, uint8_t count,
+                                  uint32_t nowMs) {
+  xSemaphoreTake(mutex_, portMAX_DELAY);
+  std::memcpy(wispCache_.mac, srcMac, 6);
+  wispCache_.present = true;
+  const uint8_t safeCount =
+      count > lamp_protocol::WISP_PAINT_MAX_ENTRIES
+          ? static_cast<uint8_t>(lamp_protocol::WISP_PAINT_MAX_ENTRIES)
+          : count;
+  wispCache_.paintCount = safeCount;
+  wispCache_.lastPaintMs = nowMs;
+  for (uint8_t i = 0; i < safeCount; ++i) {
+    const uint8_t* e = entries + static_cast<size_t>(i) *
+                                     lamp_protocol::WISP_PAINT_ENTRY_SIZE;
+    std::memcpy(wispCache_.paintEntries[i].mac, e, 6);
+    std::memcpy(wispCache_.paintEntries[i].base, e + 6, 3);
+    std::memcpy(wispCache_.paintEntries[i].shade, e + 9, 3);
+    wispCache_.paintEntries[i].valid = true;
+  }
+  // Invalidate any slots beyond the new count.
+  for (uint8_t i = safeCount; i < lamp_protocol::WISP_PAINT_MAX_ENTRIES; ++i) {
+    wispCache_.paintEntries[i].valid = false;
+  }
+  xSemaphoreGive(mutex_);
+}
+
+bool NearbyLamps::findWispPaint(const uint8_t lampMac[6], uint32_t nowMs,
+                                 uint8_t baseOut[3], uint8_t shadeOut[3]) {
+  if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(2)) != pdTRUE) return false;
+  const WispCache snap = wispCache_;
+  xSemaphoreGive(mutex_);
+
+  if (snap.lastPaintMs == 0 || (nowMs - snap.lastPaintMs) > kWispClaimStaleMs) {
+    return false;
+  }
+  for (uint8_t i = 0; i < snap.paintCount; ++i) {
+    if (snap.paintEntries[i].valid &&
+        std::memcmp(snap.paintEntries[i].mac, lampMac, 6) == 0) {
+      std::memcpy(baseOut, snap.paintEntries[i].base, 3);
+      std::memcpy(shadeOut, snap.paintEntries[i].shade, 3);
+      return true;
+    }
+  }
+  return false;
+}
+
 size_t NearbyLamps::buildWispClaimsBlob(uint8_t* out, size_t outCap,
                                          uint32_t nowMs) {
   if (!out || outCap == 0) return 0;
@@ -258,17 +305,59 @@ size_t NearbyLamps::buildWispClaimsBlob(uint8_t* out, size_t outCap,
   snap = wispCache_;
   xSemaphoreGive(mutex_);
 
-  const bool stale = snap.lastClaimMs == 0 ||
-                     (nowMs - snap.lastClaimMs) > kWispClaimStaleMs;
-  const uint8_t count = stale ? 0 : snap.claimedCount;
-  const size_t needed = 1 + static_cast<size_t>(count) * 6;
+  // Membership is the union of fresh claim macs and fresh paint macs so a
+  // lamp that arrived via one message before the other is never invisible.
+  const bool claimFresh = snap.lastClaimMs != 0 &&
+                          (nowMs - snap.lastClaimMs) <= kWispClaimStaleMs;
+  const bool paintFresh = snap.lastPaintMs != 0 &&
+                          (nowMs - snap.lastPaintMs) <= kWispClaimStaleMs;
+
+  uint8_t unionMacs[lamp_protocol::kMaxWispClaimEntries][6] = {};
+  uint8_t unionCount = 0;
+
+  if (claimFresh) {
+    for (uint8_t i = 0;
+         i < snap.claimedCount && unionCount < lamp_protocol::kMaxWispClaimEntries; ++i) {
+      std::memcpy(unionMacs[unionCount++], snap.claimedLampMacs[i], 6);
+    }
+  }
+  if (paintFresh) {
+    for (uint8_t i = 0;
+         i < snap.paintCount && unionCount < lamp_protocol::kMaxWispClaimEntries; ++i) {
+      if (!snap.paintEntries[i].valid) continue;
+      bool dup = false;
+      for (uint8_t j = 0; j < unionCount; ++j) {
+        if (std::memcmp(unionMacs[j], snap.paintEntries[i].mac, 6) == 0) {
+          dup = true;
+          break;
+        }
+      }
+      if (!dup) std::memcpy(unionMacs[unionCount++], snap.paintEntries[i].mac, 6);
+    }
+  }
+
+  // [count:1][bdAddr:6*count][colorPair:6*count]
+  const size_t needed = 1 + static_cast<size_t>(unionCount) * 12;
   if (needed > outCap) {
     out[0] = 0;
     return 1;
   }
-  out[0] = count;
-  for (uint8_t i = 0; i < count; ++i) {
-    ble_control::bdAddrFromMeshMac(snap.claimedLampMacs[i], out + 1 + static_cast<size_t>(i) * 6);
+  out[0] = unionCount;
+  for (uint8_t i = 0; i < unionCount; ++i) {
+    ble_control::bdAddrFromMeshMac(unionMacs[i],
+                                   out + 1 + static_cast<size_t>(i) * 6);
+  }
+  // Sentinel 00 00 00 00 00 00 for a mac with no fresh paint entry.
+  const size_t colorBase = 1 + static_cast<size_t>(unionCount) * 6;
+  for (uint8_t i = 0; i < unionCount; ++i) {
+    uint8_t* dst = out + colorBase + static_cast<size_t>(i) * 6;
+    uint8_t base[3], shade[3];
+    if (findWispPaint(unionMacs[i], nowMs, base, shade)) {
+      std::memcpy(dst, base, 3);
+      std::memcpy(dst + 3, shade, 3);
+    } else {
+      std::memset(dst, 0, 6);
+    }
   }
   return needed;
 }

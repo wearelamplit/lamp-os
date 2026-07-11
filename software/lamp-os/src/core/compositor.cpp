@@ -4,8 +4,8 @@
 
 #include "components/firmware/firmware_distributor.hpp"
 #include "components/firmware/firmware_receiver.hpp"
-#include "ota_indicator.hpp"
-#include "ota_quiet_mode.hpp"
+#include "components/firmware/ota_indicator.hpp"
+#include "components/firmware/ota_quiet_mode.hpp"
 
 extern lamp::FirmwareReceiver firmwareReceiver;
 
@@ -175,7 +175,8 @@ void Compositor::setHomeMode(bool homeMode) {
   }
 };
 
-void Compositor::setExpressionBandEnd(size_t end) {
+void Compositor::setExpressionBand(size_t start, size_t end) {
+  expressionBandStart = start;
   expressionBandEnd = end;
 }
 
@@ -189,11 +190,21 @@ void Compositor::addBehavior(AnimatedBehavior* b) {
   expressionBandEnd++;
 }
 
+void Compositor::addBaseBehavior(AnimatedBehavior* b) {
+  if (!b) return;
+  b->setBehaviorContext(&context_);
+  if (expressionBandStart > behaviors.size()) expressionBandStart = behaviors.size();
+  behaviors.insert(behaviors.begin() + expressionBandStart, b);
+  expressionBandStart++;
+  expressionBandEnd++;
+}
+
 void Compositor::removeBehavior(AnimatedBehavior* b) {
   if (!b) return;
   for (size_t idx = 0; idx < behaviors.size(); idx++) {
     if (behaviors[idx] == b) {
       behaviors.erase(behaviors.begin() + idx);
+      if (idx < expressionBandStart) expressionBandStart--;
       if (idx < expressionBandEnd) expressionBandEnd--;
       return;
     }

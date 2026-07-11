@@ -1,13 +1,15 @@
 // software/lamp-os/src/core/lamp_internal.hpp
 //
-// Private header — internal to core/lamp.cpp + core/lamp_drains.cpp. Do not include from any other TU.
+// Private header. Internal to the lamp.cpp TU family:
+//   core/lamp.cpp, core/lamp_drains.cpp, core/lamp_remote_op.cpp,
+//   core/lamp_brightness.cpp, core/lamp_behaviors.cpp, core/lamp_test_action.cpp
 //
-// Exposes the file-scope statics and helpers that the drain method bodies
-// (split out into lamp_drains.cpp for readability) need to reach back into.
-// The DEFINITIONS still live in lamp.cpp — this header only carries
-// `extern` declarations and a couple of forward declarations.
+// Exposes the file-scope statics and helpers that the split method bodies
+// need to reach back into lamp.cpp state. The DEFINITIONS still live in
+// lamp.cpp. This header only carries `extern` declarations and
+// cross-TU function declarations.
 //
-// Storage ownership: lamp.cpp. Readers: lamp.cpp + lamp_drains.cpp only.
+// Storage ownership: lamp.cpp. Do not include from any other TU.
 
 #pragma once
 
@@ -21,7 +23,9 @@
 #include "components/network/mesh/mesh_link.hpp"
 #include "config/config.hpp"
 #include "config/nvs_config_store.hpp"
+#include "core/lamp.hpp"
 #include "expressions/expression_manager.hpp"
+#include "expressions/expression_observer.hpp"
 
 // ── File-scope statics owned by lamp.cpp ─────────────────────────────────
 
@@ -57,8 +61,27 @@ extern lamp::BluetoothComponent bt;
 extern lamp::FirmwareReceiver firmwareReceiver;
 extern lamp::MeshLink meshLink;
 extern lamp::ExpressionManager expressionManager;
+extern lamp::ExpressionObserverRegistry expressionObserverRegistry;
 extern lamp::ConfiguratorBehavior shadeConfiguratorBehavior;
 extern lamp::ConfiguratorBehavior baseConfiguratorBehavior;
+extern lamp::Config config;
+
+// Forward declarations for the types used in the externs below.
+namespace lamp {
+class FrameBuffer;
+class Compositor;
+class SocialBehavior;
+class FadeOutBehavior;
+class KnockoutBehavior;
+}  // namespace lamp
+
+extern lamp::FrameBuffer shade;
+extern lamp::FrameBuffer base;
+extern lamp::Compositor compositor;
+extern lamp::SocialBehavior shadeSocialBehavior;
+extern lamp::FadeOutBehavior shadeFadeOutBehavior;
+extern lamp::FadeOutBehavior baseFadeOutBehavior;
+extern lamp::KnockoutBehavior baseKnockoutBehavior;
 
 // ── File-scope helpers owned by lamp.cpp ─────────────────────────────────
 
@@ -75,5 +98,17 @@ void applyRemoteOpRouted(const char* payloadJson, size_t len,
                          RemoteOpTransport origin);
 
 // Test-panel action dispatcher — drainTestAction calls this with a parsed
-// JsonDocument. Defined in lamp.cpp.
+// JsonDocument. Defined in lamp_test_action.cpp.
 void dispatchLampAction(JsonDocument& doc, unsigned long updateTimeMs);
+
+// ── Cross-TU function declarations ───────────────────────────────────────
+// These functions lost their `static` qualifier when extracted from lamp.cpp
+// into sibling TUs; they remain private by living only in this header.
+
+// lamp_brightness.cpp
+bool calculateEffectiveHomeMode();
+uint8_t effectiveBrightness();
+void reapplyHomeModeState();
+
+// lamp_behaviors.cpp
+void initBehaviors(lamp::Features features, lamp::Lamp& self);

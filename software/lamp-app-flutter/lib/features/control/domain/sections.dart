@@ -23,7 +23,6 @@ class LampSection {
     required this.advancedEnabled,
     required this.webappEnabled,
     required this.socialMode,
-    this.devMode = false,
     this.fwVersion,
     this.fwChannel,
     this.hasPassword,
@@ -37,12 +36,6 @@ class LampSection {
   // the on-device webapp at boot, so the absent payload IS "enabled".
   final bool webappEnabled;
   final SocialMode socialMode;
-
-  /// Lamp-persisted "always treat as advanced" flag. Independent of the
-  /// session-only advancedSession unlock. Also gates the cascade-to-other-
-  /// lamps controls in the expression editor, which are NOT shown in
-  /// regular advanced mode.
-  final bool devMode;
 
   /// Firmware semver, packed as `(major << 16) | (minor << 8) | patch`.
   /// Nullable for backward compat with older firmware that doesn't yet
@@ -75,7 +68,6 @@ class LampSection {
         webappEnabled: json['webappEnabled'] as bool? ?? true,
         socialMode:
             SocialMode.fromWire((json['socialMode'] as num?)?.toInt()),
-        devMode: json['devMode'] as bool? ?? false,
         fwVersion: (json['fwVersion'] as num?)?.toInt(),
         fwChannel: json['fwChannel'] as String?,
         hasPassword: json['hasPassword'] as bool?,
@@ -91,7 +83,6 @@ class LampSection {
           advancedEnabled == other.advancedEnabled &&
           webappEnabled == other.webappEnabled &&
           socialMode == other.socialMode &&
-          devMode == other.devMode &&
           fwVersion == other.fwVersion &&
           fwChannel == other.fwChannel &&
           hasPassword == other.hasPassword &&
@@ -104,12 +95,39 @@ class LampSection {
         advancedEnabled,
         webappEnabled,
         socialMode,
-        devMode,
         fwVersion,
         fwChannel,
         hasPassword,
         lampType,
       );
+}
+
+/// A named pixel segment within a role (shade or base).
+class Segment {
+  const Segment({required this.name, required this.px, required this.colors});
+  final String name;
+  final int px;
+  final List<LampColor> colors;
+
+  factory Segment.fromJson(Map<String, dynamic> json) => Segment(
+        name: json['name'] as String? ?? '',
+        px: (json['px'] as num?)?.toInt() ?? 0,
+        colors: ((json['colors'] as List?) ?? const [])
+            .whereType<String>()
+            .map(LampColor.fromHex)
+            .toList(),
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Segment &&
+          name == other.name &&
+          px == other.px &&
+          _listEq.equals(colors, other.colors);
+
+  @override
+  int get hashCode => Object.hash(name, px, _listEq.hash(colors));
 }
 
 /// CHAR_BASE_SECTION payload, see firmware Config::asBaseJson.
@@ -122,6 +140,7 @@ class BaseSection {
     required this.colors,
     required this.knockout,
     this.colorsEditable = true,
+    this.segments = const [],
   });
 
   final int px;
@@ -145,6 +164,11 @@ class BaseSection {
   /// Firmware-owned — set by the Lamp subclass via applyDefaults; defaults
   /// to true for backward compat with older firmware that doesn't emit it.
   final bool colorsEditable;
+
+  /// Per-segment breakdown of the base role. Empty on older firmware that
+  /// predates the segments field; in that case `colors` and `px` are used
+  /// directly. When non-empty, `px == Σ segments[*].px`.
+  final List<Segment> segments;
 
   factory BaseSection.fromJson(Map<String, dynamic> json) {
     // Knockout is a positional int array: index = pixel, value = brightness
@@ -176,6 +200,10 @@ class BaseSection {
           .toList(),
       knockout: knockoutMap,
       colorsEditable: (json['colorsEditable'] as bool?) ?? true,
+      segments: ((json['segments'] as List?) ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(Segment.fromJson)
+          .toList(),
     );
   }
 
@@ -189,7 +217,8 @@ class BaseSection {
           byteOrder == other.byteOrder &&
           _listEq.equals(colors, other.colors) &&
           _mapEq.equals(knockout, other.knockout) &&
-          colorsEditable == other.colorsEditable;
+          colorsEditable == other.colorsEditable &&
+          _listEq.equals(segments, other.segments);
 
   @override
   int get hashCode => Object.hash(
@@ -200,6 +229,7 @@ class BaseSection {
         _listEq.hash(colors),
         _mapEq.hash(knockout),
         colorsEditable,
+        _listEq.hash(segments),
       );
 }
 
@@ -211,6 +241,7 @@ class ShadeSection {
     required this.byteOrder,
     required this.colors,
     this.colorsEditable = true,
+    this.segments = const [],
   });
 
   final int px;
@@ -226,6 +257,11 @@ class ShadeSection {
   /// to true for backward compat with older firmware that doesn't emit it.
   final bool colorsEditable;
 
+  /// Per-segment breakdown of the shade role. Empty on older firmware that
+  /// predates the segments field; in that case `colors` and `px` are used
+  /// directly. When non-empty, `px == Σ segments[*].px`.
+  final List<Segment> segments;
+
   factory ShadeSection.fromJson(Map<String, dynamic> json) {
     final bpp = (json['bpp'] as num?)?.toInt() ?? 4;
     final byteOrder = (json['byteOrder'] as String?)?.trim().isNotEmpty == true
@@ -239,6 +275,10 @@ class ShadeSection {
           .map((e) => LampColor.fromHex(e as String))
           .toList(),
       colorsEditable: (json['colorsEditable'] as bool?) ?? true,
+      segments: ((json['segments'] as List?) ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(Segment.fromJson)
+          .toList(),
     );
   }
 
@@ -250,11 +290,18 @@ class ShadeSection {
           bpp == other.bpp &&
           byteOrder == other.byteOrder &&
           _listEq.equals(colors, other.colors) &&
-          colorsEditable == other.colorsEditable;
+          colorsEditable == other.colorsEditable &&
+          _listEq.equals(segments, other.segments);
 
   @override
-  int get hashCode =>
-      Object.hash(px, bpp, byteOrder, _listEq.hash(colors), colorsEditable);
+  int get hashCode => Object.hash(
+        px,
+        bpp,
+        byteOrder,
+        _listEq.hash(colors),
+        colorsEditable,
+        _listEq.hash(segments),
+      );
 }
 
 /// CHAR_HOME_SECTION payload. Presence-only home mode: the lamp never
@@ -316,13 +363,6 @@ class ExpressionConfig {
   final int intervalMax;
   final int target; // 1=shade, 2=base, 3=both
   final Map<String, int> parameters;
-
-  // (Refactor 2026-06-13: `disabledDuringWispOverride` field removed.
-  // It's a pure type-property now — look up via
-  // `ExpressionTypeMeta.forType(type).defaultDisabledDuringWispOverride`
-  // when the UI needs to gate against wisp control. Mirrors the firmware
-  // refactor that moved the gate to a virtual method on the Expression
-  // subclass.)
 
   static const _reservedKeys = {
     'type', 'enabled', 'colors', 'intervalMin', 'intervalMax', 'target',

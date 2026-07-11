@@ -41,8 +41,23 @@ inline void shadeColorsToConfig(JsonArray arr) {
   for (JsonVariant v : arr) {
     next.push_back(hexStringToColor(v));
   }
-  ::config.shade.colors = next;
+  ::config.shade.broadcastColors() = next;
   ::lamp::renderShadeColors(arr);
+}
+
+// Per-segment user-source variant. Writes config.shade.segments[seg].colors so
+// a segment-aware behaviour (snafu dots) previews the edit live. seg 0 is the
+// broadcast segment, so it also drives the render/advert path.
+inline void shadeSegmentColorsToConfig(uint8_t seg, JsonArray arr) {
+  if (arr.isNull() || arr.size() == 0) return;
+  if (seg >= ::config.shade.segments.size()) return;
+  std::vector<Color> next;
+  next.reserve(arr.size());
+  for (JsonVariant v : arr) {
+    next.push_back(hexStringToColor(v));
+  }
+  ::config.shade.segments[seg].colors = next;
+  if (seg == 0) ::lamp::renderShadeColors(arr);
 }
 
 // Cascade-source variant. Render-only — today's exact behavior.

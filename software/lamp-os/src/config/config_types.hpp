@@ -49,58 +49,66 @@ class LampSettings {
   // longer relies on matching default name/colors. Default false → a fresh
   // or custom lamp is "unconfigured" and gets the onboarding wizard.
   bool setup = false;
-  // True once first-boot random colors have been assigned + persisted, so we
-  // don't re-randomize on every reboot.
-  bool colorsRandomized = false;
   bool advancedEnabled = false;
-  bool devMode = false;
   // Default true so existing NVS payloads without the field opt in.
   bool webappEnabled = true;
   SocialMode socialMode = SocialMode::Ambivert;
-  // Variant identity. Firmware-owned — set by main.cpp's
-  // factory at boot (NVS → LAMP_INITIAL_TYPE build flag → "standard").
+  // Variant identity. Firmware-owned; loaded from NVS at boot.
   // Emitted in asLampJson for app display; settings_blob inbound writes
   // IGNORE this field (firmware authoritative).
   std::string lampType;  // empty string on first boot before any resolution
 };
 
 /**
- * @brief Settings used for the bulb neopixels
- * @property px - the total pixel count
- * @property bpp - bytes per pixel: 4 = RGBW-class strip, 3 = RGB-class strip
- * @property byteOrder - NeoPixel wire byte order. Recognized values:
- *   "GRBW" (4 bpp), "GRB" (3 bpp), "BGR" (3 bpp). Empty string falls back
- *   to a bpp-derived default ("GRBW" for bpp==4, "GRB" otherwise) so old
- *   NVS payloads without the field load unchanged.
- * @property colors - a list of up to 5 colors to use
+ * @brief One physical strip run within a role: its app-editable palette + pixel
+ *        count. Geometry (driver/pin/offset) lives in the variant's StripSpec;
+ *        this is the persisted, editable half.
+ * @property px - 0 = unset; applyDefaults fills from the variant default. See resolveConfiguredPx.
+ */
+struct SegmentSettings {
+  std::string name;
+  uint8_t px = 0;
+  std::vector<Color> colors;
+};
+
+// Role pixel-space size. ≤255 by construction (config_codec::fromJson clamps
+// the sum before boot buffer-sizing).
+inline uint8_t segmentsSumPx(const std::vector<SegmentSettings>& segments) {
+  unsigned total = 0;
+  for (const auto& s : segments) total += s.px;
+  return total > 255 ? 255 : static_cast<uint8_t>(total);
+}
+
+/**
+ * @brief Shade role: an ordered list of named segments.
  */
 class ShadeSettings {
  public:
-  uint8_t px = 0;  // 0 = unset; applyDefaults fills it from the variant default. See resolveConfiguredPx.
-  uint8_t bpp = 4;
-  std::string byteOrder = "";
-  std::vector<Color> colors = {kShadeDefaultColor};
-  bool colorsEditable = true;  // Emitted in asBaseJson/asShadeJson; app hides color picker when false.
+  std::vector<SegmentSettings> segments = {{"Shade", 0, {kShadeDefaultColor}}};
+  bool colorsEditable = true;  // Emitted in asShadeJson; app hides color picker when false.
+
+  uint8_t sumPx() const { return segmentsSumPx(segments); }
+  // Representative palette (HELLO/greet/adv): the broadcast segment, first.
+  std::vector<Color>& broadcastColors() { return segments.front().colors; }
+  const std::vector<Color>& broadcastColors() const { return segments.front().colors; }
 };
 
 /**
- * @brief Settings used for the base neopixels
- * @property px - the total pixel count
- * @property bpp - bytes per pixel: 4 = RGBW-class strip, 3 = RGB-class strip
- * @property byteOrder - NeoPixel wire byte order; see ShadeSettings.
- * @property colors - a list of up to 5 colors to use
- * @property knockoutPixels - a list of knockout pixels to profile the lamp base
- * @property ac - the preferred color index in a gradient
+ * @brief Base role: an ordered list of named segments, plus base-only knockout
+ *        profile + active-color index.
+ * @property knockoutPixels - per-pixel brightness profile across the whole role
+ * @property ac - the preferred color index in the broadcast segment's gradient
  */
 class BaseSettings {
  public:
-  uint8_t px = 0;  // 0 = unset; applyDefaults fills it from the variant default. See resolveConfiguredPx.
-  uint8_t bpp = 4;
-  std::string byteOrder = "";
-  std::vector<Color> colors = {kBaseDefaultColor};
+  std::vector<SegmentSettings> segments = {{"Base", 0, {kBaseDefaultColor}}};
   std::vector<uint8_t> knockoutPixels = std::vector<uint8_t>(50, (uint8_t)100);
   uint8_t ac = 0;
-  bool colorsEditable = true;  // Emitted in asBaseJson/asShadeJson; app hides color picker when false.
+  bool colorsEditable = true;  // Emitted in asBaseJson; app hides color picker when false.
+
+  uint8_t sumPx() const { return segmentsSumPx(segments); }
+  std::vector<Color>& broadcastColors() { return segments.front().colors; }
+  const std::vector<Color>& broadcastColors() const { return segments.front().colors; }
 };
 
 // Resolve a loaded pixel count against a variant default. A persisted px

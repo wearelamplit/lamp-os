@@ -21,7 +21,6 @@ uint32_t clampDelayMs(uint32_t v) {
 
 void serializeInvocation(const ExpressionInvocation& inv, std::string& out) {
   JsonDocument doc;
-  doc["char"] = "triggerExpression";
   doc["type"] = inv.type;
   doc["target"] = inv.target;
   doc["delayMs"] = inv.delayMs;
@@ -37,22 +36,6 @@ void serializeInvocation(const ExpressionInvocation& inv, std::string& out) {
   }
 
   serializeJson(doc, out);
-}
-
-// True when `s` looks like a 9-char #RRGGBBWW string we can safely hand to
-// hexStringToColor (which calls std::stoul, throwing on non-hex chars —
-// payload bytes are attacker-reachable over ESP-NOW so we validate here).
-static bool isValidColorHex(const char* s) {
-  if (!s) return false;
-  if (s[0] != '#') return false;
-  for (int i = 1; i < 9; i++) {
-    const char c = s[i];
-    if (c == '\0') return false;
-    const bool ok = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') ||
-                    (c >= 'a' && c <= 'f');
-    if (!ok) return false;
-  }
-  return s[9] == '\0';
 }
 
 bool parseInvocation(JsonObjectConst doc, ExpressionInvocation& out) {

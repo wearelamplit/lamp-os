@@ -10,6 +10,7 @@ import '../../../core/widgets/friendly_error.dart';
 import '../../../core/widgets/section_header.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/application/control_state.dart';
+import '../../control/application/dev_mode.dart';
 import '../../control/application/expression_draft.dart';
 import '../../control/domain/lamp_color.dart';
 import '../../control/domain/sections.dart';
@@ -17,9 +18,7 @@ import '../../control/presentation/widgets/color_picker_sheet.dart';
 import '../../control/presentation/widgets/connecting_view.dart';
 import '../../control/presentation/widgets/connection_banner.dart';
 import '../../control/presentation/widgets/lamp_color_swatch.dart';
-import '../../../core/widgets/interval_range_slider.dart';
-import '../domain/expression_interval_math.dart';
-import '../domain/expression_meta.dart';
+import '../domain/expression_presentation.dart';
 import 'widgets/expression_params_panel.dart';
 
 class ExpressionEditorScreen extends ConsumerStatefulWidget {
@@ -191,7 +190,9 @@ class _ExpressionEditorScreenState
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(controlNotifierProvider(widget.lampId));
-    final meta = ExpressionTypeMeta.byKey(widget.typeKey);
+    final descriptor = async.value?.catalog?.byId(widget.typeKey);
+    final name = descriptor?.name ?? widget.typeKey;
+    final icon = ExpressionPresentation.forId(widget.typeKey).icon;
     return PopScope(
       canPop: !_dirty,
       onPopInvokedWithResult: (didPop, _) async {
@@ -208,11 +209,9 @@ class _ExpressionEditorScreenState
           onPressed: _leaveGuarded,
           tooltip: 'Back',
         ),
-        // Title carries the expression's friendly name (titlized via
-        // ExpressionTypeMeta) rather than the wire-level snake-case type.
-        title: Text(_existsInState(async.value)
-            ? (meta?.name ?? widget.typeKey)
-            : 'New ${meta?.name ?? widget.typeKey}'),
+        // Title carries the catalog's friendly name rather than the
+        // wire-level snake-case type.
+        title: Text(_existsInState(async.value) ? name : 'New $name'),
         actions: [
           // Test: live-preview the editor's in-flight draft. We can't pass
           // colors/parameters in the test_expression envelope (the firmware
@@ -223,16 +222,19 @@ class _ExpressionEditorScreenState
           // queue against a dead connection.
           Consumer(
             builder: (context, ref, _) {
-              final draft = ref.watch(expressionDraftProvider(
-                  widget.lampId, widget.typeKey, _target));
               final connected = ref.watch(controlNotifierProvider(widget.lampId)
                   .select((a) => a.value?.connected ?? false));
               return IconButton(
                 icon: const Icon(Icons.play_arrow_rounded),
                 tooltip: 'Test',
+                // Read the draft on tap, not on build: watching it here would
+                // force the keep-alive draft to seed during the loading frame,
+                // before the catalog + pixel counts have landed.
                 onPressed: !connected
                     ? null
                     : () async {
+                        final draft = ref.read(expressionDraftProvider(
+                            widget.lampId, widget.typeKey, _target));
                         final notifier = ref.read(
                             controlNotifierProvider(widget.lampId).notifier);
                         // Persist via upsert first so testExpression triggers
@@ -267,6 +269,21 @@ class _ExpressionEditorScreenState
           // but must not change how far we pop on back-out.
           _openedNew ??= isNew;
 
+          // Surfaces this expression can't target, from the catalog. Both
+          // (target 3) is excluded whenever either surface is.
+          final excludedTargets = <int>{};
+          if (descriptor != null) {
+            if (descriptor.excludeTargets.contains('shade')) {
+              excludedTargets.addAll({1, 3});
+            }
+            if (descriptor.excludeTargets.contains('base')) {
+              excludedTargets.addAll({2, 3});
+            }
+          }
+          final colorMax = descriptor?.colors.max ?? 8;
+          // inheritsSurface makes an empty palette valid ("follow surface").
+          final canEmpty = descriptor?.colors.inheritsSurface ?? false;
+
           // Two-row Column: scrolling form body up top, action row pinned
           // to the bottom inside a SafeArea so it stays above the system
           // gesture bar / nav bar on Android. Matches the layout pattern
@@ -282,7 +299,7 @@ class _ExpressionEditorScreenState
                 child: ListView(
                   padding: const EdgeInsets.all(AppSpace.lg),
                   children: [
-                    _Header(meta: meta),
+                    _Header(icon: icon, name: name),
               const SizedBox(height: AppSpace.md),
               // Target switcher. Same chunky-pill UX as the picker so the
               // active target reads at a glance. Tapping a different target
@@ -293,9 +310,10 @@ class _ExpressionEditorScreenState
               _TargetRow(
                 currentTarget: _target,
                 isTaken: (t) =>
-                    t != _target &&
-                    state.expressions.expressions.any((e) =>
-                        e.type == widget.typeKey && e.target == t),
+                    excludedTargets.contains(t) ||
+                    (t != _target &&
+                        state.expressions.expressions.any((e) =>
+                            e.type == widget.typeKey && e.target == t)),
                 onTap: (t) {
                   if (t == _target) return;
                   // Move the in-flight draft onto the new (type, t) slot and
@@ -338,86 +356,60 @@ class _ExpressionEditorScreenState
                         next[i] = picked;
                         _updateDraft((d) => _withColors(d, next));
                       },
-                      // Last swatch is non-removable so the palette can't
-                      // end up empty (firmware would have nothing to draw).
-                      onRemove: draft.colors.length > 1
+                      // Last swatch is removable only when the expression
+                      // inherits the surface palette; otherwise keep at least
+                      // one so the firmware has something to draw.
+                      onRemove: (draft.colors.length > 1 || canEmpty)
                           ? () => _updateDraft((d) =>
                               _withColors(d, [...d.colors]..removeAt(i)))
                           : null,
                     ),
-                  TextButton.icon(
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Add color'),
-                    onPressed: () async {
-                      final picked = await _pickColorLive(
-                          state,
-                          notifier,
-                          const LampColor(r: 0xFF, g: 0xFF, b: 0xFF, w: 0));
-                      if (picked == null) return;
-                      _updateDraft((d) => _withColors(d, [...d.colors, picked]));
-                    },
-                  ),
+                  if (draft.colors.length < colorMax)
+                    TextButton.icon(
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('Add color'),
+                      onPressed: () async {
+                        final picked = await _pickColorLive(
+                            state,
+                            notifier,
+                            const LampColor(r: 0xFF, g: 0xFF, b: 0xFF, w: 0));
+                        if (picked == null) return;
+                        _updateDraft(
+                            (d) => _withColors(d, [...d.colors, picked]));
+                      },
+                    ),
                 ],
               ),
               const SizedBox(height: AppSpace.lg),
 
-              // Hidden for breathing: continuous expressions ignore intervalMin/Max;
-              // only breathSpeed (in the params panel) drives their timing.
-              if (widget.typeKey != 'breathing') ...[
-                const SectionHeader('Trigger interval'),
-                IntervalRangeSlider(
-                  values: RangeValues(
-                    ExpressionIntervalMath.secToPos(draft.intervalMin),
-                    ExpressionIntervalMath.secToPos(draft.intervalMax),
-                  ),
-                  min: ExpressionIntervalMath.secToPos(ExpressionIntervalMath.minSec),
-                  max: ExpressionIntervalMath.secToPos(ExpressionIntervalMath.maxSec),
-                  labelFor: (pos) => _fmtSeconds(ExpressionIntervalMath.posToSec(pos).toDouble()),
-                  leftLabel: 'often',
-                  rightLabel: 'rare',
-                  onChanged: (rv) {
-                    final lo = ExpressionIntervalMath.posToSec(rv.start);
-                    final hi = ExpressionIntervalMath.posToSec(rv.end);
-                    _updateDraft((d) => _withIntervals(d, lo, hi));
+              // Every remaining control (interval, duration, zone, params) is
+              // rendered generically from the firmware catalog descriptor.
+              // Colors + target above are the editor shell's own concern.
+              if (descriptor != null)
+                ExpressionParamsPanel(
+                  descriptor: descriptor,
+                  parameters: draft.parameters,
+                  intervalMin: draft.intervalMin,
+                  intervalMax: draft.intervalMax,
+                  onIntervalChanged: (lo, hi) =>
+                      _updateDraft((d) => _withIntervals(d, lo, hi)),
+                  pixelCount: _target == 1
+                      ? state.shade.px
+                      : _target == 2
+                          ? state.base.px
+                          : (state.shade.px > state.base.px
+                              ? state.shade.px
+                              : state.base.px),
+                  devMode: ref.watch(devModeOnProvider),
+                  onChanged: (p) => _updateDraft((d) => _withParameters(d, p)),
+                  onZonePreview: (lo, hi) {
+                    if (draft.colors.isEmpty) return;
+                    notifier.previewZoneHighlight(
+                        lo, hi, _target, draft.colors.first);
                   },
+                  onZonePreviewEnd: () =>
+                      unawaited(notifier.completeExpressionTest()),
                 ),
-                const SizedBox(height: AppSpace.lg),
-              ],
-
-              // Per-type parameters (replaces the old JSON text field).
-              // devMode gates the cascade controls — those live behind
-              // the persisted devMode flag (separate from session-only
-              // advanced unlock so regular advanced users don't see the
-              // power-user mesh fan-out toggles).
-              ExpressionParamsPanel(
-                type: draft.type,
-                parameters: draft.parameters,
-                devMode: ref.watch(
-                  controlNotifierProvider(widget.lampId).select(
-                      (async) => async.value?.lamp.devMode ?? false),
-                ),
-                onChanged: (p) => _updateDraft((d) => _withParameters(d, p)),
-              ),
-              // Wisp-override gate (`disabledDuringWispOverride`) is no
-              // longer a user-facing toggle — the per-type default in
-              // ExpressionTypeMeta.defaultDisabledDuringWispOverride is
-              // authoritative (breathing + shifty pause during wisp
-              // control; glitchy + pulse don't). The field is still
-              // wired through the data model so a future custom-lamps
-              // power-user surface can re-expose it; expressions_screen
-              // continues to grey expressions whose default says they
-              // pause during a wisp-active session.
-              if (meta != null) ...[
-                const SizedBox(height: AppSpace.xl),
-                Text(
-                  meta.description,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    fontStyle: FontStyle.italic,
-                    height: 1.35,
-                  ),
-                ),
-              ],
                   ],
                 ),
               ),
@@ -550,8 +542,9 @@ class _ExpressionEditorScreenState
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.meta});
-  final ExpressionTypeMeta? meta;
+  const _Header({required this.icon, required this.name});
+  final IconData icon;
+  final String name;
 
   @override
   Widget build(BuildContext context) {
@@ -565,20 +558,19 @@ class _Header extends StatelessWidget {
       ),
       child: Row(
         children: [
-          if (meta != null)
-            Container(
-              width: 40, // deliberate dimension, not spacing
-              height: 40,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: colorScheme.onPrimaryContainer,
-              ),
-              child: Icon(meta!.icon, color: colorScheme.onPrimary),
+          Container(
+            width: 40, // deliberate dimension, not spacing
+            height: 40,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: colorScheme.onPrimaryContainer,
             ),
-          if (meta != null) const SizedBox(width: AppSpace.md),
+            child: Icon(icon, color: colorScheme.onPrimary),
+          ),
+          const SizedBox(width: AppSpace.md),
           Expanded(
             child: Text(
-              meta?.name ?? '(unknown)',
+              name,
               style: Theme.of(context).textTheme.titleMedium,
             ),
           ),
@@ -704,14 +696,6 @@ class _TargetButton extends StatelessWidget {
       ),
     );
   }
-}
-
-String _fmtSeconds(double seconds) {
-  if (seconds < 90) return '${seconds.round()}s';
-  final m = seconds / 60;
-  if (m < 90) return '${m.round()}m';
-  final h = m / 60;
-  return '${h.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '')}h';
 }
 
 class _ColorChip extends StatelessWidget {

@@ -10,7 +10,16 @@
 #include "core/behavior_context.hpp"
 #include "core/compositor.hpp"
 
+// Owned by lamp.cpp; the private lamp_internal.hpp extern isn't includable
+// from here, so mirror the declaration like ble_control.cpp does.
+extern lamp::ExpressionManager expressionManager;
+
 namespace lamp {
+
+const std::string& expressionCatalogJson() {
+  static const std::string cat = expressionManager.registry().serializeCatalog();
+  return cat;
+}
 
 void ExpressionManager::begin(FrameBuffer* shade, FrameBuffer* base) {
   shadeBuffer = shade;
@@ -37,39 +46,22 @@ void ExpressionManager::loadFromConfig(const ExpressionSettings& settings) {
 }
 
 
-// Factory: build an Expression subclass instance for `type` bound to `buffer`,
-// configured with the given palette / interval range / target / params.
-// Returns nullptr for unknown types. Shared by addExpression (configured
-// entries) and triggerInvocation (transient one-shots from remote cascades) —
-// neither path needs to know the per-subclass constructor arguments.
-static std::unique_ptr<Expression> makeExpression(
+std::unique_ptr<Expression> ExpressionManager::makeExpression(
     const std::string& type, FrameBuffer* buffer,
     const std::vector<Color>& colors,
     uint32_t intervalMin, uint32_t intervalMax,
     ExpressionTarget target,
     const std::map<std::string, uint32_t>& parameters) {
-  std::unique_ptr<Expression> expr;
-  if (type == "glitchy") {
-    auto e = std::make_unique<GlitchyExpression>(buffer, 3);
-    e->configure(colors, intervalMin, intervalMax, target);
-    e->configureFromParameters(parameters);
-    expr = std::move(e);
-  } else if (type == "shifty") {
-    auto e = std::make_unique<ShiftyExpression>(buffer, 120);
-    e->configure(colors, intervalMin, intervalMax, target);
-    e->configureFromParameters(parameters);
-    expr = std::move(e);
-  } else if (type == "pulse") {
-    auto e = std::make_unique<PulseExpression>(buffer, 60);
-    e->configure(colors, intervalMin, intervalMax, target);
-    e->configureFromParameters(parameters);
-    expr = std::move(e);
-  } else if (type == "breathing") {
-    auto e = std::make_unique<BreathingExpression>(buffer, 60);
-    e->configure(colors, intervalMin, intervalMax, target);
-    e->configureFromParameters(parameters);
-    expr = std::move(e);
-  }
+  const ExpressionDescriptor* d = registry_.find(type.c_str());
+  if (!d || !d->make) return nullptr;
+
+  std::unique_ptr<Expression> expr(d->make(buffer));
+  expr->configure(colors, intervalMin, intervalMax, target);
+
+  std::map<std::string, uint32_t> effective = parameters;
+  registry_.applyDefaults(*d, effective,
+                          (buffer && buffer->pixelCount > 0) ? buffer->pixelCount : 1);
+  expr->configureFromParameters(effective);
   return expr;
 }
 
@@ -116,63 +108,24 @@ void ExpressionManager::setCompositor(Compositor* compositor) {
   }
 }
 
-void ExpressionManager::maybeCascade(const ExpressionEntry& entry) {
-  if (!meshLink_ || !entry.expression) {
-#ifdef LAMP_DEBUG
-    Serial.printf("[cascade] %s: skip (no meshLink=%d no expression=%d)\n",
-                  entry.config.type.c_str(), !meshLink_, !entry.expression);
-#endif
-    return;
-  }
-  if (entry.config.getParameter(kParamCascadeEnabled, 0) == 0) {
-#ifdef LAMP_DEBUG
-    Serial.printf("[cascade] %s: skip (cascadeEnabled=0)\n",
-                  entry.config.type.c_str());
-#endif
-    return;
-  }
+void ExpressionManager::maybeCascade(const ExpressionEntry& entry,
+                                     const uint8_t* excludeMac) {
+  if (!meshLink_ || !entry.expression) return;
+  if (entry.config.getParameter(kParamCascadeEnabled, 0) == 0) return;
 
-  // "Cascade once per logical trigger" invariant. A TARGET_BOTH expression
-  // has TWO entries (shade + base) that fire independently from
-  // Expression::control() in the same loop tick; each calls
-  // onExpressionFired -> maybeCascade. Without this gate, receivers see
-  // two cascade invocations and the mesh does 2x the work for one logical
-  // trigger. Keying on (type, intervalIdx=target) is enough because both
-  // halves of a TARGET_BOTH config share the same target value, while a
-  // separate TARGET_SHADE-only entry of the same type has a distinct
-  // target and still gets its own cascade.
   const uint32_t intervalIdx = static_cast<uint32_t>(entry.expression->getTarget());
   const uint32_t nowMs = millis();
-  if (recentCascades_.seen(entry.config.type, intervalIdx, nowMs)) {
-#ifdef LAMP_DEBUG
-    Serial.printf("[cascade] %s: skip (RecentCascade dedup, target=%u)\n",
-                  entry.config.type.c_str(), (unsigned)intervalIdx);
-#endif
-    return;  // dedup: same logical trigger already cascaded
-  }
+  if (recentCascades_.seen(entry.config.type, intervalIdx, nowMs)) return;
   recentCascades_.record(entry.config.type, intervalIdx, nowMs);
 
   const uint32_t staggerMs = entry.config.getParameter(kParamCascadeStaggerMs, 0);
 
-  // Build the invocation payload (JSON, serialised once).
   ExpressionInvocation inv;
   inv.type = entry.config.type;
   inv.colors = entry.expression->getColors();
   inv.target = static_cast<uint8_t>(entry.expression->getTarget());
   inv.parameters = parametersWithoutCascadeKeys(entry.config.parameters);
-  // inv.delayMs stays 0 — per-peer stagger rides the wire as the
-  // MSG_EVENT staggerEntries list, NOT inside the JSON payload. Receivers
-  // pull their own delayMs from the stagger list at recv time.
 
-  std::string json;
-  serializeInvocation(inv, json);
-
-  // Build the RSSI-sorted stagger list FIRST — the payload budget depends
-  // on how many stagger entries actually ride the wire (small meshes have
-  // more headroom). Take a snapshot, filter out self + peers with no MAC,
-  // sort by lastRssi descending (strongest signal = physically closest →
-  // fires earliest in the wave), cap at kMaxStaggerEntries so the wire
-  // frame stays bounded.
   auto peers = nearbyLamps.getReachableViaEspNow(LAMP_PRUNE_TIME_MS);
   uint8_t myMac[6];
   meshLink_->getMyMac(myMac);
@@ -181,106 +134,48 @@ void ExpressionManager::maybeCascade(const ExpressionEntry& entry) {
   for (const auto& p : peers) {
     if (!p.hasMac) continue;
     if (std::memcmp(p.mac, myMac, 6) == 0) continue;
+    if (excludeMac && std::memcmp(p.mac, excludeMac, 6) == 0) continue;
     targets.push_back(p);
   }
   std::sort(targets.begin(), targets.end(),
             [](const NearbyLamp& a, const NearbyLamp& b) {
-              // Higher RSSI = stronger signal → fires first. Unknown
-              // (-127) sorts to the back automatically.
               return a.lastRssi > b.lastRssi;
             });
-  if (targets.size() > lamp_protocol::kMaxStaggerEntries) {
-    targets.resize(lamp_protocol::kMaxStaggerEntries);
-  }
-  const uint8_t numStagger = static_cast<uint8_t>(targets.size());
 
-  // Dynamic payload budget against the actual stagger count. 2-lamp meshes
-  // get ~226 B of headroom; fully-populated (12-peer) meshes get the
-  // worst-case 138. Without this, the static 138 cap dropped any glitchy
-  // cascade (~151 B real payload) even on a 1-peer mesh — silent failure
-  // observed in the field, see live trace 2026-06-03.
-  const size_t maxPayload = lamp_protocol::maxEventPayloadFor(numStagger);
-  if (json.size() > maxPayload) {
-#ifdef LAMP_DEBUG
-    Serial.printf("[cascade] %s: payload %u > max %u (peers=%u), dropping\n",
-                  entry.config.type.c_str(),
-                  (unsigned)json.size(),
-                  (unsigned)maxPayload,
-                  (unsigned)numStagger);
-#endif
-    return;
-  }
+  if (targets.empty()) return;
+  if (meshLink_->isOtaInProgress()) return;
 
-  // Pack the wire-shape arrays. Each per-peer delay = (i + 1) * staggerMs,
-  // clamped to kMaxDelayMs defensively. i fits in uint8_t (we capped at 12).
-  //
-  // The (i + 1) offset means the closest peer (i=0) fires staggerMs AFTER
-  // the sender — not at the same instant. Without the offset, a 2-lamp
-  // mesh fires both lamps simultaneously regardless of staggerMs, which
-  // defeats the "wave from the trigger source outward" UX intent.
-  // Observed 2026-06-03: with staggerMs=800 and 1 peer, melonie fired
-  // at t=0 alongside jacko instead of at t=800ms.
-  uint8_t staggerMacs[lamp_protocol::kMaxStaggerEntries * 6];
-  uint16_t staggerDelays[lamp_protocol::kMaxStaggerEntries];
-  for (uint8_t i = 0; i < numStagger; ++i) {
-    std::memcpy(&staggerMacs[i * 6], targets[i].mac, 6);
+  for (size_t i = 0; i < targets.size(); ++i) {
     const uint32_t d = static_cast<uint32_t>(i + 1) * staggerMs;
-    staggerDelays[i] = static_cast<uint16_t>(
-        d > kMaxDelayMs ? kMaxDelayMs : d);
+    inv.delayMs = d > kMaxDelayMs ? kMaxDelayMs : d;
+    std::string json;
+    serializeInvocation(inv, json);
+    if (json.size() > lamp_protocol::COMMAND_MAX_PAYLOAD) continue;
+    meshLink_->sendCommand(targets[i].mac,
+                           reinterpret_cast<const uint8_t*>(json.data()),
+                           json.size());
   }
+}
 
-#ifdef LAMP_DEBUG
-  Serial.printf("[cascade] %s: broadcasting MSG_EVENT (target=%u staggerMs=%u peers=%u payload=%u/%u)\n",
-                entry.config.type.c_str(), (unsigned)intervalIdx,
-                (unsigned)staggerMs, (unsigned)numStagger,
-                (unsigned)json.size(), (unsigned)maxPayload);
-  for (uint8_t i = 0; i < numStagger; ++i) {
-    Serial.printf("[cascade]   peer rssi=%d delayMs=%u\n",
-                  (int)targets[i].lastRssi, (unsigned)staggerDelays[i]);
-  }
-#endif
+void ExpressionManager::emitEvent(const ExpressionEntry& entry) {
+  if (!meshLink_ || !entry.expression) return;
+  if (meshLink_->isOtaInProgress()) return;
 
-  // Build the MSG_EVENT frame and broadcast it twice, back-to-back. ESP-NOW
-  // broadcasts have no link-layer ACK, so the duplicate is best-effort
-  // insurance against a single dropped frame (BLE adv burst, brief radio
-  // contention, etc.). Both copies share the same seq; receivers'
-  // eventDedup_ collapses the second copy by (sourceMac, seq) so the
-  // dispatch only fires once.
-  //
-  // The previous implementation inserted `delay(20)` between the two
-  // sends to space them across separate RF transient windows. That was
-  // dropped 2026-06-03 because the delay() blocked Core 1 and stalled the
-  // sender's compositor render — sender's own LEDs visibly lagged
-  // receivers'. Back-to-back (no delay) loses the across-RF-window
-  // spread but keeps the "two TX attempts" resilience and doesn't block.
-  uint8_t frame[lamp_protocol::EVENT_MAX_SIZE];
-  const uint16_t seq = meshLink_->nextEventSeq();
-  const size_t frameLen = lamp_protocol::buildEvent(
-      frame, sizeof(frame), seq, myMac,
-      static_cast<uint8_t>(lamp_protocol::EventKind::ExpressionTriggered),
-      staggerMacs, staggerDelays, numStagger,
-      reinterpret_cast<const uint8_t*>(json.data()),
-      static_cast<uint16_t>(json.size()));
-  if (frameLen == 0) {
-#ifdef LAMP_DEBUG
-    Serial.printf("[cascade] %s: buildEvent failed (frameLen=0)\n",
-                  entry.config.type.c_str());
-#endif
-    return;
-  }
-  // Mesh quiesce during gossip OTA: a 1.4 MB chunk stream is fragile under
-  // BLE coex; suppress MSG_EVENT cascade broadcasts while we're mid-flow
-  // so the chunk stream gets the channel time. The cascade resumes once
-  // the OTA flow exits (Done/Failed → Idle).
-  if (meshLink_->isOtaInProgress()) {
-#ifdef LAMP_DEBUG
-    Serial.printf("[cascade] %s: suppressed during OTA flow\n",
-                  entry.config.type.c_str());
-#endif
-    return;
-  }
-  meshLink_->broadcastRaw(frame, frameLen);
-  meshLink_->broadcastRaw(frame, frameLen);
+  const uint32_t intervalIdx = static_cast<uint32_t>(entry.expression->getTarget());
+  const uint32_t nowMs = millis();
+  if (recentEvents_.seen(entry.config.type, intervalIdx, nowMs)) return;
+  recentEvents_.record(entry.config.type, intervalIdx, nowMs);
+
+  ExpressionInvocation inv;
+  inv.type = entry.config.type;
+  inv.colors = entry.expression->getColors();
+  inv.target = static_cast<uint8_t>(entry.expression->getTarget());
+  inv.parameters = parametersWithoutCascadeKeys(entry.config.parameters);
+
+  std::string json;
+  serializeInvocation(inv, json);
+  if (json.size() > lamp_protocol::EVENT_MAX_PAYLOAD) return;
+  meshLink_->sendEvent(reinterpret_cast<const uint8_t*>(json.data()), json.size());
 }
 
 std::vector<AnimatedBehavior*> ExpressionManager::getBehaviors() {
@@ -320,7 +215,7 @@ bool ExpressionManager::triggerExpression(const std::string& type) {
   // Cascade once per logical trigger, not once per entry — a TARGET_BOTH
   // expression has two entries (shade + base) but should fan out a single
   // invocation that receivers' own managers expand back to both sides.
-  if (firstFired) maybeCascade(*firstFired);
+  if (firstFired) { maybeCascade(*firstFired); emitEvent(*firstFired); }
   return triggered;
 }
 
@@ -336,8 +231,42 @@ bool ExpressionManager::triggerExpression(const std::string& type, ExpressionTar
     }
   }
   suppressCascade_ = false;
-  if (firstFired) maybeCascade(*firstFired);
+  if (firstFired) { maybeCascade(*firstFired); emitEvent(*firstFired); }
   return triggered;
+}
+
+void ExpressionManager::broadcastInvocation(const ExpressionInvocation& inv,
+                                            const uint8_t* excludeMac) {
+  if (!shadeBuffer || !baseBuffer) return;
+
+  ExpressionTarget target = static_cast<ExpressionTarget>(inv.target);
+  FrameBuffer* buffer = (target == TARGET_BASE) ? baseBuffer : shadeBuffer;
+
+  ExpressionEntry entry;
+  entry.type = inv.type;
+  entry.config.type = inv.type;
+  entry.config.colors = inv.colors;
+  entry.config.target = inv.target;
+  entry.config.parameters = inv.parameters;
+  entry.config.setParameter(kParamCascadeEnabled, 1);
+  entry.expression = makeExpression(inv.type, buffer, inv.colors,
+                                    entry.config.intervalMin,
+                                    entry.config.intervalMax,
+                                    target, entry.config.parameters);
+  if (!entry.expression) return;
+
+  maybeCascade(entry, excludeMac);
+  emitEvent(entry);
+}
+
+void ExpressionManager::sendInvocationTo(const uint8_t mac[6],
+                                         const ExpressionInvocation& inv) {
+  if (!meshLink_) return;
+  std::string json;
+  serializeInvocation(inv, json);
+  if (json.size() > lamp_protocol::COMMAND_MAX_PAYLOAD) return;
+  meshLink_->sendCommand(mac, reinterpret_cast<const uint8_t*>(json.data()),
+                         json.size());
 }
 
 void ExpressionManager::onExpressionFired(Expression* e) {
@@ -345,6 +274,7 @@ void ExpressionManager::onExpressionFired(Expression* e) {
   for (auto& entry : expressions) {
     if (entry.expression.get() == e) {
       maybeCascade(entry);
+      emitEvent(entry);
       return;
     }
   }
@@ -406,7 +336,7 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
                                /*intervalMin*/ 60, /*intervalMax*/ 900,
                                invTarget, inv.parameters);
     if (!expr) continue;  // unknown type
-    expr->autoTriggerEnabled = false;  // pure one-shot — never re-fires itself
+    expr->autoTriggerEnabled = false;  // transients fire once; the STOPPED-state auto-retrigger and any onComplete re-chain are gated off
 
     Expression* raw = expr.get();
     if (compositor_) compositor_->addBehavior(raw);
@@ -516,121 +446,6 @@ void ExpressionManager::removeExpression(const std::string& type, ExpressionTarg
     } else {
       ++it;
     }
-  }
-}
-
-// Cheap "is `key` present as a JSON string value" peek. Walks `payload`
-// (NOT NUL-terminated; bounded by payloadLen) looking for `"key":"value"`
-// and copies the value substring into `outValue` up to outMaxLen-1 chars.
-// Returns true on match. Used by tryHandleExpressionEvent to extract the
-// expression type without paying for a full JsonDocument parse — the
-// payload may be dropped seconds later if the local lamp doesn't have
-// that type cascaded.
-//
-// Doesn't handle escapes or whitespace inside the key/value — fine for
-// our serializeInvocation output which is single-line ArduinoJson with
-// no fancy formatting. Worst case a false negative leaves us with the
-// full parse, same as the legacy path.
-static bool peekJsonStringField(const uint8_t* payload, uint16_t payloadLen,
-                                const char* key,
-                                char* outValue, size_t outMaxLen) {
-  if (!payload || !key || !outValue || outMaxLen == 0) return false;
-  const size_t keyLen = std::strlen(key);
-  // Need at minimum: `"key":""` which is keyLen + 6 chars (quotes + colon
-  // + empty value pair). Guard so the index math below can't underflow.
-  if (payloadLen < keyLen + 6) return false;
-  // Scan for `"key":"`. Stop early enough that the lookahead can't read
-  // off the end.
-  const size_t needleLen = keyLen + 4;  // "key":"
-  for (size_t i = 0; i + needleLen <= payloadLen; ++i) {
-    if (payload[i] != '"') continue;
-    if (std::memcmp(&payload[i + 1], key, keyLen) != 0) continue;
-    if (payload[i + 1 + keyLen] != '"') continue;
-    if (payload[i + 2 + keyLen] != ':') continue;
-    if (payload[i + 3 + keyLen] != '"') continue;
-    // Found it. Copy until the next unescaped `"`, capping at outMaxLen-1.
-    size_t valueStart = i + 4 + keyLen;
-    size_t w = 0;
-    for (size_t j = valueStart; j < payloadLen && w + 1 < outMaxLen; ++j) {
-      if (payload[j] == '"') {
-        outValue[w] = '\0';
-        return true;
-      }
-      outValue[w++] = static_cast<char>(payload[j]);
-    }
-    // Ran off the buffer without closing quote — bad payload.
-    return false;
-  }
-  return false;
-}
-
-void ExpressionManager::tryHandleExpressionEvent(const uint8_t sourceMac[6],
-                                                  uint16_t suppliedDelayMs,
-                                                  const uint8_t* payload,
-                                                  uint16_t payloadLen) {
-  if (!payload || payloadLen == 0) return;
-
-  // 1) Cheap peek for the type. Used as the RecentCascade dedup key so we
-  // can drop a duplicate cascade of the same type without paying for the
-  // full JSON parse. The JSON we emit always carries `type`; an attacker-
-  // crafted MSG_EVENT without one is ignored silently.
-  //
-  // No local-config consult: cascade is sender-authoritative. The wire
-  // payload carries the full ExpressionInvocation (type, target, colors,
-  // parameters), and triggerInvocation builds a fresh transient Expression
-  // from it. The receiver's own `expressions` vector is intentionally
-  // irrelevant — keeps the cascade behavior matching the legacy CONTROL_OP
-  // model ("execute this expression once and forget it"). A receiver-side
-  // cascadeEnabled gate that filters on the receiver's own expressions
-  // silently breaks this — don't reintroduce one.
-  char type[64] = {0};
-  if (!peekJsonStringField(payload, payloadLen, "type", type, sizeof(type))) {
-#ifdef LAMP_DEBUG
-    Serial.println("[event] no type peek, drop");
-#endif
-    return;
-  }
-
-  // 2) RecentCascade dedup. Keep the same key shape the local-trigger
-  // path uses (type, target). We don't know `target` yet without the
-  // full parse, but the wire format defines TARGET_BOTH as 3 and that's
-  // what cascade events almost always carry. Use a per-type bucket
-  // keyed at intervalIdx=0 to mirror the simpler remote-side dedup —
-  // suppression scope is "same type from any sender within window."
-  const uint32_t nowMs = millis();
-  if (recentCascades_.seen(std::string(type), 0, nowMs)) {
-#ifdef LAMP_DEBUG
-    Serial.printf("[event] type=%s recent-cascade dedup\n", type);
-#endif
-    return;
-  }
-  recentCascades_.record(std::string(type), 0, nowMs);
-
-  // 3) Full parse now that we've confirmed we'll act on it.
-  JsonDocument doc;
-  if (deserializeJson(doc, payload, payloadLen) != DeserializationError::Ok) {
-#ifdef LAMP_DEBUG
-    Serial.println("[event] full parse failed");
-#endif
-    return;
-  }
-  ExpressionInvocation inv;
-  if (!parseInvocation(doc.as<JsonObjectConst>(), inv)) {
-#ifdef LAMP_DEBUG
-    Serial.println("[event] parseInvocation failed");
-#endif
-    return;
-  }
-
-  // 4) Defense-in-depth: clamp the supplied delay. parseInvocation clamps
-  // `inv.delayMs` but the stagger-list-delivered delay is a separate
-  // attacker-controlled quantity. kMaxDelayMs (10s) is plenty for any
-  // realistic cascade UX.
-  const uint32_t delayMs = clampDelayMs(static_cast<uint32_t>(suppliedDelayMs));
-  if (delayMs == 0) {
-    triggerInvocation(inv, sourceMac);
-  } else {
-    enqueueDelayedInvocation(inv, sourceMac, delayMs);
   }
 }
 

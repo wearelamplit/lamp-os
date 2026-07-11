@@ -4,7 +4,7 @@
 
 #include "firmware_signature.hpp"
 #include "components/network/ble/ble_control.hpp"  // pauseRadioForOta / resumeRadioAfterOta
-#include "core/ota_quiet_mode.hpp"     // enterQuiet / exitQuiet
+#include "components/firmware/ota_quiet_mode.hpp"     // enterQuiet / exitQuiet
 #include "components/network/mesh/mesh_link.hpp"
 #include "../../version.hpp"
 

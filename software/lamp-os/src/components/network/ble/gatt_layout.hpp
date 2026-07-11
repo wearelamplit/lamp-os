@@ -27,7 +27,7 @@ constexpr const char* CHAR_SCHEMA_VERSION = "5f64f4ea-d6d9-4a44-9b3f-3a8d6f7e6b4
 // New in schema v2 (tail). Binary blob of claimed lamp MACs from the wisp.
 constexpr const char* CHAR_WISP_CLAIMS    = "5f64f4eb-d6d9-4a44-9b3f-3a8d6f7e6b40";
 
-constexpr uint8_t kGattSchemaVersion = 2;
+constexpr uint8_t kGattSchemaVersion = 4;
 
 // Property bits — local mirror of the NimBLE flags so this header stays
 // dependency-free. Only the bits that affect the handle layout matter

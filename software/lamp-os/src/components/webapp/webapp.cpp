@@ -18,6 +18,7 @@
 
 #include "components/network/transport/wifi.hpp"
 #include "config/config_types.hpp"
+#include "expressions/expression_manager.hpp"
 #include "util/color.hpp"
 
 // Same Core 0 → Core 1 drain handoff the BLE writes use; mutating config
@@ -72,6 +73,10 @@ static void buildSettingsSnapshot() {
 static void handleGetSettings(AsyncWebServerRequest* req) {
   bumpDeadline();
   req->send(200, "application/json", s_settingsJson);
+}
+
+static void handleGetExpressions(AsyncWebServerRequest* req) {
+  req->send(200, "application/json", lamp::expressionCatalogJson().c_str());
 }
 
 static void handlePutSettings(AsyncWebServerRequest* req, JsonVariant& json) {
@@ -162,6 +167,7 @@ void begin(lamp::Config& config) {
   s_server->addHandler(s_ws);
 
   s_server->on("/api/settings", HTTP_GET, handleGetSettings);
+  s_server->on("/api/expressions", HTTP_GET, handleGetExpressions);
 
   auto* putHandler =
       new AsyncCallbackJsonWebHandler("/api/settings", handlePutSettings);

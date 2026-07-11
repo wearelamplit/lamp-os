@@ -13,7 +13,8 @@ import '../../control/domain/sections.dart';
 import '../../control/presentation/widgets/connecting_view.dart';
 import '../../control/presentation/widgets/connection_banner.dart';
 import '../../wisp/application/wisp_notifier.dart';
-import '../domain/expression_meta.dart';
+import '../domain/expression_catalog.dart';
+import '../domain/expression_presentation.dart';
 
 class ExpressionsScreen extends ConsumerWidget {
   const ExpressionsScreen({super.key, required this.lampId});
@@ -37,6 +38,8 @@ class ExpressionsScreen extends ConsumerWidget {
     ));
     final connected = connState.value?.connected ?? true;
     final attempt = connState.value?.attempt ?? 0;
+    final catalog = ref.watch(controlNotifierProvider(lampId)
+        .select((a) => a.value?.catalog));
     return Scaffold(
       body: async.when(
         loading: () => ConnectingView(deviceId: lampId),
@@ -71,6 +74,9 @@ class ExpressionsScreen extends ConsumerWidget {
                     return _ExpressionTile(
                       lampId: lampId,
                       expression: e,
+                      descriptor: catalog?.byId(e.type),
+                      title: catalog?.byId(e.type)?.name ??
+                          (e.type.isEmpty ? '(unnamed)' : e.type),
                       onToggle: (v) async {
                         await notifier.upsertExpression(ExpressionConfig(
                           type: e.type,
@@ -176,6 +182,8 @@ class _ExpressionTile extends ConsumerWidget {
   const _ExpressionTile({
     required this.lampId,
     required this.expression,
+    required this.descriptor,
+    required this.title,
     required this.onToggle,
     required this.onConfirmDelete,
     required this.onDelete,
@@ -184,6 +192,8 @@ class _ExpressionTile extends ConsumerWidget {
 
   final String lampId;
   final ExpressionConfig expression;
+  final ExpressionDescriptor? descriptor;
+  final String title;
   final ValueChanged<bool> onToggle;
   final Future<bool> Function() onConfirmDelete;
   final Future<void> Function() onDelete;
@@ -197,21 +207,17 @@ class _ExpressionTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final meta = ExpressionTypeMeta.byKey(expression.type);
-    final title = meta?.name ??
-        (expression.type.isEmpty ? '(unnamed)' : expression.type);
-    // Per-expression wisp-gating. Wisp-disabled-ness is a type-property
-    // (refactor 2026-06-13 — removed the per-instance toggle), so we look
-    // it up via ExpressionTypeMeta. Watch a tiny slice of wispStatus
-    // (just `controlling`) so the row greys when a wisp takes over and
-    // un-greys when the wisp releases.
+    final presentation = ExpressionPresentation.forId(expression.type);
+    // Per-expression wisp-gating. Watch a tiny slice of wispStatus (just
+    // `controlling`) so the row greys when a wisp takes over and un-greys
+    // when the wisp releases.
     final wispControlling = ref.watch(
       wispNotifierProvider(lampId).select(
         (async) => async.value?.controlling ?? false,
       ),
     );
     final muted =
-        (meta?.defaultDisabledDuringWispOverride ?? false) && wispControlling;
+        (descriptor?.pausesWispOverride ?? false) && wispControlling;
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     return Dismissible(
@@ -254,7 +260,7 @@ class _ExpressionTile extends ConsumerWidget {
                     shape: BoxShape.circle,
                     color: colorScheme.onPrimaryContainer,
                   ),
-                  child: Icon(meta?.icon ?? Icons.auto_awesome,
+                  child: Icon(presentation.icon,
                       size: 18, color: colorScheme.onPrimary),
                 ),
                 const SizedBox(width: AppSpace.md),

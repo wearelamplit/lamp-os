@@ -9,7 +9,6 @@ export interface LampConfig {
   password?: string
   brightness: number
   setup: boolean
-  colorsRandomized: boolean
   advancedEnabled: boolean
   devMode: boolean
   webappEnabled: boolean
@@ -57,4 +56,64 @@ export interface Config {
   shade: ShadeConfig
   expressions: Expression[]
   homeMode: HomeMode
+}
+
+// Expression catalog served by the firmware at GET /api/expressions. The web
+// UI renders a subset of these archetypes and ignores the rest (zones, invert,
+// requiresZoning params); un-rendered instance keys survive save via merge.
+
+// Resolves against a surface's pixel count: literal, whole strip, or capped.
+export type Bound = number | { rel: 'pixels'; cap?: number }
+
+export interface CatalogColors {
+  max: number
+  label?: string
+  help?: string
+  inheritsSurface?: boolean
+}
+
+export interface CatalogRange {
+  min: number
+  max: number
+  step: number
+  unit?: string
+  default: [number, number]
+  label?: string
+  minKey?: string
+  maxKey?: string
+}
+
+export interface CatalogEnumOption {
+  value: number
+  label: string
+  zoning?: boolean
+}
+
+export interface CatalogParam {
+  key: string
+  type: 'int' | 'enum'
+  label: string
+  min?: number
+  max?: Bound
+  step?: number
+  default?: Bound
+  unit?: string
+  invert?: boolean
+  leftLabel?: string
+  rightLabel?: string
+  requiresZoning?: boolean
+  options?: CatalogEnumOption[]
+}
+
+export interface ExpressionDescriptor {
+  id: string
+  name: string
+  continuous: boolean
+  pausesWispOverride?: boolean
+  colors: CatalogColors
+  interval?: CatalogRange
+  duration?: CatalogRange
+  zone?: { optional?: boolean }
+  excludeTargets?: string[]
+  params?: CatalogParam[]
 }

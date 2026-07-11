@@ -39,6 +39,19 @@ struct WispCache {
   uint8_t claimedLampMacs[lamp_protocol::kMaxWispClaimEntries][6] = {};
   uint8_t claimedCount = 0;
   uint32_t lastClaimMs = 0;
+
+  // Per-lamp paint colors from MSG_WISP_PAINT. Keyed by lampMac; count
+  // matches WISP_PAINT_MAX_ENTRIES. Aged by lastPaintMs via the same
+  // kWispClaimStaleMs window as the claim cache.
+  struct PaintEntry {
+    uint8_t mac[6] = {0};
+    uint8_t base[3] = {0};
+    uint8_t shade[3] = {0};
+    bool valid = false;
+  };
+  PaintEntry paintEntries[lamp_protocol::WISP_PAINT_MAX_ENTRIES] = {};
+  uint8_t paintCount = 0;
+  uint32_t lastPaintMs = 0;
 };
 
 }  // namespace lamp

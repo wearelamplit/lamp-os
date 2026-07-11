@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -9,10 +10,12 @@
 #include "core/frame_buffer.hpp"
 #include "expression.hpp"
 #include "expression_invocation.hpp"
-#include "glitchy_expression.hpp"
-#include "shifty_expression.hpp"
-#include "pulse_expression.hpp"
-#include "breathing_expression.hpp"
+#include "expression_registry.hpp"
+#include "expressions/glitchy/glitchy_expression.hpp"
+#include "expressions/shifty/shifty_expression.hpp"
+#include "expressions/pulse/pulse_expression.hpp"
+#include "expressions/breathing/breathing_expression.hpp"
+#include "expressions/spotty/spotty_expression.hpp"
 
 namespace lamp {
 
@@ -28,11 +31,9 @@ class Compositor;
 class ExpressionManager;
 class MeshLink;
 
-// Forwarder implemented in lamp.cpp. tryHandleExpressionEvent
-// uses this to push a delayed invocation into the loop-task pendingTriggers
-// queue when suppliedDelayMs > 0; immediate fires go straight to
-// triggerInvocation. Keeps the queue's storage in standard_lamp where the
-// drain lives — the manager doesn't need to own a second queue.
+// Forwarder implemented in lamp.cpp. Schedules a future triggerInvocation
+// without each call site having to know the queue storage lives there.
+// Runs on Core 1 (drain task); pendingTriggers is loop-task-only.
 void enqueueDelayedInvocation(const ExpressionInvocation& inv,
                               const uint8_t srcMac[6],
                               uint32_t delayMs);
@@ -137,8 +138,14 @@ class ExpressionManager {
   };
   RecentCascade recentCascades_;
 
-  // Send the cascade fan-out for an expression that just fired locally,
-  // if its config opts in via the cascadeEnabled parameter. No-op when
+  // Parallel dedup ring for MSG_EVENT announces. Same keying and eviction
+  // policy as recentCascades_: a TARGET_BOTH expression's shade and base
+  // entries auto-fire microseconds apart — recentEvents_.seen() suppresses
+  // the second announce so observers receive exactly one per logical trigger.
+  RecentCascade recentEvents_;
+
+  // Fan out MSG_COMMAND to each nearby lamp for an expression that just
+  // fired locally, if its config opts in via cascadeEnabled. No-op when
   // no MeshLink has been wired in. Never called for remote-arrived
   // triggers — that's the structural loop break.
   //
@@ -148,9 +155,31 @@ class ExpressionManager {
   // outbound cascade. Use the (type, intervalIdx) key — currently the
   // entry's target field, which is identical across both halves of a
   // TARGET_BOTH config and distinct for TARGET_SHADE vs TARGET_BASE.
-  void maybeCascade(const ExpressionEntry& entry);
+  //
+  // `excludeMac`: if non-null, that peer is skipped in the target loop.
+  void maybeCascade(const ExpressionEntry& entry,
+                    const uint8_t* excludeMac = nullptr);
+
+  // Broadcast a MSG_EVENT announce for a locally-fired expression. Gated on
+  // recentEvents_ so a TARGET_BOTH auto-trigger produces exactly one event.
+  void emitEvent(const ExpressionEntry& entry);
+
+  ExpressionRegistry registry_;
+
+  // Build an Expression bound to `buffer` for `type` via the registry's
+  // descriptor. Folds descriptor defaults into `parameters` before
+  // configureFromParameters. Returns nullptr for a type absent from the
+  // registry. Shared by addExpression + triggerInvocation.
+  std::unique_ptr<Expression> makeExpression(
+      const std::string& type, FrameBuffer* buffer,
+      const std::vector<Color>& colors,
+      uint32_t intervalMin, uint32_t intervalMax,
+      ExpressionTarget target,
+      const std::map<std::string, uint32_t>& parameters);
 
  public:
+  ExpressionRegistry& registry() { return registry_; }
+
   /**
    * @brief Initialize manager with frame buffers
    */
@@ -219,24 +248,25 @@ class ExpressionManager {
                          const uint8_t srcMac[6]);
 
   /**
-   * @brief MSG_EVENT receive-side handler. Called from the Core 1 drain
-   *        for an ExpressionTriggered event. Does a cheap JSON peek for
-   *        `"type":"..."` first so an unconfigured-cascade-type event can
-   *        be dropped without paying the full JsonDocument parse. Then
-   *        checks the local cascadeEnabled config + RecentCascade dedup
-   *        before the full parseInvocation + triggerInvocation with
-   *        fireAtMs = millis() + suppliedDelayMs.
+   * @brief Broadcast an invocation to the crowd WITHOUT firing it locally.
+   *        Synthesizes a cascading entry from `inv` and runs the same
+   *        maybeCascade (directed RSSI-staggered wave) + emitEvent (announce)
+   *        path a locally-fired cascading expression uses, minus the local
+   *        render. snafu's greeting uses it to fan a crowd glitch on arrival
+   *        while its own scramble renders locally.
    *
-   *        suppliedDelayMs is the stagger value the recv-side already
-   *        looked up from the MSG_EVENT staggerEntries list (own MAC →
-   *        delayMs, or tail-fire fallback if absent). Clamped to
-   *        kMaxDelayMs defensively here so an attacker who builds a
-   *        stagger entry with a huge delay can't hold a pendingTriggers
-   *        slot for ~49 days.
+   *        `excludeMac`: if non-null, that peer is skipped in the target loop.
+   *        Default nullptr sends to all reachable peers.
    */
-  void tryHandleExpressionEvent(const uint8_t sourceMac[6],
-                                uint16_t suppliedDelayMs,
-                                const uint8_t* payload, uint16_t payloadLen);
+  void broadcastInvocation(const ExpressionInvocation& inv,
+                           const uint8_t* excludeMac = nullptr);
+
+  /**
+   * @brief Send an invocation directly to a single peer by MAC. Serializes
+   *        `inv`, size-guards against COMMAND_MAX_PAYLOAD, and calls
+   *        meshLink_->sendCommand. No-op if no meshLink_ is wired.
+   */
+  void sendInvocationTo(const uint8_t mac[6], const ExpressionInvocation& inv);
 
   /**
    * @brief Called by Expression::trigger() after onTrigger() runs, regardless
@@ -303,5 +333,9 @@ class ExpressionManager {
    */
   bool isAnyTestActive() const { return !activeTests_.empty(); }
 };
+
+// Serialized expression catalog. Immutable after boot registration, so it's
+// built once on first call and cached for the process lifetime.
+const std::string& expressionCatalogJson();
 
 }  // namespace lamp

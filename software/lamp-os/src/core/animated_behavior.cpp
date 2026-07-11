@@ -30,6 +30,10 @@ void AnimatedBehavior::playOnce() { animationState = PLAYING_ONCE; };
 
 bool AnimatedBehavior::isLastFrame() { return (frame == frames - 1); };
 
+uint16_t AnimatedBehavior::windowSize() const {
+  return (fb && fb->pixelCount > 0) ? static_cast<uint16_t>(fb->pixelCount) : 1;
+}
+
 void AnimatedBehavior::nextFrame() {
   if (animationState == PAUSING) {
     animationState = PAUSED;

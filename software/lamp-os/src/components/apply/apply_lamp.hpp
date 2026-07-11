@@ -52,9 +52,6 @@ inline void lampLocal(JsonObject obj, uint8_t maxBrightness) {
   if (obj["advancedEnabled"].is<bool>()) {
     ::config.lamp.advancedEnabled = obj["advancedEnabled"].as<bool>();
   }
-  if (obj["devMode"].is<bool>()) {
-    ::config.lamp.devMode = obj["devMode"].as<bool>();
-  }
   if (obj["webappEnabled"].is<bool>()) {
     ::config.lamp.webappEnabled = obj["webappEnabled"].as<bool>();
   }

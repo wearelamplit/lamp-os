@@ -8,7 +8,6 @@ import '../../../../core/routing/routes.dart';
 import '../../../../core/utils/tap_counter.dart';
 import '../../../wisp/application/wisp_notifier.dart';
 import '../../application/advanced_session.dart';
-import '../../domain/lamp_color.dart';
 
 /// Whimsical will-o'-wisp indicator: two softly glowing orbs that gently
 /// pulse + float, tinted by whatever the wisp is currently painting on

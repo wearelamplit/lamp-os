@@ -181,12 +181,19 @@ enum MsgType : uint8_t {
   // lamp and viewed via another. Cadence: piggybacked on the 30 s
   // emitStatus() tick, plus an on-change emit from WispOpDispatcher.
   MSG_WISP_PALETTE        = 0x26,
+  // Per-lamp paint colors broadcast by the wisp. Each entry carries the lamp's
+  // current base + shade RGB so the app preview reflects drift, not just the
+  // deterministic newcomer prediction.
+  MSG_WISP_PAINT          = 0x27,
   MSG_EVENT               = 0x30,
+  // Targeted expression invocation. Lamp directs a specific nearby lamp to
+  // run an expression. No gossip relay; addressedToUs filter on recv.
+  MSG_COMMAND             = 0x31,
 };
 
 // Explicit reserve of the high bit on msgType. Previously FLAG_LOCAL_ONLY
-// rode there for the cascade-locality hack; that path is retired
-// (cascade now uses MSG_EVENT broadcast). The bit is reserved for
+// rode there for the cascade-locality hack; that path is retired.
+// The bit is reserved for
 // future protocol changes; inspect() no longer masks it so any future
 // reuse will surface immediately as an unrecognised msgType byte.
 constexpr uint8_t kReservedMsgTypeHighBit = 0x80;

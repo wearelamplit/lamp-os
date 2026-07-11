@@ -6,6 +6,7 @@
 
 #include "components/network/mesh/nearby_lamps.hpp"
 #include "core/personality_engine.hpp"
+#include "behaviors/greetable.hpp"
 #include "components/firmware/firmware_distributor.hpp"
 #include "components/firmware/fs_ota.hpp"
 #include "components/firmware/firmware_receiver.hpp"
@@ -35,6 +36,21 @@ Color darken(const Color& c, uint8_t strength) {
 }
 
 }  // namespace
+
+GreetingState SocialBehavior::greetingState() const {
+  if (animationState == STOPPED) return {};
+  GreetingState gs;
+  gs.active     = true;
+  gs.peerBdAddr = greetingPeerBdAddr_;
+  if (snub) {
+    gs.kind = "snub";
+  } else if (pulseBackStrength > 0) {
+    gs.kind = "warm";
+  } else {
+    gs.kind = "reserved";
+  }
+  return gs;
+}
 
 void SocialBehavior::applyTuning(const GreetingTuning& t) {
   easeInFrames      = t.easeInFrames;
@@ -202,6 +218,15 @@ void SocialBehavior::control() {
     }
   }
 
+  // onGreetingChange_ is the sole path to CHAR_STATE_NOTIFY — keeps behaviors
+  // free of BLE includes.
+  const bool greetingNowActive = (animationState != STOPPED);
+  if (!greetingNowActive && greetingWasActive_) {
+    greetingPeerBdAddr_.clear();
+    if (onGreetingChange_) onGreetingChange_();
+  }
+  greetingWasActive_ = greetingNowActive;
+
   // Greeting / cooldown logic below only runs when the previous
   // greeting animation finished. This early-return USED to be at the
   // top of control() — which silently gated the OTA tick above on the
@@ -227,13 +252,11 @@ void SocialBehavior::control() {
     case SocialMode::Introvert: regreetWindowMs = INTROVERT_REGREET_WINDOW_MS; break;
   }
 
-  // Snapshot taken under nearbyLamps' mutex so iterating is safe against
-  // the NimBLE scan task and the ESP-NOW recv task both writing.
   std::vector<NearbyLamp> foundLamps =
-      nearbyLamps.getReachableViaBle(LAMP_PRUNE_TIME_MS);
+      nearbyLamps.getUngreetedArrivals(LAMP_PRUNE_TIME_MS);
 
   for (auto it = foundLamps.rbegin(); it != foundLamps.rend(); ++it) {
-    // Re-greet window: even if the NearbyLamp's `acknowledged` flag was
+    // Re-greet window: even if the NearbyLamp's acknowledged flag was
     // reset (peer pruned + returned), enforce our own per-peer cooldown.
     if (regreetWindowMs > 0) {
       auto last = lastGreetedAtMs_.find(it->name);
@@ -241,9 +264,6 @@ void SocialBehavior::control() {
         continue;
       }
     }
-    // Skip already-acknowledged (within the NearbyLamp lifetime) so we
-    // don't greet the same peer twice in a single sighting.
-    if (it->acknowledged) continue;
 
     const GreetingTuning tuning = personalityEngine.greetingFor(it->bdAddr);
 
@@ -254,6 +274,7 @@ void SocialBehavior::control() {
                   (unsigned)tuning.pulseBackStrength,
                   (unsigned)tuning.pulseBackCount);
 #endif
+    greetingPeerBdAddr_ = it->bdAddr;
     nearbyLamps.acknowledge(it->name);
     foundLampColor = it->baseColor;
     applyTuning(tuning);
@@ -303,11 +324,25 @@ void SocialBehavior::control() {
     }
 
     playOnce();
+    greetingWasActive_ = true;
+    if (onGreetingChange_) onGreetingChange_();
     break;
   }
 };
 
-#ifdef LAMP_DEBUG
+void SocialBehavior::triggerGreeting(const NearbyLamp& peer) {
+  const uint32_t now = millis();
+  const GreetingTuning tuning = personalityEngine.greetingFor(peer.bdAddr);
+  greetingPeerBdAddr_ = peer.bdAddr;
+  foundLampColor = peer.baseColor;
+  applyTuning(tuning);
+  nearbyLamps.acknowledge(peer.name);
+  playOnce();
+  greetingWasActive_ = true;
+  if (onGreetingChange_) onGreetingChange_();
+  markGreeted(peer.name, now);
+}
+
 void SocialBehavior::markGreeted(const std::string& peerName, uint32_t nowMs) {
   lastGreetedAtMs_[peerName] = nowMs;
   if (lastGreetedAtMs_.size() > MAX_GREETED_TRACKED) {
@@ -326,6 +361,5 @@ void SocialBehavior::markGreeted(const std::string& peerName, uint32_t nowMs) {
   }
   nextAcknowledgeTimeMs = nowMs + cooldown;
 }
-#endif
 
 }  // namespace lamp

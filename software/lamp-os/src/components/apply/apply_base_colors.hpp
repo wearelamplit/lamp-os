@@ -41,7 +41,7 @@ inline void baseColorsToConfig(JsonArray arr) {
   for (JsonVariant v : arr) {
     next.push_back(hexStringToColor(v));
   }
-  ::config.base.colors = next;
+  ::config.base.broadcastColors() = next;
   ::lamp::renderBaseColors(arr);
 }
 

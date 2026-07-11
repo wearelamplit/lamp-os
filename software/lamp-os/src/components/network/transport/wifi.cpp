@@ -248,10 +248,8 @@ void tick() {
       s_lastError = "scan";
       // The scanner can leave the radio on the last-hopped channel; re-pin
       // to LAMP_ESPNOW_CHANNEL so ESP-NOW recv still works in FAILED.
-      // Symmetry with the success branch above. Before this re-pin, a
-      // failed scan silently broke ALL mesh recv on this lamp until
-      // reboot (observed on melonie 2026-06-03 — 2 of 21 MSG_EVENT
-      // broadcasts received during a cascade test).
+      // Without this re-pin, a failed scan silently breaks all mesh recv
+      // until reboot.
       esp_wifi_set_channel(LAMP_ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
       s_failedSinceMs = millis();
       setState(FAILED);

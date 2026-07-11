@@ -119,6 +119,11 @@ class NearbyLamps {
   // SocialBehavior: only entries whose lastSeenViaBleMs is within maxAgeMs.
   std::vector<NearbyLamp> getReachableViaBle(uint32_t maxAgeMs);
 
+  // BLE-reachable peers (lastSeenViaBleMs within maxAgeMs, non-empty bdAddr)
+  // whose acknowledged flag is false. Snapshot taken under the same mutex
+  // as getReachableViaBle.
+  std::vector<NearbyLamp> getUngreetedArrivals(uint32_t maxAgeMs);
+
   // Grid view / remote-config: only entries whose lastSeenViaEspNowMs
   // is within maxAgeMs.
   std::vector<NearbyLamp> getReachableViaEspNow(uint32_t maxAgeMs);
@@ -171,10 +176,26 @@ class NearbyLamps {
                       const uint8_t lampMacs[][6], uint8_t count,
                       uint32_t nowMs);
 
-  // Build the binary blob served on CHAR_WISP_CLAIMS: [count:1][lampMac:6]*count.
-  // Returns count=0 when the cached claim is stale (nowMs - lastClaimMs >
-  // kWispClaimStaleMs). Returns the number of bytes written to `out`.
-  // Max output = 1 + kMaxWispClaimEntries * 6 = 193 bytes.
+  // Cache per-lamp paint colors from MSG_WISP_PAINT. `entries` is
+  // `count * WISP_PAINT_ENTRY_SIZE` bytes: lampMac(6)+baseRGB(3)+shadeRGB(3)
+  // per entry. Aged by the same kWispClaimStaleMs window as the claim cache.
+  // Loop-task-only writer (Core 1).
+  void cacheWispPaint(const uint8_t srcMac[6],
+                      const uint8_t* entries, uint8_t count,
+                      uint32_t nowMs);
+
+  // Look up a lamp's cached paint color by its mesh MAC. Returns true and
+  // fills `baseOut` (3 bytes) and `shadeOut` (3 bytes) on a fresh hit;
+  // returns false when absent or stale (nowMs - lastPaintMs > kWispClaimStaleMs).
+  bool findWispPaint(const uint8_t lampMac[6], uint32_t nowMs,
+                     uint8_t baseOut[3], uint8_t shadeOut[3]);
+
+  // Build the binary blob served on CHAR_WISP_CLAIMS:
+  //   [count:1][bdAddr:6*count][colorPair:6*count]
+  // colorPair = baseRGB(3)+shadeRGB(3), positionally aligned to the mac at
+  // the same index. Sentinel 00 00 00 00 00 00 when no fresh paint is cached.
+  // Returns count=0 when the claim is stale (nowMs - lastClaimMs >
+  // kWispClaimStaleMs). Returns bytes written. Max = 1 + count*12 = 385 bytes.
   size_t buildWispClaimsBlob(uint8_t* out, size_t outCap, uint32_t nowMs);
 
   // Assert wisp presence from a paint frame. Unicast OVERRIDE_COLORS

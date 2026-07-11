@@ -89,7 +89,7 @@ final class LampNearbyPeersNotifierProvider
 }
 
 String _$lampNearbyPeersNotifierHash() =>
-    r'974f170c3d2db79535b5bbd0e7e5b7f8be4e2565';
+    r'75c9cd238c9e4e50936c346d8c646ddf4e130200';
 
 /// Per-lamp view of peers the connected lamp can hear. Reads the
 /// `nearby` page-protocol section from CHAR_NEARBY_LAMPS at 1 Hz.

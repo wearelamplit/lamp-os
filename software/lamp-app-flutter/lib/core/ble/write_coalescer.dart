@@ -61,6 +61,16 @@ class WriteCoalescer {
     }
   }
 
+  /// Cancels any pending deferred flush without disabling the coalescer.
+  /// Use before writing a superseding command so no stale payload lands
+  /// after the command.
+  void cancel() {
+    _windowTimer?.cancel();
+    _windowTimer = null;
+    _pending = null;
+    _windowOpen = false;
+  }
+
   void dispose() {
     _disposed = true;
     _windowTimer?.cancel();

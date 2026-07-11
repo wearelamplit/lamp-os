@@ -41,6 +41,13 @@ dark-in-their-color and back). Cooldowns + introvert fatigue throttle how
 often greetings fire. Full waveform + cadence contract:
 [`personality-greetings.md`](personality-greetings.md).
 
+The active greeting state is exposed via `Greetable::greetingState()` and
+pushed on `CHAR_STATE_NOTIFY` (field `greeting`) on start and stop. The
+`kind` field uses a three-word vocabulary: `"warm"` (pulsed hold),
+`"reserved"` (plain hold), `"snub"` (dark-in-peer-color). The snafu
+variant uses `"glitch"`. `peer` is the greeted peer's BD_ADDR; empty when
+idle.
+
 ### Crowd-dim
 
 `PersonalityEngine` samples BLE-reachable peers at 1 Hz, weights each by

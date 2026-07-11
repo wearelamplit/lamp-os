@@ -150,6 +150,22 @@ void test_ring_evicts_oldest_after_capacity_plus_one() {
       "t" + std::to_string(lamp::RecentCascade::CAPACITY), 0, 100));
 }
 
+// Event-announce dedup (recentEvents_) uses the same ring type and keying as
+// recentCascades_. A TARGET_BOTH expression's shade and base entries auto-fire
+// microseconds apart; the second emitEvent call must be suppressed so observers
+// receive exactly one announce per logical trigger.
+void test_event_dedup_suppresses_target_both_second_fire() {
+  lamp::RecentCascade ring;  // models recentEvents_ for a TARGET_BOTH expression
+
+  // Both shade and base report target=3 (TARGET_BOTH). Simulate the shade
+  // entry firing first (records) then the base entry firing within the window.
+  const uint32_t target_both_idx = 3;
+  TEST_ASSERT_FALSE(ring.seen("glitchy", target_both_idx, 100));
+  ring.record("glitchy", target_both_idx, 100);
+  // Base fires 50 µs later — well within the 250 ms window.
+  TEST_ASSERT_TRUE(ring.seen("glitchy", target_both_idx, 100));
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
@@ -160,6 +176,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_distinct_type_is_independent);
   RUN_TEST(test_distinct_intervalIdx_is_independent);
   RUN_TEST(test_ring_evicts_oldest_after_capacity_plus_one);
+  RUN_TEST(test_event_dedup_suppresses_target_both_second_fire);
 
   return UNITY_END();
 }

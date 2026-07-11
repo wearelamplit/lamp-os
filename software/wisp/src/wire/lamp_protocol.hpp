@@ -86,29 +86,19 @@ enum MsgType : uint8_t {
   // lamp and viewed via another. Cadence: piggybacked on the 30 s
   // emitStatus() tick, plus an on-change emit from WispOpDispatcher.
   MSG_WISP_PALETTE        = 0x26,
+  // Per-lamp paint colors broadcast by the wisp. Each entry carries the lamp's
+  // current base + shade RGB so the app preview reflects drift, not just the
+  // deterministic newcomer prediction.
+  MSG_WISP_PAINT          = 0x27,
   MSG_EVENT               = 0x30,
 };
 
-// Explicit reserve of the high bit on msgType. Previously
-// FLAG_LOCAL_ONLY rode there for the cascade-locality hack; that path
-// is retired (cascade now uses MSG_EVENT broadcast). The bit is reserved
-// for future protocol changes; inspect() no longer masks it so any future
-// reuse will surface immediately as an unrecognised msgType byte.
+// inspect() no longer masks the high bit on msgType; any frame that sets it
+// surfaces as an unrecognised type.
 constexpr uint8_t kReservedMsgTypeHighBit = 0x80;
-
-// v0x03 mesh-deploy lock-in: parallel reservation of the high bit on the
-// numStaggerEntries field (data[13] of MSG_EVENT). Plausible future use:
-// a "scope flag" on the stagger semantics (e.g., room-scope vs. fleet-
-// scope cascades, or "broadcast-everyone-fires-tail-jittered" vs the
-// current "fires per its delayMs"). parseEvent rejects any frame that
-// sets this bit so a future receiver gains an unambiguous escape hatch:
-// v0x03 peers loudly drop the frame, not silently reinterpret it.
-// why: forward-compat reservation per validated plan §"Layer 3".
-constexpr uint8_t kStaggerCountReservedHighBit = 0x80;
 
 // Single-source-of-truth caps.
 constexpr size_t kMaxOverrideColorsPerFrame = 8;   // ESP-NOW 250-byte cap math
-constexpr size_t kMaxStaggerEntries         = 12;  // ESP-NOW 250-byte cap math
 constexpr uint8_t kBrightnessOverrideMin    = 5;   // anti-defeat floor
 
 // Surface byte values used by the override/restore family. `BaseAndShade`
@@ -130,13 +120,6 @@ enum class OverrideSource : uint8_t {
   None     = 0x00,
   Wisp     = 0x01,
   Any      = 0xFF,
-};
-
-// MSG_EVENT discriminator. 0x02..0x0F are reserved for built-ins so the
-// firmware can add new well-known events without colliding with
-// user-defined ones in the 0x10..0xFF range.
-enum class EventKind : uint8_t {
-  ExpressionTriggered = 0x01,
 };
 
 constexpr size_t HEADER_SIZE = 6;
@@ -221,6 +204,17 @@ constexpr size_t WISP_PALETTE_MAX_SIZE     = WISP_PALETTE_FIXED_PREFIX +
                                               kMaxWispPaletteColors *
                                               WISP_PALETTE_ENTRY_SIZE;  // 163
 
+// MSG_WISP_PAINT: header(6) + sourceMac(6) + count(1) + entries[count * 12].
+// Each entry: lampMac(6) + baseRGB(3) + shadeRGB(3) = 12 bytes.
+// Cap at 18 entries: 13 + 18*12 = 229 B, within the 250-byte ESP-NOW frame.
+constexpr size_t WISP_PAINT_FIXED_PREFIX = HEADER_SIZE + 6 + 1;  // 13
+constexpr size_t WISP_PAINT_ENTRY_SIZE   = 6 + 3 + 3;            // 12
+constexpr size_t WISP_PAINT_MAX_ENTRIES  = 18;
+constexpr size_t WISP_PAINT_MAX_SIZE     = WISP_PAINT_FIXED_PREFIX +
+                                            WISP_PAINT_MAX_ENTRIES *
+                                            WISP_PAINT_ENTRY_SIZE;  // 229
+static_assert(WISP_PAINT_MAX_SIZE <= 250, "MSG_WISP_PAINT exceeds ESP-NOW frame cap");
+
 // MSG_OVERRIDE_COLORS fixed prefix:
 //   header(6) + sourceMac(6) + targetMac(6) + surface(1) + sourceKind(1)
 //   + fadeDurationMs(4) + numColors(1)
@@ -242,48 +236,10 @@ constexpr size_t RESTORE_FIXED_SIZE = HEADER_SIZE + 6 + 6 + 1 + 1 + 2;  // 22
 // = 23 bytes fixed.
 constexpr size_t OVERRIDE_BRIGHTNESS_FIXED_SIZE = HEADER_SIZE + 6 + 6 + 1 + 1 + 2 + 1;  // 23
 
-// MSG_EVENT fixed prefix when numStaggerEntries=0 and payloadLen=0:
-//   header(6) + sourceMac(6) + eventKind(1) + numStaggerEntries(1)
-//   + payloadLen(2)
-// = 16 bytes minimum. (Spec'd as 17 in the plan; the math here is the
-// authoritative one — header is 6, not 7.)
-constexpr size_t EVENT_FIXED_SIZE      = HEADER_SIZE + 6 + 1 + 1 + 2;  // 16
-constexpr size_t EVENT_STAGGER_ENTRY   = 6 + 2;                        // mac + delayMs
-// Worst-case JSON tail when the wire frame carries a fully-populated
-// stagger list (12 peers): 250 - 16 - 12*8 = 138. Kept as a hard upper
-// bound the rest of the codebase can rely on for buffer sizing.
-// Callers building or validating an event with a known stagger count
-// should use maxEventPayloadFor(n) instead — small meshes get a larger
-// payload window because fewer bytes are reserved for stagger entries.
-constexpr size_t EVENT_MAX_PAYLOAD     = 250 - EVENT_FIXED_SIZE -
-                                         (kMaxStaggerEntries * EVENT_STAGGER_ENTRY);
-constexpr size_t EVENT_MAX_SIZE        = EVENT_FIXED_SIZE +
-                                         kMaxStaggerEntries * EVENT_STAGGER_ENTRY +
-                                         EVENT_MAX_PAYLOAD;  // 250
-
-// Dynamic payload budget. The stagger list only occupies n * 8 bytes on
-// the wire, so on small meshes (typical home setup: 1–4 lamps) the
-// payload window is much larger than the worst-case 138 B. Clamps at the
-// 12-peer ceiling so a stale numStagger can't grant a larger-than-frame
-// budget. Before this helper, ExpressionManager::maybeCascade dropped any
-// invocation > 138 B even on a 1-peer mesh — which silently broke glitchy
-// (~151 B real payload) in the field.
-constexpr size_t maxEventPayloadFor(uint8_t numStaggerEntries) {
-  const size_t n = numStaggerEntries > kMaxStaggerEntries
-                       ? kMaxStaggerEntries
-                       : static_cast<size_t>(numStaggerEntries);
-  return 250 - EVENT_FIXED_SIZE - (n * EVENT_STAGGER_ENTRY);
-}
-
-// MAX_PACKET_SIZE: receiver buffer sizing. CONTROL_MAX_SIZE has historically
-// been the biggest (250); EVENT_MAX_SIZE is also 250; the override family
-// is well under. Use a max() over the candidates so a future shrink of any
-// one doesn't silently shrink the buffer.
+// MAX_PACKET_SIZE: receiver buffer sizing. CONTROL_MAX_SIZE (250) is the
+// largest frame; HELLO_MAX_SIZE and the override family are smaller.
 constexpr size_t MAX_PACKET_SIZE =
-    (CONTROL_MAX_SIZE > HELLO_MAX_SIZE ? CONTROL_MAX_SIZE : HELLO_MAX_SIZE) >
-            EVENT_MAX_SIZE
-        ? (CONTROL_MAX_SIZE > HELLO_MAX_SIZE ? CONTROL_MAX_SIZE : HELLO_MAX_SIZE)
-        : EVENT_MAX_SIZE;
+    CONTROL_MAX_SIZE > HELLO_MAX_SIZE ? CONTROL_MAX_SIZE : HELLO_MAX_SIZE;
 
 struct ParsedHello {
   uint16_t seq;
@@ -347,6 +303,15 @@ struct ParsedWispPalette {
   const uint8_t* rgb;
 };
 
+struct ParsedWispPaint {
+  uint16_t seq;
+  uint8_t  sourceMac[6];
+  uint8_t  count;
+  // Pointer into the recv buffer; caller must not retain past this call.
+  // `count * WISP_PAINT_ENTRY_SIZE` bytes of packed lampMac(6)+baseRGB(3)+shadeRGB(3).
+  const uint8_t* entries;
+};
+
 struct ParsedOverrideColors {
   uint16_t        seq;
   uint8_t         sourceMac[6];
@@ -384,20 +349,6 @@ struct ParsedRestoreBrightness {
   OverrideSurface surface;
   OverrideSource  sourceKind;
   uint16_t        fadeDurationMs;
-};
-
-struct ParsedEvent {
-  uint16_t       seq;
-  uint8_t        sourceMac[6];
-  EventKind      eventKind;            // typed for built-ins
-  uint8_t        eventKindRaw;         // raw byte for forward-compat / user-defined
-  uint8_t        numStaggerEntries;
-  struct StaggerEntry {
-    uint8_t  mac[6];
-    uint16_t delayMs;
-  } staggerEntries[kMaxStaggerEntries];
-  uint16_t       payloadLen;
-  const uint8_t* payload;  // points into the recv buffer; caller must not retain past this call
 };
 
 // --- Internal helpers (header-internal; not part of the public ABI). ---
@@ -607,6 +558,29 @@ inline size_t buildWispPalette(uint8_t* buf, size_t bufLen, uint16_t seq,
   return total;
 }
 
+// Build a MSG_WISP_PAINT frame. `entries` is `count` packed records, each
+// WISP_PAINT_ENTRY_SIZE bytes: lampMac(6) + baseRGB(3) + shadeRGB(3). `count`
+// must be ≤ WISP_PAINT_MAX_ENTRIES. Returns total bytes written on success, 0
+// on bad args / insufficient buffer / count overflow.
+inline size_t buildWispPaint(uint8_t* buf, size_t bufLen, uint16_t seq,
+                             const uint8_t sourceMac[6],
+                             const uint8_t* entries,
+                             uint8_t count) {
+  if (!buf || !sourceMac) return 0;
+  if (count > WISP_PAINT_MAX_ENTRIES) return 0;
+  if (count > 0 && !entries) return 0;
+  const size_t total = WISP_PAINT_FIXED_PREFIX + count * WISP_PAINT_ENTRY_SIZE;
+  if (bufLen < total) return 0;
+  detail::writeHeader(buf, MSG_WISP_PAINT, seq);
+  std::memcpy(&buf[6], sourceMac, 6);
+  buf[12] = count;
+  if (count) {
+    std::memcpy(&buf[WISP_PAINT_FIXED_PREFIX], entries,
+                count * WISP_PAINT_ENTRY_SIZE);
+  }
+  return total;
+}
+
 // Build a MSG_OVERRIDE_COLORS frame. `numColors` must be 1..kMaxOverrideColorsPerFrame.
 // `colorsRGBW` is numColors * 4 bytes. Returns total bytes written on success.
 inline size_t buildOverrideColors(uint8_t* buf, size_t bufLen, uint16_t seq,
@@ -705,51 +679,8 @@ inline size_t buildRestoreBrightness(uint8_t* buf, size_t bufLen, uint16_t seq,
   return RESTORE_FIXED_SIZE;
 }
 
-// Build a MSG_EVENT frame. `eventKind` is the raw byte so callers can emit
-// user-defined kinds in 0x10..0xFF without re-extending the enum. Stagger
-// entries are `numStaggerEntries * (mac(6) + delayMs(2 LE))`; capped at
-// kMaxStaggerEntries. Payload is opaque (JSON in practice); capped at
-// maxEventPayloadFor(numStaggerEntries) so the full frame stays within
-// ESP-NOW's 250-byte limit. Dynamic in the actual stagger count, not the
-// worst case, so small meshes can carry larger invocations.
-inline size_t buildEvent(uint8_t* buf, size_t bufLen, uint16_t seq,
-                         const uint8_t sourceMac[6],
-                         uint8_t eventKind,
-                         const uint8_t* staggerMacs,    // numStaggerEntries * 6
-                         const uint16_t* staggerDelays, // numStaggerEntries
-                         uint8_t numStaggerEntries,
-                         const uint8_t* payload, uint16_t payloadLen) {
-  if (!buf || !sourceMac) return 0;
-  if (numStaggerEntries > kMaxStaggerEntries) return 0;
-  if (numStaggerEntries > 0 && (!staggerMacs || !staggerDelays)) return 0;
-  if (payloadLen > maxEventPayloadFor(numStaggerEntries)) return 0;
-  const size_t total = EVENT_FIXED_SIZE +
-                       static_cast<size_t>(numStaggerEntries) * EVENT_STAGGER_ENTRY +
-                       payloadLen;
-  if (bufLen < total) return 0;
-  detail::writeHeader(buf, MSG_EVENT, seq);
-  std::memcpy(&buf[6], sourceMac, 6);
-  buf[12] = eventKind;
-  buf[13] = numStaggerEntries;
-  size_t off = 14;
-  for (uint8_t i = 0; i < numStaggerEntries; ++i) {
-    std::memcpy(&buf[off], &staggerMacs[i * 6], 6);
-    off += 6;
-    buf[off]     = static_cast<uint8_t>(staggerDelays[i] & 0xFF);
-    buf[off + 1] = static_cast<uint8_t>((staggerDelays[i] >> 8) & 0xFF);
-    off += 2;
-  }
-  buf[off]     = static_cast<uint8_t>(payloadLen & 0xFF);
-  buf[off + 1] = static_cast<uint8_t>((payloadLen >> 8) & 0xFF);
-  off += 2;
-  if (payloadLen && payload) std::memcpy(&buf[off], payload, payloadLen);
-  return total;
-}
-
 // Validate magic + version. Returns the msg type byte verbatim or 0 if
-// invalid. C.3 retired FLAG_LOCAL_ONLY; the high bit is reserved for
-// future use, so we no longer mask it — any future reuse of that bit
-// will surface immediately as an unrecognised msgType.
+// invalid.
 inline uint8_t inspect(const uint8_t* data, size_t len) {
   if (!data || len < HEADER_SIZE) return 0;
   if (data[0] != MAGIC_0 || data[1] != MAGIC_1) return 0;
@@ -841,6 +772,21 @@ inline bool parseWispPalette(const uint8_t* data, size_t len,
   std::memcpy(out.sourceMac, &data[6], 6);
   out.count = count;
   out.rgb = count ? &data[WISP_PALETTE_FIXED_PREFIX] : nullptr;
+  return true;
+}
+
+inline bool parseWispPaint(const uint8_t* data, size_t len, ParsedWispPaint& out) {
+  if (inspect(data, len) != MSG_WISP_PAINT) return false;
+  if (len < WISP_PAINT_FIXED_PREFIX) return false;
+  const uint8_t count = data[12];
+  if (count > WISP_PAINT_MAX_ENTRIES) return false;
+  const size_t expected = WISP_PAINT_FIXED_PREFIX +
+                          static_cast<size_t>(count) * WISP_PAINT_ENTRY_SIZE;
+  if (len < expected) return false;
+  out.seq = static_cast<uint16_t>(data[4]) | (static_cast<uint16_t>(data[5]) << 8);
+  std::memcpy(out.sourceMac, &data[6], 6);
+  out.count = count;
+  out.entries = count ? &data[WISP_PAINT_FIXED_PREFIX] : nullptr;
   return true;
 }
 
@@ -959,49 +905,6 @@ inline bool parseRestoreBrightness(const uint8_t* data, size_t len,
   return true;
 }
 
-inline bool parseEvent(const uint8_t* data, size_t len, ParsedEvent& out) {
-  if (inspect(data, len) != MSG_EVENT) return false;
-  if (len < EVENT_FIXED_SIZE) return false;
-  // v0x03 lock-in: reject if the reserved high bit on numStaggerEntries is
-  // set. EXPLICIT check (not relying on the > kMaxStaggerEntries clamp
-  // below to catch it incidentally) so a future refactor that masks low
-  // bits first can't silently start accepting the bit. See
-  // kStaggerCountReservedHighBit declaration for the rationale.
-  // why: forward-compat reservation per validated plan §"Layer 3".
-  if (data[13] & kStaggerCountReservedHighBit) return false;
-  const uint8_t numStaggerEntries = data[13];
-  if (numStaggerEntries > kMaxStaggerEntries) return false;
-  const size_t staggerBytes =
-      static_cast<size_t>(numStaggerEntries) * EVENT_STAGGER_ENTRY;
-  // Need room for the stagger block + the 2-byte payloadLen.
-  if (len < EVENT_FIXED_SIZE + staggerBytes) return false;
-  const size_t payloadLenOff = HEADER_SIZE + 6 + 1 + 1 + staggerBytes;  // 14 + staggerBytes
-  const uint16_t payloadLen =
-       static_cast<uint16_t>(data[payloadLenOff])
-     | (static_cast<uint16_t>(data[payloadLenOff + 1]) << 8);
-  if (payloadLen > maxEventPayloadFor(numStaggerEntries)) return false;
-  const size_t expected = EVENT_FIXED_SIZE + staggerBytes + payloadLen;
-  if (len != expected) return false;
-  out.seq = static_cast<uint16_t>(data[4]) | (static_cast<uint16_t>(data[5]) << 8);
-  std::memcpy(out.sourceMac, &data[6], 6);
-  out.eventKindRaw = data[12];
-  out.eventKind = static_cast<EventKind>(out.eventKindRaw);
-  out.numStaggerEntries = numStaggerEntries;
-  size_t off = 14;
-  for (uint8_t i = 0; i < numStaggerEntries; ++i) {
-    std::memcpy(out.staggerEntries[i].mac, &data[off], 6);
-    off += 6;
-    out.staggerEntries[i].delayMs =
-         static_cast<uint16_t>(data[off])
-       | (static_cast<uint16_t>(data[off + 1]) << 8);
-    off += 2;
-  }
-  out.payloadLen = payloadLen;
-  out.payload    = payloadLen ? &data[payloadLenOff + 2] : nullptr;
-  return true;
-}
-
-
 // Gossip dedup: small fixed-size ring tracking (sourceMac, msgType, seq) tuples
 // seen recently. Drops duplicates so re-broadcasts terminate.
 //
@@ -1013,16 +916,10 @@ inline bool parseEvent(const uint8_t* data, size_t len, ParsedEvent& out) {
 // network calls, no logging. See audit finding #7 / Stability #3.
 class DedupRing {
  public:
-  // v0x03 mesh-deploy lock-in: bumped from 32 to 64. At 20-50 lamps each
-  // gossiping every unique (sourceMac, seq), the 32-slot ring wrapped
-  // fast enough that a late-arriving relayed copy could re-fire a
-  // receiver — specifically a problem now that MSG_EVENT itself gains
-  // gossip-relay (Commit E). 64 slots give sufficient headroom: at 50
-  // lamps emitting one cascade each within a small window, we still hold
-  // ~24 unique (mac, seq) entries past the ring's age horizon. Per-msgType
-  // dedup (ShowReceiver has separate rings per message type) means EVENT
-  // entries never get evicted by HELLO traffic etc.
-  // why: scale-fix per validated plan §"Layer 2".
+  // 64 slots: at 20-50 lamps each gossiping a unique (sourceMac, seq), the
+  // previous 32-slot ring wrapped fast enough that a late-arriving relay could
+  // re-fire a receiver. Per-msgType dedup (separate rings per message type)
+  // prevents HELLO traffic from evicting command or control entries.
   static constexpr size_t CAPACITY = 64;
 
   // Returns true if (mac, msgType, seq) is new (and records it); false if seen.

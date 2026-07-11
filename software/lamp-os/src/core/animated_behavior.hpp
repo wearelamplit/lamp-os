@@ -97,6 +97,12 @@ class AnimatedBehavior {
   void nextFrame();
 
   /**
+   * @brief Pixel count of the wired frame buffer, floored at 1 so callers can
+   *        divide or clamp without a null / zero guard.
+   */
+  uint16_t windowSize() const;
+
+  /**
    * @brief Wire a BehaviorContext into this behavior. Called by the Compositor
    *        the moment a behavior is registered (via addBehavior or begin()),
    *        and by ExpressionManager just before handing a transient to the

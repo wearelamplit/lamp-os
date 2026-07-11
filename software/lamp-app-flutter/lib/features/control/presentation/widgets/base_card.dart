@@ -32,10 +32,12 @@ class BaseCard extends ConsumerWidget {
     super.key,
     required this.lampId,
     required this.onTap,
+    this.title = 'Base',
   });
 
   final String lampId;
   final VoidCallback onTap;
+  final String title;
 
   /// Returns a gradient-safe list: LinearGradient requires ≥2 stops, so a
   /// single-color list is duplicated, and an empty list falls back to black.
@@ -89,7 +91,7 @@ class BaseCard extends ConsumerWidget {
             const SizedBox(width: AppSpace.lg),
             Expanded(
               child: Text(
-                'Base',
+                title,
                 style: Theme.of(context).textTheme.titleMedium,
               ),
             ),

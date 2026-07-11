@@ -1,14 +1,9 @@
-// Custom Arduino-ESP32 panic handler. Arduino-ESP32 already wraps
-// esp_panic_handler internally; we register via set_arduino_panic_handler()
-// so we get called with a pre-parsed backtrace before the system reboots.
-//
-// This is critical for our bug: we get `_invalid_pc_placeholder` resets that
-// silently bypass the normal panic backtrace. With this hook we always print
-// something useful to UART before reset, even when the regular ESP-IDF panic
-// pipeline can't.
-//
-// Output uses ets_printf (interrupt-safe, direct UART) since interrupts are
-// disabled at this point.
+// Custom Arduino-ESP32 panic hook, registered via set_arduino_panic_handler().
+// Dumps a tagged [LAMP PANIC] block (reason/core/pc/backtrace) over UART with
+// ets_printf (interrupt-safe direct UART; interrupts are off at panic time).
+// pc may be _invalid_pc_placeholder when ESP-IDF cannot determine the fault address.
+// Coredump-to-flash is disabled on this build (SPIFFS occupies that partition;
+// see platformio.ini), so this hook is the only crash-diagnostic path before reset.
 
 #include <Arduino.h>
 #include <esp32-hal.h>

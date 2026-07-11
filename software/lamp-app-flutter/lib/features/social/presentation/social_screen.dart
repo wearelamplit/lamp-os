@@ -2,9 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/ble/ble_client_provider.dart';
 import '../../../core/theme/app_spacing.dart';
-import '../../../core/utils/tap_counter.dart';
 import '../../../core/widgets/critter_icon.dart';
 import '../../../core/widgets/empty_state_pane.dart';
 import '../../../core/widgets/section_header.dart';
@@ -12,7 +10,6 @@ import '../../control/application/advanced_session.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/presentation/widgets/disconnect_aware_body.dart';
 import '../../inventory/application/inventory_notifier.dart';
-import '../../wisp/data/wisp_repository.dart';
 import '../application/dispositions_notifier.dart';
 import '../application/lamp_nearby_peers_notifier.dart';
 import '../domain/lamp_nearby_peer.dart';
@@ -217,22 +214,12 @@ class _LampDispositionRow extends ConsumerStatefulWidget {
 }
 
 class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
-  // 3 taps on a peer's row within 2s fire a greeting from the connected
-  // lamp toward that peer, so the user can trigger greetings on demand
-  // without dragging physical peers in and out of BLE range.
-  late final TapCounter _testGreetTaps = TapCounter(
-    count: 3,
-    window: const Duration(seconds: 2),
-    onTriggered: _fireTestGreet,
-  );
-
   bool _flashing = false;
 
-  void _fireTestGreet() {
+  void _onDoubleTap() {
     final bdAddr = widget.row.bdAddr;
     if (bdAddr.isEmpty) return;
-    final repo = WispRepository(ref.read(bleClientProvider), widget.lampId);
-    repo.testGreet(bdAddr);
+    ref.read(controlNotifierProvider(widget.lampId).notifier).triggerGreet(bdAddr);
     HapticFeedback.mediumImpact();
     setState(() => _flashing = true);
     Future<void>.delayed(const Duration(milliseconds: 120), () {
@@ -267,8 +254,18 @@ class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
     final disposition =
         (hasBdAddr && dispositionsLoaded) ? dispNotifier!.get(row.bdAddr) : 3;
 
+    final greeting = ref.watch(
+      controlNotifierProvider(lampId).select((a) => a.value?.greeting),
+    );
+    final isGreeting = greeting != null &&
+        row.bdAddr.isNotEmpty &&
+        greeting.peer == row.bdAddr.toUpperCase();
+
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+
+    // Greeting tint: peer's base color at low opacity + a matching left border.
+    final greetColor = isGreeting ? Color(0xFF000000 | row.baseRgb) : null;
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
@@ -276,18 +273,23 @@ class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
       decoration: BoxDecoration(
         color: _flashing
             ? colorScheme.secondary.withValues(alpha: 0.25)
-            : Colors.transparent,
+            : greetColor != null
+                ? greetColor.withValues(alpha: 0.15)
+                : Colors.transparent,
+        border: !_flashing && greetColor != null
+            ? Border(
+                left: BorderSide(color: greetColor.withValues(alpha: 0.6), width: 2),
+              )
+            : null,
         borderRadius: BorderRadius.circular(6),
       ),
       padding: const EdgeInsets.symmetric(vertical: AppSpace.md, horizontal: AppSpace.sm),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 3 taps anywhere on the name row fire a greeting — the whole row
-          // is the hit target (opaque) so it's easy to land, not a tiny label.
           GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTap: _testGreetTaps.record,
+            onDoubleTap: _onDoubleTap,
             child: Row(
               children: [
                 CritterIcon(

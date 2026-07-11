@@ -201,12 +201,16 @@ class ColorOverride {
   OnWispStateChangeCallback wispStateCb_;
 
   // Edge-detect helper: call after any mutation to state_ / activeSource_.
-  void maybeNotifyWispStateChange() {
+  // Returns true when the active-state edge fired the callback, so callers
+  // can add their own non-edge notify triggers without double-firing.
+  bool maybeNotifyWispStateChange() {
     const bool nowActive = isWispActive();
     if (nowActive != wasWispActive_) {
       wasWispActive_ = nowActive;
       if (wispStateCb_) wispStateCb_();
+      return true;
     }
+    return false;
   }
 };
 

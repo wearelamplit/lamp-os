@@ -11,7 +11,7 @@ import TextInput from './components/TextInput.vue'
 import BooleanInput from './components/BooleanInput.vue'
 import NumberInput from './components/NumberInput.vue'
 import ExpressionsList from './components/expressions/ExpressionsList.vue'
-import type { Config } from './types'
+import type { Config, ExpressionDescriptor } from './types'
 
 // Firmware does a full-replace on PUT: any field omitted from the body resets
 // to its firmware default on the post-save reboot. So we GET the whole doc,
@@ -21,7 +21,6 @@ const defaultConfig = (): Config => ({
     name: '',
     brightness: 100,
     setup: true,
-    colorsRandomized: false,
     advancedEnabled: false,
     devMode: false,
     webappEnabled: true,
@@ -41,6 +40,7 @@ const tabs = [
 ]
 
 const cfg = ref<Config>(defaultConfig())
+const expressionCatalog = ref<ExpressionDescriptor[]>([])
 const ready = ref(false)
 const saving = ref(false)
 const activeTab = ref('home')
@@ -174,6 +174,15 @@ onMounted(async () => {
   } catch {
     // Leave defaults; user can still save fresh values.
   }
+  try {
+    const res = await fetch('/api/expressions')
+    const data = await res.json()
+    if (data && Array.isArray(data.expressions)) {
+      expressionCatalog.value = data.expressions as ExpressionDescriptor[]
+    }
+  } catch {
+    // Old firmware without the catalog endpoint; expressions tab degrades.
+  }
   originalSettings.value = JSON.stringify(cfg.value)
   ready.value = true
   connectWs()
@@ -250,6 +259,9 @@ onUnmounted(() => {
             </div>
             <ExpressionsList
               v-model="cfg.expressions"
+              :catalog="expressionCatalog"
+              :base-px="cfg.base.px"
+              :shade-px="cfg.shade.px"
               :disabled="disabled"
               @preview="previewExpressionColors"
             />

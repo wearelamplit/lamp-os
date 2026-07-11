@@ -9,8 +9,6 @@
 
 #include "behaviors/configurator.hpp"
 #include "behaviors/fade_out.hpp"
-#include "behaviors/social.hpp"
-#include "core/personality_engine.hpp"
 #include "components/apply/apply_base_colors.hpp"
 #include "components/apply/apply_base_knockout.hpp"
 #include "components/apply/apply_brightness.hpp"
@@ -24,13 +22,10 @@
 #include "components/network/mesh/mesh_link.hpp"
 #include "components/network/transport/wifi.hpp"
 #include "config/config.hpp"
-#include "core/ota_quiet_mode.hpp"
+#include "components/firmware/ota_quiet_mode.hpp"
 #include "core/override_aggregate.hpp"
 #include "core/pending_slot_aggregate.hpp"
 
-#ifdef LAMP_DEBUG
-extern lamp::SocialBehavior shadeSocialBehavior;
-#endif
 
 namespace lamp {
 
@@ -85,9 +80,14 @@ void Lamp::drainShadeColors() {
 
     JsonDocument doc;
     if (deserializeJson(doc, buf) == DeserializationError::Ok) {
-      // User-source: ToConfig mutates config.shade.colors so a subsequent
-      // CHAR_COMMIT can persist the user's color choice.
-      lamp::apply::shadeColorsToConfig(doc.as<JsonArray>());
+      // Object payload {"seg":k,"colors":[...]} targets one segment (per-segment
+      // live preview); a bare array targets the broadcast segment (seg 0).
+      if (doc.is<JsonObject>()) {
+        lamp::apply::shadeSegmentColorsToConfig(
+            doc["seg"] | 0, doc["colors"].as<JsonArray>());
+      } else {
+        lamp::apply::shadeColorsToConfig(doc.as<JsonArray>());
+      }
     }
     shadeConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
     baseConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
@@ -531,6 +531,17 @@ void Lamp::drainWispClaim() {
   }
 }
 
+// Cache per-lamp paint colors for the app's painted-lamps preview.
+void Lamp::drainWispPaint() {
+  {
+    lamp::PendingWispPaint cmd;
+    if (lamp::pendingSlots.wispPaint.drain(pendingMux, cmd)) {
+      lamp::nearbyLamps.cacheWispPaint(cmd.sourceMac, cmd.entries, cmd.count,
+                                       millis());
+    }
+  }
+}
+
 // Broadcasts wispOp as MSG_CONTROL_OP to reach the wisp. Not applied
 // locally; sendControlOp pre-records the seq so the echoed relay is deduped.
 void Lamp::drainWispOp() {
@@ -541,34 +552,6 @@ void Lamp::drainWispOp() {
     Serial.printf("[loop] drain wispOp len=%u\n", (unsigned)len);
 #endif
     if (len > 0) {
-#ifdef LAMP_DEBUG
-      {
-        JsonDocument peek;
-        auto err = deserializeJson(peek, buf, len);
-        if (!err) {
-          const char* op = peek["op"] | "";
-          if (std::strcmp(op, "testGreet") == 0) {
-            const char* bdAddrC = peek["bdAddr"] | "";
-            std::string bdAddr(bdAddrC);
-            NearbyLamp peer;
-            if (!nearbyLamps.findByBdAddr(bdAddr, peer)) {
-              Serial.printf("[testGreet] peer not in nearbyLamps (bdAddr=%s) — dropped\n",
-                            bdAddr.c_str());
-              return;
-            }
-            const GreetingTuning tuning = personalityEngine.greetingFor(peer.bdAddr);
-            shadeSocialBehavior.foundLampColor = peer.baseColor;
-            shadeSocialBehavior.applyTuning(tuning);
-            shadeSocialBehavior.playOnce();
-            nearbyLamps.acknowledge(peer.name);
-            shadeSocialBehavior.markGreeted(peer.name, millis());
-            Serial.printf("[testGreet] forced greeting for %s (%s)\n",
-                          peer.name.c_str(), bdAddr.c_str());
-            return;
-          }
-        }
-      }
-#endif
       // No OTA gate here: wispOps are low-rate config; they reach the wisp
       // even during OTA. applyRemoteOpRouted() still quiesces (gossip-relay,
       // much higher volume).
@@ -598,21 +581,32 @@ void Lamp::drainWispStatus() {
   }
 }
 
-// delayMs already resolved on the recv side.
-// Cascade is sender-authoritative; no local-config consult.
+void Lamp::drainCommand() {
+  {
+    lamp::PendingCommand cmd;
+    if (lamp::pendingSlots.command.drain(pendingMux, cmd)) {
+      JsonDocument doc;
+      if (deserializeJson(doc, cmd.payload, cmd.payloadLen) != DeserializationError::Ok) return;
+      lamp::ExpressionInvocation inv;
+      if (!lamp::parseInvocation(doc.as<JsonObjectConst>(), inv)) return;
+      if (inv.delayMs == 0) {
+        expressionManager.triggerInvocation(inv, cmd.sourceMac);
+      } else {
+        lamp::enqueueDelayedInvocation(inv, cmd.sourceMac, inv.delayMs);
+      }
+    }
+  }
+}
+
 void Lamp::drainEvent() {
   {
-    lamp::PendingEvent cmd;
-    if (lamp::pendingSlots.event.drain(pendingMux, cmd)) {
-#ifdef LAMP_DEBUG
-      Serial.printf("[loop] drain event src=%02X:%02X:%02X:%02X:%02X:%02X "
-                    "delayMs=%u payloadLen=%u\n",
-                    cmd.sourceMac[0], cmd.sourceMac[1], cmd.sourceMac[2],
-                    cmd.sourceMac[3], cmd.sourceMac[4], cmd.sourceMac[5],
-                    (unsigned)cmd.delayMs, (unsigned)cmd.payloadLen);
-#endif
-      expressionManager.tryHandleExpressionEvent(cmd.sourceMac, cmd.delayMs,
-                                                 cmd.payload, cmd.payloadLen);
+    lamp::PendingEvent ev;
+    if (lamp::pendingSlots.event.drain(pendingMux, ev)) {
+      JsonDocument doc;
+      if (deserializeJson(doc, ev.payload, ev.payloadLen) != DeserializationError::Ok) return;
+      lamp::ExpressionInvocation inv;
+      if (!lamp::parseInvocation(doc.as<JsonObjectConst>(), inv)) return;
+      expressionObserverRegistry.fanOut(ev.sourceMac, inv);
     }
   }
 }

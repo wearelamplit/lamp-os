@@ -23,12 +23,19 @@ size_t buildWispStatusJson(const WispStatusFields& f, char* out,
     JsonArray o = doc["offColor"].to<JsonArray>();
     o.add(f.offR); o.add(f.offG); o.add(f.offB);
   }
+  // name before droppable fields so it survives budget pressure.
+  if (f.name && f.name[0] != '\0') {
+    doc["name"] = f.name;
+  }
   // shuffleSeed is priority: without it the app's predictTuple() desyncs from
   // the wisp's paint. The lower-value drift fields and observedZones absorb
   // truncation first; the seed is dropped only as a last resort below.
   if (f.shuffleSeed) {
     doc["shuffleSeed"] = f.shuffleSeed;
   }
+  // hasPassword is non-droppable: the app defaults a missing field to false,
+  // which would wrongly assume open access when a password is set.
+  doc["hasPassword"] = f.hasPassword;
   if (!isOff) {
     doc["driftIntervalMs"] = f.driftIntervalMs;
     if (measureJson(doc) > cap) doc.remove("driftIntervalMs");
@@ -41,11 +48,13 @@ size_t buildWispStatusJson(const WispStatusFields& f, char* out,
     z.add(f.observedZones[i]);
     if (measureJson(doc) > cap) { z.remove(z.size() - 1); break; }
   }
-  // Last resort: a produced frame beats a perfect one (a 0-length frame stops
-  // all broadcasts, vanishing the wisp from the app). Only reached when no
-  // lower-value field remained to cut, e.g. off mode with a long-uptime lastSeenMs.
+  // Last resorts: a produced frame beats a perfect one (a 0-length frame stops
+  // all broadcasts, vanishing the wisp from the app). Drop in reverse priority.
   if (f.shuffleSeed && measureJson(doc) > cap) {
     doc.remove("shuffleSeed");
+  }
+  if (f.name && f.name[0] != '\0' && measureJson(doc) > cap) {
+    doc.remove("name");
   }
   size_t n = serializeJson(doc, out, outCap);
   return (n > 0 && n <= cap) ? n : 0;

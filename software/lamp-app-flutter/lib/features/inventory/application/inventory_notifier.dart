@@ -195,21 +195,6 @@ class InventoryNotifier extends _$InventoryNotifier {
     await _persist(updated);
   }
 
-  /// Mirror the lamp's persistent dev-mode flag onto inventory so
-  /// `effectiveAdvancedProvider` can answer without a connection.
-  /// Called from ControlNotifier after each successful section read +
-  /// after the dev-mode-toggle write completes.
-  Future<void> updateDevMode(String id, bool devMode) async {
-    final current = state.value ?? const [];
-    final idx = current.indexWhere((l) => l.id == id);
-    if (idx < 0) return;
-    if (current[idx].devMode == devMode) return;
-    final updated = [...current];
-    updated[idx] = current[idx].copyWith(devMode: devMode);
-    state = AsyncData(updated);
-    await _persist(updated);
-  }
-
   /// Mirror the lamp's reported firmware version + channel onto inventory
   /// so My Lamps can render `v1.0.82 · stable` per tile even when the
   /// lamp is offline. Both args nullable: lamps that don't emit

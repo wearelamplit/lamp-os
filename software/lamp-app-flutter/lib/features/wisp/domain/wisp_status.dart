@@ -48,6 +48,8 @@ class WispStatus {
     this.shuffleSeed = 0,
     this.driftIntervalMs = 120000,
     this.driftFadePct = 50,
+    this.name = '',
+    this.hasPassword = false,
   });
 
   /// Sentinel for "no wisp has been heard on this lamp yet" (lamp
@@ -141,6 +143,13 @@ class WispStatus {
   /// Fade depth for drift transitions, as a percentage of the color delta.
   /// Defaults to 50 matching the firmware default.
   final int driftFadePct;
+
+  /// Wisp's human-readable name, set via the `setName` wispOp.
+  /// Empty string on factory-fresh wisps or payloads pre-dating this field.
+  final String name;
+
+  /// True when the wisp has a password set.
+  final bool hasPassword;
 
   /// Convenience: are we currently being wisp-painted on either surface?
   bool get controlling => controllingBase || controllingShade;
@@ -290,6 +299,8 @@ class WispStatus {
       shuffleSeed: asInt(json['shuffleSeed']) ?? 0,
       driftIntervalMs: asInt(json['driftIntervalMs']) ?? 120000,
       driftFadePct: asInt(json['driftFadePct']) ?? 50,
+      name: asString(json['name']),
+      hasPassword: asBool(json['hasPassword']),
     );
   }
 
@@ -302,6 +313,8 @@ class WispStatus {
     List<LampColor>? currentPalette,
     int? driftIntervalMs,
     int? driftFadePct,
+    String? name,
+    bool? hasPassword,
   }) {
     return WispStatus(
       currentZone: currentZone ?? this.currentZone,
@@ -327,6 +340,8 @@ class WispStatus {
       shuffleSeed: shuffleSeed,
       driftIntervalMs: driftIntervalMs ?? this.driftIntervalMs,
       driftFadePct: driftFadePct ?? this.driftFadePct,
+      name: name ?? this.name,
+      hasPassword: hasPassword ?? this.hasPassword,
     );
   }
 
@@ -358,7 +373,9 @@ class WispStatus {
               other.currentPalette ?? const <LampColor>[]) &&
           shuffleSeed == other.shuffleSeed &&
           driftIntervalMs == other.driftIntervalMs &&
-          driftFadePct == other.driftFadePct;
+          driftFadePct == other.driftFadePct &&
+          name == other.name &&
+          hasPassword == other.hasPassword;
 
   @override
   int get hashCode => Object.hash(
@@ -383,5 +400,7 @@ class WispStatus {
         shuffleSeed,
         driftIntervalMs,
         driftFadePct,
+        name,
+        hasPassword,
       );
 }

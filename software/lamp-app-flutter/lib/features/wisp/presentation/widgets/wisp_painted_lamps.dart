@@ -12,6 +12,25 @@ import '../../application/wisp_notifier.dart';
 import '../../domain/tuple_sampler.dart';
 import '../../domain/wisp_source_mode.dart';
 
+/// Selects the paint color for a lamp row. Live color wins over prediction;
+/// returns null when neither is available (empty palette + no live entry).
+({LampColor base, LampColor shade})? paintColorFor({
+  required String bdAddr,
+  required Map<String, ({LampColor base, LampColor shade})> livePaint,
+  required List<LampColor> palette,
+  required int shuffleSeed,
+}) {
+  // Look up by bdAddr: the claims blob is keyed by bdAddr (wisp_cache.cpp writes
+  // bdAddrFromMeshMac bytes, and _macAt formats them as uppercase colon-hex).
+  final live = livePaint[bdAddr.toUpperCase()];
+  if (live != null) return live;
+  final mac = meshMacFromBdAddr(bdAddr);
+  if (mac == null || palette.isEmpty) return null;
+  final p = predictTuple(mac: mac, palette: palette, shuffleSeed: shuffleSeed);
+  if (p == null) return null;
+  return (base: p.base, shade: p.shade);
+}
+
 class PaintedLampEntry {
   const PaintedLampEntry({required this.bdAddr, required this.name});
   final String bdAddr;
@@ -67,11 +86,12 @@ class PaintedLampsList extends ConsumerWidget {
     final shuffleSeed = status?.shuffleSeed ?? 0;
     final palette = previewPaletteFor(status?.source, notifier.savedManualPalette);
     final claimedMacs = notifier.claimedMacs; // Set<String>? of bdAddrs
+    final livePaint = notifier.livePaint;
     final peersAsync = ref.watch(lampNearbyPeersNotifierProvider(lampId));
     final peers = peersAsync.value ?? const <LampNearbyPeer>[];
 
     // The connected lamp never lists itself as a nearby peer, so supply its
-    // own name from inventory (on Android lampId IS the bdAddr) — otherwise
+    // own name from inventory (on Android lampId IS the bdAddr); otherwise
     // its own claimed entry would render as a bare bdAddr label.
     final inventory =
         ref.watch(inventoryNotifierProvider).value ?? const <InventoryLamp>[];
@@ -97,7 +117,7 @@ class PaintedLampsList extends ConsumerWidget {
     if (entries.isEmpty) {
       return Padding(
         padding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: AppSpace.md),
+            const EdgeInsets.symmetric(horizontal: AppSpace.lg, vertical: AppSpace.md),
         child: Text('No lamps claimed by this wisp right now.',
             style: Theme.of(context).textTheme.bodySmall),
       );
@@ -111,6 +131,7 @@ class PaintedLampsList extends ConsumerWidget {
             name: e.name,
             palette: palette,
             shuffleSeed: shuffleSeed,
+            livePaint: livePaint,
           ),
       ],
     );
@@ -123,21 +144,25 @@ class _PaintedLampRow extends StatelessWidget {
     required this.name,
     required this.palette,
     required this.shuffleSeed,
+    required this.livePaint,
   });
 
   final String bdAddr;
   final String name;
   final List<LampColor> palette;
   final int shuffleSeed;
+  final Map<String, ({LampColor base, LampColor shade})> livePaint;
 
   @override
   Widget build(BuildContext context) {
-    final mac = meshMacFromBdAddr(bdAddr);
-    final prediction = (mac == null || palette.isEmpty)
-        ? null
-        : predictTuple(mac: mac, palette: palette, shuffleSeed: shuffleSeed);
+    final colors = paintColorFor(
+      bdAddr: bdAddr,
+      livePaint: livePaint,
+      palette: palette,
+      shuffleSeed: shuffleSeed,
+    );
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpace.lg, vertical: AppSpace.sm),
       child: Row(
         children: [
           Expanded(
@@ -150,7 +175,7 @@ class _PaintedLampRow extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          if (prediction == null)
+          if (colors == null)
             Text(
               '—',
               style: Theme.of(context).textTheme.bodySmall,
@@ -159,9 +184,9 @@ class _PaintedLampRow extends StatelessWidget {
             // Tooltip hex for color-blind operators; RGB-only because
             // the wisp wire palette has no W channel.
             Tooltip(
-              message: 'base #${prediction.base.toRgbHex()}',
+              message: 'base #${colors.base.toRgbHex()}',
               child: LampColorSwatch(
-                color: prediction.base,
+                color: colors.base,
                 size: 22,
                 shape: LampSwatchShape.roundedSquare,
                 borderRadius: 6,
@@ -169,9 +194,9 @@ class _PaintedLampRow extends StatelessWidget {
             ),
             const SizedBox(width: 6),
             Tooltip(
-              message: 'shade #${prediction.shade.toRgbHex()}',
+              message: 'shade #${colors.shade.toRgbHex()}',
               child: LampColorSwatch(
-                color: prediction.shade,
+                color: colors.shade,
                 size: 22,
                 shape: LampSwatchShape.roundedSquare,
                 borderRadius: 6,

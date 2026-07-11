@@ -1,9 +1,11 @@
 #pragma once
 
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
 
+#include "behaviors/greetable.hpp"
 #include "config/config_types.hpp"
 #include "core/animated_behavior.hpp"
 #include "util/color.hpp"
@@ -32,7 +34,7 @@ struct GreetingTuning;  // fwd-decl — defined in core/personality_engine.hpp.
  * NearbyLamps prune cycle so a peer leaving + returning doesn't re-greet
  * within the window.
  */
-class SocialBehavior : public AnimatedBehavior {
+class SocialBehavior : public AnimatedBehavior, public Greetable {
   using AnimatedBehavior::AnimatedBehavior;
 
  public:
@@ -62,6 +64,11 @@ class SocialBehavior : public AnimatedBehavior {
   void draw() override;
   void control() override;
 
+  // Greetable: play a greeting for the given peer immediately, bypassing
+  // discovery and cooldown gates. Stamps re-greet tracking so the natural
+  // cooldown applies on the next organic sighting.
+  void triggerGreeting(const NearbyLamp& peer) override;
+
   // Copy a greeting waveform from the engine into the draw-side fields
   // (including `frames`, which AnimatedBehavior's playOnce/nextFrame
   // drive). Single seam so adding a GreetingTuning field touches one
@@ -69,9 +76,22 @@ class SocialBehavior : public AnimatedBehavior {
   // separately by the caller.
   void applyTuning(const GreetingTuning& t);
 
+  // Current greeting state. active while the animation plays; peer and kind
+  // are populated for the duration. Cleared when the animation stops.
+  GreetingState greetingState() const override;
+
+  // Called when greeting starts or ends. Used by the framework wiring to
+  // push CHAR_STATE_NOTIFY without coupling behaviors to the BLE layer.
+  void setOnGreetingChangeCallback(std::function<void()> fn) { onGreetingChange_ = std::move(fn); }
+
   // Wires the live Config so control() can read the current socialMode.
   // No setter = behaves as Ambivert (the spec's pre-personality default).
   void setConfig(Config* config) { config_ = config; }
+
+  // Stamp the per-peer re-greet timestamp + per-mode cooldown without
+  // running the discovery / cooldown gates. Called by triggerGreeting so
+  // forced greetings still enforce the natural cooldown on the next sighting.
+  void markGreeted(const std::string& peerName, uint32_t nowMs);
 
   // Throttle the gossip-OTA peer scan to this cadence. Lamps emit HELLO
   // every 1-2s, so 500 ms catches every fresh sighting while saving the
@@ -80,14 +100,6 @@ class SocialBehavior : public AnimatedBehavior {
   // single-source mutex blocks a second concurrent session anyway, so
   // there's nothing useful to scan for.
   static constexpr uint32_t kOtaScanIntervalMs  = 500;
-
-#ifdef LAMP_DEBUG
-  // Stamp the per-peer re-greet timestamp + per-mode cooldown without
-  // running the discovery / cooldown gates. Used by the testGreet bench
-  // path so a forced greeting still observes the natural cooldown the
-  // next time the peer is heard via BLE adv.
-  void markGreeted(const std::string& peerName, uint32_t nowMs);
-#endif
 
  private:
   static constexpr size_t MAX_GREETED_TRACKED = 32;
@@ -110,6 +122,11 @@ class SocialBehavior : public AnimatedBehavior {
   std::map<std::string, uint32_t> lastGreetedAtMs_;
   std::vector<uint32_t> recentGreetMs_;
   uint32_t tiredUntilMs_ = 0;
+  // BD_ADDR of the peer being greeted, populated for the animation duration.
+  std::string greetingPeerBdAddr_;
+  std::function<void()> onGreetingChange_;
+  // Tracks whether the animation was active last control() so stop-edge fires.
+  bool greetingWasActive_ = false;
 
   // Last time the OTA peer-scan block in control() actually walked the
   // ESP-NOW roster. Throttled by kOtaScanIntervalMs to amortize the

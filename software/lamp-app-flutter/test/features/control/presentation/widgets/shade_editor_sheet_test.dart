@@ -47,7 +47,8 @@ Widget _wrap(ProviderContainer c) => UncontrolledProviderScope(
         home: Builder(
           builder: (ctx) => Scaffold(
             body: TextButton(
-              onPressed: () => showShadeEditorSheet(ctx, lampId: _devId),
+              onPressed: () =>
+                  showShadeEditorSheet(ctx, lampId: _devId, spec: shadeSegmentSpec(0, 'Shade')),
               child: const Text('open'),
             ),
           ),

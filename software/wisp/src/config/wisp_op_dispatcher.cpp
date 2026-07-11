@@ -9,13 +9,71 @@
 
 namespace wisp {
 
+// CHAR_WISP_OP UUID 5f64f4e1-d6d9-4a44-9b3f-3a8d6f7e6b40, byte-reversed (LE).
+// Must match uuidSaltLE16(CHAR_WISP_OP) in the app's lamp_crypto.dart.
+static const uint8_t kWispOpSaltLE[16] = {
+    0x40, 0x6b, 0x7e, 0x6f, 0x8d, 0x3a, 0x3f, 0x9b,
+    0x44, 0x4a, 0xd9, 0xd6, 0xe1, 0xf4, 0x64, 0x5f
+};
+
 DispatchResult WispOpDispatcher::dispatch(const uint8_t* payload, size_t len) {
   if (!payload || len == 0) {
     return DispatchResult::Malformed;
   }
 
+  const uint8_t magic = crypto::magicByte(payload, len);
+
+  if (magic == crypto::MAGIC_CIPHERTEXT) {
+    // 0x02: sealed. Attempt decrypt regardless of password state
+    // (decryptOp itself refuses on empty password).
+    if (!nonces_) {
+      Serial.println("[wisp.op] sealed op received but no nonce ring bound; rejecting");
+      return DispatchResult::Rejected;
+    }
+    std::string plain;
+    std::string pw(config_.password().c_str(), config_.password().length());
+    if (!crypto::decryptOp(payload, len, kWispOpSaltLE, "wispOp", pw, *nonces_, plain)) {
+      Serial.println("[wisp.op] sealed op: decrypt failed");
+      return DispatchResult::Rejected;
+    }
+    return dispatchJson(plain.c_str(), plain.size());
+  }
+
+  // Plaintext path: 0x01-prefixed or bare '{'.
+  const char* json;
+  size_t jsonLen;
+  if (magic == crypto::MAGIC_PLAINTEXT) {
+    json    = reinterpret_cast<const char*>(payload + 1);
+    jsonLen = len - 1;
+  } else {
+    json    = reinterpret_cast<const char*>(payload);
+    jsonLen = len;
+  }
+
+  // Gate plaintext behind the password. setManualPalette is an integrity
+  // exception: palette colors are unauthenticated by design (an attacker in
+  // BLE proximity can vandalize colors regardless, so sealing adds nothing
+  // under the proximity threat model).
+  if (config_.password().length() > 0) {
+    // Peek the op name before deciding to reject.
+    JsonDocument peekDoc;
+    DeserializationError err = deserializeJson(peekDoc, json, jsonLen);
+    if (!err) {
+      const char* op = peekDoc["op"];
+      if (op && strcmp(op, "setManualPalette") == 0) {
+        return dispatchJson(json, jsonLen);
+      }
+    }
+    Serial.println("[wisp.op] plaintext rejected: password is set");
+    return DispatchResult::Rejected;
+  }
+
+  return dispatchJson(json, jsonLen);
+}
+
+DispatchResult WispOpDispatcher::dispatchJson(const char* json, size_t len) {
   JsonDocument doc;
-  DeserializationError err = deserializeJson(doc, payload, len);
+  DeserializationError err = deserializeJson(doc, json, len);
   if (err) {
     Serial.printf("[wisp.op] malformed JSON: %s\n", err.c_str());
     return DispatchResult::Malformed;
@@ -185,6 +243,32 @@ DispatchResult WispOpDispatcher::dispatch(const uint8_t* payload, size_t len) {
     if (iv < 30000 || iv > 3600000 || fp < 0 || fp > 100) return DispatchResult::Malformed;
     config_.setDrift(static_cast<uint32_t>(iv), static_cast<uint8_t>(fp));
     return DispatchResult::AppliedDriftChange;
+  }
+
+  if (strcmp(op, "setName") == 0) {
+    const char* nameVal = doc["name"];
+    if (!nameVal) {
+      Serial.println("[wisp.op] setName missing 'name'");
+      return DispatchResult::Malformed;
+    }
+    config_.setName(String(nameVal));
+    return DispatchResult::AppliedNameChange;
+  }
+
+  if (strcmp(op, "setPassword") == 0) {
+    // Plaintext setPassword is accepted only when factory-fresh (no password set).
+    // The auth gate above already enforces this: plaintext is blocked when a
+    // password exists, and sealed ops (0x02) require the current password to
+    // decrypt — so a sealed setPassword authenticates via the old password
+    // before replacing it.
+    const char* newPw = doc["password"];
+    if (!newPw) {
+      Serial.println("[wisp.op] setPassword missing 'password'");
+      return DispatchResult::Malformed;
+    }
+    config_.setPassword(String(newPw));
+    Serial.printf("[wisp.op] setPassword applied (%u chars)\n", (unsigned)strlen(newPw));
+    return DispatchResult::AppliedPasswordChange;
   }
 
   Serial.printf("[wisp.op] unknown wispOp op='%s'\n", op);

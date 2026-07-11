@@ -36,10 +36,6 @@ abstract class InventoryLamp with _$InventoryLamp {
     /// Firmware channel string the lamp was last seen running (e.g.
     /// `standard-stable`). Carries the v0x04 `{lampType}-{channel}` form.
     String? fwChannel,
-    /// Mirrored from CHAR_LAMP_SECTION's `devMode`, persisted so
-    /// `effectiveAdvancedProvider` can answer "dev mode?" without a live BLE
-    /// connection (list-view consumers would otherwise fan out a connect storm).
-    @Default(false) bool devMode,
   }) = _InventoryLamp;
 
   factory InventoryLamp.fromJson(Map<String, dynamic> json) =>

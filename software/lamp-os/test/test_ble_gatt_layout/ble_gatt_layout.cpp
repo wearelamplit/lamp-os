@@ -40,6 +40,8 @@ static bool expectedHash(uint8_t version, uint32_t& out) {
   switch (version) {
     case 1: out = 0x8386B522u; return true;
     case 2: out = 0xBE2909BFu; return true;
+    case 3: out = 0x3204C7A8u; return true;
+    case 4: out = 0xBE2909BFu; return true;
     default: return false;
   }
 }

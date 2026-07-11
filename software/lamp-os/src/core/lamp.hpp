@@ -9,6 +9,7 @@
 namespace lamp {
 
 class FrameBuffer;  // forward
+class ExpressionRegistry;  // forward
 
 class Lamp {
  public:
@@ -31,6 +32,11 @@ class Lamp {
   FrameBuffer* shadeFb();
   FrameBuffer* baseFb();
   const HwConfig& hw() const { return hw_; }
+
+  // Populate `reg` with this lamp's expression catalog. The base registers
+  // the five built-ins when Features::DefaultExpressions is set; a subclass
+  // overrides to register its own set.
+  virtual void registerExpressions(ExpressionRegistry& reg);
 
  protected:
   virtual void createBehaviors(BehaviorStackBuilder&) = 0;
@@ -68,8 +74,10 @@ class Lamp {
   void drainWispHello();
   void drainWispPalette();
   void drainWispClaim();
+  void drainWispPaint();
   void drainWispOp();
   void drainWispStatus();
+  void drainCommand();
   void drainEvent();
   void drainFirmwareControl();
 };

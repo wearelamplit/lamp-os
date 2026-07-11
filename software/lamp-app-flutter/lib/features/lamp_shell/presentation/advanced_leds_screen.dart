@@ -9,29 +9,21 @@ import '../../../core/widgets/form_section.dart';
 import '../../../core/widgets/friendly_error.dart';
 import '../../../core/widgets/info_panel.dart';
 import '../../../core/widgets/nav_row.dart';
-import '../../control/application/advanced_session.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/presentation/widgets/connecting_view.dart';
 import '../../control/presentation/widgets/disconnect_aware_body.dart';
 
-/// Advanced LED settings — number of pixels per strip + strip-type (LED
-/// byte order). Unlocked from the Info tab via the 5-tap secret on the
-/// lamplit wordmark, or directly toggleable from the Setup screen once
-/// advanced is on.
+/// Advanced LED settings — pixel count per segment. Unlocked from the Info
+/// tab via the 5-tap secret on the lamplit wordmark, or directly toggleable
+/// from the Setup screen once advanced is on.
 ///
-/// Strip-type options map directly to NeoPixel byte-order flags. The
-/// `byteOrder` field on each section is the source of truth; `bpp` is
-/// kept in sync (4 for GRBW, 3 for GRB/BGR).
-///   - **GRBW** — 4 bpp NeoPixel (`NEO_GRBW`). True warm-white channel.
-///   - **GRB**  — 3 bpp NeoPixel (`NEO_GRB`). Standard RGB ordering.
-///   - **BGR**  — 3 bpp NeoPixel (`NEO_BGR`). For strips whose hardware
-///     ships red and blue swapped from the GRB norm.
+/// Per-segment px is editable only on single-segment roles (standard); on
+/// multi-segment roles (snafu) the firmware owns the geometry via StripSpec.
 ///
 /// The bottom Cancel/Update action row: Update calls
 /// `applyAdvancedLedsAndReboot` → `writeSettingsBlob(reboot:true)` → firmware
 /// reboots and reconnects (~8–12 s), then pops on success. Cancel rewinds
-/// the four fields (base.px, base.byteOrder, shade.px, shade.byteOrder) to
-/// their pre-screen-open values without writing to the lamp.
+/// per-segment px to the pre-screen-open values without writing to the lamp.
 class AdvancedLedsScreen extends ConsumerStatefulWidget {
   const AdvancedLedsScreen({super.key, required this.lampId});
   final String lampId;
@@ -42,20 +34,19 @@ class AdvancedLedsScreen extends ConsumerStatefulWidget {
 }
 
 class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
-  // Snapshot of the four fields this screen edits, taken on the first
-  // non-loading paint. Cancel restores from here.
-  int? _origBasePx;
-  String? _origBaseByteOrder;
-  int? _origShadePx;
-  String? _origShadeByteOrder;
+  // Per-segment px snapshots taken on the first non-loading paint.
+  // Single-element for standard/old-firmware; multi-element for snafu.
+  // Cancel restores from here.
+  List<int>? _origShadePxs;
+  List<int>? _origBasePxs;
 
   void _cancel() {
     final n = ref.read(controlNotifierProvider(widget.lampId).notifier);
-    if (_origBasePx != null) n.setBasePx(_origBasePx!);
-    if (_origBaseByteOrder != null) n.setBaseByteOrder(_origBaseByteOrder!);
-    if (_origShadePx != null) n.setShadePx(_origShadePx!);
-    if (_origShadeByteOrder != null) {
-      n.setShadeByteOrder(_origShadeByteOrder!);
+    for (var i = 0; i < (_origShadePxs?.length ?? 0); i++) {
+      n.setSegmentPx('shade', i, _origShadePxs![i]);
+    }
+    for (var i = 0; i < (_origBasePxs?.length ?? 0); i++) {
+      n.setSegmentPx('base', i, _origBasePxs![i]);
     }
     Navigator.of(context).pop();
   }
@@ -83,15 +74,15 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
           // Capture on first paint, never overwrite — the user's mid-
           // edit values come through `state` later and we want Cancel
           // to revert to where things were when the screen opened.
-          _origBasePx ??= state.base.px;
-          _origBaseByteOrder ??= state.base.byteOrder;
-          _origShadePx ??= state.shade.px;
-          _origShadeByteOrder ??= state.shade.byteOrder;
+          _origShadePxs ??= state.shade.segments.isEmpty
+              ? [state.shade.px]
+              : state.shade.segments.map((s) => s.px).toList();
+          _origBasePxs ??= state.base.segments.isEmpty
+              ? [state.base.px]
+              : state.base.segments.map((s) => s.px).toList();
 
           final notifier =
               ref.read(controlNotifierProvider(widget.lampId).notifier);
-          final showByteOrder =
-              ref.watch(effectiveAdvancedProvider(widget.lampId));
           return DisconnectAwareBody(
             lampId: widget.lampId,
             child: Column(
@@ -113,27 +104,25 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
                     FormSection(
                       title: 'Shade strip',
                       children: [
-                        Padding(
-                          padding: const EdgeInsets.all(AppSpace.lg),
-                          child: _PixelCountField(
-                            initial: state.shade.px,
-                            label: 'Shade LED count',
-                            onChanged: notifier.setShadePx,
-                          ),
-                        ),
-                        if (showByteOrder)
+                        if (state.shade.segments.isNotEmpty)
+                          for (var i = 0; i < state.shade.segments.length; i++)
+                            Padding(
+                              padding: const EdgeInsets.all(AppSpace.lg),
+                              child: _PixelCountField(
+                                initial: state.shade.segments[i].px,
+                                label: '${state.shade.segments[i].name} LED count',
+                                // Multi-segment geometry is fixed in StripSpec; editing is ignored by firmware.
+                                readOnly: state.shade.segments.length > 1,
+                                onChanged: (v) => notifier.setSegmentPx('shade', i, v),
+                              ),
+                            )
+                        else
                           Padding(
                             padding: const EdgeInsets.all(AppSpace.lg),
-                            child: SegmentedButton<String>(
-                              showSelectedIcon: false,
-                              segments: const [
-                                ButtonSegment(value: 'GRBW', label: Text('GRBW')),
-                                ButtonSegment(value: 'GRB', label: Text('GRB')),
-                                ButtonSegment(value: 'BGR', label: Text('BGR')),
-                              ],
-                              selected: {state.shade.byteOrder},
-                              onSelectionChanged: (s) =>
-                                  notifier.setShadeByteOrder(s.first),
+                            child: _PixelCountField(
+                              initial: state.shade.px,
+                              label: 'Shade LED count',
+                              onChanged: (v) => notifier.setSegmentPx('shade', 0, v),
                             ),
                           ),
                       ],
@@ -144,27 +133,25 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
                     FormSection(
                       title: 'Base strip',
                       children: [
-                        Padding(
-                          padding: const EdgeInsets.all(AppSpace.lg),
-                          child: _PixelCountField(
-                            initial: state.base.px,
-                            label: 'Base LED count',
-                            onChanged: notifier.setBasePx,
-                          ),
-                        ),
-                        if (showByteOrder)
+                        if (state.base.segments.isNotEmpty)
+                          for (var i = 0; i < state.base.segments.length; i++)
+                            Padding(
+                              padding: const EdgeInsets.all(AppSpace.lg),
+                              child: _PixelCountField(
+                                initial: state.base.segments[i].px,
+                                label: '${state.base.segments[i].name} LED count',
+                                // Multi-segment geometry is fixed in StripSpec; editing is ignored by firmware.
+                                readOnly: state.base.segments.length > 1,
+                                onChanged: (v) => notifier.setSegmentPx('base', i, v),
+                              ),
+                            )
+                        else
                           Padding(
                             padding: const EdgeInsets.all(AppSpace.lg),
-                            child: SegmentedButton<String>(
-                              showSelectedIcon: false,
-                              segments: const [
-                                ButtonSegment(value: 'GRBW', label: Text('GRBW')),
-                                ButtonSegment(value: 'GRB', label: Text('GRB')),
-                                ButtonSegment(value: 'BGR', label: Text('BGR')),
-                              ],
-                              selected: {state.base.byteOrder},
-                              onSelectionChanged: (s) =>
-                                  notifier.setBaseByteOrder(s.first),
+                            child: _PixelCountField(
+                              initial: state.base.px,
+                              label: 'Base LED count',
+                              onChanged: (v) => notifier.setSegmentPx('base', 0, v),
                             ),
                           ),
                         NavRow(
@@ -249,9 +236,11 @@ class _PixelCountField extends StatefulWidget {
     required this.initial,
     required this.label,
     required this.onChanged,
+    this.readOnly = false,
   });
   final int initial;
   final String label;
+  final bool readOnly;
   final ValueChanged<int> onChanged;
 
   @override
@@ -281,6 +270,7 @@ class _PixelCountFieldState extends State<_PixelCountField> {
       controller: _ctrl,
       keyboardType: TextInputType.number,
       decoration: InputDecoration(labelText: widget.label),
+      enabled: !widget.readOnly,
       onChanged: (v) {
         final n = int.tryParse(v);
         if (n != null && n > 0 && n <= 255) widget.onChanged(n);

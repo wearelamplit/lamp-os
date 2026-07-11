@@ -15,6 +15,11 @@ class FastRng {
  public:
   FastRng() : s_(seed()) {}
 
+  // Seed explicitly (forbidden-zero maps to a fixed nonzero constant). Use for
+  // a per-lamp deterministic stream — e.g. seeding from the efuse MAC at early
+  // boot, before RF init makes esp_random() usable.
+  explicit FastRng(uint32_t s) : s_(s ? s : 0xA3C59AC3u) {}
+
   uint32_t next() {
     s_ ^= s_ << 13;
     s_ ^= s_ >> 17;

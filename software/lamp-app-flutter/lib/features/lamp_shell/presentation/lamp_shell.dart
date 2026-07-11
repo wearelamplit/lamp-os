@@ -15,6 +15,7 @@ import '../../social/presentation/social_screen.dart';
 import '../../wisp/application/wisp_notifier.dart';
 import 'expressions_screen.dart';
 import 'info_screen.dart';
+import 'setup_screen.dart';
 
 /// Bottom-nav tabs for the lamp shell. Wisp used to be a bottom-nav
 /// destination but moved out: when only one wisp is painting a given
@@ -22,7 +23,7 @@ import 'info_screen.dart';
 /// orb indicator is already onscreen advertising it. Tapping the orbs
 /// five times unlocks the dedicated wisp config route (`/lamp/:id/wisp`).
 /// Same gesture pattern as the Lamplit-wordmark advanced-unlock.
-enum LampTab { control, expressions, social, info }
+enum LampTab { control, expressions, social, config, info }
 
 class LampShell extends ConsumerStatefulWidget {
   const LampShell({
@@ -71,7 +72,7 @@ class _LampShellState extends ConsumerState<LampShell> {
   @override
   Widget build(BuildContext context) {
     // Keep the control connection alive across tab switches. Without this
-    // watch, switching to Expressions or Setup unmounts ControlScreen, drops
+    // watch, switching to another tab unmounts ControlScreen, drops
     // the only listener on controlNotifierProvider, and the provider
     // auto-disposes (incl. ble.disconnect). LampShell unmounting (back to
     // inventory, swap to another lamp) still cleans up because this watch
@@ -80,17 +81,18 @@ class _LampShellState extends ConsumerState<LampShell> {
 
     // Same lifecycle treatment for the wisp notifier even though the
     // Wisp tab is gone from the bottom nav: the WispIndicator on the
-    // Setup tab still consumes it, and the dedicated wisp config route
+    // Colors tab still consumes it, and the dedicated wisp config route
     // pushed from the 5-tap-orbs gesture should reuse the same
     // notifier instance (manual-palette draft + source mode). Without
     // this lamp-shell-level watch, the indicator would dispose the
-    // notifier the moment the user navigated away from the Setup tab.
+    // notifier the moment the user navigated away from the Colors tab.
     ref.watch(wispNotifierProvider(widget.lampId));
 
     final body = switch (_tab) {
       LampTab.control => ControlScreen(lampId: widget.lampId),
       LampTab.expressions => ExpressionsScreen(lampId: widget.lampId),
       LampTab.social => SocialScreen(lampId: widget.lampId),
+      LampTab.config => SetupScreen(lampId: widget.lampId),
       LampTab.info => InfoScreen(lampId: widget.lampId),
     };
 
@@ -169,20 +171,18 @@ class _LampShellState extends ConsumerState<LampShell> {
           }),
         ),
         child: NavigationBar(
-          // Bottom nav was carrying 6 destinations; "Setup" and "Info"
-          // are now reached via the AppBar Configuration gear (Setup =
-          // lamp-config hub; Info = About section at its bottom). That
-          // leaves four primary modes — the first tab is relabelled
-          // "Setup" since it's where most lamp tuning happens.
           selectedIndex: _tab.index,
           onDestinationSelected: (i) =>
               setState(() => _tab = LampTab.values[i]),
           destinations: [
-            _destination(Icons.tune, 'Setup', _tab == LampTab.control),
+            _destination(Icons.palette_outlined, 'Colors',
+                _tab == LampTab.control),
             _destination(
                 Icons.auto_awesome, 'Expressions', _tab == LampTab.expressions),
             _destination(Icons.handshake_outlined, 'Social',
                 _tab == LampTab.social),
+            _destination(Icons.settings_outlined, 'Config',
+                _tab == LampTab.config),
             _destination(
                 Icons.info_outline, 'Info', _tab == LampTab.info),
           ],

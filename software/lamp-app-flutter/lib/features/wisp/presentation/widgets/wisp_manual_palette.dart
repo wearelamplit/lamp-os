@@ -34,7 +34,7 @@ class _ManualPaletteEditorState extends ConsumerState<ManualPaletteEditor> {
               width: 14, height: 14,
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: AppSpace.md),
             Text('Reading palette from wisp…',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   fontStyle: FontStyle.italic,
@@ -71,7 +71,7 @@ class _ManualPaletteEditorState extends ConsumerState<ManualPaletteEditor> {
           ],
         ),
         if (atCap) ...[
-          const SizedBox(height: 4),
+          const SizedBox(height: AppSpace.xs),
           Text(
             'Palette is at the 10-color cap. Remove a swatch to add another.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -91,7 +91,7 @@ class _ManualPaletteEditorState extends ConsumerState<ManualPaletteEditor> {
       context,
       initial: initial,
       title: 'Add palette color',
-      bpp: 3, // RGB only — wisp manual palette has no W channel.
+      bpp: 3, // RGB only; wisp manual palette has no W channel.
     );
     if (picked == null) return;
     notifier.appendManualPaletteColor(picked);

@@ -68,6 +68,50 @@ void main() {
     expect(s.colors.single.w, 0xFF);
   });
 
+  test('ShadeSection segments empty when absent', () {
+    final s = ShadeSection.fromJson(jsonDecode(
+      '{"px":38,"bpp":4,"colors":["#000000FF"]}',
+    ) as Map<String, dynamic>);
+    expect(s.segments, isEmpty);
+  });
+
+  test('ShadeSection parses segments array', () {
+    final s = ShadeSection.fromJson(jsonDecode(
+      '{"px":24,"bpp":4,"colors":["#000000FF"],'
+      '"segments":[{"name":"Small Dots","px":12,"colors":["#000000FF"]},'
+      '{"name":"Big Dots","px":12,"colors":["#FF0000FF"]}]}',
+    ) as Map<String, dynamic>);
+    expect(s.segments, hasLength(2));
+    expect(s.segments[0].name, 'Small Dots');
+    expect(s.segments[0].px, 12);
+    expect(s.segments[1].name, 'Big Dots');
+    expect(s.segments[1].colors.single.r, 0xFF);
+  });
+
+  test('BaseSection parses segments array', () {
+    final s = BaseSection.fromJson(jsonDecode(
+      '{"px":35,"ac":0,"bpp":4,"colors":["#300783FF"],"knockout":[],'
+      '"segments":[{"name":"Stem","px":35,"colors":["#300783FF"]}]}',
+    ) as Map<String, dynamic>);
+    expect(s.segments, hasLength(1));
+    expect(s.segments.first.name, 'Stem');
+  });
+
+  test('Segment equality', () {
+    const a = Segment(
+      name: 'Shade',
+      px: 38,
+      colors: [LampColor(r: 0, g: 0, b: 0, w: 255)],
+    );
+    const b = Segment(
+      name: 'Shade',
+      px: 38,
+      colors: [LampColor(r: 0, g: 0, b: 0, w: 255)],
+    );
+    expect(a, equals(b));
+    expect(a.hashCode, b.hashCode);
+  });
+
   test('HomeSection parses ssid + brightness (legacy password field ignored)',
       () {
     // Legacy lamps wrote a "password" field — we silently ignore it now.
@@ -124,8 +168,7 @@ void main() {
   });
 
   group('ExpressionConfig drops legacy disabledDuringWispOverride', () {
-    // The field is no longer a per-instance config — it's now a pure
-    // type-property looked up via ExpressionTypeMeta. fromJson/toJson must
+    // The field is no longer a per-instance config. fromJson/toJson must
     // tolerate the legacy key (older firmware/payloads may still ship it)
     // but never surface it as a parameter or carry it forward.
     test('legacy disabledDuringWispOverride is dropped, not stored as param',

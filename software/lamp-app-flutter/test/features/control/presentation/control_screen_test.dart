@@ -63,6 +63,33 @@ Future<(ProviderContainer, InMemoryBleClient)> _withAuthGatedLamp() async {
   return (c, ble);
 }
 
+Future<ProviderContainer> _withSnafuLamp() async {
+  SharedPreferences.setMockInitialValues({});
+  final ble = InMemoryBleClient();
+  await seedControlBle(
+    ble,
+    deviceId: _devId,
+    name: 'jacko',
+    lampType: 'snafu',
+    shadePx: 24,
+    shadeSegmentsJson:
+        '[{"name":"Small Dots","px":12,"colors":["#000000FF"]},'
+        '{"name":"Big Dots","px":12,"colors":["#FF0000FF"]}]',
+    basePx: 35,
+    baseSegmentsJson: '[{"name":"Stem","px":35,"colors":["#300783FF"]}]',
+  );
+  final c = ProviderContainer(
+    overrides: [
+      bleClientProvider.overrideWithValue(ble),
+      bleScannerProvider.overrideWithValue(FakeBleScanner()),
+    ],
+  );
+  await c.read(inventoryNotifierProvider.future);
+  await c.read(inventoryNotifierProvider.notifier).add(const InventoryLamp(
+        id: _devId, name: 'jacko', controlPassword: 'secret'));
+  return c;
+}
+
 Future<void> _pumpUntil(WidgetTester tester, Finder finder,
     {int frames = 60}) async {
   for (var i = 0; i < frames; i++) {
@@ -98,6 +125,42 @@ void main() {
     final baseY = tester.getTopLeft(find.byType(BaseCard)).dy;
     expect(brightnessY, greaterThan(baseY),
         reason: 'Brightness must be visually below the base card');
+  });
+
+  testWidgets('non-snafu lamp shows "Shade" and no "Big Dots" card',
+      (tester) async {
+    final c = await _withLamp();
+    addTearDown(c.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: c,
+      child: const MaterialApp(
+        home: Scaffold(body: ControlScreen(lampId: _devId)),
+      ),
+    ));
+    await _pumpToData(tester);
+    expect(find.text('Shade'), findsOneWidget);
+    expect(find.text('Big Dots'), findsNothing);
+    expect(find.text('Small Dots'), findsNothing);
+  });
+
+  testWidgets('snafu lamp shows per-segment names: Small Dots, Big Dots, Stem',
+      (tester) async {
+    final c = await _withSnafuLamp();
+    addTearDown(c.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: c,
+      child: const MaterialApp(
+        home: Scaffold(body: ControlScreen(lampId: _devId)),
+      ),
+    ));
+    await _pumpToData(tester);
+    expect(find.text('Small Dots'), findsOneWidget);
+    expect(find.text('Big Dots'), findsOneWidget);
+    expect(find.text('Stem'), findsOneWidget);
+    // Once a role is multi-segment, both roles show a header so the Stem can't
+    // fold under the Shade group. SectionHeader uppercases its label.
+    expect(find.text('SHADE'), findsOneWidget);
+    expect(find.text('BASE'), findsOneWidget);
   });
 
   // ---------------------------------------------------------------------------

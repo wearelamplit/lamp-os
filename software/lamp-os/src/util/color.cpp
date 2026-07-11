@@ -20,6 +20,19 @@ std::string colorToHexString(Color inColor) {
   return std::string(buf, 9);
 };
 
+bool isValidColorHex(const char* s) {
+  if (!s) return false;
+  if (s[0] != '#') return false;
+  for (int i = 1; i < 9; i++) {
+    const char c = s[i];
+    if (c == '\0') return false;
+    const bool ok = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') ||
+                    (c >= 'a' && c <= 'f');
+    if (!ok) return false;
+  }
+  return s[9] == '\0';
+}
+
 namespace {
 // Map a single ASCII hex char to its 0..15 value, or -1 if not a hex digit.
 inline int hexNibble(char c) {

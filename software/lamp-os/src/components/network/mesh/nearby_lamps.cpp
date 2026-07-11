@@ -217,6 +217,27 @@ std::vector<NearbyLamp> NearbyLamps::getReachableViaBle(uint32_t maxAgeMs) {
   return out;
 }
 
+std::vector<NearbyLamp> NearbyLamps::getUngreetedArrivals(uint32_t maxAgeMs) {
+  uint32_t now = millis();
+  xSemaphoreTake(mutex_, portMAX_DELAY);
+  std::vector<NearbyLamp> snapshot = store_;
+  xSemaphoreGive(mutex_);
+  std::vector<NearbyLamp> out;
+  out.reserve(snapshot.size());
+  for (const auto& e : snapshot) {
+    if (e.bdAddr.empty()) continue;
+    if (e.lastSeenViaBleMs == 0) continue;
+    if ((now - e.lastSeenViaBleMs) > maxAgeMs) continue;
+    if (e.acknowledged) continue;
+    out.push_back(e);
+  }
+  std::stable_sort(out.begin(), out.end(),
+                   [](const NearbyLamp& a, const NearbyLamp& b) {
+                     return a.lastRssi > b.lastRssi;
+                   });
+  return out;
+}
+
 std::vector<NearbyLamp> NearbyLamps::getReachableViaEspNow(uint32_t maxAgeMs) {
   uint32_t now = millis();
   xSemaphoreTake(mutex_, portMAX_DELAY);

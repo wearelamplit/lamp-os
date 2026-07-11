@@ -113,19 +113,6 @@ static void applyRemoteOpLocal(const char* payloadJson, size_t len,
     // Match the drain's unconditional invalidate semantics.
     config.invalidateExpressionsSection();
 
-  } else if (strcmp(ch, "triggerExpression") == 0) {
-    // Receive side of the single-peer-named triggerExpression CONTROL_OP.
-    // The MSG_EVENT broadcast cascade has its own recv path through
-    // tryHandleExpressionEvent and does NOT route through here. We never
-    // re-emit — that's the structural loop break.
-    lamp::ExpressionInvocation inv;
-    if (!lamp::parseInvocation(doc.as<JsonObjectConst>(), inv)) return;
-    if (inv.delayMs == 0) {
-      expressionManager.triggerInvocation(inv, srcMac);
-    } else {
-      lamp::enqueueDelayedInvocation(inv, srcMac, inv.delayMs);
-    }
-
   } else if (strcmp(ch, "wispStatus") == 0) {
     // A wispStatus payload reached us — either directly from the
     // wisp's MSG_CONTROL_OP broadcast or via a peer's gossip relay. We

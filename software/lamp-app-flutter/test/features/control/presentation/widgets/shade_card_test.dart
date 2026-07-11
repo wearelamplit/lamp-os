@@ -5,6 +5,7 @@ import '../../../../_support/in_memory_ble_client.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/features/control/application/control_notifier.dart';
 import 'package:lamp_app/features/control/presentation/widgets/shade_card.dart';
+import 'package:lamp_app/features/control/presentation/widgets/shade_editor_sheet.dart';
 import 'package:lamp_app/features/inventory/application/inventory_notifier.dart';
 import 'package:lamp_app/features/inventory/domain/inventory_lamp.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -39,9 +40,9 @@ void main() {
     addTearDown(c.dispose);
     await tester.pumpWidget(UncontrolledProviderScope(
       container: c,
-      child: const MaterialApp(
+      child: MaterialApp(
         home: Scaffold(
-          body: ShadeCard(lampId: _devId),
+          body: ShadeCard(lampId: _devId, spec: shadeSegmentSpec(0,'Shade')),
         ),
       ),
     ));
@@ -57,9 +58,9 @@ void main() {
     addTearDown(c.dispose);
     await tester.pumpWidget(UncontrolledProviderScope(
       container: c,
-      child: const MaterialApp(
+      child: MaterialApp(
         home: Scaffold(
-          body: ShadeCard(lampId: _devId),
+          body: ShadeCard(lampId: _devId, spec: shadeSegmentSpec(0,'Shade')),
         ),
       ),
     ));

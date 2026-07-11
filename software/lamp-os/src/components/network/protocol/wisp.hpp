@@ -7,9 +7,10 @@
 
 // =============================================================================
 // wisp.hpp — the wisp coordination family.
-// Covers MSG_WISP_HELLO (0x20), MSG_WISP_CLAIM (0x25), MSG_WISP_PALETTE (0x26).
+// Covers MSG_WISP_HELLO (0x20), MSG_WISP_CLAIM (0x25), MSG_WISP_PALETTE (0x26),
+//         MSG_WISP_PAINT (0x27).
 // build/parse: buildWispHello/parseWispHello, buildWispClaim/parseWispClaim,
-//              buildWispPalette/parseWispPalette.
+//              buildWispPalette/parseWispPalette, buildWispPaint/parseWispPaint.
 // =============================================================================
 //
 // MSG_WISP_HELLO (0x20) — wisp presence beacon (WISP_HELLO_FIXED_SIZE == 45):
@@ -37,6 +38,13 @@
 //   12    1    count (≤ kMaxWispPaletteColors = 50)
 //   13   3*n   rgb: each WISP_PALETTE_ENTRY_SIZE = R,G,B (no W)
 //              Fixed prefix WISP_PALETTE_FIXED_PREFIX = 13.
+//
+// MSG_WISP_PAINT (0x27) — per-lamp paint colors broadcast (MAX_SIZE == 229):
+//    0    6    header
+//    6    6    sourceMac
+//   12    1    count (≤ WISP_PAINT_MAX_ENTRIES = 18)
+//   13  12*n   entries: each WISP_PAINT_ENTRY_SIZE = lampMac(6)+baseRGB(3)+shadeRGB(3)
+//              Fixed prefix WISP_PAINT_FIXED_PREFIX = 13.
 
 namespace lamp_protocol {
 
@@ -90,6 +98,17 @@ constexpr size_t WISP_CLAIM_MAX_SIZE     = WISP_CLAIM_FIXED_PREFIX +
                                             kMaxWispClaimEntries *
                                             WISP_CLAIM_ENTRY_SIZE;  // 237
 
+// MSG_WISP_PAINT: header(6) + sourceMac(6) + count(1) + entries[count * 12].
+// Each entry: lampMac(6) + baseRGB(3) + shadeRGB(3) = 12 bytes.
+// Cap at 18 entries: 13 + 18*12 = 229 B, within the 250-byte ESP-NOW frame.
+constexpr size_t WISP_PAINT_FIXED_PREFIX = HEADER_SIZE + 6 + 1;  // 13
+constexpr size_t WISP_PAINT_ENTRY_SIZE   = 6 + 3 + 3;            // 12
+constexpr size_t WISP_PAINT_MAX_ENTRIES  = 18;
+constexpr size_t WISP_PAINT_MAX_SIZE     = WISP_PAINT_FIXED_PREFIX +
+                                            WISP_PAINT_MAX_ENTRIES *
+                                            WISP_PAINT_ENTRY_SIZE;  // 229
+static_assert(WISP_PAINT_MAX_SIZE <= 250, "MSG_WISP_PAINT exceeds ESP-NOW frame cap");
+
 struct ParsedWispHello {
   uint16_t seq;
   uint8_t  sourceMac[6];
@@ -121,6 +140,15 @@ struct ParsedWispPalette {
   // Pointer into the recv buffer; caller must not retain past this call.
   // `count * 3` bytes of packed R, G, B.
   const uint8_t* rgb;
+};
+
+struct ParsedWispPaint {
+  uint16_t seq;
+  uint8_t  sourceMac[6];
+  uint8_t  count;
+  // Pointer into the recv buffer; caller must not retain past this call.
+  // `count * WISP_PAINT_ENTRY_SIZE` bytes of packed lampMac(6)+baseRGB(3)+shadeRGB(3).
+  const uint8_t* entries;
 };
 
 // Build a MSG_WISP_CLAIM frame. `entries` is `count` packed records, each
@@ -165,6 +193,29 @@ inline size_t buildWispPalette(uint8_t* buf, size_t bufLen, uint16_t seq,
   if (count) {
     std::memcpy(&buf[WISP_PALETTE_FIXED_PREFIX], rgb,
                 count * WISP_PALETTE_ENTRY_SIZE);
+  }
+  return total;
+}
+
+// Build a MSG_WISP_PAINT frame. `entries` is `count` packed records, each
+// WISP_PAINT_ENTRY_SIZE bytes: lampMac(6) + baseRGB(3) + shadeRGB(3). `count`
+// must be ≤ WISP_PAINT_MAX_ENTRIES. Returns total bytes written on success, 0
+// on bad args / insufficient buffer / count overflow.
+inline size_t buildWispPaint(uint8_t* buf, size_t bufLen, uint16_t seq,
+                             const uint8_t sourceMac[6],
+                             const uint8_t* entries,
+                             uint8_t count) {
+  if (!buf || !sourceMac) return 0;
+  if (count > WISP_PAINT_MAX_ENTRIES) return 0;
+  if (count > 0 && !entries) return 0;
+  const size_t total = WISP_PAINT_FIXED_PREFIX + count * WISP_PAINT_ENTRY_SIZE;
+  if (bufLen < total) return 0;
+  detail::writeHeader(buf, MSG_WISP_PAINT, seq);
+  std::memcpy(&buf[6], sourceMac, 6);
+  buf[12] = count;
+  if (count) {
+    std::memcpy(&buf[WISP_PAINT_FIXED_PREFIX], entries,
+                count * WISP_PAINT_ENTRY_SIZE);
   }
   return total;
 }
@@ -248,6 +299,21 @@ inline bool parseWispPalette(const uint8_t* data, size_t len,
   std::memcpy(out.sourceMac, &data[6], 6);
   out.count = count;
   out.rgb = count ? &data[WISP_PALETTE_FIXED_PREFIX] : nullptr;
+  return true;
+}
+
+inline bool parseWispPaint(const uint8_t* data, size_t len, ParsedWispPaint& out) {
+  if (inspect(data, len) != MSG_WISP_PAINT) return false;
+  if (len < WISP_PAINT_FIXED_PREFIX) return false;
+  const uint8_t count = data[12];
+  if (count > WISP_PAINT_MAX_ENTRIES) return false;
+  const size_t expected = WISP_PAINT_FIXED_PREFIX +
+                          static_cast<size_t>(count) * WISP_PAINT_ENTRY_SIZE;
+  if (len < expected) return false;
+  out.seq = static_cast<uint16_t>(data[4]) | (static_cast<uint16_t>(data[5]) << 8);
+  std::memcpy(out.sourceMac, &data[6], 6);
+  out.count = count;
+  out.entries = count ? &data[WISP_PAINT_FIXED_PREFIX] : nullptr;
   return true;
 }
 

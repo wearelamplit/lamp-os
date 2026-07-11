@@ -8,6 +8,7 @@
 #include "core/behavior_context.hpp"
 #include "core/compositor.hpp"
 #include "expression_manager.hpp"
+#include "expressions/primitives.hpp"
 
 namespace lamp {
 
@@ -16,8 +17,8 @@ void Expression::configure(const std::vector<Color>& inColors,
                           uint32_t inIntervalMax,
                           ExpressionTarget inTarget) {
   colors = inColors;
-  intervalMinMs = inIntervalMin * 1000;
-  intervalMaxMs = inIntervalMax * 1000;
+  intervalMinMs = inIntervalMin * kMsPerSecond;
+  intervalMaxMs = inIntervalMax * kMsPerSecond;
   target = inTarget;
   scheduleNextTrigger();
 }

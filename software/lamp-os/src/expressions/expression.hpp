@@ -71,6 +71,10 @@ class Expression : public AnimatedBehavior {
                  uint32_t inIntervalMax,
                  ExpressionTarget inTarget);
 
+  // Apply expression-specific tuning params keyed as in descriptor().params.
+  virtual void configureFromParameters(
+      const std::map<std::string, uint32_t>& parameters) = 0;
+
   void control() override;
 
   /**

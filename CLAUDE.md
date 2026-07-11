@@ -34,7 +34,7 @@ The mesh wire format carries a **receive range**, not a single version:
 `PROTOCOL_VERSION_EMIT = 0x05` is what we broadcast; `RX_MIN = 0x04` ..
 `RX_MAX = 0x05` is what we parse. Splitting emit from receive lets the fleet
 *receive* a newer version before it *emits* one — the safe path for a
-multi-version OTA wave. MSG_EVENT gossip-relays, DedupRing capacity is 64,
+multi-version OTA wave. MSG_EVENT is nearby-scoped (no relay), DedupRing capacity is 64,
 HELLO interval is 5 s. v0x04 widened the FW channel slot to 16 bytes for
 per-variant OTA gating (`{type}-{channel}`); v0x05 added a TLV trailer to
 HELLO + WISP_HELLO (TLVs: `HELLO_TLV_OTA_STATE`, `HELLO_TLV_FW_CHANNEL`,
@@ -63,8 +63,10 @@ instead:
 - `kGattLayout` / `kGattSchemaVersion` in
   `components/network/ble/gatt_layout.hpp` are the single source of truth.
   `CHAR_SCHEMA_VERSION` exposes the version on the wire (read-only, single
-  byte; absent on legacy lamps that predate it). No app consumer reads it
-  yet — that lands with the first feature that gates on the version.
+  byte; absent on legacy lamps that predate it). `kGattSchemaVersion` is
+  currently **4**; `CHAR_WISP_CLAIMS` (`5f64f4eb-…`) is the v4 tail. No app
+  consumer gates on the version yet — that lands with the first feature that
+  requires it.
 - **Grow append-only** (new characteristic at the tail) or evolve a
   characteristic's *payload* (settings_blob / sections / page-data), neither
   moves an existing handle, so deployed installs keep working.
@@ -73,6 +75,19 @@ instead:
   native test fails until you do), and expect a one-time force-stop on
   already-paired phones. The boot-time assert in `ble_control.cpp` catches
   table-vs-registration drift.
+
+## Worktrees and branch safety
+
+This repo uses multiple git worktrees under `.claude/worktrees/`, each on its
+own branch (e.g. the `net-hardening` worktree is on `snafu-cleanup`), separate
+from the main checkout at the repo root (usually on `dev`). **Before any build,
+flash, install, or commit, confirm both the worktree AND the branch** —
+`git rev-parse --show-toplevel` and `git rev-parse --abbrev-ref HEAD`. A stray
+`cd` to the repo root (or an agent that starts there) silently builds, edits,
+or commits against the WRONG branch: changes land where no one is looking,
+codegen dirties the wrong tree, and reviews read stale code. This has bitten us
+for real. **Any agent dispatched to work in a worktree MUST be given the
+absolute worktree path and told NOT to `cd` to the repo root.**
 
 ## Build + test
 
@@ -83,15 +98,31 @@ contract CI and bench-verify run against; bypassing them silently desyncs
 
 ```sh
 npm run lamp:test          # native unit tests (runs in CI)
-npm run lamp:build         # lamp firmware, standard variant (default)
-VARIANT=snafu npm run lamp:build   # any other variant
+npm run lamp:build         # lamp firmware, unsigned (no key needed)
+VARIANT=snafu npm run lamp:build   # any other variant, still unsigned
 npm run wisp:build         # wisp firmware
 ```
+
+Local builds are unsigned by default (`LAMP_FIRMWARE_SKIP_SIGN=1`). Unsigned
+binaries boot and mesh normally; they cannot be distributed over ESP-NOW OTA
+(no LSIG footer). Use `:signed` variants when you have the signing key and need
+an OTA-distributable binary.
 
 `lamp:flash` and `lamp:build` take three optional env params: `VARIANT`
 (default `standard`), `CHANNEL` (flash defaults to `beta`), and `PORT` (flash
 only, passed to `--upload-port` for when more than one board is attached).
 `VARIANT=snafu CHANNEL=stable PORT=/dev/cu.usbserial-6 npm run lamp:flash`.
+
+`lamp:build:signed` / `lamp:flash:signed` build and sign locally. Requires the
+signing key at `~/.lamp-os-firmware-key.bin`. Accept the same `VARIANT`,
+`CHANNEL`, and `PORT` env params.
+
+`lamp:flash:release` downloads a prebuilt signed binary from the GitHub `beta`
+release (via `gh`) and flashes it over USB with `esptool`. No build, no key
+needed. `VARIANT` (default `standard`), `RELEASE_TAG` (default `beta`), and
+`PORT` env params apply. Beta releases are published manually
+(`release-beta.yml` is `workflow_dispatch`), so the downloaded build is only as
+current as the last manual run.
 
 The native suite covers protocol parsers, dedup ring, color math, fade
 math, cascade dedup, OTA receiver/indicator, and the GATT layout pin. Keep

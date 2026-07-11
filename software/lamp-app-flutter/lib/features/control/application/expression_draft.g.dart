@@ -14,8 +14,7 @@ part of 'expression_draft.dart';
 ///
 /// Family key is `(lampId, type, target)`. If the family entry doesn't
 /// match any existing expression, a fresh draft is created with that
-/// (type, target) — this is the path used for new entries after the user
-/// picks them in `AddExpressionPickerScreen`.
+/// (type, target), seeded from the firmware catalog's declared defaults.
 
 @ProviderFor(ExpressionDraft)
 final expressionDraftProvider = ExpressionDraftFamily._();
@@ -26,8 +25,7 @@ final expressionDraftProvider = ExpressionDraftFamily._();
 ///
 /// Family key is `(lampId, type, target)`. If the family entry doesn't
 /// match any existing expression, a fresh draft is created with that
-/// (type, target) — this is the path used for new entries after the user
-/// picks them in `AddExpressionPickerScreen`.
+/// (type, target), seeded from the firmware catalog's declared defaults.
 final class ExpressionDraftProvider
     extends $NotifierProvider<ExpressionDraft, ExpressionConfig> {
   /// Working copy of an expression while the user is editing it. Held in a
@@ -36,8 +34,7 @@ final class ExpressionDraftProvider
   ///
   /// Family key is `(lampId, type, target)`. If the family entry doesn't
   /// match any existing expression, a fresh draft is created with that
-  /// (type, target) — this is the path used for new entries after the user
-  /// picks them in `AddExpressionPickerScreen`.
+  /// (type, target), seeded from the firmware catalog's declared defaults.
   ExpressionDraftProvider._({
     required ExpressionDraftFamily super.from,
     required (String, String, int) super.argument,
@@ -82,7 +79,7 @@ final class ExpressionDraftProvider
   }
 }
 
-String _$expressionDraftHash() => r'2c04a96ea89450be0bebdd194131a25cf28d7147';
+String _$expressionDraftHash() => r'197dfacf767920b481736d698f445d0026a79994';
 
 /// Working copy of an expression while the user is editing it. Held in a
 /// keep-alive provider so navigating away from the editor and back doesn't
@@ -90,8 +87,7 @@ String _$expressionDraftHash() => r'2c04a96ea89450be0bebdd194131a25cf28d7147';
 ///
 /// Family key is `(lampId, type, target)`. If the family entry doesn't
 /// match any existing expression, a fresh draft is created with that
-/// (type, target) — this is the path used for new entries after the user
-/// picks them in `AddExpressionPickerScreen`.
+/// (type, target), seeded from the firmware catalog's declared defaults.
 
 final class ExpressionDraftFamily extends $Family
     with
@@ -117,8 +113,7 @@ final class ExpressionDraftFamily extends $Family
   ///
   /// Family key is `(lampId, type, target)`. If the family entry doesn't
   /// match any existing expression, a fresh draft is created with that
-  /// (type, target) — this is the path used for new entries after the user
-  /// picks them in `AddExpressionPickerScreen`.
+  /// (type, target), seeded from the firmware catalog's declared defaults.
 
   ExpressionDraftProvider call(String lampId, String type, int target) =>
       ExpressionDraftProvider._(argument: (lampId, type, target), from: this);
@@ -133,8 +128,7 @@ final class ExpressionDraftFamily extends $Family
 ///
 /// Family key is `(lampId, type, target)`. If the family entry doesn't
 /// match any existing expression, a fresh draft is created with that
-/// (type, target) — this is the path used for new entries after the user
-/// picks them in `AddExpressionPickerScreen`.
+/// (type, target), seeded from the firmware catalog's declared defaults.
 
 abstract class _$ExpressionDraft extends $Notifier<ExpressionConfig> {
   late final _$args = ref.$arg as (String, String, int);

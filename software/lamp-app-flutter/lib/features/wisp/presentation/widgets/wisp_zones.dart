@@ -15,7 +15,7 @@ class AuroraNotConnectedNotice extends StatelessWidget {
   Widget build(BuildContext context) {
     final detail = wifiConnected
         ? "Wi-Fi is up but Aurora hasn't been reached yet."
-        : "The wisp isn't on Wi-Fi — configure it below.";
+        : "The wisp isn't on Wi-Fi. Configure it below.";
     final secondary = Theme.of(context).colorScheme.secondary;
     return Container(
       padding: const EdgeInsets.all(AppSpace.md),
@@ -61,7 +61,7 @@ class CurrentZone extends StatelessWidget {
     if (!zoneHeard) {
       headline = 'None detected';
       subhead = status.zoneSource == ZoneSource.none
-          ? 'Tap a zone below to assign one — or wait for Aurora to '
+          ? 'Tap a zone below to assign one, or wait for Aurora to '
               'publish one.'
           : null;
     } else {
@@ -78,7 +78,7 @@ class CurrentZone extends StatelessWidget {
           style: textTheme.displaySmall,
         ),
         if (subhead != null) ...[
-          const SizedBox(height: 4),
+          const SizedBox(height: AppSpace.xs),
           Text(
             subhead,
             style: textTheme.bodySmall?.copyWith(fontStyle: FontStyle.italic),

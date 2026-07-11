@@ -197,6 +197,10 @@ void WispController::applyOpResult(DispatchResult res) {
       paint_.setDriftInterval(config_.driftIntervalMs(), config_.driftFadePct());
       status_.triggerOnChange();
       break;
+    case wisp::DispatchResult::AppliedNameChange:
+      status_.triggerOnChange();
+      break;
+    case wisp::DispatchResult::Rejected:
     case wisp::DispatchResult::Ignored:
     case wisp::DispatchResult::Malformed:
       break;

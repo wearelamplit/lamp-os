@@ -50,14 +50,26 @@ import 'package:shared_preferences/shared_preferences.dart';
 // SocialScreen gates on controlNotifierProvider — it renders a spinner
 // until ctl.hasState. Bypass the BLE-heavy ControlNotifier.build() by
 // subclassing and returning a synthetic ControlState directly.
-class _FakeControl extends ControlNotifier {
-  _FakeControl(this._selfName);
+//
+// _CapturingControl also overrides triggerGreet so double-tap tests can
+// assert the bdAddr sent without a live BLE connection.
+class _CapturingControl extends ControlNotifier {
+  _CapturingControl(this._selfName);
   final String _selfName;
+  final List<String> greetedAddrs = [];
+
   @override
-  Future<ControlState> build(String deviceId) async {
-    return ControlState(
+  Future<ControlState> build(String deviceId) async => _fakeState(_selfName);
+
+  @override
+  Future<void> triggerGreet(String bdAddr) async {
+    greetedAddrs.add(bdAddr);
+  }
+}
+
+ControlState _fakeState(String selfName) => ControlState(
       lamp: LampSection(
-        name: _selfName,
+        name: selfName,
         brightness: 100,
         advancedEnabled: false,
         webappEnabled: true,
@@ -80,7 +92,12 @@ class _FakeControl extends ControlNotifier {
       home: const HomeSection(ssid: '', brightness: 60, enabled: false),
       expressions: const ExpressionsSection(expressions: []),
     );
-  }
+
+class _FakeControl extends ControlNotifier {
+  _FakeControl(this._selfName);
+  final String _selfName;
+  @override
+  Future<ControlState> build(String deviceId) async => _fakeState(_selfName);
 }
 
 /// Stub for lampNearbyPeersNotifierProvider that returns a
@@ -259,6 +276,51 @@ void main() {
     // Disposition (BD_ADDR-keyed) is unchanged because the BD_ADDR
     // didn't change — only the display name did.
     expect(find.text('fond'), findsOneWidget);
+  });
+
+  testWidgets('double-tap on peer row calls triggerGreet with correct bdAddr',
+      (tester) async {
+    final ble = InMemoryBleClient();
+    await _seedDispositions(
+      ble,
+      'floral-id',
+      const {'AA:BB:CC:DD:EE:FF': 3},
+    );
+    late _CapturingControl capturer;
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        bleClientProvider.overrideWithValue(ble),
+        controlNotifierProvider('floral-id').overrideWith(() {
+          capturer = _CapturingControl('floral');
+          return capturer;
+        }),
+        lampNearbyPeersNotifierProvider('floral-id').overrideWith(
+          () => _FakeLampNearbyPeers(const [
+            LampNearbyPeer(
+              name: 'jacko',
+              bdAddr: 'AA:BB:CC:DD:EE:FF',
+              rssi: -72,
+              proximity: 0,
+            ),
+          ]),
+        ),
+      ],
+      child: const MaterialApp(
+        home: Scaffold(body: SocialScreen(lampId: 'floral-id')),
+      ),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // Double-tap on the peer row icon+name area. Two taps within
+    // kDoubleTapTimeout (300ms) trigger GestureDetector.onDoubleTap.
+    await tester.tap(find.text('jacko'));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(find.text('jacko'));
+    await tester.pumpAndSettle();
+
+    expect(capturer.greetedAddrs, ['AA:BB:CC:DD:EE:FF']);
   });
 
   testWidgets('row label prefers inventory name over BLE-adv name',

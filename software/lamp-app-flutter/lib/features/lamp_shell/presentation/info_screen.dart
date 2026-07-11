@@ -9,14 +9,17 @@ import '../../../core/utils/tap_counter.dart';
 import '../../../core/widgets/app_snackbar.dart';
 import '../../../core/widgets/friendly_error.dart';
 import '../../../core/widgets/info_panel.dart';
+import '../../../core/widgets/settings_row.dart';
 import '../../control/application/advanced_session.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/application/control_state.dart';
+import '../../control/application/dev_mode.dart';
 import '../../control/presentation/widgets/connecting_view.dart';
 import '../../control/presentation/widgets/disconnect_aware_body.dart';
 
 /// Info tab — Lamplit branding, firmware + app version footer, and the
 /// 5-tap-the-wordmark gesture that unlocks session-only advanced settings.
+/// When dev mode is on, a toggle row appears here to disable it.
 ///
 /// Lives as a dedicated tab so the About content isn't buried inside the
 /// Setup pane (where it had been folded as a Configuration drilldown
@@ -71,9 +74,8 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
       window: const Duration(seconds: 3),
       onTriggered: () {
         // Toggle, not enable: a second 5-tap re-hides advanced UI without
-        // needing a disconnect. Session-only — devMode lamps keep advanced
-        // on regardless (effectiveAdvancedProvider), so reflect the session
-        // flag we actually flipped.
+        // needing a disconnect. Session-only — devMode on reflects via
+        // effectiveAdvancedProvider; here we flip the session flag we own.
         final p = advancedSessionProvider(widget.lampId);
         ref.read(p.notifier).toggle();
         if (mounted) {
@@ -95,6 +97,7 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
     final fwLine = (v == null || ch == null)
         ? 'Firmware ...'
         : 'Firmware ${formatFirmwareSemver(v)} ($ch)';
+    final devModeOn = ref.watch(devModeOnProvider);
     return ListView(
       padding: const EdgeInsets.fromLTRB(
           AppSpace.lg, AppSpace.xl, AppSpace.lg, AppSpace.xxl),
@@ -139,6 +142,18 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
             ),
           ),
         ),
+        if (devModeOn) ...[
+          const SizedBox(height: AppSpace.xl),
+          SettingsRow(
+            icon: Icons.developer_mode,
+            title: 'Developer mode',
+            trailing: Switch(
+              value: true,
+              onChanged: (_) =>
+                  ref.read(devModeProvider.notifier).disable(),
+            ),
+          ),
+        ],
         const SizedBox(height: AppSpace.xl),
         // Firmware OTA update panel is hidden while the push flow isn't
         // reliable; the version line below still reports current firmware.

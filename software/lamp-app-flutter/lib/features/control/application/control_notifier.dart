@@ -13,10 +13,11 @@ import '../../../core/ble/uuids.dart';
 import '../../../core/ble/write_coalescer.dart';
 import '../../../core/lifecycle/app_lifecycle.dart';
 import '../../inventory/application/inventory_notifier.dart';
+import 'advanced_session.dart';
+import '../../lamp_shell/domain/expression_catalog.dart';
 import '../domain/lamp_color.dart';
 import '../domain/sections.dart';
 import '../../social/domain/social_mode.dart';
-import 'advanced_session.dart';
 import 'auth_client.dart';
 import 'control_state.dart';
 import 'lamp_auth_required_exception.dart';
@@ -46,12 +47,6 @@ class FactoryResetSentinel implements Exception {
   String toString() => 'lamp was factory-reset';
 }
 
-/// Fallback used when `shade.colors` comes back empty from the lamp.
-/// Firmware enforces exactly one shade color today, but a corrupted NVS
-/// payload (or a future firmware change) could yield 0 or 2+ — defensive
-/// fallback avoids a `StateError` from `.single` blowing up the connect /
-/// post-save reconnect paths.
-
 /// Disables Riverpod's framework-level auto-retry for the control notifier.
 /// We run our own reconnect loop with explicit backoff (`_reconnectDelays`)
 /// and two concurrent framework retries observed racing the scheduler when
@@ -70,6 +65,7 @@ class ControlNotifier extends _$ControlNotifier {
   WriteCoalescer? _shadeColorsWriter;
   WriteCoalescer? _baseColorsWriter;
   KeyedWriteCoalescer<EditSurface>? _editSessionWriter;
+  WriteCoalescer? _zonePreviewWriter;
 
   // Per-pixel knockout debounce: keyed by pixel index.
   final Map<int, Timer?> _knockoutTimers = {};
@@ -353,12 +349,6 @@ class ControlNotifier extends _$ControlNotifier {
     if (lampType != null && lampType.isNotEmpty) {
       await _inv.updateLampType(deviceId, lampType);
     }
-    // Mirror the persistent dev-mode flag onto inventory so
-    // `effectiveAdvancedProvider` can read it without holding a live
-    // connection. Without this mirror, a list-view watch on the
-    // provider would force a controlNotifier instance + GATT connect
-    // per row.
-    await _inv.updateDevMode(deviceId, fresh.lamp.devMode);
     // Mirror fwVersion + fwChannel onto inventory so My Lamps can render
     // each tile's firmware identity offline (and CachedFirmwareNotifier
     // can decide which variants need a fresh fetch).
@@ -429,12 +419,18 @@ class ControlNotifier extends _$ControlNotifier {
       onWrite: (_, payload) => safeWrite(BleUuids.editSession, payload),
       debounce: _writeDebounce,
     );
+    _zonePreviewWriter?.dispose();
+    _zonePreviewWriter = WriteCoalescer(
+      onWrite: (v) => safeWrite(BleUuids.expressionTest, v),
+      debounce: _writeDebounce,
+    );
 
     ref.onDispose(() {
       _brightnessWriter?.dispose();
       _shadeColorsWriter?.dispose();
       _baseColorsWriter?.dispose();
       _editSessionWriter?.dispose();
+      _zonePreviewWriter?.dispose();
       for (final t in _knockoutTimers.values) {
         t?.cancel();
       }
@@ -547,7 +543,22 @@ class ControlNotifier extends _$ControlNotifier {
       shade: ShadeSection.fromJson(shadeJson),
       home: HomeSection.fromJson(homeJson),
       expressions: ExpressionsSection.fromJson(exprList),
+      catalog: await _readCatalog(ble),
     );
+  }
+
+  /// Reads the firmware-declared expression catalog. Returns null on older
+  /// firmware that doesn't serve the section (empty bytes) or on a malformed
+  /// payload, so the editor degrades instead of crashing.
+  Future<ExpressionCatalog?> _readCatalog(BleClient ble) async {
+    try {
+      final bytes = await ble.readSection(_deviceId, 'exprcat');
+      if (bytes.isEmpty) return null;
+      return ExpressionCatalog.fromJson(
+          jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>);
+    } catch (_) {
+      return null;
+    }
   }
 
 
@@ -749,7 +760,6 @@ class ControlNotifier extends _$ControlNotifier {
         advancedEnabled: cur.lamp.advancedEnabled,
         webappEnabled: cur.lamp.webappEnabled,
         socialMode: cur.lamp.socialMode,
-        devMode: cur.lamp.devMode,
         fwVersion: cur.lamp.fwVersion,
         fwChannel: cur.lamp.fwChannel,
       ),
@@ -782,12 +792,25 @@ class ControlNotifier extends _$ControlNotifier {
   Future<void> setShadeColors(List<LampColor> colors) async {
     final cur = state.value;
     if (cur == null) return;
+    // Sync broadcast change into segments[0] so per-segment viewers stay current.
+    final segs = cur.shade.segments.isEmpty
+        ? <Segment>[]
+        : [
+            Segment(
+              name: cur.shade.segments.first.name,
+              px: cur.shade.segments.first.px,
+              colors: colors,
+            ),
+            ...cur.shade.segments.skip(1),
+          ];
     state = AsyncData(cur.copyWith(
       shade: ShadeSection(
         px: cur.shade.px,
         bpp: cur.shade.bpp,
         byteOrder: cur.shade.byteOrder,
         colors: colors,
+        colorsEditable: cur.shade.colorsEditable,
+        segments: segs,
       ),
     ));
     _shadeColorsWriter?.schedule(_encodeColors(colors));
@@ -799,9 +822,46 @@ class ControlNotifier extends _$ControlNotifier {
     }
   }
 
+  /// Live-update a specific shade segment's colors. Segment 0 routes through
+  /// setShadeColors (broadcast path); segments > 0 stream over CHAR_SHADE_COLORS
+  /// as {"seg":k,"colors":[...]}. Persisted by the Save-triggered CHAR_COMMIT,
+  /// same path as segment 0.
+  Future<void> setShadeSegmentColors(int segIdx, List<LampColor> colors) async {
+    if (segIdx == 0) {
+      await setShadeColors(colors);
+      return;
+    }
+    final cur = state.value;
+    if (cur == null) return;
+    final segs = List<Segment>.from(cur.shade.segments);
+    if (segIdx >= segs.length) return;
+    segs[segIdx] = Segment(name: segs[segIdx].name, px: segs[segIdx].px, colors: colors);
+    state = AsyncData(cur.copyWith(
+      shade: ShadeSection(
+        px: cur.shade.px,
+        bpp: cur.shade.bpp,
+        byteOrder: cur.shade.byteOrder,
+        colors: cur.shade.colors,
+        colorsEditable: cur.shade.colorsEditable,
+        segments: segs,
+      ),
+    ));
+    _shadeColorsWriter?.schedule(_encodeSegmentColors(segIdx, colors));
+  }
+
   Future<void> setBaseColors(List<LampColor> colors) async {
     final cur = state.value;
     if (cur == null) return;
+    final segs = cur.base.segments.isEmpty
+        ? <Segment>[]
+        : [
+            Segment(
+              name: cur.base.segments.first.name,
+              px: cur.base.segments.first.px,
+              colors: colors,
+            ),
+            ...cur.base.segments.skip(1),
+          ];
     state = AsyncData(cur.copyWith(
       base: BaseSection(
         px: cur.base.px,
@@ -810,6 +870,8 @@ class ControlNotifier extends _$ControlNotifier {
         byteOrder: cur.base.byteOrder,
         colors: colors,
         knockout: cur.base.knockout,
+        colorsEditable: cur.base.colorsEditable,
+        segments: segs,
       ),
     ));
     _baseColorsWriter?.schedule(_encodeColors(colors));
@@ -832,6 +894,8 @@ class ControlNotifier extends _$ControlNotifier {
         byteOrder: cur.base.byteOrder,
         colors: cur.base.colors,
         knockout: cur.base.knockout,
+        colorsEditable: cur.base.colorsEditable,
+        segments: cur.base.segments,
       ),
     ));
     // ac is part of the base settings blob, not its own characteristic; the
@@ -857,6 +921,8 @@ class ControlNotifier extends _$ControlNotifier {
         byteOrder: cur.base.byteOrder,
         colors: cur.base.colors,
         knockout: next,
+        colorsEditable: cur.base.colorsEditable,
+        segments: cur.base.segments,
       ),
     ));
     _scheduleKnockoutWrite(index, clamped);
@@ -917,6 +983,8 @@ class ControlNotifier extends _$ControlNotifier {
         byteOrder: cur.base.byteOrder,
         colors: cur.base.colors,
         knockout: const {},
+        colorsEditable: cur.base.colorsEditable,
+        segments: cur.base.segments,
       ),
     ));
     // Serialize the per-pixel writes so the queue stays shallow.
@@ -934,7 +1002,7 @@ class ControlNotifier extends _$ControlNotifier {
 
   // ---------------------------------------------------------------------------
   // Setup-screen mutators — each call writes immediately via
-  // writeSettingsBlob. name / SSID / devMode use reboot:false (instant);
+  // writeSettingsBlob. name / SSID use reboot:false (instant);
   // password / advanced-LED use reboot:true (triggers reboot + ~8–12s reconnect).
   // ---------------------------------------------------------------------------
 
@@ -947,7 +1015,6 @@ class ControlNotifier extends _$ControlNotifier {
           advancedEnabled: s.lamp.advancedEnabled,
           webappEnabled: s.lamp.webappEnabled,
           socialMode: s.lamp.socialMode,
-          devMode: s.lamp.devMode,
           fwVersion: s.lamp.fwVersion,
           fwChannel: s.lamp.fwChannel,
         ),
@@ -972,7 +1039,6 @@ class ControlNotifier extends _$ControlNotifier {
           advancedEnabled: v,
           webappEnabled: s.lamp.webappEnabled,
           socialMode: s.lamp.socialMode,
-          devMode: s.lamp.devMode,
           fwVersion: s.lamp.fwVersion,
           fwChannel: s.lamp.fwChannel,
         ),
@@ -993,7 +1059,6 @@ class ControlNotifier extends _$ControlNotifier {
           advancedEnabled: s.lamp.advancedEnabled,
           webappEnabled: v,
           socialMode: s.lamp.socialMode,
-          devMode: s.lamp.devMode,
           fwVersion: s.lamp.fwVersion,
           fwChannel: s.lamp.fwChannel,
         ),
@@ -1017,7 +1082,6 @@ class ControlNotifier extends _$ControlNotifier {
           advancedEnabled: s.lamp.advancedEnabled,
           webappEnabled: s.lamp.webappEnabled,
           socialMode: mode,
-          devMode: s.lamp.devMode,
           fwVersion: s.lamp.fwVersion,
           fwChannel: s.lamp.fwChannel,
         ),
@@ -1286,71 +1350,54 @@ class ControlNotifier extends _$ControlNotifier {
     );
   }
 
-  /// Pick the wire byte order for the base strip. Recognized values:
-  /// `GRBW` (4 bpp), `GRB` (3 bpp), `BGR` (3 bpp). `bpp` is updated to
-  /// match so the wire payload stays internally consistent for any
-  /// future firmware that only reads `bpp`.
-  Future<void> setBaseByteOrder(String order) async {
-    final cur = state.value;
-    if (cur == null) return;
-    final normalized = _normalizeByteOrder(order);
-    state = AsyncData(cur.copyWith(
-      base: BaseSection(
-        px: cur.base.px,
-        ac: cur.base.ac,
-        bpp: _bppForByteOrder(normalized),
-        byteOrder: normalized,
-        colors: cur.base.colors,
-        knockout: cur.base.knockout,
-      ),
-    ));
-  }
-
-  Future<void> setBasePx(int px) async {
+  /// Update px for a single segment and recompute the role total.
+  /// For single-segment or old firmware (empty segments), segIdx 0 updates the role px directly.
+  void setSegmentPx(String role, int segIdx, int px) {
     final cur = state.value;
     if (cur == null) return;
     final clamped = px.clamp(1, 255);
-    state = AsyncData(cur.copyWith(
-      base: BaseSection(
-        px: clamped,
-        ac: cur.base.ac,
-        bpp: cur.base.bpp,
-        byteOrder: cur.base.byteOrder,
-        colors: cur.base.colors,
-        knockout: cur.base.knockout,
-      ),
-    ));
+    if (role == 'shade') {
+      final segs = List<Segment>.from(cur.shade.segments);
+      if (segIdx < segs.length) {
+        segs[segIdx] = Segment(name: segs[segIdx].name, px: clamped, colors: segs[segIdx].colors);
+      }
+      final rolePx = segs.isEmpty
+          ? clamped
+          : segs.fold<int>(0, (acc, s) => acc + s.px).clamp(1, 255);
+      state = AsyncData(cur.copyWith(
+        shade: ShadeSection(
+          px: rolePx,
+          bpp: cur.shade.bpp,
+          byteOrder: cur.shade.byteOrder,
+          colors: cur.shade.colors,
+          colorsEditable: cur.shade.colorsEditable,
+          segments: segs,
+        ),
+      ));
+    } else {
+      final segs = List<Segment>.from(cur.base.segments);
+      if (segIdx < segs.length) {
+        segs[segIdx] = Segment(name: segs[segIdx].name, px: clamped, colors: segs[segIdx].colors);
+      }
+      final rolePx = segs.isEmpty
+          ? clamped
+          : segs.fold<int>(0, (acc, s) => acc + s.px).clamp(1, 255);
+      state = AsyncData(cur.copyWith(
+        base: BaseSection(
+          px: rolePx,
+          ac: cur.base.ac,
+          bpp: cur.base.bpp,
+          byteOrder: cur.base.byteOrder,
+          colors: cur.base.colors,
+          knockout: cur.base.knockout,
+          colorsEditable: cur.base.colorsEditable,
+          segments: segs,
+        ),
+      ));
+    }
   }
 
-  Future<void> setShadeByteOrder(String order) async {
-    final cur = state.value;
-    if (cur == null) return;
-    final normalized = _normalizeByteOrder(order);
-    state = AsyncData(cur.copyWith(
-      shade: ShadeSection(
-        px: cur.shade.px,
-        bpp: _bppForByteOrder(normalized),
-        byteOrder: normalized,
-        colors: cur.shade.colors,
-      ),
-    ));
-  }
-
-  Future<void> setShadePx(int px) async {
-    final cur = state.value;
-    if (cur == null) return;
-    final clamped = px.clamp(1, 255);
-    state = AsyncData(cur.copyWith(
-      shade: ShadeSection(
-        px: clamped,
-        bpp: cur.shade.bpp,
-        byteOrder: cur.shade.byteOrder,
-        colors: cur.shade.colors,
-      ),
-    ));
-  }
-
-  /// Apply Advanced LED settings (px, byteOrder, bpp, ac) via
+  /// Apply Advanced LED settings (px, ac) via
   /// settings_blob with reboot:true. Mirrors the setLampPassword pattern:
   /// write → firmware reboots (drops link) → reconnect ladder →
   /// reload sections. After reload, diffs the freshly-read base/shade
@@ -1364,16 +1411,26 @@ class ControlNotifier extends _$ControlNotifier {
     final shipped = <String, dynamic>{
       'base': {
         'px': base.px,
-        'byteOrder': base.byteOrder,
-        'bpp': base.bpp,
         'ac': base.ac,
         'colors': base.colors.map((c) => c.toHex()).toList(),
+        'segments': base.segments
+            .map((s) => {
+                  'name': s.name,
+                  'px': s.px,
+                  'colors': s.colors.map((c) => c.toHex()).toList(),
+                })
+            .toList(),
       },
       'shade': {
         'px': shade.px,
-        'byteOrder': shade.byteOrder,
-        'bpp': shade.bpp,
         'colors': shade.colors.map((c) => c.toHex()).toList(),
+        'segments': shade.segments
+            .map((s) => {
+                  'name': s.name,
+                  'px': s.px,
+                  'colors': s.colors.map((c) => c.toHex()).toList(),
+                })
+            .toList(),
       },
     };
     await writeSettingsBlob(shipped, reboot: true);
@@ -1394,15 +1451,7 @@ class ControlNotifier extends _$ControlNotifier {
         password: lamp.controlPassword ?? '',
         postReload: (fresh) async {
           if (fresh.base.px != base.px) mismatches.add('base.px');
-          if (fresh.base.byteOrder != base.byteOrder) {
-            mismatches.add('base.byteOrder');
-          }
-          if (fresh.base.bpp != base.bpp) mismatches.add('base.bpp');
           if (fresh.shade.px != shade.px) mismatches.add('shade.px');
-          if (fresh.shade.byteOrder != shade.byteOrder) {
-            mismatches.add('shade.byteOrder');
-          }
-          if (fresh.shade.bpp != shade.bpp) mismatches.add('shade.bpp');
         },
       );
     } catch (e) {
@@ -1410,17 +1459,6 @@ class ControlNotifier extends _$ControlNotifier {
     }
     return mismatches;
   }
-
-  static String _normalizeByteOrder(String order) {
-    final up = order.toUpperCase();
-    // Keep the strict allow-list small. Adafruit_NeoPixel supports more
-    // permutations; expand here once a strip actually needs one.
-    if (up == 'GRBW' || up == 'GRB' || up == 'BGR') return up;
-    return 'GRBW';
-  }
-
-  static int _bppForByteOrder(String order) =>
-      order == 'GRBW' || order == 'BGRW' || order == 'RGBW' ? 4 : 3;
 
   // ---------------------------------------------------------------------------
   // Expressions
@@ -1449,9 +1487,8 @@ class ControlNotifier extends _$ControlNotifier {
       expressions: ExpressionsSection(expressions: next),
     ));
     await _writeExpressionOp({'op': 'upsert', 'entry': entry.toJson()});
-    // Firmware-side, applyExpressionOpLocal + persistConfig has now written
-    // the new entry to NVS (added 2026-06-13 — see standard_lamp.cpp's
-    // expressionOp drain — no settings_blob save needed.
+    // Firmware persists the entry to NVS via the expressionOp drain; no
+    // settings_blob save needed.
   }
 
   /// Remove the expression keyed by (type, target). Live-previews via
@@ -1507,13 +1544,47 @@ class ControlNotifier extends _$ControlNotifier {
     }
   }
 
+  /// Trigger a greeting from the connected lamp toward [bdAddr]. The lamp
+  /// resolves the peer from its nearby list and plays its greeting; silently
+  /// no-ops if the peer isn't currently sighted.
+  Future<void> triggerGreet(String bdAddr) async {
+    final ble = ref.read(bleClientProvider);
+    final bytes = Uint8List.fromList(utf8.encode(jsonEncode({
+      'a': 'triggerGreet',
+      'bdAddr': bdAddr,
+    })));
+    try {
+      await ble.write(
+        _deviceId,
+        BleUuids.controlService,
+        BleUuids.expressionTest,
+        bytes,
+        withoutResponse: true,
+      );
+    } catch (_) {
+      // best-effort
+    }
+  }
+
   /// Tells the firmware to end a `test_expression` preview and re-enable
   /// the configurator behaviors. Safe to call when no preview is in flight
   /// — firmware treats it idempotently. Called from build() (heal stuck
   /// state on connect) and from the expression editor's dispose.
   Future<void> completeExpressionTest() async {
+    _zonePreviewWriter?.cancel();
     final ble = ref.read(bleClientProvider);
     await _completeExpressionTest(ble);
+  }
+
+  void previewZoneHighlight(
+      int posMin, int posMax, int target, LampColor color) {
+    _zonePreviewWriter?.schedule(Uint8List.fromList(utf8.encode(jsonEncode({
+      'a': 'test_zone_preview',
+      'posMin': posMin,
+      'posMax': posMax,
+      'target': target,
+      'color': color.toHex(),
+    }))));
   }
 
   /// Private form so build() can use the BleClient it already holds.
@@ -1550,27 +1621,42 @@ class ControlNotifier extends _$ControlNotifier {
     return Uint8List.fromList(utf8.encode(jsonEncode(arr)));
   }
 
+  // Per-segment live-preview payload: {"seg":k,"colors":[...]}. The firmware
+  // applies it to config.shade.segments[k] so a segment-aware behaviour (dots)
+  // previews the edit. A bare array (segment 0) stays the broadcast path.
+  Uint8List _encodeSegmentColors(int seg, List<LampColor> colors) {
+    final map = {'seg': seg, 'colors': colors.map((c) => c.toHex()).toList()};
+    return Uint8List.fromList(utf8.encode(jsonEncode(map)));
+  }
+
   // ---------------------------------------------------------------------------
   // Connection lifecycle
   // ---------------------------------------------------------------------------
 
-  /// Handles CHAR_STATE_NOTIFY payloads. Single field:
-  ///   `previewActive` — bool, mirrors expressionManager.isAnyTestActive
-  /// Older firmware emits `{}` and the parser leaves the default false.
+  /// Handles CHAR_STATE_NOTIFY payloads.
+  /// Fields: `previewActive` (bool), `greeting` (object or absent).
+  /// Older firmware emits `{}` — missing fields stay at their defaults.
   void _onStateNotify(Uint8List bytes) {
     final cur = state.value;
     if (cur == null || bytes.isEmpty) return;
     bool previewActive = false;
+    GreetingState? greeting;
     try {
       final obj = jsonDecode(utf8.decode(bytes));
       if (obj is Map<String, dynamic>) {
         previewActive = obj['previewActive'] == true;
+        final g = obj['greeting'];
+        if (g is Map<String, dynamic> && g['active'] == true) {
+          final peer = (g['peer'] as String?)?.toUpperCase() ?? '';
+          final kind = (g['kind'] as String?) ?? '';
+          if (peer.isNotEmpty) greeting = GreetingState(peer: peer, kind: kind);
+        }
       }
     } catch (_) {
       return;
     }
-    if (previewActive == cur.previewActive) return;
-    state = AsyncData(cur.copyWith(previewActive: previewActive));
+    if (previewActive == cur.previewActive && greeting == cur.greeting) return;
+    state = AsyncData(cur.copyWith(previewActive: previewActive, greeting: greeting));
   }
 
   void _onConnectionChange(bool isConnected) {
@@ -1593,8 +1679,6 @@ class ControlNotifier extends _$ControlNotifier {
     }
     if (!isConnected && cur.connected) {
       state = AsyncData(cur.copyWith(connected: false));
-      // Advanced mode is session-only — drop the unlock the moment the BLE
-      // session ends. User must re-do the tap gesture after reconnect.
       ref.read(advancedSessionProvider(_deviceId).notifier).disable();
       _scheduleReconnect();
     }

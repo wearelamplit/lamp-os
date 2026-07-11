@@ -5,7 +5,7 @@
 #include "firmware_receiver.hpp"  // FirmwareTransport interface
 #include "firmware_signature.hpp"  // kLsigFooterLen
 #include "components/network/ble/ble_control.hpp"  // pauseRadioForOta / resumeRadioAfterOta
-#include "core/ota_quiet_mode.hpp"     // enterQuiet / exitQuiet
+#include "components/firmware/ota_quiet_mode.hpp"     // enterQuiet / exitQuiet
 #include "components/network/protocol/lamp_protocol.hpp"
 #include "../../version.hpp"
 
