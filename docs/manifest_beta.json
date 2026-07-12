@@ -1,0 +1,14 @@
+{
+  "name": "LampOS (beta)",
+  "version": "beta",
+  "funding_url": "https://esphome.io/guides/supporters.html",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        { "path": "distribution-beta.bin", "offset": 0 }
+      ]
+    }
+  ]
+}

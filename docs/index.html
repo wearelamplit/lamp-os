@@ -111,6 +111,20 @@
         ></esp-web-install-button>
       </div>
     </div>
+  <script>
+    // ?channel=beta flashes the beta build (manifest_beta.json -> distribution-beta.bin).
+    (function () {
+      if (new URLSearchParams(location.search).get('channel') !== 'beta') return;
+      var btn = document.querySelector('esp-web-install-button');
+      if (btn) btn.setAttribute('manifest', 'manifest_beta.json');
+      var h = document.querySelector('h2');
+      if (h) h.textContent = 'Install LampOS (Beta)';
+      var badge = document.createElement('div');
+      badge.textContent = 'Beta channel';
+      badge.style.cssText = 'margin-top:12px;color:var(--brand-amber-gold);font-weight:700;';
+      if (btn && btn.parentElement) btn.parentElement.appendChild(badge);
+    })();
+  </script>
   <script
     type="module"
     src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"
