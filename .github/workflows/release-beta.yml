@@ -2,6 +2,12 @@ name: Release (beta)
 
 on:
   workflow_dispatch:
+  push:
+    branches: [dev]
+
+concurrency:
+  group: release-beta
+  cancel-in-progress: true
 
 jobs:
   build:
