@@ -8,10 +8,23 @@ namespace config_codec {
 // Replace a role's segment list from `node["segments"]`. Absent/empty array
 // keeps the current (variant-default) list. Every segment is left with ≥1
 // color so broadcastColors() is always dereferenceable.
+// Fallback: if `segments` is absent/empty but the old flat `colors` array
+// is present (blobs from before the per-segment schema), migrate to a single
+// segment so custom colors survive the upgrade.
 static void parseSegments(JsonObject node, std::vector<SegmentSettings>& segs,
                           const Color& fallback) {
   JsonArray arr = node["segments"];
-  if (arr.isNull() || arr.size() == 0) return;
+  if (arr.isNull() || arr.size() == 0) {
+    JsonArray flat = node["colors"];
+    if (flat.isNull() || flat.size() == 0) return;
+    SegmentSettings seg;
+    seg.px = node["px"] | 0;
+    for (JsonVariant c : flat) seg.colors.push_back(hexStringToColor(c));
+    if (seg.colors.empty()) seg.colors.push_back(fallback);
+    segs.clear();
+    segs.push_back(std::move(seg));
+    return;
+  }
   segs.clear();
   for (JsonObject segNode : arr) {
     SegmentSettings seg;
