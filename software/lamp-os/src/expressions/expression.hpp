@@ -99,9 +99,7 @@ class Expression : public AnimatedBehavior {
   Color firstColorOr(Color fallback) const;
 
   // Shared safe fallback color when a palette is unconfigured. W channel only
-  // so the lamp emits a dim white rather than going dark. Unifies what
-  // pulse/breathing/shifty each used to define independently as a magic
-  // (0, 0, 0, 255) literal.
+  // so the lamp emits a dim white rather than going dark.
   static inline const Color kSafeFallbackColor{0, 0, 0, 255};
 
   const std::vector<Color>& getColors() const { return colors; }

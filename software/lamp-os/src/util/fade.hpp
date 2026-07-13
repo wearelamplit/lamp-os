@@ -45,12 +45,8 @@ Color fade(Color start, Color end, uint32_t steps, uint32_t currentStep);
  */
 Color fadeLinear(Color start, Color end, uint32_t steps, uint32_t currentStep);
 
-// Inner-loop primitives used by per-pixel expression draw() math. Each of
-// pulse / breathing / shifty / glitchy used to maintain its own
-// anonymous-namespace copy of these three helpers — they are identical
-// in math and the only reason they weren't already shared was to keep
-// the call sites inline-able. Marked `inline` so the compiler still
-// inlines them across translation units.
+// Inner-loop primitives used by per-pixel expression draw() math.
+// Marked `inline` so the compiler inlines them across translation units.
 //
 // `computeLinearFactor` mirrors `easeLinear()`'s factor calc bit-for-bit
 // (linear[i] == i * 511 by construction → factor computed analytically,

@@ -29,9 +29,8 @@ class ConfiguratorBehavior : public AnimatedBehavior {
   using AnimatedBehavior::AnimatedBehavior;
 
  public:
-  // Legacy frame-count knob preserved for compat with the existing
-  // control() state-machine timing; the actual per-pixel interpolation now
-  // uses fadeStartMs_/fadeDurationMs_.
+  // Frame-count knob for control() state-machine timing; per-pixel
+  // interpolation uses fadeStartMs_/fadeDurationMs_.
   uint32_t easeFrames = 60;
   std::vector<Color> colors;
   unsigned long lastWebSocketUpdateTimeMs = 0;

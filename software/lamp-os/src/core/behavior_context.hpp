@@ -29,9 +29,8 @@ struct Greetable;
 struct BehaviorContext {
   Compositor* compositor = nullptr;
   ExpressionManager* expressionManager = nullptr;
-  // Mirrors the previous `expressionFrameBuffers` extern: ExpressionManager
-  // populates [shade, base] in begin() so Expression::shouldAffectBuffer()
-  // can route by target without grabbing a global.
+  // ExpressionManager populates [shade, base] in begin() so
+  // Expression::shouldAffectBuffer() can route by target without a global.
   std::vector<FrameBuffer*> expressionFrameBuffers;
   // Transient color overrides drive their target colors + fade
   // duration through ConfiguratorBehavior::beginFade() so per-pixel fade

@@ -6,14 +6,10 @@
 #include <string>
 
 namespace lamp {
-// std::format pulled in tens of KB of <format> machinery
-// (locale + facet code) and allocated a std::string per call. Every persist
-// and serialize path that touches a color palette went through here. Replace
-// with snprintf into a 10-byte stack buffer (9 chars + NUL), then construct
-// the returned std::string from exactly 9 chars. Lowercase preserved to
-// match the previous "{:02x}" output byte-for-byte — callers (config.cpp,
-// expression_invocation.cpp, lamp.cpp) serialize this directly
-// into JSON, and hexStringToColor accepts both cases on the way back in.
+// snprintf into a 10-byte stack buffer (9 chars + NUL), then construct
+// the returned std::string from exactly 9 chars. Lowercase hex: callers
+// (config.cpp, expression_invocation.cpp, lamp.cpp) serialize this
+// directly into JSON, and hexStringToColor accepts both cases on read-back.
 std::string colorToHexString(Color inColor) {
   char buf[10];
   std::snprintf(buf, sizeof(buf), "#%02x%02x%02x%02x", inColor.r, inColor.g, inColor.b, inColor.w);
@@ -52,16 +48,13 @@ inline bool parseHexByte(const char* p, uint8_t& out) {
 }
 }  // namespace
 
-// This function used to call std::stoul on substrings of
-// `inHexString`, which throws std::invalid_argument on non-hex chars. Under
-// Arduino-ESP32's default -fno-exceptions that throw turns into abort(),
-// and these payload bytes are attacker-reachable over BLE + ESP-NOW
+// These payload bytes are attacker-reachable over BLE + ESP-NOW
 // (shadeColors, baseColors, expressionOp.entry.colors,
-// settings_blob.{base,shade}.colors). The validating 2-char-nibble parser
-// below removes the std::stoul exception path entirely, and also eliminates
-// the 4 substr heap allocations per call. On any invalid input (wrong
-// length, missing '#', or any non-hex char) we return a default Color —
-// the same fallback the old wrong-length branch already had.
+// settings_blob.{base,shade}.colors). The validating 2-char-nibble
+// parser below avoids the std::stoul exception path (a throw becomes
+// abort() under -fno-exceptions) and eliminates per-call heap
+// allocations. On any invalid input (wrong length, missing '#', or any
+// non-hex char) returns a default Color.
 //
 // See also test/test_color/color.cpp which pins this contract end-to-end.
 Color hexStringToColor(std::string inHexString) {

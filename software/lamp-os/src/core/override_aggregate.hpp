@@ -1,9 +1,8 @@
 // software/lamp-os/src/core/override_aggregate.hpp
 //
-// Bundles the three transient overrides that used to live at file scope
-// in lamp.cpp into a single aggregate the framework owns. File-scope
-// per the single-instance-per-binary design (see lamp.cpp header
-// comment).
+// Bundles the three transient overrides into a single aggregate owned
+// by the framework. File-scope per the single-instance-per-binary
+// design (see lamp.cpp).
 
 #pragma once
 

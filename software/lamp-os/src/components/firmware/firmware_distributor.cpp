@@ -928,7 +928,7 @@ bool FirmwareDistributor::sendOfferFrame(const uint8_t targetMac[6],
       fsHooks_ ? fsHooks_->offerType : lamp_protocol::MSG_FW_OFFER);
   if (!n) {
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-    FWDIST_LOGLN("[fwdist] buildFwOffer failed (defensive)");
+    FWDIST_LOGLN("[fwdist] buildFwOffer failed");
 #endif
     return false;
   }

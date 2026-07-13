@@ -134,9 +134,8 @@ static void applyRemoteOpLocal(const char* payloadJson, size_t len,
 // drainRemoteOp can see them. Definition follows below.
 
 // Unified cascade-receive router. Single place where the BLE remoteOp drain
-// and the ESP-NOW CONTROL_OP receive path converge — both used to duplicate
-// the self-vs-broadcast logic, the ApplyX dispatch, and the forwarding
-// policy.
+// and the ESP-NOW CONTROL_OP receive path converge: self-vs-broadcast
+// logic, the ApplyX dispatch, and the forwarding policy.
 //
 // Inputs:
 //   `payloadJson`  : NUL-terminated JSON. For BLE this is the raw GATT

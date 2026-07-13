@@ -63,9 +63,8 @@ void WispRoster::recordPeerClaim(const uint8_t peerWispMac[6],
   // would treat us as silent.
   if (xSemaphoreTake(asHandle(mutex_), pdMS_TO_TICKS(2)) != pdTRUE) return;
 
-  // Ignore self-broadcasts. (Should not happen in practice — wisps don't
-  // hear their own ESP-NOW broadcasts — but defensive against a future
-  // gossip-relay loopback.)
+  // Ignore self-broadcasts. Wisps don't hear their own ESP-NOW frames, but
+  // the check guards against a gossip-relay loopback.
   if (selfMacSet_ && std::memcmp(peerWispMac, selfMac_, 6) == 0) {
     xSemaphoreGive(asHandle(mutex_));
     return;

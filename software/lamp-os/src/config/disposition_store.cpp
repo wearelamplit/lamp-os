@@ -46,8 +46,8 @@ void DispositionStore::load() {
                const std::pair<std::string, uint8_t>& b) {
               return a.first < b.first;
             });
-  // Dedupe defensively. JSON objects shouldn't have duplicate keys, but
-  // ArduinoJson is permissive on bad input. Last write wins.
+  // Dedupe: ArduinoJson is permissive on malformed input and may emit
+  // duplicate keys. Last write wins.
   auto last = std::unique(
       entries_.begin(), entries_.end(),
       [](const std::pair<std::string, uint8_t>& a,

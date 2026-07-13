@@ -158,8 +158,8 @@ class NearbyLamps {
   WispCache getWispCache();
 
   // Cache the latest wispStatus JSON broadcast for a given wisp MAC.
-  // Loop-task-only writer (Core 1). A status broadcast from a
-  // previously-unseen wisp asserts presence even before a hello arrives.
+  // Loop-task-only writer (Core 1). A status broadcast from an unseen
+  // wisp asserts presence even before a hello arrives.
   void cacheWispStatus(const uint8_t mac[6],
                        const char* json, size_t jsonLen);
 

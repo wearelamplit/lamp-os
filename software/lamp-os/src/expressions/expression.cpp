@@ -125,11 +125,10 @@ void Expression::trigger() {
   scheduleNextTrigger();  // Reset next automatic trigger
   playOnce();
 
-  // Notify the manager so the cascade convention fires for ALL trigger paths,
-  // including the per-entry auto-trigger from control() (which previously
-  // bypassed maybeCascade entirely). triggerExpression/triggerInvocation set
-  // a suppress flag on the manager around their own loops so this callback
-  // doesn't double-cascade (or re-cascade for remote-arrived invocations).
+  // Notify the manager so the cascade convention fires for all trigger
+  // paths, including the per-entry auto-trigger from control().
+  // triggerExpression/triggerInvocation set a suppress flag around their
+  // own loops so this callback doesn't double-cascade.
   if (context_ && context_->expressionManager) {
     context_->expressionManager->onExpressionFired(this);
   }

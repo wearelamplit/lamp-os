@@ -3,9 +3,10 @@
 // settings_blob's `homeMode` section handler. Updates config.homeMode.*
 // fields in place. Missing fields are left alone (partial-merge by design).
 //
-// Note: HomeModeSettings has no `password` field — the lamp only sniffs
-// WiFi beacons for SSID presence and never associates to the AP, so no
-// credential is stored or transmitted. See config_types.hpp for rationale.
+// HomeModeSettings has no `password` field: the lamp only sniffs WiFi
+// beacons for SSID presence and never associates to the AP, so no
+// credential is stored or transmitted. See config_types.hpp for the
+// constraint.
 
 #pragma once
 

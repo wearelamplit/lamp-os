@@ -2,8 +2,8 @@
 
 // PendingJsonSlot<N> — fixed-capacity single-slot byte buffer shared between
 // the BLE/WiFi/ESP-NOW callbacks (Core 0 or the WiFi task) and the loop drain
-// (Core 1). Replaces nine open-coded "post → memcpy under portMUX → drain →
-// parse → dispatch" copies in lamp.cpp (audit finding #9).
+// (Core 1). Consolidates the per-characteristic "post → memcpy under portMUX
+// → drain → parse → dispatch" pattern into one reusable type.
 //
 // Contract:
 //   - post(mux, data, len)   : called from any core. Returns false when

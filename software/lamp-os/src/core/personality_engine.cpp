@@ -196,9 +196,8 @@ const Profile& profileFor(lamp::SocialMode mode, uint8_t disposition) {
 GreetingTuning PersonalityEngine::greetingFor(const std::string& peerBdAddr) const {
   if (!config_) return toTuning(kProfileStandard);
   const SocialMode mode = config_->lamp.socialMode;
-  // Empty bdAddr → Neutral profile. Defensive against any caller passing an
-  // unpopulated bdAddr; also avoids accidentally matching a stray empty
-  // key in dispositions_.
+  // Empty bdAddr → Neutral profile. Avoids accidentally matching a stray
+  // empty key in dispositions_.
   if (peerBdAddr.empty()) return toTuning(profileFor(mode, 3));
   const uint8_t disp = config_->getDisposition(peerBdAddr);  // unknown → 3
   return toTuning(profileFor(mode, disp));

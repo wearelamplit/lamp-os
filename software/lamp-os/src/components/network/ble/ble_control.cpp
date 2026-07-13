@@ -221,7 +221,7 @@ static bool decodeIncomingOp(const std::string& raw,
 
   if (lamp::crypto::magicByte(p, n) == lamp::crypto::MAGIC_CIPHERTEXT) {
     ConnSlot* slot = findOrAllocSlot(handle);
-    if (!slot) return false;  // all slots taken — shouldn't happen w/ NimBLE cap
+    if (!slot) return false;  // all slots taken; NimBLE cap bounds this
     if (!lamp::crypto::decryptOp(p, n, charUuidLE16, charShortName,
                                  s_config->lamp.password, slot->crypto, outJson)) {
       return false;

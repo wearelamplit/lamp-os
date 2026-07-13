@@ -102,8 +102,8 @@ class PersonalityEngine {
   float smoothedCrowdWeight() const;
 
   // Snapshot of BLE-reachable peers grouped by disposition. Pure read;
-  // safe from any Core 1 context. Counts cap at uint8_t max — fleet
-  // is 22 lamps, no realistic overflow.
+  // safe from any Core 1 context. Counts cap at uint8_t max; the
+  // BLE-reachable crowd can't approach 255, so no realistic overflow.
   CrowdComposition crowdComposition() const;
 
   // Per-peer greeting tuning. Returned at SocialBehavior::control() time

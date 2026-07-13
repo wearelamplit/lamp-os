@@ -169,10 +169,10 @@ class Config {
   // Bounded to ~100 entries. Per-lamp metadata, never synced
   // cross-mesh; each lamp has its own view.
   // Idle window before debounced disposition writes are committed to NVS.
-  // See DispositionStore and audit finding #5 (NVS write amplification).
   // 5s comfortably exceeds a worst-case slider-drag cadence (~20 Hz BLE
   // writes) while still feeling snappy if the user closes the app right
   // after touching the slider (the BLE disconnect path forces a flush).
+  // See DispositionStore for the write-amplification guard.
   static constexpr uint32_t kDispositionFlushIdleMs = 5000;
 
   // Returns kDispositionDefault when the peer isn't in the store.

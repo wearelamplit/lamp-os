@@ -26,9 +26,9 @@ class FrameBuffer;
 namespace ota_indicator {
 
 // Paint the indicator into fb->buffer for the current OTA state.
-//   fb        — destination framebuffer; writes fb->buffer[0..pixelCount).
-//   localBase — this lamp's base color (caller passes per-FB defaultColors[0]).
-//   nowMs     — millis() snapshot used to drive the pulse phase.
+// fb: destination framebuffer, writes fb->buffer[0..pixelCount).
+// localBase: this lamp's base color (caller passes per-FB defaultColors[0]).
+// nowMs: millis() snapshot used to drive the pulse phase.
 void paint(FrameBuffer* fb, const Color& localBase, uint32_t nowMs);
 
 }  // namespace ota_indicator
