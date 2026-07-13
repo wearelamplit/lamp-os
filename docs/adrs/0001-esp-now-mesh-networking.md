@@ -4,7 +4,7 @@
 
 ## Context
 
-The lamp fleet (~22 lamps) is an **unconducted fleet**: there is no central
+The lamp fleet is an **unconducted fleet** of unknown, variable size: there is no central
 coordinator, no guaranteed router/AP, and lamps power on/off and move around a
 venue freely. Lamps must talk to each other to:
 
@@ -22,8 +22,8 @@ Forces:
   within a beacon interval, with no association/handshake.
 - **Single radio, shared with BLE.** Each lamp also runs a BLE GATT control
   service for the Flutter app. ESP-NOW and BLE coexist on one antenna.
-- **Small fleet, broadcast-natural traffic.** Presence + events are inherently
-  one-to-many.
+- **Broadcast-natural traffic.** Presence + events are inherently
+  one-to-many, so they fan out the same regardless of how many lamps are present.
 
 ## Decision
 

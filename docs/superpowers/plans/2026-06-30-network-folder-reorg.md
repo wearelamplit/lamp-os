@@ -8,7 +8,7 @@
 
 ## Global Constraints (every task)
 
-- **Live 22-lamp fleet. Moves/renames/splits ONLY.** Never reorder a struct field, byte offset, `static_assert`, enum value, message size, or GATT characteristic. No logic edits.
+- **Live deployed fleet. Moves/renames/splits ONLY.** Never reorder a struct field, byte offset, `static_assert`, enum value, message size, or GATT characteristic. No logic edits.
 - **`lamp_protocol.hpp` split:** the umbrella header's aggregate must be **byte-identical** to the pre-split header (every constant/struct/function present, same order of *definition* where it matters for the `static_assert` locks). The **wisp mirror at `software/wisp/src/lamp_protocol.hpp` is split in lockstep** to the identical structure.
 - **`ble_control.cpp`:** the `createCharacteristic()` registration block stays **contiguous and unreordered** (the boot assert + `test_ble_gatt_layout` hash guard it). This plan does NOT split `ble_control.cpp` (deferred).
 - **Per-task gate (all must pass before commit):** `npm run lamp:build` (standard) → SUCCESS, `npm run lamp:build:snafu` (snafu) → SUCCESS, `npm run lamp:test` (native). **Known-pre-existing baseline:** `test_fs_signature::test_digest_golden_and_order_independent` fails (unrelated FS-OTA P2a work) — only a NEW failure beyond that blocks. Run from the worktree root.
