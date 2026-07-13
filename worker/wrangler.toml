@@ -1,0 +1,9 @@
+name = "lamp-flash-proxy"
+main = "flash-proxy.js"
+compatibility_date = "2026-07-01"
+
+# Intercepts only /dl/* on the existing flasher host; everything else stays on
+# GitHub Pages. Same origin as the manifests, so the firmware fetch needs no CORS.
+routes = [
+  { pattern = "update.lamplit.ca/dl/*", zone_name = "lamplit.ca" },
+]
