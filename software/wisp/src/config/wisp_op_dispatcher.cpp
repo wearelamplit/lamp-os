@@ -9,7 +9,7 @@
 
 namespace wisp {
 
-// CHAR_WISP_OP UUID 5f64f4e1-d6d9-4a44-9b3f-3a8d6f7e6b40, byte-reversed (LE).
+// CHAR_WISP_OP UUID 5f64f4e1-… as a flat 16-byte array, last byte first.
 // Must match uuidSaltLE16(CHAR_WISP_OP) in the app's lamp_crypto.dart.
 static const uint8_t kWispOpSaltLE[16] = {
     0x40, 0x6b, 0x7e, 0x6f, 0x8d, 0x3a, 0x3f, 0x9b,
@@ -24,8 +24,7 @@ DispatchResult WispOpDispatcher::dispatch(const uint8_t* payload, size_t len) {
   const uint8_t magic = crypto::magicByte(payload, len);
 
   if (magic == crypto::MAGIC_CIPHERTEXT) {
-    // 0x02: sealed. Attempt decrypt regardless of password state
-    // (decryptOp itself refuses on empty password).
+    // decryptOp rejects empty-password attempts.
     if (!nonces_) {
       Serial.println("[wisp.op] sealed op received but no nonce ring bound; rejecting");
       return DispatchResult::Rejected;
@@ -256,11 +255,7 @@ DispatchResult WispOpDispatcher::dispatchJson(const char* json, size_t len) {
   }
 
   if (strcmp(op, "setPassword") == 0) {
-    // Plaintext setPassword is accepted only when factory-fresh (no password set).
-    // The auth gate above already enforces this: plaintext is blocked when a
-    // password exists, and sealed ops (0x02) require the current password to
-    // decrypt — so a sealed setPassword authenticates via the old password
-    // before replacing it.
+    // Plaintext only when no password is set; sealed ops authenticate via the old password.
     const char* newPw = doc["password"];
     if (!newPw) {
       Serial.println("[wisp.op] setPassword missing 'password'");

@@ -52,18 +52,12 @@ void WifiLink::reconnect() {
   const std::string p = password();
   if (s.empty() || p.empty()) {
     Serial.println("[wifi] no creds; staying disconnected (radio stays up for ESP-NOW)");
-    // disconnect(false) drops the association but keeps the WiFi radio up.
-    // disconnect(true) turns the radio OFF, which kills ESP-NOW
-    // (esp_now_send fails synchronously). The STA radio interface must
-    // stay up so mesh broadcasts continue to land.
+    // false keeps the radio up; the STA interface must stay up for ESP-NOW.
     WiFi.disconnect(false);
     return;
   }
   Serial.printf("[wifi] reconnect requested ssid=%s\n", s.c_str());
-  // disconnect(false, false) drops the association without erasing the
-  // stored creds inside the WiFi driver AND without turning the radio off.
-  // We follow with a begin() to re-associate using whatever WispConfig
-  // now holds.
+  // (false, false): drop association, keep stored creds and radio up.
   WiFi.disconnect(false, false);
   WiFi.begin(s.c_str(), p.c_str());
 }

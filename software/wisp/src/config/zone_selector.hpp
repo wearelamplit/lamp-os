@@ -2,8 +2,8 @@
 //
 // observe() and copyObserved() are guarded by portMUX: copyObserved() runs on
 // the timer task and must not read a half-shifted array during observe()'s
-// FIFO memmove. All mutators run on the loop task; scalar reads tolerate torn
-// snapshots from that task.
+// FIFO memmove. All mutators run on the loop task; scalar reads are loop-task
+// only and require no guard.
 
 #pragma once
 
@@ -31,7 +31,7 @@ enum class ZoneSource : uint8_t { None, FirstSeen, Nvs, AppOp };
 
 const char* zoneSourceName(ZoneSource s);
 
-// Matches Aurora's per-notification cap; also the wispStatus JSON zone-array cap.
+// Cap shared with wispStatus JSON zone-array budget.
 constexpr size_t kMaxObservedZones = 16;
 
 // 4-digit bound caps JSON digit width and keeps frame size predictable.

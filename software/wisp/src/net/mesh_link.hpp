@@ -10,14 +10,9 @@
 
 namespace wisp {
 
-// ESP-NOW channel the lamp grid sits on. Matches LAMP_ESPNOW_CHANNEL in
-// software/lamp-os/src/components/network/wifi.cpp. If the lamp side ever
-// moves, mirror here.
+// Must match the lamp firmware's ESP-NOW channel.
 #ifndef LAMP_ESPNOW_CHANNEL
-// Channel 6 is what pre-mesh lamps hardcode for their ArtNet WiFi, so the
-// mesh, the wisp stage softAP, and old lamps all share one channel. A
-// mixed-channel fleet does NOT interoperate; peers on another channel are
-// invisible.
+// All ESP-NOW peers must share this channel.
 #define LAMP_ESPNOW_CHANNEL 6
 #endif
 
@@ -51,18 +46,16 @@ class MeshLink {
   // Wisp's STA MAC, for log lines.
   void getMac(uint8_t out[6]) const;
 
-  // ESP-NOW C callback can't capture; the trampoline reaches the std::function
-  // via s_instance. Public so the .cpp trampoline needs no friend decl; an
-  // internal seam, not a sanctioned API.
+  // Trampoline seam: ESP-NOW C callback can't capture; reaches handler_ via s_instance.
   static MeshLink* s_instance;
   MeshRecvFn handler_;
 
  private:
 
   // ESP-NOW caps the peer table at ESP_NOW_MAX_TOTAL_PEER_NUM (20 on the C6).
-  // begin() registers the broadcast peer, leaving 19 unicast slots; with 22
-  // lamps the table fills, so the LRU unicast peer is evicted on overflow to
-  // keep newly seen MACs working.
+  // begin() registers the broadcast peer, leaving 19 unicast slots; with more
+  // than 19 peers the LRU unicast peer is evicted on overflow to keep newly
+  // seen MACs working.
   static constexpr size_t MAX_TRACKED_PEERS = 19;
   struct PeerSlot {
     uint8_t  mac[6];

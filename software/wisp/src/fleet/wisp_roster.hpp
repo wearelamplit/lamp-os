@@ -12,9 +12,8 @@ namespace wisp {
 constexpr size_t WISP_ROSTER_MAX_PEERS = 8;
 
 // Cap on the number of lamps per peer's claim list and our own claim
-// list. Matches the wisp's LampInventory::MAX_LAMPS so a wisp can never
-// claim more lamps than it has in inventory. Mirrors MSG_WISP_CLAIM's
-// wire-level kMaxWispClaimEntries.
+// list. Matches LampInventory::MAX_LAMPS so a wisp can never claim more
+// lamps than it has in inventory; also the wire-level kMaxWispClaimEntries cap.
 constexpr size_t WISP_ROSTER_MAX_LAMPS = 32;
 
 // Aging window: a peer wisp's claim entries are dropped from the shared
@@ -133,8 +132,7 @@ class WispRoster {
   OwnClaim ownClaims_[WISP_ROSTER_MAX_LAMPS];
   size_t   ownCount_ = 0;
 
-  // Mutex handle — opaque to keep FreeRTOS out of the header. Cast
-  // back to SemaphoreHandle_t in the .cpp. Same pattern as LampInventory.
+  // Opaque; keeps FreeRTOS out of the header.
   void* mutex_ = nullptr;
 
   // All these helpers assume the caller holds the mutex.
@@ -143,8 +141,7 @@ class WispRoster {
   size_t findOwnLocked(const uint8_t mac[6]) const;
   // Best peer RSSI for `lampMac` across all live peers. Writes the
   // peer's wisp-MAC to `peerWispMacOut` when found. Returns
-  // INT8_MIN + 1 if no peer claims the lamp (so any real RSSI beats
-  // it on the comparison).
+  // INT8_MIN if no peer claims the lamp.
   int8_t bestPeerRssiLocked(const uint8_t lampMac[6],
                             uint8_t peerWispMacOut[6]) const;
   // Returns true if `selfMac_` should win a tiebreak against `peerMac`.

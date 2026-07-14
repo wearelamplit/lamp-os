@@ -46,8 +46,7 @@ void LampInventory::recordHello(const uint8_t mac[6], const std::string& name,
                                 const uint8_t baseRGBW[4], const uint8_t shadeRGBW[4],
                                 uint32_t firmwareVersion, uint32_t nowMs,
                                 int8_t rssi) {
-  // Bounded take — mirrors nearby_lamps's pattern for the same reason: this
-  // runs on a WiFi-task callback and shouldn't stall on a loop-task reader.
+  // Bounded take — runs on the WiFi recv task; mustn't stall a loop-task reader.
   if (xSemaphoreTake(asHandle(mutex_), pdMS_TO_TICKS(2)) != pdTRUE) return;
 
   size_t idx = findByMacLocked(mac);

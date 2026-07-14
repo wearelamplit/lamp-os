@@ -76,8 +76,7 @@ void StatusEmitter::emitStatus() {
   const char* zoneSrc    = zone_ ? zoneSourceName(zone_->source())
                                  : zoneSourceName(ZoneSource::None);
 
-  // copyObserved is mux-guarded: a direct reference would race observe()'s
-  // push_back (which can relocate backing storage) on the loop task.
+  // copyObserved is mux-guarded against concurrent observe() calls.
   int obsBuf[kMaxObservedZones];
   size_t obsCount = 0;
   if (zone_) {
@@ -93,7 +92,7 @@ void StatusEmitter::emitStatus() {
 
   const uint32_t lastSeenMs = millis();
 
-  // manualPalette excluded: at 10 colors it can push JSON past CONTROL_MAX_PAYLOAD.
+  // manualPalette excluded: emitted separately via MSG_WISP_PALETTE (buildWispPalette).
   const char* sourceName = "aurora";  // safe default for nullptr config
   if (config_) {
     switch (config_->sourceMode()) {
@@ -153,7 +152,7 @@ void StatusEmitter::emitStatus() {
   lastWifiConnected_   = wifiConn;
   lastAuroraConnected_ = auroraConn;
 
-  // seq under the mux: parallel emit() / emitStatus() must not share a seq.
+  // SeqSource mux: concurrent HELLO and wispStatus emits must not share a seq.
   uint8_t frame[lamp_protocol::CONTROL_MAX_SIZE];
   size_t frameLen = 0;
   uint16_t seq = 0;

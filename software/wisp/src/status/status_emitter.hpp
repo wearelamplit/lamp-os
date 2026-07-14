@@ -58,9 +58,7 @@ class StatusEmitter {
   SeqSource* seq_ = nullptr;
   StatusEmitterTimerHandle statusTimer_ = nullptr;
 
-  // Set from the timer task / triggerOnChange, cleared in pump() on the loop
-  // task, so the ~750B JSON build + broadcast never runs on the 2KB timer
-  // daemon stack.
+  // Set from the timer task / triggerOnChange, cleared in pump() on the loop task.
   std::atomic<bool> statusDue_{false};
 
   bool lastWifiConnected_   = false;

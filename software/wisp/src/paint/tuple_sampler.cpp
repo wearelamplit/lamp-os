@@ -62,7 +62,7 @@ std::vector<RGBW> dedupe(const std::vector<RGBW>& in) {
   return out;
 }
 
-// All-unsigned arithmetic keeps the result byte-identical to the Dart implementation.
+// All-unsigned arithmetic keeps result byte-identical to the app's predictTuple().
 uint8_t lerp8(uint8_t a, uint8_t b, uint32_t frac) {
   const uint64_t inv = 0x100000000ULL - static_cast<uint64_t>(frac);
   return static_cast<uint8_t>(

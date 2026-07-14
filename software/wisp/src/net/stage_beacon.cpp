@@ -22,9 +22,7 @@ void StageBeacon::begin(const std::string& deviceName, WispConfig* config) {
   deviceName_ = deviceName;
   config_ = config;
   NimBLEDevice::init(deviceName_);
-  // NimBLE-Arduino 2.3.6 takes dBm as int8_t, not the legacy esp_power_level_t
-  // enum. Passing ESP_PWR_LVL_P9 (enum=7) here would yield +6 dBm — the Gen 1
-  // repeater code had this bug. Pass 9 to actually get +9 dBm.
+  // NimBLE 2.x takes raw dBm, not esp_power_level_t; 9 = +9 dBm.
   NimBLEDevice::setPower(static_cast<int8_t>(9), NimBLETxPowerType::Advertise);
   initialized_ = true;
 }

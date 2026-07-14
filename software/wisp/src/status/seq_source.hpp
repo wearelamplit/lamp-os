@@ -23,8 +23,7 @@ struct WispSeqNullMux {};
 
 namespace wisp {
 
-// Bump and frame build stay under the same mux so the two beacon tasks never
-// share a seq. Enter mux, next(), build the frame, exit.
+// Bump and frame build stay under the same mux so the two beacon tasks never share a seq.
 struct SeqSource {
   WISP_SEQ_PORTMUX_TYPE mux = WISP_SEQ_PORTMUX_INIT;
   uint16_t counter = 0;
