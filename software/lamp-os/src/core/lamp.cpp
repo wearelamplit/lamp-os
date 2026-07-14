@@ -404,7 +404,7 @@ void applyKnockoutPixel(uint8_t pixel, uint8_t brightness) {
     ::baseKnockoutBehavior.knockoutPixels[pixel] = brightness;
     ::config.base.knockoutPixels[pixel] = brightness;
     // Live per-pixel knockout; does NOT invalidate the base section cache.
-    // See the invariant at the brightness drain: CHAR_COMMIT invalidates the
+    // See drainBrightness in lamp_drains.cpp: CHAR_COMMIT invalidates the
     // cache, not per-pixel knockout writes.
   }
 }

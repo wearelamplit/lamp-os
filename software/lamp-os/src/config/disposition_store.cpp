@@ -77,8 +77,7 @@ void DispositionStore::set(const std::string& bdAddr, uint8_t value,
     it->second = value;
   } else {
     if (entries_.size() >= kMax) {
-      // Evict the lowest-by-key entry (matches the historical std::map
-      // iteration-order eviction). Best-effort at the cap; users typically
+      // Evict the lowest-by-key entry. Best-effort at the cap; users typically
       // have <100 paired lamps.
       entries_.erase(entries_.begin());
       it = std::lower_bound(entries_.begin(), entries_.end(), bdAddr, entryLess);

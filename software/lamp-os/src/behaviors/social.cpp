@@ -149,7 +149,6 @@ void SocialBehavior::draw() {
 void SocialBehavior::control() {
   const uint32_t now = millis();
 
-  // -- Gossip OTA tick ---------------------------------------------------
   // Fires INDEPENDENTLY of the social greeting state. The user's intent
   // (locked in the design): "personality controls the visual greeting,
   // not whether firmware propagates. Version updates outrank social
@@ -176,7 +175,7 @@ void SocialBehavior::control() {
   // Receive-first policy: skip the outbound loop entirely if either
   //   (a) we're currently RECEIVING an OTA — finish receiving before
   //       burning Core 1 + airtime on outbound chunks that may be
-  //       obsolete the moment we reboot into the new image, OR
+  //       obsolete after the lamp reboots into the new image, OR
   //   (b) any reachable peer reports a higher firmware version than
   //       ours — we're about to be the receiver, so any outbound we
   //       start now is just chunks we'd have to re-send under the
@@ -237,7 +236,7 @@ void SocialBehavior::control() {
 
   const SocialMode mode = config_ ? config_->lamp.socialMode : SocialMode::Ambivert;
 
-  // Introvert fatigue gate — if we burnt out recently, take a breather.
+  // Introvert fatigue gate: skip if the lamp is in its post-fatigue rest window.
   if (mode == SocialMode::Introvert &&
       static_cast<int32_t>(now - tiredUntilMs_) < 0) {
     return;

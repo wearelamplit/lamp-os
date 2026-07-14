@@ -144,10 +144,7 @@ constexpr uint8_t PROTOCOL_VERSION_EMIT   = 0x05;
 constexpr uint8_t PROTOCOL_VERSION_RX_MIN = 0x04;
 constexpr uint8_t PROTOCOL_VERSION_RX_MAX = 0x05;
 
-// Back-compat alias for code paths that still reference a single
-// "PROTOCOL_VERSION". The intent is for callers to migrate to EMIT
-// (when building) or check the range (when validating); this alias
-// keeps the obvious thing working during the migration.
+// Alias for callers that only need the emit version.
 constexpr uint8_t PROTOCOL_VERSION = PROTOCOL_VERSION_EMIT;
 
 enum MsgType : uint8_t {
@@ -196,7 +193,6 @@ constexpr uint8_t kReservedMsgTypeHighBit = 0x80;
 
 constexpr size_t HEADER_SIZE = 6;
 
-// --- Internal helpers (header-internal; not part of the public ABI). ---
 namespace detail {
 
 // Write the 6-byte header (magic + version + msgType + seq LE) to `buf`.

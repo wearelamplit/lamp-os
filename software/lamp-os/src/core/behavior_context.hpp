@@ -16,11 +16,6 @@ struct Greetable;
 
 /**
  * @brief Per-behavior context wired by the Compositor at register time.
- *        Replaces the hidden singleton globals (globalCompositor,
- *        globalExpressionManager, expressionFrameBuffers) with an explicit
- *        pointer that the Compositor sets via AnimatedBehavior::setBehaviorContext
- *        the moment a behavior is registered.
- *
  *        The Compositor owns one instance; every behavior it registers points
  *        at that single instance. Mutating a field (e.g. ExpressionManager
  *        wiring up the frame buffer list after begin()) is observed by every

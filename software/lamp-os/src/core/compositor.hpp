@@ -26,10 +26,9 @@ class Compositor {
   size_t expressionBandStart = 0;
   size_t expressionBandEnd = 0;
 
-  // The shared per-behavior context. We own it; every behavior we register
-  // gets a pointer to it via setBehaviorContext. ExpressionManager wires
-  // itself into this context via setExpressionManager(); standard_lamp pokes
-  // its frame-buffer list in too. Single instance, multiple readers.
+  // The shared per-behavior context. Owned here; every registered behavior
+  // gets a pointer via setBehaviorContext. The lamp wires the ExpressionManager
+  // pointer and frame-buffer list in initBehaviors(). Single instance, multiple readers.
   BehaviorContext context_;
 
  public:

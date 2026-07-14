@@ -19,12 +19,8 @@
 //                          level instead of rubber-banding from a stale
 //                          source.
 //
-// Firmware-only: the inline bodies call into Adafruit_NeoPixel
-// (`setBrightness`) so this header cannot be linked from the native
-// test env. The earlier "header-only, native-testable" framing never
-// held — Adafruit_NeoPixel is in the include list below. If native
-// coverage of the compute path becomes valuable, split into a pure
-// compute helper + .cpp-resident strip application.
+// Firmware-only: Adafruit_NeoPixel in the include chain makes this
+// unlinkable from the native test env.
 //
 // Dependencies pulled in by the include chain:
 //   util/levels.hpp        — lamp::calculateBrightnessLevel
