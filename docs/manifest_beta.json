@@ -7,7 +7,10 @@
     {
       "chipFamily": "ESP32",
       "parts": [
-        { "path": "/dl/beta/distribution-standard.bin", "offset": 0 }
+        { "path": "/dl/beta/bootloader.bin",        "offset": 4096 },
+        { "path": "/dl/beta/partitions.bin",        "offset": 32768 },
+        { "path": "/dl/beta/firmware-standard.bin", "offset": 65536 },
+        { "path": "/dl/beta/spiffs.bin",            "offset": 3997696 }
       ]
     }
   ]
