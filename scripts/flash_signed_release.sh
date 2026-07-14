@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# Download a full release image and flash a lamp over USB. This is the console
-# equivalent of the web installer at update.lamplit.ca: it writes the WHOLE
-# image (bootloader + partitions + firmware + spiffs) at offset 0, so the web
-# config UI ships with it. A real flash does not assume the old SPIFFS carries
-# over. NVS (name/config) is not in the image, so it persists across the write.
+# Download a release image and UPDATE a lamp over USB: flashes only app0
+# (firmware) + spiffs (web config UI), carved out of the merged image. NVS
+# (name/colors/adoption) and otadata are never written, so they persist across
+# the update. The merged image is 0xFF across the NVS region, so a whole-image
+# 0x0 write would erase name/colors/adoption; this is not that.
+#
+# This is an update path, not a full/erase flash. A truly blank lamp (no valid
+# bootloader/partitions) needs the web installer at update.lamplit.ca or a
+# :signed build, not this script.
 #
 # Usage: VARIANT=standard PORT=/dev/cu.usbserial-0 RELEASE_TAG=beta scripts/flash_signed_release.sh
 #
@@ -13,7 +17,7 @@
 #   RELEASE_TAG  GitHub release tag to pull from: beta (default) or stable
 #
 # For people WITHOUT the signing key: downloads a prebuilt image, never builds
-# or signs. Requires: curl, esptool (pip install esptool).
+# or signs. Requires: curl, esptool (pip install esptool), dd.
 
 set -euo pipefail
 
@@ -23,6 +27,8 @@ ASSET="distribution-${VARIANT}.bin"
 REPO="wearelamplit/lamp-os"
 URL="https://github.com/${REPO}/releases/download/${RELEASE_TAG}/${ASSET}"
 TMPFILE="$(mktemp -t lamp-dist-XXXX.bin)"
+APP0FILE="$(mktemp -t lamp-app0-XXXX.bin)"
+SPIFFSFILE="$(mktemp -t lamp-spiffs-XXXX.bin)"
 # Prefer the esptool binary on PATH, else the module form (pip installs the
 # module but not always the console script). Array form so a binary path with a
 # space in it survives.
@@ -32,7 +38,7 @@ else
   ESPTOOL=( python3 -m esptool )
 fi
 
-cleanup() { rm -f "$TMPFILE"; }
+cleanup() { rm -f "$TMPFILE" "$APP0FILE" "$SPIFFSFILE"; }
 trap cleanup EXIT
 
 echo "[flash:release] downloading ${ASSET} from release '${RELEASE_TAG}' (${REPO})"
@@ -47,9 +53,22 @@ if [ ! -s "$TMPFILE" ]; then
   exit 1
 fi
 
-echo "[flash:release] flashing full image (bootloader+partitions+firmware+spiffs) at 0x0..."
+# A short image would dd garbage past its end into the flashed regions.
+IMG_SIZE="$(wc -c < "$TMPFILE")"
+if [ "$IMG_SIZE" -lt $((0x400000)) ]; then
+  echo "ERROR: image is ${IMG_SIZE} bytes, expected at least 4 MiB (0x400000)." >&2
+  exit 1
+fi
+
+# Carve app0 (0x10000, len 0x1e0000) and spiffs (0x3d0000, len 0x30000) out of
+# the merged image, in 4096-byte blocks.
+dd if="$TMPFILE" of="$APP0FILE"   bs=4096 skip=16  count=480 2>/dev/null
+dd if="$TMPFILE" of="$SPIFFSFILE" bs=4096 skip=976 count=48  2>/dev/null
+
+echo "[flash:release] updating firmware (app0 @0x10000) + spiffs (@0x3d0000); NVS preserved..."
 PORT_ARG=()
 [ -n "${PORT:-}" ] && PORT_ARG=(--port "$PORT")
-"${ESPTOOL[@]}" ${PORT_ARG[@]+"${PORT_ARG[@]}"} --chip esp32 --baud 921600 write_flash 0x0 "$TMPFILE"
+"${ESPTOOL[@]}" ${PORT_ARG[@]+"${PORT_ARG[@]}"} --chip esp32 --baud 921600 write_flash \
+  0x10000 "$APP0FILE" 0x3d0000 "$SPIFFSFILE"
 
-echo "[flash:release] done — lamp should reboot into ${VARIANT}/${RELEASE_TAG} firmware."
+echo "[flash:release] done — lamp updated to ${VARIANT}/${RELEASE_TAG}, name/colors/adoption kept."
