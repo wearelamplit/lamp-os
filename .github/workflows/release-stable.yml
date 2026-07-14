@@ -1,0 +1,55 @@
+name: Release (stable, manual)
+
+# Manual stable release: builds the unsigned image + components and publishes
+# them to a GitHub release. workflow_dispatch only — cutting stable stays a
+# deliberate action. Asset names match the web installer's multipart manifest
+# and the /dl/stable proxy (distribution-standard.bin, firmware-standard.bin).
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.0.2)'
+        required: true
+      prerelease:
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build + publish stable
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+    - name: Install PlatformIO
+      run: pip install -r requirements.txt
+    - name: Build firmware
+      working-directory: ./software/lamp-os
+      run: |
+        pio run --environment upesy_wroom
+        pio run --target buildfs --environment upesy_wroom
+    - name: Merge + name assets to match the manifest
+      working-directory: ./software/lamp-os/.pio/build/upesy_wroom
+      run: |
+        esptool --chip esp32 merge-bin -o distribution-standard.bin --flash-mode dio --flash-freq 40m --flash-size 4MB 0x1000 bootloader.bin 0x8000 partitions.bin 0x10000 firmware.bin 0x3D0000 spiffs.bin
+        cp firmware.bin firmware-standard.bin
+    - name: Publish release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ inputs.tag }}
+        name: ${{ inputs.tag }}
+        prerelease: ${{ inputs.prerelease }}
+        make_latest: ${{ !inputs.prerelease }}
+        files: |
+          ./software/lamp-os/.pio/build/upesy_wroom/distribution-standard.bin
+          ./software/lamp-os/.pio/build/upesy_wroom/bootloader.bin
+          ./software/lamp-os/.pio/build/upesy_wroom/partitions.bin
+          ./software/lamp-os/.pio/build/upesy_wroom/firmware-standard.bin
+          ./software/lamp-os/.pio/build/upesy_wroom/spiffs.bin
