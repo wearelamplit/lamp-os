@@ -9,6 +9,8 @@
 
 #include <unity.h>
 
+#include <cstring>
+
 // Native-test seam: include the .cpp to get method definitions + global.
 // expression_observer.hpp pulls expression_invocation.hpp (ArduinoJson +
 // stdlib only; no Arduino.h) and color.hpp (pure struct). Compiles cleanly
