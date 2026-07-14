@@ -44,8 +44,8 @@ void exitQuiet() {
   const int prev = s_quietCount.fetch_sub(1, std::memory_order_acq_rel);
   if (prev > 1) return;   // Other session still active.
   if (prev <= 0) {
-    // Over-exit — clamp back to zero. Shouldn't happen with paired
-    // enter/exit but guards against a runaway sub.
+    // Over-exit — clamp back to zero. Guards against mismatched
+    // enter/exit call sites.
     s_quietCount.store(0, std::memory_order_release);
     return;
   }

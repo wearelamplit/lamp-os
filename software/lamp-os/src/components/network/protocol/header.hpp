@@ -175,10 +175,9 @@ enum MsgType : uint8_t {
   // Wisp's manualPalette broadcast. Carries up to kMaxWispPaletteColors
   // RGB triples packed binary. Lamps cache the latest, gossip-relay once
   // per (mac, seq), and serve it back to apps inside the wispStatus BLE
-  // characteristic JSON as a base64 blob. Replaces the previous design
-  // where the app held a per-lampId SharedPreferences copy of the palette
-  // — that caused per-lamp drift when the same operator edited via one
-  // lamp and viewed via another. Cadence: piggybacked on the 30 s
+  // characteristic JSON as a base64 blob. The wisp is the single source
+  // of truth for the palette so all apps see the same value regardless of
+  // which lamp they're connected to. Cadence: piggybacked on the 30 s
   // emitStatus() tick, plus an on-change emit from WispOpDispatcher.
   MSG_WISP_PALETTE        = 0x26,
   // Per-lamp paint colors broadcast by the wisp. Each entry carries the lamp's
@@ -191,11 +190,8 @@ enum MsgType : uint8_t {
   MSG_COMMAND             = 0x31,
 };
 
-// Explicit reserve of the high bit on msgType. Previously FLAG_LOCAL_ONLY
-// rode there for the cascade-locality hack; that path is retired.
-// The bit is reserved for
-// future protocol changes; inspect() no longer masks it so any future
-// reuse will surface immediately as an unrecognised msgType byte.
+// High bit on msgType. inspect() does not mask it; any frame that sets it
+// surfaces as an unrecognised type, making future reuse diagnosable.
 constexpr uint8_t kReservedMsgTypeHighBit = 0x80;
 
 constexpr size_t HEADER_SIZE = 6;
@@ -221,9 +217,8 @@ inline void writeHeader(uint8_t* buf, uint8_t msgType, uint16_t seq,
 }  // namespace detail
 
 // Validate magic + version. Returns the msg type byte verbatim or 0 if
-// invalid. C.3 retired FLAG_LOCAL_ONLY; the high bit is reserved for
-// future use, so we no longer mask it — any future reuse of that bit
-// will surface immediately as an unrecognised msgType.
+// invalid. The high bit is not masked; any future reuse surfaces
+// immediately as an unrecognised msgType.
 inline uint8_t inspect(const uint8_t* data, size_t len) {
   if (!data || len < HEADER_SIZE) return 0;
   if (data[0] != MAGIC_0 || data[1] != MAGIC_1) return 0;

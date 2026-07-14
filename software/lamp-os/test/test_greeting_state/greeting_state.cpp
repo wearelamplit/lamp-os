@@ -8,6 +8,7 @@
 #include <unity.h>
 
 #include <cstdint>
+#include <cstring>
 #include <string>
 
 // ---- AnimationState mirror --------------------------------------------------

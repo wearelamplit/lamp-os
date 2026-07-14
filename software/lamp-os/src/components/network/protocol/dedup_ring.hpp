@@ -43,12 +43,12 @@ namespace lamp_protocol {
 // (Core 1, via MeshLink::sendControlOp recording our own sent ops
 // so the inbound re-broadcast doesn't loop back). The critical section
 // is the compare loop + slot write — kept SHORT: no allocations, no
-// network calls, no logging. See audit finding #7 / Stability #3.
+// network calls, no logging.
 class DedupRing {
  public:
-  // 64 slots: at 20-50 lamps each gossiping a unique (sourceMac, seq), the
-  // previous 32-slot ring wrapped fast enough that a late-arriving relay could
-  // re-fire a receiver. Per-msgType dedup (MeshLink has separate rings per
+  // 64 slots: in a dense crowd each gossiping a unique (sourceMac, seq), a
+  // smaller ring wraps before a late-arriving relay lands and re-fires a
+  // receiver. Per-msgType dedup (MeshLink has separate rings per
   // message type) prevents HELLO traffic from evicting command or control
   // entries.
   static constexpr size_t CAPACITY = 64;

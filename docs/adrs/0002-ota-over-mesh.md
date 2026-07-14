@@ -3,7 +3,7 @@
 ## Context
 
 The fleet must update its own firmware without USB or physical access, over the
-ESP-NOW mesh (ADR 0001), against ~22 lamps that come and go. Constraints:
+ESP-NOW mesh (ADR 0001), against an unknown, variable number of lamps that come and go. Constraints:
 
 - **No reliable server.** A venue may have no WiFi, so HTTP-from-a-server OTA
   isn't dependable; the fleet must distribute firmware *to itself*.

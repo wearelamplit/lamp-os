@@ -52,10 +52,10 @@ void WifiLink::reconnect() {
   const std::string p = password();
   if (s.empty() || p.empty()) {
     Serial.println("[wifi] no creds; staying disconnected (radio stays up for ESP-NOW)");
-    // disconnect(false) drops the association BUT keeps the WiFi radio up.
-    // disconnect(true) — which we used to call here — turns the radio OFF,
-    // which kills ESP-NOW (esp_now_send fails synchronously). We need the
-    // STA radio interface up so mesh broadcasts continue to land.
+    // disconnect(false) drops the association but keeps the WiFi radio up.
+    // disconnect(true) turns the radio OFF, which kills ESP-NOW
+    // (esp_now_send fails synchronously). The STA radio interface must
+    // stay up so mesh broadcasts continue to land.
     WiFi.disconnect(false);
     return;
   }

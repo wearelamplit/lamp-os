@@ -36,10 +36,10 @@ static OtaInProgressGetter   s_otaInProgressGetter   = nullptr;
 // + startScan clear). Reader/drainer: Core 0 BLE WifiStateCallback::onRead
 // → consumeScanResults() (std::move + clear). Without this guard, a
 // concurrent push_back on Core 1 while Core 0 std::move's the vector
-// dereferences freed memory. Same homeSsidVisible() runs on Core 1
-// (same as tick) but we wrap defensively — critical sections are short
-// (no allocations beyond the std::move which steals the pointer, no
-// network calls, no logging). See audit finding #7 / Stability #4.
+// dereferences freed memory. homeSsidVisible() also runs on Core 1
+// (same as tick) — critical sections are kept short: no allocations
+// beyond the std::move which steals the pointer, no network calls, no
+// logging.
 static portMUX_TYPE s_scanMux = portMUX_INITIALIZER_UNLOCKED;
 
 // How recent a scan must be for homeSsidVisible() to trust the cache.
@@ -196,8 +196,8 @@ void stopSoftAp() {
   WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_STA);
   // Scanner / mode flip can leave the radio elsewhere; re-pin so ESP-NOW
-  // recv resumes immediately (same defensive re-pin pattern as the
-  // scan-complete branch of tick()).
+  // recv resumes immediately (matching the re-pin in the scan-complete
+  // branch of tick()).
   esp_wifi_set_channel(LAMP_ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
   s_softApUp = false;
 #ifdef LAMP_DEBUG

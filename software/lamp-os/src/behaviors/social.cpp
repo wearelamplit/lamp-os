@@ -98,9 +98,9 @@ void SocialBehavior::draw() {
     const Color buf = fb->buffer[i];
     Color out;
     if (easeIn > 0 && frame < easeIn) {
-      // Phase 1 — ease in toward the peer color. A snub also ramps the
-      // dim from 0 → full strength across the ease-in, so it arrives at
-      // the hold already dark-in-their-color (black for a full snub).
+      // Ease in toward the peer color. A snub also ramps the dim from
+      // 0 → full strength across the ease-in, so it arrives at the hold
+      // already dark-in-their-color (black for a full snub).
       out = fade(buf, foundLampColor, easeIn - 1, frame);
       if (snub) {
         // Ramp the dim 0 → full strength across the ease-in.
@@ -126,9 +126,9 @@ void SocialBehavior::draw() {
         out = foundLampColor;
       }
     } else if (fadeOut > 0 && frame < easeIn + hold + fadeOut) {
-      // Phase 3 — ease out back to the underlying expression's pixel. A
-      // snub ramps the dim back from full strength → 0 over the same
-      // span, mirroring the ease-in (rises from dark through their color).
+      // Ease out back to the underlying expression's pixel. A snub ramps
+      // the dim back from full strength → 0 over the same span, mirroring
+      // the ease-in (rises from dark through their color).
       const uint32_t fadeFrame = frame - (easeIn + hold);
       out = fade(foundLampColor, buf, fadeOut - 1, fadeFrame);
       if (snub) {
@@ -227,10 +227,8 @@ void SocialBehavior::control() {
   }
   greetingWasActive_ = greetingNowActive;
 
-  // Greeting / cooldown logic below only runs when the previous
-  // greeting animation finished. This early-return USED to be at the
-  // top of control() — which silently gated the OTA tick above on the
-  // greeting state, the opposite of the comment's stated intent.
+  // Greeting / cooldown logic below only runs after the previous
+  // greeting animation finishes.
   if (animationState != STOPPED) return;
 
   // Wraparound-safe time comparison (millis() rolls over at ~49 days).

@@ -13,16 +13,13 @@ enum AnimationState {
   // Animation is about to stop dead in its tracks
   PAUSING = 2,
 
-  // Animation will no longer contribute pixels to the scene and will keep
-  // its playhead at the last frame position
+  // Animation does not contribute pixels; playhead holds at last frame
   PAUSED = 3,
 
-  // Animation will stop gracefully and let the total frame count continue
-  // to contribute to the scene
+  // Animation stops gracefully; lets the current frame count finish
   STOPPING = 4,
 
-  // Animation will no longer contribute to the scene and it will
-  // resume from the beginning of the frame count
+  // Animation does not contribute pixels; resumes from frame 0 on play
   STOPPED = 5,
 
   // Animation is playing only one loop
@@ -106,10 +103,8 @@ class AnimatedBehavior {
    * @brief Wire a BehaviorContext into this behavior. Called by the Compositor
    *        the moment a behavior is registered (via addBehavior or begin()),
    *        and by ExpressionManager just before handing a transient to the
-   *        compositor. Replaces the previous globalCompositor /
-   *        globalExpressionManager / expressionFrameBuffers singleton path.
-   *        The context is owned by the Compositor; behaviors only hold a
-   *        non-owning pointer.
+   *        compositor. The context is owned by the Compositor; behaviors only
+   *        hold a non-owning pointer.
    */
   void setBehaviorContext(BehaviorContext* ctx) { context_ = ctx; }
   BehaviorContext* behaviorContext() const { return context_; }

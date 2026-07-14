@@ -117,12 +117,15 @@ only, passed to `--upload-port` for when more than one board is attached).
 signing key at `~/.lamp-os-firmware-key.bin`. Accept the same `VARIANT`,
 `CHANNEL`, and `PORT` env params.
 
-`lamp:flash:release` downloads a prebuilt signed binary from the GitHub `beta`
-release (via `gh`) and flashes it over USB with `esptool`. No build, no key
-needed. `VARIANT` (default `standard`), `RELEASE_TAG` (default `beta`), and
-`PORT` env params apply. Beta releases are published manually
-(`release-beta.yml` is `workflow_dispatch`), so the downloaded build is only as
-current as the last manual run.
+`lamp:flash:release` is the console equivalent of the web installer at
+update.lamplit.ca: it downloads the full `distribution.bin`
+(bootloader + partitions + firmware + spiffs, so the web config UI ships too)
+from the GitHub release and flashes it whole over USB. No build, no key needed.
+A fresh flash does not assume the old SPIFFS carries over; NVS (name/config) is
+not in the image, so it persists. `VARIANT` (default `standard`), `RELEASE_TAG`
+(default `beta`), and `PORT` env params apply. Every push to `dev` auto-publishes
+a fresh `beta` release (`release-beta.yml`), built at whatever version
+`platformio.ini` carries.
 
 The native suite covers protocol parsers, dedup ring, color math, fade
 math, cascade dedup, OTA receiver/indicator, and the GATT layout pin. Keep

@@ -43,7 +43,7 @@ class BluetoothComponent {
    * Synchronously calling NimBLE's setAdvertisementData() from
    * the loop task at sub-100ms intervals corrupts the host
    * task's pending-advertisement buffer and crashes the lamp
-   * with `_invalid_pc_placeholder`. Don't do that again.
+   * with `_invalid_pc_placeholder`.
    */
   void setAdvertisedColors(Color base, Color shade);
 

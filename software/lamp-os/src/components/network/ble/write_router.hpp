@@ -52,11 +52,10 @@ using PostFn = void (*)(const char* data, size_t len);
 // is negligible vs. the BLE write path's existing memcpy.
 using AuthFn = bool (*)(uint16_t connHandle);
 
-// Decoder for the AES-GCM ciphertext path. Mirrors the static
-// decodeIncomingOp() in ble_control.cpp — same args, same return. When
-// WriteRouter is instantiated with needsDecode = true, it calls this on
-// every write and replaces `raw` with the decoded JSON before bounds-
-// checking the decoded size and posting.
+// Decoder for the AES-GCM ciphertext path. Same signature as
+// decodeIncomingOp() in ble_control.cpp. When WriteRouter is instantiated
+// with needsDecode = true, it calls this on every write and replaces
+// `raw` with the decoded JSON before bounds-checking and posting.
 using DecodeFn = bool (*)(const std::string& raw,
                           uint16_t handle,
                           const uint8_t* charUuidLE16,

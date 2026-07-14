@@ -38,7 +38,7 @@ static void recvTrampoline(const esp_now_recv_info_t* info,
 // MAC-layer delivery result: ESP_NOW_SEND_SUCCESS = peer ACKed; FAIL =
 // no ACK received within hardware retries. Without this hook a
 // silently-dropped unicast looks like ESP_OK at the call site (the
-// IDF's enqueue), which previously made OFFER/ACCEPT drops invisible.
+// IDF only reports the enqueue result).
 // IDF 5.x on the C6 widened the callback signature from `(const uint8_t*,
 // status)` to `(const wifi_tx_info_t*, status)`. The MAC now lives in
 // `info->des_addr`. This matches the typedef `esp_now_send_cb_t` in
@@ -189,9 +189,7 @@ bool MeshLink::send(const uint8_t targetMac[6], const uint8_t* data, size_t len)
 
   if (needDel) {
     esp_now_del_peer(macToDel);
-    // We log evictions but they're expected at steady-state on a
-    // 22-lamp fleet. Reducing log frequency is left to caller-side
-    // diagnostics in a future tidy-up.
+    // Evictions are expected at steady-state in a busy crowd.
     Serial.printf("[mesh] LRU evict %02X:%02X:%02X:%02X:%02X:%02X\n",
                   macToDel[0], macToDel[1], macToDel[2],
                   macToDel[3], macToDel[4], macToDel[5]);

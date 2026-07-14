@@ -62,17 +62,13 @@ constexpr uint8_t WISP_HELLO_FLAG_WIFI_CONNECTED    = 0x02;
 constexpr uint8_t WISP_HELLO_FLAG_AURORA_CONNECTED  = 0x04;
 // WISP_HELLO TLV trailer (v0x05+). Same shape as HELLO's:
 //   [tlv_count 1] [type 1][len 1][value len] x tlv_count
-// Bumped 45 → 96 to leave room for ~6-7 future TLVs without ever
-// needing another PROTOCOL_VERSION bump. The wisp doesn't currently
-// emit any TLVs (it always sends tlv_count=0), but the parser tolerates
-// + skips unknowns identically to HELLO, so future additions land
-// cleanly on both sides.
+// Sized at 96 to hold the fixed fields plus a full TLV trailer without
+// a PROTOCOL_VERSION bump. The wisp always sends tlv_count=0; the parser
+// tolerates + skips unknowns identically to HELLO.
 constexpr size_t WISP_HELLO_MAX_SIZE              = 96;
-// TLV-type registry for WISP_HELLO. Currently empty; reserved 0x01-0x1F
-// for future use. Shares its 1-byte type-space namespace with HELLO,
-// which is why HELLO_TLV_OTA_STATE (also 0x01) is fine here — these
-// types appear in separate frames and HELLO_TLV_OTA_STATE doesn't
-// make sense for a wisp.
+// TLV-type registry for WISP_HELLO. Shares its 1-byte type-space
+// namespace with HELLO; types appear in separate frames so the same
+// numeric value is unambiguous in context.
 
 // MSG_WISP_CLAIM: header(6) + sourceMac(6) + count(1) + entries[count*7].
 // Each entry: lampMac(6) + signed int8 rssi(1) = 7 bytes.

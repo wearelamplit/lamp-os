@@ -6,8 +6,8 @@
 
 namespace lamp {
 uint8_t calculateBrightnessLevel(uint8_t value, uint8_t percentage) {
-  // Clamp percentage to [0,100] so a bad input can't poison the downstream
-  // (value * p) / 100 math (which previously could exceed 255 unchecked).
+  // Clamp percentage to [0,100] so a bad input can't overflow the
+  // downstream (value * p) / 100 past 255.
   uint8_t p = percentage > 100 ? 100 : percentage;
 
   return (value * p) / 100;

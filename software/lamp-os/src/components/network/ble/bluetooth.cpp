@@ -49,8 +49,7 @@ static std::string s_advertisementName;
 //                  format. Drives the app's ControlScreen vs
 //                  BtOnlyLampScreen routing.
 //   bit 2 (0x04) — kBleCapConfigured — the lamp has been claimed/set up.
-//                  Drives the app's adopt-wizard vs open-it routing, so it
-//                  no longer relies on matching the default name/colors.
+//                  Drives the app's adopt-wizard vs open-it routing.
 //
 // The mesh bit is 0x02 — bytewise identical to the prior "firmware version
 // 0x02" sentinel. v2 apps checking `mfg[6] >= 2` still pass; v3+ apps using
@@ -74,10 +73,9 @@ static void applyAdvertisementPayload(NimBLEAdvertising* adv,
   // Build the advertisement payload from scratch and atomically replace
   // it via `setAdvertisementData`. The high-level setManufacturerData /
   // setName helpers on NimBLEAdvertising both `addData` to an internal
-  // accumulator (NimBLEAdvertising.cpp ~ line 270) — a second call
-  // doesn't replace the previous mfg field, it appends a SECOND mfg
-  // field after it, which trips the 31-byte limit and falls back to the
-  // scan-response packet (firing the "Data length exceeded" warning).
+  // accumulator (NimBLEAdvertising.cpp ~ line 270); a second call
+  // appends a SECOND mfg field, trips the 31-byte limit, and falls back
+  // to the scan-response packet (firing the "Data length exceeded" warning).
   NimBLEAdvertisementData data;
   data.setFlags(BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP);
   data.setName(name, /*isComplete=*/true);
@@ -161,14 +159,13 @@ void BluetoothComponent::begin(std::string name, Color inBaseColor,
   NimBLEDevice::setPower(BLE_POWER_LEVEL);
 
   // LE Secure Connections + Just-Works bonding remain enabled, but the
-  // link layer no longer forces encryption on any characteristic — see
+  // link layer does not force encryption on any characteristic; see
   // `app-layer crypto` below. Sensitive writes (CHAR_AUTH, CHAR_WIFI_OP,
   // CHAR_REMOTE_OP, CHAR_SETTINGS_BLOB) accept an app-layer AES-GCM
   // frame keyed off the lamp password via `lamp::crypto`; legacy
   // plaintext writes still work for the webapp/old clients. The OS
   // will not pop a pair dialog on any write. Phones bonded under the
-  // old WRITE_ENC scheme still re-encrypt silently because their bond
-  // record is still valid; fresh phones simply skip the bond altogether.
+  // old WRITE_ENC scheme re-encrypt silently; fresh phones skip the bond.
   NimBLEDevice::setSecurityAuth(/*bonding=*/true,
                                 /*mitm=*/false,
                                 /*sc=*/true);
@@ -188,13 +185,12 @@ void BluetoothComponent::begin(std::string name, Color inBaseColor,
   // deterministic control over what goes on the wire.
   pAdvertising->enableScanResponse(false);
   // Adv payload shape: [magic16(2), baseRGB(3), shadeRGB(3), capabilities(1)]
-  // = 9 bytes total. byte 8 was previously a "firmware version" byte hard-
-  // coded to 0x02; it's now a forward-compatible capability bitfield (see the
-  // kBleCapMeshProtocol / kBleCapConfigured comment above). Value is 0x02
-  // (mesh only) or 0x06 (mesh + configured), so v2 apps checking `mfg[6] >= 2`
-  // still route correctly. Legacy v1 8-byte advs (no capability byte) and
-  // intermediate v2 6-byte advs (no shade) are still tolerated by the
-  // scanner above for cross-firmware compat.
+  // = 9 bytes total. Byte 8 is a forward-compatible capability bitfield
+  // (see kBleCapMeshProtocol / kBleCapConfigured above). Value is 0x02
+  // (mesh only) or 0x06 (mesh + configured), so v2 apps checking
+  // `mfg[6] >= 2` still route correctly. Legacy v1 8-byte advs (no
+  // capability byte) and intermediate v2 6-byte advs (no shade) are
+  // still tolerated by the scanner above for cross-firmware compat.
   s_advertisementData = {
       static_cast<unsigned char>(BLE_LAMP_MAGIC_NUMBER & 0xff),
       static_cast<unsigned char>((BLE_LAMP_MAGIC_NUMBER >> 8) & 0xff),
@@ -220,7 +216,7 @@ void BluetoothComponent::begin(std::string name, Color inBaseColor,
 // Minimum gap between NimBLE adv-data updates. Calling
 // setAdvertisementData() faster than the advertising interval
 // corrupts the host task's pending buffer and panics the lamp
-// (see `_invalid_pc_placeholder` repro in commit history).
+// with `_invalid_pc_placeholder`.
 // 250ms = 2× the slow end of BLE_ADVERTISING_INTERVAL_MAX (96 * 0.625ms
 // ≈ 60ms) with plenty of safety margin.
 static constexpr uint32_t ADV_FLUSH_MIN_GAP_MS = 250;

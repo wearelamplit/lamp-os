@@ -1,9 +1,8 @@
 // software/lamp-os/src/core/pending_slot_aggregate.hpp
 //
 // Aggregates the PendingJsonSlot / PendingTypedSlot instances + the two
-// commit-flag volatiles that used to live at file scope in
-// lamp.cpp. Lifted into the framework so the Lamp base class
-// owns the Core-0 → Core-1 hand-off pattern, not each lamp subclass.
+// commit-flag volatiles. The Lamp base class owns the Core-0 → Core-1
+// hand-off pattern; subclasses inherit it.
 //
 // The slots themselves are templated in pending_json_slot.hpp /
 // pending_typed_slot.hpp — those headers stay where they are. This
@@ -18,7 +17,7 @@
 
 namespace lamp {
 
-// Size constants — match the originals in lamp.cpp.
+// Size constants matched to the consuming call sites in lamp.cpp.
 inline constexpr size_t kPendingJsonBase = 256;
 inline constexpr size_t kPendingJsonOp   = 512;  // expression op payloads are larger
 
@@ -59,8 +58,8 @@ struct PendingSlotAggregate {
 };
 
 // Single production instance, defined in pending_slot_aggregate.cpp.
-// File-scope per the single-instance-per-binary design (see lamp.cpp
-// header comment) — ble_control.cpp + lamp.cpp reach it via extern.
+// File-scope per the single-instance-per-binary design (see lamp.cpp).
+// ble_control.cpp + lamp.cpp reach it via extern.
 extern PendingSlotAggregate pendingSlots;
 
 }  // namespace lamp

@@ -152,8 +152,8 @@ enum class FwReqReason : uint8_t {
   StallWatchdog = 1,  // 2s without progress; emit one REQ for the lowest gap
 };
 
-// RESULT status enum. uint8_t on the wire; values 9..255 reserved for
-// forward-compat. Wisp side treats unknown codes as "abort + log + back off".
+// RESULT status enum. uint8_t on the wire; values 9..255 reserved for forward-compat.
+// The wisp treats unknown codes as "abort + log + back off".
 enum class FwResultStatus : uint8_t {
   Success            = 0,  // verified + boot partition set + rebooting
   SignatureFail      = 1,
@@ -478,9 +478,8 @@ inline bool parseFwAccept(const uint8_t* data, size_t len, ParsedFwAccept& out,
      | (static_cast<uint32_t>(data[22]) << 16)
      | (static_cast<uint32_t>(data[23]) << 24);
   out.status = static_cast<FwAcceptStatus>(data[24]);
-  // resumeOffset is reserved-zero in v1 (the 3 trailing body bytes are
-  // reserved placeholders). Forward-compat: bytes 25..27 may carry a future
-  // 24-bit resumeOffset; for now they're zero on emit and ignored on parse.
+  // resumeOffset is reserved-zero in v1; bytes 25..27 are zero on emit
+  // and ignored on parse (forward-compat slot for a 24-bit resume field).
   out.resumeOffset = 0;
   return true;
 }

@@ -148,6 +148,59 @@ void test_round_trip_preserves_fields() {
   TEST_ASSERT_EQUAL_UINT(1, b.expressions.expressions[0].colors.size());
 }
 
+// Migration: old blobs (pre-7eca586f) had flat colors[]/px at the role level,
+// no segments array. The codec must migrate them to a single segment so custom
+// colors survive a firmware upgrade.
+
+void test_old_format_base_colors_migrated() {
+  // Old shape: {"base":{"colors":["#RRGGBBWW"],"px":35}, "shade":{...}}
+  const char* json =
+      "{\"lamp\":{\"name\":\"myLamp\"},"
+      "\"base\":{\"colors\":[\"#11223344\",\"#55667788\"],\"px\":35},"
+      "\"shade\":{\"colors\":[\"#aabbccdd\"],\"px\":38}}";
+  Model m;
+  parseInto(json, m);
+  // Colors must survive — NOT fall to kBaseDefaultColor
+  TEST_ASSERT_EQUAL_UINT(2, m.base.broadcastColors().size());
+  TEST_ASSERT_TRUE(m.base.broadcastColors()[0] == hexStringToColor("#11223344"));
+  TEST_ASSERT_TRUE(m.base.broadcastColors()[1] == hexStringToColor("#55667788"));
+  TEST_ASSERT_EQUAL_UINT8(35, m.base.segments[0].px);
+}
+
+void test_old_format_shade_colors_migrated() {
+  const char* json =
+      "{\"shade\":{\"colors\":[\"#aabbccdd\"],\"px\":38}}";
+  Model m;
+  parseInto(json, m);
+  TEST_ASSERT_EQUAL_UINT(1, m.shade.broadcastColors().size());
+  TEST_ASSERT_TRUE(m.shade.broadcastColors()[0] == hexStringToColor("#aabbccdd"));
+  TEST_ASSERT_EQUAL_UINT8(38, m.shade.segments[0].px);
+}
+
+void test_old_format_no_colors_uses_class_default() {
+  // A blob with neither segments nor colors should keep the class default.
+  const char* json = "{\"base\":{\"ac\":0},\"shade\":{}}";
+  Model m;
+  parseInto(json, m);
+  TEST_ASSERT_TRUE(m.base.broadcastColors()[0] == kBaseDefaultColor);
+  TEST_ASSERT_TRUE(m.shade.broadcastColors()[0] == kShadeDefaultColor);
+}
+
+void test_new_format_segments_unchanged() {
+  // Existing new-format blobs must parse identically to before.
+  const char* json =
+      "{\"base\":{\"segments\":[{\"name\":\"Base\",\"px\":35,"
+      "\"colors\":[\"#11223344\"]}]},"
+      "\"shade\":{\"segments\":[{\"name\":\"Shade\",\"px\":38,"
+      "\"colors\":[\"#aabbccdd\"]}]}}";
+  Model m;
+  parseInto(json, m);
+  TEST_ASSERT_EQUAL_UINT8(35, m.base.segments[0].px);
+  TEST_ASSERT_TRUE(m.base.broadcastColors()[0] == hexStringToColor("#11223344"));
+  TEST_ASSERT_EQUAL_UINT8(38, m.shade.segments[0].px);
+  TEST_ASSERT_TRUE(m.shade.broadcastColors()[0] == hexStringToColor("#aabbccdd"));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_empty_blob_uses_class_defaults);
@@ -156,5 +209,9 @@ int main(int, char**) {
   RUN_TEST(test_sum_px_clamped_to_255);
   RUN_TEST(test_homemode_enabled_migration);
   RUN_TEST(test_round_trip_preserves_fields);
+  RUN_TEST(test_old_format_base_colors_migrated);
+  RUN_TEST(test_old_format_shade_colors_migrated);
+  RUN_TEST(test_old_format_no_colors_uses_class_default);
+  RUN_TEST(test_new_format_segments_unchanged);
   return UNITY_END();
 }

@@ -48,12 +48,9 @@ struct PendingTypedSlot {
     valid = true;
     portEXIT_CRITICAL(&mux);
 #ifdef LAMP_DEBUG
-    // Overwrite diagnostic — fires when a new post() lands on a still-valid
-    // slot, meaning the previous event will be silently lost. Added
-    // 2026-06-04 to measure how often this happens in practice during
-    // rapid cascade triggers. sizeof(T) discriminates which slot
-    // (PendingWispHello small, PendingCommand large, etc.) without needing
-    // a per-slot tag parameter that would touch every forwarder.
+    // Overwrite diagnostic: fires when a new post() lands on a still-valid
+    // slot (the pending event is lost). sizeof(T) discriminates which slot
+    // without a per-slot tag parameter.
     if (overwriting) {
       Serial.printf("[slot.overwrite] size=%u\n", (unsigned)sizeof(T));
     }

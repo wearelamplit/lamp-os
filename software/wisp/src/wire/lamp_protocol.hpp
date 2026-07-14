@@ -2,13 +2,11 @@
 
 // Shared wire format for wisp <-> lamp over ESP-NOW broadcast.
 //
-// Mirrors the wisp-relevant types from
-// software/lamp-os/src/components/network/lamp_protocol.hpp. The lamp side
-// carries additional types (MSG_FW_* OTA distribution, etc.) the wisp
-// doesn't send or parse. We duplicate instead of vendoring as a shared
-// library because the two PlatformIO projects target different
-// boards/frameworks and the protocol churn rate is low. Whenever you
-// touch a type that appears on both sides, mirror the change here.
+// The lamp firmware carries additional types (MSG_FW_* OTA distribution,
+// etc.) that the wisp doesn't send or parse. The two PlatformIO projects
+// target different boards/frameworks, so the shared types are duplicated
+// rather than vendored as a library. Whenever you touch a type that
+// appears on both sides, update both copies.
 
 
 #include <cstdint>
@@ -80,10 +78,9 @@ enum MsgType : uint8_t {
   // Wisp's manualPalette broadcast. Carries up to kMaxWispPaletteColors
   // RGB triples packed binary. Lamps cache the latest, gossip-relay once
   // per (mac, seq), and serve it back to apps inside the wispStatus BLE
-  // characteristic JSON as a base64 blob. Replaces the previous design
-  // where the app held a per-lampId SharedPreferences copy of the palette
-  // — that caused per-lamp drift when the same operator edited via one
-  // lamp and viewed via another. Cadence: piggybacked on the 30 s
+  // characteristic JSON as a base64 blob. The wisp is the single source
+  // of truth for the palette so all apps see the same value regardless of
+  // which lamp they're connected to. Cadence: piggybacked on the 30 s
   // emitStatus() tick, plus an on-change emit from WispOpDispatcher.
   MSG_WISP_PALETTE        = 0x26,
   // Per-lamp paint colors broadcast by the wisp. Each entry carries the lamp's
@@ -93,7 +90,7 @@ enum MsgType : uint8_t {
   MSG_EVENT               = 0x30,
 };
 
-// inspect() no longer masks the high bit on msgType; any frame that sets it
+// High bit on msgType is not masked by inspect(); any frame that sets it
 // surfaces as an unrecognised type.
 constexpr uint8_t kReservedMsgTypeHighBit = 0x80;
 
@@ -913,12 +910,12 @@ inline bool parseRestoreBrightness(const uint8_t* data, size_t len,
 // (Core 1, via ShowReceiver::sendControlOp recording our own sent ops
 // so the inbound re-broadcast doesn't loop back). The critical section
 // is the compare loop + slot write — kept SHORT: no allocations, no
-// network calls, no logging. See audit finding #7 / Stability #3.
+// network calls, no logging.
 class DedupRing {
  public:
-  // 64 slots: at 20-50 lamps each gossiping a unique (sourceMac, seq), the
-  // previous 32-slot ring wrapped fast enough that a late-arriving relay could
-  // re-fire a receiver. Per-msgType dedup (separate rings per message type)
+  // 64 slots: in a dense crowd each gossiping a unique (sourceMac, seq), a
+  // smaller ring wraps before a late-arriving relay lands and re-fires a
+  // receiver. Per-msgType dedup (separate rings per message type)
   // prevents HELLO traffic from evicting command or control entries.
   static constexpr size_t CAPACITY = 64;
 
