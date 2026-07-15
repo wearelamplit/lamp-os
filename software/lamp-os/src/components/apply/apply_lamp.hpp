@@ -38,8 +38,7 @@ inline void lampLocal(JsonObject obj, uint8_t maxBrightness) {
   if (obj["brightness"].is<int>()) {
     int level = obj["brightness"].as<int>();
     if (level >= 0 && level <= 100) {
-      // Settings_blob is a "saved value" — use brightnessImmediate so
-      // we skip the slider micro-fade.
+      // Settings_blob is a saved value; use brightnessImmediate to skip the slider micro-fade.
       ::lamp::apply::brightnessImmediate(static_cast<uint8_t>(level),
                                           /*isHomeMode=*/false, maxBrightness);
     }

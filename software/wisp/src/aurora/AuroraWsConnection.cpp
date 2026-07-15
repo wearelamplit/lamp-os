@@ -51,7 +51,6 @@ void AuroraWsConnection::loop() {
             lastPingMs_ = now;
             client_.ping();
         }
-        // poll()/onEvent may have closed the socket; arm backoff before retry.
         if (!client_.available()) {
             Serial.println("[ws] connection lost");
             connected_ = false;

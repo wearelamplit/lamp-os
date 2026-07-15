@@ -28,7 +28,7 @@ enum AnimationState {
 
 /**
  * An Animated behavior is any lamp behavior that will have a side effect on the
- * LEDs. Any animation will run at roughly 30 frames per second
+ * LEDs. Any animation will run at roughly 60 frames per second
  */
 class AnimatedBehavior {
  public:
@@ -43,8 +43,8 @@ class AnimatedBehavior {
    * Animated Behavior Base class - integrators implement draw and control
    * functions of their own to control the lamp's LEDs
    * @param [in] inBuffer the frame buffer to interact with
-   * @param [in] inFrames the frame duration for the behaviour eg (60 frames ~ 2
-   *                      seconds of animation)
+   * @param [in] inFrames the frame duration for the behaviour eg (60 frames ~ 1
+   *                      second of animation)
    * @param [in] autoPlay if true the animation will begin immediately
    */
   AnimatedBehavior();

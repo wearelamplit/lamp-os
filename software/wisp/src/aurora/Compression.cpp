@@ -8,9 +8,7 @@ bool inflateInto(const uint8_t* d, size_t n, bool parseZlibHeader,
     tinfl_init(&inflator);
     out.clear();
     size_t inOfs = 0;
-    // Single-threaded path (loop task -> ws handleFrame -> decode), so one
-    // reused 32KB dictionary instead of a per-frame alloc that fails silently
-    // under WiFi-TLS + BLE heap pressure.
+    // Static dict avoids per-frame alloc failure under heap pressure (loop task only).
     static std::vector<uint8_t> dict(TINFL_LZ_DICT_SIZE);
     size_t dictOfs = 0;
     int flags = (parseZlibHeader ? TINFL_FLAG_PARSE_ZLIB_HEADER : 0);

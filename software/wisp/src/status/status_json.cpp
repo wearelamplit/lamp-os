@@ -16,8 +16,7 @@ size_t buildWispStatusJson(const WispStatusFields& f, char* out,
   doc["paletteIdPrefix"] = f.paletteIdPrefix;
   doc["lastSeenMs"]      = f.lastSeenMs;
   doc["source"]          = f.source;
-  // Off mode shows the offColor picker; Manual/Aurora show drift sliders.
-  // Emitting only the relevant set keeps both within the 230 B cap.
+  // Off mode emits offColor; non-Off emits drift fields.
   const bool isOff = f.source && std::strcmp(f.source, "off") == 0;
   if (isOff && f.hasOffColor) {
     JsonArray o = doc["offColor"].to<JsonArray>();
@@ -27,9 +26,7 @@ size_t buildWispStatusJson(const WispStatusFields& f, char* out,
   if (f.name && f.name[0] != '\0') {
     doc["name"] = f.name;
   }
-  // shuffleSeed is priority: without it the app's predictTuple() desyncs from
-  // the wisp's paint. The lower-value drift fields and observedZones absorb
-  // truncation first; the seed is dropped only as a last resort below.
+  // shuffleSeed drives the app's predictTuple(); dropped only as a last resort.
   if (f.shuffleSeed) {
     doc["shuffleSeed"] = f.shuffleSeed;
   }
@@ -48,8 +45,7 @@ size_t buildWispStatusJson(const WispStatusFields& f, char* out,
     z.add(f.observedZones[i]);
     if (measureJson(doc) > cap) { z.remove(z.size() - 1); break; }
   }
-  // Last resorts: a produced frame beats a perfect one (a 0-length frame stops
-  // all broadcasts, vanishing the wisp from the app). Drop in reverse priority.
+  // A 0-length frame stops all broadcasts; drop lower-priority fields before giving up.
   if (f.shuffleSeed && measureJson(doc) > cap) {
     doc.remove("shuffleSeed");
   }

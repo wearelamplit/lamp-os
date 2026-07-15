@@ -58,7 +58,7 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   // color → shade) instead of running in-hold pulses.
   bool     snub              = false;
 
-  // Per-cycle frame budget for the in-hold pulse loop (~750ms at 60fps).
+  // Per-cycle frame budget for the in-hold pulse loop. 45 frames at the ~60 fps compositor rate ≈ 750 ms.
   static constexpr uint32_t kSlowPulseCycleFrames = 45;
 
   void draw() override;

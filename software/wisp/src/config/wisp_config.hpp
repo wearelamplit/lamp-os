@@ -25,7 +25,7 @@ struct ManualPaletteColor {
   uint8_t b = 0;
 };
 
-// Aligned with lamp_protocol::kMaxWispPaletteColors; setManualPalette truncates.
+// Must not exceed lamp_protocol::kMaxWispPaletteColors; setManualPalette enforces this.
 inline constexpr size_t kManualPaletteMaxColors = 50;
 
 class WispConfig {
@@ -72,7 +72,7 @@ class WispConfig {
   ManualPaletteColor offColor() const { return offColor_; }
   void setOffColor(ManualPaletteColor c);
 
-  // Bumping re-rolls per-lamp color assignments fleet-wide (XORed into TupleSampler salts).
+  // Bumping re-rolls per-lamp color assignments fleet-wide.
   uint8_t shuffleSeed() const { return shuffleSeed_; }
   void bumpShuffleSeed();
 
@@ -90,7 +90,7 @@ class WispConfig {
   void setPassword(const String& pw);
 
  private:
-  // Opaque to keep FreeRTOS out of the header; cast to SemaphoreHandle_t in .cpp.
+  // Opaque; keeps FreeRTOS out of the header.
   void* mutex_ = nullptr;
 
   Preferences prefs_;

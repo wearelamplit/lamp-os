@@ -12,13 +12,7 @@
 
 namespace lamp {
 
-/**
- * @brief configurations file for the lamp that can be modified on the web
- * portal
- * @property lamp - global lamp details
- * @property base - details about the neopixels in the lamp base
- * @property shade - details about the neopixels in the lamp bulb
- */
+// Runtime lamp configuration; persisted to NVS under the "cfg" key.
 class Config {
  private:
   ConfigStore* store_ = nullptr;
@@ -104,10 +98,11 @@ class Config {
    *
    * Returns true iff the store wrote > 0 bytes. On failure the in-memory
    * state is unchanged; the next call may succeed.
+   *
+   * `via`: short tag like "commit" / "settings_blob" / "expressionOp"
+   * included in the success log to disambiguate which path triggered the write.
+   * Pass a constant string literal.
    */
-  // `via` is a short tag like "commit" / "settings_blob" / "expressionOp"
-  // included in the success log so fleet debugging can disambiguate
-  // which path triggered the write. Pass a constant string literal.
   bool persistConfig(const char* via);
 
   // Writes a caller-supplied whole-config JSON string straight to the NVS

@@ -36,14 +36,13 @@ class PresenceBeacon {
              AuroraPaletteClient* aurora, WispRoster* roster, SeqSource* seq,
              StatusEmitter* statusEmitter);
 
-  // One-shot wiring of the 2s HELLO timer. Call once after begin().
+  // Call once after begin().
   void startTimer();
 
   // Runs the due HELLO emit on the loop task. Cheap when nothing is due.
   void pump();
 
  private:
-  // Emit body runs only from pump() on the loop task.
   void emit();  // MSG_WISP_HELLO + MSG_WISP_CLAIM (2s cadence)
 
   MeshLink* mesh_ = nullptr;
@@ -55,12 +54,9 @@ class PresenceBeacon {
   StatusEmitter* statusEmitter_ = nullptr;
   PresenceBeaconTimerHandle timer_ = nullptr;
 
-  // Set from the timer task, cleared in pump() on the loop task, so the HELLO
-  // build + broadcast never runs on the 2KB timer daemon stack.
+  // Set from the timer task, cleared in pump() on the loop task.
   std::atomic<bool> helloDue_{false};
 
-  // A WiFi/Aurora flip in HELLO triggers StatusEmitter within 2s rather than
-  // waiting 30s.
   bool lastHelloWifi_     = false;
   bool lastHelloAurora_   = false;
   bool haveLastHelloConn_ = false;

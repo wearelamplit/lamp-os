@@ -31,15 +31,7 @@ namespace lamp_protocol {
 
 // HELLO fixed prefix: header(6) + sourceMac(6) + shade(4) + base(4) + firmwareVersion(4).
 // Name length byte + name bytes follow this prefix.
-// 6 (header: magic+ver+type+seq) + 6 (sourceMac) + 4 (shade RGBW) +
-// 4 (base RGBW) + 4 (firmwareVersion LE) = 24 bytes. Previously declared
-// as 23 — an off-by-one that made buildHello report 1 fewer byte than
-// it actually wrote (the firmwareVersion's MSB landed at offset 23 but
-// HELLO_FIXED_SIZE said the prefix ended at offset 22). Effect on the
-// wire: the last byte of the name field was truncated and parseHello
-// read stack garbage into its last slot ("jacko" → "jackx" in the
-// roster). Both lamp and wisp must run the same value here — protocol
-// is verbatim-mirrored.
+// 6 + 6 + 4 + 4 + 4 = 24 bytes. Both lamp and wisp must match — protocol is verbatim-mirrored.
 constexpr size_t HELLO_FIXED_SIZE = 24;
 constexpr size_t HELLO_MAX_NAME = 32;
 // HELLO TLV trailer (v0x05+). After the variable name field, the frame
@@ -87,9 +79,7 @@ struct ParsedHello {
   uint8_t sourceMac[6];
   uint8_t shade[4];
   uint8_t base[4];
-  // Semver packed (major<<16)|(minor<<8)|patch. Zero on pre-Phase-A peers
-  // (which never reach parseHello() anyway because their PROTOCOL_VERSION
-  // mismatches and inspect() rejects them).
+  // Semver packed (major<<16)|(minor<<8)|patch. Zero when the TLV is absent.
   uint32_t firmwareVersion;
   uint8_t nameLen;
   char name[HELLO_MAX_NAME + 1];  // null-terminated copy

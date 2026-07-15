@@ -80,7 +80,7 @@ void PresenceBeacon::emit() {
         paletteIdPrefix, sizeof(paletteIdPrefix));
   }
 
-  // carriedFw* zero-fill; wire layout retained so older lamps don't malform-drop.
+  // zero: no carried firmware channel on this beacon path.
   const char* carriedFwChannel = nullptr;
   const size_t carriedFwChannelLen = 0;
   const uint32_t carriedFwVersion = 0;

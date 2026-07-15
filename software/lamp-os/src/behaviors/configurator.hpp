@@ -19,8 +19,6 @@ namespace lamp {
 // supplied by the caller). 100ms sits right at the human just-noticeable
 // fade vs snap boundary — smooth enough to avoid stepping on slow drags,
 // snappy enough that the lamp tracks the slider in near-real-time.
-// Lowered from a previous 250ms (chosen to mimic the old
-// easeFrames=60 quad-ease feel) once the slider lag became noticeable.
 // Override callers (ColorOverride for wisp paint, peer-swap, etc.) pass
 // their own fadeDurationMs and don't touch this default.
 constexpr uint16_t kDefaultFadeMs = 100;

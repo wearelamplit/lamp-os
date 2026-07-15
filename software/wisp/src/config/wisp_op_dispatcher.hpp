@@ -35,19 +35,16 @@ class WispOpDispatcher {
   explicit WispOpDispatcher(WispConfig& config) : config_(config) {}
 
   // Optional wiring for the setWifi op chain. Pass nullptr in tests that
-  // don't exercise the setWifi path. The dispatcher does not own either
-  // pointer; the caller (main.cpp) owns the globals.
+  // don't exercise the setWifi path. The dispatcher does not own either pointer.
   void setWifiSinks(WifiLink* wifi, StageBeacon* stage) {
     wifiLink_ = wifi;
     stageBeacon_ = stage;
   }
 
-  // Inject a nonce ring for replay detection. The ring is owned by the caller
-  // (main.cpp or test). Pass nullptr to skip replay detection (open-access mode).
+  // Inject a nonce ring for replay detection. Pass nullptr to skip replay detection.
   void setNonces(crypto::RecentNonces* nonces) { nonces_ = nonces; }
 
-  // payload + len point into the recv buffer. The function copies what it
-  // needs and returns; the caller is free to release the buffer after.
+  // Caller may release payload after this returns.
   DispatchResult dispatch(const uint8_t* payload, size_t len);
 
  private:

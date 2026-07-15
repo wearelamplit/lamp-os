@@ -21,8 +21,7 @@ constexpr Color kShadeDefaultColor(0x00, 0x00, 0x00, 0xFF);
 /**
  * @brief Social personality mode — tunes how often + how eagerly the lamp
  *        greets nearby peers via SocialBehavior. Stored as uint8_t for
- *        wire/NVS compatibility. Default Ambivert (matches the
- *        pre-personality 30s-cooldown behavior).
+ *        wire/NVS compatibility. Default Ambivert.
  */
 enum class SocialMode : uint8_t {
   Introvert = 0,
@@ -32,7 +31,7 @@ enum class SocialMode : uint8_t {
 
 /**
  * @brief Global lamp settings to control initialization
- * @property name - a name that can be used to identify this lamp. it can be up to 12 characters long
+ * @property name - a name that can be used to identify this lamp. BLE device name is clipped to 12 characters on the wire
  * @property brightness - global brightness level for the lamp as a percentage
  * @property password - password to protect lamp BLE control surface
  * @property advancedEnabled - if true, advanced settings UI is unlocked
@@ -133,11 +132,6 @@ class ExpressionConfig {
   uint32_t intervalMin = 60;       // Min interval in seconds
   uint32_t intervalMax = 900;      // Max interval in seconds
   uint8_t target = 3;              // TARGET_SHADE=1, TARGET_BASE=2, TARGET_BOTH=3
-
-  // (Refactor 2026-06-13: `disabledDuringWispOverride` was here as a
-  // user-configurable bool, but the right model is a pure type-property —
-  // overridden in the Expression subclass headers. Field + serialise +
-  // parse + ExpressionManager copy + Flutter UI toggle all removed.)
 
   // Generic parameter storage for expression-specific values
   std::map<std::string, uint32_t> parameters;

@@ -17,8 +17,7 @@ bool AuroraDiscovery::discover(uint32_t /*timeoutMs*/) {
     // never wedges the state machine in a long blocking wait.
     int n = MDNS.queryService("aurora", "tcp");  // _aurora._tcp
     if (n > 0) {
-        // ESP32 Arduino core 3.x (used by the C6 platform) renamed MDNS.IP() to
-        // MDNS.address(). The reference targets core 2.x. Same semantics.
+        // MDNS.address() is the arduino-esp32 v3.x API.
         ip_ = MDNS.address(0);
         port_ = MDNS.port(0);
         found_ = (port_ != 0);

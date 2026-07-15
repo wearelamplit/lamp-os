@@ -39,10 +39,7 @@ static void recvTrampoline(const esp_now_recv_info_t* info,
 // no ACK received within hardware retries. Without this hook a
 // silently-dropped unicast looks like ESP_OK at the call site (the
 // IDF only reports the enqueue result).
-// IDF 5.x on the C6 widened the callback signature from `(const uint8_t*,
-// status)` to `(const wifi_tx_info_t*, status)`. The MAC now lives in
-// `info->des_addr`. This matches the typedef `esp_now_send_cb_t` in
-// `esp_now.h` for arduino-esp32 v3.x on the C6.
+// arduino-esp32 v3.x / C6 send callback; MAC in info->des_addr.
 static void sendTrampoline(const wifi_tx_info_t* info,
                            esp_now_send_status_t status) {
   if (!MeshLink::s_instance || !info) return;
@@ -57,10 +54,7 @@ bool MeshLink::begin() {
 
   // Order matters: STA mode → disconnect from any AP but KEEP RADIO ON →
   // pin channel → init ESP-NOW. ESP-NOW only works while the WiFi radio
-  // is powered. Calling WiFi.disconnect(true, true) was a bug — the
-  // second arg is `wifioff` and turning it on shuts the radio down,
-  // which silently broke recv (no frames seen, MAC reads as 00:00:..).
-  // Use disconnect(false, false) — clear the AP context, keep radio up.
+  // is powered. (false, false): keep stored creds and radio up.
   WiFi.mode(WIFI_STA);
   WiFi.disconnect(false, false);
   WiFi.setSleep(false);
@@ -125,10 +119,6 @@ int MeshLink::findPeerSlot(const uint8_t mac[6]) const {
 }
 
 size_t MeshLink::pickLruSlot() const {
-  // Find the slot with the smallest lastUsedMs among USED entries.
-  // Assumes the caller has already verified the table is full
-  // (peerCount_ == MAX_TRACKED_PEERS), so at least one used slot
-  // exists.
   size_t bestIdx = 0;
   uint32_t bestMs = UINT32_MAX;
   for (size_t i = 0; i < MAX_TRACKED_PEERS; ++i) {
@@ -143,13 +133,7 @@ size_t MeshLink::pickLruSlot() const {
 bool MeshLink::send(const uint8_t targetMac[6], const uint8_t* data, size_t len) {
   if (!targetMac || !data) return false;
 
-  // Bookkeeping path: ensure the target is in our local table AND in
-  // ESP-NOW's peer table. Touch lastUsedMs on hit; on miss, insert
-  // (allocating an empty slot or evicting the LRU). Two-stage so the
-  // critical section under peerMux_ stays free of ESP-NOW calls (which
-  // can return ESP_ERR_ESPNOW_NO_MEM / take internal locks) — we
-  // capture the decision under mux, then run esp_now_add_peer /
-  // esp_now_del_peer OUTSIDE the mux.
+  // Two-stage: capture insert/evict decision under mux, then call ESP-NOW APIs outside it.
   uint8_t  macToDel[6] = {0};
   bool     needDel = false;
   bool     needAdd = false;

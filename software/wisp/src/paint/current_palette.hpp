@@ -51,7 +51,7 @@ class CurrentPalette {
   uint32_t lastChangeMs_ = 0;
   std::vector<RGBW> colors_;
 
-  // Opaque to keep FreeRTOS out of the header; cast to SemaphoreHandle_t in .cpp.
+  // Opaque; keeps FreeRTOS out of the header.
   // colors_ and lastChangeMs_ are loop-task only; not guarded.
   void* mux_ = nullptr;
 };

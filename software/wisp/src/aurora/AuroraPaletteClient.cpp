@@ -50,7 +50,6 @@ void AuroraPaletteClient::loop() {
 }
 
 void AuroraPaletteClient::sendSubscriptions() {
-    // INSTANCE_INFO first, then the full replace_all subscription set.
     auto info = SubscriptionEncoder::instanceInfo(instanceId_.c_str());
     ws_.send(info.data(), info.size());
 
@@ -72,8 +71,6 @@ void AuroraPaletteClient::setDesired(int zone, const char* paletteId) {
     zones_.push_back(ZoneState{zone, String(paletteId), String()});
 }
 
-// Resolve a palette id to concrete colors. GROUP palettes have no colors of
-// their own, so fetch each child and aggregate their colors.
 bool AuroraPaletteClient::resolvePalette(const char* id, Palette& out) {
     Palette base;
     if (!fetcher_.fetchById(id, base)) return false;

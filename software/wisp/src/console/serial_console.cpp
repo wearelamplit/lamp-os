@@ -32,7 +32,7 @@ void SerialConsole::pump() {
   while (Serial.available() > 0) {
     int ch = Serial.read();
     if (ch < 0) break;
-    if (ch == '\r') continue;  // strip CR; macOS / Linux send LF only
+    if (ch == '\r') continue;  // strip CR from CRLF line endings
     if (ch == '\n') {
       String cmd = buf_;
       cmd.trim();
@@ -53,8 +53,6 @@ String SerialConsole::formatVersion(uint32_t v) {
   return String(buf);
 }
 
-// Re-sample millis() to avoid unsigned-subtraction wraparound if HELLOs
-// arrived during auroraClient.loop() between the caller's snapshot and here.
 void SerialConsole::dumpInventory() {
   const uint32_t nowMs = millis();
   auto roster = inventory_.snapshot();

@@ -1,13 +1,6 @@
 // StatusRing — pure helpers rendering the wisp's 30-pixel ring as a live
 // indicator of source/palette state. Strip control lives in main.cpp; only
 // the palette→pixels gradient math is here so it stays host-testable.
-//
-// The palette is treated as equally-spaced color stops stretched across
-// pixelCount pixels with linear interpolation:
-//   - N == 0: no-op, caller falls back to warm-white.
-//   - N == 1: every pixel takes that color.
-//   - N >= 2: pixel i maps to t = (i / (pixelCount-1)) * (N-1), lerp between
-//             floor(t) and ceil(t).
 // No heap, no Arduino headers.
 
 #pragma once
@@ -53,8 +46,7 @@ inline bool computeRingGradient(const uint8_t* stopsRgb,
   }
 
   // numStops >= 2: map each pixel to a fractional stop position and lerp in
-  // Q16.16 fixed-point (deterministic across host/MCU). Range fits:
-  // (pixelCount-1)*(numStops-1) <= 300, shifted by 16 stays under 2^32.
+  // Q16.16 fixed-point (deterministic across host/MCU). Q16 product fits in uint32_t.
   const uint32_t denom = static_cast<uint32_t>(pixelCount - 1);
   const uint32_t span  = static_cast<uint32_t>(numStops - 1);
   for (size_t i = 0; i < pixelCount; ++i) {
@@ -96,8 +88,7 @@ inline void fillRingWarmWhite(uint8_t* outRgb, size_t pixelCount) {
 inline void rgbwToRgbWarmBias(uint8_t inR, uint8_t inG, uint8_t inB,
                               uint8_t inW,
                               uint8_t& outR, uint8_t& outG, uint8_t& outB) {
-  // 0.7 * W → R, 0.4 * W → G. Approximated with /10 since the inputs are
-  // 8-bit and the helper is called <= 10 times per render.
+  // 0.7 * W → R, 0.4 * W → G, scaled with integer /10.
   const uint16_t addR = (static_cast<uint16_t>(inW) * 7u) / 10u;
   const uint16_t addG = (static_cast<uint16_t>(inW) * 4u) / 10u;
   const uint16_t r = static_cast<uint16_t>(inR) + addR;

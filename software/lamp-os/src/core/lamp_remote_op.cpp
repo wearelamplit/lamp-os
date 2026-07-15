@@ -83,9 +83,8 @@ static void applyRemoteOpLocal(const char* payloadJson, size_t len,
     // Match the drain's unconditional bookkeeping.
     shadeConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
     baseConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
-    // DO NOT invalidate the shade section here. See the architectural
-    // comment at the CHAR_BRIGHTNESS drain (~line 954) for why live
-    // preview must not poison the persisted-snapshot section cache.
+    // DO NOT invalidate the shade section here. See drainBrightness in
+    // lamp_drains.cpp for why live preview must not poison the persisted-snapshot section cache.
 
   } else if (strcmp(ch, "baseColors") == 0) {
     // Cascade-source: ToRender only — no config mutation.

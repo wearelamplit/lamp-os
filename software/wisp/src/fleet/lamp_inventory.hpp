@@ -6,9 +6,7 @@
 
 namespace wisp {
 
-// Mirror lamp-os's prune window so a peer that drops off the mesh disappears
-// from wisp's roster at the same wall-clock moment it disappears from peer
-// lamps' nearby lists. 2 minutes.
+// Matches the lamp prune window so lamps disappear from both at the same wall-clock moment.
 #ifndef LAMP_PRUNE_TIME_MS
 #define LAMP_PRUNE_TIME_MS 120000
 #endif
@@ -52,8 +50,8 @@ class LampInventory {
   LampInventory();
 
   // Called from MeshLink recv handler (WiFi task). Bounded mutex take so a
-  // contended loop reader can't stall recv; on contention we drop the update
-  // — HELLOs repeat every 2 s, so the lamp is caught on the next beacon.
+  // contended loop reader can't stall recv; on contention the update is dropped
+  // — HELLOs repeat every 5 s, so the lamp is caught on the next beacon.
   // `rssi` is the signed ESP-NOW RX RSSI for the frame that delivered this
   // hello, or INT8_MIN to mean "no measurement available" (test rigs etc.).
   void recordHello(const uint8_t mac[6], const std::string& name,

@@ -2,8 +2,7 @@
 //
 // Unified-firmware entry point. Resolves the lamp variant from NVS; if NVS
 // holds a different type from the compiled-in variant (e.g. after a
-// cross-variant reflash), overwrites it. FATAL halt with visible LED blink
-// if the compiled variant is unknown.
+// cross-variant reflash), overwrites it. Compile error if the compiled variant is unknown.
 
 #include <Arduino.h>
 #include <memory>

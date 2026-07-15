@@ -1,11 +1,3 @@
-// MeshRouter — ESP-NOW recv routing + cross-task op inbox.
-//
-// onPacket() fires on the WiFi recv task: parse HELLO/CLAIM/CONTROL_OP, feed
-// inventory + roster, and hand a CONTROL_OP payload to the single-slot portMUX
-// inbox. drainPendingOps() runs on the loop task, dispatches the queued op via
-// WispOpDispatcher, and reports the DispatchResult to the result callback.
-// Business logic stays in the callback; the router only parses and hands off.
-
 #pragma once
 
 #include <climits>
@@ -22,10 +14,8 @@ namespace wisp {
 class LampInventory;
 class WispRoster;
 
-// RSSI is trustworthy only from a direct reception. Lamps gossip-relay HELLOs
-// verbatim, so a relayed frame pairs the relayer's radio RSSI with the
-// originator's payload MAC; record INT8_MIN (the never-measured sentinel
-// recordHello preserves) for those so a relay can't corrupt claim decisions.
+// Relayed HELLO: the radio src differs from payload MAC; RSSI belongs to the
+// relayer, not the originator.
 inline int8_t helloRssiForRecord(const uint8_t* radioSrcMac,
                                  const uint8_t sourceMac[6], int8_t rssi) {
   const bool direct =
@@ -66,9 +56,7 @@ class MeshRouter {
   // keyed on (sourceMac, msgType, seq) drops re-arrivals before the dispatcher.
   lamp_protocol::DedupRing controlOpDedup_;
 
-  // MSG_CONTROL_OP recv handler fires on the WiFi task (Core 0). ArduinoJson
-  // and Preferences are not safe there; fixed-size memcpy under portMUX,
-  // drain in loop().
+  // Pending op from WiFi task; drained on loop task.
   LAMP_PROTOCOL_PORTMUX_TYPE pendingMux_ = LAMP_PROTOCOL_PORTMUX_INIT;
   uint8_t pendingWispOpBuf_[lamp_protocol::CONTROL_MAX_PAYLOAD] = {0};
   uint16_t pendingWispOpLen_ = 0;

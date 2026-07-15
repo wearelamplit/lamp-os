@@ -274,8 +274,6 @@ size_t WispRoster::peerCount() const {
   return n;
 }
 
-// --- private helpers (all assume mutex held) ---
-
 void WispRoster::prunePeersLocked(uint32_t nowMs) {
   for (size_t i = 0; i < peerCount_; ) {
     const uint32_t last = peers_[i].lastSeenMs;
