@@ -5,16 +5,26 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/brand_extras.dart';
 import '../../../core/widgets/info_panel.dart';
 import '../../inventory/application/inventory_notifier.dart';
+import '../application/cached_firmware_notifier.dart';
 import '../application/firmware_notifier.dart';
-import '../data/firmware_release_client.dart';
+import '../data/cached_firmware.dart';
 import '../domain/firmware_state.dart';
 
-// v0x04 channel strings carry `{lampType}-{channel}`; strip the prefix
-// when rendering so the user sees `stable` / `beta` / `dev`, not
-// `standard-stable`. The lamp variant is internal routing metadata.
-String _displayChannel(String raw) {
-  final dash = raw.indexOf('-');
-  return dash >= 0 ? raw.substring(dash + 1) : raw;
+enum FirmwareRowAction { install, upToDate, notThisLamp, versionUnknown }
+
+/// Gate a cached entry against the lamp: [install] only when the variant
+/// matches, the lamp reported its running version, and the cached build is
+/// strictly newer. Same packed-semver encoding on both sides, so `>` is a
+/// correct newer-than test.
+FirmwareRowAction firmwareRowActionFor({
+  required CachedFirmware entry,
+  required String? lampType,
+  required int? lampFwVersion,
+}) {
+  if (entry.lampType != lampType) return FirmwareRowAction.notThisLamp;
+  if (lampFwVersion == null) return FirmwareRowAction.versionUnknown;
+  if (entry.version <= lampFwVersion) return FirmwareRowAction.upToDate;
+  return FirmwareRowAction.install;
 }
 
 class FirmwareUpdatePanel extends ConsumerWidget {
@@ -22,30 +32,31 @@ class FirmwareUpdatePanel extends ConsumerWidget {
     super.key,
     required this.deviceId,
     required this.lampType,
-    this.channel = FirmwareChannel.stable,
+    required this.lampFwVersion,
   });
 
   final String deviceId;
   final String? lampType;
-  final FirmwareChannel channel;
+  final int? lampFwVersion;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(firmwareNotifierProvider(deviceId));
     final notifier = ref.read(firmwareNotifierProvider(deviceId).notifier);
 
-    // Fall back to inventory's persisted value when the live LampSection
-    // hasn't reported lampType yet (pre-section-read window, or a lamp
-    // whose firmware is too old to emit the field). Without this, the
-    // persisted lampType is write-only and the firmware-fetch path errors
-    // out unnecessarily.
+    // Fall back to inventory's persisted values when the live LampSection
+    // hasn't reported lampType / fwVersion yet (pre-section-read window, or
+    // a lamp whose firmware is too old to emit the field). Without this, the
+    // persisted values are write-only and gating degrades unnecessarily.
     String? resolvedLampType = lampType;
-    if (resolvedLampType == null) {
+    int? resolvedFwVersion = lampFwVersion;
+    if (resolvedLampType == null || resolvedFwVersion == null) {
       final inv = ref.watch(inventoryNotifierProvider).value;
       if (inv != null) {
         for (final entry in inv) {
           if (entry.id == deviceId) {
-            resolvedLampType = entry.lampType;
+            resolvedLampType ??= entry.lampType;
+            resolvedFwVersion ??= entry.fwVersion;
             break;
           }
         }
@@ -54,21 +65,12 @@ class FirmwareUpdatePanel extends ConsumerWidget {
 
     return InfoPanel(
       child: switch (state) {
-        FirmwareIdle() => _IdleView(
-            onCheck: () => notifier.checkForUpdate(
-              channel: channel,
-              lampType: resolvedLampType,
-            ),
+        FirmwareIdle() => _CacheListView(
+            deviceId: deviceId,
+            lampType: resolvedLampType,
+            lampFwVersion: resolvedFwVersion,
           ),
-        FirmwareDownloading() => const _BusyView(label: 'Checking for updates…'),
         FirmwareVerifying() => const _BusyView(label: 'Verifying signature…'),
-        FirmwareReadyToInstall(:final footer, :final imageBytes) => _ReadyView(
-            versionString: footer.versionString,
-            channel: _displayChannel(footer.channel),
-            imageBytes: imageBytes,
-            onInstall: notifier.install,
-            onCancel: notifier.reset,
-          ),
         FirmwareOfferSent() => const _BusyView(label: 'Waiting for the lamp to accept…'),
         FirmwareStreaming(
           :final chunksSent,
@@ -94,25 +96,116 @@ class FirmwareUpdatePanel extends ConsumerWidget {
   }
 }
 
-class _IdleView extends StatelessWidget {
-  const _IdleView({required this.onCheck});
-  final VoidCallback onCheck;
+class _CacheListView extends ConsumerWidget {
+  const _CacheListView({
+    required this.deviceId,
+    required this.lampType,
+    required this.lampFwVersion,
+  });
+  final String deviceId;
+  final String? lampType;
+  final int? lampFwVersion;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final entries = ref.watch(cachedFirmwareNotifierProvider).value ??
+        const <String, CachedFirmware>{};
+    final theme = Theme.of(context);
+
+    if (entries.isEmpty) {
+      return Row(
+        children: [
+          Icon(Icons.cloud_off,
+              color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: AppSpace.md),
+          Expanded(
+            child: Text(
+              'No firmware downloaded yet — connect while online to sync.',
+              style: theme.textTheme.bodyLarge,
+            ),
+          ),
+        ],
+      );
+    }
+
+    final sorted = entries.values.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('Downloaded firmware', style: theme.textTheme.titleMedium),
+        const SizedBox(height: AppSpace.sm),
+        for (final entry in sorted)
+          _CacheRow(
+            entry: entry,
+            action: firmwareRowActionFor(
+              entry: entry,
+              lampType: lampType,
+              lampFwVersion: lampFwVersion,
+            ),
+            onInstall: () => ref
+                .read(firmwareNotifierProvider(deviceId).notifier)
+                .installFromCache(
+                  lampType: entry.lampType,
+                  channel: entry.channel,
+                ),
+            onDelete: () => ref
+                .read(cachedFirmwareNotifierProvider.notifier)
+                .delete(lampType: entry.lampType, channel: entry.channel),
+          ),
+      ],
+    );
+  }
+}
+
+class _CacheRow extends StatelessWidget {
+  const _CacheRow({
+    required this.entry,
+    required this.action,
+    required this.onInstall,
+    required this.onDelete,
+  });
+  final CachedFirmware entry;
+  final FirmwareRowAction action;
+  final VoidCallback onInstall;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final label =
+        '${entry.lampType} · v${entry.versionString} (${entry.channel.name})';
+
+    final Widget trailing = switch (action) {
+      FirmwareRowAction.install =>
+        TextButton(onPressed: onInstall, child: const Text('Install')),
+      FirmwareRowAction.upToDate => Text(
+          'up to date',
+          style: theme.textTheme.bodySmall
+              ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+        ),
+      FirmwareRowAction.notThisLamp => Text(
+          'not this lamp',
+          style: theme.textTheme.bodySmall
+              ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+        ),
+      FirmwareRowAction.versionUnknown => Text(
+          'version unknown',
+          style: theme.textTheme.bodySmall
+              ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+        ),
+    };
+
     return Row(
       children: [
-        Icon(Icons.system_update_alt, color: Theme.of(context).colorScheme.onSurfaceVariant),
-        const SizedBox(width: AppSpace.md),
-        Expanded(
-          child: Text(
-            'Check for new firmware',
-            style: Theme.of(context).textTheme.bodyLarge,
-          ),
-        ),
-        TextButton(
-          onPressed: onCheck,
-          child: const Text('Check'),
+        Expanded(child: Text(label, style: theme.textTheme.bodyLarge)),
+        const SizedBox(width: AppSpace.sm),
+        trailing,
+        IconButton(
+          onPressed: onDelete,
+          icon: const Icon(Icons.delete_outline),
+          tooltip: 'Remove download',
         ),
       ],
     );
@@ -137,49 +230,6 @@ class _BusyView extends StatelessWidget {
             label,
             style: Theme.of(context).textTheme.bodyLarge,
           ),
-        ),
-      ],
-    );
-  }
-}
-
-class _ReadyView extends StatelessWidget {
-  const _ReadyView({
-    required this.versionString,
-    required this.channel,
-    required this.imageBytes,
-    required this.onInstall,
-    required this.onCancel,
-  });
-  final String versionString;
-  final String channel;
-  final int imageBytes;
-  final VoidCallback onInstall;
-  final VoidCallback onCancel;
-
-  @override
-  Widget build(BuildContext context) {
-    final mb = (imageBytes / 1024 / 1024).toStringAsFixed(2);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          'Update available: v$versionString ($channel)',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        const SizedBox(height: AppSpace.xs),
-        Text(
-          'Signed image $mb MB. Push will take ~30 seconds.',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-        const SizedBox(height: AppSpace.md),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            TextButton(onPressed: onCancel, child: const Text('Not now')),
-            const SizedBox(width: AppSpace.sm),
-            FilledButton(onPressed: onInstall, child: const Text('Install')),
-          ],
         ),
       ],
     );

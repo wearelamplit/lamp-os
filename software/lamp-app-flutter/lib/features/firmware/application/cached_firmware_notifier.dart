@@ -127,8 +127,7 @@ class CachedFirmwareNotifier extends _$CachedFirmwareNotifier {
   }
 
   /// Return the cached bytes + meta for a {lampType, channel} pair, or
-  /// null if not cached. Used by firmware_notifier.checkForUpdate to
-  /// avoid a network round-trip when a fresh-enough copy already exists.
+  /// null if not cached. Backs the firmware panel's install-from-cache push.
   Future<CachedFirmwareBlob?> bytesFor({
     required String lampType,
     required FirmwareChannel channel,

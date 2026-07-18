@@ -7,7 +7,6 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../../core/ble/ble_client_provider.dart';
 import '../data/firmware_ota_pusher.dart';
 import '../data/firmware_release_client.dart';
-import '../data/firmware_release_client_provider.dart';
 import '../data/firmware_signature_verifier.dart';
 import '../domain/firmware_state.dart';
 import '../domain/lsig_footer.dart';
@@ -17,8 +16,6 @@ part 'firmware_notifier.g.dart';
 
 @Riverpod(name: 'firmwareNotifierProvider')
 class FirmwareNotifier extends _$FirmwareNotifier {
-  Uint8List? _pendingImage;
-  VerifiedFirmware? _pendingVerified;
   FirmwareOtaPusher? _activePusher;
 
   @override
@@ -26,109 +23,56 @@ class FirmwareNotifier extends _$FirmwareNotifier {
     ref.onDispose(() {
       _activePusher?.cancel();
       _activePusher = null;
-      _pendingImage = null;
-      _pendingVerified = null;
     });
     return const FirmwareIdle();
   }
 
-  /// User-facing: check for an update on the configured channel.
-  /// Downloads the per-variant binary for [lampType], verifies it, and
-  /// cross-checks that the verified LSIG footer's channel string equals
-  /// `"$lampType-${channel.name}"` (defense-in-depth against a CI mistake
-  /// that uploaded the wrong asset under the right name). On success
-  /// leaves state at [FirmwareReadyToInstall].
-  Future<void> checkForUpdate({
-    FirmwareChannel channel = FirmwareChannel.stable,
-    required String? lampType,
+  /// Push a firmware image already downloaded to the on-disk cache. Loads
+  /// the bytes for [lampType] + [channel], verifies the LSIG signature, and
+  /// cross-checks that the footer channel equals `"$lampType-${channel.name}"`
+  /// (defense-in-depth against a CI mistake that uploaded the wrong asset
+  /// under the right name) before streaming it to the lamp.
+  Future<void> installFromCache({
+    required String lampType,
+    required FirmwareChannel channel,
   }) async {
-    // Double-tap guard: a check already downloading/verifying owns the state
-    // machine; a second tap would race it.
-    if (state is FirmwareDownloading || state is FirmwareVerifying) return;
-    if (lampType == null || lampType.isEmpty) {
+    if (state is FirmwareVerifying || _activePusher != null) return;
+    // Close the double-tap window synchronously, before the first await.
+    state = const FirmwareVerifying();
+
+    final cache = ref.read(cachedFirmwareNotifierProvider.notifier);
+    final blob = await cache.bytesFor(lampType: lampType, channel: channel);
+    if (blob == null) {
       state = const FirmwareFailed(
-        reason:
-            'This lamp has not reported its variant identity yet. Reconnect '
-            'once and try again.',
+        reason: 'That firmware is no longer in the download cache.',
       );
       return;
     }
-    // Pin across the download/verify awaits so tabbing away from the Info
-    // screen mid-check doesn't autoDispose the notifier and throw on the
-    // next state write. Mirrors install(). Released in finally.
-    final keepAlive = ref.keepAlive();
+
+    VerifiedFirmware verified;
     try {
-      state = const FirmwareDownloading();
-      Uint8List image;
-      // Try the disk cache first. CachedFirmwareNotifier proactively pulls
-      // the per-variant binary on inventory change, so the common case is
-      // a hit and skips the network entirely (works offline).
-      final cache = ref.read(cachedFirmwareNotifierProvider.notifier);
-      final cached =
-          await cache.bytesFor(lampType: lampType, channel: channel);
-      if (cached != null) {
-        image = cached.bytes;
-      } else {
-        final client = ref.read(firmwareReleaseClientProvider);
-        try {
-          image = await client.fetchLatest(channel, lampType: lampType);
-        } catch (e) {
-          state = FirmwareFailed(
-            reason: 'Could not reach the update server and no cached '
-                'firmware is available for this lamp.',
-            cause: e,
-          );
-          return;
-        }
-      }
-
-      state = const FirmwareVerifying();
-      VerifiedFirmware verified;
-      try {
-        verified = await verifyFirmwareImage(image);
-      } catch (e) {
-        state = FirmwareFailed(
-          reason: 'The downloaded firmware failed signature verification.',
-          cause: e,
-        );
-        return;
-      }
-
-      final expectedChannel = '$lampType-${channel.name}';
-      if (verified.footer.channel != expectedChannel) {
-        state = FirmwareFailed(
-          reason:
-              'Downloaded firmware is for the wrong lamp type or channel '
-              '(expected "$expectedChannel", got "${verified.footer.channel}").',
-        );
-        return;
-      }
-
-      _pendingImage    = image;
-      _pendingVerified = verified;
-      state = FirmwareReadyToInstall(
-        footer: verified.footer,
-        imageBytes: image.length,
+      verified = await verifyFirmwareImage(blob.bytes);
+    } catch (e) {
+      state = FirmwareFailed(
+        reason: 'The cached firmware failed signature verification.',
+        cause: e,
       );
-    } finally {
-      keepAlive.close();
+      return;
     }
+
+    final expectedChannel = '$lampType-${channel.name}';
+    if (verified.footer.channel != expectedChannel) {
+      state = FirmwareFailed(
+        reason: 'Cached firmware is for the wrong lamp type or channel '
+            '(expected "$expectedChannel", got "${verified.footer.channel}").',
+      );
+      return;
+    }
+
+    await _push(blob.bytes, verified);
   }
 
-  /// User-facing: push the previously-downloaded + verified image to the
-  /// lamp. Requires a prior [checkForUpdate] that left state at
-  /// [FirmwareReadyToInstall]. The Riverpod connection from the BLE
-  /// client provider drives the actual writes.
-  Future<void> install() async {
-    final image    = _pendingImage;
-    final verified = _pendingVerified;
-    if (image == null || verified == null) {
-      state = const FirmwareFailed(
-        reason: 'No verified update is queued. Tap "Check for updates" first.',
-      );
-      return;
-    }
-
+  Future<void> _push(Uint8List image, VerifiedFirmware verified) async {
     final ble = ref.read(bleClientProvider);
 
     final pusher = FirmwareOtaPusher(
@@ -166,9 +110,6 @@ class FirmwareNotifier extends _$FirmwareNotifier {
 
       if (result.success) {
         state = FirmwareSucceeded(footer: verified.footer);
-        // Drop the in-memory bytes. The lamp is rebooting.
-        _pendingImage    = null;
-        _pendingVerified = null;
       } else {
         state = FirmwareFailed(reason: result.message);
       }
@@ -188,8 +129,6 @@ class FirmwareNotifier extends _$FirmwareNotifier {
   /// Return to idle. Called from the UI's "dismiss" action on a
   /// success or failure card.
   void reset() {
-    _pendingImage    = null;
-    _pendingVerified = null;
     state = const FirmwareIdle();
   }
 }
