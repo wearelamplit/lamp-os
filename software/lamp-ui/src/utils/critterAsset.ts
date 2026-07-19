@@ -17,7 +17,7 @@ export function recolorCritterSvg(template: string, shadeColor: string, bodyColo
 }
 
 export function critterAssetPath(key: number | 'stray'): string {
-  return `/critters/critter-${key}.svg`
+  return `/critter-${key}.svg`
 }
 
 // Caches the in-flight promise so two consumers (nameplate + favicon)
