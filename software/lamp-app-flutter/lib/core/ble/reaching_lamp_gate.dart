@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -138,38 +139,41 @@ class _ReachingOverlayState extends State<_ReachingOverlay>
     return Semantics(
       liveRegion: true,
       label: 'Reaching your lamp',
-      child: ColoredBox(
-        color: cs.scrim.withValues(alpha: 0.6),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              AnimatedBuilder(
-                animation: _bounce,
-                builder: (_, child) => Transform.translate(
-                  offset: Offset(
-                      0, -8 * Curves.easeInOut.transform(_bounce.value)),
-                  child: child,
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+        child: ColoredBox(
+          color: cs.scrim.withValues(alpha: 0.72),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AnimatedBuilder(
+                  animation: _bounce,
+                  builder: (_, child) => Transform.translate(
+                    offset: Offset(
+                        0, -8 * Curves.easeInOut.transform(_bounce.value)),
+                    child: child,
+                  ),
+                  child: SvgPicture.asset(critterAssetFor(widget.lampId),
+                      width: 160, height: 160),
                 ),
-                child: SvgPicture.asset(critterAssetFor(widget.lampId),
-                    width: 160, height: 160),
-              ),
-              const SizedBox(height: 24),
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 400),
-                child: Text(
-                  reachingLampLine(_line, widget.name),
-                  key: ValueKey(_line),
-                  textAlign: TextAlign.center,
-                  style: tt.titleMedium?.copyWith(color: cs.onSurface),
+                const SizedBox(height: 24),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 400),
+                  child: Text(
+                    reachingLampLine(_line, widget.name),
+                    key: ValueKey(_line),
+                    textAlign: TextAlign.center,
+                    style: tt.titleMedium?.copyWith(color: cs.onSurface),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 24),
-              TextButton(
-                onPressed: widget.onPickAnother,
-                child: const Text('← pick another lamp'),
-              ),
-            ],
+                const SizedBox(height: 24),
+                TextButton(
+                  onPressed: widget.onPickAnother,
+                  child: const Text('← pick another lamp'),
+                ),
+              ],
+            ),
           ),
         ),
       ),
