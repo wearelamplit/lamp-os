@@ -7,19 +7,19 @@
 #include <Arduino.h>
 #endif
 
-// mbedTLS for streaming SHA-256: init/starts/update/finish/free. We stream
-// the signed region in 4 KB blocks via the FirmwareByteReader and feed
-// each block straight into mbedtls_sha256_update so we never have to
-// buffer the full firmware image (1.4 MB) on the lamp's ~280 KB heap.
+// mbedTLS for streaming SHA-256: init/starts/update/finish/free. The signed
+// region streams in 4 KB blocks via the FirmwareByteReader, each block fed
+// straight into mbedtls_sha256_update, so the full firmware image (1.4 MB)
+// never has to buffer on the lamp's ~280 KB heap.
 #include <mbedtls/sha256.h>
 
 // libsodium is unconditionally available in framework-arduinoespressif32-libs;
 // the header lives under `sodium/` in the SDK include path. No `lib_deps`
-// change is required — the prebuilt lib auto-links when the header is
+// change is required: the prebuilt lib auto-links when the header is
 // included from a translation unit.
 //
-// Native test rig overrides the verify call (see test_firmware_signature/)
-// so we don't have to vendor libsodium for the host toolchain.
+// The native test rig overrides the verify call (see test_firmware_signature/)
+// so libsodium need not be vendored for the host toolchain.
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 #include <sodium/crypto_sign_ed25519.h>
 #endif
@@ -28,14 +28,20 @@
 
 namespace lamp { namespace firmware {
 
+#if !(defined(ARDUINO) || defined(ESP_PLATFORM))
+// Namespace-scope so the anon-namespace helper below binds to the test's shim definition.
+extern int test_crypto_sign_ed25519_verify_detached(
+    const unsigned char* sig, const unsigned char* m, unsigned long long mlen,
+    const unsigned char* pk);
+#endif
+
 namespace {
 
-// Static buffer for the channel string returned via outChannel. 8 footer
-// bytes + 1 null terminator = 9 bytes. This is intentionally module-static
-// so callers can hold a pointer without worrying about lifetime — but they
-// MUST consume the value before another thread re-enters verifySignedFirmware.
-// In the lamp's actual flow, verify is called from the Core 1 state machine
-// only, so concurrent re-entry is structurally impossible.
+// Static buffer for the channel string returned via outChannel. 16 channel
+// bytes + 1 null terminator = 17 bytes. Module-static so callers can hold a
+// pointer without worrying about lifetime, but must consume it before the
+// next call from another thread. In practice, verify runs only from the
+// Core 1 state machine, so concurrent re-entry is structurally impossible.
 char g_channelOut[kLsigChannelLen + 1] = {0};
 
 inline uint32_t readU32LE(const uint8_t* p) {
@@ -45,47 +51,63 @@ inline uint32_t readU32LE(const uint8_t* p) {
        | (static_cast<uint32_t>(p[3]) << 24);
 }
 
-// Block size for the streaming SHA-256 pass. Sized to one flash sector
-// so the reader's call cadence matches the natural esp_partition_read
-// granularity on the lamp's W25Q. The buffer is heap-allocated inside
-// verifySignedFirmware — keeping it on the Arduino loopTask stack
-// (8 KB total) blew the stack canary in combination with the mbedtls
-// SHA-256 context + libsodium ed25519 verify scratch (~several KB) +
-// regular call-frame overhead. Hardware capture showed a "Stack canary
-// watchpoint triggered (loopTask)" Guru Meditation immediately after
-// the verify path opened this buffer. Heap path keeps total resident
-// RAM identical (~4 KB) without consuming the verify task's stack.
+// Block size for the streaming SHA-256 pass. Sized to one flash sector so
+// the reader's call cadence matches the natural esp_partition_read granularity
+// on the lamp's W25Q. Heap-allocated: the mbedtls SHA-256 context + libsodium
+// ed25519 verify scratch together consume enough stack that a 4 KB stack buffer
+// overflows the 8 KB loopTask stack canary. Heap keeps the same ~4 KB resident
+// without touching the task stack.
 constexpr size_t kStreamBlockBytes = 4096;
+
+// ed25519-verify a 64-byte signature over a 32-byte digest against
+// kFirmwarePubkey. Shared by the offer-time gate and the end-of-stream verify.
+// Returns true only on rc == 0.
+inline bool ed25519VerifyDigest(const uint8_t* signature, const uint8_t* digest) {
+#if defined(ARDUINO) || defined(ESP_PLATFORM)
+  return crypto_sign_ed25519_verify_detached(
+             signature, digest, 32, kFirmwarePubkey) == 0;
+#else
+  return test_crypto_sign_ed25519_verify_detached(
+             signature, digest, 32, kFirmwarePubkey) == 0;
+#endif
+}
 
 }  // namespace
 
+bool verifyFirmwareDigestSignature(const uint8_t digest[32],
+                                   const uint8_t signature[64]) {
+  if (!digest || !signature) return false;
+  return ed25519VerifyDigest(signature, digest);
+}
+
 bool verifySignedFirmware(FirmwareByteReader reader, size_t imageLen,
-                          const char** outChannel, uint32_t* outVersion) {
+                          const char** outChannel, uint32_t* outVersion,
+                          uint8_t* outDigest) {
   if (!reader) return false;
   if (imageLen < kLsigFooterLen) return false;
 
   // Step 1: read the 96-byte LSIG footer up-front. The footer fields
   // (magic, channel, version, signedRegionLen, signature) drive every
-  // subsequent decision; reading them first means we can short-circuit
+  // subsequent decision; reading them first short-circuits
   // bad-magic / bad-length rejections before doing any hash math.
   uint8_t footer[kLsigFooterLen] = {0};
   const size_t footerOffset = imageLen - kLsigFooterLen;
   const int footerRead = reader(footerOffset, kLsigFooterLen, footer);
   if (footerRead != static_cast<int>(kLsigFooterLen)) return false;
 
-  // Magic check — short-circuits the cheap rejections before we touch
-  // the hash + signature math.
+  // Magic check short-circuits the cheap rejections before the
+  // hash + signature math.
   if (std::memcmp(footer + kLsigMagicOffset, "LSIG", kLsigMagicLen) != 0) {
     return false;
   }
 
   // signedRegionLen lives in the footer. The bytes covered by the
   // SHA-256 (which the ed25519 signature in turn covers) are
-  // `image[0 .. signedRegionLen)`. We sanity-check signedRegionLen
+  // `image[0 .. signedRegionLen)`. Sanity-check signedRegionLen
   // against the full image length so a malformed footer can't direct
   // verify() to walk out of bounds.
   const uint32_t signedRegionLen = readU32LE(footer + kLsigSignedLenOffset);
-#if defined(ARDUINO) || defined(ESP_PLATFORM) && defined(LAMP_DEBUG)
+#if (defined(ARDUINO) || defined(ESP_PLATFORM)) && defined(LAMP_DEBUG)
   Serial.printf("[fw_sig] verify: imageLen=%u signedRegionLen=%u "
                 "footerOffset=%u\n",
                 (unsigned)imageLen, (unsigned)signedRegionLen,
@@ -105,7 +127,7 @@ bool verifySignedFirmware(FirmwareByteReader reader, size_t imageLen,
     return false;
   }
 
-  // Step 2: stream-compute SHA-256 over the signed region. We read in
+  // Step 2: stream-compute SHA-256 over the signed region, reading
   // kStreamBlockBytes (4 KB) chunks from the reader, feeding each
   // chunk straight into mbedtls_sha256_update. Total RAM footprint
   // for the verify pass: ~200 B of SHA context + 4 KB stack block
@@ -119,14 +141,13 @@ bool verifySignedFirmware(FirmwareByteReader reader, size_t imageLen,
     return false;
   }
 
-  // Heap-allocated read buffer — see kStreamBlockBytes comment for why
+  // Heap-allocated read buffer; see kStreamBlockBytes comment for why
   // this can't live on the loopTask stack. std::unique_ptr<uint8_t[]>
-  // gives us RAII cleanup on every return path below (including the
-  // mbedtls_sha256_update failure path) without dancing around manual
-  // free() calls.
+  // gives RAII cleanup on every return path below (including the
+  // mbedtls_sha256_update failure path) without manual free() calls.
   auto blockBuf = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[kStreamBlockBytes]);
   if (!blockBuf) {
-    // Out-of-heap during verify — log nothing here (this TU has no
+    // Out-of-heap during verify: log nothing here (this TU has no
     // logger dep) and bubble up a verification failure. The receiver
     // path treats `false` as a clean reject and the firmware update
     // is abandoned.
@@ -158,7 +179,7 @@ bool verifySignedFirmware(FirmwareByteReader reader, size_t imageLen,
   }
   mbedtls_sha256_free(&shaCtx);
 
-#if defined(ARDUINO) || defined(ESP_PLATFORM) && defined(LAMP_DEBUG)
+#if (defined(ARDUINO) || defined(ESP_PLATFORM)) && defined(LAMP_DEBUG)
   // Dump the computed digest. Compare to the signer's
   // `[sign] sha256(signed_region)=...` line emitted at build time.
   // - DIGESTS MATCH but verify still fails  -> signature in footer is
@@ -173,15 +194,13 @@ bool verifySignedFirmware(FirmwareByteReader reader, size_t imageLen,
 
   // Step 3: ed25519-verify the signature against the SHA-256 digest.
   // The signing tool (scripts/sign_firmware.py) signs SHA256(signed
-  // region) — not the raw region — so verify_detached's message
-  // argument is the 32-byte digest, fully constant-size, regardless
-  // of the firmware image size.
+  // region), so verify_detached's message argument is the 32-byte
+  // digest, fully constant-size, regardless of the firmware image size.
   //
   // Signature lives at bytes [32..96) of the footer.
   const uint8_t* signature = footer + kLsigSignatureOffset;
 
-#if defined(ARDUINO) || defined(ESP_PLATFORM)
-#ifdef LAMP_DEBUG
+#if (defined(ARDUINO) || defined(ESP_PLATFORM)) && defined(LAMP_DEBUG)
   // Dump the signature + pubkey so we can compare to the at-rest binary
   // and the matching key on disk. If kFirmwarePubkey is zeros here, the
   // constexpr array isn't surviving the link.
@@ -192,27 +211,10 @@ bool verifySignedFirmware(FirmwareByteReader reader, size_t imageLen,
   for (size_t i = 0; i < 32; ++i) Serial.printf(" %02X", kFirmwarePubkey[i]);
   Serial.println();
 #endif
-  // Ed25519 verify on production. crypto_sign_ed25519_verify_detached
-  // returns 0 on success, -1 on failure.
-  const int rc = crypto_sign_ed25519_verify_detached(
-      signature, digest, sizeof(digest), kFirmwarePubkey);
-#ifdef LAMP_DEBUG
-  Serial.printf("[fw_sig] verify: ed25519 rc=%d\n", rc);
-#endif
-  if (rc != 0) return false;
-#else
-  // Native test rig path: the test file provides its own
-  // crypto_sign_ed25519_verify_detached shim with controllable return
-  // value. We declare an extern hook here so the test rig can intercept.
-  extern int test_crypto_sign_ed25519_verify_detached(
-      const unsigned char* sig, const unsigned char* m, unsigned long long mlen,
-      const unsigned char* pk);
-  const int rc = test_crypto_sign_ed25519_verify_detached(
-      signature, digest, sizeof(digest), kFirmwarePubkey);
-  if (rc != 0) return false;
-#endif
+  if (!ed25519VerifyDigest(signature, digest)) return false;
 
   // Populate outputs from the footer.
+  if (outDigest) std::memcpy(outDigest, digest, 32);
   if (outVersion) {
     *outVersion = readU32LE(footer + kLsigVersionOffset);
   }

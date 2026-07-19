@@ -9,9 +9,9 @@
 // (a USB-flashed seed carries its own signature).
 //
 // What is signed: NOT the packed image (mkspiffs output is not byte-stable
-// and a mounted partition carries per-lamp wear/metadata). We sign a
-// canonical digest of the LOGICAL file contents — every data file except
-// `fw.lsig` — so host (sign_fs.py) and device recompute the identical value:
+// and a mounted partition carries per-lamp wear/metadata). The signed value is
+// a canonical digest of the LOGICAL file contents (every data file except
+// `fw.lsig`), so host (sign_fs.py) and device recompute the identical value:
 //
 //   sort files by name, bytewise ascending; then
 //   SHA-256 over, per file:  u32LE(nameLen) ∥ name ∥ u32LE(contentLen) ∥ content
@@ -24,7 +24,7 @@
 //
 // fw.lsig layout (72 bytes):
 //   [0..4)   magic "LFSG"
-//   [4..8)   firmware version — packed (major<<16)|(minor<<8)|patch, LE
+//   [4..8)   firmware version, packed (major<<16)|(minor<<8)|patch, LE
 //   [8..72)  ed25519 signature over the 32-byte manifest digest
 //
 // This digest doubles as the FS image's identity on the mesh: the OFFER

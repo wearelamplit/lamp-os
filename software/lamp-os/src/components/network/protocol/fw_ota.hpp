@@ -3,29 +3,29 @@
 #include <cstdint>
 #include <cstring>
 
-#include "header.hpp"
-#include "presence.hpp"
+#include <lampos/protocol/header.hpp>
+#include <lampos/protocol/presence.hpp>
+#include <lampos/protocol/lamp_protocol.hpp>  // ESPNOW_V2_FRAME_MAX
 
 namespace lamp_protocol {
 
-// =============================================================================
-// MSG_FW_* — OTA firmware-distribution family (msgType 0x40..0x45)
-// =============================================================================
+// MSG_FW_* OTA firmware-distribution family (msgType 0x40..0x45).
 //
-// Wire-format contract per /Users/jerrett/.claude/plans/wisp-ota-reconciliation.md.
 // All MSG_FW_* messages carry sourceMac(6) + targetMac(6) right after the
-// 6-byte header — same ordering convention as MSG_OVERRIDE_COLORS
-// (`buildOverrideColors` at line ~449-451). The MSG_FW_* family is
-// SINGLE-HOP unicast (addressedToUs filter on the lamp side; no gossip
-// relay), unlike HELLO/CONTROL_OP/WISP_HELLO/EVENT which gossip-relay.
+// 6-byte header, the same ordering as MSG_OVERRIDE_COLORS. The MSG_FW_*
+// family is single-hop unicast (addressedToUs filter on the lamp side; no
+// gossip relay), unlike HELLO/CONTROL_OP/WISP_HELLO/EVENT which gossip-relay.
 //
-// Direction:
-//   OFFER, CHUNK, DONE      — wisp → lamp (sent via wisp's unicast MeshLink::send)
-//   ACCEPT, REQ, RESULT     — lamp → wisp (sent via lamp's EspNowLink::broadcast,
-//                              with wisp filtering via addressedToUs on its MAC)
+// Direction (sender = the lamp distributor over ESP-NOW, or the app's BLE
+// pusher; the wisp distributes no firmware):
+//   OFFER, CHUNK, DONE      sender → receiver
+//   ACCEPT, REQ, RESULT     receiver → sender
 //
-// Channel mismatch is a SILENT DROP on the lamp side — no ACCEPT or RESULT
-// is ever emitted with a channel-mismatch reason (per scope decision #2).
+// A channel/variant mismatch or downgrade is caught by otaAcceptable. The
+// distributor pre-gates so it rarely offers across the gate; a receiver that
+// does get such an OFFER answers ACCEPT with FwAcceptStatus::DeclineAlreadyCurrent
+// so the distributor drops it from the queue. No dedicated channel-mismatch
+// status code exists.
 //
 // build/parse entry points (parameterized by msgType, so the identical
 // machinery serves both the FW_* and FS_* type IDs):
@@ -33,26 +33,35 @@ namespace lamp_protocol {
 //   buildFwChunk/parseFwChunk   buildFwReq/parseFwReq
 //   buildFwDone/parseFwDone     buildFwResult/parseFwResult
 //
-// FAMILY BYTE-MAPS. All share hdr(6)+src(6)+tgt(6) = bytes 0..17; the tables
+// Family byte-maps. All share hdr(6)+src(6)+tgt(6) = bytes 0..17; the tables
 // below give the body. Where a field has a named offset constant, the map
 // references the NAME (not a literal) so it can't silently drift.
 //
-// MSG_FW_OFFER  (FW_OFFER_FIXED_SIZE == 56):
+// MSG_FW_OFFER  (FW_OFFER_FIXED_SIZE == 56, + optional 96-byte auth trailer):
 //   FW_OFFER_OFF_VERSION      4  version (LE)
 //   FW_OFFER_OFF_TOTAL_LEN    4  totalLen (LE)
-//   FW_OFFER_OFF_CHUNK_SIZE   2  chunkSize (LE; locked to FW_CHUNK_SIZE=200)
+//   FW_OFFER_OFF_CHUNK_SIZE   2  chunkSize (LE; receiver accepts 1..FW_CHUNK_SIZE_MAX)
 //   FW_OFFER_OFF_CHANNEL     16  channel {type}-{channel} (FW_CHANNEL_LEN, 0-pad)
 //   FW_OFFER_OFF_SHA256       8  sha256Prefix (FW_SHA256_PREFIX_LEN)
 //   FW_OFFER_OFF_FOOTER_LEN   2  footerLen (LE)
 //   FW_OFFER_OFF_TOTAL_CHUNKS 2  totalChunks (LE)
+//   --- auth trailer (additive; absent on pre-auth senders) ---
+//   FW_OFFER_OFF_DIGEST      32  sha256(signed region) full digest
+//   FW_OFFER_OFF_SIG         64  ed25519 signature over the digest (LSIG footer)
+// The trailer lets a receiver ed25519-verify sig-over-digest BEFORE accepting
+// or streaming a byte. A pre-auth sender emits only the 56-byte fixed body; a
+// pre-auth receiver stops parsing at byte 56 and skips the trailer (its
+// existing end-of-stream verify still gates the flip). No offset shift, no
+// PROTOCOL_VERSION bump.
 //
 // MSG_FW_ACCEPT (FW_ACCEPT_FIXED_SIZE == 28):
 //   18  2  offerSeq (LE)   20  4  version (LE)   24  1  status (FwAcceptStatus)
 //   25  3  reserved (resumeOffset parses to 0 in v1)
 //
-// MSG_FW_CHUNK  (FW_CHUNK_FIXED_SIZE == 26 + payload, MAX 226):
+// MSG_FW_CHUNK  (FW_CHUNK_FIXED_SIZE == 26 + payload, MAX 1470):
 //   18  2  chunkIdx (LE)   20  4  offset (LE)   24  2  len (LE)
-//   26  len  payload (offset must equal chunkIdx * FW_CHUNK_SIZE)
+//   26  len  payload. The offset == chunkIdx * chunkSize invariant is
+//   receiver-side (session context owns chunkSize), not parsed here.
 //
 // MSG_FW_REQ    (FW_REQ_FIXED_SIZE == 24):
 //   18  2  firstChunkIdx (LE)  20  2  chunkCount (LE, 1..32)  22  1  reason
@@ -76,11 +85,11 @@ constexpr uint8_t  MSG_FW_RESULT = 0x45;
 
 // Filesystem-image OTA (the SPIFFS web-UI image → the spiffs partition).
 // Same frame layouts and single-hop convention as MSG_FW_*; the distinct
-// msgType is what routes a frame to the FS receiver/distributor (and to the
-// spiffs partition) instead of the firmware path — so the builders/parsers
-// below are parameterized by msgType and shared, not duplicated. Additive
-// type IDs (< kReservedMsgTypeHighBit): an old lamp that doesn't know them
-// silently drops them — no PROTOCOL_VERSION bump.
+// msgType routes a frame to the FS receiver/distributor (and to the spiffs
+// partition) instead of the firmware path, so the builders/parsers below are
+// parameterized by msgType and shared, not duplicated. Additive type IDs
+// (< kReservedMsgTypeHighBit): an old lamp that doesn't know them drops them
+// as an unknown msgType. No PROTOCOL_VERSION bump.
 constexpr uint8_t  MSG_FS_OFFER  = 0x46;
 constexpr uint8_t  MSG_FS_ACCEPT = 0x47;
 constexpr uint8_t  MSG_FS_CHUNK  = 0x48;
@@ -91,24 +100,40 @@ static_assert(MSG_FS_RESULT < kReservedMsgTypeHighBit,
               "MSG_FS_* must stay below the reserved high-bit type space");
 
 // Channel string is zero-padded ASCII, fixed-width. Carries `{type}-{channel}`
-// (e.g. "standard-stable", "snafu-beta") so the existing silent-drop on
-// mismatch enforces per-variant OTA gating without a separate type field.
+// (e.g. "standard-stable", "snafu-beta") so otaAcceptable enforces per-variant
+// OTA gating without a separate type field.
 constexpr size_t   FW_CHANNEL_LEN       = 16;
 // The HELLO fw-channel TLV carries the same {type}-{channel} identity, so its
 // width must match or the distributor's gate compares mismatched lengths.
 static_assert(FW_CHANNEL_LEN == HELLO_FW_CHANNEL_LEN,
               "HELLO_TLV_FW_CHANNEL width must equal the OFFER/footer channel");
-// First 8 bytes of sha256(signed region) — image fingerprint, NOT signature
-// prefix. The signature itself is 64 bytes inside the LSIG footer.
+// First 8 bytes of sha256(signed region), an image fingerprint (not a
+// signature prefix). The signature itself is 64 bytes inside the LSIG footer.
 constexpr size_t   FW_SHA256_PREFIX_LEN = 8;
-// Hard-locked chunk payload size in v1. Receiver rejects offers that don't
-// carry chunkSize == 200; no negotiation.
-constexpr uint16_t FW_CHUNK_SIZE        = 200;
+// Full sha256(signed region) + ed25519 signature over it, carried in the OFFER
+// auth trailer so the receiver verifies authenticity before streaming.
+constexpr size_t   FW_SHA256_FULL_LEN   = 32;
+constexpr size_t   FW_SIG_LEN           = 64;
+// Universal floor: what a distributor offers a peer that doesn't advertise a
+// larger capability. Every receiver, old or new, accepts this size.
+constexpr uint16_t FW_CHUNK_SIZE_BASELINE = 200;
+// v2 accept ceiling: the largest chunk payload a receiver will take and the
+// largest a distributor may advertise/emit.
+constexpr uint16_t FW_CHUNK_SIZE_MAX      = 1444;
+// Cap on per-REQ run length. One flash sector; wider values not yet
+// stability-tested under real ESP-NOW loss rates.
+constexpr uint16_t FW_MAX_REQ_RUN_CHUNKS = 20;
 
-// Fixed-size frame totals. Bytes-on-wire layouts come from the
-// reconciliation doc's per-msgType sections; see comments on each builder.
+// OTA-viable signal floor for a direct single-hop OFFER. Below this, chunk
+// transfer thrashes regardless of chunk size, so both the offering and
+// receiving side skip it and let cascade OTA reach the peer via a nearer
+// lamp instead. Tunable toward ~-85 pending bench calibration.
+constexpr int8_t kOtaMinRssiDbm = -80;
+
+// Fixed-size frame totals. The byte layout for each is the per-builder
+// comment below.
 constexpr size_t   FW_OFFER_FIXED_SIZE  = 56;   // hdr(6)+src(6)+tgt(6) + body(38)
-// MSG_FW_OFFER body field offsets — named so widening any field becomes a
+// MSG_FW_OFFER body field offsets, named so widening any field becomes a
 // single-line shift rather than hunting literals through build/parse.
 constexpr size_t   FW_OFFER_OFF_VERSION      = 18;
 constexpr size_t   FW_OFFER_OFF_TOTAL_LEN    = 22;
@@ -119,9 +144,16 @@ constexpr size_t   FW_OFFER_OFF_FOOTER_LEN   = FW_OFFER_OFF_SHA256 + FW_SHA256_P
 constexpr size_t   FW_OFFER_OFF_TOTAL_CHUNKS = FW_OFFER_OFF_FOOTER_LEN + 2;                 // 54
 static_assert(FW_OFFER_OFF_TOTAL_CHUNKS + 2 == FW_OFFER_FIXED_SIZE,
               "FW OFFER field layout must end at FW_OFFER_FIXED_SIZE");
+// Auth trailer, appended after the fixed body. Additive: absent on a pre-auth
+// sender, skipped by a pre-auth receiver (parse stops at FW_OFFER_FIXED_SIZE).
+constexpr size_t   FW_OFFER_OFF_DIGEST       = FW_OFFER_FIXED_SIZE;                          // 56
+constexpr size_t   FW_OFFER_OFF_SIG          = FW_OFFER_OFF_DIGEST + FW_SHA256_FULL_LEN;     // 88
+constexpr size_t   FW_OFFER_AUTH_SIZE        = FW_OFFER_OFF_SIG + FW_SIG_LEN;                // 152
+static_assert(FW_OFFER_AUTH_SIZE == FW_OFFER_FIXED_SIZE + FW_SHA256_FULL_LEN + FW_SIG_LEN,
+              "FW OFFER auth trailer must follow the fixed body contiguously");
 constexpr size_t   FW_ACCEPT_FIXED_SIZE = 28;   // hdr(6)+src(6)+tgt(6) + body(10)
 constexpr size_t   FW_CHUNK_FIXED_SIZE  = 26;   // hdr(6)+src(6)+tgt(6) + body(8) (payload trails)
-constexpr size_t   FW_CHUNK_MAX_SIZE    = FW_CHUNK_FIXED_SIZE + FW_CHUNK_SIZE;  // 226
+constexpr size_t   FW_CHUNK_MAX_SIZE    = FW_CHUNK_FIXED_SIZE + FW_CHUNK_SIZE_MAX;  // 1470
 constexpr size_t   FW_REQ_FIXED_SIZE    = 24;   // hdr(6)+src(6)+tgt(6) + body(6)
 constexpr size_t   FW_DONE_FIXED_SIZE   = 38;   // hdr(6)+src(6)+tgt(6) + body(20)
 constexpr size_t   FW_RESULT_FIXED_SIZE = 24;   // hdr(6)+src(6)+tgt(6) + body(6)
@@ -134,16 +166,20 @@ static_assert(FW_CHUNK_FIXED_SIZE  == 26, "FW CHUNK header lock");
 static_assert(FW_REQ_FIXED_SIZE    == 24, "FW REQ size lock");
 static_assert(FW_DONE_FIXED_SIZE   == 38, "FW DONE size lock");
 static_assert(FW_RESULT_FIXED_SIZE == 24, "FW RESULT size lock");
-static_assert(FW_CHUNK_MAX_SIZE    <= 250, "ESP-NOW frame cap");
-static_assert(FW_OFFER_FIXED_SIZE  <= 250, "ESP-NOW frame cap");
+static_assert(FW_CHUNK_MAX_SIZE    <= ESPNOW_V2_FRAME_MAX, "ESP-NOW v2 frame cap");
+static_assert(FW_OFFER_FIXED_SIZE  <= ESPNOW_V2_FRAME_MAX, "ESP-NOW v2 frame cap");
+static_assert(FW_OFFER_AUTH_SIZE   <= ESPNOW_V2_FRAME_MAX,
+              "ESP-NOW v2 frame cap (OFFER + auth trailer)");
 
 // ACCEPT status byte. 0 = accept-and-stream; 1 = busy (mid-flow already);
-// 2 = already-current (offer.version <= mine). Channel mismatch is NEVER
-// emitted as an ACCEPT — it's a silent drop on the lamp side.
+// 2 = already-current, which also covers an offer otaAcceptable rejects
+// (wrong channel, cross-variant, downgrade); 3 = offer failed the offer-time
+// ed25519 signature check (unsigned/foreign-key/tampered), never streamed.
 enum class FwAcceptStatus : uint8_t {
   Accept                = 0,
   DeclineBusy           = 1,
   DeclineAlreadyCurrent = 2,
+  DeclineUnverified     = 3,
 };
 
 // REQ reason. Diagnostic-only; wisp logs it.
@@ -184,6 +220,11 @@ struct ParsedFwOffer {
   uint8_t  sha256Prefix[FW_SHA256_PREFIX_LEN];
   uint16_t footerLen;
   uint16_t totalChunks;
+  // Auth trailer. hasAuth is false for a pre-auth (56-byte) OFFER; digest/sig
+  // are then zeroed and the receiver falls back to end-of-stream verify.
+  bool     hasAuth;
+  uint8_t  digest[FW_SHA256_FULL_LEN];
+  uint8_t  signature[FW_SIG_LEN];
 };
 
 struct ParsedFwAccept {
@@ -236,17 +277,18 @@ struct ParsedFwResult {
 
 // --- Builders -------------------------------------------------------------
 //
-// Convention mirrors buildOverrideColors at line ~435:
+// Builder convention:
 //   - Returns total bytes written on success, 0 on bad args / oversize buf.
 //   - Source MAC written to bytes 6..11; target MAC to bytes 12..17.
 //   - All multi-byte integers are little-endian on the wire.
 
 // MSG_FW_OFFER (FW_OFFER_FIXED_SIZE == 56 bytes; see the family byte-map at
-// the top of this header for the offset table — channel is 16 bytes, not the
-// 8 an older draft of this comment claimed):
+// the top of this header for the offset table, channel is 16 bytes):
 //   hdr(6) + src(6) + tgt(6) +
 //   version(4 LE) + totalLen(4 LE) + chunkSize(2 LE) + channel(16 zero-pad)
 //   + sha256Prefix(8) + footerLen(2 LE) + totalChunks(2 LE)
+// digest + signature are the optional auth trailer: pass both non-null to emit
+// the 152-byte authenticated OFFER, or both null for the legacy 56-byte body.
 inline size_t buildFwOffer(uint8_t* buf, size_t bufLen, uint16_t seq,
                            const uint8_t sourceMac[6], const uint8_t targetMac[6],
                            uint32_t version, uint32_t totalLen, uint16_t chunkSize,
@@ -254,9 +296,13 @@ inline size_t buildFwOffer(uint8_t* buf, size_t bufLen, uint16_t seq,
                            const uint8_t sha256Prefix[FW_SHA256_PREFIX_LEN],
                            uint16_t footerLen, uint16_t totalChunks,
                            uint8_t wireVersion = PROTOCOL_VERSION_EMIT,
-                           uint8_t msgType = MSG_FW_OFFER) {
+                           uint8_t msgType = MSG_FW_OFFER,
+                           const uint8_t digest[FW_SHA256_FULL_LEN] = nullptr,
+                           const uint8_t signature[FW_SIG_LEN] = nullptr) {
   if (!buf || !sourceMac || !targetMac || !sha256Prefix) return 0;
-  if (bufLen < FW_OFFER_FIXED_SIZE) return 0;
+  const bool withAuth = (digest != nullptr && signature != nullptr);
+  const size_t frameLen = withAuth ? FW_OFFER_AUTH_SIZE : FW_OFFER_FIXED_SIZE;
+  if (bufLen < frameLen) return 0;
   detail::writeHeader(buf, msgType, seq, wireVersion);
   std::memcpy(&buf[6], sourceMac, 6);
   std::memcpy(&buf[12], targetMac, 6);
@@ -281,24 +327,20 @@ inline size_t buildFwOffer(uint8_t* buf, size_t bufLen, uint16_t seq,
   buf[FW_OFFER_OFF_FOOTER_LEN + 1] = static_cast<uint8_t>((footerLen >> 8) & 0xFF);
   buf[FW_OFFER_OFF_TOTAL_CHUNKS    ] = static_cast<uint8_t>(totalChunks & 0xFF);
   buf[FW_OFFER_OFF_TOTAL_CHUNKS + 1] = static_cast<uint8_t>((totalChunks >> 8) & 0xFF);
-  return FW_OFFER_FIXED_SIZE;
+  if (withAuth) {
+    std::memcpy(&buf[FW_OFFER_OFF_DIGEST], digest, FW_SHA256_FULL_LEN);
+    std::memcpy(&buf[FW_OFFER_OFF_SIG], signature, FW_SIG_LEN);
+  }
+  return frameLen;
 }
 
 // MSG_FW_ACCEPT (28 bytes):
 //   hdr(6) + src(6) + tgt(6) + body(10)
 // Body: offerSeq(2 LE) + version(4 LE) + status(1) + reserved(3)
 //
-// IMPLEMENTER NOTE: the reconciliation doc's body layout listed
-// `offerSeq(2) + version(4) + status(1) + resumeOffset(4) + reserved(1)`
-// = 12 bytes, but the fixed-size constant (28) only allows 10 body bytes.
-// The doc's closing note ("If a byte-count cross-check disagrees, the
-// layouts above are authoritative and these constants get re-derived")
-// is in tension with the explicit FW_ACCEPT_FIXED_SIZE = 28 lock-in.
-// Resolution: lock to 28 bytes — drop `resumeOffset` from the wire (it
-// was reserved-zero in v1 anyway per the doc's own "Field-merger notes"),
-// pack 3 reserved bytes after status. Keep `resumeOffset` in
-// ParsedFwAccept as uint32_t for source-compat with callers; it always
-// parses to 0 until a future protocol revision reuses those 3 bytes.
+// resumeOffset is not on the wire. ParsedFwAccept keeps it as uint32_t
+// (always 0) for caller source-compat; a later revision can reuse the 3
+// reserved bytes after status for a 24-bit resume field.
 inline size_t buildFwAccept(uint8_t* buf, size_t bufLen, uint16_t seq,
                             const uint8_t sourceMac[6], const uint8_t targetMac[6],
                             uint16_t offerSeq, uint32_t version,
@@ -333,7 +375,7 @@ inline size_t buildFwChunk(uint8_t* buf, size_t bufLen, uint16_t seq,
                            uint8_t wireVersion = PROTOCOL_VERSION_EMIT,
                            uint8_t msgType = MSG_FW_CHUNK) {
   if (!buf || !sourceMac || !targetMac) return 0;
-  if (len == 0 || len > FW_CHUNK_SIZE) return 0;
+  if (len == 0 || len > FW_CHUNK_SIZE_MAX) return 0;
   if (len > 0 && !bytes) return 0;
   const size_t total = FW_CHUNK_FIXED_SIZE + static_cast<size_t>(len);
   if (bufLen < total) return 0;
@@ -362,7 +404,7 @@ inline size_t buildFwReq(uint8_t* buf, size_t bufLen, uint16_t seq,
                          uint8_t msgType = MSG_FW_REQ) {
   if (!buf || !sourceMac || !targetMac) return 0;
   if (bufLen < FW_REQ_FIXED_SIZE) return 0;
-  // chunkCount cap: 1..32 to prevent re-stream-all abuse per reconciliation doc.
+  // chunkCount cap: 1..32 bounds a single REQ to prevent re-stream-all abuse.
   if (chunkCount == 0 || chunkCount > 32) return 0;
   detail::writeHeader(buf, msgType, seq, wireVersion);
   std::memcpy(&buf[6], sourceMac, 6);
@@ -459,6 +501,15 @@ inline bool parseFwOffer(const uint8_t* data, size_t len, ParsedFwOffer& out,
   out.totalChunks =
        static_cast<uint16_t>(data[FW_OFFER_OFF_TOTAL_CHUNKS    ])
      | (static_cast<uint16_t>(data[FW_OFFER_OFF_TOTAL_CHUNKS + 1]) << 8);
+  if (len >= FW_OFFER_AUTH_SIZE) {
+    out.hasAuth = true;
+    std::memcpy(out.digest, &data[FW_OFFER_OFF_DIGEST], FW_SHA256_FULL_LEN);
+    std::memcpy(out.signature, &data[FW_OFFER_OFF_SIG], FW_SIG_LEN);
+  } else {
+    out.hasAuth = false;
+    std::memset(out.digest, 0, FW_SHA256_FULL_LEN);
+    std::memset(out.signature, 0, FW_SIG_LEN);
+  }
   return true;
 }
 
@@ -491,7 +542,7 @@ inline bool parseFwChunk(const uint8_t* data, size_t len, ParsedFwChunk& out,
   const uint16_t payloadLen =
        static_cast<uint16_t>(data[24])
      | (static_cast<uint16_t>(data[25]) << 8);
-  if (payloadLen == 0 || payloadLen > FW_CHUNK_SIZE) return false;
+  if (payloadLen == 0 || payloadLen > FW_CHUNK_SIZE_MAX) return false;
   if (len != FW_CHUNK_FIXED_SIZE + static_cast<size_t>(payloadLen)) return false;
   out.seq = static_cast<uint16_t>(data[4]) | (static_cast<uint16_t>(data[5]) << 8);
   std::memcpy(out.sourceMac, &data[6], 6);
@@ -505,13 +556,9 @@ inline bool parseFwChunk(const uint8_t* data, size_t len, ParsedFwChunk& out,
      | (static_cast<uint32_t>(data[22]) << 16)
      | (static_cast<uint32_t>(data[23]) << 24);
   out.len = payloadLen;
-  // Invariant: offset == chunkIdx * FW_CHUNK_SIZE on every chunk (catches
-  // malformed senders that disagree with themselves). Last chunk may be
-  // shorter than FW_CHUNK_SIZE but its offset still aligns to the grid.
-  if (out.offset !=
-      static_cast<uint32_t>(out.chunkIdx) * static_cast<uint32_t>(FW_CHUNK_SIZE)) {
-    return false;
-  }
+  // The offset == chunkIdx * chunkSize invariant needs the session's
+  // negotiated chunkSize, which this pure parser doesn't have; the receiver
+  // validates it once a session is active.
   out.bytes = &data[FW_CHUNK_FIXED_SIZE];
   return true;
 }
@@ -575,8 +622,14 @@ inline bool parseFwResult(const uint8_t* data, size_t len, ParsedFwResult& out,
   return true;
 }
 
-// =============================================================================
-// End MSG_FW_* family
-// =============================================================================
+// Pre-erase auth decision for a firmware OFFER. Pure: no flash, no state.
+// Called after chunkSize and channel checks pass; returns DeclineUnverified
+// when the offer's auth trailer is absent or its ed25519 verify failed,
+// Accept otherwise. Preserves the short-circuit: if hasAuth is false,
+// authSignatureValid is never consulted.
+inline FwAcceptStatus decideFwOfferAuth(bool hasAuth, bool authSignatureValid) {
+  return (!hasAuth || !authSignatureValid) ? FwAcceptStatus::DeclineUnverified
+                                           : FwAcceptStatus::Accept;
+}
 
 }  // namespace lamp_protocol

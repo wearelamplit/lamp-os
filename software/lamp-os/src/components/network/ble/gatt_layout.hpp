@@ -2,15 +2,16 @@
 #include <cstddef>
 #include <cstdint>
 
-// Frozen GATT attribute layout — the wire contract between lamp firmware and
+// Frozen GATT attribute layout. The wire contract between lamp firmware and
 // the app. Kept free of Arduino/NimBLE so the native `test_ble_gatt_layout`
 // can include it. Three things bind together:
 //
-//   1. `kGattLayout` below mirrors the createCharacteristic() order in
-//      ble_control.cpp. Handles are positional, so this ORDER is the contract.
-//   2. The boot-time assert in ble_control.cpp checks the live registration
-//      against this table — a mismatch means registration drifted.
-//   3. test_ble_gatt_layout pins hash(kGattLayout) to kGattSchemaVersion — you
+//   1. ble_control.cpp registers characteristics by iterating `kGattLayout`,
+//      so the live registration order and props come from this table. Handles
+//      are positional, so this ORDER is the contract.
+//   2. A boot-time coverage check in ble_control.cpp verifies every table
+//      entry has its callback binding and every binding is consumed.
+//   3. test_ble_gatt_layout pins hash(kGattLayout) to kGattSchemaVersion; you
 //      cannot change the layout without bumping the version + re-pinning.
 //
 // Append-only at the tail; never insert, remove, or reorder a characteristic
@@ -24,12 +25,12 @@ namespace ble_control {
 // fall back gracefully on legacy lamps that predate the characteristic.
 constexpr const char* CHAR_SCHEMA_VERSION = "5f64f4ea-d6d9-4a44-9b3f-3a8d6f7e6b40";
 
-// New in schema v2 (tail). Binary blob of claimed lamp MACs from the wisp.
+// Schema v4 tail. Binary blob of claimed lamp MACs from the wisp.
 constexpr const char* CHAR_WISP_CLAIMS    = "5f64f4eb-d6d9-4a44-9b3f-3a8d6f7e6b40";
 
 constexpr uint8_t kGattSchemaVersion = 4;
 
-// Property bits — local mirror of the NimBLE flags so this header stays
+// Property bits. Local mirror of the NimBLE flags so this header stays
 // dependency-free. Only the bits that affect the handle layout matter
 // (NOTIFY adds a CCCD descriptor = a handle).
 enum GattProp : uint8_t {
@@ -44,8 +45,11 @@ struct GattCharDef {
   uint8_t     props;
 };
 
-// UUIDs are literals here (not the ble_control.hpp constants, which live behind
-// <Arduino.h>); the boot assert guarantees they match the live registration.
+// UUIDs are literals here (not the ble_control.hpp constants, which live
+// behind <Arduino.h>); registration in ble_control.cpp iterates this table.
+// GP_WRITE | GP_WRITE_NR on live-edit chars: WRITE_NR skips the per-write GATT
+// ack (WRITE alone caps slider drags at ~5 Hz at the default ~49 ms conn
+// interval); WRITE stays so older app builds pass the GATT property check.
 constexpr GattCharDef kGattLayout[] = {
     {"5f64f4d1-d6d9-4a44-9b3f-3a8d6f7e6b40", GP_WRITE},                 // auth
     {"5f64f4d2-d6d9-4a44-9b3f-3a8d6f7e6b40", GP_WRITE | GP_WRITE_NR},   // brightness
@@ -70,9 +74,25 @@ constexpr GattCharDef kGattLayout[] = {
     {"5f64f4e8-d6d9-4a44-9b3f-3a8d6f7e6b40", GP_WRITE | GP_WRITE_NR},   // fwChunk
     {"5f64f4d8-d6d9-4a44-9b3f-3a8d6f7e6b40", GP_NOTIFY},                // stateNotify
     {CHAR_SCHEMA_VERSION,                    GP_READ},                  // schemaVersion
-    {CHAR_WISP_CLAIMS,                       GP_READ},                  // wispClaims (v2, tail)
+    {CHAR_WISP_CLAIMS,                       GP_READ},                  // wispClaims (v4 tail)
 };
 
 constexpr size_t kGattLayoutCount = sizeof(kGattLayout) / sizeof(kGattLayout[0]);
+
+// NIMBLE_PROPERTY bit values from NimBLE-Arduino 2.3.6 (BLE_GATT_CHR_F_* in
+// nimble/host/include/host/ble_gatt.h). GP_* bits differ in value, so the
+// mapper is required; ble_control.cpp static_asserts it against the real
+// NimBLE headers, test_ble_gatt_layout pins it against these values.
+constexpr uint32_t kNimbleRead    = 0x0002;
+constexpr uint32_t kNimbleWriteNr = 0x0004;
+constexpr uint32_t kNimbleWrite   = 0x0008;
+constexpr uint32_t kNimbleNotify  = 0x0010;
+
+constexpr uint32_t toNimbleProps(uint8_t props) {
+  return ((props & GP_READ) ? kNimbleRead : 0) |
+         ((props & GP_WRITE) ? kNimbleWrite : 0) |
+         ((props & GP_WRITE_NR) ? kNimbleWriteNr : 0) |
+         ((props & GP_NOTIFY) ? kNimbleNotify : 0);
+}
 
 }  // namespace ble_control

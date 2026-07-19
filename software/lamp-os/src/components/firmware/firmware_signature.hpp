@@ -70,9 +70,33 @@ using FirmwareByteReader =
 //              buffer; consume it before the next call from another thread (the
 //              lamp's verify is serial under the Core 1 state machine).
 //   outVersion optional. On success, the packed-semver version field.
+//   outDigest  optional 32-byte buffer. On success, the computed SHA-256 of the
+//              signed region, so the caller can bind it to an offer-time digest.
 // Returns true only if all checks pass; false on any failure, leaving
 // out-params unchanged. Failure is silent (the caller decides what to log).
 bool verifySignedFirmware(FirmwareByteReader reader, size_t imageLen,
-                          const char** outChannel, uint32_t* outVersion);
+                          const char** outChannel, uint32_t* outVersion,
+                          uint8_t* outDigest = nullptr);
+
+// Verify an ed25519 signature over an already-computed 32-byte SHA-256 digest
+// against kFirmwarePubkey. This is the offer-time authenticity gate: an OTA
+// OFFER carries the signed image's digest + signature, so a receiver rejects an
+// unsigned / foreign-key / tampered offer before streaming a byte. Same crypto
+// as verifySignedFirmware's final step, minus the image-hash pass.
+bool verifyFirmwareDigestSignature(const uint8_t digest[32],
+                                   const uint8_t signature[64]);
+
+// Scan a partition FORWARD for the first valid LSIG footer and return the
+// running image's total length (footerStart + kLsigFooterLen). A footer is
+// valid when its magic is "LSIG" AND signedRegionLen == footerStart (offset
+// kLsigSignedLenOffset). The first valid footer is the running image's; a
+// stale footer from a smaller predecessor image surviving in the un-erased
+// partition tail always sits at a higher offset. Returns false if no valid
+// footer is found or on any short/failed read.
+//   reader       supplies partition bytes [0 .. partitionLen), ascending.
+//   partitionLen full partition size to scan.
+//   outLen       on success, footerStart + kLsigFooterLen.
+bool discoverSignedImageLength(FirmwareByteReader reader, size_t partitionLen,
+                               uint32_t* outLen);
 
 }}  // namespace lamp::firmware

@@ -7,14 +7,14 @@
 
 namespace lamp {
 /**
- * @brief Entrypoint class to advertise and track lamps by Bluetooth LE
+ * Entrypoint class to advertise and track lamps by Bluetooth LE
  */
 class BluetoothComponent {
  public:
   BluetoothComponent();
 
   /**
-   * @brief initialize bluetooth with the user's lamp name and colors
+   * initialize bluetooth with the user's lamp name and colors
    * @param [in] name max. 13 character string representing the lamp's name
    * @param [in] inBaseColor the base color RGB value. W is ommitted
    * @param [in] inShadeColor the shade color RGB value. W is ommitted
@@ -23,7 +23,7 @@ class BluetoothComponent {
              bool configured);
 
   /**
-   * @brief register the GATT setup + control services, start the GATT server,
+   * register the GATT setup + control services, start the GATT server,
    * start advertising. Must be called after begin() and after any preferences
    * loaded. The scan-stop/restart bracket is handled internally because
    * NimBLE's ble_gatts_mutable() returns false if any GAP procedure is
@@ -32,9 +32,9 @@ class BluetoothComponent {
   void activateGattServices(Config* cfg);
 
   /**
-   * @brief record the latest base + shade colors that should be
-   * reflected in the BLE advertisement. This is a *fast setter* —
-   * it does not touch NimBLE. The actual NimBLE update happens
+   * record the latest base + shade colors that should be
+   * reflected in the BLE advertisement. This is a *fast setter*.
+   * It does not touch NimBLE. The actual NimBLE update happens
    * in tickAdvertising() on a debounced schedule so rapid
    * baseColors writes (e.g. a user dragging the color picker)
    * cannot starve the BLE host task. Mfg payload shape is
@@ -48,7 +48,7 @@ class BluetoothComponent {
   void setAdvertisedColors(Color base, Color shade);
 
   /**
-   * @brief flush any pending advertisement-color update to
+   * flush any pending advertisement-color update to
    * NimBLE if at least the debounce interval has elapsed since
    * the last flush. Call once per main-loop tick.
    */

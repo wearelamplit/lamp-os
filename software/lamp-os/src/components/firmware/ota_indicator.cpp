@@ -2,14 +2,17 @@
 
 #include <math.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 #include "components/firmware/firmware_distributor.hpp"
 #include "components/firmware/firmware_receiver.hpp"
-#include "components/network/mesh/nearby_lamps.hpp"
+#include "components/network/mesh/lamp_roster.hpp"
 #include "core/frame_buffer.hpp"
 #include "util/color.hpp"
+#include "util/fade.hpp"
 
 // `firmwareReceiver` lives at file scope in lamp.cpp; `lamp::firmwareDistributor`
 // is in the lamp namespace (declared via extern in firmware_distributor.hpp).
@@ -31,16 +34,68 @@ inline Color scaleColor(const Color& c, uint8_t num) {
       static_cast<uint8_t>((static_cast<uint16_t>(c.w) * num) / 255));
 }
 
-// 20% scale (51/255). The dim background uses this, kept low so the
-// peer-color band on top reads as a distinct foreground.
-constexpr uint8_t kDimScale255 = 51;
+// Tuned for gamma-corrected output; bench-adjustable. gamma8(128)≈42 → ~16%
+// physical: a visible dim background while the peer-color band reads as foreground.
+constexpr uint8_t kDimScale255 = 128;
+
+// Quadratic ease off the frozen pre-quiet frame onto defaultColors. Shorter
+// reads as a snap-cut; longer leaves the stale mid-animation frame visible
+// into the OTA.
+constexpr uint32_t kBaseSettleDurationMs = 600;
+
+// Per-surface settle state. Shade and base settle independently (silent
+// mode drives both), so each needs its own entry timestamp + start frame
+// rather than sharing one set of function-local statics.
+struct SettleState {
+  uint32_t entryMs = 0;
+  std::vector<Color> start;
+};
+
+// Settle fb toward its defaultColors, then hold static once elapsed reaches
+// kBaseSettleDurationMs.
+void settleSurface(FrameBuffer* fb, uint32_t nowMs, bool quietEntered,
+                   SettleState& state) {
+  if (fb == nullptr) return;
+  const size_t pixelCount = fb->buffer.size();
+  const size_t defaultCount = fb->defaultColors.size();
+  if (pixelCount == 0 || defaultCount == 0) return;
+
+  if (quietEntered) {
+    state.entryMs = nowMs;
+    state.start = fb->buffer;
+  }
+
+  const uint32_t elapsed = nowMs - state.entryMs;
+  const uint32_t settleStep =
+      elapsed >= kBaseSettleDurationMs ? kBaseSettleDurationMs : elapsed;
+
+  for (size_t i = 0; i < pixelCount; i++) {
+    const Color& target = fb->defaultColors[i < defaultCount ? i : defaultCount - 1];
+    const Color& start = i < state.start.size() ? state.start[i] : target;
+    fb->buffer[i] = fade(start, target, kBaseSettleDurationMs, settleStep);
+  }
+}
+
+SettleState s_baseSettle;
+SettleState s_shadeSettle;
+
+void paintBase(FrameBuffer* baseFb, uint32_t nowMs, bool quietEntered) {
+  settleSurface(baseFb, nowMs, quietEntered, s_baseSettle);
+}
 
 }  // namespace
 
-void paint(FrameBuffer* fb, const Color& localBase, uint32_t nowMs) {
-  if (fb == nullptr) return;
+void paint(FrameBuffer* fb, const Color& localBase, uint32_t nowMs,
+           FrameBuffer* baseFb, bool quietEntered) {
+  if (fb == nullptr) {
+    paintBase(baseFb, nowMs, quietEntered);
+    return;
+  }
   const size_t pixelCount = fb->buffer.size();
-  if (pixelCount == 0) return;
+  if (pixelCount == 0) {
+    paintBase(baseFb, nowMs, quietEntered);
+    return;
+  }
 
   // Probe the in-flight OTA side. The cross-state-machine guard in lamp.cpp
   // prevents simultaneous distribute + receive; if both ever read true,
@@ -114,11 +169,14 @@ void paint(FrameBuffer* fb, const Color& localBase, uint32_t nowMs) {
   }
 #endif
 
-  if (!haveSession || total == 0) return;
+  if (!haveSession || total == 0) {
+    paintBase(baseFb, nowMs, quietEntered);
+    return;
+  }
   (void)inHoldRender;  // identical render path for hold and live.
 
   // Session-stable peer color. The bar paints in the SENDER's base color so
-  // the strip reads as "who's flashing me". findByMac can miss (NearbyLamps
+  // the strip reads as "who's flashing me". findByMac can miss (LampRoster
   // is cold right after a flash, and HELLO processing is starved in OTA
   // quiet mode), so resolving every frame oscillates between the sender's
   // color and the fallback, which IS the flicker. Resolve ONCE per session:
@@ -132,8 +190,8 @@ void paint(FrameBuffer* fb, const Color& localBase, uint32_t nowMs) {
     s_latched = false;
   }
   if (!s_latched) {
-    NearbyLamp peer;
-    if (nearbyLamps.findByMac(peerMac, peer)) {
+    RosterEntry peer;
+    if (lampRoster.findByMac(peerMac, peer)) {
       s_peerColor = peer.baseColor;
       s_latched   = true;
     }
@@ -198,6 +256,14 @@ void paint(FrameBuffer* fb, const Color& localBase, uint32_t nowMs) {
                   fb->buffer[wholePixels < pixelCount ? wholePixels : 0].w);
   }
 #endif
+
+  paintBase(baseFb, nowMs, quietEntered);
+}
+
+void paintSilent(FrameBuffer* shadeFb, FrameBuffer* baseFb, uint32_t nowMs,
+                 bool quietEntered) {
+  settleSurface(shadeFb, nowMs, quietEntered, s_shadeSettle);
+  settleSurface(baseFb, nowMs, quietEntered, s_baseSettle);
 }
 
 }  // namespace ota_indicator

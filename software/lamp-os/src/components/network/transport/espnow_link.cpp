@@ -11,9 +11,9 @@ namespace lamp {
 
 EspNowRecvFn EspNowLink::s_recv = nullptr;
 
-// ESP-NOW max payload per spec is 250 B; reject anything outside [0, 250] so a
+// ESP-NOW v2 max payload is 1470 B; reject anything outside [0, 1470] so a
 // negative/garbage len from a driver error path can't be cast to a huge size_t.
-static constexpr int kMaxRecvFrameLen = 250;
+static constexpr int kMaxRecvFrameLen = ESP_NOW_MAX_DATA_LEN_V2;
 
 static void recvTrampoline(const esp_now_recv_info_t* info, const uint8_t* data, int len) {
   if (EspNowLink::s_recv == nullptr || info == nullptr) return;
@@ -24,9 +24,9 @@ static void recvTrampoline(const esp_now_recv_info_t* info, const uint8_t* data,
     return;
   }
   // RSSI lives in the IDF rx_ctrl block. Older drivers / synthetic frames
-  // can hand us a null rx_ctrl, so guard and default to -127 ("unknown").
+  // can present a null rx_ctrl, so guard and default to -127 ("unknown").
   // -127 sorts to the back of the RSSI-desc list so a peer with no signal
-  // info ends up firing last in the cascade — sensible fallback.
+  // info ends up firing last in the cascade.
   int8_t rssi = -127;
   if (info->rx_ctrl != nullptr) {
     rssi = static_cast<int8_t>(info->rx_ctrl->rssi);
@@ -55,10 +55,10 @@ bool EspNowLink::begin(EspNowRecvFn recv) {
   s_recv = recv;
 
   // WiFi STA mode is already up via wifi::begin() in standard_lamp setup;
-  // do NOT call WiFi.mode/disconnect/setSleep here — that would clobber the
+  // do NOT call WiFi.mode/disconnect/setSleep here; that would clobber the
   // radio state the wifi module relies on for periodic presence scans.
-  // Channel coordination is the wifi module's job; we just set
-  // peer.channel=0 below so the peer record tracks "whatever channel the
+  // Channel coordination is the wifi module's job; peer.channel=0 is
+  // set below so the peer record tracks "whatever channel the
   // radio is on right now".
 
   if (esp_now_init() != ESP_OK) {
@@ -72,7 +72,7 @@ bool EspNowLink::begin(EspNowRecvFn recv) {
   esp_now_peer_info_t peer = {};
   std::memset(&peer, 0, sizeof(peer));
   std::memset(peer.peer_addr, 0xFF, 6);
-  // channel=0 means "current channel" — works whether the radio is on the
+  // channel=0 means "current channel"; works whether the radio is on the
   // home AP's channel or the wifi module pinned it to LAMP_ESPNOW_CHANNEL.
   peer.channel = 0;
   peer.ifidx = WIFI_IF_STA;
@@ -81,6 +81,13 @@ bool EspNowLink::begin(EspNowRecvFn recv) {
     Serial.println("[espnow] esp_now_add_peer(broadcast) failed");
     return false;
   }
+
+#ifdef LAMP_ESPNOW_TX_QDBM
+  // Bench lossy-link simulation: cap TX power (0.25 dBm units, 8..84) to weaken
+  // the ESP-NOW signal like distance/path-loss. Absent in shipping builds.
+  esp_wifi_set_max_tx_power(LAMP_ESPNOW_TX_QDBM);
+  Serial.printf("[espnow] bench TX power capped at %d (qdBm)\n", (int)LAMP_ESPNOW_TX_QDBM);
+#endif
 
   return true;
 }

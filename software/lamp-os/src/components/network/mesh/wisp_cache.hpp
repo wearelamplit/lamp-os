@@ -8,15 +8,23 @@
 namespace lamp {
 
 /**
- * @brief Wisp presence cache from MSG_WISP_HELLO. Single global slot; most
- *        recent hello wins. The brightness-floor check in MeshLink
- *        reads this to decide whether a below-floor brightness override is
- *        allowed (requires a recent hello from the same MAC).
+ * Display-slot wisp cache: the single wisp whose hello/status/palette
+ *        the lamp serves to the app. Admission is sticky: a rival wisp's
+ *        broadcasts are rejected while the current wisp is fresh (last
+ *        hello or adoption within the sticky window),
+ *        except a claim frame naming this lamp, which takes the slot when
+ *        the current wisp does not claim it. The paint-hold and
+ *        brightness-floor obey gates key on LampRoster's dedicated painter
+ *        fields, not this slot.
  */
 struct WispCache {
   bool present = false;
   uint8_t mac[6] = {0};
   uint32_t lastHelloMs = 0;
+  // Stamped when the slot is adopted; counts toward slot freshness so a
+  // just-adopted wisp (claim takeover, first paint) is sticky before its
+  // first hello is cached. Never served to the app.
+  uint32_t slotAdoptedMs = 0;
   uint32_t wispVersion = 0;
   uint8_t flags = 0;
   // +1 for trailing NUL; on-wire slot is 8 bytes opaque (not ASCII-enforced).
@@ -30,28 +38,11 @@ struct WispCache {
   uint32_t lastStatusMs = 0;
   // Latest MSG_WISP_PALETTE from this wisp. Served base64-encoded as
   // getWispStatusReadJson()'s `palette` field on READ only (NOTIFY omits
-  // it; MTU truncation would corrupt it). 150 bytes = 50 colors * 3.
-  uint8_t manualPaletteRgb[150] = {0};
+  // it; MTU truncation would corrupt it). Interleaved R,G,B,W per color;
+  // 200 bytes = 50 colors * 4.
+  uint8_t manualPaletteRgbw[200] = {0};
   uint8_t manualPaletteCount = 0;
   uint32_t lastPaletteMs = 0;
-  // Latest MSG_WISP_CLAIM roster. Served via CHAR_WISP_CLAIMS as a binary
-  // blob so the app can filter its painted-lamps list.
-  uint8_t claimedLampMacs[lamp_protocol::kMaxWispClaimEntries][6] = {};
-  uint8_t claimedCount = 0;
-  uint32_t lastClaimMs = 0;
-
-  // Per-lamp paint colors from MSG_WISP_PAINT. Keyed by lampMac; count
-  // matches WISP_PAINT_MAX_ENTRIES. Aged by lastPaintMs via the same
-  // kWispClaimStaleMs window as the claim cache.
-  struct PaintEntry {
-    uint8_t mac[6] = {0};
-    uint8_t base[3] = {0};
-    uint8_t shade[3] = {0};
-    bool valid = false;
-  };
-  PaintEntry paintEntries[lamp_protocol::WISP_PAINT_MAX_ENTRIES] = {};
-  uint8_t paintCount = 0;
-  uint32_t lastPaintMs = 0;
 };
 
 }  // namespace lamp

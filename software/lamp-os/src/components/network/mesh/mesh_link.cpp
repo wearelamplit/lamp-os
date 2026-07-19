@@ -8,7 +8,10 @@
 #include "components/firmware/firmware_receiver.hpp"
 #include "components/firmware/firmware_distributor.hpp"
 #include "components/firmware/fs_ota.hpp"
+#include "components/network/protocol/command_auth.hpp"
 #include "version.hpp"
+
+#include <lampos/blended_identity.hpp>
 
 namespace lamp {
 
@@ -22,6 +25,9 @@ void MeshLink::onRecv(const uint8_t* mac, const uint8_t* data, size_t len,
 void MeshLink::begin(Config* cfg) {
   config_ = cfg;
   s_instance = this;
+  // Force init before the recv callback registers or any send runs, so the
+  // lazy path never writes s_key concurrently across the recv/send tasks.
+  lamp_protocol::command_auth::init();
   if (!link_.begin(&MeshLink::onRecv)) {
     Serial.println("[show] ESP-NOW init failed");
     return;
@@ -33,7 +39,7 @@ void MeshLink::begin(Config* cfg) {
 
 void MeshLink::tick() {
   uint32_t now = millis();
-  if (now - lastHelloMs_ < LAMP_HELLO_INTERVAL_MS && lastHelloMs_ != 0) return;
+  if (now - lastHelloMs_ < helloIntervalMs(now) && lastHelloMs_ != 0) return;
   lastHelloMs_ = now;
   // Suppress HELLO during gossip OTA so the chunk stream gets channel time.
   if (isOtaInProgress()) return;
@@ -72,22 +78,52 @@ bool MeshLink::sendControlOp(const uint8_t targetMac[6],
 bool MeshLink::sendCommand(const uint8_t targetMac[6],
                               const uint8_t* invocationJson, size_t len) {
   if (len == 0 || len > lamp_protocol::COMMAND_MAX_PAYLOAD) return false;
-  uint8_t buf[lamp_protocol::COMMAND_FIXED_SIZE + lamp_protocol::COMMAND_MAX_PAYLOAD];
+  // static: the ~1470 B frame is too big for the loop-task stack; every
+  // sendCommand caller (cascade + greeting) runs on the Core 1 loop task.
+  static uint8_t buf[lamp_protocol::COMMAND_FIXED_SIZE + lamp_protocol::COMMAND_MAX_PAYLOAD +
+              lamp_protocol::COMMAND_TAG_SIZE];
   const size_t n = lamp_protocol::buildCommand(buf, sizeof(buf), commandSeq_++,
                                                myMac_, targetMac,
                                                invocationJson, len);
   if (!n) return false;
+  const size_t framed = lamp_protocol::command_auth::appendTag(buf, n, sizeof(buf));
   commandDedup_.record(myMac_, lamp_protocol::MSG_COMMAND, commandSeq_ - 1);
-  return link_.broadcast(buf, n);
+  return link_.broadcast(buf, framed);
 }
 
 bool MeshLink::sendEvent(const uint8_t* payloadJson, size_t len) {
   if (len == 0 || len > lamp_protocol::EVENT_MAX_PAYLOAD) return false;
-  uint8_t buf[lamp_protocol::EVENT_FIXED_SIZE + lamp_protocol::EVENT_MAX_PAYLOAD];
+  uint8_t buf[lamp_protocol::EVENT_FIXED_SIZE + lamp_protocol::EVENT_MAX_PAYLOAD +
+              lamp_protocol::EVENT_TAG_SIZE];
   const size_t n = lamp_protocol::buildEvent(buf, sizeof(buf), eventSeq_++,
                                              myMac_, payloadJson, len);
   if (!n) return false;
+  const size_t framed = lamp_protocol::command_auth::appendTag(buf, n, sizeof(buf));
   eventDedup_.record(myMac_, lamp_protocol::MSG_EVENT, eventSeq_ - 1);
+  return link_.broadcast(buf, framed);
+}
+
+bool MeshLink::sendColorQuery(const uint8_t targetMac[6]) {
+  uint8_t buf[lamp_protocol::COLOR_QUERY_SIZE];
+  const size_t n = lamp_protocol::buildColorQuery(buf, sizeof(buf),
+                                                  colorQuerySeq_++,
+                                                  myMac_, targetMac);
+  if (!n) return false;
+  colorQueryDedup_.record(myMac_, lamp_protocol::MSG_COLOR_QUERY, colorQuerySeq_ - 1);
+  return link_.broadcast(buf, n);
+}
+
+bool MeshLink::sendColorInfo(const uint8_t targetMac[6],
+                             const uint8_t* baseStops, uint8_t baseCount,
+                             const uint8_t* shadeStops, uint8_t shadeCount) {
+  uint8_t buf[lamp_protocol::COLOR_INFO_MAX_SIZE];
+  const size_t n = lamp_protocol::buildColorInfo(buf, sizeof(buf),
+                                                 colorInfoSeq_++,
+                                                 myMac_, targetMac,
+                                                 baseStops, baseCount,
+                                                 shadeStops, shadeCount);
+  if (!n) return false;
+  colorInfoDedup_.record(myMac_, lamp_protocol::MSG_COLOR_INFO, colorInfoSeq_ - 1);
   return link_.broadcast(buf, n);
 }
 
@@ -132,7 +168,7 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
 #endif
     // RSSI feeds the cascade sort so physically closer peers fire first.
     const std::string peerName = h.nameLen ? std::string(h.name, h.nameLen) : std::string();
-    nearbyLamps.addOrUpdateFromEspNow(
+    lampRoster.addOrUpdateFromEspNow(
         peerName,
         h.sourceMac,
         Color(h.base[0],  h.base[1],  h.base[2],  h.base[3]),
@@ -143,7 +179,10 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
         data[2],
         h.fwChannel,
         h.fsDigest,
-        h.hasFsDigest);
+        h.hasFsDigest,
+        h.maxChunk,
+        h.needsFs,
+        rssi);
     link_.broadcast(data, len);
   } else if (msgType == lamp_protocol::MSG_CONTROL_OP) {
     lamp_protocol::ParsedControlOp op;
@@ -153,7 +192,7 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     // Rebroadcast for grid relay: extends mesh reach beyond direct radio
     // range. CONTROL_OP is unconditionally gossip-relayed.
     link_.broadcast(data, len);
-    // Apply locally if addressed to us or broadcast.
+    // Apply locally when the target is this lamp or broadcast.
     static const uint8_t bcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
     const bool forUs = (std::memcmp(op.targetMac, myMac_, 6) == 0) ||
                        (std::memcmp(op.targetMac, bcast, 6) == 0);
@@ -218,14 +257,18 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     PendingWispPalette slot;
     std::memcpy(slot.sourceMac, wp.sourceMac, 6);
     slot.count = wp.count;
-    if (wp.count > 0 && wp.rgb) {
-      std::memcpy(slot.rgb, wp.rgb,
-                  static_cast<size_t>(wp.count) *
-                      lamp_protocol::WISP_PALETTE_ENTRY_SIZE);
+    for (uint8_t i = 0; i < wp.count && wp.rgb; ++i) {
+      slot.rgbw[i * 4 + 0] = wp.rgb[i * 3 + 0];
+      slot.rgbw[i * 4 + 1] = wp.rgb[i * 3 + 1];
+      slot.rgbw[i * 4 + 2] = wp.rgb[i * 3 + 2];
+      slot.rgbw[i * 4 + 3] = wp.w ? wp.w[i] : 0;
     }
     postPendingWispPalette(slot);
     link_.broadcast(data, len);
   } else if (msgType == lamp_protocol::MSG_WISP_PAINT) {
+    // No relay: the wisp's rotating window re-covers a missed frame within
+    // seconds; a relay would multiply broadcast load fleet-wide. Dedup
+    // still runs to prevent repeat-fire on direct reception.
     lamp_protocol::ParsedWispPaint wp;
     if (!lamp_protocol::parseWispPaint(data, len, wp)) return;
     if (!wispPaintDedup_.record(wp.sourceMac,
@@ -241,7 +284,6 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
                       lamp_protocol::WISP_PAINT_ENTRY_SIZE);
     }
     postPendingWispPaint(slot);
-    link_.broadcast(data, len);
   } else if (msgType == lamp_protocol::MSG_OVERRIDE_COLORS) {
     lamp_protocol::ParsedOverrideColors p;
     if (!lamp_protocol::parseOverrideColors(data, len, p)) return;
@@ -250,12 +292,14 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
                                      p.seq)) return;
     // No relay: unicast paint scoped to direct radio range (no spillover).
     if (!addressedToUs(p.targetMac, myMac_)) return;
+#ifdef LAMP_DEBUG
     Serial.printf("[recv] OVERRIDE_COLORS surface=0x%02X src=%02X:%02X:%02X:%02X:%02X:%02X seq=%u fade=%ums kind=%u\n",
                   (unsigned)p.surface,
                   p.sourceMac[0], p.sourceMac[1], p.sourceMac[2],
                   p.sourceMac[3], p.sourceMac[4], p.sourceMac[5],
                   (unsigned)p.seq, (unsigned)p.fadeDurationMs,
                   (unsigned)p.sourceKind);
+#endif
     PendingOverrideColors slot;
     std::memcpy(slot.sourceMac, p.sourceMac, 6);
     slot.surface = p.surface;
@@ -275,11 +319,13 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
                                     p.seq)) return;
     // No relay.
     if (!addressedToUs(p.targetMac, myMac_)) return;
+#ifdef LAMP_DEBUG
     Serial.printf("[recv] RESTORE_COLORS surface=0x%02X src=%02X:%02X:%02X:%02X:%02X:%02X seq=%u kind=%u\n",
                   (unsigned)p.surface,
                   p.sourceMac[0], p.sourceMac[1], p.sourceMac[2],
                   p.sourceMac[3], p.sourceMac[4], p.sourceMac[5],
                   (unsigned)p.seq, (unsigned)p.sourceKind);
+#endif
     PendingRestoreColors slot;
     std::memcpy(slot.sourceMac, p.sourceMac, 6);
     slot.surface = p.surface;
@@ -294,18 +340,10 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
                                          p.seq)) return;
     // No relay.
     if (!addressedToUs(p.targetMac, myMac_)) return;
-    // Wisp-paired sources bypass the brightness floor (wisp owns go-dark scenes);
-    // match sourceMac against the cached hello sender within the pairing window.
-    if (p.brightness < lamp_protocol::kBrightnessOverrideMin) {
-      const auto wisp = nearbyLamps.getWispCache();
-      const uint32_t now = millis();
-      // 60 s matches the override watchdog; a wisp silent this long loses the bypass.
-      constexpr uint32_t kWispPairingWindowMs = 60000;
-      const bool wispPaired = wisp.present &&
-                              std::memcmp(wisp.mac, p.sourceMac, 6) == 0 &&
-                              (now - wisp.lastHelloMs) < kWispPairingWindowMs;
-      if (!wispPaired) return;  // drop silently (defeat-the-defeat)
-    }
+    // Only the wisp claiming this lamp may dim it. Claims arrive in every
+    // source mode incl Off, unlike the painter record color paint sets, so
+    // this gate holds even for an Off-mode space dim.
+    if (!lampRoster.isClaimingWisp(p.sourceMac, millis())) return;
     PendingOverrideBrightness slot;
     std::memcpy(slot.sourceMac, p.sourceMac, 6);
     slot.surface = p.surface;
@@ -329,11 +367,45 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     postPendingRestoreBrightness(slot);
   } else if (msgType == lamp_protocol::MSG_COMMAND) {
     lamp_protocol::ParsedCommand p;
-    if (!lamp_protocol::parseCommand(data, len, p)) return;
-    if (!commandDedup_.record(p.sourceMac, lamp_protocol::MSG_COMMAND, p.seq)) return;
+    if (!lamp_protocol::parseCommand(data, len, p)) {
+#ifdef LAMP_DEBUG
+      Serial.printf("[recv] COMMAND drop=parse len=%u\n", (unsigned)len);
+#endif
+      return;
+    }
+    if (!lamp_protocol::command_auth::verify(data, len - lamp_protocol::COMMAND_TAG_SIZE, p.tag)) {
+#ifdef LAMP_DEBUG
+      Serial.printf("[recv] COMMAND drop=auth src=%02X:%02X:%02X:%02X:%02X:%02X seq=%u\n",
+                    p.sourceMac[0], p.sourceMac[1], p.sourceMac[2],
+                    p.sourceMac[3], p.sourceMac[4], p.sourceMac[5], (unsigned)p.seq);
+#endif
+      return;
+    }
+    if (!commandDedup_.record(p.sourceMac, lamp_protocol::MSG_COMMAND, p.seq)) {
+#ifdef LAMP_DEBUG
+      Serial.printf("[recv] COMMAND drop=dedup src=%02X:%02X:%02X:%02X:%02X:%02X seq=%u\n",
+                    p.sourceMac[0], p.sourceMac[1], p.sourceMac[2],
+                    p.sourceMac[3], p.sourceMac[4], p.sourceMac[5], (unsigned)p.seq);
+#endif
+      return;
+    }
     // No relay.
-    if (!addressedToUs(p.targetMac, myMac_)) return;
-    PendingCommand slot;
+    if (!addressedToUs(p.targetMac, myMac_)) {
+#ifdef LAMP_DEBUG
+      Serial.printf("[recv] COMMAND drop=addressed src=%02X:%02X:%02X:%02X:%02X:%02X seq=%u\n",
+                    p.sourceMac[0], p.sourceMac[1], p.sourceMac[2],
+                    p.sourceMac[3], p.sourceMac[4], p.sourceMac[5], (unsigned)p.seq);
+#endif
+      return;
+    }
+#ifdef LAMP_DEBUG
+    Serial.printf("[recv] COMMAND accepted src=%02X:%02X:%02X:%02X:%02X:%02X seq=%u\n",
+                  p.sourceMac[0], p.sourceMac[1], p.sourceMac[2],
+                  p.sourceMac[3], p.sourceMac[4], p.sourceMac[5], (unsigned)p.seq);
+#endif
+    // static: the 1444 B payload is too big for the recv-task stack; handleRecv
+    // is the only writer and runs single-threaded on the WiFi recv callback.
+    static PendingCommand slot;
     std::memcpy(slot.sourceMac, p.sourceMac, 6);
     slot.payloadLen = static_cast<uint16_t>(p.payloadLen);
     std::memcpy(slot.payload, p.payload, p.payloadLen);
@@ -341,6 +413,7 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
   } else if (msgType == lamp_protocol::MSG_EVENT) {
     lamp_protocol::ParsedEvent p;
     if (!lamp_protocol::parseEvent(data, len, p)) return;
+    if (!lamp_protocol::command_auth::verify(data, len - lamp_protocol::EVENT_TAG_SIZE, p.tag)) return;
     if (!eventDedup_.record(p.sourceMac, lamp_protocol::MSG_EVENT, p.seq)) return;
     // No relay.
     PendingEvent slot;
@@ -348,6 +421,26 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     slot.payloadLen = static_cast<uint16_t>(p.payloadLen);
     std::memcpy(slot.payload, p.payload, p.payloadLen);
     postPendingEvent(slot);
+  } else if (msgType == lamp_protocol::MSG_COLOR_QUERY) {
+    lamp_protocol::ParsedColorQuery p;
+    if (!lamp_protocol::parseColorQuery(data, len, p)) return;
+    if (!colorQueryDedup_.record(p.sourceMac, lamp_protocol::MSG_COLOR_QUERY, p.seq)) return;
+    if (!addressedToUs(p.targetMac, myMac_)) return;
+    PendingColorQuery slot;
+    std::memcpy(slot.sourceMac, p.sourceMac, 6);
+    postPendingColorQuery(slot);
+  } else if (msgType == lamp_protocol::MSG_COLOR_INFO) {
+    lamp_protocol::ParsedColorInfo p;
+    if (!lamp_protocol::parseColorInfo(data, len, p)) return;
+    if (!colorInfoDedup_.record(p.sourceMac, lamp_protocol::MSG_COLOR_INFO, p.seq)) return;
+    if (!addressedToUs(p.targetMac, myMac_)) return;
+    PendingColorInfo slot;
+    std::memcpy(slot.sourceMac, p.sourceMac, 6);
+    slot.baseCount = p.baseCount;
+    if (p.baseCount)  std::memcpy(slot.baseStops,  p.baseStops,  p.baseCount * 4);
+    slot.shadeCount = p.shadeCount;
+    if (p.shadeCount) std::memcpy(slot.shadeStops, p.shadeStops, p.shadeCount * 4);
+    postPendingColorInfo(slot);
   } else if (msgType == lamp_protocol::MSG_FW_OFFER) {
     // Single-hop unicast; no gossip relay. The shared firmwareDedup_
     // ring guards against the wisp re-sending the OFFER mid-drain.
@@ -355,6 +448,16 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     if (!lamp_protocol::parseFwOffer(data, len, p)) return;
     if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FW_OFFER, p.seq)) return;
     if (!addressedToUs(p.targetMac, myMac_)) return;
+    // Receiver-side signal-floor gate, mirrors the sender's: a weak direct
+    // hop drops the OFFER instead of streaming a doomed transfer. Unknown
+    // RSSI isn't gated.
+    if (rssi != -127 && rssi < lamp_protocol::kOtaMinRssiDbm) {
+#ifdef LAMP_DEBUG
+      Serial.printf("[recv] FW_OFFER decline: rssi=%d below floor %d\n",
+                    (int)rssi, (int)lamp_protocol::kOtaMinRssiDbm);
+#endif
+      return;
+    }
     PendingFirmwareControl slot{};
     slot.msgType = lamp_protocol::MSG_FW_OFFER;
     slot.seq = p.seq;
@@ -369,6 +472,9 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
                 lamp_protocol::FW_SHA256_PREFIX_LEN);
     slot.offer.footerLen   = p.footerLen;
     slot.offer.totalChunks = p.totalChunks;
+    slot.offer.hasAuth     = p.hasAuth;
+    std::memcpy(slot.offer.digest, p.digest, lamp_protocol::FW_SHA256_FULL_LEN);
+    std::memcpy(slot.offer.signature, p.signature, lamp_protocol::FW_SIG_LEN);
     postPendingFirmwareControl(slot);
   } else if (msgType == lamp_protocol::MSG_FW_CHUNK) {
     // Direct handoff to handleChunkOnRecvTask: a pending single-slot
@@ -421,6 +527,16 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
     if (!lamp_protocol::parseFwOffer(data, len, p, lamp_protocol::MSG_FS_OFFER)) return;
     if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FS_OFFER, p.seq)) return;
     if (!addressedToUs(p.targetMac, myMac_)) return;
+    // Receiver-side signal-floor gate, mirrors the sender's: a weak direct
+    // hop drops the OFFER instead of streaming a doomed transfer. Unknown
+    // RSSI isn't gated.
+    if (rssi != -127 && rssi < lamp_protocol::kOtaMinRssiDbm) {
+#ifdef LAMP_DEBUG
+      Serial.printf("[recv] FS_OFFER decline: rssi=%d below floor %d\n",
+                    (int)rssi, (int)lamp_protocol::kOtaMinRssiDbm);
+#endif
+      return;
+    }
     PendingFirmwareControl slot{};
     slot.msgType = lamp_protocol::MSG_FS_OFFER;
     slot.seq = p.seq;
@@ -435,6 +551,9 @@ void MeshLink::handleRecv(const uint8_t* /*srcMac*/, const uint8_t* data,
                 lamp_protocol::FW_SHA256_PREFIX_LEN);
     slot.offer.footerLen   = p.footerLen;
     slot.offer.totalChunks = p.totalChunks;
+    slot.offer.hasAuth     = p.hasAuth;
+    std::memcpy(slot.offer.digest, p.digest, lamp_protocol::FW_SHA256_FULL_LEN);
+    std::memcpy(slot.offer.signature, p.signature, lamp_protocol::FW_SIG_LEN);
     postPendingFirmwareControl(slot);
   } else if (msgType == lamp_protocol::MSG_FS_CHUNK) {
     lamp_protocol::ParsedFwChunk p;
@@ -500,9 +619,8 @@ void MeshLink::emitHello() {
     shade[0] = c.r; shade[1] = c.g; shade[2] = c.b; shade[3] = c.w;
   }
   if (!config_->base.broadcastColors().empty()) {
-    size_t ac = config_->base.ac;
-    if (ac >= config_->base.broadcastColors().size()) ac = 0;
-    const Color& c = config_->base.broadcastColors()[ac];
+    const auto& stops = config_->base.broadcastColors();
+    const Color c = lampos::led::blendedIdentity(stops.data(), stops.size());
     base[0] = c.r; base[1] = c.g; base[2] = c.b; base[3] = c.w;
   }
 
@@ -521,11 +639,17 @@ void MeshLink::emitHello() {
   }
 
   uint8_t buf[lamp_protocol::HELLO_MAX_SIZE];
+  // FW_MAX_CHUNK advertises this lamp's OTA-receive ceiling so a peer's
+  // distributor can negotiate a larger session chunk size than the baseline.
+  // NEED_FS (re-evaluated every HELLO) asks peers to offer the UI image while
+  // this lamp has no valid FS digest to advertise a mismatch against.
   size_t n = lamp_protocol::buildHello(buf, sizeof(buf), helloSeq_++, myMac_,
                                        shade, base, FIRMWARE_VERSION,
                                        name.data(), nameLen, otaState,
                                        FIRMWARE_CHANNEL_STR,
-                                       fs_ota::localDigestPrefix());
+                                       fs_ota::localDigestPrefix(),
+                                       lamp_protocol::FW_CHUNK_SIZE_MAX,
+                                       fs_ota::needsFs());
   if (n) {
     link_.broadcast(buf, n);
   }

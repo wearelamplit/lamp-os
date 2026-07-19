@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <Preferences.h>
 #include <functional>
+#include <string>
 
 #include "behaviors/greetable.hpp"
 #include "config/config.hpp"
@@ -123,16 +124,17 @@ constexpr const char* CHAR_EDIT_SESSION    = "5f64f4e9-d6d9-4a44-9b3f-3a8d6f7e6b
 // to NVS, debounced 1500ms, OTA-gated, FNV-1a hash-deduped.
 inline constexpr const char* CHAR_COMMIT_UUID = "48537d49-11a7-4f54-a69a-9425b9288c50";
 
-/**
- * @brief Start the BLE GATT control service.
- */
 void start(lamp::Config* config);
 
 void stop();
 bool isRunning();
 
+// Copies the cached nearby-lamps JSON out. Safe to call from any task;
+// never serializes on the caller's thread.
+void copyNearbyJson(std::string& out);
+
 /**
- * @brief Per-loop housekeeping on Core 1. Rebuilds any dirty section JSON
+ * Per-loop housekeeping on Core 1. Rebuilds any dirty section JSON
  *        cache so a CHAR_PAGE_CTRL page read on Core 0 finds it populated
  *        and never serializes JSON inside the NimBLE callback. Cheap when
  *        nothing is dirty. Call once per main-loop iteration.
@@ -140,40 +142,40 @@ bool isRunning();
 void tick();
 
 /**
- * @brief Send a state-change notification to all subscribed clients.
+ * Send a state-change notification to all subscribed clients.
  *        Payload is `{"previewActive":<bool>}`, used by the app's Test
  *        button to debounce its label without an app-side timer.
  */
 void notifyStateChange();
 
 /**
- * @brief Send a WiFi-state-change notification on CHAR_WIFI_STATE.
+ * Send a WiFi-state-change notification on CHAR_WIFI_STATE.
  */
 void notifyWifiState();
 
 /**
- * @brief Push a CHAR_WISP_STATUS notification. Called from the loop
+ * Push a CHAR_WISP_STATUS notification. Called from the loop
  *        drain on Core 1 after pendingWispStatus updates the cache via
- *        NearbyLamps::cacheWispStatus. The notify payload is the same
+ *        LampRoster::cacheWispStatus. The notify payload is the same
  *        merged JSON the on-read callback serves.
  */
 void notifyWispStatus();
 
 /**
- * @brief True while a BT client is currently connected to this lamp.
+ * True while a BT client is currently connected to this lamp.
  *        Used by effective-home-mode logic and by wifi::tick() to skip
  *        background scans during BT sessions.
  */
 bool isClientConnected();
 
 /**
- * @brief True while the app has signalled it's on the Home Mode setup
+ * True while the app has signalled it's on the Home Mode setup
  *        page (via CHAR_HOME_MODE_FOCUS = 1). Cleared on BT disconnect.
  */
 bool isHomeModePageActive();
 
 /**
- * @brief True while the central scan is paused because a GATT client is
+ * True while the central scan is paused because a GATT client is
  *        connected. bluetooth.cpp's onScanEnd queries this to decide
  *        whether to auto-restart the scan. Flipped on GATT connect /
  *        disconnect inside ble_control.cpp.
@@ -181,7 +183,7 @@ bool isHomeModePageActive();
 bool isScanPaused();
 
 /**
- * @brief Stop BLE advertising + scan to free the radio for ESP-NOW
+ * Stop BLE advertising + scan to free the radio for ESP-NOW
  *        during OTA. ESP32-WROOM shares one 2.4 GHz radio between BLE and
  *        WiFi; the IDF coex arbiter gates WiFi RX during BLE adv/scan
  *        windows. For OTA's narrow OFFER↔ACCEPT handshake (and chunk
@@ -194,13 +196,13 @@ bool isScanPaused();
 void pauseRadioForOta();
 
 /**
- * @brief Restart BLE advertising + scan after pauseRadioForOta(). Called
+ * Restart BLE advertising + scan after pauseRadioForOta(). Called
  *        on OTA success or any failure path. Idempotent.
  */
 void resumeRadioAfterOta();
 
 /**
- * @brief Force-disconnect any active GATT client. Called from
+ * Force-disconnect any active GATT client. Called from
  *        ota_quiet_mode::enterQuiet when tearDownRadio=true (mesh OTA
  *        path). Keeps the GATT server up; only kicks the connected
  *        peer so it can't send writes that compete for radio time with
@@ -209,7 +211,7 @@ void resumeRadioAfterOta();
 void disconnectGattClientsForOta();
 
 /**
- * @brief Register a provider for the current greeting state. Called from
+ * Register a provider for the current greeting state. Called from
  *        lamp_behaviors.cpp after the greeting behavior is wired. The
  *        provider is called inside notifyStateChange() to include greeting
  *        in the stateNotify payload.
@@ -229,7 +231,7 @@ namespace lamp { class FirmwareReceiver; }
 namespace ble_control {
 
 /**
- * @brief Wire the FirmwareReceiver instance into the BLE OTA dispatch.
+ * Wire the FirmwareReceiver instance into the BLE OTA dispatch.
  *        Called from lamp.cpp after firmwareReceiver.begin().
  *        Once registered, CHAR_FW_CONTROL writes (OFFER/DONE) and
  *        CHAR_FW_CHUNK writes route into the receiver, and the receiver's

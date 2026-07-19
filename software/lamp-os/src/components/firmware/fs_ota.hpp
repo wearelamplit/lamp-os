@@ -1,6 +1,6 @@
 #pragma once
 
-// FS-image OTA — delivers the SPIFFS web-UI image over the mesh to the spiffs
+// FS-image OTA. Delivers the SPIFFS web-UI image over the mesh to the spiffs
 // partition, reusing the firmware OTA engine via FsReceiverHooks /
 // FsDistributorHooks.
 //
@@ -37,28 +37,38 @@ void begin(lamp::FirmwareTransport* meshTransport,
            lamp::FirmwareReceiver* fwReceiver,
            lamp::FirmwareDistributor* fwDistributor);
 
-// Core 1 tick — drives the FS receiver + distributor state machines.
+// Core 1 tick. Drives the FS receiver + distributor state machines.
 void tick(uint32_t nowMs);
 
-// 8-byte prefix of our local FS manifest digest for HELLO_TLV_FS_STATE, or
+// True while the FS OTA path (receiver or distributor) is mid-flow. The
+// firmware start gate consults it so fw and FS OTA never stream at once.
+bool fsPathBusy();
+
+// 8-byte prefix of the local FS manifest digest for HELLO_TLV_FS_STATE, or
 // nullptr if not yet computed (SPIFFS unmountable / empty).
 const uint8_t* localDigestPrefix();
 
-// Offer our FS image to a peer if it needs it: peer at our firmware version,
-// advertising an FS digest that differs from ours. Called from the social
-// peer loop (Core 1). hasFsDigest=false (older / FS-disabled peer) → skip.
+// True when FS-capable at the running firmware version but with no valid local
+// digest (SPIFFS unmountable / empty). Drives HELLO_TLV_NEED_FS so peers offer
+// the UI image to a lamp that can't compute a digest to advertise a mismatch.
+bool needsFs();
+
+// Offer the FS image to a peer if it needs it: peer at this firmware version,
+// advertising an FS digest that differs from ours, OR advertising need-FS
+// (HELLO_TLV_NEED_FS, no digest to compare). Called from the social peer loop
+// (Core 1). No digest AND not need-FS (older / FS-disabled peer) → skip.
 void considerPeer(const uint8_t peerMac[6], uint32_t peerFwVersion,
                   uint8_t peerProtocolVersion, uint32_t nowMs,
                   const char* peerFwChannel, const uint8_t* peerFsDigest,
-                  bool peerHasFsDigest);
+                  bool peerHasFsDigest, bool peerNeedsFs, int8_t peerRssi = -127);
 
-// --- Inbound dispatch (called from mesh_link's WiFi recv task) -------------
-// MSG_FS_OFFER / MSG_FS_DONE — posted to the Core 1 drain (like firmware).
+// Inbound dispatch, called from mesh_link's WiFi recv task.
+// MSG_FS_OFFER / MSG_FS_DONE post to the Core 1 drain, like firmware.
 // handleControl is the Core 1 side (called by the lamp.cpp drain).
 void handleControl(const lamp::PendingFirmwareControl& ctrl);
-// MSG_FS_CHUNK — written straight to the spiffs partition on Core 0.
+// MSG_FS_CHUNK writes straight to the spiffs partition on Core 0.
 void onChunk(const lamp_protocol::ParsedFwChunk& c);
-// MSG_FS_ACCEPT / REQ / RESULT — to the FS distributor (we're the sender).
+// MSG_FS_ACCEPT / REQ / RESULT go to the FS distributor (this lamp sends).
 void onAccept(const lamp_protocol::ParsedFwAccept& a);
 void onReq(const lamp_protocol::ParsedFwReq& r);
 void onResult(const lamp_protocol::ParsedFwResult& r);

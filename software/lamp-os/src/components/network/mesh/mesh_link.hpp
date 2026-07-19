@@ -11,7 +11,8 @@
 #include "expressions/expression_invocation.hpp"
 #include "components/network/transport/espnow_link.hpp"
 #include "components/network/protocol/lamp_protocol.hpp"
-#include "nearby_lamps.hpp"
+#include "hello_interval.hpp"
+#include "lamp_roster.hpp"
 #include "pending_slots.hpp"
 #include "util/color.hpp"
 #include "components/firmware/firmware_receiver.hpp"  // FirmwareTransport interface
@@ -20,20 +21,6 @@
 // ESP-NOW channel; must match the wisp's mesh_link.hpp or the mesh won't form.
 #define LAMP_ESPNOW_CHANNEL 6
 #endif
-
-// HELLO broadcast interval. Higher = less baseline mesh traffic; the
-// fleet-scale airtime budget (HELLO gossip-relays across N lamps) drove
-// this to 5s. Must stay well under LAMP_PRUNE_TIME_MS (120s) so peers
-// aren't pruned between emits.
-#define LAMP_HELLO_INTERVAL_MS 5000
-
-// Pin so a drift back below 5s can't silently re-introduce the airtime
-// pressure; bumping it down requires re-validating the fleet-size airtime
-// budget.
-static_assert(LAMP_HELLO_INTERVAL_MS == 5000,
-              "LAMP_HELLO_INTERVAL_MS lock-in for v0x03 (5s baseline). "
-              "Bumping back below 5000 must come with a re-validation "
-              "against fleet-size airtime budget.");
 
 namespace lamp {
 
@@ -65,6 +52,8 @@ void postPendingWispClaim(const PendingWispClaim& src);
 void postPendingWispPaint(const PendingWispPaint& src);
 void postPendingCommand(const PendingCommand& src);
 void postPendingEvent(const PendingEvent& src);
+void postPendingColorQuery(const PendingColorQuery& src);
+void postPendingColorInfo(const PendingColorInfo& src);
 
 // Forward decl; full type lives in components/firmware/firmware_receiver.hpp.
 // MeshLink only needs the pointer + the chunk handler, which it calls
@@ -114,6 +103,11 @@ class MeshLink {
   // Broadcast a MSG_EVENT frame; payload is the ExpressionInvocation JSON.
   bool sendEvent(const uint8_t* payloadJson, size_t len);
 
+  bool sendColorQuery(const uint8_t targetMac[6]);
+  bool sendColorInfo(const uint8_t targetMac[6],
+                     const uint8_t* baseStops, uint8_t baseCount,
+                     const uint8_t* shadeStops, uint8_t shadeCount);
+
   // Broadcast a raw pre-built ESP-NOW frame onto the grid. Used by
   // EspNowFirmwareTransport. Caller is responsible for size limits.
   bool broadcastRaw(const uint8_t* data, size_t len);
@@ -149,38 +143,46 @@ class MeshLink {
   Config* config_ = nullptr;
   uint8_t myMac_[6] = {0};
 
-  lamp_protocol::DedupRing helloDedup_;
-  lamp_protocol::DedupRing controlOpDedup_;
+  // Capacity per ring is sized to the message type's traffic. Relay-heavy
+  // every-lamp types get the full 64; single-hop / low-rate types get less.
+  lamp_protocol::DedupRing<64> helloDedup_;
+  lamp_protocol::DedupRing<64> controlOpDedup_;
   // Per-type dedup. Each new MSG_* gets its own ring so a
   // CONTROL_OP seq doesn't accidentally suppress an OVERRIDE_COLORS seq
   // from the same sender (seqs are independent per type).
-  lamp_protocol::DedupRing overrideColorsDedup_;
-  lamp_protocol::DedupRing restoreColorsDedup_;
-  lamp_protocol::DedupRing overrideBrightnessDedup_;
-  lamp_protocol::DedupRing restoreBrightnessDedup_;
-  lamp_protocol::DedupRing wispHelloDedup_;
-  // Wisp-to-wisp claim broadcasts. Dedup so a relayed echo can't
-  // repeat-fire. Lamps don't act on MSG_WISP_CLAIM (pure pass-through).
-  lamp_protocol::DedupRing wispClaimDedup_;
+  lamp_protocol::DedupRing<16> overrideColorsDedup_;
+  lamp_protocol::DedupRing<16> restoreColorsDedup_;
+  lamp_protocol::DedupRing<16> overrideBrightnessDedup_;
+  lamp_protocol::DedupRing<16> restoreBrightnessDedup_;
+  lamp_protocol::DedupRing<32> wispHelloDedup_;
+  // Wisp claim broadcasts. No relay; dedup prevents repeat-fire on direct
+  // reception. Entries accumulate in LampRoster's fleet cache for
+  // CHAR_WISP_CLAIMS and display-slot admission.
+  lamp_protocol::DedupRing<16> wispClaimDedup_;
   // Wisp manualPalette broadcasts. Dedup + gossip-relay like wispHello.
   // Lamps DO act on the payload: cache it for the app to read via
   // CHAR_WISP_STATUS.
-  lamp_protocol::DedupRing wispPaletteDedup_;
-  // Per-lamp paint colors from the wisp. Dedup + gossip-relay; cached for
-  // CHAR_WISP_CLAIMS to serve the app's painted-lamps preview.
-  lamp_protocol::DedupRing wispPaintDedup_;
-  lamp_protocol::DedupRing commandDedup_;
-  lamp_protocol::DedupRing eventDedup_;
+  lamp_protocol::DedupRing<32> wispPaletteDedup_;
+  // Per-lamp paint colors from the wisp. No relay; dedup prevents
+  // repeat-fire. Cached for CHAR_WISP_CLAIMS to serve the app's
+  // painted-lamps preview.
+  lamp_protocol::DedupRing<16> wispPaintDedup_;
+  lamp_protocol::DedupRing<64> commandDedup_;
+  lamp_protocol::DedupRing<16> eventDedup_;
+  lamp_protocol::DedupRing<16> colorQueryDedup_;
+  lamp_protocol::DedupRing<16> colorInfoDedup_;
   // Single shared dedup for the MSG_FW_* family. One sender owns all
   // outbound FW seqs; the 6 msgTypes share one seq counter so cross-msgType
-  // collisions can't happen. 64 slots is ample for a single in-flight OTA.
-  lamp_protocol::DedupRing firmwareDedup_;
+  // collisions can't happen. 16 slots is ample for a single in-flight OTA.
+  lamp_protocol::DedupRing<16> firmwareDedup_;
 
   uint32_t lastHelloMs_ = 0;
   uint16_t helloSeq_ = 0;
   uint16_t controlOpSeq_ = 0;
-  uint16_t commandSeq_ = 0;
-  uint16_t eventSeq_   = 0;
+  uint16_t commandSeq_    = 0;
+  uint16_t eventSeq_      = 0;
+  uint16_t colorQuerySeq_ = 0;
+  uint16_t colorInfoSeq_  = 0;
 
   ControlOpHandler controlOpHandler_;
   FirmwareReceiver*    firmwareReceiver_    = nullptr;

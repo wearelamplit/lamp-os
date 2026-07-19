@@ -7,7 +7,7 @@
 // Lamp manufacturer identifier
 #define BLE_LAMP_MAGIC_NUMBER 42069
 
-// BLE scan window — pScan->setWindow(BLE_GAP_SCAN_WINDOW_MS) in
+// BLE scan window. pScan->setWindow(BLE_GAP_SCAN_WINDOW_MS) in
 // bluetooth.cpp. Kept short under SW-coex to leave airtime for ESP-NOW.
 #define BLE_GAP_SCAN_WINDOW_MS 15
 

@@ -1,10 +1,9 @@
 #pragma once
 
-// WriteRouter — single NimBLECharacteristicCallbacks subclass that handles
+// WriteRouter is the single NimBLECharacteristicCallbacks subclass that handles
 // the auth-gated, bounds-checked write path shared by most JSON-payload
 // characteristics on the lamp's BLE control service. Replaces the bulk
-// of the 11 near-identical Callback classes in ble_control.cpp (audit
-// finding #9).
+// of the 11 near-identical Callback classes in ble_control.cpp.
 //
 // Two flavors are needed because some writes are plaintext (the BLE
 // callback just bounds-checks raw byte count and posts) and some are
@@ -18,12 +17,11 @@
 //   - BaseKnockoutCallback       (two raw u8 bytes)
 //   - HomeModeFocusCallback      (single u8 + flips a module-level flag)
 //   - AuthCallback               (plaintext-vs-ciphertext auth bifurcation)
-//   - NearbyLampsCallback        (read-only)
 //   - WifiStateCallback          (read-only)
 //   - LampSectionCallback etc.   (read-only)
 //   - SettingsBlobCallback       (read+write, custom size budget, debug
 //                                 logs the decrypt/auth failure path
-//                                 separately — clarity > consolidation)
+//                                 separately; clarity > consolidation)
 //   - SocialDispositionsCallback (read+write, with auth-gated read)
 //
 // Each of those carries enough idiomatic special-case that flattening
@@ -71,7 +69,7 @@ using DecodeFn = bool (*)(const std::string& raw,
 // crypto layer's HKDF info-string.
 class WriteRouter : public NimBLECharacteristicCallbacks {
  public:
-  // Plaintext flavor — no AES-GCM decode. Used for live-preview chars
+  // Plaintext flavor. No AES-GCM decode. Used for live-preview chars
   // (CHAR_SHADE_COLORS, CHAR_BASE_COLORS) and the expression CRUD chars
   // (CHAR_EXPRESSION_OP, CHAR_EXPRESSION_TEST) where the app sends raw
   // JSON. maxSize bounds the bytes-on-wire; the same value is the
@@ -86,7 +84,7 @@ class WriteRouter : public NimBLECharacteristicCallbacks {
         debugTag_(nullptr),
         allowEmpty_(false) {}
 
-  // Ciphertext flavor — decodeIncomingOp() runs before bounds-check.
+  // Ciphertext flavor. decodeIncomingOp() runs before bounds-check.
   // maxSize bounds the DECODED JSON size (matches the slot capacity);
   // the over-the-wire bound is maxSize + 64 to leave headroom for the
   // GCM prefix + tag (matches the existing per-callback sanity ceiling).
@@ -110,7 +108,7 @@ class WriteRouter : public NimBLECharacteristicCallbacks {
   // literal at construction time).
   //
   // Returns `this` so the call site can chain straight into
-  // setCallbacks(...) — NimBLE's setCallbacks takes a base-class pointer
+  // setCallbacks(...). NimBLE's setCallbacks takes a base-class pointer
   // and the chained pointer-returning setters avoid an intermediate
   // temporary.
   WriteRouter* setDebugTag(const char* tag) {

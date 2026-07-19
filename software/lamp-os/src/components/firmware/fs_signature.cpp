@@ -6,8 +6,8 @@
 
 // Same backend split as firmware_signature.cpp: mbedTLS for the streaming
 // SHA-256 (available on both host test + device), libsodium for the ed25519
-// verify on device, and an extern test shim on the native host (we don't
-// vendor libsodium for the host toolchain).
+// verify on device, and an extern test shim on the native host (libsodium is
+// not vendored for the host toolchain).
 #include <mbedtls/sha256.h>
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 #include <sodium/crypto_sign_ed25519.h>
@@ -37,7 +37,7 @@ inline uint32_t readU32LE(const uint8_t* p) {
 }  // namespace
 
 bool computeFsManifestDigest(std::vector<FsManifestFile>& files, uint8_t out[32]) {
-  // Bytewise name sort — std::string::operator< compares as unsigned bytes,
+  // Bytewise name sort: std::string::operator< compares as unsigned bytes,
   // matching sign_fs.py's sort on ASCII names.
   std::sort(files.begin(), files.end(),
             [](const FsManifestFile& a, const FsManifestFile& b) {

@@ -16,6 +16,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "components/network/protocol/fw_ota.hpp"  // FW_CHUNK_SIZE_BASELINE/_MAX
+
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -41,10 +43,13 @@ class FirmwareTransport;
 struct FsDistributorHooks {
   // Source spiffs partition to stream (really const esp_partition_t*).
   const void* (*partition)();
-  // Fixed image length (spiffs partition size) + FS manifest digest prefix for
-  // OFFER. Replaces the LSIG forward-scan + signed-region SHA (an FS image has
-  // no footer, and a raw-partition SHA differs per lamp). false -> Disabled.
-  bool (*lengthAndDigest)(uint32_t* outLen, uint8_t outDigestPrefix[8]);
+  // Fixed image length (spiffs partition size) + FS manifest digest (8-byte
+  // prefix + full 32) + the fw.lsig ed25519 signature over that digest, for the
+  // OFFER auth trailer. Replaces the LSIG forward-scan + signed-region SHA (an FS
+  // image has no footer, and a raw-partition SHA differs per lamp). false ->
+  // Disabled.
+  bool (*lengthAndDigest)(uint32_t* outLen, uint8_t outDigestPrefix[8],
+                          uint8_t outFullDigest[32], uint8_t outSignature[64]);
   uint8_t offerType;
   uint8_t chunkType;
   uint8_t doneType;
@@ -64,7 +69,15 @@ class FirmwareDistributor {
 
   // Call once in setup() AFTER mesh_link is begin()'d so the transport's
   // MAC snapshot is valid. nullptr transport leaves the distributor Disabled.
+  // Registers this instance with the shared streaming task; does not launch it.
   void begin(FirmwareTransport* transport);
+
+#if defined(ARDUINO) || defined(ESP_PLATFORM)
+  // Launch the one shared streaming task. Call once from setup() AFTER every
+  // instance's begin() so the registry is fully published before the task reads
+  // it.
+  static void startSharedStreaming();
+#endif
 
   // Inject FS-image OTA behavior (see FsDistributorHooks). Call BEFORE begin()
   // so begin() resolves the spiffs source instead of the running app partition.
@@ -74,7 +87,7 @@ class FirmwareDistributor {
   void tick(uint32_t nowMs);
 
   // Idempotent peer-trigger. Called from SocialBehavior::control on Core 1 per
-  // nearby peer. No-op unless state == Idle, peer is below our FIRMWARE_VERSION,
+  // nearby peer. No-op unless state == Idle, peer is below FIRMWARE_VERSION,
   // and the peer isn't in the backoff ring; otherwise transitions Idle ->
   // OfferSent, sends OFFER, kicks the streaming task. Additional gates (mesh
   // quiesce, receiver-busy) live in the wiring layer.
@@ -84,9 +97,17 @@ class FirmwareDistributor {
   // 0 = unknown HELLO, peer skipped. peerFwChannel is the peer's
   // {type}-{channel} from HELLO_TLV_FW_CHANNEL: known and != ours skips the
   // peer (no cross-variant/channel flash); unknown offers anyway.
+  // peerMaxChunk is the peer's HELLO_TLV_FW_MAX_CHUNK (0 = peer doesn't
+  // advertise): the session chunk size becomes min(FW_CHUNK_SIZE_MAX,
+  // peerMaxChunk) when advertised, else FW_CHUNK_SIZE_BASELINE.
+  // peerRssi is the peer's ESP-NOW HELLO RSSI (-127 = unknown, not gated):
+  // skips the offer below kOtaMinRssiDbm rather than starting a doomed
+  // direct-hop transfer.
   void considerPeerForOta(const uint8_t peerMac[6], uint32_t peerVersion,
                           uint8_t peerProtocolVersion, uint32_t nowMs,
-                          const char* peerFwChannel = nullptr);
+                          const char* peerFwChannel = nullptr,
+                          uint16_t peerMaxChunk = 0,
+                          int8_t peerRssi = -127);
 
   // Inbound packet hooks: mesh_link dispatches MSG_FW_ACCEPT/REQ/RESULT
   // from its WiFi recv task. Idempotent on irrelevant packets (wrong target
@@ -103,7 +124,7 @@ class FirmwareDistributor {
   bool isInProgress() const;
 
   // Snapshot the active OTA target's MAC into out[6]. True while mid-flow. Used
-  // by the OTA indicator to look up the receiver's base color from NearbyLamps.
+  // by the OTA indicator to look up the receiver's base color from LampRoster.
   bool getPeerMac(uint8_t out[6]) const {
     if (!isInProgress()) return false;
     for (int i = 0; i < 6; i++) out[i] = targetMac_[i];
@@ -119,8 +140,10 @@ class FirmwareDistributor {
     return nextChunkIdx_ > hw ? nextChunkIdx_ : hw;
   }
 
-  // Total chunks for the running image, computed once at begin(). Zero until then.
-  uint16_t totalChunks() const { return firmwareTotalChunks_; }
+  // Total chunks for the ACTIVE session at its negotiated chunk size (chunk
+  // size varies per peer, so this isn't the image's baseline-chunk count).
+  // Zero when idle.
+  uint16_t totalChunks() const { return totalChunks_; }
 
   // Streaming and retry tunables.
   // Streaming cadence: push one chunk, then vTaskDelay to let the WiFi task
@@ -128,7 +151,9 @@ class FirmwareDistributor {
   // loss and burst density drives LED flicker. Sender-side only.
   static constexpr uint32_t kStreamingChunkSpacingMs   = 30;
   static constexpr uint32_t kStreamingQueueBackoffMs   = 5;
-  static constexpr uint32_t kStreamingTaskStackSize    = 4096;
+  // streamOneChunk stacks two max-size chunk buffers (~2.9 KB) below the
+  // partition-read + esp_now_send call chain; size for headroom above them.
+  static constexpr uint32_t kStreamingTaskStackSize    = 8192;
   // Above the Arduino loop (1), well below WiFi/IDF (18+).
   static constexpr uint32_t kStreamingTaskPriority     = 5;
   // Re-check state this often in case a wake give was lost.
@@ -157,7 +182,7 @@ class FirmwareDistributor {
   // Tail-end RESULT loss is recoverable on a fast retry; skip the 10-min penalty.
   static constexpr uint32_t kPeerFinalizeBackoffMs = 15000;
   // Per-session REQ budget. Far above any reasonable peer's amplification, so
-  // the receiver's 5-min hard cap (not this) bounds a stuck session.
+  // the receiver's 10-min hard cap (not this) bounds a stuck session.
   static constexpr uint16_t kMaxReqPerSession   = 4096;
 
  private:
@@ -169,7 +194,17 @@ class FirmwareDistributor {
 
   void recordPeerFailure(uint32_t nowMs);
   void recordPeerFailureFinalize(uint32_t nowMs);
+  // An offered peer replying already-current contradicts the below-version
+  // read of it; that mismatch is the cross-variant tell (same-variant behind
+  // peers reply Accept), so block it for the rest of the session instead of
+  // the usual timed backoff.
+  void recordPeerBlocklist(uint32_t nowMs);
   void resetSession();
+  // Snapshot the just-completed peer + total for the indicator's inter-session
+  // hold. Call on the Done transition under stateMux_ before resetSession()
+  // blanks the fields; the write crosses to Core 0 (onResult recv task) while
+  // the indicator's mux-less getLastSession read tolerates one torn frame.
+  void captureLastSession();
 
   // Inbound dispatchers (Core 0 / WiFi recv task: caller takes the mux around
   // the state pivot; logging happens outside the mux).
@@ -186,7 +221,9 @@ class FirmwareDistributor {
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   static void streamingTaskTrampoline(void* arg);
-  void        streamingTaskLoop();
+  // Services every registered instance's step per wake; one shared task drives
+  // all distributors.
+  static void streamingTaskLoop();
   // One inner-loop iteration: send one OFFER retry if due, OR one chunk if
   // streaming. Returns false to put the task back on the wake semaphore.
   bool        streamingTaskStep(uint32_t nowMs);
@@ -205,10 +242,13 @@ class FirmwareDistributor {
     uint8_t  mac[6];
     uint32_t backoffUntilMs;
     bool     used;
+    // True = never expires (backoffUntilMs unused). Session-lifetime block,
+    // not a timed backoff.
+    bool     persistent;
   };
   bool peerIsInBackoff(const uint8_t mac[6], uint32_t nowMs) const;
   void notePeerBackoff(const uint8_t mac[6], uint32_t nowMs,
-                       uint32_t durationMs);
+                       uint32_t durationMs, bool persistent = false);
 
   FirmwareTransport* transport_ = nullptr;
   // nullptr = firmware distribution (default). Set on the FS distributor
@@ -226,6 +266,12 @@ class FirmwareDistributor {
   // Wire version emitted for this target, captured from the peer's HELLO at
   // considerPeerForOta time. Reset to 0 in resetSession().
   uint8_t  targetProtocolVersion_ = 0;
+  // Negotiated chunk size for this session, captured from the peer's HELLO
+  // FW_MAX_CHUNK TLV at considerPeerForOta time. Reset to the baseline floor
+  // in resetSession(). Drives totalChunks_, the per-chunk slice, and the
+  // OFFER's chunkSize field; the CHUNK payload buffer stays sized to
+  // FW_CHUNK_SIZE_MAX regardless (the ceiling every session fits under).
+  uint16_t sessionChunkSize_      = lamp_protocol::FW_CHUNK_SIZE_BASELINE;
   uint16_t totalChunks_           = 0;
   uint16_t nextChunkIdx_           = 0;
   // Monotonic max of nextChunkIdx_, read by sentChunksCount() so the indicator
@@ -253,6 +299,15 @@ class FirmwareDistributor {
   // reused across every OFFER + DONE.
   uint8_t  sha256Prefix_[8]    = {0};
   bool     shaPrefixReady_     = false;
+  // Full digest + LSIG-footer signature, carried in the OFFER auth trailer so a
+  // receiver verifies authenticity before streaming. authReady_ is set only
+  // after this lamp's own signature verifies against kFirmwarePubkey at begin();
+  // an unverifiable running image never offers. FS distribution binds the same
+  // fw.lsig signature over its manifest digest, so its OFFERs carry the trailer
+  // too.
+  uint8_t  sha256Full_[32]     = {0};
+  uint8_t  imageSignature_[64] = {0};
+  bool     authReady_          = false;
   uint32_t firmwareTotalLen_   = 0;
   uint16_t firmwareTotalChunks_ = 0;
   uint8_t  cachedSrcMac_[6]    = {0};
@@ -261,13 +316,20 @@ class FirmwareDistributor {
   // Guards all session state shared between recv task (Core 0), loop task
   // (Core 1), and streaming task.
   portMUX_TYPE stateMux_ = portMUX_INITIALIZER_UNLOCKED;
-  // Given on transition into OfferSent/Streaming. Token-bucket of 1.
-  SemaphoreHandle_t wakeSem_       = nullptr;
-  TaskHandle_t      streamingTask_ = nullptr;
+
+  // One streaming task + wake sem shared across all instances. The fw/FS start
+  // gates keep at most one registrant streaming at a time, so the shared loop
+  // services whichever is active without interleaving real work. s_sharedWake
+  // is a token-bucket of 1, given on transition into OfferSent/Streaming.
+  // ponytail: fixed [2] holds the firmware + FS partition targets; bump if a
+  // third OTA partition target appears.
+  static FirmwareDistributor* s_streamers[2];
+  static uint8_t              s_streamerCount;
+  static SemaphoreHandle_t    s_sharedWake;
+  static TaskHandle_t         s_sharedTask;
 #endif
 
   PeerPenalty penalties_[kPenaltyRingSize] = {};
-  size_t      penaltyHead_                 = 0;
 
   // Inter-session quiet hold. During a fleet OTA wave several below-version
   // peers queue; without the latch each session's enterQuiet/exitQuiet leaves a
@@ -276,6 +338,13 @@ class FirmwareDistributor {
   // peer so the indicator paints a held full bar through the gap.
   static constexpr uint32_t kInterSessionQuietHoldMs = 10000;
   bool     quietHeld_                   = false;
+  // Set once the streaming task has entered quiet + torn down the radio for the
+  // active session; reset in resetSession(). Radio teardown is deferred off the
+  // recv task (enterQuiet's BLE-host/webserver shutdown isn't recv-task-safe) and
+  // off OfferSent (the first ACCEPT should arrive under a live radio) to the
+  // streaming task's first Streaming step. Guards against re-tearing on a
+  // Finalizing→Streaming REQ bounce.
+  bool     sessionQuietArmed_          = false;
   uint32_t quietHoldUntilMs_            = 0;
   uint8_t  lastSessionPeerMac_[6]       = {0};
   uint16_t lastSessionTotalChunks_      = 0;

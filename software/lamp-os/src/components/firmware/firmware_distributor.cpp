@@ -4,6 +4,7 @@
 
 #include "firmware_receiver.hpp"  // FirmwareTransport interface
 #include "firmware_signature.hpp"  // kLsigFooterLen
+#include "ota_channel.hpp"
 #include "components/network/ble/ble_control.hpp"  // pauseRadioForOta / resumeRadioAfterOta
 #include "components/firmware/ota_quiet_mode.hpp"     // enterQuiet / exitQuiet
 #include "components/network/protocol/lamp_protocol.hpp"
@@ -27,6 +28,13 @@
 namespace lamp {
 
 FirmwareDistributor firmwareDistributor;
+
+#if defined(ARDUINO) || defined(ESP_PLATFORM)
+FirmwareDistributor* FirmwareDistributor::s_streamers[2] = {nullptr, nullptr};
+uint8_t              FirmwareDistributor::s_streamerCount = 0;
+SemaphoreHandle_t    FirmwareDistributor::s_sharedWake = nullptr;
+TaskHandle_t         FirmwareDistributor::s_sharedTask = nullptr;
+#endif
 
 namespace {
 
@@ -52,7 +60,14 @@ void FirmwareDistributor::begin(FirmwareTransport* transport) {
     return;
   }
 
-  // Snapshot the lamp's MAC once — getMyMac is cheap but the streaming task
+  // Dev channel is USB-only; never source OTA even if a footer somehow exists.
+  if (std::strstr(lamp::FIRMWARE_CHANNEL_STR, "-dev")) {
+    state_ = State::Disabled;
+    FWDIST_LOGLN("[fwdist] disabled (dev channel)");
+    return;
+  }
+
+  // Snapshot the lamp's MAC once. getMyMac is cheap but the streaming task
   // would otherwise hammer it per chunk.
   transport_->getMyMac(cachedSrcMac_);
 
@@ -68,15 +83,18 @@ void FirmwareDistributor::begin(FirmwareTransport* transport) {
       FWDIST_LOGLN("[fsdist] disabled (no spiffs partition)");
       return;
     }
-    if (!fsHooks_->lengthAndDigest(&firmwareTotalLen_, sha256Prefix_)) {
+    if (!fsHooks_->lengthAndDigest(&firmwareTotalLen_, sha256Prefix_,
+                                   sha256Full_, imageSignature_)) {
       state_ = State::Disabled;
       FWDIST_LOGLN("[fsdist] disabled (length/digest)");
       return;
     }
     shaPrefixReady_ = true;
+    // FS offers now carry the same digest + signature auth trailer as firmware,
+    // so the receiver verifies before it unmounts + erases the live web UI.
+    authReady_ = true;
     firmwareTotalChunks_ = static_cast<uint16_t>(
-        (firmwareTotalLen_ + lamp_protocol::FW_CHUNK_SIZE - 1) /
-        lamp_protocol::FW_CHUNK_SIZE);
+        (firmwareTotalLen_ + sessionChunkSize_ - 1) / sessionChunkSize_);
     if (firmwareTotalChunks_ == 0) {
       state_ = State::Disabled;
       FWDIST_LOGLN("[fsdist] disabled (empty fs image)");
@@ -91,16 +109,16 @@ void FirmwareDistributor::begin(FirmwareTransport* transport) {
   }
   // Distribute the actual signed image size, not the partition capacity (the
   // partition is larger, tail erased to 0xFF; sending it would stream garbage
-  // and break the receiver's SHA). Scan FORWARD for the lowest valid LSIG
-  // footer: forward, not backward, is load-bearing (see discoverImageLength).
+  // and break the receiver's SHA). Scan forward for the lowest valid LSIG
+  // footer (see discoverImageLength for why a backward scan can find a stale
+  // footer from a smaller predecessor image).
   if (!discoverImageLength(&firmwareTotalLen_)) {
     state_ = State::Disabled;
     FWDIST_LOGLN("[fwdist] disabled (could not discover image length)");
     return;
   }
   firmwareTotalChunks_ = static_cast<uint16_t>(
-      (firmwareTotalLen_ + lamp_protocol::FW_CHUNK_SIZE - 1) /
-      lamp_protocol::FW_CHUNK_SIZE);
+      (firmwareTotalLen_ + sessionChunkSize_ - 1) / sessionChunkSize_);
   if (firmwareTotalLen_ <= kFwFooterLenV1 || firmwareTotalChunks_ == 0) {
     state_ = State::Disabled;
     FWDIST_LOGLN("[fwdist] disabled (running partition too small for OTA)");
@@ -112,6 +130,27 @@ void FirmwareDistributor::begin(FirmwareTransport* transport) {
     FWDIST_LOGLN("[fwdist] disabled (sha256 prefix compute failed)");
     return;
   }
+  // Read the running image's ed25519 signature from its LSIG footer and verify
+  // it against the running digest + kFirmwarePubkey. A running image that doesn't
+  // self-verify (unsigned, foreign key, corrupt footer) must never OFFER: the
+  // receiver would stream the whole image and reject it at end-verify, looping.
+  {
+    const uint32_t footerStart = firmwareTotalLen_ - kFwFooterLenV1;
+    if (!readPartitionBytes(
+            footerStart + ::lamp::firmware::kLsigSignatureOffset,
+            ::lamp::firmware::kLsigSignatureLen, imageSignature_)) {
+      state_ = State::Disabled;
+      FWDIST_LOGLN("[fwdist] disabled (signature read failed)");
+      return;
+    }
+    if (!::lamp::firmware::verifyFirmwareDigestSignature(sha256Full_,
+                                                         imageSignature_)) {
+      state_ = State::Disabled;
+      FWDIST_LOGLN("[fwdist] disabled (running image signature invalid)");
+      return;
+    }
+    authReady_ = true;
+  }
   }  // else: firmware distribution
 #else
   // Native test path: tests bypass begin() or stub these fields directly.
@@ -121,34 +160,29 @@ void FirmwareDistributor::begin(FirmwareTransport* transport) {
   stateEnteredMs_ = 0;
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-  wakeSem_ = xSemaphoreCreateBinary();
-  if (!wakeSem_) {
-    FWDIST_LOGLN("[fwdist] failed to create wake semaphore");
+  if (!s_sharedWake) {
+    s_sharedWake = xSemaphoreCreateBinary();
+    if (!s_sharedWake) {
+      FWDIST_LOGLN("[fwdist] failed to create wake semaphore");
+      state_ = State::Disabled;
+      return;
+    }
+  }
+  if (s_streamerCount >= (sizeof(s_streamers) / sizeof(s_streamers[0]))) {
+    FWDIST_LOGLN("[fwdist] streamer registry full");
     state_ = State::Disabled;
     return;
   }
-  // Unpinned so the scheduler can place it on whichever core has slack.
-  const BaseType_t ok = xTaskCreate(
-      &FirmwareDistributor::streamingTaskTrampoline,
-      "fwdist",
-      kStreamingTaskStackSize,
-      this,
-      kStreamingTaskPriority,
-      &streamingTask_);
-  if (ok != pdPASS) {
-    FWDIST_LOGLN("[fwdist] failed to create streaming task");
-    state_ = State::Disabled;
-    return;
-  }
+  s_streamers[s_streamerCount++] = this;
   FWDIST_LOGF("[fwdist] online; v=0x%08lx chunks=%u totalLen=%u\n",
                 (unsigned long)lamp::FIRMWARE_VERSION,
                 (unsigned)firmwareTotalChunks_,
                 (unsigned)firmwareTotalLen_);
-  // Loop-task stack HWM: discoverImageLength + computeShaPrefixOnce each
-  // stack-allocate 4 KB scratch on the 8 KB loop stack. Words; x4 for bytes.
-  const UBaseType_t hwmWords = uxTaskGetStackHighWaterMark(nullptr);
-  FWDIST_LOGF("[fwdist] loop-task stack HWM: %u words (%u bytes free)\n",
-                (unsigned)hwmWords, (unsigned)(hwmWords * 4));
+  // Loop-task stack HWM: computeShaPrefixOnce stack-allocates a 512 B SHA
+  // scratch block on the loop stack (discoverImageLength's window is ~259 B).
+  const UBaseType_t hwmBytes = uxTaskGetStackHighWaterMark(nullptr);
+  FWDIST_LOGF("[fwdist] loop-task stack HWM: %u bytes free\n",
+                (unsigned)hwmBytes);
 #endif
 }
 
@@ -158,6 +192,21 @@ bool FirmwareDistributor::isInProgress() const {
 }
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
+
+void FirmwareDistributor::startSharedStreaming() {
+  if (s_sharedTask || s_streamerCount == 0) return;
+  // Unpinned so the scheduler can place it on whichever core has slack.
+  const BaseType_t ok = xTaskCreate(
+      &FirmwareDistributor::streamingTaskTrampoline,
+      "fwdist",
+      kStreamingTaskStackSize,
+      nullptr,
+      kStreamingTaskPriority,
+      &s_sharedTask);
+  if (ok != pdPASS) {
+    FWDIST_LOGLN("[fwdist] failed to create streaming task");
+  }
+}
 
 bool FirmwareDistributor::readPartitionBytes(uint32_t offset, size_t len,
                                              uint8_t* buf) const {
@@ -169,65 +218,13 @@ bool FirmwareDistributor::readPartitionBytes(uint32_t offset, size_t len,
 
 bool FirmwareDistributor::discoverImageLength(uint32_t* outLen) const {
   if (!runningPartition_ || !outLen) return false;
-  // Locate the running image's LSIG footer (at the START of the partition) by
-  // scanning FORWARD and returning the FIRST valid footer (lowest offset). The
-  // signed length is whatever the footer says (signedRegionLen == footerStart).
-  //
-  // Forward, not backward, is load-bearing. esptool's app-only flash erases
-  // only the bytes it writes, so a lamp re-flashed with an image SMALLER than
-  // its predecessor keeps the OLD image's footer in the un-erased tail at a
-  // HIGHER offset, and that stale footer is internally self-consistent so the
-  // signedRegionLen sanity check can't reject it. A backward scan finds the
-  // stale footer first and streams the wrong image. The lowest valid footer is
-  // always the running image's: a LARGER new image fully overwrites a smaller
-  // predecessor (footer included), so no stale footer survives BELOW the
-  // current one. (A normal mesh OTA erases a fixed sector span that masks this,
-  // which is why it only bit esptool-flashed lamps.)
-  //
-  // 256-byte sliding window with a (kMagicLen - 1) overlap so a magic that
-  // straddles a window boundary isn't missed. Called once at init, so the
-  // forward read up to the footer is a one-time cost.
-  constexpr size_t  kWindow   = 256;
-  constexpr size_t  kMagicLen = 4;  // "LSIG"
-  static const uint8_t kMagic[kMagicLen] = {'L', 'S', 'I', 'G'};
-  uint8_t buf[kWindow + kMagicLen - 1];
-  const uint32_t partSize = runningPartition_->size;
-  uint32_t scanStart = 0;
-  while (scanStart < partSize) {
-    const size_t take = (partSize - scanStart > kWindow) ? kWindow
-                                                         : (partSize - scanStart);
-    // Read (kMagicLen - 1) past the window so a magic straddling the top
-    // boundary is captured intact; those bytes belong to the next window.
-    const size_t extra = (scanStart + take + kMagicLen - 1 <= partSize)
-                            ? (kMagicLen - 1)
-                            : 0;
-    if (!readPartitionBytes(scanStart, take + extra, buf)) return false;
-    for (size_t off = 0; off < take; ++off) {
-      if (off + kMagicLen > take + extra) break;
-      if (buf[off]     == kMagic[0] &&
-          buf[off + 1] == kMagic[1] &&
-          buf[off + 2] == kMagic[2] &&
-          buf[off + 3] == kMagic[3]) {
-        const uint32_t footerStart = scanStart + off;
-        uint8_t lenBytes[4];
-        if (!readPartitionBytes(footerStart + ::lamp::firmware::kLsigSignedLenOffset,
-                                4, lenBytes)) return false;
-        const uint32_t signedRegionLen =
-            static_cast<uint32_t>(lenBytes[0]) |
-            (static_cast<uint32_t>(lenBytes[1]) << 8) |
-            (static_cast<uint32_t>(lenBytes[2]) << 16) |
-            (static_cast<uint32_t>(lenBytes[3]) << 24);
-        // Real footer sits immediately after its signed region. A
-        // coincidental "LSIG" inside firmware data won't satisfy this.
-        if (signedRegionLen == footerStart) {
-          *outLen = footerStart + kFwFooterLenV1;
-          return true;
-        }
-      }
-    }
-    scanStart += take;
-  }
-  return false;
+  return ::lamp::firmware::discoverSignedImageLength(
+      [this](size_t off, size_t want, uint8_t* out) -> int {
+        return readPartitionBytes(static_cast<uint32_t>(off), want, out)
+                   ? static_cast<int>(want)
+                   : -1;
+      },
+      runningPartition_->size, outLen);
 }
 
 bool FirmwareDistributor::computeShaPrefixOnce(uint32_t totalLen) {
@@ -243,9 +240,11 @@ bool FirmwareDistributor::computeShaPrefixOnce(uint32_t totalLen) {
     return false;
   }
 
-  // Stream the signed region through SHA-256 in 4 KB blocks: the partition is
+  // Stream the signed region through SHA-256 in 512 B blocks: the partition is
   // at a physical offset, not a CPU address, so it can't be hashed in place.
-  constexpr size_t kBlock = 4096;
+  // SHA-256 is a streaming hash, so block size doesn't change the digest; a
+  // small block keeps the boot-time scratch off the loop-task stack.
+  constexpr size_t kBlock = 512;
   uint8_t buf[kBlock];
   uint32_t cursor = 0;
   while (cursor < signedLen) {
@@ -269,6 +268,7 @@ bool FirmwareDistributor::computeShaPrefixOnce(uint32_t totalLen) {
   }
   mbedtls_sha256_free(&ctx);
   std::memcpy(sha256Prefix_, digest, 8);
+  std::memcpy(sha256Full_, digest, 32);
   shaPrefixReady_ = true;
   FWDIST_LOGF("[fwdist] sha256 prefix = %02x%02x%02x%02x%02x%02x%02x%02x\n",
                 sha256Prefix_[0], sha256Prefix_[1], sha256Prefix_[2],
@@ -280,11 +280,12 @@ bool FirmwareDistributor::computeShaPrefixOnce(uint32_t totalLen) {
 // Wake the streaming task. Safe from recv task + loop task + the task
 // itself (idempotent give on a binary semaphore).
 void FirmwareDistributor::wakeStreamingTask() {
-  if (wakeSem_) xSemaphoreGive(wakeSem_);
+  if (s_sharedWake) xSemaphoreGive(s_sharedWake);
 }
 
 void FirmwareDistributor::streamingTaskTrampoline(void* arg) {
-  static_cast<FirmwareDistributor*>(arg)->streamingTaskLoop();
+  (void)arg;
+  streamingTaskLoop();
 }
 
 // Blocks on the wake semaphore until there's work, then drains
@@ -293,11 +294,15 @@ void FirmwareDistributor::streamingTaskTrampoline(void* arg) {
 // task can preempt the loop without waiting on the next idle poll boundary.
 void FirmwareDistributor::streamingTaskLoop() {
   for (;;) {
-    xSemaphoreTake(wakeSem_, pdMS_TO_TICKS(kStreamingIdlePollMs));
-    while (streamingTaskStep(millis())) {
-      // Yield so the WiFi task can push frames over the air before the next
-      // one is queued (see kStreamingChunkSpacingMs).
-      vTaskDelay(pdMS_TO_TICKS(kStreamingChunkSpacingMs));
+    xSemaphoreTake(s_sharedWake, pdMS_TO_TICKS(kStreamingIdlePollMs));
+    for (uint8_t i = 0; i < s_streamerCount; ++i) {
+      // Re-read millis() per step; a hoisted now freezes the clock and the
+      // tick() stall watchdog reads every chunk as overdue, failing the peer.
+      while (s_streamers[i]->streamingTaskStep(millis())) {
+        // Yield so the WiFi task can push frames over the air before the next
+        // one is queued (see kStreamingChunkSpacingMs).
+        vTaskDelay(pdMS_TO_TICKS(kStreamingChunkSpacingMs));
+      }
     }
   }
 }
@@ -311,6 +316,8 @@ bool FirmwareDistributor::streamingTaskStep(uint32_t nowMs) {
   uint8_t  offerRetriesLocal = 0;
   uint16_t nextChunkLocal = 0;
   uint16_t totalChunksLocal = 0;
+  bool     quietHeldLocal = false;
+  bool     sessionQuietArmedLocal = false;
   portENTER_CRITICAL(&stateMux_);
   s = state_;
   std::memcpy(targetMacLocal, targetMac_, 6);
@@ -318,6 +325,8 @@ bool FirmwareDistributor::streamingTaskStep(uint32_t nowMs) {
   offerRetriesLocal  = offerRetryCount_;
   nextChunkLocal     = nextChunkIdx_;
   totalChunksLocal   = totalChunks_;
+  quietHeldLocal     = quietHeld_;
+  sessionQuietArmedLocal = sessionQuietArmed_;
   portEXIT_CRITICAL(&stateMux_);
 
   if (s == State::OfferSent) {
@@ -335,13 +344,35 @@ bool FirmwareDistributor::streamingTaskStep(uint32_t nowMs) {
       return true;
     }
     const uint32_t waitMs = kOfferRetryIntervalMs - sinceLast;
-    // xSemaphoreTake (not vTaskDelay) so a state-pivoting recv event wakes us
-    // immediately instead of burning ~200ms of dead air after ACCEPT.
-    xSemaphoreTake(wakeSem_, pdMS_TO_TICKS(waitMs));
+    // xSemaphoreTake (not vTaskDelay) so a state-pivoting recv event wakes the
+    // task immediately instead of burning ~200ms of dead air after ACCEPT.
+    xSemaphoreTake(s_sharedWake, pdMS_TO_TICKS(waitMs));
     return true;
   }
 
   if (s == State::Streaming) {
+    // Deferred radio teardown + quiet entry, once per session, before chunk 0.
+    // Safe task context (unlike the recv task that sets Streaming) and the radio
+    // is down for the chunk flood. An inherited hold (quietHeldLocal) already
+    // tore it down. quietHeld_ is state-disjoint here: the loop-task Idle reap
+    // only clears it in State::Idle, which can't run while this session streams.
+    if (!sessionQuietArmedLocal) {
+      if (!quietHeldLocal) {
+        ::lamp::ota_quiet_mode::enterQuiet(/*tearDownRadio=*/true,
+                                           /*visible=*/fsHooks_ == nullptr);
+      }
+      portENTER_CRITICAL(&stateMux_);
+      quietHeld_         = true;
+      quietHoldUntilMs_  = 0;
+      sessionQuietArmed_ = true;
+      portEXIT_CRITICAL(&stateMux_);
+#ifdef LAMP_DEBUG
+      const UBaseType_t hwmBytes = uxTaskGetStackHighWaterMark(nullptr);
+      FWDIST_LOGF("[fwdist] streaming-task stack HWM after teardown: "
+                  "%u bytes free\n",
+                  (unsigned)hwmBytes);
+#endif
+    }
     if (nextChunkLocal >= totalChunksLocal) {
       // Drained: transition to Finalizing and emit DONE outside the mux.
       bool needFinalize = false;
@@ -355,7 +386,7 @@ bool FirmwareDistributor::streamingTaskStep(uint32_t nowMs) {
       portEXIT_CRITICAL(&stateMux_);
       if (needFinalize) emitDone(nowMs);
       // No more chunk work; idle. tick() owns the FINALIZE timeout, the recv
-      // task wakes us on RESULT.
+      // task wakes the streamer on RESULT.
       return false;
     }
     const int rc = streamOneChunk(nowMs);
@@ -392,11 +423,11 @@ int FirmwareDistributor::streamOneChunk(uint32_t nowMs) {
 
   if (!transport_ || !runningPartition_) return 2;
 
-  uint8_t scratch[lamp_protocol::FW_CHUNK_SIZE];
+  uint8_t scratch[lamp_protocol::FW_CHUNK_SIZE_MAX];
   const uint32_t offset =
-      static_cast<uint32_t>(chunkIdx) * lamp_protocol::FW_CHUNK_SIZE;
-  // Last chunk is short when totalLen isn't a multiple of FW_CHUNK_SIZE.
-  size_t want = lamp_protocol::FW_CHUNK_SIZE;
+      static_cast<uint32_t>(chunkIdx) * sessionChunkSize_;
+  // Last chunk is short when totalLen isn't a multiple of sessionChunkSize_.
+  size_t want = sessionChunkSize_;
   if (offset >= firmwareTotalLen_) {
     return 2;
   }
@@ -462,8 +493,8 @@ int FirmwareDistributor::streamOneChunk(uint32_t nowMs) {
     lastSentMs_ = nowMs;
     lastBurstSentChunks_++;
     // Smart-REQ resume: after serving the requested chunks, jump back to the
-    // forward-progress position so we don't re-stream what the receiver has
-    // (set up in onReq).
+    // forward-progress position so the stream doesn't repeat what the receiver
+    // has (set up in onReq).
     if (resumeChunkIdx_ != 0 && nextChunkIdx_ >= reqEndIdx_ &&
         nextChunkIdx_ < resumeChunkIdx_) {
       resumeToLog       = resumeChunkIdx_;
@@ -645,12 +676,6 @@ void FirmwareDistributor::tick(uint32_t nowMs) {
 
     case State::Failed:
     case State::Done:
-      // Capture last-session identity BEFORE resetSession() blanks
-      // targetMac/totalChunks so ota_indicator can keep painting a held
-      // completed bar through the inter-session quiet hold.
-      std::memcpy(lastSessionPeerMac_, targetMac_, 6);
-      lastSessionTotalChunks_ = totalChunks_;
-      lastSessionValid_       = true;
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
       portENTER_CRITICAL(&stateMux_);
       resetSession();
@@ -663,10 +688,13 @@ void FirmwareDistributor::tick(uint32_t nowMs) {
       stateEnteredMs_ = nowMs;
 #endif
       // Defer exitQuiet to keep the indicator up through the gap to the next
-      // session. The Idle case expires the hold if nothing arms within
-      // kInterSessionQuietHoldMs; a new emitOffer inside the window inherits
-      // the held quiet and clears the pending exit.
-      quietHoldUntilMs_ = nowMs + kInterSessionQuietHoldMs;
+      // session, but only when quiet is actually held: a session that failed
+      // before its first Streaming step never entered quiet. The Idle case
+      // expires the hold if nothing arms within kInterSessionQuietHoldMs; a new
+      // emitOffer inside the window inherits the held quiet and clears the exit.
+      if (quietHeld_) {
+        quietHoldUntilMs_ = nowMs + kInterSessionQuietHoldMs;
+      }
       break;
 
     case State::Disabled:
@@ -678,7 +706,9 @@ void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
                                              uint32_t peerVersion,
                                              uint8_t peerProtocolVersion,
                                              uint32_t nowMs,
-                                             const char* peerFwChannel) {
+                                             const char* peerFwChannel,
+                                             uint16_t peerMaxChunk,
+                                             int8_t peerRssi) {
   if (state_ != State::Idle) {
     FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X v=0x%08X skip: "
                 "state=%u (not Idle)\n",
@@ -688,8 +718,8 @@ void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
     return;
   }
   if (!transport_) return;
-  // Skip until we've heard a HELLO (peerProtocolVersion 0), so we never OFFER
-  // at an unknown version.
+  // Skip until a HELLO has arrived (peerProtocolVersion 0), so an OFFER never
+  // goes out at an unknown version.
   if (peerProtocolVersion < lamp_protocol::PROTOCOL_VERSION_RX_MIN ||
       peerProtocolVersion > lamp_protocol::PROTOCOL_VERSION_RX_MAX) {
     FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X v=0x%08X skip: "
@@ -699,6 +729,18 @@ void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
                 (unsigned)peerVersion, (unsigned)peerProtocolVersion,
                 (unsigned)lamp_protocol::PROTOCOL_VERSION_RX_MIN,
                 (unsigned)lamp_protocol::PROTOCOL_VERSION_RX_MAX);
+    return;
+  }
+  // Skip peers below the OTA signal floor: a weak direct hop thrashes/fails
+  // regardless of chunk size. Unknown RSSI (-127 sentinel) isn't gated;
+  // cascade OTA reaches this peer later via a nearer upgraded lamp.
+  if (peerRssi != -127 && peerRssi < lamp_protocol::kOtaMinRssiDbm) {
+    FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X v=0x%08X skip: "
+                "rssi=%d below floor %d\n",
+                peerMac[0], peerMac[1], peerMac[2],
+                peerMac[3], peerMac[4], peerMac[5],
+                (unsigned)peerVersion, (int)peerRssi,
+                (int)lamp_protocol::kOtaMinRssiDbm);
     return;
   }
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
@@ -712,22 +754,26 @@ void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
     return;
   }
 #endif
-  // Peer-stale gate. Firmware: skip peers at/above our version. FS skips it:
-  // fs_ota pre-decides staleness, and the FS image's version equals our
-  // firmware version so a >= test would reject every eligible peer.
-  if (!fsHooks_ && peerVersion >= lamp::FIRMWARE_VERSION) return;
-  // Type/channel gate: a known peer {type}-{channel} that differs from ours
-  // doesn't OFFER. An unknown/empty channel is an older peer; fall through to
-  // the receiver's silent-drop backstop.
-  if (peerFwChannel && peerFwChannel[0] != '\0' &&
-      std::strncmp(peerFwChannel, lamp::FIRMWARE_CHANNEL_STR,
-                   lamp_protocol::FW_CHANNEL_LEN) != 0) {
-    FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X skip: "
-                "peer channel=%s != ours=%s\n",
-                peerMac[0], peerMac[1], peerMac[2],
-                peerMac[3], peerMac[4], peerMac[5],
-                peerFwChannel, lamp::FIRMWARE_CHANNEL_STR);
-    return;
+  // FS distributor uses its own staleness gate; firmware uses otaAcceptable.
+  if (!fsHooks_) {
+    if (peerFwChannel && peerFwChannel[0] != '\0') {
+      // Known channel: ask "would the peer accept this firmware?" by calling
+      // otaAcceptable with the peer as receiver and this lamp as the offer side.
+      if (!otaAcceptable(peerFwChannel, peerVersion,
+                         lamp::FIRMWARE_CHANNEL_STR, lamp::FIRMWARE_VERSION)) {
+        FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X skip: "
+                    "otaAcceptable(peerCh=%s peerV=0x%08X ourCh=%s ourV=0x%08X)=false\n",
+                    peerMac[0], peerMac[1], peerMac[2],
+                    peerMac[3], peerMac[4], peerMac[5],
+                    peerFwChannel, (unsigned)peerVersion,
+                    lamp::FIRMWARE_CHANNEL_STR, (unsigned)lamp::FIRMWARE_VERSION);
+        return;
+      }
+    } else {
+      // Unknown/empty channel (older peer with no channel TLV): fall back to
+      // version-only gate. Receiver's otaAcceptable is the downstream backstop.
+      if (peerVersion >= lamp::FIRMWARE_VERSION) return;
+    }
   }
   if (peerIsInBackoff(peerMac, nowMs)) {
     FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X v=0x%08X skip: "
@@ -743,14 +789,24 @@ void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
               peerMac[3], peerMac[4], peerMac[5],
               (unsigned)peerVersion, (unsigned)lamp::FIRMWARE_VERSION);
   // An unknown-channel peer can still reach here; the receiver's onOfferOnLoop
-  // silent-drop is the backstop (the OFFER times out into our backoff ring).
+  // silent-drop is the backstop (the OFFER times out into the backoff ring).
   targetProtocolVersion_ = peerProtocolVersion;
+  // peerMaxChunk 0 = peer doesn't advertise HELLO_TLV_FW_MAX_CHUNK (older
+  // firmware, or never-OTA-receiving peer) → the baseline every receiver
+  // accepts. Otherwise cap at FW_CHUNK_SIZE_MAX in case a peer overstates.
+  const uint16_t cappedPeerMaxChunk =
+      peerMaxChunk < lamp_protocol::FW_CHUNK_SIZE_MAX
+          ? peerMaxChunk
+          : lamp_protocol::FW_CHUNK_SIZE_MAX;
+  sessionChunkSize_ = peerMaxChunk > 0 ? cappedPeerMaxChunk
+                                       : lamp_protocol::FW_CHUNK_SIZE_BASELINE;
   emitOffer(peerMac, peerVersion, nowMs);
 }
 
 void FirmwareDistributor::resetSession() {
   std::memset(targetMac_, 0, 6);
   targetProtocolVersion_ = 0;
+  sessionChunkSize_ = lamp_protocol::FW_CHUNK_SIZE_BASELINE;
   totalChunks_     = 0;
   nextChunkIdx_    = 0;
   sentProgress_.reset();
@@ -766,6 +822,13 @@ void FirmwareDistributor::resetSession() {
   reqCountThisSession_ = 0;
   resumeChunkIdx_  = 0;
   reqEndIdx_       = 0;
+  sessionQuietArmed_ = false;
+}
+
+void FirmwareDistributor::captureLastSession() {
+  std::memcpy(lastSessionPeerMac_, targetMac_, 6);
+  lastSessionTotalChunks_ = totalChunks_;
+  lastSessionValid_       = true;
 }
 
 bool FirmwareDistributor::getLastSession(uint8_t outMac[6],
@@ -782,23 +845,58 @@ bool FirmwareDistributor::peerIsInBackoff(const uint8_t mac[6],
     const auto& p = penalties_[i];
     if (!p.used) continue;
     if (!macsEqual(p.mac, mac)) continue;
+    if (p.persistent) return true;
     if (nowMs < p.backoffUntilMs) return true;
   }
   return false;
 }
 
 void FirmwareDistributor::notePeerBackoff(const uint8_t mac[6], uint32_t nowMs,
-                                          uint32_t durationMs) {
+                                          uint32_t durationMs,
+                                          bool persistent) {
   for (size_t i = 0; i < kPenaltyRingSize; ++i) {
     if (penalties_[i].used && macsEqual(penalties_[i].mac, mac)) {
       penalties_[i].backoffUntilMs = nowMs + durationMs;
+      penalties_[i].persistent     = persistent;
       return;
     }
   }
-  penalties_[penaltyHead_].used = true;
-  std::memcpy(penalties_[penaltyHead_].mac, mac, 6);
-  penalties_[penaltyHead_].backoffUntilMs = nowMs + durationMs;
-  penaltyHead_ = (penaltyHead_ + 1) % kPenaltyRingSize;
+
+  // Slot priority for a new mac: free > expired transient > active transient.
+  // A persistent (cross-variant-block) slot is never picked here, so a later
+  // transient penalty can't evict an earlier permanent block.
+  int freeSlot = -1, expiredTransient = -1, activeTransient = -1, oldestPersistent = -1;
+  for (size_t i = 0; i < kPenaltyRingSize; ++i) {
+    PeerPenalty& p = penalties_[i];
+    if (!p.used) {
+      if (freeSlot < 0) freeSlot = static_cast<int>(i);
+    } else if (!p.persistent) {
+      if (nowMs >= p.backoffUntilMs) {
+        if (expiredTransient < 0) expiredTransient = static_cast<int>(i);
+      } else if (activeTransient < 0) {
+        activeTransient = static_cast<int>(i);
+      }
+    } else if (oldestPersistent < 0 ||
+               p.backoffUntilMs < penalties_[oldestPersistent].backoffUntilMs) {
+      oldestPersistent = static_cast<int>(i);
+    }
+  }
+
+  int slot = freeSlot >= 0 ? freeSlot
+           : expiredTransient >= 0 ? expiredTransient
+           : activeTransient;
+  if (slot < 0) {
+    // Ring is entirely persistent blocks. A transient penalty re-arms on its
+    // next failure, so skip it rather than evict a permanent block; a new
+    // permanent block replaces the oldest one (bounded, least-bad choice).
+    if (!persistent) return;
+    slot = oldestPersistent;
+  }
+
+  penalties_[slot].used           = true;
+  penalties_[slot].persistent     = persistent;
+  std::memcpy(penalties_[slot].mac, mac, 6);
+  penalties_[slot].backoffUntilMs = nowMs + durationMs;
 }
 
 void FirmwareDistributor::recordPeerFailure(uint32_t nowMs) {
@@ -815,6 +913,14 @@ void FirmwareDistributor::recordPeerFailureFinalize(uint32_t nowMs) {
     if (targetMac_[i] != 0) { nonzero = true; break; }
   }
   if (nonzero) notePeerBackoff(targetMac_, nowMs, kPeerFinalizeBackoffMs);
+}
+
+void FirmwareDistributor::recordPeerBlocklist(uint32_t nowMs) {
+  bool nonzero = false;
+  for (int i = 0; i < 6; ++i) {
+    if (targetMac_[i] != 0) { nonzero = true; break; }
+  }
+  if (nonzero) notePeerBackoff(targetMac_, nowMs, 0, /*persistent=*/true);
 }
 
 void FirmwareDistributor::emitOffer(const uint8_t targetMac[6],
@@ -840,7 +946,11 @@ void FirmwareDistributor::emitOffer(const uint8_t targetMac[6],
   }
   std::memcpy(targetMac_, targetMac, 6);
   sessionOfferSeq_  = seqCounter_++;
-  totalChunks_      = firmwareTotalChunks_;
+  // Recomputed per session: sessionChunkSize_ (set just before this call, in
+  // considerPeerForOta) can differ from the chunk size begin() assumed, so
+  // firmwareTotalChunks_ (that stale baseline count) isn't reused here.
+  totalChunks_      = static_cast<uint16_t>(
+      (firmwareTotalLen_ + sessionChunkSize_ - 1) / sessionChunkSize_);
   nextChunkIdx_     = 0;
   lastSentChunk_    = 0;
   lastSentMs_       = 0;
@@ -859,15 +969,12 @@ void FirmwareDistributor::emitOffer(const uint8_t targetMac[6],
   portEXIT_CRITICAL(&stateMux_);
 #endif
 
-  // Enter OTA quiet mode for the session: distributor side is always EspNow,
-  // so unconditionally tear down GATT + pause adv/scan + suspend behaviors.
-  // Exited on the Idle/Failed tombstone, with an inter-session hold so OTA
-  // waves don't flicker. quietHeld_ tracks our refcount share: a deferred prior
-  // exit is inherited (don't re-enter, don't double-count).
-  if (!quietHeld_) {
-    ::lamp::ota_quiet_mode::enterQuiet(/*tearDownRadio=*/true);
-    quietHeld_ = true;
-  }
+  // Quiet mode + radio teardown are deferred to the streaming task on the first
+  // Streaming step (see streamingTaskStep): enterQuiet's BLE-host + webserver
+  // shutdown isn't safe on the recv task where ACCEPT lands, and keeping adv/scan
+  // live through OfferSent lets the first ACCEPT arrive before the radio drops.
+  // An inherited hold (quietHeld_) means the radio is already down; just cancel
+  // its pending exit.
   quietHoldUntilMs_ = 0;
   lastSessionValid_ = false;  // new session takes over the indicator
 
@@ -882,9 +989,14 @@ void FirmwareDistributor::emitOffer(const uint8_t targetMac[6],
     state_ = State::Idle;
 #endif
     // Send failed before the session got off the ground (likely transport, not
-    // peer cadence); drop straight back to normal animations.
-    ::lamp::ota_quiet_mode::exitQuiet();
-    quietHeld_ = false;
+    // peer cadence). Only drop quiet if this distributor actually holds it (an
+    // inherited hold from a prior session): a bare exitQuiet would decrement a
+    // concurrent receiver session's refcount and knock the strip out of quiet
+    // mid-receive.
+    if (quietHeld_) {
+      ::lamp::ota_quiet_mode::exitQuiet();
+      quietHeld_ = false;
+    }
     quietHoldUntilMs_ = 0;
     return;
   }
@@ -902,6 +1014,7 @@ bool FirmwareDistributor::sendOfferFrame(const uint8_t targetMac[6],
   uint32_t sessionVersionLocal;
   uint32_t sessionTotalLenLocal;
   uint16_t totalChunksLocal;
+  uint16_t chunkSizeLocal;
   uint8_t  sha[8];
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   portENTER_CRITICAL(&stateMux_);
@@ -910,22 +1023,30 @@ bool FirmwareDistributor::sendOfferFrame(const uint8_t targetMac[6],
   sessionVersionLocal  = sessionVersion_;
   sessionTotalLenLocal = sessionTotalLen_;
   totalChunksLocal     = totalChunks_;
+  chunkSizeLocal       = sessionChunkSize_;
   std::memcpy(sha, sha256Prefix_, 8);
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   portEXIT_CRITICAL(&stateMux_);
 #endif
 
-  uint8_t buf[lamp_protocol::FW_OFFER_FIXED_SIZE];
+  uint8_t buf[lamp_protocol::FW_OFFER_AUTH_SIZE];
   const char* channel = lamp::FIRMWARE_CHANNEL_STR;
   const size_t channelLen = channel ? std::strlen(channel) : 0;
+  // Firmware and FS OTA both emit the auth trailer (digest + signature) once
+  // authReady_ so the receiver verifies before streaming; FS binds the same
+  // fw.lsig signature over its manifest digest. A pre-auth image sends the
+  // legacy trailerless OFFER.
+  const uint8_t* digestArg = authReady_ ? sha256Full_ : nullptr;
+  const uint8_t* sigArg    = authReady_ ? imageSignature_ : nullptr;
   const size_t n = lamp_protocol::buildFwOffer(
       buf, sizeof(buf), sessionOfferSeqLocal,
       cachedSrcMac_, targetMac,
-      sessionVersionLocal, sessionTotalLenLocal, lamp_protocol::FW_CHUNK_SIZE,
+      sessionVersionLocal, sessionTotalLenLocal, chunkSizeLocal,
       channel, channelLen,
       sha, kFwFooterLenV1, totalChunksLocal,
       targetProtocolVersion_,
-      fsHooks_ ? fsHooks_->offerType : lamp_protocol::MSG_FW_OFFER);
+      fsHooks_ ? fsHooks_->offerType : lamp_protocol::MSG_FW_OFFER,
+      digestArg, sigArg);
   if (!n) {
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
     FWDIST_LOGLN("[fwdist] buildFwOffer failed");
@@ -1023,7 +1144,7 @@ void FirmwareDistributor::emitDone(uint32_t nowMs) {
       // xSemaphoreTake (not vTaskDelay) so onResult's wakeStreamingTask
       // preempts the wait once RESULT lands, instead of sending more DONE
       // frames while mid-sleep.
-      xSemaphoreTake(wakeSem_, pdMS_TO_TICKS(kDoneRetryIntervalMs));
+      xSemaphoreTake(s_sharedWake, pdMS_TO_TICKS(kDoneRetryIntervalMs));
     }
 #endif
   }
@@ -1104,7 +1225,15 @@ void FirmwareDistributor::onAccept(const lamp_protocol::ParsedFwAccept& a,
   if (a.status != lamp_protocol::FwAcceptStatus::Accept) {
     logBackoff = true;
     logStatus = static_cast<uint8_t>(a.status);
-    recordPeerFailure(nowMs);
+    // Offers go only to peers read as behind; DeclineAlreadyCurrent from one
+    // of them means it can't actually accept the local variant (a genuine
+    // same-variant behind peer replies Accept). Block it instead of retrying
+    // on a timer.
+    if (a.status == lamp_protocol::FwAcceptStatus::DeclineAlreadyCurrent) {
+      recordPeerBlocklist(nowMs);
+    } else {
+      recordPeerFailure(nowMs);
+    }
     resetSession();
     state_ = State::Failed;
     stateEnteredMs_ = nowMs;
@@ -1251,6 +1380,7 @@ void FirmwareDistributor::onResult(const lamp_protocol::ParsedFwResult& r,
   const uint8_t status = static_cast<uint8_t>(r.status);
   std::memcpy(logMac, r.sourceMac, 6);
   if (status == static_cast<uint8_t>(lamp_protocol::FwResultStatus::Success)) {
+    captureLastSession();
     resetSession();
     state_ = State::Done;
     stateEnteredMs_ = nowMs;

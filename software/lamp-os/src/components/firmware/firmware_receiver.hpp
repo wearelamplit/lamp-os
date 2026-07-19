@@ -13,7 +13,9 @@
 // the erased image length; verifyAndApply rejects a re-OFFER at a different
 // length so a partial image never boots.
 //
-// Channel mismatch is a silent drop (no ACCEPT, no RESULT), at handleControlOnLoop.
+// An OFFER that fails otaAcceptable (wrong channel, cross-variant, downgrade)
+// is declined with FwAcceptStatus::DeclineAlreadyCurrent in onOfferOnLoop, so
+// the distributor drops this lamp from its queue.
 
 #include <atomic>
 #include <cstdint>
@@ -78,6 +80,11 @@ struct PendingFirmwareControl {
     uint8_t  sha256Prefix[lamp_protocol::FW_SHA256_PREFIX_LEN];
     uint16_t footerLen;
     uint16_t totalChunks;
+    // Auth trailer, copied from ParsedFwOffer. hasAuth false for a legacy
+    // (56-byte) OFFER; the receiver then declines firmware OTA upfront.
+    bool     hasAuth;
+    uint8_t  digest[lamp_protocol::FW_SHA256_FULL_LEN];
+    uint8_t  signature[lamp_protocol::FW_SIG_LEN];
   } offer;
   struct {
     uint32_t version;
@@ -101,13 +108,16 @@ struct FsReceiverHooks {
   // The spiffs partition to write into (really const esp_partition_t*).
   const void* (*partition)();
   // Accept a fresh offer? FS rule: offer.version == FIRMWARE_VERSION AND the
-  // offered digest differs from our local FS digest. (Channel/chunkSize/busy
+  // offered digest differs from the local FS digest. (Channel/chunkSize/busy
   // are checked by the receiver first.)
   bool (*shouldAccept)(uint32_t offerVersion, const uint8_t* offerDigestPrefix);
   // Verify the written partition (mount + manifest digest + ed25519 + version).
-  // Returns Success or an FS failure code; no commit step.
+  // offerDigest is the offer-time verified 32-byte manifest digest; verify binds
+  // the written image's recomputed digest to it before trusting the embedded
+  // signature. Returns Success or an FS failure code; no commit step.
   lamp_protocol::FwResultStatus (*verify)(const void* partition,
-                                          uint32_t expectedVersion);
+                                          uint32_t expectedVersion,
+                                          const uint8_t* offerDigest);
   // Post-verify apply for FS, in place of the firmware path's esp_restart():
   // the FS image is read-only at runtime, so remount SPIFFS + recompute the
   // local digest instead of rebooting. nullptr -> fall back to reboot.
@@ -213,7 +223,8 @@ class FirmwareReceiver {
   // cap=1 does NOT converge under real ESP-NOW loss (session times out before
   // the bitmap fills). 20 = one flash sector; held here until a wider value is
   // stability-tested.
-  static constexpr uint16_t kMaxReqRunChunks = 20;
+  static constexpr uint16_t kMaxReqRunChunks =
+      lamp_protocol::FW_MAX_REQ_RUN_CHUNKS;
 
   // All FW_* sends route through transport_->sendFrame (ESP-NOW broadcastRaw or
   // a BLE notify on the firmware-status characteristic).
@@ -227,8 +238,9 @@ class FirmwareReceiver {
   void abortOta();
 
   // Verify + apply, on DONE with a full bitmap: read the partition back, parse
-  // the LSIG footer, verify the signature, set the boot partition, esp_restart.
-  // Returns Success or the first failure encountered.
+  // the LSIG footer, verify the signature, and set the boot partition.
+  // Returns Success or the first failure encountered; the caller reboots on
+  // Success (firmware path) or remounts SPIFFS (FS path).
   lamp_protocol::FwResultStatus verifyAndApply();
 
   // Transport for a kind, or nullptr if it wasn't wired at begin().
@@ -249,8 +261,8 @@ class FirmwareReceiver {
   State state_ = State::Idle;
 
   // Snapshot of the in-flight OFFER.
-  uint8_t  wispMac_[6] = {0};      // sourceMac of the OFFER (target of our ACCEPT/REQ/RESULT)
-  uint8_t  myMac_[6]   = {0};      // our MAC (sourceMac of ACCEPT/REQ/RESULT)
+  uint8_t  wispMac_[6] = {0};      // sourceMac of the OFFER (target of ACCEPT/REQ/RESULT)
+  uint8_t  myMac_[6]   = {0};      // this lamp's MAC (sourceMac of ACCEPT/REQ/RESULT)
   FirmwareTransportKind activeTransportKind_ = FirmwareTransportKind::EspNow;
   uint8_t activeWireVersion_ = lamp_protocol::PROTOCOL_VERSION_EMIT;
   uint16_t activeBleConnHandle_ = 0;
@@ -258,8 +270,12 @@ class FirmwareReceiver {
   uint32_t offerTotalLen_ = 0;
   uint16_t offerChunkSize_ = 0;
   uint16_t offerTotalChunks_ = 0;
+  // Offer-time verified digest (firmware OTA). verifyAndApply binds the
+  // streamed image's computed digest to this so a source can't offer a verified
+  // digest then stream different bytes. Zero for FS OTA (no offer signature).
+  uint8_t  offerDigest_[lamp_protocol::FW_SHA256_FULL_LEN] = {0};
 
-  // Sequence counters for our outbound FW frames (ACCEPT/REQ/RESULT).
+  // Sequence counters for outbound FW frames (ACCEPT/REQ/RESULT).
   uint16_t fwOutSeq_ = 0;
 
   // One bit per chunk (set = received), ceil(totalChunks/8).
@@ -271,7 +287,7 @@ class FirmwareReceiver {
   //                      (drives the no-progress abort; failed writes still
   //                      flow chunks and the stall-REQ recovers them)
   //   lastReqMs_         last MSG_FW_REQ sent (rate-limit)
-  //   streamingStartMs_  entered Streaming (60s budget)
+  //   streamingStartMs_  entered Streaming (10-min hard cap)
   uint32_t lastChunkMs_     = 0;
   uint32_t lastChunkSeenMs_ = 0;
   uint32_t lastReqMs_       = 0;

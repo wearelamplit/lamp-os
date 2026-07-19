@@ -15,7 +15,7 @@ namespace lamp {
 // post/drain has well-defined semantics across the WiFi-task -> loop-task
 // hand-off. MeshLink::handleRecv populates these on the WiFi task
 // (Core 0); standard_lamp's loop drain reads them on Core 1 and dispatches
-// into the ColorOverride / BrightnessOverride / NearbyLamps modules.
+// into the ColorOverride / BrightnessOverride / LampRoster modules.
 //
 // Colors use the Color struct directly (4 bytes/pixel, RGBW) since the loop
 // drain hands them to ColorOverride::apply which expects `const Color*`.
@@ -61,17 +61,17 @@ struct PendingWispHello {
 };
 
 // MSG_WISP_PALETTE pending slot. Holds the wisp's broadcast manualPalette
-// until the Core 1 drain forwards it into NearbyLamps::cacheWispPalette.
-// Sized to kMaxWispPaletteColors * 3 = 150 bytes (matches the on-wire cap).
+// until the Core 1 drain forwards it into LampRoster::cacheWispPalette.
+// Interleaved R,G,B,W per color (W = 0 for frames without a W plane);
+// kMaxWispPaletteColors * 4 = 200 bytes.
 struct PendingWispPalette {
   uint8_t sourceMac[6];
   uint8_t count;  // 0..kMaxWispPaletteColors
-  uint8_t rgb[lamp_protocol::kMaxWispPaletteColors *
-              lamp_protocol::WISP_PALETTE_ENTRY_SIZE];
+  uint8_t rgbw[lamp_protocol::kMaxWispPaletteColors * 4];
 };
 
 // MSG_WISP_CLAIM pending slot. Holds the wisp's claimed-lamp roster until
-// the Core 1 drain forwards it into NearbyLamps::cacheWispClaim.
+// the Core 1 drain forwards it into LampRoster::cacheWispClaim.
 struct PendingWispClaim {
   uint8_t sourceMac[6];
   uint8_t count;
@@ -79,7 +79,7 @@ struct PendingWispClaim {
 };
 
 // MSG_WISP_PAINT pending slot. Holds per-lamp paint entries until the
-// Core 1 drain forwards them into NearbyLamps::cacheWispPaint.
+// Core 1 drain forwards them into LampRoster::cacheWispPaint.
 struct PendingWispPaint {
   uint8_t sourceMac[6];
   uint8_t count;
@@ -94,6 +94,18 @@ struct PendingCommand {
   uint8_t  sourceMac[6];
   uint16_t payloadLen;
   uint8_t  payload[lamp_protocol::COMMAND_MAX_PAYLOAD];
+};
+
+struct PendingColorQuery {
+  uint8_t sourceMac[6];
+};
+
+struct PendingColorInfo {
+  uint8_t sourceMac[6];
+  uint8_t baseCount;
+  uint8_t baseStops[lamp_protocol::COLOR_INFO_MAX_STOPS * 4];
+  uint8_t shadeCount;
+  uint8_t shadeStops[lamp_protocol::COLOR_INFO_MAX_STOPS * 4];
 };
 
 // MSG_EVENT pending slot. Carries an expression-fired announce payload from

@@ -1,6 +1,6 @@
 #include "wisp_cache.hpp"
 
-#include "nearby_lamps.hpp"
+#include "lamp_roster.hpp"
 
 #include <ArduinoJson.h>
 
@@ -8,11 +8,57 @@
 #include <cstring>
 
 #include "util/base64.hpp"
-#include "components/network/mesh/wisp_claims_addr.hpp"
 
 namespace lamp {
 
-void NearbyLamps::cacheWispHello(const uint8_t mac[6],
+// Display-slot stickiness: a rival wisp is rejected until the current
+// wisp misses 6 of its 2 s WISP_HELLOs, so two overlapping wisps don't
+// flip-flop the app's wisp view. Adoption stamps the same window
+// (slotAdoptedMs), so a claim takeover holds through the loser's next hello.
+static constexpr uint32_t kWispDisplayStaleMs = 12000;
+
+// Painter freshness for the obey gates; matches the override watchdog so
+// a wisp silent this long loses paint-hold and below-floor rights together.
+static constexpr uint32_t kWispPainterFreshMs = 60000;
+
+static bool freshWithin(uint32_t stampMs, uint32_t nowMs) {
+  return stampMs != 0 && (nowMs - stampMs) <= kWispDisplayStaleMs;
+}
+
+static bool wispSlotFresh(const WispCache& cache, uint32_t nowMs) {
+  return freshWithin(cache.lastHelloMs, nowMs) ||
+         freshWithin(cache.slotAdoptedMs, nowMs);
+}
+
+void LampRoster::adoptWispLocked(const uint8_t mac[6], uint32_t nowMs) {
+  wispCache_.lastStatusJson.clear();
+  wispCache_.lastStatusMs = 0;
+  wispCache_.lastHelloMs = 0;
+  wispCache_.slotAdoptedMs = nowMs;
+  wispCache_.wispVersion = 0;
+  wispCache_.flags = 0;
+  wispCache_.paletteIdPrefix[0] = '\0';
+  wispCache_.carriedFwChannel[0] = '\0';
+  wispCache_.carriedFwVersion = 0;
+  wispCache_.manualPaletteCount = 0;
+  wispCache_.lastPaletteMs = 0;
+  wispFleet_.clear();
+  std::memcpy(wispCache_.mac, mac, 6);
+  wispCache_.present = true;
+}
+
+bool LampRoster::admitWispLocked(const uint8_t mac[6], uint32_t nowMs) {
+  if (wispCache_.present && std::memcmp(wispCache_.mac, mac, 6) == 0) {
+    return true;
+  }
+  if (wispCache_.present && wispSlotFresh(wispCache_, nowMs)) {
+    return false;
+  }
+  adoptWispLocked(mac, nowMs);
+  return true;
+}
+
+void LampRoster::cacheWispHello(const uint8_t mac[6],
                                  uint32_t wispVersion,
                                  uint8_t flags,
                                  const char* paletteIdPrefix,
@@ -21,15 +67,12 @@ void NearbyLamps::cacheWispHello(const uint8_t mac[6],
   // Loop-task-only writer (Core 1 drain). portMAX_DELAY is safe because
   // the only contended reader is also on Core 1.
   xSemaphoreTake(mutex_, portMAX_DELAY);
-  // MAC mismatch: clear stale status data so the next read doesn't merge
-  // wisp-A's payload under wisp-B's identity.
-  if (wispCache_.present && std::memcmp(wispCache_.mac, mac, 6) != 0) {
-    wispCache_.lastStatusJson.clear();
-    wispCache_.lastStatusMs = 0;
+  const uint32_t nowMs = millis();
+  if (!admitWispLocked(mac, nowMs)) {
+    xSemaphoreGive(mutex_);
+    return;
   }
-  std::memcpy(wispCache_.mac, mac, 6);
-  wispCache_.present = true;
-  wispCache_.lastHelloMs = millis();
+  wispCache_.lastHelloMs = nowMs;
   wispCache_.wispVersion = wispVersion;
   wispCache_.flags = flags;
   // On-wire slots are 8 bytes, not NUL-terminated; add the NUL for safe logging.
@@ -41,100 +84,93 @@ void NearbyLamps::cacheWispHello(const uint8_t mac[6],
   xSemaphoreGive(mutex_);
 }
 
-WispCache NearbyLamps::getWispCache() {
-  // Called from Core 0 (MSG_OVERRIDE_BRIGHTNESS recv). A long wait stalls
-  // the recv task; on timeout return a "not present" snapshot so the floor
-  // check drops the frame.
-  WispCache snap;  // present=false by default
-  if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(2)) != pdTRUE) {
-    return snap;
-  }
-  snap = wispCache_;
-  xSemaphoreGive(mutex_);
-  return snap;
-}
-
-void NearbyLamps::cacheWispStatus(const uint8_t mac[6],
+void LampRoster::cacheWispStatus(const uint8_t mac[6],
                                   const char* json, size_t jsonLen) {
   // Loop-task-only writer (Core 1). portMAX_DELAY is safe; Core 0 only
   // reads via getWispStatusReadJson with a 2 ms bounded take.
   xSemaphoreTake(mutex_, portMAX_DELAY);
+  if (!admitWispLocked(mac, millis())) {
+    xSemaphoreGive(mutex_);
+    return;
+  }
   wispCache_.lastStatusJson.assign(json, jsonLen);
   wispCache_.lastStatusMs = millis();
-  // Status alone asserts wisp presence if no hello has arrived.
-  // MAC mismatch takes the new wisp and clears stale hello fields.
-  if (!wispCache_.present || std::memcmp(wispCache_.mac, mac, 6) != 0) {
-    std::memcpy(wispCache_.mac, mac, 6);
-    wispCache_.present = true;
-    // Clear stale hello fields so the next read doesn't merge
-    // wisp-A's data under wisp-B's identity.
-    wispCache_.wispVersion = 0;
-    wispCache_.flags = 0;
-    wispCache_.paletteIdPrefix[0] = '\0';
-    wispCache_.carriedFwChannel[0] = '\0';
-    wispCache_.carriedFwVersion = 0;
-    wispCache_.lastHelloMs = 0;
-  }
   xSemaphoreGive(mutex_);
 }
 
-void NearbyLamps::cacheWispPalette(const uint8_t mac[6],
-                                    const uint8_t* rgb, uint8_t count) {
+void LampRoster::cacheWispPalette(const uint8_t mac[6],
+                                    const uint8_t* rgbw, uint8_t count) {
   // Loop-task-only writer (Core 1). portMAX_DELAY is safe; the BLE read
   // side (Core 0) uses a 2 ms bounded take.
   xSemaphoreTake(mutex_, portMAX_DELAY);
-  // MAC mismatch: clear stale per-wisp data so the next BLE read doesn't
-  // merge wisp-A's palette under wisp-B's identity.
-  if (wispCache_.present && std::memcmp(wispCache_.mac, mac, 6) != 0) {
-    wispCache_.lastStatusJson.clear();
-    wispCache_.lastStatusMs = 0;
-    wispCache_.lastHelloMs = 0;
-    wispCache_.wispVersion = 0;
-    wispCache_.flags = 0;
-    wispCache_.paletteIdPrefix[0] = '\0';
-    wispCache_.carriedFwChannel[0] = '\0';
-    wispCache_.carriedFwVersion = 0;
+  if (!admitWispLocked(mac, millis())) {
+    xSemaphoreGive(mutex_);
+    return;
   }
-  std::memcpy(wispCache_.mac, mac, 6);
-  wispCache_.present = true;
   static constexpr uint8_t kSlotMaxColors =
-      static_cast<uint8_t>(sizeof(WispCache{}.manualPaletteRgb) / 3);
+      static_cast<uint8_t>(sizeof(WispCache{}.manualPaletteRgbw) / 4);
   const uint8_t safeCount = count > kSlotMaxColors ? kSlotMaxColors : count;
-  if (safeCount > 0 && rgb) {
-    std::memcpy(wispCache_.manualPaletteRgb, rgb,
-                static_cast<size_t>(safeCount) * 3);
+  if (safeCount > 0 && rgbw) {
+    std::memcpy(wispCache_.manualPaletteRgbw, rgbw,
+                static_cast<size_t>(safeCount) * 4);
   }
   wispCache_.manualPaletteCount = safeCount;
   wispCache_.lastPaletteMs = millis();
   xSemaphoreGive(mutex_);
 }
 
-void NearbyLamps::cacheWispMacFromPaint(const uint8_t mac[6]) {
+void LampRoster::cacheWispMacFromPaint(const uint8_t mac[6]) {
   // 2 ms matches getWispStatusReadJson's bounded take so a BLE read on
   // Core 0 doesn't starve behind this Core 1 paint update.
   if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(2)) != pdTRUE) {
     return;
   }
-  // MAC mismatch: clear stale per-wisp data so the next BLE read doesn't
-  // merge wisp-A's data under wisp-B's identity.
-  if (wispCache_.present && std::memcmp(wispCache_.mac, mac, 6) != 0) {
-    wispCache_.lastStatusJson.clear();
-    wispCache_.lastStatusMs = 0;
-    wispCache_.lastHelloMs = 0;
-    wispCache_.wispVersion = 0;
-    wispCache_.flags = 0;
-    wispCache_.paletteIdPrefix[0] = '\0';
-    wispCache_.carriedFwChannel[0] = '\0';
-    wispCache_.carriedFwVersion = 0;
-  }
-  std::memcpy(wispCache_.mac, mac, 6);
-  wispCache_.present = true;
-  // hello-only fields (lastHelloMs, wispVersion, flags, paletteIdPrefix,
-  // carriedFw*) not set; their zero defaults signal "no hello received."
+  const uint32_t nowMs = millis();
+  painterPresent_ = true;
+  std::memcpy(painterMac_, mac, 6);
+  painterLastMs_ = nowMs;
+  // Display slot only when empty or stale: being painted must not evict a
+  // fresh display wisp, but the first BLE wispStatus read should still be
+  // non-empty when paint arrives before any hello.
+  admitWispLocked(mac, nowMs);
   xSemaphoreGive(mutex_);
 }
 
-std::string NearbyLamps::getWispStatusReadJson(bool includePalette) {
+bool LampRoster::isWispPainter(const uint8_t mac[6], uint32_t nowMs) {
+  if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(2)) != pdTRUE) {
+    return false;
+  }
+  const bool painter = painterPresent_ &&
+                       std::memcmp(painterMac_, mac, 6) == 0 &&
+                       (nowMs - painterLastMs_) < kWispPainterFreshMs;
+  xSemaphoreGive(mutex_);
+  return painter;
+}
+
+bool LampRoster::isClaimingWisp(const uint8_t mac[6], uint32_t nowMs) {
+  if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(2)) != pdTRUE) {
+    return false;
+  }
+  const bool claiming = wispCache_.present &&
+                        std::memcmp(wispCache_.mac, mac, 6) == 0 &&
+                        wispSlotFresh(wispCache_, nowMs);
+  xSemaphoreGive(mutex_);
+  return claiming;
+}
+
+bool LampRoster::touchWispPainter(const uint8_t mac[6], uint32_t nowMs) {
+  if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(2)) != pdTRUE) {
+    return false;
+  }
+  const bool painter = painterPresent_ &&
+                       std::memcmp(painterMac_, mac, 6) == 0 &&
+                       (nowMs - painterLastMs_) < kWispPainterFreshMs;
+  if (painter) painterLastMs_ = nowMs;
+  xSemaphoreGive(mutex_);
+  return painter;
+}
+
+std::string LampRoster::getWispStatusReadJson(bool includePalette) {
   // BLE on-read callback (Core 0); bounded take so it doesn't block
   // behind a loop-task writer. On timeout return "{}".
   WispCache snap;
@@ -214,10 +250,13 @@ std::string NearbyLamps::getWispStatusReadJson(bool includePalette) {
 
   // Palette omitted on the NOTIFY leg (MTU truncation would corrupt it);
   // served on READ only. paletteIdPrefix signals the app to re-read.
+  // paletteBpp is the blob's explicit stride discriminator; the app must
+  // never infer it from length (ambiguous at len % 12 == 0).
   if (includePalette && snap.manualPaletteCount > 0) {
     doc["palette"] = lamp::base64::encode(
-        snap.manualPaletteRgb,
-        static_cast<size_t>(snap.manualPaletteCount) * 3);
+        snap.manualPaletteRgbw,
+        static_cast<size_t>(snap.manualPaletteCount) * 4);
+    doc["paletteBpp"] = 4;
   }
 
   std::string out;
@@ -225,141 +264,65 @@ std::string NearbyLamps::getWispStatusReadJson(bool includePalette) {
   return out;
 }
 
-// Pairing lasts ≤60 s; claims older than this are meaningless.
-static constexpr uint32_t kWispClaimStaleMs = 60000;
-
-void NearbyLamps::cacheWispClaim(const uint8_t mac[6],
+void LampRoster::cacheWispClaim(const uint8_t mac[6],
                                   const uint8_t lampMacs[][6], uint8_t count,
-                                  uint32_t nowMs) {
-  xSemaphoreTake(mutex_, portMAX_DELAY);
-  std::memcpy(wispCache_.mac, mac, 6);
-  wispCache_.present = true;
+                                  const uint8_t selfMac[6], uint32_t nowMs) {
   const uint8_t safeCount =
       count > lamp_protocol::kMaxWispClaimEntries
           ? static_cast<uint8_t>(lamp_protocol::kMaxWispClaimEntries)
           : count;
-  if (safeCount > 0 && lampMacs) {
-    std::memcpy(wispCache_.claimedLampMacs, lampMacs,
-                static_cast<size_t>(safeCount) * 6);
+  xSemaphoreTake(mutex_, portMAX_DELAY);
+  const bool rival = wispCache_.present &&
+                     std::memcmp(wispCache_.mac, mac, 6) != 0 &&
+                     wispSlotFresh(wispCache_, nowMs);
+  if (rival) {
+    // A rival claiming this lamp takes the slot only when the current
+    // wisp does not; boundary lamps otherwise stay with first-heard.
+    bool claimsUs = false;
+    for (uint8_t i = 0; i < safeCount && lampMacs; ++i) {
+      if (std::memcmp(lampMacs[i], selfMac, 6) == 0) {
+        claimsUs = true;
+        break;
+      }
+    }
+    if (!claimsUs || wispFleet_.containsClaim(selfMac, nowMs)) {
+      xSemaphoreGive(mutex_);
+      return;
+    }
+    adoptWispLocked(mac, nowMs);
+  } else {
+    admitWispLocked(mac, nowMs);
   }
-  wispCache_.claimedCount = safeCount;
-  wispCache_.lastClaimMs = nowMs;
+  wispFleet_.upsertClaims(lampMacs, safeCount, nowMs);
   xSemaphoreGive(mutex_);
 }
 
-void NearbyLamps::cacheWispPaint(const uint8_t srcMac[6],
+void LampRoster::cacheWispPaint(const uint8_t srcMac[6],
                                   const uint8_t* entries, uint8_t count,
                                   uint32_t nowMs) {
-  xSemaphoreTake(mutex_, portMAX_DELAY);
-  std::memcpy(wispCache_.mac, srcMac, 6);
-  wispCache_.present = true;
   const uint8_t safeCount =
       count > lamp_protocol::WISP_PAINT_MAX_ENTRIES
           ? static_cast<uint8_t>(lamp_protocol::WISP_PAINT_MAX_ENTRIES)
           : count;
-  wispCache_.paintCount = safeCount;
-  wispCache_.lastPaintMs = nowMs;
-  for (uint8_t i = 0; i < safeCount; ++i) {
-    const uint8_t* e = entries + static_cast<size_t>(i) *
-                                     lamp_protocol::WISP_PAINT_ENTRY_SIZE;
-    std::memcpy(wispCache_.paintEntries[i].mac, e, 6);
-    std::memcpy(wispCache_.paintEntries[i].base, e + 6, 3);
-    std::memcpy(wispCache_.paintEntries[i].shade, e + 9, 3);
-    wispCache_.paintEntries[i].valid = true;
+  xSemaphoreTake(mutex_, portMAX_DELAY);
+  if (!admitWispLocked(srcMac, nowMs)) {
+    xSemaphoreGive(mutex_);
+    return;
   }
-  // Invalidate any slots beyond the new count.
-  for (uint8_t i = safeCount; i < lamp_protocol::WISP_PAINT_MAX_ENTRIES; ++i) {
-    wispCache_.paintEntries[i].valid = false;
-  }
+  wispFleet_.upsertPaints(entries, safeCount, nowMs);
   xSemaphoreGive(mutex_);
 }
 
-bool NearbyLamps::findWispPaint(const uint8_t lampMac[6], uint32_t nowMs,
-                                 uint8_t baseOut[3], uint8_t shadeOut[3]) {
-  if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(2)) != pdTRUE) return false;
-  const WispCache snap = wispCache_;
-  xSemaphoreGive(mutex_);
-
-  if (snap.lastPaintMs == 0 || (nowMs - snap.lastPaintMs) > kWispClaimStaleMs) {
-    return false;
-  }
-  for (uint8_t i = 0; i < snap.paintCount; ++i) {
-    if (snap.paintEntries[i].valid &&
-        std::memcmp(snap.paintEntries[i].mac, lampMac, 6) == 0) {
-      std::memcpy(baseOut, snap.paintEntries[i].base, 3);
-      std::memcpy(shadeOut, snap.paintEntries[i].shade, 3);
-      return true;
-    }
-  }
-  return false;
-}
-
-size_t NearbyLamps::buildWispClaimsBlob(uint8_t* out, size_t outCap,
+size_t LampRoster::buildWispClaimsBlob(uint8_t* out, size_t outCap,
                                          uint32_t nowMs) {
   if (!out || outCap == 0) return 0;
-  WispCache snap;
   if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(2)) != pdTRUE) {
     out[0] = 0;
     return 1;
   }
-  snap = wispCache_;
+  const size_t n = wispFleet_.buildClaimsBlob(out, outCap, nowMs);
   xSemaphoreGive(mutex_);
-
-  // Membership is the union of fresh claim macs and fresh paint macs so a
-  // lamp that arrived via one message before the other is never invisible.
-  const bool claimFresh = snap.lastClaimMs != 0 &&
-                          (nowMs - snap.lastClaimMs) <= kWispClaimStaleMs;
-  const bool paintFresh = snap.lastPaintMs != 0 &&
-                          (nowMs - snap.lastPaintMs) <= kWispClaimStaleMs;
-
-  uint8_t unionMacs[lamp_protocol::kMaxWispClaimEntries][6] = {};
-  uint8_t unionCount = 0;
-
-  if (claimFresh) {
-    for (uint8_t i = 0;
-         i < snap.claimedCount && unionCount < lamp_protocol::kMaxWispClaimEntries; ++i) {
-      std::memcpy(unionMacs[unionCount++], snap.claimedLampMacs[i], 6);
-    }
-  }
-  if (paintFresh) {
-    for (uint8_t i = 0;
-         i < snap.paintCount && unionCount < lamp_protocol::kMaxWispClaimEntries; ++i) {
-      if (!snap.paintEntries[i].valid) continue;
-      bool dup = false;
-      for (uint8_t j = 0; j < unionCount; ++j) {
-        if (std::memcmp(unionMacs[j], snap.paintEntries[i].mac, 6) == 0) {
-          dup = true;
-          break;
-        }
-      }
-      if (!dup) std::memcpy(unionMacs[unionCount++], snap.paintEntries[i].mac, 6);
-    }
-  }
-
-  // [count:1][bdAddr:6*count][colorPair:6*count]
-  const size_t needed = 1 + static_cast<size_t>(unionCount) * 12;
-  if (needed > outCap) {
-    out[0] = 0;
-    return 1;
-  }
-  out[0] = unionCount;
-  for (uint8_t i = 0; i < unionCount; ++i) {
-    ble_control::bdAddrFromMeshMac(unionMacs[i],
-                                   out + 1 + static_cast<size_t>(i) * 6);
-  }
-  // Sentinel 00 00 00 00 00 00 for a mac with no fresh paint entry.
-  const size_t colorBase = 1 + static_cast<size_t>(unionCount) * 6;
-  for (uint8_t i = 0; i < unionCount; ++i) {
-    uint8_t* dst = out + colorBase + static_cast<size_t>(i) * 6;
-    uint8_t base[3], shade[3];
-    if (findWispPaint(unionMacs[i], nowMs, base, shade)) {
-      std::memcpy(dst, base, 3);
-      std::memcpy(dst + 3, shade, 3);
-    } else {
-      std::memset(dst, 0, 6);
-    }
-  }
-  return needed;
+  return n;
 }
 
 }  // namespace lamp

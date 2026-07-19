@@ -1,5 +1,5 @@
 /**
- *  Lamp Bluetooth Management. Pure-BLE v1 — no WiFi, no stage mode, no ArtNet.
+ *  Lamp Bluetooth Management. Pure-BLE v1: no WiFi, no stage mode, no ArtNet.
  */
 #include "bluetooth.hpp"
 
@@ -24,18 +24,18 @@ extern "C" bool btInUse() { return true; }
 #include "config/config.hpp"
 #include "util/color.hpp"
 #include "ble_control.hpp"
-#include "components/network/mesh/nearby_lamps.hpp"
+#include "components/network/mesh/lamp_roster.hpp"
 
 namespace lamp {
 
 // Cached manufacturer-data vector. `begin()` populates it;
 // `setAdvertisedColors()` rebuilds + re-applies when shade or base
-// changes. Lives at file scope so we can compare-and-skip when the
+// changes. Lives at file scope for compare-and-skip when the
 // new buffer matches the last applied one.
 static std::vector<unsigned char> s_advertisementData;
 // Cached name so the advertisement-rebuild helpers don't need it
 // passed in. (NimBLE's setManufacturerData *appends* rather than
-// replaces; we rebuild the entire AdvertisementData each time.)
+// replaces; the entire AdvertisementData is rebuilt each time.)
 static std::string s_advertisementName;
 
 // Capability bitfield advertised as the trailing manufacturer-data byte.
@@ -43,15 +43,15 @@ static std::string s_advertisementName;
 // `(byte & WANTED_BIT) != 0`. Forward-compatible: new bits added when
 // a real consumer ships; old apps just don't read them.
 //
-//   bit 0 (0x01) — reserved (always 0; bookmark for legacy v1 lamps
+//   bit 0 (0x01): reserved (always 0; bookmark for legacy v1 lamps
 //                  that didn't advertise this byte at all)
-//   bit 1 (0x02) — kBleCapMeshProtocol — speaks the v0x03 mesh wire
+//   bit 1 (0x02): kBleCapMeshProtocol, speaks the v0x03 mesh wire
 //                  format. Drives the app's ControlScreen vs
 //                  BtOnlyLampScreen routing.
-//   bit 2 (0x04) — kBleCapConfigured — the lamp has been claimed/set up.
+//   bit 2 (0x04): kBleCapConfigured, the lamp has been claimed/set up.
 //                  Drives the app's adopt-wizard vs open-it routing.
 //
-// The mesh bit is 0x02 — bytewise identical to the prior "firmware version
+// The mesh bit is 0x02, bytewise identical to the "firmware version
 // 0x02" sentinel. v2 apps checking `mfg[6] >= 2` still pass; v3+ apps using
 // `(mfg[6] & WANTED_BIT) != 0` read each flag independently.
 static constexpr unsigned char kBleCapMeshProtocol = 0x02;
@@ -84,7 +84,7 @@ static void applyAdvertisementPayload(NimBLEAdvertising* adv,
 }
 
 class ScanCallbacks : public NimBLEScanCallbacks {
-  bool isLamp(std::string data) {
+  bool isLamp(const std::string &data) {
     // Accepted mfg payload shapes (all share the same magic16
     // prefix in bytes 0-1):
     //   - 8 bytes [magic, baseRGB, shadeRGB]: v1 firmware (legacy,
@@ -107,9 +107,9 @@ class ScanCallbacks : public NimBLEScanCallbacks {
     if (advertisedDevice->getRSSI() <= BLE_MINIMUM_RSSI_VALUE) return;
     std::string data = advertisedDevice->getManufacturerData();
     if (!isLamp(data)) return;
-    // ESP32 controller will sometimes surface our own adv to our own scan
+    // ESP32 controller will sometimes surface this lamp's own adv to its own scan
     // when adv + scan overlap. Without this filter the lamp would appear in
-    // its own NearbyLamps list and surface in the app's Social tab as a
+    // its own LampRoster list and surface in the app's Social tab as a
     // "seen" peer. Match by BLE address (the lamp's name is user-set and
     // can collide; the address is unique). ESP-NOW already does the
     // equivalent filter in mesh_link.cpp:175 via sourceMac vs myMac_.
@@ -123,22 +123,16 @@ class ScanCallbacks : public NimBLEScanCallbacks {
                       ? Color(data[5], data[6], data[7], 0)
                       : Color(0, 0, 0, 0);
 
-    // Canonical uppercase colon-hex BD_ADDR for the disposition
-    // cross-reference. NimBLEAddress::toString() returns lowercase; we
-    // uppercase to match the format used elsewhere in this codebase
-    // (ble_control.cpp:606, nearby_lamps.cpp:446).
-    std::string bdAddr = advertisedDevice->getAddress().toString();
-    for (char& c : bdAddr) {
-      if (c >= 'a' && c <= 'f') c = c - 'a' + 'A';
-    }
-
-    nearbyLamps.addOrUpdateFromBle(advertisedDevice->getName(), bdAddr,
+    // NimBLEAddress::toString() is lowercase colon-hex; the roster parses
+    // it case-insensitively and stores address bytes.
+    lampRoster.addOrUpdateFromBle(advertisedDevice->getName(),
+                                   advertisedDevice->getAddress().toString(),
                                    base, shade,
                                    static_cast<int8_t>(advertisedDevice->getRSSI()));
   };
 
   void onScanEnd(const NimBLEScanResults &results, int reason) override {
-    nearbyLamps.prune(LAMP_PRUNE_TIME_MS);
+    lampRoster.prune(LAMP_PRUNE_TIME_MS);
     // Skip restart while a phone is using the GATT control service.
     // ble_control resumes the scan on disconnect.
     if (!ble_control::isScanPaused()) {
@@ -180,8 +174,8 @@ void BluetoothComponent::begin(std::string name, Color inBaseColor,
 
   NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
   s_advertisementName = name;
-  // Scan response stays off — we build the entire payload into the main
-  // advertisement packet via setAdvertisementData below, which gives us
+  // Scan response stays off; the entire payload goes into the main
+  // advertisement packet via setAdvertisementData below, for
   // deterministic control over what goes on the wire.
   pAdvertising->enableScanResponse(false);
   // Adv payload shape: [magic16(2), baseRGB(3), shadeRGB(3), capabilities(1)]
@@ -207,7 +201,7 @@ void BluetoothComponent::begin(std::string name, Color inBaseColor,
   pAdvertising->setConnectableMode(BLE_GAP_CONN_MODE_UND);
   pAdvertising->setMinInterval(BLE_ADVERTISING_INTERVAL_MIN);
   pAdvertising->setMaxInterval(BLE_ADVERTISING_INTERVAL_MAX);
-  // Advertising start is deferred to activateGattServices() — NimBLE's
+  // Advertising start is deferred to activateGattServices(); NimBLE's
   // GATT database is frozen once advertising starts.
   Serial.printf("[ble] advertising configured for name=%s (deferred start)\n",
                 name.c_str());
@@ -255,8 +249,8 @@ void BluetoothComponent::tickAdvertising() {
     }
   }
   // Clear dirty + stamp the flush time regardless of whether the
-  // bytes differed. If a re-call set the same colors, we don't want
-  // to keep re-evaluating it every tick.
+  // bytes differed. If a re-call set the same colors, avoid
+  // re-evaluating it every tick.
   m_advDirty = false;
   m_lastAdvFlushMs = now;
   if (!changed) return;

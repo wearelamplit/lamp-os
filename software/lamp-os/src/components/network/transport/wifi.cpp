@@ -8,9 +8,9 @@
 
 #include "components/network/ble/ble_control.hpp"  // for ble_control::isClientConnected()
 
-// Grid channel — all unconnected grid lamps line up here so ESP-NOW peers
-// can hear each other. Since we never associate to a home AP anymore,
-// the radio sits on this channel permanently (modulo brief scan windows).
+// Grid channel. All unconnected grid lamps line up here so ESP-NOW peers
+// can hear each other. The radio never associates to a home AP,
+// so it sits on this channel permanently (modulo brief scan windows).
 #ifndef LAMP_ESPNOW_CHANNEL
 // Channel 6: the channel pre-mesh lamps hardcode for their ArtNet WiFi, so
 // new mesh lamps, the wisp stage softAP, and old lamps all share one channel.
@@ -37,26 +37,26 @@ static OtaInProgressGetter   s_otaInProgressGetter   = nullptr;
 // → consumeScanResults() (std::move + clear). Without this guard, a
 // concurrent push_back on Core 1 while Core 0 std::move's the vector
 // dereferences freed memory. homeSsidVisible() also runs on Core 1
-// (same as tick) — critical sections are kept short: no allocations
+// (same as tick). Critical sections are kept short: no allocations
 // beyond the std::move which steals the pointer, no network calls, no
 // logging.
 static portMUX_TYPE s_scanMux = portMUX_INITIALIZER_UNLOCKED;
 
 // How recent a scan must be for homeSsidVisible() to trust the cache.
-// Networks come and go (router restarts, user leaves home), so we time
-// out the presence cache aggressively.
+// Networks come and go (router restarts, user leaves home), so the
+// presence cache times out aggressively.
 static constexpr uint32_t SCAN_STALENESS_MS = 90 * 1000;
 
-// How often we kick off a background scan when idle + no BT client.
-// Scans cost ~5s of radio time each — once a minute is the sweet spot
+// How often a background scan fires when idle + no BT client.
+// Scans cost ~5s of radio time each. Once a minute is the sweet spot
 // between responsiveness and ESP-NOW receive uptime.
 static constexpr uint32_t BACKGROUND_SCAN_INTERVAL_MS = 60 * 1000;
 
 // How long to dwell in FAILED before letting the state machine return to
 // IDLE so future background scans can be attempted. Without this, a single
 // transient `WiFi.scanNetworks()` failure leaves the wifi module stuck in
-// FAILED until reboot — and historically also stranded the radio on
-// whatever channel the scanner had last hopped to, silently killing
+// FAILED until reboot, and also strands the radio on
+// whatever channel the scanner last hopped to, silently killing
 // ESP-NOW recv (HELLO / CONTROL_OP / OVERRIDE / EVENT / WISP_HELLO all
 // missed). 5 min is long enough not to thrash, short enough that
 // home-presence detection comes back without manual intervention.
@@ -75,15 +75,15 @@ static void setState(State next) {
 void begin() {
   // Order matters: `WiFi.disconnect(true, _)` passes wifioff=true which
   // calls WiFi.mode(WIFI_OFF) on its way out, so STA mode has to be
-  // (re-)enabled AFTER any disconnect call — otherwise WiFi.scanNetworks
+  // (re-)enabled AFTER any disconnect call. Otherwise WiFi.scanNetworks
   // returns 0 (no STA to scan from).
   WiFi.disconnect(true, true);   // wipe any stale SDK creds from a previous boot
   WiFi.mode(WIFI_STA);            // enable STA so scanNetworks works
   esp_wifi_set_channel(LAMP_ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
   // Don't run the first periodic scan at boot. The boot-time WiFi stack
   // is fragile (just came up from WiFi.disconnect+WIFI_STA), and a failed
-  // scan in this window strands the radio off LAMP_ESPNOW_CHANNEL —
-  // observed 2026-06-04 on jacko, killed mesh recv entirely. Seed
+  // scan in this window strands the radio off LAMP_ESPNOW_CHANNEL,
+  // killing mesh recv entirely. Seed
   // s_lastBackgroundScanMs with the current millis() so the first
   // periodic scan fires BACKGROUND_SCAN_INTERVAL_MS *after* boot, when
   // the WiFi stack has settled.
@@ -118,7 +118,7 @@ void startScan() {
 
 std::vector<ScanResult> consumeScanResults() {
   // Called from Core 0 (BLE WifiStateCallback::onRead). The swap is
-  // O(1) — three-pointer steal — so the critical section is tight.
+  // O(1) (three-pointer steal), so the critical section is tight.
   // Destructors on the moved-out empty vector are trivial.
   std::vector<ScanResult> out;
   portENTER_CRITICAL(&s_scanMux);
@@ -140,8 +140,8 @@ void setOtaInProgressGetter(OtaInProgressGetter fn) {
 bool homeSsidVisible(const std::string& ssid) {
   if (ssid.empty()) return false;
   // Called from Core 1 (reapplyHomeModeState → calculateEffectiveHomeMode).
-  // The writer is also Core 1 (wifi::tick), so this is single-core — but
-  // we still wrap because s_recentSsids is shared state and the cost is
+  // The writer is also Core 1 (wifi::tick), so this is single-core, but
+  // the wrap stays because s_recentSsids is shared state and the cost is
   // negligible (string == is a no-alloc compare). The string compares run
   // inside the critical section; the loop is bounded (~30 SSIDs max).
   bool seen = false;
@@ -155,7 +155,7 @@ bool homeSsidVisible(const std::string& ssid) {
   }
   portEXIT_CRITICAL(&s_scanMux);
   if (!seen) return false;
-  // Staleness check is OUTSIDE the critical section — millis() is fast
+  // Staleness check is OUTSIDE the critical section; millis() is fast
   // but no point holding the lock for a wall-clock read.
   return (millis() - lastMs) <= SCAN_STALENESS_MS;
 }
@@ -165,11 +165,11 @@ static bool s_softApUp = false;
 bool startSoftAp(const std::string& name) {
   if (s_softApUp) return true;
   // AP_STA so STA scan + ESP-NOW recv keep working while the AP serves
-  // the webapp. Both interfaces share the radio's current channel — we
+  // the webapp. Both interfaces share the radio's current channel;
   // pin LAMP_ESPNOW_CHANNEL after softAPConfig so an associating phone
   // doesn't pull the lamp off the grid channel.
   WiFi.mode(WIFI_AP_STA);
-  // Open network (no password) — the boot window IS the auth boundary.
+  // Open network (no password). The boot window IS the auth boundary.
   // Hidden=false so phones surface it without manual entry.
   const bool ok = WiFi.softAP(name.c_str(), nullptr, LAMP_ESPNOW_CHANNEL,
                               /*ssid_hidden=*/0, /*max_connection=*/4);
@@ -210,7 +210,7 @@ void tick() {
   if (s_state == SCANNING) {
     int16_t n = WiFi.scanComplete();
     if (n >= 0) {
-      // Build into LOCAL vectors first — no allocations or string ops
+      // Build into LOCAL vectors first; no allocations or string ops
       // inside the portMUX. The atomic swap at the end is O(1).
       std::vector<ScanResult> newResults;
       std::vector<std::string> newSsids;
@@ -272,13 +272,13 @@ void tick() {
   //    - BACKGROUND_SCAN_INTERVAL_MS elapsed since the last scan
   //
   //    The first periodic scan fires BACKGROUND_SCAN_INTERVAL_MS after
-  //    boot, not at boot — see wifi::begin() for the rationale (boot-
+  //    boot. See wifi::begin() for the rationale (boot-
   //    time scan failures stranded the radio off LAMP_ESPNOW_CHANNEL).
   const bool homeModeEnabled =
       s_homeModeEnabledGetter && s_homeModeEnabledGetter();
-  // Block periodic scans during OTA — channel hopping silently drops
-  // ESP-NOW unicast in both directions for the duration of the scan
-  // (hardware-confirmed 2026-06-04). On-demand scans (BLE op:scan) still
+  // Block periodic scans during OTA. Channel hopping silently drops
+  // ESP-NOW unicast in both directions for the duration of the scan.
+  // On-demand scans (BLE op:scan) still
   // route through startScan() directly and remain available.
   const bool otaInProgress =
       s_otaInProgressGetter && s_otaInProgressGetter();

@@ -1,108 +1,104 @@
-#include "nearby_lamps.hpp"
+#include "lamp_roster.hpp"
 
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
 
-#include "components/network/mesh/wisp_claims_addr.hpp"
-#include "util/proximity.hpp"
-
 namespace lamp {
 
 namespace {
-// BLE BD_ADDR = WiFi STA MAC + 2 on the last byte. ESP32 silicon
-// convention; holds for WROOM and C6.
-std::string deriveBdAddrFromEspNowMac(const uint8_t mac[6]) {
-  uint8_t bd[6];
-  ble_control::bdAddrFromMeshMac(mac, bd);
-  char buf[18];
-  std::snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X",
-                bd[0], bd[1], bd[2], bd[3], bd[4], bd[5]);
-  return std::string(buf);
+// Truncate-on-copy into the fixed name slot; always NUL-terminated.
+void copyName(char (&dst)[lamp_protocol::HELLO_MAX_NAME + 1],
+              const std::string& src) {
+  std::snprintf(dst, sizeof(dst), "%s", src.c_str());
 }
 
 // Most-recent sighting across either transport. Eviction and prune sort key.
-uint32_t lastSeen(const NearbyLamp& e) {
-  return std::max(e.lastSeenViaBleMs, e.lastSeenViaEspNowMs);
+uint32_t lastSeen(const RosterEntry& e) {
+  return std::max(e.lastSeenNearMs, e.lastSeenMeshMs);
 }
 }  // namespace
 
-NearbyLamps nearbyLamps;  // global instance
+LampRoster lampRoster;  // global instance
 
-NearbyLamps::NearbyLamps() {
+LampRoster::LampRoster() {
   mutex_ = xSemaphoreCreateMutex();
 }
 
-size_t NearbyLamps::findIndexLocked(const std::string& name) const {
-  for (size_t i = 0; i < store_.size(); i++) {
-    if (store_[i].name == name) return i;
+size_t LampRoster::findIndexLocked(const std::string& name) const {
+  for (size_t i = 0; i < count_; i++) {
+    if (name == store_[i].name) return i;
   }
-  return store_.size();
+  return count_;
 }
 
-void NearbyLamps::evictOldestIfFullLocked() {
-  if (store_.size() < MAX_NEARBY) return;
+void LampRoster::evictOldestIfFullLocked() {
+  if (count_ < kCapacity) return;
   size_t oldestIdx = 0;
   uint32_t oldestMax = lastSeen(store_[0]);
-  for (size_t i = 1; i < store_.size(); i++) {
+  for (size_t i = 1; i < count_; i++) {
     uint32_t m = lastSeen(store_[i]);
     if (m < oldestMax) { oldestMax = m; oldestIdx = i; }
   }
-  if (oldestIdx != store_.size() - 1) {
-    store_[oldestIdx] = store_.back();
+  if (oldestIdx != count_ - 1) {
+    store_[oldestIdx] = store_[count_ - 1];
   }
-  store_.pop_back();
+  count_--;
 }
 
-void NearbyLamps::addOrUpdateFromBle(const std::string& name,
-                                     const std::string& bdAddr,
-                                     const Color& base, const Color& shade,
-                                     int8_t rssi) {
+void LampRoster::addOrUpdateFromBle(const std::string& name,
+                                    const std::string& bleAddr,
+                                    const Color& base, const Color& shade,
+                                    int8_t rssi) {
   uint32_t now = millis();
+  uint8_t ble[6];
+  const bool bleOk = parseBdAddr(bleAddr.c_str(), ble);
   xSemaphoreTake(mutex_, portMAX_DELAY);
   size_t idx = findIndexLocked(name);
-  if (idx == store_.size()) {
+  if (idx == count_) {
     evictOldestIfFullLocked();
-    NearbyLamp e;
-    e.name = name;
-    e.bdAddr = bdAddr;
+    RosterEntry e;
+    copyName(e.name, name);
+    if (bleOk) {
+      meshMacFromBleAddr(ble, e.mac);
+      e.hasMac = true;
+    }
     e.baseColor = base;
     e.shadeColor = shade;
-    e.lastSeenViaBleMs = now;
+    e.lastSeenNearMs = now;
     e.lastRssi = rssi;
-    e.firstSeenMs = now;
-    store_.push_back(e);
+    store_[count_++] = e;
   } else {
-    // bdAddr only fills once (first sighting). Name collision silently
-    // drops the second peer's address; dispositions route to the first-seen
-    // BD_ADDR. Keying by name preserves BLE-only lamp compatibility.
-    if (store_[idx].bdAddr.empty()) {
-      store_[idx].bdAddr = bdAddr;
+    // The BLE-recovered mac only fills the gap; a raw HELLO mac wins.
+    if (!store_[idx].hasMac && bleOk) {
+      meshMacFromBleAddr(ble, store_[idx].mac);
+      store_[idx].hasMac = true;
     }
     store_[idx].baseColor = base;
     store_[idx].shadeColor = shade;
-    store_[idx].lastSeenViaBleMs = now;
-    // RSSI freshens on every BLE adv (~30 Hz) so the proximity sort key
+    store_[idx].lastSeenNearMs = now;
+    // RSSI freshens on every BLE adv (~30 Hz) so the closest-peer sort key
     // tracks current signal strength rather than a one-shot first-seen
     // value. -127 is the "unknown" sentinel; only overwrite when the
     // caller supplied a real reading.
     if (rssi != -127) store_[idx].lastRssi = rssi;
   }
+  generation_++;
   xSemaphoreGive(mutex_);
 }
 
-void NearbyLamps::addOrUpdateFromEspNow(const std::string& name, const uint8_t mac[6],
-                                        const Color& base, const Color& shade,
-                                        uint32_t firmwareVersion,
-                                        uint8_t otaState,
-                                        uint8_t protocolVersion,
-                                        const char* fwChannel,
-                                        const uint8_t* fsDigest,
-                                        bool hasFsDigest) {
+void LampRoster::addOrUpdateFromEspNow(const std::string& name, const uint8_t mac[6],
+                                       const Color& base, const Color& shade,
+                                       uint32_t firmwareVersion,
+                                       uint8_t otaState,
+                                       uint8_t protocolVersion,
+                                       const char* fwChannel,
+                                       const uint8_t* fsDigest,
+                                       bool hasFsDigest,
+                                       uint16_t maxChunk,
+                                       bool needsFs,
+                                       int8_t rssi) {
   uint32_t now = millis();
-  // Derived before the lock: snprintf + heap alloc outside the critical
-  // section so it stays short.
-  const std::string derivedBdAddr = deriveBdAddrFromEspNowMac(mac);
   // WiFi task: bounded take so a stall doesn't block recv frames or the
   // link_.broadcast(). On timeout the write drops; HELLO repeats every 5 s.
   if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(2)) != pdTRUE) {
@@ -110,7 +106,7 @@ void NearbyLamps::addOrUpdateFromEspNow(const std::string& name, const uint8_t m
     static uint32_t lastDropLogMs = 0;
     uint32_t logNow = millis();
     if (logNow - lastDropLogMs > 1000) {
-      Serial.printf("[nearby] addOrUpdateFromEspNow: mutex contended, dropped (name=%s)\n",
+      Serial.printf("[roster] addOrUpdateFromEspNow: mutex contended, dropped (name=%s)\n",
                     name.c_str());
       lastDropLogMs = logNow;
     }
@@ -120,16 +116,15 @@ void NearbyLamps::addOrUpdateFromEspNow(const std::string& name, const uint8_t m
   // lastRssi not updated from HELLO: single transport source prevents
   // cross-transport contamination in PersonalityEngine's hysteresis.
   size_t idx = findIndexLocked(name);
-  if (idx == store_.size()) {
+  if (idx == count_) {
     evictOldestIfFullLocked();
-    NearbyLamp e;
-    e.name = name;
+    RosterEntry e;
+    copyName(e.name, name);
     e.baseColor = base;
     e.shadeColor = shade;
     std::memcpy(e.mac, mac, 6);
     e.hasMac = true;
-    e.bdAddr = derivedBdAddr;
-    e.lastSeenViaEspNowMs = now;
+    e.lastSeenMeshMs = now;
     e.firmwareVersion = firmwareVersion;
     e.otaState = otaState;
     e.protocolVersion = protocolVersion;
@@ -141,18 +136,16 @@ void NearbyLamps::addOrUpdateFromEspNow(const std::string& name, const uint8_t m
       std::memcpy(e.fsDigest, fsDigest, sizeof(e.fsDigest));
       e.hasFsDigest = true;
     }
-    store_.push_back(e);
+    e.needsFs = needsFs;
+    e.maxChunk = maxChunk;
+    e.espnowRssi = rssi;
+    store_[count_++] = e;
   } else {
     store_[idx].baseColor = base;
     store_[idx].shadeColor = shade;
     std::memcpy(store_[idx].mac, mac, 6);
     store_[idx].hasMac = true;
-    // Observed BLE BD_ADDR wins; only fill from the derivation when
-    // the entry has no real BLE sighting yet.
-    if (store_[idx].bdAddr.empty()) {
-      store_[idx].bdAddr = derivedBdAddr;
-    }
-    store_[idx].lastSeenViaEspNowMs = now;
+    store_[idx].lastSeenMeshMs = now;
     // Zero from BLE-only callers (no HELLO) leaves a known version intact.
     if (firmwareVersion != 0) store_[idx].firmwareVersion = firmwareVersion;
     // OTA state is instantaneous; the latest HELLO always wins.
@@ -174,18 +167,28 @@ void NearbyLamps::addOrUpdateFromEspNow(const std::string& name, const uint8_t m
       std::memcpy(store_[idx].fsDigest, fsDigest, sizeof(store_[idx].fsDigest));
       store_[idx].hasFsDigest = true;
     }
+    // Instantaneous like otaState: the latest HELLO wins, so a healed peer that
+    // stops emitting NEED_FS clears here. Only HELLO reaches this method.
+    store_[idx].needsFs = needsFs;
+    // Zero from BLE-only callers or older peers leaves a known value intact.
+    if (maxChunk != 0) store_[idx].maxChunk = maxChunk;
+    // Freshens every HELLO like lastRssi does for BLE adv; -127 sentinel
+    // (unavailable RSSI) leaves the last known reading intact.
+    if (rssi != -127) store_[idx].espnowRssi = rssi;
   }
+  generation_++;
   xSemaphoreGive(mutex_);
 }
 
-void NearbyLamps::prune(uint32_t maxAgeMs) {
+void LampRoster::prune(uint32_t maxAgeMs) {
   uint32_t now = millis();
   xSemaphoreTake(mutex_, portMAX_DELAY);
-  for (size_t i = 0; i < store_.size(); ) {
+  for (size_t i = 0; i < count_; ) {
     uint32_t mostRecent = lastSeen(store_[i]);
     if (mostRecent != 0 && (now - mostRecent) > maxAgeMs) {
-      if (i != store_.size() - 1) store_[i] = store_.back();
-      store_.pop_back();
+      if (i != count_ - 1) store_[i] = store_[count_ - 1];
+      count_--;
+      generation_++;
       continue;
     }
     i++;
@@ -195,91 +198,77 @@ void NearbyLamps::prune(uint32_t maxAgeMs) {
 
 // Copy store_ under lock, filter outside. Bounds the critical section so
 // ESP-NOW recv-side bounded takes don't time out on a loop-task reader.
-std::vector<NearbyLamp> NearbyLamps::getReachableViaBle(uint32_t maxAgeMs) {
+std::vector<RosterEntry> LampRoster::getNear(uint32_t maxAgeMs) {
   uint32_t now = millis();
   xSemaphoreTake(mutex_, portMAX_DELAY);
-  std::vector<NearbyLamp> snapshot = store_;
+  std::vector<RosterEntry> snapshot(store_.begin(), store_.begin() + count_);
   xSemaphoreGive(mutex_);
-  std::vector<NearbyLamp> out;
+  std::vector<RosterEntry> out;
   out.reserve(snapshot.size());
   for (const auto& e : snapshot) {
-    if (e.lastSeenViaBleMs != 0 && (now - e.lastSeenViaBleMs) <= maxAgeMs) {
+    if (e.lastSeenNearMs != 0 && (now - e.lastSeenNearMs) <= maxAgeMs) {
       out.push_back(e);
     }
   }
   // Highest RSSI first: `peers.front()` gives the nearest lamp
-  // (PersonalityEngine closest-peer tracking, cascade-stagger sort key).
-  // -127 sorts to the back. Stable sort keeps equal-RSSI order predictable.
+  // (cascade-stagger sort key). -127 sorts to the back. Stable sort keeps
+  // equal-RSSI order predictable.
   std::stable_sort(out.begin(), out.end(),
-                    [](const NearbyLamp& a, const NearbyLamp& b) {
+                    [](const RosterEntry& a, const RosterEntry& b) {
                       return a.lastRssi > b.lastRssi;
                     });
   return out;
 }
 
-std::vector<NearbyLamp> NearbyLamps::getUngreetedArrivals(uint32_t maxAgeMs) {
+std::vector<RosterEntry> LampRoster::getUngreetedArrivals(uint32_t maxAgeMs) {
   uint32_t now = millis();
   xSemaphoreTake(mutex_, portMAX_DELAY);
-  std::vector<NearbyLamp> snapshot = store_;
+  std::vector<RosterEntry> snapshot(store_.begin(), store_.begin() + count_);
   xSemaphoreGive(mutex_);
-  std::vector<NearbyLamp> out;
+  std::vector<RosterEntry> out;
   out.reserve(snapshot.size());
   for (const auto& e : snapshot) {
-    if (e.bdAddr.empty()) continue;
-    if (e.lastSeenViaBleMs == 0) continue;
-    if ((now - e.lastSeenViaBleMs) > maxAgeMs) continue;
+    if (!e.hasMac) continue;
+    if (e.lastSeenNearMs == 0) continue;
+    if ((now - e.lastSeenNearMs) > maxAgeMs) continue;
     if (e.acknowledged) continue;
     out.push_back(e);
   }
   std::stable_sort(out.begin(), out.end(),
-                   [](const NearbyLamp& a, const NearbyLamp& b) {
+                   [](const RosterEntry& a, const RosterEntry& b) {
                      return a.lastRssi > b.lastRssi;
                    });
   return out;
 }
 
-std::vector<NearbyLamp> NearbyLamps::getReachableViaEspNow(uint32_t maxAgeMs) {
+std::vector<RosterEntry> LampRoster::getMesh(uint32_t maxAgeMs) {
   uint32_t now = millis();
   xSemaphoreTake(mutex_, portMAX_DELAY);
-  std::vector<NearbyLamp> snapshot = store_;
+  std::vector<RosterEntry> snapshot(store_.begin(), store_.begin() + count_);
   xSemaphoreGive(mutex_);
-  std::vector<NearbyLamp> out;
+  std::vector<RosterEntry> out;
   out.reserve(snapshot.size());
   for (const auto& e : snapshot) {
-    if (e.lastSeenViaEspNowMs != 0 && (now - e.lastSeenViaEspNowMs) <= maxAgeMs) {
+    if (e.lastSeenMeshMs != 0 && (now - e.lastSeenMeshMs) <= maxAgeMs) {
       out.push_back(e);
     }
   }
   return out;
 }
 
-std::vector<NearbyLamp> NearbyLamps::getAll() {
+std::vector<RosterEntry> LampRoster::getAll() {
   xSemaphoreTake(mutex_, portMAX_DELAY);
-  std::vector<NearbyLamp> snapshot = store_;
+  std::vector<RosterEntry> snapshot(store_.begin(), store_.begin() + count_);
   xSemaphoreGive(mutex_);
   return snapshot;
 }
 
-bool NearbyLamps::findByBdAddr(const std::string& bdAddr, NearbyLamp& out) {
-  if (bdAddr.empty()) return false;
-  xSemaphoreTake(mutex_, portMAX_DELAY);
-  for (const auto& e : store_) {
-    if (e.bdAddr == bdAddr) {
-      out = e;
-      xSemaphoreGive(mutex_);
-      return true;
-    }
-  }
-  xSemaphoreGive(mutex_);
-  return false;
-}
-
-bool NearbyLamps::findByMac(const uint8_t mac[6], NearbyLamp& out) {
+bool LampRoster::findByMac(const uint8_t mac[6], RosterEntry& out) {
   if (mac == nullptr) return false;
   xSemaphoreTake(mutex_, portMAX_DELAY);
-  for (const auto& e : store_) {
-    if (e.hasMac && std::memcmp(e.mac, mac, 6) == 0) {
-      out = e;
+  for (size_t i = 0; i < count_; i++) {
+    if (store_[i].hasMac && std::memcmp(store_[i].mac, mac, 6) == 0) {
+      out = store_[i];
       xSemaphoreGive(mutex_);
       return true;
     }
@@ -288,11 +277,21 @@ bool NearbyLamps::findByMac(const uint8_t mac[6], NearbyLamp& out) {
   return false;
 }
 
-void NearbyLamps::acknowledge(const std::string& name) {
+void LampRoster::acknowledge(const std::string& name) {
   xSemaphoreTake(mutex_, portMAX_DELAY);
   size_t idx = findIndexLocked(name);
-  if (idx < store_.size()) store_[idx].acknowledged = true;
+  if (idx < count_) {
+    store_[idx].acknowledged = true;
+    generation_++;
+  }
   xSemaphoreGive(mutex_);
+}
+
+uint32_t LampRoster::generation() {
+  xSemaphoreTake(mutex_, portMAX_DELAY);
+  uint32_t g = generation_;
+  xSemaphoreGive(mutex_);
+  return g;
 }
 
 }  // namespace lamp

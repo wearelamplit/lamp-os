@@ -2,10 +2,14 @@
 
 #include <cstring>
 
+#include "ota_channel.hpp"
+
 #include "firmware_signature.hpp"
+#include "components/network/protocol/fw_ota.hpp"
 #include "components/network/ble/ble_control.hpp"  // pauseRadioForOta / resumeRadioAfterOta
 #include "components/firmware/ota_quiet_mode.hpp"     // enterQuiet / exitQuiet
 #include "components/network/mesh/mesh_link.hpp"
+#include "util/heap_probe.hpp"
 #include "../../version.hpp"
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
@@ -48,7 +52,7 @@ constexpr uint32_t kChunkStallReqMs    = 2000;   // emit REQ after 2s gap
 constexpr uint32_t kStreamingHardCapMs = 600000; // total OTA budget (10 min)
 // If no chunk arrives for this long the offerer has likely died; abort the
 // Streaming state back to Idle and resume HELLOs so any peer can re-OFFER.
-// Without it, receivers stay locked to dead offerers until the 5-min hard cap.
+// Without it, receivers stay locked to dead offerers until the 10-min hard cap.
 constexpr uint32_t kNoProgressAbortMs  = 60000;  // 1 min no-chunk abort
 constexpr uint32_t kPostResultPauseMs  = 100;    // pre-restart delay
 
@@ -100,18 +104,6 @@ inline void widenIwdt() {
 }
 #endif
 
-// Channel match against this lamp's compiled-in channel. Both sides are
-// zero-padded to FW_CHANNEL_LEN before compare so "stable" vs "stable\0\0"
-// match correctly.
-bool channelMatchesOurs(const char* offerChannel /* FW_CHANNEL_LEN bytes */) {
-  char ours[lamp_protocol::FW_CHANNEL_LEN] = {0};
-  const char* src = FIRMWARE_CHANNEL_STR ? FIRMWARE_CHANNEL_STR : "";
-  size_t srcLen = 0;
-  while (src[srcLen] != '\0' && srcLen < lamp_protocol::FW_CHANNEL_LEN) ++srcLen;
-  std::memcpy(ours, src, srcLen);
-  return std::memcmp(offerChannel, ours, lamp_protocol::FW_CHANNEL_LEN) == 0;
-}
-
 }  // namespace
 
 void FirmwareReceiver::begin(FirmwareTransport* meshTransport,
@@ -140,6 +132,13 @@ void FirmwareReceiver::tick(uint32_t nowMs) {
         ::lamp::ota_quiet_mode::exitQuiet();
         quietHeld_        = false;
         quietHoldUntilMs_ = 0;
+      }
+      // Reclaim the chunk bitmap once back in Idle. The gate is disarmed and the
+      // abort/verify path that set Idle ran a prior tick, so any Core 0 write has
+      // drained (a write is sub-ms) and the capacity is safe to drop.
+      if (!bitmap_.empty()) {
+        std::vector<uint8_t>().swap(bitmap_);
+        bitmapTotalChunks_ = 0;
       }
       return;
     case State::Apply:
@@ -179,11 +178,11 @@ void FirmwareReceiver::tick(uint32_t nowMs) {
       // No-progress abort: if no chunk has arrived for kNoProgressAbortMs the
       // offerer likely died; abort to Idle and resume HELLOs so a peer can
       // re-OFFER (Streaming suppresses HELLO, so otherwise no peer finds this
-      // receiver until the 5-min hard cap).
+      // receiver until the 10-min hard cap).
       // Gated on lastChunkSeenMs_ (any arrival) not lastChunkMs_ (successful
       // write): a write-failure streak with chunks still arriving is not a dead
       // session, the stall watchdog will REQ the holes. Signed cast because
-      // Core 0 can bump lastChunkSeenMs_ a few ms past our captured nowMs, and
+      // Core 0 can bump lastChunkSeenMs_ a few ms past the captured nowMs, and
       // unsigned subtraction would wrap to ~4 billion (spurious abort).
       const int32_t elapsedSeen =
           static_cast<int32_t>(nowMs - lastChunkSeenMs_);
@@ -264,43 +263,60 @@ void FirmwareReceiver::handleControlOnLoop(const PendingFirmwareControl& ctrl) {
 
 void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
                                      uint32_t nowMs) {
-  // Channel mismatch: silent drop, no ACCEPT or RESULT. Cross-channel offers
-  // are a wisp-side target-picker bug and shouldn't add ack-stream noise.
-  if (!channelMatchesOurs(ctrl.offer.channel)) {
-#ifdef LAMP_DEBUG
-    char ch[lamp_protocol::FW_CHANNEL_LEN + 1] = {0};
-    std::memcpy(ch, ctrl.offer.channel, lamp_protocol::FW_CHANNEL_LEN);
-    Serial.printf("[fw_receiver] OFFER channel=%s ours=%s → silent drop\n",
-                  ch, FIRMWARE_CHANNEL_STR);
-#endif
-    return;
-  }
-  // Chunk size mismatch: decline-busy (no negotiation, locked to 200).
+  // Accept any chunkSize in 1..FW_CHUNK_SIZE_MAX so a v2 distributor's larger
+  // negotiated chunk clears this gate; 0 or oversize declines-busy.
   // DeclineBusy signals the wisp to stop retrying.
-  if (ctrl.offer.chunkSize != lamp_protocol::FW_CHUNK_SIZE) {
+  if (ctrl.offer.chunkSize == 0 ||
+      ctrl.offer.chunkSize > lamp_protocol::FW_CHUNK_SIZE_MAX) {
 #ifdef LAMP_DEBUG
-    Serial.printf("[fw_receiver] OFFER chunkSize=%u != %u, declining\n",
+    Serial.printf("[fw_receiver] OFFER chunkSize=%u out of range (1..%u), declining\n",
                   (unsigned)ctrl.offer.chunkSize,
-                  (unsigned)lamp_protocol::FW_CHUNK_SIZE);
+                  (unsigned)lamp_protocol::FW_CHUNK_SIZE_MAX);
 #endif
     sendAccept(ctrl, lamp_protocol::FwAcceptStatus::DeclineBusy);
     return;
   }
-  // Already-current decline. Firmware: version <= ours. FS: the hook declines
-  // when the offer isn't the running firmware version OR the offered digest
-  // matches the installed image. The peer then drops this lamp from its
-  // needs-update set.
+  // Firmware: reject if otaAcceptable returns false (wrong channel, downgrade,
+  // cross-variant, or stable<-beta). FS: the hook owns its own accept logic.
+  // Distributor is the upstream gate for unwanted offers; receiver sends
+  // DeclineAlreadyCurrent so the distributor drops this lamp from its queue.
+  char offerCh[lamp_protocol::FW_CHANNEL_LEN + 1] = {0};
+  std::memcpy(offerCh, ctrl.offer.channel, lamp_protocol::FW_CHANNEL_LEN);
   const bool declineCurrent =
       fsHooks_
           ? !fsHooks_->shouldAccept(ctrl.offer.version, ctrl.offer.sha256Prefix)
-          : (ctrl.offer.version <= FIRMWARE_VERSION);
+          : !otaAcceptable(FIRMWARE_CHANNEL_STR, FIRMWARE_VERSION,
+                           offerCh, ctrl.offer.version);
   if (declineCurrent) {
 #ifdef LAMP_DEBUG
-    Serial.printf("[fw_receiver] OFFER v=0x%08X declined (already current)\n",
-                  (unsigned)ctrl.offer.version);
+    Serial.printf("[fw_receiver] OFFER v=0x%08X ch=%s declined\n",
+                  (unsigned)ctrl.offer.version, offerCh);
 #endif
     sendAccept(ctrl, lamp_protocol::FwAcceptStatus::DeclineAlreadyCurrent);
     return;
+  }
+  // Decline before erase: an unverifiable offer never triggers the erase +
+  // stream-then-fail loop. FS offers carry the same digest + ed25519 signature
+  // trailer (fw.lsig signs the manifest digest with the same key), so this is
+  // the FS erase-DoS boundary too, not a receiver toggle. A forged FS offer with
+  // no valid signature is declined before fsRecvPartition unmounts + erases the
+  // live web UI.
+  {
+    const lamp_protocol::FwAcceptStatus authStatus =
+        lamp_protocol::decideFwOfferAuth(
+            ctrl.offer.hasAuth,
+            ctrl.offer.hasAuth &&
+                firmware::verifyFirmwareDigestSignature(ctrl.offer.digest,
+                                                        ctrl.offer.signature));
+    if (authStatus != lamp_protocol::FwAcceptStatus::Accept) {
+#ifdef LAMP_DEBUG
+      Serial.printf("[fw_receiver] OFFER v=0x%08X unverified (hasAuth=%d) → "
+                    "decline, no stream\n",
+                    (unsigned)ctrl.offer.version, (int)ctrl.offer.hasAuth);
+#endif
+      sendAccept(ctrl, authStatus);
+      return;
+    }
   }
   // Single-source-at-a-time. An idempotent re-OFFER (same version, transport,
   // and source) re-ACKs so a wisp that missed the first ACCEPT can restart.
@@ -352,16 +368,29 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
   offerVersion_       = ctrl.offer.version;
   offerTotalLen_      = ctrl.offer.totalLen;
   offerChunkSize_     = ctrl.offer.chunkSize;
-  offerTotalChunks_   = ctrl.offer.totalChunks;
+  std::memcpy(offerDigest_, ctrl.offer.digest,
+              lamp_protocol::FW_SHA256_FULL_LEN);
 
-  // Derive expected chunk count from totalLen when totalChunks is zero
-  // (forward-compat); otherwise prefer the wire value (catches off-by-one
-  // sender bugs).
-  size_t expectedChunks = ctrl.offer.totalChunks;
-  if (expectedChunks == 0 && ctrl.offer.chunkSize > 0) {
-    expectedChunks = (ctrl.offer.totalLen + ctrl.offer.chunkSize - 1) /
-                     ctrl.offer.chunkSize;
+  // Reject oversized offers before any allocation. totalLen is unauthenticated
+  // (ed25519 signs the image digest, not the OFFER header), so a bogus large
+  // totalLen would cause resetBitmap to attempt a multi-MB vector alloc and
+  // abort()/reset before the partition-size check below can fire. 4 MB covers
+  // any realistic firmware image with comfortable headroom.
+  static constexpr uint32_t kMaxOfferLen = 4u * 1024u * 1024u;
+  if (ctrl.offer.totalLen == 0 || ctrl.offer.totalLen > kMaxOfferLen) {
+    sendAccept(ctrl, lamp_protocol::FwAcceptStatus::DeclineBusy);
+    return;
   }
+
+  // Derive the chunk count from totalLen, never the wire totalChunks. totalLen
+  // is bounded by kMaxOfferLen above; totalChunks is unauthenticated until the
+  // DONE-time digest bind, so trusting a mutated value would size the bitmap for
+  // chunks that never arrive and stall the session to the 10-min cap. chunkSize
+  // is range-checked to 1..FW_CHUNK_SIZE_MAX above, so the divide is safe.
+  const size_t expectedChunks =
+      (static_cast<size_t>(offerTotalLen_) + offerChunkSize_ - 1) /
+      offerChunkSize_;
+  offerTotalChunks_ = static_cast<uint16_t>(expectedChunks);
 
   resetBitmap(expectedChunks);
 
@@ -473,6 +502,7 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
     progressForLen_ = offerTotalLen_;
   }
   state_            = State::Streaming;
+  lamp::logHeap("ota-stream");
 
   // Enter OTA quiet mode for the streaming window: suspends behaviors / draw /
   // non-OTA BLE writes. Mesh (EspNow) OTA also pauses the radio and kicks any
@@ -484,7 +514,8 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
   // expire-and-exit mid-session.
   if (!quietHeld_) {
     ::lamp::ota_quiet_mode::enterQuiet(
-        activeTransportKind_ == FirmwareTransportKind::EspNow);
+        activeTransportKind_ == FirmwareTransportKind::EspNow,
+        /*visible=*/fsHooks_ == nullptr);
     quietHeld_ = true;
   }
   quietHoldUntilMs_ = 0;
@@ -530,7 +561,7 @@ void FirmwareReceiver::onDoneOnLoop(const PendingFirmwareControl& ctrl,
     return;
   }
   // Bitmap not yet full: REQ the first missing run and stay in Streaming. The
-  // wisp fills the run and re-sends DONE.
+  // sender fills the run and re-sends DONE.
   if (!isBitmapFull()) {
     const uint16_t missing = firstMissingChunk();
     if (missing != UINT16_MAX) {
@@ -555,9 +586,9 @@ void FirmwareReceiver::onDoneOnLoop(const PendingFirmwareControl& ctrl,
                   (unsigned)recvChunksCount_);
   }
 #endif
-  // verifyAndApply drives esp_ota_end + signature check + set_boot_partition +
-  // esp_restart, returning the RESULT code; emit MSG_FW_RESULT and, on success,
-  // pause before reboot so the broadcast clears the radio.
+  // verifyAndApply drives esp_ota_end + signature check + set_boot_partition,
+  // returning the RESULT code. Emit MSG_FW_RESULT and, on success, pause
+  // before reboot so the broadcast clears the radio.
   state_ = State::Verify;
   const lamp_protocol::FwResultStatus rc = verifyAndApply();
   if (rc == lamp_protocol::FwResultStatus::Success) {
@@ -566,9 +597,12 @@ void FirmwareReceiver::onDoneOnLoop(const PendingFirmwareControl& ctrl,
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
     // Pause so the broadcast leaves the radio before the CPU resets.
     delay(kPostResultPauseMs);
-    // Exit quiet-mode before reboot OR before returning to Idle (the FS path
-    // below returns without rebooting, so this is load-bearing there).
+    // exitQuiet before reboot (firmware path) and before returning to Idle
+    // (FS path, which remounts without rebooting). Clear quietHeld_ so the FS
+    // path leaves quiet accounting balanced; the firmware path reboots past it.
     ::lamp::ota_quiet_mode::exitQuiet();
+    quietHeld_        = false;
+    quietHoldUntilMs_ = 0;
     // FS image OTA finalizes without a reboot: SPIFFS is only read by the
     // onboarding webapp, so a remount makes the new UI live. Firmware OTA
     // reboots.
@@ -646,12 +680,24 @@ void FirmwareReceiver::handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk&
     return;
   }
   // Chunk size must match (last chunk may be shorter; intermediate must
-  // be exactly FW_CHUNK_SIZE).
+  // be exactly offerChunkSize_).
   if (p.len > offerChunkSize_) {
 #ifdef LAMP_DEBUG
     Serial.printf("[fw_receiver] chunk drop: oversize chunkIdx=%u len=%u "
                   "max=%u\n",
                   (unsigned)p.chunkIdx, (unsigned)p.len,
+                  (unsigned)offerChunkSize_);
+#endif
+    return;
+  }
+  // offset == chunkIdx * offerChunkSize_ on every chunk (catches malformed
+  // senders that disagree with themselves). Only the receiver holds the
+  // session's negotiated chunkSize, so it validates this, not parseFwChunk.
+  if (p.offset != static_cast<uint32_t>(p.chunkIdx) * offerChunkSize_) {
+#ifdef LAMP_DEBUG
+    Serial.printf("[fw_receiver] chunk drop: offset misaligned chunkIdx=%u "
+                  "off=%u chunkSize=%u\n",
+                  (unsigned)p.chunkIdx, (unsigned)p.offset,
                   (unsigned)offerChunkSize_);
 #endif
     return;
@@ -668,9 +714,10 @@ void FirmwareReceiver::handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk&
 #endif
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   // Paired with Core 1's release-store of publishedOtaHandle_, the partition
-  // pointer is valid here. Pure write: the region was erased upfront, and an
-  // esp_partition_write of <=200 bytes holds cache/interrupts off for <1 ms,
-  // far under the IWDT ceiling, so no per-chunk widen is needed.
+  // pointer is valid here. Pure write: the region was erased upfront, and the
+  // write is bounded by the negotiated chunk size (up to FW_CHUNK_SIZE_MAX
+  // bytes). Each call holds cache/interrupts off for the write's duration,
+  // which scales with chunk size.
   const esp_partition_t* part =
       publishedPartition_.load(std::memory_order_relaxed);
   if (part == nullptr) return;
@@ -765,14 +812,22 @@ uint16_t FirmwareReceiver::firstMissingChunk() const {
   portENTER_CRITICAL(&eraseMux_);
 #endif
   uint16_t result = UINT16_MAX;
-  for (size_t i = 0; i < bitmapTotalChunks_; ++i) {
-    const size_t byteIdx = i / 8;
-    const uint8_t bit = static_cast<uint8_t>(1u << (i % 8));
-    if (byteIdx >= bitmap_.size()) break;
-    if ((bitmap_[byteIdx] & bit) == 0) {
-      result = static_cast<uint16_t>(i);
-      break;
+  const size_t fullBytes = bitmapTotalChunks_ / 8;
+  const size_t tailBits = bitmapTotalChunks_ % 8;
+  const size_t scanBytes = fullBytes + (tailBits != 0 ? 1u : 0u);
+  for (size_t b = 0; b < scanBytes && b < bitmap_.size(); ++b) {
+    // Clear bits above bitmapTotalChunks_ in the tail byte are padding, not missing chunks.
+    const uint8_t validMask =
+        (b == fullBytes) ? static_cast<uint8_t>((1u << tailBits) - 1u) : 0xFFu;
+    const uint8_t missing = static_cast<uint8_t>(~bitmap_[b] & validMask);
+    if (missing == 0) continue;
+    for (uint8_t bit = 0; bit < 8; ++bit) {
+      if (missing & (1u << bit)) {
+        result = static_cast<uint16_t>(b * 8 + bit);
+        break;
+      }
     }
+    break;
   }
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   portEXIT_CRITICAL(&eraseMux_);
@@ -952,7 +1007,7 @@ lamp_protocol::FwResultStatus FirmwareReceiver::verifyAndApply() {
   // falls through to the streaming LSIG verify + boot flip below.
   if (fsHooks_) {
     return fsHooks_->verify(static_cast<const void*>(otaPartition),
-                            offerVersion_);
+                            offerVersion_, offerDigest_);
   }
   // Streaming verify: the lamp's ~280 KB heap can't hold a 1.4 MB image, so feed
   // firmware_signature's streaming reader from the OTA partition via
@@ -968,13 +1023,24 @@ lamp_protocol::FwResultStatus FirmwareReceiver::verifyAndApply() {
   };
   const char* outChannel = nullptr;
   uint32_t outVersion = 0;
+  uint8_t streamedDigest[lamp_protocol::FW_SHA256_FULL_LEN] = {0};
   const bool ok = firmware::verifySignedFirmware(reader, offerTotalLen_,
-                                                 &outChannel, &outVersion);
+                                                 &outChannel, &outVersion,
+                                                 streamedDigest);
   if (!ok) {
 #ifdef LAMP_DEBUG
     Serial.println("[fw_receiver] signature verify FAILED");
 #endif
     return lamp_protocol::FwResultStatus::SignatureFail;
+  }
+  // Bind the streamed image to the offer-time verified digest: a source can't
+  // pass an authentic OFFER then stream different (also-signed) bytes.
+  if (std::memcmp(streamedDigest, offerDigest_,
+                  lamp_protocol::FW_SHA256_FULL_LEN) != 0) {
+#ifdef LAMP_DEBUG
+    Serial.println("[fw_receiver] streamed digest != offered digest → reject");
+#endif
+    return lamp_protocol::FwResultStatus::OfferShaMismatch;
   }
   if (outVersion != offerVersion_) {
     // Footer version disagrees with the offer's claim; the bytes don't match
@@ -982,11 +1048,12 @@ lamp_protocol::FwResultStatus FirmwareReceiver::verifyAndApply() {
     return lamp_protocol::FwResultStatus::OfferShaMismatch;
   }
   // Re-check the verified footer's channel before flipping the boot partition.
-  // The OFFER-time channelMatchesOurs already rejected cross-variant binaries;
-  // this closes the gap against a CI asset swap or a future path that bypasses
-  // the OFFER gate.
+  // Closes the gap against a CI asset swap or a path that bypasses the OFFER gate.
+  // Type prefix must match exactly; channel suffix may differ only as beta->stable.
+  // ponytail: version args are irrelevant here; 0 < 1 satisfies both the
+  //   intra-channel (>0) and promotion (>=0) requirements in otaAcceptable.
   const char* ours = FIRMWARE_CHANNEL_STR ? FIRMWARE_CHANNEL_STR : "";
-  if (!outChannel || std::strcmp(outChannel, ours) != 0) {
+  if (!outChannel || !otaAcceptable(ours, 0, outChannel, 1)) {
 #ifdef LAMP_DEBUG
     Serial.printf("[fw_receiver] type-gate REJECT: footer channel=\"%s\" "
                   "ours=\"%s\"\n",
