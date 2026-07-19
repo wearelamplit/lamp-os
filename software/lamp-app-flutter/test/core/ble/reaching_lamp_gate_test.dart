@@ -249,6 +249,44 @@ void main() {
     expect(find.text('My Lamps'), findsOneWidget);
   });
 
+  testWidgets('blocks back-navigation while the overlay is shown',
+      (tester) async {
+    await _pumpGate(
+      tester,
+      router: _testRouter('/lamp/$_lampId/control'),
+      overrides: [
+        controlNotifierProvider(_lampId)
+            .overrideWith(() => _FakeControl(connected: false)),
+      ],
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final popScope = tester.widget<PopScope>(
+        find.ancestor(of: find.byType(Stack), matching: find.byType(PopScope))
+            .first);
+    expect(popScope.canPop, isFalse);
+  });
+
+  testWidgets('allows back-navigation once the overlay is hidden',
+      (tester) async {
+    await _pumpGate(
+      tester,
+      router: _testRouter('/lamp/$_lampId/control'),
+      overrides: [
+        controlNotifierProvider(_lampId)
+            .overrideWith(() => _FakeControl(connected: true)),
+      ],
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final popScope = tester.widget<PopScope>(
+        find.ancestor(of: find.byType(Stack), matching: find.byType(PopScope))
+            .first);
+    expect(popScope.canPop, isTrue);
+  });
+
   testWidgets('escape button navigates to My Lamps', (tester) async {
     await _pumpGate(
       tester,

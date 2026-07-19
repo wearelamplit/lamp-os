@@ -167,8 +167,11 @@ class LampRoster {
 
   // Cache wisp presence from MSG_WISP_HELLO. Display-slot admission: a
   // rival wisp is rejected while the current wisp's hellos are fresh
-  // (kWispDisplayStaleMs).
-  void cacheWispHello(const uint8_t mac[6],
+  // (kWispDisplayStaleMs). Returns true when this hello established a new
+  // display-slot wisp (first sighting or a takeover), so the caller can
+  // push a wispStatus notify for the presence edge rather than on every
+  // 2 s keepalive.
+  bool cacheWispHello(const uint8_t mac[6],
                       uint32_t wispVersion,
                       uint8_t flags,
                       const char* paletteIdPrefix,  // 8 bytes; not NUL-terminated

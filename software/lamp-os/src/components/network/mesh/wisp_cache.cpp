@@ -58,7 +58,7 @@ bool LampRoster::admitWispLocked(const uint8_t mac[6], uint32_t nowMs) {
   return true;
 }
 
-void LampRoster::cacheWispHello(const uint8_t mac[6],
+bool LampRoster::cacheWispHello(const uint8_t mac[6],
                                  uint32_t wispVersion,
                                  uint8_t flags,
                                  const char* paletteIdPrefix,
@@ -68,10 +68,14 @@ void LampRoster::cacheWispHello(const uint8_t mac[6],
   // the only contended reader is also on Core 1.
   xSemaphoreTake(mutex_, portMAX_DELAY);
   const uint32_t nowMs = millis();
+  const bool wasPresent = wispCache_.present;
+  uint8_t prevMac[6];
+  std::memcpy(prevMac, wispCache_.mac, 6);
   if (!admitWispLocked(mac, nowMs)) {
     xSemaphoreGive(mutex_);
-    return;
+    return false;
   }
+  const bool presenceEdge = !wasPresent || std::memcmp(prevMac, mac, 6) != 0;
   wispCache_.lastHelloMs = nowMs;
   wispCache_.wispVersion = wispVersion;
   wispCache_.flags = flags;
@@ -82,6 +86,7 @@ void LampRoster::cacheWispHello(const uint8_t mac[6],
   wispCache_.carriedFwChannel[8] = '\0';
   wispCache_.carriedFwVersion = carriedFwVersion;
   xSemaphoreGive(mutex_);
+  return presenceEdge;
 }
 
 void LampRoster::cacheWispStatus(const uint8_t mac[6],

@@ -83,13 +83,13 @@ class PaintDistributor {
   size_t walkCount_ = 0;
   size_t walkIdx_ = 0;
 
-  // Restore is a one-shot unicast per peer with no periodic re-cover; a single
-  // BLE-coex-dropped frame strands a lamp painted until its 60 s watchdog. Run
-  // the Restore walk extra passes so one lost frame doesn't lose the release.
+  // Restore has no lamp-side keepalive; a lamp only drops paint on a received
+  // RESTORE or its 60 s watchdog. Re-cover the release across a bounded window
+  // so a run of BLE-coex-dropped frames can't strand a lamp for the full 60 s.
   uint8_t restoreRepeatsLeft_ = 0;
   uint32_t nextRestorePassMs_ = 0;
-  static constexpr uint8_t  kRestoreRepeats     = 2;
-  static constexpr uint32_t kRestorePassGapMs   = 150;
+  static constexpr uint8_t  kRestoreRepeats     = 6;
+  static constexpr uint32_t kRestorePassGapMs   = 500;
 
   uint32_t driftIntervalMs_    = 120000;
   uint8_t  driftFadePct_       = 50;
