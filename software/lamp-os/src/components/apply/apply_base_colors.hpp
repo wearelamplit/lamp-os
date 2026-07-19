@@ -1,13 +1,11 @@
-// software/lamp-os/src/components/apply/apply_base_colors.hpp
-//
 // Base-color mutation helpers, user/remote split. See apply_shade_colors.hpp
 // for the rationale.
 //
-//   baseColorsToConfig  — user-direct BLE write. Mutates config.base.colors
-//                         so a later CHAR_COMMIT can persist the user's
-//                         choice. Then calls the existing render path.
-//   baseColorsToRender  — mesh-relayed cascade. Render-only. Matches
-//                         today's applyBaseColorsLocal behavior exactly.
+//   baseColorsToConfig: user-direct BLE write. Mutates config.base.colors
+//                       so a later CHAR_COMMIT can persist the user's
+//                       choice. Then calls the existing render path.
+//   baseColorsToRender: mesh-relayed cascade. Render-only. Matches
+//                       applyBaseColorsLocal behavior exactly.
 
 #pragma once
 
@@ -19,12 +17,12 @@
 #include "util/color.hpp"
 
 // config is defined as `lamp::Config config;` at file scope in
-// lamp.cpp — i.e., it lives at ::config, not ::lamp::config.
+// lamp.cpp; it lives at ::config, not ::lamp::config.
 extern lamp::Config config;
 
 namespace lamp {
 
-// Provided by lamp.cpp — calls into the existing render path
+// Provided by lamp.cpp. Calls into the existing render path
 // (ConfiguratorBehavior beginFade + ColorOverride rebaseline + BLE advert
 // update).
 void renderBaseColors(JsonArray arr);
@@ -45,7 +43,7 @@ inline void baseColorsToConfig(JsonArray arr) {
   ::lamp::renderBaseColors(arr);
 }
 
-// Cascade-source variant. Render-only — today's exact behavior.
+// Cascade-source variant. Render-only.
 // Does NOT mutate config so cascade transients cannot contaminate a
 // subsequent CHAR_COMMIT persistence sweep.
 inline void baseColorsToRender(JsonArray arr) {

@@ -1,4 +1,3 @@
-// software/lamp-os/src/components/apply/apply_base_ac.hpp
 #pragma once
 
 #include "config/config.hpp"

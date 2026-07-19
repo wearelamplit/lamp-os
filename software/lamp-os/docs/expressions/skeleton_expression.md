@@ -19,9 +19,7 @@ class SkeletonExpression : public Expression {
 
  public:
   SkeletonExpression(FrameBuffer* inBuffer, uint32_t inFrames = 30)
-      : Expression(inBuffer, inFrames) {
-    allowedInHomeMode = true;
-  }
+      : Expression(inBuffer, inFrames) {}
 
   // Pure type property — override only if your expression differs from the
   // default (false = coexists with the wisp's hold colour).

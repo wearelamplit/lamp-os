@@ -1,5 +1,3 @@
-// software/lamp-os/src/components/apply/apply_settings_blob.hpp
-//
 // settings_blob's per-section dispatch orchestrator. Returns whether
 // the incoming blob requested a reboot. The caller (settings_blob drain
 // in lamp.cpp) handles persistConfig + cache invalidation +
@@ -22,7 +20,7 @@ namespace apply {
 
 // Dispatches each top-level section in the incoming blob to its
 // applyXxxLocal handler. Returns whether the caller should reboot
-// after persisting. `expressions` is INTENTIONALLY SKIPPED — the
+// after persisting. `expressions` is INTENTIONALLY SKIPPED: the
 // per-entry CHAR_EXPRESSION_OP path is canonical for that section.
 // `factoryReset` is handled by the caller before this orchestrator
 // runs (short-circuit).
@@ -59,7 +57,7 @@ inline bool settingsBlobLocal(JsonObject doc, uint8_t maxBrightness) {
       apply::shadeColorsToConfig(shadeObj["colors"].as<JsonArray>());
     }
   }
-  // expressions[]: SKIPPED — see header comment. Per-entry
+  // expressions[]: SKIPPED, see header comment. Per-entry
   // CHAR_EXPRESSION_OP is the canonical path.
 
   // Reboot opt-in. Default true if key omitted, for backward compat with

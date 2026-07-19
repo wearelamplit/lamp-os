@@ -1,5 +1,3 @@
-// software/lamp-os/src/components/apply/apply_base_knockout.hpp
-//
 // settings_blob path for a full base.knockoutPixels map. The
 // per-pixel CHAR_BASE_KNOCKOUT drain remains as a separate live-preview
 // path; this helper applies the bulk shape via the same applyKnockoutPixel

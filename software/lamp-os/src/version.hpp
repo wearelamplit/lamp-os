@@ -9,8 +9,8 @@
 // Layout: (major << 16) | (minor << 8) | patch. Stored as uint32_t for cheap
 // `<` comparisons in the distributor's "lowest version peer" pick.
 
-// Defaults for native env / sanity. Firmware envs override via build_flags
-// (see [env:upesy_wroom] LAMP_FW_* defines).
+// Defaults for native env / sanity. Firmware builds override via the
+// LAMP_FW_* defines injected from the root VERSION file by inject_version.py.
 #ifndef LAMP_FW_MAJOR
 #define LAMP_FW_MAJOR 0
 #endif
@@ -31,7 +31,7 @@ constexpr uint32_t FIRMWARE_VERSION =
     (LAMP_FW_MAJOR << 16) | (LAMP_FW_MINOR << 8) | LAMP_FW_PATCH;
 
 // Human-readable. Stringified via the preprocessor from the same LAMP_FW_*
-// integers — single source of truth.
+// integers; single source of truth.
 constexpr const char* FIRMWARE_VERSION_STR =
     LAMP_STRINGIFY(LAMP_FW_MAJOR) "."
     LAMP_STRINGIFY(LAMP_FW_MINOR) "."

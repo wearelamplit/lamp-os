@@ -1,18 +1,18 @@
 #pragma once
 
-// ColorOverride — transient color override owned per-surface
+// ColorOverride: transient color override owned per-surface
 // (base / shade). The wisp module drives a lamp's surface through
 // this primitive:
 //
-//   apply()   — paint an override color set, fade-in over fadeDurationMs.
-//               Marks state FadingIn → Holding.
-//   restore() — fade back to the saved baseline. Marks state Restoring →
-//               Idle.
-//   tick()    — drives the state machine. Watchdog auto-restores after
-//               kPaintWatchdogMs (60s) of no apply() refresh, so a wisp
-//               that goes silent doesn't leave a lamp painted forever.
+//   apply():   paint an override color set, fade-in over fadeDurationMs.
+//              Marks state FadingIn → Holding.
+//   restore(): fade back to the saved baseline. Marks state Restoring →
+//              Idle.
+//   tick():    drives the state machine. Watchdog auto-restores after
+//              kPaintWatchdogMs (60s) of no apply() refresh, so a wisp
+//              that goes silent doesn't leave a lamp painted forever.
 //
-// Per-pixel fade lives in ConfiguratorBehavior — apply() builds the
+// Per-pixel fade lives in ConfiguratorBehavior: apply() builds the
 // gradient + calls configurator->beginFade(targetColors, fadeDurationMs).
 // The configurator's own draw loop runs the interpolation. Single source
 // of truth for fade math; ColorOverride never touches the buffer.
@@ -51,12 +51,12 @@ class ColorOverride {
  public:
   // Wire the configurator pointer via the shared BehaviorContext. The
   // surface arg picks base vs shade. pixelCount is read once from the
-  // bound configurator's frame buffer at apply() time and cached so we
-  // don't re-resolve on every fade.
+  // bound configurator's frame buffer at apply() time and cached to
+  // avoid re-resolving on every fade.
   void bind(BehaviorContext& ctx, lamp_protocol::OverrideSurface surface);
 
-  // Apply an override. `colors` is the unexpanded list (1..N stops); we
-  // expand to pixelCount via buildGradientWithStops before pushing into
+  // Apply an override. `colors` is the unexpanded list (1..N stops),
+  // expanded to pixelCount via buildGradientWithStops before pushing into
   // the configurator. `fadeDurationMs == 0` means snap-in (configurator
   // writes target directly on the next frame). On entry: snapshots the
   // CURRENT buffer state (the live baseline) into savedColors_ so a
@@ -69,7 +69,7 @@ class ColorOverride {
 
   // Restore to the saved baseline. Drops silently if the call doesn't
   // own this override (sourceKind mismatch and not Any). When state is
-  // Idle this is a no-op — restore-without-prior-apply is benign.
+  // Idle this is a no-op; restore-without-prior-apply is benign.
   void restore(const uint8_t sourceMac[6],
                lamp_protocol::OverrideSource source,
                uint32_t fadeDurationMs);
@@ -90,7 +90,7 @@ class ColorOverride {
   // a Base+Shade pair 10 ms apart but lands in a single-slot mailbox
   // (PendingTypedSlot, newest writer wins). If Core 1 doesn't drain
   // between the two posts the Shade frame silently drops the Base frame
-  // and Base's lastApplyMs_ never advances — after 60 s the watchdog
+  // and Base's lastApplyMs_ never advances; after 60 s the watchdog
   // auto-restores Base, expressions un-pause, and the next surviving
   // wisp Base frame snapshots the expression-painted buffer as the new
   // savedColors_, leaving the lamp visibly "stopped listening" to wisp.
@@ -101,8 +101,8 @@ class ColorOverride {
   bool isActive() const { return state_ != FadeState::Idle; }
   lamp_protocol::OverrideSource activeSource() const { return activeSource_; }
 
-  // True iff a wisp paint frame is currently shaping this surface — i.e.
-  // the override is animating (FadingIn/Holding/Restoring) AND the most
+  // True iff a wisp paint frame is currently shaping this surface: the
+  // override is animating (FadingIn/Holding/Restoring) AND the most
   // recent apply that took effect carried sourceKind=Wisp. The Flutter
   // app reads this through wispStatus to render the will-o'-wisp icon
   // and to grey out expressions that opt into disabledDuringWispOverride.
@@ -130,7 +130,7 @@ class ColorOverride {
   // Snap-re-install the most recent override target gradient back into
   // the configurator. Acts on FadingIn + Holding (skips Restoring + Idle).
   // Used by test_expression_complete after the app's payload overwrites
-  // `configurator.colors` with the lamp's saved colors — without this
+  // `configurator.colors` with the lamp's saved colors; without this
   // call, the wisp paint wouldn't visually return until the wisp's next
   // backstop paint cycle (~10s gap). Holding snaps in (0ms) since the
   // surface is already at these colors; FadingIn continues the remaining
@@ -162,7 +162,7 @@ class ColorOverride {
   FadeState state_ = FadeState::Idle;
   lamp_protocol::OverrideSource activeSource_ = lamp_protocol::OverrideSource::None;
 
-  // Timestamp of the last apply() — drives the FadingIn→Holding transition
+  // Timestamp of the last apply(); drives the FadingIn→Holding transition
   // (when elapsed >= currentFadeDurationMs_).
   uint32_t lastApplyMs_ = 0;
   uint32_t currentFadeDurationMs_ = 0;
@@ -170,14 +170,14 @@ class ColorOverride {
   // Last time the wisp was seen (an apply, or a paint-mode HELLO keepalive).
   // Drives the auto-restore watchdog independent of fade timing, so a long
   // drift fade holds while the wisp is present but reverts within
-  // kPaintWatchdogMs of it going silent — in any active fade state.
+  // kPaintWatchdogMs of it going silent, in any active fade state.
   uint32_t lastWispSeenMs_ = 0;
 
-  // Timestamp of the restore() — drives the Restoring→Idle transition.
+  // Timestamp of the restore(); drives the Restoring→Idle transition.
   uint32_t restoreStartMs_ = 0;
   uint32_t restoreDurationMs_ = 0;
 
-  // The baseline we'll restore to. Snapshotted from the configurator's
+  // The baseline to restore to. Snapshotted from the configurator's
   // `colors` at apply() time, and replaced by rebaseline() during Holding.
   std::vector<Color> savedColors_;
 
@@ -187,15 +187,15 @@ class ColorOverride {
   // round-trip overwrote it.
   std::vector<Color> targetGradient_;
 
-  // Operator-editing lock — see setOperatorEditing() above.
+  // Operator-editing lock; see setOperatorEditing() above.
   bool operatorEditing_ = false;
 
-  // Wisp paint state — set in apply() when source==Wisp.
+  // Wisp paint state, set in apply() when source==Wisp.
   Color lastWispColor_;
   bool  hasLastWispColor_ = false;
 
   // isWispActive() value at the last callback fire. Used for edge-
-  // triggering so we don't spam BLE notifies on every paint.
+  // triggering to avoid spamming BLE notifies on every paint.
   bool wasWispActive_ = false;
 
   OnWispStateChangeCallback wispStateCb_;

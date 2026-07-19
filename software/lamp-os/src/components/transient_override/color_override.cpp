@@ -19,7 +19,7 @@ void ColorOverride::bind(BehaviorContext& ctx, lamp_protocol::OverrideSurface su
       configurator_ = ctx.shadeConfigurator;
       break;
     case lamp_protocol::OverrideSurface::BaseAndShade:
-      // BaseAndShade is a wire-format value only — emitted by the wisp
+      // BaseAndShade is a wire-format value only, emitted by the wisp
       // PaintDistributor to halve frame count; the receive path in
       // lamp.cpp routes the colors into the per-surface ColorOverride
       // instances. ColorOverride itself is always bound per-surface.
@@ -48,10 +48,9 @@ void ColorOverride::apply(const uint8_t sourceMac[6],
     return;
   }
   // Source-ownership: a Holding override from a different source can be
-  // overtaken — newer apply() wins. We DON'T re-snapshot savedColors_
-  // in that case because savedColors_ already holds the true pre-any-
-  // override baseline. Snapshot only when transitioning from Idle
-  // into FadingIn.
+  // overtaken, newer apply() wins. savedColors_ is NOT re-snapshotted
+  // in that case because it already holds the true pre-any-override
+  // baseline. Snapshot only when transitioning from Idle into FadingIn.
   if (state_ == FadeState::Idle) {
     savedColors_ = configurator_->colors;
   }
@@ -97,9 +96,9 @@ void ColorOverride::apply(const uint8_t sourceMac[6],
   // Keep the configurator's animation state machine alive. Without this,
   // ConfiguratorBehavior::control() (behaviors/configurator.cpp:77-89)
   // lapses to STOPPED after CONFIGURATOR_WEBSOCKET_TIMEOUT_MS=60s of no
-  // BLE writes — the legacy WebSocket-era inactivity gate. While
-  // STOPPED, the Compositor skips its draw() (core/compositor.cpp:62),
-  // so the wisp gradient we just stored in `colors` never reaches the
+  // BLE writes (the WebSocket inactivity gate). While STOPPED, the
+  // Compositor skips its draw() (core/compositor.cpp:62),
+  // so the wisp gradient stored in `colors` never reaches the
   // LED buffer even though apply() is firing every ~5-10s. Wisp paint
   // cadence (well inside 60s) keeps the configurator perpetually awake
   // through this bump; the existing 6 BLE-write bump sites in
@@ -113,8 +112,6 @@ void ColorOverride::apply(const uint8_t sourceMac[6],
   lastWispSeenMs_ = lastApplyMs_;
   currentFadeDurationMs_ = fadeDurationMs;
 
-  // Debug-session telemetry: every apply is a state-transition into
-  // (or through) FadingIn — track surface, source, and fade window.
   Serial.printf("[override] apply surface=0x%02X src=%d fade=%ums numColors=%u\n",
                 (unsigned)surface_, (int)source,
                 (unsigned)fadeDurationMs, (unsigned)numColors);
@@ -131,7 +128,7 @@ void ColorOverride::apply(const uint8_t sourceMac[6],
 void ColorOverride::restore(const uint8_t sourceMac[6],
                             lamp_protocol::OverrideSource source,
                             uint32_t fadeDurationMs) {
-  (void)sourceMac;  // not used for the dedup decision in v1 — see source
+  (void)sourceMac;  // not used for the dedup decision; see source
                     // ownership rules below.
   if (!configurator_ || state_ == FadeState::Idle) return;
 
@@ -147,7 +144,7 @@ void ColorOverride::restore(const uint8_t sourceMac[6],
   // machinery so this restore visually behaves identically to a fresh
   // apply (same per-pixel interp curve, same mid-fade interrupt support).
   configurator_->beginFade(savedColors_, fadeDurationMs);
-  // See apply() above — keep the configurator drawing through the
+  // See apply() above; keep the configurator drawing through the
   // restore fade-back too, otherwise the watchdog-driven restore would
   // hand off to a STOPPED configurator and the fade would be invisible.
   configurator_->lastWebSocketUpdateTimeMs = millis();
@@ -165,7 +162,7 @@ void ColorOverride::restore(const uint8_t sourceMac[6],
 void ColorOverride::tick(uint32_t nowMs) {
   // Auto-restore watchdog. In any active fade state, if the wisp hasn't been
   // seen (an apply, or a paint-mode HELLO keepalive) within the window, revert
-  // so a silent wisp can't keep us painted forever. Any-source so restore()'s
+  // so a silent wisp can't keep the surface painted forever. Any-source so restore()'s
   // ownership check doesn't bounce it. Keyed off lastWispSeenMs_, not the fade
   // clock, so a long drift fade holds while the wisp is present.
   if ((state_ == FadeState::FadingIn || state_ == FadeState::Holding) &&
@@ -214,10 +211,10 @@ void ColorOverride::touchApply(uint32_t nowMs) {
 void ColorOverride::reassertHold() {
   // Snap the wisp's target gradient back into the configurator after
   // something else (test_expression_complete's saved-colors payload)
-  // overwrote it. Acts on FadingIn AND Holding — both states are
+  // overwrote it. Acts on FadingIn AND Holding, both states where
   // "wisp paint is currently in effect or arriving" and need the
   // configurator's colors restored to the wisp target. Skipped during
-  // Restoring (wisp is intentionally fading out — re-asserting would
+  // Restoring (wisp is intentionally fading out, so re-asserting would
   // fight the restore) and Idle (no wisp paint to restore).
   if (!configurator_) return;
   if (state_ != FadeState::FadingIn && state_ != FadeState::Holding) {
@@ -233,9 +230,9 @@ void ColorOverride::reassertHold() {
     fadeMs = elapsed < currentFadeDurationMs_ ? currentFadeDurationMs_ - elapsed : 0;
   }
   configurator_->beginFade(targetGradient_, fadeMs);
-  // Keep the configurator's animation state machine alive — same reason
+  // Keep the configurator's animation state machine alive, same reason
   // as apply()'s bump. Without this, a STOPPED configurator would skip
-  // its draw() and the wisp paint we just re-installed wouldn't reach
+  // its draw() and the re-installed wisp paint wouldn't reach
   // the LED buffer until the next ColorOverride apply() bump.
   configurator_->lastWebSocketUpdateTimeMs = millis();
 }
@@ -243,7 +240,7 @@ void ColorOverride::reassertHold() {
 void ColorOverride::rebaseline(const std::vector<Color>& currentSavedColors) {
   // BLE write landed mid-Holding (user changed the underlying config
   // colors). Replace the baseline so the next restore lands on the new
-  // colors. No-op when Idle — the BLE write went straight to the
+  // colors. No-op when Idle; the BLE write went straight to the
   // configurator and there's no override to fix up.
   if (state_ == FadeState::Idle) return;
   savedColors_ = currentSavedColors;

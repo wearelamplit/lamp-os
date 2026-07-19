@@ -12,10 +12,14 @@ void begin(lamp::Config& config);
 void tick();
 bool isActive();
 
+// True while a station is joined to the config softAP (editor open), so the
+// AP is actively transmitting rather than just beaconing.
+bool hasClient();
+
 // Force the SoftAP + HTTP/WS server down NOW (vs. waiting for the
-// 120 s boot-window deadline). Called from pauseRadioForOta() so the
+// boot-window deadline). Called from pauseRadioForOta() so the
 // AP beacons (every ~100 ms) don't keep eating WiFi airtime while
-// ESP-NOW OTA chunks need it. Idempotent — safe to call when already
+// ESP-NOW OTA chunks need it. Idempotent; safe to call when already
 // torn down. There's no companion "bring it back" because the webapp
 // is first-boot config only; it doesn't come back for the rest of
 // this boot regardless.

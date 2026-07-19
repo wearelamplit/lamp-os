@@ -1,5 +1,3 @@
-// software/lamp-os/src/components/apply/apply_expressions.hpp
-//
 // Expression-op user/remote split. See apply_brightness.hpp for the
 // general split rationale.
 
