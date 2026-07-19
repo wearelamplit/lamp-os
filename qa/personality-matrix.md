@@ -78,19 +78,20 @@ greeted/acknowledged state), then ON, and watch for the greet line:
 ```
 
 `mode` is the lamp's own socialMode (0=Introvert 1=Ambivert 2=Extrovert);
-frames/pulse/count must match the profile table in
-`docs/dev/personality-greetings.md` (frames at 60 fps). Ambivert expectations:
+frames/pulse/count must match the `kProfile*` constants in
+`personality_engine.cpp` (frames at 60 fps). Ambivert expectations:
 
 | disposition | profile | frames | pulse | count |
 |---|---|---|---|---|
-| 1 (Salty) | Snub | 270 | 90 | 1 |
-| 5 (Smitten) | Enthused | 1350 | 45 | 2 |
+| 1 (Salty) | Snub | 540 | 191 | 1 |
+| 5 (Smitten) | Enthused | 1512 | 65 | 255 |
 
-(Code sets full-snub dim to `kFullSnubDim = 90`.) Repeat with disposition 5.
+(Code sets full-snub dim to `kFullSnubDim = 191`; count 255 = `kPulseCountContinuous`.)
+Repeat with disposition 5.
 **Same-peer pacing:** Ambivert re-greets the same peer at most every 5 min
 (Introvert 10 min); for fast iteration set the lamp Extrovert in the app
-first — 26 s base cooldown, no per-peer window, expectations become SnubQuick
-frames=330/pulse=90/count=1 and Effusive frames=1425/pulse=55/count=255.
+first — 26 s base cooldown, no per-peer window, expectations become Snub
+frames=540/pulse=191/count=1 and Effusive frames=1620/pulse=80/count=255.
 Restore the peer's disposition to 3 at the end (same inject with
 `"disposition":3`).
 

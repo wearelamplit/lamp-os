@@ -59,9 +59,10 @@ empty when idle.
 disposition (mode-dependent — Ambivert ignores Fond/Smitten pressure,
 Introvert weights almost everyone), medians over a short window + EMA-
 smooths, then maps the weighted count through a log curve to a brightness
-multiplier floored per mode (`kIntrovertFloor = 0.5`, `kAmbivertFloor =
-0.7`, Extrovert disabled = 1.0). A 2/100 deadband stops jitter from
-committing. The result is applied to the lamp's baseline brightness — a
+multiplier floored per mode (Introvert dims further than Ambivert;
+Extrovert disabled = 1.0; floors in `personality_engine.cpp`). A small
+deadband stops jitter from committing. The result is applied to the lamp's
+baseline brightness — a
 busy room makes an introverted lamp recede. The read-only accessors a
 custom lamp can react to (`crowdDimFactor()`, `smoothedCrowdWeight()`,
 `crowdComposition()`) are in [`personality-signals.md`](personality-signals.md).
@@ -94,7 +95,7 @@ custom lamp can react to (`crowdDimFactor()`, `smoothedCrowdWeight()`,
 ## Cross-references
 
 - [`personality-greetings.md`](personality-greetings.md) — greeting
-  waveforms, the profile table, cooldown + fatigue rules.
+  waveforms, the profile shapes, cooldown + fatigue rules.
 - [`personality-signals.md`](personality-signals.md) — the read-only
   signal API custom lamps react to, with worked examples.
 - [`lamp-framework.md`](lamp-framework.md) — the runtime the social

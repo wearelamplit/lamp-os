@@ -66,7 +66,7 @@ loopTask → Lamp::setup [528] → firmwareDistributor.begin [32]
          → computeShaPrefixOnce [4320] → mbedtls_sha256_update (prebuilt ~300)
 ```
 ≈ **5.4 KB** with the 4096 B buffer. The distributor self-disables on the
-`-dev` channel (`firmware_distributor.cpp:64`), so this chain runs ONLY on
+`-dev` channel (`firmware_distributor.cpp`), so this chain runs ONLY on
 signed (`beta`/`stable`) builds, at boot, before the first `loop()`. With the
 pending 512 B buffer it drops to ≈ **1.9 KB** and stops being the peak.
 
@@ -166,8 +166,8 @@ for the shipped build if the watchpoint is needed elsewhere.
 
 ## Step 2 — MEASUREMENT
 
-There is no working loop-task HWM readout today: the print at
-`firmware_distributor.cpp:185` is `FWDIST_LOG`-gated (`LAMP_DEBUG` ≡ dev) AND
+There is no working loop-task HWM readout today: the HWM print in
+`firmware_distributor.cpp` is `FWDIST_LOG`-gated (`LAMP_DEBUG` ≡ dev) AND
 sits after the distributor's `-dev` early-return, so it never executes in any
 shipping config. Add a temporary probe.
 

@@ -127,7 +127,7 @@ and (with upfront-erase) reliable at speed without the erase-stall failure class
 
 - `software/lamp-os/src/components/firmware/firmware_distributor.{hpp,cpp}`,
   `firmware_receiver.{hpp,cpp}`, `firmware_signature.{hpp,cpp}`.
-- `scripts/sign_firmware.py`, `software/lamp-os/scripts/inject_firmware_channel.py`.
+- `scripts/sign_firmware.py`, `scripts/inject_firmware_channel.py`.
 - ADR 0001 (mesh), ADR 0003 (dual-core concurrency).
 
 > **Currency note.** A sibling **filesystem-image OTA** (`fs_ota`, signed via

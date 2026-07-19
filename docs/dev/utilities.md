@@ -126,7 +126,7 @@ bool findByMac(const uint8_t mac[6], RosterEntry& out);
 ```
 
 `RosterEntry` is a trivially-copyable POD (~104 B) held in a fixed
-static array of 100; snapshots never allocate per entry. Each entry
+static array of `kCapacity` (50); snapshots never allocate per entry. Each entry
 carries `name`, `baseColor` / `shadeColor`, `mac` bytes + `hasMac`
 (canonical colon-hex `lampId` string via `macStr()`), `lastRssi`,
 `lastSeenNearMs` / `lastSeenMeshMs`, `firmwareVersion`,

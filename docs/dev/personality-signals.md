@@ -49,10 +49,10 @@ shape it produces is documented in `docs/dev/personality-greetings.md`.
 
 ### 1. Shy lamp: steeper crowd curve
 
-Default `crowdDimFactor()` floors at 0.5 (Introvert) or 0.7 (Ambivert)
-and rolls off as `1 - 0.5 * log10(1+W) / log10(11)`. A shy variant
-might want a much lower floor and a sharper onset, read the raw W
-yourself and curve it your own way:
+Default `crowdDimFactor()` rolls off on a log curve toward a per-mode
+floor (Introvert dims further than Ambivert; the curve and floors are in
+`personality_engine.cpp`). A shy variant might want a much lower floor
+and a sharper onset, read the raw W yourself and curve it your own way:
 
 ```cpp
 #include "core/personality_engine.hpp"

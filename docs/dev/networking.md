@@ -346,7 +346,7 @@ surface(1) + sourceKind(1) + fadeDurationMs(2 LE)
 - **Receiver**: delivers to the `ExpressionObserverRegistry` fan-out on Core 1. No auto-action in the mesh layer; observers react if registered. The `SocialEchoObserver` (expression mirror) is the current consumer: it probabilistically replays a warm peer's triggered expression ~0.5 s later, weighted by disposition + social mode. The replay goes through `triggerInvocation` (cascade-suppressed), so two lamps never echo into a loop.
 - **No relay**: nearby-scoped by design — lamps only observe expressions they can physically hear.
 - **Auth**: `command_auth::verify()` runs before dedup-record, so an unauthenticated frame is dropped before it consumes a dedup slot. See the command_auth section below.
-- **Dedup**: `eventDedup_` 64-slot ring per `(sourceMac, seq)`. Originator pre-records its own seq so the broadcast echo does not re-deliver via observers.
+- **Dedup**: `eventDedup_` 16-slot ring per `(sourceMac, seq)`. Originator pre-records its own seq so the broadcast echo does not re-deliver via observers.
 - **Drain**: Core 1 loop via `PendingEvent` slot → `Lamp::drainEvent()` → `ExpressionObserverRegistry::fanOut()`.
 - **Payload**: `ExpressionInvocation` JSON (cascade keys stripped, colors packed — see MSG_COMMAND). `delayMs` is carried but not acted on by the receiver; observers interpret it as they see fit.
 

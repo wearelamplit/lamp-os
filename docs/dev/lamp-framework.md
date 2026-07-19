@@ -74,58 +74,60 @@ Subclass `lamp::Lamp`, provide `HwConfig` in the constructor, override
 class SnafuLamp : public Lamp {
  public:
   SnafuLamp() : Lamp(HwConfig{
-    .surfaces = {
-      {.id=Surface::Shade, .pin=12, .byteOrder=ByteOrder::GRBW},
-      {.id=Surface::Base,  .pin=14, .byteOrder=ByteOrder::GRBW},
-      {.id=Surface::Aux0,  .pin=27, .byteOrder=ByteOrder::GRBW, .pixelCount=12},
-      {.id=Surface::Aux1,  .pin=26, .byteOrder=ByteOrder::GRBW, .pixelCount=9},
+    .strips = {
+      {.role=Surface::Shade, .pin=14, .byteOrder=ByteOrder::GRBW, .pixelCount=16, .name="Small Dots"},
+      {.role=Surface::Shade, .pin=27, .byteOrder=ByteOrder::GRBW, .pixelCount=12, .name="Medium Dots"},
+      {.role=Surface::Shade, .pin=26, .byteOrder=ByteOrder::GRBW, .pixelCount=9,  .name="Big Dots"},
+      {.role=Surface::Base,  .pin=12, .byteOrder=ByteOrder::GRBW, .pixelCount=24, .name="Stem", .broadcast=1, .reversed=true},
     },
-    .maxBrightness = 180,
+    .maxBrightness = 230,
+    .supplyBudgetMa = 1400,
   }) {}
 
  protected:
   Features featuresEnabled() const override {
     return Features::All
       & ~Features::SocialBehavior      // replaced by snafu::Greeting
-      & ~Features::DefaultExpressions; // snafu owns its own visuals
+      & ~Features::DefaultExpressions  // snafu owns its own visuals
+      & ~Features::WebApp;             // snafu configures over BLE
   }
 
   Config::Defaults defaults() const override {
     return {
-      .name       = "snafu",
-      .baseColor  = "#30078300", // purple stem
-      .shadeColor = "#78100000", // amanita red — Small Dots
-      .basePx  = 32,
-      .shadePx = 16,
+      .name = "snafu",
+      .setup = true,
+      .baseSegments  = { {"Stem", 24, "#30078300,#64149600"} },
+      .shadeSegments = {
+        {"Small Dots",  16, "#962d0000,#097d0400,#003c7800,#78003200"},
+        {"Medium Dots", 12, "#78100000,#a03c0000,#966e0000"},
+        {"Big Dots",     9, "#9b000000,#612d2c00"},
+      },
     };
   }
 
-  std::vector<AuxSlotSpec> auxSlots() const override {
-    return {
-      {.name="Medium Dots", .defaultColor="#78100000"},
-      {.name="Big Dots",    .defaultColor="#78100000"},
-    };
+  void registerExpressions(ExpressionRegistry& reg) override {
+    reg.add(GlitchyExpression::classDescriptor());
+    reg.add(PulseExpression::classDescriptor());
+    reg.add(SpottyExpression::classDescriptor());
   }
 
   void createBehaviors(BehaviorStackBuilder& b) override {
-    if (shadeFb()) {
-      bgFade_   = std::make_unique<snafu::BackgroundFade>(shadeFb());
-      greeting_ = std::make_unique<snafu::Greeting>(shadeFb());
-      b.add(bgFade_.get());
-    }
-    if (auto* m = fbForSurface(Surface::Aux0))
-      { medium_  = std::make_unique<behaviors::AuxDotsBehavior>(m, 0); b.add(medium_.get()); }
-    if (auto* big = fbForSurface(Surface::Aux1))
-      { bigDots_ = std::make_unique<behaviors::AuxDotsBehavior>(big, 1); b.add(bigDots_.get()); }
-    if (greeting_) b.add(greeting_.get());
+    if (!shadeFb()) return;
+    dots_ = std::make_unique<snafu::DotsBehavior>(shadeFb(), config.shade);
+    compositor.addBaseBehavior(dots_.get());
+    greeting_ = std::make_unique<snafu::Greeting>(shadeFb());
+    b.add(greeting_.get());
+    greeting_->setDotsBehavior(dots_.get());
   }
   // ...
 };
 ```
 
-See `software/lamp-os/src/core/hw_config.hpp` for the full `HwConfig` /
-`SurfaceSpec` POD definitions. See `core/lamp_features.hpp` for the `Features`
-bitmask enum.
+The shade role fans three physical dot strips (each its own palette, rendered
+by the segment-aware `DotsBehavior`); the base role is the Stem broadcast
+segment on the flat configurator. See
+`software/lamp-os/src/core/hw_config.hpp` for the full `HwConfig` / `StripSpec`
+POD definitions. See `core/lamp_features.hpp` for the `Features` bitmask enum.
 
 ### Step 2: Register the variant (two files, in lockstep)
 
@@ -186,35 +188,11 @@ A slot with exactly 1 color renders static; 2 or more animate.
 
 First-boot randomization only touches surfaces whose variant left `baseColor` / `shadeColor` empty in `Config::Defaults`. A non-empty default survives randomization unchanged.
 
-### Aux slots (local, variant-declared)
+### Multi-segment roles
 
-A variant declares named color slots by overriding `auxSlots()` — one entry per slot, in wire-index order:
+A role's colors can be a single scalar (`baseColor` / `shadeColor` + `basePx` / `shadePx`) or split into named segments. A variant declares segments via `Config::Defaults::baseSegments` / `shadeSegments` (a `std::vector<SegmentDefault>` of `{name, px, "csv,of,hex,colors"}`); an empty vector takes the single-segment scalar path. Snafu drives its three shade dot-strips (`Small Dots` / `Medium Dots` / `Big Dots`) and the `Stem` base entirely through segments, one palette per segment, rendered by the segment-aware `DotsBehavior`.
 
-```cpp
-std::vector<AuxSlotSpec> auxSlots() const override {
-  return {
-    {.name="Medium Dots", .defaultColor="#78100000"},
-    {.name="Big Dots",    .defaultColor="#78100000"},
-  };
-}
-```
-
-The framework seeds first-boot colors (`seedAuxSlots`), stores them indexed in `config.auxSlotColors`, and exposes the slot list as a read-only `aux` page section (returned as `[{name, colors}]`). The app renders one labeled color picker per slot dynamically, with no per-variant app code. Writes go to `CHAR_AUX_COLORS` with an indexed payload `{"slot": i, "colors": ["RRGGBBWW", ...]}` — one characteristic serves any number of slots, so the frozen GATT layout does not grow per slot. Aux is local-only: not meshed, not advertised.
-
-#### N-surface layout
-
-`HwConfig.surfaces` lists every physical NeoPixel strip. The framework allocates a `FrameBuffer` and strip for each entry. Core Shade (index 0) and Base (index 1) carry the full configurator/override/wisp stack; each additional entry (`Aux0 = 2`, `Aux1 = 3`) is a local strip with a framebuffer and pixel output, but no configurator, override, or wisp involvement.
-
-Aux surfaces declare their pixel count via `SurfaceSpec::pixelCount` (core Shade/Base use `config.shade.px`/`config.base.px`). Render via `lamp::behaviors::AuxDotsBehavior(fb, slotIndex)`, which reads `config.auxSlotColors[slotIndex]` each tick and paints the framebuffer (1 color = static, 2 or more = animated). Snafu wires one `AuxDotsBehavior` per aux surface:
-
-```cpp
-if (auto* m = fbForSurface(Surface::Aux0))
-  { medium_  = std::make_unique<behaviors::AuxDotsBehavior>(m, 0); b.add(medium_.get()); }
-if (auto* big = fbForSurface(Surface::Aux1))
-  { bigDots_ = std::make_unique<behaviors::AuxDotsBehavior>(big, 1); b.add(bigDots_.get()); }
-```
-
-Each aux slot currently maps to its own physical strip. Painting a sub-region of an existing strip is not implemented (`AuxDotsBehavior` would need a start/count range).
+`HwConfig.strips` lists every physical NeoPixel strip; each entry carries a `role` (`Surface::Shade` or `Surface::Base`), pin, byte order, pixel count, and optional `name` / `broadcast` / `reversed` flags. Multiple strips can share a role (as the snafu shade does), and one `broadcast=1` strip per role is the representative for advertisement / HELLO.
 
 ## Provisioning a fresh hardware lamp
 
@@ -500,31 +478,32 @@ Battery Saver setting, floored at 1, cached in `s_hwMaxBrightness`.
 settings-blob write, so a new ceiling applies without a reboot.
 
 The estimator (`core/power_governor.hpp`) prices the frame the drivers are
-about to show. `fullDutyMa` gamma-sums each surface's FrameBuffer at
-`kMaPerChannelFullDuty` (10 mA per channel; W counts only on 4-channel
-strips); `demandMa` scales that by the NeoPixel `(level+1)/256` factor at
-the requested (pre-clamp) level and adds `kIdleMaPerPixel` (0.7 mA) per
-pixel. The compositor's `preFlushHook` (`governFrame`, `lamp.cpp`) runs it
-once per drawn frame, after behaviors draw and before any pixel write, so a
-clamp decision reaches the drivers ahead of that frame's `setPixelColor`
-loop — `setBrightness` after `setPixelColor` destructively rescales the
-frame it was meant to protect.
+about to show. `fullDutyMa` gamma-sums each surface's FrameBuffer at a
+per-channel full-duty draw (W counts only on 4-channel strips); `demandMa`
+scales that by the NeoPixel `(level+1)/256` factor at the requested
+(pre-clamp) level and adds a per-pixel idle draw. The compositor's
+`preFlushHook` (`governFrame`, `lamp.cpp`) runs it once per drawn frame,
+after behaviors draw and before any pixel write, so a clamp decision
+reaches the drivers ahead of that frame's `setPixelColor` loop —
+`setBrightness` after `setPixelColor` destructively rescales the frame it
+was meant to protect.
 
-`PowerGovernor` compares demand against `HwConfig::supplyBudgetMa`
-(2000 mA on both variants) minus a reserve: 400 mA while the radio is hot
-(OTA in either direction, quiet mode, or a BLE client) or during the boot
-window, 200 mA quiet. Any frame over budget at the level about to be
-written snaps the ceiling to the level that fits inside the same frame
-(`senseFrame` returns true and `governFrame` re-mins the drivers before the
-flush). While clamped, per-frame re-solves only move the ceiling down;
-recovery goes through the release, paced at 1 s inside
-`PowerGovernor::tick` (called from `Lamp::tick`, which also advances the
-boot ramp), which returns the governor to dormant at 88 % of budget —
-there the ceiling is 255 and the funnel `min()` is identity. The ceiling
-glides back up over 400 ms, and every cold boot holds ceiling 128 for 5 s
-then ramps to full by 10 s to ride out supply inrush.
-Tuning constants live in `core/power_governor.cpp`; the per-pixel draw
-constants in `software/shared/led-common/src/lampos/led_power.hpp`. The
+`PowerGovernor` compares demand against `HwConfig::supplyBudgetMa` minus a
+reserve that widens while the radio is hot (OTA in either direction, quiet
+mode, or a BLE client) or during the boot window and narrows when quiet.
+Any frame over budget at the level about to be written snaps the ceiling to
+the level that fits inside the same frame (`senseFrame` returns true and
+`governFrame` re-mins the drivers before the flush). While clamped,
+per-frame re-solves only move the ceiling down; recovery goes through the
+release, paced inside `PowerGovernor::tick` (called from `Lamp::tick`,
+which also advances the boot ramp), which returns the governor to dormant
+once demand falls a set margin below budget — there the ceiling is 255 and
+the funnel `min()` is identity. The ceiling glides back up rather than
+snapping, and every cold boot holds a reduced ceiling before ramping to
+full to ride out supply inrush. Tuning constants (budget reserve, release
+margin, glide + boot-ramp timing) live in `core/power_governor.cpp`; the
+per-pixel draw constants in
+`software/shared/led-common/src/lampos/led_power.hpp`. The
 `qa/power-governor.md` runbook is the hardware pass.
 
 ## File index
@@ -534,7 +513,7 @@ constants in `software/shared/led-common/src/lampos/led_power.hpp`. The
 | `software/lamp-os/src/core/lamp.hpp` | Base class: setup/tick entry points, hw config accessor |
 | `software/lamp-os/src/core/lamp.cpp` | Implementation: BLE GATT wiring, mesh init, OTA health checks |
 | `software/lamp-os/src/lamp_variants.hpp` | `createCompiledLamp()` + `compiledLampType()`, compile-time variant selection |
-| `software/lamp-os/src/core/hw_config.hpp` | `HwConfig`, `SurfaceSpec`, `Surface`, `ByteOrder` PODs + `validateHwConfig()` |
+| `software/lamp-os/src/core/hw_config.hpp` | `HwConfig`, `StripSpec`, `Surface`, `ByteOrder` PODs + `validateHwConfig()` |
 | `software/lamp-os/src/core/lamp_features.hpp` | `Features` bitmask enum for built-in behavior opt-in/out |
 | `software/lamp-os/src/core/behavior_stack_builder.hpp` | `BehaviorStackBuilder` helper for registering behaviors |
 | `software/lamp-os/src/core/pending_slot_aggregate.hpp/.cpp` | Core 0→1 hand-off mechanism for async work |
@@ -547,8 +526,7 @@ constants in `software/shared/led-common/src/lampos/led_power.hpp`. The
 | `software/lamp-os/src/core/compositor.hpp/.cpp` | `Compositor`: blends behavior layers, home-mode gate, dynamic add/remove |
 | `software/lamp-os/src/lamps/standard/standard_lamp.hpp/.cpp` | Production fleet lamp (built-in social, expressions, idle) |
 | `software/lamp-os/src/lamps/snafu/snafu_lamp.hpp/.cpp` | Amanita mushroom lamp: reference variant |
-| `software/lamp-os/src/lamps/snafu/background_fade.hpp/.cpp` | Shade palette-cycle behavior (12 scenes, 45 s per scene) |
-| `software/lamp-os/src/behaviors/aux_dots.hpp/.cpp` | `AuxDotsBehavior`: paints an aux surface framebuffer from `config.auxSlotColors[slotIndex]`; static for 1 color, animated for 2+ |
+| `software/lamp-os/src/lamps/snafu/dots_behavior.hpp/.cpp` | Segment-aware base-layer scatter scene for the snafu shade; crossfades old→new per cycle, pauses under wisp override |
 | `software/lamp-os/src/lamps/snafu/greeting.hpp/.cpp` | Peer-arrival watcher with glitch + fade response |
 | `software/lamp-os/src/main.cpp` | Unified entry point: mirrors compiled variant into NVS, instantiates it |
 | `software/lamp-os/platformio.ini` | Per-variant envs (`upesy_wroom_standard`/`_snafu`) extending `env_base_upesy`; SemVer build_flags |
