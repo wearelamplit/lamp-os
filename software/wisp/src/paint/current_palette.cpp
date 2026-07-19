@@ -4,7 +4,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #else
-// Native test build — no-op FreeRTOS stubs. Single-threaded; mutex is
+// Native test build. No-op FreeRTOS stubs. Single-threaded; mutex is
 // a sequence point on hardware only, safe to drop here.
 #include <cstddef>
 typedef void* SemaphoreHandle_t;

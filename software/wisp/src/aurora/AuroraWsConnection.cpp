@@ -1,5 +1,4 @@
 #include "AuroraWsConnection.h"
-#include <algorithm>
 
 using namespace websockets;
 
@@ -7,7 +6,7 @@ void AuroraWsConnection::tryConnect() {
     if (port_ == 0) return;
     lastAttemptMs_ = millis();
 
-    // Bind handlers once — re-binding on every attempt is wasteful and can
+    // Bind handlers once. Re-binding on every attempt is wasteful and can
     // stack callbacks.
     if (!handlersBound_) {
         client_.onMessage([this](WebsocketsMessage msg) {
@@ -26,14 +25,18 @@ void AuroraWsConnection::tryConnect() {
     Serial.printf("[ws] connecting %s\n", url.c_str());
     connected_ = client_.connect(url);
     if (connected_) {
-        backoffMs_ = 500;
         consecutiveFailures_ = 0;
         lastPingMs_ = millis();
         if (onOpen_) onOpen_();
     } else {
         consecutiveFailures_++;
-        backoffMs_ = std::min<uint32_t>(backoffMs_ * 2, kMaxBackoffMs);
     }
+}
+
+void AuroraWsConnection::close() {
+    client_.close();
+    connected_ = false;
+    consecutiveFailures_ = 0;
 }
 
 bool AuroraWsConnection::send(const uint8_t* data, size_t len) {
@@ -59,5 +62,5 @@ void AuroraWsConnection::loop() {
         }
         return;
     }
-    if (millis() - lastAttemptMs_ >= backoffMs_) tryConnect();
+    if (millis() - lastAttemptMs_ >= kRetryMs) tryConnect();
 }

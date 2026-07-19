@@ -54,7 +54,7 @@ class MeshRouter {
 
   // Gossip relay delivers CONTROL_OP multiple times by design; 64-slot ring
   // keyed on (sourceMac, msgType, seq) drops re-arrivals before the dispatcher.
-  lamp_protocol::DedupRing controlOpDedup_;
+  lamp_protocol::DedupRing<64> controlOpDedup_;
 
   // Pending op from WiFi task; drained on loop task.
   LAMP_PROTOCOL_PORTMUX_TYPE pendingMux_ = LAMP_PROTOCOL_PORTMUX_INIT;

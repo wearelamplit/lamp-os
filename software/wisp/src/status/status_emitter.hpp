@@ -1,14 +1,19 @@
-// StatusEmitter — wispStatus heartbeat on a 30s FreeRTOS timer.
+// StatusEmitter drives the wispStatus heartbeat on a 30s FreeRTOS timer.
 //
 // Broadcasts MSG_CONTROL_OP (wispStatus JSON) then MSG_WISP_PALETTE. The timer
 // (and triggerOnChange) only flag the emit due; pump() runs the build +
 // broadcast on the loop task so nothing heavy touches the 2KB timer stack.
+// pump() also detects wifi/aurora connectivity edges and flags an emit for
+// them. Emits are coalesced to one per 5 s minimum: a due flag inside the
+// window is deferred until the window opens, never dropped.
 
 #pragma once
 
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+
+#include "wire/lamp_protocol.hpp"
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 #include <freertos/FreeRTOS.h>
@@ -37,15 +42,19 @@ class StatusEmitter {
   void startTimer();
 
   // Mark a wispStatus emit due AND reschedule the heartbeat from now. Call
-  // after applying a setZone/clearZone/setWifi op so the app sees the new state
-  // without waiting up to 30s. The emit runs from pump() on the loop task, so
-  // this is safe from any task and does no heavy work itself.
+  // after applying an op that changes reported state so the app sees it
+  // without waiting up to 30s. The emit runs from pump() on the loop task
+  // (subject to the 5 s coalescer), so this is safe from any task and does
+  // no heavy work itself.
   void triggerOnChange();
 
   // Runs the due wispStatus emit on the loop task. Cheap when nothing is due.
   void pump();
 
  private:
+  // wifi/aurora connectivity flips flag an emit. Loop task only.
+  void checkConnEdges();
+
   // Emit bodies run only from pump() on the loop task.
   void emitStatus();   // MSG_CONTROL_OP wispStatus path (30s heartbeat)
   void emitPalette();  // MSG_WISP_PALETTE (piggybacked on emitStatus)
@@ -65,8 +74,13 @@ class StatusEmitter {
   bool lastAuroraConnected_ = false;
   bool haveLastConnState_   = false;
 
+  uint32_t lastEmitMs_ = 0;
+  bool haveEmitted_    = false;
+
   static constexpr uint32_t kStatusIntervalMs = 30000;
-  static constexpr size_t kStatusJsonBufLen = 256;
+  static constexpr uint32_t kMinEmitIntervalMs = 5000;
+  static constexpr size_t kStatusJsonBufLen =
+      lamp_protocol::CONTROL_MAX_PAYLOAD + 1;
 };
 
 }  // namespace wisp

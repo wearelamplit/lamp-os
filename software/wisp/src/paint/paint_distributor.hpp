@@ -1,8 +1,8 @@
-// PaintDistributor — fans out the active palette to every claimed lamp as
+// PaintDistributor fans out the active palette to every claimed lamp as
 // MSG_OVERRIDE_COLORS unicast frames.
 //
 // Each peer gets one combined frame per cycle with surface=BaseAndShade,
-// numColors=2 — both surfaces deliver atomically or both are lost, which
+// numColors=2. Both surfaces deliver atomically or both are lost, which
 // eliminates the asymmetric per-surface loss seen under BLE coex pressure.
 // kPerPeerPaceMs (5 ms) between unicasts keeps ESP-NOW's send queue clear.
 
@@ -15,7 +15,6 @@ namespace wisp {
 
 class CurrentPalette;
 class LampInventory;
-struct InventoryEntry;
 class MeshLink;
 class WispRoster;
 
@@ -36,6 +35,11 @@ class PaintDistributor {
   // fadePct: fade length as % of interval [0..100].
   void setDriftInterval(uint32_t intervalMs, uint8_t fadePct);
 
+  // Space-dim factor (0..100) asserted on claimed lamps. Stores the value
+  // and kicks an immediate re-assert walk. Independent of paint mode: fires
+  // in every source mode incl Off.
+  void setBrightness(uint8_t pct);
+
   void onPaletteChanged();
   void tick(uint32_t nowMs);
 
@@ -52,6 +56,10 @@ class PaintDistributor {
   void sendPaintToPeer(const uint8_t mac[6]);
   void sendRestoreToPeer(const uint8_t mac[6]);
   void sendDriftToPeer(size_t idx);
+
+  // Snapshot claimed lamps into brWalkMacs_ and arm the paced brightness walk.
+  void beginBrightnessWalk();
+  void sendBrightnessToPeer(const uint8_t mac[6]);
 
   // Rebuilds driftMacs_ from claimed inventory, sorts by MAC, recomputes slot.
   // Call on roster changes and on setDriftInterval. With paintNewcomers, any
@@ -70,10 +78,18 @@ class PaintDistributor {
   uint16_t seqCounter_ = 0;
 
   Mode walkMode_ = Mode::Idle;
-  static constexpr size_t kMaxWalkPeers = 32;  // matches LampInventory::MAX_LAMPS
+  static constexpr size_t kMaxWalkPeers = 100;  // matches LampInventory::MAX_LAMPS
   uint8_t walkMacs_[kMaxWalkPeers][6];
   size_t walkCount_ = 0;
   size_t walkIdx_ = 0;
+
+  // Restore is a one-shot unicast per peer with no periodic re-cover; a single
+  // BLE-coex-dropped frame strands a lamp painted until its 60 s watchdog. Run
+  // the Restore walk extra passes so one lost frame doesn't lose the release.
+  uint8_t restoreRepeatsLeft_ = 0;
+  uint32_t nextRestorePassMs_ = 0;
+  static constexpr uint8_t  kRestoreRepeats     = 2;
+  static constexpr uint32_t kRestorePassGapMs   = 150;
 
   uint32_t driftIntervalMs_    = 120000;
   uint8_t  driftFadePct_       = 50;
@@ -84,8 +100,28 @@ class PaintDistributor {
   uint32_t lastDriftFireMs_    = 0;
   uint32_t lastDriftRosterMs_  = 0;
 
+  // Space-dim brightness re-assert. Its own paced walk buffer so it never
+  // clobbers an in-flight paint/restore walk. Dimming (< 100) is held by the
+  // periodic re-assert loop; the return to 100 has no re-assert, so it repeats
+  // the un-dim walk for redundancy, backed by the lamp's 60 s watchdog.
+  uint8_t  brightness_         = 100;
+  uint8_t  brWalkMacs_[kMaxWalkPeers][6];
+  size_t   brWalkCount_        = 0;
+  size_t   brWalkIdx_          = 0;
+  bool     brWalkActive_       = false;
+  uint32_t lastBrWalkMs_       = 0;
+  uint32_t lastBrSendMs_       = 0;
+
+  // Return-to-100 is a one-shot un-dim walk with no re-assert (the re-assert
+  // loop is gated < 100) and no lamp-side HELLO keepalive, so a dropped frame
+  // strands a lamp dim until its 60 s watchdog. Repeat the un-dim walk.
+  uint8_t  brRepeatsLeft_      = 0;
+  uint32_t nextBrPassMs_       = 0;
+
   static constexpr uint32_t kPerPeerPaceMs        = 5;
   static constexpr uint16_t kDefaultFadeDurationMs = 1500;
+  static constexpr uint16_t kBrightnessFadeMs      = 1000;
+  static constexpr uint32_t kBrightnessReassertMs  = 20000;
 };
 
 }  // namespace wisp

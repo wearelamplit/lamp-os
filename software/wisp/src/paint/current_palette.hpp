@@ -1,4 +1,4 @@
-// CurrentPalette — most recently resolved Aurora palette for the shadowed zone.
+// CurrentPalette is the most recently resolved Aurora palette for the shadowed zone.
 //
 // Aurora's amber channel folds into the warm-white W channel (the grid's
 // dedicated warm emitter).
@@ -40,10 +40,9 @@ class CurrentPalette {
   const std::vector<RGBW>& colors() const { return colors_; }
 
   // Snapshot first up-to-`outCap` chars of paletteId into `out` (no null
-  // terminator written). Returns the number of chars written. Thread-safe —
-  // takes the internal mux, so this is the only accessor safe to call from
-  // the FreeRTOS timer-service task while update() is racing on the loop
-  // task.
+  // terminator written). Returns the number of chars written. Takes the
+  // internal mux, so this is the only accessor safe to call from the
+  // FreeRTOS timer-service task while update() is racing on the loop task.
   size_t copyPaletteIdPrefix(char* out, size_t outCap) const;
 
  private:

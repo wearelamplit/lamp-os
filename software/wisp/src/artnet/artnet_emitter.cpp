@@ -36,7 +36,7 @@ void ArtnetEmitter::emitNow() {
 
   if (!udpReady_) {
     // AsyncUDP::connect for outgoing only; no listen needed.
-    // We use writeTo() with broadcast addr per call.
+    // Uses writeTo() with broadcast addr per call.
     udpReady_ = true;
     Serial.println("[artnet] udp ready");
   }

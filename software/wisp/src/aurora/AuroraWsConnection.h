@@ -15,6 +15,8 @@ public:
 
     void setTarget(IPAddress ip, uint16_t port) { ip_ = ip; port_ = port; }
     void loop();                 // call frequently
+    // Close the socket and reset failure tracking. Safe when not connected.
+    void close();
     bool isConnected() const { return connected_; }
     bool send(const uint8_t* data, size_t len);
     // Consecutive failed connects / drops since the last successful open.
@@ -30,14 +32,15 @@ private:
     bool handlersBound_ = false;       // bind onMessage/onEvent only once
     uint32_t lastPingMs_ = 0;
     uint32_t lastAttemptMs_ = 0;
-    uint32_t backoffMs_ = 500;
     uint32_t consecutiveFailures_ = 0;
     BinaryHandler onBinary_;
     OpenHandler onOpen_;
 
     // PALETTE_STATE/PATTERN_STATE are event-driven, so an idle device may send
-    // no app data for a long time. We detect dead connections with a periodic
-    // ping + WebsocketsClient::available() rather than a data-inactivity timer.
+    // no app data for a long time. Dead connections are detected with a
+    // periodic ping + WebsocketsClient::available() rather than a
+    // data-inactivity timer.
     static constexpr uint32_t kPingIntervalMs = 10000;
-    static constexpr uint32_t kMaxBackoffMs   = 8000;
+    // connect() blocks while it fails; 5 s spacing bounds the loop-stall duty.
+    static constexpr uint32_t kRetryMs        = 5000;
 };

@@ -1,8 +1,8 @@
-// StageBeacon — non-connectable BLE advertisement carrying WiFi creds for
+// StageBeacon is a non-connectable BLE advertisement carrying WiFi creds for
 // pre-mesh lamps to discover and auto-join.
 //
 // Magic ID 42007. Payload: <2 bytes magic LE><ssid\0><password\0>.
-// Max combined ssid+password+2 NULs is 26 bytes — caller must enforce
+// Max combined ssid+password+2 NULs is 26 bytes. Caller must enforce
 // or advertising is refused.
 
 #pragma once

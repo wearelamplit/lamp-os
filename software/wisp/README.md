@@ -9,7 +9,7 @@ A small magical light that signals to others. Wisp is dedicated infrastructure (
 
 ## Off-by-default paint
 
-Discovery, status reporting, mesh-inventory tracking, and firmware push all run unconditionally at boot. **Palette painting requires explicit user opt-in via the app each boot.** A power blip therefore never surprises lamps with a sudden color change — wisp comes back up watching, not painting.
+Status reporting, mesh-inventory tracking, and firmware push all run unconditionally at boot. Aurora discovery and the notification WebSocket run only while the source mode is Aurora. **Palette painting requires explicit user opt-in via the app each boot.** A power blip therefore never surprises lamps with a sudden color change — wisp comes back up watching, not painting.
 
 Lamp overrides are transient (RAM-only on the lamp side). When wisp drops or paint mode goes off, lamps re-render their saved base config. The user's stored config is never touched.
 

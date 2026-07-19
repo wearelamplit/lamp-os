@@ -1,4 +1,4 @@
-// WispZoneSelector — in-RAM zone-selection state (persistence lives in WispConfig).
+// WispZoneSelector holds in-RAM zone-selection state (persistence lives in WispConfig).
 //
 // observe() and copyObserved() are guarded by portMUX: copyObserved() runs on
 // the timer task and must not read a half-shifted array during observe()'s

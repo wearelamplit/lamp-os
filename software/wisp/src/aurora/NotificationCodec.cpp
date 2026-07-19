@@ -6,13 +6,21 @@
 
 namespace NotificationCodec {
 
-DecodedNotification decode(const uint8_t* frame, size_t len) {
-    DecodedNotification out;
+// ~4.3 KB of nanopb structs; statics keep them off the 8 KB loop stack.
+// memset over {}-assignment: the assignment would materialize the same-size
+// temporary on the stack.
+static DecodedNotification s_out;
+static aurora_NotificationEnvelope s_env;
+
+const DecodedNotification& decode(const uint8_t* frame, size_t len) {
+    std::memset(&s_out, 0, sizeof s_out);
+    std::memset(&s_env, 0, sizeof s_env);
+    DecodedNotification& out = s_out;
+    aurora_NotificationEnvelope& env = s_env;
 
     std::vector<uint8_t> raw;
     if (!Compression::maybeInflate(frame, len, aurora_NotificationEnvelope_size, raw)) return out;
 
-    aurora_NotificationEnvelope env = aurora_NotificationEnvelope_init_zero;
     pb_istream_t es = pb_istream_from_buffer(raw.data(), raw.size());
     if (!pb_decode(&es, aurora_NotificationEnvelope_fields, &env)) return out;
 
@@ -35,7 +43,7 @@ DecodedNotification decode(const uint8_t* frame, size_t len) {
                 out.hasPattern = true;
             break;
         default:
-            break;  // CACHE_INVALIDATE etc. — type is enough for callers.
+            break;  // CACHE_INVALIDATE etc. Type is enough for callers.
     }
     out.ok = true;
     return out;

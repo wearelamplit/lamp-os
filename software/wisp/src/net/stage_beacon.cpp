@@ -77,7 +77,7 @@ void StageBeacon::startAdvert(const std::string& ssid,
   // Password + NUL
   for (char c : password) data.push_back(uint8_t(c));
   data.push_back(0);
-  // Refuse — truncation can chop the SSID's NUL terminator and the lamp-side
+  // Truncation can chop the SSID's NUL terminator and the lamp-side
   // scanner would then parse "ssidpassword" as the SSID with no password.
   // Better to fail loudly than to advertise broken creds.
   if (data.size() > kMaxAdvertBytes) {

@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <lampos/led_types.hpp>
 
 #include "paint/current_palette.hpp"
 #include "net/mesh_link.hpp"
@@ -59,9 +60,30 @@ void StatusEmitter::triggerOnChange() {
 }
 
 void StatusEmitter::pump() {
-  if (statusDue_.exchange(false, std::memory_order_relaxed)) {
-    emitStatus();
+  checkConnEdges();
+  if (!statusDue_.load(std::memory_order_relaxed)) return;
+  const uint32_t now = millis();
+  // Coalesce: leave the due flag set until the window opens.
+  if (haveEmitted_ && now - lastEmitMs_ < kMinEmitIntervalMs) return;
+  statusDue_.store(false, std::memory_order_relaxed);
+  haveEmitted_ = true;
+  lastEmitMs_ = now;
+  emitStatus();
+}
+
+void StatusEmitter::checkConnEdges() {
+  const bool wifiConn   = WiFi.isConnected();
+  const bool auroraConn = aurora_ && aurora_->isStreaming();
+  if (!haveLastConnState_) {
+    haveLastConnState_ = true;
+  } else if (wifiConn != lastWifiConnected_ ||
+             auroraConn != lastAuroraConnected_) {
+    Serial.printf("[wisp.beacon] connectivity edge wifi=%d aurora=%d\n",
+                  (int)wifiConn, (int)auroraConn);
+    triggerOnChange();
   }
+  lastWifiConnected_   = wifiConn;
+  lastAuroraConnected_ = auroraConn;
 }
 
 void StatusEmitter::emitStatus() {
@@ -102,28 +124,39 @@ void StatusEmitter::emitStatus() {
     }
   }
 
-  uint8_t offR = 0, offG = 0, offB = 0;
+  uint8_t offR = 0, offG = 0, offB = 0, offW = 0;
   bool hasOffColor = false;
   uint8_t shuffleSeed = 0;
   uint32_t driftIntervalMs = 0;
   uint8_t driftFadePct = 0;
   const char* wispName = "";
   bool hasPassword = false;
+  const char* ledType = "GRB";
+  uint16_t pixelCount = 30;
+  uint8_t rangeStep = 0;
+  uint32_t opSeq = 0;
+  uint8_t brightness = 100;
   if (config_) {
     const auto off = config_->offColor();
-    offR = off.r; offG = off.g; offB = off.b;
+    offR = off.r; offG = off.g; offB = off.b; offW = off.w;
     hasOffColor = true;
     shuffleSeed = config_->shuffleSeed();
     driftIntervalMs = config_->driftIntervalMs();
     driftFadePct = config_->driftFadePct();
     wispName = config_->name().c_str();
     hasPassword = config_->password().length() > 0;
+    ledType = lampos::led::byteOrderToString(config_->ledFormat());
+    pixelCount = config_->pixelCount();
+    rangeStep = config_->rangeStep();
+    opSeq = config_->opSeq();
+    brightness = config_->brightness();
   }
   const WispStatusFields fields{
       currentZone, zoneSrc, obsBuf, obsCount,
       wifiConn, auroraConn, paletteIdPrefix, lastSeenMs,
-      sourceName, offR, offG, offB, hasOffColor, shuffleSeed,
-      driftIntervalMs, driftFadePct, wispName, hasPassword };
+      sourceName, offR, offG, offB, offW, hasOffColor, shuffleSeed,
+      driftIntervalMs, driftFadePct, wispName, hasPassword,
+      ledType, pixelCount, rangeStep, opSeq, brightness };
 
   char jsonBuf[kStatusJsonBufLen];
   const size_t jsonLen = buildWispStatusJson(
@@ -136,21 +169,6 @@ void StatusEmitter::emitStatus() {
     Serial.println("[wisp.beacon] wispStatus JSON build failed");
     return;
   }
-
-  if (!haveLastConnState_) {
-    haveLastConnState_ = true;
-  } else {
-    if (wifiConn != lastWifiConnected_) {
-      Serial.printf("[wisp.beacon] wifiConnected: %d -> %d\n",
-                    (int)lastWifiConnected_, (int)wifiConn);
-    }
-    if (auroraConn != lastAuroraConnected_) {
-      Serial.printf("[wisp.beacon] auroraConnected: %d -> %d\n",
-                    (int)lastAuroraConnected_, (int)auroraConn);
-    }
-  }
-  lastWifiConnected_   = wifiConn;
-  lastAuroraConnected_ = auroraConn;
 
   // SeqSource mux: concurrent HELLO and wispStatus emits must not share a seq.
   uint8_t frame[lamp_protocol::CONTROL_MAX_SIZE];
@@ -177,9 +195,11 @@ void StatusEmitter::emitPalette() {
   mesh_->getMac(srcMac);
 
   uint8_t rgb[lamp_protocol::kMaxWispPaletteColors * 3];
+  uint8_t w[lamp_protocol::kMaxWispPaletteColors];
   size_t count = 0;
   if (config_) {
-    count = config_->copyManualPalette(rgb, lamp_protocol::kMaxWispPaletteColors);
+    count = config_->copyManualPalette(rgb, w,
+                                       lamp_protocol::kMaxWispPaletteColors);
   }
 
   uint8_t frame[lamp_protocol::WISP_PALETTE_MAX_SIZE];
@@ -189,7 +209,7 @@ void StatusEmitter::emitPalette() {
   seq = seq_->next();
   frameLen = lamp_protocol::buildWispPalette(
       frame, sizeof(frame), seq, srcMac,
-      count > 0 ? rgb : nullptr, count);
+      count > 0 ? rgb : nullptr, count > 0 ? w : nullptr, count);
   WISP_SEQ_PORTMUX_EXIT(&seq_->mux);
   if (!frameLen) {
     Serial.println("[wisp.beacon] buildWispPalette failed");

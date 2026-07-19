@@ -12,6 +12,9 @@
 //   - setLampPaint stores on the matched entry; no-op for unclaimed mac.
 //   - recomputeClaims carries paint on stable claim; zeroes for new entry.
 //   - snapshotPaintForBroadcast packs 12-byte entries; caps at WISP_PAINT_MAX_ENTRIES.
+//   - Range floor gates admission; -5 dB exit band retains, then drops.
+//   - Composite claim frame: contested every frame, rest rotates to coverage.
+//   - Paint window rotates over the claim set across ticks.
 
 #include <unity.h>
 
@@ -25,6 +28,9 @@
 namespace {
 
 constexpr int8_t kHyst = wisp::WISP_ROSTER_HYSTERESIS_DB;
+// Wide floor keeps the RSSI values used across these tests admissible;
+// the range-floor tests pass tighter floors explicitly.
+constexpr int8_t kFloor = -90;
 
 uint8_t kSelfMac[6] = {0xAA, 0x11, 0x22, 0x33, 0x44, 0x55};
 uint8_t kPeerLowMac[6]  = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55}; // lower than self
@@ -38,8 +44,8 @@ void packEntry(uint8_t* buf, const uint8_t mac[6], int8_t rssi) {
   buf[6] = static_cast<uint8_t>(rssi);
 }
 
-wisp::WispRoster::LampObservation obs(const uint8_t mac[6], int8_t rssi) {
-  wisp::WispRoster::LampObservation o{};
+wisp::LampObservation obs(const uint8_t mac[6], int8_t rssi) {
+  wisp::LampObservation o{};
   std::memcpy(o.mac, mac, 6);
   o.rssi = rssi;
   return o;
@@ -53,11 +59,11 @@ void tearDown(void) {}
 void test_single_wisp_claims_everything(void) {
   wisp::WispRoster r;
   r.setSelfMac(kSelfMac);
-  wisp::WispRoster::LampObservation lamps[] = {
+  wisp::LampObservation lamps[] = {
       obs(kLampX, -65),
       obs(kLampY, -75),
   };
-  r.recomputeClaims(lamps, 2, /*nowMs=*/1000);
+  r.recomputeClaims(lamps, 2, /*nowMs=*/1000, kFloor);
   TEST_ASSERT_TRUE(r.claims(kLampX));
   TEST_ASSERT_TRUE(r.claims(kLampY));
   TEST_ASSERT_EQUAL_size_t(2, r.claimedCount());
@@ -72,7 +78,7 @@ void test_we_claim_when_strictly_closer(void) {
   r.recordPeerClaim(kPeerLowMac, entries, 1, /*nowMs=*/1000);
 
   auto lamps = obs(kLampX, -60); // we hear X at -60 → 15 dB advantage
-  r.recomputeClaims(&lamps, 1, /*nowMs=*/1000);
+  r.recomputeClaims(&lamps, 1, /*nowMs=*/1000, kFloor);
   TEST_ASSERT_TRUE(r.claims(kLampX));
 }
 
@@ -85,7 +91,7 @@ void test_we_drop_when_strictly_further(void) {
   r.recordPeerClaim(kPeerLowMac, entries, 1, /*nowMs=*/1000);
 
   auto lamps = obs(kLampX, -80); // we hear X at -80 → 25 dB DISadvantage
-  r.recomputeClaims(&lamps, 1, /*nowMs=*/1000);
+  r.recomputeClaims(&lamps, 1, /*nowMs=*/1000, kFloor);
   TEST_ASSERT_FALSE(r.claims(kLampX));
 }
 
@@ -98,7 +104,7 @@ void test_hysteresis_keeps_last_owner_within_band(void) {
 
   // Tick 1: peer hasn't broadcast yet. We claim X unconditionally.
   auto lamps = obs(kLampX, -65);
-  r.recomputeClaims(&lamps, 1, /*nowMs=*/1000);
+  r.recomputeClaims(&lamps, 1, /*nowMs=*/1000, kFloor);
   TEST_ASSERT_TRUE(r.claims(kLampX));
 
   // Tick 2: higher-MAC peer broadcasts within hysteresis band.
@@ -106,7 +112,7 @@ void test_hysteresis_keeps_last_owner_within_band(void) {
   packEntry(entries, kLampX, -67);
   r.recordPeerClaim(kPeerHighMac, entries, 1, /*nowMs=*/1000);
   lamps = obs(kLampX, -65);
-  r.recomputeClaims(&lamps, 1, /*nowMs=*/1000);
+  r.recomputeClaims(&lamps, 1, /*nowMs=*/1000, kFloor);
   // Within hysteresis + we own + peer has higher MAC → we keep it.
   TEST_ASSERT_TRUE(r.claims(kLampX));
 }
@@ -120,14 +126,14 @@ void test_hysteresis_with_peer_owner_keeps_peer(void) {
   packEntry(entries, kLampX, -55);
   r.recordPeerClaim(kPeerLowMac, entries, 1, /*nowMs=*/1000);
   auto lamps = obs(kLampX, -75);
-  r.recomputeClaims(&lamps, 1, /*nowMs=*/1000);
+  r.recomputeClaims(&lamps, 1, /*nowMs=*/1000, kFloor);
   TEST_ASSERT_FALSE(r.claims(kLampX));
 
   // Tick 2: peer drifts a bit closer to us — now within hysteresis.
   packEntry(entries, kLampX, -73); // 2 dB advantage to peer
   r.recordPeerClaim(kPeerLowMac, entries, 1, /*nowMs=*/2000);
   lamps = obs(kLampX, -75);
-  r.recomputeClaims(&lamps, 1, /*nowMs=*/2000);
+  r.recomputeClaims(&lamps, 1, /*nowMs=*/2000, kFloor);
   // Hysteresis keeps the peer as owner (we didn't claim last tick).
   TEST_ASSERT_FALSE(r.claims(kLampX));
 }
@@ -140,7 +146,7 @@ void test_lower_mac_wins_simultaneous_claim_tiebreak(void) {
   // We claim it unconditionally because the peer's broadcast hasn't
   // landed yet.
   auto lamps = obs(kLampX, -65);
-  r.recomputeClaims(&lamps, 1, /*nowMs=*/1000);
+  r.recomputeClaims(&lamps, 1, /*nowMs=*/1000, kFloor);
   TEST_ASSERT_TRUE(r.claims(kLampX));
 
   // Tick 2: peer's broadcast lands — peer claims X too, at near-identical
@@ -150,7 +156,7 @@ void test_lower_mac_wins_simultaneous_claim_tiebreak(void) {
   packEntry(entries, kLampX, -67); // 2 dB peer-side, within hysteresis
   r.recordPeerClaim(kPeerLowMac, entries, 1, /*nowMs=*/2000);
   lamps = obs(kLampX, -65);
-  r.recomputeClaims(&lamps, 1, /*nowMs=*/2000);
+  r.recomputeClaims(&lamps, 1, /*nowMs=*/2000, kFloor);
   // Peer's MAC is lower → peer wins the tiebreak → we drop.
   TEST_ASSERT_FALSE(r.claims(kLampX));
 }
@@ -161,14 +167,14 @@ void test_higher_mac_peer_loses_tiebreak(void) {
 
   // Same setup, but peer has HIGHER mac. We should keep the claim.
   auto lamps = obs(kLampX, -65);
-  r.recomputeClaims(&lamps, 1, /*nowMs=*/1000);
+  r.recomputeClaims(&lamps, 1, /*nowMs=*/1000, kFloor);
   TEST_ASSERT_TRUE(r.claims(kLampX));
 
   uint8_t entries[7];
   packEntry(entries, kLampX, -67);
   r.recordPeerClaim(kPeerHighMac, entries, 1, /*nowMs=*/2000);
   lamps = obs(kLampX, -65);
-  r.recomputeClaims(&lamps, 1, /*nowMs=*/2000);
+  r.recomputeClaims(&lamps, 1, /*nowMs=*/2000, kFloor);
   TEST_ASSERT_TRUE(r.claims(kLampX));
 }
 
@@ -181,13 +187,13 @@ void test_peer_silence_ages_out_and_we_adopt(void) {
   packEntry(entries, kLampX, -55);
   r.recordPeerClaim(kPeerLowMac, entries, 1, /*nowMs=*/1000);
   auto lamps = obs(kLampX, -75);
-  r.recomputeClaims(&lamps, 1, /*nowMs=*/1000);
+  r.recomputeClaims(&lamps, 1, /*nowMs=*/1000, kFloor);
   TEST_ASSERT_FALSE(r.claims(kLampX));
 
   // Tick 2: jump forward past the 10 s aging window without any further
   // peer broadcasts. Peer entries get pruned; we adopt X.
   lamps = obs(kLampX, -75);
-  r.recomputeClaims(&lamps, 1, /*nowMs=*/12000);
+  r.recomputeClaims(&lamps, 1, /*nowMs=*/12000, kFloor);
   TEST_ASSERT_TRUE(r.claims(kLampX));
 }
 
@@ -204,13 +210,13 @@ void test_rssi_jitter_inside_hysteresis_no_flap(void) {
 
   // We start ahead of peer — claim X.
   auto lamps = obs(kLampX, -60); // 5 dB advantage = right at the boundary
-  r.recomputeClaims(&lamps, 1, /*nowMs=*/1000);
+  r.recomputeClaims(&lamps, 1, /*nowMs=*/1000, kFloor);
   TEST_ASSERT_TRUE(r.claims(kLampX));
 
   // Jitter ±3 dB on subsequent ticks, peer steady. Claim should stick.
   for (int8_t delta = -3; delta <= 3; ++delta) {
     lamps = obs(kLampX, static_cast<int8_t>(-60 + delta));
-    r.recomputeClaims(&lamps, 1, /*nowMs=*/2000 + static_cast<uint32_t>(delta + 3) * 100);
+    r.recomputeClaims(&lamps, 1, /*nowMs=*/2000 + static_cast<uint32_t>(delta + 3) * 100, kFloor);
     TEST_ASSERT_TRUE_MESSAGE(r.claims(kLampX),
                              "claim flipped on RSSI jitter inside hysteresis");
   }
@@ -223,7 +229,7 @@ void test_peer_not_pruned_when_lastseen_ahead_of_now(void) {
   packEntry(entries, kLampX, -65);
   r.recordPeerClaim(kPeerHighMac, entries, 1, /*nowMs=*/5000);
   auto lamps = obs(kLampX, -75);                // peer is closer → owns X
-  r.recomputeClaims(&lamps, 1, /*nowMs=*/4000); // nowMs < lastSeenMs by 1s
+  r.recomputeClaims(&lamps, 1, /*nowMs=*/4000, kFloor); // nowMs < lastSeenMs by 1s
   TEST_ASSERT_FALSE(r.claims(kLampX));          // buggy code prunes & adopts
 }
 
@@ -231,7 +237,7 @@ void test_never_measured_rssi_skips_claim(void) {
   wisp::WispRoster r;
   r.setSelfMac(kSelfMac);
   auto lamps = obs(kLampX, INT8_MIN);
-  r.recomputeClaims(&lamps, 1, /*nowMs=*/1000);
+  r.recomputeClaims(&lamps, 1, /*nowMs=*/1000, kFloor);
   TEST_ASSERT_FALSE(r.claims(kLampX));
   TEST_ASSERT_EQUAL_size_t(0, r.claimedCount());
 }
@@ -239,11 +245,11 @@ void test_never_measured_rssi_skips_claim(void) {
 void test_snapshot_for_broadcast_packs_correctly(void) {
   wisp::WispRoster r;
   r.setSelfMac(kSelfMac);
-  wisp::WispRoster::LampObservation lamps[] = {
+  wisp::LampObservation lamps[] = {
       obs(kLampX, -60),
       obs(kLampY, -70),
   };
-  r.recomputeClaims(lamps, 2, /*nowMs=*/1000);
+  r.recomputeClaims(lamps, 2, /*nowMs=*/1000, kFloor);
 
   uint8_t buf[14];  // 2 entries × 7 bytes
   const size_t n = r.snapshotClaimsForBroadcast(buf, sizeof(buf));
@@ -259,7 +265,7 @@ void test_set_lamp_paint_stores_on_claimed_entry(void) {
   wisp::WispRoster r;
   r.setSelfMac(kSelfMac);
   auto lamp = obs(kLampX, -65);
-  r.recomputeClaims(&lamp, 1, /*nowMs=*/1000);
+  r.recomputeClaims(&lamp, 1, /*nowMs=*/1000, kFloor);
   TEST_ASSERT_TRUE(r.claims(kLampX));
 
   const uint8_t base[3]  = {0x11, 0x22, 0x33};
@@ -294,7 +300,7 @@ void test_recompute_preserves_paint_on_stable_claim(void) {
   wisp::WispRoster r;
   r.setSelfMac(kSelfMac);
   auto lamp = obs(kLampX, -65);
-  r.recomputeClaims(&lamp, 1, /*nowMs=*/1000);
+  r.recomputeClaims(&lamp, 1, /*nowMs=*/1000, kFloor);
 
   const uint8_t base[3]  = {0x10, 0x20, 0x30};
   const uint8_t shade[3] = {0xA0, 0xB0, 0xC0};
@@ -302,7 +308,7 @@ void test_recompute_preserves_paint_on_stable_claim(void) {
 
   // Recompute again with kLampX still present.
   lamp = obs(kLampX, -65);
-  r.recomputeClaims(&lamp, 1, /*nowMs=*/2000);
+  r.recomputeClaims(&lamp, 1, /*nowMs=*/2000, kFloor);
   TEST_ASSERT_TRUE(r.claims(kLampX));
 
   uint8_t buf[12];
@@ -322,14 +328,14 @@ void test_recompute_zeroes_paint_for_new_entry(void) {
 
   // Claim X and paint it.
   auto lamps = obs(kLampX, -65);
-  r.recomputeClaims(&lamps, 1, /*nowMs=*/1000);
+  r.recomputeClaims(&lamps, 1, /*nowMs=*/1000, kFloor);
   const uint8_t base[3]  = {0x10, 0x20, 0x30};
   const uint8_t shade[3] = {0xA0, 0xB0, 0xC0};
   r.setLampPaint(kLampX, base, shade);
 
   // Now recompute with X + a brand-new Y.
-  wisp::WispRoster::LampObservation both[] = {obs(kLampX, -65), obs(kLampY, -70)};
-  r.recomputeClaims(both, 2, /*nowMs=*/2000);
+  wisp::LampObservation both[] = {obs(kLampX, -65), obs(kLampY, -70)};
+  r.recomputeClaims(both, 2, /*nowMs=*/2000, kFloor);
 
   uint8_t buf[2 * 12];
   const size_t n = r.snapshotPaintForBroadcast(buf, sizeof(buf));
@@ -359,7 +365,7 @@ void test_snapshot_paint_caps_at_max_entries(void) {
 
   // Build WISP_PAINT_MAX_ENTRIES + 1 distinct lamp MACs and claim them all.
   constexpr size_t kOver = lamp_protocol::WISP_PAINT_MAX_ENTRIES + 1;
-  wisp::WispRoster::LampObservation lamps[kOver];
+  wisp::LampObservation lamps[kOver];
   for (size_t i = 0; i < kOver; ++i) {
     lamps[i].mac[0] = 0xCC;
     lamps[i].mac[1] = 0x00;
@@ -369,7 +375,7 @@ void test_snapshot_paint_caps_at_max_entries(void) {
     lamps[i].mac[5] = static_cast<uint8_t>(i + 1);
     lamps[i].rssi   = -60;
   }
-  r.recomputeClaims(lamps, kOver, /*nowMs=*/1000);
+  r.recomputeClaims(lamps, kOver, /*nowMs=*/1000, kFloor);
 
   // Provide a buffer large enough for kOver entries; cap must fire.
   uint8_t buf[kOver * 12];
@@ -380,11 +386,11 @@ void test_snapshot_paint_caps_at_max_entries(void) {
 void test_snapshot_paint_entries_12_bytes_each(void) {
   wisp::WispRoster r;
   r.setSelfMac(kSelfMac);
-  wisp::WispRoster::LampObservation lamps[] = {
+  wisp::LampObservation lamps[] = {
       obs(kLampX, -60),
       obs(kLampY, -70),
   };
-  r.recomputeClaims(lamps, 2, /*nowMs=*/1000);
+  r.recomputeClaims(lamps, 2, /*nowMs=*/1000, kFloor);
 
   const uint8_t baseX[3]  = {0x01, 0x02, 0x03};
   const uint8_t shadeX[3] = {0x04, 0x05, 0x06};
@@ -417,6 +423,150 @@ void test_snapshot_paint_entries_12_bytes_each(void) {
   TEST_ASSERT_EQUAL_UINT8(0x0A, yEntry[9]);
 }
 
+// --- range floor + composite frame tests ---
+
+namespace {
+
+void fleetMac(uint8_t out[6], uint8_t last) {
+  const uint8_t m[6] = {0xCC, 0x00, 0x00, 0x00, 0x00, last};
+  std::memcpy(out, m, 6);
+}
+
+// True when `mac` appears in a packed 7-byte-entry claim buffer.
+bool bufHasMac(const uint8_t* buf, size_t entries, const uint8_t mac[6],
+               size_t entryBytes = 7) {
+  for (size_t i = 0; i < entries; ++i) {
+    if (std::memcmp(buf + i * entryBytes, mac, 6) == 0) return true;
+  }
+  return false;
+}
+
+}  // namespace
+
+void test_range_floor_gates_admission(void) {
+  wisp::WispRoster r;
+  r.setSelfMac(kSelfMac);
+  wisp::LampObservation lamps[] = {
+      obs(kLampX, -60),
+      obs(kLampY, -70),
+  };
+  r.recomputeClaims(lamps, 2, /*nowMs=*/1000, /*floor=*/-65);
+  TEST_ASSERT_TRUE(r.claims(kLampX));
+  TEST_ASSERT_FALSE(r.claims(kLampY));
+}
+
+void test_range_floor_exit_band_retains_then_drops(void) {
+  wisp::WispRoster r;
+  r.setSelfMac(kSelfMac);
+
+  auto lamp = obs(kLampX, -60);
+  r.recomputeClaims(&lamp, 1, /*nowMs=*/1000, /*floor=*/-65);
+  TEST_ASSERT_TRUE(r.claims(kLampX));
+
+  // Inside the exit band [floor-5, floor): retained.
+  lamp = obs(kLampX, -68);
+  r.recomputeClaims(&lamp, 1, /*nowMs=*/2000, /*floor=*/-65);
+  TEST_ASSERT_TRUE(r.claims(kLampX));
+
+  // Below the exit band: dropped.
+  lamp = obs(kLampX, -71);
+  r.recomputeClaims(&lamp, 1, /*nowMs=*/3000, /*floor=*/-65);
+  TEST_ASSERT_FALSE(r.claims(kLampX));
+
+  // Once dropped, the exit band no longer admits.
+  lamp = obs(kLampX, -68);
+  r.recomputeClaims(&lamp, 1, /*nowMs=*/4000, /*floor=*/-65);
+  TEST_ASSERT_FALSE(r.claims(kLampX));
+}
+
+void test_claim_rotation_covers_full_set(void) {
+  wisp::WispRoster r;
+  r.setSelfMac(kSelfMac);
+
+  constexpr size_t kFleet = 40;
+  wisp::LampObservation lamps[kFleet];
+  for (size_t i = 0; i < kFleet; ++i) {
+    fleetMac(lamps[i].mac, static_cast<uint8_t>(i + 1));
+    lamps[i].rssi = -60;
+  }
+  r.recomputeClaims(lamps, kFleet, /*nowMs=*/1000, kFloor);
+  TEST_ASSERT_EQUAL_size_t(kFleet, r.claimedCount());
+
+  bool seen[kFleet] = {false};
+  uint8_t buf[32 * 7];
+  for (int frame = 0; frame < 2; ++frame) {
+    const size_t n = r.snapshotClaimsForBroadcast(buf, sizeof(buf));
+    TEST_ASSERT_TRUE(n <= 32);
+    for (size_t i = 0; i < kFleet; ++i) {
+      uint8_t m[6];
+      fleetMac(m, static_cast<uint8_t>(i + 1));
+      if (bufHasMac(buf, n, m)) seen[i] = true;
+    }
+  }
+  for (size_t i = 0; i < kFleet; ++i) {
+    TEST_ASSERT_TRUE_MESSAGE(seen[i], "rotation missed a claimed lamp");
+  }
+}
+
+void test_contested_entries_ride_every_frame(void) {
+  wisp::WispRoster r;
+  r.setSelfMac(kSelfMac);
+
+  // Peer also lists X and Y (weaker) → contested but still ours.
+  uint8_t entries[2 * 7];
+  packEntry(entries,     kLampX, -75);
+  packEntry(entries + 7, kLampY, -75);
+  r.recordPeerClaim(kPeerHighMac, entries, 2, /*nowMs=*/1000);
+
+  constexpr size_t kFleet = 40;
+  wisp::LampObservation lamps[kFleet + 2];
+  lamps[0] = obs(kLampX, -60);
+  lamps[1] = obs(kLampY, -60);
+  for (size_t i = 0; i < kFleet; ++i) {
+    fleetMac(lamps[i + 2].mac, static_cast<uint8_t>(i + 1));
+    lamps[i + 2].rssi = -60;
+  }
+  r.recomputeClaims(lamps, kFleet + 2, /*nowMs=*/1000, kFloor);
+  TEST_ASSERT_EQUAL_size_t(kFleet + 2, r.claimedCount());
+
+  uint8_t buf[32 * 7];
+  for (int frame = 0; frame < 4; ++frame) {
+    const size_t n = r.snapshotClaimsForBroadcast(buf, sizeof(buf));
+    TEST_ASSERT_TRUE_MESSAGE(bufHasMac(buf, n, kLampX),
+                             "contested lamp missing from a frame");
+    TEST_ASSERT_TRUE_MESSAGE(bufHasMac(buf, n, kLampY),
+                             "contested lamp missing from a frame");
+  }
+}
+
+void test_paint_window_rotates_over_claim_set(void) {
+  wisp::WispRoster r;
+  r.setSelfMac(kSelfMac);
+
+  constexpr size_t kFleet = 20;
+  wisp::LampObservation lamps[kFleet];
+  for (size_t i = 0; i < kFleet; ++i) {
+    fleetMac(lamps[i].mac, static_cast<uint8_t>(i + 1));
+    lamps[i].rssi = -60;
+  }
+  r.recomputeClaims(lamps, kFleet, /*nowMs=*/1000, kFloor);
+
+  bool seen[kFleet] = {false};
+  uint8_t buf[lamp_protocol::WISP_PAINT_MAX_ENTRIES * 12];
+  for (int frame = 0; frame < 2; ++frame) {
+    const size_t n = r.snapshotPaintForBroadcast(buf, sizeof(buf));
+    TEST_ASSERT_TRUE(n <= lamp_protocol::WISP_PAINT_MAX_ENTRIES);
+    for (size_t i = 0; i < kFleet; ++i) {
+      uint8_t m[6];
+      fleetMac(m, static_cast<uint8_t>(i + 1));
+      if (bufHasMac(buf, n, m, /*entryBytes=*/12)) seen[i] = true;
+    }
+  }
+  for (size_t i = 0; i < kFleet; ++i) {
+    TEST_ASSERT_TRUE_MESSAGE(seen[i], "paint window missed a claimed lamp");
+  }
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_single_wisp_claims_everything);
@@ -437,5 +587,10 @@ int main(int, char**) {
   RUN_TEST(test_recompute_zeroes_paint_for_new_entry);
   RUN_TEST(test_snapshot_paint_caps_at_max_entries);
   RUN_TEST(test_snapshot_paint_entries_12_bytes_each);
+  RUN_TEST(test_range_floor_gates_admission);
+  RUN_TEST(test_range_floor_exit_band_retains_then_drops);
+  RUN_TEST(test_claim_rotation_covers_full_set);
+  RUN_TEST(test_contested_entries_ride_every_frame);
+  RUN_TEST(test_paint_window_rotates_over_claim_set);
   return UNITY_END();
 }

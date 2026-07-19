@@ -11,20 +11,35 @@ void AuroraPaletteClient::begin() {
         fetcher_.setTarget(staticIp_, staticPort_);
         Serial.printf("[client] static host %s:%u (skipping mDNS)\n",
                       staticIp_.toString().c_str(), staticPort_);
-        state_ = State::Connecting;
-    } else {
-        state_ = State::Discovering;
     }
+}
+
+void AuroraPaletteClient::setActive(bool on) {
+    if (on == (state_ != State::Idle)) return;
+    if (!on) {
+        ws_.close();
+        group_ = GroupResolve{};
+        state_ = State::Idle;
+        Serial.println("[client] aurora client idle");
+        return;
+    }
+    for (auto& z : zones_) z.resolvedId = String();
+    // Back-dated so the first Discovering pass queries immediately.
+    lastDiscoverMs_ = millis() - kDiscoverRetryMs;
+    state_ = staticHost_ ? State::Connecting : State::Discovering;
+    Serial.println("[client] aurora client armed");
 }
 
 void AuroraPaletteClient::loop() {
     switch (state_) {
         case State::Discovering:
             // Skip mDNS until STA is up. Without this gate the wisp issues
-            // MDNS.queryService("aurora","tcp") every ~3s even when ssid='';
+            // MDNS.queryService("aurora","tcp") even when ssid='';
             // each query blocks the WiFi task ~50-300ms and starves the
             // ESP-NOW send-callback path, causing bursty paint FAILs.
             if (!WiFi.isConnected()) break;
+            if (millis() - lastDiscoverMs_ < kDiscoverRetryMs) break;
+            lastDiscoverMs_ = millis();
             if (discovery_.discover()) {
                 ws_.setTarget(discovery_.ip(), discovery_.port());
                 fetcher_.setTarget(discovery_.ip(), discovery_.port());
@@ -71,45 +86,62 @@ void AuroraPaletteClient::setDesired(int zone, const char* paletteId) {
     zones_.push_back(ZoneState{zone, String(paletteId), String()});
 }
 
-bool AuroraPaletteClient::resolvePalette(const char* id, Palette& out) {
-    Palette base;
-    if (!fetcher_.fetchById(id, base)) return false;
-    if (!base.isGroup) { out = base; return true; }
-
-    out = Palette{};
-    out.id = base.id;
-    out.name = base.name;
-    out.isGroup = true;
-    out.childIds = base.childIds;
-    for (const auto& cid : base.childIds) {
-        Palette child;
-        if (fetcher_.fetchById(cid.c_str(), child)) {
-            out.hexColors.insert(out.hexColors.end(),
-                                 child.hexColors.begin(), child.hexColors.end());
-            out.colors.insert(out.colors.end(),
-                              child.colors.begin(), child.colors.end());
-        }
-    }
-    return true;
-}
-
 void AuroraPaletteClient::serviceFetches() {
     if (millis() - lastFetchMs_ < kFetchRetryMs) return;
-    // Resolve at most one stale zone per pass (keeps ws_.poll() responsive).
+    if (group_.active) { serviceGroupResolve(); return; }
+    // At most one blocking GET per pass (keeps ws_.poll() responsive).
     for (auto& z : zones_) {
         if (z.desiredId.length() == 0 || z.desiredId == z.resolvedId) continue;
         lastFetchMs_ = millis();
         Palette p;
-        if (resolvePalette(z.desiredId.c_str(), p)) {
+        if (!fetcher_.fetchById(z.desiredId.c_str(), p)) return;
+        if (p.isGroup && !p.childIds.empty()) {
+            group_.active = true;
+            group_.zone = z.zone;
+            group_.desiredId = z.desiredId;
+            group_.acc = Palette{};
+            group_.acc.id = p.id;
+            group_.acc.name = p.name;
+            group_.acc.isGroup = true;
+            group_.acc.childIds = p.childIds;
+            group_.nextChild = 0;
+        } else {
             z.resolvedId = z.desiredId;
             if (onPalette_) onPalette_(z.zone, p);
         }
-        return;  // one fetch per pass
+        return;
     }
 }
 
+void AuroraPaletteClient::serviceGroupResolve() {
+    ZoneState* z = nullptr;
+    for (auto& s : zones_) {
+        if (s.zone == group_.zone) { z = &s; break; }
+    }
+    // Abandon if the zone's desired palette moved on mid-resolve.
+    if (!z || z->desiredId != group_.desiredId) {
+        group_ = GroupResolve{};
+        return;
+    }
+    lastFetchMs_ = millis();
+    Palette child;
+    // A failed child fetch is skipped, not retried.
+    if (fetcher_.fetchById(group_.acc.childIds[group_.nextChild].c_str(),
+                           child)) {
+        group_.acc.hexColors.insert(group_.acc.hexColors.end(),
+                                    child.hexColors.begin(),
+                                    child.hexColors.end());
+        group_.acc.colors.insert(group_.acc.colors.end(),
+                                 child.colors.begin(), child.colors.end());
+    }
+    if (++group_.nextChild < group_.acc.childIds.size()) return;
+    z->resolvedId = z->desiredId;
+    if (onPalette_) onPalette_(z->zone, group_.acc);
+    group_ = GroupResolve{};
+}
+
 void AuroraPaletteClient::handleFrame(const uint8_t* data, size_t len) {
-    DecodedNotification d = NotificationCodec::decode(data, len);
+    const DecodedNotification& d = NotificationCodec::decode(data, len);
     if (!d.ok) {
         Serial.printf("[client] ws frame decode failed (len=%u), dropped\n",
                       (unsigned)len);
@@ -117,8 +149,10 @@ void AuroraPaletteClient::handleFrame(const uint8_t* data, size_t len) {
     }
 
     if (d.type == aurora_NotificationType_CACHE_INVALIDATE) {
-        // A palette's colors may have changed; force re-resolution of all zones.
+        // A palette's colors may have changed; force re-resolution of all
+        // zones and drop any half-built group result.
         for (auto& z : zones_) z.resolvedId = String();
+        group_ = GroupResolve{};
         return;
     }
     if (d.hasPalette) {

@@ -1,4 +1,4 @@
-// StatusRing — pure helpers rendering the wisp's 30-pixel ring as a live
+// StatusRing holds pure helpers rendering the wisp's 30-pixel ring as a live
 // indicator of source/palette state. Strip control lives in main.cpp; only
 // the palette→pixels gradient math is here so it stays host-testable.
 // No heap, no Arduino headers.
@@ -12,6 +12,9 @@ namespace wisp {
 
 // Fixed ring length. Kept here so tests and production share one constant.
 inline constexpr size_t kStatusRingPixelCount = 30;
+
+// Upper bound for configurable pixel count (NVS / app-settable).
+inline constexpr size_t kMaxRingPixels = 100;
 
 // Warm-white fallback when the ring has no palette (Off, or empty Manual/
 // Aurora). Pulled warmer than a neutral warm-white because at brightness 40
@@ -50,7 +53,7 @@ inline bool computeRingGradient(const uint8_t* stopsRgb,
   const uint32_t denom = static_cast<uint32_t>(pixelCount - 1);
   const uint32_t span  = static_cast<uint32_t>(numStops - 1);
   for (size_t i = 0; i < pixelCount; ++i) {
-    // t_q16 = (i * span * 65536) / denom — fractional palette-index in Q16.16.
+    // t_q16 = (i * span * 65536) / denom, fractional palette-index in Q16.16.
     const uint32_t tQ16 = (static_cast<uint32_t>(i) * span * 65536u) / denom;
     const uint32_t lo = tQ16 >> 16;        // floor stop index
     uint32_t hi = lo + 1;                  // ceil stop index

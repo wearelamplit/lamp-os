@@ -1,4 +1,4 @@
-// WispController — source-mode + Aurora orchestration brain.
+// WispController is the source-mode + Aurora orchestration brain.
 //
 // Owns the mode-transition, manual-palette push, Aurora palette callback,
 // Aurora-liveness edge handling, and the op-result application invoked by
@@ -49,6 +49,10 @@ class WispController {
 
   // Loop-task edge detector: Aurora stream drop holds paint off + re-emits.
   void tickAuroraLiveness();
+
+  // Re-init the strip from the current LED format + pixel count config.
+  // Call once after config load; call again after setLedStrip op.
+  void applyLedConfig();
 
  private:
   void pushManualPaletteToCurrent();

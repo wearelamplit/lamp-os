@@ -1,4 +1,4 @@
-// PresenceBeacon — wisp presence on a 2s FreeRTOS timer.
+// PresenceBeacon broadcasts wisp presence on a 2s FreeRTOS timer.
 //
 // Broadcasts MSG_WISP_HELLO then MSG_WISP_CLAIM (roster snapshot). A WiFi/Aurora
 // flag flip triggers StatusEmitter's on-change path so the app sees it within 2s
@@ -10,6 +10,8 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+
+#include "version.hpp"
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 #include <freertos/FreeRTOS.h>
@@ -62,7 +64,8 @@ class PresenceBeacon {
   bool haveLastHelloConn_ = false;
 
   static constexpr uint32_t kHelloIntervalMs = 2000;
-  static constexpr uint32_t kWispVersion     = 0x00010000u;  // 1.0.0
+  // Follows the root VERSION file (injected as LAMP_FW_* by inject_version.py).
+  static constexpr uint32_t kWispVersion     = FIRMWARE_VERSION;
 };
 
 }  // namespace wisp

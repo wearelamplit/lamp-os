@@ -3,7 +3,6 @@
 #include <Arduino.h>
 
 #include <cstring>
-#include <string>
 
 #include "fleet/lamp_inventory.hpp"
 #include "fleet/wisp_roster.hpp"
@@ -25,9 +24,7 @@ void MeshRouter::onPacket(const uint8_t* srcMac, const uint8_t* data,
   if (msgType == lamp_protocol::MSG_HELLO) {
     lamp_protocol::ParsedHello h;
     if (!lamp_protocol::parseHello(data, len, h)) return;
-    const std::string peerName =
-        h.nameLen ? std::string(h.name, h.nameLen) : std::string();
-    inventory_.recordHello(h.sourceMac, peerName, h.base, h.shade,
+    inventory_.recordHello(h.sourceMac, h.name, h.base, h.shade,
                            h.firmwareVersion, millis(),
                            helloRssiForRecord(srcMac, h.sourceMac, rssi));
     return;

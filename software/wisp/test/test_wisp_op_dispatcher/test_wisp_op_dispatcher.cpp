@@ -149,6 +149,68 @@ void test_set_manual_palette_plaintext_with_password() {
     TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedManualPalette, (int)result);
 }
 
+// Tuples may be [r,g,b] or [r,g,b,w] per color; missing w reads as 0.
+void test_set_manual_palette_mixed_rgb_rgbw_tuples() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+
+    wisp::WispOpDispatcher d(cfg);
+    const char* plain =
+        R"({"char":"wispOp","op":"setManualPalette","colors":[[255,0,0],[0,255,0,128],[1,2,3,255]]})";
+    auto result = d.dispatch(reinterpret_cast<const uint8_t*>(plain), strlen(plain));
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedManualPalette, (int)result);
+
+    const auto& pal = cfg.manualPalette();
+    TEST_ASSERT_EQUAL(3, (int)pal.size());
+    TEST_ASSERT_EQUAL_UINT8(0,   pal[0].w);
+    TEST_ASSERT_EQUAL_UINT8(128, pal[1].w);
+    TEST_ASSERT_EQUAL_UINT8(255, pal[2].w);
+    TEST_ASSERT_EQUAL_UINT8(0,   pal[1].r);
+    TEST_ASSERT_EQUAL_UINT8(255, pal[1].g);
+}
+
+void test_set_off_color_rgbw_tuple() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+
+    wisp::WispOpDispatcher d(cfg);
+    const char* rgbw = R"({"char":"wispOp","op":"setOffColor","color":[10,20,30,40]})";
+    auto result = d.dispatch(reinterpret_cast<const uint8_t*>(rgbw), strlen(rgbw));
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOffColor, (int)result);
+    TEST_ASSERT_EQUAL_UINT8(30, cfg.offColor().b);
+    TEST_ASSERT_EQUAL_UINT8(40, cfg.offColor().w);
+
+    const char* rgb = R"({"char":"wispOp","op":"setOffColor","color":[1,2,3]})";
+    result = d.dispatch(reinterpret_cast<const uint8_t*>(rgb), strlen(rgb));
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOffColor, (int)result);
+    TEST_ASSERT_EQUAL_UINT8(0, cfg.offColor().w);
+}
+
+// pollStatus is accepted without a password.
+void test_poll_status_no_password() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+
+    wisp::WispOpDispatcher d(cfg);
+    const char* plain = R"({"char":"wispOp","op":"pollStatus"})";
+    auto result = d.dispatch(reinterpret_cast<const uint8_t*>(plain), strlen(plain));
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::PollStatus, (int)result);
+}
+
+// pollStatus is on the plaintext exception list: it only triggers a
+// re-broadcast of already-public state, so a password-protected wisp
+// still refreshes for an app without the password.
+void test_poll_status_plaintext_with_password() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    cfg.setPassword("testpass");
+
+    wisp::WispOpDispatcher d(cfg);
+    const char* plain = R"({"char":"wispOp","op":"pollStatus"})";
+    auto result = d.dispatch(reinterpret_cast<const uint8_t*>(plain), strlen(plain));
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::PollStatus, (int)result);
+}
+
 // --- Task 4b: setPassword op + replay window ---
 
 // setPassword sealed under the OLD password changes the password; subsequent
@@ -259,6 +321,150 @@ void test_replay_same_nonce_dropped() {
     TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::Rejected, (int)r2);
 }
 
+// opSeq bumps once per sealed op that is accepted+applied.
+void test_op_seq_bumps_on_sealed_applied() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    cfg.setPassword("testpass");
+
+    wisp::WispOpDispatcher d(cfg);
+    wisp::crypto::RecentNonces nonces;
+    d.setNonces(&nonces);
+
+    TEST_ASSERT_EQUAL_UINT32(0, cfg.opSeq());
+    auto r = d.dispatch(kSealedSetName, kSealedSetNameLen);
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedNameChange, (int)r);
+    TEST_ASSERT_EQUAL_UINT32(1, cfg.opSeq());
+
+    // A replay of the same nonce is Rejected and must not bump.
+    d.dispatch(kSealedSetName, kSealedSetNameLen);
+    TEST_ASSERT_EQUAL_UINT32(1, cfg.opSeq());
+}
+
+// A plaintext accepted op does not bump opSeq (only sealed ops do).
+void test_op_seq_unchanged_on_plaintext() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+
+    wisp::WispOpDispatcher d(cfg);
+    const char* plain = R"({"char":"wispOp","op":"shuffle"})";
+    auto r = d.dispatch(reinterpret_cast<const uint8_t*>(plain), strlen(plain));
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedShuffle, (int)r);
+    TEST_ASSERT_EQUAL_UINT32(0, cfg.opSeq());
+}
+
+// --- setLedStrip op ---
+
+// Happy path: valid ledType + pixelCount dispatches to AppliedLedStrip and
+// updates the config.
+void test_set_led_strip_happy_path() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+
+    wisp::WispOpDispatcher d(cfg);
+    const char* plain =
+        R"({"char":"wispOp","op":"setLedStrip","ledType":"BGR","pixelCount":42})";
+    auto result = d.dispatch(reinterpret_cast<const uint8_t*>(plain), strlen(plain));
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedLedStrip, (int)result);
+    TEST_ASSERT_EQUAL_INT((int)lampos::led::ByteOrder::BGR, (int)cfg.ledFormat());
+    TEST_ASSERT_EQUAL_INT(42, (int)cfg.pixelCount());
+}
+
+// Unknown ledType returns Malformed.
+void test_set_led_strip_unknown_led_type() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+
+    wisp::WispOpDispatcher d(cfg);
+    const char* plain =
+        R"({"char":"wispOp","op":"setLedStrip","ledType":"RGBX","pixelCount":10})";
+    auto result = d.dispatch(reinterpret_cast<const uint8_t*>(plain), strlen(plain));
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::Malformed, (int)result);
+}
+
+// pixelCount < 1 returns Malformed.
+void test_set_led_strip_zero_pixel_count() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+
+    wisp::WispOpDispatcher d(cfg);
+    const char* plain =
+        R"({"char":"wispOp","op":"setLedStrip","ledType":"GRB","pixelCount":0})";
+    auto result = d.dispatch(reinterpret_cast<const uint8_t*>(plain), strlen(plain));
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::Malformed, (int)result);
+}
+
+// Missing pixelCount field returns Malformed.
+void test_set_led_strip_missing_pixel_count() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+
+    wisp::WispOpDispatcher d(cfg);
+    const char* plain =
+        R"({"char":"wispOp","op":"setLedStrip","ledType":"GRB"})";
+    auto result = d.dispatch(reinterpret_cast<const uint8_t*>(plain), strlen(plain));
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::Malformed, (int)result);
+}
+
+// --- setRange op ---
+
+void test_set_range_happy_path() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+
+    wisp::WispOpDispatcher d(cfg);
+    const char* plain = R"({"char":"wispOp","op":"setRange","range":2})";
+    auto result = d.dispatch(reinterpret_cast<const uint8_t*>(plain), strlen(plain));
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedRangeChange, (int)result);
+    TEST_ASSERT_EQUAL_INT(2, (int)cfg.rangeStep());
+    TEST_ASSERT_EQUAL_INT(-82, (int)cfg.rangeFloorDbm());
+}
+
+void test_set_range_out_of_bounds_malformed() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+
+    wisp::WispOpDispatcher d(cfg);
+    const char* over = R"({"char":"wispOp","op":"setRange","range":4})";
+    TEST_ASSERT_EQUAL_INT(
+        (int)wisp::DispatchResult::Malformed,
+        (int)d.dispatch(reinterpret_cast<const uint8_t*>(over), strlen(over)));
+    const char* missing = R"({"char":"wispOp","op":"setRange"})";
+    TEST_ASSERT_EQUAL_INT(
+        (int)wisp::DispatchResult::Malformed,
+        (int)d.dispatch(reinterpret_cast<const uint8_t*>(missing), strlen(missing)));
+    TEST_ASSERT_EQUAL_INT(0, (int)cfg.rangeStep());
+}
+
+// --- setBrightness op ---
+
+void test_set_brightness_happy_path() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+
+    wisp::WispOpDispatcher d(cfg);
+    const char* plain = R"({"char":"wispOp","op":"setBrightness","brightness":60})";
+    auto result = d.dispatch(reinterpret_cast<const uint8_t*>(plain), strlen(plain));
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedBrightnessChange, (int)result);
+    TEST_ASSERT_EQUAL_INT(60, (int)cfg.brightness());
+}
+
+void test_set_brightness_out_of_bounds_malformed() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+
+    wisp::WispOpDispatcher d(cfg);
+    const char* over = R"({"char":"wispOp","op":"setBrightness","brightness":101})";
+    TEST_ASSERT_EQUAL_INT(
+        (int)wisp::DispatchResult::Malformed,
+        (int)d.dispatch(reinterpret_cast<const uint8_t*>(over), strlen(over)));
+    const char* missing = R"({"char":"wispOp","op":"setBrightness"})";
+    TEST_ASSERT_EQUAL_INT(
+        (int)wisp::DispatchResult::Malformed,
+        (int)d.dispatch(reinterpret_cast<const uint8_t*>(missing), strlen(missing)));
+    TEST_ASSERT_EQUAL_INT(100, (int)cfg.brightness());
+}
+
 // Nonce ring is bounded: pre-fill the ring to MAX_RECENT_NONCES and verify
 // that adding one more evicts the oldest entry instead of growing.
 // ponytail: RAM-only replay window; a forced reboot clears it.
@@ -298,10 +504,24 @@ int main(int, char**) {
     RUN_TEST(test_no_password_0x01_prefix_accepted);
     RUN_TEST(test_no_password_sealed_rejected);
     RUN_TEST(test_set_manual_palette_plaintext_with_password);
+    RUN_TEST(test_set_manual_palette_mixed_rgb_rgbw_tuples);
+    RUN_TEST(test_set_off_color_rgbw_tuple);
+    RUN_TEST(test_poll_status_no_password);
+    RUN_TEST(test_poll_status_plaintext_with_password);
     RUN_TEST(test_set_password_sealed_changes_password);
     RUN_TEST(test_set_password_plaintext_factory_fresh);
     RUN_TEST(test_set_password_plaintext_rejected_when_password_set);
     RUN_TEST(test_replay_same_nonce_dropped);
     RUN_TEST(test_nonce_ring_bounded);
+    RUN_TEST(test_op_seq_bumps_on_sealed_applied);
+    RUN_TEST(test_op_seq_unchanged_on_plaintext);
+    RUN_TEST(test_set_led_strip_happy_path);
+    RUN_TEST(test_set_led_strip_unknown_led_type);
+    RUN_TEST(test_set_led_strip_zero_pixel_count);
+    RUN_TEST(test_set_led_strip_missing_pixel_count);
+    RUN_TEST(test_set_range_happy_path);
+    RUN_TEST(test_set_range_out_of_bounds_malformed);
+    RUN_TEST(test_set_brightness_happy_path);
+    RUN_TEST(test_set_brightness_out_of_bounds_malformed);
     return UNITY_END();
 }

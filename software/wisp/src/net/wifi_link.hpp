@@ -1,4 +1,4 @@
-// WifiLink — hosts the wisp's softAP for pre-mesh lamps. Brought up once at
+// WifiLink hosts the wisp's softAP for pre-mesh lamps. Brought up once at
 // boot on the mesh channel and left up; the ArtNet emitter gates on
 // canBroadcast() and pins the egress netif off isAp().
 //

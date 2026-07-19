@@ -3,12 +3,13 @@
 #include <algorithm>
 
 #include "config/zone_selector.hpp"
+#include "status/status_ring.hpp"
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #else
-// Native test build — no-op FreeRTOS stubs. Single-threaded; mutex is
+// Native test build. No-op FreeRTOS stubs. Single-threaded; mutex is
 // a sequence point on hardware only, safe to drop here.
 #include <cstddef>
 typedef void* SemaphoreHandle_t;
@@ -34,8 +35,11 @@ constexpr const char* kKeyZone        = "selZone";
 constexpr const char* kKeySsid        = "wifiSsid";
 constexpr const char* kKeyPw          = "wifiPw";
 constexpr const char* kKeySourceMode  = "srcMode";
-// Packed RGB bytes: count implicit in blob length (length % 3 == 0).
-constexpr const char* kKeyManualPalette = "manualPal";
+// Legacy packed RGB blob (3 bytes/color), read-only for migration.
+constexpr const char* kKeyManualPaletteRgb = "manualPal";
+// Packed RGBW blob (4 bytes/color). A separate key because length parity
+// can't disambiguate strides (len % 12 == 0 fits both).
+constexpr const char* kKeyManualPalette = "manualPal4";
 constexpr const char* kKeyOffColor      = "offColor";
 constexpr const char* kKeyShuffleSeed   = "shufSeed";
 constexpr const char* kKeyDriftIntv     = "driftIntv";
@@ -43,6 +47,10 @@ constexpr const char* kKeyDriftFade     = "driftFade";
 constexpr const char* kKeyName          = "wispName";
 constexpr size_t      kMaxNameLen       = 20;
 constexpr const char* kKeyPassword      = "wispPassword";
+constexpr const char* kKeyLedFmt        = "ledFmt";
+constexpr const char* kKeyPxCount       = "pxCount";
+constexpr const char* kKeyRangeStep     = "rangeStep";
+constexpr const char* kKeyBrightness    = "brightness";
 
 WispSourceMode coerceSourceMode(int raw) {
   switch (raw) {
@@ -82,12 +90,33 @@ void WispConfig::begin() {
 
   manualPalette_.clear();
   const size_t paletteLen = prefs_.getBytesLength(kKeyManualPalette);
-  if (paletteLen > 0 && paletteLen % 3 == 0) {
+  const size_t legacyLen  = prefs_.getBytesLength(kKeyManualPaletteRgb);
+  if (paletteLen > 0 && paletteLen % 4 == 0) {
     const size_t colorCount =
-        std::min<size_t>(paletteLen / 3, kManualPaletteMaxColors);
+        std::min<size_t>(paletteLen / 4, kManualPaletteMaxColors);
+    uint8_t buf[kManualPaletteMaxColors * 4];
+    const size_t toRead = colorCount * 4;
+    const size_t got = prefs_.getBytes(kKeyManualPalette, buf, toRead);
+    if (got == toRead) {
+      manualPalette_.reserve(colorCount);
+      for (size_t i = 0; i < colorCount; ++i) {
+        ManualPaletteColor c;
+        c.r = buf[i * 4 + 0];
+        c.g = buf[i * 4 + 1];
+        c.b = buf[i * 4 + 2];
+        c.w = buf[i * 4 + 3];
+        manualPalette_.push_back(c);
+      }
+    }
+  } else if (paletteLen > 0) {
+    Serial.printf("[wisp.cfg] manualPalette blob has odd length %u; ignoring\n",
+                  (unsigned)paletteLen);
+  } else if (legacyLen > 0 && legacyLen % 3 == 0) {
+    const size_t colorCount =
+        std::min<size_t>(legacyLen / 3, kManualPaletteMaxColors);
     uint8_t buf[kManualPaletteMaxColors * 3];
     const size_t toRead = colorCount * 3;
-    const size_t got = prefs_.getBytes(kKeyManualPalette, buf, toRead);
+    const size_t got = prefs_.getBytes(kKeyManualPaletteRgb, buf, toRead);
     if (got == toRead) {
       manualPalette_.reserve(colorCount);
       for (size_t i = 0; i < colorCount; ++i) {
@@ -98,18 +127,16 @@ void WispConfig::begin() {
         manualPalette_.push_back(c);
       }
     }
-  } else if (paletteLen > 0) {
-    Serial.printf("[wisp.cfg] manualPalette blob has odd length %u; ignoring\n",
-                  (unsigned)paletteLen);
   }
 
   const size_t offColorLen = prefs_.getBytesLength(kKeyOffColor);
-  if (offColorLen == 3) {
-    uint8_t buf[3];
-    if (prefs_.getBytes(kKeyOffColor, buf, 3) == 3) {
+  if (offColorLen == 3 || offColorLen == 4) {
+    uint8_t buf[4] = {0};
+    if (prefs_.getBytes(kKeyOffColor, buf, offColorLen) == offColorLen) {
       offColor_.r = buf[0];
       offColor_.g = buf[1];
       offColor_.b = buf[2];
+      offColor_.w = buf[3];
     }
   }
 
@@ -126,6 +153,30 @@ void WispConfig::begin() {
   }
 
   password_ = prefs_.getString(kKeyPassword, String());
+
+  {
+    const uint8_t raw = prefs_.getUChar(kKeyLedFmt, 1 /* GRB default */);
+    ledFormat_ = (raw <= 2)
+        ? static_cast<lampos::led::ByteOrder>(raw)
+        : lampos::led::ByteOrder::GRB;
+  }
+  {
+    const uint16_t raw = prefs_.getUShort(kKeyPxCount, 30);
+    pixelCount_ = (raw < 1) ? 1
+        : (raw > static_cast<uint16_t>(kMaxRingPixels))
+              ? static_cast<uint16_t>(kMaxRingPixels)
+              : raw;
+  }
+
+  {
+    const uint8_t raw = prefs_.getUChar(kKeyRangeStep, 0);
+    rangeStep_ = raw > kRangeStepMax ? 0 : raw;
+  }
+
+  {
+    const uint8_t raw = prefs_.getUChar(kKeyBrightness, 100);
+    brightness_ = raw > 100 ? 100 : raw;
+  }
 
   Serial.printf("[wisp.cfg] loaded selZone=%d ssid='%s' pw=%s "
                 "srcMode=%d manualColors=%u offColor=%u,%u,%u shuffleSeed=%u "
@@ -198,16 +249,18 @@ void WispConfig::setManualPalette(
   manualPalette_.assign(colors.begin(), colors.begin() + n);
   xSemaphoreGive(asHandle(mutex_));
   if (opened_) {
+    prefs_.remove(kKeyManualPaletteRgb);
     if (n == 0) {
       prefs_.remove(kKeyManualPalette);
     } else {
-      uint8_t buf[kManualPaletteMaxColors * 3];
+      uint8_t buf[kManualPaletteMaxColors * 4];
       for (size_t i = 0; i < n; ++i) {
-        buf[i * 3 + 0] = manualPalette_[i].r;
-        buf[i * 3 + 1] = manualPalette_[i].g;
-        buf[i * 3 + 2] = manualPalette_[i].b;
+        buf[i * 4 + 0] = manualPalette_[i].r;
+        buf[i * 4 + 1] = manualPalette_[i].g;
+        buf[i * 4 + 2] = manualPalette_[i].b;
+        buf[i * 4 + 3] = manualPalette_[i].w;
       }
-      prefs_.putBytes(kKeyManualPalette, buf, n * 3);
+      prefs_.putBytes(kKeyManualPalette, buf, n * 4);
     }
   }
   Serial.printf("[wisp.cfg] manualPalette <= %u colors\n", (unsigned)n);
@@ -216,10 +269,10 @@ void WispConfig::setManualPalette(
 void WispConfig::setOffColor(ManualPaletteColor c) {
   offColor_ = c;
   if (opened_) {
-    const uint8_t buf[3] = {c.r, c.g, c.b};
-    prefs_.putBytes(kKeyOffColor, buf, 3);
+    const uint8_t buf[4] = {c.r, c.g, c.b, c.w};
+    prefs_.putBytes(kKeyOffColor, buf, 4);
   }
-  Serial.printf("[wisp.cfg] offColor <= %u,%u,%u\n", c.r, c.g, c.b);
+  Serial.printf("[wisp.cfg] offColor <= %u,%u,%u,%u\n", c.r, c.g, c.b, c.w);
 }
 
 void WispConfig::bumpShuffleSeed() {
@@ -260,14 +313,43 @@ void WispConfig::setPassword(const String& pw) {
   Serial.printf("[wisp.cfg] password <= <%u chars>\n", (unsigned)pw.length());
 }
 
-size_t WispConfig::copyManualPalette(uint8_t* out, size_t maxColors) const {
-  if (!out || !maxColors) return 0;
+void WispConfig::setLedFormat(lampos::led::ByteOrder b) {
+  ledFormat_ = b;
+  if (opened_) prefs_.putUChar(kKeyLedFmt, static_cast<uint8_t>(b));
+  Serial.printf("[wisp.cfg] ledFmt <= %s\n", lampos::led::byteOrderToString(b));
+}
+
+void WispConfig::setPixelCount(uint16_t n) {
+  if (n < 1) n = 1;
+  if (n > static_cast<uint16_t>(kMaxRingPixels)) n = static_cast<uint16_t>(kMaxRingPixels);
+  pixelCount_ = n;
+  if (opened_) prefs_.putUShort(kKeyPxCount, n);
+  Serial.printf("[wisp.cfg] pxCount <= %u\n", n);
+}
+
+void WispConfig::setRangeStep(uint8_t step) {
+  rangeStep_ = step > kRangeStepMax ? kRangeStepMax : step;
+  if (opened_) prefs_.putUChar(kKeyRangeStep, rangeStep_);
+  Serial.printf("[wisp.cfg] rangeStep <= %u (%d dBm)\n",
+                (unsigned)rangeStep_, (int)rangeFloorDbm());
+}
+
+void WispConfig::setBrightness(uint8_t pct) {
+  brightness_ = pct > 100 ? 100 : pct;
+  if (opened_) prefs_.putUChar(kKeyBrightness, brightness_);
+  Serial.printf("[wisp.cfg] brightness <= %u\n", (unsigned)brightness_);
+}
+
+size_t WispConfig::copyManualPalette(uint8_t* outRgb, uint8_t* outW,
+                                     size_t maxColors) const {
+  if (!outRgb || !outW || !maxColors) return 0;
   xSemaphoreTake(asHandle(mutex_), portMAX_DELAY);
   size_t n = std::min(manualPalette_.size(), maxColors);
   for (size_t i = 0; i < n; ++i) {
-    out[i * 3 + 0] = manualPalette_[i].r;
-    out[i * 3 + 1] = manualPalette_[i].g;
-    out[i * 3 + 2] = manualPalette_[i].b;
+    outRgb[i * 3 + 0] = manualPalette_[i].r;
+    outRgb[i * 3 + 1] = manualPalette_[i].g;
+    outRgb[i * 3 + 2] = manualPalette_[i].b;
+    outW[i] = manualPalette_[i].w;
   }
   xSemaphoreGive(asHandle(mutex_));
   return n;

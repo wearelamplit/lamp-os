@@ -59,6 +59,13 @@ class Preferences {
   uint8_t getUChar(const char* k, uint8_t def = 0) {
     const auto* e = kv_find(k); return e ? (uint8_t)atoi(e->val) : def;
   }
+  bool putUShort(const char* k, uint16_t v) {
+    auto* e = kv_slot(k); if (!e) return false;
+    snprintf(e->val, sizeof(e->val), "%u", (unsigned)v); return true;
+  }
+  uint16_t getUShort(const char* k, uint16_t def = 0) {
+    const auto* e = kv_find(k); return e ? (uint16_t)strtoul(e->val, nullptr, 10) : def;
+  }
   size_t getBytesLength(const char*) { return 0; }
   size_t getBytes(const char*, void*, size_t) { return 0; }
   size_t putBytes(const char*, const void*, size_t) { return 0; }

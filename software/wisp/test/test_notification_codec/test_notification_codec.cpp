@@ -43,6 +43,19 @@ void test_decodes_palette_state(void) {
                              d.palette.states[0].active_color_palette_id);
 }
 
+void test_scratch_resets_between_decodes(void) {
+    auto frame = buildPaletteEnvelope();
+    DecodedNotification d1 = NotificationCodec::decode(frame.data(), frame.size());
+    TEST_ASSERT_TRUE(d1.hasPalette);
+
+    // A bad frame after a good one must not leak the previous decode.
+    const uint8_t junk[] = {0xFF, 0xFF, 0xFF, 0xFF};
+    DecodedNotification d2 = NotificationCodec::decode(junk, sizeof junk);
+    TEST_ASSERT_FALSE(d2.ok);
+    TEST_ASSERT_FALSE(d2.hasPalette);
+    TEST_ASSERT_EQUAL(0, d2.palette.states_count);
+}
+
 void test_rejects_oversized_inflate(void) {
     std::vector<uint8_t> big(64 * 1024, 0);
     mz_ulong zlen = mz_compressBound(static_cast<mz_ulong>(big.size()));
@@ -58,6 +71,7 @@ void test_rejects_oversized_inflate(void) {
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_decodes_palette_state);
+    RUN_TEST(test_scratch_resets_between_decodes);
     RUN_TEST(test_rejects_oversized_inflate);
     return UNITY_END();
 }

@@ -1,8 +1,8 @@
-// artnet_frame — pure, host-portable ArtNet DMX frame builder for the wisp
+// artnet_frame is a pure, host-portable ArtNet DMX frame builder for the wisp
 // backwards-compat ArtNet bridge. Produces the exact 530-byte wire format
 // that software/lamp-os/src/components/network/artnet.cpp decodes.
 //
-// No Arduino, no FreeRTOS. Caller owns the buffer; we just fill it in.
+// No Arduino, no FreeRTOS. Caller owns the buffer; the builder only fills it in.
 
 #pragma once
 
@@ -16,7 +16,7 @@ namespace wisp {
 // Total bytes the lamp listener requires (it rejects anything else).
 constexpr size_t kArtnetFrameSize = 530;
 
-// Number of 10-channel fixtures we emit into universe 1. Matches the lamp
+// Number of 10-channel fixtures emitted into universe 1. Matches the lamp
 // firmware's lampNumber range [0, 7].
 constexpr size_t kArtnetNumFixtures = 8;
 

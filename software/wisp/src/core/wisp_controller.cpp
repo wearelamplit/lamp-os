@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <Adafruit_NeoPixel.h>
+#include <lampos/led_types.hpp>
 
 #include "aurora/AuroraPaletteClient.h"
 #include "config/wisp_config.hpp"
@@ -20,12 +21,15 @@ void WispController::pushManualPaletteToCurrent() {
   if (cols.empty()) return;
   Palette p;
   p.id = "manual";
-  p.hexColors.reserve(cols.size());
+  // Float-channel shape (not hexColors): the 24-bit hex form can't carry W.
+  p.colors.reserve(cols.size());
   for (const auto& c : cols) {
-    const uint64_t packed = (static_cast<uint64_t>(c.r) << 16) |
-                            (static_cast<uint64_t>(c.g) << 8) |
-                            (static_cast<uint64_t>(c.b));
-    p.hexColors.push_back(packed);
+    PaletteColor pc;
+    pc.r = c.r / 255.0f;
+    pc.g = c.g / 255.0f;
+    pc.b = c.b / 255.0f;
+    pc.w = c.w / 255.0f;
+    p.colors.push_back(pc);
   }
   palette_.update(p, millis());
   paint_.onPaletteChanged();
@@ -36,7 +40,11 @@ void WispController::pushManualPaletteToCurrent() {
 void WispController::renderRing() {
   uint8_t stopsRgb[wisp::kManualPaletteMaxColors * 3];
   size_t numStops = 0;
-  uint8_t pixels[wisp::kStatusRingPixelCount * 3];
+  uint8_t pixels[wisp::kMaxRingPixels * 3];
+
+  const size_t px = (config_.pixelCount() <= wisp::kMaxRingPixels)
+                        ? config_.pixelCount()
+                        : wisp::kMaxRingPixels;
 
   const wisp::WispSourceMode mode = config_.sourceMode();
   // Render as Off when Aurora stream is down, not stale palette.
@@ -48,9 +56,9 @@ void WispController::renderRing() {
                          ? wisp::kManualPaletteMaxColors
                          : cols.size();
     for (size_t i = 0; i < n; ++i) {
-      stopsRgb[i * 3 + 0] = cols[i].r;
-      stopsRgb[i * 3 + 1] = cols[i].g;
-      stopsRgb[i * 3 + 2] = cols[i].b;
+      wisp::rgbwToRgbWarmBias(cols[i].r, cols[i].g, cols[i].b, cols[i].w,
+                              stopsRgb[i * 3 + 0], stopsRgb[i * 3 + 1],
+                              stopsRgb[i * 3 + 2]);
     }
     numStops = n;
   } else if (auroraLive) {
@@ -71,32 +79,48 @@ void WispController::renderRing() {
   if (mode == wisp::WispSourceMode::Off ||
       (mode == wisp::WispSourceMode::Aurora && !auroraLive)) {
     const wisp::ManualPaletteColor offColor = config_.offColor();
-    for (size_t i = 0; i < wisp::kStatusRingPixelCount; ++i) {
-      pixels[i * 3 + 0] = offColor.r;
-      pixels[i * 3 + 1] = offColor.g;
-      pixels[i * 3 + 2] = offColor.b;
+    uint8_t offR, offG, offB;
+    wisp::rgbwToRgbWarmBias(offColor.r, offColor.g, offColor.b, offColor.w,
+                            offR, offG, offB);
+    for (size_t i = 0; i < px; ++i) {
+      pixels[i * 3 + 0] = offR;
+      pixels[i * 3 + 1] = offG;
+      pixels[i * 3 + 2] = offB;
     }
-  } else if (!wisp::computeRingGradient(stopsRgb, numStops, pixels,
-                                        wisp::kStatusRingPixelCount)) {
-    wisp::fillRingWarmWhite(pixels, wisp::kStatusRingPixelCount);
+  } else if (!wisp::computeRingGradient(stopsRgb, numStops, pixels, px)) {
+    wisp::fillRingWarmWhite(pixels, px);
   }
 
-  for (size_t i = 0; i < wisp::kStatusRingPixelCount; ++i) {
+  for (size_t i = 0; i < px; ++i) {
     strip_.setPixelColor(static_cast<uint16_t>(i),
-                         pixels[i * 3 + 0],
-                         pixels[i * 3 + 1],
-                         pixels[i * 3 + 2]);
+                         Adafruit_NeoPixel::gamma8(pixels[i * 3 + 0]),
+                         Adafruit_NeoPixel::gamma8(pixels[i * 3 + 1]),
+                         Adafruit_NeoPixel::gamma8(pixels[i * 3 + 2]));
   }
   strip_.show();
+}
+
+void WispController::applyLedConfig() {
+  strip_.updateType(lampos::led::neoPixelFormat(config_.ledFormat()) +
+                    NEO_KHZ800);
+  strip_.updateLength(config_.pixelCount());
+  strip_.begin();
+  strip_.clear();
+  renderRing();
 }
 
 void WispController::applySourceModeTransition(wisp::WispSourceMode mode) {
   switch (mode) {
     case wisp::WispSourceMode::Off:
+      aurora_.setActive(false);
       paint_.setPaintMode(false);
+      // Off plays nothing; a stale paletteIdPrefix would keep triggering
+      // app-side palette re-reads.
+      palette_.clear();
       Serial.println("[wisp] source=Off — broadcast RESTORE; paintMode off");
       break;
     case wisp::WispSourceMode::Manual:
+      aurora_.setActive(false);
       paint_.setPaintMode(true);
       pushManualPaletteToCurrent();
       Serial.println("[wisp] source=Manual — paintMode on");
@@ -104,8 +128,11 @@ void WispController::applySourceModeTransition(wisp::WispSourceMode mode) {
     case wisp::WispSourceMode::Aurora:
       // Clear stale palette; onAuroraPalette enables paint when a live
       // palette arrives; loop's liveness check disables it if stream drops.
+      aurora_.setActive(true);
       palette_.clear();
       paint_.setPaintMode(aurora_.isStreaming());
+      // Re-seed the liveness edge; a drop while inactive is not a fresh edge.
+      auroraWasStreaming_ = aurora_.isStreaming();
       Serial.printf("[wisp] source=Aurora — %s\n",
                     aurora_.isStreaming() ? "stream live"
                                           : "no stream, holding off");
@@ -124,9 +151,11 @@ void WispController::onAuroraPalette(int zone, const Palette& p) {
   }
 
   if (zone != zones_.currentZone()) {
+#ifdef LAMP_DEBUG
     Serial.printf("[wisp] ignoring zone %d palette (selected %d, source=%s)\n",
                   zone, zones_.currentZone(),
                   wisp::zoneSourceName(zones_.source()));
+#endif
     return;
   }
 
@@ -137,6 +166,7 @@ void WispController::onAuroraPalette(int zone, const Palette& p) {
   }
 
   palette_.update(p, millis());
+#ifdef LAMP_DEBUG
   const auto& cols = palette_.colors();
   Serial.printf("[wisp] palette change: %s with %u colors\n",
                 palette_.paletteId().c_str(),
@@ -145,6 +175,7 @@ void WispController::onAuroraPalette(int zone, const Palette& p) {
     Serial.printf("  [%u] r=%u g=%u b=%u w=%u\n",
                   (unsigned)i, cols[i].r, cols[i].g, cols[i].b, cols[i].w);
   }
+#endif
   paint_.setPaintMode(true);
   artnet_.onPaletteChanged();
   renderRing();
@@ -198,6 +229,24 @@ void WispController::applyOpResult(DispatchResult res) {
       status_.triggerOnChange();
       break;
     case wisp::DispatchResult::AppliedNameChange:
+      status_.triggerOnChange();
+      break;
+    case wisp::DispatchResult::AppliedPasswordChange:
+      status_.triggerOnChange();
+      break;
+    case wisp::DispatchResult::AppliedLedStrip:
+      applyLedConfig();
+      status_.triggerOnChange();
+      break;
+    // The claim recompute reads the new floor from config on its next 2 s tick.
+    case wisp::DispatchResult::AppliedRangeChange:
+      status_.triggerOnChange();
+      break;
+    case wisp::DispatchResult::AppliedBrightnessChange:
+      paint_.setBrightness(config_.brightness());
+      status_.triggerOnChange();
+      break;
+    case wisp::DispatchResult::PollStatus:
       status_.triggerOnChange();
       break;
     case wisp::DispatchResult::Rejected:

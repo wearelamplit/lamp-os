@@ -1,27 +1,7 @@
 #include "fleet/wisp_roster.hpp"
 #include "wire/lamp_protocol.hpp"
 
-#if defined(ARDUINO) || defined(ESP_PLATFORM)
-#include <Arduino.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/semphr.h>
-#else
-// Native test build — stub the FreeRTOS surface to no-ops. Single-thread
-// test harness has no concurrent access; the mutex acts solely as a
-// sequence point on hardware, so dropping it for native is safe.
-#include <cstddef>
-typedef void* SemaphoreHandle_t;
-#define pdTRUE         1
-#define portMAX_DELAY  0xFFFFFFFFu
-inline int pdMS_TO_TICKS(unsigned ms) { return static_cast<int>(ms); }
-inline SemaphoreHandle_t xSemaphoreCreateMutex() {
-  // Return a non-null sentinel so callers' null-checks succeed.
-  return reinterpret_cast<SemaphoreHandle_t>(0x1);
-}
-inline int xSemaphoreTake(SemaphoreHandle_t, int) { return pdTRUE; }
-inline void xSemaphoreGive(SemaphoreHandle_t) {}
-inline void vSemaphoreDelete(SemaphoreHandle_t) {}
-#endif
+#include "fleet/freertos_shim.hpp"
 
 #include <climits>
 #include <cstring>
@@ -36,6 +16,10 @@ inline SemaphoreHandle_t asHandle(void* m) {
 // Packed wire entry size; mirrors WISP_CLAIM_ENTRY_SIZE in lamp_protocol.
 constexpr size_t kEntryBytes = 6 + 1;
 }  // namespace
+
+static_assert(WISP_ROSTER_MAX_PEER_ENTRIES ==
+                  lamp_protocol::kMaxWispClaimEntries,
+              "peer claim storage must match the wire frame cap");
 
 WispRoster::WispRoster() {
   mutex_ = xSemaphoreCreateMutex();
@@ -58,9 +42,9 @@ void WispRoster::setSelfMac(const uint8_t mac[6]) {
 void WispRoster::recordPeerClaim(const uint8_t peerWispMac[6],
                                  const uint8_t* entries, uint8_t count,
                                  uint32_t nowMs) {
-  // Bounded take — runs on the WiFi recv task. Drop on contention; the
-  // wisp's broadcast cadence (2 s) gives us 5× retries before peer aging
-  // would treat us as silent.
+  // Bounded take, runs on the WiFi recv task. Drop on contention; the
+  // wisp's broadcast cadence (2 s) gives 5× retries before peer aging
+  // treats the wisp as silent.
   if (xSemaphoreTake(asHandle(mutex_), pdMS_TO_TICKS(2)) != pdTRUE) return;
 
   // Ignore self-broadcasts. Wisps don't hear their own ESP-NOW frames, but
@@ -75,8 +59,8 @@ void WispRoster::recordPeerClaim(const uint8_t peerWispMac[6],
     if (peerCount_ < WISP_ROSTER_MAX_PEERS) {
       idx = peerCount_++;
     } else {
-      // Evict the peer with the OLDEST lastSeenMs — it's the most likely
-      // to have gone silent, and we'd drop it on the next prune anyway.
+      // Evict the peer with the OLDEST lastSeenMs; it's the most likely
+      // to have gone silent, and the next prune would drop it anyway.
       uint32_t oldest = peers_[0].lastSeenMs;
       idx = 0;
       for (size_t i = 1; i < peerCount_; ++i) {
@@ -90,8 +74,8 @@ void WispRoster::recordPeerClaim(const uint8_t peerWispMac[6],
   }
 
   peers_[idx].lastSeenMs = nowMs;
-  const uint8_t clamped = count > WISP_ROSTER_MAX_LAMPS
-                              ? WISP_ROSTER_MAX_LAMPS
+  const uint8_t clamped = count > WISP_ROSTER_MAX_PEER_ENTRIES
+                              ? WISP_ROSTER_MAX_PEER_ENTRIES
                               : count;
   peers_[idx].count = clamped;
   for (uint8_t i = 0; i < clamped; ++i) {
@@ -104,21 +88,38 @@ void WispRoster::recordPeerClaim(const uint8_t peerWispMac[6],
 }
 
 void WispRoster::recomputeClaims(const LampObservation* observations,
-                                 size_t count, uint32_t nowMs) {
+                                 size_t count, uint32_t nowMs,
+                                 int8_t rangeFloorDbm) {
   if (xSemaphoreTake(asHandle(mutex_), portMAX_DELAY) != pdTRUE) return;
 
   // Aging first: any peer silent for > WISP_ROSTER_PEER_AGE_MS gets
-  // dropped from the shared view. This makes failover implicit — when
+  // dropped from the shared view. This makes failover implicit. When
   // a peer goes offline, its entries vanish and the survivor's claim
   // logic naturally adopts the orphans on the next tick.
   prunePeersLocked(nowMs);
 
-  // Build a fresh own-claim set. We don't mutate ownClaims_ in place
-  // because the iteration order over `observations` differs from the
-  // existing ownClaims_ order, and we need to remember the previous
-  // ownership for hysteresis.
+  // Build a fresh own-claim set rather than mutating ownClaims_ in place.
+  // The iteration order over `observations` differs from the existing
+  // ownClaims_ order, and the previous ownership must be remembered for
+  // hysteresis.
   OwnClaim next[WISP_ROSTER_MAX_LAMPS];
   size_t   nextCount = 0;
+
+  // Carries prior paint colors forward; zeroes them for a fresh claim.
+  auto appendClaim = [&](const LampObservation& o, bool contested,
+                         size_t prevIdx) {
+    OwnClaim& c = next[nextCount++];
+    std::memcpy(c.lampMac, o.mac, 6);
+    c.rssi = o.rssi;
+    c.contested = contested;
+    if (prevIdx != ownCount_) {
+      std::memcpy(c.base,  ownClaims_[prevIdx].base,  3);
+      std::memcpy(c.shade, ownClaims_[prevIdx].shade, 3);
+    } else {
+      std::memset(c.base,  0, 3);
+      std::memset(c.shade, 0, 3);
+    }
+  };
 
   const size_t cap = count > WISP_ROSTER_MAX_LAMPS
                          ? WISP_ROSTER_MAX_LAMPS
@@ -129,22 +130,24 @@ void WispRoster::recomputeClaims(const LampObservation* observations,
     // the next tick once a real measurement lands.
     if (obs.rssi == INT8_MIN) continue;
 
+    // Range floor: admit at >= floor; an existing claim rides the exit
+    // band down to floor - hysteresis before it drops.
+    const size_t prevIdx = findOwnLocked(obs.mac);
+    const bool weClaimedLast = prevIdx != ownCount_;
+    const int8_t admitFloor =
+        weClaimedLast
+            ? static_cast<int8_t>(rangeFloorDbm - WISP_ROSTER_HYSTERESIS_DB)
+            : rangeFloorDbm;
+    if (obs.rssi < admitFloor) continue;
+    const bool inExitBand = obs.rssi < rangeFloorDbm;
+
     uint8_t bestPeerMac[6] = {0};
     const int8_t bestPeerRssi = bestPeerRssiLocked(obs.mac, bestPeerMac);
+    const bool contested = bestPeerRssi != INT8_MIN || inExitBand;
 
-    // No peer claims this lamp → we claim it unconditionally.
+    // No peer claims this lamp → claim it unconditionally.
     if (bestPeerRssi == INT8_MIN) {
-      std::memcpy(next[nextCount].lampMac, obs.mac, 6);
-      next[nextCount].rssi = obs.rssi;
-      const size_t prev = findOwnLocked(obs.mac);
-      if (prev != ownCount_) {
-        std::memcpy(next[nextCount].base,  ownClaims_[prev].base,  3);
-        std::memcpy(next[nextCount].shade, ownClaims_[prev].shade, 3);
-      } else {
-        std::memset(next[nextCount].base,  0, 3);
-        std::memset(next[nextCount].shade, 0, 3);
-      }
-      nextCount++;
+      appendClaim(obs, contested, prevIdx);
       continue;
     }
 
@@ -152,18 +155,7 @@ void WispRoster::recomputeClaims(const LampObservation* observations,
                           static_cast<int>(bestPeerRssi);
 
     if (advantage >= WISP_ROSTER_HYSTERESIS_DB) {
-      // Strictly closer → claim it.
-      std::memcpy(next[nextCount].lampMac, obs.mac, 6);
-      next[nextCount].rssi = obs.rssi;
-      const size_t prev = findOwnLocked(obs.mac);
-      if (prev != ownCount_) {
-        std::memcpy(next[nextCount].base,  ownClaims_[prev].base,  3);
-        std::memcpy(next[nextCount].shade, ownClaims_[prev].shade, 3);
-      } else {
-        std::memset(next[nextCount].base,  0, 3);
-        std::memset(next[nextCount].shade, 0, 3);
-      }
-      nextCount++;
+      appendClaim(obs, contested, prevIdx);
       continue;
     }
 
@@ -173,26 +165,20 @@ void WispRoster::recomputeClaims(const LampObservation* observations,
     }
 
     // Within the ±5 dB hysteresis band. Stickiness rule: whoever
-    // claimed it last tick keeps it. If both we AND a peer are
+    // claimed it last tick keeps it. If both this wisp AND a peer are
     // currently claiming it (simultaneous-claim window from packet
     // loss), the lower MAC wins.
-    const size_t prevIdx = findOwnLocked(obs.mac);
-    const bool weClaimedLast = prevIdx != ownCount_;
     if (weClaimedLast) {
-      // Defend our claim unless the peer is also claiming AND has the
+      // Defend the claim unless the peer is also claiming AND has the
       // lower MAC.
       if (selfWinsTiebreakLocked(bestPeerMac)) {
-        std::memcpy(next[nextCount].lampMac, obs.mac, 6);
-        next[nextCount].rssi = obs.rssi;
-        std::memcpy(next[nextCount].base,  ownClaims_[prevIdx].base,  3);
-        std::memcpy(next[nextCount].shade, ownClaims_[prevIdx].shade, 3);
-        nextCount++;
+        appendClaim(obs, contested, prevIdx);
       }
-      // else: peer's MAC is lower and we're within hysteresis → yield.
+      // else: peer's MAC is lower and within hysteresis → yield.
       continue;
     }
-    // We did NOT claim it last tick; a peer did. Hysteresis says keep
-    // the current owner; we don't claim.
+    // This wisp did NOT claim it last tick; a peer did. Hysteresis keeps
+    // the current owner; no claim here.
   }
 
   // Commit.
@@ -216,15 +202,52 @@ bool WispRoster::claims(const uint8_t lampMac[6]) const {
 }
 
 size_t WispRoster::snapshotClaimsForBroadcast(uint8_t* outBuf,
-                                              size_t outCapacity) const {
+                                              size_t outCapacity) {
   if (!outBuf) return 0;
   if (xSemaphoreTake(asHandle(mutex_), portMAX_DELAY) != pdTRUE) return 0;
-  const size_t maxEntries = outCapacity / kEntryBytes;
-  const size_t n = ownCount_ < maxEntries ? ownCount_ : maxEntries;
+
+  const size_t byBuf = outCapacity / kEntryBytes;
+  const size_t frameCap = byBuf < WISP_ROSTER_MAX_PEER_ENTRIES
+                              ? byBuf
+                              : WISP_ROSTER_MAX_PEER_ENTRIES;
+
+  size_t contestedIdx[WISP_ROSTER_MAX_LAMPS];
+  size_t restIdx[WISP_ROSTER_MAX_LAMPS];
+  size_t contestedCount = 0;
+  size_t restCount = 0;
+  for (size_t i = 0; i < ownCount_; ++i) {
+    if (ownClaims_[i].contested) {
+      contestedIdx[contestedCount++] = i;
+    } else {
+      restIdx[restCount++] = i;
+    }
+  }
+
+  size_t picked[WISP_ROSTER_MAX_PEER_ENTRIES];
+  size_t n = 0;
+  if (contestedCount >= frameCap) {
+    // Contested alone overflow the frame: rotate among them so every
+    // boundary lamp re-broadcasts within a few ticks. Display coverage
+    // waits; arbitration degrades last.
+    for (size_t i = 0; i < frameCap; ++i) {
+      picked[n++] = contestedIdx[(claimContestedCursor_ + i) % contestedCount];
+    }
+    claimContestedCursor_ =
+        (claimContestedCursor_ + frameCap) % contestedCount;
+  } else {
+    for (size_t i = 0; i < contestedCount; ++i) picked[n++] = contestedIdx[i];
+    const size_t rotSlots = frameCap - contestedCount;
+    const size_t take = rotSlots < restCount ? rotSlots : restCount;
+    for (size_t i = 0; i < take; ++i) {
+      picked[n++] = restIdx[(claimRotCursor_ + i) % restCount];
+    }
+    if (restCount) claimRotCursor_ = (claimRotCursor_ + take) % restCount;
+  }
+
   for (size_t i = 0; i < n; ++i) {
     uint8_t* dst = outBuf + i * kEntryBytes;
-    std::memcpy(dst, ownClaims_[i].lampMac, 6);
-    dst[6] = static_cast<uint8_t>(ownClaims_[i].rssi);
+    std::memcpy(dst, ownClaims_[picked[i]].lampMac, 6);
+    dst[6] = static_cast<uint8_t>(ownClaims_[picked[i]].rssi);
   }
   xSemaphoreGive(asHandle(mutex_));
   return n;
@@ -241,7 +264,7 @@ void WispRoster::setLampPaint(const uint8_t mac[6], const uint8_t base[3],
   xSemaphoreGive(asHandle(mutex_));
 }
 
-size_t WispRoster::snapshotPaintForBroadcast(uint8_t* out, size_t cap) const {
+size_t WispRoster::snapshotPaintForBroadcast(uint8_t* out, size_t cap) {
   if (!out) return 0;
   if (xSemaphoreTake(asHandle(mutex_), portMAX_DELAY) != pdTRUE) return 0;
   constexpr size_t kPaintEntry = 12;  // mac(6) + base(3) + shade(3)
@@ -250,12 +273,15 @@ size_t WispRoster::snapshotPaintForBroadcast(uint8_t* out, size_t cap) const {
                                 ? lamp_protocol::WISP_PAINT_MAX_ENTRIES
                                 : maxByBuf;
   const size_t n = ownCount_ < maxEntries ? ownCount_ : maxEntries;
+  const size_t start = ownCount_ ? paintCursor_ % ownCount_ : 0;
   for (size_t i = 0; i < n; ++i) {
+    const OwnClaim& c = ownClaims_[(start + i) % ownCount_];
     uint8_t* dst = out + i * kPaintEntry;
-    std::memcpy(dst,     ownClaims_[i].lampMac, 6);
-    std::memcpy(dst + 6, ownClaims_[i].base,    3);
-    std::memcpy(dst + 9, ownClaims_[i].shade,   3);
+    std::memcpy(dst,     c.lampMac, 6);
+    std::memcpy(dst + 6, c.base,    3);
+    std::memcpy(dst + 9, c.shade,   3);
   }
+  if (ownCount_) paintCursor_ = (start + n) % ownCount_;
   xSemaphoreGive(asHandle(mutex_));
   return n;
 }

@@ -37,7 +37,7 @@ message NotificationSubscription {
   optional string             subscription_id = 1;
   optional NotificationType    type           = 2;
   optional SubscriptionAction  action         = 3;
-  // filter (field 4, Any) intentionally omitted: we send no filters.
+  // filter (field 4, Any) intentionally omitted: no filters are sent.
 }
 
 message NotificationSubscriptionRequest {
@@ -57,7 +57,7 @@ message PaletteState {
   optional string           fx_snapshot_id_preview = 2;
 }
 
-// Trimmed: only scalar fields we surface; nested params/transitions skipped.
+// Trimmed to the scalar fields the wisp surfaces; nested params/transitions skipped.
 message PatternState {
   optional int32  mode            = 1;
   optional int32  status          = 2;

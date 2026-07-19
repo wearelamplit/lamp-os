@@ -22,6 +22,13 @@ void WifiLink::begin(WispConfig* config) {
     if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
       Serial.printf("[wifi] got IP: %s\n",
                     WiFi.localIP().toString().c_str());
+      // One shared radio: STA follows the AP's channel, dragging ESP-NOW with it.
+      const int ch = WiFi.channel();
+      if (ch != LAMP_ESPNOW_CHANNEL) {
+        Serial.printf("[wifi] FAULT: STA on ch=%d but ESP-NOW mesh is ch=%d; "
+                      "mesh unreachable on this AP's channel\n",
+                      ch, LAMP_ESPNOW_CHANNEL);
+      }
     } else if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
       Serial.println("[wifi] disconnected");
 #ifdef LAMP_DEBUG

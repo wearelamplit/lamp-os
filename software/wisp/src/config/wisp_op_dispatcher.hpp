@@ -1,4 +1,4 @@
-// WispOpDispatcher — parse + route a MSG_CONTROL_OP payload (JSON).
+// WispOpDispatcher parses + routes a MSG_CONTROL_OP payload (JSON).
 // Wire: {"char":"wispOp","op":"setZone","zoneId":3} etc.
 // WifiLink/StageBeacon pointers are nullable for tests that skip the setWifi path.
 
@@ -16,7 +16,7 @@ class WifiLink;
 class StageBeacon;
 
 enum class DispatchResult {
-  Ignored,             // payload not for us (e.g. wispStatus echo)
+  Ignored,             // payload not addressed to this wisp (e.g. wispStatus echo)
   AppliedZoneChange,   // setZone / clearZone applied
   AppliedWifiChange,   // setWifi persisted + WifiLink/StageBeacon kicked
   AppliedSourceChange, // setSource applied (Off/Manual/Aurora)
@@ -26,6 +26,10 @@ enum class DispatchResult {
   AppliedDriftChange,  // setDrift applied (interval + fadePct)
   AppliedNameChange,     // setName applied
   AppliedPasswordChange, // setPassword applied
+  AppliedLedStrip,       // setLedStrip applied (format + pixel count)
+  AppliedRangeChange,    // setRange applied (claim-range step)
+  AppliedBrightnessChange, // setBrightness applied (space-dim factor)
+  PollStatus,            // pollStatus: re-emit wispStatus, no state change
   Malformed,             // JSON parse failed or required field missing
   Rejected,              // auth gate blocked (password set, plaintext not allowed)
 };

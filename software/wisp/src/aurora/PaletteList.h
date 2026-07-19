@@ -9,7 +9,7 @@
 //   - hexColors: decimal-encoded 24-bit RGB values (often sent as strings)
 //   - colors:    explicit float channels (0..1): r,g,b plus optional
 //                w (white), am (amber), u (uv), when present
-// GROUP palettes carry no colors of their own — they reference child ids.
+// GROUP palettes carry no colors of their own; they reference child ids.
 struct PaletteColor { float r = 0, g = 0, b = 0, w = 0, am = 0, u = 0; };
 
 struct Palette {

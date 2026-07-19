@@ -1,4 +1,4 @@
-// TupleSampler — pure function (palette, mac) → two RGBW colors.
+// TupleSampler is a pure function (palette, mac) → two RGBW colors.
 // FNV-1a + Stafford-13 finalizer; finalizer is required for good avalanche
 // when fleet MACs differ only in the low byte. Host-portable: no Arduino.
 

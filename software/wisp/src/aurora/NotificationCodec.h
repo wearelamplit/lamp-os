@@ -3,7 +3,7 @@
 #include <cstddef>
 #include "aurora_notifications.pb.h"
 
-// Pure (host-portable). Decompresses (if needed) then decodes a NotificationEnvelope
+// Host-portable. Decompresses (if needed) then decodes a NotificationEnvelope
 // and, for known types, the inner payload. Dispatch is on the envelope `type` enum.
 struct DecodedNotification {
     bool ok = false;
@@ -17,5 +17,7 @@ struct DecodedNotification {
 
 namespace NotificationCodec {
     // frame = raw bytes from the WebSocket (possibly compressed).
-    DecodedNotification decode(const uint8_t* frame, size_t len);
+    // Returns a reference to static scratch, valid until the next call.
+    // Not reentrant; call only from the loop task.
+    const DecodedNotification& decode(const uint8_t* frame, size_t len);
 }

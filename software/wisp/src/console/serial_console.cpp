@@ -54,6 +54,7 @@ String SerialConsole::formatVersion(uint32_t v) {
 }
 
 void SerialConsole::dumpInventory() {
+#ifdef LAMP_DEBUG
   const uint32_t nowMs = millis();
   auto roster = inventory_.snapshot();
   Serial.printf("[wisp] roster (%u lamp%s):\n",
@@ -62,13 +63,14 @@ void SerialConsole::dumpInventory() {
     const uint32_t ageMs = (nowMs >= e.lastSeenMs) ? nowMs - e.lastSeenMs : 0;
     Serial.printf("  %02X:%02X:%02X:%02X:%02X:%02X  %-12s  fw=%s  age=%lums\n",
                   e.mac[0], e.mac[1], e.mac[2], e.mac[3], e.mac[4], e.mac[5],
-                  e.name.c_str(), formatVersion(e.firmwareVersion).c_str(),
+                  e.name, formatVersion(e.firmwareVersion).c_str(),
                   (unsigned long)ageMs);
   }
   Serial.printf("[wisp] zone=%d source=%s observed=%u\n",
                 zones_.currentZone(),
                 zoneSourceName(zones_.source()),
                 (unsigned)zones_.observedCount());
+#endif
 }
 
 void SerialConsole::handleCommand(const String& cmd) {
@@ -108,7 +110,7 @@ void SerialConsole::handleCommand(const String& cmd) {
     Serial.printf("[wisp.cmd] wifi creds cleared; radio pinned to channel %d\n",
                   LAMP_ESPNOW_CHANNEL);
   } else if (cmd.startsWith("wifi:set ")) {
-    // Format: "wifi:set <ssid> <pass>" — split on first space after prefix.
+    // Format: "wifi:set <ssid> <pass>". Split on first space after prefix.
     int sp = cmd.indexOf(' ', 9);
     if (sp < 0 || sp == 9 || sp == (int)cmd.length() - 1) {
       Serial.println("[wisp.cmd] usage: wifi:set <ssid> <pass>");

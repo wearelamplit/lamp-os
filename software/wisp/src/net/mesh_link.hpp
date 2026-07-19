@@ -39,7 +39,7 @@ class MeshLink {
   bool broadcast(const uint8_t* data, size_t len);
 
   // Unicast to a specific peer. Adds the peer on first use (idempotent).
-  // `msgType` is informational only — the payload is already a fully formed
+  // `msgType` is informational only. The payload is already a fully formed
   // lamp_protocol frame.
   bool send(const uint8_t targetMac[6], const uint8_t* data, size_t len);
 

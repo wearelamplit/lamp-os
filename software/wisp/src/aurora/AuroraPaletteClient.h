@@ -13,8 +13,8 @@ class AuroraPaletteClient {
 public:
     // Called when a zone's active palette resolves to a concrete Palette.
     using PaletteHandler = std::function<void(int zone, const Palette&)>;
-    // Called on EVERY zone we see a palette-state announcement for,
-    // BEFORE setDesired runs. Lets the wisp's ZoneSelector populate its
+    // Called for EVERY zone with a palette-state announcement, BEFORE
+    // setDesired runs. Lets the wisp's ZoneSelector populate its
     // observed-zones set even for zones whose palette never resolves (GET
     // rate-limited / stragglers). Decoupled from onPalette_ on purpose:
     // onPalette_ only fires on a successful color resolve.
@@ -32,26 +32,41 @@ public:
     void begin();
     void loop();
 
+    // Source-mode gate. Active runs discover -> connect -> stream; inactive
+    // closes the WS, cancels in-flight resolution, and idles loop() to a no-op.
+    // Arming clears resolved ids so palettes changed while idle re-resolve.
+    void setActive(bool on);
+
     // StatusEmitter needs to mirror this into the wispStatus JSON
-    // payload's `auroraConnected` field. "Streaming" is the only state where
-    // we've actually established a WS session and are processing announcements;
-    // earlier states (discovering / connecting) are best reported as not yet
-    // connected. Read-cheap, no caching at the call site.
+    // payload's `auroraConnected` field. "Streaming" is the only state with
+    // an established WS session processing announcements; earlier states
+    // (discovering / connecting) are best reported as not yet connected.
+    // Read-cheap, no caching at the call site.
     bool isStreaming() const { return state_ == State::Streaming; }
 
 private:
     enum class State { Idle, Discovering, Connecting, Streaming };
 
-    // Latest active palette id per zone, plus the last id we resolved+emitted
-    // (so we only fetch when it changes; an id seen before connect still
-    // resolves once we're streaming).
+    // Latest active palette id per zone, plus the last id resolved+emitted
+    // (so a fetch only happens when it changes; an id seen before connect
+    // still resolves once streaming).
     struct ZoneState { int zone; String desiredId; String resolvedId; };
+
+    // A group palette resolves one child fetch per loop pass; this carries
+    // the accumulating result across passes.
+    struct GroupResolve {
+        bool active = false;
+        int zone = 0;
+        String desiredId;
+        Palette acc;
+        size_t nextChild = 0;
+    };
 
     void handleFrame(const uint8_t* data, size_t len);
     void sendSubscriptions();
     void setDesired(int zone, const char* paletteId);
     void serviceFetches();
-    bool resolvePalette(const char* id, Palette& out);  // fetch + group-expand
+    void serviceGroupResolve();
 
     State state_ = State::Idle;
     String instanceId_ = "esp32-aurora-client";
@@ -62,10 +77,14 @@ private:
     AuroraWsConnection ws_;
     PaletteFetcher fetcher_;
     std::vector<ZoneState> zones_;
+    GroupResolve group_;
     uint32_t lastFetchMs_ = 0;
+    uint32_t lastDiscoverMs_ = 0;
     PaletteHandler onPalette_;
     ZoneObservedHandler onZoneObserved_;
 
     static constexpr uint32_t kFetchRetryMs    = 1000;  // min spacing between GETs
     static constexpr uint32_t kRediscoverFails = 5;     // re-run mDNS after N WS fails
+    // queryService blocks 50-300 ms per call; pacing bounds the loop-stall duty.
+    static constexpr uint32_t kDiscoverRetryMs = 5000;
 };

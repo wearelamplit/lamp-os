@@ -11,10 +11,10 @@ namespace wisp {
 
 MeshLink* MeshLink::s_instance = nullptr;
 
-// ESP-NOW max payload per spec is 250 B; reject anything outside [0, 250]
+// ESP-NOW v2 max payload is 1470 B; reject anything outside [0, 1470]
 // so a driver error can't cast to a huge size_t and reach handler_ with a
 // bogus length.
-static constexpr int kMaxRecvFrameLen = 250;
+static constexpr int kMaxRecvFrameLen = ESP_NOW_MAX_DATA_LEN_V2;
 
 static void recvTrampoline(const esp_now_recv_info_t* info,
                            const uint8_t* data, int len) {
@@ -25,7 +25,7 @@ static void recvTrampoline(const esp_now_recv_info_t* info,
   // ESP-NOW recv-info carries the rx_ctrl pointer when the IDF supports
   // it (true on arduino-esp32 v3.x / IDF 5.x). rx_ctrl->rssi is a
   // signed 8-bit bit-field on the C6. Fall back to INT8_MIN ("not
-  // measured") if rx_ctrl is null — the WispRoster claim logic treats
+  // measured") if rx_ctrl is null. The WispRoster claim logic treats
   // that as "don't consider this lamp closer".
   int8_t rssi = INT8_MIN;
   if (info->rx_ctrl) {
@@ -44,9 +44,11 @@ static void sendTrampoline(const wifi_tx_info_t* info,
                            esp_now_send_status_t status) {
   if (!MeshLink::s_instance || !info) return;
   if (status == ESP_NOW_SEND_SUCCESS) return;
+#ifdef LAMP_DEBUG
   const uint8_t* mac = info->des_addr;
   Serial.printf("[mesh.send] FAIL to %02X:%02X:%02X:%02X:%02X:%02X\n",
                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+#endif
 }
 
 bool MeshLink::begin() {
@@ -61,7 +63,7 @@ bool MeshLink::begin() {
 
   // Xiao ESP32-C6 external antenna select. The arduino-esp32 v3.x C6
   // variant declares `static const uint8_t WIFI_ANT_CONFIG = 14;` as a
-  // C++ constant, NOT a #define — so #ifdef misses it. Check the board
+  // C++ constant, NOT a #define, so #ifdef misses it. Check the board
   // macro directly. ARDUINO_XIAO_ESP32C6 comes from the variant boards.txt.
   // Without this the wisp falls back to the internal antenna and signal
   // is too weak to reach lamps in another room.
@@ -80,8 +82,8 @@ bool MeshLink::begin() {
   esp_now_register_recv_cb(recvTrampoline);
   esp_now_register_send_cb(sendTrampoline);
 
-  // Broadcast peer. channel=0 means "use the radio's current channel" — we
-  // just pinned it above so this lands on LAMP_ESPNOW_CHANNEL.
+  // Broadcast peer. channel=0 means "use the radio's current channel", just
+  // pinned above so this lands on LAMP_ESPNOW_CHANNEL.
   esp_now_peer_info_t peer = {};
   std::memset(&peer, 0, sizeof(peer));
   std::memset(peer.peer_addr, 0xFF, 6);
@@ -146,7 +148,7 @@ bool MeshLink::send(const uint8_t targetMac[6], const uint8_t* data, size_t len)
   if (existing >= 0) {
     peers_[existing].lastUsedMs = nowMs;
   } else if (peerCount_ < MAX_TRACKED_PEERS) {
-    // Find the first empty slot. Linear scan is fine — table is small.
+    // Find the first empty slot. Linear scan is fine (table is small).
     for (size_t i = 0; i < MAX_TRACKED_PEERS; ++i) {
       if (!peers_[i].used) {
         peers_[i].used = true;
@@ -158,8 +160,8 @@ bool MeshLink::send(const uint8_t targetMac[6], const uint8_t* data, size_t len)
       }
     }
   } else {
-    // Full → evict LRU. Copy the old MAC out for esp_now_del_peer; we
-    // can't call IDF APIs under the critical section.
+    // Full → evict LRU. Copy the old MAC out for esp_now_del_peer; IDF
+    // APIs can't run under the critical section.
     const size_t lru = pickLruSlot();
     std::memcpy(macToDel, peers_[lru].mac, 6);
     needDel = true;
@@ -173,10 +175,11 @@ bool MeshLink::send(const uint8_t targetMac[6], const uint8_t* data, size_t len)
 
   if (needDel) {
     esp_now_del_peer(macToDel);
-    // Evictions are expected at steady-state in a busy crowd.
+#ifdef LAMP_DEBUG
     Serial.printf("[mesh] LRU evict %02X:%02X:%02X:%02X:%02X:%02X\n",
                   macToDel[0], macToDel[1], macToDel[2],
                   macToDel[3], macToDel[4], macToDel[5]);
+#endif
   }
   if (needAdd) {
     esp_now_peer_info_t peer = {};
@@ -187,10 +190,10 @@ bool MeshLink::send(const uint8_t targetMac[6], const uint8_t* data, size_t len)
     peer.encrypt = false;
     esp_err_t err = esp_now_add_peer(&peer);
     if (err != ESP_OK && err != ESP_ERR_ESPNOW_EXIST) {
-      // Tracking-table is committed (we already wrote into peers_) but
-      // the ESP-NOW side rejected the add. esp_now_send will return
-      // NOT_FOUND. Surface this to caller so the distributor doesn't
-      // mistake it for a queue-full transient.
+      // Tracking-table is committed (peers_ already written) but the
+      // ESP-NOW side rejected the add. esp_now_send will return NOT_FOUND.
+      // Surface this to caller so the distributor doesn't mistake it for a
+      // queue-full transient.
       Serial.printf("[mesh] add_peer err=0x%x for %02X:%02X:%02X:%02X:%02X:%02X\n",
                     (unsigned)err,
                     targetMac[0], targetMac[1], targetMac[2],

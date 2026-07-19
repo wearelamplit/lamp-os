@@ -43,7 +43,7 @@ size_t buildArtnetDmxFrame(const CurrentPalette& palette, uint8_t seq,
 
   for (uint8_t i = 0; i < kArtnetNumFixtures; ++i) {
     // Synthetic MAC: 02:57:49:53:50:<fixture>. The 0x02 sets the
-    // locally-administered bit so we can't collide with a real OUI.
+    // locally-administered bit so it can't collide with a real OUI.
     // 0x57 0x49 0x53 0x50 = "WISP".
     uint8_t mac[6] = {0x02, 0x57, 0x49, 0x53, 0x50, i};
     ColorTuple t = sampleTupleForMac(palette, mac);
