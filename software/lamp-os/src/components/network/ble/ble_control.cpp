@@ -90,7 +90,7 @@ static volatile bool         s_scanPausedForGattClient = false;
 static volatile bool         s_otaRadioPaused = false;
 // Armed on Core 0 by a nearby-page read; serviced on Core 1 by tick().
 static volatile bool         s_scanBurstRequested = false;
-static          bool         s_scanBurstActive    = false;
+static volatile bool         s_scanBurstActive    = false;
 static          uint32_t     s_lastScanBurstMs    = 0;
 
 // Scan-burst coex knobs, bench-tuned. One short high-duty burst while an app
