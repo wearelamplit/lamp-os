@@ -62,6 +62,25 @@ static Transient makeTransient(uint32_t createdMs, bool complete) {
   return t;
 }
 
+// Mirror of triggerInvocation's admit gate: a transient whose trigger()
+// never started (wisp hold on a gate=true type) is not retained, so it
+// can't pollute the same-sender coalesce check.
+static bool admitTransient(std::vector<Transient>& transients,
+                           bool triggerStarted, uint32_t nowMs) {
+  if (!triggerStarted) return false;
+  transients.push_back(makeTransient(nowMs, /*complete=*/false));
+  return true;
+}
+
+// Mirror of triggerInvocation's coalesce check: an in-flight (incomplete)
+// transient of the same type blocks a new arrival from the same sender.
+static bool coalesced(const std::vector<Transient>& transients) {
+  for (const auto& t : transients) {
+    if (t.expression && !t.expression->isAnimationComplete()) return true;
+  }
+  return false;
+}
+
 }  // namespace test
 
 void setUp(void) {}
@@ -101,6 +120,21 @@ void test_live_transient_survives_before_cap() {
   TEST_ASSERT_EQUAL_UINT32(1, transients.size());
 }
 
+void test_never_started_transient_not_retained() {
+  std::vector<test::Transient> transients;
+
+  // Trigger gated off (wisp hold): nothing retained, nothing to coalesce on.
+  TEST_ASSERT_FALSE(test::admitTransient(transients, /*triggerStarted=*/false, 1000));
+  TEST_ASSERT_EQUAL_UINT32(0, transients.size());
+  TEST_ASSERT_FALSE(test::coalesced(transients));
+
+  // A follow-up cascade from the same sender is admitted, not blocked for
+  // the 180 s GC lifetime by a dead STOPPED transient.
+  TEST_ASSERT_TRUE(test::admitTransient(transients, /*triggerStarted=*/true, 2000));
+  TEST_ASSERT_EQUAL_UINT32(1, transients.size());
+  TEST_ASSERT_TRUE(test::coalesced(transients));
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
@@ -109,6 +143,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_never_completing_transient_evicted_after_cap);
   RUN_TEST(test_completed_transient_evicted_immediately);
   RUN_TEST(test_live_transient_survives_before_cap);
+  RUN_TEST(test_never_started_transient_not_retained);
 
   return UNITY_END();
 }

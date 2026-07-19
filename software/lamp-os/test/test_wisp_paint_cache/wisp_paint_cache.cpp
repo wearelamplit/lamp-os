@@ -1,170 +1,183 @@
-// Native-host unit tests for NearbyLamps::cacheWispPaint + findWispPaint.
-//
-// Mirrors the production logic inline (no Arduino deps) to verify:
-//   - 2-entry round-trip: each lamp MAC retrieves its exact base/shade RGB.
-//   - Unknown MAC returns false.
-//   - Entries age out when nowMs - lastPaintMs > kWispClaimStaleMs.
+// Native-host unit tests for WispFleetCache paint accumulation:
+//   - round-trip: each lamp MAC retrieves its exact base/shade RGB.
+//   - unknown MAC returns false.
+//   - entries accumulate across frames (the wisp rotates a partial window).
+//   - per-entry staleness eviction at kStaleMs.
+//   - upsert refreshes in place; a full cache evicts the oldest entry.
 
 #include <unity.h>
 
 #include <cstdint>
 #include <cstring>
-#include <vector>
 
-namespace {
+// Native-test seam: include the .cpp to get the definitions.
+#include "components/network/mesh/wisp_fleet_cache.cpp"
 
-// Must match wisp_cache.cpp's constant.
-constexpr uint32_t kWispClaimStaleMs = 60000;
-constexpr size_t WISP_PAINT_ENTRY_SIZE = 12;
-constexpr size_t WISP_PAINT_MAX_ENTRIES = 18;
-
-struct PaintEntry {
-  uint8_t mac[6] = {0};
-  uint8_t base[3] = {0};
-  uint8_t shade[3] = {0};
-  bool valid = false;
-};
-
-// Minimal inline mirror of the production cacheWispPaint / findWispPaint logic.
-class PaintCache {
- public:
-  void cacheWispPaint(const uint8_t* entries, uint8_t count, uint32_t nowMs) {
-    const uint8_t safeCount =
-        count > WISP_PAINT_MAX_ENTRIES
-            ? static_cast<uint8_t>(WISP_PAINT_MAX_ENTRIES)
-            : count;
-    count_ = safeCount;
-    lastPaintMs_ = nowMs;
-    for (uint8_t i = 0; i < safeCount; ++i) {
-      const uint8_t* e = entries + static_cast<size_t>(i) * WISP_PAINT_ENTRY_SIZE;
-      std::memcpy(entries_[i].mac, e, 6);
-      std::memcpy(entries_[i].base, e + 6, 3);
-      std::memcpy(entries_[i].shade, e + 9, 3);
-      entries_[i].valid = true;
-    }
-    for (uint8_t i = safeCount; i < WISP_PAINT_MAX_ENTRIES; ++i) {
-      entries_[i].valid = false;
-    }
-  }
-
-  bool findWispPaint(const uint8_t lampMac[6], uint32_t nowMs,
-                     uint8_t baseOut[3], uint8_t shadeOut[3]) {
-    if (lastPaintMs_ == 0 || (nowMs - lastPaintMs_) > kWispClaimStaleMs) {
-      return false;
-    }
-    for (uint8_t i = 0; i < count_; ++i) {
-      if (entries_[i].valid &&
-          std::memcmp(entries_[i].mac, lampMac, 6) == 0) {
-        std::memcpy(baseOut, entries_[i].base, 3);
-        std::memcpy(shadeOut, entries_[i].shade, 3);
-        return true;
-      }
-    }
-    return false;
-  }
-
- private:
-  PaintEntry entries_[WISP_PAINT_MAX_ENTRIES] = {};
-  uint8_t count_ = 0;
-  uint32_t lastPaintMs_ = 0;
-};
-
-}  // namespace
+using lamp::WispFleetCache;
 
 void setUp() {}
 void tearDown() {}
 
-// 2-entry round-trip: both MACs retrieve their exact base/shade RGB.
+namespace {
+
+void makePaintEntry(uint8_t* out, const uint8_t mac[6],
+                    uint8_t baseSeed, uint8_t shadeSeed) {
+  std::memcpy(out, mac, 6);
+  out[6] = baseSeed;
+  out[7] = static_cast<uint8_t>(baseSeed + 1);
+  out[8] = static_cast<uint8_t>(baseSeed + 2);
+  out[9] = shadeSeed;
+  out[10] = static_cast<uint8_t>(shadeSeed + 1);
+  out[11] = static_cast<uint8_t>(shadeSeed + 2);
+}
+
+void macForIndex(uint8_t out[6], uint8_t i) {
+  const uint8_t mac[6] = {0x02, 0x00, 0x00, 0x00, 0x00, i};
+  std::memcpy(out, mac, 6);
+}
+
+}  // namespace
+
 void test_two_entry_round_trip() {
-  PaintCache cache;
-
-  const uint8_t mac0[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
-  const uint8_t mac1[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
-
-  // Build a 2-entry wire payload.
-  uint8_t payload[2 * WISP_PAINT_ENTRY_SIZE] = {};
-  std::memcpy(payload, mac0, 6);
-  payload[6] = 0x10; payload[7] = 0x20; payload[8] = 0x30;   // base0
-  payload[9] = 0x40; payload[10] = 0x50; payload[11] = 0x60; // shade0
-  std::memcpy(payload + WISP_PAINT_ENTRY_SIZE, mac1, 6);
-  payload[WISP_PAINT_ENTRY_SIZE + 6] = 0xA1;
-  payload[WISP_PAINT_ENTRY_SIZE + 7] = 0xB2;
-  payload[WISP_PAINT_ENTRY_SIZE + 8] = 0xC3;
-  payload[WISP_PAINT_ENTRY_SIZE + 9] = 0xD4;
-  payload[WISP_PAINT_ENTRY_SIZE + 10] = 0xE5;
-  payload[WISP_PAINT_ENTRY_SIZE + 11] = 0xF6;
-
-  cache.cacheWispPaint(payload, 2, 1000);
+  WispFleetCache cache;
+  uint8_t mac0[6], mac1[6];
+  macForIndex(mac0, 0);
+  macForIndex(mac1, 1);
+  uint8_t frame[2 * 12];
+  makePaintEntry(frame, mac0, 0x10, 0x40);
+  makePaintEntry(frame + 12, mac1, 0xA0, 0xD0);
+  cache.upsertPaints(frame, 2, 1000);
 
   uint8_t base[3], shade[3];
-
-  TEST_ASSERT_TRUE(cache.findWispPaint(mac0, 1000, base, shade));
+  TEST_ASSERT_TRUE(cache.findPaint(mac0, 1000, base, shade));
   TEST_ASSERT_EQUAL_UINT8(0x10, base[0]);
-  TEST_ASSERT_EQUAL_UINT8(0x20, base[1]);
-  TEST_ASSERT_EQUAL_UINT8(0x30, base[2]);
+  TEST_ASSERT_EQUAL_UINT8(0x11, base[1]);
+  TEST_ASSERT_EQUAL_UINT8(0x12, base[2]);
   TEST_ASSERT_EQUAL_UINT8(0x40, shade[0]);
-  TEST_ASSERT_EQUAL_UINT8(0x50, shade[1]);
-  TEST_ASSERT_EQUAL_UINT8(0x60, shade[2]);
-
-  TEST_ASSERT_TRUE(cache.findWispPaint(mac1, 1000, base, shade));
-  TEST_ASSERT_EQUAL_UINT8(0xA1, base[0]);
-  TEST_ASSERT_EQUAL_UINT8(0xB2, base[1]);
-  TEST_ASSERT_EQUAL_UINT8(0xC3, base[2]);
-  TEST_ASSERT_EQUAL_UINT8(0xD4, shade[0]);
-  TEST_ASSERT_EQUAL_UINT8(0xE5, shade[1]);
-  TEST_ASSERT_EQUAL_UINT8(0xF6, shade[2]);
+  TEST_ASSERT_TRUE(cache.findPaint(mac1, 1000, base, shade));
+  TEST_ASSERT_EQUAL_UINT8(0xA0, base[0]);
+  TEST_ASSERT_EQUAL_UINT8(0xD0, shade[0]);
 }
 
-// Unknown MAC returns false.
 void test_unknown_mac_returns_false() {
-  PaintCache cache;
-  const uint8_t mac[6] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
-  uint8_t entry[WISP_PAINT_ENTRY_SIZE] = {};
-  std::memcpy(entry, mac, 6);
-  cache.cacheWispPaint(entry, 1, 1000);
+  WispFleetCache cache;
+  uint8_t mac[6], other[6];
+  macForIndex(mac, 0);
+  macForIndex(other, 9);
+  uint8_t frame[12];
+  makePaintEntry(frame, mac, 0x10, 0x40);
+  cache.upsertPaints(frame, 1, 1000);
 
-  const uint8_t other[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
   uint8_t base[3], shade[3];
-  TEST_ASSERT_FALSE(cache.findWispPaint(other, 1000, base, shade));
+  TEST_ASSERT_FALSE(cache.findPaint(other, 1000, base, shade));
 }
 
-// Entry ages out when nowMs - lastPaintMs > kWispClaimStaleMs.
-void test_stale_entry_not_returned() {
-  PaintCache cache;
-  const uint8_t mac[6] = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01};
-  uint8_t entry[WISP_PAINT_ENTRY_SIZE] = {};
-  std::memcpy(entry, mac, 6);
-  entry[6] = 0xFF;  // base R
+// Frames accumulate: a later frame must not evict earlier fresh entries.
+void test_entries_accumulate_across_frames() {
+  WispFleetCache cache;
+  uint8_t mac0[6], mac1[6];
+  macForIndex(mac0, 0);
+  macForIndex(mac1, 1);
+  uint8_t frame[12];
+  makePaintEntry(frame, mac0, 0x10, 0x40);
+  cache.upsertPaints(frame, 1, 1000);
+  makePaintEntry(frame, mac1, 0xA0, 0xD0);
+  cache.upsertPaints(frame, 1, 3000);
 
-  cache.cacheWispPaint(entry, 1, 1000);
-
-  // nowMs past the stale window.
-  const uint32_t staleNow = 1000 + kWispClaimStaleMs + 1;
   uint8_t base[3], shade[3];
-  TEST_ASSERT_FALSE(cache.findWispPaint(mac, staleNow, base, shade));
+  TEST_ASSERT_TRUE(cache.findPaint(mac0, 4000, base, shade));
+  TEST_ASSERT_TRUE(cache.findPaint(mac1, 4000, base, shade));
 }
 
-// Entry is returned when exactly at the stale boundary (inclusive edge).
-void test_entry_at_stale_boundary_returned() {
-  PaintCache cache;
-  const uint8_t mac[6] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
-  uint8_t entry[WISP_PAINT_ENTRY_SIZE] = {};
-  std::memcpy(entry, mac, 6);
-  entry[6] = 0xAB;
+// Staleness is per entry, not per frame.
+void test_per_entry_staleness() {
+  WispFleetCache cache;
+  uint8_t mac0[6], mac1[6];
+  macForIndex(mac0, 0);
+  macForIndex(mac1, 1);
+  uint8_t frame[12];
+  makePaintEntry(frame, mac0, 0x10, 0x40);
+  cache.upsertPaints(frame, 1, 0);
+  makePaintEntry(frame, mac1, 0xA0, 0xD0);
+  cache.upsertPaints(frame, 1, 50000);
 
-  cache.cacheWispPaint(entry, 1, 1000);
-
-  const uint32_t boundaryNow = 1000 + kWispClaimStaleMs;
+  const uint32_t nowMs = WispFleetCache::kStaleMs + 10000;
   uint8_t base[3], shade[3];
-  TEST_ASSERT_TRUE(cache.findWispPaint(mac, boundaryNow, base, shade));
-  TEST_ASSERT_EQUAL_UINT8(0xAB, base[0]);
+  TEST_ASSERT_FALSE(cache.findPaint(mac0, nowMs, base, shade));
+  TEST_ASSERT_TRUE(cache.findPaint(mac1, nowMs, base, shade));
+}
+
+// Fresh exactly at the boundary (inclusive edge), stale one past it.
+void test_boundary_age_still_fresh() {
+  WispFleetCache cache;
+  uint8_t mac[6];
+  macForIndex(mac, 0);
+  uint8_t frame[12];
+  makePaintEntry(frame, mac, 0x10, 0x40);
+  cache.upsertPaints(frame, 1, 1000);
+
+  uint8_t base[3], shade[3];
+  TEST_ASSERT_TRUE(
+      cache.findPaint(mac, 1000 + WispFleetCache::kStaleMs, base, shade));
+  TEST_ASSERT_FALSE(
+      cache.findPaint(mac, 1001 + WispFleetCache::kStaleMs, base, shade));
+}
+
+// Re-hearing a mac refreshes its entry in place with the new colors.
+void test_upsert_refreshes_in_place() {
+  WispFleetCache cache;
+  uint8_t mac[6];
+  macForIndex(mac, 0);
+  uint8_t frame[12];
+  makePaintEntry(frame, mac, 0x10, 0x40);
+  cache.upsertPaints(frame, 1, 1000);
+  makePaintEntry(frame, mac, 0x77, 0x99);
+  cache.upsertPaints(frame, 1, 2000);
+
+  uint8_t base[3], shade[3];
+  TEST_ASSERT_TRUE(cache.findPaint(mac, 2000, base, shade));
+  TEST_ASSERT_EQUAL_UINT8(0x77, base[0]);
+  TEST_ASSERT_EQUAL_UINT8(0x99, shade[0]);
+
+  // Single blob entry: no duplicate slot was consumed.
+  uint8_t blob[1 + 2 * 12];
+  TEST_ASSERT_EQUAL_size_t(1 + 12,
+                           cache.buildClaimsBlob(blob, sizeof(blob), 2000));
+}
+
+// At capacity, a new mac evicts the oldest entry.
+void test_full_cache_evicts_oldest() {
+  static WispFleetCache cache;
+  uint8_t frame[12];
+  for (size_t i = 0; i < WispFleetCache::kCapacity; ++i) {
+    const uint8_t mac[6] = {0x02, 0x00, 0x00, 0x01,
+                            static_cast<uint8_t>(i >> 8),
+                            static_cast<uint8_t>(i)};
+    makePaintEntry(frame, mac, 0x10, 0x40);
+    cache.upsertPaints(frame, 1, static_cast<uint32_t>(1000 + i));
+  }
+  const uint8_t newcomer[6] = {0x02, 0x00, 0x00, 0x02, 0x00, 0x00};
+  makePaintEntry(frame, newcomer, 0x55, 0x66);
+  const uint32_t nowMs =
+      static_cast<uint32_t>(1000 + WispFleetCache::kCapacity);
+  cache.upsertPaints(frame, 1, nowMs);
+
+  uint8_t base[3], shade[3];
+  TEST_ASSERT_TRUE(cache.findPaint(newcomer, nowMs, base, shade));
+  const uint8_t oldestMac[6] = {0x02, 0x00, 0x00, 0x01, 0x00, 0x00};
+  TEST_ASSERT_FALSE(cache.findPaint(oldestMac, nowMs, base, shade));
+  const uint8_t secondOldest[6] = {0x02, 0x00, 0x00, 0x01, 0x00, 0x01};
+  TEST_ASSERT_TRUE(cache.findPaint(secondOldest, nowMs, base, shade));
 }
 
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_two_entry_round_trip);
   RUN_TEST(test_unknown_mac_returns_false);
-  RUN_TEST(test_stale_entry_not_returned);
-  RUN_TEST(test_entry_at_stale_boundary_returned);
+  RUN_TEST(test_entries_accumulate_across_frames);
+  RUN_TEST(test_per_entry_staleness);
+  RUN_TEST(test_boundary_age_still_fresh);
+  RUN_TEST(test_upsert_refreshes_in_place);
+  RUN_TEST(test_full_cache_evicts_oldest);
   return UNITY_END();
 }

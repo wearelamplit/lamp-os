@@ -21,7 +21,7 @@ static HwConfig snafuHwConfig() {
       {.role=Surface::Shade, .pin=26, .byteOrder=ByteOrder::GRBW, .pixelCount=9,  .name="Big Dots"},
       {.role=Surface::Base,  .pin=12, .byteOrder=ByteOrder::GRBW, .pixelCount=24, .name="Stem", .broadcast=1},
     },
-    .maxBrightness = 180,
+    .maxBrightness = 230,
   };
 }
 

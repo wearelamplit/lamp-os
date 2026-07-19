@@ -29,16 +29,9 @@ namespace lamp_protocol {
 // native host has no FreeRTOS. The production class wraps the
 // record()-body in portENTER_CRITICAL/portEXIT_CRITICAL; the data flow
 // (compare-then-evict-oldest) is what this test pins.
+template <size_t CAPACITY = 64>
 class DedupRing {
  public:
-  // Mirror of the production CAPACITY. v0x03 mesh-deploy lock-in bumped
-  // this from 32 → 64 because at 20-50 lamps each gossiping every unique
-  // (sourceMac, seq), the 32-slot ring wrapped fast enough that a
-  // late-arriving relayed copy could re-fire a receiver. The static_assert
-  // pinning the production-side value lives in test_protocol_v2.
-  // why: matches production lock-in per validated plan §"Layer 2".
-  static constexpr size_t CAPACITY = 64;
-
   bool record(const uint8_t mac[6], uint8_t msgType, uint16_t seq) {
     for (size_t i = 0; i < CAPACITY; i++) {
       const Entry& e = entries_[i];
@@ -79,7 +72,7 @@ void test_first_record_returns_true_and_records() {
   // A fresh ring has seen nothing — the first record(mac, type, seq)
   // returns true so the receiver knows to handle (and rebroadcast) the
   // frame. A second identical record returns false.
-  lamp_protocol::DedupRing ring;
+  lamp_protocol::DedupRing<> ring;
 
   TEST_ASSERT_TRUE(ring.record(kMacA, 0x02, 100));
   TEST_ASSERT_FALSE(ring.record(kMacA, 0x02, 100));
@@ -88,7 +81,7 @@ void test_first_record_returns_true_and_records() {
 void test_different_seq_is_independent() {
   // The dedup key is (mac, msgType, seq). Same mac + type but different
   // seq must be treated as a new frame.
-  lamp_protocol::DedupRing ring;
+  lamp_protocol::DedupRing<> ring;
 
   TEST_ASSERT_TRUE(ring.record(kMacA, 0x02, 100));
   TEST_ASSERT_TRUE(ring.record(kMacA, 0x02, 101));
@@ -99,7 +92,7 @@ void test_different_msgtype_is_independent() {
   // A HELLO and a COLORS frame with the same seq from the same mac
   // must NOT collide. (In practice seqs are per-type, but the keying
   // contract still has to honor msgType.)
-  lamp_protocol::DedupRing ring;
+  lamp_protocol::DedupRing<> ring;
 
   TEST_ASSERT_TRUE(ring.record(kMacA, 0x01, 50));
   TEST_ASSERT_TRUE(ring.record(kMacA, 0x02, 50));
@@ -108,7 +101,7 @@ void test_different_msgtype_is_independent() {
 void test_different_mac_is_independent() {
   // Two different sources broadcasting the same (msgType, seq) — both
   // are "new" to us.
-  lamp_protocol::DedupRing ring;
+  lamp_protocol::DedupRing<> ring;
 
   TEST_ASSERT_TRUE(ring.record(kMacA, 0x02, 100));
   TEST_ASSERT_TRUE(ring.record(kMacB, 0x02, 100));
@@ -118,10 +111,10 @@ void test_full_ring_evicts_oldest_first() {
   // After CAPACITY records, the oldest slot is overwritten and that
   // entry's frame appears "new" again. Frames recorded MORE recently
   // than the oldest must still dedup.
-  lamp_protocol::DedupRing ring;
+  lamp_protocol::DedupRing<> ring;
 
   // Fill the ring with CAPACITY distinct (seq) entries from kMacA.
-  for (uint16_t s = 0; s < lamp_protocol::DedupRing::CAPACITY; ++s) {
+  for (uint16_t s = 0; s < 64; ++s) {
     TEST_ASSERT_TRUE(ring.record(kMacA, 0x02, s));
   }
 
@@ -129,12 +122,12 @@ void test_full_ring_evicts_oldest_first() {
   // — re-recording it returns false. Same for seq=CAPACITY-1 (last).
   TEST_ASSERT_FALSE(ring.record(kMacA, 0x02, 0));
   TEST_ASSERT_FALSE(ring.record(kMacA, 0x02,
-                                lamp_protocol::DedupRing::CAPACITY - 1));
+                                64 - 1));
 
   // Insert one fresh entry — this evicts seq=0 (the oldest by
   // insertion order, occupying slot[head=0] after the fill loop wraps).
   TEST_ASSERT_TRUE(ring.record(kMacA, 0x02,
-                               lamp_protocol::DedupRing::CAPACITY));
+                               64));
 
   // seq=0 is now evicted; recording it again returns true. This re-add
   // takes slot[1] (the next-oldest), so seq=1 is ALSO evicted as a
@@ -157,7 +150,7 @@ void test_full_ring_at_64_distinct_entries_all_record_then_evict_oldest() {
   // gossip copy (the one we relay through Commit E) still hits the dedup
   // before the slot rotates.
   // why: pins behavior at the new capacity boundary per validated plan §"Layer 2".
-  lamp_protocol::DedupRing ring;
+  lamp_protocol::DedupRing<> ring;
 
   // All 64 inserts must succeed.
   for (uint16_t s = 0; s < 64; ++s) {
@@ -179,7 +172,7 @@ void test_empty_ring_does_not_match_zero_mac() {
   // Entry default-constructs with used=false. A record() lookup must
   // NOT match a default (zeroed) slot — otherwise a frame from mac
   // 00:00:00:00:00:00 with type=0 seq=0 would always look "seen".
-  lamp_protocol::DedupRing ring;
+  lamp_protocol::DedupRing<> ring;
   const uint8_t zeroMac[6] = {0, 0, 0, 0, 0, 0};
 
   TEST_ASSERT_TRUE(ring.record(zeroMac, 0x00, 0));

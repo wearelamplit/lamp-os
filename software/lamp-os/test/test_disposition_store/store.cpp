@@ -22,6 +22,12 @@ void test_unknown_peer_returns_default() {
   TEST_ASSERT_EQUAL_UINT8(DispositionStore::kDefault, ds.get("AA:BB:CC:DD:EE:FF"));
 }
 
+void test_keyed_by_mac() {
+  DispositionStore ds(100);
+  ds.set("C4:DD:57:EB:64:60", 4, 0);
+  TEST_ASSERT_EQUAL_UINT8(4, ds.get("C4:DD:57:EB:64:60"));
+}
+
 void test_set_get_and_clamp() {
   DispositionStore ds(100);
   ds.set("AA:BB:CC:DD:EE:01", 4, 0);
@@ -88,6 +94,7 @@ void test_flush_now_writes_immediately() {
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_unknown_peer_returns_default);
+  RUN_TEST(test_keyed_by_mac);
   RUN_TEST(test_set_get_and_clamp);
   RUN_TEST(test_eviction_at_capacity_drops_lowest_key);
   RUN_TEST(test_set_from_json_filters_invalid_keys);

@@ -69,6 +69,20 @@ void test_layout_matches_pinned_hash() {
       "update expectedHash() (see CLAUDE.md frozen-layout lock-in)");
 }
 
+void test_props_map_to_nimble_bits() {
+  // Expected values are NIMBLE_PROPERTY::READ/WRITE/WRITE_NR/NOTIFY from
+  // NimBLE-Arduino 2.3.6 (BLE_GATT_CHR_F_* in host/ble_gatt.h). NimBLE
+  // headers don't compile natively, so the bits are pinned here; the
+  // static_assert in ble_control.cpp checks the same mapping against the
+  // real headers at firmware build time.
+  TEST_ASSERT_EQUAL_HEX32(0x0002, toNimbleProps(GP_READ));
+  TEST_ASSERT_EQUAL_HEX32(0x0008, toNimbleProps(GP_WRITE));
+  TEST_ASSERT_EQUAL_HEX32(0x0004, toNimbleProps(GP_WRITE_NR));
+  TEST_ASSERT_EQUAL_HEX32(0x0010, toNimbleProps(GP_NOTIFY));
+  TEST_ASSERT_EQUAL_HEX32(0x000C, toNimbleProps(GP_WRITE | GP_WRITE_NR));
+  TEST_ASSERT_EQUAL_HEX32(0x0012, toNimbleProps(GP_READ | GP_NOTIFY));
+}
+
 void test_schema_version_char_is_tail() {
   // The most-recently-appended characteristic must be last; the app relies
   // on append-only growth to preserve handle positions.
@@ -82,6 +96,7 @@ int main(int argc, char** argv) {
   UNITY_BEGIN();
   RUN_TEST(test_schema_version_has_a_pinned_hash);
   RUN_TEST(test_layout_matches_pinned_hash);
+  RUN_TEST(test_props_map_to_nimble_bits);
   RUN_TEST(test_schema_version_char_is_tail);
   return UNITY_END();
 }

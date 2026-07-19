@@ -4,6 +4,10 @@
 //   1. build → parse round-trip: targetMac + sourceMac + payload survive.
 //   2. addressedToUs filter: exact MAC match, broadcast FF:FF:..., non-target drops.
 //   3. parseCommand rejects frames that are too short, too long, or wrong msgType.
+//
+// buildCommand returns the body without the command_auth tag; parseCommand
+// requires the 8-byte trailer, so frame the body with a keyless (zero) tag
+// before parsing. Tag auth itself is covered by test_command_auth.
 
 #include <unity.h>
 
@@ -16,6 +20,12 @@ void setUp(void) {}
 void tearDown(void) {}
 
 namespace lp = lamp_protocol;
+
+// Append a keyless (zero) command_auth tag so parseCommand accepts the frame.
+static size_t frame(uint8_t* buf, size_t body) {
+  std::memset(buf + body, 0, lp::COMMAND_TAG_SIZE);
+  return body + lp::COMMAND_TAG_SIZE;
+}
 
 static const uint8_t kSrc[6]    = {0x10, 0x11, 0x12, 0x13, 0x14, 0x15};
 static const uint8_t kTarget[6] = {0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5};
@@ -31,15 +41,16 @@ static bool addressedToUs(const uint8_t targetMac[6], const uint8_t myMac[6]) {
 // --- Round-trip ---
 
 void test_roundtrip_payload_survives() {
-  uint8_t buf[lp::COMMAND_FIXED_SIZE + lp::COMMAND_MAX_PAYLOAD];
+  uint8_t buf[lp::COMMAND_FIXED_SIZE + lp::COMMAND_MAX_PAYLOAD + lp::COMMAND_TAG_SIZE];
   const char json[] = R"({"type":"pulse","target":"base"})";
   const size_t jsonLen = sizeof(json) - 1;
 
-  const size_t n = lp::buildCommand(buf, sizeof(buf), 0x1234,
+  const size_t body = lp::buildCommand(buf, sizeof(buf), 0x1234,
                                     kSrc, kTarget,
                                     reinterpret_cast<const uint8_t*>(json),
                                     jsonLen);
-  TEST_ASSERT_EQUAL_UINT32(lp::COMMAND_FIXED_SIZE + jsonLen, n);
+  TEST_ASSERT_EQUAL_UINT32(lp::COMMAND_FIXED_SIZE + jsonLen, body);
+  const size_t n = frame(buf, body);
   TEST_ASSERT_EQUAL_UINT8(lp::MSG_COMMAND, lp::inspect(buf, n));
 
   lp::ParsedCommand out;
@@ -53,13 +64,14 @@ void test_roundtrip_payload_survives() {
 }
 
 void test_roundtrip_max_payload() {
-  uint8_t buf[lp::COMMAND_FIXED_SIZE + lp::COMMAND_MAX_PAYLOAD];
+  uint8_t buf[lp::COMMAND_FIXED_SIZE + lp::COMMAND_MAX_PAYLOAD + lp::COMMAND_TAG_SIZE];
   uint8_t payload[lp::COMMAND_MAX_PAYLOAD];
   for (size_t i = 0; i < sizeof(payload); ++i) payload[i] = static_cast<uint8_t>(i);
 
-  const size_t n = lp::buildCommand(buf, sizeof(buf), 1, kSrc, kTarget,
+  const size_t body = lp::buildCommand(buf, sizeof(buf), 1, kSrc, kTarget,
                                     payload, lp::COMMAND_MAX_PAYLOAD);
-  TEST_ASSERT_EQUAL_UINT32(lp::COMMAND_FIXED_SIZE + lp::COMMAND_MAX_PAYLOAD, n);
+  TEST_ASSERT_EQUAL_UINT32(lp::COMMAND_FIXED_SIZE + lp::COMMAND_MAX_PAYLOAD, body);
+  const size_t n = frame(buf, body);
 
   lp::ParsedCommand out;
   TEST_ASSERT_TRUE(lp::parseCommand(buf, n, out));
@@ -109,30 +121,29 @@ void test_build_rejects_oversized_payload() {
 }
 
 void test_parse_rejects_wrong_msg_type() {
-  // Build a valid COMMAND frame then corrupt the msgType byte.
-  uint8_t buf[lp::COMMAND_FIXED_SIZE + 4];
-  const uint8_t pay[4] = {'{', '}', 0, 0};
-  lp::buildCommand(buf, sizeof(buf), 1, kSrc, kTarget, pay, 2);
+  uint8_t buf[lp::COMMAND_FIXED_SIZE + 2 + lp::COMMAND_TAG_SIZE];
+  const uint8_t pay[2] = {'{', '}'};
+  const size_t n = frame(buf, lp::buildCommand(buf, sizeof(buf), 1, kSrc, kTarget, pay, 2));
   buf[3] = lp::MSG_EVENT;  // wrong type
   lp::ParsedCommand out;
-  TEST_ASSERT_FALSE(lp::parseCommand(buf, lp::COMMAND_FIXED_SIZE + 2, out));
+  TEST_ASSERT_FALSE(lp::parseCommand(buf, n, out));
 }
 
 void test_parse_rejects_oversized_frame() {
-  // Claim a frame larger than COMMAND_FIXED_SIZE + COMMAND_MAX_PAYLOAD.
-  uint8_t buf[lp::COMMAND_FIXED_SIZE + lp::COMMAND_MAX_PAYLOAD + 1];
+  uint8_t buf[lp::COMMAND_FIXED_SIZE + lp::COMMAND_MAX_PAYLOAD + lp::COMMAND_TAG_SIZE + 1];
   const uint8_t pay[1] = {'{' };
   lp::buildCommand(buf, sizeof(buf), 1, kSrc, kTarget, pay, 1);
   lp::ParsedCommand out;
   TEST_ASSERT_FALSE(lp::parseCommand(buf,
-      lp::COMMAND_FIXED_SIZE + lp::COMMAND_MAX_PAYLOAD + 1, out));
+      lp::COMMAND_FIXED_SIZE + lp::COMMAND_MAX_PAYLOAD + lp::COMMAND_TAG_SIZE + 1, out));
 }
 
 // --- Size lock-in ---
 
 void test_command_size_constants() {
-  TEST_ASSERT_EQUAL_UINT32(18,  lp::COMMAND_FIXED_SIZE);
-  TEST_ASSERT_EQUAL_UINT32(232, lp::COMMAND_MAX_PAYLOAD);
+  TEST_ASSERT_EQUAL_UINT32(18,   lp::COMMAND_FIXED_SIZE);
+  TEST_ASSERT_EQUAL_UINT32(1444, lp::COMMAND_MAX_PAYLOAD);
+  TEST_ASSERT_EQUAL_UINT32(8,    lp::COMMAND_TAG_SIZE);
 }
 
 int main() {

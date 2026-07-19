@@ -30,6 +30,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <new>
 #include <string>
 
 namespace lamp {
@@ -46,12 +47,17 @@ struct SectionCache {
   void markDirty() { dirty = true; }
 
   // Returns a const ref to the cached value. If dirty, calls rebuilder()
-  // to produce a fresh string, stores it, clears the dirty flag.
+  // to produce a fresh string, stores it, clears the dirty flag. A rebuild
+  // that throws (bad_alloc under a fragmented heap) keeps the last-good
+  // value and leaves dirty set so a later call retries.
   const std::string& getOrRebuild(
       const std::function<std::string()>& rebuilder) {
     if (dirty) {
-      value = rebuilder();
-      dirty = false;
+      try {
+        value = rebuilder();
+        dirty = false;
+      } catch (const std::bad_alloc&) {
+      }
     }
     return value;
   }
@@ -187,6 +193,33 @@ void test_independent_caches_dont_interfere() {
   TEST_ASSERT_EQUAL_INT(1, baseRb.calls);  // untouched
 }
 
+void test_throwing_rebuild_serves_empty_and_stays_dirty() {
+  // A web/BLE read must never let a rebuild's bad_alloc escape. On throw the
+  // cache serves its last-good value (empty on a never-built cache) and stays
+  // dirty so it retries once heap recovers.
+  lamp::SectionCache c;
+  auto boom = []() -> std::string { throw std::bad_alloc(); };
+
+  const std::string& v = c.getOrRebuild(boom);
+  TEST_ASSERT_EQUAL_STRING("", v.c_str());
+  TEST_ASSERT_TRUE(c.dirty);
+}
+
+void test_throwing_rebuild_keeps_last_good_value() {
+  // After a good build, a later rebuild that throws must not clobber the
+  // cached bytes — the stale value keeps serving until a build succeeds.
+  lamp::SectionCache c;
+  TEST_ASSERT_EQUAL_STRING("good", c.getOrRebuild([] { return std::string("good"); }).c_str());
+
+  c.markDirty();
+  auto boom = []() -> std::string { throw std::bad_alloc(); };
+  TEST_ASSERT_EQUAL_STRING("good", c.getOrRebuild(boom).c_str());
+  TEST_ASSERT_TRUE(c.dirty);
+
+  TEST_ASSERT_EQUAL_STRING("fresh", c.getOrRebuild([] { return std::string("fresh"); }).c_str());
+  TEST_ASSERT_FALSE(c.dirty);
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
@@ -199,6 +232,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_rebuild_picks_up_latest_underlying_value);
   RUN_TEST(test_clean_cache_returns_stable_reference);
   RUN_TEST(test_independent_caches_dont_interfere);
+  RUN_TEST(test_throwing_rebuild_serves_empty_and_stays_dirty);
+  RUN_TEST(test_throwing_rebuild_keeps_last_good_value);
 
   return UNITY_END();
 }

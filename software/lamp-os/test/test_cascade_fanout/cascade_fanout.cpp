@@ -74,6 +74,21 @@ struct CascadeSuppressionModel {
     }
 };
 
+// Mirror of the triggerInvocation originate decision:
+// a cascade wave starts iff (triggered && broadcast), then maybeCascade
+// still skips continuous types even with broadcast=true.
+struct OriginateModel {
+    bool triggered  = true;
+    bool broadcast  = false;   // app Test button passes true; receive path false
+    bool continuous = false;
+
+    bool wouldOriginate() const {
+        if (!(triggered && broadcast)) return false;
+        if (continuous) return false;
+        return true;
+    }
+};
+
 }  // namespace lamp_test
 
 void setUp(void) {}
@@ -165,6 +180,50 @@ void test_local_trigger_with_cascade_enabled_does_cascade() {
     TEST_ASSERT_TRUE(m.wouldCascade());
 }
 
+// --- Broadcast axis (triggerInvocation originate) ---
+
+void test_originate_requires_triggered_and_broadcast() {
+    // App Test button: triggered locally with broadcast=true → wave starts.
+    lamp_test::OriginateModel m;
+    m.triggered = true;
+    m.broadcast = true;
+    TEST_ASSERT_TRUE(m.wouldOriginate());
+}
+
+void test_received_cascade_stays_terminal() {
+    // Receive/forward path passes broadcast=false; even though the expression
+    // fired, no new wave originates from this lamp.
+    lamp_test::OriginateModel m;
+    m.triggered = true;
+    m.broadcast = false;
+    TEST_ASSERT_FALSE(m.wouldOriginate());
+}
+
+void test_no_trigger_no_originate_even_with_broadcast() {
+    // Coalesced/duplicate invocation never sets triggered; broadcast alone
+    // does not originate a wave.
+    lamp_test::OriginateModel m;
+    m.triggered = false;
+    m.broadcast = true;
+    TEST_ASSERT_FALSE(m.wouldOriginate());
+}
+
+void test_no_trigger_no_broadcast_no_originate() {
+    lamp_test::OriginateModel m;
+    m.triggered = false;
+    m.broadcast = false;
+    TEST_ASSERT_FALSE(m.wouldOriginate());
+}
+
+void test_continuous_type_does_not_originate_with_broadcast() {
+    // maybeCascade skips continuous types; broadcast=true cannot force a wave.
+    lamp_test::OriginateModel m;
+    m.triggered  = true;
+    m.broadcast  = true;
+    m.continuous = true;
+    TEST_ASSERT_FALSE(m.wouldOriginate());
+}
+
 // --- RSSI sort ---
 
 void test_rssi_sort_strongest_first() {
@@ -223,6 +282,11 @@ int main(int argc, char** argv) {
     RUN_TEST(test_cascade_enabled_issues_commands);
     RUN_TEST(test_received_command_does_not_cascade);
     RUN_TEST(test_local_trigger_with_cascade_enabled_does_cascade);
+    RUN_TEST(test_originate_requires_triggered_and_broadcast);
+    RUN_TEST(test_received_cascade_stays_terminal);
+    RUN_TEST(test_no_trigger_no_originate_even_with_broadcast);
+    RUN_TEST(test_no_trigger_no_broadcast_no_originate);
+    RUN_TEST(test_continuous_type_does_not_originate_with_broadcast);
     RUN_TEST(test_rssi_sort_strongest_first);
     RUN_TEST(test_rssi_sort_unknown_rssi_sorts_last);
     RUN_TEST(test_delay_clamps_at_kMaxDelayMs);

@@ -1,70 +1,11 @@
-// parseColorList is a file-static in config.cpp; mirrored here for native testability
-// (config.cpp pulls Arduino.h). Keep the mirror in sync.
-
 #include <unity.h>
 
-#include <cstdint>
-#include <cstdio>
-#include <sstream>
 #include <string>
 #include <vector>
 
-namespace lamp {
+#include "util/color.hpp"
 
-class Color {
- public:
-  uint8_t r, g, b, w;
-  Color() : r(0), g(0), b(0), w(0) {}
-  Color(uint8_t inR, uint8_t inG, uint8_t inB, uint8_t inW)
-      : r(inR), g(inG), b(inB), w(inW) {}
-  bool operator==(const Color& o) const {
-    return r == o.r && g == o.g && b == o.b && w == o.w;
-  }
-};
-
-static inline int hexNibble(char c) {
-  if (c >= '0' && c <= '9') return c - '0';
-  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-  return -1;
-}
-
-static inline bool parseHexByte(const char* p, uint8_t& out) {
-  int hi = hexNibble(p[0]);
-  int lo = hexNibble(p[1]);
-  if (hi < 0 || lo < 0) return false;
-  out = static_cast<uint8_t>((hi << 4) | lo);
-  return true;
-}
-
-Color hexStringToColor(std::string inHexString) {
-  Color output;
-  if (inHexString.size() != 9) return output;
-  if (inHexString[0] != '#') return output;
-  const char* s = inHexString.c_str();
-  uint8_t r, g, b, w;
-  if (!parseHexByte(s + 1, r)) return output;
-  if (!parseHexByte(s + 3, g)) return output;
-  if (!parseHexByte(s + 5, b)) return output;
-  if (!parseHexByte(s + 7, w)) return output;
-  output.r = r; output.g = g; output.b = b; output.w = w;
-  return output;
-}
-
-std::vector<Color> parseColorList(const std::string& csv) {
-  std::vector<Color> out;
-  std::istringstream stream(csv);
-  std::string token;
-  while (std::getline(stream, token, ',')) {
-    size_t start = token.find_first_not_of(' ');
-    size_t end   = token.find_last_not_of(' ');
-    if (start == std::string::npos) continue;
-    out.push_back(hexStringToColor(token.substr(start, end - start + 1)));
-  }
-  return out;
-}
-
-}  // namespace lamp
+#include "../../src/util/color.cpp"
 
 void setUp(void) {}
 void tearDown(void) {}

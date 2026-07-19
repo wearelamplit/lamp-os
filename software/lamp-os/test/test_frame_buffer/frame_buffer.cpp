@@ -22,7 +22,10 @@ void setUp() {
 void tearDown() {}
 
 static uint32_t encode(const Color& c) {
-  return (uint32_t)((c.w << 24) | (c.r << 16) | (c.g << 8) | c.b);
+  return (uint32_t)((Adafruit_NeoPixel::gamma8(c.w) << 24) |
+                    (Adafruit_NeoPixel::gamma8(c.r) << 16) |
+                    (Adafruit_NeoPixel::gamma8(c.g) << 8) |
+                    Adafruit_NeoPixel::gamma8(c.b));
 }
 
 // New API and old adapter produce identical setPixelColor call sequences.
@@ -125,11 +128,74 @@ void test_skipped_segment_leaves_previous_buffer_unadvanced() {
   TEST_ASSERT_TRUE(fb.previousBuffer == fb.buffer);
 }
 
+// A driver-brightness change alone (the governor's pre-flush setBrightness)
+// defeats the content dedup: every pixel is rewritten and shown at the new
+// level, so a clamped frame reaches the strip fully re-scaled.
+void test_brightness_change_forces_full_repush() {
+  const Color red(0xFF, 0, 0, 0);
+
+  FrameBuffer fb;
+  fb.begin({}, std::vector<StripSegment>{{&neo0, "s0", 0, 3}});
+  fb.buffer = {red, red, red};
+  neo0.brightness = 255;
+  fb.flush();
+  TEST_ASSERT_EQUAL_UINT8(255, fb.previousBrightness);
+
+  // Same content, same brightness: dedup short-circuits.
+  neo0.reset();
+  fb.flush();
+  TEST_ASSERT_EQUAL_UINT(0, neo0.pixelCalls.size());
+  TEST_ASSERT_EQUAL_INT(0, neo0.showCount);
+
+  // Same content, clamped brightness: full repush then show.
+  neo0.brightness = 127;
+  neo0.reset();
+  fb.flush();
+  TEST_ASSERT_EQUAL_UINT(3, neo0.pixelCalls.size());
+  TEST_ASSERT_EQUAL_INT(1, neo0.showCount);
+  TEST_ASSERT_EQUAL_UINT8(127, fb.previousBrightness);
+}
+
+// reversed=true flips pixel order; reversed=false is byte-identical to before.
+void test_reversed_segment_flips_pixel_order() {
+  const Color c0(0xFF, 0,    0,    0);
+  const Color c1(0,    0xFF, 0,    0);
+  const Color c2(0,    0,    0xFF, 0);
+  const Color c3(0,    0,    0,    0xFF);
+  const std::vector<Color> pattern = {c0, c1, c2, c3};
+
+  // reversed segment: driver pixel i should receive buffer[offset + (3-i)]
+  FrameBuffer fwd;
+  fwd.begin({}, std::vector<StripSegment>{{&neo0, "rev", 0, 4, true}});
+  fwd.buffer = pattern;
+  neo0.reset();
+  fwd.flush();
+  TEST_ASSERT_EQUAL_UINT(4, neo0.pixelCalls.size());
+  for (size_t i = 0; i < 4; i++) {
+    TEST_ASSERT_EQUAL_UINT16(i, neo0.pixelCalls[i].n);
+    TEST_ASSERT_EQUAL_UINT32(encode(pattern[3 - i]), neo0.pixelCalls[i].c);
+  }
+
+  // non-reversed segment: driver pixel i should receive buffer[offset + i]
+  FrameBuffer fwd2;
+  fwd2.begin({}, std::vector<StripSegment>{{&neo0, "norm", 0, 4, false}});
+  fwd2.buffer = pattern;
+  neo0.reset();
+  fwd2.flush();
+  TEST_ASSERT_EQUAL_UINT(4, neo0.pixelCalls.size());
+  for (size_t i = 0; i < 4; i++) {
+    TEST_ASSERT_EQUAL_UINT16(i, neo0.pixelCalls[i].n);
+    TEST_ASSERT_EQUAL_UINT32(encode(pattern[i]), neo0.pixelCalls[i].c);
+  }
+}
+
 int main(int argc, char** argv) {
   (void)argc; (void)argv;
   UNITY_BEGIN();
   RUN_TEST(test_new_api_and_adapter_flush_identically);
   RUN_TEST(test_multisegment_routes_pixels_to_correct_drivers);
   RUN_TEST(test_skipped_segment_leaves_previous_buffer_unadvanced);
+  RUN_TEST(test_brightness_change_forces_full_repush);
+  RUN_TEST(test_reversed_segment_flips_pixel_order);
   return UNITY_END();
 }

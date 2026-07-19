@@ -25,8 +25,8 @@
 
 using namespace lamp;
 
-// Mirror of greeting.hpp kFastGlitchFrames.
-static constexpr uint32_t kFastGlitchFrames = 12;
+// Mirror of greeting.hpp kFastGlitchMs.
+static constexpr uint32_t kFastGlitchMs = 30;
 // Mirror of expression.hpp TARGET_SHADE.
 static constexpr uint8_t kTargetShade = 1;
 
@@ -83,8 +83,8 @@ static Invocation buildGreetInvocation(const Color& stem) {
   inv.colors = {stem};
   inv.target = kTargetShade;
   inv.parameters = {
-    {"durationMin", kFastGlitchFrames},
-    {"durationMax", kFastGlitchFrames},
+    {"durationMin", kFastGlitchMs},
+    {"durationMax", kFastGlitchMs},
   };
   inv.delayMs = 0;
   return inv;
@@ -98,8 +98,8 @@ void test_crowd_invocation_is_glitchy_in_stem_color() {
   TEST_ASSERT_EQUAL_UINT(1, inv.colors.size());
   TEST_ASSERT_TRUE(inv.colors[0] == stem);
   TEST_ASSERT_EQUAL_UINT8(kTargetShade, inv.target);
-  TEST_ASSERT_EQUAL_UINT32(kFastGlitchFrames, inv.parameters["durationMin"]);
-  TEST_ASSERT_EQUAL_UINT32(kFastGlitchFrames, inv.parameters["durationMax"]);
+  TEST_ASSERT_EQUAL_UINT32(kFastGlitchMs, inv.parameters["durationMin"]);
+  TEST_ASSERT_EQUAL_UINT32(kFastGlitchMs, inv.parameters["durationMax"]);
   // Broadcast, not directed: delay 0, no peer MAC on the payload.
   TEST_ASSERT_EQUAL_UINT32(0, inv.delayMs);
 }

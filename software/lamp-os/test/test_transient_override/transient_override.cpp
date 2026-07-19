@@ -304,6 +304,15 @@ class BrightnessOverride {
   std::function<void()> onChange_;
 
   static constexpr uint32_t kPaintWatchdogMs = 60000;
+  static constexpr uint8_t kSpaceDimFloor = 20;
+
+  static uint8_t applyDimFactor(uint8_t baseline, uint8_t factor) {
+    const uint16_t scaled =
+        static_cast<uint16_t>((static_cast<uint16_t>(baseline) * factor) / 100);
+    const uint8_t floored =
+        scaled < kSpaceDimFloor ? kSpaceDimFloor : static_cast<uint8_t>(scaled);
+    return floored > baseline ? baseline : floored;
+  }
 
   void apply(const uint8_t sourceMac[6],
              lamp_protocol::OverrideSource source,
@@ -345,16 +354,20 @@ class BrightnessOverride {
         return baseline;
       case FadeState::FadingIn: {
         const uint32_t elapsed = nowMs - fadeStartMs_;
-        if (fadeDurationMs_ == 0 || elapsed >= fadeDurationMs_) return toBrightness_;
-        const uint8_t from = fromSeeded_ ? fromBrightness_ : baseline;
-        return linearLerp(from, toBrightness_, fadeDurationMs_, elapsed);
+        if (fadeDurationMs_ == 0 || elapsed >= fadeDurationMs_)
+          return applyDimFactor(baseline, toBrightness_);
+        const uint8_t fromFactor = fromSeeded_ ? fromBrightness_ : 100;
+        return applyDimFactor(
+            baseline,
+            linearLerp(fromFactor, toBrightness_, fadeDurationMs_, elapsed));
       }
       case FadeState::Holding:
-        return toBrightness_;
+        return applyDimFactor(baseline, toBrightness_);
       case FadeState::Restoring: {
         const uint32_t elapsed = nowMs - restoreStartMs_;
         if (restoreDurationMs_ == 0 || elapsed >= restoreDurationMs_) return baseline;
-        return linearLerp(fromBrightness_, baseline, restoreDurationMs_, elapsed);
+        return applyDimFactor(
+            baseline, linearLerp(fromBrightness_, 100, restoreDurationMs_, elapsed));
       }
     }
     return baseline;
@@ -366,7 +379,7 @@ class BrightnessOverride {
         return;
       case FadeState::FadingIn: {
         if (!fromSeeded_) {
-          fromBrightness_ = baseline;
+          fromBrightness_ = 100;
           fromSeeded_ = true;
         }
         const uint32_t elapsed = nowMs - fadeStartMs_;
@@ -944,44 +957,64 @@ void test_brightness_override_change_driven_callback_only_on_int_change() {
                            "callback fires roughly once per integer brightness step");
 }
 
-void test_brightness_override_floor_rejects_below_min_unless_wisp_paired() {
-  // This is the contract enforced by MeshLink, NOT by
-  // BrightnessOverride itself — but the test pins the rule: brightness <
-  // kBrightnessOverrideMin from a non-Wisp-paired source is dropped;
-  // from a Wisp-paired source it's accepted.
-  //
-  // The "wisp paired" check looks up the source MAC in a recent WispCache
-  // entry. Here we re-implement the floor predicate inline so the test
-  // documents the rule without needing to drag in mesh_link.cpp.
+void test_brightness_override_gate_requires_claiming_wisp() {
+  // The gate is MeshLink's, not BrightnessOverride's: a brightness override
+  // is accepted only from the wisp holding this lamp's fresh display slot
+  // (isClaimingWisp), at any level. A rogue or stale source is dropped. The
+  // claim-gate predicate is re-implemented inline so the test documents the
+  // rule without dragging in mesh_link.cpp.
   struct WispCache {
     bool present;
     uint8_t mac[6];
     uint32_t lastHelloMs;
   };
-  auto floorAccepts = [](uint8_t brightness, const uint8_t srcMac[6],
-                         const WispCache& wisp, uint32_t nowMs) {
-    if (brightness >= test::lamp_protocol::kBrightnessOverrideMin) return true;
-    constexpr uint32_t kWindow = 60000;
+  auto gateAccepts = [](const uint8_t srcMac[6], const WispCache& wisp,
+                        uint32_t nowMs) {
+    constexpr uint32_t kSlotFreshMs = 12000;
     return wisp.present &&
            std::memcmp(wisp.mac, srcMac, 6) == 0 &&
-           (nowMs - wisp.lastHelloMs) < kWindow;
+           wisp.lastHelloMs != 0 &&
+           (nowMs - wisp.lastHelloMs) <= kSlotFreshMs;
   };
 
   WispCache empty{};
-  TEST_ASSERT_FALSE(floorAccepts(2, kMacPeerSwap, empty, 1000));
+  TEST_ASSERT_FALSE(gateAccepts(kMacWisp, empty, 1000));
 
-  WispCache paired{};
-  paired.present = true;
-  std::memcpy(paired.mac, kMacWisp, 6);
-  paired.lastHelloMs = 100;
-  // Within the window: accepted even at brightness=2.
-  TEST_ASSERT_TRUE(floorAccepts(2, kMacWisp, paired, 1000));
-  // Outside the window (60s): rejected.
-  TEST_ASSERT_FALSE(floorAccepts(2, kMacWisp, paired, 100 + 60000));
-  // Wisp-paired but wrong sender: rejected.
-  TEST_ASSERT_FALSE(floorAccepts(2, kMacPeerSwap, paired, 1000));
-  // Above the floor: always accepted (paired or not).
-  TEST_ASSERT_TRUE(floorAccepts(50, kMacPeerSwap, empty, 1000));
+  WispCache claiming{};
+  claiming.present = true;
+  std::memcpy(claiming.mac, kMacWisp, 6);
+  claiming.lastHelloMs = 1000;
+  // Fresh claim from the claiming wisp: accepted regardless of level.
+  TEST_ASSERT_TRUE(gateAccepts(kMacWisp, claiming, 2000));
+  // Stale claim (past the freshness window): rejected.
+  TEST_ASSERT_FALSE(gateAccepts(kMacWisp, claiming, 1000 + 12001));
+  // Fresh slot but a different sender: rejected.
+  TEST_ASSERT_FALSE(gateAccepts(kMacPeerSwap, claiming, 2000));
+}
+
+void test_brightness_override_floored_multiplier() {
+  // effective() applies the override brightness as a floored relative
+  // multiplier over the caller's live baseline: output =
+  // min(baseline, max(baseline * factor / 100, 20)).
+  auto holdFactor = [](uint8_t factor, uint8_t baseline) {
+    test::BrightnessOverride b;
+    test::g_nowMs = 0;
+    b.apply(kMacWisp, test::lamp_protocol::OverrideSource::Wisp,
+            test::lamp_protocol::OverrideSurface::Base, factor,
+            /*fadeDurationMs=*/0);
+    test::g_nowMs = 1;
+    b.tick(test::g_nowMs, baseline);
+    return b.effective(test::g_nowMs, baseline);
+  };
+
+  // 100% baseline scales straight to the factor.
+  TEST_ASSERT_EQUAL_UINT8(50, holdFactor(50, 100));
+  // Full dim (factor 0) clamps to the 20% output floor, never black.
+  TEST_ASSERT_EQUAL_UINT8(20, holdFactor(0, 100));
+  // 30% baseline at 0.5x wants 15, floored up to 20.
+  TEST_ASSERT_EQUAL_UINT8(20, holdFactor(50, 30));
+  // A lamp already below the floor is left as-is; the floor never raises it.
+  TEST_ASSERT_EQUAL_UINT8(10, holdFactor(100, 10));
 }
 
 void test_brightness_override_watchdog_auto_restores() {
@@ -1038,7 +1071,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_brightness_override_apply_transitions_to_holding);
   RUN_TEST(test_brightness_override_restore_returns_to_baseline);
   RUN_TEST(test_brightness_override_change_driven_callback_only_on_int_change);
-  RUN_TEST(test_brightness_override_floor_rejects_below_min_unless_wisp_paired);
+  RUN_TEST(test_brightness_override_gate_requires_claiming_wisp);
+  RUN_TEST(test_brightness_override_floored_multiplier);
   RUN_TEST(test_brightness_override_watchdog_auto_restores);
   RUN_TEST(test_brightness_override_cross_source_restore_blocked);
 

@@ -7,7 +7,7 @@ void tearDown(void) {}
 
 void test_new_pointers_default_to_null() {
   lamp::BehaviorContext ctx;
-  TEST_ASSERT_NULL(ctx.nearbyLamps);
+  TEST_ASSERT_NULL(ctx.lampRoster);
   TEST_ASSERT_NULL(ctx.greeting);
 }
 

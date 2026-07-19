@@ -24,7 +24,7 @@ static void test_fs_offer_roundtrip_and_dispatch() {
   uint8_t sha[lp::FW_SHA256_PREFIX_LEN] = {1, 2, 3, 4, 5, 6, 7, 8};
   const char* ch = "standard-stable";
   const size_t n = lp::buildFwOffer(
-      buf, sizeof(buf), 42, kSrc, kDst, 0x000100A5, 0x30000, lp::FW_CHUNK_SIZE,
+      buf, sizeof(buf), 42, kSrc, kDst, 0x000100A5, 0x30000, lp::FW_CHUNK_SIZE_BASELINE,
       ch, std::strlen(ch), sha, /*footerLen=*/72, /*totalChunks=*/983,
       lp::PROTOCOL_VERSION_EMIT, lp::MSG_FS_OFFER);
   TEST_ASSERT_EQUAL_UINT32(lp::FW_OFFER_FIXED_SIZE, n);
@@ -36,7 +36,7 @@ static void test_fs_offer_roundtrip_and_dispatch() {
   TEST_ASSERT_TRUE(lp::parseFwOffer(buf, n, out, lp::MSG_FS_OFFER));
   TEST_ASSERT_EQUAL_UINT32(0x000100A5, out.version);
   TEST_ASSERT_EQUAL_UINT32(0x30000, out.totalLen);
-  TEST_ASSERT_EQUAL_UINT16(lp::FW_CHUNK_SIZE, out.chunkSize);
+  TEST_ASSERT_EQUAL_UINT16(lp::FW_CHUNK_SIZE_BASELINE, out.chunkSize);
   TEST_ASSERT_EQUAL_UINT16(983, out.totalChunks);
   TEST_ASSERT_EQUAL_STRING("standard-stable", out.channel);
 }
@@ -48,7 +48,7 @@ static void test_fs_offer_not_parsed_as_fw() {
   uint8_t sha[lp::FW_SHA256_PREFIX_LEN] = {0};
   const char* ch = "snafu-beta";
   const size_t n = lp::buildFwOffer(
-      buf, sizeof(buf), 1, kSrc, kDst, 1, 100, lp::FW_CHUNK_SIZE, ch,
+      buf, sizeof(buf), 1, kSrc, kDst, 1, 100, lp::FW_CHUNK_SIZE_BASELINE, ch,
       std::strlen(ch), sha, 0, 1, lp::PROTOCOL_VERSION_EMIT, lp::MSG_FS_OFFER);
   lp::ParsedFwOffer out;
   TEST_ASSERT_FALSE(lp::parseFwOffer(buf, n, out));                    // default = FW
@@ -61,7 +61,7 @@ static void test_fw_offer_not_parsed_as_fs() {
   uint8_t sha[lp::FW_SHA256_PREFIX_LEN] = {0};
   const char* ch = "standard-stable";
   const size_t n = lp::buildFwOffer(buf, sizeof(buf), 1, kSrc, kDst, 1, 100,
-                                    lp::FW_CHUNK_SIZE, ch, std::strlen(ch), sha,
+                                    lp::FW_CHUNK_SIZE_BASELINE, ch, std::strlen(ch), sha,
                                     0, 1);  // default msgType = MSG_FW_OFFER
   TEST_ASSERT_EQUAL_UINT8(lp::MSG_FW_OFFER, lp::inspect(buf, n));
   lp::ParsedFwOffer out;
@@ -132,9 +132,54 @@ static void test_hello_fs_digest_tlv() {
   TEST_ASSERT_FALSE(out2.hasFsDigest);
 }
 
+// HELLO_TLV_NEED_FS round-trips its flag, coexists with the other TLVs, and is
+// absent (needsFs=false) when not requested. A frame carrying it still parses
+// under a length-only skip (the forward-compat contract older parsers rely on).
+static void test_hello_need_fs_tlv() {
+  const uint8_t shade[4] = {1, 2, 3, 4};
+  const uint8_t base[4] = {5, 6, 7, 8};
+  uint8_t buf[lp::HELLO_MAX_SIZE];
+
+  // need-FS lamp has no digest to advertise: idle ota, channel, no fs digest,
+  // needsFs=true.
+  size_t n = lp::buildHello(buf, sizeof(buf), 1, kSrc, shade, base, 0x000100A5,
+                            "grady", 5, lp::kOtaStateIdle, "standard-stable",
+                            /*fsDigest=*/nullptr, /*maxChunk=*/0,
+                            /*needsFs=*/true);
+  TEST_ASSERT_TRUE(n > 0);
+  lp::ParsedHello out;
+  TEST_ASSERT_TRUE(lp::parseHello(buf, n, out));
+  TEST_ASSERT_TRUE(out.needsFs);
+  TEST_ASSERT_FALSE(out.hasFsDigest);
+  TEST_ASSERT_EQUAL_STRING("standard-stable", out.fwChannel);
+
+  // Not requested → absent → needsFs false, and coexists with a real digest.
+  const uint8_t digest[lp::HELLO_FS_DIGEST_LEN] = {9, 8, 7, 6, 5, 4, 3, 2};
+  n = lp::buildHello(buf, sizeof(buf), 2, kSrc, shade, base, 0x000100A5, "g", 1,
+                     lp::kOtaStateIdle, nullptr, digest, /*maxChunk=*/0,
+                     /*needsFs=*/false);
+  lp::ParsedHello out2;
+  TEST_ASSERT_TRUE(lp::parseHello(buf, n, out2));
+  TEST_ASSERT_FALSE(out2.needsFs);
+  TEST_ASSERT_TRUE(out2.hasFsDigest);
+
+  // The TLV is 3 wire bytes ({type,len=1,value}); a parser that doesn't know
+  // 0x05 advances off += len and lands cleanly on the next byte. Re-parsing the
+  // need-FS frame with the maxChunk TLV appended proves the skip doesn't
+  // desync a following TLV.
+  n = lp::buildHello(buf, sizeof(buf), 3, kSrc, shade, base, 0x000100A5, "g", 1,
+                     lp::kOtaStateIdle, nullptr, nullptr, /*maxChunk=*/512,
+                     /*needsFs=*/true);
+  lp::ParsedHello out3;
+  TEST_ASSERT_TRUE(lp::parseHello(buf, n, out3));
+  TEST_ASSERT_TRUE(out3.needsFs);
+  TEST_ASSERT_EQUAL_UINT16(512, out3.maxChunk);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_hello_fs_digest_tlv);
+  RUN_TEST(test_hello_need_fs_tlv);
   RUN_TEST(test_fs_offer_roundtrip_and_dispatch);
   RUN_TEST(test_fs_offer_not_parsed_as_fw);
   RUN_TEST(test_fw_offer_not_parsed_as_fs);

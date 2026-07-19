@@ -1,7 +1,7 @@
-// Tests for NearbyLamps::getUngreetedArrivals.
+// Tests for LampRoster::getUngreetedArrivals.
 //
 // Uses an inline mirror (no FreeRTOS). Pins the filter contract:
-// BLE-fresh + non-empty bdAddr + !acknowledged. Stale or acknowledged
+// near-fresh + hasMac + !acknowledged. Stale or acknowledged
 // peers must be excluded.
 
 #include <unity.h>
@@ -17,35 +17,35 @@ static uint32_t millis() { return s_nowMs; }
 
 namespace lamp {
 
-struct NearbyLamp {
+struct RosterEntry {
   std::string name;
-  std::string bdAddr;
-  uint32_t lastSeenViaBleMs = 0;
+  bool hasMac = false;
+  uint32_t lastSeenNearMs = 0;
   bool acknowledged = false;
 };
 
-class NearbyLamps {
+class LampRoster {
  public:
   // Seed a peer directly (mirrors what addOrUpdateFromBle would do).
-  void seed(const std::string& name, const std::string& bdAddr,
-            uint32_t lastSeenViaBleMs, bool acknowledged) {
-    NearbyLamp e;
+  void seed(const std::string& name, bool hasMac,
+            uint32_t lastSeenNearMs, bool acknowledged) {
+    RosterEntry e;
     e.name = name;
-    e.bdAddr = bdAddr;
-    e.lastSeenViaBleMs = lastSeenViaBleMs;
+    e.hasMac = hasMac;
+    e.lastSeenNearMs = lastSeenNearMs;
     e.acknowledged = acknowledged;
     store_.push_back(e);
   }
 
-  // Production contract: BLE-reachable peers whose acknowledged flag is false.
-  // BLE-reachable = lastSeenViaBleMs within maxAgeMs AND bdAddr non-empty.
-  std::vector<NearbyLamp> getUngreetedArrivals(uint32_t maxAgeMs) {
+  // Production contract: near peers whose acknowledged flag is false.
+  // Near = lastSeenNearMs within maxAgeMs AND hasMac.
+  std::vector<RosterEntry> getUngreetedArrivals(uint32_t maxAgeMs) {
     uint32_t now = millis();
-    std::vector<NearbyLamp> out;
+    std::vector<RosterEntry> out;
     for (const auto& e : store_) {
-      if (e.bdAddr.empty()) continue;
-      if (e.lastSeenViaBleMs == 0) continue;
-      if ((now - e.lastSeenViaBleMs) > maxAgeMs) continue;
+      if (!e.hasMac) continue;
+      if (e.lastSeenNearMs == 0) continue;
+      if ((now - e.lastSeenNearMs) > maxAgeMs) continue;
       if (e.acknowledged) continue;
       out.push_back(e);
     }
@@ -53,7 +53,7 @@ class NearbyLamps {
   }
 
  private:
-  std::vector<NearbyLamp> store_;
+  std::vector<RosterEntry> store_;
 };
 
 }  // namespace lamp
@@ -62,64 +62,64 @@ void setUp(void) { s_nowMs = 10000; }
 void tearDown(void) {}
 
 void test_fresh_unacknowledged_returned() {
-  lamp::NearbyLamps lamps;
-  lamps.seed("jacko", "AA:BB:CC:DD:EE:01", s_nowMs - 100, false);
+  lamp::LampRoster lamps;
+  lamps.seed("jacko", true, s_nowMs - 100, false);
   auto result = lamps.getUngreetedArrivals(5000);
   TEST_ASSERT_EQUAL_UINT(1, result.size());
   TEST_ASSERT_EQUAL_STRING("jacko", result[0].name.c_str());
 }
 
 void test_acknowledged_excluded() {
-  lamp::NearbyLamps lamps;
-  lamps.seed("jacko", "AA:BB:CC:DD:EE:01", s_nowMs - 100, true);
+  lamp::LampRoster lamps;
+  lamps.seed("jacko", true, s_nowMs - 100, true);
   auto result = lamps.getUngreetedArrivals(5000);
   TEST_ASSERT_EQUAL_UINT(0, result.size());
 }
 
 void test_stale_excluded() {
-  lamp::NearbyLamps lamps;
+  lamp::LampRoster lamps;
   // Last seen 6000 ms ago; maxAge is 5000. Stale.
-  lamps.seed("jacko", "AA:BB:CC:DD:EE:01", s_nowMs - 6000, false);
+  lamps.seed("jacko", true, s_nowMs - 6000, false);
   auto result = lamps.getUngreetedArrivals(5000);
   TEST_ASSERT_EQUAL_UINT(0, result.size());
 }
 
-void test_empty_bdaddr_excluded() {
-  lamp::NearbyLamps lamps;
-  // No BLE advert yet; bdAddr empty.
-  lamps.seed("phantom", "", s_nowMs - 100, false);
+void test_no_mac_excluded() {
+  lamp::LampRoster lamps;
+  // No sighting has yielded a mac yet.
+  lamps.seed("phantom", false, s_nowMs - 100, false);
   auto result = lamps.getUngreetedArrivals(5000);
   TEST_ASSERT_EQUAL_UINT(0, result.size());
 }
 
 void test_mixed_peers_only_fresh_unacknowledged_returned() {
-  lamp::NearbyLamps lamps;
+  lamp::LampRoster lamps;
   // Fresh + unacknowledged; should appear.
-  lamps.seed("flora",   "AA:BB:CC:DD:EE:01", s_nowMs - 200,  false);
+  lamps.seed("flora",   true, s_nowMs - 200,  false);
   // Acknowledged; excluded.
-  lamps.seed("gramp",   "AA:BB:CC:DD:EE:02", s_nowMs - 200,  true);
+  lamps.seed("gramp",   true, s_nowMs - 200,  true);
   // Stale; excluded.
-  lamps.seed("herald",  "AA:BB:CC:DD:EE:03", s_nowMs - 9000, false);
-  // No BLE sighting (lastSeenViaBleMs==0); excluded.
-  lamps.seed("phantom", "AA:BB:CC:DD:EE:04", 0,              false);
+  lamps.seed("herald",  true, s_nowMs - 9000, false);
+  // No near sighting (lastSeenNearMs==0); excluded.
+  lamps.seed("phantom", true, 0,              false);
   // Fresh + unacknowledged; should appear.
-  lamps.seed("snafu",   "AA:BB:CC:DD:EE:05", s_nowMs - 50,   false);
+  lamps.seed("snafu",   true, s_nowMs - 50,   false);
 
   auto result = lamps.getUngreetedArrivals(5000);
   TEST_ASSERT_EQUAL_UINT(2, result.size());
 
   auto hasName = [&](const std::string& n) {
     return std::any_of(result.begin(), result.end(),
-                       [&](const lamp::NearbyLamp& p) { return p.name == n; });
+                       [&](const lamp::RosterEntry& p) { return p.name == n; });
   };
   TEST_ASSERT_TRUE(hasName("flora"));
   TEST_ASSERT_TRUE(hasName("snafu"));
 }
 
 void test_zero_last_seen_excluded() {
-  lamp::NearbyLamps lamps;
-  // lastSeenViaBleMs == 0 means never seen via BLE.
-  lamps.seed("jacko", "AA:BB:CC:DD:EE:01", 0, false);
+  lamp::LampRoster lamps;
+  // lastSeenNearMs == 0 means never seen via BLE.
+  lamps.seed("jacko", true, 0, false);
   auto result = lamps.getUngreetedArrivals(5000);
   TEST_ASSERT_EQUAL_UINT(0, result.size());
 }
@@ -131,7 +131,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_fresh_unacknowledged_returned);
   RUN_TEST(test_acknowledged_excluded);
   RUN_TEST(test_stale_excluded);
-  RUN_TEST(test_empty_bdaddr_excluded);
+  RUN_TEST(test_no_mac_excluded);
   RUN_TEST(test_mixed_peers_only_fresh_unacknowledged_returned);
   RUN_TEST(test_zero_last_seen_excluded);
   return UNITY_END();

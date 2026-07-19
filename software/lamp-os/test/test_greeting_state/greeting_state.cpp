@@ -2,7 +2,7 @@
 //
 // Both greetable implementations are mirrored inline here so the tests compile
 // on native without Arduino / FreeRTOS. Keep the mirrored logic in sync with:
-//   behaviors/social.cpp  (greetingState() + greetingPeerBdAddr_ lifecycle)
+//   behaviors/social.cpp  (greetingState() + greetingPeerLampId_ lifecycle)
 //   lamps/snafu/greeting.cpp  (greetingState())
 
 #include <unity.h>
@@ -26,28 +26,28 @@ enum AnimationState {
 
 struct GreetingState {
   bool        active      = false;
-  std::string peerBdAddr;
+  std::string peerLampId;
   std::string kind;
 };
 
 // ---- SocialBehavior greeting-state logic mirror -----------------------------
 //
 // Mirrors greetingState() from social.cpp. The production method reads
-// animationState, snub, pulseBackStrength, and greetingPeerBdAddr_.
+// animationState, snub, pulseBackStrength, and greetingPeerLampId_.
 // Kept verbatim so a logic change in production fails this test.
 
 struct SocialGreetingFields {
   AnimationState animationState = STOPPED;
   bool           snub             = false;
   uint8_t        pulseBackStrength = 0;
-  std::string    greetingPeerBdAddr;
+  std::string    greetingPeerLampId_;
 };
 
 static GreetingState socialGreetingState(const SocialGreetingFields& s) {
   if (s.animationState == STOPPED) return {};
   GreetingState gs;
   gs.active     = true;
-  gs.peerBdAddr = s.greetingPeerBdAddr;
+  gs.peerLampId = s.greetingPeerLampId_;
   if (s.snub) {
     gs.kind = "snub";
   } else if (s.pulseBackStrength > 0) {
@@ -65,7 +65,7 @@ static GreetingState socialGreetingState(const SocialGreetingFields& s) {
 
 struct SnafuGreetingFields {
   AnimationState animationState = STOPPED;
-  std::string    greetedBdAddr;
+  std::string    greetedLampId_;
 };
 
 static GreetingState snafuGreetingState(const SnafuGreetingFields& s) {
@@ -75,7 +75,7 @@ static GreetingState snafuGreetingState(const SnafuGreetingFields& s) {
   if (!playing) return {};
   GreetingState gs;
   gs.active     = true;
-  gs.peerBdAddr = s.greetedBdAddr;
+  gs.peerLampId = s.greetedLampId_;
   gs.kind       = "glitch";
   return gs;
 }
@@ -95,7 +95,7 @@ void test_social_idle_returns_inactive() {
   s.animationState = STOPPED;
   auto gs = socialGreetingState(s);
   TEST_ASSERT_FALSE(gs.active);
-  TEST_ASSERT_TRUE(gs.peerBdAddr.empty());
+  TEST_ASSERT_TRUE(gs.peerLampId.empty());
   TEST_ASSERT_TRUE(gs.kind.empty());
 }
 
@@ -104,10 +104,10 @@ void test_social_playing_snub_returns_active_snub() {
   s.animationState    = PLAYING_ONCE;
   s.snub              = true;
   s.pulseBackStrength = 255;
-  s.greetingPeerBdAddr = kPeerA;
+  s.greetingPeerLampId_ = kPeerA;
   auto gs = socialGreetingState(s);
   TEST_ASSERT_TRUE(gs.active);
-  TEST_ASSERT_EQUAL_STRING(kPeerA.c_str(), gs.peerBdAddr.c_str());
+  TEST_ASSERT_EQUAL_STRING(kPeerA.c_str(), gs.peerLampId.c_str());
   TEST_ASSERT_EQUAL_STRING("snub", gs.kind.c_str());
 }
 
@@ -116,10 +116,10 @@ void test_social_playing_with_pulse_returns_warm() {
   s.animationState    = PLAYING_ONCE;
   s.snub              = false;
   s.pulseBackStrength = 100;
-  s.greetingPeerBdAddr = kPeerB;
+  s.greetingPeerLampId_ = kPeerB;
   auto gs = socialGreetingState(s);
   TEST_ASSERT_TRUE(gs.active);
-  TEST_ASSERT_EQUAL_STRING(kPeerB.c_str(), gs.peerBdAddr.c_str());
+  TEST_ASSERT_EQUAL_STRING(kPeerB.c_str(), gs.peerLampId.c_str());
   TEST_ASSERT_EQUAL_STRING("warm", gs.kind.c_str());
 }
 
@@ -128,7 +128,7 @@ void test_social_playing_no_pulse_returns_reserved() {
   s.animationState    = PLAYING_ONCE;
   s.snub              = false;
   s.pulseBackStrength = 0;
-  s.greetingPeerBdAddr = kPeerA;
+  s.greetingPeerLampId_ = kPeerA;
   auto gs = socialGreetingState(s);
   TEST_ASSERT_TRUE(gs.active);
   TEST_ASSERT_EQUAL_STRING("reserved", gs.kind.c_str());
@@ -139,15 +139,15 @@ void test_social_peer_addr_populated_while_playing() {
   s.animationState    = PLAYING_ONCE;
   s.snub              = false;
   s.pulseBackStrength = 0;
-  s.greetingPeerBdAddr = kPeerA;
+  s.greetingPeerLampId_ = kPeerA;
   auto gs = socialGreetingState(s);
-  TEST_ASSERT_EQUAL_STRING(kPeerA.c_str(), gs.peerBdAddr.c_str());
+  TEST_ASSERT_EQUAL_STRING(kPeerA.c_str(), gs.peerLampId.c_str());
 }
 
 void test_social_stopping_state_is_active() {
   SocialGreetingFields s;
   s.animationState    = STOPPING;
-  s.greetingPeerBdAddr = kPeerA;
+  s.greetingPeerLampId_ = kPeerA;
   auto gs = socialGreetingState(s);
   TEST_ASSERT_TRUE(gs.active);
 }
@@ -159,24 +159,24 @@ void test_snafu_idle_returns_inactive() {
   s.animationState = STOPPED;
   auto gs = snafuGreetingState(s);
   TEST_ASSERT_FALSE(gs.active);
-  TEST_ASSERT_TRUE(gs.peerBdAddr.empty());
+  TEST_ASSERT_TRUE(gs.peerLampId.empty());
   TEST_ASSERT_TRUE(gs.kind.empty());
 }
 
 void test_snafu_playing_returns_active_glitch() {
   SnafuGreetingFields s;
   s.animationState = PLAYING_ONCE;
-  s.greetedBdAddr  = kPeerA;
+  s.greetedLampId_  = kPeerA;
   auto gs = snafuGreetingState(s);
   TEST_ASSERT_TRUE(gs.active);
-  TEST_ASSERT_EQUAL_STRING(kPeerA.c_str(), gs.peerBdAddr.c_str());
+  TEST_ASSERT_EQUAL_STRING(kPeerA.c_str(), gs.peerLampId.c_str());
   TEST_ASSERT_EQUAL_STRING("glitch", gs.kind.c_str());
 }
 
 void test_snafu_stopping_is_active() {
   SnafuGreetingFields s;
   s.animationState = STOPPING;
-  s.greetedBdAddr  = kPeerB;
+  s.greetedLampId_  = kPeerB;
   auto gs = snafuGreetingState(s);
   TEST_ASSERT_TRUE(gs.active);
 }
@@ -184,7 +184,7 @@ void test_snafu_stopping_is_active() {
 void test_snafu_kind_is_always_glitch() {
   SnafuGreetingFields s;
   s.animationState = PLAYING;
-  s.greetedBdAddr  = kPeerA;
+  s.greetedLampId_  = kPeerA;
   auto gs = snafuGreetingState(s);
   TEST_ASSERT_EQUAL_STRING("glitch", gs.kind.c_str());
 }
@@ -192,9 +192,9 @@ void test_snafu_kind_is_always_glitch() {
 void test_snafu_peer_addr_populated_while_playing() {
   SnafuGreetingFields s;
   s.animationState = PLAYING_ONCE;
-  s.greetedBdAddr  = kPeerB;
+  s.greetedLampId_  = kPeerB;
   auto gs = snafuGreetingState(s);
-  TEST_ASSERT_EQUAL_STRING(kPeerB.c_str(), gs.peerBdAddr.c_str());
+  TEST_ASSERT_EQUAL_STRING(kPeerB.c_str(), gs.peerLampId.c_str());
 }
 
 // ---- snafu::Greeting change-callback edge detection -------------------------
@@ -273,7 +273,7 @@ static std::string buildStateNotifyPayload(bool previewActive,
     snprintf(buf, sizeof(buf),
              "{\"previewActive\":%s,\"greeting\":{\"active\":true,\"peer\":\"%s\",\"kind\":\"%s\"}}",
              previewActive ? "true" : "false",
-             gs.peerBdAddr.c_str(),
+             gs.peerLampId.c_str(),
              gs.kind.c_str());
   } else {
     snprintf(buf, sizeof(buf),
@@ -293,7 +293,7 @@ void test_notify_payload_idle_greeting() {
 void test_notify_payload_active_greeting_includes_peer_and_kind() {
   GreetingState gs;
   gs.active     = true;
-  gs.peerBdAddr = kPeerA;
+  gs.peerLampId = kPeerA;
   gs.kind       = "warm";
   auto payload = buildStateNotifyPayload(false, gs);
   TEST_ASSERT_NOT_NULL(strstr(payload.c_str(), "\"active\":true"));
@@ -302,10 +302,10 @@ void test_notify_payload_active_greeting_includes_peer_and_kind() {
 }
 
 void test_notify_payload_fits_budget() {
-  // Worst case: active + 17B bdAddr + max kind.
+  // Worst case: active + 17B lampId + max kind.
   GreetingState gs;
   gs.active     = true;
-  gs.peerBdAddr = "AA:BB:CC:DD:EE:FF";
+  gs.peerLampId = "AA:BB:CC:DD:EE:FF";
   gs.kind       = "reserved";
   auto payload = buildStateNotifyPayload(true, gs);
   // Must fit in 128 bytes (the ble_control buffer size).

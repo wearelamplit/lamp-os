@@ -1,14 +1,14 @@
 // Native-host tests for the staged snafu greeting sequence.
 //
-// Pins the three-tier, two-stage mesh behaviour introduced in Task 3.
-// Mirrors the production logic inline (no Arduino / FreeRTOS) so the
-// tests compile on native. The production SocialMode enum and the three
-// NearbyLamps queries are reproduced verbatim; keep them in sync with
-// config_types.hpp and nearby_lamps.hpp.
+// Pins the three-tier, two-stage social greeting behaviour: stages fire on
+// elapsed time and SocialMode alone, gated only by the greeted peer having a
+// MAC. Mirrors the production logic inline (no Arduino / FreeRTOS) so the
+// tests compile on native. The production SocialMode enum and the
+// LampRoster queries it uses are reproduced verbatim; keep them in sync
+// with config_types.hpp and lamp_roster.hpp.
 
 #include <unity.h>
 
-#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -44,68 +44,57 @@ struct ExpressionInvocation {
   uint32_t delayMs = 0;
 };
 
-struct NearbyLamp {
+struct RosterEntry {
   std::string name;
-  std::string bdAddr;
+  std::string lampId;
   Color baseColor;
   uint8_t mac[6] = {0};
   bool hasMac = false;
-  uint32_t lastSeenViaBleMs = 0;
-  uint32_t lastSeenViaEspNowMs = 0;
+  uint32_t lastSeenNearMs = 0;
+  uint32_t lastSeenMeshMs = 0;
   bool acknowledged = false;
 };
 
-// Inline NearbyLamps mirror sufficient for the tests. No FreeRTOS locks.
-class NearbyLamps {
+// Inline LampRoster mirror sufficient for the tests. No FreeRTOS locks.
+class LampRoster {
  public:
-  void seedBle(const std::string& name, const std::string& bdAddr,
-               const Color& base, uint32_t lastSeenViaBleMs, bool ack) {
-    NearbyLamp e;
+  void seedBle(const std::string& name, const std::string& lampId,
+               const Color& base, uint32_t lastSeenNearMs, bool ack) {
+    RosterEntry e;
     e.name = name;
-    e.bdAddr = bdAddr;
+    e.lampId = lampId;
     e.baseColor = base;
-    e.lastSeenViaBleMs = lastSeenViaBleMs;
+    e.lastSeenNearMs = lastSeenNearMs;
     e.acknowledged = ack;
     store_.push_back(e);
   }
 
   // Seeds a peer visible on both transports.
-  void seedMesh(const std::string& name, const std::string& bdAddr,
+  void seedMesh(const std::string& name, const std::string& lampId,
                 const Color& base, const uint8_t mac[6],
-                uint32_t lastSeenViaBleMs, uint32_t lastSeenViaEspNowMs,
+                uint32_t lastSeenNearMs, uint32_t lastSeenMeshMs,
                 bool ack) {
-    NearbyLamp e;
+    RosterEntry e;
     e.name = name;
-    e.bdAddr = bdAddr;
+    e.lampId = lampId;
     e.baseColor = base;
     std::memcpy(e.mac, mac, 6);
     e.hasMac = true;
-    e.lastSeenViaBleMs = lastSeenViaBleMs;
-    e.lastSeenViaEspNowMs = lastSeenViaEspNowMs;
+    e.lastSeenNearMs = lastSeenNearMs;
+    e.lastSeenMeshMs = lastSeenMeshMs;
     e.acknowledged = ack;
     store_.push_back(e);
   }
 
-  std::vector<NearbyLamp> getUngreetedArrivals(uint32_t maxAgeMs) {
+  std::vector<RosterEntry> getUngreetedArrivals(uint32_t maxAgeMs) {
     uint32_t now = millis();
-    std::vector<NearbyLamp> out;
+    std::vector<RosterEntry> out;
     for (const auto& e : store_) {
-      if (e.bdAddr.empty()) continue;
-      if (e.lastSeenViaBleMs == 0) continue;
-      if ((now - e.lastSeenViaBleMs) > maxAgeMs) continue;
+      if (e.lampId.empty()) continue;
+      if (e.lastSeenNearMs == 0) continue;
+      if ((now - e.lastSeenNearMs) > maxAgeMs) continue;
       if (e.acknowledged) continue;
       out.push_back(e);
-    }
-    return out;
-  }
-
-  std::vector<NearbyLamp> getReachableViaEspNow(uint32_t maxAgeMs) {
-    uint32_t now = millis();
-    std::vector<NearbyLamp> out;
-    for (const auto& e : store_) {
-      if (e.lastSeenViaEspNowMs != 0 && (now - e.lastSeenViaEspNowMs) <= maxAgeMs) {
-        out.push_back(e);
-      }
     }
     return out;
   }
@@ -117,7 +106,7 @@ class NearbyLamps {
   }
 
  private:
-  std::vector<NearbyLamp> store_;
+  std::vector<RosterEntry> store_;
 };
 
 // ---- Fake ExpressionManager ---------------------------------------------
@@ -160,14 +149,13 @@ class FakeExpressionManager {
 // on native without Arduino headers. Keep in sync with greeting.cpp.
 
 static constexpr uint32_t kBleMaxAgeMs     = 5000;
-static constexpr uint32_t kEspNowMaxAgeMs  = 5000;
 static constexpr uint32_t kStage2Ms        = 700;
 static constexpr uint32_t kStage3Ms        = 1400;
 
 struct GreetState {
   bool     active      = false;
   std::string greetedName;
-  std::string greetedBdAddr;
+  std::string greetedLampId;
   uint8_t  greetedMac[6] = {0};
   bool     hasMac      = false;
   Color    peerColor;
@@ -177,11 +165,11 @@ struct GreetState {
 };
 
 // doGreet: start a greeting sequence (stage 1 implicit in tests via state set).
-static void doGreet(GreetState& g, const NearbyLamp& peer,
-                    NearbyLamps& lamps) {
+static void doGreet(GreetState& g, const RosterEntry& peer,
+                    LampRoster& lamps) {
   g.active         = true;
   g.greetedName    = peer.name;
-  g.greetedBdAddr  = peer.bdAddr;
+  g.greetedLampId  = peer.lampId;
   std::memcpy(g.greetedMac, peer.mac, 6);
   g.hasMac         = peer.hasMac;
   g.peerColor      = peer.baseColor;
@@ -192,10 +180,10 @@ static void doGreet(GreetState& g, const NearbyLamp& peer,
 }
 
 // tickStages: call each control() iteration after doGreet. Fires stage 2
-// at kStage2Ms and stage 3 at kStage3Ms via the fake manager.
+// at kStage2Ms and stage 3 at kStage3Ms via the fake manager, gated only
+// on elapsed time, SocialMode, and the greeted peer having a MAC.
 static void tickStages(GreetState& g, SocialMode mode,
                        const Color& stemColor,
-                       NearbyLamps& lamps,
                        FakeExpressionManager& mgr) {
   if (!g.active) return;
   const uint32_t elapsed = millis() - g.greetStartMs;
@@ -205,21 +193,14 @@ static void tickStages(GreetState& g, SocialMode mode,
       (mode == SocialMode::Ambivert || mode == SocialMode::Extrovert)) {
     g.stage2Done = true;
     if (g.hasMac) {
-      auto peers = lamps.getReachableViaEspNow(kEspNowMaxAgeMs);
-      bool reachable = std::any_of(peers.begin(), peers.end(),
-        [&](const NearbyLamp& p) {
-          return p.hasMac && std::memcmp(p.mac, g.greetedMac, 6) == 0;
-        });
-      if (reachable) {
-        ExpressionInvocation inv;
-        inv.type   = "glitchy";
-        inv.colors = {g.peerColor};
-        inv.target = kTargetShade;
-        inv.parameters = {{"durationMin", kFastGlitchFrames},
-                          {"durationMax", kFastGlitchFrames}};
-        inv.delayMs = 0;
-        mgr.sendInvocationTo(g.greetedMac, inv);
-      }
+      ExpressionInvocation inv;
+      inv.type   = "glitchy";
+      inv.colors = {g.peerColor};
+      inv.target = kTargetShade;
+      inv.parameters = {{"durationMin", kFastGlitchFrames},
+                        {"durationMax", kFastGlitchFrames}};
+      inv.delayMs = 0;
+      mgr.sendInvocationTo(g.greetedMac, inv);
     }
   }
 
@@ -228,21 +209,14 @@ static void tickStages(GreetState& g, SocialMode mode,
       mode == SocialMode::Extrovert) {
     g.stage3Done = true;
     if (g.hasMac) {
-      auto peers = lamps.getReachableViaEspNow(kEspNowMaxAgeMs);
-      bool reachable = std::any_of(peers.begin(), peers.end(),
-        [&](const NearbyLamp& p) {
-          return p.hasMac && std::memcmp(p.mac, g.greetedMac, 6) == 0;
-        });
-      if (reachable) {
-        ExpressionInvocation inv;
-        inv.type   = "glitchy";
-        inv.colors = {stemColor, g.peerColor};
-        inv.target = kTargetShade;
-        inv.parameters = {{"durationMin", kFastGlitchFrames},
-                          {"durationMax", kFastGlitchFrames}};
-        inv.delayMs = 0;
-        mgr.broadcastInvocation(inv, g.greetedMac);
-      }
+      ExpressionInvocation inv;
+      inv.type   = "glitchy";
+      inv.colors = {stemColor, g.peerColor};
+      inv.target = kTargetShade;
+      inv.parameters = {{"durationMin", kFastGlitchFrames},
+                        {"durationMax", kFastGlitchFrames}};
+      inv.delayMs = 0;
+      mgr.broadcastInvocation(inv, g.greetedMac);
     }
   }
 }
@@ -264,7 +238,7 @@ void tearDown() {}
 
 // Introvert: stage 1 only; zero mesh sends regardless of mesh reachability.
 void test_introvert_no_mesh_sends() {
-  lamp::NearbyLamps lamps;
+  lamp::LampRoster lamps;
   lamp::FakeExpressionManager mgr;
 
   lamps.seedMesh("flora", "AA:BB:CC:DD:EE:01", kBlue, kMacA,
@@ -278,14 +252,14 @@ void test_introvert_no_mesh_sends() {
 
   // Jump past both stage thresholds.
   s_nowMs += 1500;
-  lamp::tickStages(g, lamp::SocialMode::Introvert, kStem, lamps, mgr);
+  lamp::tickStages(g, lamp::SocialMode::Introvert, kStem, mgr);
 
   TEST_ASSERT_EQUAL_UINT(0, mgr.sent.size());
 }
 
 // Ambivert: exactly one directed send to the greeted mac; no broadcast.
 void test_ambivert_directed_only() {
-  lamp::NearbyLamps lamps;
+  lamp::LampRoster lamps;
   lamp::FakeExpressionManager mgr;
 
   lamps.seedMesh("flora", "AA:BB:CC:DD:EE:01", kBlue, kMacA,
@@ -301,7 +275,7 @@ void test_ambivert_directed_only() {
   lamp::doGreet(g, arrivals[0], lamps);
 
   s_nowMs += 1500;
-  lamp::tickStages(g, lamp::SocialMode::Ambivert, kStem, lamps, mgr);
+  lamp::tickStages(g, lamp::SocialMode::Ambivert, kStem, mgr);
 
   TEST_ASSERT_EQUAL_UINT(1, mgr.sent.size());
   TEST_ASSERT_TRUE(mgr.sent[0].directed);
@@ -310,7 +284,7 @@ void test_ambivert_directed_only() {
 
 // Extrovert: directed to greeted mac AND a broadcast excluding greeted mac.
 void test_extrovert_directed_and_broadcast() {
-  lamp::NearbyLamps lamps;
+  lamp::LampRoster lamps;
   lamp::FakeExpressionManager mgr;
 
   lamps.seedMesh("flora", "AA:BB:CC:DD:EE:01", kBlue, kMacA,
@@ -325,7 +299,7 @@ void test_extrovert_directed_and_broadcast() {
   lamp::doGreet(g, arrivals[0], lamps);
 
   s_nowMs += 1500;
-  lamp::tickStages(g, lamp::SocialMode::Extrovert, kStem, lamps, mgr);
+  lamp::tickStages(g, lamp::SocialMode::Extrovert, kStem, mgr);
 
   // Exactly two sends: directed + broadcast.
   TEST_ASSERT_EQUAL_UINT(2, mgr.sent.size());
@@ -349,27 +323,27 @@ void test_extrovert_directed_and_broadcast() {
   TEST_ASSERT_EQUAL_UINT8_ARRAY(kMacA, bcast->mac, 6);  // stored as excludeMac
 }
 
-// Opportunistic: greeted peer not ESP-NOW-reachable; no stage 2/3 sends.
-void test_extrovert_no_send_when_peer_not_mesh_reachable() {
-  lamp::NearbyLamps lamps;
+// Opportunistic: greeted peer has no mac (BLE-only); no stage 2/3 sends.
+void test_extrovert_no_send_when_peer_has_no_mac() {
+  lamp::LampRoster lamps;
   lamp::FakeExpressionManager mgr;
 
-  // BLE-only peer: no lastSeenViaEspNowMs.
+  // BLE-only peer: no lastSeenMeshMs.
   lamps.seedBle("flora", "AA:BB:CC:DD:EE:01", kBlue, s_nowMs - 100, false);
 
-  // Manually build a NearbyLamp with hasMac=false (BLE-only).
-  lamp::NearbyLamp peer;
+  // Manually build a RosterEntry with hasMac=false (BLE-only).
+  lamp::RosterEntry peer;
   peer.name             = "flora";
-  peer.bdAddr           = "AA:BB:CC:DD:EE:01";
+  peer.lampId           = "AA:BB:CC:DD:EE:01";
   peer.baseColor        = kBlue;
   peer.hasMac           = false;
-  peer.lastSeenViaBleMs = s_nowMs - 100;
+  peer.lastSeenNearMs = s_nowMs - 100;
 
   lamp::GreetState g;
   lamp::doGreet(g, peer, lamps);
 
   s_nowMs += 1500;
-  lamp::tickStages(g, lamp::SocialMode::Extrovert, kStem, lamps, mgr);
+  lamp::tickStages(g, lamp::SocialMode::Extrovert, kStem, mgr);
 
   // No mesh sends because hasMac is false.
   TEST_ASSERT_EQUAL_UINT(0, mgr.sent.size());
@@ -377,7 +351,7 @@ void test_extrovert_no_send_when_peer_not_mesh_reachable() {
 
 // Two-color: Extrovert crowd invocation carries {stemColor, peer.baseColor}.
 void test_extrovert_broadcast_two_color_palette() {
-  lamp::NearbyLamps lamps;
+  lamp::LampRoster lamps;
   lamp::FakeExpressionManager mgr;
 
   lamps.seedMesh("flora", "AA:BB:CC:DD:EE:01", kBlue, kMacA,
@@ -390,7 +364,7 @@ void test_extrovert_broadcast_two_color_palette() {
   lamp::doGreet(g, arrivals[0], lamps);
 
   s_nowMs += 1500;
-  lamp::tickStages(g, lamp::SocialMode::Extrovert, kStem, lamps, mgr);
+  lamp::tickStages(g, lamp::SocialMode::Extrovert, kStem, mgr);
 
   const lamp::SendRecord* bcast = nullptr;
   for (const auto& r : mgr.sent)
@@ -404,7 +378,7 @@ void test_extrovert_broadcast_two_color_palette() {
 
 // Stage 2 must not fire before kStage2Ms elapses.
 void test_stage2_does_not_fire_before_threshold() {
-  lamp::NearbyLamps lamps;
+  lamp::LampRoster lamps;
   lamp::FakeExpressionManager mgr;
 
   lamps.seedMesh("flora", "AA:BB:CC:DD:EE:01", kBlue, kMacA,
@@ -416,14 +390,14 @@ void test_stage2_does_not_fire_before_threshold() {
 
   // Advance to just before the threshold.
   s_nowMs += lamp::kStage2Ms - 1;
-  lamp::tickStages(g, lamp::SocialMode::Extrovert, kStem, lamps, mgr);
+  lamp::tickStages(g, lamp::SocialMode::Extrovert, kStem, mgr);
 
   TEST_ASSERT_EQUAL_UINT(0, mgr.sent.size());
 }
 
 // Stage 3 must not fire before kStage3Ms elapses.
 void test_stage3_does_not_fire_before_threshold() {
-  lamp::NearbyLamps lamps;
+  lamp::LampRoster lamps;
   lamp::FakeExpressionManager mgr;
 
   lamps.seedMesh("flora", "AA:BB:CC:DD:EE:01", kBlue, kMacA,
@@ -435,45 +409,39 @@ void test_stage3_does_not_fire_before_threshold() {
 
   // Advance past stage 2 but not stage 3.
   s_nowMs += lamp::kStage2Ms + 100;
-  lamp::tickStages(g, lamp::SocialMode::Extrovert, kStem, lamps, mgr);
+  lamp::tickStages(g, lamp::SocialMode::Extrovert, kStem, mgr);
   // Only stage 2 (directed) fired.
   TEST_ASSERT_EQUAL_UINT(1, mgr.sent.size());
   TEST_ASSERT_TRUE(mgr.sent[0].directed);
 }
 
-// Opportunistic skip: peer has a valid MAC but dropped off ESP-NOW (BLE-only
-// after initial handshake). Stage 1 ran; stages 2 and 3 must not send.
-void test_extrovert_no_send_when_peer_has_mac_but_not_espnow_reachable() {
-  lamp::NearbyLamps lamps;
+// Peer has a MAC but was seen only via BLE (never confirmed ESP-NOW
+// reachable). Stages 2 and 3 still fire: elapsed time and SocialMode are
+// the only preconditions.
+void test_extrovert_sends_even_when_not_mesh_reachable() {
+  lamp::LampRoster lamps;
   lamp::FakeExpressionManager mgr;
 
-  // Peer seen via BLE only (lastSeenViaEspNowMs == 0).
-  lamp::NearbyLamp peer;
+  lamp::RosterEntry peer;
   peer.name             = "flora";
-  peer.bdAddr           = "AA:BB:CC:DD:EE:01";
+  peer.lampId           = "AA:BB:CC:DD:EE:01";
   peer.baseColor        = kBlue;
   std::memcpy(peer.mac, kMacA, 6);
   peer.hasMac           = true;
-  peer.lastSeenViaBleMs = s_nowMs - 100;
-  // lastSeenViaEspNowMs left 0 — not ESP-NOW reachable.
-
-  // Seed the same peer BLE-only so getReachableViaEspNow returns nothing.
-  lamps.seedBle("flora", "AA:BB:CC:DD:EE:01", kBlue, s_nowMs - 100, false);
+  peer.lastSeenNearMs = s_nowMs - 100;
 
   lamp::GreetState g;
   lamp::doGreet(g, peer, lamps);
 
-  // Jump past both stage thresholds.
   s_nowMs += 1500;
-  lamp::tickStages(g, lamp::SocialMode::Extrovert, kStem, lamps, mgr);
+  lamp::tickStages(g, lamp::SocialMode::Extrovert, kStem, mgr);
 
-  // Stage 1 ran (doGreet), but no directed or crowd mesh sends.
-  TEST_ASSERT_EQUAL_UINT(0, mgr.sent.size());
+  TEST_ASSERT_EQUAL_UINT(2, mgr.sent.size());
 }
 
 // Stages fire at most once each.
 void test_stages_fire_at_most_once() {
-  lamp::NearbyLamps lamps;
+  lamp::LampRoster lamps;
   lamp::FakeExpressionManager mgr;
 
   lamps.seedMesh("flora", "AA:BB:CC:DD:EE:01", kBlue, kMacA,
@@ -484,9 +452,9 @@ void test_stages_fire_at_most_once() {
   lamp::doGreet(g, arrivals[0], lamps);
 
   s_nowMs += 1500;
-  lamp::tickStages(g, lamp::SocialMode::Extrovert, kStem, lamps, mgr);
-  lamp::tickStages(g, lamp::SocialMode::Extrovert, kStem, lamps, mgr);
-  lamp::tickStages(g, lamp::SocialMode::Extrovert, kStem, lamps, mgr);
+  lamp::tickStages(g, lamp::SocialMode::Extrovert, kStem, mgr);
+  lamp::tickStages(g, lamp::SocialMode::Extrovert, kStem, mgr);
+  lamp::tickStages(g, lamp::SocialMode::Extrovert, kStem, mgr);
 
   // Each stage fires exactly once.
   TEST_ASSERT_EQUAL_UINT(2, mgr.sent.size());
@@ -497,8 +465,8 @@ int main(int, char**) {
   RUN_TEST(test_introvert_no_mesh_sends);
   RUN_TEST(test_ambivert_directed_only);
   RUN_TEST(test_extrovert_directed_and_broadcast);
-  RUN_TEST(test_extrovert_no_send_when_peer_not_mesh_reachable);
-  RUN_TEST(test_extrovert_no_send_when_peer_has_mac_but_not_espnow_reachable);
+  RUN_TEST(test_extrovert_no_send_when_peer_has_no_mac);
+  RUN_TEST(test_extrovert_sends_even_when_not_mesh_reachable);
   RUN_TEST(test_extrovert_broadcast_two_color_palette);
   RUN_TEST(test_stage2_does_not_fire_before_threshold);
   RUN_TEST(test_stage3_does_not_fire_before_threshold);

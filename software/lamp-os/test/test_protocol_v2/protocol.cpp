@@ -28,7 +28,7 @@ namespace lp = lamp_protocol;
 //
 // If a future change wants to bump 0x05, it has to update THIS line —
 // which forces a thoughtful answer to "is this actually a behavioral
-// contract change (DedupRing capacity, HELLO interval, MSG_FW_*
+// contract change (HELLO interval, MSG_FW_*
 // layout, semantic redefinition) and not just a new field that could
 // have been a TLV?" since inspect() rejects mismatched-version frames
 // and a bump splits the mesh.
@@ -46,17 +46,6 @@ static_assert(lp::PROTOCOL_VERSION_RX_MAX == 0x05,
 static_assert(lp::PROTOCOL_VERSION_RX_MIN == 0x04,
               "RX_MIN lock-in. Dropping this floor evicts v0x04 lamps from "
               "the mesh — only do so once the whole fleet has rolled past it.");
-
-// v0x03 lock-in pin: DedupRing capacity grew 32 → 64 because at 20-50 lamps
-// each gossiping (sourceMac, seq) the 32-slot ring wrapped fast enough that
-// a late-arriving gossip copy could re-fire a receiver. Pinning here forces
-// any future shrink to come with an explicit "we re-validated this against
-// fleet size N" answer. The data-behavior tests for the new boundary live
-// in test_dedup_ring (against an inline mirror that's also pinned to 64).
-// why: pins the DedupRing capacity lock-in per validated plan §"Layer 2".
-static_assert(lp::DedupRing::CAPACITY == 64,
-              "DedupRing::CAPACITY lock-in for v0x03 (32→64 for 20-50 lamp "
-              "fleet headroom). Shrinking risks re-firing late gossip copies.");
 
 static const uint8_t kSrcMac[6]    = {0x10, 0x11, 0x12, 0x13, 0x14, 0x15};
 static const uint8_t kTargetMac[6] = {0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5};
@@ -259,13 +248,17 @@ void test_override_brightness_roundtrip() {
   TEST_ASSERT_EQUAL_UINT16(2500, out.fadeDurationMs);
 }
 
-void test_override_brightness_too_low_rejected_by_builder() {
+void test_override_brightness_zero_accepted_by_builder() {
   uint8_t buf[lp::OVERRIDE_BRIGHTNESS_FIXED_SIZE];
-  TEST_ASSERT_EQUAL_UINT32(0,
-      lp::buildOverrideBrightness(buf, sizeof(buf), 1, kSrcMac, kTargetMac,
-                                  lp::OverrideSurface::Base,
-                                  lp::OverrideSource::Wisp, 0,
-                                  /*brightness=*/lp::kBrightnessOverrideMin - 1));
+  const size_t n = lp::buildOverrideBrightness(buf, sizeof(buf), 1, kSrcMac,
+                                               kTargetMac,
+                                               lp::OverrideSurface::Base,
+                                               lp::OverrideSource::Wisp, 0,
+                                               /*brightness=*/0);
+  TEST_ASSERT_EQUAL_UINT32(lp::OVERRIDE_BRIGHTNESS_FIXED_SIZE, n);
+  lp::ParsedOverrideBrightness out;
+  TEST_ASSERT_TRUE(lp::parseOverrideBrightness(buf, n, out));
+  TEST_ASSERT_EQUAL_UINT8(0, out.brightness);
 }
 
 void test_override_brightness_over_100_rejected_by_builder() {
@@ -324,10 +317,12 @@ static void test_wisp_palette_roundtrip() {
       36,  99,  39,
   };
   const size_t count = sizeof(rgb) / 3;
+  const uint8_t w[] = {0, 255, 128, 0, 1, 254, 77};
+  static_assert(sizeof(w) == sizeof(rgb) / 3, "w plane mismatched to rgb");
 
   const size_t n = lp::buildWispPalette(buf, sizeof(buf), /*seq*/ 0x1234,
-                                        mac, rgb, count);
-  TEST_ASSERT_EQUAL(lp::WISP_PALETTE_FIXED_PREFIX + count * 3, n);
+                                        mac, rgb, w, count);
+  TEST_ASSERT_EQUAL(lp::WISP_PALETTE_FIXED_PREFIX + count * 4, n);
 
   lp::ParsedWispPalette out;
   TEST_ASSERT_TRUE(lp::parseWispPalette(buf, n, out));
@@ -335,6 +330,25 @@ static void test_wisp_palette_roundtrip() {
   TEST_ASSERT_EQUAL_MEMORY(mac, out.sourceMac, 6);
   TEST_ASSERT_EQUAL(count, out.count);
   TEST_ASSERT_EQUAL_MEMORY(rgb, out.rgb, count * 3);
+  TEST_ASSERT_NOT_NULL(out.w);
+  TEST_ASSERT_EQUAL_MEMORY(w, out.w, count);
+}
+
+static void test_wisp_palette_legacy_frame_parses_without_w_plane() {
+  // Frames from senders that predate the W plane are count*3 only; the
+  // parser must accept them and surface w == nullptr.
+  uint8_t buf[lp::WISP_PALETTE_MAX_SIZE];
+  const uint8_t mac[6] = {0xE4, 0xB3, 0x23, 0xB4, 0x95, 0x20};
+  const uint8_t rgb[] = {10, 20, 30, 40, 50, 60};
+  const size_t n = lp::buildWispPalette(buf, sizeof(buf), /*seq*/ 5, mac,
+                                        rgb, /*w*/ nullptr, 2);
+  TEST_ASSERT_EQUAL(lp::WISP_PALETTE_FIXED_PREFIX + 2 * 3, n);
+
+  lp::ParsedWispPalette out;
+  TEST_ASSERT_TRUE(lp::parseWispPalette(buf, n, out));
+  TEST_ASSERT_EQUAL(2, out.count);
+  TEST_ASSERT_EQUAL_MEMORY(rgb, out.rgb, sizeof(rgb));
+  TEST_ASSERT_NULL(out.w);
 }
 
 static void test_wisp_palette_empty_roundtrip() {
@@ -343,13 +357,15 @@ static void test_wisp_palette_empty_roundtrip() {
   uint8_t buf[lp::WISP_PALETTE_MAX_SIZE];
   const uint8_t mac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
   const size_t n = lp::buildWispPalette(buf, sizeof(buf), /*seq*/ 7, mac,
-                                        /*rgb*/ nullptr, /*count*/ 0);
+                                        /*rgb*/ nullptr, /*w*/ nullptr,
+                                        /*count*/ 0);
   TEST_ASSERT_EQUAL(lp::WISP_PALETTE_FIXED_PREFIX, n);
 
   lp::ParsedWispPalette out;
   TEST_ASSERT_TRUE(lp::parseWispPalette(buf, n, out));
   TEST_ASSERT_EQUAL(0, out.count);
   TEST_ASSERT_NULL(out.rgb);
+  TEST_ASSERT_NULL(out.w);
 }
 
 static void test_wisp_palette_at_cap_roundtrip() {
@@ -359,15 +375,20 @@ static void test_wisp_palette_at_cap_roundtrip() {
   const uint8_t mac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
   uint8_t rgb[lp::kMaxWispPaletteColors * 3];
   for (size_t i = 0; i < sizeof(rgb); ++i) rgb[i] = static_cast<uint8_t>(i);
+  uint8_t w[lp::kMaxWispPaletteColors];
+  for (size_t i = 0; i < sizeof(w); ++i) w[i] = static_cast<uint8_t>(255 - i);
 
   const size_t n = lp::buildWispPalette(buf, sizeof(buf), /*seq*/ 0xFFFF, mac,
-                                        rgb, lp::kMaxWispPaletteColors);
+                                        rgb, w, lp::kMaxWispPaletteColors);
   TEST_ASSERT_EQUAL(lp::WISP_PALETTE_MAX_SIZE, n);
+  TEST_ASSERT_TRUE(n <= 250);
 
   lp::ParsedWispPalette out;
   TEST_ASSERT_TRUE(lp::parseWispPalette(buf, n, out));
   TEST_ASSERT_EQUAL(lp::kMaxWispPaletteColors, out.count);
   TEST_ASSERT_EQUAL_MEMORY(rgb, out.rgb, sizeof(rgb));
+  TEST_ASSERT_NOT_NULL(out.w);
+  TEST_ASSERT_EQUAL_MEMORY(w, out.w, sizeof(w));
 }
 
 static void test_wisp_palette_over_cap_rejected_by_builder() {
@@ -378,6 +399,7 @@ static void test_wisp_palette_over_cap_rejected_by_builder() {
   uint8_t rgb[(lp::kMaxWispPaletteColors + 1) * 3] = {0};
   TEST_ASSERT_EQUAL(0,
                     lp::buildWispPalette(buf, sizeof(buf), 0, mac, rgb,
+                                         /*w*/ nullptr,
                                          lp::kMaxWispPaletteColors + 1));
 }
 
@@ -388,7 +410,8 @@ static void test_wisp_palette_short_frame_rejected_by_parser() {
   uint8_t buf[lp::WISP_PALETTE_MAX_SIZE];
   const uint8_t mac[6] = {1, 2, 3, 4, 5, 6};
   const uint8_t rgb[12] = {10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120};
-  const size_t n = lp::buildWispPalette(buf, sizeof(buf), 0, mac, rgb, 4);
+  const size_t n =
+      lp::buildWispPalette(buf, sizeof(buf), 0, mac, rgb, /*w*/ nullptr, 4);
   TEST_ASSERT_TRUE(n > 0);
   // Trim one byte off the end → tail color is incomplete.
   lp::ParsedWispPalette out;
@@ -531,6 +554,53 @@ void test_hello_absent_fw_channel_is_empty() {
   TEST_ASSERT_EQUAL_STRING("", out.fwChannel);
 }
 
+void test_hello_max_chunk_round_trip() {
+  uint8_t buf[lp::HELLO_MAX_SIZE];
+  const size_t n = lp::buildHello(buf, sizeof(buf), 14, kSrcMac,
+                                  kHelloShade, kHelloBase, 0xBEEF,
+                                  "jacko", 5, lp::kOtaStateIdle,
+                                  /*fwChannel=*/nullptr, /*fsDigest=*/nullptr,
+                                  /*maxChunk=*/768);
+  // Idle (no OTA_STATE TLV) + FW_MAX_CHUNK TLV: tlv_count(1) + type(1) +
+  // len(1) + value(2).
+  TEST_ASSERT_EQUAL_UINT32(lp::HELLO_FIXED_SIZE + 1 + 5 + 1 + 4, n);
+  lp::ParsedHello out;
+  TEST_ASSERT_TRUE(lp::parseHello(buf, n, out));
+  TEST_ASSERT_EQUAL_UINT16(768, out.maxChunk);
+}
+
+void test_hello_absent_max_chunk_is_zero() {
+  uint8_t buf[lp::HELLO_MAX_SIZE];
+  // No maxChunk arg → no TLV emitted → parses to 0, the "older peer /
+  // never-receives-OTA peer" default the distributor treats as baseline.
+  const size_t n = lp::buildHello(buf, sizeof(buf), 15, kSrcMac,
+                                  kHelloShade, kHelloBase, 0xBEEF,
+                                  "old", 3, lp::kOtaStateIdle);
+  lp::ParsedHello out;
+  TEST_ASSERT_TRUE(lp::parseHello(buf, n, out));
+  TEST_ASSERT_EQUAL_UINT16(0, out.maxChunk);
+}
+
+void test_hello_max_chunk_with_channel_and_fs_state_all_emit() {
+  // Every known TLV type at once: the byte-budget worst case (name at max
+  // length + OTA_STATE + FW_CHANNEL + FS_STATE + FW_MAX_CHUNK) must still
+  // fit HELLO_MAX_SIZE (128).
+  static const uint8_t kFsDigest[lp::HELLO_FS_DIGEST_LEN] = {
+      1, 2, 3, 4, 5, 6, 7, 8};
+  uint8_t buf[lp::HELLO_MAX_SIZE];
+  const size_t n = lp::buildHello(
+      buf, sizeof(buf), 16, kSrcMac, kHelloShade, kHelloBase, 0xBEEF,
+      "thirtytwocharlongnamepadded1234", 32, lp::kOtaStateSending,
+      "standard-beta", kFsDigest, /*maxChunk=*/768);
+  TEST_ASSERT_TRUE(n <= lp::HELLO_MAX_SIZE);
+  lp::ParsedHello out;
+  TEST_ASSERT_TRUE(lp::parseHello(buf, n, out));
+  TEST_ASSERT_EQUAL_UINT8(lp::kOtaStateSending, out.otaState);
+  TEST_ASSERT_EQUAL_STRING("standard-beta", out.fwChannel);
+  TEST_ASSERT_TRUE(out.hasFsDigest);
+  TEST_ASSERT_EQUAL_UINT16(768, out.maxChunk);
+}
+
 // Forward-compat: an unknown TLV type must be skipped (by length),
 // the known OTA_STATE TLV that follows must still parse cleanly, and
 // no fields beyond what we know about should be affected.
@@ -597,6 +667,9 @@ int main(int argc, char** argv) {
   RUN_TEST(test_hello_fw_channel_round_trip);
   RUN_TEST(test_hello_fw_channel_and_ota_state_both_emit);
   RUN_TEST(test_hello_absent_fw_channel_is_empty);
+  RUN_TEST(test_hello_max_chunk_round_trip);
+  RUN_TEST(test_hello_absent_max_chunk_is_zero);
+  RUN_TEST(test_hello_max_chunk_with_channel_and_fs_state_all_emit);
   RUN_TEST(test_hello_unknown_tlv_is_skipped);
   RUN_TEST(test_hello_tlv_with_oversized_length_is_rejected);
 
@@ -611,13 +684,14 @@ int main(int argc, char** argv) {
   RUN_TEST(test_restore_colors_roundtrip);
 
   RUN_TEST(test_override_brightness_roundtrip);
-  RUN_TEST(test_override_brightness_too_low_rejected_by_builder);
+  RUN_TEST(test_override_brightness_zero_accepted_by_builder);
   RUN_TEST(test_override_brightness_over_100_rejected_by_builder);
   RUN_TEST(test_override_brightness_out_of_range_rejected_by_parser);
 
   RUN_TEST(test_restore_brightness_roundtrip);
 
   RUN_TEST(test_wisp_palette_roundtrip);
+  RUN_TEST(test_wisp_palette_legacy_frame_parses_without_w_plane);
   RUN_TEST(test_wisp_palette_empty_roundtrip);
   RUN_TEST(test_wisp_palette_at_cap_roundtrip);
   RUN_TEST(test_wisp_palette_over_cap_rejected_by_builder);

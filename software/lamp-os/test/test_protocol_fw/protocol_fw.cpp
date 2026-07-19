@@ -30,9 +30,11 @@ static_assert(lp::FW_CHUNK_FIXED_SIZE  == 26, "FW CHUNK header pin");
 static_assert(lp::FW_REQ_FIXED_SIZE    == 24, "FW REQ size pin");
 static_assert(lp::FW_DONE_FIXED_SIZE   == 38, "FW DONE size pin");
 static_assert(lp::FW_RESULT_FIXED_SIZE == 24, "FW RESULT size pin");
-static_assert(lp::FW_CHUNK_MAX_SIZE   <= 250, "FW CHUNK max within ESP-NOW");
-static_assert(lp::FW_OFFER_FIXED_SIZE <= 250, "FW OFFER max within ESP-NOW");
-static_assert(lp::FW_CHUNK_SIZE       == 200, "FW chunk payload v1 lock");
+static_assert(lp::FW_CHUNK_MAX_SIZE   <= lp::ESPNOW_V2_FRAME_MAX, "FW CHUNK max within ESP-NOW v2");
+static_assert(lp::FW_OFFER_FIXED_SIZE <= lp::ESPNOW_V2_FRAME_MAX, "FW OFFER max within ESP-NOW v2");
+static_assert(lp::FW_CHUNK_SIZE_BASELINE == 200, "FW chunk baseline lock");
+static_assert(lp::FW_CHUNK_SIZE_MAX      == 1444, "FW chunk v2 ceiling lock");
+static_assert(lp::FW_CHUNK_MAX_SIZE      == 1470, "FW CHUNK frame size at the v2 ceiling");
 static_assert(lp::FW_CHANNEL_LEN       ==  16, "FW channel slot lock (typed)");
 static_assert(lp::FW_SHA256_PREFIX_LEN ==   8, "FW sha256 prefix lock");
 
@@ -50,7 +52,7 @@ void test_fw_offer_roundtrip() {
       buf, sizeof(buf), /*seq=*/0x1234, kWispMac, kLampMac,
       /*version=*/0x00010203,
       /*totalLen=*/0x000F4240,    // 1,000,000 bytes
-      /*chunkSize=*/lp::FW_CHUNK_SIZE,
+      /*chunkSize=*/lp::FW_CHUNK_SIZE_BASELINE,
       channel, 15,
       sha,
       /*footerLen=*/96,
@@ -65,7 +67,7 @@ void test_fw_offer_roundtrip() {
   TEST_ASSERT_EQUAL_UINT8_ARRAY(kLampMac, out.targetMac, 6);
   TEST_ASSERT_EQUAL_UINT32(0x00010203u, out.version);
   TEST_ASSERT_EQUAL_UINT32(0x000F4240u, out.totalLen);
-  TEST_ASSERT_EQUAL_UINT16(lp::FW_CHUNK_SIZE, out.chunkSize);
+  TEST_ASSERT_EQUAL_UINT16(lp::FW_CHUNK_SIZE_BASELINE, out.chunkSize);
   TEST_ASSERT_EQUAL_STRING("standard-stable", out.channel);
   TEST_ASSERT_EQUAL_UINT8_ARRAY(sha, out.sha256Prefix, lp::FW_SHA256_PREFIX_LEN);
   TEST_ASSERT_EQUAL_UINT16(96, out.footerLen);
@@ -80,7 +82,7 @@ void test_fw_offer_full_channel_string() {
                             'i','j','k','l','m','n','o','p'};
   const uint8_t sha[lp::FW_SHA256_PREFIX_LEN] = {0};
   const size_t n = lp::buildFwOffer(buf, sizeof(buf), 1, kWispMac, kLampMac,
-                                    0, 0, lp::FW_CHUNK_SIZE,
+                                    0, 0, lp::FW_CHUNK_SIZE_BASELINE,
                                     channel, 16, sha, 96, 0);
   TEST_ASSERT_EQUAL_UINT32(lp::FW_OFFER_FIXED_SIZE, n);
   lp::ParsedFwOffer out;
@@ -92,16 +94,16 @@ void test_fw_offer_full_channel_string() {
 void test_fw_offer_typed_channels_distinguishable() {
   // Two OFFERs with different {type}-{channel} strings must produce
   // distinct wire bytes in the channel slot — this is what makes the
-  // existing channelMatchesOurs() silent-drop enforce type gating.
+  // otaAcceptable() type-prefix check enforce variant gating.
   uint8_t bufStd[lp::FW_OFFER_FIXED_SIZE];
   uint8_t bufSnf[lp::FW_OFFER_FIXED_SIZE];
   const uint8_t sha[lp::FW_SHA256_PREFIX_LEN] = {0};
   const char chStd[] = "standard-stable";
   const char chSnf[] = "snafu-stable";
   lp::buildFwOffer(bufStd, sizeof(bufStd), 1, kWispMac, kLampMac, 0, 0,
-                   lp::FW_CHUNK_SIZE, chStd, 15, sha, 96, 0);
+                   lp::FW_CHUNK_SIZE_BASELINE, chStd, 15, sha, 96, 0);
   lp::buildFwOffer(bufSnf, sizeof(bufSnf), 1, kWispMac, kLampMac, 0, 0,
-                   lp::FW_CHUNK_SIZE, chSnf, 12, sha, 96, 0);
+                   lp::FW_CHUNK_SIZE_BASELINE, chSnf, 12, sha, 96, 0);
   lp::ParsedFwOffer outStd, outSnf;
   TEST_ASSERT_TRUE(lp::parseFwOffer(bufStd, sizeof(bufStd), outStd));
   TEST_ASSERT_TRUE(lp::parseFwOffer(bufSnf, sizeof(bufSnf), outSnf));
@@ -118,9 +120,72 @@ void test_fw_offer_too_short_rejected() {
   const uint8_t sha[lp::FW_SHA256_PREFIX_LEN] = {0};
   TEST_ASSERT_EQUAL_UINT32(lp::FW_OFFER_FIXED_SIZE,
       lp::buildFwOffer(buf, sizeof(buf), 1, kWispMac, kLampMac,
-                       0, 0, lp::FW_CHUNK_SIZE, "x", 1, sha, 96, 0));
+                       0, 0, lp::FW_CHUNK_SIZE_BASELINE, "x", 1, sha, 96, 0));
   lp::ParsedFwOffer out;
   TEST_ASSERT_FALSE(lp::parseFwOffer(buf, lp::FW_OFFER_FIXED_SIZE - 1, out));
+}
+
+// Legacy (no-trailer) OFFER parses with hasAuth == false and zeroed auth.
+void test_fw_offer_legacy_no_auth_trailer() {
+  uint8_t buf[lp::FW_OFFER_FIXED_SIZE];
+  const uint8_t sha[lp::FW_SHA256_PREFIX_LEN] = {1, 2, 3, 4, 5, 6, 7, 8};
+  const size_t n = lp::buildFwOffer(buf, sizeof(buf), 1, kWispMac, kLampMac,
+                                    0x10, 400, lp::FW_CHUNK_SIZE_BASELINE, "std", 3, sha,
+                                    96, 2);
+  TEST_ASSERT_EQUAL_UINT32(lp::FW_OFFER_FIXED_SIZE, n);
+  lp::ParsedFwOffer out;
+  TEST_ASSERT_TRUE(lp::parseFwOffer(buf, n, out));
+  TEST_ASSERT_FALSE(out.hasAuth);
+  uint8_t zero32[lp::FW_SHA256_FULL_LEN] = {0};
+  uint8_t zero64[lp::FW_SIG_LEN] = {0};
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(zero32, out.digest, lp::FW_SHA256_FULL_LEN);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(zero64, out.signature, lp::FW_SIG_LEN);
+}
+
+// Authenticated OFFER: builder emits the 152-byte frame, parser recovers the
+// digest + signature and sets hasAuth.
+void test_fw_offer_auth_trailer_roundtrip() {
+  uint8_t buf[lp::FW_OFFER_AUTH_SIZE];
+  const uint8_t sha[lp::FW_SHA256_PREFIX_LEN] = {0xAA, 0xBB, 0xCC, 0xDD,
+                                                 0xEE, 0xFF, 0x00, 0x11};
+  uint8_t digest[lp::FW_SHA256_FULL_LEN];
+  uint8_t sig[lp::FW_SIG_LEN];
+  for (size_t i = 0; i < sizeof(digest); ++i) digest[i] = static_cast<uint8_t>(i + 1);
+  for (size_t i = 0; i < sizeof(sig); ++i) sig[i] = static_cast<uint8_t>(0x80 + i);
+
+  const size_t n = lp::buildFwOffer(buf, sizeof(buf), 0x2222, kWispMac, kLampMac,
+                                    0x00010005, 1000, lp::FW_CHUNK_SIZE_BASELINE,
+                                    "standard-beta", 13, sha, 96, 5,
+                                    lp::PROTOCOL_VERSION_EMIT, lp::MSG_FW_OFFER,
+                                    digest, sig);
+  TEST_ASSERT_EQUAL_UINT32(lp::FW_OFFER_AUTH_SIZE, n);
+
+  lp::ParsedFwOffer out;
+  TEST_ASSERT_TRUE(lp::parseFwOffer(buf, n, out));
+  TEST_ASSERT_TRUE(out.hasAuth);
+  TEST_ASSERT_EQUAL_UINT32(0x00010005u, out.version);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(digest, out.digest, lp::FW_SHA256_FULL_LEN);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(sig, out.signature, lp::FW_SIG_LEN);
+}
+
+// A new sender's authenticated OFFER stays parseable by the legacy fixed-size
+// path: an old receiver reads the first 56 bytes and ignores the trailer.
+void test_fw_offer_auth_trailer_backcompat() {
+  uint8_t buf[lp::FW_OFFER_AUTH_SIZE];
+  const uint8_t sha[lp::FW_SHA256_PREFIX_LEN] = {0};
+  uint8_t digest[lp::FW_SHA256_FULL_LEN] = {9};
+  uint8_t sig[lp::FW_SIG_LEN] = {9};
+  const size_t n = lp::buildFwOffer(buf, sizeof(buf), 7, kWispMac, kLampMac,
+                                    0x20, 600, lp::FW_CHUNK_SIZE_BASELINE, "x", 1, sha,
+                                    96, 3, lp::PROTOCOL_VERSION_EMIT,
+                                    lp::MSG_FW_OFFER, digest, sig);
+  TEST_ASSERT_EQUAL_UINT32(lp::FW_OFFER_AUTH_SIZE, n);
+  // Parse only the legacy prefix (old receiver's view): fields intact, no auth.
+  lp::ParsedFwOffer out;
+  TEST_ASSERT_TRUE(lp::parseFwOffer(buf, lp::FW_OFFER_FIXED_SIZE, out));
+  TEST_ASSERT_FALSE(out.hasAuth);
+  TEST_ASSERT_EQUAL_UINT32(0x20u, out.version);
+  TEST_ASSERT_EQUAL_UINT16(3, out.totalChunks);
 }
 
 // --- MSG_FW_ACCEPT ---
@@ -189,26 +254,47 @@ void test_fw_chunk_roundtrip_min_payload() {
   TEST_ASSERT_EQUAL_UINT8(0xAB, out.bytes[0]);
 }
 
-void test_fw_chunk_roundtrip_full_payload() {
+void test_fw_chunk_roundtrip_baseline_payload() {
   uint8_t buf[lp::FW_CHUNK_MAX_SIZE];
-  uint8_t payload[lp::FW_CHUNK_SIZE];
-  for (size_t i = 0; i < lp::FW_CHUNK_SIZE; ++i) {
+  uint8_t payload[lp::FW_CHUNK_SIZE_BASELINE];
+  for (size_t i = 0; i < lp::FW_CHUNK_SIZE_BASELINE; ++i) {
     payload[i] = static_cast<uint8_t>(i ^ 0xA5);
   }
-  // chunkIdx=37 → offset must equal 37 * 200 = 7400.
+  // chunkIdx=37 → offset 37 * 200 = 7400 (baseline sender).
   const size_t n = lp::buildFwChunk(
       buf, sizeof(buf), /*seq=*/7, kWispMac, kLampMac,
-      /*chunkIdx=*/37, /*offset=*/37u * lp::FW_CHUNK_SIZE,
-      payload, /*len=*/lp::FW_CHUNK_SIZE);
-  TEST_ASSERT_EQUAL_UINT32(lp::FW_CHUNK_MAX_SIZE, n);
+      /*chunkIdx=*/37, /*offset=*/37u * lp::FW_CHUNK_SIZE_BASELINE,
+      payload, /*len=*/lp::FW_CHUNK_SIZE_BASELINE);
+  TEST_ASSERT_EQUAL_UINT32(lp::FW_CHUNK_FIXED_SIZE + lp::FW_CHUNK_SIZE_BASELINE, n);
   TEST_ASSERT_EQUAL_UINT32(226u, n);
 
   lp::ParsedFwChunk out;
   TEST_ASSERT_TRUE(lp::parseFwChunk(buf, n, out));
   TEST_ASSERT_EQUAL_UINT16(37, out.chunkIdx);
   TEST_ASSERT_EQUAL_UINT32(7400u, out.offset);
-  TEST_ASSERT_EQUAL_UINT16(lp::FW_CHUNK_SIZE, out.len);
-  TEST_ASSERT_EQUAL_UINT8_ARRAY(payload, out.bytes, lp::FW_CHUNK_SIZE);
+  TEST_ASSERT_EQUAL_UINT16(lp::FW_CHUNK_SIZE_BASELINE, out.len);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(payload, out.bytes, lp::FW_CHUNK_SIZE_BASELINE);
+}
+
+void test_fw_chunk_roundtrip_v2_max_payload() {
+  uint8_t buf[lp::FW_CHUNK_MAX_SIZE];
+  uint8_t payload[lp::FW_CHUNK_SIZE_MAX];
+  for (size_t i = 0; i < lp::FW_CHUNK_SIZE_MAX; ++i) {
+    payload[i] = static_cast<uint8_t>((i * 7) ^ 0x5A);
+  }
+  // chunkIdx=12 → offset 12 * FW_CHUNK_SIZE_MAX (v2 ceiling sender).
+  const size_t n = lp::buildFwChunk(
+      buf, sizeof(buf), /*seq=*/9, kWispMac, kLampMac,
+      /*chunkIdx=*/12, /*offset=*/12u * lp::FW_CHUNK_SIZE_MAX,
+      payload, /*len=*/lp::FW_CHUNK_SIZE_MAX);
+  TEST_ASSERT_EQUAL_UINT32(lp::FW_CHUNK_MAX_SIZE, n);
+
+  lp::ParsedFwChunk out;
+  TEST_ASSERT_TRUE(lp::parseFwChunk(buf, n, out));
+  TEST_ASSERT_EQUAL_UINT16(12, out.chunkIdx);
+  TEST_ASSERT_EQUAL_UINT32(12u * lp::FW_CHUNK_SIZE_MAX, out.offset);
+  TEST_ASSERT_EQUAL_UINT16(lp::FW_CHUNK_SIZE_MAX, out.len);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(payload, out.bytes, lp::FW_CHUNK_SIZE_MAX);
 }
 
 void test_fw_chunk_zero_len_rejected_by_builder() {
@@ -221,30 +307,34 @@ void test_fw_chunk_zero_len_rejected_by_builder() {
 
 void test_fw_chunk_oversize_rejected_by_builder() {
   uint8_t buf[lp::FW_CHUNK_MAX_SIZE + 16];
-  uint8_t payload[lp::FW_CHUNK_SIZE + 1] = {0};
+  uint8_t payload[lp::FW_CHUNK_SIZE_MAX + 1] = {0};
   TEST_ASSERT_EQUAL_UINT32(0u,
       lp::buildFwChunk(buf, sizeof(buf), 1, kWispMac, kLampMac,
-                       0, 0, payload, lp::FW_CHUNK_SIZE + 1));
+                       0, 0, payload, lp::FW_CHUNK_SIZE_MAX + 1));
 }
 
-void test_fw_chunk_offset_chunkidx_mismatch_rejected_by_parser() {
-  // Build a valid chunk, then corrupt the offset field so the
-  // (offset == chunkIdx * chunkSize) invariant fails. The parser must
-  // reject — catches malformed senders that disagree with themselves.
+void test_fw_chunk_offset_not_enforced_by_parser() {
+  // The offset == chunkIdx * chunkSize invariant needs the session's
+  // negotiated chunkSize, which this pure parser doesn't have; the receiver
+  // validates it once a session is active. The parser accepts a
+  // structurally-valid chunk regardless of offset alignment.
   uint8_t buf[lp::FW_CHUNK_MAX_SIZE];
-  const uint8_t payload[lp::FW_CHUNK_SIZE] = {0};
+  const uint8_t payload[lp::FW_CHUNK_SIZE_BASELINE] = {0};
   const size_t n = lp::buildFwChunk(buf, sizeof(buf), 1, kWispMac, kLampMac,
                                     /*chunkIdx=*/5,
-                                    /*offset=*/5u * lp::FW_CHUNK_SIZE,
-                                    payload, lp::FW_CHUNK_SIZE);
+                                    /*offset=*/5u * lp::FW_CHUNK_SIZE_BASELINE,
+                                    payload, lp::FW_CHUNK_SIZE_BASELINE);
   TEST_ASSERT_GREATER_THAN_UINT32(0u, n);
-  // Sanity: as-built parses cleanly.
   lp::ParsedFwChunk ok;
   TEST_ASSERT_TRUE(lp::parseFwChunk(buf, n, ok));
-  // Corrupt the LSB of offset (bytes 20..23).
+  // Corrupt the LSB of offset: the parser surfaces the value as-is and
+  // lets the receiver validate alignment.
   buf[20] = 0x01;
-  lp::ParsedFwChunk bad;
-  TEST_ASSERT_FALSE(lp::parseFwChunk(buf, n, bad));
+  lp::ParsedFwChunk misaligned;
+  TEST_ASSERT_TRUE(lp::parseFwChunk(buf, n, misaligned));
+  TEST_ASSERT_NOT_EQUAL_UINT32(
+      static_cast<uint32_t>(misaligned.chunkIdx) * lp::FW_CHUNK_SIZE_BASELINE,
+      misaligned.offset);
 }
 
 void test_fw_chunk_length_mismatch_rejected_by_parser() {
@@ -393,7 +483,7 @@ void test_fw_inspect_msg_types() {
   const uint8_t payload[1] = {0};
 
   size_t n = lp::buildFwOffer(buf, sizeof(buf), 1, kWispMac, kLampMac,
-                              0, 0, lp::FW_CHUNK_SIZE, "x", 1, sha, 96, 0);
+                              0, 0, lp::FW_CHUNK_SIZE_BASELINE, "x", 1, sha, 96, 0);
   TEST_ASSERT_EQUAL_UINT8(lp::MSG_FW_OFFER, lp::inspect(buf, n));
 
   n = lp::buildFwAccept(buf, sizeof(buf), 1, kLampMac, kWispMac, 0, 0,
@@ -425,7 +515,7 @@ void test_fw_builders_reject_short_buffer() {
 
   TEST_ASSERT_EQUAL_UINT32(0u,
       lp::buildFwOffer(small, sizeof(small), 1, kWispMac, kLampMac,
-                       0, 0, lp::FW_CHUNK_SIZE, "x", 1, sha, 96, 0));
+                       0, 0, lp::FW_CHUNK_SIZE_BASELINE, "x", 1, sha, 96, 0));
   TEST_ASSERT_EQUAL_UINT32(0u,
       lp::buildFwAccept(small, sizeof(small), 1, kLampMac, kWispMac,
                         0, 0, lp::FwAcceptStatus::Accept, 0));
@@ -452,16 +542,20 @@ int main(int argc, char** argv) {
   RUN_TEST(test_fw_offer_full_channel_string);
   RUN_TEST(test_fw_offer_typed_channels_distinguishable);
   RUN_TEST(test_fw_offer_too_short_rejected);
+  RUN_TEST(test_fw_offer_legacy_no_auth_trailer);
+  RUN_TEST(test_fw_offer_auth_trailer_roundtrip);
+  RUN_TEST(test_fw_offer_auth_trailer_backcompat);
 
   RUN_TEST(test_fw_accept_roundtrip);
   RUN_TEST(test_fw_accept_status_codes);
   RUN_TEST(test_fw_accept_too_short_rejected);
 
   RUN_TEST(test_fw_chunk_roundtrip_min_payload);
-  RUN_TEST(test_fw_chunk_roundtrip_full_payload);
+  RUN_TEST(test_fw_chunk_roundtrip_baseline_payload);
+  RUN_TEST(test_fw_chunk_roundtrip_v2_max_payload);
   RUN_TEST(test_fw_chunk_zero_len_rejected_by_builder);
   RUN_TEST(test_fw_chunk_oversize_rejected_by_builder);
-  RUN_TEST(test_fw_chunk_offset_chunkidx_mismatch_rejected_by_parser);
+  RUN_TEST(test_fw_chunk_offset_not_enforced_by_parser);
   RUN_TEST(test_fw_chunk_length_mismatch_rejected_by_parser);
 
   RUN_TEST(test_fw_req_roundtrip);

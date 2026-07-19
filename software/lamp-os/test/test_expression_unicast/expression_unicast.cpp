@@ -43,7 +43,7 @@ static void serializeInvocation(const ExpressionInvocation& inv, std::string& ou
   out = "{\"type\":\"" + inv.type + "\"}";
 }
 
-struct NearbyLamp {
+struct RosterEntry {
   uint8_t mac[6] = {0};
   bool hasMac = false;
   int8_t lastRssi = -60;
@@ -90,7 +90,7 @@ static bool sendInvocationTo(FakeMeshLink* link, const uint8_t mac[6],
 // maybeCascade's target-loop filter (skip self + excluded mac).
 static void broadcastInvocationTo(FakeMeshLink* link,
                                   const ExpressionInvocation& inv,
-                                  const std::vector<NearbyLamp>& peers,
+                                  const std::vector<RosterEntry>& peers,
                                   const uint8_t* excludeMac = nullptr) {
   if (!link) return;
   if (link->isOtaInProgress()) return;
@@ -115,8 +115,8 @@ static const uint8_t kMacA[6] = {0xAA, 0x01, 0x02, 0x03, 0x04, 0x05};
 static const uint8_t kMacB[6] = {0xBB, 0x01, 0x02, 0x03, 0x04, 0x05};
 static const uint8_t kMacC[6] = {0xCC, 0x01, 0x02, 0x03, 0x04, 0x05};
 
-static lamp::NearbyLamp makePeer(const uint8_t mac[6]) {
-  lamp::NearbyLamp p;
+static lamp::RosterEntry makePeer(const uint8_t mac[6]) {
+  lamp::RosterEntry p;
   std::memcpy(p.mac, mac, 6);
   p.hasMac = true;
   return p;
@@ -164,7 +164,7 @@ void test_broadcast_excludes_specified_mac() {
   lamp::ExpressionInvocation inv;
   inv.type = "glitchy";
 
-  std::vector<lamp::NearbyLamp> peers = {
+  std::vector<lamp::RosterEntry> peers = {
     makePeer(kMacA),  // excluded
     makePeer(kMacB),  // included
     makePeer(kMacC),  // included
@@ -191,7 +191,7 @@ void test_broadcast_no_exclude_sends_to_all() {
   lamp::ExpressionInvocation inv;
   inv.type = "glitchy";
 
-  std::vector<lamp::NearbyLamp> peers = {
+  std::vector<lamp::RosterEntry> peers = {
     makePeer(kMacA),
     makePeer(kMacB),
   };
@@ -206,10 +206,10 @@ void test_broadcast_skips_peers_without_mac() {
   lamp::ExpressionInvocation inv;
   inv.type = "glitchy";
 
-  lamp::NearbyLamp noMac;
+  lamp::RosterEntry noMac;
   noMac.hasMac = false;  // BLE-only peer with no HELLO yet
 
-  std::vector<lamp::NearbyLamp> peers = { noMac, makePeer(kMacB) };
+  std::vector<lamp::RosterEntry> peers = { noMac, makePeer(kMacB) };
 
   lamp::broadcastInvocationTo(&link, inv, peers);
 

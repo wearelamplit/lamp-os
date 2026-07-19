@@ -161,6 +161,46 @@ void test_drain_then_post_then_drain() {
   TEST_ASSERT_EQUAL_STRING("round-2-longer", buf);
 }
 
+void test_settings_blob_sized_payload_round_trips() {
+  // The settingsBlob slot must carry a full Advanced-LED save (~1 KB),
+  // which exceeds the op-slot bound. Round-trip a payload sized past
+  // kPendingJsonOp through a slot at the production capacity.
+  static_assert(lamp::kPendingSettingsBlob > lamp::kPendingJsonOp,
+                "settings blob slot must exceed the op slot");
+  static lamp::PendingJsonSlot<lamp::kPendingSettingsBlob> slot;
+  portMUX_TYPE mux{};
+
+  std::string payload = "{\"k\":\"";
+  payload.append(lamp::kPendingJsonOp + 500, 'x');
+  payload += "\"}";
+  TEST_ASSERT_TRUE(payload.size() > lamp::kPendingJsonOp);
+  TEST_ASSERT_TRUE(slot.post(mux, payload.data(), payload.size()));
+
+  static char buf[lamp::kPendingSettingsBlob + 1];
+  uint16_t len = slot.drain(mux, buf);
+  TEST_ASSERT_EQUAL_UINT16(payload.size(), len);
+  TEST_ASSERT_EQUAL_STRING(payload.c_str(), buf);
+}
+
+void test_control_op_max_payload_round_trips_through_mac_slot() {
+  // inboundOp / wispStatus are PendingJsonSlotWithMac<kPendingJsonOp>, fed
+  // straight from a wire CONTROL_OP whose payload can be as large as
+  // CONTROL_MAX_PAYLOAD. kPendingJsonOp must never fall below that or the
+  // post silently drops the largest legal control-op.
+  lamp::PendingJsonSlotWithMac<lamp::kPendingJsonOp> slot;
+  portMUX_TYPE mux{};
+  const uint8_t mac[6] = {1, 2, 3, 4, 5, 6};
+
+  std::string payload(lamp_protocol::CONTROL_MAX_PAYLOAD, 'x');
+  TEST_ASSERT_TRUE(slot.post(mux, payload.data(), payload.size(), mac));
+
+  static char buf[lamp::kPendingJsonOp + 1];
+  uint8_t outMac[6];
+  uint16_t len = slot.drain(mux, buf, outMac);
+  TEST_ASSERT_EQUAL_UINT16(payload.size(), len);
+  TEST_ASSERT_EQUAL_STRING(payload.c_str(), buf);
+}
+
 void test_post_zero_length_is_accepted() {
   // CHAR_EXPRESSION_TEST allows an empty payload as a "test complete"
   // sentinel — the slot must accept len==0 (it's the existing wire
@@ -191,6 +231,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_drain_nul_terminates_at_length);
   RUN_TEST(test_post_overwrites_previous_unread_post);
   RUN_TEST(test_drain_then_post_then_drain);
+  RUN_TEST(test_settings_blob_sized_payload_round_trips);
+  RUN_TEST(test_control_op_max_payload_round_trips_through_mac_slot);
   RUN_TEST(test_post_zero_length_is_accepted);
 
   return UNITY_END();

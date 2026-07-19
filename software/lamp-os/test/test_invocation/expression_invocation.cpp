@@ -1,38 +1,28 @@
-// Native-host unit tests for the pure-logic pieces of ExpressionInvocation.
+// Native-host tests for ExpressionInvocation.
 //
-// The Arduino-integrated JSON helpers (serializeInvocation, parseInvocation)
-// depend on ArduinoJson which isn't pulled into the native test env; those
-// are verified by the firmware build + on-hardware integration testing.
-//
-// What IS testable natively is the cascade-key stripping helper, which is
-// pure data manipulation. We re-declare a minimal shape here (the same
-// pattern test/gradient.cpp uses for Color) so this file stays standalone
-// and the existing native test env keeps working.
+// Pins:
+//   1. cascade-key stripping + delayMs clamp.
+//   2. serialize/parse round-trip, including the packed-hex colors wire form
+//      ("rrggbbww" per color, no '#', no separators; key omitted when empty).
+//   3. malformed colors (bad length / non-hex) drop whole; parse still succeeds.
+//   4. worst-case 8-color zoned glitchy payload fits COMMAND_MAX_PAYLOAD.
 
 #include <unity.h>
 
+#include <cstdio>
 #include <map>
 #include <string>
 
-namespace lamp {
+#include "components/network/protocol/command.hpp"
 
-// Mirrors the production declaration in src/expressions/expression_invocation.hpp.
-// Kept in sync manually — the native test env doesn't link against src/.
-constexpr const char* kParamCascadeEnabled = "cascadeEnabled";
-constexpr const char* kParamCascadeStaggerMs = "cascadeStaggerMs";
+// Native-test seam: include the .cpps for the real definitions.
+#include "expressions/expression_invocation.cpp"
+#include "util/color.cpp"
 
-// Mirrors the production ceiling. A remote ESP-NOW peer can send any uint32_t
-// `delayMs`; an unbounded value would pin a pendingTriggers slot for ~49 days.
-// 10 s comfortably exceeds typical cascade staggers (<2 s) while keeping a
-// full queue self-clearing in seconds, not weeks.
-constexpr uint32_t kMaxDelayMs = 10000;
+void setUp(void) {}
+void tearDown(void) {}
 
-std::map<std::string, uint32_t> parametersWithoutCascadeKeys(
-    const std::map<std::string, uint32_t>& parameters);
-
-uint32_t clampDelayMs(uint32_t v);
-
-}  // namespace lamp
+// --- cascade-key stripping ---
 
 void test_strip_removes_cascade_enabled() {
   std::map<std::string, uint32_t> in = {
@@ -87,6 +77,8 @@ void test_strip_does_not_mutate_input() {
   TEST_ASSERT_EQUAL(1, (int)in["cascadeEnabled"]);
 }
 
+// --- delayMs clamp ---
+
 void test_clamp_delay_passes_under_limit() {
   TEST_ASSERT_EQUAL_UINT32(5000u, lamp::clampDelayMs(5000u));
 }
@@ -103,27 +95,116 @@ void test_clamp_delay_passes_zero() {
   TEST_ASSERT_EQUAL_UINT32(0u, lamp::clampDelayMs(0u));
 }
 
-// Re-implementation under test, kept here in the test file to match the
-// existing native-env convention (test/gradient.cpp re-declares Color the
-// same way). Production code under src/expressions/expression_invocation.cpp
-// implements the same contract; the contract is what the firmware build and
-// hardware test verify together.
-namespace lamp {
-std::map<std::string, uint32_t> parametersWithoutCascadeKeys(
-    const std::map<std::string, uint32_t>& parameters) {
-  std::map<std::string, uint32_t> out;
-  for (const auto& kv : parameters) {
-    if (kv.first == kParamCascadeEnabled) continue;
-    if (kv.first == kParamCascadeStaggerMs) continue;
-    out.insert(kv);
-  }
-  return out;
+// --- serialize / parse round-trip ---
+
+static bool roundTrip(const lamp::ExpressionInvocation& in,
+                      lamp::ExpressionInvocation& out, std::string& json) {
+  lamp::serializeInvocation(in, json);
+  JsonDocument doc;
+  if (deserializeJson(doc, json) != DeserializationError::Ok) return false;
+  return lamp::parseInvocation(doc.as<JsonObjectConst>(), out);
 }
 
-uint32_t clampDelayMs(uint32_t v) {
-  return v > kMaxDelayMs ? kMaxDelayMs : v;
+void test_round_trip_one_color() {
+  lamp::ExpressionInvocation in;
+  in.type = "glitchy";
+  in.target = 1;
+  in.delayMs = 250;
+  in.colors.push_back(lamp::Color(0xFF, 0x23, 0x42, 0x12));
+
+  lamp::ExpressionInvocation out;
+  std::string json;
+  TEST_ASSERT_TRUE(roundTrip(in, out, json));
+  TEST_ASSERT_TRUE(json.find("\"colors\":\"ff234212\"") != std::string::npos);
+  TEST_ASSERT_EQUAL_STRING("glitchy", out.type.c_str());
+  TEST_ASSERT_EQUAL_UINT8(1, out.target);
+  TEST_ASSERT_EQUAL_UINT32(250u, out.delayMs);
+  TEST_ASSERT_EQUAL_UINT(1, out.colors.size());
+  TEST_ASSERT_TRUE(in.colors[0] == out.colors[0]);
 }
-}  // namespace lamp
+
+void test_round_trip_eight_colors() {
+  lamp::ExpressionInvocation in;
+  in.type = "glitchy";
+  for (uint8_t i = 0; i < 8; i++) {
+    in.colors.push_back(lamp::Color(i, 0x10 + i, 0xA0 + i, 0xF0 + i));
+  }
+
+  lamp::ExpressionInvocation out;
+  std::string json;
+  TEST_ASSERT_TRUE(roundTrip(in, out, json));
+  TEST_ASSERT_EQUAL_UINT(8, out.colors.size());
+  for (size_t i = 0; i < 8; i++) {
+    TEST_ASSERT_TRUE(in.colors[i] == out.colors[i]);
+  }
+}
+
+void test_serialize_omits_colors_when_empty() {
+  lamp::ExpressionInvocation in;
+  in.type = "pulse";
+
+  std::string json;
+  lamp::serializeInvocation(in, json);
+  TEST_ASSERT_TRUE(json.find("colors") == std::string::npos);
+
+  JsonDocument doc;
+  TEST_ASSERT_TRUE(deserializeJson(doc, json) == DeserializationError::Ok);
+  lamp::ExpressionInvocation out;
+  TEST_ASSERT_TRUE(lamp::parseInvocation(doc.as<JsonObjectConst>(), out));
+  TEST_ASSERT_EQUAL_UINT(0, out.colors.size());
+}
+
+// --- malformed colors: dropped whole, invocation still parses ---
+
+static void assertColorsDropped(const char* json) {
+  JsonDocument doc;
+  TEST_ASSERT_TRUE(deserializeJson(doc, json) == DeserializationError::Ok);
+  lamp::ExpressionInvocation out;
+  TEST_ASSERT_TRUE(lamp::parseInvocation(doc.as<JsonObjectConst>(), out));
+  TEST_ASSERT_EQUAL_UINT(0, out.colors.size());
+}
+
+void test_parse_drops_truncated_colors() {
+  assertColorsDropped("{\"type\":\"glitchy\",\"colors\":\"ff234212ff2342\"}");
+}
+
+void test_parse_drops_odd_length_colors() {
+  assertColorsDropped("{\"type\":\"glitchy\",\"colors\":\"ff23421\"}");
+}
+
+void test_parse_drops_non_hex_colors() {
+  assertColorsDropped("{\"type\":\"glitchy\",\"colors\":\"ff234212zz234212\"}");
+}
+
+// --- worst-case payload budget ---
+
+// The 8-color zoned glitchy config that overflowed the command cap under the
+// old "#rrggbbww"-array encoding (~255 B). Full app-written param set on the
+// standard shade window (38 px). Values with more digits (maxed count/size
+// sliders, 4-digit durations, staggered delayMs) can still exceed the cap;
+// ExpressionManager drops those with the loud [cascade] ERR log.
+void test_zoned_glitchy_8_colors_fits_command_payload() {
+  lamp::ExpressionInvocation inv;
+  inv.type = "glitchy";
+  inv.target = 1;
+  inv.delayMs = 0;
+  for (int i = 0; i < 8; i++) {
+    inv.colors.push_back(lamp::Color(0xFF, 0xFF, 0xFF, 0xFF));
+  }
+  inv.parameters = {
+      {"durationMin", 30}, {"durationMax", 120}, {"fullStrip", 0},
+      {"posMin", 0},       {"posMax", 37},       {"count", 1},
+      {"size", 1},
+  };
+
+  std::string json;
+  lamp::serializeInvocation(inv, json);
+  std::printf("8-color zoned glitchy payload: %u bytes (cap %u)\n",
+              (unsigned)json.size(),
+              (unsigned)lamp_protocol::COMMAND_MAX_PAYLOAD);
+  TEST_ASSERT_LESS_OR_EQUAL_UINT(lamp_protocol::COMMAND_MAX_PAYLOAD,
+                                 json.size());
+}
 
 int main() {
   UNITY_BEGIN();
@@ -137,5 +218,12 @@ int main() {
   RUN_TEST(test_clamp_delay_caps_at_ceiling);
   RUN_TEST(test_clamp_delay_handles_max_uint32);
   RUN_TEST(test_clamp_delay_passes_zero);
+  RUN_TEST(test_round_trip_one_color);
+  RUN_TEST(test_round_trip_eight_colors);
+  RUN_TEST(test_serialize_omits_colors_when_empty);
+  RUN_TEST(test_parse_drops_truncated_colors);
+  RUN_TEST(test_parse_drops_odd_length_colors);
+  RUN_TEST(test_parse_drops_non_hex_colors);
+  RUN_TEST(test_zoned_glitchy_8_colors_fits_command_payload);
   return UNITY_END();
 }

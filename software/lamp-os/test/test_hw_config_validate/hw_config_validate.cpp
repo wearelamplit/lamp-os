@@ -80,9 +80,18 @@ void test_single_broadcast_valid() {
   TEST_ASSERT_TRUE(lamp::validateHwConfig(hw));
 }
 
+void test_zero_supply_budget_invalid() {
+  lamp::HwConfig hw{};
+  hw.strips.push_back({lamp::Surface::Shade, 12, lamp::ByteOrder::GRBW});
+  hw.strips.push_back({lamp::Surface::Base,  14, lamp::ByteOrder::GRBW});
+  hw.supplyBudgetMa = 0;
+  TEST_ASSERT_FALSE(lamp::validateHwConfig(hw));
+}
+
 int main(int argc, char** argv) {
   (void)argc; (void)argv;
   UNITY_BEGIN();
+  RUN_TEST(test_zero_supply_budget_invalid);
   RUN_TEST(test_empty_strips_invalid);
   RUN_TEST(test_duplicate_pins_invalid);
   RUN_TEST(test_well_formed_config_valid);

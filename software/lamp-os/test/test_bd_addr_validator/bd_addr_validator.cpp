@@ -13,6 +13,9 @@
 
 #include <unity.h>
 
+#include <cstdint>
+#include <cstring>
+
 #include "util/bd_addr.hpp"
 
 void setUp(void) {}
@@ -70,6 +73,53 @@ void test_non_hex_characters_rejected() {
   TEST_ASSERT_FALSE(lamp::isValidBdAddr("  :BB:CC:DD:EE:FF"));
 }
 
+void test_parse_lowercase() {
+  uint8_t out[6];
+  const uint8_t expected[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+  TEST_ASSERT_TRUE(lamp::parseBdAddr("aa:bb:cc:dd:ee:ff", out));
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, out, 6);
+}
+
+void test_parse_uppercase() {
+  uint8_t out[6];
+  const uint8_t expected[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+  TEST_ASSERT_TRUE(lamp::parseBdAddr("AA:BB:CC:DD:EE:FF", out));
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, out, 6);
+}
+
+void test_parse_mixed_case() {
+  uint8_t out[6];
+  const uint8_t expected[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+  TEST_ASSERT_TRUE(lamp::parseBdAddr("Aa:bB:cC:dd:EE:ff", out));
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, out, 6);
+}
+
+void test_parse_broadcast() {
+  uint8_t out[6];
+  const uint8_t expected[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  TEST_ASSERT_TRUE(lamp::parseBdAddr("ff:ff:ff:ff:ff:ff", out));
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, out, 6);
+}
+
+void test_parse_malformed_leaves_out_untouched() {
+  const uint8_t sentinel[6] = {0x11, 0x11, 0x11, 0x11, 0x11, 0x11};
+  uint8_t out[6];
+
+  const char* bad[] = {
+      "AA:BB:CC:DD:EE:F",     // too short
+      "GG:BB:CC:DD:EE:FF",    // non-hex char
+      "AA-BB-CC-DD-EE-FF",    // wrong separator
+      "a:b:c:d:e:f",          // single-hex-digit octets, not canonical two-digit
+      "AA:BB:CC:DD:EE:FF:00", // trailing junk past the 6th octet
+      nullptr,
+  };
+  for (const char* s : bad) {
+    std::memcpy(out, sentinel, 6);
+    TEST_ASSERT_FALSE(lamp::parseBdAddr(s, out));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(sentinel, out, 6);
+  }
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
@@ -82,6 +132,12 @@ int main(int argc, char** argv) {
   RUN_TEST(test_wrong_length_rejected);
   RUN_TEST(test_wrong_separator_positions_rejected);
   RUN_TEST(test_non_hex_characters_rejected);
+
+  RUN_TEST(test_parse_lowercase);
+  RUN_TEST(test_parse_uppercase);
+  RUN_TEST(test_parse_mixed_case);
+  RUN_TEST(test_parse_broadcast);
+  RUN_TEST(test_parse_malformed_leaves_out_untouched);
 
   return UNITY_END();
 }

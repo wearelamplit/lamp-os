@@ -51,6 +51,39 @@ void test_empty_blob_uses_class_defaults() {
   TEST_ASSERT_TRUE(m.shade.broadcastColors()[0] == kShadeDefaultColor);
 }
 
+void test_apbootminutes_defaults_and_round_trip() {
+  Model absent;
+  parseInto("{}", absent);
+  TEST_ASSERT_EQUAL_UINT8(0, absent.lamp.apBootMinutes);
+
+  for (uint8_t v : {(uint8_t)0, (uint8_t)5, (uint8_t)10}) {
+    Model a;
+    a.lamp.apBootMinutes = v;
+    JsonDocument out;
+    config_codec::toJson(out.to<JsonObject>(), a.lamp, a.base, a.shade,
+                         a.expressions, a.homeMode);
+    std::string serialized;
+    serializeJson(out, serialized);
+    Model b;
+    parseInto(serialized.c_str(), b);
+    TEST_ASSERT_EQUAL_UINT8(v, b.lamp.apBootMinutes);
+  }
+}
+
+void test_brightnessceiling_defaults_and_round_trip() {
+  Model absent;
+  parseInto("{}", absent);
+  TEST_ASSERT_EQUAL_UINT8(170, absent.lamp.brightnessCeiling);
+  for (uint8_t v : {(uint8_t)120, (uint8_t)170, (uint8_t)230}) {
+    Model a; a.lamp.brightnessCeiling = v;
+    JsonDocument out;
+    config_codec::toJson(out.to<JsonObject>(), a.lamp, a.base, a.shade, a.expressions, a.homeMode);
+    std::string serialized; serializeJson(out, serialized);
+    Model b; parseInto(serialized.c_str(), b);
+    TEST_ASSERT_EQUAL_UINT8(v, b.lamp.brightnessCeiling);
+  }
+}
+
 void test_socialmode_out_of_range_falls_back_to_ambivert() {
   Model m;
   parseInto("{\"lamp\":{\"socialMode\":9}}", m);
@@ -201,9 +234,91 @@ void test_new_format_segments_unchanged() {
   TEST_ASSERT_TRUE(m.shade.broadcastColors()[0] == hexStringToColor("#aabbccdd"));
 }
 
+// --- Home mode new fields ---
+
+void test_networkbound_absent_with_ssid() {
+  // Legacy blobs with an SSID but no networkBound: migrate to networkBound=true.
+  Model m;
+  parseInto("{\"homeMode\":{\"ssid\":\"net\"}}", m);
+  TEST_ASSERT_TRUE(m.homeMode.networkBound);
+}
+
+void test_networkbound_absent_no_ssid() {
+  Model m;
+  parseInto("{\"homeMode\":{\"ssid\":\"\"}}", m);
+  TEST_ASSERT_FALSE(m.homeMode.networkBound);
+}
+
+void test_networkbound_explicit_false_wins() {
+  // Explicit false must win even if ssid is non-empty.
+  Model m;
+  parseInto("{\"homeMode\":{\"ssid\":\"net\",\"networkBound\":false}}", m);
+  TEST_ASSERT_FALSE(m.homeMode.networkBound);
+}
+
+void test_disabled_expr_types_absent_defaults_to_glitchy() {
+  Model m;
+  parseInto("{\"homeMode\":{\"ssid\":\"net\"}}", m);
+  TEST_ASSERT_EQUAL_UINT(1, m.homeMode.disabledExpressionTypes.size());
+  TEST_ASSERT_EQUAL_STRING("glitchy", m.homeMode.disabledExpressionTypes[0].c_str());
+}
+
+void test_disabled_expr_types_explicit() {
+  Model m;
+  parseInto("{\"homeMode\":{\"disabledExpressionTypes\":[\"pulse\",\"shifty\"]}}", m);
+  TEST_ASSERT_EQUAL_UINT(2, m.homeMode.disabledExpressionTypes.size());
+  TEST_ASSERT_EQUAL_STRING("pulse", m.homeMode.disabledExpressionTypes[0].c_str());
+  TEST_ASSERT_EQUAL_STRING("shifty", m.homeMode.disabledExpressionTypes[1].c_str());
+}
+
+void test_disabled_expr_types_empty_array_preserved() {
+  Model m;
+  parseInto("{\"homeMode\":{\"disabledExpressionTypes\":[]}}", m);
+  TEST_ASSERT_EQUAL_UINT(0, m.homeMode.disabledExpressionTypes.size());
+}
+
+void test_social_disabled_absent_defaults_true() {
+  Model m;
+  parseInto("{\"homeMode\":{\"ssid\":\"net\"}}", m);
+  TEST_ASSERT_TRUE(m.homeMode.socialDisabled);
+}
+
+void test_social_disabled_explicit_false() {
+  Model m;
+  parseInto("{\"homeMode\":{\"socialDisabled\":false}}", m);
+  TEST_ASSERT_FALSE(m.homeMode.socialDisabled);
+}
+
+void test_homemode_round_trip_new_fields() {
+  const char* json =
+      "{\"homeMode\":{\"ssid\":\"net\",\"brightness\":40,\"enabled\":true,"
+      "\"networkBound\":true,\"socialDisabled\":false,"
+      "\"disabledExpressionTypes\":[\"pulse\",\"breathing\"]}}";
+  Model a;
+  parseInto(json, a);
+
+  JsonDocument out;
+  config_codec::toJson(out.to<JsonObject>(), a.lamp, a.base, a.shade,
+                       a.expressions, a.homeMode);
+  std::string serialized;
+  serializeJson(out, serialized);
+
+  Model b;
+  parseInto(serialized.c_str(), b);
+
+  TEST_ASSERT_EQUAL_STRING("net", b.homeMode.ssid.c_str());
+  TEST_ASSERT_TRUE(b.homeMode.networkBound);
+  TEST_ASSERT_FALSE(b.homeMode.socialDisabled);
+  TEST_ASSERT_EQUAL_UINT(2, b.homeMode.disabledExpressionTypes.size());
+  TEST_ASSERT_EQUAL_STRING("pulse", b.homeMode.disabledExpressionTypes[0].c_str());
+  TEST_ASSERT_EQUAL_STRING("breathing", b.homeMode.disabledExpressionTypes[1].c_str());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_empty_blob_uses_class_defaults);
+  RUN_TEST(test_apbootminutes_defaults_and_round_trip);
+  RUN_TEST(test_brightnessceiling_defaults_and_round_trip);
   RUN_TEST(test_socialmode_out_of_range_falls_back_to_ambivert);
   RUN_TEST(test_three_segment_shade_round_trip);
   RUN_TEST(test_sum_px_clamped_to_255);
@@ -213,5 +328,14 @@ int main(int, char**) {
   RUN_TEST(test_old_format_shade_colors_migrated);
   RUN_TEST(test_old_format_no_colors_uses_class_default);
   RUN_TEST(test_new_format_segments_unchanged);
+  RUN_TEST(test_networkbound_absent_with_ssid);
+  RUN_TEST(test_networkbound_absent_no_ssid);
+  RUN_TEST(test_networkbound_explicit_false_wins);
+  RUN_TEST(test_disabled_expr_types_absent_defaults_to_glitchy);
+  RUN_TEST(test_disabled_expr_types_explicit);
+  RUN_TEST(test_disabled_expr_types_empty_array_preserved);
+  RUN_TEST(test_social_disabled_absent_defaults_true);
+  RUN_TEST(test_social_disabled_explicit_false);
+  RUN_TEST(test_homemode_round_trip_new_fields);
   return UNITY_END();
 }

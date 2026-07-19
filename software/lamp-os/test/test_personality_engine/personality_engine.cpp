@@ -1,9 +1,8 @@
 // Native-host unit tests for PersonalityEngine. Mirrors the production
 // engine inline (same convention as test_transient_override) so the
 // native rig doesn't need to link the firmware. Each test pins the
-// observable contract (curve shape, hysteresis behavior, mode-flip
-// release, greeting matrix, closest-Smitten cycle) so production
-// refactors are free as long as the contract holds.
+// observable contract (curve shape, mode-flip release, greeting matrix)
+// so production refactors are free as long as the contract holds.
 
 #include <unity.h>
 
@@ -15,11 +14,14 @@
 #include <string>
 #include <vector>
 
+#include "util/easing.hpp"
+
 namespace test {
+
+using lamp::Easing;
 
 // --- Time scaffolding -----------------------------------------------------
 static uint32_t g_nowMs = 0;
-static uint32_t mockMillis() { return g_nowMs; }
 
 // --- Mirrors of production types -----------------------------------------
 
@@ -39,28 +41,11 @@ struct Color {
   }
 };
 
-struct NearbyLamp {
+struct RosterEntry {
   std::string name;
-  std::string bdAddr;
+  std::string lampId;
   Color baseColor;
   int8_t lastRssi = -127;
-};
-
-// Mock ExpressionManager for the closest-Smitten pulse tests. Records
-// every call so assertions can pin the contract.
-
-struct InvocationRecord {
-  std::string type;
-  Color color;
-  uint32_t timeMs = 0;
-};
-
-class MockExpressionManager {
- public:
-  std::vector<InvocationRecord> invocations;
-  void triggerPulse(const Color& color) {
-    invocations.push_back({"pulse", color, mockMillis()});
-  }
 };
 
 // Sentinel for pulseBackCount meaning "fill the entire hold window with
@@ -78,7 +63,11 @@ struct GreetingTuning {
   uint32_t fadeOutFrames = 0;
   uint8_t  pulseBackStrength = 0;
   uint8_t  pulseBackCount    = 0;
+  uint16_t breathCycleFrames = 120;
   bool     snub              = false;
+  Easing   easeInCurve  = Easing::Smooth;
+  Easing   easeOutCurve = Easing::Smooth;
+  Easing   breathCurve  = Easing::Float;
 };
 
 struct CrowdComposition {
@@ -94,11 +83,11 @@ struct CrowdComposition {
 class FakeConfig {
  public:
   SocialMode socialMode = SocialMode::Ambivert;
-  // Mirrors production: key is BD_ADDR (uppercase colon-hex). The map
-  // doesn't care what the key is, but tests now uniformly key by bdAddr.
+  // Key is lampId, the mesh mac in uppercase colon-hex. The map doesn't
+  // care what the key is, but tests uniformly key by lampId.
   std::map<std::string, uint8_t> dispositions;
-  uint8_t getDisposition(const std::string& bdAddr) const {
-    auto it = dispositions.find(bdAddr);
+  uint8_t getDisposition(const std::string& lampId) const {
+    auto it = dispositions.find(lampId);
     return it == dispositions.end() ? /*kDispositionDefault=*/3 : it->second;
   }
 };
@@ -106,8 +95,7 @@ class FakeConfig {
 // --- PersonalityEngine inline mirror -------------------------------------
 //
 // Mirrors the surface that effectiveBrightness() / loop() in lamp.cpp
-// consumes, plus the greeting matrix and closest-Smitten cycle exercised
-// by the tests below.
+// consumes, plus the greeting matrix exercised by the tests below.
 class PersonalityEngine {
  public:
   static constexpr float kIntrovertFloor = 0.5f;
@@ -118,14 +106,12 @@ class PersonalityEngine {
   static constexpr float kEmaAlpha = 0.15f;
   static constexpr uint8_t kDeadbandLevels = 2;
 
-  void begin(FakeConfig* config,
-             MockExpressionManager* expressionManager = nullptr) {
+  void begin(FakeConfig* config) {
     config_ = config;
-    expressionManager_ = expressionManager;
     if (config_) lastSocialMode_ = config_->socialMode;
   }
 
-  void setNearbyOverride(std::vector<NearbyLamp> peers) {
+  void setNearbyOverride(std::vector<RosterEntry> peers) {
     nearbyOverride_ = std::move(peers);
   }
 
@@ -144,9 +130,12 @@ class PersonalityEngine {
         pendingApplyCount_++;
       }
     }
-    tickClosestSmittenPulse_(nowMs);
+    // Mirrors production: the roster snapshot is copied once per sample
+    // period, not per tick.
     if (nowMs - lastSampleMs_ >= kSamplePeriodMs || lastSampleMs_ == 0) {
       lastSampleMs_ = nowMs;
+      blePeerCache_ = nearbyOverride_;
+      snapshotCount_++;
       sampleAndSmoothCrowd_(nowMs);
     }
   }
@@ -162,11 +151,13 @@ class PersonalityEngine {
   }
 
   // Greeting waveform matrix — pure read; production reads via Config.
-  GreetingTuning greetingFor(const std::string& peerBdAddr) const {
-    if (!config_) return profileToTuning_(150, 15, 51, 84, 0, 0);
-    // Empty bdAddr → Neutral; mirrors production guard.
-    if (peerBdAddr.empty()) return profileForCell_(config_->socialMode, 3);
-    const uint8_t disp = config_->getDisposition(peerBdAddr);  // unknown → 3
+  GreetingTuning greetingFor(const std::string& peerLampId) const {
+    if (!config_)
+      return profileToTuning_(150, 15, 51, 84, 0, 0, false, Easing::Smooth,
+                              Easing::Smooth);
+    // Empty lampId → Neutral; mirrors production guard.
+    if (peerLampId.empty()) return profileForCell_(config_->socialMode, 3);
+    const uint8_t disp = config_->getDisposition(peerLampId);  // unknown → 3
     return profileForCell_(config_->socialMode, disp);
   }
 
@@ -180,6 +171,7 @@ class PersonalityEngine {
   float currentDimFactor() const { return crowdDimFactor_; }
   float currentSmoothedW() const { return smoothedW_; }
   int pendingApplyCount() const { return pendingApplyCount_; }
+  int snapshotCount() const { return snapshotCount_; }
 
   // Production accessors mirrored for parity testing.
   float smoothedCrowdWeight() const { return smoothedW_; }
@@ -189,7 +181,7 @@ class PersonalityEngine {
     if (!config_) return c;
     for (const auto& p : nearbyOverride_) {
       if (p.name.empty()) continue;
-      const uint8_t d = p.bdAddr.empty() ? 3 : config_->getDisposition(p.bdAddr);
+      const uint8_t d = p.lampId.empty() ? 3 : config_->getDisposition(p.lampId);
       switch (d) {
         case 1: if (c.salty   < 255) c.salty++;   break;
         case 2: if (c.wary    < 255) c.wary++;    break;
@@ -218,7 +210,10 @@ class PersonalityEngine {
   static GreetingTuning profileToTuning_(uint32_t total, uint32_t easeIn,
                                           uint32_t hold, uint32_t fadeOut,
                                           uint8_t pulseBack, uint8_t pulseCount,
-                                          bool snub = false) {
+                                          bool snub, Easing easeInCurve,
+                                          Easing easeOutCurve,
+                                          uint16_t breathCycle = 120,
+                                          Easing breathCurve = Easing::Float) {
     GreetingTuning t;
     t.totalFrames = total;
     t.easeInFrames = easeIn;
@@ -226,37 +221,38 @@ class PersonalityEngine {
     t.fadeOutFrames = fadeOut;
     t.pulseBackStrength = pulseBack;
     t.pulseBackCount    = pulseCount;
+    t.breathCycleFrames = breathCycle;
     t.snub              = snub;
+    t.easeInCurve       = easeInCurve;
+    t.easeOutCurve      = easeOutCurve;
+    t.breathCurve       = breathCurve;
     return t;
   }
   static GreetingTuning profileForCell_(SocialMode mode, uint8_t disp) {
+    const Easing sw = Easing::Swell, sm = Easing::Smooth, fl = Easing::Float;
+    const uint8_t cont = kPulseCountContinuous;
     switch (disp) {
       case 1:  // Salty
-        if (mode == SocialMode::Extrovert)
-          return profileToTuning_(330, 60, 180, 90, 255, 1, true);   // SnubQuick
-        return profileToTuning_(270, 60, 150, 60, 255, 1, true);     // Snub
+        return profileToTuning_(540, 120, 300, 120, 191, 1, true, sm, sm);        // Snub
       case 2:  // Wary
-        if (mode == SocialMode::Extrovert)
-          return profileToTuning_(390, 60, 240, 90, 128, 1, true);   // PartialSnubQuick
-        return profileToTuning_(360, 60, 210, 90, 128, 1, true);     // PartialSnub
+        return profileToTuning_(570, 120, 300, 150, 165, 1, true, sm, sm);        // PartialSnub
       case 4:  // Fond
         if (mode == SocialMode::Introvert)
-          return profileToTuning_(1110, 120, 840, 150, 0, 0);        // Gentle
+          return profileToTuning_(1176, 156, 840, 180, 0, 0, false, sw, sm);            // Gentle
         if (mode == SocialMode::Ambivert)
-          return profileToTuning_(1290, 90, 1020, 180, 100, 1);      // Warm
-        return profileToTuning_(1350, 60, 1080, 210, 128, 2);        // Enthused
+          return profileToTuning_(1404, 144, 1020, 240, 50, cont, false, sw, sm, 300, fl); // Warm
+        return profileToTuning_(1512, 132, 1080, 300, 65, cont, false, sw, sm, 240, sm);   // Enthused
       case 5:  // Smitten
         if (mode == SocialMode::Introvert)
-          return profileToTuning_(1290, 90, 1020, 180, 100, 1);      // Warm
+          return profileToTuning_(1404, 144, 1020, 240, 50, cont, false, sw, sm, 300, fl); // Warm
         if (mode == SocialMode::Ambivert)
-          return profileToTuning_(1350, 60, 1080, 210, 128, 2);      // Enthused
-        return profileToTuning_(1425, 45, 1140, 240, 153,
-                                kPulseCountContinuous);               // Effusive
+          return profileToTuning_(1512, 132, 1080, 300, 65, cont, false, sw, sm, 240, sm); // Enthused
+        return profileToTuning_(1620, 120, 1140, 360, 80, cont, false, sw, sm, 180, sm);   // Effusive
       case 3:
       default:  // Neutral / unknown
         if (mode == SocialMode::Introvert)
-          return profileToTuning_(1020, 150, 780, 90, 0, 0);         // Minimal
-        return profileToTuning_(1200, 120, 960, 120, 0, 0);          // Standard
+          return profileToTuning_(1080, 180, 780, 120, 0, 0, false, sm, sm);  // Minimal
+        return profileToTuning_(1278, 168, 960, 150, 0, 0, false, sm, sm);   // Standard
     }
   }
 
@@ -289,14 +285,14 @@ class PersonalityEngine {
       default: return 1.0f;
     }
   }
-  float computeWeightedCount_(const std::vector<NearbyLamp>& peers,
+  float computeWeightedCount_(const std::vector<RosterEntry>& peers,
                               SocialMode mode) const {
     if (!config_) return 0.0f;
     float w = 0.0f;
     for (const auto& p : peers) {
       if (p.name.empty()) continue;
-      if (p.bdAddr.empty()) continue;
-      w += weightForDisposition_(config_->getDisposition(p.bdAddr), mode);
+      if (p.lampId.empty()) continue;
+      w += weightForDisposition_(config_->getDisposition(p.lampId), mode);
     }
     return w;
   }
@@ -313,7 +309,7 @@ class PersonalityEngine {
   }
   void sampleAndSmoothCrowd_(uint32_t /*nowMs*/) {
     const SocialMode mode = config_->socialMode;
-    const float rawW = computeWeightedCount_(nearbyOverride_, mode);
+    const float rawW = computeWeightedCount_(blePeerCache_, mode);
     sampleBuf_[sampleHead_] = rawW;
     sampleHead_ = (sampleHead_ + 1) % kSampleWindow;
     if (sampleCount_ < kSampleWindow) sampleCount_++;
@@ -344,77 +340,10 @@ class PersonalityEngine {
     }
   }
 
-  // --- Closest-Smitten pulse cycle --------------------------------------
-
-  void firePulse_(const Color& color) {
-    if (expressionManager_) expressionManager_->triggerPulse(color);
-  }
-
-  void tickClosestSmittenPulse_(uint32_t nowMs) {
-    if (!config_) return;
-    // Sort a local copy by RSSI desc (mirrors production
-    // getReachableViaBle behavior). nearbyOverride_ stays in test-author
-    // order so test setup doesn't need to know about the sort.
-    std::vector<NearbyLamp> sorted = nearbyOverride_;
-    std::stable_sort(sorted.begin(), sorted.end(),
-                      [](const NearbyLamp& a, const NearbyLamp& b) {
-                        return a.lastRssi > b.lastRssi;
-                      });
-    const NearbyLamp* closest = nullptr;
-    for (const auto& p : sorted) {
-      if (!p.name.empty()) { closest = &p; break; }
-    }
-    if (!closest) {
-      closestSmittenName_.clear();
-      lastClosestPulseMs_ = 0;
-      return;
-    }
-    if (closest->bdAddr.empty()) {
-      closestSmittenName_.clear();
-      lastClosestPulseMs_ = 0;
-      return;
-    }
-    const uint8_t disp = config_->getDisposition(closest->bdAddr);
-    if (disp != 5) {
-      closestSmittenName_.clear();
-      lastClosestPulseMs_ = 0;
-      return;
-    }
-    if (closest->name != closestSmittenName_) {
-      // Hysteresis (mirrors production): if the previous closest is still
-      // visible, only swap when the new closest is ≥kRssiHysteresisDb
-      // dBm stronger. Stops noise-driven flapping.
-      if (!closestSmittenName_.empty()) {
-        const NearbyLamp* prev = nullptr;
-        for (const auto& p : sorted) {
-          if (p.name == closestSmittenName_) { prev = &p; break; }
-        }
-        if (prev != nullptr) {
-          const int delta = static_cast<int>(closest->lastRssi) -
-                            static_cast<int>(prev->lastRssi);
-          if (delta < static_cast<int>(kRssiHysteresisDb)) return;
-        }
-      }
-      closestSmittenName_ = closest->name;
-      lastClosestPulseMs_ = nowMs;
-      firePulse_(closest->baseColor);
-      return;
-    }
-    if (nowMs - lastClosestPulseMs_ >= kClosestPulsePeriodMs) {
-      lastClosestPulseMs_ = nowMs;
-      firePulse_(closest->baseColor);
-    }
-  }
-
-  // Constants (mirror production).
-  static constexpr uint32_t kClosestPulsePeriodMs = 60000;
-  static constexpr uint8_t  kRssiHysteresisDb     = 3;
-
   FakeConfig* config_ = nullptr;
-  MockExpressionManager*  expressionManager_  = nullptr;
-  std::vector<NearbyLamp> nearbyOverride_;
-  std::string closestSmittenName_;
-  uint32_t lastClosestPulseMs_ = 0;
+  std::vector<RosterEntry> nearbyOverride_;
+  std::vector<RosterEntry> blePeerCache_;
+  int snapshotCount_ = 0;
   uint32_t lastSampleMs_ = 0;
   float sampleBuf_[kSampleWindow] = {0};
   size_t sampleHead_ = 0;
@@ -430,10 +359,10 @@ class PersonalityEngine {
 
 // --- Helpers for tests ---------------------------------------------------
 
-// Synthesise a deterministic BD_ADDR-shaped string from any input string.
+// Synthesise a deterministic lampId-shaped string from any input string.
 // Tests don't care about the exact bytes — only that the key is stable +
-// unique per peer and shaped like an uppercase colon-hex BD_ADDR.
-static std::string bdAddrFor(const std::string& s) {
+// unique per peer and shaped like an uppercase colon-hex mac.
+static std::string lampIdFor(const std::string& s) {
   uint32_t h = 2166136261u;
   for (unsigned char c : s) { h ^= c; h *= 16777619u; }
   char buf[18];
@@ -443,31 +372,18 @@ static std::string bdAddrFor(const std::string& s) {
   return std::string(buf);
 }
 
-static std::vector<NearbyLamp> peers(size_t n, uint8_t dispositionToSet,
+static std::vector<RosterEntry> peers(size_t n, uint8_t dispositionToSet,
                                      FakeConfig& cfg, const char* prefix = "p") {
-  std::vector<NearbyLamp> v;
+  std::vector<RosterEntry> v;
   v.reserve(n);
   for (size_t i = 0; i < n; ++i) {
-    NearbyLamp lamp;
+    RosterEntry lamp;
     lamp.name = std::string(prefix) + std::to_string(i);
-    lamp.bdAddr = bdAddrFor(lamp.name);
+    lamp.lampId = lampIdFor(lamp.name);
     v.push_back(lamp);
-    cfg.dispositions[lamp.bdAddr] = dispositionToSet;
+    cfg.dispositions[lamp.lampId] = dispositionToSet;
   }
   return v;
-}
-
-// Build a single named peer with color + RSSI (for closest tests).
-static NearbyLamp makePeer(const char* name, uint8_t disp, FakeConfig& cfg,
-                           Color color = Color(255, 0, 0, 0),
-                           int8_t rssi = -50) {
-  NearbyLamp p;
-  p.name = name;
-  p.bdAddr = bdAddrFor(name);
-  p.baseColor = color;
-  p.lastRssi = rssi;
-  cfg.dispositions[p.bdAddr] = disp;
-  return p;
 }
 
 // Run enough sample ticks to flush the median window + EMA convergence.
@@ -481,7 +397,7 @@ static void runSampleTicks(PersonalityEngine& eng, size_t n) {
 
 // Settle the smoother fully against a held nearby list. Returns the
 // final committed dim factor.
-static float settleAt(PersonalityEngine& eng, const std::vector<NearbyLamp>& nearby) {
+static float settleAt(PersonalityEngine& eng, const std::vector<RosterEntry>& nearby) {
   eng.setNearbyOverride(nearby);
   runSampleTicks(eng, 40);  // way more than needed; EMA τ ≈ 6s = 6 ticks
   return eng.currentDimFactor();
@@ -546,14 +462,14 @@ void test_crowd_weight_mixed() {
   resetEngine(eng, cfg);
   // 1 Salty (2.0) + 2 Wary (3.0) + 1 Neutral (1.0) + 1 Fond (0.5) + 1 Smitten (0.0)
   //   = 6.5 weighted (Introvert table)
-  std::vector<NearbyLamp> mix;
+  std::vector<RosterEntry> mix;
   auto add = [&](const std::string& n, uint8_t d) {
-    NearbyLamp lamp;
+    RosterEntry lamp;
     lamp.name = n;
-    lamp.bdAddr = bdAddrFor(n);
+    lamp.lampId = lampIdFor(n);
     lamp.lastRssi = -50;
     mix.push_back(lamp);
-    cfg.dispositions[lamp.bdAddr] = d;
+    cfg.dispositions[lamp.lampId] = d;
   };
   add("salt1", 1);
   add("wary1", 2); add("wary2", 2);
@@ -756,29 +672,29 @@ void test_greeting_tuning_matrix() {
     bool     expectedSnub;
   };
   const Row rows[] = {
-    // Salty — Snub (Introvert/Ambivert) or SnubQuick (Extrovert)
-    {SocialMode::Introvert, 1,  270, 255, 1, true},
-    {SocialMode::Ambivert,  1,  270, 255, 1, true},
-    {SocialMode::Extrovert, 1,  330, 255, 1, true},
-    // Wary — PartialSnub (Introvert/Ambivert) or PartialSnubQuick (Extrovert)
-    {SocialMode::Introvert, 2,  360, 128, 1, true},
-    {SocialMode::Ambivert,  2,  360, 128, 1, true},
-    {SocialMode::Extrovert, 2,  390, 128, 1, true},
+    // Salty — Snub in every mode
+    {SocialMode::Introvert, 1,  540, 191, 1, true},
+    {SocialMode::Ambivert,  1,  540, 191, 1, true},
+    {SocialMode::Extrovert, 1,  540, 191, 1, true},
+    // Wary — PartialSnub in every mode
+    {SocialMode::Introvert, 2,  570, 165, 1, true},
+    {SocialMode::Ambivert,  2,  570, 165, 1, true},
+    {SocialMode::Extrovert, 2,  570, 165, 1, true},
     // Neutral
-    {SocialMode::Introvert, 3, 1020,   0, 0, false},
-    {SocialMode::Ambivert,  3, 1200,   0, 0, false},
-    {SocialMode::Extrovert, 3, 1200,   0, 0, false},
-    // Fond
-    {SocialMode::Introvert, 4, 1110,   0, 0, false},
-    {SocialMode::Ambivert,  4, 1290, 100, 1, false},
-    {SocialMode::Extrovert, 4, 1350, 128, 2, false},
+    {SocialMode::Introvert, 3, 1080,   0, 0, false},
+    {SocialMode::Ambivert,  3, 1278,   0, 0, false},
+    {SocialMode::Extrovert, 3, 1278,   0, 0, false},
+    // Fond — warm greetings breathe continuously
+    {SocialMode::Introvert, 4, 1176,   0, 0, false},
+    {SocialMode::Ambivert,  4, 1404,  50, kPulseCountContinuous, false},
+    {SocialMode::Extrovert, 4, 1512,  65, kPulseCountContinuous, false},
     // Smitten
-    {SocialMode::Introvert, 5, 1290, 100, 1, false},
-    {SocialMode::Ambivert,  5, 1350, 128, 2, false},
-    {SocialMode::Extrovert, 5, 1425, 153, kPulseCountContinuous, false},
+    {SocialMode::Introvert, 5, 1404,  50, kPulseCountContinuous, false},
+    {SocialMode::Ambivert,  5, 1512,  65, kPulseCountContinuous, false},
+    {SocialMode::Extrovert, 5, 1620,  80, kPulseCountContinuous, false},
   };
 
-  const std::string peerAddr = bdAddrFor("peer");
+  const std::string peerAddr = lampIdFor("peer");
   cfg.dispositions[peerAddr] = 3;  // placeholder; we'll set per-row
   for (const auto& r : rows) {
     cfg.socialMode = r.mode;
@@ -788,49 +704,87 @@ void test_greeting_tuning_matrix() {
     TEST_ASSERT_EQUAL_UINT8(r.expectedPulseBack, t.pulseBackStrength);
     TEST_ASSERT_EQUAL_UINT8(r.expectedPulseCount, t.pulseBackCount);
     TEST_ASSERT_EQUAL(r.expectedSnub, t.snub);
+    // No greeting blinks or snaps: >= 5s hold, >= 2s ramps at ~60 fps.
+    TEST_ASSERT_TRUE(t.holdFrames >= 300);
+    TEST_ASSERT_TRUE(t.easeInFrames >= 120);
+    TEST_ASSERT_TRUE(t.fadeOutFrames >= 120);
+    // total stays consistent with the phase sum.
+    TEST_ASSERT_EQUAL_UINT32(t.easeInFrames + t.holdFrames + t.fadeOutFrames,
+                             t.totalFrames);
+  }
+}
+
+// 15b. test_greeting_curve_per_disposition — warm greetings swell in and
+// smooth out; neutral and snub ramps are Smooth both ways.
+void test_greeting_curve_per_disposition() {
+  FakeConfig cfg;
+  PersonalityEngine eng;
+  resetEngine(eng, cfg);
+  const std::string peerAddr = lampIdFor("peer");
+  auto curve = [&](SocialMode mode, uint8_t disp) {
+    cfg.socialMode = mode;
+    cfg.dispositions[peerAddr] = disp;
+    return eng.greetingFor(peerAddr);
+  };
+  // Warm family: Swell in, Smooth out.
+  for (auto cell : {curve(SocialMode::Ambivert, 4), curve(SocialMode::Extrovert, 5),
+                    curve(SocialMode::Introvert, 4)}) {
+    TEST_ASSERT_EQUAL(Easing::Swell, cell.easeInCurve);
+    TEST_ASSERT_EQUAL(Easing::Smooth, cell.easeOutCurve);
+  }
+  // Neutral + snubs: Smooth both ways (dismissiveness rides the dim floor).
+  for (auto cell : {curve(SocialMode::Ambivert, 3), curve(SocialMode::Ambivert, 1),
+                    curve(SocialMode::Extrovert, 2)}) {
+    TEST_ASSERT_EQUAL(Easing::Smooth, cell.easeInCurve);
+    TEST_ASSERT_EQUAL(Easing::Smooth, cell.easeOutCurve);
   }
 }
 
 // 16. test_greeting_for_salty_is_snub_in_all_modes — Salty produces a
-// full-dim Snub waveform (or SnubQuick under Extrovert).
+// Snub waveform in every mode that dims to a deep floor (~16% brightness)
+// and lingers >= 5s.
 void test_greeting_for_salty_is_snub_in_all_modes() {
   FakeConfig cfg;
   PersonalityEngine eng;
   resetEngine(eng, cfg);
-  const std::string nemesisAddr = bdAddrFor("nemesis");
+  const std::string nemesisAddr = lampIdFor("nemesis");
   cfg.dispositions[nemesisAddr] = 1;
 
   cfg.socialMode = SocialMode::Introvert;
   GreetingTuning t = eng.greetingFor(nemesisAddr);
-  TEST_ASSERT_EQUAL_UINT32(270, t.totalFrames);
-  TEST_ASSERT_EQUAL_UINT8(255, t.pulseBackStrength);
+  TEST_ASSERT_EQUAL_UINT32(540, t.totalFrames);
+  TEST_ASSERT_EQUAL_UINT8(191, t.pulseBackStrength);
   TEST_ASSERT_EQUAL_UINT8(1, t.pulseBackCount);
+  TEST_ASSERT_TRUE(t.holdFrames >= 300);
 
   cfg.socialMode = SocialMode::Ambivert;
   t = eng.greetingFor(nemesisAddr);
-  TEST_ASSERT_EQUAL_UINT32(270, t.totalFrames);
-  TEST_ASSERT_EQUAL_UINT8(255, t.pulseBackStrength);
+  TEST_ASSERT_EQUAL_UINT32(540, t.totalFrames);
+  TEST_ASSERT_EQUAL_UINT8(191, t.pulseBackStrength);
   TEST_ASSERT_EQUAL_UINT8(1, t.pulseBackCount);
+  TEST_ASSERT_TRUE(t.holdFrames >= 300);
 
   cfg.socialMode = SocialMode::Extrovert;
   t = eng.greetingFor(nemesisAddr);
-  TEST_ASSERT_EQUAL_UINT32(330, t.totalFrames);
-  TEST_ASSERT_EQUAL_UINT8(255, t.pulseBackStrength);
+  TEST_ASSERT_EQUAL_UINT32(540, t.totalFrames);
+  TEST_ASSERT_EQUAL_UINT8(191, t.pulseBackStrength);
   TEST_ASSERT_EQUAL_UINT8(1, t.pulseBackCount);
+  TEST_ASSERT_TRUE(t.holdFrames >= 300);
 }
 
-// 16b. test_greeting_for_wary_is_partial_snub_in_all_modes — pulseBackStrength=128.
+// 16b. test_greeting_for_wary_is_partial_snub_in_all_modes — pulseBackStrength=165.
 void test_greeting_for_wary_is_partial_snub_in_all_modes() {
   FakeConfig cfg;
   PersonalityEngine eng;
   resetEngine(eng, cfg);
-  const std::string acqAddr = bdAddrFor("acquaintance");
+  const std::string acqAddr = lampIdFor("acquaintance");
   cfg.dispositions[acqAddr] = 2;
   for (auto mode : {SocialMode::Introvert, SocialMode::Ambivert, SocialMode::Extrovert}) {
     cfg.socialMode = mode;
     const GreetingTuning t = eng.greetingFor(acqAddr);
-    TEST_ASSERT_EQUAL_UINT8(128, t.pulseBackStrength);
+    TEST_ASSERT_EQUAL_UINT8(165, t.pulseBackStrength);
     TEST_ASSERT_EQUAL_UINT8(1, t.pulseBackCount);
+    TEST_ASSERT_TRUE(t.holdFrames >= 300);
   }
 }
 
@@ -839,25 +793,31 @@ void test_greeting_for_smitten_extrovert_is_effusive_continuous() {
   FakeConfig cfg;
   PersonalityEngine eng;
   resetEngine(eng, cfg);
-  const std::string crushAddr = bdAddrFor("crush");
+  const std::string crushAddr = lampIdFor("crush");
   cfg.dispositions[crushAddr] = 5;
   cfg.socialMode = SocialMode::Extrovert;
   const GreetingTuning t = eng.greetingFor(crushAddr);
   TEST_ASSERT_EQUAL_UINT8(kPulseCountContinuous, t.pulseBackCount);
-  TEST_ASSERT_EQUAL_UINT32(1425, t.totalFrames);
+  TEST_ASSERT_EQUAL_UINT8(80, t.pulseBackStrength);
+  TEST_ASSERT_EQUAL_UINT16(180, t.breathCycleFrames);
+  TEST_ASSERT_EQUAL(Easing::Smooth, t.breathCurve);
+  TEST_ASSERT_EQUAL_UINT32(1620, t.totalFrames);
 }
 
-// 16d. test_greeting_for_smitten_ambivert_is_enthused_two_pulses
-void test_greeting_for_smitten_ambivert_is_enthused_two_pulses() {
+// 16d. test_greeting_for_smitten_ambivert_is_enthused_continuous
+void test_greeting_for_smitten_ambivert_is_enthused_continuous() {
   FakeConfig cfg;
   PersonalityEngine eng;
   resetEngine(eng, cfg);
-  const std::string crushAddr = bdAddrFor("crush");
+  const std::string crushAddr = lampIdFor("crush");
   cfg.dispositions[crushAddr] = 5;
   cfg.socialMode = SocialMode::Ambivert;
   const GreetingTuning t = eng.greetingFor(crushAddr);
-  TEST_ASSERT_EQUAL_UINT8(2, t.pulseBackCount);
-  TEST_ASSERT_EQUAL_UINT32(1350, t.totalFrames);
+  TEST_ASSERT_EQUAL_UINT8(kPulseCountContinuous, t.pulseBackCount);
+  TEST_ASSERT_EQUAL_UINT8(65, t.pulseBackStrength);
+  TEST_ASSERT_EQUAL_UINT16(240, t.breathCycleFrames);
+  TEST_ASSERT_EQUAL(Easing::Smooth, t.breathCurve);
+  TEST_ASSERT_EQUAL_UINT32(1512, t.totalFrames);
 }
 
 // 16e. test_greeting_profile_easeins_invert_with_warmth
@@ -869,7 +829,7 @@ void test_greeting_profile_easeins_invert_with_warmth() {
   FakeConfig cfg;
   PersonalityEngine eng;
   resetEngine(eng, cfg);
-  const std::string peerAddr = bdAddrFor("peer");
+  const std::string peerAddr = lampIdFor("peer");
   auto easeFor = [&](SocialMode mode, uint8_t disp) -> uint32_t {
     cfg.socialMode = mode;
     cfg.dispositions[peerAddr] = disp;
@@ -903,224 +863,14 @@ void test_greeting_for_unknown_peer_is_neutral() {
   PersonalityEngine eng;
   resetEngine(eng, cfg);
   cfg.socialMode = SocialMode::Ambivert;
-  const GreetingTuning t = eng.greetingFor(bdAddrFor("stranger"));
-  // Ambivert × Neutral → standard (1200, 120, 960, 120, 0, 0) — the anchor.
-  TEST_ASSERT_EQUAL_UINT32(1200, t.totalFrames);
-  TEST_ASSERT_EQUAL_UINT32(120, t.easeInFrames);
+  const GreetingTuning t = eng.greetingFor(lampIdFor("stranger"));
+  // Ambivert × Neutral → standard (1278, 168, 960, 150, 0, 0) — the anchor.
+  TEST_ASSERT_EQUAL_UINT32(1278, t.totalFrames);
+  TEST_ASSERT_EQUAL_UINT32(168, t.easeInFrames);
   TEST_ASSERT_EQUAL_UINT32(960, t.holdFrames);
-  TEST_ASSERT_EQUAL_UINT32(120, t.fadeOutFrames);
+  TEST_ASSERT_EQUAL_UINT32(150, t.fadeOutFrames);
   TEST_ASSERT_EQUAL_UINT8(0, t.pulseBackStrength);
   TEST_ASSERT_EQUAL_UINT8(0, t.pulseBackCount);
-}
-
-// --- Closest-Smitten cycle tests ----------------------------------------
-
-// test_smitten_closest_pulse_fires_on_transition_and_every_60s
-void test_smitten_closest_pulse_fires_on_transition_and_every_60s() {
-  FakeConfig cfg;
-  MockExpressionManager em;
-  PersonalityEngine eng;
-  resetEngine(eng, cfg);
-  eng.begin(&cfg, &em);
-  cfg.socialMode = SocialMode::Ambivert;
-
-  // Single Smitten peer = the closest. First tick: closest-transition
-  // fires 1 pulse.
-  eng.setNearbyOverride({makePeer("crush", 5, cfg, Color(200, 0, 200, 0), -40)});
-  eng.tick(g_nowMs);
-  TEST_ASSERT_EQUAL_INT(1, (int)em.invocations.size());
-
-  // 45s < 60s closest cadence — no new pulses expected.
-  for (int t = 0; t < 45; ++t) {
-    g_nowMs += 1000;
-    eng.tick(g_nowMs);
-  }
-  TEST_ASSERT_EQUAL_INT(1, (int)em.invocations.size());
-
-  // Advance another 16s (total 61s since the transition). Cadence fires.
-  for (int t = 0; t < 16; ++t) {
-    g_nowMs += 1000;
-    eng.tick(g_nowMs);
-  }
-  TEST_ASSERT_EQUAL_INT(2, (int)em.invocations.size());
-
-  // Another 60s of ticks → another pulse.
-  for (int t = 0; t < 60; ++t) {
-    g_nowMs += 1000;
-    eng.tick(g_nowMs);
-  }
-  TEST_ASSERT_EQUAL_INT(3, (int)em.invocations.size());
-}
-
-// test_smitten_closest_pulse_resets_when_closest_changes
-void test_smitten_closest_pulse_resets_when_closest_changes() {
-  FakeConfig cfg;
-  MockExpressionManager em;
-  PersonalityEngine eng;
-  resetEngine(eng, cfg);
-  eng.begin(&cfg, &em);
-  cfg.socialMode = SocialMode::Ambivert;
-
-  // Crush A is closest (higher RSSI = closer = less negative).
-  const Color colorA = Color(255, 0, 0, 0);
-  const Color colorB = Color(0, 0, 255, 0);
-  eng.setNearbyOverride({
-    makePeer("crushA", 5, cfg, colorA, -40),
-    makePeer("crushB", 5, cfg, colorB, -55),
-  });
-  eng.tick(g_nowMs);
-  // A is closest → closest-transition fires for A. B is Smitten but not
-  // closest → no immediate pulse for B.
-  TEST_ASSERT_EQUAL_INT(1, (int)em.invocations.size());
-  TEST_ASSERT_TRUE(em.invocations[0].color == colorA);
-
-  // Now B becomes closest — engine should fire an immediate pulse in B's color.
-  em.invocations.clear();
-  eng.setNearbyOverride({
-    makePeer("crushB", 5, cfg, colorB, -30),  // now closer
-    makePeer("crushA", 5, cfg, colorA, -55),
-  });
-  g_nowMs += 100;  // small advance
-  eng.tick(g_nowMs);
-  TEST_ASSERT_EQUAL_INT(1, (int)em.invocations.size());
-  TEST_ASSERT_TRUE(em.invocations[0].color == colorB);
-}
-
-// test_smitten_closest_pulse_does_not_fire_if_closest_is_non_smitten
-void test_smitten_closest_pulse_does_not_fire_if_closest_is_non_smitten() {
-  FakeConfig cfg;
-  MockExpressionManager em;
-  PersonalityEngine eng;
-  resetEngine(eng, cfg);
-  eng.begin(&cfg, &em);
-  cfg.socialMode = SocialMode::Ambivert;
-
-  // Neutral lamp is closest; Smitten is further away.
-  eng.setNearbyOverride({
-    makePeer("neut",  3, cfg, Color(80, 80, 80, 0), -35),  // closest
-    makePeer("crush", 5, cfg, Color(200, 0, 200, 0), -65),
-  });
-  eng.tick(g_nowMs);
-  // Closest is Neutral → no closest-pulse.
-  TEST_ASSERT_EQUAL_INT(0, (int)em.invocations.size());
-
-  // Tick every second for 50s — closest stays Neutral throughout, no pulse.
-  for (int t = 0; t < 50; ++t) {
-    g_nowMs += 1000;
-    eng.tick(g_nowMs);
-  }
-  TEST_ASSERT_EQUAL_INT(0, (int)em.invocations.size());
-}
-
-// test_smitten_closest_picks_highest_rssi_regardless_of_insertion_order
-// Production `getReachableViaBle()` had a long-standing bug: the header
-// comment claimed the result was sorted by RSSI descending but the sort
-// was never actually performed. This test mirrors the sort behavior —
-// peer inserted LAST but with the strongest RSSI must be the chosen closest.
-void test_smitten_closest_picks_highest_rssi_regardless_of_insertion_order() {
-  FakeConfig cfg;
-  MockExpressionManager em;
-  PersonalityEngine eng;
-  resetEngine(eng, cfg);
-  eng.begin(&cfg, &em);
-  cfg.socialMode = SocialMode::Ambivert;
-  const Color colorWeak   = Color(255, 0, 0, 0);  // red, far away
-  const Color colorStrong = Color(0, 0, 255, 0);  // blue, closest
-  eng.setNearbyOverride({
-    makePeer("far",  5, cfg, colorWeak,   -70),  // inserted first
-    makePeer("near", 5, cfg, colorStrong, -35),  // inserted second
-  });
-  eng.tick(g_nowMs);
-  TEST_ASSERT_EQUAL_INT(1, (int)em.invocations.size());
-  TEST_ASSERT_TRUE(em.invocations[0].color == colorStrong);
-}
-
-// test_smitten_closest_cadence_resets_after_disposition_demotion
-// Cadence clock must not carry across a Smitten→non-Smitten flip.
-void test_smitten_closest_cadence_resets_after_disposition_demotion() {
-  FakeConfig cfg;
-  MockExpressionManager em;
-  PersonalityEngine eng;
-  resetEngine(eng, cfg);
-  eng.begin(&cfg, &em);
-  cfg.socialMode = SocialMode::Ambivert;
-  const Color color = Color(255, 0, 255, 0);
-  eng.setNearbyOverride({makePeer("crush", 5, cfg, color, -40)});
-  eng.tick(g_nowMs);
-  TEST_ASSERT_EQUAL_INT(1, (int)em.invocations.size());
-
-  // Demote to Neutral. closestSmittenName_ should clear AND
-  // lastClosestPulseMs_ should reset to 0.
-  cfg.dispositions[bdAddrFor("crush")] = 3;
-  g_nowMs += 10000;
-  eng.tick(g_nowMs);
-  TEST_ASSERT_EQUAL_INT(1, (int)em.invocations.size());
-
-  // Re-promote within the 60s cadence window — a fresh transition fires.
-  cfg.dispositions[bdAddrFor("crush")] = 5;
-  g_nowMs += 1000;
-  eng.tick(g_nowMs);
-  TEST_ASSERT_EQUAL_INT(2, (int)em.invocations.size());
-
-  // 44s later: cadence has NOT yet elapsed since the fresh transition
-  // (lastClosestPulseMs_ was reset to the re-promotion time, ~t=11000).
-  g_nowMs += 44000;
-  eng.tick(g_nowMs);
-  TEST_ASSERT_EQUAL_INT(2, (int)em.invocations.size());
-
-  // 16s later (60s since re-promotion): cadence fires.
-  g_nowMs += 16000;
-  eng.tick(g_nowMs);
-  TEST_ASSERT_EQUAL_INT(3, (int)em.invocations.size());
-}
-
-// test_smitten_closest_hysteresis_absorbs_small_rssi_noise
-// Two Smitten peers with nearly identical RSSI. Without hysteresis, ±1
-// dBm noise (well below the 3 dB hysteresis) would flap "closest" every
-// tick and strobe a pulse on every flip.
-void test_smitten_closest_hysteresis_absorbs_small_rssi_noise() {
-  FakeConfig cfg;
-  MockExpressionManager em;
-  PersonalityEngine eng;
-  resetEngine(eng, cfg);
-  eng.begin(&cfg, &em);
-  cfg.socialMode = SocialMode::Ambivert;
-  const Color colorA = Color(255, 0, 0, 0);
-  const Color colorB = Color(0, 255, 0, 0);
-
-  // Initial state: A is closest by 2 dB (sub-threshold). One transition fires.
-  eng.setNearbyOverride({
-    makePeer("A", 5, cfg, colorA, -50),
-    makePeer("B", 5, cfg, colorB, -52),
-  });
-  eng.tick(g_nowMs);
-  TEST_ASSERT_EQUAL_INT(1, (int)em.invocations.size());
-  TEST_ASSERT_TRUE(em.invocations[0].color == colorA);
-
-  // Now flap: B nudges 1 dB stronger, then A regains 1 dB, etc. Each
-  // tick the "front" alternates between A and B, but the delta is only
-  // 1-2 dB — below kRssiHysteresisDb=3.
-  for (int i = 1; i <= 20; ++i) {
-    const int8_t aRssi = (i % 2 == 0) ? -50 : -51;
-    const int8_t bRssi = (i % 2 == 0) ? -51 : -50;
-    eng.setNearbyOverride({
-      makePeer("A", 5, cfg, colorA, aRssi),
-      makePeer("B", 5, cfg, colorB, bRssi),
-    });
-    g_nowMs += 200;
-    eng.tick(g_nowMs);
-  }
-  TEST_ASSERT_EQUAL_INT(1, (int)em.invocations.size());
-
-  // A decisive 5 dB jump (B now -45 vs A -50) should transition.
-  eng.setNearbyOverride({
-    makePeer("A", 5, cfg, colorA, -50),
-    makePeer("B", 5, cfg, colorB, -45),  // 5 dB stronger than A
-  });
-  g_nowMs += 200;
-  eng.tick(g_nowMs);
-  TEST_ASSERT_EQUAL_INT(2, (int)em.invocations.size());
-  TEST_ASSERT_TRUE(em.invocations[1].color == colorB);
 }
 
 // --- Smoothed-W + crowd composition accessor tests ----------------------
@@ -1146,14 +896,14 @@ void test_crowd_composition_counts_by_disposition() {
   PersonalityEngine eng;
   resetEngine(eng, cfg);
 
-  std::vector<NearbyLamp> mix;
+  std::vector<RosterEntry> mix;
   auto add = [&](const std::string& n, uint8_t d) {
-    NearbyLamp lamp;
+    RosterEntry lamp;
     lamp.name = n;
-    lamp.bdAddr = bdAddrFor(n);
+    lamp.lampId = lampIdFor(n);
     lamp.lastRssi = -50;
     mix.push_back(lamp);
-    cfg.dispositions[lamp.bdAddr] = d;
+    cfg.dispositions[lamp.lampId] = d;
   };
   add("salt1", 1);
   add("wary1", 2); add("wary2", 2);
@@ -1188,12 +938,12 @@ void test_crowd_composition_unknown_peer_counts_as_neutral() {
   resetEngine(eng, cfg);
 
   // Peer in snapshot but absent from dispositions map → unknown → Neutral.
-  NearbyLamp p;
+  RosterEntry p;
   p.name = "stranger";
-  p.bdAddr = bdAddrFor("stranger");
+  p.lampId = lampIdFor("stranger");
   p.lastRssi = -50;
   eng.setNearbyOverride({p});
-  // Intentionally do NOT set cfg.dispositions[p.bdAddr].
+  // Intentionally do NOT set cfg.dispositions[p.lampId].
 
   const CrowdComposition c = eng.crowdComposition();
   TEST_ASSERT_EQUAL_UINT8(0, c.salty);
@@ -1225,18 +975,13 @@ int main(int, char**) {
   RUN_TEST(test::test_crowd_dim_extrovert_returns_baseline);
   RUN_TEST(test::test_crowd_dim_introvert_unchanged_curve);
   RUN_TEST(test::test_greeting_tuning_matrix);
+  RUN_TEST(test::test_greeting_curve_per_disposition);
   RUN_TEST(test::test_greeting_for_salty_is_snub_in_all_modes);
   RUN_TEST(test::test_greeting_for_wary_is_partial_snub_in_all_modes);
   RUN_TEST(test::test_greeting_for_smitten_extrovert_is_effusive_continuous);
-  RUN_TEST(test::test_greeting_for_smitten_ambivert_is_enthused_two_pulses);
+  RUN_TEST(test::test_greeting_for_smitten_ambivert_is_enthused_continuous);
   RUN_TEST(test::test_greeting_profile_easeins_invert_with_warmth);
   RUN_TEST(test::test_greeting_for_unknown_peer_is_neutral);
-  RUN_TEST(test::test_smitten_closest_pulse_fires_on_transition_and_every_60s);
-  RUN_TEST(test::test_smitten_closest_pulse_resets_when_closest_changes);
-  RUN_TEST(test::test_smitten_closest_pulse_does_not_fire_if_closest_is_non_smitten);
-  RUN_TEST(test::test_smitten_closest_picks_highest_rssi_regardless_of_insertion_order);
-  RUN_TEST(test::test_smitten_closest_hysteresis_absorbs_small_rssi_noise);
-  RUN_TEST(test::test_smitten_closest_cadence_resets_after_disposition_demotion);
   RUN_TEST(test::test_smoothed_crowd_weight_matches_internal);
   RUN_TEST(test::test_crowd_composition_counts_by_disposition);
   RUN_TEST(test::test_crowd_composition_empty_when_no_peers);

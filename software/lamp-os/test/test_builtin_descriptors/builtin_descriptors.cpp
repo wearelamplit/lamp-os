@@ -1,138 +1,18 @@
-// Local constexpr copies mirror the production descriptors (.make needs Arduino).
+// Pins the exprcat wire JSON for the five production descriptors. Registers
+// the real header-defined descriptor data (make-less; .make needs Arduino),
+// so any production descriptor change fails here instead of drifting.
 #include <unity.h>
 #include <ArduinoJson.h>
 
-#include "expressions/expression_registry.hpp"
-#include "expressions/expression_schema.hpp"
+#include "expressions/breathing/breathing_expression.hpp"
+#include "expressions/glitchy/glitchy_expression.hpp"
+#include "expressions/pulse/pulse_expression.hpp"
+#include "expressions/shifty/shifty_expression.hpp"
+#include "expressions/spotty/spotty_expression.hpp"
 
 #include "../../src/expressions/expression_registry.cpp"
 
 using namespace lamp;
-
-// ---- Glitchy ---------------------------------------------------------------
-
-static constexpr ParamSpec kGlitchyParams[] = {
-  { .key = "count", .kind = ParamKind::Int, .label = "Points",
-    .min = 1, .max = Bound::pixels(10), .step = 1, .def = 1,
-    .requiresZoning = true },
-  { .key = "size", .kind = ParamKind::Int, .label = "Size",
-    .min = 1, .max = Bound::pixels(), .step = 1, .def = 1,
-    .requiresZoning = true },
-};
-static constexpr ExpressionDescriptor kGlitchy{
-  .id = "glitchy",
-  .name = "Glitchy",
-  .continuous = false,
-  .colors = { .max = 8, .label = "Colors" },
-  .interval = RangeSpec{ .min = 60, .max = 900, .step = 30, .unit = "s",
-                         .defLo = 60, .defHi = 900 },
-  .duration = RangeSpec{ .min = 30, .max = 2000, .step = 30, .unit = "ms",
-                         .defLo = 30, .defHi = 120, .label = "Glitch duration" },
-  .hasZone = true,
-  .zoneOptional = true,
-  .params = kGlitchyParams,
-};
-
-// ---- Pulse -----------------------------------------------------------------
-
-static constexpr ParamSpec kPulseParams[] = {
-  { .key = "pulseSpeed", .kind = ParamKind::Int, .label = "Pulse speed",
-    .min = 1, .max = 10, .step = 1, .def = 3, .unit = "s",
-    .invert = true, .leftLabel = "slow", .rightLabel = "fast" },
-  { .key = "size", .kind = ParamKind::Int, .label = "Size",
-    .min = 1, .max = Bound::pixels(), .step = 1, .def = 15 },
-};
-static constexpr ExpressionDescriptor kPulse{
-  .id = "pulse",
-  .name = "Pulse",
-  .continuous = false,
-  .colors = { .max = 8, .label = "Colors" },
-  .interval = RangeSpec{ .min = 60, .max = 900, .step = 30, .unit = "s",
-                         .defLo = 60, .defHi = 900 },
-  .hasZone = true,
-  .zoneOptional = false,
-  .params = kPulseParams,
-};
-
-// ---- Breathing -------------------------------------------------------------
-
-static constexpr ParamSpec kBreathingParams[] = {
-  { .key = "breathSpeed", .kind = ParamKind::Int, .label = "Breath cycle length",
-    .min = 1, .max = 60, .step = 1, .def = 10, .unit = "s",
-    .invert = true, .leftLabel = "slow", .rightLabel = "fast" },
-  { .key = "count", .kind = ParamKind::Int, .label = "Points",
-    .min = 1, .max = Bound::pixels(10), .step = 1, .def = 1 },
-  { .key = "size", .kind = ParamKind::Int, .label = "Size",
-    .min = 1, .max = Bound::pixels(), .step = 1, .def = 32767 },
-  { .key = "scatter", .kind = ParamKind::Int, .label = "Scatter",
-    .min = 0, .max = 100, .step = 1, .def = 0, .unit = "%",
-    .leftLabel = "Sync", .rightLabel = "Embers" },
-};
-static constexpr ExpressionDescriptor kBreathing{
-  .id = "breathing",
-  .name = "Breathing",
-  .continuous = true,
-  .pausesWispOverride = true,
-  .colors = { .max = 8, .label = "Colors" },
-  .hasZone = true,
-  .zoneOptional = false,
-  .params = kBreathingParams,
-};
-
-// ---- Shifty ----------------------------------------------------------------
-
-static constexpr EnumOption kShiftyFillOpts[] = {
-  { .value = 0, .label = "Uniform", .zoning = false },
-  { .value = 1, .label = "Up",      .zoning = true  },
-  { .value = 2, .label = "Down",    .zoning = true  },
-  { .value = 3, .label = "Bloom",   .zoning = true  },
-};
-static constexpr ParamSpec kShiftyParams[] = {
-  { .key = "fillMode", .kind = ParamKind::Enum, .label = "Fill",
-    .min = 0, .max = 3, .step = 1, .def = 0,
-    .options = kShiftyFillOpts },
-  { .key = "fadeDuration", .kind = ParamKind::Int, .label = "Fade duration",
-    .min = 10, .max = 300, .step = 1, .def = 60, .unit = "s",
-    .leftLabel = "quick", .rightLabel = "slow" },
-};
-static constexpr ExpressionDescriptor kShifty{
-  .id = "shifty",
-  .name = "Shifty",
-  .continuous = true,
-  .pausesWispOverride = true,
-  .colors = { .max = 8, .label = "Colors" },
-  .interval = RangeSpec{ .min = 60, .max = 900, .step = 30, .unit = "s",
-                         .defLo = 60, .defHi = 900 },
-  .duration = RangeSpec{ .min = 60, .max = 1800, .step = 30, .unit = "s",
-                         .defLo = 300, .defHi = 600, .label = "Hold time" },
-  .hasZone = true,
-  .zoneOptional = false,
-  .params = kShiftyParams,
-};
-
-// ---- Spotty ----------------------------------------------------------------
-
-static constexpr ParamSpec kSpottyParams[] = {
-  { .key = "count", .kind = ParamKind::Int, .label = "Points",
-    .min = 1, .max = Bound::pixels(10), .step = 1, .def = 3 },
-  { .key = "size", .kind = ParamKind::Int, .label = "Size",
-    .min = 1, .max = Bound::pixels(), .step = 1, .def = 4 },
-  { .key = "spotSpeed", .kind = ParamKind::Int, .label = "Speed",
-    .min = 1, .max = 10, .step = 1, .def = 3, .unit = "s",
-    .invert = true, .leftLabel = "slow", .rightLabel = "fast" },
-};
-static constexpr ExpressionDescriptor kSpotty{
-  .id = "spotty",
-  .name = "Spotty",
-  .continuous = false,
-  .pausesWispOverride = true,
-  .colors = { .max = 8, .label = "Colors" },
-  .interval = RangeSpec{ .min = 60, .max = 900, .step = 30, .unit = "s",
-                         .defLo = 60, .defHi = 900 },
-  .hasZone = true,
-  .zoneOptional = false,
-  .params = kSpottyParams,
-};
 
 // ---- Test helpers ----------------------------------------------------------
 
@@ -141,11 +21,11 @@ static JsonDocument g_doc;
 
 void setUp() {
   g_reg = ExpressionRegistry{};
-  g_reg.add(kGlitchy);
-  g_reg.add(kPulse);
-  g_reg.add(kBreathing);
-  g_reg.add(kShifty);
-  g_reg.add(kSpotty);
+  g_reg.add(kGlitchyDescriptorData);
+  g_reg.add(kPulseDescriptorData);
+  g_reg.add(kBreathingDescriptorData);
+  g_reg.add(kShiftyDescriptorData);
+  g_reg.add(kSpottyDescriptorData);
   g_doc.clear();
   deserializeJson(g_doc, g_reg.serializeCatalog());
 }
@@ -174,9 +54,9 @@ void test_all_five_ids_present() {
 void test_continuous_flags() {
   TEST_ASSERT_TRUE(findById("breathing")["continuous"].as<bool>());
   TEST_ASSERT_TRUE(findById("shifty")["continuous"].as<bool>());
+  TEST_ASSERT_TRUE(findById("spotty")["continuous"].as<bool>());
   TEST_ASSERT_FALSE(findById("glitchy")["continuous"].as<bool>());
   TEST_ASSERT_FALSE(findById("pulse")["continuous"].as<bool>());
-  TEST_ASSERT_FALSE(findById("spotty")["continuous"].as<bool>());
 }
 
 void test_pauses_wisp_override_flags() {
@@ -193,55 +73,81 @@ void test_glitchy_zone_optional() {
   TEST_ASSERT_TRUE(zone["optional"].as<bool>());
 }
 
-void test_glitchy_count_requires_zoning_pixel_capped_max() {
+void test_glitchy_scatter_always_active_literal_max() {
   JsonObject e = findById("glitchy");
-  JsonObject countParam;
+  JsonObject scatter;
   for (JsonObject p : e["params"].as<JsonArray>()) {
-    if (std::string(p["key"].as<const char*>()) == "count") { countParam = p; break; }
+    if (std::string(p["key"].as<const char*>()) == "scatter") { scatter = p; break; }
   }
-  TEST_ASSERT_TRUE(countParam["requiresZoning"].as<bool>());
-  auto maxVal = countParam["max"];
-  TEST_ASSERT_TRUE(maxVal.is<JsonObject>());
-  TEST_ASSERT_EQUAL_STRING("pixels", maxVal["rel"].as<const char*>());
-  TEST_ASSERT_EQUAL_INT(10, maxVal["cap"].as<int>());
+  TEST_ASSERT_FALSE(scatter.isNull());
+  TEST_ASSERT_TRUE(scatter["requiresZoning"].isNull());
+  auto maxVal = scatter["max"];
+  TEST_ASSERT_FALSE(maxVal.is<JsonObject>());
+  TEST_ASSERT_EQUAL_INT(5, maxVal.as<int>());
+  TEST_ASSERT_EQUAL_INT(0, scatter["min"].as<int>());
+  TEST_ASSERT_EQUAL_INT(5, scatter["default"].as<int>());
+  TEST_ASSERT_TRUE(scatter["unit"].isNull());
 }
 
-void test_glitchy_size_requires_zoning_pixel_relative_max() {
+void test_glitchy_has_no_size_param() {
   JsonObject e = findById("glitchy");
-  JsonObject sizeParam;
+  bool hasSize = false;
   for (JsonObject p : e["params"].as<JsonArray>()) {
-    if (std::string(p["key"].as<const char*>()) == "size") { sizeParam = p; break; }
+    if (std::string(p["key"].as<const char*>()) == "size") hasSize = true;
   }
-  TEST_ASSERT_TRUE(sizeParam["requiresZoning"].as<bool>());
-  auto maxVal = sizeParam["max"];
-  TEST_ASSERT_TRUE(maxVal.is<JsonObject>());
-  TEST_ASSERT_EQUAL_STRING("pixels", maxVal["rel"].as<const char*>());
+  TEST_ASSERT_FALSE(hasSize);
 }
 
 void test_glitchy_duration_range() {
   auto dur = findById("glitchy")["duration"];
   TEST_ASSERT_TRUE(dur.is<JsonObject>());
   TEST_ASSERT_EQUAL_INT(30,   dur["min"].as<int>());
-  TEST_ASSERT_EQUAL_INT(2000, dur["max"].as<int>());
+  TEST_ASSERT_EQUAL_INT(1000, dur["max"].as<int>());
   auto def = dur["default"].as<JsonArray>();
   TEST_ASSERT_EQUAL_size_t(2, def.size());
   TEST_ASSERT_EQUAL_INT(30,  def[0].as<int>());
   TEST_ASSERT_EQUAL_INT(120, def[1].as<int>());
+  TEST_ASSERT_EQUAL_STRING("Each glitch lasts a random time in this range.",
+                           dur["help"].as<const char*>());
 }
 
-void test_shifty_fillmode_enum_with_zoning() {
+void test_interval_help_present() {
+  const char* expected = "A random time in this range is picked before each trigger.";
+  TEST_ASSERT_EQUAL_STRING(expected, findById("glitchy")["interval"]["help"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING(expected, findById("pulse")["interval"]["help"].as<const char*>());
+}
+
+void test_shifty_fillmode_enum_no_zoning() {
   JsonObject e = findById("shifty");
   JsonObject fillParam;
   for (JsonObject p : e["params"].as<JsonArray>()) {
     if (std::string(p["key"].as<const char*>()) == "fillMode") { fillParam = p; break; }
   }
   TEST_ASSERT_EQUAL_STRING("enum", fillParam["type"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING(
+      "How the new color spreads: Uniform all at once, Up/Down from one end, "
+      "Bloom outward from the center.",
+      fillParam["help"].as<const char*>());
   auto opts = fillParam["options"].as<JsonArray>();
   TEST_ASSERT_EQUAL_size_t(4, opts.size());
-  TEST_ASSERT_FALSE(opts[0]["zoning"].as<bool>());  // Uniform: no zone
-  TEST_ASSERT_TRUE(opts[1]["zoning"].as<bool>());   // Up: zoning
-  TEST_ASSERT_TRUE(opts[2]["zoning"].as<bool>());   // Down: zoning
-  TEST_ASSERT_TRUE(opts[3]["zoning"].as<bool>());   // Bloom: zoning
+  // Zone is now toggle-driven, not enum-driven; no option carries zoning.
+  for (JsonObject o : opts) TEST_ASSERT_TRUE(o["zoning"].isNull());
+}
+
+void test_shifty_fade_duration_range() {
+  JsonObject e = findById("shifty");
+  JsonObject fadeParam;
+  for (JsonObject p : e["params"].as<JsonArray>()) {
+    if (std::string(p["key"].as<const char*>()) == "fadeDuration") { fadeParam = p; break; }
+  }
+  TEST_ASSERT_EQUAL_INT(30,  fadeParam["min"].as<int>());
+  TEST_ASSERT_EQUAL_INT(600, fadeParam["max"].as<int>());
+}
+
+void test_shifty_zone_optional() {
+  auto zone = findById("shifty")["zone"];
+  TEST_ASSERT_TRUE(zone.is<JsonObject>());
+  TEST_ASSERT_TRUE(zone["optional"].as<bool>());
 }
 
 void test_shifty_duration_hold_time() {
@@ -250,6 +156,9 @@ void test_shifty_duration_hold_time() {
   TEST_ASSERT_EQUAL_INT(60,   dur["min"].as<int>());
   TEST_ASSERT_EQUAL_INT(1800, dur["max"].as<int>());
   TEST_ASSERT_EQUAL_STRING("Hold time", dur["label"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING(
+      "How long each color holds before the next shift (a random time in this range).",
+      dur["help"].as<const char*>());
   auto def = dur["default"].as<JsonArray>();
   TEST_ASSERT_EQUAL_INT(300, def[0].as<int>());
   TEST_ASSERT_EQUAL_INT(600, def[1].as<int>());
@@ -261,30 +170,49 @@ void test_breathing_has_no_interval() {
 
 void test_breathing_params_present() {
   JsonObject e = findById("breathing");
-  bool hasBreathSpeed = false, hasCount = false, hasSize = false, hasScatter = false;
+  bool hasBreathSpeed = false, hasSections = false;
+  bool hasCount = false, hasSize = false, hasScatter = false;
   for (JsonObject p : e["params"].as<JsonArray>()) {
     const char* k = p["key"].as<const char*>();
     if (std::string(k) == "breathSpeed") hasBreathSpeed = true;
+    if (std::string(k) == "sections")    hasSections = true;
     if (std::string(k) == "count")       hasCount = true;
     if (std::string(k) == "size")        hasSize = true;
     if (std::string(k) == "scatter")     hasScatter = true;
   }
   TEST_ASSERT_TRUE(hasBreathSpeed);
-  TEST_ASSERT_TRUE(hasCount);
-  TEST_ASSERT_TRUE(hasSize);
-  TEST_ASSERT_TRUE(hasScatter);
+  TEST_ASSERT_TRUE(hasSections);
+  TEST_ASSERT_FALSE(hasCount);
+  TEST_ASSERT_FALSE(hasSize);
+  TEST_ASSERT_FALSE(hasScatter);
 }
 
-void test_breathing_scatter_labels() {
+void test_breathing_speed_floor() {
   JsonObject e = findById("breathing");
   for (JsonObject p : e["params"].as<JsonArray>()) {
-    if (std::string(p["key"].as<const char*>()) == "scatter") {
-      TEST_ASSERT_EQUAL_STRING("Sync",   p["leftLabel"].as<const char*>());
-      TEST_ASSERT_EQUAL_STRING("Embers", p["rightLabel"].as<const char*>());
+    if (std::string(p["key"].as<const char*>()) == "breathSpeed") {
+      TEST_ASSERT_EQUAL_INT(8, p["min"].as<int>());
+      TEST_ASSERT_EQUAL_INT(60, p["max"].as<int>());
+      TEST_ASSERT_EQUAL_INT(10, p["default"].as<int>());
       return;
     }
   }
-  TEST_FAIL_MESSAGE("scatter param not found");
+  TEST_FAIL_MESSAGE("breathSpeed param not found");
+}
+
+void test_breathing_sections_range_always_active() {
+  JsonObject e = findById("breathing");
+  for (JsonObject p : e["params"].as<JsonArray>()) {
+    if (std::string(p["key"].as<const char*>()) == "sections") {
+      TEST_ASSERT_EQUAL_STRING("Sections", p["label"].as<const char*>());
+      TEST_ASSERT_EQUAL_INT(1, p["min"].as<int>());
+      TEST_ASSERT_EQUAL_INT(5, p["max"].as<int>());
+      TEST_ASSERT_EQUAL_INT(1, p["default"].as<int>());
+      TEST_ASSERT_TRUE(p["requiresZoning"].isNull());
+      return;
+    }
+  }
+  TEST_FAIL_MESSAGE("sections param not found");
 }
 
 void test_spotty_speed_param() {
@@ -298,23 +226,78 @@ void test_spotty_speed_param() {
       TEST_ASSERT_EQUAL_INT(10, p["max"].as<int>());
       TEST_ASSERT_EQUAL_INT(3,  p["default"].as<int>());
       TEST_ASSERT_TRUE(p["invert"].as<bool>());
+      TEST_ASSERT_EQUAL_STRING("stars", p["leftLabel"].as<const char*>());
+      TEST_ASSERT_EQUAL_STRING("fire", p["rightLabel"].as<const char*>());
+      TEST_ASSERT_EQUAL_STRING(
+          "Stars: slow, gentle, unpredictable fades. Fire: fast flickers mixed with slower flames.",
+          p["help"].as<const char*>());
       break;
     }
   }
   TEST_ASSERT_TRUE(found);
 }
 
-void test_spotty_has_interval() {
-  auto interval = findById("spotty")["interval"];
-  TEST_ASSERT_TRUE(interval.is<JsonObject>());
-  TEST_ASSERT_EQUAL_STRING("s", interval["unit"].as<const char*>());
+void test_spotty_has_no_interval() {
+  TEST_ASSERT_TRUE(findById("spotty")["interval"].isNull());
 }
 
-void test_pulse_has_zone_not_optional() {
+void test_spotty_count_and_size_caps() {
+  JsonObject e = findById("spotty");
+  bool foundCount = false, foundSize = false;
+  for (JsonObject p : e["params"].as<JsonArray>()) {
+    const std::string k = p["key"].as<const char*>();
+    if (k == "count") {
+      foundCount = true;
+      TEST_ASSERT_EQUAL_STRING("pixels", p["max"]["rel"].as<const char*>());
+      TEST_ASSERT_EQUAL_INT(5, p["max"]["cap"].as<int>());
+      TEST_ASSERT_EQUAL_INT(3, p["default"].as<int>());
+    } else if (k == "size") {
+      foundSize = true;
+      TEST_ASSERT_EQUAL_STRING("pixels", p["max"]["rel"].as<const char*>());
+      TEST_ASSERT_EQUAL_INT(6, p["max"]["cap"].as<int>());
+      TEST_ASSERT_EQUAL_INT(1, p["min"].as<int>());
+      TEST_ASSERT_EQUAL_INT(3, p["default"].as<int>());
+      TEST_ASSERT_EQUAL_STRING("Small", p["leftLabel"].as<const char*>());
+      TEST_ASSERT_EQUAL_STRING("Large", p["rightLabel"].as<const char*>());
+    }
+  }
+  TEST_ASSERT_TRUE(foundCount);
+  TEST_ASSERT_TRUE(foundSize);
+}
+
+void test_pulse_zone_optional() {
   JsonObject e = findById("pulse");
   auto zone = e["zone"];
   TEST_ASSERT_TRUE(zone.is<JsonObject>());
-  TEST_ASSERT_TRUE(zone["optional"].isNull());
+  TEST_ASSERT_TRUE(zone["optional"].as<bool>());
+}
+
+void test_pulse_size_is_percent() {
+  JsonObject e = findById("pulse");
+  for (JsonObject p : e["params"].as<JsonArray>()) {
+    if (std::string(p["key"].as<const char*>()) == "size") {
+      TEST_ASSERT_EQUAL_STRING("%", p["unit"].as<const char*>());
+      TEST_ASSERT_EQUAL_INT(5, p["min"].as<int>());
+      auto maxVal = p["max"];
+      TEST_ASSERT_FALSE(maxVal.is<JsonObject>());
+      TEST_ASSERT_EQUAL_INT(100, maxVal.as<int>());
+      TEST_ASSERT_EQUAL_INT(40, p["default"].as<int>());
+      return;
+    }
+  }
+  TEST_FAIL_MESSAGE("size param not found");
+}
+
+void test_spotty_zone_optional() {
+  auto zone = findById("spotty")["zone"];
+  TEST_ASSERT_TRUE(zone.is<JsonObject>());
+  TEST_ASSERT_TRUE(zone["optional"].as<bool>());
+}
+
+void test_breathing_zone_optional() {
+  auto zone = findById("breathing")["zone"];
+  TEST_ASSERT_TRUE(zone.is<JsonObject>());
+  TEST_ASSERT_TRUE(zone["optional"].as<bool>());
 }
 
 void test_pulse_speed_invert_and_labels() {
@@ -330,23 +313,102 @@ void test_pulse_speed_invert_and_labels() {
   TEST_FAIL_MESSAGE("pulseSpeed param not found");
 }
 
+void test_pulse_easing_param() {
+  JsonObject e = findById("pulse");
+  JsonObject easing;
+  for (JsonObject p : e["params"].as<JsonArray>()) {
+    if (std::string(p["key"].as<const char*>()) == "easing") { easing = p; break; }
+  }
+  TEST_ASSERT_FALSE(easing.isNull());
+  TEST_ASSERT_EQUAL_STRING("enum", easing["type"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("Motion", easing["label"].as<const char*>());
+  TEST_ASSERT_EQUAL_INT(0, easing["default"].as<int>());  // Linear reproduces today's sweep
+  auto opts = easing["options"].as<JsonArray>();
+  TEST_ASSERT_EQUAL_size_t(5, opts.size());
+  TEST_ASSERT_EQUAL_STRING("Linear", opts[0]["label"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("Swell", opts[4]["label"].as<const char*>());
+}
+
+static JsonObject findParam(JsonObject e, const char* key) {
+  for (JsonObject p : e["params"].as<JsonArray>()) {
+    if (std::string(p["key"].as<const char*>()) == key) return p;
+  }
+  return JsonObject{};
+}
+
+void test_spotty_easing_param_defaults_linear() {
+  JsonObject easing = findParam(findById("spotty"), "easing");
+  TEST_ASSERT_FALSE(easing.isNull());
+  TEST_ASSERT_EQUAL_STRING("enum", easing["type"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("Motion", easing["label"].as<const char*>());
+  TEST_ASSERT_EQUAL_INT(0, easing["default"].as<int>());  // Linear reproduces the plain fade ramp
+  TEST_ASSERT_EQUAL_size_t(5, easing["options"].as<JsonArray>().size());
+}
+
+void test_shifty_easing_param_defaults_linear() {
+  JsonObject easing = findParam(findById("shifty"), "easing");
+  TEST_ASSERT_FALSE(easing.isNull());
+  TEST_ASSERT_EQUAL_STRING("enum", easing["type"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("Motion", easing["label"].as<const char*>());
+  TEST_ASSERT_EQUAL_INT(0, easing["default"].as<int>());  // Linear reproduces today's linear fade
+  TEST_ASSERT_EQUAL_size_t(5, easing["options"].as<JsonArray>().size());
+}
+
+void test_breathing_easing_param_defaults_smooth() {
+  JsonObject easing = findParam(findById("breathing"), "easing");
+  TEST_ASSERT_FALSE(easing.isNull());
+  TEST_ASSERT_EQUAL_STRING("enum", easing["type"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("Motion", easing["label"].as<const char*>());
+  TEST_ASSERT_EQUAL_INT(1, easing["default"].as<int>());  // Smooth approximates the sine breath curve
+  TEST_ASSERT_EQUAL_size_t(5, easing["options"].as<JsonArray>().size());
+}
+
+void test_pulse_loop_param() {
+  JsonObject e = findById("pulse");
+  JsonObject loop;
+  for (JsonObject p : e["params"].as<JsonArray>()) {
+    if (std::string(p["key"].as<const char*>()) == "loop") { loop = p; break; }
+  }
+  TEST_ASSERT_FALSE(loop.isNull());
+  TEST_ASSERT_EQUAL_STRING("enum", loop["type"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("Loop", loop["label"].as<const char*>());
+  TEST_ASSERT_EQUAL_INT(0, loop["default"].as<int>());  // Trigger keeps single-sweep default
+  auto opts = loop["options"].as<JsonArray>();
+  TEST_ASSERT_EQUAL_size_t(2, opts.size());
+  TEST_ASSERT_EQUAL_STRING("Trigger", opts[0]["label"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("Continuous", opts[1]["label"].as<const char*>());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_all_five_ids_present);
   RUN_TEST(test_continuous_flags);
   RUN_TEST(test_pauses_wisp_override_flags);
   RUN_TEST(test_glitchy_zone_optional);
-  RUN_TEST(test_glitchy_count_requires_zoning_pixel_capped_max);
-  RUN_TEST(test_glitchy_size_requires_zoning_pixel_relative_max);
+  RUN_TEST(test_glitchy_scatter_always_active_literal_max);
+  RUN_TEST(test_glitchy_has_no_size_param);
   RUN_TEST(test_glitchy_duration_range);
-  RUN_TEST(test_shifty_fillmode_enum_with_zoning);
+  RUN_TEST(test_interval_help_present);
+  RUN_TEST(test_shifty_fillmode_enum_no_zoning);
+  RUN_TEST(test_shifty_fade_duration_range);
+  RUN_TEST(test_shifty_zone_optional);
   RUN_TEST(test_shifty_duration_hold_time);
   RUN_TEST(test_breathing_has_no_interval);
   RUN_TEST(test_breathing_params_present);
-  RUN_TEST(test_breathing_scatter_labels);
+  RUN_TEST(test_breathing_speed_floor);
+  RUN_TEST(test_breathing_sections_range_always_active);
   RUN_TEST(test_spotty_speed_param);
-  RUN_TEST(test_spotty_has_interval);
-  RUN_TEST(test_pulse_has_zone_not_optional);
+  RUN_TEST(test_spotty_has_no_interval);
+  RUN_TEST(test_spotty_count_and_size_caps);
+  RUN_TEST(test_pulse_zone_optional);
+  RUN_TEST(test_pulse_size_is_percent);
+  RUN_TEST(test_spotty_zone_optional);
+  RUN_TEST(test_breathing_zone_optional);
   RUN_TEST(test_pulse_speed_invert_and_labels);
+  RUN_TEST(test_pulse_easing_param);
+  RUN_TEST(test_spotty_easing_param_defaults_linear);
+  RUN_TEST(test_shifty_easing_param_defaults_linear);
+  RUN_TEST(test_breathing_easing_param_defaults_smooth);
+  RUN_TEST(test_pulse_loop_param);
   return UNITY_END();
 }
