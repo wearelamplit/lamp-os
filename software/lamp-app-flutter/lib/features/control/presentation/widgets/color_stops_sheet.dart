@@ -201,12 +201,21 @@ class _ColorStopsSheetState extends State<ColorStopsSheet> {
           padding: const EdgeInsets.all(AppSpace.lg),
           child: Column(
             children: [
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  widget.title,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      widget.title,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                  if (_colors.length < widget.max)
+                    TextButton.icon(
+                      onPressed: _addStop,
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('Add Color'),
+                    ),
+                ],
               ),
               if (widget.description != null) ...[
                 const SizedBox(height: AppSpace.xs),
@@ -234,17 +243,6 @@ class _ColorStopsSheetState extends State<ColorStopsSheet> {
                         itemBuilder: _row,
                       ),
               ),
-              if (_colors.length < widget.max) ...[
-                const SizedBox(height: AppSpace.sm),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.tonalIcon(
-                    onPressed: _addStop,
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Add Color'),
-                  ),
-                ),
-              ],
               const SizedBox(height: AppSpace.sm),
               Row(
                 children: [
