@@ -37,10 +37,11 @@ constexpr const char* kParamCascadeStaggerMs = "cascadeStaggerMs";
 // Upper bound (ms) accepted for a remote-triggered `delayMs`. ESP-NOW
 // peers are untrusted: an unclamped uint32_t can schedule a fire ~49 days
 // out, which holds a pendingTriggers slot indefinitely; 16 such payloads
-// from a rogue peer would wedge the queue. 10 s comfortably exceeds typical
-// cascade staggers (<2 s) while keeping a full queue self-clearing in
-// seconds, not weeks. Applied in parseInvocation via clampDelayMs().
-constexpr uint32_t kMaxDelayMs = 10000;
+// from a rogue peer would wedge the queue. 1 s bounds how long any peer
+// waits before playing a cascaded expression while keeping a full queue
+// self-clearing in seconds, not weeks. Applied in parseInvocation via
+// clampDelayMs().
+constexpr uint32_t kMaxDelayMs = 1000;
 
 // Clamp `v` to [0, kMaxDelayMs]. Pure; safe to call on attacker-controlled
 // values. Exposed for native unit testing.

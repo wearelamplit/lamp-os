@@ -16,7 +16,7 @@ inline constexpr ParamSpec kGlitchyParams[] = {
     .min            = 0,
     .max            = Bound{5},
     .step           = 1,
-    .def            = 5,
+    .def            = 0,
     .help           = "0 is a solid glitch; higher scatters it into finer, sparser flecks.",
     .requiresZoning = false,
   },
@@ -27,7 +27,7 @@ inline constexpr ExpressionDescriptor kGlitchyDescriptorData{
   .colors       = { .max = 8, .label = "Colors" },
   .interval     = RangeSpec{
     .min   = 60,
-    .max   = 900,
+    .max   = 3600,
     .step  = 30,
     .unit  = "s",
     .defLo = 60,

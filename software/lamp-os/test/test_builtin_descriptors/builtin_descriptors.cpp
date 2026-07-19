@@ -85,7 +85,7 @@ void test_glitchy_scatter_always_active_literal_max() {
   TEST_ASSERT_FALSE(maxVal.is<JsonObject>());
   TEST_ASSERT_EQUAL_INT(5, maxVal.as<int>());
   TEST_ASSERT_EQUAL_INT(0, scatter["min"].as<int>());
-  TEST_ASSERT_EQUAL_INT(5, scatter["default"].as<int>());
+  TEST_ASSERT_EQUAL_INT(0, scatter["default"].as<int>());
   TEST_ASSERT_TRUE(scatter["unit"].isNull());
 }
 

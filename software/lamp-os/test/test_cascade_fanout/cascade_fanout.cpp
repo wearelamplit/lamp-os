@@ -9,7 +9,7 @@
 //   3. Loop-break: a lamp that receives a MSG_COMMAND runs the expression
 //      with suppressCascade=true and does not enqueue a further cascade.
 //   4. RSSI sort: strongest signal (closest) gets rank 0 → shortest delay.
-//   5. delayMs clamp at kMaxDelayMs (10 s).
+//   5. delayMs clamp at kMaxDelayMs (1 s).
 
 #include <unity.h>
 
@@ -21,7 +21,7 @@
 
 namespace lamp_test {
 
-static constexpr uint32_t kMaxDelayMs = 10000;
+static constexpr uint32_t kMaxDelayMs = 1000;
 
 struct Peer {
     uint8_t mac[6];
@@ -253,7 +253,7 @@ void test_rssi_sort_unknown_rssi_sorts_last() {
 // --- delayMs clamp ---
 
 void test_delay_clamps_at_kMaxDelayMs() {
-    // 15 peers at staggerMs=1000: peer at rank 14 computes 15*1000=15000 > 10000.
+    // 15 peers at staggerMs=250: peer at rank 4 computes 5*250=1250 > 1000.
     std::vector<lamp_test::Peer> peers;
     for (size_t i = 0; i < 15; ++i) {
         lamp_test::Peer p{};
@@ -261,13 +261,13 @@ void test_delay_clamps_at_kMaxDelayMs() {
         p.lastRssi = static_cast<int8_t>(-30 - static_cast<int>(i));
         peers.push_back(p);
     }
-    auto cmds = lamp_test::computeCascadeCommands(peers, 1000);
+    auto cmds = lamp_test::computeCascadeCommands(peers, 250);
     for (const auto& c : cmds) {
         TEST_ASSERT_LESS_OR_EQUAL_UINT32(lamp_test::kMaxDelayMs, c.delayMs);
     }
-    // Peer at rank 9 computes 10*1000=10000 (exactly at cap).
-    TEST_ASSERT_EQUAL_UINT32(lamp_test::kMaxDelayMs, cmds[9].delayMs);
-    // Peers at rank 10+ are clamped.
+    // Peer at rank 3 computes 4*250=1000 (exactly at cap).
+    TEST_ASSERT_EQUAL_UINT32(lamp_test::kMaxDelayMs, cmds[3].delayMs);
+    // Peers at rank 4+ are clamped.
     TEST_ASSERT_EQUAL_UINT32(lamp_test::kMaxDelayMs, cmds[14].delayMs);
 }
 

@@ -80,7 +80,7 @@ void test_strip_does_not_mutate_input() {
 // --- delayMs clamp ---
 
 void test_clamp_delay_passes_under_limit() {
-  TEST_ASSERT_EQUAL_UINT32(5000u, lamp::clampDelayMs(5000u));
+  TEST_ASSERT_EQUAL_UINT32(500u, lamp::clampDelayMs(500u));
 }
 
 void test_clamp_delay_caps_at_ceiling() {
