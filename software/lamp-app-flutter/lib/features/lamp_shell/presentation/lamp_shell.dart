@@ -4,8 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/routing/routes.dart';
-import '../../../core/theme/app_spacing.dart';
-import '../../../core/theme/brand_extras.dart';
+import '../../../core/widgets/gradient_nav_bar.dart';
 import '../../../core/widgets/lamp_chip.dart';
 import '../../../features/control/application/control_notifier.dart';
 import '../../../features/control/presentation/control_screen.dart';
@@ -41,33 +40,6 @@ class LampShell extends ConsumerStatefulWidget {
 
 class _LampShellState extends ConsumerState<LampShell> {
   late LampTab _tab = widget.initialTab;
-
-  NavigationDestination _destination(
-      IconData icon, String label, bool selected) {
-    final iconWidget = Icon(icon, size: 22);
-    if (!selected) return NavigationDestination(icon: iconWidget, label: label);
-    final gradient = context.brandExtras.chromeGradient;
-    final primary = Theme.of(context).colorScheme.primary;
-    return NavigationDestination(
-      icon: Container(
-        padding: const EdgeInsets.symmetric(
-            horizontal: AppSpace.lg, vertical: AppSpace.xs),
-        decoration: BoxDecoration(
-          gradient: gradient,
-          borderRadius: BorderRadius.circular(999), // pill shape, not spacing
-          boxShadow: [
-            BoxShadow(
-              color: primary.withValues(alpha: 0.3),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: iconWidget,
-      ),
-      label: label,
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -114,8 +86,6 @@ class _LampShellState extends ConsumerState<LampShell> {
     final status =
         connected ? StatusKind.mesh : StatusKind.searching;
 
-    final cs = Theme.of(context).colorScheme;
-
     return Scaffold(
       appBar: AppBar(
         // The LampChip in `title` routes to My Lamps for the picker; that's
@@ -143,50 +113,18 @@ class _LampShellState extends ConsumerState<LampShell> {
         ignoring: !connected,
         child: Opacity(
           opacity: connected ? 1.0 : 0.4,
-          child: NavigationBarTheme(
-        data: NavigationBarThemeData(
-          // Active-state gradient: `linear-gradient(135deg, auroraBlue,
-          // glowPink)` with a soft shadow. Material 3's NavigationBar only
-          // allows a flat indicator color, so the gradient renders via a
-          // custom indicator BoxDecoration.
-          indicatorColor: Colors.transparent,
-          indicatorShape: const StadiumBorder(),
-          labelTextStyle: WidgetStateProperty.resolveWith((states) {
-            if (states.contains(WidgetState.selected)) {
-              return TextStyle(
-                color: cs.onSurface,
-                fontWeight: FontWeight.w600,
-                fontSize: 12,
-              );
-            }
-            return TextStyle(color: cs.onSurfaceVariant, fontSize: 12);
-          }),
-          iconTheme: WidgetStateProperty.resolveWith((states) {
-            return IconThemeData(
-              color: states.contains(WidgetState.selected)
-                  ? cs.onSurface
-                  : cs.onSurfaceVariant,
-            );
-          }),
-        ),
-        child: NavigationBar(
-          selectedIndex: _tab.index,
-          onDestinationSelected: (i) =>
-              setState(() => _tab = LampTab.values[i]),
-          destinations: [
-            _destination(Icons.palette_outlined, 'Colors',
-                _tab == LampTab.control),
-            _destination(Icons.handshake_outlined, 'Social',
-                _tab == LampTab.social),
-            _destination(
-                Icons.auto_awesome, 'Expressions', _tab == LampTab.expressions),
-            _destination(Icons.settings_outlined, 'Config',
-                _tab == LampTab.config),
-            _destination(
-                Icons.info_outline, 'Info', _tab == LampTab.info),
-          ],
-        ),
-      ),
+          child: GradientNavBar(
+            selectedIndex: _tab.index,
+            onDestinationSelected: (i) =>
+                setState(() => _tab = LampTab.values[i]),
+            destinations: const [
+              (icon: Icons.palette_outlined, label: 'Colors'),
+              (icon: Icons.handshake_outlined, label: 'Social'),
+              (icon: Icons.auto_awesome, label: 'Expressions'),
+              (icon: Icons.settings_outlined, label: 'Config'),
+              (icon: Icons.info_outline, label: 'Info'),
+            ],
+          ),
         ),
       ),
     );

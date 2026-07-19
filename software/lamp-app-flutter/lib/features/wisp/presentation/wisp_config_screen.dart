@@ -8,6 +8,7 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/app_snackbar.dart';
 import '../../../core/widgets/empty_state_pane.dart';
 import '../../../core/widgets/friendly_error.dart';
+import '../../../core/widgets/gradient_nav_bar.dart';
 import '../../../core/widgets/rename_dialog.dart';
 import '../../../core/widgets/section_header.dart';
 import '../../../core/widgets/settings_row.dart';
@@ -86,14 +87,12 @@ class _WispBody extends ConsumerStatefulWidget {
   ConsumerState<_WispBody> createState() => _WispBodyState();
 }
 
-class _WispBodyState extends ConsumerState<_WispBody>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tabController;
+class _WispBodyState extends ConsumerState<_WispBody> {
+  int _navIndex = 0;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
     // The lamp shell keeps the notifier alive, so its build() won't re-run
     // on screen open; poll here so a stale relay cache refreshes now
     // instead of on the wisp's 30 s heartbeat.
@@ -103,12 +102,6 @@ class _WispBodyState extends ConsumerState<_WispBody>
         ref.read(wispNotifierProvider(widget.lampId).notifier).pollStatus(),
       );
     });
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
   }
 
   @override
@@ -148,22 +141,15 @@ class _WispBodyState extends ConsumerState<_WispBody>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        SpaceBrightnessSlider(lampId: widget.lampId, status: status),
         PaletteGradientBar(
           sourceMode: source,
           manualPalette: notifier.draftManualPalette,
           offColor: status.offColor,
         ),
-        TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(icon: Icon(Icons.palette_outlined), text: 'Palette source'),
-            Tab(icon: Icon(Icons.tune), text: 'Settings'),
-            Tab(icon: Icon(Icons.lightbulb_outline), text: 'Lamps'),
-          ],
-        ),
         Expanded(
-          child: TabBarView(
-            controller: _tabController,
+          child: IndexedStack(
+            index: _navIndex,
             children: [
               _SourcesTab(
                 lampId: widget.lampId,
@@ -180,7 +166,15 @@ class _WispBodyState extends ConsumerState<_WispBody>
             ],
           ),
         ),
-        SpaceBrightnessSlider(lampId: widget.lampId, status: status),
+        GradientNavBar(
+          selectedIndex: _navIndex,
+          onDestinationSelected: (i) => setState(() => _navIndex = i),
+          destinations: const [
+            (icon: Icons.palette_outlined, label: 'Palette source'),
+            (icon: Icons.tune, label: 'Settings'),
+            (icon: Icons.lightbulb_outline, label: 'Lamps'),
+          ],
+        ),
       ],
     );
   }

@@ -5,10 +5,9 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../application/wisp_notifier.dart';
 import '../../domain/wisp_status.dart';
 
-/// Global space-dimmer footer. Sits below the tabs, mirroring the palette
-/// gradient bar at the top: it scales every claimed lamp together without
-/// touching their colors. Deliberately relative (no absolute %) so the
-/// number never reads as a specific lamp brightness.
+/// Top space-dimmer control above the palette gradient bar. Scales every
+/// claimed lamp together without touching their colors. Deliberately relative
+/// (no absolute %) so the number never reads as a specific lamp brightness.
 class SpaceBrightnessSlider extends ConsumerStatefulWidget {
   const SpaceBrightnessSlider({
     super.key,
@@ -41,44 +40,40 @@ class _SpaceBrightnessSliderState extends ConsumerState<SpaceBrightnessSlider> {
     final notifier = ref.read(wispNotifierProvider(widget.lampId).notifier);
     return Material(
       color: theme.colorScheme.surface,
-      elevation: 3,
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(
-              AppSpace.lg, AppSpace.sm, AppSpace.lg, AppSpace.sm),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.brightness_6_outlined,
-                      size: 18, color: theme.colorScheme.secondary),
-                  const SizedBox(width: AppSpace.sm),
-                  Text('Relative Brightness',
-                      style: theme.textTheme.titleSmall),
-                ],
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+            AppSpace.lg, AppSpace.sm, AppSpace.lg, AppSpace.sm),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.brightness_6_outlined,
+                    size: 18, color: theme.colorScheme.secondary),
+                const SizedBox(width: AppSpace.sm),
+                Text('Relative Brightness',
+                    style: theme.textTheme.titleSmall),
+              ],
+            ),
+            Text(
+              'Dims all lamps in this space together.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
               ),
-              Text(
-                'Dims all lamps in this space together.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-              Slider(
-                min: 0,
-                max: 100,
-                value: _value,
-                label: _value >= 99.5 ? 'Full' : 'Dimmer',
-                onChanged: (v) {
-                  setState(() => _value = v);
-                  notifier.setBrightness(v.round());
-                },
-                onChangeEnd: (_) => notifier.flushBrightness(),
-              ),
-            ],
-          ),
+            ),
+            Slider(
+              min: 0,
+              max: 100,
+              value: _value,
+              label: _value >= 99.5 ? 'Full' : 'Dimmer',
+              onChanged: (v) {
+                setState(() => _value = v);
+                notifier.setBrightness(v.round());
+              },
+              onChangeEnd: (_) => notifier.flushBrightness(),
+            ),
+          ],
         ),
       ),
     );
