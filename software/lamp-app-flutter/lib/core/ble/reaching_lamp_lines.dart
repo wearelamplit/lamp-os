@@ -13,7 +13,7 @@ const List<String> reachingLampLines = [
   'Peeking around for {name}…',
   'Whistling for {name}…',
   "Trying to get {name}'s attention…",
-  'Waiting for {name} to come around…',
+  'Almost got {name}…',
 ];
 
 String reachingLampLine(String template, String name) =>
