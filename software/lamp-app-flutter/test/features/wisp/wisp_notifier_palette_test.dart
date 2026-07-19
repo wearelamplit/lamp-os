@@ -229,32 +229,45 @@ void main() {
       expect(after.source, WispSourceMode.off);
     });
 
-    test('drops a stale source echo while the write guard is armed',
+    test('drops a stale source echo WHOLE, preserving the palette',
         () async {
+      // The stale echo carries a DIFFERENT palette than the one already
+      // seeded. Whole-drop keeps the seeded palette; adopting the echo
+      // (the old field-rewrite guard) would ingest the stale one.
+      const b64Seeded = 'CgsM'; // [10, 11, 12]
       final ble = InMemoryBleClient();
       await primeStatus(
-          ble, '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual"}');
+          ble,
+          '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual",'
+          '"paletteIdPrefix":"seed0001","palette":"$b64Seeded"}');
       final c = makeContainer(ble: ble);
 
       c.listen(wispNotifierProvider(lampId), (_, _) {});
       await c.read(wispNotifierProvider(lampId).future);
       final n = c.read(wispNotifierProvider(lampId).notifier);
+      expect(n.savedManualPalette.single.r, 10);
 
       await n.setSource(WispSourceMode.off);
 
-      // Relay re-broadcasts the cached pre-change status still on manual.
+      // Relay re-broadcasts the cached pre-change status still on manual,
+      // carrying a stale [99,98,97] palette. Same paletteIdPrefix as the
+      // seed so adopting it would ingest the stale palette directly (no
+      // re-read masks the difference).
       ble.simulateNotify(
         lampId,
         BleUuids.controlService,
         BleUuids.wispStatus,
-        Uint8List.fromList(
-            utf8.encode('{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual"}')),
+        Uint8List.fromList(utf8.encode(
+            '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual",'
+            '"paletteIdPrefix":"seed0001","palette":"Y2Jh"}')),
       );
       await Future<void>.delayed(Duration.zero);
 
       expect(c.read(wispNotifierProvider(lampId)).value!.source,
           WispSourceMode.off,
           reason: 'stale manual echo dropped, not adopted');
+      expect(n.savedManualPalette.single.r, 10,
+          reason: 'stale echo dropped whole, seeded palette preserved');
     });
 
     test('releases the guard when the wisp confirms the requested mode',
