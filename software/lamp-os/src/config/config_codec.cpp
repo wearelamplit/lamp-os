@@ -79,6 +79,8 @@ void fromJson(JsonObject root, LampSettings& lamp, BaseSettings& base,
   lamp.setup = lampNode["setup"] | false;
   lamp.advancedEnabled = lampNode["advancedEnabled"] | false;
   lamp.webappEnabled = lampNode["webappEnabled"] | true;
+  lamp.apBootMinutes = lampNode["apBootMinutes"] | 0;
+  lamp.brightnessCeiling = lampNode["brightnessCeiling"] | 170;
   // SocialMode persists as uint8_t (0=Introvert, 1=Ambivert, 2=Extrovert).
   // Out-of-range values fall back to Ambivert so a corrupt or future-versioned
   // payload doesn't strand the lamp in an unknown personality.
@@ -90,6 +92,7 @@ void fromJson(JsonObject root, LampSettings& lamp, BaseSettings& base,
 
   JsonObject baseNode = root["base"];
   base.ac = baseNode["ac"] | 0;
+  base.byteOrder = std::string(baseNode["byteOrder"] | "");
   parseSegments(baseNode, base.segments, kBaseDefaultColor);
   clampSumPx(base.segments);
   if (base.ac >= base.broadcastColors().size()) {
@@ -111,6 +114,7 @@ void fromJson(JsonObject root, LampSettings& lamp, BaseSettings& base,
   }
 
   JsonObject shadeNode = root["shade"];
+  shade.byteOrder = std::string(shadeNode["byteOrder"] | "");
   parseSegments(shadeNode, shade.segments, kShadeDefaultColor);
   clampSumPx(shade.segments);
   // colorsEditable is firmware-owned (set by Lamp subclass defaults via
@@ -135,7 +139,7 @@ void fromJson(JsonObject root, LampSettings& lamp, BaseSettings& base,
         const char* key = kv.key().c_str();
         std::string keyStr(key);
 
-        // Skip common fields we've already handled
+        // Common fields already handled above.
         if (keyStr == "type" || keyStr == "enabled" || keyStr == "intervalMin" ||
             keyStr == "intervalMax" || keyStr == "target" || keyStr == "colors" ||
             keyStr == "disabledDuringWispOverride") {
@@ -172,6 +176,16 @@ void fromJson(JsonObject root, LampSettings& lamp, BaseSettings& base,
     // "enabled" key in their NVS-stored JSON. Treat "has SSID" as proxy
     // for "user wanted home mode on" so they keep working post-update.
     homeMode.enabled = homeModeNode["enabled"] | !homeMode.ssid.empty();
+    homeMode.networkBound = homeModeNode["networkBound"] | !homeMode.ssid.empty();
+    homeMode.socialDisabled = homeModeNode["socialDisabled"] | true;
+    if (homeModeNode["disabledExpressionTypes"].is<JsonArray>()) {
+      homeMode.disabledExpressionTypes.clear();
+      for (JsonVariant v : homeModeNode["disabledExpressionTypes"].as<JsonArray>())
+        if (const char* s = v.as<const char*>())
+          homeMode.disabledExpressionTypes.push_back(s);
+    } else {
+      homeMode.disabledExpressionTypes = {"glitchy"};
+    }
   }
 
   // downstream code dereferences broadcastColors()[ac] / [0]; parseSegments
@@ -193,9 +207,13 @@ void toJson(JsonObject root, const LampSettings& lamp, const BaseSettings& base,
   lampNode["setup"] = lamp.setup;
   lampNode["advancedEnabled"] = lamp.advancedEnabled;
   lampNode["webappEnabled"] = lamp.webappEnabled;
+  lampNode["apBootMinutes"] = lamp.apBootMinutes;
+  lampNode["brightnessCeiling"] = lamp.brightnessCeiling;
   lampNode["socialMode"] = static_cast<uint8_t>(lamp.socialMode);
   JsonObject baseNode = root["base"].to<JsonObject>();
   baseNode["ac"] = base.ac;
+  if (!base.byteOrder.empty()) baseNode["byteOrder"] = base.byteOrder;
+  baseNode["colorsEditable"] = base.colorsEditable;
   writeSegments(baseNode, base.segments);
   // Positional uint8 array, same shape as asBaseJson. Keeps the on-disk
   // NVS format consistent with the BLE per-section read.
@@ -205,6 +223,8 @@ void toJson(JsonObject root, const LampSettings& lamp, const BaseSettings& base,
   }
 
   JsonObject shadeNode = root["shade"].to<JsonObject>();
+  if (!shade.byteOrder.empty()) shadeNode["byteOrder"] = shade.byteOrder;
+  shadeNode["colorsEditable"] = shade.colorsEditable;
   writeSegments(shadeNode, shade.segments);
 
   // Serialize expressions
@@ -234,6 +254,10 @@ void toJson(JsonObject root, const LampSettings& lamp, const BaseSettings& base,
   homeModeNode["ssid"] = homeMode.ssid;
   homeModeNode["brightness"] = homeMode.brightness;
   homeModeNode["enabled"] = homeMode.enabled;
+  homeModeNode["networkBound"] = homeMode.networkBound;
+  homeModeNode["socialDisabled"] = homeMode.socialDisabled;
+  JsonArray disArr = homeModeNode["disabledExpressionTypes"].to<JsonArray>();
+  for (const auto& s : homeMode.disabledExpressionTypes) disArr.add(s);
 }
 
 }  // namespace config_codec

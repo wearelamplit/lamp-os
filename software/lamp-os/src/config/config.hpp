@@ -63,7 +63,7 @@ class Config {
   Config() {};
 
   /**
-   * @brief create a config, loading the persisted blob from the store
+   * create a config, loading the persisted blob from the store
    * @param [in] inStore persistence backend for NVS-backed values
    */
   Config(ConfigStore* inStore);
@@ -83,13 +83,13 @@ class Config {
   void applyDefaults(const Defaults& d);
 
   /**
-   * @brief create a streamable json doc to send configs to the webserver
+   * create a streamable json doc to send configs to the webserver
    * @return a JsonDocument to serialize
    */
   JsonDocument asJsonDocument();
 
   /**
-   * @brief Persist the current in-memory config to NVS under the "cfg" key.
+   * Persist the current in-memory config to NVS under the "cfg" key.
    *
    * Used by live-preview drains (e.g. expressionOp) that want their change
    * to survive a reboot WITHOUT going through the settings_blob path's
@@ -122,6 +122,12 @@ class Config {
   void setLampType(const std::string& type);     // persists + updates in-memory
   std::string loadLampType();                     // reads NVS, returns empty if unset
 
+  // This lamp's own mesh mac in canonical colon-hex, the same bytes peers
+  // store for it as `mac` (the value it broadcasts as HELLO sourceMac). Seeded
+  // once at mesh init; surfaced as `lampId` in the lamp section.
+  void setLampId(const std::string& lampId);
+  const std::string& lampId() const { return lampId_; }
+
   // Per-section serializers, each returning a String of just the JSON for
   // that section. Internal helpers backing the *JsonCached() accessors
   // below; the BLE onRead path always goes through the cache.
@@ -132,21 +138,33 @@ class Config {
   String asHomeModeJson();
 
   // Per-section JSON cache. Each section caches its serialised JSON plus a
-  // dirty flag; the CHAR_*_SECTION read on Core 0 hands back the cached
-  // string and NimBLE copies it, so reads never re-touch Config. Mutation
-  // paths on Core 1 must call invalidateXSection() after touching any field
-  // that feeds asXJson(); the cache rebuilds lazily on next read. Safe from
-  // either core (a portMUX in config.cpp serialises the rebuild).
-  const std::string& lampSectionJsonCached();
-  const std::string& baseSectionJsonCached();
-  const std::string& shadeSectionJsonCached();
-  const std::string& expressionsSectionJsonCached();
-  const std::string& homeSectionJsonCached();
+  // dirty flag; the accessor rebuilds if dirty and copies the JSON into out,
+  // both under a mutex in config.cpp, so it is safe from any task on either
+  // core (never an ISR, the mutex blocks). Mutation paths must call
+  // invalidateXSection() after touching any field that feeds asXJson().
+  void lampSectionJsonCached(std::string& out);
+  void baseSectionJsonCached(std::string& out);
+  void shadeSectionJsonCached(std::string& out);
+  void expressionsSectionJsonCached(std::string& out);
+  void homeSectionJsonCached(std::string& out);
+
+  // Rebuild a dirty section cache without the copy-out. For an off-BLE-path
+  // caller (ble_control::tick) to warm the cache so the Core-0 read hits it
+  // clean, without allocating a throwaway out-string every tick.
+  void lampSectionRebuildIfDirty();
+  void baseSectionRebuildIfDirty();
+  void shadeSectionRebuildIfDirty();
+  void expressionsSectionRebuildIfDirty();
+  void homeSectionRebuildIfDirty();
 
   // Mark a section's cache dirty (a bool flip). Call after mutating any
   // field that contributes to the section's JSON shape.
   void invalidateLampSection();
   void invalidateBaseSection();
+  // Whole-lamp current-draw anchors (mA) across every strip, emitted in
+  // asBaseJson so the app can estimate battery runtime. idleMa is draw at
+  // level 0, fullMa at level 255. No-op (no invalidate) when both are unchanged.
+  void setDrawAnchors(uint16_t idleMa, uint16_t fullMa);
   void invalidateShadeSection();
   void invalidateExpressionsSection();
   void invalidateHomeSection();
@@ -158,11 +176,11 @@ class Config {
   // 5=Smitten). Lives in a SEPARATE NVS key ("dispositions") from the
   // main config blob so the peer list can grow without bloating
   // CHAR_LAMP_SECTION / settings_blob. Stored as JSON object
-  // { "AA:BB:CC:DD:EE:FF": 1..5 }; keys are canonical-form BD_ADDR
-  // strings. Legacy name-keyed entries (older firmware) are silently
-  // dropped on load via lamp::isValidBdAddr in util/bd_addr.hpp.
-  // Bounded to ~100 entries. Per-lamp metadata, never synced
-  // cross-mesh; each lamp has its own view.
+  // { "AA:BB:CC:DD:EE:FF": 1..5 }; keys are lampId (mesh mac,
+  // canonical-form colon-hex). Legacy name-keyed entries (older
+  // firmware) are silently dropped on load via lamp::isValidBdAddr in
+  // util/bd_addr.hpp. Bounded to ~100 entries. Per-lamp metadata,
+  // never synced cross-mesh; each lamp has its own view.
   // Idle window before debounced disposition writes are committed to NVS.
   // 5s comfortably exceeds a worst-case slider-drag cadence (~20 Hz BLE
   // writes) while still feeling snappy if the user closes the app right
@@ -171,14 +189,14 @@ class Config {
   static constexpr uint32_t kDispositionFlushIdleMs = 5000;
 
   // Returns kDispositionDefault when the peer isn't in the store.
-  // `bdAddr` is canonical-form colon-hex (e.g. "AA:BB:CC:DD:EE:FF").
-  // See lamp::isValidBdAddr in util/bd_addr.hpp.
-  uint8_t getDisposition(const std::string& bdAddr) const;
+  // `lampId` is the mesh mac, canonical-form colon-hex (e.g.
+  // "AA:BB:CC:DD:EE:FF"). See lamp::isValidBdAddr in util/bd_addr.hpp.
+  uint8_t getDisposition(const std::string& lampId) const;
   // Clamps `value` to [1,5] and marks the debouncer dirty; the NVS write
   // happens later via maybeFlushDispositions() or flushDispositionsNow().
-  // Evicts the lowest-by-key entry when at kDispositionsMax and the BD_ADDR
+  // Evicts the lowest-by-key entry when at kDispositionsMax and the lampId
   // is new.
-  void setDisposition(const std::string& bdAddr, uint8_t value);
+  void setDisposition(const std::string& lampId, uint8_t value);
   // Full JSON serialization for the CHAR_SOCIAL_DISPOSITIONS read path.
   String asDispositionsJson() const;
   // Bulk replace from the CHAR_SOCIAL_DISPOSITIONS write path. Caller
@@ -209,6 +227,9 @@ class Config {
   std::string shadeSectionJson_;
   std::string expressionsSectionJson_;
   std::string homeSectionJson_;
+  std::string lampId_;
+  uint16_t drawIdleMa_ = 0;
+  uint16_t drawFullMa_ = 0;
   bool lampSectionDirty_ = true;
   bool baseSectionDirty_ = true;
   bool shadeSectionDirty_ = true;

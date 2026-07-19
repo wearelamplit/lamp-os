@@ -1,8 +1,9 @@
 #include "config.hpp"
 
 #include <ArduinoJson.h>
-
-#include <sstream>
+#include <new>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 #include "config/config_codec.hpp"
 #include "core/lamp.hpp"
@@ -10,21 +11,6 @@
 #include "version.hpp"
 
 namespace lamp {
-
-// Split csv on commas, parse each trimmed token as a #RRGGBBWW hex color,
-// return the non-empty results.
-static std::vector<Color> parseColorList(const std::string& csv) {
-  std::vector<Color> out;
-  std::istringstream stream(csv);
-  std::string token;
-  while (std::getline(stream, token, ',')) {
-    size_t start = token.find_first_not_of(' ');
-    size_t end   = token.find_last_not_of(' ');
-    if (start == std::string::npos) continue;
-    out.push_back(hexStringToColor(token.substr(start, end - start + 1)));
-  }
-  return out;
-}
 
 // Seed every segment of a role from the variant defaults, but only while NVS
 // still holds the single class-default segment. A configured lamp (NVS parsed
@@ -128,12 +114,18 @@ std::string Config::loadLampType() {
   return lamp.lampType;
 }
 
-uint8_t Config::getDisposition(const std::string& bdAddr) const {
-  return dispositions_.get(bdAddr);
+void Config::setLampId(const std::string& lampId) {
+  if (lampId == lampId_) return;
+  lampId_ = lampId;
+  invalidateLampSection();
 }
 
-void Config::setDisposition(const std::string& bdAddr, uint8_t value) {
-  dispositions_.set(bdAddr, value, millis());
+uint8_t Config::getDisposition(const std::string& lampId) const {
+  return dispositions_.get(lampId);
+}
+
+void Config::setDisposition(const std::string& lampId, uint8_t value) {
+  dispositions_.set(lampId, value, millis());
 }
 
 String Config::asDispositionsJson() const {
@@ -171,6 +163,7 @@ String Config::asLampJson() {
   doc["hasPassword"] = !lamp.password.empty();
   doc["advancedEnabled"] = lamp.advancedEnabled;
   doc["webappEnabled"] = lamp.webappEnabled;
+  doc["brightnessCeiling"] = lamp.brightnessCeiling;
   doc["socialMode"] = static_cast<uint8_t>(lamp.socialMode);
   // Firmware identity (packed semver + release channel string). Constant at
   // boot, so no extra invalidation hook is needed; the lamp section cache
@@ -180,6 +173,9 @@ String Config::asLampJson() {
   // lampType is firmware-owned; the app can read it but settings_blob
   // writes do NOT update it (see parser block below).
   doc["lampType"] = lamp.lampType;
+  if (!lampId_.empty()) {
+    doc["lampId"] = lampId_;
+  }
   String out;
   serializeJson(doc, out);
   return out;
@@ -207,6 +203,7 @@ String Config::asBaseJson() {
   JsonDocument doc;
   emitRoleTopology(doc, base.segments);
   doc["ac"] = base.ac;
+  doc["byteOrder"] = base.byteOrder;
   // Knockout: positional uint8 array, one entry per pixel.
   //   wire shape: "knockout":[100,100,6,9,...] (length = knockoutPixels.size())
   // Index = pixel; value = brightness % (0..100). Caps the base section at
@@ -220,6 +217,8 @@ String Config::asBaseJson() {
   // Emitted so the app can hide the color picker for surfaces the subclass
   // has opted out of (e.g. SnafuLamp shade).
   doc["colorsEditable"] = base.colorsEditable;
+  doc["drawIdleMa"] = drawIdleMa_;
+  doc["drawFullMa"] = drawFullMa_;
   String out;
   serializeJson(doc, out);
   return out;
@@ -228,6 +227,7 @@ String Config::asBaseJson() {
 String Config::asShadeJson() {
   JsonDocument doc;
   emitRoleTopology(doc, shade.segments);
+  doc["byteOrder"] = shade.byteOrder;
   // colorsEditable is firmware-owned (set by Lamp subclass via applyDefaults).
   // Emitted so the app can hide the color picker for surfaces the subclass
   // has opted out of (e.g. SnafuLamp shade).
@@ -265,31 +265,63 @@ String Config::asHomeModeJson() {
   doc["ssid"] = homeMode.ssid;
   doc["brightness"] = homeMode.brightness;
   doc["enabled"] = homeMode.enabled;
+  doc["networkBound"] = homeMode.networkBound;
+  doc["socialDisabled"] = homeMode.socialDisabled;
+  JsonArray disArr = doc["disabledExpressionTypes"].to<JsonArray>();
+  for (const auto& s : homeMode.disabledExpressionTypes) disArr.add(s);
   String out;
   serializeJson(doc, out);
   return out;
 }
 
-// Per-section JSON cache accessors. Clean section: return the cached string
-// in O(1). Dirty: rebuild via asXJson(), copy into the member string, clear
-// the flag. The portMUX serialises the rebuild so two cores can't .assign()
-// the same string concurrently. Torn source reads are avoided by discipline,
-// not the mux: a section is invalidated only at commit/boot (quiescent), never
-// mid-live-write, so the rebuild never reads a source another core is mutating.
-static portMUX_TYPE s_cacheMux = portMUX_INITIALIZER_UNLOCKED;
+// Per-section JSON cache accessors. Rebuild-if-dirty and the reader's
+// copy-out share one mutex; without it a reader on one core can copy the
+// member string while a rebuild on the other core reallocates it.
+static SemaphoreHandle_t cacheMutex() {
+  static SemaphoreHandle_t m = xSemaphoreCreateMutex();
+  return m;
+}
 
+// A field OOM must stay visible without spamming: warn on the degrade path
+// on every channel, throttled to one line per LAMP_SECTION_OOM_MIN_MS.
+static void logSectionOom(const char* msg) {
+  static constexpr uint32_t LAMP_SECTION_OOM_MIN_MS = 5000;
+  static uint32_t lastMs = 0;
+  const uint32_t now = millis();
+  if (now - lastMs < LAMP_SECTION_OOM_MIN_MS && lastMs != 0) return;
+  lastMs = now;
+  Serial.printf("[cfg] %s section OOM; serving stale\n", msg);
+}
+
+// A web/BLE section read must never panic the lamp: under a fragmented heap
+// the rebuild's string alloc can throw bad_alloc. On failure keep the
+// last-good cache, leave the dirty flag set so it retries when heap recovers,
+// and serve the stale (or empty) bytes. Catch only bad_alloc so a genuine
+// logic exception propagates instead of degrading to stale JSON.
 #define LAMP_DEFINE_SECTION_CACHED(NAME, BUILDER)                          \
-  const std::string& Config::NAME##SectionJsonCached() {                   \
+  void Config::NAME##SectionRebuildIfDirty() {                             \
+    xSemaphoreTake(cacheMutex(), portMAX_DELAY);                           \
     if (NAME##SectionDirty_) {                                             \
-      portENTER_CRITICAL(&s_cacheMux);                                     \
-      if (NAME##SectionDirty_) {                                           \
-        String s = BUILDER();                                              \
-        NAME##SectionJson_.assign(s.c_str(), s.length());                  \
+      try {                                                                \
+        String s = BUILDER();                                             \
+        NAME##SectionJson_.assign(s.c_str(), s.length());                 \
         NAME##SectionDirty_ = false;                                       \
+      } catch (const std::bad_alloc&) {                                    \
+        logSectionOom(#NAME);                                              \
       }                                                                    \
-      portEXIT_CRITICAL(&s_cacheMux);                                      \
     }                                                                      \
-    return NAME##SectionJson_;                                             \
+    xSemaphoreGive(cacheMutex());                                          \
+  }                                                                        \
+  void Config::NAME##SectionJsonCached(std::string& out) {                 \
+    NAME##SectionRebuildIfDirty();                                         \
+    xSemaphoreTake(cacheMutex(), portMAX_DELAY);                           \
+    try {                                                                  \
+      out = NAME##SectionJson_;                                            \
+    } catch (const std::bad_alloc&) {                                      \
+      out.clear();                                                         \
+      logSectionOom(#NAME);                                                \
+    }                                                                      \
+    xSemaphoreGive(cacheMutex());                                          \
   }
 
 LAMP_DEFINE_SECTION_CACHED(lamp, asLampJson)
@@ -306,6 +338,13 @@ void Config::invalidateLampSection() {
 
 void Config::invalidateBaseSection() {
   baseSectionDirty_ = true;
+}
+
+void Config::setDrawAnchors(uint16_t idleMa, uint16_t fullMa) {
+  if (idleMa == drawIdleMa_ && fullMa == drawFullMa_) return;
+  drawIdleMa_ = idleMa;
+  drawFullMa_ = fullMa;
+  invalidateBaseSection();
 }
 
 void Config::invalidateShadeSection() {
@@ -335,7 +374,7 @@ void Config::applyDefaults(const Defaults& d) {
   // first-boot baselines.
   //
   // Name: the Config class default is "stray". If NVS had no name (empty
-  // NVS) the loaded value is still "stray". We replace it with the subclass
+  // NVS) the loaded value is still "stray". Replace it with the subclass
   // preferred name.
   if (!d.name.empty() && lamp.name == "stray") {
     lamp.name = d.name;

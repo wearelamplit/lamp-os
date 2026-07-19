@@ -1,5 +1,8 @@
 #pragma once
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -49,28 +52,32 @@ class DispositionDebouncer {
   uint32_t idleMs_;
 };
 
-// Per-peer social dispositions (BD_ADDR -> 1..5). Kept as a key-sorted vector
+// Per-peer social dispositions (lampId -> 1..5). Kept as a key-sorted vector
 // for O(log N) lookup and a stable on-disk byte shape; persisted to its own
 // NVS key via the injected ConfigStore, debounced to spare flash wear. The
 // caller passes the clock (millis) in so this stays pure and native-testable
 // against an InMemoryConfigStore.
+//
+// Read from the NimBLE host task (Core 0) via asJson() while the Core 1 loop
+// drain mutates via setFromJson(); a SemaphoreHandle_t mutex serialises all
+// entries_ access. JSON parse/serialize and NVS writes stay outside the lock.
 class DispositionStore {
  public:
   static constexpr uint8_t kDefault = 3;
   static constexpr size_t kMax = 100;
 
-  explicit DispositionStore(uint32_t flushIdleMs) : debouncer_(flushIdleMs) {}
+  explicit DispositionStore(uint32_t flushIdleMs);
 
   void attachStore(ConfigStore* store) { store_ = store; }
 
   // Read + parse the "dispositions" NVS key into the sorted vector.
   void load();
 
-  // kDefault when the peer isn't present. bdAddr is canonical colon-hex.
-  uint8_t get(const std::string& bdAddr) const;
+  // kDefault when the peer isn't present. lampId is canonical colon-hex.
+  uint8_t get(const std::string& lampId) const;
   // Clamp to [1,5], insert/update preserving sort order, evict lowest-by-key
   // at capacity. Marks dirty; the actual write is deferred to a flush.
-  void set(const std::string& bdAddr, uint8_t value, uint32_t nowMs);
+  void set(const std::string& lampId, uint8_t value, uint32_t nowMs);
 
   std::string asJson() const;
   // Bulk replace from a JSON object; parse + clamp + mark dirty. Defers the
@@ -89,6 +96,7 @@ class DispositionStore {
   std::vector<std::pair<std::string, uint8_t>> entries_;
   DispositionDebouncer debouncer_;
   ConfigStore* store_ = nullptr;
+  SemaphoreHandle_t mutex_ = nullptr;
 };
 
 }  // namespace lamp
