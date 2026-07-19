@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # Download a release image and UPDATE a lamp over USB: flashes only app0
 # (firmware) + spiffs (web config UI), carved out of the merged image. NVS
-# (name/colors/adoption) and otadata are never written, so they persist across
-# the update. The merged image is 0xFF across the NVS region, so a whole-image
-# 0x0 write would erase name/colors/adoption; this is not that.
+# (name/colors/adoption) is never written, so it persists across the update.
+# The merged image is 0xFF across the NVS region, so a whole-image 0x0 write
+# would erase name/colors/adoption; this is not that.
+#
+# otadata IS reset here. Mesh OTA is A/B: it writes the inactive app slot and
+# flips otadata (app0<->app1). This script only writes app0, so a lamp that
+# last OTA-booted app1 would keep booting app1 and never see the new app0. The
+# erase forces the bootloader back to ota_0. otadata (@0xE000) is separate from
+# nvs (@0x9000), so name/config survive.
 #
 # This is an update path, not a full/erase flash. A truly blank lamp (no valid
 # bootloader/partitions) needs the web installer at update.lamplit.ca or a
@@ -41,6 +47,17 @@ fi
 cleanup() { rm -f "$TMPFILE" "$APP0FILE" "$SPIFFSFILE"; }
 trap cleanup EXIT
 
+# otadata offset+size from the partition table, not hardcoded, so a repartition
+# can't silently desync this erase.
+PARTITIONS_CSV="$(cd "$(dirname "${BASH_SOURCE[0]}")/../software/lamp-os" && pwd)/partitions.csv"
+read -r OTADATA_OFF OTADATA_SIZE < <(
+  awk -F',' '{gsub(/[ \t]/,"")} $3=="ota" && $2=="data" { print $4, $5 }' "$PARTITIONS_CSV"
+)
+if [ -z "${OTADATA_OFF:-}" ] || [ -z "${OTADATA_SIZE:-}" ]; then
+  echo "ERROR: could not derive otadata offset/size from ${PARTITIONS_CSV}." >&2
+  exit 1
+fi
+
 echo "[flash:release] downloading ${ASSET} from release '${RELEASE_TAG}' (${REPO})"
 if ! curl -fSL --retry 3 -o "${TMPFILE}" "${URL}"; then
   echo "ERROR: asset '${ASSET}' not found in release '${RELEASE_TAG}'." >&2
@@ -70,5 +87,8 @@ PORT_ARG=()
 [ -n "${PORT:-}" ] && PORT_ARG=(--port "$PORT")
 "${ESPTOOL[@]}" ${PORT_ARG[@]+"${PORT_ARG[@]}"} --chip esp32 --baud 921600 write_flash \
   0x10000 "$APP0FILE" 0x3d0000 "$SPIFFSFILE"
+
+echo "[flash:release] resetting otadata (${OTADATA_OFF}+${OTADATA_SIZE}) so the bootloader boots ota_0 (app0)..."
+"${ESPTOOL[@]}" ${PORT_ARG[@]+"${PORT_ARG[@]}"} --chip esp32 erase_region "$OTADATA_OFF" "$OTADATA_SIZE"
 
 echo "[flash:release] done — lamp updated to ${VARIANT}/${RELEASE_TAG}, name/colors/adoption kept."

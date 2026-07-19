@@ -578,6 +578,10 @@ The **FS-image OTA** (`MSG_FS_*`, the SPIFFS web-UI image) reuses this receiver/
 
 See `software/lamp-os/src/components/firmware/` (distributor + receiver) and [`../../scripts/README.md`](../../scripts/README.md) for the signed-image OTA model.
 
+### A/B slots and USB re-flash
+
+The lamp partitions two app slots (`ota_0`/app0, `ota_1`/app1) plus an `otadata` partition that selects which one boots. Each mesh OTA writes the *inactive* slot and flips `otadata` (app0↔app1 ping-pong). The USB flash tasks (`lamp:flash`, `lamp:flash:release`) only ever write **app0** — so a lamp that last OTA-booted app1 keeps booting the stale app1 and the flash lands invisibly in app0. Both tasks therefore erase `otadata` after the write (offset/size read from `partitions.csv`), which makes the 2nd-stage bootloader default back to `ota_0`. `otadata` is separate from `nvs`, so name/config survive. The **web installer** (update.lamplit.ca / `manifest_*.json`) is immune without a reset: it flashes the whole merged image at offset 0, and `esptool merge-bin` leaves the `otadata` region 0xFF, which the bootloader reads as "boot `ota_0`". It also carries `new_install_prompt_erase`, so the web path wipes NVS/name — unlike `lamp:flash:release`, which preserves it. The **wisp** never receives mesh OTA, so its `otadata` never flips and its USB flash needs no reset.
+
 ### RSSI gate
 
 `MSG_FW_OFFER`/`MSG_FS_OFFER` are single-hop unicast (no relay), so a weak direct link thrashes or fails a transfer regardless of chunk size. Both sides gate on `kOtaMinRssiDbm` (`components/network/protocol/fw_ota.hpp`, currently -80 dBm): the distributor (`considerPeerForOta`) skips offering below the floor using the peer's ESP-NOW HELLO RSSI (`LampRoster::espnowRssi`, distinct from the BLE-scan `lastRssi`); the receiver (`MeshLink::handleRecv`) independently drops an inbound OFFER whose frame RSSI is below the floor. The -127 "unknown RSSI" sentinel is never gated (allow). This is local, not on the wire — no `PROTOCOL_VERSION` involvement. Gating a weak direct hop doesn't strand a peer: cascade OTA still reaches it later via a nearer already-upgraded lamp.
