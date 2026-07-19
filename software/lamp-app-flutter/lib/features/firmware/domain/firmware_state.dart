@@ -7,29 +7,14 @@ sealed class FirmwareState {
   const FirmwareState();
 }
 
-/// No OTA in progress and no firmware fetched yet. Initial state.
+/// No OTA in progress. Shows the downloaded-firmware list.
 class FirmwareIdle extends FirmwareState {
   const FirmwareIdle();
-}
-
-/// Downloading the signed binary from GitHub Releases.
-class FirmwareDownloading extends FirmwareState {
-  const FirmwareDownloading();
 }
 
 /// Verifying the LSIG footer + Ed25519 signature locally.
 class FirmwareVerifying extends FirmwareState {
   const FirmwareVerifying();
-}
-
-/// Download + verify succeeded. UI shows version + install button.
-class FirmwareReadyToInstall extends FirmwareState {
-  const FirmwareReadyToInstall({
-    required this.footer,
-    required this.imageBytes,
-  });
-  final LsigFooter footer;
-  final int imageBytes;
 }
 
 /// OFFER is on the wire; waiting for ACCEPT.

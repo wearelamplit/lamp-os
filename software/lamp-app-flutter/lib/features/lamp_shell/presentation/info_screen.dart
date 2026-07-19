@@ -14,7 +14,6 @@ import '../../control/application/advanced_session.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/application/control_state.dart';
 import '../../control/application/dev_mode.dart';
-import '../../firmware/data/firmware_release_client.dart';
 import '../../firmware/presentation/firmware_update_panel.dart';
 
 /// Info tab: Lamplit branding, firmware + app version footer, and the
@@ -155,7 +154,7 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
           FirmwareUpdatePanel(
             deviceId: widget.lampId,
             lampType: widget.state.lamp.lampType,
-            channel: firmwareChannelFromString(widget.state.lamp.fwChannel),
+            lampFwVersion: widget.state.lamp.fwVersion,
           ),
         ],
         const SizedBox(height: AppSpace.xl),
