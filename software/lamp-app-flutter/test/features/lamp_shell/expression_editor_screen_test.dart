@@ -11,6 +11,7 @@ import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/features/control/application/control_notifier.dart';
 import 'package:lamp_app/features/control/application/expression_draft.dart';
 import 'package:lamp_app/features/control/domain/lamp_color.dart';
+import 'package:lamp_app/features/control/presentation/widgets/color_blocks_bar.dart';
 import 'package:lamp_app/features/inventory/application/inventory_notifier.dart';
 import 'package:lamp_app/features/inventory/domain/inventory_lamp.dart';
 import 'package:lamp_app/features/lamp_shell/domain/expression_catalog.dart';
@@ -852,5 +853,61 @@ void main() {
 
     expect(written, isNotNull);
     expect(written!['easing'], 2);
+  });
+
+  testWidgets(
+      'color editor previews to the target surface only and restores on close',
+      (tester) async {
+    final ble = InMemoryBleClient();
+    SharedPreferences.setMockInitialValues({});
+    await seedControlBle(ble, deviceId: _devId, name: 'test');
+    final c = ProviderContainer(
+      overrides: [bleClientProvider.overrideWithValue(ble)],
+    );
+    addTearDown(c.dispose);
+    await c.read(inventoryNotifierProvider.future);
+    await c.read(inventoryNotifierProvider.notifier).add(const InventoryLamp(
+          id: _devId,
+          name: 'jacko',
+          controlPassword: 'secret',
+        ));
+
+    // Base target (2): preview must hit baseColors, never shadeColors.
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: c,
+      child: const MaterialApp(
+        home: ExpressionEditorScreen(
+            lampId: _devId, typeKey: 'breathing', targetKey: 2),
+      ),
+    ));
+    await _pumpToData(tester, 'Breathing');
+
+    await tester.dragUntilVisible(
+      find.byType(ColorBlocksBar),
+      find.byType(ListView),
+      const Offset(0, -200),
+    );
+    await tester.tap(find.byType(ColorBlocksBar));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add Color'));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(ble.writesTo(_devId, BleUuids.baseColors), isNotEmpty,
+        reason: 'base-target preview must reach the base surface');
+    expect(ble.writesTo(_devId, BleUuids.shadeColors), isEmpty,
+        reason: 'base-target preview must not touch the shade surface');
+
+    // Two Save buttons exist (editor + sheet); the sheet's is topmost.
+    await tester.tap(find.widgetWithText(FilledButton, 'Save').last);
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // Last base write restores the surface's opening palette (#300783FF),
+    // not the previewed edit: the preview was transient.
+    final baseWrites = ble.writesTo(_devId, BleUuids.baseColors);
+    expect(jsonDecode(utf8.decode(baseWrites.last)), ['#300783FF'],
+        reason: 'closing the sheet must restore the original base colors');
+
+    // Drain the seen-cache commit-debounce timer before teardown.
+    await tester.pump(const Duration(milliseconds: 600));
   });
 }

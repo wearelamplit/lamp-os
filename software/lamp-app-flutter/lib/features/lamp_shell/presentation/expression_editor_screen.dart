@@ -166,6 +166,57 @@ class _ExpressionEditorScreenState
           ExpressionConfig d, Map<String, int> p) =>
       d.copyWith(parameters: p);
 
+  /// Open the color-stops sheet with live preview wired to the lamp. Every
+  /// in-flight edit streams the whole stop list to whichever strips the
+  /// expression's target paints (shade-only → shade, base-only → base, both →
+  /// both) so the lamp preview matches the saved expression. An empty list
+  /// means "follow surface", so it isn't streamed (streaming empty would blank
+  /// the strip). On close (save or cancel) the surface's original palette is
+  /// restored: the preview writes were for preview only; the expression's own
+  /// colors are committed by Save via `upsertExpression`.
+  Future<void> _editColorsLive(
+    ControlState state,
+    ControlNotifier notifier,
+    List<LampColor> initial,
+    int colorMax,
+    bool canEmpty,
+  ) async {
+    final t = _target;
+    final previewShade = (t == 1 || t == 3);
+    final previewBase = (t == 2 || t == 3);
+    final originalShade = state.shade.colors;
+    final originalBase = state.base.colors;
+
+    // Stop any active expression test so the configurator is back in charge
+    // and the preview writes are visible.
+    unawaited(notifier.completeExpressionTest());
+
+    void writeLive(List<LampColor> colors) {
+      if (colors.isEmpty) return;
+      if (previewShade) unawaited(notifier.setShadeColors(colors));
+      if (previewBase) unawaited(notifier.setBaseColors(colors));
+    }
+
+    await showColorStopsSheet(
+      context,
+      initial: initial,
+      title: 'Colors',
+      description: 'This effect picks colors from this set at random.',
+      max: colorMax,
+      allowEmpty: canEmpty,
+      reorderable: false,
+      onChanged: (colors) {
+        _updateDraft((d) => _withColors(d, colors));
+        writeLive(colors);
+      },
+      onSave: (colors) async => _updateDraft((d) => _withColors(d, colors)),
+    );
+
+    // Restore whichever strips were driven, regardless of save/cancel.
+    if (previewShade) unawaited(notifier.setShadeColors(originalShade));
+    if (previewBase) unawaited(notifier.setBaseColors(originalBase));
+  }
+
   /// Pixel count for the active target's strip; max of shade/base for `both`.
   int _pixelCount(ControlState state) => _target == 1
       ? state.shade.px
@@ -342,20 +393,8 @@ class _ExpressionEditorScreenState
                     const SettingsGroupHeading('Colors'),
                     ColorBlocksBar(
                       colors: draft.colors,
-                      onTap: () => showColorStopsSheet(
-                        context,
-                        initial: draft.colors,
-                        title: 'Colors',
-                        description:
-                            'This effect picks colors from this set at random.',
-                        max: colorMax,
-                        allowEmpty: canEmpty,
-                        reorderable: false,
-                        onChanged: (colors) =>
-                            _updateDraft((d) => _withColors(d, colors)),
-                        onSave: (colors) async =>
-                            _updateDraft((d) => _withColors(d, colors)),
-                      ),
+                      onTap: () => _editColorsLive(
+                          state, notifier, draft.colors, colorMax, canEmpty),
                     ),
 
                     // Timing / Behaviour / Mesh render generically from the
