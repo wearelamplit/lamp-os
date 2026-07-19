@@ -7,15 +7,14 @@
 #include <NimBLEDevice.h>
 
 // arduino-esp32 3.3.9 defines `btInUse()` as a weak alias for an internal
-// `_btInUse_default` that returns `true`. The framework's startup code in
-// esp32-hal-misc.c uses btInUse() to decide whether to call
-// esp_bt_controller_mem_release(ESP_BT_MODE_BTDM) BEFORE setup() runs.
-// On 3.3.0 the strong override pulled into the link; on 3.3.9 only the
-// weak alias is visible at link time, the framework picks the weak default
-// (return false), releases the BT controller's BTDM memory, and the
-// subsequent NimBLEDevice::init()/esp_bt_controller_init() returns
-// ESP_ERR_INVALID_STATE (259). Defining a STRONG btInUse() here forces
-// the framework to skip the mem-release call.
+// `_btInUse_default`. The framework's startup code in esp32-hal-misc.c uses
+// btInUse() to decide whether to call
+// esp_bt_controller_mem_release(ESP_BT_MODE_BTDM) BEFORE setup() runs. With
+// only the weak default visible at link time it returns false, the framework
+// releases the BT controller's BTDM memory, and the subsequent
+// NimBLEDevice::init()/esp_bt_controller_init() returns ESP_ERR_INVALID_STATE
+// (259). A STRONG btInUse() here forces the framework to skip the mem-release
+// call.
 extern "C" bool btInUse() { return true; }
 
 #include <string>

@@ -138,9 +138,9 @@ class WriteRouter : public NimBLECharacteristicCallbacks {
     const std::string raw = c->getValue();
 
     if (decode_) {
-      // Ciphertext path. The 64-byte slop above maxSize_ matches the
-      // pre-refactor sanity ceiling on the raw wire bytes (GCM prefix+tag
-      // overhead). decode rejects > slot capacity after decryption.
+      // Ciphertext path. The 64-byte slop above maxSize_ covers GCM prefix+tag
+      // overhead on the raw wire bytes. decode rejects > slot capacity after
+      // decryption.
       if (raw.size() > maxSize_ + 64) return;
       std::string json;
       bool authed = false;

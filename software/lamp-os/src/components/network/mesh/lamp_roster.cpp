@@ -100,7 +100,7 @@ void LampRoster::addOrUpdateFromEspNow(const std::string& name, const uint8_t ma
                                        int8_t rssi) {
   uint32_t now = millis();
   // WiFi task: bounded take so a stall doesn't block recv frames or the
-  // link_.broadcast(). On timeout the write drops; HELLO repeats every 5 s.
+  // link_.broadcast(). On timeout the write drops; the next HELLO retries.
   if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(2)) != pdTRUE) {
 #ifdef LAMP_DEBUG
     static uint32_t lastDropLogMs = 0;
