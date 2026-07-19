@@ -77,6 +77,9 @@ class ShiftyExpression : public Expression {
   uint8_t fillMode_ = 0;
   Easing easing_ = Easing::Linear;
   std::vector<uint32_t> pixelStartOffsetMs_;
+  // Largest start-stagger applied this fade. The fade window must outlast the
+  // last-staged pixel, so state transitions gate on fadeDurationMs + this.
+  uint32_t maxAppliedOffsetMs_ = 0;
 
   // Currently shifted color
   Color shiftedColor;

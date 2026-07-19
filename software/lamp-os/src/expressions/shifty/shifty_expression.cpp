@@ -95,6 +95,7 @@ void ShiftyExpression::startUnshift() {
 void ShiftyExpression::populatePixelStartOffsets(bool fadingBack) {
   const uint16_t n = zone_.size();
   pixelStartOffsetMs_.assign(static_cast<size_t>(fb->pixelCount), 0u);
+  maxAppliedOffsetMs_ = 0;
   if (n == 0 || fadeDurationMs < 2) return;
   const uint32_t maxOffset = fadeDurationMs / 2;
   const uint32_t denom = (n > 1u) ? static_cast<uint32_t>(n - 1) : 1u;
@@ -112,7 +113,9 @@ void ShiftyExpression::populatePixelStartOffsets(bool fadingBack) {
         break;
       }
     }
-    pixelStartOffsetMs_[static_cast<size_t>(idx)] = ord * maxOffset / denom;
+    const uint32_t offset = ord * maxOffset / denom;
+    pixelStartOffsetMs_[static_cast<size_t>(idx)] = offset;
+    if (offset > maxAppliedOffsetMs_) maxAppliedOffsetMs_ = offset;
   }
 }
 
@@ -136,9 +139,13 @@ void ShiftyExpression::onTrigger() {
 void ShiftyExpression::onUpdate() {
   const uint32_t nowMs = millis();
 
+  // Directional fills stagger each pixel's fade start; the window must outlast
+  // the last-staged pixel or the edges freeze mid-fade (0 for uniform).
+  const uint32_t fadeWindowMs = fadeDurationMs + maxAppliedOffsetMs_;
+
   switch (state) {
     case FADING_TO_PALETTE:
-      if (nowMs - fadeStartMs >= fadeDurationMs) {
+      if (nowMs - fadeStartMs >= fadeWindowMs) {
         state = SHIFTED;
         shiftStartMs = nowMs;
 #ifdef LAMP_DEBUG
@@ -155,7 +162,7 @@ void ShiftyExpression::onUpdate() {
       break;
 
     case FADING_BACK:
-      if (nowMs - fadeStartMs >= fadeDurationMs) {
+      if (nowMs - fadeStartMs >= fadeWindowMs) {
         state = IDLE;
 #ifdef LAMP_DEBUG
         Serial.printf("[shifty] complete t=%lu\n", (unsigned long)nowMs);

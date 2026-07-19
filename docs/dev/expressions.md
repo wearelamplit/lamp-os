@@ -179,6 +179,8 @@ The Zone is toggle-driven (`fullStrip=1` whole strip, `fullStrip=0` region), ind
 | 2 | Down — last pixel leads, sweeps toward first |
 | 3 | Bloom — center pixels lead on fade-in; outside-in on fade-back |
 
+A directional mode staggers each pixel's fade start by up to `fadeDuration/2`, so the transition holds `FADING_*` for `fadeDuration + maxOffset` (up to `1.5× fadeDuration`) to let the last-staged edge pixel reach the target before the state flips. Uniform has no offset and flips at exactly `fadeDuration`.
+
 ## Trigger cadence
 
 `Expression::control()` checks `timeReached(millis(), nextTriggerMs)` (wrap-safe) and fires `trigger()` if so. After every fire the schedule is reset with `nextTriggerMs = millis() + rng.range(intervalMinMs, intervalMaxMs)` (`rng` is the per-instance `FastRng`). Subclasses that override `control()` (breathing, spotty) are continuous and don't gate on `nextTriggerMs`.
