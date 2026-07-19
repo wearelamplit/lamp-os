@@ -10,7 +10,7 @@
  */
 namespace lamp {
 /**
- * @brief ease one color byte to another using a quadratic curve
+ * ease one color byte to another using a quadratic curve
  * @param  [in] start - the start pixel value
  * @param [in] end - the end pixel value
  * @param [in] duration - the duration of the change
@@ -19,7 +19,7 @@ namespace lamp {
 uint8_t ease(uint8_t start, uint8_t end, uint32_t duration, uint32_t currentStep);
 
 /**
- * @brief ease one color byte to another using a linear curve
+ * ease one color byte to another using a linear curve
  * @param  [in] start - the start pixel value
  * @param [in] end - the end pixel value
  * @param [in] duration - the duration of the change
@@ -28,7 +28,7 @@ uint8_t ease(uint8_t start, uint8_t end, uint32_t duration, uint32_t currentStep
 uint8_t easeLinear(uint8_t start, uint8_t end, uint32_t duration, uint32_t currentStep);
 
 /**
- * @brief fade all color bytes to another using a quadratic curve
+ * fade all color bytes to another using a quadratic curve
  * @param  [in] start - the start pixel value
  * @param [in] end - the end pixel value
  * @param [in] steps - the duration of the change
@@ -37,7 +37,7 @@ uint8_t easeLinear(uint8_t start, uint8_t end, uint32_t duration, uint32_t curre
 Color fade(Color start, Color end, uint32_t steps, uint32_t currentStep);
 
 /**
- * @brief fade all color byte to another using a linear curve
+ * fade all color byte to another using a linear curve
  * @param  [in] start - the start pixel value
  * @param [in] end - the end pixel value
  * @param [in] steps - the duration of the change

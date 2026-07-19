@@ -1,13 +1,9 @@
-// core/lamp_remote_op.cpp — cascade-receive routing.
+// Cascade-receive routing.
 //
 // applyRemoteOpRouted is the single convergence point where BLE-originated
 // remote-ops (CHAR_OP) and ESP-NOW-originated CONTROL_OPs merge. Both
 // inbound transports drain into the pending slots; the drain in
 // lamp_drains.cpp dispatches here for surface-routed application.
-//
-// Split out from core/lamp.cpp purely for readability — keeps the
-// receive flow co-located with its drain callers. Bodies are
-// line-for-line moves from lamp.cpp.
 
 #include "core/lamp.hpp"
 #include "core/lamp_internal.hpp"
@@ -16,7 +12,6 @@
 #include <ArduinoJson.h>
 
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <string>
 
@@ -29,6 +24,7 @@
 #include "config/config.hpp"
 #include "core/pending_slot_aggregate.hpp"
 #include "expressions/expression_manager.hpp"
+#include "util/bd_addr.hpp"
 
 // Forward-declared so the wispStatus branch below can post into the slot
 // aggregate without dragging ble_control.cpp's header into this TU. Same
@@ -37,7 +33,7 @@ void postPendingKnockout(uint8_t pixel, uint8_t brightness);
 
 // wispStatus: applyRemoteOpLocal sees char:"wispStatus" and
 // memcpys here under portMUX along with the original wisp's MAC.
-// The drain caches via NearbyLamps + emits a BLE notify.
+// The drain caches via LampRoster + emits a BLE notify.
 static void postPendingWispStatusJson(const uint8_t srcMac[6],
                                       const char* data, size_t len) {
   lamp::pendingSlots.wispStatus.post(pendingMux, data, len, srcMac);
@@ -45,11 +41,11 @@ static void postPendingWispStatusJson(const uint8_t srcMac[6],
 
 // Apply a remote-op payload locally (either from BLE remoteOp drain when
 // targetMac==self/broadcast, or from an incoming ESP-NOW MSG_CONTROL_OP).
-// Both call sites run on the loop task (Core 1) — the BLE remoteOp drain
+// Both call sites run on the loop task (Core 1). The BLE remoteOp drain
 // runs in loop() directly, and the ESP-NOW path goes via MeshLink's
 // WiFi-task handler which only does memcpy into pendingInboundOpJson; the
-// loop drain then calls this function. Because we're already on Core 1, we
-// mutate state directly via the applyXxxLocal helpers above instead of
+// loop drain then calls this function. Already on Core 1, this mutates
+// state directly via the applyXxxLocal helpers above instead of
 // re-serializing into a pending slot just so a drain can re-parse it.
 //
 // `payload` must be a NUL-terminated JSON string for ArduinoJson to parse.
@@ -66,8 +62,8 @@ static void applyRemoteOpLocal(const char* payloadJson, size_t len,
   if (strcmp(ch, "brightness") == 0) {
     int level = doc["value"] | -1;
     if (level >= 0 && level <= 100) {
-      // Cascade-relayed brightness goes directly through ToRender —
-      // skips the pendingBrightness slot (we're already on Core 1)
+      // Cascade-relayed brightness goes directly through ToRender.
+      // Skips the pendingBrightness slot (already on Core 1)
       // AND skips config mutation so a subsequent CHAR_COMMIT doesn't
       // persist the cascade transient.
       lamp::apply::brightnessToRender(static_cast<uint8_t>(level), false, s_hwMaxBrightness);
@@ -75,23 +71,21 @@ static void applyRemoteOpLocal(const char* payloadJson, size_t len,
 
   } else if (strcmp(ch, "shadeColors") == 0) {
     // Direct path: applyRemoteOpLocal runs on Core 1, so call the local
-    // applier with the JsonArray we already have. Skips the slot round-trip
+    // applier with the JsonArray already in hand. Skips the slot round-trip
     // that would otherwise be serializeJson → std::string → memcpy → drain → re-parse.
-    // Cascade-source: ToRender only — no config mutation; cascade transients
+    // Cascade-source: ToRender only, no config mutation; cascade transients
     // must not contaminate a subsequent CHAR_COMMIT persistence sweep.
     lamp::apply::shadeColorsToRender(doc["colors"].as<JsonArray>());
     // Match the drain's unconditional bookkeeping.
-    shadeConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
-    baseConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
+    lamp::stampConfiguratorActivity(millis());
     // DO NOT invalidate the shade section here. See drainBrightness in
     // lamp_drains.cpp for why live preview must not poison the persisted-snapshot section cache.
 
   } else if (strcmp(ch, "baseColors") == 0) {
-    // Cascade-source: ToRender only — no config mutation.
+    // Cascade-source: ToRender only, no config mutation.
     lamp::apply::baseColorsToRender(doc["colors"].as<JsonArray>());
-    shadeConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
-    baseConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
-    // Same as shadeColors above — live preview must not poison the
+    lamp::stampConfiguratorActivity(millis());
+    // Same as shadeColors above; live preview must not poison the
     // persisted-snapshot section cache.
 
   } else if (strcmp(ch, "knockout") == 0) {
@@ -102,30 +96,30 @@ static void applyRemoteOpLocal(const char* payloadJson, size_t len,
     }
 
   } else if (strcmp(ch, "expressionOp") == 0) {
-    // Direct path: same Core 1 reasoning — call the applier with the parsed
+    // Direct path: same Core 1 reasoning. Call the applier with the parsed
     // JsonObject. The drain shape expects the `char` key gone, but the
     // applier just looks at `op`/`entry`/`type`/`target`, so leaving `char`
     // is harmless. Skips serialize → drain → re-parse.
-    // Cascade-source: ToRender only — no config mutation; cascade transients
+    // Cascade-source: ToRender only, no config mutation; cascade transients
     // must not contaminate a subsequent CHAR_COMMIT persistence sweep.
     lamp::apply::expressionOpToRender(doc.as<JsonObject>());
     // Match the drain's unconditional invalidate semantics.
     config.invalidateExpressionsSection();
 
   } else if (strcmp(ch, "wispStatus") == 0) {
-    // A wispStatus payload reached us — either directly from the
-    // wisp's MSG_CONTROL_OP broadcast or via a peer's gossip relay. We
-    // don't APPLY anything locally (lamps don't have a zone state to
-    // mutate); we just cache + notify so the phone-paired lamp's
-    // CHAR_WISP_STATUS read/notify surface stays current. srcMac is the
-    // wisp's MAC (preserved through gossip relay by MeshLink, which
+    // A wispStatus payload arrived, either directly from the
+    // wisp's MSG_CONTROL_OP broadcast or via a peer's gossip relay.
+    // Nothing is APPLIED locally (lamps don't have a zone state to
+    // mutate); the payload is just cached + notified so the phone-paired
+    // lamp's CHAR_WISP_STATUS read/notify surface stays current. srcMac is
+    // the wisp's MAC (preserved through gossip relay by MeshLink, which
     // copies op.sourceMac into the inbound slot).
     postPendingWispStatusJson(srcMac, payloadJson, len);
   }
   // wispOp intentionally has NO branch here. The dedicated CHAR_WISP_OP
   // slot drain broadcasts a MSG_CONTROL_OP; the wisp(s) on the mesh
   // consume it. A gossip-relayed wispOp lands here, finds no matching
-  // branch, and silently drops — which is exactly the desired behavior.
+  // branch, and silently drops, which is the desired behavior.
 }
 
 // `RemoteOpTransport` enum + applyRemoteOpRouted forward declaration both
@@ -142,27 +136,26 @@ static void applyRemoteOpLocal(const char* payloadJson, size_t len,
 //                    that MeshLink already passed through MAC + dedup
 //                    filtering on the WiFi task.
 //   `srcMac`       : Sender's MAC. For ESP-NOW this is the original CONTROL_OP
-//                    `sourceMac`. For BLE there is no real network source —
+//                    `sourceMac`. For BLE there is no real network source;
 //                    the caller passes selfMac so app-driven rapid triggers
 //                    coalesce against each other on the receive side.
 //   `origin`       : Selects the small bit of asymmetry between the two
-//                    transports (see comments below). Everything else —
-//                    JSON dispatch (`applyRemoteOpLocal`), RecentCascade
+//                    transports (see comments below). Everything else is
+//                    shared: JSON dispatch (`applyRemoteOpLocal`), RecentCascade
 //                    dedup + suppressCascade_ invariant (both internal to
 //                    ExpressionManager and consulted via triggerInvocation),
-//                    delayed-trigger queue, settings-not-forwarded policy —
-//                    is shared.
+//                    delayed-trigger queue, and settings-not-forwarded policy.
 //
 // What still differs between BLE and EspNow, handled here:
 //   - For BLE the payload arrives wrapped with a top-level `targetMac`
 //     ("broadcast" | "AA:BB:..."). The router strips it, decides self /
 //     broadcast / unicast, applies locally when self-or-broadcast, and
 //     forwards over ESP-NOW (broadcast or unicast) when not-self.
-//   - For EspNow the addressed-to-us check (`forUs`) and the once-only
+//   - For EspNow the addressed-to-self check (`forUs`) and the once-only
 //     grid rebroadcast already happened on the WiFi task inside
 //     MeshLink::handleRecv (kept there for latency: rebroadcast doesn't
 //     wait on the loop drain). By the time the slot is drained the payload
-//     is unconditionally for-us, so the router just applies locally.
+//     is unconditionally for this lamp, so the router just applies locally.
 //
 void applyRemoteOpRouted(const char* payloadJson, size_t len,
                          const uint8_t srcMac[6],
@@ -170,12 +163,12 @@ void applyRemoteOpRouted(const char* payloadJson, size_t len,
   if (origin == RemoteOpTransport::EspNow) {
     // MeshLink::handleRecv (WiFi task) already gated on targetMac == myMac
     // || broadcast, and already rebroadcast once for grid relay. Nothing for
-    // the router to decide — just dispatch locally on Core 1.
+    // the router to decide; just dispatch locally on Core 1.
     applyRemoteOpLocal(payloadJson, len, srcMac);
     return;
   }
 
-  // BLE origin. The CHAR_REMOTE_OP drain handed us a payload that may carry a
+  // BLE origin. The CHAR_REMOTE_OP drain provides a payload that may carry a
   // top-level `targetMac` field selecting self / broadcast / a specific peer.
   JsonDocument doc;
   if (deserializeJson(doc, payloadJson, len) != DeserializationError::Ok) return;
@@ -188,16 +181,14 @@ void applyRemoteOpRouted(const char* payloadJson, size_t len,
     if (strcmp(tgtStr, "broadcast") == 0) {
       memset(targetMac, 0xFF, 6);
       isBroadcast = true;
-    } else if (sscanf(tgtStr, "%02hhX:%02hhX:%02hhX:%02hhX:%02hhX:%02hhX",
-                      &targetMac[0], &targetMac[1], &targetMac[2],
-                      &targetMac[3], &targetMac[4], &targetMac[5]) == 6) {
+    } else if (lamp::parseBdAddr(tgtStr, targetMac)) {
       uint8_t myMac[6];
       meshLink.getMyMac(myMac);
       isSelf = (memcmp(targetMac, myMac, 6) == 0);
     }
   }
 
-  // Strip targetMac before applying/forwarding — applyRemoteOpLocal and the
+  // Strip targetMac before applying/forwarding; applyRemoteOpLocal and the
   // CONTROL_OP payload both expect the unwrapped op shape.
   doc.remove("targetMac");
   std::string payload;
@@ -206,18 +197,18 @@ void applyRemoteOpRouted(const char* payloadJson, size_t len,
   if (isSelf || isBroadcast) {
     // applyRemoteOpLocal's srcMac is the *original* sender for the cascade
     // coalesce. For BLE-initiated ops the "sender" is this lamp's own app
-    // session — `srcMac` was already populated with selfMac by the caller.
+    // session; `srcMac` was already populated with selfMac by the caller.
     applyRemoteOpLocal(payload.data(), payload.size(), srcMac);
   }
   if (!isSelf && !meshLink.isOtaInProgress()) {
     // Forward over ESP-NOW. broadcast => fan out to all peers; unicast =>
     // targets the specific MAC. MeshLink::sendControlOp also records
-    // its own seq into controlOpDedup_ so the rebroadcast we'll get back
+    // its own seq into controlOpDedup_ so the returning rebroadcast
     // doesn't loop in as an "apply locally".
     //
     // Suppressed during gossip OTA: control-op forwards compete with the
     // chunk stream for ESP-NOW airtime under BLE coex. Dropped forwards
-    // are recoverable — the app retries on its next loop drain — but a
+    // are recoverable (the app retries on its next loop drain), but a
     // dropped chunk needs a stall-watchdog REQ round trip to recover.
     meshLink.sendControlOp(
         targetMac,

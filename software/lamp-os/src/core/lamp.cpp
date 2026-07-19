@@ -30,10 +30,11 @@
 #include <NimBLEDevice.h>
 #include <esp_ota_ops.h>
 #include <esp_mac.h>
+#include <esp_system.h>
 #endif
 #include "components/network/ble/bluetooth.hpp"
 #include "components/network/ble/ble_control.hpp"
-#include "components/network/mesh/nearby_lamps.hpp"
+#include "components/network/mesh/lamp_roster.hpp"
 #include "components/network/mesh/mesh_link.hpp"
 #include "components/network/transport/wifi.hpp"
 #if LAMP_WEBAPP_ENABLED
@@ -47,19 +48,25 @@
 #include "behaviors/fade_out.hpp"
 #include "behaviors/knockout.hpp"
 #include "behaviors/social.hpp"
+#include "behaviors/social_echo.hpp"
 #include "config/config.hpp"
 #include "config/config_types.hpp"
 #include "config/nvs_config_store.hpp"
 #include "core/compositor.hpp"
 #include "core/frame_buffer.hpp"
+#include "core/power_governor.hpp"
+#include <lampos/blended_identity.hpp>
+#include <lampos/led_power.hpp>
 #include "components/firmware/ota_quiet_mode.hpp"
 #include "core/pending_json_slot.hpp"
 #include "core/pending_typed_slot.hpp"
 #include "core/pending_slot_aggregate.hpp"
 #include "core/override_aggregate.hpp"
+#include "util/bd_addr.hpp"
 #include "util/color.hpp"
 #include "util/fast_rng.hpp"
 #include "util/gradient.hpp"
+#include "util/heap_probe.hpp"
 #include "util/levels.hpp"
 
 lamp::NvsConfigStore configStore;
@@ -73,11 +80,19 @@ lamp::NvsConfigStore configStore;
 // the matching drain body lives in core/lamp_drains.cpp.
 
 volatile int8_t pendingBrightness = -1;
+volatile int16_t pendingEditSession = -1;
 
 // HwConfig-sourced brightness cap. Set in Lamp::setup() from hw_.maxBrightness
 // so free functions across this TU + sibling TUs use the correct variant
 // ceiling without importing a variant header.
 uint8_t s_hwMaxBrightness = 180;
+
+lamp::PowerGovernor s_powerGovernor;
+// Sense inputs resolved once in Lamp::setup() after the FrameBuffers exist.
+static uint8_t s_shadeChannels = 4;
+static uint8_t s_baseChannels = 4;
+static uint16_t s_govPixelCount = 0;
+static void governFrame();
 
 // Bring apply_brightness helpers into file scope so unqualified call sites
 // (applyEffectiveBrightness, computeUserBrightnessNow) resolve.
@@ -118,6 +133,9 @@ portMUX_TYPE pendingMux = portMUX_INITIALIZER_UNLOCKED;
 void postPendingShadeColorsJson(const char* data, size_t len) { lamp::pendingSlots.shadeColors.post(pendingMux, data, len); }
 void postPendingBaseColorsJson(const char* data, size_t len)  { lamp::pendingSlots.baseColors.post(pendingMux, data, len); }
 void postPendingBrightness(int8_t level) { pendingBrightness = level; }
+void postPendingEditSession(uint8_t surfaceMask, bool open) {
+  pendingEditSession = static_cast<int16_t>((surfaceMask << 1) | (open ? 1 : 0));
+}
 void postPendingApplyEffectiveBrightness() { pendingApplyEffectiveBrightness = true; }
 // Single-bit post called from the NimBLE host task (Core 0) inside
 // ServerCallbacks::onDisconnect. NVS is NOT Core-0-safe, so
@@ -157,6 +175,8 @@ void postPendingWispClaim(const PendingWispClaim& src)                   { pendi
 void postPendingWispPaint(const PendingWispPaint& src)                   { pendingSlots.wispPaint.post(pendingMux, src); }
 void postPendingCommand(const PendingCommand& src)                       { pendingSlots.command.post(pendingMux, src); }
 void postPendingEvent(const PendingEvent& src)                           { pendingSlots.event.post(pendingMux, src); }
+void postPendingColorQuery(const PendingColorQuery& src)                 { pendingSlots.colorQuery.post(pendingMux, src); }
+void postPendingColorInfo(const PendingColorInfo& src)                   { pendingSlots.colorInfo.post(pendingMux, src); }
 void postPendingFirmwareControl(const PendingFirmwareControl& src)       { pendingSlots.firmwareControl.post(pendingMux, src); }
 
 // Schedules a future triggerInvocation without each call site having to
@@ -206,6 +226,7 @@ lamp::ExpressionManager expressionManager;
 lamp::ExpressionObserverRegistry expressionObserverRegistry;
 lamp::Config config;
 lamp::MeshLink meshLink;
+lamp::SocialEchoObserver socialEchoObserver(config, expressionManager, meshLink);
 // Lamp-side OTA receiver. Bound to meshLink via
 // setFirmwareReceiver() in setup() so the WiFi recv path can hand
 // MSG_FW_CHUNK directly to handleChunkOnRecvTask (Core 0). OFFER/DONE
@@ -252,6 +273,31 @@ static std::vector<lamp::Color> jsonArrayToColors(JsonArray arr) {
   return colors;
 }
 
+static float roleAvgFullDutyMa(const std::vector<lamp::Color>& palette,
+                               uint8_t channels) {
+  return palette.empty() ? 0.0f
+                         : lamp::fullDutyMa(palette, channels) / palette.size();
+}
+
+// ponytail: palette-average anchor — steady (palette changes only on edit),
+// ballpark by design.
+static void recomputeDrawAnchors() {
+  const uint16_t totalPx =
+      static_cast<uint16_t>(shade.pixelCount) + base.pixelCount;
+  if (totalPx == 0) {
+    config.setDrawAnchors(0, 0);
+    return;
+  }
+  const float sum =
+      roleAvgFullDutyMa(config.base.broadcastColors(), s_baseChannels) *
+          base.pixelCount +
+      roleAvgFullDutyMa(config.shade.broadcastColors(), s_shadeChannels) *
+          shade.pixelCount;
+  config.setDrawAnchors(
+      static_cast<uint16_t>(lamp::demandMa(sum, 0, totalPx)),
+      static_cast<uint16_t>(lamp::demandMa(sum, 255, totalPx)));
+}
+
 // renderShadeColors / renderBaseColors: the render-only core, exposed in
 // namespace lamp so apply_shade_colors.hpp and apply_base_colors.hpp can
 // call them without pulling in the rest of this file. Callers handle the
@@ -268,9 +314,13 @@ void renderShadeColors(JsonArray arr) {
   shadeConfiguratorBehavior.beginFade(gradient, lamp::kDefaultFadeMs);
   lamp::overrides.shade.rebaseline(gradient);
   // Reflect the new shade in the BLE adv so phones and v1 neighbours see it
-  // without connecting. Use the first stop (shade in this build is a single
-  // color).
-  bt.setAdvertisedColors(config.base.broadcastColors()[config.base.ac], colors[0]);
+  // without connecting. Base carries its blended identity color; shade is a
+  // single stop.
+  const auto& baseStops = config.base.broadcastColors();
+  bt.setAdvertisedColors(
+      lampos::led::blendedIdentity(baseStops.data(), baseStops.size()),
+      colors[0]);
+  ::recomputeDrawAnchors();
 }
 
 // renderBaseColors: counterpart to renderShadeColors. As above, callers
@@ -286,10 +336,11 @@ void renderBaseColors(JsonArray arr) {
   // needed here.
   baseConfiguratorBehavior.beginFade(gradient, lamp::kDefaultFadeMs);
   lamp::overrides.base.rebaseline(gradient);
-  // Reflect the new base in the BLE adv; the first stop is what the adv
-  // carries (the user's active-stop index isn't known from this drain, and
-  // bt.begin used the first stop initially).
-  bt.setAdvertisedColors(colors[0], config.shade.broadcastColors()[0]);
+  // Reflect the new base in the BLE adv as its blended identity color.
+  bt.setAdvertisedColors(
+      lampos::led::blendedIdentity(colors.data(), colors.size()),
+      config.shade.broadcastColors()[0]);
+  ::recomputeDrawAnchors();
 }
 }  // namespace lamp
 
@@ -429,24 +480,20 @@ static void onWifiStateChanged() {
 lamp::FrameBuffer* lamp::Lamp::shadeFb() { return &::shade; }
 lamp::FrameBuffer* lamp::Lamp::baseFb()  { return &::base; }
 
+void lamp::Lamp::recomputeEffectiveCeiling() {
+  s_hwMaxBrightness =
+      lamp::effectiveCeiling(hw_.maxBrightness, ::config.lamp.brightnessCeiling);
+}
+
 // Per-lamp seed for the first-boot color roll. The efuse base MAC is unique
 // per unit and readable this early in boot, before wifi::begin() brings RF up
-// and makes esp_random() actually random — seeding from esp_random() here
+// and makes esp_random() actually random; seeding from esp_random() here
 // would hand every lamp the same value and roll every lamp the same color.
 static uint32_t seedFromMac() {
   uint8_t mac[6] = {0};
   esp_read_mac(mac, ESP_MAC_WIFI_STA);
   return (uint32_t(mac[2]) << 24) | (uint32_t(mac[3]) << 16) |
          (uint32_t(mac[4]) << 8) | uint32_t(mac[5]);
-}
-
-static uint16_t neoFmt(lamp::ByteOrder b) {
-  switch (b) {
-    case lamp::ByteOrder::GRBW: return NEO_GRBW;
-    case lamp::ByteOrder::GRB:  return NEO_GRB;
-    case lamp::ByteOrder::BGR:  return NEO_BGR;
-  }
-  return NEO_GRBW;
 }
 
 void lamp::Lamp::setup() {
@@ -462,10 +509,10 @@ void lamp::Lamp::setup() {
       delay(200);
     }
   }
-  // Seed the file-scope brightness cap from the variant's HwConfig so
-  // free functions (applyEffectiveBrightness, applyRemoteOpLocal) use
-  // the correct ceiling without importing a variant header.
-  s_hwMaxBrightness = hw_.maxBrightness;
+  // Seed the file-scope brightness cap from the variant's HwConfig narrowed by
+  // the user ceiling so free functions (applyEffectiveBrightness,
+  // applyRemoteOpLocal) use the correct ceiling without importing a variant header.
+  recomputeEffectiveCeiling();
 
   // `config` as an unqualified name inside a Lamp member function resolves to
   // Lamp::config() (the accessor method). Bring the file-scope global into
@@ -475,6 +522,10 @@ void lamp::Lamp::setup() {
 #ifdef LAMP_DEBUG
   Serial.begin(115200);
 #endif
+  if (esp_reset_reason() == ESP_RST_BROWNOUT) {
+    Serial.println(
+        "[power] brownout reset — supply budget constants may be mis-sized");
+  }
   lamp_register_panic_handler();
 
   config = lamp::Config(&configStore);
@@ -531,18 +582,27 @@ void lamp::Lamp::setup() {
   delay(kRadioStaggerMs);
   wifi::begin();
   wifi::setStateChangeCallback(onWifiStateChanged);
-  wifi::setHomeModeEnabledGetter([]() { return config.homeMode.enabled; });
+  wifi::setHomeModeEnabledGetter([]() {
+    return config.homeMode.enabled
+        && config.homeMode.networkBound
+        && !config.homeMode.ssid.empty();
+  });
   // Suspend WiFi background scans while OTA is in flight: the scan hops the
   // radio across 11+ channels for ~5s and silently drops ESP-NOW unicast
   // (both OFFER→lamp AND lamp→wisp ACCEPT/REQ) during that window.
   wifi::setOtaInProgressGetter([]() { return firmwareReceiver.isInProgress(); });
 
   delay(kRadioStaggerMs);
-  bt.begin(config.lamp.name, config.base.broadcastColors()[config.base.ac],
+  const auto& baseStops = config.base.broadcastColors();
+  bt.begin(config.lamp.name,
+           lampos::led::blendedIdentity(baseStops.data(), baseStops.size()),
            config.shade.broadcastColors()[0], config.lamp.setup);
 
 #if LAMP_WEBAPP_ENABLED
-  if (config.lamp.webappEnabled) webapp::begin(config);
+  if (lamp::any(featuresEnabled(), lamp::Features::WebApp) && config.lamp.webappEnabled) {
+    webapp::begin(config);
+    lamp::logHeap("webapp");
+  }
 #endif
 
   // Build role FrameBuffers. Each role groups its hw_.strips in declaration
@@ -553,24 +613,49 @@ void lamp::Lamp::setup() {
   // a custom variant sets an explicit per-strip count.
   auto buildRole = [&](lamp::Surface role, uint8_t configPx,
                        const std::vector<lamp::Color>& colors,
+                       const std::string& configByteOrder,
                        lamp::FrameBuffer& fb) {
+    // Config byteOrder overrides the StripSpec default for every strip in the
+    // role; empty or unrecognized falls back to the compile-time default.
     std::vector<lamp::StripSegment> segments;
     uint16_t offset = 0;
     for (const auto& s : hw_.strips) {
       if (s.role != role) continue;
       const uint16_t px = s.pixelCount ? s.pixelCount : configPx;
+      lamp::ByteOrder order = s.byteOrder;
+      byteOrderFromString(configByteOrder.c_str(), order);
       auto* driver =
-          new Adafruit_NeoPixel(px, s.pin, neoFmt(s.byteOrder) + NEO_KHZ800);
-      segments.push_back({driver, s.name, offset, px});
+          new Adafruit_NeoPixel(px, s.pin, lampos::led::neoPixelFormat(order) + NEO_KHZ800);
+      segments.push_back({driver, s.name, offset, px, s.reversed});
       offset += px;
     }
     fb.begin(lamp::buildGradientWithStops(offset, colors), std::move(segments));
   };
-  buildRole(lamp::Surface::Shade, config.shade.sumPx(), config.shade.broadcastColors(), shade);
-  buildRole(lamp::Surface::Base,  config.base.sumPx(),  config.base.broadcastColors(),  base);
+  buildRole(lamp::Surface::Shade, config.shade.sumPx(), config.shade.broadcastColors(), config.shade.byteOrder, shade);
+  buildRole(lamp::Surface::Base,  config.base.sumPx(),  config.base.broadcastColors(),  config.base.byteOrder,  base);
+
+  // Governor sense inputs: per-role transmitted channel count resolved with
+  // the same config-over-StripSpec byteOrder fallback buildRole uses.
+  auto roleChannels = [&](lamp::Surface role,
+                          const std::string& configByteOrder) -> uint8_t {
+    for (const auto& s : hw_.strips) {
+      if (s.role != role) continue;
+      lamp::ByteOrder order = s.byteOrder;
+      byteOrderFromString(configByteOrder.c_str(), order);
+      return lampos::led::activeChannelCount(order);
+    }
+    return 3;
+  };
+  s_shadeChannels = roleChannels(lamp::Surface::Shade, config.shade.byteOrder);
+  s_baseChannels = roleChannels(lamp::Surface::Base, config.base.byteOrder);
+  s_govPixelCount = static_cast<uint16_t>(shade.pixelCount) + base.pixelCount;
+  s_powerGovernor.begin(hw_.supplyBudgetMa, millis());
+  compositor.preFlushHook = &governFrame;
+  ::recomputeDrawAnchors();
 
   // Cap every segment at maxBrightness before the first content flush, else a
-  // strip runs at the NeoPixel full-bright default.
+  // strip runs at the NeoPixel full-bright default. Runs after the governor's
+  // begin() so the boot-hold ceiling reaches the drivers here.
   applyEffectiveBrightness();
 
   initBehaviors(featuresEnabled(), *this);
@@ -607,6 +692,12 @@ void lamp::Lamp::setup() {
   // Bring up ESP-NOW grid presence (HELLO + COLORS). Independent of home
   // WiFi; runs on whatever channel the radio is on. See lamp_protocol.hpp.
   meshLink.begin(&config);
+  uint8_t ownMac[6];
+  meshLink.getMyMac(ownMac);
+  char ownMacStr[18];
+  lamp::formatBdAddr(ownMac, ownMacStr);
+  config.setLampId(ownMacStr);
+  lamp::logHeap("mesh");
   // Wire the ESP-NOW transport adapter onto the FirmwareReceiver. The
   // mesh path (wisp → lamp MSG_FW_*) emits via this transport. The BLE
   // transport is late-bound by ble_control::setFirmwareReceiver() below
@@ -630,6 +721,10 @@ void lamp::Lamp::setup() {
   // FS-image OTA: a second receiver/distributor pair targeting the spiffs
   // partition (shares the mesh transport; cross-OTA guard prevents overlap).
   fs_ota::begin(&meshFwTransport, &firmwareReceiver, &lamp::firmwareDistributor);
+
+  // Launch the one streaming task shared by both distributors, now that both
+  // have registered.
+  lamp::FirmwareDistributor::startSharedStreaming();
 
   // Arm the post-OTA self-health timer. esp_ota_get_state_partition returns
   // the ota-image-state of the running partition. A freshly-OTA'd image
@@ -660,8 +755,11 @@ void lamp::Lamp::setup() {
   // remote cascade arrives for an expression type not configured on this
   // lamp, so receivers don't need to pre-configure every type.
   expressionManager.setCompositor(&compositor);
+  // Expression mirror: replay a warm peer's triggered expression locally.
+  expressionObserverRegistry.registerObserver(&socialEchoObserver);
   // One-shot reservation so the loop-task drain never reallocates mid-frame.
   pendingTriggers.reserve(MAX_PENDING_TRIGGERS);
+  lamp::logHeap("boot");
 }
 
 // Drain order matters: the per-slot drains below run in a fixed sequence
@@ -688,11 +786,58 @@ void lamp::Lamp::setup() {
 //     starting on the same tick it arrived.
 //
 // See each drain helper's body for the per-slot detail.
+
+// Compositor pre-flush hook, Core 1. Prices the frame both surfaces are
+// about to push; a clamp re-mins the drivers here so the over-budget frame
+// never reaches the strip.
+static void governFrame() {
+  const uint32_t nowMs = millis();
+  const float fullDuty = lamp::fullDutyMa(shade.buffer, s_shadeChannels) +
+                         lamp::fullDutyMa(base.buffer, s_baseChannels);
+  bool radioBusy = firmwareReceiver.isInProgress() ||
+                   lamp::firmwareDistributor.isInProgress() ||
+                   lamp::ota_quiet_mode::isQuiet() ||
+                   ble_control::isClientConnected();
+#if LAMP_WEBAPP_ENABLED
+  radioBusy = radioBusy || webapp::hasClient();
+#endif
+#ifdef LAMP_DEBUG
+  const auto prevGovState = s_powerGovernor.state();
+#endif
+  const bool clamped =
+      s_powerGovernor.senseFrame(nowMs, fullDuty, lamp::requestedStripLevel(),
+                                 s_govPixelCount, radioBusy);
+  if (clamped) {
+    lamp::setAllStripsBrightness(lamp::requestedStripLevel());
+  }
+#ifdef LAMP_DEBUG
+  if (clamped && prevGovState != lamp::PowerGovernor::State::Clamped) {
+    Serial.printf("[gov] clamp demand=%.0f budget=%u ceiling=%u\n",
+                  s_powerGovernor.lastDemandMa(),
+                  (unsigned)s_powerGovernor.pixelBudgetMa(),
+                  (unsigned)s_powerGovernor.ceiling(nowMs));
+  }
+#endif
+}
+
 void lamp::Lamp::tick() {
   // `config` local reference so the bt.tickAdvertising / maybeFlushDispositions
   // / flushDispositionsNow calls below can use it unqualified. Drain helpers
   // each re-bind locally where they need it.
   lamp::Config& config = ::config;
+
+#ifdef LAMP_DEBUG
+  pollSerialCommands();
+  {
+    static uint32_t s_nextStackLogMs = 0;
+    const uint32_t nowMs = millis();
+    if (static_cast<int32_t>(nowMs - s_nextStackLogMs) >= 0) {
+      s_nextStackLogMs = nowMs + 10000;
+      Serial.printf("[loop] stack HWM: %u bytes free\n",
+                    (unsigned)uxTaskGetStackHighWaterMark(nullptr));
+    }
+  }
+#endif
 
   // Drain pending BLE actions on the loop task (Core 1). All heap allocation
   // (JsonDocument parse, std::vector, gradient construction) happens here,
@@ -730,6 +875,7 @@ void lamp::Lamp::tick() {
   }
 
   drainBrightness();
+  drainEditSession();
 
   drainShadeColors();
   drainBaseColors();
@@ -761,6 +907,8 @@ void lamp::Lamp::tick() {
   drainWispOp();
   drainWispStatus();
   drainCommand();
+  drainColorQuery();
+  drainColorInfo();
   drainEvent();
   drainFirmwareControl();
 
@@ -789,7 +937,7 @@ void lamp::Lamp::tick() {
         lamp::brightnessFadeSource() != lamp::brightnessFadeTarget()) {
       const uint8_t level = computeUserBrightnessNow(now);
       lamp::setAllStripsBrightness(
-          lamp::calculateBrightnessLevel(hw_.maxBrightness, level));
+          lamp::calculateBrightnessLevel(s_hwMaxBrightness, level));
       if (level == lamp::brightnessFadeTarget()) {
         lamp::settleBrightnessFade();
       }
@@ -823,6 +971,8 @@ void lamp::Lamp::tick() {
       }
     }
   }
+
+  socialEchoObserver.tick(millis());
 
   wifi::tick();
 #if LAMP_WEBAPP_ENABLED
@@ -864,6 +1014,36 @@ void lamp::Lamp::tick() {
   ble_control::tick();
 
   compositor.tick();
+
+  // Demand sensing is per frame in governFrame (compositor pre-flush hook);
+  // this block only advances the boot ramp and the paced release, plus the
+  // pump check every loop tick so the 400 ms ceiling glide isn't quantized
+  // to the 1 s pace.
+  {
+    const uint32_t nowMs = millis();
+#ifdef LAMP_DEBUG
+    const auto prevGovState = s_powerGovernor.state();
+#endif
+    s_powerGovernor.tick(nowMs);
+#ifdef LAMP_DEBUG
+    if (prevGovState == lamp::PowerGovernor::State::Clamped &&
+        s_powerGovernor.state() != lamp::PowerGovernor::State::Clamped) {
+      Serial.printf("[gov] release demand=%.0f\n",
+                    s_powerGovernor.lastDemandMa());
+    }
+#endif
+    if (s_powerGovernor.consumePendingApply()) {
+      if (ota_quiet_mode::isQuiet()) {
+        // pendingApplyEffectiveBrightness is held off during quiet mode (see
+        // the drain at the top of tick); a direct re-min applies the new
+        // ceiling without a baseline recompute or crowd-dim snap, so the
+        // governor still protects the flash-write window.
+        lamp::setAllStripsBrightness(lamp::requestedStripLevel());
+      } else {
+        pendingApplyEffectiveBrightness = true;
+      }
+    }
+  }
 
   // Reap transient one-shot expressions (created by triggerInvocation when
   // a remote cascade arrived) whose animations have finished. AFTER tick so

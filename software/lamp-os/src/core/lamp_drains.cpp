@@ -6,6 +6,7 @@
 
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "behaviors/configurator.hpp"
 #include "behaviors/fade_out.hpp"
@@ -18,11 +19,12 @@
 #include "components/firmware/firmware_receiver.hpp"
 #include "components/firmware/fs_ota.hpp"
 #include "components/network/ble/ble_control.hpp"
-#include "components/network/mesh/nearby_lamps.hpp"
+#include "components/network/mesh/lamp_roster.hpp"
 #include "components/network/mesh/mesh_link.hpp"
 #include "components/network/transport/wifi.hpp"
 #include "config/config.hpp"
 #include "components/firmware/ota_quiet_mode.hpp"
+#include "core/compositor.hpp"
 #include "core/override_aggregate.hpp"
 #include "core/pending_slot_aggregate.hpp"
 
@@ -58,11 +60,28 @@ void Lamp::drainBrightness() {
                   (unsigned)level, (unsigned long)micros(),
                   (int)ble_control::isHomeModePageActive());
 #endif
-    lamp::apply::brightnessToConfig(level, ble_control::isHomeModePageActive(), hw_.maxBrightness);
+    lamp::apply::brightnessToConfig(level, ble_control::isHomeModePageActive(), s_hwMaxBrightness);
     // Live-preview drains update in-memory config but not the section cache.
     // The cache reflects the persisted snapshot; only commit/settings_blob
     // paths invalidate it.
   }
+}
+
+// Routes the web edit_session signal to the same operatorEditing setters
+// the BLE CHAR_EDIT_SESSION path uses, so an open base/shade color editor
+// pauses expressions (and wisp paint) on that surface.
+void Lamp::drainEditSession() {
+  if (pendingEditSession < 0) return;
+  const int16_t packed = pendingEditSession;
+  pendingEditSession = -1;
+  const uint8_t surface = static_cast<uint8_t>(packed >> 1);
+  const bool open = (packed & 0x01) != 0;
+  if (surface & 0x01) lamp::overrides.base.setOperatorEditing(open);
+  if (surface & 0x02) lamp::overrides.shade.setOperatorEditing(open);
+#ifdef LAMP_DEBUG
+  Serial.printf("[drain] editSession surface=0x%02x %s\n",
+                surface, open ? "open" : "closed");
+#endif
 }
 
 // Live-preview; updates config.shade.colors without NVS persist.
@@ -89,8 +108,7 @@ void Lamp::drainShadeColors() {
         lamp::apply::shadeColorsToConfig(doc.as<JsonArray>());
       }
     }
-    shadeConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
-    baseConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
+    lamp::stampConfiguratorActivity(millis());
   }
 }
 
@@ -113,8 +131,7 @@ void Lamp::drainBaseColors() {
       // CHAR_COMMIT can persist the user's color choice.
       lamp::apply::baseColorsToConfig(doc.as<JsonArray>());
     }
-    shadeConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
-    baseConfiguratorBehavior.lastWebSocketUpdateTimeMs = millis();
+    lamp::stampConfiguratorActivity(millis());
   }
 }
 
@@ -216,7 +233,9 @@ void Lamp::drainCommit() {
 void Lamp::drainSettingsBlob() {
   lamp::Config& config = ::config;
   if (lamp::pendingSlots.settingsBlob.valid) {
-    char buf[lamp::kPendingJsonOp + 1];
+    // static: 2 KB is too big for the loop-task stack; this drain is the
+    // slot's only consumer and runs only on Core 1.
+    static char buf[lamp::kPendingSettingsBlob + 1];
     uint16_t len = lamp::pendingSlots.settingsBlob.drain(pendingMux, buf);
 
 #ifdef LAMP_DEBUG
@@ -254,7 +273,9 @@ void Lamp::drainSettingsBlob() {
           "[loop] settingsBlob: OTA in progress, discarding write");
 #endif
     } else {
-      bool wantsReboot = lamp::apply::settingsBlobLocal(incomingDoc.as<JsonObject>(), hw_.maxBrightness);
+      bool wantsReboot = lamp::apply::settingsBlobLocal(incomingDoc.as<JsonObject>(), s_hwMaxBrightness);
+      recomputeEffectiveCeiling();  // new brightnessCeiling takes effect without reboot
+      reapplyHomeModeState();
       bool persisted = config.persistConfig("settings_blob");
       config.invalidateAllSections();
       ble_control::notifyStateChange();
@@ -388,7 +409,7 @@ void Lamp::drainOverrideColors() {
       // Cache the wisp MAC before apply() so the transition callback's
       // notifyWispStatus sees non-empty status immediately.
       if (cmd.sourceKind == lamp_protocol::OverrideSource::Wisp) {
-        lamp::nearbyLamps.cacheWispMacFromPaint(cmd.sourceMac);
+        lamp::lampRoster.cacheWispMacFromPaint(cmd.sourceMac);
       }
       // BaseAndShade: colors[0] to base, colors[1] to shade.
       // If numColors < 2 only base is updated.
@@ -488,16 +509,20 @@ void Lamp::drainWispHello() {
       Serial.printf("[loop] drain wispHello flags=0x%02X v=0x%08X\n",
                     (unsigned)cmd.flags, (unsigned)cmd.wispVersion);
 #endif
-      lamp::nearbyLamps.cacheWispHello(cmd.sourceMac, cmd.wispVersion, cmd.flags,
+      lamp::lampRoster.cacheWispHello(cmd.sourceMac, cmd.wispVersion, cmd.flags,
                                        cmd.paletteIdPrefix, cmd.carriedFwChannel,
                                        cmd.carriedFwVersion);
-      // Hold the override while the wisp is actively painting (PAINT_MODE) so a
-      // long drift fade doesn't trip the 60s watchdog; paint:off still reverts.
-      // ponytail: single-wisp fleet — scope to the painter's MAC if a 2nd ships.
+      // Hold the override while the painter is actively painting (PAINT_MODE)
+      // so a long drift fade doesn't trip the 60s watchdog; paint:off still
+      // reverts. Scoped to the painter's MAC so a second wisp's hello can't
+      // hold another wisp's paint.
       if (cmd.flags & lamp_protocol::WISP_HELLO_FLAG_PAINT_MODE) {
         const uint32_t nowMs = millis();
-        if (lamp::overrides.base.isWispActive()) lamp::overrides.base.touchApply(nowMs);
-        if (lamp::overrides.shade.isWispActive()) lamp::overrides.shade.touchApply(nowMs);
+        if (lamp::lampRoster.touchWispPainter(cmd.sourceMac, nowMs)) {
+          if (lamp::overrides.base.isWispActive()) lamp::overrides.base.touchApply(nowMs);
+          if (lamp::overrides.shade.isWispActive()) lamp::overrides.shade.touchApply(nowMs);
+          if (lamp::overrides.brightness.isWispActive()) lamp::overrides.brightness.touchApply(nowMs);
+        }
       }
     }
   }
@@ -514,7 +539,7 @@ void Lamp::drainWispPalette() {
                     cmd.sourceMac[0], cmd.sourceMac[1], cmd.sourceMac[2],
                     cmd.sourceMac[3], cmd.sourceMac[4], cmd.sourceMac[5]);
 #endif
-      lamp::nearbyLamps.cacheWispPalette(cmd.sourceMac, cmd.rgb, cmd.count);
+      lamp::lampRoster.cacheWispPalette(cmd.sourceMac, cmd.rgbw, cmd.count);
       ble_control::notifyWispStatus();
     }
   }
@@ -525,8 +550,10 @@ void Lamp::drainWispClaim() {
   {
     lamp::PendingWispClaim cmd;
     if (lamp::pendingSlots.wispClaim.drain(pendingMux, cmd)) {
-      lamp::nearbyLamps.cacheWispClaim(cmd.sourceMac, cmd.lampMacs, cmd.count,
-                                       millis());
+      uint8_t selfMac[6];
+      meshLink.getMyMac(selfMac);
+      lamp::lampRoster.cacheWispClaim(cmd.sourceMac, cmd.lampMacs, cmd.count,
+                                       selfMac, millis());
     }
   }
 }
@@ -536,7 +563,7 @@ void Lamp::drainWispPaint() {
   {
     lamp::PendingWispPaint cmd;
     if (lamp::pendingSlots.wispPaint.drain(pendingMux, cmd)) {
-      lamp::nearbyLamps.cacheWispPaint(cmd.sourceMac, cmd.entries, cmd.count,
+      lamp::lampRoster.cacheWispPaint(cmd.sourceMac, cmd.entries, cmd.count,
                                        millis());
     }
   }
@@ -575,7 +602,7 @@ void Lamp::drainWispStatus() {
                   srcMac[3], srcMac[4], srcMac[5]);
 #endif
     if (len > 0) {
-      lamp::nearbyLamps.cacheWispStatus(srcMac, buf, len);
+      lamp::lampRoster.cacheWispStatus(srcMac, buf, len);
       ble_control::notifyWispStatus();
     }
   }
@@ -583,7 +610,9 @@ void Lamp::drainWispStatus() {
 
 void Lamp::drainCommand() {
   {
-    lamp::PendingCommand cmd;
+    // static: the 1444 B payload is too big for the loop-task stack; this drain
+    // is the slot's only consumer and runs only on Core 1.
+    static lamp::PendingCommand cmd;
     if (lamp::pendingSlots.command.drain(pendingMux, cmd)) {
       JsonDocument doc;
       if (deserializeJson(doc, cmd.payload, cmd.payloadLen) != DeserializationError::Ok) return;
@@ -595,6 +624,53 @@ void Lamp::drainCommand() {
         lamp::enqueueDelayedInvocation(inv, cmd.sourceMac, inv.delayMs);
       }
     }
+  }
+}
+
+void Lamp::drainColorQuery() {
+  lamp::PendingColorQuery q;
+  if (!lamp::pendingSlots.colorQuery.drain(pendingMux, q)) return;
+
+  lamp::Config& config = ::config;
+
+  uint8_t baseStops[lamp_protocol::COLOR_INFO_MAX_STOPS * 4];
+  uint8_t shadeStops[lamp_protocol::COLOR_INFO_MAX_STOPS * 4];
+
+  auto pack = [](const std::vector<Color>& colors, uint8_t* out) -> uint8_t {
+    uint8_t n = 0;
+    for (const Color& c : colors) {
+      if (n >= lamp_protocol::COLOR_INFO_MAX_STOPS) break;
+      out[n * 4 + 0] = c.r; out[n * 4 + 1] = c.g;
+      out[n * 4 + 2] = c.b; out[n * 4 + 3] = c.w;
+      ++n;
+    }
+    return n;
+  };
+
+  const uint8_t baseCount  = pack(config.base.broadcastColors(),  baseStops);
+  const uint8_t shadeCount = pack(config.shade.broadcastColors(), shadeStops);
+
+  meshLink.sendColorInfo(q.sourceMac, baseStops, baseCount,
+                         shadeStops, shadeCount);
+}
+
+void Lamp::drainColorInfo() {
+  lamp::PendingColorInfo info;
+  if (!lamp::pendingSlots.colorInfo.drain(pendingMux, info)) return;
+  std::vector<Color> baseStops;
+  baseStops.reserve(info.baseCount);
+  for (uint8_t i = 0; i < info.baseCount; ++i) {
+    baseStops.emplace_back(info.baseStops[i * 4 + 0], info.baseStops[i * 4 + 1],
+                           info.baseStops[i * 4 + 2], info.baseStops[i * 4 + 3]);
+  }
+  std::vector<Color> shadeStops;
+  shadeStops.reserve(info.shadeCount);
+  for (uint8_t i = 0; i < info.shadeCount; ++i) {
+    shadeStops.emplace_back(info.shadeStops[i * 4 + 0], info.shadeStops[i * 4 + 1],
+                            info.shadeStops[i * 4 + 2], info.shadeStops[i * 4 + 3]);
+  }
+  if (auto* g = compositor.behaviorContext().greeting) {
+    g->onColorInfo(info.sourceMac, baseStops, shadeStops);
   }
 }
 

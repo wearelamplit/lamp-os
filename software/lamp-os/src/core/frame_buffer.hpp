@@ -15,6 +15,7 @@ struct StripSegment {
   const char* name;
   uint16_t offset;     // start index in the logical buffer
   uint16_t pixelCount;
+  bool reversed = false;
 };
 
 class FrameBuffer {

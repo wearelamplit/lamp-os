@@ -4,22 +4,22 @@
 
 namespace lamp {
 
-// Forward declarations — keep this header dependency-light so it can be
+// Forward declarations keep this header dependency-light so it can be
 // included from animated_behavior.hpp without dragging in compositor/manager
 // definitions.
 class Compositor;
 class ConfiguratorBehavior;
 class ExpressionManager;
 class FrameBuffer;
-class NearbyLamps;
+class LampRoster;
 struct Greetable;
 
 /**
- * @brief Per-behavior context wired by the Compositor at register time.
- *        The Compositor owns one instance; every behavior it registers points
- *        at that single instance. Mutating a field (e.g. ExpressionManager
- *        wiring up the frame buffer list after begin()) is observed by every
- *        behavior without re-pointing.
+ * Per-behavior context wired by the Compositor at register time.
+ * The Compositor owns one instance; every behavior it registers points
+ * at that single instance. Mutating a field (e.g. ExpressionManager
+ * wiring up the frame buffer list after begin()) is observed by every
+ * behavior without re-pointing.
  */
 struct BehaviorContext {
   Compositor* compositor = nullptr;
@@ -36,9 +36,9 @@ struct BehaviorContext {
   ConfiguratorBehavior* shadeConfigurator = nullptr;
   // Mesh identity surface for custom behaviors. Wired by the framework
   // during boot before any AnimatedBehavior::control() runs. Behaviors
-  // must null-check (consistent with existing field policy —
+  // must null-check (consistent with existing field policy;
   // expressionManager nullability is the precedent).
-  NearbyLamps* nearbyLamps = nullptr;
+  LampRoster* lampRoster = nullptr;
   // Active greeting behavior, or null when the lamp has none. The triggerGreet
   // handler routes here so dispatch never switches on lamp type.
   Greetable* greeting = nullptr;

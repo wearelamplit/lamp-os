@@ -1,6 +1,6 @@
 #pragma once
 
-// PendingTypedSlot<T> — single-slot zero-allocation post/drain for POD
+// PendingTypedSlot<T> is a single-slot zero-allocation post/drain for POD
 // payloads. Mirrors PendingJsonSlot's discipline (mux-guarded write,
 // single-slot semantics, newest writer wins) but takes a copyable typed
 // payload instead of a byte buffer.
@@ -13,7 +13,7 @@
 //
 // Contract:
 //   - post(mux, src) : copies src into payload under portMUX, sets valid.
-//                      Returns true (always — the bounds check is on T
+//                      Always returns true (the bounds check is on T
 //                      itself, which is required to be sized at compile
 //                      time). Newest writer wins.
 //   - drain(mux, out): if valid, copies payload into out, clears valid,
@@ -21,7 +21,7 @@
 //                      touching out.
 //
 // T MUST be trivially copyable so the memcpy semantics are well-defined
-// across the portMUX boundary. We don't static_assert that here so this
+// across the portMUX boundary. It isn't static_asserted here so this
 // template stays usable from the native test rig where TestMux replaces
 // portMUX_TYPE; the production wire-payload types (PendingOverrideColors,
 // PendingWispHello, etc.) are all POD-by-construction.

@@ -7,8 +7,10 @@
 
 #include "core/lamp.hpp"
 #include "core/lamp_internal.hpp"
+#include "core/home_mode_logic.hpp"
 
 #include <Arduino.h>
+#include <algorithm>
 #include <cstdint>
 
 #include "components/firmware/ota_quiet_mode.hpp"
@@ -136,6 +138,10 @@ static float currentCrowdDimFactor(uint32_t nowMs) {
                  static_cast<float>(kCrowdDimFadeMs));
 }
 
+// Crowd-dim output floor, in percent. Deliberately above the space-dim floor
+// (20) — 30% is already very dim, and crowd-dim is a mood nudge, not a shutoff.
+static constexpr uint8_t kCrowdDimFloorPct = 30;
+
 uint8_t effectiveBrightness() {
   const uint8_t raw = calculateEffectiveHomeMode() ? config.homeMode.brightness
                                                    : config.lamp.brightness;
@@ -145,21 +151,20 @@ uint8_t effectiveBrightness() {
   // a target factor, interpolated between successive targets over
   // kCrowdDimFadeMs so deadband-crossing commits don't snap.
   const float factor = currentCrowdDimFactor(millis());
-  uint8_t afterCrowd;
-  if (factor >= 0.999f) {
-    afterCrowd = raw;
-  } else {
-    const float scaled = static_cast<float>(raw) * factor;
-    afterCrowd = static_cast<uint8_t>(scaled + 0.5f);
-    if (afterCrowd < 1) afterCrowd = 1;  // never blank from personality alone
-  }
-  return afterCrowd;
+  return lamp::applyDimFactor(raw, factor, kCrowdDimFloorPct);
 }
 
+static uint8_t s_requestedScaled = 0;
+
 namespace lamp {
+uint8_t requestedStripLevel() { return s_requestedScaled; }
+
 void setAllStripsBrightness(uint8_t scaledLevel) {
-  for (const auto& seg : shade.segments) if (seg.driver) seg.driver->setBrightness(scaledLevel);
-  for (const auto& seg : base.segments)  if (seg.driver) seg.driver->setBrightness(scaledLevel);
+  s_requestedScaled = scaledLevel;
+  const uint8_t applied =
+      std::min(scaledLevel, s_powerGovernor.ceiling(millis()));
+  for (const auto& seg : shade.segments) if (seg.driver) seg.driver->setBrightness(applied);
+  for (const auto& seg : base.segments)  if (seg.driver) seg.driver->setBrightness(applied);
 }
 
 void applyEffectiveBrightness() {
@@ -183,9 +188,11 @@ bool calculateEffectiveHomeMode() {
   if (ble_control::isClientConnected()) {
     return ble_control::isHomeModePageActive();
   }
-  return config.homeMode.enabled
-      && !config.homeMode.ssid.empty()
-      && wifi::homeSsidVisible(config.homeMode.ssid);
+  return lamp::effectiveHomeModeFromConfig(
+      config.homeMode.enabled,
+      config.homeMode.networkBound,
+      config.homeMode.ssid.empty(),
+      wifi::homeSsidVisible(config.homeMode.ssid));
 }
 
 // Single funnel for "home mode state may have changed". Keeps the
@@ -193,6 +200,8 @@ bool calculateEffectiveHomeMode() {
 // lamp transitions cleanly when preview flips or WiFi associates /
 // disassociates.
 void reapplyHomeModeState() {
+  compositor.setHomeModePolicy(config.homeMode.socialDisabled,
+                               config.homeMode.disabledExpressionTypes);
   compositor.setHomeMode(calculateEffectiveHomeMode());
   lamp::applyEffectiveBrightness();
 }

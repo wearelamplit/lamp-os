@@ -11,14 +11,22 @@
 #include "config/config.hpp"
 #include "config/nvs_config_store.hpp"
 #include "core/lamp.hpp"
-#include "core/lamp_variants.hpp"
+#include "lamp_variants.hpp"
 
 extern lamp::Config config;            // file-scope singleton, defined in lamp.cpp
 extern lamp::NvsConfigStore configStore;  // file-scope NVS store, defined in lamp.cpp
 
 static std::unique_ptr<lamp::Lamp> g_lamp;
 
+// Loop-task stack. Measured HWM peak ~4.4 KB; 7168 leaves ~2.7 KB headroom.
+SET_LOOP_TASK_STACK_SIZE(7168);
+
 void setup() {
+#ifdef LAMP_DEBUG
+  // Serial command ingress: a long command line must survive a loop stall
+  // (NVS persist blocks ~tens of ms); the 256-byte default ring tears it.
+  Serial.setRxBufferSize(2048);
+#endif
   Serial.begin(115200);
   // Small delay so the boot log isn't lost while the host opens the port.
   delay(50);

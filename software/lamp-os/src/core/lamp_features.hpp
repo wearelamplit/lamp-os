@@ -12,7 +12,8 @@ enum class Features : uint32_t {
   None                = 0,
   SocialBehavior      = 1u << 0,
   DefaultExpressions  = 1u << 1,  // load Expressions from NVS on boot
-  // Bits 2-4 unused.
+  WebApp              = 1u << 2,  // softAP web configurator
+  // Bits 3-4 unused.
   FadeOutBehavior     = 1u << 5,
   KnockoutBehavior    = 1u << 6,
   All                 = 0xFFFFFFFFu,

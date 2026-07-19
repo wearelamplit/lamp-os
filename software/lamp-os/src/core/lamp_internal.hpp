@@ -24,12 +24,11 @@
 #include "config/config.hpp"
 #include "config/nvs_config_store.hpp"
 #include "core/lamp.hpp"
+#include "core/power_governor.hpp"
 #include "expressions/expression_manager.hpp"
 #include "expressions/expression_observer.hpp"
 
-// ── File-scope statics owned by lamp.cpp ─────────────────────────────────
-
-// Per-pixel knockout staging slot — drain reads + clears, BLE callback
+// Per-pixel knockout staging slot. Drain reads + clears, BLE callback
 // fills under portMUX. Struct definition is small so it lives here in
 // full rather than as an opaque type.
 struct PendingKnockoutUpdate {
@@ -43,6 +42,11 @@ extern PendingKnockoutUpdate pendingKnockout;
 // Single-byte staging slot for CHAR_BRIGHTNESS writes. -1 = empty.
 extern volatile int8_t pendingBrightness;
 
+// Staging slot for a web edit_session signal. -1 = empty, else
+// (surfaceMask << 1) | open. Core 0 WS callback posts; Core 1 drain
+// routes to the ColorOverride operatorEditing setters.
+extern volatile int16_t pendingEditSession;
+
 // Set on Core 0 (BLE onDisconnect) to force a synchronous disposition
 // NVS commit on Core 1. Drain tick consumes.
 extern volatile bool pendingFlushDispositionsRequested;
@@ -51,6 +55,11 @@ extern volatile bool pendingFlushDispositionsRequested;
 // hw_.maxBrightness so file-scope helpers can use the right ceiling
 // without importing a variant header.
 extern uint8_t s_hwMaxBrightness;
+
+// Supply-budget governor. Senses demand per frame in the compositor
+// pre-flush hook (governFrame, lamp.cpp); its ceiling is the final min()
+// inside lamp::setAllStripsBrightness.
+extern lamp::PowerGovernor s_powerGovernor;
 
 // Cross-core mux shared by every pending slot post / drain pair.
 extern portMUX_TYPE pendingMux;
@@ -83,32 +92,44 @@ extern lamp::FadeOutBehavior shadeFadeOutBehavior;
 extern lamp::FadeOutBehavior baseFadeOutBehavior;
 extern lamp::KnockoutBehavior baseKnockoutBehavior;
 
-// ── File-scope helpers owned by lamp.cpp ─────────────────────────────────
-
 // Selects the transport-flavour branch inside applyRemoteOpRouted. The
 // BLE drain passes BLE so the router unwraps the targetMac envelope;
 // the ESP-NOW drain passes EspNow so the router dispatches directly
-// (the WiFi task already did the for-us / rebroadcast decision).
+// (the WiFi task already did the addressed-to-self / rebroadcast decision).
 enum class RemoteOpTransport { BLE, EspNow };
 
-// Unified cascade-receive router — see lamp.cpp definition for the
+// Unified cascade-receive router. See lamp.cpp definition for the
 // full BLE-vs-EspNow asymmetry note. Used by drainInboundOp / drainRemoteOp.
 void applyRemoteOpRouted(const char* payloadJson, size_t len,
                          const uint8_t srcMac[6],
                          RemoteOpTransport origin);
 
-// Test-panel action dispatcher — drainTestAction calls this with a parsed
+// Test-panel action dispatcher. drainTestAction calls this with a parsed
 // JsonDocument. Defined in lamp_test_action.cpp.
 void dispatchLampAction(JsonDocument& doc, unsigned long updateTimeMs);
 
-// ── Cross-TU function declarations ───────────────────────────────────────
-// These functions lost their `static` qualifier when extracted from lamp.cpp
-// into sibling TUs; they remain private by living only in this header.
+#ifdef LAMP_DEBUG
+// Bench serial command ingress. Reads newline-terminated commands from
+// Serial on the loop task and routes them into the same dispatch paths the
+// BLE characteristics use. Defined in lamp_test_action.cpp.
+void pollSerialCommands();
+#endif
+
+// Cross-TU declarations, private by living only in this header.
 
 // lamp_brightness.cpp
 bool calculateEffectiveHomeMode();
 uint8_t effectiveBrightness();
 void reapplyHomeModeState();
+namespace lamp {
+// Last pre-clamp level handed to setAllStripsBrightness. The governor's
+// engage/release hysteresis keys on this, and ceiling changes re-min it
+// without recomputing the brightness baseline.
+uint8_t requestedStripLevel();
+}  // namespace lamp
+
+// lamp_test_action.cpp (LAMP_DEBUG builds only)
+void pollSerialCommands();
 
 // lamp_behaviors.cpp
 void initBehaviors(lamp::Features features, lamp::Lamp& self);

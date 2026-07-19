@@ -61,7 +61,7 @@ void Compositor::tick() {
   // OTA quiet mode: skip the normal behavior pipeline, but paint the OTA
   // progress indicator (see ota_indicator.hpp) and flush so the user sees
   // a live "I'm in OTA right now" signal instead of a frozen frame.
-  // Indicator is cheap — fill + per-pixel scale — well within frame budget.
+  // Indicator is cheap (fill + per-pixel scale), well within frame budget.
   if (ota_quiet_mode::isQuiet()) {
     const uint32_t nowMs = millis();
 #ifdef LAMP_DEBUG
@@ -70,26 +70,30 @@ void Compositor::tick() {
     // Cap the indicator repaint to the normal pipeline's ~60 Hz frame rate
     // (MINIMUM_FRAME_DRAW_TIME_MS). FrameBuffer::flush() already content-dedups
     // and gates the strip write on the driver's reset window, so this is a CPU
-    // cap, not an LED-timing fix — without it the quiet branch re-runs the
+    // cap. Without it the quiet branch re-runs the
     // paint every loop iteration for no visible gain.
     if (millis() < lastDrawTimeMs + MINIMUM_FRAME_DRAW_TIME_MS) {
       return;
     }
     lastDrawTimeMs = millis();
-    for (size_t i = 0; i < frameBuffers.size(); i++) {
-      FrameBuffer* fb = frameBuffers[i];
-      if (!fb) continue;
-      // Each FB's first defaultColors entry is the surface's configured
-      // "primary" color (gradient stop 0). Use that as the local-side
-      // dim base for this surface so a multi-color gradient lamp still
-      // reads as itself during OTA.
-      // Empty defaultColors is a should-not-happen guard; fall back to a
-      // low-power blue, never full white, which would peg the PSU.
-      const Color localBase = fb->defaultColors.empty()
-                                  ? Color(0, 0, 255, 0)
-                                  : fb->defaultColors.front();
-      ota_indicator::paint(fb, localBase, nowMs);
+    const bool quietEntered = !otaQuietPainted_;
+    otaQuietPainted_ = true;
+    // frameBuffers[0]/[1] per lamp_behaviors.cpp ordering: {shade, base}.
+    // Visible (firmware) OTA paints the progress bar on shade and settles +
+    // pulses base; silent (FS) OTA settles both surfaces with no signaling.
+    if (!frameBuffers.empty() && frameBuffers[0]) {
+      FrameBuffer* shade = frameBuffers[0];
+      FrameBuffer* base = frameBuffers.size() > 1 ? frameBuffers[1] : nullptr;
+      if (ota_quiet_mode::visibleOtaActive()) {
+        const Color localBase = shade->defaultColors.empty()
+                                    ? Color(0, 0, 255, 0)
+                                    : shade->defaultColors.front();
+        ota_indicator::paint(shade, localBase, nowMs, base, quietEntered);
+      } else {
+        ota_indicator::paintSilent(shade, base, nowMs, quietEntered);
+      }
     }
+    if (preFlushHook) preFlushHook();
     for (size_t i = 0; i < frameBuffers.size(); i++) {
       if (frameBuffers[i]) frameBuffers[i]->flush();
     }
@@ -106,6 +110,7 @@ void Compositor::tick() {
 #endif
     return;
   }
+  otaQuietPainted_ = false;
 
 #ifdef LAMP_DEBUG
   // Non-quiet branch. If OTA is active here we have the bug — the
@@ -132,7 +137,7 @@ void Compositor::tick() {
 
     if (startupComplete) {
       for (size_t i = 0; i < behaviors.size(); i++) {
-        if (!homeMode || behaviors[i]->allowedInHomeMode) {
+        if (!homeMode || !homeModeSkips(behaviors[i])) {
           behaviors[i]->control();
           if (behaviors[i]->animationState != STOPPED) {
             behaviors[i]->draw();
@@ -162,6 +167,7 @@ void Compositor::tick() {
   if (behaviorsComputed && millis() >= lastDrawTimeMs + MINIMUM_FRAME_DRAW_TIME_MS) {
     lastDrawTimeMs = millis();
     behaviorsComputed = false;
+    if (preFlushHook) preFlushHook();
     for (size_t i = 0; i < frameBuffers.size(); i++) {
       frameBuffers[i]->flush();
     }
@@ -210,4 +216,22 @@ void Compositor::removeBehavior(AnimatedBehavior* b) {
     }
   }
 }
+
+void Compositor::setHomeModePolicy(bool socialDisabled, std::vector<std::string> disabledIds) {
+  if (homeSocialDisabled_ != socialDisabled || homeDisabledExprIds_ != disabledIds) {
+    homeSocialDisabled_ = socialDisabled;
+    homeDisabledExprIds_ = std::move(disabledIds);
+    behaviorsComputed = false;
+  }
+}
+
+bool Compositor::homeModeSkips(AnimatedBehavior* b) const {
+  if (b->isSocialBehavior()) return homeSocialDisabled_;
+  return homeModeExpressionSkips(b->homeModeExpressionId(), homeDisabledExprIds_);
+}
+
+bool Compositor::homeModeSkipsType(const std::string& type) const {
+  return homeMode && homeModeExpressionSkips(type.c_str(), homeDisabledExprIds_);
+}
+
 };  // namespace lamp

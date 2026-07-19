@@ -7,7 +7,7 @@
 namespace lamp {
 
 // Lightweight xorshift32 PRNG. ~8 bytes of state vs ~2.5 KB for std::mt19937
-// per instance — the expressions only need uniform integer ranges for animation
+// per instance. The expressions only need uniform integer ranges for animation
 // timing and color picks, never cryptographic quality. Seeded from esp_random()
 // at construction; the xorshift forbidden-zero case maps to a fixed nonzero
 // constant so the state is always usable.
@@ -16,7 +16,7 @@ class FastRng {
   FastRng() : s_(seed()) {}
 
   // Seed explicitly (forbidden-zero maps to a fixed nonzero constant). Use for
-  // a per-lamp deterministic stream — e.g. seeding from the efuse MAC at early
+  // a per-lamp deterministic stream, e.g. seeding from the efuse MAC at early
   // boot, before RF init makes esp_random() usable.
   explicit FastRng(uint32_t s) : s_(s ? s : 0xA3C59AC3u) {}
 

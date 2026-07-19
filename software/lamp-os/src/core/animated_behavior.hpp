@@ -36,7 +36,6 @@ class AnimatedBehavior {
   uint32_t frames = 60;
   uint32_t frame = 0;
   uint32_t currentLoop = 0;
-  bool allowedInHomeMode = true;
   AnimationState animationState = STOPPED;
 
   /**
@@ -52,62 +51,67 @@ class AnimatedBehavior {
   virtual ~AnimatedBehavior();
 
   /**
-   * @brief A virtual function to make changes to the frame buffer per frame
+   * Make changes to the frame buffer per frame.
    */
   virtual void draw();
 
   /**
-   * @brief A virtual function to do calculations and coordinate animation state
-   *        for each animation layer
+   * Do calculations and coordinate animation state for each animation layer.
    */
   virtual void control();
 
   /**
-   * @brief Pause the animation and redraw the paused frame
+   * Pause the animation and redraw the paused frame.
    */
   void pause();
 
   /**
-   * @brief Stop the animation at the last frame
+   * Stop the animation at the last frame.
    */
   void stop();
 
   /**
-   * @brief Play the animation in a loop
+   * Play the animation in a loop.
    */
   void play();
 
   /**
-   * @brief Play the animation for one full frame cycle
+   * Play the animation for one full frame cycle.
    */
   void playOnce();
 
   /**
-   * @brief Check for the last frame
    * @return true if the playhead is at the last frame of the animation
    */
   bool isLastFrame();
 
   /**
-   * @brief conclude the draw procedure and advance the internal frame counters
+   * Conclude the draw procedure and advance the internal frame counters.
    */
   void nextFrame();
 
   /**
-   * @brief Pixel count of the wired frame buffer, floored at 1 so callers can
-   *        divide or clamp without a null / zero guard.
+   * Pixel count of the wired frame buffer, floored at 1 so callers can
+   * divide or clamp without a null / zero guard.
    */
   uint16_t windowSize() const;
 
   /**
-   * @brief Wire a BehaviorContext into this behavior. Called by the Compositor
-   *        the moment a behavior is registered (via addBehavior or begin()),
-   *        and by ExpressionManager just before handing a transient to the
-   *        compositor. The context is owned by the Compositor; behaviors only
-   *        hold a non-owning pointer.
+   * Wire a BehaviorContext into this behavior. Called by the Compositor
+   * the moment a behavior is registered (via addBehavior or begin()),
+   * and by ExpressionManager just before handing a transient to the
+   * compositor. The context is owned by the Compositor; behaviors only
+   * hold a non-owning pointer.
    */
   void setBehaviorContext(BehaviorContext* ctx) { context_ = ctx; }
   BehaviorContext* behaviorContext() const { return context_; }
+
+  // Home-mode compositor queries. isSocialBehavior returns true on
+  // SocialBehavior; homeModeExpressionId returns the expression type id
+  // string on Expression subclasses (used to match disabledExpressionTypes),
+  // or nullptr for non-expression behaviors.
+  virtual bool isSocialBehavior() const { return false; }
+  virtual const char* homeModeExpressionId() const { return nullptr; }
 
  protected:
   // Non-owning. Null until the Compositor (or ExpressionManager, for

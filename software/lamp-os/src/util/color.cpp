@@ -3,7 +3,9 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <string>
+#include <vector>
 
 namespace lamp {
 // snprintf into a 10-byte stack buffer (9 chars + NUL), then construct
@@ -76,6 +78,52 @@ Color hexStringToColor(std::string inHexString) {
   output.w = w;
   return output;
 };
+
+std::vector<Color> parseColorList(const std::string& csv) {
+  std::vector<Color> out;
+  size_t pos = 0;
+  while (pos <= csv.size()) {
+    size_t comma = csv.find(',', pos);
+    size_t len   = (comma == std::string::npos ? csv.size() : comma) - pos;
+    std::string token = csv.substr(pos, len);
+    size_t start = token.find_first_not_of(' ');
+    size_t end   = token.find_last_not_of(' ');
+    if (start != std::string::npos)
+      out.push_back(hexStringToColor(token.substr(start, end - start + 1)));
+    if (comma == std::string::npos) break;
+    pos = comma + 1;
+  }
+  return out;
+}
+
+std::string colorsToPackedHex(const std::vector<Color>& colors) {
+  std::string out;
+  out.reserve(colors.size() * 8);
+  char buf[9];
+  for (const Color& c : colors) {
+    std::snprintf(buf, sizeof(buf), "%02x%02x%02x%02x", c.r, c.g, c.b, c.w);
+    out.append(buf, 8);
+  }
+  return out;
+}
+
+bool packedHexToColors(const char* s, std::vector<Color>& out) {
+  out.clear();
+  if (!s) return false;
+  const size_t len = std::strlen(s);
+  if (len % 8 != 0) return false;
+  out.reserve(len / 8);
+  for (size_t i = 0; i < len; i += 8) {
+    uint8_t r, g, b, w;
+    if (!parseHexByte(s + i, r) || !parseHexByte(s + i + 2, g) ||
+        !parseHexByte(s + i + 4, b) || !parseHexByte(s + i + 6, w)) {
+      out.clear();
+      return false;
+    }
+    out.push_back(Color(r, g, b, w));
+  }
+  return true;
+}
 
 uint32_t colorDistance(Color c1, Color c2) {
   return uint32_t(sqrtf(powf((c2.r - c1.r), 2) + powf((c2.g - c1.g), 2) + powf((c2.b - c1.b), 2) + powf(c2.w - c1.w, 2)));

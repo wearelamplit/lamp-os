@@ -19,7 +19,7 @@
 #include "behaviors/knockout.hpp"
 #include "behaviors/social.hpp"
 #include "components/network/ble/ble_control.hpp"
-#include "components/network/mesh/nearby_lamps.hpp"
+#include "components/network/mesh/lamp_roster.hpp"
 #include "components/transient_override/brightness_override.hpp"
 #include "components/transient_override/color_override.hpp"
 #include "core/animated_behavior.hpp"
@@ -42,11 +42,11 @@ using lamp::applyEffectiveBrightness;
 
 void lamp::Lamp::registerExpressions(lamp::ExpressionRegistry& reg) {
   if (!lamp::any(featuresEnabled(), lamp::Features::DefaultExpressions)) return;
-  reg.add(lamp::GlitchyExpression::descriptor());
-  reg.add(lamp::PulseExpression::descriptor());
-  reg.add(lamp::BreathingExpression::descriptor());
-  reg.add(lamp::ShiftyExpression::descriptor());
-  reg.add(lamp::SpottyExpression::descriptor());
+  reg.add(lamp::GlitchyExpression::classDescriptor());
+  reg.add(lamp::PulseExpression::classDescriptor());
+  reg.add(lamp::BreathingExpression::classDescriptor());
+  reg.add(lamp::ShiftyExpression::classDescriptor());
+  reg.add(lamp::SpottyExpression::classDescriptor());
 }
 
 void initBehaviors(lamp::Features features, lamp::Lamp& self) {
@@ -69,10 +69,7 @@ void initBehaviors(lamp::Features features, lamp::Lamp& self) {
     // change rides through settings_blob save + reboot, but the wiring
     // is per-instance regardless).
     shadeSocialBehavior.setConfig(&config);
-    // Pause social greetings in home mode (the user's "I'm home, calm down"
-    // mode). Compositor gates this via the homeMode flag, kept in sync by
-    // reapplyHomeModeState().
-    shadeSocialBehavior.allowedInHomeMode = false;
+    shadeSocialBehavior.setMeshLink(&meshLink);
     compositor.behaviorContext().greeting = &shadeSocialBehavior;
     ble_control::setGreetingStateProvider(
         []() { return shadeSocialBehavior.greetingState(); });
@@ -172,7 +169,7 @@ void initBehaviors(lamp::Features features, lamp::Lamp& self) {
   behaviorCtx.baseConfigurator = &baseConfiguratorBehavior;
   behaviorCtx.shadeConfigurator = &shadeConfiguratorBehavior;
   // Mesh + identity surface for custom behaviors
-  behaviorCtx.nearbyLamps = &lamp::nearbyLamps;
+  behaviorCtx.lampRoster = &lamp::lampRoster;
   // bind() the override instances. From here on apply()/restore() will
   // drive the right configurator's beginFade.
   lamp::overrides.base.bind(behaviorCtx, lamp_protocol::OverrideSurface::Base);
@@ -189,8 +186,8 @@ void initBehaviors(lamp::Features features, lamp::Lamp& self) {
       []() { ble_control::notifyWispStatus(); });
   // Provider that the CHAR_WISP_STATUS read merges into the JSON. Lives
   // here so the ColorOverride globals stay out of the network layer.
-  lamp::nearbyLamps.setLampWispStateProvider([]() {
-    lamp::NearbyLamps::LampWispState ws;
+  lamp::lampRoster.setLampWispStateProvider([]() {
+    lamp::LampRoster::LampWispState ws;
     ws.controllingBase  = lamp::overrides.base.isWispActive();
     ws.controllingShade = lamp::overrides.shade.isWispActive();
     if (lamp::overrides.base.hasLastWispColor()) {
@@ -215,7 +212,5 @@ void initBehaviors(lamp::Features features, lamp::Lamp& self) {
   // share the same NeoPixel setBrightness entry point.
   lamp::overrides.brightness.setOnChangeCallback([]() { applyEffectiveBrightness(); });
 
-  // Init order: needs config + expressionManager + meshLink, all
-  // constructed above. See personality_engine.hpp for behavior details.
-  lamp::personalityEngine.begin(&config, &expressionManager, &meshLink);
+  lamp::personalityEngine.begin(&config);
 }

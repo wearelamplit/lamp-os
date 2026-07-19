@@ -42,9 +42,12 @@ void FrameBuffer::flush() {
   bool allShown = true;
   for (const auto& seg : segments) {
     for (uint16_t i = 0; i < seg.pixelCount; i++) {
-      const Color& c = buffer[seg.offset + i];
+      const Color& c = buffer[seg.offset + (seg.reversed ? (seg.pixelCount - 1 - i) : i)];
       seg.driver->setPixelColor(
-          i, (uint32_t)((c.w << 24) | (c.r << 16) | (c.g << 8) | c.b));
+          i, (uint32_t)((Adafruit_NeoPixel::gamma8(c.w) << 24) |
+                        (Adafruit_NeoPixel::gamma8(c.r) << 16) |
+                        (Adafruit_NeoPixel::gamma8(c.g) << 8) |
+                        Adafruit_NeoPixel::gamma8(c.b)));
     }
     if (seg.driver->canShow()) {
       seg.driver->show();

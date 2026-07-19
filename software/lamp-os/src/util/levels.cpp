@@ -13,6 +13,12 @@ uint8_t calculateBrightnessLevel(uint8_t value, uint8_t percentage) {
   return (value * p) / 100;
 };
 
+uint8_t applyDimFactor(uint8_t baseline, float factor, uint8_t floorPct) {
+  const uint8_t scaled = static_cast<uint8_t>(baseline * factor + 0.5f);
+  const uint8_t floored = scaled < floorPct ? floorPct : scaled;
+  return floored > baseline ? baseline : floored;
+}
+
 Color setColorBrightness(Color inColor, uint8_t percentage) {
   if (percentage >= 100) {
     return inColor;

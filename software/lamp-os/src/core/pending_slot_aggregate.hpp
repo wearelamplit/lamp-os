@@ -5,7 +5,7 @@
 // hand-off pattern; subclasses inherit it.
 //
 // The slots themselves are templated in pending_json_slot.hpp /
-// pending_typed_slot.hpp — those headers stay where they are. This
+// pending_typed_slot.hpp; those headers stay where they are. This
 // aggregate just bundles the production instances.
 
 #pragma once
@@ -17,12 +17,8 @@
 
 namespace lamp {
 
-// Size constants matched to the consuming call sites in lamp.cpp.
-inline constexpr size_t kPendingJsonBase = 256;
-inline constexpr size_t kPendingJsonOp   = 512;  // expression op payloads are larger
-
 struct PendingSlotAggregate {
-  // Commit flags — set by ble_control.cpp's CHAR_COMMIT path, drained by
+  // Commit flags, set by ble_control.cpp's CHAR_COMMIT path, drained by
   // the loop in lamp.cpp's commit-tick logic.
   volatile bool pendingCommit = false;
   volatile bool forceCommitFlush = false;
@@ -39,10 +35,10 @@ struct PendingSlotAggregate {
   PendingJsonSlot<kPendingJsonOp> wispOp;
   PendingJsonSlotWithMac<kPendingJsonOp> wispStatus;
   PendingJsonSlot<kPendingJsonOp> socialDispositions;
-  PendingJsonSlot<kPendingJsonOp> settingsBlob;
+  PendingJsonSlot<kPendingSettingsBlob> settingsBlob;
   PendingJsonSlotWithMac<kPendingJsonOp> inboundOp;
 
-  // Typed slots — transient color/brightness overrides + wisp events +
+  // Typed slots: transient color/brightness overrides + wisp events +
   // firmware control flow.
   PendingTypedSlot<PendingOverrideColors>     overrideColors;
   PendingTypedSlot<PendingRestoreColors>      restoreColors;
@@ -54,6 +50,8 @@ struct PendingSlotAggregate {
   PendingTypedSlot<PendingWispPaint>          wispPaint;
   PendingTypedSlot<PendingCommand>            command;
   PendingTypedSlot<PendingEvent>              event;
+  PendingTypedSlot<PendingColorQuery>         colorQuery;
+  PendingTypedSlot<PendingColorInfo>          colorInfo;
   PendingTypedSlot<PendingFirmwareControl>    firmwareControl;
 };
 

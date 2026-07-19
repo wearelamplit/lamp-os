@@ -46,16 +46,20 @@ class Lamp {
  private:
   HwConfig hw_;
   // Internal framework members (compositor, BLE, mesh, OTA timing) live as
-  // file-scope statics in lamp.cpp — single-Lamp-per-binary by design. The
+  // file-scope statics in lamp.cpp, single-Lamp-per-binary by design. The
   // extern declarations in apply_brightness.hpp etc. resolve to those
   // file-scope statics.
 
+  // Recompute s_hwMaxBrightness from the variant cap and config.brightnessCeiling.
+  // Call at setup and after any settings-blob write so a new ceiling applies live.
+  void recomputeEffectiveCeiling();
+
   // Per-slot drains (called from tick()). Each drains one pending slot
   // (BLE input, mesh input, transient-override command, etc.) and applies
-  // its payload to lamp state. Bodies are line-for-line moves of the
-  // original inline tick() blocks — see the invariant comment above
+  // its payload to lamp state. See the invariant comment above
   // tick()'s definition for the ordering contract.
   void drainBrightness();
+  void drainEditSession();
   void drainShadeColors();
   void drainBaseColors();
   void drainKnockout();
@@ -78,6 +82,8 @@ class Lamp {
   void drainWispOp();
   void drainWispStatus();
   void drainCommand();
+  void drainColorQuery();
+  void drainColorInfo();
   void drainEvent();
   void drainFirmwareControl();
 };

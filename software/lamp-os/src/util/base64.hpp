@@ -1,7 +1,7 @@
 #pragma once
 
 // Tiny base64 encoder. Pulled in instead of mbedtls_base64_encode because
-// we only need the encoder side (no padding-stripping, no chunking) and
+// only the encoder side is needed (no padding-stripping, no chunking) and
 // the wisp-palette payload is small (<=150 bytes → <=200 chars output).
 // Header-only so unit tests can pick it up without an extra translation
 // unit.

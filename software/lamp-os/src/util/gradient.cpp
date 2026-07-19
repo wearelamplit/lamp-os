@@ -8,8 +8,8 @@
 
 namespace lamp {
 namespace {
-// Maximum number of color stops we'll honor in buildGradientWithStops. The UI
-// caps user-selectable stops at 5; we pick a slightly generous ceiling so the
+// Maximum number of color stops honored in buildGradientWithStops. The UI
+// caps user-selectable stops at 5; the ceiling is slightly generous so the
 // `breaks` array can live on the stack. Anything beyond this is silently
 // truncated to the first kMaxStops colors.
 constexpr uint8_t kMaxStops = 8;
@@ -45,7 +45,7 @@ std::vector<Color> buildGradientWithStops(uint8_t inNumberPixels,
     return std::vector<Color>{inNumberPixels, inColorStops[0]};
   }
 
-  // Clamp to our compile-time ceiling so `breaks` can live on the stack.
+  // Clamp to the compile-time ceiling so `breaks` can live on the stack.
   if (numberColors > kMaxStops) {
     numberColors = kMaxStops;
   }
@@ -82,7 +82,7 @@ std::vector<Color> buildGradientWithStops(uint8_t inNumberPixels,
     }
   }
 
-  // with all the breakpoints identified, build the gradients in place — no
+  // with all the breakpoints identified, build the gradients in place. No
   // per-stop allocation, one resize on `buf`.
   std::vector<Color> buf;
   buf.resize(inNumberPixels);

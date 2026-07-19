@@ -1,6 +1,6 @@
 #pragma once
 
-// PendingJsonSlot<N> — fixed-capacity single-slot byte buffer shared between
+// PendingJsonSlot<N> is a fixed-capacity single-slot byte buffer shared between
 // the BLE/WiFi/ESP-NOW callbacks (Core 0 or the WiFi task) and the loop drain
 // (Core 1). Consolidates the per-characteristic "post → memcpy under portMUX
 // → drain → parse → dispatch" pattern into one reusable type.
@@ -20,7 +20,7 @@
 //                              slot is empty.
 //
 // Single-slot semantics: post() overwrites any pending-but-undrained value.
-// Newest writer wins. The BLE side intentionally relies on this — slider
+// Newest writer wins. The BLE side intentionally relies on this: slider
 // drag at 60 Hz hammers post() faster than the loop drains, and the user
 // only cares about the latest value.
 
@@ -28,7 +28,26 @@
 #include <cstdint>
 #include <cstring>
 
+#include <lampos/protocol/control_op.hpp>
+
 namespace lamp {
+
+// Slot capacities for the production instances in pending_slot_aggregate.hpp.
+inline constexpr size_t kPendingJsonBase = 256;
+// Also backs BLE op writes (expressionOp, wifiOp, remoteOp, wispOp,
+// testAction, socialDispositions), which have no wire relation to
+// CONTROL_MAX_PAYLOAD; the max() keeps both needs satisfied from one slot
+// size and the static_assert makes it fail to compile if a future
+// CONTROL_MAX_PAYLOAD bump outgrows it silently.
+inline constexpr size_t kPendingJsonOp =
+    512 > (lamp_protocol::CONTROL_MAX_PAYLOAD + 1)
+        ? 512
+        : lamp_protocol::CONTROL_MAX_PAYLOAD + 1;
+static_assert(kPendingJsonOp >= lamp_protocol::CONTROL_MAX_PAYLOAD + 1,
+              "control-op ingest slot must fit the max control-op payload");
+// Full settings save: two LED roles' segments/colors/byteOrder/px plus a
+// knockout array reaches ~1 KB decoded JSON.
+inline constexpr size_t kPendingSettingsBlob = 2048;
 
 template <size_t N>
 struct PendingJsonSlot {
@@ -37,7 +56,7 @@ struct PendingJsonSlot {
   char json[N];
 
   // Returns false when the caller's payload exceeds the slot capacity.
-  // The mux is held only across the memcpy + bit flip — no parsing,
+  // The mux is held only across the memcpy + bit flip; no parsing,
   // no allocation. Safe to call from the NimBLE host task (Core 0) and
   // from the WiFi task.
   bool post(portMUX_TYPE& mux, const char* data, size_t len) {
@@ -68,7 +87,7 @@ struct PendingJsonSlot {
 // Variant carrying a 6-byte source MAC alongside the JSON payload. Used
 // for the CONTROL_OP ingest path (ESP-NOW receiver memcpys the sender's
 // MAC alongside the payload so the loop's applyRemoteOpLocal() can
-// coalesce same-sender cascades). The BLE-only slots don't need this —
+// coalesce same-sender cascades). The BLE-only slots don't need this;
 // they pass the lamp's own MAC at the drain site.
 template <size_t N>
 struct PendingJsonSlotWithMac {
