@@ -509,9 +509,10 @@ void Lamp::drainWispHello() {
       Serial.printf("[loop] drain wispHello flags=0x%02X v=0x%08X\n",
                     (unsigned)cmd.flags, (unsigned)cmd.wispVersion);
 #endif
-      lamp::lampRoster.cacheWispHello(cmd.sourceMac, cmd.wispVersion, cmd.flags,
-                                       cmd.paletteIdPrefix, cmd.carriedFwChannel,
-                                       cmd.carriedFwVersion);
+      const bool presenceEdge = lamp::lampRoster.cacheWispHello(
+          cmd.sourceMac, cmd.wispVersion, cmd.flags, cmd.paletteIdPrefix,
+          cmd.carriedFwChannel, cmd.carriedFwVersion);
+      if (presenceEdge) ble_control::notifyWispStatus();
       // Hold the override while the painter is actively painting (PAINT_MODE)
       // so a long drift fade doesn't trip the 60s watchdog; paint:off still
       // reverts. Scoped to the painter's MAC so a second wisp's hello can't
