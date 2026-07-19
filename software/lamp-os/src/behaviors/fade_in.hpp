@@ -3,7 +3,7 @@
 #include "core/animated_behavior.hpp"
 
 /**
- * @brief animation to fade from black to the lamp default color
+ * animation to fade from black to the lamp default color
  */
 namespace lamp {
 class FadeInBehavior : public AnimatedBehavior {

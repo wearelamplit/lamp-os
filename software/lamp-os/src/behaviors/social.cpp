@@ -4,7 +4,9 @@
 #include <algorithm>
 #include <cstring>
 
-#include "components/network/mesh/nearby_lamps.hpp"
+#include "components/network/mesh/mesh_link.hpp"
+
+#include "components/network/mesh/lamp_roster.hpp"
 #include "core/personality_engine.hpp"
 #include "behaviors/greetable.hpp"
 #include "components/firmware/firmware_distributor.hpp"
@@ -12,10 +14,12 @@
 #include "components/firmware/firmware_receiver.hpp"
 #include "config/config.hpp"
 #include "util/color.hpp"
+#include "util/easing.hpp"
 #include "util/fade.hpp"
+#include "util/gradient.hpp"
 #include "version.hpp"
 
-// firmwareReceiver lives at file scope in lamp.cpp — the receiver
+// firmwareReceiver lives at file scope in lamp.cpp; the receiver
 // header doesn't expose an extern itself (matching the established
 // pattern in ota_indicator.cpp); declare it here so the receive-first
 // gate in the OTA gossip tick can read its isInProgress().
@@ -35,13 +39,23 @@ Color darken(const Color& c, uint8_t strength) {
                static_cast<uint8_t>(c.w * keep / 255));
 }
 
+// Blend start → end at ramp position `step`/`span` shaped by `curve`.
+// Easing shapes the POSITION; the blend itself is linear, so the curve
+// isn't applied twice.
+Color easedRamp(const Color& start, const Color& end, Easing curve,
+                uint32_t step, uint32_t span) {
+  const float t = span > 0 ? static_cast<float>(step) / static_cast<float>(span) : 1.0f;
+  const uint32_t pos = static_cast<uint32_t>(applyEasing(curve, t) * 255.0f + 0.5f);
+  return fadeLinear(start, end, 255, pos);
+}
+
 }  // namespace
 
 GreetingState SocialBehavior::greetingState() const {
   if (animationState == STOPPED) return {};
   GreetingState gs;
   gs.active     = true;
-  gs.peerBdAddr = greetingPeerBdAddr_;
+  gs.peerLampId = greetingPeerLampId_;
   if (snub) {
     gs.kind = "snub";
   } else if (pulseBackStrength > 0) {
@@ -58,8 +72,12 @@ void SocialBehavior::applyTuning(const GreetingTuning& t) {
   fadeOutFrames     = t.fadeOutFrames;
   pulseBackStrength = t.pulseBackStrength;
   pulseBackCount    = t.pulseBackCount;
+  breathCycleFrames = t.breathCycleFrames;
   snub              = t.snub;
-  // AnimatedBehavior's playOnce/nextFrame drive `frames` — keep it in
+  easeInCurve       = t.easeInCurve;
+  easeOutCurve      = t.easeOutCurve;
+  breathCurve       = t.breathCurve;
+  // AnimatedBehavior's playOnce/nextFrame drive `frames`; keep it in
   // lockstep with totalFrames.
   frames            = t.totalFrames;
 }
@@ -72,16 +90,16 @@ void SocialBehavior::draw() {
   const uint32_t fadeOut = fadeOutFrames;
 
   // Resolve pulse parameters once per draw call. Snubs don't use the
-  // in-hold pulse machinery — they fold the dim into the ease-in/out.
+  // in-hold pulse machinery. They fold the dim into the ease-in/out.
   const bool pulseEnabled = (!snub && pulseBackStrength > 0 && pulseBackCount > 0 && hold > 0);
   uint32_t pulseSpan = 0;
   uint32_t cycleFrames = 0;
   if (pulseEnabled) {
     // Clamp the nominal cycle to the available hold so the dip+return
     // always completes inside the hold phase. Without this, a profile
-    // whose hold < kSlowPulseCycleFrames would snap mid-breath when the
+    // whose hold < breathCycleFrames would snap mid-breath when the
     // hold ends.
-    const uint32_t nominalCycle = std::min<uint32_t>(kSlowPulseCycleFrames, hold);
+    const uint32_t nominalCycle = std::min<uint32_t>(breathCycleFrames, hold);
     if (pulseBackCount == kPulseCountContinuous) {
       uint32_t cycles = (hold + nominalCycle / 2) / nominalCycle;
       if (cycles == 0) cycles = 1;
@@ -94,50 +112,56 @@ void SocialBehavior::draw() {
     }
   }
 
+  const bool haveGradient = !greetedBaseStops_.empty();
+  if (haveGradient) {
+    if (gradientCache_.size() != static_cast<size_t>(fb->pixelCount)) {
+      gradientCache_ = buildGradientWithStops(
+          static_cast<uint8_t>(fb->pixelCount), greetedBaseStops_);
+    }
+    if (greetedBlend_ < 255) {
+      const uint16_t next = greetedBlend_ + kGradientBlendStep;
+      greetedBlend_ = next > 255 ? 255 : static_cast<uint8_t>(next);
+    }
+  }
+
   for (int i = 0; i < fb->pixelCount; i++) {
     const Color buf = fb->buffer[i];
+    Color target = foundLampColor;
+    if (haveGradient) {
+      // fade(span=255, pos=blend) is the 0..255 blend primitive here.
+      target = fade(foundLampColor, gradientCache_[i], 255, greetedBlend_);
+    }
     Color out;
     if (easeIn > 0 && frame < easeIn) {
-      // Ease in toward the peer color. A snub also ramps the dim from
-      // 0 → full strength across the ease-in, so it arrives at the hold
-      // already dark-in-their-color (black for a full snub).
-      out = fade(buf, foundLampColor, easeIn - 1, frame);
+      out = easedRamp(buf, target, easeInCurve, frame, easeIn - 1);
       if (snub) {
-        // Ramp the dim 0 → full strength across the ease-in.
         out = darken(out, easeLinear(0, pulseBackStrength, easeIn - 1, frame));
       }
     } else if (frame < easeIn + hold) {
       const uint32_t holdFrame = frame - easeIn;
       if (snub) {
-        // Hold steady at the dark target — the snub's pointed pause.
-        out = darken(foundLampColor, pulseBackStrength);
+        out = darken(target, pulseBackStrength);
       } else if (pulseEnabled && holdFrame < pulseSpan && cycleFrames > 0) {
-        const Color dimmed = darken(foundLampColor, pulseBackStrength);
+        const Color dimmed = darken(target, pulseBackStrength);
         const uint32_t cyclePos = holdFrame % cycleFrames;
         const uint32_t halfCycle = cycleFrames / 2;
         if (halfCycle > 0 && cyclePos < halfCycle) {
-          out = fade(foundLampColor, dimmed, halfCycle - 1, cyclePos);
+          out = easedRamp(target, dimmed, breathCurve, cyclePos, halfCycle - 1);
         } else if (halfCycle > 0) {
-          out = fade(dimmed, foundLampColor, halfCycle - 1, cyclePos - halfCycle);
+          out = easedRamp(dimmed, target, breathCurve, cyclePos - halfCycle, halfCycle - 1);
         } else {
-          out = foundLampColor;
+          out = target;
         }
       } else {
-        out = foundLampColor;
+        out = target;
       }
     } else if (fadeOut > 0 && frame < easeIn + hold + fadeOut) {
-      // Ease out back to the underlying expression's pixel. A snub ramps
-      // the dim back from full strength → 0 over the same span, mirroring
-      // the ease-in (rises from dark through their color).
       const uint32_t fadeFrame = frame - (easeIn + hold);
-      out = fade(foundLampColor, buf, fadeOut - 1, fadeFrame);
+      out = easedRamp(target, buf, easeOutCurve, fadeFrame, fadeOut - 1);
       if (snub) {
-        // Ramp the dim full strength → 0, mirroring the ease-in.
         out = darken(out, easeLinear(pulseBackStrength, 0, fadeOut - 1, fadeFrame));
       }
     } else {
-      // Past the explicit window — leave buffer alone (playOnce will stop
-      // us at `frames` regardless).
       out = buf;
     }
     fb->buffer[i] = out;
@@ -162,7 +186,7 @@ void SocialBehavior::control() {
   // every social tick is safe.
   //
   // Two throttles to keep this cheap:
-  //   (1) Skip entirely while distributor.isInProgress() — the single-
+  //   (1) Skip entirely while distributor.isInProgress(); the single-
   //       source mutex blocks concurrent sessions, so scanning during
   //       OTA finds nothing actionable.
   //   (2) Throttle the ESP-NOW vector snapshot to kOtaScanIntervalMs
@@ -173,21 +197,22 @@ void SocialBehavior::control() {
   // only populated by ESP-NOW HELLO; BLE-only sightings carry no version.
   //
   // Receive-first policy: skip the outbound loop entirely if either
-  //   (a) we're currently RECEIVING an OTA — finish receiving before
+  //   (a) an OTA is currently RECEIVING. Finish receiving before
   //       burning Core 1 + airtime on outbound chunks that may be
   //       obsolete after the lamp reboots into the new image, OR
   //   (b) any reachable peer reports a higher firmware version than
-  //       ours — we're about to be the receiver, so any outbound we
-  //       start now is just chunks we'd have to re-send under the
+  //       this lamp's. This lamp is about to be the receiver, so any
+  //       outbound started now is just chunks to re-send under the
   //       new image.
   if (!firmwareDistributor.isInProgress() &&
       !::firmwareReceiver.isInProgress() &&
+      !fs_ota::fsPathBusy() &&
       (lastOtaScanMs_ == 0 ||
        static_cast<int32_t>(now - lastOtaScanMs_) >=
            static_cast<int32_t>(kOtaScanIntervalMs))) {
     lastOtaScanMs_ = now;
-    std::vector<NearbyLamp> espNowPeers =
-        nearbyLamps.getReachableViaEspNow(LAMP_PRUNE_TIME_MS);
+    std::vector<RosterEntry> espNowPeers =
+        lampRoster.getMesh(LAMP_PRUNE_TIME_MS);
     bool peerHigherSeen = false;
     for (const auto& p : espNowPeers) {
       if (!p.hasMac) continue;
@@ -201,27 +226,29 @@ void SocialBehavior::control() {
       for (const auto& p : espNowPeers) {
         if (!p.hasMac) continue;
         if (p.firmwareVersion == 0) continue;
-        if (p.firmwareVersion >= lamp::FIRMWARE_VERSION) continue;
         firmwareDistributor.considerPeerForOta(p.mac, p.firmwareVersion,
                                                 p.protocolVersion, now,
-                                                p.fwChannel);
+                                                p.fwChannel, p.maxChunk,
+                                                p.espnowRssi);
       }
-      // FS-image OTA: offer our UI image to same-firmware-version peers whose
-      // FS digest differs from ours. fs_ota::considerPeer does the staleness +
+      // FS-image OTA: offer the local UI image to same-firmware-version peers
+      // whose FS digest differs. fs_ota::considerPeer does the staleness +
       // busy gating internally.
       for (const auto& p : espNowPeers) {
         if (!p.hasMac) continue;
         fs_ota::considerPeer(p.mac, p.firmwareVersion, p.protocolVersion, now,
-                             p.fwChannel, p.fsDigest, p.hasFsDigest);
+                             p.fwChannel, p.fsDigest, p.hasFsDigest, p.needsFs,
+                             p.espnowRssi);
       }
     }
   }
 
-  // onGreetingChange_ is the sole path to CHAR_STATE_NOTIFY — keeps behaviors
+  // onGreetingChange_ is the sole path to CHAR_STATE_NOTIFY; keeps behaviors
   // free of BLE includes.
   const bool greetingNowActive = (animationState != STOPPED);
   if (!greetingNowActive && greetingWasActive_) {
-    greetingPeerBdAddr_.clear();
+    greetingPeerLampId_.clear();
+    greetedHasMac_ = false;
     if (onGreetingChange_) onGreetingChange_();
   }
   greetingWasActive_ = greetingNowActive;
@@ -249,12 +276,12 @@ void SocialBehavior::control() {
     case SocialMode::Introvert: regreetWindowMs = INTROVERT_REGREET_WINDOW_MS; break;
   }
 
-  std::vector<NearbyLamp> foundLamps =
-      nearbyLamps.getUngreetedArrivals(LAMP_PRUNE_TIME_MS);
+  std::vector<RosterEntry> foundLamps =
+      lampRoster.getUngreetedArrivals(LAMP_PRUNE_TIME_MS);
 
   for (auto it = foundLamps.rbegin(); it != foundLamps.rend(); ++it) {
-    // Re-greet window: even if the NearbyLamp's acknowledged flag was
-    // reset (peer pruned + returned), enforce our own per-peer cooldown.
+    // Re-greet window: even if the RosterEntry's acknowledged flag was
+    // reset (peer pruned + returned), enforce a per-peer cooldown.
     if (regreetWindowMs > 0) {
       auto last = lastGreetedAtMs_.find(it->name);
       if (last != lastGreetedAtMs_.end() && now - last->second < regreetWindowMs) {
@@ -262,48 +289,32 @@ void SocialBehavior::control() {
       }
     }
 
-    const GreetingTuning tuning = personalityEngine.greetingFor(it->bdAddr);
+    const GreetingTuning tuning = personalityEngine.greetingFor(it->macStr());
 
 #ifdef LAMP_DEBUG
     Serial.printf("[social] greet %s (mode=%u frames=%u pulse=%u count=%u)\n",
-                  it->name.c_str(), (unsigned)mode,
+                  it->name, (unsigned)mode,
                   (unsigned)tuning.totalFrames,
                   (unsigned)tuning.pulseBackStrength,
                   (unsigned)tuning.pulseBackCount);
 #endif
-    greetingPeerBdAddr_ = it->bdAddr;
-    nearbyLamps.acknowledge(it->name);
+    greetingPeerLampId_ = it->macStr();
+    lampRoster.acknowledge(it->name);
     foundLampColor = it->baseColor;
+    std::memcpy(greetedMac_, it->mac, 6);
+    greetedHasMac_ = it->hasMac;
+    greetedBaseStops_.clear();
+    greetedBlend_ = 0;
+    gradientCache_.clear();
+    if (greetedHasMac_ && meshLink_) {
+      meshLink_->sendColorQuery(greetedMac_);
+    }
     applyTuning(tuning);
 
-    // Record into our persistent (in-memory) greeting log.
-    lastGreetedAtMs_[it->name] = now;
-    if (lastGreetedAtMs_.size() > MAX_GREETED_TRACKED) {
-      // LRU eviction — drop the entry with the smallest timestamp.
-      auto oldest = lastGreetedAtMs_.begin();
-      for (auto i = lastGreetedAtMs_.begin(); i != lastGreetedAtMs_.end(); ++i) {
-        if (i->second < oldest->second) oldest = i;
-      }
-      lastGreetedAtMs_.erase(oldest);
-    }
+    markGreeted(it->name, now);
 
-    // Per-mode cooldown.
-    uint32_t cooldown = 0;
-    switch (mode) {
-      case SocialMode::Extrovert:
-        cooldown = EXTROVERT_COOLDOWN_MS;
-        break;
-      case SocialMode::Ambivert:
-        cooldown = AMBIVERT_BASE_COOLDOWN_MS;
-        break;
-      case SocialMode::Introvert:
-        cooldown = INTROVERT_BASE_COOLDOWN_MS;
-        break;
-    }
-    nextAcknowledgeTimeMs = now + cooldown;
-
-    // Introvert: trim the fatigue window, enter "tired" if we've burned
-    // through too many greetings recently.
+    // Introvert: trim the fatigue window, enter "tired" after too many
+    // greetings burned through recently.
     if (mode == SocialMode::Introvert) {
       recentGreetMs_.push_back(now);
       while (!recentGreetMs_.empty() &&
@@ -327,17 +338,34 @@ void SocialBehavior::control() {
   }
 };
 
-void SocialBehavior::triggerGreeting(const NearbyLamp& peer) {
+void SocialBehavior::triggerGreeting(const RosterEntry& peer) {
   const uint32_t now = millis();
-  const GreetingTuning tuning = personalityEngine.greetingFor(peer.bdAddr);
-  greetingPeerBdAddr_ = peer.bdAddr;
+  const GreetingTuning tuning = personalityEngine.greetingFor(peer.macStr());
+  greetingPeerLampId_ = peer.macStr();
   foundLampColor = peer.baseColor;
+  std::memcpy(greetedMac_, peer.mac, 6);
+  greetedHasMac_ = peer.hasMac;
+  greetedBaseStops_.clear();
+  greetedBlend_ = 0;
+  gradientCache_.clear();
+  if (greetedHasMac_ && meshLink_) {
+    meshLink_->sendColorQuery(greetedMac_);
+  }
   applyTuning(tuning);
-  nearbyLamps.acknowledge(peer.name);
+  lampRoster.acknowledge(peer.name);
   playOnce();
   greetingWasActive_ = true;
   if (onGreetingChange_) onGreetingChange_();
   markGreeted(peer.name, now);
+}
+
+void SocialBehavior::onColorInfo(const uint8_t srcMac[6],
+                                 const std::vector<Color>& baseStops,
+                                 const std::vector<Color>& /*shadeStops*/) {
+  if (animationState == STOPPED) return;
+  if (!greetedHasMac_ || std::memcmp(srcMac, greetedMac_, 6) != 0) return;
+  if (baseStops.empty()) return;
+  greetedBaseStops_ = baseStops;
 }
 
 void SocialBehavior::markGreeted(const std::string& peerName, uint32_t nowMs) {

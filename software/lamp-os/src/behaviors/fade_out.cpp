@@ -10,7 +10,7 @@ namespace lamp {
 std::atomic<bool> fadeOutRebootRequested{false};
 
 void FadeOutBehavior::draw() {
-  // See FadeInBehavior::draw — same divide-by-zero defence.
+  // See FadeInBehavior::draw for the same divide-by-zero guard.
   const uint32_t duration = frames > 1 ? frames - 1 : 1;
   for (int i = 0; i < fb->pixelCount; i++) {
     fb->buffer[i] = fade(fb->buffer[i], Color(0, 0, 0, 0), duration, frame);

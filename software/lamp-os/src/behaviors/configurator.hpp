@@ -10,14 +10,14 @@
 #define CONFIGURATOR_WEBSOCKET_TIMEOUT_MS 60000
 
 /**
- * @brief a layer to preview realtime changes from the web
+ * a layer to preview realtime changes from the web
  *        configuration tool
  */
 namespace lamp {
 
 // Per-pixel fade window for BLE color writes (no explicit fadeDurationMs
 // supplied by the caller). 100ms sits right at the human just-noticeable
-// fade vs snap boundary — smooth enough to avoid stepping on slow drags,
+// fade vs snap boundary: smooth enough to avoid stepping on slow drags,
 // snappy enough that the lamp tracks the slider in near-real-time.
 // Override callers (ColorOverride for wisp paint, peer-swap, etc.) pass
 // their own fadeDurationMs and don't touch this default.
@@ -61,7 +61,7 @@ class ConfiguratorBehavior : public AnimatedBehavior {
   // The buffer snapshot taken at beginFade() time. Allocated once per
   // beginFade(); per-pixel interp in draw() walks it alongside `colors`.
   // Sized to pixelCount on first beginFade() and resized only when the
-  // pixel count changes (rare — only on configuration boot).
+  // pixel count changes (rare; only on configuration boot).
   std::vector<Color> fadeFromColors_;
   uint32_t fadeStartMs_ = 0;
   uint32_t fadeDurationMs_ = 0;

@@ -5,8 +5,8 @@
 #include "core/animated_behavior.hpp"
 
 /**
- * @brief animation to fade to black and reboot. Driven by a global flag
- * (see fade_out.cpp) that any reboot path sets — e.g. BLE settings_blob save.
+ * animation to fade to black and reboot. Driven by a global flag
+ * (see fade_out.cpp) that any reboot path sets, e.g. BLE settings_blob save.
  * No WiFi dependency.
  */
 namespace lamp {

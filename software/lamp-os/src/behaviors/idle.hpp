@@ -4,7 +4,7 @@
 #include "util/color.hpp"
 
 /**
- * @brief a base layer of the lamp's default color to prevent blackout
+ * a base layer of the lamp's default color to prevent blackout
  */
 namespace lamp {
 class IdleBehavior : public AnimatedBehavior {

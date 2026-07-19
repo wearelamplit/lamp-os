@@ -17,8 +17,8 @@ bool ConfiguratorBehavior::fadeActive(uint32_t nowMs) const {
 void ConfiguratorBehavior::beginFade(const std::vector<Color>& targetColors,
                                      uint32_t fadeDurationMs) {
   // Snapshot the fade-FROM endpoint from the configurator's PREVIOUS
-  // intended output (the `colors` field, optionally lerped if we're
-  // interrupting a fade in flight) — NOT from fb->buffer. fb->buffer
+  // intended output (the `colors` field, optionally lerped when
+  // interrupting a fade in flight), NOT from fb->buffer. fb->buffer
   // is the post-overlay rendered state, which on Base includes the
   // knockout overlay's per-pixel dimming. Snapshotting from the buffer
   // captured that dimming as the fade baseline and produced a visible
@@ -28,9 +28,9 @@ void ConfiguratorBehavior::beginFade(const std::vector<Color>& targetColors,
   // pixel brightness as fades restarted.
   //
   // Snapshotting from `colors` (or the in-progress lerp value mid-fade)
-  // gives us the configurator's INTENDED rendered state, decoupled from
+  // gives the configurator's INTENDED rendered state, decoupled from
   // any downstream overlays. Mid-fade interrupts still pick up wherever
-  // the interpolation has landed — just from the lerp math, not from
+  // the interpolation has landed, just from the lerp math, not from
   // the post-overlay buffer.
   const size_t n = fb ? static_cast<size_t>(fb->pixelCount) : 0;
   const uint32_t now = millis();
@@ -63,7 +63,7 @@ void ConfiguratorBehavior::beginFade(const std::vector<Color>& targetColors,
       // Cold-start: no prior `colors` (first beginFade ever). Fall
       // back to fb->buffer because there's no other source. Knockout
       // dimming here doesn't cause flicker because there's nothing
-      // for it to be inconsistent against — the next fade onward
+      // for it to be inconsistent against; the next fade onward
       // hits the `colors` branch above.
       for (size_t i = 0; i < n; ++i) {
         fadeFromColors_[i] = fb->buffer[i];
@@ -72,7 +72,7 @@ void ConfiguratorBehavior::beginFade(const std::vector<Color>& targetColors,
   }
   // Assign the target colors. Callers (ColorOverride::apply, the BLE
   // colors drain) have already done the gradient expansion to pixelCount
-  // length, so we just copy.
+  // length, so this just copies.
   colors = targetColors;
   fadeStartMs_ = now;
   fadeDurationMs_ = fadeDurationMs;
@@ -80,7 +80,7 @@ void ConfiguratorBehavior::beginFade(const std::vector<Color>& targetColors,
 
 void ConfiguratorBehavior::draw() {
   // Duration-controlled fade. When fadeDurationMs_ is 0 (set by
-  // legacy callers that never went through beginFade — i.e. boot-time
+  // legacy callers that never went through beginFade, i.e. boot-time
   // initBehaviors which assigns colors directly) or the window has
   // elapsed, write target colors directly. Otherwise per-pixel lerp
   // between fadeFromColors_[i] and colors[i] using the existing quad

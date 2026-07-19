@@ -3,7 +3,7 @@
 #include "core/animated_behavior.hpp"
 
 /**
- * @brief selectively darken parts of the lamp to handle brightness of the
+ * selectively darken parts of the lamp to handle brightness of the
  *        leds in the lamp base
  * @property knockoutPixels - a list of knockout pixels to profile the lamp base
  */
