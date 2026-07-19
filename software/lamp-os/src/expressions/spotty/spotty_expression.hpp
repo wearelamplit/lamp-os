@@ -41,9 +41,9 @@ inline constexpr ParamSpec kSpottyParams[] = {
     .max        = 10,
     .def        = 3,
     .invert     = true,
-    .leftLabel  = "stars",
-    .rightLabel = "fire",
-    .help       = "Stars: slow, gentle, unpredictable fades. Fire: fast flickers mixed with slower flames.",
+    .leftLabel  = "Slow",
+    .rightLabel = "Fast",
+    .help       = "Slow: gentle, unpredictable fades. Fast: quick flickers mixed with slower fades.",
   },
   kEasingParam,
 };

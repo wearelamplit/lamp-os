@@ -226,10 +226,10 @@ void test_spotty_speed_param() {
       TEST_ASSERT_EQUAL_INT(10, p["max"].as<int>());
       TEST_ASSERT_EQUAL_INT(3,  p["default"].as<int>());
       TEST_ASSERT_TRUE(p["invert"].as<bool>());
-      TEST_ASSERT_EQUAL_STRING("stars", p["leftLabel"].as<const char*>());
-      TEST_ASSERT_EQUAL_STRING("fire", p["rightLabel"].as<const char*>());
+      TEST_ASSERT_EQUAL_STRING("Slow", p["leftLabel"].as<const char*>());
+      TEST_ASSERT_EQUAL_STRING("Fast", p["rightLabel"].as<const char*>());
       TEST_ASSERT_EQUAL_STRING(
-          "Stars: slow, gentle, unpredictable fades. Fire: fast flickers mixed with slower flames.",
+          "Slow: gentle, unpredictable fades. Fast: quick flickers mixed with slower fades.",
           p["help"].as<const char*>());
       break;
     }
