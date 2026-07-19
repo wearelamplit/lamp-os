@@ -61,6 +61,16 @@ PRs are welcome for new features, fixes, and docs, and for **custom lamps** too:
 
 One ask: if you build something cool, try to send it back upstream. Open a PR, or poke us on Discord first. Totally optional, but the more we run off a shared base, the less the fleet splinters into forks that can't even talk to each other on the mesh. One compatible family beats a pile of private snowflakes. 💡
 
+## Flashing your ESP32
+
+You do **not** need a development environment or to build anything to get a working lamp. The firmware is prebuilt and signed, and you flash it straight from your browser:
+
+### → [update.lamplit.ca](https://update.lamplit.ca/)
+
+Plug your ESP32 into your computer over USB, open the flasher in **Chrome or Edge** (it uses WebSerial, so Safari and Firefox won't work), pick your board, and hit flash. No toolchain, no repo clone, no `pio`. It writes the whole image, bootloader, partitions, firmware, and the web config UI, so the lamp boots ready to name and pair with the app.
+
+That's the path for almost everyone. Only keep reading into [Development](#development) if you actually want to *modify* the firmware or the app, building it yourself is not required to make a lamp.
+
 ## Development
 
 ### Flutter app: macOS
