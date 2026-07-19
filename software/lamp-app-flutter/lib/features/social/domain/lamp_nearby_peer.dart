@@ -75,6 +75,24 @@ List<int> _rgbwFromJson(dynamic value) {
   return const [0, 0, 0, 0];
 }
 
+/// Display substitution for legacy BLE-only peers. Such a lamp omits the
+/// W channel from its advertisement, so a stored W-white shade/base
+/// `(0,0,0,255)` arrives all-zero and would render black. White is the one
+/// channel legacy omits, so an all-zero legacy color means white: return
+/// `(0,0,0,255)`. A real mesh peer's all-zero color is genuinely off and
+/// stays black, so the swap is gated to legacy (BLE-only) peers.
+List<int> displayRgbw(List<int> rgbw, {required bool legacyOnlyBle}) {
+  if (legacyOnlyBle &&
+      rgbw.length >= 4 &&
+      rgbw[0] == 0 &&
+      rgbw[1] == 0 &&
+      rgbw[2] == 0 &&
+      rgbw[3] == 0) {
+    return const [0, 0, 0, 255];
+  }
+  return rgbw;
+}
+
 /// Proximity bucket (0=Near, 1=Around, 2=Far) derived from the
 /// lamp-observed RSSI. Thresholds match the firmware's bench-calibrated
 /// tiers: >= -80 dBm Near, >= -90 Around, else Far. The -127 "no
