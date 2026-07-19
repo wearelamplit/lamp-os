@@ -77,6 +77,11 @@ void PulseExpression::updateWavePosition() {
   if (progress_ >= 1.0f) {
     progress_ = 1.0f;
     if (loopContinuous_) {
+      if (!firstEntranceDone_) {
+        firstEntranceDone_ = true;
+        travelStart_ = static_cast<float>(zone_.posMin);
+        travelSpan_ = std::max(1.0f, static_cast<float>(zone_.posMax) - travelStart_);
+      }
       waveDirection = -1;
       reachedFarEnd_ = true;
     }
@@ -108,9 +113,10 @@ void PulseExpression::selectNextColor() {
 
 void PulseExpression::onTrigger() {
   if (loopContinuous_) {
-    travelStart_ = static_cast<float>(zone_.posMin) + kContinuousTravelInset;
-    const float travelEnd = static_cast<float>(zone_.posMax) - kContinuousTravelInset;
-    travelSpan_ = std::max(1.0f, travelEnd - travelStart_);
+    // Leg 0 enters off-strip; updateWavePosition() repoints to the visible
+    // edges once it lands, then ping-pongs there forever.
+    travelStart_ = static_cast<float>(zone_.posMin) - static_cast<float>(pulseWidth);
+    travelSpan_ = std::max(1.0f, static_cast<float>(zone_.posMax) - travelStart_);
   } else {
     travelStart_ = static_cast<float>(zone_.posMin) - static_cast<float>(pulseWidth);
     travelSpan_ = (static_cast<float>(zone_.posMax) + 2.0f * pulseWidth) - travelStart_;
@@ -118,20 +124,13 @@ void PulseExpression::onTrigger() {
   progress_ = 0.0f;
   waveDirection = 1;
   reachedFarEnd_ = false;
+  firstEntranceDone_ = false;
   wavePosition = travelStart_;
   lastUpdateMs = 0;
-  ebbStartMs_ = millis();
   selectNextColor();
 
   frames = kContinuousMaxFrames;
   frame = 0;
-}
-
-float PulseExpression::ebbInScale() const {
-  if (!loopContinuous_) return 1.0f;
-  const uint32_t elapsed = millis() - ebbStartMs_;
-  if (elapsed >= kEbbInMs) return 1.0f;
-  return static_cast<float>(elapsed) / static_cast<float>(kEbbInMs);
 }
 
 void PulseExpression::onUpdate() {
@@ -148,12 +147,9 @@ void PulseExpression::draw() {
     return;
   }
 
-  const float ebb = ebbInScale();
-
   // blendFactor varies per pixel (distance to wave center), so no frame-level hoist.
   for (int i = zone_.posMin; i <= zone_.posMax; i++) {
     uint32_t blendFactor = calculateBlendFactor(i);
-    if (ebb < 1.0f) blendFactor = static_cast<uint32_t>(blendFactor * ebb);
 
     if (blendFactor == 0) continue;  // Skip pixels with no blend
     if (blendFactor >= 100) {

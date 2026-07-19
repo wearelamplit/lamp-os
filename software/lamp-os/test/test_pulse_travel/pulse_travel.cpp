@@ -11,10 +11,6 @@
 
 namespace test {
 
-// Mirrors pulse_expression.hpp defaults.
-constexpr float kInset = 0.0f;
-constexpr uint32_t kEbbMs = 800;
-
 struct PulseTravelRig {
   float progress = 0.0f;
   float travelStart = 0.0f;
@@ -26,31 +22,29 @@ struct PulseTravelRig {
   bool loop = false;
   bool autoTrigger = true;  // false = transient preview (Test button)
   uint32_t lastUpdateMs = 0;
-  uint32_t ebbStartMs = 0;  // set once at first appearance, never by step()
   bool ended = false;
   bool reachedFarEnd = false;
+  bool firstEntranceDone = false;
+  float posMin = 0.0f;
+  float posMax = 0.0f;
 
-  void trigger(float posMin, float posMax, float pulseWidth) {
+  void trigger(float inMin, float inMax, float pulseWidth) {
+    posMin = inMin;
+    posMax = inMax;
     if (loop) {
-      travelStart = posMin + kInset;
-      travelSpan = std::max(1.0f, (posMax - kInset) - travelStart);
+      travelStart = inMin - pulseWidth;
+      travelSpan = std::max(1.0f, inMax - travelStart);
     } else {
-      travelStart = posMin - pulseWidth;
-      travelSpan = (posMax + 2.0f * pulseWidth) - travelStart;
+      travelStart = inMin - pulseWidth;
+      travelSpan = (inMax + 2.0f * pulseWidth) - travelStart;
     }
     progress = 0.0f;
     waveDirection = 1;
     reachedFarEnd = false;
+    firstEntranceDone = false;
     wavePosition = travelStart;
     lastUpdateMs = 0;
     ended = false;
-  }
-
-  float ebb(uint32_t nowMs) const {
-    if (!loop) return 1.0f;
-    const uint32_t elapsed = nowMs - ebbStartMs;
-    if (elapsed >= kEbbMs) return 1.0f;
-    return static_cast<float>(elapsed) / static_cast<float>(kEbbMs);
   }
 
   void step(uint32_t nowMs) {
@@ -62,7 +56,15 @@ struct PulseTravelRig {
     progress += dt * static_cast<float>(waveDirection);
     if (progress >= 1.0f) {
       progress = 1.0f;
-      if (loop) { waveDirection = -1; reachedFarEnd = true; }
+      if (loop) {
+        if (!firstEntranceDone) {
+          firstEntranceDone = true;
+          travelStart = posMin;
+          travelSpan = std::max(1.0f, posMax - travelStart);
+        }
+        waveDirection = -1;
+        reachedFarEnd = true;
+      }
     } else if (progress <= 0.0f) {
       progress = 0.0f;
       if (loop) waveDirection = 1;
@@ -135,6 +137,49 @@ void test_trigger_mode_ends_on_exit() {
   TEST_ASSERT_FLOAT_WITHIN(1e-6f, 1.0f, rig.progress);
 }
 
+void test_continuous_first_entrance_starts_off_strip() {
+  test::PulseTravelRig rig;
+  rig.easing = lamp::Easing::Float;
+  rig.loop = true;
+  rig.trigger(/*posMin=*/10, /*posMax=*/40, /*pulseWidth=*/5);
+
+  // Leg 0 spawns fully off-strip (center a pulse-width below the near edge)
+  // and sweeps to the far edge, no in-view pop-on.
+  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 5.0f, rig.travelStart);
+  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 5.0f, rig.wavePosition);
+  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 40.0f, rig.travelStart + rig.travelSpan);
+}
+
+void test_continuous_repoints_to_visible_edges_after_entrance() {
+  test::PulseTravelRig rig;
+  rig.easing = lamp::Easing::Float;
+  rig.loop = true;
+  rig.pulseSpeedMs = 10;
+  rig.trigger(/*posMin=*/10, /*posMax=*/40, /*pulseWidth=*/5);
+
+  uint32_t nowMs = 1000;
+  int guard = 0;
+  while (!rig.firstEntranceDone && guard++ < 100000) {
+    nowMs += 16;
+    rig.step(nowMs);
+  }
+  TEST_ASSERT_TRUE(rig.firstEntranceDone);
+  // Ongoing ping-pong bunches at each visible edge: center range [posMin, posMax].
+  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 10.0f, rig.travelStart);
+  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 40.0f, rig.travelStart + rig.travelSpan);
+  // Landed the entrance at the far edge, no jump-back.
+  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 40.0f, rig.wavePosition);
+
+  // Ping-pong turnaround pixels: center reaches exactly posMax at progress 1
+  // and posMin at progress 0 (bunch, not exit).
+  rig.progress = 0.0f;
+  rig.wavePosition = rig.travelStart + lamp::applyEasing(rig.easing, rig.progress) * rig.travelSpan;
+  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 10.0f, rig.wavePosition);
+  rig.progress = 1.0f;
+  rig.wavePosition = rig.travelStart + lamp::applyEasing(rig.easing, rig.progress) * rig.travelSpan;
+  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 40.0f, rig.wavePosition);
+}
+
 void test_continuous_reverses_and_never_ends() {
   test::PulseTravelRig rig;
   rig.easing = lamp::Easing::Float;
@@ -157,6 +202,29 @@ void test_continuous_reverses_and_never_ends() {
   }
   TEST_ASSERT_TRUE(sawReverseDown);
   TEST_ASSERT_TRUE(sawReverseUp);
+}
+
+void test_continuous_pingpong_stays_within_visible_edges() {
+  test::PulseTravelRig rig;
+  rig.easing = lamp::Easing::Float;
+  rig.loop = true;
+  rig.pulseSpeedMs = 10;
+  rig.trigger(/*posMin=*/10, /*posMax=*/40, /*pulseWidth=*/5);
+
+  uint32_t nowMs = 1000;
+  // Run past the entrance leg, then confirm the center never exceeds the
+  // visible edges (bunch at the edge, never a full exit) across many bounces.
+  int guard = 0;
+  while (!rig.firstEntranceDone && guard++ < 100000) {
+    nowMs += 16;
+    rig.step(nowMs);
+  }
+  for (int i = 0; i < 20000; ++i) {
+    nowMs += 16;
+    rig.step(nowMs);
+    TEST_ASSERT_TRUE(rig.wavePosition >= 10.0f - 1e-3f);
+    TEST_ASSERT_TRUE(rig.wavePosition <= 40.0f + 1e-3f);
+  }
 }
 
 void test_continuous_transient_ends_after_one_cycle() {
@@ -183,7 +251,7 @@ void test_continuous_transient_ends_after_one_cycle() {
   }
   TEST_ASSERT_TRUE(rig.ended);
   TEST_ASSERT_TRUE(rig.reachedFarEnd);
-  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 0.0f, rig.progress);  // stopped back at the start end
+  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 0.0f, rig.progress);  // stopped back at the near edge
 }
 
 void test_continuous_live_never_ends() {
@@ -202,71 +270,15 @@ void test_continuous_live_never_ends() {
   }
 }
 
-void test_continuous_travel_spans_visible_edges() {
-  test::PulseTravelRig rig;
-  rig.easing = lamp::Easing::Float;
-  rig.loop = true;
-  rig.trigger(/*posMin=*/10, /*posMax=*/40, /*pulseWidth=*/5);
-
-  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 10.0f, rig.travelStart);
-  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 40.0f, rig.travelStart + rig.travelSpan);
-
-  // Center reaches the visible edges at the progress extremes, not off-screen.
-  rig.progress = 0.0f;
-  rig.wavePosition = rig.travelStart + lamp::applyEasing(rig.easing, rig.progress) * rig.travelSpan;
-  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 10.0f, rig.wavePosition);
-  rig.progress = 1.0f;
-  rig.wavePosition = rig.travelStart + lamp::applyEasing(rig.easing, rig.progress) * rig.travelSpan;
-  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 40.0f, rig.wavePosition);
-}
-
-void test_continuous_ebb_in_ramps_from_zero() {
-  test::PulseTravelRig rig;
-  rig.loop = true;
-  rig.ebbStartMs = 1000;
-
-  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 0.0f, rig.ebb(1000));
-  const float mid = rig.ebb(1000 + test::kEbbMs / 2);
-  TEST_ASSERT_TRUE(mid > 0.4f && mid < 0.6f);
-  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 1.0f, rig.ebb(1000 + test::kEbbMs));
-  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 1.0f, rig.ebb(1000 + test::kEbbMs * 10));
-}
-
-void test_ebb_does_not_retrigger_on_reversal() {
-  test::PulseTravelRig rig;
-  rig.easing = lamp::Easing::Float;
-  rig.loop = true;
-  rig.pulseSpeedMs = 10;
-  rig.ebbStartMs = 1000;
-  rig.trigger(0, 20, 3);
-
-  uint32_t nowMs = 1000;
-  int prevDir = rig.waveDirection;
-  bool reversed = false;
-  for (int i = 0; i < 20000 && !reversed; ++i) {
-    nowMs += 16;
-    rig.step(nowMs);
-    if (rig.waveDirection != prevDir) reversed = true;
-    prevDir = rig.waveDirection;
-  }
-  TEST_ASSERT_TRUE(reversed);
-  // step() never touches ebbStartMs, so the ramp stays a pure function of
-  // elapsed time across the turnaround, never resetting to 0.
-  const float expected = static_cast<float>(nowMs - 1000) / static_cast<float>(test::kEbbMs);
-  TEST_ASSERT_FLOAT_WITHIN(1e-6f, std::min(1.0f, expected), rig.ebb(nowMs));
-  TEST_ASSERT_TRUE(rig.ebb(nowMs) > 0.0f);
-  TEST_ASSERT_FLOAT_WITHIN(1e-6f, 1.0f, rig.ebb(1000 + test::kEbbMs + 100));
-}
-
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_linear_travel_matches_legacy);
   RUN_TEST(test_trigger_mode_ends_on_exit);
+  RUN_TEST(test_continuous_first_entrance_starts_off_strip);
+  RUN_TEST(test_continuous_repoints_to_visible_edges_after_entrance);
   RUN_TEST(test_continuous_reverses_and_never_ends);
+  RUN_TEST(test_continuous_pingpong_stays_within_visible_edges);
   RUN_TEST(test_continuous_transient_ends_after_one_cycle);
   RUN_TEST(test_continuous_live_never_ends);
-  RUN_TEST(test_continuous_travel_spans_visible_edges);
-  RUN_TEST(test_continuous_ebb_in_ramps_from_zero);
-  RUN_TEST(test_ebb_does_not_retrigger_on_reversal);
   return UNITY_END();
 }
