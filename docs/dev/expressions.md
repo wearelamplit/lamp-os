@@ -14,7 +14,7 @@ Files:
 | `software/lamp-os/src/expressions/expression.cpp` | `control()` driver, wisp-override gate |
 | `software/lamp-os/src/expressions/expression_manager.{hpp,cpp}` | Owns the entry list + one-shot transients, `makeExpression()` (registry-driven), cascade dedup, mesh recv path |
 | `software/lamp-os/src/expressions/{glitchy,pulse,breathing,shifty,spotty}/*_expression.{hpp,cpp}` | The five shipped subclasses; each declares its own `ExpressionDescriptor` |
-| `software/lamp-os/src/expressions/primitives.hpp` | Shared Zone/Points/Size/Scatter clamped helpers |
+| `software/lamp-os/src/expressions/primitives.hpp` | Shared Zone/Points/Size clamped helpers + `resolveZone` (whole-strip/region toggle → Zone, shared by every zonable expression) + `pulseWidthFromPercent` (pulse `size` percent → capped fade radius) + `glitchBlockPlan` (glitchy scatter level→distinct grain blocks) + `usableSections` (breathing bands that fit the zone at ≥ `kMinSectionPx`) + `edgeTaper` (edge-taper weight: flat interior, curve-parameterized taper near the ends; `TaperCurve::Linear` or `Quadratic`) + `randomPermutation` (Fisher–Yates fill of a 0..n-1 order array over an injected rng; breathing's random band order) |
 | `software/lamp-os/src/expressions/param_utils.hpp` | `getParam` — one-arg (descriptor keys, always present after `applyDefaults`) and two-arg (explicit fallback) lookups |
 | `software/lamp-os/src/expressions/expression_schema.hpp` | `ExpressionDescriptor` / `ParamSpec` / `Bound` / `ColorSpec` / `RangeSpec` — the per-type schema each subclass declares |
 | `software/lamp-os/src/expressions/expression_registry.{hpp,cpp}` | `ExpressionRegistry`: `add`/`remove`/`find`, `applyDefaults()`, `serializeCatalog()` (the `exprcat` wire JSON) |
@@ -42,19 +42,19 @@ The editor shell (`expression_editor_screen.dart`) owns only colors + target; `e
 - `interval?` / `duration?`: `{min, max, step, unit, default: [lo, hi], label?, minKey?, maxKey?}`. `minKey`/`maxKey` name the instance keys the range writes; only `duration` carries them (into the **params map**). `interval` has none — the client writes it to the instance's **top-level** `intervalMin`/`intervalMax`.
 - `zone?`: `{}` (present) or `{optional: true}` (whole-strip/region toggle). Absent = no zone.
 - `excludeTargets?`: `[surface…]`; `defaultTarget?`: surface. Surface strings only, see **Target vocabulary**.
-- `params`: `[ {key, type("int"|"enum"), label, min, max, step, default, unit?, invert?, leftLabel?, rightLabel?, requiresZoning?, options?: [{value, label, zoning?}]} ]`.
+- `params`: `[ {key, type("int"|"enum"), label, min, max, step, default, unit?, invert?, leftLabel?, rightLabel?, help?, requiresZoning?, options?: [{value, label, zoning?}]} ]`.
 
 Within `params`, `max` and `default` are **structured `Bound`s**: a plain number (literal), `{"rel":"pixels"}` (= target surface pixel count), or `{"rel":"pixels","cap":N}` (= `min(pixelCount, N)`), resolved client-side against the target surface. `min` and `step` are plain ints. `colors.max` is a plain int, **not** a `Bound`.
 
 ### Zoning truth table
 
-"Zoning active" is derived by the client (`expression_params_panel.dart::_zoningActive`), in precedence order:
+The zone is a universal **whole-strip/region toggle** on every zonable expression: it selects which part of the strip the effect paints, honored in every mode. "Zoning active" is derived by the client (`expression_params_panel.dart::_zoningActive`), in precedence order:
 
-1. **Zoning enum present** (any `params` entry with an option carrying `zoning:true`): zoning is active iff the currently-selected option's `zoning` is true. Shifty's `fillMode` is the case — selecting `Up`/`Down`/`Bloom` zones, `Uniform` doesn't.
-2. Else **optional zone** (`zone.optional:true`): a whole-strip/region toggle drives it; zoning active iff the synthesized `fullStrip == 0` (region).
+1. **Zoning enum present** (any `params` entry with an option carrying `zoning:true`): zoning is active iff the currently-selected option's `zoning` is true. No shipped expression uses this rung; the app keeps the mechanism, and it stays a valid encoding.
+2. Else **optional zone** (`zone.optional:true`): the whole-strip/region toggle drives it; zoning active iff the synthesized `fullStrip == 0` (region). Every zonable shipped expression is on this rung.
 3. Else **plain zone** (`zone:{}`, no optional, no zoning enum): always zoned.
 
-When zoning is active the client renders the zone (`posMin`/`posMax`) range control and any `requiresZoning:true` params; when inactive it hides both.
+When zoning is active the client renders the zone (`posMin`/`posMax`) range control and any `requiresZoning:true` params; when inactive it hides both. Firmware resolves the toggle via `resolveZone(parameters, window)` in `primitives.hpp`: `fullStrip=1` (default) spans the whole strip and ignores any stale `posMin`/`posMax` left behind in Region mode; `fullStrip=0` honors them.
 
 ### ColorSpec state machine
 
@@ -90,11 +90,34 @@ The Vue web UI (`software/lamp-ui/src/components/expressions/`) renders a **subs
 
 `Expression` derives from `AnimatedBehavior` and is plugged into the `Compositor`, which ticks every registered behaviour every loop iteration. Subclasses override these:
 
-- `void onTrigger()`, **required**. Called once when `trigger()` fires (auto-interval, chain, or manual test). Read `colors[]`, `target`, the per-instance parameter map, and any subclass state. Schedule the first frame by setting `animationState = PLAYING` (or `PLAYING_ONCE`).
-- `void draw()`, the compositor's per-tick render hook (from `AnimatedBehavior`). Every shipped expression overrides `draw()` — it's where pixels actually get written, gated on `shouldAffectBuffer()`. `draw()` runs every tick regardless of `animationState`; guard your paint on the state yourself.
-- `void onUpdate()`, optional. Called by `control()` every loop tick while `animationState == PLAYING || PLAYING_ONCE`. Advance per-frame animation state here. Set `animationState = STOPPED` when done.
+- `void onTrigger()`, **required**. Called once when `trigger()` fires (auto-interval, chain, or manual test) — `trigger()` returns false and skips it when the buffer routing or wisp gate rejects the start. Read `colors[]`, `target`, the per-instance parameter map, and set up subclass state (`frames`, `frame`, allocations). Don't set `animationState` here — `trigger()` calls `playOnce()` right after `onTrigger()` returns, overwriting anything you set.
+- `void draw()`, the compositor's render hook (from `AnimatedBehavior`). Every shipped expression overrides `draw()` — it's where pixels actually get written, gated on `shouldAffectBuffer()`. The compositor calls it once per flush window (~16 ms) while the behavior isn't `STOPPED`; `STOPPED` behaviors are never drawn.
+- `void onUpdate()`, optional. Called by `control()` once per flush window while `animationState == PLAYING || PLAYING_ONCE`. Advance animation state here. Set `animationState = STOPPED` when done.
 - `void onComplete()`, optional. Called the tick after `animationState` transitions back to `STOPPED`. Use it to restore any state you snapshotted in `onTrigger` (most expressions hand the buffer back to the configurator's render and don't need this).
-- `void control()`, overridable but not required. The base class implementation handles the auto-trigger cadence, the wisp-override gate, `onUpdate` dispatch, and `onComplete` dispatch. Subclasses that override `control()` (e.g. `BreathingExpression`, which is continuous and never enters `STOPPED`) take on the responsibility of those four behaviours themselves.
+- `void control()`, overridable but not required. The base class implementation handles the auto-trigger cadence, the wisp-override gate, `onUpdate` dispatch, and `onComplete` dispatch. Subclasses that override `control()` take on the responsibility of those four behaviours themselves; the continuous ones (breathing, spotty) route through the protected `Expression::continuousControl()` helper for the first two.
+
+### Timing convention: wall clock, not frames
+
+The compositor's flush cadence (`MINIMUM_FRAME_DRAW_TIME_MS = 16`) is not a
+stable timebase — it runs ~62 fps steady with dips to ~46 during BLE coex
+windows — so **no user-facing duration is counted in frames**. Every labeled
+duration (glitch duration, shifty fade + hold, spot lifetime, breath cycle,
+pulse transit) derives from `millis()` deltas, breathing's `updateBreathPhase`
+being the reference pattern. The frame counter exists only as the
+`AnimatedBehavior` completion plumbing, driven by two idioms from
+`primitives.hpp`:
+
+- `rewindBeforeExhaust(frame, frames)` right before `nextFrame()` keeps the
+  counter from ever ending an animation whose end belongs to wall-clock (or
+  wave-position) state — steady-state continuous instances rewind forever.
+- Setting `frames = frame + 1` concludes: the next `nextFrame()` flips
+  `PLAYING_ONCE` → `STOPPED` and increments `currentLoop`, so `onComplete`
+  fires through the normal base-class path.
+
+Deadline comparisons use the wrap-safe `timeReached(now, deadline)` from
+`primitives.hpp`, never `millis() > deadline`. Glitchy additionally guarantees
+at least one painted frame even when its duration is shorter than a flush
+window.
 
 ## Frame buffer + targets
 
@@ -104,8 +127,8 @@ The Vue web UI (`software/lamp-ui/src/components/expressions/`) renders a **subs
 
 ## Adding a new expression type: minimum viable diff
 
-1. **New subclass** in `software/lamp-os/src/expressions/foo/foo_expression.{hpp,cpp}` (each expression gets its own directory). Derive from `Expression`, override `draw()` (where you paint) and `onTrigger()`; add `onUpdate()`/`onComplete()`/`control()` as the effect needs. Implement `configureFromParameters(const std::map<std::string, uint32_t>&)` to read your params. Read them with the **one-arg** `getParam(parameters, "key")` — `applyDefaults` has already folded every descriptor key into the map, so a miss is a schema bug, not a missing preset. Look at `glitchy/glitchy_expression.cpp` for a brief-flash pattern, `breathing/breathing_expression.cpp` for a continuous always-running pattern, `spotty/spotty_expression.cpp` for an interval-triggered ambient effect that pauses under wisp override.
-2. **Descriptor** — declare an inline `static constexpr ExpressionDescriptor` in `foo_expression.cpp` (see the shipped types) with id, name, `colors`, optional `interval`/`duration`, zone flags, `params`, and `.make = &makeExpr<FooExpression>`. Expose it via a `static const ExpressionDescriptor& descriptor()` accessor. Every wire field (and the whole editor) derives from this; there is no separate app-side schema. Return `pausesWispOverride`/`continuous` here rather than the app — and override `disabledDuringWispOverride()` on the class to match if you set `pausesWispOverride`.
+1. **New subclass** in `software/lamp-os/src/expressions/foo/foo_expression.{hpp,cpp}` (each expression gets its own directory). Derive from `Expression`, override `draw()` (where you paint) and `onTrigger()`; add `onUpdate()`/`onComplete()`/`control()` as the effect needs. Implement `configureFromParameters(const std::map<std::string, uint32_t>&)` to read your params. Read them with the **one-arg** `getParam(parameters, "key")` — `applyDefaults` has already folded every descriptor key into the map, so a miss is a schema bug, not a missing preset. Look at `glitchy/glitchy_expression.cpp` for an interval-triggered brief-flash pattern, `breathing/breathing_expression.cpp` for a continuous always-running pattern, `spotty/spotty_expression.cpp` for a continuous effect with independent per-point lifecycles that pauses under wisp override.
+2. **Descriptor** — declare the descriptor data as `inline constexpr` in `foo_expression.hpp` (see the shipped types: `kFooDescriptorData`, make-less) with id, name, `colors`, optional `interval`/`duration`, zone flags, and `params`; in the `.cpp`, compose the registered descriptor with `withMake(kFooDescriptorData, &makeExpr<FooExpression>)` and expose it via a `static const ExpressionDescriptor& descriptor()` accessor. The split is a native-test seam: `test_builtin_descriptors` registers the header data directly (the `.make` factory can't link without Arduino), so a descriptor change fails the pinned catalog instead of drifting. Every wire field (and the whole editor) derives from this; there is no separate app-side schema. Return `pausesWispOverride`/`continuous` here rather than the app — and override `disabledDuringWispOverride()` on the class to match if you set `pausesWispOverride`.
 3. **Register it** — add `reg.add(FooExpression::descriptor())` to `Lamp::registerExpressions` in `lamp.cpp`. `ExpressionManager::makeExpression` then finds the descriptor by id, builds the instance via `.make`, and folds defaults before `configureFromParameters`. No factory dispatch to edit.
 4. **App presentation** (optional) — add an entry to `expression_presentation.dart` keyed by your `id` for the picker icon + tagline. Skip it and the type falls back to a generic icon and no tagline; every control still renders from the descriptor.
 
@@ -125,41 +148,40 @@ Those skip lists are **fixed** — adding a per-type param does not touch them, 
 
 ## Shared expression primitives
 
-`primitives.hpp` provides four clamped ingress helpers shared across all expression types. Absent params produce identity behavior; present params clamp to valid range at `configureFromParameters` time. `windowSize` is `fb->pixelCount` at configure time.
+`primitives.hpp` provides three clamped ingress helpers shared across all expression types. Absent params produce identity behavior; present params clamp to valid range at `configureFromParameters` time. `windowSize` is `fb->pixelCount` at configure time.
 
 | Primitive | Param key(s) | Clamp range | Absent default |
 |---|---|---|---|
 | Zone | `posMin`, `posMax` | [0, windowSize-1]; reversed bounds swap | 0 .. windowSize-1 (full strip) |
 | Points | `count` | [1, windowSize] | per-expression (see table below) |
 | Size | `size` | [1, windowSize] | per-expression |
-| Scatter | `scatter` | [0, 100] | 0 (synchronized) |
 
 **Identity invariant.** A config with no params set renders identically to one with all params at their defaults.
 
 ### Per-expression primitive support
 
-| Expression | Zone | Points | Size | Scatter | Notes |
-|---|---|---|---|---|---|
-| Pulse | ✓ | — | ✓ (default 15) | — | |
-| Glitchy | ✓ | ✓ (default 1) | ✓ (default 1) | — | `fullStrip=1` (default) glitches the whole strip; set `fullStrip=0` to glitch Zone/Points/Size points instead |
-| Breathing | ✓ | ✓ (default 1) | ✓ (default windowSize) | ✓ | |
-| Shifty | ✓ | — | — | — | See `fillMode` below |
-| Spotty | ✓ | ✓ (default 3) | ✓ (default 4) | — | Wandering ambient points; `disabledDuringWispOverride` = true. Speed (`spotSpeed` 1..10 s) scales each spot's fade-in/hold/fade-out lifetime. |
+| Expression | Zone | Points | Size | Notes |
+|---|---|---|---|---|
+| Pulse | ✓ | — | ✓ (`size` %, default 40) | `fullStrip=1` (default) spans the whole strip; `fullStrip=0` scopes to the Zone. `size` is a **percent** (5–100) of the zone, not pixels: the fade radius is `pulseWidthFromPercent()` in `primitives.hpp`, capped at `kPulseMaxWidthFrac`=0.33 of the zone (so at 100% the lit span reads ~⅔ of the zone and the wave still visibly travels), with a 3px floor. Wave transit is wall-clock (`pulseSpeed` scaled per pixel); the pulse ends when the wave exits the zone, never on the frame counter |
+| Glitchy | ✓ | — | — | `scatter` (0–5, always active, default 5) sets grain and density. 0 is a solid static fill of the active region held for the duration; 1–5 scatter into progressively finer, sparser flecks (level → {density%, grain px} in `kGlitchScatter`: 1={80,6} … 5={30,1}). Blocks occupy **distinct** grain slots (`slotCount = region / grain`, `blocksWanted = round(density% of slots)`), so realized density is exact rather than collision-capped. `fullStrip=1` (default) spans the whole strip; `fullStrip=0` scopes to the Zone. Each active frame repaints from the saved background, so 1–5 re-roll into a stable dancing density; 0 reads as a steady solid. `durationMin`/`durationMax` are milliseconds of wall clock (max 1000); every glitch paints ≥1 frame. The grain-block plan derives from `glitchBlockPlan()` in `primitives.hpp` |
+| Breathing | ✓ | — | — | `fullStrip=1` (default) spans the whole strip; `fullStrip=0` scopes to the Zone. The whole zone always breathes at full coverage. `breathSpeed` floors at 8 s (fastest cycle; faster reads as hectic), up to 60 s. `sections` (1–5, default 1) splits the zone into N contiguous equal bands; the bands fire in a **random staggered order** so the breath hops around the strip instead of sweeping it. `onTrigger`/`configure` resolves `usableSections_` and a Fisher–Yates permutation (`sectionOrder_`) over the expression's `rng`, fixed per instance (re-rolls on retrigger). Each band's phase offset is `sectionOrder_[band] * kBreathStaggerFrac` (0.15), a controlled overlap where the next breath-order section begins its fade-in as the previous nears the end of its fade-out; 1 = uniform whole-zone breath. `usableSections()` in `primitives.hpp` clamps N down so every band spans ≥ `kMinSectionPx`=5 pixels (zoneSize 36 → 5, 12 → 2, 4 → 1). Steady-state breathing never restarts; phase accrues from `millis()` deltas indefinitely. The zone's outer edges are soft: per-pixel intensity is scaled by `edgeTaper(off + 1, zoneSize + 2, kBreathTaperWidth, Quadratic)` — the taper runs over a virtual region 2 px wider with the offset shifted in one, putting the darkest step off-screen so the outermost real pixel reads the brighter second step (both ends shift symmetrically; interior stays 100). Timing is driven by `breathPhase`; the taper only weights the spatial per-pixel intensity |
+| Shifty | ✓ | — | — | See `fillMode` below. Fades (`fadeDuration`) and the hold (`shiftDurationMin/Max`) are pure `millis()` deadlines; the frame counter cannot end a fade or a hold |
+| Spotty | ✓ | ✓ (default 3, max 5) | ✓ (Small↔Large slider, 1–6 px, default 3) | `fullStrip=1` (default) spans the whole strip; `fullStrip=0` scopes to the Zone. Continuous wandering ambient points; `disabledDuringWispOverride` = true. Each spot fades in/holds/fades out (equal thirds), then respawns at a new random position and color; initial phases are randomly staggered so spots don't pulse in unison. `spotSpeed` (1..10, inverted slow↔fast) scales a wide per-spot lifetime range: each spot rolls a random lifetime in `[kSpotLifeMinMs·spotSpeed, kSpotLifeMaxMs·spotSpeed]` (`spotLifeBounds`), i.e. `[5, 2000] ms` at the fastest setting up to `[50, 20000] ms` at the slowest. The wide, low floor makes the fast end read like fire — mostly rapid pops with occasional lingers. The spot's pixel width is the size value directly; `edgeTaper(k, size, size/2, Linear)` handles even and odd widths symmetrically (size 3 → 50/100/50%, size 4 → 33/66/66/33%, size 5 → 33/66/100/66/33%). |
 
 ### Shifty `fillMode`
 
-`fillMode` controls the per-pixel wavefront order during both fade-to-color and fade-back transitions. Pixels outside the Zone are unaffected.
+The Zone is toggle-driven (`fullStrip=1` whole strip, `fullStrip=0` region), independent of `fillMode`. `fillMode` controls the per-pixel wavefront order within the zone during both fade-to-color and fade-back transitions. Pixels outside the Zone are unaffected in every mode, Uniform included (its fade/hold loops iterate `zone_.posMin..zone_.posMax`).
 
 | Value | Behavior |
 |---|---|
-| 0 | Uniform — all pixels fade simultaneously (default) |
+| 0 | Uniform — all zone pixels fade simultaneously (default) |
 | 1 | Up — first pixel in zone leads, sweeps toward last |
 | 2 | Down — last pixel leads, sweeps toward first |
 | 3 | Bloom — center pixels lead on fade-in; outside-in on fade-back |
 
 ## Trigger cadence
 
-`Expression::control()` checks `millis() > nextTriggerMs` and fires `trigger()` if so. After every fire the schedule is reset with `nextTriggerMs = millis() + rng.range(intervalMinMs, intervalMaxMs)` (`rng` is the per-instance `FastRng`). Subclasses that override `control()` (breathing) are continuous and don't gate on `nextTriggerMs`.
+`Expression::control()` checks `timeReached(millis(), nextTriggerMs)` (wrap-safe) and fires `trigger()` if so. After every fire the schedule is reset with `nextTriggerMs = millis() + rng.range(intervalMinMs, intervalMaxMs)` (`rng` is the per-instance `FastRng`). Subclasses that override `control()` (breathing, spotty) are continuous and don't gate on `nextTriggerMs`.
 
 `enabled = false` clears `autoTriggerEnabled` at load time, which suppresses the auto-trigger in `control()`. Manual `trigger()` from the test path still works.
 
@@ -187,7 +209,18 @@ Semantics:
 
 ## Mesh cascade integration
 
-When `parameters["cascadeEnabled"] == 1`, a local trigger fans out a matching `MSG_EVENT` to every reachable peer, staggered by `parameters["cascadeStaggerMs"]`. The structural loop break is in `triggerInvocation`, remote-arrived triggers are dispatched to a transient one-shot Expression instance and **never cascade**. See `docs/dev/networking.md` (MSG_EVENT section) for the wire format, the gossip-relay rule, and the per-msgType DedupRing (64 slots).
+Cascade is a dev/testing tool, not a user-facing feature: the app exposes the toggle only in dev mode, on purpose — a fleet of user lamps flashing in sync is visual noise, and only a few specifically controlled lamps ship with it. When `parameters["cascadeEnabled"] == 1`, a local trigger fans out a matching `MSG_EVENT` to every reachable peer, staggered by `parameters["cascadeStaggerMs"]`. Continuous descriptors never cascade — a cascaded long-running expression would override other lamps' behavior, and they retrigger at boot, settings upsert, and wisp release anyway — so `maybeCascade` gates them out, matching the app's hidden toggle. The structural loop break is in `triggerInvocation`, remote-arrived triggers are dispatched to a transient one-shot Expression instance and **never cascade**. A transient whose `trigger()` is rejected (wisp hold on a gate=true type) is not retained: it neither occupies the compositor nor blocks the same-sender coalesce check. See `docs/dev/networking.md` (MSG_EVENT section) for the wire format, the gossip-relay rule, and the per-msgType DedupRing.
+
+## Expression mirror
+
+The social echo the fleet ships (rather than cascade, which is dev-only). Every local fire of a triggered (non-`continuous`) expression announces a `MSG_EVENT` (see `ExpressionManager::emitEvent`; continuous types are gated out for the same reason cascade gates them). On receipt, `SocialEchoObserver` (registered on `ExpressionObserverRegistry`) rolls a disposition + social-mode weighted chance to replay that exact expression ~0.4–0.8 s later:
+
+- `rate% = kMirrorBasePct[disposition] * kMirrorModeFactorX10[mode] / 10`, clamped 0..100. Only Fond (4) / Smitten (5) ever mirror; Salty/Wary/Neutral and unknown peers (disposition < 4) are 0. Grid: Fond → 10/20/30, Smitten → 25/50/75 (intro/ambi/extro).
+- Introvert-only cooldown (`kIntrovertMirrorCooldownMs`, 10 min) between mirrors so an introvert doesn't chatter; Ambivert/Extrovert have none.
+- The replay is scheduled into a small pending buffer and fired from `tick()` via `triggerInvocation`, which suppresses cascade — so two warm lamps never echo each other into a loop.
+- Skipped entirely during OTA and while a local Test/preview is active.
+
+All feel numbers (`kMirrorBasePct`, `kMirrorModeFactorX10`, cooldown, delay floor + jitter) live in `behaviors/social_echo.hpp` and are bench-tunable.
 
 ## Testing
 
@@ -196,7 +229,12 @@ Host-side tests are per-folder PlatformIO suites under `software/lamp-os/test/` 
 - `test/test_personality_engine/personality_engine.cpp`, auto-trigger cadence, enable/disable
 - `test/test_transient_override/transient_override.cpp`, the ColorOverride state machine the wisp gate consults
 - `test/test_cascade_dedup/cascade_dedup.cpp`, `RecentCascade` ring keying and eviction
-- `test/test_expression_primitives/expression_primitives.cpp`, Zone/Points/Size/Scatter primitive helpers
+- `test/test_expression_primitives/expression_primitives.cpp`, Zone/Points/Size primitive helpers, `timeReached` wrap safety, `rewindBeforeExhaust`
+- `test/test_builtin_descriptors/builtin_descriptors.cpp`, the exprcat wire JSON pinned against the production header-defined descriptor data
+- `test/test_glitchy_timing/glitchy_timing.cpp`, glitchy's millis-driven duration gate (≥1 painted frame, wrap-safe deadline)
+- `test/test_glitchy_coverage/glitchy_coverage.cpp`, `glitchBlockPlan` scatter→grain-block math (solid sentinel, grain-1 at max, exact per-level density, monotonic sparsity, empty/undersized region)
+- `test/test_transient_lifetime/transient_lifetime.cpp`, transient GC backstop + never-started-transient rejection
+- `test/test_social_echo/social_echo.cpp`, expression-mirror rate grid, disp<4 early-out, introvert cooldown, replay scheduling window + fire, emitEvent continuous-gate
 
 To add a host-side test for a new expression: instantiate it with a stub `FrameBuffer` (see the personality-engine suite for the pattern), call the public `trigger()` to fire `onTrigger()`, then call `draw()` per frame and assert on the buffer's pixel state. You don't need a real Compositor — `Expression::control()` (the auto-cadence driver) is the only thing that requires one.
 
@@ -205,5 +243,5 @@ To add a host-side test for a new expression: instantiate it with a stub `FrameB
 - **Reserved-keys mismatch.** Adding a top-level field without updating both `config_codec.cpp` and `sections.dart`'s `_reservedKeys` will leak the field into the `parameters` map. Round-trips look fine but the field gets silently demoted on the next read. Per-type params never need this — only genuinely new top-level fields do.
 - **`target` is a bitmask, not an enum.** 1=shade, 2=base, 3=both. Mixing up the bits compiles fine and produces "expression only paints half the lamp" symptoms.
 - **The visible output is not your buffer.** Expressions paint into the configurator's frame buffer. If a `ColorOverride` is `Holding`, the strip shows the override fade, not your writes. Test in isolation (with the wisp off or `disabledDuringWispOverride` true) OR clear overrides manually before debugging.
-- **No allocation in `onUpdate()`.** It runs every loop tick (every ~4-8 ms during PLAYING). Allocate in `onTrigger()`, reuse buffers across frames. The existing expressions follow this pattern; copy them.
-- **Continuous expressions own the loop.** Subclasses that override `control()` (breathing) don't get the base class's wisp-override gate for free, they have to check `isWispCurrentlyOverriding()` themselves if they want to honour the flag. Today no continuous expression does this; if you add one that should, fold the check into your override.
+- **No allocation in `onUpdate()`.** It runs once per flush window (~16 ms) for the whole time an instance is PLAYING. Allocate in `onTrigger()`, reuse buffers across frames. The existing expressions follow this pattern; copy them.
+- **Continuous expressions own the loop.** Subclasses that override `control()` (breathing, spotty) don't get the base class's wisp-override gate for free. Route the override through the protected `Expression::continuousControl()` helper: it applies the wisp gate every tick, auto-retriggers when `STOPPED` (never for transients, which `gcTransients()` must reap), and returns true while suppressed so the caller can react. On that path a steady-state instance freezes its wall-clock state for a clean resume (breathing resets `lastBreathUpdateMs`), but a **transient must keep its completion progress advancing** while the paint is suppressed — breathing keeps calling `updateBreathPhase()`, spotty keeps aging its spots — or it never reaches `STOPPED` and squats on the compositor until the 180 s GC backstop.

@@ -52,6 +52,10 @@ hood); the Flutter toolchain setup is in the [root README](../../README.md).
 
 ## Guides
 
+### Dev environment
+- [`environment/`](environment/README.md), toolchain setup, npm task catalog,
+  flashing a lamp, and the emulator+bridge path for development without a phone.
+
 ### Architecture
 - [`lamp-framework.md`](lamp-framework.md), the lamp's core runtime: behavior
   stack, compositor/overrides, the per-variant build model, and the single-
@@ -67,8 +71,8 @@ hood); the Flutter toolchain setup is in the [root README](../../README.md).
 - [`expressions.md`](expressions.md), the auto-triggered animation subsystem:
   how to write a new expression, the wisp-override gate, the testing pattern.
 - [`social.md`](social.md), overview of how a lamp behaves around other lamps,
-  greetings, crowd-dim, and the closest-Smitten pulse, and how they fit
-  together. **Start here** for the social system, then the two docs below.
+  greetings and crowd-dim, and how they fit together. **Start here** for the
+  social system, then the two docs below.
 - [`personality-greetings.md`](personality-greetings.md), disposition-driven
   greeting animations (how lamps acknowledge peers they meet on the mesh).
 - [`personality-signals.md`](personality-signals.md), the signals a custom

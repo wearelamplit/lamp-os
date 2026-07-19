@@ -107,35 +107,31 @@ uint32_t range(uint32_t lo, uint32_t hi); // unbiased, inclusive [lo, hi]
 
 ## Mesh / peer queries
 
-### `NearbyLamps` — `components/network/mesh/nearby_lamps.hpp`
-Live roster of lamps this one can currently see. Global singleton
-`lamp::nearbyLamps`; also reachable as `behaviorContext()->nearbyLamps`
-(null-check that pointer). Use this for "who's around" / "react when a
-lamp shows up". For *weighted* crowd reactions, prefer
-`PersonalityEngine` (see [`personality-signals.md`](personality-signals.md)).
+### `LampRoster` — `components/network/mesh/lamp_roster.hpp`
+Live roster of lamps this one can currently see, on two facets: **near**
+(seen via BLE — physically close; gates greetings and crowd-dim) and
+**mesh** (seen via ESP-NOW — network reachable; gates OTA and presence).
+Global singleton `lamp::lampRoster`; also reachable as
+`behaviorContext()->lampRoster` (null-check that pointer). Use this for
+"who's around" / "react when a lamp shows up". For *weighted* crowd
+reactions, prefer `PersonalityEngine` (see
+[`personality-signals.md`](personality-signals.md)).
 
 ```cpp
-std::vector<NearbyLamp> getReachableViaBle(uint32_t maxAgeMs);    // short-range, sorted by RSSI (nearest first)
-std::vector<NearbyLamp> getReachableViaEspNow(uint32_t maxAgeMs); // mesh-range
-std::vector<NearbyLamp> getAll();
-bool findByBdAddr(const std::string& bdAddr, NearbyLamp& out);
-bool findByMac(const uint8_t mac[6], NearbyLamp& out);
+std::vector<RosterEntry> getNear(uint32_t maxAgeMs);  // BLE-seen, sorted by RSSI (nearest first)
+std::vector<RosterEntry> getMesh(uint32_t maxAgeMs);  // ESP-NOW-seen
+std::vector<RosterEntry> getUngreetedArrivals(uint32_t maxAgeMs); // near + not yet acknowledged
+std::vector<RosterEntry> getAll();
+bool findByMac(const uint8_t mac[6], RosterEntry& out);
 ```
 
-Each `NearbyLamp` carries `name`, `baseColor` / `shadeColor`, `bdAddr`,
-`mac`, `lastRssi`, `firstSeenMs` (use for arrival edge detection — see
-[`lamp-framework.md`](lamp-framework.md)), `lastSeenViaBleMs` /
-`lastSeenViaEspNowMs`, `firmwareVersion`, `protocolVersion`, `otaState`.
-
-### Proximity — `util/proximity.hpp`
-Bucket an RSSI into a coarse distance tier, so you don't hardcode dBm
-thresholds in every expression.
-
-```cpp
-enum class Proximity : uint8_t { Near = 0, Around = 1, Far = 2 };
-Proximity proximityFor(int8_t rssi);
-uint8_t   proximityToInt(Proximity);
-```
+`RosterEntry` is a trivially-copyable POD (~104 B) held in a fixed
+static array of 100; snapshots never allocate per entry. Each entry
+carries `name`, `baseColor` / `shadeColor`, `mac` bytes + `hasMac`
+(canonical colon-hex `lampId` string via `macStr()`), `lastRssi`,
+`lastSeenNearMs` / `lastSeenMeshMs`, `firmwareVersion`,
+`protocolVersion`, `otaState`. For arrival edge detection see
+[`lamp-framework.md`](lamp-framework.md).
 
 ---
 
@@ -146,8 +142,8 @@ How *this* lamp feels about a specific peer, persisted across reboots.
 Disposition is the 1–5 scale the crowd weighting is built on.
 
 ```cpp
-uint8_t getDisposition(const std::string& bdAddr) const; // 1=Salty 2=Wary 3=Neutral 4=Fond 5=Smitten (3 = unknown peer)
-void    setDisposition(const std::string& bdAddr, uint8_t value); // debounced NVS flush
+uint8_t getDisposition(const std::string& lampId) const; // 1=Salty 2=Wary 3=Neutral 4=Fond 5=Smitten (3 = unknown peer)
+void    setDisposition(const std::string& lampId, uint8_t value); // debounced NVS flush
 String  asDispositionsJson() const;
 ```
 
@@ -162,7 +158,7 @@ in range, that's `PersonalityEngine::crowdComposition()` /
 
 | Helper | File | What |
 |---|---|---|
-| `isValidBdAddr(const char*)` | `util/bd_addr.hpp` | Validate canonical `AA:BB:CC:DD:EE:FF` form before keying a disposition |
+| `isValidBdAddr(const char*)` | `util/bd_addr.hpp` | Validate canonical `AA:BB:CC:DD:EE:FF` colon-hex form before keying a disposition on a `lampId` |
 | `base64::encode(const uint8_t*, size_t)` | `util/base64.hpp` | Tiny header-only encoder (wisp palette payloads) |
 
 ---

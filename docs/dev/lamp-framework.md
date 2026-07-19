@@ -12,22 +12,19 @@ does NOT include visual algorithms (animations, gradients, palette cycling),
 that's your `AnimatedBehavior` subclass's domain.
 
 **Per-variant builds.** Each lamp variant has its own PIO environment
-(`upesy_wroom_standard`, `upesy_wroom_snafu`). Two distinct build flags do two
-jobs: `-D LAMP_BUILD_VARIANT_*` is the **compile-selection** flag (it picks
-which variant's factory + sources compile into the binary, via `#ifdef` +
-`build_src_filter`), while `-D LAMP_INITIAL_TYPE` is the **first-boot NVS seed**
-(injected from the env's `custom_lamp_variant` by `inject_initial_type.py`). At
-boot, `resolveLampType()` in `main.cpp` reads `Config::lampType` from NVS
-(falling back to the `LAMP_INITIAL_TYPE` seed on first boot), then
-`createLampByType()` instantiates the matching subclass — which, in a per-variant
-binary, is the single compiled-in variant. Per-variant ed25519-signed binaries keep cross-variant and cross-fork
-OTA cryptographically separated.
+(`upesy_wroom_standard`, `upesy_wroom_snafu`). Variant identity is entirely
+compile-time: the env's `-D LAMP_BUILD_VARIANT_*` flag both picks which
+variant's sources compile in (paired with `build_src_filter`) and, via `#ifdef`
+in `lamp_variants.hpp`, selects what `createCompiledLamp()` and
+`compiledLampType()` return. The binary IS a variant; there is no runtime
+registry lookup. Per-variant ed25519-signed binaries keep cross-variant and
+cross-fork OTA cryptographically separated.
 
 ## Single-instance invariant
 
 The framework assumes ONE Lamp subclass instance per firmware binary,
-selected at boot by the `core/lamp_variants.cpp` factory (per NVS `lampType`).
-This is deliberate, it lets compositor, config, frame buffers, NimBLE handles,
+the compiled-in variant returned by `createCompiledLamp()` in
+`lamp_variants.hpp`. This is deliberate, it lets compositor, config, frame buffers, NimBLE handles,
 and aggregate state (pendingSlots, overrides) live at file scope without
 coordination overhead. Two Lamp instances in one binary is unsupported.
 
@@ -130,38 +127,41 @@ See `software/lamp-os/src/core/hw_config.hpp` for the full `HwConfig` /
 `SurfaceSpec` POD definitions. See `core/lamp_features.hpp` for the `Features`
 bitmask enum.
 
-### Step 2: Register the variant (four sites, in lockstep)
+### Step 2: Register the variant (two files, in lockstep)
 
 This is a **per-variant build**: exactly one `LAMP_BUILD_VARIANT_<TYPE>` is
 defined per binary, and `build_src_filter` excludes the other variants'
-sources. So `kLampVariants` is a **single-entry** array holding only the
-compiled-in variant — a `standard` binary can only ever instantiate
-`StandardLamp`. Adding a variant means updating four sites together (the header
-of `core/lamp_variants.cpp` lists them):
+sources. A `standard` binary can only ever instantiate `StandardLamp`. Adding a
+variant means updating two files together.
+
+**1. `platformio.ini`** — a new `[env:upesy_wroom_<type>]` block that defines
+`-D LAMP_BUILD_VARIANT_<TYPE>`, sets `custom_lamp_variant = <name>`, and adds a
+`build_src_filter` arm including `lamps/<name>/`. Without that env there's no
+way to compile the variant.
+
+**2. `software/lamp-os/src/lamp_variants.hpp`** — four `#ifdef` sites keyed on
+the same flag:
 
 ```cpp
-// In software/lamp-os/src/core/lamp_variants.cpp — all guarded by the build flag:
-
-// 2. conditional include
+// conditional include
 #ifdef LAMP_BUILD_VARIANT_<TYPE>
-#include "lamps/<name>/<name>.hpp"
+#include "lamps/<name>/<name>_lamp.hpp"
 #endif
 
-// (extend the one-of invariant)
+// extend the exactly-one invariant
 #if (defined(LAMP_BUILD_VARIANT_STANDARD) + defined(LAMP_BUILD_VARIANT_SNAFU) \
      + defined(LAMP_BUILD_VARIANT_<TYPE>)) != 1
-#error "Exactly one LAMP_BUILD_VARIANT_* must be defined"
+#error "Exactly one LAMP_BUILD_VARIANT_* must be defined (check platformio.ini env)"
 #endif
 
-// 3. conditional factory arm in kLampVariants
+// createCompiledLamp() arm
 #elif defined(LAMP_BUILD_VARIANT_<TYPE>)
-  {"<name>", make<Name>},
-```
+  return std::make_unique<<Name>Lamp>();
 
-The remaining site is **1. the `[env:upesy_wroom_<type>]` block in
-`platformio.ini`** — it defines `LAMP_BUILD_VARIANT_<TYPE>`, sets
-`custom_lamp_variant = <name>`, and adds a `build_src_filter` arm that includes
-`lamps/<name>/`. Without that env there's no way to compile the variant.
+// compiledLampType() arm
+#elif defined(LAMP_BUILD_VARIANT_<TYPE>)
+  return "<name>";
+```
 
 ### Step 3: Build
 
@@ -172,8 +172,8 @@ VARIANT=snafu npm run lamp:build   # any other variant
 ```
 
 Each variant has its own env, so `build_src_filter` compiles only that variant's
-sources into its own binary. The runtime factory still resolves the type from
-NVS at boot.
+sources into its own binary; the compiled-in variant is the lamp's identity, and
+NVS `lampType` is written from it at boot rather than consulted to pick it.
 
 ## Color slots
 
@@ -218,47 +218,35 @@ Each aux slot currently maps to its own physical strip. Painting a sub-region of
 
 ## Provisioning a fresh hardware lamp
 
-### Command-line (scripted provisioning)
+Pick the variant by flashing its env; the binary carries its identity.
 
 ```sh
 pio run -e upesy_wroom_snafu -t upload --upload-port /dev/cu.usbserial-XXX
 # or, from the repo root: VARIANT=snafu PORT=/dev/cu.usbserial-XXX npm run lamp:flash
 ```
 
-The per-variant env declares `custom_lamp_variant = snafu`, which
-`software/lamp-os/scripts/inject_initial_type.py` (a PIO pre-build hook) reads
-via `env.GetProjectOption()` and turns into `-D LAMP_INITIAL_TYPE="snafu"`
-(SCons `CPPDEFINES` tuple form, bypassing shell-quoting hazards). On first boot, `main.cpp` seeds
-NVS with this value; subsequent OTAs preserve identity.
-
-### Serial CLI (interactive)
-
-Flash a stock binary without `LAMP_TYPE` set, and the lamp's NVS is empty: the
-lamp listens 10 seconds on USB serial for `LAMP_TYPE=<name>\n`:
-
-```sh
-echo "LAMP_TYPE=snafu" > /dev/cu.usbserial-XXX
-```
-
-The value persists to NVS and the lamp reboots into the new variant. Subsequent
-OTAs preserve identity. The CLI validates the name against `kLampVariants` and
-rejects unknown types (with the known-names list printed to serial).
+There is no post-flash provisioning step. A reflash to the other variant's env
+switches identity on the next boot (see below).
 
 ## Variant resolution at boot
 
-`main.cpp`'s `resolveLampType()` priority order:
+The compiled-in variant is authoritative. `compiledLampType()` returns the
+name baked in by `-D LAMP_BUILD_VARIANT_*`, and `main.cpp` writes it to the NVS
+`lampType` key on every boot, overwriting a stale value left by a previous
+cross-variant reflash:
 
-1. **NVS `lampType`**, set on a previous boot or via serial CLI
-2. **`LAMP_INITIAL_TYPE` build flag**, first-boot seed injected from the env's
-   `custom_lamp_variant`; persists to NVS on first use
-3. **Serial CLI prompt**, 10-second window on USB serial when both above are
-   absent
-4. **Default `"standard"`**, canonical fallback
+```
+const char* compiled = lamp::compiledLampType();
+if (config.loadLampType() != compiled) config.setLampType(compiled);
+g_lamp = lamp::createCompiledLamp();
+```
 
-The resolved type is always logged: `[lamp] resolved lampType="X"`. On an
-unknown type, `main.cpp` calls `haltVisible()`, an infinite LED blink, rather
-than silently falling back. A lamp that boots healthy but drives wrong hardware
-is the worst failure mode.
+NVS `lampType` is a persisted mirror, not an input to resolution: the firmware
+never reads it to decide what to build, only writes it. Its purpose is to
+expose the variant over the BLE `lampType` section field so the app can fetch
+the matching per-variant OTA binary. A cross-variant OTA can't land it in the
+wrong state anyway — the `{type}-{channel}` LSIG gate drops a mismatched image
+before it flashes.
 
 ## BehaviorContext services
 
@@ -273,7 +261,7 @@ struct BehaviorContext {
   std::vector<FrameBuffer*> expressionFrameBuffers;   // [shade, base]
   ConfiguratorBehavior* baseConfigurator = nullptr;   // color/brightness fades
   ConfiguratorBehavior* shadeConfigurator = nullptr;
-  NearbyLamps* nearbyLamps = nullptr;            // peer discovery, RSSI, proximity
+  LampRoster* lampRoster = nullptr;              // peer roster (near + mesh), RSSI
 };
 ```
 
@@ -282,33 +270,27 @@ Real example from `snafu::Greeting::control()`:
 
 ```cpp
 void snafu::Greeting::control() {
-  if (!context_ || !context_->nearbyLamps) {
-    lastTickMs_ = millis();
+  if (!context_ || !context_->lampRoster) {
     return;
   }
-  // ... now safe to use context_->nearbyLamps
+  // ... now safe to use context_->lampRoster
 }
 ```
 
-## Arrival edge detection: firstSeenMs
+## Arrival edge detection
 
-Detecting when a peer first appears on the mesh maps to Python's
-`await network.arrived()`. Use the 3-line pattern:
+Detecting when a peer first appears maps to Python's
+`await network.arrived()`. Use `getUngreetedArrivals()` + `acknowledge()`:
 
 ```cpp
-for (const auto& p : context_->nearbyLamps->getReachableViaBle(/*maxAgeMs=*/5000)) {
-  if (p.firstSeenMs >= lastTickMs_ && p.bdAddr != lastGreetedBdAddr_) {
-    // peer just arrived, this fires exactly once per arrival
-  }
+for (const auto& p : context_->lampRoster->getUngreetedArrivals(/*maxAgeMs=*/5000)) {
+  // peer arrived and hasn't been greeted yet
+  context_->lampRoster->acknowledge(p.name);
 }
-lastTickMs_ = millis();
 ```
 
-`firstSeenMs` is set once when the peer first enters the nearby-lamp registry
-and stays locked there through subsequent RSSI refreshes. Comparing
-`firstSeenMs >= lastTickMs_` fires exactly one tick when they arrive.
-`lastTickMs_` is updated at the end of `control()` so the comparison doesn't
-fire again next cycle.
+`acknowledge()` marks the entry so it stops appearing in
+`getUngreetedArrivals()` until the peer prunes out and returns.
 
 ## The colorsEditable flag
 
@@ -369,7 +351,7 @@ impossible, no registry or allowlist needed. The signing chain enforces it.
 | `core/animated_behavior.hpp` | STABLE, base class for custom behaviors |
 | `core/behavior_context.hpp` | STABLE-ADDITIVE, new nullable pointers may be added; existing pointers won't be removed |
 | `core/personality_engine.hpp` | STABLE, personality gate for expression suppression |
-| `components/network/mesh/nearby_lamps.hpp` | STABLE, read by custom behaviors |
+| `components/network/mesh/lamp_roster.hpp` | STABLE, read by custom behaviors |
 | `config/config.hpp` | STABLE, read-only surface for custom behaviors |
 
 ### Internal headers: may change without notice
@@ -433,27 +415,24 @@ Relevant files: `scripts/sign_firmware.py` (signer),
 ## PIO build setup
 
 Per-variant envs: `upesy_wroom_standard`, `upesy_wroom_snafu` (both extend
-`env_base_upesy`). Each declares `custom_lamp_variant = <name>` and a
+`env_base_upesy`). Each sets `-D LAMP_BUILD_VARIANT_<NAME>` and a
 `build_src_filter` that compiles **only** that variant's `lamps/<variant>/`
-sources, the other variant is never built.
+sources, the other variant is never built. Each also declares
+`custom_lamp_variant = <name>`, which `inject_firmware_channel.py` and
+`sign_firmware.py` read (via `env.GetProjectOption()`) to build the
+`{type}-{channel}` OTA gate string.
 
-**`inject_initial_type.py` hook** is wired as a PIO pre-build script
-(`extra_scripts = pre:scripts/inject_initial_type.py` in `env_base_upesy`). It
-reads the env's `custom_lamp_variant` option and appends
-`-D LAMP_INITIAL_TYPE="<name>"` to `CPPDEFINES` using SCons tuple form, no
-shell-quoting hazards.
+**SemVer source-of-truth.** The root `VERSION` file (`MAJOR.MINOR.PATCH`, one
+line) is the canonical version for both lamp and wisp. `inject_version.py` (a
+PIO pre-build hook wired in both components' `platformio.ini`) parses it and
+injects `-D LAMP_FW_MAJOR/MINOR/PATCH`:
 
-**SemVer source-of-truth.** The three build_flags in `[env_base_upesy]` of
-`platformio.ini` are the canonical version:
-
-```ini
--D LAMP_FW_MAJOR=1
--D LAMP_FW_MINOR=0
--D LAMP_FW_PATCH=165
+```
+1.1.1
 ```
 
-`FIRMWARE_VERSION_STR` is derived from these via preprocessor stringify.
-Bumping a release = edit three integers; no other file needs to change.
+`FIRMWARE_VERSION` / `FIRMWARE_VERSION_STR` are derived from those macros.
+Bumping a release = edit one file; no other file needs to change.
 
 ## Lifecycle: Core 0 vs Core 1
 
@@ -489,14 +468,64 @@ or allocate directly on the host task. Instead, use
 
 ### Home mode
 
-"Home mode" is the lamp's idle/resting state, dimmed, quiet, no active
-expressions, entered when nothing is going on. The Compositor tracks it
-(`Compositor::setHomeMode(bool)`) and gates each behavior on the
-`allowedInHomeMode` flag on `AnimatedBehavior` (default `true`): the
-render rule is `!homeMode || allowedInHomeMode`, so by default a behavior
-keeps drawing even while the lamp rests. Set `allowedInHomeMode = false`
-to suppress your behavior during the idle/resting state, the framework
-then skips its `draw()` until home mode releases.
+"Home mode" is the lamp's idle/resting state, dimmed and quiet. The
+Compositor tracks it (`Compositor::setHomeMode(bool)`) and gates each
+behavior via two virtual queries on `AnimatedBehavior`:
+`isSocialBehavior()` (returns `true` on `SocialBehavior`) and
+`homeModeExpressionId()` (returns the expression type id string on
+`Expression` subclasses, `nullptr` otherwise). The suppression policy
+(which social and which expression ids to skip) is pushed by
+`reapplyHomeModeState()` via `Compositor::setHomeModePolicy()` and comes
+from `HomeModeSettings::socialDisabled` and
+`HomeModeSettings::disabledExpressionTypes`. The render rule is
+`!homeMode || !homeModeSkips(b)`; behaviors not matching either query
+always draw.
+
+## Brightness path and the power governor
+
+Every brightness writer funnels through `lamp::setAllStripsBrightness`:
+`applyEffectiveBrightness()` (home-mode/user baseline → personality
+crowd-dim → transient override → `calculateBrightnessLevel`), the slider
+micro-fade in `Lamp::tick`, and the `apply::brightness*` helpers (BLE
+slider, mesh cascade, settings_blob) all end there. The funnel latches the
+requested level and hands `min(requested, governor ceiling)` to every strip
+driver, so the governor caps every path with one `min()` and never touches
+the computed baseline.
+
+The ceiling `calculateBrightnessLevel` scales against is not the raw variant
+`HwConfig::maxBrightness` but `effectiveCeiling(hw_.maxBrightness,
+config.lamp.brightnessCeiling)` — the variant cap narrowed by the user's
+Battery Saver setting, floored at 1, cached in `s_hwMaxBrightness`.
+`Lamp::recomputeEffectiveCeiling()` refreshes it at setup and on every
+settings-blob write, so a new ceiling applies without a reboot.
+
+The estimator (`core/power_governor.hpp`) prices the frame the drivers are
+about to show. `fullDutyMa` gamma-sums each surface's FrameBuffer at
+`kMaPerChannelFullDuty` (10 mA per channel; W counts only on 4-channel
+strips); `demandMa` scales that by the NeoPixel `(level+1)/256` factor at
+the requested (pre-clamp) level and adds `kIdleMaPerPixel` (0.7 mA) per
+pixel. The compositor's `preFlushHook` (`governFrame`, `lamp.cpp`) runs it
+once per drawn frame, after behaviors draw and before any pixel write, so a
+clamp decision reaches the drivers ahead of that frame's `setPixelColor`
+loop — `setBrightness` after `setPixelColor` destructively rescales the
+frame it was meant to protect.
+
+`PowerGovernor` compares demand against `HwConfig::supplyBudgetMa`
+(2000 mA on both variants) minus a reserve: 400 mA while the radio is hot
+(OTA in either direction, quiet mode, or a BLE client) or during the boot
+window, 200 mA quiet. Any frame over budget at the level about to be
+written snaps the ceiling to the level that fits inside the same frame
+(`senseFrame` returns true and `governFrame` re-mins the drivers before the
+flush). While clamped, per-frame re-solves only move the ceiling down;
+recovery goes through the release, paced at 1 s inside
+`PowerGovernor::tick` (called from `Lamp::tick`, which also advances the
+boot ramp), which returns the governor to dormant at 88 % of budget —
+there the ceiling is 255 and the funnel `min()` is identity. The ceiling
+glides back up over 400 ms, and every cold boot holds ceiling 128 for 5 s
+then ramps to full by 10 s to ride out supply inrush.
+Tuning constants live in `core/power_governor.cpp`; the per-pixel draw
+constants in `software/shared/led-common/src/lampos/led_power.hpp`. The
+`qa/power-governor.md` runbook is the hardware pass.
 
 ## File index
 
@@ -504,8 +533,7 @@ then skips its `draw()` until home mode releases.
 |---|---|
 | `software/lamp-os/src/core/lamp.hpp` | Base class: setup/tick entry points, hw config accessor |
 | `software/lamp-os/src/core/lamp.cpp` | Implementation: BLE GATT wiring, mesh init, OTA health checks |
-| `software/lamp-os/src/core/lamp_variants.hpp` | `createLampByType()` + `knownLampTypes()` declarations |
-| `software/lamp-os/src/core/lamp_variants.cpp` | `kLampVariants` array, append new variants here |
+| `software/lamp-os/src/lamp_variants.hpp` | `createCompiledLamp()` + `compiledLampType()`, compile-time variant selection |
 | `software/lamp-os/src/core/hw_config.hpp` | `HwConfig`, `SurfaceSpec`, `Surface`, `ByteOrder` PODs + `validateHwConfig()` |
 | `software/lamp-os/src/core/lamp_features.hpp` | `Features` bitmask enum for built-in behavior opt-in/out |
 | `software/lamp-os/src/core/behavior_stack_builder.hpp` | `BehaviorStackBuilder` helper for registering behaviors |
@@ -515,14 +543,14 @@ then skips its `draw()` until home mode releases.
 | `software/lamp-os/src/core/behavior_context.hpp` | `BehaviorContext` struct: service pointers for behaviors |
 | `software/lamp-os/src/core/animated_behavior.hpp` | `AnimatedBehavior` base class: control/draw interface |
 | `software/lamp-os/src/core/frame_buffer.hpp/.cpp` | `FrameBuffer`: the per-surface pixel buffer `draw()` writes into |
+| `software/lamp-os/src/core/power_governor.hpp/.cpp` | Current estimator + supply-budget brightness governor |
 | `software/lamp-os/src/core/compositor.hpp/.cpp` | `Compositor`: blends behavior layers, home-mode gate, dynamic add/remove |
 | `software/lamp-os/src/lamps/standard/standard_lamp.hpp/.cpp` | Production fleet lamp (built-in social, expressions, idle) |
 | `software/lamp-os/src/lamps/snafu/snafu_lamp.hpp/.cpp` | Amanita mushroom lamp: reference variant |
 | `software/lamp-os/src/lamps/snafu/background_fade.hpp/.cpp` | Shade palette-cycle behavior (12 scenes, 45 s per scene) |
 | `software/lamp-os/src/behaviors/aux_dots.hpp/.cpp` | `AuxDotsBehavior`: paints an aux surface framebuffer from `config.auxSlotColors[slotIndex]`; static for 1 color, animated for 2+ |
 | `software/lamp-os/src/lamps/snafu/greeting.hpp/.cpp` | Peer-arrival watcher with glitch + fade response |
-| `software/lamp-os/src/main.cpp` | Unified entry point: variant resolution + factory + FATAL halt |
-| `software/lamp-os/scripts/inject_initial_type.py` | PIO pre-build hook for `LAMP_TYPE` provisioning |
+| `software/lamp-os/src/main.cpp` | Unified entry point: mirrors compiled variant into NVS, instantiates it |
 | `software/lamp-os/platformio.ini` | Per-variant envs (`upesy_wroom_standard`/`_snafu`) extending `env_base_upesy`; SemVer build_flags |
 | `scripts/gen_firmware_keys.py` | Per-fork ed25519 keypair generation |
 | `scripts/sign_firmware.py` | Build-time firmware signer |

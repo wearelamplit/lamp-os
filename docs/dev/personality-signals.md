@@ -28,7 +28,7 @@ the caller side, the framework already wires + ticks the engine.
 | `crowdDimFactor()` | `float [floor, 1.0]` | Ready-to-use brightness multiplier, log-curved + per-mode floored | You want to dim your lamp the same way personality does |
 | `smoothedCrowdWeight()` | `float [0, ∞)` | Raw weighted W, the signal that feeds `crowdDimFactor()` before curve/floor | You want to apply your own curve, floor, or target axis |
 | `crowdComposition()` | `CrowdComposition` (5 `uint8_t` counts) | Currently-visible peer counts by disposition | You want to react to specific disposition patterns |
-| `greetingFor(bdAddr)` | `GreetingTuning` struct | The greeting waveform the engine would play for that peer | You're driving your own greeting renderer on a non-Standard lamp |
+| `greetingFor(lampId)` | `GreetingTuning` struct | The greeting waveform the engine would play for that peer | You're driving your own greeting renderer on a non-Standard lamp |
 
 `CrowdComposition`:
 
@@ -89,7 +89,7 @@ hysteresis, layer it yourself.
 
 ### 3. Custom greeting renderer
 
-`greetingFor(bdAddr)` returns the same `GreetingTuning` the framework's
+`greetingFor(lampId)` returns the same `GreetingTuning` the framework's
 `SocialBehavior` would render for a peer. A variant lamp that wants
 the same disposition-driven waveform but rendered on different
 hardware (the snafu lamp does exactly this in
@@ -97,8 +97,8 @@ hardware (the snafu lamp does exactly this in
 and draw it however it wants:
 
 ```cpp
-void SnafuGreeting::playFor(const NearbyLamp& peer) {
-  const auto tuning = lamp::personalityEngine.greetingFor(peer.bdAddr);
+void SnafuGreeting::playFor(const RosterEntry& peer) {
+  const auto tuning = lamp::personalityEngine.greetingFor(peer.macStr());
   // Drive your own ease-in / hold / fade-out using tuning's frame
   // counts; render onto your variant's pixel surfaces.
   renderEaseIn_(peer.baseColor, tuning.easeInFrames);
@@ -115,8 +115,8 @@ disposition the same way the rest of the fleet does.
 
 ## What's NOT exposed (and why)
 
-- **Per-peer raw RSSI**, already on `NearbyLamps` directly. Iterate
-  `nearbyLamps.getReachableViaBle(...)` if you need distance.
+- **Per-peer raw RSSI**, already on `LampRoster` directly. Iterate
+  `lampRoster.getNear(...)` if you need distance.
 - **The smoothing state buffer** (`sampleBuf_`, `sampleHead_`,
   `emaSeeded_`), internal to the smoother. Leaking it would freeze
   the smoother's internals as an external contract; don't want that.
