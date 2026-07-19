@@ -14,6 +14,7 @@
 
 extern lamp::Compositor compositor;
 extern lamp::Config config;
+extern lamp::MeshLink meshLink;
 
 namespace lamp {
 
@@ -29,16 +30,18 @@ class SnafuLamp : public Lamp {
       {.role=Surface::Shade, .pin=14, .byteOrder=ByteOrder::GRBW, .pixelCount=16, .name="Small Dots"},
       {.role=Surface::Shade, .pin=27, .byteOrder=ByteOrder::GRBW, .pixelCount=12, .name="Medium Dots"},
       {.role=Surface::Shade, .pin=26, .byteOrder=ByteOrder::GRBW, .pixelCount=9,  .name="Big Dots"},
-      {.role=Surface::Base,  .pin=12, .byteOrder=ByteOrder::GRBW, .pixelCount=24, .name="Stem", .broadcast=1},
+      {.role=Surface::Base,  .pin=12, .byteOrder=ByteOrder::GRBW, .pixelCount=24, .name="Stem", .broadcast=1, .reversed=true},
     },
-    .maxBrightness = 180,
+    .maxBrightness = 230,
+    .supplyBudgetMa = 1400,
   }) {}
 
  protected:
   Features featuresEnabled() const override {
     return Features::All
       & ~Features::SocialBehavior      // replaced by snafu::Greeting
-      & ~Features::DefaultExpressions; // snafu owns its own visuals
+      & ~Features::DefaultExpressions  // snafu owns its own visuals
+      & ~Features::WebApp;             // snafu configures over BLE
   }
 
   Config::Defaults defaults() const override {
@@ -57,9 +60,9 @@ class SnafuLamp : public Lamp {
   }
 
   void registerExpressions(ExpressionRegistry& reg) override {
-    reg.add(GlitchyExpression::descriptor());
-    reg.add(PulseExpression::descriptor());
-    reg.add(SpottyExpression::descriptor());
+    reg.add(GlitchyExpression::classDescriptor());
+    reg.add(PulseExpression::classDescriptor());
+    reg.add(SpottyExpression::classDescriptor());
   }
 
   void createBehaviors(BehaviorStackBuilder& b) override {
@@ -69,6 +72,8 @@ class SnafuLamp : public Lamp {
     greeting_ = std::make_unique<snafu::Greeting>(shadeFb());
     b.add(greeting_.get());
     compositor.behaviorContext().greeting = greeting_.get();
+    greeting_->setMeshLink(&meshLink);
+    greeting_->setDotsBehavior(dots_.get());
     ble_control::setGreetingStateProvider(
         [this]() { return greeting_->greetingState(); });
     greeting_->setOnGreetingChangeCallback(

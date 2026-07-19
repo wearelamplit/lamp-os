@@ -6,7 +6,7 @@
 
 #define LAMP_SHADE_PIN 12
 #define LAMP_BASE_PIN 14
-#define LAMP_MAX_BRIGHTNESS 180
+#define LAMP_MAX_BRIGHTNESS 230
 
 namespace lamp {
 
@@ -15,9 +15,10 @@ class StandardLamp : public Lamp {
   StandardLamp() : Lamp(HwConfig{
     .strips = {
       {.role=Surface::Shade, .pin=LAMP_SHADE_PIN, .byteOrder=ByteOrder::GRBW, .name="Shade", .broadcast=1},
-      {.role=Surface::Base,  .pin=LAMP_BASE_PIN,  .byteOrder=ByteOrder::GRBW, .name="Base"},
+      {.role=Surface::Base,  .pin=LAMP_BASE_PIN,  .byteOrder=ByteOrder::GRBW, .name="Base", .reversed=true},
     },
     .maxBrightness = LAMP_MAX_BRIGHTNESS,
+    .supplyBudgetMa = 1400,
   }) {}
 
  protected:
@@ -40,7 +41,7 @@ class StandardLamp : public Lamp {
 
   void createBehaviors(BehaviorStackBuilder&) override {
     // All StandardLamp behaviors are covered by Feature flags (Features::All).
-    // Nothing to add here — the framework registers configurator, personality,
+    // Nothing to add here; the framework registers configurator, personality,
     // social, fade-out, and knockout based on featuresEnabled().
   }
 };
