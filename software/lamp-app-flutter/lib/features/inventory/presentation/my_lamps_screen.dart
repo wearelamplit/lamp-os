@@ -174,12 +174,15 @@ class _LampTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     // Connected lamps don't advertise (NimBLE peripheral default), so the
     // BLE scan never sees them. Checking only `nearbyById` would render
-    // them as "offline". Cross-check fbp's connectedDevices list to
-    // catch that case. `isConnected` is a synchronous check against the
-    // already-cached connected-devices set; it doesn't materialise any
-    // notifier, so this stays cheap across an N-tile inventory.
+    // them as "offline". Watch the lamp's live connection state so an
+    // unsolicited link drop (powered-off lamp hitting supervision timeout)
+    // repaints this tile immediately, instead of holding green until an
+    // unrelated rebuild. Seed with the synchronous `isConnected` read so the
+    // first paint is correct before the stream's initial emit lands.
     final bleClient = ref.watch(bleClientProvider);
-    final connectedToThisLamp = bleClient.isConnected(lamp.id);
+    final connectedToThisLamp =
+        ref.watch(lampConnectedProvider(lamp.id)).value ??
+            bleClient.isConnected(lamp.id);
     // For the active lamp, also fold in the controlNotifier's `connected`
     // signal. fbp may report connected mid-handshake before the app has
     // a usable GATT session. The `.select` keeps slider drags from
