@@ -5,7 +5,7 @@
 #include <cstring>
 
 #include "components/network/protocol/lamp_protocol.hpp"
-#include "components/network/mesh/nearby_lamps.hpp"
+#include "components/network/mesh/lamp_roster.hpp"
 #include "components/network/mesh/mesh_link.hpp"
 #include "core/behavior_context.hpp"
 #include "core/compositor.hpp"
@@ -111,11 +111,32 @@ void ExpressionManager::setCompositor(Compositor* compositor) {
 void ExpressionManager::maybeCascade(const ExpressionEntry& entry,
                                      const uint8_t* excludeMac) {
   if (!meshLink_ || !entry.expression) return;
-  if (entry.config.getParameter(kParamCascadeEnabled, 0) == 0) return;
+  if (entry.config.getParameter(kParamCascadeEnabled, 0) == 0) {
+#ifdef LAMP_DEBUG
+    Serial.printf("[cascade] skip not-enabled type=%s\n", entry.config.type.c_str());
+#endif
+    return;
+  }
+
+  // Continuous expressions retrigger at boot, settings upsert, and wisp
+  // release; a stored cascadeEnabled=1 would fan out one-shots on each. The
+  // app hides the cascade toggle for continuous types, so gate here to match.
+  const ExpressionDescriptor* d = registry_.find(entry.config.type.c_str());
+  if (d && effectiveContinuous(*d, entry.config.parameters)) {
+#ifdef LAMP_DEBUG
+    Serial.printf("[cascade] skip continuous type=%s\n", entry.config.type.c_str());
+#endif
+    return;
+  }
 
   const uint32_t intervalIdx = static_cast<uint32_t>(entry.expression->getTarget());
   const uint32_t nowMs = millis();
-  if (recentCascades_.seen(entry.config.type, intervalIdx, nowMs)) return;
+  if (recentCascades_.seen(entry.config.type, intervalIdx, nowMs)) {
+#ifdef LAMP_DEBUG
+    Serial.printf("[cascade] skip dedup type=%s\n", entry.config.type.c_str());
+#endif
+    return;
+  }
   recentCascades_.record(entry.config.type, intervalIdx, nowMs);
 
   const uint32_t staggerMs = entry.config.getParameter(kParamCascadeStaggerMs, 0);
@@ -126,10 +147,10 @@ void ExpressionManager::maybeCascade(const ExpressionEntry& entry,
   inv.target = static_cast<uint8_t>(entry.expression->getTarget());
   inv.parameters = parametersWithoutCascadeKeys(entry.config.parameters);
 
-  auto peers = nearbyLamps.getReachableViaEspNow(LAMP_PRUNE_TIME_MS);
+  auto peers = lampRoster.getMesh(LAMP_PRUNE_TIME_MS);
   uint8_t myMac[6];
   meshLink_->getMyMac(myMac);
-  std::vector<NearbyLamp> targets;
+  std::vector<RosterEntry> targets;
   targets.reserve(peers.size());
   for (const auto& p : peers) {
     if (!p.hasMac) continue;
@@ -138,28 +159,66 @@ void ExpressionManager::maybeCascade(const ExpressionEntry& entry,
     targets.push_back(p);
   }
   std::sort(targets.begin(), targets.end(),
-            [](const NearbyLamp& a, const NearbyLamp& b) {
+            [](const RosterEntry& a, const RosterEntry& b) {
               return a.lastRssi > b.lastRssi;
             });
 
-  if (targets.empty()) return;
-  if (meshLink_->isOtaInProgress()) return;
+  if (targets.empty()) {
+#ifdef LAMP_DEBUG
+    Serial.printf("[cascade] skip no-peers type=%s\n", entry.config.type.c_str());
+#endif
+    return;
+  }
+  if (meshLink_->isOtaInProgress()) {
+#ifdef LAMP_DEBUG
+    Serial.printf("[cascade] skip ota type=%s\n", entry.config.type.c_str());
+#endif
+    return;
+  }
 
+  size_t sent = 0;
+  size_t dropped = 0;
+  size_t overLen = 0;
   for (size_t i = 0; i < targets.size(); ++i) {
     const uint32_t d = static_cast<uint32_t>(i + 1) * staggerMs;
     inv.delayMs = d > kMaxDelayMs ? kMaxDelayMs : d;
     std::string json;
     serializeInvocation(inv, json);
-    if (json.size() > lamp_protocol::COMMAND_MAX_PAYLOAD) continue;
+    if (json.size() > lamp_protocol::COMMAND_MAX_PAYLOAD) {
+      ++dropped;
+      overLen = json.size();
+      continue;
+    }
     meshLink_->sendCommand(targets[i].mac,
                            reinterpret_cast<const uint8_t*>(json.data()),
                            json.size());
+    ++sent;
   }
+  // Unconditional: an over-cap invocation silently fails to cascade on
+  // deployed lamps; this is the only signal.
+  if (dropped > 0) {
+    Serial.printf("[cascade] ERR payload %uB over %uB cap, dropped %u/%u sends type=%s\n",
+                  (unsigned)overLen,
+                  (unsigned)lamp_protocol::COMMAND_MAX_PAYLOAD,
+                  (unsigned)dropped, (unsigned)targets.size(),
+                  entry.config.type.c_str());
+  }
+#ifdef LAMP_DEBUG
+  if (sent > 0) {
+    Serial.printf("[cascade] sent type=%s peers=%u\n",
+                  entry.config.type.c_str(), (unsigned)sent);
+  }
+#endif
 }
 
 void ExpressionManager::emitEvent(const ExpressionEntry& entry) {
   if (!meshLink_ || !entry.expression) return;
   if (meshLink_->isOtaInProgress()) return;
+
+  // Continuous expressions retrigger at boot, settings upsert, and wisp
+  // release; announcing those would spuriously trigger peer mirrors.
+  const ExpressionDescriptor* d = registry_.find(entry.config.type.c_str());
+  if (d && effectiveContinuous(*d, entry.config.parameters)) return;
 
   const uint32_t intervalIdx = static_cast<uint32_t>(entry.expression->getTarget());
   const uint32_t nowMs = millis();
@@ -187,8 +246,8 @@ std::vector<AnimatedBehavior*> ExpressionManager::getBehaviors() {
 }
 
 void ExpressionManager::clear() {
-  // Drop active-test pointers first — they point into the entries we're
-  // about to destroy.
+  // Drop active-test pointers first; they point into the entries about
+  // to be destroyed.
   activeTests_.clear();
   expressions.clear();
 }
@@ -196,8 +255,8 @@ void ExpressionManager::clear() {
 bool ExpressionManager::triggerExpression(const std::string& type) {
   bool triggered = false;
   const ExpressionEntry* firstFired = nullptr;
-  // Suppress per-entry cascade callbacks from Expression::trigger() — we
-  // batch a single cascade for the logical trigger after the loop.
+  // Suppress per-entry cascade callbacks from Expression::trigger();
+  // a single cascade for the logical trigger is batched after the loop.
   suppressCascade_ = true;
   for (auto& entry : expressions) {
     if (entry.type == type && entry.expression) {
@@ -212,7 +271,7 @@ bool ExpressionManager::triggerExpression(const std::string& type) {
                 type.c_str(), triggered,
                 firstFired ? "≥1 entry" : "no entries");
 #endif
-  // Cascade once per logical trigger, not once per entry — a TARGET_BOTH
+  // Cascade once per logical trigger. A TARGET_BOTH
   // expression has two entries (shade + base) but should fan out a single
   // invocation that receivers' own managers expand back to both sides.
   if (firstFired) { maybeCascade(*firstFired); emitEvent(*firstFired); }
@@ -231,14 +290,16 @@ bool ExpressionManager::triggerExpression(const std::string& type, ExpressionTar
     }
   }
   suppressCascade_ = false;
+#ifdef LAMP_DEBUG
+  Serial.printf("[trigger] '%s' target=%d fired=%d\n",
+                type.c_str(), static_cast<int>(target), triggered);
+#endif
   if (firstFired) { maybeCascade(*firstFired); emitEvent(*firstFired); }
   return triggered;
 }
 
-void ExpressionManager::broadcastInvocation(const ExpressionInvocation& inv,
-                                            const uint8_t* excludeMac) {
-  if (!shadeBuffer || !baseBuffer) return;
-
+ExpressionManager::ExpressionEntry
+ExpressionManager::entryFromInvocation(const ExpressionInvocation& inv) {
   ExpressionTarget target = static_cast<ExpressionTarget>(inv.target);
   FrameBuffer* buffer = (target == TARGET_BASE) ? baseBuffer : shadeBuffer;
 
@@ -253,6 +314,14 @@ void ExpressionManager::broadcastInvocation(const ExpressionInvocation& inv,
                                     entry.config.intervalMin,
                                     entry.config.intervalMax,
                                     target, entry.config.parameters);
+  return entry;
+}
+
+void ExpressionManager::broadcastInvocation(const ExpressionInvocation& inv,
+                                            const uint8_t* excludeMac) {
+  if (!shadeBuffer || !baseBuffer) return;
+
+  ExpressionEntry entry = entryFromInvocation(inv);
   if (!entry.expression) return;
 
   maybeCascade(entry, excludeMac);
@@ -273,6 +342,10 @@ void ExpressionManager::onExpressionFired(Expression* e) {
   if (suppressCascade_ || !e) return;
   for (auto& entry : expressions) {
     if (entry.expression.get() == e) {
+#ifdef LAMP_DEBUG
+      Serial.printf("[expr] fired type=%s target=%d\n", entry.type.c_str(),
+                    static_cast<int>(e->getTarget()));
+#endif
       maybeCascade(entry);
       emitEvent(entry);
       return;
@@ -281,7 +354,7 @@ void ExpressionManager::onExpressionFired(Expression* e) {
 }
 
 bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
-                                          const uint8_t srcMac[6]) {
+                                          const uint8_t srcMac[6], bool broadcast) {
   if (!shadeBuffer || !baseBuffer) return false;
 
   ExpressionTarget invTarget = static_cast<ExpressionTarget>(inv.target);
@@ -289,7 +362,7 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
   // Coalesce: if a transient with the same (sender, type) is still
   // animating, drop this incoming cascade. Prevents pile-up from one
   // chatty sender (e.g. spam-tapping Test on the originator) while still
-  // letting concurrent cascades from DIFFERENT senders both land — each
+  // letting concurrent cascades from DIFFERENT senders both land; each
   // sender contributes one in-flight transient.
   for (const auto& t : transientExpressions_) {
     if (t.type == inv.type && t.expression &&
@@ -305,7 +378,17 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
     }
   }
 
-  // Determine target buffers — same convention as addExpression. TARGET_BOTH
+  // Home mode makes the per-type disable list authoritative for received
+  // cascades too: drop a home-disabled type at receipt so no transient is
+  // created (the render gate would refuse it, leaving a zombie until GC).
+  if (compositor_ && compositor_->homeModeSkipsType(inv.type)) {
+#ifdef LAMP_DEBUG
+    Serial.printf("[expr] home-mode drop %s (type disabled)\n", inv.type.c_str());
+#endif
+    return false;
+  }
+
+  // Determine target buffers, same convention as addExpression. TARGET_BOTH
   // fires on both halves of the lamp; specific target fires on one.
   std::vector<FrameBuffer*> targetBuffers;
   if (invTarget == TARGET_BOTH) {
@@ -328,29 +411,60 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
   for (auto* buffer : targetBuffers) {
     // Build a fresh one-shot Expression instance directly from the
     // invocation. NEVER consults this lamp's `expressions` (configured)
-    // vector — the receiver's local config is intentionally irrelevant.
+    // vector; the receiver's local config is intentionally irrelevant.
     // The cascade is a self-contained "execute this expression once and
     // forget it" command; the receiver's own configured expressions remain
     // entirely independent (untouched, unread, unmodified).
     auto expr = makeExpression(inv.type, buffer, inv.colors,
                                /*intervalMin*/ 60, /*intervalMax*/ 900,
                                invTarget, inv.parameters);
-    if (!expr) continue;  // unknown type
+    if (!expr) {
+#ifdef LAMP_DEBUG
+      Serial.printf("[expr] transient rejected type=%s (unknown type)\n",
+                    inv.type.c_str());
+#endif
+      continue;
+    }
     expr->autoTriggerEnabled = false;  // transients fire once; the STOPPED-state auto-retrigger and any onComplete re-chain are gated off
 
     Expression* raw = expr.get();
+    // addBehavior wires the BehaviorContext trigger() needs; a trigger the
+    // wisp gate (or buffer routing) rejects never starts, and retaining the
+    // dead STOPPED transient would block same-sender coalescing for the
+    // full GC lifetime.
     if (compositor_) compositor_->addBehavior(raw);
+    if (!raw->trigger()) {
+      if (compositor_) compositor_->removeBehavior(raw);
+#ifdef LAMP_DEBUG
+      Serial.printf("[expr] transient rejected type=%s (never started)\n",
+                    inv.type.c_str());
+#endif
+      continue;
+    }
     TransientExpression t;
     t.type = inv.type;
     std::memcpy(t.srcMac, srcMac, 6);
     t.expression = std::move(expr);
     t.createdMs = millis();
     transientExpressions_.push_back(std::move(t));
-    raw->trigger();
     triggered = true;
+#ifdef LAMP_DEBUG
+    Serial.printf("[expr] transient created type=%s target=%d t=%lu\n",
+                  inv.type.c_str(), static_cast<int>(invTarget),
+                  (unsigned long)millis());
+#endif
   }
 
   suppressCascade_ = false;
+
+  // `broadcast` originates a wave from this call, distinct from suppressCascade_
+  // which only stops the transient's own trigger() from re-firing one.
+  if (triggered && broadcast) {
+    ExpressionEntry entry = entryFromInvocation(inv);
+    maybeCascade(entry);
+    emitEvent(entry);
+  }
+
   return triggered;
 }
 
@@ -365,6 +479,16 @@ void ExpressionManager::gcTransients() {
     const bool complete = it->expression && it->expression->isAnimationComplete();
     const bool expired = nowMs - it->createdMs >= kTransientMaxLifetimeMs;
     if (complete || expired) {
+      if (expired && !complete) {
+        Serial.printf("[expr] WARN transient reaped expired type=%s age=%lums (never completed)\n",
+                      it->type.c_str(),
+                      (unsigned long)(nowMs - it->createdMs));
+      }
+#ifdef LAMP_DEBUG
+      Serial.printf("[expr] transient reaped type=%s (%s) t=%lu\n",
+                    it->type.c_str(), complete ? "complete" : "expired",
+                    (unsigned long)nowMs);
+#endif
       if (compositor_) compositor_->removeBehavior(it->expression.get());
       it = transientExpressions_.erase(it);
     } else {

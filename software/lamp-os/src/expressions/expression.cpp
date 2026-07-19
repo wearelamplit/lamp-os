@@ -32,7 +32,7 @@ void Expression::saveBufferState() {
 }
 
 // Defined out-of-line at the bottom of this file. Queries the lamp's
-// two ColorOverride globals — returns true iff the wisp is actively
+// two ColorOverride globals; returns true iff the wisp is actively
 // holding either surface. Used by shouldAffectBuffer() AND control()
 // below to suppress disabled-during-wisp expressions.
 bool isWispCurrentlyOverriding();
@@ -41,22 +41,29 @@ bool Expression::shouldAffectBuffer() {
   // Context is wired by Compositor::addBehavior at register time (or by
   // ExpressionManager::setCompositor for transients). Until both are wired
   // and ExpressionManager::begin() has published the buffer list, treat as
-  // not-yet-routable and skip — same behavior as the old empty-vector guard.
+  // not-yet-routable and skip.
   if (!context_ || context_->expressionFrameBuffers.size() < 2) return false;
 
-  // Check if current buffer matches our target
+  // Check if current buffer matches the target
   bool isShade = (fb == context_->expressionFrameBuffers[0]);  // Shade is first
   bool isBase = (fb == context_->expressionFrameBuffers[1]);   // Base is second
+
+  // While the operator has this surface's color editor open, pause all
+  // expressions on it so the color being picked reads clean instead of
+  // getting overdrawn. Per-surface: editing base leaves shade alone.
+  if ((isBase && lamp::overrides.base.operatorEditing()) ||
+      (isShade && lamp::overrides.shade.operatorEditing())) {
+    return false;
+  }
 
   // Wisp-override draw gate. control() already suppresses auto-trigger
   // and (for Breathing) per-frame onUpdate while wisp paint is held, but
   // an expression that was already PLAYING when wisp activated keeps
-  // its CACHED last frame — and draw() runs each tick regardless,
-  // stomping the wisp paint with stale data. The 2026-06-13 "jacko
-  // renders pink despite correct wisp blue at beginFade" symptom was
-  // exactly this: a frozen BreathingExpression::draw() repainting its
-  // last targetColor over the wisp gradient every frame. Suppress
-  // draw too while wisp owns the relevant surface.
+  // its CACHED last frame, and draw() runs each tick regardless,
+  // stomping the wisp paint with stale data (a frozen
+  // BreathingExpression::draw() repainting its last targetColor over the
+  // wisp gradient every frame). Suppress draw too while wisp owns the
+  // relevant surface.
   if (disabledDuringWispOverride() && isWispCurrentlyOverriding()) {
     return false;
   }
@@ -86,7 +93,7 @@ void Expression::control() {
   }
 
   // Check for automatic trigger
-  if (autoTriggerEnabled && animationState == STOPPED && millis() > nextTriggerMs) {
+  if (autoTriggerEnabled && animationState == STOPPED && timeReached(millis(), nextTriggerMs)) {
     trigger();
   }
 
@@ -95,11 +102,17 @@ void Expression::control() {
     onUpdate();
   }
 
-  // Handle completion - check if we just stopped
+  // Handle completion when the animation just stopped
   if (animationState == STOPPED && currentLoop > lastCompletedLoop) {
     onComplete();
     lastCompletedLoop = currentLoop;
   }
+}
+
+bool Expression::continuousControl() {
+  if (disabledDuringWispOverride() && isWispCurrentlyOverriding()) return true;
+  if (autoTriggerEnabled && animationState == STOPPED) trigger();
+  return false;
 }
 
 Color Expression::getRandomColor() {
@@ -113,11 +126,11 @@ Color Expression::firstColorOr(Color fallback) const {
   return colors.empty() ? fallback : colors.front();
 }
 
-void Expression::trigger() {
+bool Expression::trigger() {
   // Only trigger if this expression should affect this buffer
   // This ensures expressions respect their target configuration
   if (!shouldAffectBuffer()) {
-    return;
+    return false;
   }
 
   // Start immediately
@@ -132,6 +145,7 @@ void Expression::trigger() {
   if (context_ && context_->expressionManager) {
     context_->expressionManager->onExpressionFired(this);
   }
+  return true;
 }
 
 // Lives in lamp.cpp as globals; defined in lamp namespace.
@@ -139,8 +153,8 @@ void Expression::trigger() {
 
 namespace lamp {
 
-// Forward-declared in this TU above Expression::control(). Cheap query
-// — two bool reads + two enum comparisons per Expression per loop
+// Forward-declared in this TU above Expression::control(). Cheap query,
+// two bool reads + two enum comparisons per Expression per loop
 // tick. The override aggregate lives in override_aggregate.cpp.
 bool isWispCurrentlyOverriding() {
   if (lamp::overrides.base.isActive() &&

@@ -39,12 +39,12 @@ void enqueueDelayedInvocation(const ExpressionInvocation& inv,
                               uint32_t delayMs);
 
 /**
- * @brief Manages active expressions and their lifecycle
+ * Manages active expressions and their lifecycle.
  */
 class ExpressionManager {
  private:
   // Store expression with its type for triggering. `config` is a snapshot
-  // of the ExpressionConfig that built this entry — kept so the manager can
+  // of the ExpressionConfig that built this entry, kept so the manager can
   // make cascade decisions without each Expression subclass having to
   // expose its raw parameter map.
   struct ExpressionEntry {
@@ -58,15 +58,15 @@ class ExpressionManager {
   MeshLink* meshLink_ = nullptr;
   Compositor* compositor_ = nullptr;
   // Set during the manager's own trigger* loops so per-entry Expression::trigger()
-  // callbacks don't fan out a cascade we're already handling explicitly (or
-  // intentionally skipping for remote-arrived invocations). Loop-task only —
+  // callbacks don't fan out a cascade already being handled explicitly (or
+  // intentionally skipping for remote-arrived invocations). Loop-task only,
   // no concurrency.
   bool suppressCascade_ = false;
 
   // One-shot Expression instances created on-demand by triggerInvocation when
   // a remote cascade arrives. They live in the compositor for the duration of
   // their animation, then gcTransients() removes them. Entirely independent of
-  // the `expressions` (configured) vector — no interaction with the receiver's
+  // the `expressions` (configured) vector; no interaction with the receiver's
   // local config in any direction.
   //
   // `type` + `srcMac` together key the coalesce check in triggerInvocation:
@@ -94,7 +94,7 @@ class ExpressionManager {
   // already fanned out, so a TARGET_BOTH expression's per-entry auto-
   // trigger from Expression::control() doesn't double-cascade through
   // onExpressionFired(). The shade entry fires, records (type, idx, now),
-  // then the base entry fires microseconds later — recentCascades_.seen()
+  // then the base entry fires microseconds later; recentCascades_.seen()
   // returns true and maybeCascade() short-circuits. The pure data shape
   // (keying, eviction, window check) is mirrored in
   // test/test_cascade_dedup/cascade_dedup.cpp.
@@ -140,19 +140,20 @@ class ExpressionManager {
 
   // Parallel dedup ring for MSG_EVENT announces. Same keying and eviction
   // policy as recentCascades_: a TARGET_BOTH expression's shade and base
-  // entries auto-fire microseconds apart — recentEvents_.seen() suppresses
+  // entries auto-fire microseconds apart; recentEvents_.seen() suppresses
   // the second announce so observers receive exactly one per logical trigger.
   RecentCascade recentEvents_;
 
   // Fan out MSG_COMMAND to each nearby lamp for an expression that just
-  // fired locally, if its config opts in via cascadeEnabled. No-op when
-  // no MeshLink has been wired in. Never called for remote-arrived
-  // triggers — that's the structural loop break.
+  // fired locally, if its config opts in via cascadeEnabled. Continuous
+  // descriptors never cascade. No-op when no MeshLink has been wired in.
+  // Never called for remote-arrived triggers; that's the structural loop
+  // break.
   //
   // Internally gates on recentCascades_ to enforce the "cascade once per
   // logical trigger" invariant: a TARGET_BOTH expression auto-firing the
   // shade and base entries in the same tick must produce exactly one
-  // outbound cascade. Use the (type, intervalIdx) key — currently the
+  // outbound cascade. Use the (type, intervalIdx) key, currently the
   // entry's target field, which is identical across both halves of a
   // TARGET_BOTH config and distinct for TARGET_SHADE vs TARGET_BASE.
   //
@@ -163,6 +164,10 @@ class ExpressionManager {
   // Broadcast a MSG_EVENT announce for a locally-fired expression. Gated on
   // recentEvents_ so a TARGET_BOTH auto-trigger produces exactly one event.
   void emitEvent(const ExpressionEntry& entry);
+
+  // Synthesize a cascade-enabled ExpressionEntry from an invocation, selecting
+  // the base/shade buffer by `inv.target`. Feeds maybeCascade + emitEvent.
+  ExpressionEntry entryFromInvocation(const ExpressionInvocation& inv);
 
   ExpressionRegistry registry_;
 
@@ -181,155 +186,158 @@ class ExpressionManager {
   ExpressionRegistry& registry() { return registry_; }
 
   /**
-   * @brief Initialize manager with frame buffers
+   * Initialize manager with frame buffers.
    */
   void begin(FrameBuffer* shade, FrameBuffer* base);
 
   /**
-   * @brief Wire up the mesh send path for the cascade convention. Optional —
-   *        when unset, cascade is silently disabled (boot before mesh ready,
-   *        or test environments).
+   * Wire up the mesh send path for the cascade convention. Optional;
+   * when unset, cascade is silently disabled (boot before mesh ready,
+   * or test environments).
    */
   void setMeshLink(MeshLink* link);
 
   /**
-   * @brief Wire up the compositor so triggerInvocation can register transient
-   *        one-shot Expressions built from incoming remote invocations.
-   *        Without this, remote cascades are silently no-op'd.
+   * Wire up the compositor so triggerInvocation can register transient
+   * one-shot Expressions built from incoming remote invocations.
+   * Without this, remote cascades are silently no-op'd.
    */
   void setCompositor(Compositor* compositor);
 
   /**
-   * @brief Load expressions from config
+   * Load expressions from config.
    */
   void loadFromConfig(const ExpressionSettings& settings);
 
   /**
-   * @brief Get active expression behaviors for compositor
+   * Get active expression behaviors for compositor.
    */
   std::vector<AnimatedBehavior*> getBehaviors();
 
   /**
-   * @brief Add a new expression. Used at boot by loadFromConfig (compositor
-   *        not yet built). Runtime callers should use upsertExpression.
+   * Add a new expression. Used at boot by loadFromConfig (compositor
+   * not yet built). Runtime callers should use upsertExpression.
    */
   void addExpression(const ExpressionConfig& config);
 
   /**
-   * @brief Clear all expressions. Only safe before the compositor has been
-   *        built — does not unregister behaviors from a running compositor.
+   * Clear all expressions. Only safe before the compositor has been
+   * built; does not unregister behaviors from a running compositor.
    */
   void clear();
 
   /**
-   * @brief Trigger every expression whose type matches. LOCAL path —
-   *        honors the cascade convention if configured.
+   * Trigger every expression whose type matches. LOCAL path;
+   * honors the cascade convention if configured.
    */
   bool triggerExpression(const std::string& type);
 
   /**
-   * @brief Trigger expressions matching both type and target. Used by the
-   *        per-row Test button to fire exactly the configured instance.
-   *        LOCAL path — honors the cascade convention if configured.
+   * Trigger expressions matching both type and target. Used by the
+   * per-row Test button to fire exactly the configured instance.
+   * LOCAL path; honors the cascade convention if configured.
    */
   bool triggerExpression(const std::string& type, ExpressionTarget target);
 
   /**
-   * @brief REMOTE path. Called only by the receive side of the mesh when a
-   *        triggerExpression CONTROL_OP arrives. Builds a fresh transient
-   *        Expression instance from the invocation's colors + params and
-   *        fires it once; the receiver's own configured expressions are
-   *        not consulted. Transients live in the compositor for the
-   *        duration of their animation and are reaped by gcTransients().
-   *        NEVER cascades — this is the structural loop break that makes
-   *        flood propagation safe.
+   * Builds a fresh transient Expression from the invocation's colors +
+   * params and fires it once; the lamp's own configured expressions are
+   * not consulted. Serves the mesh receive/forward paths and local
+   * originations (the app Test button). Transients live in the compositor
+   * for their animation and are reaped by gcTransients().
+   *
+   * The transient's own trigger() never re-cascades; that structural loop
+   * break makes flood propagation safe. `broadcast` is a separate axis: true
+   * only for a local origination (the app Test button) that must fan a wave
+   * out, false for every receive/forward path so received cascades stay
+   * terminal.
    */
   bool triggerInvocation(const ExpressionInvocation& inv,
-                         const uint8_t srcMac[6]);
+                         const uint8_t srcMac[6], bool broadcast = false);
 
   /**
-   * @brief Broadcast an invocation to the crowd WITHOUT firing it locally.
-   *        Synthesizes a cascading entry from `inv` and runs the same
-   *        maybeCascade (directed RSSI-staggered wave) + emitEvent (announce)
-   *        path a locally-fired cascading expression uses, minus the local
-   *        render. snafu's greeting uses it to fan a crowd glitch on arrival
-   *        while its own scramble renders locally.
+   * Broadcast an invocation to the crowd WITHOUT firing it locally.
+   * Synthesizes a cascading entry from `inv` and runs the same
+   * maybeCascade (directed RSSI-staggered wave) + emitEvent (announce)
+   * path a locally-fired cascading expression uses, minus the local
+   * render. snafu's greeting uses it to fan a crowd glitch on arrival
+   * while its own scramble renders locally.
    *
-   *        `excludeMac`: if non-null, that peer is skipped in the target loop.
-   *        Default nullptr sends to all reachable peers.
+   * `excludeMac`: if non-null, that peer is skipped in the target loop.
+   * Default nullptr sends to all reachable peers.
    */
   void broadcastInvocation(const ExpressionInvocation& inv,
                            const uint8_t* excludeMac = nullptr);
 
   /**
-   * @brief Send an invocation directly to a single peer by MAC. Serializes
-   *        `inv`, size-guards against COMMAND_MAX_PAYLOAD, and calls
-   *        meshLink_->sendCommand. No-op if no meshLink_ is wired.
+   * Send an invocation directly to a single peer by MAC. Serializes
+   * `inv`, size-guards against COMMAND_MAX_PAYLOAD, and calls
+   * meshLink_->sendCommand. No-op if no meshLink_ is wired.
    */
   void sendInvocationTo(const uint8_t mac[6], const ExpressionInvocation& inv);
 
   /**
-   * @brief Called by Expression::trigger() after onTrigger() runs, regardless
-   *        of how trigger() was reached (auto-interval from control(),
-   *        internal chain triggers, etc.). Looks up the entry by pointer and
-   *        runs the cascade convention. Suppressed when the manager's own
-   *        trigger* loops are running so they can batch cascade themselves.
+   * Called by Expression::trigger() after onTrigger() runs, regardless
+   * of how trigger() was reached (auto-interval from control(),
+   * internal chain triggers, etc.). Looks up the entry by pointer and
+   * runs the cascade convention. Suppressed when the manager's own
+   * trigger* loops are running so they can batch cascade themselves.
    */
   void onExpressionFired(Expression* e);
 
   /**
-   * @brief Garbage-collect transient one-shot expressions created by
-   *        triggerInvocation whose animation has finished. Unregisters them
-   *        from the compositor and destroys the instance. Cheap; safe to
-   *        call every loop tick. Call AFTER compositor.tick() so the final
-   *        frame of the animation gets drawn before removal.
+   * Garbage-collect transient one-shot expressions created by
+   * triggerInvocation whose animation has finished. Unregisters them
+   * from the compositor and destroys the instance. Cheap; safe to
+   * call every loop tick. Call AFTER compositor.tick() so the final
+   * frame of the animation gets drawn before removal.
    */
   void gcTransients();
 
   std::vector<Color> getExpressionColors(const std::string& type) const;
 
   /**
-   * @brief Live insert-or-update keyed by (type, target). Destroys any
-   *        existing entries for (type, target), builds fresh ones from
-   *        config, and registers them with the compositor.
+   * Live insert-or-update keyed by (type, target). Destroys any
+   * existing entries for (type, target), builds fresh ones from
+   * config, and registers them with the compositor.
    */
   void upsertExpression(const ExpressionConfig& config, Compositor* compositor);
 
   /**
-   * @brief Live remove keyed by (type, target). Unregisters from compositor
-   *        first, then destroys the Expression instances.
+   * Live remove keyed by (type, target). Unregisters from compositor
+   * first, then destroys the Expression instances.
    */
   void removeExpression(const std::string& type, ExpressionTarget target, Compositor* compositor);
 
   /**
-   * @brief Register every expression entry matching (type, target) as
-   *        currently being previewed by the app's Test button. Called from
-   *        the test_expression dispatch path immediately after
-   *        triggerExpression(...). Returns true iff the active-test set
-   *        transitioned from empty to non-empty (caller emits the
-   *        previewActive=true state-notify edge).
+   * Register every expression entry matching (type, target) as
+   * currently being previewed by the app's Test button. Called from
+   * the test_expression dispatch path immediately after
+   * triggerExpression(...). Returns true iff the active-test set
+   * transitioned from empty to non-empty (caller emits the
+   * previewActive=true state-notify edge).
    */
   bool markTestActive(const std::string& type, ExpressionTarget target);
 
   /**
-   * @brief Drop every active-test entry whose underlying Expression has
-   *        returned to STOPPED. Called from the loop tick (same cadence as
-   *        gcTransients). Returns true iff the set transitioned from
-   *        non-empty to empty (caller emits the previewActive=false edge).
+   * Drop every active-test entry whose underlying Expression has
+   * returned to STOPPED. Called from the loop tick (same cadence as
+   * gcTransients). Returns true iff the set transitioned from
+   * non-empty to empty (caller emits the previewActive=false edge).
    */
   bool reapCompletedTests();
 
   /**
-   * @brief Clear all active-test entries. Called from the
-   *        test_expression_complete dispatch path. Returns true iff the set
-   *        transitioned from non-empty to empty.
+   * Clear all active-test entries. Called from the
+   * test_expression_complete dispatch path. Returns true iff the set
+   * transitioned from non-empty to empty.
    */
   bool clearAllTestActive();
 
   /**
-   * @brief True iff at least one expression is currently being previewed
-   *        via the app's Test button. Read by ble_control::notifyStateChange
-   *        to populate the previewActive bit.
+   * True iff at least one expression is currently being previewed
+   * via the app's Test button. Read by ble_control::notifyStateChange
+   * to populate the previewActive bit.
    */
   bool isAnyTestActive() const { return !activeTests_.empty(); }
 };

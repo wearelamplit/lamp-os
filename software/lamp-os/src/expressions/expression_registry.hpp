@@ -1,11 +1,26 @@
 #pragma once
+#include <cstring>
 #include <map>
 #include <string>
 #include <vector>
 
 #include "expressions/expression_schema.hpp"
+#include "expressions/param_utils.hpp"
 
 namespace lamp {
+
+// Effective continuity for a configured instance: an expression that exposes
+// the loop param follows its config value (Continuous == 1); otherwise the
+// descriptor's static continuous flag decides.
+inline bool effectiveContinuous(const ExpressionDescriptor& d,
+                                const std::map<std::string, uint32_t>& params) {
+  for (const auto& p : d.params) {
+    if (std::strcmp(p.key, kLoopParamKey) == 0) {
+      return getParam(params, kLoopParamKey, 0) != 0;
+    }
+  }
+  return d.continuous;
+}
 
 // Registry of ExpressionDescriptors. Holds pointers into static constexpr
 // storage; descriptors are never copied.

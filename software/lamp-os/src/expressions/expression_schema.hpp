@@ -42,6 +42,7 @@ struct ParamSpec {
   bool invert = false;
   const char* leftLabel = nullptr;
   const char* rightLabel = nullptr;
+  const char* help = nullptr;
   bool requiresZoning = false;
   std::span<const EnumOption> options;
 };
@@ -61,10 +62,39 @@ struct RangeSpec {
   int32_t defLo = 0;
   int32_t defHi = 0;
   const char* label = nullptr;
+  const char* help = nullptr;
   // Param keys the fold writes defLo/defHi into (e.g. "intervalMin"/"intervalMax").
   const char* minKey = nullptr;
   const char* maxKey = nullptr;
 };
+
+inline constexpr const char* kIntervalHelp =
+    "A random time in this range is picked before each trigger.";
+
+// Shared "Motion" easing control. Values mirror util/easing.hpp Easing (0..4).
+inline constexpr EnumOption kEasingOptions[] = {
+  { .value = 0, .label = "Linear" },
+  { .value = 1, .label = "Smooth" },
+  { .value = 2, .label = "Float"  },
+  { .value = 3, .label = "Settle" },
+  { .value = 4, .label = "Swell"  },
+};
+inline constexpr const char* kEasingHelp =
+    "Shape of the motion: Linear steady, Smooth eased ends, Float lava drift, "
+    "Settle fast then rest, Swell slow build to a peak.";
+inline constexpr ParamSpec kEasingParam = {
+  .key     = "easing",
+  .kind    = ParamKind::Enum,
+  .label   = "Motion",
+  .max     = 4,
+  .help    = kEasingHelp,
+  .options = kEasingOptions,
+};
+
+// Continuity-of-travel key. Present on an expression's params -> its effective
+// continuity follows the config value (Continuous == 1) rather than the
+// descriptor's static continuous flag.
+inline constexpr const char* kLoopParamKey = "loop";
 
 // Top-level config for one expression. `params` are the per-control options above.
 struct ExpressionDescriptor {
@@ -87,5 +117,15 @@ struct ExpressionDescriptor {
 
 template <class T>
 Expression* makeExpr(FrameBuffer* fb) { return new T(fb); }
+
+// Binds .make onto make-less descriptor data. Each expression's header holds
+// its descriptor as `inline constexpr` data without .make (the factory needs
+// the complete class, which native tests can't link); the .cpp composes the
+// registered descriptor with this.
+constexpr ExpressionDescriptor withMake(ExpressionDescriptor d,
+                                        Expression* (*make)(FrameBuffer*)) {
+  d.make = make;
+  return d;
+}
 
 }  // namespace lamp

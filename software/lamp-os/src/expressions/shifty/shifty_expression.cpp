@@ -1,7 +1,6 @@
 #include "expressions/shifty/shifty_expression.hpp"
 
 #include <Arduino.h>
-#include <algorithm>
 
 #include "util/fade.hpp"
 #include "expressions/expression_manager.hpp"
@@ -9,70 +8,19 @@
 namespace lamp {
 
 namespace {
-static constexpr EnumOption kShiftyFillOpts[] = {
-  { .value = 0, .label = "Uniform", .zoning = false },
-  { .value = 1, .label = "Up",      .zoning = true  },
-  { .value = 2, .label = "Down",    .zoning = true  },
-  { .value = 3, .label = "Bloom",   .zoning = true  },
-};
-static constexpr ParamSpec kShiftyParams[] = {
-  {
-    .key     = "fillMode",
-    .kind    = ParamKind::Enum,
-    .label   = "Fill",
-    .max     = 3,
-    .options = kShiftyFillOpts,
-  },
-  {
-    .key        = "fadeDuration",
-    .kind       = ParamKind::Int,
-    .label      = "Fade duration",
-    .min        = 10,
-    .max        = 300,
-    .def        = 60,
-    .unit       = "s",
-    .leftLabel  = "quick",
-    .rightLabel = "slow",
-  },
-};
-// duration models the hold time (shiftDurationMin/Max in seconds).
-static constexpr ExpressionDescriptor kShiftyDescriptor{
-  .id           = "shifty",
-  .name         = "Shifty",
-  .continuous   = true,
-  .pausesWispOverride = true,
-  .colors       = { .max = 8, .label = "Colors" },
-  .interval     = RangeSpec{
-    .min   = 60,
-    .max   = 900,
-    .step  = 30,
-    .unit  = "s",
-    .defLo = 60,
-    .defHi = 900,
-  },
-  .duration     = RangeSpec{
-    .min    = 60,
-    .max    = 1800,
-    .step   = 30,
-    .unit   = "s",
-    .defLo  = 300,
-    .defHi  = 600,
-    .label  = "Hold time",
-    .minKey = "shiftDurationMin",
-    .maxKey = "shiftDurationMax",
-  },
-  .hasZone      = true,
-  .params       = kShiftyParams,
-  .make         = &makeExpr<ShiftyExpression>,
-};
+constexpr ExpressionDescriptor kShiftyDescriptor =
+    withMake(kShiftyDescriptorData, &makeExpr<ShiftyExpression>);
 }  // namespace
 
 ShiftyExpression::ShiftyExpression(FrameBuffer* inBuffer, uint32_t inFrames)
     : Expression(inBuffer, inFrames) {
-  allowedInHomeMode = true;  // Shifty should work in home mode
 }
 
-const ExpressionDescriptor& ShiftyExpression::descriptor() {
+const ExpressionDescriptor& ShiftyExpression::classDescriptor() {
+  return kShiftyDescriptor;
+}
+
+const ExpressionDescriptor& ShiftyExpression::descriptor() const {
   return kShiftyDescriptor;
 }
 
@@ -83,12 +31,13 @@ void ShiftyExpression::configureFromParameters(const std::map<std::string, uint3
 
   shiftDurationMinMs = shiftDurationMin * kMsPerSecond;
   shiftDurationMaxMs = shiftDurationMax * kMsPerSecond;
-  fadeDurationFrames = fadeDuration * kFrameRateHz;
+  fadeDurationMs = fadeDuration * kMsPerSecond;
 
   const uint16_t window = windowSize();
-  zone_ = Zone::fromParameters(parameters, window);
+  zone_ = resolveZone(parameters, window);
   uint32_t fmv = getParam(parameters, "fillMode");
   fillMode_ = (fmv > 3) ? 3 : static_cast<uint8_t>(fmv);
+  easing_ = static_cast<Easing>(getParam(parameters, "easing", 0));
 
   // If no colors configured, use current buffer colors as default
   if (colors.empty() && fb && fb->pixelCount > 0) {
@@ -108,39 +57,46 @@ void ShiftyExpression::startShift() {
   // Set target to the shifted color for all pixels
   fadeTargetColors.assign(fb->pixelCount, shiftedColor);
 
-  // Set animation parameters
-  frames = fadeDurationFrames;
+  // The whole shift cycle (fade + hold + fade, up to 2400 s) outruns any
+  // frame budget; onUpdate ends each phase on millis() and concludes the
+  // cycle by capping frames, so the counter never ends a phase itself.
+  frames = kContinuousMaxFrames;
   frame = 0;
+  fadeStartMs = millis();
   state = FADING_TO_PALETTE;
-  if (fillMode_ != 0) populatePixelStartFrames(false);
+  if (fillMode_ != 0) populatePixelStartOffsets(false);
 
   // Determine how long to stay shifted
   currentShiftDurationMs = getRandomShiftDuration();
   shiftStartMs = millis();
-
-  // Animation will be started by base class trigger()
+#ifdef LAMP_DEBUG
+  Serial.printf("[shifty] fade-start t=%lu fadeMs=%u holdMs=%u\n",
+                (unsigned long)fadeStartMs, (unsigned)fadeDurationMs,
+                (unsigned)currentShiftDurationMs);
+#endif
 }
 
 void ShiftyExpression::startUnshift() {
   // Set up fade back to original
-  // Start from the shifted color (what we're currently showing)
+  // Start from the shifted color (what is currently showing)
   fadeStartColors.assign(fb->pixelCount, shiftedColor);
   fadeTargetColors = savedBuffer;
 
-  // Reset animation parameters for fade back
-  frames = fadeDurationFrames;
-  frame = 0;
+  fadeStartMs = millis();
   state = FADING_BACK;
-  if (fillMode_ != 0) populatePixelStartFrames(true);
+#ifdef LAMP_DEBUG
+  Serial.printf("[shifty] fade-back-start t=%lu\n", (unsigned long)fadeStartMs);
+#endif
+  if (fillMode_ != 0) populatePixelStartOffsets(true);
 
   // Keep animation running (don't change animationState, it's already PLAYING_ONCE)
 }
 
-void ShiftyExpression::populatePixelStartFrames(bool fadingBack) {
+void ShiftyExpression::populatePixelStartOffsets(bool fadingBack) {
   const uint16_t n = zone_.size();
-  pixelStartFrame_.assign(static_cast<size_t>(fb->pixelCount), 0u);
-  if (n == 0 || fadeDurationFrames < 2) return;
-  const uint32_t maxOffset = fadeDurationFrames / 2;
+  pixelStartOffsetMs_.assign(static_cast<size_t>(fb->pixelCount), 0u);
+  if (n == 0 || fadeDurationMs < 2) return;
+  const uint32_t maxOffset = fadeDurationMs / 2;
   const uint32_t denom = (n > 1u) ? static_cast<uint32_t>(n - 1) : 1u;
   for (uint16_t j = 0; j < n; j++) {
     const int idx = static_cast<int>(zone_.posMin) + static_cast<int>(j);
@@ -156,7 +112,7 @@ void ShiftyExpression::populatePixelStartFrames(bool fadingBack) {
         break;
       }
     }
-    pixelStartFrame_[static_cast<size_t>(idx)] = ord * maxOffset / denom;
+    pixelStartOffsetMs_[static_cast<size_t>(idx)] = ord * maxOffset / denom;
   }
 }
 
@@ -167,7 +123,7 @@ uint32_t ShiftyExpression::getRandomShiftDuration() {
 void ShiftyExpression::onTrigger() {
   saveBufferState();
 
-  // If we're already animating, cancel and start fresh
+  // If already animating, cancel and start fresh
   // This allows manual triggers to work at any time
   if (state != IDLE) {
     // Reset to idle state
@@ -178,30 +134,35 @@ void ShiftyExpression::onTrigger() {
 }
 
 void ShiftyExpression::onUpdate() {
+  const uint32_t nowMs = millis();
+
   switch (state) {
     case FADING_TO_PALETTE:
-      // Check if fade is complete
-      if (isLastFrame()) {
+      if (nowMs - fadeStartMs >= fadeDurationMs) {
         state = SHIFTED;
-        shiftStartMs = millis();
-        // Extend animation to last through the shift hold period
-        // Add enough frames to cover the shift duration
-        frames = frame + (currentShiftDurationMs / static_cast<float>(kMsPerSecond)) * kFrameRateHz;
+        shiftStartMs = nowMs;
+#ifdef LAMP_DEBUG
+        Serial.printf("[shifty] hold-start t=%lu\n", (unsigned long)nowMs);
+#endif
       }
       break;
 
     case SHIFTED:
       // Check if it's time to unshift
-      if (millis() - shiftStartMs > currentShiftDurationMs) {
+      if (nowMs - shiftStartMs > currentShiftDurationMs) {
         startUnshift();
       }
       break;
 
     case FADING_BACK:
-      // Check if fade back is complete
-      if (isLastFrame()) {
+      if (nowMs - fadeStartMs >= fadeDurationMs) {
         state = IDLE;
-        // Animation will naturally stop after this
+#ifdef LAMP_DEBUG
+        Serial.printf("[shifty] complete t=%lu\n", (unsigned long)nowMs);
+#endif
+        // Cap the counter; the next nextFrame() flips PLAYING_ONCE to
+        // STOPPED and onComplete chains glitchy.
+        frames = frame + 1;
       }
       break;
 
@@ -211,20 +172,23 @@ void ShiftyExpression::onUpdate() {
 
   // Perf: precompute the per-frame fade factor here so draw() can apply it
   // per pixel without redoing the LUT-equivalent math for every channel.
-  // (frame, frames) are frame-scoped; per-pixel work in draw() only reads
-  // fadeStartColors[i] / fadeTargetColors[i]. Only meaningful in FADING_*
-  // states; SHIFTED and IDLE branches in draw() don't consult the factor.
+  // Only meaningful in FADING_* states; SHIFTED and IDLE branches in draw()
+  // don't consult the factor.
   if (state == FADING_TO_PALETTE || state == FADING_BACK) {
-    cachedFadeAtEnd_ = (frame >= frames);
+    const uint32_t elapsed = nowMs - fadeStartMs;
+    cachedFadeAtEnd_ = (elapsed >= fadeDurationMs);
     // When cachedFadeAtEnd_ is true, draw() short-circuits to the end color
     // and never reads cachedFadeFactor_, so a divide-by-zero in
-    // computeLinearFactor (when frames == 0) is unreachable here.
-    cachedFadeFactor_ = cachedFadeAtEnd_ ? 0u : computeLinearFactor(frame, frames);
+    // computeLinearFactor (when fadeDurationMs == 0) is unreachable here.
+    cachedFadeFactor_ = cachedFadeAtEnd_
+                            ? 0u
+                            : computeLinearFactor(easeStep(elapsed, fadeDurationMs, easing_),
+                                                  fadeDurationMs);
   }
 }
 
 void ShiftyExpression::onComplete() {
-  // Always trigger glitch on unshift if glitchy is available and we just finished fading back
+  // Always trigger glitch on unshift if glitchy is available and the fade back just finished
   if (state == IDLE) {
     if (context_ && context_->expressionManager) {
 #ifdef LAMP_DEBUG
@@ -242,6 +206,11 @@ void ShiftyExpression::onComplete() {
 }
 
 void ShiftyExpression::draw() {
+  // Mid-cycle (including a wisp-suppressed one) the counter must never
+  // exhaust; a wrap would flip STOPPED and snap the strip to base with no
+  // fade-back. onUpdate() ends the cycle on wall clock.
+  if (state != IDLE) frame = rewindBeforeExhaust(frame, frames);
+
   if (!shouldAffectBuffer()) {
     nextFrame();
     return;
@@ -252,29 +221,33 @@ void ShiftyExpression::draw() {
     case FADING_BACK: {
       if (fillMode_ == 0) {
         if (cachedFadeAtEnd_) {
-          for (int i = 0; i < fb->pixelCount; i++) {
+          for (int i = zone_.posMin; i <= zone_.posMax; i++) {
+            if (i >= fb->pixelCount) break;
             fb->buffer[i] = fadeTargetColors[i];
           }
         } else {
-          for (int i = 0; i < fb->pixelCount; i++) {
+          for (int i = zone_.posMin; i <= zone_.posMax; i++) {
+            if (i >= fb->pixelCount) break;
             fb->buffer[i] = mixColorLinear(fadeStartColors[i], fadeTargetColors[i],
                                             cachedFadeFactor_);
           }
         }
       } else {
-        const uint32_t perFade = (fadeDurationFrames > 1u) ? fadeDurationFrames / 2u : 1u;
+        const uint32_t elapsed = millis() - fadeStartMs;
+        const uint32_t perFade = (fadeDurationMs > 1u) ? fadeDurationMs / 2u : 1u;
         for (int i = zone_.posMin; i <= zone_.posMax; i++) {
           if (i >= fb->pixelCount) break;
-          const uint32_t offset = pixelStartFrame_[static_cast<size_t>(i)];
-          if (frame < offset) {
+          const uint32_t offset = pixelStartOffsetMs_[static_cast<size_t>(i)];
+          if (elapsed < offset) {
             fb->buffer[i] = fadeStartColors[i];
           } else {
-            const uint32_t elapsed = frame - offset;
-            if (elapsed >= perFade) {
+            const uint32_t pixelElapsed = elapsed - offset;
+            if (pixelElapsed >= perFade) {
               fb->buffer[i] = fadeTargetColors[i];
             } else {
-              fb->buffer[i] = mixColorLinear(fadeStartColors[i], fadeTargetColors[i],
-                                              computeLinearFactor(elapsed, perFade));
+              fb->buffer[i] = mixColorLinear(
+                  fadeStartColors[i], fadeTargetColors[i],
+                  computeLinearFactor(easeStep(pixelElapsed, perFade, easing_), perFade));
             }
           }
         }
@@ -285,11 +258,12 @@ void ShiftyExpression::draw() {
     case SHIFTED:
       // Re-snapshot the live base (configurator drew it this frame, before
       // shifty) so startUnshift fades back to the CURRENT base, not the one
-      // captured at onTrigger — an operator base change mid-hold otherwise
+      // captured at onTrigger; an operator base change mid-hold otherwise
       // pops in one frame when shifty releases.
       savedBuffer = fb->buffer;
       if (fillMode_ == 0) {
-        for (int i = 0; i < fb->pixelCount; i++) {
+        for (int i = zone_.posMin; i <= zone_.posMax; i++) {
+          if (i >= fb->pixelCount) break;
           fb->buffer[i] = shiftedColor;
         }
       } else {

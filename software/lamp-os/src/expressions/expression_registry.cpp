@@ -41,6 +41,7 @@ void serializeRangeSpec(JsonObject parent, const RangeSpec& r) {
   def.add(r.defLo);
   def.add(r.defHi);
   if (r.label) parent["label"] = r.label;
+  if (r.help) parent["help"] = r.help;
   if (r.minKey) parent["minKey"] = r.minKey;
   if (r.maxKey) parent["maxKey"] = r.maxKey;
 }
@@ -150,6 +151,7 @@ std::string ExpressionRegistry::serializeCatalog() const {
         if (p.invert) pObj["invert"] = true;
         if (p.leftLabel) pObj["leftLabel"] = p.leftLabel;
         if (p.rightLabel) pObj["rightLabel"] = p.rightLabel;
+        if (p.help) pObj["help"] = p.help;
         if (p.requiresZoning) pObj["requiresZoning"] = true;
         if (p.kind == ParamKind::Enum && !p.options.empty()) {
           JsonArray opts = pObj["options"].to<JsonArray>();

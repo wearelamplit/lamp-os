@@ -1,5 +1,7 @@
 #include "expressions/glitchy/glitchy_expression.hpp"
 #include <Arduino.h>
+#include <algorithm>
+#include <array>
 #include "util/fade.hpp"
 
 namespace lamp {
@@ -12,122 +14,85 @@ static constexpr uint32_t kFadeLutScale = 511;
 static constexpr uint32_t kGlitchBlendLutIndex = 485;
 static constexpr uint32_t kGlitchyLinearFactor = kGlitchBlendLutIndex * kFadeLutScale;
 
-static constexpr ParamSpec kGlitchyParams[] = {
-  {
-    .key            = "count",
-    .kind           = ParamKind::Int,
-    .label          = "Points",
-    .min            = 1,
-    .max            = Bound::pixels(10),
-    .def            = 1,
-    .requiresZoning = true,
-  },
-  {
-    .key            = "size",
-    .kind           = ParamKind::Int,
-    .label          = "Size",
-    .min            = 1,
-    .max            = Bound::pixels(),
-    .def            = 1,
-    .requiresZoning = true,
-  },
-};
-
-static constexpr ExpressionDescriptor kGlitchyDescriptor{
-  .id           = "glitchy",
-  .name         = "Glitchy",
-  .colors       = { .max = 8, .label = "Colors" },
-  .interval     = RangeSpec{
-    .min   = 60,
-    .max   = 900,
-    .step  = 30,
-    .unit  = "s",
-    .defLo = 60,
-    .defHi = 900,
-  },
-  .duration     = RangeSpec{
-    .min    = 30,
-    .max    = 2000,
-    .step   = 30,
-    .unit   = "ms",
-    .defLo  = 30,
-    .defHi  = 120,
-    .label  = "Glitch duration",
-    .minKey = "durationMin",
-    .maxKey = "durationMax",
-  },
-  .hasZone      = true,
-  .zoneOptional = true,
-  .params       = kGlitchyParams,
-  .make         = &makeExpr<GlitchyExpression>,
-};
+constexpr ExpressionDescriptor kGlitchyDescriptor =
+    withMake(kGlitchyDescriptorData, &makeExpr<GlitchyExpression>);
 }  // namespace
 
 GlitchyExpression::GlitchyExpression(FrameBuffer* inBuffer, uint32_t inFrames)
     : Expression(inBuffer, inFrames) {
-  allowedInHomeMode = false;  // Glitchy should not work in home mode
 }
 
 void GlitchyExpression::configureFromParameters(const std::map<std::string, uint32_t>& parameters) {
-  glitchDurationMin = getParam(parameters, "durationMin") * kFrameRateHz / kMsPerSecond;
-  glitchDurationMax = getParam(parameters, "durationMax") * kFrameRateHz / kMsPerSecond;
-  if (glitchDurationMin < 1 || glitchDurationMin > 60) glitchDurationMin = 1;
-  if (glitchDurationMax < 1 || glitchDurationMax > 60) glitchDurationMax = 3;
-  if (glitchDurationMax < glitchDurationMin) glitchDurationMax = glitchDurationMin;
+  const uint32_t durMin = static_cast<uint32_t>(kGlitchyDescriptorData.duration->min);
+  const uint32_t durMax = static_cast<uint32_t>(kGlitchyDescriptorData.duration->max);
+  glitchDurationMinMs = std::clamp(getParam(parameters, "durationMin"), durMin, durMax);
+  glitchDurationMaxMs = std::clamp(getParam(parameters, "durationMax"),
+                                   glitchDurationMinMs, durMax);
 
-  const uint16_t window = windowSize();
-  fullStrip_ = getParam(parameters, "fullStrip", 1) != 0;
-  zone_ = Zone::fromParameters(parameters, window);
-  points_ = Points::fromParameters(parameters, window, 1).count;
-  size_ = parseSize(parameters, window, 1);
+  zone_ = resolveZone(parameters, windowSize());
+  scatter_ = std::min<uint32_t>(getParam(parameters, "scatter", kGlitchScatterMax),
+                                kGlitchScatterMax);
 }
 
 void GlitchyExpression::onTrigger() {
   saveBufferState();
   glitchColor = getRandomColor();
-
-  // Randomly pick duration between min and max
-  if (glitchDurationMin == glitchDurationMax) {
-    frames = glitchDurationMin;
-  } else {
-    frames = rng.range(glitchDurationMin, glitchDurationMax);
-  }
-
+  glitchEndMs = millis() + rng.range(glitchDurationMinMs, glitchDurationMaxMs);
+  painted_ = false;
+  frames = kContinuousMaxFrames;
+  frame = 0;
 }
 
 void GlitchyExpression::draw() {
-
   if (!shouldAffectBuffer()) {
     nextFrame();
     return;
   }
 
-  if (isLastFrame()) {
+  if (painted_ && timeReached(millis(), glitchEndMs)) {
     fb->buffer = savedBuffer;
-  } else if (fullStrip_) {
-    for (int i = 0; i < fb->pixelCount; i++) {
-      fb->buffer[i] = mixColorLinear(fb->buffer[i], glitchColor, kGlitchyLinearFactor);
-    }
+    // Cap the counter; nextFrame() flips PLAYING_ONCE to STOPPED and
+    // onComplete may chain a follow-up glitch.
+    frames = frame + 1;
   } else {
-    paintPoints_();
+    // Repaint from the saved background each frame so the scatter re-rolls into
+    // a steady density instead of accumulating.
+    fb->buffer = savedBuffer;
+    paintGlitch_();
+    painted_ = true;
   }
 
   nextFrame();
 }
 
-void GlitchyExpression::paintPoints_() {
-  if (fb->pixelCount == 0) return;
-  const uint16_t clampedSize = zoneSpan(zone_, size_).clampedSize;
-  if (clampedSize == 0) return;
-  for (uint16_t p = 0; p < points_; ++p) {
-    const uint16_t start = randomStartInZone(zone_, size_, rng);
-    for (uint16_t i = start; i < start + clampedSize; ++i) {
+void GlitchyExpression::paintGlitch_() {
+  if (zone_.size() == 0) return;
+
+  if (scatter_ == 0) {
+    for (uint16_t i = zone_.posMin; i <= zone_.posMax; ++i)
       fb->buffer[i] = mixColorLinear(fb->buffer[i], glitchColor, kGlitchyLinearFactor);
-    }
+    return;
+  }
+
+  const GlitchPlan plan = glitchBlockPlan(scatter_, zone_.size());
+  if (plan.blocksWanted == 0) return;
+
+  std::array<uint8_t, 256> slots;
+  randomPermutation(slots, plan.slotCount, rng);
+  for (uint16_t b = 0; b < plan.blocksWanted; ++b) {
+    const uint16_t start =
+        static_cast<uint16_t>(zone_.posMin + slots[b] * plan.grainPx);
+    const uint16_t end = std::min<uint16_t>(start + plan.grainPx, zone_.posMax + 1);
+    for (uint16_t i = start; i < end; ++i)
+      fb->buffer[i] = mixColorLinear(fb->buffer[i], glitchColor, kGlitchyLinearFactor);
   }
 }
 
-const ExpressionDescriptor& GlitchyExpression::descriptor() {
+const ExpressionDescriptor& GlitchyExpression::classDescriptor() {
+  return kGlitchyDescriptor;
+}
+
+const ExpressionDescriptor& GlitchyExpression::descriptor() const {
   return kGlitchyDescriptor;
 }
 

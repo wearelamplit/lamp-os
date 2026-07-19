@@ -1,6 +1,8 @@
 #include "expression_invocation.hpp"
 
+#ifdef LAMP_DEBUG
 #include <Arduino.h>
+#endif
 
 namespace lamp {
 
@@ -25,9 +27,8 @@ void serializeInvocation(const ExpressionInvocation& inv, std::string& out) {
   doc["target"] = inv.target;
   doc["delayMs"] = inv.delayMs;
 
-  JsonArray colorsArr = doc["colors"].to<JsonArray>();
-  for (const Color& c : inv.colors) {
-    colorsArr.add(colorToHexString(c));
+  if (!inv.colors.empty()) {
+    doc["colors"] = colorsToPackedHex(inv.colors);
   }
 
   JsonObject paramsObj = doc["parameters"].to<JsonObject>();
@@ -45,7 +46,7 @@ bool parseInvocation(JsonObjectConst doc, ExpressionInvocation& out) {
   out.type = type;
 
   // target is one of ExpressionTarget {SHADE=1, BASE=2, BOTH=3}. Coerce
-  // anything else to BOTH so a malformed peer can't silently no-op us.
+  // anything else to BOTH so a malformed peer can't silently no-op the trigger.
   const uint32_t t = doc["target"] | 3;
   out.target = (t >= 1 && t <= 3) ? static_cast<uint8_t>(t) : 3;
 
@@ -54,19 +55,11 @@ bool parseInvocation(JsonObjectConst doc, ExpressionInvocation& out) {
   out.delayMs = clampDelayMs(doc["delayMs"] | 0u);
 
   out.colors.clear();
-  JsonArrayConst colors = doc["colors"].as<JsonArrayConst>();
-  if (!colors.isNull()) {
-    for (JsonVariantConst c : colors) {
-      const char* hex = c.as<const char*>();
-      if (isValidColorHex(hex)) {
-        out.colors.push_back(hexStringToColor(hex));
-      }
+  const char* hex = doc["colors"].as<const char*>();
+  if (hex && !packedHexToColors(hex, out.colors)) {
 #ifdef LAMP_DEBUG
-      else if (hex) {
-        Serial.printf("[invocation] dropping bad color hex '%s'\n", hex);
-      }
+    Serial.printf("[invocation] dropping bad colors '%s'\n", hex);
 #endif
-    }
   }
 
   out.parameters.clear();
@@ -74,7 +67,7 @@ bool parseInvocation(JsonObjectConst doc, ExpressionInvocation& out) {
   if (!params.isNull()) {
     for (JsonPairConst kv : params) {
       JsonVariantConst v = kv.value();
-      // bool first — ArduinoJson types `true`/`false` as bool, distinct
+      // bool first; ArduinoJson types `true`/`false` as bool, distinct
       // from int. Coerce so callers can send the JSON-natural form too.
       if (v.is<bool>()) {
         out.parameters[std::string(kv.key().c_str())] =

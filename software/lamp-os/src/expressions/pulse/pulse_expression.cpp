@@ -9,65 +9,28 @@
 namespace lamp {
 
 namespace {
-static constexpr ParamSpec kPulseParams[] = {
-  {
-    .key        = "pulseSpeed",
-    .kind       = ParamKind::Int,
-    .label      = "Pulse speed",
-    .min        = 1,
-    .max        = 10,
-    .def        = 3,
-    .unit       = "s",
-    .invert     = true,
-    .leftLabel  = "slow",
-    .rightLabel = "fast",
-  },
-  {
-    .key   = "size",
-    .kind  = ParamKind::Int,
-    .label = "Size",
-    .min   = 1,
-    .max   = Bound::pixels(),
-    .def   = 15,
-  },
-};
-static constexpr ExpressionDescriptor kPulseDescriptor{
-  .id       = "pulse",
-  .name     = "Pulse",
-  .colors   = { .max = 8, .label = "Colors" },
-  .interval = RangeSpec{
-    .min   = 60,
-    .max   = 900,
-    .step  = 30,
-    .unit  = "s",
-    .defLo = 60,
-    .defHi = 900,
-  },
-  .hasZone  = true,
-  .params   = kPulseParams,
-  .make     = &makeExpr<PulseExpression>,
-};
+constexpr ExpressionDescriptor kPulseDescriptor =
+    withMake(kPulseDescriptorData, &makeExpr<PulseExpression>);
 }  // namespace
-
-// Use a large frame count to let wave position determine animation end
-// This prevents premature stopping based on frame count
-static constexpr uint32_t PULSE_MAX_FRAMES = 10000;
 
 PulseExpression::PulseExpression(FrameBuffer* inBuffer, uint32_t inFrames)
     : Expression(inBuffer, inFrames) {
-  allowedInHomeMode = true;
 }
 
 void PulseExpression::configureFromParameters(const std::map<std::string, uint32_t>& parameters) {
   const uint16_t window = windowSize();
-  zone_ = Zone::fromParameters(parameters, window);
+  zone_ = resolveZone(parameters, window);
 
   uint32_t pulseSpeed = getParam(parameters, "pulseSpeed");
   const uint16_t span = zone_.size() > 0 ? zone_.size() : window;
   pulseSpeedMs = std::max<uint32_t>(100, (pulseSpeed * kMsPerSecond) / span);
 
-  pulseWidth = parseSize(parameters, window, 15);
+  const uint16_t sizePercent = static_cast<uint16_t>(getParam(parameters, "size", 40));
+  pulseWidth = pulseWidthFromPercent(sizePercent, span);
   pulseColor = firstColorOr(kSafeFallbackColor);
+
+  easing_ = static_cast<Easing>(getParam(parameters, "easing", 0));
+  loopContinuous_ = getParam(parameters, kLoopParamKey, 0) != 0;
 }
 
 uint32_t PulseExpression::calculateBlendFactor(int pixelIndex) const {
@@ -101,23 +64,35 @@ void PulseExpression::updateWavePosition() {
     return;
   }
 
-  // Cap deltaMs so a long pause before re-entry doesn't teleport wavePosition
-  // past zone_.posMax before any pixels are drawn.
+  // Cap deltaMs so a long pause before re-entry doesn't teleport the wave
+  // across the span before any pixels are drawn.
   uint32_t deltaMs = std::min(currentMs - lastUpdateMs, (uint32_t)100);
-
-  // Calculate how far to move based on speed
-  float pixelsToMove = static_cast<float>(deltaMs) / static_cast<float>(pulseSpeedMs);
-
-  wavePosition += pixelsToMove * waveDirection;
-
-  // Continue moving wave past the end of the strip
-  // Animation will stop when frame >= frames via nextFrame()
-  // Wave should reach position (pixelCount + pulseWidth) before stopping
-
   lastUpdateMs = currentMs;
+
+  // Advance linear phase at pulseSpeedMs per pixel, normalized to the span.
+  const float dt = static_cast<float>(deltaMs) /
+                   (static_cast<float>(pulseSpeedMs) * travelSpan_);
+  progress_ += dt * static_cast<float>(waveDirection);
+
+  if (progress_ >= 1.0f) {
+    progress_ = 1.0f;
+    if (loopContinuous_) {
+      waveDirection = -1;
+      reachedFarEnd_ = true;
+    }
+  } else if (progress_ <= 0.0f) {
+    progress_ = 0.0f;
+    if (loopContinuous_) waveDirection = 1;
+  }
+
+  wavePosition = travelStart_ + applyEasing(easing_, progress_) * travelSpan_;
 }
 
-const ExpressionDescriptor& PulseExpression::descriptor() {
+const ExpressionDescriptor& PulseExpression::classDescriptor() {
+  return kPulseDescriptor;
+}
+
+const ExpressionDescriptor& PulseExpression::descriptor() const {
   return kPulseDescriptor;
 }
 
@@ -132,19 +107,34 @@ void PulseExpression::selectNextColor() {
 }
 
 void PulseExpression::onTrigger() {
-  wavePosition = static_cast<float>(zone_.posMin) - static_cast<float>(pulseWidth);
-  waveDirection = 1;  // Always move forward
+  if (loopContinuous_) {
+    travelStart_ = static_cast<float>(zone_.posMin) + kContinuousTravelInset;
+    const float travelEnd = static_cast<float>(zone_.posMax) - kContinuousTravelInset;
+    travelSpan_ = std::max(1.0f, travelEnd - travelStart_);
+  } else {
+    travelStart_ = static_cast<float>(zone_.posMin) - static_cast<float>(pulseWidth);
+    travelSpan_ = (static_cast<float>(zone_.posMax) + 2.0f * pulseWidth) - travelStart_;
+  }
+  progress_ = 0.0f;
+  waveDirection = 1;
+  reachedFarEnd_ = false;
+  wavePosition = travelStart_;
   lastUpdateMs = 0;
+  ebbStartMs_ = millis();
   selectNextColor();
 
-  // Set frames high enough that wave position will determine when to stop
-  frames = PULSE_MAX_FRAMES;
+  frames = kContinuousMaxFrames;
   frame = 0;
+}
 
+float PulseExpression::ebbInScale() const {
+  if (!loopContinuous_) return 1.0f;
+  const uint32_t elapsed = millis() - ebbStartMs_;
+  if (elapsed >= kEbbInMs) return 1.0f;
+  return static_cast<float>(elapsed) / static_cast<float>(kEbbInMs);
 }
 
 void PulseExpression::onUpdate() {
-  // Always update wave position to ensure smooth fade-out
   updateWavePosition();
 }
 
@@ -154,19 +144,16 @@ void PulseExpression::draw() {
     return;
   }
 
-  // For pulse, we need to continue drawing even when "stopped" to allow fade-out
-  // Only skip if we shouldn't affect this buffer based on target
-  if (!shouldAffectBuffer() && animationState != STOPPED) {
+  if (!shouldAffectBuffer()) {
     return;
   }
 
-  if (animationState == STOPPED && wavePosition <= zone_.posMax + (2 * pulseWidth)) {
-    updateWavePosition();
-  }
+  const float ebb = ebbInScale();
 
   // blendFactor varies per pixel (distance to wave center), so no frame-level hoist.
   for (int i = zone_.posMin; i <= zone_.posMax; i++) {
     uint32_t blendFactor = calculateBlendFactor(i);
+    if (ebb < 1.0f) blendFactor = static_cast<uint32_t>(blendFactor * ebb);
 
     if (blendFactor == 0) continue;  // Skip pixels with no blend
     if (blendFactor >= 100) {
@@ -178,17 +165,19 @@ void PulseExpression::draw() {
     fb->buffer[i] = mixColorLinear(fb->buffer[i], pulseColor, factor);
   }
 
-  // Advance animation frame
-  nextFrame();
-
-  if (wavePosition > zone_.posMax + (2 * pulseWidth)) {
-    if (animationState != STOPPED) {
-      animationState = STOPPED;
-      frame = 0;
-      currentLoop += 1;
-    }
+  // Transit time is wall-clock; a tiny zone with a slow, wide wave can take
+  // minutes. Trigger mode ends when the wave exits (progress complete).
+  // Continuous ping-pongs forever when live, but a transient preview (Test,
+  // autoTriggerEnabled false) does one out-and-back then stops so the GC reaps it.
+  const bool triggerExit = !loopContinuous_ && progress_ >= 1.0f;
+  const bool previewCycleDone =
+      loopContinuous_ && !autoTriggerEnabled && reachedFarEnd_ && progress_ <= 0.0f;
+  if (triggerExit || previewCycleDone) {
+    frames = frame + 1;
+  } else {
+    frame = rewindBeforeExhaust(frame, frames);
   }
-
+  nextFrame();
 }
 
 }  // namespace lamp
