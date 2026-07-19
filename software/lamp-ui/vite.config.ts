@@ -6,15 +6,12 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import compression from 'vite-plugin-compression'
 
-// Read the firmware version from the lamp's platformio.ini so the UI shows the
-// build it's paired with (the FS image is version-coupled to firmware). Falls
-// back to 'dev' for local runs without the firmware tree.
+// Read the firmware version from the root VERSION file (the single source both
+// firmwares derive from) so the UI shows the build it's paired with. Falls back
+// to 'dev' for local runs without the firmware tree.
 function readFwVersion(): string {
   try {
-    const ini = readFileSync(join(__dirname, '..', 'lamp-os', 'platformio.ini'), 'utf-8')
-    const get = (k: string) => ini.match(new RegExp(`-D\\s+${k}\\s*=\\s*(\\d+)`))?.[1]
-    const maj = get('LAMP_FW_MAJOR'), min = get('LAMP_FW_MINOR'), pat = get('LAMP_FW_PATCH')
-    return maj && min && pat ? `${maj}.${min}.${pat}` : 'dev'
+    return readFileSync(join(__dirname, '..', '..', 'VERSION'), 'utf-8').trim() || 'dev'
   } catch {
     return 'dev'
   }

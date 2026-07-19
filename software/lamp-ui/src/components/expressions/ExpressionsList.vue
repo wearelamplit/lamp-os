@@ -18,23 +18,15 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   'update:modelValue': [value: Expression[]]
-  preview: [colors: string[]]
+  preview: [colors: string[], target: number]
+  'preview-end': []
+  'test-expression': [type: string, target: number]
 }>()
 
 const byId = computed(() => new Map(props.catalog.map((d) => [d.id, d])))
 
 const expandedIndex = ref<number | null>(null)
-const showAdd = ref(false)
-
-const existingTypes = computed(() => new Set(props.modelValue.map((e) => e.type)))
-
-const availableTypes = computed(() =>
-  props.catalog.map((d) => ({
-    id: d.id,
-    name: d.name,
-    added: existingTypes.value.has(d.id),
-  })),
-)
+const showAddModal = ref(false)
 
 const nameOf = (type: string) => byId.value.get(type)?.name ?? type
 const descriptorOf = (type: string) => byId.value.get(type)
@@ -62,7 +54,7 @@ const toggleConfig = (index: number) => {
 // exist for the firmware even though the web UI doesn't render them all.
 const addExpression = (type: string) => {
   const d = byId.value.get(type)
-  if (!d || existingTypes.value.has(type)) return
+  if (!d) return
 
   // New instances default to the base surface (target 2).
   const expr: Expression = {
@@ -71,7 +63,7 @@ const addExpression = (type: string) => {
     target: 2,
     intervalMin: d.interval?.default[0] ?? 300,
     intervalMax: d.interval?.default[1] ?? 900,
-    colors: d.colors.inheritsSurface ? [] : ['#FF0000FF'],
+    colors: d.colors.inheritsSurface ? [] : ['#FF000000'],
   }
   if (d.duration?.minKey) expr[d.duration.minKey] = d.duration.default[0]
   if (d.duration?.maxKey) expr[d.duration.maxKey] = d.duration.default[1]
@@ -80,7 +72,8 @@ const addExpression = (type: string) => {
   }
 
   update([...props.modelValue, expr])
-  showAdd.value = false
+  showAddModal.value = false
+  expandedIndex.value = props.modelValue.length
 }
 </script>
 
@@ -99,6 +92,14 @@ const addExpression = (type: string) => {
           @update:model-value="(value) => updateExpression(index, { enabled: value })"
         />
         <span class="name">{{ nameOf(expr.type) }}</span>
+        <button
+          type="button"
+          class="test"
+          :disabled="disabled"
+          @click="emit('test-expression', expr.type, expr.target)"
+        >
+          Test
+        </button>
         <button
           v-if="descriptorOf(expr.type)"
           type="button"
@@ -127,30 +128,46 @@ const addExpression = (type: string) => {
           :shade-px="shadePx"
           :disabled="disabled"
           @update="(updates) => updateExpression(index, updates)"
-          @preview="(colors) => emit('preview', colors)"
+          @preview="(colors) => emit('preview', colors, expr.target)"
+          @preview-end="emit('preview-end')"
         />
       </div>
     </div>
 
-    <template v-if="catalog.length > 0">
-      <button v-if="!showAdd" type="button" class="add" :disabled="disabled" @click="showAdd = true">
-        + Add expression
-      </button>
+    <button
+      v-if="catalog.length > 0"
+      type="button"
+      class="add"
+      :disabled="disabled"
+      @click="showAddModal = true"
+    >
+      + Add expression
+    </button>
 
-      <div v-else class="picker">
-        <button
-          v-for="t in availableTypes"
-          :key="t.id"
-          type="button"
-          class="type"
-          :disabled="disabled || t.added"
-          @click="addExpression(t.id)"
-        >
-          <span class="type-name">{{ t.name }}<span v-if="t.added"> ✓</span></span>
-        </button>
-        <button type="button" class="cancel" @click="showAdd = false">Cancel</button>
+    <div v-if="showAddModal" class="modal-overlay" @click="showAddModal = false">
+      <div class="modal-container" @click.stop>
+        <div class="modal-box">
+          <h3>Add an expression</h3>
+
+          <div class="type-list">
+            <button
+              v-for="t in catalog"
+              :key="t.id"
+              type="button"
+              class="type"
+              :disabled="disabled"
+              @click="addExpression(t.id)"
+            >
+              <span class="type-name">{{ t.name }}</span>
+            </button>
+          </div>
+
+          <div class="modal-actions">
+            <button type="button" class="cancel" @click="showAddModal = false">Cancel</button>
+          </div>
+        </div>
       </div>
-    </template>
+    </div>
   </div>
 </template>
 
@@ -194,6 +211,20 @@ const addExpression = (type: string) => {
   cursor: pointer;
 }
 
+.test {
+  padding: 6px 12px;
+  background: rgba(68, 108, 156, 0.15);
+  color: var(--brand-aurora-blue);
+  border: 1px solid rgba(68, 108, 156, 0.5);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.test:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .del {
   width: 32px;
   height: 32px;
@@ -220,20 +251,57 @@ const addExpression = (type: string) => {
   cursor: pointer;
 }
 
-.picker {
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.modal-container {
+  width: 100%;
+  max-width: 500px;
+  padding: 20px;
+}
+
+.modal-box {
+  background: var(--color-background-soft);
+  border-radius: 16px;
+  padding: 32px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.modal-box h3 {
+  color: var(--brand-lamp-white);
+  margin: 0 0 24px 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.type-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  margin-bottom: 24px;
 }
 
 .type {
   text-align: left;
-  padding: 12px;
+  padding: 16px;
   background: rgba(255, 255, 255, 0.05);
   color: var(--brand-fog-grey);
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 8px;
   cursor: pointer;
+  transition: all 0.2s;
+}
+
+.type:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--brand-lumen-green);
 }
 
 .type:disabled {
@@ -246,13 +314,21 @@ const addExpression = (type: string) => {
   font-weight: 500;
 }
 
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .cancel {
-  align-self: flex-start;
   padding: 8px 16px;
   background: transparent;
   color: var(--brand-light-grey);
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 6px;
   cursor: pointer;
+}
+
+.cancel:hover {
+  background: rgba(255, 255, 255, 0.05);
 }
 </style>

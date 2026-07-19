@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // Renders the subset of the catalog the web UI owns: colors, interval,
-// duration, plain int sliders, and enum selects. Zones, requiresZoning
-// params, and the invert/label cosmetics are skipped; ExpressionsList
-// round-trips every un-rendered instance key untouched.
+// duration, int sliders (honoring invert + end labels), and enum selects.
+// Zones and requiresZoning params are skipped; ExpressionsList round-trips
+// every un-rendered instance key untouched.
 import { computed } from 'vue'
 import FormField from '../FormField.vue'
 import ColorPicker from '../ColorPicker.vue'
@@ -26,6 +26,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   update: [updates: Partial<Expression>]
   preview: [colors: string[]]
+  'preview-end': []
 }>()
 
 const targetOptions = [
@@ -50,6 +51,17 @@ const shownParams = computed(() =>
 const paramMax = (p: CatalogParam) => resolveBound(p.max, pixelCount.value, p.min ?? 0)
 const paramValue = (p: CatalogParam) => Number(props.expression[p.key] ?? p.min ?? 0)
 
+// invert flips the slider axis for display only; the stored value stays raw so
+// a "slow→fast" param reads left-to-right without changing the wire value.
+const paramSliderValue = (p: CatalogParam) => {
+  const v = paramValue(p)
+  return p.invert ? (p.min ?? 0) + paramMax(p) - v : v
+}
+const onParamSlider = (p: CatalogParam, value: number) => {
+  const v = p.invert ? (p.min ?? 0) + paramMax(p) - value : value
+  emit('update', { [p.key]: v })
+}
+
 const updateColor = (index: number, value: string) => {
   const colors = [...props.expression.colors]
   colors[index] = value
@@ -58,7 +70,7 @@ const updateColor = (index: number, value: string) => {
 }
 
 const addColor = () => {
-  const colors = [...props.expression.colors, '#FF0000FF']
+  const colors = [...props.expression.colors, '#FF000000']
   emit('update', { colors })
   emit('preview', colors)
 }
@@ -96,7 +108,11 @@ const onDurationMax = (value: number) => {
 
 <template>
   <div class="config">
-    <FormField label="Target" id="expr-target">
+    <FormField
+      label="Target"
+      id="expr-target"
+      help-text="Which part of the lamp shows this effect."
+    >
       <div class="targets">
         <button
           v-for="opt in targetOptions"
@@ -123,6 +139,7 @@ const onDurationMax = (value: number) => {
             :model-value="color"
             :disabled="disabled"
             @update:model-value="(value) => updateColor(index, value)"
+            @close="emit('preview-end')"
           />
           <button
             v-if="expression.colors.length > minColors"
@@ -203,7 +220,7 @@ const onDurationMax = (value: number) => {
       </FormField>
     </template>
 
-    <FormField v-for="p in shownParams" :key="p.key" :label="p.label" :id="`expr-param-${p.key}`">
+    <FormField v-for="p in shownParams" :key="p.key" :label="p.label" :id="`expr-param-${p.key}`" :help-text="p.help">
       <div v-if="p.type === 'enum'" class="targets">
         <button
           v-for="opt in p.options"
@@ -217,17 +234,22 @@ const onDurationMax = (value: number) => {
           {{ opt.label }}
         </button>
       </div>
-      <NumberSlider
-        v-else
-        :id="`expr-param-${p.key}`"
-        :model-value="paramValue(p)"
-        :min="p.min ?? 0"
-        :max="paramMax(p)"
-        :step="p.step ?? 1"
-        :append="p.unit || ''"
-        :disabled="disabled"
-        @update:model-value="(value) => emit('update', { [p.key]: value })"
-      />
+      <div v-else class="slider-labelled">
+        <NumberSlider
+          :id="`expr-param-${p.key}`"
+          :model-value="paramSliderValue(p)"
+          :min="p.min ?? 0"
+          :max="paramMax(p)"
+          :step="p.step ?? 1"
+          :append="p.unit || ''"
+          :disabled="disabled"
+          @update:model-value="(value) => onParamSlider(p, value)"
+        />
+        <div v-if="p.leftLabel || p.rightLabel" class="slider-ends">
+          <span>{{ p.leftLabel }}</span>
+          <span>{{ p.rightLabel }}</span>
+        </div>
+      </div>
     </FormField>
   </div>
 </template>
@@ -264,6 +286,19 @@ const onDurationMax = (value: number) => {
 .target:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.slider-labelled {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.slider-ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: var(--brand-slate-grey);
 }
 
 .colors {

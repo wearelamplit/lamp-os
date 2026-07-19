@@ -14,7 +14,6 @@
       class="number-slider"
       :class="{ disabled: disabled }"
       :style="sliderStyle"
-      @input="updateValue"
       @touchstart="handleTouchStart"
       @touchmove="handleTouchMove"
       @touchend="handleTouchEnd"
@@ -59,10 +58,6 @@ const sliderStyle = computed(() => {
     '--slider-thumb-hover-color': props.color,
   }
 })
-
-const updateValue = () => {
-  emit('update:modelValue', localValue.value)
-}
 
 // Touch event handlers to prevent page swiping
 const handleTouchStart = (event: TouchEvent) => {

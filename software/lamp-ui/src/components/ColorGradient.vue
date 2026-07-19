@@ -14,6 +14,8 @@
           <ColorPicker
             v-model="localColors[localColors.length - 1 - index]"
             @update:model-value="updateColor(localColors.length - 1 - index, $event)"
+            @open="emit('edit-session', true)"
+            @close="emit('edit-session', false)"
             :disabled="disabled"
           />
 
@@ -79,7 +81,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  modelValue: () => ['#FF0000FF'],
+  modelValue: () => ['#FF000000'],
   showAddButton: true,
   maxColors: 5,
   disabled: false,
@@ -89,13 +91,14 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   'update:modelValue': [value: string[]]
   'update:activeColor': [value: number]
+  'edit-session': [open: boolean]
 }>()
 
 const localColors = ref<string[]>([...props.modelValue])
 
 // Ensure we always have at least one color
 if (localColors.value.length === 0) {
-  localColors.value = ['#FF0000FF']
+  localColors.value = ['#FF000000']
 }
 
 const gradientStyle = computed(() => {
@@ -116,7 +119,7 @@ const updateColor = (index: number, value: string) => {
 }
 
 const addColor = () => {
-  const firstColor = localColors.value[0] || '#FF0000FF'
+  const firstColor = localColors.value[0] || '#FF000000'
   localColors.value.unshift(firstColor)
 
   // If active color exists and is not at index 0, increment its index

@@ -1,16 +1,29 @@
 <script setup lang="ts">
-import Critter from './Critter-7.vue'
-defineProps<{ name?: string }>()
+import { computed } from 'vue'
+import CritterIcon from './CritterIcon.vue'
+import { SAFE_COLOR } from '../utils/configShape'
+
+const props = withDefaults(
+  defineProps<{ name?: string; lampId?: string; baseColor?: string; shadeColor?: string; size?: number }>(),
+  { size: 51 },
+)
+
+const isUnnamed = computed(() => !props.name)
 </script>
 
 <template>
   <div class="nameplate-container">
-    <div class="critter">
-      <Critter />
+    <div class="critter" :style="{ width: size + 'px' }">
+      <CritterIcon
+        :lamp-id="lampId"
+        :shade="shadeColor ?? SAFE_COLOR"
+        :base="baseColor ?? SAFE_COLOR"
+        :stray="isUnnamed"
+      />
     </div>
     <div class="text">
       <div class="preamble">Hello my name is:</div>
-      <div class="lampname">{{ name }}</div>
+      <div class="lampname" :class="{ unnamed: isUnnamed }">{{ isUnnamed ? 'a nameless friend' : name }}</div>
     </div>
   </div>
 </template>
@@ -19,19 +32,12 @@ defineProps<{ name?: string }>()
 .nameplate-container {
   display: flex;
   align-items: center;
+  gap: 35px;
   margin: 40px 0;
 }
 
 .critter {
-  width: 51px;
-  color: white;
-  float: left;
   margin-left: 10px;
-}
-
-.nameplate-container .text {
-  float: left;
-  margin-left: 35px;
 }
 
 .nameplate-container .text .preamble {
@@ -45,5 +51,12 @@ defineProps<{ name?: string }>()
   font-weight: 800;
   color: #ffffff;
   margin-top: -9px;
+}
+
+.nameplate-container .text .lampname.unnamed {
+  font-size: 20px;
+  font-weight: 400;
+  font-style: italic;
+  color: #b1aa92;
 }
 </style>

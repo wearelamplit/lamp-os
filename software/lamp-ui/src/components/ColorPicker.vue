@@ -24,7 +24,7 @@
                 v-model="hexInput"
                 type="text"
                 class="hex-input"
-                placeholder="#FF0000FF or #FF0000"
+                placeholder="#FF000000 or #FF0000"
                 @blur="updateFromHex"
               />
             </div>
@@ -120,9 +120,9 @@ const openDialog = () => {
   isDialogOpen.value = true
   emit('open')
   // Store the original color before making changes
-  originalColor.value = props.modelValue || '#FF0000FF'
+  originalColor.value = props.modelValue || '#FF000000'
   // Initialize the hex input with the current model value
-  hexInput.value = props.modelValue || '#FF0000FF'
+  hexInput.value = props.modelValue || '#FF000000'
   // Parse the hex value to update sliders without emitting
   parseHexwwValue(props.modelValue)
 
