@@ -20,6 +20,11 @@ Read these before changing networking, protocol, or BLE behavior:
 
 - **[`docs/dev/networking.md`](docs/dev/networking.md)**, wire-format spec for every
   message type. The code wins ties; update this doc when it doesn't.
+- **[`docs/dev/embedded-heap.md`](docs/dev/embedded-heap.md)**, heap discipline for
+  the tight, fragmented lamp/wisp heap (~23 KB largest free block). Read before
+  adding any roster / per-peer / hot-path feature: the fleet-awareness "snapshot the
+  roster into a vector of strings and sort it" pattern is the top fragmentation
+  driver and reinvents itself per feature.
 
 **Keep docs current.** Before calling work done, check whether anything under
 `docs/dev/` describes the behavior you changed; if so, update it in the same
@@ -28,17 +33,30 @@ change. A doc that contradicts shipped code is a bug.
 The full developer handbook (architecture, expressions, personality, security)
 lives in [`docs/dev/`](docs/dev/).
 
+## Versioning + changelog
+
+The firmware version is the root `VERSION` file. **When you bump it, add a
+matching entry to [`docs/CHANGELOG.md`](docs/CHANGELOG.md) in the same change** —
+grouped Added / Fixed / Changed, highlights not every commit. A version bump
+with no changelog entry is incomplete.
+
+Claude: before treating a version bump as done, confirm `docs/CHANGELOG.md` has
+an entry for the new version; if it doesn't, stop and prompt to add one.
+
 ## Lock-ins (don't change without a protocol version bump)
 
 The mesh wire format carries a **receive range**, not a single version:
 `PROTOCOL_VERSION_EMIT = 0x05` is what we broadcast; `RX_MIN = 0x04` ..
 `RX_MAX = 0x05` is what we parse. Splitting emit from receive lets the fleet
 *receive* a newer version before it *emits* one — the safe path for a
-multi-version OTA wave. MSG_EVENT is nearby-scoped (no relay), DedupRing capacity is 64,
-HELLO interval is 5 s. v0x04 widened the FW channel slot to 16 bytes for
+multi-version OTA wave. MSG_EVENT is nearby-scoped (no relay), the
+per-message-type DedupRings are sized per traffic (relay-heavy types 64,
+down to 16 for single-hop / low-rate types) — receive-side state, not a
+wire contract, so nodes with different capacities interoperate and a
+resize needs no protocol bump. HELLO interval is 60 s. v0x04 widened the FW channel slot to 16 bytes for
 per-variant OTA gating (`{type}-{channel}`); v0x05 added a TLV trailer to
 HELLO + WISP_HELLO (TLVs: `HELLO_TLV_OTA_STATE`, `HELLO_TLV_FW_CHANNEL`,
-`HELLO_TLV_FS_STATE`). Unknown TLVs are
+`HELLO_TLV_FS_STATE`, `HELLO_TLV_FW_MAX_CHUNK`, `HELLO_TLV_NEED_FS`). Unknown TLVs are
 silently skipped (forward-compat). Cross-version mismatch fails loud (peers
 don't show up).
 
@@ -73,8 +91,9 @@ instead:
 - Insert / remove / reorder / add-CCCD is a **breaking** change: bump
   `kGattSchemaVersion` and re-pin the hash in `test_ble_gatt_layout` (the
   native test fails until you do), and expect a one-time force-stop on
-  already-paired phones. The boot-time assert in `ble_control.cpp` catches
-  table-vs-registration drift.
+  already-paired phones. Registration in `ble_control.cpp` iterates
+  `kGattLayout`, so order/props cannot drift; a boot-time coverage check
+  catches a callback binding that misses the table.
 
 ## Worktrees and branch safety
 
@@ -103,19 +122,28 @@ VARIANT=snafu npm run lamp:build   # any other variant, still unsigned
 npm run wisp:build         # wisp firmware
 ```
 
-Local builds are unsigned by default (`LAMP_FIRMWARE_SKIP_SIGN=1`). Unsigned
-binaries boot and mesh normally; they cannot be distributed over ESP-NOW OTA
-(no LSIG footer). Use `:signed` variants when you have the signing key and need
-an OTA-distributable binary.
+One axis governs the build: **channel ∈ {dev, beta, stable}**
+(`LAMP_FIRMWARE_CHANNEL`). Everything derives — `signed ≡ channel != dev`,
+`LAMP_DEBUG ≡ channel == dev`, `key required ≡ channel != dev`. Local build and
+flash are always **dev**: unsigned, `LAMP_DEBUG` on, no key needed. A dev binary
+boots and meshes normally but never OTA-*sources* — it carries no LSIG footer,
+and the distributor self-disables on the dev channel at boot, so a bench dev
+lamp can't make signed peers loop re-offering it. Dev is an OTA island: the
+`{type}-{channel}` gate isolates it from beta/stable both directions.
 
-`lamp:flash` and `lamp:build` take three optional env params: `VARIANT`
-(default `standard`), `CHANNEL` (flash defaults to `beta`), and `PORT` (flash
-only, passed to `--upload-port` for when more than one board is attached).
-`VARIANT=snafu CHANNEL=stable PORT=/dev/cu.usbserial-6 npm run lamp:flash`.
+`beta` and `stable` are the signed channels. Signing is CI's job: every push to
+`dev` builds a signed `beta` release (`release-beta.yml`, keys from repo
+secrets), and `lamp:flash:release` flashes that signed image over USB. There is
+no local sign-and-flash npm task. To produce a signed binary locally, the
+key-holder runs `pio run` with `LAMP_FIRMWARE_CHANNEL=beta` (or `stable`), the
+firmware key at `~/.lamp-os-firmware-key.bin`, and the command key
+(`LAMP_COMMAND_KEY_HEX` or `~/.lamp-os-command-key.hex`); `sign_firmware.py`
+appends the footer and `inject_command_key.py` bakes in the key. A beta/stable
+build with a missing key FATALs.
 
-`lamp:build:signed` / `lamp:flash:signed` build and sign locally. Requires the
-signing key at `~/.lamp-os-firmware-key.bin`. Accept the same `VARIANT`,
-`CHANNEL`, and `PORT` env params.
+`lamp:build` and `lamp:flash` are always dev; they take `VARIANT` (default
+`standard`) and, for flash, `PORT` (passed to `--upload-port` for when more than
+one board is attached). `VARIANT=snafu PORT=/dev/cu.usbserial-6 npm run lamp:flash`.
 
 `lamp:flash:release` is the console equivalent of the web installer at
 update.lamplit.ca: it downloads the full `distribution.bin`
@@ -124,8 +152,8 @@ from the GitHub release and flashes it whole over USB. No build, no key needed.
 A fresh flash does not assume the old SPIFFS carries over; NVS (name/config) is
 not in the image, so it persists. `VARIANT` (default `standard`), `RELEASE_TAG`
 (default `beta`), and `PORT` env params apply. Every push to `dev` auto-publishes
-a fresh `beta` release (`release-beta.yml`), built at whatever version
-`platformio.ini` carries.
+a fresh `beta` release (`release-beta.yml`), built at whatever version the
+root `VERSION` file carries.
 
 The native suite covers protocol parsers, dedup ring, color math, fade
 math, cascade dedup, OTA receiver/indicator, and the GATT layout pin. Keep

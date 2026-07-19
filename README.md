@@ -37,6 +37,12 @@ You'll also need some basic workshop tools, heat shrink, wire connectors, a sold
 
 There's a handy [build guide with images here](hardware/build/README.md)
 
+## Build Tutorials
+
+[![Assembly Guide](hardware/build/images/assembly-guide.jpg)](hardware/build/files/lamp-build-instructions.pdf)
+
+[![Conversion kit Guide](hardware/build/images/conversion-kit.jpg)](hardware/build/README.md)
+
 ## Lamp OS
 
 Three components live under [`software/`](software/):
