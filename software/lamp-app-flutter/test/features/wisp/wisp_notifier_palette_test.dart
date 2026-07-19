@@ -228,6 +228,70 @@ void main() {
       final after = c.read(wispNotifierProvider(lampId)).value!;
       expect(after.source, WispSourceMode.off);
     });
+
+    test('drops a stale source echo while the write guard is armed',
+        () async {
+      final ble = InMemoryBleClient();
+      await primeStatus(
+          ble, '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual"}');
+      final c = makeContainer(ble: ble);
+
+      c.listen(wispNotifierProvider(lampId), (_, _) {});
+      await c.read(wispNotifierProvider(lampId).future);
+      final n = c.read(wispNotifierProvider(lampId).notifier);
+
+      await n.setSource(WispSourceMode.off);
+
+      // Relay re-broadcasts the cached pre-change status still on manual.
+      ble.simulateNotify(
+        lampId,
+        BleUuids.controlService,
+        BleUuids.wispStatus,
+        Uint8List.fromList(
+            utf8.encode('{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual"}')),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(c.read(wispNotifierProvider(lampId)).value!.source,
+          WispSourceMode.off,
+          reason: 'stale manual echo dropped, not adopted');
+    });
+
+    test('releases the guard when the wisp confirms the requested mode',
+        () async {
+      final ble = InMemoryBleClient();
+      await primeStatus(
+          ble, '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual"}');
+      final c = makeContainer(ble: ble);
+
+      c.listen(wispNotifierProvider(lampId), (_, _) {});
+      await c.read(wispNotifierProvider(lampId).future);
+      final n = c.read(wispNotifierProvider(lampId).notifier);
+
+      await n.setSource(WispSourceMode.off);
+      ble.simulateNotify(
+        lampId,
+        BleUuids.controlService,
+        BleUuids.wispStatus,
+        Uint8List.fromList(
+            utf8.encode('{"wispMac":"AA:BB:CC:DD:EE:FF","source":"off"}')),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      // After confirmation a genuine later manual switch flows through.
+      ble.simulateNotify(
+        lampId,
+        BleUuids.controlService,
+        BleUuids.wispStatus,
+        Uint8List.fromList(
+            utf8.encode('{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual"}')),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(c.read(wispNotifierProvider(lampId)).value!.source,
+          WispSourceMode.manual,
+          reason: 'guard released on confirm, later status not suppressed');
+    });
   });
 
   group('WispNotifier currentPalette from read', () {

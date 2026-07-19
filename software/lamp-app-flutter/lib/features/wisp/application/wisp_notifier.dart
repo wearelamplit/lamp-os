@@ -58,14 +58,16 @@ class WispNotifier extends _$WispNotifier {
   /// → wispStatus relays back to lamps → BLE notify fires. During that
   /// round-trip (up to seconds, especially via multi-hop relay), the
   /// relay lamp keeps notifying its CACHED wispStatus, still carrying
-  /// the previous `source`, which races the optimistic state and flips
-  /// the picker back. While `_pendingSourceMode` is set, incoming
-  /// wispStatus notifications have their `source` field replaced with
-  /// the pending value until either (a) a wispStatus arrives whose
-  /// source matches the pending mode (write confirmed), or (b) the
-  /// 3 s window expires (write missed; the real state is let through so
-  /// the picker snaps back and the user can retry).
-  static const Duration _sourceWriteGuard = Duration(seconds: 3);
+  /// the previous `source`. Adopting one would flip the picker back and,
+  /// worse, replace the palette with the stale mode's contents (OFF →
+  /// stale Manual with an empty palette). While the guard is armed, a
+  /// status whose `source` doesn't match the pending mode is stale: it's
+  /// dropped whole, not adopted. The guard releases when the wisp
+  /// confirms (a status whose source == pending), and only falls back to
+  /// the timeout if no confirmation arrives. The timeout sits well past a
+  /// multi-hop round-trip so it can't strand the picker in optimistic
+  /// state, then lets ground truth through so the user can retry.
+  static const Duration _sourceWriteGuard = Duration(seconds: 10);
   WispSourceMode? _pendingSourceMode;
   DateTime? _pendingSourceUntil;
 
@@ -180,7 +182,15 @@ class WispNotifier extends _$WispNotifier {
         return;
       }
       final rawMac = next.wispMac;
-      next = _applySourceWriteGuard(next);
+      final guarded = _applySourceWriteGuard(next);
+      if (guarded == null) {
+        debugPrint(
+          '[wisp_notifier] notify lamp=$lampId dropped stale source echo '
+          'source=${next.source} pending=$_pendingSourceMode',
+        );
+        return;
+      }
+      next = guarded;
       _ingestManualPaletteFromStatus(next.currentPalette);
       _maybeRereadForPalette(next);
       // Throttle: claims change rarely; re-read at most once per ~3 s so this
@@ -210,7 +220,8 @@ class WispNotifier extends _$WispNotifier {
       // cover that window. Kept tight (2x1.5s) so a genuinely wisp-less lamp
       // resolves fast rather than sitting in loading; the notify subscription
       // (already attached above) catches anything slower.
-      var initial = _applySourceWriteGuard(await _repo.readStatus());
+      var initial = _applySourceWriteGuard(await _repo.readStatus()) ??
+          WispStatus.empty;
       if (_disposed) return WispStatus.empty;
       for (var attempt = 0; !initial.present && attempt < 2; attempt++) {
         await Future.delayed(const Duration(milliseconds: 1500));
@@ -222,7 +233,8 @@ class WispNotifier extends _$WispNotifier {
           initial = live;
           break;
         }
-        initial = _applySourceWriteGuard(await _repo.readStatus());
+        initial = _applySourceWriteGuard(await _repo.readStatus()) ??
+            WispStatus.empty;
         if (_disposed) return WispStatus.empty;
       }
       _ingestManualPaletteFromStatus(initial.currentPalette);
@@ -320,6 +332,7 @@ class WispNotifier extends _$WispNotifier {
       try {
         final full = _applySourceWriteGuard(await _repo.readStatus());
         if (_disposed) return;
+        if (full == null) return;
         _ingestManualPaletteFromStatus(full.currentPalette);
         _lastPaletteIdPrefix = full.paletteIdPrefix;
         _bumpState();
@@ -690,12 +703,12 @@ class WispNotifier extends _$WispNotifier {
   }
 
   /// Apply the [setSource] optimistic-write guard to an incoming
-  /// [WispStatus]. When the guard is armed and the incoming `source`
-  /// still carries the stale pre-write value, the field is replaced
-  /// with the pending mode (everything else flows through unchanged).
-  /// The guard releases when the wisp confirms (incoming.source ==
-  /// pending) or the window expires.
-  WispStatus _applySourceWriteGuard(WispStatus incoming) {
+  /// [WispStatus]. Returns null when the status is a stale pre-write
+  /// echo that the caller must drop whole; otherwise returns the status
+  /// to adopt. The guard releases (and lets the status through) when the
+  /// wisp confirms (incoming.source == pending) or the fallback window
+  /// expires.
+  WispStatus? _applySourceWriteGuard(WispStatus incoming) {
     final pendingMode = _pendingSourceMode;
     if (pendingMode == null) return incoming;
     final now = DateTime.now();
@@ -710,7 +723,7 @@ class WispNotifier extends _$WispNotifier {
       _pendingSourceUntil = null;
       return incoming;
     }
-    return incoming.copyWith(source: pendingMode);
+    return null;
   }
 
   // Each helper rebuilds the draft list and rebroadcasts state.
