@@ -12,20 +12,16 @@ part of 'dispositions_notifier.dart';
 ///
 /// Reads CHAR_SOCIAL_DISPOSITIONS once at build; subsequent edits update
 /// an in-memory map AND schedule a debounced write back to the lamp (500
-/// ms after the last edit). The full map is sent on every write — the
+/// ms after the last edit). The full map is sent on every write: the
 /// firmware-side characteristic replaces the entire state on each write.
 ///
 /// Disposition values are 1..5 (salty, wary, neutral, fond, smitten).
 /// Missing keys default to 3 (neutral) at the call site via `get`.
 ///
-/// Keys are BD_ADDR strings (canonical uppercase colon-hex,
-/// e.g. "AA:BB:CC:DD:EE:FF") — NOT the peer's user-set name. On
-/// Android, `NearbyLamp.id` is the BLE remoteId which IS the BD_ADDR
-/// in this exact format. On iOS the BLE remoteId is a CoreBluetooth
-/// UUID, NOT a BD_ADDR — iOS cross-reference is a known follow-up
-/// (would require reading the lamp's CHAR_NEARBY_LAMPS JSON which
-/// emits `bdAddr` per peer; the social screen currently uses the
-/// phone-direct scan).
+/// Keys are the peer's lamp-reported lampId (mesh MAC, colon-hex, from the
+/// connected lamp's `nearby` section, `LampNearbyPeer.lampId`), NOT the
+/// peer's user-set name or the phone's BLE remoteId. The firmware emits the
+/// same address on both platforms, so keys are stable across Android and iOS.
 
 @ProviderFor(Dispositions)
 final dispositionsProvider = DispositionsFamily._();
@@ -34,40 +30,32 @@ final dispositionsProvider = DispositionsFamily._();
 ///
 /// Reads CHAR_SOCIAL_DISPOSITIONS once at build; subsequent edits update
 /// an in-memory map AND schedule a debounced write back to the lamp (500
-/// ms after the last edit). The full map is sent on every write — the
+/// ms after the last edit). The full map is sent on every write: the
 /// firmware-side characteristic replaces the entire state on each write.
 ///
 /// Disposition values are 1..5 (salty, wary, neutral, fond, smitten).
 /// Missing keys default to 3 (neutral) at the call site via `get`.
 ///
-/// Keys are BD_ADDR strings (canonical uppercase colon-hex,
-/// e.g. "AA:BB:CC:DD:EE:FF") — NOT the peer's user-set name. On
-/// Android, `NearbyLamp.id` is the BLE remoteId which IS the BD_ADDR
-/// in this exact format. On iOS the BLE remoteId is a CoreBluetooth
-/// UUID, NOT a BD_ADDR — iOS cross-reference is a known follow-up
-/// (would require reading the lamp's CHAR_NEARBY_LAMPS JSON which
-/// emits `bdAddr` per peer; the social screen currently uses the
-/// phone-direct scan).
+/// Keys are the peer's lamp-reported lampId (mesh MAC, colon-hex, from the
+/// connected lamp's `nearby` section, `LampNearbyPeer.lampId`), NOT the
+/// peer's user-set name or the phone's BLE remoteId. The firmware emits the
+/// same address on both platforms, so keys are stable across Android and iOS.
 final class DispositionsProvider
     extends $AsyncNotifierProvider<Dispositions, Map<String, int>> {
   /// Per-peer social disposition for a given lamp.
   ///
   /// Reads CHAR_SOCIAL_DISPOSITIONS once at build; subsequent edits update
   /// an in-memory map AND schedule a debounced write back to the lamp (500
-  /// ms after the last edit). The full map is sent on every write — the
+  /// ms after the last edit). The full map is sent on every write: the
   /// firmware-side characteristic replaces the entire state on each write.
   ///
   /// Disposition values are 1..5 (salty, wary, neutral, fond, smitten).
   /// Missing keys default to 3 (neutral) at the call site via `get`.
   ///
-  /// Keys are BD_ADDR strings (canonical uppercase colon-hex,
-  /// e.g. "AA:BB:CC:DD:EE:FF") — NOT the peer's user-set name. On
-  /// Android, `NearbyLamp.id` is the BLE remoteId which IS the BD_ADDR
-  /// in this exact format. On iOS the BLE remoteId is a CoreBluetooth
-  /// UUID, NOT a BD_ADDR — iOS cross-reference is a known follow-up
-  /// (would require reading the lamp's CHAR_NEARBY_LAMPS JSON which
-  /// emits `bdAddr` per peer; the social screen currently uses the
-  /// phone-direct scan).
+  /// Keys are the peer's lamp-reported lampId (mesh MAC, colon-hex, from the
+  /// connected lamp's `nearby` section, `LampNearbyPeer.lampId`), NOT the
+  /// peer's user-set name or the phone's BLE remoteId. The firmware emits the
+  /// same address on both platforms, so keys are stable across Android and iOS.
   DispositionsProvider._({
     required DispositionsFamily super.from,
     required String super.argument,
@@ -104,26 +92,22 @@ final class DispositionsProvider
   }
 }
 
-String _$dispositionsHash() => r'67fc5d630c14a7267f1b3e268620c895fc3dbee1';
+String _$dispositionsHash() => r'287cdb6e46f32c8d55d2d4f76c650203a8d8889e';
 
 /// Per-peer social disposition for a given lamp.
 ///
 /// Reads CHAR_SOCIAL_DISPOSITIONS once at build; subsequent edits update
 /// an in-memory map AND schedule a debounced write back to the lamp (500
-/// ms after the last edit). The full map is sent on every write — the
+/// ms after the last edit). The full map is sent on every write: the
 /// firmware-side characteristic replaces the entire state on each write.
 ///
 /// Disposition values are 1..5 (salty, wary, neutral, fond, smitten).
 /// Missing keys default to 3 (neutral) at the call site via `get`.
 ///
-/// Keys are BD_ADDR strings (canonical uppercase colon-hex,
-/// e.g. "AA:BB:CC:DD:EE:FF") — NOT the peer's user-set name. On
-/// Android, `NearbyLamp.id` is the BLE remoteId which IS the BD_ADDR
-/// in this exact format. On iOS the BLE remoteId is a CoreBluetooth
-/// UUID, NOT a BD_ADDR — iOS cross-reference is a known follow-up
-/// (would require reading the lamp's CHAR_NEARBY_LAMPS JSON which
-/// emits `bdAddr` per peer; the social screen currently uses the
-/// phone-direct scan).
+/// Keys are the peer's lamp-reported lampId (mesh MAC, colon-hex, from the
+/// connected lamp's `nearby` section, `LampNearbyPeer.lampId`), NOT the
+/// peer's user-set name or the phone's BLE remoteId. The firmware emits the
+/// same address on both platforms, so keys are stable across Android and iOS.
 
 final class DispositionsFamily extends $Family
     with
@@ -147,20 +131,16 @@ final class DispositionsFamily extends $Family
   ///
   /// Reads CHAR_SOCIAL_DISPOSITIONS once at build; subsequent edits update
   /// an in-memory map AND schedule a debounced write back to the lamp (500
-  /// ms after the last edit). The full map is sent on every write — the
+  /// ms after the last edit). The full map is sent on every write: the
   /// firmware-side characteristic replaces the entire state on each write.
   ///
   /// Disposition values are 1..5 (salty, wary, neutral, fond, smitten).
   /// Missing keys default to 3 (neutral) at the call site via `get`.
   ///
-  /// Keys are BD_ADDR strings (canonical uppercase colon-hex,
-  /// e.g. "AA:BB:CC:DD:EE:FF") — NOT the peer's user-set name. On
-  /// Android, `NearbyLamp.id` is the BLE remoteId which IS the BD_ADDR
-  /// in this exact format. On iOS the BLE remoteId is a CoreBluetooth
-  /// UUID, NOT a BD_ADDR — iOS cross-reference is a known follow-up
-  /// (would require reading the lamp's CHAR_NEARBY_LAMPS JSON which
-  /// emits `bdAddr` per peer; the social screen currently uses the
-  /// phone-direct scan).
+  /// Keys are the peer's lamp-reported lampId (mesh MAC, colon-hex, from the
+  /// connected lamp's `nearby` section, `LampNearbyPeer.lampId`), NOT the
+  /// peer's user-set name or the phone's BLE remoteId. The firmware emits the
+  /// same address on both platforms, so keys are stable across Android and iOS.
 
   DispositionsProvider call(String lampId) =>
       DispositionsProvider._(argument: lampId, from: this);
@@ -173,20 +153,16 @@ final class DispositionsFamily extends $Family
 ///
 /// Reads CHAR_SOCIAL_DISPOSITIONS once at build; subsequent edits update
 /// an in-memory map AND schedule a debounced write back to the lamp (500
-/// ms after the last edit). The full map is sent on every write — the
+/// ms after the last edit). The full map is sent on every write: the
 /// firmware-side characteristic replaces the entire state on each write.
 ///
 /// Disposition values are 1..5 (salty, wary, neutral, fond, smitten).
 /// Missing keys default to 3 (neutral) at the call site via `get`.
 ///
-/// Keys are BD_ADDR strings (canonical uppercase colon-hex,
-/// e.g. "AA:BB:CC:DD:EE:FF") — NOT the peer's user-set name. On
-/// Android, `NearbyLamp.id` is the BLE remoteId which IS the BD_ADDR
-/// in this exact format. On iOS the BLE remoteId is a CoreBluetooth
-/// UUID, NOT a BD_ADDR — iOS cross-reference is a known follow-up
-/// (would require reading the lamp's CHAR_NEARBY_LAMPS JSON which
-/// emits `bdAddr` per peer; the social screen currently uses the
-/// phone-direct scan).
+/// Keys are the peer's lamp-reported lampId (mesh MAC, colon-hex, from the
+/// connected lamp's `nearby` section, `LampNearbyPeer.lampId`), NOT the
+/// peer's user-set name or the phone's BLE remoteId. The firmware emits the
+/// same address on both platforms, so keys are stable across Android and iOS.
 
 abstract class _$Dispositions extends $AsyncNotifier<Map<String, int>> {
   late final _$args = ref.$arg as String;

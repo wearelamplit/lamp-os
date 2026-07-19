@@ -15,5 +15,5 @@ const TextTheme appTextTheme = TextTheme(
   bodyLarge: TextStyle(fontFamily: _inter, fontWeight: FontWeight.w400, fontSize: 15, color: _ink),
   bodyMedium: TextStyle(fontFamily: _inter, fontWeight: FontWeight.w400, fontSize: 13, color: Brand.fogGrey),
   bodySmall: TextStyle(fontFamily: _inter, fontWeight: FontWeight.w400, fontSize: 12, color: Brand.fogGrey),
-  labelLarge: TextStyle(fontFamily: _inter, fontWeight: FontWeight.w600, fontSize: 11, letterSpacing: 1.2, color: Brand.fogGrey),
+  labelLarge: TextStyle(fontFamily: _inter, fontWeight: FontWeight.w700, fontSize: 12, letterSpacing: 1.0, color: Brand.fogGrey),
 );

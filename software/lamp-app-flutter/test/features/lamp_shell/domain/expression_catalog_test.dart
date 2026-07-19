@@ -1,9 +1,21 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lamp_app/features/control/domain/sections.dart';
 import 'package:lamp_app/features/lamp_shell/domain/expression_catalog.dart';
 
 import '../../../_support/seed.dart';
+
+ExpressionConfig _config(String type, {Map<String, int> parameters = const {}}) =>
+    ExpressionConfig(
+      type: type,
+      enabled: true,
+      colors: const [],
+      intervalMin: 60,
+      intervalMax: 900,
+      target: 3,
+      parameters: parameters,
+    );
 
 void main() {
   final catalog = ExpressionCatalog.fromJson(
@@ -45,7 +57,7 @@ void main() {
       expect(d.continuous, isTrue);
       expect(d.interval, isNull);
       expect(d.hasZone, isTrue);
-      expect(d.zoneOptional, isFalse);
+      expect(d.zoneOptional, isTrue);
     });
 
     test('pausesWispOverride parses per expression', () {
@@ -66,12 +78,13 @@ void main() {
           isTrue);
     });
 
-    test('shifty fillMode is an enum whose Up/Down/Bloom options zone', () {
+    test('shifty zone is toggle-driven; fillMode options carry no zoning', () {
       final d = catalog.byId('shifty')!;
+      expect(d.hasZone, isTrue);
+      expect(d.zoneOptional, isTrue);
       final fill = d.params.firstWhere((p) => p.key == 'fillMode');
       expect(fill.type, ParamType.enumeration);
-      expect(fill.options.firstWhere((o) => o.value == 0).zoning, isFalse);
-      expect(fill.options.firstWhere((o) => o.value == 1).zoning, isTrue);
+      expect(fill.options.every((o) => !o.zoning), isTrue);
     });
 
     test('interval is top-level; duration carries param keys', () {
@@ -79,6 +92,47 @@ void main() {
       expect(d.interval!.defLo, 60);
       expect(d.interval!.defHi, 900);
       expect(d.duration!.label, 'Hold time');
+    });
+  });
+
+  group('triggerCooldown', () {
+    test('glitchy uses configured durationMax in ms (unit ms)', () {
+      final d = catalog.byId('glitchy')!;
+      expect(
+        triggerCooldown(d, _config('glitchy', parameters: {'durationMax': 1500})),
+        const Duration(milliseconds: 1500),
+      );
+    });
+
+    test('glitchy falls back to defHi when durationMax absent', () {
+      final d = catalog.byId('glitchy')!;
+      expect(
+        triggerCooldown(d, _config('glitchy')),
+        const Duration(milliseconds: 120),
+      );
+    });
+
+    test('shifty converts durationMax from seconds to ms (unit s)', () {
+      final d = catalog.byId('shifty')!;
+      expect(
+        triggerCooldown(d, _config('shifty', parameters: {'shiftDurationMax': 5})),
+        const Duration(milliseconds: 5000),
+      );
+    });
+
+    test('duration-less pulse uses the fixed fallback', () {
+      final d = catalog.byId('pulse')!;
+      expect(
+        triggerCooldown(d, _config('pulse')),
+        const Duration(milliseconds: kTriggerCooldownFallbackMs),
+      );
+    });
+
+    test('null descriptor uses the fixed fallback', () {
+      expect(
+        triggerCooldown(null, _config('anything')),
+        const Duration(milliseconds: kTriggerCooldownFallbackMs),
+      );
     });
   });
 }

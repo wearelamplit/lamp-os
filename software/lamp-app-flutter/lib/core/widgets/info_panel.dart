@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import '../theme/app_spacing.dart';
 
 /// Small inline callout used to surface contextual help / explanations
-/// inside settings forms. Ported from the Vue app's `InfoPanel.vue`:
-/// linear gradient on aurora-blue, left border accent, fog-grey body text.
+/// inside settings forms: linear gradient on aurora-blue, left border
+/// accent, fog-grey body text.
 ///
 /// No horizontal margin: callers place it inside an already-padded list, so
 /// it inherits the parent inset and stays flush with sibling cards/content.

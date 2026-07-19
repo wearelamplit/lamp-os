@@ -10,7 +10,7 @@ import 'connect_with_retry.dart';
 /// Connects to an unclaimed lamp and re-fires a `pulse` test_expression in the
 /// lamp's own shade colour on the BASE strip, so the physical lamp pulses for
 /// identification. Pulse is used (not breathing) because it doesn't yield to
-/// wisp paint — the identify has to win over an active show. The firmware runs
+/// wisp paint: the identify has to win over an active show. The firmware runs
 /// a transient colored pulse from the payload. All writes best-effort; [stop]
 /// idempotent.
 class AdoptPulseController {

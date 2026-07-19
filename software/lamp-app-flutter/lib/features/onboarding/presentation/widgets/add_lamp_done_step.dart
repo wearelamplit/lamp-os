@@ -1,4 +1,3 @@
-// lib/features/onboarding/presentation/widgets/add_lamp_done_step.dart
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/brand_extras.dart';
+import '../../../../core/widgets/critter_icon.dart';
 import '../../../control/application/control_notifier.dart';
 import '../../../inventory/application/inventory_notifier.dart';
 import '../../../nearby/application/lamp_route_resolver.dart';
@@ -24,7 +24,7 @@ class AddLampDoneStep extends ConsumerWidget {
     ref.watch(controlNotifierProvider(state.deviceId));
     // Watch the full nearby list (not just an isMesh boolean) so the
     // route picker below can distinguish "lamp not in range" from
-    // "lamp in range with isMesh=false" — those route differently
+    // "lamp in range with isMesh=false"; those route differently
     // (control + ConnectingView vs. dedicated BT-only pane).
     // This widget is only shown for a few seconds at the end of
     // onboarding, so rebuilding on every nearby tick is fine.
@@ -35,7 +35,6 @@ class AddLampDoneStep extends ConsumerWidget {
         false;
     final name = state.name.isEmpty ? 'Your lamp' : state.name;
     final textTheme = Theme.of(context).textTheme;
-    final colorScheme = Theme.of(context).colorScheme;
     return SingleChildScrollView(
       padding: const EdgeInsets.all(AppSpace.xl),
       child: SizedBox(
@@ -43,10 +42,11 @@ class AddLampDoneStep extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Icon(
-              Icons.favorite,
-              color: colorScheme.primary,
-              size: 64,
+            CritterIcon(
+              deviceId: state.deviceId,
+              shade: Color(0xFF000000 | state.shadeRgb),
+              base: Color(0xFF000000 | state.baseRgb),
+              size: 96,
             ),
             const SizedBox(height: AppSpace.lg),
             Text(
@@ -64,7 +64,7 @@ class AddLampDoneStep extends ConsumerWidget {
             ),
             const SizedBox(height: AppSpace.xl),
             // Wi-Fi instructions only for legacy lamps that aren't on
-            // the mesh — mesh-capable lamps don't need the user to
+            // the mesh; mesh-capable lamps don't need the user to
             // chase the AP.
             if (!isMesh) const _WifiSetupCard(),
             if (!isMesh) const SizedBox(height: AppSpace.xl),

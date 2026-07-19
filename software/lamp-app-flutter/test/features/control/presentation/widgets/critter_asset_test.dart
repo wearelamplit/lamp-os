@@ -2,18 +2,39 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lamp_app/features/control/presentation/widgets/critter_asset.dart';
 
 void main() {
-  test('critterIndex 1..16 maps to sixteen distinct critter SVGs', () {
-    final picks = {
-      for (var i = 1; i <= 16; i++)
-        critterAssetFor(critterIndex: i, deviceId: 'x'),
-    };
-    expect(picks.length, 16);
+  test('critterAssetFor derives a deterministic path from identity', () {
+    expect(critterAssetFor('lamp-A'), critterAssetFor('lamp-A'));
+    expect(
+      critterAssetFor('AA:BB:CC:DD:EE:01'),
+      'assets/critters/critter-${critterIndexFor('AA:BB:CC:DD:EE:01')}.svg',
+    );
   });
 
-  test('null critterIndex falls back to a deterministic deviceId hash', () {
-    expect(
-      critterAssetFor(critterIndex: null, deviceId: 'lamp-A'),
-      critterAssetFor(critterIndex: null, deviceId: 'lamp-A'),
-    );
+  test('every critter index resolves to a distinct asset path', () {
+    final picks = {
+      for (var i = 1; i <= critterCount; i++) 'assets/critters/critter-$i.svg',
+    };
+    expect(picks.length, critterCount);
+  });
+
+  test('critterIndexFor is stable for a given identity', () {
+    expect(critterIndexFor('AA:BB:CC:DD:EE:01'),
+        critterIndexFor('AA:BB:CC:DD:EE:01'));
+  });
+
+  test('critterIndexFor is case-insensitive', () {
+    expect(critterIndexFor('aa:bb:cc:dd:ee:01'),
+        critterIndexFor('AA:BB:CC:DD:EE:01'));
+  });
+
+  test('critterIndexFor always lands in 1..16', () {
+    for (final identity in ['', 'x', 'AA:BB:CC:DD:EE:01', 'a' * 200]) {
+      expect(critterIndexFor(identity), inInclusiveRange(1, 16));
+    }
+  });
+
+  test('critterIndexFor pins known identities to known indices', () {
+    expect(critterIndexFor('AA:BB:CC:DD:EE:01'), 2);
+    expect(critterIndexFor('11:22:33:44:55:66'), 13);
   });
 }

@@ -1,6 +1,6 @@
 /// Returns a short human-readable "last seen" label, e.g. "Just now",
 /// "5m ago", "2h ago", "3d ago", "2 weeks ago", "5 months ago",
-/// "over a year ago". Pure — caller passes [now] so tests are
+/// "over a year ago". Pure. Caller passes [now] so tests are
 /// deterministic. Future timestamps (clock skew) clamp to "Just now".
 String formatLastSeen(int epochMs, DateTime now) {
   final delta =

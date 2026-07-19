@@ -54,8 +54,7 @@ class _ColorPickerSheetState extends State<_ColorPickerSheet> {
   late int _b = widget.initial.b;
   late int _w = widget.bpp == 4 ? widget.initial.w : 0;
 
-  // Round-trips with _r/_g/_b/_w so the user can type a hex code directly
-  // (matches the Vue picker — software/lamp-app/src/components/fields/Color.vue).
+  // Round-trips with _r/_g/_b/_w so the user can type a hex code directly.
   late final TextEditingController _hexCtrl =
       TextEditingController(text: _displayHex);
   String? _hexError;
@@ -117,7 +116,7 @@ class _ColorPickerSheetState extends State<_ColorPickerSheet> {
   void _onHexChanged(String input) {
     final parsed = LampColor.tryFromHex(input);
     if (parsed == null) {
-      // Show the error inline but don't reject partial typing — the user is
+      // Show the error inline but don't reject partial typing. The user is
       // probably mid-keystroke; revert validation when they reach a valid
       // length.
       setState(() => _hexError = 'Need #RRGGBB or #RRGGBBWW');

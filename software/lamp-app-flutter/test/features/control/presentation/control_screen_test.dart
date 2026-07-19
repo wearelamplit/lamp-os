@@ -106,7 +106,7 @@ Future<void> _pumpToData(WidgetTester tester) async {
 }
 
 void main() {
-  testWidgets('BrightnessCard sits below BaseCard', (tester) async {
+  testWidgets('BrightnessCard sits above the color cards', (tester) async {
     final c = await _withLamp();
     addTearDown(c.dispose);
     await tester.pumpWidget(UncontrolledProviderScope(
@@ -116,15 +116,10 @@ void main() {
       ),
     ));
     await _pumpToData(tester);
-    await tester.dragUntilVisible(
-      find.byType(BrightnessCard),
-      find.byType(ListView),
-      const Offset(0, -200),
-    );
     final brightnessY = tester.getTopLeft(find.byType(BrightnessCard)).dy;
     final baseY = tester.getTopLeft(find.byType(BaseCard)).dy;
-    expect(brightnessY, greaterThan(baseY),
-        reason: 'Brightness must be visually below the base card');
+    expect(brightnessY, lessThan(baseY),
+        reason: 'Brightness sits under the name tag, above the color cards');
   });
 
   testWidgets('non-snafu lamp shows "Shade" and no "Big Dots" card',

@@ -10,4 +10,8 @@ abstract class AppSpace {
 
 abstract class AppRadius {
   static const double card = 12;
+
+  /// Corner radius for every color swatch (rounded square). Matches the
+  /// Colors-page cards so all swatches rhyme.
+  static const double swatch = 14; // deliberate dimension, not spacing
 }

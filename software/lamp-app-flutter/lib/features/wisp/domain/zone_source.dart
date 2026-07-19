@@ -2,12 +2,12 @@
 /// `ZoneSelector::Source` enum on the wisp firmware side; the wire
 /// format on `wispStatus.zoneSource` is the lowercase enum name.
 ///
-/// - [none]      — no zone selected, wisp is idle.
-/// - [firstSeen] — wisp adopted the first zone it observed on the mesh.
-/// - [nvs]       — operator persisted a choice from a previous session.
-/// - [appOp]     — operator set it this session via a `setZone` wispOp.
-/// - [unknown]   — forward-compat sentinel for any value the firmware
-///                 introduces before the app catches up.
+/// - [none]:      no zone selected, wisp is idle.
+/// - [firstSeen]: wisp adopted the first zone it observed on the mesh.
+/// - [nvs]:       operator persisted a choice from a previous session.
+/// - [appOp]:     operator set it this session via a `setZone` wispOp.
+/// - [unknown]:   forward-compat sentinel for any value the firmware
+///                introduces before the app catches up.
 enum ZoneSource {
   none,
   firstSeen,
@@ -51,9 +51,9 @@ String zoneSourceWire(ZoneSource s) {
     case ZoneSource.appOp:
       return 'appOp';
     case ZoneSource.unknown:
-      // Wire format reserved — should never be emitted from the app
-      // since `unknown` only arises on parse. Round-tripping a string
-      // we don't recognise back to the wisp would be a bug.
+      // Wire format reserved. Should never be emitted from the app
+      // since `unknown` only arises on parse. Round-tripping an
+      // unrecognized string back to the wisp would be a bug.
       return 'none';
   }
 }

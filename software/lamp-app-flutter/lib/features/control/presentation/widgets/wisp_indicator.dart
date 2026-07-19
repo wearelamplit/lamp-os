@@ -15,14 +15,14 @@ import '../../application/advanced_session.dart';
 ///   - Wisp is actively controlling at least one surface (default), OR
 ///   - Advanced settings are unlocked AND the wisp is on the mesh
 ///     (`status.present`). The orbs use `status.offColor` for the tint
-///     because the wisp isn't painting per-surface colors right now —
-///     this gives operators an entry point to the wisp config even when
+///     because the wisp isn't painting per-surface colors right now.
+///     This gives operators an entry point to the wisp config even when
 ///     the wisp is in Off mode or stuck waiting for Aurora to publish a
 ///     zone. Without this escape hatch, the 5-tap-orbs gesture would be
 ///     inaccessible whenever the wisp wasn't painting.
 ///
 /// Sized to sit in the empty top-right of the control screen header. No
-/// label — the user asked for whimsy without explanation.
+/// label; the user asked for whimsy without explanation.
 class WispIndicator extends ConsumerStatefulWidget {
   const WispIndicator({
     super.key,
@@ -41,7 +41,7 @@ class _WispIndicatorState extends ConsumerState<WispIndicator>
     with TickerProviderStateMixin {
   late final AnimationController _drift;
   late final AnimationController _pulse;
-  // 5-tap gesture unlocks the wisp config route — same pattern as the
+  // 5-tap gesture unlocks the wisp config route, same pattern as the
   // Lamplit-wordmark advanced-unlock in info_screen.dart. No visible
   // affordance; users discover via word-of-mouth or by accident.
   late final TapCounter _tap;
@@ -97,10 +97,10 @@ class _WispIndicatorState extends ConsumerState<WispIndicator>
     // Tint each half:
     // - When controlling: use the wisp's per-surface paint colour. Fall
     //   back to soft glow if a surface's colour hasn't landed yet
-    //   (rare — firmware caches on first wisp paint).
+    //   (rare; firmware caches on first wisp paint).
     // - When in escape-hatch mode (not controlling, just advertising
     //   presence to advanced operators): both orbs use the wisp's
-    //   offColor — the wisp isn't painting per-surface, it just is.
+    //   offColor, since the wisp isn't painting per-surface, it just is.
     final Color baseColor;
     final Color shadeColor;
     if (controlling) {
@@ -120,7 +120,7 @@ class _WispIndicatorState extends ConsumerState<WispIndicator>
         animation: Listenable.merge([_drift, _pulse]),
         builder: (context, _) {
           // When in escape-hatch mode the wisp isn't painting any
-          // surface — mark both orbs inactive so the painter dims them
+          // surface. Mark both orbs inactive so the painter dims them
           // to ~35% brightness. Reads as "wisp is here but quiet."
           return CustomPaint(
             size: Size.square(widget.size),

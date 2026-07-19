@@ -1,15 +1,15 @@
 import '../../../core/widgets/status_dot.dart';
 import '../../nearby/domain/nearby_lamp.dart';
 
-/// Derives a [StatusKind] for a lamp at the moment we're looking at it.
+/// Derives a [StatusKind] for a lamp at the current moment.
 ///
-/// - `mesh` — the active connection right now. Pulses; the app is actually
+/// - `mesh`: the active connection right now. Pulses; the app is actually
 ///   reading + writing this lamp.
-/// - `bluetooth` — heard via BLE adv within the nearby staleness window but
-///   not the one we're connected to (or connection is currently dropped).
-/// - `searching` — not heard YET but the BLE scanner just started; the
+/// - `bluetooth`: heard via BLE adv within the nearby staleness window but
+///   not the one connected (or connection is currently dropped).
+/// - `searching`: not heard yet but the BLE scanner just started; the
 ///   caller passes `inScanGrace=true` while the grace window is open.
-/// - `offline` — not heard, scan grace has expired.
+/// - `offline`: not heard, scan grace has expired.
 ///
 /// Pure function so both `LampChip` in the AppBar and the rows in
 /// `MyLampsScreen` share the same logic and stay in unit-test reach.
@@ -30,9 +30,9 @@ StatusKind statusFor({
   return _kindFromHit(hit, inScanGrace);
 }
 
-/// Map-keyed overload: call this when the caller already has an
-/// id->NearbyLamp index materialised at a higher scope (e.g. screen-level
-/// for a list of inventory tiles). Saves the linear scan in [statusFor].
+/// Map-keyed overload for a caller that already has an id->NearbyLamp
+/// index materialised at a higher scope (e.g. screen-level for a list of
+/// inventory tiles). Saves the linear scan in [statusFor].
 StatusKind statusForById({
   required String lampId,
   required Map<String, NearbyLamp> nearbyById,

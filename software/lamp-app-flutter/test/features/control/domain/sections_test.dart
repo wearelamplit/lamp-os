@@ -23,6 +23,12 @@ void main() {
     expect(s.fwChannel, 'stable');
   });
 
+  test('LampSection parses lampId', () {
+    final s = LampSection.fromJson(
+        {'lampType': 'standard', 'lampId': 'C4:DD:57:EB:64:60'});
+    expect(s.lampId, 'C4:DD:57:EB:64:60');
+  });
+
   test('LampSection.fwVersion + fwChannel null on legacy firmware', () {
     // Old firmware that doesn't yet emit fwVersion/fwChannel — the Info
     // tab renders these as "..." rather than crashing on a null cast.
@@ -33,12 +39,27 @@ void main() {
     expect(s.fwChannel, isNull);
   });
 
-  test('BaseSection parses colors, ac, px', () {
+  test('LampSection.copyWith preserves untouched fields (incl. lampType)', () {
+    final s = LampSection.fromJson(jsonDecode(
+      '{"name":"jacko","brightness":42,"advancedEnabled":true,'
+      '"fwVersion":65536,"fwChannel":"stable","hasPassword":true,'
+      '"lampType":"snafu"}',
+    ) as Map<String, dynamic>);
+    final copy = s.copyWith(brightness: 80);
+    expect(copy.brightness, 80);
+    expect(copy.name, 'jacko');
+    expect(copy.advancedEnabled, true);
+    expect(copy.fwVersion, 0x010000);
+    expect(copy.fwChannel, 'stable');
+    expect(copy.hasPassword, true);
+    expect(copy.lampType, 'snafu');
+  });
+
+  test('BaseSection parses colors, px', () {
     final s = BaseSection.fromJson(jsonDecode(
       '{"px":35,"ac":1,"bpp":4,"colors":["#300783FF","#FF0000AA"],"knockout":[]}',
     ) as Map<String, dynamic>);
     expect(s.px, 35);
-    expect(s.ac, 1);
     expect(s.colors.length, 2);
     expect(s.colors[0], const LampColor(r: 0x30, g: 0x07, b: 0x83, w: 0xFF));
     expect(s.colors[1].w, 0xAA);
@@ -126,6 +147,84 @@ void main() {
     final s = HomeSection.fromJson(<String, dynamic>{});
     expect(s.ssid, '');
     expect(s.brightness, 60);
+  });
+
+  group('HomeSection new fields — migration parity with firmware', () {
+    test('networkBound absent → false when ssid empty', () {
+      final s = HomeSection.fromJson(<String, dynamic>{'ssid': ''});
+      expect(s.networkBound, isFalse);
+    });
+
+    test('networkBound absent → true when ssid non-empty', () {
+      final s = HomeSection.fromJson(<String, dynamic>{'ssid': 'myhome'});
+      expect(s.networkBound, isTrue);
+    });
+
+    test('networkBound explicit false preserved', () {
+      final s = HomeSection.fromJson(
+          <String, dynamic>{'ssid': 'myhome', 'networkBound': false});
+      expect(s.networkBound, isFalse);
+    });
+
+    test('socialDisabled absent → true', () {
+      final s = HomeSection.fromJson(<String, dynamic>{});
+      expect(s.socialDisabled, isTrue);
+    });
+
+    test('socialDisabled explicit false preserved', () {
+      final s = HomeSection.fromJson(
+          <String, dynamic>{'socialDisabled': false});
+      expect(s.socialDisabled, isFalse);
+    });
+
+    test('disabledExpressionTypes absent → [glitchy]', () {
+      final s = HomeSection.fromJson(<String, dynamic>{});
+      expect(s.disabledExpressionTypes, equals(['glitchy']));
+    });
+
+    test('disabledExpressionTypes explicit [] preserved (not defaulted)', () {
+      final s = HomeSection.fromJson(
+          <String, dynamic>{'disabledExpressionTypes': <dynamic>[]});
+      expect(s.disabledExpressionTypes, isEmpty);
+    });
+
+    test('disabledExpressionTypes populated list preserved', () {
+      final s = HomeSection.fromJson(<String, dynamic>{
+        'disabledExpressionTypes': ['breathing', 'glitchy'],
+      });
+      expect(s.disabledExpressionTypes, equals(['breathing', 'glitchy']));
+    });
+
+    test('HomeSection.toJson round-trips all fields', () {
+      const src = HomeSection(
+        ssid: 'myhome',
+        brightness: 42,
+        enabled: true,
+        networkBound: true,
+        socialDisabled: false,
+        disabledExpressionTypes: ['breathing'],
+      );
+      final json = src.toJson();
+      expect(json['ssid'], 'myhome');
+      expect(json['brightness'], 42);
+      expect(json['enabled'], isTrue);
+      expect(json['networkBound'], isTrue);
+      expect(json['socialDisabled'], isFalse);
+      expect(json['disabledExpressionTypes'], equals(['breathing']));
+    });
+
+    test('HomeSection.toJson round-trip: empty disabledExpressionTypes', () {
+      const src = HomeSection(
+        ssid: '',
+        brightness: 60,
+        enabled: false,
+        networkBound: false,
+        socialDisabled: true,
+        disabledExpressionTypes: [],
+      );
+      final json = src.toJson();
+      expect(json['disabledExpressionTypes'], isEmpty);
+    });
   });
 
   test('ExpressionConfig round-trips through toJson + fromJson', () {
@@ -229,6 +328,20 @@ void main() {
       expect(a.hashCode, b.hashCode);
     });
 
+    test('BaseSection parses a stale out-of-range ac without a RangeError', () {
+      // A stored blob can carry ac past the end of a shrunk colors list.
+      // The section ignores ac; the representative color comes from
+      // blendedIdentity, which for a single stop is that stop.
+      final s = BaseSection.fromJson(<String, dynamic>{
+        'px': 35,
+        'ac': 2,
+        'colors': ['#112233FF'],
+      });
+      expect(s.colors.length, 1);
+      const only = LampColor(r: 0x11, g: 0x22, b: 0x33, w: 0xFF);
+      expect(LampColor.blendedIdentity(s.colors), only);
+    });
+
     test('BaseSection equality uses deep colors + knockout', () {
       // Build with mutable lists/maps so Dart's const-literal
       // canonicalisation can't make `identical(a, b)` true and mask a
@@ -236,7 +349,6 @@ void main() {
       // ignore: prefer_const_constructors
       final a = BaseSection(
         px: 35,
-        ac: 0,
         bpp: 4,
         byteOrder: 'GRBW',
         colors: [const LampColor(r: 255, g: 0, b: 0, w: 0)],
@@ -245,7 +357,6 @@ void main() {
       // ignore: prefer_const_constructors
       final b = BaseSection(
         px: 35,
-        ac: 0,
         bpp: 4,
         byteOrder: 'GRBW',
         colors: [const LampColor(r: 255, g: 0, b: 0, w: 0)],
@@ -259,7 +370,6 @@ void main() {
       // ignore: prefer_const_constructors
       final c = BaseSection(
         px: 35,
-        ac: 0,
         bpp: 4,
         byteOrder: 'GRBW',
         colors: [const LampColor(r: 255, g: 0, b: 0, w: 0)],

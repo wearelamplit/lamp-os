@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Shared visual pattern for "there's nothing here yet" / "we can't see X"
+/// Shared visual pattern for "there's nothing here yet" / "nothing found"
 /// states. Used by the wisp tab's "No wisp detected" empty state and the
 /// expressions tab's "No expressions yet" empty state, so the two read
 /// as one design language rather than diverging snowflakes.

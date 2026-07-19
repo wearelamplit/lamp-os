@@ -1,6 +1,6 @@
-/// Lamp personality. Mirrors firmware's `SocialMode` enum in
-/// `software/lamp-os/src/config/config_types.hpp`. Wire format is `int`
-/// 0..2; the Dart enum carries the same numeric values via `.wire`.
+/// Lamp personality. Wire values match firmware's `SocialMode` enum in
+/// `software/lamp-os/src/config/config_types.hpp`: `int` 0..2, carried
+/// by the Dart enum via `.wire`.
 enum SocialMode {
   introvert(0, 'Introvert'),
   ambivert(1, 'Ambivert'),

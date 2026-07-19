@@ -15,7 +15,7 @@ class AuroraNotConnectedNotice extends StatelessWidget {
   Widget build(BuildContext context) {
     final detail = wifiConnected
         ? "Wi-Fi is up but Aurora hasn't been reached yet."
-        : "The wisp isn't on Wi-Fi. Configure it below.";
+        : "The wisp isn't on Wi-Fi. Set it up in Settings.";
     final secondary = Theme.of(context).colorScheme.secondary;
     return Container(
       padding: const EdgeInsets.all(AppSpace.md),

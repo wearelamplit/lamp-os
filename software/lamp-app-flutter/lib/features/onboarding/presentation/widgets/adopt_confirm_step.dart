@@ -21,8 +21,8 @@ class AdoptConfirmStep extends ConsumerStatefulWidget {
 class _AdoptConfirmStepState extends ConsumerState<AdoptConfirmStep>
     with WidgetsBindingObserver {
   late final AdoptPulseController _ctrl;
-  // Colours the scan step captured at tap-time (AddLampState). We connect for
-  // the pulse right after this, which stops the lamp advertising — it then
+  // Colours the scan step captured at tap-time (AddLampState). Connecting
+  // for the pulse right after this stops the lamp advertising; it then
   // ages out of the nearby-scan list, so re-reading colours from there would
   // collapse to black. The wizard snapshot survives that.
   late final LampColor _shadeColor;
@@ -54,7 +54,7 @@ class _AdoptConfirmStepState extends ConsumerState<AdoptConfirmStep>
 
   // Android freezes the process on screen-off, pausing the pulse timer and
   // stranding the lamp mid-pulse with the edit-session held. Release it
-  // cleanly when we background and re-arm the pulse when we come back.
+  // cleanly on backgrounding and re-arm the pulse on resume.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {

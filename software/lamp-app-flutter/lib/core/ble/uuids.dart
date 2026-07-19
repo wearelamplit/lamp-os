@@ -14,16 +14,15 @@ abstract class BleUuids {
   static const expressionOp   = '5f64f4d9-d6d9-4a44-9b3f-3a8d6f7e6b40';
   static const wifiOp         = '5f64f4da-d6d9-4a44-9b3f-3a8d6f7e6b40';
   static const wifiState      = '5f64f4db-d6d9-4a44-9b3f-3a8d6f7e6b40';
-  // Page protocol — paginated lamp→app reads of named sections. Replaces
-  // the previous per-section chars (lampSection/baseSection/shadeSection/
-  // exprSection/homeSection/nearbyLamps), all of which were capped at 512
-  // bytes by NimBLE's vendored ble_att.h spec ceiling. The CTRL+DATA
-  // pair streams MTU-sized chunks from a per-connection snapshot.
+  // Page protocol: paginated lamp→app reads of named sections, avoiding
+  // the 512-byte cap NimBLE's vendored ble_att.h spec ceiling puts on a
+  // single characteristic. The CTRL+DATA pair streams MTU-sized chunks
+  // from a per-connection snapshot.
   //
-  // Use BleClient.readSection(deviceId, sectionName) — not the raw chars
-  // — for any section read. Known names: "lamp", "base", "shade",
+  // Use BleClient.readSection(deviceId, sectionName), not the raw chars,
+  // for any section read. Known names: "lamp", "base", "shade",
   // "expr", "home", "nearby". The reader pulls DATA chunks until an
-  // empty one (the lamp's end-of-snapshot signal) — MTU-agnostic.
+  // empty one (the lamp's end-of-snapshot signal); MTU-agnostic.
   static const pageCtrl       = '5f64f4dc-d6d9-4a44-9b3f-3a8d6f7e6b40';
   static const pageData       = '5f64f4dd-d6d9-4a44-9b3f-3a8d6f7e6b40';
   static const remoteOp       = '5f64f4e4-d6d9-4a44-9b3f-3a8d6f7e6b40';
@@ -61,8 +60,8 @@ abstract class BleUuids {
   // data. See features/wisp/data/wisp_repository.dart for the parsed shape.
   static const wispStatus = '5f64f4e2-d6d9-4a44-9b3f-3a8d6f7e6b40';
 
-  // wisp_claims (read-only, binary): the set of lamp bdAddrs the wisp
-  // currently claims. Format: [count:1][bdAddr:6]*count, count ≤ 32.
+  // wisp_claims (read-only, binary): the set of lamp mesh macs the wisp
+  // currently claims. Format: [count:1][mac:6]*count, count ≤ 32.
   // count=0 means no claims / wisp stale. See parseClaimedMacs().
   static const wispClaims = '5f64f4eb-d6d9-4a44-9b3f-3a8d6f7e6b40';
 

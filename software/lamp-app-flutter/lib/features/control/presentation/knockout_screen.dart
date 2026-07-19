@@ -6,13 +6,11 @@ import '../../../core/widgets/back_button_leading.dart';
 import '../../../core/widgets/friendly_error.dart';
 import '../../inventory/application/inventory_notifier.dart';
 import '../application/control_notifier.dart';
-import 'widgets/connecting_view.dart';
-import 'widgets/disconnect_aware_body.dart';
 
 /// Per-pixel knockout editor with a region-split gesture model:
 /// - Touch in the **left+middle zone** (label + bar): paint. y picks
 ///   the row, x picks the brightness, continuously, as the finger
-///   moves — one stroke can paint many rows.
+///   moves. One stroke can paint many rows.
 /// - Touch in the **right "%" readout zone**: vertical drag scrolls
 ///   the list. Used when pixelCount × rowHeight overflows the
 ///   viewport.
@@ -33,7 +31,7 @@ class _KnockoutScreenState extends ConsumerState<KnockoutScreen> {
   /// drifted (re-setting added pixels to 100 = default = "no knockout").
   Map<int, int>? _original;
 
-  /// Used to read the inner column's RenderBox so we can translate global
+  /// Used to read the inner column's RenderBox to translate global
   /// pointer events into local (x, y) for row+value math.
   final GlobalKey _columnKey = GlobalKey();
 
@@ -42,23 +40,26 @@ class _KnockoutScreenState extends ConsumerState<KnockoutScreen> {
   /// inner column which scrolls).
   final GlobalKey _viewportKey = GlobalKey();
 
-  /// We drive scrolling ourselves so the readout-zone gesture can move
+  /// Drives scrolling directly so the readout-zone gesture can move
   /// the list without competing with the paint zone's pointer events.
   final ScrollController _scrollCtrl = ScrollController();
 
-  /// Row layout constants — must match `_PixelBar`.
+  /// Row layout constants. Must match `_PixelBar`.
   static const double _rowHeight = 28.0;
   static const double _hPadding = 16.0;
   static const double _labelWidth = 32.0;
   static const double _readoutWidth = 40.0;
 
-  /// Horizontal inset between the column's bar-painting band and the
-  /// visible bar. Gives the user a `_barInsetH`-wide grab zone at each
-  /// end that snaps to 0 % / 100 % so a finger drifting toward the
-  /// scrollable readout strip still lands in paint territory. Without
-  /// this the visible bar ran flush against the readout zone and the
-  /// last few percent were nearly impossible to set.
-  static const double _barInsetH = 12.0;
+  /// Horizontal inset pulling the visible bar in from each end of its
+  /// paint band; the inset maps to 0 % / 100 % so an overshooting finger
+  /// still snaps to the extreme instead of falling short. Width is a
+  /// bench feel-test.
+  static const double _barInsetH = 20.0;
+
+  /// Dead buffer between the paint track's 100 % end and the readout/scroll
+  /// strip. Touches in this band paint 100 % (not scroll), so aiming at max
+  /// can't flip into scrolling. Width is a bench feel-test.
+  static const double _scrollGap = 24.0;
 
   @override
   void dispose() {
@@ -97,17 +98,19 @@ class _KnockoutScreenState extends ConsumerState<KnockoutScreen> {
   /// per-pixel 30 ms debounce in `setKnockoutPixel` coalesces redundant
   /// calls firmware-side.
   void _paintAt(Offset colLocal, int pixelCount, ControlNotifier notifier) {
+    if (pixelCount <= 0) return;
     final box = _columnKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null) return;
     final colWidth = box.size.width;
 
-    // The paint band is the full column space between the label and the
+    // The paint band spans from the label to `_scrollGap` short of the
     // readout strip. The *visible* bar inside that band is inset by
     // `_barInsetH` on each side; the inset region maps to 0 % / 100 %
-    // via the .clamp() below, giving an extra easy-grab zone at each
-    // end without overlapping the right-side scroll strip.
+    // via the .clamp() below. The `[paintRight, paintRight + _scrollGap]`
+    // gap still routes here (not the scroll zone) and clamps to 100 %, so
+    // the max-grab zone extends across the gap without touching scroll.
     const paintLeft = _hPadding + _labelWidth;
-    final paintRight = colWidth - _hPadding - _readoutWidth;
+    final paintRight = colWidth - _hPadding - _readoutWidth - _scrollGap;
     const barLeft = paintLeft + _barInsetH;
     final barRight = paintRight - _barInsetH;
     final barWidth = barRight - barLeft;
@@ -163,7 +166,7 @@ class _KnockoutScreenState extends ConsumerState<KnockoutScreen> {
           ],
         ),
         body: async.when(
-          loading: () => ConnectingView(deviceId: widget.lampId),
+          loading: () => const SizedBox.expand(),
           error: (e, _) => FriendlyError.page(
             title: "Couldn't reach your lamp.",
             subtitle:
@@ -205,9 +208,7 @@ class _KnockoutScreenState extends ConsumerState<KnockoutScreen> {
               _paintAt(colLocal, pixelCount, notifier);
             }
 
-            return DisconnectAwareBody(
-              lampId: widget.lampId,
-              child: Column(
+            return Column(
               children: [
                 Expanded(
                   child: Listener(
@@ -228,9 +229,9 @@ class _KnockoutScreenState extends ConsumerState<KnockoutScreen> {
                     ),
                   ),
                 ),
-                // Action row — Cancel (discards live-applied changes by
+                // Action row: Cancel (discards live-applied changes by
                 // rewriting every drifted pixel back to its original value),
-                // Reset all (set every pixel to 100%), Update (just pop —
+                // Reset all (set every pixel to 100%), Update (just pop;
                 // changes were already live-applied during the drag).
                 // Matches the editor pattern used elsewhere in the app.
                 SafeArea(
@@ -271,7 +272,6 @@ class _KnockoutScreenState extends ConsumerState<KnockoutScreen> {
                   ),
                 ),
               ],
-            ),
             );
           },
         ),
@@ -318,10 +318,8 @@ class _PixelBar extends ConsumerWidget {
               ),
             ),
             Expanded(
-              // Match `_KnockoutScreenState._barInsetH`: the gesture math
-              // treats the inset as 0/100 grab zones, and the visible bar
-              // pulls back from the readout strip by the same amount so
-              // a finger reaching 100 % no longer crashes into scroll.
+              // Visible bar inset must match the gesture math's
+              // `_KnockoutScreenState._barInsetH` grab zones.
               child: Padding(
                 padding: const EdgeInsets.symmetric(
                     horizontal: _KnockoutScreenState._barInsetH),
@@ -344,6 +342,9 @@ class _PixelBar extends ConsumerWidget {
                 ),
               ),
             ),
+            // Dead buffer separating the bar's 100 % end from the readout;
+            // must match the gesture math's `_KnockoutScreenState._scrollGap`.
+            const SizedBox(width: _KnockoutScreenState._scrollGap),
             SizedBox(
               width: _KnockoutScreenState._readoutWidth,
               child: Text(

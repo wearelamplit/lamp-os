@@ -8,7 +8,7 @@ import 'control_state.dart';
 
 part 'expression_draft.g.dart';
 
-/// Default starting swatch for a brand-new expression — lime yellow
+/// Default starting swatch for a brand-new expression: lime yellow
 /// (`0xDDFF77`). Seeded so the user always has at least one color to work
 /// with; they can edit or add more from the editor.
 const _defaultNewColor = LampColor(r: 0xDD, g: 0xFF, b: 0x77, w: 0);

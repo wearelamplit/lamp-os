@@ -9,7 +9,7 @@ part 'control_state.freezed.dart';
 /// older firmware sends no `greeting` key.
 class GreetingState {
   const GreetingState({required this.peer, required this.kind});
-  final String peer; // uppercase colon-hex BD_ADDR
+  final String peer; // uppercase colon-hex mesh MAC (lampId)
   final String kind; // e.g. "glitch", "warm", "reserved", "snub"
 
   @override
@@ -21,7 +21,7 @@ class GreetingState {
 }
 
 /// Combined state for the Control screen. Populated by ControlNotifier after
-/// connect+auth+per-section reads. Not JSON-serialized — purely in-memory.
+/// connect+auth+per-section reads. Not JSON-serialized, purely in-memory.
 ///
 /// `connected` and `reconnectAttempt` track the BLE link state.
 @freezed

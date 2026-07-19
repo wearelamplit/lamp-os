@@ -1,8 +1,47 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lamp_app/core/ble/ble_client.dart';
+import 'package:lamp_app/core/ble/uuids.dart';
 import '../../_support/in_memory_ble_client.dart';
+
+/// Models the firmware's ONE shared page snapshot + cursor per connection:
+/// a CTRL write selects a section and rewinds the cursor; each DATA read pops
+/// the next chunk of the currently-selected section, then an empty terminator.
+/// Overlapping CTRL+DATA pairs (no app-side lock) corrupt each other, exactly
+/// the flicker bug. All reads yield a microtask so two sessions can interleave.
+class _CursorPageBleClient implements BleClient {
+  _CursorPageBleClient(this.sections);
+  final Map<String, List<String>> sections;
+  String? _selected;
+  int _cursor = 0;
+
+  @override
+  Future<void> write(String d, String s, String c, Uint8List v,
+      {bool withoutResponse = false, bool allowLongWrite = false}) async {
+    await Future<void>.delayed(Duration.zero);
+    if (c == BleUuids.pageCtrl) {
+      _selected = utf8.decode(v);
+      _cursor = 0;
+    }
+  }
+
+  @override
+  Future<Uint8List> read(String d, String s, String c) async {
+    await Future<void>.delayed(Duration.zero);
+    final chunks = sections[_selected] ?? const <String>[];
+    if (_cursor >= chunks.length) return Uint8List(0);
+    return Uint8List.fromList(utf8.encode(chunks[_cursor++]));
+  }
+
+  @override
+  Future<Uint8List> readSection(String deviceId, String name) =>
+      readSectionVia(this, deviceId, name);
+
+  @override
+  dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
+}
 
 void main() {
   late InMemoryBleClient ble;
@@ -83,6 +122,24 @@ void main() {
     await ble.connect('dev1');
     await ble.write('dev1', 'svc', 'chr', Uint8List.fromList([1]));
     expect(await ble.read('dev1', 'svc', 'chr'), Uint8List.fromList([1]));
+  });
+
+  test('readSectionVia serializes overlapping sessions on one device',
+      () async {
+    // Two sections drained concurrently. Without the per-device lock the
+    // second CTRL write rewinds the shared cursor mid-drain and both reads
+    // pull garbage; the lock forces them one-at-a-time so each gets its own
+    // clean bytes.
+    final ble = _CursorPageBleClient({
+      'nearby': ['[{"name":"a"}', ',{"name":"b"}]'],
+      'lamp': ['{"name":"self"}'],
+    });
+    final results = await Future.wait([
+      ble.readSection('dev1', 'nearby'),
+      ble.readSection('dev1', 'lamp'),
+    ]);
+    expect(utf8.decode(results[0]), '[{"name":"a"},{"name":"b"}]');
+    expect(utf8.decode(results[1]), '{"name":"self"}');
   });
 
   group('isBleDisconnectError', () {

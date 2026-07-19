@@ -13,13 +13,15 @@ const ColorScheme appColorScheme = ColorScheme(
   secondary: Brand.goldenYellow,
   onSecondary: Brand.midnightBlack,
   secondaryContainer: Brand.goldenYellow,
-  onSecondaryContainer: Brand.creamYellow,
+  // Dark text on the golden-yellow container; the near-white creamYellow is
+  // unreadable on gold (e.g. a selected SegmentedButton segment).
+  onSecondaryContainer: Brand.midnightBlack,
   tertiary: Brand.deepBlue,
   onTertiary: Brand.lampWhite,
   tertiaryContainer: Brand.deepBlue,
   onTertiaryContainer: Brand.lavenderBlue,
   error: Brand.coral,
-  onError: Brand.midnightBlack,
+  onError: Brand.lampWhite,
   surface: Brand.midnightBlack,
   onSurface: Brand.lampWhite,
   surfaceContainerLowest: Brand.midnightBlack,

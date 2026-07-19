@@ -1,9 +1,9 @@
 /// Where the wisp gets its paint palette from. Mirrors the wisp-side
 /// `WispSourceMode` enum in `software/wisp/src/WispConfig.h`:
-///   off    — wisp does not broadcast paint; lamps run local behavior.
-///   manual — wisp broadcasts paint from an operator-defined palette.
-///   aurora — wisp follows its Aurora subscription (default; legacy
-///            first-seen-wins behavior).
+///   off:    wisp does not broadcast paint; lamps run local behavior.
+///   manual: wisp broadcasts paint from an operator-defined palette.
+///   aurora: wisp follows its Aurora subscription (default; legacy
+///           first-seen-wins behavior).
 ///
 /// Wire-format on `wispStatus.source` is the lowercase enum name; the
 /// wispOp setter accepts the same strings.
@@ -13,8 +13,8 @@ enum WispSourceMode {
   aurora,
 }
 
-/// Decode a wire-format `source` string into the enum. Anything we don't
-/// recognise (older wisp, future field, missing key) maps to [off] — the
+/// Decode a wire-format `source` string into the enum. Anything not
+/// recognized (older wisp, future field, missing key) maps to [off], the
 /// safe default. The wisp emits paint frames only when source is Manual
 /// or Aurora, so falling back to Off can never accidentally override the
 /// lamps; the user has to explicitly opt in.

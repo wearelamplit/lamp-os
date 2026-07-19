@@ -49,8 +49,8 @@ class _StatusDotState extends State<StatusDot>
 
   @override
   Widget build(BuildContext context) {
-    // Searching is the "we've started scanning but haven't heard back yet"
-    // state — render an indeterminate spinner rather than a dot so the
+    // Searching is the "scanning but haven't heard back yet" state.
+    // Render an indeterminate spinner rather than a dot so the
     // user can distinguish it from a true Offline.
     final colorScheme = Theme.of(context).colorScheme;
     if (widget.kind == StatusKind.searching) {
@@ -71,7 +71,7 @@ class _StatusDotState extends State<StatusDot>
 
     // Mesh-connected lamps glow brand green (mesh is the live, healthy
     // state). BT-only is tertiary at ~70 % so it reads as "online but not
-    // the live link." Offline is a dimmed grey — must read as more muted
+    // the live link." Offline is a dimmed grey; must read as more muted
     // than bluetooth so the inactive state isn't louder than the active one.
     final color = switch (widget.kind) {
       StatusKind.offline => colorScheme.onSurfaceVariant.withValues(alpha: 0.35),

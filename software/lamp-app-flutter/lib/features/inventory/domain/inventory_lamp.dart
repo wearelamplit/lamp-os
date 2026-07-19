@@ -8,11 +8,13 @@ abstract class InventoryLamp with _$InventoryLamp {
   const factory InventoryLamp({
     required String id,
     required String name,
+    /// Lamp's raw mesh MAC (uppercase colon-hex), mirrored from
+    /// CHAR_LAMP_SECTION's `lampId`. `id` is the platform BLE remoteId (a MAC
+    /// on Android, a CoreBluetooth UUID on iOS); this is the stable address
+    /// that matches peer-observed `lampId`s on both platforms (case-
+    /// insensitively). Null on legacy entries and firmware predating the field.
+    String? lampId,
     String? controlPassword,
-    /// Persistent random critter pick (1-16) assigned at adopt time so the
-    /// lamp keeps the same critter across sessions and surfaces. Null for
-    /// legacy entries; consumers fall back to a deviceId hash.
-    int? critterIndex,
     int? lastSeenEpochMs,
     /// Cached last-seen colors, written by `controlNotifier._updateSeen` on
     /// each connect-and-read and settled slider drag, persisted via

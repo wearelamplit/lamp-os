@@ -1,284 +1,43 @@
-import 'dart:async';
-
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/widgets/app_sheet.dart';
-import '../../../../core/widgets/confirm_discard.dart';
 import '../../application/control_notifier.dart';
-import '../../domain/lamp_color.dart';
-import 'color_picker_sheet.dart';
+import 'color_stops_sheet.dart';
 
-/// Hard cap on base gradient stops. Bumped from 5 → 6 (commit-equivalent
-/// of "give the user one more notch of expressive room"). Firmware
-/// interp handles arbitrary N via even-spacing so no firmware change
-/// is needed for this bump; the only reason to keep a finite cap is
-/// UX (a row list with 6 stops still fits the modal comfortably; 10+
-/// would crowd the picker).
+/// Hard cap on base gradient stops. Firmware interp handles arbitrary N via
+/// even-spacing; the cap is UX-only so the row list stays scannable.
 const int _kMaxBaseStops = 6;
 
-/// Modal sheet for editing the base gradient stops. Acts as an atomic edit
-/// session: every in-sheet change live-previews via the controlNotifier
-/// (so the lamp tracks the gradient as the user picks), but the sheet
-/// keeps a snapshot of the colors/ac it opened with and either commits
-/// (Save writes BLE + closes) or rolls back the live-preview channel
-/// (Cancel/discard re-writes the snapshot). A discard-guard dialog blocks
-/// accidental dismissal when edits are pending.
-class BaseEditorSheet extends ConsumerStatefulWidget {
+/// Modal sheet for editing the base gradient stops. A thin [ColorStopsSheet]
+/// caller: live-previews via `setBaseColors` as the user edits and commits
+/// through CHAR_COMMIT on Save. ControlScreen drives the base wisp edit-session
+/// around the whole sheet.
+class BaseEditorSheet extends ConsumerWidget {
   const BaseEditorSheet({super.key, required this.lampId, this.title = 'Base'});
 
   final String lampId;
   final String title;
 
   @override
-  ConsumerState<BaseEditorSheet> createState() => _BaseEditorSheetState();
-}
-
-class _BaseEditorSheetState extends ConsumerState<BaseEditorSheet> {
-  /// Captured at first build when state is non-null. Revert restores both.
-  List<LampColor>? _originalColors;
-  int? _originalAc;
-
-  /// True once we've signalled PopScope to allow the pop. Set just before
-  /// the addPostFrameCallback-deferred Navigator.pop so the route doesn't
-  /// get blocked by canPop=false on the same frame.
-  bool _allowPop = false;
-
-  bool _hasUnsavedChanges(List<LampColor> colors, int ac) =>
-      (_originalColors != null && !listEquals(colors, _originalColors)) ||
-      (_originalAc != null && ac != _originalAc);
-
-  void _close({required bool revert}) {
-    if (revert) {
-      final n = ref.read(controlNotifierProvider(widget.lampId).notifier);
-      if (_originalColors != null) n.setBaseColors(_originalColors!);
-      if (_originalAc != null) n.setBaseAc(_originalAc!);
-    }
-    setState(() => _allowPop = true);
-    // Pop after the frame so PopScope picks up _allowPop=true (setState +
-    // synchronous Navigator.pop would still see the old canPop=false).
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) Navigator.of(context).pop();
-    });
-  }
-
-  Future<void> _save() async {
-    final notifier =
-        ref.read(controlNotifierProvider(widget.lampId).notifier);
-    try {
-      final cur = ref.read(controlNotifierProvider(widget.lampId)).value;
-      if (cur != null && _originalAc != null && cur.base.ac != _originalAc) {
-        await notifier.writeSettingsBlob(
-          {'base': {'ac': cur.base.ac}},
-          reboot: false,
-        );
-      }
-      await notifier.commit();
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Couldn't save: disconnected")),
-      );
-      return;
-    }
-    if (!mounted) return;
-    _close(revert: false);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // Slice to just the base section. Without `.select` the sheet
-    // rebuilds on every ControlState change (brightness, shade,
-    // expressions, etc) — and a color-picker drag spams notifier
-    // updates, all of which would re-render the whole sheet. With
-    // the slice, only mutations to `state.base` trigger a rebuild.
+  Widget build(BuildContext context, WidgetRef ref) {
     final base = ref.watch(
-      controlNotifierProvider(widget.lampId)
-          .select((async) => async.value?.base),
+      controlNotifierProvider(lampId).select((async) => async.value?.base),
     );
     if (base == null) return const SizedBox.shrink();
 
-    // First successful paint snapshots the session baseline.
-    _originalColors ??= List.of(base.colors);
-    _originalAc ??= base.ac;
-
-    final colors = base.colors;
-    final activeIndex = base.ac;
-    final notifier =
-        ref.read(controlNotifierProvider(widget.lampId).notifier);
-
-    Future<void> editStop(int i) async {
-      final original = [...colors];
-      // Tell the lamp we're operator-editing the base surface so the
-      // wisp's overrides get dropped for the picker's lifetime. Always
-      // pair with a close call in `finally`.
-      notifier.setEditSession(EditSurface.base, true);
-      try {
-        final picked = await showColorPickerSheet(
-          context,
-          initial: colors[i],
-          title: 'Stop ${i + 1}',
-          bpp: base.bpp,
-          onLive: (live) {
-            // Latest colors come from the notifier — read fresh each tick so
-            // concurrent state changes (e.g. another stop edited in parallel)
-            // don't get clobbered. In practice the picker is modal so this is
-            // belt-and-suspenders, but it matches the realtime contract.
-            final current =
-                ref.read(controlNotifierProvider(widget.lampId)).value;
-            if (current == null) return;
-            final next = [...current.base.colors];
-            if (i >= next.length) return; // stop removed while picker open
-            next[i] = live;
-            notifier.setBaseColors(next);
-          },
-        );
-        if (picked == null) {
-          // Cancelled — restore the snapshot we took before the picker opened.
-          unawaited(notifier.setBaseColors(original));
-        }
-        // Save case: the last onLive tick already wrote the correct color;
-        // no further action needed.
-      } finally {
-        notifier.setEditSession(EditSurface.base, false);
-      }
-    }
-
-    void removeStop(int i) {
-      if (colors.length <= 1) return;
-      final next = [...colors]..removeAt(i);
-      notifier.setBaseColors(next);
-      if (activeIndex >= next.length) notifier.setBaseAc(next.length - 1);
-    }
-
-    void addStop() {
-      if (colors.length >= _kMaxBaseStops) return;
-      // Duplicate the last stop so the new one starts at a sensible color
-      // the user can tweak from, rather than dropping to white and forcing
-      // them to dial it back to something nearby.
-      final seed = colors.isNotEmpty
-          ? colors.last
-          : const LampColor(r: 0xFF, g: 0xFF, b: 0xFF, w: 0);
-      notifier.setBaseColors([...colors, seed]);
-    }
-
-    void reorder(int oldIndex, int newIndex) {
-      final next = [...colors];
-      final picked = next.removeAt(oldIndex);
-      next.insert(newIndex, picked);
-      notifier.setBaseColors(next);
-      if (activeIndex == oldIndex) {
-        notifier.setBaseAc(newIndex);
-      }
-    }
-
-    return PopScope(
-      canPop: _allowPop || !_hasUnsavedChanges(colors, activeIndex),
-      onPopInvokedWithResult: (didPop, _) async {
-        if (didPop) return; // no unsaved changes — already popped
-        final discard = await confirmDiscard(context);
-        if (discard) _close(revert: true);
+    final notifier = ref.read(controlNotifierProvider(lampId).notifier);
+    return ColorStopsSheet(
+      initial: base.colors,
+      title: '$title colors',
+      description: 'These colors blend into a gradient along the strip.',
+      max: _kMaxBaseStops,
+      bpp: base.bpp,
+      onChanged: (colors) => notifier.setBaseColors(colors),
+      onSave: (colors) async {
+        await notifier.setBaseColors(colors);
+        await notifier.commit();
       },
-      child: SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpace.lg),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                Text(
-                  '${widget.title} colors',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpace.md),
-            Expanded(
-              child: ReorderableListView.builder(
-                itemCount: colors.length,
-                onReorderItem: reorder,
-                buildDefaultDragHandles: false,
-                itemBuilder: (ctx, i) {
-                  final stop = colors[i];
-                  final cs = Theme.of(ctx).colorScheme;
-                  return ListTile(
-                    key: ValueKey('stop-$i'),
-                    onTap: () {
-                      notifier.setBaseAc(i);
-                      editStop(i);
-                    },
-                    leading: ReorderableDragStartListener(
-                      index: i,
-                      child: Icon(Icons.drag_indicator,
-                          color: cs.onSurfaceVariant),
-                    ),
-                    title: Row(
-                      children: [
-                        Container(
-                          width: 28,
-                          height: 28,
-                          decoration: BoxDecoration(
-                            color: stop.toSwatch(),
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: i == activeIndex
-                                  ? cs.primary
-                                  : cs.outlineVariant,
-                              width: i == activeIndex ? 2 : 1,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: AppSpace.md),
-                        Text(
-                          '#${stop.toHex().substring(1, 7)}',
-                          style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                                color: cs.onSurfaceVariant,
-                                fontFamily: 'monospace',
-                              ),
-                        ),
-                      ],
-                    ),
-                    trailing: Tooltip(
-                      message: colors.length <= 1
-                          ? 'A gradient needs at least one stop'
-                          : 'Remove stop',
-                      child: IconButton(
-                        icon: Icon(Icons.close, color: cs.onSurfaceVariant),
-                        onPressed: colors.length <= 1
-                            ? null
-                            : () => removeStop(i),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-            if (colors.length < _kMaxBaseStops)
-              TextButton(
-                onPressed: addStop,
-                child: const Text('+ Add stop'),
-              ),
-            const SizedBox(height: AppSpace.sm),
-            Row(
-              children: [
-                TextButton(
-                  onPressed: () => _close(revert: true),
-                  child: const Text('Cancel'),
-                ),
-                const Spacer(),
-                FilledButton.icon(
-                  icon: const Icon(Icons.check, size: 18),
-                  label: const Text('Save'),
-                  onPressed: _save,
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    ),
     );
   }
 }

@@ -2,8 +2,15 @@ import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_spacing.dart';
-import '../../../../core/widgets/section_header.dart';
+import '../../../../core/widgets/lamp_card.dart';
+import '../../../../core/widgets/settings_row.dart';
 import '../../domain/expression_catalog.dart';
+import 'motion_picker.dart';
+
+/// Which slice of the panel to render. The editor emits [placement] directly
+/// under the Target chooser and [main] below the Colors section, so Placement
+/// sits above Colors while the rest stays below.
+enum ExpressionPanelPart { placement, main }
 
 /// Renders an expression's editor controls generically from its firmware
 /// [ExpressionDescriptor]. Every control (sliders, ranges, segmented enums,
@@ -11,6 +18,10 @@ import '../../domain/expression_catalog.dart';
 /// hardcoded, non-schema pieces are the client conventions the firmware reads
 /// but doesn't declare: the `fullStrip` zone flag and the mesh `cascade`
 /// controls (dev-mode, non-continuous expressions only).
+///
+/// Controls are sorted into yellow-headed cards (Placement / Timing /
+/// Behaviour / Mesh); empty groups don't render. [part] selects which cards
+/// this instance emits.
 ///
 /// Edits merge-patch the params map: each change copies the map and sets only
 /// the touched keys, so keys the schema-driven UI never surfaced (e.g. a zone
@@ -25,10 +36,13 @@ class ExpressionParamsPanel extends StatelessWidget {
     required this.intervalMin,
     required this.intervalMax,
     required this.onIntervalChanged,
+    this.part = ExpressionPanelPart.main,
     this.devMode = false,
     this.onZonePreview,
     this.onZonePreviewEnd,
   });
+
+  final ExpressionPanelPart part;
 
   final ExpressionDescriptor descriptor;
 
@@ -89,32 +103,49 @@ class ExpressionParamsPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final zoning = _zoningActive;
-    final children = <Widget>[];
+
+    final options = <Widget>[];
+    final placement = <Widget>[];
+    final timing = <Widget>[];
+    final mesh = <Widget>[];
+    final motion = <Widget>[];
 
     if (descriptor.hasZone && descriptor.zoneOptional) {
-      children.add(_segmented(
+      placement.add(_segmented(
         label: 'Mode',
         options: const ['Whole strip', 'Region'],
         selectedIndex: _get('fullStrip', 1) == 1 ? 0 : 1,
         onIndex: (i) => _set('fullStrip', i == 0 ? 1 : 0),
+        help: _zoneHelp,
       ));
     }
 
     for (final p in descriptor.params) {
-      if (p.type != ParamType.enumeration) continue;
-      children.add(_segmented(
+      if (p.type != ParamType.enumeration || p.options.isEmpty) continue;
+      if (p.key == kEasingParamKey) {
+        motion.add(MotionPicker(
+          label: p.label,
+          options: p.options,
+          value: _get(p.key, p.def.resolve(pixelCount)),
+          onChanged: (v) => _set(p.key, v),
+        ));
+        continue;
+      }
+      final control = _segmented(
         label: p.label,
         options: p.options.map((o) => o.label).toList(),
         selectedIndex: p.options
             .indexWhere((o) => o.value == _get(p.key, p.def.resolve(pixelCount)))
             .clamp(0, p.options.length - 1),
         onIndex: (i) => _set(p.key, p.options[i].value),
-      ));
+      );
+      // Loop rides in the Motion card with the easing picker; other enums
+      // stay in Behaviour.
+      (p.key == kLoopParamKey ? motion : options).add(control);
     }
 
     if (zoning && descriptor.hasZone) {
-      children.add(const SectionHeader('Placement'));
-      children.add(_RangeParamSlider(
+      placement.add(_RangeParamSlider(
         label: 'Zone',
         lo: _get('posMin', 0),
         hi: _get('posMax', pixelCount - 1),
@@ -123,6 +154,7 @@ class ExpressionParamsPanel extends StatelessWidget {
         onChanged: (lo, hi) => _setBoth('posMin', lo, 'posMax', hi),
         onPreview: onZonePreview,
         onChangeEnd: onZonePreviewEnd,
+        help: descriptor.zoneOptional ? null : _zoneHelp,
         format: (v) => '$v',
       ));
     }
@@ -131,7 +163,7 @@ class ExpressionParamsPanel extends StatelessWidget {
       if (p.type == ParamType.enumeration) continue;
       if (p.requiresZoning && !zoning) continue;
       final maxV = p.max.resolve(pixelCount);
-      children.add(_ParamSlider(
+      options.add(_ParamSlider(
         label: p.label,
         value: _get(p.key, p.def.resolve(pixelCount)),
         min: p.min,
@@ -141,13 +173,14 @@ class ExpressionParamsPanel extends StatelessWidget {
         invert: p.invert,
         leftLabel: p.leftLabel,
         rightLabel: p.rightLabel,
+        help: p.help,
         format: (v) => _fmtUnit(v, p.unit),
       ));
     }
 
     final duration = descriptor.duration;
     if (duration != null && duration.minKey != null && duration.maxKey != null) {
-      children.add(_RangeParamSlider(
+      timing.add(_RangeParamSlider(
         label: duration.label ?? 'Duration',
         lo: _get(duration.minKey!, duration.defLo),
         hi: _get(duration.maxKey!, duration.defHi),
@@ -158,14 +191,16 @@ class ExpressionParamsPanel extends StatelessWidget {
             _setBoth(duration.minKey!, lo, duration.maxKey!, hi),
         leftLabel: 'short',
         rightLabel: 'long',
+        help: duration.help,
         format: (v) => _fmtUnit(v, duration.unit),
       ));
     }
 
+    // A continuous (e.g. looped) expression never re-triggers on an interval,
+    // so hide the control when it would do nothing.
     final interval = descriptor.interval;
-    if (interval != null) {
-      children.add(const SectionHeader('Trigger interval'));
-      children.add(_RangeParamSlider(
+    if (interval != null && !effectiveContinuous(descriptor, parameters)) {
+      timing.add(_RangeParamSlider(
         label: interval.label ?? 'Interval',
         lo: intervalMin,
         hi: intervalMax,
@@ -175,23 +210,31 @@ class ExpressionParamsPanel extends StatelessWidget {
         onChanged: onIntervalChanged,
         leftLabel: 'often',
         rightLabel: 'rare',
+        help: interval.help,
         format: (v) => _fmtUnit(v, interval.unit),
       ));
     }
 
-    if (!descriptor.continuous &&
+    if (!effectiveContinuous(descriptor, parameters) &&
         (devMode || _get('cascadeEnabled', 0) != 0)) {
       final cascadeOn = _get('cascadeEnabled', 0) != 0;
-      children.add(Row(
+      mesh.add(Row(
         children: [
-          const Expanded(child: _SectionLabel('Cascade to other lamps')),
+          Expanded(
+            child: Builder(
+              builder: (context) => Text(
+                'Cascade to other lamps',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ),
+          ),
           Switch(
             value: cascadeOn,
             onChanged: (v) => _set('cascadeEnabled', v ? 1 : 0),
           ),
         ],
       ));
-      children.add(_ParamSlider(
+      mesh.add(_ParamSlider(
         label: 'Delay between lamps',
         value: (_get('cascadeStaggerMs', 0) / 100).round().clamp(0, 50),
         min: 0,
@@ -204,10 +247,39 @@ class ExpressionParamsPanel extends StatelessWidget {
       ));
     }
 
+    final children = switch (part) {
+      ExpressionPanelPart.placement => [
+          ..._group('Placement', placement),
+          ..._group('Motion', motion),
+        ],
+      ExpressionPanelPart.main => [
+          ..._group('Timing', timing),
+          ..._group('Behaviour', options),
+          ..._group('Mesh', mesh),
+        ],
+    };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: children,
     );
+  }
+
+  List<Widget> _group(String title, List<Widget> children) {
+    if (children.isEmpty) return const [];
+    return [
+      SettingsGroupHeading(title),
+      LampCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (var i = 0; i < children.length; i++) ...[
+              if (i > 0) const SizedBox(height: AppSpace.lg),
+              children[i],
+            ],
+          ],
+        ),
+      ),
+    ];
   }
 }
 
@@ -229,44 +301,56 @@ String _fmtUnit(int value, String? unit) {
   }
 }
 
+const _zoneHelp =
+    'Restricts the effect to a section of the strip rather than its full length.';
+
+Widget _controlLabel(BuildContext context, String text) => Padding(
+      padding: const EdgeInsets.only(bottom: AppSpace.xs),
+      child: Text(text, style: Theme.of(context).textTheme.bodyMedium),
+    );
+
+Widget _helpText(BuildContext context, String text) => Text(
+      text,
+      style: TextStyle(
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+        fontSize: 11,
+      ),
+    );
+
 Widget _segmented({
   required String label,
   required List<String> options,
   required int selectedIndex,
   required ValueChanged<int> onIndex,
+  String? help,
 }) =>
-    Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _SectionLabel(label),
-        SegmentedButton<int>(
-          showSelectedIcon: false,
-          segments: [
-            for (var i = 0; i < options.length; i++)
-              ButtonSegment(value: i, label: Text(options[i])),
-          ],
-          selected: {selectedIndex},
-          onSelectionChanged: (s) => onIndex(s.first),
-        ),
-      ],
-    );
-
-class _SectionLabel extends StatelessWidget {
-  const _SectionLabel(this.text);
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpace.xs, top: AppSpace.sm),
-      child: Text(
-        text,
-        style: TextStyle(
-            color: Theme.of(context).colorScheme.onSurface, fontSize: 14),
+    Builder(
+      builder: (context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _controlLabel(context, label),
+          if (help != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpace.xs),
+              child: _helpText(context, help),
+            ),
+          SegmentedButton<int>(
+            showSelectedIcon: false,
+            style: SegmentedButton.styleFrom(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadius.card),
+              ),
+            ),
+            segments: [
+              for (var i = 0; i < options.length; i++)
+                ButtonSegment(value: i, label: Text(options[i])),
+            ],
+            selected: {selectedIndex},
+            onSelectionChanged: (s) => onIndex(s.first),
+          ),
+        ],
       ),
     );
-  }
-}
 
 /// Snap [raw] to the nearest [step] within [min]..[max].
 int _snap(int raw, int min, int max, int step) {
@@ -292,6 +376,7 @@ class _ParamSlider extends StatelessWidget {
     this.step = 1,
     this.leftLabel,
     this.rightLabel,
+    this.help,
     this.invert = false,
   });
 
@@ -306,6 +391,7 @@ class _ParamSlider extends StatelessWidget {
   final String Function(int) format;
   final String? leftLabel;
   final String? rightLabel;
+  final String? help;
 
   /// Mirrors the thumb high↔low while storage stays in original units. Used
   /// where "right = faster" conflicts with the stored value's direction.
@@ -313,8 +399,8 @@ class _ParamSlider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final clamped = value.clamp(min, max).toDouble();
-    final sliderValue = invert ? (min + max).toDouble() - clamped : clamped;
+    final clamped = value.clamp(min, max);
+    final sliderValue = (invert ? (min + max) - clamped : clamped).toDouble();
     final hasEnds = leftLabel != null && rightLabel != null;
     final cb = onChanged;
     final slider = Slider(
@@ -333,7 +419,8 @@ class _ParamSlider extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SectionLabel(label),
+        _controlLabel(context, label),
+        if (help != null) _helpText(context, help!),
         Row(
           children: [
             if (hasEnds)
@@ -348,7 +435,7 @@ class _ParamSlider extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.only(right: AppSpace.xs),
             child: Text(
-              format(value),
+              format(clamped),
               style: TextStyle(
                 color: muted,
                 fontSize: 12,
@@ -374,6 +461,7 @@ class _RangeParamSlider extends StatelessWidget {
     this.step = 1,
     this.leftLabel,
     this.rightLabel,
+    this.help,
     this.onPreview,
     this.onChangeEnd,
   });
@@ -388,6 +476,7 @@ class _RangeParamSlider extends StatelessWidget {
   final String Function(int) format;
   final String? leftLabel;
   final String? rightLabel;
+  final String? help;
   final void Function(int lo, int hi)? onPreview;
   final VoidCallback? onChangeEnd;
 
@@ -414,7 +503,8 @@ class _RangeParamSlider extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SectionLabel(label),
+        _controlLabel(context, label),
+        if (help != null) _helpText(context, help!),
         Row(
           children: [
             if (hasEnds)

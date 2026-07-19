@@ -55,8 +55,8 @@ class SourcePicker extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 2),
             child: Text(
-              "No Aurora zone heard yet. Once a zone shows up on the "
-              "mesh, you'll be able to follow it.",
+              'Aurora is untested in this release and can\'t be '
+              'selected yet.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 fontStyle: FontStyle.italic,
               ),
@@ -86,17 +86,19 @@ class _SourcePill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // selected → solid primary fill; idle → outline border.
-    // Disabled drops opacity to signal "unavailable" without looking broken.
+    // Disabled drops opacity to signal "unavailable" without looking broken;
+    // a disabled pill still renders as selected when it is the current source.
     final colorScheme = Theme.of(context).colorScheme;
-    final Color fill = enabled && selected
-        ? colorScheme.primary
+    final double alpha = enabled ? 1.0 : 0.4;
+    final Color fill = selected
+        ? colorScheme.primary.withValues(alpha: alpha)
         : Colors.transparent;
-    final Color border = enabled && selected
-        ? colorScheme.primary
-        : colorScheme.outline.withValues(alpha: enabled ? 1.0 : 0.4);
-    final Color fg = enabled && selected
-        ? colorScheme.onPrimary
-        : colorScheme.onSurface.withValues(alpha: enabled ? 1.0 : 0.4);
+    final Color border = selected
+        ? colorScheme.primary.withValues(alpha: alpha)
+        : colorScheme.outline.withValues(alpha: alpha);
+    final Color fg = selected
+        ? colorScheme.onPrimary.withValues(alpha: alpha)
+        : colorScheme.onSurface.withValues(alpha: alpha);
 
     return Expanded(
       child: Material(
@@ -110,7 +112,7 @@ class _SourcePill extends StatelessWidget {
               color: fill,
               border: Border.all(
                 color: border,
-                width: selected && enabled ? 2 : 1,
+                width: selected ? 2 : 1,
               ),
               borderRadius: BorderRadius.circular(AppRadius.card),
             ),
@@ -124,9 +126,7 @@ class _SourcePill extends StatelessWidget {
                   style: TextStyle(
                     color: fg,
                     fontSize: 13,
-                    fontWeight: selected && enabled
-                        ? FontWeight.w700
-                        : FontWeight.w500,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                     letterSpacing: 0.5,
                   ),
                 ),

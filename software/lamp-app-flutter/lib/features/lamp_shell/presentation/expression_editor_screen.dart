@@ -1,23 +1,28 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/ble/ble_client.dart';
+import '../../../core/ble/ble_client_provider.dart';
+import '../../../core/ble/uuids.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/confirm_discard.dart';
 import '../../../core/widgets/friendly_error.dart';
-import '../../../core/widgets/section_header.dart';
+import '../../../core/widgets/lamp_card.dart';
+import '../../../core/widgets/settings_row.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/application/control_state.dart';
 import '../../control/application/dev_mode.dart';
 import '../../control/application/expression_draft.dart';
 import '../../control/domain/lamp_color.dart';
 import '../../control/domain/sections.dart';
-import '../../control/presentation/widgets/color_picker_sheet.dart';
-import '../../control/presentation/widgets/connecting_view.dart';
-import '../../control/presentation/widgets/connection_banner.dart';
-import '../../control/presentation/widgets/lamp_color_swatch.dart';
+import '../../control/presentation/widgets/color_blocks_bar.dart';
+import '../../control/presentation/widgets/color_stops_sheet.dart';
+import '../domain/expression_catalog.dart';
 import '../domain/expression_presentation.dart';
 import 'widgets/expression_params_panel.dart';
 
@@ -29,12 +34,12 @@ class ExpressionEditorScreen extends ConsumerStatefulWidget {
     required this.targetKey,
   });
 
-  /// The expression type — locked. New entries reach this screen via the
+  /// The expression type, locked. New entries reach this screen via the
   /// AddExpressionPickerScreen which chose the type up front; edits
   /// preserve whatever (type, target) the user tapped.
   final String typeKey;
 
-  /// The expression target (1 = shade, 2 = base, 3 = both) — locked.
+  /// The expression target (1 = shade, 2 = base, 3 = both), locked.
   final int targetKey;
 
   final String lampId;
@@ -46,9 +51,11 @@ class ExpressionEditorScreen extends ConsumerStatefulWidget {
 
 class _ExpressionEditorScreenState
     extends ConsumerState<ExpressionEditorScreen> {
-  /// Cached at initState so `dispose()` can call into the notifier without
-  /// touching `ref` after the widget is deactivated (which Riverpod blocks).
-  late final ControlNotifier _controlNotifier;
+  /// Captured at initState so `dispose()` can fire the test-complete write
+  /// without touching `ref` (blocked once deactivated) or a ControlNotifier
+  /// that a mid-session `ref.invalidate` may have staled out. BleClient lives
+  /// in a keepAlive provider, so the reference stays valid for the app's life.
+  late final BleClient _ble;
 
   /// Live target (1=shade, 2=base, 3=both). Seeded from the route's
   /// [ExpressionEditorScreen.targetKey] but mutable: the target switcher
@@ -58,7 +65,7 @@ class _ExpressionEditorScreenState
 
   /// Whether the editor was opened on a not-yet-existing entry (i.e. reached
   /// via the picker, so the stack is [list, picker, editor]). Captured ONCE on
-  /// first load, before any target switch — `isNew` is dynamic and flips true
+  /// first load, before any target switch. `isNew` is dynamic and flips true
   /// the moment you retarget, which must NOT change the back-out pop count.
   bool? _openedNew;
 
@@ -66,6 +73,11 @@ class _ExpressionEditorScreenState
   /// param edit or a target switch). Gates the discard guard: a clean back-out
   /// pops straight through, a dirty one confirms first.
   bool _dirty = false;
+
+  /// Disables the Test ▶ for the fired expression's cycle duration so a
+  /// transient plays out before it can be re-fired.
+  Timer? _cooldownTimer;
+  bool _cooling = false;
 
   bool _existsInState(ControlState? state) =>
       state != null &&
@@ -76,19 +88,35 @@ class _ExpressionEditorScreenState
   void initState() {
     super.initState();
     _target = widget.targetKey;
-    _controlNotifier =
-        ref.read(controlNotifierProvider(widget.lampId).notifier);
+    _ble = ref.read(bleClientProvider);
   }
 
   @override
   void dispose() {
+    _cooldownTimer?.cancel();
     // Tell the firmware to leave preview mode and re-enable the configurator
     // behaviors. Without this, a `test_expression` write performed while the
     // editor was open leaves the shade/base configurator stuck in
     // `disabled=true`, so subsequent shade/base color writes are received
-    // by the lamp but never drawn.
-    _controlNotifier.completeExpressionTest();
+    // by the lamp but never drawn. Fire-and-forget straight through the
+    // BleClient: dispose can't await and the notifier may be staled out.
+    unawaited(_ble
+        .write(
+          widget.lampId,
+          BleUuids.controlService,
+          BleUuids.expressionTest,
+          Uint8List.fromList(utf8.encode('{"a":"test_expression_complete"}')),
+        )
+        .catchError((Object _) {}));
     super.dispose();
+  }
+
+  void _startCooldown(Duration d) {
+    _cooldownTimer?.cancel();
+    setState(() => _cooling = true);
+    _cooldownTimer = Timer(d, () {
+      if (mounted) setState(() => _cooling = false);
+    });
   }
 
   void _updateDraft(ExpressionConfig Function(ExpressionConfig d) f) {
@@ -138,54 +166,12 @@ class _ExpressionEditorScreenState
           ExpressionConfig d, Map<String, int> p) =>
       d.copyWith(parameters: p);
 
-  /// Open the color picker with live preview wired to the lamp. While
-  /// the user drags R/G/B sliders, the picked color streams to
-  /// whichever strips the expression's target paints (shade-only →
-  /// shade, base-only → base, both → both) so the lamp preview matches
-  /// what the saved expression will actually do. On close — confirm OR
-  /// cancel — restore the lamp's main shade/base palette so the picker
-  /// session doesn't permanently contaminate it. Returns the user's
-  /// picked color, or null on cancel.
-  Future<LampColor?> _pickColorLive(
-    ControlState state,
-    ControlNotifier notifier,
-    LampColor initial,
-  ) async {
-    final t = _target;
-    final previewShade = (t == 1 || t == 3);
-    final previewBase = (t == 2 || t == 3);
-    final originalShade = state.shade.colors;
-    final originalBase = state.base.colors;
-
-    // Stop any active expression test so the configurator is back in
-    // charge and the picker's writes are visible. Tests disable the
-    // configurator behavior, which would otherwise let the expression
-    // keep painting over our live writes.
-    unawaited(notifier.completeExpressionTest());
-
-    void writeLive(LampColor c) {
-      if (previewShade) unawaited(notifier.setShadeColor(c));
-      if (previewBase) unawaited(notifier.setBaseColors([c]));
-    }
-
-    final picked = await showColorPickerSheet(
-      context,
-      initial: initial,
-      onLive: writeLive,
-    );
-
-    // Restore whichever strips we drove regardless of confirm/cancel.
-    // The picker's writes were for preview only; the expression's
-    // palette is what should actually change (handled by the caller).
-    if (previewShade && originalShade.isNotEmpty) {
-      unawaited(notifier.setShadeColor(originalShade.first));
-    }
-    if (previewBase) {
-      unawaited(notifier.setBaseColors(originalBase));
-    }
-
-    return picked;
-  }
+  /// Pixel count for the active target's strip; max of shade/base for `both`.
+  int _pixelCount(ControlState state) => _target == 1
+      ? state.shade.px
+      : _target == 2
+          ? state.base.px
+          : (state.shade.px > state.base.px ? state.shade.px : state.base.px);
 
   @override
   Widget build(BuildContext context) {
@@ -196,7 +182,7 @@ class _ExpressionEditorScreenState
     return PopScope(
       canPop: !_dirty,
       onPopInvokedWithResult: (didPop, _) async {
-        if (didPop) return; // clean draft — already popped
+        if (didPop) return; // clean draft, already popped
         final discard = await confirmDiscard(context);
         if (!discard || !mounted) return;
         _resetDraft();
@@ -213,13 +199,11 @@ class _ExpressionEditorScreenState
         // wire-level snake-case type.
         title: Text(_existsInState(async.value) ? name : 'New $name'),
         actions: [
-          // Test: live-preview the editor's in-flight draft. We can't pass
-          // colors/parameters in the test_expression envelope (the firmware
-          // only takes type+target and triggers whatever is in its in-memory
-          // expressionManager), so seed the draft via expressionOp first.
-          // dispose() rolls it back if the user leaves without Saving.
-          // Disabled when the BLE link is down — the writes would silently
-          // queue against a dead connection.
+          // Test previews the in-flight draft transiently (no persist); the
+          // test_expression envelope carries colors + params. A continuous
+          // expression plays one cycle. Disabled while the BLE link is down so
+          // writes don't queue against a dead connection.
+          if (descriptor != null)
           Consumer(
             builder: (context, ref, _) {
               final connected = ref.watch(controlNotifierProvider(widget.lampId)
@@ -230,17 +214,14 @@ class _ExpressionEditorScreenState
                 // Read the draft on tap, not on build: watching it here would
                 // force the keep-alive draft to seed during the loading frame,
                 // before the catalog + pixel counts have landed.
-                onPressed: !connected
+                onPressed: (!connected || _cooling)
                     ? null
                     : () async {
                         final draft = ref.read(expressionDraftProvider(
                             widget.lampId, widget.typeKey, _target));
                         final notifier = ref.read(
                             controlNotifierProvider(widget.lampId).notifier);
-                        // Persist via upsert first so testExpression triggers
-                        // the configured entry (the lamp keys the trigger off
-                        // the entry already in expressionManager).
-                        await notifier.upsertExpression(draft);
+                        _startCooldown(triggerCooldown(descriptor, draft));
                         await notifier.testExpression(draft);
                       },
               );
@@ -249,7 +230,7 @@ class _ExpressionEditorScreenState
         ],
       ),
       body: async.when(
-        loading: () => ConnectingView(deviceId: widget.lampId),
+        loading: () => const SizedBox.expand(),
         error: (e, _) => FriendlyError.page(
           title: "Couldn't reach your lamp.",
           subtitle:
@@ -266,7 +247,7 @@ class _ExpressionEditorScreenState
               widget.lampId, widget.typeKey, _target));
           final isNew = !_existsInState(state);
           // Capture the open-time newness once; retargeting flips `isNew`
-          // but must not change how far we pop on back-out.
+          // but must not change how far the back-out pops.
           _openedNew ??= isNew;
 
           // Surfaces this expression can't target, from the catalog. Both
@@ -288,145 +269,127 @@ class _ExpressionEditorScreenState
           // to the bottom inside a SafeArea so it stays above the system
           // gesture bar / nav bar on Android. Matches the layout pattern
           // used by knockout_screen and advanced_leds_screen.
-          //
-          // Wrapped in IgnorePointer + Opacity below when the BLE link is
-          // down so the user can see the editor but can't fire writes
-          // (Save / Test / color-pick) at a dead connection. Banner up
-          // top mirrors the ControlScreen pattern.
-          final body = Column(
+          return Column(
             children: [
               Expanded(
                 child: ListView(
                   padding: const EdgeInsets.all(AppSpace.lg),
                   children: [
                     _Header(icon: icon, name: name),
-              const SizedBox(height: AppSpace.md),
-              // Target switcher. Same chunky-pill UX as the picker so the
-              // active target reads at a glance. Tapping a different target
-              // retargets the current draft IN PLACE (no navigation), so the
-              // user keeps their colors/interval/params; other-target buttons
-              // are disabled when that combo is already configured (one entry
-              // per (type, target) firmware-side).
-              _TargetRow(
-                currentTarget: _target,
-                isTaken: (t) =>
-                    excludedTargets.contains(t) ||
-                    (t != _target &&
-                        state.expressions.expressions.any((e) =>
-                            e.type == widget.typeKey && e.target == t)),
-                onTap: (t) {
-                  if (t == _target) return;
-                  // Move the in-flight draft onto the new (type, t) slot and
-                  // retarget it, then drop the old slot — the work follows the
-                  // target instead of resetting or duplicating. isTaken
-                  // guarantees the destination slot is a fresh default.
-                  final from = _target;
-                  final current = ref.read(expressionDraftProvider(
-                      widget.lampId, widget.typeKey, from));
-                  ref
-                      .read(expressionDraftProvider(
-                              widget.lampId, widget.typeKey, t)
-                          .notifier)
-                      .update((_) => current.copyWith(target: t));
-                  ref.invalidate(expressionDraftProvider(
-                      widget.lampId, widget.typeKey, from));
-                  setState(() {
-                    _target = t;
-                    _dirty = true;
-                  });
-                },
-              ),
-              const SizedBox(height: AppSpace.xl),
-
-              // Colors
-              const SectionHeader('Colors'),
-              const SizedBox(height: AppSpace.sm),
-              Wrap(
-                spacing: AppSpace.sm,
-                runSpacing: AppSpace.sm,
-                children: [
-                  for (var i = 0; i < draft.colors.length; i++)
-                    _ColorChip(
-                      color: draft.colors[i],
-                      onEdit: () async {
-                        final picked = await _pickColorLive(
-                            state, notifier, draft.colors[i]);
-                        if (picked == null) return;
-                        final next = [...draft.colors];
-                        next[i] = picked;
-                        _updateDraft((d) => _withColors(d, next));
-                      },
-                      // Last swatch is removable only when the expression
-                      // inherits the surface palette; otherwise keep at least
-                      // one so the firmware has something to draw.
-                      onRemove: (draft.colors.length > 1 || canEmpty)
-                          ? () => _updateDraft((d) =>
-                              _withColors(d, [...d.colors]..removeAt(i)))
-                          : null,
+                    const SettingsGroupHeading('Target'),
+                    // Same chunky-pill UX as the picker so the active target
+                    // reads at a glance. Tapping a different target retargets
+                    // the current draft IN PLACE (no navigation), so the user
+                    // keeps their colors/interval/params; other-target buttons
+                    // disable when that combo is already configured (one entry
+                    // per (type, target) firmware-side).
+                    LampCard(
+                      child: _TargetRow(
+                        currentTarget: _target,
+                        isTaken: (t) =>
+                            excludedTargets.contains(t) ||
+                            (t != _target &&
+                                t != widget.targetKey &&
+                                state.expressions.expressions.any((e) =>
+                                    e.type == widget.typeKey && e.target == t)),
+                        onTap: (t) {
+                          if (t == _target) return;
+                          // Move the in-flight draft onto the new (type, t) slot
+                          // and retarget it, then drop the old slot: the work
+                          // follows the target instead of resetting or
+                          // duplicating. isTaken guarantees the destination slot
+                          // is a fresh default.
+                          final from = _target;
+                          final current = ref.read(expressionDraftProvider(
+                              widget.lampId, widget.typeKey, from));
+                          ref
+                              .read(expressionDraftProvider(
+                                      widget.lampId, widget.typeKey, t)
+                                  .notifier)
+                              .update((_) => current.copyWith(target: t));
+                          ref.invalidate(expressionDraftProvider(
+                              widget.lampId, widget.typeKey, from));
+                          setState(() {
+                            _target = t;
+                            _dirty = true;
+                          });
+                        },
+                      ),
                     ),
-                  if (draft.colors.length < colorMax)
-                    TextButton.icon(
-                      icon: const Icon(Icons.add, size: 18),
-                      label: const Text('Add color'),
-                      onPressed: () async {
-                        final picked = await _pickColorLive(
-                            state,
-                            notifier,
-                            const LampColor(r: 0xFF, g: 0xFF, b: 0xFF, w: 0));
-                        if (picked == null) return;
-                        _updateDraft(
-                            (d) => _withColors(d, [...d.colors, picked]));
-                      },
+                    // Placement (zone) sits directly under Target, above
+                    // Colors, so the effect's extent reads before its palette.
+                    if (descriptor != null)
+                      ExpressionParamsPanel(
+                        descriptor: descriptor,
+                        part: ExpressionPanelPart.placement,
+                        parameters: draft.parameters,
+                        intervalMin: draft.intervalMin,
+                        intervalMax: draft.intervalMax,
+                        onIntervalChanged: (lo, hi) =>
+                            _updateDraft((d) => _withIntervals(d, lo, hi)),
+                        pixelCount: _pixelCount(state),
+                        devMode: ref.watch(devModeOnProvider),
+                        onChanged: (p) =>
+                            _updateDraft((d) => _withParameters(d, p)),
+                        onZonePreview: (lo, hi) {
+                          if (draft.colors.isEmpty) return;
+                          notifier.previewZoneHighlight(
+                              lo, hi, _target, draft.colors.first);
+                        },
+                        onZonePreviewEnd: () =>
+                            unawaited(notifier.completeExpressionTest()),
+                      ),
+                    const SettingsGroupHeading('Colors'),
+                    ColorBlocksBar(
+                      colors: draft.colors,
+                      onTap: () => showColorStopsSheet(
+                        context,
+                        initial: draft.colors,
+                        title: 'Colors',
+                        description:
+                            'This effect picks colors from this set at random.',
+                        max: colorMax,
+                        allowEmpty: canEmpty,
+                        reorderable: false,
+                        onChanged: (colors) =>
+                            _updateDraft((d) => _withColors(d, colors)),
+                        onSave: (colors) async =>
+                            _updateDraft((d) => _withColors(d, colors)),
+                      ),
                     ),
-                ],
-              ),
-              const SizedBox(height: AppSpace.lg),
 
-              // Every remaining control (interval, duration, zone, params) is
-              // rendered generically from the firmware catalog descriptor.
-              // Colors + target above are the editor shell's own concern.
-              if (descriptor != null)
-                ExpressionParamsPanel(
-                  descriptor: descriptor,
-                  parameters: draft.parameters,
-                  intervalMin: draft.intervalMin,
-                  intervalMax: draft.intervalMax,
-                  onIntervalChanged: (lo, hi) =>
-                      _updateDraft((d) => _withIntervals(d, lo, hi)),
-                  pixelCount: _target == 1
-                      ? state.shade.px
-                      : _target == 2
-                          ? state.base.px
-                          : (state.shade.px > state.base.px
-                              ? state.shade.px
-                              : state.base.px),
-                  devMode: ref.watch(devModeOnProvider),
-                  onChanged: (p) => _updateDraft((d) => _withParameters(d, p)),
-                  onZonePreview: (lo, hi) {
-                    if (draft.colors.isEmpty) return;
-                    notifier.previewZoneHighlight(
-                        lo, hi, _target, draft.colors.first);
-                  },
-                  onZonePreviewEnd: () =>
-                      unawaited(notifier.completeExpressionTest()),
-                ),
+                    // Timing / Behaviour / Mesh render generically from the
+                    // firmware catalog descriptor into their own yellow-headed
+                    // cards. Colors + target above are the editor shell's own
+                    // concern.
+                    if (descriptor != null)
+                      ExpressionParamsPanel(
+                        descriptor: descriptor,
+                        parameters: draft.parameters,
+                        intervalMin: draft.intervalMin,
+                        intervalMax: draft.intervalMax,
+                        onIntervalChanged: (lo, hi) =>
+                            _updateDraft((d) => _withIntervals(d, lo, hi)),
+                        pixelCount: _pixelCount(state),
+                        devMode: ref.watch(devModeOnProvider),
+                        onChanged: (p) =>
+                            _updateDraft((d) => _withParameters(d, p)),
+                      ),
                   ],
                 ),
               ),
-              // Action row — Cancel + Delete on the left, Add/Update on
+              // Action row: Cancel + Delete on the left, Add/Update on
               // the right. Test sits on the AppBar's actions area; the
               // back-arrow on the AppBar leading area (and system back)
               // confirm before discarding when the draft has unsaved
-              // edits. Cancel is the explicit "throw away" counterpart —
+              // edits. Cancel is the explicit "throw away" counterpart:
               // it discards without a prompt.
               //
-              // This was previously the last child of the ListView and
-              // scrolled with the form, leaving the buttons midway down
-              // the screen on short forms. Pulling it out as a sibling
-              // under SafeArea pins it to the bottom in line with the
-              // rest of the editors. Bespoke shape (optional leading
-              // Delete + dynamic primary label) so it doesn't share
-              // EditorActionBar with the four uniform editors.
+              // A sibling under SafeArea pins the row to the bottom in
+              // line with the rest of the editors, above the system
+              // gesture bar / nav bar on Android. Bespoke shape (optional
+              // leading Delete + dynamic primary label) so it doesn't
+              // share EditorActionBar with the four uniform editors.
               SafeArea(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
@@ -457,15 +420,19 @@ class _ExpressionEditorScreenState
                                 Theme.of(context).colorScheme.error,
                           ),
                           onPressed: () async {
+                            final target = _target;
+                            // Capture the keep-alive draft notifier before the
+                            // await so the reset doesn't touch `ref` after the
+                            // widget may have unmounted mid-write.
+                            final draftNotifier = ref.read(
+                                expressionDraftProvider(widget.lampId,
+                                        widget.typeKey, target)
+                                    .notifier);
                             await notifier.removeExpression(
                               type: widget.typeKey,
-                              target: _target,
+                              target: target,
                             );
-                            ref
-                                .read(expressionDraftProvider(widget.lampId,
-                                        widget.typeKey, _target)
-                                    .notifier)
-                                .reset();
+                            draftNotifier.reset();
                             if (context.mounted) {
                               GoRouter.maybeOf(context)?.pop();
                             }
@@ -475,16 +442,27 @@ class _ExpressionEditorScreenState
                       FilledButton.icon(
                         icon: const Icon(Icons.check, size: 18),
                         label: const Text('Save'),
+                        style: FilledButton.styleFrom(
+                          shape: RoundedRectangleBorder(
+                            borderRadius:
+                                BorderRadius.circular(AppRadius.card),
+                          ),
+                        ),
                         onPressed: () async {
                           // Capture the active target up front: the user can
                           // tap another target pill while the awaited writes
                           // are in flight, which would move _target out from
                           // under the reset() below.
                           final savedTarget = _target;
-                          // Target changed this session → it's a move: drop
-                          // the row we opened so it doesn't linger as a
-                          // duplicate. removeExpression is a no-op when the
-                          // original row never existed (the create flow).
+                          // Capture the keep-alive draft notifier before the
+                          // awaits so the reset doesn't touch `ref` after the
+                          // widget may have unmounted mid-write.
+                          final draftNotifier = ref.read(
+                              expressionDraftProvider(widget.lampId,
+                                      widget.typeKey, savedTarget)
+                                  .notifier);
+                          // A moved target leaves the origin row behind;
+                          // remove it. No-op when the origin never existed.
                           if (savedTarget != widget.targetKey) {
                             await notifier.removeExpression(
                               type: widget.typeKey,
@@ -492,16 +470,12 @@ class _ExpressionEditorScreenState
                             );
                           }
                           await notifier.upsertExpression(draft);
-                          ref
-                              .read(expressionDraftProvider(widget.lampId,
-                                      widget.typeKey, savedTarget)
-                                  .notifier)
-                              .reset();
+                          draftNotifier.reset();
                           if (!context.mounted) return;
                           // Entries opened via the picker have the stack
                           // [list, picker, editor]; pop twice to land back on
                           // the list, skipping the picker. Use the open-time
-                          // flag, NOT live `isNew` — retargeting an existing
+                          // flag, not live `isNew`: retargeting an existing
                           // entry flips `isNew` true but didn't add a picker
                           // to pop past.
                           final router = GoRouter.maybeOf(context);
@@ -514,21 +488,6 @@ class _ExpressionEditorScreenState
                         },
                       ),
                     ],
-                  ),
-                ),
-              ),
-            ],
-          );
-          return Column(
-            children: [
-              if (!state.connected)
-                ConnectionBanner(attempt: state.reconnectAttempt),
-              Expanded(
-                child: IgnorePointer(
-                  ignoring: !state.connected,
-                  child: Opacity(
-                    opacity: state.connected ? 1.0 : 0.4,
-                    child: body,
                   ),
                 ),
               ),
@@ -586,7 +545,7 @@ class _Header extends StatelessWidget {
 /// selected and is a no-op on tap; other targets disable when this type
 /// is already configured for them (firmware enforces one entry per
 /// (type, target) pair, so tapping into an in-use combo would just
-/// silently replace it — disable instead so it's obvious).
+/// silently replace it; disable instead so it's obvious).
 class _TargetRow extends StatelessWidget {
   const _TargetRow({
     required this.currentTarget,
@@ -655,41 +614,42 @@ class _TargetButton extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final fill = selected ? colorScheme.primary : Colors.transparent;
     final border = selected ? colorScheme.primary : colorScheme.outlineVariant;
-    final fg = !enabled
-        ? colorScheme.onSurfaceVariant
-        : (selected ? colorScheme.onPrimary : colorScheme.onSurface);
+    final fg = selected ? colorScheme.onPrimary : colorScheme.onSurface;
     return Expanded(
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: enabled ? onTap : null,
-          borderRadius: BorderRadius.circular(AppRadius.card),
-          child: Container(
-            height: 64,
-            decoration: BoxDecoration(
-              color: fill,
-              border: Border.all(
-                color: border,
-                width: selected ? 2 : 1,
-              ),
-              borderRadius: BorderRadius.circular(AppRadius.card),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(icon, color: fg, size: 22),
-                const SizedBox(height: AppSpace.xs),
-                Text(
-                  label,
-                  style: TextStyle(
-                    color: fg,
-                    fontSize: 13,
-                    fontWeight:
-                        selected ? FontWeight.w700 : FontWeight.w500,
-                    letterSpacing: 0.5,
-                  ),
+      child: Opacity(
+        opacity: enabled ? 1.0 : 0.35,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: enabled ? onTap : null,
+            borderRadius: BorderRadius.circular(AppRadius.card),
+            child: Container(
+              height: 64,
+              decoration: BoxDecoration(
+                color: fill,
+                border: Border.all(
+                  color: border,
+                  width: selected ? 2 : 1,
                 ),
-              ],
+                borderRadius: BorderRadius.circular(AppRadius.card),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(icon, color: fg, size: 22),
+                  const SizedBox(height: AppSpace.xs),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: fg,
+                      fontSize: 13,
+                      fontWeight:
+                          selected ? FontWeight.w700 : FontWeight.w500,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -698,57 +658,3 @@ class _TargetButton extends StatelessWidget {
   }
 }
 
-class _ColorChip extends StatelessWidget {
-  const _ColorChip({
-    required this.color,
-    required this.onEdit,
-    required this.onRemove,
-  });
-
-  final LampColor color;
-  final VoidCallback onEdit;
-
-  /// Null when this swatch is the last one in the palette — the X button
-  /// hides entirely so the user can't end up with an empty colors list.
-  final VoidCallback? onRemove;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        GestureDetector(
-          onTap: onEdit,
-          child: LampColorSwatch(color: color, size: 40),
-        ),
-        if (onRemove != null)
-          Positioned(
-            top: -6,
-            right: -6,
-            child: Semantics(
-              label: 'Remove color',
-              button: true,
-              child: InkWell(
-                onTap: onRemove,
-                customBorder: const CircleBorder(),
-                child: Container(
-                  width: 18,
-                  height: 18,
-                  decoration: BoxDecoration(
-                    color: colorScheme.surfaceContainerHigh,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.close,
-                    size: 12,
-                    color: colorScheme.onSurface,
-                  ),
-                ),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-}

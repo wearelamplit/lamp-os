@@ -77,7 +77,7 @@ class NearbyLampsNotifier extends _$NearbyLampsNotifier {
       isMesh: ad.isMesh,
       configured: ad.configured,
     );
-    // Build the next-roster against whatever's MOST CURRENT — either the
+    // Build the next-roster against whatever's MOST CURRENT: either the
     // pending list waiting to flush, or the live state if no window is
     // open. Without checking _pendingRoster here, a burst of advs in a
     // single window would each rebuild against stale `state`.
@@ -155,7 +155,7 @@ class NearbyLampsNotifier extends _$NearbyLampsNotifier {
     return true;
   }
 
-  /// Prewarm a GATT connection to a paired lamp as soon as we see its adv, so
+  /// Prewarm a GATT connection to a paired lamp as soon as its adv lands, so
   /// by tap time the connect handshake + service discovery are already done
   /// (`control_notifier` short-circuits its `connect()` when `isConnected`).
   /// Saves ~300-900 ms of perceived tap-to-interactive latency. Rate-limited
@@ -184,7 +184,7 @@ class NearbyLampsNotifier extends _$NearbyLampsNotifier {
       ));
       return;
     }
-    // Update inventory "last seen" too — without this, My Lamps says
+    // Update inventory "last seen" too. Without this, My Lamps says
     // "3 weeks ago" for a paired lamp that the user has been seeing
     // continuously since they opened the app. InventoryNotifier
     // self-caps at one write per 30s per id, so it's safe to call

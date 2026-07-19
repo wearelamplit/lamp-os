@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Raw brand tokens — the ONLY place color hex literals live.
+/// Raw brand tokens. The ONLY place color hex literals live.
 /// Source of truth: lamplit.ca/brand. Recolor the app here.
 abstract class Brand {
   // Primary (Pink)

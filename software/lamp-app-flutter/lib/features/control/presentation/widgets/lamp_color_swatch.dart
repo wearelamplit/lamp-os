@@ -1,26 +1,23 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/brand.dart';
 import '../../domain/lamp_color.dart';
 
-/// A swatch that visualizes a [LampColor] — including the separate
-/// warm-white LED's contribution. Renders as a stack of two layers
-/// matching the original Vue ColorPreview component: a base RGB
-/// layer with a warm-white tint (#FABB3E) overlaid at
+/// A swatch that visualizes a [LampColor], including the separate
+/// warm-white LED's contribution. Renders as a stack of two layers: a base
+/// RGB layer with a warm-white tint (#FABB3E) overlaid at
 /// `opacity = (W/255) * (availableRoom/765)`.
 ///
-/// On 2026-06-12 this was briefly changed to a single Container using
-/// the screen-blend math from [LampColor.blendedRgb] (which is correct
-/// for gradient / SVG fills where you can't stack layers), but bright
-/// colors with high W didn't wash visibly enough — the screen blend
-/// preserves base brightness while alpha overlay actually mutes it
-/// toward the warm tint. Operator feedback 2026-06-13 reverted this
-/// widget back to the stacked alpha overlay. The screen-blend path
-/// remains the right tool for [LampColor.toRgbHex] / gradient stops.
+/// Uses a stacked alpha overlay rather than [LampColor.blendedRgb]'s screen
+/// blend: screen blend preserves base brightness, while alpha overlay mutes
+/// it toward the warm tint, giving bright high-W colors a visible wash. The
+/// screen-blend path remains the right tool for [LampColor.toRgbHex] /
+/// gradient stops, where layers can't be stacked.
 
-/// Two-shape variants of [LampColorSwatch]. The default is [circle] so
-/// existing call-sites stay unchanged; the [roundedSquare] variant is
-/// used by [ShadeCard] to visually rhyme with [BaseCard].
+/// Two-shape variants of [LampColorSwatch]. The default is [roundedSquare]
+/// so every color swatch reads as a rounded square; [circle] stays for the
+/// rare caller that needs it.
 enum LampSwatchShape { circle, roundedSquare }
 
 class LampColorSwatch extends StatelessWidget {
@@ -29,8 +26,8 @@ class LampColorSwatch extends StatelessWidget {
     required this.color,
     this.size = 48,
     this.borderColor,
-    this.shape = LampSwatchShape.circle,
-    this.borderRadius = 14,
+    this.shape = LampSwatchShape.roundedSquare,
+    this.borderRadius = AppRadius.swatch,
   });
 
   final LampColor color;

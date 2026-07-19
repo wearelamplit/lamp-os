@@ -56,9 +56,9 @@ void main() {
     final Map<String, dynamic> payload =
         jsonDecode(utf8.decode(greetWrite)) as Map<String, dynamic>;
     expect(payload['a'], 'triggerGreet');
-    expect(payload['bdAddr'], _peerAddr);
+    expect(payload['lampId'], _peerAddr);
     // Exact shape: only two keys.
-    expect(payload.keys.toSet(), {'a', 'bdAddr'});
+    expect(payload.keys.toSet(), {'a', 'lampId'});
   });
 
   test('no advanced-mode gate: triggerGreet is callable without advanced session',

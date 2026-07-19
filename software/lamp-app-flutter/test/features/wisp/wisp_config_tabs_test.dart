@@ -69,31 +69,31 @@ Future<void> _pumpScreen(WidgetTester tester, ProviderContainer c) async {
   // Pump until the tab bar appears, up to 20 frames.
   for (var i = 0; i < 20; i++) {
     await tester.pump(const Duration(milliseconds: 16));
-    if (find.text('Sources').evaluate().isNotEmpty) return;
+    if (find.text('Palette source').evaluate().isNotEmpty) return;
   }
 }
 
 void main() {
   group('WispConfigScreen tabs', () {
-    testWidgets('renders Sources, Settings, and Lamps tabs in order',
+    testWidgets('renders Palette source, Settings, and Lamps tabs in order',
         (tester) async {
       final c = await _makeContainer();
       addTearDown(c.dispose);
       await _pumpScreen(tester, c);
 
-      expect(find.text('Sources'), findsOneWidget);
+      expect(find.text('Palette source'), findsOneWidget);
       expect(find.text('Settings'), findsOneWidget);
       expect(find.text('Lamps'), findsOneWidget);
 
-      // Verify order: Sources comes before Settings, Settings before Lamps.
-      final sourcesPos = tester.getCenter(find.text('Sources')).dx;
+      // Verify order: Palette source comes before Settings, Settings before Lamps.
+      final sourcesPos = tester.getCenter(find.text('Palette source')).dx;
       final settingsPos = tester.getCenter(find.text('Settings')).dx;
       final lampsPos = tester.getCenter(find.text('Lamps')).dx;
       expect(sourcesPos, lessThan(settingsPos));
       expect(settingsPos, lessThan(lampsPos));
     });
 
-    testWidgets('default tab is Sources — source picker visible on open',
+    testWidgets('default tab is Palette source — source picker visible on open',
         (tester) async {
       final c = await _makeContainer();
       addTearDown(c.dispose);
@@ -105,13 +105,13 @@ void main() {
       expect(find.text('Aurora'), findsOneWidget);
     });
 
-    testWidgets('Sources tab shows per-mode widget (manual palette editor)',
+    testWidgets('Palette source tab shows per-mode widget (manual palette editor)',
         (tester) async {
       final c = await _makeContainer();
       addTearDown(c.dispose);
       await _pumpScreen(tester, c);
 
-      // Still on Sources tab (default); manual source is active in seed JSON.
+      // Still on Palette source tab (default); manual source is active in seed JSON.
       expect(find.text('MANUAL PALETTE'), findsOneWidget);
     });
 
@@ -124,11 +124,16 @@ void main() {
       await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
 
-      // Name text field
-      expect(find.byKey(const Key('wisp-name-field')), findsOneWidget);
+      // Name row (opens the shared rename dialog on tap)
+      expect(find.byKey(const Key('wisp-name-row')), findsOneWidget);
       // Password row (SettingsRow from WispPasswordField)
       expect(find.text('No password'), findsOneWidget);
-      // DriftControls renders a 'Color drift' section header
+      // DriftControls renders a 'Color drift' section header. The persistent
+      // space-brightness footer shortens the tab, so scroll it into view.
+      await tester.ensureVisible(find.text('NETWORK'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('COLOR DRIFT'));
+      await tester.pumpAndSettle();
       expect(find.text('COLOR DRIFT'), findsOneWidget);
     });
 
@@ -158,13 +163,13 @@ void main() {
       expect(find.text('Aurora'), findsNothing);
     });
 
-    testWidgets('DriftControls does NOT appear on Sources or Lamps tabs',
+    testWidgets('DriftControls does NOT appear on Palette source or Lamps tabs',
         (tester) async {
       final c = await _makeContainer();
       addTearDown(c.dispose);
       await _pumpScreen(tester, c);
 
-      // On the Sources tab by default — no drift.
+      // On the Palette source tab by default — no drift.
       expect(find.text('COLOR DRIFT'), findsNothing);
 
       await tester.tap(find.text('Lamps'));
@@ -174,7 +179,8 @@ void main() {
       expect(find.text('COLOR DRIFT'), findsNothing);
     });
 
-    testWidgets('Settings tab shows name field after scroll', (tester) async {
+    testWidgets('Settings tab scrolls to reveal Network section and drift',
+        (tester) async {
       final c = await _makeContainer();
       addTearDown(c.dispose);
       await _pumpScreen(tester, c);
@@ -182,10 +188,21 @@ void main() {
       await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
 
-      await tester.drag(find.byType(ListView).last, const Offset(0, -800));
+      // The Settings tab is taller now; use ensureVisible to scroll each
+      // section into view rather than a fixed-pixel drag.
+      await tester.ensureVisible(find.text('NETWORK'));
+      await tester.pumpAndSettle();
+      expect(find.text('NETWORK'), findsOneWidget);
+
+      await tester.ensureVisible(find.text('COLOR DRIFT'));
+      await tester.pumpAndSettle();
+      expect(find.text('COLOR DRIFT'), findsOneWidget);
+
+      // Scroll back up to verify the name row is still in the tree.
+      await tester.drag(find.byType(ListView).last, const Offset(0, 800));
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const Key('wisp-name-field')), findsOneWidget);
+      expect(find.byKey(const Key('wisp-name-row')), findsOneWidget);
       expect(find.text('No password'), findsOneWidget);
     });
   });
@@ -204,7 +221,7 @@ void main() {
       await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
 
-      await tester.drag(find.byType(ListView).last, const Offset(0, -800));
+      await tester.ensureVisible(find.text('Password set'));
       await tester.pumpAndSettle();
 
       expect(find.text('Password set'), findsOneWidget);
@@ -236,8 +253,8 @@ void main() {
       await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
 
-      // Scroll to reveal the password row (it's below the fold).
-      await tester.drag(find.byType(ListView).last, const Offset(0, -800));
+      // Scroll to reveal the password row.
+      await tester.ensureVisible(find.text('Password set'));
       await tester.pumpAndSettle();
 
       // Tap the password row to open the dialog.

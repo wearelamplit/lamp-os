@@ -10,16 +10,16 @@ import '../domain/nearby_lamp.dart';
 /// where the user would just be stuck on the ConnectingView.
 ///
 /// Out-of-range lamps fall back to [InventoryLamp.lastKnownIsMesh] when
-/// available — a legacy BT-only lamp that's currently silent should
+/// available (a legacy BT-only lamp that's currently silent should
 /// still route to BtOnlyLampScreen instead of stranding the user on
-/// ConnectingView. When neither nearby NOR inventory has a cached
-/// `isMesh` (factory-fresh inventory entry, pre-fix inventory written
-/// before `lastKnownIsMesh` existed), default to control — that's the
-/// pre-fix behavior and the "optimistic" path that any newer lamp
-/// satisfies once it comes back into range.
+/// ConnectingView). When neither nearby NOR inventory has a cached
+/// `isMesh` (factory-fresh inventory entry, or an inventory entry
+/// written before `lastKnownIsMesh` existed), default to control: the
+/// optimistic path that any newer lamp satisfies once it comes back
+/// into range.
 ///
-/// Centralizing this so every entry point — MyLamps tile,
-/// AppBar picker sheet, post-adoption done step — uses the same logic.
+/// Centralizing this so every entry point (MyLamps tile,
+/// AppBar picker sheet, post-adoption done step) uses the same logic.
 String routeForLamp(
   String lampId,
   List<NearbyLamp> nearby, {

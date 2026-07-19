@@ -63,8 +63,10 @@ class PaletteGradientBar extends StatelessWidget {
   }
 
   /// Map (source mode, manual palette, off color) → list of [Color]
-  /// stops fed to `renderPaletteRamp`. Empty-list cases collapse to
-  /// warm-white inside the renderer, matching the LED ring fallback.
+  /// stops fed to `renderPaletteRamp`. W folds into RGB via
+  /// [foldRgbwWarmBias], matching the wisp ring's warm-bias fold.
+  /// Empty-list cases collapse to warm-white inside the renderer,
+  /// matching the LED ring fallback.
   static List<Color> _stopsFor(
     WispSourceMode mode,
     List<LampColor> manual,
@@ -72,12 +74,14 @@ class PaletteGradientBar extends StatelessWidget {
   ) {
     switch (mode) {
       case WispSourceMode.manual:
-        return [for (final c in manual) Color.fromARGB(0xFF, c.r, c.g, c.b)];
+        return [for (final c in manual) foldRgbwWarmBias(c.r, c.g, c.b, c.w)];
       case WispSourceMode.aurora:
         // No app-side Aurora palette; see file-level comment.
         return const <Color>[];
       case WispSourceMode.off:
-        return [Color.fromARGB(0xFF, offColor.r, offColor.g, offColor.b)];
+        return [
+          foldRgbwWarmBias(offColor.r, offColor.g, offColor.b, offColor.w)
+        ];
     }
   }
 }

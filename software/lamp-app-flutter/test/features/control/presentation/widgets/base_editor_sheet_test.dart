@@ -94,7 +94,7 @@ void main() {
       ),
     ));
     // Provider stays in loading — widget renders SizedBox.shrink().
-    expect(find.text('+ Add stop'), findsNothing);
+    expect(find.text('Add Color'), findsNothing);
     expect(find.text('Base colors'), findsNothing);
   });
 
@@ -113,7 +113,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Base colors'), findsOneWidget);
-    expect(find.text('+ Add stop'), findsOneWidget);
+    expect(find.text('Add Color'), findsOneWidget);
     expect(find.byIcon(Icons.drag_indicator), findsNWidgets(2));
   });
 
@@ -157,7 +157,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('+ Add stop'), findsNothing);
+    expect(find.text('Add Color'), findsNothing);
     expect(find.byIcon(Icons.drag_indicator), findsNWidgets(6));
   });
 
@@ -264,30 +264,5 @@ void main() {
     final colors = c.read(controlNotifierProvider(_devId)).value!.base.colors;
     expect(colors.length, 2);
     expect(colors.first, _baselineColor);
-  });
-
-  testWidgets(
-      'Changing only ac (colors unchanged) counts as unsaved; system-back shows discard dialog',
-      (tester) async {
-    final ble = InMemoryBleClient();
-    final c = await _buildContainer(ble); // baseAc=0 (default), 2 stops
-    addTearDown(c.dispose);
-    final sub = c.listen(controlNotifierProvider(_devId), (_, __) {});
-    addTearDown(sub.close);
-
-    await tester.pumpWidget(_wrap(c));
-    await tester.tap(find.text('open'));
-    await tester.pumpAndSettle();
-
-    // Change only ac — colors stay the same.
-    c.read(controlNotifierProvider(_devId).notifier).setBaseAc(1);
-    await tester.pump();
-
-    // Simulate system back.
-    await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
-
-    // ac changed (0→1) with colors unchanged → still unsaved → dialog shown.
-    expect(find.text('Discard changes?'), findsOneWidget);
   });
 }

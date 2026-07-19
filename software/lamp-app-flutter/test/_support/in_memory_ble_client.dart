@@ -26,6 +26,10 @@ class InMemoryBleClient implements BleClient {
   final List<({String deviceId, String charUuid, Uint8List value})>
       _writeLog = [];
 
+  /// Test-settable negotiated MTU, per device. Unset devices report 0
+  /// (unknown), matching a real link before/without negotiation.
+  final Map<String, int> mtuValues = {};
+
   String _key(String d, String s, String c) => '$d|$s|$c';
 
   StreamController<bool> _ensureConnStream(String deviceId) {
@@ -81,6 +85,9 @@ class InMemoryBleClient implements BleClient {
 
   @override
   bool isConnected(String deviceId) => _connected.contains(deviceId);
+
+  @override
+  int mtu(String deviceId) => mtuValues[deviceId] ?? 0;
 
   @override
   Future<Uint8List> read(String d, String s, String c) async {
@@ -158,6 +165,12 @@ class InMemoryBleClient implements BleClient {
     );
     return ctrl.stream;
   }
+
+  // The fake's subscribe already has notify-only semantics (no replay, no
+  // write echo).
+  @override
+  Stream<Uint8List> subscribeNotifyOnly(String d, String s, String c) =>
+      subscribe(d, s, c);
 
   @override
   Future<void> cycleAdapter(String deviceId) async {

@@ -31,7 +31,7 @@ class NavRow extends StatelessWidget {
       subtitle: subtitle == null
           ? null
           : Text(subtitle!, style: Theme.of(context).textTheme.bodySmall),
-      trailing: const Icon(Icons.chevron_right),
+      trailing: onTap == null ? null : const Icon(Icons.chevron_right),
       onTap: onTap,
     );
   }

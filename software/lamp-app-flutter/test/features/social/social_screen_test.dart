@@ -1,12 +1,12 @@
-// BD_ADDR-keyed disposition cross-reference + lamp-emitted
+// lampId-keyed disposition cross-reference + lamp-emitted
 // nearby peer list.
 //
 // Three scenarios:
-// 1. Lamp emits a peer with BD_ADDR X + name N:
+// 1. Lamp emits a peer with lampId X + name N:
 //    row label is N and slider reflects the stored disposition for X.
 // 2. No peers in the lamp's nearby list:
 //    row is not rendered (empty-state copy shows).
-// 3. Same BD_ADDR re-emitted with new name (the rename case):
+// 3. Same lampId re-emitted with new name (the rename case):
 //    row label re-renders; disposition value unchanged.
 //
 // Test wiring:
@@ -17,7 +17,7 @@
 //   pending-timer assertion at dispose and the BLE I/O entirely.
 // * `bleClientProvider` is overridden with `InMemoryBleClient`; the
 //   CHAR_SOCIAL_DISPOSITIONS read is pre-seeded so the real
-//   `Dispositions` notifier (which keys on BD_ADDR) populates its
+//   `Dispositions` notifier (which keys on lampId) populates its
 //   in-memory map from the seeded JSON — this is the cross-reference
 //   path under test.
 // * `controlNotifierProvider` is overridden with a synthetic
@@ -36,6 +36,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../_support/in_memory_ble_client.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
+import 'package:lamp_app/core/widgets/critter_icon.dart';
 import 'package:lamp_app/features/control/application/control_notifier.dart';
 import 'package:lamp_app/features/control/application/control_state.dart';
 import 'package:lamp_app/features/control/domain/sections.dart';
@@ -52,7 +53,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 // subclassing and returning a synthetic ControlState directly.
 //
 // _CapturingControl also overrides triggerGreet so double-tap tests can
-// assert the bdAddr sent without a live BLE connection.
+// assert the lampId sent without a live BLE connection.
 class _CapturingControl extends ControlNotifier {
   _CapturingControl(this._selfName);
   final String _selfName;
@@ -62,22 +63,22 @@ class _CapturingControl extends ControlNotifier {
   Future<ControlState> build(String deviceId) async => _fakeState(_selfName);
 
   @override
-  Future<void> triggerGreet(String bdAddr) async {
-    greetedAddrs.add(bdAddr);
+  Future<void> triggerGreet(String lampId) async {
+    greetedAddrs.add(lampId);
   }
 }
 
-ControlState _fakeState(String selfName) => ControlState(
+ControlState _fakeState(String selfName, {String? selfLampId}) => ControlState(
       lamp: LampSection(
         name: selfName,
         brightness: 100,
         advancedEnabled: false,
         webappEnabled: true,
         socialMode: SocialMode.ambivert,
+        lampId: selfLampId,
       ),
       base: const BaseSection(
         px: 35,
-        ac: 0,
         bpp: 4,
         byteOrder: 'GRBW',
         colors: [],
@@ -89,15 +90,24 @@ ControlState _fakeState(String selfName) => ControlState(
         byteOrder: 'GRBW',
         colors: [],
       ),
-      home: const HomeSection(ssid: '', brightness: 60, enabled: false),
+      home: const HomeSection(
+        ssid: '',
+        brightness: 60,
+        enabled: false,
+        networkBound: false,
+        socialDisabled: true,
+        disabledExpressionTypes: ['glitchy'],
+      ),
       expressions: const ExpressionsSection(expressions: []),
     );
 
 class _FakeControl extends ControlNotifier {
-  _FakeControl(this._selfName);
+  _FakeControl(this._selfName, {this.selfLampId});
   final String _selfName;
+  final String? selfLampId;
   @override
-  Future<ControlState> build(String deviceId) async => _fakeState(_selfName);
+  Future<ControlState> build(String deviceId) async =>
+      _fakeState(_selfName, selfLampId: selfLampId);
 }
 
 /// Stub for lampNearbyPeersNotifierProvider that returns a
@@ -148,7 +158,7 @@ Future<void> _seedDispositions(
 }
 
 void main() {
-  testWidgets('row label shows current peer name when bdAddr is known',
+  testWidgets('row label shows current peer name when lampId is known',
       (tester) async {
     final ble = InMemoryBleClient();
     await _seedDispositions(
@@ -165,9 +175,8 @@ void main() {
           () => _FakeLampNearbyPeers(const [
             LampNearbyPeer(
               name: 'jacko',
-              bdAddr: 'AA:BB:CC:DD:EE:FF',
+              lampId: 'AA:BB:CC:DD:EE:FF',
               rssi: -72,
-              proximity: 0, // Near
             ),
           ]),
         ),
@@ -221,6 +230,69 @@ void main() {
     expect(find.text('jacko'), findsNothing);
   });
 
+  testWidgets('same-named peer with different lampId is not self-filtered',
+      (tester) async {
+    final ble = InMemoryBleClient();
+    await _seedDispositions(ble, 'floral-id', const {});
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        bleClientProvider.overrideWithValue(ble),
+        controlNotifierProvider('floral-id').overrideWith(
+            () => _FakeControl('floral', selfLampId: '11:22:33:44:55:66')),
+        lampNearbyPeersNotifierProvider('floral-id').overrideWith(
+          () => _FakeLampNearbyPeers(const [
+            LampNearbyPeer(
+              name: 'floral',
+              lampId: 'AA:BB:CC:DD:EE:FF',
+              rssi: -72,
+            ),
+          ]),
+        ),
+      ],
+      child: const MaterialApp(
+        home: Scaffold(body: SocialScreen(lampId: 'floral-id')),
+      ),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.text('floral'), findsOneWidget);
+    expect(find.textContaining('No lamps nearby'), findsNothing);
+  });
+
+  testWidgets('peer whose lampId matches self is filtered out',
+      (tester) async {
+    final ble = InMemoryBleClient();
+    await _seedDispositions(ble, 'floral-id', const {});
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        bleClientProvider.overrideWithValue(ble),
+        controlNotifierProvider('floral-id').overrideWith(
+            () => _FakeControl('floral', selfLampId: 'AA:BB:CC:DD:EE:FF')),
+        lampNearbyPeersNotifierProvider('floral-id').overrideWith(
+          () => _FakeLampNearbyPeers(const [
+            LampNearbyPeer(
+              // Distinct name, same lampId, mixed case: still self.
+              name: 'ghost',
+              lampId: 'aa:bb:cc:dd:ee:ff',
+              rssi: -72,
+            ),
+          ]),
+        ),
+      ],
+      child: const MaterialApp(
+        home: Scaffold(body: SocialScreen(lampId: 'floral-id')),
+      ),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.text('ghost'), findsNothing);
+    expect(find.textContaining('No lamps nearby'), findsOneWidget);
+  });
+
   testWidgets('renamed peer label updates without disturbing disposition',
       (tester) async {
     final ble = InMemoryBleClient();
@@ -233,9 +305,8 @@ void main() {
     fakePeers = _MutableFakeLampNearbyPeers(const [
       LampNearbyPeer(
         name: 'jacko',
-        bdAddr: 'AA:BB:CC:DD:EE:FF',
+        lampId: 'AA:BB:CC:DD:EE:FF',
         rssi: -72,
-        proximity: 0,
       ),
     ]);
     await tester.pumpWidget(ProviderScope(
@@ -258,27 +329,26 @@ void main() {
     expect(find.text('jacko'), findsOneWidget);
     expect(find.text('fond'), findsOneWidget);
 
-    // Rename simulation: same BD_ADDR, new name. Production parallel:
+    // Rename simulation: same lampId, new name. Production parallel:
     // a fresh nearby JSON poll lands with the lamp emitting the new name
     // for the same peer.
     fakePeers.setPeers(const [
       LampNearbyPeer(
         name: 'jacko-test',
-        bdAddr: 'AA:BB:CC:DD:EE:FF',
+        lampId: 'AA:BB:CC:DD:EE:FF',
         rssi: -72,
-        proximity: 0,
       ),
     ]);
     await tester.pump();
 
     expect(find.text('jacko'), findsNothing);
     expect(find.text('jacko-test'), findsOneWidget);
-    // Disposition (BD_ADDR-keyed) is unchanged because the BD_ADDR
-    // didn't change — only the display name did.
+    // Disposition (lampId-keyed) is unchanged because the lampId
+    // didn't change: only the display name did.
     expect(find.text('fond'), findsOneWidget);
   });
 
-  testWidgets('double-tap on peer row calls triggerGreet with correct bdAddr',
+  testWidgets('double-tap on peer row calls triggerGreet with correct lampId',
       (tester) async {
     final ble = InMemoryBleClient();
     await _seedDispositions(
@@ -298,9 +368,8 @@ void main() {
           () => _FakeLampNearbyPeers(const [
             LampNearbyPeer(
               name: 'jacko',
-              bdAddr: 'AA:BB:CC:DD:EE:FF',
+              lampId: 'AA:BB:CC:DD:EE:FF',
               rssi: -72,
-              proximity: 0,
             ),
           ]),
         ),
@@ -313,24 +382,24 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    // Double-tap on the peer row icon+name area. Two taps within
-    // kDoubleTapTimeout (300ms) trigger GestureDetector.onDoubleTap.
-    await tester.tap(find.text('jacko'));
+    // Double-tap on the critter icon, the only tap target wired to
+    // GestureDetector.onDoubleTap. Two taps within kDoubleTapTimeout
+    // (300ms) trigger it.
+    await tester.tap(find.byType(CritterIcon));
     await tester.pump(const Duration(milliseconds: 100));
-    await tester.tap(find.text('jacko'));
+    await tester.tap(find.byType(CritterIcon));
     await tester.pumpAndSettle();
 
     expect(capturer.greetedAddrs, ['AA:BB:CC:DD:EE:FF']);
   });
 
-  testWidgets('row label prefers inventory name over BLE-adv name',
-      (tester) async {
-    // The rename dialog updates inventory immediately, but the lamp's
-    // BLE advertisement payload may lag (or not refresh until power
-    // cycle). Mirror the lamp picker's behavior: read display names
-    // from inventory when available, fall back to the lamp-emitted name
-    // otherwise. Verifies the bench-fix: even if the lamp keeps
-    // emitting "jacko" in its nearby JSON, inventory's "jacko-test" wins.
+  testWidgets(
+      'social join keys on lampId regardless of remoteId shape '
+      '(iOS: id != lampId)', (tester) async {
+    // Inventory's `id` is an opaque UUID unrelated to any mac (the iOS
+    // remoteId shape) and its name differs from the peer's ('jacko-test'
+    // vs 'jacko'), so the name-fallback rung can't produce a match either:
+    // the row resolving to 'jacko-test' is only possible via the lampId join.
     SharedPreferences.setMockInitialValues({});
     final ble = InMemoryBleClient();
     await _seedDispositions(
@@ -350,19 +419,21 @@ void main() {
               // rename update by a power cycle); inventory has the
               // fresh name from the rename dialog.
               name: 'jacko',
-              bdAddr: 'AA:BB:CC:DD:EE:FF',
+              lampId: 'AA:BB:CC:DD:EE:FF',
               rssi: -72,
-              proximity: 0,
             ),
           ]),
         ),
-        // Seed inventory with jacko's BD_ADDR as id and the NEW name —
-        // i.e., the user just renamed jacko via the in-app dialog which
-        // updated inventory but the BLE adv hasn't refreshed yet.
+        // Seed inventory with jacko's lampId and the NEW name. The `id`
+        // is an opaque iOS-shape UUID, never a mac, so the join can only
+        // resolve via the mirrored `lampId`. Lowercase here vs the peer's
+        // uppercase to prove the match is case-insensitive.
         inventoryNotifierProvider.overrideWith(
             () => _FakeInventory(const [
                   InventoryLamp(
-                      id: 'AA:BB:CC:DD:EE:FF', name: 'jacko-test'),
+                      id: 'ios-uuid-floral-peer',
+                      lampId: 'aa:bb:cc:dd:ee:ff',
+                      name: 'jacko-test'),
                 ])),
       ],
       child: const MaterialApp(
@@ -376,7 +447,7 @@ void main() {
     // Inventory wins: row label is jacko-test, not jacko.
     expect(find.text('jacko-test'), findsOneWidget);
     expect(find.text('jacko'), findsNothing);
-    // Disposition (BD_ADDR-keyed) still resolves correctly.
+    // Disposition (lampId-keyed) still resolves correctly.
     expect(find.text('fond'), findsOneWidget);
   });
 }

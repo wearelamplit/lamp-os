@@ -1,17 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/routing/routes.dart';
 import '../../../core/theme/app_spacing.dart';
-import '../../../core/theme/brand_extras.dart';
 import '../../../core/widgets/app_snackbar.dart';
 import '../../../core/widgets/empty_state_pane.dart';
 import '../../../core/widgets/friendly_error.dart';
+import '../../../core/widgets/settings_row.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/domain/sections.dart';
-import '../../control/presentation/widgets/connecting_view.dart';
-import '../../control/presentation/widgets/connection_banner.dart';
 import '../../wisp/application/wisp_notifier.dart';
 import '../domain/expression_catalog.dart';
 import '../domain/expression_presentation.dart';
@@ -29,20 +29,16 @@ class ExpressionsScreen extends ConsumerWidget {
     final async = ref.watch(controlNotifierProvider(lampId).select(
       (a) => a.whenData((s) => s.expressions),
     ));
-    // Separate slice for the BLE link state so a mid-session disconnect
-    // can grey out interaction + surface the reconnect banner. Same
-    // pattern as ControlScreen, which is the canonical example.
-    final connState = ref.watch(controlNotifierProvider(lampId).select(
-      (a) => a.whenData(
-          (s) => (connected: s.connected, attempt: s.reconnectAttempt)),
+    // Gates the FAB below: disabled while the BLE link is mid-reconnect so
+    // tapping it doesn't queue a write against a dead connection.
+    final connected = ref.watch(controlNotifierProvider(lampId).select(
+      (a) => a.value?.connected ?? true,
     ));
-    final connected = connState.value?.connected ?? true;
-    final attempt = connState.value?.attempt ?? 0;
     final catalog = ref.watch(controlNotifierProvider(lampId)
         .select((a) => a.value?.catalog));
     return Scaffold(
       body: async.when(
-        loading: () => ConnectingView(deviceId: lampId),
+        loading: () => const SizedBox.expand(),
         error: (e, _) => FriendlyError.page(
           title: "Couldn't reach your lamp.",
           subtitle:
@@ -66,17 +62,19 @@ class ExpressionsScreen extends ConsumerWidget {
                   subtitle:
                       'Tap + to add a Glitch, Pulse, Breath or Shift effect.',
                 )
-              : ListView.builder(
-                  padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
-                  itemCount: exprSection.expressions.length,
-                  itemBuilder: (ctx, i) {
-                    final e = exprSection.expressions[i];
+              : Builder(builder: (context) {
+                  _ExpressionTile tile(ExpressionConfig e) {
+                    final descriptor = catalog?.byId(e.type);
+                    final triggerable =
+                        !effectiveContinuous(descriptor, e.parameters);
                     return _ExpressionTile(
                       lampId: lampId,
                       expression: e,
-                      descriptor: catalog?.byId(e.type),
-                      title: catalog?.byId(e.type)?.name ??
+                      descriptor: descriptor,
+                      title: descriptor?.name ??
                           (e.type.isEmpty ? '(unnamed)' : e.type),
+                      onTrigger:
+                          triggerable ? () => notifier.testExpression(e) : null,
                       onToggle: (v) async {
                         await notifier.upsertExpression(ExpressionConfig(
                           type: e.type,
@@ -88,8 +86,7 @@ class ExpressionsScreen extends ConsumerWidget {
                           parameters: e.parameters,
                         ));
                       },
-                      onConfirmDelete: () =>
-                          _confirmDelete(context, e.type),
+                      onConfirmDelete: () => _confirmDelete(context, e.type),
                       onDelete: () async {
                         await notifier.removeExpression(
                           type: e.type,
@@ -103,24 +100,33 @@ class ExpressionsScreen extends ConsumerWidget {
                           onAction: () => notifier.upsertExpression(e),
                         );
                       },
-                      onTrigger: () => notifier.testExpression(e),
                     );
-                  },
-                );
-          return Column(
-            children: [
-              if (!connected) ConnectionBanner(attempt: attempt),
-              Expanded(
-                child: IgnorePointer(
-                  ignoring: !connected,
-                  child: Opacity(
-                    opacity: connected ? 1.0 : 0.4,
-                    child: content,
-                  ),
-                ),
-              ),
-            ],
-          );
+                  }
+
+                  final triggered = <ExpressionConfig>[];
+                  final continuous = <ExpressionConfig>[];
+                  for (final e in exprSection.expressions) {
+                    (effectiveContinuous(catalog?.byId(e.type), e.parameters)
+                            ? continuous
+                            : triggered)
+                        .add(e);
+                  }
+                  return ListView(
+                    padding:
+                        const EdgeInsets.symmetric(vertical: AppSpace.sm),
+                    children: [
+                      if (triggered.isNotEmpty) ...[
+                        const SettingsGroupHeading('Triggered'),
+                        ...triggered.map(tile),
+                      ],
+                      if (continuous.isNotEmpty) ...[
+                        const SettingsGroupHeading('Continuous'),
+                        ...continuous.map(tile),
+                      ],
+                    ],
+                  );
+                });
+          return content;
         },
       ),
       floatingActionButton: async.hasValue
@@ -128,7 +134,7 @@ class ExpressionsScreen extends ConsumerWidget {
               // Pushes the friendly target + type picker; the editor is
               // reached from there with a real `(type, target)` pair, not
               // the legacy `_new` sentinel. Disabled while the BLE link is
-              // mid-reconnect — the picker would render but every write
+              // mid-reconnect: the picker would render but every write
               // from the editor would silently queue against a dead
               // connection. Hidden entirely when the notifier is in error
               // or loading state (no data to add expressions against).
@@ -140,6 +146,7 @@ class ExpressionsScreen extends ConsumerWidget {
               backgroundColor: connected
                   ? null
                   : Theme.of(context).colorScheme.onSurfaceVariant,
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
               tooltip: 'Add expression',
               child: const Icon(Icons.add),
             )
@@ -178,46 +185,78 @@ Future<bool> _confirmDelete(BuildContext context, String type) async {
   return result ?? false;
 }
 
-class _ExpressionTile extends ConsumerWidget {
+class _ExpressionTile extends ConsumerStatefulWidget {
   const _ExpressionTile({
     required this.lampId,
     required this.expression,
     required this.descriptor,
     required this.title,
+    required this.onTrigger,
     required this.onToggle,
     required this.onConfirmDelete,
     required this.onDelete,
-    required this.onTrigger,
   });
 
   final String lampId;
   final ExpressionConfig expression;
   final ExpressionDescriptor? descriptor;
   final String title;
+  final VoidCallback? onTrigger;
   final ValueChanged<bool> onToggle;
   final Future<bool> Function() onConfirmDelete;
   final Future<void> Function() onDelete;
-  final VoidCallback onTrigger;
 
-  String get _targetLabel => switch (expression.target) {
+  @override
+  ConsumerState<_ExpressionTile> createState() => _ExpressionTileState();
+}
+
+class _ExpressionTileState extends ConsumerState<_ExpressionTile> {
+  /// Disables this row's ▶ for the fired expression's cycle duration so a
+  /// transient plays out before it can be re-fired. Per-row, so rows cool
+  /// down independently.
+  Timer? _cooldownTimer;
+  bool _cooling = false;
+
+  @override
+  void dispose() {
+    _cooldownTimer?.cancel();
+    super.dispose();
+  }
+
+  void _fire() {
+    _cooldownTimer?.cancel();
+    setState(() => _cooling = true);
+    _cooldownTimer = Timer(
+      triggerCooldown(widget.descriptor, widget.expression),
+      () {
+        if (mounted) setState(() => _cooling = false);
+      },
+    );
+    widget.onTrigger?.call();
+  }
+
+  String get _targetLabel => switch (widget.expression.target) {
         1 => 'shade',
         2 => 'base',
         _ => 'both',
       };
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
+    final expression = widget.expression;
     final presentation = ExpressionPresentation.forId(expression.type);
     // Per-expression wisp-gating. Watch a tiny slice of wispStatus (just
     // `controlling`) so the row greys when a wisp takes over and un-greys
     // when the wisp releases.
     final wispControlling = ref.watch(
-      wispNotifierProvider(lampId).select(
+      wispNotifierProvider(widget.lampId).select(
         (async) => async.value?.controlling ?? false,
       ),
     );
     final muted =
-        (descriptor?.pausesWispOverride ?? false) && wispControlling;
+        (widget.descriptor?.pausesWispOverride ?? false) && wispControlling;
+    final connected = ref.watch(controlNotifierProvider(widget.lampId)
+        .select((a) => a.value?.connected ?? false));
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     return Dismissible(
@@ -229,17 +268,17 @@ class _ExpressionTile extends ConsumerWidget {
         color: colorScheme.error.withValues(alpha: 0.3),
         child: Icon(Icons.delete, color: colorScheme.error),
       ),
-      confirmDismiss: (_) => onConfirmDelete(),
-      onDismissed: (_) => onDelete(),
+      confirmDismiss: (_) => widget.onConfirmDelete(),
+      onDismissed: (_) => widget.onDelete(),
       child: Opacity(
         opacity: muted ? 0.35 : 1.0,
         child: InkWell(
-          // `push` not `go` — see the FAB callsite for the same reason.
+          // `push` not `go`; see the FAB callsite for the same reason.
           onTap: muted
               ? null
               : () => GoRouter.maybeOf(context)?.push(
                     AppRoutes.expressionEditor(
-                        lampId, expression.type, expression.target),
+                        widget.lampId, expression.type, expression.target),
                   ),
           child: Container(
             margin: const EdgeInsets.symmetric(
@@ -268,7 +307,7 @@ class _ExpressionTile extends ConsumerWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(title, style: textTheme.titleMedium),
+                      Text(widget.title, style: textTheme.titleMedium),
                       const SizedBox(height: AppSpace.xs),
                       Text(
                         _targetLabel,
@@ -279,15 +318,16 @@ class _ExpressionTile extends ConsumerWidget {
                     ],
                   ),
                 ),
-                IconButton(
-                  tooltip: 'Trigger now',
-                  icon: Icon(Icons.play_arrow,
-                      color: context.brandExtras.success),
-                  onPressed: muted ? null : onTrigger,
-                ),
+                if (widget.onTrigger != null)
+                  IconButton(
+                    icon: const Icon(Icons.play_arrow_rounded),
+                    tooltip: 'Trigger',
+                    onPressed:
+                        (connected && !muted && !_cooling) ? _fire : null,
+                  ),
                 Switch(
                   value: expression.enabled,
-                  onChanged: muted ? null : onToggle,
+                  onChanged: muted ? null : widget.onToggle,
                 ),
               ],
             ),

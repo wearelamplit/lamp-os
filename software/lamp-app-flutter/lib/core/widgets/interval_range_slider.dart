@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 /// A themed dual-grab range slider for interval bounds.
 ///
 /// Wraps Material [RangeSlider] with optional thumb labels via [labelFor].
-/// Colors inherit from [SliderTheme] / the ambient [ColorScheme] — no
+/// Colors inherit from [SliderTheme] / the ambient [ColorScheme]; no
 /// hardcoded colors.
 class IntervalRangeSlider extends StatelessWidget {
   const IntervalRangeSlider({

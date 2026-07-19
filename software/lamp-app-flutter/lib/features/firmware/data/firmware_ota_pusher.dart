@@ -1,34 +1,5 @@
-// BLE OTA pusher: drives one signed firmware image into one connected
-// lamp using the CHAR_FW_CONTROL + CHAR_FW_CHUNK characteristics.
-//
-// State machine (mirrors the lamp-side distributor enum but lives on the
-// SENDER side):
-//
-//   .start() called
-//     → write OFFER to CHAR_FW_CONTROL (with-response)
-//     → wait for ACCEPT notify on CHAR_FW_CONTROL
-//   onAccept(Accept):
-//     → stream CHUNKs to CHAR_FW_CHUNK (write-no-response)
-//     → after last chunk: write DONE to CHAR_FW_CONTROL
-//     → wait for RESULT notify
-//   onAccept(DeclineBusy / DeclineAlreadyCurrent):
-//     → completer.complete with a categorized error
-//   onReq(firstIdx, count):
-//     → rewind chunk cursor to firstIdx; the stream loop picks up
-//   onResult(Success):
-//     → completer.complete success (the lamp reboots immediately)
-//   onResult(<error>):
-//     → completer.complete with the FwResultStatus mapped to a user-
-//       facing message
-//
-// Streaming pacing:
-//   - 10 ms gap between chunks (kStreamingChunkSpacingMs on the lamp),
-//     matching the receiver's loop-task starvation concern
-//     (esp_ota_write_with_offset flash-bus contention) and the gossip-OTA
-//     mesh streaming cadence. ~80 chunks/sec sustained for the full image.
-//   - chunkSize = 200 bytes (FW_CHUNK_SIZE locked in v1).
-
 import 'dart:async';
+import 'dart:math';
 import 'dart:typed_data';
 
 import '../../../core/ble/ble_client.dart';
@@ -45,8 +16,8 @@ class FirmwareOtaResult {
   });
 
   /// True iff the lamp reported [FwResultStatus.success] and is about
-  /// to reboot. Caller should NOT attempt to keep the BLE connection
-  /// — the lamp drops it within ~100 ms.
+  /// to reboot. Caller should NOT attempt to keep the BLE connection.
+  /// The lamp drops it within ~100 ms.
   final bool success;
 
   /// Short user-facing string. On success: a "shipped" confirmation.
@@ -68,7 +39,8 @@ class FirmwareOtaPusher {
     required this.signedImage,
     required this.version,
     required this.channel,
-    required this.sha256Prefix,
+    required this.digest,
+    required this.signature,
     required this.totalLen,
     required this.footerLen,
     this.appMac = const AppSourceMac(),
@@ -83,7 +55,8 @@ class FirmwareOtaPusher {
   final Uint8List signedImage;
   final int version;
   final String channel;
-  final Uint8List sha256Prefix;
+  final Uint8List digest;
+  final Uint8List signature;
   final int totalLen;
   final int footerLen;
   final AppSourceMac appMac;
@@ -92,18 +65,43 @@ class FirmwareOtaPusher {
   final Duration acceptTimeout;
   final Duration resultTimeout;
 
-  // ── Session state ──────────────────────────────────────────────────
+  // Post-DONE recovery cap. A receiver that keeps REQ-ing missing chunks
+  // after every DONE is either on a hopeless link or replaying; bound the
+  // re-stream + re-DONE passes so a bad session can't loop forever.
+  static const int _maxRecoveryRounds = 5;
+
   Completer<FirmwareOtaResult>? _completer;
   StreamSubscription<Uint8List>? _notifySub;
   bool _streamingActive = false;
+  bool _loopRunning = false;
+  bool _accepted = false;
   int _offerSeq = 0;
-  int _chunkSeq = 0;
+  // Random seq start so the first _nextSeq() yields a nonzero offerSeq
+  // (1..0xFFFF) unique per session: RESULT carries no offerSeq on the wire,
+  // and a stale prior-session ACCEPT must fail the offerSeq correlation.
+  int _chunkSeq = Random().nextInt(0xFFFF);
   int _doneSeq  = 0;
   int _nextChunkIdx = 0;
+  // Exclusive upper bound for the current send run. Normally _totalChunks; a
+  // REQ narrows it to the requested window.
+  int _streamEndIdx = 0;
+  // Forward high-water to jump back to once a bounded rewind is served; 0 = no
+  // pending resume.
+  int _resumeIdx = 0;
+  // Monotonic forward progress (highest chunk index reached), so a REQ rewind
+  // re-sending chunks can't push the reported count past _totalChunks.
   int _chunksSent   = 0;
+  int _recoveryRounds = 0;
+  // Invalidates a superseded RESULT-timeout watchdog: each DONE bumps it, so a
+  // recovery pass's re-DONE cancels the prior pass's pending timeout.
+  int _resultTimeoutGen = 0;
   late final int _totalChunks;
-  // Target MAC. The lamp dedups frames by (sourceMac, targetMac) — the
-  // sender (us, the app) doesn't know the lamp's MAC up front. The BLE
+  // Sized to the negotiated BLE MTU at start(); rides the OFFER's chunkSize
+  // field, so the receiver's offset check (chunkIdx * offerChunkSize_) stays
+  // in lockstep with the slicing below.
+  late final int _fwChunkSize;
+  // Target MAC. The lamp dedups frames by (sourceMac, targetMac); the
+  // sender (the app) doesn't know the lamp's MAC up front. The BLE
   // path on the lamp uses the BLE connection handle for routing rather
   // than the targetMac field, so zeros here don't affect correctness.
   static final Uint8List _zeroMac = Uint8List(6);
@@ -115,13 +113,16 @@ class FirmwareOtaPusher {
       throw StateError('FirmwareOtaPusher already running');
     }
     _completer = Completer<FirmwareOtaResult>();
-    _totalChunks = (signedImage.length + fwChunkSize - 1) ~/ fwChunkSize;
 
     // Subscribe BEFORE the OFFER write so a near-instant ACCEPT can't
-    // race us.
+    // race the write. Notify-only: a replayed cached frame from a prior
+    // session would complete this one before a byte is sent.
     try {
+      _fwChunkSize = chooseFwChunkSize(ble.mtu(deviceId));
+      _totalChunks = (signedImage.length + _fwChunkSize - 1) ~/ _fwChunkSize;
       _notifySub = ble
-          .subscribe(deviceId, BleUuids.controlService, BleUuids.fwControl)
+          .subscribeNotifyOnly(
+              deviceId, BleUuids.controlService, BleUuids.fwControl)
           .listen(_onNotify, onError: _onNotifyError);
 
       _offerSeq = _nextSeq();
@@ -131,20 +132,23 @@ class FirmwareOtaPusher {
         targetMac: _zeroMac,
         version: version,
         totalLen: totalLen,
-        chunkSize: fwChunkSize,
+        chunkSize: _fwChunkSize,
         channel: channel,
-        sha256Prefix: sha256Prefix,
         footerLen: footerLen,
         totalChunks: _totalChunks,
+        digest: digest,
+        signature: signature,
       );
+      // The authenticated OFFER is 152 bytes, past MTU-3 on a low-MTU link.
       await ble.write(
         deviceId,
         BleUuids.controlService,
         BleUuids.fwControl,
         offer,
+        allowLongWrite: true,
       );
 
-      // ACCEPT timeout watchdog — we hold the completer and a stuck
+      // ACCEPT timeout watchdog. Holds the completer; a stuck
       // peer would otherwise wedge the future forever.
       Future.delayed(acceptTimeout, () {
         if (_completer != null && !_completer!.isCompleted && !_streamingActive) {
@@ -163,12 +167,21 @@ class FirmwareOtaPusher {
   void _onNotify(Uint8List data) {
     if (_completer == null || _completer!.isCompleted) return;
     final t = inspectHeader(data);
+    // REQ and RESULT carry no offerSeq on the wire, so they can't be
+    // correlated to this session; trust them only after this session's
+    // OFFER was ACCEPTed.
+    if (t != msgFwAccept && !_accepted) return;
     if (t == msgFwAccept) {
       final a = parseFwAccept(data);
       if (a == null || a.offerSeq != _offerSeq) return;
       switch (a.status) {
         case FwAcceptStatus.accept:
+          // A replayed/duplicate ACCEPT must not spin up a second concurrent
+          // streaming loop over the same session.
+          if (_accepted) break;
+          _accepted = true;
           _streamingActive = true;
+          _streamEndIdx = _totalChunks;
           unawaited(_runStreamingLoop());
           break;
         case FwAcceptStatus.declineBusy:
@@ -183,15 +196,17 @@ class FirmwareOtaPusher {
             message: 'Lamp is already running this version or newer.',
           ));
           break;
+        case FwAcceptStatus.declineUnverified:
+          _finish(const FirmwareOtaResult(
+            success: false,
+            message: 'Lamp rejected the firmware signature at offer time.',
+          ));
+          break;
       }
     } else if (t == msgFwReq) {
       final r = parseFwReq(data);
       if (r == null) return;
-      // Rewind cursor. The streaming loop respects _nextChunkIdx on
-      // every iteration, so this is enough to redirect it.
-      if (r.firstChunkIdx < _totalChunks) {
-        _nextChunkIdx = r.firstChunkIdx;
-      }
+      _onReq(r);
     } else if (t == msgFwResult) {
       final res = parseFwResult(data);
       if (res == null) return;
@@ -208,93 +223,154 @@ class FirmwareOtaPusher {
     ));
   }
 
+  // REQ handling. While a loop is running, bound the resend to
+  // [firstChunkIdx, firstChunkIdx+count) and resume forward progress after;
+  // once the loop has exited (post-DONE), spin up a recovery pass that
+  // streams exactly that run, re-sends DONE, and exits. Recovery rounds are
+  // capped so a hopeless link can't loop forever.
+  void _onReq(ParsedFwReq r) {
+    if (!_accepted || !_streamingActive) return;
+    final first = r.firstChunkIdx;
+    if (first >= _totalChunks) return;
+    final count = r.chunkCount <= 0 ? 1 : r.chunkCount;
+    final last = min(first + count, _totalChunks);
+
+    if (_loopRunning) {
+      // Ahead of the requested window: save the forward position, serve the
+      // window, then jump back to it. Behind or inside it: a plain rewind, the
+      // forward drain covers the rest.
+      if (_resumeIdx == 0 && _nextChunkIdx > last) {
+        _resumeIdx = _nextChunkIdx;
+        _streamEndIdx = last;
+      } else if (_resumeIdx != 0 && last > _streamEndIdx) {
+        _streamEndIdx = last;
+      }
+      _nextChunkIdx = first;
+      return;
+    }
+
+    // Post-DONE: no loop is running to pick up the rewind, so relaunch one
+    // bounded to the requested window.
+    if (_recoveryRounds >= _maxRecoveryRounds) {
+      _finish(const FirmwareOtaResult(
+        success: false,
+        message: 'Lamp kept requesting chunks after the update finished.',
+      ));
+      return;
+    }
+    _recoveryRounds++;
+    _nextChunkIdx = first;
+    _streamEndIdx = last;
+    _resumeIdx = 0;
+    unawaited(_runStreamingLoop());
+  }
+
   Future<void> _runStreamingLoop() async {
-    while (_streamingActive &&
-           _nextChunkIdx < _totalChunks &&
-           _completer != null && !_completer!.isCompleted) {
-      final idx = _nextChunkIdx;
-      final start = idx * fwChunkSize;
-      final end = (start + fwChunkSize) < signedImage.length
-          ? (start + fwChunkSize)
-          : signedImage.length;
-      final payload = Uint8List.sublistView(signedImage, start, end);
-      final frame = buildFwChunk(
-        seq: _nextSeq(),
+    _loopRunning = true;
+    try {
+      while (_streamingActive &&
+             _completer != null && !_completer!.isCompleted) {
+        if (_nextChunkIdx >= _streamEndIdx) {
+          if (_resumeIdx != 0) {
+            // Bounded window served; jump back to forward progress.
+            _nextChunkIdx = _resumeIdx;
+            _streamEndIdx = _totalChunks;
+            _resumeIdx = 0;
+            continue;
+          }
+          break;
+        }
+        final idx = _nextChunkIdx;
+        final start = idx * _fwChunkSize;
+        final end = (start + _fwChunkSize) < signedImage.length
+            ? (start + _fwChunkSize)
+            : signedImage.length;
+        final payload = Uint8List.sublistView(signedImage, start, end);
+        final frame = buildFwChunk(
+          seq: _nextSeq(),
+          sourceMac: appMac.bytes,
+          targetMac: _zeroMac,
+          chunkIdx: idx,
+          offset: start,
+          payload: payload,
+        );
+        try {
+          await ble.write(
+            deviceId,
+            BleUuids.controlService,
+            BleUuids.fwChunk,
+            frame,
+            withoutResponse: true,
+          );
+        } catch (e) {
+          _finish(FirmwareOtaResult(
+            success: false,
+            message: 'Chunk write failed at idx=$idx: $e',
+          ));
+          return;
+        }
+        // Only advance if the recv path didn't rewind the cursor mid-await.
+        // If an onReq landed during the write, _nextChunkIdx may be lower
+        // than (idx + 1); honor that on the next iteration.
+        if (_nextChunkIdx == idx) {
+          _nextChunkIdx = idx + 1;
+          if (_nextChunkIdx > _chunksSent) {
+            _chunksSent = _nextChunkIdx;
+            if (onProgress != null) onProgress!(_chunksSent, _totalChunks);
+          }
+        }
+        // Pace. Without this gap the BLE radio backs up on the receiving
+        // side. 10 ms = ~100 chunks/sec ceiling, above the ~50 chunks/sec
+        // floor a clean session hits once the receiver's flash IO settles.
+        if (chunkSpacingMs > 0) {
+          await Future<void>.delayed(Duration(milliseconds: chunkSpacingMs));
+        }
+      }
+      if (!_streamingActive) return;
+      if (_completer == null || _completer!.isCompleted) return;
+
+      // Requested run drained → write DONE.
+      _doneSeq = _nextSeq();
+      final done = buildFwDone(
+        seq: _doneSeq,
         sourceMac: appMac.bytes,
         targetMac: _zeroMac,
-        chunkIdx: idx,
-        offset: start,
-        payload: payload,
+        version: version,
+        totalLen: totalLen,
+        sha256Prefix: Uint8List.sublistView(digest, 0, fwSha256PrefixLen),
+        footerLen: footerLen,
       );
       try {
         await ble.write(
           deviceId,
           BleUuids.controlService,
-          BleUuids.fwChunk,
-          frame,
-          withoutResponse: true,
+          BleUuids.fwControl,
+          done,
         );
       } catch (e) {
         _finish(FirmwareOtaResult(
           success: false,
-          message: 'Chunk write failed at idx=$idx: $e',
+          message: 'DONE write failed: $e',
         ));
         return;
       }
-      // Only advance if the recv path didn't rewind us mid-await. If
-      // an onReq landed during the write, _nextChunkIdx may be lower
-      // than (idx + 1); honor that on the next iteration.
-      if (_nextChunkIdx == idx) {
-        _nextChunkIdx = idx + 1;
-        _chunksSent++;
-        if (onProgress != null) onProgress!(_chunksSent, _totalChunks);
-      }
-      // Pace. Without this gap the BLE radio backs up on the receiving
-      // side. 10 ms = ~100 chunks/sec ceiling, above the ~50 chunks/sec
-      // floor a clean session hits once the receiver's flash IO settles.
-      if (chunkSpacingMs > 0) {
-        await Future<void>.delayed(Duration(milliseconds: chunkSpacingMs));
-      }
-    }
-    if (!_streamingActive) return;
-    if (_completer == null || _completer!.isCompleted) return;
 
-    // All chunks sent → write DONE.
-    _doneSeq = _nextSeq();
-    final done = buildFwDone(
-      seq: _doneSeq,
-      sourceMac: appMac.bytes,
-      targetMac: _zeroMac,
-      version: version,
-      totalLen: totalLen,
-      sha256Prefix: sha256Prefix,
-      footerLen: footerLen,
-    );
-    try {
-      await ble.write(
-        deviceId,
-        BleUuids.controlService,
-        BleUuids.fwControl,
-        done,
-      );
-    } catch (e) {
-      _finish(FirmwareOtaResult(
-        success: false,
-        message: 'DONE write failed: $e',
-      ));
-      return;
+      // RESULT timeout. The lamp's verify + esp_ota_set_boot_partition
+      // path takes a few seconds on a healthy image; budget 40s. A recovery
+      // pass's re-DONE bumps the generation so this timeout is superseded.
+      final gen = ++_resultTimeoutGen;
+      Future.delayed(resultTimeout, () {
+        if (gen != _resultTimeoutGen) return;
+        if (_completer != null && !_completer!.isCompleted) {
+          _finish(const FirmwareOtaResult(
+            success: false,
+            message: 'Lamp did not report an OTA result within the budget.',
+          ));
+        }
+      });
+    } finally {
+      _loopRunning = false;
     }
-
-    // RESULT timeout. The lamp's verify + esp_ota_set_boot_partition
-    // path takes a few seconds on a healthy image; budget 40s.
-    Future.delayed(resultTimeout, () {
-      if (_completer != null && !_completer!.isCompleted) {
-        _finish(const FirmwareOtaResult(
-          success: false,
-          message: 'Lamp did not report an OTA result within the budget.',
-        ));
-      }
-    });
   }
 
   FirmwareOtaResult _mapResultToOtaResult(ParsedFwResult res) {
@@ -369,7 +445,7 @@ class FirmwareOtaPusher {
   }
 
   /// Cancel an in-flight session. Idempotent; safe to call from a
-  /// disposed Notifier. Does NOT send a cancel frame to the lamp — the
+  /// disposed Notifier. Does NOT send a cancel frame to the lamp. The
   /// receiver's stall-watchdog cleans up after ~chunkResendMs of no
   /// progress.
   void cancel() {
@@ -380,17 +456,17 @@ class FirmwareOtaPusher {
   }
 }
 
-/// The app's "MAC" — a 6-byte source identifier used in the OFFER/CHUNK
+/// The app's "MAC": a 6-byte source identifier used in the OFFER/CHUNK
 /// frames. The lamp's BLE OTA path doesn't authenticate against this
 /// (the BLE connection handle is the real source identity), but the
-/// frame format demands SOMETHING here. We bake a constant prefix so
+/// frame format demands SOMETHING here. Bakes in a constant prefix so
 /// logs on the lamp clearly mark which session was BLE-initiated vs
 /// gossip-mesh-initiated.
 class AppSourceMac {
   const AppSourceMac();
   Uint8List get bytes => Uint8List.fromList(const [
         // "APP" + 3 zero bytes. The first byte (0x41) is decoded as
-        // locally-administered + unicast per IEEE 802 MAC rules — never
+        // locally-administered + unicast per IEEE 802 MAC rules. Never
         // collides with a real ESP32 station MAC.
         0x41, 0x50, 0x50, 0x00, 0x00, 0x00,
       ]);

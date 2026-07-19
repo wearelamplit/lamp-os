@@ -14,7 +14,7 @@ abstract class AppRoutes {
   static String knockout(String id) => '/lamp/$id/setup/knockout';
   static String setup(String id) => '/lamp/$id/setup';
   static String info(String id) => '/lamp/$id/info';
-  // Wisp config — pushed from the WispIndicator's 5-tap-orbs gesture
+  // Wisp config: pushed from the WispIndicator's 5-tap-orbs gesture
   // on a wisp-painted lamp. Standalone screen because the Wisp tab is
   // gone from the bottom nav; the orbs themselves are the entry point.
   static String wispConfig(String id) => '/lamp/$id/wisp';

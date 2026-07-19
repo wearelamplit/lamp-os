@@ -1,11 +1,9 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
 
 import 'ble_client.dart';
-import 'uuids.dart';
 
 /// Production [BleClient] backed by flutter_blue_plus. Each public method
 /// resolves the device + service + characteristic from the plugin's live
@@ -20,7 +18,7 @@ class FbpBleClient implements BleClient {
 
   /// Single-slot mutex for pre-warm. Pre-warming holds the lamp's BLE
   /// peripheral and consumes some of its mesh airtime even at WIDE
-  /// conn-params, so we cap concurrent pre-warms at one — the latest
+  /// conn-params, so concurrent pre-warms cap at one. The latest
   /// caller waits behind the in-flight one or no-ops if it's already
   /// connected by then.
   Future<void>? _prewarmInFlight;
@@ -30,7 +28,7 @@ class FbpBleClient implements BleClient {
     if (isConnected(deviceId)) return;
     final inFlight = _prewarmInFlight;
     if (inFlight != null) {
-      // Another pre-warm is in progress. Drop this request — the
+      // Another pre-warm is in progress. Drop this request. The
       // pre-warm payoff is "have a hot connection ready when the user
       // taps"; if the in-flight pre-warm targets a different lamp, the
       // user is no worse off than today.
@@ -40,14 +38,14 @@ class FbpBleClient implements BleClient {
       try {
         await connect(deviceId);
         // Force service discovery now so the cache is hot before the
-        // user taps. _resolve() does this lazily on first I/O — we just
-        // do it eagerly here.
+        // user taps. _resolve() does this lazily on first I/O; this
+        // does it eagerly instead.
         final device = fbp.BluetoothDevice(
           remoteId: fbp.DeviceIdentifier(deviceId),
         );
         _serviceCache[deviceId] = await device.discoverServices();
       } catch (_) {
-        // Best-effort — never let a pre-warm failure surface. If the
+        // Best-effort: never let a pre-warm failure surface. If the
         // user does end up tapping this lamp, the normal connect path
         // will re-try and report any real failure.
         try {
@@ -65,12 +63,12 @@ class FbpBleClient implements BleClient {
     final device = fbp.BluetoothDevice(
       remoteId: fbp.DeviceIdentifier(deviceId),
     );
-    // Scan/connect coex: we do NOT explicitly pause the background scan
+    // Scan/connect coex: does NOT explicitly pause the background scan
     // here. flutter_blue_plus serializes scan and
     // connect operations internally on both Android (BluetoothLeScanner
     // pause during gatt.connect) and iOS (CoreBluetooth's
-    // centralManager will defer scan callbacks during a connect-in-
-    // progress). If we ever see GATT MTU exchange failures correlated
+    // centralManager defers scan callbacks during a connect-in-
+    // progress). If GATT MTU exchange failures ever correlate
     // with continuous scanning (the cited iOS edge case), revisit by
     // calling `FlutterBluePlus.stopScan()` here + a hook to re-issue
     // start in NearbyLampsNotifier after `disconnect()`. Until then,
@@ -83,21 +81,21 @@ class FbpBleClient implements BleClient {
       timeout: const Duration(seconds: 8),
     );
     // Ask Android for a tighter connection interval (11.25-15ms vs the
-    // default ~49ms) — wraps BluetoothGatt.requestConnectionPriority(
+    // default ~49ms), wraps BluetoothGatt.requestConnectionPriority(
     // CONNECTION_PRIORITY_HIGH). Without this, slider-rate live writes
     // ceiling at ~11Hz (one write per pair of connection events) even
     // with WRITE_NR and a rate-paced WriteCoalescer. HIGH costs the
     // phone some battery while connected, but the lamp is line-powered
-    // and the user is actively interacting — fair trade. iOS ignores;
+    // and the user is actively interacting: fair trade. iOS ignores;
     // some Androids decline; either way swallow the error.
     try {
       await device.requestConnectionPriority(
         connectionPriorityRequest: fbp.ConnectionPriority.high,
       );
     } catch (_) {
-      // best-effort — not all platforms honor this
+      // best-effort: not all platforms honor this
     }
-    // Drop our Dart-side service cache — handles may have changed since
+    // Drop the Dart-side service cache. Handles may have changed since
     // last connect (e.g. firmware re-registered the GATT database), so
     // the next _resolve() does a fresh discoverServices().
     _serviceCache.remove(deviceId);
@@ -119,6 +117,14 @@ class FbpBleClient implements BleClient {
     );
   }
 
+  @override
+  int mtu(String deviceId) {
+    for (final d in fbp.FlutterBluePlus.connectedDevices) {
+      if (d.remoteId.str == deviceId) return d.mtuNow;
+    }
+    return 0;
+  }
+
   Future<fbp.BluetoothCharacteristic> _resolve(
     String deviceId,
     String serviceUuid,
@@ -130,7 +136,7 @@ class FbpBleClient implements BleClient {
           orElse: () => throw BleNotFound('device $deviceId not connected'),
         );
 
-    // Reuse the cached service list when present — discoverServices() is a
+    // Reuse the cached service list when present. discoverServices() is a
     // multi-round-trip GATT exchange and re-running it per write floods the
     // link. Only call it on a cold cache (first I/O after connect).
     final services = _serviceCache[deviceId] ??=
@@ -147,8 +153,8 @@ class FbpBleClient implements BleClient {
     return ch;
   }
 
-  /// Inspect an fbp exception and rethrow it as one of our typed
-  /// exceptions when the shape is unambiguous. Centralised so the
+  /// Inspect an fbp exception and rethrow it as one of the typed
+  /// exceptions here when the shape is unambiguous. Centralised so the
   /// string-match for fbp's reworded error messages lives in exactly
   /// ONE place at the platform boundary.
   Never _classifyAndRethrow(String deviceId, Object e) {
@@ -204,37 +210,21 @@ class FbpBleClient implements BleClient {
   Stream<Uint8List> subscribe(String d, String s, String c) async* {
     final ch = await _resolve(d, s, c);
     await ch.setNotifyValue(true);
-    yield* ch.lastValueStream.map(Uint8List.fromList);
+    // lastValueStream replays fbp's cached value on listen (the cache
+    // persists across disconnects) and echoes this app's own writes.
+    yield* capNotifyBytes(ch.lastValueStream);
   }
 
   @override
-  Future<Uint8List> readSection(String deviceId, String name) async {
-    try {
-      // Write the section name to PAGE_CTRL. The firmware snapshots the
-      // section into the conn slot + resets a cursor. CTRL is a normal
-      // write-with-response so we know the snapshot is ready before
-      // the first DATA read fires.
-      await write(
-        deviceId,
-        BleUuids.controlService,
-        BleUuids.pageCtrl,
-        Uint8List.fromList(utf8.encode(name)),
-      );
-      // Pull DATA chunks until the lamp's empty end-of-snapshot chunk. The
-      // read-until-empty accumulation (and its runaway cap) lives in
-      // readPagesUntilEmpty so it's unit-testable without a live link. fbp 2.x
-      // serializes GATT ops per-device, so our back-to-back write/reads can't
-      // interleave on the wire.
-      return readPagesUntilEmpty(
-        deviceId,
-        () => read(deviceId, BleUuids.controlService, BleUuids.pageData),
-      );
-    } on BleDisconnectedException {
-      // Mid-stream drop. Partial bytes are discarded; the surrounding
-      // reconnect ladder re-runs the section sweep.
-      rethrow;
-    }
+  Stream<Uint8List> subscribeNotifyOnly(String d, String s, String c) async* {
+    final ch = await _resolve(d, s, c);
+    await ch.setNotifyValue(true);
+    yield* capNotifyBytes(ch.onValueReceived);
   }
+
+  @override
+  Future<Uint8List> readSection(String deviceId, String name) =>
+      readSectionVia(this, deviceId, name);
 
   @override
   Stream<bool> watchConnected(String deviceId) {
@@ -250,13 +240,13 @@ class FbpBleClient implements BleClient {
     final device = fbp.BluetoothDevice(
       remoteId: fbp.DeviceIdentifier(deviceId),
     );
-    // Force-release any handles fbp holds on this device. Clearing our
-    // own service cache too — we'll re-discover on the next connect.
+    // Force-release any handles fbp holds on this device. Clears the
+    // service cache too; re-discovers on the next connect.
     _serviceCache.remove(deviceId);
     try {
       await device.disconnect();
     } catch (_) {
-      // already disconnected, or fbp didn't have a handle — both fine.
+      // already disconnected, or fbp didn't have a handle: both fine.
     }
     // Give the Android BT stack a beat to actually release the
     // gatts_if slot before the next connect. Empirically, < 500ms

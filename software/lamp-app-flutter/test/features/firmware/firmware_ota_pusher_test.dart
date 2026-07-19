@@ -25,7 +25,11 @@ class RecordedWrite {
 class NotifyableBle implements BleClient {
   final Set<String> _connected = {};
   final Map<String, StreamController<Uint8List>> _streams = {};
+  final Map<String, Uint8List> _lastValue = {};
   final List<RecordedWrite> writes = [];
+
+  /// Test-settable negotiated MTU. 0 (default) = unknown.
+  int mtuValue = 0;
 
   String _key(String d, String s, String c) => '$d|$s|$c';
 
@@ -41,8 +45,15 @@ class NotifyableBle implements BleClient {
   /// continues.
   Future<void> simulateNotify(
       String d, String s, String c, Uint8List bytes) async {
+    _lastValue[_key(d, s, c)] = bytes;
     _ensure(d, s, c).add(bytes);
     await Future<void>.delayed(Duration.zero);
+  }
+
+  /// Seed the replay cache without emitting — models fbp's static last-value
+  /// cache surviving from a previous session.
+  void seedLastValue(String d, String s, String c, Uint8List bytes) {
+    _lastValue[_key(d, s, c)] = bytes;
   }
 
   @override
@@ -62,6 +73,9 @@ class NotifyableBle implements BleClient {
   bool isConnected(String deviceId) => _connected.contains(deviceId);
 
   @override
+  int mtu(String deviceId) => mtuValue;
+
+  @override
   Future<Uint8List> read(String d, String s, String c) async =>
       throw UnimplementedError();
 
@@ -76,8 +90,21 @@ class NotifyableBle implements BleClient {
     writes.add(RecordedWrite(s, c, v, withoutResponse: withoutResponse));
   }
 
+  // Mimics fbp's lastValueStream: replays the cached value on listen.
   @override
   Stream<Uint8List> subscribe(String d, String s, String c) {
+    if (!_connected.contains(d)) throw BleNotConnected(d);
+    final cached = _lastValue[_key(d, s, c)];
+    final live = _ensure(d, s, c).stream;
+    if (cached == null) return live;
+    return () async* {
+      yield cached;
+      yield* live;
+    }();
+  }
+
+  @override
+  Stream<Uint8List> subscribeNotifyOnly(String d, String s, String c) {
     if (!_connected.contains(d)) throw BleNotConnected(d);
     return _ensure(d, s, c).stream;
   }
@@ -147,6 +174,17 @@ Uint8List makeSignedImage({int signedRegion = 600}) {
   return out;
 }
 
+int chunkWriteCount(NotifyableBle ble, int chunkIdx) {
+  return ble.writes.where((w) {
+    if (w.charUuid != BleUuids.fwChunk) return false;
+    final view = ByteData.view(w.value.buffer, w.value.offsetInBytes);
+    return view.getUint16(18, Endian.little) == chunkIdx;
+  }).length;
+}
+
+int doneWriteCount(NotifyableBle ble) =>
+    ble.writes.where((w) => inspectHeader(w.value) == msgFwDone).length;
+
 FirmwareOtaPusher makePusher(NotifyableBle ble, Uint8List image) {
   return FirmwareOtaPusher(
     ble: ble,
@@ -154,7 +192,8 @@ FirmwareOtaPusher makePusher(NotifyableBle ble, Uint8List image) {
     signedImage: image,
     version: 0x00010205,
     channel: 'stable',
-    sha256Prefix: Uint8List.fromList([1, 2, 3, 4, 5, 6, 7, 8]),
+    digest: Uint8List(32),
+    signature: Uint8List(64),
     totalLen: image.length,
     footerLen: 96,
     chunkSpacingMs: 0, // tests don't pace
@@ -223,6 +262,50 @@ void main() {
     expect(result.lampReportedVersion, equals(0x00010205));
   });
 
+  test('sizes chunks to a negotiated MTU; OFFER chunkSize matches the slicing', () async {
+    final ble = NotifyableBle();
+    ble.mtuValue = 512; // chooseFwChunkSize(512) == 483
+    await ble.connect('lamp-A');
+
+    final image = makeSignedImage(signedRegion: 1000); // 3 chunks @ 483
+    final pusher = makePusher(ble, image);
+    final pendingResult = pusher.start();
+    await Future<void>.delayed(Duration.zero);
+
+    final offerWrite = ble.writes.first;
+    final offerView = ByteData.view(offerWrite.value.buffer);
+    expect(offerView.getUint16(fwOfferOffChunkSize, Endian.little), equals(483));
+    final offerSeq = offerView.getUint16(4, Endian.little);
+
+    await ble.simulateNotify(
+      'lamp-A',
+      BleUuids.controlService,
+      BleUuids.fwControl,
+      makeAccept(
+          seq: 0xAA02,
+          offerSeq: offerSeq,
+          version: 0x00010205,
+          status: FwAcceptStatus.accept),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    final chunkWrites =
+        ble.writes.where((w) => w.charUuid == BleUuids.fwChunk).toList();
+    expect(chunkWrites.length, equals(3));
+    expect(chunkWrites[0].value.length, equals(fwChunkFixedSize + 483));
+    expect(chunkWrites[1].value.length, equals(fwChunkFixedSize + 483));
+    expect(chunkWrites[2].value.length, equals(fwChunkFixedSize + (image.length - 2 * 483)));
+
+    await ble.simulateNotify(
+      'lamp-A',
+      BleUuids.controlService,
+      BleUuids.fwControl,
+      makeResult(seq: 0xBB02, status: FwResultStatus.success, version: 0x00010205),
+    );
+    final result = await pendingResult;
+    expect(result.success, isTrue);
+  });
+
   test('ACCEPT(DeclineBusy) ends with success=false + busy message', () async {
     final ble = NotifyableBle();
     await ble.connect('lamp-A');
@@ -245,6 +328,33 @@ void main() {
     final result = await pending;
     expect(result.success, isFalse);
     expect(result.message, contains('Another update'));
+  });
+
+  test('ACCEPT(DeclineUnverified) ends with success=false + signature-rejected message', () async {
+    final ble = NotifyableBle();
+    await ble.connect('lamp-A');
+
+    final image = makeSignedImage(signedRegion: 200);
+    final pusher = makePusher(ble, image);
+    final pending = pusher.start();
+    await Future<void>.delayed(Duration.zero);
+
+    final offerSeq = ByteData.view(ble.writes.first.value.buffer)
+        .getUint16(4, Endian.little);
+    await ble.simulateNotify(
+      'lamp-A',
+      BleUuids.controlService,
+      BleUuids.fwControl,
+      makeAccept(
+          seq: 1,
+          offerSeq: offerSeq,
+          version: 0x00010205,
+          status: FwAcceptStatus.declineUnverified),
+    );
+
+    final result = await pending;
+    expect(result.success, isFalse);
+    expect(result.message, contains('signature'));
   });
 
   test('ACCEPT(DeclineAlreadyCurrent) reports success=true + already-current message', () async {
@@ -282,7 +392,8 @@ void main() {
       signedImage: image,
       version: 0x00010205,
       channel: 'stable',
-      sha256Prefix: Uint8List.fromList([1, 2, 3, 4, 5, 6, 7, 8]),
+      digest: Uint8List(32),
+      signature: Uint8List(64),
       totalLen: image.length,
       footerLen: 96,
       chunkSpacingMs: 20,
@@ -364,6 +475,220 @@ void main() {
     final result = await pending;
     expect(result.success, isFalse);
     expect(result.message, contains('signature'));
+  });
+
+  test('stale cached RESULT replayed at subscribe time does not complete the session', () async {
+    final ble = NotifyableBle();
+    await ble.connect('lamp-A');
+    // A previous session's RESULT(success) sits in the platform's
+    // last-value cache when the second pusher subscribes.
+    ble.seedLastValue(
+      'lamp-A',
+      BleUuids.controlService,
+      BleUuids.fwControl,
+      makeResult(seq: 7, status: FwResultStatus.success, version: 0x00010204),
+    );
+
+    final pusher = makePusher(ble, makeSignedImage(signedRegion: 200));
+    var completed = false;
+    final pending = pusher.start();
+    unawaited(pending.whenComplete(() => completed = true));
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    expect(completed, isFalse,
+        reason: 'replayed prior-session RESULT must not finish a fresh session');
+    pusher.cancel();
+    await pending;
+  });
+
+  test('RESULT notify before ACCEPT is ignored; session still completes normally', () async {
+    final ble = NotifyableBle();
+    await ble.connect('lamp-A');
+    final pusher = makePusher(ble, makeSignedImage(signedRegion: 200));
+    var completed = false;
+    final pending = pusher.start();
+    unawaited(pending.whenComplete(() => completed = true));
+    await Future<void>.delayed(Duration.zero);
+
+    // Stale RESULT arrives before any ACCEPT — uncorrelatable, must be dropped.
+    await ble.simulateNotify(
+      'lamp-A',
+      BleUuids.controlService,
+      BleUuids.fwControl,
+      makeResult(seq: 7, status: FwResultStatus.success, version: 0x00010204),
+    );
+    expect(completed, isFalse);
+
+    final offerSeq = ByteData.view(ble.writes.first.value.buffer)
+        .getUint16(4, Endian.little);
+    await ble.simulateNotify(
+      'lamp-A',
+      BleUuids.controlService,
+      BleUuids.fwControl,
+      makeAccept(
+          seq: 1,
+          offerSeq: offerSeq,
+          version: 0x00010205,
+          status: FwAcceptStatus.accept),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    await ble.simulateNotify(
+      'lamp-A',
+      BleUuids.controlService,
+      BleUuids.fwControl,
+      makeResult(seq: 8, status: FwResultStatus.success, version: 0x00010205),
+    );
+    final result = await pending;
+    expect(result.success, isTrue);
+    expect(result.lampReportedVersion, equals(0x00010205));
+  });
+
+  test('ACCEPT with mismatched offerSeq is ignored; offerSeq is nonzero', () async {
+    final ble = NotifyableBle();
+    await ble.connect('lamp-A');
+    final pusher = makePusher(ble, makeSignedImage(signedRegion: 200));
+    final pending = pusher.start();
+    await Future<void>.delayed(Duration.zero);
+
+    final offerSeq = ByteData.view(ble.writes.first.value.buffer)
+        .getUint16(4, Endian.little);
+    expect(offerSeq, isNot(0));
+
+    await ble.simulateNotify(
+      'lamp-A',
+      BleUuids.controlService,
+      BleUuids.fwControl,
+      makeAccept(
+          seq: 1,
+          offerSeq: (offerSeq + 1) & 0xFFFF,
+          version: 0x00010205,
+          status: FwAcceptStatus.accept),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    expect(ble.writes.where((w) => w.charUuid == BleUuids.fwChunk), isEmpty,
+        reason: 'a prior-session ACCEPT must not start streaming');
+    pusher.cancel();
+    await pending;
+  });
+
+  test('stale REQ after DONE re-streams the run and re-sends DONE', () async {
+    final ble = NotifyableBle();
+    await ble.connect('lamp-A');
+    final image = makeSignedImage(signedRegion: 600);
+    final pusher = makePusher(ble, image);
+    final pending = pusher.start();
+    await Future<void>.delayed(Duration.zero);
+
+    final offerSeq = ByteData.view(ble.writes.first.value.buffer)
+        .getUint16(4, Endian.little);
+    await ble.simulateNotify(
+      'lamp-A',
+      BleUuids.controlService,
+      BleUuids.fwControl,
+      makeAccept(
+          seq: 1, offerSeq: offerSeq, version: 0x00010205, status: FwAcceptStatus.accept),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    expect(doneWriteCount(ble), equals(1));
+    final chunk1Before = chunkWriteCount(ble, 1);
+
+    // Receiver missed chunk 1; REQs it after DONE (loop already exited).
+    await ble.simulateNotify(
+      'lamp-A',
+      BleUuids.controlService,
+      BleUuids.fwControl,
+      makeReq(seq: 50, firstIdx: 1, count: 1),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    expect(chunkWriteCount(ble, 1), greaterThan(chunk1Before),
+        reason: 'chunk 1 must re-stream on a post-DONE REQ');
+    expect(doneWriteCount(ble), equals(2),
+        reason: 'recovery pass must re-send DONE');
+
+    await ble.simulateNotify(
+      'lamp-A',
+      BleUuids.controlService,
+      BleUuids.fwControl,
+      makeResult(seq: 60, status: FwResultStatus.success, version: 0x00010205),
+    );
+    final result = await pending;
+    expect(result.success, isTrue);
+  });
+
+  test('post-DONE REQ recovery is capped', () async {
+    final ble = NotifyableBle();
+    await ble.connect('lamp-A');
+    final pusher = makePusher(ble, makeSignedImage(signedRegion: 600));
+    final pending = pusher.start();
+    await Future<void>.delayed(Duration.zero);
+    final offerSeq = ByteData.view(ble.writes.first.value.buffer)
+        .getUint16(4, Endian.little);
+    await ble.simulateNotify(
+      'lamp-A',
+      BleUuids.controlService,
+      BleUuids.fwControl,
+      makeAccept(
+          seq: 1, offerSeq: offerSeq, version: 0x00010205, status: FwAcceptStatus.accept),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    // Six post-DONE REQs. Five recovery passes run; the sixth is over budget
+    // and fails the session instead of looping forever.
+    for (var i = 0; i < 6; ++i) {
+      await ble.simulateNotify(
+        'lamp-A',
+        BleUuids.controlService,
+        BleUuids.fwControl,
+        makeReq(seq: 50 + i, firstIdx: 1, count: 1),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+
+    final result = await pending;
+    expect(result.success, isFalse);
+    expect(result.message, contains('after the update finished'));
+  });
+
+  test('replayed ACCEPT does not start a second streaming loop', () async {
+    final ble = NotifyableBle();
+    await ble.connect('lamp-A');
+    final image = makeSignedImage(signedRegion: 600);
+    final expectedChunks = (image.length + fwChunkSize - 1) ~/ fwChunkSize;
+    final pusher = makePusher(ble, image);
+    final pending = pusher.start();
+    await Future<void>.delayed(Duration.zero);
+
+    final offerSeq = ByteData.view(ble.writes.first.value.buffer)
+        .getUint16(4, Endian.little);
+    final accept = makeAccept(
+        seq: 1, offerSeq: offerSeq, version: 0x00010205, status: FwAcceptStatus.accept);
+    await ble.simulateNotify(
+        'lamp-A', BleUuids.controlService, BleUuids.fwControl, accept);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    final chunksAfterFirst =
+        ble.writes.where((w) => w.charUuid == BleUuids.fwChunk).length;
+    expect(chunksAfterFirst, equals(expectedChunks));
+
+    // A duplicate/replayed ACCEPT with the same offerSeq must be ignored.
+    await ble.simulateNotify(
+        'lamp-A', BleUuids.controlService, BleUuids.fwControl, accept);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    expect(ble.writes.where((w) => w.charUuid == BleUuids.fwChunk).length,
+        equals(chunksAfterFirst),
+        reason: 'a replayed ACCEPT must not re-stream the image');
+
+    await ble.simulateNotify(
+      'lamp-A',
+      BleUuids.controlService,
+      BleUuids.fwControl,
+      makeResult(seq: 9, status: FwResultStatus.success, version: 0x00010205),
+    );
+    final result = await pending;
+    expect(result.success, isTrue);
   });
 
   test('cancel() ends the future with a cancelled message', () async {

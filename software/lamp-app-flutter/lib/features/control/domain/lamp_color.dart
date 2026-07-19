@@ -1,3 +1,5 @@
+import 'dart:math' show max, min, sqrt;
+
 import 'package:flutter/painting.dart' show Color;
 
 /// A lamp color carries an explicit white channel alongside RGB. The firmware
@@ -19,6 +21,50 @@ class LampColor {
   /// colors yet" baseline. Kept on `LampColor` so both
   /// `ControlNotifier` and `ControlScreen` can share the same instance.
   static const black = LampColor(r: 0, g: 0, b: 0, w: 0);
+
+  /// Single representative color for a gradient, blended in linear light
+  /// (de-gamma square, mean, re-gamma sqrt) with a chroma guard that keeps a
+  /// complementary pair from collapsing to grey. Matches the firmware's
+  /// `lampos::led::blendedIdentity`; keep the two in lockstep.
+  static LampColor blendedIdentity(List<LampColor> stops) {
+    if (stops.isEmpty) return black;
+    if (stops.length == 1) return stops.first;
+    const guard = 0.5;
+    var rl = 0.0, gl = 0.0, bl = 0.0, wl = 0.0, inChroma = 0.0;
+    for (final s in stops) {
+      final r = s.r / 255, g = s.g / 255, b = s.b / 255, w = s.w / 255;
+      rl += r * r;
+      gl += g * g;
+      bl += b * b;
+      wl += w * w;
+      inChroma += max(r, max(g, b)) - min(r, min(g, b));
+    }
+    final inv = 1 / stops.length;
+    var r = sqrt(rl * inv), g = sqrt(gl * inv), b = sqrt(bl * inv);
+    final w = sqrt(wl * inv);
+    inChroma *= inv;
+    final mx = max(r, max(g, b)), mn = min(r, min(g, b));
+    final chroma = mx - mn, target = guard * inChroma;
+    if (inChroma > 0 && chroma < target) {
+      final mid = (mx + mn) / 2;
+      var hr = r, hg = g, hb = b;
+      if (chroma <= 1e-4) {
+        hr = stops.first.r / 255;
+        hg = stops.first.g / 255;
+        hb = stops.first.b / 255;
+      }
+      final hmx = max(hr, max(hg, hb)), hmn = min(hr, min(hg, hb));
+      final hc = hmx - hmn, hmid = (hmx + hmn) / 2;
+      if (hc > 1e-4) {
+        final k = target / hc;
+        r = mid + (hr - hmid) * k;
+        g = mid + (hg - hmid) * k;
+        b = mid + (hb - hmid) * k;
+      }
+    }
+    int q(double v) => (v.clamp(0.0, 1.0) * 255).round();
+    return LampColor(r: q(r), g: q(g), b: q(b), w: q(w));
+  }
 
   factory LampColor.fromHex(String input) {
     var s = input.startsWith('#') ? input.substring(1) : input;
@@ -57,14 +103,13 @@ class LampColor {
   }
 
   /// Blend the warm-white channel into RGB for on-screen rendering.
-  /// Mirrors the old Vue ColorPreview algorithm exactly: a `#FABB3E`
-  /// warm-white overlay composited onto the RGB layer using SCREEN
-  /// blend (`1 - (1-a)(1-b)`), not alpha blend. Screen brightens
-  /// additively — matching how the physical W LED adds light on top
+  /// Composites a `#FABB3E` warm-white overlay onto the RGB layer using
+  /// SCREEN blend (`1 - (1-a)(1-b)`), not alpha blend. Screen brightens
+  /// additively, matching how the physical W LED adds light on top
   /// of the RGB LEDs. Alpha blend muddies bright colors toward the
   /// orange tint instead of brightening them.
   ///
-  /// Algorithm (ported from software/lamp-app/src/lib/colorUtils.ts):
+  /// Algorithm:
   ///   - tint = #FABB3E
   ///   - opacity = (W / 255) × (headroom / 765)
   ///       where headroom = 765 − (R+G+B)
@@ -96,8 +141,8 @@ class LampColor {
   }
 
   /// Flutter [Color] with the warm-white channel blended in.
-  /// Phone screens can't reproduce the physical W LED directly so
-  /// we approximate it with a warm-tone overlay on RGB.
+  /// Phone screens can't reproduce the physical W LED directly, so
+  /// this approximates it with a warm-tone overlay on RGB.
   Color toSwatch() {
     final c = blendedRgb;
     return Color.fromARGB(0xFF, c.r, c.g, c.b);

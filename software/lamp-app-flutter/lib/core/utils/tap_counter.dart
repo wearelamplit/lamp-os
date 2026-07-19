@@ -1,7 +1,6 @@
 /// Counts taps inside a sliding window and fires [onTriggered] once
 /// [count] taps land within [window]. Used for the "tap the lamplit
-/// logo 5 times" gesture that unlocks advanced settings — ported from
-/// the Vue app's `useTapCounter.ts`.
+/// logo 5 times" gesture that unlocks advanced settings.
 class TapCounter {
   TapCounter({
     required this.count,

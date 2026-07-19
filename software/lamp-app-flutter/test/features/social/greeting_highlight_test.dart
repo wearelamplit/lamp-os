@@ -47,7 +47,6 @@ class _GreetingFakeControl extends ControlNotifier {
         ),
         base: const BaseSection(
           px: 35,
-          ac: 0,
           bpp: 4,
           byteOrder: 'GRBW',
           colors: [],
@@ -59,7 +58,14 @@ class _GreetingFakeControl extends ControlNotifier {
           byteOrder: 'GRBW',
           colors: [],
         ),
-        home: const HomeSection(ssid: '', brightness: 60, enabled: false),
+        home: const HomeSection(
+          ssid: '',
+          brightness: 60,
+          enabled: false,
+          networkBound: false,
+          socialDisabled: true,
+          disabledExpressionTypes: ['glitchy'],
+        ),
         expressions: const ExpressionsSection(expressions: []),
         greeting: _greeting,
       );
@@ -87,7 +93,7 @@ Future<void> _seedDispositions(
   );
 }
 
-// Two peer BD_ADDRs with distinct base colors so we can differentiate tints.
+// Two peer lampIds with distinct base colors so we can differentiate tints.
 // Peer A: red-ish base (0xFF0000 -> Color(0xFFFF0000))
 // Peer B: blue-ish base (0x0000FF -> Color(0xFF0000FF))
 const _peerA = 'AA:BB:CC:DD:EE:FF';
@@ -108,19 +114,17 @@ Widget _buildApp(
           () => _FakeLampNearbyPeers(const [
             LampNearbyPeer(
               name: 'peer-a',
-              bdAddr: _peerA,
+              lampId: _peerA,
               baseRgbw: _peerABaseRgbw,
               shadeRgbw: [0, 0, 0, 0],
               rssi: -72,
-              proximity: 0,
             ),
             LampNearbyPeer(
               name: 'peer-b',
-              bdAddr: _peerB,
+              lampId: _peerB,
               baseRgbw: _peerBBaseRgbw,
               shadeRgbw: [0, 0, 0, 0],
               rssi: -65,
-              proximity: 1,
             ),
           ]),
         ),

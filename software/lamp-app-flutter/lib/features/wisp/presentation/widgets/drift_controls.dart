@@ -34,7 +34,7 @@ class DriftControls extends ConsumerStatefulWidget {
 
 class _DriftControlsState extends ConsumerState<DriftControls> {
   // Local slider state is authoritative after mount; the wisp echoes back
-  // what we write, so a re-seed on every status change would fight an
+  // the written value, so a re-seed on every status change would fight an
   // in-progress drag.
   late double _pos;
   late int _fadePct;

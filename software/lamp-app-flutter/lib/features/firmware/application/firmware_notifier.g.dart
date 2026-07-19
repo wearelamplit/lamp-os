@@ -58,7 +58,7 @@ final class FirmwareNotifierProvider
   }
 }
 
-String _$firmwareNotifierHash() => r'cc19f38b57bd2234c4f329aa6770425b518c4327';
+String _$firmwareNotifierHash() => r'6e98ecf8d438141c4bd20b5ae62ab4ac6e4f1d53';
 
 final class FirmwareNotifierFamily extends $Family
     with

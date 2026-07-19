@@ -1,5 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart';
+
+import 'uuids.dart';
 
 
 class BleNotFound implements Exception {
@@ -54,6 +59,21 @@ class BleReadTooLarge implements Exception {
 /// probe.
 const int kBleMaxReadBytes = 4096;
 
+/// Applies [kBleMaxReadBytes] to a notify stream, dropping an oversized frame
+/// (not throwing) so one bad payload keeps the subscription alive. The read()
+/// path throws because a caller awaits a single value; a stream must survive.
+/// Real BLE notifies are MTU-bounded, but the dev bridge relays them over a
+/// WebSocket that is not.
+Stream<Uint8List> capNotifyBytes(Stream<List<int>> src) {
+  return src.where((b) {
+    if (b.length > kBleMaxReadBytes) {
+      debugPrint('[ble] dropped oversized notify: ${b.length} > $kBleMaxReadBytes');
+      return false;
+    }
+    return true;
+  }).map(Uint8List.fromList);
+}
+
 /// True when [e] looks like a disconnect / link-dropped error from any source
 /// (this module's typed exception, fbp's various reworded "disconnected" /
 /// "not connected" messages). Use only at boundaries that compose other
@@ -77,8 +97,8 @@ const int kBleMaxSectionBytes = 65536;
 /// lamp's end-of-snapshot signal), concatenating them. Reading-until-empty is
 /// MTU-agnostic: a short NON-final chunk must NOT be mistaken for the end (the
 /// bug when this keyed off a hardcoded "short = done" threshold). Throws
-/// [BleReadTooLarge] if the total passes [cap] before the terminator arrives —
-/// a wedged firmware cursor otherwise loops forever / OOMs the caller.
+/// [BleReadTooLarge] if the total passes [cap] before the terminator arrives.
+/// A wedged firmware cursor otherwise loops forever / OOMs the caller.
 Future<Uint8List> readPagesUntilEmpty(
   String deviceId,
   Future<Uint8List> Function() nextChunk, {
@@ -93,6 +113,38 @@ Future<Uint8List> readPagesUntilEmpty(
   }
 }
 
+/// Serializes page-protocol sessions per device. The firmware keeps ONE
+/// shared page snapshot + cursor per connection, so two overlapping
+/// CTRL+DATA pairs corrupt each other (a CTRL write mid-DATA-drain resets
+/// the cursor and the in-flight reader pulls the other section's bytes).
+final Map<String, Future<void>> _pageSessions = {};
+
+/// Reads a named page-protocol section from any [BleClient]: write the section
+/// name to CHAR_PAGE_CTRL, then pull CHAR_PAGE_DATA chunks until the empty
+/// end-of-snapshot chunk. Serialized per [deviceId] so a CTRL write can never
+/// interleave into another section's DATA drain on the same connection.
+Future<Uint8List> readSectionVia(
+  BleClient client,
+  String deviceId,
+  String name,
+) {
+  Future<Uint8List> run() => client
+      .write(deviceId, BleUuids.controlService, BleUuids.pageCtrl,
+          Uint8List.fromList(utf8.encode(name)))
+      .then((_) => readPagesUntilEmpty(
+            deviceId,
+            () => client.read(deviceId, BleUuids.controlService, BleUuids.pageData),
+          ));
+
+  final prior = _pageSessions[deviceId] ?? Future<void>.value();
+  final result = prior.then((_) => run());
+  // Chain the next session behind this one regardless of outcome; a failure
+  // must not wedge the queue.
+  _pageSessions[deviceId] =
+      result.then((_) {}, onError: (_) {});
+  return result;
+}
+
 abstract class BleClient {
   Future<void> connect(String deviceId);
   Future<void> disconnect(String deviceId);
@@ -105,6 +157,12 @@ abstract class BleClient {
   /// keep at most ONE prewarm in flight across all device ids: it holds the
   /// lamp's peripheral and degrades mesh airtime, so fanning out hurts the fleet.
   Future<void> prewarm(String deviceId) async {}
+
+  /// Best-effort current negotiated ATT MTU for [deviceId], or 0 if
+  /// unknown (not connected yet, negotiation still in flight, or the
+  /// transport doesn't expose one). Callers must treat 0 as "fall back
+  /// to the safe baseline chunk size", never as a literal MTU.
+  int mtu(String deviceId) => 0;
 
   Future<Uint8List> read(String deviceId, String serviceUuid, String charUuid);
   /// Writes [value] to the characteristic.
@@ -133,6 +191,16 @@ abstract class BleClient {
     String charUuid,
   );
 
+  /// Like [subscribe], but emits ONLY frames the lamp pushes: no cached
+  /// last-value replay on listen, no echo of the app's own writes. Use for
+  /// request/response characteristics (OTA control) where a replayed stale
+  /// frame reads as a live response.
+  Stream<Uint8List> subscribeNotifyOnly(
+    String deviceId,
+    String serviceUuid,
+    String charUuid,
+  );
+
   /// Reads a named section from the lamp via the page protocol. Writes
   /// the section name to CHAR_PAGE_CTRL, then loops reading CHAR_PAGE_DATA
   /// until an empty chunk arrives (the lamp's end-of-snapshot signal).
@@ -146,7 +214,7 @@ abstract class BleClient {
   ///
   /// Throws [BleDisconnectedException] mid-stream if the link drops
   /// between the CTRL write and the final DATA read. Partial bytes are
-  /// discarded — the caller should let the surrounding reconnect ladder
+  /// discarded; the caller should let the surrounding reconnect ladder
   /// retry the whole section.
   Future<Uint8List> readSection(String deviceId, String name);
 

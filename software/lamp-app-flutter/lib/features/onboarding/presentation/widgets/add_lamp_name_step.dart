@@ -1,4 +1,3 @@
-// lib/features/onboarding/presentation/widgets/add_lamp_name_step.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 

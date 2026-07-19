@@ -13,6 +13,7 @@ All gaps, padding, and margins use `AppSpace` tokens. All card radii use `AppRad
 | `AppSpace.xl` | 24 |
 | `AppSpace.xxl` | 32 |
 | `AppRadius.card` | 12 |
+| `AppRadius.swatch` | 14 |
 
 **Snap to the nearest token — do not add tokens.**
 

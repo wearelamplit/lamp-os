@@ -1,21 +1,3 @@
-// Owns the per-lamp firmware OTA lifecycle: download → verify → push.
-//
-// One notifier per lamp (keyed by deviceId). Sequence:
-//   1. State starts at FirmwareIdle.
-//   2. checkForUpdate() → FirmwareDownloading → FirmwareVerifying →
-//      FirmwareReadyToInstall (with parsed footer + image kept in
-//      memory for the install step).
-//   3. install() consumes the kept image, transitions through
-//      FirmwareOfferSent / FirmwareStreaming / FirmwareFinalizing,
-//      then FirmwareSucceeded or FirmwareFailed.
-//   4. reset() returns to FirmwareIdle (called after user dismisses
-//      a success/fail card).
-//
-// The notifier holds the downloaded image in memory across the verify
-// → ready → install sequence. ~1.5 MB sits in a single Uint8List —
-// fine for a phone. We don't cache to disk for v1; the user can
-// re-tap "Check for updates" if they back out and come back.
-
 import 'dart:async';
 import 'dart:typed_data';
 
@@ -60,6 +42,9 @@ class FirmwareNotifier extends _$FirmwareNotifier {
     FirmwareChannel channel = FirmwareChannel.stable,
     required String? lampType,
   }) async {
+    // Double-tap guard: a check already downloading/verifying owns the state
+    // machine; a second tap would race it.
+    if (state is FirmwareDownloading || state is FirmwareVerifying) return;
     if (lampType == null || lampType.isEmpty) {
       state = const FirmwareFailed(
         reason:
@@ -68,58 +53,66 @@ class FirmwareNotifier extends _$FirmwareNotifier {
       );
       return;
     }
-    state = const FirmwareDownloading();
-    Uint8List image;
-    // Try the disk cache first — CachedFirmwareNotifier proactively pulls
-    // the per-variant binary on inventory change, so the common case is
-    // a hit and we skip the network entirely (works offline).
-    final cache = ref.read(cachedFirmwareNotifierProvider.notifier);
-    final cached =
-        await cache.bytesFor(lampType: lampType, channel: channel);
-    if (cached != null) {
-      image = cached.bytes;
-    } else {
-      final client = ref.read(firmwareReleaseClientProvider);
+    // Pin across the download/verify awaits so tabbing away from the Info
+    // screen mid-check doesn't autoDispose the notifier and throw on the
+    // next state write. Mirrors install(). Released in finally.
+    final keepAlive = ref.keepAlive();
+    try {
+      state = const FirmwareDownloading();
+      Uint8List image;
+      // Try the disk cache first. CachedFirmwareNotifier proactively pulls
+      // the per-variant binary on inventory change, so the common case is
+      // a hit and skips the network entirely (works offline).
+      final cache = ref.read(cachedFirmwareNotifierProvider.notifier);
+      final cached =
+          await cache.bytesFor(lampType: lampType, channel: channel);
+      if (cached != null) {
+        image = cached.bytes;
+      } else {
+        final client = ref.read(firmwareReleaseClientProvider);
+        try {
+          image = await client.fetchLatest(channel, lampType: lampType);
+        } catch (e) {
+          state = FirmwareFailed(
+            reason: 'Could not reach the update server and no cached '
+                'firmware is available for this lamp.',
+            cause: e,
+          );
+          return;
+        }
+      }
+
+      state = const FirmwareVerifying();
+      VerifiedFirmware verified;
       try {
-        image = await client.fetchLatest(channel, lampType: lampType);
+        verified = await verifyFirmwareImage(image);
       } catch (e) {
         state = FirmwareFailed(
-          reason: 'Could not reach the update server and no cached '
-              'firmware is available for this lamp.',
+          reason: 'The downloaded firmware failed signature verification.',
           cause: e,
         );
         return;
       }
-    }
 
-    state = const FirmwareVerifying();
-    VerifiedFirmware verified;
-    try {
-      verified = await verifyFirmwareImage(image);
-    } catch (e) {
-      state = FirmwareFailed(
-        reason: 'The downloaded firmware failed signature verification.',
-        cause: e,
+      final expectedChannel = '$lampType-${channel.name}';
+      if (verified.footer.channel != expectedChannel) {
+        state = FirmwareFailed(
+          reason:
+              'Downloaded firmware is for the wrong lamp type or channel '
+              '(expected "$expectedChannel", got "${verified.footer.channel}").',
+        );
+        return;
+      }
+
+      _pendingImage    = image;
+      _pendingVerified = verified;
+      state = FirmwareReadyToInstall(
+        footer: verified.footer,
+        imageBytes: image.length,
       );
-      return;
+    } finally {
+      keepAlive.close();
     }
-
-    final expectedChannel = '$lampType-${channel.name}';
-    if (verified.footer.channel != expectedChannel) {
-      state = FirmwareFailed(
-        reason:
-            'Downloaded firmware is for the wrong lamp type or channel '
-            '(expected "$expectedChannel", got "${verified.footer.channel}").',
-      );
-      return;
-    }
-
-    _pendingImage    = image;
-    _pendingVerified = verified;
-    state = FirmwareReadyToInstall(
-      footer: verified.footer,
-      imageBytes: image.length,
-    );
   }
 
   /// User-facing: push the previously-downloaded + verified image to the
@@ -144,7 +137,8 @@ class FirmwareNotifier extends _$FirmwareNotifier {
       signedImage: image,
       version: verified.footer.version,
       channel: verified.footer.channel,
-      sha256Prefix: verified.sha256Prefix,
+      digest: verified.fullSha256,
+      signature: verified.footer.signature,
       totalLen: image.length,
       footerLen: lsigFooterLen,
       onProgress: (sent, total) {
@@ -172,7 +166,7 @@ class FirmwareNotifier extends _$FirmwareNotifier {
 
       if (result.success) {
         state = FirmwareSucceeded(footer: verified.footer);
-        // Drop the in-memory bytes — the lamp is rebooting.
+        // Drop the in-memory bytes. The lamp is rebooting.
         _pendingImage    = null;
         _pendingVerified = null;
       } else {

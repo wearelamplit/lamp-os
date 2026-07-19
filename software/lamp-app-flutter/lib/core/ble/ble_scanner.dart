@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
 
 /// BLE Manufacturer ID the firmware advertises (0xA455). The 6 bytes after
@@ -8,10 +9,9 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
 ///
 /// IMPORTANT: 0xA455 is NOT a registered Bluetooth SIG company identifier.
 /// Any third-party device that picked the same 16-bit value would be
-/// parsed as a lamp by [parseLampAdvertisement] unless we also verify
-/// the payload length is one of the three known shapes (4, 6, or 7 bytes).
-/// We do — see the length check below. A 3-byte adv from a random beacon
-/// no longer slips through.
+/// parsed as a lamp by [parseLampAdvertisement] were the payload length
+/// not also checked against the three known shapes (4, 6, or 7 bytes);
+/// see the length check below.
 const _lampMfgId = 0xA455;
 
 /// Valid lamp adv payload sizes (after the 2-byte company-ID prefix that
@@ -38,7 +38,7 @@ BleAdvertisement? parseLampAdvertisement({
   final mfg = manufacturerData[_lampMfgId];
   if (mfg == null) return null;
   if (!_validLampPayloadLengths.contains(mfg.length)) return null;
-  // Bit 1 of byte 6 — "speaks the v0x03 mesh protocol". Byte-for-byte
+  // Bit 1 of byte 6: "speaks the v0x03 mesh protocol". Byte-for-byte
   // identical to the prior `mfg[6] >= 2` check on existing fielded
   // firmware; forward-compatible for v3+ firmware that sets additional
   // bits. See software/lamp-os/.../bluetooth.cpp `kBleCapMeshProtocol`.
@@ -52,7 +52,7 @@ BleAdvertisement? parseLampAdvertisement({
   final configured =
       mfg.length >= 7 && (mfg[6] & kBleCapConfigured) != 0;
   final name = advName.isNotEmpty ? advName : platformName;
-  // Empty-name advs are noise — non-lamp devices that happen to collide
+  // Empty-name advs are noise: non-lamp devices that happen to collide
   // on the 16-bit mfg ID, lamps with a corrupted name chunk, or platform
   // glitches where the scan-response was lost. A nearby-list entry with
   // name='' renders as a blank, unselectable row in My Lamps.
@@ -94,7 +94,7 @@ class BleAdvertisement {
   final int rssi;
 
   /// True iff this lamp's firmware advertises the version byte
-  /// (mfg.length >= 7 && mfg[6] >= 2) — i.e. it speaks the app's
+  /// (mfg.length >= 7 && mfg[6] >= 2): it speaks the app's
   /// mesh protocol and is fully app-controllable. v1 lamps and
   /// transitional pre-shade-restore v2 builds get `false` (the
   /// former because they're genuinely BT-only, the latter because
@@ -102,7 +102,7 @@ class BleAdvertisement {
   final bool isMesh;
 
   /// True iff the lamp's capability byte has the "configured" bit set
-  /// (`mfg[6] & 0x04`) — it has been claimed/set up. Fresh and custom lamps
+  /// (`mfg[6] & 0x04`): it has been claimed/set up. Fresh and custom lamps
   /// advertise it clear, so the app routes them into the onboarding wizard.
   final bool configured;
 }
@@ -114,7 +114,7 @@ abstract class BleScanner {
   Stream<BleAdvertisement> results();
 
   /// Begin scanning. Must be called once before [results] yields anything
-  /// on the real driver. Idempotent — calling twice is a no-op.
+  /// on the real driver. Idempotent: calling twice is a no-op.
   Future<void> start();
 
   /// Stop scanning (frees the radio).
@@ -124,17 +124,18 @@ abstract class BleScanner {
 class FbpBleScanner implements BleScanner {
   StreamSubscription<List<fbp.ScanResult>>? _sub;
   StreamSubscription<bool>? _scanningSub;
+  StreamSubscription<fbp.BluetoothAdapterState>? _adapterSub;
   final _ctrl = StreamController<BleAdvertisement>.broadcast();
   bool _running = false;
+  bool _restarting = false;
+
+  // Delay before re-issuing a scan so a persistently failing startScan
+  // (permission revoked, adapter mid-cycle) can't spin a hot retry loop.
+  static const _restartBackoff = Duration(seconds: 3);
 
   @override
   Stream<BleAdvertisement> results() => _ctrl.stream;
 
-  /// Power on the radio + start scanning. The fbp `startScan(timeout: 5min)`
-  /// stops the scan after 5 minutes — without a restart loop the app would
-  /// silently go blind. We listen to `isScanning` and re-issue startScan
-  /// every time it flips to false while we still want to be scanning.
-  /// Stop() flips `_running` to false so the restart loop quiesces.
   Future<void> _startNativeScan() async {
     await fbp.FlutterBluePlus.startScan(
       timeout: const Duration(minutes: 5),
@@ -142,40 +143,72 @@ class FbpBleScanner implements BleScanner {
     );
   }
 
+  void _onScanResults(List<fbp.ScanResult> results) {
+    for (final r in results) {
+      final ad = parseLampAdvertisement(
+        manufacturerData: r.advertisementData.manufacturerData,
+        advName: r.advertisementData.advName,
+        platformName: r.device.platformName,
+        remoteId: r.device.remoteId.str,
+        rssi: r.rssi,
+      );
+      if (ad != null) _ctrl.add(ad);
+    }
+  }
+
+  // fbp's own 5-min startScan timeout, an unexpected radio stop, or the BLE
+  // adapter flipping back on all route here. Backoff-gated and re-entrancy
+  // guarded so overlapping triggers collapse to one delayed restart.
+  Future<void> _restartScan() async {
+    if (!_running || _restarting) return;
+    _restarting = true;
+    try {
+      await Future<void>.delayed(_restartBackoff);
+      if (!_running || fbp.FlutterBluePlus.isScanningNow) return;
+      await _startNativeScan();
+    } catch (e) {
+      debugPrint('[ble_scanner] scan restart failed: $e');
+    } finally {
+      _restarting = false;
+    }
+  }
+
   @override
   Future<void> start() async {
     if (_running) return;
     _running = true;
-    _sub = fbp.FlutterBluePlus.scanResults.listen((results) {
-      for (final r in results) {
-        final ad = parseLampAdvertisement(
-          manufacturerData: r.advertisementData.manufacturerData,
-          advName: r.advertisementData.advName,
-          platformName: r.device.platformName,
-          remoteId: r.device.remoteId.str,
-          rssi: r.rssi,
-        );
-        if (ad != null) _ctrl.add(ad);
-      }
-    });
-    await _startNativeScan();
-    // Watch for the platform-side scan ending (its own 5-min timeout, or
-    // an unexpected radio stop) and re-issue startScan so users who leave
-    // the app foregrounded longer than 5 minutes don't silently lose adv
-    // visibility. The first emission can be the current state (true), so
-    // gate on the running flag too.
-    _scanningSub = fbp.FlutterBluePlus.isScanning.listen((isScanning) async {
-      if (!_running) return;
-      if (isScanning) return;
-      // Best-effort restart. A failure here (e.g. permission revoked
-      // mid-session) leaves _running true and the next isScanning event
-      // re-tries.
-      try {
-        await _startNativeScan();
-      } catch (_) {
-        // intentionally swallowed — let the isScanning loop retry
-      }
-    });
+    // Arm every listener before the first startScan so a throw below still
+    // leaves recovery wired: the next isScanning=false or adapter=on event
+    // drives _restartScan.
+    _sub = fbp.FlutterBluePlus.scanResults.listen(
+      _onScanResults,
+      onError: (Object e) =>
+          debugPrint('[ble_scanner] scanResults stream error: $e'),
+    );
+    _scanningSub = fbp.FlutterBluePlus.isScanning.listen(
+      (isScanning) {
+        if (!_running || isScanning) return;
+        unawaited(_restartScan());
+      },
+      onError: (Object e) =>
+          debugPrint('[ble_scanner] isScanning stream error: $e'),
+    );
+    _adapterSub = fbp.FlutterBluePlus.adapterState.listen(
+      (adapter) {
+        if (!_running) return;
+        if (adapter == fbp.BluetoothAdapterState.on &&
+            !fbp.FlutterBluePlus.isScanningNow) {
+          unawaited(_restartScan());
+        }
+      },
+      onError: (Object e) =>
+          debugPrint('[ble_scanner] adapterState stream error: $e'),
+    );
+    try {
+      await _startNativeScan();
+    } catch (e) {
+      debugPrint('[ble_scanner] initial startScan failed: $e');
+    }
   }
 
   @override
@@ -187,6 +220,8 @@ class FbpBleScanner implements BleScanner {
     _sub = null;
     await _scanningSub?.cancel();
     _scanningSub = null;
+    await _adapterSub?.cancel();
+    _adapterSub = null;
   }
 }
 

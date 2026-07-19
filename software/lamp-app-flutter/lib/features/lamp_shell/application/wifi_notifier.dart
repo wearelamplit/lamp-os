@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../../core/ble/ble_client_provider.dart';
@@ -27,17 +27,29 @@ class WifiNotifier extends _$WifiNotifier {
     final ble = ref.read(bleClientProvider);
     _sub = ble
         .subscribe(deviceId, BleUuids.controlService, BleUuids.wifiState)
-        .listen(_onNotify);
+        .listen(
+          _onNotify,
+          onError: (Object e) =>
+              debugPrint('[wifi_notifier] wifiState stream error: $e'),
+        );
     ref.onDispose(() => _sub?.cancel());
-    final bytes = await ble.read(
-        deviceId, BleUuids.controlService, BleUuids.wifiState);
-    return _parse(bytes);
+    // Legacy lamps predate the wifiState characteristic; the read throws
+    // BleNotFound. Degrade to an empty state so the network picker renders
+    // its "tap refresh" prompt instead of erroring the whole surface.
+    try {
+      final bytes = await ble.read(
+          deviceId, BleUuids.controlService, BleUuids.wifiState);
+      return _parse(bytes);
+    } catch (e) {
+      debugPrint('[wifi_notifier] wifiState read failed for $deviceId: $e');
+      return const WifiState();
+    }
   }
 
   void _onNotify(Uint8List bytes) {
     final cur = state.value ?? const WifiState();
     final next = _parse(bytes);
-    // Notifies for state transitions (connecting → connected → failed)
+    // Notifies for state transitions (connecting to connected to failed)
     // typically omit scanResults; preserve the last-known scan list across
     // those transitions so the UI doesn't blink the network list empty.
     state = AsyncData(next.copyWith(
@@ -56,8 +68,8 @@ class WifiNotifier extends _$WifiNotifier {
 
   // SSID operations live on controlNotifier (setHomeSsid), which writes
   // immediately via writeSettingsBlob (reboot:false). No "live" firmware
-  // effect to preview for an SSID — home-mode detection runs off the saved
-  // value — so no wifiOp channel is needed for setHomeSsid/forget.
+  // effect to preview for an SSID (home-mode detection runs off the saved
+  // value), so no wifiOp channel is needed for setHomeSsid/forget.
 
   Future<void> _writeOp(Map<String, dynamic> op) async {
     final ble = ref.read(bleClientProvider);

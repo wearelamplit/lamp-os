@@ -75,7 +75,6 @@ class _OffColorPickerState extends ConsumerState<OffColorPicker> {
       context,
       initial: original,
       title: 'Wisp color (Off)',
-      bpp: 3,
       onLive: notifier.setOffColor,
     );
     if (picked == null) {

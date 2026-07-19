@@ -8,13 +8,10 @@ import '../../../core/widgets/empty_state_pane.dart';
 import '../../../core/widgets/friendly_error.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/domain/sections.dart';
-import '../../control/presentation/widgets/connecting_view.dart';
-import '../../control/presentation/widgets/connection_banner.dart';
 import '../domain/expression_catalog.dart';
 import '../domain/expression_presentation.dart';
 
-/// Entry point for adding a new expression. Replaces the previous "open the
-/// editor with a blank draft" flow: now the user picks Target first
+/// Entry point for adding a new expression. The user picks Target first
 /// (Shade / Base / Both), then picks one of the expression types from a
 /// list of friendly cards. Combos already in use are disabled in-place.
 class AddExpressionPickerScreen extends ConsumerStatefulWidget {
@@ -51,7 +48,7 @@ class _AddExpressionPickerScreenState
         title: const Text('New expression'),
       ),
       body: async.when(
-        loading: () => ConnectingView(deviceId: widget.lampId),
+        loading: () => const SizedBox.expand(),
         error: (e, _) => FriendlyError.page(
           title: "Couldn't reach your lamp.",
           subtitle:
@@ -61,32 +58,13 @@ class _AddExpressionPickerScreenState
           onRetry: () =>
               ref.invalidate(controlNotifierProvider(widget.lampId)),
         ),
-        data: (state) {
-          // Same disconnect-handling pattern as ControlScreen: banner up
-          // top, IgnorePointer + Opacity over the body so taps don't
-          // queue against a dead BLE link.
-          return Column(
-            children: [
-              if (!state.connected)
-                ConnectionBanner(attempt: state.reconnectAttempt),
-              Expanded(
-                child: IgnorePointer(
-                  ignoring: !state.connected,
-                  child: Opacity(
-                    opacity: state.connected ? 1.0 : 0.4,
-                    child: _Body(
-                      lampId: widget.lampId,
-                      target: _target,
-                      onTargetChanged: (t) => setState(() => _target = t),
-                      existing: state.expressions.expressions,
-                      catalog: state.catalog,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
+        data: (state) => _Body(
+          lampId: widget.lampId,
+          target: _target,
+          onTargetChanged: (t) => setState(() => _target = t),
+          existing: state.expressions.expressions,
+          catalog: state.catalog,
+        ),
       ),
     );
   }
@@ -252,7 +230,7 @@ class _ExpressionCard extends StatelessWidget {
                       shape: BoxShape.circle,
                       color: colorScheme.primaryContainer,
                     ),
-                    child: Icon(icon, color: colorScheme.onPrimaryContainer),
+                    child: Icon(icon, color: colorScheme.onPrimary),
                   ),
                   const SizedBox(width: AppSpace.md),
                   Expanded(
@@ -308,9 +286,9 @@ class _ExpressionCard extends StatelessWidget {
 }
 
 /// Big tappable target chooser. Bigger + iconned than a SegmentedButton
-/// so the active target reads at a glance — important here since the
-/// rest of the screen is a long list of expression cards and the user
-/// needs to know "where am I about to drop this expression".
+/// so the active target reads at a glance (the rest of the screen is a
+/// long list of expression cards and the user needs to know "where am I
+/// about to drop this expression").
 class _TargetButton extends StatelessWidget {
   const _TargetButton({
     required this.label,

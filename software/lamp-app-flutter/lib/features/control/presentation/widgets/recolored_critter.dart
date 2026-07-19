@@ -6,13 +6,13 @@ import '../../domain/lamp_color.dart';
 import 'critter_asset.dart';
 
 /// Renders a critter SVG recolored from caller-supplied shade + base colors.
-/// Pure stateless — no provider watching, no caching. Use for one-shot
+/// Pure stateless, no provider watching, no caching. Use for one-shot
 /// renders (adopt-confirm) where a heavy ConsumerStatefulWidget is overkill.
 ///
-/// The SVG substitution logic mirrors LampPreview: replaces the two
+/// The SVG substitution logic matches LampPreview's: replaces the two
 /// linearGradient blocks (ids ending in `Shade` and `Body`) with stops
 /// derived from [shadeColors] and [baseColors].
-// ponytail: no widget cache / template memoization — adopt-confirm renders once.
+// ponytail: no widget cache / template memoization; adopt-confirm renders once.
 class RecoloredCritter extends StatelessWidget {
   const RecoloredCritter({
     super.key,
@@ -69,7 +69,7 @@ class RecoloredCritter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final asset = critterAssetFor(critterIndex: null, deviceId: deviceId);
+    final asset = critterAssetFor(deviceId);
     return FutureBuilder<String>(
       // ponytail: new future each build; acceptable for a one-shot adopt render.
       future: rootBundle.loadString(asset),

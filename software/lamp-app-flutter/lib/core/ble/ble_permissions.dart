@@ -5,7 +5,7 @@ import 'package:permission_handler/permission_handler.dart';
 /// Wraps runtime BT permissions on Android AND iOS. The Android impl
 /// gates BLUETOOTH_SCAN + BLUETOOTH_CONNECT; the iOS impl gates the
 /// CoreBluetooth authorization state. Use [BlePermissions.forPlatform]
-/// to get the right instance — both impls no-op `true` on the other
+/// to get the right instance; both impls no-op `true` on the other
 /// platform so the factory is safe to call unconditionally.
 abstract class BlePermissions {
   Future<bool> isGranted();
@@ -68,7 +68,7 @@ class AndroidBlePermissions implements BlePermissions {
 /// iOS BT permission wrapper. CoreBluetooth surfaces three terminal
 /// states beyond "granted": denied (user said no in the system dialog),
 /// restricted (parental controls / MDM), and permanentlyDenied
-/// (effectively the same as denied on iOS — there is no second-prompt
+/// (effectively the same as denied on iOS; there is no second-prompt
 /// distinction). All three route the user to Settings since the system
 /// dialog only fires once per install.
 class IosBlePermissions implements BlePermissions {

@@ -6,7 +6,7 @@ import '../../application/control_notifier.dart';
 import '../../domain/lamp_color.dart';
 
 /// Slice of ControlState BaseCard needs: colors list + colorsEditable. Used as
-/// the `.select` projection so sibling state changes don't rebuild us.
+/// the `.select` projection so sibling state changes don't trigger a rebuild.
 class _BaseSlice {
   const _BaseSlice(this.colors, {required this.colorsEditable});
   final List<LampColor> colors;

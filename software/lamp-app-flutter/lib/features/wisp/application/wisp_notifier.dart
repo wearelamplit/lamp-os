@@ -22,7 +22,7 @@ part 'wisp_notifier.g.dart';
 ///
 /// `setZone` / `clearZone` delegate to the repository and rely on the
 /// wisp's on-change broadcast (≤ ~2s) to push the updated status back
-/// via CHAR_WISP_STATUS. We optimistically reflect the choice in local
+/// via CHAR_WISP_STATUS. Optimistically reflects the choice in local
 /// state so the chip highlight doesn't lag the tap; the notify either
 /// confirms or corrects it.
 @Riverpod(name: 'wispNotifierProvider')
@@ -36,7 +36,7 @@ class WispNotifier extends _$WispNotifier {
 
   /// Debounce window for the realtime wispOp writes that fire on every
   /// Off-mode color-picker drag tick or manual-palette editor mutation.
-  /// 250 ms gives a continuous picker drag ~4 writes/sec — fast enough
+  /// 250 ms gives a continuous picker drag ~4 writes/sec: fast enough
   /// to feel realtime, slow enough that NVS wear and BLE bandwidth stay
   /// reasonable.
   static const Duration _offColorDebounce =
@@ -44,23 +44,26 @@ class WispNotifier extends _$WispNotifier {
   static const Duration _manualPaletteDebounce =
       Duration(milliseconds: 250);
   static const Duration _driftDebounce = Duration(milliseconds: 300);
+  static const Duration _brightnessDebounce = Duration(milliseconds: 250);
   Timer? _offColorWriteTimer;
   Timer? _manualPaletteWriteTimer;
   Timer? _driftWriteTimer;
+  Timer? _brightnessWriteTimer;
   (int, int)? _pendingDrift; // (intervalMs, fadePct)
+  int? _pendingBrightness;
 
   /// Optimistic-write guard for [setSource]. The wisp's response chain
   /// is: app BLE-writes wispOp → relay lamp forwards via MSG_CONTROL_OP
   /// → wisp dispatches setSource → triggerOnChange emits new wispStatus
   /// → wispStatus relays back to lamps → BLE notify fires. During that
   /// round-trip (up to seconds, especially via multi-hop relay), the
-  /// relay lamp keeps notifying its CACHED wispStatus — still carrying
-  /// the previous `source` — which races our optimistic state and flips
+  /// relay lamp keeps notifying its CACHED wispStatus, still carrying
+  /// the previous `source`, which races the optimistic state and flips
   /// the picker back. While `_pendingSourceMode` is set, incoming
   /// wispStatus notifications have their `source` field replaced with
   /// the pending value until either (a) a wispStatus arrives whose
   /// source matches the pending mode (write confirmed), or (b) the
-  /// 3 s window expires (write missed — let the real state through so
+  /// 3 s window expires (write missed; the real state is let through so
   /// the picker snaps back and the user can retry).
   static const Duration _sourceWriteGuard = Duration(seconds: 3);
   WispSourceMode? _pendingSourceMode;
@@ -80,8 +83,9 @@ class WispNotifier extends _$WispNotifier {
   Map<String, ({LampColor base, LampColor shade})> _livePaint = const {};
   bool _claimsReadInFlight = false;
   DateTime? _lastClaimsReadAt;
+  DateTime? _lastStatusPollAt;
 
-  /// The set of lamp bdAddrs the wisp currently claims, or null while
+  /// The set of lamp mesh macs the wisp currently claims, or null while
   /// the first CHAR_WISP_CLAIMS read is in flight. Empty set means the
   /// wisp reported count=0 (no claims / stale).
   Set<String>? get claimedMacs => _claimedMacs;
@@ -130,6 +134,7 @@ class WispNotifier extends _$WispNotifier {
     _livePaint = const {};
     _claimsReadInFlight = false;
     _lastClaimsReadAt = null;
+    _lastStatusPollAt = null;
 
     ref.onDispose(() {
       _disposed = true;
@@ -137,6 +142,7 @@ class WispNotifier extends _$WispNotifier {
       _offColorWriteTimer?.cancel();
       _manualPaletteWriteTimer?.cancel();
       _driftWriteTimer?.cancel();
+      _brightnessWriteTimer?.cancel();
     });
 
     debugPrint('[wisp_notifier] build lamp=$lampId -- waiting for connect');
@@ -177,8 +183,8 @@ class WispNotifier extends _$WispNotifier {
       next = _applySourceWriteGuard(next);
       _ingestManualPaletteFromStatus(next.currentPalette);
       _maybeRereadForPalette(next);
-      // Throttle: claims change rarely; re-read at most once per ~3 s so we
-      // don't issue a BLE read on every ~2 s wispStatus notify.
+      // Throttle: claims change rarely; re-read at most once per ~3 s so this
+      // doesn't issue a BLE read on every ~2 s wispStatus notify.
       final notifyNow = DateTime.now();
       final lastRead = _lastClaimsReadAt;
       if (lastRead == null ||
@@ -267,7 +273,7 @@ class WispNotifier extends _$WispNotifier {
     if (palette == null || palette.isEmpty) return;
     _currentPaletteKnown = true;
     if (_palettesEqual(_savedManualPalette, palette)) return;
-    // Capture pristine-vs-OLD-saved BEFORE we overwrite -- the pristine
+    // Capture pristine-vs-OLD-saved BEFORE overwriting -- the pristine
     // check is "did the user touch the draft since the last save".
     final wasDraftPristine = _draftManualPalette.isEmpty ||
         _palettesEqual(_draftManualPalette, _savedManualPalette);
@@ -344,6 +350,7 @@ class WispNotifier extends _$WispNotifier {
       await _repo.setZone(zoneId);
     } catch (e, st) {
       debugPrint('WispNotifier.setZone($zoneId) failed: $e\n$st');
+      if (_disposed) rethrow;
       state = prev;
       rethrow;
     }
@@ -367,6 +374,7 @@ class WispNotifier extends _$WispNotifier {
       await _repo.clearZone();
     } catch (e, st) {
       debugPrint('WispNotifier.clearZone() failed: $e\n$st');
+      if (_disposed) rethrow;
       state = prev;
       rethrow;
     }
@@ -420,36 +428,102 @@ class WispNotifier extends _$WispNotifier {
     }
   }
 
-  /// Set or change the wisp password. The op is sealed under the CURRENT
-  /// cached password; plaintext when the wisp is factory-fresh (no password).
-  /// On success, the new password is cached in memory and persisted.
-  Future<void> setPassword(String newPassword) async {
+  /// Set or change the wisp password.
+  ///
+  /// Factory-fresh ([currentPassword] null): the op is plaintext, persisted on
+  /// write success. Changing an existing password ([currentPassword] set): the
+  /// op is sealed under the entered current password, and the new password is
+  /// persisted ONLY after the wisp confirms acceptance by advancing `opSeq`.
+  /// Returns true on success; false when the current password was wrong (the
+  /// store and cache are left untouched).
+  Future<bool> setPassword(String newPassword, {String? currentPassword}) async {
     final mac = state.value?.wispMac;
-    try {
-      await _repo.setPassword(newPassword);
-    } catch (e, st) {
-      debugPrint('WispNotifier.setPassword() failed: $e\n$st');
-      rethrow;
+    if (currentPassword == null) {
+      try {
+        await _repo.setPassword(newPassword);
+      } catch (e, st) {
+        debugPrint('WispNotifier.setPassword() failed: $e\n$st');
+        rethrow;
+      }
+      _cachedPassword = newPassword;
+      _repo.updatePassword(newPassword);
+      if (mac != null) await _store.save(mac, newPassword);
+      return true;
     }
+    final ok = await _sendVerifiedPasswordOp(
+      currentGuess: currentPassword,
+      sendOp: () => _repo.setPassword(newPassword),
+    );
+    if (!ok) return false;
     _cachedPassword = newPassword;
     _repo.updatePassword(newPassword);
     if (mac != null) await _store.save(mac, newPassword);
+    return true;
   }
 
-  /// Remove the wisp password (sets it to empty). The op is sealed under
-  /// the current password. On success, the local cache and persisted entry
-  /// are cleared.
-  Future<void> clearPassword() async {
+  /// Remove the wisp password. The clear op is sealed under [currentPassword]
+  /// and only persisted once the wisp confirms acceptance via an `opSeq`
+  /// advance. Returns true on success; false when the current password was
+  /// wrong (store and cache untouched).
+  Future<bool> clearPassword(String currentPassword) async {
     final mac = state.value?.wispMac;
-    try {
-      await _repo.setPassword('');
-    } catch (e, st) {
-      debugPrint('WispNotifier.clearPassword() failed: $e\n$st');
-      rethrow;
-    }
+    final ok = await _sendVerifiedPasswordOp(
+      currentGuess: currentPassword,
+      sendOp: () => _repo.setPassword(''),
+    );
+    if (!ok) return false;
     _cachedPassword = null;
     _repo.updatePassword(null);
     if (mac != null) await _store.clear(mac);
+    return true;
+  }
+
+  /// How long to wait for the wisp's `opSeq` to advance after a sealed
+  /// password op. A wrong current password fails the seal on the wisp, so no
+  /// advance arrives and the window elapses.
+  static const Duration _opConfirmTimeout = Duration(seconds: 5);
+
+  /// Seal [sendOp] under [currentGuess] and wait for the wisp to confirm it
+  /// applied by advancing `opSeq`. Restores the previously-cached password on
+  /// failure so a wrong guess doesn't strand the repo on a bad secret.
+  Future<bool> _sendVerifiedPasswordOp({
+    required String currentGuess,
+    required Future<void> Function() sendOp,
+  }) async {
+    final baseline = state.value?.opSeq ?? 0;
+    final prevCached = _cachedPassword;
+    // Watch for the confirming status before sending so a fast echo can't slip
+    // through between the write and the listen.
+    final confirmed = _awaitOpSeqAdvance(baseline);
+    _repo.updatePassword(currentGuess.isEmpty ? null : currentGuess);
+    try {
+      await sendOp();
+    } catch (e, st) {
+      debugPrint('WispNotifier verified password op send failed: $e\n$st');
+      _repo.updatePassword(prevCached);
+      unawaited(confirmed.catchError((_) => false));
+      rethrow;
+    }
+    try {
+      await _repo.pollStatus();
+    } catch (_) {}
+    final ok = await confirmed;
+    if (!ok) _repo.updatePassword(prevCached);
+    return ok;
+  }
+
+  /// Resolve true once a wisp status arrives whose `opSeq` advances past
+  /// [baseline], or false when [_opConfirmTimeout] elapses first. A reboot
+  /// resets `opSeq` to 0, so only a strict advance counts as confirmation.
+  Future<bool> _awaitOpSeqAdvance(int baseline) {
+    return ref
+        .read(bleClientProvider)
+        .subscribe(lampId, BleUuids.controlService, BleUuids.wispStatus)
+        .map((bytes) => WispStatus.fromBytes(bytes).opSeq)
+        .firstWhere((seq) => seq > baseline)
+        .timeout(_opConfirmTimeout)
+        .then((_) => true)
+        .catchError((_) => false);
   }
 
   /// Inject a known password into the in-memory cache and repository,
@@ -461,6 +535,25 @@ class WispNotifier extends _$WispNotifier {
     await _store.save(wispMac, password);
   }
 
+  /// Rate limit for [pollStatus]: screen re-opens inside this window skip
+  /// the write (the wisp coalesces on its side too).
+  static const Duration _statusPollMinInterval = Duration(seconds: 4);
+
+  /// Ask the wisp to re-broadcast its status now. Fired on wisp-screen
+  /// open so a stale relay cache refreshes without waiting for the 30 s
+  /// heartbeat. Failures are swallowed: the heartbeat covers it.
+  Future<void> pollStatus() async {
+    final now = DateTime.now();
+    final last = _lastStatusPollAt;
+    if (last != null && now.difference(last) < _statusPollMinInterval) return;
+    _lastStatusPollAt = now;
+    try {
+      await _repo.pollStatus();
+    } catch (e) {
+      debugPrint('WispNotifier.pollStatus failed: $e');
+    }
+  }
+
   /// Shuffle: tell the wisp to bump its seed and re-roll per-lamp color
   /// assignments. The updated seed rides back in the next wispStatus so
   /// the app preview re-rolls in lock-step without optimistic state here.
@@ -470,6 +563,32 @@ class WispNotifier extends _$WispNotifier {
     } catch (e, st) {
       debugPrint('WispNotifier.shuffle() failed: $e\n$st');
       rethrow;
+    }
+  }
+
+  /// Configure the wisp LED strip byte order and pixel count. Optimistically
+  /// reflects in local state; the wisp echoes the applied config back through
+  /// the next wispStatus notify.
+  Future<void> setLedStrip(String ledType, int pixelCount) async {
+    final cur = state.value ?? WispStatus.empty;
+    state = AsyncData(cur.copyWith(ledType: ledType, pixelCount: pixelCount));
+    try {
+      await _repo.setLedStrip(ledType, pixelCount);
+    } catch (e, st) {
+      debugPrint('WispNotifier.setLedStrip write failed: $e\n$st');
+    }
+  }
+
+  /// Set the wisp's claim-range step (0=Close .. 3=Wide). Optimistically
+  /// reflects in local state; the wisp echoes the applied value back through
+  /// the next wispStatus notify.
+  Future<void> setRange(int rangeStep) async {
+    final cur = state.value ?? WispStatus.empty;
+    state = AsyncData(cur.copyWith(rangeStep: rangeStep));
+    try {
+      await _repo.setRange(rangeStep);
+    } catch (e, st) {
+      debugPrint('WispNotifier.setRange write failed: $e\n$st');
     }
   }
 
@@ -499,6 +618,38 @@ class WispNotifier extends _$WispNotifier {
     }
   }
 
+  /// Set the space-brightness factor (0..100). Optimistically reflects in
+  /// local state so the slider tracks the drag, then debounces the BLE write
+  /// at [_brightnessDebounce] to bound NVS wear. The wisp echoes the applied
+  /// value back through the next wispStatus notify.
+  void setBrightness(int pct) {
+    final cur = state.value ?? WispStatus.empty;
+    state = AsyncData(cur.copyWith(brightness: pct));
+    _pendingBrightness = pct;
+    _brightnessWriteTimer?.cancel();
+    _brightnessWriteTimer =
+        Timer(_brightnessDebounce, () => unawaited(_flushBrightness()));
+  }
+
+  /// Call on slider release so the final value lands without waiting for the
+  /// debounce window.
+  void flushBrightness() {
+    _brightnessWriteTimer?.cancel();
+    _brightnessWriteTimer = null;
+    unawaited(_flushBrightness());
+  }
+
+  Future<void> _flushBrightness() async {
+    final pending = _pendingBrightness;
+    if (pending == null) return;
+    _pendingBrightness = null;
+    try {
+      await _repo.setBrightness(pending);
+    } catch (e, st) {
+      debugPrint('WispNotifier.setBrightness write failed: $e\n$st');
+    }
+  }
+
   /// Set the wisp source mode (Off / Manual / Aurora).
   /// Optimistically reflects in local state so the pill picker doesn't
   /// lag the tap; the wispStatus notify reconciles within ~2s. Rolls
@@ -522,6 +673,11 @@ class WispNotifier extends _$WispNotifier {
       await _repo.setSource(mode);
     } catch (e, st) {
       debugPrint('WispNotifier.setSource($mode) failed: $e\n$st');
+      if (_disposed) {
+        _pendingSourceMode = null;
+        _pendingSourceUntil = null;
+        rethrow;
+      }
       state = prev;
       // On failure, clear the guard rather than restoring its prior
       // value. The optimistic state is also being rolled back, so
@@ -565,6 +721,15 @@ class WispNotifier extends _$WispNotifier {
   void resetManualPaletteDraft() {
     _draftManualPalette = List<LampColor>.from(_savedManualPalette);
     _bumpState();
+  }
+
+  /// Replace the whole draft palette in one shot (the color-stops editor
+  /// streams the full list per edit). Caps at 10; extra swatches are dropped.
+  void setManualPaletteDraft(List<LampColor> colors) {
+    final capped = colors.length > 10 ? colors.sublist(0, 10) : colors;
+    _draftManualPalette = List<LampColor>.from(capped);
+    _bumpState();
+    _scheduleManualPaletteWrite();
   }
 
   /// Append a swatch to the draft. Caps at 10 -- anything beyond is
@@ -651,6 +816,7 @@ class WispNotifier extends _$WispNotifier {
   /// even when the value didn't change.
   // ponytail: _draftManualPalette belongs in its own StateProvider; add when per-slice selects matter.
   void _bumpState() {
+    if (_disposed) return;
     final hadValue = state.value != null;
     final cur = state.value ?? WispStatus.empty;
     state = AsyncData(cur);

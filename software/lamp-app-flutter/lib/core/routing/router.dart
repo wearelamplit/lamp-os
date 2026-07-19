@@ -14,6 +14,7 @@ import '../../features/lamp_shell/presentation/home_mode_screen.dart';
 import '../../features/lamp_shell/presentation/lamp_shell.dart';
 import '../../features/lamp_shell/presentation/setup_screen.dart';
 import '../widgets/back_button_leading.dart';
+import '../../features/nearby/presentation/mesh_lamps_screen.dart';
 import '../../features/nearby/presentation/nearby_lamps_screen.dart';
 import '../../features/onboarding/presentation/add_lamp_shell.dart';
 import '../../features/onboarding/presentation/onboarding_placeholder.dart';
@@ -141,6 +142,10 @@ GoRouter appRouter(Ref ref) {
       GoRoute(
         path: '/devices',
         builder: (_, state) => const NearbyLampsScreen(),
+      ),
+      GoRoute(
+        path: '/mesh-lamps',
+        builder: (_, state) => const MeshLampsScreen(),
       ),
       GoRoute(
         path: '/lamp/:id/setup/knockout',

@@ -12,7 +12,7 @@ import 'critter_asset.dart';
 
 /// A small recolored lamp graphic that reflects the current shade + base
 /// gradient in real time. Picks the same critter SVG as ConnectingView for
-/// this lamp (driven by the persistent `InventoryLamp.critterIndex`).
+/// this lamp (derived from `InventoryLamp.lampId`, falling back to `deviceId`).
 ///
 /// Each viable critter SVG carries two linearGradient defs whose ids end in
 /// `Shade` and `Body`. On each rebuild the `<linearGradient …>…</linearGradient>`
@@ -37,7 +37,7 @@ class LampPreview extends ConsumerStatefulWidget {
 }
 
 /// Subset of ControlState that LampPreview cares about. Two `_PreviewSlice`
-/// values are equal iff the rendered SVG would be identical — drives the
+/// values are equal iff the rendered SVG would be identical. Drives the
 /// `.select`'s equality check so unchanged surfaces don't rebuild.
 class _PreviewSlice {
   const _PreviewSlice(this.shadeColors, this.baseColors);
@@ -129,7 +129,7 @@ class _LampPreviewState extends ConsumerState<LampPreview> {
 
   /// Build replacement `<stop>` elements for [colors], spreading them evenly
   /// from 0 % to 100 % along the gradient axis. Uses the `style="stop-color:…"`
-  /// form to match the convention in the critter SVGs — flutter_svg renders
+  /// form to match the convention in the critter SVGs. flutter_svg renders
   /// the style-attribute form reliably but ignores `stop-color="…"` written
   /// as a direct attribute, which would leave the gradient uncolored.
   String _stopTag(double pct, String hex) =>
@@ -175,32 +175,29 @@ class _LampPreviewState extends ConsumerState<LampPreview> {
 
   @override
   Widget build(BuildContext context) {
-    // Watch ONLY this lamp's critterIndex. The previous `ref.watch` against
-    // the whole inventory list caused a full LampPreview rebuild every time
-    // setShadeColor / setBaseColors called _updateSeen (which writes
-    // lastShadeColor + lastBaseColor back into inventory). Per slider tick
-    // that storm of rebuilds was wasting frames re-rendering the same SVG.
-    final critterIndex =
+    // Watch ONLY this lamp's critter identity to avoid a rebuild storm:
+    // watching the whole inventory list rebuilds LampPreview on every
+    // setShadeColor / setBaseColors call, since _updateSeen writes
+    // lastShadeColor + lastBaseColor back into inventory on every slider tick.
+    final critterIdentity =
         ref.watch(inventoryNotifierProvider.select((async) {
-      return async.value
+      final lampId = async.value
           ?.firstWhereOrNull((l) => l.id == widget.deviceId)
-          ?.critterIndex;
+          ?.lampId;
+      return (lampId != null && lampId.isNotEmpty) ? lampId : widget.deviceId;
     }));
-    // Targeted watch on the control state — only the slice that affects
-    // the rendered SVG. Sibling state changes (brightness, expressions,
-    // home, etc.) and the inventory writeback storm during a slider drag
-    // don't rebuild this widget.
+    // Targeted watch on the control state, scoped to only the slice that
+    // affects the rendered SVG. Sibling state changes (brightness,
+    // expressions, home, etc.) and the inventory writeback storm during a
+    // slider drag don't rebuild this widget.
     final slice = ref.watch(
       controlNotifierProvider(widget.deviceId).select(_previewSliceFrom),
     );
-    final asset = critterAssetFor(
-      critterIndex: critterIndex,
-      deviceId: widget.deviceId,
-    );
+    final asset = critterAssetFor(critterIdentity);
 
-    // Kick off (or refresh) the load if this is a new asset path. We do it
-    // here rather than initState because the chosen asset can change if the
-    // inventory entry's critterIndex appears asynchronously.
+    // Kick off (or refresh) the load if this is a new asset path. Done here
+    // rather than in initState because the chosen asset can change if the
+    // inventory entry's lampId appears asynchronously.
     if (_loadedFor != asset) {
       _ensureLoaded(asset);
     }

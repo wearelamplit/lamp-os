@@ -14,16 +14,15 @@ import '../../control/application/advanced_session.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/application/control_state.dart';
 import '../../control/application/dev_mode.dart';
-import '../../control/presentation/widgets/connecting_view.dart';
-import '../../control/presentation/widgets/disconnect_aware_body.dart';
+import '../../firmware/data/firmware_release_client.dart';
+import '../../firmware/presentation/firmware_update_panel.dart';
 
-/// Info tab — Lamplit branding, firmware + app version footer, and the
+/// Info tab: Lamplit branding, firmware + app version footer, and the
 /// 5-tap-the-wordmark gesture that unlocks session-only advanced settings.
 /// When dev mode is on, a toggle row appears here to disable it.
 ///
 /// Lives as a dedicated tab so the About content isn't buried inside the
-/// Setup pane (where it had been folded as a Configuration drilldown
-/// item — visually cluttered, hard to find, mixed concerns).
+/// Setup pane as a Configuration drilldown item.
 class InfoScreen extends ConsumerWidget {
   const InfoScreen({super.key, required this.lampId});
   final String lampId;
@@ -32,7 +31,7 @@ class InfoScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(controlNotifierProvider(lampId));
     return async.when(
-      loading: () => ConnectingView(deviceId: lampId),
+      loading: () => const SizedBox.expand(),
       error: (e, _) => FriendlyError.page(
         title: "Couldn't reach your lamp.",
         subtitle:
@@ -41,10 +40,7 @@ class InfoScreen extends ConsumerWidget {
         rawError: e,
         onRetry: () => ref.invalidate(controlNotifierProvider(lampId)),
       ),
-      data: (state) => DisconnectAwareBody(
-        lampId: lampId,
-        child: _InfoBody(lampId: lampId, state: state),
-      ),
+      data: (state) => _InfoBody(lampId: lampId, state: state),
     );
   }
 }
@@ -74,8 +70,8 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
       window: const Duration(seconds: 3),
       onTriggered: () {
         // Toggle, not enable: a second 5-tap re-hides advanced UI without
-        // needing a disconnect. Session-only — devMode on reflects via
-        // effectiveAdvancedProvider; here we flip the session flag we own.
+        // needing a disconnect. Session-only: devMode on reflects via
+        // effectiveAdvancedProvider; this flips the owned session flag.
         final p = advancedSessionProvider(widget.lampId);
         ref.read(p.notifier).toggle();
         if (mounted) {
@@ -154,9 +150,15 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
             ),
           ),
         ],
+        if (devModeOn) ...[
+          const SizedBox(height: AppSpace.xl),
+          FirmwareUpdatePanel(
+            deviceId: widget.lampId,
+            lampType: widget.state.lamp.lampType,
+            channel: firmwareChannelFromString(widget.state.lamp.fwChannel),
+          ),
+        ],
         const SizedBox(height: AppSpace.xl),
-        // Firmware OTA update panel is hidden while the push flow isn't
-        // reliable; the version line below still reports current firmware.
         Center(
           child: Text(
             fwLine,
@@ -188,7 +190,7 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
   }
 }
 
-/// Lamplit brand mark — SVG glyph + sub-wordmark. Tap target for the
+/// Lamplit brand mark: SVG glyph + sub-wordmark. Tap target for the
 /// 5-tap advanced-unlock wraps the whole column at the call site.
 class _LamplitWordmark extends StatelessWidget {
   const _LamplitWordmark();

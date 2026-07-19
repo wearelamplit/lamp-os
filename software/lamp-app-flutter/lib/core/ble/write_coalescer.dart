@@ -12,17 +12,16 @@ import 'dart:typed_data';
 ///   3. When the window elapses the pending payload is drained.
 ///   4. Calls after the trailing drain start a fresh window at #1.
 ///
-/// Crucially, writes are fired via `unawaited(onWrite(...))` — pacing is
-/// driven by the timer, not by the previous write's ACK. That means the
-/// lamp keeps seeing a steady ~`1000ms/debounce` writes during a drag even
-/// when the BLE link is under WIDE conn parameters or a WRITE-with-response
-/// commit is queued in front. The trade-off is that fbp's per-device FIFO
-/// can grow briefly under sustained slow-link conditions; the debounce
-/// value is the floor that keeps that bounded.
+/// Writes are fired via `unawaited(onWrite(...))`. Pacing is driven by the
+/// timer, not by the previous write's ACK. That means the lamp keeps
+/// seeing a steady ~`1000ms/debounce` writes during a drag even when the
+/// BLE link is under WIDE conn parameters or a WRITE-with-response commit
+/// is queued in front. The trade-off is that fbp's per-device FIFO can
+/// grow briefly under sustained slow-link conditions; the debounce value
+/// is the floor that keeps that bounded.
 ///
-/// Errors from [onWrite] are intentionally dropped — this is a
-/// fire-and-forget channel; a failed mid-stream slider write should not
-/// crash the UI.
+/// Errors from [onWrite] are dropped: this is a fire-and-forget channel,
+/// a failed mid-stream slider write should not crash the UI.
 class WriteCoalescer {
   WriteCoalescer({required this.onWrite, required this.debounce});
 
@@ -85,7 +84,7 @@ class WriteCoalescer {
 /// proceed concurrently while writes for the same key still coalesce to
 /// the latest. Use when a single characteristic carries multiple
 /// independent state streams (e.g. CHAR_EDIT_SESSION encodes a per-surface
-/// open/close flag — collapsing across surfaces would lose the signal for
+/// open/close flag; collapsing across surfaces would lose the signal for
 /// the other surface).
 class KeyedWriteCoalescer<K> {
   KeyedWriteCoalescer({required this.onWrite, required this.debounce});

@@ -10,8 +10,8 @@ _InventoryLamp _$InventoryLampFromJson(Map<String, dynamic> json) =>
     _InventoryLamp(
       id: json['id'] as String,
       name: json['name'] as String,
+      lampId: json['lampId'] as String?,
       controlPassword: json['controlPassword'] as String?,
-      critterIndex: (json['critterIndex'] as num?)?.toInt(),
       lastSeenEpochMs: (json['lastSeenEpochMs'] as num?)?.toInt(),
       lastShadeColor: (json['lastShadeColor'] as List<dynamic>?)
           ?.map((e) => (e as num).toInt())
@@ -29,8 +29,8 @@ Map<String, dynamic> _$InventoryLampToJson(_InventoryLamp instance) =>
     <String, dynamic>{
       'id': instance.id,
       'name': instance.name,
+      'lampId': instance.lampId,
       'controlPassword': instance.controlPassword,
-      'critterIndex': instance.critterIndex,
       'lastSeenEpochMs': instance.lastSeenEpochMs,
       'lastShadeColor': instance.lastShadeColor,
       'lastBaseColor': instance.lastBaseColor,

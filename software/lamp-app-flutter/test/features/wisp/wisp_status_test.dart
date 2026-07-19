@@ -169,6 +169,37 @@ void main() {
       expect(s.currentPalette![2].b, 255);
     });
 
+    test('currentPalette strides RGBW when paletteBpp is 4', () {
+      final b64 = base64Encode([199, 0, 16, 80, 49, 155, 0, 0]);
+      final s = WispStatus.fromBytes(
+        Uint8List.fromList(utf8.encode(
+          '{"wispMac":"AA:BB:CC:DD:EE:FF","palette":"$b64","paletteBpp":4}',
+        )),
+      );
+      expect(s.currentPalette, isNotNull);
+      expect(s.currentPalette!.length, 2);
+      expect(s.currentPalette![0].r, 199);
+      expect(s.currentPalette![0].w, 80);
+      expect(s.currentPalette![1].g, 155);
+      expect(s.currentPalette![1].w, 0);
+    });
+
+    test('currentPalette stride comes from paletteBpp, never length', () {
+      // 12 bytes fits both strides; the discriminator must win.
+      final raw = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+      final b64 = base64Encode(raw);
+      final rgb = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","palette":"$b64"}',
+      ));
+      expect(rgb.currentPalette!.length, 4);
+      expect(rgb.currentPalette![0].w, 0);
+      final rgbw = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","palette":"$b64","paletteBpp":4}',
+      ));
+      expect(rgbw.currentPalette!.length, 3);
+      expect(rgbw.currentPalette![0].w, 4);
+    });
+
     test('currentPalette absent → null', () {
       final s = WispStatus.fromBytes(_b(
         '{"wispMac":"AA:BB:CC:DD:EE:FF"}',
@@ -233,6 +264,24 @@ void main() {
 
     // Option A: the wisp emits offColor only in off mode and drift fields only
     // in manual/aurora. Both sets must round-trip even when the other is absent.
+    test('offColor parses the W element when present', () {
+      final s = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"off","offColor":[200,100,50,90]}',
+      ));
+      expect(s.offColor.r, 200);
+      expect(s.offColor.w, 90);
+    });
+
+    test('offColor parses the packed hex string form', () {
+      final s = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"off","offColor":"c8643219"}',
+      ));
+      expect(s.offColor.r, 200);
+      expect(s.offColor.g, 100);
+      expect(s.offColor.b, 50);
+      expect(s.offColor.w, 25);
+    });
+
     test('off-mode frame carries offColor; manual-mode frame carries drift fields', () {
       final off = WispStatus.fromBytes(_b(
         '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"off","offColor":[200,100,50]}',
@@ -240,6 +289,7 @@ void main() {
       expect(off.offColor.r, 200);
       expect(off.offColor.g, 100);
       expect(off.offColor.b, 50);
+      expect(off.offColor.w, 0);
       expect(off.driftIntervalMs, 120000); // absent → default
       expect(off.driftFadePct, 50);        // absent → default
 
@@ -285,6 +335,42 @@ void main() {
         '{"wispMac":"AA:BB:CC:DD:EE:FF","hasPassword":false}',
       ));
       expect(s.hasPassword, isFalse);
+    });
+
+    test('rangeStep parses from JSON and rides copyWith/==', () {
+      final s = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","range":2}',
+      ));
+      expect(s.rangeStep, 2);
+      final wide = s.copyWith(rangeStep: 3);
+      expect(wide.rangeStep, 3);
+      expect(wide == s, isFalse);
+      expect(s.copyWith(rangeStep: 2), s);
+    });
+
+    test('rangeStep defaults to 0 (Close) when absent', () {
+      final s = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF"}',
+      ));
+      expect(s.rangeStep, 0);
+    });
+
+    test('brightness parses from JSON and rides copyWith/==', () {
+      final s = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","brightness":40}',
+      ));
+      expect(s.brightness, 40);
+      final dimmer = s.copyWith(brightness: 20);
+      expect(dimmer.brightness, 20);
+      expect(dimmer == s, isFalse);
+      expect(s.copyWith(brightness: 40), s);
+    });
+
+    test('brightness defaults to 100 (full) when absent', () {
+      final s = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF"}',
+      ));
+      expect(s.brightness, 100);
     });
   });
 }

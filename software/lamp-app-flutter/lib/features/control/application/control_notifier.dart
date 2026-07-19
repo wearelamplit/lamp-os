@@ -48,19 +48,19 @@ class FactoryResetSentinel implements Exception {
 }
 
 /// Disables Riverpod's framework-level auto-retry for the control notifier.
-/// We run our own reconnect loop with explicit backoff (`_reconnectDelays`)
-/// and two concurrent framework retries observed racing the scheduler when
+/// Runs its own reconnect loop with explicit backoff (`_reconnectDelays`);
+/// two concurrent framework retries were observed racing the scheduler when
 /// multiple lamps failed connect at once. Returning null keeps the provider
 /// in error state until an explicit `ref.invalidate` or a new build().
 Duration? _noRetry(int retryCount, Object error) => null;
 
 @Riverpod(keepAlive: false, name: 'controlNotifierProvider', retry: _noRetry)
 class ControlNotifier extends _$ControlNotifier {
-  // Nullable for defensive re-assignability. With framework retry disabled
-  // (see `_noRetry`) build() is no longer re-entered on the same instance
-  // after a connect/auth failure, but an explicit `ref.invalidate` could
-  // still trigger rebuild; nullable shape costs nothing and removes the
-  // LateInitializationError class of bug entirely.
+  // Nullable so the field can be freely reassigned. Framework retry is
+  // disabled (see `_noRetry`), so build() isn't re-entered on the same
+  // instance after a connect/auth failure, but an explicit `ref.invalidate`
+  // can still trigger a rebuild; nullable shape costs nothing and removes
+  // the LateInitializationError class of bug entirely.
   WriteCoalescer? _brightnessWriter;
   WriteCoalescer? _shadeColorsWriter;
   WriteCoalescer? _baseColorsWriter;
@@ -80,20 +80,21 @@ class ControlNotifier extends _$ControlNotifier {
   StreamSubscription<Uint8List>? _stateNotifySub;
   Timer? _reconnectTimer;
   /// Periodic liveness probe. fbp's connectionState stream doesn't reliably
-  /// emit the `false` edge when the lamp terminates the link itself — e.g.
-  /// it kicks the GATT client when a mesh OTA starts (ble_control
-  /// disconnectGattClientsForOta). Without this we'd sit on a zombie
-  /// "connected" state until the user's next write fails. _probeLink forces
-  /// a real GATT round-trip; a dead link throws and routes to the reconnect
-  /// ladder, same as the foreground-resume probe.
+  /// emit the `false` edge when the lamp terminates the link itself (e.g.
+  /// it kicks the GATT client when a mesh OTA starts, via ble_control's
+  /// disconnectGattClientsForOta). Without this the app would sit on a
+  /// zombie "connected" state until the user's next write fails. _probeLink
+  /// forces a real GATT round-trip; a dead link throws and routes to the
+  /// reconnect ladder, same as the foreground-resume probe.
   Timer? _probeTimer;
   // ponytail: 3s is the detection-latency vs battery/radio knob; tune on hardware.
   static const _probeInterval = Duration(seconds: 3);
   /// Single-slot guard against concurrent reconnect attempts. Set true at
-  /// the top of `_tryReconnect`, cleared in `finally`. Lets us safely
-  /// kick `_tryReconnect` from BOTH the scheduled timer (`_scheduleReconnect`)
-  /// AND the watchConnected→true edge (`_onConnectionChange`) without
-  /// stacking ble.connect + auth + canary calls on top of each other.
+  /// the top of `_tryReconnect`, cleared in `finally`. Allows safely
+  /// kicking `_tryReconnect` from BOTH the scheduled timer
+  /// (`_scheduleReconnect`) AND the watchConnected→true edge
+  /// (`_onConnectionChange`) without stacking ble.connect + auth + canary
+  /// calls on top of each other.
   bool _reconnectInFlight = false;
   static const _reconnectDelays = [500, 1000, 2000, 4000, 8000]; // ms, capped
   /// Max consecutive reconnect attempts before giving up and surfacing an
@@ -105,11 +106,11 @@ class ControlNotifier extends _$ControlNotifier {
   /// reset the loop.
   static const _maxReconnectAttempts = 30;
 
-  // Inventory "last-seen color" debouncer. We don't need to persist every
-  // slider tick — only the trailing value. The previous code was awaiting a
-  // SharedPreferences write + an inventory-state notification per tick,
-  // which dominated frame time during a drag. We collapse all the writes
-  // inside a window into one disk write at the trailing edge.
+  // Inventory "last-seen color" debouncer. Only the trailing value needs to
+  // persist; writing every slider tick would mean a SharedPreferences write
+  // plus an inventory-state notification per tick, dominating frame time
+  // during a drag. Collapses all the writes inside a window into one disk
+  // write at the trailing edge.
   Timer? _seenFlushTimer;
   LampColor? _pendingSeenShade;
   LampColor? _pendingSeenBase;
@@ -120,7 +121,7 @@ class ControlNotifier extends _$ControlNotifier {
   // rapid calls collapse to one BLE write. Flushed synchronously on
   // notifier dispose and on AppLifecycleState.paused.
   /// Debounce window after the last user fence (slider release, picker
-  /// accept) before commit fires. 500ms matches the spec — feels instant
+  /// accept) before commit fires. 500ms matches the spec, feels instant
   /// after release, generous enough that incremental taps collapse to
   /// one commit.
   static const Duration _commitDebounce = Duration(milliseconds: 500);
@@ -136,7 +137,7 @@ class ControlNotifier extends _$ControlNotifier {
 
 
   // Captured from the build argument. Not `late final` because a Riverpod
-  // retry re-runs build() on the same notifier instance — the second pass
+  // retry re-runs build() on the same notifier instance; the second pass
   // would reassign and a final field throws LateInitializationError.
   late String _deviceId;
 
@@ -150,13 +151,9 @@ class ControlNotifier extends _$ControlNotifier {
   late BleClient _ble;
   late InventoryNotifier _inv;
 
-  // ---------------------------------------------------------------------------
-  // Inventory color-cache helpers
-  // ---------------------------------------------------------------------------
-
   /// RGBW list shape persisted in inventory (and read back by
   /// `resolveLampColors`). Includes the warm-white byte so warm-heavy
-  /// edits render correctly on the My Lamps / picker tiles — the BLE
+  /// edits render correctly on the My Lamps / picker tiles. The BLE
   /// adv carries only RGB triplets, so the cache is the only source
   /// of W for offline / between-edit rendering.
   List<int> _rgbwList(LampColor c) => [c.r, c.g, c.b, c.w];
@@ -175,56 +172,63 @@ class ControlNotifier extends _$ControlNotifier {
     required Future<void> Function(ControlState fresh) postReload,
     int maxAttempts = 12,
   }) async {
-    // Initial grace: give the lamp a head start on the reboot so the
-    // first attempt isn't guaranteed to race the disconnect. ~2s lets
-    // the firmware fade-out complete and the actual reboot kick in.
-    await Future<void>.delayed(const Duration(seconds: 2));
-
-    ControlState? fresh;
-    Object? lastError;
-    StackTrace? lastStack;
-    for (var attempt = 0; attempt < maxAttempts; attempt++) {
-      if (!ref.mounted) return;
-      try {
-        await ble.connect(_deviceId);
-        await AuthClient(ble: ble).authenticate(
-            deviceId: _deviceId, password: password);
-        fresh = await _readSections(ble);
-        break;
-      } catch (e, st) {
-        lastError = e;
-        lastStack = st;
-        // Disconnect / not-connected go through the typed path now
-        // (BleDisconnectedException from FbpBleClient). The remaining
-        // transient signals — discoverServices flakes and connect/auth
-        // timeouts — are still detected by message inspection because
-        // fbp doesn't surface them as discrete types.
-        final msg = e.toString().toLowerCase();
-        final isTransient = isBleDisconnectError(e) ||
-            msg.contains('discoverservices') ||
-            msg.contains('timeout');
-        if (!isTransient) break;
-        await Future<void>.delayed(const Duration(seconds: 1));
-      }
-    }
-
-    if (!ref.mounted) return;
-    if (fresh == null) {
-      state = AsyncError(
-          lastError ?? Exception('lamp did not reconnect after save'),
-          lastStack ?? StackTrace.current);
-      ref.read(lampSaveStatusProvider(_deviceId).notifier).stop();
-      return;
-    }
-
-    state = AsyncData(fresh);
+    // Captured up front so every exit path clears the "Saving…" banner,
+    // including the `!ref.mounted` early-returns (the notifier may dispose
+    // mid-reconnect when the user leaves the page). lampSaveStatusProvider
+    // is keepAlive, so this reference stays valid past this notifier's own dispose.
+    final saveStatus = ref.read(lampSaveStatusProvider(_deviceId).notifier);
     try {
-      await postReload(fresh);
-    } catch (e, st) {
-      // postReload is best-effort housekeeping.
-      if (ref.mounted) state = AsyncError(e, st);
+      // Initial grace: give the lamp a head start on the reboot so the
+      // first attempt isn't guaranteed to race the disconnect. ~2s lets
+      // the firmware fade-out complete and the actual reboot kick in.
+      await Future<void>.delayed(const Duration(seconds: 2));
+
+      ControlState? fresh;
+      Object? lastError;
+      StackTrace? lastStack;
+      for (var attempt = 0; attempt < maxAttempts; attempt++) {
+        if (!ref.mounted) return;
+        try {
+          await ble.connect(_deviceId);
+          await AuthClient(ble: ble).authenticate(
+              deviceId: _deviceId, password: password);
+          fresh = await _readSections(ble);
+          break;
+        } catch (e, st) {
+          lastError = e;
+          lastStack = st;
+          // Disconnect / not-connected go through the typed path now
+          // (BleDisconnectedException from FbpBleClient). The remaining
+          // transient signals (discoverServices flakes and connect/auth
+          // timeouts) are still detected by message inspection because
+          // fbp doesn't surface them as discrete types.
+          final msg = e.toString().toLowerCase();
+          final isTransient = isBleDisconnectError(e) ||
+              msg.contains('discoverservices') ||
+              msg.contains('timeout');
+          if (!isTransient) break;
+          await Future<void>.delayed(const Duration(seconds: 1));
+        }
+      }
+
+      if (!ref.mounted) return;
+      if (fresh == null) {
+        state = AsyncError(
+            lastError ?? Exception('lamp did not reconnect after save'),
+            lastStack ?? StackTrace.current);
+        return;
+      }
+
+      state = AsyncData(fresh);
+      try {
+        await postReload(fresh);
+      } catch (e, st) {
+        // postReload is best-effort housekeeping.
+        if (ref.mounted) state = AsyncError(e, st);
+      }
+    } finally {
+      saveStatus.stop();
     }
-    ref.read(lampSaveStatusProvider(_deviceId).notifier).stop();
   }
 
   Future<void> _updateSeen({
@@ -277,7 +281,7 @@ class ControlNotifier extends _$ControlNotifier {
     );
 
     // Skip the cold GATT connect when a pre-warm has already established
-    // the link (BleClient.prewarm wired into the BLE adv stream — see
+    // the link (BleClient.prewarm wired into the BLE adv stream; see
     // nearby_lamps_notifier.dart). Saves the 200-500 ms `device.connect`
     // handshake + 100-400 ms `discoverServices` round-trip on the
     // common "user opens app, taps a nearby paired lamp" path. Cold-tap
@@ -298,7 +302,7 @@ class ControlNotifier extends _$ControlNotifier {
         await ble.connect(deviceId);
       }
     }
-    // Register disconnect now — only after a successful connect. If connect
+    // Register disconnect only after a successful connect. If connect
     // itself threw, there's nothing to tear down, and registering this
     // earlier would crash dispose on platforms where the BLE client can't
     // run (e.g. flutter_blue_plus in unit tests). If auth or section reads
@@ -317,7 +321,7 @@ class ControlNotifier extends _$ControlNotifier {
 
     // Auth-gate canary. Firmware returns empty bytes from lampSection on
     // unauthenticated reads so an unauth'd peer can't exfiltrate the
-    // password embedded in the section blob. Empty bytes here mean our
+    // password embedded in the section blob. Empty bytes here mean the
     // stored credential is missing or stale → typed sentinel the UI
     // catches and converts into a password prompt.
     final canaryBytes = await ble.readSection(deviceId, 'lamp');
@@ -328,12 +332,12 @@ class ControlNotifier extends _$ControlNotifier {
     final fresh = await _readSections(ble);
 
     // Heal password divergence: lamp's NVS pw got wiped (re-flash, factory
-    // reset) but our cached controlPassword is still non-empty. The lamp
+    // reset) but the cached controlPassword is still non-empty. The lamp
     // is in open-access mode (isAuthed=true unconditionally), so reads
-    // and most writes work — but settings_blob still gets encrypted by
+    // and most writes work. settings_blob still gets encrypted by
     // the app, then dropped by the lamp's decryptOp at password.empty().
     // Authoritative signal is fresh.lamp.hasPassword==false from the
-    // section we just read. Clear the cache so future writeSettingsBlob
+    // section just read. Clear the cache so future writeSettingsBlob
     // calls hit the pw.isEmpty plaintext branch.
     if (fresh.lamp.hasPassword == false &&
         (lamp.controlPassword?.isNotEmpty ?? false)) {
@@ -359,6 +363,12 @@ class ControlNotifier extends _$ControlNotifier {
         fwChannel: fresh.lamp.fwChannel,
       );
     }
+    // Mirror the lamp's own mesh MAC so the Social tab can cross-reference
+    // nearby peers by address on iOS, where `deviceId` is a CoreBluetooth UUID.
+    final lampId = fresh.lamp.lampId;
+    if (lampId != null && lampId.isNotEmpty) {
+      await _inv.updateLampId(deviceId, lampId);
+    }
 
     // Live-preview writes are fire-and-forget. Swallow errors here so a
     // pending debounce timer that fires after the lamp disconnects (e.g.
@@ -367,8 +377,8 @@ class ControlNotifier extends _$ControlNotifier {
     // reloads state from the lamp anyway.
     Future<void> safeWrite(String charUuid, Uint8List v) async {
       try {
-        // withoutResponse: true — slider-rate live preview, no need
-        // for per-write GATT ACK round-trip.
+        // withoutResponse: true for slider-rate live preview; no need
+        // for a per-write GATT ACK round-trip.
         await ble.write(
           deviceId,
           BleUuids.controlService,
@@ -378,21 +388,21 @@ class ControlNotifier extends _$ControlNotifier {
         );
       } catch (e) {
         // A live-preview write throwing a disconnect-shaped error is the
-        // canonical "link has zombified" signal — fbp's connectionState
+        // canonical "link has zombified" signal. fbp's connectionState
         // stream sometimes misses the false edge (backgrounded socket
-        // teardown, gatts_if slot leak). Treat it as the disconnect we
-        // never observed and kick the reconnect ladder so the user
+        // teardown, gatts_if slot leak). Treat it as the disconnect that
+        // was never observed and kick the reconnect ladder so the user
         // doesn't have to force-stop the app to recover.
         if (isBleDisconnectError(e) && ref.mounted) {
           // Notifier dispose during a live-preview write happens routinely
-          // (lamp switch, back-nav, post-save reboot) — `safeWrite`'s
+          // (lamp switch, back-nav, post-save reboot); `safeWrite`'s
           // own onWrite closure outlives ref. Guard against mutating
           // state on a disposed notifier.
           _onConnectionChange(false);
         }
         // Other exception types (e.g. encryption-required surfaced mid-
-        // session, or a transient write rejection) are still dropped —
-        // a live-preview write tearing the UI down on an isolated failure
+        // session, or a transient write rejection) are still dropped.
+        // A live-preview write tearing the UI down on an isolated failure
         // would be a worse outcome than the missed paint.
       }
     }
@@ -442,7 +452,7 @@ class ControlNotifier extends _$ControlNotifier {
         _seenFlushTimer!.cancel();
         unawaited(_flushSeen());
       }
-      // Cancel the debounce timer — the commit flush itself is handled in
+      // Cancel the debounce timer; the commit flush itself is handled in
       // the earlier onDispose (bundled with disconnect) so it fires while
       // the BLE link is still open. Cancelling here just stops a dangling
       // timer from firing after disconnect.
@@ -451,14 +461,14 @@ class ControlNotifier extends _$ControlNotifier {
       // connect(), ensuring it always runs even if build() throws mid-way.
     });
 
-    // Subscribe to the connection stream so we can surface unsolicited
+    // Subscribe to the connection stream to surface unsolicited
     // disconnects and drive the reconnect loop. The first emission will be
-    // `true` (we just connected); _onConnectionChange(true) when already
+    // `true` (just connected); _onConnectionChange(true) when already
     // connected is a no-op.
     _connSub = ble.watchConnected(deviceId).listen(_onConnectionChange);
     // Catch lamp-side link terminations fbp misses (mesh-OTA kick, etc.).
     // Self-gates: _probeLink no-ops while disconnected/reconnecting.
-    // ponytail: skip under `flutter test` — there's no platform BLE and a
+    // ponytail: skip under `flutter test`; there's no platform BLE and a
     // free-running periodic timer trips the binding's pending-timer check.
     if (!Platform.environment.containsKey('FLUTTER_TEST')) {
       _probeTimer = Timer.periodic(_probeInterval, (_) => _probeLink());
@@ -474,7 +484,11 @@ class ControlNotifier extends _$ControlNotifier {
     // change clients re-fetch via the page protocol, same as before.
     _stateNotifySub = ble
         .subscribe(deviceId, BleUuids.controlService, BleUuids.stateNotify)
-        .listen(_onStateNotify);
+        .listen(
+          _onStateNotify,
+          onError: (Object e) =>
+              debugPrint('[control_notifier] stateNotify stream error: $e'),
+        );
     ref.onDispose(() => _stateNotifySub?.cancel());
 
     // Probe the BLE link whenever the app comes back to the foreground.
@@ -483,8 +497,8 @@ class ControlNotifier extends _$ControlNotifier {
     // stream doesn't always emit the `false` edge in those cases, so a
     // bare _onConnectionChange listener stays stuck on `true` and any
     // user interaction silently fails. The probe forces a real GATT
-    // round-trip — if the link is dead, the read throws
-    // BleDisconnectedException and we kick the reconnect ladder.
+    // round-trip; if the link is dead, the read throws
+    // BleDisconnectedException and kicks the reconnect ladder.
     ref.listen<AppLifecycleState>(appLifecycleStateProvider, (prev, next) {
       if (next == AppLifecycleState.resumed && prev != next) {
         _probeLink();
@@ -498,7 +512,7 @@ class ControlNotifier extends _$ControlNotifier {
       shade: fresh.shade.colors.isEmpty
           ? LampColor.black
           : fresh.shade.colors.first,
-      base: fresh.base.colors[fresh.base.ac],
+      base: LampColor.blendedIdentity(fresh.base.colors),
     );
 
     // Mirror the lamp's current display name into the inventory cache so
@@ -511,7 +525,7 @@ class ControlNotifier extends _$ControlNotifier {
 
     // Self-heal: if a previous session left the firmware's configurator
     // behaviors stuck in disabled=true (the test_expression / complete
-    // protocol can leak that state — see ExpressionEditorScreen.dispose),
+    // protocol can leak that state; see ExpressionEditorScreen.dispose),
     // re-enable them on every connect. Cheap one-shot write; safe no-op
     // when the configurators are already enabled.
     await _completeExpressionTest(ble);
@@ -522,13 +536,19 @@ class ControlNotifier extends _$ControlNotifier {
   /// Reads every section via the page protocol and returns a fresh
   /// ControlState. Assumes the BLE link is connected and authenticated.
   Future<ControlState> _readSections(BleClient ble) async {
+    // A section a legacy lamp doesn't serve comes back as empty bytes;
+    // jsonDecode('') throws. Default missing sections to an empty object /
+    // array so each fromJson falls through to its field defaults, same
+    // tolerance as the optional exprcat catalog read.
     Future<Map<String, dynamic>> readJsonSection(String name) async {
       final bytes = await ble.readSection(_deviceId, name);
+      if (bytes.isEmpty) return const {};
       return jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
     }
 
     Future<List<dynamic>> readJsonListSection(String name) async {
       final bytes = await ble.readSection(_deviceId, name);
+      if (bytes.isEmpty) return const [];
       return jsonDecode(utf8.decode(bytes)) as List<dynamic>;
     }
 
@@ -562,10 +582,9 @@ class ControlNotifier extends _$ControlNotifier {
   }
 
 
-  /// Commit fence. Writes a single byte to CHAR_COMMIT — the firmware
+  /// Commit fence. Writes a single byte to CHAR_COMMIT. The firmware
   /// persists current RAM state to NVS. The whole fleet exposes
-  /// CHAR_COMMIT now (older firmware was retired); this is the only
-  /// persistence path.
+  /// CHAR_COMMIT; this is the only persistence path.
   Future<void> commit() async {
     final ble = ref.read(bleClientProvider);
     try {
@@ -639,7 +658,7 @@ class ControlNotifier extends _$ControlNotifier {
   /// doesn't lose the user's last change.
   ///
   /// IMPORTANT: This method MUST NOT call `ref.read(...)` or access any
-  /// Riverpod notifier `.state` — it runs from `ref.onDispose` where
+  /// Riverpod notifier `.state`; it runs from `ref.onDispose` where
   /// Riverpod forbids ref access. Uses cached `_ble` instead.
   void _flushPendingCommit() {
     if (!_commitPending) return;
@@ -717,7 +736,7 @@ class ControlNotifier extends _$ControlNotifier {
         allowLongWrite: true,
       );
     } on BleDisconnectedException {
-      // Expected when reboot==true — firmware drops the link mid-write.
+      // Expected when reboot==true. Firmware drops the link mid-write.
       // For reboot==false this is a real disconnect: rethrow so the
       // caller can surface it.
       if (!reboot) rethrow;
@@ -734,13 +753,12 @@ class ControlNotifier extends _$ControlNotifier {
   /// session, so a wisp paint frame mid-drag doesn't fight the user's
   /// pick. Always pair an `open=true` call with a matching `open=false`
   /// when the picker / drag closes (use `try/finally`). The lamp's
-  /// own onDisconnect handler also clears every flag as a defensive
-  /// sweep, so a forgotten close (app crash, force-stop) recovers on
-  /// the next reconnect.
+  /// own onDisconnect handler also clears every flag on disconnect, so a
+  /// forgotten close (app crash, force-stop) recovers on the next reconnect.
   ///
   /// Routed through a per-surface KeyedWriteCoalescer so a flurry of
   /// open/close pairs from rapid micro-drags collapses to the latest
-  /// state per surface — drag-tap-drag-tap on the brightness slider
+  /// state per surface: drag-tap-drag-tap on the brightness slider
   /// becomes one open + one close, not a queue of N pairs.
   void setEditSession(EditSurface surface, bool open) {
     _editSessionWriter?.schedule(
@@ -754,15 +772,7 @@ class ControlNotifier extends _$ControlNotifier {
     final cur = state.value;
     if (cur == null) return;
     state = AsyncData(cur.copyWith(
-      lamp: LampSection(
-        name: cur.lamp.name,
-        brightness: v,
-        advancedEnabled: cur.lamp.advancedEnabled,
-        webappEnabled: cur.lamp.webappEnabled,
-        socialMode: cur.lamp.socialMode,
-        fwVersion: cur.lamp.fwVersion,
-        fwChannel: cur.lamp.fwChannel,
-      ),
+      lamp: cur.lamp.copyWith(brightness: v),
     ));
     _brightnessWriter?.schedule(Uint8List.fromList([v]));
   }
@@ -814,7 +824,7 @@ class ControlNotifier extends _$ControlNotifier {
       ),
     ));
     _shadeColorsWriter?.schedule(_encodeColors(colors));
-    // Inventory "last seen" cache mirrors the first stop — same shape as
+    // Inventory "last seen" cache mirrors the first stop. Same shape as
     // the pre-gradient single-color path, so the lamp picker's swatch
     // preview stays representative.
     if (colors.isNotEmpty) {
@@ -865,7 +875,6 @@ class ControlNotifier extends _$ControlNotifier {
     state = AsyncData(cur.copyWith(
       base: BaseSection(
         px: cur.base.px,
-        ac: cur.base.ac.clamp(0, colors.isEmpty ? 0 : colors.length - 1),
         bpp: cur.base.bpp,
         byteOrder: cur.base.byteOrder,
         colors: colors,
@@ -876,31 +885,8 @@ class ControlNotifier extends _$ControlNotifier {
     ));
     _baseColorsWriter?.schedule(_encodeColors(colors));
     if (colors.isNotEmpty) {
-      final acIdx = cur.base.ac.clamp(0, colors.length - 1);
-      _queueSeen(base: colors[acIdx]);
+      _queueSeen(base: LampColor.blendedIdentity(colors));
     }
-  }
-
-  Future<void> setBaseAc(int index) async {
-    final cur = state.value;
-    if (cur == null) return;
-    final clamped =
-        index.clamp(0, cur.base.colors.isEmpty ? 0 : cur.base.colors.length - 1);
-    state = AsyncData(cur.copyWith(
-      base: BaseSection(
-        px: cur.base.px,
-        ac: clamped,
-        bpp: cur.base.bpp,
-        byteOrder: cur.base.byteOrder,
-        colors: cur.base.colors,
-        knockout: cur.base.knockout,
-        colorsEditable: cur.base.colorsEditable,
-        segments: cur.base.segments,
-      ),
-    ));
-    // ac is part of the base settings blob, not its own characteristic; the
-    // firmware picks it up on the next CHAR_SETTINGS_BLOB save. Updating
-    // locally is enough for the visible session.
   }
 
   Future<void> setKnockoutPixel(int index, int brightness) async {
@@ -909,14 +895,13 @@ class ControlNotifier extends _$ControlNotifier {
     final clamped = brightness.clamp(0, 100);
     final next = Map<int, int>.from(cur.base.knockout);
     if (clamped == 100) {
-      next.remove(index); // default — drop the entry to keep the map small
+      next.remove(index); // default value; drop the entry to keep the map small
     } else {
       next[index] = clamped;
     }
     state = AsyncData(cur.copyWith(
       base: BaseSection(
         px: cur.base.px,
-        ac: cur.base.ac,
         bpp: cur.base.bpp,
         byteOrder: cur.base.byteOrder,
         colors: cur.base.colors,
@@ -948,7 +933,7 @@ class ControlNotifier extends _$ControlNotifier {
       BleClient ble, int index, int brightness) async {
     try {
       // Same write-without-response semantics as the color/brightness
-      // coalescers — knockout writes are also slider-rate live preview.
+      // coalescers. Knockout writes are also slider-rate live preview.
       await ble.write(
         _deviceId,
         BleUuids.controlService,
@@ -962,9 +947,9 @@ class ControlNotifier extends _$ControlNotifier {
   }
 
   /// Reset every knockout entry to 100% in one pass. Cheaper than looping
-  /// `setKnockoutPixel` N times because we mutate state once and skip the
-  /// per-pixel debounce timers. Firmware has no clear-all sentinel, so we
-  /// still write index+100 per previously-edited pixel.
+  /// `setKnockoutPixel` N times: mutates state once and skips the
+  /// per-pixel debounce timers. Firmware has no clear-all sentinel, so this
+  /// still writes index+100 per already-edited pixel.
   Future<void> clearKnockout() async {
     final cur = state.value;
     if (cur == null) return;
@@ -978,7 +963,6 @@ class ControlNotifier extends _$ControlNotifier {
     state = AsyncData(cur.copyWith(
       base: BaseSection(
         px: cur.base.px,
-        ac: cur.base.ac,
         bpp: cur.base.bpp,
         byteOrder: cur.base.byteOrder,
         colors: cur.base.colors,
@@ -1000,24 +984,14 @@ class ControlNotifier extends _$ControlNotifier {
     _scheduleCommitDebounced();
   }
 
-  // ---------------------------------------------------------------------------
-  // Setup-screen mutators — each call writes immediately via
+  // Setup-screen mutators: each call writes immediately via
   // writeSettingsBlob. name / SSID use reboot:false (instant);
   // password / advanced-LED use reboot:true (triggers reboot + ~8–12s reconnect).
-  // ---------------------------------------------------------------------------
 
   Future<void> setLampName(String name) async {
     await _mutate(
       (s) => s.copyWith(
-        lamp: LampSection(
-          name: name,
-          brightness: s.lamp.brightness,
-          advancedEnabled: s.lamp.advancedEnabled,
-          webappEnabled: s.lamp.webappEnabled,
-          socialMode: s.lamp.socialMode,
-          fwVersion: s.lamp.fwVersion,
-          fwChannel: s.lamp.fwChannel,
-        ),
+        lamp: s.lamp.copyWith(name: name),
       ),
       () async {
         await writeSettingsBlob({'lamp': {'name': name}}, reboot: false);
@@ -1033,15 +1007,7 @@ class ControlNotifier extends _$ControlNotifier {
   Future<void> setLampAdvancedEnabled(bool v) async {
     await _mutate(
       (s) => s.copyWith(
-        lamp: LampSection(
-          name: s.lamp.name,
-          brightness: s.lamp.brightness,
-          advancedEnabled: v,
-          webappEnabled: s.lamp.webappEnabled,
-          socialMode: s.lamp.socialMode,
-          fwVersion: s.lamp.fwVersion,
-          fwChannel: s.lamp.fwChannel,
-        ),
+        lamp: s.lamp.copyWith(advancedEnabled: v),
       ),
       () async {
         await writeSettingsBlob(
@@ -1050,18 +1016,22 @@ class ControlNotifier extends _$ControlNotifier {
     );
   }
 
+  Future<void> setLampBrightnessCeiling(int v) async {
+    await _mutate(
+      (s) => s.copyWith(
+        lamp: s.lamp.copyWith(brightnessCeiling: v),
+      ),
+      () async {
+        await writeSettingsBlob(
+            {'lamp': {'brightnessCeiling': v}}, reboot: false);
+      },
+    );
+  }
+
   Future<void> setLampWebappEnabled(bool v) async {
     await _mutate(
       (s) => s.copyWith(
-        lamp: LampSection(
-          name: s.lamp.name,
-          brightness: s.lamp.brightness,
-          advancedEnabled: s.lamp.advancedEnabled,
-          webappEnabled: v,
-          socialMode: s.lamp.socialMode,
-          fwVersion: s.lamp.fwVersion,
-          fwChannel: s.lamp.fwChannel,
-        ),
+        lamp: s.lamp.copyWith(webappEnabled: v),
       ),
       () async {
         await writeSettingsBlob(
@@ -1071,20 +1041,12 @@ class ControlNotifier extends _$ControlNotifier {
   }
 
   /// Personality pill. Commits immediately via `writeSettingsBlob`
-  /// (`reboot: false`) — no reboot required; the firmware picks up the new
+  /// (`reboot: false`): no reboot required; the firmware picks up the new
   /// social mode without disconnecting.
   Future<void> setLampSocialMode(SocialMode mode) async {
     await _mutate(
       (s) => s.copyWith(
-        lamp: LampSection(
-          name: s.lamp.name,
-          brightness: s.lamp.brightness,
-          advancedEnabled: s.lamp.advancedEnabled,
-          webappEnabled: s.lamp.webappEnabled,
-          socialMode: mode,
-          fwVersion: s.lamp.fwVersion,
-          fwChannel: s.lamp.fwChannel,
-        ),
+        lamp: s.lamp.copyWith(socialMode: mode),
       ),
       () async {
         await writeSettingsBlob(
@@ -1095,14 +1057,14 @@ class ControlNotifier extends _$ControlNotifier {
 
   /// Wipe the lamp back to factory defaults. Writes the
   /// `{factoryReset: true}` sentinel to settings_blob (encrypted with the
-  /// CURRENT password — the lamp authenticates the request before
+  /// CURRENT password; the lamp authenticates the request before
   /// clearing). Firmware clears its NVS namespace and reboots into the
   /// awaiting-adoption state.
   ///
   /// After the expected reboot-disconnect, removes this lamp from the
-  /// inventory: it no longer has a password we know, and from the user's
-  /// POV it's a fresh lamp again. The caller (UI) typically navigates
-  /// back to the lamp picker.
+  /// inventory: it no longer has a password the app knows, and from the
+  /// user's POV it's a fresh lamp again. The caller (UI) typically
+  /// navigates back to the lamp picker.
   Future<void> factoryReset() async {
     final cur = state.value;
     if (cur == null) return;
@@ -1145,7 +1107,7 @@ class ControlNotifier extends _$ControlNotifier {
       if (!isBleDisconnectError(e)) rethrow;
     }
 
-    // Lamp is now factory-fresh — tear down everything tied to this
+    // Lamp is now factory-fresh; tear down everything tied to this
     // session so the reconnect machinery doesn't churn forever against
     // a lamp the user has deliberately abandoned.
     //
@@ -1165,7 +1127,7 @@ class ControlNotifier extends _$ControlNotifier {
     try {
       await ble.disconnect(_deviceId);
     } catch (_) {
-      // already-disconnected / lamp rebooting — both fine.
+      // already-disconnected / lamp rebooting; both fine.
     }
     await ref
         .read(inventoryNotifierProvider.notifier)
@@ -1184,11 +1146,11 @@ class ControlNotifier extends _$ControlNotifier {
   /// inventory (so future reconnects skip the prompt) and invalidates the
   /// provider so build() reruns cleanly with the new password in inventory.
   /// On failure, throws [LampAuthRequiredException] without mutating
-  /// inventory — the dialog surfaces it inline and lets the user retry.
+  /// inventory; the dialog surfaces it inline and lets the user retry.
   ///
   /// Reuses `_ble` / `_deviceId`, which build() set before it threw. The
-  /// BLE link is still alive: ControlNotifier is keepAlive, so the
-  /// disconnect onDispose hasn't fired.
+  /// BLE link is still alive: the error UI still listens this provider, so
+  /// the notifier isn't disposed and the disconnect onDispose hasn't fired.
   Future<void> submitConnectPassword(String pw) async {
     await AuthClient(ble: _ble)
         .authenticate(deviceId: _deviceId, password: pw);
@@ -1203,10 +1165,10 @@ class ControlNotifier extends _$ControlNotifier {
   }
 
   /// Change the lamp's auth password. Writes a partial settings_blob with
-  /// just `{lamp: {password: newPassword}}` — same path the onboarding
+  /// just `{lamp: {password: newPassword}}`, the same path the onboarding
   /// claim uses to set the initial password. The lamp drains the write,
-  /// commits the new password to NVS, and reboots; we then reconnect and
-  /// reauth with the new password.
+  /// commits the new password to NVS, and reboots; the app then reconnects
+  /// and reauths with the new password.
   ///
   /// Inventory is updated to the new password BEFORE the BLE write so the
   /// post-reboot reconnect picks up the new credentials. If the write
@@ -1270,7 +1232,7 @@ class ControlNotifier extends _$ControlNotifier {
       // Expected: the reboot drops the link mid-write.
     } catch (e) {
       if (isBleDisconnectError(e)) return;
-      // Genuine failure — restore the old credentials so the next
+      // Genuine failure: restore the old credentials so the next
       // reconnect attempt uses what the firmware still actually has.
       await ref
           .read(inventoryNotifierProvider.notifier)
@@ -1281,7 +1243,7 @@ class ControlNotifier extends _$ControlNotifier {
     // Reuse the save()-style reconnect cadence: flip the saving banner,
     // drop state into AsyncLoading, then defer to _awaitReconnectAndReload
     // which polls connect+auth+read with backoff (replaces the brittle
-    // fixed 5s delay — see the helper's docstring).
+    // fixed 5s delay; see the helper's docstring).
     ref.read(lampSaveStatusProvider(_deviceId).notifier).start();
     state = const AsyncLoading<ControlState>();
     unawaited(_awaitReconnectAndReload(
@@ -1297,13 +1259,7 @@ class ControlNotifier extends _$ControlNotifier {
 
   Future<void> setHomeSsid(String ssid) async {
     await _mutate(
-      (s) => s.copyWith(
-        home: HomeSection(
-          ssid: ssid,
-          brightness: s.home.brightness,
-          enabled: s.home.enabled,
-        ),
-      ),
+      (s) => s.copyWith(home: s.home.copyWith(ssid: ssid)),
       () async {
         await writeSettingsBlob({'homeMode': {'ssid': ssid}}, reboot: false);
       },
@@ -1315,13 +1271,9 @@ class ControlNotifier extends _$ControlNotifier {
     if (cur == null) return;
     final clamped = brightness.clamp(0, 100);
     state = AsyncData(cur.copyWith(
-      home: HomeSection(
-        ssid: cur.home.ssid,
-        brightness: clamped,
-        enabled: cur.home.enabled,
-      ),
+      home: cur.home.copyWith(brightness: clamped),
     ));
-    // Live-write via CHAR_BRIGHTNESS — the firmware routes the value to
+    // Live-write via CHAR_BRIGHTNESS. The firmware routes the value to
     // homeMode.brightness vs lamp.brightness based on whether the app
     // has signalled it's on the Home Mode page (CHAR_HOME_MODE_FOCUS).
     // Calling setHomeBrightness while NOT on the Home Mode page would
@@ -1336,18 +1288,87 @@ class ControlNotifier extends _$ControlNotifier {
 
   Future<void> setHomeEnabled(bool enabled) async {
     await _mutate(
-      (s) => s.copyWith(
-        home: HomeSection(
-          ssid: s.home.ssid,
-          brightness: s.home.brightness,
-          enabled: enabled,
-        ),
-      ),
+      (s) => s.copyWith(home: s.home.copyWith(enabled: enabled)),
       () async {
         await writeSettingsBlob(
             {'homeMode': {'enabled': enabled}}, reboot: false);
       },
     );
+  }
+
+  Future<void> setHomeNetworkBound(bool networkBound) async {
+    await _mutate(
+      (s) => s.copyWith(home: s.home.copyWith(networkBound: networkBound)),
+      () async {
+        await writeSettingsBlob(
+            {'homeMode': {'networkBound': networkBound}}, reboot: false);
+      },
+    );
+  }
+
+  Future<void> setHomeSocialDisabled(bool socialDisabled) async {
+    await _mutate(
+      (s) => s.copyWith(home: s.home.copyWith(socialDisabled: socialDisabled)),
+      () async {
+        await writeSettingsBlob(
+            {'homeMode': {'socialDisabled': socialDisabled}}, reboot: false);
+      },
+    );
+  }
+
+  Future<void> setHomeExpressionDisabled(String id, bool disabled) async {
+    await _mutate(
+      (s) {
+        final current = s.home.disabledExpressionTypes;
+        final updated = disabled
+            ? (current.contains(id) ? current : [...current, id])
+            : current.where((e) => e != id).toList();
+        return s.copyWith(
+            home: s.home.copyWith(disabledExpressionTypes: updated));
+      },
+      () async {
+        final updated = state.value?.home.disabledExpressionTypes ?? [];
+        await writeSettingsBlob(
+            {'homeMode': {'disabledExpressionTypes': updated}}, reboot: false);
+      },
+    );
+  }
+
+  /// Pick the wire byte order for the base strip. Recognized values:
+  /// `GRBW` (4 bpp), `GRB` (3 bpp), `BGR` (3 bpp). `bpp` is updated to
+  /// match so the wire payload stays internally consistent for any
+  /// firmware that only reads `bpp`.
+  Future<void> setBaseByteOrder(String order) async {
+    final cur = state.value;
+    if (cur == null) return;
+    final normalized = _normalizeByteOrder(order);
+    state = AsyncData(cur.copyWith(
+      base: BaseSection(
+        px: cur.base.px,
+        bpp: _bppForByteOrder(normalized),
+        byteOrder: normalized,
+        colors: cur.base.colors,
+        knockout: cur.base.knockout,
+        colorsEditable: cur.base.colorsEditable,
+        segments: cur.base.segments,
+      ),
+    ));
+  }
+
+  Future<void> setShadeByteOrder(String order) async {
+    final cur = state.value;
+    if (cur == null) return;
+    final normalized = _normalizeByteOrder(order);
+    state = AsyncData(cur.copyWith(
+      shade: ShadeSection(
+        px: cur.shade.px,
+        bpp: _bppForByteOrder(normalized),
+        byteOrder: normalized,
+        colors: cur.shade.colors,
+        colorsEditable: cur.shade.colorsEditable,
+        segments: cur.shade.segments,
+      ),
+    ));
   }
 
   /// Update px for a single segment and recompute the role total.
@@ -1385,7 +1406,6 @@ class ControlNotifier extends _$ControlNotifier {
       state = AsyncData(cur.copyWith(
         base: BaseSection(
           px: rolePx,
-          ac: cur.base.ac,
           bpp: cur.base.bpp,
           byteOrder: cur.base.byteOrder,
           colors: cur.base.colors,
@@ -1397,13 +1417,13 @@ class ControlNotifier extends _$ControlNotifier {
     }
   }
 
-  /// Apply Advanced LED settings (px, ac) via
+  /// Apply Advanced LED settings (px, byteOrder, bpp) via
   /// settings_blob with reboot:true. Mirrors the setLampPassword pattern:
   /// write → firmware reboots (drops link) → reconnect ladder →
   /// reload sections. After reload, diffs the freshly-read base/shade
   /// sections against what was shipped. Returns a list of field names
   /// that didn't round-trip (empty on full success). Caller shows a
-  /// "save didn't take — retry?" snackbar on non-empty mismatches.
+  /// "save didn't take, retry?" snackbar on non-empty mismatches.
   Future<List<String>> applyAdvancedLedsAndReboot({
     required BaseSection base,
     required ShadeSection shade,
@@ -1411,7 +1431,8 @@ class ControlNotifier extends _$ControlNotifier {
     final shipped = <String, dynamic>{
       'base': {
         'px': base.px,
-        'ac': base.ac,
+        'byteOrder': base.byteOrder,
+        'bpp': base.bpp,
         'colors': base.colors.map((c) => c.toHex()).toList(),
         'segments': base.segments
             .map((s) => {
@@ -1423,6 +1444,8 @@ class ControlNotifier extends _$ControlNotifier {
       },
       'shade': {
         'px': shade.px,
+        'byteOrder': shade.byteOrder,
+        'bpp': shade.bpp,
         'colors': shade.colors.map((c) => c.toHex()).toList(),
         'segments': shade.segments
             .map((s) => {
@@ -1451,7 +1474,15 @@ class ControlNotifier extends _$ControlNotifier {
         password: lamp.controlPassword ?? '',
         postReload: (fresh) async {
           if (fresh.base.px != base.px) mismatches.add('base.px');
+          if (fresh.base.byteOrder != base.byteOrder) {
+            mismatches.add('base.byteOrder');
+          }
+          if (fresh.base.bpp != base.bpp) mismatches.add('base.bpp');
           if (fresh.shade.px != shade.px) mismatches.add('shade.px');
+          if (fresh.shade.byteOrder != shade.byteOrder) {
+            mismatches.add('shade.byteOrder');
+          }
+          if (fresh.shade.bpp != shade.bpp) mismatches.add('shade.bpp');
         },
       );
     } catch (e) {
@@ -1460,11 +1491,16 @@ class ControlNotifier extends _$ControlNotifier {
     return mismatches;
   }
 
-  // ---------------------------------------------------------------------------
-  // Expressions
-  // ---------------------------------------------------------------------------
+  static String _normalizeByteOrder(String order) {
+    final up = order.toUpperCase();
+    if (up == 'GRBW' || up == 'GRB' || up == 'BGR') return up;
+    return 'GRBW';
+  }
 
-  /// Add or update an expression. Writes via CHAR_EXPRESSION_OP — the
+  static int _bppForByteOrder(String order) =>
+      order == 'GRBW' || order == 'BGRW' || order == 'RGBW' ? 4 : 3;
+
+  /// Add or update an expression. Writes via CHAR_EXPRESSION_OP. The
   /// firmware's expressionOp handler calls applyExpressionOpLocal + persistConfig,
   /// persisting the change to NVS immediately (no settings_blob write needed).
   Future<void> upsertExpression(ExpressionConfig entry) async {
@@ -1513,22 +1549,17 @@ class ControlNotifier extends _$ControlNotifier {
   }
 
 
-  /// Live-preview an expression configuration without persisting it.
-  ///
-  /// Sends the firmware-expected envelope `{"a":"test_expression", "type":…,
-  /// "target":…}`. Previously this sent the full ExpressionConfig JSON
-  /// directly, which the firmware's BLE dispatch couldn't recognize and
-  /// silently treated as `test_expression` against a non-existent type —
-  /// leaving the configurator behaviors stuck in `disabled=true` until the
-  /// next `test_expression_complete` (or lamp reboot). The colors and
-  /// parameters are already on the lamp via the `expressionOp` upsert that
-  /// preceded this call, so the envelope only needs to name the entry.
+  /// Live-preview an expression without persisting it. The colors +
+  /// parameters ride in the envelope so the firmware fires a transient
+  /// one-shot seeded from them, with no NVS write or configured-entry lookup.
   Future<void> testExpression(ExpressionConfig entry) async {
     final ble = ref.read(bleClientProvider);
     final payload = <String, dynamic>{
       'a': 'test_expression',
       'type': entry.type,
       'target': entry.target,
+      'colors': entry.colors.map((c) => c.toHex()).toList(),
+      'parameters': entry.parameters,
     };
     final bytes = Uint8List.fromList(utf8.encode(jsonEncode(payload)));
     try {
@@ -1544,14 +1575,14 @@ class ControlNotifier extends _$ControlNotifier {
     }
   }
 
-  /// Trigger a greeting from the connected lamp toward [bdAddr]. The lamp
+  /// Trigger a greeting from the connected lamp toward [lampId]. The lamp
   /// resolves the peer from its nearby list and plays its greeting; silently
   /// no-ops if the peer isn't currently sighted.
-  Future<void> triggerGreet(String bdAddr) async {
+  Future<void> triggerGreet(String lampId) async {
     final ble = ref.read(bleClientProvider);
     final bytes = Uint8List.fromList(utf8.encode(jsonEncode({
       'a': 'triggerGreet',
-      'bdAddr': bdAddr,
+      'lampId': lampId,
     })));
     try {
       await ble.write(
@@ -1567,8 +1598,8 @@ class ControlNotifier extends _$ControlNotifier {
   }
 
   /// Tells the firmware to end a `test_expression` preview and re-enable
-  /// the configurator behaviors. Safe to call when no preview is in flight
-  /// — firmware treats it idempotently. Called from build() (heal stuck
+  /// the configurator behaviors. Safe to call when no preview is in flight;
+  /// firmware treats it idempotently. Called from build() (heal stuck
   /// state on connect) and from the expression editor's dispose.
   Future<void> completeExpressionTest() async {
     _zonePreviewWriter?.cancel();
@@ -1598,7 +1629,7 @@ class ControlNotifier extends _$ControlNotifier {
             utf8.encode('{"a":"test_expression_complete"}')),
       );
     } catch (_) {
-      // best-effort — same contract as the live-preview writes
+      // best-effort, same contract as the live-preview writes
     }
   }
 
@@ -1629,13 +1660,9 @@ class ControlNotifier extends _$ControlNotifier {
     return Uint8List.fromList(utf8.encode(jsonEncode(map)));
   }
 
-  // ---------------------------------------------------------------------------
-  // Connection lifecycle
-  // ---------------------------------------------------------------------------
-
   /// Handles CHAR_STATE_NOTIFY payloads.
   /// Fields: `previewActive` (bool), `greeting` (object or absent).
-  /// Older firmware emits `{}` — missing fields stay at their defaults.
+  /// Older firmware emits `{}`; missing fields stay at their defaults.
   void _onStateNotify(Uint8List bytes) {
     final cur = state.value;
     if (cur == null || bytes.isEmpty) return;
@@ -1663,12 +1690,12 @@ class ControlNotifier extends _$ControlNotifier {
     final cur = state.value;
     if (cur == null) return;
     if (isConnected && !cur.connected) {
-      // fbp's connectionState emitted `true` mid-reconnect — but the
+      // fbp's connectionState emitted `true` mid-reconnect, but the
       // GATT services aren't necessarily discovered yet (observed on
       // hardware: a 4-second window where writes failed with
       // "primary service not found" before the canary lands).
       //
-      // Don't flip the UI to "connected" on this edge — _tryReconnect's
+      // Don't flip the UI to "connected" on this edge. _tryReconnect's
       // canary read is the truthful "the link can actually be used"
       // signal. Kick _tryReconnect immediately rather than waiting for
       // the soft 500ms reconnect timer; the in-flight guard prevents
@@ -1688,19 +1715,19 @@ class ControlNotifier extends _$ControlNotifier {
   /// actually alive. Used by the foreground-resume listener: fbp may
   /// still report `isConnected == true` for a connection the OS killed
   /// while the app was backgrounded, but any real I/O immediately
-  /// throws BleDisconnectedException. We surface that as the disconnect
-  /// edge we never observed, and the existing _onConnectionChange path
+  /// throws BleDisconnectedException. Surfaces that as the disconnect
+  /// edge never observed, and the existing _onConnectionChange path
   /// schedules a reconnect.
   ///
   /// No-op when:
   ///   - notifier state is still loading / errored (nothing connected yet)
-  ///   - we're already in a reconnect cycle (banner showing attempts)
+  ///   - already in a reconnect cycle (banner showing attempts)
   Future<void> _probeLink() async {
     final cur = state.value;
     if (cur == null || !cur.connected) return;
     final ble = ref.read(bleClientProvider);
     if (!ble.isConnected(_deviceId)) {
-      // fbp itself has dropped the link — surface the missing false edge.
+      // fbp itself has dropped the link; surface the missing false edge.
       _onConnectionChange(false);
       return;
     }
@@ -1719,18 +1746,17 @@ class ControlNotifier extends _$ControlNotifier {
     } catch (_) {
       // Any other error (transient read failure, encryption etc.) is
       // not a clean disconnect signal. Don't disturb the connection
-      // state — the next user action will surface a real failure if
+      // state; the next user action will surface a real failure if
       // the link is actually dead.
     }
   }
 
-  /// Reconnect attempt at which we escalate to `cycleAdapter`. The soft
-  /// reconnect ladder is good for clean link drops (lamp reboot,
-  /// transient RF loss); after this many failures we assume the
-  /// Android `gatts_if` slot has zombified and force a soft-cycle
-  /// (explicit disconnect + delay + reconnect) before the next attempt.
-  /// Pre-this-attempt, plain reconnect; on this attempt, cycle then
-  /// reconnect.
+  /// Reconnect attempt at which escalation to `cycleAdapter` kicks in. The
+  /// soft reconnect ladder is good for clean link drops (lamp reboot,
+  /// transient RF loss); after this many failures the Android `gatts_if`
+  /// slot is assumed zombified, forcing a soft-cycle (explicit disconnect +
+  /// delay + reconnect) before the next attempt. Pre-this-attempt, plain
+  /// reconnect; on this attempt, cycle then reconnect.
   static const int _cycleAdapterAttempt = 3;
 
   void _scheduleReconnect() {
@@ -1780,7 +1806,7 @@ class ControlNotifier extends _$ControlNotifier {
       await AuthClient(ble: ble)
           .authenticate(deviceId: _deviceId, password: lamp.controlPassword);
       // Same canary as build(): if the firmware still returns empty bytes
-      // after our auth attempt, the stored password no longer works (e.g.
+      // after this auth attempt, the stored password no longer works (e.g.
       // it was changed on another device). Drop to error so the UI re-
       // prompts instead of leaving the user in a silent-write-rejected
       // state with the banner clearing as if everything was fine.
@@ -1792,25 +1818,25 @@ class ControlNotifier extends _$ControlNotifier {
       }
       // Canary succeeded → the link is fully usable (GATT connected
       // AND services discovered AND auth restored). Pull every section
-      // fresh from the lamp before flipping the UI to connected — during
+      // fresh from the lamp before flipping the UI to connected. During
       // the disconnect window the firmware state could have changed via
       // the webapp, a lamp reboot, or a mesh override, and the locally-
       // cached state is stale. The lamp is authoritative.
       //
       // Trade-off: if the user dragged a slider mid-disconnect (the
       // live-preview writes failed silently during the gap), that input
-      // is lost. The alternative — push the stale local cache — would
+      // is lost. The alternative (pushing the stale local cache) would
       // overwrite any genuine lamp-side change with old data, which
       // breaks trust in a way the missing-gesture case doesn't.
       //
-      // Bail if disposed during the awaits — touching state would throw.
-      // The notifier dispose path already cancels everything we care about.
+      // Bail if disposed during the awaits; touching state would throw.
+      // The notifier dispose path already cancels everything that matters here.
       final fresh = await _readSections(ble);
       if (!ref.mounted) return;
       _reconnectTimer?.cancel();
       state = AsyncData(fresh.copyWith(connected: true, reconnectAttempt: 0));
     } catch (_) {
-      // Bail if the notifier was disposed while we were awaiting — touching
+      // Bail if the notifier was disposed while awaiting; touching
       // `state` after dispose throws. This happens in tests that
       // dispose the ProviderContainer while a reconnect is mid-flight,
       // and could also happen in production if the user navigates
@@ -1819,7 +1845,7 @@ class ControlNotifier extends _$ControlNotifier {
         _reconnectInFlight = false;
         return;
       }
-      // Clear the flag BEFORE scheduling the next attempt — the timer
+      // Clear the flag BEFORE scheduling the next attempt. The timer
       // is scheduled via _scheduleReconnect and its `_tryReconnect`
       // call will check `_reconnectInFlight` on entry. If finally
       // hadn't yet run, that next call would incorrectly skip itself

@@ -10,8 +10,8 @@ const _mapEq = MapEquality<Object?, Object?>();
 ///
 /// Manually-overridden `==` / `hashCode`: Riverpod's
 /// `.select` and AsyncValue equality short-circuit on `prev == next`.
-/// Without explicit equality the default identity compare always misses
-/// — every notifier rebuild propagated to every consumer even when no
+/// Without explicit equality the default identity compare always misses.
+/// Every notifier rebuild propagated to every consumer even when no
 /// observable field changed. Full @freezed conversion was rejected
 /// because the `fromJson` factories carry non-trivial coercion logic
 /// (knockout list → map, byteOrder fallback from bpp, etc.) that the
@@ -21,18 +21,21 @@ class LampSection {
     required this.name,
     required this.brightness,
     required this.advancedEnabled,
+    this.brightnessCeiling = 170,
     required this.webappEnabled,
     required this.socialMode,
     this.fwVersion,
     this.fwChannel,
     this.hasPassword,
     this.lampType,
+    this.lampId,
   });
 
   final String name;
   final int brightness;
   final bool advancedEnabled;
-  // Default true on missing — older firmware without the field still ran
+  final int brightnessCeiling;
+  // Default true on missing. Older firmware without the field still ran
   // the on-device webapp at boot, so the absent payload IS "enabled".
   final bool webappEnabled;
   final SocialMode socialMode;
@@ -48,23 +51,31 @@ class LampSection {
 
   /// Whether the lamp's NVS has a non-empty controlPassword set. Lets
   /// the app detect divergence between its cached pw and the lamp's
-  /// actual state — when the lamp was reflashed/NVS-wiped, this comes
+  /// actual state. When the lamp was reflashed/NVS-wiped, this comes
   /// back false and the app clears its cached pw so settings_blob
   /// writes fall back to plaintext. Null on older firmware that doesn't
-  /// emit the field — the divergence heal is opt-in on its presence.
+  /// emit the field. The divergence heal is opt-in on its presence.
   final bool? hasPassword;
 
-  /// Lamp variant identity — `'standard'`, `'snafu'`, etc. Firmware-owned
-  /// (resolved at first boot via the LAMP_INITIAL_TYPE build flag, then
-  /// persisted in NVS). Used by the app to fetch the matching per-variant
-  /// firmware binary at OTA time. Nullable for backward compat with older
-  /// firmware that doesn't yet emit the field.
+  /// Lamp variant identity: `'standard'`, `'snafu'`, etc. Firmware-owned
+  /// (the compiled-in variant, mirrored into NVS each boot). Used by the app
+  /// to fetch the matching per-variant firmware binary at OTA time. Nullable
+  /// for backward compat with older firmware that doesn't yet emit the field.
   final String? lampType;
+
+  /// The lamp's raw mesh MAC (uppercase colon-hex), same wire form as the peer
+  /// `lampId` in the nearby section. Lets the app match this lamp against
+  /// peer-observed addresses on both platforms (the BLE remoteId is a MAC on
+  /// Android but a CoreBluetooth UUID on iOS); matches are case-insensitive.
+  /// Null on older firmware.
+  final String? lampId;
 
   factory LampSection.fromJson(Map<String, dynamic> json) => LampSection(
         name: (json['name'] as String?) ?? '',
         brightness: (json['brightness'] as num?)?.toInt() ?? 100,
         advancedEnabled: json['advancedEnabled'] as bool? ?? false,
+        brightnessCeiling:
+            (json['brightnessCeiling'] as num?)?.toInt() ?? 170,
         webappEnabled: json['webappEnabled'] as bool? ?? true,
         socialMode:
             SocialMode.fromWire((json['socialMode'] as num?)?.toInt()),
@@ -72,6 +83,34 @@ class LampSection {
         fwChannel: json['fwChannel'] as String?,
         hasPassword: json['hasPassword'] as bool?,
         lampType: json['lampType'] as String?,
+        lampId: json['lampId'] as String?,
+      );
+
+  LampSection copyWith({
+    String? name,
+    int? brightness,
+    bool? advancedEnabled,
+    int? brightnessCeiling,
+    bool? webappEnabled,
+    SocialMode? socialMode,
+    int? fwVersion,
+    String? fwChannel,
+    bool? hasPassword,
+    String? lampType,
+    String? lampId,
+  }) =>
+      LampSection(
+        name: name ?? this.name,
+        brightness: brightness ?? this.brightness,
+        advancedEnabled: advancedEnabled ?? this.advancedEnabled,
+        brightnessCeiling: brightnessCeiling ?? this.brightnessCeiling,
+        webappEnabled: webappEnabled ?? this.webappEnabled,
+        socialMode: socialMode ?? this.socialMode,
+        fwVersion: fwVersion ?? this.fwVersion,
+        fwChannel: fwChannel ?? this.fwChannel,
+        hasPassword: hasPassword ?? this.hasPassword,
+        lampType: lampType ?? this.lampType,
+        lampId: lampId ?? this.lampId,
       );
 
   @override
@@ -81,24 +120,28 @@ class LampSection {
           name == other.name &&
           brightness == other.brightness &&
           advancedEnabled == other.advancedEnabled &&
+          brightnessCeiling == other.brightnessCeiling &&
           webappEnabled == other.webappEnabled &&
           socialMode == other.socialMode &&
           fwVersion == other.fwVersion &&
           fwChannel == other.fwChannel &&
           hasPassword == other.hasPassword &&
-          lampType == other.lampType;
+          lampType == other.lampType &&
+          lampId == other.lampId;
 
   @override
   int get hashCode => Object.hash(
         name,
         brightness,
         advancedEnabled,
+        brightnessCeiling,
         webappEnabled,
         socialMode,
         fwVersion,
         fwChannel,
         hasPassword,
         lampType,
+        lampId,
       );
 }
 
@@ -134,18 +177,24 @@ class Segment {
 class BaseSection {
   const BaseSection({
     required this.px,
-    required this.ac,
     required this.bpp,
     required this.byteOrder,
     required this.colors,
     required this.knockout,
     this.colorsEditable = true,
     this.segments = const [],
+    this.drawIdleMa = 0,
+    this.drawFullMa = 0,
   });
 
   final int px;
-  final int ac;
   final int bpp;
+
+  /// Whole-lamp current draw anchors (mA) the firmware emits: idle floor and
+  /// full-brightness ceiling. Drive the Battery Saver draw estimate. 0 on
+  /// older firmware that doesn't emit them.
+  final int drawIdleMa;
+  final int drawFullMa;
 
   /// NeoPixel wire byte order: `GRBW` (4 bpp), `GRB` (3 bpp), or `BGR`
   /// (3 bpp). Source of truth for strip type; `bpp` is kept in sync so
@@ -161,7 +210,7 @@ class BaseSection {
   final Map<int, int> knockout;
 
   /// Whether the app should expose the color picker for this surface.
-  /// Firmware-owned — set by the Lamp subclass via applyDefaults; defaults
+  /// Firmware-owned. Set by the Lamp subclass via applyDefaults; defaults
   /// to true for backward compat with older firmware that doesn't emit it.
   final bool colorsEditable;
 
@@ -192,7 +241,6 @@ class BaseSection {
         : (bpp == 4 ? 'GRBW' : 'GRB');
     return BaseSection(
       px: (json['px'] as num?)?.toInt() ?? 35,
-      ac: (json['ac'] as num?)?.toInt() ?? 0,
       bpp: bpp,
       byteOrder: byteOrder,
       colors: ((json['colors'] as List?) ?? const [])
@@ -204,6 +252,8 @@ class BaseSection {
           .whereType<Map<String, dynamic>>()
           .map(Segment.fromJson)
           .toList(),
+      drawIdleMa: (json['drawIdleMa'] as num?)?.toInt() ?? 0,
+      drawFullMa: (json['drawFullMa'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -212,24 +262,26 @@ class BaseSection {
       identical(this, other) ||
       other is BaseSection &&
           px == other.px &&
-          ac == other.ac &&
           bpp == other.bpp &&
           byteOrder == other.byteOrder &&
           _listEq.equals(colors, other.colors) &&
           _mapEq.equals(knockout, other.knockout) &&
           colorsEditable == other.colorsEditable &&
-          _listEq.equals(segments, other.segments);
+          _listEq.equals(segments, other.segments) &&
+          drawIdleMa == other.drawIdleMa &&
+          drawFullMa == other.drawFullMa;
 
   @override
   int get hashCode => Object.hash(
         px,
-        ac,
         bpp,
         byteOrder,
         _listEq.hash(colors),
         _mapEq.hash(knockout),
         colorsEditable,
         _listEq.hash(segments),
+        drawIdleMa,
+        drawFullMa,
       );
 }
 
@@ -253,7 +305,7 @@ class ShadeSection {
   final List<LampColor> colors;
 
   /// Whether the app should expose the color picker for this surface.
-  /// Firmware-owned — set by the Lamp subclass via applyDefaults; defaults
+  /// Firmware-owned. Set by the Lamp subclass via applyDefaults; defaults
   /// to true for backward compat with older firmware that doesn't emit it.
   final bool colorsEditable;
 
@@ -304,15 +356,15 @@ class ShadeSection {
       );
 }
 
-/// CHAR_HOME_SECTION payload. Presence-only home mode: the lamp never
-/// stores a password (no association — just SSID-visibility detection),
-/// so this section carries only the SSID, brightness, and the soft
-/// on/off toggle.
+/// CHAR_HOME_SECTION payload. See firmware Config::asHomeJson.
 class HomeSection {
   const HomeSection({
     required this.ssid,
     required this.brightness,
     required this.enabled,
+    required this.networkBound,
+    required this.socialDisabled,
+    required this.disabledExpressionTypes,
   });
 
   final String ssid;
@@ -322,14 +374,59 @@ class HomeSection {
   /// visibility and stays in regular mode.
   final bool enabled;
 
+  /// When true, home mode is presence-driven (SSID must be visible).
+  /// When false, home mode is a plain manual on/off (no WiFi scanning).
+  /// Migration: absent → `ssid.isNotEmpty` (a saved SSID meant presence-driven).
+  final bool networkBound;
+
+  /// Pauses social greetings while home mode is active.
+  /// Migration: absent → true.
+  final bool socialDisabled;
+
+  /// Expression type ids paused while home mode is active.
+  /// Migration: absent → `['glitchy']`; explicit `[]` is preserved.
+  final List<String> disabledExpressionTypes;
+
   factory HomeSection.fromJson(Map<String, dynamic> json) {
     final ssid = (json['ssid'] as String?) ?? '';
     return HomeSection(
       ssid: ssid,
       brightness: (json['brightness'] as num?)?.toInt() ?? 60,
       enabled: (json['enabled'] as bool?) ?? ssid.isNotEmpty,
+      networkBound: (json['networkBound'] as bool?) ?? ssid.isNotEmpty,
+      socialDisabled: (json['socialDisabled'] as bool?) ?? true,
+      disabledExpressionTypes:
+          (json['disabledExpressionTypes'] as List?)?.cast<String>() ??
+              const ['glitchy'],
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'ssid': ssid,
+        'brightness': brightness,
+        'enabled': enabled,
+        'networkBound': networkBound,
+        'socialDisabled': socialDisabled,
+        'disabledExpressionTypes': disabledExpressionTypes,
+      };
+
+  HomeSection copyWith({
+    String? ssid,
+    int? brightness,
+    bool? enabled,
+    bool? networkBound,
+    bool? socialDisabled,
+    List<String>? disabledExpressionTypes,
+  }) =>
+      HomeSection(
+        ssid: ssid ?? this.ssid,
+        brightness: brightness ?? this.brightness,
+        enabled: enabled ?? this.enabled,
+        networkBound: networkBound ?? this.networkBound,
+        socialDisabled: socialDisabled ?? this.socialDisabled,
+        disabledExpressionTypes:
+            disabledExpressionTypes ?? this.disabledExpressionTypes,
+      );
 
   @override
   bool operator ==(Object other) =>
@@ -337,10 +434,20 @@ class HomeSection {
       other is HomeSection &&
           ssid == other.ssid &&
           brightness == other.brightness &&
-          enabled == other.enabled;
+          enabled == other.enabled &&
+          networkBound == other.networkBound &&
+          socialDisabled == other.socialDisabled &&
+          _listEq.equals(disabledExpressionTypes, other.disabledExpressionTypes);
 
   @override
-  int get hashCode => Object.hash(ssid, brightness, enabled);
+  int get hashCode => Object.hash(
+        ssid,
+        brightness,
+        enabled,
+        networkBound,
+        socialDisabled,
+        _listEq.hash(disabledExpressionTypes),
+      );
 }
 
 /// A single expression configuration. CHAR_EXPRESSION_SECTION returns an array
@@ -442,7 +549,7 @@ class ExpressionConfig {
       );
 }
 
-/// CHAR_EXPRESSION_SECTION payload — a JSON array of ExpressionConfig objects.
+/// CHAR_EXPRESSION_SECTION payload, a JSON array of ExpressionConfig objects.
 class ExpressionsSection {
   const ExpressionsSection({required this.expressions});
 

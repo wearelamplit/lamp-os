@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 /// Client-side presentation for an expression type: the icon and the picker
-/// tagline. These are UX choices, not schema — the firmware `exprcat` catalog
+/// tagline. These are UX choices, not schema. The firmware `exprcat` catalog
 /// owns everything structural (params, ranges, types, names, and the
 /// wisp-pause flag). Keyed by the catalog `id`.
 class ExpressionPresentation {

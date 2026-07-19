@@ -10,7 +10,7 @@ import '../../../core/ble/ble_client.dart';
 ///
 /// This is NOT the post-reboot reconnect loop in AddLampNotifier: that one
 /// disconnects a stale handle, waits out the firmware reboot, and wraps a
-/// per-attempt timeout — deliberately different, so it stays hand-rolled.
+/// per-attempt timeout, deliberately different, so it stays hand-rolled.
 Future<void> connectWithRetry(
   BleClient ble,
   String deviceId, {

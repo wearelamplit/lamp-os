@@ -16,6 +16,7 @@ import 'package:lamp_app/features/inventory/domain/inventory_lamp.dart';
 import 'package:lamp_app/features/lamp_shell/domain/expression_catalog.dart';
 import 'package:lamp_app/features/lamp_shell/presentation/expression_editor_screen.dart';
 import 'package:lamp_app/features/lamp_shell/presentation/widgets/expression_params_panel.dart';
+import 'package:lamp_app/features/lamp_shell/presentation/widgets/motion_picker.dart';
 
 import '../../_support/seed.dart';
 
@@ -46,7 +47,6 @@ Future<ProviderContainer> _withEmptyState() async {
 }
 
 /// Pump enough frames for InMemoryBleClient async operations to resolve.
-/// ConnectingView animates infinitely so pumpAndSettle never converges.
 Future<void> _pumpToData(WidgetTester tester, String sentinel) async {
   for (var i = 0; i < 30; i++) {
     await tester.pump(const Duration(milliseconds: 16));
@@ -235,6 +235,111 @@ void main() {
     expect(exprs.single.target, 2);
   });
 
+  testWidgets('Test previews without persisting to NVS', (tester) async {
+    final ble = InMemoryBleClient();
+    SharedPreferences.setMockInitialValues({});
+    await seedControlBle(ble, deviceId: _devId, name: 'test');
+    final c = ProviderContainer(
+      overrides: [bleClientProvider.overrideWithValue(ble)],
+    );
+    addTearDown(c.dispose);
+    await c.read(inventoryNotifierProvider.future);
+    await c.read(inventoryNotifierProvider.notifier).add(const InventoryLamp(
+          id: _devId,
+          name: 'jacko',
+          controlPassword: 'secret',
+        ));
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: c,
+      child: const MaterialApp(
+        home: ExpressionEditorScreen(
+            lampId: _devId, typeKey: 'glitchy', targetKey: 3),
+      ),
+    ));
+    await _pumpToData(tester, 'Glitchy');
+
+    await tester.tap(find.byTooltip('Test'));
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+
+    expect(ble.writesTo(_devId, BleUuids.expressionOp), isEmpty,
+        reason: 'Test must not upsert to NVS');
+    final tests = ble.writesTo(_devId, BleUuids.expressionTest);
+    final testEnvelope = utf8.decode(tests.last);
+    expect(testEnvelope, contains('"a":"test_expression"'));
+    expect(testEnvelope, contains('"colors"'));
+    expect(testEnvelope, contains('"parameters"'));
+  });
+
+  testWidgets('Test ▶ disables for the cooldown then re-enables',
+      (tester) async {
+    // pulse in Trigger mode has no duration range, so the 2s fallback applies.
+    final c = await _withEmptyState();
+    addTearDown(c.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: c,
+      child: const MaterialApp(
+        home: ExpressionEditorScreen(
+            lampId: _devId, typeKey: 'pulse', targetKey: 3),
+      ),
+    ));
+    await _pumpToData(tester, 'Pulse');
+
+    IconButton btn() => tester.widget<IconButton>(
+        find.widgetWithIcon(IconButton, Icons.play_arrow_rounded));
+    expect(btn().onPressed, isNotNull);
+
+    await tester.tap(find.byTooltip('Test'));
+    await tester.pump();
+    expect(btn().onPressed, isNull);
+
+    await tester.pump(const Duration(milliseconds: 1999));
+    expect(btn().onPressed, isNull);
+
+    await tester.pump(const Duration(milliseconds: 2));
+    expect(btn().onPressed, isNotNull);
+  });
+
+  testWidgets('retargeting off then back onto the origin re-enables it',
+      (tester) async {
+    final ble = InMemoryBleClient();
+    SharedPreferences.setMockInitialValues({});
+    await seedControlBle(
+      ble,
+      deviceId: _devId,
+      name: 'test',
+      expressionsJson:
+          '[{"type":"breathing","enabled":true,"colors":[],"intervalMin":123,"intervalMax":900,"target":1}]',
+    );
+    final c = ProviderContainer(
+      overrides: [bleClientProvider.overrideWithValue(ble)],
+    );
+    addTearDown(c.dispose);
+    await c.read(inventoryNotifierProvider.future);
+    await c.read(inventoryNotifierProvider.notifier).add(const InventoryLamp(
+          id: _devId,
+          name: 'jacko',
+          controlPassword: 'secret',
+        ));
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: c,
+      child: const MaterialApp(
+        home: ExpressionEditorScreen(
+            lampId: _devId, typeKey: 'breathing', targetKey: 1),
+      ),
+    ));
+    await _pumpToData(tester, 'Breathing');
+
+    await tester.tap(find.text('Base'));
+    await tester.pump();
+    await tester.tap(find.text('Shade'));
+    await tester.pump();
+
+    final draft = c.read(expressionDraftProvider(_devId, 'breathing', 1));
+    expect(draft.target, 1, reason: 'origin pill stays tappable while editing');
+  });
+
   testWidgets(
       'interval range slider renders from the catalog for trigger-based expressions',
       (tester) async {
@@ -250,11 +355,11 @@ void main() {
     ));
     await _pumpToData(tester, 'Glitchy');
     await tester.dragUntilVisible(
-      find.text('TRIGGER INTERVAL'),
+      find.text('TIMING'),
       find.byType(ListView),
       const Offset(0, -200),
     );
-    expect(find.text('TRIGGER INTERVAL'), findsOneWidget);
+    expect(find.text('TIMING'), findsOneWidget);
     // The interval range uses the catalog bounds (60..900), linear.
     final intervalSlider = find.byWidgetPredicate((w) =>
         w is RangeSlider &&
@@ -323,12 +428,17 @@ void main() {
       ),
     ));
     await _pumpToData(tester, 'Breathing');
+    // Optional zone defaults to whole strip; switch to Region to reveal it.
+    c
+        .read(expressionDraftProvider(_devId, 'breathing', 3).notifier)
+        .update((d) =>
+            d.copyWith(parameters: {...d.parameters, 'fullStrip': 0}));
+    await tester.pump();
     await tester.dragUntilVisible(
       find.text('Spread'),
       find.byType(ListView),
       const Offset(0, -200),
     );
-    // Non-optional zone → Placement always shown.
     expect(find.text('PLACEMENT'), findsOneWidget);
     // Labels come straight from the catalog descriptor.
     expect(find.text('Breath cycle length'), findsOneWidget);
@@ -353,6 +463,12 @@ void main() {
       ),
     ));
     await _pumpToData(tester, 'Spotty');
+    // Optional zone defaults to whole strip; switch to Region to reveal it.
+    c
+        .read(expressionDraftProvider(_devId, 'spotty', 3).notifier)
+        .update((d) =>
+            d.copyWith(parameters: {...d.parameters, 'fullStrip': 0}));
+    await tester.pump();
     expect(find.text('PLACEMENT'), findsOneWidget);
     expect(find.byType(RangeSlider), findsWidgets);
     await tester.dragUntilVisible(
@@ -366,7 +482,8 @@ void main() {
   });
 
   testWidgets(
-      'shifty Fill enum drives the zone: hidden at Uniform, shown when zoning',
+      'shifty zone is toggle-driven: whole-strip hides it, region shows it '
+      'regardless of fillMode',
       (tester) async {
     final c = await _withEmptyState();
     addTearDown(c.dispose);
@@ -381,16 +498,24 @@ void main() {
       ),
     ));
     await _pumpToData(tester, 'Shifty');
+    // Whole strip is the default; the zone range is hidden even at Uniform.
+    expect(find.text('Whole strip'), findsOneWidget);
+    expect(find.text('Zone'), findsNothing);
+    // Fill mode lives in Behaviour, below Colors.
+    await tester.dragUntilVisible(
+        find.text('Fill'), find.byType(ListView), const Offset(0, -200));
     expect(find.text('Fill'), findsOneWidget);
     expect(find.text('Uniform'), findsOneWidget);
-    expect(find.text('PLACEMENT'), findsNothing);
 
+    // Uniform can now be zoned: the toggle, not the fillMode, drives it.
     c
         .read(expressionDraftProvider(_devId, 'shifty', 3).notifier)
         .update((d) =>
-            d.copyWith(parameters: {...d.parameters, 'fillMode': 1}));
+            d.copyWith(parameters: {...d.parameters, 'fullStrip': 0}));
     await tester.pump();
-    expect(find.text('PLACEMENT'), findsOneWidget);
+    await tester.dragUntilVisible(
+        find.text('Zone'), find.byType(ListView), const Offset(0, 200));
+    expect(find.text('Zone'), findsOneWidget);
   });
 
   testWidgets(
@@ -410,7 +535,7 @@ void main() {
     ));
     await _pumpToData(tester, 'Glitchy');
     expect(find.text('Whole strip'), findsOneWidget);
-    expect(find.text('PLACEMENT'), findsNothing);
+    expect(find.text('Zone'), findsNothing);
     // requiresZoning params stay hidden while whole-strip.
     expect(find.text('Points'), findsNothing);
 
@@ -419,7 +544,9 @@ void main() {
         .update((d) =>
             d.copyWith(parameters: {...d.parameters, 'fullStrip': 0}));
     await tester.pump();
-    expect(find.text('PLACEMENT'), findsOneWidget);
+    expect(find.text('Zone'), findsOneWidget);
+    await tester.dragUntilVisible(
+        find.text('Points'), find.byType(ListView), const Offset(0, -200));
     expect(find.text('Points'), findsOneWidget);
     expect(find.text('Size'), findsOneWidget);
   });
@@ -439,14 +566,28 @@ void main() {
       ),
     ));
     await _pumpToData(tester, 'Pulse');
+    // Whole strip is the default; the zone range is hidden until Region.
+    expect(find.text('Whole strip'), findsOneWidget);
+    expect(find.text('Zone'), findsNothing);
+    c
+        .read(expressionDraftProvider(_devId, 'pulse', 3).notifier)
+        .update((d) =>
+            d.copyWith(parameters: {...d.parameters, 'fullStrip': 0}));
+    await tester.pump();
+    // Zone lives in Placement near the top; check it before scrolling away.
+    expect(find.text('Zone'), findsOneWidget);
     await tester.dragUntilVisible(
-      find.text('TRIGGER INTERVAL'),
+      find.text('TIMING'),
       find.byType(ListView),
       const Offset(0, -200),
     );
-    expect(find.text('PLACEMENT'), findsOneWidget);
+    expect(find.text('TIMING'), findsOneWidget);
+    await tester.dragUntilVisible(
+      find.text('Pulse speed'),
+      find.byType(ListView),
+      const Offset(0, -200),
+    );
     expect(find.text('Pulse speed'), findsOneWidget);
-    expect(find.text('TRIGGER INTERVAL'), findsOneWidget);
   });
 
   testWidgets(
@@ -509,7 +650,9 @@ void main() {
         body: SingleChildScrollView(
           child: ExpressionParamsPanel(
             descriptor: _descriptor('spotty'),
+            part: ExpressionPanelPart.placement,
             parameters: const {
+              'fullStrip': 0,
               'posMin': 5,
               'posMax': 25,
               'count': 3,
@@ -618,7 +761,9 @@ void main() {
 
     c
         .read(expressionDraftProvider(_devId, 'pulse', 3).notifier)
-        .update((d) => d.copyWith(colors: const []));
+        .update((d) => d.copyWith(
+            colors: const [],
+            parameters: {...d.parameters, 'fullStrip': 0}));
     await tester.pump();
 
     await tester.dragUntilVisible(
@@ -640,5 +785,72 @@ void main() {
         .toList();
     expect(zoneWrites, isEmpty,
         reason: 'empty-colors guard must prevent zone preview writes');
+  });
+
+  testWidgets('Motion picker opens a sheet with 5 curve options', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: ExpressionParamsPanel(
+            descriptor: _descriptor('pulse'),
+            part: ExpressionPanelPart.placement,
+            parameters: const {'easing': 0, 'loop': 0},
+            pixelCount: 30,
+            intervalMin: 60,
+            intervalMax: 900,
+            onIntervalChanged: (_, _) {},
+            onChanged: (_) {},
+          ),
+        ),
+      ),
+    ));
+    await tester.pump();
+
+    await tester.ensureVisible(find.text('Motion'));
+    await tester.tap(find.text('Motion'));
+    await tester.pumpAndSettle();
+
+    // 'Swell'..'Settle' appear only in the sheet; 'Linear' also shows in the
+    // picker row (current selection), so its blurb is the sheet-only signal.
+    expect(find.text('Smooth'), findsOneWidget);
+    expect(find.text('Float'), findsOneWidget);
+    expect(find.text('Settle'), findsOneWidget);
+    expect(find.text('Swell'), findsOneWidget);
+    expect(find.textContaining('Steady as she goes'), findsOneWidget);
+    expect(
+      find.byWidgetPredicate(
+          (w) => w is CustomPaint && w.painter is EasingSparkline),
+      findsNWidgets(5),
+    );
+  });
+
+  testWidgets('Motion picker selection writes the easing param', (tester) async {
+    Map<String, int>? written;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: ExpressionParamsPanel(
+            descriptor: _descriptor('pulse'),
+            part: ExpressionPanelPart.placement,
+            parameters: const {'easing': 0, 'loop': 0},
+            pixelCount: 30,
+            intervalMin: 60,
+            intervalMax: 900,
+            onIntervalChanged: (_, _) {},
+            onChanged: (p) => written = p,
+          ),
+        ),
+      ),
+    ));
+    await tester.pump();
+
+    await tester.ensureVisible(find.text('Motion'));
+    await tester.tap(find.text('Motion'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Float'));
+    await tester.pumpAndSettle();
+
+    expect(written, isNotNull);
+    expect(written!['easing'], 2);
   });
 }

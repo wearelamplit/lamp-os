@@ -7,7 +7,7 @@ import '../../application/lamp_auth_required_exception.dart';
 import 'connecting_view.dart';
 
 /// Surface shown when [controlNotifierProvider] enters an AsyncError carrying
-/// [LampAuthRequiredException] — typically because the password stored in
+/// [LampAuthRequiredException], typically because the password stored in
 /// inventory no longer satisfies the firmware's auth gate (changed on another
 /// device, second-device install, etc.). Renders [ConnectingView] underneath
 /// and pops an [AlertDialog] over it for the user to enter the password.
@@ -45,7 +45,7 @@ class _ConnectPasswordPromptState
           await ref
               .read(controlNotifierProvider(widget.lampId).notifier)
               .submitConnectPassword(pw);
-          return null; // success — notifier triggers a rebuild
+          return null; // success; notifier triggers a rebuild
         } on LampAuthRequiredException {
           return ('Wrong password. Try again.', null);
         } catch (e) {

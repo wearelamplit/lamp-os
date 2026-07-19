@@ -2,7 +2,8 @@
 // firmware's TupleSampler algorithm exactly or the "Painted lamps" preview
 // will diverge from what the wisp actually broadcasts.
 //
-// iOS returns a UUID instead of a bdAddr, so those lamps get no preview.
+// Callers pass the mirrored lampId (raw mesh MAC), not the platform BLE id,
+// so iOS lamps get a preview too.
 
 import 'dart:typed_data';
 
@@ -67,22 +68,6 @@ List<int>? parseMacFromBleId(String id) {
     final v = int.tryParse(p, radix: 16);
     if (v == null || v < 0 || v > 255) return null;
     out.add(v);
-  }
-  return out;
-}
-
-/// The lamp's mesh MAC derived from its bdAddr. ESP32 BLE MAC = STA base + 2,
-/// so mesh MAC = BLE MAC - 2 (full 48-bit, with borrow). The wisp keys
-/// per-lamp color picks and claim roster on the mesh MAC; use this, not the
-/// raw BLE id, when matching or predicting against wisp data.
-List<int>? meshMacFromBdAddr(String bdAddr) {
-  final out = parseMacFromBleId(bdAddr);
-  if (out == null) return null;
-  var borrow = 2;
-  for (var i = 5; i >= 0 && borrow > 0; i--) {
-    final v = out[i] - borrow;
-    out[i] = v < 0 ? v + 256 : v;
-    borrow = v < 0 ? 1 : 0;
   }
   return out;
 }

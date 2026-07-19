@@ -69,7 +69,7 @@ class FirmwareSucceeded extends FirmwareState {
   final LsigFooter footer;
 }
 
-/// Terminal failure surface — wraps a user-presentable reason. The
+/// Terminal failure surface. Wraps a user-presentable reason. The
 /// `cause` is preserved for logging but not shown to the user.
 class FirmwareFailed extends FirmwareState {
   const FirmwareFailed({required this.reason, this.cause});

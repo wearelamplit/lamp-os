@@ -8,8 +8,8 @@ import '../../domain/lamp_color.dart';
 import 'shade_editor_sheet.dart';
 
 /// Slice of ControlState ShadeCard needs: colors list + colorsEditable. Used
-/// as the `.select` projection so sibling state changes don't rebuild us.
-/// (Mirrors `_BaseSlice` in base_card.dart now that shade is a gradient too.)
+/// as the `.select` projection so sibling state changes don't trigger a rebuild.
+/// (Matches `_BaseSlice` in base_card.dart now that shade is a gradient too.)
 class _ShadeSlice {
   const _ShadeSlice(this.colors, {required this.colorsEditable});
   final List<LampColor> colors;
@@ -47,7 +47,7 @@ class ShadeCard extends ConsumerWidget {
 
   /// Returns a gradient-safe list: LinearGradient requires ≥2 stops, so a
   /// single-color list is duplicated, and an empty list falls back to black.
-  /// (Mirrors `BaseCard._gradientColors`.)
+  /// (Matches `BaseCard._gradientColors`.)
   List<Color> _gradientColors(List<LampColor> colors) {
     if (colors.isEmpty) return const [Colors.black, Colors.black];
     final swatches = colors.map((c) => c.toSwatch()).toList();

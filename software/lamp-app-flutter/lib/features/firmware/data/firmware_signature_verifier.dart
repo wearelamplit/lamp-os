@@ -2,10 +2,10 @@
 //
 // The lamp's verify path streams SHA-256 over the signed region in
 // 4 KB blocks (firmware_signature.hpp:verifySignedFirmware), then
-// ed25519-verifies the 32-byte digest. We do the same here: it's the
-// canonical scheme, it's auditable against the C++ side byte-for-byte,
-// and it lets us reject a corrupt download BEFORE we burn the lamp's
-// BLE OTA bandwidth on an image that would just fail at the end.
+// ed25519-verifies the 32-byte digest. Same scheme here: canonical,
+// auditable against the C++ side byte-for-byte, and it rejects a
+// corrupt download before burning the lamp's BLE OTA bandwidth on an
+// image that would just fail at the end.
 
 import 'dart:typed_data';
 
@@ -21,25 +21,17 @@ class FirmwareVerifyException implements Exception {
   String toString() => 'FirmwareVerifyException: $reason';
 }
 
-/// First 8 bytes of SHA-256(signed region) — the image fingerprint
-/// exchanged in MSG_FW_OFFER + MSG_FW_DONE. Computed during verify and
-/// returned alongside the boolean result so the OTA pusher can include
-/// it in the OFFER without a second hash pass.
+/// Parsed footer + the SHA-256 digest of the signed region. The OTA
+/// pusher derives the OFFER/DONE prefix from `fullSha256` itself.
 class VerifiedFirmware {
   VerifiedFirmware({
     required this.footer,
-    required this.sha256Prefix,
     required this.fullSha256,
   });
 
   final LsigFooter footer;
 
-  /// First 8 bytes of `fullSha256`. Convenience for the OFFER builder.
-  final Uint8List sha256Prefix;
-
-  /// The 32-byte SHA-256 digest of the signed region. Kept around for
-  /// the DONE frame (same prefix carries through; comparison is byte-
-  /// for-byte against what the OFFER advertised).
+  /// The 32-byte SHA-256 digest of the signed region.
   final Uint8List fullSha256;
 }
 
@@ -47,9 +39,9 @@ class VerifiedFirmware {
 /// digest on success; throws [FirmwareVerifyException] with a
 /// user-actionable reason on any failure.
 ///
-/// The verify is offline — no network, no lamp involvement. We compute
+/// The verify is offline: no network, no lamp involvement. Computes
 /// SHA-256 over `signedImage[0..signedRegionLen)` (i.e. everything
-/// except the 96-byte LSIG footer) and ed25519-verify the digest
+/// except the 96-byte LSIG footer) and ed25519-verifies the digest
 /// against the footer's signature with the baked-in [firmwarePublicKey].
 Future<VerifiedFirmware> verifyFirmwareImage(Uint8List signedImage) async {
   // 1. Parse footer (also validates length + magic + signedRegionLen).
@@ -78,7 +70,6 @@ Future<VerifiedFirmware> verifyFirmwareImage(Uint8List signedImage) async {
 
   return VerifiedFirmware(
     footer: footer,
-    sha256Prefix: Uint8List.sublistView(fullSha256, 0, 8),
     fullSha256: fullSha256,
   );
 }

@@ -17,13 +17,13 @@ import 'expressions_screen.dart';
 import 'info_screen.dart';
 import 'setup_screen.dart';
 
-/// Bottom-nav tabs for the lamp shell. Wisp used to be a bottom-nav
-/// destination but moved out: when only one wisp is painting a given
-/// lamp (enforced by the wisp-side multi-wisp coordination), the floating
-/// orb indicator is already onscreen advertising it. Tapping the orbs
-/// five times unlocks the dedicated wisp config route (`/lamp/:id/wisp`).
-/// Same gesture pattern as the Lamplit-wordmark advanced-unlock.
-enum LampTab { control, expressions, social, config, info }
+/// Bottom-nav tabs for the lamp shell. When only one wisp is painting a
+/// given lamp (enforced by the wisp-side multi-wisp coordination), the
+/// floating orb indicator is already onscreen advertising it. Tapping the
+/// orbs five times unlocks the dedicated wisp config route
+/// (`/lamp/:id/wisp`). Same gesture pattern as the Lamplit-wordmark
+/// advanced-unlock.
+enum LampTab { control, social, expressions, config, info }
 
 class LampShell extends ConsumerStatefulWidget {
   const LampShell({
@@ -103,14 +103,14 @@ class _LampShellState extends ConsumerState<LampShell> {
         widget.lampId;
 
     // `select` so the shell only rebuilds when the connection state
-    // actually flips — not on every shade/base color tick during a drag.
+    // actually flips, not on every shade/base color tick during a drag.
     final connected = ref.watch(controlNotifierProvider(widget.lampId)
         .select((async) => async.value?.connected ?? false));
-    // While the user is on a lamp's screen we don't consume the BLE
-    // scanner — the scanner is scoped to MyLamps + onboarding/discovery
-    // screens. Two-state status is enough here: connected → mesh, not
-    // connected → searching (the screen exists precisely because we want
-    // to reach this lamp, so "offline" wouldn't be a useful distinction).
+    // While the user is on a lamp's screen the BLE scanner is untouched;
+    // it's scoped to MyLamps + onboarding/discovery screens. Two-state
+    // status is enough here: connected → mesh, not connected → searching
+    // (the screen exists precisely to reach this lamp, so "offline"
+    // wouldn't be a useful distinction).
     final status =
         connected ? StatusKind.mesh : StatusKind.searching;
 
@@ -118,7 +118,7 @@ class _LampShellState extends ConsumerState<LampShell> {
 
     return Scaffold(
       appBar: AppBar(
-        // The LampChip in `title` routes to My Lamps for the picker — that's
+        // The LampChip in `title` routes to My Lamps for the picker; that's
         // the on-screen nav. Skip GoRouter's auto-injected back arrow (now
         // present because LampShell is pushed on top of My Lamps) so the
         // AppBar doesn't carry two redundant nav controls. Android system
@@ -135,21 +135,20 @@ class _LampShellState extends ConsumerState<LampShell> {
       // Tab nav is gated on the BLE connection. When the link is
       // down (post-disconnect, mid-reconnect), the per-tab views would
       // either render stale data or hang on a write the lamp can't
-      // hear — both confusing. Greying + ignoring the buttons makes
+      // hear, both confusing. Greying + ignoring the buttons makes
       // the reconnect-in-flight state visible without taking the user
-      // off the page they were on. ConnectionBanner (at the top of the
-      // tab body) carries the attempt counter; this is the
-      // complementary affordance on the bottom nav.
+      // off the page they were on; ReachingLampGate carries the
+      // reconnect messaging above this.
       bottomNavigationBar: IgnorePointer(
         ignoring: !connected,
         child: Opacity(
           opacity: connected ? 1.0 : 0.4,
           child: NavigationBarTheme(
         data: NavigationBarThemeData(
-          // Vue active state: `linear-gradient(135deg, auroraBlue, glowPink)`
-          // with a soft shadow. Material 3's NavigationBar only lets us set
-          // a flat indicator color, so we render the gradient via a custom
-          // indicator BoxDecoration.
+          // Active-state gradient: `linear-gradient(135deg, auroraBlue,
+          // glowPink)` with a soft shadow. Material 3's NavigationBar only
+          // allows a flat indicator color, so the gradient renders via a
+          // custom indicator BoxDecoration.
           indicatorColor: Colors.transparent,
           indicatorShape: const StadiumBorder(),
           labelTextStyle: WidgetStateProperty.resolveWith((states) {
@@ -177,10 +176,10 @@ class _LampShellState extends ConsumerState<LampShell> {
           destinations: [
             _destination(Icons.palette_outlined, 'Colors',
                 _tab == LampTab.control),
-            _destination(
-                Icons.auto_awesome, 'Expressions', _tab == LampTab.expressions),
             _destination(Icons.handshake_outlined, 'Social',
                 _tab == LampTab.social),
+            _destination(
+                Icons.auto_awesome, 'Expressions', _tab == LampTab.expressions),
             _destination(Icons.settings_outlined, 'Config',
                 _tab == LampTab.config),
             _destination(

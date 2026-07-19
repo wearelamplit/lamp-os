@@ -2,10 +2,10 @@
 //
 // The CI workflow (.github/workflows/release.yml + release-beta.yml)
 // publishes `lamp-firmware-signed.bin` as a release asset on every
-// tagged push. We fetch that asset over HTTPS, hand it to the verifier
-// for LSIG + Ed25519 check, and return the bytes for the OTA pusher.
+// tagged push. Fetches that asset over HTTPS, hands it to the verifier
+// for LSIG + Ed25519 check, and returns the bytes for the OTA pusher.
 //
-// No GitHub auth token needed — the releases are public. No API rate
+// No GitHub auth token needed; the releases are public. No API rate
 // limit risk for the per-user fetch cadence (one tap per user per OTA
 // session).
 
@@ -27,6 +27,19 @@ enum FirmwareChannel {
   beta,
 }
 
+/// Resolve a lamp's reported `fwChannel` to a fetchable [FirmwareChannel].
+/// The wire value carries a `{lampType}-{channel}` prefix (`standard-beta`);
+/// the variant prefix is stripped. Empty, legacy, or unrecognized (e.g. a
+/// `dev` lamp, which has no release channel) falls back to [stable].
+FirmwareChannel firmwareChannelFromString(String? raw) {
+  if (raw == null || raw.isEmpty) return FirmwareChannel.stable;
+  final tail = raw.contains('-') ? raw.split('-').last : raw;
+  for (final c in FirmwareChannel.values) {
+    if (c.name == tail) return c;
+  }
+  return FirmwareChannel.stable;
+}
+
 /// Where to fetch from. The default constant points at the production
 /// repo's "latest" + "beta" release endpoints. Tests can swap to a
 /// fake-server URL via the optional [endpointOverride].
@@ -42,8 +55,8 @@ class FirmwareReleaseClient {
   final HttpClient _httpClient;
   final String? endpointOverride;
 
-  /// Public repo. The per-variant asset name is composed at request time —
-  /// each lamp variant publishes its own `lamp-firmware-<variant>-signed.bin`
+  /// Public repo. The per-variant asset name is composed at request time.
+  /// Each lamp variant publishes its own `lamp-firmware-<variant>-signed.bin`
   /// asset on the same release. Names MUST match the `release.yml` /
   /// `release-beta.yml` rename step.
   static const String _githubOrg  = 'wearelamplit';
@@ -83,7 +96,7 @@ class FirmwareReleaseClient {
       final req = await _httpClient.getUrl(uri);
       req.followRedirects = true;
       // Polite UA so 403s from GH's WAF would surface in their logs
-      // with our app identifying itself rather than a generic Dart UA.
+      // with the app identifying itself rather than a generic Dart UA.
       req.headers.set(HttpHeaders.userAgentHeader, 'lamp-os-app/1.0');
       final resp = await req.close();
       if (resp.statusCode != HttpStatus.ok) {

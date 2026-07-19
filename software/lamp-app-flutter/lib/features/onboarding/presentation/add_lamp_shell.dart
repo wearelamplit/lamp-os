@@ -34,7 +34,7 @@ class _AddLampShellState extends ConsumerState<AddLampShell> {
 
   @override
   void dispose() {
-    // Reset the wizard to its initial step on every exit path — back
+    // Reset the wizard to its initial step on every exit path: back
     // arrow, GoRouter pop, system back. Otherwise `addLampNotifier` is
     // `keepAlive: true` and the user's previous `done` state persists,
     // so the next time they open `/onboarding/add` they land directly
@@ -42,7 +42,7 @@ class _AddLampShellState extends ConsumerState<AddLampShell> {
     // "Open your lamp" handler also calls reset(); idempotent.
     //
     // Run via `Future.microtask` so the `state = …` write doesn't fire
-    // during widget-tree teardown — Riverpod 4 blocks mutations in that
+    // during widget-tree teardown. Riverpod 4 blocks mutations in that
     // window (`_debugCanModifyProviders`). The microtask runs on the
     // very next event-loop turn, after the current frame finalizes.
     //
@@ -54,7 +54,7 @@ class _AddLampShellState extends ConsumerState<AddLampShell> {
       try {
         _notifier.reset();
       } catch (_) {
-        // Container disposed before microtask ran — nothing to reset.
+        // Container disposed before microtask ran, nothing to reset.
       }
     });
     super.dispose();

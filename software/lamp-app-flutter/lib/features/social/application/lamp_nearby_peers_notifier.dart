@@ -10,15 +10,15 @@ import '../domain/lamp_nearby_peer.dart';
 part 'lamp_nearby_peers_notifier.g.dart';
 
 /// Polling interval for the lamp's nearby JSON. The page-protocol
-/// section has no NOTIFY path, so polling is required. 1 Hz balances
+/// section has no NOTIFY path, so polling is required. 5 s balances
 /// freshness on rename/disposition changes against battery cost.
-const _pollInterval = Duration(seconds: 1);
+const _pollInterval = Duration(seconds: 5);
 
 /// Per-lamp view of peers the connected lamp can hear. Reads the
-/// `nearby` page-protocol section from CHAR_NEARBY_LAMPS at 1 Hz.
+/// `nearby` page-protocol section from CHAR_NEARBY_LAMPS every 5 s.
 ///
 /// Empty list while loading. Keeps the last-good snapshot on parse
-/// errors and disconnects — only surfaces AsyncError after sustained
+/// errors and disconnects, only surfaces AsyncError after sustained
 /// failure (currently: never auto-fails; the social screen will
 /// render "No lamps nearby" once the connection is restored and a
 /// real empty response lands).
@@ -32,7 +32,7 @@ class LampNearbyPeersNotifier extends _$LampNearbyPeersNotifier {
   StreamSubscription<bool>? _connSub;
   late final BleClient _ble;
   bool _connected = false;
-  // Last successful decode — preserved across transient errors so the
+  // Last successful decode. Preserved across transient errors so the
   // UI doesn't blip back to an empty list on a single failed poll.
   List<LampNearbyPeer> _lastGood = const [];
 
@@ -79,7 +79,7 @@ class LampNearbyPeersNotifier extends _$LampNearbyPeersNotifier {
     try {
       final peers = await _readOnce();
       _lastGood = peers;
-      // Only emit a state update if the contents actually changed —
+      // Only emit a state update if the contents actually changed;
       // avoids gratuitous rebuilds when nothing's different.
       if (!_listsEqual(state.value, peers)) {
         state = AsyncData(peers);
@@ -98,7 +98,12 @@ class LampNearbyPeersNotifier extends _$LampNearbyPeersNotifier {
       throw const FormatException('empty nearby section read');
     }
     final decoded = jsonDecode(utf8.decode(bytes));
-    if (decoded is! List) return const [];
+    // A non-List decode means the read pulled another section's bytes (a
+    // `lamp` JSON object slipping into an interleaved `nearby` read). Throw
+    // so the last-good snapshot survives instead of blanking every peer.
+    if (decoded is! List) {
+      throw const FormatException('nearby section decoded to non-List');
+    }
     return decoded
         .whereType<Map<String, dynamic>>()
         .map(LampNearbyPeer.fromJson)

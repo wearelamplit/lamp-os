@@ -87,7 +87,7 @@ class AddLampMeetStep extends ConsumerWidget {
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
-                  // Adopt lamps are always mesh — no Wi-Fi setup to show — so
+                  // Adopt lamps are always mesh, no Wi-Fi setup to show, so
                   // skip the done screen and open the lamp directly.
                   onPressed: ready
                       ? () async {

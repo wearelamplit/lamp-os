@@ -40,7 +40,6 @@ Future<ProviderContainer> _withState(String expressionsJson) async {
 }
 
 /// Pump enough frames for InMemoryBleClient async operations to resolve.
-/// ConnectingView animates infinitely so pumpAndSettle never converges.
 Future<void> _pumpToData(WidgetTester tester, String sentinel) async {
   for (var i = 0; i < 30; i++) {
     await tester.pump(const Duration(milliseconds: 16));
@@ -201,6 +200,94 @@ void main() {
     expect(find.byIcon(Icons.air), findsOneWidget);
   });
 
+  testWidgets('looped pulse groups as Continuous and hides the play button',
+      (tester) async {
+    final c = await _withState(
+        '[{"type":"pulse","enabled":true,"colors":[],'
+        '"intervalMin":60,"intervalMax":900,"target":3,"loop":1}]');
+    addTearDown(c.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: c,
+      child: const MaterialApp(home: ExpressionsScreen(lampId: _devId)),
+    ));
+    await _pumpToData(tester, 'Pulse');
+
+    expect(find.text('CONTINUOUS'), findsOneWidget);
+    expect(find.text('TRIGGERED'), findsNothing);
+    expect(find.byIcon(Icons.play_arrow_rounded), findsNothing);
+  });
+
+  testWidgets('triggered pulse groups as Triggered and shows the play button',
+      (tester) async {
+    final c = await _withState(
+        '[{"type":"pulse","enabled":true,"colors":[],'
+        '"intervalMin":60,"intervalMax":900,"target":3,"loop":0}]');
+    addTearDown(c.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: c,
+      child: const MaterialApp(home: ExpressionsScreen(lampId: _devId)),
+    ));
+    await _pumpToData(tester, 'Pulse');
+
+    expect(find.text('TRIGGERED'), findsOneWidget);
+    expect(find.text('CONTINUOUS'), findsNothing);
+    expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
+  });
+
+  testWidgets('trigger ▶ disables for the cooldown then re-enables',
+      (tester) async {
+    // glitchy: duration unit ms, so durationMax=2000 => 2000 ms cooldown.
+    final c = await _withState(
+        '[{"type":"glitchy","enabled":true,"colors":[],'
+        '"intervalMin":60,"intervalMax":900,"target":3,"durationMax":2000}]');
+    addTearDown(c.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: c,
+      child: const MaterialApp(home: ExpressionsScreen(lampId: _devId)),
+    ));
+    await _pumpToData(tester, 'Glitchy');
+
+    IconButton btn() => tester.widget<IconButton>(
+        find.widgetWithIcon(IconButton, Icons.play_arrow_rounded));
+    expect(btn().onPressed, isNotNull);
+
+    await tester.tap(find.byIcon(Icons.play_arrow_rounded));
+    await tester.pump();
+    expect(btn().onPressed, isNull);
+
+    await tester.pump(const Duration(milliseconds: 1999));
+    expect(btn().onPressed, isNull);
+
+    await tester.pump(const Duration(milliseconds: 2));
+    expect(btn().onPressed, isNotNull);
+  });
+
+  testWidgets('trigger ▶ on a duration-less expression uses the 2s fallback',
+      (tester) async {
+    final c = await _withState(
+        '[{"type":"pulse","enabled":true,"colors":[],'
+        '"intervalMin":60,"intervalMax":900,"target":3,"loop":0}]');
+    addTearDown(c.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: c,
+      child: const MaterialApp(home: ExpressionsScreen(lampId: _devId)),
+    ));
+    await _pumpToData(tester, 'Pulse');
+
+    IconButton btn() => tester.widget<IconButton>(
+        find.widgetWithIcon(IconButton, Icons.play_arrow_rounded));
+
+    await tester.tap(find.byIcon(Icons.play_arrow_rounded));
+    await tester.pump();
+    expect(btn().onPressed, isNull);
+
+    await tester.pump(const Duration(milliseconds: 1999));
+    expect(btn().onPressed, isNull);
+
+    await tester.pump(const Duration(milliseconds: 2));
+    expect(btn().onPressed, isNotNull);
+  });
+
   testWidgets('tile does not show raw interval seconds', (tester) async {
     final c = await _withState(
         '[{"type":"breathing","enabled":true,"colors":[],'
@@ -213,10 +300,4 @@ void main() {
     await _pumpToData(tester, 'Breathing');
     expect(find.textContaining('60-900'), findsNothing);
   });
-
-  // TODO: verify trigger via BLE introspection once a helper exists.
-  // InMemoryBleClient stores only the last-written value per characteristic
-  // in a private map (_values) with no public writesTo() / recordedWritesTo()
-  // accessor. Until such a helper is added to InMemoryBleClient, we cannot
-  // assert that tapping 'Trigger now' wrote to BleUuids.expressionTest.
 }

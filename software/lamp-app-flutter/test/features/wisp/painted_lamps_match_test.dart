@@ -6,8 +6,8 @@ import 'package:lamp_app/features/wisp/presentation/widgets/wisp_painted_lamps.d
     show resolvePaintedLamps, previewPaletteFor;
 
 void main() {
-  LampNearbyPeer peer(String bd, String name) =>
-      LampNearbyPeer(name: name, bdAddr: bd);
+  LampNearbyPeer peer(String id, String name) =>
+      LampNearbyPeer(name: name, lampId: id);
 
   group('previewPaletteFor (only Manual paints a predictable grid palette)', () {
     const manual = [
@@ -32,7 +32,7 @@ void main() {
     expect(resolvePaintedLamps(claimed: null, peers: const []), isEmpty);
   });
 
-  test('bdAddr name lookup is case-insensitive', () {
+  test('lampId name lookup is case-insensitive', () {
     final peers = [peer('FC:B4:67:F1:DD:A6', 'grady')];
     final out = resolvePaintedLamps(
       claimed: {'fc:b4:67:f1:dd:a6'},
@@ -46,22 +46,31 @@ void main() {
     final out = resolvePaintedLamps(
       claimed: {'FC:B4:67:F1:DD:A6'},
       peers: const [],
-      selfBdAddr: 'FC:B4:67:F1:DD:A6',
+      selfLampId: 'FC:B4:67:F1:DD:A6',
       selfName: 'betty',
     );
     expect(out.single.name, 'betty');
   });
 
-  test('every claimed bdAddr appears; name from peers when present', () {
+  test('every claimed lampId appears; name from peers when present', () {
     final peers = [peer('FC:B4:67:F1:DD:A6', 'grady')];
     final out = resolvePaintedLamps(
       claimed: {'FC:B4:67:F1:DD:A6', 'AA:BB:CC:DD:EE:02'},
       peers: peers,
     );
     expect(out.length, 2);
-    expect(out.firstWhere((e) => e.bdAddr == 'FC:B4:67:F1:DD:A6').name, 'grady');
-    // unresolved claim still shows, labeled by a short bdAddr tail
-    expect(out.firstWhere((e) => e.bdAddr == 'AA:BB:CC:DD:EE:02').name,
+    expect(out.firstWhere((e) => e.lampId == 'FC:B4:67:F1:DD:A6').name, 'grady');
+    // unresolved claim still shows, labeled by a short mac tail
+    expect(out.firstWhere((e) => e.lampId == 'AA:BB:CC:DD:EE:02').name,
         contains('EE:02'));
+  });
+
+  test('claims blob mac 10:20:30:40:50:60 joins a peer with the same lampId, no -2', () {
+    final peers = [peer('10:20:30:40:50:60', 'flora')];
+    final out = resolvePaintedLamps(
+      claimed: {'10:20:30:40:50:60'},
+      peers: peers,
+    );
+    expect(out.single.name, 'flora');
   });
 }

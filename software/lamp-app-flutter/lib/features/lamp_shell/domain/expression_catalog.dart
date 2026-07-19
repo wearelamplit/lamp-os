@@ -1,5 +1,7 @@
 import 'package:collection/collection.dart';
 
+import '../../control/domain/sections.dart';
+
 /// Parsed `exprcat` page-section: the firmware-declared expression catalog.
 /// The firmware is the single source of truth for what parameters each
 /// expression accepts, their ranges, and their types; the app renders the
@@ -37,6 +39,50 @@ class Bound {
 
 enum ParamType { integer, enumeration }
 
+/// Firmware param keys the app treats specially (mirrors
+/// `software/lamp-os/src/expressions/expression_schema.hpp`). The `easing`
+/// param renders as the Motion picker; the `loop` param drives
+/// [effectiveContinuous].
+const String kEasingParamKey = 'easing';
+const String kLoopParamKey = 'loop';
+
+/// Effective continuity for grouping, the per-row play button, and params
+/// gating. Mirrors the firmware: a `loop` param set on the config wins over
+/// the descriptor's static [ExpressionDescriptor.continuous] flag (any
+/// non-zero value == continuous, matching `getParam(..., kLoopParamKey) != 0`).
+bool effectiveContinuous(
+  ExpressionDescriptor? descriptor,
+  Map<String, int> parameters,
+) {
+  final loop = parameters[kLoopParamKey];
+  if (loop != null) return loop != 0;
+  return descriptor?.continuous ?? false;
+}
+
+/// Cooldown for a triggerable expression that has no duration range (e.g.
+/// pulse in Trigger mode). Tunable.
+const int kTriggerCooldownFallbackMs = 2000;
+
+/// How long a ▶ trigger stays disabled after firing one cycle, so the
+/// transient plays out before it can be re-fired. A duration-bearing
+/// expression uses its configured durationMax (falling back to the
+/// descriptor's default), converted to ms via the range's unit; a
+/// duration-less one uses [kTriggerCooldownFallbackMs].
+Duration triggerCooldown(
+  ExpressionDescriptor? descriptor,
+  ExpressionConfig config,
+) {
+  final duration = descriptor?.duration;
+  if (duration == null) {
+    return const Duration(milliseconds: kTriggerCooldownFallbackMs);
+  }
+  final key = duration.maxKey;
+  final durationMax =
+      (key != null ? config.parameters[key] : null) ?? duration.defHi;
+  final factor = duration.unit == 's' ? 1000 : 1;
+  return Duration(milliseconds: durationMax * factor);
+}
+
 class EnumOption {
   const EnumOption({
     required this.value,
@@ -71,6 +117,7 @@ class CatalogParam {
     this.invert = false,
     this.leftLabel,
     this.rightLabel,
+    this.help,
     this.requiresZoning = false,
     this.options = const [],
   });
@@ -86,6 +133,7 @@ class CatalogParam {
   final bool invert;
   final String? leftLabel;
   final String? rightLabel;
+  final String? help;
   final bool requiresZoning;
   final List<EnumOption> options;
 
@@ -101,6 +149,7 @@ class CatalogParam {
         invert: j['invert'] as bool? ?? false,
         leftLabel: j['leftLabel'] as String?,
         rightLabel: j['rightLabel'] as String?,
+        help: j['help'] as String?,
         requiresZoning: j['requiresZoning'] as bool? ?? false,
         options: ((j['options'] as List?) ?? const [])
             .map((e) => EnumOption.fromJson(e as Map<String, dynamic>))
@@ -120,6 +169,7 @@ class CatalogRange {
     required this.defHi,
     this.unit,
     this.label,
+    this.help,
     this.minKey,
     this.maxKey,
   });
@@ -131,6 +181,7 @@ class CatalogRange {
   final int defHi;
   final String? unit;
   final String? label;
+  final String? help;
   final String? minKey;
   final String? maxKey;
 
@@ -144,6 +195,7 @@ class CatalogRange {
       defHi: def.length > 1 ? (def[1] as num).toInt() : 0,
       unit: j['unit'] as String?,
       label: j['label'] as String?,
+      help: j['help'] as String?,
       minKey: j['minKey'] as String?,
       maxKey: j['maxKey'] as String?,
     );

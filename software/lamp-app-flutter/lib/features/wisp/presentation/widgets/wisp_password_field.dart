@@ -27,7 +27,7 @@ class WispPasswordField extends ConsumerWidget {
       drillChevron: true,
       onTap: wispMac == null
           ? null
-          : () => _showPasswordDialog(context, ref, hasPassword, wispMac),
+          : () => _showPasswordDialog(context, ref, hasPassword),
     );
   }
 
@@ -35,14 +35,12 @@ class WispPasswordField extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref,
     bool hasPassword,
-    String wispMac,
   ) async {
     await showDialog<void>(
       context: context,
       builder: (ctx) => _WispPasswordDialog(
         lampId: lampId,
         hasPassword: hasPassword,
-        wispMac: wispMac,
       ),
     );
   }
@@ -52,12 +50,10 @@ class _WispPasswordDialog extends ConsumerStatefulWidget {
   const _WispPasswordDialog({
     required this.lampId,
     required this.hasPassword,
-    required this.wispMac,
   });
 
   final String lampId;
   final bool hasPassword;
-  final String wispMac;
 
   @override
   ConsumerState<_WispPasswordDialog> createState() =>
@@ -133,22 +129,29 @@ class _WispPasswordDialogState extends ConsumerState<_WispPasswordDialog> {
   Future<void> _doSet() async {
     final newPw = _ctrl.text.trim();
     if (newPw.isEmpty) return;
-    if (widget.hasPassword) {
-      final current = _currentCtrl.text.trim();
-      if (current.isEmpty) {
-        setState(() => _currentPasswordError = 'Enter the current password');
-        return;
-      }
+    final current = _currentCtrl.text.trim();
+    if (widget.hasPassword && current.isEmpty) {
+      setState(() => _currentPasswordError = 'Enter the current password');
+      return;
     }
     final n = ref.read(wispNotifierProvider(widget.lampId).notifier);
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _currentPasswordError = null;
+    });
     try {
-      if (widget.hasPassword) {
-        final current = _currentCtrl.text.trim();
-        await n.cachePassword(widget.wispMac, current);
+      final ok = widget.hasPassword
+          ? await n.setPassword(newPw, currentPassword: current)
+          : await n.setPassword(newPw);
+      if (!mounted) return;
+      if (ok) {
+        Navigator.of(context).pop();
+      } else {
+        setState(() {
+          _loading = false;
+          _currentPasswordError = 'Current password is incorrect';
+        });
       }
-      await n.setPassword(newPw);
-      if (mounted) Navigator.of(context).pop();
     } catch (_) {
       if (mounted) {
         setState(() => _loading = false);
@@ -164,11 +167,21 @@ class _WispPasswordDialogState extends ConsumerState<_WispPasswordDialog> {
       return;
     }
     final n = ref.read(wispNotifierProvider(widget.lampId).notifier);
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _currentPasswordError = null;
+    });
     try {
-      await n.cachePassword(widget.wispMac, current);
-      await n.clearPassword();
-      if (mounted) Navigator.of(context).pop();
+      final ok = await n.clearPassword(current);
+      if (!mounted) return;
+      if (ok) {
+        Navigator.of(context).pop();
+      } else {
+        setState(() {
+          _loading = false;
+          _currentPasswordError = 'Current password is incorrect';
+        });
+      }
     } catch (_) {
       if (mounted) {
         setState(() => _loading = false);

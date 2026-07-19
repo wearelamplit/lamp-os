@@ -1,17 +1,3 @@
-// Compact panel surfacing the firmware update lifecycle on a single
-// lamp. Lives on the Info tab; renders as an InfoPanel-styled card.
-//
-// Visual states (mirror of FirmwareState's sealed subclasses):
-//   Idle                → "Check for updates" button
-//   Downloading         → spinner + "Checking…"
-//   Verifying           → spinner + "Verifying signature…"
-//   ReadyToInstall      → version line + "Install" / "Cancel"
-//   OfferSent           → spinner + "Waiting for lamp…"
-//   Streaming           → progress bar + percent + "Cancel"
-//   Finalizing          → spinner + "Finishing up…"
-//   Succeeded           → checkmark + "Update installed. Lamp is rebooting."
-//   Failed              → reason + "Try again"
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -23,7 +9,7 @@ import '../application/firmware_notifier.dart';
 import '../data/firmware_release_client.dart';
 import '../domain/firmware_state.dart';
 
-// v0x04 channel strings carry `{lampType}-{channel}` — strip the prefix
+// v0x04 channel strings carry `{lampType}-{channel}`; strip the prefix
 // when rendering so the user sees `stable` / `beta` / `dev`, not
 // `standard-stable`. The lamp variant is internal routing metadata.
 String _displayChannel(String raw) {

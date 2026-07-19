@@ -18,7 +18,7 @@ abstract class AddLampState with _$AddLampState {
     @Default('') String deviceId,
     @Default('') String name,
     @Default('') String password,
-    // Snapshotted from the nearby scan at select() — the lamp has left the
+    // Snapshotted from the nearby scan at select(); the lamp has left the
     // scan list by the Meet pane (it's rebooting), so carry its colours
     // through for the critter recolor.
     @Default(0) int baseRgb,

@@ -5,7 +5,7 @@ import '../../../core/ble/uuids.dart';
 /// Writes [BleUuids.auth] so the firmware grants subsequent control writes on
 /// this connection.  Empty/null password is treated as a factory-default lamp
 /// (firmware grants open access; no write needed).  Non-empty password: sends
-/// a ciphertext frame — the firmware's GCM auth-tag verification on CHAR_AUTH
+/// a ciphertext frame. The firmware's GCM auth-tag verification on CHAR_AUTH
 /// implicitly authenticates without exposing the password on the wire.
 class AuthClient {
   AuthClient({required this.ble});

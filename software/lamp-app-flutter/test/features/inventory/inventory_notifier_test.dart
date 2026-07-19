@@ -82,4 +82,32 @@ void main() {
     final list = await container.read(inventoryNotifierProvider.future);
     expect(list.single.name, 'alpha');
   });
+
+  test('corrupt inventory JSON recovers to empty instead of erroring',
+      () async {
+    SharedPreferences.setMockInitialValues({'inventory.v1': 'not-json{{{'});
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    final list = await container.read(inventoryNotifierProvider.future);
+    expect(list, isEmpty);
+  });
+
+  test('concurrent mutations both persist (no read-modify-write clobber)',
+      () async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    await container.read(inventoryNotifierProvider.future);
+    final n = container.read(inventoryNotifierProvider.notifier);
+    await n.add(const InventoryLamp(id: '1', name: 'a'));
+    await n.add(const InventoryLamp(id: '2', name: 'b'));
+    // Fire both without awaiting between: unserialized, each reads the same
+    // pre-mutation snapshot and the second persist clobbers the first.
+    final f1 = n.updateName('1', 'a2');
+    final f2 = n.updateName('2', 'b2');
+    await Future.wait([f1, f2]);
+    final list = await container.read(inventoryNotifierProvider.future);
+    final byId = {for (final l in list) l.id: l.name};
+    expect(byId['1'], 'a2');
+    expect(byId['2'], 'b2');
+  });
 }

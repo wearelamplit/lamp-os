@@ -205,6 +205,42 @@ void main() {
     expect(inv, isEmpty);
   });
 
+  test('non-empty but malformed verify read retries, not wrongPassword',
+      () async {
+    // Non-empty bytes mean the auth-gate let the read through, so auth
+    // succeeded. Garbled/undecodable bytes are a transient read glitch —
+    // the user stays on the Meet pane with a recoverable Retry, never the
+    // wrong-password step.
+    final ble = InMemoryBleClient();
+    ble.seedSection(
+      'dev1',
+      'lamp',
+      Uint8List.fromList(utf8.encode('{"name": broken json')),
+    );
+    final c = ProviderContainer(
+      overrides: [bleClientProvider.overrideWithValue(ble)],
+    );
+    addTearDown(c.dispose);
+    await c.read(inventoryNotifierProvider.future);
+    await c.read(activeLampNotifierProvider.future);
+
+    final n = c.read(addLampNotifierProvider.notifier);
+    n.select('dev1');
+    n.setName('jacko');
+    n.setPassword('secret');
+    await n.submit();
+    await n.verifyDone;
+
+    final s = c.read(addLampNotifierProvider);
+    expect(s.step, AddLampStep.verifying,
+        reason: 'a read glitch keeps the user on the Meet pane to Retry');
+    expect(s.status, AddLampStatus.error);
+    expect(s.error, AddLampError.connectFailed);
+    expect(s.error, isNot(AddLampError.wrongPassword));
+    final inv = await c.read(inventoryNotifierProvider.future);
+    expect(inv, isEmpty);
+  });
+
   test('submit() with empty password (Skip) succeeds without probing auth',
       () async {
     // Skip path: password is empty. The lamp's isAuthed() early-returns
@@ -459,6 +495,9 @@ class _HangingBleClient implements BleClient {
   bool isConnected(String deviceId) => _connected.contains(deviceId);
 
   @override
+  int mtu(String deviceId) => 0;
+
+  @override
   Future<Uint8List> read(String d, String s, String c) {
     if (hangOn == _HangOp.read) return Completer<Uint8List>().future;
     return Future.value(Uint8List(0));
@@ -485,6 +524,10 @@ class _HangingBleClient implements BleClient {
 
   @override
   Stream<Uint8List> subscribe(String d, String s, String c) =>
+      const Stream.empty();
+
+  @override
+  Stream<Uint8List> subscribeNotifyOnly(String d, String s, String c) =>
       const Stream.empty();
 
   @override
@@ -526,6 +569,9 @@ class _ResetDuringClaimBleClient implements BleClient {
   bool isConnected(String deviceId) => _connected.contains(deviceId);
 
   @override
+  int mtu(String deviceId) => 0;
+
+  @override
   Future<Uint8List> read(String d, String s, String c) async => Uint8List(0);
 
   @override
@@ -546,6 +592,10 @@ class _ResetDuringClaimBleClient implements BleClient {
 
   @override
   Stream<Uint8List> subscribe(String d, String s, String c) =>
+      const Stream.empty();
+
+  @override
+  Stream<Uint8List> subscribeNotifyOnly(String d, String s, String c) =>
       const Stream.empty();
 
   @override
@@ -585,6 +635,9 @@ class _RecoveringBleClient implements BleClient {
   bool isConnected(String deviceId) => _connected.contains(deviceId);
 
   @override
+  int mtu(String deviceId) => 0;
+
+  @override
   Future<Uint8List> read(String d, String s, String c) async => Uint8List(0);
 
   @override
@@ -603,6 +656,10 @@ class _RecoveringBleClient implements BleClient {
 
   @override
   Stream<Uint8List> subscribe(String d, String s, String c) =>
+      const Stream.empty();
+
+  @override
+  Stream<Uint8List> subscribeNotifyOnly(String d, String s, String c) =>
       const Stream.empty();
 
   @override

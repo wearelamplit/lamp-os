@@ -9,28 +9,27 @@ import '../../../core/ble/ble_client.dart';
 import '../../../core/ble/ble_client_provider.dart';
 import '../../../core/ble/uuids.dart';
 import '../../../core/theme/app_spacing.dart';
+import '../../../core/widgets/form_section.dart';
 import '../../../core/widgets/friendly_error.dart';
 import '../../../core/widgets/info_panel.dart';
-import '../../../core/widgets/section_header.dart';
+import '../../../core/widgets/settings_row.dart';
 import '../../control/application/control_notifier.dart';
-import '../../control/presentation/widgets/connecting_view.dart';
-import '../../control/presentation/widgets/disconnect_aware_body.dart';
+import '../../control/application/control_state.dart';
+import '../../control/domain/sections.dart';
 import 'widgets/wifi_network_picker.dart';
 
-/// Home Mode pane — presence-only detection of a home WiFi network.
+/// Home Mode pane. Quiets the lamp for everyday use.
 ///
-/// The lamp never associates to the AP. It periodically scans for nearby
-/// SSIDs (background scans gated to BT-disconnected windows so they don't
-/// stress the shared radio) and treats the user's selected SSID being
-/// visible as "I'm at home". No password is stored or transmitted, which
-/// also closes off the spoofed-AP password-capture attack.
+/// When `networkBound` is on, home mode is presence-driven: the lamp
+/// periodically scans for the saved SSID and activates when it's visible
+/// (background scans gated to BT-disconnected windows). When `networkBound`
+/// is off, home mode is a plain manual on/off (no WiFi scanning).
 ///
 /// While the user is on this page, the firmware unconditionally treats
-/// home mode as ACTIVE via the CHAR_HOME_MODE_FOCUS signal — so the
+/// home mode as ACTIVE via the CHAR_HOME_MODE_FOCUS signal, so the
 /// brightness slider previews the home brightness in real time. When
 /// the user leaves the page, the focus signal clears and the firmware
-/// falls back to "configurator" mode (home mode off) for the rest of
-/// the BT session.
+/// falls back to "configurator" mode for the rest of the BT session.
 class HomeModeScreen extends ConsumerStatefulWidget {
   const HomeModeScreen({super.key, required this.lampId});
   final String lampId;
@@ -41,8 +40,7 @@ class HomeModeScreen extends ConsumerStatefulWidget {
 
 class _HomeModeScreenState extends ConsumerState<HomeModeScreen> {
   // Captured in initState so dispose can fire the focus-off write WITHOUT
-  // touching `ref` after super.dispose() — the previous pattern of
-  // ref.read(...) in dispose was tripping
+  // touching `ref` after super.dispose(). ref.read(...) in dispose trips
   // `_lifecycleState != _ElementLifecycle.defunct` framework asserts
   // because the Element is mid-teardown by then.
   late BleClient _ble;
@@ -62,9 +60,9 @@ class _HomeModeScreenState extends ConsumerState<HomeModeScreen> {
 
   @override
   void dispose() {
-    // Tell the lamp "user is leaving" — fire-and-forget via the captured
-    // BleClient. The firmware also clears the flag on BT disconnect as
-    // a safety net, so a missed exit (app killed mid-page) is recovered.
+    // Tell the lamp "user is leaving": fire-and-forget via the captured
+    // BleClient. The firmware also clears the flag on BT disconnect, so
+    // a missed exit (app killed mid-page) is recovered.
     _writeFocus(false);
     super.dispose();
   }
@@ -77,32 +75,13 @@ class _HomeModeScreenState extends ConsumerState<HomeModeScreen> {
       Uint8List.fromList([active ? 1 : 0]),
       withoutResponse: true,
     ).catchError((_) {
-      // best-effort — BT may already be torn down by route pop
+      // BT may already be torn down by route pop
     }));
-  }
-
-  void _selectSsid(String ssid) {
-    // setHomeSsid writes immediately via writeSettingsBlob (reboot:false).
-    // No live firmware effect to preview for an SSID — home-mode detection
-    // runs off the saved value.
-    ref.read(controlNotifierProvider(widget.lampId).notifier)
-        .setHomeSsid(ssid);
-  }
-
-  void _onForget() {
-    // Same immediate-write flow: clears homeMode.ssid via writeSettingsBlob
-    // (reboot:false). The lamp drops home mode on its next detection cycle.
-    ref.read(controlNotifierProvider(widget.lampId).notifier)
-        .setHomeSsid('');
   }
 
   @override
   Widget build(BuildContext context) {
-    // .select to just the home section. HomeMode reads only
-    // home.{ssid, brightness}; brightness sliders on the active lamp's
-    // ControlNotifier don't rebuild this whole tree.
-    final controlAsync = ref.watch(controlNotifierProvider(widget.lampId)
-        .select((a) => a.whenData((s) => s.home)));
+    final controlAsync = ref.watch(controlNotifierProvider(widget.lampId));
 
     return Scaffold(
       appBar: AppBar(
@@ -113,7 +92,7 @@ class _HomeModeScreenState extends ConsumerState<HomeModeScreen> {
         title: const Text('Home Mode'),
       ),
       body: controlAsync.when(
-        loading: () => ConnectingView(deviceId: widget.lampId),
+        loading: () => const SizedBox.expand(),
         error: (e, _) => FriendlyError.page(
           title: "Couldn't reach your lamp.",
           subtitle:
@@ -123,48 +102,159 @@ class _HomeModeScreenState extends ConsumerState<HomeModeScreen> {
           onRetry: () =>
               ref.invalidate(controlNotifierProvider(widget.lampId)),
         ),
-        data: (home) {
-          final notifier =
-              ref.read(controlNotifierProvider(widget.lampId).notifier);
+        data: (state) => _HomeModeBody(lampId: widget.lampId, state: state),
+      ),
+    );
+  }
+}
 
-          final hasSaved = home.ssid.isNotEmpty;
+class _HomeModeBody extends ConsumerWidget {
+  const _HomeModeBody({required this.lampId, required this.state});
+  final String lampId;
+  final ControlState state;
 
-          return DisconnectAwareBody(
-            lampId: widget.lampId,
-            child: ListView(
-            padding: const EdgeInsets.all(AppSpace.lg),
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final home = state.home;
+    final notifier = ref.read(controlNotifierProvider(lampId).notifier);
+    final catalog = state.catalog;
+
+    return ListView(
+      padding: const EdgeInsets.all(AppSpace.lg),
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text('Home Mode',
+                  style: Theme.of(context).textTheme.titleMedium),
+            ),
+            Switch(
+              value: home.enabled,
+              onChanged: (v) => notifier.setHomeEnabled(v),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpace.lg),
+        const InfoPanel(
+          child: Text(
+            'Home Mode quiets the lamp for everyday use. It can activate '
+            'automatically when your home Wi-Fi is nearby, or simply stay '
+            'on as a manual setting. The lamp never connects to the network '
+            'or stores a password. It just listens for the name in the air.',
+          ),
+        ),
+        const SizedBox(height: AppSpace.lg),
+
+        // Network binding
+        FormSection(
+          title: 'Activation',
+          children: [
+            SettingsRow(
+              icon: Icons.wifi_find_outlined,
+              title: 'Only on my home network',
+              subtitle: home.networkBound
+                  ? 'Activates when your Wi-Fi is in range'
+                  : 'Always on when Home Mode is enabled',
+              trailing: Switch(
+                value: home.networkBound,
+                onChanged: (v) => notifier.setHomeNetworkBound(v),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpace.lg),
+
+        // Network picker + brightness only shown when presence-driven
+        if (home.networkBound) ...[
+          _NetworkSection(lampId: lampId, home: home, notifier: notifier),
+          const SizedBox(height: AppSpace.lg),
+        ],
+
+        // Behaviour toggles
+        FormSection(
+          title: 'While home mode is active',
+          children: [
+            SettingsRow(
+              icon: Icons.waving_hand_outlined,
+              title: 'Social behaviours',
+              subtitle: 'Greetings and nearby-lamp reactions',
+              trailing: Switch(
+                value: !home.socialDisabled,
+                onChanged: (v) => notifier.setHomeSocialDisabled(!v),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpace.lg),
+
+        // Per-expression type toggles shown only when the catalog is available
+        if (catalog != null && catalog.expressions.isNotEmpty) ...[
+          FormSection(
+            title: 'Expressions',
             children: [
-              const InfoPanel(
-                child: Text(
-                  'Home Mode quiets the lamp for everyday use. When the '
-                  'lamp sees your home Wi-Fi nearby it pauses social '
-                  'greetings and switches to a calmer brightness. The '
-                  "lamp doesn't connect to the network or store its "
-                  'password. It just listens for the name in the air.',
+              for (final descriptor in catalog.expressions)
+                SettingsRow(
+                  icon: Icons.auto_awesome_outlined,
+                  title: descriptor.name,
+                  trailing: Switch(
+                    value:
+                        !home.disabledExpressionTypes.contains(descriptor.id),
+                    onChanged: (v) => notifier.setHomeExpressionDisabled(
+                        descriptor.id, !v),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: AppSpace.lg),
+        ],
+      ],
+    );
+  }
+}
+
+class _NetworkSection extends ConsumerWidget {
+  const _NetworkSection({
+    required this.lampId,
+    required this.home,
+    required this.notifier,
+  });
+  final String lampId;
+  final HomeSection home;
+  final ControlNotifier notifier;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hasSaved = home.ssid.isNotEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        FormSection(
+          title: 'Home network',
+          children: [
+            if (hasSaved)
+              _ConnectionStatusRow(
+                label: home.ssid,
+                onForget: () => notifier.setHomeSsid(''),
+              )
+            else
+              Padding(
+                padding: const EdgeInsets.all(AppSpace.lg),
+                child: WifiNetworkPicker(
+                  lampId: lampId,
+                  onPick: (r) => notifier.setHomeSsid(r.ssid),
                 ),
               ),
-              const SizedBox(height: AppSpace.lg),
-
-              if (hasSaved) ...[
-                _ConnectionStatusRow(
-                  label: 'Home network: ${home.ssid}',
-                  onForget: _onForget,
-                ),
-                const SizedBox(height: AppSpace.md),
-              ] else ...[
-                WifiNetworkPicker(
-                  lampId: widget.lampId,
-                  onPick: (r) => _selectSsid(r.ssid),
-                ),
-              ],
-
-              // Home brightness — slider always available; the firmware
-              // routes CHAR_BRIGHTNESS to home.brightness while this page
-              // is open (via CHAR_HOME_MODE_FOCUS), so dragging the
-              // slider previews the home brightness live on the lamp.
-              const SizedBox(height: AppSpace.xl),
-              const SectionHeader('Home Mode brightness'),
-              Row(
+          ],
+        ),
+        const SizedBox(height: AppSpace.lg),
+        FormSection(
+          title: 'Home brightness',
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpace.lg, vertical: AppSpace.sm),
+              child: Row(
                 children: [
                   Expanded(
                     child: Slider(
@@ -172,37 +262,34 @@ class _HomeModeScreenState extends ConsumerState<HomeModeScreen> {
                       min: 0,
                       max: 100,
                       divisions: 100,
-                      onChanged: (v) =>
-                          notifier.setHomeBrightness(v.round()),
+                      onChanged: (v) => notifier.setHomeBrightness(v.round()),
                       onChangeEnd: (v) =>
                           notifier.setHomeBrightness(v.round()),
                     ),
                   ),
                   SizedBox(
-                    width: 48,
+                    width: 48, // deliberate dimension, not spacing
                     child: Text(
                       '${home.brightness}%',
                       textAlign: TextAlign.right,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        fontFamily: 'monospace',
-                      ),
+                      style:
+                          Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                                fontFamily: 'monospace',
+                              ),
                     ),
                   ),
                 ],
               ),
-            ],
-          ),
-          );
-        },
-      ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }
-
-// ---------------------------------------------------------------------------
-// Private widgets
-// ---------------------------------------------------------------------------
 
 class _ConnectionStatusRow extends StatelessWidget {
   const _ConnectionStatusRow({
@@ -214,17 +301,21 @@ class _ConnectionStatusRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: Text(label),
-        ),
-        TextButton.icon(
-          icon: const Icon(Icons.wifi_off, size: 16),
-          label: const Text('Forget network'),
-          onPressed: onForget,
-        ),
-      ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpace.lg, vertical: AppSpace.md),
+      child: Row(
+        children: [
+          const Icon(Icons.wifi, size: 18), // deliberate dimension, not spacing
+          const SizedBox(width: AppSpace.sm),
+          Expanded(child: Text(label)),
+          TextButton.icon(
+            icon: const Icon(Icons.wifi_off, size: 16), // deliberate dimension, not spacing
+            label: const Text('Forget'),
+            onPressed: onForget,
+          ),
+        ],
+      ),
     );
   }
 }

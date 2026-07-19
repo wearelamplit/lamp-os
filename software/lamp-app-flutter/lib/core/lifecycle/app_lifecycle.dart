@@ -4,8 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 /// Broadcasts the current `AppLifecycleState` to anything that wants to
 /// react to the app being foregrounded / backgrounded / detached.
 ///
-/// Wired from `LampApp.didChangeAppLifecycleState`, which is the only
-/// `WidgetsBindingObserver` we already have. Single source of truth so
+/// Wired from `LampApp.didChangeAppLifecycleState`, the only
+/// `WidgetsBindingObserver` in the app. Single source of truth so
 /// any number of notifiers (currently: ControlNotifier's probe-on-resume
 /// reconnect path) can listen without each holding its own observer.
 ///

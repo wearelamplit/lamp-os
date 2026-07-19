@@ -70,17 +70,23 @@ Future<ProviderContainer> _makeContainer({
 /// never drain under FakeAsync; resolving via `c.read(...future)` inside
 /// runAsync first lets it reach AsyncData, then pumpWidget builds from cache.
 ///
-/// Default tab is Sources; wifi-config-row lives there under Aurora mode.
+/// Lands on Palette source tab (default). Call [_tapSettingsTab] to reach
+/// the Settings tab where wifi-config-row now lives.
 Future<void> _pumpScreen(WidgetTester tester, ProviderContainer c) async {
   await tester.runAsync(() async {
     await c.read(wispNotifierProvider(_devId).future);
   });
   await tester.pumpWidget(_wrap(c));
-  // Wait for the tab bar to render (Sources is the default tab).
+  // Wait for the tab bar to render (Palette source is the default tab).
   for (var i = 0; i < 20; i++) {
     await tester.pump(const Duration(milliseconds: 16));
-    if (find.text('Sources').evaluate().isNotEmpty) break;
+    if (find.text('Palette source').evaluate().isNotEmpty) break;
   }
+}
+
+Future<void> _tapSettingsTab(WidgetTester tester) async {
+  await tester.tap(find.text('Settings'));
+  await tester.pumpAndSettle();
 }
 
 Widget _wrap(ProviderContainer c) => UncontrolledProviderScope(
@@ -100,6 +106,7 @@ void main() {
     );
     addTearDown(c.dispose);
     await _pumpScreen(tester, c);
+    await _tapSettingsTab(tester);
 
     expect(find.byKey(const Key('wifi-config-row')), findsOneWidget);
     expect(find.text('WiFi'), findsOneWidget);
@@ -118,6 +125,7 @@ void main() {
     );
     addTearDown(c.dispose);
     await _pumpScreen(tester, c);
+    await _tapSettingsTab(tester);
 
     expect(find.byKey(const Key('wifi-config-row')), findsOneWidget);
     expect(find.textContaining('Connected'), findsWidgets);
@@ -128,6 +136,7 @@ void main() {
     final c = await _makeContainer();
     addTearDown(c.dispose);
     await _pumpScreen(tester, c);
+    await _tapSettingsTab(tester);
 
     await tester.tap(find.byKey(const Key('wifi-config-row')));
     // Give the modal a couple of frames to slide in.
@@ -179,6 +188,7 @@ void main() {
         ));
 
     await _pumpScreen(tester, c);
+    await _tapSettingsTab(tester);
 
     // Open the picker.
     await tester.tap(find.byKey(const Key('wifi-config-row')));
@@ -249,6 +259,7 @@ void main() {
         ));
 
     await _pumpScreen(tester, c);
+    await _tapSettingsTab(tester);
 
     await tester.tap(find.byKey(const Key('wifi-config-row')));
     for (var i = 0; i < 20; i++) {
@@ -263,40 +274,32 @@ void main() {
       await tester.pump(const Duration(milliseconds: 16));
     }
 
-    // wispOp characteristic was never written, so InMemoryBleClient
-    // throws BleNotFound on read. That's our "no setWifi shipped"
-    // signal — anything else would mean the cancel path silently sent
-    // credentials.
-    await expectLater(
-      () => ble.read(_devId, BleUuids.controlService, BleUuids.wispOp),
-      throwsA(isA<BleNotFound>()),
-    );
+    // The screen's open-time pollStatus may have written to wispOp, so
+    // assert on op names: a setWifi write here would mean the cancel path
+    // silently sent credentials.
+    final ops = ble
+        .writesTo(_devId, BleUuids.wispOp)
+        .map((w) => (jsonDecode(utf8.decode(w)) as Map<String, dynamic>)['op'])
+        .toList();
+    expect(ops, isNot(contains('setWifi')));
   });
 
-  // The WiFi row is Aurora-only; confirm it's absent in Off and Manual modes.
-  // Use tester.runAsync to escape FakeAsync so the notifier's BLE futures
-  // resolve before pumpWidget.
+  // WiFi is now on the Settings tab unconditionally; confirm it appears there
+  // regardless of source mode.
   for (final mode in <String>['off', 'manual']) {
-    testWidgets('WiFi row is NOT rendered when source=$mode', (tester) async {
+    testWidgets('WiFi row is on Settings tab when source=$mode', (tester) async {
       final c = await _makeContainer(
         wispStatusJson:
             '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"$mode"}',
       );
       addTearDown(c.dispose);
-      await tester.runAsync(() async {
-        await c.read(wispNotifierProvider(_devId).future);
-      });
-
-      await tester.pumpWidget(_wrap(c));
-      for (var i = 0; i < 4; i++) {
-        await tester.pump(const Duration(milliseconds: 16));
-      }
+      await _pumpScreen(tester, c);
+      await _tapSettingsTab(tester);
 
       expect(
         find.byKey(const Key('wifi-config-row')),
-        findsNothing,
-        reason: 'WiFi row must be hidden when wisp.source=$mode '
-            '(only Aurora mode needs internet)',
+        findsOneWidget,
+        reason: 'WiFi row lives on Settings tab regardless of source mode',
       );
     });
   }

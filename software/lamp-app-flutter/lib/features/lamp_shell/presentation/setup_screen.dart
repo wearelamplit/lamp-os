@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -8,15 +10,14 @@ import '../../../core/utils/tap_counter.dart';
 import '../../../core/widgets/app_snackbar.dart';
 import '../../../core/widgets/friendly_error.dart';
 import '../../../core/widgets/password_prompt_dialog.dart';
+import '../../../core/widgets/rename_dialog.dart';
 import '../../../core/widgets/settings_row.dart';
 import '../../control/application/advanced_session.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/application/control_state.dart';
 import '../../control/application/dev_mode.dart';
-import '../../control/presentation/widgets/connecting_view.dart';
-import '../../control/presentation/widgets/disconnect_aware_body.dart';
 
-/// Setup tab — mobile-style row list. Tapping a row drills into a
+/// Setup tab: mobile-style row list. Tapping a row drills into a
 /// sub-pane (HomeWifi, HomeMode, AdvancedLeds, Knockout). The Home Wi-Fi
 /// row has a tap-toggle that flips the SSID between "" and a placeholder
 /// without leaving the screen; tapping the chevron-y area drills in to
@@ -33,7 +34,7 @@ class SetupScreen extends ConsumerWidget {
     // candidates; knockout is the actual exploitable case.
     final async = ref.watch(controlNotifierProvider(lampId));
     return async.when(
-      loading: () => ConnectingView(deviceId: lampId),
+      loading: () => const SizedBox.expand(),
       error: (e, _) => FriendlyError.page(
         title: "Couldn't reach your lamp.",
         subtitle:
@@ -42,10 +43,7 @@ class SetupScreen extends ConsumerWidget {
         rawError: e,
         onRetry: () => ref.invalidate(controlNotifierProvider(lampId)),
       ),
-      data: (state) => DisconnectAwareBody(
-        lampId: lampId,
-        child: _SetupBody(lampId: lampId, state: state),
-      ),
+      data: (state) => _SetupBody(lampId: lampId, state: state),
     );
   }
 }
@@ -57,14 +55,22 @@ class _SetupBody extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final n = ref.read(controlNotifierProvider(lampId).notifier);
+    // Read the notifier fresh at each tap rather than caching one instance
+    // across the build: a mid-session reconnect (password change) can
+    // invalidate the control provider, staling out a captured reference.
+    ControlNotifier n() => ref.read(controlNotifierProvider(lampId).notifier);
     final hasSsid = state.home.ssid.isNotEmpty;
     final enabled = state.home.enabled;
+    final networkBound = state.home.networkBound;
     final String homeSubtitle;
     if (enabled) {
-      homeSubtitle = hasSsid
-          ? '${state.home.ssid} · ${state.home.brightness}%'
-          : 'On · not configured';
+      if (networkBound) {
+        homeSubtitle = hasSsid
+            ? 'On · ${state.home.ssid} · ${state.home.brightness}%'
+            : 'On · not configured';
+      } else {
+        homeSubtitle = 'On · manual';
+      }
     } else {
       homeSubtitle = hasSsid ? 'Off · ${state.home.ssid} saved' : 'Off';
     }
@@ -76,7 +82,13 @@ class _SetupBody extends ConsumerWidget {
           icon: Icons.label_outline,
           title: 'Name',
           subtitle: state.lamp.name.isEmpty ? '(unnamed)' : state.lamp.name,
-          onTap: () => _showRenameDialog(context, state.lamp.name, n.setLampName),
+          onTap: () => showRenameDialog(
+            context,
+            title: 'Rename lamp',
+            label: 'Name',
+            initial: state.lamp.name,
+            onSave: (name) => n().setLampName(name),
+          ),
         ),
         SettingsRow(
           icon: Icons.lock_outline,
@@ -93,7 +105,7 @@ class _SetupBody extends ConsumerWidget {
               subtitle: 'Saving restarts the lamp (~10s).',
               confirmLabel: 'Save',
             );
-            if (pw != null) n.setLampPassword(pw);
+            if (pw != null) unawaited(n().setLampPassword(pw));
           },
         ),
         const SettingsGroupHeading('Connectivity'),
@@ -101,20 +113,6 @@ class _SetupBody extends ConsumerWidget {
           icon: Icons.home_outlined,
           title: 'Home Mode',
           subtitle: homeSubtitle,
-          drillChevron: true,
-          trailing: Switch(
-            value: enabled,
-            // Soft toggle: flips the enabled flag without wiping the saved
-            // SSID/password. Destructive "Forget network" lives inside the
-            // Home Mode pane. First-time on (no SSID yet): drill into the
-            // pane so the user can pick a network.
-            onChanged: (v) {
-              n.setHomeEnabled(v);
-              if (v && !hasSsid) {
-                context.push(AppRoutes.homeMode(lampId));
-              }
-            },
-          ),
           onTap: () => context.push(AppRoutes.homeMode(lampId)),
         ),
         SettingsRow(
@@ -125,7 +123,7 @@ class _SetupBody extends ConsumerWidget {
               : 'Off',
           trailing: Switch(
             value: state.lamp.webappEnabled,
-            onChanged: (v) => n.setLampWebappEnabled(v),
+            onChanged: (v) => n().setLampWebappEnabled(v),
           ),
         ),
         const SettingsGroupHeading('LEDs'),
@@ -135,111 +133,50 @@ class _SetupBody extends ConsumerWidget {
           subtitle: 'Base ${state.base.px} · Shade ${state.shade.px} LEDs',
           onTap: () => context.push(AppRoutes.advancedLeds(lampId)),
         ),
-        // Nearby lamps (debug), behind the advanced gate so the /devices
-        // route stays reachable once a lamp is adopted.
-        if (ref.watch(effectiveAdvancedProvider(lampId)))
+        // Debug group appears only in advanced mode.
+        if (ref.watch(effectiveAdvancedProvider(lampId))) ...[
+          const SettingsGroupHeading('Debug'),
           SettingsRow(
             icon: Icons.bluetooth_searching,
-            title: 'Nearby lamps (debug)',
-            subtitle: 'Live BLE adv stream',
-            onTap: () => context.push('/devices'),
+            title: 'Mesh lamps',
+            subtitle: 'Fleet roster over the mesh',
+            onTap: () => context.push('/mesh-lamps'),
           ),
-        // Factory reset — also gated on session-advanced. Destructive:
-        // wipes NVS and re-adopts. Dialog confirms before firing.
-        if (ref.watch(effectiveAdvancedProvider(lampId)))
+          // Destructive: wipes NVS and re-adopts. The dialog confirms
+          // before firing.
           SettingsRow(
             icon: Icons.restore_outlined,
             title: 'Factory reset',
             subtitle: 'Wipe all settings and re-adopt',
-            onTap: () => _showFactoryResetDialog(context, lampId, n),
+            onTap: () => _showFactoryResetDialog(context, lampId),
           ),
+        ],
       ],
     );
   }
 }
 
-/// Lightweight rename modal — keeps the row tappable without taking the
-/// user to a full sub-screen for a one-field edit. Hosted by a
-/// `StatefulWidget` so the `TextEditingController` has a lifecycle to
-/// dispose on (a plain `showDialog` closure leaks the controller).
-Future<void> _showRenameDialog(
-  BuildContext context,
-  String initial,
-  ValueChanged<String> onSave,
-) =>
-    showDialog<void>(
-      context: context,
-      builder: (_) => _RenameDialog(initial: initial, onSave: onSave),
-    );
-
-class _RenameDialog extends StatefulWidget {
-  const _RenameDialog({required this.initial, required this.onSave});
-  final String initial;
-  final ValueChanged<String> onSave;
-
-  @override
-  State<_RenameDialog> createState() => _RenameDialogState();
-}
-
-class _RenameDialogState extends State<_RenameDialog> {
-  late final TextEditingController _ctrl =
-      TextEditingController(text: widget.initial);
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Rename lamp'),
-      content: TextField(
-        controller: _ctrl,
-        autofocus: true,
-        decoration: const InputDecoration(labelText: 'Name'),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () {
-            widget.onSave(_ctrl.text.trim());
-            Navigator.of(context).pop();
-          },
-          child: const Text('Save'),
-        ),
-      ],
-    );
-  }
-}
-
-/// Factory-reset confirmation. Destructive operation, so we go through a
+/// Factory-reset confirmation. Destructive operation, so it goes through a
 /// straightforward Cancel/Reset dialog (no text confirmation step like
-/// some apps require — the advanced-mode gesture barrier and the
+/// some apps require; the advanced-mode gesture barrier and the
 /// confirm-tap are gate enough). On Reset, the notifier sends the
 /// settings_blob sentinel and the lamp reboots into factory defaults.
-/// We pop the dialog before the BLE write returns so the UI doesn't
+/// The dialog pops before the BLE write returns so the UI doesn't
 /// hang on the reboot-disconnect.
 ///
 /// The content area carries a hidden 5-tap zone to the LEFT of the
 /// action buttons that enables app-global dev mode (password-gated).
 /// Only registers when the user already has session-unlocked advanced
-/// mode — keeps the feature undiscoverable without going through the
+/// mode, keeping the feature undiscoverable without going through the
 /// Info-wordmark gesture first.
 Future<void> _showFactoryResetDialog(
   BuildContext context,
   String lampId,
-  ControlNotifier notifier,
 ) =>
     showDialog<void>(
       context: context,
       builder: (_) => _FactoryResetDialog(
         lampId: lampId,
-        notifier: notifier,
         outerContext: context,
       ),
     );
@@ -247,11 +184,9 @@ Future<void> _showFactoryResetDialog(
 class _FactoryResetDialog extends ConsumerStatefulWidget {
   const _FactoryResetDialog({
     required this.lampId,
-    required this.notifier,
     required this.outerContext,
   });
   final String lampId;
-  final ControlNotifier notifier;
   // GoRouter on post-reset navigation needs the parent route tree, not
   // the dialog's overlay route. Captured at show-time so the post-pop
   // jump to my-lamps lands on the right router.
@@ -277,8 +212,8 @@ class _FactoryResetDialogState extends ConsumerState<_FactoryResetDialog> {
 
   Future<void> _onDevModeTap() async {
     // Gate on session-advanced (NOT effective). The user must have come
-    // through the Info-wordmark 5-tap this session; we don't want a
-    // devMode-on app to expose this to anyone who picks up the phone.
+    // through the Info-wordmark 5-tap this session, so a devMode-on app
+    // doesn't expose this to anyone who picks up the phone.
     if (!ref.read(advancedSessionProvider(widget.lampId))) return;
     final input = await showPasswordPromptDialog(
       context,
@@ -306,7 +241,7 @@ class _FactoryResetDialogState extends ConsumerState<_FactoryResetDialog> {
     // Everything lives in `content:` rather than splitting into
     // `actions:`. AlertDialog's actions slot lays out via OverflowBar
     // with unbounded-width intrinsic constraints, which is incompatible
-    // with the Expanded GestureDetector we use as the hidden 5-tap
+    // with the Expanded GestureDetector used as the hidden 5-tap
     // hotspot. Content area uses normal bounded Flex constraints, so
     // Expanded + Row + buttons layout correctly.
     return AlertDialog(
@@ -343,7 +278,9 @@ class _FactoryResetDialogState extends ConsumerState<_FactoryResetDialog> {
                   backgroundColor: colorScheme.error,
                 ),
                 onPressed: () async {
-                  await widget.notifier.factoryReset();
+                  await ref
+                      .read(controlNotifierProvider(widget.lampId).notifier)
+                      .factoryReset();
                   if (!dialogCtx.mounted) return;
                   Navigator.of(dialogCtx).pop();
                   if (!widget.outerContext.mounted) return;

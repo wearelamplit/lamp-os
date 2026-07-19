@@ -22,15 +22,14 @@ import '../../nearby/application/scan_grace_provider.dart';
 import '../../nearby/domain/nearby_lamp.dart';
 import '../domain/last_seen.dart';
 
-/// Unified lamp picker — the app's landing screen for users with at least
+/// Unified lamp picker. The app's landing screen for users with at least
 /// one lamp, and also the destination of LampShell's "switch lamp" action.
 ///
-/// Replaces the old split between MyLampsScreen and LampPickerSheet modal:
-/// one full-screen widget, one ordered list (no online/offline section
+/// One full-screen widget, one ordered list (no online/offline section
 /// headers), both delete affordances (swipe + long-press), and an "Adopt
 /// a lamp" entry at the end. Tile order is connected → in-range → most-
 /// recently-seen → alphabetical so the "online" lamps float to the top
-/// without needing a structural split.
+/// without a separate section.
 ///
 /// The scanner is mounted while this screen is alive (via the watch on
 /// `nearbyLampsNotifierProvider`) and torn down when the user navigates
@@ -120,7 +119,7 @@ class _LampTile extends ConsumerWidget {
   final bool inScanGrace;
 
   Future<void> _onTap(BuildContext context, WidgetRef ref) async {
-    // Tapping any tile — including the currently-active lamp — navigates to
+    // Tapping any tile (including the currently-active lamp) navigates to
     // its control screen. From the full-screen picker the user is not on the
     // lamp's screen, so "tap active" needs to take them there.
     //
@@ -174,15 +173,15 @@ class _LampTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     // Connected lamps don't advertise (NimBLE peripheral default), so the
-    // BLE scan never sees them — they'd render as "offline" if we only
-    // looked at `nearbyById`. Cross-check fbp's connectedDevices list to
+    // BLE scan never sees them. Checking only `nearbyById` would render
+    // them as "offline". Cross-check fbp's connectedDevices list to
     // catch that case. `isConnected` is a synchronous check against the
     // already-cached connected-devices set; it doesn't materialise any
     // notifier, so this stays cheap across an N-tile inventory.
     final bleClient = ref.watch(bleClientProvider);
     final connectedToThisLamp = bleClient.isConnected(lamp.id);
     // For the active lamp, also fold in the controlNotifier's `connected`
-    // signal — fbp may report connected mid-handshake before the app has
+    // signal. fbp may report connected mid-handshake before the app has
     // a usable GATT session. The `.select` keeps slider drags from
     // rebuilding this tile.
     final notifierConnected = isCurrent &&
@@ -229,7 +228,7 @@ class _LampTile extends ConsumerWidget {
       },
       onDismissed: (_) async {
         // Swipe is the only remove path. confirmDismiss already prompted, so
-        // no dialog here — just remove and, if this was the active lamp,
+        // no dialog here: just remove and, if this was the active lamp,
         // repoint activeLampNotifier so nothing dangles at a deleted id.
         final activeBefore = ref.read(activeLampNotifierProvider).value;
         await ref.read(inventoryNotifierProvider.notifier).remove(lamp.id);
@@ -248,7 +247,7 @@ class _LampTile extends ConsumerWidget {
       },
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadius.card),
-        // Every tile is tappable, even offline ones — the user may want
+        // Every tile is tappable, even offline ones. The user may want
         // to navigate to a lamp's screen to wait for its reconnect or
         // see its last-known state, even when not currently in range.
         onTap: () => _onTap(context, ref),
@@ -260,8 +259,9 @@ class _LampTile extends ConsumerWidget {
               StatusDot(kind: status, size: 14), // deliberate dimension, not spacing
               const SizedBox(width: AppSpace.md),
               CritterIcon(
-                critterIndex: lamp.critterIndex,
-                deviceId: lamp.id,
+                deviceId: (lamp.lampId?.isNotEmpty ?? false)
+                    ? lamp.lampId!
+                    : lamp.id,
                 shade: colors.shade ?? colorScheme.onSurfaceVariant,
                 base: colors.base ?? colorScheme.onSurfaceVariant,
                 size: 44,
@@ -277,7 +277,7 @@ class _LampTile extends ConsumerWidget {
               ),
               // Right-side detail. In advanced mode (session-unlock for
               // this lamp), the firmware/version line replaces the
-              // status text — the operator already knows the lamp is
+              // status text: the operator already knows the lamp is
               // in range from the dot, and the version is the more
               // valuable info. Plain widget (no Flexible) so it pins to
               // the right edge; the Expanded name above absorbs the

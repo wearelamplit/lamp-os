@@ -1,23 +1,30 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/app_channel.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/app_snackbar.dart';
 import '../../../core/widgets/empty_state_pane.dart';
 import '../../../core/widgets/friendly_error.dart';
+import '../../../core/widgets/rename_dialog.dart';
+import '../../../core/widgets/section_header.dart';
+import '../../../core/widgets/settings_row.dart';
 import '../../control/application/control_notifier.dart';
-import '../../control/presentation/widgets/connecting_view.dart';
-import '../../control/presentation/widgets/disconnect_aware_body.dart';
 import '../application/wisp_notifier.dart';
 import '../domain/wisp_source_mode.dart';
 import '../domain/wisp_status.dart';
 import '../domain/zone_source.dart';
 import 'palette_gradient_bar.dart';
 import 'widgets/drift_controls.dart';
+import 'widgets/wisp_led_config.dart';
 import 'widgets/wisp_manual_palette.dart';
 import 'widgets/wisp_off_color.dart';
 import 'widgets/wisp_painted_lamps.dart';
 import 'widgets/wisp_password_field.dart';
+import 'widgets/space_brightness_slider.dart';
+import 'widgets/wisp_range_control.dart';
 import 'widgets/wisp_source_picker.dart';
 import 'widgets/wisp_wifi_config.dart';
 import 'widgets/wisp_zones.dart';
@@ -56,7 +63,7 @@ class WispConfigScreen extends ConsumerWidget {
         title: appBarTitle,
       ),
       body: controlAsync.when(
-        loading: () => ConnectingView(deviceId: lampId),
+        loading: () => const SizedBox.expand(),
         error: (e, _) => FriendlyError.page(
           title: "Couldn't reach your lamp.",
           subtitle:
@@ -65,12 +72,7 @@ class WispConfigScreen extends ConsumerWidget {
           rawError: e,
           onRetry: () => ref.invalidate(controlNotifierProvider(lampId)),
         ),
-        data: (state) {
-          return DisconnectAwareBody(
-            lampId: lampId,
-            child: _WispBody(lampId: lampId),
-          );
-        },
+        data: (state) => _WispBody(lampId: lampId),
       ),
     );
   }
@@ -92,6 +94,15 @@ class _WispBodyState extends ConsumerState<_WispBody>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    // The lamp shell keeps the notifier alive, so its build() won't re-run
+    // on screen open; poll here so a stale relay cache refreshes now
+    // instead of on the wisp's 30 s heartbeat.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(
+        ref.read(wispNotifierProvider(widget.lampId).notifier).pollStatus(),
+      );
+    });
   }
 
   @override
@@ -120,13 +131,16 @@ class _WispBodyState extends ConsumerState<_WispBody>
   Widget _buildBody(BuildContext context, WispStatus status) {
     final notifier = ref.read(wispNotifierProvider(widget.lampId).notifier);
     final source = status.source;
-    final auroraEnabled = status.auroraDetected;
+    // Aurora selection is disabled app-wide: the feature is untested against
+    // real hardware. A wisp already in Aurora mode still displays normally.
+    const auroraEnabled = false;
 
     // Schedule on the next frame to avoid mutating notifier state mid-build.
     if (source == WispSourceMode.manual &&
         notifier.draftManualPalette.isEmpty &&
         notifier.savedManualPalette.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
         notifier.resetManualPaletteDraft();
       });
     }
@@ -134,10 +148,15 @@ class _WispBodyState extends ConsumerState<_WispBody>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        PaletteGradientBar(
+          sourceMode: source,
+          manualPalette: notifier.draftManualPalette,
+          offColor: status.offColor,
+        ),
         TabBar(
           controller: _tabController,
           tabs: const [
-            Tab(icon: Icon(Icons.palette_outlined), text: 'Sources'),
+            Tab(icon: Icon(Icons.palette_outlined), text: 'Palette source'),
             Tab(icon: Icon(Icons.tune), text: 'Settings'),
             Tab(icon: Icon(Icons.lightbulb_outline), text: 'Lamps'),
           ],
@@ -157,14 +176,11 @@ class _WispBodyState extends ConsumerState<_WispBody>
                 lampId: widget.lampId,
                 status: status,
               ),
-              _LampsTab(
-                lampId: widget.lampId,
-                status: status,
-                notifier: notifier,
-              ),
+              _LampsTab(lampId: widget.lampId),
             ],
           ),
         ),
+        SpaceBrightnessSlider(lampId: widget.lampId, status: status),
       ],
     );
   }
@@ -238,8 +254,6 @@ class _SourcesTabState extends State<_SourcesTab> {
             ),
             const SizedBox(height: AppSpace.lg),
           ],
-          WifiConfigRow(lampId: lampId, status: status),
-          const SizedBox(height: AppSpace.lg),
           CurrentZone(status: status),
           const SizedBox(height: AppSpace.lg),
           ObservedZonesPicker(
@@ -270,7 +284,7 @@ class _SourcesTabState extends State<_SourcesTab> {
       s.zoneSource == ZoneSource.appOp || s.zoneSource == ZoneSource.nvs;
 }
 
-class _SettingsTab extends StatefulWidget {
+class _SettingsTab extends ConsumerWidget {
   const _SettingsTab({
     required this.lampId,
     required this.status,
@@ -280,106 +294,62 @@ class _SettingsTab extends StatefulWidget {
   final WispStatus status;
 
   @override
-  State<_SettingsTab> createState() => _SettingsTabState();
-}
-
-class _SettingsTabState extends State<_SettingsTab> {
-  late final TextEditingController _nameCtrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _nameCtrl = TextEditingController(text: widget.status.name);
-  }
-
-  @override
-  void didUpdateWidget(_SettingsTab old) {
-    super.didUpdateWidget(old);
-    // Sync name field if the wisp echoes back a new name and the field
-    // is not focused (user not mid-edit).
-    if (old.status.name != widget.status.name &&
-        !_nameCtrl.selection.isValid) {
-      _nameCtrl.text = widget.status.name;
-    }
-  }
-
-  @override
-  void dispose() {
-    _nameCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final textTheme = Theme.of(context).textTheme;
+    final colorScheme = Theme.of(context).colorScheme;
+    final v = status.wispVersion;
+    final fwLine = v == null
+        ? 'Wisp firmware ...'
+        : 'Wisp firmware ${formatFirmwareSemver(v)}';
     return ListView(
       padding: const EdgeInsets.fromLTRB(
           AppSpace.lg, AppSpace.lg, AppSpace.lg, AppSpace.xxl),
       children: [
-        _WispNameField(lampId: widget.lampId, ctrl: _nameCtrl),
-        const SizedBox(height: AppSpace.lg),
-        WispPasswordField(lampId: widget.lampId),
-        const SizedBox(height: AppSpace.xl),
-        DriftControls(lampId: widget.lampId, status: widget.status),
-      ],
-    );
-  }
-}
-
-class _LampsTab extends ConsumerWidget {
-  const _LampsTab({
-    required this.lampId,
-    required this.status,
-    required this.notifier,
-  });
-
-  final String lampId;
-  final WispStatus status;
-  final WispNotifier notifier;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        PaletteGradientBar(
-          sourceMode: status.source,
-          manualPalette: notifier.draftManualPalette,
-          offColor: status.offColor,
+        SettingsRow(
+          key: const Key('wisp-name-row'),
+          icon: Icons.label_outline,
+          title: 'Name',
+          subtitle: status.name.isEmpty ? 'Unnamed' : status.name,
+          drillChevron: true,
+          onTap: () => showRenameDialog(
+            context,
+            title: 'Rename wisp',
+            label: 'Wisp name',
+            initial: status.name,
+            hintText: 'Unnamed',
+            maxLength: 20,
+            onSave: (name) {
+              if (name.isEmpty) return;
+              ref
+                  .read(wispNotifierProvider(lampId).notifier)
+                  .setName(name)
+                  .catchError((_) {
+                if (context.mounted) {
+                  AppSnackbar.error(context, "Couldn't set name. Try again.");
+                }
+              });
+            },
+          ),
         ),
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(
-                AppSpace.lg, AppSpace.lg, AppSpace.lg, AppSpace.xxl),
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(0, AppSpace.sm, 0, AppSpace.sm),
-                child: Row(
-                  children: [
-                    Text(
-                      'LAMPS',
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                            color: Theme.of(context).colorScheme.secondary,
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      icon: Icon(Icons.shuffle,
-                          size: 18,
-                          color: Theme.of(context).colorScheme.secondary),
-                      visualDensity: VisualDensity.compact,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                      tooltip: 'Shuffle colours',
-                      onPressed: () => ref
-                          .read(wispNotifierProvider(lampId).notifier)
-                          .shuffle(),
-                    ),
-                  ],
-                ),
-              ),
-              PaintedLampsList(lampId: lampId),
-            ],
+        const SizedBox(height: AppSpace.lg),
+        WispPasswordField(lampId: lampId),
+        const SizedBox(height: AppSpace.xl),
+        const SectionHeader('Network'),
+        const SizedBox(height: AppSpace.sm),
+        WifiConfigRow(lampId: lampId, status: status),
+        const SizedBox(height: AppSpace.xl),
+        DriftControls(lampId: lampId, status: status),
+        const SizedBox(height: AppSpace.xl),
+        WispRangeControl(lampId: lampId, status: status),
+        const SizedBox(height: AppSpace.xl),
+        WispLedConfig(lampId: lampId, status: status),
+        const SizedBox(height: AppSpace.xl),
+        Center(
+          child: Text(
+            fwLine,
+            style: textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
           ),
         ),
       ],
@@ -387,41 +357,30 @@ class _LampsTab extends ConsumerWidget {
   }
 }
 
-/// Name text field. Submits via `setName` on submit/done; clamped to 20 chars
-/// matching the firmware limit.
-class _WispNameField extends ConsumerWidget {
-  const _WispNameField({required this.lampId, required this.ctrl});
+class _LampsTab extends ConsumerWidget {
+  const _LampsTab({required this.lampId});
 
   final String lampId;
-  final TextEditingController ctrl;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: AppSpace.xs),
-      child: TextField(
-        key: const Key('wisp-name-field'),
-        controller: ctrl,
-        maxLength: 20,
-        decoration: const InputDecoration(
-          labelText: 'Wisp name',
-          counterText: '',
-          hintText: 'Unnamed',
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(
+          AppSpace.lg, AppSpace.lg, AppSpace.lg, AppSpace.xxl),
+      children: [
+        Row(
+          children: [
+            const SectionHeader('Lamps'),
+            const Spacer(),
+            _ShuffleButton(
+              onPressed: () => ref
+                  .read(wispNotifierProvider(lampId).notifier)
+                  .shuffle(),
+            ),
+          ],
         ),
-        textInputAction: TextInputAction.done,
-        onSubmitted: (v) {
-          final name = v.trim();
-          if (name.isEmpty) return;
-          ref
-              .read(wispNotifierProvider(lampId).notifier)
-              .setName(name)
-              .catchError((_) {
-            if (context.mounted) {
-              AppSnackbar.error(context, "Couldn't set name. Try again.");
-            }
-          });
-        },
-      ),
+        PaintedLampsList(lampId: lampId),
+      ],
     );
   }
 }
@@ -514,4 +473,40 @@ class _TwoOrbsPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_TwoOrbsPainter old) => old.color != color;
+}
+
+/// Shuffle icon that spins on tap so the instant colour re-roll reads as
+/// responsive. Default IconButton hit area restored (no zeroed padding),
+/// so the ink splash shows.
+class _ShuffleButton extends StatefulWidget {
+  const _ShuffleButton({required this.onPressed});
+  final VoidCallback onPressed;
+
+  @override
+  State<_ShuffleButton> createState() => _ShuffleButtonState();
+}
+
+class _ShuffleButtonState extends State<_ShuffleButton> {
+  int _turns = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedRotation(
+      turns: _turns.toDouble(),
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeOut,
+      child: IconButton(
+        icon: Icon(
+          Icons.shuffle,
+          size: 18, // deliberate dimension, not spacing
+          color: Theme.of(context).colorScheme.secondary,
+        ),
+        tooltip: 'Shuffle colours',
+        onPressed: () {
+          setState(() => _turns++);
+          widget.onPressed();
+        },
+      ),
+    );
+  }
 }

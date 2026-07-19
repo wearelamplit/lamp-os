@@ -16,7 +16,7 @@ import '../domain/wisp_status.dart';
 /// When [password] is non-null and non-empty, ops are sealed via
 /// LampCrypto.encryptOp (salt = CHAR_WISP_OP uuid LE, info key = "wispOp").
 /// setManualPalette is always plaintext. It carries no secret and the byte
-/// budget is tight (up to 50 * 3 ints + JSON framing ≈ 400 B in one MTU).
+/// budget is tight (see [kWispOpPayloadCap]).
 class WispRepository {
   WispRepository(this._ble, this._deviceId, {this._password});
 
@@ -56,7 +56,7 @@ class WispRepository {
     }
   }
 
-  /// Pin the wisp to [zoneId]. Persisted in wisp NVS — survives reboot.
+  /// Pin the wisp to [zoneId]. Persisted in wisp NVS; survives reboot.
   Future<void> setZone(int zoneId) async {
     await _writeOp({
       'char': 'wispOp',
@@ -84,30 +84,59 @@ class WispRepository {
     });
   }
 
+  /// Payload budget for a wispOp once the lamp relays it as
+  /// MSG_CONTROL_OP (`CONTROL_MAX_PAYLOAD`). An oversized payload is
+  /// silently dropped at the relay, so the palette serializer must stay
+  /// under this.
+  static const int kWispOpPayloadCap = 230;
+
   /// Manual palette. The wisp persists the (clamped to 50) color
   /// list in NVS and, if currently in Manual mode, pushes it into
-  /// CurrentPalette so the lamps repaint without a mode flip. Palette is
-  /// emitted as a list of `[r,g,b]` integer triples; W is intentionally
-  /// dropped (the lamp's headroom math handles warm tinting locally).
+  /// CurrentPalette so the lamps repaint without a mode flip. Each color
+  /// is emitted as `[r,g,b,w]`, collapsed to `[r,g,b]` when w == 0 to
+  /// keep a full 10-color palette inside [kWispOpPayloadCap]. If the
+  /// serialized payload still exceeds the cap (every color carrying W at
+  /// pathological widths), W is stripped from trailing colors until it
+  /// fits. A truncated write beats a silently dropped one, and the
+  /// wisp's palette echo re-syncs the UI to what was stored.
   /// The cap aligns with `lamp_protocol::kMaxWispPaletteColors` on the
   /// firmware side so the MSG_WISP_PALETTE broadcast that follows can
   /// carry the whole palette without truncation.
   ///
   /// Always plaintext, even when a password is set. Colors are low-value;
   /// the proximity threat model accepts unauthenticated palette pushes
-  /// to keep the byte budget under one MTU. See Global Constraints in the
-  /// wisp-settings plan for the integrity exception rationale.
+  /// to keep the byte budget under one MTU.
   Future<void> setManualPalette(List<LampColor> palette) async {
-    await _writeOpPlaintext({
-      'char': 'wispOp',
-      'op': 'setManualPalette',
-      'colors': [
-        // The wisp dispatcher caps at 50 even if we send more, but we
-        // also clamp client-side so a slightly stale UI doesn't waste
-        // wire bytes on values that will be silently discarded.
-        for (final c in palette.take(50)) [c.r, c.g, c.b],
-      ],
-    });
+    // The wisp dispatcher caps at 50 even if more is sent; client-side
+    // clamps too so a slightly stale UI doesn't waste wire bytes on
+    // values that will be silently discarded.
+    final clamped = palette.take(50).toList();
+    await _writeOpPlaintext(buildManualPaletteOp(clamped));
+  }
+
+  /// Serialize the setManualPalette envelope, enforcing
+  /// [kWispOpPayloadCap]. Exposed for the byte-budget unit test.
+  static Map<String, dynamic> buildManualPaletteOp(List<LampColor> palette) {
+    final withW = List<bool>.generate(palette.length, (i) => palette[i].w != 0);
+    Map<String, dynamic> encode() => {
+          'char': 'wispOp',
+          'op': 'setManualPalette',
+          'colors': [
+            for (var i = 0; i < palette.length; i++)
+              withW[i]
+                  ? [palette[i].r, palette[i].g, palette[i].b, palette[i].w]
+                  : [palette[i].r, palette[i].g, palette[i].b],
+          ],
+        };
+    var op = encode();
+    for (var i = palette.length - 1;
+        i >= 0 && utf8.encode(jsonEncode(op)).length > kWispOpPayloadCap;
+        i--) {
+      if (!withW[i]) continue;
+      withW[i] = false;
+      op = encode();
+    }
+    return op;
   }
 
   /// Set the wisp password. Sealed under the CURRENT password when one is
@@ -129,7 +158,9 @@ class WispRepository {
     await _writeOp({
       'char': 'wispOp',
       'op': 'setOffColor',
-      'color': <int>[color.r, color.g, color.b],
+      'color': color.w == 0
+          ? <int>[color.r, color.g, color.b]
+          : <int>[color.r, color.g, color.b, color.w],
     });
   }
 
@@ -152,6 +183,38 @@ class WispRepository {
     });
   }
 
+  /// Configure the wisp LED strip byte order and pixel count. Persisted in
+  /// wisp NVS; the wisp re-inits the strip at the new format and length.
+  Future<void> setLedStrip(String ledType, int pixelCount) async {
+    await _writeOp({
+      'char': 'wispOp',
+      'op': 'setLedStrip',
+      'ledType': ledType,
+      'pixelCount': pixelCount,
+    });
+  }
+
+  /// Set the wisp's claim-range step (0=Close .. 3=Wide). Persisted in wisp
+  /// NVS; the claim recompute applies the new RSSI floor on its next tick.
+  Future<void> setRange(int rangeStep) async {
+    await _writeOp({
+      'char': 'wispOp',
+      'op': 'setRange',
+      'range': rangeStep,
+    });
+  }
+
+  /// Set the space-brightness factor (0..100) the wisp asserts on its
+  /// claimed lamps. Persisted in wisp NVS; the wisp re-asserts it to the
+  /// claimed lamps immediately and periodically.
+  Future<void> setBrightness(int pct) async {
+    await _writeOp({
+      'char': 'wispOp',
+      'op': 'setBrightness',
+      'brightness': pct,
+    });
+  }
+
   /// Commit a new drift interval and fade percentage. The wisp persists both
   /// in NVS and restarts the drift engine at the new rate.
   Future<void> setDrift(int intervalMs, int fadePct) async {
@@ -169,6 +232,16 @@ class WispRepository {
       'char': 'wispOp',
       'op': 'setName',
       'name': name,
+    });
+  }
+
+  /// Ask the wisp to re-broadcast its status now (read-only; no state
+  /// change). Always plaintext: it rides the wisp's plaintext exception
+  /// list so a password-protected wisp still refreshes without the password.
+  Future<void> pollStatus() async {
+    await _writeOpPlaintext({
+      'char': 'wispOp',
+      'op': 'pollStatus',
     });
   }
 

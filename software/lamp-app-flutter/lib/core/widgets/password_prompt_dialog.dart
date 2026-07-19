@@ -7,7 +7,7 @@ import 'friendly_error.dart';
 ///
 /// Used by feature surfaces that need to collect a password without the
 /// caller having to roll its own obscured TextField + show/hide eye
-/// button + submit-on-enter wiring every time. Pure UI — the caller owns
+/// button + submit-on-enter wiring every time. Pure UI: the caller owns
 /// what to do with the result (e.g. ship it as a wispOp arg).
 ///
 /// When [onSubmit] is provided the dialog drives an async operation:

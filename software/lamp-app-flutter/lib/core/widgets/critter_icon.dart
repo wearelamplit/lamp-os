@@ -19,14 +19,12 @@ import '../../features/control/presentation/widgets/critter_asset.dart';
 class CritterIcon extends StatefulWidget {
   const CritterIcon({
     super.key,
-    required this.critterIndex,
     required this.deviceId,
     required this.shade,
     required this.base,
     this.size = 44,
   });
 
-  final int? critterIndex;
   final String deviceId;
   final Color shade;
   final Color base;
@@ -55,7 +53,7 @@ class _CritterIconState extends State<CritterIcon> {
 
   // 8-entry LRU of built SvgPicture widgets keyed by (shadeHex|baseHex).
   // Smaller than LampPreview's cache (16) because a list row doesn't
-  // sweep through color samples — it lands on a single (shade, base)
+  // sweep through color samples; it lands on a single (shade, base)
   // pair and stays there. 8 covers the rare cross-row color overlap.
   static const int _cacheSize = 8;
   final Map<String, SvgPicture> _svgCache = {};
@@ -109,10 +107,7 @@ class _CritterIconState extends State<CritterIcon> {
 
   @override
   Widget build(BuildContext context) {
-    final asset = critterAssetFor(
-      critterIndex: widget.critterIndex,
-      deviceId: widget.deviceId,
-    );
+    final asset = critterAssetFor(widget.deviceId);
 
     if (_loadedFor != asset) {
       _ensureLoaded(asset);

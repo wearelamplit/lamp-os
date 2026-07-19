@@ -42,7 +42,7 @@ class LampCrypto {
     required String charShortName,
   }) async {
     // info = b"lamp-v1" + 0x00 + charShortName (NUL is a separator byte, not
-    // a C-string terminator — firmware builds it explicitly the same way).
+    // a C-string terminator). Firmware builds it explicitly the same way.
     final info = <int>[
       ...utf8.encode('lamp-v1'),
       0,
@@ -50,7 +50,7 @@ class LampCrypto {
     ];
     return _hkdf.deriveKey(
       secretKey: SecretKey(utf8.encode(password)),
-      // package:cryptography names the HKDF salt slot `nonce` — semantically
+      // package:cryptography names the HKDF salt slot `nonce`; semantically
       // it IS the salt parameter (RFC 5869 §2.2).
       nonce: saltUuid16,
       info: info,
@@ -95,7 +95,7 @@ class LampCrypto {
     return Uint8List.fromList([magicPlaintext, ...json]);
   }
 
-  /// Test-only inverse of [encryptOp] — mirrors the firmware's
+  /// Test-only inverse of [encryptOp]. Matches the firmware's
   /// `lamp::crypto::decryptOp` so round-trip tests don't need a device.
   ///
   /// Returns the decrypted plaintext bytes (caller decodes JSON), or

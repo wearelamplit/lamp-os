@@ -48,8 +48,7 @@ Future<ProviderContainer> _makeContainer({
 }
 
 /// Pump frames until the row list has rendered (its lampname subtitle is
-/// the most stable visible anchor). ConnectingView runs an infinite
-/// animation so pumpAndSettle would never converge.
+/// the most stable visible anchor).
 Future<void> _pumpToData(WidgetTester tester) async {
   for (var i = 0; i < 30; i++) {
     await tester.pump(const Duration(milliseconds: 16));
@@ -158,7 +157,7 @@ void main() {
   });
 
   testWidgets(
-      'toggling Home Mode switch off flips enabled but preserves the SSID',
+      'Home Mode row shows enabled state in subtitle, no inline switch',
       (tester) async {
     final c = await _makeContainer(homeSsid: 'home');
     addTearDown(c.dispose);
@@ -167,20 +166,21 @@ void main() {
 
     // With homeSsid: 'home', HomeSection.fromJson defaults enabled=true
     // (legacy lamps without the `enabled` field migrate to "ssid present
-    // => home mode on"). The switch should reflect that.
+    // => home mode on").
     expect(
       c.read(controlNotifierProvider(_devId)).value!.home.enabled,
       isTrue,
     );
 
-    await tester.tap(find.byType(Switch).first);
-    await tester.pump();
-
-    final home = c.read(controlNotifierProvider(_devId)).value!.home;
-    expect(home.enabled, isFalse);
-    // Soft toggle preserves credentials — Forget Network lives inside the
-    // Home Mode pane.
-    expect(home.ssid, 'home');
+    final homeModeRow = find.ancestor(
+      of: find.text('Home Mode'),
+      matching: find.byType(Material),
+    ).first;
+    // The enable toggle lives in the Home Mode pane; the row carries none.
+    expect(find.descendant(of: homeModeRow, matching: find.byType(Switch)),
+        findsNothing);
+    // Enabled state reads in the subtitle instead.
+    expect(find.textContaining('On ·'), findsOneWidget);
   });
 
   // --- Password status ---
@@ -236,7 +236,7 @@ void main() {
 
   // --- Home Mode drill chevron ---
 
-  testWidgets('Home Mode row shows both Switch and chevron_right', (tester) async {
+  testWidgets('Home Mode row shows chevron_right and no inline switch', (tester) async {
     final c = await _makeContainer();
     addTearDown(c.dispose);
     await tester.pumpWidget(_wrap(c));
@@ -248,7 +248,7 @@ void main() {
     ).first;
 
     expect(find.descendant(of: homeModeRow, matching: find.byType(Switch)),
-        findsOneWidget);
+        findsNothing);
     expect(
       find.descendant(
         of: homeModeRow,

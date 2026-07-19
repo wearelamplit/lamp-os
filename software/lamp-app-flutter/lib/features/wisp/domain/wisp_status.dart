@@ -50,6 +50,11 @@ class WispStatus {
     this.driftFadePct = 50,
     this.name = '',
     this.hasPassword = false,
+    this.ledType = 'GRB',
+    this.pixelCount = 30,
+    this.rangeStep = 0,
+    this.opSeq = 0,
+    this.brightness = 100,
   });
 
   /// Sentinel for "no wisp has been heard on this lamp yet" (lamp
@@ -105,7 +110,7 @@ class WispStatus {
   final int? statusLastSeenMs;
 
   /// True iff this lamp is currently following a wisp paint on the Base
-  /// surface — i.e. its baseColorOverride is FadingIn / Holding /
+  /// surface, i.e. its baseColorOverride is FadingIn / Holding /
   /// Restoring AND the most recent apply that took effect was
   /// Wisp-sourced. Drives the will-o'-wisp indicator in the control
   /// screen header and the `disabledDuringWispOverride` expression gate.
@@ -123,7 +128,8 @@ class WispStatus {
   final LampColor? shadeWispColor;
 
   /// The wisp's current active palette, served on the `CHAR_WISP_STATUS`
-  /// read leg as a base64-packed RGB blob under the `palette` key. `null`
+  /// read leg as a base64-packed blob under the `palette` key
+  /// (`paletteBpp` gives the stride: 4 = RGBW, absent = RGB). `null`
   /// means the lamp hasn't received a palette from the wisp yet (typical
   /// for the first ~30 s after wisp boot, or for offline lamps). The wisp
   /// truncates at 50 colors before emission; larger Aurora palettes
@@ -151,7 +157,31 @@ class WispStatus {
   /// True when the wisp has a password set.
   final bool hasPassword;
 
-  /// Convenience: are we currently being wisp-painted on either surface?
+  /// LED strip byte order reported by the wisp (`'GRBW'`, `'GRB'`, `'BGR'`).
+  /// Absent on legacy wisps; defaults to `'GRB'` matching the firmware default.
+  final String ledType;
+
+  /// Number of pixels in the wisp's LED ring. Absent on legacy wisps;
+  /// defaults to 30 matching the firmware default.
+  final int pixelCount;
+
+  /// Claim-range step (0=Close, 1=Camp, 2=Stage, 3=Wide): the RSSI floor
+  /// the wisp requires before claiming a lamp. Absent on legacy wisps and
+  /// omitted at the default; defaults to 0 (Close) matching the firmware.
+  final int rangeStep;
+
+  /// Monotonic counter the wisp bumps each time it accepts and applies a
+  /// sealed wispOp. Sealed ops have no direct ACK; the app confirms one
+  /// landed by watching this advance. Omitted at 0 (firmware default and
+  /// legacy wisps); resets on wisp reboot.
+  final int opSeq;
+
+  /// Space-brightness factor (0..100) the wisp asserts on its claimed
+  /// lamps: 100 = untouched, lower dims the whole space together. Absent on
+  /// legacy wisps and omitted at the default; defaults to 100.
+  final int brightness;
+
+  /// Convenience: is either surface currently wisp-painted?
   bool get controlling => controllingBase || controllingShade;
 
   /// Source-mode: off / manual / aurora. Drives the top-of-pane pill
@@ -160,7 +190,7 @@ class WispStatus {
   final WispSourceMode source;
 
   /// Color the wisp renders on its own 30-pixel ring when sourceMode is
-  /// Off. Does NOT propagate to the lamp grid — Off mode broadcasts
+  /// Off. Does NOT propagate to the lamp grid. Off mode broadcasts
   /// RESTORE so the lamps drop any prior override. Defaults to a warm
   /// candle-amber matching the firmware fallback so pre-feature wisps
   /// (or `{}` payloads) land on a sensible value.
@@ -179,9 +209,9 @@ class WispStatus {
   bool get present => wispMac != null;
 
   /// Decode the raw BLE characteristic bytes. Tolerates an empty
-  /// payload, `"{}"`, and malformed JSON — all map to [empty]. Hello
+  /// payload, `"{}"`, and malformed JSON, all map to [empty]. Hello
   /// vs status fields are independent; missing keys default to the
-  /// safest "we don't know" value.
+  /// safest "unknown" value.
   factory WispStatus.fromBytes(Uint8List bytes) {
     if (bytes.isEmpty) return empty;
     final dynamic decoded;
@@ -224,12 +254,20 @@ class WispStatus {
     }
 
     LampColor parseOffColor(Object? v) {
+      if (v is String) {
+        try {
+          return LampColor.fromHex(v);
+        } catch (_) {
+          return _defaultOffColor;
+        }
+      }
       if (v is List && v.length >= 3) {
         final r = asInt(v[0]);
         final g = asInt(v[1]);
         final b = asInt(v[2]);
+        final w = v.length >= 4 ? (asInt(v[3]) ?? 0) : 0;
         if (r != null && g != null && b != null) {
-          return LampColor(r: r & 0xFF, g: g & 0xFF, b: b & 0xFF, w: 0);
+          return LampColor(r: r & 0xFF, g: g & 0xFF, b: b & 0xFF, w: w & 0xFF);
         }
       }
       return _defaultOffColor;
@@ -244,22 +282,23 @@ class WispStatus {
       }
     }
 
-    // Decode the base64-packed RGB blob served under the `palette` key.
-    // Each triple becomes one LampColor (W=0). Returns null for missing
-    // or malformed payloads.
-    List<LampColor>? parseCurrentPalette(Object? v) {
+    // Decode the base64-packed blob served under the `palette` key. The
+    // stride comes from `paletteBpp` (absent → 3, RGB from older lamps);
+    // never inferred from length, which is ambiguous at len % 12 == 0.
+    List<LampColor>? parseCurrentPalette(Object? v, Object? bppRaw) {
       if (v is! String || v.isEmpty) return null;
+      final bpp = asInt(bppRaw) == 4 ? 4 : 3;
       try {
         final bytes = base64Decode(v);
-        if (bytes.length < 3) return null;
-        final usable = bytes.length - (bytes.length % 3);
+        if (bytes.length < bpp) return null;
+        final usable = bytes.length - (bytes.length % bpp);
         final colors = <LampColor>[];
-        for (var i = 0; i + 2 < usable; i += 3) {
+        for (var i = 0; i + bpp - 1 < usable; i += bpp) {
           colors.add(LampColor(
             r: bytes[i],
             g: bytes[i + 1],
             b: bytes[i + 2],
-            w: 0,
+            w: bpp == 4 ? bytes[i + 3] : 0,
           ));
         }
         return colors;
@@ -295,12 +334,17 @@ class WispStatus {
       controllingShade: asBool(json['controllingShade']),
       baseWispColor: parseWispHexColor(json['baseWispColor']),
       shadeWispColor: parseWispHexColor(json['shadeWispColor']),
-      currentPalette: parseCurrentPalette(json['palette']),
+      currentPalette: parseCurrentPalette(json['palette'], json['paletteBpp']),
       shuffleSeed: asInt(json['shuffleSeed']) ?? 0,
       driftIntervalMs: asInt(json['driftIntervalMs']) ?? 120000,
       driftFadePct: asInt(json['driftFadePct']) ?? 50,
       name: asString(json['name']),
       hasPassword: asBool(json['hasPassword']),
+      ledType: json['ledType'] is String ? json['ledType'] as String : 'GRB',
+      pixelCount: asInt(json['px']) ?? 30,
+      rangeStep: asInt(json['range']) ?? 0,
+      opSeq: asInt(json['opSeq']) ?? 0,
+      brightness: asInt(json['brightness']) ?? 100,
     );
   }
 
@@ -315,6 +359,10 @@ class WispStatus {
     int? driftFadePct,
     String? name,
     bool? hasPassword,
+    String? ledType,
+    int? pixelCount,
+    int? rangeStep,
+    int? brightness,
   }) {
     return WispStatus(
       currentZone: currentZone ?? this.currentZone,
@@ -342,6 +390,11 @@ class WispStatus {
       driftFadePct: driftFadePct ?? this.driftFadePct,
       name: name ?? this.name,
       hasPassword: hasPassword ?? this.hasPassword,
+      ledType: ledType ?? this.ledType,
+      pixelCount: pixelCount ?? this.pixelCount,
+      rangeStep: rangeStep ?? this.rangeStep,
+      opSeq: opSeq,
+      brightness: brightness ?? this.brightness,
     );
   }
 
@@ -375,7 +428,12 @@ class WispStatus {
           driftIntervalMs == other.driftIntervalMs &&
           driftFadePct == other.driftFadePct &&
           name == other.name &&
-          hasPassword == other.hasPassword;
+          hasPassword == other.hasPassword &&
+          ledType == other.ledType &&
+          pixelCount == other.pixelCount &&
+          rangeStep == other.rangeStep &&
+          opSeq == other.opSeq &&
+          brightness == other.brightness;
 
   @override
   int get hashCode => Object.hash(
@@ -400,7 +458,7 @@ class WispStatus {
         shuffleSeed,
         driftIntervalMs,
         driftFadePct,
-        name,
-        hasPassword,
+        Object.hash(
+            name, hasPassword, ledType, pixelCount, rangeStep, opSeq, brightness),
       );
 }

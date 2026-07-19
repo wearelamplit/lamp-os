@@ -11,22 +11,21 @@ import '../../../core/widgets/app_snackbar.dart';
 import '../../inventory/application/inventory_notifier.dart';
 import '../../nearby/application/nearby_lamps_notifier.dart';
 
-/// Full-screen replacement for the old in-control banner. Shown when the
-/// user taps a lamp from "My lamps" whose latest BLE advertisement reports
-/// `isMesh: false` — i.e. the lamp's firmware predates the mesh + app
-/// protocol. The app CAN'T control it. The lamp just exists in BLE
-/// advertising range.
+/// Full-screen surface shown when the user taps a lamp from "My lamps"
+/// whose latest BLE advertisement reports `isMesh: false` (the lamp's
+/// firmware predates the mesh + app protocol). The app CAN'T control it.
+/// The lamp just exists in BLE advertising range.
 ///
 /// Two paths the user can take from here:
 ///
-///   1. Configure / control it now — connect this phone's Wi-Fi to the
+///   1. Configure / control it now: connect this phone's Wi-Fi to the
 ///      lamp's own access point (its name is the lamp's name), then open
 ///      `http://192.168.4.1` in a browser. That's the lamp's on-board web
 ///      UI. The address is shown copy-only (no tap-to-launch) because the
 ///      user needs to switch their Wi-Fi network first; jumping straight
 ///      to the URL while still on cellular would just fail.
-///   2. Get app + mesh features — flash the latest firmware via
-///      `https://update.lamplit.ca`. The URL is tappable — opens the
+///   2. Get app + mesh features: flash the latest firmware via
+///      `https://update.lamplit.ca`. The URL is tappable and opens the
 ///      site in the system browser.
 class BtOnlyLampScreen extends ConsumerStatefulWidget {
   const BtOnlyLampScreen({super.key, required this.lampId});
@@ -44,8 +43,8 @@ class BtOnlyLampScreen extends ConsumerStatefulWidget {
 /// Control, ad infinitum) can't happen: once a lamp's auto-route fires, every
 /// subsequent BtOnly mount for that lamp ignores the fresh-adv signal. The
 /// user keeps full manual navigation via the AppBar back button. Reset only
-/// on app restart;
-/// the auto-route is one-shot convenience, not a steady-state poll.
+/// on app restart; the auto-route is one-shot convenience, not a
+/// steady-state poll.
 final Set<String> _btOnlyAlreadyAutoRouted = <String>{};
 
 class _BtOnlyLampScreenState extends ConsumerState<BtOnlyLampScreen> {
@@ -86,7 +85,7 @@ class _BtOnlyLampScreenState extends ConsumerState<BtOnlyLampScreen> {
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          // Explicit back affordance — without this the user is stranded
+          // Explicit back affordance. Without this the user is stranded
           // on this screen if they landed via a deep link / initial route
           // (no back stack to auto-derive a leading widget from), and
           // even when pushed from My Lamps the auto-route `pushReplacement`

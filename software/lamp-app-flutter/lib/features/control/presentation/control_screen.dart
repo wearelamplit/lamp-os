@@ -1,11 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart' as gr;
-
-import '../../../core/routing/routes.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/friendly_error.dart';
-import '../../../core/widgets/nav_row.dart';
 import '../../../core/widgets/section_header.dart';
 import '../application/control_notifier.dart';
 import '../application/lamp_auth_required_exception.dart';
@@ -13,8 +9,6 @@ import 'widgets/base_card.dart';
 import 'widgets/base_editor_sheet.dart';
 import 'widgets/brightness_card.dart';
 import 'widgets/connect_password_prompt.dart';
-import 'widgets/connecting_view.dart';
-import 'widgets/connection_banner.dart';
 import 'widgets/lamp_preview.dart';
 import 'widgets/wisp_indicator.dart';
 import 'widgets/shade_card.dart';
@@ -36,10 +30,11 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
     final async = ref.watch(controlNotifierProvider(lampId));
     return async.when(
       // Render the loading branch on an explicit invalidate too (the
-      // "Try again" retry), so the tap immediately swaps to ConnectingView
-      // instead of holding the error page for the whole reconnect.
+      // "Try again" retry), so the tap immediately swaps away from the
+      // error page for the whole reconnect. ReachingLampGate paints the
+      // overlay; the shell underneath stays empty.
       skipLoadingOnRefresh: false,
-      loading: () => ConnectingView(deviceId: lampId),
+      loading: () => const SizedBox.expand(),
       error: (e, _) {
         if (e is LampAuthRequiredException) {
           return ConnectPasswordPrompt(lampId: lampId);
@@ -70,8 +65,6 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
             : state.base.segments.first.name;
         return Column(
           children: [
-            if (!state.connected)
-              ConnectionBanner(attempt: state.reconnectAttempt),
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
@@ -113,6 +106,12 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
                       ],
                     ),
                   ),
+                  BrightnessCard(
+                    lampId: lampId,
+                    onEditSessionChanged: (open) => notifier
+                        .setEditSession(EditSurface.brightness, open),
+                  ),
+                  const SizedBox(height: AppSpace.md),
                   if (!useHeaders)
                     ShadeCard(
                       lampId: lampId,
@@ -139,21 +138,15 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
                   BaseCard(
                     lampId: lampId,
                     title: baseName,
-                    onTap: () => showBaseEditorSheet(context,
-                        lampId: lampId, title: baseName),
-                  ),
-                  const SizedBox(height: AppSpace.md),
-                  BrightnessCard(
-                    lampId: lampId,
-                    onEditSessionChanged: (open) => notifier
-                        .setEditSession(EditSurface.brightness, open),
-                  ),
-                  const SizedBox(height: AppSpace.sm),
-                  NavRow(
-                    icon: Icons.settings,
-                    title: 'Configuration',
-                    onTap: () => gr.GoRouter.maybeOf(context)
-                        ?.push(AppRoutes.setup(lampId)),
+                    onTap: () async {
+                      notifier.setEditSession(EditSurface.base, true);
+                      try {
+                        await showBaseEditorSheet(context,
+                            lampId: lampId, title: baseName);
+                      } finally {
+                        notifier.setEditSession(EditSurface.base, false);
+                      }
+                    },
                   ),
                 ],
               ),

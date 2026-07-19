@@ -7,7 +7,7 @@ import '../../../../core/widgets/app_sheet.dart';
 import '../../application/wifi_notifier.dart';
 import '../../domain/wifi_state.dart';
 
-/// Inline WiFi-network list — shows scan results, a refresh button, and a
+/// Inline WiFi-network list: shows scan results, a refresh button, and a
 /// row-tap callback. Used by Home Mode (inline in the page) and the Wisp
 /// pane (inside a bottom sheet). The lamp owns the scan radio so both
 /// surfaces share the same [wifiNotifierProvider].
@@ -17,7 +17,7 @@ import '../../domain/wifi_state.dart';
 /// time they land on a surface that just opened it). Subsequent visits
 /// reuse the cached list; the operator can tap refresh to rescan.
 ///
-/// `currentSsid` — if non-null, the matching row renders with a check
+/// `currentSsid`: if non-null, the matching row renders with a check
 /// icon to signal "this is what's currently set". The row is still
 /// tappable so the user can re-pick it (idempotent on the wisp side).
 class WifiNetworkPicker extends ConsumerStatefulWidget {
@@ -49,7 +49,7 @@ class _WifiNetworkPickerState extends ConsumerState<WifiNetworkPicker> {
     final wifi = wifiAsync.value ?? const WifiState();
     final isScanning = wifi.state == 'scanning';
 
-    // Kick off a scan on first paint if we have nothing to show. Mirrors
+    // Kick off a scan on first paint if there's nothing to show. Mirrors
     // the home-mode pattern of "land on the page → see networks without
     // pressing anything". Subsequent visits reuse the cached list.
     if (!_didKickoffScan && wifi.scanResults.isEmpty && !isScanning) {

@@ -10,7 +10,7 @@
 //   3. Rebuild + redeploy the app
 //
 // A mismatch here vs the lamp side renders OTA permanently broken for
-// the fleet — the app will pass the verify here (signature was made
+// the fleet. The app will pass the verify here (signature was made
 // against this app's key) but the lamp will reject it (signature
 // doesn't match the lamp's key). The 32-byte payload below is a public
 // key only; loss does not compromise the fleet.

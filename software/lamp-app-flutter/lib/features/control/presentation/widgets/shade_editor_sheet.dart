@@ -1,19 +1,13 @@
-import 'dart:async';
-
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/widgets/app_sheet.dart';
-import '../../../../core/widgets/confirm_discard.dart';
 import '../../application/control_notifier.dart';
 import '../../application/control_state.dart';
 import '../../domain/lamp_color.dart';
-import 'color_picker_sheet.dart';
+import 'color_stops_sheet.dart';
 
-/// Hard cap on shade gradient stops. Same rationale as `_kMaxBaseStops`
-/// in base_editor_sheet.dart — firmware interp handles arbitrary N, the
+/// Hard cap on shade gradient stops. Firmware interp handles arbitrary N; the
 /// cap is UX-only so the modal stays scannable.
 const int _kMaxShadeStops = 6;
 
@@ -40,13 +34,11 @@ ColorChannelSpec shadeSegmentSpec(int segIdx, String title) => ColorChannelSpec(
       setLive: (n, c) => n.setShadeSegmentColors(segIdx, c),
     );
 
-/// Modal sheet for editing the shade gradient stops. Mirrors
-/// `BaseEditorSheet`'s session pattern — live-previews via the
-/// controlNotifier as the user picks, snapshots the colors it opened
-/// with, and either commits (Save writes BLE + closes) or reverts the
-/// live-preview channel (Cancel/discard re-writes the snapshot). A
-/// discard-guard dialog blocks accidental dismissal when edits are pending.
-class ShadeEditorSheet extends ConsumerStatefulWidget {
+/// Modal sheet for editing the shade gradient stops. A thin [ColorStopsSheet]
+/// caller: live-previews via [ColorChannelSpec.setLive] as the user edits and
+/// commits through CHAR_COMMIT on Save. The wisp edit-session spans the whole
+/// sheet (opened by ShadeCard around [showShadeEditorSheet]).
+class ShadeEditorSheet extends ConsumerWidget {
   const ShadeEditorSheet({
     super.key,
     required this.lampId,
@@ -57,214 +49,24 @@ class ShadeEditorSheet extends ConsumerStatefulWidget {
   final ColorChannelSpec spec;
 
   @override
-  ConsumerState<ShadeEditorSheet> createState() => _ShadeEditorSheetState();
-}
-
-class _ShadeEditorSheetState extends ConsumerState<ShadeEditorSheet> {
-  List<LampColor>? _originalColors;
-
-  /// True once we've signalled PopScope to allow the pop. Set just before
-  /// the addPostFrameCallback-deferred Navigator.pop so the route doesn't
-  /// get blocked by canPop=false on the same frame.
-  bool _allowPop = false;
-
-  bool _hasUnsavedChanges(List<LampColor> colors) =>
-      _originalColors != null && !listEquals(colors, _originalColors);
-
-  void _close({required bool revert}) {
-    if (revert && _originalColors != null) {
-      widget.spec.setLive(
-        ref.read(controlNotifierProvider(widget.lampId).notifier),
-        _originalColors!,
-      );
-    }
-    setState(() => _allowPop = true);
-    // Pop after the frame so PopScope picks up _allowPop=true (setState +
-    // synchronous Navigator.pop would still see the old canPop=false).
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) Navigator.of(context).pop();
-    });
-  }
-
-  Future<void> _save() async {
-    final notifier =
-        ref.read(controlNotifierProvider(widget.lampId).notifier);
-    try {
-      await notifier.commit();
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Couldn't save: disconnected")),
-      );
-      return;
-    }
-    if (!mounted) return;
-    _close(revert: false);
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(
-      controlNotifierProvider(widget.lampId).select((async) => async.value),
+      controlNotifierProvider(lampId).select((async) => async.value),
     );
     if (state == null) return const SizedBox.shrink();
 
-    final spec = widget.spec;
-    _originalColors ??= List.of(spec.selectColors(state));
-
-    final colors = spec.selectColors(state);
-    final notifier =
-        ref.read(controlNotifierProvider(widget.lampId).notifier);
-
-    Future<void> editStop(int i) async {
-      // The wisp edit-session spans the whole sheet (opened by ShadeCard around
-      // showShadeEditorSheet), so per-stop pick doesn't touch it.
-      final picked = await showColorPickerSheet(
-        context,
-        initial: colors[i],
-        title: 'Stop ${i + 1}',
-        bpp: state.shade.bpp,
-        onLive: (live) {
-          final current =
-              ref.read(controlNotifierProvider(widget.lampId)).value;
-          if (current == null) return;
-          final next = [...spec.selectColors(current)];
-          if (i >= next.length) return; // stop removed while picker open
-          next[i] = live;
-          spec.setLive(notifier, next);
-        },
-      );
-      if (picked == null) {
-        final reverted = [...colors];
-        spec.setLive(notifier, reverted);
-      }
-    }
-
-    void removeStop(int i) {
-      if (colors.length <= 1) return;
-      final next = [...colors]..removeAt(i);
-      spec.setLive(notifier, next);
-    }
-
-    void addStop() {
-      if (colors.length >= _kMaxShadeStops) return;
-      // Duplicate the last stop so the new one starts at a sensible color
-      // the user can tweak from, rather than dropping to white and forcing
-      // them to dial it back to something nearby.
-      final seed = colors.isNotEmpty
-          ? colors.last
-          : const LampColor(r: 0xFF, g: 0xFF, b: 0xFF, w: 0);
-      spec.setLive(notifier, [...colors, seed]);
-    }
-
-    void reorder(int oldIndex, int newIndex) {
-      final next = [...colors];
-      final picked = next.removeAt(oldIndex);
-      next.insert(newIndex, picked);
-      spec.setLive(notifier, next);
-    }
-
-    return PopScope(
-      canPop: _allowPop || !_hasUnsavedChanges(colors),
-      onPopInvokedWithResult: (didPop, _) async {
-        if (didPop) return; // no unsaved changes — already popped
-        final discard = await confirmDiscard(context);
-        if (discard) _close(revert: true);
+    final notifier = ref.read(controlNotifierProvider(lampId).notifier);
+    return ColorStopsSheet(
+      initial: spec.selectColors(state),
+      title: spec.title,
+      description: 'These colors blend into a gradient along the strip.',
+      max: _kMaxShadeStops,
+      bpp: state.shade.bpp,
+      onChanged: (colors) => spec.setLive(notifier, colors),
+      onSave: (colors) async {
+        spec.setLive(notifier, colors);
+        await notifier.commit();
       },
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpace.lg),
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  Text(
-                    spec.title,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ],
-              ),
-              const SizedBox(height: AppSpace.md),
-              Expanded(
-                child: ReorderableListView.builder(
-                  itemCount: colors.length,
-                  onReorderItem: reorder,
-                  buildDefaultDragHandles: false,
-                  itemBuilder: (ctx, i) {
-                    final stop = colors[i];
-                    final cs = Theme.of(ctx).colorScheme;
-                    return ListTile(
-                      key: ValueKey('shade-stop-$i'),
-                      onTap: () => editStop(i),
-                      leading: ReorderableDragStartListener(
-                        index: i,
-                        child: Icon(Icons.drag_indicator,
-                            color: cs.onSurfaceVariant),
-                      ),
-                      title: Row(
-                        children: [
-                          Container(
-                            width: 28,
-                            height: 28,
-                            decoration: BoxDecoration(
-                              color: stop.toSwatch(),
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: cs.outlineVariant,
-                                width: 1,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: AppSpace.md),
-                          Text(
-                            '#${stop.toHex().substring(1, 7)}',
-                            style:
-                                Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                                      color: cs.onSurfaceVariant,
-                                      fontFamily: 'monospace',
-                                    ),
-                          ),
-                        ],
-                      ),
-                      trailing: Tooltip(
-                        message: colors.length <= 1
-                            ? 'A gradient needs at least one stop'
-                            : 'Remove stop',
-                        child: IconButton(
-                          icon: Icon(Icons.close, color: cs.onSurfaceVariant),
-                          onPressed: colors.length <= 1
-                              ? null
-                              : () => removeStop(i),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-              if (colors.length < _kMaxShadeStops)
-                TextButton(
-                  onPressed: addStop,
-                  child: const Text('+ Add stop'),
-                ),
-              const SizedBox(height: AppSpace.sm),
-              Row(
-                children: [
-                  TextButton(
-                    onPressed: () => _close(revert: true),
-                    child: const Text('Cancel'),
-                  ),
-                  const Spacer(),
-                  FilledButton.icon(
-                    icon: const Icon(Icons.check, size: 18),
-                    label: const Text('Save'),
-                    onPressed: _save,
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }

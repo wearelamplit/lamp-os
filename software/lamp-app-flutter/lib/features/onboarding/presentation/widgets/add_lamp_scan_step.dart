@@ -7,9 +7,11 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/routing/routes.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/brand_extras.dart';
+import '../../../../core/widgets/critter_icon.dart';
 import '../../../../core/widgets/lamp_card.dart';
 import '../../../../core/widgets/status_dot.dart';
 import '../../../inventory/application/inventory_notifier.dart';
+import '../../../inventory/domain/lamp_colors.dart';
 import '../../../nearby/application/nearby_lamps_notifier.dart';
 import '../../../nearby/domain/nearby_lamp.dart';
 import '../../application/add_lamp_notifier.dart';
@@ -23,7 +25,7 @@ class AddLampScanStep extends ConsumerWidget {
     final inventory =
         ref.watch(inventoryNotifierProvider).value ?? const [];
     final inventoryIds = inventory.map((l) => l.id).toSet();
-    // Hide lamps that are already in this phone's inventory — they're
+    // Hide lamps that are already in this phone's inventory: they're
     // already addable from "My lamps", and showing them here would
     // confuse the "tap a discovered lamp to add it" flow.
     final lamps = all.where((l) => !inventoryIds.contains(l.id)).toList();
@@ -65,21 +67,21 @@ class _LampRow extends ConsumerWidget {
   final NearbyLamp lamp;
 
   Future<void> _onTap(BuildContext context, WidgetRef ref) async {
-    // Legacy (non-mesh) firmware can't be controlled by the app — there's
+    // Legacy (non-mesh) firmware can't be controlled by the app: there's
     // no GATT control service. Route to the BtOnly explanation screen
     // instead of adopting; that page tells the user how to use the
     // lamp's own Wi-Fi AP and how to flash current firmware. Crucially
-    // we do NOT add the lamp to inventory — adopting a lamp we can't
-    // talk to would just leave a dead tile in the picker.
+    // this does NOT add the lamp to inventory: adopting an unreachable
+    // lamp would just leave a dead tile in the picker.
     if (!lamp.isMesh) {
-      // Fire-and-forget — we're not awaiting the routed screen's
+      // Fire-and-forget: not awaiting the routed screen's
       // pop, just sending the user there.
       unawaited(GoRouter.maybeOf(context)?.push(AppRoutes.btOnly(lamp.id))
           ?? Future<void>.value());
       return;
     }
     if (lamp.isFactoryDefault) {
-      // select() is synchronous — it records the deviceId and advances
+      // select() is synchronous: it records the deviceId and advances
       // to Name without opening a BLE link. The link is opened in
       // submit() so it doesn't sit idle through the form-fill and
       // expire under LINK_SUPERVISION_TIMEOUT.
@@ -89,7 +91,7 @@ class _LampRow extends ConsumerWidget {
             shadeRgb: lamp.shadeRgb,
           );
     } else {
-      // No confirm dialog — `add()` sets state.step to `done` and the
+      // No confirm dialog: `add()` sets state.step to `done` and the
       // AddLampShell will swap in the AddLampDoneStep ("X is home!"),
       // which serves as the visual confirmation.
       await ref
@@ -100,6 +102,8 @@ class _LampRow extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final colors = resolveLampColors(near: lamp);
     return InkWell(
       borderRadius: BorderRadius.circular(AppRadius.card),
       onTap: () => _onTap(context, ref),
@@ -107,7 +111,7 @@ class _LampRow extends ConsumerWidget {
         padding: const EdgeInsets.all(AppSpace.md),
         child: Row(
           children: [
-            // BLE adv tells us this lamp is bluetooth-reachable; the
+            // BLE adv reports this lamp is bluetooth-reachable; the
             // `isMesh` flag distinguishes mesh-protocol firmware from
             // legacy BT-only. Light green for mesh, faded blue for BT.
             StatusDot(
@@ -115,6 +119,13 @@ class _LampRow extends ConsumerWidget {
                   ? StatusKind.mesh
                   : StatusKind.bluetooth,
               size: 14,
+            ),
+            const SizedBox(width: AppSpace.md),
+            CritterIcon(
+              deviceId: lamp.id,
+              shade: colors.shade ?? colorScheme.onSurfaceVariant,
+              base: colors.base ?? colorScheme.onSurfaceVariant,
+              size: 44,
             ),
             const SizedBox(width: AppSpace.md),
             Expanded(

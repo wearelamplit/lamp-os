@@ -3,8 +3,8 @@ import '../theme/app_spacing.dart';
 
 /// Mobile-style settings row: leading icon, title + optional subtitle,
 /// optional trailing widget (toggle / chevron). Used everywhere on the
-/// Setup tab to give it the iOS/Android-Settings look from the old Vue
-/// app instead of inline form cards.
+/// Setup tab for the iOS/Android-Settings look instead of inline form
+/// cards.
 class SettingsRow extends StatelessWidget {
   const SettingsRow({
     super.key,

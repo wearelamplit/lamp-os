@@ -10,21 +10,18 @@ void main() {
   const green = LampColor(r: 0, g: 255, b: 0, w: 0);
   const white = LampColor(r: 255, g: 255, b: 255, w: 0);
 
-  // bdAddr FC:B4:67:F1:DD:A6 → meshMac FC:B4:67:F1:DD:A4 (BLE - 2).
-  // parseWispClaims keys colors by bdAddr (the blob contains bdAddr bytes
-  // written by bdAddrFromMeshMac in wisp_cache.cpp:319).
-  const bdAddr = 'FC:B4:67:F1:DD:A6';
-  // Key format: uppercase colon-hex of bdAddr bytes, as _macAt emits.
-  const bdAddrKey = 'FC:B4:67:F1:DD:A6';
+  // parseWispClaims keys colors by raw mesh mac (the blob carries mac bytes
+  // directly), and _macAt formats them as uppercase colon-hex.
+  const lampId = '10:20:30:40:50:60';
 
   const palette = [red, blue];
 
-  test('live color wins over prediction when bdAddr is in livePaint', () {
+  test('live color wins over prediction when lampId is in livePaint', () {
     final live = {
-      bdAddrKey: (base: green, shade: white),
+      lampId: (base: green, shade: white),
     };
     final result = paintColorFor(
-      bdAddr: bdAddr,
+      lampId: lampId,
       livePaint: live,
       palette: palette,
       shuffleSeed: 0,
@@ -33,19 +30,19 @@ void main() {
     expect(result!.base, green);
     expect(result.shade, white);
     // Verify the live color differs from the prediction so the test is meaningful.
-    final pred = predictTuple(mac: meshMacFromBdAddr(bdAddr)!, palette: palette);
+    final pred = predictTuple(mac: parseMacFromBleId(lampId)!, palette: palette);
     final predPair = (base: pred!.base, shade: pred.shade);
     expect(result, isNot(predPair));
   });
 
-  test('falls back to predictTuple when bdAddr absent from livePaint', () {
+  test('falls back to predictTuple when lampId absent from livePaint', () {
     final result = paintColorFor(
-      bdAddr: bdAddr,
+      lampId: lampId,
       livePaint: const {},
       palette: palette,
       shuffleSeed: 0,
     );
-    final mac = meshMacFromBdAddr(bdAddr)!;
+    final mac = parseMacFromBleId(lampId)!;
     final pred = predictTuple(mac: mac, palette: palette)!;
     expect(result, isNotNull);
     expect(result!.base, pred.base);
@@ -54,7 +51,7 @@ void main() {
 
   test('returns null when palette empty and no live entry', () {
     final result = paintColorFor(
-      bdAddr: bdAddr,
+      lampId: lampId,
       livePaint: const {},
       palette: const [],
       shuffleSeed: 0,
@@ -62,11 +59,10 @@ void main() {
     expect(result, isNull);
   });
 
-  test('key derivation: livePaint keyed by bdAddr string hits correctly', () {
-    // livePaint is keyed by uppercase colon-hex bdAddr, matching parseWispClaims output.
-    final live = {bdAddrKey: (base: green, shade: white)};
+  test('key derivation: livePaint keyed by lampId string hits correctly', () {
+    final live = {lampId: (base: green, shade: white)};
     final result = paintColorFor(
-      bdAddr: bdAddr,
+      lampId: lampId,
       livePaint: live,
       palette: palette,
       shuffleSeed: 0,
@@ -76,10 +72,10 @@ void main() {
     expect(result.shade, white);
   });
 
-  test('iOS-style UUID bdAddr (no mesh MAC) returns null without live entry', () {
+  test('iOS-style UUID lampId (no mesh mac) returns null without live entry', () {
     const iosId = '12345678-1234-1234-1234-123456789ABC';
     final result = paintColorFor(
-      bdAddr: iosId,
+      lampId: iosId,
       livePaint: const {},
       palette: palette,
       shuffleSeed: 0,

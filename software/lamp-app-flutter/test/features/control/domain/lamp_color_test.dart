@@ -29,4 +29,41 @@ void main() {
     expect(next.w, 0xAA);
     expect(next.r, 0xFF);
   });
+
+  // Pinned to the same vectors as the firmware's blendedIdentity native test.
+  group('blendedIdentity', () {
+    const red = LampColor(r: 255, g: 0, b: 0, w: 0);
+    const blue = LampColor(r: 0, g: 0, b: 255, w: 0);
+    const cyan = LampColor(r: 0, g: 255, b: 255, w: 0);
+
+    test('single stop is the identity', () {
+      const c = LampColor(r: 10, g: 20, b: 30, w: 200);
+      expect(LampColor.blendedIdentity([c]), c);
+    });
+
+    test('2R + 1B leans red', () {
+      final out = LampColor.blendedIdentity([red, red, blue]);
+      expect(out.r > out.b, isTrue);
+      expect(out.g, 0);
+    });
+
+    test('complementary pair guard avoids grey', () {
+      final out = LampColor.blendedIdentity([red, cyan]);
+      expect(out.r > out.g, isTrue);
+      expect(out.r > out.b, isTrue);
+    });
+
+    test('white channel passes through identical stops', () {
+      const c = LampColor(r: 10, g: 20, b: 30, w: 200);
+      final out = LampColor.blendedIdentity([c, c]);
+      expect(out.w, 200);
+      expect(out.r, 10);
+      expect(out.g, 20);
+      expect(out.b, 30);
+    });
+
+    test('empty is black', () {
+      expect(LampColor.blendedIdentity(const []), LampColor.black);
+    });
+  });
 }

@@ -4,7 +4,7 @@ import '../utils/tap_counter.dart';
 
 /// Friendly error surface used wherever a Riverpod AsyncError or a caught
 /// exception would otherwise dump `e.toString()` at the user. The raw
-/// exception is hidden behind a 5-tap gesture on the message — matching
+/// exception is hidden behind a 5-tap gesture on the message, matching
 /// the same 5-tap convention used elsewhere (Info wordmark → advanced
 /// settings unlock).
 ///
@@ -31,7 +31,7 @@ class FriendlyError extends StatefulWidget {
   })  : onRetry = null,
         _inline = true;
 
-  /// Headline. Short, on-voice — e.g. "Couldn't reach your lamp."
+  /// Headline. Short, on-voice, e.g. "Couldn't reach your lamp."
   final String title;
 
   /// Optional supporting line under the headline. Tells the user what to
@@ -43,7 +43,7 @@ class FriendlyError extends StatefulWidget {
   final Object? rawError;
 
   /// Renders a "Try again" button below the subtitle. Without this the
-  /// only way out of the error page is to back out and re-enter — which
+  /// only way out of the error page is to back out and re-enter, which
   /// for BLE-reach failures means restarting the app. Page-only.
   final VoidCallback? onRetry;
 

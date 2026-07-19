@@ -14,20 +14,16 @@ part 'dispositions_notifier.g.dart';
 ///
 /// Reads CHAR_SOCIAL_DISPOSITIONS once at build; subsequent edits update
 /// an in-memory map AND schedule a debounced write back to the lamp (500
-/// ms after the last edit). The full map is sent on every write — the
+/// ms after the last edit). The full map is sent on every write: the
 /// firmware-side characteristic replaces the entire state on each write.
 ///
 /// Disposition values are 1..5 (salty, wary, neutral, fond, smitten).
 /// Missing keys default to 3 (neutral) at the call site via `get`.
 ///
-/// Keys are BD_ADDR strings (canonical uppercase colon-hex,
-/// e.g. "AA:BB:CC:DD:EE:FF") — NOT the peer's user-set name. On
-/// Android, `NearbyLamp.id` is the BLE remoteId which IS the BD_ADDR
-/// in this exact format. On iOS the BLE remoteId is a CoreBluetooth
-/// UUID, NOT a BD_ADDR — iOS cross-reference is a known follow-up
-/// (would require reading the lamp's CHAR_NEARBY_LAMPS JSON which
-/// emits `bdAddr` per peer; the social screen currently uses the
-/// phone-direct scan).
+/// Keys are the peer's lamp-reported lampId (mesh MAC, colon-hex, from the
+/// connected lamp's `nearby` section, `LampNearbyPeer.lampId`), NOT the
+/// peer's user-set name or the phone's BLE remoteId. The firmware emits the
+/// same address on both platforms, so keys are stable across Android and iOS.
 @Riverpod(keepAlive: false, name: 'dispositionsProvider')
 class Dispositions extends _$Dispositions {
   Timer? _flushTimer;
@@ -35,7 +31,7 @@ class Dispositions extends _$Dispositions {
   // Cache the BleClient at build() so the onDispose flush can still
   // dispatch the trailing write AFTER the provider has been torn down.
   // Without this, `_flush` calls `ref.read(bleClientProvider)` post-
-  // dispose and throws — the throw is swallowed silently by the
+  // dispose and throws. The throw is swallowed silently by the
   // try/catch below, and the user's last slider edit vanishes.
   late final BleClient _ble;
 
@@ -48,7 +44,6 @@ class Dispositions extends _$Dispositions {
       // app within the 500ms window), flush it instead of dropping it.
       // Otherwise the local state diverges from the lamp and next visit
       // re-reads the OLD value and silently clobbers the user's edit.
-      // Mirrors the _seenFlushTimer pattern in ControlNotifier.
       if (_flushTimer?.isActive ?? false) {
         _flushTimer!.cancel();
         unawaited(_flush());
@@ -80,17 +75,17 @@ class Dispositions extends _$Dispositions {
     return _local;
   }
 
-  /// Disposition for `bdAddr`, defaulting to 3 (neutral) when unset.
-  int get(String bdAddr) => _local[bdAddr] ?? 3;
+  /// Disposition for `lampId`, defaulting to 3 (neutral) when unset.
+  int get(String lampId) => _local[lampId] ?? 3;
 
-  /// Set the disposition for `bdAddr`. Updates local state immediately
+  /// Set the disposition for `lampId`. Updates local state immediately
   /// (so the slider doesn't bounce) and schedules a debounced write
   /// to the lamp 500 ms after the last edit.
-  void set(String bdAddr, int value) {
+  void set(String lampId, int value) {
     final clamped = value.clamp(1, 5);
-    if (bdAddr.isEmpty) return;
+    if (lampId.isEmpty) return;
     final updated = Map<String, int>.from(_local);
-    updated[bdAddr] = clamped;
+    updated[lampId] = clamped;
     _local = updated;
     state = AsyncData(updated);
     _scheduleFlush();
@@ -113,7 +108,7 @@ class Dispositions extends _$Dispositions {
     } catch (_) {
       // Best-effort. If the write failed (disconnect, auth lost), the
       // lamp will keep its previous value. UI doesn't surface this to
-      // the user — they can re-toggle when reconnected.
+      // the user; they can re-toggle when reconnected.
     }
   }
 }
