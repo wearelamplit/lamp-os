@@ -72,7 +72,7 @@ class _ReachingLampGateState extends ConsumerState<ReachingLampGate> {
         );
       }
     }
-    return Stack(children: [
+    final stack = Stack(children: [
       widget.child,
       Positioned.fill(
         child: IgnorePointer(
@@ -84,6 +84,10 @@ class _ReachingLampGateState extends ConsumerState<ReachingLampGate> {
         ),
       ),
     ]);
+    // While the overlay is up the underlying route must not pop out from
+    // under it (system back / iOS edge-swipe); the only way off the gate is
+    // its own "pick another lamp" action.
+    return PopScope(canPop: overlay == null, child: stack);
   }
 }
 
