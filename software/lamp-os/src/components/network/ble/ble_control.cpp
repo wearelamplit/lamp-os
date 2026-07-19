@@ -24,6 +24,7 @@
 #include "core/override_aggregate.hpp"
 #include "components/firmware/ota_quiet_mode.hpp"
 #include "ble_gap.hpp"
+#include "scan_burst.hpp"
 #include "crypto.hpp"
 #include "components/network/ble/gatt_layout.hpp"
 #include "expressions/expression_manager.hpp"
@@ -85,6 +86,22 @@ static volatile bool         s_homeModePageActive = false;
 // Prevents the central scan from auto-restarting while a phone holds a
 // GATT connection (queried by isScanPaused()).
 static volatile bool         s_scanPausedForGattClient = false;
+// Held true for an OTA window (pauseRadioForOta): quiets adv + scan.
+static volatile bool         s_otaRadioPaused = false;
+// Armed on Core 0 by a nearby-page read; serviced on Core 1 by tick().
+static volatile bool         s_scanBurstRequested = false;
+static          bool         s_scanBurstActive    = false;
+static          uint32_t     s_lastScanBurstMs    = 0;
+
+// Scan-burst coex knobs, bench-tuned. One short high-duty burst while an app
+// holds the GATT link; long enough to catch a ~1 s legacy adv, short overall.
+// ponytail: fixed single-burst shape, no adaptive backoff. The ceiling is
+// airtime stolen from the GATT link; widen window/duration only if a bench
+// run shows legacy lamps still missed.
+static constexpr uint16_t kScanBurstWindowMs      = 60;
+static constexpr uint16_t kScanBurstIntervalMs    = 100;
+static constexpr uint32_t kScanBurstDurationMs    = 1200;
+static constexpr uint32_t kScanBurstMinIntervalMs = 5000;
 
 static          uint16_t     s_currentConnHandle = 0xFFFF;
 
@@ -280,7 +297,14 @@ class ControlServerCallbacks : public NimBLEServerCallbacks {
     freeSlot(handle);
 
     s_scanPausedForGattClient = false;
-    NimBLEDevice::getScan()->start(BLE_GAP_SCAN_TIME_MS);
+    s_scanBurstRequested = false;
+    s_scanBurstActive    = false;
+    // Restore idle duty in case a burst left the higher-duty window/interval
+    // set, so the continuous post-disconnect scan doesn't run hot on coex.
+    NimBLEScan* scan = NimBLEDevice::getScan();
+    scan->setWindow(BLE_GAP_SCAN_WINDOW_MS);
+    scan->setInterval(BLE_GAP_ADV_INTERVAL_MS);
+    scan->start(BLE_GAP_SCAN_TIME_MS);
 
     s_clientConnected = false;
     s_homeModePageActive = false;
@@ -719,6 +743,10 @@ class PageCtrlCallback : public NimBLECharacteristicCallbacks {
     const std::string name = c->getValue();
     if (name.empty() || name.size() > 16) return;
 
+    // App polls the nearby section ~every 5 s while on Social; arm a scan
+    // burst so BLE-only legacy peers surface without a periodic scan.
+    if (name == "nearby") s_scanBurstRequested = true;
+
     ConnSlot* slot = findSlot(handle);
     if (!slot) return;
 
@@ -889,8 +917,43 @@ class FwChunkCallback : public NimBLECharacteristicCallbacks {
   }
 };
 
+// Core 1. Starts one short high-duty scan burst per armed nearby-read,
+// rate-limited to kScanBurstMinIntervalMs. onScanEnd will not auto-restart
+// (isScanPaused() stays true while connected), so the burst is one-shot;
+// onDisconnect restores idle duty.
+static void serviceScanBurst() {
+  const uint32_t now = millis();
+  if (!s_clientConnected || s_otaRadioPaused) {
+    s_scanBurstActive    = false;
+    s_scanBurstRequested = false;
+    return;
+  }
+  if (s_scanBurstActive) {
+    if (now - s_lastScanBurstMs >= kScanBurstDurationMs) s_scanBurstActive = false;
+    return;
+  }
+  if (!scanBurstReady(s_scanBurstRequested, s_scanBurstActive, s_clientConnected,
+                      now, s_lastScanBurstMs, kScanBurstMinIntervalMs)) {
+    return;
+  }
+  s_scanBurstRequested = false;
+  s_scanBurstActive    = true;
+  s_lastScanBurstMs    = now;
+  NimBLEScan* scan = NimBLEDevice::getScan();
+  scan->setWindow(kScanBurstWindowMs);
+  scan->setInterval(kScanBurstIntervalMs);
+  scan->start(kScanBurstDurationMs);
+#ifdef LAMP_DEBUG
+  Serial.printf("[ble_control] scan burst %ums window=%u interval=%u\n",
+                (unsigned)kScanBurstDurationMs, (unsigned)kScanBurstWindowMs,
+                (unsigned)kScanBurstIntervalMs);
+#endif
+}
+
 void tick() {
   if (!s_running || !s_config) return;
+
+  serviceScanBurst();
 
   // Proactively rebuild dirty section caches on Core 1 so the BLE host
   // task (Core 0) rarely serialises JSON inside a NimBLE callback.
@@ -1157,8 +1220,6 @@ void stop() {
 }
 
 bool isRunning() { return s_running; }
-
-static volatile bool s_otaRadioPaused = false;
 
 void pauseRadioForOta() {
   if (s_otaRadioPaused) return;

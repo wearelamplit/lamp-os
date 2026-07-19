@@ -7,6 +7,7 @@
 #include "components/network/mesh/mesh_link.hpp"
 
 #include "components/network/mesh/lamp_roster.hpp"
+#include "components/network/ble/ble_control.hpp"
 #include "core/personality_engine.hpp"
 #include "behaviors/greetable.hpp"
 #include "components/firmware/firmware_distributor.hpp"
@@ -256,6 +257,10 @@ void SocialBehavior::control() {
   // Greeting / cooldown logic below only runs after the previous
   // greeting animation finishes.
   if (animationState != STOPPED) return;
+
+  // A scan burst freshens BLE sightings while an app holds the GATT link;
+  // populate the roster but stay quiet during the session.
+  if (ble_control::isClientConnected()) return;
 
   // Wraparound-safe time comparison (millis() rolls over at ~49 days).
   // The re-greet check below uses the same idiom for consistency.
