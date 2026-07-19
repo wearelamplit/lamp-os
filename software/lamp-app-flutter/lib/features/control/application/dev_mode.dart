@@ -11,7 +11,7 @@ const _devModeKey = 'dev_mode.v1';
 
 // SHA-256 of the dev-mode unlock password. Only the hash lives in the binary.
 const _kDevModePasswordHashHex =
-    'f7bc3d20eccd3fe6522c1c59e8752e7d85a33d66a560506dc0c83858bf4c2156';
+    'c790b132032e07e60b7d1ceb3f8ea7a0cd9bbae18aed4cab35b637aede04e7d1';
 
 Future<bool> devModePasswordMatches(String input) async {
   final hash = await Sha256().hash(utf8.encode(input));
