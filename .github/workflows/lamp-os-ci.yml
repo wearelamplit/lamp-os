@@ -11,7 +11,7 @@ on:
 
 jobs:
   check:
-    name: Compile + native tests
+    name: Compile + native tests (lamp + wisp)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,11 +22,16 @@ jobs:
           cache: 'pip'
       - name: Install PlatformIO
         run: pip install -r requirements.txt
-      - name: Compile firmware
-        # No signing key in CI; sign_firmware.py no-ops on this flag (the PR
-        # gate only needs a clean compile, not a signed image).
-        env:
-          LAMP_FIRMWARE_SKIP_SIGN: '1'
+      # wisp native crypto test links libmbedcrypto. The wisp env's homebrew
+      # -I/-L paths don't exist on the runner and are ignored; -lmbedcrypto
+      # resolves against this system package on the default search path.
+      - name: Install mbedtls
+        run: sudo apt-get update && sudo apt-get install -y libmbedtls-dev
+      - name: Compile lamp firmware
         run: npm run lamp:build
-      - name: Native tests
+      - name: Lamp native tests
         run: npm run lamp:test
+      - name: Compile wisp firmware
+        run: npm run wisp:build
+      - name: Wisp native tests
+        run: npm run wisp:test

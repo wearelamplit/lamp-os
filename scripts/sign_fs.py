@@ -16,8 +16,8 @@ fw.lsig layout (72 bytes), see fs_signature.hpp:
   [4..8)   firmware version — packed (major<<16)|(minor<<8)|patch, LE
   [8..72)  ed25519 signature over the manifest digest
 
-PR builds (no signing key) set LAMP_FIRMWARE_SKIP_SIGN=1; we no-op and remove
-any stale fw.lsig so the unsigned spiffs.bin ships without one.
+A dev build is unsigned; no-op and remove any stale fw.lsig so the spiffs.bin
+ships without one. Beta and stable sign.
 
 Standalone (testing):  python3 scripts/sign_fs.py path/to/data_dir
 """
@@ -25,12 +25,11 @@ Standalone (testing):  python3 scripts/sign_fs.py path/to/data_dir
 from __future__ import annotations
 
 import hashlib
-import os
 import struct
 import sys
 from pathlib import Path
 
-# Reuse the firmware signer's version/key/ed25519 helpers — single source of
+# Reuse the firmware signer's version/key/ed25519 helpers, the single source of
 # truth so the FS image and firmware binary stamp the identical version in one
 # build.
 import sign_firmware  # same scripts/ dir
@@ -69,7 +68,7 @@ def _canonical_files(data_dir: Path) -> list[Path]:
             )
             sys.exit(1)
         out.append(p)
-    # Bytewise sort on the canonical (ASCII) name — matches std::string < on the
+    # Bytewise sort on the canonical (ASCII) name; matches std::string < on the
     # device. Re-sort explicitly in case iterdir's order differs.
     out.sort(key=lambda q: q.name.encode("ascii"))
     return out
@@ -97,12 +96,11 @@ def _build_fw_lsig(digest: bytes, fw_version: int, private_seed: bytes) -> bytes
 
 def sign_fs(data_dir: Path) -> None:
     sig_path = data_dir / FS_SIG_NAME
-    if os.environ.get("LAMP_FIRMWARE_SKIP_SIGN") == "1":
-        # PR / compile-only build: ship no signature. Drop any stale one so it
-        # isn't packed into the image.
+    if sign_firmware._channel_is_dev():
+        # Dev build ships no signature. Drop any stale one so it isn't packed.
         if sig_path.exists():
             sig_path.unlink()
-        print("[sign-fs] skipped: LAMP_FIRMWARE_SKIP_SIGN=1 (no fw.lsig produced)")
+        print("[sign-fs] skipped: dev channel (no fw.lsig produced)")
         return
 
     private_seed = sign_firmware._read_private_key(sign_firmware.PRIVATE_KEY_PATH)

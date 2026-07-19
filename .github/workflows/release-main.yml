@@ -12,6 +12,7 @@ jobs:
       channel: stable
     secrets:
       LAMP_FIRMWARE_PRIVATE_KEY_HEX: ${{ secrets.LAMP_FIRMWARE_PRIVATE_KEY_HEX }}
+      LAMP_COMMAND_KEY_HEX: ${{ secrets.LAMP_COMMAND_KEY_HEX }}
 
   publish:
     needs: build
@@ -43,6 +44,10 @@ jobs:
         with:
           name: lamp-firmware-snafu-signed
           path: signed/snafu
+      - uses: actions/download-artifact@v4
+        with:
+          name: wisp-firmware
+          path: signed/wisp
       - name: Rename artifacts for unique release-asset names
         run: |
           mkdir -p release
@@ -50,6 +55,7 @@ jobs:
           mv dist/snafu/distribution.bin               release/distribution-snafu.bin
           mv signed/standard/firmware-signed.bin       release/lamp-firmware-standard-signed.bin
           mv signed/snafu/firmware-signed.bin          release/lamp-firmware-snafu-signed.bin
+          mv signed/wisp/firmware-signed.bin           release/wisp-firmware-signed.bin
           mv updates/standard/firmware.bin             release/firmware-standard.bin
           mv updates/snafu/firmware.bin                release/firmware-snafu.bin
           mv updates/standard/bootloader.bin           release/bootloader.bin
@@ -79,3 +85,4 @@ jobs:
             release/spiffs.bin
             release/lamp-firmware-standard-signed.bin
             release/lamp-firmware-snafu-signed.bin
+            release/wisp-firmware-signed.bin

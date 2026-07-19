@@ -12,6 +12,7 @@ jobs:
       channel: stable
     secrets:
       LAMP_FIRMWARE_PRIVATE_KEY_HEX: ${{ secrets.LAMP_FIRMWARE_PRIVATE_KEY_HEX }}
+      LAMP_COMMAND_KEY_HEX: ${{ secrets.LAMP_COMMAND_KEY_HEX }}
 
   publish:
     needs: build

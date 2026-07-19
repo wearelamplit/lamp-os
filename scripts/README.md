@@ -55,29 +55,35 @@ Plan accordingly.
 
 ## Building signed firmware
 
-```sh
-cd software/lamp-os && pio run -e upesy_wroom
-  # post-build sign_firmware.py appends LSIG footer to firmware.bin,
-  # writes firmware-signed.bin alongside it. This is what the app pushes
-  # over BLE to seed gossip-OTA across the fleet.
+A signed binary needs an explicit channel (`beta` or `stable`) plus the key; a
+bare build is `dev` (unsigned, `LAMP_DEBUG` on, OTA island).
 
-cd software/wisp && pio run -e seeed_xiao_esp32_c6
-  # post-build sign_firmware.py runs the same way. The signed wisp
-  # binary has no consumer in v1 (wisps don't gossip-OTA), but the hook
-  # stays so a future wisp self-OTA path doesn't need re-plumbing.
+```sh
+cd software/lamp-os && LAMP_FIRMWARE_CHANNEL=beta pio run -e upesy_wroom_standard
+  # post-build sign_firmware.py appends the LSIG footer to firmware.bin and
+  # writes firmware-signed.bin alongside it. This is what the app pushes over
+  # BLE to seed gossip-OTA across the fleet.
+
+cd software/wisp && LAMP_FIRMWARE_CHANNEL=beta pio run -e seeed_xiao_esp32_c6
+  # sign_firmware.py runs the same way. The signed wisp binary has no consumer
+  # today (wisps don't gossip-OTA), but the hook stays for a future wisp
+  # self-OTA path.
 ```
 
 ## Channels
 
-The LSIG footer carries an 8-byte ASCII channel field. Default is
-`"stable"`. To build for the `beta` channel:
+`LAMP_FIRMWARE_CHANNEL` selects one of three: `dev` (default), `beta`,
+`stable`. Both the compiled firmware and the LSIG footer carry the same
+`{type}-{channel}` slot. `dev` is unsigned, `LAMP_DEBUG` on, and an OTA island
+(never signs, never sources OTA); `beta` and `stable` sign and require the key.
 
 ```sh
-LAMP_FIRMWARE_CHANNEL=beta pio run -e upesy_wroom
+LAMP_FIRMWARE_CHANNEL=beta pio run -e upesy_wroom_standard
 ```
 
-A `beta` lamp's OFFER carries `channel="beta"`; a `stable` peer silently
-drops it. Cross-channel migration only via USB re-flash.
+A `beta` lamp's OFFER carries `channel="…-beta"`; a `stable` peer silently
+drops it (a beta lamp accepts a newer stable — promotion). A dev lamp matches
+neither. Cross-channel migration only via USB re-flash.
 
 ## Files in detail
 
@@ -98,10 +104,9 @@ drops it. Cross-channel migration only via USB re-flash.
 - Reads `firmware.bin` from PIO's build dir, appends 96-byte LSIG footer
   (magic + channel + version + signedRegionLen + reserved + ed25519
   signature), writes `firmware-signed.bin` alongside.
-- Version source: parses `software/lamp-os/include/firmware_version.h`
-  (`FIRMWARE_VERSION_MAJOR/MINOR/PATCH` defines). Falls back to parsing
-  `src/version.hpp`'s `FIRMWARE_VERSION = 0xXXXXXX` literal if the
-  defines file is absent.
+- Version source: the root `VERSION` file. `inject_version.py` reads it and
+  injects the `LAMP_FW_*` build defines for lamp + wisp; `sign_firmware.py`
+  reads the same `VERSION` file to stamp the footer.
 - Idempotent: if `firmware-signed.bin` is newer than `firmware.bin` AND
   newer than the private key, skips re-signing.
 

@@ -1,10 +1,9 @@
 # workflows adapted from the WLED project using PlatformIO
 name: LampOS Build
 
-# Only included into other workflows. Caller passes the firmware signing
-# secret (release.yml + release-beta.yml) or omits it (lamp-os-ci.yml PR
-# builds) — in the latter case sign_firmware.py sees LAMP_FIRMWARE_SKIP_SIGN=1
-# and no-ops the post-build hook.
+# Only included into the release workflows, which pass a beta or stable channel
+# plus the firmware + command signing secrets. sign_firmware.py signs for those
+# channels and FATALs if a key is missing.
 on:
   workflow_call:
     inputs:
@@ -17,6 +16,9 @@ on:
     secrets:
       LAMP_FIRMWARE_PRIVATE_KEY_HEX:
         description: 32-byte Ed25519 firmware-signing seed as 64 hex chars
+        required: false
+      LAMP_COMMAND_KEY_HEX:
+        description: 32-byte MSG_EVENT/MSG_COMMAND auth key as 64 hex chars
         required: false
 
 jobs:
@@ -38,17 +40,16 @@ jobs:
     - name: Install PlatformIO + signing deps
       run: pip install -r requirements.txt
 
-    - name: Materialize firmware signing key (or set skip flag)
+    - name: Materialize firmware signing key
       env:
         KEY_HEX: ${{ secrets.LAMP_FIRMWARE_PRIVATE_KEY_HEX }}
       run: |
         if [ -n "$KEY_HEX" ]; then
           printf '%s' "$KEY_HEX" | xxd -r -p > "$HOME/.lamp-os-firmware-key.bin"
           chmod 600 "$HOME/.lamp-os-firmware-key.bin"
-          echo "[ci] signing enabled — key materialized at ~/.lamp-os-firmware-key.bin"
+          echo "[ci] signing key materialized at ~/.lamp-os-firmware-key.bin"
         else
-          echo "LAMP_FIRMWARE_SKIP_SIGN=1" >> "$GITHUB_ENV"
-          echo "[ci] no signing secret available — sign_firmware.py will no-op"
+          echo "[ci] no signing key; a beta/stable build will FATAL at sign"
         fi
 
     - name: Set up Node
@@ -70,6 +71,7 @@ jobs:
       working-directory: ./software/lamp-os
       env:
         LAMP_FIRMWARE_CHANNEL: ${{ inputs.channel }}
+        LAMP_COMMAND_KEY_HEX: ${{ secrets.LAMP_COMMAND_KEY_HEX }}
       run: |
         pio run --environment upesy_wroom_${{ matrix.lamp_variant }}
         pio run --target buildfs --environment upesy_wroom_${{ matrix.lamp_variant }}
@@ -97,7 +99,7 @@ jobs:
           ./software/lamp-os/.pio/build/upesy_wroom_${{ matrix.lamp_variant }}/spiffs.bin
 
     - name: Upload signed lamp firmware (${{ matrix.lamp_variant }})
-      if: env.LAMP_FIRMWARE_SKIP_SIGN != '1'
+      if: inputs.channel != 'dev'
       uses: actions/upload-artifact@v4
       with:
         name: lamp-firmware-${{ matrix.lamp_variant }}-signed
@@ -117,7 +119,7 @@ jobs:
     - name: Install PlatformIO + signing deps
       run: pip install -r requirements.txt
 
-    - name: Materialize firmware signing key (or set skip flag)
+    - name: Materialize firmware signing key
       env:
         KEY_HEX: ${{ secrets.LAMP_FIRMWARE_PRIVATE_KEY_HEX }}
       run: |
@@ -125,7 +127,7 @@ jobs:
           printf '%s' "$KEY_HEX" | xxd -r -p > "$HOME/.lamp-os-firmware-key.bin"
           chmod 600 "$HOME/.lamp-os-firmware-key.bin"
         else
-          echo "LAMP_FIRMWARE_SKIP_SIGN=1" >> "$GITHUB_ENV"
+          echo "[ci] no signing key; a beta/stable build will FATAL at sign"
         fi
 
     - name: Build wisp firmware
@@ -133,3 +135,11 @@ jobs:
       env:
         LAMP_FIRMWARE_CHANNEL: ${{ inputs.channel }}
       run: pio run --environment seeed_xiao_esp32_c6
+
+    - name: Upload signed wisp firmware
+      if: inputs.channel != 'dev'
+      uses: actions/upload-artifact@v4
+      with:
+        name: wisp-firmware
+        path: |
+          ./software/wisp/.pio/build/seeed_xiao_esp32_c6/firmware-signed.bin

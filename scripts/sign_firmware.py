@@ -46,7 +46,7 @@ import sys
 from pathlib import Path
 
 # `__file__` isn't defined when SCons execs a script (the Import("env")
-# loader uses compile()+exec()), so we derive the repo paths lazily:
+# loader uses compile()+exec()), so the repo paths derive lazily:
 # - PIO path: env.subst("$PROJECT_DIR") gives software/lamp-os; ../.. is repo.
 # - CLI path: __file__ is available; ../scripts/.. is repo.
 # Both branches populate the same module-level globals.
@@ -70,7 +70,7 @@ def _resolve_paths_pio(env) -> None:
     REPO_ROOT = project_dir.parent.parent
     LAMP_DIR = project_dir
 
-# Canonical LSIG layout — mirrors firmware_signature.hpp's offsets exactly.
+# Canonical LSIG layout; matches firmware_signature.hpp's offsets exactly.
 # v0x04: channel widens 8 → 16 (carries `{type}-{channel}`); reserved shrinks
 # 12 → 4. Signature offset 32 is pinned.
 LSIG_FOOTER_LEN = 96
@@ -84,11 +84,17 @@ LSIG_SIGNED_LEN_OFFSET = 24
 LSIG_SIGNATURE_OFFSET = 32
 
 # Must match inject_firmware_channel.py's default: that hook sets the compiled
-# FIRMWARE_CHANNEL, this one sets the LSIG footer channel. If the two defaults
-# diverge, an unset build (plain `lamp:flash`) compiles for one channel but is
-# signed for another — which is exactly how a beta build ended up footer-signed
-# "stable". Only an explicit LAMP_FIRMWARE_CHANNEL=stable opts out.
-DEFAULT_CHANNEL = "beta"
+# FIRMWARE_CHANNEL, this one sets the LSIG footer channel and decides whether to
+# sign at all. If the two defaults diverge, an unset build compiles for one
+# channel but is signed (or not) for another. A dev build is unsigned.
+DEFAULT_CHANNEL = "dev"
+
+
+def _channel_is_dev() -> bool:
+    """Dev is the keyless, unsigned, OTA-island channel. Reads the same env var
+    inject_firmware_channel does, so the sign decision tracks the compiled slot."""
+    base = (os.environ.get("LAMP_FIRMWARE_CHANNEL") or DEFAULT_CHANNEL).strip()
+    return (base or DEFAULT_CHANNEL) == "dev"
 
 
 def _read_private_key(path: Path) -> bytes:
@@ -131,8 +137,15 @@ _LAMP_PATCH_RE = re.compile(r"-D\s+LAMP_FW_PATCH\s*=\s*(\d+)")
 
 
 def _parse_firmware_version() -> tuple[int, str]:
-    """Return (packed_u32, human_str). Single source of truth: platformio.ini build_flags."""
-    # Phase H path: LAMP_FW_* defines in platformio.ini [env:upesy_wroom].
+    """Return (packed_u32, human_str). Single source of truth: root VERSION file."""
+    version_file = REPO_ROOT / "VERSION"
+    if version_file.exists():
+        parts = version_file.read_text().strip().split(".")
+        if len(parts) == 3 and all(p.isdigit() for p in parts):
+            major, minor, patch = (int(p) for p in parts)
+            packed = ((major & 0xFF) << 16) | ((minor & 0xFF) << 8) | (patch & 0xFF)
+            return packed, f"{major}.{minor}.{patch}"
+    # Fallback: LAMP_FW_* defines in platformio.ini.
     pio_ini = LAMP_DIR / "platformio.ini"
     if pio_ini.exists():
         text = pio_ini.read_text()
@@ -170,6 +183,7 @@ def _parse_firmware_version() -> tuple[int, str]:
             return packed, f"{major}.{minor}.{patch}"
     print(
         "[sign] FATAL: could not locate firmware version. Looked at:\n"
+        f"       {version_file} (M.m.p)\n"
         f"       {pio_ini} (LAMP_FW_MAJOR/MINOR/PATCH build_flags)\n"
         f"       {defines_path} (FIRMWARE_VERSION_MAJOR/MINOR/PATCH defines)\n"
         f"       {version_hpp} (FIRMWARE_VERSION = 0xXXXXXX literal)",
@@ -257,7 +271,7 @@ def _build_footer(
     struct.pack_into("<I", footer, LSIG_VERSION_OFFSET, fw_version & 0xFFFFFFFF)
     struct.pack_into("<I", footer, LSIG_SIGNED_LEN_OFFSET,
                      signed_region_len & 0xFFFFFFFF)
-    # bytes [28..32) already zeros from bytearray() — reserved
+    # bytes [28..32) already zeros from bytearray(); reserved
     footer[LSIG_SIGNATURE_OFFSET : LSIG_SIGNATURE_OFFSET + LSIG_SIGNATURE_LEN] = signature
     assert len(footer) == LSIG_FOOTER_LEN
     return bytes(footer)
@@ -322,16 +336,10 @@ def sign(input_bin: Path, output_bin: Path, env=None) -> None:
 
 def _post_build_action(source, target, env):  # noqa: ARG001 — PIO signature
     """SCons action signature. `target` is the linker output (.elf)."""
-    # Compile-only escape hatch — set LAMP_FIRMWARE_SKIP_SIGN=1 to no-op the
-    # post-build hook. Used by CI on PR builds (where the private key
-    # isn't materialized from a secret) so that `pio run` succeeds without
-    # producing a signed artifact. Release workflows (tag / beta branch)
-    # materialize the secret and don't set this flag.
-    if os.environ.get("LAMP_FIRMWARE_SKIP_SIGN") == "1":
-        print(
-            "[sign] skipped: LAMP_FIRMWARE_SKIP_SIGN=1 "
-            "(compile-only / PR build — no signed artifact produced)"
-        )
+    # A dev build produces no LSIG footer: unsigned, OTA-island, keyless. Beta
+    # and stable sign and FATAL if the key is missing.
+    if _channel_is_dev():
+        print("[sign] skipped: dev channel (no signature footer produced)")
         return
     build_dir = Path(env.subst("$BUILD_DIR"))
     input_bin = build_dir / "firmware.bin"
@@ -348,7 +356,7 @@ try:
         _post_build_action,
     )
 except NameError:
-    # Not running under PIO — fall through to CLI mode.
+    # Not running under PIO; fall through to CLI mode.
     if __name__ == "__main__":
         _resolve_paths_cli()
         if len(sys.argv) != 2:

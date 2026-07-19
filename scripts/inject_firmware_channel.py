@@ -9,7 +9,7 @@ that the existing silent-drop on channel-mismatch enforces per-variant
 OTA gating for free.
 
 This hook derives the variant from the per-env `custom_lamp_variant`
-project option and combines it with `LAMP_FIRMWARE_CHANNEL` (or "stable"
+project option and combines it with `LAMP_FIRMWARE_CHANNEL` (or "dev"
 default). Result is injected as -D FIRMWARE_CHANNEL='"<combined>"'.
 
 When the env doesn't declare `custom_lamp_variant` (e.g. the native test
@@ -31,12 +31,12 @@ Import("env")  # SCons / PIO global
 
 LSIG_CHANNEL_LEN = 16
 
-# Default to "beta" when unset: local dev builds and the beta CI build get
-# the beta channel (and LAMP_DEBUG, below). Only an explicit stable build
-# (release-main sets LAMP_FIRMWARE_CHANNEL=stable) opts out.
-base = os.environ.get("LAMP_FIRMWARE_CHANNEL", "beta").strip()
+# Default to "dev" when unset: a local build is a dev build (unsigned,
+# LAMP_DEBUG on, OTA island). CI passes an explicit beta/stable channel.
+# This default MUST match sign_firmware.py's DEFAULT_CHANNEL.
+base = os.environ.get("LAMP_FIRMWARE_CHANNEL", "dev").strip()
 if not base:
-    base = "beta"
+    base = "dev"
 
 try:
     variant = env.GetProjectOption("custom_lamp_variant")
@@ -53,15 +53,15 @@ if len(combined.encode("ascii", errors="strict")) > LSIG_CHANNEL_LEN:
         f"exceeds {LSIG_CHANNEL_LEN} bytes"
     )
 
-# Pass the value with escaped quotes so it reaches GCC as a string
-# literal (matches the inject_initial_type.py pattern).
+# Escaped quotes so the value reaches GCC as a string literal, dodging
+# shell-quoting hazards in the CPPDEFINES tuple form.
 env.Append(CPPDEFINES=[("FIRMWARE_CHANNEL", '\\"' + combined + '\\"')])
 print(f"[inject_firmware_channel] FIRMWARE_CHANNEL={combined}")
 
 # LAMP_DEBUG gates bench-only affordances (testGreet, extra serial logging).
-# Stable firmware ships without them; every other channel — beta and local
-# dev — keeps them. Keyed off the raw channel, not the variant-prefixed slot.
-debug_on = base != "stable"
+# Only a dev build keeps them; beta and stable ship quiet. Keyed off the raw
+# channel, not the variant-prefixed slot.
+debug_on = base == "dev"
 if debug_on:
     env.Append(CPPDEFINES=["LAMP_DEBUG"])
 print(f"[inject_firmware_channel] LAMP_DEBUG={'on' if debug_on else 'off'}")
