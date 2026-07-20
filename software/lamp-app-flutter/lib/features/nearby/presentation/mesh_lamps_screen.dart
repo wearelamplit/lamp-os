@@ -68,8 +68,13 @@ class _Roster extends ConsumerWidget {
       );
     }
 
+    bool isBtOnly(LampNearbyPeer p) => p.viaBle && !p.viaEspNow;
+    final btOnly = peers.where(isBtOnly).toList()
+      ..sort((a, b) => b.rssi.compareTo(a.rssi));
+
     final byTier = <int, List<LampNearbyPeer>>{};
     for (final p in peers) {
+      if (isBtOnly(p)) continue;
       byTier.putIfAbsent(proximityFromRssi(p.rssi), () => []).add(p);
     }
 
@@ -85,6 +90,14 @@ class _Roster extends ConsumerWidget {
               const SizedBox(height: AppSpace.sm),
             ],
           ],
+        if (btOnly.isNotEmpty) ...[
+          const SectionHeader('BT-only'),
+          const SizedBox(height: AppSpace.xs),
+          for (final peer in btOnly) ...[
+            _PeerCard(peer: peer),
+            const SizedBox(height: AppSpace.sm),
+          ],
+        ],
         if (peers.length >= _rosterCap) ...[
           const SizedBox(height: AppSpace.sm),
           Text(
