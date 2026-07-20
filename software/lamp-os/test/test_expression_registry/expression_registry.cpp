@@ -6,6 +6,7 @@
 #include <string>
 
 #include "expressions/expression_registry.hpp"
+#include "expressions/param_utils.hpp"
 
 // Native tests don't build src/ — pull in the implementation directly.
 #include "../../src/expressions/expression_registry.cpp"
@@ -254,6 +255,40 @@ void test_serialize_range_min_max_keys() {
   TEST_ASSERT_EQUAL_STRING("intervalMax", interval["maxKey"].as<const char*>());
 }
 
+void test_serialize_range_min_gap_present() {
+  static constexpr ExpressionDescriptor kGapDesc{
+    .id = "gappy", .name = "Gappy",
+    .colors = { .max = 1 },
+    .interval = RangeSpec{ .min = 600, .max = 18000, .step = 30, .unit = "s",
+                           .defLo = 1800, .defHi = 7200, .minGap = 1800 },
+  };
+  ExpressionRegistry reg;
+  reg.add(kGapDesc);
+
+  JsonDocument doc;
+  deserializeJson(doc, reg.serializeCatalog());
+
+  TEST_ASSERT_EQUAL_INT(1800, doc["expressions"][0]["interval"]["minGap"].as<int>());
+}
+
+void test_serialize_range_min_gap_absent_when_zero() {
+  ExpressionRegistry reg;
+  reg.add(kDesc1);  // interval has no minGap
+
+  JsonDocument doc;
+  deserializeJson(doc, reg.serializeCatalog());
+
+  TEST_ASSERT_TRUE(doc["expressions"][0]["interval"]["minGap"].isNull());
+}
+
+void test_clamp_range_hi_gap_widens_narrow_pair() {
+  TEST_ASSERT_EQUAL_UINT32(2400, clampRangeHiGap(600, 900, 1800, 18000));
+  TEST_ASSERT_EQUAL_UINT32(2400, clampRangeHiGap(600, 2400, 1800, 18000));
+  TEST_ASSERT_EQUAL_UINT32(9000, clampRangeHiGap(600, 9000, 1800, 18000));
+  // lo + minGap exceeds max -> clamped to max.
+  TEST_ASSERT_EQUAL_UINT32(18000, clampRangeHiGap(17000, 17100, 1800, 18000));
+}
+
 void test_serialize_range_keys_absent_when_unset() {
   ExpressionRegistry reg;
   reg.add(kDesc3);  // duration has no keys
@@ -465,6 +500,9 @@ int main(int, char**) {
   RUN_TEST(test_serialize_param_default_pixels_is_object);
   RUN_TEST(test_serialize_param_default_pixelscapped_is_object);
   RUN_TEST(test_serialize_range_min_max_keys);
+  RUN_TEST(test_serialize_range_min_gap_present);
+  RUN_TEST(test_serialize_range_min_gap_absent_when_zero);
+  RUN_TEST(test_clamp_range_hi_gap_widens_narrow_pair);
   RUN_TEST(test_serialize_range_keys_absent_when_unset);
   RUN_TEST(test_serialize_param_type_strings);
   RUN_TEST(test_serialize_enum_options_zoning);

@@ -187,6 +187,7 @@ class ExpressionParamsPanel extends StatelessWidget {
         min: duration.min,
         max: duration.max,
         step: duration.step,
+        minGap: duration.minGap,
         onChanged: (lo, hi) =>
             _setBoth(duration.minKey!, lo, duration.maxKey!, hi),
         leftLabel: 'short',
@@ -207,6 +208,7 @@ class ExpressionParamsPanel extends StatelessWidget {
         min: interval.min,
         max: interval.max,
         step: interval.step,
+        minGap: interval.minGap,
         onChanged: onIntervalChanged,
         leftLabel: 'often',
         rightLabel: 'rare',
@@ -459,6 +461,7 @@ class _RangeParamSlider extends StatelessWidget {
     required this.onChanged,
     required this.format,
     this.step = 1,
+    this.minGap = 0,
     this.leftLabel,
     this.rightLabel,
     this.help,
@@ -472,6 +475,10 @@ class _RangeParamSlider extends StatelessWidget {
   final int min;
   final int max;
   final int step;
+
+  /// Minimum spread the thumbs keep. The dragged thumb pushes the other so the
+  /// pair never comes within [minGap]. 0 = free.
+  final int minGap;
   final void Function(int lo, int hi) onChanged;
   final String Function(int) format;
   final String? leftLabel;
@@ -483,7 +490,10 @@ class _RangeParamSlider extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final loClamp = lo.clamp(min, max);
-    final hiClamp = hi.clamp(loClamp, max);
+    final hiClamp = hi.clamp(loClamp, max).clamp(
+          (loClamp + minGap).clamp(min, max),
+          max,
+        );
     final hasEnds = leftLabel != null && rightLabel != null;
     final slider = RangeSlider(
       values: RangeValues(loClamp.toDouble(), hiClamp.toDouble()),
@@ -491,8 +501,18 @@ class _RangeParamSlider extends StatelessWidget {
       max: max.toDouble(),
       divisions: _divisions(min, max, step),
       onChanged: (v) {
-        final a = _snap(v.start.round(), min, max, step);
-        final b = _snap(v.end.round(), min, max, step);
+        var a = _snap(v.start.round(), min, max, step);
+        var b = _snap(v.end.round(), min, max, step);
+        if (b - a < minGap) {
+          // Push whichever thumb didn't move; if lo moved, raise hi (cap at
+          // max and pull lo back down when hi hits the ceiling).
+          if (a != loClamp) {
+            b = (a + minGap).clamp(min, max);
+            a = (b - minGap).clamp(min, max);
+          } else {
+            a = (b - minGap).clamp(min, max);
+          }
+        }
         onChanged(a, b);
         onPreview?.call(a, b);
       },

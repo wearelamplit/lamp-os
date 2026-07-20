@@ -82,27 +82,33 @@ const removeColor = (index: number) => {
 }
 
 const onIntervalMin = (value: number) => {
-  const intervalMax = Math.max(value, props.expression.intervalMax)
-  emit('update', { intervalMin: value, intervalMax })
+  const gap = props.descriptor.interval?.minGap ?? 0
+  const cap = props.descriptor.interval?.max ?? Number.MAX_SAFE_INTEGER
+  const intervalMax = Math.min(cap, Math.max(value + gap, props.expression.intervalMax))
+  emit('update', { intervalMin: Math.min(value, intervalMax - gap), intervalMax })
 }
 
 const onIntervalMax = (value: number) => {
-  const intervalMin = Math.min(value, props.expression.intervalMin)
-  emit('update', { intervalMin, intervalMax: value })
+  const gap = props.descriptor.interval?.minGap ?? 0
+  const floor = props.descriptor.interval?.min ?? 0
+  const intervalMin = Math.max(floor, Math.min(value - gap, props.expression.intervalMin))
+  emit('update', { intervalMin, intervalMax: Math.max(value, intervalMin + gap) })
 }
 
 const onDurationMin = (value: number) => {
   const d = props.descriptor.duration
   if (!d?.minKey || !d.maxKey) return
-  const hi = Math.max(value, Number(props.expression[d.maxKey] ?? value))
-  emit('update', { [d.minKey]: value, [d.maxKey]: hi })
+  const gap = d.minGap ?? 0
+  const hi = Math.min(d.max, Math.max(value + gap, Number(props.expression[d.maxKey] ?? value)))
+  emit('update', { [d.minKey]: Math.min(value, hi - gap), [d.maxKey]: hi })
 }
 
 const onDurationMax = (value: number) => {
   const d = props.descriptor.duration
   if (!d?.minKey || !d.maxKey) return
-  const lo = Math.min(value, Number(props.expression[d.minKey] ?? value))
-  emit('update', { [d.minKey]: lo, [d.maxKey]: value })
+  const gap = d.minGap ?? 0
+  const lo = Math.max(d.min, Math.min(value - gap, Number(props.expression[d.minKey] ?? value)))
+  emit('update', { [d.minKey]: lo, [d.maxKey]: Math.max(value, lo + gap) })
 }
 </script>
 

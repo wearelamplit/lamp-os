@@ -111,6 +111,18 @@ void test_glitchy_duration_range() {
                            dur["help"].as<const char*>());
 }
 
+void test_glitchy_interval_bounds_and_min_gap() {
+  auto iv = findById("glitchy")["interval"];
+  TEST_ASSERT_TRUE(iv.is<JsonObject>());
+  TEST_ASSERT_EQUAL_INT(600,   iv["min"].as<int>());
+  TEST_ASSERT_EQUAL_INT(18000, iv["max"].as<int>());
+  TEST_ASSERT_EQUAL_INT(1800,  iv["minGap"].as<int>());
+  auto def = iv["default"].as<JsonArray>();
+  TEST_ASSERT_EQUAL_INT(1800, def[0].as<int>());
+  TEST_ASSERT_EQUAL_INT(7200, def[1].as<int>());
+  TEST_ASSERT_TRUE(def[1].as<int>() - def[0].as<int>() >= iv["minGap"].as<int>());
+}
+
 void test_interval_help_present() {
   const char* expected = "A random time in this range is picked before each trigger.";
   TEST_ASSERT_EQUAL_STRING(expected, findById("glitchy")["interval"]["help"].as<const char*>());
@@ -388,6 +400,7 @@ int main(int, char**) {
   RUN_TEST(test_glitchy_scatter_always_active_literal_max);
   RUN_TEST(test_glitchy_has_no_size_param);
   RUN_TEST(test_glitchy_duration_range);
+  RUN_TEST(test_glitchy_interval_bounds_and_min_gap);
   RUN_TEST(test_interval_help_present);
   RUN_TEST(test_shifty_fillmode_enum_no_zoning);
   RUN_TEST(test_shifty_fade_duration_range);

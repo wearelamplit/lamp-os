@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cstring>
 
+#include "expressions/param_utils.hpp"
+
 #include "components/network/protocol/lamp_protocol.hpp"
 #include "components/network/mesh/lamp_roster.hpp"
 #include "components/network/mesh/mesh_link.hpp"
@@ -56,6 +58,11 @@ std::unique_ptr<Expression> ExpressionManager::makeExpression(
   if (!d || !d->make) return nullptr;
 
   std::unique_ptr<Expression> expr(d->make(buffer));
+  if (d->interval && d->interval->minGap) {
+    intervalMax = clampRangeHiGap(intervalMin, intervalMax,
+                                  static_cast<uint32_t>(d->interval->minGap),
+                                  static_cast<uint32_t>(d->interval->max));
+  }
   expr->configure(colors, intervalMin, intervalMax, target);
 
   std::map<std::string, uint32_t> effective = parameters;

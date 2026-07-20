@@ -167,6 +167,7 @@ class CatalogRange {
     required this.step,
     required this.defLo,
     required this.defHi,
+    this.minGap = 0,
     this.unit,
     this.label,
     this.help,
@@ -179,6 +180,10 @@ class CatalogRange {
   final int step;
   final int defLo;
   final int defHi;
+
+  /// Minimum spread the two thumbs must keep, same unit as [min]/[max].
+  /// 0 = no constraint. Firmware clamps authoritatively; this drives the UX.
+  final int minGap;
   final String? unit;
   final String? label;
   final String? help;
@@ -193,6 +198,7 @@ class CatalogRange {
       step: (j['step'] as num?)?.toInt() ?? 1,
       defLo: def.isNotEmpty ? (def[0] as num).toInt() : 0,
       defHi: def.length > 1 ? (def[1] as num).toInt() : 0,
+      minGap: (j['minGap'] as num?)?.toInt() ?? 0,
       unit: j['unit'] as String?,
       label: j['label'] as String?,
       help: j['help'] as String?,

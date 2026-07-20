@@ -112,6 +112,8 @@ export interface CatalogRange {
   step: number
   unit?: string
   default: [number, number]
+  // Minimum spread between lo and hi, same unit as min/max. Absent = 0.
+  minGap?: number
   label?: string
   minKey?: string
   maxKey?: string
