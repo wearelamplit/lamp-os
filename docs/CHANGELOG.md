@@ -4,6 +4,36 @@ Notable changes per firmware version. The version is the root `VERSION` file;
 add an entry here in the **same change** that bumps it. Highlights grouped
 Added / Fixed / Changed — not every commit.
 
+## 1.1.2 — pending (bench + release)
+
+### Added
+- **Firmware update panel** (app) — downloaded-firmware list with per-row delete
+  and a newer-than install gate, so it only offers a genuinely newer build.
+- **Nearby scan burst** — a bounded, rate-limited BLE scan (from the Social tab)
+  surfaces legacy BLE-only lamps that don't gossip; they also get their own
+  section on the Mesh-lamps debug screen.
+- **Wisp presence live-refresh** — a wisp that comes online after the app connects
+  now appears without an app restart.
+- **Range-slider minimum gap** — range-pair sliders can enforce a minimum spread;
+  the glitchy interval is now 10 min–5 h with a 30 min floor between its ends.
+- **`wisp:flash:release`** — flash a signed wisp image over USB from the console.
+
+### Fixed
+- **Wisp OFF release** — turning a wisp off releases its lamps promptly instead of
+  occasionally stranding one until the 60 s watchdog.
+- **Wisp source control** — setting a source no longer flips back to Manual with
+  empty colors under a slow multi-hop round-trip.
+- **USB re-flash boots the flashed image** — flash tasks reset the OTA selector, so
+  a re-flashed lamp runs the new image instead of a previously OTA'd slot.
+- **Shifty** — directional fills (Up/Down/Bloom) now paint edge-to-edge.
+- **Legacy peers in Social** — a legacy lamp's white shade shows white, not black.
+- **Reaching-lamp overlay** blocks navigation while it's shown.
+
+### Changed
+- **Pulse** enters from off-strip and bunches at each edge.
+- Wisp controls standardized on the gradient bottom bar; reaching-lamp overlay
+  frosted; Add-Color moved out of the Save/Cancel row.
+
 ## 1.1.1 — pending (bench + release)
 
 ### Added
