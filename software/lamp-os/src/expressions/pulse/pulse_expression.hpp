@@ -47,16 +47,6 @@ inline constexpr ParamSpec kPulseParams[] = {
     .options = kPulseLoopOpts,
   },
 };
-// Continuous pulse runs its wave center between the visible edge pixels (not
-// off-screen), so Float's end-dwell leaves a lit blob hanging at each end
-// instead of a dark gap. Inset shrinks that range symmetrically; 0 = full zone.
-// Bench-tunable.
-inline constexpr float kContinuousTravelInset = 0.0f;
-
-// Continuous pulse ramps its applied brightness 0 -> full over this window on
-// first appearance so it grows in rather than popping on at the edge.
-inline constexpr uint32_t kEbbInMs = 800;
-
 inline constexpr ExpressionDescriptor kPulseDescriptorData{
   .id       = "pulse",
   .name     = "Pulse",
@@ -98,14 +88,10 @@ class PulseExpression : public Expression {
   Easing easing_ = Easing::Linear;
   bool loopContinuous_ = false;   // Ping-pong forever instead of ending on exit
   bool reachedFarEnd_ = false;    // Continuous wave has touched the far end; arms preview one-cycle stop
+  bool firstEntranceDone_ = false;  // Continuous leg 0 enters off-strip; later legs ping-pong the visible edges
 
   // Timing
   uint32_t lastUpdateMs = 0;      // Last time wave position was updated
-  uint32_t ebbStartMs_ = 0;       // Continuous ebb-in origin, set at first appearance
-
-  // Brightness scale applied to the whole pulse: 1.0 except during the
-  // continuous ebb-in ramp. Trigger mode is always 1.0.
-  float ebbInScale() const;
 
   /**
    * Calculate blend factor for a pixel based on distance from wave center.
