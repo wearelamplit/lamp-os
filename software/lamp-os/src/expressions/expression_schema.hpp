@@ -61,6 +61,8 @@ struct RangeSpec {
   const char* unit = nullptr;
   int32_t defLo = 0;
   int32_t defHi = 0;
+  // Minimum spread between the pair's lo and hi, same unit as min/max. 0 = no constraint.
+  int32_t minGap = 0;
   const char* label = nullptr;
   const char* help = nullptr;
   // Param keys the fold writes defLo/defHi into (e.g. "intervalMin"/"intervalMax").

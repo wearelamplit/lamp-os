@@ -40,6 +40,7 @@ void serializeRangeSpec(JsonObject parent, const RangeSpec& r) {
   JsonArray def = parent["default"].to<JsonArray>();
   def.add(r.defLo);
   def.add(r.defHi);
+  if (r.minGap) parent["minGap"] = r.minGap;
   if (r.label) parent["label"] = r.label;
   if (r.help) parent["help"] = r.help;
   if (r.minKey) parent["minKey"] = r.minKey;
