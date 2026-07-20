@@ -97,8 +97,10 @@ class SocialScreen extends ConsumerWidget {
           _SocialLampRow(
             name: invFor(l)?.name ?? l.name,
             lampId: l.lampId,
-            baseColor: _colorFromRgbw(l.baseRgbw),
-            shadeColor: _colorFromRgbw(l.shadeRgbw),
+            baseColor: _colorFromRgbw(
+                displayRgbw(l.baseRgbw, legacyOnlyBle: l.viaBle && !l.viaEspNow)),
+            shadeColor: _colorFromRgbw(
+                displayRgbw(l.shadeRgbw, legacyOnlyBle: l.viaBle && !l.viaEspNow)),
             rssi: l.rssi,
             proximity: proximityFromRssi(l.rssi),
           ),
