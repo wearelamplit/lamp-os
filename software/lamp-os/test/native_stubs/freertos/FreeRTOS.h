@@ -6,3 +6,4 @@
 
 constexpr uint32_t portMAX_DELAY = 0xFFFFFFFFu;
 constexpr int pdTRUE = 1;
+constexpr uint32_t pdMS_TO_TICKS(uint32_t ms) { return ms; }

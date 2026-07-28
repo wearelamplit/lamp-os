@@ -601,6 +601,31 @@ void test_hello_max_chunk_with_channel_and_fs_state_all_emit() {
   TEST_ASSERT_EQUAL_UINT16(768, out.maxChunk);
 }
 
+void test_hello_ota_sending_to_round_trip() {
+  uint8_t buf[lp::HELLO_MAX_SIZE];
+  const size_t n = lp::buildHello(buf, sizeof(buf), 17, kSrcMac,
+                                  kHelloShade, kHelloBase, 0xBEEF,
+                                  "jacko", 5, lp::kOtaStateSending,
+                                  /*fwChannel=*/nullptr, /*fsDigest=*/nullptr,
+                                  /*maxChunk=*/0, /*needsFs=*/false,
+                                  /*otaSendingTo=*/kTargetMac);
+  lp::ParsedHello out;
+  TEST_ASSERT_TRUE(lp::parseHello(buf, n, out));
+  TEST_ASSERT_EQUAL_UINT8(lp::kOtaStateSending, out.otaState);
+  TEST_ASSERT_TRUE(out.hasOtaSendingTo);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(kTargetMac, out.otaSendingTo, 6);
+}
+
+void test_hello_absent_ota_sending_to_is_false() {
+  uint8_t buf[lp::HELLO_MAX_SIZE];
+  const size_t n = lp::buildHello(buf, sizeof(buf), 18, kSrcMac,
+                                  kHelloShade, kHelloBase, 0xBEEF,
+                                  "jacko", 5, lp::kOtaStateSending);
+  lp::ParsedHello out;
+  TEST_ASSERT_TRUE(lp::parseHello(buf, n, out));
+  TEST_ASSERT_FALSE(out.hasOtaSendingTo);
+}
+
 // Forward-compat: an unknown TLV type must be skipped (by length),
 // the known OTA_STATE TLV that follows must still parse cleanly, and
 // no fields beyond what we know about should be affected.
@@ -670,6 +695,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_hello_max_chunk_round_trip);
   RUN_TEST(test_hello_absent_max_chunk_is_zero);
   RUN_TEST(test_hello_max_chunk_with_channel_and_fs_state_all_emit);
+  RUN_TEST(test_hello_ota_sending_to_round_trip);
+  RUN_TEST(test_hello_absent_ota_sending_to_is_false);
   RUN_TEST(test_hello_unknown_tlv_is_skipped);
   RUN_TEST(test_hello_tlv_with_oversized_length_is_rejected);
 

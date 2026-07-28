@@ -215,8 +215,11 @@ struct DistAlgo {
   bool considerPeerForOta(const uint8_t peerMac[6], uint32_t peerVersion,
                           uint32_t nowMs, const char* peerChannel = nullptr,
                           uint16_t peerMaxChunk = 0,
-                          int8_t peerRssi = -127) {
+                          int8_t peerRssi = -127,
+                          bool peerBeingServed = false) {
     if (state_ != State::Idle) return false;
+    // Another lamp already owns this peer's transfer; don't stomp it.
+    if (peerBeingServed) return false;
     // Use otaAcceptable with roles swapped: asks "would the peer accept this
     // firmware?" so the peer is the receiver and this side is the offerer.
     if (peerChannel && peerChannel[0] != '\0') {
@@ -470,6 +473,89 @@ static std::vector<uint8_t> makeSignedImage(size_t signedLen) {
 
 void setUp(void) {}
 void tearDown(void) {}
+
+// =============================================================================
+// peerBeingServed derivation (mirror of SocialBehavior::control's roster scan)
+// =============================================================================
+//
+// The distributor takes a bool; the caller (social.cpp) derives it from the
+// roster where the roster is in scope. This mirrors that derivation: skip a
+// peer another lamp already owns.
+
+constexpr uint8_t kOtaStateSending   = 1;
+constexpr uint8_t kOtaStateReceiving = 2;
+
+struct RosterPeer {
+  uint8_t mac[6]           = {0};
+  uint8_t otaState         = 0;
+  bool    hasOtaSendingTo  = false;
+  uint8_t otaSendingTo[6]  = {0};
+};
+
+static bool peerBeingServed(const std::vector<RosterPeer>& roster,
+                            const uint8_t peerMac[6], uint8_t peerOtaState) {
+  if (peerOtaState == kOtaStateReceiving) return true;
+  for (const auto& q : roster) {
+    if (q.otaState == kOtaStateSending && q.hasOtaSendingTo &&
+        std::memcmp(q.otaSendingTo, peerMac, 6) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void test_peer_being_served_when_peer_receiving(void) {
+  std::vector<RosterPeer> roster;
+  uint8_t x[6]; macFromTail(x, 5);
+  TEST_ASSERT_TRUE(peerBeingServed(roster, x, kOtaStateReceiving));
+}
+
+void test_peer_being_served_when_other_sending_to_it(void) {
+  uint8_t x[6]; macFromTail(x, 5);
+  RosterPeer sender;
+  macFromTail(sender.mac, 6);
+  sender.otaState = kOtaStateSending;
+  sender.hasOtaSendingTo = true;
+  std::memcpy(sender.otaSendingTo, x, 6);
+  std::vector<RosterPeer> roster{sender};
+  TEST_ASSERT_TRUE(peerBeingServed(roster, x, /*peerOtaState=*/0));
+}
+
+void test_peer_not_served_when_sender_targets_someone_else(void) {
+  uint8_t x[6]; macFromTail(x, 5);
+  uint8_t other[6]; macFromTail(other, 7);
+  RosterPeer sender;
+  macFromTail(sender.mac, 6);
+  sender.otaState = kOtaStateSending;
+  sender.hasOtaSendingTo = true;
+  std::memcpy(sender.otaSendingTo, other, 6);
+  std::vector<RosterPeer> roster{sender};
+  TEST_ASSERT_FALSE(peerBeingServed(roster, x, /*peerOtaState=*/0));
+}
+
+void test_peer_not_served_when_roster_idle(void) {
+  uint8_t x[6]; macFromTail(x, 5);
+  std::vector<RosterPeer> roster;
+  TEST_ASSERT_FALSE(peerBeingServed(roster, x, /*peerOtaState=*/0));
+}
+
+void test_considerPeerForOta_peer_being_served_skips(void) {
+  auto d = makeAlgo();
+  uint8_t mac[6]; macFromTail(mac, 1);
+  TEST_ASSERT_FALSE(d.considerPeerForOta(mac, 0x00010003u, 1000, nullptr, 0,
+                                         -127, /*peerBeingServed=*/true));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(State::Idle),
+                          static_cast<uint8_t>(d.state_));
+}
+
+void test_considerPeerForOta_not_served_offers(void) {
+  auto d = makeAlgo();
+  uint8_t mac[6]; macFromTail(mac, 1);
+  TEST_ASSERT_TRUE(d.considerPeerForOta(mac, 0x00010003u, 1000, nullptr, 0,
+                                        -127, /*peerBeingServed=*/false));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(State::OfferSent),
+                          static_cast<uint8_t>(d.state_));
+}
 
 // =============================================================================
 // considerPeerForOta gating
@@ -1199,6 +1285,13 @@ void test_sha256_prefix_block_size_independent(void) {
 
 int main(int, char**) {
   UNITY_BEGIN();
+  // peerBeingServed derivation + gate
+  RUN_TEST(test_peer_being_served_when_peer_receiving);
+  RUN_TEST(test_peer_being_served_when_other_sending_to_it);
+  RUN_TEST(test_peer_not_served_when_sender_targets_someone_else);
+  RUN_TEST(test_peer_not_served_when_roster_idle);
+  RUN_TEST(test_considerPeerForOta_peer_being_served_skips);
+  RUN_TEST(test_considerPeerForOta_not_served_offers);
   // considerPeerForOta gating
   RUN_TEST(test_considerPeerForOta_idle_emits_offer);
   RUN_TEST(test_considerPeerForOta_no_max_chunk_uses_baseline);

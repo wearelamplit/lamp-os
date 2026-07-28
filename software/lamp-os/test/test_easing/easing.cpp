@@ -1,11 +1,14 @@
 #include <unity.h>
 
 #include <cmath>
+#include <initializer_list>
 
+#include "util/eased_scalar.hpp"
 #include "util/easing.hpp"
 
 using lamp::Easing;
 using lamp::applyEasing;
+using lamp::clamp01;
 using lamp::easeStep;
 using lamp::kFloatDwell;
 
@@ -143,6 +146,63 @@ void test_greeting_eased_ramp_contract() {
                    easedRampByte(0, 200, Easing::Smooth, 150, 300));
 }
 
+void test_new_curves_hit_endpoints() {
+  for (auto e : {Easing::SnapIn, Easing::SnapOut, Easing::SnapInOut,
+                 Easing::OvershootIn, Easing::OvershootOut, Easing::OvershootInOut,
+                 Easing::SpringIn, Easing::SpringOut, Easing::SpringInOut,
+                 Easing::BounceIn, Easing::BounceOut, Easing::BounceInOut}) {
+    TEST_ASSERT_FLOAT_WITHIN(1e-4, 0.0f, applyEasing(e, 0.0f));
+    TEST_ASSERT_FLOAT_WITHIN(1e-4, 1.0f, applyEasing(e, 1.0f));
+  }
+}
+
+void test_direction_reflection_identity() {
+  for (float t = 0.0f; t <= 1.0f; t += 0.1f) {
+    TEST_ASSERT_FLOAT_WITHIN(
+        1e-4, applyEasing(Easing::SnapIn, t), 1.0f - applyEasing(Easing::SnapOut, 1.0f - t));
+  }
+}
+
+void test_overshoot_can_exceed_unit() {
+  bool over = false;
+  for (float t = 0.5f; t < 1.0f; t += 0.02f)
+    if (applyEasing(Easing::OvershootOut, t) > 1.0f) over = true;
+  TEST_ASSERT_TRUE(over);
+}
+
+void test_easeStep_clamps_overshoot() {
+  for (uint32_t s = 0; s <= 100; ++s)
+    TEST_ASSERT_TRUE(easeStep(s, 100, Easing::OvershootOut) <= 100);
+}
+
+namespace {
+struct SeqRng { uint32_t n = 0; uint32_t range(uint32_t lo, uint32_t hi) { return lo + (n++ % (hi - lo + 1)); } };
+}  // namespace
+
+void test_randomEasing_in_concrete_range() {
+  SeqRng r;
+  for (int i = 0; i < 40; ++i) {
+    Easing e = lamp::randomEasing(r);
+    TEST_ASSERT_TRUE(e != Easing::Random);
+    TEST_ASSERT_TRUE(static_cast<uint8_t>(e) <= static_cast<uint8_t>(Easing::BounceInOut));
+  }
+}
+
+void test_breathing_curves_dip_below_zero_and_clamp() {
+  // OvershootIn / SpringIn go negative mid-range; clamp01 must pull them
+  // back into [0,1] before breathing's uint32 cast.
+  bool sawNegative = false;
+  for (auto e : {Easing::OvershootIn, Easing::SpringIn}) {
+    for (float t = 0.0f; t <= 1.0f; t += 0.02f) {
+      const float raw = applyEasing(e, t);
+      if (raw < 0.0f) sawNegative = true;
+      const float c = clamp01(raw);
+      TEST_ASSERT_TRUE(c >= 0.0f && c <= 1.0f);
+    }
+  }
+  TEST_ASSERT_TRUE(sawNegative);  // the clamp is necessary, not decorative
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_endpoints_map_to_endpoints);
@@ -157,5 +217,11 @@ int main(int, char**) {
   RUN_TEST(test_breath_smooth_matches_raised_cosine);
   RUN_TEST(test_greeting_ramp_position_follows_curve);
   RUN_TEST(test_greeting_eased_ramp_contract);
+  RUN_TEST(test_new_curves_hit_endpoints);
+  RUN_TEST(test_direction_reflection_identity);
+  RUN_TEST(test_overshoot_can_exceed_unit);
+  RUN_TEST(test_easeStep_clamps_overshoot);
+  RUN_TEST(test_randomEasing_in_concrete_range);
+  RUN_TEST(test_breathing_curves_dip_below_zero_and_clamp);
   return UNITY_END();
 }

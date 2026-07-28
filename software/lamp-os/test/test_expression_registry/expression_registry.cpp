@@ -56,7 +56,6 @@ static constexpr ExpressionDescriptor kDesc2{
   .id = "wash",
   .name = "Wash",
   .continuous = true,
-  .pausesWispOverride = true,
   .colors = { .max = 4, .label = "Wash Colors", .inheritsSurface = true },
   .excludeTargets = kExclude2,
   .params = kParams2,
@@ -350,18 +349,6 @@ void test_serialize_exclude_targets() {
   TEST_ASSERT_EQUAL_STRING("base", excl[0].as<const char*>());
 }
 
-void test_serialize_pauses_wisp_override() {
-  ExpressionRegistry reg;
-  reg.add(kDesc1);  // pausesWispOverride unset
-  reg.add(kDesc2);  // pausesWispOverride=true
-
-  JsonDocument doc;
-  deserializeJson(doc, reg.serializeCatalog());
-
-  TEST_ASSERT_TRUE(doc["expressions"][0]["pausesWispOverride"].isNull());
-  TEST_ASSERT_TRUE(doc["expressions"][1]["pausesWispOverride"].as<bool>());
-}
-
 void test_serialize_colors_inherits_surface() {
   ExpressionRegistry reg;
   reg.add(kDesc2);
@@ -508,7 +495,6 @@ int main(int, char**) {
   RUN_TEST(test_serialize_enum_options_zoning);
   RUN_TEST(test_serialize_zone_optional);
   RUN_TEST(test_serialize_exclude_targets);
-  RUN_TEST(test_serialize_pauses_wisp_override);
   RUN_TEST(test_serialize_colors_inherits_surface);
   RUN_TEST(test_serialize_interval_default_is_two_element_array);
   RUN_TEST(test_serialize_pixels_bound_is_object_no_cap);

@@ -15,7 +15,6 @@ using lamp::Points;
 using lamp::parseSize;
 using lamp::spotBlendPercent;
 using lamp::edgeTaper;
-using lamp::usableSections;
 using lamp::randomPermutation;
 using lamp::Color;
 using lamp::buildZonePreviewBuffer;
@@ -112,60 +111,6 @@ void test_breathing_identity_defaults() {
   TEST_ASSERT_EQUAL_UINT16(143, r.posMax);
 }
 
-void test_usable_sections_clamps_to_min_band_px() {
-  TEST_ASSERT_EQUAL_UINT16(5, usableSections(5, 36));   // 36/5=7 fits, requested caps
-  TEST_ASSERT_EQUAL_UINT16(2, usableSections(5, 12));   // 12/5=2
-  TEST_ASSERT_EQUAL_UINT16(1, usableSections(5, 4));    // 4/5=0 -> floored to 1
-}
-void test_usable_sections_never_exceeds_requested() {
-  TEST_ASSERT_EQUAL_UINT16(1, usableSections(1, 144));
-  TEST_ASSERT_EQUAL_UINT16(3, usableSections(3, 144));
-}
-void test_usable_sections_floor_is_one() {
-  TEST_ASSERT_EQUAL_UINT16(1, usableSections(0, 144));
-}
-void test_breathing_band_index_and_phase_offset() {
-  const uint16_t zoneSize = 30;
-  const uint16_t usable = usableSections(3, zoneSize);  // 30/5=6 fits -> 3
-  TEST_ASSERT_EQUAL_UINT16(3, usable);
-  auto band = [&](uint16_t off) {
-    return static_cast<uint16_t>(static_cast<uint32_t>(off) * usable / zoneSize);
-  };
-  TEST_ASSERT_EQUAL_UINT16(0, band(0));
-  TEST_ASSERT_EQUAL_UINT16(0, band(9));
-  TEST_ASSERT_EQUAL_UINT16(1, band(10));
-  TEST_ASSERT_EQUAL_UINT16(1, band(19));
-  TEST_ASSERT_EQUAL_UINT16(2, band(20));
-  TEST_ASSERT_EQUAL_UINT16(2, band(29));
-  // phase offset = sectionOrder[band] * stagger; identity order here.
-  const std::array<uint8_t, 5> order{{0, 1, 2, 0, 0}};
-  const float stagger = 0.15f;
-  TEST_ASSERT_FLOAT_WITHIN(1e-6, 0.0f * stagger, order[band(0)] * stagger);
-  TEST_ASSERT_FLOAT_WITHIN(1e-6, 1.0f * stagger, order[band(10)] * stagger);
-  TEST_ASSERT_FLOAT_WITHIN(1e-6, 2.0f * stagger, order[band(20)] * stagger);
-}
-
-void test_breathing_sections_one_is_uniform() {
-  const uint16_t zoneSize = 30;
-  const uint16_t usable = usableSections(1, zoneSize);
-  TEST_ASSERT_EQUAL_UINT16(1, usable);
-  auto band = [&](uint16_t off) {
-    return static_cast<uint16_t>(static_cast<uint32_t>(off) * usable / zoneSize);
-  };
-  TEST_ASSERT_EQUAL_UINT16(0, band(0));
-  TEST_ASSERT_EQUAL_UINT16(0, band(7));
-  TEST_ASSERT_EQUAL_UINT16(0, band(15));
-  TEST_ASSERT_EQUAL_UINT16(0, band(29));
-}
-void test_breathing_last_pixel_band_no_overflow() {
-  const uint16_t zoneSize = 36;
-  const uint16_t usable = usableSections(5, zoneSize);  // 36/5=7 fits -> 5
-  TEST_ASSERT_EQUAL_UINT16(5, usable);
-  const uint16_t last =
-      static_cast<uint16_t>(static_cast<uint32_t>(zoneSize - 1) * usable / zoneSize);
-  TEST_ASSERT_EQUAL_UINT16(usable - 1, last);
-}
-
 void test_shifty_fillmode_default_is_uniform() {
   TEST_ASSERT_EQUAL_UINT32(0u, getParam(empty(), "fillMode", 0u));
 }
@@ -204,6 +149,13 @@ void test_spot_blend_envelope_easing_shapes_ramps() {
   TEST_ASSERT_EQUAL_UINT32(100, spotBlendPercent(45, life, lamp::Easing::Swell));
   TEST_ASSERT_EQUAL_UINT32(0, spotBlendPercent(0, life, lamp::Easing::Swell));
   TEST_ASSERT_EQUAL_UINT32(0, spotBlendPercent(90, life, lamp::Easing::Swell));
+}
+
+void test_spotBlendPercent_clamps_overshoot() {
+  for (uint32_t age = 0; age <= 900; age += 30) {
+    uint32_t b = spotBlendPercent(age, 900, lamp::Easing::OvershootOut);
+    TEST_ASSERT_TRUE(b <= 100);
+  }
 }
 
 void test_spot_blend_envelope_degenerate_life() {
@@ -426,18 +378,13 @@ int main(int, char**) {
   RUN_TEST(test_pulse_width_floor_is_three);
   RUN_TEST(test_pulse_width_full_percent_is_half_of_zone);
   RUN_TEST(test_breathing_identity_defaults);
-  RUN_TEST(test_usable_sections_clamps_to_min_band_px);
-  RUN_TEST(test_usable_sections_never_exceeds_requested);
-  RUN_TEST(test_usable_sections_floor_is_one);
-  RUN_TEST(test_breathing_band_index_and_phase_offset);
-  RUN_TEST(test_breathing_sections_one_is_uniform);
-  RUN_TEST(test_breathing_last_pixel_band_no_overflow);
   RUN_TEST(test_random_permutation_is_valid);
   RUN_TEST(test_random_permutation_single_is_identity);
   RUN_TEST(test_shifty_fillmode_default_is_uniform);
   RUN_TEST(test_spotty_param_defaults);
   RUN_TEST(test_spot_blend_envelope_thirds);
   RUN_TEST(test_spot_blend_envelope_easing_shapes_ramps);
+  RUN_TEST(test_spotBlendPercent_clamps_overshoot);
   RUN_TEST(test_spot_blend_envelope_degenerate_life);
   RUN_TEST(test_spot_life_bounds_band);
   RUN_TEST(test_edge_taper_linear_half_width_is_spotty_triangle);

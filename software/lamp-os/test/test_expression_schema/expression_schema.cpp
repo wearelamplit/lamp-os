@@ -80,6 +80,38 @@ void test_int_modifiers_and_zoning() {
   TEST_ASSERT_TRUE(d.hasZone);
 }
 
+static const EnumOption* findEasingOption(int32_t value) {
+  for (const auto& o : kEasingOptions)
+    if (o.value == value) return &o;
+  return nullptr;
+}
+
+void test_easing_options_type_direction() {
+  TEST_ASSERT_EQUAL_size_t(18, sizeof(kEasingOptions) / sizeof(kEasingOptions[0]));
+
+  const EnumOption* linear = findEasingOption(0);
+  TEST_ASSERT_NOT_NULL(linear);
+  TEST_ASSERT_EQUAL_STRING("Linear", linear->group);
+
+  const EnumOption* smoothOut = findEasingOption(3);
+  TEST_ASSERT_NOT_NULL(smoothOut);
+  TEST_ASSERT_EQUAL_STRING("Smooth", smoothOut->group);
+  TEST_ASSERT_EQUAL_STRING("Out", smoothOut->label);
+
+  const EnumOption* overshootOut = findEasingOption(9);
+  TEST_ASSERT_NOT_NULL(overshootOut);
+  TEST_ASSERT_EQUAL_STRING("Overshoot", overshootOut->group);
+  TEST_ASSERT_EQUAL_STRING("Out", overshootOut->label);
+
+  const EnumOption* random = findEasingOption(17);
+  TEST_ASSERT_NOT_NULL(random);
+  TEST_ASSERT_EQUAL_STRING("Random", random->group);
+}
+
+void test_easing_param_max_covers_new_curves() {
+  TEST_ASSERT_EQUAL_INT32(17, kEasingParam.max.v);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_params_size);
@@ -89,5 +121,7 @@ int main(int, char**) {
   RUN_TEST(test_continuous_flag);
   RUN_TEST(test_enum_options);
   RUN_TEST(test_int_modifiers_and_zoning);
+  RUN_TEST(test_easing_options_type_direction);
+  RUN_TEST(test_easing_param_max_covers_new_curves);
   return UNITY_END();
 }

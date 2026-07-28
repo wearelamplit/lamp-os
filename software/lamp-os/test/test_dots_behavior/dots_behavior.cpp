@@ -31,9 +31,9 @@
 #include "../../src/util/gradient.cpp"
 
 namespace lamp {
-// dots_behavior.cpp forward-declares this; the native suite doesn't link
-// expression.cpp, so provide the never-overriding stub here.
-bool isWispCurrentlyOverriding() { return false; }
+// dots_behavior.cpp reads the wisp-active flag off the compositor; the native
+// suite doesn't link compositor.cpp, so provide the never-active stub here.
+bool Compositor::wispActive() const { return false; }
 }  // namespace lamp
 
 using namespace lamp;

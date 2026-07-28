@@ -4,6 +4,8 @@
 #include <unity.h>
 #include <ArduinoJson.h>
 
+#include <cstring>
+
 #include "expressions/breathing/breathing_expression.hpp"
 #include "expressions/glitchy/glitchy_expression.hpp"
 #include "expressions/pulse/pulse_expression.hpp"
@@ -57,14 +59,6 @@ void test_continuous_flags() {
   TEST_ASSERT_TRUE(findById("spotty")["continuous"].as<bool>());
   TEST_ASSERT_FALSE(findById("glitchy")["continuous"].as<bool>());
   TEST_ASSERT_FALSE(findById("pulse")["continuous"].as<bool>());
-}
-
-void test_pauses_wisp_override_flags() {
-  TEST_ASSERT_TRUE(findById("breathing")["pausesWispOverride"].as<bool>());
-  TEST_ASSERT_TRUE(findById("shifty")["pausesWispOverride"].as<bool>());
-  TEST_ASSERT_TRUE(findById("spotty")["pausesWispOverride"].as<bool>());
-  TEST_ASSERT_TRUE(findById("glitchy")["pausesWispOverride"].isNull());
-  TEST_ASSERT_TRUE(findById("pulse")["pausesWispOverride"].isNull());
 }
 
 void test_glitchy_zone_optional() {
@@ -193,7 +187,7 @@ void test_breathing_params_present() {
     if (std::string(k) == "scatter")     hasScatter = true;
   }
   TEST_ASSERT_TRUE(hasBreathSpeed);
-  TEST_ASSERT_TRUE(hasSections);
+  TEST_ASSERT_FALSE(hasSections);
   TEST_ASSERT_FALSE(hasCount);
   TEST_ASSERT_FALSE(hasSize);
   TEST_ASSERT_FALSE(hasScatter);
@@ -210,21 +204,6 @@ void test_breathing_speed_floor() {
     }
   }
   TEST_FAIL_MESSAGE("breathSpeed param not found");
-}
-
-void test_breathing_sections_range_always_active() {
-  JsonObject e = findById("breathing");
-  for (JsonObject p : e["params"].as<JsonArray>()) {
-    if (std::string(p["key"].as<const char*>()) == "sections") {
-      TEST_ASSERT_EQUAL_STRING("Sections", p["label"].as<const char*>());
-      TEST_ASSERT_EQUAL_INT(1, p["min"].as<int>());
-      TEST_ASSERT_EQUAL_INT(5, p["max"].as<int>());
-      TEST_ASSERT_EQUAL_INT(1, p["default"].as<int>());
-      TEST_ASSERT_TRUE(p["requiresZoning"].isNull());
-      return;
-    }
-  }
-  TEST_FAIL_MESSAGE("sections param not found");
 }
 
 void test_spotty_speed_param() {
@@ -336,9 +315,9 @@ void test_pulse_easing_param() {
   TEST_ASSERT_EQUAL_STRING("Motion", easing["label"].as<const char*>());
   TEST_ASSERT_EQUAL_INT(0, easing["default"].as<int>());  // Linear reproduces today's sweep
   auto opts = easing["options"].as<JsonArray>();
-  TEST_ASSERT_EQUAL_size_t(5, opts.size());
+  TEST_ASSERT_EQUAL_size_t(18, opts.size());
   TEST_ASSERT_EQUAL_STRING("Linear", opts[0]["label"].as<const char*>());
-  TEST_ASSERT_EQUAL_STRING("Swell", opts[4]["label"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("Random", opts[17]["label"].as<const char*>());
 }
 
 static JsonObject findParam(JsonObject e, const char* key) {
@@ -354,7 +333,7 @@ void test_spotty_easing_param_defaults_linear() {
   TEST_ASSERT_EQUAL_STRING("enum", easing["type"].as<const char*>());
   TEST_ASSERT_EQUAL_STRING("Motion", easing["label"].as<const char*>());
   TEST_ASSERT_EQUAL_INT(0, easing["default"].as<int>());  // Linear reproduces the plain fade ramp
-  TEST_ASSERT_EQUAL_size_t(5, easing["options"].as<JsonArray>().size());
+  TEST_ASSERT_EQUAL_size_t(18, easing["options"].as<JsonArray>().size());
 }
 
 void test_shifty_easing_param_defaults_linear() {
@@ -363,7 +342,7 @@ void test_shifty_easing_param_defaults_linear() {
   TEST_ASSERT_EQUAL_STRING("enum", easing["type"].as<const char*>());
   TEST_ASSERT_EQUAL_STRING("Motion", easing["label"].as<const char*>());
   TEST_ASSERT_EQUAL_INT(0, easing["default"].as<int>());  // Linear reproduces today's linear fade
-  TEST_ASSERT_EQUAL_size_t(5, easing["options"].as<JsonArray>().size());
+  TEST_ASSERT_EQUAL_size_t(18, easing["options"].as<JsonArray>().size());
 }
 
 void test_breathing_easing_param_defaults_smooth() {
@@ -372,7 +351,7 @@ void test_breathing_easing_param_defaults_smooth() {
   TEST_ASSERT_EQUAL_STRING("enum", easing["type"].as<const char*>());
   TEST_ASSERT_EQUAL_STRING("Motion", easing["label"].as<const char*>());
   TEST_ASSERT_EQUAL_INT(1, easing["default"].as<int>());  // Smooth approximates the sine breath curve
-  TEST_ASSERT_EQUAL_size_t(5, easing["options"].as<JsonArray>().size());
+  TEST_ASSERT_EQUAL_size_t(18, easing["options"].as<JsonArray>().size());
 }
 
 void test_pulse_loop_param() {
@@ -391,11 +370,24 @@ void test_pulse_loop_param() {
   TEST_ASSERT_EQUAL_STRING("Continuous", opts[1]["label"].as<const char*>());
 }
 
+static bool hasOpacity(const ExpressionDescriptor& d) {
+  for (const auto& p : d.params)
+    if (std::strcmp(p.key, "opacity") == 0)
+      return p.min == 10 && p.max.v == 100 && p.def.v == 100;
+  return false;
+}
+void test_all_types_expose_opacity() {
+  TEST_ASSERT_TRUE(hasOpacity(kBreathingDescriptorData));
+  TEST_ASSERT_TRUE(hasOpacity(kSpottyDescriptorData));
+  TEST_ASSERT_TRUE(hasOpacity(kPulseDescriptorData));
+  TEST_ASSERT_TRUE(hasOpacity(kGlitchyDescriptorData));
+  TEST_ASSERT_TRUE(hasOpacity(kShiftyDescriptorData));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_all_five_ids_present);
   RUN_TEST(test_continuous_flags);
-  RUN_TEST(test_pauses_wisp_override_flags);
   RUN_TEST(test_glitchy_zone_optional);
   RUN_TEST(test_glitchy_scatter_always_active_literal_max);
   RUN_TEST(test_glitchy_has_no_size_param);
@@ -409,7 +401,6 @@ int main(int, char**) {
   RUN_TEST(test_breathing_has_no_interval);
   RUN_TEST(test_breathing_params_present);
   RUN_TEST(test_breathing_speed_floor);
-  RUN_TEST(test_breathing_sections_range_always_active);
   RUN_TEST(test_spotty_speed_param);
   RUN_TEST(test_spotty_has_no_interval);
   RUN_TEST(test_spotty_count_and_size_caps);
@@ -423,5 +414,6 @@ int main(int, char**) {
   RUN_TEST(test_shifty_easing_param_defaults_linear);
   RUN_TEST(test_breathing_easing_param_defaults_smooth);
   RUN_TEST(test_pulse_loop_param);
+  RUN_TEST(test_all_types_expose_opacity);
   return UNITY_END();
 }

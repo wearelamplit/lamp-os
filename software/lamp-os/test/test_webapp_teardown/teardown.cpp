@@ -34,10 +34,22 @@ void test_wrap_safe_finite() {
   TEST_ASSERT_FALSE(webappShouldTeardown(0xFFFFFF80UL, deadline, false));
 }
 
+void test_restore_ble_reboots_once_idle_regardless_of_station() {
+  // BLE down + idle window elapsed -> restore (reboot), even with a station
+  // still on.
+  TEST_ASSERT_TRUE(webappShouldRestoreBle(/*now=*/200000, /*deadlineMs=*/100000,
+                                          /*bleDown=*/true));
+  // fresh activity (deadline in future) -> hold BLE down.
+  TEST_ASSERT_FALSE(webappShouldRestoreBle(150000, 300000, true));
+  // BLE not down -> this path never fires.
+  TEST_ASSERT_FALSE(webappShouldRestoreBle(200000, 100000, false));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_never_expire_always_false);
   RUN_TEST(test_finite_deadline_before_and_after);
   RUN_TEST(test_wrap_safe_finite);
+  RUN_TEST(test_restore_ble_reboots_once_idle_regardless_of_station);
   return UNITY_END();
 }

@@ -20,6 +20,8 @@
 
 #include <unity.h>
 
+#include <lampos/protocol/paint_timing.hpp>
+
 #include <cstdint>
 #include <cstring>
 #include <functional>
@@ -137,7 +139,7 @@ class ColorOverride {
   Color lastWispColor_;
   bool hasLastWispColor_ = false;
 
-  static constexpr uint32_t kPaintWatchdogMs = 60000;
+  static constexpr uint32_t kPaintWatchdogMs = ::lamp_protocol::kPaintWatchdogMs;
   static constexpr uint32_t kWatchdogRestoreFadeMs = 1500;
 
   void bind(FakeConfigurator* cfg, uint8_t pixelCount) {
@@ -234,10 +236,11 @@ class ColorOverride {
     savedColors_ = currentSavedColors;
   }
 
-  // Refresh the auto-restore watchdog without running a fade — the wisp's
-  // paint-mode HELLO keepalive touches this so a long drift fade holds while
-  // the wisp is present. Advances lastWispSeenMs_ (watchdog) only, not
-  // lastApplyMs_ (fade clock), so it can't block the FadingIn→Holding latch.
+  // Refresh the auto-restore watchdog without running a fade — a Base+Shade
+  // paint frame lets the surviving half cross-touch the other so a dropped
+  // sibling frame doesn't trip its watchdog. Advances lastWispSeenMs_
+  // (watchdog) only, not lastApplyMs_ (fade clock), so it can't block the
+  // FadingIn→Holding latch.
   void touchApply(uint32_t nowMs) {
     if (state_ == FadeState::FadingIn || state_ == FadeState::Holding) {
       lastWispSeenMs_ = nowMs;
@@ -261,6 +264,32 @@ class ColorOverride {
     }
     configurator_->beginFade(targetGradient_, fadeMs);
     configurator_->lastWebSocketUpdateTimeMs = mockMillis();
+  }
+
+  // Mirror of ColorOverride::transitionWeight(). Idle 1.0, FadingIn ramps
+  // 1->0, Holding 0.0, Restoring ramps 0->1; a zero fade duration returns the
+  // window's endpoint (no divide-by-zero).
+  float transitionWeight(uint32_t nowMs) const {
+    switch (state_) {
+      case FadeState::Idle:
+        return 1.0f;
+      case FadeState::Holding:
+        return 0.0f;
+      case FadeState::FadingIn: {
+        if (currentFadeDurationMs_ == 0) return 0.0f;
+        const uint32_t elapsed = nowMs - lastApplyMs_;
+        if (elapsed >= currentFadeDurationMs_) return 0.0f;
+        return 1.0f -
+               static_cast<float>(elapsed) / static_cast<float>(currentFadeDurationMs_);
+      }
+      case FadeState::Restoring: {
+        if (restoreDurationMs_ == 0) return 1.0f;
+        const uint32_t elapsed = nowMs - restoreStartMs_;
+        if (elapsed >= restoreDurationMs_) return 1.0f;
+        return static_cast<float>(elapsed) / static_cast<float>(restoreDurationMs_);
+      }
+    }
+    return 1.0f;
   }
 
   bool isActive() const { return state_ != FadeState::Idle; }
@@ -303,7 +332,7 @@ class BrightnessOverride {
   uint8_t activeMac_[6] = {0};
   std::function<void()> onChange_;
 
-  static constexpr uint32_t kPaintWatchdogMs = 60000;
+  static constexpr uint32_t kPaintWatchdogMs = ::lamp_protocol::kPaintWatchdogMs;
   static constexpr uint8_t kSpaceDimFloor = 20;
 
   static uint8_t applyDimFactor(uint8_t baseline, uint8_t factor) {
@@ -521,9 +550,12 @@ void test_color_override_restore_transitions_restoring_then_idle() {
   TEST_ASSERT_EQUAL(test::FadeState::Idle, ov.state());
 }
 
-void test_color_override_watchdog_auto_restores_after_60s() {
-  // No re-apply within kPaintWatchdogMs (60s) of lastApplyMs_ → tick()
+void test_color_override_watchdog_auto_restores() {
+  // No re-apply within kPaintWatchdogMs of lastApplyMs_ → tick()
   // auto-fires restore(). The override transitions Holding → Restoring.
+  // A single apply() with nothing else touching the watchdog is exactly
+  // the listener-only contract: only a received paint holds the override,
+  // nothing else keeps it alive.
   test::FakeConfigurator cfg;
   cfg.colors.resize(4, test::Color(50, 50, 50, 0));
   test::ColorOverride ov;
@@ -536,20 +568,53 @@ void test_color_override_watchdog_auto_restores_after_60s() {
   TEST_ASSERT_EQUAL(test::FadeState::Holding, ov.state());
 
   // Just before the watchdog: still Holding.
-  test::g_nowMs = 59999;
+  test::g_nowMs = test::ColorOverride::kPaintWatchdogMs - 1;
   ov.tick(test::g_nowMs);
   TEST_ASSERT_EQUAL(test::FadeState::Holding, ov.state());
 
   // At the boundary: Restoring.
-  test::g_nowMs = 60000;
+  test::g_nowMs = test::ColorOverride::kPaintWatchdogMs;
   ov.tick(test::g_nowMs);
   TEST_ASSERT_EQUAL(test::FadeState::Restoring, ov.state());
 }
 
+void test_color_override_apply_reestablishes_after_watchdog_drop() {
+  // A dropped lamp (watchdog fires, override restores to Idle) recovers on
+  // the next received paint: apply() is the entry point regardless of prior
+  // state, so it re-arms FadingIn → Holding from Idle.
+  test::FakeConfigurator cfg;
+  cfg.colors.resize(4, test::Color(50, 50, 50, 0));
+  test::ColorOverride ov;
+  ov.bind(&cfg, 4);
+
+  test::Color target(255, 0, 0, 0);
+  ov.apply(kMacWisp, test::lamp_protocol::OverrideSource::Wisp, &target, 1, 50);
+  test::g_nowMs = 60;
+  ov.tick(test::g_nowMs);
+  TEST_ASSERT_EQUAL(test::FadeState::Holding, ov.state());
+
+  test::g_nowMs = test::ColorOverride::kPaintWatchdogMs;
+  ov.tick(test::g_nowMs);
+  TEST_ASSERT_EQUAL(test::FadeState::Restoring, ov.state());
+
+  test::g_nowMs = test::ColorOverride::kPaintWatchdogMs +
+                  test::ColorOverride::kWatchdogRestoreFadeMs;
+  ov.tick(test::g_nowMs);
+  TEST_ASSERT_EQUAL(test::FadeState::Idle, ov.state());
+
+  test::Color recovered(0, 255, 0, 0);
+  ov.apply(kMacWisp, test::lamp_protocol::OverrideSource::Wisp, &recovered, 1, 50);
+  TEST_ASSERT_EQUAL(test::FadeState::FadingIn, ov.state());
+
+  test::g_nowMs += 50;
+  ov.tick(test::g_nowMs);
+  TEST_ASSERT_EQUAL(test::FadeState::Holding, ov.state());
+}
+
 void test_color_override_touch_apply_defers_watchdog() {
-  // The wisp's paint-mode HELLO keepalive calls touchApply() every ~5s, which
-  // advances the watchdog (lastWispSeenMs_) so a wisp-painted surface holds
-  // while the wisp is present. Pins that the watchdog anchors to the last
+  // A sibling-surface paint frame calls touchApply(), which advances the
+  // watchdog (lastWispSeenMs_) so a wisp-painted surface holds through a
+  // dropped same-frame paint. Pins that the watchdog anchors to the last
   // touchApply, not the original apply.
   test::FakeConfigurator cfg;
   cfg.colors.resize(4, test::Color(50, 50, 50, 0));
@@ -562,19 +627,22 @@ void test_color_override_touch_apply_defers_watchdog() {
   ov.tick(test::g_nowMs);
   TEST_ASSERT_EQUAL(test::FadeState::Holding, ov.state());
 
-  // 50 s into Holding (10 s before watchdog) — touchApply from a sibling
-  // surface drain. Watchdog reference moves forward to 50 s.
-  test::g_nowMs = 50000;
+  constexpr uint32_t kWd = test::ColorOverride::kPaintWatchdogMs;
+
+  // Well into Holding, 10s before the original apply's watchdog deadline —
+  // touchApply from a sibling surface drain moves the watchdog reference
+  // forward to this point.
+  test::g_nowMs = kWd - 10000;
   ov.touchApply(test::g_nowMs);
 
-  // 60 s into the original lifetime: STILL Holding because the watchdog
-  // now anchors to the touchApply at 50 s, not the original apply.
-  test::g_nowMs = 60000;
+  // At the original apply's deadline: STILL Holding because the watchdog
+  // now anchors to the touchApply, not the original apply.
+  test::g_nowMs = kWd;
   ov.tick(test::g_nowMs);
   TEST_ASSERT_EQUAL(test::FadeState::Holding, ov.state());
 
-  // 110 s — 60 s past the touchApply — the watchdog finally fires.
-  test::g_nowMs = 110000;
+  // A full watchdog window past the touchApply: it finally fires.
+  test::g_nowMs = kWd - 10000 + kWd;
   ov.tick(test::g_nowMs);
   TEST_ASSERT_EQUAL(test::FadeState::Restoring, ov.state());
 }
@@ -590,12 +658,12 @@ void test_color_override_watchdog_fires_during_long_fade() {
   test::g_nowMs = 0;
   test::Color target(255, 0, 0, 0);
   ov.apply(kMacWisp, test::lamp_protocol::OverrideSource::Wisp, &target, 1,
-           /*fadeDurationMs=*/1800000);  // 30 min, well past the 60s watchdog
-  test::g_nowMs = 30000;
+           /*fadeDurationMs=*/1800000);  // 30 min, well past the watchdog window
+  test::g_nowMs = test::ColorOverride::kPaintWatchdogMs / 2;
   ov.tick(test::g_nowMs);
   TEST_ASSERT_EQUAL(test::FadeState::FadingIn, ov.state());  // fade far from done
 
-  test::g_nowMs = 60000;
+  test::g_nowMs = test::ColorOverride::kPaintWatchdogMs;
   ov.tick(test::g_nowMs);
   TEST_ASSERT_EQUAL(test::FadeState::Restoring, ov.state());  // fired mid-fade
 }
@@ -839,7 +907,7 @@ void test_color_override_watchdog_restore_uses_short_fade() {
   ov.apply(kMacWisp, test::lamp_protocol::OverrideSource::Wisp, &target, 1,
            /*fadeDurationMs=*/1800000u);  // 30 min drift fade
 
-  test::g_nowMs = 60000;
+  test::g_nowMs = test::ColorOverride::kPaintWatchdogMs;
   ov.tick(test::g_nowMs);
   TEST_ASSERT_EQUAL(test::FadeState::Restoring, ov.state());
   TEST_ASSERT_EQUAL_UINT32(test::ColorOverride::kWatchdogRestoreFadeMs,
@@ -892,6 +960,94 @@ void test_color_override_operator_editing_drops_wisp() {
   ov.apply(kMacWisp, test::lamp_protocol::OverrideSource::Wisp, &target, 1, 0);
   TEST_ASSERT_EQUAL(test::FadeState::FadingIn, ov.state());
   TEST_ASSERT_EQUAL(1, cfg.beginFadeCount);
+}
+
+void test_color_override_transition_weight_ramps_across_fades() {
+  // The pausing-expression contribution weight: 1.0 Idle, ramps 1->0 across
+  // FadingIn, 0.0 while Holding, ramps 0->1 across Restoring. This is what
+  // lets breathing/shifty/spotty crossfade to the wisp paint instead of
+  // snapping at the on/off transition.
+  test::FakeConfigurator cfg;
+  cfg.colors.resize(4, test::Color());
+  test::ColorOverride ov;
+  ov.bind(&cfg, 4);
+
+  // Idle: full expression.
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, ov.transitionWeight(0));
+
+  // FadingIn over 1000ms: 1.0 at start, 0.5 midway, 0.0 at the end.
+  test::g_nowMs = 0;
+  test::Color target(200, 100, 50, 0);
+  ov.apply(kMacWisp, test::lamp_protocol::OverrideSource::Wisp, &target, 1, 1000);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, ov.transitionWeight(0));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.5f, ov.transitionWeight(500));
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, ov.transitionWeight(1000));
+
+  // Holding: fully suppressed.
+  test::g_nowMs = 1000;
+  ov.tick(test::g_nowMs);
+  TEST_ASSERT_EQUAL(test::FadeState::Holding, ov.state());
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, ov.transitionWeight(1500));
+
+  // Restoring over 200ms: 0.0 at start, 0.5 midway, 1.0 at the end.
+  test::g_nowMs = 2000;
+  ov.restore(kMacWisp, test::lamp_protocol::OverrideSource::Wisp, 200);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, ov.transitionWeight(2000));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.5f, ov.transitionWeight(2100));
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, ov.transitionWeight(2200));
+}
+
+void test_color_override_transition_weight_snaps_when_duration_zero() {
+  // A 0ms fade must not divide by zero; the weight jumps straight to the
+  // window's endpoint (FadingIn -> 0.0, Restoring -> 1.0).
+  test::FakeConfigurator cfg;
+  cfg.colors.resize(4, test::Color());
+  test::ColorOverride ov;
+  ov.bind(&cfg, 4);
+
+  test::g_nowMs = 0;
+  test::Color target(200, 100, 50, 0);
+  ov.apply(kMacWisp, test::lamp_protocol::OverrideSource::Wisp, &target, 1, 0);
+  TEST_ASSERT_EQUAL(test::FadeState::FadingIn, ov.state());
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, ov.transitionWeight(0));
+
+  test::g_nowMs = 1;
+  ov.tick(test::g_nowMs);
+  TEST_ASSERT_EQUAL(test::FadeState::Holding, ov.state());
+  ov.restore(kMacWisp, test::lamp_protocol::OverrideSource::Wisp, 0);
+  TEST_ASSERT_EQUAL(test::FadeState::Restoring, ov.state());
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, ov.transitionWeight(1));
+}
+
+void test_mix_color_weight_blends_toward_underlying() {
+  // Mirror of util/fade.hpp mixColorWeight: weight 1.0 returns the
+  // expression color byte-exact, 0.0 returns the underlying configurator
+  // color, and intermediate weights land between. This is the compositing
+  // the pausing expressions apply so a dropping weight reveals the wisp paint.
+  auto mixByteLinear = [](uint8_t start, uint8_t end, uint32_t factor) -> uint8_t {
+    if (start == end) return end;
+    return static_cast<uint8_t>(
+        ((static_cast<uint32_t>(end) - static_cast<uint32_t>(start)) * factor) / 262144u +
+        start);
+  };
+  auto mixColorWeight = [&](test::Color under, test::Color over, float w) -> test::Color {
+    if (w >= 1.0f) return over;
+    if (w <= 0.0f) return under;
+    const uint32_t f = static_cast<uint32_t>(w * 262144.0f);
+    return test::Color(mixByteLinear(under.r, over.r, f), mixByteLinear(under.g, over.g, f),
+                       mixByteLinear(under.b, over.b, f), mixByteLinear(under.w, over.w, f));
+  };
+
+  const test::Color under(0, 0, 0, 0);
+  const test::Color over(200, 100, 40, 0);
+
+  TEST_ASSERT_TRUE(mixColorWeight(under, over, 1.0f) == over);   // full expression
+  TEST_ASSERT_TRUE(mixColorWeight(under, over, 0.0f) == under);  // full underlying
+  // Halfway: each channel roughly half of `over`.
+  const test::Color mid = mixColorWeight(under, over, 0.5f);
+  TEST_ASSERT_UINT8_WITHIN(2, 100, mid.r);
+  TEST_ASSERT_UINT8_WITHIN(2, 50, mid.g);
+  TEST_ASSERT_UINT8_WITHIN(2, 20, mid.b);
 }
 
 // ============================================================================
@@ -1026,7 +1182,7 @@ void test_brightness_override_watchdog_auto_restores() {
   b.tick(test::g_nowMs, 100);
   TEST_ASSERT_EQUAL(test::FadeState::Holding, b.state());
 
-  test::g_nowMs = 60000;
+  test::g_nowMs = test::BrightnessOverride::kPaintWatchdogMs;
   b.tick(test::g_nowMs, 100);
   TEST_ASSERT_EQUAL(test::FadeState::Restoring, b.state());
 }
@@ -1051,7 +1207,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_color_override_apply_bumps_configurator_websocket_timestamp);
   RUN_TEST(test_color_override_apply_transitions_fading_then_holding);
   RUN_TEST(test_color_override_restore_transitions_restoring_then_idle);
-  RUN_TEST(test_color_override_watchdog_auto_restores_after_60s);
+  RUN_TEST(test_color_override_watchdog_auto_restores);
+  RUN_TEST(test_color_override_apply_reestablishes_after_watchdog_drop);
   RUN_TEST(test_color_override_touch_apply_defers_watchdog);
   RUN_TEST(test_color_override_watchdog_fires_during_long_fade);
   RUN_TEST(test_color_override_touch_apply_does_not_block_latch);
@@ -1067,6 +1224,9 @@ int main(int argc, char** argv) {
   RUN_TEST(test_color_override_watchdog_restore_uses_short_fade);
   RUN_TEST(test_color_override_clears_wisp_color_on_idle);
   RUN_TEST(test_color_override_operator_editing_drops_wisp);
+  RUN_TEST(test_color_override_transition_weight_ramps_across_fades);
+  RUN_TEST(test_color_override_transition_weight_snaps_when_duration_zero);
+  RUN_TEST(test_mix_color_weight_blends_toward_underlying);
 
   RUN_TEST(test_brightness_override_apply_transitions_to_holding);
   RUN_TEST(test_brightness_override_restore_returns_to_baseline);

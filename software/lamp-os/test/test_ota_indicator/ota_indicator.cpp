@@ -42,20 +42,62 @@ inline Color scaleColor(const Color& c, uint8_t num) {
       static_cast<uint8_t>((static_cast<uint16_t>(c.w) * num) / 255));
 }
 
+// Settle duration must match production
+// (src/components/firmware/ota_indicator.cpp).
+constexpr uint32_t kBaseSettleDurationMs = 600;
+
+// Test double for lamp::fade's boundary behavior: exact at currentStep==0
+// (start) and currentStep>=duration (end), linear in between. The quadratic
+// curve shape itself is pinned by test_fade; the settle math only needs correct
+// start/end boundaries plus "moves toward end" in between.
+inline Color fadeMirror(const Color& start, const Color& end, uint32_t duration,
+                         uint32_t currentStep) {
+  if (currentStep >= duration) return end;
+  if (currentStep == 0) return start;
+  auto mix = [&](uint8_t s, uint8_t e) -> uint8_t {
+    return static_cast<uint8_t>(
+        static_cast<int32_t>(s) +
+        (static_cast<int32_t>(e) - static_cast<int32_t>(s)) *
+            static_cast<int64_t>(currentStep) / duration);
+  };
+  return Color(mix(start.r, end.r), mix(start.g, end.g), mix(start.b, end.b),
+               mix(start.w, end.w));
+}
+
+// Mirror of ota_indicator's blendShadeToFrozen: crossfade the computed shade
+// back toward the frozen pre-quiet frame. settleStep 0 holds the frozen frame;
+// >= kBaseSettleDurationMs yields the pure indicator.
+void blendShadeToFrozen(FrameBuffer* fb, const std::vector<Color>& settleStart,
+                        uint32_t settleStep) {
+  const uint32_t clampedStep =
+      settleStep >= kBaseSettleDurationMs ? kBaseSettleDurationMs : settleStep;
+  for (size_t i = 0; i < fb->buffer.size(); i++) {
+    if (i >= settleStart.size()) continue;
+    fb->buffer[i] =
+        fadeMirror(settleStart[i], fb->buffer[i], kBaseSettleDurationMs, clampedStep);
+  }
+}
+
 // Mirror of ota_indicator::paint with the OTA session state passed
 // explicitly (no firmwareReceiver / firmwareDistributor globals reachable
-// from the native env). nowMs is accepted but only used by production debug
-// logging; pixel output is deterministic without it.
+// from the native env). The shade crossfades from the frozen pre-quiet frame
+// (settleStart, captured at the top before the dim fill) into the indicator
+// over settleStep; defaults resolve the crossfade fully (pure indicator).
 void paint(FrameBuffer* fb, const Color& localBase, uint32_t /*nowMs*/,
            bool haveSession, const Color& peerBase,
-           uint32_t done, uint32_t total) {
+           uint32_t done, uint32_t total,
+           const std::vector<Color>& settleStart = {},
+           uint32_t settleStep = kBaseSettleDurationMs) {
   if (!fb) return;
   const size_t pixelCount = fb->buffer.size();
   if (pixelCount == 0) return;
 
   const Color dim = scaleColor(localBase, kDimScale255);
   for (size_t i = 0; i < pixelCount; i++) fb->buffer[i] = dim;
-  if (!haveSession || total == 0) return;
+  if (!haveSession || total == 0) {
+    blendShadeToFrozen(fb, settleStart, settleStep);
+    return;
+  }
 
   const Color peerSolid = peerBase;
   if (done > total) done = total;
@@ -83,31 +125,8 @@ void paint(FrameBuffer* fb, const Color& localBase, uint32_t /*nowMs*/,
         static_cast<uint8_t>(
             (static_cast<uint16_t>(a.w) * inv + static_cast<uint16_t>(b.w) * f) / 255));
   }
-}
 
-// ---------------------------------------------------------------------------
-// Base-surface settle mirror. Constants must match production
-// (src/components/firmware/ota_indicator.cpp).
-// ---------------------------------------------------------------------------
-
-constexpr uint32_t kBaseSettleDurationMs = 600;
-
-// Test double for lamp::fade's boundary behavior: exact at currentStep==0
-// (start) and currentStep>=duration (end), linear in between. The quadratic
-// curve shape itself is pinned by test_fade; paintBase only needs correct
-// start/end boundaries plus "moves toward end" in between.
-inline Color fadeMirror(const Color& start, const Color& end, uint32_t duration,
-                         uint32_t currentStep) {
-  if (currentStep >= duration) return end;
-  if (currentStep == 0) return start;
-  auto mix = [&](uint8_t s, uint8_t e) -> uint8_t {
-    return static_cast<uint8_t>(
-        static_cast<int32_t>(s) +
-        (static_cast<int32_t>(e) - static_cast<int32_t>(s)) *
-            static_cast<int64_t>(currentStep) / duration);
-  };
-  return Color(mix(start.r, end.r), mix(start.g, end.g), mix(start.b, end.b),
-               mix(start.w, end.w));
+  blendShadeToFrozen(fb, settleStart, settleStep);
 }
 
 // Mirror of ota_indicator's internal paintBase settle math. Production
@@ -282,27 +301,78 @@ void test_done_greater_than_total_clamps_to_full() {
 
 // ---------------------------------------------------------------------------
 // Base surface is left untouched: paint() on the shade FB leaves a separate
-// base FB unchanged (simulating the compositor painting shade only).
+// base FB unchanged (simulating the compositor painting shade only). On the
+// entry tick (settleStep==0) the shade crossfade holds the frozen pre-quiet
+// frame.
 // ---------------------------------------------------------------------------
 
 void test_base_surface_untouched() {
   test::FrameBuffer shade;
-  shade.buffer.resize(6, test::Color(0, 0, 0, 0));
+  const test::Color frozenShade(42, 99, 7, 0);
+  shade.buffer.assign(6, frozenShade);
   test::FrameBuffer base;
   // Pre-fill base with a sentinel color to prove paint() never touches it.
-  const test::Color sentinel(42, 99, 7, 0);
-  base.buffer.resize(6, sentinel);
+  const test::Color sentinel(11, 22, 33, 0);
+  base.buffer.assign(6, sentinel);
 
   const test::Color localBase(255, 0, 0, 0);
   const test::Color peerBase(0, 0, 255, 0);
+  std::vector<test::Color> settleStart(6, frozenShade);
   // Simulate the compositor: paint shade only, do not call paint on base.
-  test::paint(&shade, localBase, 0, true, peerBase, 50, 100);
+  test::paint(&shade, localBase, 0, true, peerBase, 50, 100, settleStart,
+              /*settleStep=*/0);
 
-  // Shade should have indicator pixels.
-  TEST_ASSERT_FALSE(shade.buffer[0] == test::Color(0, 0, 0, 0));
+  // Shade holds the frozen pre-quiet frame at the entry tick.
+  for (size_t i = 0; i < shade.buffer.size(); i++) {
+    TEST_ASSERT_TRUE(shade.buffer[i] == frozenShade);
+  }
   // Base is unchanged.
   for (size_t i = 0; i < base.buffer.size(); i++) {
     TEST_ASSERT_TRUE(base.buffer[i] == sentinel);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Shade surface settle: crossfades from the frozen pre-quiet frame into the
+// indicator, matching the base.
+// ---------------------------------------------------------------------------
+
+void test_shade_settle_at_zero_step_holds_frozen_frame() {
+  test::FrameBuffer shade;
+  const test::Color frozen(200, 10, 10, 0);
+  shade.buffer.assign(10, frozen);
+  const test::Color localBase(0, 0, 255, 0);
+  const test::Color peerBase(0, 255, 0, 0);
+  std::vector<test::Color> settleStart(10, frozen);
+
+  test::paint(&shade, localBase, 0, true, peerBase, 50, 100, settleStart,
+              /*settleStep=*/0);
+
+  for (size_t i = 0; i < shade.buffer.size(); i++) {
+    TEST_ASSERT_TRUE(shade.buffer[i] == frozen);
+  }
+}
+
+void test_shade_settle_reaches_indicator_after_duration() {
+  test::FrameBuffer shade;
+  const test::Color frozen(200, 10, 10, 0);
+  shade.buffer.assign(10, frozen);
+  const test::Color localBase(255, 0, 0, 0);
+  const test::Color peerBase(0, 0, 255, 0);
+  std::vector<test::Color> settleStart(10, frozen);
+
+  // settleStep >= duration: the crossfade fully resolves to the pure
+  // indicator (first-half peer, rest dim), same as an un-faded paint.
+  test::paint(&shade, localBase, 0, true, peerBase, 50, 100, settleStart,
+              test::kBaseSettleDurationMs);
+
+  const test::Color ep = test::expectedPeer(peerBase);
+  const test::Color ed = test::expectedDim(localBase);
+  for (size_t i = 0; i < 5; i++) {
+    TEST_ASSERT_TRUE(shade.buffer[i] == ep);
+  }
+  for (size_t i = 5; i < 10; i++) {
+    TEST_ASSERT_TRUE(shade.buffer[i] == ed);
   }
 }
 
@@ -544,6 +614,8 @@ int main(int, char**) {
   RUN_TEST(test_done_greater_than_total_clamps_to_full);
 
   RUN_TEST(test_base_surface_untouched);
+  RUN_TEST(test_shade_settle_at_zero_step_holds_frozen_frame);
+  RUN_TEST(test_shade_settle_reaches_indicator_after_duration);
 
   RUN_TEST(test_empty_buffer_noop);
   RUN_TEST(test_null_fb_noop);
