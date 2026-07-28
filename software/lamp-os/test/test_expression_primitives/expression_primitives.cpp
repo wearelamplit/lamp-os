@@ -166,13 +166,13 @@ void test_spot_blend_envelope_degenerate_life() {
 
 void test_spot_life_bounds_band() {
   using lamp::spotLifeBounds;
-  lamp::SpotLifeBounds fire = spotLifeBounds(1);
-  TEST_ASSERT_EQUAL_UINT32(30, fire.lo);
-  TEST_ASSERT_EQUAL_UINT32(2000, fire.hi);
+  lamp::SpotLifeBounds gentle = spotLifeBounds(1);
+  TEST_ASSERT_EQUAL_UINT32(1800, gentle.lo);
+  TEST_ASSERT_EQUAL_UINT32(8000, gentle.hi);
 
-  lamp::SpotLifeBounds stars = spotLifeBounds(10);
-  TEST_ASSERT_EQUAL_UINT32(4000, stars.lo);
-  TEST_ASSERT_EQUAL_UINT32(15000, stars.hi);
+  lamp::SpotLifeBounds dreamy = spotLifeBounds(10);
+  TEST_ASSERT_EQUAL_UINT32(8000, dreamy.lo);
+  TEST_ASSERT_EQUAL_UINT32(45000, dreamy.hi);
 
   uint32_t prevLo = 0, prevHi = 0;
   for (uint16_t s = 1; s <= 10; ++s) {
@@ -186,8 +186,8 @@ void test_spot_life_bounds_band() {
     prevHi = b.hi;
   }
 
-  TEST_ASSERT_EQUAL_UINT32(30, spotLifeBounds(0).lo);
-  TEST_ASSERT_EQUAL_UINT32(4000, spotLifeBounds(99).lo);
+  TEST_ASSERT_EQUAL_UINT32(1800, spotLifeBounds(0).lo);
+  TEST_ASSERT_EQUAL_UINT32(8000, spotLifeBounds(99).lo);
 }
 
 void test_edge_taper_linear_half_width_is_spotty_triangle() {

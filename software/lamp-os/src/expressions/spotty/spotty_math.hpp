@@ -40,22 +40,22 @@ struct SpotLifeBounds {
   uint32_t hi;
 };
 
-// Per-spot lifetime [min, max] (ms) at each end of spotSpeed. The FIRE end is a
-// wide, low band: quick flickers mixed with slower flames. The STARS end is a
-// narrow, high band: slow, gentle, never fast. Tune per bench feel.
-inline constexpr uint32_t kSpotFireLoMs  = 30;
-inline constexpr uint32_t kSpotFireHiMs  = 2000;
-inline constexpr uint32_t kSpotStarsLoMs = 4000;
-inline constexpr uint32_t kSpotStarsHiMs = 15000;
+// Per-spot lifetime [min, max] (ms) at each end of spotSpeed. The GENTLE end
+// (spotSpeed 1) is a calm mid band; the DREAMY end (spotSpeed 10) is a slower,
+// wider band that drifts for tens of seconds. Tune per bench feel.
+inline constexpr uint32_t kSpotGentleLoMs = 1800;
+inline constexpr uint32_t kSpotGentleHiMs = 8000;
+inline constexpr uint32_t kSpotDreamyLoMs = 8000;
+inline constexpr uint32_t kSpotDreamyHiMs = 45000;
 
-// lo and hi interpolate independently between the fire (spotSpeed 1) and stars
-// (spotSpeed 10) ends. Header-only as a native-test seam.
+// lo and hi interpolate independently between the gentle (spotSpeed 1) and
+// dreamy (spotSpeed 10) ends. Header-only as a native-test seam.
 inline SpotLifeBounds spotLifeBounds(uint16_t spotSpeed) {
   uint32_t s = spotSpeed;
   if (s < 1u) s = 1u;
   if (s > 10u) s = 10u;
-  uint32_t lo = kSpotFireLoMs + (kSpotStarsLoMs - kSpotFireLoMs) * (s - 1u) / 9u;
-  uint32_t hi = kSpotFireHiMs + (kSpotStarsHiMs - kSpotFireHiMs) * (s - 1u) / 9u;
+  uint32_t lo = kSpotGentleLoMs + (kSpotDreamyLoMs - kSpotGentleLoMs) * (s - 1u) / 9u;
+  uint32_t hi = kSpotGentleHiMs + (kSpotDreamyHiMs - kSpotGentleHiMs) * (s - 1u) / 9u;
   if (hi <= lo) hi = lo + 1u;
   return {lo, hi};
 }
