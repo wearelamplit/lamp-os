@@ -37,7 +37,8 @@ void ShiftyExpression::configureFromParameters(const std::map<std::string, uint3
   zone_ = resolveZone(parameters, window);
   uint32_t fmv = getParam(parameters, "fillMode");
   fillMode_ = (fmv > 3) ? 3 : static_cast<uint8_t>(fmv);
-  easing_ = static_cast<Easing>(getParam(parameters, "easing", 0));
+  configureEasing(parameters, 0);
+  configureOpacity(parameters);
 
   // If no colors configured, use current buffer colors as default
   if (colors.empty() && fb && fb->pixelCount > 0) {
@@ -223,6 +224,11 @@ void ShiftyExpression::draw() {
     return;
   }
 
+  // Blend shifty's output onto the configurator's live output by the wisp
+  // dim scale so it dims-and-blends while the wisp is present and eases back
+  // to full on release. 1.0 (no wisp) leaves the writes byte-identical.
+  const float wispWeight = wispDimScale();
+
   switch (state) {
     case FADING_TO_PALETTE:
     case FADING_BACK: {
@@ -230,13 +236,14 @@ void ShiftyExpression::draw() {
         if (cachedFadeAtEnd_) {
           for (int i = zone_.posMin; i <= zone_.posMax; i++) {
             if (i >= fb->pixelCount) break;
-            fb->buffer[i] = fadeTargetColors[i];
+            fb->buffer[i] = mixColorWeight(fb->buffer[i], fadeTargetColors[i], wispWeight);
           }
         } else {
           for (int i = zone_.posMin; i <= zone_.posMax; i++) {
             if (i >= fb->pixelCount) break;
-            fb->buffer[i] = mixColorLinear(fadeStartColors[i], fadeTargetColors[i],
-                                            cachedFadeFactor_);
+            const Color shifted = mixColorLinear(fadeStartColors[i], fadeTargetColors[i],
+                                                 cachedFadeFactor_);
+            fb->buffer[i] = mixColorWeight(fb->buffer[i], shifted, wispWeight);
           }
         }
       } else {
@@ -245,18 +252,20 @@ void ShiftyExpression::draw() {
         for (int i = zone_.posMin; i <= zone_.posMax; i++) {
           if (i >= fb->pixelCount) break;
           const uint32_t offset = pixelStartOffsetMs_[static_cast<size_t>(i)];
+          Color shifted;
           if (elapsed < offset) {
-            fb->buffer[i] = fadeStartColors[i];
+            shifted = fadeStartColors[i];
           } else {
             const uint32_t pixelElapsed = elapsed - offset;
             if (pixelElapsed >= perFade) {
-              fb->buffer[i] = fadeTargetColors[i];
+              shifted = fadeTargetColors[i];
             } else {
-              fb->buffer[i] = mixColorLinear(
+              shifted = mixColorLinear(
                   fadeStartColors[i], fadeTargetColors[i],
                   computeLinearFactor(easeStep(pixelElapsed, perFade, easing_), perFade));
             }
           }
+          fb->buffer[i] = mixColorWeight(fb->buffer[i], shifted, wispWeight);
         }
       }
       break;
@@ -268,16 +277,9 @@ void ShiftyExpression::draw() {
       // captured at onTrigger; an operator base change mid-hold otherwise
       // pops in one frame when shifty releases.
       savedBuffer = fb->buffer;
-      if (fillMode_ == 0) {
-        for (int i = zone_.posMin; i <= zone_.posMax; i++) {
-          if (i >= fb->pixelCount) break;
-          fb->buffer[i] = shiftedColor;
-        }
-      } else {
-        for (int i = zone_.posMin; i <= zone_.posMax; i++) {
-          if (i >= fb->pixelCount) break;
-          fb->buffer[i] = shiftedColor;
-        }
+      for (int i = zone_.posMin; i <= zone_.posMax; i++) {
+        if (i >= fb->pixelCount) break;
+        fb->buffer[i] = mixColorWeight(fb->buffer[i], shiftedColor, wispWeight);
       }
       break;
 

@@ -122,18 +122,6 @@ inline uint16_t pulseWidthFromPercent(uint16_t sizePercent, uint16_t zoneSize) {
   return static_cast<uint16_t>(std::max<long>(3, r));
 }
 
-// Each phase-offset breath band must span at least this many pixels.
-constexpr uint16_t kMinSectionPx = 5;
-
-// Breath bands that fit `zoneSize`: the requested `sections`, floored to 1 and
-// capped so every band holds >= kMinSectionPx.
-inline uint16_t usableSections(uint16_t sections, uint16_t zoneSize) {
-  const uint16_t fit = std::max<uint16_t>(1u, zoneSize / kMinSectionPx);
-  uint16_t s = sections < 1 ? 1 : sections;
-  if (s > fit) s = fit;
-  return s;
-}
-
 // Fill order[0..n-1] with a random permutation of 0..n-1 (Fisher-Yates).
 // `rng` needs a `range(lo, hi)` returning an inclusive uniform draw.
 template <typename Order, typename Rng>

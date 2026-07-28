@@ -39,13 +39,13 @@ inline constexpr ParamSpec kShiftyParams[] = {
     .help       = "How long each color transition takes",
   },
   kEasingParam,
+  kOpacityParam,
 };
 // duration models the hold time (shiftDurationMin/Max in seconds).
 inline constexpr ExpressionDescriptor kShiftyDescriptorData{
   .id           = "shifty",
   .name         = "Shifty",
   .continuous   = true,
-  .pausesWispOverride = true,
   .colors       = { .max = 8, .label = "Colors" },
   .duration     = RangeSpec{
     .min    = 60,
@@ -75,7 +75,6 @@ class ShiftyExpression : public Expression {
  private:
   Zone zone_;
   uint8_t fillMode_ = 0;
-  Easing easing_ = Easing::Linear;
   std::vector<uint32_t> pixelStartOffsetMs_;
   // Largest start-stagger applied this fade. The fade window must outlast the
   // last-staged pixel, so state transitions gate on fadeDurationMs + this.
@@ -150,9 +149,9 @@ class ShiftyExpression : public Expression {
 
   void draw() override;
 
-  // Continuous palette-shift animation; visually fights the wisp's
-  // hold colour, so must pause while wisp is overriding.
-  bool disabledDuringWispOverride() const override { return true; }
+  // Continuous palette-shift animation; dims to blend under the wisp's
+  // hold colour rather than fighting it at full contribution.
+  float wispDimFloor() const override { return 0.3f; }
 
 protected:
   void onTrigger() override;

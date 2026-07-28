@@ -27,6 +27,7 @@ struct EnumOption {
   int32_t value;
   const char* label;
   bool zoning = false;
+  const char* group = nullptr;  // Motion family (Type) for the app's Type x Direction picker.
 };
 
 // Per-control option within an expression.
@@ -73,22 +74,37 @@ struct RangeSpec {
 inline constexpr const char* kIntervalHelp =
     "A random time in this range is picked before each trigger.";
 
-// Shared "Motion" easing control. Values mirror util/easing.hpp Easing (0..4).
+// Shared "Motion" easing control. Values mirror util/easing.hpp Easing (0..17).
 inline constexpr EnumOption kEasingOptions[] = {
-  { .value = 0, .label = "Linear" },
-  { .value = 1, .label = "Smooth" },
-  { .value = 2, .label = "Float"  },
-  { .value = 3, .label = "Settle" },
-  { .value = 4, .label = "Swell"  },
+  { .value = 0,  .label = "Linear",     .group = "Linear" },
+  { .value = 4,  .label = "In",         .group = "Smooth" },
+  { .value = 3,  .label = "Out",        .group = "Smooth" },
+  { .value = 1,  .label = "In-out",     .group = "Smooth" },
+  { .value = 5,  .label = "In",         .group = "Snap" },
+  { .value = 6,  .label = "Out",        .group = "Snap" },
+  { .value = 7,  .label = "In-out",     .group = "Snap" },
+  { .value = 2,  .label = "Float",      .group = "Float"  },
+  { .value = 8,  .label = "In",         .group = "Overshoot" },
+  { .value = 9,  .label = "Out",        .group = "Overshoot" },
+  { .value = 10, .label = "In-out",     .group = "Overshoot" },
+  { .value = 11, .label = "In",         .group = "Spring" },
+  { .value = 12, .label = "Out",        .group = "Spring" },
+  { .value = 13, .label = "In-out",     .group = "Spring" },
+  { .value = 14, .label = "In",         .group = "Bounce" },
+  { .value = 15, .label = "Out",        .group = "Bounce" },
+  { .value = 16, .label = "In-out",     .group = "Bounce" },
+  { .value = 17, .label = "Random",     .group = "Random" },
 };
 inline constexpr const char* kEasingHelp =
-    "Shape of the motion: Linear steady, Smooth eased ends, Float lava drift, "
-    "Settle fast then rest, Swell slow build to a peak.";
+    "Shape of the motion: Linear steady, Smooth eased ends, Snap fast then "
+    "coast, Float lava drift, Overshoot blows past and eases back, Spring "
+    "wobbles in, Bounce hops before it settles, Random rolls a new curve "
+    "each fire.";
 inline constexpr ParamSpec kEasingParam = {
   .key     = "easing",
   .kind    = ParamKind::Enum,
   .label   = "Motion",
-  .max     = 4,
+  .max     = 17,
   .help    = kEasingHelp,
   .options = kEasingOptions,
 };
@@ -98,14 +114,26 @@ inline constexpr ParamSpec kEasingParam = {
 // descriptor's static continuous flag.
 inline constexpr const char* kLoopParamKey = "loop";
 
+// Shared "Opacity" cap. Min 10 (0 would be invisible; use disable for that).
+inline constexpr const char* kOpacityHelp =
+    "Caps how strong the effect gets at its peak. 100% is full colour.";
+inline constexpr ParamSpec kOpacityParam = {
+  .key   = "opacity",
+  .kind  = ParamKind::Int,
+  .label = "Opacity",
+  .min   = 10,
+  .max   = 100,
+  .step  = 5,
+  .def   = 100,
+  .unit  = "%",
+  .help  = kOpacityHelp,
+};
+
 // Top-level config for one expression. `params` are the per-control options above.
 struct ExpressionDescriptor {
   const char* id;
   const char* name;
   bool continuous = false;
-  // Wire mirror of Expression::disabledDuringWispOverride(); the app greys the
-  // expression out while the wisp is overriding colors.
-  bool pausesWispOverride = false;
   ColorSpec colors;
   std::optional<RangeSpec> interval;
   std::optional<RangeSpec> duration;

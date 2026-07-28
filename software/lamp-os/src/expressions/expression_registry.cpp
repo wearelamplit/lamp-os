@@ -112,7 +112,6 @@ std::string ExpressionRegistry::serializeCatalog() const {
     obj["id"] = d->id;
     obj["name"] = d->name;
     obj["continuous"] = d->continuous;
-    if (d->pausesWispOverride) obj["pausesWispOverride"] = true;
 
     JsonObject colorsObj = obj["colors"].to<JsonObject>();
     colorsObj["max"] = d->colors.max;
@@ -161,13 +160,19 @@ std::string ExpressionRegistry::serializeCatalog() const {
             optObj["value"] = opt.value;
             optObj["label"] = opt.label;
             if (opt.zoning) optObj["zoning"] = true;
+            if (opt.group) optObj["group"] = opt.group;
           }
         }
       }
     }
   }
 
+  // Reserve the exact serialized size up front. Growing a std::string by
+  // doubling would momentarily need ~2x the final size contiguous, and this
+  // ~9 KB catalog builds during boot when the largest free block is still
+  // contended, tipping into bad_alloc.
   std::string out;
+  out.reserve(measureJson(doc) + 1);
   serializeJson(doc, out);
   return out;
 }

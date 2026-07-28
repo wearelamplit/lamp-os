@@ -29,8 +29,9 @@ void PulseExpression::configureFromParameters(const std::map<std::string, uint32
   pulseWidth = pulseWidthFromPercent(sizePercent, span);
   pulseColor = firstColorOr(kSafeFallbackColor);
 
-  easing_ = static_cast<Easing>(getParam(parameters, "easing", 0));
+  configureEasing(parameters, 0);
   loopContinuous_ = getParam(parameters, kLoopParamKey, 0) != 0;
+  configureOpacity(parameters);
 }
 
 uint32_t PulseExpression::calculateBlendFactor(int pixelIndex) const {
@@ -148,17 +149,16 @@ void PulseExpression::draw() {
   }
 
   // blendFactor varies per pixel (distance to wave center), so no frame-level hoist.
+  const float wispWeight = wispDimScale();
   for (int i = zone_.posMin; i <= zone_.posMax; i++) {
     uint32_t blendFactor = calculateBlendFactor(i);
-
     if (blendFactor == 0) continue;  // Skip pixels with no blend
-    if (blendFactor >= 100) {
-      fb->buffer[i] = pulseColor;
-      continue;
-    }
-
-    uint32_t factor = computeLinearFactor(blendFactor, 100u);
-    fb->buffer[i] = mixColorLinear(fb->buffer[i], pulseColor, factor);
+    const Color painted =
+        (blendFactor >= 100)
+            ? pulseColor
+            : mixColorLinear(fb->buffer[i], pulseColor,
+                             computeLinearFactor(blendFactor, 100u));
+    fb->buffer[i] = mixColorWeight(fb->buffer[i], painted, wispWeight);
   }
 
   // Transit time is wall-clock; a tiny zone with a slow, wide wave can take

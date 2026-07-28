@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <algorithm>
 
+#include "util/eased_scalar.hpp"
 #include "util/fade.hpp"
 
 namespace lamp {
@@ -33,12 +34,8 @@ void BreathingExpression::configureFromParameters(const std::map<std::string, ui
 
   const uint16_t window = windowSize();
   zone_ = resolveZone(parameters, window);
-  uint32_t s = getParam(parameters, "sections", 1);
-  sections_ = static_cast<uint16_t>(std::clamp<uint32_t>(s, 1, 5));
-  easing_ = static_cast<Easing>(getParam(parameters, "easing", 1));
-
-  usableSections_ = usableSections(sections_, zone_.size());
-  randomPermutation(sectionOrder_, usableSections_, rng);
+  configureEasing(parameters, 1);
+  configureOpacity(parameters);
 }
 
 void BreathingExpression::updateBreathPhase() {
@@ -95,22 +92,7 @@ void BreathingExpression::onUpdate() {
 }
 
 void BreathingExpression::control() {
-  if (continuousControl()) {
-    if (!autoTriggerEnabled) {
-      // A transient frozen by the wisp hold would never finish its cycle and
-      // never reach STOPPED for gcTransients(). Painting stays suppressed via
-      // shouldAffectBuffer(); only completion progress advances.
-      if (animationState == PLAYING || animationState == PLAYING_ONCE) {
-        updateBreathPhase();
-      }
-      return;
-    }
-    // Recompute phase from the current time on resume; a multi-cycle wisp
-    // hold would otherwise add one huge phaseIncrement and skip palette colors.
-    lastBreathUpdateMs = 0;
-    return;
-  }
-
+  continuousControl();
   if (animationState == PLAYING || animationState == PLAYING_ONCE) {
     onUpdate();
   }
@@ -129,26 +111,22 @@ void BreathingExpression::draw() {
     return;
   }
   const int end = std::min(static_cast<int>(zone_.posMax) + 1, static_cast<int>(fb->pixelCount));
+  const float wispWeight = wispDimScale();
   for (int i = static_cast<int>(zone_.posMin); i < end; ++i) {
     const uint16_t off = static_cast<uint16_t>(i - zone_.posMin);
-    const uint16_t band =
-        static_cast<uint16_t>(static_cast<uint32_t>(off) * usableSections_ / zoneSize);
-    float phase = breathPhase + sectionOrder_[band] * kBreathStaggerFrac;
-    if (phase >= 1.0f) phase -= 1.0f;
-    const float breath = (phase < 0.5f) ? phase * 2.0f : 2.0f - phase * 2.0f;
+    const float breath = (breathPhase < 0.5f) ? breathPhase * 2.0f : 2.0f - breathPhase * 2.0f;
     const float intensity = applyEasing(easing_, breath);
-    const uint32_t pIntensity = static_cast<uint32_t>(intensity * 100.0f);
+    const uint32_t pIntensity = static_cast<uint32_t>(clamp01(intensity) * 100.0f);
     // Vignette over a region 2px wider with the offset shifted in by one, so
     // the darkest taper step lands off-screen and the outermost real pixel
     // reads the brighter second step.
     const uint32_t pct =
         pIntensity * edgeTaper(off + 1, zoneSize + 2, kBreathTaperWidth, TaperCurve::Quadratic) / 100u;
-    if (pct >= 100u) {
-      fb->buffer[i] = targetColor;
-    } else {
-      fb->buffer[i] = mixColorLinear(fb->buffer[i], targetColor,
-                                     computeLinearFactor(pct, 100u));
-    }
+    const Color painted =
+        (pct >= 100u)
+            ? targetColor
+            : mixColorLinear(fb->buffer[i], targetColor, computeLinearFactor(pct, 100u));
+    fb->buffer[i] = mixColorWeight(fb->buffer[i], painted, wispWeight);
   }
 
   if (autoTriggerEnabled) frame = rewindBeforeExhaust(frame, frames);

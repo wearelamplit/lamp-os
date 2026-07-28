@@ -32,6 +32,7 @@ void GlitchyExpression::configureFromParameters(const std::map<std::string, uint
   zone_ = resolveZone(parameters, windowSize());
   scatter_ = std::min<uint32_t>(getParam(parameters, "scatter", kGlitchScatterMax),
                                 kGlitchScatterMax);
+  configureOpacity(parameters);
 }
 
 void GlitchyExpression::onTrigger() {
@@ -58,19 +59,21 @@ void GlitchyExpression::draw() {
     // Repaint from the saved background each frame so the scatter re-rolls into
     // a steady density instead of accumulating.
     fb->buffer = savedBuffer;
-    paintGlitch_();
+    paintGlitch_(wispDimScale());
     painted_ = true;
   }
 
   nextFrame();
 }
 
-void GlitchyExpression::paintGlitch_() {
+void GlitchyExpression::paintGlitch_(float wispWeight) {
   if (zone_.size() == 0) return;
 
   if (scatter_ == 0) {
-    for (uint16_t i = zone_.posMin; i <= zone_.posMax; ++i)
-      fb->buffer[i] = mixColorLinear(fb->buffer[i], glitchColor, kGlitchyLinearFactor);
+    for (uint16_t i = zone_.posMin; i <= zone_.posMax; ++i) {
+      const Color painted = mixColorLinear(fb->buffer[i], glitchColor, kGlitchyLinearFactor);
+      fb->buffer[i] = mixColorWeight(fb->buffer[i], painted, wispWeight);
+    }
     return;
   }
 
@@ -83,8 +86,10 @@ void GlitchyExpression::paintGlitch_() {
     const uint16_t start =
         static_cast<uint16_t>(zone_.posMin + slots[b] * plan.grainPx);
     const uint16_t end = std::min<uint16_t>(start + plan.grainPx, zone_.posMax + 1);
-    for (uint16_t i = start; i < end; ++i)
-      fb->buffer[i] = mixColorLinear(fb->buffer[i], glitchColor, kGlitchyLinearFactor);
+    for (uint16_t i = start; i < end; ++i) {
+      const Color painted = mixColorLinear(fb->buffer[i], glitchColor, kGlitchyLinearFactor);
+      fb->buffer[i] = mixColorWeight(fb->buffer[i], painted, wispWeight);
+    }
   }
 }
 

@@ -2,10 +2,12 @@
 
 #include <Arduino.h>
 
+#include "behaviors/configurator.hpp"
 #include "components/firmware/firmware_distributor.hpp"
 #include "components/firmware/firmware_receiver.hpp"
 #include "components/firmware/ota_indicator.hpp"
 #include "components/firmware/ota_quiet_mode.hpp"
+#include "core/override_aggregate.hpp"
 
 extern lamp::FirmwareReceiver firmwareReceiver;
 
@@ -136,14 +138,26 @@ void Compositor::tick() {
     }
 
     if (startupComplete) {
+      // The configurators write the base scene; the wisp layer composites over
+      // it and beneath the first overlay (greeting / expressions) so those still
+      // render on top, matching the layering from when the wisp lived in
+      // configurator.colors.
+      bool wispComposited = false;
       for (size_t i = 0; i < behaviors.size(); i++) {
-        if (!homeMode || !homeModeSkips(behaviors[i])) {
-          behaviors[i]->control();
-          if (behaviors[i]->animationState != STOPPED) {
-            behaviors[i]->draw();
+        AnimatedBehavior* b = behaviors[i];
+        if (!wispComposited && b != context_.baseConfigurator &&
+            b != context_.shadeConfigurator) {
+          compositeWisp();
+          wispComposited = true;
+        }
+        if (!homeMode || !homeModeSkips(b)) {
+          b->control();
+          if (b->animationState != STOPPED) {
+            b->draw();
           }
         }
       }
+      if (!wispComposited) compositeWisp();
     } else {
       for (size_t i = 0; i < startupBehaviors.size(); i++) {
         startupBehaviors[i]->control();
@@ -173,6 +187,35 @@ void Compositor::tick() {
     }
   };
 };
+
+bool Compositor::wispActive() const {
+  return wispStatePresent_ &&
+         (millis() - wispStateFreshMs_) < kWispStateFreshMs;
+}
+
+void Compositor::compositeWisp() {
+  // MSG_WISP_STATE is the sole wisp render source: presence holds while the
+  // freshest STATE from this lamp's wisp paints it, eases home on a fresh
+  // frame that drops this lamp, and ages out if STATE goes silent.
+  // Fade the wisp layer off the surface an operator is editing so the live
+  // color edit shows through; the other surface keeps its wisp paint.
+  const bool active = wispActive();
+  const bool baseHeld = active && !overrides.base.operatorEditing();
+  const bool shadeHeld = active && !overrides.shade.operatorEditing();
+  wispBasePresence_.setTarget(baseHeld ? 1.0f : 0.0f);
+  wispShadePresence_.setTarget(shadeHeld ? 1.0f : 0.0f);
+  wispBasePresence_.tick();
+  wispShadePresence_.tick();
+  wispShadeStack_.tick(wispShadePresence_.value());
+  wispBaseStack_.tick(wispBasePresence_.value());
+  // frameBuffers[0]=shade, [1]=base per lamp_behaviors.cpp ordering.
+  if (!frameBuffers.empty() && frameBuffers[0]) {
+    for (Color& px : frameBuffers[0]->buffer) px = wispShadeStack_.composite(px);
+  }
+  if (frameBuffers.size() > 1 && frameBuffers[1]) {
+    for (Color& px : frameBuffers[1]->buffer) px = wispBaseStack_.composite(px);
+  }
+}
 
 void Compositor::setHomeMode(bool homeMode) {
   if (this->homeMode != homeMode) {

@@ -8,16 +8,10 @@
 #include "core/animated_behavior.hpp"
 #include "expressions/expression_schema.hpp"
 #include "util/color.hpp"
+#include "util/easing.hpp"
 #include "util/fast_rng.hpp"
 
 namespace lamp {
-
-// True iff the wisp is currently holding an override on either the
-// base or shade surface. Defined in expression.cpp. Used by
-// Expression::control() and any continuous subclass that overrides
-// control() to honour `disabledDuringWispOverride`. See
-// `docs/dev/expressions.md` for the semantics.
-bool isWispCurrentlyOverriding();
 
 enum ExpressionTarget {
   TARGET_SHADE = 1,
@@ -39,6 +33,9 @@ class Expression : public AnimatedBehavior {
   uint32_t lastCompletedLoop = 0;   // Track last completed animation loop
   ExpressionTarget target = TARGET_BOTH;
   FastRng rng;
+  uint8_t opacityPct_ = 100;
+  Easing easing_ = Easing::Linear;
+  uint32_t easingRaw_ = 0;
 
   /**
    * Schedule next trigger within configured interval range.
@@ -54,6 +51,25 @@ class Expression : public AnimatedBehavior {
    * Check if this expression should affect current buffer.
    */
   bool shouldAffectBuffer();
+
+  /**
+   * Per-pixel contribution scale in [0,1] for a yielding expression drawing
+   * on this fb's surface: opacityPct_/100 capped further by the compositor's
+   * wisp presence `w`, lerping toward wispDimFloor() as w rises. Opacity 100
+   * with no wisp present (or a type that doesn't yield) returns 1.0. Reads
+   * the same `w` that composites the wisp, so on release the expression
+   * returns to its opacity cap in lockstep with the wisp fade. Per-surface:
+   * base presence for a base fb, shade presence for a shade fb.
+   */
+  float wispDimScale();
+
+  // Read the shared "opacity" param (clamped 10..100, default 100) into
+  // opacityPct_. Call from each subclass configureFromParameters.
+  void configureOpacity(const std::map<std::string, uint32_t>& parameters);
+
+  // Read the shared "easing" param (default defVal). Resolves Random to a
+  // concrete curve immediately; trigger() re-rolls it on each fire.
+  void configureEasing(const std::map<std::string, uint32_t>& parameters, uint32_t defVal);
 
  public:
   using AnimatedBehavior::AnimatedBehavior;
@@ -88,7 +104,7 @@ class Expression : public AnimatedBehavior {
    * Manually trigger this expression to start immediately.
    * Can be called from UI or other expressions.
    * @return true if the animation started; false when gated off (wrong
-   *         buffer, or a wisp hold on a disabledDuringWispOverride type)
+   *         buffer, or the operator has this surface's color editor open)
    */
   bool trigger();
 
@@ -130,30 +146,21 @@ class Expression : public AnimatedBehavior {
   // chain-triggered firing still work. Listing's enabled toggle drives this.
   bool autoTriggerEnabled = true;
 
-  // Suppresses auto-trigger from control() while the wisp is actively
-  // overriding the lamp's base or shade surface. Manual trigger() (the
-  // app's "Test" button + chain triggers) still fires. Pure type-property,
-  // overridden in subclasses, NOT stored in config/NVS/BLE. Whether a given
-  // expression coexists with wisp paint is a property of the expression
-  // class itself (continuous animations like breathing / shifty fight the
-  // wisp's hold colour and must pause; short discrete ones like glitchy /
-  // pulse coexist fine). The control() implementation queries the override
-  // state via `isWispCurrentlyOverriding()` (declared in expression.cpp).
-  virtual bool disabledDuringWispOverride() const { return false; }
+  // Floor this expression's per-pixel contribution dims to while the wisp is
+  // fully present, in [0,1]. 1.0 (default) ignores the wisp and paints at full
+  // regardless. A continuous color animation that would fight the wisp's hold
+  // (breathing / shifty / spotty) returns a low floor so it dims-and-blends
+  // instead of pausing, and eases back to full with the wisp fade on release.
+  // Pure type-property, NOT stored in config/NVS/BLE.
+  virtual float wispDimFloor() const { return 1.0f; }
 
 protected:
   /**
-   * control() body for continuous expressions. Applies the
-   * wisp-override gate every tick (the base-class gate runs only at
-   * trigger time) and retriggers when STOPPED. Transients
-   * (autoTriggerEnabled=false) never retrigger, so gcTransients()
-   * can reap them. Returns true while the wisp override suppresses
-   * this expression; on that path a steady-state caller resets its
-   * wall-clock state (resume must not integrate the whole hold), and
-   * a transient keeps its completion progress advancing so it still
-   * reaches STOPPED.
+   * control() body for continuous expressions. Retriggers when STOPPED so an
+   * auto-trigger loop keeps running; transients (autoTriggerEnabled=false)
+   * never retrigger, so gcTransients() can reap them.
    */
-  bool continuousControl();
+  void continuousControl();
 
   /**
    * Expression-specific setup when triggered (REQUIRED).

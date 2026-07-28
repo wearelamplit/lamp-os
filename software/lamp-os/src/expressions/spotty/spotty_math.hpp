@@ -5,6 +5,14 @@
 
 namespace lamp {
 
+// Overshoot/Spring easings leave applyEasing's [0,1] output range; clamps
+// the eased fraction to a valid blend percent.
+inline uint32_t clampPct(float f) {
+  if (f <= 0.0f) return 0u;
+  if (f >= 1.0f) return 100u;
+  return static_cast<uint32_t>(f * 100.0f);
+}
+
 // Fade-in / hold / fade-out blend envelope in equal thirds. Returns the
 // blend percent (0..100) for a spot `age` into a `life`-long cycle (both in
 // the same unit, e.g. milliseconds); ages at or past `life` return 0. The
@@ -16,7 +24,7 @@ inline uint32_t spotBlendPercent(uint32_t age, uint32_t life,
   if (third == 0) return 100;
   if (age < third) {
     const float t = static_cast<float>(age) / static_cast<float>(third);
-    return static_cast<uint32_t>(applyEasing(easing, t) * 100.0f);
+    return clampPct(applyEasing(easing, t));
   }
   if (age < 2 * third) return 100;
   const uint32_t outStart = 2 * third;
@@ -24,7 +32,7 @@ inline uint32_t spotBlendPercent(uint32_t age, uint32_t life,
   const uint32_t elapsed = age - outStart;
   if (elapsed >= outLen) return 0;
   const float t = static_cast<float>(elapsed) / static_cast<float>(outLen);
-  return static_cast<uint32_t>((1.0f - applyEasing(easing, t)) * 100.0f);
+  return clampPct(1.0f - applyEasing(easing, t));
 }
 
 struct SpotLifeBounds {

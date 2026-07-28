@@ -19,7 +19,7 @@ inline constexpr ParamSpec kPulseParams[] = {
     .kind       = ParamKind::Int,
     .label      = "Pulse speed",
     .min        = 1,
-    .max        = 10,
+    .max        = 20,
     .def        = 3,
     .unit       = "s",
     .invert     = true,
@@ -46,6 +46,7 @@ inline constexpr ParamSpec kPulseParams[] = {
     .help    = "Trigger runs one sweep then stops. Continuous ping-pongs back and forth forever.",
     .options = kPulseLoopOpts,
   },
+  kOpacityParam,
 };
 inline constexpr ExpressionDescriptor kPulseDescriptorData{
   .id       = "pulse",
@@ -85,7 +86,6 @@ class PulseExpression : public Expression {
   uint32_t pulseWidth = 3;        // Fade radius in pixels on each side
   Color pulseColor;                // Current pulse color
   Zone zone_;                      // Wave travel bounds
-  Easing easing_ = Easing::Linear;
   bool loopContinuous_ = false;   // Ping-pong forever instead of ending on exit
   bool reachedFarEnd_ = false;    // Continuous wave has touched the far end; arms preview one-cycle stop
   bool firstEntranceDone_ = false;  // Continuous leg 0 enters off-strip; later legs ping-pong the visible edges

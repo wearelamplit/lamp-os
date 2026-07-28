@@ -34,7 +34,8 @@ void SpottyExpression::configureFromParameters(const std::map<std::string, uint3
   if (spotSpeed > 10) spotSpeed = 10;
   spotSpeed_ = static_cast<uint16_t>(spotSpeed);
 
-  easing_ = static_cast<Easing>(getParam(parameters, "easing", 0));
+  configureEasing(parameters, 0);
+  configureOpacity(parameters);
 }
 
 void SpottyExpression::respawn(Spot& spot) {
@@ -74,12 +75,13 @@ void SpottyExpression::draw() {
   lastUpdateMs_ = nowMs;
 
   const uint16_t regionSize = zone_.size();
-  // Spot ages advance on wall clock even while painting is suppressed (wisp
-  // hold), so a frozen transient still reaches STOPPED for gcTransients()
-  // instead of replaying its stale cycle when the wisp releases.
+  // Spot ages advance on wall clock even when paint is gated off (color
+  // editor open, empty region), so a frozen transient still reaches STOPPED
+  // for gcTransients() instead of replaying a stale cycle.
   const bool paint = shouldAffectBuffer() && regionSize > 0 && !spots_.empty();
   const uint16_t clampedSize = paint ? std::min(size_, regionSize) : 0;
   const uint16_t pixMax = paint ? static_cast<uint16_t>(fb->pixelCount - 1) : 0;
+  const float wispWeight = paint ? wispDimScale() : 1.0f;
 
   bool allDone = true;
   for (Spot& spot : spots_) {
@@ -90,12 +92,11 @@ void SpottyExpression::draw() {
         if (i > pixMax) break;
         const uint32_t pct =
             blend * edgeTaper(k, clampedSize, clampedSize / 2, TaperCurve::Linear) / 100u;
-        if (pct >= 100u) {
-          fb->buffer[i] = spot.color;
-        } else {
-          fb->buffer[i] =
-              mixColorLinear(fb->buffer[i], spot.color, computeLinearFactor(pct, 100u));
-        }
+        const Color painted =
+            (pct >= 100u)
+                ? spot.color
+                : mixColorLinear(fb->buffer[i], spot.color, computeLinearFactor(pct, 100u));
+        fb->buffer[i] = mixColorWeight(fb->buffer[i], painted, wispWeight);
       }
     }
     spot.ageMs += deltaMs;

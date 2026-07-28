@@ -9,8 +9,9 @@
 //   restore(): fade back to the saved baseline. Marks state Restoring →
 //              Idle.
 //   tick():    drives the state machine. Watchdog auto-restores after
-//              kPaintWatchdogMs (60s) of no apply() refresh, so a wisp
-//              that goes silent doesn't leave a lamp painted forever.
+//              lamp_protocol::kPaintWatchdogMs (paint_timing.hpp, shared
+//              with the wisp) of no apply() refresh, so a wisp that goes
+//              silent doesn't leave a lamp painted forever.
 //
 // Per-pixel fade lives in ConfiguratorBehavior: apply() builds the
 // gradient + calls configurator->beginFade(targetColors, fadeDurationMs).
@@ -42,7 +43,8 @@ enum class FadeState : uint8_t {
                   // Transitions to Holding when the fade window elapses.
   Holding = 2,    // Override fully applied; tick() watches the watchdog.
                   // Transitions to Restoring when restore() is called OR
-                  // kPaintWatchdogMs (60s) elapses since the last apply().
+                  // lamp_protocol::kPaintWatchdogMs elapses since the
+                  // last apply().
   Restoring = 3,  // Configurator is fading override → savedColors_.
                   // Transitions to Idle when the restore fade completes.
 };
@@ -90,8 +92,8 @@ class ColorOverride {
   // a Base+Shade pair 10 ms apart but lands in a single-slot mailbox
   // (PendingTypedSlot, newest writer wins). If Core 1 doesn't drain
   // between the two posts the Shade frame silently drops the Base frame
-  // and Base's lastApplyMs_ never advances; after 60 s the watchdog
-  // auto-restores Base, expressions un-pause, and the next surviving
+  // and Base's lastApplyMs_ never advances; after kPaintWatchdogMs the
+  // watchdog auto-restores Base, expressions un-pause, and the next surviving
   // wisp Base frame snapshots the expression-painted buffer as the new
   // savedColors_, leaving the lamp visibly "stopped listening" to wisp.
   // Cross-touch from the Shade-side drain (and vice versa) is proof of
@@ -99,13 +101,13 @@ class ColorOverride {
   void touchApply(uint32_t nowMs);
 
   bool isActive() const { return state_ != FadeState::Idle; }
+  FadeState fadeState() const { return state_; }
   lamp_protocol::OverrideSource activeSource() const { return activeSource_; }
 
   // True iff a wisp paint frame is currently shaping this surface: the
   // override is animating (FadingIn/Holding/Restoring) AND the most
   // recent apply that took effect carried sourceKind=Wisp. The Flutter
-  // app reads this through wispStatus to render the will-o'-wisp icon
-  // and to grey out expressions that opt into disabledDuringWispOverride.
+  // app reads this through wispStatus to render the will-o'-wisp icon.
   bool isWispActive() const {
     return state_ != FadeState::Idle &&
            activeSource_ == lamp_protocol::OverrideSource::Wisp;
@@ -144,11 +146,6 @@ class ColorOverride {
   void setOperatorEditing(bool editing) { operatorEditing_ = editing; }
   bool operatorEditing() const { return operatorEditing_; }
 
-  // Auto-restore watchdog. If the wisp goes silent the override
-  // transitions out so the lamp can't be painted forever. 60s matches
-  // the wisp's expected refresh cadence with margin.
-  static constexpr uint32_t kPaintWatchdogMs = 60000;
-
   // Fade the watchdog's own revert uses. Fixed and short so a stranded
   // paint reverts promptly instead of inheriting the wisp's drift fade,
   // which can run tens of minutes.
@@ -167,10 +164,11 @@ class ColorOverride {
   uint32_t lastApplyMs_ = 0;
   uint32_t currentFadeDurationMs_ = 0;
 
-  // Last time the wisp was seen (an apply, or a paint-mode HELLO keepalive).
-  // Drives the auto-restore watchdog independent of fade timing, so a long
-  // drift fade holds while the wisp is present but reverts within
-  // kPaintWatchdogMs of it going silent, in any active fade state.
+  // Last time a paint (apply(), or a same-frame touchApply() cross-touch)
+  // landed. Drives the auto-restore watchdog independent of fade timing, so
+  // a long drift fade holds while paints keep arriving but reverts within
+  // lamp_protocol::kPaintWatchdogMs of them stopping, in any active fade
+  // state.
   uint32_t lastWispSeenMs_ = 0;
 
   // Timestamp of the restore(); drives the Restoring→Idle transition.

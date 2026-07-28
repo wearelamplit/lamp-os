@@ -20,6 +20,7 @@ inline constexpr ParamSpec kGlitchyParams[] = {
     .help           = "0 is a solid glitch; higher scatters it into finer, sparser flecks.",
     .requiresZoning = false,
   },
+  kOpacityParam,
 };
 inline constexpr ExpressionDescriptor kGlitchyDescriptorData{
   .id           = "glitchy",
@@ -67,7 +68,7 @@ class GlitchyExpression : public Expression {
   Zone zone_;
   uint16_t scatter_ = kGlitchScatterMax;
 
-  void paintGlitch_();
+  void paintGlitch_(float wispWeight);
 
  public:
   using Expression::Expression;

@@ -46,12 +46,12 @@ inline constexpr ParamSpec kSpottyParams[] = {
     .help       = "Slow: gentle, unpredictable fades. Fast: quick flickers mixed with slower fades.",
   },
   kEasingParam,
+  kOpacityParam,
 };
 inline constexpr ExpressionDescriptor kSpottyDescriptorData{
   .id         = "spotty",
   .name       = "Spotty",
   .continuous = true,
-  .pausesWispOverride = true,
   .colors     = { .max = 8, .label = "Colors" },
   .hasZone      = true,
   .zoneOptional = true,
@@ -67,7 +67,7 @@ class SpottyExpression : public Expression {
   const ExpressionDescriptor& descriptor() const override;
   void draw() override;
   void control() override;
-  bool disabledDuringWispOverride() const override { return true; }
+  float wispDimFloor() const override { return 0.3f; }
 
  protected:
   void onTrigger() override;
@@ -85,7 +85,6 @@ class SpottyExpression : public Expression {
   uint16_t points_ = 1;
   uint16_t size_ = 3;
   uint16_t spotSpeed_ = 3;  // 1=fastest..10=slowest; scales the per-spot lifetime roll
-  Easing easing_ = Easing::Linear;
   uint32_t lastUpdateMs_ = 0;
   std::vector<Spot> spots_;
 };

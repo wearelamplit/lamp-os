@@ -2,13 +2,17 @@
 
 #include <Arduino.h>
 
+#include <algorithm>
+
 #include "components/network/protocol/lamp_protocol.hpp"
 #include "components/transient_override/color_override.hpp"
 #include "core/override_aggregate.hpp"
 #include "core/behavior_context.hpp"
 #include "core/compositor.hpp"
 #include "expression_manager.hpp"
+#include "expressions/param_utils.hpp"
 #include "expressions/primitives.hpp"
+#include "util/eased_scalar.hpp"
 
 namespace lamp {
 
@@ -31,11 +35,17 @@ void Expression::saveBufferState() {
   savedBuffer = fb->buffer;
 }
 
-// Defined out-of-line at the bottom of this file. Queries the lamp's
-// two ColorOverride globals; returns true iff the wisp is actively
-// holding either surface. Used by shouldAffectBuffer() AND control()
-// below to suppress disabled-during-wisp expressions.
-bool isWispCurrentlyOverriding();
+namespace {
+// The ColorOverride owning this fb's surface, or nullptr when the buffer
+// list isn't wired yet (or fb isn't one of the two surfaces). Shade is
+// published first, base second (ExpressionManager::begin()).
+ColorOverride* surfaceOverrideFor(BehaviorContext* ctx, FrameBuffer* fb) {
+  if (!ctx || ctx->expressionFrameBuffers.size() < 2) return nullptr;
+  if (fb == ctx->expressionFrameBuffers[1]) return &lamp::overrides.base;
+  if (fb == ctx->expressionFrameBuffers[0]) return &lamp::overrides.shade;
+  return nullptr;
+}
+}  // namespace
 
 bool Expression::shouldAffectBuffer() {
   // Context is wired by Compositor::addBehavior at register time (or by
@@ -44,35 +54,18 @@ bool Expression::shouldAffectBuffer() {
   // not-yet-routable and skip.
   if (!context_ || context_->expressionFrameBuffers.size() < 2) return false;
 
-  // Check if current buffer matches the target
-  bool isShade = (fb == context_->expressionFrameBuffers[0]);  // Shade is first
-  bool isBase = (fb == context_->expressionFrameBuffers[1]);   // Base is second
+  ColorOverride* ov = surfaceOverrideFor(context_, fb);
 
   // While the operator has this surface's color editor open, pause all
   // expressions on it so the color being picked reads clean instead of
   // getting overdrawn. Per-surface: editing base leaves shade alone.
-  if ((isBase && lamp::overrides.base.operatorEditing()) ||
-      (isShade && lamp::overrides.shade.operatorEditing())) {
-    return false;
-  }
-
-  // Wisp-override draw gate. control() already suppresses auto-trigger
-  // and (for Breathing) per-frame onUpdate while wisp paint is held, but
-  // an expression that was already PLAYING when wisp activated keeps
-  // its CACHED last frame, and draw() runs each tick regardless,
-  // stomping the wisp paint with stale data (a frozen
-  // BreathingExpression::draw() repainting its last targetColor over the
-  // wisp gradient every frame). Suppress draw too while wisp owns the
-  // relevant surface.
-  if (disabledDuringWispOverride() && isWispCurrentlyOverriding()) {
-    return false;
-  }
+  if (ov && ov->operatorEditing()) return false;
 
   switch (target) {
     case TARGET_SHADE:
-      return isShade;
+      return fb == context_->expressionFrameBuffers[0];
     case TARGET_BASE:
-      return isBase;
+      return fb == context_->expressionFrameBuffers[1];
     case TARGET_BOTH:
       return true;
     default:
@@ -80,18 +73,31 @@ bool Expression::shouldAffectBuffer() {
   }
 }
 
-void Expression::control() {
-  // Wisp-override gate: skip auto-trigger when the operator has marked
-  // this expression "pause when wisp is in control" AND a wisp paint
-  // is currently held on either surface. Pushes nextTriggerMs forward
-  // by the min interval so a long-running wisp hold doesn't queue up
-  // a backlog of triggers that all fire the instant the wisp lets go.
-  if (disabledDuringWispOverride() && animationState == STOPPED &&
-      isWispCurrentlyOverriding()) {
-    nextTriggerMs = millis() + intervalMinMs;
-    return;
+float Expression::wispDimScale() {
+  if (!context_ || !context_->compositor ||
+      context_->expressionFrameBuffers.size() < 2) {
+    return 1.0f;
   }
+  const bool isBase = fb == context_->expressionFrameBuffers[1];
+  const bool isShade = fb == context_->expressionFrameBuffers[0];
+  if (!isBase && !isShade) return 1.0f;
+  const float w = context_->compositor->wispPresence(isBase);
+  return opacityTarget(true, opacityPct_ / 100.0f, wispDimFloor(), w);
+}
 
+void Expression::configureOpacity(const std::map<std::string, uint32_t>& parameters) {
+  opacityPct_ = static_cast<uint8_t>(
+      std::clamp<uint32_t>(getParam(parameters, "opacity", 100), 10, 100));
+}
+
+void Expression::configureEasing(const std::map<std::string, uint32_t>& parameters, uint32_t defVal) {
+  easingRaw_ = getParam(parameters, "easing", defVal);
+  easing_ = (easingRaw_ == static_cast<uint32_t>(Easing::Random))
+                ? randomEasing(rng)
+                : static_cast<Easing>(easingRaw_);
+}
+
+void Expression::control() {
   // Check for automatic trigger
   if (autoTriggerEnabled && animationState == STOPPED && timeReached(millis(), nextTriggerMs)) {
     trigger();
@@ -109,10 +115,8 @@ void Expression::control() {
   }
 }
 
-bool Expression::continuousControl() {
-  if (disabledDuringWispOverride() && isWispCurrentlyOverriding()) return true;
+void Expression::continuousControl() {
   if (autoTriggerEnabled && animationState == STOPPED) trigger();
-  return false;
 }
 
 Color Expression::getRandomColor() {
@@ -133,6 +137,8 @@ bool Expression::trigger() {
     return false;
   }
 
+  if (easingRaw_ == static_cast<uint32_t>(Easing::Random)) easing_ = randomEasing(rng);
+
   // Start immediately
   onTrigger();            // Expression-specific setup
   scheduleNextTrigger();  // Reset next automatic trigger
@@ -149,25 +155,4 @@ bool Expression::trigger() {
 }
 
 // Lives in lamp.cpp as globals; defined in lamp namespace.
-}  // namespace lamp
-
-namespace lamp {
-
-// Forward-declared in this TU above Expression::control(). Cheap query,
-// two bool reads + two enum comparisons per Expression per loop
-// tick. The override aggregate lives in override_aggregate.cpp.
-bool isWispCurrentlyOverriding() {
-  if (lamp::overrides.base.isActive() &&
-      lamp::overrides.base.activeSource() ==
-          lamp_protocol::OverrideSource::Wisp) {
-    return true;
-  }
-  if (lamp::overrides.shade.isActive() &&
-      lamp::overrides.shade.activeSource() ==
-          lamp_protocol::OverrideSource::Wisp) {
-    return true;
-  }
-  return false;
-}
-
 }  // namespace lamp

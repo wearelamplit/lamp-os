@@ -73,4 +73,13 @@ inline Color mixColorLinear(const Color& start, const Color& end, uint32_t facto
                mixByteLinear(start.b, end.b, factor),
                mixByteLinear(start.w, end.w, factor));
 }
+
+// Blend `over` onto `under` by weight in [0,1]. weight 1.0 returns `over`
+// byte-exact, 0.0 returns `under`. 262144 == mixByteLinear's full-scale
+// divisor, so the top of the range lands on `over` with no rounding drift.
+inline Color mixColorWeight(const Color& under, const Color& over, float weight) {
+  if (weight >= 1.0f) return over;
+  if (weight <= 0.0f) return under;
+  return mixColorLinear(under, over, static_cast<uint32_t>(weight * 262144.0f));
+}
 }  // namespace lamp
