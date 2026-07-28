@@ -62,9 +62,9 @@ class AddLampMeetStep extends ConsumerWidget {
             Text(
               "From here it's in your care. Help it find its colors, base and "
               'shade, and coax out the little moods and pulses it likes to move '
-              "through. Introduce it around, too. It'll make its own friends "
-              'among the other lamps, warming from salty to smitten in its own '
-              'time.',
+              "through. Introduce it around, too. It'll greet the other lamps "
+              'on its own, and you decide how it feels about each, from salty '
+              'to smitten.',
               textAlign: TextAlign.center,
               style: textTheme.bodyMedium,
             ),
