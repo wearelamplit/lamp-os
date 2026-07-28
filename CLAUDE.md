@@ -45,18 +45,22 @@ an entry for the new version; if it doesn't, stop and prompt to add one.
 
 ## Lock-ins (don't change without a protocol version bump)
 
-The mesh wire format carries a **receive range**, not a single version:
-`PROTOCOL_VERSION_EMIT = 0x05` is what we broadcast; `RX_MIN = 0x04` ..
-`RX_MAX = 0x05` is what we parse. Splitting emit from receive lets the fleet
-*receive* a newer version before it *emits* one — the safe path for a
-multi-version OTA wave. MSG_EVENT is nearby-scoped (no relay), the
-per-message-type DedupRings are sized per traffic (relay-heavy types 64,
-down to 16 for single-hop / low-rate types) — receive-side state, not a
-wire contract, so nodes with different capacities interoperate and a
-resize needs no protocol bump. HELLO interval is 60 s. v0x04 widened the FW channel slot to 16 bytes for
-per-variant OTA gating (`{type}-{channel}`); v0x05 added a TLV trailer to
-HELLO + WISP_HELLO (TLVs: `HELLO_TLV_OTA_STATE`, `HELLO_TLV_FW_CHANNEL`,
-`HELLO_TLV_FS_STATE`, `HELLO_TLV_FW_MAX_CHUNK`, `HELLO_TLV_NEED_FS`). Unknown TLVs are
+The mesh wire format carries a **receive range**, not a single version: one
+emit version broadcast, a `[RX_MIN, RX_MAX]` range parsed (`PROTOCOL_VERSION_EMIT`
+/ `PROTOCOL_VERSION_RX_MIN` / `PROTOCOL_VERSION_RX_MAX` in
+`software/shared/protocol/src/lampos/protocol/header.hpp`; emit must stay
+`<= RX_MAX`). Splitting emit from receive lets the fleet *receive* a newer
+version before it *emits* one — the safe path for a multi-version OTA wave.
+MSG_EVENT is nearby-scoped (no relay); the per-message-type DedupRings
+(`software/lamp-os/src/components/network/mesh/mesh_link.hpp`) are sized per
+traffic, relay-heavy types larger than single-hop / low-rate ones — receive-side
+state, not a wire contract, so nodes with different capacities interoperate and
+a resize needs no protocol bump. HELLO cadence (boot burst, then a steady
+interval) is defined in
+`software/lamp-os/src/components/network/mesh/hello_interval.hpp`. Past
+protocol bumps have widened the FW channel slot for per-variant OTA gating
+(`{type}-{channel}`) and added a TLV trailer to HELLO + WISP_HELLO (TLV enum in
+`software/shared/protocol/src/lampos/protocol/presence.hpp`). Unknown TLVs are
 silently skipped (forward-compat). Cross-version mismatch fails loud (peers
 don't show up).
 
@@ -81,10 +85,8 @@ instead:
 - `kGattLayout` / `kGattSchemaVersion` in
   `components/network/ble/gatt_layout.hpp` are the single source of truth.
   `CHAR_SCHEMA_VERSION` exposes the version on the wire (read-only, single
-  byte; absent on legacy lamps that predate it). `kGattSchemaVersion` is
-  currently **4**; `CHAR_WISP_CLAIMS` (`5f64f4eb-…`) is the v4 tail. No app
-  consumer gates on the version yet — that lands with the first feature that
-  requires it.
+  byte; absent on legacy lamps that predate it). No app consumer gates on the
+  version yet — that lands with the first feature that requires it.
 - **Grow append-only** (new characteristic at the tail) or evolve a
   characteristic's *payload* (settings_blob / sections / page-data), neither
   moves an existing handle, so deployed installs keep working.
@@ -172,18 +174,25 @@ conventions here reference them:
 
 ## Tail multiple lamps simultaneously
 
-`scripts/bench_tap.py` tails several USB serial ports at once, prefixing
-each line with a short label so cross-lamp behavior (cascade OTA, mesh
-paint, greet handshakes) reads as one stream. Useful for diff-checking
-sender vs receiver across two physical lamps during firmware iteration.
+`npm run lamp:tap` (wraps `scripts/bench_tap.py`) tails several USB serial
+ports at once, prefixing each line with a short label so cross-lamp behavior
+(cascade OTA, mesh paint, greet handshakes) reads as one stream. Useful for
+diff-checking sender vs receiver across two physical lamps during firmware
+iteration.
+
+**Always tap through this, never a raw `pyserial` / `screen` / `pio device
+monitor` open.** The upesy_wroom auto-reset circuit reboots the ESP32 when a
+plain serial open toggles DTR/RTS — which silently aborts any in-flight OTA
+or mesh wave you were trying to observe (the observer breaks the experiment).
+`bench_tap.py` holds DTR high + RTS low so the board stays up, and reopens on
+a reboot/USB blip.
 
 ```sh
-python3 scripts/bench_tap.py /dev/cu.usbserial-0001:flora \
-                             /dev/cu.usbserial-6:gramp -o /tmp/bench.log
+npm run lamp:tap -- /dev/cu.usbserial-7:jacko \
+                    /dev/cu.usbserial-10:flora -o /tmp/bench.log
 ```
 
-See the script's `--help` for label/log options. (Supersedes the old
-local-only `/tmp/dual_tap.py`.)
+See the script's `--help` for label/log options.
 
 ## Code conventions
 

@@ -59,9 +59,9 @@ env.Append(CPPDEFINES=[("FIRMWARE_CHANNEL", '\\"' + combined + '\\"')])
 print(f"[inject_firmware_channel] FIRMWARE_CHANNEL={combined}")
 
 # LAMP_DEBUG gates bench-only affordances (testGreet, extra serial logging).
-# Only a dev build keeps them; beta and stable ship quiet. Keyed off the raw
-# channel, not the variant-prefixed slot.
-debug_on = base == "dev"
+# On for dev; off for beta/stable unless LAMP_FORCE_DEBUG=1 forces it on for a
+# signed bench build. Keyed off the raw channel, not the variant-prefixed slot.
+debug_on = base == "dev" or os.environ.get("LAMP_FORCE_DEBUG") == "1"
 if debug_on:
     env.Append(CPPDEFINES=["LAMP_DEBUG"])
 print(f"[inject_firmware_channel] LAMP_DEBUG={'on' if debug_on else 'off'}")
