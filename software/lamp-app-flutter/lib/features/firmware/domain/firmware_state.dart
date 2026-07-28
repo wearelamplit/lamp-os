@@ -61,3 +61,16 @@ class FirmwareFailed extends FirmwareState {
   final String reason;
   final Object? cause;
 }
+
+extension FirmwarePushing on FirmwareState {
+  /// The phone is actively pushing an image to this lamp (offer through
+  /// finalize). Excludes Succeeded so the post-reboot presence takes over.
+  bool get isPushing =>
+      this is FirmwareOfferSent ||
+      this is FirmwareStreaming ||
+      this is FirmwareFinalizing;
+
+  /// Pushing plus the local verify step that precedes OfferSent. Drives the
+  /// whimsical badge + card so the verify window isn't a blank gap.
+  bool get isBusy => isPushing || this is FirmwareVerifying;
+}

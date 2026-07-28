@@ -27,19 +27,6 @@ enum FirmwareChannel {
   beta,
 }
 
-/// Resolve a lamp's reported `fwChannel` to a fetchable [FirmwareChannel].
-/// The wire value carries a `{lampType}-{channel}` prefix (`standard-beta`);
-/// the variant prefix is stripped. Empty, legacy, or unrecognized (e.g. a
-/// `dev` lamp, which has no release channel) falls back to [stable].
-FirmwareChannel firmwareChannelFromString(String? raw) {
-  if (raw == null || raw.isEmpty) return FirmwareChannel.stable;
-  final tail = raw.contains('-') ? raw.split('-').last : raw;
-  for (final c in FirmwareChannel.values) {
-    if (c.name == tail) return c;
-  }
-  return FirmwareChannel.stable;
-}
-
 /// Where to fetch from. The default constant points at the production
 /// repo's "latest" + "beta" release endpoints. Tests can swap to a
 /// fake-server URL via the optional [endpointOverride].

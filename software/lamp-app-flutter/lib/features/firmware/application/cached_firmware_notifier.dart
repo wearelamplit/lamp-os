@@ -14,6 +14,13 @@ import '../data/firmware_signature_verifier.dart';
 
 part 'cached_firmware_notifier.g.dart';
 
+/// Whether to replace the cached firmware with a freshly-fetched GitHub
+/// image. Skips the replace when the cached copy is a newer version than
+/// GitHub's, so a manually-pushed newer build isn't clobbered. Versions are
+/// packed ints; larger = newer.
+bool shouldReplaceCachedFirmware(int? cachedVersion, int githubVersion) =>
+    cachedVersion == null || cachedVersion <= githubVersion;
+
 @Riverpod(keepAlive: true, name: 'cachedFirmwareNotifierProvider')
 class CachedFirmwareNotifier extends _$CachedFirmwareNotifier {
   static const String _cacheDirName = 'firmware-cache';
@@ -71,17 +78,19 @@ class CachedFirmwareNotifier extends _$CachedFirmwareNotifier {
   String _metaPathFor(Directory dir, String lampType, FirmwareChannel channel) =>
       '${dir.path}/lamp-firmware-$lampType-${channel.name}.$_metaSuffix';
 
-  /// Compute the set of {lampType, channel} pairs the user actually
-  /// owns. Lamps with no lampType yet (never connected on the new
-  /// firmware) are skipped: nothing to fetch until their variant
-  /// identity is known.
+  /// Compute the set of {lampType, channel} pairs to auto-download, one per
+  /// owned lampType on the stable channel. Beta lamps get promoted to stable
+  /// via the unified push rule (`otaAcceptable`), so the cache only ever holds
+  /// stable images. Lamps with no lampType yet (never connected on the new
+  /// firmware) are skipped: nothing to fetch until their variant identity is
+  /// known.
   Set<({String lampType, FirmwareChannel channel})> _wantedFor(
       List<InventoryLamp> inventory) {
     final out = <({String lampType, FirmwareChannel channel})>{};
     for (final lamp in inventory) {
       final t = lamp.lampType;
       if (t == null || t.isEmpty) continue;
-      out.add((lampType: t, channel: firmwareChannelFromString(lamp.fwChannel)));
+      out.add((lampType: t, channel: FirmwareChannel.stable));
     }
     return out;
   }
@@ -98,12 +107,22 @@ class CachedFirmwareNotifier extends _$CachedFirmwareNotifier {
       if (wanted.isEmpty) return;
       final client = ref.read(firmwareReleaseClientProvider);
       final dir = await _ensureCacheDir();
-      final next = Map<String, CachedFirmware>.from(index);
+      // Await the initial load so `next` reflects the real on-disk cache,
+      // not the empty map `index` reads mid-build (a sync triggered right
+      // after app launch would otherwise see every slot as uncached and
+      // let a stale GitHub release clobber a newer manually-pushed build).
+      final loaded = await future;
+      final next = Map<String, CachedFirmware>.from(loaded);
       for (final w in wanted) {
         try {
           final bytes = await client.fetchLatest(w.channel,
               lampType: w.lampType);
           final verified = await verifyFirmwareImage(bytes);
+          final cached = next['${w.lampType}-${w.channel.name}'];
+          if (!shouldReplaceCachedFirmware(
+              cached?.version, verified.footer.version)) {
+            continue;
+          }
           final binPath = _binPathFor(dir, w.lampType, w.channel);
           final metaPath = _metaPathFor(dir, w.lampType, w.channel);
           await File(binPath).writeAsBytes(bytes, flush: true);

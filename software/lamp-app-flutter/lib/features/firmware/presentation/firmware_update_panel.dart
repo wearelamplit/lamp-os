@@ -6,37 +6,23 @@ import '../../../core/theme/brand_extras.dart';
 import '../../../core/widgets/info_panel.dart';
 import '../../inventory/application/inventory_notifier.dart';
 import '../application/cached_firmware_notifier.dart';
+import '../application/firmware_gate.dart';
 import '../application/firmware_notifier.dart';
 import '../data/cached_firmware.dart';
 import '../domain/firmware_state.dart';
-
-enum FirmwareRowAction { install, upToDate, notThisLamp, versionUnknown }
-
-/// Gate a cached entry against the lamp: [install] only when the variant
-/// matches, the lamp reported its running version, and the cached build is
-/// strictly newer. Same packed-semver encoding on both sides, so `>` is a
-/// correct newer-than test.
-FirmwareRowAction firmwareRowActionFor({
-  required CachedFirmware entry,
-  required String? lampType,
-  required int? lampFwVersion,
-}) {
-  if (entry.lampType != lampType) return FirmwareRowAction.notThisLamp;
-  if (lampFwVersion == null) return FirmwareRowAction.versionUnknown;
-  if (entry.version <= lampFwVersion) return FirmwareRowAction.upToDate;
-  return FirmwareRowAction.install;
-}
 
 class FirmwareUpdatePanel extends ConsumerWidget {
   const FirmwareUpdatePanel({
     super.key,
     required this.deviceId,
     required this.lampType,
+    required this.lampChannel,
     required this.lampFwVersion,
   });
 
   final String deviceId;
   final String? lampType;
+  final String? lampChannel;
   final int? lampFwVersion;
 
   @override
@@ -45,17 +31,21 @@ class FirmwareUpdatePanel extends ConsumerWidget {
     final notifier = ref.read(firmwareNotifierProvider(deviceId).notifier);
 
     // Fall back to inventory's persisted values when the live LampSection
-    // hasn't reported lampType / fwVersion yet (pre-section-read window, or
-    // a lamp whose firmware is too old to emit the field). Without this, the
-    // persisted values are write-only and gating degrades unnecessarily.
+    // hasn't reported lampType / fwChannel / fwVersion yet (pre-section-read
+    // window, or a lamp whose firmware is too old to emit the field). Without
+    // this, the persisted values are write-only and gating degrades.
     String? resolvedLampType = lampType;
+    String? resolvedChannel = lampChannel;
     int? resolvedFwVersion = lampFwVersion;
-    if (resolvedLampType == null || resolvedFwVersion == null) {
+    if (resolvedLampType == null ||
+        resolvedChannel == null ||
+        resolvedFwVersion == null) {
       final inv = ref.watch(inventoryNotifierProvider).value;
       if (inv != null) {
         for (final entry in inv) {
           if (entry.id == deviceId) {
             resolvedLampType ??= entry.lampType;
+            resolvedChannel ??= entry.fwChannel;
             resolvedFwVersion ??= entry.fwVersion;
             break;
           }
@@ -68,6 +58,7 @@ class FirmwareUpdatePanel extends ConsumerWidget {
         FirmwareIdle() => _CacheListView(
             deviceId: deviceId,
             lampType: resolvedLampType,
+            lampChannel: resolvedChannel,
             lampFwVersion: resolvedFwVersion,
           ),
         FirmwareVerifying() => const _BusyView(label: 'Verifying signature…'),
@@ -100,10 +91,12 @@ class _CacheListView extends ConsumerWidget {
   const _CacheListView({
     required this.deviceId,
     required this.lampType,
+    required this.lampChannel,
     required this.lampFwVersion,
   });
   final String deviceId;
   final String? lampType;
+  final String? lampChannel;
   final int? lampFwVersion;
 
   @override
@@ -134,14 +127,13 @@ class _CacheListView extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('Downloaded firmware', style: theme.textTheme.titleMedium),
-        const SizedBox(height: AppSpace.sm),
         for (final entry in sorted)
           _CacheRow(
             entry: entry,
             action: firmwareRowActionFor(
               entry: entry,
               lampType: lampType,
+              lampChannel: lampChannel,
               lampFwVersion: lampFwVersion,
             ),
             onInstall: () => ref

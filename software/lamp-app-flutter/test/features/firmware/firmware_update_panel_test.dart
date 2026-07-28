@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lamp_app/features/firmware/application/firmware_gate.dart';
 import 'package:lamp_app/features/firmware/data/cached_firmware.dart';
 import 'package:lamp_app/features/firmware/data/firmware_release_client.dart';
-import 'package:lamp_app/features/firmware/presentation/firmware_update_panel.dart';
 
 CachedFirmware _entry({
   String lampType = 'standard',
@@ -23,6 +23,7 @@ void main() {
         firmwareRowActionFor(
           entry: _entry(version: 5),
           lampType: 'standard',
+          lampChannel: 'standard-beta',
           lampFwVersion: 4,
         ),
         FirmwareRowAction.install,
@@ -34,6 +35,7 @@ void main() {
         firmwareRowActionFor(
           entry: _entry(version: 4),
           lampType: 'standard',
+          lampChannel: 'standard-beta',
           lampFwVersion: 4,
         ),
         FirmwareRowAction.upToDate,
@@ -45,6 +47,7 @@ void main() {
         firmwareRowActionFor(
           entry: _entry(version: 3),
           lampType: 'standard',
+          lampChannel: 'standard-beta',
           lampFwVersion: 4,
         ),
         FirmwareRowAction.upToDate,
@@ -56,6 +59,7 @@ void main() {
         firmwareRowActionFor(
           entry: _entry(lampType: 'snafu', version: 9),
           lampType: 'standard',
+          lampChannel: 'standard-beta',
           lampFwVersion: 4,
         ),
         FirmwareRowAction.notThisLamp,
@@ -67,9 +71,46 @@ void main() {
         firmwareRowActionFor(
           entry: _entry(version: 9),
           lampType: 'standard',
+          lampChannel: 'standard-beta',
           lampFwVersion: null,
         ),
         FirmwareRowAction.versionUnknown,
+      );
+    });
+
+    test('lamp channel unknown → version unknown', () {
+      expect(
+        firmwareRowActionFor(
+          entry: _entry(version: 9),
+          lampType: 'standard',
+          lampChannel: null,
+          lampFwVersion: 4,
+        ),
+        FirmwareRowAction.versionUnknown,
+      );
+    });
+
+    test('beta lamp + stable entry at equal version → install (promotion)', () {
+      expect(
+        firmwareRowActionFor(
+          entry: _entry(channel: FirmwareChannel.stable, version: 4),
+          lampType: 'standard',
+          lampChannel: 'standard-beta',
+          lampFwVersion: 4,
+        ),
+        FirmwareRowAction.install,
+      );
+    });
+
+    test('stable lamp + beta entry → up to date (no reverse promotion)', () {
+      expect(
+        firmwareRowActionFor(
+          entry: _entry(channel: FirmwareChannel.beta, version: 5),
+          lampType: 'standard',
+          lampChannel: 'standard-stable',
+          lampFwVersion: 4,
+        ),
+        FirmwareRowAction.upToDate,
       );
     });
 
@@ -78,6 +119,7 @@ void main() {
         firmwareRowActionFor(
           entry: _entry(version: 9),
           lampType: 'standard',
+          lampChannel: 'standard-beta',
           lampFwVersion: 4,
         ),
         FirmwareRowAction.install,
@@ -86,6 +128,7 @@ void main() {
         firmwareRowActionFor(
           entry: _entry(version: 4),
           lampType: 'standard',
+          lampChannel: 'standard-beta',
           lampFwVersion: 4,
         ),
         FirmwareRowAction.upToDate,
