@@ -1,12 +1,17 @@
 # Embedded heap discipline
 
-The lamp's real runtime free heap is ~58 KB, fragmented in practice to a ~23 KB
-largest contiguous block (BLE, ESP-NOW, the webapp, and wifi are all resident at
-once). `malloc(N)` needs N *contiguous* bytes, so the number that bites is the
-largest free block, not total free. The 1.1.1 audit found a whole column of
-independent bugs that were one anti-pattern hitting this ceiling. Read this before
-adding any feature that snapshots the roster, tracks per-peer state, or answers
-"who's nearby."
+The lamp's settled-boot free heap is ~46.5 KB, fragmented in practice to a
+~40.9 KB largest contiguous block (BLE, ESP-NOW, and wifi resident). `malloc(N)`
+needs N *contiguous* bytes, so the number that bites is the largest free block,
+not total free. The 1.1.1 audit found a whole column of independent bugs that
+were one anti-pattern hitting this ceiling. Read this before adding any feature
+that snapshots the roster, tracks per-peer state, or answers "who's nearby."
+
+The softAP webapp and BLE are heap-exclusive: a config client connecting can
+squeeze free heap into a range too tight for the AsyncWebServer to serve the
+config page, so `ble_control::deinitForWebapp()` tears BLE (NimBLE host + BT
+controller) down on client-connect to give the serve headroom. BLE comes back
+only via a reboot on session end (`webapp::tick()`), never an in-place re-init.
 
 ## The recurring anti-pattern
 
@@ -32,9 +37,9 @@ Two properties make it lethal:
 
 1. **Watch `largest`, not just `free`.** `heap_caps_get_largest_free_block()` is the
    real budget. `util/heap_probe.hpp` (`lamp::logHeap`, LAMP_DEBUG) logs both at
-   boot / mesh / webapp / ble-connect / ble-disconnect / ota-stream / web-save. Tap
-   the serial, grep `[heap]`, find the checkpoint that craters the block. Measure the
-   fragmenter; do not theorize it.
+   boot / mesh / webapp / ble-connect / ble-disconnect / ble-pre / ble-post /
+   ota-stream / web-save. Tap the serial, grep `[heap]`, find the checkpoint that
+   craters the block. Measure the fragmenter; do not theorize it.
 2. **No heap churn on the hot path.** Never rebuild-and-sort a fresh allocation per
    loop tick. Throttle it, dirty-gate it (rebuild only when the roster changed), or
    reuse a member buffer `reserve()`d once to its max.

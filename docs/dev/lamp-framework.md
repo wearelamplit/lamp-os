@@ -517,7 +517,7 @@ per-pixel draw constants in
 | `software/lamp-os/src/core/lamp_features.hpp` | `Features` bitmask enum for built-in behavior opt-in/out |
 | `software/lamp-os/src/core/behavior_stack_builder.hpp` | `BehaviorStackBuilder` helper for registering behaviors |
 | `software/lamp-os/src/core/pending_slot_aggregate.hpp/.cpp` | Core 0→1 hand-off mechanism for async work |
-| `software/lamp-os/src/core/override_aggregate.hpp/.cpp` | Transient color/brightness overrides (60 s watchdog release) |
+| `software/lamp-os/src/core/override_aggregate.hpp/.cpp` | Transient color/brightness overrides (colour watchdog 100 s, wisp keep-alive-held; brightness watchdog its own separate 60 s) |
 | `software/lamp-os/src/core/personality_engine.hpp/.cpp` | Personality gate for expression suppression |
 | `software/lamp-os/src/core/behavior_context.hpp` | `BehaviorContext` struct: service pointers for behaviors |
 | `software/lamp-os/src/core/animated_behavior.hpp` | `AnimatedBehavior` base class: control/draw interface |

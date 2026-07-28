@@ -51,9 +51,9 @@ identical.
   even size rounded down to odd, spotSpeed to 1–10): expect a normal render,
   `[cmd] ok` + `[trigger]`, zero crash lines. Partially verified 2026-07-15.
 - Codec clamp (BLE settings path, `config_codec.cpp`): out-of-range
-  `socialMode` (>2) falls back to 1, `base.ac` beyond the color list resets
-  to 0, segment `px` values clamp to the 255-pixel budget. Exercise via a
-  settings write with a bad value and read the `lamp` section back clamped.
+  `socialMode` (>2) falls back to 1, segment `px` values clamp to the
+  255-pixel budget. Exercise via a settings write with a bad value and read
+  the `lamp` section back clamped.
 
 Verified 2026-07-15: a `{"lamp":{…}}` settings-blob write persists, then
 intentionally reboots the lamp ~2 s later (`wantsReboot` path — rst:0xc, no

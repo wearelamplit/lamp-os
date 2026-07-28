@@ -9,9 +9,8 @@ prefix hash at boot, and the web-server start. A single-threaded task, so its
 true peak is the DEEPEST NESTED call chain in any one entry, not the sum of the
 sequential drains (the stack unwinds between them).
 
-Run this before changing `LAMP_LOOP_STACK_SIZE`, before/after the OTA SHA
-buffer shrink, or after adding any new drain, expression, behavior, or
-web-server work that runs on the loop task.
+Run this before changing `LAMP_LOOP_STACK_SIZE`, or after adding any new
+drain, expression, behavior, or web-server work that runs on the loop task.
 
 ## Hardware
 
@@ -38,7 +37,7 @@ on the same dominant chain.
 
 | Function | Frame (B) | Notes |
 |---|---:|---|
-| `FirmwareDistributor::computeShaPrefixOnce` | **4320** | 4096 B stack block buffer. Boot only, signed builds. Pending shrink to a 512 B block → ~**736 B**. |
+| `FirmwareDistributor::computeShaPrefixOnce` | **736** | 512 B stack block buffer. Boot only, signed builds. |
 | `Lamp::setup` | 528 | live under the whole boot chain |
 | `drainTestAction` | 704 | 512 B `kPendingJsonOp` stack buf + locals |
 | `drainExpressionOp` / `drainWifiOp` | 640 | " |
@@ -60,15 +59,17 @@ analysis.
 
 ### Candidate chains, deepest first
 
-**A. Boot OTA SHA prefix (signed builds only) — CURRENT worst case.**
+**A. Boot OTA SHA prefix (signed builds only).**
 ```
 loopTask → Lamp::setup [528] → firmwareDistributor.begin [32]
-         → computeShaPrefixOnce [4320] → mbedtls_sha256_update (prebuilt ~300)
+         → computeShaPrefixOnce [736] → mbedtls_sha256_update (prebuilt ~300)
 ```
-≈ **5.4 KB** with the 4096 B buffer. The distributor self-disables on the
+≈ **1.9 KB** with the 512 B block buffer. The distributor self-disables on the
 `-dev` channel (`firmware_distributor.cpp`), so this chain runs ONLY on
-signed (`beta`/`stable`) builds, at boot, before the first `loop()`. With the
-pending 512 B buffer it drops to ≈ **1.9 KB** and stops being the peak.
+signed (`beta`/`stable`) builds, at boot, before the first `loop()`. It is not
+the peak; the web-server-start path (chain C) dominates. The signature-verify
+scratch (`firmware_signature` / `fs_signature`, 4096 B) is HEAP-allocated
+(`unique_ptr`), off the loop stack.
 
 **B. Runtime drain + JSON parse (all builds).**
 ```
@@ -98,16 +99,13 @@ vectors. Never the peak. Listed to rule out.
 
 | Configuration | Peak chain | Estimate | Observable on |
 |---|---|---:|---|
-| Current (4096 B SHA buffer) | A (boot SHA) | ~5.4 KB | signed build only |
-| Current, dev build | max(B, C) | ~2.6 KB | dev serial |
-| After 512 B SHA shrink | C (webui start), then B | ~2.6 KB | dev serial |
+| Signed build | C (webui start), then B | ~2.6 KB | signed build only |
+| Dev build | max(B, C) | ~2.6 KB | dev serial |
 
-**Finding that drives the plan:** with the 4096 B SHA buffer the true peak
-(~5.4 KB) leaves little headroom under 8192, so shrinking the loop stack is not
-worth it until the SHA buffer shrinks. After the 512 B shrink the peak falls to
-the web-server-start path (~2.6 KB, measurable on a dev build), and the loop
-stack can come down materially. **Land the SHA-buffer shrink first, then set
-the ceiling against the shrunk build.**
+**Finding that drives the plan:** the SHA prefix streams in a 512 B stack block
+(chain A ≈ 1.9 KB) and the signature-verify scratch is heap-allocated, so the
+peak is the web-server-start path (~2.6 KB, measurable on a dev build). The loop
+stack ceiling is set against that path.
 
 ## Step 0 — RE-EVALUATE before every run (mandatory)
 
@@ -233,13 +231,10 @@ safety margin, applied via a weak `getArduinoLoopTaskStackSize()` override.
   prebuilt libs. The margin covers that unmeasured tail plus the port's ISR
   frame that can nest on top of the deepest sync frame. 1.5 KB is the floor;
   2 KB is the recommendation.
-- **After the 512 B SHA shrink:** measured peak ≈ 2.6 KB (confirm chain C
-  empirically — it's the new driver) + 2 KB → **`LAMP_LOOP_STACK_SIZE = 5120`**
-  (recovers ~3 KB RAM vs 8192; meaningful given the tight fragmented heap). If
-  chain C measures higher than the analytic estimate, raise to `measured + 2048`
-  rounded up to a KB.
-- **Before the shrink (4096 B buffer):** peak ≈ 5.4 KB + 2 KB ≈ 7.4 KB — under
-  8192 but not worth the change. Do the SHA shrink first.
+- **Ceiling:** measured peak ≈ 2.6 KB (confirm chain C empirically — it's the
+  driver) + 2 KB → **`LAMP_LOOP_STACK_SIZE = 5120`** (recovers ~3 KB RAM vs
+  8192; meaningful given the tight fragmented heap). If chain C measures higher
+  than the analytic estimate, raise to `measured + 2048` rounded up to a KB.
 - **Single default, not per-variant.** Standard and snafu share the dominant
   chain and differ by < 200 B at the render leaf, so one
   `LAMP_LOOP_STACK_SIZE` covers both. Only split into a per-variant override
@@ -265,9 +260,9 @@ is a finding even though it passes.
 |---|---|---|---:|---:|---:|---:|---|
 | _tbd_ | | | | | | | analysis only — no hardware run yet |
 
-Analytic baseline (this branch, `-fstack-usage`, no hardware): current peak
-≈ 5.4 KB (signed, boot SHA) / ≈ 2.6 KB (dev runtime). Post-512-shrink peak
-≈ 2.6 KB. Recommended ceiling post-shrink: 5120 B.
+Analytic baseline (this branch, `-fstack-usage`, no hardware): peak ≈ 2.6 KB
+(web-server start on the loop task), signed and dev alike. Recommended
+ceiling: 5120 B.
 
 ## Not covered here
 
