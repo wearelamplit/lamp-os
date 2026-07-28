@@ -83,6 +83,21 @@ void paintBase(FrameBuffer* baseFb, uint32_t nowMs, bool quietEntered) {
   settleSurface(baseFb, nowMs, quietEntered, s_baseSettle);
 }
 
+// Crossfade the just-computed shade indicator back toward the frozen pre-quiet
+// frame captured on quiet entry. settleStep 0 holds the frozen frame;
+// >= kBaseSettleDurationMs yields the pure indicator.
+void blendShadeToFrozen(FrameBuffer* fb, uint32_t nowMs) {
+  const size_t pixelCount = fb->buffer.size();
+  const uint32_t elapsed = nowMs - s_shadeSettle.entryMs;
+  const uint32_t settleStep =
+      elapsed >= kBaseSettleDurationMs ? kBaseSettleDurationMs : elapsed;
+  for (size_t i = 0; i < pixelCount; i++) {
+    if (i >= s_shadeSettle.start.size()) continue;
+    fb->buffer[i] =
+        fade(s_shadeSettle.start[i], fb->buffer[i], kBaseSettleDurationMs, settleStep);
+  }
+}
+
 }  // namespace
 
 void paint(FrameBuffer* fb, const Color& localBase, uint32_t nowMs,
@@ -95,6 +110,13 @@ void paint(FrameBuffer* fb, const Color& localBase, uint32_t nowMs,
   if (pixelCount == 0) {
     paintBase(baseFb, nowMs, quietEntered);
     return;
+  }
+
+  // Snapshot the frozen pre-quiet shade frame before any write to fb->buffer,
+  // so blendShadeToFrozen can crossfade the indicator out of it.
+  if (quietEntered) {
+    s_shadeSettle.entryMs = nowMs;
+    s_shadeSettle.start = fb->buffer;
   }
 
   // Probe the in-flight OTA side. The cross-state-machine guard in lamp.cpp
@@ -170,6 +192,7 @@ void paint(FrameBuffer* fb, const Color& localBase, uint32_t nowMs,
 #endif
 
   if (!haveSession || total == 0) {
+    blendShadeToFrozen(fb, nowMs);
     paintBase(baseFb, nowMs, quietEntered);
     return;
   }
@@ -257,6 +280,7 @@ void paint(FrameBuffer* fb, const Color& localBase, uint32_t nowMs,
   }
 #endif
 
+  blendShadeToFrozen(fb, nowMs);
   paintBase(baseFb, nowMs, quietEntered);
 }
 

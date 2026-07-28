@@ -130,7 +130,7 @@ bool verifySignedFirmware(FirmwareByteReader reader, size_t imageLen,
   // Step 2: stream-compute SHA-256 over the signed region, reading
   // kStreamBlockBytes (4 KB) chunks from the reader, feeding each
   // chunk straight into mbedtls_sha256_update. Total RAM footprint
-  // for the verify pass: ~200 B of SHA context + 4 KB stack block
+  // for the verify pass: ~200 B of SHA context + 4 KB heap block
   // buffer + 96 B footer + 32 B digest. The full ~1.4 MB firmware is
   // never resident in heap.
   mbedtls_sha256_context shaCtx;

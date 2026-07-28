@@ -11,7 +11,9 @@
 //
 // Shade render: all pixels = localBase at 20% dim; the leading N pixels = the
 // peer's base color at full brightness, where N = (done/total) * pixelCount
-// in 8.8 fixed-point (anti-aliased fractional edge pixel).
+// in 8.8 fixed-point (anti-aliased fractional edge pixel). On quiet entry the
+// shade crossfades from the frozen pre-quiet frame into this indicator over the
+// settle duration, matching the base.
 //
 // Base render: on quiet entry (caller-signaled via quietEntered), eases from
 // the frozen pre-quiet frame to baseFb->defaultColors, then holds static.

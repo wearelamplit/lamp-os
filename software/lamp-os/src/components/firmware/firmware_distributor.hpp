@@ -103,11 +103,16 @@ class FirmwareDistributor {
   // peerRssi is the peer's ESP-NOW HELLO RSSI (-127 = unknown, not gated):
   // skips the offer below kOtaMinRssiDbm rather than starting a doomed
   // direct-hop transfer.
+  // peerBeingServed is the mesh-derived "another lamp already has this peer":
+  // the peer reports otaState receiving, or some roster peer reports sending to
+  // it. The caller computes it from the roster; the offer is skipped so
+  // concurrent senders don't stomp a legacy receiver's erase+accept.
   void considerPeerForOta(const uint8_t peerMac[6], uint32_t peerVersion,
                           uint8_t peerProtocolVersion, uint32_t nowMs,
                           const char* peerFwChannel = nullptr,
                           uint16_t peerMaxChunk = 0,
-                          int8_t peerRssi = -127);
+                          int8_t peerRssi = -127,
+                          bool peerBeingServed = false);
 
   // Inbound packet hooks: mesh_link dispatches MSG_FW_ACCEPT/REQ/RESULT
   // from its WiFi recv task. Idempotent on irrelevant packets (wrong target

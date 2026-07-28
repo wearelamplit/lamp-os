@@ -708,7 +708,8 @@ void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
                                              uint32_t nowMs,
                                              const char* peerFwChannel,
                                              uint16_t peerMaxChunk,
-                                             int8_t peerRssi) {
+                                             int8_t peerRssi,
+                                             bool peerBeingServed) {
   if (state_ != State::Idle) {
     FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X v=0x%08X skip: "
                 "state=%u (not Idle)\n",
@@ -774,6 +775,14 @@ void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
       // version-only gate. Receiver's otaAcceptable is the downstream backstop.
       if (peerVersion >= lamp::FIRMWARE_VERSION) return;
     }
+  }
+  if (peerBeingServed) {
+    FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X v=0x%08X skip: "
+                "peer being served\n",
+                peerMac[0], peerMac[1], peerMac[2],
+                peerMac[3], peerMac[4], peerMac[5],
+                (unsigned)peerVersion);
+    return;
   }
   if (peerIsInBackoff(peerMac, nowMs)) {
     FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X v=0x%08X skip: "

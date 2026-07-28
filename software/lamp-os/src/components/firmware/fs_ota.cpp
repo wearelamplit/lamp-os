@@ -125,8 +125,9 @@ const void* fsRecvPartition() {
 }
 
 bool fsShouldAccept(uint32_t offerVersion, const uint8_t* offerDigestPrefix) {
-  // Don't overwrite the UI partition while the web server is mid-serve.
-  if (webapp::isActive()) return false;
+  // Don't overwrite the UI partition out from under a client mid-serve. An idle
+  // boot-window AP doesn't block; the transfer tears the SoftAP down for coex.
+  if (webapp::hasClient()) return false;
   // Version-coupled: only an FS image stamped with the running firmware
   // version, and only if its content differs from the local image.
   if (offerVersion != lamp::FIRMWARE_VERSION) return false;
@@ -299,9 +300,11 @@ void considerPeer(const uint8_t peerMac[6], uint32_t peerFwVersion,
       std::memcmp(peerFsDigest, s_localDigest, lp::FW_SHA256_PREFIX_LEN) == 0) {
     return;
   }
-  // Don't distribute while any OTA (FS or firmware) is mid-flow, or while the
-  // local web window is open.
-  if (firmwarePathBusy() || s_fsReceiver.isInProgress() || webapp::isActive()) {
+  // Don't distribute while any OTA (FS or firmware) is mid-flow, or while a
+  // client is actively using this lamp's web UI. The stream itself tears the
+  // SoftAP down for coex via enterQuiet; gating on an idle boot-window AP would
+  // block distribution indefinitely on never-expire lamps.
+  if (firmwarePathBusy() || s_fsReceiver.isInProgress() || webapp::hasClient()) {
     return;
   }
   s_fsDistributor.considerPeerForOta(peerMac, peerFwVersion,
