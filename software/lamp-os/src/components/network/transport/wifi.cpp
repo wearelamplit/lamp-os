@@ -30,6 +30,7 @@ static uint32_t s_lastBackgroundScanMs = 0;
 static StateChangeCallback s_cb = nullptr;
 static HomeModeEnabledGetter s_homeModeEnabledGetter = nullptr;
 static OtaInProgressGetter   s_otaInProgressGetter   = nullptr;
+static WebappActiveGetter    s_webappActiveGetter    = nullptr;
 
 // Guards s_scanResults + s_recentSsids + s_lastScanCompleteMs against
 // concurrent access. Writer: Core 1 wifi::tick() (scan-complete drain
@@ -135,6 +136,10 @@ void setHomeModeEnabledGetter(HomeModeEnabledGetter fn) {
 
 void setOtaInProgressGetter(OtaInProgressGetter fn) {
   s_otaInProgressGetter = fn;
+}
+
+void setWebappActiveGetter(WebappActiveGetter fn) {
+  s_webappActiveGetter = fn;
 }
 
 bool homeSsidVisible(const std::string& ssid) {
@@ -282,8 +287,12 @@ void tick() {
   // route through startScan() directly and remain available.
   const bool otaInProgress =
       s_otaInProgressGetter && s_otaInProgressGetter();
+  // Block periodic scans while a webapp client is connected: the channel hop
+  // stalls the softAP's HTTP server for the scan's duration.
+  const bool webappActive =
+      s_webappActiveGetter && s_webappActiveGetter();
   if (s_state == IDLE && !ble_control::isClientConnected() &&
-      homeModeEnabled && !otaInProgress) {
+      homeModeEnabled && !otaInProgress && !webappActive) {
     const uint32_t now = millis();
     const uint32_t elapsed = now - s_lastBackgroundScanMs;
     if (elapsed > BACKGROUND_SCAN_INTERVAL_MS) {

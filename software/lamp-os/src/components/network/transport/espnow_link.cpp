@@ -69,6 +69,11 @@ bool EspNowLink::begin(EspNowRecvFn recv) {
   esp_now_register_recv_cb(recvTrampoline);
   esp_now_register_send_cb(sendTrampoline);
 
+  // 1M DSSS: the robust rate. Broadcasts (HELLO/cascade) get no MAC ACK/retry,
+  // so robustness matters; coex is slot-scheduled, so a faster rate frees no
+  // BLE airtime. TX-side only; receivers auto-detect from the PLCP header.
+  esp_wifi_config_espnow_rate(WIFI_IF_STA, WIFI_PHY_RATE_1M_L);
+
   esp_now_peer_info_t peer = {};
   std::memset(&peer, 0, sizeof(peer));
   std::memset(peer.peer_addr, 0xFF, 6);
@@ -104,6 +109,30 @@ bool EspNowLink::broadcast(const uint8_t* data, size_t len) {
   }
 #endif
   return err == ESP_OK;
+}
+
+// ponytail: single cached peer slot, not an LRU table; one display wisp. Grow to N-slot only if we ever unicast to multiple wisps at once.
+bool EspNowLink::send(const uint8_t mac[6], const uint8_t* data, size_t len) {
+  if (mac == nullptr || data == nullptr) return false;
+  if (peerCacheNeedsReadd(peerSet_, peerMac_, mac)) {
+    if (peerSet_) esp_now_del_peer(peerMac_);
+    esp_now_peer_info_t peer = {};
+    std::memset(&peer, 0, sizeof(peer));
+    std::memcpy(peer.peer_addr, mac, 6);
+    peer.channel = 0;
+    peer.ifidx = WIFI_IF_STA;
+    peer.encrypt = false;
+    const esp_err_t err = esp_now_add_peer(&peer);
+    if (err != ESP_OK && err != ESP_ERR_ESPNOW_EXIST) {
+#ifdef LAMP_DEBUG
+      Serial.printf("[espnow] add_peer err=%d (0x%x)\n", (int)err, (unsigned)err);
+#endif
+      return false;
+    }
+    std::memcpy(peerMac_, mac, 6);
+    peerSet_ = true;
+  }
+  return esp_now_send(mac, data, len) == ESP_OK;
 }
 
 void EspNowLink::getMac(uint8_t out[6]) {

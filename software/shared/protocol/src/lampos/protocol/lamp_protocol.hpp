@@ -13,10 +13,13 @@
 //   presence.hpp    MSG_HELLO (0x01), lamp beacon.
 //   control_op.hpp  MSG_CONTROL_OP (0x03), forwarded BLE write.
 //   wisp.hpp        MSG_WISP_HELLO (0x20), MSG_WISP_CLAIM (0x25),
-//                   MSG_WISP_PALETTE (0x26), MSG_WISP_PAINT (0x27).
+//                   MSG_WISP_PALETTE (0x26), MSG_WISP_PAINT (0x27),
+//                   MSG_WISP_STATE (0x28).
 //   override.hpp    MSG_OVERRIDE_COLORS (0x21) / RESTORE_COLORS (0x22) /
 //                   OVERRIDE_BRIGHTNESS (0x23) / RESTORE_BRIGHTNESS (0x24).
 //   dedup_ring.hpp  DedupRing (gossip-relay dup suppressor; not a message).
+//   paint_timing.hpp  Wisp paint watchdog/keep-alive constants (not a
+//                     message; compile-time timing shared lamp+wisp).
 //
 // The version byte at data[2] is a receive range, not a single number.
 // PROTOCOL_VERSION_EMIT goes on the wire; inspect() accepts
@@ -40,13 +43,9 @@
 #include <lampos/protocol/wisp.hpp>
 #include <lampos/protocol/override.hpp>
 #include <lampos/protocol/dedup_ring.hpp>
+#include <lampos/protocol/paint_timing.hpp>
 
 namespace lamp_protocol {
-
-// ESP-NOW v2 payload ceiling (matches ESP_NOW_MAX_DATA_LEN_V2). A named
-// literal, not an esp_now.h include, so this header stays transport-agnostic
-// for the native test build.
-constexpr size_t ESPNOW_V2_FRAME_MAX = 1470;
 
 // Scratch-buffer size for building/parsing CONTROL_OP or HELLO frames (the
 // two families that share this sizing); NOT a receive buffer, no production

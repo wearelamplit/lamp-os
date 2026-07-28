@@ -21,7 +21,8 @@
 //              HELLO_TLV_FW_CHANNEL (0x02, HELLO_FW_CHANNEL_LEN=16B),
 //              HELLO_TLV_FS_STATE (0x03, HELLO_FS_DIGEST_LEN=8B),
 //              HELLO_TLV_FW_MAX_CHUNK (0x04, 2B),
-//              HELLO_TLV_NEED_FS (0x05, 1B).
+//              HELLO_TLV_NEED_FS (0x05, 1B),
+//              HELLO_TLV_OTA_SENDING_TO (0x06, 6B).
 //              Unknown types are skipped by their len byte (forward-compat).
 //
 // Fixed prefix through nameLen is HELLO_FIXED_SIZE (24) + 1; the whole frame
@@ -75,6 +76,13 @@ constexpr uint8_t HELLO_TLV_FW_MAX_CHUNK = 0x04;
 // distributor offers to the former. Re-evaluated every HELLO while no valid FS.
 constexpr uint8_t HELLO_TLV_NEED_FS = 0x05;
 
+// value: 6 raw MAC bytes, the mesh MAC of the peer this lamp is currently
+// OTA-distributing to. Emitted only while Sending (single-peer distributor).
+// Lets the app name the send edge and mark the receiver, which is HELLO-silent
+// during its own OTA. Absent on idle lamps and older firmware.
+constexpr uint8_t HELLO_TLV_OTA_SENDING_TO = 0x06;
+constexpr size_t  HELLO_OTA_SENDING_TO_LEN = 6;
+
 // Compact OTA-state enum carried in HELLO_TLV_OTA_STATE. Maps to:
 //   firmwareDistributor.isInProgress() → kOtaStateSending
 //   firmwareReceiver.isInProgress()    → kOtaStateReceiving
@@ -115,6 +123,10 @@ struct ParsedHello {
   // HELLO_TLV_NEED_FS. True when the peer has no FS image but wants one at this
   // firmware version; the FS distributor offers even though hasFsDigest=false.
   bool needsFs = false;
+  // HELLO_TLV_OTA_SENDING_TO, the mesh MAC of the peer this sender is OTA-ing.
+  // hasOtaSendingTo=false when absent (idle sender or older firmware).
+  bool    hasOtaSendingTo = false;
+  uint8_t otaSendingTo[6] = {0};
 };
 
 // Build a HELLO frame into `buf`. `name` is utf-8, NOT null-terminated on the wire.
@@ -133,7 +145,8 @@ inline size_t buildHello(uint8_t* buf, size_t bufLen, uint16_t seq,
                          const char* fwChannel = nullptr,
                          const uint8_t* fsDigest = nullptr,
                          uint16_t maxChunk = 0,
-                         bool needsFs = false) {
+                         bool needsFs = false,
+                         const uint8_t* otaSendingTo = nullptr) {
   if (!buf || !sourceMac || !shadeRGBW || !baseRGBW) return 0;
   if (nameLen > HELLO_MAX_NAME) nameLen = HELLO_MAX_NAME;
   // TLV trailer: tlv_count(1) + (type(1) + len(1) + value(N)) per emitted TLV.
@@ -145,11 +158,13 @@ inline size_t buildHello(uint8_t* buf, size_t bufLen, uint16_t seq,
   const bool emitFsDigest  = (fsDigest != nullptr);
   const bool emitMaxChunk  = (maxChunk != 0);
   const bool emitNeedFs    = needsFs;
+  const bool emitSendingTo = (otaSendingTo != nullptr);
   const size_t tlvBytes = 1 + (emitOtaState ? 3 : 0) +
                           (emitFwChannel ? (2 + HELLO_FW_CHANNEL_LEN) : 0) +
                           (emitFsDigest ? (2 + HELLO_FS_DIGEST_LEN) : 0) +
                           (emitMaxChunk ? 4 : 0) +
-                          (emitNeedFs ? 3 : 0);
+                          (emitNeedFs ? 3 : 0) +
+                          (emitSendingTo ? (2 + HELLO_OTA_SENDING_TO_LEN) : 0);
   const size_t total = HELLO_FIXED_SIZE + 1 + nameLen + tlvBytes;
   if (bufLen < total) return 0;
   buf[0] = MAGIC_0;
@@ -175,7 +190,8 @@ inline size_t buildHello(uint8_t* buf, size_t bufLen, uint16_t seq,
                                     (emitFwChannel ? 1 : 0) +
                                     (emitFsDigest ? 1 : 0) +
                                     (emitMaxChunk ? 1 : 0) +
-                                    (emitNeedFs ? 1 : 0));  // tlv_count
+                                    (emitNeedFs ? 1 : 0) +
+                                    (emitSendingTo ? 1 : 0));  // tlv_count
   if (emitOtaState) {
     buf[off++] = HELLO_TLV_OTA_STATE;
     buf[off++] = 1;          // len
@@ -207,6 +223,12 @@ inline size_t buildHello(uint8_t* buf, size_t bufLen, uint16_t seq,
     buf[off++] = 1;  // len
     buf[off++] = 1;  // value
   }
+  if (emitSendingTo) {
+    buf[off++] = HELLO_TLV_OTA_SENDING_TO;
+    buf[off++] = static_cast<uint8_t>(HELLO_OTA_SENDING_TO_LEN);  // len = 6
+    std::memcpy(&buf[off], otaSendingTo, HELLO_OTA_SENDING_TO_LEN);
+    off += HELLO_OTA_SENDING_TO_LEN;
+  }
   return total;
 }
 
@@ -233,6 +255,7 @@ inline bool parseHello(const uint8_t* data, size_t len, ParsedHello& out) {
   out.fwChannel[0] = '\0';
   out.maxChunk = 0;
   out.needsFs = false;
+  out.hasOtaSendingTo = false;
   size_t off = HELLO_FIXED_SIZE + 1 + nameLen;
   if (len <= off) return true;
   const uint8_t tlvCount = data[off++];
@@ -260,6 +283,10 @@ inline bool parseHello(const uint8_t* data, size_t len, ParsedHello& out) {
                      (static_cast<uint16_t>(data[off + 1]) << 8);
     } else if (tlvType == HELLO_TLV_NEED_FS && tlvLen == 1) {
       out.needsFs = (data[off] != 0);
+    } else if (tlvType == HELLO_TLV_OTA_SENDING_TO &&
+               tlvLen == HELLO_OTA_SENDING_TO_LEN) {
+      std::memcpy(out.otaSendingTo, &data[off], HELLO_OTA_SENDING_TO_LEN);
+      out.hasOtaSendingTo = true;
     }
     off += tlvLen;
   }

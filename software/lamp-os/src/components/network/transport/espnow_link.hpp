@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <cstring>
 
 namespace lamp {
 
@@ -15,6 +16,13 @@ namespace lamp {
 using EspNowRecvFn = void (*)(const uint8_t* mac, const uint8_t* data, size_t len,
                               int8_t rssi);
 
+// True when the single cached peer must be (re-)registered before a unicast
+// to `mac`: no peer cached yet, or the cached MAC differs from `mac`.
+inline bool peerCacheNeedsReadd(bool peerSet, const uint8_t cached[6],
+                               const uint8_t mac[6]) {
+  return !peerSet || std::memcmp(cached, mac, 6) != 0;
+}
+
 class EspNowLink {
  public:
   // Init ESP-NOW, register the broadcast peer, and route incoming frames
@@ -25,12 +33,20 @@ class EspNowLink {
   // Broadcast to FF:FF:FF:FF:FF:FF. Returns true if send queued.
   bool broadcast(const uint8_t* data, size_t len);
 
+  // Unicast to `mac`, ESP-NOW MAC-acked with hardware retry. Returns true if
+  // the send queued. One caller (the display-wisp control path, loop task).
+  bool send(const uint8_t mac[6], const uint8_t* data, size_t len);
+
   // Populate `out` (6 bytes) with this device's Wi-Fi STA MAC. Caller must
   // ensure begin() has run.
   void getMac(uint8_t out[6]);
 
   // Public so the C trampoline in the .cpp can reach it without a friend.
   static EspNowRecvFn s_recv;
+
+ private:
+  uint8_t peerMac_[6] = {0};
+  bool peerSet_ = false;
 };
 
 }  // namespace lamp

@@ -6,9 +6,10 @@
 #include <lampos/protocol/header.hpp>
 
 // The wisp coordination family: MSG_WISP_HELLO (0x20), MSG_WISP_CLAIM (0x25),
-// MSG_WISP_PALETTE (0x26), MSG_WISP_PAINT (0x27).
+// MSG_WISP_PALETTE (0x26), MSG_WISP_PAINT (0x27), MSG_WISP_STATE (0x28).
 // build/parse: buildWispHello/parseWispHello, buildWispClaim/parseWispClaim,
-//              buildWispPalette/parseWispPalette, buildWispPaint/parseWispPaint.
+//              buildWispPalette/parseWispPalette, buildWispPaint/parseWispPaint,
+//              buildWispState/parseWispState.
 //
 // MSG_WISP_HELLO (0x20), wisp presence beacon (WISP_HELLO_FIXED_SIZE == 45):
 //   off  size  field
@@ -22,12 +23,13 @@
 //   45    …    TLV trailer (v0x05+): [tlv_count][type,len,value]… (wisp emits
 //              tlv_count=0 today; parser skips unknowns). Cap WISP_HELLO_MAX_SIZE=96.
 //
-// MSG_WISP_CLAIM (0x25), wisp-to-wisp lamp-claim broadcast (WISP_CLAIM_MAX_SIZE==237):
+// MSG_WISP_CLAIM (0x25), wisp-to-wisp lamp-claim broadcast (WISP_CLAIM_MAX_SIZE==713):
 //    0    6    header
 //    6    6    sourceMac
-//   12    1    count (≤ kMaxWispClaimEntries = 32)
+//   12    1    count (≤ kMaxWispClaimEntries = 100)
 //   13   7*n   entries: each WISP_CLAIM_ENTRY_SIZE = lampMac(6) + int8 rssi(1)
-//              Fixed prefix WISP_CLAIM_FIXED_PREFIX = 13.
+//              Fixed prefix WISP_CLAIM_FIXED_PREFIX = 13. The whole claim set
+//              rides one v2 frame; no windowing.
 //
 // MSG_WISP_PALETTE (0x26), wisp manualPalette broadcast (MAX_SIZE == 213):
 //    0    6    header
@@ -37,12 +39,24 @@
 //   +    1*n   w plane (length-gated trailer; frames without it parse with
 //              w == nullptr). Fixed prefix WISP_PALETTE_FIXED_PREFIX = 13.
 //
-// MSG_WISP_PAINT (0x27), per-lamp paint colors broadcast (MAX_SIZE == 229):
+// MSG_WISP_PAINT (0x27), per-lamp paint colors broadcast (MAX_SIZE == 1213):
 //    0    6    header
 //    6    6    sourceMac
-//   12    1    count (≤ WISP_PAINT_MAX_ENTRIES = 18)
+//   12    1    count (≤ WISP_PAINT_MAX_ENTRIES = 100)
 //   13  12*n   entries: each WISP_PAINT_ENTRY_SIZE = lampMac(6)+baseRGB(3)+shadeRGB(3)
-//              Fixed prefix WISP_PAINT_FIXED_PREFIX = 13.
+//              Fixed prefix WISP_PAINT_FIXED_PREFIX = 13. The whole painted set
+//              rides one v2 frame; no windowing.
+//
+// MSG_WISP_STATE (0x28), declarative per-lamp state broadcast (MAX_SIZE == 1459):
+//    0    6    header
+//    6    6    sourceMac
+//   12    1    brightness (per-frame global)
+//   13    4    driftRateMs (LE, per-frame global; matches WispConfig driftIntervalMs)
+//   17    1    presenceFlags (per-frame global)
+//   18    1    count (≤ WISP_STATE_MAX_ENTRIES = 120)
+//   19  12*n   entries: each WISP_STATE_ENTRY_SIZE = lampMac(6)+baseRGB(3)+shadeRGB(3)
+//              Fixed prefix WISP_STATE_FIXED_PREFIX = 19. The whole state rides
+//              one v2 frame; no windowing, no relay (re-covers on its cadence).
 
 namespace lamp_protocol {
 
@@ -68,13 +82,12 @@ constexpr size_t WISP_HELLO_MAX_SIZE              = 96;
 // numeric value is unambiguous in context.
 
 // MSG_WISP_CLAIM: header(6) + sourceMac(6) + count(1) + entries[count*7].
-// Each entry: lampMac(6) + signed int8 rssi(1) = 7 bytes.
-// ESP-NOW frame cap 250 bytes; (250 - 13) / 7 = 33 entries max, capped at
-// 32. A claim set larger than one frame rotates across frames sender-side
-// (contested entries every frame); receivers accumulate.
+// Each entry: lampMac(6) + signed int8 rssi(1) = 7 bytes. One v2 frame carries
+// the whole claim set (up to kMaxWispClaimEntries = LampInventory::MAX_LAMPS),
+// so every lamp refreshes each tick and no sender-side windowing is needed.
 constexpr size_t WISP_CLAIM_FIXED_PREFIX = HEADER_SIZE + 6 + 1;  // 13
 constexpr size_t WISP_CLAIM_ENTRY_SIZE   = 6 + 1;                // 7
-constexpr size_t kMaxWispClaimEntries    = 32;
+constexpr size_t kMaxWispClaimEntries    = 100;
 // MSG_WISP_PALETTE: header(6) + sourceMac(6) + count(1) + rgb[count*3]
 // + w[count]. The W plane rides after the RGB block so parsers that read
 // only count*3 stay compatible (parseWispPalette is `len <` tolerant).
@@ -90,18 +103,38 @@ constexpr size_t WISP_PALETTE_MAX_SIZE     = WISP_PALETTE_FIXED_PREFIX +
                                               (WISP_PALETTE_ENTRY_SIZE + 1);  // 213
 constexpr size_t WISP_CLAIM_MAX_SIZE     = WISP_CLAIM_FIXED_PREFIX +
                                             kMaxWispClaimEntries *
-                                            WISP_CLAIM_ENTRY_SIZE;  // 237
+                                            WISP_CLAIM_ENTRY_SIZE;  // 713
+static_assert(WISP_CLAIM_MAX_SIZE <= ESPNOW_V2_FRAME_MAX,
+              "MSG_WISP_CLAIM exceeds ESP-NOW v2 frame cap");
 
 // MSG_WISP_PAINT: header(6) + sourceMac(6) + count(1) + entries[count * 12].
-// Each entry: lampMac(6) + baseRGB(3) + shadeRGB(3) = 12 bytes.
-// Cap at 18 entries: 13 + 18*12 = 229 B, within the 250-byte ESP-NOW frame.
+// Each entry: lampMac(6) + baseRGB(3) + shadeRGB(3) = 12 bytes. One v2 frame
+// carries the whole painted set: 13 + 100*12 = 1213 B, under the v2 cap.
 constexpr size_t WISP_PAINT_FIXED_PREFIX = HEADER_SIZE + 6 + 1;  // 13
 constexpr size_t WISP_PAINT_ENTRY_SIZE   = 6 + 3 + 3;            // 12
-constexpr size_t WISP_PAINT_MAX_ENTRIES  = 18;
+constexpr size_t WISP_PAINT_MAX_ENTRIES  = 100;
 constexpr size_t WISP_PAINT_MAX_SIZE     = WISP_PAINT_FIXED_PREFIX +
                                             WISP_PAINT_MAX_ENTRIES *
-                                            WISP_PAINT_ENTRY_SIZE;  // 229
-static_assert(WISP_PAINT_MAX_SIZE <= 250, "MSG_WISP_PAINT exceeds ESP-NOW frame cap");
+                                            WISP_PAINT_ENTRY_SIZE;  // 1213
+static_assert(WISP_PAINT_MAX_SIZE <= ESPNOW_V2_FRAME_MAX,
+              "MSG_WISP_PAINT exceeds ESP-NOW v2 frame cap");
+
+// MSG_WISP_STATE: header(6) + sourceMac(6) + brightness(1) + driftRateMs(4 LE)
+// + presenceFlags(1) + count(1) + entries[count * 12]. Brightness / drift-rate
+// / presence are per-frame globals, not per-lamp. Each entry: lampMac(6) +
+// baseRGB(3) + shadeRGB(3) = 12 bytes. One v2 frame carries the whole state:
+// 19 + 120*12 = 1459 B, under the v2 cap.
+constexpr size_t WISP_STATE_ENTRY_SIZE   = 6 + 3 + 3;  // 12
+constexpr size_t WISP_STATE_FIXED_PREFIX = HEADER_SIZE + 6 + 1 + 4 + 1 + 1;  // 19
+constexpr size_t WISP_STATE_MAX_ENTRIES  = 120;
+constexpr size_t WISP_STATE_MAX_SIZE     = WISP_STATE_FIXED_PREFIX +
+                                            WISP_STATE_MAX_ENTRIES *
+                                            WISP_STATE_ENTRY_SIZE;  // 1459
+static_assert(WISP_STATE_ENTRY_SIZE == 12, "WISP_STATE entry is mac(6)+base(3)+shade(3)");
+static_assert(WISP_STATE_FIXED_PREFIX == 19,
+              "WISP_STATE prefix is header(6)+mac(6)+brightness(1)+drift(4)+presence(1)+count(1)");
+static_assert(WISP_STATE_MAX_SIZE <= ESPNOW_V2_FRAME_MAX,
+              "MSG_WISP_STATE exceeds ESP-NOW v2 frame cap");
 
 struct ParsedWispHello {
   uint16_t seq;
@@ -144,6 +177,18 @@ struct ParsedWispPaint {
   uint8_t  count;
   // Pointer into the recv buffer; caller must not retain past this call.
   // `count * WISP_PAINT_ENTRY_SIZE` bytes of packed lampMac(6)+baseRGB(3)+shadeRGB(3).
+  const uint8_t* entries;
+};
+
+struct ParsedWispState {
+  uint16_t seq;
+  uint8_t  sourceMac[6];
+  uint8_t  brightness;
+  uint32_t driftRateMs;
+  uint8_t  presenceFlags;
+  uint8_t  count;
+  // Pointer into the recv buffer; caller must not retain past this call.
+  // `count * WISP_STATE_ENTRY_SIZE` bytes of packed lampMac(6)+baseRGB(3)+shadeRGB(3).
   const uint8_t* entries;
 };
 
@@ -216,6 +261,39 @@ inline size_t buildWispPaint(uint8_t* buf, size_t bufLen, uint16_t seq,
   if (count) {
     std::memcpy(&buf[WISP_PAINT_FIXED_PREFIX], entries,
                 count * WISP_PAINT_ENTRY_SIZE);
+  }
+  return total;
+}
+
+// Build a MSG_WISP_STATE frame. `entries` is `count` packed records, each
+// WISP_STATE_ENTRY_SIZE bytes: lampMac(6) + baseRGB(3) + shadeRGB(3).
+// `brightness`, `driftRateMs`, and `presenceFlags` are per-frame globals.
+// `count` must be ≤ WISP_STATE_MAX_ENTRIES. Returns total bytes written on
+// success, 0 on bad args / insufficient buffer / count overflow.
+inline size_t buildWispState(uint8_t* buf, size_t bufLen, uint16_t seq,
+                             const uint8_t sourceMac[6],
+                             uint8_t brightness,
+                             uint32_t driftRateMs,
+                             uint8_t presenceFlags,
+                             const uint8_t* entries,
+                             uint8_t count) {
+  if (!buf || !sourceMac) return 0;
+  if (count > WISP_STATE_MAX_ENTRIES) return 0;
+  if (count > 0 && !entries) return 0;
+  const size_t total = WISP_STATE_FIXED_PREFIX + count * WISP_STATE_ENTRY_SIZE;
+  if (bufLen < total) return 0;
+  detail::writeHeader(buf, MSG_WISP_STATE, seq);
+  std::memcpy(&buf[6], sourceMac, 6);
+  buf[12] = brightness;
+  buf[13] = static_cast<uint8_t>(driftRateMs & 0xFF);
+  buf[14] = static_cast<uint8_t>((driftRateMs >> 8) & 0xFF);
+  buf[15] = static_cast<uint8_t>((driftRateMs >> 16) & 0xFF);
+  buf[16] = static_cast<uint8_t>((driftRateMs >> 24) & 0xFF);
+  buf[17] = presenceFlags;
+  buf[18] = count;
+  if (count) {
+    std::memcpy(&buf[WISP_STATE_FIXED_PREFIX], entries,
+                count * WISP_STATE_ENTRY_SIZE);
   }
   return total;
 }
@@ -316,6 +394,42 @@ inline bool parseWispPaint(const uint8_t* data, size_t len, ParsedWispPaint& out
   out.count = count;
   out.entries = count ? &data[WISP_PAINT_FIXED_PREFIX] : nullptr;
   return true;
+}
+
+inline bool parseWispState(const uint8_t* data, size_t len, ParsedWispState& out) {
+  if (inspect(data, len) != MSG_WISP_STATE) return false;
+  if (len < WISP_STATE_FIXED_PREFIX) return false;
+  const uint8_t count = data[18];
+  if (count > WISP_STATE_MAX_ENTRIES) return false;
+  const size_t expected = WISP_STATE_FIXED_PREFIX +
+                          static_cast<size_t>(count) * WISP_STATE_ENTRY_SIZE;
+  if (len < expected) return false;
+  out.seq = static_cast<uint16_t>(data[4]) | (static_cast<uint16_t>(data[5]) << 8);
+  std::memcpy(out.sourceMac, &data[6], 6);
+  out.brightness = data[12];
+  out.driftRateMs =
+       static_cast<uint32_t>(data[13])
+     | (static_cast<uint32_t>(data[14]) << 8)
+     | (static_cast<uint32_t>(data[15]) << 16)
+     | (static_cast<uint32_t>(data[16]) << 24);
+  out.presenceFlags = data[17];
+  out.count = count;
+  out.entries = count ? &data[WISP_STATE_FIXED_PREFIX] : nullptr;
+  return true;
+}
+
+// Locate this receiver's own entry inside a parsed MSG_WISP_STATE block.
+// `entries` is `count` packed WISP_STATE_ENTRY_SIZE records; `mac` is the
+// receiver's 6-byte mesh MAC. Returns a pointer to the matching 12-byte
+// entry (lampMac(6)+baseRGB(3)+shadeRGB(3)), or nullptr when absent.
+inline const uint8_t* findWispStateEntry(const uint8_t* entries, uint8_t count,
+                                         const uint8_t mac[6]) {
+  if (!entries || !mac) return nullptr;
+  for (uint8_t i = 0; i < count; ++i) {
+    const uint8_t* e = entries + static_cast<size_t>(i) * WISP_STATE_ENTRY_SIZE;
+    if (std::memcmp(e, mac, 6) == 0) return e;
+  }
+  return nullptr;
 }
 
 inline bool parseWispHello(const uint8_t* data, size_t len, ParsedWispHello& out) {

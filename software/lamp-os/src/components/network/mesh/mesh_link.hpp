@@ -13,7 +13,10 @@
 #include "components/network/protocol/lamp_protocol.hpp"
 #include "hello_interval.hpp"
 #include "lamp_roster.hpp"
+#include "resend_ring.hpp"
 #include "pending_slots.hpp"
+#include "wisp_coex.hpp"
+#include "meshmix.hpp"
 #include "util/color.hpp"
 #include "components/firmware/firmware_receiver.hpp"  // FirmwareTransport interface
 
@@ -50,6 +53,7 @@ void postPendingWispHello(const PendingWispHello& src);
 void postPendingWispPalette(const PendingWispPalette& src);
 void postPendingWispClaim(const PendingWispClaim& src);
 void postPendingWispPaint(const PendingWispPaint& src);
+void postPendingWispState(const PendingWispState& src);
 void postPendingCommand(const PendingCommand& src);
 void postPendingEvent(const PendingEvent& src);
 void postPendingColorQuery(const PendingColorQuery& src);
@@ -92,6 +96,13 @@ class MeshLink {
   // CHAR_REMOTE_OP drain to forward a write to a far lamp.
   bool sendControlOp(const uint8_t targetMac[6], const uint8_t* payload,
                      size_t payloadLen);
+
+  // Unicast a CONTROL_OP to `targetMac` (the in-range display wisp). ESP-NOW
+  // MAC-ack + hardware retry replaces the broadcast path's spaced resends, so
+  // no ResendRing enqueue. Still records the seq in controlOpDedup_ so the
+  // receiver dedups. Returns the link send result.
+  bool sendControlOpUnicast(const uint8_t targetMac[6], const uint8_t* payload,
+                            size_t payloadLen);
 
   // Broadcast a MSG_COMMAND frame targeting a specific nearby lamp.
   // `invocationJson` is the ExpressionInvocation JSON; `len` must be
@@ -159,26 +170,57 @@ class MeshLink {
   // reception. Entries accumulate in LampRoster's fleet cache for
   // CHAR_WISP_CLAIMS and display-slot admission.
   lamp_protocol::DedupRing<16> wispClaimDedup_;
-  // Wisp manualPalette broadcasts. Dedup + gossip-relay like wispHello.
-  // Lamps DO act on the payload: cache it for the app to read via
+  // Wisp manualPalette broadcasts. Adopted only when heard directly (no
+  // relay). Lamps DO act on the payload: cache it for the app to read via
   // CHAR_WISP_STATUS.
   lamp_protocol::DedupRing<32> wispPaletteDedup_;
   // Per-lamp paint colors from the wisp. No relay; dedup prevents
   // repeat-fire. Cached for CHAR_WISP_CLAIMS to serve the app's
   // painted-lamps preview.
   lamp_protocol::DedupRing<16> wispPaintDedup_;
+  // Declarative per-lamp state from the wisp. No relay; dedup prevents
+  // repeat-fire on direct reception.
+  lamp_protocol::DedupRing<16> wispStateDedup_;
   lamp_protocol::DedupRing<64> commandDedup_;
-  lamp_protocol::DedupRing<16> eventDedup_;
-  lamp_protocol::DedupRing<16> colorQueryDedup_;
-  lamp_protocol::DedupRing<16> colorInfoDedup_;
+  // Greeting/expression low-rate types. 32 slots (up from 16) so a dense
+  // greet-storm plus the resend copies below don't evict a still-live
+  // (mac, seq) before its duplicate lands.
+  lamp_protocol::DedupRing<32> eventDedup_;
+  lamp_protocol::DedupRing<32> colorQueryDedup_;
+  lamp_protocol::DedupRing<32> colorInfoDedup_;
   // Single shared dedup for the MSG_FW_* family. One sender owns all
   // outbound FW seqs; the 6 msgTypes share one seq counter so cross-msgType
   // collisions can't happen. 16 slots is ample for a single in-flight OTA.
   lamp_protocol::DedupRing<16> firmwareDedup_;
 
+  // WISP_HELLO seq-gap coex meter. Runs on the recv task (handleRecv),
+  // never the loop task; see qa/coex.md.
+#ifdef LAMP_DEBUG
+  WispCoexMeter wispCoexMeter_;
+  MeshMix meshMix_;
+#endif
+
   uint32_t lastHelloMs_ = 0;
+  // MAC-seeded first-HELLO offset so a fleet powering on together doesn't
+  // boot-burst in lockstep. Applied once, to the first emit only.
+  uint32_t helloBootPhaseMs_ = 0;
+  uint8_t prevOtaState_ = lamp_protocol::kOtaStateIdle;
   uint16_t helloSeq_ = 0;
   uint16_t controlOpSeq_ = 0;
+
+  // Spaced re-broadcast of the unacked types that must survive the C6's
+  // bursty RX-scan gaps. Per-type instances (not one shared ring) so a
+  // command fan-out's replays don't crowd out a control-op's. The ring
+  // covers a 384 B command frame (358 B payload budget); a larger frame
+  // sends once. See docs/dev/networking.md.
+  static constexpr size_t kCommandResendPayloadMax = 358;
+  static constexpr size_t kCommandResendMax =
+      lamp_protocol::COMMAND_FIXED_SIZE + kCommandResendPayloadMax +
+      lamp_protocol::COMMAND_TAG_SIZE;
+  ResendRing<lamp_protocol::CONTROL_MAX_SIZE, 1> controlOpResend_;
+  ResendRing<kCommandResendMax, 10> commandResend_;
+  ResendRing<lamp_protocol::COLOR_QUERY_SIZE, 1> colorQueryResend_;
+  ResendRing<lamp_protocol::COLOR_INFO_MAX_SIZE, 4> colorInfoResend_;
   uint16_t commandSeq_    = 0;
   uint16_t eventSeq_      = 0;
   uint16_t colorQuerySeq_ = 0;
@@ -189,7 +231,22 @@ class MeshLink {
   FirmwareDistributor* firmwareDistributor_ = nullptr;
 
   void handleRecv(const uint8_t* mac, const uint8_t* data, size_t len, int8_t rssi);
-  void emitHello();
+  void emitHello(uint8_t otaState);
+  // Receiver in progress takes priority over distributor. kOtaStateIdle when
+  // neither is active.
+  uint8_t currentOtaState() const;
+#ifdef LAMP_DEBUG
+  void reportWispCoex(const uint8_t mac[6], uint16_t seq, uint32_t nowMs);
+  void reportMeshMix(uint32_t nowMs);
+#endif
+
+  // Re-broadcast a received frame for gossip relay.
+  void relay(const uint8_t* data, size_t len) {
+    link_.broadcast(data, len);
+#ifdef LAMP_DEBUG
+    meshMix_.relayedOut++;
+#endif
+  }
 };
 
 // FirmwareTransport adapter for the ESP-NOW mesh path. Thin wrapper over

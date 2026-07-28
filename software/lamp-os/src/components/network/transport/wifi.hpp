@@ -48,6 +48,13 @@ void setHomeModeEnabledGetter(HomeModeEnabledGetter fn);
 using OtaInProgressGetter = bool (*)();
 void setOtaInProgressGetter(OtaInProgressGetter fn);
 
+// Caller registers a getter for "a webapp client is connected to the softAP".
+// wifi.cpp uses it to suppress periodic background scans while the web config
+// UI is in use: a scan hops the radio off the softAP's channel, stalling the
+// HTTP server (reads as "site can't be reached") until it re-pins.
+using WebappActiveGetter = bool (*)();
+void setWebappActiveGetter(WebappActiveGetter fn);
+
 void tick();
 
 // Home-presence detection. The lamp periodically scans (when no BT client

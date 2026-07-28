@@ -128,7 +128,11 @@ constexpr uint16_t FW_MAX_REQ_RUN_CHUNKS = 20;
 // transfer thrashes regardless of chunk size, so both the offering and
 // receiving side skip it and let cascade OTA reach the peer via a nearer
 // lamp instead. Tunable toward ~-85 pending bench calibration.
-constexpr int8_t kOtaMinRssiDbm = -80;
+// RSSI reads pessimistically on these radios, so the floor is lenient. A peer
+// weaker than this can't converge a full-image transfer and just thrashes the
+// single streaming slot, so skip it and let cascade OTA reach it via a nearer
+// lamp.
+constexpr int8_t kOtaMinRssiDbm = -92;
 
 // Fixed-size frame totals. The byte layout for each is the per-builder
 // comment below.

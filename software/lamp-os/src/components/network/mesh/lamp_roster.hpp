@@ -34,8 +34,10 @@ namespace lamp {
  *
  *        Two facets, one per transport timestamp:
  *
- *        - near = seen via BLE (`lastSeenNearMs`): physically close.
- *          Gates greetings and crowd-dim.
+ *        - near (`lastSeenNearMs`): physically close. Set by any BT
+ *          sighting (short-range beacon, ungated) or by a direct ESP-NOW
+ *          HELLO whose RSSI clears the mesh threshold (`markNear`). Gates
+ *          greetings and crowd-dim.
  *        - mesh = seen via ESP-NOW (`lastSeenMeshMs`): network reachable.
  *          Gates OTA, remote config, and presence.
  *
@@ -80,6 +82,11 @@ struct RosterEntry {
   // Peer's HELLO_TLV_NEED_FS: empty/unmountable FS at this firmware version, so
   // it can't emit a digest. The FS distributor offers to it despite no digest.
   bool    needsFs = false;
+  // Peer's HELLO_TLV_OTA_SENDING_TO: the mesh MAC it's OTA-distributing to.
+  // hasOtaSendingTo=false unless the peer is mid-distribution. Surfaced in the
+  // nearby JSON so the app can name the send edge and mark the silent receiver.
+  bool    hasOtaSendingTo = false;
+  uint8_t otaSendingTo[6] = {0};
   // BLE-scan RSSI (dBm). Written only by addOrUpdateFromBle (single-transport
   // invariant for PersonalityEngine hysteresis). -127 = unknown, sorts to back.
   // getNear() sorts descending; getMesh() does not.
@@ -131,6 +138,8 @@ class LampRoster {
                              bool hasFsDigest = false,
                              uint16_t maxChunk = 0,
                              bool needsFs = false,
+                             const uint8_t* otaSendingTo = nullptr,
+                             bool hasOtaSendingTo = false,
                              int8_t rssi = -127);
 
   // Drop entries whose most-recent sighting (max of the two transports)
@@ -164,6 +173,10 @@ class LampRoster {
   // Mark a lamp as acknowledged. SocialBehavior calls this once per peer
   // so a re-trigger doesn't re-greet the same lamp until it prunes.
   void acknowledge(const std::string& name);
+
+  // Set the near timestamp on an existing entry (direct-HELLO proximity).
+  // No-op if the name is unknown.
+  void markNear(const std::string& name);
 
   // Cache wisp presence from MSG_WISP_HELLO. Display-slot admission: a
   // rival wisp is rejected while the current wisp's hellos are fresh
@@ -215,34 +228,32 @@ class LampRoster {
   // the page section serves the full accumulation.
   size_t buildWispClaimsBlob(uint8_t* out, size_t outCap, uint32_t nowMs);
 
-  // Record the source of an addressed wisp OVERRIDE_COLORS frame as the
-  // active painter (obey-gate key) and assert display presence when the
-  // slot is empty or stale so the first BLE wispStatus read is non-empty.
-  // 2 ms bounded take: CHAR_WISP_STATUS reads on Core 0 share this mutex.
+  // Record the source of an addressed wisp OVERRIDE_COLORS frame and assert
+  // display presence when the slot is empty or stale so the first BLE
+  // wispStatus read is non-empty. 2 ms bounded take: CHAR_WISP_STATUS reads
+  // on Core 0 share this mutex.
   void cacheWispMacFromPaint(const uint8_t mac[6]);
 
-  // True when `mac` is the active painter (painted this lamp, or was
-  // touch-refreshed by its PAINT_MODE hello, within the override-watchdog
-  // window). Brightness-floor bypass check; 2 ms bounded take, false on
-  // timeout so the frame drops.
-  bool isWispPainter(const uint8_t mac[6], uint32_t nowMs);
-
   // True when `mac` is the wisp currently claiming this lamp (the fresh
-  // display-slot wisp). Gates brightness overrides in every source mode,
-  // including Off where no color paint sets the painter record. 2 ms
-  // bounded take; false on timeout so the frame drops.
+  // display-slot wisp). Gates brightness overrides in every source mode.
+  // 2 ms bounded take; false on timeout so the frame drops.
   bool isClaimingWisp(const uint8_t mac[6], uint32_t nowMs);
 
-  // Refresh the painter's freshness stamp from its PAINT_MODE hello.
-  // Returns true when `mac` is the active painter; false leaves the
-  // stamp untouched so a rival wisp's hello cannot hold another wisp's
-  // paint.
-  bool touchWispPainter(const uint8_t mac[6], uint32_t nowMs);
+  // Copy the display-slot wisp's MAC into `out` when the slot is present and
+  // fresh, returning true. False (out untouched) when empty, stale, or the
+  // bounded take times out. The unicast target for the lamp's wisp control op.
+  bool copyDisplayWispMac(uint8_t out[6], uint32_t nowMs);
 
   // Build and return the JSON to serve on CHAR_WISP_STATUS reads.
   // Merges the cached wispStatus payload with the last MSG_WISP_HELLO
   // data. Returns "{}" if nothing has been cached for either path.
-  std::string getWispStatusReadJson(bool includePalette = false);
+  std::string getWispStatusReadJson();
+
+  // Copy the cached manual palette (interleaved R,G,B,W per color) into
+  // `out`, returning bytes written. Served on the `wisppalette` page
+  // section, decoupled from the notify-clobbered status char. 0 on an
+  // empty palette or a bounded-take timeout.
+  size_t copyManualPaletteBlob(uint8_t* out, size_t cap);
 
   // Current wisp-control state per surface: whether each surface is
   // actively wisp-painted and the most recent paint color.
@@ -266,11 +277,6 @@ class LampRoster {
   SemaphoreHandle_t mutex_ = nullptr;
   WispCache wispCache_;
   WispFleetCache wispFleet_;
-  // Obey-gate painter identity, distinct from the display slot: set by
-  // cacheWispMacFromPaint, refreshed by touchWispPainter.
-  bool painterPresent_ = false;
-  uint8_t painterMac_[6] = {0};
-  uint32_t painterLastMs_ = 0;
 
   // Caller must hold the mutex. True when `mac` may take or keep the
   // display slot; adopts (clearing per-wisp state) when it may and the

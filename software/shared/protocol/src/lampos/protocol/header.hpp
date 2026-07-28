@@ -143,6 +143,11 @@ enum MsgType : uint8_t {
   // current base + shade RGB so the app preview reflects drift, not just the
   // deterministic newcomer prediction.
   MSG_WISP_PAINT          = 0x27,
+  // Declarative per-lamp state the wisp broadcasts (~2 s, no relay). Per-lamp
+  // {mac,base,shade} entries plus per-frame globals (brightness, drift-rate,
+  // presence); lamps chase the targets. Supersedes the WISP_PAINT/CLAIM/OVERRIDE
+  // path, which stays wired until later phases retire it.
+  MSG_WISP_STATE          = 0x28,
   MSG_EVENT               = 0x30,
   // Targeted expression invocation. Lamp directs a specific nearby lamp to
   // run an expression. No gossip relay; addressedToUs filter on recv.
@@ -160,6 +165,11 @@ enum MsgType : uint8_t {
 constexpr uint8_t kReservedMsgTypeHighBit = 0x80;
 
 constexpr size_t HEADER_SIZE = 6;
+
+// ESP-NOW v2 payload ceiling (matches ESP_NOW_MAX_DATA_LEN_V2). A named
+// literal, not an esp_now.h include, so this header stays transport-agnostic
+// for the native test build.
+constexpr size_t ESPNOW_V2_FRAME_MAX = 1470;
 
 namespace detail {
 

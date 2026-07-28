@@ -97,6 +97,8 @@ void LampRoster::addOrUpdateFromEspNow(const std::string& name, const uint8_t ma
                                        bool hasFsDigest,
                                        uint16_t maxChunk,
                                        bool needsFs,
+                                       const uint8_t* otaSendingTo,
+                                       bool hasOtaSendingTo,
                                        int8_t rssi) {
   uint32_t now = millis();
   // WiFi task: bounded take so a stall doesn't block recv frames or the
@@ -138,6 +140,10 @@ void LampRoster::addOrUpdateFromEspNow(const std::string& name, const uint8_t ma
     }
     e.needsFs = needsFs;
     e.maxChunk = maxChunk;
+    e.hasOtaSendingTo = hasOtaSendingTo;
+    if (hasOtaSendingTo && otaSendingTo) {
+      std::memcpy(e.otaSendingTo, otaSendingTo, 6);
+    }
     e.espnowRssi = rssi;
     store_[count_++] = e;
   } else {
@@ -170,6 +176,12 @@ void LampRoster::addOrUpdateFromEspNow(const std::string& name, const uint8_t ma
     // Instantaneous like otaState: the latest HELLO wins, so a healed peer that
     // stops emitting NEED_FS clears here. Only HELLO reaches this method.
     store_[idx].needsFs = needsFs;
+    // Instantaneous like otaState: the latest HELLO wins. Absent (idle sender,
+    // older peer, or BLE-only caller) clears the edge.
+    store_[idx].hasOtaSendingTo = hasOtaSendingTo;
+    if (hasOtaSendingTo && otaSendingTo) {
+      std::memcpy(store_[idx].otaSendingTo, otaSendingTo, 6);
+    }
     // Zero from BLE-only callers or older peers leaves a known value intact.
     if (maxChunk != 0) store_[idx].maxChunk = maxChunk;
     // Freshens every HELLO like lastRssi does for BLE adv; -127 sentinel
@@ -282,6 +294,16 @@ void LampRoster::acknowledge(const std::string& name) {
   size_t idx = findIndexLocked(name);
   if (idx < count_) {
     store_[idx].acknowledged = true;
+    generation_++;
+  }
+  xSemaphoreGive(mutex_);
+}
+
+void LampRoster::markNear(const std::string& name) {
+  if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(2)) != pdTRUE) return;
+  size_t idx = findIndexLocked(name);
+  if (idx < count_) {
+    store_[idx].lastSeenNearMs = millis();
     generation_++;
   }
   xSemaphoreGive(mutex_);

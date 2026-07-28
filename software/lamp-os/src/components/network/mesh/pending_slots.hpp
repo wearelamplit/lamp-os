@@ -87,6 +87,18 @@ struct PendingWispPaint {
                   lamp_protocol::WISP_PAINT_ENTRY_SIZE];
 };
 
+// MSG_WISP_STATE pending slot. Holds the declarative per-lamp state entries
+// until the Core 1 drain scans for this lamp's own MAC and feeds the wisp
+// LayerStack. sourceMac gates the drain to this lamp's display wisp so a
+// rival's frame can't ease it home. Brightness / drift-rate globals are not
+// carried; the render path consumes base/shade only.
+struct PendingWispState {
+  uint8_t sourceMac[6];
+  uint8_t count;
+  uint8_t entries[lamp_protocol::WISP_STATE_MAX_ENTRIES *
+                  lamp_protocol::WISP_STATE_ENTRY_SIZE];
+};
+
 // MSG_COMMAND pending slot. Carries an ExpressionInvocation JSON payload
 // from the WiFi recv task to the Core 1 drain. sourceMac is used for cascade
 // coalescing.
