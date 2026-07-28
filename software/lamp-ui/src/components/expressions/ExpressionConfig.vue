@@ -7,8 +7,18 @@ import { computed } from 'vue'
 import FormField from '../FormField.vue'
 import ColorPicker from '../ColorPicker.vue'
 import NumberSlider from '../NumberSlider.vue'
+import RangeSlider from '../RangeSlider.vue'
 import { resolveBound } from './catalog'
-import type { Expression, ExpressionDescriptor, CatalogParam } from '../../types'
+import { formatDuration } from '../../utils/duration'
+import type { Expression, ExpressionDescriptor, CatalogParam, CatalogEnumOption } from '../../types'
+
+// Catalog units are 's' or 'ms' (raw slider value in that unit); anything
+// else (%, unitless) keeps the slider's default `value + append` label.
+const timeFormat = (unit?: string) => {
+  if (unit === 's') return (v: number) => formatDuration(v * 1000)
+  if (unit === 'ms') return (v: number) => formatDuration(v)
+  return undefined
+}
 
 const props = withDefaults(
   defineProps<{
@@ -47,6 +57,19 @@ const shownParams = computed(() =>
     (p) => !p.requiresZoning && (p.type === 'int' || p.type === 'enum'),
   ),
 )
+
+const optionGroups = (p: CatalogParam): { name: string | null; options: CatalogEnumOption[] }[] => {
+  const opts = p.options ?? []
+  if (!opts.some((o) => o.group)) return [{ name: null, options: opts }]
+  const groups: { name: string | null; options: CatalogEnumOption[] }[] = []
+  for (const o of opts) {
+    const name = o.group ?? ''
+    const last = groups[groups.length - 1]
+    if (last && last.name === name) last.options.push(o)
+    else groups.push({ name, options: [o] })
+  }
+  return groups
+}
 
 const paramMax = (p: CatalogParam) => resolveBound(p.max, pixelCount.value, p.min ?? 0)
 const paramValue = (p: CatalogParam) => Number(props.expression[p.key] ?? p.min ?? 0)
@@ -171,74 +194,59 @@ const onDurationMax = (value: number) => {
     </FormField>
 
     <template v-if="descriptor.interval">
-      <FormField :label="`${descriptor.interval.label || 'Trigger interval'} (min)`" id="expr-interval-min">
-        <NumberSlider
-          id="expr-interval-min"
-          :model-value="expression.intervalMin"
+      <FormField :label="descriptor.interval.label || 'Trigger interval'" id="expr-interval-min">
+        <RangeSlider
+          id="expr-interval"
+          :min-value="expression.intervalMin"
+          :max-value="expression.intervalMax"
           :min="descriptor.interval.min"
           :max="descriptor.interval.max"
           :step="descriptor.interval.step"
           :append="descriptor.interval.unit || ''"
+          :format="timeFormat(descriptor.interval.unit)"
           :disabled="disabled"
-          @update:model-value="onIntervalMin"
-        />
-      </FormField>
-
-      <FormField :label="`${descriptor.interval.label || 'Trigger interval'} (max)`" id="expr-interval-max">
-        <NumberSlider
-          id="expr-interval-max"
-          :model-value="expression.intervalMax"
-          :min="descriptor.interval.min"
-          :max="descriptor.interval.max"
-          :step="descriptor.interval.step"
-          :append="descriptor.interval.unit || ''"
-          :disabled="disabled"
-          @update:model-value="onIntervalMax"
+          @update:min-value="onIntervalMin"
+          @update:max-value="onIntervalMax"
         />
       </FormField>
     </template>
 
     <template v-if="descriptor.duration?.minKey && descriptor.duration?.maxKey">
-      <FormField :label="`${descriptor.duration.label || 'Duration'} (min)`" id="expr-duration-min">
-        <NumberSlider
-          id="expr-duration-min"
-          :model-value="Number(expression[descriptor.duration.minKey] ?? descriptor.duration.default[0])"
+      <FormField :label="descriptor.duration.label || 'Duration'" id="expr-duration-min">
+        <RangeSlider
+          id="expr-duration"
+          :min-value="Number(expression[descriptor.duration.minKey] ?? descriptor.duration.default[0])"
+          :max-value="Number(expression[descriptor.duration.maxKey] ?? descriptor.duration.default[1])"
           :min="descriptor.duration.min"
           :max="descriptor.duration.max"
           :step="descriptor.duration.step"
           :append="descriptor.duration.unit || ''"
+          :format="timeFormat(descriptor.duration.unit)"
           :disabled="disabled"
-          @update:model-value="onDurationMin"
-        />
-      </FormField>
-
-      <FormField :label="`${descriptor.duration.label || 'Duration'} (max)`" id="expr-duration-max">
-        <NumberSlider
-          id="expr-duration-max"
-          :model-value="Number(expression[descriptor.duration.maxKey] ?? descriptor.duration.default[1])"
-          :min="descriptor.duration.min"
-          :max="descriptor.duration.max"
-          :step="descriptor.duration.step"
-          :append="descriptor.duration.unit || ''"
-          :disabled="disabled"
-          @update:model-value="onDurationMax"
+          @update:min-value="onDurationMin"
+          @update:max-value="onDurationMax"
         />
       </FormField>
     </template>
 
     <FormField v-for="p in shownParams" :key="p.key" :label="p.label" :id="`expr-param-${p.key}`" :help-text="p.help">
-      <div v-if="p.type === 'enum'" class="targets">
-        <button
-          v-for="opt in p.options"
-          :key="opt.value"
-          type="button"
-          class="target"
-          :class="{ active: paramValue(p) === opt.value }"
-          :disabled="disabled"
-          @click="emit('update', { [p.key]: opt.value })"
-        >
-          {{ opt.label }}
-        </button>
+      <div v-if="p.type === 'enum'" class="enum-groups">
+        <div v-for="g in optionGroups(p)" :key="g.name ?? '_flat'" class="enum-group">
+          <span v-if="g.name" class="enum-group-label">{{ g.name }}</span>
+          <div class="targets">
+            <button
+              v-for="opt in g.options"
+              :key="opt.value"
+              type="button"
+              class="target"
+              :class="{ active: paramValue(p) === opt.value }"
+              :disabled="disabled"
+              @click="emit('update', { [p.key]: opt.value })"
+            >
+              {{ opt.label }}
+            </button>
+          </div>
+        </div>
       </div>
       <div v-else class="slider-labelled">
         <NumberSlider
@@ -248,6 +256,7 @@ const onDurationMax = (value: number) => {
           :max="paramMax(p)"
           :step="p.step ?? 1"
           :append="p.unit || ''"
+          :format="timeFormat(p.unit)"
           :disabled="disabled"
           @update:model-value="(value) => onParamSlider(p, value)"
         />
@@ -292,6 +301,19 @@ const onDurationMax = (value: number) => {
 .target:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.enum-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.enum-group-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--brand-slate-grey);
 }
 
 .slider-labelled {

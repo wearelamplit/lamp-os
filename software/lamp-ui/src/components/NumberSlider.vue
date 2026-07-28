@@ -1,7 +1,7 @@
 <template>
   <div class="number-slider-group">
     <span class="number-slider-value">{{
-      prepend === 'time' ? 'Time' : prepend + localValue + append
+      format ? format(localValue) : prepend === 'time' ? 'Time' : prepend + localValue + append
     }}</span>
     <input
       :id="id"
@@ -34,6 +34,8 @@ interface Props {
   append?: string
   prepend?: string
   disabled?: boolean
+  /** Overrides the `prepend + value + append` label when set. */
+  format?: (v: number) => string
 }
 
 const props = withDefaults(defineProps<Props>(), {

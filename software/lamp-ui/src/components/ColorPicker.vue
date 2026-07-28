@@ -21,6 +21,7 @@
               <label for="hex-input">Hex Value (RGB or RGBWW):</label>
               <input
                 id="hex-input"
+                ref="hexInputEl"
                 v-model="hexInput"
                 type="text"
                 class="hex-input"
@@ -30,7 +31,7 @@
             </div>
 
             <!-- Sliders -->
-            <div class="sliders-container">
+            <div class="sliders-container" @pointerdown.capture="blurHexInput">
               <NumberSlider
                 v-model="colorValues.red"
                 label="Red"
@@ -100,6 +101,11 @@ const emit = defineEmits<{
 const isDialogOpen = ref(false)
 const hexInput = ref('')
 const originalColor = ref('')
+const hexInputEl = ref<HTMLInputElement | null>(null)
+
+// A slider drag must not hand focus to the hex field, it pops the OS
+// keyboard mid-drag on mobile. Blur it before the drag's own focus lands.
+const blurHexInput = () => hexInputEl.value?.blur()
 
 const colorValues = ref<ColorValues>({
   red: 255,

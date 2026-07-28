@@ -18,18 +18,6 @@
             @close="emit('edit-session', false)"
             :disabled="disabled"
           />
-
-          <IconButton
-            v-if="localColors.length > 1"
-            icon="star"
-            variant="star"
-            :title="
-              isActiveColor(localColors.length - 1 - index) ? 'Active color' : 'Set as active'
-            "
-            :disabled="disabled"
-            :class="{ active: isActiveColor(localColors.length - 1 - index) }"
-            @click="setActiveColor(localColors.length - 1 - index)"
-          />
         </div>
 
         <div class="color-actions">
@@ -77,7 +65,6 @@ interface Props {
   showAddButton?: boolean
   maxColors?: number
   disabled?: boolean
-  activeColor?: number
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -85,12 +72,10 @@ const props = withDefaults(defineProps<Props>(), {
   showAddButton: true,
   maxColors: 5,
   disabled: false,
-  activeColor: 0,
 })
 
 const emit = defineEmits<{
   'update:modelValue': [value: string[]]
-  'update:activeColor': [value: number]
   'edit-session': [open: boolean]
 }>()
 
@@ -109,10 +94,6 @@ const gradientStyle = computed(() => {
   }
 })
 
-const isActiveColor = (index: number) => {
-  return props.activeColor === index
-}
-
 const updateColor = (index: number, value: string) => {
   localColors.value[index] = value
   emit('update:modelValue', [...localColors.value])
@@ -121,45 +102,20 @@ const updateColor = (index: number, value: string) => {
 const addColor = () => {
   const firstColor = localColors.value[0] || '#FF000000'
   localColors.value.unshift(firstColor)
-
-  // If active color exists and is not at index 0, increment its index
-  if (props.activeColor !== undefined && props.activeColor >= 0) {
-    emit('update:activeColor', props.activeColor + 1)
-  }
-
   emit('update:modelValue', [...localColors.value])
 }
 
 const removeColor = (index: number) => {
   if (localColors.value.length > 1) {
     localColors.value.splice(index, 1)
-
-    // If active color exists and is at or after the removed position, decrement its index
-    if (props.activeColor !== undefined && props.activeColor >= index) {
-      // If we're removing the active color itself, set it to 0 (first color)
-      // Otherwise, decrement the index
-      const newActiveIndex = props.activeColor === index ? 0 : props.activeColor - 1
-      emit('update:activeColor', newActiveIndex)
-    }
-
     emit('update:modelValue', [...localColors.value])
   }
-}
-
-const setActiveColor = (index: number) => {
-  emit('update:activeColor', index)
 }
 
 const cloneColor = (index: number) => {
   if (localColors.value.length < props.maxColors) {
     const colorToClone = localColors.value[index]
     localColors.value.splice(index, 0, colorToClone)
-
-    // If active color exists and is at or after the cloned position, increment its index
-    if (props.activeColor !== undefined && props.activeColor >= index) {
-      emit('update:activeColor', props.activeColor + 1)
-    }
-
     emit('update:modelValue', [...localColors.value])
   }
 }
@@ -173,17 +129,6 @@ watch(
     }
   },
   { deep: true },
-)
-
-// Watch for activeColor changes to ensure UI updates
-watch(
-  () => props.activeColor,
-  (newValue) => {
-    // Ensure activeColor is within valid range
-    if (newValue !== undefined && (newValue < 0 || newValue >= localColors.value.length)) {
-      console.warn(`activeColor ${newValue} is out of range for ${localColors.value.length} colors`)
-    }
-  },
 )
 </script>
 
@@ -250,18 +195,6 @@ watch(
   align-items: center;
   gap: 12px;
   margin-top: 8px;
-}
-
-/* Active star button styling */
-:deep(.icon-button.active) {
-  background: linear-gradient(135deg, var(--brand-aurora-blue), var(--brand-glow-pink));
-  color: var(--brand-lamp-white);
-  box-shadow: 0 2px 8px rgba(68, 108, 156, 0.3);
-}
-
-:deep(.icon-button.active:hover) {
-  background: linear-gradient(135deg, var(--color-accent-hover), var(--brand-glow-pink));
-  box-shadow: 0 4px 12px rgba(68, 108, 156, 0.4);
 }
 
 /* Mobile optimizations */

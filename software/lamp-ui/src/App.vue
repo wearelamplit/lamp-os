@@ -19,9 +19,7 @@ import {
   pxFromSegments,
   segmentsFromPalette,
 } from './utils/configShape'
-import { critterIndexFor } from './utils/critterIndex'
-import { critterAssetPath, fetchCritterTemplate, recolorCritterSvg } from './utils/critterAsset'
-import { hexwwToRgb } from './utils/colorUtils'
+import { blendedIdentity, hexwwToRgb } from './utils/colorUtils'
 
 // Firmware does a full-replace on PUT: any field omitted from the body resets
 // to its firmware default on the post-save reboot. So we GET the whole doc,
@@ -37,7 +35,7 @@ const defaultConfig = (): Config => ({
     socialMode: 1,
     apBootMinutes: 2,
   },
-  base: { ac: 0, segments: [{ px: 0, colors: [SAFE_COLOR] }], knockout: [] },
+  base: { segments: [{ px: 0, colors: [SAFE_COLOR] }], knockout: [] },
   shade: { segments: [{ px: 0, colors: [SAFE_COLOR] }] },
   expressions: [],
   homeMode: {
@@ -50,7 +48,7 @@ const defaultConfig = (): Config => ({
   },
 })
 
-// The UI edits one palette per surface plus base px/ac; these mirror the
+// The UI edits one palette per surface plus base px; these mirror the
 // firmware's segments (single source on load, fanned back on save).
 const baseColors = ref<string[]>([SAFE_COLOR])
 const basePx = ref(0)
@@ -244,6 +242,10 @@ const errorMessage = ref('')
 const baseColorsEditable = computed(() => cfg.value.base.colorsEditable !== false)
 const shadeColorsEditable = computed(() => cfg.value.shade.colorsEditable !== false)
 
+// Matches the lamp's own blendedIdentity() so the favicon + nameplate glow
+// the same color the device actually shows for a multi-stop base.
+const blendedBaseColor = computed(() => blendedIdentity(baseColors.value) ?? SAFE_COLOR)
+
 const nameValid = computed(() => {
   const n = cfg.value.lamp.name.trim()
   return n.length >= 3 && n.length <= 12
@@ -321,9 +323,22 @@ const sendEditSession = (surface: number, open: boolean) => {
   sendPreview({ a: 'edit_session', surface, open })
 }
 
+// Surface the expression-color preview is currently pausing expressions on,
+// as the sendEditSession mask (1=base, 2=shade, 3=both); 0 = none open.
+let previewEditSurface = 0
+
+// Expression target (1=Shade, 2=Base, 3=Both) inverted onto the
+// sendEditSession surface mask (1=Base, 2=Shade); target 3 sets both bits.
+const surfaceMaskForTarget = (target: number) =>
+  target === 1 ? 2 : target === 2 ? 1 : target === 3 ? 3 : 0
+
 // Re-assert the saved base/shade colors on the lamp to undo an
 // expression-color preview when leaving the expressions tab.
 const restoreColorPreview = () => {
+  if (previewEditSurface) {
+    sendEditSession(previewEditSurface, false)
+    previewEditSurface = 0
+  }
   if (!ready.value) return
   sendPreview({
     a: 'test_expression_complete',
@@ -334,9 +349,16 @@ const restoreColorPreview = () => {
 
 // Light the lamp with an expression's palette while its colors are edited,
 // routed to the surface the expression targets (1=Shade, 2=Base, 3=Both).
-// restoreColorPreview() puts the real colors back.
+// Pauses expressions on that surface (edit_session) so the preview reads
+// clean; restoreColorPreview() closes the session and puts the real colors back.
 const previewExpressionColors = (colors: string[], target: number) => {
   if (!ready.value || !colors.length) return
+  const mask = surfaceMaskForTarget(target)
+  if (mask && mask !== previewEditSurface) {
+    if (previewEditSurface) sendEditSession(previewEditSurface, false)
+    sendEditSession(mask, true)
+    previewEditSurface = mask
+  }
   if (target === 1 || target === 3) sendPreview({ shadeColors: [...colors] })
   if (target === 2 || target === 3) sendPreview({ baseColors: [...colors] })
 }
@@ -348,6 +370,7 @@ const connectWs = () => {
   }
   ws.onclose = () => {
     wsConnected.value = false
+    previewEditSurface = 0
     reconnectTimer = setTimeout(connectWs, 2000)
   }
 }
@@ -432,31 +455,6 @@ const save = async () => {
   }
 }
 
-// Sets tab title + favicon once when settings load; doesn't track later
-// color-slider edits.
-const setTabChrome = async () => {
-  document.title = cfg.value.lamp.name || 'Lamp config'
-  if (!cfg.value.lamp.lampId) return
-  try {
-    const template = await fetchCritterTemplate(critterAssetPath(critterIndexFor(cfg.value.lamp.lampId)))
-    const svg = recolorCritterSvg(
-      template,
-      hexwwToRgb(shadeColors.value[0] ?? SAFE_COLOR),
-      hexwwToRgb(baseColors.value[cfg.value.base.ac ?? 0] ?? SAFE_COLOR),
-    )
-    let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
-    if (!link) {
-      link = document.createElement('link')
-      link.rel = 'icon'
-      document.head.appendChild(link)
-    }
-    link.type = 'image/svg+xml'
-    link.href = `data:image/svg+xml,${encodeURIComponent(svg)}`
-  } catch {
-    // Keep the default favicon.
-  }
-}
-
 onMounted(async () => {
   try {
     const res = await fetch('/api/settings')
@@ -492,7 +490,6 @@ onMounted(async () => {
   originalSettings.value = editSnapshot()
   ready.value = true
   connectWs()
-  setTabChrome()
 })
 
 onUnmounted(() => {
@@ -543,7 +540,7 @@ onUnmounted(() => {
             <CritterNameplate
               :name="cfg.lamp.name"
               :lamp-id="cfg.lamp.lampId"
-              :base-color="baseColors[cfg.base.ac ?? 0]"
+              :base-color="blendedBaseColor"
               :shade-color="shadeColors[0]"
               :size="96"
             />
@@ -571,8 +568,7 @@ onUnmounted(() => {
               <ColorGradient
                 v-if="shadeColorsEditable"
                 v-model="shadeColors"
-                :show-add-button="false"
-                :max-colors="1"
+                :max-colors="5"
                 :disabled="disabled"
                 @edit-session="(open) => sendEditSession(2, open)"
               />
@@ -585,8 +581,6 @@ onUnmounted(() => {
                 v-model="baseColors"
                 :max-colors="5"
                 :disabled="disabled"
-                :active-color="cfg.base.ac ?? 0"
-                @update:active-color="(v) => (cfg.base.ac = v)"
                 @edit-session="(open) => sendEditSession(1, open)"
               />
               <div v-else class="info-text">Base color is set by firmware.</div>

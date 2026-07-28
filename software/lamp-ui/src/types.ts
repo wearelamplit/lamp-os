@@ -44,7 +44,6 @@ export interface Segment {
 }
 
 export interface BaseConfig {
-  ac: number
   segments?: Segment[]
   knockout: number[] // dense, one 0-100 entry per base pixel (100 = no knockout)
   // Firmware-owned; false = colors are fixed by the variant, hide the picker.
@@ -122,6 +121,7 @@ export interface CatalogRange {
 export interface CatalogEnumOption {
   value: number
   label: string
+  group?: string
 }
 
 export interface CatalogParam {

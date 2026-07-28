@@ -82,6 +82,82 @@ export function hexwwToRgb(hexValue: string): string {
   return `rgb(${blendedRed}, ${blendedGreen}, ${blendedBlue})`
 }
 
+// Fraction of the stops' mean chroma the blend must retain before the guard
+// pulls it back along a hue. Mirrors kIdentityChromaGuard in
+// software/shared/led-common/src/lampos/blended_identity.hpp.
+const IDENTITY_CHROMA_GUARD = 0.5
+
+function toByteHex(v: number): string {
+  return v.toString(16).padStart(2, '0').toUpperCase()
+}
+
+/**
+ * Single representative hexww color for a set of hexww stops, blended in
+ * linear light (de-gamma square, weighted mean, re-gamma sqrt) so a
+ * multi-stop base leans toward its dominant color instead of averaging
+ * muddy in gamma space. A chroma guard nudges a near-grey blend of
+ * complementary stops back along the result's hue (the first stop's hue if
+ * the blend is fully neutral). Port of blendedIdentity() in
+ * software/shared/led-common/src/lampos/blended_identity.hpp; keep in sync.
+ */
+export function blendedIdentity(colors: string[]): string | undefined {
+  if (colors.length === 0) return undefined
+  if (colors.length === 1) return colors[0]
+
+  const stops = colors.map(parseHexww)
+  let rl = 0,
+    gl = 0,
+    bl = 0,
+    wl = 0,
+    inChroma = 0
+  for (const { red, green, blue, warmWhite } of stops) {
+    const r = red / 255,
+      g = green / 255,
+      b = blue / 255,
+      w = warmWhite / 255
+    rl += r * r
+    gl += g * g
+    bl += b * b
+    wl += w * w
+    inChroma += Math.max(r, g, b) - Math.min(r, g, b)
+  }
+  const inv = 1 / colors.length
+  let r = Math.sqrt(rl * inv)
+  let g = Math.sqrt(gl * inv)
+  let b = Math.sqrt(bl * inv)
+  const w = Math.sqrt(wl * inv)
+  inChroma *= inv
+
+  const mx = Math.max(r, g, b)
+  const mn = Math.min(r, g, b)
+  const chroma = mx - mn
+  const target = IDENTITY_CHROMA_GUARD * inChroma
+  if (inChroma > 0 && chroma < target) {
+    const mid = (mx + mn) * 0.5
+    let hr = r,
+      hg = g,
+      hb = b
+    if (chroma <= 1e-4) {
+      hr = stops[0].red / 255
+      hg = stops[0].green / 255
+      hb = stops[0].blue / 255
+    }
+    const hmx = Math.max(hr, hg, hb)
+    const hmn = Math.min(hr, hg, hb)
+    const hc = hmx - hmn
+    const hmid = (hmx + hmn) * 0.5
+    if (hc > 1e-4) {
+      const k = target / hc
+      r = mid + (hr - hmid) * k
+      g = mid + (hg - hmid) * k
+      b = mid + (hb - hmid) * k
+    }
+  }
+
+  const q = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 255)
+  return `#${toByteHex(q(r))}${toByteHex(q(g))}${toByteHex(q(b))}${toByteHex(q(w))}`
+}
+
 /**
  * Create a CSS gradient string from an array of hexww colors
  */
