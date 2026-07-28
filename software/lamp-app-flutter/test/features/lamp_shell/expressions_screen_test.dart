@@ -6,6 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../_support/in_memory_ble_client.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/features/control/application/control_notifier.dart';
+import 'package:lamp_app/features/control/application/expression_draft.dart';
+import 'package:lamp_app/features/control/domain/lamp_color.dart';
 import 'package:lamp_app/features/inventory/application/inventory_notifier.dart';
 import 'package:lamp_app/features/inventory/domain/inventory_lamp.dart';
 import 'package:lamp_app/features/lamp_shell/presentation/expressions_screen.dart';
@@ -106,8 +108,7 @@ void main() {
     expect(find.text('Breathing'), findsOneWidget);
   });
 
-  testWidgets('confirm delete removes the entry and surfaces an UNDO snackbar',
-      (tester) async {
+  testWidgets('confirm delete removes the entry', (tester) async {
     final c = await _withState(
         '[{"type":"breathing","enabled":true,"colors":[],'
         '"intervalMin":10,"intervalMax":20,"target":1}]');
@@ -124,14 +125,11 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.tap(find.text('Delete'));
-    for (var i = 0; i < 30; i++) {
-      await tester.pump(const Duration(milliseconds: 16));
-      if (find.text('UNDO').evaluate().isNotEmpty) break;
-    }
+    // Dismissible.onDismissed (which fires removeExpression's write) runs
+    // only after the slide-out animation completes.
+    await tester.pumpAndSettle();
 
     expect(find.text('Breathing'), findsNothing);
-    expect(find.text('UNDO'), findsOneWidget);
-    expect(find.textContaining('Removed'), findsOneWidget);
 
     // Notifier state is now empty — the delete actually landed.
     expect(
@@ -139,10 +137,42 @@ void main() {
           .value!.expressions.expressions,
       isEmpty,
     );
+  });
 
-    // The UNDO action's restore via notifier.upsertExpression is exercised
-    // directly by control_notifier_test.dart; here we only verify the
-    // snackbar plumbing.
+  testWidgets(
+      'deleting an expression drops its draft so a re-add seeds defaults',
+      (tester) async {
+    // Seed breathing/shade with a distinctive red palette.
+    final c = await _withState(
+        '[{"type":"breathing","enabled":true,"colors":["FF000000"],'
+        '"intervalMin":10,"intervalMax":20,"target":1}]');
+    addTearDown(c.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: c,
+      child: const MaterialApp(
+        home: ExpressionsScreen(lampId: _devId),
+      ),
+    ));
+    await _pumpToData(tester, 'Breathing');
+
+    // Prime the keep-alive draft (as opening the editor once would): it now
+    // caches the existing red expression.
+    final primed = c.read(expressionDraftProvider(_devId, 'breathing', 1));
+    expect(primed.colors,
+        [const LampColor(r: 0xFF, g: 0, b: 0, w: 0)]);
+
+    await tester.drag(find.text('Breathing'), const Offset(-500, 0));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+
+    // Re-reading the draft for the same slot must seed the fresh default
+    // (lime, from ExpressionDraft._defaultNewColor), not the deleted red.
+    final reseeded = c.read(expressionDraftProvider(_devId, 'breathing', 1));
+    expect(reseeded.colors,
+        [const LampColor(r: 0xDD, g: 0xFF, b: 0x77, w: 0)],
+        reason: 'a re-added expression must not inherit the deleted colors');
   });
 
   testWidgets('toggling the Enabled switch flips ExpressionConfig.enabled',

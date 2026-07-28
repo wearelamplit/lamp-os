@@ -6,13 +6,12 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/routing/routes.dart';
 import '../../../core/theme/app_spacing.dart';
-import '../../../core/widgets/app_snackbar.dart';
 import '../../../core/widgets/empty_state_pane.dart';
 import '../../../core/widgets/friendly_error.dart';
 import '../../../core/widgets/settings_row.dart';
 import '../../control/application/control_notifier.dart';
+import '../../control/application/expression_draft.dart';
 import '../../control/domain/sections.dart';
-import '../../wisp/application/wisp_notifier.dart';
 import '../domain/expression_catalog.dart';
 import '../domain/expression_presentation.dart';
 
@@ -76,29 +75,36 @@ class ExpressionsScreen extends ConsumerWidget {
                       onTrigger:
                           triggerable ? () => notifier.testExpression(e) : null,
                       onToggle: (v) async {
-                        await notifier.upsertExpression(ExpressionConfig(
-                          type: e.type,
-                          enabled: v,
-                          colors: e.colors,
-                          intervalMin: e.intervalMin,
-                          intervalMax: e.intervalMax,
-                          target: e.target,
-                          parameters: e.parameters,
-                        ));
+                        // A failed write reverts optimistic state inside the
+                        // notifier; the rethrow would be an unhandled zone
+                        // error here (Switch.onChanged discards the future).
+                        try {
+                          await notifier.upsertExpression(ExpressionConfig(
+                            type: e.type,
+                            enabled: v,
+                            colors: e.colors,
+                            intervalMin: e.intervalMin,
+                            intervalMax: e.intervalMax,
+                            target: e.target,
+                            parameters: e.parameters,
+                          ));
+                        } catch (_) {}
                       },
                       onConfirmDelete: () => _confirmDelete(context, e.type),
                       onDelete: () async {
-                        await notifier.removeExpression(
-                          type: e.type,
-                          target: e.target,
-                        );
-                        if (!context.mounted) return;
-                        AppSnackbar.action(
-                          context,
-                          message: 'Removed "${e.type}"',
-                          actionLabel: 'UNDO',
-                          onAction: () => notifier.upsertExpression(e),
-                        );
+                        try {
+                          await notifier.removeExpression(
+                            type: e.type,
+                            target: e.target,
+                          );
+                        } catch (_) {
+                          return;
+                        }
+                        // Drop the keep-alive draft for this slot so re-adding
+                        // the same (type, target) seeds fresh defaults instead
+                        // of resurrecting the deleted expression's colors.
+                        ref.invalidate(
+                            expressionDraftProvider(lampId, e.type, e.target));
                       },
                     );
                   }
@@ -164,9 +170,7 @@ Future<bool> _confirmDelete(BuildContext context, String type) async {
       title: Text(type.isEmpty
           ? 'Delete this expression?'
           : 'Delete the "$type" expression?'),
-      content: const Text(
-        'You can undo this from the snackbar that appears after deleting.',
-      ),
+      content: const Text("This can't be undone."),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(ctx, false),
@@ -245,16 +249,6 @@ class _ExpressionTileState extends ConsumerState<_ExpressionTile> {
   Widget build(BuildContext context) {
     final expression = widget.expression;
     final presentation = ExpressionPresentation.forId(expression.type);
-    // Per-expression wisp-gating. Watch a tiny slice of wispStatus (just
-    // `controlling`) so the row greys when a wisp takes over and un-greys
-    // when the wisp releases.
-    final wispControlling = ref.watch(
-      wispNotifierProvider(widget.lampId).select(
-        (async) => async.value?.controlling ?? false,
-      ),
-    );
-    final muted =
-        (widget.descriptor?.pausesWispOverride ?? false) && wispControlling;
     final connected = ref.watch(controlNotifierProvider(widget.lampId)
         .select((a) => a.value?.connected ?? false));
     final colorScheme = Theme.of(context).colorScheme;
@@ -270,67 +264,61 @@ class _ExpressionTileState extends ConsumerState<_ExpressionTile> {
       ),
       confirmDismiss: (_) => widget.onConfirmDelete(),
       onDismissed: (_) => widget.onDelete(),
-      child: Opacity(
-        opacity: muted ? 0.35 : 1.0,
-        child: InkWell(
-          // `push` not `go`; see the FAB callsite for the same reason.
-          onTap: muted
-              ? null
-              : () => GoRouter.maybeOf(context)?.push(
-                    AppRoutes.expressionEditor(
-                        widget.lampId, expression.type, expression.target),
-                  ),
-          child: Container(
-            margin: const EdgeInsets.symmetric(
-                horizontal: AppSpace.lg, vertical: AppSpace.xs),
-            padding: const EdgeInsets.all(AppSpace.lg),
-            decoration: BoxDecoration(
-              color: colorScheme.surfaceContainer,
-              borderRadius: BorderRadius.circular(AppRadius.card),
-              border: Border.all(color: colorScheme.outlineVariant),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 36, // deliberate dimension, not spacing
-                  height: 36,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: colorScheme.onPrimaryContainer,
-                  ),
-                  child: Icon(presentation.icon,
-                      size: 18, color: colorScheme.onPrimary),
+      child: InkWell(
+        // `push` not `go`; see the FAB callsite for the same reason.
+        onTap: () => GoRouter.maybeOf(context)?.push(
+          AppRoutes.expressionEditor(
+              widget.lampId, expression.type, expression.target),
+        ),
+        child: Container(
+          margin: const EdgeInsets.symmetric(
+              horizontal: AppSpace.lg, vertical: AppSpace.xs),
+          padding: const EdgeInsets.all(AppSpace.lg),
+          decoration: BoxDecoration(
+            color: colorScheme.surfaceContainer,
+            borderRadius: BorderRadius.circular(AppRadius.card),
+            border: Border.all(color: colorScheme.outlineVariant),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 36, // deliberate dimension, not spacing
+                height: 36,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: colorScheme.onPrimaryContainer,
                 ),
-                const SizedBox(width: AppSpace.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(widget.title, style: textTheme.titleMedium),
-                      const SizedBox(height: AppSpace.xs),
-                      Text(
-                        _targetLabel,
-                        style: textTheme.bodySmall?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                        ),
+                child: Icon(presentation.icon,
+                    size: 18, color: colorScheme.onPrimary),
+              ),
+              const SizedBox(width: AppSpace.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(widget.title, style: textTheme.titleMedium),
+                    const SizedBox(height: AppSpace.xs),
+                    Text(
+                      _targetLabel,
+                      style: textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-                if (widget.onTrigger != null)
-                  IconButton(
-                    icon: const Icon(Icons.play_arrow_rounded),
-                    tooltip: 'Trigger',
-                    onPressed:
-                        (connected && !muted && !_cooling) ? _fire : null,
-                  ),
-                Switch(
-                  value: expression.enabled,
-                  onChanged: muted ? null : widget.onToggle,
+              ),
+              if (widget.onTrigger != null)
+                IconButton(
+                  icon: const Icon(Icons.play_arrow_rounded),
+                  tooltip: 'Trigger',
+                  onPressed: (connected && !_cooling) ? _fire : null,
                 ),
-              ],
-            ),
+              Switch(
+                value: expression.enabled,
+                onChanged: widget.onToggle,
+              ),
+            ],
           ),
         ),
       ),

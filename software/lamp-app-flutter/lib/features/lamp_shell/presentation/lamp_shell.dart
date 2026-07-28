@@ -9,6 +9,9 @@ import '../../../core/widgets/lamp_chip.dart';
 import '../../../features/control/application/control_notifier.dart';
 import '../../../features/control/presentation/control_screen.dart';
 import '../../../core/widgets/status_dot.dart';
+import '../../firmware/application/firmware_auto_installer.dart';
+import '../../firmware/application/firmware_notifier.dart';
+import '../../firmware/domain/firmware_state.dart';
 import '../../inventory/application/inventory_notifier.dart';
 import '../../social/presentation/social_screen.dart';
 import '../../wisp/application/wisp_notifier.dart';
@@ -51,6 +54,10 @@ class _LampShellState extends ConsumerState<LampShell> {
     // is released with the shell.
     ref.watch(controlNotifierProvider(widget.lampId));
 
+    // Keeps the auto-installer alive. A void provider with no other
+    // listener would auto-dispose mid-push.
+    ref.watch(firmwareAutoInstallerProvider(widget.lampId));
+
     // Same lifecycle treatment for the wisp notifier even though the
     // Wisp tab is gone from the bottom nav: the WispIndicator on the
     // Colors tab still consumes it, and the dedicated wisp config route
@@ -83,8 +90,12 @@ class _LampShellState extends ConsumerState<LampShell> {
     // status is enough here: connected → mesh, not connected → searching
     // (the screen exists precisely to reach this lamp, so "offline"
     // wouldn't be a useful distinction).
-    final status =
-        connected ? StatusKind.mesh : StatusKind.searching;
+    final updating = ref.watch(
+      firmwareNotifierProvider(widget.lampId).select((s) => s.isBusy),
+    );
+    final status = updating
+        ? StatusKind.otaBusy
+        : (connected ? StatusKind.mesh : StatusKind.searching);
 
     return Scaffold(
       appBar: AppBar(
@@ -117,15 +128,51 @@ class _LampShellState extends ConsumerState<LampShell> {
             selectedIndex: _tab.index,
             onDestinationSelected: (i) =>
                 setState(() => _tab = LampTab.values[i]),
-            destinations: const [
-              (icon: Icons.palette_outlined, label: 'Colors'),
-              (icon: Icons.handshake_outlined, label: 'Social'),
-              (icon: Icons.auto_awesome, label: 'Expressions'),
-              (icon: Icons.settings_outlined, label: 'Config'),
-              (icon: Icons.info_outline, label: 'Info'),
+            destinations: [
+              (icon: Icons.palette_outlined, label: 'Colors', badge: null),
+              (icon: Icons.handshake_outlined, label: 'Social', badge: null),
+              (icon: Icons.auto_awesome, label: 'Expressions', badge: null),
+              (icon: Icons.settings_outlined, label: 'Config', badge: null),
+              (
+                icon: Icons.info_outline,
+                label: 'Info',
+                badge: updating ? const _SparkleBadge() : null,
+              ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _SparkleBadge extends StatefulWidget {
+  const _SparkleBadge();
+
+  @override
+  State<_SparkleBadge> createState() => _SparkleBadgeState();
+}
+
+class _SparkleBadgeState extends State<_SparkleBadge>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1200),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: 'Updating',
+      child: FadeTransition(
+        opacity: Tween<double>(begin: 0.4, end: 1.0).animate(_ctrl),
+        child: const Text('✨', style: TextStyle(fontSize: 11)),
       ),
     );
   }

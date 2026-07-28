@@ -60,12 +60,27 @@ void main() {
       expect(d.zoneOptional, isTrue);
     });
 
-    test('pausesWispOverride parses per expression', () {
-      expect(catalog.byId('breathing')!.pausesWispOverride, isTrue);
-      expect(catalog.byId('shifty')!.pausesWispOverride, isTrue);
-      expect(catalog.byId('spotty')!.pausesWispOverride, isTrue);
-      expect(catalog.byId('pulse')!.pausesWispOverride, isFalse);
-      expect(catalog.byId('glitchy')!.pausesWispOverride, isFalse);
+    test('opacity param parses as an int slider', () {
+      final d = ExpressionDescriptor.fromJson({
+        'id': 'breathing', 'name': 'Breathing',
+        'params': [
+          {'key': 'opacity', 'type': 'int', 'label': 'Opacity',
+           'min': 10, 'max': 100, 'step': 5, 'default': 100, 'unit': '%'},
+        ],
+      });
+      final p = d.params.single;
+      expect(p.type, ParamType.integer);
+      expect(p.min, 10);
+      expect(p.max.resolve(50), 100);
+      expect(p.def.resolve(50), 100);
+      expect(p.unit, '%');
+    });
+
+    test('enum option parses group', () {
+      final o = EnumOption.fromJson({'value': 9, 'label': 'Out', 'group': 'Overshoot'});
+      expect(o.group, 'Overshoot');
+      final legacy = EnumOption.fromJson({'value': 0, 'label': 'Linear'});
+      expect(legacy.group, isNull);
     });
 
     test('glitchy has an optional zone and requiresZoning params', () {

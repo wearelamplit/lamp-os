@@ -2,14 +2,15 @@ import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_spacing.dart';
+import '../../../../core/utils/duration_format.dart';
 import '../../../../core/widgets/lamp_card.dart';
 import '../../../../core/widgets/settings_row.dart';
 import '../../domain/expression_catalog.dart';
 import 'motion_picker.dart';
 
-/// Which slice of the panel to render. The editor emits [placement] directly
-/// under the Target chooser and [main] below the Colors section, so Placement
-/// sits above Colors while the rest stays below.
+/// Which slice of the panel to render. The editor emits Colors directly under
+/// Target, then [placement] (Placement / Motion & Appearance / Behaviour),
+/// then [main] (Timing / Mesh).
 enum ExpressionPanelPart { placement, main }
 
 /// Renders an expression's editor controls generically from its firmware
@@ -19,9 +20,9 @@ enum ExpressionPanelPart { placement, main }
 /// but doesn't declare: the `fullStrip` zone flag and the mesh `cascade`
 /// controls (dev-mode, non-continuous expressions only).
 ///
-/// Controls are sorted into yellow-headed cards (Placement / Timing /
-/// Behaviour / Mesh); empty groups don't render. [part] selects which cards
-/// this instance emits.
+/// Controls are sorted into yellow-headed cards (Placement / Motion &
+/// Appearance / Behaviour / Timing / Mesh); empty groups don't render.
+/// [part] selects which cards this instance emits.
 ///
 /// Edits merge-patch the params map: each change copies the map and sets only
 /// the touched keys, so keys the schema-driven UI never surfaced (e.g. a zone
@@ -163,7 +164,7 @@ class ExpressionParamsPanel extends StatelessWidget {
       if (p.type == ParamType.enumeration) continue;
       if (p.requiresZoning && !zoning) continue;
       final maxV = p.max.resolve(pixelCount);
-      options.add(_ParamSlider(
+      final slider = _ParamSlider(
         label: p.label,
         value: _get(p.key, p.def.resolve(pixelCount)),
         min: p.min,
@@ -175,7 +176,8 @@ class ExpressionParamsPanel extends StatelessWidget {
         rightLabel: p.rightLabel,
         help: p.help,
         format: (v) => _fmtUnit(v, p.unit),
-      ));
+      );
+      (p.key == kOpacityParamKey ? motion : options).add(slider);
     }
 
     final duration = descriptor.duration;
@@ -252,11 +254,11 @@ class ExpressionParamsPanel extends StatelessWidget {
     final children = switch (part) {
       ExpressionPanelPart.placement => [
           ..._group('Placement', placement),
-          ..._group('Motion', motion),
+          ..._group('Motion & Appearance', motion),
+          ..._group('Behaviour', options),
         ],
       ExpressionPanelPart.main => [
           ..._group('Timing', timing),
-          ..._group('Behaviour', options),
           ..._group('Mesh', mesh),
         ],
     };
@@ -288,14 +290,9 @@ class ExpressionParamsPanel extends StatelessWidget {
 String _fmtUnit(int value, String? unit) {
   switch (unit) {
     case 's':
-      if (value < 90) return '${value}s';
-      final m = value ~/ 60;
-      final s = value % 60;
-      return s == 0 ? '${m}m' : '${m}m${s}s';
+      return formatDuration(Duration(seconds: value));
     case 'ms':
-      if (value < 1000) return '${value}ms';
-      final str = (value / 1000.0).toStringAsFixed(1);
-      return '${str.endsWith('.0') ? (value ~/ 1000).toString() : str}s';
+      return formatDuration(Duration(milliseconds: value));
     case '%':
       return '$value%';
     default:

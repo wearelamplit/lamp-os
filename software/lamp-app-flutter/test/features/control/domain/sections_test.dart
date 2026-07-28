@@ -29,6 +29,17 @@ void main() {
     expect(s.lampId, 'C4:DD:57:EB:64:60');
   });
 
+  test('LampSection parses otaState when emitted', () {
+    final s = LampSection.fromJson(
+        {'name': 'jacko', 'brightness': 42, 'otaState': 2});
+    expect(s.otaState, 2);
+  });
+
+  test('LampSection.otaState defaults to 0 (idle) on older firmware', () {
+    final s = LampSection.fromJson({'name': 'jacko', 'brightness': 42});
+    expect(s.otaState, 0);
+  });
+
   test('LampSection.fwVersion + fwChannel null on legacy firmware', () {
     // Old firmware that doesn't yet emit fwVersion/fwChannel — the Info
     // tab renders these as "..." rather than crashing on a null cast.
@@ -400,5 +411,23 @@ void main() {
       expect(a, equals(b));
       expect(a.hashCode, b.hashCode);
     });
+  });
+
+  test('BaseSection tolerates non-string and malformed colors', () {
+    final s = BaseSection.fromJson(jsonDecode(
+      '{"px":35,"bpp":4,"colors":["#300783FF",123,"FFFFFF","xy"],'
+      '"knockout":[]}',
+    ) as Map<String, dynamic>);
+    expect(s.colors, [
+      const LampColor(r: 0x30, g: 0x07, b: 0x83, w: 0xFF),
+      const LampColor(r: 0xFF, g: 0xFF, b: 0xFF, w: 0),
+    ]);
+  });
+
+  test('ShadeSection tolerates non-string and malformed colors', () {
+    final s = ShadeSection.fromJson(jsonDecode(
+      '{"px":38,"bpp":4,"colors":[null,"#000000FF","GG"]}',
+    ) as Map<String, dynamic>);
+    expect(s.colors, [const LampColor(r: 0, g: 0, b: 0, w: 0xFF)]);
   });
 }

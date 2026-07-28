@@ -104,9 +104,9 @@ void main() {
     addTearDown(c.dispose);
     await tester.pumpWidget(_wrap(c));
     await _pumpToData(tester);
-    // LED setup + Setup hotspot are always on; rows gated on advanced
+    // LED setup + Web Config are always on; rows gated on advanced
     // (e.g. Factory reset) stay hidden by default.
-    expect(find.text('Setup hotspot'), findsOneWidget);
+    expect(find.text('Web Config'), findsOneWidget);
     expect(find.text('Factory reset'), findsNothing);
   });
 
@@ -213,15 +213,69 @@ void main() {
     expect(find.text('Open · no password'), findsNothing);
   });
 
-  // --- De-jargon ---
+  // --- Web Config picker ---
 
-  testWidgets('shows "Setup hotspot", not "Boot-time setup AP"', (tester) async {
+  testWidgets('Web Config row defaults to "Always on" (webapp enabled, 0 min)',
+      (tester) async {
     final c = await _makeContainer();
     addTearDown(c.dispose);
     await tester.pumpWidget(_wrap(c));
     await _pumpToData(tester);
-    expect(find.text('Setup hotspot'), findsOneWidget);
+    expect(find.text('Web Config'), findsOneWidget);
+    expect(find.text('Always on'), findsOneWidget);
     expect(find.textContaining('Boot-time setup AP'), findsNothing);
+  });
+
+  testWidgets('tapping Web Config opens a picker with the duration options',
+      (tester) async {
+    final c = await _makeContainer();
+    addTearDown(c.dispose);
+    await tester.pumpWidget(_wrap(c));
+    await _pumpToData(tester);
+
+    await tester.tap(find.text('Web Config'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Disabled'), findsOneWidget);
+    expect(find.text('2 min'), findsOneWidget);
+    expect(find.text('5 min'), findsOneWidget);
+    expect(find.text('15 min'), findsOneWidget);
+    // 'Always on' shows both as the row subtitle and the sheet option.
+    expect(find.text('Always on'), findsWidgets);
+  });
+
+  testWidgets('picking a duration enables the webapp and sets ap-boot minutes',
+      (tester) async {
+    final c = await _makeContainer();
+    addTearDown(c.dispose);
+    await tester.pumpWidget(_wrap(c));
+    await _pumpToData(tester);
+
+    await tester.tap(find.text('Web Config'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('5 min'));
+    await tester.pumpAndSettle();
+
+    final lamp = c.read(controlNotifierProvider(_devId)).value!.lamp;
+    expect(lamp.webappEnabled, isTrue);
+    expect(lamp.apBootMinutes, 5);
+  });
+
+  testWidgets('picking Disabled turns the webapp off', (tester) async {
+    final c = await _makeContainer();
+    addTearDown(c.dispose);
+    await tester.pumpWidget(_wrap(c));
+    await _pumpToData(tester);
+
+    await tester.tap(find.text('Web Config'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Disabled'));
+    await tester.pumpAndSettle();
+
+    expect(
+      c.read(controlNotifierProvider(_devId)).value!.lamp.webappEnabled,
+      isFalse,
+    );
   });
 
   testWidgets('LED subtitle uses px counts, no byteOrder / GRB jargon',
@@ -260,7 +314,7 @@ void main() {
 
   // --- Grouping order ---
 
-  testWidgets('"Setup hotspot" sits under CONNECTIVITY and above LEDS',
+  testWidgets('"Web Config" sits under CONNECTIVITY and above LEDS',
       (tester) async {
     final c = await _makeContainer();
     addTearDown(c.dispose);
@@ -269,10 +323,10 @@ void main() {
 
     final connectivityDy =
         tester.getTopLeft(find.text('CONNECTIVITY')).dy;
-    final hotspotDy = tester.getTopLeft(find.text('Setup hotspot')).dy;
+    final webConfigDy = tester.getTopLeft(find.text('Web Config')).dy;
     final ledsDy = tester.getTopLeft(find.text('LEDS')).dy;
 
-    expect(hotspotDy, greaterThan(connectivityDy));
-    expect(hotspotDy, lessThan(ledsDy));
+    expect(webConfigDy, greaterThan(connectivityDy));
+    expect(webConfigDy, lessThan(ledsDy));
   });
 }

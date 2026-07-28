@@ -74,9 +74,11 @@ class ControlNotifier extends _$ControlNotifier {
   StreamSubscription<bool>? _connSub;
   /// CHAR_STATE_NOTIFY subscription. The firmware notifies on transitions
   /// of the active-test set (empty ↔ non-empty) so the expression editor's
-  /// Test button can morph without an app-side timer. Payload is a small
-  /// JSON object: `{"previewActive": true|false}`. Older firmware emits
-  /// `{}` and the parser leaves `previewActive` at its default `false`.
+  /// Test button can morph without an app-side timer, and on greeting
+  /// start/stop so Social can show the is-greeting tint.
+  /// Payload: `{"previewActive": bool, "greeting": {"active": bool, "peer":
+  /// str, "kind": str} | absent}`. Older firmware omits `greeting` and the
+  /// parser leaves it at its default `null`.
   StreamSubscription<Uint8List>? _stateNotifySub;
   Timer? _reconnectTimer;
   /// Periodic liveness probe. fbp's connectionState stream doesn't reliably
@@ -479,9 +481,10 @@ class ControlNotifier extends _$ControlNotifier {
       _probeTimer?.cancel();
     });
 
-    // Watch CHAR_STATE_NOTIFY. Used today only for the previewActive bit
-    // (expression editor Test button morph + auto-reset). Other state-
-    // change clients re-fetch via the page protocol, same as before.
+    // Watch CHAR_STATE_NOTIFY: previewActive drives the expression editor
+    // Test button morph + auto-reset, greeting drives Social's isGreeting
+    // tint. Other state-change clients re-fetch via the page protocol,
+    // same as before.
     _stateNotifySub = ble
         .subscribe(deviceId, BleUuids.controlService, BleUuids.stateNotify)
         .listen(
@@ -509,9 +512,7 @@ class ControlNotifier extends _$ControlNotifier {
     });
 
     await _updateSeen(
-      shade: fresh.shade.colors.isEmpty
-          ? LampColor.black
-          : fresh.shade.colors.first,
+      shade: LampColor.blendedIdentity(fresh.shade.colors),
       base: LampColor.blendedIdentity(fresh.base.colors),
     );
 
@@ -824,11 +825,10 @@ class ControlNotifier extends _$ControlNotifier {
       ),
     ));
     _shadeColorsWriter?.schedule(_encodeColors(colors));
-    // Inventory "last seen" cache mirrors the first stop. Same shape as
-    // the pre-gradient single-color path, so the lamp picker's swatch
-    // preview stays representative.
+    // Inventory "last seen" cache mirrors the blended identity color, same
+    // as base, so the lamp picker's swatch preview stays representative.
     if (colors.isNotEmpty) {
-      _queueSeen(shade: colors.first);
+      _queueSeen(shade: LampColor.blendedIdentity(colors));
     }
   }
 
@@ -1036,6 +1036,18 @@ class ControlNotifier extends _$ControlNotifier {
       () async {
         await writeSettingsBlob(
             {'lamp': {'webappEnabled': v}}, reboot: false);
+      },
+    );
+  }
+
+  Future<void> setLampApBootMinutes(int v) async {
+    await _mutate(
+      (s) => s.copyWith(
+        lamp: s.lamp.copyWith(apBootMinutes: v),
+      ),
+      () async {
+        await writeSettingsBlob(
+            {'lamp': {'apBootMinutes': v}}, reboot: false);
       },
     );
   }
@@ -1504,27 +1516,23 @@ class ControlNotifier extends _$ControlNotifier {
   /// firmware's expressionOp handler calls applyExpressionOpLocal + persistConfig,
   /// persisting the change to NVS immediately (no settings_blob write needed).
   Future<void> upsertExpression(ExpressionConfig entry) async {
-    final cur = state.value;
-    if (cur == null) return;
-
-    var found = false;
-    final next = <ExpressionConfig>[];
-    for (final e in cur.expressions.expressions) {
-      if (e.type == entry.type && e.target == entry.target) {
-        next.add(entry);
-        found = true;
-      } else {
-        next.add(e);
-      }
-    }
-    if (!found) next.add(entry);
-
-    state = AsyncData(cur.copyWith(
-      expressions: ExpressionsSection(expressions: next),
-    ));
-    await _writeExpressionOp({'op': 'upsert', 'entry': entry.toJson()});
-    // Firmware persists the entry to NVS via the expressionOp drain; no
-    // settings_blob save needed.
+    await _mutate(
+      (s) {
+        var found = false;
+        final next = <ExpressionConfig>[];
+        for (final e in s.expressions.expressions) {
+          if (e.type == entry.type && e.target == entry.target) {
+            next.add(entry);
+            found = true;
+          } else {
+            next.add(e);
+          }
+        }
+        if (!found) next.add(entry);
+        return s.copyWith(expressions: ExpressionsSection(expressions: next));
+      },
+      () => _writeExpressionOp({'op': 'upsert', 'entry': entry.toJson()}),
+    );
   }
 
   /// Remove the expression keyed by (type, target). Live-previews via
@@ -1533,19 +1541,20 @@ class ControlNotifier extends _$ControlNotifier {
     required String type,
     required int target,
   }) async {
-    final cur = state.value;
-    if (cur == null) return;
-    final next = cur.expressions.expressions
-        .where((e) => e.type != type || e.target != target)
-        .toList();
-    state = AsyncData(cur.copyWith(
-      expressions: ExpressionsSection(expressions: next),
-    ));
-    await _writeExpressionOp({
-      'op': 'remove',
-      'type': type,
-      'target': target,
-    });
+    await _mutate(
+      (s) => s.copyWith(
+        expressions: ExpressionsSection(
+          expressions: s.expressions.expressions
+              .where((e) => e.type != type || e.target != target)
+              .toList(),
+        ),
+      ),
+      () => _writeExpressionOp({
+        'op': 'remove',
+        'type': type,
+        'target': target,
+      }),
+    );
   }
 
 
@@ -1576,8 +1585,10 @@ class ControlNotifier extends _$ControlNotifier {
   }
 
   /// Trigger a greeting from the connected lamp toward [lampId]. The lamp
-  /// resolves the peer from its nearby list and plays its greeting; silently
-  /// no-ops if the peer isn't currently sighted.
+  /// resolves the peer from its own roster and plays its greeting;
+  /// fire-and-forget, no ack characteristic exists. Firmware no-ops
+  /// silently if the peer isn't currently sighted or a greeting is already
+  /// playing, both benign, so failures are swallowed rather than surfaced.
   Future<void> triggerGreet(String lampId) async {
     final ble = ref.read(bleClientProvider);
     final bytes = Uint8List.fromList(utf8.encode(jsonEncode({
@@ -1593,7 +1604,7 @@ class ControlNotifier extends _$ControlNotifier {
         withoutResponse: true,
       );
     } catch (_) {
-      // best-effort
+      // best-effort, same contract as the other live-preview writes
     }
   }
 
@@ -1635,16 +1646,12 @@ class ControlNotifier extends _$ControlNotifier {
 
   Future<void> _writeExpressionOp(Map<String, dynamic> payload) async {
     final ble = ref.read(bleClientProvider);
-    try {
-      await ble.write(
-        _deviceId,
-        BleUuids.controlService,
-        BleUuids.expressionOp,
-        Uint8List.fromList(utf8.encode(jsonEncode(payload))),
-      );
-    } catch (_) {
-      // best-effort
-    }
+    await ble.write(
+      _deviceId,
+      BleUuids.controlService,
+      BleUuids.expressionOp,
+      Uint8List.fromList(utf8.encode(jsonEncode(payload))),
+    );
   }
 
   Uint8List _encodeColors(List<LampColor> colors) {

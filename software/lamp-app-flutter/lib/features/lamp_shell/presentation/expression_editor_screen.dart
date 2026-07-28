@@ -197,24 +197,35 @@ class _ExpressionEditorScreenState
       if (previewBase) unawaited(notifier.setBaseColors(colors));
     }
 
-    await showColorStopsSheet(
-      context,
-      initial: initial,
-      title: 'Colors',
-      description: 'This effect picks colors from this set at random.',
-      max: colorMax,
-      allowEmpty: canEmpty,
-      reorderable: false,
-      onChanged: (colors) {
-        _updateDraft((d) => _withColors(d, colors));
-        writeLive(colors);
-      },
-      onSave: (colors) async => _updateDraft((d) => _withColors(d, colors)),
-    );
+    // Open the same per-surface edit session the main colors tab uses so the
+    // expression stack skips drawing over the preview (firmware
+    // `operatorEditing` gate). Closed in the finally so an early dismiss or
+    // exception can't strand it open.
+    if (previewShade) notifier.setEditSession(EditSurface.shade, true);
+    if (previewBase) notifier.setEditSession(EditSurface.base, true);
 
-    // Restore whichever strips were driven, regardless of save/cancel.
-    if (previewShade) unawaited(notifier.setShadeColors(originalShade));
-    if (previewBase) unawaited(notifier.setBaseColors(originalBase));
+    try {
+      await showColorStopsSheet(
+        context,
+        initial: initial,
+        title: 'Colors',
+        description: 'This effect picks colors from this set at random.',
+        max: colorMax,
+        allowEmpty: canEmpty,
+        reorderable: false,
+        onChanged: (colors) {
+          _updateDraft((d) => _withColors(d, colors));
+          writeLive(colors);
+        },
+        onSave: (colors) async => _updateDraft((d) => _withColors(d, colors)),
+      );
+    } finally {
+      // Restore whichever strips were driven, regardless of save/cancel.
+      if (previewShade) unawaited(notifier.setShadeColors(originalShade));
+      if (previewBase) unawaited(notifier.setBaseColors(originalBase));
+      if (previewShade) notifier.setEditSession(EditSurface.shade, false);
+      if (previewBase) notifier.setEditSession(EditSurface.base, false);
+    }
   }
 
   /// Pixel count for the active target's strip; max of shade/base for `both`.
@@ -367,8 +378,14 @@ class _ExpressionEditorScreenState
                         },
                       ),
                     ),
-                    // Placement (zone) sits directly under Target, above
-                    // Colors, so the effect's extent reads before its palette.
+                    // Colors sits directly under Target so the palette reads
+                    // before the effect's placement/motion.
+                    const SettingsGroupHeading('Colors'),
+                    ColorBlocksBar(
+                      colors: draft.colors,
+                      onTap: () => _editColorsLive(
+                          state, notifier, draft.colors, colorMax, canEmpty),
+                    ),
                     if (descriptor != null)
                       ExpressionParamsPanel(
                         descriptor: descriptor,
@@ -390,17 +407,10 @@ class _ExpressionEditorScreenState
                         onZonePreviewEnd: () =>
                             unawaited(notifier.completeExpressionTest()),
                       ),
-                    const SettingsGroupHeading('Colors'),
-                    ColorBlocksBar(
-                      colors: draft.colors,
-                      onTap: () => _editColorsLive(
-                          state, notifier, draft.colors, colorMax, canEmpty),
-                    ),
 
-                    // Timing / Behaviour / Mesh render generically from the
-                    // firmware catalog descriptor into their own yellow-headed
-                    // cards. Colors + target above are the editor shell's own
-                    // concern.
+                    // Timing / Mesh render generically from the firmware
+                    // catalog descriptor into their own yellow-headed cards.
+                    // Colors + target above are the editor shell's own concern.
                     if (descriptor != null)
                       ExpressionParamsPanel(
                         descriptor: descriptor,
@@ -467,10 +477,16 @@ class _ExpressionEditorScreenState
                                 expressionDraftProvider(widget.lampId,
                                         widget.typeKey, target)
                                     .notifier);
-                            await notifier.removeExpression(
-                              type: widget.typeKey,
-                              target: target,
-                            );
+                            // A failed write reverts optimistic state in the
+                            // notifier; keep the editor open instead of popping.
+                            try {
+                              await notifier.removeExpression(
+                                type: widget.typeKey,
+                                target: target,
+                              );
+                            } catch (_) {
+                              return;
+                            }
                             draftNotifier.reset();
                             if (context.mounted) {
                               GoRouter.maybeOf(context)?.pop();
@@ -502,13 +518,19 @@ class _ExpressionEditorScreenState
                                   .notifier);
                           // A moved target leaves the origin row behind;
                           // remove it. No-op when the origin never existed.
-                          if (savedTarget != widget.targetKey) {
-                            await notifier.removeExpression(
-                              type: widget.typeKey,
-                              target: widget.targetKey,
-                            );
+                          // A failed write reverts optimistic state in the
+                          // notifier; keep the editor open instead of popping.
+                          try {
+                            if (savedTarget != widget.targetKey) {
+                              await notifier.removeExpression(
+                                type: widget.typeKey,
+                                target: widget.targetKey,
+                              );
+                            }
+                            await notifier.upsertExpression(draft);
+                          } catch (_) {
+                            return;
                           }
-                          await notifier.upsertExpression(draft);
                           draftNotifier.reset();
                           if (!context.mounted) return;
                           // Entries opened via the picker have the stack

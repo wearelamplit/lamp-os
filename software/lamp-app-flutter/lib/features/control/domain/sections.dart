@@ -23,12 +23,15 @@ class LampSection {
     required this.advancedEnabled,
     this.brightnessCeiling = 170,
     required this.webappEnabled,
+    this.apBootMinutes = 0,
     required this.socialMode,
     this.fwVersion,
     this.fwChannel,
     this.hasPassword,
     this.lampType,
     this.lampId,
+    this.otaState = 0,
+    this.otaSendingTo,
   });
 
   final String name;
@@ -38,6 +41,9 @@ class LampSection {
   // Default true on missing. Older firmware without the field still ran
   // the on-device webapp at boot, so the absent payload IS "enabled".
   final bool webappEnabled;
+  // Config softAP up-window at boot, minutes. 0 = never expire (stays up
+  // until connected). Firmware key apBootMinutes on the same lamp blob.
+  final int apBootMinutes;
   final SocialMode socialMode;
 
   /// Firmware semver, packed as `(major << 16) | (minor << 8) | patch`.
@@ -70,6 +76,17 @@ class LampSection {
   /// Null on older firmware.
   final String? lampId;
 
+  /// This lamp's own OTA state (0=idle, 1=sending, 2=receiving), the same
+  /// wire values as the nearby section's per-peer `otaState`. Defaults to 0
+  /// (idle) on older firmware that doesn't yet emit the field.
+  final int otaState;
+
+  /// Mesh MAC (uppercase colon-hex) of the peer this lamp is OTA-sending to.
+  /// Null unless `otaState == 1`. Same wire field and semantics as the
+  /// nearby section's per-peer `otaSendingTo`; resolve against inventory by
+  /// `lampId` to name the receiver.
+  final String? otaSendingTo;
+
   factory LampSection.fromJson(Map<String, dynamic> json) => LampSection(
         name: (json['name'] as String?) ?? '',
         brightness: (json['brightness'] as num?)?.toInt() ?? 100,
@@ -77,6 +94,7 @@ class LampSection {
         brightnessCeiling:
             (json['brightnessCeiling'] as num?)?.toInt() ?? 170,
         webappEnabled: json['webappEnabled'] as bool? ?? true,
+        apBootMinutes: (json['apBootMinutes'] as num?)?.toInt() ?? 0,
         socialMode:
             SocialMode.fromWire((json['socialMode'] as num?)?.toInt()),
         fwVersion: (json['fwVersion'] as num?)?.toInt(),
@@ -84,6 +102,8 @@ class LampSection {
         hasPassword: json['hasPassword'] as bool?,
         lampType: json['lampType'] as String?,
         lampId: json['lampId'] as String?,
+        otaState: (json['otaState'] as num?)?.toInt() ?? 0,
+        otaSendingTo: json['otaSendingTo'] as String?,
       );
 
   LampSection copyWith({
@@ -92,12 +112,15 @@ class LampSection {
     bool? advancedEnabled,
     int? brightnessCeiling,
     bool? webappEnabled,
+    int? apBootMinutes,
     SocialMode? socialMode,
     int? fwVersion,
     String? fwChannel,
     bool? hasPassword,
     String? lampType,
     String? lampId,
+    int? otaState,
+    String? otaSendingTo,
   }) =>
       LampSection(
         name: name ?? this.name,
@@ -105,12 +128,15 @@ class LampSection {
         advancedEnabled: advancedEnabled ?? this.advancedEnabled,
         brightnessCeiling: brightnessCeiling ?? this.brightnessCeiling,
         webappEnabled: webappEnabled ?? this.webappEnabled,
+        apBootMinutes: apBootMinutes ?? this.apBootMinutes,
         socialMode: socialMode ?? this.socialMode,
         fwVersion: fwVersion ?? this.fwVersion,
         fwChannel: fwChannel ?? this.fwChannel,
         hasPassword: hasPassword ?? this.hasPassword,
         lampType: lampType ?? this.lampType,
         lampId: lampId ?? this.lampId,
+        otaState: otaState ?? this.otaState,
+        otaSendingTo: otaSendingTo ?? this.otaSendingTo,
       );
 
   @override
@@ -122,12 +148,15 @@ class LampSection {
           advancedEnabled == other.advancedEnabled &&
           brightnessCeiling == other.brightnessCeiling &&
           webappEnabled == other.webappEnabled &&
+          apBootMinutes == other.apBootMinutes &&
           socialMode == other.socialMode &&
           fwVersion == other.fwVersion &&
           fwChannel == other.fwChannel &&
           hasPassword == other.hasPassword &&
           lampType == other.lampType &&
-          lampId == other.lampId;
+          lampId == other.lampId &&
+          otaState == other.otaState &&
+          otaSendingTo == other.otaSendingTo;
 
   @override
   int get hashCode => Object.hash(
@@ -136,12 +165,15 @@ class LampSection {
         advancedEnabled,
         brightnessCeiling,
         webappEnabled,
+        apBootMinutes,
         socialMode,
         fwVersion,
         fwChannel,
         hasPassword,
         lampType,
         lampId,
+        otaState,
+        otaSendingTo,
       );
 }
 
@@ -244,7 +276,9 @@ class BaseSection {
       bpp: bpp,
       byteOrder: byteOrder,
       colors: ((json['colors'] as List?) ?? const [])
-          .map((e) => LampColor.fromHex(e as String))
+          .whereType<String>()
+          .map(LampColor.tryFromHex)
+          .whereType<LampColor>()
           .toList(),
       knockout: knockoutMap,
       colorsEditable: (json['colorsEditable'] as bool?) ?? true,
@@ -324,7 +358,9 @@ class ShadeSection {
       bpp: bpp,
       byteOrder: byteOrder,
       colors: ((json['colors'] as List?) ?? const [])
-          .map((e) => LampColor.fromHex(e as String))
+          .whereType<String>()
+          .map(LampColor.tryFromHex)
+          .whereType<LampColor>()
           .toList(),
       colorsEditable: (json['colorsEditable'] as bool?) ?? true,
       segments: ((json['segments'] as List?) ?? const [])

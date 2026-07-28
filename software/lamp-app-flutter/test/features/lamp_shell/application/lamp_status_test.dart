@@ -44,5 +44,38 @@ void main() {
         StatusKind.offline,
       );
     });
+
+    test('updating → otaBusy, winning over the held connection', () {
+      expect(
+        statusFor(
+          lampId: 'a',
+          nearby: const [],
+          connected: true,
+          updating: true,
+        ),
+        StatusKind.otaBusy,
+      );
+    });
+
+    test('not updating leaves the mapping unchanged', () {
+      expect(
+        statusFor(lampId: 'a', nearby: const [], connected: true),
+        StatusKind.mesh,
+      );
+    });
+  });
+
+  group('statusForById', () {
+    test('updating → otaBusy', () {
+      expect(
+        statusForById(
+          lampId: 'a',
+          nearbyById: const {},
+          connected: true,
+          updating: true,
+        ),
+        StatusKind.otaBusy,
+      );
+    });
   });
 }

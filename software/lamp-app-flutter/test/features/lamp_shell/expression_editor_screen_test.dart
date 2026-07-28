@@ -811,13 +811,12 @@ void main() {
     await tester.tap(find.text('Motion'));
     await tester.pumpAndSettle();
 
-    // 'Swell'..'Settle' appear only in the sheet; 'Linear' also shows in the
-    // picker row (current selection), so its blurb is the sheet-only signal.
+    // Each option is its own flat tile; 'Linear' (the current selection)
+    // also shows in the picker row, so these four are the sheet-only signal.
     expect(find.text('Smooth'), findsOneWidget);
     expect(find.text('Float'), findsOneWidget);
     expect(find.text('Settle'), findsOneWidget);
     expect(find.text('Swell'), findsOneWidget);
-    expect(find.textContaining('Steady as she goes'), findsOneWidget);
     expect(
       find.byWidgetPredicate(
           (w) => w is CustomPaint && w.painter is EasingSparkline),
@@ -897,6 +896,11 @@ void main() {
     expect(ble.writesTo(_devId, BleUuids.shadeColors), isEmpty,
         reason: 'base-target preview must not touch the shade surface');
 
+    // Preview must open the base edit session (base bit 0x01, open 1) so the
+    // expression stack skips drawing over the preview.
+    expect(ble.writesTo(_devId, BleUuids.editSession).last, [0x01, 1],
+        reason: 'preview-start must open the base edit session');
+
     // Two Save buttons exist (editor + sheet); the sheet's is topmost.
     await tester.tap(find.widgetWithText(FilledButton, 'Save').last);
     await tester.pump(const Duration(milliseconds: 100));
@@ -906,6 +910,11 @@ void main() {
     final baseWrites = ble.writesTo(_devId, BleUuids.baseColors);
     expect(jsonDecode(utf8.decode(baseWrites.last)), ['#300783FF'],
         reason: 'closing the sheet must restore the original base colors');
+
+    // Closing the sheet must close the base edit session (open 0) so
+    // operatorEditing can't strand true.
+    expect(ble.writesTo(_devId, BleUuids.editSession).last, [0x01, 0],
+        reason: 'closing the sheet must close the base edit session');
 
     // Drain the seen-cache commit-debounce timer before teardown.
     await tester.pump(const Duration(milliseconds: 600));

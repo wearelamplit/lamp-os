@@ -3,6 +3,8 @@ import '../../nearby/domain/nearby_lamp.dart';
 
 /// Derives a [StatusKind] for a lamp at the current moment.
 ///
+/// - `otaBusy`: the phone is actively pushing firmware to this lamp. Wins
+///   over `mesh` because the BLE link is held for the push.
 /// - `mesh`: the active connection right now. Pulses; the app is actually
 ///   reading + writing this lamp.
 /// - `bluetooth`: heard via BLE adv within the nearby staleness window but
@@ -17,8 +19,10 @@ StatusKind statusFor({
   required String lampId,
   required List<NearbyLamp> nearby,
   required bool connected,
+  bool updating = false,
   bool inScanGrace = false,
 }) {
+  if (updating) return StatusKind.otaBusy;
   if (connected) return StatusKind.mesh;
   NearbyLamp? hit;
   for (final l in nearby) {
@@ -37,8 +41,10 @@ StatusKind statusForById({
   required String lampId,
   required Map<String, NearbyLamp> nearbyById,
   required bool connected,
+  bool updating = false,
   bool inScanGrace = false,
 }) {
+  if (updating) return StatusKind.otaBusy;
   if (connected) return StatusKind.mesh;
   return _kindFromHit(nearbyById[lampId], inScanGrace);
 }

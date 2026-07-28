@@ -281,20 +281,23 @@ class _StripTypePicker extends StatelessWidget {
         children: [
           Text('LED type', style: Theme.of(context).textTheme.bodySmall),
           const SizedBox(height: AppSpace.sm),
-          SegmentedButton<String>(
-            showSelectedIcon: false,
-            style: SegmentedButton.styleFrom(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppRadius.card),
+          SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<String>(
+              showSelectedIcon: false,
+              style: SegmentedButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.card),
+                ),
               ),
+              segments: const [
+                ButtonSegment(value: 'GRBW', label: Text('GRBW')),
+                ButtonSegment(value: 'GRB', label: Text('GRB')),
+                ButtonSegment(value: 'BGR', label: Text('BGR')),
+              ],
+              selected: {selected},
+              onSelectionChanged: (s) => onChanged(s.first),
             ),
-            segments: const [
-              ButtonSegment(value: 'GRBW', label: Text('GRBW')),
-              ButtonSegment(value: 'GRB', label: Text('GRB')),
-              ButtonSegment(value: 'BGR', label: Text('BGR')),
-            ],
-            selected: {selected},
-            onSelectionChanged: (s) => onChanged(s.first),
           ),
         ],
       ),
@@ -324,20 +327,23 @@ class _BatterySaverPicker extends StatelessWidget {
         children: [
           Text('Battery Saver', style: Theme.of(context).textTheme.bodySmall),
           const SizedBox(height: AppSpace.sm),
-          SegmentedButton<int>(
-            showSelectedIcon: false,
-            style: SegmentedButton.styleFrom(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppRadius.card),
+          SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<int>(
+              showSelectedIcon: false,
+              style: SegmentedButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.card),
+                ),
               ),
+              segments: const [
+                ButtonSegment(value: 120, label: Text('Saver')),
+                ButtonSegment(value: 170, label: Text('Standard')),
+                ButtonSegment(value: 230, label: Text('Bright')),
+              ],
+              selected: {ceiling},
+              onSelectionChanged: (s) => onChanged(s.first),
             ),
-            segments: const [
-              ButtonSegment(value: 120, label: Text('Saver')),
-              ButtonSegment(value: 170, label: Text('Standard')),
-              ButtonSegment(value: 230, label: Text('Bright')),
-            ],
-            selected: {ceiling},
-            onSelectionChanged: (s) => onChanged(s.first),
           ),
           if (estimate.isNotEmpty) ...[
             const SizedBox(height: AppSpace.sm),

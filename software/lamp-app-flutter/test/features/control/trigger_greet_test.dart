@@ -68,7 +68,7 @@ void main() {
 
     // No advanced session unlock — triggerGreet still works.
     final n = c.read(controlNotifierProvider(_devId).notifier);
-    await expectLater(n.triggerGreet(_peerAddr), completes);
+    await n.triggerGreet(_peerAddr);
 
     final writes = ble.writesTo(_devId, BleUuids.expressionTest);
     expect(

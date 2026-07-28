@@ -45,6 +45,7 @@ enum ParamType { integer, enumeration }
 /// [effectiveContinuous].
 const String kEasingParamKey = 'easing';
 const String kLoopParamKey = 'loop';
+const String kOpacityParamKey = 'opacity';
 
 /// Effective continuity for grouping, the per-row play button, and params
 /// gating. Mirrors the firmware: a `loop` param set on the config wins over
@@ -88,6 +89,7 @@ class EnumOption {
     required this.value,
     required this.label,
     this.zoning = false,
+    this.group,
   });
 
   final int value;
@@ -97,10 +99,15 @@ class EnumOption {
   /// control and any `requiresZoning` params.
   final bool zoning;
 
+  /// Motion family (Type) for the app's Type x Direction picker. Null for
+  /// non-motion enums and for options a legacy firmware didn't group.
+  final String? group;
+
   factory EnumOption.fromJson(Map<String, dynamic> j) => EnumOption(
         value: (j['value'] as num).toInt(),
         label: j['label'] as String,
         zoning: j['zoning'] as bool? ?? false,
+        group: j['group'] as String?,
       );
 }
 
@@ -239,7 +246,6 @@ class ExpressionDescriptor {
     required this.id,
     required this.name,
     this.continuous = false,
-    this.pausesWispOverride = false,
     required this.colors,
     this.interval,
     this.duration,
@@ -252,9 +258,6 @@ class ExpressionDescriptor {
   final String id;
   final String name;
   final bool continuous;
-
-  /// Greys/pauses the expression while a wisp is overriding colors.
-  final bool pausesWispOverride;
   final CatalogColors colors;
   final CatalogRange? interval;
   final CatalogRange? duration;
@@ -274,7 +277,6 @@ class ExpressionDescriptor {
       id: j['id'] as String,
       name: j['name'] as String? ?? '',
       continuous: j['continuous'] as bool? ?? false,
-      pausesWispOverride: j['pausesWispOverride'] as bool? ?? false,
       colors: CatalogColors.fromJson(j['colors'] as Map<String, dynamic>?),
       interval: j['interval'] == null
           ? null

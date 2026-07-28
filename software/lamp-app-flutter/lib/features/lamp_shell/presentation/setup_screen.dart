@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/routing/routes.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/tap_counter.dart';
+import '../../../core/widgets/app_sheet.dart';
 import '../../../core/widgets/app_snackbar.dart';
 import '../../../core/widgets/friendly_error.dart';
 import '../../../core/widgets/password_prompt_dialog.dart';
@@ -117,13 +118,21 @@ class _SetupBody extends ConsumerWidget {
         ),
         SettingsRow(
           icon: Icons.router_outlined,
-          title: 'Setup hotspot',
-          subtitle: state.lamp.webappEnabled
-              ? 'Broadcasts a setup network for 2 min after each power-on'
-              : 'Off',
-          trailing: Switch(
-            value: state.lamp.webappEnabled,
-            onChanged: (v) => n().setLampWebappEnabled(v),
+          title: 'Web Config',
+          subtitle: _webConfigSubtitle(
+              state.lamp.webappEnabled, state.lamp.apBootMinutes),
+          drillChevron: true,
+          onTap: () => _pickWebConfig(
+            context,
+            current: state.lamp.webappEnabled ? state.lamp.apBootMinutes : null,
+            onPicked: (minutes) {
+              if (minutes == null) {
+                n().setLampWebappEnabled(false);
+              } else {
+                n().setLampWebappEnabled(true);
+                n().setLampApBootMinutes(minutes);
+              }
+            },
           ),
         ),
         const SettingsGroupHeading('LEDs'),
@@ -138,7 +147,7 @@ class _SetupBody extends ConsumerWidget {
           const SettingsGroupHeading('Debug'),
           SettingsRow(
             icon: Icons.bluetooth_searching,
-            title: 'Mesh lamps',
+            title: 'Lamp Network',
             subtitle: 'Fleet roster over the mesh',
             onTap: () => context.push('/mesh-lamps'),
           ),
@@ -150,10 +159,75 @@ class _SetupBody extends ConsumerWidget {
             subtitle: 'Wipe all settings and re-adopt',
             onTap: () => _showFactoryResetDialog(context, lampId),
           ),
+          if (ref.watch(devModeOnProvider))
+            SettingsRow(
+              icon: Icons.developer_mode,
+              title: 'Developer mode',
+              trailing: Switch(
+                value: true,
+                onChanged: (_) => ref.read(devModeProvider.notifier).disable(),
+              ),
+            ),
         ],
       ],
     );
   }
+}
+
+/// Web Config choices. null = disabled; otherwise softAP up-window in minutes
+/// (0 = never expire).
+const _webConfigOptions = <(int?, String)>[
+  (null, 'Disabled'),
+  (2, '2 min'),
+  (5, '5 min'),
+  (15, '15 min'),
+  (0, 'Always on'),
+];
+
+String _webConfigSubtitle(bool enabled, int minutes) {
+  if (!enabled) return 'Disabled';
+  return minutes == 0 ? 'Always on' : '$minutes min after power-on';
+}
+
+Future<void> _pickWebConfig(
+  BuildContext context, {
+  required int? current,
+  required ValueChanged<int?> onPicked,
+}) async {
+  var changed = false;
+  final picked = await showAppSheet<int?>(
+    context,
+    builder: (ctx) {
+      final colorScheme = Theme.of(ctx).colorScheme;
+      final textTheme = Theme.of(ctx).textTheme;
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  AppSpace.lg, AppSpace.md, AppSpace.lg, AppSpace.sm),
+              child: Text('Web Config', style: textTheme.titleMedium),
+            ),
+            for (final o in _webConfigOptions)
+              ListTile(
+                title: Text(o.$2),
+                trailing: o.$1 == current
+                    ? Icon(Icons.check, color: colorScheme.primary)
+                    : null,
+                onTap: () {
+                  changed = o.$1 != current;
+                  Navigator.pop(ctx, o.$1);
+                },
+              ),
+            const SizedBox(height: AppSpace.sm),
+          ],
+        ),
+      );
+    },
+  );
+  if (changed) onPicked(picked);
 }
 
 /// Factory-reset confirmation. Destructive operation, so it goes through a

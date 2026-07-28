@@ -14,11 +14,12 @@ import '../../control/application/advanced_session.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/application/control_state.dart';
 import '../../control/application/dev_mode.dart';
+import '../../firmware/application/firmware_notifier.dart';
+import '../../firmware/domain/firmware_state.dart';
 import '../../firmware/presentation/firmware_update_panel.dart';
 
 /// Info tab: Lamplit branding, firmware + app version footer, and the
 /// 5-tap-the-wordmark gesture that unlocks session-only advanced settings.
-/// When dev mode is on, a toggle row appears here to disable it.
 ///
 /// Lives as a dedicated tab so the About content isn't buried inside the
 /// Setup pane as a Configuration drilldown item.
@@ -93,6 +94,7 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
         ? 'Firmware ...'
         : 'Firmware ${formatFirmwareSemver(v)} ($ch)';
     final devModeOn = ref.watch(devModeOnProvider);
+    final fwState = ref.watch(firmwareNotifierProvider(widget.lampId));
     return ListView(
       padding: const EdgeInsets.fromLTRB(
           AppSpace.lg, AppSpace.xl, AppSpace.lg, AppSpace.xxl),
@@ -118,6 +120,10 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
           ),
         ),
         const SizedBox(height: AppSpace.lg),
+        if (!devModeOn && fwState.isBusy) ...[
+          LearningTricksCard(state: fwState),
+          const SizedBox(height: AppSpace.lg),
+        ],
         InfoPanel(
           child: Text.rich(
             TextSpan(
@@ -138,22 +144,12 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
           ),
         ),
         if (devModeOn) ...[
-          const SizedBox(height: AppSpace.xl),
-          SettingsRow(
-            icon: Icons.developer_mode,
-            title: 'Developer mode',
-            trailing: Switch(
-              value: true,
-              onChanged: (_) =>
-                  ref.read(devModeProvider.notifier).disable(),
-            ),
-          ),
-        ],
-        if (devModeOn) ...[
-          const SizedBox(height: AppSpace.xl),
+          const SizedBox(height: AppSpace.lg),
+          const SettingsGroupHeading('Firmware'),
           FirmwareUpdatePanel(
             deviceId: widget.lampId,
             lampType: widget.state.lamp.lampType,
+            lampChannel: widget.state.lamp.fwChannel,
             lampFwVersion: widget.state.lamp.fwVersion,
           ),
         ],
@@ -217,6 +213,32 @@ class _LamplitWordmark extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Normal-mode "a lamp is quietly upgrading" surface. Lamp-personality voice;
+/// never names firmware. Dev mode uses the full FirmwareUpdatePanel instead.
+class LearningTricksCard extends StatelessWidget {
+  const LearningTricksCard({super.key, required this.state});
+  final FirmwareState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final (label, progress) = switch (state) {
+      FirmwareStreaming(:final progress) => ('Learning some new tricks 🪄', progress),
+      _ => ('Warming up 🪄', null),
+    };
+    return InfoPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(label, style: textTheme.titleMedium),
+          const SizedBox(height: AppSpace.sm),
+          LinearProgressIndicator(value: progress),
+        ],
+      ),
     );
   }
 }
