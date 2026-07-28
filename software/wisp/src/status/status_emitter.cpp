@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <esp_heap_caps.h>
+#include <esp_system.h>
 #include <lampos/led_types.hpp>
 
 #include "paint/current_palette.hpp"
@@ -57,14 +59,23 @@ void StatusEmitter::triggerOnChange() {
   if (statusTimer_) {
     xTimerReset(statusTimer_, 0);
   }
+  burstUntilMs_ = millis() + kStatusBurstMs;
 }
 
 void StatusEmitter::pump() {
   checkConnEdges();
-  if (!statusDue_.load(std::memory_order_relaxed)) return;
   const uint32_t now = millis();
-  // Coalesce: leave the due flag set until the window opens.
-  if (haveEmitted_ && now - lastEmitMs_ < kMinEmitIntervalMs) return;
+  bool bursting = false;
+  if (burstUntilMs_ != 0) {
+    if (static_cast<int32_t>(now - burstUntilMs_) < 0) {
+      bursting = true;
+    } else {
+      burstUntilMs_ = 0;
+    }
+  }
+  if (!statusDue_.load(std::memory_order_relaxed) && !bursting) return;
+  const uint32_t minInterval = bursting ? kStatusBurstIntervalMs : kMinEmitIntervalMs;
+  if (haveEmitted_ && now - lastEmitMs_ < minInterval) return;
   statusDue_.store(false, std::memory_order_relaxed);
   haveEmitted_ = true;
   lastEmitMs_ = now;
@@ -88,6 +99,12 @@ void StatusEmitter::checkConnEdges() {
 
 void StatusEmitter::emitStatus() {
   if (!mesh_) return;
+
+#ifdef LAMP_DEBUG
+  Serial.printf("[wispheap] free=%u largest=%u\n",
+                (unsigned)esp_get_free_heap_size(),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+#endif
 
   uint8_t srcMac[6] = {0};
   mesh_->getMac(srcMac);
@@ -133,7 +150,6 @@ void StatusEmitter::emitStatus() {
   bool hasPassword = false;
   const char* ledType = "GRB";
   uint16_t pixelCount = 30;
-  uint8_t rangeStep = 0;
   uint32_t opSeq = 0;
   uint8_t brightness = 100;
   if (config_) {
@@ -147,7 +163,6 @@ void StatusEmitter::emitStatus() {
     hasPassword = config_->password().length() > 0;
     ledType = lampos::led::byteOrderToString(config_->ledFormat());
     pixelCount = config_->pixelCount();
-    rangeStep = config_->rangeStep();
     opSeq = config_->opSeq();
     brightness = config_->brightness();
   }
@@ -156,7 +171,7 @@ void StatusEmitter::emitStatus() {
       wifiConn, auroraConn, paletteIdPrefix, lastSeenMs,
       sourceName, offR, offG, offB, offW, hasOffColor, shuffleSeed,
       driftIntervalMs, driftFadePct, wispName, hasPassword,
-      ledType, pixelCount, rangeStep, opSeq, brightness };
+      ledType, pixelCount, opSeq, brightness };
 
   char jsonBuf[kStatusJsonBufLen];
   const size_t jsonLen = buildWispStatusJson(

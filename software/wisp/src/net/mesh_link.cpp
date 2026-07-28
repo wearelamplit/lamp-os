@@ -44,11 +44,12 @@ static void sendTrampoline(const wifi_tx_info_t* info,
                            esp_now_send_status_t status) {
   if (!MeshLink::s_instance || !info) return;
   if (status == ESP_NOW_SEND_SUCCESS) return;
-#ifdef LAMP_DEBUG
   const uint8_t* mac = info->des_addr;
+#ifdef LAMP_DEBUG
   Serial.printf("[mesh.send] FAIL to %02X:%02X:%02X:%02X:%02X:%02X\n",
                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 #endif
+  MeshLink::s_instance->notifySendFail(mac);
 }
 
 bool MeshLink::begin() {
@@ -81,6 +82,12 @@ bool MeshLink::begin() {
 
   esp_now_register_recv_cb(recvTrampoline);
   esp_now_register_send_cb(sendTrampoline);
+
+  // 1M DSSS: the wisp's traffic is dominated by small per-lamp unicast
+  // (keepalive/drift/paint), where 1M robustness beats 2M airtime; bench A/B
+  // measured 1M's send-fail rate lower. TX-side only; receivers auto-detect
+  // from the PLCP header, so lamps can run 2M independently.
+  esp_wifi_config_espnow_rate(WIFI_IF_STA, WIFI_PHY_RATE_1M_L);
 
   // Broadcast peer. channel=0 means "use the radio's current channel", just
   // pinned above so this lands on LAMP_ESPNOW_CHANNEL.
@@ -206,6 +213,27 @@ bool MeshLink::send(const uint8_t targetMac[6], const uint8_t* data, size_t len)
 
 void MeshLink::getMac(uint8_t out[6]) const {
   esp_wifi_get_mac(WIFI_IF_STA, out);
+}
+
+void MeshLink::notifySendFail(const uint8_t mac[6]) {
+#if defined(ARDUINO) || defined(ESP_PLATFORM)
+  portENTER_CRITICAL(&failedSendMux_);
+#endif
+  failedSends_.push(mac);
+#if defined(ARDUINO) || defined(ESP_PLATFORM)
+  portEXIT_CRITICAL(&failedSendMux_);
+#endif
+}
+
+bool MeshLink::pollFailedSend(uint8_t macOut[6]) {
+#if defined(ARDUINO) || defined(ESP_PLATFORM)
+  portENTER_CRITICAL(&failedSendMux_);
+#endif
+  const bool ok = failedSends_.pop(macOut);
+#if defined(ARDUINO) || defined(ESP_PLATFORM)
+  portEXIT_CRITICAL(&failedSendMux_);
+#endif
+  return ok;
 }
 
 }  // namespace wisp

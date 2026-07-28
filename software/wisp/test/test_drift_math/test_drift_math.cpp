@@ -58,6 +58,50 @@ void test_drift_fade_bounds() {
     TEST_ASSERT_TRUE(f <= c.intervalMs);
   }
 }
+void test_keepalive_not_due_before_deadline() {
+  TEST_ASSERT_FALSE(wisp::keepaliveDue(44999, 0, 45000));
+}
+void test_keepalive_due_at_deadline() {
+  TEST_ASSERT_TRUE(wisp::keepaliveDue(45000, 0, 45000));
+}
+void test_keepalive_due_past_deadline() {
+  TEST_ASSERT_TRUE(wisp::keepaliveDue(100000, 0, 45000));
+}
+void test_keepalive_force_due_overrides_deadline() {
+  // now=5000 is well inside the 30s window (the wisp boot-window gap): a
+  // FAILed send must still force a retry, not wait out the deadline.
+  TEST_ASSERT_TRUE(wisp::keepaliveDue(5000, 0, 30000, /*forceDue=*/true));
+}
+void test_keepalive_not_force_due_still_honors_deadline() {
+  TEST_ASSERT_FALSE(wisp::keepaliveDue(5000, 0, 30000, /*forceDue=*/false));
+}
+
+void test_unicast_gate_closed_before_min_gap() {
+  TEST_ASSERT_FALSE(wisp::unicastGateOpen(1010, 1000, 18));
+}
+void test_unicast_gate_open_at_min_gap() {
+  TEST_ASSERT_TRUE(wisp::unicastGateOpen(1018, 1000, 18));
+}
+void test_unicast_gate_open_past_min_gap() {
+  TEST_ASSERT_TRUE(wisp::unicastGateOpen(5000, 1000, 18));
+}
+
+void test_reaffirm_mid_fade_returns_remaining() {
+  // Fade started at t=0 with a 70s duration; keep-alive fires at 45s.
+  TEST_ASSERT_EQUAL_UINT32(25000, wisp::reaffirmFadeMs(45000, 70000, 1500));
+}
+void test_reaffirm_post_fade_floors_at_min() {
+  // fadeEndMs already elapsed: held colour, floor to the reaffirm minimum.
+  TEST_ASSERT_EQUAL_UINT32(1500, wisp::reaffirmFadeMs(50000, 40000, 1500));
+}
+void test_reaffirm_exactly_at_fade_end_floors_at_min() {
+  TEST_ASSERT_EQUAL_UINT32(1500, wisp::reaffirmFadeMs(40000, 40000, 1500));
+}
+void test_reaffirm_remaining_below_floor_uses_floor() {
+  // 1s left on the fade, floor is 1.5s: floor wins so no snap.
+  TEST_ASSERT_EQUAL_UINT32(1500, wisp::reaffirmFadeMs(39000, 40000, 1500));
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_slot_divides_interval_by_count);
@@ -67,5 +111,17 @@ int main() {
   RUN_TEST(test_drift_fade_with_max_pct_min_rnd);
   RUN_TEST(test_drift_fade_with_max_pct_reaches_interval);
   RUN_TEST(test_drift_fade_bounds);
+  RUN_TEST(test_keepalive_not_due_before_deadline);
+  RUN_TEST(test_keepalive_due_at_deadline);
+  RUN_TEST(test_keepalive_due_past_deadline);
+  RUN_TEST(test_keepalive_force_due_overrides_deadline);
+  RUN_TEST(test_keepalive_not_force_due_still_honors_deadline);
+  RUN_TEST(test_unicast_gate_closed_before_min_gap);
+  RUN_TEST(test_unicast_gate_open_at_min_gap);
+  RUN_TEST(test_unicast_gate_open_past_min_gap);
+  RUN_TEST(test_reaffirm_mid_fade_returns_remaining);
+  RUN_TEST(test_reaffirm_post_fade_floors_at_min);
+  RUN_TEST(test_reaffirm_exactly_at_fade_end_floors_at_min);
+  RUN_TEST(test_reaffirm_remaining_below_floor_uses_floor);
   return UNITY_END();
 }

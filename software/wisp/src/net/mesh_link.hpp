@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <functional>
 
+#include "net/failed_send_queue.hpp"
+
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 #include <freertos/FreeRTOS.h>
 #endif
@@ -46,6 +48,14 @@ class MeshLink {
   // Wisp's STA MAC, for log lines.
   void getMac(uint8_t out[6]) const;
 
+  // Called from the async send-status callback (WiFi task) on a FAIL.
+  // Queues the peer MAC task-safely; never touches the paint cache here.
+  void notifySendFail(const uint8_t mac[6]);
+
+  // Drains one queued failed-send MAC (FIFO) into `macOut`. False if empty.
+  // Call from the loop task, before PaintDistributor's keep-alive scan.
+  bool pollFailedSend(uint8_t macOut[6]);
+
   // Trampoline seam: ESP-NOW C callback can't capture; reaches handler_ via s_instance.
   static MeshLink* s_instance;
   MeshRecvFn handler_;
@@ -79,6 +89,14 @@ class MeshLink {
   // increment, duplicate slot, wrong eviction). portMUX fits: tiny,
   // non-blocking mutations.
   mutable portMUX_TYPE peerMux_ = portMUX_INITIALIZER_UNLOCKED;
+#endif
+
+  // Written by notifySendFail() (WiFi task), drained by pollFailedSend()
+  // (loop task, via PaintDistributor::tick). failedSendMux_ guards both;
+  // the queue itself has no locking of its own.
+  FailedSendQueue failedSends_;
+#if defined(ARDUINO) || defined(ESP_PLATFORM)
+  mutable portMUX_TYPE failedSendMux_ = portMUX_INITIALIZER_UNLOCKED;
 #endif
 };
 

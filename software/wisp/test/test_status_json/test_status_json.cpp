@@ -52,7 +52,7 @@ void test_fully_loaded_worst_case_never_fails() {
                             /*name=*/"12345678901234567890",
                             /*hasPassword=*/true,
                             /*ledType=*/"GRBW", /*pixelCount=*/65535,
-                            /*rangeStep=*/3, /*opSeq=*/4294967295u };
+                            /*opSeq=*/4294967295u };
   char out[256];
   size_t n = wisp::buildWispStatusJson(f, out, sizeof(out), CAP);
   TEST_ASSERT_TRUE(n > 0);
@@ -93,8 +93,7 @@ void test_defaults_omitted() {
                             0, 0, 0, 0, false, /*shuffleSeed=*/0,
                             /*driftIntervalMs=*/120000, /*driftFadePct=*/50,
                             /*name=*/"", /*hasPassword=*/false,
-                            /*ledType=*/"GRB", /*pixelCount=*/30,
-                            /*rangeStep=*/0 };
+                            /*ledType=*/"GRB", /*pixelCount=*/30 };
   char out[256];
   size_t n = wisp::buildWispStatusJson(f, out, sizeof(out), CAP);
   TEST_ASSERT_TRUE(n > 0 && n <= CAP);
@@ -109,7 +108,6 @@ void test_defaults_omitted() {
   TEST_ASSERT_TRUE(d["px"].isNull());
   TEST_ASSERT_TRUE(d["paletteIdPrefix"].isNull());
   TEST_ASSERT_TRUE(d["observedZones"].isNull());
-  TEST_ASSERT_TRUE(d["range"].isNull());
   TEST_ASSERT_TRUE(d["opSeq"].isNull());
 }
 
@@ -120,8 +118,7 @@ void test_non_default_identity_fields_emitted() {
                             0, 0, 0, 0, false, /*shuffleSeed=*/42,
                             /*driftIntervalMs=*/120000, /*driftFadePct=*/50,
                             /*name=*/"lamp-room", /*hasPassword=*/true,
-                            /*ledType=*/"BGR", /*pixelCount=*/42,
-                            /*rangeStep=*/2 };
+                            /*ledType=*/"BGR", /*pixelCount=*/42 };
   char out[256];
   size_t n = wisp::buildWispStatusJson(f, out, sizeof(out), CAP);
   TEST_ASSERT_TRUE(n > 0 && n <= CAP);
@@ -132,7 +129,6 @@ void test_non_default_identity_fields_emitted() {
   TEST_ASSERT_EQUAL_STRING("lamp-room", d["name"].as<const char*>());
   TEST_ASSERT_EQUAL_STRING("BGR", d["ledType"].as<const char*>());
   TEST_ASSERT_EQUAL_INT(42, d["px"].as<int>());
-  TEST_ASSERT_EQUAL_INT(2, d["range"].as<int>());
 }
 
 // opSeq (sealed-op confirmation counter) rides the wire when non-default and
@@ -144,7 +140,7 @@ void test_op_seq_emitted() {
                             /*driftIntervalMs=*/120000, /*driftFadePct=*/50,
                             /*name=*/"", /*hasPassword=*/true,
                             /*ledType=*/"GRB", /*pixelCount=*/30,
-                            /*rangeStep=*/0, /*opSeq=*/9 };
+                            /*opSeq=*/9 };
   char out[256];
   size_t n = wisp::buildWispStatusJson(f, out, sizeof(out), CAP);
   TEST_ASSERT_TRUE(n > 0 && n <= CAP);
@@ -249,12 +245,12 @@ void test_true_worst_case_untruncated_length() {
                             /*name=*/"12345678901234567890",
                             /*hasPassword=*/true,
                             /*ledType=*/"GRBW", /*pixelCount=*/65535,
-                            /*rangeStep=*/255, /*opSeq=*/4294967295u,
+                            /*opSeq=*/4294967295u,
                             /*brightness=*/99 };
   char out[1024];
   size_t n = wisp::buildWispStatusJson(f, out, sizeof(out), /*cap=*/4096);
   TEST_ASSERT_TRUE(n > 0);
-  TEST_ASSERT_EQUAL_UINT32(568, n);
+  TEST_ASSERT_EQUAL_UINT32(556, n);
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   JsonArrayConst z = d["observedZones"].as<JsonArrayConst>();
@@ -274,7 +270,7 @@ void test_worst_case_fits_control_op_at_production_cap() {
                             /*name=*/"12345678901234567890",
                             /*hasPassword=*/true,
                             /*ledType=*/"GRBW", /*pixelCount=*/65535,
-                            /*rangeStep=*/255, /*opSeq=*/4294967295u,
+                            /*opSeq=*/4294967295u,
                             /*brightness=*/99 };
   char json[1024];
   size_t jsonLen = wisp::buildWispStatusJson(

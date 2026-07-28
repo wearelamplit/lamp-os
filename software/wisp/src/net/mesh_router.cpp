@@ -38,6 +38,7 @@ void MeshRouter::onPacket(const uint8_t* srcMac, const uint8_t* data,
   if (msgType == lamp_protocol::MSG_CONTROL_OP) {
     lamp_protocol::ParsedControlOp op;
     if (!lamp_protocol::parseControlOp(data, len, op)) return;
+    if (!controlOpForWisp(op.targetMac, myMac_)) return;
     if (!controlOpDedup_.record(op.sourceMac, lamp_protocol::MSG_CONTROL_OP,
                                 op.seq)) {
       return;

@@ -24,7 +24,6 @@ struct WispStatusFields {
   bool         hasPassword;
   const char*  ledType;
   uint16_t     pixelCount;
-  uint8_t      rangeStep;
   uint32_t     opSeq;
   uint8_t      brightness = 100;
 };

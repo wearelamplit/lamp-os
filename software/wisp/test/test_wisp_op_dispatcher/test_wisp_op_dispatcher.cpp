@@ -406,36 +406,6 @@ void test_set_led_strip_missing_pixel_count() {
     TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::Malformed, (int)result);
 }
 
-// --- setRange op ---
-
-void test_set_range_happy_path() {
-    wisp::WispConfig cfg;
-    cfg.begin();
-
-    wisp::WispOpDispatcher d(cfg);
-    const char* plain = R"({"char":"wispOp","op":"setRange","range":2})";
-    auto result = d.dispatch(reinterpret_cast<const uint8_t*>(plain), strlen(plain));
-    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedRangeChange, (int)result);
-    TEST_ASSERT_EQUAL_INT(2, (int)cfg.rangeStep());
-    TEST_ASSERT_EQUAL_INT(-82, (int)cfg.rangeFloorDbm());
-}
-
-void test_set_range_out_of_bounds_malformed() {
-    wisp::WispConfig cfg;
-    cfg.begin();
-
-    wisp::WispOpDispatcher d(cfg);
-    const char* over = R"({"char":"wispOp","op":"setRange","range":4})";
-    TEST_ASSERT_EQUAL_INT(
-        (int)wisp::DispatchResult::Malformed,
-        (int)d.dispatch(reinterpret_cast<const uint8_t*>(over), strlen(over)));
-    const char* missing = R"({"char":"wispOp","op":"setRange"})";
-    TEST_ASSERT_EQUAL_INT(
-        (int)wisp::DispatchResult::Malformed,
-        (int)d.dispatch(reinterpret_cast<const uint8_t*>(missing), strlen(missing)));
-    TEST_ASSERT_EQUAL_INT(0, (int)cfg.rangeStep());
-}
-
 // --- setBrightness op ---
 
 void test_set_brightness_happy_path() {
@@ -519,8 +489,6 @@ int main(int, char**) {
     RUN_TEST(test_set_led_strip_unknown_led_type);
     RUN_TEST(test_set_led_strip_zero_pixel_count);
     RUN_TEST(test_set_led_strip_missing_pixel_count);
-    RUN_TEST(test_set_range_happy_path);
-    RUN_TEST(test_set_range_out_of_bounds_malformed);
     RUN_TEST(test_set_brightness_happy_path);
     RUN_TEST(test_set_brightness_out_of_bounds_malformed);
     return UNITY_END();

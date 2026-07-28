@@ -29,7 +29,6 @@ static bool isApplied(DispatchResult r) {
     case DispatchResult::AppliedNameChange:
     case DispatchResult::AppliedPasswordChange:
     case DispatchResult::AppliedLedStrip:
-    case DispatchResult::AppliedRangeChange:
     case DispatchResult::AppliedBrightnessChange:
       return true;
     default:
@@ -260,20 +259,6 @@ DispatchResult WispOpDispatcher::dispatchJson(const char* json, size_t len) {
       Serial.println("[wisp.op] setWifi: no StageBeacon bound; skipping refresh");
     }
     return DispatchResult::AppliedWifiChange;
-  }
-
-  if (strcmp(op, "setRange") == 0) {
-    if (!doc["range"].is<int>()) {
-      Serial.println("[wisp.op] setRange missing/invalid 'range'");
-      return DispatchResult::Malformed;
-    }
-    const int step = doc["range"].as<int>();
-    if (step < 0 || step > static_cast<int>(kRangeStepMax)) {
-      Serial.println("[wisp.op] setRange 'range' out of bounds");
-      return DispatchResult::Malformed;
-    }
-    config_.setRangeStep(static_cast<uint8_t>(step));
-    return DispatchResult::AppliedRangeChange;
   }
 
   if (strcmp(op, "setBrightness") == 0) {

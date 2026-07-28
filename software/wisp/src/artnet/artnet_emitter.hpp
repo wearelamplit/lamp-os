@@ -27,6 +27,12 @@ class ArtnetEmitter {
   // up the current colors.
   void tick(uint32_t nowMs);
 
+  // Gates emission. Off (source Off, or Aurora with no live stream) sets
+  // this false so old lamps keep their last frame instead of being driven
+  // to the off-color over ArtNet; mesh lamps get the equivalent release
+  // via isWispActive=0.
+  void setActive(bool active);
+
  private:
   void emitNow();
 
@@ -40,6 +46,7 @@ class ArtnetEmitter {
   WifiLink* wifi_ = nullptr;
   AsyncUDP udp_;
   bool udpReady_ = false;
+  bool active_ = true;
   uint8_t seq_ = 0;
   uint32_t lastEmitMs_ = 0;
 #ifdef LAMP_DEBUG

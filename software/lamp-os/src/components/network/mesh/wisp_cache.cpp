@@ -7,8 +7,6 @@
 #include <cstdio>
 #include <cstring>
 
-#include "util/base64.hpp"
-
 namespace lamp {
 
 // Display-slot stickiness: a rival wisp is rejected until the current
@@ -17,17 +15,18 @@ namespace lamp {
 // (slotAdoptedMs), so a claim takeover holds through the loser's next hello.
 static constexpr uint32_t kWispDisplayStaleMs = 12000;
 
-// Painter freshness for the obey gates; matches the override watchdog so
-// a wisp silent this long loses paint-hold and below-floor rights together.
-static constexpr uint32_t kWispPainterFreshMs = 60000;
+// Control-op targeting tolerates a longer gap than slot stickiness: the unicast
+// to the wisp is reliable, so a command must still send through a run of
+// coex-dropped broadcasts. Comfortably exceeds observed HELLO gaps.
+static constexpr uint32_t kWispControlStaleMs = 30000;
 
-static bool freshWithin(uint32_t stampMs, uint32_t nowMs) {
-  return stampMs != 0 && (nowMs - stampMs) <= kWispDisplayStaleMs;
+static bool freshWithin(uint32_t stampMs, uint32_t nowMs, uint32_t windowMs) {
+  return stampMs != 0 && (nowMs - stampMs) <= windowMs;
 }
 
 static bool wispSlotFresh(const WispCache& cache, uint32_t nowMs) {
-  return freshWithin(cache.lastHelloMs, nowMs) ||
-         freshWithin(cache.slotAdoptedMs, nowMs);
+  return freshWithin(cache.lastHelloMs, nowMs, kWispDisplayStaleMs) ||
+         freshWithin(cache.slotAdoptedMs, nowMs, kWispDisplayStaleMs);
 }
 
 void LampRoster::adoptWispLocked(const uint8_t mac[6], uint32_t nowMs) {
@@ -35,6 +34,7 @@ void LampRoster::adoptWispLocked(const uint8_t mac[6], uint32_t nowMs) {
   wispCache_.lastStatusMs = 0;
   wispCache_.lastHelloMs = 0;
   wispCache_.slotAdoptedMs = nowMs;
+  wispCache_.lastSeenMs = nowMs;
   wispCache_.wispVersion = 0;
   wispCache_.flags = 0;
   wispCache_.paletteIdPrefix[0] = '\0';
@@ -49,6 +49,7 @@ void LampRoster::adoptWispLocked(const uint8_t mac[6], uint32_t nowMs) {
 
 bool LampRoster::admitWispLocked(const uint8_t mac[6], uint32_t nowMs) {
   if (wispCache_.present && std::memcmp(wispCache_.mac, mac, 6) == 0) {
+    wispCache_.lastSeenMs = nowMs;
     return true;
   }
   if (wispCache_.present && wispSlotFresh(wispCache_, nowMs)) {
@@ -130,26 +131,11 @@ void LampRoster::cacheWispMacFromPaint(const uint8_t mac[6]) {
   if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(2)) != pdTRUE) {
     return;
   }
-  const uint32_t nowMs = millis();
-  painterPresent_ = true;
-  std::memcpy(painterMac_, mac, 6);
-  painterLastMs_ = nowMs;
   // Display slot only when empty or stale: being painted must not evict a
   // fresh display wisp, but the first BLE wispStatus read should still be
   // non-empty when paint arrives before any hello.
-  admitWispLocked(mac, nowMs);
+  admitWispLocked(mac, millis());
   xSemaphoreGive(mutex_);
-}
-
-bool LampRoster::isWispPainter(const uint8_t mac[6], uint32_t nowMs) {
-  if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(2)) != pdTRUE) {
-    return false;
-  }
-  const bool painter = painterPresent_ &&
-                       std::memcmp(painterMac_, mac, 6) == 0 &&
-                       (nowMs - painterLastMs_) < kWispPainterFreshMs;
-  xSemaphoreGive(mutex_);
-  return painter;
 }
 
 bool LampRoster::isClaimingWisp(const uint8_t mac[6], uint32_t nowMs) {
@@ -163,19 +149,18 @@ bool LampRoster::isClaimingWisp(const uint8_t mac[6], uint32_t nowMs) {
   return claiming;
 }
 
-bool LampRoster::touchWispPainter(const uint8_t mac[6], uint32_t nowMs) {
+bool LampRoster::copyDisplayWispMac(uint8_t out[6], uint32_t nowMs) {
   if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(2)) != pdTRUE) {
     return false;
   }
-  const bool painter = painterPresent_ &&
-                       std::memcmp(painterMac_, mac, 6) == 0 &&
-                       (nowMs - painterLastMs_) < kWispPainterFreshMs;
-  if (painter) painterLastMs_ = nowMs;
+  const bool have = wispCache_.present &&
+                    freshWithin(wispCache_.lastSeenMs, nowMs, kWispControlStaleMs);
+  if (have) std::memcpy(out, wispCache_.mac, 6);
   xSemaphoreGive(mutex_);
-  return painter;
+  return have;
 }
 
-std::string LampRoster::getWispStatusReadJson(bool includePalette) {
+std::string LampRoster::getWispStatusReadJson() {
   // BLE on-read callback (Core 0); bounded take so it doesn't block
   // behind a loop-task writer. On timeout return "{}".
   WispCache snap;
@@ -253,20 +238,18 @@ std::string LampRoster::getWispStatusReadJson(bool includePalette) {
     }
   }
 
-  // Palette omitted on the NOTIFY leg (MTU truncation would corrupt it);
-  // served on READ only. paletteIdPrefix signals the app to re-read.
-  // paletteBpp is the blob's explicit stride discriminator; the app must
-  // never infer it from length (ambiguous at len % 12 == 0).
-  if (includePalette && snap.manualPaletteCount > 0) {
-    doc["palette"] = lamp::base64::encode(
-        snap.manualPaletteRgbw,
-        static_cast<size_t>(snap.manualPaletteCount) * 4);
-    doc["paletteBpp"] = 4;
-  }
-
   std::string out;
   serializeJson(doc, out);
   return out;
+}
+
+size_t LampRoster::copyManualPaletteBlob(uint8_t* out, size_t cap) {
+  if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(2)) != pdTRUE) return 0;
+  size_t n = static_cast<size_t>(wispCache_.manualPaletteCount) * 4;
+  if (n > cap) n = cap;
+  std::memcpy(out, wispCache_.manualPaletteRgbw, n);
+  xSemaphoreGive(mutex_);
+  return n;
 }
 
 void LampRoster::cacheWispClaim(const uint8_t mac[6],

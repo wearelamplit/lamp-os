@@ -75,9 +75,6 @@ size_t buildWispStatusJson(const WispStatusFields& f, char* out,
       addIfFits(doc, cap, "driftFadePct", f.driftFadePct);
     }
   }
-  if (f.rangeStep != 0) {
-    addIfFits(doc, cap, "range", f.rangeStep);
-  }
   if (f.observedCount > 0) {
     JsonArray z = doc["observedZones"].to<JsonArray>();
     for (size_t i = 0; i < f.observedCount; ++i) {

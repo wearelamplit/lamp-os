@@ -77,8 +77,15 @@ class StatusEmitter {
   uint32_t lastEmitMs_ = 0;
   bool haveEmitted_    = false;
 
+  // After a state change the status re-broadcasts at kStatusBurstIntervalMs
+  // until kStatusBurstMs elapses, so the confirmation survives a multi-second
+  // coex reception burst on the lamps.
+  uint32_t burstUntilMs_ = 0;
+
   static constexpr uint32_t kStatusIntervalMs = 30000;
   static constexpr uint32_t kMinEmitIntervalMs = 5000;
+  static constexpr uint32_t kStatusBurstMs = 20000;
+  static constexpr uint32_t kStatusBurstIntervalMs = 2000;
   static constexpr size_t kStatusJsonBufLen =
       lamp_protocol::CONTROL_MAX_PAYLOAD + 1;
 };

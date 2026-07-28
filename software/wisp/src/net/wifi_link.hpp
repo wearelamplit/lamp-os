@@ -31,6 +31,7 @@ class WifiLink {
 
   // softAP role on the mesh channel (WIFI_AP_STA so ESP-NOW keeps working).
   // ssid/pass are the wisp's own network, not the WispConfig STA creds.
+  // Idempotent: a no-op when the AP is already up.
   void startSoftAp(const char* ssid, const char* pass);
 
   // True when ArtNet frames can egress: STA associated, or softAP up.

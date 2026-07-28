@@ -11,6 +11,8 @@
 
 #include <lampos/led_types.hpp>
 
+#include "config/manual_palette_color.hpp"
+
 namespace wisp {
 
 // Wire encoding (NVS u8 + wispOp + wispStatus): 0=Off, 1=Manual, 2=Aurora.
@@ -20,21 +22,8 @@ enum class WispSourceMode : uint8_t {
   Aurora = 2,
 };
 
-struct ManualPaletteColor {
-  uint8_t r = 0;
-  uint8_t g = 0;
-  uint8_t b = 0;
-  uint8_t w = 0;
-};
-
 // Must not exceed lamp_protocol::kMaxWispPaletteColors; setManualPalette enforces this.
 inline constexpr size_t kManualPaletteMaxColors = 50;
-
-// Claim-range steps (wire encoding for NVS, wispOp `setRange`, and the
-// wispStatus `range` field): 0=Close, 1=Camp, 2=Stage, 3=Wide.
-// Each step's dBm is the claim-admission floor (direct-heard RSSI).
-inline constexpr uint8_t kRangeStepMax = 3;
-inline constexpr int8_t kRangeFloorDbm[kRangeStepMax + 1] = {-65, -75, -82, -90};
 
 class WispConfig {
  public:
@@ -105,11 +94,6 @@ class WispConfig {
   void setLedFormat(lampos::led::ByteOrder b);
   void setPixelCount(uint16_t n);
 
-  // Claim-range step (0=Close .. 3=Wide); setter clamps to kRangeStepMax.
-  uint8_t rangeStep() const { return rangeStep_; }
-  int8_t rangeFloorDbm() const { return kRangeFloorDbm[rangeStep_]; }
-  void setRangeStep(uint8_t step);
-
   // Space-brightness factor (0..100) the wisp asserts on its claimed lamps.
   // 100 = untouched; the lamp applies it as a floored multiplier. Setter
   // clamps to 100.
@@ -141,7 +125,6 @@ class WispConfig {
   String password_;
   lampos::led::ByteOrder ledFormat_ = lampos::led::ByteOrder::GRB;
   uint16_t pixelCount_ = 30;
-  uint8_t rangeStep_ = 0;
   uint8_t brightness_ = 100;
   uint32_t opSeq_ = 0;
 };

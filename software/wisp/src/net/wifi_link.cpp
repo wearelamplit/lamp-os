@@ -1,7 +1,6 @@
 #include "net/wifi_link.hpp"
 
 #include <WiFi.h>
-#include <esp_wifi.h>
 
 #include "config/wisp_config.hpp"
 #include "net/mesh_link.hpp"  // LAMP_ESPNOW_CHANNEL
@@ -70,6 +69,7 @@ void WifiLink::reconnect() {
 }
 
 void WifiLink::startSoftAp(const char* ssid, const char* pass) {
+  if (mode_ == Mode::Ap && apUp_) return;
   WiFi.mode(WIFI_AP_STA);
   apUp_ = WiFi.softAP(ssid, pass, LAMP_ESPNOW_CHANNEL);
   mode_ = Mode::Ap;

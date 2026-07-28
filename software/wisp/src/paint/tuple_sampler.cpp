@@ -4,19 +4,11 @@
 #include <cstdint>
 #include <vector>
 
+#include "util/fnv1a.hpp"
+
 namespace wisp {
 
 namespace {
-
-// FNV-1a 32-bit. Not cryptographic; used only to spread MACs across a small index set.
-uint32_t fnv1a(const uint8_t* bytes, size_t n) {
-  uint32_t h = 0x811C9DC5u;
-  for (size_t i = 0; i < n; ++i) {
-    h ^= static_cast<uint32_t>(bytes[i]);
-    h *= 0x01000193u;
-  }
-  return h;
-}
 
 // FNV-1a over salt-XORed MAC bytes, then Stafford-13 finalizer. FNV-1a alone
 // has poor low-bit avalanche when inputs differ only in their low byte (fleet

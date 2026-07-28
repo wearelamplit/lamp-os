@@ -49,7 +49,6 @@ constexpr size_t      kMaxNameLen       = 20;
 constexpr const char* kKeyPassword      = "wispPassword";
 constexpr const char* kKeyLedFmt        = "ledFmt";
 constexpr const char* kKeyPxCount       = "pxCount";
-constexpr const char* kKeyRangeStep     = "rangeStep";
 constexpr const char* kKeyBrightness    = "brightness";
 
 WispSourceMode coerceSourceMode(int raw) {
@@ -166,11 +165,6 @@ void WispConfig::begin() {
         : (raw > static_cast<uint16_t>(kMaxRingPixels))
               ? static_cast<uint16_t>(kMaxRingPixels)
               : raw;
-  }
-
-  {
-    const uint8_t raw = prefs_.getUChar(kKeyRangeStep, 0);
-    rangeStep_ = raw > kRangeStepMax ? 0 : raw;
   }
 
   {
@@ -325,13 +319,6 @@ void WispConfig::setPixelCount(uint16_t n) {
   pixelCount_ = n;
   if (opened_) prefs_.putUShort(kKeyPxCount, n);
   Serial.printf("[wisp.cfg] pxCount <= %u\n", n);
-}
-
-void WispConfig::setRangeStep(uint8_t step) {
-  rangeStep_ = step > kRangeStepMax ? kRangeStepMax : step;
-  if (opened_) prefs_.putUChar(kKeyRangeStep, rangeStep_);
-  Serial.printf("[wisp.cfg] rangeStep <= %u (%d dBm)\n",
-                (unsigned)rangeStep_, (int)rangeFloorDbm());
 }
 
 void WispConfig::setBrightness(uint8_t pct) {

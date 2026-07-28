@@ -23,6 +23,16 @@ inline int8_t helloRssiForRecord(const uint8_t* radioSrcMac,
   return direct ? rssi : INT8_MIN;
 }
 
+// A CONTROL_OP applies here only when addressed to this wisp or broadcast
+// (all-0xFF). Single-hop scope: a wisp acts on ops aimed at it, not at a
+// sibling. An unset self MAC (all-zero, pre-setSelfMac) matches only broadcast.
+inline bool controlOpForWisp(const uint8_t targetMac[6],
+                             const uint8_t myMac[6]) {
+  static const uint8_t bcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  return std::memcmp(targetMac, bcast, 6) == 0 ||
+         std::memcmp(targetMac, myMac, 6) == 0;
+}
+
 class MeshRouter {
  public:
   using OpResultFn = std::function<void(DispatchResult)>;
@@ -33,6 +43,10 @@ class MeshRouter {
         roster_(roster),
         dispatcher_(dispatcher),
         onOpResult_(std::move(onOpResult)) {}
+
+  // Cache this wisp's own STA MAC so onPacket can filter CONTROL_OP by
+  // target. Set once at setup, after MeshLink::begin() brings the radio up.
+  void setSelfMac(const uint8_t mac[6]) { std::memcpy(myMac_, mac, 6); }
 
   // MeshLink recv handler. WiFi task: protocol parse + bounded memcpy only.
   // No logging, no Preferences, no ArduinoJson.
@@ -51,6 +65,7 @@ class MeshRouter {
   WispRoster& roster_;
   WispOpDispatcher& dispatcher_;
   OpResultFn onOpResult_;
+  uint8_t myMac_[6] = {0};
 
   // Gossip relay delivers CONTROL_OP multiple times by design; 64-slot ring
   // keyed on (sourceMac, msgType, seq) drops re-arrivals before the dispatcher.

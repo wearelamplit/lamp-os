@@ -28,63 +28,33 @@ void PaintDistributor::begin(LampInventory* inventory, MeshLink* mesh,
 }
 
 void PaintDistributor::setPaintMode(bool on) {
+  stateDirty_ = true;
   if (on == paintMode_) {
-    // kick a fresh walk so a newly-joined lamp gets painted
-    if (on) beginWalk(Mode::Paint);
+    if (on) assignAllClaimed();
     return;
   }
   paintMode_ = on;
   if (on) {
-    restoreRepeatsLeft_ = 0;
-    beginWalk(Mode::Paint);
     refreshDriftRoster();
-  } else {
-    restoreRepeatsLeft_ = kRestoreRepeats;
-    beginWalk(Mode::Restore);
+    assignAllClaimed();
   }
 }
 
 void PaintDistributor::onPaletteChanged() {
   if (!paintMode_) return;
-  beginWalk(Mode::Paint);
+  assignAllClaimed();
 }
 
 void PaintDistributor::tick(uint32_t nowMs) {
-  if (walkMode_ != Mode::Idle && walkIdx_ < walkCount_) {
-    if (nowMs - lastSendMs_ < kPerPeerPaceMs) return;
-    lastSendMs_ = nowMs;
-    const uint8_t* mac = walkMacs_[walkIdx_];
-    if (walkMode_ == Mode::Paint) {
-      sendPaintToPeer(mac);
-    } else {
-      sendRestoreToPeer(mac);
-    }
-    walkIdx_++;
-    if (walkIdx_ >= walkCount_) {
-      walkMode_ = Mode::Idle;
-      if (restoreRepeatsLeft_ > 0) nextRestorePassMs_ = nowMs + kRestorePassGapMs;
-    }
-    return;
-  }
-
-  if (restoreRepeatsLeft_ > 0 && walkMode_ == Mode::Idle &&
-      nowMs >= nextRestorePassMs_) {
-    restoreRepeatsLeft_--;
-    beginWalk(Mode::Restore);
-    return;
-  }
-
-  // Drift rotation replaces the global backstop. Each lamp is re-targeted
-  // on its slot, so every lamp sees a refresh within one interval.
+  // Re-color one lamp per drift slot so every lamp shifts within one interval;
+  // STATE broadcasts the roster colors on its own cadence.
   if (paintMode_ && driftSlotMs_ > 0 && driftCount_ > 0 &&
       (nowMs - lastDriftFireMs_) >= driftSlotMs_) {
     lastDriftFireMs_ = nowMs;
-    sendDriftToPeer(driftIdx_ % driftCount_);
+    assignDriftColor(driftIdx_ % driftCount_);
     driftIdx_ = nextDriftIdx(driftIdx_, driftCount_);
   }
 
-  // Fold in lamps that joined or left during steady paint without waiting
-  // for a mode change or interval update.
   if (paintMode_ && (nowMs - lastDriftRosterMs_) >= 5000) {
     lastDriftRosterMs_ = nowMs;
     refreshDriftRoster(/*paintNewcomers=*/true);
@@ -101,8 +71,10 @@ void PaintDistributor::tick(uint32_t nowMs) {
     beginBrightnessWalk();
   }
   if (brWalkActive_ && brWalkIdx_ < brWalkCount_ &&
-      (nowMs - lastBrSendMs_) >= kPerPeerPaceMs) {
+      (nowMs - lastBrSendMs_) >= kPerPeerPaceMs &&
+      unicastGateOpen(nowMs, lastUnicastMs_, kMinUnicastGapMs)) {
     lastBrSendMs_ = nowMs;
+    lastUnicastMs_ = nowMs;
     sendBrightnessToPeer(brWalkMacs_[brWalkIdx_++]);
     if (brWalkIdx_ >= brWalkCount_) {
       brWalkActive_ = false;
@@ -111,24 +83,9 @@ void PaintDistributor::tick(uint32_t nowMs) {
   }
 }
 
-void PaintDistributor::beginWalk(Mode mode) {
-  if (!inventory_) return;
-  LampObservation obs[kMaxWalkPeers];
-  const size_t n = inventory_->copyObservations(obs, kMaxWalkPeers);
-  walkCount_ = 0;
-  for (size_t i = 0; i < n; i++) {
-    if (roster_ && !roster_->claims(obs[i].mac)) continue;
-    std::memcpy(walkMacs_[walkCount_], obs[i].mac, 6);
-    walkCount_++;
-  }
-  walkIdx_ = 0;
-  walkMode_ = walkCount_ ? mode : Mode::Idle;
-  lastSendMs_ = millis() - kPerPeerPaceMs;
-#ifdef LAMP_DEBUG
-  Serial.printf("[paint] walk %s peers=%u\n",
-                mode == Mode::Paint ? "Paint" : "Restore",
-                (unsigned)walkCount_);
-#endif
+void PaintDistributor::assignAllClaimed() {
+  for (size_t i = 0; i < driftCount_; i++) assignPaintColor(driftMacs_[i]);
+  stateDirty_ = true;
 }
 
 void PaintDistributor::setBrightness(uint8_t pct) {
@@ -200,125 +157,35 @@ void PaintDistributor::refreshDriftRoster(bool paintNewcomers) {
   driftSlotMs_ = driftSlotMs(driftIntervalMs_, driftCount_);
   driftIdx_    = driftCount_ ? driftIdx_ % driftCount_ : 0;
 
-  // A lamp that joins mid-run would otherwise wait a full interval for its
-  // drift slot; queue it as a paced mini-walk so it catches up within one
-  // refresh, then it folds into the rotation.
-  // ponytail: newcomers are skipped while another walk is in flight. Rare
-  // overlap, and a missed immediate paint just waits for that lamp's normal
-  // drift slot.
-  if (paintNewcomers && paintMode_ && walkMode_ == Mode::Idle) {
-    size_t newcomerCount = 0;
+  if (paintNewcomers && paintMode_) {
     for (size_t i = 0; i < driftCount_; i++) {
       bool known = false;
       for (size_t j = 0; j < prevCount; j++) {
         if (std::memcmp(driftMacs_[i], prev[j], 6) == 0) { known = true; break; }
       }
-      if (!known) std::memcpy(walkMacs_[newcomerCount++], driftMacs_[i], 6);
-    }
-    if (newcomerCount) {
-      walkCount_ = newcomerCount;
-      walkIdx_ = 0;
-      walkMode_ = Mode::Paint;
-      lastSendMs_ = millis() - kPerPeerPaceMs;
-#ifdef LAMP_DEBUG
-      Serial.printf("[paint] newcomer mini-walk peers=%u\n",
-                    (unsigned)newcomerCount);
-#endif
+      if (!known) { assignPaintColor(driftMacs_[i]); stateDirty_ = true; }
     }
   }
 }
 
-void PaintDistributor::sendDriftToPeer(size_t idx) {
-  if (!mesh_ || !palette_) return;
+void PaintDistributor::assignDriftColor(size_t idx) {
+  if (!roster_ || !palette_) return;
   if (palette_->colors().empty()) return;
-
-  const uint8_t* mac = driftMacs_[idx];
   ColorTuple t = sampleTupleAtPositions(palette_->colors(), esp_random(), esp_random());
-  if (roster_) {
-    const uint8_t base[3]  = {t.r[0], t.g[0], t.b[0]};
-    const uint8_t shade[3] = {t.r[1], t.g[1], t.b[1]};
-    roster_->setLampPaint(mac, base, shade);
-  }
-  uint8_t srcMac[6] = {0};
-  mesh_->getMac(srcMac);
-
-  uint8_t colorsRGBW[2 * 4] = {
-      t.r[0], t.g[0], t.b[0], t.w[0],
-      t.r[1], t.g[1], t.b[1], t.w[1],
-  };
-  const uint32_t fadeDurationMs = driftFadeMs(driftIntervalMs_, driftFadePct_, esp_random());
-  uint8_t buf[lamp_protocol::OVERRIDE_COLORS_MAX_SIZE];
-  const uint16_t seq = seqCounter_++;
-  size_t n = lamp_protocol::buildOverrideColors(
-      buf, sizeof(buf), seq,
-      srcMac, mac,
-      lamp_protocol::OverrideSurface::BaseAndShade,
-      lamp_protocol::OverrideSource::Wisp,
-      fadeDurationMs,
-      colorsRGBW, /*numColors=*/2);
-  if (n) mesh_->send(mac, buf, n);
-#ifdef LAMP_DEBUG
-  Serial.printf("[drift] send Pair->%02X:%02X:%02X:%02X:%02X:%02X seq=%u fade=%ums\n",
-                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
-                (unsigned)seq, (unsigned)fadeDurationMs);
-#endif
+  const uint8_t base3[3]  = {t.r[0], t.g[0], t.b[0]};
+  const uint8_t shade3[3] = {t.r[1], t.g[1], t.b[1]};
+  roster_->setLampPaint(driftMacs_[idx], base3, shade3);
 }
 
-void PaintDistributor::sendPaintToPeer(const uint8_t mac[6]) {
-  if (!mesh_ || !palette_) return;
+void PaintDistributor::assignPaintColor(const uint8_t mac[6]) {
+  if (!roster_ || !palette_) return;
   // paintMode can flip on before the first Aurora callback populates the
-  // palette; an empty palette would blast peers with an all-zero frame.
+  // palette; an empty palette would store an all-zero color.
   if (palette_->colors().empty()) return;
-
   ColorTuple t = sampleTupleForMac(*palette_, mac, shuffleSeed_);
-  if (roster_) {
-    const uint8_t base[3]  = {t.r[0], t.g[0], t.b[0]};
-    const uint8_t shade[3] = {t.r[1], t.g[1], t.b[1]};
-    roster_->setLampPaint(mac, base, shade);
-  }
-  uint8_t srcMac[6] = {0};
-  mesh_->getMac(srcMac);
-
-  uint8_t colorsRGBW[2 * 4] = {
-      t.r[0], t.g[0], t.b[0], t.w[0],   // [0] base
-      t.r[1], t.g[1], t.b[1], t.w[1],   // [1] shade
-  };
-  uint8_t buf[lamp_protocol::OVERRIDE_COLORS_MAX_SIZE];
-  const uint16_t seq = seqCounter_++;
-  size_t n = lamp_protocol::buildOverrideColors(
-      buf, sizeof(buf), seq,
-      srcMac, mac,
-      lamp_protocol::OverrideSurface::BaseAndShade,
-      lamp_protocol::OverrideSource::Wisp,
-      kDefaultFadeDurationMs,
-      colorsRGBW, /*numColors=*/2);
-  if (n) mesh_->send(mac, buf, n);
-#ifdef LAMP_DEBUG
-  Serial.printf("[paint] send Pair->%02X:%02X:%02X:%02X:%02X:%02X seq=%u base=%u,%u,%u,%u shade=%u,%u,%u,%u\n",
-                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
-                (unsigned)seq,
-                t.r[0], t.g[0], t.b[0], t.w[0],
-                t.r[1], t.g[1], t.b[1], t.w[1]);
-#endif
-}
-
-void PaintDistributor::sendRestoreToPeer(const uint8_t mac[6]) {
-  if (!mesh_) return;
-  if (roster_) {
-    constexpr uint8_t kZero[3] = {0, 0, 0};
-    roster_->setLampPaint(mac, kZero, kZero);
-  }
-  uint8_t srcMac[6] = {0};
-  mesh_->getMac(srcMac);
-
-  uint8_t buf[lamp_protocol::RESTORE_FIXED_SIZE];
-  size_t n = lamp_protocol::buildRestoreColors(
-      buf, sizeof(buf), seqCounter_++,
-      srcMac, mac,
-      lamp_protocol::OverrideSurface::BaseAndShade,
-      lamp_protocol::OverrideSource::Wisp,
-      kDefaultFadeDurationMs);
-  if (n) mesh_->send(mac, buf, n);
+  const uint8_t base3[3]  = {t.r[0], t.g[0], t.b[0]};
+  const uint8_t shade3[3] = {t.r[1], t.g[1], t.b[1]};
+  roster_->setLampPaint(mac, base3, shade3);
 }
 
 }  // namespace wisp

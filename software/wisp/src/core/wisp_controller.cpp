@@ -8,6 +8,7 @@
 #include "config/wisp_config.hpp"
 #include "config/zone_selector.hpp"
 #include "paint/paint_distributor.hpp"
+#include "paint/palette_id.hpp"
 #include "artnet/artnet_emitter.hpp"
 #include "status/status_emitter.hpp"
 #include "status/status_ring.hpp"
@@ -20,7 +21,8 @@ void WispController::pushManualPaletteToCurrent() {
   const auto& cols = config_.manualPalette();
   if (cols.empty()) return;
   Palette p;
-  p.id = "manual";
+  // Content hash so the app confirms this exact palette on the status NOTIFY.
+  p.id = manualPaletteId(cols);
   // Float-channel shape (not hexColors): the 24-bit hex form can't carry W.
   p.colors.reserve(cols.size());
   for (const auto& c : cols) {
@@ -34,6 +36,14 @@ void WispController::pushManualPaletteToCurrent() {
   palette_.update(p, millis());
   paint_.onPaletteChanged();
   artnet_.onPaletteChanged();
+}
+
+bool WispController::effectiveOff() const {
+  const wisp::WispSourceMode mode = config_.sourceMode();
+  const bool auroraLive =
+      mode == wisp::WispSourceMode::Aurora && aurora_.isStreaming();
+  return mode == wisp::WispSourceMode::Off ||
+         (mode == wisp::WispSourceMode::Aurora && !auroraLive);
 }
 
 // Event-driven; never called from loop() steady state. Stack-only.
@@ -50,6 +60,11 @@ void WispController::renderRing() {
   // Render as Off when Aurora stream is down, not stale palette.
   const bool auroraLive =
       mode == wisp::WispSourceMode::Aurora && aurora_.isStreaming();
+  const bool off = effectiveOff();
+  // Old lamps get released on ArtNet the same way mesh lamps are released
+  // (isWispActive=0): no frames at all, rather than being driven to the
+  // off-color.
+  artnet_.setActive(!off);
   if (mode == wisp::WispSourceMode::Manual) {
     const auto& cols = config_.manualPalette();
     const size_t n = cols.size() > wisp::kManualPaletteMaxColors
@@ -76,8 +91,7 @@ void WispController::renderRing() {
   }
   // Off and Aurora-with-no-stream show the operator off-color.
   // Manual with empty palette falls through to warm-white.
-  if (mode == wisp::WispSourceMode::Off ||
-      (mode == wisp::WispSourceMode::Aurora && !auroraLive)) {
+  if (off) {
     const wisp::ManualPaletteColor offColor = config_.offColor();
     uint8_t offR, offG, offB;
     wisp::rgbwToRgbWarmBias(offColor.r, offColor.g, offColor.b, offColor.w,
@@ -117,7 +131,7 @@ void WispController::applySourceModeTransition(wisp::WispSourceMode mode) {
       // Off plays nothing; a stale paletteIdPrefix would keep triggering
       // app-side palette re-reads.
       palette_.clear();
-      Serial.println("[wisp] source=Off — broadcast RESTORE; paintMode off");
+      Serial.println("[wisp] source=Off — paintMode off, STATE clears paint");
       break;
     case wisp::WispSourceMode::Manual:
       aurora_.setActive(false);
@@ -238,10 +252,6 @@ void WispController::applyOpResult(DispatchResult res) {
       applyLedConfig();
       status_.triggerOnChange();
       break;
-    // The claim recompute reads the new floor from config on its next 2 s tick.
-    case wisp::DispatchResult::AppliedRangeChange:
-      status_.triggerOnChange();
-      break;
     case wisp::DispatchResult::AppliedBrightnessChange:
       paint_.setBrightness(config_.brightness());
       status_.triggerOnChange();
@@ -257,8 +267,8 @@ void WispController::applyOpResult(DispatchResult res) {
 }
 
 void WispController::tickAuroraLiveness() {
-  // Edge-triggered: stream drop -> RESTORE walk; onAuroraPalette re-enables
-  // paint when a fresh palette arrives.
+  // Edge-triggered: stream drop turns paint off (STATE clears); onAuroraPalette
+  // re-enables paint when a fresh palette arrives.
   if (config_.sourceMode() != wisp::WispSourceMode::Aurora) return;
   const bool streaming = aurora_.isStreaming();
   if (auroraWasStreaming_ && !streaming) {

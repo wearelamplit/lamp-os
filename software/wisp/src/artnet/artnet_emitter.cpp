@@ -25,7 +25,12 @@ void ArtnetEmitter::tick(uint32_t nowMs) {
   emitNow();
 }
 
+void ArtnetEmitter::setActive(bool active) {
+  active_ = active;
+}
+
 void ArtnetEmitter::emitNow() {
+  if (!active_) return;
   if (!palette_ || !wifi_) return;
   if (!wifi_->canBroadcast()) {
     // Stamp lastEmitMs_ so tick() backs off to backstop cadence instead of

@@ -25,6 +25,10 @@ struct WispCache {
   // just-adopted wisp (claim takeover, first paint) is sticky before its
   // first hello is cached. Never served to the app.
   uint32_t slotAdoptedMs = 0;
+  // Stamped on any reception from this wisp (hello/status/palette/paint/unicast
+  // paint), not hello alone. Control-op targeting keys on this so a command
+  // survives a coex-dropped HELLO gap while the reliable unicast still lands.
+  uint32_t lastSeenMs = 0;
   uint32_t wispVersion = 0;
   uint8_t flags = 0;
   // +1 for trailing NUL; on-wire slot is 8 bytes opaque (not ASCII-enforced).
@@ -36,10 +40,9 @@ struct WispCache {
   // fields above. Empty until the first wispStatus has been seen.
   std::string lastStatusJson;
   uint32_t lastStatusMs = 0;
-  // Latest MSG_WISP_PALETTE from this wisp. Served base64-encoded as
-  // getWispStatusReadJson()'s `palette` field on READ only (NOTIFY omits
-  // it; MTU truncation would corrupt it). Interleaved R,G,B,W per color;
-  // 200 bytes = 50 colors * 4.
+  // Latest MSG_WISP_PALETTE from this wisp. Served raw on the `wisppalette`
+  // page section (see copyManualPaletteBlob), kept off the notify-clobbered
+  // status char. Interleaved R,G,B,W per color; 200 bytes = 50 colors * 4.
   uint8_t manualPaletteRgbw[200] = {0};
   uint8_t manualPaletteCount = 0;
   uint32_t lastPaletteMs = 0;

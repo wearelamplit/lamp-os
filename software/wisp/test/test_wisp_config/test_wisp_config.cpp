@@ -111,32 +111,6 @@ void test_set_pixel_count_zero_clamped_to_one() {
   TEST_ASSERT_EQUAL_INT(1, (int)cfg.pixelCount());
 }
 
-void test_range_step_default_is_close() {
-  wisp::WispConfig cfg;
-  cfg.begin();
-  TEST_ASSERT_EQUAL_INT(0, (int)cfg.rangeStep());
-  TEST_ASSERT_EQUAL_INT(-65, (int)cfg.rangeFloorDbm());
-}
-
-void test_set_range_step_roundtrips_and_maps_floor() {
-  wisp::WispConfig cfg;
-  cfg.begin();
-  cfg.setRangeStep(3);
-  TEST_ASSERT_EQUAL_INT(3, (int)cfg.rangeStep());
-  TEST_ASSERT_EQUAL_INT(-90, (int)cfg.rangeFloorDbm());
-
-  wisp::WispConfig reload;
-  reload.begin();
-  TEST_ASSERT_EQUAL_INT(3, (int)reload.rangeStep());
-}
-
-void test_set_range_step_clamps_to_max() {
-  wisp::WispConfig cfg;
-  cfg.begin();
-  cfg.setRangeStep(9);
-  TEST_ASSERT_EQUAL_INT((int)wisp::kRangeStepMax, (int)cfg.rangeStep());
-}
-
 void test_brightness_default_is_full() {
   wisp::WispConfig cfg;
   cfg.begin();
@@ -173,9 +147,6 @@ int main(int, char**) {
   RUN_TEST(test_set_pixel_count_roundtrips);
   RUN_TEST(test_set_pixel_count_clamps_to_max);
   RUN_TEST(test_set_pixel_count_zero_clamped_to_one);
-  RUN_TEST(test_range_step_default_is_close);
-  RUN_TEST(test_set_range_step_roundtrips_and_maps_floor);
-  RUN_TEST(test_set_range_step_clamps_to_max);
   RUN_TEST(test_brightness_default_is_full);
   RUN_TEST(test_set_brightness_roundtrips_and_clamps);
   return UNITY_END();

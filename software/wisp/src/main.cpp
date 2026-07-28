@@ -39,10 +39,17 @@ wisp::StageBeacon stageBeacon;
 wisp::ArtnetEmitter artnetEmitter;
 
 // Pre-mesh lamps join this softAP (advertised over the stage beacon) to receive
-// ArtNet. Hosted unconditionally on the mesh channel: same-radio, same-channel
-// WiFi doesn't disturb ESP-NOW, so serving costs the mesh nothing.
-constexpr char kStageApSsid[] = "wisp-stage";
+// ArtNet. Hosted unconditionally on the mesh channel: the single radio stays
+// pinned there, so same-channel WiFi doesn't disturb ESP-NOW. SSID is
+// wisp-<name>, falling back when unnamed, to be recognizable in a WiFi scan.
+constexpr char kStageApSsidFallback[] = "wisp";
 constexpr char kStageApPass[] = "lamplight";
+
+std::string stageApSsid(const wisp::WispConfig& config) {
+  const String& name = config.name();
+  if (name.length() == 0) return kStageApSsidFallback;
+  return std::string("wisp-") + name.c_str();
+}
 
 // GPIO 1 (D1): D0 = GPIO 0 = BOOT strap pin; leaving it free keeps
 // USB-recover (download mode) working without unplugging the strip.
@@ -117,10 +124,18 @@ void setup() {
     Serial.println("[wisp] mesh init failed; will retry in 5s");
   }
 
+  // Set self-MAC before any packet can reach onPacket, else a real unicast
+  // CONTROL_OP addressed to us drops against a zero self-MAC.
+  uint8_t selfMac[6] = {0};
+  mesh.getMac(selfMac);
+  wispRoster.setSelfMac(selfMac);
+  meshRouter.setSelfMac(selfMac);
+
   wifi.begin(&wispConfig);
   stageBeacon.begin(buildInstanceId().c_str(), &wispConfig);
-  wifi.startSoftAp(kStageApSsid, kStageApPass);
-  stageBeacon.advertiseCreds(kStageApSsid, kStageApPass);
+  const std::string ssid = stageApSsid(wispConfig);
+  wifi.startSoftAp(ssid.c_str(), kStageApPass);
+  stageBeacon.advertiseCreds(ssid, kStageApPass);
   artnetEmitter.begin(&currentPalette, &wifi);
   wispOpDispatcher.setWifiSinks(&wifi, &stageBeacon);
   wispOpDispatcher.setNonces(&wispOpNonces);
@@ -132,10 +147,6 @@ void setup() {
   auroraClient.begin();
   Serial.printf("[wisp] aurora client started as %s\n",
                 buildInstanceId().c_str());
-
-  uint8_t selfMac[6] = {0};
-  mesh.getMac(selfMac);
-  wispRoster.setSelfMac(selfMac);
 
   paintDistributor.begin(&inventory, &mesh, &currentPalette, &wispRoster);
   paintDistributor.setShuffleSeed(wispConfig.shuffleSeed());
@@ -151,14 +162,14 @@ void setup() {
   statusEmitter.begin(&mesh, &zoneSelector, &auroraClient, &wispConfig,
                       &currentPalette, &wispSeq);
   presenceBeacon.begin(&mesh, &paintDistributor, &currentPalette,
-                       &auroraClient, &wispRoster, &wispSeq, &statusEmitter);
+                       &auroraClient, &wispRoster, &wispSeq, &statusEmitter,
+                       &wispConfig);
   statusEmitter.startTimer();
   presenceBeacon.startTimer();
 
   controller.applySourceModeTransition(wispConfig.sourceMode());
 
-  Serial.printf("[wisp] paint distributor + status beacon online; softAP '%s' up\n",
-                kStageApSsid);
+  Serial.println("[wisp] paint distributor + status beacon online");
   Serial.println("[wisp] cmds: paint:on/off  stage:on/off");
   Serial.println("[wisp] cmds: src:off/manual/aurora  wifi:set <ssid> <pass>  wifi:show");
 }
@@ -180,7 +191,7 @@ void loop() {
     lastClaimsMs = now;
     wisp::LampObservation obs[wisp::WISP_ROSTER_MAX_LAMPS];
     const size_t n = inventory.copyObservations(obs, wisp::WISP_ROSTER_MAX_LAMPS);
-    wispRoster.recomputeClaims(obs, n, now, wispConfig.rangeFloorDbm());
+    wispRoster.recomputeClaims(obs, n, now);
   }
   controller.tickAuroraLiveness();
 
@@ -196,6 +207,13 @@ void loop() {
     lastPruneMs = now;
     inventory.prune(now, LAMP_PRUNE_TIME_MS);
   }
+
+#ifdef LAMP_DEBUG
+  const uint32_t loopMs = millis() - now;
+  if (loopMs > 100) {
+    Serial.printf("[wisploop] stall=%ums\n", (unsigned)loopMs);
+  }
+#endif
 
   delay(5);
 }

@@ -55,6 +55,7 @@ class WispController {
   void applyLedConfig();
 
  private:
+  bool effectiveOff() const;
   void pushManualPaletteToCurrent();
   void renderRing();
 
