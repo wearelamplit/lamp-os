@@ -15,8 +15,9 @@ class TuplePrediction {
   final LampColor shade;
 }
 
-int _fnv1a(Uint8List bytes) {
-  // Mask to 32 bits after each multiply to match C++ uint32_t overflow.
+/// FNV-1a 32-bit, matching `wisp::fnv1a` in the firmware. Masks to 32 bits
+/// after each multiply to match C++ uint32_t overflow.
+int fnv1a(Uint8List bytes) {
   int h = 0x811C9DC5;
   for (int i = 0; i < bytes.length; ++i) {
     h ^= bytes[i];
@@ -33,7 +34,7 @@ int _hashMac(List<int> mac, int salt) {
   buf[3] = mac[3] ^ ((salt >> 24) & 0xFF);
   buf[4] = mac[4] ^ (salt & 0xFF);
   buf[5] = mac[5] ^ ((salt >> 16) & 0xFF);
-  int h = _fnv1a(buf);
+  int h = fnv1a(buf);
   h ^= h >> 16;
   h = (h * 0x7feb352d) & 0xFFFFFFFF;
   h ^= h >> 15;

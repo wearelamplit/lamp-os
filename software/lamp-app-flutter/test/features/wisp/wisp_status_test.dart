@@ -148,72 +148,6 @@ void main() {
       expect(s.auroraDetected, isFalse);
     });
 
-    test('currentPalette decodes base64-packed RGB into LampColor triples', () {
-      final b64 = base64Encode([199, 0, 16, 49, 155, 0, 0, 0, 255]);
-      final s = WispStatus.fromBytes(
-        Uint8List.fromList(utf8.encode(
-          '{"wispMac":"AA:BB:CC:DD:EE:FF","palette":"$b64"}',
-        )),
-      );
-      expect(s.currentPalette, isNotNull);
-      expect(s.currentPalette!.length, 3);
-      expect(s.currentPalette![0].r, 199);
-      expect(s.currentPalette![0].g, 0);
-      expect(s.currentPalette![0].b, 16);
-      expect(s.currentPalette![0].w, 0);
-      expect(s.currentPalette![1].r, 49);
-      expect(s.currentPalette![1].g, 155);
-      expect(s.currentPalette![1].b, 0);
-      expect(s.currentPalette![2].r, 0);
-      expect(s.currentPalette![2].g, 0);
-      expect(s.currentPalette![2].b, 255);
-    });
-
-    test('currentPalette strides RGBW when paletteBpp is 4', () {
-      final b64 = base64Encode([199, 0, 16, 80, 49, 155, 0, 0]);
-      final s = WispStatus.fromBytes(
-        Uint8List.fromList(utf8.encode(
-          '{"wispMac":"AA:BB:CC:DD:EE:FF","palette":"$b64","paletteBpp":4}',
-        )),
-      );
-      expect(s.currentPalette, isNotNull);
-      expect(s.currentPalette!.length, 2);
-      expect(s.currentPalette![0].r, 199);
-      expect(s.currentPalette![0].w, 80);
-      expect(s.currentPalette![1].g, 155);
-      expect(s.currentPalette![1].w, 0);
-    });
-
-    test('currentPalette stride comes from paletteBpp, never length', () {
-      // 12 bytes fits both strides; the discriminator must win.
-      final raw = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-      final b64 = base64Encode(raw);
-      final rgb = WispStatus.fromBytes(_b(
-        '{"wispMac":"AA:BB:CC:DD:EE:FF","palette":"$b64"}',
-      ));
-      expect(rgb.currentPalette!.length, 4);
-      expect(rgb.currentPalette![0].w, 0);
-      final rgbw = WispStatus.fromBytes(_b(
-        '{"wispMac":"AA:BB:CC:DD:EE:FF","palette":"$b64","paletteBpp":4}',
-      ));
-      expect(rgbw.currentPalette!.length, 3);
-      expect(rgbw.currentPalette![0].w, 4);
-    });
-
-    test('currentPalette absent → null', () {
-      final s = WispStatus.fromBytes(_b(
-        '{"wispMac":"AA:BB:CC:DD:EE:FF"}',
-      ));
-      expect(s.currentPalette, isNull);
-    });
-
-    test('currentPalette with malformed base64 → null', () {
-      final s = WispStatus.fromBytes(_b(
-        '{"wispMac":"AA:BB:CC:DD:EE:FF","palette":"not!!base64"}',
-      ));
-      expect(s.currentPalette, isNull);
-    });
-
     test('shuffleSeed parses from JSON', () {
       final s = WispStatus.fromBytes(_b(
         '{"wispMac":"AA:BB:CC:DD:EE:FF","shuffleSeed":7}',
@@ -226,18 +160,6 @@ void main() {
         '{"wispMac":"AA:BB:CC:DD:EE:FF"}',
       ));
       expect(s.shuffleSeed, 0);
-    });
-
-    test('currentPalette truncates partial trailing triple', () {
-      // 7 bytes = 2 full triples + 1 stray byte; stray byte is dropped.
-      // Guards against odd payload lengths from the wisp.
-      final raw = [10, 20, 30, 40, 50, 60, 70];
-      final b64 = base64Encode(raw);
-      final s = WispStatus.fromBytes(_b(
-        '{"wispMac":"AA:BB:CC:DD:EE:FF","palette":"$b64"}',
-      ));
-      expect(s.currentPalette, isNotNull);
-      expect(s.currentPalette!.length, 2);
     });
 
     test('driftIntervalMs and driftFadePct parse from JSON', () {
@@ -335,24 +257,6 @@ void main() {
         '{"wispMac":"AA:BB:CC:DD:EE:FF","hasPassword":false}',
       ));
       expect(s.hasPassword, isFalse);
-    });
-
-    test('rangeStep parses from JSON and rides copyWith/==', () {
-      final s = WispStatus.fromBytes(_b(
-        '{"wispMac":"AA:BB:CC:DD:EE:FF","range":2}',
-      ));
-      expect(s.rangeStep, 2);
-      final wide = s.copyWith(rangeStep: 3);
-      expect(wide.rangeStep, 3);
-      expect(wide == s, isFalse);
-      expect(s.copyWith(rangeStep: 2), s);
-    });
-
-    test('rangeStep defaults to 0 (Close) when absent', () {
-      final s = WispStatus.fromBytes(_b(
-        '{"wispMac":"AA:BB:CC:DD:EE:FF"}',
-      ));
-      expect(s.rangeStep, 0);
     });
 
     test('brightness parses from JSON and rides copyWith/==', () {

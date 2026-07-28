@@ -8,7 +8,6 @@ import 'wisp_source_mode.dart';
 import 'zone_source.dart';
 
 const _observedZonesEq = ListEquality<int>();
-const _currentPaletteEq = ListEquality<LampColor>();
 
 /// Default Off-mode color. Matches the wisp firmware's NVS-default for
 /// `offColor` (warm candle-amber); also the fallback when the wispStatus
@@ -44,7 +43,6 @@ class WispStatus {
     this.controllingShade = false,
     this.baseWispColor,
     this.shadeWispColor,
-    this.currentPalette,
     this.shuffleSeed = 0,
     this.driftIntervalMs = 120000,
     this.driftFadePct = 50,
@@ -52,7 +50,6 @@ class WispStatus {
     this.hasPassword = false,
     this.ledType = 'GRB',
     this.pixelCount = 30,
-    this.rangeStep = 0,
     this.opSeq = 0,
     this.brightness = 100,
   });
@@ -113,7 +110,7 @@ class WispStatus {
   /// surface, i.e. its baseColorOverride is FadingIn / Holding /
   /// Restoring AND the most recent apply that took effect was
   /// Wisp-sourced. Drives the will-o'-wisp indicator in the control
-  /// screen header and the `disabledDuringWispOverride` expression gate.
+  /// screen header.
   final bool controllingBase;
 
   /// Same as [controllingBase] but for the Shade surface.
@@ -126,16 +123,6 @@ class WispStatus {
 
   /// Same as [baseWispColor] for the Shade surface.
   final LampColor? shadeWispColor;
-
-  /// The wisp's current active palette, served on the `CHAR_WISP_STATUS`
-  /// read leg as a base64-packed blob under the `palette` key
-  /// (`paletteBpp` gives the stride: 4 = RGBW, absent = RGB). `null`
-  /// means the lamp hasn't received a palette from the wisp yet (typical
-  /// for the first ~30 s after wisp boot, or for offline lamps). The wisp
-  /// truncates at 50 colors before emission; larger Aurora palettes
-  /// round-trip partially with a `[wisp.beacon] manualPalette truncated:`
-  /// log on the wisp side.
-  final List<LampColor>? currentPalette;
 
   /// Current shuffle seed. Mixed into the TupleSampler hash salts so the
   /// app preview stays in lock-step with the wisp's color assignments.
@@ -164,11 +151,6 @@ class WispStatus {
   /// Number of pixels in the wisp's LED ring. Absent on legacy wisps;
   /// defaults to 30 matching the firmware default.
   final int pixelCount;
-
-  /// Claim-range step (0=Close, 1=Camp, 2=Stage, 3=Wide): the RSSI floor
-  /// the wisp requires before claiming a lamp. Absent on legacy wisps and
-  /// omitted at the default; defaults to 0 (Close) matching the firmware.
-  final int rangeStep;
 
   /// Monotonic counter the wisp bumps each time it accepts and applies a
   /// sealed wispOp. Sealed ops have no direct ACK; the app confirms one
@@ -282,31 +264,6 @@ class WispStatus {
       }
     }
 
-    // Decode the base64-packed blob served under the `palette` key. The
-    // stride comes from `paletteBpp` (absent → 3, RGB from older lamps);
-    // never inferred from length, which is ambiguous at len % 12 == 0.
-    List<LampColor>? parseCurrentPalette(Object? v, Object? bppRaw) {
-      if (v is! String || v.isEmpty) return null;
-      final bpp = asInt(bppRaw) == 4 ? 4 : 3;
-      try {
-        final bytes = base64Decode(v);
-        if (bytes.length < bpp) return null;
-        final usable = bytes.length - (bytes.length % bpp);
-        final colors = <LampColor>[];
-        for (var i = 0; i + bpp - 1 < usable; i += bpp) {
-          colors.add(LampColor(
-            r: bytes[i],
-            g: bytes[i + 1],
-            b: bytes[i + 2],
-            w: bpp == 4 ? bytes[i + 3] : 0,
-          ));
-        }
-        return colors;
-      } catch (_) {
-        return null;
-      }
-    }
-
     final zoneSrc = asString(json['zoneSource']);
     final sourceRaw = json['source'];
     return WispStatus(
@@ -334,7 +291,6 @@ class WispStatus {
       controllingShade: asBool(json['controllingShade']),
       baseWispColor: parseWispHexColor(json['baseWispColor']),
       shadeWispColor: parseWispHexColor(json['shadeWispColor']),
-      currentPalette: parseCurrentPalette(json['palette'], json['paletteBpp']),
       shuffleSeed: asInt(json['shuffleSeed']) ?? 0,
       driftIntervalMs: asInt(json['driftIntervalMs']) ?? 120000,
       driftFadePct: asInt(json['driftFadePct']) ?? 50,
@@ -342,7 +298,6 @@ class WispStatus {
       hasPassword: asBool(json['hasPassword']),
       ledType: json['ledType'] is String ? json['ledType'] as String : 'GRB',
       pixelCount: asInt(json['px']) ?? 30,
-      rangeStep: asInt(json['range']) ?? 0,
       opSeq: asInt(json['opSeq']) ?? 0,
       brightness: asInt(json['brightness']) ?? 100,
     );
@@ -354,14 +309,12 @@ class WispStatus {
     List<int>? observedZones,
     WispSourceMode? source,
     LampColor? offColor,
-    List<LampColor>? currentPalette,
     int? driftIntervalMs,
     int? driftFadePct,
     String? name,
     bool? hasPassword,
     String? ledType,
     int? pixelCount,
-    int? rangeStep,
     int? brightness,
   }) {
     return WispStatus(
@@ -384,7 +337,6 @@ class WispStatus {
       controllingShade: controllingShade,
       baseWispColor: baseWispColor,
       shadeWispColor: shadeWispColor,
-      currentPalette: currentPalette ?? this.currentPalette,
       shuffleSeed: shuffleSeed,
       driftIntervalMs: driftIntervalMs ?? this.driftIntervalMs,
       driftFadePct: driftFadePct ?? this.driftFadePct,
@@ -392,7 +344,6 @@ class WispStatus {
       hasPassword: hasPassword ?? this.hasPassword,
       ledType: ledType ?? this.ledType,
       pixelCount: pixelCount ?? this.pixelCount,
-      rangeStep: rangeStep ?? this.rangeStep,
       opSeq: opSeq,
       brightness: brightness ?? this.brightness,
     );
@@ -421,9 +372,6 @@ class WispStatus {
           controllingShade == other.controllingShade &&
           baseWispColor == other.baseWispColor &&
           shadeWispColor == other.shadeWispColor &&
-          _currentPaletteEq.equals(
-              currentPalette ?? const <LampColor>[],
-              other.currentPalette ?? const <LampColor>[]) &&
           shuffleSeed == other.shuffleSeed &&
           driftIntervalMs == other.driftIntervalMs &&
           driftFadePct == other.driftFadePct &&
@@ -431,7 +379,6 @@ class WispStatus {
           hasPassword == other.hasPassword &&
           ledType == other.ledType &&
           pixelCount == other.pixelCount &&
-          rangeStep == other.rangeStep &&
           opSeq == other.opSeq &&
           brightness == other.brightness;
 
@@ -452,13 +399,10 @@ class WispStatus {
         offColor,
         Object.hash(controllingBase, controllingShade, baseWispColor,
             shadeWispColor),
-        currentPalette == null
-            ? 0
-            : _currentPaletteEq.hash(currentPalette!),
         shuffleSeed,
         driftIntervalMs,
         driftFadePct,
         Object.hash(
-            name, hasPassword, ledType, pixelCount, rangeStep, opSeq, brightness),
+            name, hasPassword, ledType, pixelCount, opSeq, brightness),
       );
 }

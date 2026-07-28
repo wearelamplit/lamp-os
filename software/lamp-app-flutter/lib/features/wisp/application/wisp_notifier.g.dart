@@ -15,7 +15,7 @@ part of 'wisp_notifier.dart';
 ///
 /// `setZone` / `clearZone` delegate to the repository and rely on the
 /// wisp's on-change broadcast (≤ ~2s) to push the updated status back
-/// via CHAR_WISP_STATUS. We optimistically reflect the choice in local
+/// via CHAR_WISP_STATUS. Optimistically reflects the choice in local
 /// state so the chip highlight doesn't lag the tap; the notify either
 /// confirms or corrects it.
 
@@ -29,7 +29,7 @@ final wispNotifierProvider = WispNotifierFamily._();
 ///
 /// `setZone` / `clearZone` delegate to the repository and rely on the
 /// wisp's on-change broadcast (≤ ~2s) to push the updated status back
-/// via CHAR_WISP_STATUS. We optimistically reflect the choice in local
+/// via CHAR_WISP_STATUS. Optimistically reflects the choice in local
 /// state so the chip highlight doesn't lag the tap; the notify either
 /// confirms or corrects it.
 final class WispNotifierProvider
@@ -41,7 +41,7 @@ final class WispNotifierProvider
   ///
   /// `setZone` / `clearZone` delegate to the repository and rely on the
   /// wisp's on-change broadcast (≤ ~2s) to push the updated status back
-  /// via CHAR_WISP_STATUS. We optimistically reflect the choice in local
+  /// via CHAR_WISP_STATUS. Optimistically reflects the choice in local
   /// state so the chip highlight doesn't lag the tap; the notify either
   /// confirms or corrects it.
   WispNotifierProvider._({
@@ -80,7 +80,7 @@ final class WispNotifierProvider
   }
 }
 
-String _$wispNotifierHash() => r'bc1618b731db150ba356c9c4027389d190c23c3e';
+String _$wispNotifierHash() => r'76e1af15c7c7162d9229ca16064603356a1e63bb';
 
 /// Owns the live [WispStatus] for a single lamp. On build it does one
 /// read of `CHAR_WISP_STATUS` and subscribes to its notify stream;
@@ -89,7 +89,7 @@ String _$wispNotifierHash() => r'bc1618b731db150ba356c9c4027389d190c23c3e';
 ///
 /// `setZone` / `clearZone` delegate to the repository and rely on the
 /// wisp's on-change broadcast (≤ ~2s) to push the updated status back
-/// via CHAR_WISP_STATUS. We optimistically reflect the choice in local
+/// via CHAR_WISP_STATUS. Optimistically reflects the choice in local
 /// state so the chip highlight doesn't lag the tap; the notify either
 /// confirms or corrects it.
 
@@ -118,7 +118,7 @@ final class WispNotifierFamily extends $Family
   ///
   /// `setZone` / `clearZone` delegate to the repository and rely on the
   /// wisp's on-change broadcast (≤ ~2s) to push the updated status back
-  /// via CHAR_WISP_STATUS. We optimistically reflect the choice in local
+  /// via CHAR_WISP_STATUS. Optimistically reflects the choice in local
   /// state so the chip highlight doesn't lag the tap; the notify either
   /// confirms or corrects it.
 
@@ -136,7 +136,7 @@ final class WispNotifierFamily extends $Family
 ///
 /// `setZone` / `clearZone` delegate to the repository and rely on the
 /// wisp's on-change broadcast (≤ ~2s) to push the updated status back
-/// via CHAR_WISP_STATUS. We optimistically reflect the choice in local
+/// via CHAR_WISP_STATUS. Optimistically reflects the choice in local
 /// state so the chip highlight doesn't lag the tap; the notify either
 /// confirms or corrects it.
 

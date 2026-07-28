@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/app_spacing.dart';
-import '../../../../core/widgets/section_header.dart';
+import '../../../../core/widgets/lamp_card.dart';
+import '../../../../core/widgets/settings_row.dart';
 import '../../../control/domain/lamp_color.dart';
 import '../../../control/presentation/widgets/color_picker_sheet.dart';
 import '../../../control/presentation/widgets/lamp_color_swatch.dart';
@@ -28,39 +29,45 @@ class _OffColorPickerState extends ConsumerState<OffColorPicker> {
   @override
   Widget build(BuildContext context) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SectionHeader('Wisp color'),
-        const SizedBox(height: AppSpace.sm),
-        Padding(
-          padding: const EdgeInsets.only(bottom: AppSpace.md),
-          child: Text(
-            "Off doesn't broadcast a palette. Your lamps stay on their "
-            "own behaviour. Pick the color the wisp itself shows.",
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ),
-        Row(
-          children: [
-            GestureDetector(
-              onTap: _pick,
-              child: LampColorSwatch(color: widget.current, size: 48),
-            ),
-            const SizedBox(width: AppSpace.md),
-            Expanded(
-              child: Text(
-                widget.current.toHex().toUpperCase(),
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  fontFamily: 'monospace',
+        const SettingsGroupHeading('Wisp color'),
+        LampCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpace.md),
+                child: Text(
+                  "Off doesn't broadcast a palette. Your lamps stay on their "
+                  "own behaviour. Pick the color the wisp itself shows.",
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
               ),
-            ),
-            TextButton.icon(
-              onPressed: _pick,
-              icon: const Icon(Icons.edit, size: 16),
-              label: const Text('Change'),
-            ),
-          ],
+              Row(
+                children: [
+                  GestureDetector(
+                    onTap: _pick,
+                    child: LampColorSwatch(color: widget.current, size: 48),
+                  ),
+                  const SizedBox(width: AppSpace.md),
+                  Expanded(
+                    child: Text(
+                      widget.current.toHex().toUpperCase(),
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: _pick,
+                    icon: const Icon(Icons.edit, size: 16),
+                    label: const Text('Change'),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ],
     );

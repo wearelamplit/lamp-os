@@ -13,6 +13,7 @@ import '../../../core/widgets/rename_dialog.dart';
 import '../../../core/widgets/section_header.dart';
 import '../../../core/widgets/settings_row.dart';
 import '../../control/application/control_notifier.dart';
+import '../application/manual_palette_draft.dart';
 import '../application/wisp_notifier.dart';
 import '../domain/wisp_source_mode.dart';
 import '../domain/wisp_status.dart';
@@ -25,7 +26,6 @@ import 'widgets/wisp_off_color.dart';
 import 'widgets/wisp_painted_lamps.dart';
 import 'widgets/wisp_password_field.dart';
 import 'widgets/space_brightness_slider.dart';
-import 'widgets/wisp_range_control.dart';
 import 'widgets/wisp_source_picker.dart';
 import 'widgets/wisp_wifi_config.dart';
 import 'widgets/wisp_zones.dart';
@@ -124,13 +124,14 @@ class _WispBodyState extends ConsumerState<_WispBody> {
   Widget _buildBody(BuildContext context, WispStatus status) {
     final notifier = ref.read(wispNotifierProvider(widget.lampId).notifier);
     final source = status.source;
+    final draft = ref.watch(manualPaletteDraftProvider(widget.lampId));
     // Aurora selection is disabled app-wide: the feature is untested against
     // real hardware. A wisp already in Aurora mode still displays normally.
     const auroraEnabled = false;
 
     // Schedule on the next frame to avoid mutating notifier state mid-build.
     if (source == WispSourceMode.manual &&
-        notifier.draftManualPalette.isEmpty &&
+        draft.isEmpty &&
         notifier.savedManualPalette.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -144,7 +145,7 @@ class _WispBodyState extends ConsumerState<_WispBody> {
         SpaceBrightnessSlider(lampId: widget.lampId, status: status),
         PaletteGradientBar(
           sourceMode: source,
-          manualPalette: notifier.draftManualPalette,
+          manualPalette: draft,
           offColor: status.offColor,
         ),
         Expanded(
@@ -170,9 +171,9 @@ class _WispBodyState extends ConsumerState<_WispBody> {
           selectedIndex: _navIndex,
           onDestinationSelected: (i) => setState(() => _navIndex = i),
           destinations: const [
-            (icon: Icons.palette_outlined, label: 'Palette source'),
-            (icon: Icons.tune, label: 'Settings'),
-            (icon: Icons.lightbulb_outline, label: 'Lamps'),
+            (icon: Icons.palette_outlined, label: 'Palette', badge: null),
+            (icon: Icons.tune, label: 'Settings', badge: null),
+            (icon: Icons.lightbulb_outline, label: 'Lamps', badge: null),
           ],
         ),
       ],
@@ -226,14 +227,12 @@ class _SourcesTabState extends State<_SourcesTab> {
           onSelect: (m) => _runWispOp(() => notifier.setSource(m)),
         ),
         if (source == WispSourceMode.off) ...[
-          const SizedBox(height: AppSpace.xl),
           OffColorPicker(
             lampId: lampId,
             current: status.offColor,
           ),
         ],
         if (source == WispSourceMode.manual) ...[
-          const SizedBox(height: AppSpace.xl),
           ManualPaletteEditor(lampId: lampId),
         ],
         if (source == WispSourceMode.aurora) ...[
@@ -327,15 +326,9 @@ class _SettingsTab extends ConsumerWidget {
         ),
         const SizedBox(height: AppSpace.lg),
         WispPasswordField(lampId: lampId),
-        const SizedBox(height: AppSpace.xl),
-        const SectionHeader('Network'),
-        const SizedBox(height: AppSpace.sm),
+        const SettingsGroupHeading('Network'),
         WifiConfigRow(lampId: lampId, status: status),
-        const SizedBox(height: AppSpace.xl),
         DriftControls(lampId: lampId, status: status),
-        const SizedBox(height: AppSpace.xl),
-        WispRangeControl(lampId: lampId, status: status),
-        const SizedBox(height: AppSpace.xl),
         WispLedConfig(lampId: lampId, status: status),
         const SizedBox(height: AppSpace.xl),
         Center(
@@ -367,6 +360,7 @@ class _LampsTab extends ConsumerWidget {
             const SectionHeader('Lamps'),
             const Spacer(),
             _ShuffleButton(
+              lampId: lampId,
               onPressed: () => ref
                   .read(wispNotifierProvider(lampId).notifier)
                   .shuffle(),
@@ -469,26 +463,50 @@ class _TwoOrbsPainter extends CustomPainter {
   bool shouldRepaint(_TwoOrbsPainter old) => old.color != color;
 }
 
-/// Shuffle icon that spins on tap so the instant colour re-roll reads as
-/// responsive. Default IconButton hit area restored (no zeroed padding),
-/// so the ink splash shows.
-class _ShuffleButton extends StatefulWidget {
-  const _ShuffleButton({required this.onPressed});
+/// Shuffle icon that spins continuously while the re-rolled colors propagate
+/// back through the mesh, so the delay reads as work-in-progress rather than a
+/// dead tap. Driven by [WispNotifier.colorsRecalculating].
+class _ShuffleButton extends ConsumerStatefulWidget {
+  const _ShuffleButton({required this.lampId, required this.onPressed});
+  final String lampId;
   final VoidCallback onPressed;
 
   @override
-  State<_ShuffleButton> createState() => _ShuffleButtonState();
+  ConsumerState<_ShuffleButton> createState() => _ShuffleButtonState();
 }
 
-class _ShuffleButtonState extends State<_ShuffleButton> {
-  int _turns = 0;
+class _ShuffleButtonState extends ConsumerState<_ShuffleButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _spin = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 700),
+  );
+
+  @override
+  void dispose() {
+    _spin.dispose();
+    super.dispose();
+  }
+
+  void _sync(bool recalculating) {
+    if (recalculating) {
+      if (!_spin.isAnimating) _spin.repeat();
+    } else if (_spin.isAnimating) {
+      _spin.stop();
+      _spin.animateTo(_spin.value.roundToDouble(),
+          duration: const Duration(milliseconds: 200));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedRotation(
-      turns: _turns.toDouble(),
-      duration: const Duration(milliseconds: 400),
-      curve: Curves.easeOut,
+    ref.listen(wispNotifierProvider(widget.lampId), (_, _) {
+      _sync(ref
+          .read(wispNotifierProvider(widget.lampId).notifier)
+          .colorsRecalculating);
+    });
+    return RotationTransition(
+      turns: _spin,
       child: IconButton(
         icon: Icon(
           Icons.shuffle,
@@ -496,10 +514,7 @@ class _ShuffleButtonState extends State<_ShuffleButton> {
           color: Theme.of(context).colorScheme.secondary,
         ),
         tooltip: 'Shuffle colours',
-        onPressed: () {
-          setState(() => _turns++);
-          widget.onPressed();
-        },
+        onPressed: widget.onPressed,
       ),
     );
   }

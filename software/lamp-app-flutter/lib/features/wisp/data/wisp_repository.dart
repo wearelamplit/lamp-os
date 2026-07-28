@@ -6,6 +6,7 @@ import '../../control/domain/lamp_color.dart';
 import '../../../core/ble/ble_client.dart';
 import '../../../core/ble/lamp_crypto.dart';
 import '../../../core/ble/uuids.dart';
+import '../domain/tuple_sampler.dart';
 import '../domain/wisp_claims.dart';
 import '../domain/wisp_source_mode.dart';
 import '../domain/wisp_status.dart';
@@ -39,6 +40,36 @@ class WispRepository {
       BleUuids.wispStatus,
     );
     return WispStatus.fromBytes(bytes);
+  }
+
+  /// Read the wisp's stored manual palette from its dedicated page section.
+  /// Kept off CHAR_WISP_STATUS, whose frequent palette-less NOTIFY clobbers a
+  /// palette-full value. A legacy lamp that predates the section, an empty
+  /// palette, or any read error all map to an empty list (never throws): the
+  /// caller treats that as "no palette yet" and leaves any prior palette intact.
+  Future<List<LampColor>> readManualPalette() async {
+    try {
+      final bytes = await _ble.readSection(_deviceId, 'wisppalette');
+      return decodeManualPalette(bytes);
+    } catch (_) {
+      return const <LampColor>[];
+    }
+  }
+
+  /// Decode the raw `wisppalette` blob: interleaved R,G,B,W, one 4-byte
+  /// group per color. A trailing partial group is dropped.
+  static List<LampColor> decodeManualPalette(Uint8List bytes) {
+    final usable = bytes.length - (bytes.length % 4);
+    final out = <LampColor>[];
+    for (var i = 0; i + 3 < usable; i += 4) {
+      out.add(LampColor(
+        r: bytes[i],
+        g: bytes[i + 1],
+        b: bytes[i + 2],
+        w: bytes[i + 3],
+      ));
+    }
+    return out;
   }
 
   /// Best-effort read of CHAR_WISP_CLAIMS. Returns the claimed mesh MACs and
@@ -139,6 +170,24 @@ class WispRepository {
     return op;
   }
 
+  /// Content hash of [palette] over the same canonical wire bytes the wisp
+  /// stamps as its palette id: r,g,b per color, plus w only when w != 0.
+  /// Built from [buildManualPaletteOp] so the hashed bytes match the wire
+  /// exactly (including the trailing-W strip under [kWispOpPayloadCap]).
+  /// Returns 8 lowercase hex chars; the notifier confirms a palette write by
+  /// matching this against the wisp's `paletteIdPrefix` on the status NOTIFY.
+  static String paletteIdHash(List<LampColor> palette) {
+    final op = buildManualPaletteOp(palette.take(50).toList());
+    final wire = <int>[];
+    for (final c in op['colors'] as List) {
+      for (final ch in c as List) {
+        wire.add(ch as int);
+      }
+    }
+    final h = fnv1a(Uint8List.fromList(wire));
+    return h.toRadixString(16).padLeft(8, '0');
+  }
+
   /// Set the wisp password. Sealed under the CURRENT password when one is
   /// set; plaintext on a factory-fresh wisp (no shared secret yet).
   Future<void> setPassword(String newPassword) async {
@@ -191,16 +240,6 @@ class WispRepository {
       'op': 'setLedStrip',
       'ledType': ledType,
       'pixelCount': pixelCount,
-    });
-  }
-
-  /// Set the wisp's claim-range step (0=Close .. 3=Wide). Persisted in wisp
-  /// NVS; the claim recompute applies the new RSSI floor on its next tick.
-  Future<void> setRange(int rangeStep) async {
-    await _writeOp({
-      'char': 'wispOp',
-      'op': 'setRange',
-      'range': rangeStep,
     });
   }
 
@@ -274,6 +313,7 @@ class WispRepository {
       BleUuids.controlService,
       BleUuids.wispOp,
       bytes,
+      allowLongWrite: true,
     );
   }
 
@@ -284,6 +324,7 @@ class WispRepository {
       BleUuids.controlService,
       BleUuids.wispOp,
       Uint8List.fromList(utf8.encode(jsonEncode(payload))),
+      allowLongWrite: true,
     );
   }
 }

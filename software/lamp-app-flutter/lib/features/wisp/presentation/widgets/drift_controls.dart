@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/app_spacing.dart';
-import '../../../../core/widgets/section_header.dart';
+import '../../../../core/utils/duration_format.dart';
+import '../../../../core/widgets/lamp_card.dart';
+import '../../../../core/widgets/settings_row.dart';
 import '../../application/wisp_notifier.dart';
 import '../../domain/wisp_status.dart';
 
@@ -46,61 +48,65 @@ class _DriftControlsState extends ConsumerState<DriftControls> {
     _fadePct = widget.status.driftFadePct.clamp(0, 100);
   }
 
-  String _intervalLabel() {
-    final ms = posToMs(_pos);
-    if (ms < 60000) return '${(ms / 1000).round()}s';
-    if (ms < 3600000) return '${(ms / 60000).round()}m';
-    return '1h';
-  }
+  String _intervalLabel() =>
+      formatDuration(Duration(milliseconds: posToMs(_pos)));
 
   @override
   Widget build(BuildContext context) {
     final notifier = ref.read(wispNotifierProvider(widget.lampId).notifier);
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SectionHeader('Color drift'),
-        const SizedBox(height: AppSpace.xs),
-        _LabelRow(left: 'How often', right: _intervalLabel()),
-        Slider(
-          min: 0,
-          max: 1,
-          value: _pos,
-          onChanged: (v) {
-            setState(() => _pos = v);
-            notifier.setDrift(posToMs(v), _fadePct);
-          },
-          onChangeEnd: (_) => notifier.flushDrift(),
-        ),
-        const SizedBox(height: AppSpace.xs),
-        _LabelRow(left: 'Fade', right: '$_fadePct%'),
-        Slider(
-          min: 0,
-          max: 100,
-          divisions: 100,
-          value: _fadePct.toDouble(),
-          onChanged: (v) {
-            setState(() => _fadePct = v.round());
-            notifier.setDrift(posToMs(_pos), v.round());
-          },
-          onChangeEnd: (_) => notifier.flushDrift(),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpace.md),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        const SettingsGroupHeading('Color drift'),
+        LampCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
-                'Snappy',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
+              _LabelRow(left: 'How often', right: _intervalLabel()),
+              Slider(
+                min: 0,
+                max: 1,
+                value: _pos,
+                onChanged: (v) {
+                  setState(() => _pos = v);
+                  notifier.setDrift(posToMs(v), _fadePct);
+                },
+                onChangeEnd: (_) => notifier.flushDrift(),
               ),
-              Text(
-                'Flowing',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+              const SizedBox(height: AppSpace.lg),
+              _LabelRow(left: 'Fade', right: '$_fadePct%'),
+              Slider(
+                min: 0,
+                max: 100,
+                divisions: 100,
+                value: _fadePct.toDouble(),
+                onChanged: (v) {
+                  setState(() => _fadePct = v.round());
+                  notifier.setDrift(posToMs(_pos), v.round());
+                },
+                onChangeEnd: (_) => notifier.flushDrift(),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpace.md),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Snappy',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
                     ),
+                    Text(
+                      'Flowing',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),

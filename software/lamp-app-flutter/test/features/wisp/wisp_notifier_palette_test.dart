@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import '../../_support/in_memory_ble_client.dart';
@@ -8,6 +9,7 @@ import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/features/control/domain/lamp_color.dart';
 import 'package:lamp_app/features/wisp/application/wisp_notifier.dart';
+import 'package:lamp_app/features/wisp/data/wisp_repository.dart';
 import 'package:lamp_app/features/wisp/domain/wisp_source_mode.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -43,6 +45,30 @@ void main() {
       BleUuids.controlService,
       BleUuids.wispStatus,
       Uint8List.fromList(utf8.encode(json)),
+    );
+  }
+
+  // Seed the `wisppalette` page section the notifier reads on build: raw
+  // interleaved R,G,B,W, one 4-byte group per color.
+  void seedPalette(InMemoryBleClient ble, List<LampColor> colors) {
+    final bytes = <int>[
+      for (final c in colors) ...[c.r, c.g, c.b, c.w],
+    ];
+    ble.seedSection(lampId, 'wisppalette', Uint8List.fromList(bytes));
+  }
+
+  // Push the status NOTIFY the palette confirm awaits: source stays Manual
+  // and paletteIdPrefix carries the content hash of [committed], standing in
+  // for the wisp having stored and re-broadcast the exact palette.
+  void confirmPalette(InMemoryBleClient ble, List<LampColor> committed,
+      {String mac = 'AA:BB:CC:DD:EE:FF'}) {
+    final prefix = WispRepository.paletteIdHash(committed);
+    ble.simulateNotify(
+      lampId,
+      BleUuids.controlService,
+      BleUuids.wispStatus,
+      Uint8List.fromList(utf8.encode(
+          '{"wispMac":"$mac","source":"manual","paletteIdPrefix":"$prefix"}')),
     );
   }
 
@@ -91,39 +117,52 @@ void main() {
       expect(n.draftManualPalette.length, 10);
     });
 
-    test('setManualPalette clears the dirty flag on success', () async {
+    test('setManualPalette clears the dirty flag once the wisp echoes it',
+        () async {
       final ble = InMemoryBleClient();
-      await primeStatus(ble, '{"wispMac":"AA:BB:CC:DD:EE:FF"}');
+      await primeStatus(ble,
+          '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual"}');
       final c = makeContainer(ble: ble);
 
+      c.listen(wispNotifierProvider(lampId), (_, _) {});
       await c.read(wispNotifierProvider(lampId).future);
       final n = c.read(wispNotifierProvider(lampId).notifier);
 
-      n.appendManualPaletteColor(
-        const LampColor(r: 1, g: 2, b: 3, w: 0),
-      );
-      n.appendManualPaletteColor(
-        const LampColor(r: 4, g: 5, b: 6, w: 0),
-      );
+      const committed = [
+        LampColor(r: 1, g: 2, b: 3, w: 0),
+        LampColor(r: 4, g: 5, b: 6, w: 0),
+      ];
+      n.appendManualPaletteColor(committed[0]);
+      n.appendManualPaletteColor(committed[1]);
       expect(n.manualPaletteDirty, isTrue);
 
-      await n.setManualPalette();
+      // The wisp stamps the palette content hash and re-broadcasts it on the
+      // status NOTIFY; the confirm matches that prefix.
+      final f = n.setManualPalette();
+      await Future<void>.delayed(Duration.zero);
+      confirmPalette(ble, committed);
+      await f;
       expect(n.manualPaletteDirty, isFalse);
+      expect(n.manualPaletteWriteFailed, isFalse);
       expect(n.savedManualPalette.length, 2);
     });
 
     test('setManualPalette writes a wispOp with RGB triples', () async {
       final ble = InMemoryBleClient();
-      await primeStatus(ble, '{"wispMac":"AA:BB:CC:DD:EE:FF"}');
+      await primeStatus(ble,
+          '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual"}');
       final c = makeContainer(ble: ble);
 
+      c.listen(wispNotifierProvider(lampId), (_, _) {});
       await c.read(wispNotifierProvider(lampId).future);
       final n = c.read(wispNotifierProvider(lampId).notifier);
 
-      n.appendManualPaletteColor(
-        const LampColor(r: 255, g: 128, b: 64, w: 0),
-      );
-      await n.setManualPalette();
+      const committed = [LampColor(r: 255, g: 128, b: 64, w: 0)];
+      n.appendManualPaletteColor(committed[0]);
+      final f = n.setManualPalette();
+      await Future<void>.delayed(Duration.zero);
+      confirmPalette(ble, committed);
+      await f;
 
       // Last value written to wispOp should be the setManualPalette
       // JSON envelope.
@@ -139,6 +178,81 @@ void main() {
       expect(decoded['colors'], [
         [255, 128, 64]
       ]);
+    });
+
+    test('unconfirmed palette write resends then surfaces failure + stays dirty',
+        () async {
+      final ble = InMemoryBleClient();
+      // No status NOTIFY ever carries the committed palette hash, so no
+      // confirm arrives and every attempt times out.
+      await primeStatus(ble,
+          '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual"}');
+      final c = makeContainer(ble: ble);
+      c.listen(wispNotifierProvider(lampId), (_, _) {});
+      await c.read(wispNotifierProvider(lampId).future);
+      final n = c.read(wispNotifierProvider(lampId).notifier);
+
+      n.appendManualPaletteColor(const LampColor(r: 9, g: 9, b: 9, w: 0));
+
+      fakeAsync((fa) {
+        Object? err;
+        n.setManualPalette().catchError((Object e) => err = e);
+        fa.elapse(const Duration(seconds: 12));
+        fa.flushMicrotasks();
+        expect(err, isNotNull, reason: 'unconfirmed write surfaces error');
+        expect(err.toString(), contains('not confirmed'));
+      });
+
+      expect(n.manualPaletteWriteFailed, isTrue);
+      expect(n.manualPaletteDirty, isTrue,
+          reason: 'saved snapshot never advanced past the unconfirmed draft');
+      expect(ble.writesTo(lampId, BleUuids.wispOp).length, greaterThan(1),
+          reason: 'op resent, not fire-and-forget once');
+    });
+
+    test('source leaving Manual mid-confirm surfaces a source-changed error',
+        () async {
+      final ble = InMemoryBleClient();
+      await primeStatus(ble,
+          '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual"}');
+      final c = makeContainer(ble: ble);
+      c.listen(wispNotifierProvider(lampId), (_, _) {});
+      await c.read(wispNotifierProvider(lampId).future);
+      final n = c.read(wispNotifierProvider(lampId).notifier);
+
+      n.appendManualPaletteColor(const LampColor(r: 1, g: 2, b: 3, w: 0));
+      Object? err;
+      final f = n.setManualPalette().catchError((Object e) => err = e);
+      await Future<void>.delayed(Duration.zero);
+      // The wisp reports it left Manual before the palette prefix could
+      // confirm; the write is moot, not a delivery failure.
+      ble.simulateNotify(
+        lampId,
+        BleUuids.controlService,
+        BleUuids.wispStatus,
+        Uint8List.fromList(
+            utf8.encode('{"wispMac":"AA:BB:CC:DD:EE:FF","source":"off"}')),
+      );
+      await f;
+      expect(err, isNotNull);
+      expect(err.toString(), contains('source changed'));
+    });
+
+    test('editing then disposing writes nothing (local preview only)',
+        () async {
+      final ble = InMemoryBleClient();
+      await primeStatus(ble, '{"wispMac":"AA:BB:CC:DD:EE:FF"}');
+      final c = makeContainer(ble: ble);
+      await c.read(wispNotifierProvider(lampId).future);
+      final n = c.read(wispNotifierProvider(lampId).notifier);
+
+      n.appendManualPaletteColor(const LampColor(r: 7, g: 7, b: 7, w: 0));
+      final before = ble.writesTo(lampId, BleUuids.wispOp).length;
+      c.invalidate(wispNotifierProvider(lampId));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(ble.writesTo(lampId, BleUuids.wispOp).length, before,
+          reason: 'edits never write; only an explicit Save reaches the wisp');
     });
 
     test('reorder moves a color', () async {
@@ -185,19 +299,87 @@ void main() {
       expect(n.draftManualPalette.length, 1);
       expect(n.draftManualPalette.first.r, 2);
     });
+
+    test('re-emitting the same draft palette schedules no write', () async {
+      final ble = InMemoryBleClient();
+      seedPalette(ble, const [
+        LampColor(r: 1, g: 2, b: 3, w: 0),
+        LampColor(r: 4, g: 5, b: 6, w: 0),
+      ]);
+      await primeStatus(ble,
+          '{"wispMac":"AA:BB:CC:DD:EE:FF","paletteIdPrefix":"seed0001"}');
+      final c = makeContainer(ble: ble);
+
+      await c.read(wispNotifierProvider(lampId).future);
+      final n = c.read(wispNotifierProvider(lampId).notifier);
+      final current = n.draftManualPalette;
+      final before = ble.writesTo(lampId, BleUuids.wispOp).length;
+
+      fakeAsync((fa) {
+        // The color-stops editor re-streams its current value on every
+        // rebuild the notifier triggers; an idempotent re-emit like this
+        // must not re-arm the debounced BLE write.
+        n.setManualPaletteDraft(List.of(current));
+        fa.elapse(const Duration(milliseconds: 300));
+        fa.flushMicrotasks();
+      });
+
+      expect(ble.writesTo(lampId, BleUuids.wispOp).length, before);
+    });
+
+    test('a genuinely different draft palette still writes nothing (Save only)',
+        () async {
+      final ble = InMemoryBleClient();
+      seedPalette(ble, const [LampColor(r: 1, g: 2, b: 3, w: 0)]);
+      await primeStatus(ble,
+          '{"wispMac":"AA:BB:CC:DD:EE:FF","paletteIdPrefix":"seed0002"}');
+      final c = makeContainer(ble: ble);
+
+      await c.read(wispNotifierProvider(lampId).future);
+      final n = c.read(wispNotifierProvider(lampId).notifier);
+      final before = ble.writesTo(lampId, BleUuids.wispOp).length;
+
+      fakeAsync((fa) {
+        n.setManualPaletteDraft(const [
+          LampColor(r: 1, g: 2, b: 3, w: 0),
+          LampColor(r: 9, g: 9, b: 9, w: 0),
+        ]);
+        fa.elapse(const Duration(milliseconds: 300));
+        fa.flushMicrotasks();
+      });
+
+      expect(ble.writesTo(lampId, BleUuids.wispOp).length, before,
+          reason: 'draft edits are local preview; the wisp write waits for Save');
+    });
   });
 
   group('WispNotifier setSource', () {
+    // setSource confirms by watching for a wispStatus echo carrying the
+    // requested mode; push one so the call resolves.
+    void confirmSource(InMemoryBleClient ble, String mode) {
+      ble.simulateNotify(
+        lampId,
+        BleUuids.controlService,
+        BleUuids.wispStatus,
+        Uint8List.fromList(utf8.encode(
+            '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"$mode"}')),
+      );
+    }
+
     test('writes a setSource wispOp with the wire-format mode string',
         () async {
       final ble = InMemoryBleClient();
       await primeStatus(ble, '{"wispMac":"AA:BB:CC:DD:EE:FF"}');
       final c = makeContainer(ble: ble);
 
+      c.listen(wispNotifierProvider(lampId), (_, _) {});
       await c.read(wispNotifierProvider(lampId).future);
       final n = c.read(wispNotifierProvider(lampId).notifier);
 
-      await n.setSource(WispSourceMode.manual);
+      final f = n.setSource(WispSourceMode.manual);
+      await Future<void>.delayed(Duration.zero);
+      confirmSource(ble, 'manual');
+      await f;
       final written = await ble.read(
         lampId,
         BleUuids.controlService,
@@ -217,29 +399,59 @@ void main() {
           ble, '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"aurora"}');
       final c = makeContainer(ble: ble);
 
+      c.listen(wispNotifierProvider(lampId), (_, _) {});
       final initial =
           await c.read(wispNotifierProvider(lampId).future);
       expect(initial.source, WispSourceMode.aurora);
 
       final n = c.read(wispNotifierProvider(lampId).notifier);
-      await n.setSource(WispSourceMode.off);
+      final f = n.setSource(WispSourceMode.off);
+      // The optimistic update lands before any confirmation.
+      expect(c.read(wispNotifierProvider(lampId)).value!.source,
+          WispSourceMode.off);
 
-      // The optimistic update lives on the AsyncData state.
-      final after = c.read(wispNotifierProvider(lampId)).value!;
-      expect(after.source, WispSourceMode.off);
+      await Future<void>.delayed(Duration.zero);
+      confirmSource(ble, 'off');
+      await f;
+      expect(c.read(wispNotifierProvider(lampId)).value!.source,
+          WispSourceMode.off);
+    });
+
+    test('resends then surfaces failure when the wisp never confirms',
+        () async {
+      final ble = InMemoryBleClient();
+      await primeStatus(
+          ble, '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"aurora"}');
+      final c = makeContainer(ble: ble);
+      c.listen(wispNotifierProvider(lampId), (_, _) {});
+      await c.read(wispNotifierProvider(lampId).future);
+      final n = c.read(wispNotifierProvider(lampId).notifier);
+
+      fakeAsync((fa) {
+        Object? err;
+        // No confirming echo; every attempt times out.
+        n.setSource(WispSourceMode.off).catchError((Object e) => err = e);
+        fa.elapse(const Duration(seconds: 15));
+        fa.flushMicrotasks();
+        expect(err, isNotNull, reason: 'unconfirmed setSource surfaces error');
+      });
+
+      // Optimistic flip rolled back to ground truth; op resent, not once.
+      expect(c.read(wispNotifierProvider(lampId)).value!.source,
+          WispSourceMode.aurora);
+      expect(ble.writesTo(lampId, BleUuids.wispOp).length, greaterThan(1));
     });
 
     test('drops a stale source echo WHOLE, preserving the palette',
         () async {
-      // The stale echo carries a DIFFERENT palette than the one already
-      // seeded. Whole-drop keeps the seeded palette; adopting the echo
-      // (the old field-rewrite guard) would ingest the stale one.
-      const b64Seeded = 'CgsM'; // [10, 11, 12]
+      // The palette rides its own section read; the stale echo is dropped
+      // whole by the source guard, so the seeded palette survives regardless.
       final ble = InMemoryBleClient();
+      seedPalette(ble, const [LampColor(r: 10, g: 11, b: 12, w: 0)]);
       await primeStatus(
           ble,
           '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual",'
-          '"paletteIdPrefix":"seed0001","palette":"$b64Seeded"}');
+          '"paletteIdPrefix":"seed0001"}');
       final c = makeContainer(ble: ble);
 
       c.listen(wispNotifierProvider(lampId), (_, _) {});
@@ -247,19 +459,17 @@ void main() {
       final n = c.read(wispNotifierProvider(lampId).notifier);
       expect(n.savedManualPalette.single.r, 10);
 
-      await n.setSource(WispSourceMode.off);
+      final f = n.setSource(WispSourceMode.off);
+      await Future<void>.delayed(Duration.zero);
 
-      // Relay re-broadcasts the cached pre-change status still on manual,
-      // carrying a stale [99,98,97] palette. Same paletteIdPrefix as the
-      // seed so adopting it would ingest the stale palette directly (no
-      // re-read masks the difference).
+      // Relay re-broadcasts the cached pre-change status still on manual.
       ble.simulateNotify(
         lampId,
         BleUuids.controlService,
         BleUuids.wispStatus,
         Uint8List.fromList(utf8.encode(
             '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual",'
-            '"paletteIdPrefix":"seed0001","palette":"Y2Jh"}')),
+            '"paletteIdPrefix":"seed0001"}')),
       );
       await Future<void>.delayed(Duration.zero);
 
@@ -268,6 +478,16 @@ void main() {
           reason: 'stale manual echo dropped, not adopted');
       expect(n.savedManualPalette.single.r, 10,
           reason: 'stale echo dropped whole, seeded palette preserved');
+
+      // Confirm so the pending setSource resolves cleanly.
+      ble.simulateNotify(
+        lampId,
+        BleUuids.controlService,
+        BleUuids.wispStatus,
+        Uint8List.fromList(utf8.encode(
+            '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"off"}')),
+      );
+      await f;
     });
 
     test('releases the guard when the wisp confirms the requested mode',
@@ -281,7 +501,8 @@ void main() {
       await c.read(wispNotifierProvider(lampId).future);
       final n = c.read(wispNotifierProvider(lampId).notifier);
 
-      await n.setSource(WispSourceMode.off);
+      final f = n.setSource(WispSourceMode.off);
+      await Future<void>.delayed(Duration.zero);
       ble.simulateNotify(
         lampId,
         BleUuids.controlService,
@@ -289,7 +510,7 @@ void main() {
         Uint8List.fromList(
             utf8.encode('{"wispMac":"AA:BB:CC:DD:EE:FF","source":"off"}')),
       );
-      await Future<void>.delayed(Duration.zero);
+      await f;
 
       // After confirmation a genuine later manual switch flows through.
       ble.simulateNotify(
@@ -307,18 +528,15 @@ void main() {
     });
   });
 
-  group('WispNotifier currentPalette from read', () {
-    String paletteJson(List<List<int>> rgb, {String mac = 'AA:BB:CC:DD:EE:FF',
-        String prefix = 'abc12345'}) {
-      final bytes = [for (final c in rgb) ...c];
-      final b64 = base64Encode(bytes);
-      return '{"wispMac":"$mac","paletteIdPrefix":"$prefix","palette":"$b64"}';
-    }
-
-    test('read seeds the editor from the wisp palette (source of truth)',
-        () async {
+  group('WispNotifier palette from section', () {
+    test('section read seeds the editor from the wisp palette', () async {
       final ble = InMemoryBleClient();
-      await primeStatus(ble, paletteJson([[255, 0, 0], [0, 128, 64]]));
+      seedPalette(ble, const [
+        LampColor(r: 255, g: 0, b: 0, w: 0),
+        LampColor(r: 0, g: 128, b: 64, w: 0),
+      ]);
+      await primeStatus(ble,
+          '{"wispMac":"AA:BB:CC:DD:EE:FF","paletteIdPrefix":"abc12345"}');
       final c = makeContainer(ble: ble);
 
       await c.read(wispNotifierProvider(lampId).future);
@@ -332,7 +550,20 @@ void main() {
       expect(n.paletteLoading, isFalse);
     });
 
-    test('present wisp, empty palette → not loading, empty editor (no hang)',
+    test('preserves W when the section carries an RGBW palette', () async {
+      final ble = InMemoryBleClient();
+      seedPalette(ble, const [LampColor(r: 199, g: 0, b: 16, w: 80)]);
+      await primeStatus(ble,
+          '{"wispMac":"AA:BB:CC:DD:EE:FF","paletteIdPrefix":"abc12345"}');
+      final c = makeContainer(ble: ble);
+
+      await c.read(wispNotifierProvider(lampId).future);
+      final n = c.read(wispNotifierProvider(lampId).notifier);
+
+      expect(n.savedManualPalette.single.w, 80);
+    });
+
+    test('present wisp, empty section → not loading, empty editor (no hang)',
         () async {
       final ble = InMemoryBleClient();
       await primeStatus(ble, '{"wispMac":"AA:BB:CC:DD:EE:FF"}');
@@ -341,9 +572,9 @@ void main() {
       await c.read(wispNotifierProvider(lampId).future);
       final n = c.read(wispNotifierProvider(lampId).notifier);
 
-      // A completed read marks the palette known even when empty, so the
-      // editor renders an empty (populatable) palette instead of hanging
-      // on "reading from wisp" forever.
+      // A completed read marks the palette known even when empty (legacy lamp
+      // or empty palette), so the editor renders a populatable palette instead
+      // of hanging on "reading from wisp" forever.
       expect(n.paletteLoading, isFalse);
       expect(n.savedManualPalette, isEmpty);
       expect(n.draftManualPalette, isEmpty);
@@ -351,7 +582,8 @@ void main() {
 
     test('no SharedPreferences key is written for the palette', () async {
       final ble = InMemoryBleClient();
-      await primeStatus(ble, paletteJson([[1, 2, 3]]));
+      seedPalette(ble, const [LampColor(r: 1, g: 2, b: 3, w: 0)]);
+      await primeStatus(ble, '{"wispMac":"AA:BB:CC:DD:EE:FF"}');
       final c = makeContainer(ble: ble);
       await c.read(wispNotifierProvider(lampId).future);
       for (var i = 0; i < 10; i++) {
