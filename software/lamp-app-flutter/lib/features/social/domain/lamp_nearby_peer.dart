@@ -12,8 +12,8 @@ part 'lamp_nearby_peer.g.dart';
 /// Backward compatibility: legacy firmware doesn't emit `rssi` (missing
 /// defaults to -127, the sentinel) and emits colors as 4-int RGBW lists;
 /// current firmware emits 8-hex-char "rrggbbww" strings. `_rgbwFromJson`
-/// accepts both. A legacy `proximity` key is ignored; buckets derive
-/// from rssi via [proximityFromRssi].
+/// accepts both. A legacy `proximity` key is ignored; proximity is the
+/// firmware-computed `near` flag.
 @freezed
 abstract class LampNearbyPeer with _$LampNearbyPeer {
   const factory LampNearbyPeer({
@@ -39,9 +39,19 @@ abstract class LampNearbyPeer with _$LampNearbyPeer {
     /// Packed semver (major<<16 | minor<<8 | patch). 0 = unknown/legacy
     /// peer (the lamp omits it when zero).
     @Default(0) int fwVersion,
+    /// `{type}-{channel}` slot, e.g. "standard-beta". Empty on legacy
+    /// firmware that predates the emit.
+    @Default('') String fwChannel,
     /// OTA state: 0=idle, 1=sending, 2=receiving. Omitted by the lamp
     /// when idle.
     @Default(0) int otaState,
+    /// Mesh MAC (uppercase colon-hex) of the peer this lamp is OTA-sending
+    /// to. Null unless the lamp is Sending. Resolve against inventory by
+    /// `lampId` to name the receiver, which is HELLO-silent during its OTA.
+    String? otaSendingTo,
+    /// Firmware-computed proximity: true = near, false = far. The lamp
+    /// derives this from its own RSSI tiers; the app just renders it.
+    @Default(false) bool near,
   }) = _LampNearbyPeer;
 
   factory LampNearbyPeer.fromJson(Map<String, dynamic> json) =>
@@ -91,36 +101,4 @@ List<int> displayRgbw(List<int> rgbw, {required bool legacyOnlyBle}) {
     return const [0, 0, 0, 255];
   }
   return rgbw;
-}
-
-/// Proximity bucket (0=Near, 1=Around, 2=Far) derived from the
-/// lamp-observed RSSI. Thresholds match the firmware's bench-calibrated
-/// tiers: >= -80 dBm Near, >= -90 Around, else Far. The -127 "no
-/// reading" sentinel lands in Far, the safe-display default.
-int proximityFromRssi(int rssi) {
-  if (rssi >= -80) return 0;
-  if (rssi >= -90) return 1;
-  return 2;
-}
-
-/// Proximity bucket → user-visible label. Out-of-range buckets fall
-/// back to Far.
-String proximityLabel(int bucket) => switch (bucket) {
-  0 => 'Near',
-  1 => 'Around',
-  _ => 'Far',
-};
-
-/// Sort comparator: Near (0) → Around (1) → Far (2), alphabetical by
-/// name within a bucket. Takes primitives so both LampNearbyPeer and the
-/// Social tab's row wrapper share one ordering.
-int compareByProximityThenName(
-  int aProximity,
-  String aName,
-  int bProximity,
-  String bName,
-) {
-  final byBucket = aProximity.compareTo(bProximity);
-  if (byBucket != 0) return byBucket;
-  return aName.toLowerCase().compareTo(bName.toLowerCase());
 }

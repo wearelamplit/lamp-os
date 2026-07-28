@@ -114,7 +114,7 @@ class _LampAppState extends ConsumerState<LampApp>
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'LampOS',
+      title: 'Lamp',
       theme: appTheme,
       darkTheme: appTheme,
       themeMode: ThemeMode.dark,
@@ -143,7 +143,7 @@ class _LampAppState extends ConsumerState<LampApp>
                     ),
                     const SizedBox(height: 12),
                     const Text(
-                      'LampOS talks to your lamps over Bluetooth.',
+                      'Lamp talks to your lamps over Bluetooth.',
                       style: TextStyle(color: Brand.fogGrey),
                     ),
                     const SizedBox(height: 24),
@@ -158,7 +158,7 @@ class _LampAppState extends ConsumerState<LampApp>
           }
           final router = ref.watch(appRouterProvider);
           return MaterialApp.router(
-            title: 'LampOS',
+            title: 'Lamp',
             theme: appTheme,
             darkTheme: appTheme,
             themeMode: ThemeMode.dark,

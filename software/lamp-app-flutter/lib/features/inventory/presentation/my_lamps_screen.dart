@@ -11,6 +11,8 @@ import '../../../core/widgets/critter_icon.dart';
 import '../../../core/widgets/status_dot.dart';
 import '../../control/application/advanced_session.dart';
 import '../../control/application/control_notifier.dart';
+import '../../firmware/application/firmware_notifier.dart';
+import '../../firmware/domain/firmware_state.dart';
 import '../../inventory/application/active_lamp_notifier.dart';
 import '../../inventory/application/inventory_notifier.dart';
 import '../../inventory/domain/inventory_lamp.dart';
@@ -191,10 +193,17 @@ class _LampTile extends ConsumerWidget {
         ref.watch(controlNotifierProvider(lamp.id).select(
           (async) => async.value?.connected ?? false,
         ));
+    // Keyed by BLE deviceId (== lamp.id), the firmwareNotifier family key.
+    // `.select` so a Streaming chunk-progress tick doesn't rebuild the tile;
+    // only a push-phase transition does.
+    final updating = ref.watch(
+      firmwareNotifierProvider(lamp.id).select((s) => s.isPushing),
+    );
     final status = statusForById(
       lampId: lamp.id,
       nearbyById: nearbyById,
       connected: connectedToThisLamp || notifierConnected,
+      updating: updating,
       inScanGrace: inScanGrace,
     );
     final hit = nearbyById[lamp.id];
@@ -306,6 +315,8 @@ class _LampTile extends ConsumerWidget {
 
   String _subtitle(StatusKind status, InventoryLamp lamp) {
     switch (status) {
+      case StatusKind.otaBusy:
+        return 'Updating…';
       case StatusKind.mesh:
         return 'In range';
       case StatusKind.bluetooth:

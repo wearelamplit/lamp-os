@@ -5,7 +5,7 @@
 // We test:
 //   - Round-trip with all known fields, both color shapes (legacy 4-int
 //     list and current 8-hex "RRGGBBWW" string).
-//   - Firmware missing rssi defaults to -127 (Far via proximityFromRssi).
+//   - Firmware missing rssi defaults to -127.
 //   - A legacy `proximity` key is ignored without error.
 //   - Firmware missing lampId defaults to empty string.
 //   - Empty / malformed inputs don't throw.
@@ -90,16 +90,22 @@ void main() {
     };
     final peer = LampNearbyPeer.fromJson(json);
     expect(peer.rssi, -127);
-    expect(proximityFromRssi(peer.rssi), 2);
+    expect(peer.near, false);
   });
 
-  test('proximityFromRssi buckets match firmware tiers', () {
-    expect(proximityFromRssi(-30), 0);
-    expect(proximityFromRssi(-80), 0);
-    expect(proximityFromRssi(-81), 1);
-    expect(proximityFromRssi(-90), 1);
-    expect(proximityFromRssi(-91), 2);
-    expect(proximityFromRssi(-127), 2);
+  test('near flag parses from firmware JSON, defaults to false', () {
+    expect(LampNearbyPeer.fromJson({'name': 'x', 'near': true}).near, true);
+    expect(LampNearbyPeer.fromJson({'name': 'x', 'near': false}).near, false);
+    expect(LampNearbyPeer.fromJson({'name': 'x'}).near, false);
+  });
+
+  test('fwChannel parses from firmware JSON, defaults to empty', () {
+    expect(
+      LampNearbyPeer.fromJson({'name': 'x', 'fwChannel': 'standard-beta'})
+          .fwChannel,
+      'standard-beta',
+    );
+    expect(LampNearbyPeer.fromJson({'name': 'x'}).fwChannel, '');
   });
 
   test('peer missing lampId defaults to empty string', () {

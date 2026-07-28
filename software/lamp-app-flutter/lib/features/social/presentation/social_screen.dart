@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -102,12 +104,11 @@ class SocialScreen extends ConsumerWidget {
             shadeColor: _colorFromRgbw(
                 displayRgbw(l.shadeRgbw, legacyOnlyBle: l.viaBle && !l.viaEspNow)),
             rssi: l.rssi,
-            proximity: proximityFromRssi(l.rssi),
           ),
     ];
 
     rows.sort((a, b) =>
-        compareByProximityThenName(a.proximity, a.name, b.proximity, b.name));
+        a.name.toLowerCase().compareTo(b.name.toLowerCase()));
 
     final colorScheme = Theme.of(context).colorScheme;
 
@@ -178,7 +179,16 @@ class SocialScreen extends ConsumerWidget {
           )
         else
           for (final row in rows)
-            _LampDispositionRow(lampId: lampId, row: row),
+            _LampDispositionRow(
+              // Rows re-sort on every RSSI-driven near/far change. Without
+              // a stable key, Flutter reuses each row's Element (and its
+              // _flashing / AnimatedContainer tween state) by list
+              // position, so a reorder bleeds one peer's flash/greeting
+              // highlight onto whichever peer lands in that slot next.
+              key: ValueKey(row.lampId.isNotEmpty ? row.lampId : row.name),
+              lampId: lampId,
+              row: row,
+            ),
       ],
     );
   }
@@ -191,23 +201,18 @@ class _SocialLampRow {
     required this.baseColor,
     required this.shadeColor,
     required this.rssi,
-    required this.proximity,
   });
   final String name;
   final String lampId;
   final Color baseColor;
   final Color shadeColor;
   // TEMP DEBUG: most recent BLE-scan RSSI from the lamp's perspective.
-  // Used for the small subscript next to the proximity label. Strip
-  // once bench tuning settles.
+  // Strip once bench tuning settles.
   final int rssi;
-  /// Proximity bucket: 0=Near, 1=Around, 2=Far, derived from the
-  /// lamp-observed RSSI via [proximityFromRssi].
-  final int proximity;
 }
 
 class _LampDispositionRow extends ConsumerStatefulWidget {
-  const _LampDispositionRow({required this.lampId, required this.row});
+  const _LampDispositionRow({super.key, required this.lampId, required this.row});
   final String lampId;
   final _SocialLampRow row;
 
@@ -222,8 +227,13 @@ class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
   void _onDoubleTap() {
     final peerLampId = widget.row.lampId;
     if (peerLampId.isEmpty) return;
-    ref.read(controlNotifierProvider(widget.lampId).notifier).triggerGreet(peerLampId);
     HapticFeedback.mediumImpact();
+    // Fire-and-forget: firmware no-ops silently on the only failure cases
+    // (peer is an OTA sender, or already greeting), so there's no failure
+    // worth surfacing. Flash on tap, not on confirmation.
+    unawaited(ref
+        .read(controlNotifierProvider(widget.lampId).notifier)
+        .triggerGreet(peerLampId));
     setState(() => _flashing = true);
     Future<void>.delayed(const Duration(milliseconds: 120), () {
       if (mounted) setState(() => _flashing = false);
@@ -314,26 +324,15 @@ class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
                         style: textTheme.titleMedium?.copyWith(fontSize: 14),
                       ),
                     ),
-                    // Proximity bucket label is the user-visible signal. Raw dBm
-                    // subscript is debug-only, gated on advanced-mode session flag
-                    // and rendered TO THE LEFT of the label so the row stays a tidy
-                    // two lines (name row + slider row) regardless of mode.
                     if (_advancedDbm(ref, lampId, row.rssi) case final dbm?)
-                      Padding(
-                        padding: const EdgeInsets.only(right: AppSpace.sm),
-                        child: Text(
-                          dbm,
-                          style: textTheme.bodySmall?.copyWith(
-                            color: colorScheme.secondary,
-                            fontSize: 10,
-                            fontFamily: 'monospace',
-                          ),
+                      Text(
+                        dbm,
+                        style: textTheme.bodySmall?.copyWith(
+                          color: colorScheme.secondary,
+                          fontSize: 10,
+                          fontFamily: 'monospace',
                         ),
                       ),
-                    Text(
-                      proximityLabel(row.proximity),
-                      style: textTheme.bodySmall,
-                    ),
                   ],
                 ),
                 if (!hasLampId)

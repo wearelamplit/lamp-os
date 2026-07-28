@@ -12,7 +12,7 @@ part of 'lamp_nearby_peers_notifier.dart';
 /// `nearby` page-protocol section from CHAR_NEARBY_LAMPS every 5 s.
 ///
 /// Empty list while loading. Keeps the last-good snapshot on parse
-/// errors and disconnects — only surfaces AsyncError after sustained
+/// errors and disconnects, only surfaces AsyncError after sustained
 /// failure (currently: never auto-fails; the social screen will
 /// render "No lamps nearby" once the connection is restored and a
 /// real empty response lands).
@@ -28,7 +28,7 @@ final lampNearbyPeersNotifierProvider = LampNearbyPeersNotifierFamily._();
 /// `nearby` page-protocol section from CHAR_NEARBY_LAMPS every 5 s.
 ///
 /// Empty list while loading. Keeps the last-good snapshot on parse
-/// errors and disconnects — only surfaces AsyncError after sustained
+/// errors and disconnects, only surfaces AsyncError after sustained
 /// failure (currently: never auto-fails; the social screen will
 /// render "No lamps nearby" once the connection is restored and a
 /// real empty response lands).
@@ -43,7 +43,7 @@ final class LampNearbyPeersNotifierProvider
   /// `nearby` page-protocol section from CHAR_NEARBY_LAMPS every 5 s.
   ///
   /// Empty list while loading. Keeps the last-good snapshot on parse
-  /// errors and disconnects — only surfaces AsyncError after sustained
+  /// errors and disconnects, only surfaces AsyncError after sustained
   /// failure (currently: never auto-fails; the social screen will
   /// render "No lamps nearby" once the connection is restored and a
   /// real empty response lands).
@@ -89,13 +89,13 @@ final class LampNearbyPeersNotifierProvider
 }
 
 String _$lampNearbyPeersNotifierHash() =>
-    r'75c9cd238c9e4e50936c346d8c646ddf4e130200';
+    r'b9be24ab21434a8992d3a3032282144636497418';
 
 /// Per-lamp view of peers the connected lamp can hear. Reads the
 /// `nearby` page-protocol section from CHAR_NEARBY_LAMPS every 5 s.
 ///
 /// Empty list while loading. Keeps the last-good snapshot on parse
-/// errors and disconnects — only surfaces AsyncError after sustained
+/// errors and disconnects, only surfaces AsyncError after sustained
 /// failure (currently: never auto-fails; the social screen will
 /// render "No lamps nearby" once the connection is restored and a
 /// real empty response lands).
@@ -126,7 +126,7 @@ final class LampNearbyPeersNotifierFamily extends $Family
   /// `nearby` page-protocol section from CHAR_NEARBY_LAMPS every 5 s.
   ///
   /// Empty list while loading. Keeps the last-good snapshot on parse
-  /// errors and disconnects — only surfaces AsyncError after sustained
+  /// errors and disconnects, only surfaces AsyncError after sustained
   /// failure (currently: never auto-fails; the social screen will
   /// render "No lamps nearby" once the connection is restored and a
   /// real empty response lands).
@@ -146,7 +146,7 @@ final class LampNearbyPeersNotifierFamily extends $Family
 /// `nearby` page-protocol section from CHAR_NEARBY_LAMPS every 5 s.
 ///
 /// Empty list while loading. Keeps the last-good snapshot on parse
-/// errors and disconnects — only surfaces AsyncError after sustained
+/// errors and disconnects, only surfaces AsyncError after sustained
 /// failure (currently: never auto-fails; the social screen will
 /// render "No lamps nearby" once the connection is restored and a
 /// real empty response lands).

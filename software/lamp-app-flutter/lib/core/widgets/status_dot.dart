@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/brand_extras.dart';
 
-enum StatusKind { offline, bluetooth, mesh, searching }
+enum StatusKind { offline, bluetooth, mesh, searching, otaBusy }
 
 class StatusDot extends StatefulWidget {
   const StatusDot({super.key, required this.kind, this.size = 10});
@@ -77,6 +77,7 @@ class _StatusDotState extends State<StatusDot>
       StatusKind.offline => colorScheme.onSurfaceVariant.withValues(alpha: 0.35),
       StatusKind.bluetooth => colorScheme.tertiary.withValues(alpha: 0.7),
       StatusKind.mesh => context.brandExtras.success,
+      StatusKind.otaBusy => colorScheme.secondary,
       StatusKind.searching =>
         colorScheme.onSurfaceVariant.withValues(alpha: 0.35), // unreachable
     };
@@ -87,6 +88,7 @@ class _StatusDotState extends State<StatusDot>
       StatusKind.offline => 'Offline',
       StatusKind.bluetooth => 'Bluetooth only',
       StatusKind.mesh => 'Mesh connected',
+      StatusKind.otaBusy => 'Updating',
       StatusKind.searching => 'Searching', // unreachable
     };
 
@@ -95,9 +97,11 @@ class _StatusDotState extends State<StatusDot>
       child: AnimatedBuilder(
         animation: _ctrl,
         builder: (context, _) {
-          final glow = widget.kind == StatusKind.mesh
-              ? 6 + _ctrl.value * 8
-              : (widget.kind == StatusKind.bluetooth ? 4.0 : 0.0);
+          final glow = switch (widget.kind) {
+            StatusKind.mesh || StatusKind.otaBusy => 6 + _ctrl.value * 8,
+            StatusKind.bluetooth => 4.0,
+            _ => 0.0,
+          };
           return Container(
             width: widget.size,
             height: widget.size,

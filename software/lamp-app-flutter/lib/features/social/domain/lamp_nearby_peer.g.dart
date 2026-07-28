@@ -21,7 +21,10 @@ _LampNearbyPeer _$LampNearbyPeerFromJson(Map<String, dynamic> json) =>
       viaEspNow: json['viaEspNow'] as bool? ?? false,
       lastSeenMs: (json['lastSeenMs'] as num?)?.toInt() ?? 0,
       fwVersion: (json['fwVersion'] as num?)?.toInt() ?? 0,
+      fwChannel: json['fwChannel'] as String? ?? '',
       otaState: (json['otaState'] as num?)?.toInt() ?? 0,
+      otaSendingTo: json['otaSendingTo'] as String?,
+      near: json['near'] as bool? ?? false,
     );
 
 Map<String, dynamic> _$LampNearbyPeerToJson(_LampNearbyPeer instance) =>
@@ -35,5 +38,8 @@ Map<String, dynamic> _$LampNearbyPeerToJson(_LampNearbyPeer instance) =>
       'viaEspNow': instance.viaEspNow,
       'lastSeenMs': instance.lastSeenMs,
       'fwVersion': instance.fwVersion,
+      'fwChannel': instance.fwChannel,
       'otaState': instance.otaState,
+      'otaSendingTo': instance.otaSendingTo,
+      'near': instance.near,
     };

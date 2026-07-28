@@ -78,6 +78,18 @@ class _FakeLampNearbyPeers extends LampNearbyPeersNotifier {
   Future<List<LampNearbyPeer>> build(String lampId) async => _seed;
 }
 
+class _MutableFakeLampNearbyPeers extends LampNearbyPeersNotifier {
+  _MutableFakeLampNearbyPeers(this._seed);
+  List<LampNearbyPeer> _seed;
+  @override
+  Future<List<LampNearbyPeer>> build(String lampId) async => _seed;
+
+  void setPeers(List<LampNearbyPeer> peers) {
+    _seed = peers;
+    state = AsyncData(peers);
+  }
+}
+
 // Seeds CHAR_SOCIAL_DISPOSITIONS so Dispositions.build() doesn't hang.
 Future<void> _seedDispositions(
   InMemoryBleClient ble,
@@ -140,18 +152,24 @@ Future<void> _pump(WidgetTester tester) async {
   await tester.pump(const Duration(milliseconds: 100));
 }
 
-// Finds the AnimatedContainer for the peer row with [name] and returns its
-// decoration color. The AnimatedContainer is the first AnimatedContainer
-// ancestor above the peer name Text widget.
+// Finds the row's painted decoration color. AnimatedContainer.decoration
+// is always the fresh target config, not what's actually on screen mid
+// interpolation; the real painted value lives on the inner Container that
+// _AnimatedContainerState.build() constructs each tick, so read that one.
 Color? _rowColor(WidgetTester tester, String name) {
   final nameFinder = find.text(name);
   if (nameFinder.evaluate().isEmpty) return null;
-  final containers = find.ancestor(
+  final animContainers = find.ancestor(
     of: nameFinder,
     matching: find.byType(AnimatedContainer),
   );
-  if (containers.evaluate().isEmpty) return null;
-  final widget = tester.widget<AnimatedContainer>(containers.first);
+  if (animContainers.evaluate().isEmpty) return null;
+  final innerContainers = find.descendant(
+    of: animContainers.first,
+    matching: find.byType(Container),
+  );
+  if (innerContainers.evaluate().isEmpty) return null;
+  final widget = tester.widget<Container>(innerContainers.first);
   final decoration = widget.decoration;
   if (decoration is BoxDecoration) return decoration.color;
   return null;
@@ -200,5 +218,81 @@ void main() {
             reason: 'row $name must not be tinted when no greeting is active');
       }
     }
+  });
+
+  testWidgets(
+      'reorder does not bleed the greeted row highlight onto the wrong peer',
+      (tester) async {
+    final ble = InMemoryBleClient();
+    await _seedDispositions(ble, 'lamp-id', {_peerA: 3, _peerB: 3});
+
+    final fakePeers = _MutableFakeLampNearbyPeers(const [
+      LampNearbyPeer(
+        name: 'peer-a',
+        lampId: _peerA,
+        baseRgbw: _peerABaseRgbw,
+        shadeRgbw: [0, 0, 0, 0],
+        rssi: -72,
+        near: true,
+      ),
+      LampNearbyPeer(
+        name: 'peer-b',
+        lampId: _peerB,
+        baseRgbw: _peerBBaseRgbw,
+        shadeRgbw: [0, 0, 0, 0],
+        rssi: -65,
+        near: false,
+      ),
+    ]);
+
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        bleClientProvider.overrideWithValue(ble),
+        controlNotifierProvider('lamp-id').overrideWith(() =>
+            _GreetingFakeControl(
+                const GreetingState(peer: _peerB, kind: 'glitch'))),
+        lampNearbyPeersNotifierProvider('lamp-id')
+            .overrideWith(() => fakePeers),
+      ],
+      child: const MaterialApp(
+        home: Scaffold(body: SocialScreen(lampId: 'lamp-id')),
+      ),
+    ));
+    await _pump(tester);
+
+    // peer-b is greeted but sorts last (far); peer-a sorts first (near).
+    expect(_rowColor(tester, 'peer-a')?.a ?? 0.0, equals(0.0));
+    expect(_rowColor(tester, 'peer-b')?.a, greaterThan(0.0));
+
+    // Flip near flags so peer-b now sorts first and peer-a sorts second:
+    // the two rows swap slots without either peer's greeting state changing.
+    fakePeers.setPeers(const [
+      LampNearbyPeer(
+        name: 'peer-a',
+        lampId: _peerA,
+        baseRgbw: _peerABaseRgbw,
+        shadeRgbw: [0, 0, 0, 0],
+        rssi: -72,
+        near: false,
+      ),
+      LampNearbyPeer(
+        name: 'peer-b',
+        lampId: _peerB,
+        baseRgbw: _peerBBaseRgbw,
+        shadeRgbw: [0, 0, 0, 0],
+        rssi: -65,
+        near: true,
+      ),
+    ]);
+    // Zero elapsed time: catches a reused Element's tween starting from
+    // the previous occupant's decoration, before it interpolates away.
+    await tester.pump(Duration.zero);
+
+    expect(_rowColor(tester, 'peer-b')?.a, greaterThan(0.0),
+        reason: 'still-greeted peer-b must stay tinted after reorder');
+    expect(_rowColor(tester, 'peer-a')?.a ?? 0.0, equals(0.0),
+        reason:
+            'peer-a was never greeted; it must not inherit the tint left '
+            'behind by whichever row previously occupied its slot');
   });
 }

@@ -24,9 +24,16 @@ mixin _$LampNearbyPeer {
 /// the lamp icon next to the row.
 @JsonKey(name: 'base', fromJson: _rgbwFromJson) List<int> get baseRgbw;@JsonKey(name: 'shade', fromJson: _rgbwFromJson) List<int> get shadeRgbw; bool get viaBle; bool get viaEspNow; int get lastSeenMs;/// Packed semver (major<<16 | minor<<8 | patch). 0 = unknown/legacy
 /// peer (the lamp omits it when zero).
- int get fwVersion;/// OTA state: 0=idle, 1=sending, 2=receiving. Omitted by the lamp
+ int get fwVersion;/// `{type}-{channel}` slot, e.g. "standard-beta". Empty on legacy
+/// firmware that predates the emit.
+ String get fwChannel;/// OTA state: 0=idle, 1=sending, 2=receiving. Omitted by the lamp
 /// when idle.
- int get otaState;
+ int get otaState;/// Mesh MAC (uppercase colon-hex) of the peer this lamp is OTA-sending
+/// to. Null unless the lamp is Sending. Resolve against inventory by
+/// `lampId` to name the receiver, which is HELLO-silent during its OTA.
+ String? get otaSendingTo;/// Firmware-computed proximity: true = near, false = far. The lamp
+/// derives this from its own RSSI tiers; the app just renders it.
+ bool get near;
 /// Create a copy of LampNearbyPeer
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -39,16 +46,16 @@ $LampNearbyPeerCopyWith<LampNearbyPeer> get copyWith => _$LampNearbyPeerCopyWith
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is LampNearbyPeer&&(identical(other.name, name) || other.name == name)&&(identical(other.lampId, lampId) || other.lampId == lampId)&&(identical(other.rssi, rssi) || other.rssi == rssi)&&const DeepCollectionEquality().equals(other.baseRgbw, baseRgbw)&&const DeepCollectionEquality().equals(other.shadeRgbw, shadeRgbw)&&(identical(other.viaBle, viaBle) || other.viaBle == viaBle)&&(identical(other.viaEspNow, viaEspNow) || other.viaEspNow == viaEspNow)&&(identical(other.lastSeenMs, lastSeenMs) || other.lastSeenMs == lastSeenMs)&&(identical(other.fwVersion, fwVersion) || other.fwVersion == fwVersion)&&(identical(other.otaState, otaState) || other.otaState == otaState));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is LampNearbyPeer&&(identical(other.name, name) || other.name == name)&&(identical(other.lampId, lampId) || other.lampId == lampId)&&(identical(other.rssi, rssi) || other.rssi == rssi)&&const DeepCollectionEquality().equals(other.baseRgbw, baseRgbw)&&const DeepCollectionEquality().equals(other.shadeRgbw, shadeRgbw)&&(identical(other.viaBle, viaBle) || other.viaBle == viaBle)&&(identical(other.viaEspNow, viaEspNow) || other.viaEspNow == viaEspNow)&&(identical(other.lastSeenMs, lastSeenMs) || other.lastSeenMs == lastSeenMs)&&(identical(other.fwVersion, fwVersion) || other.fwVersion == fwVersion)&&(identical(other.fwChannel, fwChannel) || other.fwChannel == fwChannel)&&(identical(other.otaState, otaState) || other.otaState == otaState)&&(identical(other.otaSendingTo, otaSendingTo) || other.otaSendingTo == otaSendingTo)&&(identical(other.near, near) || other.near == near));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,name,lampId,rssi,const DeepCollectionEquality().hash(baseRgbw),const DeepCollectionEquality().hash(shadeRgbw),viaBle,viaEspNow,lastSeenMs,fwVersion,otaState);
+int get hashCode => Object.hash(runtimeType,name,lampId,rssi,const DeepCollectionEquality().hash(baseRgbw),const DeepCollectionEquality().hash(shadeRgbw),viaBle,viaEspNow,lastSeenMs,fwVersion,fwChannel,otaState,otaSendingTo,near);
 
 @override
 String toString() {
-  return 'LampNearbyPeer(name: $name, lampId: $lampId, rssi: $rssi, baseRgbw: $baseRgbw, shadeRgbw: $shadeRgbw, viaBle: $viaBle, viaEspNow: $viaEspNow, lastSeenMs: $lastSeenMs, fwVersion: $fwVersion, otaState: $otaState)';
+  return 'LampNearbyPeer(name: $name, lampId: $lampId, rssi: $rssi, baseRgbw: $baseRgbw, shadeRgbw: $shadeRgbw, viaBle: $viaBle, viaEspNow: $viaEspNow, lastSeenMs: $lastSeenMs, fwVersion: $fwVersion, fwChannel: $fwChannel, otaState: $otaState, otaSendingTo: $otaSendingTo, near: $near)';
 }
 
 
@@ -59,7 +66,7 @@ abstract mixin class $LampNearbyPeerCopyWith<$Res>  {
   factory $LampNearbyPeerCopyWith(LampNearbyPeer value, $Res Function(LampNearbyPeer) _then) = _$LampNearbyPeerCopyWithImpl;
 @useResult
 $Res call({
- String name, String lampId, int rssi,@JsonKey(name: 'base', fromJson: _rgbwFromJson) List<int> baseRgbw,@JsonKey(name: 'shade', fromJson: _rgbwFromJson) List<int> shadeRgbw, bool viaBle, bool viaEspNow, int lastSeenMs, int fwVersion, int otaState
+ String name, String lampId, int rssi,@JsonKey(name: 'base', fromJson: _rgbwFromJson) List<int> baseRgbw,@JsonKey(name: 'shade', fromJson: _rgbwFromJson) List<int> shadeRgbw, bool viaBle, bool viaEspNow, int lastSeenMs, int fwVersion, String fwChannel, int otaState, String? otaSendingTo, bool near
 });
 
 
@@ -76,7 +83,7 @@ class _$LampNearbyPeerCopyWithImpl<$Res>
 
 /// Create a copy of LampNearbyPeer
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? name = null,Object? lampId = null,Object? rssi = null,Object? baseRgbw = null,Object? shadeRgbw = null,Object? viaBle = null,Object? viaEspNow = null,Object? lastSeenMs = null,Object? fwVersion = null,Object? otaState = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? name = null,Object? lampId = null,Object? rssi = null,Object? baseRgbw = null,Object? shadeRgbw = null,Object? viaBle = null,Object? viaEspNow = null,Object? lastSeenMs = null,Object? fwVersion = null,Object? fwChannel = null,Object? otaState = null,Object? otaSendingTo = freezed,Object? near = null,}) {
   return _then(_self.copyWith(
 name: null == name ? _self.name : name // ignore: cast_nullable_to_non_nullable
 as String,lampId: null == lampId ? _self.lampId : lampId // ignore: cast_nullable_to_non_nullable
@@ -87,8 +94,11 @@ as List<int>,viaBle: null == viaBle ? _self.viaBle : viaBle // ignore: cast_null
 as bool,viaEspNow: null == viaEspNow ? _self.viaEspNow : viaEspNow // ignore: cast_nullable_to_non_nullable
 as bool,lastSeenMs: null == lastSeenMs ? _self.lastSeenMs : lastSeenMs // ignore: cast_nullable_to_non_nullable
 as int,fwVersion: null == fwVersion ? _self.fwVersion : fwVersion // ignore: cast_nullable_to_non_nullable
-as int,otaState: null == otaState ? _self.otaState : otaState // ignore: cast_nullable_to_non_nullable
-as int,
+as int,fwChannel: null == fwChannel ? _self.fwChannel : fwChannel // ignore: cast_nullable_to_non_nullable
+as String,otaState: null == otaState ? _self.otaState : otaState // ignore: cast_nullable_to_non_nullable
+as int,otaSendingTo: freezed == otaSendingTo ? _self.otaSendingTo : otaSendingTo // ignore: cast_nullable_to_non_nullable
+as String?,near: null == near ? _self.near : near // ignore: cast_nullable_to_non_nullable
+as bool,
   ));
 }
 
@@ -173,10 +183,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String name,  String lampId,  int rssi, @JsonKey(name: 'base', fromJson: _rgbwFromJson)  List<int> baseRgbw, @JsonKey(name: 'shade', fromJson: _rgbwFromJson)  List<int> shadeRgbw,  bool viaBle,  bool viaEspNow,  int lastSeenMs,  int fwVersion,  int otaState)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String name,  String lampId,  int rssi, @JsonKey(name: 'base', fromJson: _rgbwFromJson)  List<int> baseRgbw, @JsonKey(name: 'shade', fromJson: _rgbwFromJson)  List<int> shadeRgbw,  bool viaBle,  bool viaEspNow,  int lastSeenMs,  int fwVersion,  String fwChannel,  int otaState,  String? otaSendingTo,  bool near)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _LampNearbyPeer() when $default != null:
-return $default(_that.name,_that.lampId,_that.rssi,_that.baseRgbw,_that.shadeRgbw,_that.viaBle,_that.viaEspNow,_that.lastSeenMs,_that.fwVersion,_that.otaState);case _:
+return $default(_that.name,_that.lampId,_that.rssi,_that.baseRgbw,_that.shadeRgbw,_that.viaBle,_that.viaEspNow,_that.lastSeenMs,_that.fwVersion,_that.fwChannel,_that.otaState,_that.otaSendingTo,_that.near);case _:
   return orElse();
 
 }
@@ -194,10 +204,10 @@ return $default(_that.name,_that.lampId,_that.rssi,_that.baseRgbw,_that.shadeRgb
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String name,  String lampId,  int rssi, @JsonKey(name: 'base', fromJson: _rgbwFromJson)  List<int> baseRgbw, @JsonKey(name: 'shade', fromJson: _rgbwFromJson)  List<int> shadeRgbw,  bool viaBle,  bool viaEspNow,  int lastSeenMs,  int fwVersion,  int otaState)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String name,  String lampId,  int rssi, @JsonKey(name: 'base', fromJson: _rgbwFromJson)  List<int> baseRgbw, @JsonKey(name: 'shade', fromJson: _rgbwFromJson)  List<int> shadeRgbw,  bool viaBle,  bool viaEspNow,  int lastSeenMs,  int fwVersion,  String fwChannel,  int otaState,  String? otaSendingTo,  bool near)  $default,) {final _that = this;
 switch (_that) {
 case _LampNearbyPeer():
-return $default(_that.name,_that.lampId,_that.rssi,_that.baseRgbw,_that.shadeRgbw,_that.viaBle,_that.viaEspNow,_that.lastSeenMs,_that.fwVersion,_that.otaState);case _:
+return $default(_that.name,_that.lampId,_that.rssi,_that.baseRgbw,_that.shadeRgbw,_that.viaBle,_that.viaEspNow,_that.lastSeenMs,_that.fwVersion,_that.fwChannel,_that.otaState,_that.otaSendingTo,_that.near);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -214,10 +224,10 @@ return $default(_that.name,_that.lampId,_that.rssi,_that.baseRgbw,_that.shadeRgb
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String name,  String lampId,  int rssi, @JsonKey(name: 'base', fromJson: _rgbwFromJson)  List<int> baseRgbw, @JsonKey(name: 'shade', fromJson: _rgbwFromJson)  List<int> shadeRgbw,  bool viaBle,  bool viaEspNow,  int lastSeenMs,  int fwVersion,  int otaState)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String name,  String lampId,  int rssi, @JsonKey(name: 'base', fromJson: _rgbwFromJson)  List<int> baseRgbw, @JsonKey(name: 'shade', fromJson: _rgbwFromJson)  List<int> shadeRgbw,  bool viaBle,  bool viaEspNow,  int lastSeenMs,  int fwVersion,  String fwChannel,  int otaState,  String? otaSendingTo,  bool near)?  $default,) {final _that = this;
 switch (_that) {
 case _LampNearbyPeer() when $default != null:
-return $default(_that.name,_that.lampId,_that.rssi,_that.baseRgbw,_that.shadeRgbw,_that.viaBle,_that.viaEspNow,_that.lastSeenMs,_that.fwVersion,_that.otaState);case _:
+return $default(_that.name,_that.lampId,_that.rssi,_that.baseRgbw,_that.shadeRgbw,_that.viaBle,_that.viaEspNow,_that.lastSeenMs,_that.fwVersion,_that.fwChannel,_that.otaState,_that.otaSendingTo,_that.near);case _:
   return null;
 
 }
@@ -229,7 +239,7 @@ return $default(_that.name,_that.lampId,_that.rssi,_that.baseRgbw,_that.shadeRgb
 @JsonSerializable()
 
 class _LampNearbyPeer implements LampNearbyPeer {
-  const _LampNearbyPeer({required this.name, this.lampId = '', this.rssi = -127, @JsonKey(name: 'base', fromJson: _rgbwFromJson) final  List<int> baseRgbw = const <int>[0, 0, 0, 0], @JsonKey(name: 'shade', fromJson: _rgbwFromJson) final  List<int> shadeRgbw = const <int>[0, 0, 0, 0], this.viaBle = false, this.viaEspNow = false, this.lastSeenMs = 0, this.fwVersion = 0, this.otaState = 0}): _baseRgbw = baseRgbw,_shadeRgbw = shadeRgbw;
+  const _LampNearbyPeer({required this.name, this.lampId = '', this.rssi = -127, @JsonKey(name: 'base', fromJson: _rgbwFromJson) final  List<int> baseRgbw = const <int>[0, 0, 0, 0], @JsonKey(name: 'shade', fromJson: _rgbwFromJson) final  List<int> shadeRgbw = const <int>[0, 0, 0, 0], this.viaBle = false, this.viaEspNow = false, this.lastSeenMs = 0, this.fwVersion = 0, this.fwChannel = '', this.otaState = 0, this.otaSendingTo, this.near = false}): _baseRgbw = baseRgbw,_shadeRgbw = shadeRgbw;
   factory _LampNearbyPeer.fromJson(Map<String, dynamic> json) => _$LampNearbyPeerFromJson(json);
 
 @override final  String name;
@@ -264,9 +274,19 @@ class _LampNearbyPeer implements LampNearbyPeer {
 /// Packed semver (major<<16 | minor<<8 | patch). 0 = unknown/legacy
 /// peer (the lamp omits it when zero).
 @override@JsonKey() final  int fwVersion;
+/// `{type}-{channel}` slot, e.g. "standard-beta". Empty on legacy
+/// firmware that predates the emit.
+@override@JsonKey() final  String fwChannel;
 /// OTA state: 0=idle, 1=sending, 2=receiving. Omitted by the lamp
 /// when idle.
 @override@JsonKey() final  int otaState;
+/// Mesh MAC (uppercase colon-hex) of the peer this lamp is OTA-sending
+/// to. Null unless the lamp is Sending. Resolve against inventory by
+/// `lampId` to name the receiver, which is HELLO-silent during its OTA.
+@override final  String? otaSendingTo;
+/// Firmware-computed proximity: true = near, false = far. The lamp
+/// derives this from its own RSSI tiers; the app just renders it.
+@override@JsonKey() final  bool near;
 
 /// Create a copy of LampNearbyPeer
 /// with the given fields replaced by the non-null parameter values.
@@ -281,16 +301,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _LampNearbyPeer&&(identical(other.name, name) || other.name == name)&&(identical(other.lampId, lampId) || other.lampId == lampId)&&(identical(other.rssi, rssi) || other.rssi == rssi)&&const DeepCollectionEquality().equals(other._baseRgbw, _baseRgbw)&&const DeepCollectionEquality().equals(other._shadeRgbw, _shadeRgbw)&&(identical(other.viaBle, viaBle) || other.viaBle == viaBle)&&(identical(other.viaEspNow, viaEspNow) || other.viaEspNow == viaEspNow)&&(identical(other.lastSeenMs, lastSeenMs) || other.lastSeenMs == lastSeenMs)&&(identical(other.fwVersion, fwVersion) || other.fwVersion == fwVersion)&&(identical(other.otaState, otaState) || other.otaState == otaState));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _LampNearbyPeer&&(identical(other.name, name) || other.name == name)&&(identical(other.lampId, lampId) || other.lampId == lampId)&&(identical(other.rssi, rssi) || other.rssi == rssi)&&const DeepCollectionEquality().equals(other._baseRgbw, _baseRgbw)&&const DeepCollectionEquality().equals(other._shadeRgbw, _shadeRgbw)&&(identical(other.viaBle, viaBle) || other.viaBle == viaBle)&&(identical(other.viaEspNow, viaEspNow) || other.viaEspNow == viaEspNow)&&(identical(other.lastSeenMs, lastSeenMs) || other.lastSeenMs == lastSeenMs)&&(identical(other.fwVersion, fwVersion) || other.fwVersion == fwVersion)&&(identical(other.fwChannel, fwChannel) || other.fwChannel == fwChannel)&&(identical(other.otaState, otaState) || other.otaState == otaState)&&(identical(other.otaSendingTo, otaSendingTo) || other.otaSendingTo == otaSendingTo)&&(identical(other.near, near) || other.near == near));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,name,lampId,rssi,const DeepCollectionEquality().hash(_baseRgbw),const DeepCollectionEquality().hash(_shadeRgbw),viaBle,viaEspNow,lastSeenMs,fwVersion,otaState);
+int get hashCode => Object.hash(runtimeType,name,lampId,rssi,const DeepCollectionEquality().hash(_baseRgbw),const DeepCollectionEquality().hash(_shadeRgbw),viaBle,viaEspNow,lastSeenMs,fwVersion,fwChannel,otaState,otaSendingTo,near);
 
 @override
 String toString() {
-  return 'LampNearbyPeer(name: $name, lampId: $lampId, rssi: $rssi, baseRgbw: $baseRgbw, shadeRgbw: $shadeRgbw, viaBle: $viaBle, viaEspNow: $viaEspNow, lastSeenMs: $lastSeenMs, fwVersion: $fwVersion, otaState: $otaState)';
+  return 'LampNearbyPeer(name: $name, lampId: $lampId, rssi: $rssi, baseRgbw: $baseRgbw, shadeRgbw: $shadeRgbw, viaBle: $viaBle, viaEspNow: $viaEspNow, lastSeenMs: $lastSeenMs, fwVersion: $fwVersion, fwChannel: $fwChannel, otaState: $otaState, otaSendingTo: $otaSendingTo, near: $near)';
 }
 
 
@@ -301,7 +321,7 @@ abstract mixin class _$LampNearbyPeerCopyWith<$Res> implements $LampNearbyPeerCo
   factory _$LampNearbyPeerCopyWith(_LampNearbyPeer value, $Res Function(_LampNearbyPeer) _then) = __$LampNearbyPeerCopyWithImpl;
 @override @useResult
 $Res call({
- String name, String lampId, int rssi,@JsonKey(name: 'base', fromJson: _rgbwFromJson) List<int> baseRgbw,@JsonKey(name: 'shade', fromJson: _rgbwFromJson) List<int> shadeRgbw, bool viaBle, bool viaEspNow, int lastSeenMs, int fwVersion, int otaState
+ String name, String lampId, int rssi,@JsonKey(name: 'base', fromJson: _rgbwFromJson) List<int> baseRgbw,@JsonKey(name: 'shade', fromJson: _rgbwFromJson) List<int> shadeRgbw, bool viaBle, bool viaEspNow, int lastSeenMs, int fwVersion, String fwChannel, int otaState, String? otaSendingTo, bool near
 });
 
 
@@ -318,7 +338,7 @@ class __$LampNearbyPeerCopyWithImpl<$Res>
 
 /// Create a copy of LampNearbyPeer
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? name = null,Object? lampId = null,Object? rssi = null,Object? baseRgbw = null,Object? shadeRgbw = null,Object? viaBle = null,Object? viaEspNow = null,Object? lastSeenMs = null,Object? fwVersion = null,Object? otaState = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? name = null,Object? lampId = null,Object? rssi = null,Object? baseRgbw = null,Object? shadeRgbw = null,Object? viaBle = null,Object? viaEspNow = null,Object? lastSeenMs = null,Object? fwVersion = null,Object? fwChannel = null,Object? otaState = null,Object? otaSendingTo = freezed,Object? near = null,}) {
   return _then(_LampNearbyPeer(
 name: null == name ? _self.name : name // ignore: cast_nullable_to_non_nullable
 as String,lampId: null == lampId ? _self.lampId : lampId // ignore: cast_nullable_to_non_nullable
@@ -329,8 +349,11 @@ as List<int>,viaBle: null == viaBle ? _self.viaBle : viaBle // ignore: cast_null
 as bool,viaEspNow: null == viaEspNow ? _self.viaEspNow : viaEspNow // ignore: cast_nullable_to_non_nullable
 as bool,lastSeenMs: null == lastSeenMs ? _self.lastSeenMs : lastSeenMs // ignore: cast_nullable_to_non_nullable
 as int,fwVersion: null == fwVersion ? _self.fwVersion : fwVersion // ignore: cast_nullable_to_non_nullable
-as int,otaState: null == otaState ? _self.otaState : otaState // ignore: cast_nullable_to_non_nullable
-as int,
+as int,fwChannel: null == fwChannel ? _self.fwChannel : fwChannel // ignore: cast_nullable_to_non_nullable
+as String,otaState: null == otaState ? _self.otaState : otaState // ignore: cast_nullable_to_non_nullable
+as int,otaSendingTo: freezed == otaSendingTo ? _self.otaSendingTo : otaSendingTo // ignore: cast_nullable_to_non_nullable
+as String?,near: null == near ? _self.near : near // ignore: cast_nullable_to_non_nullable
+as bool,
   ));
 }
 

@@ -102,7 +102,7 @@ class _AddLampShellState extends ConsumerState<AddLampShell> {
               )
             : null,
       ),
-      body: body,
+      body: SafeArea(child: body),
     );
   }
 }

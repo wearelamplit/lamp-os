@@ -177,6 +177,7 @@ void main() {
               name: 'jacko',
               lampId: 'AA:BB:CC:DD:EE:FF',
               rssi: -72,
+              near: true,
             ),
           ]),
         ),
@@ -197,8 +198,8 @@ void main() {
     expect(find.text('jacko'), findsOneWidget);
     // Disposition value 4 → "fond" label.
     expect(find.text('fond'), findsOneWidget);
-    // Proximity 0 → "Near".
-    expect(find.text('Near'), findsOneWidget);
+    expect(find.text('Near'), findsNothing);
+    expect(find.text('Far'), findsNothing);
   });
 
   testWidgets('empty-state copy when no nearby lamps regardless of dispositions',

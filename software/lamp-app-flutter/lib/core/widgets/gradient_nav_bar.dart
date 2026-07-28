@@ -16,11 +16,25 @@ class GradientNavBar extends StatelessWidget {
 
   final int selectedIndex;
   final ValueChanged<int> onDestinationSelected;
-  final List<({IconData icon, String label})> destinations;
+  final List<({IconData icon, String label, Widget? badge})> destinations;
 
   NavigationDestination _destination(
-      BuildContext context, IconData icon, String label, bool selected) {
-    final iconWidget = Icon(icon, size: 22);
+    BuildContext context,
+    IconData icon,
+    String label,
+    Widget? badge,
+    bool selected,
+  ) {
+    Widget iconWidget = Icon(icon, size: 22);
+    if (badge != null) {
+      iconWidget = Stack(
+        clipBehavior: Clip.none,
+        children: [
+          iconWidget,
+          Positioned(top: -4, right: -6, child: badge),
+        ],
+      );
+    }
     if (!selected) return NavigationDestination(icon: iconWidget, label: label);
     final gradient = context.brandExtras.chromeGradient;
     final primary = Theme.of(context).colorScheme.primary;
@@ -75,8 +89,13 @@ class GradientNavBar extends StatelessWidget {
         onDestinationSelected: onDestinationSelected,
         destinations: [
           for (var i = 0; i < destinations.length; i++)
-            _destination(context, destinations[i].icon, destinations[i].label,
-                i == selectedIndex),
+            _destination(
+              context,
+              destinations[i].icon,
+              destinations[i].label,
+              destinations[i].badge,
+              i == selectedIndex,
+            ),
         ],
       ),
     );

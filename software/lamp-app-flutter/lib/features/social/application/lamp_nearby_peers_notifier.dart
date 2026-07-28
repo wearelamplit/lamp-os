@@ -1,21 +1,26 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../../core/ble/ble_client.dart';
 import '../../../core/ble/ble_client_provider.dart';
+import '../../../core/ble/uuids.dart';
 import '../domain/lamp_nearby_peer.dart';
 
 part 'lamp_nearby_peers_notifier.g.dart';
 
-/// Polling interval for the lamp's nearby JSON. The page-protocol
-/// section has no NOTIFY path, so polling is required. 5 s balances
-/// freshness on rename/disposition changes against battery cost.
-const _pollInterval = Duration(seconds: 5);
+/// Fallback poll cadence for the lamp's nearby JSON. The primary path is a
+/// push: stateNotify carries a `nearbyRev` that bumps on any app-visible
+/// roster change, and a bump triggers an immediate re-read. This slow poll
+/// only backstops a missed notify (e.g. a legacy lamp that predates
+/// nearbyRev, or a dropped frame).
+const _pollInterval = Duration(seconds: 20);
 
-/// Per-lamp view of peers the connected lamp can hear. Reads the
-/// `nearby` page-protocol section from CHAR_NEARBY_LAMPS every 5 s.
+/// Per-lamp view of peers the connected lamp can hear. Reads the `nearby`
+/// page-protocol section, re-reading when stateNotify's `nearbyRev` bumps
+/// (push) and on a slow fallback poll.
 ///
 /// Empty list while loading. Keeps the last-good snapshot on parse
 /// errors and disconnects, only surfaces AsyncError after sustained
@@ -30,11 +35,17 @@ const _pollInterval = Duration(seconds: 5);
 class LampNearbyPeersNotifier extends _$LampNearbyPeersNotifier {
   Timer? _pollTimer;
   StreamSubscription<bool>? _connSub;
+  StreamSubscription<Uint8List>? _notifySub;
   late final BleClient _ble;
   bool _connected = false;
+  // Last nearbyRev seen on stateNotify. A change means the connected lamp's
+  // roster gained/lost/renamed a peer (or a color/ota field moved); re-read.
+  // null until the first frame seeds the baseline.
+  int? _lastRev;
   // Last successful decode. Preserved across transient errors so the
   // UI doesn't blip back to an empty list on a single failed poll.
   List<LampNearbyPeer> _lastGood = const [];
+  bool _polling = false;
 
   @override
   Future<List<LampNearbyPeer>> build(String lampId) async {
@@ -44,6 +55,8 @@ class LampNearbyPeersNotifier extends _$LampNearbyPeersNotifier {
       _pollTimer = null;
       _connSub?.cancel();
       _connSub = null;
+      _notifySub?.cancel();
+      _notifySub = null;
     });
 
     // Keep the last good snapshot while disconnected so the UI doesn't
@@ -52,9 +65,13 @@ class LampNearbyPeersNotifier extends _$LampNearbyPeersNotifier {
       _connected = isConnected;
       if (isConnected) {
         _startPolling();
+        _startNotify();
       } else {
         _pollTimer?.cancel();
         _pollTimer = null;
+        _notifySub?.cancel();
+        _notifySub = null;
+        _lastRev = null;
       }
     });
 
@@ -69,13 +86,48 @@ class LampNearbyPeersNotifier extends _$LampNearbyPeersNotifier {
     }
   }
 
+  // Immediate tick before the periodic timer catches a roster change that
+  // happened while disconnected: subscribe replays the stale pre-disconnect
+  // frame, so _onStateNotify reseeds _lastRev without triggering a re-read.
   void _startPolling() {
     _pollTimer?.cancel();
+    _poll();
     _pollTimer = Timer.periodic(_pollInterval, (_) => _poll());
   }
 
+  // subscribe (not subscribeNotifyOnly) replays the characteristic's last
+  // value on listen, so a mid-session connect seeds _lastRev without waiting
+  // for the next push.
+  void _startNotify() {
+    _notifySub?.cancel();
+    _notifySub = _ble
+        .subscribe(lampId, BleUuids.controlService, BleUuids.stateNotify)
+        .listen(_onStateNotify, onError: (_) {});
+  }
+
+  void _onStateNotify(Uint8List frame) {
+    if (frame.isEmpty) return;
+    final int? rev;
+    try {
+      final decoded = jsonDecode(utf8.decode(frame));
+      rev = decoded is Map ? decoded['nearbyRev'] as int? : null;
+    } catch (_) {
+      return;
+    }
+    if (rev == null) return;
+    if (_lastRev == null) {
+      _lastRev = rev;
+      return;
+    }
+    if (rev != _lastRev) {
+      _lastRev = rev;
+      _poll();
+    }
+  }
+
   Future<void> _poll() async {
-    if (!_connected) return;
+    if (!_connected || _polling) return;
+    _polling = true;
     try {
       final peers = await _readOnce();
       _lastGood = peers;
@@ -86,6 +138,8 @@ class LampNearbyPeersNotifier extends _$LampNearbyPeersNotifier {
       }
     } catch (_) {
       // Keep last good snapshot on transient error; next tick retries.
+    } finally {
+      _polling = false;
     }
   }
 

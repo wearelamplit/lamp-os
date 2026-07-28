@@ -6,8 +6,6 @@ import 'package:flutter/material.dart';
 /// ```dart
 /// AppSnackbar.info(context, 'WiFi creds sent to wisp.');
 /// AppSnackbar.error(context, "Couldn't reach the wisp.");
-/// AppSnackbar.action(context, message: 'Removed "breathing"',
-///     actionLabel: 'UNDO', onAction: () => notifier.upsertExpression(e));
 /// ```
 ///
 /// Callers are responsible for `context.mounted`; these don't re-check.
@@ -18,9 +16,6 @@ abstract class AppSnackbar {
   /// Non-actionable failures; longer so the user can read the cause.
   static const Duration errorDuration = Duration(seconds: 3);
 
-  /// Long enough to decide whether to tap UNDO before self-dismiss.
-  static const Duration actionDuration = Duration(seconds: 4);
-
   static void info(BuildContext context, String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), duration: infoDuration),
@@ -30,21 +25,6 @@ abstract class AppSnackbar {
   static void error(BuildContext context, String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), duration: errorDuration),
-    );
-  }
-
-  static void action(
-    BuildContext context, {
-    required String message,
-    required String actionLabel,
-    required VoidCallback onAction,
-  }) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        duration: actionDuration,
-        action: SnackBarAction(label: actionLabel, onPressed: onAction),
-      ),
     );
   }
 }

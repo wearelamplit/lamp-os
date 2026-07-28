@@ -6,7 +6,7 @@
 	    android:maxSdkVersion="30" />
 	<uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
     <application
-        android:label="LampOS"
+        android:label="Lamp"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

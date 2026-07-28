@@ -46,7 +46,7 @@ class BluetoothGate extends ConsumerWidget {
         return const _GatePanel(
           icon: Icons.bluetooth_disabled,
           title: 'Bluetooth is off',
-          message: 'LampOS talks to your lamps over Bluetooth.',
+          message: 'Lamp talks to your lamps over Bluetooth.',
           action: _GateAction.turnOn,
         );
       case fbp.BluetoothAdapterState.unauthorized:
@@ -54,7 +54,7 @@ class BluetoothGate extends ConsumerWidget {
           icon: Icons.lock_outline,
           title: 'Bluetooth permission needed',
           message:
-              'Allow Bluetooth for LampOS in Settings to reach your lamps.',
+              'Allow Bluetooth for Lamp in Settings to reach your lamps.',
           action: _GateAction.openSettings,
         );
       default:
