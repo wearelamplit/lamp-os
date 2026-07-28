@@ -9,7 +9,6 @@
 
 #include "components/apply/apply_lamp.hpp"
 #include "components/apply/apply_home_mode.hpp"
-#include "components/apply/apply_base_ac.hpp"
 #include "components/apply/apply_base_knockout.hpp"
 #include "components/apply/apply_shade_colors.hpp"
 #include "components/apply/apply_base_colors.hpp"
@@ -42,9 +41,6 @@ inline bool settingsBlobLocal(JsonObject doc, uint8_t maxBrightness) {
     apply::pixelFormatLocal(baseObj, ::config.base);
     if (baseObj["colors"].is<JsonArray>()) {
       apply::baseColorsToConfig(baseObj["colors"].as<JsonArray>());
-    }
-    if (baseObj["ac"].is<int>()) {
-      apply::baseAcLocal(baseObj["ac"].as<int>());
     }
     if (baseObj["knockout"].is<JsonArray>()) {
       apply::baseKnockoutLocal(baseObj["knockout"].as<JsonArray>());

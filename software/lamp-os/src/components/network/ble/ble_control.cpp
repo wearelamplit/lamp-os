@@ -4,6 +4,7 @@
 #include <ArduinoJson.h>
 #include <NimBLEDevice.h>
 #include <Preferences.h>
+#include <esp_bt.h>
 
 #include <algorithm>
 #include <array>
@@ -24,11 +25,11 @@
 #include "core/override_aggregate.hpp"
 #include "components/firmware/ota_quiet_mode.hpp"
 #include "ble_gap.hpp"
-#include "scan_burst.hpp"
 #include "crypto.hpp"
 #include "components/network/ble/gatt_layout.hpp"
 #include "expressions/expression_manager.hpp"
 #include "components/network/mesh/lamp_roster.hpp"
+#include "components/network/mesh/proximity.hpp"
 #include "components/network/mesh/mesh_link.hpp"
 #include "components/network/transport/wifi.hpp"
 #include "write_router.hpp"
@@ -76,6 +77,7 @@ static NimBLECharacteristic* s_wispStatusChar  = nullptr;
 static NimBLECharacteristic* s_wispClaimsChar  = nullptr;
 static lamp::Config*         s_config      = nullptr;
 static bool                  s_running     = false;
+static bool                  s_bleDown     = false;
 
 // volatile: written by BLE host task (Core 0), read from Core 1 and scan
 // callbacks. Compiler would otherwise cache reads in a register and miss flips.
@@ -88,20 +90,6 @@ static volatile bool         s_homeModePageActive = false;
 static volatile bool         s_scanPausedForGattClient = false;
 // Held true for an OTA window (pauseRadioForOta): quiets adv + scan.
 static volatile bool         s_otaRadioPaused = false;
-// Armed on Core 0 by a nearby-page read; serviced on Core 1 by tick().
-static volatile bool         s_scanBurstRequested = false;
-static volatile bool         s_scanBurstActive    = false;
-static          uint32_t     s_lastScanBurstMs    = 0;
-
-// Scan-burst coex knobs, bench-tuned. One short high-duty burst while an app
-// holds the GATT link; long enough to catch a ~1 s legacy adv, short overall.
-// ponytail: fixed single-burst shape, no adaptive backoff. The ceiling is
-// airtime stolen from the GATT link; widen window/duration only if a bench
-// run shows legacy lamps still missed.
-static constexpr uint16_t kScanBurstWindowMs      = 60;
-static constexpr uint16_t kScanBurstIntervalMs    = 100;
-static constexpr uint32_t kScanBurstDurationMs    = 1200;
-static constexpr uint32_t kScanBurstMinIntervalMs = 5000;
 
 static          uint16_t     s_currentConnHandle = 0xFFFF;
 
@@ -297,14 +285,8 @@ class ControlServerCallbacks : public NimBLEServerCallbacks {
     freeSlot(handle);
 
     s_scanPausedForGattClient = false;
-    s_scanBurstRequested = false;
-    s_scanBurstActive    = false;
-    // Restore idle duty in case a burst left the higher-duty window/interval
-    // set, so the continuous post-disconnect scan doesn't run hot on coex.
-    NimBLEScan* scan = NimBLEDevice::getScan();
-    scan->setWindow(BLE_GAP_SCAN_WINDOW_MS);
-    scan->setInterval(BLE_GAP_ADV_INTERVAL_MS);
-    scan->start(BLE_GAP_SCAN_TIME_MS);
+    // Resume the continuous scan the connect paused.
+    NimBLEDevice::getScan()->start(0);
 
     s_clientConnected = false;
     s_homeModePageActive = false;
@@ -436,7 +418,12 @@ class BaseKnockoutCallback : public NimBLECharacteristicCallbacks {
 // ~15 KB and an ArduinoJson build peaks at ~3x that. Colors emit as 8
 // uppercase hex chars "RRGGBBWW" (the app also parses the legacy 4-int
 // array). Zero/idle values are omitted to keep the JSON compact.
-static std::string buildNearbyJson() {
+static inline void fnv1a(uint32_t& h, const void* data, size_t len) {
+  const uint8_t* p = static_cast<const uint8_t*>(data);
+  while (len--) { h ^= *p++; h *= 16777619u; }
+}
+
+static std::string buildNearbyJson(uint32_t& membershipHashOut) {
   auto lamps = lamp::lampRoster.getAll();
   // Sort by name for stable rendering.
   std::sort(lamps.begin(), lamps.end(),
@@ -444,25 +431,44 @@ static std::string buildNearbyJson() {
               return std::strcmp(a.name, b.name) < 0;
             });
   std::string out;
-  // Upper bound: ~208 B of fixed fields per entry plus worst-case 6 B per
-  // escaped name char, so the string never reallocs mid-build.
+  // Upper bound: ~240 B of fixed fields per entry (fwChannel added) plus
+  // worst-case 6 B per escaped name char, so the string never reallocs
+  // mid-build.
   size_t cap = 2;
-  for (const auto& p : lamps) cap += 208 + 6 * std::strlen(p.name);
+  for (const auto& p : lamps) cap += 240 + 6 * std::strlen(p.name);
   out.reserve(cap);
   out += '[';
-  char buf[72];
+  char buf[96];
   bool first = true;
+  const uint32_t now = millis();
+  uint32_t hash = 2166136261u;
   for (const auto& p : lamps) {
     if (!first) out += ',';
     first = false;
+    // Membership hash over the app-visible fields only. lastSeenMs and rssi
+    // freshen on every BLE adv (~30 Hz); folding them would churn the rev.
+    const uint8_t flags =
+        (p.lastSeenNearMs != 0 ? 1 : 0) | (p.lastSeenMeshMs != 0 ? 2 : 0) |
+        (lamp::isNearNow(p.lastSeenNearMs, now, LAMP_PRUNE_TIME_MS) ? 4 : 0) |
+        (p.hasMac ? 8 : 0) | (p.hasOtaSendingTo ? 16 : 0);
+    fnv1a(hash, p.name, std::strlen(p.name));
+    fnv1a(hash, &flags, 1);
+    if (p.hasMac) fnv1a(hash, p.mac, 6);
+    fnv1a(hash, &p.shadeColor, 4);
+    fnv1a(hash, &p.baseColor, 4);
+    fnv1a(hash, &p.firmwareVersion, sizeof(p.firmwareVersion));
+    fnv1a(hash, p.fwChannel, std::strlen(p.fwChannel));
+    fnv1a(hash, &p.otaState, 1);
+    if (p.hasOtaSendingTo) fnv1a(hash, p.otaSendingTo, 6);
     out += "{\"name\":\"";
     lamp::appendJsonEscaped(out, p.name);
     // Max of both transport timestamps is the canonical lastSeen.
     const uint32_t lastSeenMs = std::max(p.lastSeenNearMs, p.lastSeenMeshMs);
-    snprintf(buf, sizeof(buf), "\",\"lastSeenMs\":%lu,\"viaBle\":%s,\"viaEspNow\":%s",
+    snprintf(buf, sizeof(buf), "\",\"lastSeenMs\":%lu,\"viaBle\":%s,\"viaEspNow\":%s,\"near\":%s",
              static_cast<unsigned long>(lastSeenMs),
              p.lastSeenNearMs != 0 ? "true" : "false",
-             p.lastSeenMeshMs != 0 ? "true" : "false");
+             p.lastSeenMeshMs != 0 ? "true" : "false",
+             lamp::isNearNow(p.lastSeenNearMs, now, LAMP_PRUNE_TIME_MS) ? "true" : "false");
     out += buf;
     if (p.hasMac) {
       out += ",\"lampId\":\"";
@@ -483,13 +489,23 @@ static std::string buildNearbyJson() {
                static_cast<unsigned long>(p.firmwareVersion));
       out += buf;
     }
+    snprintf(buf, sizeof(buf), ",\"fwChannel\":\"%s\"", p.fwChannel);
+    out += buf;
     if (p.otaState != 0) {
       snprintf(buf, sizeof(buf), ",\"otaState\":%u", p.otaState);
       out += buf;
     }
+    if (p.hasOtaSendingTo) {
+      char macBuf[18];
+      lamp::formatBdAddr(p.otaSendingTo, macBuf);
+      out += ",\"otaSendingTo\":\"";
+      out += macBuf;
+      out += '"';
+    }
     out += '}';
   }
   out += ']';
+  membershipHashOut = hash;
   return out;
 }
 
@@ -501,6 +517,11 @@ static SemaphoreHandle_t nearbyCacheMutex() {
   return m;
 }
 static std::string s_nearbyJsonCache = "[]";
+
+// Bumped by refreshNearbyJsonCache when the app-visible roster fields change
+// (excluding the ~30 Hz rssi/lastSeen churn). Surfaced in every stateNotify
+// payload so the app re-reads nearby on a push instead of polling.
+static uint32_t s_nearbyRev = 0;
 
 void copyNearbyJson(std::string& out) {
   xSemaphoreTake(nearbyCacheMutex(), portMAX_DELAY);
@@ -514,16 +535,29 @@ void copyNearbyJson(std::string& out) {
 static void refreshNearbyJsonCache() {
   static uint32_t builtGen    = 0;
   static uint32_t lastBuildMs = 0;
+  static uint32_t lastHash    = 0;
+  static bool     seeded      = false;
   const uint32_t gen = lamp::lampRoster.generation();
   if (gen == builtGen) return;
   const uint32_t now = millis();
   if (now - lastBuildMs < 1000) return;
-  std::string json = buildNearbyJson();
+  uint32_t hash = 0;
+  std::string json = buildNearbyJson(hash);
   xSemaphoreTake(nearbyCacheMutex(), portMAX_DELAY);
   s_nearbyJsonCache.swap(json);
   xSemaphoreGive(nearbyCacheMutex());
   builtGen    = gen;
   lastBuildMs = now;
+  if (!seeded) {
+    seeded   = true;
+    lastHash = hash;
+    return;
+  }
+  if (hash != lastHash) {
+    lastHash = hash;
+    ++s_nearbyRev;
+    notifyStateChange();
+  }
 }
 
 // Auth-gated on read and write: the disposition map reveals peer
@@ -561,13 +595,13 @@ class WispStatusCallback : public NimBLECharacteristicCallbacks {
       c->setValue("");
       return;
     }
-    c->setValue(lamp::lampRoster.getWispStatusReadJson(true));
+    c->setValue(lamp::lampRoster.getWispStatusReadJson());
   }
 };
 
 void notifyWispStatus() {
   if (!s_wispStatusChar) return;
-  auto json = lamp::lampRoster.getWispStatusReadJson(false);
+  auto json = lamp::lampRoster.getWispStatusReadJson();
 #ifdef LAMP_DEBUG
   const bool sawCB = json.find("\"controllingBase\":true") != std::string::npos;
   const bool sawCS = json.find("\"controllingShade\":true") != std::string::npos;
@@ -720,7 +754,9 @@ struct SectionEntry {
 // its own mutex. exprcat is immutable (built once), no race.
 // wispclaims is binary, not JSON: the full accumulated fleet blob exceeds
 // the 512-byte ATT ceiling that caps the CHAR_WISP_CLAIMS direct read.
-static const std::array<SectionEntry, 8> kSections = {{
+// wisppalette is binary too (raw RGBW): a dedicated read path so the
+// frequent palette-less status NOTIFY can't clobber it.
+static const std::array<SectionEntry, 9> kSections = {{
   {"lamp",    [](std::string& out) { s_config->lampSectionJsonCached(out); }},
   {"base",    [](std::string& out) { s_config->baseSectionJsonCached(out); }},
   {"shade",   [](std::string& out) { s_config->shadeSectionJsonCached(out); }},
@@ -734,6 +770,11 @@ static const std::array<SectionEntry, 8> kSections = {{
                                                           millis());
     out.assign(reinterpret_cast<const char*>(buf), n);
   }},
+  {"wisppalette", [](std::string& out) {
+    static uint8_t buf[200];
+    const size_t n = lamp::lampRoster.copyManualPaletteBlob(buf, sizeof(buf));
+    out.assign(reinterpret_cast<const char*>(buf), n);
+  }},
 }};
 
 class PageCtrlCallback : public NimBLECharacteristicCallbacks {
@@ -742,10 +783,6 @@ class PageCtrlCallback : public NimBLECharacteristicCallbacks {
     if (!isAuthed(handle)) return;
     const std::string name = c->getValue();
     if (name.empty() || name.size() > 16) return;
-
-    // App polls the nearby section ~every 5 s while on Social; arm a scan
-    // burst so BLE-only legacy peers surface without a periodic scan.
-    if (name == "nearby") s_scanBurstRequested = true;
 
     ConnSlot* slot = findSlot(handle);
     if (!slot) return;
@@ -917,43 +954,17 @@ class FwChunkCallback : public NimBLECharacteristicCallbacks {
   }
 };
 
-// Core 1. Starts one short high-duty scan burst per armed nearby-read,
-// rate-limited to kScanBurstMinIntervalMs. onScanEnd will not auto-restart
-// (isScanPaused() stays true while connected), so the burst is one-shot;
-// onDisconnect restores idle duty.
-static void serviceScanBurst() {
-  const uint32_t now = millis();
-  if (!s_clientConnected || s_otaRadioPaused) {
-    s_scanBurstActive    = false;
-    s_scanBurstRequested = false;
-    return;
-  }
-  if (s_scanBurstActive) {
-    if (now - s_lastScanBurstMs >= kScanBurstDurationMs) s_scanBurstActive = false;
-    return;
-  }
-  if (!scanBurstReady(s_scanBurstRequested, s_scanBurstActive, s_clientConnected,
-                      now, s_lastScanBurstMs, kScanBurstMinIntervalMs)) {
-    return;
-  }
-  s_scanBurstRequested = false;
-  s_scanBurstActive    = true;
-  s_lastScanBurstMs    = now;
-  NimBLEScan* scan = NimBLEDevice::getScan();
-  scan->setWindow(kScanBurstWindowMs);
-  scan->setInterval(kScanBurstIntervalMs);
-  scan->start(kScanBurstDurationMs);
-#ifdef LAMP_DEBUG
-  Serial.printf("[ble_control] scan burst %ums window=%u interval=%u\n",
-                (unsigned)kScanBurstDurationMs, (unsigned)kScanBurstWindowMs,
-                (unsigned)kScanBurstIntervalMs);
-#endif
-}
-
 void tick() {
   if (!s_running || !s_config) return;
 
-  serviceScanBurst();
+  // Continuous scan means onScanEnd rarely fires, so prune here at ~1 Hz to
+  // age out silent roster peers.
+  static uint32_t s_lastPruneMs = 0;
+  const uint32_t nowMs = millis();
+  if (nowMs - s_lastPruneMs >= 1000) {
+    s_lastPruneMs = nowMs;
+    lamp::lampRoster.prune(LAMP_PRUNE_TIME_MS);
+  }
 
   // Proactively rebuild dirty section caches on Core 1 so the BLE host
   // task (Core 0) rarely serialises JSON inside a NimBLE callback.
@@ -976,29 +987,24 @@ void setGreetingStateProvider(std::function<lamp::GreetingState()> fn) {
 void notifyStateChange() {
   if (!s_stateNotify) return;
   const bool preview = ::expressionManager.isAnyTestActive();
-  std::string payload;
+  std::string payload = "{\"previewActive\":";
+  payload += preview ? "true" : "false";
   if (s_greetingStateProvider) {
     const lamp::GreetingState gs = s_greetingStateProvider();
     if (gs.active) {
-      payload = "{\"previewActive\":";
-      payload += preview ? "true" : "false";
       payload += ",\"greeting\":{\"active\":true,\"peer\":\"";
       lamp::appendJsonEscaped(payload, gs.peerLampId.c_str());
       payload += "\",\"kind\":\"";
       lamp::appendJsonEscaped(payload, gs.kind.c_str());
-      payload += "\"}}";
+      payload += "\"}";
     } else {
-      char buf[64];
-      snprintf(buf, sizeof(buf),
-               "{\"previewActive\":%s,\"greeting\":{\"active\":false}}",
-               preview ? "true" : "false");
-      payload = buf;
+      payload += ",\"greeting\":{\"active\":false}";
     }
-  } else {
-    char buf[32];
-    snprintf(buf, sizeof(buf), "{\"previewActive\":%s}", preview ? "true" : "false");
-    payload = buf;
   }
+  char buf[32];
+  snprintf(buf, sizeof(buf), ",\"nearbyRev\":%lu}",
+           static_cast<unsigned long>(s_nearbyRev));
+  payload += buf;
   s_stateNotify->setValue(payload);
   s_stateNotify->notify();
 }
@@ -1256,13 +1262,29 @@ void disconnectGattClientsForOta() {
 #endif
 }
 
+bool deinitForWebapp() {
+  if (s_bleDown || !NimBLEDevice::isInitialized()) return false;
+  lamp::logHeap("ble-pre");
+  disconnectGattClientsForOta();
+  NimBLEDevice::getScan()->stop();
+  stop();
+  NimBLEDevice::deinit(true);
+  esp_bt_controller_disable();
+  esp_bt_controller_deinit();
+  s_bleDown = true;
+  lamp::logHeap("ble-post");
+  return true;
+}
+
+bool isDownForWebapp() { return s_bleDown; }
+
 void resumeRadioAfterOta() {
   if (!s_otaRadioPaused) return;
   s_otaRadioPaused = false;
   // Two independent scan-pause flags: OTA and active GATT client. Only
   // restart if the client flag isn't also holding the scan down.
   if (!s_scanPausedForGattClient) {
-    NimBLEDevice::getScan()->start(BLE_GAP_SCAN_TIME_MS);
+    NimBLEDevice::getScan()->start(0);
   }
   NimBLEDevice::getAdvertising()->start();
 #ifdef LAMP_DEBUG

@@ -128,6 +128,14 @@ class Config {
   void setLampId(const std::string& lampId);
   const std::string& lampId() const { return lampId_; }
 
+  // This lamp's own OTA state (kOtaStateIdle/Sending/Receiving from
+  // lamp_protocol), mirrored into the lamp section so the connected app can
+  // show the same pill it shows for mesh peers. `targetMac` is the
+  // distribution receiver's mesh MAC while sending (nullptr otherwise);
+  // mirrored into the lamp section's `otaSendingTo`, same as the nearby
+  // section's per-peer field. No-op unless state or target changed.
+  void setLampOtaState(uint8_t s, const uint8_t* targetMac = nullptr);
+
   // Per-section serializers, each returning a String of just the JSON for
   // that section. Internal helpers backing the *JsonCached() accessors
   // below; the BLE onRead path always goes through the cache.
@@ -230,6 +238,9 @@ class Config {
   std::string lampId_;
   uint16_t drawIdleMa_ = 0;
   uint16_t drawFullMa_ = 0;
+  uint8_t lampOtaState_ = 0;
+  bool lampHasOtaSendingTo_ = false;
+  uint8_t lampOtaSendingTo_[6] = {0};
   bool lampSectionDirty_ = true;
   bool baseSectionDirty_ = true;
   bool shadeSectionDirty_ = true;

@@ -91,13 +91,9 @@ void fromJson(JsonObject root, LampSettings& lamp, BaseSettings& base,
   }
 
   JsonObject baseNode = root["base"];
-  base.ac = baseNode["ac"] | 0;
   base.byteOrder = std::string(baseNode["byteOrder"] | "");
   parseSegments(baseNode, base.segments, kBaseDefaultColor);
   clampSumPx(base.segments);
-  if (base.ac >= base.broadcastColors().size()) {
-    base.ac = 0;
-  }
   // Keep knockoutPixels in sync with the active pixel count. Drops stale
   // entries when px shrinks and 100-fills ("no knockout") any slots when px
   // grows. The input loop below then overwrites slots 0..sumPx-1 from JSON.
@@ -187,12 +183,6 @@ void fromJson(JsonObject root, LampSettings& lamp, BaseSettings& base,
       homeMode.disabledExpressionTypes = {"glitchy"};
     }
   }
-
-  // downstream code dereferences broadcastColors()[ac] / [0]; parseSegments
-  // guarantees ≥1 segment with ≥1 color, so no empty-vector guard is needed.
-  if (base.ac >= base.broadcastColors().size()) {
-    base.ac = 0;
-  }
 }
 
 void toJson(JsonObject root, const LampSettings& lamp, const BaseSettings& base,
@@ -211,7 +201,6 @@ void toJson(JsonObject root, const LampSettings& lamp, const BaseSettings& base,
   lampNode["brightnessCeiling"] = lamp.brightnessCeiling;
   lampNode["socialMode"] = static_cast<uint8_t>(lamp.socialMode);
   JsonObject baseNode = root["base"].to<JsonObject>();
-  baseNode["ac"] = base.ac;
   if (!base.byteOrder.empty()) baseNode["byteOrder"] = base.byteOrder;
   baseNode["colorsEditable"] = base.colorsEditable;
   writeSegments(baseNode, base.segments);

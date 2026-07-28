@@ -1,12 +1,14 @@
 #include "config.hpp"
 
 #include <ArduinoJson.h>
+#include <cstring>
 #include <new>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
 #include "config/config_codec.hpp"
 #include "core/lamp.hpp"
+#include "util/bd_addr.hpp"
 #include "util/color.hpp"
 #include "version.hpp"
 
@@ -78,7 +80,18 @@ bool Config::persistConfig(const char* via) {
   if (!store_) return false;
   JsonDocument doc = asJsonDocument();
   String out;
-  serializeJson(doc, out);
+  // Reserve the exact serialized size up front; growing by doubling would
+  // momentarily need ~2x the final size contiguous on a heap this fragmented,
+  // tipping into bad_alloc.
+  out.reserve(measureJson(doc));
+  try {
+    serializeJson(doc, out);
+  } catch (const std::bad_alloc&) {
+#ifdef LAMP_DEBUG
+    Serial.println("[nvs] persistConfig OOM during serialize");
+#endif
+    return false;
+  }
   // A store write returns 0 bytes when NVS is full or the partition is
   // corrupt; the caller decides what to do (callers today just move on;
   // expression edits stay in RAM and the next attempt may succeed).
@@ -117,6 +130,18 @@ std::string Config::loadLampType() {
 void Config::setLampId(const std::string& lampId) {
   if (lampId == lampId_) return;
   lampId_ = lampId;
+  invalidateLampSection();
+}
+
+void Config::setLampOtaState(uint8_t s, const uint8_t* targetMac) {
+  const bool hasTarget = targetMac != nullptr;
+  if (s == lampOtaState_ && hasTarget == lampHasOtaSendingTo_ &&
+      (!hasTarget || std::memcmp(targetMac, lampOtaSendingTo_, 6) == 0)) {
+    return;
+  }
+  lampOtaState_ = s;
+  lampHasOtaSendingTo_ = hasTarget;
+  if (hasTarget) std::memcpy(lampOtaSendingTo_, targetMac, 6);
   invalidateLampSection();
 }
 
@@ -163,6 +188,7 @@ String Config::asLampJson() {
   doc["hasPassword"] = !lamp.password.empty();
   doc["advancedEnabled"] = lamp.advancedEnabled;
   doc["webappEnabled"] = lamp.webappEnabled;
+  doc["apBootMinutes"] = lamp.apBootMinutes;
   doc["brightnessCeiling"] = lamp.brightnessCeiling;
   doc["socialMode"] = static_cast<uint8_t>(lamp.socialMode);
   // Firmware identity (packed semver + release channel string). Constant at
@@ -175,6 +201,12 @@ String Config::asLampJson() {
   doc["lampType"] = lamp.lampType;
   if (!lampId_.empty()) {
     doc["lampId"] = lampId_;
+  }
+  if (lampOtaState_ != 0) doc["otaState"] = lampOtaState_;
+  if (lampHasOtaSendingTo_) {
+    char macBuf[18];
+    formatBdAddr(lampOtaSendingTo_, macBuf);
+    doc["otaSendingTo"] = macBuf;
   }
   String out;
   serializeJson(doc, out);
@@ -202,7 +234,6 @@ static void emitRoleTopology(JsonDocument& doc,
 String Config::asBaseJson() {
   JsonDocument doc;
   emitRoleTopology(doc, base.segments);
-  doc["ac"] = base.ac;
   doc["byteOrder"] = base.byteOrder;
   // Knockout: positional uint8 array, one entry per pixel.
   //   wire shape: "knockout":[100,100,6,9,...] (length = knockoutPixels.size())

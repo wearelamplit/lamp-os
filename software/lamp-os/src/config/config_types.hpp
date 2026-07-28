@@ -104,16 +104,14 @@ class ShadeSettings {
 
 /**
  * Base role: an ordered list of named segments, plus base-only knockout
- *        profile + active-color index.
+ *        profile.
  * @property knockoutPixels - per-pixel brightness profile across the whole role
- * @property ac - the preferred color index in the broadcast segment's gradient
  * @property byteOrder - NeoPixel wire byte order; see ShadeSettings.
  */
 class BaseSettings {
  public:
   std::vector<SegmentSettings> segments = {{"Base", 0, {kBaseDefaultColor}}};
   std::vector<uint8_t> knockoutPixels = std::vector<uint8_t>(50, (uint8_t)100);
-  uint8_t ac = 0;
   std::string byteOrder = "";
   bool colorsEditable = true;  // Emitted in asBaseJson; app hides color picker when false.
 

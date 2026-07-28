@@ -5,6 +5,7 @@
 
 #include <Arduino.h>
 #include <NimBLEDevice.h>
+#include <esp_mac.h>
 
 // arduino-esp32 3.3.9 defines `btInUse()` as a weak alias for an internal
 // `_btInUse_default`. The framework's startup code in esp32-hal-misc.c uses
@@ -131,11 +132,14 @@ class ScanCallbacks : public NimBLEScanCallbacks {
   };
 
   void onScanEnd(const NimBLEScanResults &results, int reason) override {
-    lampRoster.prune(LAMP_PRUNE_TIME_MS);
-    // Skip restart while a phone is using the GATT control service.
-    // ble_control resumes the scan on disconnect.
+    // Skip restart while a phone holds the GATT control service; ble_control
+    // resumes the scan on disconnect. The roster prune runs on the loop tick.
     if (!ble_control::isScanPaused()) {
-      NimBLEDevice::getScan()->start(BLE_GAP_SCAN_TIME_MS);
+      // Restart the continuous passive scan at its 1.5% duty window/interval.
+      NimBLEScan* scan = NimBLEDevice::getScan();
+      scan->setWindow(BLE_GAP_SCAN_WINDOW_MS);
+      scan->setInterval(BLE_GAP_ADV_INTERVAL_MS);
+      scan->start(0);
     }
   }
 } scanCallbacks;
@@ -168,8 +172,11 @@ void BluetoothComponent::begin(std::string name, Color inBaseColor,
   pScan->setScanCallbacks(&scanCallbacks);
   pScan->setInterval(BLE_GAP_ADV_INTERVAL_MS);
   pScan->setWindow(BLE_GAP_SCAN_WINDOW_MS);
-  pScan->setActiveScan(true);
-  pScan->start(BLE_GAP_SCAN_TIME_MS);
+  // Passive scan: the lamp adv carries its full payload in the primary packet
+  // (scan-response off), so an active SCAN_REQ is wasted TX that also flips a
+  // listen window into a transmit window under BLE/ESP-NOW coex.
+  pScan->setActiveScan(false);
+  pScan->start(0);  // continuous 1.5% duty; onScanEnd/onDisconnect resume it
 
   NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
   s_advertisementName = name;
@@ -198,7 +205,14 @@ void BluetoothComponent::begin(std::string name, Color inBaseColor,
   applyAdvertisementPayload(pAdvertising, s_advertisementName,
                             s_advertisementData);
   pAdvertising->setConnectableMode(BLE_GAP_CONN_MODE_UND);
-  pAdvertising->setMinInterval(BLE_ADVERTISING_INTERVAL_MIN);
+  // MAC-seeded phase offset within the interval band so a fleet powering on
+  // together doesn't advertise in lockstep. Max stays <= INTERVAL_MAX.
+  uint8_t mac[6] = {0};
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
+  const uint16_t advJitter =
+      ((uint16_t(mac[4]) << 8) | mac[5]) %
+      (BLE_ADVERTISING_INTERVAL_MAX - BLE_ADVERTISING_INTERVAL_MIN + 1);
+  pAdvertising->setMinInterval(BLE_ADVERTISING_INTERVAL_MIN + advJitter);
   pAdvertising->setMaxInterval(BLE_ADVERTISING_INTERVAL_MAX);
   // Advertising start is deferred to activateGattServices(); NimBLE's
   // GATT database is frozen once advertising starts.
@@ -210,8 +224,8 @@ void BluetoothComponent::begin(std::string name, Color inBaseColor,
 // setAdvertisementData() faster than the advertising interval
 // corrupts the host task's pending buffer and panics the lamp
 // with `_invalid_pc_placeholder`.
-// 250ms = 2× the slow end of BLE_ADVERTISING_INTERVAL_MAX (96 * 0.625ms
-// ≈ 60ms) with plenty of safety margin.
+// 250ms sits just above BLE_ADVERTISING_INTERVAL_MAX (320 * 0.625ms = 200ms)
+// so a flush never outruns an adv event.
 static constexpr uint32_t ADV_FLUSH_MIN_GAP_MS = 250;
 
 void BluetoothComponent::setAdvertisedColors(Color base, Color shade) {

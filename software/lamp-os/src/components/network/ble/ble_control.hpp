@@ -129,6 +129,11 @@ void start(lamp::Config* config);
 void stop();
 bool isRunning();
 
+// Free the BLE stack's heap for the Web Config softAP serve. One-way; a caller
+// reboots to restore BLE. Returns true if BLE was up and is now down.
+bool deinitForWebapp();
+bool isDownForWebapp();
+
 // Copies the cached nearby-lamps JSON out. Safe to call from any task;
 // never serializes on the caller's thread.
 void copyNearbyJson(std::string& out);

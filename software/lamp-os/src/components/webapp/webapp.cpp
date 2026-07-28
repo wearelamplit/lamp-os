@@ -10,7 +10,6 @@
 #include <ESPmDNS.h>
 #include <SPIFFS.h>
 #include <WiFi.h>
-#include <esp_system.h>
 
 #include <algorithm>
 #include <atomic>
@@ -248,6 +247,9 @@ static void onApStaDisconnected(arduino_event_id_t) { s_pendingServerStop = true
 // loop task, never the WiFi event task. Idempotent.
 static void startServer() {
   if (s_serverUp) return;
+  if (ble_control::deinitForWebapp()) {
+    s_deadlineMs = millis() + LAMP_WEBAPP_IDLE_TIMEOUT_MS;
+  }
 
   // Never auto-format: an FS-OTA'd image that mounts inconsistent must not be
   // silently wiped. A genuinely blank/corrupt partition just yields no UI
@@ -353,8 +355,13 @@ void tick() {
   const uint32_t now = millis();
 
   if (s_pendingServerStart.exchange(false)) startServer();
-  if (s_pendingServerStop.exchange(false) && WiFi.softAPgetStationNum() == 0) {
-    bumpDeadline();  // last station left; grace before reboot, survives a rejoin
+  if (s_pendingServerStop.exchange(false) && WiFi.softAPgetStationNum() == 0 &&
+      ble_control::isDownForWebapp()) {
+    s_rebootAtMs = now;  // station left -> reboot restores BLE
+  }
+  if (s_rebootAtMs == 0 &&
+      webappShouldRestoreBle(now, s_deadlineMs, ble_control::isDownForWebapp())) {
+    s_rebootAtMs = now;  // idle (browser closed) -> reboot
   }
 
   if (s_rebootAtMs != 0 && static_cast<int32_t>(now - s_rebootAtMs) >= 0) {

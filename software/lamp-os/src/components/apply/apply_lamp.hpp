@@ -47,11 +47,12 @@ inline void lampLocal(JsonObject obj, uint8_t maxBrightness) {
   if (obj["setup"].is<bool>()) {
     ::config.lamp.setup = obj["setup"].as<bool>();
   }
-  // First adoption stamps a finite AP window; the factory default is forever.
-  // Skip the stamp when the blob carries an explicit apBootMinutes, so the
-  // value applied on the persisted-config reload is preserved.
-  if (!wasSetup && ::config.lamp.setup && !obj["apBootMinutes"].is<int>()) {
-    ::config.lamp.apBootMinutes = 2;
+  // First adoption (setup false->true): claimed over BLE, so the setup
+  // hotspot is redundant -> default Web Config off; stamp a finite AP window
+  // for if it's later switched on. An explicit claim-blob value wins.
+  if (!wasSetup && ::config.lamp.setup) {
+    if (!obj["apBootMinutes"].is<int>()) ::config.lamp.apBootMinutes = 2;
+    if (!obj["webappEnabled"].is<bool>()) ::config.lamp.webappEnabled = false;
   }
   if (obj["advancedEnabled"].is<bool>()) {
     ::config.lamp.advancedEnabled = obj["advancedEnabled"].as<bool>();
