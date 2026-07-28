@@ -25,7 +25,7 @@ void PulseExpression::configureFromParameters(const std::map<std::string, uint32
   const uint16_t span = zone_.size() > 0 ? zone_.size() : window;
   pulseSpeedMs = std::max<uint32_t>(100, (pulseSpeed * kMsPerSecond) / span);
 
-  const uint16_t sizePercent = static_cast<uint16_t>(getParam(parameters, "size", 40));
+  const uint16_t sizePercent = pulseSizePercentFromStep(getParam(parameters, "size", 4));
   pulseWidth = pulseWidthFromPercent(sizePercent, span);
   pulseColor = firstColorOr(kSafeFallbackColor);
 

@@ -122,6 +122,14 @@ inline uint16_t pulseWidthFromPercent(uint16_t sizePercent, uint16_t zoneSize) {
   return static_cast<uint16_t>(std::max<long>(3, r));
 }
 
+// Pulse "Size" is a relative 1..10 step mapped linearly onto width percent
+// 25..100 (step 4 = 50%). Out-of-range folds to step 4: legacy pulses stored a
+// raw percent, which we default rather than migrate.
+inline uint16_t pulseSizePercentFromStep(uint32_t step) {
+  if (step < 1 || step > 10) step = 4;
+  return static_cast<uint16_t>(std::lround(25.0 + (step - 1) * (75.0 / 9.0)));
+}
+
 // Fill order[0..n-1] with a random permutation of 0..n-1 (Fisher-Yates).
 // `rng` needs a `range(lo, hi)` returning an inclusive uniform draw.
 template <typename Order, typename Rng>

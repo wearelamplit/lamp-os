@@ -110,6 +110,9 @@ Added / Fixed / Changed, not every commit.
   with the wisp fade on release.
 - **Pulse can sweep as slowly as 20 s** (was 10 s) — the Pulse speed slider's
   slow end doubles for a longer, gentler wave.
+- **Pulse Size is a Small…Large 1–10 scale** (floor 25%, default 50%),
+  replacing the confusing percentage where 100% was only half the strip.
+  Old or absent values fall to the default.
 - **Removed the wisp claim-range knob.** RSSI at close range is too noisy to be
   a distance proxy, so the Close/Camp/Stage/Wide floor was misleading; the wisp
   now claims any lamp it directly hears (inter-wisp arbitration unchanged).

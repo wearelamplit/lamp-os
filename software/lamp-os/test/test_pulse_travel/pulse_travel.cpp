@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdint>
 
+#include "expressions/primitives.hpp"
 #include "util/easing.hpp"
 
 namespace test {
@@ -270,8 +271,36 @@ void test_continuous_live_never_ends() {
   }
 }
 
+void test_size_step_maps_to_width_percent() {
+  // 1..10 folds linearly onto 25..100%, step 4 = 50%.
+  TEST_ASSERT_EQUAL_UINT16(25, lamp::pulseSizePercentFromStep(1));
+  TEST_ASSERT_EQUAL_UINT16(50, lamp::pulseSizePercentFromStep(4));
+  TEST_ASSERT_EQUAL_UINT16(100, lamp::pulseSizePercentFromStep(10));
+
+  const uint16_t zone = 100;
+  TEST_ASSERT_EQUAL_UINT16(13, lamp::pulseWidthFromPercent(lamp::pulseSizePercentFromStep(1), zone));
+  TEST_ASSERT_EQUAL_UINT16(25, lamp::pulseWidthFromPercent(lamp::pulseSizePercentFromStep(4), zone));
+  TEST_ASSERT_EQUAL_UINT16(50, lamp::pulseWidthFromPercent(lamp::pulseSizePercentFromStep(10), zone));
+}
+
+void test_size_out_of_range_folds_to_default_step() {
+  // 0 (absent), 40 (legacy raw percent), 11 (over max) all land on step 4 = 50%.
+  const uint16_t step4 = lamp::pulseSizePercentFromStep(4);
+  TEST_ASSERT_EQUAL_UINT16(step4, lamp::pulseSizePercentFromStep(0));
+  TEST_ASSERT_EQUAL_UINT16(step4, lamp::pulseSizePercentFromStep(40));
+  TEST_ASSERT_EQUAL_UINT16(step4, lamp::pulseSizePercentFromStep(11));
+
+  const uint16_t zone = 100;
+  const uint16_t w4 = lamp::pulseWidthFromPercent(step4, zone);
+  TEST_ASSERT_EQUAL_UINT16(w4, lamp::pulseWidthFromPercent(lamp::pulseSizePercentFromStep(0), zone));
+  TEST_ASSERT_EQUAL_UINT16(w4, lamp::pulseWidthFromPercent(lamp::pulseSizePercentFromStep(40), zone));
+  TEST_ASSERT_EQUAL_UINT16(w4, lamp::pulseWidthFromPercent(lamp::pulseSizePercentFromStep(11), zone));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
+  RUN_TEST(test_size_step_maps_to_width_percent);
+  RUN_TEST(test_size_out_of_range_folds_to_default_step);
   RUN_TEST(test_linear_travel_matches_legacy);
   RUN_TEST(test_trigger_mode_ends_on_exit);
   RUN_TEST(test_continuous_first_entrance_starts_off_strip);

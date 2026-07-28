@@ -263,16 +263,19 @@ void test_pulse_zone_optional() {
   TEST_ASSERT_TRUE(zone["optional"].as<bool>());
 }
 
-void test_pulse_size_is_percent() {
+void test_pulse_size_is_small_large_scale() {
   JsonObject e = findById("pulse");
   for (JsonObject p : e["params"].as<JsonArray>()) {
     if (std::string(p["key"].as<const char*>()) == "size") {
-      TEST_ASSERT_EQUAL_STRING("%", p["unit"].as<const char*>());
-      TEST_ASSERT_EQUAL_INT(5, p["min"].as<int>());
+      TEST_ASSERT_TRUE(p["unit"].isNull());
+      TEST_ASSERT_FALSE(p["invert"].as<bool>());
+      TEST_ASSERT_EQUAL_INT(1, p["min"].as<int>());
       auto maxVal = p["max"];
       TEST_ASSERT_FALSE(maxVal.is<JsonObject>());
-      TEST_ASSERT_EQUAL_INT(100, maxVal.as<int>());
-      TEST_ASSERT_EQUAL_INT(40, p["default"].as<int>());
+      TEST_ASSERT_EQUAL_INT(10, maxVal.as<int>());
+      TEST_ASSERT_EQUAL_INT(4, p["default"].as<int>());
+      TEST_ASSERT_EQUAL_STRING("small", p["leftLabel"].as<const char*>());
+      TEST_ASSERT_EQUAL_STRING("large", p["rightLabel"].as<const char*>());
       return;
     }
   }
@@ -405,7 +408,7 @@ int main(int, char**) {
   RUN_TEST(test_spotty_has_no_interval);
   RUN_TEST(test_spotty_count_and_size_caps);
   RUN_TEST(test_pulse_zone_optional);
-  RUN_TEST(test_pulse_size_is_percent);
+  RUN_TEST(test_pulse_size_is_small_large_scale);
   RUN_TEST(test_spotty_zone_optional);
   RUN_TEST(test_breathing_zone_optional);
   RUN_TEST(test_pulse_speed_invert_and_labels);
