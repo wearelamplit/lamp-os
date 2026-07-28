@@ -5,6 +5,7 @@
 #include <ArduinoJson.h>
 
 #include <cstring>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -76,8 +77,7 @@ void Lamp::drainEditSession() {
   pendingEditSession = -1;
   const uint8_t surface = static_cast<uint8_t>(packed >> 1);
   const bool open = (packed & 0x01) != 0;
-  if (surface & 0x01) lamp::overrides.base.setOperatorEditing(open);
-  if (surface & 0x02) lamp::overrides.shade.setOperatorEditing(open);
+  lamp::overrides.setSurfacePreview(surface, open);
 #ifdef LAMP_DEBUG
   Serial.printf("[drain] editSession surface=0x%02x %s\n",
                 surface, open ? "open" : "closed");
@@ -208,21 +208,32 @@ void Lamp::drainCommit() {
     } else {
       JsonDocument doc = config.asJsonDocument();
       String serialized;
-      serializeJson(doc, serialized);
-      uint32_t hash = fnv1aHash(serialized);
-      if (hash == lastPersistedHash) {
+      // Reserve up front; growing by doubling would momentarily need ~2x the
+      // final size contiguous on a heap this fragmented, tipping into
+      // bad_alloc.
+      serialized.reserve(measureJson(doc));
+      try {
+        serializeJson(doc, serialized);
+        uint32_t hash = fnv1aHash(serialized);
+        if (hash == lastPersistedHash) {
 #ifdef LAMP_DEBUG
-        Serial.println("[loop] commit drain: hash-dedup skip");
+          Serial.println("[loop] commit drain: hash-dedup skip");
 #endif
-        commitDirty = false;
-      } else {
-        bool persisted = config.persistConfig("commit");
-        if (persisted) {
-          lastPersistedHash = hash;
-          config.invalidateAllSections();
           commitDirty = false;
+        } else {
+          bool persisted = config.persistConfig("commit");
+          if (persisted) {
+            lastPersistedHash = hash;
+            config.invalidateAllSections();
+            commitDirty = false;
+          }
+          // Persist failure leaves commitDirty set; next tick retries.
         }
-        // Persist failure leaves commitDirty set; next tick retries.
+      } catch (const std::bad_alloc&) {
+#ifdef LAMP_DEBUG
+        Serial.println("[loop] commit drain: OOM during dedup hash, deferred");
+#endif
+        // commitDirty stays set; next tick retries.
       }
     }
   }
@@ -387,90 +398,6 @@ void Lamp::drainRemoteOp() {
   }
 }
 
-// Pin wisp identity before apply() so the first paint-triggered
-// notifyWispStatus carries non-empty status.
-void Lamp::drainOverrideColors() {
-  {
-    lamp::PendingOverrideColors cmd;
-    if (lamp::pendingSlots.overrideColors.drain(pendingMux, cmd)) {
-#ifdef LAMP_DEBUG
-      Serial.printf("[loop] drain overrideColors surface=0x%02X n=%u fadeMs=%u\n",
-                    (unsigned)cmd.surface, (unsigned)cmd.numColors,
-                    (unsigned)cmd.fadeDurationMs);
-#endif
-      // OTA quiet mode: compositor owns the display for the progress indicator;
-      // drop paint frames to avoid competing with it.
-      if (lamp::ota_quiet_mode::isQuiet()) {
-#ifdef LAMP_DEBUG
-        Serial.printf("[loop] drop overrideColors (ota quiet)\n");
-#endif
-        return;
-      }
-      // Cache the wisp MAC before apply() so the transition callback's
-      // notifyWispStatus sees non-empty status immediately.
-      if (cmd.sourceKind == lamp_protocol::OverrideSource::Wisp) {
-        lamp::lampRoster.cacheWispMacFromPaint(cmd.sourceMac);
-      }
-      // BaseAndShade: colors[0] to base, colors[1] to shade.
-      // If numColors < 2 only base is updated.
-      if (cmd.surface == lamp_protocol::OverrideSurface::BaseAndShade) {
-        lamp::overrides.base.apply(cmd.sourceMac, cmd.sourceKind,
-                                &cmd.colors[0], /*numColors=*/1,
-                                cmd.fadeDurationMs);
-        if (cmd.numColors >= 2) {
-          lamp::overrides.shade.apply(cmd.sourceMac, cmd.sourceKind,
-                                   &cmd.colors[1], /*numColors=*/1,
-                                   cmd.fadeDurationMs);
-        }
-      } else {
-        if (cmd.surface == lamp_protocol::OverrideSurface::Base) {
-          lamp::overrides.base.apply(cmd.sourceMac, cmd.sourceKind,
-                                  cmd.colors, cmd.numColors,
-                                  cmd.fadeDurationMs);
-        }
-        if (cmd.surface == lamp_protocol::OverrideSurface::Shade) {
-          lamp::overrides.shade.apply(cmd.sourceMac, cmd.sourceKind,
-                                   cmd.colors, cmd.numColors,
-                                   cmd.fadeDurationMs);
-        }
-      }
-      // Wisp paint is a combined Base+Shade frame, so both apply() above
-      // already refreshed their watchdogs; touching both also covers the
-      // single-surface frame path, keeping the other surface's prior wisp
-      // override from expiring.
-      if (cmd.sourceKind == lamp_protocol::OverrideSource::Wisp) {
-        const uint32_t now = millis();
-        lamp::overrides.base.touchApply(now);
-        lamp::overrides.shade.touchApply(now);
-      }
-    }
-  }
-}
-
-// Releases the transient override on the matching surface(s).
-void Lamp::drainRestoreColors() {
-  {
-    lamp::PendingRestoreColors cmd;
-    if (lamp::pendingSlots.restoreColors.drain(pendingMux, cmd)) {
-#ifdef LAMP_DEBUG
-      Serial.printf("[loop] drain restoreColors surface=0x%02X fadeMs=%u\n",
-                    (unsigned)cmd.surface, (unsigned)cmd.fadeDurationMs);
-#endif
-      // BaseAndShade: restore both surfaces.
-      if (cmd.surface == lamp_protocol::OverrideSurface::Base ||
-          cmd.surface == lamp_protocol::OverrideSurface::BaseAndShade) {
-        lamp::overrides.base.restore(cmd.sourceMac, cmd.sourceKind,
-                                  cmd.fadeDurationMs);
-      }
-      if (cmd.surface == lamp_protocol::OverrideSurface::Shade ||
-          cmd.surface == lamp_protocol::OverrideSurface::BaseAndShade) {
-        lamp::overrides.shade.restore(cmd.sourceMac, cmd.sourceKind,
-                                   cmd.fadeDurationMs);
-      }
-    }
-  }
-}
-
 // Transient brightness override.
 void Lamp::drainOverrideBrightness() {
   {
@@ -513,18 +440,6 @@ void Lamp::drainWispHello() {
           cmd.sourceMac, cmd.wispVersion, cmd.flags, cmd.paletteIdPrefix,
           cmd.carriedFwChannel, cmd.carriedFwVersion);
       if (presenceEdge) ble_control::notifyWispStatus();
-      // Hold the override while the painter is actively painting (PAINT_MODE)
-      // so a long drift fade doesn't trip the 60s watchdog; paint:off still
-      // reverts. Scoped to the painter's MAC so a second wisp's hello can't
-      // hold another wisp's paint.
-      if (cmd.flags & lamp_protocol::WISP_HELLO_FLAG_PAINT_MODE) {
-        const uint32_t nowMs = millis();
-        if (lamp::lampRoster.touchWispPainter(cmd.sourceMac, nowMs)) {
-          if (lamp::overrides.base.isWispActive()) lamp::overrides.base.touchApply(nowMs);
-          if (lamp::overrides.shade.isWispActive()) lamp::overrides.shade.touchApply(nowMs);
-          if (lamp::overrides.brightness.isWispActive()) lamp::overrides.brightness.touchApply(nowMs);
-        }
-      }
     }
   }
 }
@@ -559,34 +474,88 @@ void Lamp::drainWispClaim() {
   }
 }
 
-// Cache per-lamp paint colors for the app's painted-lamps preview.
-void Lamp::drainWispPaint() {
-  {
-    lamp::PendingWispPaint cmd;
-    if (lamp::pendingSlots.wispPaint.drain(pendingMux, cmd)) {
-      lamp::lampRoster.cacheWispPaint(cmd.sourceMac, cmd.entries, cmd.count,
-                                       millis());
-    }
+// Drive the wisp render + app indicator from MSG_WISP_STATE, the sole wisp
+// paint path. Gated to this lamp's display wisp so a rival's frame can't ease
+// it home. This lamp's own entry present -> eased base/shade targets + active;
+// a fresh frame that omits it (Off, or unclaimed) -> ease home now. Every
+// entry feeds the app's painted-lamps preview.
+void Lamp::drainWispState() {
+  // static: the 1440 B entry array is too big for the loop-task stack; this
+  // drain is the slot's only consumer and runs only on Core 1.
+  static lamp::PendingWispState cmd;
+  if (!lamp::pendingSlots.wispState.drain(pendingMux, cmd)) return;
+  if (lamp::ota_quiet_mode::isQuiet()) return;
+  const uint32_t now = millis();
+
+  uint8_t dispMac[6];
+  if (lamp::lampRoster.copyDisplayWispMac(dispMac, now) &&
+      std::memcmp(dispMac, cmd.sourceMac, 6) != 0) {
+    return;
   }
+  lamp::lampRoster.cacheWispPaint(cmd.sourceMac, cmd.entries, cmd.count, now);
+
+  // Yield the render to an open operator color edit; the preview above still
+  // updates.
+  if (lamp::overrides.base.operatorEditing() ||
+      lamp::overrides.shade.operatorEditing()) {
+    return;
+  }
+
+  const bool wasActive = compositor.wispActive();
+  const Color prevBase = compositor.wispStateBaseColor();
+  uint8_t selfMac[6];
+  meshLink.getMyMac(selfMac);
+  const uint8_t* e =
+      lamp_protocol::findWispStateEntry(cmd.entries, cmd.count, selfMac);
+  if (e) {
+    compositor.applyWispState(Color(e[6], e[7], e[8], 0),
+                              Color(e[9], e[10], e[11], 0), now);
+  } else {
+    compositor.clearWispState(now);
+  }
+  const bool active = compositor.wispActive();
+  if (active != wasActive ||
+      (active && !(compositor.wispStateBaseColor() == prevBase))) {
+    ble_control::notifyWispStatus();
+  }
+#ifdef LAMP_DEBUG
+  if (e) {
+    Serial.printf("[loop] drain wispState base=%u,%u,%u shade=%u,%u,%u\n",
+                  e[6], e[7], e[8], e[9], e[10], e[11]);
+  } else {
+    Serial.printf("[loop] drain wispState: not painted (ease home)\n");
+  }
+#endif
 }
 
-// Broadcasts wispOp as MSG_CONTROL_OP to reach the wisp. Not applied
-// locally; sendControlOp pre-records the seq so the echoed relay is deduped.
+// Unicasts wispOp as MSG_CONTROL_OP to the in-range display wisp's MAC.
+// Single-hop scope: no display wisp in range means nothing to send (no
+// broadcast fallback). Not applied locally; sendControlOpUnicast pre-records
+// the seq so an echoed relay is deduped.
 void Lamp::drainWispOp() {
   if (lamp::pendingSlots.wispOp.valid) {
     char buf[lamp::kPendingJsonOp + 1];
     uint16_t len = lamp::pendingSlots.wispOp.drain(pendingMux, buf);
-#ifdef LAMP_DEBUG
-    Serial.printf("[loop] drain wispOp len=%u\n", (unsigned)len);
-#endif
     if (len > 0) {
       // No OTA gate here: wispOps are low-rate config; they reach the wisp
       // even during OTA. applyRemoteOpRouted() still quiesces (gossip-relay,
       // much higher volume).
-      static const uint8_t kBroadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-      meshLink.sendControlOp(kBroadcastMac,
-                                 reinterpret_cast<const uint8_t*>(buf),
-                                 len);
+      uint8_t mac[6];
+      if (lamp::lampRoster.copyDisplayWispMac(mac, millis())) {
+#ifdef LAMP_DEBUG
+        Serial.printf("[loop] drain wispOp len=%u unicast->%02X:%02X:%02X:%02X:%02X:%02X\n",
+                      (unsigned)len, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+#endif
+        // ponytail: no per-peer ack tracker — app-layer confirm is the reachability surface; the send-cb FAIL log covers bench.
+        meshLink.sendControlOpUnicast(mac,
+                                      reinterpret_cast<const uint8_t*>(buf),
+                                      len);
+      } else {
+#ifdef LAMP_DEBUG
+        Serial.printf("[loop] drain wispOp len=%u: no display wisp in range\n",
+                      (unsigned)len);
+#endif
+      }
     }
   }
 }

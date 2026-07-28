@@ -174,36 +174,20 @@ void initBehaviors(lamp::Features features, lamp::Lamp& self) {
   // drive the right configurator's beginFade.
   lamp::overrides.base.bind(behaviorCtx, lamp_protocol::OverrideSurface::Base);
   lamp::overrides.shade.bind(behaviorCtx, lamp_protocol::OverrideSurface::Shade);
-  // Wisp-state change callbacks. Each surface's ColorOverride fires
-  // when wisp goes from un-controlling → controlling or vice versa
-  // (edge-triggered inside maybeNotifyWispStateChange). The Flutter
-  // app subscribes to CHAR_WISP_STATUS so a notify lands the moment
-  // a surface transitions; the indicator widget pops on / off without
-  // having to poll.
-  lamp::overrides.base.setOnWispStateChangeCallback(
-      []() { ble_control::notifyWispStatus(); });
-  lamp::overrides.shade.setOnWispStateChangeCallback(
-      []() { ble_control::notifyWispStatus(); });
-  // Provider that the CHAR_WISP_STATUS read merges into the JSON. Lives
-  // here so the ColorOverride globals stay out of the network layer.
+  // Provider that the CHAR_WISP_STATUS read merges into the JSON. Wisp control
+  // is driven by MSG_WISP_STATE, so both surfaces share the compositor's
+  // STATE-derived active flag + colors. drainWispState pushes the notify.
   lamp::lampRoster.setLampWispStateProvider([]() {
     lamp::LampRoster::LampWispState ws;
-    ws.controllingBase  = lamp::overrides.base.isWispActive();
-    ws.controllingShade = lamp::overrides.shade.isWispActive();
-    if (lamp::overrides.base.hasLastWispColor()) {
-      ws.baseWispColor = lamp::colorToHexString(
-          lamp::overrides.base.lastWispColor());
-    }
-    if (lamp::overrides.shade.hasLastWispColor()) {
-      ws.shadeWispColor = lamp::colorToHexString(
-          lamp::overrides.shade.lastWispColor());
+    const bool active = compositor.wispActive();
+    ws.controllingBase  = active;
+    ws.controllingShade = active;
+    if (active) {
+      ws.baseWispColor  = lamp::colorToHexString(compositor.wispStateBaseColor());
+      ws.shadeWispColor = lamp::colorToHexString(compositor.wispStateShadeColor());
     }
 #ifdef LAMP_DEBUG
-    Serial.printf("[wisp_state] provider isWispActive base=%d shade=%d hasBaseC=%d hasShadeC=%d\n",
-                  ws.controllingBase ? 1 : 0,
-                  ws.controllingShade ? 1 : 0,
-                  lamp::overrides.base.hasLastWispColor() ? 1 : 0,
-                  lamp::overrides.shade.hasLastWispColor() ? 1 : 0);
+    Serial.printf("[wisp_state] provider active=%d\n", active ? 1 : 0);
 #endif
     return ws;
   });

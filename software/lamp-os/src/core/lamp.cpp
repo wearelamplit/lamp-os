@@ -173,6 +173,7 @@ void postPendingWispHello(const PendingWispHello& src)                   { pendi
 void postPendingWispPalette(const PendingWispPalette& src)               { pendingSlots.wispPalette.post(pendingMux, src); }
 void postPendingWispClaim(const PendingWispClaim& src)                   { pendingSlots.wispClaim.post(pendingMux, src); }
 void postPendingWispPaint(const PendingWispPaint& src)                   { pendingSlots.wispPaint.post(pendingMux, src); }
+void postPendingWispState(const PendingWispState& src)                   { pendingSlots.wispState.post(pendingMux, src); }
 void postPendingCommand(const PendingCommand& src)                       { pendingSlots.command.post(pendingMux, src); }
 void postPendingEvent(const PendingEvent& src)                           { pendingSlots.event.post(pendingMux, src); }
 void postPendingColorQuery(const PendingColorQuery& src)                 { pendingSlots.colorQuery.post(pendingMux, src); }
@@ -314,12 +315,12 @@ void renderShadeColors(JsonArray arr) {
   shadeConfiguratorBehavior.beginFade(gradient, lamp::kDefaultFadeMs);
   lamp::overrides.shade.rebaseline(gradient);
   // Reflect the new shade in the BLE adv so phones and v1 neighbours see it
-  // without connecting. Base carries its blended identity color; shade is a
-  // single stop.
+  // without connecting. Base and shade both carry their blended identity
+  // color.
   const auto& baseStops = config.base.broadcastColors();
   bt.setAdvertisedColors(
       lampos::led::blendedIdentity(baseStops.data(), baseStops.size()),
-      colors[0]);
+      lampos::led::blendedIdentity(colors.data(), colors.size()));
   ::recomputeDrawAnchors();
 }
 
@@ -337,9 +338,10 @@ void renderBaseColors(JsonArray arr) {
   baseConfiguratorBehavior.beginFade(gradient, lamp::kDefaultFadeMs);
   lamp::overrides.base.rebaseline(gradient);
   // Reflect the new base in the BLE adv as its blended identity color.
+  const auto& shadeStops = config.shade.broadcastColors();
   bt.setAdvertisedColors(
       lampos::led::blendedIdentity(colors.data(), colors.size()),
-      config.shade.broadcastColors()[0]);
+      lampos::led::blendedIdentity(shadeStops.data(), shadeStops.size()));
   ::recomputeDrawAnchors();
 }
 }  // namespace lamp
@@ -403,10 +405,13 @@ void runExpressionOp(JsonObject doc, bool mutateConfig) {
   } else if (op && strcmp(op, "remove") == 0) {
     const char* type = doc["type"].as<const char*>();
     int tgt = doc["target"] | 0;
-    if (type && tgt >= 1 && tgt <= 3) {
+    // Match the stored (type,target) exactly, whatever the target value. A
+    // range-guarded remove leaves a malformed or legacy target (e.g. an
+    // out-of-range value written by an older build) permanently undeletable;
+    // the exact key match is the safety, so no numeric bound is needed.
+    if (type) {
       ::expressionManager.removeExpression(type, static_cast<lamp::ExpressionTarget>(tgt), &::compositor);
       if (mutateConfig) {
-        // Mirror removal into config.expressions.
         auto& exprs = ::config.expressions.expressions;
         exprs.erase(std::remove_if(exprs.begin(), exprs.end(),
                       [&](const lamp::ExpressionConfig& e) {
@@ -569,7 +574,6 @@ void lamp::Lamp::setup() {
       int shadeHue = (baseHue + rng.range(60, 300)) % 360;
       config.base.broadcastColors() = {colorFromHue(baseHue)};
       config.shade.broadcastColors() = {colorFromHue(shadeHue)};
-      config.base.ac = 0;
       persistFirstBoot = true;
     }
   }
@@ -591,12 +595,17 @@ void lamp::Lamp::setup() {
   // radio across 11+ channels for ~5s and silently drops ESP-NOW unicast
   // (both OFFER→lamp AND lamp→wisp ACCEPT/REQ) during that window.
   wifi::setOtaInProgressGetter([]() { return firmwareReceiver.isInProgress(); });
+  // Suspend WiFi background scans while the web config UI has a client: the
+  // scan hops the radio off the softAP channel and stalls the HTTP server.
+  wifi::setWebappActiveGetter([]() { return webapp::hasClient(); });
 
   delay(kRadioStaggerMs);
   const auto& baseStops = config.base.broadcastColors();
+  const auto& shadeStops = config.shade.broadcastColors();
   bt.begin(config.lamp.name,
            lampos::led::blendedIdentity(baseStops.data(), baseStops.size()),
-           config.shade.broadcastColors()[0], config.lamp.setup);
+           lampos::led::blendedIdentity(shadeStops.data(), shadeStops.size()),
+           config.lamp.setup);
 
 #if LAMP_WEBAPP_ENABLED
   if (lamp::any(featuresEnabled(), lamp::Features::WebApp) && config.lamp.webappEnabled) {
@@ -790,8 +799,44 @@ void lamp::Lamp::setup() {
 // Compositor pre-flush hook, Core 1. Prices the frame both surfaces are
 // about to push; a clamp re-mins the drivers here so the over-budget frame
 // never reaches the strip.
+#ifdef LAMP_DEBUG
+// Single-frame max-channel jump that reads as a pop, not a fade. Too low spams
+// on ordinary fade steps; too high misses a real snap.
+static constexpr uint8_t kSnapDeltaThreshold = 56;
+
+// Compares this frame's average surface color to the last frame's; a large
+// single-frame jump is a snap. Average is the cheap summary: a whole-strip pop
+// (e.g. the wisp-release snap) moves it hard, a fade moves it a little.
+static void detectSnap(uint8_t strip, const char* name,
+                       const std::vector<lamp::Color>& buf) {
+  static lamp::Color s_prev[2] = {};
+  static bool s_seen[2] = {false, false};
+  if (buf.empty()) return;
+  uint32_t sr = 0, sg = 0, sb = 0, sw = 0;
+  for (const auto& c : buf) { sr += c.r; sg += c.g; sb += c.b; sw += c.w; }
+  const size_t n = buf.size();
+  const lamp::Color avg(static_cast<uint8_t>(sr / n), static_cast<uint8_t>(sg / n),
+                        static_cast<uint8_t>(sb / n), static_cast<uint8_t>(sw / n));
+  const lamp::Color p = s_prev[strip];
+  auto chDelta = [](uint8_t a, uint8_t b) { return a > b ? a - b : b - a; };
+  const uint8_t md = std::max(std::max(chDelta(avg.r, p.r), chDelta(avg.g, p.g)),
+                              std::max(chDelta(avg.b, p.b), chDelta(avg.w, p.w)));
+  if (s_seen[strip] && md > kSnapDeltaThreshold) {
+    Serial.printf(
+        "[ledsnap] strip=%u %s from=(%u,%u,%u,%u) to=(%u,%u,%u,%u) d=%u\n",
+        strip, name, p.r, p.g, p.b, p.w, avg.r, avg.g, avg.b, avg.w, md);
+  }
+  s_prev[strip] = avg;
+  s_seen[strip] = true;
+}
+#endif
+
 static void governFrame() {
   const uint32_t nowMs = millis();
+#ifdef LAMP_DEBUG
+  detectSnap(0, "shade", shade.buffer);
+  detectSnap(1, "base", base.buffer);
+#endif
   const float fullDuty = lamp::fullDutyMa(shade.buffer, s_shadeChannels) +
                          lamp::fullDutyMa(base.buffer, s_baseChannels);
   bool radioBusy = firmwareReceiver.isInProgress() ||
@@ -896,14 +941,12 @@ void lamp::Lamp::tick() {
   // Transient-override drains. Each block drains its typed slot
   // and dispatches to the matching override instance based on the
   // `surface` byte (Base / Shade / BaseAndShade).
-  drainOverrideColors();
-  drainRestoreColors();
   drainOverrideBrightness();
   drainRestoreBrightness();
   drainWispHello();
   drainWispPalette();
   drainWispClaim();
-  drainWispPaint();
+  drainWispState();
   drainWispOp();
   drainWispStatus();
   drainCommand();

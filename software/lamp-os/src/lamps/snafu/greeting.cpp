@@ -8,6 +8,7 @@
 #include "config/config.hpp"
 #include "components/network/mesh/mesh_link.hpp"
 #include "core/personality_engine.hpp"
+#include "core/override_aggregate.hpp"
 #include "lamps/snafu/dots_behavior.hpp"
 #include <Arduino.h>
 #include <cstring>
@@ -107,7 +108,7 @@ void Greeting::control() {
                                   animationState == PLAYING_ONCE ||
                                   animationState == STOPPING);
   if (!greetingNowActive && greetingWasActive_) {
-    if (dots_ && greetedHasMac_) {
+    if (dots_ && greetedHasMac_ && !lamp::overrides.shade.operatorEditing()) {
       const uint32_t hold = personalityEngine.greetingFor(greetedLampId_).holdFrames;
       dots_->borrowColors(greetedBaseStops_, greetedShadeStops_,
                           hold * kBorrowHoldMultiplier);
@@ -121,6 +122,8 @@ void Greeting::control() {
     return;
   }
 
+  if (lamp::overrides.shade.operatorEditing()) return;
+
   const auto arrivals = context_->lampRoster->getUngreetedArrivals(kBleMaxAgeMs);
   for (const auto& p : arrivals) {
     doGreet(p);
@@ -131,6 +134,10 @@ void Greeting::control() {
 
 void Greeting::draw() {
   if (!fb) { nextFrame(); return; }
+
+  // Expressions self-suppress while the operator edits this surface; the
+  // greeting must too, or it overpaints the color-editor preview underneath.
+  if (lamp::overrides.shade.operatorEditing()) { nextFrame(); return; }
 
   const auto pixelCount = static_cast<uint8_t>(fb->buffer.size());
   if (pixelCount == 0) { nextFrame(); return; }

@@ -120,9 +120,9 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   // the cooldown is inert; it's clocked from greeting start and the
   // animationState!=STOPPED gate already blocks until the animation ends,
   // so a value below the animation length leaves zero gap between
-  // greetings. 26s keeps extroverts the eagerest mode (small post-greet
-  // gap) while still pacing them.
-  static constexpr uint32_t EXTROVERT_COOLDOWN_MS = 26000;
+  // greetings. 30s floors the gap between any two greetings, pacing out
+  // a burst of arrivals.
+  static constexpr uint32_t EXTROVERT_COOLDOWN_MS = 30000;
   static constexpr uint32_t AMBIVERT_BASE_COOLDOWN_MS = 30000;
   static constexpr uint32_t AMBIVERT_REGREET_WINDOW_MS = 300000;
   static constexpr uint32_t INTROVERT_BASE_COOLDOWN_MS = 60000;

@@ -65,26 +65,33 @@ void paintZonePreview(lamp::ConfiguratorBehavior& cfg, uint16_t pixelCount,
 
 void applyZonePreview(uint32_t posMin, uint32_t posMax,
                       lamp::ExpressionTarget target, lamp::Color color) {
+  // The marker composites below the wisp layer; yield the painted surfaces
+  // so wisp paint + expressions don't cover it (same gate the color editor
+  // uses). Yield tracks the active flags so it can't outlive the preview.
   if (target == lamp::TARGET_SHADE || target == lamp::TARGET_BOTH) {
     paintZonePreview(shadeConfiguratorBehavior, shade.pixelCount,
                      s_zonePreview.shadeActive, s_zonePreview.savedShade,
                      posMin, posMax, color);
+    lamp::overrides.setSurfacePreview(0x02, s_zonePreview.shadeActive);
   }
   if (target == lamp::TARGET_BASE || target == lamp::TARGET_BOTH) {
     paintZonePreview(baseConfiguratorBehavior, base.pixelCount,
                      s_zonePreview.baseActive, s_zonePreview.savedBase,
                      posMin, posMax, color);
+    lamp::overrides.setSurfacePreview(0x01, s_zonePreview.baseActive);
   }
 }
 
 void clearZonePreview() {
   if (s_zonePreview.shadeActive) {
     shadeConfiguratorBehavior.beginFade(s_zonePreview.savedShade, 0);
+    lamp::overrides.setSurfacePreview(0x02, false);
     s_zonePreview.savedShade.clear();
     s_zonePreview.shadeActive = false;
   }
   if (s_zonePreview.baseActive) {
     baseConfiguratorBehavior.beginFade(s_zonePreview.savedBase, 0);
+    lamp::overrides.setSurfacePreview(0x01, false);
     s_zonePreview.savedBase.clear();
     s_zonePreview.baseActive = false;
   }

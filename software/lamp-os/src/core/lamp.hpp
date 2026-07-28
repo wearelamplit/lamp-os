@@ -71,14 +71,12 @@ class Lamp {
   void drainWifiOp();
   void drainInboundOp();
   void drainRemoteOp();
-  void drainOverrideColors();
-  void drainRestoreColors();
   void drainOverrideBrightness();
   void drainRestoreBrightness();
   void drainWispHello();
   void drainWispPalette();
   void drainWispClaim();
-  void drainWispPaint();
+  void drainWispState();
   void drainWispOp();
   void drainWispStatus();
   void drainCommand();

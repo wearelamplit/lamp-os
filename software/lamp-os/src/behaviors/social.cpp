@@ -7,8 +7,8 @@
 #include "components/network/mesh/mesh_link.hpp"
 
 #include "components/network/mesh/lamp_roster.hpp"
-#include "components/network/ble/ble_control.hpp"
 #include "core/personality_engine.hpp"
+#include "core/override_aggregate.hpp"
 #include "behaviors/greetable.hpp"
 #include "components/firmware/firmware_distributor.hpp"
 #include "components/firmware/fs_ota.hpp"
@@ -84,6 +84,10 @@ void SocialBehavior::applyTuning(const GreetingTuning& t) {
 }
 
 void SocialBehavior::draw() {
+  // Expressions self-suppress while the operator edits this surface; the
+  // greeting must too, or it overpaints the color-editor preview underneath.
+  if (lamp::overrides.shade.operatorEditing()) { nextFrame(); return; }
+
   // Waveform: ease-in → hold (steady or pulsed depending on
   // pulseBackStrength + pulseBackCount) → ease-out.
   const uint32_t easeIn  = easeInFrames;
@@ -227,10 +231,26 @@ void SocialBehavior::control() {
       for (const auto& p : espNowPeers) {
         if (!p.hasMac) continue;
         if (p.firmwareVersion == 0) continue;
+        // Don't stomp a transfer another lamp already owns: the peer is
+        // receiving, or some roster peer reports sending to it. The roster
+        // holds peers only, so this lamp's own in-progress send never trips
+        // the scan (and state != Idle guards that case anyway).
+        bool peerBeingServed =
+            p.otaState == lamp_protocol::kOtaStateReceiving;
+        if (!peerBeingServed) {
+          for (const auto& q : espNowPeers) {
+            if (q.otaState == lamp_protocol::kOtaStateSending &&
+                q.hasOtaSendingTo &&
+                std::memcmp(q.otaSendingTo, p.mac, 6) == 0) {
+              peerBeingServed = true;
+              break;
+            }
+          }
+        }
         firmwareDistributor.considerPeerForOta(p.mac, p.firmwareVersion,
                                                 p.protocolVersion, now,
                                                 p.fwChannel, p.maxChunk,
-                                                p.espnowRssi);
+                                                p.espnowRssi, peerBeingServed);
       }
       // FS-image OTA: offer the local UI image to same-firmware-version peers
       // whose FS digest differs. fs_ota::considerPeer does the staleness +
@@ -258,9 +278,7 @@ void SocialBehavior::control() {
   // greeting animation finishes.
   if (animationState != STOPPED) return;
 
-  // A scan burst freshens BLE sightings while an app holds the GATT link;
-  // populate the roster but stay quiet during the session.
-  if (ble_control::isClientConnected()) return;
+  if (lamp::overrides.shade.operatorEditing()) return;
 
   // Wraparound-safe time comparison (millis() rolls over at ~49 days).
   // The re-greet check below uses the same idiom for consistency.

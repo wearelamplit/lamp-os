@@ -1,11 +1,10 @@
 #include "lamps/snafu/dots_behavior.hpp"
 
+#include "core/behavior_context.hpp"
+#include "core/compositor.hpp"
 #include "util/fade.hpp"
 #include "util/gradient.hpp"
 
-namespace lamp {
-bool isWispCurrentlyOverriding();  // defined in expressions/expression.cpp
-}
 
 namespace lamp { namespace snafu {
 
@@ -180,7 +179,8 @@ void DotsBehavior::control() {
 
 void DotsBehavior::draw() {
   if (!fb || fb->buffer.empty()) { nextFrame(); return; }
-  if (isWispCurrentlyOverriding()) { nextFrame(); return; }
+  if (context_ && context_->compositor &&
+      context_->compositor->wispActive()) { nextFrame(); return; }
   if (cur_.empty()) { cur_ = buildScene(); prev_ = cur_; }
   if (sceneChange_) {
     for (size_t j = 0; j < fb->buffer.size(); ++j)

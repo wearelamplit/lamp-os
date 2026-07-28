@@ -15,6 +15,14 @@ struct OverrideAggregate {
   ColorOverride base;
   ColorOverride shade;
   BrightnessOverride brightness;
+
+  // Suspend autonomous render (wisp paint + expressions) on the masked
+  // surfaces while an operator previews a static overlay (color edit or
+  // zone highlight), so the overlay shows through. base=0x01, shade=0x02.
+  void setSurfacePreview(uint8_t surfaceMask, bool previewing) {
+    if (surfaceMask & 0x01) base.setOperatorEditing(previewing);
+    if (surfaceMask & 0x02) shade.setOperatorEditing(previewing);
+  }
 };
 
 // Single production instance.
