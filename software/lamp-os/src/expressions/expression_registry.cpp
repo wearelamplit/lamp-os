@@ -108,6 +108,7 @@ std::string ExpressionRegistry::serializeCatalog() const {
   JsonArray exprs = doc["expressions"].to<JsonArray>();
 
   for (const auto* d : descriptors_) {
+    if (d->internal) continue;
     JsonObject obj = exprs.add<JsonObject>();
     obj["id"] = d->id;
     obj["name"] = d->name;

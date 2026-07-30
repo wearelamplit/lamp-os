@@ -32,6 +32,7 @@
 #include <esp_mac.h>
 #include <esp_system.h>
 #endif
+#include "components/input/input_driver.hpp"
 #include "components/network/ble/bluetooth.hpp"
 #include "components/network/ble/ble_control.hpp"
 #include "components/network/mesh/lamp_roster.hpp"
@@ -41,6 +42,7 @@
 #include "components/webapp/webapp.hpp"
 #endif
 #include "core/personality_engine.hpp"
+#include "core/arrival_notifier.hpp"
 #include "components/transient_override/brightness_override.hpp"
 #include "components/transient_override/color_override.hpp"
 #include "expressions/expression_manager.hpp"
@@ -88,6 +90,8 @@ volatile int16_t pendingEditSession = -1;
 uint8_t s_hwMaxBrightness = 180;
 
 lamp::PowerGovernor s_powerGovernor;
+lamp::BidReceiver s_bidReceiver;
+lamp::FastRng s_bidRng;
 // Sense inputs resolved once in Lamp::setup() after the FrameBuffers exist.
 static uint8_t s_shadeChannels = 4;
 static uint8_t s_baseChannels = 4;
@@ -176,6 +180,7 @@ void postPendingWispPaint(const PendingWispPaint& src)                   { pendi
 void postPendingWispState(const PendingWispState& src)                   { pendingSlots.wispState.post(pendingMux, src); }
 void postPendingCommand(const PendingCommand& src)                       { pendingSlots.command.post(pendingMux, src); }
 void postPendingEvent(const PendingEvent& src)                           { pendingSlots.event.post(pendingMux, src); }
+void postPendingBid(const PendingBid& src)                               { pendingSlots.bid.post(pendingMux, src); }
 void postPendingColorQuery(const PendingColorQuery& src)                 { pendingSlots.colorQuery.post(pendingMux, src); }
 void postPendingColorInfo(const PendingColorInfo& src)                   { pendingSlots.colorInfo.post(pendingMux, src); }
 void postPendingFirmwareControl(const PendingFirmwareControl& src)       { pendingSlots.firmwareControl.post(pendingMux, src); }
@@ -225,6 +230,7 @@ lamp::FadeOutBehavior baseFadeOutBehavior;
 lamp::KnockoutBehavior baseKnockoutBehavior;
 lamp::ExpressionManager expressionManager;
 lamp::ExpressionObserverRegistry expressionObserverRegistry;
+lamp::ArrivalNotifier arrivalNotifier;
 lamp::Config config;
 lamp::MeshLink meshLink;
 lamp::SocialEchoObserver socialEchoObserver(config, expressionManager, meshLink);
@@ -465,6 +471,35 @@ void applyKnockoutPixel(uint8_t pixel, uint8_t brightness) {
   }
 }
 
+void BehaviorContext::setSolidColor(Color c) {
+  if (shadeConfigurator) shadeConfigurator->setSolid(c);
+  if (baseConfigurator)  baseConfigurator->setSolid(c);
+}
+
+void BehaviorContext::setGradient(const std::vector<Color>& stops) {
+  const uint32_t now = millis();
+  auto paint = [&](ConfiguratorBehavior* cfg) {
+    if (!cfg || !cfg->fb) return;
+    cfg->beginFade(buildGradientWithStops(cfg->fb->pixelCount, stops),
+                   kDefaultFadeMs);
+    cfg->lastWebSocketUpdateTimeMs = now;
+  };
+  paint(shadeConfigurator);
+  paint(baseConfigurator);
+}
+
+void BehaviorContext::setBrightness(uint8_t level) {
+  const uint32_t now = millis();
+  const uint8_t source =
+      brightnessFadeSeeded() ? computeUserBrightnessNow(now) : level;
+  setBrightnessFade(source, level, now);
+  setAllStripsBrightness(calculateBrightnessLevel(::s_hwMaxBrightness, source));
+}
+
+void BehaviorContext::setSurfaceBrightness(Surface surface, uint8_t level) {
+  setSurfaceFactor(surface, calculateBrightnessLevel(255, level));
+}
+
 }  // namespace lamp
 
 
@@ -484,6 +519,17 @@ static void onWifiStateChanged() {
 
 lamp::FrameBuffer* lamp::Lamp::shadeFb() { return &::shade; }
 lamp::FrameBuffer* lamp::Lamp::baseFb()  { return &::base; }
+
+lamp::input::InputSource* lamp::Lamp::inputById(uint8_t id) const {
+  for (const auto& src : inputs_) {
+    if (src->id() == id) return src.get();
+  }
+  return nullptr;
+}
+
+void lamp::Lamp::tickInputs(uint32_t nowMs) {
+  for (auto& src : inputs_) src->tick(nowMs);
+}
 
 void lamp::Lamp::recomputeEffectiveCeiling() {
   s_hwMaxBrightness =
@@ -677,6 +723,12 @@ void lamp::Lamp::setup() {
   applyEffectiveBrightness();
 
   initBehaviors(featuresEnabled(), *this);
+
+  // Build input drivers before createBehaviors so a variant can bind gestures
+  // to them there. Empty on standard/snafu (no declared inputs). Touch
+  // calibration warms up from here, but the first sample only lands once the
+  // loop starts ticking (post-setup, all radios up).
+  inputs_ = input::buildInputs(hw_.inputs);
 
   // Give the subclass a chance to register any extra behaviors not covered
   // by the Feature flags. StandardLamp's createBehaviors is empty since all
@@ -970,6 +1022,7 @@ void lamp::Lamp::tick() {
   drainColorQuery();
   drainColorInfo();
   drainEvent();
+  drainBid();
   drainFirmwareControl();
 
   // Drive the override state machines. tick() is cheap when Idle
@@ -1033,6 +1086,7 @@ void lamp::Lamp::tick() {
   }
 
   socialEchoObserver.tick(millis());
+  arrivalNotifier.tick(millis(), lamp::lampRoster, LAMP_PRUNE_TIME_MS);
 
   wifi::tick();
 #if LAMP_WEBAPP_ENABLED
@@ -1072,6 +1126,11 @@ void lamp::Lamp::tick() {
   // so onRead callbacks (Core 0) hand back NimBLE's already-buffered
   // bytes without walking config vectors. Cheap when nothing's dirty.
   ble_control::tick();
+
+  // Tick physical inputs immediately before the compositor so a gesture's
+  // edge/held state is current for this frame's render. Core 1, millis-gated
+  // (touch), no delay().
+  tickInputs(millis());
 
   compositor.tick();
 

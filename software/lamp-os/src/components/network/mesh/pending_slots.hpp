@@ -128,4 +128,11 @@ struct PendingEvent {
   uint8_t  payload[lamp_protocol::EVENT_MAX_PAYLOAD];
 };
 
+// MSG_BID pending slot. The bidder's mac + bid type; the Core 1 drain resolves
+// disposition + roster entry and decides whether to honor.
+struct PendingBid {
+  uint8_t sourceMac[6];
+  uint8_t bidType;
+};
+
 }  // namespace lamp

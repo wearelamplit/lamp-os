@@ -27,11 +27,12 @@
 namespace lamp {
 
 /**
- * One peer in the roster. Primary key is `name` (user-set, capped
- *        at HELLO_MAX_NAME); preserves BLE-only lamp compatibility.
- *        `mac` is the stable social identity: the ESP-NOW/HELLO path
- *        stores it raw, the BLE-scan path recovers it from the scanned
- *        address, so dispositions key on it and don't orphan on rename.
+ * One peer in the roster. Identity keys on `mac`, the stable social
+ *        identity: the ESP-NOW/HELLO path stores it raw, the BLE-scan path
+ *        recovers it from the scanned address. Dispositions, the greeting
+ *        dedup, and the roster itself all key on it, so a rename doesn't
+ *        orphan an entry and two same-named lamps don't collide. `name` is
+ *        a stored display field (user-set, capped at HELLO_MAX_NAME).
  *
  *        Two facets, one per transport timestamp:
  *
@@ -55,7 +56,7 @@ struct RosterEntry {
   bool hasMac = false;
   uint32_t lastSeenNearMs = 0;
   uint32_t lastSeenMeshMs = 0;
-  bool acknowledged = false;  // SocialBehavior's per-name greeting state
+  bool acknowledged = false;  // SocialBehavior's per-MAC greeting state
   // Packed semver (major<<16|minor<<8|patch) from MSG_HELLO.
   // Zero until the first HELLO (BLE adv doesn't carry it).
   uint32_t firmwareVersion = 0;
@@ -198,11 +199,11 @@ class LampRoster {
 
   // Mark a lamp as acknowledged. SocialBehavior calls this once per peer
   // so a re-trigger doesn't re-greet the same lamp until it prunes.
-  void acknowledge(const std::string& name);
+  void acknowledge(const uint8_t mac[6]);
 
   // Set the near timestamp on an existing entry (direct-HELLO proximity).
-  // No-op if the name is unknown.
-  void markNear(const std::string& name);
+  // No-op if the MAC is unknown.
+  void markNear(const uint8_t mac[6]);
 
   // Cache wisp presence from MSG_WISP_HELLO. Display-slot admission: a
   // rival wisp is rejected while the current wisp's hellos are fresh
@@ -312,9 +313,10 @@ class LampRoster {
   // the fleet cache, installs `mac`, and stamps slot freshness at `nowMs`.
   void adoptWispLocked(const uint8_t mac[6], uint32_t nowMs);
 
-  // Caller must hold the mutex. Returns index of entry or count_ if not
-  // found.
-  size_t findIndexLocked(const std::string& name) const;
+  // Caller must hold the mutex. Returns index of the entry keyed by `mac`,
+  // or count_ if not found. Skips entries without a MAC so their all-zero
+  // default doesn't collide.
+  size_t findIndexLocked(const uint8_t mac[6]) const;
   // Caller must hold the mutex. Evicts the entry with the oldest combined
   // last-seen if the store is at capacity.
   void evictOldestIfFullLocked();

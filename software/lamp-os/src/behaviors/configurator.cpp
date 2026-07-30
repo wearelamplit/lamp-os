@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+#include <algorithm>
 #include <cstdint>
 
 #include "util/color.hpp"
@@ -76,6 +77,17 @@ void ConfiguratorBehavior::beginFade(const std::vector<Color>& targetColors,
   colors = targetColors;
   fadeStartMs_ = now;
   fadeDurationMs_ = fadeDurationMs;
+}
+
+void ConfiguratorBehavior::setSolid(Color c) {
+  const size_t n = fb ? static_cast<size_t>(fb->pixelCount) : 0;
+  if (colors.size() != n) {
+    colors.assign(n, c);  // one-time size reconcile; steady state fills below
+  } else {
+    std::fill(colors.begin(), colors.end(), c);
+  }
+  fadeDurationMs_ = 0;  // instant, no lerp window
+  lastWebSocketUpdateTimeMs = millis();  // keep control() in PLAYING_ONCE
 }
 
 void ConfiguratorBehavior::draw() {

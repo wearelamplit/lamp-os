@@ -28,43 +28,13 @@
 
 #include "components/network/mesh/lamp_roster.hpp"
 #include "config/config_types.hpp"
+#include "core/greeting_profiles.hpp"  // GreetingTuning + the profile table
 #include "util/color.hpp"
 #include "util/easing.hpp"
 
 namespace lamp {
 
 class Config;  // fwd-decl
-
-// Sentinel for GreetingTuning::pulseBackCount meaning "fill the entire
-// hold window with back-to-back cycles" instead of a fixed cycle count.
-constexpr uint8_t kPulseCountContinuous = 0xFF;
-
-// A peer's greeting waveform parameters. Returned by greetingFor() and
-// consumed by SocialBehavior's draw()/playOnce().
-struct GreetingTuning {
-  uint32_t totalFrames     = 0;
-  uint32_t easeInFrames    = 0;
-  uint32_t holdFrames      = 0;
-  uint32_t fadeOutFrames   = 0;
-  uint8_t  pulseBackStrength = 0;
-  uint8_t  pulseBackCount    = 0;
-  // Frames per warm-breath cycle (dim-down + brighten-back). Faster =
-  // more eager. Only meaningful when pulseBackStrength > 0.
-  uint16_t breathCycleFrames = 120;
-  // Snub waveform: the ease-in fades shade → peer color while dimming
-  // brightness to pulseBackStrength depth (255 = black), holds dark, and
-  // reverses on the way out. Warm greetings (snub=false) instead reach
-  // full peer color and use pulseBackStrength/Count for in-hold pulses.
-  bool     snub              = false;
-  // Motion of the color ramps. draw() routes the ease-in/ease-out
-  // POSITION through applyEasing(curve, t), so disposition reads in the
-  // arrival/departure curve, not just the timing.
-  Easing   easeInCurve  = Easing::Smooth;
-  Easing   easeOutCurve = Easing::Smooth;
-  // Motion of the in-hold breath (warm profiles). Float dwells at the top +
-  // bottom of each breath (calm); Smooth breathes continuously (eager).
-  Easing   breathCurve  = Easing::Float;
-};
 
 // Counts of currently-visible BLE peers grouped by disposition.
 // Returned by crowdComposition() for custom lamps + expressions that

@@ -158,6 +158,10 @@ enum MsgType : uint8_t {
   // Directed reply to MSG_COLOR_QUERY carrying base + shade gradient stops.
   // No gossip relay; addressedToUs filter on recv.
   MSG_COLOR_INFO          = 0x33,
+  // Relationship-gated request broadcast to nearby lamps. Each receiver
+  // decides whether to honor it from its own disposition toward the sender.
+  // Nearby-scoped (no relay); command_auth-tagged like MSG_EVENT.
+  MSG_BID                 = 0x34,
 };
 
 // High bit on msgType. inspect() does not mask it; any frame that sets it

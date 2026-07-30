@@ -25,9 +25,9 @@ LampRoster::LampRoster() {
   mutex_ = xSemaphoreCreateMutex();
 }
 
-size_t LampRoster::findIndexLocked(const std::string& name) const {
+size_t LampRoster::findIndexLocked(const uint8_t mac[6]) const {
   for (size_t i = 0; i < count_; i++) {
-    if (name == store_[i].name) return i;
+    if (store_[i].hasMac && std::memcmp(store_[i].mac, mac, 6) == 0) return i;
   }
   return count_;
 }
@@ -52,28 +52,26 @@ void LampRoster::addOrUpdateFromBle(const std::string& name,
                                     int8_t rssi) {
   uint32_t now = millis();
   uint8_t ble[6];
-  const bool bleOk = parseBdAddr(bleAddr.c_str(), ble);
+  if (!parseBdAddr(bleAddr.c_str(), ble)) return;
+  uint8_t recoveredMac[6];
+  meshMacFromBleAddr(ble, recoveredMac);
   xSemaphoreTake(mutex_, portMAX_DELAY);
-  size_t idx = findIndexLocked(name);
+  size_t idx = findIndexLocked(recoveredMac);
   if (idx == count_) {
     evictOldestIfFullLocked();
     RosterEntry e;
     copyName(e.name, name);
-    if (bleOk) {
-      meshMacFromBleAddr(ble, e.mac);
-      e.hasMac = true;
-    }
+    std::memcpy(e.mac, recoveredMac, 6);
+    e.hasMac = true;
     e.baseColor = base;
     e.shadeColor = shade;
     e.lastSeenNearMs = now;
     e.lastRssi = rssi;
     store_[count_++] = e;
   } else {
-    // The BLE-recovered mac only fills the gap; a raw HELLO mac wins.
-    if (!store_[idx].hasMac && bleOk) {
-      meshMacFromBleAddr(ble, store_[idx].mac);
-      store_[idx].hasMac = true;
-    }
+    // Empty name from a nameless BLE adv must not erase a known display name
+    // on the merged entry.
+    if (!name.empty()) copyName(store_[idx].name, name);
     store_[idx].baseColor = base;
     store_[idx].shadeColor = shade;
     store_[idx].lastSeenNearMs = now;
@@ -117,7 +115,7 @@ void LampRoster::addOrUpdateFromEspNow(const std::string& name, const uint8_t ma
   }
   // lastRssi not updated from HELLO: single transport source prevents
   // cross-transport contamination in PersonalityEngine's hysteresis.
-  size_t idx = findIndexLocked(name);
+  size_t idx = findIndexLocked(mac);
   if (idx == count_) {
     evictOldestIfFullLocked();
     RosterEntry e;
@@ -147,6 +145,9 @@ void LampRoster::addOrUpdateFromEspNow(const std::string& name, const uint8_t ma
     e.espnowRssi = rssi;
     store_[count_++] = e;
   } else {
+    // A HELLO whose nameLen was 0 arrives with an empty name; keep the last
+    // known display name rather than blanking the merged entry.
+    if (!name.empty()) copyName(store_[idx].name, name);
     store_[idx].baseColor = base;
     store_[idx].shadeColor = shade;
     std::memcpy(store_[idx].mac, mac, 6);
@@ -233,7 +234,6 @@ std::vector<RosterEntry> LampRoster::getNear(uint32_t maxAgeMs) {
             });
   return out;
 }
-
 std::vector<RosterEntry> LampRoster::getMesh(uint32_t maxAgeMs) {
   uint32_t now = millis();
   xSemaphoreTake(mutex_, portMAX_DELAY);
@@ -270,9 +270,9 @@ bool LampRoster::findByMac(const uint8_t mac[6], RosterEntry& out) {
   return false;
 }
 
-void LampRoster::acknowledge(const std::string& name) {
+void LampRoster::acknowledge(const uint8_t mac[6]) {
   xSemaphoreTake(mutex_, portMAX_DELAY);
-  size_t idx = findIndexLocked(name);
+  size_t idx = findIndexLocked(mac);
   if (idx < count_) {
     store_[idx].acknowledged = true;
     generation_++;
@@ -280,9 +280,9 @@ void LampRoster::acknowledge(const std::string& name) {
   xSemaphoreGive(mutex_);
 }
 
-void LampRoster::markNear(const std::string& name) {
+void LampRoster::markNear(const uint8_t mac[6]) {
   if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(2)) != pdTRUE) return;
-  size_t idx = findIndexLocked(name);
+  size_t idx = findIndexLocked(mac);
   if (idx < count_) {
     store_[idx].lastSeenNearMs = millis();
     generation_++;

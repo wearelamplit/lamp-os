@@ -6,7 +6,7 @@
 
 namespace lamp {
 
-struct RosterEntry;  // fwd-decl; full include is only needed by implementors.
+struct PeerView;  // fwd-decl; full definition lives in core/behavior_context.hpp.
 class Color;
 
 // Snapshot of the active greeting. Populated while an animation plays;
@@ -24,7 +24,7 @@ struct GreetingState {
 // snafu::Greeting. Inverted here so the framework dispatch never switches
 // on lamp type.
 struct Greetable {
-  virtual void         triggerGreeting(const RosterEntry& peer) = 0;
+  virtual void         triggerGreeting(const PeerView& peer) = 0;
   virtual GreetingState greetingState() const = 0;
   // Peer's base + shade color stops from a MSG_COLOR_INFO reply. Default
   // no-op: a greeting that doesn't render peer palettes ignores it.

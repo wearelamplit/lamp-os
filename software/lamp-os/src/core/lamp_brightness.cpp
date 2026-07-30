@@ -156,6 +156,11 @@ uint8_t effectiveBrightness() {
 
 static uint8_t s_requestedScaled = 0;
 
+// Per-surface brightness trims. 255 = no trim (master brightness verbatim).
+// Only ever scale DOWN from the governed level, so the power ceiling holds.
+static uint8_t s_shadeFactor = 255;
+static uint8_t s_baseFactor  = 255;
+
 namespace lamp {
 uint8_t requestedStripLevel() { return s_requestedScaled; }
 
@@ -163,14 +168,21 @@ void setAllStripsBrightness(uint8_t scaledLevel) {
   s_requestedScaled = scaledLevel;
   const uint8_t applied =
       std::min(scaledLevel, s_powerGovernor.ceiling(millis()));
-  for (const auto& seg : shade.segments) if (seg.driver) seg.driver->setBrightness(applied);
-  for (const auto& seg : base.segments)  if (seg.driver) seg.driver->setBrightness(applied);
+  const uint8_t shadeApplied = scale8(applied, s_shadeFactor);
+  const uint8_t baseApplied  = scale8(applied, s_baseFactor);
+  for (const auto& seg : shade.segments) if (seg.driver) seg.driver->setBrightness(shadeApplied);
+  for (const auto& seg : base.segments)  if (seg.driver) seg.driver->setBrightness(baseApplied);
 }
 
 void applyEffectiveBrightness() {
   uint8_t baseline = effectiveBrightness();
   uint8_t level = lamp::overrides.brightness.effective(millis(), baseline);
   setAllStripsBrightness(lamp::calculateBrightnessLevel(s_hwMaxBrightness, level));
+}
+
+void setSurfaceFactor(Surface surface, uint8_t factor) {
+  (surface == Surface::Shade ? s_shadeFactor : s_baseFactor) = factor;
+  applyEffectiveBrightness();
 }
 }  // namespace lamp
 

@@ -657,6 +657,34 @@ void Lamp::drainEvent() {
   }
 }
 
+void Lamp::drainBid() {
+  const uint32_t now = millis();
+
+  // Fire a previously-armed honor whose jitter delay has elapsed. Re-resolve
+  // the peer so a color update between arm and fire is picked up; drop if it
+  // left the roster or a greeting is already playing.
+  {
+    uint8_t mac[6];
+    uint8_t bidType;
+    if (s_bidReceiver.takeDue(now, mac, bidType)) {
+      auto* g = compositor.behaviorContext().greeting;
+      lamp::RosterEntry peer;
+      if (g && !g->greetingState().active && lampRoster.findByMac(mac, peer)) {
+        g->triggerGreeting(lamp::PeerView::from(peer));
+      }
+    }
+  }
+
+  lamp::PendingBid bid;
+  if (!lamp::pendingSlots.bid.drain(pendingMux, bid)) return;
+
+  lamp::RosterEntry peer;
+  if (!lampRoster.findByMac(bid.sourceMac, peer)) return;  // no name/color to greet
+  const uint8_t disp = config.getDisposition(peer.macStr());
+  s_bidReceiver.onBid(bid.sourceMac, bid.bidType, disp,
+                      config.lamp.socialMode, now, s_bidRng);
+}
+
 // FW_OFFER/DONE: heavy work (esp_ota_begin, sig verify) runs on Core 1.
 void Lamp::drainFirmwareControl() {
   {

@@ -1,18 +1,14 @@
-// Native-host unit tests pinning the roster's single-source RSSI contract
-// and mac fill rules.
+// Native-host unit tests for the real LampRoster: MAC-keyed identity plus
+// the single-source RSSI contract.
 //
 // lastRssi is written only by the BLE scan path (~30 Hz) so the
 // RSSI-descending sort key never compares values from two different radio
 // transports (which have different absolute readings on the same physical
-// link).
+// link). espnowRssi carries the mesh-side reading separately.
 //
-// The inline mirror captures the invariants:
-//   - BLE scan with a real RSSI updates lastRssi on insert + on update.
-//   - BLE scan with the -127 sentinel does NOT clobber a stored value.
-//   - ESP-NOW HELLO never touches lastRssi (regardless of the rssi arg).
-//   - ESP-NOW stores the raw mesh mac and always wins.
-//   - BLE scan recovers the mac from its scanned address (address - 2),
-//     but only when no mac is set yet.
+// Identity keys on the mesh (STA) MAC: a mesh sighting stores it raw, a BLE
+// sighting recovers it as (scanned address - 2). Two sightings with the same
+// recovered/raw MAC merge; two distinct MACs are two peers regardless of name.
 
 #include <unity.h>
 
@@ -22,211 +18,218 @@
 #include <vector>
 #include <algorithm>
 
-#include "util/bd_addr.hpp"
+// Native-test seam: include the real .cpp so identity + RSSI rules are
+// exercised against the shipped class, not a hand-rolled mirror.
+#include "components/network/mesh/lamp_roster.cpp"
 
-namespace lamp {
+using namespace lamp;
 
-struct RosterEntry {
-  std::string name;
-  int8_t lastRssi = -127;
-  uint8_t mac[6] = {0};
-  bool hasMac = false;
+namespace {
 
-  std::string macStr() const {
-    if (!hasMac) return {};
-    char buf[18];
-    formatBdAddr(mac, buf);
-    return buf;
+const Color kNoColor = Color();
+
+int8_t lastRssiByName(LampRoster& r, const std::string& name) {
+  for (const auto& e : r.getAll()) {
+    if (name == e.name) return e.lastRssi;
   }
-};
+  return -127;
+}
 
-class LampRoster {
- public:
-  // Mirror of addOrUpdateFromBle: writes lastRssi on insert
-  // unconditionally; on update only if rssi != -127. Recovers the mac
-  // from the scanned BLE address (address - 2) only when no mac is set
-  // (the ESP-NOW real mac wins).
-  void addOrUpdateFromBle(const std::string& name, int8_t rssi,
-                          const std::string& bleAddr = "") {
-    uint8_t ble[6];
-    const bool bleOk = parseBdAddr(bleAddr.c_str(), ble);
-    auto it = std::find_if(store_.begin(), store_.end(),
-                           [&](const RosterEntry& p) { return p.name == name; });
-    if (it == store_.end()) {
-      RosterEntry e;
-      e.name = name;
-      e.lastRssi = rssi;
-      if (bleOk) {
-        meshMacFromBleAddr(ble, e.mac);
-        e.hasMac = true;
-      }
-      store_.push_back(e);
-    } else {
-      if (rssi != -127) it->lastRssi = rssi;
-      if (!it->hasMac && bleOk) {
-        meshMacFromBleAddr(ble, it->mac);
-        it->hasMac = true;
-      }
-    }
+int8_t espnowRssiByName(LampRoster& r, const std::string& name) {
+  for (const auto& e : r.getAll()) {
+    if (name == e.name) return e.espnowRssi;
   }
+  return -127;
+}
 
-  // Mirror of addOrUpdateFromEspNow: does NOT touch lastRssi. Stores the
-  // raw mesh mac and always wins over a BLE-derived mac.
-  void addOrUpdateFromEspNow(const std::string& name, int8_t /*rssi*/,
-                             const uint8_t mac[6] = nullptr) {
-    auto it = std::find_if(store_.begin(), store_.end(),
-                           [&](const RosterEntry& p) { return p.name == name; });
-    if (it == store_.end()) {
-      RosterEntry e;
-      e.name = name;
-      if (mac != nullptr) {
-        std::memcpy(e.mac, mac, 6);
-        e.hasMac = true;
-      }
-      store_.push_back(e);
-    } else {
-      if (mac != nullptr) {
-        std::memcpy(it->mac, mac, 6);
-        it->hasMac = true;
-      }
-    }
+std::string macStrByName(LampRoster& r, const std::string& name) {
+  for (const auto& e : r.getAll()) {
+    if (name == e.name) return e.macStr();
   }
+  return {};
+}
 
-  int8_t lastRssiOf(const std::string& name) const {
-    auto it = std::find_if(store_.begin(), store_.end(),
-                           [&](const RosterEntry& p) { return p.name == name; });
-    return it == store_.end() ? -127 : it->lastRssi;
-  }
+bool hasUngreetedArrival(LampRoster& r, uint32_t maxAgeMs = 240000) {
+  RosterEntry out;
+  return r.bestUngreetedArrival(
+      maxAgeMs, g_mock_millis,
+      [](const RosterEntry&) { return true; }, out);
+}
 
-  std::string macOf(const std::string& name) const {
-    auto it = std::find_if(store_.begin(), store_.end(),
-                           [&](const RosterEntry& p) { return p.name == name; });
-    return it == store_.end() ? std::string{} : it->macStr();
-  }
+}  // namespace
 
-  bool findByMac(const uint8_t mac[6], RosterEntry& out) const {
-    auto it = std::find_if(store_.begin(), store_.end(),
-                           [&](const RosterEntry& p) {
-                             return p.hasMac && std::memcmp(p.mac, mac, 6) == 0;
-                           });
-    if (it == store_.end()) return false;
-    out = *it;
-    return true;
-  }
-
-  size_t size() const { return store_.size(); }
-
- private:
-  std::vector<RosterEntry> store_;
-};
-
-}  // namespace lamp
-
-void setUp(void) {}
+void setUp(void) { set_mock_millis(100000); }
 void tearDown(void) {}
 
+// ---- Single-source RSSI contract ----------------------------------------
+
 void test_ble_scan_sets_last_rssi_on_insert() {
-  lamp::LampRoster lamps;
-  lamps.addOrUpdateFromBle("jacko", -72);
-  TEST_ASSERT_EQUAL_INT8(-72, lamps.lastRssiOf("jacko"));
+  LampRoster r;
+  r.addOrUpdateFromBle("jacko", "AA:BB:CC:DD:EE:FF", kNoColor, kNoColor, -72);
+  TEST_ASSERT_EQUAL_INT8(-72, lastRssiByName(r, "jacko"));
 }
 
 void test_ble_scan_updates_last_rssi_on_existing_entry() {
-  lamp::LampRoster lamps;
-  lamps.addOrUpdateFromBle("jacko", -72);
-  lamps.addOrUpdateFromBle("jacko", -75);
-  TEST_ASSERT_EQUAL_INT8(-75, lamps.lastRssiOf("jacko"));
+  LampRoster r;
+  r.addOrUpdateFromBle("jacko", "AA:BB:CC:DD:EE:FF", kNoColor, kNoColor, -72);
+  r.addOrUpdateFromBle("jacko", "AA:BB:CC:DD:EE:FF", kNoColor, kNoColor, -75);
+  TEST_ASSERT_EQUAL_UINT(1u, r.getAll().size());
+  TEST_ASSERT_EQUAL_INT8(-75, lastRssiByName(r, "jacko"));
 }
 
 void test_ble_scan_sentinel_does_not_clobber_existing_value() {
-  // The -127 sentinel means "no reading" and must NOT overwrite a real
-  // stored value.
-  lamp::LampRoster lamps;
-  lamps.addOrUpdateFromBle("jacko", -72);
-  lamps.addOrUpdateFromBle("jacko", -127);  // sentinel
-  TEST_ASSERT_EQUAL_INT8(-72, lamps.lastRssiOf("jacko"));
+  LampRoster r;
+  r.addOrUpdateFromBle("jacko", "AA:BB:CC:DD:EE:FF", kNoColor, kNoColor, -72);
+  r.addOrUpdateFromBle("jacko", "AA:BB:CC:DD:EE:FF", kNoColor, kNoColor, -127);
+  TEST_ASSERT_EQUAL_INT8(-72, lastRssiByName(r, "jacko"));
 }
 
 void test_esp_now_does_not_write_last_rssi() {
-  // ESP-NOW HELLO does NOT touch lastRssi. Even with a real rssi
-  // argument, the stored value must remain whatever BLE scan put there
-  // (or -127 if no BLE sighting yet).
-  lamp::LampRoster lamps;
-  lamps.addOrUpdateFromBle("jacko", -72);
-  TEST_ASSERT_EQUAL_INT8(-72, lamps.lastRssiOf("jacko"));
-  lamps.addOrUpdateFromEspNow("jacko", -65);
-  TEST_ASSERT_EQUAL_INT8(-72, lamps.lastRssiOf("jacko"));
+  // Same physical lamp: BLE address AA:..:FF recovers MAC AA:..:FD, so a
+  // later HELLO carrying that raw MAC merges into the same entry. The HELLO
+  // must not touch lastRssi (it lives on espnowRssi instead).
+  LampRoster r;
+  r.addOrUpdateFromBle("jacko", "AA:BB:CC:DD:EE:FF", kNoColor, kNoColor, -72);
+  const uint8_t mac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFD};
+  r.addOrUpdateFromEspNow("jacko", mac, kNoColor, kNoColor, 0, 0, 0, nullptr,
+                          nullptr, false, 0, false, nullptr, false, -65);
+  TEST_ASSERT_EQUAL_UINT(1u, r.getAll().size());
+  TEST_ASSERT_EQUAL_INT8(-72, lastRssiByName(r, "jacko"));
+  TEST_ASSERT_EQUAL_INT8(-65, espnowRssiByName(r, "jacko"));
 }
 
 void test_esp_now_only_peer_has_sentinel_last_rssi() {
-  // A peer that ONLY appears via ESP-NOW (never via BLE scan) has no
-  // RSSI source — lastRssi stays at the -127 default.
-  lamp::LampRoster lamps;
-  lamps.addOrUpdateFromEspNow("phantom", -65);
-  TEST_ASSERT_EQUAL_INT8(-127, lamps.lastRssiOf("phantom"));
+  LampRoster r;
+  const uint8_t mac[6] = {0xC4, 0xDD, 0x57, 0xEB, 0x64, 0x60};
+  r.addOrUpdateFromEspNow("phantom", mac, kNoColor, kNoColor, 0, 0, 0, nullptr,
+                          nullptr, false, 0, false, nullptr, false, -65);
+  TEST_ASSERT_EQUAL_INT8(-127, lastRssiByName(r, "phantom"));
 }
 
-void test_roster_identity_is_raw_mac() {
-  // A mesh sighting is found by its raw mac; a BLE sighting recovers the
-  // mac as (scanned address - 2).
-  lamp::LampRoster roster;
-  uint8_t mac[6] = {0xC4, 0xDD, 0x57, 0xEB, 0x64, 0x60};
-  roster.addOrUpdateFromEspNow("flora", -50, mac);
-  lamp::RosterEntry out;
-  TEST_ASSERT_TRUE(roster.findByMac(mac, out));
-  TEST_ASSERT_EQUAL_STRING("C4:DD:57:EB:64:60", out.macStr().c_str());
-
-  roster.addOrUpdateFromBle("gramp", -40, "C4:DD:57:EB:64:62");
-  uint8_t derived[6] = {0xC4, 0xDD, 0x57, 0xEB, 0x64, 0x60};
-  lamp::RosterEntry out2;
-  TEST_ASSERT_TRUE(roster.findByMac(derived, out2));
-}
+// ---- MAC identity --------------------------------------------------------
 
 void test_esp_now_stores_raw_mac() {
-  // A peer first heard over ESP-NOW stores the raw mesh mac verbatim.
-  lamp::LampRoster lamps;
+  LampRoster r;
   const uint8_t mac[6] = {0xC4, 0xDD, 0x57, 0xEB, 0x64, 0x60};
-  lamps.addOrUpdateFromEspNow("phantom", -65, mac);
-  TEST_ASSERT_EQUAL_STRING("C4:DD:57:EB:64:60", lamps.macOf("phantom").c_str());
-}
-
-void test_esp_now_real_mac_wins_over_ble_derived() {
-  // The ESP-NOW mac is the source of truth. A mac recovered from a BLE
-  // scan is overwritten by the real mac from a later HELLO.
-  lamp::LampRoster lamps;
-  lamps.addOrUpdateFromBle("jacko", -72, "AA:BB:CC:DD:EE:FF");
-  const uint8_t mac[6] = {0xC4, 0xDD, 0x57, 0xEB, 0x64, 0x60};
-  lamps.addOrUpdateFromEspNow("jacko", -65, mac);
-  TEST_ASSERT_EQUAL_STRING("C4:DD:57:EB:64:60", lamps.macOf("jacko").c_str());
+  r.addOrUpdateFromEspNow("phantom", mac, kNoColor, kNoColor);
+  RosterEntry out;
+  TEST_ASSERT_TRUE(r.findByMac(mac, out));
+  TEST_ASSERT_EQUAL_STRING("C4:DD:57:EB:64:60", out.macStr().c_str());
 }
 
 void test_ble_derives_mac_minus_two() {
-  // A BLE-only sighting recovers the mesh mac as (scanned address - 2);
-  // NimBLEAddress::toString() is lowercase, formatted back canonical.
-  lamp::LampRoster lamps;
-  lamps.addOrUpdateFromBle("jacko", -72, "aa:bb:cc:dd:ee:ff");
-  TEST_ASSERT_EQUAL_STRING("AA:BB:CC:DD:EE:FD", lamps.macOf("jacko").c_str());
-}
-
-void test_ble_derived_mac_does_not_overwrite_real_mac() {
-  // ESP-NOW sets the real mac first; a later BLE sighting for the same
-  // name whose (address - 2) differs must NOT clobber it (the !hasMac
-  // guard). Fails if that guard is removed from the update branch.
-  lamp::LampRoster lamps;
-  const uint8_t realMac[6] = {0xC4, 0xDD, 0x57, 0xEB, 0x64, 0x60};
-  lamps.addOrUpdateFromEspNow("flora", -50, realMac);
-  lamps.addOrUpdateFromBle("flora", -40, "AA:BB:CC:DD:EE:FF");  // -2 = AA:..:FD
-  lamp::RosterEntry out;
-  TEST_ASSERT_TRUE(lamps.findByMac(realMac, out));
-  TEST_ASSERT_EQUAL_STRING("C4:DD:57:EB:64:60", lamps.macOf("flora").c_str());
+  LampRoster r;
+  r.addOrUpdateFromBle("jacko", "aa:bb:cc:dd:ee:ff", kNoColor, kNoColor, -72);
+  TEST_ASSERT_EQUAL_STRING("AA:BB:CC:DD:EE:FD", macStrByName(r, "jacko").c_str());
 }
 
 void test_ble_derives_mac_borrow_across_byte() {
-  // Last byte < 2 forces the subtract-2 borrow into the prior byte:
-  // 0x01 - 2 = 0xFF, carry -1 into 0xEE -> 0xED.
-  lamp::LampRoster lamps;
-  lamps.addOrUpdateFromBle("jacko", -72, "AA:BB:CC:DD:EE:01");
-  TEST_ASSERT_EQUAL_STRING("AA:BB:CC:DD:ED:FF", lamps.macOf("jacko").c_str());
+  LampRoster r;
+  r.addOrUpdateFromBle("jacko", "AA:BB:CC:DD:EE:01", kNoColor, kNoColor, -72);
+  TEST_ASSERT_EQUAL_STRING("AA:BB:CC:DD:ED:FF", macStrByName(r, "jacko").c_str());
+}
+
+void test_ble_and_mesh_same_lamp_merge_to_one_entry() {
+  // BLE address AA:..:FF recovers MAC AA:..:FD; a HELLO with that raw MAC is
+  // the same physical lamp and merges into one entry.
+  LampRoster r;
+  r.addOrUpdateFromBle("flora", "AA:BB:CC:DD:EE:FF", kNoColor, kNoColor, -40);
+  const uint8_t mac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFD};
+  r.addOrUpdateFromEspNow("flora", mac, kNoColor, kNoColor);
+  TEST_ASSERT_EQUAL_UINT(1u, r.getAll().size());
+}
+
+// ---- New MAC-keyed contract ----------------------------------------------
+
+// (a) Two peers, same name, different MAC -> two distinct entries.
+void test_same_name_distinct_mac_two_entries() {
+  LampRoster r;
+  const uint8_t macA[6] = {0xAA, 0x11, 0x22, 0x33, 0x44, 0x55};
+  const uint8_t macB[6] = {0xBB, 0x11, 0x22, 0x33, 0x44, 0x55};
+  r.addOrUpdateFromEspNow("twin", macA, kNoColor, kNoColor);
+  r.addOrUpdateFromEspNow("twin", macB, kNoColor, kNoColor);
+  TEST_ASSERT_EQUAL_UINT(2u, r.getAll().size());
+  RosterEntry out;
+  TEST_ASSERT_TRUE(r.findByMac(macA, out));
+  TEST_ASSERT_TRUE(r.findByMac(macB, out));
+}
+
+// (b) Same MAC, name changes -> one entry, name refreshed, acknowledged
+//     preserved -> not re-greeted.
+void test_same_mac_rename_updates_in_place_keeps_ack() {
+  LampRoster r;
+  r.addOrUpdateFromBle("flora", "AA:BB:CC:DD:EE:FF", kNoColor, kNoColor, -40);
+  const uint8_t mac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFD};
+  r.acknowledge(mac);
+  TEST_ASSERT_FALSE(hasUngreetedArrival(r));
+
+  r.addOrUpdateFromBle("renamed", "AA:BB:CC:DD:EE:FF", kNoColor, kNoColor, -40);
+  TEST_ASSERT_EQUAL_UINT(1u, r.getAll().size());
+  TEST_ASSERT_EQUAL_STRING("renamed", r.getAll()[0].name);
+  TEST_ASSERT_FALSE(hasUngreetedArrival(r));
+}
+
+// (c) acknowledge keyed by MAC: a rename cannot dodge the acknowledgement.
+void test_acknowledge_keyed_by_mac_survives_rename() {
+  LampRoster r;
+  const uint8_t mac[6] = {0xC4, 0xDD, 0x57, 0xEB, 0x64, 0x60};
+  r.addOrUpdateFromEspNow("orig", mac, kNoColor, kNoColor);
+  r.markNear(mac);
+  TEST_ASSERT_TRUE(hasUngreetedArrival(r));
+  r.acknowledge(mac);
+  TEST_ASSERT_FALSE(hasUngreetedArrival(r));
+  // Same MAC arrives advertising a different name; still acknowledged.
+  r.addOrUpdateFromEspNow("spoofed", mac, kNoColor, kNoColor);
+  r.markNear(mac);
+  TEST_ASSERT_FALSE(hasUngreetedArrival(r));
+}
+
+// (d) Prune-and-return by MAC re-fires (fresh entry, un-acked).
+void test_prune_and_return_refires() {
+  LampRoster r;
+  const uint8_t mac[6] = {0xC4, 0xDD, 0x57, 0xEB, 0x64, 0x60};
+  r.addOrUpdateFromEspNow("flora", mac, kNoColor, kNoColor);
+  r.markNear(mac);
+  r.acknowledge(mac);
+  TEST_ASSERT_FALSE(hasUngreetedArrival(r));
+
+  set_mock_millis(100000 + 240000 + 1);
+  r.prune(240000);
+  TEST_ASSERT_EQUAL_UINT(0u, r.getAll().size());
+
+  r.addOrUpdateFromEspNow("flora", mac, kNoColor, kNoColor);
+  r.markNear(mac);
+  TEST_ASSERT_TRUE(hasUngreetedArrival(r));
+}
+
+// (e) A BLE sighting whose address doesn't parse has no MAC to key on and is
+//     dropped (no entry).
+void test_unparseable_ble_address_dropped() {
+  LampRoster r;
+  r.addOrUpdateFromBle("junk", "not-a-mac", kNoColor, kNoColor, -50);
+  TEST_ASSERT_EQUAL_UINT(0u, r.getAll().size());
+}
+
+// (f) An empty-name HELLO (nameLen==0) must not blank a known display name on
+//     the merged entry. BLE stored "flora"; a nameless mesh sighting keeps it.
+void test_empty_hello_name_does_not_clobber_known_name() {
+  LampRoster r;
+  r.addOrUpdateFromBle("flora", "AA:BB:CC:DD:EE:FF", kNoColor, kNoColor, -40);
+  const uint8_t mac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFD};
+  r.addOrUpdateFromEspNow("", mac, kNoColor, kNoColor);
+  TEST_ASSERT_EQUAL_UINT(1u, r.getAll().size());
+  TEST_ASSERT_EQUAL_STRING("flora", r.getAll()[0].name);
+}
+
+// (g) Mirror of (f) on the BLE update branch: a nameless BLE adv merging onto a
+//     mesh-named entry keeps the known name.
+void test_empty_ble_name_does_not_clobber_known_name() {
+  LampRoster r;
+  const uint8_t mac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFD};
+  r.addOrUpdateFromEspNow("gramp", mac, kNoColor, kNoColor);
+  r.addOrUpdateFromBle("", "AA:BB:CC:DD:EE:FF", kNoColor, kNoColor, -40);
+  TEST_ASSERT_EQUAL_UINT(1u, r.getAll().size());
+  TEST_ASSERT_EQUAL_STRING("gramp", r.getAll()[0].name);
 }
 
 int main(int argc, char** argv) {
@@ -239,12 +242,17 @@ int main(int argc, char** argv) {
   RUN_TEST(test_ble_scan_sentinel_does_not_clobber_existing_value);
   RUN_TEST(test_esp_now_does_not_write_last_rssi);
   RUN_TEST(test_esp_now_only_peer_has_sentinel_last_rssi);
-  RUN_TEST(test_roster_identity_is_raw_mac);
   RUN_TEST(test_esp_now_stores_raw_mac);
-  RUN_TEST(test_esp_now_real_mac_wins_over_ble_derived);
   RUN_TEST(test_ble_derives_mac_minus_two);
-  RUN_TEST(test_ble_derived_mac_does_not_overwrite_real_mac);
   RUN_TEST(test_ble_derives_mac_borrow_across_byte);
+  RUN_TEST(test_ble_and_mesh_same_lamp_merge_to_one_entry);
+  RUN_TEST(test_same_name_distinct_mac_two_entries);
+  RUN_TEST(test_same_mac_rename_updates_in_place_keeps_ack);
+  RUN_TEST(test_acknowledge_keyed_by_mac_survives_rename);
+  RUN_TEST(test_prune_and_return_refires);
+  RUN_TEST(test_unparseable_ble_address_dropped);
+  RUN_TEST(test_empty_hello_name_does_not_clobber_known_name);
+  RUN_TEST(test_empty_ble_name_does_not_clobber_known_name);
 
   return UNITY_END();
 }

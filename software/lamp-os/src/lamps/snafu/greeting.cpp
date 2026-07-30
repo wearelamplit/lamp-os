@@ -34,11 +34,11 @@ lamp::GreetingState Greeting::greetingState() const {
   return gs;
 }
 
-void Greeting::doGreet(const lamp::RosterEntry& peer) {
+void Greeting::doGreet(const lamp::PeerView& peer) {
   arrivedColor_    = peer.baseColor;
   std::memcpy(greetedMac_, peer.mac, 6);
   greetedHasMac_   = peer.hasMac;
-  greetedLampId_   = peer.macStr();
+  greetedLampId_   = peer.lampId;
   greetStartMs_    = millis();
   stage2Done_      = false;
   stage3Done_      = false;
@@ -56,7 +56,7 @@ void Greeting::doGreet(const lamp::RosterEntry& peer) {
   if (onGreetingChange_) onGreetingChange_();
 }
 
-void Greeting::triggerGreeting(const lamp::RosterEntry& peer) {
+void Greeting::triggerGreeting(const lamp::PeerView& peer) {
   doGreet(peer);
 }
 
@@ -124,13 +124,10 @@ void Greeting::control() {
 
   if (lamp::overrides.shade.operatorEditing()) return;
 
-  lamp::RosterEntry arrival;
-  if (context_->lampRoster->bestUngreetedArrival(
-          kBleMaxAgeMs, millis(),
-          [](const lamp::RosterEntry&) { return true; }, arrival)) {
-    doGreet(arrival);
-    context_->lampRoster->acknowledge(arrival.name);
-  }
+  context_->forEachArrival(kBleMaxAgeMs, [this](const lamp::PeerView& p) {
+    doGreet(p);
+    return true;
+  });
 }
 
 void Greeting::draw() {

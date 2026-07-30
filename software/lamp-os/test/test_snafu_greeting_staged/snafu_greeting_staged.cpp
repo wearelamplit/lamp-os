@@ -3,14 +3,16 @@
 // Pins the three-tier, two-stage social greeting behaviour: stages fire on
 // elapsed time and SocialMode alone, gated only by the greeted peer having a
 // MAC. Mirrors the production logic inline (no Arduino / FreeRTOS) so the
-// tests compile on native. The production SocialMode enum and the
-// LampRoster queries it uses are reproduced verbatim; keep them in sync
-// with config_types.hpp and lamp_roster.hpp.
+// tests compile on native. The LampRoster surface mirrors the shipped
+// contract: MAC-keyed acknowledge and the single-best bestUngreetedArrival
+// scan (the caller acks by MAC on a greet). Keep in sync with
+// config_types.hpp and lamp_roster.hpp.
 
 #include <unity.h>
 
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <string>
 #include <vector>
 #include <map>
@@ -86,22 +88,27 @@ class LampRoster {
     store_.push_back(e);
   }
 
-  std::vector<RosterEntry> getUngreetedArrivals(uint32_t maxAgeMs) {
+  // Shipped arrival surface: fill `out` with a near, hasMac, unacknowledged
+  // peer (in-place scan, no ack). The caller acks by MAC after greeting.
+  bool bestUngreetedArrival(uint32_t maxAgeMs, RosterEntry& out) {
     uint32_t now = millis();
-    std::vector<RosterEntry> out;
     for (const auto& e : store_) {
-      if (e.lampId.empty()) continue;
+      if (!e.hasMac) continue;
       if (e.lastSeenNearMs == 0) continue;
       if ((now - e.lastSeenNearMs) > maxAgeMs) continue;
       if (e.acknowledged) continue;
-      out.push_back(e);
+      out = e;
+      return true;
     }
-    return out;
+    return false;
   }
 
-  void acknowledge(const std::string& name) {
+  void acknowledge(const uint8_t mac[6]) {
     for (auto& e : store_) {
-      if (e.name == name) { e.acknowledged = true; return; }
+      if (e.hasMac && std::memcmp(e.mac, mac, 6) == 0) {
+        e.acknowledged = true;
+        return;
+      }
     }
   }
 
@@ -165,8 +172,9 @@ struct GreetState {
 };
 
 // doGreet: start a greeting sequence (stage 1 implicit in tests via state set).
-static void doGreet(GreetState& g, const RosterEntry& peer,
-                    LampRoster& lamps) {
+// Mirrors production greeting.cpp doGreet: it does NOT ack. The caller acks by
+// MAC after the greet (the BehaviorContext::forEachArrival contract).
+static void doGreet(GreetState& g, const RosterEntry& peer) {
   g.active         = true;
   g.greetedName    = peer.name;
   g.greetedLampId  = peer.lampId;
@@ -176,7 +184,16 @@ static void doGreet(GreetState& g, const RosterEntry& peer,
   g.greetStartMs   = millis();
   g.stage2Done     = false;
   g.stage3Done     = false;
-  lamps.acknowledge(peer.name);
+}
+
+// Greet the closest ungreeted arrival, then ack it by MAC (the
+// BehaviorContext::forEachArrival contract). Returns the number greeted (0 or 1).
+static int greetFirstArrival(LampRoster& lamps, GreetState& g) {
+  RosterEntry arrival;
+  if (!lamps.bestUngreetedArrival(kBleMaxAgeMs, arrival)) return 0;
+  doGreet(g, arrival);
+  lamps.acknowledge(arrival.mac);
+  return 1;
 }
 
 // tickStages: call each control() iteration after doGreet. Fires stage 2
@@ -244,11 +261,8 @@ void test_introvert_no_mesh_sends() {
   lamps.seedMesh("flora", "AA:BB:CC:DD:EE:01", kBlue, kMacA,
                  s_nowMs - 100, s_nowMs - 100, false);
 
-  auto arrivals = lamps.getUngreetedArrivals(5000);
-  TEST_ASSERT_EQUAL_UINT(1, arrivals.size());
-
   lamp::GreetState g;
-  lamp::doGreet(g, arrivals[0], lamps);
+  TEST_ASSERT_EQUAL_INT(1, lamp::greetFirstArrival(lamps, g));
 
   // Jump past both stage thresholds.
   s_nowMs += 1500;
@@ -268,11 +282,8 @@ void test_ambivert_directed_only() {
   lamps.seedMesh("gramp", "AA:BB:CC:DD:EE:02", kRed, kMacB,
                  s_nowMs - 100, s_nowMs - 100, true);
 
-  auto arrivals = lamps.getUngreetedArrivals(5000);
-  TEST_ASSERT_EQUAL_UINT(1, arrivals.size());
-
   lamp::GreetState g;
-  lamp::doGreet(g, arrivals[0], lamps);
+  TEST_ASSERT_EQUAL_INT(1, lamp::greetFirstArrival(lamps, g));
 
   s_nowMs += 1500;
   lamp::tickStages(g, lamp::SocialMode::Ambivert, kStem, mgr);
@@ -292,11 +303,8 @@ void test_extrovert_directed_and_broadcast() {
   lamps.seedMesh("gramp", "AA:BB:CC:DD:EE:02", kRed, kMacB,
                  s_nowMs - 100, s_nowMs - 100, true);
 
-  auto arrivals = lamps.getUngreetedArrivals(5000);
-  TEST_ASSERT_EQUAL_UINT(1, arrivals.size());
-
   lamp::GreetState g;
-  lamp::doGreet(g, arrivals[0], lamps);
+  TEST_ASSERT_EQUAL_INT(1, lamp::greetFirstArrival(lamps, g));
 
   s_nowMs += 1500;
   lamp::tickStages(g, lamp::SocialMode::Extrovert, kStem, mgr);
@@ -340,7 +348,7 @@ void test_extrovert_no_send_when_peer_has_no_mac() {
   peer.lastSeenNearMs = s_nowMs - 100;
 
   lamp::GreetState g;
-  lamp::doGreet(g, peer, lamps);
+  lamp::doGreet(g, peer);
 
   s_nowMs += 1500;
   lamp::tickStages(g, lamp::SocialMode::Extrovert, kStem, mgr);
@@ -357,11 +365,8 @@ void test_extrovert_broadcast_two_color_palette() {
   lamps.seedMesh("flora", "AA:BB:CC:DD:EE:01", kBlue, kMacA,
                  s_nowMs - 100, s_nowMs - 100, false);
 
-  auto arrivals = lamps.getUngreetedArrivals(5000);
-  TEST_ASSERT_EQUAL_UINT(1, arrivals.size());
-
   lamp::GreetState g;
-  lamp::doGreet(g, arrivals[0], lamps);
+  TEST_ASSERT_EQUAL_INT(1, lamp::greetFirstArrival(lamps, g));
 
   s_nowMs += 1500;
   lamp::tickStages(g, lamp::SocialMode::Extrovert, kStem, mgr);
@@ -384,9 +389,8 @@ void test_stage2_does_not_fire_before_threshold() {
   lamps.seedMesh("flora", "AA:BB:CC:DD:EE:01", kBlue, kMacA,
                  s_nowMs - 100, s_nowMs - 100, false);
 
-  auto arrivals = lamps.getUngreetedArrivals(5000);
   lamp::GreetState g;
-  lamp::doGreet(g, arrivals[0], lamps);
+  lamp::greetFirstArrival(lamps, g);
 
   // Advance to just before the threshold.
   s_nowMs += lamp::kStage2Ms - 1;
@@ -403,9 +407,8 @@ void test_stage3_does_not_fire_before_threshold() {
   lamps.seedMesh("flora", "AA:BB:CC:DD:EE:01", kBlue, kMacA,
                  s_nowMs - 100, s_nowMs - 100, false);
 
-  auto arrivals = lamps.getUngreetedArrivals(5000);
   lamp::GreetState g;
-  lamp::doGreet(g, arrivals[0], lamps);
+  lamp::greetFirstArrival(lamps, g);
 
   // Advance past stage 2 but not stage 3.
   s_nowMs += lamp::kStage2Ms + 100;
@@ -431,7 +434,7 @@ void test_extrovert_sends_even_when_not_mesh_reachable() {
   peer.lastSeenNearMs = s_nowMs - 100;
 
   lamp::GreetState g;
-  lamp::doGreet(g, peer, lamps);
+  lamp::doGreet(g, peer);
 
   s_nowMs += 1500;
   lamp::tickStages(g, lamp::SocialMode::Extrovert, kStem, mgr);
@@ -447,9 +450,8 @@ void test_stages_fire_at_most_once() {
   lamps.seedMesh("flora", "AA:BB:CC:DD:EE:01", kBlue, kMacA,
                  s_nowMs - 100, s_nowMs - 100, false);
 
-  auto arrivals = lamps.getUngreetedArrivals(5000);
   lamp::GreetState g;
-  lamp::doGreet(g, arrivals[0], lamps);
+  lamp::greetFirstArrival(lamps, g);
 
   s_nowMs += 1500;
   lamp::tickStages(g, lamp::SocialMode::Extrovert, kStem, mgr);
@@ -460,9 +462,25 @@ void test_stages_fire_at_most_once() {
   TEST_ASSERT_EQUAL_UINT(2, mgr.sent.size());
 }
 
+// Greeting one arrival acks it by MAC; it does not re-arrive on the next
+// visitor pass. Pins the shipped MAC-keyed dedup contract.
+void test_greeted_arrival_acked_by_mac_not_regreeted() {
+  lamp::LampRoster lamps;
+
+  lamps.seedMesh("flora", "AA:BB:CC:DD:EE:01", kBlue, kMacA,
+                 s_nowMs - 100, s_nowMs - 100, false);
+
+  lamp::GreetState g;
+  TEST_ASSERT_EQUAL_INT(1, lamp::greetFirstArrival(lamps, g));
+
+  lamp::GreetState g2;
+  TEST_ASSERT_EQUAL_INT(0, lamp::greetFirstArrival(lamps, g2));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_introvert_no_mesh_sends);
+  RUN_TEST(test_greeted_arrival_acked_by_mac_not_regreeted);
   RUN_TEST(test_ambivert_directed_only);
   RUN_TEST(test_extrovert_directed_and_broadcast);
   RUN_TEST(test_extrovert_no_send_when_peer_has_no_mac);

@@ -146,6 +146,10 @@ struct ExpressionDescriptor {
   std::span<const ParamSpec> params;
   // Plain fn-ptr keeps the descriptor a constexpr literal (no heap, constexpr-safe).
   Expression* (*make)(FrameBuffer*) = nullptr;
+  // Framework-only expression: registry-backed so triggerInvocation can fire
+  // it, but omitted from serializeCatalog so it never surfaces in the app's
+  // editable catalog.
+  bool internal = false;
 };
 
 template <class T>

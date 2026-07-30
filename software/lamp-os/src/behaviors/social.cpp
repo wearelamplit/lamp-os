@@ -14,6 +14,7 @@
 #include "components/firmware/fs_ota.hpp"
 #include "components/firmware/firmware_receiver.hpp"
 #include "config/config.hpp"
+#include "util/bd_addr.hpp"
 #include "util/color.hpp"
 #include "util/easing.hpp"
 #include "util/fade.hpp"
@@ -301,14 +302,17 @@ void SocialBehavior::control() {
 
   // Re-greet window: even if the RosterEntry's acknowledged flag was reset
   // (peer pruned + returned), enforce a per-peer cooldown. The predicate runs
-  // in place under the roster mutex, so it stays allocation-free (the char-
-  // array name keys the transparent-comparator map without a std::string).
+  // in place under the roster mutex, so it stays allocation-free (the mac
+  // formats into a stack buffer that keys the transparent-comparator map
+  // without a std::string).
   RosterEntry arrival;
   const bool haveArrival = lampRoster.bestUngreetedArrival(
       LAMP_PRUNE_TIME_MS, now,
       [&](const RosterEntry& e) {
         if (regreetWindowMs == 0) return true;
-        auto last = lastGreetedAtMs_.find(e.name);
+        char idbuf[18];
+        formatBdAddr(e.mac, idbuf);
+        auto last = lastGreetedAtMs_.find(idbuf);
         return last == lastGreetedAtMs_.end() ||
                (now - last->second) >= regreetWindowMs;
       },
@@ -325,7 +329,7 @@ void SocialBehavior::control() {
                 (unsigned)tuning.pulseBackCount);
 #endif
   greetingPeerLampId_ = arrival.macStr();
-  lampRoster.acknowledge(arrival.name);
+  lampRoster.acknowledge(arrival.mac);
   foundLampColor = arrival.baseColor;
   std::memcpy(greetedMac_, arrival.mac, 6);
   greetedHasMac_ = arrival.hasMac;
@@ -337,7 +341,7 @@ void SocialBehavior::control() {
   }
   applyTuning(tuning);
 
-  markGreeted(arrival.name, now);
+  markGreeted(arrival.macStr(), now);
 
   // Introvert: trim the fatigue window, enter "tired" after too many
   // greetings burned through recently.
@@ -362,10 +366,11 @@ void SocialBehavior::control() {
   if (onGreetingChange_) onGreetingChange_();
 };
 
-void SocialBehavior::triggerGreeting(const RosterEntry& peer) {
+void SocialBehavior::triggerGreeting(const PeerView& peer) {
   const uint32_t now = millis();
-  const GreetingTuning tuning = personalityEngine.greetingFor(peer.macStr());
-  greetingPeerLampId_ = peer.macStr();
+  const std::string peerLampId = peer.lampId;
+  const GreetingTuning tuning = personalityEngine.greetingFor(peerLampId);
+  greetingPeerLampId_ = peerLampId;
   foundLampColor = peer.baseColor;
   std::memcpy(greetedMac_, peer.mac, 6);
   greetedHasMac_ = peer.hasMac;
@@ -376,11 +381,11 @@ void SocialBehavior::triggerGreeting(const RosterEntry& peer) {
     meshLink_->sendColorQuery(greetedMac_);
   }
   applyTuning(tuning);
-  lampRoster.acknowledge(peer.name);
+  lampRoster.acknowledge(peer.mac);
   playOnce();
   greetingWasActive_ = true;
   if (onGreetingChange_) onGreetingChange_();
-  markGreeted(peer.name, now);
+  markGreeted(peerLampId, now);
 }
 
 void SocialBehavior::onColorInfo(const uint8_t srcMac[6],
@@ -392,8 +397,8 @@ void SocialBehavior::onColorInfo(const uint8_t srcMac[6],
   greetedBaseStops_ = baseStops;
 }
 
-void SocialBehavior::markGreeted(const std::string& peerName, uint32_t nowMs) {
-  lastGreetedAtMs_[peerName] = nowMs;
+void SocialBehavior::markGreeted(const std::string& peerLampId, uint32_t nowMs) {
+  lastGreetedAtMs_[peerLampId] = nowMs;
   if (lastGreetedAtMs_.size() > MAX_GREETED_TRACKED) {
     auto oldest = lastGreetedAtMs_.begin();
     for (auto i = lastGreetedAtMs_.begin(); i != lastGreetedAtMs_.end(); ++i) {

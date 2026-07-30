@@ -30,7 +30,7 @@ void test_fresh_unacknowledged_returned() {
 void test_acknowledged_excluded() {
   LampRoster r;
   r.addOrUpdateFromBle("jacko", "AA:BB:CC:00:00:01", Color(), Color(), -50);
-  r.acknowledge("jacko");
+  r.acknowledge(r.getAll()[0].mac);
   RosterEntry out;
   TEST_ASSERT_FALSE(r.bestUngreetedArrival(5000, g_mock_millis, acceptAll, out));
 }
@@ -58,7 +58,7 @@ void test_mesh_only_not_near() {
   RosterEntry out;
   // Mesh-reachable but no near sighting yet: not a greeting candidate.
   TEST_ASSERT_FALSE(r.bestUngreetedArrival(5000, g_mock_millis, acceptAll, out));
-  r.markNear("meshpeer");
+  r.markNear(mac);
   TEST_ASSERT_TRUE(r.bestUngreetedArrival(5000, g_mock_millis, acceptAll, out));
 }
 

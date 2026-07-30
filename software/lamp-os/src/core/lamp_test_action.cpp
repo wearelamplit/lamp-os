@@ -176,7 +176,7 @@ void dispatchLampAction(JsonDocument& doc, unsigned long updateTimeMs) {
     if (ctx.greeting && lamp::parseBdAddr(lampIdC, peerMac) &&
         lamp::lampRoster.findByMac(peerMac, peer)) {
       if (!ctx.greeting->greetingState().active) {
-        ctx.greeting->triggerGreeting(peer);
+        ctx.greeting->triggerGreeting(lamp::PeerView::from(peer));
       }
     }
   } else if (action == "test_expression_complete") {

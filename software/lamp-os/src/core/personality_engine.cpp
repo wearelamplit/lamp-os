@@ -80,132 +80,14 @@ CrowdComposition PersonalityEngine::crowdComposition() const {
   return c;
 }
 
-namespace {
-
-// Waveform profiles in compositor frames (~60 fps). Anchored on
-// kProfileStandard (Ambivert greeting a Neutral peer) = ~2.8s in / 16s hold /
-// 2.5s out, the neutral baseline. Every profile holds >= 5s so no greeting
-// reads as a blink, every ramp is >= 2s so nothing snaps, and the ease-out
-// lengthens with warmth for a reluctant goodbye. Disposition reads in the
-// MOTION as much as the timing: warm greetings swell in and smooth back out;
-// snubs hold a deep dim floor (pulseBackStrength) so a brush-off reads as a
-// cold-shoulder, not a quick flash.
-struct Profile {
-  uint32_t total;
-  uint32_t easeIn;
-  uint32_t hold;
-  uint32_t fadeOut;
-  uint8_t  pulseBackStrength;
-  uint8_t  pulseBackCount;
-  uint16_t breathCycleFrames;
-  bool     snub;
-  Easing   easeInCurve;
-  Easing   easeOutCurve;
-  Easing   breathCurve;
-};
-
-// Warm-breath cycle lengths (frames at ~60 fps). Warmer disposition breathes
-// faster; a 3 s floor keeps even the eagerest breath from reading as a
-// flutter. Bench-tunable. Non-pulsing profiles carry the default; the field is
-// inert when pulseBackStrength is 0.
-constexpr uint16_t kDefaultBreathFrames  = 120;
-constexpr uint16_t kWarmBreathFrames     = 300;  // ~5.0 s, slow + calm
-constexpr uint16_t kEnthusedBreathFrames = 240;  // ~4.0 s
-constexpr uint16_t kEffusiveBreathFrames = 180;  // ~3.0 s, eager
-
-// 5s at ~60 fps; the shortest a greeting lingers. Bench-tunable.
-constexpr uint32_t kMinHoldFrames = 300;
-
-constexpr Profile kProfileMinimal           = {1080, 180,  780, 120, 0, 0, kDefaultBreathFrames, false,
-                                                Easing::Smooth, Easing::Smooth, Easing::Float};
-constexpr Profile kProfileGentle            = {1176, 156,  840, 180, 0, 0, kDefaultBreathFrames, false,
-                                                Easing::Swell, Easing::Smooth, Easing::Float};
-constexpr Profile kProfileStandard          = {1278, 168,  960, 150, 0, 0, kDefaultBreathFrames, false,
-                                                Easing::Smooth, Easing::Smooth, Easing::Float};
-// Warm pulse depths are a gentle glow-breath, not a flash. Bench-tunable.
-constexpr uint8_t kWarmPulseDim     = 50;
-constexpr uint8_t kEnthusedPulseDim = 65;
-constexpr uint8_t kEffusivePulseDim = 80;
-
-// Warm greetings breathe for the entire hold; depth + cycle speed carry the
-// disposition (deeper + faster = more excited).
-constexpr Profile kProfileWarm              = {1404, 144, 1020, 240, kWarmPulseDim,
-                                                kPulseCountContinuous, kWarmBreathFrames, false,
-                                                Easing::Swell, Easing::Smooth, Easing::Float};
-constexpr Profile kProfileEnthused          = {1512, 132, 1080, 300, kEnthusedPulseDim,
-                                                kPulseCountContinuous, kEnthusedBreathFrames, false,
-                                                Easing::Swell, Easing::Smooth, Easing::Smooth};
-constexpr Profile kProfileEffusive          = {1620, 120, 1140, 360, kEffusivePulseDim,
-                                                kPulseCountContinuous, kEffusiveBreathFrames, false,
-                                                Easing::Swell, Easing::Smooth, Easing::Smooth};
-// Snub dim depth: 191 → ~25% brightness, 165 → ~35%. A real cold floor,
-// never fully off. Bench-tunable.
-constexpr uint8_t kFullSnubDim    = 191;
-constexpr uint8_t kPartialSnubDim = 165;
-
-constexpr Profile kProfileSnub              = {540, 120, kMinHoldFrames, 120, kFullSnubDim, 1, kDefaultBreathFrames, true,
-                                                Easing::Smooth, Easing::Smooth, Easing::Float};
-constexpr Profile kProfilePartialSnub       = {570, 120, kMinHoldFrames, 150, kPartialSnubDim, 1, kDefaultBreathFrames, true,
-                                                Easing::Smooth, Easing::Smooth, Easing::Float};
-
-GreetingTuning toTuning(const Profile& p) {
-  GreetingTuning t;
-  t.totalFrames       = p.total;
-  t.easeInFrames      = p.easeIn;
-  t.holdFrames        = p.hold;
-  t.fadeOutFrames     = p.fadeOut;
-  t.pulseBackStrength = p.pulseBackStrength;
-  t.pulseBackCount    = p.pulseBackCount;
-  t.breathCycleFrames = p.breathCycleFrames;
-  t.snub              = p.snub;
-  t.easeInCurve       = p.easeInCurve;
-  t.easeOutCurve      = p.easeOutCurve;
-  t.breathCurve       = p.breathCurve;
-  return t;
-}
-
-// (SocialMode × Disposition) → Profile.
-const Profile& profileFor(lamp::SocialMode mode, uint8_t disposition) {
-  switch (disposition) {
-    case 1:  // Salty
-      return kProfileSnub;
-    case 2:  // Wary
-      return kProfilePartialSnub;
-    case 4:  // Fond
-      switch (mode) {
-        case lamp::SocialMode::Introvert: return kProfileGentle;
-        case lamp::SocialMode::Ambivert:  return kProfileWarm;
-        case lamp::SocialMode::Extrovert: return kProfileEnthused;
-      }
-      return kProfileWarm;
-    case 5:  // Smitten
-      switch (mode) {
-        case lamp::SocialMode::Introvert: return kProfileWarm;
-        case lamp::SocialMode::Ambivert:  return kProfileEnthused;
-        case lamp::SocialMode::Extrovert: return kProfileEffusive;
-      }
-      return kProfileEnthused;
-    case 3:  // Neutral (also the default for unknown peers)
-    default:
-      switch (mode) {
-        case lamp::SocialMode::Introvert: return kProfileMinimal;
-        case lamp::SocialMode::Ambivert:  return kProfileStandard;
-        case lamp::SocialMode::Extrovert: return kProfileStandard;
-      }
-      return kProfileStandard;
-  }
-}
-
-}  // namespace
-
 GreetingTuning PersonalityEngine::greetingFor(const std::string& peerLampId) const {
-  if (!config_) return toTuning(kProfileStandard);
+  if (!config_) return greetingTuningFor(SocialMode::Ambivert, 3);
   const SocialMode mode = config_->lamp.socialMode;
   // Empty lampId → Neutral profile. Avoids accidentally matching a stray
   // empty key in dispositions_.
-  if (peerLampId.empty()) return toTuning(profileFor(mode, 3));
+  if (peerLampId.empty()) return greetingTuningFor(mode, 3);
   const uint8_t disp = config_->getDisposition(peerLampId);  // unknown → 3
-  return toTuning(profileFor(mode, disp));
+  return greetingTuningFor(mode, disp);
 }
 
 #if defined(LAMP_TEST) || defined(LAMP_DEBUG)

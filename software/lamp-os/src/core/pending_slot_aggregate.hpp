@@ -51,6 +51,7 @@ struct PendingSlotAggregate {
   PendingTypedSlot<PendingWispState>          wispState;
   PendingTypedSlot<PendingCommand>            command;
   PendingTypedSlot<PendingEvent>              event;
+  PendingTypedSlot<PendingBid>                bid;
   PendingTypedSlot<PendingColorQuery>         colorQuery;
   PendingTypedSlot<PendingColorInfo>          colorInfo;
   PendingTypedSlot<PendingFirmwareControl>    firmwareControl;

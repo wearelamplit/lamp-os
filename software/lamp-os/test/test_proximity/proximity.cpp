@@ -55,7 +55,7 @@ void test_markNear_sets_near() {
   RosterEntry out;
   r.addOrUpdateFromEspNow("meshpeer", mac, Color(), Color());
   TEST_ASSERT_FALSE(r.bestUngreetedArrival(240000, g_mock_millis, acceptAll, out));
-  r.markNear("meshpeer");
+  r.markNear(mac);
   TEST_ASSERT_TRUE(r.bestUngreetedArrival(240000, g_mock_millis, acceptAll, out));
 }
 

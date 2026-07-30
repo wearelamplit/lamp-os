@@ -1,9 +1,13 @@
 // software/lamp-os/src/core/lamp.hpp
 #pragma once
 
+#include <memory>
+#include <vector>
+
 #include "core/hw_config.hpp"
 #include "core/lamp_features.hpp"
 #include "core/behavior_stack_builder.hpp"
+#include "components/input/input_source.hpp"
 #include "config/config.hpp"
 
 namespace lamp {
@@ -38,6 +42,10 @@ class Lamp {
   // overrides to register its own set.
   virtual void registerExpressions(ExpressionRegistry& reg);
 
+  // Look up a boot-built input driver by its HwConfig id, or null. A variant
+  // binds gestures in createBehaviors via source->asButton()/asTouch().
+  input::InputSource* inputById(uint8_t id) const;
+
  protected:
   virtual void createBehaviors(BehaviorStackBuilder&) = 0;
   virtual Features featuresEnabled() const { return Features::All; }
@@ -45,6 +53,10 @@ class Lamp {
 
  private:
   HwConfig hw_;
+  // Input drivers built once from hw_.inputs at setup(); ticked before the
+  // compositor each loop. Empty on variants that declare no inputs.
+  std::vector<std::unique_ptr<input::InputSource>> inputs_;
+  void tickInputs(uint32_t nowMs);
   // Internal framework members (compositor, BLE, mesh, OTA timing) live as
   // file-scope statics in lamp.cpp, single-Lamp-per-binary by design. The
   // extern declarations in apply_brightness.hpp etc. resolve to those
@@ -83,6 +95,7 @@ class Lamp {
   void drainColorQuery();
   void drainColorInfo();
   void drainEvent();
+  void drainBid();
   void drainFirmwareControl();
 };
 

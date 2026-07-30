@@ -174,6 +174,7 @@ void initBehaviors(lamp::Features features, lamp::Lamp& self) {
   behaviorCtx.shadeConfigurator = &shadeConfiguratorBehavior;
   // Mesh + identity surface for custom behaviors
   behaviorCtx.lampRoster = &lamp::lampRoster;
+  behaviorCtx.meshLink = &meshLink;
   // bind() the override instances. From here on apply()/restore() will
   // drive the right configurator's beginFade.
   lamp::overrides.base.bind(behaviorCtx, lamp_protocol::OverrideSurface::Base);

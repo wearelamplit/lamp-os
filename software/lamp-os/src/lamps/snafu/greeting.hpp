@@ -5,7 +5,6 @@
 #include <vector>
 #include "behaviors/greetable.hpp"
 #include "core/animated_behavior.hpp"
-#include "components/network/mesh/lamp_roster.hpp"
 #include "util/color.hpp"
 
 namespace lamp { class MeshLink; }
@@ -25,7 +24,7 @@ class Greeting : public AnimatedBehavior, public lamp::Greetable {
   void control() override;
 
   // Greetable: play a greeting for the given peer immediately.
-  void triggerGreeting(const lamp::RosterEntry& peer) override;
+  void triggerGreeting(const lamp::PeerView& peer) override;
 
   lamp::GreetingState greetingState() const override;
 
@@ -38,7 +37,7 @@ class Greeting : public AnimatedBehavior, public lamp::Greetable {
                    const std::vector<Color>& shadeStops) override;
 
  private:
-  void doGreet(const lamp::RosterEntry& peer);
+  void doGreet(const lamp::PeerView& peer);
   void tickStages();
 
   static constexpr uint32_t kGlitchFrames    = 10;

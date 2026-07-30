@@ -49,6 +49,12 @@ class ConfiguratorBehavior : public AnimatedBehavior {
   void beginFade(const std::vector<Color>& targetColors,
                  uint32_t fadeDurationMs);
 
+  // Non-allocating instant solid fill. Fills `colors` in place (no per-call
+  // vector alloc, unlike beginFade) and keeps the configurator playing so
+  // draw() writes it. The mood scrub calls this per step; a raw beginFade
+  // there would fragment the heap.
+  void setSolid(Color c);
+
   // ColorOverride/BLE color writes need to read back the
   // fade-tracking state to decide whether the configurator is mid-fade.
   // Exposed publicly so the override modules can drive the transition

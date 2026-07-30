@@ -75,7 +75,7 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   // Greetable: play a greeting for the given peer immediately, bypassing
   // discovery and cooldown gates. Stamps re-greet tracking so the natural
   // cooldown applies on the next organic sighting.
-  void triggerGreeting(const RosterEntry& peer) override;
+  void triggerGreeting(const PeerView& peer) override;
 
   // Copy a greeting waveform from the engine into the draw-side fields
   // (including `frames`, which AnimatedBehavior's playOnce/nextFrame
@@ -104,7 +104,8 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   // Stamp the per-peer re-greet timestamp + per-mode cooldown without
   // running the discovery / cooldown gates. Called by triggerGreeting so
   // forced greetings still enforce the natural cooldown on the next sighting.
-  void markGreeted(const std::string& peerName, uint32_t nowMs);
+  // `peerLampId` is the peer's MAC string (RosterEntry::macStr()).
+  void markGreeted(const std::string& peerLampId, uint32_t nowMs);
 
   // Throttle the gossip-OTA peer scan to this cadence. Lamps emit HELLO
   // every 1-2s, so 500 ms catches every fresh sighting while saving the

@@ -58,6 +58,7 @@ void postPendingWispPaint(const PendingWispPaint& src);
 void postPendingWispState(const PendingWispState& src);
 void postPendingCommand(const PendingCommand& src);
 void postPendingEvent(const PendingEvent& src);
+void postPendingBid(const PendingBid& src);
 void postPendingColorQuery(const PendingColorQuery& src);
 void postPendingColorInfo(const PendingColorInfo& src);
 
@@ -115,6 +116,11 @@ class MeshLink {
 
   // Broadcast a MSG_EVENT frame; payload is the ExpressionInvocation JSON.
   bool sendEvent(const uint8_t* payloadJson, size_t len);
+
+  // Broadcast a MSG_BID frame (broadcast, no relay, command_auth-tagged).
+  // Fires no local greeting. Rate-limited by kBidSendCooldownMs regardless of
+  // bidType; a call inside the window returns false without sending.
+  bool sendBid(uint8_t bidType);
 
   bool sendColorQuery(const uint8_t targetMac[6]);
   bool sendColorInfo(const uint8_t targetMac[6],
@@ -192,6 +198,7 @@ class MeshLink {
   // greet-storm plus the resend copies below don't evict a still-live
   // (mac, seq) before its duplicate lands.
   lamp_protocol::DedupRing<32> eventDedup_;
+  lamp_protocol::DedupRing<16> bidDedup_;
   lamp_protocol::DedupRing<32> colorQueryDedup_;
   lamp_protocol::DedupRing<32> colorInfoDedup_;
   // Single shared dedup for the MSG_FW_* family. One sender owns all
@@ -230,6 +237,8 @@ class MeshLink {
   ResendRing<lamp_protocol::COLOR_INFO_MAX_SIZE, 4> colorInfoResend_;
   uint16_t commandSeq_    = 0;
   uint16_t eventSeq_      = 0;
+  uint16_t bidSeq_        = 0;
+  uint32_t lastBidSendMs_ = 0;
   uint16_t colorQuerySeq_ = 0;
   uint16_t colorInfoSeq_  = 0;
 
