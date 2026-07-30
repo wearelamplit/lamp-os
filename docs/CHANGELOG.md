@@ -4,6 +4,17 @@ Notable changes per firmware version. The version is the root `VERSION` file;
 add an entry here in the **same change** that bumps it. Highlights grouped
 Added / Fixed / Changed, not every commit.
 
+## 1.1.8
+
+### Fixed
+- **App→wisp control ops now survive a dropped frame.** Forwarding a
+  `setManualPalette` / `setSource` from the paired lamp to the wisp was a single
+  unacked unicast; on the C6 wisp's bursty RX-scan a lone dropped frame silently
+  lost the op, so a saved palette could never reach the wisp. The lamp now
+  re-sends the op a few times spaced apart (each copy still unicast and
+  MAC-acked, collapsed by the wisp's dedup), so it lands even when the first
+  frame is dropped.
+
 ## 1.1.7
 
 Consolidates every post-1.1.6 bench iteration into one release. Highlights:

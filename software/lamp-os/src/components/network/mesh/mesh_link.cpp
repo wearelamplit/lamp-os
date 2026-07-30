@@ -61,6 +61,9 @@ void MeshLink::tick() {
     link_.broadcast(frame, len);
   };
   controlOpResend_.service(now, send);
+  controlOpUnicastResend_.service(now, [this](const uint8_t* frame, size_t len) {
+    link_.send(&frame[lamp_protocol::HEADER_SIZE], frame, len);
+  });
   commandResend_.service(now, send);
   colorQueryResend_.service(now, send);
   colorInfoResend_.service(now, send);
@@ -138,7 +141,9 @@ bool MeshLink::sendControlOpUnicast(const uint8_t targetMac[6],
                                                  payload, payloadLen);
   if (!n) return false;
   controlOpDedup_.record(myMac_, lamp_protocol::MSG_CONTROL_OP, controlOpSeq_ - 1);
-  return link_.send(targetMac, buf, n);
+  const bool ok = link_.send(targetMac, buf, n);
+  controlOpUnicastResend_.enqueue(buf, n, millis(), kResends, kResendGapMs);
+  return ok;
 }
 
 bool MeshLink::sendCommand(const uint8_t targetMac[6],
