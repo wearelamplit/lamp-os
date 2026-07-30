@@ -20,6 +20,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../../_support/in_memory_ble_client.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
+import 'package:lamp_app/core/utils/string_case.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/features/control/application/control_notifier.dart';
 import 'package:lamp_app/features/control/application/control_state.dart';
@@ -157,7 +158,7 @@ Future<void> _pump(WidgetTester tester) async {
 // interpolation; the real painted value lives on the inner Container that
 // _AnimatedContainerState.build() constructs each tick, so read that one.
 Color? _rowColor(WidgetTester tester, String name) {
-  final nameFinder = find.text(name);
+  final nameFinder = find.text(name.toTitleCase());
   if (nameFinder.evaluate().isEmpty) return null;
   final animContainers = find.ancestor(
     of: nameFinder,

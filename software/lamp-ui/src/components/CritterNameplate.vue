@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import CritterIcon from './CritterIcon.vue'
 import { SAFE_COLOR } from '../utils/configShape'
+import { toTitleCase } from '../utils/stringCase'
 
 const props = withDefaults(
   defineProps<{ name?: string; lampId?: string; baseColor?: string; shadeColor?: string; size?: number }>(),
@@ -23,7 +24,7 @@ const isUnnamed = computed(() => !props.name)
     </div>
     <div class="text">
       <div class="preamble">Hello my name is:</div>
-      <div class="lampname" :class="{ unnamed: isUnnamed }">{{ isUnnamed ? 'a nameless friend' : name }}</div>
+      <div class="lampname" :class="{ unnamed: isUnnamed }">{{ isUnnamed ? 'a nameless friend' : toTitleCase(name!) }}</div>
     </div>
   </div>
 </template>

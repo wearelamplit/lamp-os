@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:lamp_app/core/utils/string_case.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -115,7 +116,7 @@ class _LampTile extends ConsumerWidget {
       deviceId: lamp.id,
       colors: resolveLampColors(near: lamp),
       status: status,
-      name: lamp.name.isEmpty ? '(unnamed)' : lamp.name,
+      name: lamp.name.isEmpty ? '(unnamed)' : lamp.name.toTitleCase(),
       rssi: lamp.rssi,
       onTap: () => _onTap(context, ref),
     );

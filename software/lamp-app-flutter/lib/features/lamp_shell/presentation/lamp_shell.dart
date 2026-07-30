@@ -1,5 +1,6 @@
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
+import 'package:lamp_app/core/utils/string_case.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -78,7 +79,8 @@ class _LampShellState extends ConsumerState<LampShell> {
     final inventory = ref.watch(inventoryNotifierProvider).value;
     final name = inventory
             ?.firstWhereOrNull((l) => l.id == widget.lampId)
-            ?.name ??
+            ?.name
+            .toTitleCase() ??
         widget.lampId;
 
     // `select` so the shell only rebuilds when the connection state

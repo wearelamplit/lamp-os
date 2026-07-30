@@ -152,7 +152,7 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(find.text('← pick another lamp'), findsOneWidget);
-    expect(find.textContaining(_lampName), findsOneWidget);
+    expect(find.textContaining('Gramp'), findsOneWidget);
   });
 
   testWidgets('overlay absent once the lamp is connected', (tester) async {
@@ -197,7 +197,7 @@ void main() {
     await tester.pump();
 
     Text lineText() => tester.widget<Text>(find.byWidgetPredicate(
-        (w) => w is Text && w.data != null && w.data!.contains(_lampName)));
+        (w) => w is Text && w.data != null && w.data!.contains('Gramp')));
     final firstLine = lineText().data;
 
     await tester.pump(const Duration(seconds: 4));

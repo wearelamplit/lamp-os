@@ -140,7 +140,7 @@ void main() {
       ),
     ));
     await tester.pumpAndSettle();
-    expect(find.text('Pixel Knockout · jacko'), findsOneWidget);
+    expect(find.text('Pixel Knockout · Jacko'), findsOneWidget);
   });
 
   testWidgets('tapping the bar on a row sets that pixel via setKnockoutPixel',

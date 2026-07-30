@@ -1,5 +1,6 @@
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
+import 'package:lamp_app/core/utils/string_case.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/back_button_leading.dart';
@@ -129,7 +130,8 @@ class _KnockoutScreenState extends ConsumerState<KnockoutScreen> {
     final inv = ref.watch(inventoryNotifierProvider).value;
     final name = inv
             ?.firstWhereOrNull((l) => l.id == widget.lampId)
-            ?.name ??
+            ?.name
+            .toTitleCase() ??
         widget.lampId;
 
     // Knockout count is sourced from the same async state the body renders.

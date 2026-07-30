@@ -20,6 +20,7 @@ import {
   segmentsFromPalette,
 } from './utils/configShape'
 import { blendedIdentity, hexwwToRgb } from './utils/colorUtils'
+import { toTitleCase } from './utils/stringCase'
 
 // Firmware does a full-replace on PUT: any field omitted from the body resets
 // to its firmware default on the post-save reboot. So we GET the whole doc,
@@ -651,7 +652,7 @@ onUnmounted(() => {
                   />
                 </div>
                 <div class="nearby-name">
-                  {{ lamp.name }}
+                  {{ toTitleCase(lamp.name) }}
                   <span v-if="dispositionLabel(lamp.lampId)" class="nearby-disposition">
                     {{ dispositionLabel(lamp.lampId) }}
                   </span>
@@ -915,7 +916,7 @@ onUnmounted(() => {
               :base="dispModalLamp.base"
             />
           </div>
-          <div class="disp-name">{{ dispModalLamp.name }}</div>
+          <div class="disp-name">{{ toTitleCase(dispModalLamp.name) }}</div>
           <button type="button" class="disp-close" aria-label="Close" @click="closeDisposition">×</button>
         </div>
         <p class="disp-prompt">How does your lamp feel about this one?</p>

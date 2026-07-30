@@ -1,6 +1,7 @@
 #include "config/config_codec.hpp"
 
 #include "util/color.hpp"
+#include "util/str.hpp"
 
 namespace lamp {
 namespace config_codec {
@@ -70,7 +71,7 @@ void fromJson(JsonObject root, LampSettings& lamp, BaseSettings& base,
   // lampType is firmware-owned (see Config::setLampType).
   // Inbound settings_blob writes intentionally do not update it; the app
   // can read but not write the variant identity.
-  lamp.name = std::string(lampNode["name"] | "stray");
+  lamp.name = asciiLower(std::string(lampNode["name"] | "stray"));
   lamp.brightness = lampNode["brightness"] | 100;
   std::string password = std::string(lampNode["password"] | "");
   if (!password.empty()) {

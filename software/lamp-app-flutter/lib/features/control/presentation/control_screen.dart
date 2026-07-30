@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lamp_app/core/utils/string_case.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/friendly_error.dart';
@@ -92,7 +93,7 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
                                 ),
                               ),
                               Text(
-                                state.lamp.name,
+                                state.lamp.name.toTitleCase(),
                                 style: tt.displaySmall?.copyWith(
                                   color: cs.onSurface,
                                   fontWeight: FontWeight.w800,

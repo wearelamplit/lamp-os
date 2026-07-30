@@ -1,5 +1,6 @@
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
+import 'package:lamp_app/core/utils/string_case.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -33,7 +34,7 @@ class AddLampDoneStep extends ConsumerWidget {
             .firstWhereOrNull((l) => l.id == state.deviceId)
             ?.isMesh ??
         false;
-    final name = state.name.isEmpty ? 'Your lamp' : state.name;
+    final name = state.name.isEmpty ? 'Your lamp' : state.name.toTitleCase();
     final textTheme = Theme.of(context).textTheme;
     return SingleChildScrollView(
       padding: const EdgeInsets.all(AppSpace.xl),

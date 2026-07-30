@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lamp_app/core/utils/string_case.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_spacing.dart';
@@ -41,7 +42,7 @@ class NearbyLampsScreen extends ConsumerWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              l.name.isEmpty ? '(unnamed)' : l.name,
+                              l.name.isEmpty ? '(unnamed)' : l.name.toTitleCase(),
                               style: textTheme.titleMedium,
                             ),
                             Text(

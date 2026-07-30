@@ -52,7 +52,7 @@ Future<ProviderContainer> _makeContainer({
 Future<void> _pumpToData(WidgetTester tester) async {
   for (var i = 0; i < 30; i++) {
     await tester.pump(const Duration(milliseconds: 16));
-    if (find.text('jacko').evaluate().isNotEmpty) return;
+    if (find.text('Jacko').evaluate().isNotEmpty) return;
   }
 }
 
@@ -76,7 +76,7 @@ void main() {
     await _pumpToData(tester);
 
     expect(find.text('Name'), findsOneWidget);
-    expect(find.text('jacko'), findsOneWidget);
+    expect(find.text('Jacko'), findsOneWidget);
   });
 
   testWidgets('Home Mode row shows "Off" when SSID empty', (tester) async {

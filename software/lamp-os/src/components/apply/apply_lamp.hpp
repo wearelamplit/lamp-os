@@ -10,6 +10,7 @@
 
 #include "config/config.hpp"
 #include "components/apply/apply_brightness.hpp"
+#include "util/str.hpp"
 
 // config is defined as `lamp::Config config;` at file scope in
 // lamp.cpp; it lives at ::config, not ::lamp::config.
@@ -30,7 +31,7 @@ namespace apply {
 inline void lampLocal(JsonObject obj, uint8_t maxBrightness) {
   if (obj.isNull()) return;
   if (obj["name"].is<const char*>()) {
-    ::config.lamp.name = obj["name"].as<const char*>();
+    ::config.lamp.name = asciiLower(std::string(obj["name"].as<const char*>()));
     ::lamp::updateAdvertisedDeviceName(::config.lamp.name.c_str());
   }
   if (obj["brightness"].is<int>()) {

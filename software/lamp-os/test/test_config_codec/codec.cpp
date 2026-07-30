@@ -51,6 +51,16 @@ void test_empty_blob_uses_class_defaults() {
   TEST_ASSERT_TRUE(m.shade.broadcastColors()[0] == kShadeDefaultColor);
 }
 
+void test_name_stored_lowercase() {
+  Model mixed;
+  parseInto("{\"lamp\":{\"name\":\"Jacko\"}}", mixed);
+  TEST_ASSERT_EQUAL_STRING("jacko", mixed.lamp.name.c_str());
+
+  Model words;
+  parseInto("{\"lamp\":{\"name\":\"LIVING ROOM\"}}", words);
+  TEST_ASSERT_EQUAL_STRING("living room", words.lamp.name.c_str());
+}
+
 void test_apbootminutes_defaults_and_round_trip() {
   Model absent;
   parseInto("{}", absent);
@@ -317,6 +327,7 @@ void test_homemode_round_trip_new_fields() {
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_empty_blob_uses_class_defaults);
+  RUN_TEST(test_name_stored_lowercase);
   RUN_TEST(test_apbootminutes_defaults_and_round_trip);
   RUN_TEST(test_brightnessceiling_defaults_and_round_trip);
   RUN_TEST(test_socialmode_out_of_range_falls_back_to_ambivert);

@@ -71,7 +71,7 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('Welcome home, jacko.'), findsOneWidget);
+    expect(find.text('Welcome home, Jacko.'), findsOneWidget);
     expect(find.byType(RecoloredCritter), findsOneWidget);
     final continueBtn = find.widgetWithText(FilledButton, 'Continue');
     expect(continueBtn, findsOneWidget);

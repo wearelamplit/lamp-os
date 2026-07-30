@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:lamp_app/core/utils/string_case.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -82,12 +83,13 @@ class _SetupBody extends ConsumerWidget {
         SettingsRow(
           icon: Icons.label_outline,
           title: 'Name',
-          subtitle: state.lamp.name.isEmpty ? '(unnamed)' : state.lamp.name,
+          subtitle:
+              state.lamp.name.isEmpty ? '(unnamed)' : state.lamp.name.toTitleCase(),
           onTap: () => showRenameDialog(
             context,
             title: 'Rename lamp',
             label: 'Name',
-            initial: state.lamp.name,
+            initial: state.lamp.name.toTitleCase(),
             onSave: (name) => n().setLampName(name),
           ),
         ),

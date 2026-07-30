@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lamp_app/core/utils/string_case.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/app_spacing.dart';
@@ -168,7 +169,7 @@ class _PaintedLampRow extends StatelessWidget {
         children: [
           Expanded(
             child: Text(
-              name,
+              name.toTitleCase(),
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                 fontWeight: FontWeight.w500,
                 fontSize: 14,

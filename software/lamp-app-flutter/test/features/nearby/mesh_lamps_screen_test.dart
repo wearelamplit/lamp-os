@@ -131,8 +131,8 @@ void main() {
     expect(find.text('BT-ONLY'), findsOneWidget);
     expect(find.text('NEAR'), findsNothing);
     expect(find.text('FAR'), findsNothing);
-    expect(find.text('meshpeer'), findsOneWidget);
-    expect(find.text('btpeer'), findsOneWidget);
+    expect(find.text('Meshpeer'), findsOneWidget);
+    expect(find.text('Btpeer'), findsOneWidget);
   });
 
   testWidgets('self row renders send pill with resolved receiver name '
@@ -168,6 +168,6 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.text('→ gramp'), findsOneWidget);
+    expect(find.text('→ Gramp'), findsOneWidget);
   });
 }

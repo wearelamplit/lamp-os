@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lamp_app/core/utils/string_case.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/app_spacing.dart';
@@ -73,7 +74,7 @@ class _AddLampPasswordStepState extends ConsumerState<AddLampPasswordStep> {
         _confirm.text.isNotEmpty && _confirm.text != state.password;
     final canContinue = state.password.isNotEmpty &&
         _confirm.text == state.password;
-    final name = state.name.isEmpty ? 'your lamp' : state.name;
+    final name = state.name.isEmpty ? 'your lamp' : state.name.toTitleCase();
     return Padding(
       padding: const EdgeInsets.all(AppSpace.xl),
       // SizedBox.expand fills the Padding's width so `crossAxisAlignment

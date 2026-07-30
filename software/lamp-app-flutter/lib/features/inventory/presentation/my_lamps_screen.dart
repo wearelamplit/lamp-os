@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:lamp_app/core/utils/string_case.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -164,10 +165,10 @@ class _LampTile extends ConsumerWidget {
         ref.invalidate(controlNotifierProvider(lamp.id));
         if (!context.mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Cleared cached password for ${lamp.name}')),
+          SnackBar(content: Text('Cleared cached password for ${lamp.name.toTitleCase()}')),
         );
       case _LampAction.remove:
-        if (!await _confirmRemoveDialog(context, lamp.name)) return;
+        if (!await _confirmRemoveDialog(context, lamp.name.toTitleCase())) return;
         // If this was the active lamp, repoint activeLampNotifier so nothing
         // dangles at a deleted id.
         final activeBefore = ref.read(activeLampNotifierProvider).value;
@@ -231,7 +232,7 @@ class _LampTile extends ConsumerWidget {
       deviceId: (lamp.lampId?.isNotEmpty ?? false) ? lamp.lampId! : lamp.id,
       colors: colors,
       status: status,
-      name: lamp.name,
+      name: lamp.name.toTitleCase(),
       rssi: hit?.rssi,
       highlighted: isCurrent,
       onTap: () => _onTap(context, ref),

@@ -1,5 +1,6 @@
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
+import 'package:lamp_app/core/utils/string_case.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -54,7 +55,7 @@ class _BtOnlyLampScreenState extends ConsumerState<BtOnlyLampScreen> {
     final inventory =
         ref.watch(inventoryNotifierProvider).value ?? const [];
     final lamp = inventory.firstWhereOrNull((l) => l.id == lampId);
-    final name = lamp?.name ?? lampId;
+    final name = lamp?.name.toTitleCase() ?? lampId;
 
     // Auto-recovery: if a fresh adv reports `isMesh: true`, the lamp is
     // mesh-capable after all (the previous adv was stale or the lamp

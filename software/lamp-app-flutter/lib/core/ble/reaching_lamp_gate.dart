@@ -3,6 +3,7 @@ import 'dart:math';
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
+import 'package:lamp_app/core/utils/string_case.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
@@ -65,7 +66,7 @@ class _ReachingLampGateState extends ConsumerState<ReachingLampGate> {
           state.maybeWhen(data: (d) => !d.connected, orElse: () => false);
       if (reaching) {
         final name = state.maybeWhen(
-            data: (d) => d.lamp.name, orElse: () => 'your lamp');
+            data: (d) => d.lamp.name.toTitleCase(), orElse: () => 'your lamp');
         overlay = _ReachingOverlay(
           lampId: id,
           name: name,

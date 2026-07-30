@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lamp_app/core/utils/string_case.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -27,7 +28,7 @@ class AddLampMeetStep extends ConsumerWidget {
     final notifier = ref.read(addLampNotifierProvider.notifier);
     final state = ref.watch(addLampNotifierProvider);
     final textTheme = Theme.of(context).textTheme;
-    final name = state.name.isEmpty ? 'your lamp' : state.name;
+    final name = state.name.isEmpty ? 'your lamp' : state.name.toTitleCase();
     final ready = state.status == AddLampStatus.ready;
     final failed = state.status == AddLampStatus.error &&
         state.error == AddLampError.connectFailed;

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:lamp_app/core/utils/string_case.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -97,7 +98,7 @@ class SocialScreen extends ConsumerWidget {
       for (final l in nearby)
         if (l.name.isNotEmpty && !isSelf(l))
           _SocialLampRow(
-            name: invFor(l)?.name ?? l.name,
+            name: (invFor(l)?.name ?? l.name).toTitleCase(),
             lampId: l.lampId,
             baseColor: _colorFromRgbw(
                 displayRgbw(l.baseRgbw, legacyOnlyBle: l.viaBle && !l.viaEspNow)),

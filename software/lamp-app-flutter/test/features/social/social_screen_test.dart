@@ -195,7 +195,7 @@ void main() {
     // Settle the disposition async build (it reads via BleClient).
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.text('jacko'), findsOneWidget);
+    expect(find.text('Jacko'), findsOneWidget);
     // Disposition value 4 → "fond" label.
     expect(find.text('fond'), findsOneWidget);
     expect(find.text('Near'), findsNothing);
@@ -228,7 +228,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.textContaining('No lamps nearby'), findsOneWidget);
-    expect(find.text('jacko'), findsNothing);
+    expect(find.text('Jacko'), findsNothing);
   });
 
   testWidgets('same-named peer with different lampId is not self-filtered',
@@ -258,7 +258,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.text('floral'), findsOneWidget);
+    expect(find.text('Floral'), findsOneWidget);
     expect(find.textContaining('No lamps nearby'), findsNothing);
   });
 
@@ -327,7 +327,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.text('jacko'), findsOneWidget);
+    expect(find.text('Jacko'), findsOneWidget);
     expect(find.text('fond'), findsOneWidget);
 
     // Rename simulation: same lampId, new name. Production parallel:
@@ -342,8 +342,8 @@ void main() {
     ]);
     await tester.pump();
 
-    expect(find.text('jacko'), findsNothing);
-    expect(find.text('jacko-test'), findsOneWidget);
+    expect(find.text('Jacko'), findsNothing);
+    expect(find.text('Jacko-Test'), findsOneWidget);
     // Disposition (lampId-keyed) is unchanged because the lampId
     // didn't change: only the display name did.
     expect(find.text('fond'), findsOneWidget);
@@ -446,8 +446,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
 
     // Inventory wins: row label is jacko-test, not jacko.
-    expect(find.text('jacko-test'), findsOneWidget);
-    expect(find.text('jacko'), findsNothing);
+    expect(find.text('Jacko-Test'), findsOneWidget);
+    expect(find.text('Jacko'), findsNothing);
     // Disposition (lampId-keyed) still resolves correctly.
     expect(find.text('fond'), findsOneWidget);
   });

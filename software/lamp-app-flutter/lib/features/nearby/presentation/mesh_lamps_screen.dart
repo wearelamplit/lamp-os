@@ -1,5 +1,6 @@
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
+import 'package:lamp_app/core/utils/string_case.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/app_channel.dart';
@@ -71,7 +72,7 @@ class _Roster extends ConsumerWidget {
       final match = inventory?.firstWhereOrNull(
         (l) => l.lampId != null && l.lampId!.toLowerCase() == mac.toLowerCase(),
       );
-      return match?.name ?? mac;
+      return match?.name.toTitleCase() ?? mac;
     }
     // A lamp receiving an OTA is HELLO-silent, so it can't self-report.
     // Derive the inbound edge: map each sender's target MAC to the sender's
@@ -80,7 +81,7 @@ class _Roster extends ConsumerWidget {
     for (final p in peersAsync.value!) {
       final target = p.otaSendingTo;
       if (target != null && target.isNotEmpty) {
-        receivingFrom[target.toLowerCase()] = p.name;
+        receivingFrom[target.toLowerCase()] = p.name.toTitleCase();
       }
     }
     String? senderLabel(LampNearbyPeer p) =>
@@ -238,7 +239,7 @@ class _PeerCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  peer.name.isEmpty ? '(unnamed)' : peer.name,
+                  peer.name.isEmpty ? '(unnamed)' : peer.name.toTitleCase(),
                   style: textTheme.titleMedium,
                 ),
                 const SizedBox(height: AppSpace.xs),
