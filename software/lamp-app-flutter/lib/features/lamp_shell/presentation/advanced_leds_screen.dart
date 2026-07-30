@@ -29,10 +29,14 @@ import '../../control/application/control_notifier.dart';
 /// reboots and reconnects (~8–12 s), then pops on success. Cancel rewinds
 /// per-segment px and byte order to the pre-screen-open values without
 /// writing to the lamp.
-// 20 Ah battery. Interpolate the two firmware draw anchors to the ceiling.
+// 20 Ah battery. Interpolate the two firmware draw anchors (LED-only) to the
+// ceiling, plus the MCU+radio floor the anchors omit: a dark lamp measures
+// ~134 mA total vs the ~55 mA LED-idle anchor, so ~80 mA is the ESP32 + radio.
+const _mcuRadioBaselineMa = 80;
 String batteryEstimateLabel(int idleMa, int fullMa, int ceiling) {
   if (fullMa <= idleMa) return '';
-  final drawMa = idleMa + (fullMa - idleMa) * ceiling / 255.0;
+  final drawMa =
+      idleMa + (fullMa - idleMa) * ceiling / 255.0 + _mcuRadioBaselineMa;
   if (drawMa <= 0) return '';
   final hours = 20000 / drawMa;
   return '~${hours.toStringAsFixed(hours < 10 ? 1 : 0)} h on a 20 Ah battery (estimated)';

@@ -6,12 +6,10 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/routing/routes.dart';
 import '../../../../core/theme/app_spacing.dart';
-import '../../../../core/theme/brand_extras.dart';
-import '../../../../core/widgets/critter_icon.dart';
-import '../../../../core/widgets/lamp_card.dart';
 import '../../../../core/widgets/status_dot.dart';
 import '../../../inventory/application/inventory_notifier.dart';
 import '../../../inventory/domain/lamp_colors.dart';
+import '../../../inventory/presentation/lamp_grid_tile.dart';
 import '../../../nearby/application/nearby_lamps_notifier.dart';
 import '../../../nearby/domain/nearby_lamp.dart';
 import '../../application/add_lamp_notifier.dart';
@@ -53,17 +51,24 @@ class AddLampScanStep extends ConsumerWidget {
         ),
       );
     }
-    return ListView.separated(
-      padding: const EdgeInsets.all(AppSpace.lg),
-      itemCount: lamps.length,
-      separatorBuilder: (_, index) => const SizedBox(height: AppSpace.sm),
-      itemBuilder: (context, i) => _LampRow(lamp: lamps[i]),
+    return GridView(
+      padding: const EdgeInsets.fromLTRB(
+          AppSpace.lg, AppSpace.md, AppSpace.lg, AppSpace.xl),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 200, // deliberate dimension, not spacing
+        mainAxisSpacing: AppSpace.md,
+        crossAxisSpacing: AppSpace.md,
+        childAspectRatio: 0.88,
+      ),
+      children: [
+        for (final lamp in lamps) _LampTile(lamp: lamp),
+      ],
     );
   }
 }
 
-class _LampRow extends ConsumerWidget {
-  const _LampRow({required this.lamp});
+class _LampTile extends ConsumerWidget {
+  const _LampTile({required this.lamp});
   final NearbyLamp lamp;
 
   Future<void> _onTap(BuildContext context, WidgetRef ref) async {
@@ -102,95 +107,17 @@ class _LampRow extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final colors = resolveLampColors(near: lamp);
-    return InkWell(
-      borderRadius: BorderRadius.circular(AppRadius.card),
+    // BLE adv reports this lamp is bluetooth-reachable; `isMesh`
+    // distinguishes mesh-protocol firmware (green dot) from legacy
+    // BT-only (blue dot).
+    final status = lamp.isMesh ? StatusKind.mesh : StatusKind.bluetooth;
+    return LampGridTile(
+      deviceId: lamp.id,
+      colors: resolveLampColors(near: lamp),
+      status: status,
+      name: lamp.name.isEmpty ? '(unnamed)' : lamp.name,
+      rssi: lamp.rssi,
       onTap: () => _onTap(context, ref),
-      child: LampCard(
-        padding: const EdgeInsets.all(AppSpace.md),
-        child: Row(
-          children: [
-            // BLE adv reports this lamp is bluetooth-reachable; the
-            // `isMesh` flag distinguishes mesh-protocol firmware from
-            // legacy BT-only. Light green for mesh, faded blue for BT.
-            StatusDot(
-              kind: lamp.isMesh
-                  ? StatusKind.mesh
-                  : StatusKind.bluetooth,
-              size: 14,
-            ),
-            const SizedBox(width: AppSpace.md),
-            CritterIcon(
-              deviceId: lamp.id,
-              shade: colors.shade ?? colorScheme.onSurfaceVariant,
-              base: colors.base ?? colorScheme.onSurfaceVariant,
-              size: 44,
-            ),
-            const SizedBox(width: AppSpace.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    lamp.name.isEmpty ? '(unnamed)' : lamp.name,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  Text(
-                    '${lamp.id} · ${lamp.rssi} dBm',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            _Pill(
-              factoryDefault: lamp.isFactoryDefault,
-              isMesh: lamp.isMesh,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _Pill extends StatelessWidget {
-  const _Pill({required this.factoryDefault, required this.isMesh});
-  final bool factoryDefault;
-  final bool isMesh;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final extras = context.brandExtras;
-    final Color base;
-    final String label;
-    if (!isMesh) {
-      base = colorScheme.onSurfaceVariant;
-      label = 'legacy';
-    } else if (factoryDefault) {
-      base = colorScheme.secondary;
-      label = 'adopt';
-    } else {
-      base = extras.success;
-      label = 'add';
-    }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: AppSpace.sm, vertical: AppSpace.xs),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999), // pill shape, not spacing
-        color: base.withValues(alpha: 0.18),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 10,
-          color: base,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
     );
   }
 }

@@ -7,9 +7,6 @@ import 'package:go_router/go_router.dart';
 import '../../../core/routing/routes.dart';
 import '../../../core/ble/ble_client_provider.dart';
 import '../../../core/theme/app_spacing.dart';
-import '../../../core/widgets/critter_icon.dart';
-import '../../../core/widgets/status_dot.dart';
-import '../../control/application/advanced_session.dart';
 import '../../control/application/control_notifier.dart';
 import '../../firmware/application/firmware_notifier.dart';
 import '../../firmware/domain/firmware_state.dart';
@@ -22,16 +19,16 @@ import '../../nearby/application/lamp_route_resolver.dart';
 import '../../nearby/application/nearby_lamps_notifier.dart';
 import '../../nearby/application/scan_grace_provider.dart';
 import '../../nearby/domain/nearby_lamp.dart';
-import '../domain/last_seen.dart';
+import 'lamp_grid_tile.dart';
 
 /// Unified lamp picker. The app's landing screen for users with at least
 /// one lamp, and also the destination of LampShell's "switch lamp" action.
 ///
-/// One full-screen widget, one ordered list (no online/offline section
-/// headers), both delete affordances (swipe + long-press), and an "Adopt
-/// a lamp" entry at the end. Tile order is connected → in-range → most-
-/// recently-seen → alphabetical so the "online" lamps float to the top
-/// without a separate section.
+/// One full-screen widget, one ordered grid of critter tiles (no
+/// online/offline section headers), a long-press action sheet per tile, and
+/// an "Adopt a lamp" tile at the end. The active lamp is
+/// pinned to the top; the rest hold a fixed alphabetical order (see
+/// [sortMyLamps]) so tiles don't churn as lamps move in and out of range.
 ///
 /// The scanner is mounted while this screen is alive (via the watch on
 /// `nearbyLampsNotifierProvider`) and torn down when the user navigates
@@ -48,16 +45,22 @@ class MyLampsScreen extends ConsumerWidget {
     final inScanGrace = ref.watch(scanGraceActiveProvider);
     final nearbyById = <String, NearbyLamp>{for (final n in nearby) n.id: n};
 
-    final ordered = _sortInventory(inventory, nearbyById, activeId);
+    final ordered = sortMyLamps(inventory, activeId);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('My lamps'),
       ),
       body: SafeArea(
-        child: ListView(
+        child: GridView(
           padding: const EdgeInsets.fromLTRB(
-              AppSpace.lg, AppSpace.sm, AppSpace.lg, AppSpace.xl),
+              AppSpace.lg, AppSpace.md, AppSpace.lg, AppSpace.xl),
+          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: 200, // deliberate dimension, not spacing
+            mainAxisSpacing: AppSpace.md,
+            crossAxisSpacing: AppSpace.md,
+            childAspectRatio: 0.88,
+          ),
           children: [
             for (final lamp in ordered)
               _LampTile(
@@ -66,9 +69,6 @@ class MyLampsScreen extends ConsumerWidget {
                 isCurrent: lamp.id == activeId,
                 inScanGrace: inScanGrace,
               ),
-            const SizedBox(height: AppSpace.sm),
-            const Divider(height: 1),
-            const SizedBox(height: AppSpace.sm),
             const _AddLampTile(),
           ],
         ),
@@ -77,31 +77,19 @@ class MyLampsScreen extends ConsumerWidget {
   }
 }
 
-/// Order: connected first → in-range (mesh or bluetooth) → most-recently-
-/// seen → alphabetical by name. Inventory's natural order is the
-/// tiebreaker for entries with identical last-seen timestamps (so two
-/// never-seen lamps fall back to their adoption order).
-List<InventoryLamp> _sortInventory(
-  List<InventoryLamp> inv,
-  Map<String, NearbyLamp> nearbyById,
-  String? activeId,
-) {
-  int rank(InventoryLamp l) {
-    if (l.id == activeId) return 0;
-    final hit = nearbyById[l.id];
-    if (hit != null) return hit.isMesh ? 1 : 2;
-    return 3;
-  }
-
+/// The active lamp pins to the top; every other lamp orders alphabetically by
+/// name (case-insensitive), with `id` as a stable tiebreak so equal names
+/// don't shuffle. No RSSI / last-seen term, so a lamp moving in and out of
+/// range never reorders the list.
+List<InventoryLamp> sortMyLamps(List<InventoryLamp> inv, String? activeId) {
   final sorted = [...inv];
   sorted.sort((a, b) {
-    final ra = rank(a);
-    final rb = rank(b);
-    if (ra != rb) return ra - rb;
-    final aSeen = a.lastSeenEpochMs ?? 0;
-    final bSeen = b.lastSeenEpochMs ?? 0;
-    if (aSeen != bSeen) return bSeen.compareTo(aSeen);
-    return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    final aActive = a.id == activeId;
+    final bActive = b.id == activeId;
+    if (aActive != bActive) return aActive ? -1 : 1;
+    final byName = a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    if (byName != 0) return byName;
+    return a.id.compareTo(b.id);
   });
   return sorted;
 }
@@ -154,6 +142,15 @@ class _LampTile extends ConsumerWidget {
               ),
               onTap: () => Navigator.pop(ctx, _LampAction.resetPassword),
             ),
+            ListTile(
+              leading: Icon(Icons.delete_outline,
+                  color: Theme.of(ctx).colorScheme.error),
+              title: Text(
+                'Remove',
+                style: TextStyle(color: Theme.of(ctx).colorScheme.error),
+              ),
+              onTap: () => Navigator.pop(ctx, _LampAction.remove),
+            ),
           ],
         ),
       ),
@@ -169,6 +166,24 @@ class _LampTile extends ConsumerWidget {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Cleared cached password for ${lamp.name}')),
         );
+      case _LampAction.remove:
+        if (!await _confirmRemoveDialog(context, lamp.name)) return;
+        // If this was the active lamp, repoint activeLampNotifier so nothing
+        // dangles at a deleted id.
+        final activeBefore = ref.read(activeLampNotifierProvider).value;
+        await ref.read(inventoryNotifierProvider.notifier).remove(lamp.id);
+        ref.invalidate(controlNotifierProvider(lamp.id));
+        if (lamp.id == activeBefore) {
+          final remaining =
+              ref.read(inventoryNotifierProvider).value ?? const [];
+          if (remaining.isEmpty) {
+            await ref.read(activeLampNotifierProvider.notifier).clear();
+          } else {
+            await ref
+                .read(activeLampNotifierProvider.notifier)
+                .set(remaining.first.id);
+          }
+        }
     }
   }
 
@@ -208,176 +223,19 @@ class _LampTile extends ConsumerWidget {
     );
     final hit = nearbyById[lamp.id];
     final colors = resolveLampColors(inv: lamp, near: hit);
-    final colorScheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
 
-    // Discoverable delete via swipe-left + long-press for users who learned
-    // that gesture.
-    return Dismissible(
-      key: ValueKey(lamp.id),
-      direction: DismissDirection.endToStart,
-      background: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.symmetric(horizontal: AppSpace.xl),
-        color: colorScheme.error,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.delete_outline, color: colorScheme.onError),
-            const SizedBox(width: AppSpace.sm),
-            Text(
-              'Remove',
-              style: TextStyle(
-                color: colorScheme.onError,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
-      confirmDismiss: (_) async {
-        return await _confirmRemoveDialog(context, lamp.name);
-      },
-      onDismissed: (_) async {
-        // Swipe is the only remove path. confirmDismiss already prompted, so
-        // no dialog here: just remove and, if this was the active lamp,
-        // repoint activeLampNotifier so nothing dangles at a deleted id.
-        final activeBefore = ref.read(activeLampNotifierProvider).value;
-        await ref.read(inventoryNotifierProvider.notifier).remove(lamp.id);
-        ref.invalidate(controlNotifierProvider(lamp.id));
-        if (lamp.id == activeBefore) {
-          final remaining =
-              ref.read(inventoryNotifierProvider).value ?? const [];
-          if (remaining.isEmpty) {
-            await ref.read(activeLampNotifierProvider.notifier).clear();
-          } else {
-            await ref
-                .read(activeLampNotifierProvider.notifier)
-                .set(remaining.first.id);
-          }
-        }
-      },
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadius.card),
-        // Every tile is tappable, even offline ones. The user may want
-        // to navigate to a lamp's screen to wait for its reconnect or
-        // see its last-known state, even when not currently in range.
-        onTap: () => _onTap(context, ref),
-        onLongPress: () => _showLampActions(context, ref),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpace.sm, vertical: AppSpace.md),
-          child: Row(
-            children: [
-              StatusDot(kind: status, size: 14), // deliberate dimension, not spacing
-              const SizedBox(width: AppSpace.md),
-              CritterIcon(
-                deviceId: (lamp.lampId?.isNotEmpty ?? false)
-                    ? lamp.lampId!
-                    : lamp.id,
-                shade: colors.shade ?? colorScheme.onSurfaceVariant,
-                base: colors.base ?? colorScheme.onSurfaceVariant,
-                size: 44,
-              ),
-              const SizedBox(width: AppSpace.md),
-              Expanded(
-                child: Text(
-                  lamp.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: textTheme.titleMedium,
-                ),
-              ),
-              // Right-side detail. In advanced mode (session-unlock for
-              // this lamp), the firmware/version line replaces the
-              // status text: the operator already knows the lamp is
-              // in range from the dot, and the version is the more
-              // valuable info. Plain widget (no Flexible) so it pins to
-              // the right edge; the Expanded name above absorbs the
-              // remaining space and ellipsizes if needed.
-              if (ref.watch(advancedSessionProvider(lamp.id)))
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 160),
-                  child: _FirmwareInfo(lamp: lamp),
-                )
-              else
-                Text(
-                  _subtitle(status, lamp),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: textTheme.bodySmall,
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  String _subtitle(StatusKind status, InventoryLamp lamp) {
-    switch (status) {
-      case StatusKind.otaBusy:
-        return 'Updating…';
-      case StatusKind.mesh:
-        return 'In range';
-      case StatusKind.bluetooth:
-        return 'Bluetooth only';
-      case StatusKind.searching:
-        return 'Searching…';
-      case StatusKind.offline:
-        if (lamp.lastSeenEpochMs == null) return 'Not seen yet';
-        return formatLastSeen(lamp.lastSeenEpochMs!, DateTime.now());
-    }
-  }
-}
-
-/// Single-line firmware identity shown in the tile when the lamp is
-/// in advanced mode. Reads from inventory's persisted fwVersion /
-/// fwChannel (mirrored from the live LampSection in ControlNotifier)
-/// so it renders for offline lamps too.
-///
-/// Format: `{major}.{minor}.{patch}-{channel} ({lampType})`, e.g.
-/// `1.0.82-stable (standard)`. Pieces with missing data are dropped:
-/// no channel → `1.0.82 (standard)`; no type → `1.0.82-stable`; no
-/// version → render `—` so the column collapses politely.
-class _FirmwareInfo extends StatelessWidget {
-  const _FirmwareInfo({required this.lamp});
-  final InventoryLamp lamp;
-
-  String _formatVersion(int? packed) {
-    if (packed == null) return '';
-    final major = (packed >> 16) & 0xFF;
-    final minor = (packed >> 8) & 0xFF;
-    final patch = packed & 0xFF;
-    return '$major.$minor.$patch';
-  }
-
-  String _channelTail(String? raw) {
-    if (raw == null || raw.isEmpty) return '';
-    // v0x04 channels carry `{lampType}-{channel}`. Strip the variant
-    // prefix so the user sees `stable` / `beta`, not `standard-stable`.
-    return raw.contains('-') ? raw.split('-').last : raw;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final version = _formatVersion(lamp.fwVersion);
-    final channel = _channelTail(lamp.fwChannel);
-    final type = (lamp.lampType ?? '').trim();
-
-    final buf = StringBuffer();
-    if (version.isEmpty) {
-      buf.write('-');
-    } else {
-      buf.write(version);
-      if (channel.isNotEmpty) buf..write('-')..write(channel);
-      if (type.isNotEmpty) buf..write(' (')..write(type)..write(')');
-    }
-
-    return Text(
-      buf.toString(),
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: Theme.of(context).textTheme.bodySmall,
+    // Every tile is tappable, even offline ones. The user may want to
+    // navigate to a lamp's screen to wait for its reconnect or see its
+    // last-known state, even when not currently in range.
+    return LampGridTile(
+      deviceId: (lamp.lampId?.isNotEmpty ?? false) ? lamp.lampId! : lamp.id,
+      colors: colors,
+      status: status,
+      name: lamp.name,
+      rssi: hit?.rssi,
+      highlighted: isCurrent,
+      onTap: () => _onTap(context, ref),
+      onLongPress: () => _showLampActions(context, ref),
     );
   }
 }
@@ -393,26 +251,29 @@ class _AddLampTile extends StatelessWidget {
       borderRadius: BorderRadius.circular(AppRadius.card),
       onTap: () => GoRouter.maybeOf(context)?.push(AppRoutes.addLamp),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: AppSpace.sm, vertical: AppSpace.md),
-        child: Row(
+        padding: const EdgeInsets.all(AppSpace.md),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppRadius.card),
+          border: Border.all(color: colorScheme.outlineVariant),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 44, // deliberate dimension, not spacing
-              height: 44,
+              width: 64, // deliberate dimension, not spacing
+              height: 64,
               decoration: BoxDecoration(
                 color: colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(AppSpace.sm),
+                shape: BoxShape.circle,
               ),
               child: Icon(Icons.add, color: colorScheme.onSurface),
             ),
-            const SizedBox(width: AppSpace.md),
-            Expanded(
-              child: Text(
-                'Adopt a lamp',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
+            const SizedBox(height: AppSpace.sm),
+            Text(
+              'Adopt a lamp',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleSmall,
             ),
-            Icon(Icons.chevron_right, color: colorScheme.onSurfaceVariant),
           ],
         ),
       ),
@@ -420,7 +281,7 @@ class _AddLampTile extends StatelessWidget {
   }
 }
 
-/// Confirmation dialog used by both the swipe and long-press delete paths.
+/// Confirmation gate for the long-press remove action.
 Future<bool> _confirmRemoveDialog(BuildContext context, String lampName) async {
   final ok = await showDialog<bool>(
     context: context,
@@ -449,4 +310,4 @@ Future<bool> _confirmRemoveDialog(BuildContext context, String lampName) async {
   return ok == true;
 }
 
-enum _LampAction { resetPassword }
+enum _LampAction { resetPassword, remove }

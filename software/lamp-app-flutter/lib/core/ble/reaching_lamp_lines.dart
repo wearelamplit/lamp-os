@@ -16,8 +16,12 @@ const List<String> reachingLampLines = [
   'Almost got {name}…',
 ];
 
-String reachingLampLine(String template, String name) =>
-    template.replaceAll('{name}', name);
+String reachingLampLine(String template, String name) {
+  final line = template.replaceAll('{name}', name);
+  // Sentence-case the rendered line so a {name}-first template (lamp names are
+  // lowercase) still opens with a capital, matching the word-led lines.
+  return line.isEmpty ? line : line[0].toUpperCase() + line.substring(1);
+}
 
 // Emits every element once per shuffled pass before reshuffling, so no line
 // repeats until the whole set has played.

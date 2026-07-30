@@ -5,10 +5,19 @@ import '../theme/brand_extras.dart';
 enum StatusKind { offline, bluetooth, mesh, searching, otaBusy }
 
 class StatusDot extends StatefulWidget {
-  const StatusDot({super.key, required this.kind, this.size = 10});
+  const StatusDot({
+    super.key,
+    required this.kind,
+    this.size = 10,
+    this.brightness = 1.0,
+  });
 
   final StatusKind kind;
   final double size;
+
+  /// Dims the mesh (green) dot to encode signal strength: 1.0 full bright,
+  /// lower = weaker. Ignored for every other [StatusKind].
+  final double brightness;
 
   @override
   State<StatusDot> createState() => _StatusDotState();
@@ -76,7 +85,8 @@ class _StatusDotState extends State<StatusDot>
     final color = switch (widget.kind) {
       StatusKind.offline => colorScheme.onSurfaceVariant.withValues(alpha: 0.35),
       StatusKind.bluetooth => colorScheme.tertiary.withValues(alpha: 0.7),
-      StatusKind.mesh => context.brandExtras.success,
+      StatusKind.mesh =>
+        context.brandExtras.success.withValues(alpha: widget.brightness),
       StatusKind.otaBusy => colorScheme.secondary,
       StatusKind.searching =>
         colorScheme.onSurfaceVariant.withValues(alpha: 0.35), // unreachable
