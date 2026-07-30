@@ -66,6 +66,23 @@ void test_rejects_oversized_inflate(void) {
     bool ok = Compression::maybeInflate(z.data(), static_cast<size_t>(zlen),
                                         aurora_NotificationEnvelope_size, out);
     TEST_ASSERT_FALSE(ok);
+    // The bomb must never force an alloc past the budget (never a 32 KB window).
+    TEST_ASSERT_LESS_OR_EQUAL(aurora_NotificationEnvelope_size, out.size());
+}
+
+void test_inflates_small_zlib_frame(void) {
+    const char* text = "aurora palette state, small and compressible payload";
+    std::vector<uint8_t> src(text, text + std::strlen(text));
+    mz_ulong zlen = mz_compressBound(static_cast<mz_ulong>(src.size()));
+    std::vector<uint8_t> z(zlen);
+    TEST_ASSERT_EQUAL(MZ_OK, mz_compress(z.data(), &zlen, src.data(),
+                                         static_cast<mz_ulong>(src.size())));
+    std::vector<uint8_t> out;
+    bool ok = Compression::maybeInflate(z.data(), static_cast<size_t>(zlen),
+                                        aurora_NotificationEnvelope_size, out);
+    TEST_ASSERT_TRUE(ok);
+    TEST_ASSERT_EQUAL(src.size(), out.size());
+    TEST_ASSERT_EQUAL_MEMORY(src.data(), out.data(), src.size());
 }
 
 int main(int, char**) {
@@ -73,5 +90,6 @@ int main(int, char**) {
     RUN_TEST(test_decodes_palette_state);
     RUN_TEST(test_scratch_resets_between_decodes);
     RUN_TEST(test_rejects_oversized_inflate);
+    RUN_TEST(test_inflates_small_zlib_frame);
     return UNITY_END();
 }

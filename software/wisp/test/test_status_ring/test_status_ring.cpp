@@ -188,6 +188,34 @@ void test_ten_stops_no_buffer_overrun(void) {
   TEST_ASSERT_EQUAL_UINT8(9 * 10, out[lastBase + 2]);
 }
 
+void test_ring_fade_weight_endpoints_and_clamp(void) {
+  TEST_ASSERT_EQUAL_UINT8(0, wisp::ringFadeWeight(0, 280));
+  TEST_ASSERT_EQUAL_UINT8(255, wisp::ringFadeWeight(280, 280));
+  TEST_ASSERT_EQUAL_UINT8(255, wisp::ringFadeWeight(9999, 280));  // clamps
+  TEST_ASSERT_EQUAL_UINT8(255, wisp::ringFadeWeight(0, 0));       // zero-dur
+  // Eased: monotic and near the halfway point at the midpoint.
+  const uint8_t mid = wisp::ringFadeWeight(140, 280);
+  TEST_ASSERT_TRUE(mid > 100 && mid < 155);
+  TEST_ASSERT_TRUE(wisp::ringFadeWeight(70, 280) < mid);
+  TEST_ASSERT_TRUE(wisp::ringFadeWeight(210, 280) > mid);
+}
+
+void test_lerp_ring_blends_from_to(void) {
+  const uint8_t from[6] = {0, 0, 0, 200, 100, 50};
+  const uint8_t to[6]   = {255, 255, 255, 0, 0, 0};
+  uint8_t out[6] = {0};
+
+  wisp::lerpRing(from, to, out, 6, 0);  // weight 0 → from
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(from, out, 6);
+
+  wisp::lerpRing(from, to, out, 6, 255);  // weight 255 → to
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(to, out, 6);
+
+  wisp::lerpRing(from, to, out, 6, 128);  // ~halfway
+  TEST_ASSERT_UINT8_WITHIN(2, 128, out[0]);
+  TEST_ASSERT_UINT8_WITHIN(2, 100, out[3]);  // 200→0 midpoint
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_empty_palette_returns_false);
@@ -200,5 +228,7 @@ int main(int, char**) {
   RUN_TEST(test_rgbw_warm_bias_adds_warm);
   RUN_TEST(test_rgbw_warm_bias_clamps_to_255);
   RUN_TEST(test_ten_stops_no_buffer_overrun);
+  RUN_TEST(test_ring_fade_weight_endpoints_and_clamp);
+  RUN_TEST(test_lerp_ring_blends_from_to);
   return UNITY_END();
 }

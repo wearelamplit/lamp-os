@@ -5,10 +5,10 @@
 // HELLO broadcast interval. Airtime scales N²/interval as the fleet grows,
 // so this is the steady-state mesh-traffic knob. Must stay well under
 // LAMP_PRUNE_TIME_MS so a couple of lost beacons don't prune a live peer
-// (prune tolerates 4 missed emits at 60s).
-#define LAMP_HELLO_INTERVAL_MS 60000
+// (prune tolerates 8 missed emits at 30s).
+#define LAMP_HELLO_INTERVAL_MS 30000
 
-static_assert(LAMP_HELLO_INTERVAL_MS == 60000,
+static_assert(LAMP_HELLO_INTERVAL_MS == 30000,
               "LAMP_HELLO_INTERVAL_MS is the fleet airtime budget (N²/interval) "
               "coupled to LAMP_PRUNE_TIME_MS; changing it must re-validate both "
               "the airtime budget and the prune window.");

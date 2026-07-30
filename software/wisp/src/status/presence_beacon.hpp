@@ -4,7 +4,9 @@
 // MSG_WISP_STATE frames alternate on odd/even ticks so two fat frames never
 // fire in the same tick on the single core. STATE is the sole paint render
 // path (per-lamp colors), so a paint-mode edge also emits STATE out of cadence
-// via PaintDistributor's dirty flag. A WiFi/Aurora flag flip triggers
+// via PaintDistributor's dirty flag, then re-emits it a few times over a short
+// burst window so the take/release edge survives a coex drop instead of waiting
+// on the 4s re-cover. A WiFi/Aurora flag flip triggers
 // StatusEmitter's on-change path so the app sees it within 2s rather than
 // waiting on the 30s heartbeat. The timer only flags the emit due; pump() runs
 // the build + broadcast on the loop task, off the 2KB timer stack.
@@ -37,6 +39,17 @@ class StatusEmitter;
 class WispConfig;
 class WispRoster;
 struct SeqSource;
+
+// True when the STATE burst window (opened on a paint-mode edge) is still open
+// at `now` and at least intervalMs has elapsed since the last STATE emit, so an
+// extra STATE copy is due. burstUntilMs == 0 (no window) or a closed/too-soon
+// window returns false. Pure so the burst timing is unit-testable.
+inline bool stateBurstDue(uint32_t now, uint32_t burstUntilMs,
+                          uint32_t lastStateEmitMs, uint32_t intervalMs) {
+  if (burstUntilMs == 0) return false;
+  if (static_cast<int32_t>(now - burstUntilMs) >= 0) return false;
+  return (now - lastStateEmitMs) >= intervalMs;
+}
 
 class PresenceBeacon {
  public:
@@ -87,6 +100,10 @@ class PresenceBeacon {
   // 2s-tick counter driving the phased claim/paint sub-multiples.
   uint32_t beaconTick_ = 0;
 
+  // Elevated-rate STATE window opened on a paint-mode edge. 0 when closed.
+  uint32_t stateBurstUntilMs_ = 0;
+  uint32_t lastStateEmitMs_   = 0;
+
   struct ResendSlot {
     // CLAIM is the largest resent frame; STATE is not resent (too big, and it
     // re-covers on its own cadence).
@@ -105,6 +122,12 @@ class PresenceBeacon {
   size_t     resendCursor_ = 0;
 
   static constexpr uint32_t kHelloIntervalMs = 2000;
+  // STATE edge-burst: emit a few extra copies over kStateBurstMs, spaced
+  // kStateBurstIntervalMs apart. Too short/sparse and a take/release edge lost
+  // to coex waits the full 4s re-cover; too long/dense wastes air against the
+  // alternating fat frames on the single core.
+  static constexpr uint32_t kStateBurstMs         = 2000;
+  static constexpr uint32_t kStateBurstIntervalMs = 700;
   // Follows the root VERSION file (injected as LAMP_FW_* by inject_version.py).
   static constexpr uint32_t kWispVersion     = FIRMWARE_VERSION;
 };

@@ -12,10 +12,12 @@
 #include "components/network/transport/espnow_link.hpp"
 #include "components/network/protocol/lamp_protocol.hpp"
 #include "hello_interval.hpp"
+#include "hello_relay_suppressor.hpp"
 #include "lamp_roster.hpp"
 #include "resend_ring.hpp"
 #include "pending_slots.hpp"
 #include "wisp_coex.hpp"
+#include "wisp_state.hpp"
 #include "meshmix.hpp"
 #include "util/color.hpp"
 #include "components/firmware/firmware_receiver.hpp"  // FirmwareTransport interface
@@ -157,6 +159,10 @@ class MeshLink {
   // Capacity per ring is sized to the message type's traffic. Relay-heavy
   // every-lamp types get the full 64; single-hop / low-rate types get less.
   lamp_protocol::DedupRing<64> helloDedup_;
+  // Defers each first-seen HELLO relay; drops it if enough neighbors already
+  // relayed the same (mac, seq). Bounds HELLO airtime below the ~N^2 that
+  // relaying every first sight costs. Receive-side only, no wire change.
+  HelloRelaySuppressor helloSuppressor_;
   lamp_protocol::DedupRing<64> controlOpDedup_;
   // Per-type dedup. Each new MSG_* gets its own ring so a
   // CONTROL_OP seq doesn't accidentally suppress an OVERRIDE_COLORS seq
@@ -197,6 +203,7 @@ class MeshLink {
   // never the loop task; see qa/coex.md.
 #ifdef LAMP_DEBUG
   WispCoexMeter wispCoexMeter_;
+  WispStateMeter wispStateMeter_;
   MeshMix meshMix_;
 #endif
 
@@ -236,7 +243,9 @@ class MeshLink {
   // neither is active.
   uint8_t currentOtaState() const;
 #ifdef LAMP_DEBUG
-  void reportWispCoex(const uint8_t mac[6], uint16_t seq, uint32_t nowMs);
+  void reportWispCoex(const uint8_t mac[6], uint32_t nowMs);
+  void reportWispState(const uint8_t sourceMac[6],
+                       const lamp_protocol::ParsedWispState& ws, uint32_t nowMs);
   void reportMeshMix(uint32_t nowMs);
 #endif
 

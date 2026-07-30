@@ -1,5 +1,5 @@
 // Pins the boot-burst HELLO cadence: fast (5 s) for the first 30 s of uptime,
-// then the steady 60 s budget.
+// then the steady 30 s budget.
 
 #include <unity.h>
 #include <cstdint>

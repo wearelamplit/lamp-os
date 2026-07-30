@@ -55,11 +55,6 @@ void PaintDistributor::tick(uint32_t nowMs) {
     driftIdx_ = nextDriftIdx(driftIdx_, driftCount_);
   }
 
-  if (paintMode_ && (nowMs - lastDriftRosterMs_) >= 5000) {
-    lastDriftRosterMs_ = nowMs;
-    refreshDriftRoster(/*paintNewcomers=*/true);
-  }
-
   // Space-dim re-assert, independent of paint mode (runs in Off too). The
   // lamp override times out at 60 s, so only a live dim needs re-sending.
   if (brightness_ < 100 && !brWalkActive_ &&
@@ -150,7 +145,7 @@ void PaintDistributor::refreshDriftRoster(bool paintNewcomers) {
     std::memcpy(tmp[driftCount_].data(), obs[i].mac, 6);
     driftCount_++;
   }
-  std::stable_sort(tmp, tmp + driftCount_, [](const auto& a, const auto& b) {
+  std::sort(tmp, tmp + driftCount_, [](const auto& a, const auto& b) {
     return std::memcmp(a.data(), b.data(), 6) < 0;
   });
   for (size_t i = 0; i < driftCount_; i++) std::memcpy(driftMacs_[i], tmp[i].data(), 6);

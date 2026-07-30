@@ -10,46 +10,29 @@ namespace lamp {
 // give headroom over that without a heap allocation.
 constexpr size_t kWispCoexMaxPeers = 8;
 
-// A seq delta above this is a wisp reboot (SeqSource restarts at 0), not
-// broadcast loss; treated as a resync rather than a loss spike.
-constexpr uint16_t kWispCoexResyncThreshold = 1024;
-
-// Missed-hello count between two seq observations, uint16-wraparound-safe.
-// Duplicate/retransmit (delta 0) and an implausible jump (delta above
-// kWispCoexResyncThreshold, a wisp reboot) both count as 0 missed; the
-// caller re-baselines lastSeq to newSeq either way.
-inline uint16_t wispCoexMissed(uint16_t lastSeq, uint16_t newSeq) {
-  const uint16_t delta = static_cast<uint16_t>(newSeq - lastSeq);
-  if (delta == 0 || delta > kWispCoexResyncThreshold) return 0;
-  return static_cast<uint16_t>(delta - 1);
-}
-
 struct WispCoexSlot {
   uint8_t mac[6] = {0};
   bool used = false;
-  bool haveSeq = false;
-  uint16_t lastSeq = 0;
   uint32_t recv = 0;
-  uint32_t missed = 0;
   uint32_t lastHelloMs = 0;
   uint32_t maxGapMs = 0;
   uint32_t lastEmitMs = 0;
 };
 
-// Per-wisp seq-gap accumulator: fixed slot array keyed by MAC, linear
-// scan, no heap (docs/dev/embedded-heap.md). Not thread-safe; the caller
-// (handleRecv) runs single-threaded on the ESP-NOW recv task.
+// Per-wisp presence tracker: fixed slot array keyed by MAC, linear scan, no
+// heap (docs/dev/embedded-heap.md). No loss/seq-gap math: the wisp shares one
+// seq counter across all its message types, so a per-type seq gap is not loss.
+// maxGapMs (wall-clock time between hellos) is the real presence signal. Not
+// thread-safe; the caller (handleRecv) runs single-threaded on the ESP-NOW
+// recv task.
 class WispCoexMeter {
  public:
-  WispCoexSlot& record(const uint8_t mac[6], uint16_t seq, uint32_t nowMs) {
+  WispCoexSlot& record(const uint8_t mac[6], uint32_t nowMs) {
     WispCoexSlot& slot = findOrCreate(mac);
-    if (slot.haveSeq) {
-      slot.missed += wispCoexMissed(slot.lastSeq, seq);
+    if (slot.recv > 0) {
       const uint32_t gap = nowMs - slot.lastHelloMs;
       if (gap > slot.maxGapMs) slot.maxGapMs = gap;
     }
-    slot.lastSeq = seq;
-    slot.haveSeq = true;
     slot.recv++;
     slot.lastHelloMs = nowMs;
     return slot;

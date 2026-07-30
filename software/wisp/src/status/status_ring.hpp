@@ -84,6 +84,35 @@ inline void fillRingWarmWhite(uint8_t* outRgb, size_t pixelCount) {
   }
 }
 
+// Own-ring crossfade duration on the Off<->painting source flip. A few hundred
+// ms reads as a soft on/off rather than a hard snap; tune on the bench.
+inline constexpr uint16_t kRingFadeMs = 280;
+
+// Smoothstep an 0..255 linear position into an 0..255 eased weight (3t^2-2t^3),
+// so the crossfade eases in and out rather than running dead linear.
+inline uint8_t smoothstep8(uint8_t x) {
+  const uint32_t t = x;
+  return static_cast<uint8_t>((t * t * (765u - 2u * t)) / 65025u);
+}
+
+// Eased 0..255 crossfade weight for `elapsedMs` into a `durationMs` fade. Clamps
+// to 255 (fully faded) once elapsed reaches the duration.
+inline uint8_t ringFadeWeight(uint32_t elapsedMs, uint16_t durationMs) {
+  if (durationMs == 0 || elapsedMs >= durationMs) return 255;
+  const uint32_t lin = (elapsedMs * 255u) / durationMs;
+  return smoothstep8(static_cast<uint8_t>(lin));
+}
+
+// Blend `from`->`to` (len bytes each) into `out` by `weight` (0=from, 255=to).
+inline void lerpRing(const uint8_t* from, const uint8_t* to, uint8_t* out,
+                     size_t len, uint8_t weight) {
+  const uint32_t w = weight;
+  const uint32_t iw = 255u - w;
+  for (size_t i = 0; i < len; ++i) {
+    out[i] = static_cast<uint8_t>((from[i] * iw + to[i] * w + 127u) / 255u);
+  }
+}
+
 // Fold an Aurora RGBW sample to RGB for the NEO_GRB ring (no W channel). The
 // W contribution biases warm (most lands on R, some on G, almost none on B)
 // so a mostly-white palette still reads warm rather than washed-out. Each

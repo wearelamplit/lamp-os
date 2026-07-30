@@ -192,8 +192,10 @@ void loop() {
     wisp::LampObservation obs[wisp::WISP_ROSTER_MAX_LAMPS];
     const size_t n = inventory.copyObservations(obs, wisp::WISP_ROSTER_MAX_LAMPS);
     wispRoster.recomputeClaims(obs, n, now);
+    paintDistributor.refreshDriftRoster(/*paintNewcomers=*/true);
   }
   controller.tickAuroraLiveness();
+  controller.tickRingFade(now);
 
   paintDistributor.tick(now);
   artnetEmitter.tick(now);

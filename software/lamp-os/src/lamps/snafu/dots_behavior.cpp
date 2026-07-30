@@ -179,16 +179,25 @@ void DotsBehavior::control() {
 
 void DotsBehavior::draw() {
   if (!fb || fb->buffer.empty()) { nextFrame(); return; }
-  if (context_ && context_->compositor &&
-      context_->compositor->wispActive()) { nextFrame(); return; }
   if (cur_.empty()) { cur_ = buildScene(); prev_ = cur_; }
+  // Yield the shade to the wisp by its eased presence: at w==1 the dots hand
+  // fully to the already-composited wisp, at w==0 they own the shade, and the
+  // ~500ms ease crossfades both take and release (fb->buffer holds the eased
+  // wisp composite from compositeWisp()).
+  const float w = (context_ && context_->compositor)
+                      ? context_->compositor->wispPresence(false)
+                      : 0.0f;
   if (sceneChange_) {
     for (size_t j = 0; j < fb->buffer.size(); ++j)
-      fb->buffer[j] = fade(prev_[j], cur_[j], frames, frame);
+      fb->buffer[j] = mixColorWeight(fade(prev_[j], cur_[j], frames, frame),
+                                     fb->buffer[j], w);
     if (isLastFrame()) sceneChange_ = false;
   } else {
-    for (size_t j = 0; j < fb->buffer.size(); ++j) fb->buffer[j] = cur_[j];
+    for (size_t j = 0; j < fb->buffer.size(); ++j)
+      fb->buffer[j] = mixColorWeight(cur_[j], fb->buffer[j], w);
   }
+  // Greeting melt renders over the composited wisp, unlike the dots above; a
+  // greeting stays visible over wisp paint.
   if (borrowActive_ && borrowElapsed_ * 2 > borrowDuration_ && !ownMelt_.empty()) {
     const uint32_t half = borrowDuration_ / 2;
     const uint32_t span = borrowDuration_ - half;

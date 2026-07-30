@@ -10,6 +10,7 @@
 
 #include "paint/current_palette.hpp"  // CurrentPalette, Palette
 #include "config/wisp_op_dispatcher.hpp"  // DispatchResult
+#include "status/status_ring.hpp"  // kMaxRingPixels
 
 class Adafruit_NeoPixel;
 class AuroraPaletteClient;
@@ -54,10 +55,15 @@ class WispController {
   // Call once after config load; call again after setLedStrip op.
   void applyLedConfig();
 
+  // Loop-task driver for the own-ring Off<->painting crossfade. No-op when idle.
+  void tickRingFade(uint32_t now);
+
  private:
   bool effectiveOff() const;
   void pushManualPaletteToCurrent();
   void renderRing();
+  void computeRingPixels(uint8_t* pixels, size_t px, bool off);
+  void showPixels(const uint8_t* pixels, size_t px);
 
   CurrentPalette& palette_;
   PaintDistributor& paint_;
@@ -69,6 +75,18 @@ class WispController {
   Adafruit_NeoPixel& strip_;
 
   bool auroraWasStreaming_ = false;
+
+  // Own-ring crossfade state. shown_ mirrors the last emitted (pre-gamma)
+  // frame so a fresh Off<->painting flip can blend out of whatever is lit.
+  uint8_t shown_[kMaxRingPixels * 3] = {0};
+  uint8_t fadeFrom_[kMaxRingPixels * 3] = {0};
+  uint8_t fadeTo_[kMaxRingPixels * 3] = {0};
+  size_t shownPx_ = 0;
+  size_t fadePx_ = 0;
+  uint32_t fadeStartMs_ = 0;
+  bool fading_ = false;
+  bool ringReady_ = false;
+  bool lastOff_ = false;
 };
 
 }  // namespace wisp

@@ -1,6 +1,7 @@
 #include "mesh_link.hpp"
 
 #include <Arduino.h>
+#include <esp_random.h>
 
 #include <algorithm>
 #include <cstring>
@@ -44,6 +45,10 @@ void MeshLink::begin(Config* cfg) {
     return;
   }
   link_.getMac(myMac_);
+  // Random boot seq: a fixed start replays (mac, seq) tuples that peers still
+  // hold in their HELLO dedup rings after a quick reboot, so the fresh HELLOs
+  // drop before the roster's version/state update and the peer stalls stale.
+  helloSeq_ = static_cast<uint16_t>(esp_random());
   helloBootPhaseMs_ =
       ((uint32_t(myMac_[4]) << 8) | myMac_[5]) % LAMP_HELLO_BURST_INTERVAL_MS;
   Serial.printf("[show] ready, mac=%02X:%02X:%02X:%02X:%02X:%02X\n",
@@ -59,6 +64,9 @@ void MeshLink::tick() {
   commandResend_.service(now, send);
   colorQueryResend_.service(now, send);
   colorInfoResend_.service(now, send);
+  helloSuppressor_.tick(now, [this](const uint8_t* frame, size_t len) {
+    relay(frame, len);
+  });
   const uint8_t otaState = currentOtaState();
   uint8_t sendingTo[6];
   const bool hasSendingTo =
@@ -214,20 +222,41 @@ constexpr uint32_t kWispCoexEmitIntervalMs = 10000;
 constexpr uint32_t kMeshMixWindowMs = 30000;
 }  // namespace
 
-// A/B tool for the wisp coex-hole investigation (qa/coex.md): reads
-// missed/loss/maxgap without changing behavior. maxGapMs resets each emit;
-// recv/missed stay cumulative for the life of the boot.
-void MeshLink::reportWispCoex(const uint8_t mac[6], uint16_t seq, uint32_t nowMs) {
-  WispCoexSlot& s = wispCoexMeter_.record(mac, seq, nowMs);
+// A/B tool for the wisp coex-hole investigation (qa/coex.md): maxgap is the
+// presence-stability signal (wall-clock between hellos). No loss%: the wisp
+// shares one seq across all its message types, so a per-type seq gap is not
+// loss. maxGapMs resets each emit; recv stays cumulative for the boot.
+void MeshLink::reportWispCoex(const uint8_t mac[6], uint32_t nowMs) {
+  WispCoexSlot& s = wispCoexMeter_.record(mac, nowMs);
   if (nowMs - s.lastEmitMs < kWispCoexEmitIntervalMs) return;
   s.lastEmitMs = nowMs;
-  const uint32_t total = s.recv + s.missed;
-  const uint32_t percentX1000 = total ? (100000ULL * s.missed / total) : 0;
-  Serial.printf("[wispcoex] wisp=%02X:%02X recv=%u missed=%u loss=%u.%01u%% maxgap=%ums\n",
-                mac[0], mac[1], (unsigned)s.recv, (unsigned)s.missed,
-                (unsigned)(percentX1000 / 1000), (unsigned)(percentX1000 / 100 % 10),
-                (unsigned)s.maxGapMs);
+  Serial.printf("[wispcoex] wisp=%02X:%02X recv=%u maxgap=%ums\n",
+                mac[0], mac[1], (unsigned)s.recv, (unsigned)s.maxGapMs);
   s.maxGapMs = 0;
+}
+
+// Control-plane instrument for MSG_WISP_STATE (docs/dev/networking.md):
+// recv/adopt/release counts plus this lamp's adopt/release edges, scoped to
+// the display wisp so a rival's frame can't flip the state. Windowed line
+// emits in reportMeshMix; edges log here on transition only.
+void MeshLink::reportWispState(const uint8_t sourceMac[6],
+                               const lamp_protocol::ParsedWispState& ws,
+                               uint32_t nowMs) {
+  uint8_t dispMac[6];
+  if (lampRoster.copyDisplayWispMac(dispMac, nowMs) &&
+      std::memcmp(dispMac, sourceMac, 6) != 0) {
+    return;
+  }
+  const bool selfPresent =
+      lamp_protocol::findWispStateEntry(ws.entries, ws.count, myMac_) != nullptr;
+  const WispStateEdge edge = wispStateMeter_.record(selfPresent);
+  if (edge == WispStateEdge::kAdopt) {
+    Serial.printf("[wispstate] ADOPT src=%02X:%02X seq=%u\n",
+                  sourceMac[0], sourceMac[1], (unsigned)ws.seq);
+  } else if (edge == WispStateEdge::kRelease) {
+    Serial.printf("[wispstate] RELEASE src=%02X:%02X seq=%u\n",
+                  sourceMac[0], sourceMac[1], (unsigned)ws.seq);
+  }
 }
 
 // meshmix airtime instrument (docs/dev/networking.md): once per window, dump
@@ -249,6 +278,19 @@ void MeshLink::reportMeshMix(uint32_t nowMs) {
                 (unsigned)meshMix_.rx[MeshMix::kOther],
                 (unsigned)meshMix_.relayedOut,
                 (unsigned)meshMix_.totalRx());
+  const uint32_t supp = helloSuppressor_.suppressedWindow();
+  const uint32_t rel = helloSuppressor_.relayedWindow();
+  const uint32_t fired = supp + rel;
+  Serial.printf("[hellosupp] win=30s suppressed=%u relayed=%u rate=%u%%\n",
+                (unsigned)supp, (unsigned)rel,
+                (unsigned)(fired ? supp * 100 / fired : 0));
+  Serial.printf("[wispstate] win=30s recv=%u adopts=%u releases=%u selfPresent=%u\n",
+                (unsigned)wispStateMeter_.recv(),
+                (unsigned)wispStateMeter_.adopts(),
+                (unsigned)wispStateMeter_.releases(),
+                (unsigned)wispStateMeter_.selfPresent());
+  wispStateMeter_.resetWindow();
+  helloSuppressor_.resetWindow();
   meshMix_.reset(nowMs);
 }
 #endif
@@ -263,7 +305,12 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
   if (msgType == lamp_protocol::MSG_HELLO) {
     lamp_protocol::ParsedHello h;
     if (!lamp_protocol::parseHello(data, len, h)) return;
-    if (!helloDedup_.record(h.sourceMac, lamp_protocol::MSG_HELLO, h.seq)) return;
+    // A duplicate still counts toward relay suppression (a neighbor already
+    // rebroadcast it) even though it skips the roster reprocess below.
+    if (!helloDedup_.record(h.sourceMac, lamp_protocol::MSG_HELLO, h.seq)) {
+      helloSuppressor_.onDuplicate(h.sourceMac, h.seq);
+      return;
+    }
     // Don't rebroadcast own hellos.
     if (std::memcmp(h.sourceMac, myMac_, 6) == 0) return;
 #ifdef LAMP_DEBUG
@@ -307,7 +354,9 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     if (isDirectHello(srcMac, h.sourceMac) && isNearRssi(rssi, kNearRssiEspNow)) {
       lampRoster.markNear(peerName);
     }
-    relay(data, len);
+    if (helloSuppressor_.onFirstSeen(h.sourceMac, h.seq, data, len, millis())) {
+      relay(data, len);
+    }
   } else if (msgType == lamp_protocol::MSG_CONTROL_OP) {
     lamp_protocol::ParsedControlOp op;
     if (!lamp_protocol::parseControlOp(data, len, op)) return;
@@ -335,7 +384,7 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     lamp_protocol::ParsedWispHello h;
     if (!lamp_protocol::parseWispHello(data, len, h)) return;
 #ifdef LAMP_DEBUG
-    reportWispCoex(h.sourceMac, h.seq, millis());
+    reportWispCoex(h.sourceMac, millis());
     static bool s_loggedWispMacs = false;
     if (!s_loggedWispMacs) {
       s_loggedWispMacs = true;
@@ -434,6 +483,9 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     // cadence. Dedup prevents repeat-fire on direct reception.
     lamp_protocol::ParsedWispState ws;
     if (!lamp_protocol::parseWispState(data, len, ws)) return;
+#ifdef LAMP_DEBUG
+    reportWispState(ws.sourceMac, ws, millis());
+#endif
     if (!wispStateDedup_.record(ws.sourceMac,
                                 lamp_protocol::MSG_WISP_STATE, ws.seq)) {
       return;

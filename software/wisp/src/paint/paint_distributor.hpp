@@ -49,6 +49,11 @@ class PaintDistributor {
   void onPaletteChanged();
   void tick(uint32_t nowMs);
 
+  // Rebuilds driftMacs_ from claimed inventory, sorts by MAC, recomputes slot.
+  // With paintNewcomers, any lamp new since the last refresh is colored
+  // immediately so its first STATE frame carries paint.
+  void refreshDriftRoster(bool paintNewcomers = false);
+
  private:
   // Store a per-lamp color on the lamp's roster claim; no wire send.
   // assignPaintColor is deterministic per-MAC; assignDriftColor re-rolls.
@@ -59,11 +64,6 @@ class PaintDistributor {
   // Snapshot claimed lamps into brWalkMacs_ and arm the paced brightness walk.
   void beginBrightnessWalk();
   void sendBrightnessToPeer(const uint8_t mac[6]);
-
-  // Rebuilds driftMacs_ from claimed inventory, sorts by MAC, recomputes slot.
-  // With paintNewcomers, any lamp new since the last refresh is colored
-  // immediately so its first STATE frame carries paint.
-  void refreshDriftRoster(bool paintNewcomers = false);
 
   LampInventory* inventory_ = nullptr;
   MeshLink* mesh_ = nullptr;
@@ -84,7 +84,6 @@ class PaintDistributor {
   size_t   driftIdx_           = 0;
   uint32_t driftSlotMs_        = 0;
   uint32_t lastDriftFireMs_    = 0;
-  uint32_t lastDriftRosterMs_  = 0;
 
   // Space-dim brightness re-assert. Own paced walk buffer. Dimming (< 100) is
   // held by the periodic re-assert loop; the return to 100 has no re-assert,

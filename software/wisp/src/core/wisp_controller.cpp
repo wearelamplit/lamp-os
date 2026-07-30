@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <Adafruit_NeoPixel.h>
+#include <cstring>
 #include <lampos/led_types.hpp>
 
 #include "aurora/AuroraPaletteClient.h"
@@ -46,25 +47,14 @@ bool WispController::effectiveOff() const {
          (mode == wisp::WispSourceMode::Aurora && !auroraLive);
 }
 
-// Event-driven; never called from loop() steady state. Stack-only.
-void WispController::renderRing() {
+// Fill `pixels` (pre-gamma RGB, length px*3) from the current source state.
+void WispController::computeRingPixels(uint8_t* pixels, size_t px, bool off) {
   uint8_t stopsRgb[wisp::kManualPaletteMaxColors * 3];
   size_t numStops = 0;
-  uint8_t pixels[wisp::kMaxRingPixels * 3];
-
-  const size_t px = (config_.pixelCount() <= wisp::kMaxRingPixels)
-                        ? config_.pixelCount()
-                        : wisp::kMaxRingPixels;
 
   const wisp::WispSourceMode mode = config_.sourceMode();
-  // Render as Off when Aurora stream is down, not stale palette.
   const bool auroraLive =
       mode == wisp::WispSourceMode::Aurora && aurora_.isStreaming();
-  const bool off = effectiveOff();
-  // Old lamps get released on ArtNet the same way mesh lamps are released
-  // (isWispActive=0): no frames at all, rather than being driven to the
-  // off-color.
-  artnet_.setActive(!off);
   if (mode == wisp::WispSourceMode::Manual) {
     const auto& cols = config_.manualPalette();
     const size_t n = cols.size() > wisp::kManualPaletteMaxColors
@@ -104,7 +94,9 @@ void WispController::renderRing() {
   } else if (!wisp::computeRingGradient(stopsRgb, numStops, pixels, px)) {
     wisp::fillRingWarmWhite(pixels, px);
   }
+}
 
+void WispController::showPixels(const uint8_t* pixels, size_t px) {
   for (size_t i = 0; i < px; ++i) {
     strip_.setPixelColor(static_cast<uint16_t>(i),
                          Adafruit_NeoPixel::gamma8(pixels[i * 3 + 0]),
@@ -112,6 +104,46 @@ void WispController::renderRing() {
                          Adafruit_NeoPixel::gamma8(pixels[i * 3 + 2]));
   }
   strip_.show();
+  std::memcpy(shown_, pixels, px * 3);
+  shownPx_ = px;
+  ringReady_ = true;
+}
+
+// Event-driven; never called from loop() steady state. Stack-only. Only the
+// Off<->painting flip crossfades; other changes (palette edit, resize) snap.
+void WispController::renderRing() {
+  const size_t px = (config_.pixelCount() <= wisp::kMaxRingPixels)
+                        ? config_.pixelCount()
+                        : wisp::kMaxRingPixels;
+  const bool off = effectiveOff();
+  // Old lamps get released on ArtNet the same way mesh lamps are released
+  // (isWispActive=0): no frames at all, rather than being driven to the
+  // off-color. Stays immediate; only the local ring fades.
+  artnet_.setActive(!off);
+
+  uint8_t target[wisp::kMaxRingPixels * 3];
+  computeRingPixels(target, px, off);
+
+  if (ringReady_ && off != lastOff_ && px == shownPx_) {
+    std::memcpy(fadeFrom_, shown_, px * 3);
+    std::memcpy(fadeTo_, target, px * 3);
+    fadePx_ = px;
+    fadeStartMs_ = millis();
+    fading_ = true;
+  } else {
+    fading_ = false;
+    showPixels(target, px);
+  }
+  lastOff_ = off;
+}
+
+void WispController::tickRingFade(uint32_t now) {
+  if (!fading_) return;
+  const uint8_t w = wisp::ringFadeWeight(now - fadeStartMs_, wisp::kRingFadeMs);
+  uint8_t frame[wisp::kMaxRingPixels * 3];
+  wisp::lerpRing(fadeFrom_, fadeTo_, frame, fadePx_ * 3, w);
+  showPixels(frame, fadePx_);
+  if (w == 255) fading_ = false;
 }
 
 void WispController::applyLedConfig() {

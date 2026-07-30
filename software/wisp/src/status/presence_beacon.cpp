@@ -51,12 +51,25 @@ void PresenceBeacon::startTimer() {
 }
 
 void PresenceBeacon::pump() {
-  serviceResends(millis());
+  const uint32_t now = millis();
+  serviceResends(now);
+  bool emittedThisPump = false;
   if (helloDue_.exchange(false, std::memory_order_relaxed)) {
     emit();
+    emittedThisPump = true;
   }
   if (paint_ && paint_->consumeStateDirty()) {
+    stateBurstUntilMs_ = now + kStateBurstMs;
     emitStateEvent();
+  } else if (!emittedThisPump && stateBurstUntilMs_ != 0) {
+    // Skip the pump that already ran a tick emit so a burst STATE never lands
+    // in the same loop pass as the HELLO/CLAIM/STATE fat frames.
+    if (stateBurstDue(now, stateBurstUntilMs_, lastStateEmitMs_,
+                      kStateBurstIntervalMs)) {
+      emitStateEvent();
+    } else if (static_cast<int32_t>(now - stateBurstUntilMs_) >= 0) {
+      stateBurstUntilMs_ = 0;
+    }
   }
 }
 
@@ -180,9 +193,15 @@ void PresenceBeacon::emitState(const uint8_t srcMac[6], uint8_t presenceFlags) {
       stateBuf, sizeof(stateBuf), stateSeq, srcMac, brightness, driftRateMs,
       presenceFlags, stateCount > 0 ? stateEntries : nullptr,
       static_cast<uint8_t>(stateCount));
-  // No resend: at up to 1459 B STATE overflows the paint-sized resend slot,
-  // and it re-covers the whole fleet on its own 4s cadence anyway.
-  if (stateLen) mesh_->broadcast(stateBuf, stateLen);
+  // No resend: at up to 1459 B STATE overflows the paint-sized resend slot.
+  // Edge coverage comes from the burst window in pump(); the 4s cadence backs
+  // both up.
+  if (stateLen) {
+    mesh_->broadcast(stateBuf, stateLen);
+  }
+  // Advance even on a zero-length build so a failing frame can't respin the
+  // burst window every pump.
+  lastStateEmitMs_ = millis();
 }
 
 void PresenceBeacon::queueResend(const uint8_t* frame, size_t len,

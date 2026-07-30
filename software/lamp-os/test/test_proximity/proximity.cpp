@@ -6,7 +6,7 @@
 #include "components/network/mesh/proximity.hpp"
 
 // Native-test seam: include the real .cpp so the RSSI gate is exercised
-// against LampRoster::addOrUpdateFromBle / getUngreetedArrivals, not a
+// against LampRoster::addOrUpdateFromBle / bestUngreetedArrival, not a
 // hand-rolled mirror.
 #include "components/network/mesh/lamp_roster.cpp"
 
@@ -51,10 +51,12 @@ void test_markNear_sets_near() {
   set_mock_millis(100000);
   LampRoster r;
   uint8_t mac[6] = {0xB8, 0xD6, 0x1A, 0x44, 0xA3, 0x5C};
+  auto acceptAll = [](const RosterEntry&) { return true; };
+  RosterEntry out;
   r.addOrUpdateFromEspNow("meshpeer", mac, Color(), Color());
-  TEST_ASSERT_EQUAL(0u, r.getUngreetedArrivals(240000).size());
+  TEST_ASSERT_FALSE(r.bestUngreetedArrival(240000, g_mock_millis, acceptAll, out));
   r.markNear("meshpeer");
-  TEST_ASSERT_EQUAL(1u, r.getUngreetedArrivals(240000).size());
+  TEST_ASSERT_TRUE(r.bestUngreetedArrival(240000, g_mock_millis, acceptAll, out));
 }
 
 int main(int, char**) {
