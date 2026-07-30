@@ -6,6 +6,7 @@ import '../../../core/routing/routes.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/empty_state_pane.dart';
 import '../../../core/widgets/friendly_error.dart';
+import '../../control/application/advanced_session.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/domain/sections.dart';
 import '../domain/expression_catalog.dart';
@@ -64,6 +65,7 @@ class _AddExpressionPickerScreenState
           onTargetChanged: (t) => setState(() => _target = t),
           existing: state.expressions.expressions,
           catalog: state.catalog,
+          showAdvanced: ref.watch(effectiveAdvancedProvider(widget.lampId)),
         ),
       ),
     );
@@ -77,6 +79,7 @@ class _Body extends StatelessWidget {
     required this.onTargetChanged,
     required this.existing,
     required this.catalog,
+    required this.showAdvanced,
   });
 
   final String lampId;
@@ -84,8 +87,12 @@ class _Body extends StatelessWidget {
   final ValueChanged<int> onTargetChanged;
   final List<ExpressionConfig> existing;
   final ExpressionCatalog? catalog;
+  final bool showAdvanced;
 
-  List<ExpressionDescriptor> get _types => catalog?.expressions ?? const [];
+  List<ExpressionDescriptor> get _types {
+    final all = catalog?.expressions ?? const <ExpressionDescriptor>[];
+    return showAdvanced ? all : all.where((d) => !d.advanced).toList();
+  }
 
   bool _isTaken(String type, int t) =>
       existing.any((e) => e.type == type && e.target == t);

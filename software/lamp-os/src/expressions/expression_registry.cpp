@@ -112,6 +112,7 @@ std::string ExpressionRegistry::serializeCatalog() const {
     obj["id"] = d->id;
     obj["name"] = d->name;
     obj["continuous"] = d->continuous;
+    if (d->advanced) obj["advanced"] = true;
 
     JsonObject colorsObj = obj["colors"].to<JsonObject>();
     colorsObj["max"] = d->colors.max;

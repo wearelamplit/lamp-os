@@ -34,6 +34,10 @@ class ExpressionPresentation {
       icon: Icons.blur_on,
       tagline: 'Random blinking points.',
     ),
+    'flicker': ExpressionPresentation(
+      icon: Icons.auto_awesome,
+      tagline: 'A soft continuous shimmer, from cool sparkle to warm flame.',
+    ),
   };
 
   static const fallback =

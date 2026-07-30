@@ -110,6 +110,23 @@ void main() {
     });
   });
 
+  test('advanced defaults false and parses true', () {
+    final std = ExpressionDescriptor.fromJson({
+      'id': 'spotty',
+      'name': 'Spotty',
+      'colors': {'max': 8},
+    });
+    expect(std.advanced, isFalse);
+
+    final adv = ExpressionDescriptor.fromJson({
+      'id': 'flicker',
+      'name': 'Flicker',
+      'advanced': true,
+      'colors': {'max': 4},
+    });
+    expect(adv.advanced, isTrue);
+  });
+
   group('triggerCooldown', () {
     test('glitchy uses configured durationMax in ms (unit ms)', () {
       final d = catalog.byId('glitchy')!;

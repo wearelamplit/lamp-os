@@ -139,6 +139,9 @@ struct ExpressionDescriptor {
   std::optional<RangeSpec> duration;
   bool hasZone = false;
   bool zoneOptional = false;
+  // Offer this expression only when the app's advanced mode is on. Additive
+  // catalog field; absent means standard.
+  bool advanced = false;
   std::span<const Surface> excludeTargets;
   std::span<const ParamSpec> params;
   // Plain fn-ptr keeps the descriptor a constexpr literal (no heap, constexpr-safe).

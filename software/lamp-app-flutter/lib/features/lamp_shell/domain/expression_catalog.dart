@@ -251,6 +251,7 @@ class ExpressionDescriptor {
     this.duration,
     this.hasZone = false,
     this.zoneOptional = false,
+    this.advanced = false,
     this.excludeTargets = const [],
     this.params = const [],
   });
@@ -266,6 +267,9 @@ class ExpressionDescriptor {
   /// When true the zone is opt-in via a whole-strip/region toggle; when false
   /// (with [hasZone]) the zone is always available unless a zoning enum gates it.
   final bool zoneOptional;
+
+  /// Offered only when the app's advanced mode is on.
+  final bool advanced;
 
   /// Surface strings this expression cannot target.
   final List<String> excludeTargets;
@@ -286,6 +290,7 @@ class ExpressionDescriptor {
           : CatalogRange.fromJson(j['duration'] as Map<String, dynamic>),
       hasZone: zone != null,
       zoneOptional: zone is Map && (zone['optional'] as bool? ?? false),
+      advanced: j['advanced'] as bool? ?? false,
       excludeTargets:
           ((j['excludeTargets'] as List?) ?? const []).cast<String>(),
       params: ((j['params'] as List?) ?? const [])

@@ -474,6 +474,22 @@ void test_apply_defaults_does_not_overwrite_duration_max_key() {
   TEST_ASSERT_EQUAL_UINT32(99, params["durationMax"]);
 }
 
+void test_advanced_field_serializes_only_when_set() {
+  static constexpr ExpressionDescriptor kAdv{
+      .id = "adv", .name = "Adv", .advanced = true};
+  static constexpr ExpressionDescriptor kStd{.id = "std", .name = "Std"};
+  ExpressionRegistry reg;
+  reg.add(kAdv);
+  reg.add(kStd);
+  JsonDocument doc;
+  deserializeJson(doc, reg.serializeCatalog());
+  for (JsonObject e : doc["expressions"].as<JsonArray>()) {
+    const std::string id = e["id"].as<const char*>();
+    if (id == "adv") TEST_ASSERT_TRUE(e["advanced"].as<bool>());
+    if (id == "std") TEST_ASSERT_TRUE(e["advanced"].isNull());
+  }
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_add_find_remove);
@@ -505,5 +521,6 @@ int main(int, char**) {
   RUN_TEST(test_serialize_interval_unit_and_label);
   RUN_TEST(test_apply_defaults_negative_literal_clamps_to_zero);
   RUN_TEST(test_apply_defaults_does_not_overwrite_duration_max_key);
+  RUN_TEST(test_advanced_field_serializes_only_when_set);
   return UNITY_END();
 }
