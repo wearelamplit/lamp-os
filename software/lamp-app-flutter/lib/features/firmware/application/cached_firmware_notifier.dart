@@ -78,12 +78,14 @@ class CachedFirmwareNotifier extends _$CachedFirmwareNotifier {
   String _metaPathFor(Directory dir, String lampType, FirmwareChannel channel) =>
       '${dir.path}/lamp-firmware-$lampType-${channel.name}.$_metaSuffix';
 
-  /// Compute the set of {lampType, channel} pairs to auto-download, one per
-  /// owned lampType on the stable channel. Beta lamps get promoted to stable
-  /// via the unified push rule (`otaAcceptable`), so the cache only ever holds
-  /// stable images. Lamps with no lampType yet (never connected on the new
-  /// firmware) are skipped: nothing to fetch until their variant identity is
-  /// known.
+  /// Compute the set of {lampType, channel} pairs to auto-download: both the
+  /// stable and beta channel for each owned lampType, so a mixed fleet can be
+  /// pushed whichever channel a given lamp is on (`otaAcceptable` picks the
+  /// right entry per lamp, incl. beta→stable promotion). A stable-`latest` 404
+  /// is caught and skipped in `syncForInventory`; that's expected until a
+  /// conventions-matching stable release exists. Lamps with no lampType yet
+  /// (never connected on the new firmware) are skipped: nothing to fetch until
+  /// their variant identity is known.
   Set<({String lampType, FirmwareChannel channel})> _wantedFor(
       List<InventoryLamp> inventory) {
     final out = <({String lampType, FirmwareChannel channel})>{};
@@ -91,6 +93,7 @@ class CachedFirmwareNotifier extends _$CachedFirmwareNotifier {
       final t = lamp.lampType;
       if (t == null || t.isEmpty) continue;
       out.add((lampType: t, channel: FirmwareChannel.stable));
+      out.add((lampType: t, channel: FirmwareChannel.beta));
     }
     return out;
   }

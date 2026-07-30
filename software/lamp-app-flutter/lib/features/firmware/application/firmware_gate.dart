@@ -26,12 +26,12 @@ FirmwareRowAction firmwareRowActionFor({
 }
 
 /// Which cached image to auto-push to a connected lamp, or null for none.
-/// Scans the cache for an entry the lamp would accept per `otaAcceptable`, so
-/// a beta lamp promotes to a stable entry at equal-or-newer version.
-/// `latchedVersion` is the version already attempted while continuously
-/// connected; the caller clears it on disconnect so a dropped/failed push
-/// retries on reconnect, and the acceptance rule makes a rebooted lamp
-/// ineligible on its own.
+/// Scans the cache for the highest-version entry the lamp would accept per
+/// `otaAcceptable`, so with both channels cached a beta lamp still lands on
+/// the best acceptable image (incl. beta→stable promotion). `latchedVersion`
+/// is the version already attempted while continuously connected; the caller
+/// clears it on disconnect so a dropped/failed push retries on reconnect, and
+/// the acceptance rule makes a rebooted lamp ineligible on its own.
 CachedFirmware? firmwareAutoInstallTarget({
   required bool connected,
   required String? lampType,
@@ -48,14 +48,15 @@ CachedFirmware? firmwareAutoInstallTarget({
       cache == null) {
     return null;
   }
+  CachedFirmware? best;
   for (final entry in cache.values) {
     if (entry.lampType != lampType) continue;
     final offerChannel = '${entry.lampType}-${entry.channel.name}';
     if (!otaAcceptable(fwChannel, fwVersion, offerChannel, entry.version)) {
       continue;
     }
-    if (latchedVersion == entry.version) return null;
-    return entry;
+    if (best == null || entry.version > best.version) best = entry;
   }
-  return null;
+  if (best == null || latchedVersion == best.version) return null;
+  return best;
 }
