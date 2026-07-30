@@ -1,11 +1,19 @@
 # Embedded heap discipline
 
-The lamp's settled-boot free heap is ~46.5 KB, fragmented in practice to a
-~40.9 KB largest contiguous block (BLE, ESP-NOW, and wifi resident). `malloc(N)`
-needs N *contiguous* bytes, so the number that bites is the largest free block,
-not total free. The 1.1.1 audit found a whole column of independent bugs that
-were one anti-pattern hitting this ceiling. Read this before adding any feature
-that snapshots the roster, tracks per-peer state, or answers "who's nearby."
+`malloc(N)` needs N *contiguous* bytes, so the number that bites is the largest
+free block, not total free. Two figures matter and they measure different things:
+
+- **Settled-boot headroom** (idle, no BLE client): free heap ~46.5 KB,
+  fragmented to a ~40.9 KB largest contiguous block, with BLE, ESP-NOW, and wifi
+  resident. This is the quiet-desk best case.
+- **Runtime largest free block** (BLE client connected + a full roster): the
+  largest contiguous block craters to **~23.5 KB**. This is the real cap on
+  roster / per-peer / hot-path growth, and the number to design against.
+
+A whole column of independent bugs turned out to be one anti-pattern hitting the
+runtime ceiling. Read this before adding any feature that snapshots the roster,
+tracks per-peer state, or answers "who's nearby." Measure with the probe (below)
+on the bench under real BLE + fleet load; the quiet-desk figure hides the cliff.
 
 The softAP webapp and BLE are heap-exclusive: a config client connecting can
 squeeze free heap into a range too tight for the AsyncWebServer to serve the

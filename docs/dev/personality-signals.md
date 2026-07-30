@@ -45,6 +45,16 @@ struct CrowdComposition {
 `GreetingTuning` is documented in `personality_engine.hpp` and the
 shape it produces is documented in `docs/dev/personality-greetings.md`.
 
+### From a behavior: prefer the context wrappers
+
+A custom `AnimatedBehavior` already holds a `BehaviorContext*` that wraps these
+same signals (`greetingFor` / `dispositionOf` / `crowd` / `crowdWeight`), so you
+don't reach for the global — same values, one indirection, null-safe against the
+engine not being wired yet. The wrapper table is in
+[`lamp-social-api.md`](lamp-social-api.md#social-reads). Behaviors should route
+through `context_`; the globals below are for lamp `loop()` code that has no
+context in hand.
+
 ## Worked examples
 
 ### 1. Shy lamp: steeper crowd curve
@@ -145,6 +155,7 @@ disposition the same way the rest of the fleet does.
 
 - `docs/dev/personality-greetings.md`, the behavioral / visual side of
   greetings: what profiles look like, the cooldown + fatigue rules.
-- `docs/dev/lamp-framework.md`, how to author a custom lamp variant.
+- `docs/dev/building-custom-lamps.md`, how to author a custom lamp variant.
+- `docs/dev/lamp-social-api.md`, the `BehaviorContext` peer/reaction API.
 - `software/lamp-os/src/core/personality_engine.hpp`, canonical
   declaration; the code wins ties, update this doc when it doesn't.

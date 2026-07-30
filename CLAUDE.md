@@ -18,6 +18,9 @@ ESP32-based smart-lamp fleet. Three components:
 
 Read these before changing networking, protocol, or BLE behavior:
 
+- **[`docs/dev/architecture.md`](docs/dev/architecture.md)**, the one-screen map of
+  the three components, their links, and where each subsystem lives. Start here for
+  orientation.
 - **[`docs/dev/networking.md`](docs/dev/networking.md)**, wire-format spec for every
   message type. The code wins ties; update this doc when it doesn't.
 - **[`docs/dev/embedded-heap.md`](docs/dev/embedded-heap.md)**, heap discipline for
@@ -30,8 +33,8 @@ Read these before changing networking, protocol, or BLE behavior:
 `docs/dev/` describes the behavior you changed; if so, update it in the same
 change. A doc that contradicts shipped code is a bug.
 
-The full developer handbook (architecture, expressions, personality, security)
-lives in [`docs/dev/`](docs/dev/).
+The full developer handbook (architecture, custom lamps, expressions,
+personality, protocol) lives in [`docs/dev/`](docs/dev/).
 
 ## Versioning + changelog
 

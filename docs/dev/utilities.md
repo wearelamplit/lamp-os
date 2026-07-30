@@ -127,12 +127,18 @@ template <typename Accept>
 bool bestUngreetedArrival(uint32_t maxAgeMs, uint32_t now, Accept accept, RosterEntry& out);
 ```
 
+Prefer the `forEach*` visitors over the snapshot getters for hot-path / arrival
+work — they keep `RosterEntry` copies off the small heap.
+
 `RosterEntry` is a trivially-copyable POD (~104 B) held in a fixed
-static array of `kCapacity` (50); snapshots never allocate per entry. Each entry
-carries `name`, `baseColor` / `shadeColor`, `mac` bytes + `hasMac`
-(canonical colon-hex `lampId` string via `macStr()`), `lastRssi`,
-`lastSeenNearMs` / `lastSeenMeshMs`, `firmwareVersion`,
-`protocolVersion`, `otaState`. For arrival edge detection see
+static array of `kCapacity` (50); snapshots never allocate per entry.
+**Identity keys on `mac`** (the stable social identity used by the roster,
+disposition store, and greeting dedup); `name` is a stored display field
+(user-set), so a rename doesn't orphan an entry and two same-named lamps don't
+collide. Each entry carries `name`, `baseColor` / `shadeColor`, `mac` bytes +
+`hasMac` (canonical colon-hex `lampId` string via `macStr()`), `lastRssi`,
+`lastSeenNearMs` / `lastSeenMeshMs`, `firmwareVersion`, `protocolVersion`,
+`otaState`. For arrival edge detection see
 [`lamp-framework.md`](lamp-framework.md).
 
 ---

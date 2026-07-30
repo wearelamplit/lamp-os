@@ -13,12 +13,12 @@ Files:
 | `software/lamp-os/src/expressions/expression.hpp` | Base class + lifecycle contract |
 | `software/lamp-os/src/expressions/expression.cpp` | `control()` driver, wisp-override dim (`wispDimScale`) |
 | `software/lamp-os/src/expressions/expression_manager.{hpp,cpp}` | Owns the entry list + one-shot transients, `makeExpression()` (registry-driven), cascade dedup, mesh recv path |
-| `software/lamp-os/src/expressions/{glitchy,pulse,breathing,shifty,spotty,flicker}/*_expression.{hpp,cpp}` | The six shipped subclasses; each declares its own `ExpressionDescriptor` |
+| `software/lamp-os/src/expressions/{glitchy,pulse,breathing,shifty,spotty,flicker}/*_expression.{hpp,cpp}` | The shipped subclasses; each declares its own `ExpressionDescriptor` |
 | `software/lamp-os/src/expressions/primitives.hpp` | Shared Zone/Points/Size clamped helpers + `resolveZone` (whole-strip/region toggle → Zone, shared by every zonable expression) + `pulseWidthFromPercent` (pulse `size` percent → capped fade radius) + `glitchBlockPlan` (glitchy scatter level→distinct grain blocks) + `usableSections` (breathing bands that fit the zone at ≥ `kMinSectionPx`) + `edgeTaper` (edge-taper weight: flat interior, curve-parameterized taper near the ends; `TaperCurve::Linear` or `Quadratic`) + `randomPermutation` (Fisher–Yates fill of a 0..n-1 order array over an injected rng; breathing's random band order) |
 | `software/lamp-os/src/expressions/param_utils.hpp` | `getParam` — one-arg (descriptor keys, always present after `applyDefaults`) and two-arg (explicit fallback) lookups |
 | `software/lamp-os/src/expressions/expression_schema.hpp` | `ExpressionDescriptor` / `ParamSpec` / `Bound` / `ColorSpec` / `RangeSpec` — the per-type schema each subclass declares |
 | `software/lamp-os/src/expressions/expression_registry.{hpp,cpp}` | `ExpressionRegistry`: `add`/`remove`/`find`, `applyDefaults()`, `serializeCatalog()` (the `exprcat` wire JSON) |
-| `software/lamp-os/src/core/lamp.cpp` | `Lamp::registerExpressions()` — the default set (`reg.add(T::descriptor())`); a variant overrides it |
+| `software/lamp-os/src/core/lamp_behaviors.cpp` | `Lamp::registerExpressions()` — the default set (`reg.add(T::classDescriptor())`); a variant overrides it |
 | `software/lamp-os/src/config/config_types.hpp` | `ExpressionConfig` class (persisted form) |
 | `software/lamp-os/src/config/config_codec.cpp` | JSON serialisation + parsing; the top-level-field skip chain (`keyStr == …` in `fromJson`) |
 | `software/lamp-app-flutter/lib/features/control/domain/sections.dart` | App-side `ExpressionConfig` mirror; the matching `_reservedKeys` skip set |
@@ -129,15 +129,15 @@ window.
 ## Adding a new expression type: minimum viable diff
 
 1. **New subclass** in `software/lamp-os/src/expressions/foo/foo_expression.{hpp,cpp}` (each expression gets its own directory). Derive from `Expression`, override `draw()` (where you paint) and `onTrigger()`; add `onUpdate()`/`onComplete()`/`control()` as the effect needs. Implement `configureFromParameters(const std::map<std::string, uint32_t>&)` to read your params. Read them with the **one-arg** `getParam(parameters, "key")` — `applyDefaults` has already folded every descriptor key into the map, so a miss is a schema bug, not a missing preset. Look at `glitchy/glitchy_expression.cpp` for an interval-triggered brief-flash pattern, `breathing/breathing_expression.cpp` for a continuous always-running pattern, `spotty/spotty_expression.cpp` for a continuous effect with independent per-point lifecycles that dims under wisp override.
-2. **Descriptor** — declare the descriptor data as `inline constexpr` in `foo_expression.hpp` (see the shipped types: `kFooDescriptorData`, make-less) with id, name, `colors`, optional `interval`/`duration`, zone flags, and `params`; in the `.cpp`, compose the registered descriptor with `withMake(kFooDescriptorData, &makeExpr<FooExpression>)` and expose it via a `static const ExpressionDescriptor& descriptor()` accessor. The split is a native-test seam: `test_builtin_descriptors` registers the header data directly (the `.make` factory can't link without Arduino), so a descriptor change fails the pinned catalog instead of drifting. Every wire field (and the whole editor) derives from this; there is no separate app-side schema. Return `continuous` here rather than the app — and override `wispDimFloor()` on the class (a value below `1.0`) if the type should dim, not pause, under a wisp hold.
-3. **Register it** — add `reg.add(FooExpression::descriptor())` to `Lamp::registerExpressions` in `lamp.cpp`. `ExpressionManager::makeExpression` then finds the descriptor by id, builds the instance via `.make`, and folds defaults before `configureFromParameters`. No factory dispatch to edit.
+2. **Descriptor** — declare the descriptor data as `inline constexpr` in `foo_expression.hpp` (see the shipped types: `kFooDescriptorData`, make-less) with id, name, `colors`, optional `interval`/`duration`, zone flags, and `params`; in the `.cpp`, compose the registered descriptor with `withMake(kFooDescriptorData, &makeExpr<FooExpression>)` and expose it via a `static const ExpressionDescriptor& classDescriptor()` accessor. The split is a native-test seam: `test_builtin_descriptors` registers the header data directly (the `.make` factory can't link without Arduino), so a descriptor change fails the pinned catalog instead of drifting. Every wire field (and the whole editor) derives from this; there is no separate app-side schema. Return `continuous` here rather than the app — and override `wispDimFloor()` on the class (a value below `1.0`) if the type should dim, not pause, under a wisp hold.
+3. **Register it** — add `reg.add(FooExpression::classDescriptor())` to `Lamp::registerExpressions` in `lamp_behaviors.cpp`. `ExpressionManager::makeExpression` then finds the descriptor by id, builds the instance via `.make`, and folds defaults before `configureFromParameters`. No factory dispatch to edit.
 4. **App presentation** (optional) — add an entry to `expression_presentation.dart` keyed by your `id` for the picker icon + tagline. Skip it and the type falls back to a generic icon and no tagline; every control still renders from the descriptor.
 
 Type-specific params ride the generic `parameters` map automatically — you do **not** touch the reserved-key skip lists (those cover only the fixed top-level fields, see **Parameter contract**). That's it: no protocol bump, no NVS migration. The settings_blob path picks up the new fields on first save, and the app picks up the new controls the next time it reads `exprcat`.
 
 ### Custom-lamp override
 
-A variant owns its own set. Put the subclass + descriptor under `software/lamp-os/src/lamps/<variant>/` and override `registerExpressions` in the variant's `Lamp` subclass: call `reg.add(MyExpression::descriptor())` for its own types and `reg.remove("glitchy")` (etc.) to drop a stock one. The framework `registerExpressions` in `lamp.cpp` is the default the variant replaces or extends; framework code never includes variant headers (see the variant-include hygiene rule in `CLAUDE.md`).
+A variant owns its own set. Put the subclass + descriptor under `software/lamp-os/src/lamps/<variant>/` and override `registerExpressions` in the variant's `Lamp` subclass: call `reg.add(MyExpression::classDescriptor())` for its own types and `reg.remove("glitchy")` (etc.) to drop a stock one. The framework `registerExpressions` in `lamp_behaviors.cpp` is the default the variant replaces or extends; framework code never includes variant headers (see the variant-include hygiene rule in `CLAUDE.md`).
 
 ## Parameter contract
 
@@ -167,8 +167,8 @@ Those skip lists are **fixed** — adding a per-type param does not touch them, 
 | Glitchy | ✓ | — | — | `scatter` (always active) sets grain and density. Its lowest level is a solid static fill of the active region held for the duration; higher levels scatter into progressively finer, sparser flecks (per-level density/grain in `kGlitchScatter`, `primitives.hpp`). Blocks occupy **distinct** grain slots (`slotCount = region / grain`, `blocksWanted = round(density% of slots)`), so realized density is exact rather than collision-capped. `fullStrip=1` (default) spans the whole strip; `fullStrip=0` scopes to the Zone. Each active frame repaints from the saved background, so scattered levels re-roll into a stable dancing density; the solid level reads as a steady fill. `durationMin`/`durationMax` are milliseconds of wall clock; every glitch paints ≥1 frame. The grain-block plan derives from `glitchBlockPlan()` in `primitives.hpp`. The interval spans 10 min (`600 s`) to 5 h (`18000 s`) with a 30 min (`1800 s`) `minGap` between `intervalMin` and `intervalMax` |
 | Breathing | ✓ | — | — | `fullStrip=1` (default) spans the whole strip; `fullStrip=0` scopes to the Zone. The whole zone breathes together. `breathSpeed` runs between a fast floor (faster reads as hectic) and a slow ceiling. A multi-color palette advances to the next random color at the bottom of each breath (the dark trough), so the swap is unseen. Steady-state breathing never restarts; phase accrues from `millis()` deltas indefinitely. The zone's outer edges are soft: per-pixel intensity is scaled by an `edgeTaper()` run over a virtual region a couple pixels wider with the offset shifted in one, putting the darkest step off-screen so the outermost real pixel reads the brighter second step (both ends shift symmetrically; interior stays full). Timing is driven by `breathPhase`; the taper only weights the spatial per-pixel intensity |
 | Shifty | ✓ | — | — | See `fillMode` below. Fades (`fadeDuration`) and the hold (`shiftDurationMin/Max`) are pure `millis()` deadlines; the frame counter cannot end a fade or a hold |
+| Flicker | ✓ | — | — | Continuous fire shimmer; `wispDimFloor` = 0.3 (dims under wisp). `fullStrip=1` (default) spans the whole strip; `fullStrip=0` scopes to the Zone. The `fire` enum (0–3: Twinkle / Coals / Candle / Campfire) selects the `FireStyle` — rest level, heat targets, and wind gusts (`flicker_math.hpp`); up to 4 colors read coolest-first (sparkle) to hottest-last (flame tip). Per-cell heat approaches its rolled target on `millis()` deltas with a wind offset, so the effect runs indefinitely off wall clock, not the frame counter |
 | Spotty | ✓ | ✓ | ✓ (Small↔Large slider) | `fullStrip=1` (default) spans the whole strip; `fullStrip=0` scopes to the Zone. Continuous wandering ambient points; `wispDimFloor` = 0.3 (dims under wisp). Each spot fades in/holds/fades out (equal thirds), then respawns at a new random position and color; initial phases are randomly staggered so spots don't pulse in unison. `spotSpeed` (inverted slow↔fast) selects a per-spot lifetime range: each spot rolls a random lifetime in `spotLifeBounds(spotSpeed)`, whose `lo`/`hi` interpolate independently between a fire end and a stars end (bounds in `spotty_expression.cpp`). The wide, low fire band makes the fast end read like fire — mostly rapid pops with occasional lingers; the narrow, high stars band is slow and gentle. The spot's pixel width is the size value directly; `edgeTaper(k, size, size/2, Linear)` handles even and odd widths symmetrically (a symmetric taper at both edges, single-pixel-accurate for even and odd sizes). |
-| Flicker | ✓ | — | — | Continuous shimmer (id `flicker`); `continuous=true`, `advanced=true` (offered only in the app's advanced mode), `wispDimFloor` = 0.3 (dims under wisp). `fullStrip=1` (default) spans the whole strip; `fullStrip=0` scopes to the Zone. A `fire` **Style** enum picks one of four looks from the `fireStyle` table in `flicker/flicker_math.hpp` (default index 1, Coals): **Twinkle** (near-dark base, sparse gentle sparks, no wind, cool colors read as stars), **Coals** (a calm dim ember bed with rare soft glows), **Candle** (a gentle flame with occasional soft dips and light wind), **Campfire** (lively, brighter, regular gusts). Per-pixel heat eases toward a rolled target on the wall clock (`approachHeat`), with an optional global gust for the windy styles; nothing keys off the frame counter. Colors are a cool-to-hot gradient (coolest first, hottest last, up to 4 stops); an empty palette falls back to the built-in warm ramp `defaultFireRamp()`. |
 
 ### Shifty `fillMode`
 
@@ -267,3 +267,103 @@ To add a host-side test for a new expression: instantiate it with a stub `FrameB
 - **The visible output is not your buffer.** Expressions paint into the configurator's frame buffer, which the compositor then composites the wisp layer over. While a wisp holds a surface, a dimming expression (`wispDimFloor` < 1.0) contributes only at its floor, so the strip mostly shows the wisp colour, not your writes. Test with the wisp off, or clear overrides manually, before debugging.
 - **No allocation in `onUpdate()`.** It runs once per flush window (~16 ms) for the whole time an instance is PLAYING. Allocate in `onTrigger()`, reuse buffers across frames. The existing expressions follow this pattern; copy them.
 - **Continuous expressions own the loop.** Subclasses that override `control()` (breathing, spotty, flicker) route through the protected `Expression::continuousControl()` helper: it auto-retriggers when `STOPPED` (never for transients, which `gcTransients()` must reap). Spot/breath state advances on the wall clock every frame — a transient keeps its completion progress moving so it still reaches `STOPPED` instead of squatting on the compositor until the transient GC backstop.
+
+## Appendix: new-expression skeleton
+
+A minimal copy-paste type, matching the shipped pattern (registry-driven, no
+factory dispatch). Follows the four steps in **Adding a new expression type**
+above.
+
+`foo/foo_expression.hpp`:
+
+```cpp
+#pragma once
+
+#include "expressions/expression.hpp"
+#include "expressions/expression_schema.hpp"
+
+namespace lamp {
+
+// Make-less descriptor data the .cpp composes via withMake(); native-test
+// seam so test_builtin_descriptors pins the production catalog.
+inline constexpr ParamSpec kFooParams[] = {
+  { .key = "fooTempo", .kind = ParamKind::Int, .label = "Tempo",
+    .min = 100, .max = 4000, .def = 1000, .unit = "ms" },
+  kOpacityParam,
+};
+inline constexpr ExpressionDescriptor kFooDescriptorData{
+  .id     = "foo",
+  .name   = "Foo",
+  .colors = { .max = 4, .label = "Colors" },
+  .params = kFooParams,
+};
+
+class FooExpression : public Expression {
+ public:
+  FooExpression(FrameBuffer* inBuffer, uint32_t inFrames = 30)
+      : Expression(inBuffer, inFrames) {}
+
+  static const ExpressionDescriptor& classDescriptor();     // for reg.add()
+  const ExpressionDescriptor& descriptor() const override;  // instance accessor
+
+  void configureFromParameters(
+      const std::map<std::string, uint32_t>& parameters) override;
+  void draw() override;
+
+ protected:
+  void onTrigger() override;
+
+ private:
+  uint32_t tempoMs_ = 1000;
+};
+
+}  // namespace lamp
+```
+
+`foo/foo_expression.cpp`:
+
+```cpp
+#include "expressions/foo/foo_expression.hpp"
+
+#include "expressions/param_utils.hpp"
+
+namespace lamp {
+
+namespace {
+constexpr ExpressionDescriptor kFooDescriptor =
+    withMake(kFooDescriptorData, &makeExpr<FooExpression>);
+}  // namespace
+
+const ExpressionDescriptor& FooExpression::classDescriptor() { return kFooDescriptor; }
+const ExpressionDescriptor& FooExpression::descriptor() const { return kFooDescriptor; }
+
+void FooExpression::configureFromParameters(
+    const std::map<std::string, uint32_t>& parameters) {
+  // applyDefaults has folded every descriptor key into the map, so the
+  // one-arg getParam always finds it — a miss is a schema bug.
+  tempoMs_ = getParam(parameters, "fooTempo");
+  configureOpacity(parameters);
+}
+
+void FooExpression::onTrigger() {
+  // Snapshot palette + per-trigger state (allocations go here, not draw()).
+}
+
+void FooExpression::draw() {
+  if (!shouldAffectBuffer()) { nextFrame(); return; }
+  for (int i = 0; i < fb->pixelCount; ++i) {
+    fb->buffer[i] = getRandomColor();   // your effect
+  }
+  nextFrame();
+}
+
+}  // namespace lamp
+```
+
+Register it in `Lamp::registerExpressions` (`core/lamp_behaviors.cpp`), or a
+variant's override, with `reg.add(FooExpression::classDescriptor())`. Add
+`onUpdate()` / `onComplete()` / `control()` as the effect needs, override
+`wispDimFloor()` (a value below `1.0`) if it should dim rather than pause under a
+wisp hold, and — optionally — a picker icon/tagline in `expression_presentation.dart`
+keyed by `id`. The app renders every control generically from the descriptor;
+there is no per-type app schema to touch.

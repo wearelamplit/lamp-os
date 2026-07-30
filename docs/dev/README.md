@@ -5,20 +5,14 @@ firmware, hacking on the wisp, working on the control app, or authoring a custom
 lamp. (For the project pitch, hardware build, and contribution flow, see the
 [root README](../../README.md).)
 
-## The three components
+## The big picture
 
-Everything lives under [`software/`](../../software/):
-
-| Component | What it is | Build env |
-|---|---|---|
-| [`lamp-os/`](../../software/lamp-os/) | Lamp firmware (ESP32-WROOM): BLE GATT control for the app + ESP-NOW mesh between lamps | `upesy_wroom_standard` / `upesy_wroom_snafu` |
-| [`wisp/`](../../software/wisp/) | Wisp infrastructure node (Seeed XIAO ESP32-C6): Aurora palette subscriber + mesh paint distributor + status beacon | `seeed_xiao_esp32_c6` |
-| [`lamp-app-flutter/`](../../software/lamp-app-flutter/) | iOS/Android control app: talks BLE GATT to lamps; no direct mesh participation | (Flutter) |
-
-The app talks BLE to lamps. The wisp reaches the app only by proxy, it
-broadcasts over the mesh, lamps cache that, and the app reads it off a connected
-lamp. The wisp is **USB-flash-only** (no OTA), so it must be re-flashed whenever
-the protocol version bumps or it goes silently invisible on the mesh.
+Three components under [`software/`](../../software/) — the lamp firmware
+(ESP32-WROOM), the wisp infrastructure node (Seeed XIAO ESP32-C6), and the
+Flutter control app — linked by BLE GATT, an ESP-NOW mesh, and the wisp's Aurora
+feed. The one-screen map of components, links, data flows, and where each
+subsystem lives is [`architecture.md`](architecture.md). **Start there** for
+orientation.
 
 ## Quickstart
 
@@ -52,29 +46,31 @@ hood); the Flutter toolchain setup is in the [root README](../../README.md).
 
 ## Guides
 
-### Dev environment
-- [`environment/`](environment/README.md), toolchain setup, npm task catalog,
-  flashing a lamp, and the emulator+bridge path for development without a phone.
+### Big picture
+- [`architecture.md`](architecture.md), the three components, the links between
+  them, the data flows, and where each subsystem lives.
 
-### Architecture
-- [`lamp-framework.md`](lamp-framework.md), the lamp's core runtime: behavior
-  stack, compositor/overrides, the per-variant build model, and the single-
-  instance + boot invariants.
+### Custom lamps
+Building your own variant or behaviour?
+[`building-custom-lamps.md`](building-custom-lamps.md) is the author's guide —
+the configure → subclass → call → utils narrative with snafu (social) and staff
+(physical) as worked examples, plus the build/ship path.
+[`lamp-social-api.md`](lamp-social-api.md) is the lamp-to-lamp API it reacts
+with (`BehaviorContext`, `PeerView`, arrivals, bids). Built something cool? Send
+it back upstream, see [Contributing](../../README.md#contributing).
 
-### Conventions
-- [`code-smells.md`](code-smells.md), a catalog of code smells as
-  *heuristics* (with the "when it's actually fine" cases), to reason about
-  refactors. Pairs with the comment policy and conventions in
-  [`CLAUDE.md`](../../CLAUDE.md).
+### Runtime internals
+- [`lamp-framework.md`](lamp-framework.md), the lamp's core runtime: single-
+  instance model, compositor, dual-core split, power governor, and the boot /
+  variant-resolution invariants.
 
 ### Subsystems
 - [`expressions.md`](expressions.md), the auto-triggered animation subsystem:
-  how to write a new expression, the wisp-override gate, the testing pattern.
-  [`expressions/`](expressions/) holds the authoring guide and a skeleton
-  expression to copy from.
+  the descriptor model, the wisp-override gate, the testing pattern, and the
+  new-expression skeleton.
 - [`social.md`](social.md), overview of how a lamp behaves around other lamps,
   greetings and crowd-dim, and how they fit together. **Start here** for the
-  social system, then the two docs below.
+  social system, then the docs below.
 - [`personality-greetings.md`](personality-greetings.md), disposition-driven
   greeting animations (how lamps acknowledge peers they meet on the mesh).
 - [`personality-signals.md`](personality-signals.md), the signals a custom
@@ -88,19 +84,26 @@ hood); the Flutter toolchain setup is in the [root README](../../README.md).
   ESP-NOW mesh **and** the BLE GATT link. **The code wins ties**, update this
   doc when it doesn't.
 
+### Operations + environment
+- [`environment/`](environment/README.md), toolchain setup, npm task catalog,
+  flashing a lamp, and the emulator+bridge path for development without a phone.
+- [`debug-instruments.md`](debug-instruments.md), the `LAMP_DEBUG` serial
+  bracket-tag catalog (lamp + wisp): which tag to grep for what.
+
+### Conventions
+- [`code-smells.md`](code-smells.md), a catalog of code smells as
+  *heuristics* (with the "when it's actually fine" cases), to reason about
+  refactors. Pairs with the comment policy and conventions in
+  [`CLAUDE.md`](../../CLAUDE.md).
+- [`embedded-heap.md`](embedded-heap.md), heap discipline for the tight,
+  fragmented lamp/wisp heap. Read before adding any roster / per-peer / hot-path
+  feature.
+
 ### Decisions
 - [`../adrs/`](../adrs/README.md), the **Architecture Decision Records** — the
   significant, hard-to-reverse choices that shape the firmware (ESP-NOW mesh,
   OTA over mesh, the dual-core concurrency model, …) and the alternatives they
   rejected. Read these for the *why* behind the lock-ins.
-
-### Custom lamps
-Building your own variant or behaviour? Start with
-[`lamp-framework.md`](lamp-framework.md) (the runtime you plug into) and
-[`personality-signals.md`](personality-signals.md) (what you can react to), then
-[`expressions.md`](expressions.md) for custom animations and
-[`utilities.md`](utilities.md) for the helper toolbox they're built from. We'd love you to
-upstream it, see [Contributing](../../README.md#contributing).
 
 ---
 

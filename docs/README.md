@@ -2,9 +2,9 @@
 
 This folder holds:
 
-- [`dev/`](dev/), the **developer handbook** and reference guides (architecture,
-  the mesh wire-format spec, expressions, personality, security). Start at
-  [`dev/README.md`](dev/README.md).
+- [`dev/`](dev/), the **developer handbook** and reference guides (the
+  architecture map, custom lamps, the mesh wire-format spec, expressions,
+  personality). Start at [`dev/README.md`](dev/README.md).
 - [`adrs/`](adrs/), the **Architecture Decision Records** — the significant,
   hard-to-reverse decisions that shape the firmware, with the alternatives they
   rejected. Start at [`adrs/README.md`](adrs/README.md).
