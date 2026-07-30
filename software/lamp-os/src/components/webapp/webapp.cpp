@@ -147,6 +147,10 @@ static void handlePutSettings(AsyncWebServerRequest* req, JsonVariant& json) {
   if (pw[0] == '\0' && !s_config->lamp.password.empty()) {
     obj["lamp"]["password"] = s_config->lamp.password;
   }
+  // A web save carrying a name is an explicit user configuration; stamp the
+  // adoption flag so boot's applyDefaults never reverts the name to a default.
+  const char* nm = obj["lamp"]["name"] | "";
+  if (nm[0] != '\0') obj["lamp"]["named"] = true;
   String out;
   serializeJson(json, out);
   if (!s_config->persistRawJson(out.c_str())) {

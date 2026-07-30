@@ -78,6 +78,7 @@ Config::Config(ConfigStore* inStore) {
 
   config_codec::fromJson(doc.as<JsonObject>(), lamp, base, shade, expressions,
                          homeMode);
+  namedKeyPresent_ = doc["lamp"]["named"].is<bool>();
 
   // Per-peer dispositions live in a separate NVS key.
   dispositions_.load();
@@ -411,10 +412,11 @@ void Config::applyDefaults(const Defaults& d) {
   // overwritten. Subclass defaults() returns values that are used as
   // first-boot baselines.
   //
-  // Name: the Config class default is "stray". If NVS had no name (empty
-  // NVS) the loaded value is still "stray". Replace it with the subclass
-  // preferred name.
-  if (!d.name.empty() && lamp.name == "stray") {
+  // Name: resolve `named` (migrating pre-flag NVS from the stored name), then
+  // substitute the variant default only for a lamp the user never named. A
+  // named lamp keeps its stored name even when it equals a default word.
+  lamp.named = resolveNamed(namedKeyPresent_, lamp.named, lamp.name, d.name);
+  if (!d.name.empty() && !lamp.named) {
     lamp.name = d.name;
   }
   // Colors: apply the variant's injected default when the vector still holds

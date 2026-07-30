@@ -599,18 +599,18 @@ void lamp::Lamp::setup() {
   config.applyDefaults(defaults());
 
   // First-ever-boot housekeeping, persisted once so it sticks across reboots.
-  // Migrate a lamp configured under firmware that predated the `setup` flag
-  // (custom name OR a control password) onto the flag first, so the roll below
-  // sees it as adopted. Then, only while still unadopted, give it a random
-  // per-surface hue so units aren't visually identical out of the box. Shade
-  // hue is offset from base by [60,300]° so a lamp never boots base≈shade;
-  // seeded from the MAC so each unit lands on a distinct hue. Guarded on
-  // `!setup` and the single-color variant default, so it fires once and never
-  // on an adopted lamp; a variant that forces `setup=true` (curated colors)
-  // skips it entirely.
-  bool persistFirstBoot = false;
+  // Persist when NVS predated the `named` flag so applyDefaults' inferred value
+  // becomes authoritative. Then latch a lamp the user named OR gave a control
+  // password to adopted, so the roll below sees it as configured. Then, only
+  // while still unadopted, give it a random per-surface hue so units aren't
+  // visually identical out of the box. Shade hue is offset from base by
+  // [60,300]° so a lamp never boots base≈shade; seeded from the MAC so each
+  // unit lands on a distinct hue. Guarded on `!setup` and the single-color
+  // variant default, so it fires once and never on an adopted lamp; a variant
+  // that forces `setup=true` (curated colors) skips it entirely.
+  bool persistFirstBoot = !config.namedKeyPresent();
   if (!config.lamp.setup &&
-      (config.lamp.name != defaults().name || !config.lamp.password.empty())) {
+      (config.lamp.named || !config.lamp.password.empty())) {
     config.lamp.setup = true;
     persistFirstBoot = true;
   }

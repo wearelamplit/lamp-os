@@ -26,8 +26,8 @@ class StandardLamp : public Lamp {
 
   Config::Defaults defaults() const override {
     return {
-      // name omitted-no: kept as "stray" because lamp.cpp's first-boot
-      // setup-flag detection compares config.lamp.name == defaults().name.
+      // Kept as the fresh-lamp sentinel so an unconfigured standard lamp reads
+      // as never-named (applyDefaults' `named` migration).
       .name = "stray",
       // baseColor + *ColorsEditable omitted: they equal the Config class
       // defaults, and first-boot randomization (lamp.cpp) overwrites the

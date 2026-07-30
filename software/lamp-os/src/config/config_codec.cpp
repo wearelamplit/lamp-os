@@ -71,13 +71,14 @@ void fromJson(JsonObject root, LampSettings& lamp, BaseSettings& base,
   // lampType is firmware-owned (see Config::setLampType).
   // Inbound settings_blob writes intentionally do not update it; the app
   // can read but not write the variant identity.
-  lamp.name = asciiLower(std::string(lampNode["name"] | "stray"));
+  lamp.name = asciiLower(std::string(lampNode["name"] | kDefaultLampName));
   lamp.brightness = lampNode["brightness"] | 100;
   std::string password = std::string(lampNode["password"] | "");
   if (!password.empty()) {
     lamp.password = password;
   }
   lamp.setup = lampNode["setup"] | false;
+  lamp.named = lampNode["named"] | false;
   lamp.advancedEnabled = lampNode["advancedEnabled"] | false;
   lamp.webappEnabled = lampNode["webappEnabled"] | true;
   lamp.apBootMinutes = lampNode["apBootMinutes"] | 0;
@@ -196,6 +197,7 @@ void toJson(JsonObject root, const LampSettings& lamp, const BaseSettings& base,
     lampNode["password"] = lamp.password;
   }
   lampNode["setup"] = lamp.setup;
+  lampNode["named"] = lamp.named;
   lampNode["advancedEnabled"] = lamp.advancedEnabled;
   lampNode["webappEnabled"] = lamp.webappEnabled;
   lampNode["apBootMinutes"] = lamp.apBootMinutes;

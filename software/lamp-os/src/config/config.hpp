@@ -87,6 +87,11 @@ class Config {
   // the stored blob may be recoverable.
   bool loadFailedWithData() const { return loadFailedWithData_; }
 
+  // False when the loaded NVS blob predated the `named` flag. applyDefaults
+  // infers `named` from the stored name once; the caller persists so the flag
+  // is authoritative thereafter.
+  bool namedKeyPresent() const { return namedKeyPresent_; }
+
   /**
    * create a streamable json doc to send configs to the webserver
    * @return a JsonDocument to serialize
@@ -247,6 +252,7 @@ class Config {
   bool lampHasOtaSendingTo_ = false;
   uint8_t lampOtaSendingTo_[6] = {0};
   bool loadFailedWithData_ = false;
+  bool namedKeyPresent_ = false;
   bool lampSectionDirty_ = true;
   bool baseSectionDirty_ = true;
   bool shadeSectionDirty_ = true;

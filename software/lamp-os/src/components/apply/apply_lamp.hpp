@@ -32,6 +32,7 @@ inline void lampLocal(JsonObject obj, uint8_t maxBrightness) {
   if (obj.isNull()) return;
   if (obj["name"].is<const char*>()) {
     ::config.lamp.name = asciiLower(std::string(obj["name"].as<const char*>()));
+    ::config.lamp.named = true;
     ::lamp::updateAdvertisedDeviceName(::config.lamp.name.c_str());
   }
   if (obj["brightness"].is<int>()) {

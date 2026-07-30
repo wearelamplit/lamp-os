@@ -18,6 +18,11 @@ namespace lamp {
 constexpr Color kBaseDefaultColor(0x30, 0x07, 0x83, 0x00);
 constexpr Color kShadeDefaultColor(0x00, 0x00, 0x00, 0xFF);
 
+// Name a fresh lamp loads from empty NVS, and the sentinel a variant replaces
+// with its own default in applyDefaults(). A stored name equal to this or the
+// variant default is treated as unconfigured by the pre-`named`-flag migration.
+inline constexpr const char* kDefaultLampName = "stray";
+
 /**
  * Social personality mode. Tunes how often + how eagerly the lamp
  *        greets nearby peers via SocialBehavior. Stored as uint8_t for
@@ -41,7 +46,7 @@ enum class SocialMode : uint8_t {
  */
 class LampSettings {
  public:
-  std::string name = "stray";
+  std::string name = kDefaultLampName;
   uint8_t brightness = 100;
   std::string password = "";
   // True once the lamp has been claimed/configured via the app. Drives the
@@ -49,6 +54,11 @@ class LampSettings {
   // longer relies on matching default name/colors. Default false → a fresh
   // or custom lamp is "unconfigured" and gets the onboarding wizard.
   bool setup = false;
+  // True once a user has set this lamp's name via a client write (app blob or
+  // web config). Gates the first-boot default-name substitution and adopt
+  // latch so a lamp named the literal variant default word ("stray"/"snafu"/
+  // "staff") isn't mistaken for an unconfigured lamp and reset every boot.
+  bool named = false;
   bool advancedEnabled = false;
   // Default true so existing NVS payloads without the field opt in.
   bool webappEnabled = true;
@@ -143,6 +153,19 @@ inline bool configBlobHasData(const std::string& json) {
 // hiccup into a permanent factory reset, and the original blob may be recoverable.
 inline bool shouldPersistFirstBoot(bool wouldPersist, bool loadFailedWithData) {
   return wouldPersist && !loadFailedWithData;
+}
+
+// Resolve the persisted `named` flag. When the flag was present in NVS
+// (namedKeyPresent), trust it. Otherwise migrate pre-flag NVS once by
+// inferring from the stored name: a name matching neither the fresh-lamp
+// sentinel nor the variant default was user-set. A blank variantDefault means
+// the variant supplies no name, so only the fresh sentinel counts.
+inline bool resolveNamed(bool namedKeyPresent, bool loadedNamed,
+                         const std::string& name,
+                         const std::string& variantDefault) {
+  if (namedKeyPresent) return loadedNamed;
+  if (name == kDefaultLampName) return false;
+  return variantDefault.empty() || name != variantDefault;
 }
 
 /**
