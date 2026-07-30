@@ -132,7 +132,10 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   static constexpr uint32_t INTROVERT_TIRED_DURATION_MS = 300000;
 
   Config* config_ = nullptr;
-  std::map<std::string, uint32_t> lastGreetedAtMs_;
+  // Transparent comparator so the re-greet lookup in control() can key on a
+  // RosterEntry's char-array name without building a std::string (a 32-char
+  // name would heap-allocate, and the lookup runs inside the roster mutex).
+  std::map<std::string, uint32_t, std::less<>> lastGreetedAtMs_;
   std::vector<uint32_t> recentGreetMs_;
   uint32_t tiredUntilMs_ = 0;
   // Peer's lampId (mac), populated for the animation duration.

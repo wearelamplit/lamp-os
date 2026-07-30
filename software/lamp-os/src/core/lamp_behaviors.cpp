@@ -30,6 +30,7 @@
 #include "core/personality_engine.hpp"
 #include "expressions/breathing/breathing_expression.hpp"
 #include "expressions/expression_manager.hpp"
+#include "expressions/flicker/flicker_expression.hpp"
 #include "expressions/glitchy/glitchy_expression.hpp"
 #include "expressions/pulse/pulse_expression.hpp"
 #include "expressions/shifty/shifty_expression.hpp"
@@ -47,6 +48,7 @@ void lamp::Lamp::registerExpressions(lamp::ExpressionRegistry& reg) {
   reg.add(lamp::BreathingExpression::classDescriptor());
   reg.add(lamp::ShiftyExpression::classDescriptor());
   reg.add(lamp::SpottyExpression::classDescriptor());
+  reg.add(lamp::FlickerExpression::classDescriptor());
 }
 
 void initBehaviors(lamp::Features features, lamp::Lamp& self) {
@@ -96,16 +98,20 @@ void initBehaviors(lamp::Features features, lamp::Lamp& self) {
 
   // Draw order = registration order, last-writer-wins on the surface buffer.
   //
-  // Configurator (wisp paint + saved colors) goes FIRST (the base scene).
-  // Social greetings overlay next. Expressions come LAST so brief transient
-  // effects (glitchy / pulse / breathing / shifty) compose on top and yield
-  // when their animation completes (animationState=STOPPED, Compositor skips
-  // them, configurator's writes are the final state).
-  //
-  // The configurator must register BEFORE the expressions so expressions
-  // compose ON TOP of whatever the configurator writes. Reversing the order
+  // Configurator (wisp paint + saved colors) goes FIRST (the base scene), so
+  // expressions compose ON TOP of whatever it writes. Reversing that order
   // would let the configurator overwrite per-pixel expression writes every
   // frame, making non-exclusive expressions invisible during wisp paint.
+  //
+  // Expressions compose next. Brief transient effects (glitchy / pulse /
+  // breathing / shifty) yield when their animation completes
+  // (animationState=STOPPED, the Compositor skips them and the configurator's
+  // writes are the final state).
+  //
+  // The social greeting composites ON TOP of the expressions: its draw() eases
+  // in over whatever is running and eases back out toward the live surface, so
+  // a continuous expression (flicker) can't bury it. Fade-out behaviors stay
+  // last so a reboot animation sits on top of even the greeting.
 
   std::vector<lamp::AnimatedBehavior*> allBehaviors = {};
 
@@ -113,17 +119,17 @@ void initBehaviors(lamp::Features features, lamp::Lamp& self) {
   allBehaviors.push_back(&baseConfiguratorBehavior);
   allBehaviors.push_back(&shadeConfiguratorBehavior);
 
-  // Social greeting behaviors
-  if (lamp::any(features, lamp::Features::SocialBehavior)) {
-    allBehaviors.push_back(&shadeSocialBehavior);
-  }
-
-  // Expression behaviors LAST: transient effects compose on top. When their
-  // animationState transitions to STOPPED the compositor skips them and the
-  // configurator's base scene shows through.
+  // Expression band: transient effects compose over the base scene.
   const size_t exprBandStart = allBehaviors.size();
   auto exprBehaviors = expressionManager.getBehaviors();
   allBehaviors.insert(allBehaviors.end(), exprBehaviors.begin(), exprBehaviors.end());
+  const size_t exprBandEnd = allBehaviors.size();
+
+  // Social greeting on top of the expressions so it fades in over whatever is
+  // running and eases back out to the live expression.
+  if (lamp::any(features, lamp::Features::SocialBehavior)) {
+    allBehaviors.push_back(&shadeSocialBehavior);
+  }
 
   // Fade-out behaviors run last so reboot animation is on top of everything
   if (lamp::any(features, lamp::Features::FadeOutBehavior)) {
@@ -142,12 +148,10 @@ void initBehaviors(lamp::Features features, lamp::Lamp& self) {
   compositor.begin(allBehaviors, allFbs, underlayBehaviors, startupBehaviors, calculateEffectiveHomeMode());
   // Bound the expression band so runtime-added transients land at its top
   // (addBehavior) and base scenes at its bottom (addBaseBehavior), keeping
-  // "all expressions draw together, late in the list" ordering.
-  // The end offset accounts for the fade-out behaviors appended after the
-  // band (2 when FadeOutBehavior is enabled, 0 otherwise).
-  const size_t fadeOutCount =
-      lamp::any(features, lamp::Features::FadeOutBehavior) ? 2u : 0u;
-  compositor.setExpressionBand(exprBandStart, allBehaviors.size() - fadeOutCount);
+  // "all expressions draw together" ordering. The band excludes the social
+  // greeting and the fade-out behaviors that follow it, so a runtime-added
+  // expression inserts before the greeting and the greeting stays on top.
+  compositor.setExpressionBand(exprBandStart, exprBandEnd);
 
   if (lamp::any(features, lamp::Features::KnockoutBehavior)) {
     compositor.overlayBehaviors.push_back(&baseKnockoutBehavior);

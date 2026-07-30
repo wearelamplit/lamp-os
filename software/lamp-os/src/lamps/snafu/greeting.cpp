@@ -124,11 +124,12 @@ void Greeting::control() {
 
   if (lamp::overrides.shade.operatorEditing()) return;
 
-  const auto arrivals = context_->lampRoster->getUngreetedArrivals(kBleMaxAgeMs);
-  for (const auto& p : arrivals) {
-    doGreet(p);
-    context_->lampRoster->acknowledge(p.name);
-    break;
+  lamp::RosterEntry arrival;
+  if (context_->lampRoster->bestUngreetedArrival(
+          kBleMaxAgeMs, millis(),
+          [](const lamp::RosterEntry&) { return true; }, arrival)) {
+    doGreet(arrival);
+    context_->lampRoster->acknowledge(arrival.name);
   }
 }
 

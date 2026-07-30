@@ -299,66 +299,67 @@ void SocialBehavior::control() {
     case SocialMode::Introvert: regreetWindowMs = INTROVERT_REGREET_WINDOW_MS; break;
   }
 
-  std::vector<RosterEntry> foundLamps =
-      lampRoster.getUngreetedArrivals(LAMP_PRUNE_TIME_MS);
+  // Re-greet window: even if the RosterEntry's acknowledged flag was reset
+  // (peer pruned + returned), enforce a per-peer cooldown. The predicate runs
+  // in place under the roster mutex, so it stays allocation-free (the char-
+  // array name keys the transparent-comparator map without a std::string).
+  RosterEntry arrival;
+  const bool haveArrival = lampRoster.bestUngreetedArrival(
+      LAMP_PRUNE_TIME_MS, now,
+      [&](const RosterEntry& e) {
+        if (regreetWindowMs == 0) return true;
+        auto last = lastGreetedAtMs_.find(e.name);
+        return last == lastGreetedAtMs_.end() ||
+               (now - last->second) >= regreetWindowMs;
+      },
+      arrival);
+  if (!haveArrival) return;
 
-  for (auto it = foundLamps.rbegin(); it != foundLamps.rend(); ++it) {
-    // Re-greet window: even if the RosterEntry's acknowledged flag was
-    // reset (peer pruned + returned), enforce a per-peer cooldown.
-    if (regreetWindowMs > 0) {
-      auto last = lastGreetedAtMs_.find(it->name);
-      if (last != lastGreetedAtMs_.end() && now - last->second < regreetWindowMs) {
-        continue;
-      }
-    }
-
-    const GreetingTuning tuning = personalityEngine.greetingFor(it->macStr());
+  const GreetingTuning tuning = personalityEngine.greetingFor(arrival.macStr());
 
 #ifdef LAMP_DEBUG
-    Serial.printf("[social] greet %s (mode=%u frames=%u pulse=%u count=%u)\n",
-                  it->name, (unsigned)mode,
-                  (unsigned)tuning.totalFrames,
-                  (unsigned)tuning.pulseBackStrength,
-                  (unsigned)tuning.pulseBackCount);
+  Serial.printf("[social] greet %s (mode=%u frames=%u pulse=%u count=%u)\n",
+                arrival.name, (unsigned)mode,
+                (unsigned)tuning.totalFrames,
+                (unsigned)tuning.pulseBackStrength,
+                (unsigned)tuning.pulseBackCount);
 #endif
-    greetingPeerLampId_ = it->macStr();
-    lampRoster.acknowledge(it->name);
-    foundLampColor = it->baseColor;
-    std::memcpy(greetedMac_, it->mac, 6);
-    greetedHasMac_ = it->hasMac;
-    greetedBaseStops_.clear();
-    greetedBlend_ = 0;
-    gradientCache_.clear();
-    if (greetedHasMac_ && meshLink_) {
-      meshLink_->sendColorQuery(greetedMac_);
-    }
-    applyTuning(tuning);
-
-    markGreeted(it->name, now);
-
-    // Introvert: trim the fatigue window, enter "tired" after too many
-    // greetings burned through recently.
-    if (mode == SocialMode::Introvert) {
-      recentGreetMs_.push_back(now);
-      while (!recentGreetMs_.empty() &&
-             now - recentGreetMs_.front() > INTROVERT_FATIGUE_WINDOW_MS) {
-        recentGreetMs_.erase(recentGreetMs_.begin());
-      }
-      if (recentGreetMs_.size() >= INTROVERT_FATIGUE_COUNT) {
-        tiredUntilMs_ = now + INTROVERT_TIRED_DURATION_MS;
-        recentGreetMs_.clear();
-#ifdef LAMP_DEBUG
-        Serial.printf("[social] introvert tired until +%u ms\n",
-                      (unsigned)INTROVERT_TIRED_DURATION_MS);
-#endif
-      }
-    }
-
-    playOnce();
-    greetingWasActive_ = true;
-    if (onGreetingChange_) onGreetingChange_();
-    break;
+  greetingPeerLampId_ = arrival.macStr();
+  lampRoster.acknowledge(arrival.name);
+  foundLampColor = arrival.baseColor;
+  std::memcpy(greetedMac_, arrival.mac, 6);
+  greetedHasMac_ = arrival.hasMac;
+  greetedBaseStops_.clear();
+  greetedBlend_ = 0;
+  gradientCache_.clear();
+  if (greetedHasMac_ && meshLink_) {
+    meshLink_->sendColorQuery(greetedMac_);
   }
+  applyTuning(tuning);
+
+  markGreeted(arrival.name, now);
+
+  // Introvert: trim the fatigue window, enter "tired" after too many
+  // greetings burned through recently.
+  if (mode == SocialMode::Introvert) {
+    recentGreetMs_.push_back(now);
+    while (!recentGreetMs_.empty() &&
+           now - recentGreetMs_.front() > INTROVERT_FATIGUE_WINDOW_MS) {
+      recentGreetMs_.erase(recentGreetMs_.begin());
+    }
+    if (recentGreetMs_.size() >= INTROVERT_FATIGUE_COUNT) {
+      tiredUntilMs_ = now + INTROVERT_TIRED_DURATION_MS;
+      recentGreetMs_.clear();
+#ifdef LAMP_DEBUG
+      Serial.printf("[social] introvert tired until +%u ms\n",
+                    (unsigned)INTROVERT_TIRED_DURATION_MS);
+#endif
+    }
+  }
+
+  playOnce();
+  greetingWasActive_ = true;
+  if (onGreetingChange_) onGreetingChange_();
 };
 
 void SocialBehavior::triggerGreeting(const RosterEntry& peer) {
