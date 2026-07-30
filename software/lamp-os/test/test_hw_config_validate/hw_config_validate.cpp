@@ -88,10 +88,40 @@ void test_zero_supply_budget_invalid() {
   TEST_ASSERT_FALSE(lamp::validateHwConfig(hw));
 }
 
+static lamp::HwConfig twoStrip() {
+  lamp::HwConfig hw{};
+  hw.strips.push_back({lamp::Surface::Shade, 12, lamp::ByteOrder::GRBW});
+  hw.strips.push_back({lamp::Surface::Base,  14, lamp::ByteOrder::GRBW});
+  return hw;
+}
+
+void test_inputs_valid_distinct_pins() {
+  lamp::HwConfig hw = twoStrip();
+  hw.inputs.push_back({1, lamp::InputType::Button, 19});
+  hw.inputs.push_back({2, lamp::InputType::Touch,  4});
+  TEST_ASSERT_TRUE(lamp::validateHwConfig(hw));
+}
+
+void test_input_colliding_with_strip_pin_invalid() {
+  lamp::HwConfig hw = twoStrip();  // strips on 12, 14
+  hw.inputs.push_back({1, lamp::InputType::Touch, 12});
+  TEST_ASSERT_FALSE(lamp::validateHwConfig(hw));
+}
+
+void test_input_colliding_with_input_pin_invalid() {
+  lamp::HwConfig hw = twoStrip();
+  hw.inputs.push_back({1, lamp::InputType::Button, 19});
+  hw.inputs.push_back({2, lamp::InputType::Touch,  19});
+  TEST_ASSERT_FALSE(lamp::validateHwConfig(hw));
+}
+
 int main(int argc, char** argv) {
   (void)argc; (void)argv;
   UNITY_BEGIN();
   RUN_TEST(test_zero_supply_budget_invalid);
+  RUN_TEST(test_inputs_valid_distinct_pins);
+  RUN_TEST(test_input_colliding_with_strip_pin_invalid);
+  RUN_TEST(test_input_colliding_with_input_pin_invalid);
   RUN_TEST(test_empty_strips_invalid);
   RUN_TEST(test_duplicate_pins_invalid);
   RUN_TEST(test_well_formed_config_valid);

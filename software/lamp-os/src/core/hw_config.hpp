@@ -6,9 +6,25 @@
 
 #include <lampos/led_types.hpp>
 
+#include "components/input/input_source.hpp"
+
 namespace lamp {
 
 enum class Surface : uint8_t { Shade = 0, Base = 1 };
+
+using input::InputType;
+
+// One physical input (button or capacitive touch pad). `id` is the
+// variant-chosen handle a behavior looks up to bind gestures. Touch fields
+// are ignored for buttons.
+struct InputSpec {
+  uint8_t   id;
+  InputType type;
+  uint8_t   pin;
+  uint16_t  touchPressDelta   = 12;
+  uint16_t  touchReleaseDelta = 6;
+  uint16_t  touchHoldMs       = 400;
+};
 
 using lampos::led::ByteOrder;
 using lampos::led::byteOrderFromString;
@@ -25,6 +41,7 @@ struct StripSpec {
 
 struct HwConfig {
   std::vector<StripSpec> strips;
+  std::vector<InputSpec> inputs;
   uint8_t maxBrightness = 200;
   uint16_t supplyBudgetMa = 2000;
 };
@@ -58,6 +75,18 @@ inline bool validateHwConfig(const HwConfig& hw) {
   if (!hasShade || !hasBase) return false;
   if (shadePx > 255 || basePx > 255) return false;
   if (broadcastCount > 1) return false;
+  // An input pin must not collide with another input pin OR any strip pin;
+  // a shared line drives a NeoPixel and reads a gesture at once, corrupting
+  // both. The strip cross-check is as load-bearing as the input↔input one.
+  for (size_t i = 0; i < hw.inputs.size(); ++i) {
+    const uint8_t pin = hw.inputs[i].pin;
+    for (const StripSpec& s : hw.strips) {
+      if (s.pin == pin) return false;
+    }
+    for (size_t j = i + 1; j < hw.inputs.size(); ++j) {
+      if (hw.inputs[j].pin == pin) return false;
+    }
+  }
   return true;
 }
 

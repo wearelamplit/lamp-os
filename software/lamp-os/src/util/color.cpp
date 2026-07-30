@@ -1,5 +1,6 @@
 #include "color.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -142,6 +143,21 @@ Color colorFromHue(uint16_t hueDeg) {
     case 4:  return Color(rem, 0, 255, 0);   // blue  → magenta
     default: return Color(255, 0, down, 0);  // magenta→ red
   }
+}
+
+uint16_t colorToHue(Color inColor) {
+  const int r = inColor.r, g = inColor.g, b = inColor.b;
+  const int mx = std::max(r, std::max(g, b));
+  const int mn = std::min(r, std::min(g, b));
+  const int d = mx - mn;
+  if (d == 0) return 0;
+  float h;
+  if (mx == r) h = static_cast<float>(g - b) / d;
+  else if (mx == g) h = static_cast<float>(b - r) / d + 2.0f;
+  else h = static_cast<float>(r - g) / d + 4.0f;
+  h *= 60.0f;
+  if (h < 0.0f) h += 360.0f;
+  return static_cast<uint16_t>(h + 0.5f) % 360;
 }
 
 }  // namespace lamp

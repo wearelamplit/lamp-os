@@ -14,8 +14,11 @@
 #ifdef LAMP_BUILD_VARIANT_SNAFU
 #include "lamps/snafu/snafu_lamp.hpp"
 #endif
+#ifdef LAMP_BUILD_VARIANT_STAFF
+#include "lamps/staff/staff_lamp.hpp"
+#endif
 
-#if (defined(LAMP_BUILD_VARIANT_STANDARD) + defined(LAMP_BUILD_VARIANT_SNAFU)) != 1
+#if (defined(LAMP_BUILD_VARIANT_STANDARD) + defined(LAMP_BUILD_VARIANT_SNAFU) + defined(LAMP_BUILD_VARIANT_STAFF)) != 1
 #error "Exactly one LAMP_BUILD_VARIANT_* must be defined (check platformio.ini env)"
 #endif
 
@@ -28,6 +31,8 @@ inline std::unique_ptr<Lamp> createCompiledLamp() {
   return std::make_unique<StandardLamp>();
 #elif defined(LAMP_BUILD_VARIANT_SNAFU)
   return std::make_unique<SnafuLamp>();
+#elif defined(LAMP_BUILD_VARIANT_STAFF)
+  return std::make_unique<StaffLamp>();
 #endif
 }
 
@@ -36,6 +41,8 @@ inline const char* compiledLampType() {
   return "standard";
 #elif defined(LAMP_BUILD_VARIANT_SNAFU)
   return "snafu";
+#elif defined(LAMP_BUILD_VARIANT_STAFF)
+  return "staff";
 #endif
 }
 

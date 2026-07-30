@@ -63,4 +63,11 @@ uint32_t colorDistance(Color c1, Color c2);
  * caller supplies a random hue). hue is taken mod 360.
  */
 Color colorFromHue(uint16_t hueDeg);
+
+/**
+ * Inverse of colorFromHue: recover the hue in degrees [0,360) from a color's
+ * RGB channels (white ignored). A greyscale color returns 0. Seeds the staff
+ * mood scrub from the configured color once at boot.
+ */
+uint16_t colorToHue(Color inColor);
 }  // namespace lamp

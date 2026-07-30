@@ -7,6 +7,12 @@
 namespace lamp {
 uint8_t calculateBrightnessLevel(uint8_t value, uint8_t percentage);
 
+// Scale an 8-bit value by an 8-bit fraction where 255 == 1.0. Rounds so
+// fract 255 maps v to v exactly (identity); any fract < 255 only scales down.
+inline uint8_t scale8(uint8_t v, uint8_t fract) {
+  return static_cast<uint8_t>((static_cast<uint16_t>(v) * fract + 255) >> 8);
+}
+
 Color setColorBrightness(Color inColor, uint8_t percentage);
 
 // Scale baseline by factor (0..1) and floor the result at floorPct, but never
