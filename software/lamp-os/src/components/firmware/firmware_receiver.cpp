@@ -385,11 +385,21 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
   // Derive the chunk count from totalLen, never the wire totalChunks. totalLen
   // is bounded by kMaxOfferLen above; totalChunks is unauthenticated until the
   // DONE-time digest bind, so trusting a mutated value would size the bitmap for
-  // chunks that never arrive and stall the session to the 10-min cap. chunkSize
-  // is range-checked to 1..FW_CHUNK_SIZE_MAX above, so the divide is safe.
-  const size_t expectedChunks =
-      (static_cast<size_t>(offerTotalLen_) + offerChunkSize_ - 1) /
-      offerChunkSize_;
+  // chunks that never arrive and stall the session to the 10-min cap. The
+  // (totalLen, chunkSize) ratio is unauthenticated too, so bound the chunk count
+  // before allocating or truncating: a replayed chunkSize=1 / totalLen=4MB OFFER
+  // implies 4M chunks and a ~512KB bitmap alloc that aborts the lamp.
+  uint32_t expectedChunks = 0;
+  if (!lamp_protocol::offerChunkCountOk(offerTotalLen_, offerChunkSize_,
+                                        expectedChunks)) {
+#ifdef LAMP_DEBUG
+    Serial.printf("[fw_receiver] OFFER chunk-count reject: totalLen=%u "
+                  "chunkSize=%u, declining\n",
+                  (unsigned)offerTotalLen_, (unsigned)offerChunkSize_);
+#endif
+    sendAccept(ctrl, lamp_protocol::FwAcceptStatus::DeclineBusy);
+    return;
+  }
   offerTotalChunks_ = static_cast<uint16_t>(expectedChunks);
 
   resetBitmap(expectedChunks);
@@ -669,8 +679,9 @@ void FirmwareReceiver::handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk&
 #endif
   }
   // offset + len must fit within the offer's totalLen, else a malformed chunk
-  // could direct esp_partition_write past the erased range.
-  if (p.offset + p.len > offerTotalLen_) {
+  // could direct esp_partition_write past the erased range. Compared without
+  // adding so an offset near UINT32_MAX can't wrap the sum under the bound.
+  if (p.offset > offerTotalLen_ || p.len > offerTotalLen_ - p.offset) {
 #ifdef LAMP_DEBUG
     Serial.printf("[fw_receiver] chunk drop: oob chunkIdx=%u off=%u len=%u "
                   "total=%u\n",

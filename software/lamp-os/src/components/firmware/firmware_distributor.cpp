@@ -760,14 +760,11 @@ void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
     if (peerFwChannel && peerFwChannel[0] != '\0') {
       // Known channel: ask "would the peer accept this firmware?" by calling
       // otaAcceptable with the peer as receiver and this lamp as the offer side.
+      // A peer we can't offer to (converged / wrong channel / downgrade) is the
+      // boring default; skipping it silently keeps the log to actual OFFERs.
+      // Only the → OFFER outcome below is worth a line.
       if (!otaAcceptable(peerFwChannel, peerVersion,
                          lamp::FIRMWARE_CHANNEL_STR, lamp::FIRMWARE_VERSION)) {
-        FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X skip: "
-                    "otaAcceptable(peerCh=%s peerV=0x%08X ourCh=%s ourV=0x%08X)=false\n",
-                    peerMac[0], peerMac[1], peerMac[2],
-                    peerMac[3], peerMac[4], peerMac[5],
-                    peerFwChannel, (unsigned)peerVersion,
-                    lamp::FIRMWARE_CHANNEL_STR, (unsigned)lamp::FIRMWARE_VERSION);
         return;
       }
     } else {

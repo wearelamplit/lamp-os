@@ -32,15 +32,15 @@ static HomeModeEnabledGetter s_homeModeEnabledGetter = nullptr;
 static OtaInProgressGetter   s_otaInProgressGetter   = nullptr;
 static WebappActiveGetter    s_webappActiveGetter    = nullptr;
 
-// Guards s_scanResults + s_recentSsids + s_lastScanCompleteMs against
-// concurrent access. Writer: Core 1 wifi::tick() (scan-complete drain
-// + startScan clear). Reader/drainer: Core 0 BLE WifiStateCallback::onRead
-// → consumeScanResults() (std::move + clear). Without this guard, a
-// concurrent push_back on Core 1 while Core 0 std::move's the vector
-// dereferences freed memory. homeSsidVisible() also runs on Core 1
-// (same as tick). Critical sections are kept short: no allocations
-// beyond the std::move which steals the pointer, no network calls, no
-// logging.
+// Guards s_scanResults + s_recentSsids + s_lastScanCompleteMs + s_lastError
+// against concurrent access. Writers run on Core 1 (wifi::tick scan-complete
+// drain + startScan clear, s_lastError set in tick/startSoftAp). Readers on
+// Core 0 (BLE WifiStateCallback::onRead → peekScanResults() + lastError()).
+// Without this guard, a concurrent push_back / string reassign on Core 1
+// while Core 0 copies the vector or string dereferences freed memory.
+// homeSsidVisible() also runs on Core 1 (same as tick). Critical sections
+// are kept short: only O(1) swaps or a short-string (SSO, no-alloc) copy, no
+// network calls, no logging.
 static portMUX_TYPE s_scanMux = portMUX_INITIALIZER_UNLOCKED;
 
 // How recent a scan must be for homeSsidVisible() to trust the cache.
@@ -80,6 +80,9 @@ void begin() {
   // returns 0 (no STA to scan from).
   WiFi.disconnect(true, true);   // wipe any stale SDK creds from a previous boot
   WiFi.mode(WIFI_STA);            // enable STA so scanNetworks works
+  // ESP-NOW is unbuffered, so a wisp/HELLO/OTA frame arriving during a modem
+  // sleep window is lost outright. WiFi.mode() resets PS, so re-assert after each.
+  WiFi.setSleep(false);
   esp_wifi_set_channel(LAMP_ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
   // Don't run the first periodic scan at boot. The boot-time WiFi stack
   // is fragile (just came up from WiFi.disconnect+WIFI_STA), and a failed
@@ -92,7 +95,17 @@ void begin() {
 }
 
 State state() { return s_state; }
-std::string lastError() { return s_lastError; }
+
+std::string lastError() {
+  // s_lastError is always a short literal ("scan" | "softap" | ""), so the
+  // copy inside the portMUX stays in SSO and never allocates. Guards a Core 0
+  // BLE read from tearing the string while Core 1 reassigns it.
+  std::string out;
+  portENTER_CRITICAL(&s_scanMux);
+  out = s_lastError;
+  portEXIT_CRITICAL(&s_scanMux);
+  return out;
+}
 
 void startScan() {
 #ifdef LAMP_DEBUG
@@ -117,15 +130,23 @@ void startScan() {
   setState(SCANNING);
 }
 
-std::vector<ScanResult> consumeScanResults() {
-  // Called from Core 0 (BLE WifiStateCallback::onRead). The swap is
-  // O(1) (three-pointer steal), so the critical section is tight.
-  // Destructors on the moved-out empty vector are trivial.
-  std::vector<ScanResult> out;
+std::vector<ScanResult> peekScanResults() {
+  // Non-destructive: both the BLE read and the state-change notify call this,
+  // so a consuming drain would let each steal the other's results. Steal the
+  // buffer under the mux (O(1)), copy it OUTSIDE the mux (the allocation the
+  // portMUX discipline forbids inside a critical section), then restore it
+  // unless a fresh scan already published in the gap. The stolen buffer (or a
+  // clobbered stale one) frees on return, outside the mux. Results otherwise
+  // live until startScan() clears them.
+  std::vector<ScanResult> stolen;
   portENTER_CRITICAL(&s_scanMux);
-  out.swap(s_scanResults);
+  stolen.swap(s_scanResults);
   portEXIT_CRITICAL(&s_scanMux);
-  return out;
+  std::vector<ScanResult> copy = stolen;
+  portENTER_CRITICAL(&s_scanMux);
+  if (s_scanResults.empty()) s_scanResults.swap(stolen);
+  portEXIT_CRITICAL(&s_scanMux);
+  return copy;
 }
 
 void setStateChangeCallback(StateChangeCallback cb) { s_cb = cb; }
@@ -174,16 +195,20 @@ bool startSoftAp(const std::string& name) {
   // pin LAMP_ESPNOW_CHANNEL after softAPConfig so an associating phone
   // doesn't pull the lamp off the grid channel.
   WiFi.mode(WIFI_AP_STA);
+  WiFi.setSleep(false);
   // Open network (no password). The boot window IS the auth boundary.
   // Hidden=false so phones surface it without manual entry.
   const bool ok = WiFi.softAP(name.c_str(), nullptr, LAMP_ESPNOW_CHANNEL,
                               /*ssid_hidden=*/0, /*max_connection=*/4);
   if (!ok) {
+    portENTER_CRITICAL(&s_scanMux);
     s_lastError = "softap";
+    portEXIT_CRITICAL(&s_scanMux);
 #ifdef LAMP_DEBUG
     Serial.println("[wifi] softAP up FAILED");
 #endif
     WiFi.mode(WIFI_STA);
+    WiFi.setSleep(false);
     esp_wifi_set_channel(LAMP_ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
     return false;
   }
@@ -200,6 +225,7 @@ void stopSoftAp() {
   if (!s_softApUp) return;
   WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
   // Scanner / mode flip can leave the radio elsewhere; re-pin so ESP-NOW
   // recv resumes immediately (matching the re-pin in the scan-complete
   // branch of tick()).
@@ -250,7 +276,9 @@ void tick() {
       esp_wifi_set_channel(LAMP_ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
       setState(IDLE);
     } else if (n == WIFI_SCAN_FAILED) {
+      portENTER_CRITICAL(&s_scanMux);
       s_lastError = "scan";
+      portEXIT_CRITICAL(&s_scanMux);
       // The scanner can leave the radio on the last-hopped channel; re-pin
       // to LAMP_ESPNOW_CHANNEL so ESP-NOW recv still works in FAILED.
       // Without this re-pin, a failed scan silently breaks all mesh recv
@@ -265,7 +293,9 @@ void tick() {
   // disable home-presence detection. The channel re-pin in the FAILED
   // branch above keeps mesh recv alive in the meantime.
   if (s_state == FAILED && millis() - s_failedSinceMs > FAILED_RETRY_MS) {
+    portENTER_CRITICAL(&s_scanMux);
     s_lastError.clear();
+    portEXIT_CRITICAL(&s_scanMux);
     setState(IDLE);
   }
 

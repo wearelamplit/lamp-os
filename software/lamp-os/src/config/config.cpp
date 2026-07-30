@@ -63,6 +63,13 @@ Config::Config(ConfigStore* inStore) {
 #endif
 
   if (error) {
+    if (configBlobHasData(json)) {
+      loadFailedWithData_ = true;
+      Serial.printf(
+          "[cfg] STORED CONFIG FAILED TO PARSE (%u bytes) — serving defaults "
+          "WITHOUT overwriting NVS\n",
+          (unsigned)json.length());
+    }
 #ifdef LAMP_DEBUG
     Serial.printf("ws deserializeJson() failed: %s\n", error.c_str());
 #endif

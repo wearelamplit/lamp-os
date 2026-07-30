@@ -354,6 +354,14 @@ void tick() {
   if (!s_apUp) return;
   const uint32_t now = millis();
 
+  // A BLE client's connect proves no station is associated (association takes
+  // BLE down), so the heavy server cannot be up and stopAp() has no server to
+  // race-free-drop. Reclaim the AP's heap for the BLE JSON sections.
+  if (!s_serverUp && ble_control::isClientConnected()) {
+    stopAp();
+    return;
+  }
+
   if (s_pendingServerStart.exchange(false)) startServer();
   if (s_pendingServerStop.exchange(false) && WiFi.softAPgetStationNum() == 0 &&
       ble_control::isDownForWebapp()) {

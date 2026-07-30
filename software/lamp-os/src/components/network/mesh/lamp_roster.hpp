@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -150,9 +151,34 @@ class LampRoster {
   // (front = physically closest).
   std::vector<RosterEntry> getNear(uint32_t maxAgeMs);
 
-  // Near peers (within maxAgeMs, hasMac) whose acknowledged flag is
-  // false. RSSI-sorted like getNear.
-  std::vector<RosterEntry> getUngreetedArrivals(uint32_t maxAgeMs);
+  // Highest-RSSI near arrival (hasMac, unacknowledged, seen within maxAgeMs)
+  // that `accept` also passes, copied into `out`. Scans store_ in place under
+  // the mutex, no snapshot and no sort, so the ~60 Hz greeting tick can't
+  // fragment the heap. `accept` runs inside the critical section: it must not
+  // allocate or block. Equal RSSI breaks on mac bytes ascending for a
+  // deterministic pick. Returns false and leaves `out` untouched when nothing
+  // qualifies.
+  template <typename Accept>
+  bool bestUngreetedArrival(uint32_t maxAgeMs, uint32_t now, Accept accept,
+                            RosterEntry& out) {
+    bool found = false;
+    xSemaphoreTake(mutex_, portMAX_DELAY);
+    for (size_t i = 0; i < count_; i++) {
+      const RosterEntry& e = store_[i];
+      if (!e.hasMac) continue;
+      if (e.lastSeenNearMs == 0) continue;
+      if ((now - e.lastSeenNearMs) > maxAgeMs) continue;
+      if (e.acknowledged) continue;
+      if (!accept(e)) continue;
+      if (!found || e.lastRssi > out.lastRssi ||
+          (e.lastRssi == out.lastRssi && std::memcmp(e.mac, out.mac, 6) < 0)) {
+        out = e;
+        found = true;
+      }
+    }
+    xSemaphoreGive(mutex_);
+    return found;
+  }
 
   // Peers seen via ESP-NOW within maxAgeMs (mesh-reachable; OTA and
   // remote-config candidates).

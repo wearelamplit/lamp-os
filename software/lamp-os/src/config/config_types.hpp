@@ -131,6 +131,20 @@ inline uint8_t resolveConfiguredPx(uint8_t stored, uint8_t dflt) {
   return stored != 0 ? stored : dflt;
 }
 
+// A stored config blob "has data" when it's neither empty nor the empty-object
+// sentinel the loader reads for an absent NVS key. A parse failure over such a
+// blob is corruption of a real config, not a true first boot.
+inline bool configBlobHasData(const std::string& json) {
+  return !json.empty() && json != "{}";
+}
+
+// First-boot housekeeping writes defaults to NVS. Suppress it when the stored
+// blob was present but failed to parse: overwriting cements a transient parse
+// hiccup into a permanent factory reset, and the original blob may be recoverable.
+inline bool shouldPersistFirstBoot(bool wouldPersist, bool loadFailedWithData) {
+  return wouldPersist && !loadFailedWithData;
+}
+
 /**
  * Configuration for a single expression with generic parameter system
  */

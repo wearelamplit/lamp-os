@@ -354,6 +354,16 @@ class FirmwareReceiver {
       return;
     }
 
+    // Ratio guard: an unauthenticated (totalLen, chunkSize) implying more than
+    // FW_MAX_CHUNKS chunks would size a multi-MB bitmap; decline before arming.
+    uint32_t expectedChunks = 0;
+    if (!lamp_protocol::offerChunkCountOk(ctrl.offer.totalLen,
+                                          ctrl.offer.chunkSize,
+                                          expectedChunks)) {
+      sendAccept(ctrl, FwAcceptStatus::DeclineBusy);
+      return;
+    }
+
     if (ota_->beginShouldFail) {
       sendResult(FwResultStatus::OtaBeginFail, 0);
       state_ = State::Failed;
@@ -369,9 +379,6 @@ class FirmwareReceiver {
     offerChunkSize_   = ctrl.offer.chunkSize;
     std::memcpy(offerSha256Prefix_, ctrl.offer.sha256Prefix, FW_SHA256_PREFIX_LEN);
 
-    const size_t expectedChunks =
-        (static_cast<size_t>(ctrl.offer.totalLen) + ctrl.offer.chunkSize - 1) /
-        ctrl.offer.chunkSize;
     offerTotalChunks_ = static_cast<uint16_t>(expectedChunks);
     resetBitmap(expectedChunks);
     streamingStartMs_  = mockNow_;
@@ -1243,6 +1250,74 @@ void test_firstMissingRunLen_caps_when_scattered_beyond_window() {
   TEST_ASSERT_EQUAL_UINT16(1, fr.firstMissingRunLenForTest(30));
 }
 
+// --- offerChunkCountOk (OFFER ratio DoS guard) ---------------------------
+
+// The replay attack: a sniffed (digest, signature) re-sent with chunkSize=1,
+// totalLen=4MB implies 4M chunks -> a ~512KB bitmap alloc that aborts the lamp.
+// Rejected before any sizing.
+void test_offerChunkCountOk_rejects_tiny_chunk_huge_len() {
+  uint32_t chunks = 0xDEAD;
+  TEST_ASSERT_FALSE(
+      lamp_protocol::offerChunkCountOk(4u * 1024u * 1024u, 1, chunks));
+}
+
+void test_offerChunkCountOk_rejects_zero_chunk_size() {
+  uint32_t chunks = 0xDEAD;
+  TEST_ASSERT_FALSE(lamp_protocol::offerChunkCountOk(1024, 0, chunks));
+}
+
+void test_offerChunkCountOk_rejects_zero_total_len() {
+  uint32_t chunks = 0xDEAD;
+  TEST_ASSERT_FALSE(lamp_protocol::offerChunkCountOk(0, 1024, chunks));
+}
+
+void test_offerChunkCountOk_rejects_oversize_chunk() {
+  uint32_t chunks = 0xDEAD;
+  TEST_ASSERT_FALSE(lamp_protocol::offerChunkCountOk(
+      1024, lamp_protocol::FW_CHUNK_SIZE_MAX + 1, chunks));
+}
+
+void test_offerChunkCountOk_accepts_normal_offer() {
+  uint32_t chunks = 0;
+  // 1MB / 1024 = 1024 chunks.
+  TEST_ASSERT_TRUE(
+      lamp_protocol::offerChunkCountOk(1024u * 1024u, 1024, chunks));
+  TEST_ASSERT_EQUAL_UINT32(1024u, chunks);
+}
+
+// The exact uint16 boundary: FW_MAX_CHUNKS chunks accepted (no truncation
+// wrap); one more chunk rejected.
+void test_offerChunkCountOk_boundary_at_max_chunks() {
+  uint32_t chunks = 0;
+  TEST_ASSERT_TRUE(lamp_protocol::offerChunkCountOk(
+      lamp_protocol::FW_MAX_CHUNKS, 1, chunks));
+  TEST_ASSERT_EQUAL_UINT32(lamp_protocol::FW_MAX_CHUNKS, chunks);
+  TEST_ASSERT_FALSE(lamp_protocol::offerChunkCountOk(
+      lamp_protocol::FW_MAX_CHUNKS + 1u, 1, chunks));
+}
+
+// Full-session: an adversarial (chunkSize=1, totalLen=4MB) OFFER is declined
+// without arming the OTA or allocating a bitmap.
+void test_offer_ratio_dos_declined_no_alloc() {
+  test::MockMeshLink mock;
+  test::MockOta ota;
+  test::FirmwareReceiver fr;
+  fr.begin(&mock, &ota);
+
+  auto offer = test::makeOffer(1, 0x00010001, 4u * 1024u * 1024u, 0xFFFF);
+  offer.offer.chunkSize = 1;
+  fr.handleControlOnLoop(offer);
+
+  TEST_ASSERT_EQUAL_UINT32(1u, static_cast<uint32_t>(mock.accepts.size()));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(test::FwAcceptStatus::DeclineBusy),
+                          static_cast<uint8_t>(mock.accepts[0].status));
+  TEST_ASSERT_EQUAL(static_cast<int>(test::FirmwareReceiver::State::Idle),
+                    static_cast<int>(fr.state()));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(test::MockOtaState::None),
+                          static_cast<uint8_t>(ota.state));
+  TEST_ASSERT_EQUAL_UINT32(0u, static_cast<uint32_t>(fr.bitmapBytesForTest()));
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
@@ -1286,5 +1361,12 @@ int main(int argc, char** argv) {
   RUN_TEST(test_firstMissingRunLen_stops_at_bitmap_end);
   RUN_TEST(test_firstMissingRunLen_covers_scattered_holes_in_window);
   RUN_TEST(test_firstMissingRunLen_caps_when_scattered_beyond_window);
+  RUN_TEST(test_offerChunkCountOk_rejects_tiny_chunk_huge_len);
+  RUN_TEST(test_offerChunkCountOk_rejects_zero_chunk_size);
+  RUN_TEST(test_offerChunkCountOk_rejects_zero_total_len);
+  RUN_TEST(test_offerChunkCountOk_rejects_oversize_chunk);
+  RUN_TEST(test_offerChunkCountOk_accepts_normal_offer);
+  RUN_TEST(test_offerChunkCountOk_boundary_at_max_chunks);
+  RUN_TEST(test_offer_ratio_dos_declined_no_alloc);
   return UNITY_END();
 }

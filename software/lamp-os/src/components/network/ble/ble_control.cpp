@@ -5,6 +5,7 @@
 #include <NimBLEDevice.h>
 #include <Preferences.h>
 #include <esp_bt.h>
+#include <esp_heap_caps.h>
 
 #include <algorithm>
 #include <array>
@@ -12,6 +13,7 @@
 #include <functional>
 #include <string>
 #include <unordered_set>
+#include <vector>
 
 #include "config/config.hpp"
 #include "behaviors/fade_out.hpp"
@@ -113,11 +115,15 @@ struct ConnSlot {
   std::string                 pageSnapshot;
   uint16_t                    pageCursor;
   uint16_t                    pageMtu;
+  // Points at the buffer being paged out. For build-based sections it is
+  // &pageSnapshot; for reference-based sections (exprcat) it is the immutable
+  // static, so no ~9.6 KB per-connection copy is pinned for the session.
+  const std::string*          pageSource;
 };
 static constexpr uint16_t kUnusedHandle = 0xFFFF;
 static constexpr size_t   kMaxConns     = 1;
 static std::array<ConnSlot, kMaxConns> s_conn{{
-  {kUnusedHandle, false, {}, {}, 0, 0},
+  {kUnusedHandle, false, {}, {}, 0, 0, nullptr},
 }};
 
 // Pinned to ATT_MTU 247 minus the 3-byte ATT header rather than reading
@@ -151,6 +157,7 @@ static ConnSlot* findOrAllocSlot(uint16_t handle) {
     freeSlot->pageSnapshot.clear();  // keeps capacity
     freeSlot->pageCursor = 0;
     freeSlot->pageMtu    = 0;
+    freeSlot->pageSource = nullptr;
   }
   return freeSlot;
 }
@@ -164,6 +171,7 @@ static void freeSlot(uint16_t handle) {
     s->pageSnapshot.clear();  // keeps capacity
     s->pageCursor = 0;
     s->pageMtu    = 0;
+    s->pageSource = nullptr;
   }
 }
 
@@ -176,6 +184,7 @@ static void clearAllSlots() {
     s.pageSnapshot.clear();
     s.pageCursor = 0;
     s.pageMtu    = 0;
+    s.pageSource = nullptr;
   }
 }
 
@@ -423,8 +432,29 @@ static inline void fnv1a(uint32_t& h, const void* data, size_t len) {
   while (len--) { h ^= *p++; h *= 16777619u; }
 }
 
-static std::string buildNearbyJson(uint32_t& membershipHashOut) {
-  auto lamps = lamp::lampRoster.getAll();
+// A BLE section OOM degrades to a graceful-empty serve; keep it visible on
+// every channel, throttled to one line per 5000ms.
+static void logBleSectionOom(const char* what) {
+  static uint32_t lastMs = 0;
+  const uint32_t now = millis();
+  if (now - lastMs < 5000 && lastMs != 0) return;
+  lastMs = now;
+  Serial.printf("[ble_control] %s OOM; serving graceful-empty\n", what);
+}
+
+static void logNearbyHeapSkip(uint32_t largest, uint32_t needed, uint32_t lamps) {
+  static uint32_t lastMs = 0;
+  const uint32_t now = millis();
+  if (now - lastMs < 5000 && lastMs != 0) return;
+  lastMs = now;
+  Serial.printf("[ble_control] nearby build skipped, low heap: largest=%u needed=%u lamps=%u\n",
+                largest, needed, lamps);
+}
+
+static constexpr uint32_t kNearbyHeapMargin = 1024;
+
+static std::string buildNearbyJson(uint32_t& membershipHashOut,
+                                   std::vector<lamp::RosterEntry>& lamps) {
   // Sort by name for stable rendering.
   std::sort(lamps.begin(), lamps.end(),
             [](const lamp::RosterEntry& a, const lamp::RosterEntry& b) {
@@ -541,8 +571,26 @@ static void refreshNearbyJsonCache() {
   if (gen == builtGen) return;
   const uint32_t now = millis();
   if (now - lastBuildMs < 1000) return;
+
+  auto lamps = lamp::lampRoster.getAll();
+  uint32_t needed = 2;
+  for (auto& e : lamps) needed += 240 + 6 * std::strlen(e.name);
+  const uint32_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+  if (largest < needed + kNearbyHeapMargin) {
+    lastBuildMs = now;
+    logNearbyHeapSkip(largest, needed, lamps.size());
+    return;
+  }
+
   uint32_t hash = 0;
-  std::string json = buildNearbyJson(hash);
+  std::string json;
+  try {
+    json = buildNearbyJson(hash, lamps);
+  } catch (const std::bad_alloc&) {
+    logBleSectionOom("nearby");
+    lastBuildMs = now;
+    return;
+  }
   xSemaphoreTake(nearbyCacheMutex(), portMAX_DELAY);
   s_nearbyJsonCache.swap(json);
   xSemaphoreGive(nearbyCacheMutex());
@@ -568,7 +616,13 @@ class SocialDispositionsCallback : public NimBLECharacteristicCallbacks {
       c->setValue("");
       return;
     }
-    c->setValue(s_config->asDispositionsJson().c_str());
+    try {
+      c->setValue(s_config->asDispositionsJson().c_str());
+    } catch (const std::bad_alloc&) {
+      c->setValue("");
+      logBleSectionOom("dispositions");
+      return;
+    }
   }
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
@@ -625,11 +679,12 @@ static const char* wifiStateName(wifi::State s) {
 static std::string buildWifiStateJson(bool includeScanResults) {
   JsonDocument doc;
   doc["state"] = wifiStateName(wifi::state());
-  if (!wifi::lastError().empty()) {
-    doc["lastError"] = wifi::lastError();
+  const std::string err = wifi::lastError();
+  if (!err.empty()) {
+    doc["lastError"] = err;
   }
   if (includeScanResults) {
-    auto results = wifi::consumeScanResults();
+    auto results = wifi::peekScanResults();
     if (!results.empty()) {
       // Sort strongest first so the trimmed list keeps the most useful entries.
       std::sort(results.begin(), results.end(),
@@ -664,15 +719,23 @@ static std::string buildWifiStateJson(bool includeScanResults) {
 
 class WifiStateCallback : public NimBLECharacteristicCallbacks {
   void onRead(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
-    auto json = buildWifiStateJson(true);
-    c->setValue(json);
+    try {
+      c->setValue(buildWifiStateJson(true));
+    } catch (const std::bad_alloc&) {
+      c->setValue("");
+      logBleSectionOom("wifi");
+    }
   }
 };
 
 void notifyWifiState() {
   if (!s_wifiStateChar) return;
-  auto json = buildWifiStateJson(true);
-  s_wifiStateChar->setValue(json);
+  try {
+    s_wifiStateChar->setValue(buildWifiStateJson(true));
+  } catch (const std::bad_alloc&) {
+    logBleSectionOom("wifi");
+    return;
+  }
   s_wifiStateChar->notify();
 }
 
@@ -741,9 +804,13 @@ class SettingsBlobCallback : public NimBLECharacteristicCallbacks {
 
 using SectionSerializer = void(*)(std::string&);
 
+// A section is either build-based (fn serialises into pageSnapshot) or
+// reference-based (ref returns an immutable static paged in place, no copy).
+// Exactly one of fn/ref is set.
 struct SectionEntry {
-  const char*       name;
-  SectionSerializer fn;
+  const char*                 name;
+  SectionSerializer           fn;
+  const std::string&        (*ref)();
 };
 
 // Lambdas capture only globals so they decay to plain function pointers
@@ -757,24 +824,24 @@ struct SectionEntry {
 // wisppalette is binary too (raw RGBW): a dedicated read path so the
 // frequent palette-less status NOTIFY can't clobber it.
 static const std::array<SectionEntry, 9> kSections = {{
-  {"lamp",    [](std::string& out) { s_config->lampSectionJsonCached(out); }},
-  {"base",    [](std::string& out) { s_config->baseSectionJsonCached(out); }},
-  {"shade",   [](std::string& out) { s_config->shadeSectionJsonCached(out); }},
-  {"expr",    [](std::string& out) { s_config->expressionsSectionJsonCached(out); }},
-  {"home",    [](std::string& out) { s_config->homeSectionJsonCached(out); }},
-  {"nearby",  [](std::string& out) { copyNearbyJson(out); }},
-  {"exprcat", [](std::string& out) { out = lamp::expressionCatalogJson(); }},
+  {"lamp",    [](std::string& out) { s_config->lampSectionJsonCached(out); }, nullptr},
+  {"base",    [](std::string& out) { s_config->baseSectionJsonCached(out); }, nullptr},
+  {"shade",   [](std::string& out) { s_config->shadeSectionJsonCached(out); }, nullptr},
+  {"expr",    [](std::string& out) { s_config->expressionsSectionJsonCached(out); }, nullptr},
+  {"home",    [](std::string& out) { s_config->homeSectionJsonCached(out); }, nullptr},
+  {"nearby",  [](std::string& out) { copyNearbyJson(out); }, nullptr},
+  {"exprcat", nullptr, []() -> const std::string& { return lamp::expressionCatalogJson(); }},
   {"wispclaims", [](std::string& out) {
     static uint8_t buf[1 + lamp::WispFleetCache::kCapacity * 12];
     const size_t n = lamp::lampRoster.buildWispClaimsBlob(buf, sizeof(buf),
                                                           millis());
     out.assign(reinterpret_cast<const char*>(buf), n);
-  }},
+  }, nullptr},
   {"wisppalette", [](std::string& out) {
     static uint8_t buf[200];
     const size_t n = lamp::lampRoster.copyManualPaletteBlob(buf, sizeof(buf));
     out.assign(reinterpret_cast<const char*>(buf), n);
-  }},
+  }, nullptr},
 }};
 
 class PageCtrlCallback : public NimBLECharacteristicCallbacks {
@@ -789,10 +856,23 @@ class PageCtrlCallback : public NimBLECharacteristicCallbacks {
 
     for (const auto& entry : kSections) {
       if (name == entry.name) {
-        // assign() reuses the string's existing capacity (heap growth, not
-        // churn). Capture MTU at snapshot time so the chunk size is stable
-        // even if conn-params shift mid-stream.
-        entry.fn(slot->pageSnapshot);
+        if (entry.ref) {
+          slot->pageSource = &entry.ref();
+        } else {
+          // assign() reuses the string's existing capacity (heap growth, not
+          // churn).
+          try {
+            entry.fn(slot->pageSnapshot);
+          } catch (const std::bad_alloc&) {
+            slot->pageSnapshot.clear();
+            slot->pageCursor = 0;
+            slot->pageMtu    = 0;
+            slot->pageSource = nullptr;
+            logBleSectionOom(entry.name);
+            return;
+          }
+          slot->pageSource = &slot->pageSnapshot;
+        }
         slot->pageCursor = 0;
         // Cap the chunk at the baseline-MTU page size even when this link
         // negotiated higher; the app reads until an empty terminator, so
@@ -803,7 +883,7 @@ class PageCtrlCallback : public NimBLECharacteristicCallbacks {
                                                               : kPageMaxChunkSize;
 #ifdef LAMP_DEBUG
         Serial.printf("[ble_control] page CTRL section=%s len=%u mtu=%u chunk=%u\n",
-                      entry.name, (unsigned)slot->pageSnapshot.size(),
+                      entry.name, (unsigned)slot->pageSource->size(),
                       (unsigned)mtu, (unsigned)slot->pageMtu);
 #endif
         return;
@@ -815,6 +895,7 @@ class PageCtrlCallback : public NimBLECharacteristicCallbacks {
     slot->pageSnapshot.clear();
     slot->pageCursor = 0;
     slot->pageMtu    = 0;
+    slot->pageSource = nullptr;
 #ifdef LAMP_DEBUG
     Serial.printf("[ble_control] page CTRL unknown section='%.*s'\n",
                   (int)name.size(), name.data());
@@ -830,23 +911,23 @@ class PageDataCallback : public NimBLECharacteristicCallbacks {
       return;
     }
     ConnSlot* slot = findSlot(handle);
-    if (!slot || slot->pageMtu == 0 ||
-        slot->pageCursor >= slot->pageSnapshot.size()) {
+    if (!slot || slot->pageMtu == 0 || slot->pageSource == nullptr ||
+        slot->pageCursor >= slot->pageSource->size()) {
       // Empty response signals end-of-section: the app reads chunks until empty.
       c->setValue("");
       return;
     }
-    const size_t remaining = slot->pageSnapshot.size() - slot->pageCursor;
+    const size_t remaining = slot->pageSource->size() - slot->pageCursor;
     const size_t take      = remaining < slot->pageMtu ? remaining
                                                        : slot->pageMtu;
-    c->setValue(reinterpret_cast<const uint8_t*>(slot->pageSnapshot.data() +
+    c->setValue(reinterpret_cast<const uint8_t*>(slot->pageSource->data() +
                                                   slot->pageCursor),
                 static_cast<size_t>(take));
     slot->pageCursor += static_cast<uint16_t>(take);
 #ifdef LAMP_DEBUG
     Serial.printf("[ble_control] page DATA cursor=%u/%u take=%u\n",
                   (unsigned)slot->pageCursor,
-                  (unsigned)slot->pageSnapshot.size(),
+                  (unsigned)slot->pageSource->size(),
                   (unsigned)take);
 #endif
   }

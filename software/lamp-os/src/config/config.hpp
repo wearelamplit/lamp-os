@@ -82,6 +82,11 @@ class Config {
   // user-saved values are authoritative.
   void applyDefaults(const Defaults& d);
 
+  // True when NVS held a non-empty config blob that failed to deserialize.
+  // The lamp served defaults for this boot; callers must NOT overwrite NVS,
+  // the stored blob may be recoverable.
+  bool loadFailedWithData() const { return loadFailedWithData_; }
+
   /**
    * create a streamable json doc to send configs to the webserver
    * @return a JsonDocument to serialize
@@ -241,6 +246,7 @@ class Config {
   uint8_t lampOtaState_ = 0;
   bool lampHasOtaSendingTo_ = false;
   uint8_t lampOtaSendingTo_[6] = {0};
+  bool loadFailedWithData_ = false;
   bool lampSectionDirty_ = true;
   bool baseSectionDirty_ = true;
   bool shadeSectionDirty_ = true;

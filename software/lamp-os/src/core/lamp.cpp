@@ -494,11 +494,19 @@ void lamp::Lamp::recomputeEffectiveCeiling() {
 // per unit and readable this early in boot, before wifi::begin() brings RF up
 // and makes esp_random() actually random; seeding from esp_random() here
 // would hand every lamp the same value and roll every lamp the same color.
+// FNV-1a folds all 6 bytes into a well-mixed seed. FastRng's first draw reads
+// only the high bits of one xorshift round, which don't avalanche low-byte
+// differences, so a raw-packed MAC collapses same-reel units (shared OUI plus a
+// near-sequential low byte) onto one hue; the hash spreads every byte first.
 static uint32_t seedFromMac() {
   uint8_t mac[6] = {0};
   esp_read_mac(mac, ESP_MAC_WIFI_STA);
-  return (uint32_t(mac[2]) << 24) | (uint32_t(mac[3]) << 16) |
-         (uint32_t(mac[4]) << 8) | uint32_t(mac[5]);
+  uint32_t h = 0x811c9dc5u;
+  for (uint8_t b : mac) {
+    h ^= b;
+    h *= 0x01000193u;
+  }
+  return h;
 }
 
 void lamp::Lamp::setup() {
@@ -577,7 +585,8 @@ void lamp::Lamp::setup() {
       persistFirstBoot = true;
     }
   }
-  if (persistFirstBoot) config.persistConfig("first-boot-init");
+  if (shouldPersistFirstBoot(persistFirstBoot, config.loadFailedWithData()))
+    config.persistConfig("first-boot-init");
 
   // Space the radio bring-ups so their init inrush spikes don't stack into one
   // brownout-tripping surge on marginal USB power. Sub-100ms total, invisible
@@ -880,6 +889,14 @@ void lamp::Lamp::tick() {
       s_nextStackLogMs = nowMs + 10000;
       Serial.printf("[loop] stack HWM: %u bytes free\n",
                     (unsigned)uxTaskGetStackHighWaterMark(nullptr));
+    }
+  }
+  {
+    static uint32_t s_nextHeapLogMs = 0;
+    const uint32_t nowMs = millis();
+    if (static_cast<int32_t>(nowMs - s_nextHeapLogMs) >= 0) {
+      s_nextHeapLogMs = nowMs + 30000;
+      lamp::logHeap("trend");
     }
   }
 #endif

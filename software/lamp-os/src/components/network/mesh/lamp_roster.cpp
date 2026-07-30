@@ -223,33 +223,14 @@ std::vector<RosterEntry> LampRoster::getNear(uint32_t maxAgeMs) {
     }
   }
   // Highest RSSI first: `peers.front()` gives the nearest lamp
-  // (cascade-stagger sort key). -127 sorts to the back. Stable sort keeps
-  // equal-RSSI order predictable.
-  std::stable_sort(out.begin(), out.end(),
-                    [](const RosterEntry& a, const RosterEntry& b) {
-                      return a.lastRssi > b.lastRssi;
-                    });
-  return out;
-}
-
-std::vector<RosterEntry> LampRoster::getUngreetedArrivals(uint32_t maxAgeMs) {
-  uint32_t now = millis();
-  xSemaphoreTake(mutex_, portMAX_DELAY);
-  std::vector<RosterEntry> snapshot(store_.begin(), store_.begin() + count_);
-  xSemaphoreGive(mutex_);
-  std::vector<RosterEntry> out;
-  out.reserve(snapshot.size());
-  for (const auto& e : snapshot) {
-    if (!e.hasMac) continue;
-    if (e.lastSeenNearMs == 0) continue;
-    if ((now - e.lastSeenNearMs) > maxAgeMs) continue;
-    if (e.acknowledged) continue;
-    out.push_back(e);
-  }
-  std::stable_sort(out.begin(), out.end(),
-                   [](const RosterEntry& a, const RosterEntry& b) {
-                     return a.lastRssi > b.lastRssi;
-                   });
+  // (cascade-stagger sort key). -127 sorts to the back. std::sort (in-place
+  // introsort, no merge-buffer alloc) avoids bad_alloc on the fragmented
+  // heap; the mac tiebreak gives equal-RSSI peers a deterministic order.
+  std::sort(out.begin(), out.end(),
+            [](const RosterEntry& a, const RosterEntry& b) {
+              if (a.lastRssi != b.lastRssi) return a.lastRssi > b.lastRssi;
+              return std::memcmp(a.mac, b.mac, 6) < 0;
+            });
   return out;
 }
 

@@ -23,7 +23,7 @@ State state();
 std::string lastError();   // "scan" | ""; only ever set when a scan fails
 
 void startScan();
-std::vector<ScanResult> consumeScanResults();  // drains; used by the UI notify
+std::vector<ScanResult> peekScanResults();  // non-destructive copy of the latest scan
 
 using StateChangeCallback = void (*)();
 void setStateChangeCallback(StateChangeCallback cb);

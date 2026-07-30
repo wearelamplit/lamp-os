@@ -124,6 +124,31 @@ constexpr uint16_t FW_CHUNK_SIZE_MAX      = 1444;
 // stability-tested under real ESP-NOW loss rates.
 constexpr uint16_t FW_MAX_REQ_RUN_CHUNKS = 20;
 
+// Largest chunk count a receiver can track. chunkIdx and OFFER.totalChunks are
+// both uint16, so a count above this is unrepresentable on the wire; it also
+// caps the chunk bitmap at 8 KB. A 4 MB image at the baseline 200-byte chunk is
+// ~21k chunks, far below this.
+constexpr uint32_t FW_MAX_CHUNKS = 65535;
+
+// Validate an OFFER's (totalLen, chunkSize) before sizing the chunk bitmap.
+// Both fields are unauthenticated (ed25519 signs the image digest, not the
+// OFFER header), so a replayed OFFER can carry chunkSize=1, totalLen=4MB and
+// drive a ~512 KB bitmap alloc -> bad_alloc -> reset on a fragmented lamp heap.
+// Reject any ratio implying more than FW_MAX_CHUNKS chunks; on success write the
+// derived count (always <= FW_MAX_CHUNKS, so a uint16 truncation can't wrap).
+inline bool offerChunkCountOk(uint32_t totalLen, uint16_t chunkSize,
+                              uint32_t& expectedChunksOut) {
+  if (totalLen == 0 || chunkSize == 0 || chunkSize > FW_CHUNK_SIZE_MAX) {
+    return false;
+  }
+  // Overflow-safe ceil: totalLen + chunkSize could wrap uint32 for a huge
+  // totalLen, so never form that sum.
+  const uint32_t chunks = totalLen / chunkSize + (totalLen % chunkSize != 0u);
+  if (chunks > FW_MAX_CHUNKS) return false;
+  expectedChunksOut = chunks;
+  return true;
+}
+
 // OTA-viable signal floor for a direct single-hop OFFER. Below this, chunk
 // transfer thrashes regardless of chunk size, so both the offering and
 // receiving side skip it and let cascade OTA reach the peer via a nearer
