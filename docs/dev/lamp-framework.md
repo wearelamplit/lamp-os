@@ -258,17 +258,24 @@ void snafu::Greeting::control() {
 ## Arrival edge detection
 
 Detecting when a peer first appears maps to Python's
-`await network.arrived()`. Use `getUngreetedArrivals()` + `acknowledge()`:
+`await network.arrived()`. Use `bestUngreetedArrival()` + `acknowledge()`:
 
 ```cpp
-for (const auto& p : context_->lampRoster->getUngreetedArrivals(/*maxAgeMs=*/5000)) {
-  // peer arrived and hasn't been greeted yet
-  context_->lampRoster->acknowledge(p.name);
+lamp::RosterEntry arrival;
+if (context_->lampRoster->bestUngreetedArrival(
+        /*maxAgeMs=*/5000, millis(),
+        [](const lamp::RosterEntry&) { return true; }, arrival)) {
+  // nearest un-greeted peer; greet it, then acknowledge so it doesn't recur
+  context_->lampRoster->acknowledge(arrival.name);
 }
 ```
 
-`acknowledge()` marks the entry so it stops appearing in
-`getUngreetedArrivals()` until the peer prunes out and returns.
+`bestUngreetedArrival()` scans the roster in place under its mutex (no
+snapshot, no sort) and fills `out` with the highest-RSSI near arrival that
+your `accept` predicate also passes — greet one per tick. The predicate runs
+inside the critical section, so keep it allocation-free (that's how
+`SocialBehavior` layers its per-peer re-greet window on top). `acknowledge()`
+marks the entry so it stops qualifying until the peer prunes out and returns.
 
 ## The colorsEditable flag
 

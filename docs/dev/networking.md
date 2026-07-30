@@ -56,7 +56,7 @@ Four behavioral tiers, each with its own crypto posture, reach, and lifetime:
 
 | Tier | Reach | Crypto | Lifetime | Examples |
 |---|---|---|---|---|
-| **Presence** | Broadcast (lamp: 60s, wisp: 2s) | Plaintext | None, pure state report | `MSG_HELLO`, `MSG_WISP_HELLO` |
+| **Presence** | Broadcast (lamp: 30s, wisp: 2s) | Plaintext | None, pure state report | `MSG_HELLO`, `MSG_WISP_HELLO` |
 | **Authenticated commands** | Unicast (or broadcast) | AES-GCM with target's password OR plaintext JSON | NVS-writable; can mutate config | `MSG_CONTROL_OP` |
 | **Transient overrides** | Unicast (broadcast for restore) | Plaintext | RAM-only; watchdog-released after 60s | `MSG_OVERRIDE_BRIGHTNESS/RESTORE_BRIGHTNESS` (space-dim). Wisp paint no longer rides `MSG_OVERRIDE_COLORS/RESTORE_COLORS`; it's declared in `MSG_WISP_STATE`. |
 | **Expression announce / directed** | No relay: EVENT nearby-broadcast, COMMAND targeted (addressedToUs filter on recv) | 8-byte HMAC-SHA256 shared-key tag (`command_auth`) | RAM-only; observer-delivered / applied | `MSG_EVENT`, `MSG_COMMAND` |
@@ -65,7 +65,7 @@ Four behavioral tiers, each with its own crypto posture, reach, and lifetime:
 
 | msgType | Reach | Relay? | Storm bound |
 |---|---|---|---|
-| `MSG_HELLO` (0x01) | broadcast | yes, gossip-rebroadcast on first sight | `helloDedup_` 64-slot ring per (sourceMac, seq) |
+| `MSG_HELLO` (0x01) | broadcast | yes, gossip-rebroadcast, counter-suppressed (see below) | `helloDedup_` 64-slot ring per (sourceMac, seq) + `HelloRelaySuppressor` 16-slot pending table |
 | `MSG_CONTROL_OP` (0x03) | unicast or broadcast | yes, unconditional | `controlOpDedup_` 64-slot ring |
 | `MSG_WISP_HELLO` (0x20) | broadcast | one hop, relayed only when heard direct from the wisp | `wispHelloDedup_` 32-slot ring |
 | `MSG_WISP_CLAIM` (0x25) | broadcast | **no**, direct radio range only | `wispClaimDedup_` 16-slot ring |
@@ -81,7 +81,9 @@ Four behavioral tiers, each with its own crypto posture, reach, and lifetime:
 | `MSG_COLOR_QUERY` (0x32) | broadcast (physical); addressedToUs filter on recv | **no** | n/a (single-hop) |
 | `MSG_COLOR_INFO` (0x33) | broadcast (physical); addressedToUs filter on recv | **no** | n/a (single-hop) |
 
-Relay rule: every lamp that successfully parses + dedup-records a relayable frame AND is not the originator (self-MAC drop) rebroadcasts the frame verbatim before any application-level filtering. `MSG_HELLO` and `MSG_CONTROL_OP` relay unconditionally. `MSG_WISP_HELLO` and `MSG_WISP_PALETTE` relay one hop: a lamp rebroadcasts them only when the frame transmitter equals the originator wisp (heard direct), so a relayed copy (`srcMac != sourceMac`) is not re-relayed. This carries wisp presence/palette to lamps one hop past the wisp's own radio range so the app's wisp view converges across paired lamps despite coex-dropped broadcasts, while bounding propagation to exactly one hop. Remaining wisp traffic (`CLAIM`, `STATE`, `OVERRIDE_BRIGHTNESS`) stays direct-only. Per-message-type `DedupRing` instances (separate per msgType, each sized to its traffic — 64 slots for relay-heavy types, fewer for single-hop / low-rate ones) bound the storm to ≤ N relays per cascade in an N-lamp mesh.
+Relay rule: every lamp that successfully parses + dedup-records a relayable frame AND is not the originator (self-MAC drop) rebroadcasts the frame verbatim before any application-level filtering. `MSG_CONTROL_OP` relays unconditionally.
+
+`MSG_HELLO` relay is **counter-suppressed** (receive-side only, no wire change). A first-seen HELLO is not relayed immediately; `HelloRelaySuppressor` enqueues it in a 16-slot pending table keyed on `(sourceMac, seq)` with a randomized fire delay (`kHelloRelayJitterMinMs`..`kHelloRelayJitterMaxMs`, derived deterministically from the mac+seq). Every duplicate `(sourceMac, seq)` heard before the delay elapses — the frames that `helloDedup_` would otherwise silently drop — increments that entry's `dupCount`; each duplicate is one neighbor that already relayed the beacon. At fire time (`MeshLink::tick`) an entry with `dupCount >= kHelloSuppressThreshold` (3) is dropped, since the mesh already covered it; otherwise the stored frame is relayed verbatim. This pulls total HELLO airtime down from ~N²/interval (every node relaying every beacon) toward the coverage the mesh actually needs, without RSSI gating. Table overflow **fails open** (relay immediately) so a burst never loses coverage. A suppressing node simply transmits less; old-firmware peers that relay unconditionally still interoperate, and the relayed bytes are byte-identical to what arrived. Under `LAMP_DEBUG` each lamp prints a 30 s `[hellosupp] win=30s suppressed=N relayed=M rate=XX%` line (piggybacked on the `[meshmix]` window) so the kill rate is directly observable on the bench. `MSG_WISP_HELLO` and `MSG_WISP_PALETTE` relay one hop: a lamp rebroadcasts them only when the frame transmitter equals the originator wisp (heard direct), so a relayed copy (`srcMac != sourceMac`) is not re-relayed. This carries wisp presence/palette to lamps one hop past the wisp's own radio range so the app's wisp view converges across paired lamps despite coex-dropped broadcasts, while bounding propagation to exactly one hop. Remaining wisp traffic (`CLAIM`, `STATE`, `OVERRIDE_BRIGHTNESS`) stays direct-only. Per-message-type `DedupRing` instances (separate per msgType, each sized to its traffic — 64 slots for relay-heavy types, fewer for single-hop / low-rate ones) bound the storm to ≤ N relays per cascade in an N-lamp mesh.
 
 `OVERRIDE_BRIGHTNESS` / `RESTORE_BRIGHTNESS` deliberately stay single-hop. They're unicast by design (`esp_now_send(targetMac, ...)` with 802.11 driver-level retries; per-link reliability is already strong). Gossip-relay would amplify airtime without obvious benefit because non-addressed receivers drop after the relay step anyway.
 
@@ -93,7 +95,7 @@ Every frame starts with the same 6-byte header:
 [MAGIC_0='L'(1)] [MAGIC_1='M'(1)] [PROTOCOL_VERSION(1)] [msgType(1)] [seq(2 LE)]
 ```
 
-The wire carries a **receive range**, not a single version: `PROTOCOL_VERSION_EMIT = 0x05` is what a node broadcasts; `RX_MIN = 0x04` .. `RX_MAX = 0x05` is what it parses. Splitting emit from receive lets the fleet *receive* a newer version before any node *emits* one — the safe path for a multi-version OTA wave, where mixed versions coexist as long as every node's RX range covers what its peers emit. The v0x05 emit carries a TLV trailer on HELLO + WISP_HELLO (TLVs: `HELLO_TLV_OTA_STATE`, `HELLO_TLV_FW_CHANNEL`, `HELLO_TLV_FS_STATE`, `HELLO_TLV_FW_MAX_CHUNK`, `HELLO_TLV_OTA_SENDING_TO`); v0x04 frames omit it and parsers accept both. Per-message-type DedupRing capacities are sized per traffic (receive-side state, not a wire contract — a resize needs no version bump) and the HELLO interval is 60 s. Bump the version only for a genuine parser-contract change — additive fields ride as TLVs (unknown TLVs are skipped, forward-compat). `inspect()` rejects a frame whose version falls outside `[RX_MIN, RX_MAX]`, so a node emitting outside the fleet's range silently stops showing up — a loud, diagnosable failure by design. The **wisp** is the standing hazard here: it's OTA-excluded, so it never moves forward on its own and goes invisible on the mesh after a bump pushes emit past its RX window, until it's hand-flashed.
+The wire carries a **receive range**, not a single version: `PROTOCOL_VERSION_EMIT = 0x05` is what a node broadcasts; `RX_MIN = 0x04` .. `RX_MAX = 0x05` is what it parses. Splitting emit from receive lets the fleet *receive* a newer version before any node *emits* one — the safe path for a multi-version OTA wave, where mixed versions coexist as long as every node's RX range covers what its peers emit. The v0x05 emit carries a TLV trailer on HELLO + WISP_HELLO (TLVs: `HELLO_TLV_OTA_STATE`, `HELLO_TLV_FW_CHANNEL`, `HELLO_TLV_FS_STATE`, `HELLO_TLV_FW_MAX_CHUNK`, `HELLO_TLV_OTA_SENDING_TO`); v0x04 frames omit it and parsers accept both. Per-message-type DedupRing capacities are sized per traffic (receive-side state, not a wire contract — a resize needs no version bump) and the HELLO interval is 30 s. Bump the version only for a genuine parser-contract change — additive fields ride as TLVs (unknown TLVs are skipped, forward-compat). `inspect()` rejects a frame whose version falls outside `[RX_MIN, RX_MAX]`, so a node emitting outside the fleet's range silently stops showing up — a loud, diagnosable failure by design. The **wisp** is the standing hazard here: it's OTA-excluded, so it never moves forward on its own and goes invisible on the mesh after a bump pushes emit past its RX window, until it's hand-flashed.
 
 **Reserved bits** (must be 0; receivers reject any frame that sets them):
 
@@ -101,7 +103,7 @@ The wire carries a **receive range**, not a single version: `PROTOCOL_VERSION_EM
 
 ### Tier 1: Presence
 
-**`MSG_HELLO` (0x01)**, Lamp presence beacon. Broadcast by every lamp every 5 s for the first 30 s of uptime (boot burst, so a missed first HELLO refills the roster in seconds), then every 60 s. Pruned from `lampRoster` after 240 s of silence.
+**`MSG_HELLO` (0x01)**, Lamp presence beacon. Broadcast by every lamp every 5 s for the first 30 s of uptime (boot burst, so a missed first HELLO refills the roster in seconds), then every 30 s. Pruned from `lampRoster` after 240 s of silence.
 ```
 header(6) + sourceMac(6) + shade[4 RGBW] + base[4 RGBW] +
 firmwareVersion(4 LE) + nameLen(1) + name[0..32] +
@@ -120,7 +122,7 @@ TLV trailer (v0x05+): `tlv_count(1)`, then per TLV `type(1) + len(1) + value(len
 
 Unknown TLV types are skipped by length (forward-compat); a receiver that doesn't know a type just gets the default for that field.
 
-**`MSG_WISP_HELLO` (0x20)**, Wisp presence beacon. Broadcast by wisp every 2 s via a FreeRTOS software timer (so HELLO cadence survives WiFi/WebSocket blocks). Liveness only: presence, version, and flags for the app. It does not hold a lamp's colour paint alive — that hold rides `MSG_WISP_STATE` freshness (see `MSG_WISP_STATE` below).
+**`MSG_WISP_HELLO` (0x20)**, Wisp presence beacon. Broadcast by wisp every 2 s. A FreeRTOS software timer flags the emit due on the 2 s cadence; `PresenceBeacon::pump()` on the loop task does the build + broadcast, off the 2 KB timer stack (so a busy loop pass delays the actual send). Liveness only: presence, version, and flags for the app. It does not hold a lamp's colour paint alive — that hold rides `MSG_WISP_STATE` freshness (see `MSG_WISP_STATE` below).
 ```
 header(6) + sourceMac(6) + wispVersion(4 LE) + flags(1) +
 paletteIdPrefix(8 utf-8, null-padded) +
@@ -168,7 +170,7 @@ presenceFlags(1) + count(1) + entries[count*12]
 ```
 - **Sender**: wisp(s) only. In Off (paint disabled) the wisp packs zero entries, so every claimed lamp finds its MAC absent and eases home. No gossip relay (direct radio range only); it re-covers the whole claimed set on its own cadence.
 - **Off / presence**: presence holds while STATE from the display wisp keeps naming this lamp. A fresh STATE that drops the lamp eases it home now; total STATE silence ages presence out after `kWispStateFreshMs` (60 s) as a failsafe. A paint-mode edge emits STATE out of cadence so on/off lands within a frame or two, not up to one steady tick.
-- **Cadence**: on even presence ticks (every ~4 s), alternating with `MSG_WISP_CLAIM` (odd ticks) so the single core never sends two fat frames back-to-back. No resend: at up to 1459 B it overflows the claim-sized resend slot, and the re-cover cadence makes a per-frame retry redundant.
+- **Cadence**: on even presence ticks (every ~4 s), alternating with `MSG_WISP_CLAIM` (odd ticks) so the single core never sends two fat frames back-to-back. No resend ring: at up to 1459 B it overflows the claim-sized resend slot. Edge coverage instead comes from a burst window (`kStateBurstMs` ≈ 2 s, `kStateBurstIntervalMs` ≈ 700 ms in `presence_beacon.hpp`): a paint-mode edge re-emits STATE a few times over ~2 s so a take/release lost to coex is caught without waiting the full 4 s re-cover. Burst emits skip any pump that already ran a tick frame, so they never collide with the alternating HELLO/CLAIM/STATE on the single core; the 4 s re-cover remains the backstop.
 - **Per-frame globals**: `brightness` (space brightness), `driftRateMs` (drift interval, matches `WispConfig::driftIntervalMs`), `presenceFlags` (the same bitfield as this tick's `MSG_WISP_HELLO` flags, incl `WISP_HELLO_FLAG_PAINT_MODE`).
 - **Encoding**: raw R, G, B per surface (base, shade); W dropped.
 - **Full-set frame**: one v2 frame carries the whole claimed set (up to 120 = `WISP_STATE_MAX_ENTRIES`); no windowing. Past 120 the extras truncate cleanly.
@@ -528,13 +530,22 @@ both surfaces into a single ESP-NOW frame. Delivery is atomic: both
 colors land or neither does, so base and shade can't diverge from
 per-surface frame loss under BLE coex.
 
-**Observability**: `MSG_WISP_HELLO`'s monotonic `seq` still flows even though
-it no longer holds paint alive — the lamp's `[wispcoex]` meter
+**Observability**: the lamp's `[wispcoex]` meter
 (`components/network/mesh/wisp_coex.hpp`, fed from `mesh_link.cpp`) logs a
-periodic per-wisp `recv`/`missed`/`loss%`/`maxgap` line on `LAMP_DEBUG`
-builds. `maxgap` climbing toward the `kWispStateFreshMs` (60 s) failsafe is the
-signal that the STATE paint stream itself (not just hellos) is at risk of a
-drop; see `qa/coex.md`.
+periodic per-wisp `recv`/`maxgap` line on `LAMP_DEBUG` builds. `maxgap`
+(wall-clock between hellos) climbing toward the `kWispStateFreshMs` (60 s)
+failsafe is the signal that the STATE paint stream itself (not just hellos) is
+at risk of a drop; see `qa/coex.md`. There is no `loss%`/`missed`: the wisp
+shares one seq counter across all its message types, so a per-message-type
+seq gap is not loss, and `maxgap` is the real presence-stability signal. The
+STATE stream is measured by the `[wispstate]` meter
+(`components/network/mesh/wisp_state.hpp`, fed from the `MSG_WISP_STATE` recv
+arm and scoped to the display wisp): a 30 s
+`[wispstate] win=30s recv=N adopts=A releases=R selfPresent=P` line
+(piggybacked on the `[meshmix]` window) plus an edge-only
+`[wispstate] ADOPT|RELEASE src=… seq=N` line on each paint transition (seq is
+just the frame identifier there). Whether the lamp reliably sees the wisp
+take / release control reads directly off the adopt/release edges and counts.
 
 ### Phone picks a wisp zone via mesh proxy
 

@@ -4,6 +4,101 @@ Notable changes per firmware version. The version is the root `VERSION` file;
 add an entry here in the **same change** that bumps it. Highlights grouped
 Added / Fixed / Changed, not every commit.
 
+## 1.1.7
+
+Consolidates every post-1.1.6 bench iteration into one release. Highlights:
+
+### Added
+- **Shimmer expression (formerly the fire flicker).** A soft continuous shimmer
+  spanning twinkling sparkles to a flickering flame, on one "Style" dial:
+  Twinkle, Coals, Candle, Campfire. Cool colors read as sparkle, warm
+  ones as flame. Per-pixel heat turbulence plus a global gust and occasional
+  bright embers; gated behind the app's advanced mode via an additive `advanced`
+  catalog field (no protocol or schema-version change).
+
+### Fixed
+- **BLE section pager no longer fragments the heap during an app session.** The
+  `exprcat` catalog (~9.6 KB) now pages straight from its immutable static buffer
+  instead of being copied into a per-connection buffer that stayed allocated for
+  the connection's life, punching a pinned 9.6 KB hole in the middle of the heap.
+  App-visible bytes and the chunked-read protocol are unchanged.
+- **Social greetings now show over any expression.** The greeting composites on
+  top of the expression band instead of beneath it, so it fades in over whatever
+  is running (including a continuous full-coverage shimmer) and eases back out to
+  the live effect. Previously a continuous expression buried the greeting and
+  leaked its peer color as a dim tint.
+- **Lamps no longer reboot on a phone BLE connect.** Uncaught `std::bad_alloc`
+  from large contiguous nearby / exprcat / dispositions JSON builds under BLE
+  heap fragmentation is caught and heap-gated (graceful last-good serve).
+- **Roster sort no longer crashes on a fragmented heap.** `getNear` moved off
+  `std::stable_sort` (temp merge-buffer allocation) to in-place `std::sort` with
+  a MAC tiebreaker.
+- **Greeting no longer churns the heap every frame.** The social and snafu
+  greeting paths snapshotted and sorted a ~5 KB roster copy (two allocations) on
+  every control tick; replaced with an allocation-free in-place scan for the best
+  ungreeted arrival, removing a fragmentation driver and a BLE-path bad_alloc
+  crash vector. Social now greets the nearest ungreeted peer first, where it
+  previously greeted the farthest.
+- **WiFi-state read hardened.** The `wifi::lastError()` cross-core string race is
+  locked, and the BLE wifi-state read and notify are wrapped in a bad_alloc guard
+  so an out-of-memory on the host task degrades to an empty read instead of
+  aborting.
+- **Config no longer factory-resets on a transient parse failure.** A present-
+  but-unparseable config blob serves RAM defaults without overwriting NVS, so a
+  one-boot hiccup cannot cement into a permanent loss of name, password, or
+  expressions.
+- **First-boot color is genuinely distinct per lamp.** The MAC is hashed
+  (FNV-1a) before seeding the hue RNG, so same-reel lamps no longer collapse to
+  the same color.
+- **The web-config softAP is torn down on a BLE connect**, so the WiFi stack no
+  longer fragments the heap and starves the connection.
+- **OTA offer bounds its chunk count** before sizing the tracking bitmap, so a
+  forged or replayed offer (tiny chunk size, huge length) cannot trigger a giant
+  allocation and reset every lamp in range.
+- **Wisp Aurora decompression is bounded to its output budget**, so a crafted
+  compressed frame cannot overflow the C6 heap and reset the wisp.
+- **Wisp paints a newly-claimed lamp right away** on the 2 s claim cadence
+  instead of a separate 5 s poll.
+- **Wisp take / release survives coex** (a short re-broadcast burst after a
+  source edge) and no longer snaps the fleet dark on release.
+- **Random HELLO boot sequence**, so a quick reboot no longer leaves a lamp
+  advertised at its stale pre-reboot roster version.
+- **WiFi modem sleep is held off for ESP-NOW receive**, closing an intermittent
+  wisp-paint and roster-staleness gap after the config AP comes down.
+
+### Changed
+- **Wisp status ring crossfades** on Off to painting instead of jumping; the
+  `[wispcoex]` / `[wispstate]` meters drop the invalid seq-gap loss figure.
+- **Internal hardening:** HELLO relay suppressor portMUX-guarded, wisp STATE
+  burst cannot respin on a zero-length build, the paint distributor sheds a
+  per-tick allocation, flicker wind math is factored into a tested header, and
+  the firmware distributor's per-peer skip log is throttled (debug builds).
+
+## 1.1.6
+
+### Changed
+- **Faster fleet awareness.** The lamp HELLO broadcast interval drops from 60 s
+  to 30 s so roster/presence updates propagate twice as fast. Added airtime
+  stays well within the ESP-NOW budget at bench scale, and the 240 s prune
+  window still tolerates 8 missed beacons.
+- **HELLO relay suppression (density-adaptive).** A lamp defers relaying a
+  first-seen HELLO for a short jittered window and skips its own rebroadcast
+  once it has heard enough neighbors relay the same beacon — cutting the
+  N²/interval gossip airtime at crowd density while still relaying (preserving
+  coverage) where the fleet is sparse. Receive-side only, no wire/protocol
+  change; a `LAMP_DEBUG` `[hellosupp]` counter reports the per-window
+  suppression rate.
+- **Spotty motion recentred to Gentle → Dreamy.** The Speed slider drops its
+  chaotic fast/flicker end; the whole range now lives in gentle territory —
+  from ~2 s fades (Gentle) to slow ~45 s drifts (Dreamy) — and is relabeled
+  accordingly.
+- **Pulse Size is a relative Small–Large scale.** Size becomes a 1–10 relative
+  control rather than an absolute pixel count.
+
+### Fixed
+- **Adopt copy no longer implies dispositions auto-warm.** Adopting a lamp no
+  longer silently pre-warms its disposition state.
+
 ## 1.1.5
 
 ### Added

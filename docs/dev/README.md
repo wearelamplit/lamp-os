@@ -70,6 +70,8 @@ hood); the Flutter toolchain setup is in the [root README](../../README.md).
 ### Subsystems
 - [`expressions.md`](expressions.md), the auto-triggered animation subsystem:
   how to write a new expression, the wisp-override gate, the testing pattern.
+  [`expressions/`](expressions/) holds the authoring guide and a skeleton
+  expression to copy from.
 - [`social.md`](social.md), overview of how a lamp behaves around other lamps,
   greetings and crowd-dim, and how they fit together. **Start here** for the
   social system, then the two docs below.

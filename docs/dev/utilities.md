@@ -120,9 +120,11 @@ reactions, prefer `PersonalityEngine` (see
 ```cpp
 std::vector<RosterEntry> getNear(uint32_t maxAgeMs);  // BLE-seen, sorted by RSSI (nearest first)
 std::vector<RosterEntry> getMesh(uint32_t maxAgeMs);  // ESP-NOW-seen
-std::vector<RosterEntry> getUngreetedArrivals(uint32_t maxAgeMs); // near + not yet acknowledged
 std::vector<RosterEntry> getAll();
 bool findByMac(const uint8_t mac[6], RosterEntry& out);
+// Nearest un-greeted arrival passing `accept`; in-place scan, no snapshot/sort.
+template <typename Accept>
+bool bestUngreetedArrival(uint32_t maxAgeMs, uint32_t now, Accept accept, RosterEntry& out);
 ```
 
 `RosterEntry` is a trivially-copyable POD (~104 B) held in a fixed
