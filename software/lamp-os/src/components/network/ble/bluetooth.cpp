@@ -50,21 +50,30 @@ static std::string s_advertisementName;
 //                  BtOnlyLampScreen routing.
 //   bit 2 (0x04): kBleCapConfigured, the lamp has been claimed/set up.
 //                  Drives the app's adopt-wizard vs open-it routing.
+//   bit 3 (0x08): kBleCapOtaDistributing, sourcing firmware to a peer right
+//                  now. Dynamic (flips during an OTA wave); the app paints
+//                  the lamp busy at scan time so a failed connect reads as
+//                  "teaching, come back soon" instead of a generic error.
 //
 // The mesh bit is 0x02, bytewise identical to the "firmware version
 // 0x02" sentinel. v2 apps checking `mfg[6] >= 2` still pass; v3+ apps using
 // `(mfg[6] & WANTED_BIT) != 0` read each flag independently.
-static constexpr unsigned char kBleCapMeshProtocol = 0x02;
-static constexpr unsigned char kBleCapConfigured   = 0x04;
+static constexpr unsigned char kBleCapMeshProtocol   = 0x02;
+static constexpr unsigned char kBleCapConfigured     = 0x04;
+static constexpr unsigned char kBleCapOtaDistributing = 0x08;
 
 // Set from begin()'s `configured` arg. Only changes across a reboot (the
 // setup flag flips at adoption, which reboots), so the color-update adv
 // rebuild can safely reuse it.
 static bool s_configured = false;
+// Live OTA-distributing flag. Flips at runtime as a distribution starts and
+// ends; tickAdvertising() rebuilds the capability byte when it changes.
+static bool s_otaDistributing = false;
 
 static unsigned char advCapabilityByte() {
   return static_cast<unsigned char>(
-      kBleCapMeshProtocol | (s_configured ? kBleCapConfigured : 0));
+      kBleCapMeshProtocol | (s_configured ? kBleCapConfigured : 0) |
+      (s_otaDistributing ? kBleCapOtaDistributing : 0));
 }
 
 static void applyAdvertisementPayload(NimBLEAdvertising* adv,
@@ -238,6 +247,12 @@ void BluetoothComponent::setAdvertisedColors(Color base, Color shade) {
   m_advDirty = true;
 }
 
+void BluetoothComponent::setAdvertisedOtaDistributing(bool distributing) {
+  if (distributing == m_pendingOtaDistributing) return;
+  m_pendingOtaDistributing = distributing;
+  m_advDirty = true;
+}
+
 void BluetoothComponent::tickAdvertising() {
   if (!m_advDirty) return;
   const uint32_t now = millis();
@@ -260,6 +275,12 @@ void BluetoothComponent::tickAdvertising() {
       s_advertisementData[2 + i] = newBytes[i];
       changed = true;
     }
+  }
+  s_otaDistributing = m_pendingOtaDistributing;
+  const unsigned char newCap = advCapabilityByte();
+  if (s_advertisementData[8] != newCap) {
+    s_advertisementData[8] = newCap;
+    changed = true;
   }
   // Clear dirty + stamp the flush time regardless of whether the
   // bytes differed. If a re-call set the same colors, avoid

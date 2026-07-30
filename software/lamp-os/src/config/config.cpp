@@ -12,6 +12,8 @@
 #include "util/color.hpp"
 #include "version.hpp"
 
+#include <lampos/protocol/presence.hpp>
+
 namespace lamp {
 
 // Seed every segment of a role from the variant defaults, but only while NVS
@@ -150,6 +152,10 @@ void Config::setLampOtaState(uint8_t s, const uint8_t* targetMac) {
   lampHasOtaSendingTo_ = hasTarget;
   if (hasTarget) std::memcpy(lampOtaSendingTo_, targetMac, 6);
   invalidateLampSection();
+}
+
+bool Config::isOtaDistributing() const {
+  return lampOtaState_ == lamp_protocol::kOtaStateSending;
 }
 
 uint8_t Config::getDisposition(const std::string& lampId) const {

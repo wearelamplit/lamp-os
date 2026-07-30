@@ -6,6 +6,7 @@ import '../../../core/ble/ble_client_provider.dart';
 import '../../../core/ble/ble_scanner.dart';
 import '../../inventory/application/inventory_notifier.dart';
 import '../domain/nearby_lamp.dart';
+import 'ota_busy_seen_provider.dart';
 
 part 'nearby_lamps_notifier.g.dart';
 
@@ -66,6 +67,12 @@ class NearbyLampsNotifier extends _$NearbyLampsNotifier {
 
   void _onAd(BleAdvertisement ad) {
     final now = DateTime.now().millisecondsSinceEpoch;
+    // Carry the OTA-distributing bit into the keepAlive tracker so the busy
+    // state survives navigation into the lamp's screen (this scanner is
+    // scoped to the picker and tears down on the way there).
+    ref
+        .read(otaBusySeenProvider.notifier)
+        .observe(ad.id, distributing: ad.otaDistributing);
     final updated = NearbyLamp(
       id: ad.id,
       name: ad.name,
@@ -76,6 +83,7 @@ class NearbyLampsNotifier extends _$NearbyLampsNotifier {
       lastSeenEpochMs: now,
       isMesh: ad.isMesh,
       configured: ad.configured,
+      otaDistributing: ad.otaDistributing,
     );
     // Build the next-roster against whatever's MOST CURRENT: either the
     // pending list waiting to flush, or the live state if no window is
