@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <algorithm>
+#include <array>
 #include <cstring>
 
 #include "components/network/mesh/mesh_link.hpp"
@@ -57,7 +58,11 @@ GreetingState SocialBehavior::greetingState() const {
   if (animationState == STOPPED) return {};
   GreetingState gs;
   gs.active     = true;
-  gs.peerLampId = greetingPeerLampId_;
+  if (greetedHasMac_) {
+    char buf[18];
+    formatBdAddr(greetedMac_, buf);
+    gs.peerLampId = buf;
+  }
   if (snub) {
     gs.kind = "snub";
   } else if (pulseBackStrength > 0) {
@@ -269,7 +274,6 @@ void SocialBehavior::control() {
   // free of BLE includes.
   const bool greetingNowActive = (animationState != STOPPED);
   if (!greetingNowActive && greetingWasActive_) {
-    greetingPeerLampId_.clear();
     greetedHasMac_ = false;
     if (onGreetingChange_) onGreetingChange_();
   }
@@ -302,24 +306,22 @@ void SocialBehavior::control() {
 
   // Re-greet window: even if the RosterEntry's acknowledged flag was reset
   // (peer pruned + returned), enforce a per-peer cooldown. The predicate runs
-  // in place under the roster mutex, so it stays allocation-free (the mac
-  // formats into a stack buffer that keys the transparent-comparator map
-  // without a std::string).
+  // in place under the roster mutex; the mac-keyed map keeps it allocation-free.
   RosterEntry arrival;
   const bool haveArrival = lampRoster.bestUngreetedArrival(
       LAMP_PRUNE_TIME_MS, now,
       [&](const RosterEntry& e) {
         if (regreetWindowMs == 0) return true;
-        char idbuf[18];
-        formatBdAddr(e.mac, idbuf);
-        auto last = lastGreetedAtMs_.find(idbuf);
+        std::array<uint8_t, 6> key;
+        std::memcpy(key.data(), e.mac, 6);
+        auto last = lastGreetedAtMs_.find(key);
         return last == lastGreetedAtMs_.end() ||
                (now - last->second) >= regreetWindowMs;
       },
       arrival);
   if (!haveArrival) return;
 
-  const GreetingTuning tuning = personalityEngine.greetingFor(arrival.macStr());
+  const GreetingTuning tuning = personalityEngine.greetingFor(arrival.mac);
 
 #ifdef LAMP_DEBUG
   Serial.printf("[social] greet %s (mode=%u frames=%u pulse=%u count=%u)\n",
@@ -328,7 +330,6 @@ void SocialBehavior::control() {
                 (unsigned)tuning.pulseBackStrength,
                 (unsigned)tuning.pulseBackCount);
 #endif
-  greetingPeerLampId_ = arrival.macStr();
   lampRoster.acknowledge(arrival.mac);
   foundLampColor = arrival.baseColor;
   std::memcpy(greetedMac_, arrival.mac, 6);
@@ -341,7 +342,7 @@ void SocialBehavior::control() {
   }
   applyTuning(tuning);
 
-  markGreeted(arrival.macStr(), now);
+  markGreeted(arrival.mac, now);
 
   // Introvert: trim the fatigue window, enter "tired" after too many
   // greetings burned through recently.
@@ -368,9 +369,7 @@ void SocialBehavior::control() {
 
 void SocialBehavior::triggerGreeting(const PeerView& peer) {
   const uint32_t now = millis();
-  const std::string peerLampId = peer.lampId;
-  const GreetingTuning tuning = personalityEngine.greetingFor(peerLampId);
-  greetingPeerLampId_ = peerLampId;
+  const GreetingTuning tuning = personalityEngine.greetingFor(peer.mac);
   foundLampColor = peer.baseColor;
   std::memcpy(greetedMac_, peer.mac, 6);
   greetedHasMac_ = peer.hasMac;
@@ -385,7 +384,7 @@ void SocialBehavior::triggerGreeting(const PeerView& peer) {
   playOnce();
   greetingWasActive_ = true;
   if (onGreetingChange_) onGreetingChange_();
-  markGreeted(peerLampId, now);
+  markGreeted(peer.mac, now);
 }
 
 void SocialBehavior::onColorInfo(const uint8_t srcMac[6],
@@ -397,8 +396,10 @@ void SocialBehavior::onColorInfo(const uint8_t srcMac[6],
   greetedBaseStops_ = baseStops;
 }
 
-void SocialBehavior::markGreeted(const std::string& peerLampId, uint32_t nowMs) {
-  lastGreetedAtMs_[peerLampId] = nowMs;
+void SocialBehavior::markGreeted(const uint8_t mac[6], uint32_t nowMs) {
+  std::array<uint8_t, 6> key;
+  std::memcpy(key.data(), mac, 6);
+  lastGreetedAtMs_[key] = nowMs;
   if (lastGreetedAtMs_.size() > MAX_GREETED_TRACKED) {
     auto oldest = lastGreetedAtMs_.begin();
     for (auto i = lastGreetedAtMs_.begin(); i != lastGreetedAtMs_.end(); ++i) {

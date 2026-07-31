@@ -159,12 +159,20 @@ bool Config::isOtaDistributing() const {
   return lampOtaState_ == lamp_protocol::kOtaStateSending;
 }
 
+uint8_t Config::getDisposition(const uint8_t mac[6]) const {
+  return dispositions_.get(mac);
+}
+
 uint8_t Config::getDisposition(const std::string& lampId) const {
-  return dispositions_.get(lampId);
+  uint8_t mac[6];
+  if (!parseBdAddr(lampId.c_str(), mac)) return DispositionStore::kDefault;
+  return dispositions_.get(mac);
 }
 
 void Config::setDisposition(const std::string& lampId, uint8_t value) {
-  dispositions_.set(lampId, value, millis());
+  uint8_t mac[6];
+  if (!parseBdAddr(lampId.c_str(), mac)) return;
+  dispositions_.set(mac, value, millis());
 }
 
 String Config::asDispositionsJson() const {

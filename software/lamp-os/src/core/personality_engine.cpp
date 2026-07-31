@@ -67,7 +67,7 @@ CrowdComposition PersonalityEngine::crowdComposition() const {
   const std::vector<RosterEntry> peers = snapshotBlePeers_();
   for (const auto& p : peers) {
     if (p.name[0] == '\0') continue;
-    const uint8_t d = p.hasMac ? config_->getDisposition(p.macStr()) : 3;
+    const uint8_t d = p.hasMac ? config_->getDisposition(p.mac) : 3;
     switch (d) {
       case 1: if (c.salty   < 255) c.salty++;   break;
       case 2: if (c.wary    < 255) c.wary++;    break;
@@ -78,6 +78,12 @@ CrowdComposition PersonalityEngine::crowdComposition() const {
     }
   }
   return c;
+}
+
+GreetingTuning PersonalityEngine::greetingFor(const uint8_t mac[6]) const {
+  if (!config_) return greetingTuningFor(SocialMode::Ambivert, 3);
+  const SocialMode mode = config_->lamp.socialMode;
+  return greetingTuningFor(mode, config_->getDisposition(mac));  // unknown → 3
 }
 
 GreetingTuning PersonalityEngine::greetingFor(const std::string& peerLampId) const {
@@ -144,7 +150,7 @@ float PersonalityEngine::computeWeightedCount_(
   for (const auto& p : peers) {
     if (p.name[0] == '\0') continue;
     if (!p.hasMac) continue;
-    const uint8_t d = config_->getDisposition(p.macStr());
+    const uint8_t d = config_->getDisposition(p.mac);
     w += weightForDisposition_(d, mode);
   }
   return w;

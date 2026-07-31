@@ -211,14 +211,18 @@ class Config {
   // See DispositionStore for the write-amplification guard.
   static constexpr uint32_t kDispositionFlushIdleMs = 5000;
 
-  // Returns kDispositionDefault when the peer isn't in the store.
-  // `lampId` is the mesh mac, canonical-form colon-hex (e.g.
-  // "AA:BB:CC:DD:EE:FF"). See lamp::isValidBdAddr in util/bd_addr.hpp.
+  // Returns kDispositionDefault when the peer isn't in the store. The raw
+  // overload is the hot-path form; callers pass a RosterEntry's 6-byte mac
+  // directly, building no string. The string overload is the author-facing
+  // form (BehaviorContext::dispositionOf) keyed by canonical-form colon-hex
+  // lampId (e.g. "AA:BB:CC:DD:EE:FF"); it parses to bytes and returns the
+  // default on an unparseable key.
+  uint8_t getDisposition(const uint8_t mac[6]) const;
   uint8_t getDisposition(const std::string& lampId) const;
   // Clamps `value` to [1,5] and marks the debouncer dirty; the NVS write
   // happens later via maybeFlushDispositions() or flushDispositionsNow().
   // Evicts the lowest-by-key entry when at kDispositionsMax and the lampId
-  // is new.
+  // is new. A non-canonical `lampId` is a no-op.
   void setDisposition(const std::string& lampId, uint8_t value);
   // Full JSON serialization for the CHAR_SOCIAL_DISPOSITIONS read path.
   String asDispositionsJson() const;

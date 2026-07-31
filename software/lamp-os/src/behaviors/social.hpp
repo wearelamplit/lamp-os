@@ -1,8 +1,9 @@
 #pragma once
 
+#include <array>
+#include <cstdint>
 #include <functional>
 #include <map>
-#include <string>
 #include <vector>
 
 #include "behaviors/greetable.hpp"
@@ -104,8 +105,8 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   // Stamp the per-peer re-greet timestamp + per-mode cooldown without
   // running the discovery / cooldown gates. Called by triggerGreeting so
   // forced greetings still enforce the natural cooldown on the next sighting.
-  // `peerLampId` is the peer's MAC string (RosterEntry::macStr()).
-  void markGreeted(const std::string& peerLampId, uint32_t nowMs);
+  // `mac` is the peer's raw 6-byte mesh MAC.
+  void markGreeted(const uint8_t mac[6], uint32_t nowMs);
 
   // Throttle the gossip-OTA peer scan to this cadence. Lamps emit HELLO
   // every 1-2s, so 500 ms catches every fresh sighting while saving the
@@ -133,14 +134,12 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   static constexpr uint32_t INTROVERT_TIRED_DURATION_MS = 300000;
 
   Config* config_ = nullptr;
-  // Transparent comparator so the re-greet lookup in control() can key on a
-  // RosterEntry's char-array name without building a std::string (a 32-char
-  // name would heap-allocate, and the lookup runs inside the roster mutex).
-  std::map<std::string, uint32_t, std::less<>> lastGreetedAtMs_;
+  // Keyed on the raw 6-byte mac so a tracked peer never spawns a per-entry
+  // heap string (see docs/dev/embedded-heap.md rule 3); the control() lookup
+  // runs inside the roster mutex.
+  std::map<std::array<uint8_t, 6>, uint32_t> lastGreetedAtMs_;
   std::vector<uint32_t> recentGreetMs_;
   uint32_t tiredUntilMs_ = 0;
-  // Peer's lampId (mac), populated for the animation duration.
-  std::string greetingPeerLampId_;
   std::function<void()> onGreetingChange_;
   // Tracks whether the animation was active last control() so stop-edge fires.
   bool greetingWasActive_ = false;

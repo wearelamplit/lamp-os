@@ -3,6 +3,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -52,11 +53,15 @@ class DispositionDebouncer {
   uint32_t idleMs_;
 };
 
-// Per-peer social dispositions (lampId -> 1..5). Kept as a key-sorted vector
-// for O(log N) lookup and a stable on-disk byte shape; persisted to its own
-// NVS key via the injected ConfigStore, debounced to spare flash wear. The
-// caller passes the clock (millis) in so this stays pure and native-testable
-// against an InMemoryConfigStore.
+// Per-peer social dispositions (mesh MAC -> 1..5). Keys are the raw 6-byte
+// MAC held inline, so an entry is trivially copyable and never spawns a
+// per-peer heap block (a 17-char colon-hex string would defeat SSO; see
+// docs/dev/embedded-heap.md rule 3). Kept sorted by MAC for O(log N) lookup;
+// the byte order matches the canonical colon-hex string order, so the on-disk
+// JSON shape is stable across the packing. Persisted to its own NVS key via
+// the injected ConfigStore, debounced to spare flash wear. The caller passes
+// the clock (millis) in so this stays pure and native-testable against an
+// InMemoryConfigStore.
 //
 // Read from the NimBLE host task (Core 0) via asJson() while the Core 1 loop
 // drain mutates via setFromJson(); a SemaphoreHandle_t mutex serialises all
@@ -73,11 +78,11 @@ class DispositionStore {
   // Read + parse the "dispositions" NVS key into the sorted vector.
   void load();
 
-  // kDefault when the peer isn't present. lampId is canonical colon-hex.
-  uint8_t get(const std::string& lampId) const;
+  // kDefault when the peer isn't present. mac is the raw 6-byte mesh MAC.
+  uint8_t get(const uint8_t mac[6]) const;
   // Clamp to [1,5], insert/update preserving sort order, evict lowest-by-key
   // at capacity. Marks dirty; the actual write is deferred to a flush.
-  void set(const std::string& lampId, uint8_t value, uint32_t nowMs);
+  void set(const uint8_t mac[6], uint8_t value, uint32_t nowMs);
 
   std::string asJson() const;
   // Bulk replace from a JSON object; parse + clamp + mark dirty. Defers the
@@ -93,7 +98,7 @@ class DispositionStore {
  private:
   bool persist_();
 
-  std::vector<std::pair<std::string, uint8_t>> entries_;
+  std::vector<std::pair<std::array<uint8_t, 6>, uint8_t>> entries_;
   DispositionDebouncer debouncer_;
   ConfigStore* store_ = nullptr;
   SemaphoreHandle_t mutex_ = nullptr;

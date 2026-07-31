@@ -77,7 +77,9 @@ class PersonalityEngine {
 
   // Per-peer greeting tuning. Returned at SocialBehavior::control() time
   // so the waveform is read in lockstep with the cooldown gate the
-  // behavior already does. Pure read.
+  // behavior already does. Pure read. The raw overload is the hot-path form
+  // (no string built); the string overload backs BehaviorContext::greetingFor.
+  GreetingTuning greetingFor(const uint8_t mac[6]) const;
   GreetingTuning greetingFor(const std::string& peerLampId) const;
 
   // Was a SocialMode transition witnessed since the last consume that
