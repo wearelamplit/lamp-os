@@ -199,10 +199,13 @@ class ExpressionParamsPanel extends StatelessWidget {
       ));
     }
 
-    // A continuous (e.g. looped) expression never re-triggers on an interval,
-    // so hide the control when it would do nothing.
+    // The interval is the random gap before each re-trigger. A `loop` param set
+    // to Continuous runs forever with no gap, so hide it there; a statically
+    // continuous expression that still declares an interval (shifty) re-triggers
+    // between cycles, so keep it.
     final interval = descriptor.interval;
-    if (interval != null && !effectiveContinuous(descriptor, parameters)) {
+    final loopedForever = (parameters[kLoopParamKey] ?? 0) != 0;
+    if (interval != null && !loopedForever) {
       timing.add(_RangeParamSlider(
         label: interval.label ?? 'Interval',
         lo: intervalMin,

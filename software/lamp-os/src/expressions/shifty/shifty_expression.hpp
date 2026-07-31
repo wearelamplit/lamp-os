@@ -41,12 +41,22 @@ inline constexpr ParamSpec kShiftyParams[] = {
   kEasingParam,
   kOpacityParam,
 };
-// duration models the hold time (shiftDurationMin/Max in seconds).
+// interval is the random gap before each shift (top-level intervalMin/Max, the
+// base-class trigger schedule); duration is the hold time (shiftDurationMin/Max).
 inline constexpr ExpressionDescriptor kShiftyDescriptorData{
   .id           = "shifty",
   .name         = "Shifty",
   .continuous   = true,
   .colors       = { .max = 8, .label = "Colors" },
+  .interval     = RangeSpec{
+    .min   = 60,
+    .max   = 900,
+    .step  = 30,
+    .unit  = "s",
+    .defLo = 60,
+    .defHi = 900,
+    .help  = kIntervalHelp,
+  },
   .duration     = RangeSpec{
     .min    = 60,
     .max    = 1800,

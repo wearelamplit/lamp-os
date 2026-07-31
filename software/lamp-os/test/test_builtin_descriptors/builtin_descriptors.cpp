@@ -173,6 +173,18 @@ void test_shifty_duration_hold_time() {
   TEST_ASSERT_EQUAL_INT(600, def[1].as<int>());
 }
 
+void test_shifty_interval_bounds_and_help() {
+  auto iv = findById("shifty")["interval"];
+  TEST_ASSERT_TRUE(iv.is<JsonObject>());
+  TEST_ASSERT_EQUAL_INT(60,  iv["min"].as<int>());
+  TEST_ASSERT_EQUAL_INT(900, iv["max"].as<int>());
+  auto def = iv["default"].as<JsonArray>();
+  TEST_ASSERT_EQUAL_INT(60,  def[0].as<int>());
+  TEST_ASSERT_EQUAL_INT(900, def[1].as<int>());
+  TEST_ASSERT_EQUAL_STRING("A random time in this range is picked before each trigger.",
+                           iv["help"].as<const char*>());
+}
+
 void test_breathing_has_no_interval() {
   TEST_ASSERT_TRUE(findById("breathing")["interval"].isNull());
 }
@@ -436,6 +448,7 @@ int main(int, char**) {
   RUN_TEST(test_shifty_fade_duration_range);
   RUN_TEST(test_shifty_zone_optional);
   RUN_TEST(test_shifty_duration_hold_time);
+  RUN_TEST(test_shifty_interval_bounds_and_help);
   RUN_TEST(test_breathing_has_no_interval);
   RUN_TEST(test_breathing_params_present);
   RUN_TEST(test_breathing_speed_floor);
