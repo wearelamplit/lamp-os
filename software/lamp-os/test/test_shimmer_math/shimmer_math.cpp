@@ -187,39 +187,77 @@ void test_heat_brightness_monotonic_with_floor() {
   TEST_ASSERT_TRUE(heatBrightness(0.5f, 0.2f) > heatBrightness(0.1f, 0.2f));
 }
 
-void test_sample_gradient_endpoints_and_mid() {
-  std::vector<Color> stops = {Color{0, 0, 0, 0}, Color{100, 0, 0, 0},
-                              Color{200, 0, 0, 0}};
-  TEST_ASSERT_EQUAL_UINT8(0,   sampleGradient(stops, 0.0f).r);
-  TEST_ASSERT_EQUAL_UINT8(200, sampleGradient(stops, 1.0f).r);
-  const uint8_t mid = sampleGradient(stops, 0.5f).r;
-  TEST_ASSERT_TRUE(mid > 80 && mid < 120);
+static int brightnessSum(Color c) {
+  return static_cast<int>(c.r) + c.g + c.b + c.w;
 }
 
-void test_sample_gradient_four_stops() {
-  // Descriptor allows colors.max = 4; sample across all three segments.
-  std::vector<Color> stops = {Color{0, 0, 0, 0}, Color{90, 0, 0, 0},
-                              Color{180, 0, 0, 0}, Color{255, 0, 0, 0}};
-  TEST_ASSERT_EQUAL_UINT8(0,   sampleGradient(stops, 0.0f).r);
-  TEST_ASSERT_EQUAL_UINT8(255, sampleGradient(stops, 1.0f).r);
-  TEST_ASSERT_EQUAL_UINT8(90,  sampleGradient(stops, 1.0f / 3.0f).r);
-  TEST_ASSERT_EQUAL_UINT8(180, sampleGradient(stops, 2.0f / 3.0f).r);
-  const uint8_t mid = sampleGradient(stops, 0.5f).r;
-  TEST_ASSERT_TRUE(mid > 90 && mid < 180);  // between stops 1 and 2
+void test_warmth_modulate_neutral_returns_anchor() {
+  const Color anchor{200, 40, 0, 0};
+  const FireStyle s = fireStyle(2);  // Candle
+  const Color mid =
+      warmthModulate(anchor, s.restLevel, s.restLevel, s.warmthSwing, s.whiteHot);
+  TEST_ASSERT_EQUAL_UINT8(anchor.r, mid.r);
+  TEST_ASSERT_EQUAL_UINT8(anchor.g, mid.g);
+  TEST_ASSERT_EQUAL_UINT8(anchor.b, mid.b);
+  TEST_ASSERT_EQUAL_UINT8(anchor.w, mid.w);
 }
 
-void test_sample_gradient_degenerate() {
-  TEST_ASSERT_EQUAL_UINT8(0, sampleGradient({}, 0.5f).r);
-  std::vector<Color> one = {Color{55, 0, 0, 0}};
-  TEST_ASSERT_EQUAL_UINT8(55, sampleGradient(one, 0.5f).r);
-  // Clamp out-of-range p.
-  TEST_ASSERT_EQUAL_UINT8(55, sampleGradient(one, 9.0f).r);
+void test_warmth_modulate_direction_warm_anchor() {
+  const Color anchor{200, 40, 0, 0};  // warm red-orange
+  const FireStyle s = fireStyle(2);   // Candle
+  const float neutral = s.restLevel;
+  const Color cold = warmthModulate(anchor, 0.0f, neutral, s.warmthSwing, s.whiteHot);
+  const Color mid  = warmthModulate(anchor, neutral, neutral, s.warmthSwing, s.whiteHot);
+  const Color hot  = warmthModulate(anchor, 1.0f, neutral, s.warmthSwing, s.whiteHot);
+  // Hot brighter than mid brighter than cold.
+  TEST_ASSERT_TRUE(brightnessSum(hot) > brightnessSum(mid));
+  TEST_ASSERT_TRUE(brightnessSum(mid) > brightnessSum(cold));
+  // Hot slides toward yellow (green climbs); cold toward maroon (green falls).
+  TEST_ASSERT_TRUE(hot.g > mid.g);
+  TEST_ASSERT_TRUE(cold.g < mid.g);
 }
 
-void test_default_fire_ramp_is_warm() {
-  const auto& ramp = defaultFireRamp();
-  TEST_ASSERT_TRUE(ramp.size() >= 2);
-  TEST_ASSERT_TRUE(ramp.back().r >= ramp.front().r);  // hotter end brighter red
+void test_warmth_modulate_channel_bounded_all_heat() {
+  const Color anchor{255, 200, 120, 60};
+  const FireStyle s = fireStyle(3);  // Campfire, strongest swing + whiteHot
+  for (int k = 0; k <= 100; ++k) {
+    const Color c = warmthModulate(anchor, k / 100.0f, s.restLevel,
+                                   s.warmthSwing, s.whiteHot);
+    (void)c;  // uint8_t channels are 0..255 by construction; compiles-and-runs guard
+  }
+  TEST_PASS();
+}
+
+void test_warmth_modulate_zero_swing_is_pure_brightness() {
+  const Color anchor{120, 60, 0, 0};  // r == 2*g, clean ratio under scaling
+  const float neutral = 0.3f;
+  const Color hot  = warmthModulate(anchor, 1.0f, neutral, 0.0f, 0.0f);
+  const Color cold = warmthModulate(anchor, 0.0f, neutral, 0.0f, 0.0f);
+  // No hue shift: r:g ratio preserved (within rounding).
+  TEST_ASSERT_INT_WITHIN(1, hot.r, hot.g * 2);
+  TEST_ASSERT_INT_WITHIN(1, cold.r, cold.g * 2);
+  TEST_ASSERT_EQUAL_UINT8(0, hot.b);
+  TEST_ASSERT_EQUAL_UINT8(0, cold.b);
+  // Still brightness-modulated.
+  TEST_ASSERT_TRUE(brightnessSum(hot) > brightnessSum(cold));
+}
+
+void test_warmth_modulate_cool_anchor_valid() {
+  const Color anchor{0, 0, 200, 0};  // pure blue
+  const FireStyle s = fireStyle(2);  // Candle
+  const Color hot  = warmthModulate(anchor, 1.0f, s.restLevel, s.warmthSwing, s.whiteHot);
+  const Color cold = warmthModulate(anchor, 0.0f, s.restLevel, s.warmthSwing, s.whiteHot);
+  TEST_ASSERT_TRUE(brightnessSum(hot) > brightnessSum(cold));
+}
+
+void test_warmth_modulate_black_anchor_stays_black() {
+  const Color anchor{0, 0, 0, 0};
+  const FireStyle s = fireStyle(3);  // Campfire, whiteHot 0.40
+  const Color hot = warmthModulate(anchor, 1.0f, s.restLevel, s.warmthSwing, s.whiteHot);
+  TEST_ASSERT_EQUAL_UINT8(0, hot.r);
+  TEST_ASSERT_EQUAL_UINT8(0, hot.g);
+  TEST_ASSERT_EQUAL_UINT8(0, hot.b);
+  TEST_ASSERT_EQUAL_UINT8(0, hot.w);  // no fake-fire: shimmer of nothing is nothing
 }
 
 int main(int, char**) {
@@ -238,9 +276,11 @@ int main(int, char**) {
   RUN_TEST(test_flutter_stays_within_amplitude);
   RUN_TEST(test_approach_heat_moves_toward_target);
   RUN_TEST(test_heat_brightness_monotonic_with_floor);
-  RUN_TEST(test_sample_gradient_endpoints_and_mid);
-  RUN_TEST(test_sample_gradient_four_stops);
-  RUN_TEST(test_sample_gradient_degenerate);
-  RUN_TEST(test_default_fire_ramp_is_warm);
+  RUN_TEST(test_warmth_modulate_neutral_returns_anchor);
+  RUN_TEST(test_warmth_modulate_direction_warm_anchor);
+  RUN_TEST(test_warmth_modulate_channel_bounded_all_heat);
+  RUN_TEST(test_warmth_modulate_zero_swing_is_pure_brightness);
+  RUN_TEST(test_warmth_modulate_cool_anchor_valid);
+  RUN_TEST(test_warmth_modulate_black_anchor_stays_black);
   return UNITY_END();
 }

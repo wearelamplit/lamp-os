@@ -92,8 +92,6 @@ void ShimmerExpression::draw() {
   }
 
   if (paint) {
-    const std::vector<Color>& palette =
-        getColors().empty() ? defaultFireRamp() : getColors();
     const float wispWeight = wispDimScale();
     const float flutterScale = 1.0f + flutter_;
     // cells_ is sized on trigger, zone_ on configure; bound the index so a
@@ -105,15 +103,17 @@ void ShimmerExpression::draw() {
     for (int i = static_cast<int>(zone_.posMin); i < end; ++i) {
       const Cell& c = cells_[static_cast<uint16_t>(i - zone_.posMin)];
       const float heatR = clampUnit(c.heat + windOffset_);
-      const Color color = sampleGradient(palette, heatR);
+      const Color anchor = fb->buffer[i];
+      const Color color = warmthModulate(anchor, heatR, style_.restLevel,
+                                         style_.warmthSwing, style_.whiteHot);
       const float bright =
           clampUnit(heatBrightness(heatR, kShimmerMinBright) * flutterScale);
       const uint32_t pct = static_cast<uint32_t>(bright * 100.0f);
       const Color painted =
           (pct >= 100u)
               ? color
-              : mixColorLinear(fb->buffer[i], color, computeLinearFactor(pct, 100u));
-      fb->buffer[i] = mixColorWeight(fb->buffer[i], painted, wispWeight);
+              : mixColorLinear(anchor, color, computeLinearFactor(pct, 100u));
+      fb->buffer[i] = mixColorWeight(anchor, painted, wispWeight);
     }
   }
 

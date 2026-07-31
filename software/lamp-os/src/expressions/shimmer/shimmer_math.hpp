@@ -1,10 +1,9 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
-#include <vector>
 
 #include "util/color.hpp"
-#include "util/fade.hpp"
 
 namespace lamp {
 
@@ -17,7 +16,10 @@ inline float clampUnit(float v) {
 // per-roll probability a heat target instead lands in the hot [sparkLo,sparkHi]
 // ember band (0 = never). flutterAmp is the amplitude of a fast per-frame global
 // brightness random-walk layered on top of the smooth movement (0 = none).
-// Starting calibration, tuned on the bench.
+// warmthSwing/whiteHot shape how heat modulates the lamp's own colour (see
+// warmthModulate): warmthSwing is the hue slide toward yellow at peak / maroon
+// at floor (0 = pure brightness), whiteHot the desaturation toward white at the
+// hot tip (0 = stays saturated). Starting calibration, tuned on the bench.
 struct FireStyle {
   float restLevel;
   float amp;
@@ -29,18 +31,20 @@ struct FireStyle {
   float sparkLo;
   float sparkHi;
   float flutterAmp;
+  float warmthSwing;
+  float whiteHot;
 };
 
 inline FireStyle fireStyle(uint32_t value) {
   static constexpr FireStyle table[] = {
-    // Twinkle: near-dark base, sparse sparks that rise and fade slowly, no wind. Cool colors read as stars.
-    {0.00f, 0.02f, 900, 0.00f,    0,    0, 0.030f, 0.60f, 1.00f, 0.00f},
+    // Twinkle: near-dark base, sparse sparks that rise and fade slowly, no wind.
+    {0.00f, 0.02f, 900, 0.00f,    0,    0, 0.030f, 0.60f, 1.00f, 0.00f, 0.15f, 0.00f},
     // Coals: a dim ember bed, several embers breathing in and out in place, no wind.
-    {0.12f, 0.05f, 1600, 0.00f,    0,    0, 0.045f, 0.55f, 0.85f, 0.00f},
+    {0.12f, 0.05f, 1600, 0.00f,    0,    0, 0.045f, 0.55f, 0.85f, 0.00f, 0.30f, 0.00f},
     // Candle: a slow convective sway plus a fast turbulent brightness flutter.
-    {0.36f, 0.16f, 220, 0.24f, 1500, 3500, 0.00f, 0.00f, 0.00f, 0.15f},
+    {0.36f, 0.16f, 220, 0.24f, 1500, 3500, 0.00f, 0.00f, 0.00f, 0.15f, 0.55f, 0.15f},
     // Campfire: lively, brighter, regular gusts with a subtle flutter.
-    {0.50f, 0.28f, 180, 0.18f, 3000, 7000, 0.00f, 0.00f, 0.00f, 0.04f},
+    {0.50f, 0.28f, 180, 0.18f, 3000, 7000, 0.00f, 0.00f, 0.00f, 0.04f, 0.80f, 0.40f},
   };
   if (value > 3) value = 3;
   return table[value];
@@ -95,28 +99,49 @@ inline float heatBrightness(float heat, float minBright) {
   return minBright + (1.0f - minBright) * clampUnit(heat);
 }
 
-// Point-sample an ordered cool->hot gradient at p in [0,1]. No allocation.
-inline Color sampleGradient(const std::vector<Color>& stops, float p) {
-  if (stops.empty()) return Color{};
-  if (stops.size() == 1) return stops.front();
-  p = clampUnit(p);
-  const float scaled = p * static_cast<float>(stops.size() - 1);
-  size_t i = static_cast<size_t>(scaled);
-  if (i >= stops.size() - 1) return stops.back();
-  const float frac = scaled - static_cast<float>(i);
-  return mixColorLinear(stops[i], stops[i + 1],
-                        static_cast<uint32_t>(frac * 262144.0f));
-}
+inline constexpr float kShimmerColdFloor = 0.20f;   // channel scale at coldest
+inline constexpr float kShimmerHotGain = 0.35f;     // brightness lift at hottest
+inline constexpr float kShimmerColdBlueKill = 1.3f; // blue attenuates past green when cold
 
-// Warm ramp for an empty palette so a fresh shimmer looks like fire. Static so
-// draw() never allocates.
-inline const std::vector<Color>& defaultFireRamp() {
-  static const std::vector<Color> ramp = {
-    Color{60, 0, 0, 0},
-    Color{255, 60, 0, 0},
-    Color{255, 160, 20, 0},
+// Modulate the anchor colour along a dim->warm ramp driven by heat. neutral is
+// the style rest heat: heat == neutral returns the anchor unchanged. Above it
+// the anchor brightens and (warmthSwing) slides green toward red for a yellower
+// tip, with whiteHot engaging W at the very top; below it the anchor darkens and
+// green/blue fall faster than red for a maroon floor. Channel-space only, no HSV
+// round-trip; a black anchor stays black.
+inline Color warmthModulate(Color anchor, float heat, float neutral,
+                            float warmthSwing, float whiteHot) {
+  float w;
+  if (heat >= neutral)
+    w = (neutral < 1.0f) ? (heat - neutral) / (1.0f - neutral) : 0.0f;
+  else
+    w = (neutral > 0.0f) ? (heat - neutral) / neutral : 0.0f;
+  w = w < -1.0f ? -1.0f : (w > 1.0f ? 1.0f : w);
+
+  const float bscale = (w >= 0.0f) ? 1.0f + w * kShimmerHotGain
+                                   : 1.0f + w * (1.0f - kShimmerColdFloor);
+  float r = anchor.r * bscale;
+  float g = anchor.g * bscale;
+  float b = anchor.b * bscale;
+  float wc = anchor.w * bscale;
+
+  if (warmthSwing > 0.0f) {
+    const float hot = warmthSwing * (w > 0.0f ? w : 0.0f);
+    const float cold = warmthSwing * (w < 0.0f ? -w : 0.0f);
+    g += (r - g) * hot;
+    g *= 1.0f - cold;
+    b *= 1.0f - cold * kShimmerColdBlueKill;
+  }
+
+  if (whiteHot > 0.0f && w > 0.0f) {
+    const float lum = std::max(r, std::max(g, b)) / 255.0f;
+    wc += (255.0f - wc) * whiteHot * w * clampUnit(lum);
+  }
+
+  auto clamp8 = [](float v) -> uint8_t {
+    return v <= 0.0f ? 0 : (v >= 255.0f ? 255 : static_cast<uint8_t>(v + 0.5f));
   };
-  return ramp;
+  return Color{clamp8(r), clamp8(g), clamp8(b), clamp8(wc)};
 }
 
 inline constexpr float kShimmerMinBright = 0.15f;

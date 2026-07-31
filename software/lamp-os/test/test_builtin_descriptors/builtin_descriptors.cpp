@@ -429,8 +429,8 @@ void test_shimmer_fire_enum() {
   TEST_ASSERT_EQUAL_STRING("Campfire",  opts[3]["label"].as<const char*>());
 }
 
-void test_shimmer_colors_cap_and_opacity() {
-  TEST_ASSERT_EQUAL_INT(4, findById("flicker")["colors"]["max"].as<int>());
+void test_shimmer_has_no_colors_and_has_opacity() {
+  TEST_ASSERT_EQUAL_INT(0, findById("flicker")["colors"]["max"].as<int>());
   TEST_ASSERT_TRUE(hasOpacity(kShimmerDescriptorData));
 }
 
@@ -469,6 +469,6 @@ int main(int, char**) {
   RUN_TEST(test_shimmer_is_continuous_and_zoneable);
   RUN_TEST(test_shimmer_is_advanced_and_others_are_not);
   RUN_TEST(test_shimmer_fire_enum);
-  RUN_TEST(test_shimmer_colors_cap_and_opacity);
+  RUN_TEST(test_shimmer_has_no_colors_and_has_opacity);
   return UNITY_END();
 }
