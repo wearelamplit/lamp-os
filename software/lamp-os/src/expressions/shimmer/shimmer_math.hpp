@@ -38,7 +38,7 @@ inline FireStyle fireStyle(uint32_t value) {
     // Coals: a dim ember bed, several embers breathing in and out in place, no wind.
     {0.12f, 0.05f, 1600, 0.00f,    0,    0, 0.045f, 0.55f, 0.85f, 0.00f},
     // Candle: a slow convective sway plus a fast turbulent brightness flutter.
-    {0.36f, 0.16f, 220, 0.14f, 1500, 3500, 0.00f, 0.00f, 0.00f, 0.08f},
+    {0.36f, 0.16f, 220, 0.24f, 1500, 3500, 0.00f, 0.00f, 0.00f, 0.15f},
     // Campfire: lively, brighter, regular gusts with a subtle flutter.
     {0.50f, 0.28f, 180, 0.18f, 3000, 7000, 0.00f, 0.00f, 0.00f, 0.04f},
   };
