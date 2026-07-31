@@ -13,9 +13,11 @@ inline float clampUnit(float v) {
 }
 
 // restLevel/amp are the heat band; stepMs the per-pixel flicker responsiveness;
-// windAmp/gust* the global gust (windAmp 0 = still). sparkChance is the
+// windAmp/gust* the global smooth gust (windAmp 0 = still). sparkChance is the
 // per-roll probability a heat target instead lands in the hot [sparkLo,sparkHi]
-// ember band (0 = never). Starting calibration, tuned on the bench.
+// ember band (0 = never). flutterAmp is the amplitude of a fast per-frame global
+// brightness random-walk layered on top of the smooth movement (0 = none).
+// Starting calibration, tuned on the bench.
 struct FireStyle {
   float restLevel;
   float amp;
@@ -26,18 +28,19 @@ struct FireStyle {
   float sparkChance;
   float sparkLo;
   float sparkHi;
+  float flutterAmp;
 };
 
 inline FireStyle fireStyle(uint32_t value) {
   static constexpr FireStyle table[] = {
     // Twinkle: near-dark base, sparse sparks that rise and fade slowly, no wind. Cool colors read as stars.
-    {0.00f, 0.02f, 900, 0.00f,    0,    0, 0.030f, 0.60f, 1.00f},
+    {0.00f, 0.02f, 900, 0.00f,    0,    0, 0.030f, 0.60f, 1.00f, 0.00f},
     // Coals: a dim ember bed, several embers breathing in and out in place, no wind.
-    {0.12f, 0.05f, 1600, 0.00f,    0,    0, 0.045f, 0.55f, 0.85f},
-    // Candle: a quick, flickery flame reacting to fast air jitter.
-    {0.36f, 0.16f, 220, 0.14f, 1500, 3500, 0.00f, 0.00f, 0.00f},
-    // Campfire: lively, brighter, regular gusts.
-    {0.50f, 0.28f, 180, 0.18f, 3000, 7000, 0.00f, 0.00f, 0.00f},
+    {0.12f, 0.05f, 1600, 0.00f,    0,    0, 0.045f, 0.55f, 0.85f, 0.00f},
+    // Candle: a slow convective sway plus a fast turbulent brightness flutter.
+    {0.36f, 0.16f, 220, 0.14f, 1500, 3500, 0.00f, 0.00f, 0.00f, 0.08f},
+    // Campfire: lively, brighter, regular gusts with a subtle flutter.
+    {0.50f, 0.28f, 180, 0.18f, 3000, 7000, 0.00f, 0.00f, 0.00f, 0.04f},
   };
   if (value > 3) value = 3;
   return table[value];
@@ -65,6 +68,19 @@ inline float rollWindTarget(const FireStyle& s, Rng& rng) {
 template <class Rng>
 inline uint32_t nextGustAt(uint32_t nowMs, const FireStyle& s, Rng& rng) {
   return nowMs + rng.range(s.gustLoMs, s.gustHiMs);
+}
+
+inline constexpr float kFlutterStepFrac = 0.5f;
+
+// One step of a bounded fast random-walk in [-flutterAmp, +flutterAmp]. Each call
+// nudges by up to +/- kFlutterStepFrac*amp and clamps. amp 0 yields 0.
+template <class Rng>
+inline float advanceFlutter(float flutter, float amp, Rng& rng) {
+  if (amp <= 0.0f) return 0.0f;
+  const float step = amp * kFlutterStepFrac;
+  const float delta = (rng.range(0, 2000) / 1000.0f - 1.0f) * step;
+  const float v = flutter + delta;
+  return v < -amp ? -amp : (v > amp ? amp : v);
 }
 
 inline float approachHeat(float heat, float target, uint32_t deltaMs,

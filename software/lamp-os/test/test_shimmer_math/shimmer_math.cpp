@@ -132,6 +132,38 @@ void test_fire_styles_split_sparkle_and_flame() {
   TEST_ASSERT_TRUE(campfire.windAmp > 0.0f);
 }
 
+void test_flutter_calm_styles_unperturbed() {
+  // Twinkle + Coals have flutterAmp 0: advanceFlutter is a no-op regardless of rng.
+  for (uint32_t idx = 0; idx <= 1; ++idx) {
+    const FireStyle s = fireStyle(idx);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, s.flutterAmp);
+    LoRng lo;
+    HiRng hi;
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, advanceFlutter(0.0f, s.flutterAmp, lo));
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, advanceFlutter(0.0f, s.flutterAmp, hi));
+  }
+}
+
+void test_flutter_stays_within_amplitude() {
+  const FireStyle candle = fireStyle(2);
+  TEST_ASSERT_TRUE(candle.flutterAmp > 0.0f);
+  // Drive the walk up with a max-positive rng then down with a max-negative one;
+  // it must never escape [-amp, +amp].
+  HiRng hi;
+  LoRng lo;
+  float f = 0.0f;
+  for (int i = 0; i < 200; ++i) {
+    f = advanceFlutter(f, candle.flutterAmp, hi);
+    TEST_ASSERT_TRUE(f <= candle.flutterAmp + 1e-4f);
+    TEST_ASSERT_TRUE(f >= -candle.flutterAmp - 1e-4f);
+  }
+  for (int i = 0; i < 200; ++i) {
+    f = advanceFlutter(f, candle.flutterAmp, lo);
+    TEST_ASSERT_TRUE(f <= candle.flutterAmp + 1e-4f);
+    TEST_ASSERT_TRUE(f >= -candle.flutterAmp - 1e-4f);
+  }
+}
+
 void test_approach_heat_moves_toward_target() {
   const float a = approachHeat(0.0f, 1.0f, 90, 180);   // half a step
   TEST_ASSERT_TRUE(a > 0.0f && a < 1.0f);
@@ -193,6 +225,8 @@ int main(int, char**) {
   RUN_TEST(test_roll_wind_target_still_air_is_zero);
   RUN_TEST(test_next_gust_at_within_dwell_window);
   RUN_TEST(test_fire_styles_split_sparkle_and_flame);
+  RUN_TEST(test_flutter_calm_styles_unperturbed);
+  RUN_TEST(test_flutter_stays_within_amplitude);
   RUN_TEST(test_approach_heat_moves_toward_target);
   RUN_TEST(test_heat_brightness_monotonic_with_floor);
   RUN_TEST(test_sample_gradient_endpoints_and_mid);

@@ -43,6 +43,7 @@ void ShimmerExpression::onTrigger() {
   lastUpdateMs_ = 0;
   windOffset_ = 0.0f;
   windTarget_ = 0.0f;
+  flutter_ = 0.0f;
   nextGustMs_ = 0;
 
   cells_.clear();
@@ -82,6 +83,7 @@ void ShimmerExpression::draw() {
                      fb->pixelCount > 0 && !cells_.empty();
 
   advanceWind(nowMs, deltaMs);
+  flutter_ = advanceFlutter(flutter_, style_.flutterAmp, rng);
   for (Cell& c : cells_) {
     c.heat = approachHeat(c.heat, c.target, deltaMs, style_.stepMs);
     if (std::abs(c.target - c.heat) < 0.02f) {
@@ -93,6 +95,7 @@ void ShimmerExpression::draw() {
     const std::vector<Color>& palette =
         getColors().empty() ? defaultFireRamp() : getColors();
     const float wispWeight = wispDimScale();
+    const float flutterScale = 1.0f + flutter_;
     // cells_ is sized on trigger, zone_ on configure; bound the index so a
     // future in-place reconfigure that grows the zone can't read past cells_.
     const int end = std::min({static_cast<int>(zone_.posMax) + 1,
@@ -103,8 +106,9 @@ void ShimmerExpression::draw() {
       const Cell& c = cells_[static_cast<uint16_t>(i - zone_.posMin)];
       const float heatR = clampUnit(c.heat + windOffset_);
       const Color color = sampleGradient(palette, heatR);
-      const uint32_t pct =
-          static_cast<uint32_t>(heatBrightness(heatR, kShimmerMinBright) * 100.0f);
+      const float bright =
+          clampUnit(heatBrightness(heatR, kShimmerMinBright) * flutterScale);
+      const uint32_t pct = static_cast<uint32_t>(bright * 100.0f);
       const Color painted =
           (pct >= 100u)
               ? color
