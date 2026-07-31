@@ -118,8 +118,16 @@ async def subscribe(request):
         q = conn.notify_queues.get(chr_uuid)
         if q:
             conn._loop.call_soon_threadsafe(q.put_nowait, bytes(data))
-    async with conn.lock:
-        await conn.client.start_notify(chr_uuid, on_notify)
+    try:
+        async with conn.lock:
+            await conn.client.start_notify(chr_uuid, on_notify)
+    except ValueError as e:
+        if "already started" not in str(e):
+            code = wire_error(e)
+            return web.json_response({"error": code, "message": str(e)}, status=_status_for(code))
+    except Exception as e:
+        code = wire_error(e)
+        return web.json_response({"error": code, "message": str(e)}, status=_status_for(code))
     return web.json_response({"ok": True})
 
 
