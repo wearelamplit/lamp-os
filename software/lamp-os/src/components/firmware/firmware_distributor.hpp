@@ -159,8 +159,8 @@ class FirmwareDistributor {
   // Sized for the partition-read + esp_now_send call chain (plus the first
   // Streaming step's radio teardown). streamOneChunk's two max-size chunk
   // buffers (~2.9 KB) live off-stack in file-statics, so the stack only holds
-  // the call chain; ~2.7 KB headroom over its observed depth.
-  static constexpr uint32_t kStreamingTaskStackSize    = 5632;
+  // the call chain.
+  static constexpr uint32_t kStreamingTaskStackSize    = 6144;
   // Above the Arduino loop (1), well below WiFi/IDF (18+).
   static constexpr uint32_t kStreamingTaskPriority     = 5;
   // Re-check state this often in case a wake give was lost.
