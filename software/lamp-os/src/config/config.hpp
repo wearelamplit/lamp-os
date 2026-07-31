@@ -23,6 +23,9 @@ class Config {
   BaseSettings base;
   ShadeSettings shade;
   ExpressionSettings expressions;
+#ifdef LAMP_MQTT_ENABLED
+  MqttSettings mqtt;
+#endif
 
   Config() {};
 

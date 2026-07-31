@@ -42,6 +42,7 @@ class LampSettings {
   std::string homeModeSSID = "";
   uint8_t homeModeBrightness = 80;
   std::string password = "";
+  std::string homeModePassword = "";
 };
 
 /**
@@ -106,6 +107,27 @@ class ExpressionSettings {
  public:
   std::vector<ExpressionConfig> expressions;
 };
+
+#ifdef LAMP_MQTT_ENABLED
+/**
+ * @brief MQTT broker connection settings for smart home integration
+ * @property enabled - whether MQTT is active
+ * @property brokerHost - MQTT broker hostname or IP
+ * @property brokerPort - MQTT broker port (default 1883)
+ * @property username - optional broker auth username
+ * @property password - optional broker auth password
+ * @property topicPrefix - optional custom topic prefix (default: homeassistant)
+ */
+class MqttSettings {
+ public:
+  bool enabled = false;
+  std::string brokerHost = "";
+  uint16_t brokerPort = 1883;
+  std::string username = "";
+  std::string password = "";
+  std::string topicPrefix = "";
+};
+#endif
 
 }  // namespace lamp
 #endif

@@ -35,6 +35,7 @@ Config::Config(Preferences* inPrefs) {
   if (!password.empty()) {
     lamp.password = password;
   }
+  lamp.homeModePassword = std::string(lampNode["homeModePassword"] | "");
 
   JsonObject baseNode = doc["base"];
   base.px = baseNode["px"] | 36;
@@ -75,6 +76,18 @@ Config::Config(Preferences* inPrefs) {
       shade.colors.push_back(hexStringToColor(shadeColor));
     }
   }
+
+#ifdef LAMP_MQTT_ENABLED
+  JsonObject mqttNode = doc["mqtt"];
+  if (mqttNode) {
+    mqtt.enabled = mqttNode["enabled"] | false;
+    mqtt.brokerHost = std::string(mqttNode["brokerHost"] | "");
+    mqtt.brokerPort = mqttNode["brokerPort"] | 1883;
+    mqtt.username = std::string(mqttNode["username"] | "");
+    mqtt.password = std::string(mqttNode["password"] | "");
+    mqtt.topicPrefix = std::string(mqttNode["topicPrefix"] | "");
+  }
+#endif
 
   // Load expressions
   JsonArray expressionsNode = doc["expressions"];
@@ -131,6 +144,9 @@ JsonDocument Config::asJsonDocument() {
   if (!lamp.password.empty()) {
     lampNode["password"] = lamp.password;
   }
+  if (!lamp.homeModePassword.empty()) {
+    lampNode["homeModePassword"] = lamp.homeModePassword;
+  }
   JsonObject baseNode = doc["base"].to<JsonObject>();
   baseNode["px"] = base.px;
   baseNode["ac"] = base.ac;
@@ -161,6 +177,22 @@ JsonDocument Config::asJsonDocument() {
   for (int i = 0; i < shade.colors.size(); i++) {
     shadeColorsNode[i] = colorToHexString(shade.colors[i]);
   }
+
+#ifdef LAMP_MQTT_ENABLED
+  JsonObject mqttNode = doc["mqtt"].to<JsonObject>();
+  mqttNode["enabled"] = mqtt.enabled;
+  mqttNode["brokerHost"] = mqtt.brokerHost;
+  mqttNode["brokerPort"] = mqtt.brokerPort;
+  if (!mqtt.username.empty()) {
+    mqttNode["username"] = mqtt.username;
+  }
+  if (!mqtt.password.empty()) {
+    mqttNode["password"] = mqtt.password;
+  }
+  if (!mqtt.topicPrefix.empty()) {
+    mqttNode["topicPrefix"] = mqtt.topicPrefix;
+  }
+#endif
 
   // Serialize expressions
   JsonArray expressionsNode = doc["expressions"].to<JsonArray>();

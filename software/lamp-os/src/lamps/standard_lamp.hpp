@@ -31,4 +31,12 @@ void handleStageMode();
  * Whole lamp changes from the configuration tool
  */
 void handleWebSocket();
+
+#ifdef LAMP_MQTT_ENABLED
+/**
+ * MQTT smart home connection management
+ */
+void handleMqtt();
+#endif
+
 #endif
