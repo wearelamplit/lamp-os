@@ -36,7 +36,7 @@ class ExpressionPresentation {
     ),
     'flicker': ExpressionPresentation(
       icon: Icons.auto_awesome,
-      tagline: 'A soft continuous shimmer, from cool sparkle to warm flame.',
+      tagline: 'A soft shimmer, from sparkle to flame.',
     ),
   };
 

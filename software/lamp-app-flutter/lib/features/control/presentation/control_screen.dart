@@ -111,16 +111,17 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
                             children: [
                               Text(
                                 'Hello, my name is:',
-                                style: tt.bodySmall?.copyWith(
+                                style: tt.bodyMedium?.copyWith(
                                   color: cs.onSurfaceVariant,
                                 ),
                               ),
+                              const SizedBox(height: AppSpace.sm),
                               Text(
                                 state.lamp.name.toTitleCase(),
                                 style: tt.displaySmall?.copyWith(
                                   color: cs.onSurface,
                                   fontWeight: FontWeight.w800,
-                                  height: 1.0,
+                                  height: 1.05,
                                 ),
                               ),
                             ],

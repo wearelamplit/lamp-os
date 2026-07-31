@@ -23,9 +23,7 @@ inline constexpr ParamSpec kFlickerParams[] = {
     .label = "Style",
     .max   = 3,
     .def   = 1,
-    .help  = "The shimmer's character: Twinkle sparse cool stars, Coals a dim "
-             "ember bed, Candle a steady flame with the odd flutter, Campfire "
-             "a lively dance.",
+    .help  = "From sparse Twinkle stars to a lively Campfire blaze.",
     .options = kFireOptions,
   },
   kOpacityParam,
@@ -33,7 +31,7 @@ inline constexpr ParamSpec kFlickerParams[] = {
 
 inline constexpr ExpressionDescriptor kFlickerDescriptorData{
   .id         = "flicker",
-  .name       = "Flicker",
+  .name       = "Shimmer",
   .continuous = true,
   .colors     = { .max = 4, .label = "Colors",
                   .help = "Coolest first (sparkle), hottest last (flame tip)." },
