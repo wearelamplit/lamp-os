@@ -1,34 +1,42 @@
 # Changelog
 
 Notable changes per firmware version. The version is the root `VERSION` file;
-add an entry here in the **same change** that bumps it. Highlights grouped
-Added / Fixed / Changed, not every commit.
+add an entry here in the **same change** that bumps it. Entries describe what's
+new for someone upgrading — what changed for you, not how it was built.
+Highlights grouped Added / Fixed / Changed, not every commit.
 
 ## 1.2.0
 
 ### Added
-- **Lamps sourcing firmware to a peer now show as busy in the app.** A lamp
-  distributing an OTA over the mesh is hard to reach over BLE (the OFFER and
-  chunk bursts starve the connect), which read as an unexplained connect
-  failure. The lamp now flips a new capability bit in its BLE advertisement
-  while distributing, so the app paints it busy (orange) at scan time with no
-  connection needed, and explains the wait in-voice ("Jacko is busy teaching
-  lily new tricks"). The receiver's name is resolved from the connected lamp's
-  nearby data when available; the scan-only view falls back to "a lamp". A
-  connect that fails against a lamp last seen busy surfaces the same whimsical
-  message instead of a generic "out of range" error. Advertisement-only, no
-  mesh protocol or GATT schema change.
+- **A lamp sending firmware to a peer now shows as busy in the app.** It paints
+  orange at scan time (no connection needed) with an in-voice note ("Jacko is
+  busy teaching lily new tricks"), and a connect that fails against a busy lamp
+  says so instead of a generic "out of range".
+- **Custom lamps.** An author API for building bespoke lamp behaviours (fleet
+  reachability / nearby, peer colour queries, gradients), with the staff lamp as
+  a reference build (input layer, per-surface brightness, on-arrival bloom).
+
+### Changed
+- **Shimmer now flickers the lamp's own colours** instead of a fixed fire
+  palette, so each lamp shimmers in its own identity — a red lamp rides
+  maroon → red → yellow, a teal lamp toward bright cyan. Its four styles
+  (Twinkle, Coals, Candle, Campfire) each gained their own motion — drift, sway,
+  a fast flutter, ember sparks — and a floor that fades cold cells to a
+  dark-but-not-off glow. It moved out of advanced mode into the general
+  expression list and no longer takes a colour palette (it follows the surface).
+- **Lamp names display in consistent casing** regardless of how they were typed.
+
+### Fixed
+- **Shifty picks its colour-shift time unpredictably again**, instead of the
+  fixed cadence it had regressed to.
+- **A lamp named "stray", "snafu", or "staff" keeps its name** instead of being
+  reset to unnamed.
 
 ## 1.1.8
 
 ### Fixed
-- **App→wisp control ops now survive a dropped frame.** Forwarding a
-  `setManualPalette` / `setSource` from the paired lamp to the wisp was a single
-  unacked unicast; on the C6 wisp's bursty RX-scan a lone dropped frame silently
-  lost the op, so a saved palette could never reach the wisp. The lamp now
-  re-sends the op a few times spaced apart (each copy still unicast and
-  MAC-acked, collapsed by the wisp's dedup), so it lands even when the first
-  frame is dropped.
+- **A saved wisp palette or source change reliably reaches the wisp** even when
+  a mesh frame drops.
 
 ## 1.1.7
 
@@ -38,27 +46,18 @@ Added / Fixed / Changed, not every commit.
   as flame. Behind the app's advanced mode.
 
 ### Fixed
-- **Social greetings show over any expression.** The greeting composites on top
-  of the running expression and eases back out to it, instead of being buried by
-  a full-coverage effect.
-- **Lamps no longer reboot on a phone BLE connect** under heap fragmentation.
-- **Greeting no longer churns the heap every frame** — an allocation-free
-  in-place scan for the best ungreeted arrival replaces a per-tick
-  roster-snapshot-and-sort; social now greets the nearest ungreeted peer first.
-- **Roster sort no longer crashes on a fragmented heap** — in-place `std::sort`
-  with a MAC tiebreaker.
-- **BLE section pager no longer fragments the heap during an app session** — the
-  `exprcat` catalog pages straight from its static buffer.
+- **Greetings show on top of a running expression** and ease back out to it,
+  instead of being buried by a full-coverage effect.
+- **Lamps no longer crash or reboot under heap pressure** — on a phone connect,
+  with a busy roster, or during a long app session.
+- **Lamps greet the nearest new arrival first.**
 - **First-boot color is genuinely distinct per lamp** — same-reel lamps no
   longer collapse to the same color.
-- **Config no longer factory-resets on a transient parse failure**, so a
-  one-boot hiccup can't cement into a lost name, password, or expressions.
-- **Wisp paints a newly-claimed lamp right away**, and take/release survives
+- **A transient config parse hiccup no longer factory-resets the lamp**, so a
+  one-boot glitch can't lose a name, password, or expressions.
+- **The wisp paints a newly-claimed lamp right away**, and take/release survives
   coex without snapping the fleet dark.
-- **Random HELLO boot sequence**, so a quick reboot no longer advertises a stale
-  roster version.
-- **WiFi modem sleep is held off for ESP-NOW receive**, closing a wisp-paint and
-  roster-staleness gap after the config AP comes down.
+- **A quick reboot no longer advertises a stale roster.**
 
 ### Changed
 - **Wisp status ring crossfades** on Off to painting instead of jumping.
@@ -66,8 +65,8 @@ Added / Fixed / Changed, not every commit.
 ## 1.1.6
 
 ### Changed
-- **Faster fleet awareness.** The lamp HELLO interval drops from 60 s to 30 s,
-  with density-adaptive relay suppression so crowd airtime stays in budget.
+- **Faster fleet awareness** — lamps notice each other about twice as fast, with
+  crowd airtime kept in budget.
 - **Spotty motion recentred to Gentle → Dreamy** — the chaotic fast end is gone.
 - **Pulse Size is a relative Small–Large scale** (1–10) instead of a pixel count.
 
@@ -81,23 +80,22 @@ Added / Fixed / Changed, not every commit.
   10–100% opacity control, plus a two-selector motion picker — Direction
   (In / Out / In-Out) and Feel — over eight motion families with live
   sparklines.
-- **Declarative wisp paint.** The wisp broadcasts one full-fleet paint frame the
-  lamps converge to, replacing per-lamp unicast paint walks.
+- **The wisp paints the whole fleet at once**, so a colour change lands across
+  all its lamps together instead of walking them one by one.
 - **Firmware auto-installs on connect.** When a lamp connects and a newer cached
   build for its variant+channel is on hand, the app pushes it without a manual
   tap, with a sparkle badge while it runs. Beta lamps can promote to stable.
 - **Legacy lamps join the mesh OTA wave** — legacy receivers self-upgrade to a
-  signed 1.1.5 over the air, with an RSSI floor skipping peers too weak to
-  converge.
+  signed 1.1.5 over the air, skipping peers too weak to converge.
 - **Learning-tricks card** in the Info tab.
 
 ### Fixed
-- **Reliable manual-palette delivery** — the palette serves on its own page
-  section and the editor populates on a fresh connect.
+- **Manual palette delivery is reliable**, and the editor populates on a fresh
+  connect.
 - **App→wisp control lands reliably** across a coex blackout; rapid source-pill
   taps no longer flip back.
-- **Lamps no longer flap on/off wisp paint under coex loss** — the freshness
-  failsafe widened so only a genuinely vanished wisp releases the hold.
+- **Lamps no longer flap on/off wisp paint under coex loss** — only a genuinely
+  vanished wisp releases the hold.
 - **Web Config now serves on mesh firmware**, and legacy lamps recover their
   web-UI from a neighbor after a mesh OTA.
 - **Deleting an expression with a malformed target now works.**
@@ -115,21 +113,20 @@ Added / Fixed / Changed, not every commit.
 
 ## 1.1.4
 
-### Changed
-- **ESP-NOW radio rate → 1 Mbps across the board.** 1M DSSS is the robust rate
-  for unacked broadcast beacons.
-
 ### Added
-- **Wisp broadcast redundancy.** Presence / claim / paint broadcasts resend a
-  few times ~40 ms apart so a copy survives a coex loss window; receivers dedup.
+- **Wisp presence, claims, and paint survive a dropped frame**, so a colour or
+  claim change isn't lost to a brief radio blackout.
 
 ### Fixed
-- **Manual-palette writes reach the wisp regardless of MTU** (long writes), so a
-  full palette isn't rejected on the phone.
-- **App→wisp control ops are confirmed-and-retried** — a set of the wisp's
-  palette or source waits for its status echo and resends on a miss.
-- **Firmware-version display** shows a reported version verbatim, a dash when
-  absent, and refreshes on connect.
+- **A full manual palette reaches the wisp** even as a long write, instead of
+  being rejected on the phone.
+- **App→wisp control is confirmed and retried** — setting the wisp's palette or
+  source waits for its echo and resends on a miss.
+- **Firmware version** shows verbatim, a dash when absent, and refreshes on
+  connect.
+
+### Changed
+- **More reliable mesh broadcasts** across the fleet.
 
 ## 1.1.3
 
@@ -145,18 +142,17 @@ Added / Fixed / Changed, not every commit.
 - **Web Config picker** — Disabled / 2 min / 5 min / 15 min / Always on.
 
 ### Fixed
-- **Mesh reliability under BLE coex.** Unacked broadcasts re-broadcast on spaced
-  per-type resend rings so a copy clears the radio's RX-scan gaps.
-- **Wisp paint dropouts** — the wisp keeps each lamp's color alive on the
-  reliable unicast channel on a per-lamp schedule.
+- **More reliable mesh delivery under BLE coex.**
+- **Wisp paint dropouts** — the wisp keeps each lamp's color alive on a per-lamp
+  schedule.
 - **Expression color editing** previews just the edited color and pauses the
   running expression on that surface.
 - **Wisp ArtNet off-state** — a wisp set Off stops emission instead of driving
   old lamps to the off-color.
 
 ### Changed
-- **Identity color on the wire** — lamps broadcast and cache their blended
-  identity color instead of the first gradient stop.
+- **Lamps broadcast their blended identity color** instead of the first gradient
+  stop.
 - App-adopted lamps default Web Config off; legacy lamps stay on.
 
 ## 1.1.2
@@ -164,8 +160,8 @@ Added / Fixed / Changed, not every commit.
 ### Added
 - **Firmware update panel** (app). Downloaded-firmware list with per-row delete
   and a newer-than install gate.
-- **Nearby lamp surfacing.** The passive BLE scan cache reveals legacy BLE-only
-  lamps that don't gossip, on the Social tab.
+- **Nearby lamp surfacing.** Legacy BLE-only lamps that don't gossip now appear
+  on the Social tab.
 - **Wisp presence live-refresh** — a wisp coming online after the app connects
   appears without an app restart.
 - **`wisp:flash:release`** — flash a signed wisp image over USB.
@@ -185,42 +181,37 @@ Added / Fixed / Changed, not every commit.
 ### Added
 - **Battery Saver.** A per-lamp brightness ceiling (Saver / Standard / Bright)
   with a battery-life estimate from the lamp's measured draw.
-- **ESP-NOW v2 mesh frames.** Larger frames (up to ~1470 B) with per-target OTA
-  chunk-size negotiation and both-sided RSSI-gated offers, so OTA moves in fewer
-  packets with less coex contention.
+- **Faster OTA over the mesh** — firmware moves in fewer, larger packets with
+  less radio contention.
 - **OTA channel promotion.** A `-beta` lamp graduates to `-stable` over the air.
-- **Mesh command-auth.** HMAC-SHA256 tag on the "force another lamp" frames so
-  unkeyed builds can't drive cascades or greetings.
+- **Only keyed builds can drive another lamp** — cascades and forced greetings
+  are rejected from unkeyed firmware.
 - **Expression motion modes** — a shared Motion control plus a Continuous mode
   that ping-pongs a wave forever.
 - **Per-surface expressions** — target the shade, the base, or both.
 - **Gradient shades** — up to six blended color stops along the strip.
 - **Social greeting base-gradient.** Lamps exchange colors on greet and render
   the peer's base as a blended gradient; iOS and Android lamps recognize each
-  other via a self-reported BD_ADDR identity.
+  other.
 - **Home mode redesign** — network binding is opt-in, with per-expression-type
   and social quiet toggles.
 - **Web config UI overhaul** — AP-duration setup, password gate, expressions
   modal, home-mode toggles, adopt-on-save.
 - **Gamma-corrected LED output** so colors match the app instead of washing out.
-- **Version reporting** derived from the root `VERSION` file, shown in the app
-  and web UI.
+- **Version reporting** shown in the app and web UI.
 
 ### Fixed
-- **OTA re-offer loop** — unverifiable and declined cross-variant offers are
-  rejected up front and blocklisted instead of re-offered on a timer.
-- **Post-boot roster dead zone** — a fresh lamp bursts HELLOs for its first 30 s
-  so cascades can reach it quickly.
-- **Expression-editor ghost rows** — the Test preview no longer writes to NVS.
-- **Brownout on boot** with the full segment config.
+- **OTA no longer re-offers a declined or cross-variant build on a timer.**
+- **A fresh lamp fills into the fleet quickly** so cascades reach it right away.
+- **Expression-editor Test preview no longer leaves ghost rows.**
+- **No brownout on boot** with the full segment config.
 
 ### Changed
-- **Mesh HELLO cadence** slowed to 60 s (roster prune at 240 s), cutting idle
-  chatter; the boot burst covers initial fill.
+- **Quieter idle mesh** — less background chatter, with a boot burst covering
+  the initial fill.
 - **Per-frame supply-budget power governor** replaces the fixed brightness cap.
 - **Expression rework** across Glitchy, Shifty, Breathing, and Spotty, plus a
   universal Whole-strip / Region zone toggle.
-- Mesh wire-format core extracted to a shared library shared by lamp and wisp.
 - Local flash defaults to unsigned; signing is CI's job.
 
 ## 1.1.0
@@ -229,17 +220,15 @@ Initial mesh-era release: the ESP-NOW fleet firmware and the Flutter control
 app. Everything since builds on this baseline.
 
 ### Added
-- **ESP-NOW mesh networking.** Lamps discover each other, gossip presence over
-  HELLO beacons, relay frames across hops with per-type dedup, and prune stale
-  peers. A versioned wire format carries a receive range so mixed-version fleets
-  interoperate.
+- **ESP-NOW mesh networking.** Lamps discover each other, gossip presence, relay
+  across hops, and prune stale peers, with a versioned wire format so
+  mixed-version fleets interoperate.
 - **Mesh expression cascades.** Triggering an expression on one lamp propagates
   it across the fleet with stagger timing.
-- **BLE GATT control service** — a frozen positional attribute layout exposing
-  real-time brightness/color plus a JSON section protocol, authenticated at the
-  app layer with AES-GCM.
-- **Mesh OTA firmware distribution.** Signed ed25519 binaries move lamp-to-lamp
-  with channel / version / variant gating, plus a web and USB installer for first
+- **BLE GATT control service** — real-time brightness/color plus a JSON section
+  protocol, app-layer encrypted.
+- **Mesh OTA firmware distribution.** Signed binaries move lamp-to-lamp with
+  channel / version / variant gating, plus a web and USB installer for first
   flash and recovery.
 - **Expressions system.** Per-surface firmware animations the lamp auto-triggers,
   each schema-driven so the app builds its editor from the descriptor.
