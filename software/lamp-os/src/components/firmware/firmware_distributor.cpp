@@ -423,7 +423,11 @@ int FirmwareDistributor::streamOneChunk(uint32_t nowMs) {
 
   if (!transport_ || !runningPartition_) return 2;
 
-  uint8_t scratch[lamp_protocol::FW_CHUNK_SIZE_MAX];
+  // Off-stack scratch: the single shared streaming task services every
+  // registered distributor serially (streamingTaskLoop), so streamOneChunk
+  // never runs re-entrantly or concurrently and both instances can share one
+  // buffer. Keeps ~2.9 KB off the streaming-task stack.
+  static uint8_t scratch[lamp_protocol::FW_CHUNK_SIZE_MAX];
   const uint32_t offset =
       static_cast<uint32_t>(chunkIdx) * sessionChunkSize_;
   // Last chunk is short when totalLen isn't a multiple of sessionChunkSize_.
@@ -454,7 +458,7 @@ int FirmwareDistributor::streamOneChunk(uint32_t nowMs) {
   seq = seqCounter_++;
   portEXIT_CRITICAL(&stateMux_);
 
-  uint8_t buf[lamp_protocol::FW_CHUNK_MAX_SIZE];
+  static uint8_t buf[lamp_protocol::FW_CHUNK_MAX_SIZE];
   const size_t framed = lamp_protocol::buildFwChunk(
       buf, sizeof(buf), seq,
       cachedSrcMac_, targetMacLocal,
