@@ -379,13 +379,16 @@ class _ExpressionEditorScreenState
                       ),
                     ),
                     // Colors sits directly under Target so the palette reads
-                    // before the effect's placement/motion.
-                    const SettingsGroupHeading('Colors'),
-                    ColorBlocksBar(
-                      colors: draft.colors,
-                      onTap: () => _editColorsLive(
-                          state, notifier, draft.colors, colorMax, canEmpty),
-                    ),
+                    // before the effect's placement/motion. Hidden when the
+                    // descriptor declares no colors (max 0), e.g. shimmer.
+                    if (colorMax > 0) ...[
+                      const SettingsGroupHeading('Colors'),
+                      ColorBlocksBar(
+                        colors: draft.colors,
+                        onTap: () => _editColorsLive(
+                            state, notifier, draft.colors, colorMax, canEmpty),
+                      ),
+                    ],
                     if (descriptor != null)
                       ExpressionParamsPanel(
                         descriptor: descriptor,
