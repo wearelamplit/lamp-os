@@ -38,7 +38,7 @@ void tearDown() {}
 void test_fire_style_table_values() {
   TEST_ASSERT_EQUAL_FLOAT(0.00f, fireStyle(0).restLevel);   // Twinkle
   TEST_ASSERT_EQUAL_FLOAT(0.0f,  fireStyle(0).windAmp);     // Twinkle: no wind
-  TEST_ASSERT_EQUAL_FLOAT(0.12f, fireStyle(1).restLevel);   // Coals (default)
+  TEST_ASSERT_EQUAL_FLOAT(0.06f, fireStyle(1).restLevel);   // Coals (default)
   TEST_ASSERT_EQUAL_FLOAT(0.36f, fireStyle(2).restLevel);   // Candle
   TEST_ASSERT_EQUAL_FLOAT(0.50f, fireStyle(3).restLevel);   // Campfire
 }
@@ -74,21 +74,17 @@ void test_roll_heat_target_no_spark_stays_calm() {
   TEST_ASSERT_TRUE(t <= clampUnit(twinkle.restLevel + twinkle.amp) + 1e-4f);
 }
 
-void test_roll_heat_target_spark_free_styles_unchanged() {
-  // sparkChance 0 short-circuits before any rng call: same single roll, same
-  // value as the pre-spark calm-band formula, regardless of rng.
-  for (uint32_t idx = 2; idx <= 3; ++idx) {
-    const FireStyle s = fireStyle(idx);
-    TEST_ASSERT_EQUAL_FLOAT(0.0f, s.sparkChance);
-    MidRng mid;
-    const float lo = clampUnit(s.restLevel - s.amp);
-    const float hi = clampUnit(s.restLevel + s.amp);
-    const float expected = lo + (hi - lo) * 0.5f;  // MidRng -> 500/1000
-    TEST_ASSERT_EQUAL_FLOAT(expected, rollHeatTarget(s, mid));
-    // A spark-forcing rng value can't move them off the calm band.
-    FixedRng zero{0};
-    TEST_ASSERT_EQUAL_FLOAT(lo, rollHeatTarget(s, zero));
-  }
+void test_roll_heat_target_spark_free_short_circuits() {
+  // sparkChance 0 short-circuits before any rng call: the calm-band roll is
+  // returned regardless of a spark-forcing rng value.
+  FireStyle s = fireStyle(2);  // Candle, then force spark-free
+  s.sparkChance = 0.0f;
+  const float lo = clampUnit(s.restLevel - s.amp);
+  const float hi = clampUnit(s.restLevel + s.amp);
+  MidRng mid;
+  TEST_ASSERT_EQUAL_FLOAT(lo + (hi - lo) * 0.5f, rollHeatTarget(s, mid));
+  FixedRng zero{0};  // would force a spark if sparkChance were > 0
+  TEST_ASSERT_EQUAL_FLOAT(lo, rollHeatTarget(s, zero));
 }
 
 void test_roll_wind_target_within_amp_and_boundaries() {
@@ -131,13 +127,13 @@ void test_fire_styles_split_sparkle_and_flame() {
   TEST_ASSERT_TRUE(coals.sparkChance > 0.0f);
   TEST_ASSERT_EQUAL_FLOAT(0.0f, coals.windAmp);
   TEST_ASSERT_TRUE(coals.restLevel < 0.30f);
-  // Flame styles: no spark, they gust.
+  // Flame styles: wind drives them (still-air styles have none); they also spark.
   const FireStyle candle = fireStyle(2);
   const FireStyle campfire = fireStyle(3);
-  TEST_ASSERT_EQUAL_FLOAT(0.0f, candle.sparkChance);
   TEST_ASSERT_TRUE(candle.windAmp > 0.0f);
-  TEST_ASSERT_EQUAL_FLOAT(0.0f, campfire.sparkChance);
+  TEST_ASSERT_TRUE(candle.sparkChance > 0.0f);
   TEST_ASSERT_TRUE(campfire.windAmp > 0.0f);
+  TEST_ASSERT_TRUE(campfire.sparkChance > 0.0f);
 }
 
 void test_flutter_calm_styles_unperturbed() {
@@ -267,7 +263,7 @@ int main(int, char**) {
   RUN_TEST(test_roll_heat_target_within_bounds_and_clamped);
   RUN_TEST(test_roll_heat_target_spark_hits_hot_band);
   RUN_TEST(test_roll_heat_target_no_spark_stays_calm);
-  RUN_TEST(test_roll_heat_target_spark_free_styles_unchanged);
+  RUN_TEST(test_roll_heat_target_spark_free_short_circuits);
   RUN_TEST(test_roll_wind_target_within_amp_and_boundaries);
   RUN_TEST(test_roll_wind_target_still_air_is_zero);
   RUN_TEST(test_next_gust_at_within_dwell_window);

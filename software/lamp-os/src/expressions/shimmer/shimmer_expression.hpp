@@ -39,7 +39,7 @@ inline constexpr ExpressionDescriptor kShimmerDescriptorData{
   .colors     = { .max = 0 },
   .hasZone      = true,
   .zoneOptional = true,
-  .advanced     = true,
+  .advanced     = false,
   .params       = kShimmerParams,
 };
 

@@ -107,12 +107,14 @@ void ShimmerExpression::draw() {
       const Color color = warmthModulate(anchor, heatR, style_.restLevel,
                                          style_.warmthSwing, style_.whiteHot);
       const float bright =
-          clampUnit(heatBrightness(heatR, kShimmerMinBright) * flutterScale);
+          clampUnit(heatBrightness(heatR, style_.minBright) * flutterScale);
       const uint32_t pct = static_cast<uint32_t>(bright * 100.0f);
+      const Color floorColor = mixColorLinear(
+          Color{}, color, computeLinearFactor(kShimmerFloorPct, 100u));
       const Color painted =
           (pct >= 100u)
               ? color
-              : mixColorLinear(anchor, color, computeLinearFactor(pct, 100u));
+              : mixColorLinear(floorColor, color, computeLinearFactor(pct, 100u));
       fb->buffer[i] = mixColorWeight(anchor, painted, wispWeight);
     }
   }

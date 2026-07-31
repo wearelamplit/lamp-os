@@ -409,8 +409,8 @@ void test_shimmer_is_continuous_and_zoneable() {
   TEST_ASSERT_TRUE(zone["optional"].as<bool>());
 }
 
-void test_shimmer_is_advanced_and_others_are_not() {
-  TEST_ASSERT_TRUE(findById("flicker")["advanced"].as<bool>());
+void test_shimmer_is_not_advanced() {
+  TEST_ASSERT_TRUE(findById("flicker")["advanced"].isNull());
   TEST_ASSERT_TRUE(findById("spotty")["advanced"].isNull());
   TEST_ASSERT_TRUE(findById("breathing")["advanced"].isNull());
 }
@@ -467,7 +467,7 @@ int main(int, char**) {
   RUN_TEST(test_pulse_loop_param);
   RUN_TEST(test_all_types_expose_opacity);
   RUN_TEST(test_shimmer_is_continuous_and_zoneable);
-  RUN_TEST(test_shimmer_is_advanced_and_others_are_not);
+  RUN_TEST(test_shimmer_is_not_advanced);
   RUN_TEST(test_shimmer_fire_enum);
   RUN_TEST(test_shimmer_has_no_colors_and_has_opacity);
   return UNITY_END();

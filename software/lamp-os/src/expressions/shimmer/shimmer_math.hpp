@@ -19,7 +19,9 @@ inline float clampUnit(float v) {
 // warmthSwing/whiteHot shape how heat modulates the lamp's own colour (see
 // warmthModulate): warmthSwing is the hue slide toward yellow at peak / maroon
 // at floor (0 = pure brightness), whiteHot the desaturation toward white at the
-// hot tip (0 = stays saturated). Starting calibration, tuned on the bench.
+// hot tip (0 = stays saturated). minBright is the brightness floor at zero heat;
+// a low value lets a style go near-dark between embers. Starting calibration,
+// tuned on the bench.
 struct FireStyle {
   float restLevel;
   float amp;
@@ -33,18 +35,21 @@ struct FireStyle {
   float flutterAmp;
   float warmthSwing;
   float whiteHot;
+  float minBright;
 };
 
 inline FireStyle fireStyle(uint32_t value) {
   static constexpr FireStyle table[] = {
     // Twinkle: near-dark base, sparse sparks that rise and fade slowly, no wind.
-    {0.00f, 0.02f, 900, 0.00f,    0,    0, 0.030f, 0.60f, 1.00f, 0.00f, 0.15f, 0.00f},
+    {0.00f, 0.02f, 900, 0.00f,    0,    0, 0.030f, 0.60f, 1.00f, 0.00f, 0.15f, 0.00f, 0.80f},
     // Coals: a dim ember bed, several embers breathing in and out in place, no wind.
-    {0.12f, 0.05f, 1600, 0.00f,    0,    0, 0.045f, 0.55f, 0.85f, 0.00f, 0.30f, 0.00f},
-    // Candle: a slow convective sway plus a fast turbulent brightness flutter.
-    {0.36f, 0.16f, 220, 0.24f, 1500, 3500, 0.00f, 0.00f, 0.00f, 0.15f, 0.55f, 0.15f},
-    // Campfire: lively, brighter, regular gusts with a subtle flutter.
-    {0.50f, 0.28f, 180, 0.18f, 3000, 7000, 0.00f, 0.00f, 0.00f, 0.04f, 0.80f, 0.40f},
+    {0.06f, 0.05f, 1600, 0.00f,    0,    0, 0.045f, 0.55f, 0.85f, 0.00f, 0.30f, 0.00f, 0.40f},
+    // Candle: a slow convective sway plus a fast turbulent brightness flutter,
+    // with the occasional brighter flicker-up.
+    {0.36f, 0.16f, 220, 0.08f, 1500, 3500, 0.012f, 0.70f, 0.95f, 0.075f, 0.55f, 0.15f, 0.50f},
+    // Campfire: lively, brighter, regular gusts with a subtle flutter and embers
+    // that flare up.
+    {0.50f, 0.28f, 180, 0.18f, 3000, 7000, 0.020f, 0.85f, 1.00f, 0.02f, 0.80f, 0.40f, 0.30f},
   };
   if (value > 3) value = 3;
   return table[value];
@@ -102,6 +107,7 @@ inline float heatBrightness(float heat, float minBright) {
 inline constexpr float kShimmerColdFloor = 0.20f;   // channel scale at coldest
 inline constexpr float kShimmerHotGain = 0.35f;     // brightness lift at hottest
 inline constexpr float kShimmerColdBlueKill = 1.3f; // blue attenuates past green when cold
+inline constexpr uint32_t kShimmerFloorPct = 8;     // faded cells settle to this % of their own colour, not black
 
 // Modulate the anchor colour along a dim->warm ramp driven by heat. neutral is
 // the style rest heat: heat == neutral returns the anchor unchanged. Above it
@@ -143,7 +149,5 @@ inline Color warmthModulate(Color anchor, float heat, float neutral,
   };
   return Color{clamp8(r), clamp8(g), clamp8(b), clamp8(wc)};
 }
-
-inline constexpr float kShimmerMinBright = 0.15f;
 
 }  // namespace lamp
