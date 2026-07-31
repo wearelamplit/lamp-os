@@ -16,7 +16,6 @@ constexpr uint32_t kRampPeriodMs = 3000;   // top pad: slow sweep
 constexpr uint32_t kPulsePeriodMs = 1200;  // bottom pad: faster pulse
 constexpr uint8_t kBrightLo = 20;
 constexpr uint8_t kBrightHi = 100;
-constexpr uint32_t kShoutCooldownMs = 3000;  // a mash sends one bid, not a flood
 
 uint8_t triangle(uint32_t heldMs, uint32_t periodMs, uint8_t lo, uint8_t hi) {
   const uint32_t half = periodMs / 2;
@@ -29,13 +28,11 @@ uint8_t triangle(uint32_t heldMs, uint32_t periodMs, uint8_t lo, uint8_t hi) {
 StaffInputBehavior::StaffInputBehavior(lamp::FrameBuffer* fb,
                                        lamp::Config& config,
                                        lamp::Button* stoke,
-                                       lamp::Button* shout,
                                        lamp::Touch* topPad,
                                        lamp::Touch* bottomPad)
     : lamp::AnimatedBehavior(fb, 60, false),
       config_(config),
       stoke_(stoke),
-      shout_(shout),
       topPad_(topPad),
       bottomPad_(bottomPad),
       configuredBrightness_(config.lamp.brightness) {
@@ -45,26 +42,9 @@ StaffInputBehavior::StaffInputBehavior(lamp::FrameBuffer* fb,
   if (stoke_) {
     stoke_->setCallback([this](lamp::ButtonEvent e) { onStoke(e); });
   }
-  if (shout_) {
-    shout_->setCallback([this](lamp::ButtonEvent e) { onShout(e); });
-  }
   if (topPad_) {
     topPad_->setCallback([this](lamp::TouchEvent e) { onTopPad(e); });
   }
-}
-
-void StaffInputBehavior::onShout(lamp::ButtonEvent e) {
-  if (e != lamp::ButtonEvent::Click) return;
-  auto* ctx = behaviorContext();
-  if (!ctx) return;
-  const uint32_t now = millis();
-  if (lastShoutMs_ != 0 && now - lastShoutMs_ < kShoutCooldownMs) return;
-  lastShoutMs_ = now;
-  ctx->requestGreeting();
-  // ponytail: legacy leg (flip the advertised BLE name so pre-mesh lamps
-  // re-greet) deferred pending a bench proof that legacy greeting dedup keys
-  // on name, not BLE address. Building the setAdvertisedName setter before
-  // that would be dead code if it keys on address.
 }
 
 void StaffInputBehavior::onStoke(lamp::ButtonEvent e) {

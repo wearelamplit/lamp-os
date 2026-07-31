@@ -5,10 +5,6 @@
 // capacity-bounded fired set, and throttle honoured. The notifier's fired set
 // and re-arm are the unique logic; the roster + PeerView::from are exercised
 // as shipped (test_lamp_roster_rssi convention).
-//
-// requestGreeting's real body needs the Arduino/ESP-NOW MeshLink, which is not
-// native-linkable (every mesh test fakes it), so its null guard is mirrored
-// against a fake, same as test_expression_unicast's no-MeshLink no-op.
 
 #include <unity.h>
 
@@ -188,25 +184,6 @@ void test_only_fresh_arrivals_fire() {
   TEST_ASSERT_EQUAL_INT(0, sink.fires);
 }
 
-// --- requestGreeting null-guard (mirror; real MeshLink isn't native) --------
-namespace {
-int g_bidCount = 0;
-struct FakeMesh { void sendBid(uint8_t) { g_bidCount++; } };
-void requestGreetingLike(FakeMesh* mesh) {
-  if (!mesh) return;
-  mesh->sendBid(0x01);
-}
-}  // namespace
-
-void test_request_greeting_null_safe() {
-  g_bidCount = 0;
-  requestGreetingLike(nullptr);
-  TEST_ASSERT_EQUAL_INT(0, g_bidCount);
-  FakeMesh mesh;
-  requestGreetingLike(&mesh);
-  TEST_ASSERT_EQUAL_INT(1, g_bidCount);
-}
-
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_fires_once_per_new_near_peer);
@@ -216,6 +193,5 @@ int main(int, char**) {
   RUN_TEST(test_fired_set_heap_safe_and_capacity_bounded);
   RUN_TEST(test_zero_observers_is_noop);
   RUN_TEST(test_only_fresh_arrivals_fire);
-  RUN_TEST(test_request_greeting_null_safe);
   return UNITY_END();
 }

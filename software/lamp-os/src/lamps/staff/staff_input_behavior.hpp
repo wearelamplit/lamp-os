@@ -22,7 +22,7 @@ namespace staff {
 class StaffInputBehavior : public lamp::AnimatedBehavior {
  public:
   StaffInputBehavior(lamp::FrameBuffer* fb, lamp::Config& config,
-                     lamp::Button* stoke, lamp::Button* shout,
+                     lamp::Button* stoke,
                      lamp::Touch* topPad, lamp::Touch* bottomPad);
 
   void control() override;
@@ -30,13 +30,11 @@ class StaffInputBehavior : public lamp::AnimatedBehavior {
 
  private:
   void onStoke(lamp::ButtonEvent e);
-  void onShout(lamp::ButtonEvent e);
   void onTopPad(lamp::TouchEvent e);
   void restoreConfiguredColors();
 
   lamp::Config& config_;
   lamp::Button* stoke_;
-  lamp::Button* shout_;
   lamp::Touch* topPad_;
   lamp::Touch* bottomPad_;
 
@@ -48,7 +46,6 @@ class StaffInputBehavior : public lamp::AnimatedBehavior {
   bool scrubbing_ = false;
   uint8_t configuredBrightness_;
   uint32_t lastScrubMs_ = 0;
-  uint32_t lastShoutMs_ = 0;
 };
 
 }  // namespace staff

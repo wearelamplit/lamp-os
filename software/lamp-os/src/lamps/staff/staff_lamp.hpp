@@ -21,8 +21,7 @@ namespace lamp {
 // Tactile staff lamp: a shade + base strip plus physical inputs (stoke
 // button, two touch pads). Keeps the standard social stack; adds local
 // gesture control (stoke brightness, mood scrub, touch-unlock, pad dims)
-// wired in createBehaviors. The shout button is declared for its driver but
-// left unbound (its handler is a later social phase).
+// wired in createBehaviors.
 //
 // ponytail: GPIO12 (shade LED) and GPIO15 (bottom touch pad) sit on ESP32
 // boot straps. As-wired and field-proven for GPIO12 (standard/snafu drive
@@ -30,7 +29,7 @@ namespace lamp {
 // cold-boot flake.
 class StaffLamp : public Lamp {
  public:
-  enum InputId : uint8_t { kStoke = 1, kShout = 2, kTopPad = 3, kBottomPad = 4 };
+  enum InputId : uint8_t { kStoke = 1, kTopPad = 3, kBottomPad = 4 };
 
   StaffLamp() : Lamp(HwConfig{
     .strips = {
@@ -39,7 +38,6 @@ class StaffLamp : public Lamp {
     },
     .inputs = {
       {.id=kStoke,     .type=InputType::Button, .pin=19},
-      {.id=kShout,     .type=InputType::Button, .pin=21},
       {.id=kTopPad,    .type=InputType::Touch,  .pin=4},
       {.id=kBottomPad, .type=InputType::Touch,  .pin=15},
     },
@@ -68,13 +66,11 @@ class StaffLamp : public Lamp {
 
   void createBehaviors(BehaviorStackBuilder& b) override {
     auto* stoke = inputById(kStoke);
-    auto* shout = inputById(kShout);
     auto* topPad = inputById(kTopPad);
     auto* bottomPad = inputById(kBottomPad);
     input_ = std::make_unique<staff::StaffInputBehavior>(
         shadeFb(), config,
         stoke ? stoke->asButton() : nullptr,
-        shout ? shout->asButton() : nullptr,
         topPad ? topPad->asTouch() : nullptr,
         bottomPad ? bottomPad->asTouch() : nullptr);
     b.add(input_.get());

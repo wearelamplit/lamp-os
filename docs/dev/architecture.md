@@ -60,7 +60,7 @@ Full topology and channel details: [`networking.md`](networking.md#topology).
 | Lamp runtime / compositor | `software/lamp-os/src/core/` (`lamp.cpp`, `compositor.cpp`, `power_governor.cpp`) |
 | Behaviors (social, idle, fade, configurator) | `software/lamp-os/src/behaviors/` |
 | Expressions | `software/lamp-os/src/expressions/` |
-| Personality / crowd-dim / bids | `software/lamp-os/src/core/` (`personality_engine`, `bid_receiver`, `arrival_notifier`) |
+| Personality / crowd-dim / arrivals | `software/lamp-os/src/core/` (`personality_engine`, `arrival_notifier`) |
 | Mesh | `software/lamp-os/src/components/network/mesh/` |
 | BLE GATT | `software/lamp-os/src/components/network/ble/` |
 | Firmware OTA | `software/lamp-os/src/components/firmware/` |

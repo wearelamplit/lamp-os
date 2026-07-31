@@ -116,11 +116,6 @@ struct BehaviorContext {
   // wisp override, and crowd-dim; 100 clears the trim.
   void setSurfaceBrightness(Surface surface, uint8_t level);
 
-  // Broadcast a greeting bid to the crowd (MSG_BID/BID_GREETING); nearby
-  // lamps decide by disposition whether to greet back. Null-safe when no
-  // meshLink is wired. First production caller of MeshLink::sendBid.
-  void requestGreeting();
-
   // Register a push callback fired once per genuinely-new near peer. Attach-
   // once at boot; the callback runs on Core 1, receives a PeerView valid only
   // for the call, and filters by disposition itself. Dedup + re-arm live in

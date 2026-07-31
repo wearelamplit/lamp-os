@@ -23,10 +23,8 @@
 #include "components/network/mesh/mesh_link.hpp"
 #include "config/config.hpp"
 #include "config/nvs_config_store.hpp"
-#include "core/bid_receiver.hpp"
 #include "core/lamp.hpp"
 #include "core/power_governor.hpp"
-#include "util/fast_rng.hpp"
 #include "expressions/expression_manager.hpp"
 #include "expressions/expression_observer.hpp"
 
@@ -62,12 +60,6 @@ extern uint8_t s_hwMaxBrightness;
 // pre-flush hook (governFrame, lamp.cpp); its ceiling is the final min()
 // inside lamp::setAllStripsBrightness.
 extern lamp::PowerGovernor s_powerGovernor;
-
-// Receiver-side bid gate + storm control (Core 1) and its dedicated PRNG.
-// drainBid (lamp_drains.cpp) owns them; file-scope so the split drain body
-// reaches the state that must survive across ticks (the jittered honor).
-extern lamp::BidReceiver s_bidReceiver;
-extern lamp::FastRng s_bidRng;
 
 // Cross-core mux shared by every pending slot post / drain pair.
 extern portMUX_TYPE pendingMux;

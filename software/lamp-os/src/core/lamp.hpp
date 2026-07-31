@@ -95,7 +95,6 @@ class Lamp {
   void drainColorQuery();
   void drainColorInfo();
   void drainEvent();
-  void drainBid();
   void drainFirmwareControl();
 };
 

@@ -16,5 +16,4 @@
 #include "command.hpp"
 #include "color_info.hpp"
 #include "event.hpp"
-#include "bid.hpp"
 #include "fw_ota.hpp"

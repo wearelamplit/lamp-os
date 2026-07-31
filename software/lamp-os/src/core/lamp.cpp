@@ -90,8 +90,6 @@ volatile int16_t pendingEditSession = -1;
 uint8_t s_hwMaxBrightness = 180;
 
 lamp::PowerGovernor s_powerGovernor;
-lamp::BidReceiver s_bidReceiver;
-lamp::FastRng s_bidRng;
 // Sense inputs resolved once in Lamp::setup() after the FrameBuffers exist.
 static uint8_t s_shadeChannels = 4;
 static uint8_t s_baseChannels = 4;
@@ -180,7 +178,6 @@ void postPendingWispPaint(const PendingWispPaint& src)                   { pendi
 void postPendingWispState(const PendingWispState& src)                   { pendingSlots.wispState.post(pendingMux, src); }
 void postPendingCommand(const PendingCommand& src)                       { pendingSlots.command.post(pendingMux, src); }
 void postPendingEvent(const PendingEvent& src)                           { pendingSlots.event.post(pendingMux, src); }
-void postPendingBid(const PendingBid& src)                               { pendingSlots.bid.post(pendingMux, src); }
 void postPendingColorQuery(const PendingColorQuery& src)                 { pendingSlots.colorQuery.post(pendingMux, src); }
 void postPendingColorInfo(const PendingColorInfo& src)                   { pendingSlots.colorInfo.post(pendingMux, src); }
 void postPendingFirmwareControl(const PendingFirmwareControl& src)       { pendingSlots.firmwareControl.post(pendingMux, src); }
@@ -1023,7 +1020,6 @@ void lamp::Lamp::tick() {
   drainColorQuery();
   drainColorInfo();
   drainEvent();
-  drainBid();
   drainFirmwareControl();
 
   // Drive the override state machines. tick() is cheap when Idle

@@ -25,13 +25,12 @@ struct BehaviorContext {
   ConfiguratorBehavior* shadeConfigurator = nullptr;
   LampRoster* lampRoster = nullptr;    // peer roster (near + mesh), RSSI
   Greetable* greeting = nullptr;       // active greeting behavior, or null
-  MeshLink* meshLink = nullptr;        // mesh send surface (bids)
+  MeshLink* meshLink = nullptr;        // mesh send surface
 
   void forEachArrival(uint32_t maxAgeMs,
                       const std::function<bool(const PeerView&)>& cb);
   void forEachNearby(const std::function<bool(const PeerView&)>& cb);
   void onArrival(std::function<void(const PeerView&)> cb);
-  void requestGreeting();
 
   GreetingTuning   greetingFor(const std::string& peerLampId) const;
   uint8_t          dispositionOf(const std::string& peerLampId) const;
@@ -152,37 +151,6 @@ you want (a custom greeting renderer). Push for a side reaction that shouldn't
 touch the greeting ack (a bloom, a chime, a log) and should fire once per real
 arrival.
 
-## Asking the crowd: `requestGreeting` / MSG_BID
-
-`requestGreeting()` broadcasts a `MSG_BID` / `BID_GREETING` onto the mesh;
-nearby lamps resolve the sender's disposition and decide probabilistically
-whether to greet back. It fires no local greeting (the bidder is the subject,
-not a greeter), is null-safe when no `meshLink` is wired, and is rate-limited by
-a sender cooldown (a mash sends one bid). The staff shout button is the first
-caller:
-
-```cpp
-void StaffInputBehavior::onShout(lamp::ButtonEvent e) {
-  if (e != lamp::ButtonEvent::Click) return;
-  auto* ctx = behaviorContext();
-  if (!ctx) return;
-  const uint32_t now = millis();
-  if (lastShoutMs_ != 0 && now - lastShoutMs_ < kShoutCooldownMs) return;
-  lastShoutMs_ = now;
-  ctx->requestGreeting();
-}
-```
-
-The receiver side is the anti-grief primitive: `BidReceiver`
-(`core/bid_receiver.hpp`) rolls `socialBidResponse(disposition, mode)` — a
-`[0..100]` acceptance probability off the same openness ladder as the greeting
-profiles — and on a hit arms a single jittered, cooldown-bounded honor that
-calls `triggerGreeting()` for the bidder. A cold disposition rarely honors, and
-a crowd's honors scatter across ticks instead of stampeding. Wire format and the
-gate: `core/bid_receiver.{hpp,cpp}`,
-`components/network/protocol/bid.hpp`, and the `MSG_BID` spec in
-[`networking.md`](networking.md#command_auth-shared-key-tag-on-event--command).
-
 ## Social reads
 
 Per-tick, by value, allocate nothing. Each wraps a `PersonalityEngine` global so
@@ -226,11 +194,10 @@ the snafu variant. `peer` carries `peerLampId`; empty when idle.
 
 - [`building-custom-lamps.md`](building-custom-lamps.md) — the author task guide;
   the physical facade verbs, the whimsy gallery, the register-a-variant recipe.
-- [`social.md`](social.md) — how greetings, bids, and crowd-dim fit together
+- [`social.md`](social.md) — how greetings and crowd-dim fit together
   conceptually.
 - [`personality-signals.md`](personality-signals.md) — the crowd/disposition
   signal semantics behind the social reads.
 - [`personality-greetings.md`](personality-greetings.md) — the greeting waveform
   contract.
-- [`networking.md`](networking.md) — the `MSG_BID` and `CHAR_STATE_NOTIFY` wire
-  formats.
+- [`networking.md`](networking.md) — the `CHAR_STATE_NOTIFY` wire format.

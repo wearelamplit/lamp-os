@@ -46,17 +46,6 @@ stack, `snafu::Greeting` plus a `DotsBehavior` borrow/melt afterglow, in
 `lamps/snafu/greeting.{hpp,cpp}` and `lamps/snafu/dots_behavior.{hpp,cpp}`;
 the description above doesn't apply to snafu.
 
-#### Bid-driven greeting
-
-A lamp can also *ask* a nearby peer to greet it, rather than waiting to meet one:
-`MSG_BID` (0x34) is a nearby-scoped, relationship-gated request. Acceptance is
-probabilistic off the same openness ladder as the greeting profiles, so a cold
-disposition rarely honors and a crowd's honors scatter across ticks instead of
-stampeding (anti-grief). This is the author-facing `requestGreeting()` verb; the
-API and the greeting-state-on-wire vocabulary are in
-[`lamp-social-api.md`](lamp-social-api.md#asking-the-crowd-requestgreeting--msg_bid),
-the wire format in [`networking.md`](networking.md#command_auth-shared-key-tag-on-event--command).
-
 ### Crowd-dim
 
 `PersonalityEngine` samples BLE-reachable peers at 1 Hz, weights each by
@@ -104,5 +93,5 @@ custom lamp can react to (`crowdDimFactor()`, `smoothedCrowdWeight()`,
   signal API custom lamps react to, with worked examples.
 - [`lamp-social-api.md`](lamp-social-api.md) — the author-facing API a custom
   behavior reaches these signals through: `forEachArrival` / `onArrival` /
-  `requestGreeting` / `greetingFor` / `dispositionOf` / `crowd` / `crowdWeight`,
-  via its `BehaviorContext` rather than the globals.
+  `greetingFor` / `dispositionOf` / `crowd` / `crowdWeight`, via its
+  `BehaviorContext` rather than the globals.

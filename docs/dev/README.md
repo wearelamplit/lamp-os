@@ -56,7 +56,7 @@ Building your own variant or behaviour?
 the configure → subclass → call → utils narrative with snafu (social) and staff
 (physical) as worked examples, plus the build/ship path.
 [`lamp-social-api.md`](lamp-social-api.md) is the lamp-to-lamp API it reacts
-with (`BehaviorContext`, `PeerView`, arrivals, bids). Built something cool? Send
+with (`BehaviorContext`, `PeerView`, arrivals). Built something cool? Send
 it back upstream, see [Contributing](../../README.md#contributing).
 
 ### Runtime internals

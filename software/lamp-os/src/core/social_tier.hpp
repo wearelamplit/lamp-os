@@ -5,7 +5,7 @@
 #include "config/config_types.hpp"  // SocialMode
 
 // The shared social-openness ladder. One relationship ordering (disposition ×
-// mode) drives both the greeting-profile picker and bid acceptance:
+// mode) drives the greeting-profile picker:
 //
 //   Snub(0) < PartialSnub(1) < Minimal(2) < Standard(3) < Gentle(4)
 //           < Warm(5) < Enthused(6) < Effusive(7)
@@ -15,8 +15,8 @@
 // each rung 1:1). The cold end and Extrovert-Neutral clamp are preserved
 // deliberately so the greeting mapping stays lossless.
 //
-// Header-only as a native-test seam (the receiver + equivalence tests link it
-// without the firmware).
+// Header-only as a native-test seam (the equivalence tests link it without the
+// firmware).
 
 namespace lamp {
 
@@ -51,14 +51,6 @@ constexpr uint8_t socialTier(uint8_t disposition, SocialMode mode) {
       }
       return 3;
   }
-}
-
-// Bid acceptance probability [0..100] for (disposition, mode): the ladder tier
-// mapped through the acceptance curve. Unknown peer → Neutral (disposition 3),
-// matching getDisposition.
-constexpr uint8_t socialBidResponse(uint8_t disposition, SocialMode mode) {
-  constexpr uint8_t kTierAccept[8] = {0, 0, 15, 30, 45, 60, 80, 100};
-  return kTierAccept[socialTier(disposition, mode)];
 }
 
 }  // namespace lamp

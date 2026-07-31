@@ -201,12 +201,11 @@ changelog, per [`CLAUDE.md`](../../CLAUDE.md)).
 | `software/lamp-os/src/core/override_aggregate.hpp/.cpp` | Transient color/brightness overrides (colour watchdog 100 s, wisp keep-alive-held; brightness watchdog a separate 60 s) |
 | `software/lamp-os/src/core/personality_engine.hpp/.cpp` | Personality gate for expression suppression + crowd-dim |
 | `software/lamp-os/src/core/arrival_notifier.hpp/.cpp` | Push-notifies `onArrival` observers once per new near peer |
-| `software/lamp-os/src/core/bid_receiver.hpp/.cpp` | Receiver-side MSG_BID gate + storm control |
 | `software/lamp-os/src/core/power_governor.hpp/.cpp` | Current estimator + supply-budget brightness governor |
 | `software/lamp-os/src/core/compositor.hpp/.cpp` | `Compositor`: blends behavior layers, home-mode gate, dynamic add/remove |
 | `software/lamp-os/src/lamps/standard/standard_lamp.hpp/.cpp` | Production fleet lamp (built-in social, expressions, idle) |
 | `software/lamp-os/src/lamps/snafu/*` | Amanita mushroom lamp: social reference variant |
-| `software/lamp-os/src/lamps/staff/*` | Physical reference variant (inputs, per-surface trim, bloom, shout) |
+| `software/lamp-os/src/lamps/staff/*` | Physical reference variant (inputs, per-surface trim, bloom) |
 | `software/lamp-os/src/main.cpp` | Unified entry point: mirrors compiled variant into NVS, instantiates it |
 | `software/lamp-os/platformio.ini` | Per-variant envs extending `env_base_upesy`; SemVer build_flags |
 | `scripts/sign_firmware.py` | Build-time firmware signer (CI) |

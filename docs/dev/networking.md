@@ -59,7 +59,7 @@ Four behavioral tiers, each with its own crypto posture, reach, and lifetime:
 | **Presence** | Broadcast (lamp: 30s, wisp: 2s) | Plaintext | None, pure state report | `MSG_HELLO`, `MSG_WISP_HELLO` |
 | **Authenticated commands** | Unicast (or broadcast) | AES-GCM with target's password OR plaintext JSON | NVS-writable; can mutate config | `MSG_CONTROL_OP` |
 | **Transient overrides** | Unicast (broadcast for restore) | Plaintext | RAM-only; watchdog-released after 60s | `MSG_OVERRIDE_BRIGHTNESS/RESTORE_BRIGHTNESS` (space-dim). Wisp paint no longer rides `MSG_OVERRIDE_COLORS/RESTORE_COLORS`; it's declared in `MSG_WISP_STATE`. |
-| **Expression announce / directed** | No relay: EVENT nearby-broadcast, COMMAND targeted (addressedToUs filter on recv) | 8-byte HMAC-SHA256 shared-key tag (`command_auth`) | RAM-only; observer-delivered / applied | `MSG_EVENT`, `MSG_COMMAND`, `MSG_BID` |
+| **Expression announce / directed** | No relay: EVENT nearby-broadcast, COMMAND targeted (addressedToUs filter on recv) | 8-byte HMAC-SHA256 shared-key tag (`command_auth`) | RAM-only; observer-delivered / applied | `MSG_EVENT`, `MSG_COMMAND` |
 
 **Relay policy:**
 
@@ -80,7 +80,6 @@ Four behavioral tiers, each with its own crypto posture, reach, and lifetime:
 | `MSG_COMMAND` (0x31) | broadcast (physical); addressedToUs filter on recv | **no** | `commandDedup_` 64-slot ring |
 | `MSG_COLOR_QUERY` (0x32) | broadcast (physical); addressedToUs filter on recv | **no** | n/a (single-hop) |
 | `MSG_COLOR_INFO` (0x33) | broadcast (physical); addressedToUs filter on recv | **no** | n/a (single-hop) |
-| `MSG_BID` (0x34) | broadcast | **no**, single-hop nearby-only | `bidDedup_` 16-slot ring |
 
 Relay rule: every lamp that successfully parses + dedup-records a relayable frame AND is not the originator (self-MAC drop) rebroadcasts the frame verbatim before any application-level filtering. `MSG_CONTROL_OP` relays unconditionally.
 
@@ -410,21 +409,6 @@ Fixed 18 bytes; no payload. No gossip relay; addressedToUs filter on recv.
 
 - Each stop is 4 bytes RGBW (R, G, B, W). baseCount and shadeCount are each ≤ 8. Maximum frame size is 84 bytes.
 - No gossip relay; addressedToUs filter on recv.
-
-**`MSG_BID` (0x34)**, shared-key-authenticated, nearby-scoped relationship-gated request.
-
-```
-[header(6)] [sourceMac(6)] [bidType(1)] [command_auth tag(8)]
-```
-
-Fixed 21 bytes. A **bid** is a request broadcast to nearby lamps; each receiver decides *whether to honor it* from its own per-peer disposition toward the sender and its social mode. Acceptance is probabilistic, so no bid type can force behavior on lamps that don't already like the sender — the anti-grief primitive generalized. `BID_GREETING = 0x01` is the only bid type.
-
-- **Sender**: any lamp, via `MeshLink::sendBid(bidType)`. Broadcast (no targetMac), fires no local greeting (the bidder is the subject, not a greeter), and pre-records its own seq in `bidDedup_`. A `kBidSendCooldownMs` sender cooldown gates outbound bids regardless of type. The first caller is the staff lamp's shout button, via `BehaviorContext::requestGreeting()` → `sendBid(BID_GREETING)`; the legacy BLE-name-flip leg of shout is deferred pending a bench proof of legacy greeting-dedup keying (name vs address).
-- **Receiver**: `parseBid` → `command_auth::verify()` (before dedup-record, so a bad tag never consumes a dedup slot) → `bidDedup_` record → single-slot `PendingBid {sourceMac, bidType}` → Core 1 `drainBid`. On drain: `lampRoster.findByMac(sourceMac)` (**drop on miss** — no name/color to greet), resolve disposition (`getDisposition`, unknown → 3) + `socialMode`, roll `p = socialBidResponse(disposition, mode)` and honor iff `FastRng.range(0,99) < p`. `BID_GREETING` honors via `triggerGreeting(peer)`, guarded by `!greetingState().active`, reaching around the emergent acknowledged/cooldown gate the same way the on-demand app path does.
-- **Storm control**: a broadcast bid is rolled independently by every nearby lamp and each honored greeting issues a `MSG_COLOR_QUERY` back at the bidder, so honors are scattered by a randomized delay (`rng(0, kBidHonorJitterMs)`) and bounded by a per-receiver honor cooldown (`kBidHonorCooldownMs`, distinct from the sender cooldown).
-- **No relay**: nearby-scoped by design. Dedup: `bidDedup_` 16-slot ring per `(sourceMac, seq)`.
-- **No PROTOCOL_VERSION bump**: `MSG_BID` is a new message type at the current emit version, not an additive field, so it can't ride as a TLV. An unknown `0x34` at emit `0x05` falls through the recv dispatch and is dropped (forward-compatible); all mesh-era lamps rx `0x05`, so no `RX_MIN`/`RX_MAX` change is needed.
-- **Trust model**: `command_auth` stops a non-keyed device from injecting bids, but any keyed lamp can forge `sourceMac`; the anti-grief property rests on the receiver's own disposition gate, not on `sourceMac` authenticity — same trust model as `MSG_EVENT`/`MSG_COMMAND`.
 
 ## BLE GATT characteristics (lamp ↔ phone)
 

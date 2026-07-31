@@ -7,7 +7,6 @@
 //
 // Pins:
 //   1. socialTier(disposition, mode) against the ladder table, all 15 cells.
-//   2. socialBidResponse(disposition, mode) against the accept table, 15 cells.
 
 #include <unity.h>
 
@@ -17,7 +16,6 @@
 
 using lamp::SocialMode;
 using lamp::socialTier;
-using lamp::socialBidResponse;
 
 void setUp(void) {}
 void tearDown(void) {}
@@ -50,28 +48,9 @@ void test_unknown_disposition_maps_neutral() {
   }
 }
 
-// --- 2. socialBidResponse 15-cell pin ---
-
-void test_social_bid_response_15_cells() {
-  const uint8_t expect[5][3] = {
-      {0,   0,   0},    // Salty
-      {0,   0,   0},    // Wary
-      {15,  30,  30},   // Neutral
-      {45,  60,  80},   // Fond
-      {60,  80,  100},  // Smitten
-  };
-  for (uint8_t disp = 1; disp <= 5; ++disp) {
-    for (int m = 0; m < 3; ++m) {
-      TEST_ASSERT_EQUAL_UINT8(expect[disp - 1][m],
-                              socialBidResponse(disp, kModes[m]));
-    }
-  }
-}
-
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_social_tier_15_cells);
   RUN_TEST(test_unknown_disposition_maps_neutral);
-  RUN_TEST(test_social_bid_response_15_cells);
   return UNITY_END();
 }

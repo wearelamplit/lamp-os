@@ -25,10 +25,6 @@ namespace {
 // don't share a hole. Dedup collapses the copies to one apply.
 constexpr uint8_t kResends = 2;
 constexpr uint32_t kResendGapMs = 40;
-
-// Outbound bid rate limit (any bidType). Bench-tunable; keep in sync with the
-// mirror in test_msg_bid.
-constexpr uint32_t kBidSendCooldownMs = 3000;
 }  // namespace
 
 MeshLink* MeshLink::s_instance = nullptr;
@@ -183,21 +179,6 @@ bool MeshLink::sendEvent(const uint8_t* payloadJson, size_t len) {
   if (!n) return false;
   const size_t framed = lamp_protocol::command_auth::appendTag(buf, n, sizeof(buf));
   eventDedup_.record(myMac_, lamp_protocol::MSG_EVENT, eventSeq_ - 1);
-  return link_.broadcast(buf, framed);
-}
-
-bool MeshLink::sendBid(uint8_t bidType) {
-  const uint32_t now = millis();
-  if (lastBidSendMs_ != 0 && (now - lastBidSendMs_) < kBidSendCooldownMs) {
-    return false;
-  }
-  uint8_t buf[lamp_protocol::BID_SIZE];
-  const size_t n = lamp_protocol::buildBid(buf, sizeof(buf), bidSeq_++,
-                                           myMac_, bidType);
-  if (!n) return false;
-  const size_t framed = lamp_protocol::command_auth::appendTag(buf, n, sizeof(buf));
-  bidDedup_.record(myMac_, lamp_protocol::MSG_BID, bidSeq_ - 1);
-  lastBidSendMs_ = now;
   return link_.broadcast(buf, framed);
 }
 
@@ -662,16 +643,6 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     slot.payloadLen = static_cast<uint16_t>(p.payloadLen);
     std::memcpy(slot.payload, p.payload, p.payloadLen);
     postPendingEvent(slot);
-  } else if (msgType == lamp_protocol::MSG_BID) {
-    lamp_protocol::ParsedBid p;
-    if (!lamp_protocol::parseBid(data, len, p)) return;
-    if (!lamp_protocol::command_auth::verify(data, len - lamp_protocol::BID_TAG_SIZE, p.tag)) return;
-    if (!bidDedup_.record(p.sourceMac, lamp_protocol::MSG_BID, p.seq)) return;
-    // No relay; the Core 1 drain resolves disposition + roster and decides.
-    PendingBid slot;
-    std::memcpy(slot.sourceMac, p.sourceMac, 6);
-    slot.bidType = p.bidType;
-    postPendingBid(slot);
   } else if (msgType == lamp_protocol::MSG_COLOR_QUERY) {
     lamp_protocol::ParsedColorQuery p;
     if (!lamp_protocol::parseColorQuery(data, len, p)) return;

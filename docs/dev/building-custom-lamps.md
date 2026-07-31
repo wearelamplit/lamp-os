@@ -8,7 +8,7 @@ behaviors. There are four levels of involvement, in increasing order:
 math helpers).
 
 This page is the author narrative and the on-ramp. The lamp-to-lamp API you
-react with (`BehaviorContext`, `PeerView`, arrivals, bids) is its own reference,
+react with (`BehaviorContext`, `PeerView`, arrivals) is its own reference,
 [`lamp-social-api.md`](lamp-social-api.md); the runtime underneath (compositor,
 dual-core split, power governor, boot invariants) is
 [`lamp-framework.md`](lamp-framework.md). Two shipped variants are the worked
@@ -18,7 +18,7 @@ examples:
   its own greeting driven by `forEachArrival`.
 - **`lamps/staff/`** — the **physical** reference. Declares `HwConfig.inputs`
   (a button + touch pads), drives per-surface brightness and a mood scrub from
-  gestures, blooms on a friend's arrival, and shouts a bid to the crowd.
+  gestures, and blooms on a friend's arrival.
 
 `lamps/standard/` is the minimal baseline: two strips, all features on, no
 custom behaviors.
@@ -33,7 +33,7 @@ runs**, not by one god-object. A behavior holds a `BehaviorContext*`, never a
 |---|---|---|
 | **Implement** | `Lamp` subclass override hooks | `HwConfig` (ctor), `featuresEnabled()`, `registerExpressions()`, `defaults()`, `createBehaviors()` |
 | **Attach** | inside `createBehaviors()`, once at boot | input-driver callbacks (`Button::setCallback`), `onArrival()`, greeting-state provider, `b.add(behavior)` |
-| **Call** | per-tick, from a behavior's `control()`/`draw()` | the `BehaviorContext` verbs: `setSolidColor`, `setBrightness`, `dispositionOf`, `forEachArrival`, `requestGreeting`, … |
+| **Call** | per-tick, from a behavior's `control()`/`draw()` | the `BehaviorContext` verbs: `setSolidColor`, `setBrightness`, `dispositionOf`, `forEachArrival`, … |
 
 Keep the split straight and the rest follows: you can't call `setBrightness`
 from a constructor (no context yet), and you don't re-register an `onArrival`
@@ -52,7 +52,6 @@ StaffLamp() : Lamp(HwConfig{
   },
   .inputs = {
     {.id=kStoke,     .type=InputType::Button, .pin=19},
-    {.id=kShout,     .type=InputType::Button, .pin=21},
     {.id=kTopPad,    .type=InputType::Touch,  .pin=4},
     {.id=kBottomPad, .type=InputType::Touch,  .pin=15},
   },
@@ -246,14 +245,12 @@ per-frame path.
 
 ## 4. React to the social fabric
 
-Noticing a peer, greeting it, and asking the crowd to greet back is the
-lamp-to-lamp API, its own reference: [`lamp-social-api.md`](lamp-social-api.md).
-In short — `forEachArrival` (pull, ack-coupled, one greet per call) drives a
-custom greeting like snafu's; `onArrival` (push, attach-once, framework-deduped)
-drives a side reaction like the staff's friend-bloom; `requestGreeting()`
-broadcasts a `MSG_BID` asking nearby lamps to greet back (the staff shout
-button). The social reads (`dispositionOf` / `greetingFor` / `crowd` /
-`crowdWeight`) are on the same `BehaviorContext`.
+Noticing a peer and greeting it is the lamp-to-lamp API, its own reference:
+[`lamp-social-api.md`](lamp-social-api.md). In short — `forEachArrival` (pull,
+ack-coupled, one greet per call) drives a custom greeting like snafu's;
+`onArrival` (push, attach-once, framework-deduped) drives a side reaction like
+the staff's friend-bloom. The social reads (`dispositionOf` / `greetingFor` /
+`crowd` / `crowdWeight`) are on the same `BehaviorContext`.
 
 ## 5. Custom internal expressions
 
@@ -329,21 +326,6 @@ if (topPad_ && topPad_->isHeld()) {
   ctx->setSurfaceBrightness(
       lamp::Surface::Shade,
       triangle(topPad_->heldMs(now), kRampPeriodMs, kBrightLo, kBrightHi));
-}
-```
-
-**Shout** — one button click asks the whole crowd to greet, with a self-cooldown
-so a mash sends one bid:
-
-```cpp
-void StaffInputBehavior::onShout(lamp::ButtonEvent e) {
-  if (e != lamp::ButtonEvent::Click) return;
-  auto* ctx = behaviorContext();
-  if (!ctx) return;
-  const uint32_t now = millis();
-  if (lastShoutMs_ != 0 && now - lastShoutMs_ < kShoutCooldownMs) return;
-  lastShoutMs_ = now;
-  ctx->requestGreeting();
 }
 ```
 
@@ -435,9 +417,9 @@ layout and surface roles against the physical hardware.
 **Cross-references**
 
 - [`lamp-social-api.md`](lamp-social-api.md) — the lamp-to-lamp API: the full
-  `BehaviorContext` surface, arrivals, bids, greeting state.
+  `BehaviorContext` surface, arrivals, greeting state.
 - [`lamp-framework.md`](lamp-framework.md) — the runtime internals underneath.
-- [`social.md`](social.md) — how greetings, bids, and crowd-dim fit together.
+- [`social.md`](social.md) — how greetings and crowd-dim fit together.
 - [`personality-signals.md`](personality-signals.md) — the social signals a
   custom lamp reacts to.
 - [`expressions.md`](expressions.md) — writing a new expression type.
