@@ -4,6 +4,32 @@ Notable changes per firmware version. The version is the root `VERSION` file;
 add an entry here in the **same change** that bumps it. Highlights grouped
 Added / Fixed / Changed, not every commit.
 
+## 1.2.0
+
+### Added
+- **Lamps sourcing firmware to a peer now show as busy in the app.** A lamp
+  distributing an OTA over the mesh is hard to reach over BLE (the OFFER and
+  chunk bursts starve the connect), which read as an unexplained connect
+  failure. The lamp now flips a new capability bit in its BLE advertisement
+  while distributing, so the app paints it busy (orange) at scan time with no
+  connection needed, and explains the wait in-voice ("Jacko is busy teaching
+  lily new tricks"). The receiver's name is resolved from the connected lamp's
+  nearby data when available; the scan-only view falls back to "a lamp". A
+  connect that fails against a lamp last seen busy surfaces the same whimsical
+  message instead of a generic "out of range" error. Advertisement-only, no
+  mesh protocol or GATT schema change.
+
+## 1.1.8
+
+### Fixed
+- **App→wisp control ops now survive a dropped frame.** Forwarding a
+  `setManualPalette` / `setSource` from the paired lamp to the wisp was a single
+  unacked unicast; on the C6 wisp's bursty RX-scan a lone dropped frame silently
+  lost the op, so a saved palette could never reach the wisp. The lamp now
+  re-sends the op a few times spaced apart (each copy still unicast and
+  MAC-acked, collapsed by the wisp's dedup), so it lands even when the first
+  frame is dropped.
+
 ## 1.1.7
 
 ### Added

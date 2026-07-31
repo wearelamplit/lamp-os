@@ -962,6 +962,7 @@ void lamp::Lamp::tick() {
   // fast cache write); the actual NimBLE setAdvertisementData() call
   // is rate-limited inside tickAdvertising() to avoid the host-task
   // race that panics the lamp on rapid color picker drags.
+  bt.setAdvertisedOtaDistributing(config.isOtaDistributing());
   bt.tickAdvertising();
 
   if (pendingApplyEffectiveBrightness && !ota_quiet_mode::isQuiet()) {

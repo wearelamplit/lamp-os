@@ -173,6 +173,22 @@ void main() {
       );
     });
 
+    test('both a beta and stable entry acceptable → highest version wins', () {
+      final t = firmwareAutoInstallTarget(
+        connected: true,
+        lampType: 'standard',
+        fwVersion: 4,
+        fwChannel: 'standard-beta',
+        cache: _cache([
+          _entry(channel: FirmwareChannel.beta, version: 6),
+          _entry(channel: FirmwareChannel.stable, version: 7),
+        ]),
+        latchedVersion: null,
+      );
+      expect(t?.version, 7);
+      expect(t?.channel, FirmwareChannel.stable);
+    });
+
     test('already latched at that version → null (fire-once)', () {
       expect(
         firmwareAutoInstallTarget(

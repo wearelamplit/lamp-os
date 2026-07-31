@@ -27,6 +27,7 @@ constexpr uint32_t kGapMs = 40;
 
 const uint8_t kSrc[6]    = {0x10, 0x11, 0x12, 0x13, 0x14, 0x15};
 const uint8_t kBcast[6]  = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+const uint8_t kWisp[6]   = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xF0};
 const uint8_t kPayload[] = {'{', '}'};
 
 // Records every frame service() re-emits.
@@ -34,6 +35,19 @@ struct Capture {
   std::vector<std::vector<uint8_t>> frames;
   void operator()(const uint8_t* buf, size_t len) {
     frames.emplace_back(buf, buf + len);
+  }
+};
+
+// Mirrors mesh_link's unicast service lambda: the target MAC is read out of
+// the frame at offset HEADER_SIZE (the CONTROL_OP targetMac field) and passed
+// as the ESP-NOW destination alongside the frame itself.
+struct UnicastCapture {
+  std::vector<std::vector<uint8_t>> dstMacs;
+  std::vector<std::vector<uint8_t>> frames;
+  void operator()(const uint8_t* frame, size_t len) {
+    const uint8_t* mac = &frame[lp::HEADER_SIZE];
+    dstMacs.emplace_back(mac, mac + 6);
+    frames.emplace_back(frame, frame + len);
   }
 };
 
@@ -160,6 +174,57 @@ void test_command_ring_covers_384_rejects_385() {
   TEST_ASSERT_FALSE(ring.enqueue(frame, kBudget + 1, 0, kResends, kGapMs));
 }
 
+// The unicast resend ring re-emits kResends copies (one per service tick),
+// each addressed to the target MAC extracted from the frame at HEADER_SIZE, so
+// every resent copy reaches the same display wisp and stays individually
+// MAC-acked.
+void test_unicast_resend_targets_embedded_mac() {
+  ResendRing<lp::CONTROL_MAX_SIZE, 1> ring;
+  uint8_t frame[lp::CONTROL_MAX_SIZE];
+  const size_t n = lp::buildControlOp(frame, sizeof(frame), /*seq=*/9,
+                                      kWisp, kSrc, kPayload, sizeof(kPayload));
+  TEST_ASSERT_TRUE(n > 0);
+  ring.enqueue(frame, n, /*now=*/1000, kResends, kGapMs);
+
+  UnicastCapture cap;
+  for (uint32_t now = 1010; now <= 1200; now += 10) {
+    ring.service(now, cap);  // at most one copy per tick
+  }
+  TEST_ASSERT_EQUAL_INT(kResends, (int)cap.frames.size());
+  for (size_t i = 0; i < cap.dstMacs.size(); ++i) {
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(kWisp, cap.dstMacs[i].data(), 6);
+    lp::ParsedControlOp parsed;
+    TEST_ASSERT_TRUE(lp::parseControlOp(cap.frames[i].data(),
+                                        cap.frames[i].size(), parsed));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(kWisp, parsed.targetMac, 6);
+    TEST_ASSERT_EQUAL_UINT16(9, parsed.seq);
+  }
+}
+
+// A fresh unicast enqueue replaces the size-1 slot: later copies carry the new
+// frame's target MAC, the superseded destination never resurfaces.
+void test_unicast_enqueue_replaces_slot() {
+  ResendRing<lp::CONTROL_MAX_SIZE, 1> ring;
+  const uint8_t kWispB[6] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
+  uint8_t a[lp::CONTROL_MAX_SIZE];
+  const size_t na = lp::buildControlOp(a, sizeof(a), 1, kWisp, kSrc,
+                                       kPayload, sizeof(kPayload));
+  ring.enqueue(a, na, 0, kResends, kGapMs);
+  UnicastCapture cap;
+  ring.service(kGapMs, cap);  // one copy to kWisp
+
+  uint8_t b[lp::CONTROL_MAX_SIZE];
+  const size_t nb = lp::buildControlOp(b, sizeof(b), 2, kWispB, kSrc,
+                                       kPayload, sizeof(kPayload));
+  ring.enqueue(b, nb, kGapMs, kResends, kGapMs);
+  for (uint32_t now = 2 * kGapMs; now <= 6 * kGapMs; now += kGapMs) {
+    ring.service(now, cap);
+  }
+  for (size_t i = 1; i < cap.dstMacs.size(); ++i) {
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(kWispB, cap.dstMacs[i].data(), 6);
+  }
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
@@ -171,5 +236,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_fanout_all_slots_replay);
   RUN_TEST(test_resend_copies_dedup_to_one_apply);
   RUN_TEST(test_command_ring_covers_384_rejects_385);
+  RUN_TEST(test_unicast_resend_targets_embedded_mac);
+  RUN_TEST(test_unicast_enqueue_replaces_slot);
   return UNITY_END();
 }

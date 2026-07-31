@@ -63,6 +63,14 @@ void main() {
         StatusKind.mesh,
       );
     });
+
+    test('nearby lamp advertising OTA-distributing → otaBusy', () {
+      final busy = _seenLamp('a').copyWith(otaDistributing: true);
+      expect(
+        statusFor(lampId: 'a', nearby: [busy], connected: false),
+        StatusKind.otaBusy,
+      );
+    });
   });
 
   group('statusForById', () {

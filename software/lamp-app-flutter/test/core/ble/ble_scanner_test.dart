@@ -118,6 +118,22 @@ void main() {
           reason: 'no capability byte → treated as unconfigured');
     });
 
+    test('otaDistributing: reads capability bit 3 (0x08)', () {
+      // Lamp sourcing firmware: mesh + configured + distributing (0x0E).
+      final busy = _parse(mfg: [0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x0E]);
+      expect(busy!.otaDistributing, isTrue);
+      expect(busy.isMesh, isTrue, reason: 'other bits stay independent');
+      expect(busy.configured, isTrue);
+
+      // Idle lamp: mesh + configured, bit 3 clear.
+      final idle = _parse(mfg: [0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x06]);
+      expect(idle!.otaDistributing, isFalse);
+
+      // Legacy lamp with no capability byte → not distributing.
+      final legacy = _parse(mfg: [0xFF, 0x00, 0x00, 0x00, 0xFF, 0x00]);
+      expect(legacy!.otaDistributing, isFalse);
+    });
+
     test('drops 3-byte payload (random-beacon mfg-id collision)', () {
       // The whole H3 motivation — pre-fix, 3-byte advs were parsed as
       // lamps with garbage colors.

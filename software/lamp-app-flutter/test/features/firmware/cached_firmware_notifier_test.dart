@@ -61,8 +61,8 @@ void main() {
       firmwarePublicKey.setAll(0, publicKey.bytes);
 
       const lampType = 'standard';
-      // Auto-download is stable-only; a beta lamp (below) pulls the stable
-      // image, so the cached + fetched entries share the stable key.
+      // Both channels are fetched per owned variant; the pre-seeded stable
+      // entry (below) shares the stable key with the stable fetch.
       const channel = FirmwareChannel.stable;
       const cachedVersion = 0x00010400; // 1.4.0, already cached on disk
       const githubVersion = 0x00010200; // 1.2.0, what GitHub offers
@@ -123,6 +123,45 @@ void main() {
             'already-cached newer build',
       );
     });
+
+    test('syncs both the stable and beta channel for an owned variant',
+        () async {
+      final keyPair = await Ed25519().newKeyPairFromSeed(List.filled(32, 7));
+      final publicKey = await keyPair.extractPublicKey();
+      firmwarePublicKey.setAll(0, publicKey.bytes);
+
+      const lampType = 'standard';
+      final image = await _signedImage(
+        keyPair: keyPair,
+        channel: '$lampType-stable',
+        version: 0x00010200,
+      );
+      final stub = _StubReleaseClient(image);
+      final container = ProviderContainer(
+        overrides: [
+          firmwareReleaseClientProvider.overrideWithValue(stub),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container
+          .read(cachedFirmwareNotifierProvider.notifier)
+          .syncForInventory(const [
+        InventoryLamp(
+          id: 'lamp-A',
+          name: 'lamp-A',
+          lampType: lampType,
+          fwChannel: '$lampType-beta',
+        ),
+      ]);
+
+      expect(
+        stub.channelsFetched.toSet(),
+        equals({FirmwareChannel.stable, FirmwareChannel.beta}),
+        reason: 'both channels must be fetched so a mixed fleet can update '
+            'from either',
+      );
+    });
   });
 }
 
@@ -137,11 +176,14 @@ class _FakeDocsPath extends PathProviderPlatform {
 class _StubReleaseClient extends FirmwareReleaseClient {
   _StubReleaseClient(this.bytes);
   final Uint8List bytes;
+  final List<FirmwareChannel> channelsFetched = [];
 
   @override
   Future<Uint8List> fetchLatest(FirmwareChannel channel,
-          {required String lampType}) async =>
-      bytes;
+      {required String lampType}) async {
+    channelsFetched.add(channel);
+    return bytes;
+  }
 }
 
 Uint8List _lsigFooter({

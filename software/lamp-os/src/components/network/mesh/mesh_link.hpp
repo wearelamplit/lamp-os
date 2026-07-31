@@ -100,10 +100,12 @@ class MeshLink {
   bool sendControlOp(const uint8_t targetMac[6], const uint8_t* payload,
                      size_t payloadLen);
 
-  // Unicast a CONTROL_OP to `targetMac` (the in-range display wisp). ESP-NOW
-  // MAC-ack + hardware retry replaces the broadcast path's spaced resends, so
-  // no ResendRing enqueue. Still records the seq in controlOpDedup_ so the
-  // receiver dedups. Returns the link send result.
+  // Unicast a CONTROL_OP to `targetMac` (the in-range display wisp). Arms a
+  // spaced unicast resend: the wisp's bursty RX-scan can drop every MAC-ARQ
+  // attempt inside one scan gap, so the frame is re-sent kResends times, each
+  // copy also unicast (individually MAC-acked) to the same MAC and collapsed
+  // by the receiver's dedup. Records the seq in controlOpDedup_. Returns the
+  // initial link send result.
   bool sendControlOpUnicast(const uint8_t targetMac[6], const uint8_t* payload,
                             size_t payloadLen);
 
@@ -232,6 +234,7 @@ class MeshLink {
       lamp_protocol::COMMAND_FIXED_SIZE + kCommandResendPayloadMax +
       lamp_protocol::COMMAND_TAG_SIZE;
   ResendRing<lamp_protocol::CONTROL_MAX_SIZE, 1> controlOpResend_;
+  ResendRing<lamp_protocol::CONTROL_MAX_SIZE, 1> controlOpUnicastResend_;
   ResendRing<kCommandResendMax, 10> commandResend_;
   ResendRing<lamp_protocol::COLOR_QUERY_SIZE, 1> colorQueryResend_;
   ResendRing<lamp_protocol::COLOR_INFO_MAX_SIZE, 4> colorInfoResend_;

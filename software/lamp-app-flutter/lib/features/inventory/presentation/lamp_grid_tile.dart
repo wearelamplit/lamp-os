@@ -21,6 +21,7 @@ class LampGridTile extends StatelessWidget {
     required this.name,
     this.rssi,
     this.highlighted = false,
+    this.subtitle,
     this.onTap,
     this.onLongPress,
   });
@@ -31,6 +32,9 @@ class LampGridTile extends StatelessWidget {
   final String name;
   final int? rssi;
   final bool highlighted;
+  /// Optional secondary line under the name, rendered in the busy accent.
+  /// Used for the "teaching new tricks" note on an OTA-distributing lamp.
+  final String? subtitle;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
 
@@ -88,13 +92,26 @@ class LampGridTile extends StatelessWidget {
             Text(
               name,
               textAlign: TextAlign.center,
-              maxLines: 2,
+              maxLines: subtitle == null ? 2 : 1,
               overflow: TextOverflow.ellipsis,
               style: textTheme.titleSmall?.copyWith(
                 color: offline ? colorScheme.onSurfaceVariant : null,
                 fontWeight: highlighted ? FontWeight.w700 : null,
               ),
             ),
+            if (subtitle != null) ...[
+              const SizedBox(height: AppSpace.xs),
+              Text(
+                subtitle!,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: textTheme.bodySmall?.copyWith(
+                  color: colorScheme.secondary,
+                  fontSize: 11, // deliberate dimension, not spacing
+                ),
+              ),
+            ],
           ],
         ),
       ),

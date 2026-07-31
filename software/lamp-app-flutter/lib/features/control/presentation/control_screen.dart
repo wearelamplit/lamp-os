@@ -1,9 +1,13 @@
+import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:lamp_app/core/utils/string_case.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/ota_busy_message.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/friendly_error.dart';
 import '../../../core/widgets/section_header.dart';
+import '../../inventory/application/inventory_notifier.dart';
+import '../../nearby/application/ota_busy_seen_provider.dart';
 import '../application/control_notifier.dart';
 import '../application/lamp_auth_required_exception.dart';
 import 'widgets/base_card.dart';
@@ -39,6 +43,25 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
       error: (e, _) {
         if (e is LampAuthRequiredException) {
           return ConnectPasswordPrompt(lampId: lampId);
+        }
+        // A lamp sourcing firmware to a peer is hard to connect to (the OTA
+        // bursts starve BLE connect). If the scan saw it busy just before we
+        // tried, explain the wait in-voice instead of "out of range".
+        if (ref.read(otaBusySeenProvider.notifier).wasBusyRecently(lampId)) {
+          final name = ref
+                  .read(inventoryNotifierProvider)
+                  .value
+                  ?.firstWhereOrNull((l) => l.id == lampId)
+                  ?.name ??
+              'This lamp';
+          return FriendlyError.page(
+            title: otaBusyMessage(lampName: name),
+            subtitle:
+                'It is hard to reach while teaching. Give it a minute, then '
+                'try again.',
+            rawError: e,
+            onRetry: () => ref.invalidate(controlNotifierProvider(lampId)),
+          );
         }
         return FriendlyError.page(
           title: "Couldn't reach your lamp.",

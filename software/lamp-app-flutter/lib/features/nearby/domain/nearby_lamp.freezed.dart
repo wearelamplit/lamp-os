@@ -15,15 +15,18 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$NearbyLamp {
 
- String get id; String get name; int get rssi; List<String> get serviceUuids; int get baseRgb; int get shadeRgb; int get lastSeenEpochMs;/// True iff this lamp's firmware advertises the version byte —
+ String get id; String get name; int get rssi; List<String> get serviceUuids; int get baseRgb; int get shadeRgb; int get lastSeenEpochMs;/// True iff this lamp's firmware advertises the version byte,
 /// i.e. speaks the app's mesh protocol and is fully app-
 /// controllable. Drives the BT-only routing decision in
 /// MyLampsScreen and the `mesh` vs `bluetooth` status dot. v1
 /// firmware (legacy BT-only) and transitional pre-shade-restore
 /// v2 builds both get `false`.
- bool get isMesh;/// True once the lamp has been claimed/set up — capability bit 0x04 in
-/// the advertisement. Drives the adopt-wizard vs one-tap-add routing.
- bool get configured;
+ bool get isMesh;/// True once the lamp has been claimed/set up (capability bit 0x04 in
+/// the advertisement). Drives the adopt-wizard vs one-tap-add routing.
+ bool get configured;/// True while the lamp is sourcing firmware to a peer (capability bit
+/// 0x08). It is hard to connect to during the wave, so the picker paints
+/// it busy and explains why without a connection.
+ bool get otaDistributing;
 /// Create a copy of NearbyLamp
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -36,16 +39,16 @@ $NearbyLampCopyWith<NearbyLamp> get copyWith => _$NearbyLampCopyWithImpl<NearbyL
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is NearbyLamp&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.rssi, rssi) || other.rssi == rssi)&&const DeepCollectionEquality().equals(other.serviceUuids, serviceUuids)&&(identical(other.baseRgb, baseRgb) || other.baseRgb == baseRgb)&&(identical(other.shadeRgb, shadeRgb) || other.shadeRgb == shadeRgb)&&(identical(other.lastSeenEpochMs, lastSeenEpochMs) || other.lastSeenEpochMs == lastSeenEpochMs)&&(identical(other.isMesh, isMesh) || other.isMesh == isMesh)&&(identical(other.configured, configured) || other.configured == configured));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is NearbyLamp&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.rssi, rssi) || other.rssi == rssi)&&const DeepCollectionEquality().equals(other.serviceUuids, serviceUuids)&&(identical(other.baseRgb, baseRgb) || other.baseRgb == baseRgb)&&(identical(other.shadeRgb, shadeRgb) || other.shadeRgb == shadeRgb)&&(identical(other.lastSeenEpochMs, lastSeenEpochMs) || other.lastSeenEpochMs == lastSeenEpochMs)&&(identical(other.isMesh, isMesh) || other.isMesh == isMesh)&&(identical(other.configured, configured) || other.configured == configured)&&(identical(other.otaDistributing, otaDistributing) || other.otaDistributing == otaDistributing));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,name,rssi,const DeepCollectionEquality().hash(serviceUuids),baseRgb,shadeRgb,lastSeenEpochMs,isMesh,configured);
+int get hashCode => Object.hash(runtimeType,id,name,rssi,const DeepCollectionEquality().hash(serviceUuids),baseRgb,shadeRgb,lastSeenEpochMs,isMesh,configured,otaDistributing);
 
 @override
 String toString() {
-  return 'NearbyLamp(id: $id, name: $name, rssi: $rssi, serviceUuids: $serviceUuids, baseRgb: $baseRgb, shadeRgb: $shadeRgb, lastSeenEpochMs: $lastSeenEpochMs, isMesh: $isMesh, configured: $configured)';
+  return 'NearbyLamp(id: $id, name: $name, rssi: $rssi, serviceUuids: $serviceUuids, baseRgb: $baseRgb, shadeRgb: $shadeRgb, lastSeenEpochMs: $lastSeenEpochMs, isMesh: $isMesh, configured: $configured, otaDistributing: $otaDistributing)';
 }
 
 
@@ -56,7 +59,7 @@ abstract mixin class $NearbyLampCopyWith<$Res>  {
   factory $NearbyLampCopyWith(NearbyLamp value, $Res Function(NearbyLamp) _then) = _$NearbyLampCopyWithImpl;
 @useResult
 $Res call({
- String id, String name, int rssi, List<String> serviceUuids, int baseRgb, int shadeRgb, int lastSeenEpochMs, bool isMesh, bool configured
+ String id, String name, int rssi, List<String> serviceUuids, int baseRgb, int shadeRgb, int lastSeenEpochMs, bool isMesh, bool configured, bool otaDistributing
 });
 
 
@@ -73,7 +76,7 @@ class _$NearbyLampCopyWithImpl<$Res>
 
 /// Create a copy of NearbyLamp
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? name = null,Object? rssi = null,Object? serviceUuids = null,Object? baseRgb = null,Object? shadeRgb = null,Object? lastSeenEpochMs = null,Object? isMesh = null,Object? configured = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? name = null,Object? rssi = null,Object? serviceUuids = null,Object? baseRgb = null,Object? shadeRgb = null,Object? lastSeenEpochMs = null,Object? isMesh = null,Object? configured = null,Object? otaDistributing = null,}) {
   return _then(_self.copyWith(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,name: null == name ? _self.name : name // ignore: cast_nullable_to_non_nullable
@@ -84,6 +87,7 @@ as int,shadeRgb: null == shadeRgb ? _self.shadeRgb : shadeRgb // ignore: cast_nu
 as int,lastSeenEpochMs: null == lastSeenEpochMs ? _self.lastSeenEpochMs : lastSeenEpochMs // ignore: cast_nullable_to_non_nullable
 as int,isMesh: null == isMesh ? _self.isMesh : isMesh // ignore: cast_nullable_to_non_nullable
 as bool,configured: null == configured ? _self.configured : configured // ignore: cast_nullable_to_non_nullable
+as bool,otaDistributing: null == otaDistributing ? _self.otaDistributing : otaDistributing // ignore: cast_nullable_to_non_nullable
 as bool,
   ));
 }
@@ -169,10 +173,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String name,  int rssi,  List<String> serviceUuids,  int baseRgb,  int shadeRgb,  int lastSeenEpochMs,  bool isMesh,  bool configured)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String name,  int rssi,  List<String> serviceUuids,  int baseRgb,  int shadeRgb,  int lastSeenEpochMs,  bool isMesh,  bool configured,  bool otaDistributing)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _NearbyLamp() when $default != null:
-return $default(_that.id,_that.name,_that.rssi,_that.serviceUuids,_that.baseRgb,_that.shadeRgb,_that.lastSeenEpochMs,_that.isMesh,_that.configured);case _:
+return $default(_that.id,_that.name,_that.rssi,_that.serviceUuids,_that.baseRgb,_that.shadeRgb,_that.lastSeenEpochMs,_that.isMesh,_that.configured,_that.otaDistributing);case _:
   return orElse();
 
 }
@@ -190,10 +194,10 @@ return $default(_that.id,_that.name,_that.rssi,_that.serviceUuids,_that.baseRgb,
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String name,  int rssi,  List<String> serviceUuids,  int baseRgb,  int shadeRgb,  int lastSeenEpochMs,  bool isMesh,  bool configured)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String name,  int rssi,  List<String> serviceUuids,  int baseRgb,  int shadeRgb,  int lastSeenEpochMs,  bool isMesh,  bool configured,  bool otaDistributing)  $default,) {final _that = this;
 switch (_that) {
 case _NearbyLamp():
-return $default(_that.id,_that.name,_that.rssi,_that.serviceUuids,_that.baseRgb,_that.shadeRgb,_that.lastSeenEpochMs,_that.isMesh,_that.configured);case _:
+return $default(_that.id,_that.name,_that.rssi,_that.serviceUuids,_that.baseRgb,_that.shadeRgb,_that.lastSeenEpochMs,_that.isMesh,_that.configured,_that.otaDistributing);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -210,10 +214,10 @@ return $default(_that.id,_that.name,_that.rssi,_that.serviceUuids,_that.baseRgb,
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String name,  int rssi,  List<String> serviceUuids,  int baseRgb,  int shadeRgb,  int lastSeenEpochMs,  bool isMesh,  bool configured)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String name,  int rssi,  List<String> serviceUuids,  int baseRgb,  int shadeRgb,  int lastSeenEpochMs,  bool isMesh,  bool configured,  bool otaDistributing)?  $default,) {final _that = this;
 switch (_that) {
 case _NearbyLamp() when $default != null:
-return $default(_that.id,_that.name,_that.rssi,_that.serviceUuids,_that.baseRgb,_that.shadeRgb,_that.lastSeenEpochMs,_that.isMesh,_that.configured);case _:
+return $default(_that.id,_that.name,_that.rssi,_that.serviceUuids,_that.baseRgb,_that.shadeRgb,_that.lastSeenEpochMs,_that.isMesh,_that.configured,_that.otaDistributing);case _:
   return null;
 
 }
@@ -225,7 +229,7 @@ return $default(_that.id,_that.name,_that.rssi,_that.serviceUuids,_that.baseRgb,
 @JsonSerializable()
 
 class _NearbyLamp extends NearbyLamp {
-  const _NearbyLamp({required this.id, required this.name, required this.rssi, required final  List<String> serviceUuids, required this.baseRgb, required this.shadeRgb, required this.lastSeenEpochMs, this.isMesh = false, this.configured = false}): _serviceUuids = serviceUuids,super._();
+  const _NearbyLamp({required this.id, required this.name, required this.rssi, required final  List<String> serviceUuids, required this.baseRgb, required this.shadeRgb, required this.lastSeenEpochMs, this.isMesh = false, this.configured = false, this.otaDistributing = false}): _serviceUuids = serviceUuids,super._();
   factory _NearbyLamp.fromJson(Map<String, dynamic> json) => _$NearbyLampFromJson(json);
 
 @override final  String id;
@@ -241,16 +245,20 @@ class _NearbyLamp extends NearbyLamp {
 @override final  int baseRgb;
 @override final  int shadeRgb;
 @override final  int lastSeenEpochMs;
-/// True iff this lamp's firmware advertises the version byte —
+/// True iff this lamp's firmware advertises the version byte,
 /// i.e. speaks the app's mesh protocol and is fully app-
 /// controllable. Drives the BT-only routing decision in
 /// MyLampsScreen and the `mesh` vs `bluetooth` status dot. v1
 /// firmware (legacy BT-only) and transitional pre-shade-restore
 /// v2 builds both get `false`.
 @override@JsonKey() final  bool isMesh;
-/// True once the lamp has been claimed/set up — capability bit 0x04 in
-/// the advertisement. Drives the adopt-wizard vs one-tap-add routing.
+/// True once the lamp has been claimed/set up (capability bit 0x04 in
+/// the advertisement). Drives the adopt-wizard vs one-tap-add routing.
 @override@JsonKey() final  bool configured;
+/// True while the lamp is sourcing firmware to a peer (capability bit
+/// 0x08). It is hard to connect to during the wave, so the picker paints
+/// it busy and explains why without a connection.
+@override@JsonKey() final  bool otaDistributing;
 
 /// Create a copy of NearbyLamp
 /// with the given fields replaced by the non-null parameter values.
@@ -265,16 +273,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _NearbyLamp&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.rssi, rssi) || other.rssi == rssi)&&const DeepCollectionEquality().equals(other._serviceUuids, _serviceUuids)&&(identical(other.baseRgb, baseRgb) || other.baseRgb == baseRgb)&&(identical(other.shadeRgb, shadeRgb) || other.shadeRgb == shadeRgb)&&(identical(other.lastSeenEpochMs, lastSeenEpochMs) || other.lastSeenEpochMs == lastSeenEpochMs)&&(identical(other.isMesh, isMesh) || other.isMesh == isMesh)&&(identical(other.configured, configured) || other.configured == configured));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _NearbyLamp&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.rssi, rssi) || other.rssi == rssi)&&const DeepCollectionEquality().equals(other._serviceUuids, _serviceUuids)&&(identical(other.baseRgb, baseRgb) || other.baseRgb == baseRgb)&&(identical(other.shadeRgb, shadeRgb) || other.shadeRgb == shadeRgb)&&(identical(other.lastSeenEpochMs, lastSeenEpochMs) || other.lastSeenEpochMs == lastSeenEpochMs)&&(identical(other.isMesh, isMesh) || other.isMesh == isMesh)&&(identical(other.configured, configured) || other.configured == configured)&&(identical(other.otaDistributing, otaDistributing) || other.otaDistributing == otaDistributing));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,name,rssi,const DeepCollectionEquality().hash(_serviceUuids),baseRgb,shadeRgb,lastSeenEpochMs,isMesh,configured);
+int get hashCode => Object.hash(runtimeType,id,name,rssi,const DeepCollectionEquality().hash(_serviceUuids),baseRgb,shadeRgb,lastSeenEpochMs,isMesh,configured,otaDistributing);
 
 @override
 String toString() {
-  return 'NearbyLamp(id: $id, name: $name, rssi: $rssi, serviceUuids: $serviceUuids, baseRgb: $baseRgb, shadeRgb: $shadeRgb, lastSeenEpochMs: $lastSeenEpochMs, isMesh: $isMesh, configured: $configured)';
+  return 'NearbyLamp(id: $id, name: $name, rssi: $rssi, serviceUuids: $serviceUuids, baseRgb: $baseRgb, shadeRgb: $shadeRgb, lastSeenEpochMs: $lastSeenEpochMs, isMesh: $isMesh, configured: $configured, otaDistributing: $otaDistributing)';
 }
 
 
@@ -285,7 +293,7 @@ abstract mixin class _$NearbyLampCopyWith<$Res> implements $NearbyLampCopyWith<$
   factory _$NearbyLampCopyWith(_NearbyLamp value, $Res Function(_NearbyLamp) _then) = __$NearbyLampCopyWithImpl;
 @override @useResult
 $Res call({
- String id, String name, int rssi, List<String> serviceUuids, int baseRgb, int shadeRgb, int lastSeenEpochMs, bool isMesh, bool configured
+ String id, String name, int rssi, List<String> serviceUuids, int baseRgb, int shadeRgb, int lastSeenEpochMs, bool isMesh, bool configured, bool otaDistributing
 });
 
 
@@ -302,7 +310,7 @@ class __$NearbyLampCopyWithImpl<$Res>
 
 /// Create a copy of NearbyLamp
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? name = null,Object? rssi = null,Object? serviceUuids = null,Object? baseRgb = null,Object? shadeRgb = null,Object? lastSeenEpochMs = null,Object? isMesh = null,Object? configured = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? name = null,Object? rssi = null,Object? serviceUuids = null,Object? baseRgb = null,Object? shadeRgb = null,Object? lastSeenEpochMs = null,Object? isMesh = null,Object? configured = null,Object? otaDistributing = null,}) {
   return _then(_NearbyLamp(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,name: null == name ? _self.name : name // ignore: cast_nullable_to_non_nullable
@@ -313,6 +321,7 @@ as int,shadeRgb: null == shadeRgb ? _self.shadeRgb : shadeRgb // ignore: cast_nu
 as int,lastSeenEpochMs: null == lastSeenEpochMs ? _self.lastSeenEpochMs : lastSeenEpochMs // ignore: cast_nullable_to_non_nullable
 as int,isMesh: null == isMesh ? _self.isMesh : isMesh // ignore: cast_nullable_to_non_nullable
 as bool,configured: null == configured ? _self.configured : configured // ignore: cast_nullable_to_non_nullable
+as bool,otaDistributing: null == otaDistributing ? _self.otaDistributing : otaDistributing // ignore: cast_nullable_to_non_nullable
 as bool,
   ));
 }

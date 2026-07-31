@@ -48,6 +48,15 @@ class BluetoothComponent {
   void setAdvertisedColors(Color base, Color shade);
 
   /**
+   * record whether this lamp is currently sourcing firmware to a peer.
+   * A *fast setter* like setAdvertisedColors: it only marks the pending
+   * value; tickAdvertising() folds it into the capability byte on the
+   * debounced schedule. The app reads the bit at scan time to paint the
+   * lamp busy without connecting (OTA bursts starve BLE connect).
+   */
+  void setAdvertisedOtaDistributing(bool distributing);
+
+  /**
    * flush any pending advertisement-color update to
    * NimBLE if at least the debounce interval has elapsed since
    * the last flush. Call once per main-loop tick.
@@ -57,6 +66,7 @@ class BluetoothComponent {
  private:
   Color m_pendingAdvBase;
   Color m_pendingAdvShade;
+  bool m_pendingOtaDistributing = false;
   bool m_advDirty = false;
   uint32_t m_lastAdvFlushMs = 0;
 };

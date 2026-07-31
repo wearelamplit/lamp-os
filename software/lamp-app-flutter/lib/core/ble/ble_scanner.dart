@@ -44,6 +44,7 @@ BleAdvertisement? parseLampAdvertisement({
   // bits. See software/lamp-os/.../bluetooth.cpp `kBleCapMeshProtocol`.
   const kBleCapMeshProtocol = 0x02;
   const kBleCapConfigured = 0x04;
+  const kBleCapOtaDistributing = 0x08;
   final hasShade = mfg.length >= 6;
   final isMesh =
       mfg.length >= 7 && (mfg[6] & kBleCapMeshProtocol) != 0;
@@ -51,6 +52,10 @@ BleAdvertisement? parseLampAdvertisement({
   // lamps advertise it clear, so the app routes them into the adopt wizard.
   final configured =
       mfg.length >= 7 && (mfg[6] & kBleCapConfigured) != 0;
+  // Capability bit 3: sourcing firmware to a peer right now. The OTA bursts
+  // starve BLE connect, so the app paints the lamp busy at scan time.
+  final otaDistributing =
+      mfg.length >= 7 && (mfg[6] & kBleCapOtaDistributing) != 0;
   final name = advName.isNotEmpty ? advName : platformName;
   // Empty-name advs are noise: non-lamp devices that happen to collide
   // on the 16-bit mfg ID, lamps with a corrupted name chunk, or platform
@@ -68,6 +73,7 @@ BleAdvertisement? parseLampAdvertisement({
     rssi: rssi,
     isMesh: isMesh,
     configured: configured,
+    otaDistributing: otaDistributing,
   );
 }
 
@@ -81,6 +87,7 @@ class BleAdvertisement {
     required this.rssi,
     this.isMesh = false,
     this.configured = false,
+    this.otaDistributing = false,
   });
 
   final String id;
@@ -105,6 +112,11 @@ class BleAdvertisement {
   /// (`mfg[6] & 0x04`): it has been claimed/set up. Fresh and custom lamps
   /// advertise it clear, so the app routes them into the onboarding wizard.
   final bool configured;
+
+  /// True iff the lamp's capability byte has the "OTA-distributing" bit set
+  /// (`mfg[6] & 0x08`): it is sourcing firmware to a peer right now and is
+  /// hard to connect to. The app paints it busy at scan time.
+  final bool otaDistributing;
 }
 
 abstract class BleScanner {

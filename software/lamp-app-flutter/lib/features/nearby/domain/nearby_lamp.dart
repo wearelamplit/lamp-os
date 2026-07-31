@@ -25,6 +25,10 @@ abstract class NearbyLamp with _$NearbyLamp {
     /// True once the lamp has been claimed/set up (capability bit 0x04 in
     /// the advertisement). Drives the adopt-wizard vs one-tap-add routing.
     @Default(false) bool configured,
+    /// True while the lamp is sourcing firmware to a peer (capability bit
+    /// 0x08). It is hard to connect to during the wave, so the picker paints
+    /// it busy and explains why without a connection.
+    @Default(false) bool otaDistributing,
   }) = _NearbyLamp;
 
   factory NearbyLamp.fromJson(Map<String, dynamic> json) =>

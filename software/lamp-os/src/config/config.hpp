@@ -146,6 +146,11 @@ class Config {
   // section's per-peer field. No-op unless state or target changed.
   void setLampOtaState(uint8_t s, const uint8_t* targetMac = nullptr);
 
+  // True while this lamp is sourcing firmware to a peer. The app reads the
+  // mirrored BLE-advertisement flag to render the lamp as busy at scan time,
+  // since the OFFER/stream bursts starve BLE connect.
+  bool isOtaDistributing() const;
+
   // Per-section serializers, each returning a String of just the JSON for
   // that section. Internal helpers backing the *JsonCached() accessors
   // below; the BLE onRead path always goes through the cache.
