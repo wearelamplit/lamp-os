@@ -92,7 +92,7 @@ inline Color sampleGradient(const std::vector<Color>& stops, float p) {
                         static_cast<uint32_t>(frac * 262144.0f));
 }
 
-// Warm ramp for an empty palette so a fresh flicker looks like fire. Static so
+// Warm ramp for an empty palette so a fresh shimmer looks like fire. Static so
 // draw() never allocates.
 inline const std::vector<Color>& defaultFireRamp() {
   static const std::vector<Color> ramp = {
@@ -103,6 +103,6 @@ inline const std::vector<Color>& defaultFireRamp() {
   return ramp;
 }
 
-inline constexpr float kFlickerMinBright = 0.15f;
+inline constexpr float kShimmerMinBright = 0.15f;
 
 }  // namespace lamp

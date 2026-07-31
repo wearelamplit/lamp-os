@@ -4,7 +4,7 @@
 
 #include "expressions/expression.hpp"
 #include "expressions/expression_schema.hpp"
-#include "expressions/flicker/flicker_math.hpp"
+#include "expressions/shimmer/shimmer_math.hpp"
 #include "expressions/primitives.hpp"
 
 namespace lamp {
@@ -16,7 +16,7 @@ inline constexpr EnumOption kFireOptions[] = {
   { .value = 3, .label = "Campfire" },
 };
 
-inline constexpr ParamSpec kFlickerParams[] = {
+inline constexpr ParamSpec kShimmerParams[] = {
   {
     .key   = "fire",
     .kind  = ParamKind::Enum,
@@ -29,7 +29,10 @@ inline constexpr ParamSpec kFlickerParams[] = {
   kOpacityParam,
 };
 
-inline constexpr ExpressionDescriptor kFlickerDescriptorData{
+inline constexpr ExpressionDescriptor kShimmerDescriptorData{
+  // "flicker" is the stable persisted/wire key (NVS + exprcat catalog + app),
+  // intentionally not renamed with the code identity; a rename needs an NVS
+  // migration + app coordination.
   .id         = "flicker",
   .name       = "Shimmer",
   .continuous = true,
@@ -38,13 +41,13 @@ inline constexpr ExpressionDescriptor kFlickerDescriptorData{
   .hasZone      = true,
   .zoneOptional = true,
   .advanced     = true,
-  .params       = kFlickerParams,
+  .params       = kShimmerParams,
 };
 
-class FlickerExpression : public Expression {
+class ShimmerExpression : public Expression {
  public:
   using Expression::Expression;
-  FlickerExpression(FrameBuffer* inBuffer, uint32_t inFrames = 90);
+  ShimmerExpression(FrameBuffer* inBuffer, uint32_t inFrames = 90);
   void configureFromParameters(const std::map<std::string, uint32_t>& parameters) override;
   static const ExpressionDescriptor& classDescriptor();
   const ExpressionDescriptor& descriptor() const override;

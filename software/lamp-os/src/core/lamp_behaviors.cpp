@@ -30,7 +30,7 @@
 #include "core/personality_engine.hpp"
 #include "expressions/breathing/breathing_expression.hpp"
 #include "expressions/expression_manager.hpp"
-#include "expressions/flicker/flicker_expression.hpp"
+#include "expressions/shimmer/shimmer_expression.hpp"
 #include "expressions/glitchy/glitchy_expression.hpp"
 #include "expressions/pulse/pulse_expression.hpp"
 #include "expressions/shifty/shifty_expression.hpp"
@@ -48,7 +48,7 @@ void lamp::Lamp::registerExpressions(lamp::ExpressionRegistry& reg) {
   reg.add(lamp::BreathingExpression::classDescriptor());
   reg.add(lamp::ShiftyExpression::classDescriptor());
   reg.add(lamp::SpottyExpression::classDescriptor());
-  reg.add(lamp::FlickerExpression::classDescriptor());
+  reg.add(lamp::ShimmerExpression::classDescriptor());
 }
 
 void initBehaviors(lamp::Features features, lamp::Lamp& self) {
@@ -110,7 +110,7 @@ void initBehaviors(lamp::Features features, lamp::Lamp& self) {
   //
   // The social greeting composites ON TOP of the expressions: its draw() eases
   // in over whatever is running and eases back out toward the live surface, so
-  // a continuous expression (flicker) can't bury it. Fade-out behaviors stay
+  // a continuous expression (shimmer) can't bury it. Fade-out behaviors stay
   // last so a reboot animation sits on top of even the greeting.
 
   std::vector<lamp::AnimatedBehavior*> allBehaviors = {};

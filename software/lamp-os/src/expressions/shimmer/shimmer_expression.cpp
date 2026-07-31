@@ -1,4 +1,4 @@
-#include "expressions/flicker/flicker_expression.hpp"
+#include "expressions/shimmer/shimmer_expression.hpp"
 
 #include <Arduino.h>
 #include <algorithm>
@@ -9,23 +9,23 @@
 namespace lamp {
 
 namespace {
-constexpr ExpressionDescriptor kFlickerDescriptor =
-    withMake(kFlickerDescriptorData, &makeExpr<FlickerExpression>);
+constexpr ExpressionDescriptor kShimmerDescriptor =
+    withMake(kShimmerDescriptorData, &makeExpr<ShimmerExpression>);
 constexpr uint32_t kWindStepFactor = 3;
 }  // namespace
 
-const ExpressionDescriptor& FlickerExpression::classDescriptor() {
-  return kFlickerDescriptor;
+const ExpressionDescriptor& ShimmerExpression::classDescriptor() {
+  return kShimmerDescriptor;
 }
 
-const ExpressionDescriptor& FlickerExpression::descriptor() const {
-  return kFlickerDescriptor;
+const ExpressionDescriptor& ShimmerExpression::descriptor() const {
+  return kShimmerDescriptor;
 }
 
-FlickerExpression::FlickerExpression(FrameBuffer* inBuffer, uint32_t inFrames)
+ShimmerExpression::ShimmerExpression(FrameBuffer* inBuffer, uint32_t inFrames)
     : Expression(inBuffer, inFrames) {}
 
-void FlickerExpression::configureFromParameters(
+void ShimmerExpression::configureFromParameters(
     const std::map<std::string, uint32_t>& parameters) {
   const uint16_t window = windowSize();
   zone_ = resolveZone(parameters, window);
@@ -37,7 +37,7 @@ void FlickerExpression::configureFromParameters(
   configureOpacity(parameters);
 }
 
-void FlickerExpression::onTrigger() {
+void ShimmerExpression::onTrigger() {
   frame = 0;
   frames = kContinuousMaxFrames;
   lastUpdateMs_ = 0;
@@ -56,7 +56,7 @@ void FlickerExpression::onTrigger() {
   }
 }
 
-void FlickerExpression::advanceWind(uint32_t nowMs, uint32_t deltaMs) {
+void ShimmerExpression::advanceWind(uint32_t nowMs, uint32_t deltaMs) {
   if (style_.windAmp <= 0.0f) {
     windOffset_ = 0.0f;
     return;
@@ -69,11 +69,11 @@ void FlickerExpression::advanceWind(uint32_t nowMs, uint32_t deltaMs) {
                              style_.stepMs * kWindStepFactor);
 }
 
-void FlickerExpression::control() {
+void ShimmerExpression::control() {
   continuousControl();
 }
 
-void FlickerExpression::draw() {
+void ShimmerExpression::draw() {
   const uint32_t nowMs = millis();
   const uint32_t deltaMs = (lastUpdateMs_ == 0) ? 0 : nowMs - lastUpdateMs_;
   lastUpdateMs_ = nowMs;
@@ -104,7 +104,7 @@ void FlickerExpression::draw() {
       const float heatR = clampUnit(c.heat + windOffset_);
       const Color color = sampleGradient(palette, heatR);
       const uint32_t pct =
-          static_cast<uint32_t>(heatBrightness(heatR, kFlickerMinBright) * 100.0f);
+          static_cast<uint32_t>(heatBrightness(heatR, kShimmerMinBright) * 100.0f);
       const Color painted =
           (pct >= 100u)
               ? color

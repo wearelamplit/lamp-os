@@ -6,7 +6,7 @@
 #include "core/compositor.hpp"
 #include "core/lamp.hpp"
 #include "expressions/expression_registry.hpp"
-#include "expressions/flicker/flicker_expression.hpp"
+#include "expressions/shimmer/shimmer_expression.hpp"
 #include "expressions/glitchy/glitchy_expression.hpp"
 #include "expressions/pulse/pulse_expression.hpp"
 #include "expressions/spotty/spotty_expression.hpp"
@@ -64,7 +64,7 @@ class SnafuLamp : public Lamp {
     reg.add(GlitchyExpression::classDescriptor());
     reg.add(PulseExpression::classDescriptor());
     reg.add(SpottyExpression::classDescriptor());
-    reg.add(FlickerExpression::classDescriptor());
+    reg.add(ShimmerExpression::classDescriptor());
   }
 
   void createBehaviors(BehaviorStackBuilder& b) override {

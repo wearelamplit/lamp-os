@@ -1,7 +1,7 @@
 #include <unity.h>
 #include <vector>
 
-#include "expressions/flicker/flicker_math.hpp"
+#include "expressions/shimmer/shimmer_math.hpp"
 #include "util/color.hpp"
 
 using namespace lamp;

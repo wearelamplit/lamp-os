@@ -7,7 +7,7 @@
 #include <cstring>
 
 #include "expressions/breathing/breathing_expression.hpp"
-#include "expressions/flicker/flicker_expression.hpp"
+#include "expressions/shimmer/shimmer_expression.hpp"
 #include "expressions/glitchy/glitchy_expression.hpp"
 #include "expressions/pulse/pulse_expression.hpp"
 #include "expressions/shifty/shifty_expression.hpp"
@@ -29,7 +29,7 @@ void setUp() {
   g_reg.add(kBreathingDescriptorData);
   g_reg.add(kShiftyDescriptorData);
   g_reg.add(kSpottyDescriptorData);
-  g_reg.add(kFlickerDescriptorData);
+  g_reg.add(kShimmerDescriptorData);
   g_doc.clear();
   deserializeJson(g_doc, g_reg.serializeCatalog());
 }
@@ -390,20 +390,20 @@ void test_all_types_expose_opacity() {
   TEST_ASSERT_TRUE(hasOpacity(kShiftyDescriptorData));
 }
 
-void test_flicker_is_continuous_and_zoneable() {
+void test_shimmer_is_continuous_and_zoneable() {
   TEST_ASSERT_TRUE(findById("flicker")["continuous"].as<bool>());
   auto zone = findById("flicker")["zone"];
   TEST_ASSERT_TRUE(zone.is<JsonObject>());
   TEST_ASSERT_TRUE(zone["optional"].as<bool>());
 }
 
-void test_flicker_is_advanced_and_others_are_not() {
+void test_shimmer_is_advanced_and_others_are_not() {
   TEST_ASSERT_TRUE(findById("flicker")["advanced"].as<bool>());
   TEST_ASSERT_TRUE(findById("spotty")["advanced"].isNull());
   TEST_ASSERT_TRUE(findById("breathing")["advanced"].isNull());
 }
 
-void test_flicker_fire_enum() {
+void test_shimmer_fire_enum() {
   JsonObject fire = findParam(findById("flicker"), "fire");
   TEST_ASSERT_FALSE(fire.isNull());
   TEST_ASSERT_EQUAL_STRING("enum", fire["type"].as<const char*>());
@@ -417,9 +417,9 @@ void test_flicker_fire_enum() {
   TEST_ASSERT_EQUAL_STRING("Campfire",  opts[3]["label"].as<const char*>());
 }
 
-void test_flicker_colors_cap_and_opacity() {
+void test_shimmer_colors_cap_and_opacity() {
   TEST_ASSERT_EQUAL_INT(4, findById("flicker")["colors"]["max"].as<int>());
-  TEST_ASSERT_TRUE(hasOpacity(kFlickerDescriptorData));
+  TEST_ASSERT_TRUE(hasOpacity(kShimmerDescriptorData));
 }
 
 int main(int, char**) {
@@ -453,9 +453,9 @@ int main(int, char**) {
   RUN_TEST(test_breathing_easing_param_defaults_smooth);
   RUN_TEST(test_pulse_loop_param);
   RUN_TEST(test_all_types_expose_opacity);
-  RUN_TEST(test_flicker_is_continuous_and_zoneable);
-  RUN_TEST(test_flicker_is_advanced_and_others_are_not);
-  RUN_TEST(test_flicker_fire_enum);
-  RUN_TEST(test_flicker_colors_cap_and_opacity);
+  RUN_TEST(test_shimmer_is_continuous_and_zoneable);
+  RUN_TEST(test_shimmer_is_advanced_and_others_are_not);
+  RUN_TEST(test_shimmer_fire_enum);
+  RUN_TEST(test_shimmer_colors_cap_and_opacity);
   return UNITY_END();
 }
