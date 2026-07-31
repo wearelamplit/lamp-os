@@ -32,14 +32,23 @@ import '../../control/application/control_notifier.dart';
 // 20 Ah battery. Interpolate the two firmware draw anchors (LED-only) to the
 // ceiling, plus the MCU+radio floor the anchors omit: a dark lamp measures
 // ~134 mA total vs the ~55 mA LED-idle anchor, so ~80 mA is the ESP32 + radio.
-const _mcuRadioBaselineMa = 80;
+// ESP32 + BLE/mesh average draw. Idle alone is lower (~80), an active app
+// session or config AP is higher; this leans toward the active case.
+const _mcuRadioBaselineMa = 120;
+// INIU 20000 mAh bank: ~75 Wh in the cells (20 Ah at ~3.7 V), not 20 Ah at 5 V.
+// Deliberately conservative until measured: 0.78 covers the 5 V boost loss plus
+// real delivered capacity running under nominal, so ~11700 mAh usable at 5 V.
+const _bankWh = 75.0;
+const _deliveredFraction = 0.78;
+const _railVolts = 5.0;
 String batteryEstimateLabel(int idleMa, int fullMa, int ceiling) {
   if (fullMa <= idleMa) return '';
   final drawMa =
       idleMa + (fullMa - idleMa) * ceiling / 255.0 + _mcuRadioBaselineMa;
   if (drawMa <= 0) return '';
-  final hours = 20000 / drawMa;
-  return '~${hours.toStringAsFixed(hours < 10 ? 1 : 0)} h on a 20 Ah battery (estimated)';
+  const usableMahAt5v = _bankWh * _deliveredFraction / _railVolts * 1000.0;
+  final hours = usableMahAt5v / drawMa;
+  return '~${hours.toStringAsFixed(hours < 10 ? 1 : 0)} h on a 20000 mAh bank (estimated)';
 }
 
 class AdvancedLedsScreen extends ConsumerStatefulWidget {
