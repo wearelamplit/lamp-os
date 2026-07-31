@@ -23,6 +23,14 @@ struct FixedRng {
     return lo + (hi - lo) * v / 1000;
   }
 };
+// Counts draws so a test can assert a code path consumes zero rng.
+struct CountingRng {
+  uint32_t calls = 0;
+  uint32_t range(uint32_t lo, uint32_t hi) {
+    ++calls;
+    return lo + (hi - lo) / 2;
+  }
+};
 
 void setUp() {}
 void tearDown() {}
@@ -133,14 +141,15 @@ void test_fire_styles_split_sparkle_and_flame() {
 }
 
 void test_flutter_calm_styles_unperturbed() {
-  // Twinkle + Coals have flutterAmp 0: advanceFlutter is a no-op regardless of rng.
+  // Twinkle + Coals have flutterAmp 0: advanceFlutter returns 0 AND draws no rng,
+  // so calm styles render byte-identically (a stray draw would shift the shared
+  // rng sequence for the rest of the frame).
   for (uint32_t idx = 0; idx <= 1; ++idx) {
     const FireStyle s = fireStyle(idx);
     TEST_ASSERT_EQUAL_FLOAT(0.0f, s.flutterAmp);
-    LoRng lo;
-    HiRng hi;
-    TEST_ASSERT_EQUAL_FLOAT(0.0f, advanceFlutter(0.0f, s.flutterAmp, lo));
-    TEST_ASSERT_EQUAL_FLOAT(0.0f, advanceFlutter(0.0f, s.flutterAmp, hi));
+    CountingRng rng;
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, advanceFlutter(0.25f, s.flutterAmp, rng));
+    TEST_ASSERT_EQUAL_UINT32(0, rng.calls);
   }
 }
 
