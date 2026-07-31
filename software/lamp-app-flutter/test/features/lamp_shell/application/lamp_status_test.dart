@@ -64,11 +64,11 @@ void main() {
       );
     });
 
-    test('nearby lamp advertising OTA-distributing → otaBusy', () {
+    test('nearby lamp advertising OTA-distributing does not read as busy', () {
       final busy = _seenLamp('a').copyWith(otaDistributing: true);
       expect(
         statusFor(lampId: 'a', nearby: [busy], connected: false),
-        StatusKind.otaBusy,
+        StatusKind.bluetooth,
       );
     });
   });

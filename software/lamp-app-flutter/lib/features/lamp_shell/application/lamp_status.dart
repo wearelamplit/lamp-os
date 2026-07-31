@@ -4,9 +4,7 @@ import '../../nearby/domain/nearby_lamp.dart';
 /// Derives a [StatusKind] for a lamp at the current moment.
 ///
 /// - `otaBusy`: the phone is actively pushing firmware to this lamp (wins
-///   over `mesh`, the BLE link is held for the push), or the lamp advertised
-///   that it is sourcing firmware to a peer (hard to connect to during the
-///   wave).
+///   over `mesh`, the BLE link is held for the push).
 /// - `mesh`: the active connection right now. Pulses; the app is actually
 ///   reading + writing this lamp.
 /// - `bluetooth`: heard via BLE adv within the nearby staleness window but
@@ -55,9 +53,6 @@ StatusKind _kindFromHit(NearbyLamp? hit, bool inScanGrace) {
   if (hit == null) {
     return inScanGrace ? StatusKind.searching : StatusKind.offline;
   }
-  // Sourcing firmware to a peer: heard fine over the air but hard to connect
-  // to, so it reads as busy (orange) rather than a healthy mesh green.
-  if (hit.otaDistributing) return StatusKind.otaBusy;
   // `isMesh` = "firmware speaks the app's mesh protocol". Lamps with
   // the current build show as `mesh` whenever in range; legacy v1
   // firmware (BT-only) shows as `bluetooth`.

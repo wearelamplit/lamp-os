@@ -7,7 +7,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/routing/routes.dart';
 import '../../../core/ble/ble_client_provider.dart';
-import '../../../core/ota_busy_message.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../control/application/control_notifier.dart';
 import '../../firmware/application/firmware_notifier.dart';
@@ -225,10 +224,6 @@ class _LampTile extends ConsumerWidget {
     );
     final hit = nearbyById[lamp.id];
     final colors = resolveLampColors(inv: lamp, near: hit);
-    // The scan-time busy bit carries no target, so the picker names no pupil.
-    // The mesh view resolves the specific receiver from the connected lamp's
-    // nearby data.
-    final busy = hit?.otaDistributing ?? false;
 
     // Every tile is tappable, even offline ones. The user may want to
     // navigate to a lamp's screen to wait for its reconnect or see its
@@ -240,7 +235,6 @@ class _LampTile extends ConsumerWidget {
       name: lamp.name.toTitleCase(),
       rssi: hit?.rssi,
       highlighted: isCurrent,
-      subtitle: busy ? otaBusyMessage(lampName: lamp.name) : null,
       onTap: () => _onTap(context, ref),
       onLongPress: () => _showLampActions(context, ref),
     );

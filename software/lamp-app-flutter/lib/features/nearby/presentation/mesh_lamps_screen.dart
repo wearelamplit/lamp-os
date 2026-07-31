@@ -4,7 +4,6 @@ import 'package:lamp_app/core/utils/string_case.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/app_channel.dart';
-import '../../../core/ota_busy_message.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/back_button_leading.dart';
 import '../../../core/widgets/critter_icon.dart';
@@ -292,16 +291,6 @@ class _PeerCard extends StatelessWidget {
                       ),
                   ],
                 ),
-                if (peer.otaState == 1 || sendingTo != null) ...[
-                  const SizedBox(height: AppSpace.xs),
-                  Text(
-                    otaBusyMessage(lampName: peer.name, targetName: sendingTo),
-                    style: textTheme.bodySmall?.copyWith(
-                      fontSize: 11,
-                      color: colorScheme.secondary,
-                    ),
-                  ),
-                ],
               ],
             ),
           ),
