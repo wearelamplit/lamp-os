@@ -138,6 +138,24 @@ void PulseExpression::onUpdate() {
   updateWavePosition();
 }
 
+void PulseExpression::control() {
+  if (!loopContinuous_) {
+    Expression::control();
+    return;
+  }
+  continuousControl();
+  if (animationState == PLAYING || animationState == PLAYING_ONCE) {
+    onUpdate();
+  }
+  // Pulse marks completion via frames=frame+1 in draw(), so the base
+  // onComplete dispatch must run here to set lastCompletedLoop and let
+  // gcTransients() reap a finished preview.
+  if (animationState == STOPPED && currentLoop > lastCompletedLoop) {
+    onComplete();
+    lastCompletedLoop = currentLoop;
+  }
+}
+
 void PulseExpression::draw() {
   if (!fb || fb->pixelCount == 0) {
     nextFrame();
@@ -163,11 +181,12 @@ void PulseExpression::draw() {
 
   // Transit time is wall-clock; a tiny zone with a slow, wide wave can take
   // minutes. Trigger mode ends when the wave exits (progress complete).
-  // Continuous ping-pongs forever when live, but a transient preview (Test,
-  // autoTriggerEnabled false) does one out-and-back then stops so the GC reaps it.
+  // Continuous ping-pongs forever when live; a transient preview stops after
+  // kPreviewCycles out-and-back legs so the GC reaps it. One leg completes on
+  // the return to the near edge.
   const bool triggerExit = !loopContinuous_ && progress_ >= 1.0f;
-  const bool previewCycleDone =
-      loopContinuous_ && !autoTriggerEnabled && reachedFarEnd_ && progress_ <= 0.0f;
+  const bool cycleReturned = loopContinuous_ && reachedFarEnd_ && progress_ <= 0.0f;
+  const bool previewCycleDone = cycleReturned && previewCycleComplete();
   if (triggerExit || previewCycleDone) {
     frames = frame + 1;
   } else {

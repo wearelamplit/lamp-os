@@ -18,6 +18,11 @@ constexpr uint32_t kMsPerSecond = 1000;
 // one-shots conclude by setting frames = frame + 1.
 constexpr uint32_t kContinuousMaxFrames = 100000;
 
+// A transient preview (Test button) of a continuous expression runs this many
+// cycles before completing so the operator sees it loop; gcTransients() reaps
+// it after (the 180 s lifetime cap backstops it either way).
+constexpr uint8_t kPreviewCycles = 2;
+
 // Wrap-safe "now has reached deadline" for millis()-domain timestamps.
 inline bool timeReached(uint32_t nowMs, uint32_t deadlineMs) {
   return static_cast<int32_t>(nowMs - deadlineMs) >= 0;

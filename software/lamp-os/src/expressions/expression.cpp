@@ -119,6 +119,11 @@ void Expression::continuousControl() {
   if (autoTriggerEnabled && animationState == STOPPED) trigger();
 }
 
+bool Expression::previewCycleComplete() {
+  if (autoTriggerEnabled) return false;
+  return ++previewCyclesDone_ >= kPreviewCycles;
+}
+
 Color Expression::getRandomColor() {
   if (colors.empty()) {
     return kSafeFallbackColor;

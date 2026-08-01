@@ -57,14 +57,10 @@ void BreathingExpression::updateBreathPhase() {
   if (breathPhase >= 1.0f) {
     breathPhase -= 1.0f;
 
-    // Transient one-shot path: when autoTriggerEnabled is false, this
-    // expression was created by ExpressionManager::triggerInvocation as a
-    // remote-cascaded one-breath instance.
-    // BreathingExpression normally runs continuously with frames=100000 and
-    // animationState=PLAYING, which never naturally reaches STOPPED, so
-    // gcTransients() would never reap it (memory leak). Mark one complete
-    // cycle here so isAnimationComplete() returns true on the next tick.
-    if (!autoTriggerEnabled) {
+    // A live instance runs continuously with frames=100000 and
+    // animationState=PLAYING, never naturally reaching STOPPED. A transient
+    // preview stops after kPreviewCycles breaths so gcTransients() can reap it.
+    if (previewCycleComplete()) {
       animationState = STOPPED;
       lastCompletedLoop = currentLoop + 1;
       lastBreathUpdateMs = currentMs;

@@ -36,6 +36,7 @@ class Expression : public AnimatedBehavior {
   uint8_t opacityPct_ = 100;
   Easing easing_ = Easing::Linear;
   uint32_t easingRaw_ = 0;
+  uint8_t previewCyclesDone_ = 0;
 
   /**
    * Schedule next trigger within configured interval range.
@@ -161,6 +162,14 @@ protected:
    * never retrigger, so gcTransients() can reap them.
    */
   void continuousControl();
+
+  /**
+   * Call once per completed cycle from a continuous expression's draw().
+   * Returns true once a transient preview (autoTriggerEnabled=false) has run
+   * kPreviewCycles cycles and should stop for gcTransients(); always false for
+   * a live saved instance, which never completes.
+   */
+  bool previewCycleComplete();
 
   /**
    * Expression-specific setup when triggered (REQUIRED).

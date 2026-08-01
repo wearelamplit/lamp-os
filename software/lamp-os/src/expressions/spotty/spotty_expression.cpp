@@ -111,8 +111,12 @@ void SpottyExpression::draw() {
   }
 
   if (!autoTriggerEnabled && allDone) {
-    animationState = STOPPED;
-    lastCompletedLoop = currentLoop + 1;
+    if (previewCycleComplete()) {
+      animationState = STOPPED;
+      lastCompletedLoop = currentLoop + 1;
+    } else {
+      for (Spot& spot : spots_) respawn(spot);
+    }
   }
 
   if (autoTriggerEnabled) frame = rewindBeforeExhaust(frame, frames);

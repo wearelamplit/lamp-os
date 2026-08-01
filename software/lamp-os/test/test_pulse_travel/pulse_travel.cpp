@@ -26,6 +26,7 @@ struct PulseTravelRig {
   bool ended = false;
   bool reachedFarEnd = false;
   bool firstEntranceDone = false;
+  uint8_t previewCyclesDone = 0;
   float posMin = 0.0f;
   float posMax = 0.0f;
 
@@ -72,7 +73,11 @@ struct PulseTravelRig {
     }
     wavePosition = travelStart + lamp::applyEasing(easing, progress) * travelSpan;
     const bool triggerExit = !loop && progress >= 1.0f;
-    const bool previewCycleDone = loop && !autoTrigger && reachedFarEnd && progress <= 0.0f;
+    const bool cycleReturned = loop && reachedFarEnd && progress <= 0.0f;
+    bool previewCycleDone = false;
+    if (cycleReturned && !autoTrigger) {
+      previewCycleDone = ++previewCyclesDone >= lamp::kPreviewCycles;
+    }
     if (triggerExit || previewCycleDone) ended = true;
   }
 };
@@ -93,6 +98,44 @@ struct LegacyRig {
     const uint32_t delta = std::min(nowMs - lastUpdateMs, (uint32_t)100);
     lastUpdateMs = nowMs;
     wavePosition += static_cast<float>(delta) / static_cast<float>(pulseSpeedMs);
+  }
+};
+
+// Mirrors PulseExpression::control() dispatch over Expression::control() and
+// continuousControl(). STOPPED/PLAYING mirror AnimationState (Arduino-free).
+struct ControlRig {
+  static constexpr int STOPPED = 5;
+  static constexpr int PLAYING = 1;
+
+  bool loopContinuous = false;
+  bool autoTriggerEnabled = true;
+  int state = STOPPED;
+  uint32_t nextTriggerMs = 0;
+  bool triggered = false;
+  uint32_t currentLoop = 0;
+  uint32_t lastCompletedLoop = 0;
+  int onCompleteCalls = 0;
+
+  void doTrigger() { triggered = true; state = PLAYING; }
+
+  bool isAnimationComplete() const {
+    return state == STOPPED && lastCompletedLoop > 0;
+  }
+
+  void control(uint32_t nowMs) {
+    if (!loopContinuous) {
+      if (autoTriggerEnabled && state == STOPPED &&
+          static_cast<int32_t>(nowMs - nextTriggerMs) >= 0) {
+        doTrigger();
+      }
+      return;
+    }
+    if (autoTriggerEnabled && state == STOPPED) doTrigger();
+    // Mirror PulseExpression::control()'s onComplete dispatch.
+    if (state == STOPPED && currentLoop > lastCompletedLoop) {
+      ++onCompleteCalls;
+      lastCompletedLoop = currentLoop;
+    }
   }
 };
 
@@ -228,7 +271,7 @@ void test_continuous_pingpong_stays_within_visible_edges() {
   }
 }
 
-void test_continuous_transient_ends_after_one_cycle() {
+void test_continuous_transient_ends_after_two_cycles() {
   test::PulseTravelRig rig;
   rig.easing = lamp::Easing::Float;
   rig.loop = true;
@@ -241,16 +284,15 @@ void test_continuous_transient_ends_after_one_cycle() {
   rig.step(nowMs);  // first step only seeds lastUpdateMs
   TEST_ASSERT_FALSE(rig.ended);
 
-  bool reachedFar = false;
   int guard = 0;
-  while (!rig.ended && guard++ < 100000) {
+  while (!rig.ended && guard++ < 200000) {
     nowMs += 16;
     rig.step(nowMs);
-    if (rig.reachedFarEnd) reachedFar = true;
-    if (!reachedFar) TEST_ASSERT_FALSE(rig.ended);              // no stop before far end
-    else if (rig.progress > 0.001f) TEST_ASSERT_FALSE(rig.ended);  // no stop mid return
+    // The preview must loop, not stop on the first return to the near edge.
+    if (rig.previewCyclesDone < lamp::kPreviewCycles) TEST_ASSERT_FALSE(rig.ended);
   }
   TEST_ASSERT_TRUE(rig.ended);
+  TEST_ASSERT_EQUAL_UINT8(lamp::kPreviewCycles, rig.previewCyclesDone);
   TEST_ASSERT_TRUE(rig.reachedFarEnd);
   TEST_ASSERT_FLOAT_WITHIN(1e-6f, 0.0f, rig.progress);  // stopped back at the near edge
 }
@@ -269,6 +311,62 @@ void test_continuous_live_never_ends() {
     rig.step(nowMs);
     TEST_ASSERT_FALSE(rig.ended);
   }
+}
+
+void test_continuous_pulse_triggers_promptly() {
+  test::ControlRig rig;
+  rig.loopContinuous = true;
+  rig.autoTriggerEnabled = true;
+  rig.nextTriggerMs = 1000000;  // far future; a saved Pulse must not wait for it
+  rig.control(0);
+  TEST_ASSERT_TRUE(rig.triggered);
+}
+
+void test_continuous_pulse_self_heals_from_stopped() {
+  test::ControlRig rig;
+  rig.loopContinuous = true;
+  rig.autoTriggerEnabled = true;
+  rig.state = test::ControlRig::STOPPED;
+  rig.nextTriggerMs = 1000000;
+  rig.control(500);
+  TEST_ASSERT_TRUE(rig.triggered);
+}
+
+void test_trigger_mode_pulse_waits_for_interval() {
+  test::ControlRig rig;
+  rig.loopContinuous = false;
+  rig.autoTriggerEnabled = true;
+  rig.nextTriggerMs = 1000;
+  rig.control(0);
+  TEST_ASSERT_FALSE(rig.triggered);  // before the interval, no start
+  rig.control(1000);
+  TEST_ASSERT_TRUE(rig.triggered);   // at the interval, scheduled start
+}
+
+void test_continuous_pulse_preview_does_not_autotrigger() {
+  test::ControlRig rig;
+  rig.loopContinuous = true;
+  rig.autoTriggerEnabled = false;  // transient preview; manager triggers it
+  rig.control(0);
+  TEST_ASSERT_FALSE(rig.triggered);
+}
+
+void test_continuous_pulse_finished_preview_is_reap_eligible() {
+  // A finished continuous preview: draw() set frames=frame+1, nextFrame() drove
+  // it to STOPPED with currentLoop advanced. The overridden control() must
+  // still fire the onComplete dispatch so isAnimationComplete() reads true.
+  test::ControlRig rig;
+  rig.loopContinuous = true;
+  rig.autoTriggerEnabled = false;
+  rig.state = test::ControlRig::STOPPED;
+  rig.currentLoop = 1;
+  rig.lastCompletedLoop = 0;
+
+  TEST_ASSERT_FALSE(rig.isAnimationComplete());
+  rig.control(0);
+  TEST_ASSERT_FALSE(rig.triggered);  // transient never auto-retriggers
+  TEST_ASSERT_EQUAL_INT(1, rig.onCompleteCalls);
+  TEST_ASSERT_TRUE(rig.isAnimationComplete());
 }
 
 void test_size_step_maps_to_width_percent() {
@@ -307,7 +405,12 @@ int main(int, char**) {
   RUN_TEST(test_continuous_repoints_to_visible_edges_after_entrance);
   RUN_TEST(test_continuous_reverses_and_never_ends);
   RUN_TEST(test_continuous_pingpong_stays_within_visible_edges);
-  RUN_TEST(test_continuous_transient_ends_after_one_cycle);
+  RUN_TEST(test_continuous_transient_ends_after_two_cycles);
   RUN_TEST(test_continuous_live_never_ends);
+  RUN_TEST(test_continuous_pulse_triggers_promptly);
+  RUN_TEST(test_continuous_pulse_self_heals_from_stopped);
+  RUN_TEST(test_trigger_mode_pulse_waits_for_interval);
+  RUN_TEST(test_continuous_pulse_preview_does_not_autotrigger);
+  RUN_TEST(test_continuous_pulse_finished_preview_is_reap_eligible);
   return UNITY_END();
 }

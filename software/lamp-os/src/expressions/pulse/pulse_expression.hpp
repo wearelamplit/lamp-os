@@ -129,6 +129,7 @@ class PulseExpression : public Expression {
   const ExpressionDescriptor& descriptor() const override;
 
   void draw() override;
+  void control() override;
 
 protected:
   void onTrigger() override;

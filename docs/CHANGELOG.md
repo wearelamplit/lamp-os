@@ -5,6 +5,16 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## 1.2.2
+
+### Fixed
+- **Continuous Pulse loops right away.** A Pulse set to continuous could take up
+  to ~15 minutes to start and wouldn't restart on its own if it ever stopped — it
+  now begins immediately and keeps looping.
+- **Testing a looping expression actually shows it loop.** Previewing a
+  continuous expression (Pulse, Breathing, Spotty) now runs a couple of cycles
+  instead of a single one, so you can see the motion before saving it.
+
 ## 1.2.0
 
 ### Added

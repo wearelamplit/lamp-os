@@ -95,7 +95,7 @@ The Vue web UI (`software/lamp-ui/src/components/expressions/`) renders a **subs
 - `void draw()`, the compositor's render hook (from `AnimatedBehavior`). Every shipped expression overrides `draw()` — it's where pixels actually get written, gated on `shouldAffectBuffer()`. The compositor calls it once per flush window (~16 ms) while the behavior isn't `STOPPED`; `STOPPED` behaviors are never drawn.
 - `void onUpdate()`, optional. Called by `control()` once per flush window while `animationState == PLAYING || PLAYING_ONCE`. Advance animation state here. Set `animationState = STOPPED` when done.
 - `void onComplete()`, optional. Called the tick after `animationState` transitions back to `STOPPED`. Use it to restore any state you snapshotted in `onTrigger` (most expressions hand the buffer back to the configurator's render and don't need this).
-- `void control()`, overridable but not required. The base class implementation handles the auto-trigger cadence, `onUpdate` dispatch, and `onComplete` dispatch. Subclasses that override `control()` take on the responsibility of those behaviours themselves; the continuous ones (breathing, spotty, shimmer) route through the protected `Expression::continuousControl()` helper for the auto-retrigger.
+- `void control()`, overridable but not required. The base class implementation handles the auto-trigger cadence, `onUpdate` dispatch, and `onComplete` dispatch. Subclasses that override `control()` take on the responsibility of those behaviours themselves; the continuous ones (breathing, spotty, shimmer) route through the protected `Expression::continuousControl()` helper for the auto-retrigger. Pulse overrides `control()` too but is dual-mode: in continuous mode it routes through `continuousControl()`, in trigger mode it falls back to the base auto-interval cadence.
 
 ### Timing convention: wall clock, not frames
 
@@ -185,7 +185,7 @@ A directional mode staggers each pixel's fade start by up to `fadeDuration/2`, s
 
 ## Trigger cadence
 
-`Expression::control()` checks `timeReached(millis(), nextTriggerMs)` (wrap-safe) and fires `trigger()` if so. After every fire the schedule is reset with `nextTriggerMs = millis() + rng.range(intervalMinMs, intervalMaxMs)` (`rng` is the per-instance `FastRng`). Subclasses that override `control()` (breathing, spotty, shimmer) are continuous and don't gate on `nextTriggerMs`.
+`Expression::control()` checks `timeReached(millis(), nextTriggerMs)` (wrap-safe) and fires `trigger()` if so. After every fire the schedule is reset with `nextTriggerMs = millis() + rng.range(intervalMinMs, intervalMaxMs)` (`rng` is the per-instance `FastRng`). Subclasses that override `control()` (breathing, spotty, shimmer) are continuous and don't gate on `nextTriggerMs`. Pulse overrides `control()` as well: in continuous mode it skips `nextTriggerMs` and auto-retriggers immediately, in trigger mode it keeps this interval schedule.
 
 `enabled = false` clears `autoTriggerEnabled` at load time, which suppresses the auto-trigger in `control()`. Manual `trigger()` from the test path still works.
 
@@ -266,7 +266,7 @@ To add a host-side test for a new expression: instantiate it with a stub `FrameB
 - **`target` is a bitmask, not an enum.** 1=shade, 2=base, 3=both. Mixing up the bits compiles fine and produces "expression only paints half the lamp" symptoms.
 - **The visible output is not your buffer.** Expressions paint into the configurator's frame buffer, which the compositor then composites the wisp layer over. While a wisp holds a surface, a dimming expression (`wispDimFloor` < 1.0) contributes only at its floor, so the strip mostly shows the wisp colour, not your writes. Test with the wisp off, or clear overrides manually, before debugging.
 - **No allocation in `onUpdate()`.** It runs once per flush window (~16 ms) for the whole time an instance is PLAYING. Allocate in `onTrigger()`, reuse buffers across frames. The existing expressions follow this pattern; copy them.
-- **Continuous expressions own the loop.** Subclasses that override `control()` (breathing, spotty, shimmer) route through the protected `Expression::continuousControl()` helper: it auto-retriggers when `STOPPED` (never for transients, which `gcTransients()` must reap). Spot/breath state advances on the wall clock every frame; a transient keeps its completion progress moving so it still reaches `STOPPED` instead of squatting on the compositor until the transient GC backstop.
+- **Continuous expressions own the loop.** Subclasses that override `control()` (breathing, spotty, shimmer, and pulse in continuous mode) route through the protected `Expression::continuousControl()` helper: it auto-retriggers when `STOPPED` (never for transients, which `gcTransients()` must reap). Spot/breath state advances on the wall clock every frame; a transient keeps its completion progress moving so it still reaches `STOPPED` instead of squatting on the compositor until the transient GC backstop. A transient preview loops `kPreviewCycles` cycles (`primitives.hpp`) before completing, via the shared `Expression::previewCycleComplete()` counter, so the operator sees it move.
 
 ## Appendix: new-expression skeleton
 
