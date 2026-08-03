@@ -11,7 +11,7 @@ This page is the author narrative and the on-ramp. The lamp-to-lamp API you
 react with (`BehaviorContext`, `PeerView`, arrivals) is its own reference,
 [`lamp-social-api.md`](lamp-social-api.md); the runtime underneath (compositor,
 dual-core split, power governor, boot invariants) is
-[`lamp-framework.md`](lamp-framework.md). Two shipped variants are the worked
+[`lamp-framework.md`](lamp-framework.md). Three shipped variants are the worked
 examples:
 
 - **`lamps/snafu/`** — the **social** reference. Replaces `SocialBehavior` with
@@ -19,6 +19,9 @@ examples:
 - **`lamps/staff/`** — the **physical** reference. Declares `HwConfig.inputs`
   (a button + touch pads), drives per-surface brightness and a mood scrub from
   gestures, and blooms on a friend's arrival.
+- **`lamps/lioness/`** — the **multi-strip social ambient** reference (walked
+  through below). Three fixed strips, peer-color mirroring across zones of a
+  shared strip, and a two-object always-on-ambient + one-shot-greeting split.
 
 `lamps/standard/` is the minimal baseline: two strips, all features on, no
 custom behaviors.
@@ -339,6 +342,45 @@ of `control()`:
 unlock_.tick(now);
 if (!unlock_.unlocked()) return;   // touch gestures gated until unlocked
 ```
+
+## Worked example: Lioness
+
+A locked, fixed-install variant (`lamps/lioness/`) — the multi-strip social
+reference. Three strips: `Shade` (pin14, 36px), `Base "Main"` (pin4, 32px,
+`broadcast=1`), `Base "Lions"` (pin5, 18px), the last split by
+`evenZones(3, 18)` into three 6px lion zones.
+
+Two behaviors, split by lifecycle. `LionsAmbientBehavior` is the
+always-`PLAYING` base scene (`compositor.addBaseBehavior()` only), owning just the
+Lions segment's pixel range (`fb->segments[k].offset`) — the base
+`ConfiguratorBehavior` draws first and covers the whole buffer from
+`defaults()`, so `Main` is left untouched underneath. It's also the sole
+`Greetable` (needs `onColorInfo` to cache peers' base-color stops for the zone
+gradients), and delegates `triggerGreeting()`/`greetingState()` to
+`LionsGreetingBehavior`, which starts `STOPPED` (`b.add()` only) and draws its
+pulse over whatever the ambient behavior wrote this frame.
+
+Each tick, `LionsAmbientBehavior::control()` calls `LionsDirector::tick()` to
+assign nearby peers to the three zones. The nearby lamps are an ordered list and
+the three lions are a sliding window that walks it: each lion advances on its
+own staggered deadline (`kStaggerPeriodMs`, phase-offset `kStaggerPhaseMs`
+apart) to the next lamp not shown by the other two, so over time every nearby
+lamp gets shown, the trio stays distinct, and no two lions switch on the same
+tick (0 → all idle / mirror `Main`; 1 → all three show it; 2 → two lions show
+the pair, the third holds idle; ≥3 → the walk). It pulls stops via
+`MSG_COLOR_QUERY`/`onColorInfo` and renders with the pure `renderLions()`
+(`lions_scene.cpp`), crossfading a switched zone over `kCrossfadeFrames` with
+`util/fade`. `LionsGreetingBehavior::startGreeting()` snaps all three lions to
+the newcomer's `peer.baseColor`, breathes `kPulses` times via the pure
+`pulseEnvelope()` (`lions_greeting.hpp`), eases into the ambient pixels
+underneath, and fires the shared `GlitchyExpression` on the shade
+(`triggerInvocation(..., broadcast=false)` — already in the base catalog, no
+internal descriptor needed). `LionsDirector` / `renderLions` / `pulseEnvelope`
+are pure and frame-driven, each with its own native test.
+
+One item wants a hardware pass: `maxBrightness=230` / `supplyBudgetMa=1400`
+are copied from snafu's `HwConfig`, not measured against Lioness's 86-pixel
+draw.
 
 ## 7. Build, test, and ship
 

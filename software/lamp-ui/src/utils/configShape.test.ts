@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  SAFE_COLOR,
-  paletteFromSegments,
-  pxFromSegments,
-  segmentsFromPalette,
-} from './configShape'
+import { SAFE_COLOR, paletteFromSegments, pxFromSegments, segmentsFromPalette } from './configShape'
 
 describe('SAFE_COLOR', () => {
   it('pins the W=0 brownout constant', () => {

@@ -181,14 +181,15 @@ the live `GreetingState`. The framework routes both through
 struct GreetingState {
   bool        active = false;
   std::string peerLampId;   // greeted peer's colon-hex mac, empty when idle
-  std::string kind;         // "warm" | "reserved" | "snub" | "glitch"
+  std::string kind;         // "warm" | "reserved" | "snub" | "glitch" | "pulse"
 };
 ```
 
 The state is pushed on `CHAR_STATE_NOTIFY` (field `greeting`) on start and stop.
 `kind` is a stable short label: `"warm"` (pulsed hold), `"reserved"` (plain
-hold), `"snub"` (dark-in-peer-color) from `SocialBehavior`, or `"glitch"` from
-the snafu variant. `peer` carries `peerLampId`; empty when idle.
+hold), `"snub"` (dark-in-peer-color) from `SocialBehavior`, `"glitch"` from
+the snafu variant, or `"pulse"` from the Lioness variant. `peer` carries
+`peerLampId`; empty when idle.
 
 ## Cross-references
 

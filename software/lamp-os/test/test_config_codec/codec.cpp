@@ -208,6 +208,9 @@ void test_old_format_base_colors_migrated() {
   TEST_ASSERT_TRUE(m.base.broadcastColors()[0] == hexStringToColor("#11223344"));
   TEST_ASSERT_TRUE(m.base.broadcastColors()[1] == hexStringToColor("#55667788"));
   TEST_ASSERT_EQUAL_UINT8(35, m.base.segments[0].px);
+  // Migrated segment gets the role default name so the app never renders a
+  // blank Base label.
+  TEST_ASSERT_EQUAL_STRING("Base", m.base.segments[0].name.c_str());
 }
 
 void test_old_format_shade_colors_migrated() {
@@ -218,6 +221,7 @@ void test_old_format_shade_colors_migrated() {
   TEST_ASSERT_EQUAL_UINT(1, m.shade.broadcastColors().size());
   TEST_ASSERT_TRUE(m.shade.broadcastColors()[0] == hexStringToColor("#aabbccdd"));
   TEST_ASSERT_EQUAL_UINT8(38, m.shade.segments[0].px);
+  TEST_ASSERT_EQUAL_STRING("Shade", m.shade.segments[0].name.c_str());
 }
 
 void test_old_format_no_colors_uses_class_default() {
@@ -242,6 +246,19 @@ void test_new_format_segments_unchanged() {
   TEST_ASSERT_TRUE(m.base.broadcastColors()[0] == hexStringToColor("#11223344"));
   TEST_ASSERT_EQUAL_UINT8(38, m.shade.segments[0].px);
   TEST_ASSERT_TRUE(m.shade.broadcastColors()[0] == hexStringToColor("#aabbccdd"));
+  TEST_ASSERT_EQUAL_STRING("Base", m.base.segments[0].name.c_str());
+  TEST_ASSERT_EQUAL_STRING("Shade", m.shade.segments[0].name.c_str());
+}
+
+void test_named_segment_not_overwritten_by_role_default() {
+  // An already-named segment (any name, not just the role default) must
+  // survive parseSegments untouched.
+  Model m;
+  parseInto(
+      "{\"base\":{\"segments\":[{\"name\":\"Left rail\",\"px\":20,"
+      "\"colors\":[\"#11223344\"]}]}}",
+      m);
+  TEST_ASSERT_EQUAL_STRING("Left rail", m.base.segments[0].name.c_str());
 }
 
 // --- Home mode new fields ---
@@ -339,6 +356,7 @@ int main(int, char**) {
   RUN_TEST(test_old_format_shade_colors_migrated);
   RUN_TEST(test_old_format_no_colors_uses_class_default);
   RUN_TEST(test_new_format_segments_unchanged);
+  RUN_TEST(test_named_segment_not_overwritten_by_role_default);
   RUN_TEST(test_networkbound_absent_with_ssid);
   RUN_TEST(test_networkbound_absent_no_ssid);
   RUN_TEST(test_networkbound_explicit_false_wins);

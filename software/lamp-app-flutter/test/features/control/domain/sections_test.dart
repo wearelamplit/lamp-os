@@ -129,6 +129,16 @@ void main() {
     expect(s.segments.first.name, 'Stem');
   });
 
+  test('Segment.displayName falls back to roleLabel when name is empty', () {
+    const migrated = Segment(name: '', px: 35, colors: []);
+    expect(migrated.displayName('Base'), 'Base');
+  });
+
+  test('Segment.displayName keeps a non-empty name', () {
+    const named = Segment(name: 'Left rail', px: 35, colors: []);
+    expect(named.displayName('Base'), 'Left rail');
+  });
+
   test('Segment equality', () {
     const a = Segment(
       name: 'Shade',

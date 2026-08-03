@@ -27,7 +27,7 @@ inline constexpr ExpressionDescriptor kGlitchyDescriptorData{
   .name         = "Glitchy",
   .colors       = { .max = 8, .label = "Colors" },
   .interval     = RangeSpec{
-    .min    = 600,
+    .min    = 300,
     .max    = 18000,
     .step   = 30,
     .unit   = "s",

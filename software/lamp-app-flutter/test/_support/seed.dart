@@ -79,7 +79,8 @@ Future<void> seedControlBle(
     Uint8List.fromList(utf8.encode(
       '{"px":$basePx,"ac":$baseAc,"bpp":$baseBpp,'
       '"colors":$baseColorsJson,"knockout":$baseKnockoutJson,'
-      '"drawIdleMa":$drawIdleMa,"drawFullMa":$drawFullMa$baseSegsTail}',
+      '"drawIdleMa":$drawIdleMa,"drawFullMa":$drawFullMa'
+      '$baseSegsTail}',
     )),
   );
   final shadeSegsTail =
@@ -88,7 +89,8 @@ Future<void> seedControlBle(
     deviceId,
     'shade',
     Uint8List.fromList(utf8.encode(
-      '{"px":$shadePx,"bpp":$shadeBpp,"colors":$shadeColorsJson$shadeSegsTail}',
+      '{"px":$shadePx,"bpp":$shadeBpp,"colors":$shadeColorsJson'
+      '$shadeSegsTail}',
     )),
   );
   ble.seedSection(

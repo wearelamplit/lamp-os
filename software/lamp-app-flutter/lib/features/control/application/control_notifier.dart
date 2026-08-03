@@ -807,22 +807,11 @@ class ControlNotifier extends _$ControlNotifier {
     final segs = cur.shade.segments.isEmpty
         ? <Segment>[]
         : [
-            Segment(
-              name: cur.shade.segments.first.name,
-              px: cur.shade.segments.first.px,
-              colors: colors,
-            ),
+            cur.shade.segments.first.copyWith(colors: colors),
             ...cur.shade.segments.skip(1),
           ];
     state = AsyncData(cur.copyWith(
-      shade: ShadeSection(
-        px: cur.shade.px,
-        bpp: cur.shade.bpp,
-        byteOrder: cur.shade.byteOrder,
-        colors: colors,
-        colorsEditable: cur.shade.colorsEditable,
-        segments: segs,
-      ),
+      shade: cur.shade.copyWith(colors: colors, segments: segs),
     ));
     _shadeColorsWriter?.schedule(_encodeColors(colors));
     // Inventory "last seen" cache mirrors the blended identity color, same
@@ -845,16 +834,9 @@ class ControlNotifier extends _$ControlNotifier {
     if (cur == null) return;
     final segs = List<Segment>.from(cur.shade.segments);
     if (segIdx >= segs.length) return;
-    segs[segIdx] = Segment(name: segs[segIdx].name, px: segs[segIdx].px, colors: colors);
+    segs[segIdx] = segs[segIdx].copyWith(colors: colors);
     state = AsyncData(cur.copyWith(
-      shade: ShadeSection(
-        px: cur.shade.px,
-        bpp: cur.shade.bpp,
-        byteOrder: cur.shade.byteOrder,
-        colors: cur.shade.colors,
-        colorsEditable: cur.shade.colorsEditable,
-        segments: segs,
-      ),
+      shade: cur.shade.copyWith(segments: segs),
     ));
     _shadeColorsWriter?.schedule(_encodeSegmentColors(segIdx, colors));
   }
@@ -865,23 +847,11 @@ class ControlNotifier extends _$ControlNotifier {
     final segs = cur.base.segments.isEmpty
         ? <Segment>[]
         : [
-            Segment(
-              name: cur.base.segments.first.name,
-              px: cur.base.segments.first.px,
-              colors: colors,
-            ),
+            cur.base.segments.first.copyWith(colors: colors),
             ...cur.base.segments.skip(1),
           ];
     state = AsyncData(cur.copyWith(
-      base: BaseSection(
-        px: cur.base.px,
-        bpp: cur.base.bpp,
-        byteOrder: cur.base.byteOrder,
-        colors: colors,
-        knockout: cur.base.knockout,
-        colorsEditable: cur.base.colorsEditable,
-        segments: segs,
-      ),
+      base: cur.base.copyWith(colors: colors, segments: segs),
     ));
     _baseColorsWriter?.schedule(_encodeColors(colors));
     if (colors.isNotEmpty) {
@@ -900,15 +870,7 @@ class ControlNotifier extends _$ControlNotifier {
       next[index] = clamped;
     }
     state = AsyncData(cur.copyWith(
-      base: BaseSection(
-        px: cur.base.px,
-        bpp: cur.base.bpp,
-        byteOrder: cur.base.byteOrder,
-        colors: cur.base.colors,
-        knockout: next,
-        colorsEditable: cur.base.colorsEditable,
-        segments: cur.base.segments,
-      ),
+      base: cur.base.copyWith(knockout: next),
     ));
     _scheduleKnockoutWrite(index, clamped);
     // Schedule a debounced commit so the change persists on lamps
@@ -1355,14 +1317,9 @@ class ControlNotifier extends _$ControlNotifier {
     if (cur == null) return;
     final normalized = _normalizeByteOrder(order);
     state = AsyncData(cur.copyWith(
-      base: BaseSection(
-        px: cur.base.px,
+      base: cur.base.copyWith(
         bpp: _bppForByteOrder(normalized),
         byteOrder: normalized,
-        colors: cur.base.colors,
-        knockout: cur.base.knockout,
-        colorsEditable: cur.base.colorsEditable,
-        segments: cur.base.segments,
       ),
     ));
   }
@@ -1372,61 +1329,54 @@ class ControlNotifier extends _$ControlNotifier {
     if (cur == null) return;
     final normalized = _normalizeByteOrder(order);
     state = AsyncData(cur.copyWith(
-      shade: ShadeSection(
-        px: cur.shade.px,
+      shade: cur.shade.copyWith(
         bpp: _bppForByteOrder(normalized),
         byteOrder: normalized,
-        colors: cur.shade.colors,
-        colorsEditable: cur.shade.colorsEditable,
-        segments: cur.shade.segments,
       ),
     ));
   }
 
+  /// Apply a transform to a role's segment list and recompute the role px
+  /// total (Σ segment px). Empty segments (old firmware) keep the role px
+  /// as-is; those roles edit px directly through `setSegmentPx`.
+  void _updateSegments(String role, List<Segment> Function(List<Segment>) f) {
+    final cur = state.value;
+    if (cur == null) return;
+    if (role == 'shade') {
+      final segs = f(List<Segment>.from(cur.shade.segments));
+      final rolePx = segs.isEmpty
+          ? cur.shade.px
+          : segs.fold<int>(0, (a, s) => a + s.px).clamp(1, 255);
+      state = AsyncData(
+          cur.copyWith(shade: cur.shade.copyWith(px: rolePx, segments: segs)));
+    } else {
+      final segs = f(List<Segment>.from(cur.base.segments));
+      final rolePx = segs.isEmpty
+          ? cur.base.px
+          : segs.fold<int>(0, (a, s) => a + s.px).clamp(1, 255);
+      state = AsyncData(
+          cur.copyWith(base: cur.base.copyWith(px: rolePx, segments: segs)));
+    }
+  }
+
   /// Update px for a single segment and recompute the role total.
-  /// For single-segment or old firmware (empty segments), segIdx 0 updates the role px directly.
+  /// For old firmware (empty segments), segIdx 0 updates the role px directly.
   void setSegmentPx(String role, int segIdx, int px) {
     final cur = state.value;
     if (cur == null) return;
     final clamped = px.clamp(1, 255);
-    if (role == 'shade') {
-      final segs = List<Segment>.from(cur.shade.segments);
-      if (segIdx < segs.length) {
-        segs[segIdx] = Segment(name: segs[segIdx].name, px: clamped, colors: segs[segIdx].colors);
-      }
-      final rolePx = segs.isEmpty
-          ? clamped
-          : segs.fold<int>(0, (acc, s) => acc + s.px).clamp(1, 255);
-      state = AsyncData(cur.copyWith(
-        shade: ShadeSection(
-          px: rolePx,
-          bpp: cur.shade.bpp,
-          byteOrder: cur.shade.byteOrder,
-          colors: cur.shade.colors,
-          colorsEditable: cur.shade.colorsEditable,
-          segments: segs,
-        ),
-      ));
-    } else {
-      final segs = List<Segment>.from(cur.base.segments);
-      if (segIdx < segs.length) {
-        segs[segIdx] = Segment(name: segs[segIdx].name, px: clamped, colors: segs[segIdx].colors);
-      }
-      final rolePx = segs.isEmpty
-          ? clamped
-          : segs.fold<int>(0, (acc, s) => acc + s.px).clamp(1, 255);
-      state = AsyncData(cur.copyWith(
-        base: BaseSection(
-          px: rolePx,
-          bpp: cur.base.bpp,
-          byteOrder: cur.base.byteOrder,
-          colors: cur.base.colors,
-          knockout: cur.base.knockout,
-          colorsEditable: cur.base.colorsEditable,
-          segments: segs,
-        ),
-      ));
+    final segments = role == 'shade' ? cur.shade.segments : cur.base.segments;
+    if (segments.isEmpty) {
+      state = AsyncData(role == 'shade'
+          ? cur.copyWith(shade: cur.shade.copyWith(px: clamped))
+          : cur.copyWith(base: cur.base.copyWith(px: clamped)));
+      return;
     }
+    _updateSegments(
+        role,
+        (segs) => segIdx < segs.length
+            ? (segs..[segIdx] = segs[segIdx].copyWith(px: clamped))
+            : segs);
   }
 
   /// Apply Advanced LED settings (px, byteOrder, bpp) via
@@ -1446,26 +1396,14 @@ class ControlNotifier extends _$ControlNotifier {
         'byteOrder': base.byteOrder,
         'bpp': base.bpp,
         'colors': base.colors.map((c) => c.toHex()).toList(),
-        'segments': base.segments
-            .map((s) => {
-                  'name': s.name,
-                  'px': s.px,
-                  'colors': s.colors.map((c) => c.toHex()).toList(),
-                })
-            .toList(),
+        'segments': base.segments.map(_segmentJson).toList(),
       },
       'shade': {
         'px': shade.px,
         'byteOrder': shade.byteOrder,
         'bpp': shade.bpp,
         'colors': shade.colors.map((c) => c.toHex()).toList(),
-        'segments': shade.segments
-            .map((s) => {
-                  'name': s.name,
-                  'px': s.px,
-                  'colors': s.colors.map((c) => c.toHex()).toList(),
-                })
-            .toList(),
+        'segments': shade.segments.map(_segmentJson).toList(),
       },
     };
     await writeSettingsBlob(shipped, reboot: true);
@@ -1502,6 +1440,12 @@ class ControlNotifier extends _$ControlNotifier {
     }
     return mismatches;
   }
+
+  static Map<String, dynamic> _segmentJson(Segment s) => {
+        'name': s.name,
+        'px': s.px,
+        'colors': s.colors.map((c) => c.toHex()).toList(),
+      };
 
   static String _normalizeByteOrder(String order) {
     final up = order.toUpperCase();

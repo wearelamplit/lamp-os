@@ -179,10 +179,18 @@ class LampSection {
 
 /// A named pixel segment within a role (shade or base).
 class Segment {
-  const Segment({required this.name, required this.px, required this.colors});
+  const Segment({
+    required this.name,
+    required this.px,
+    required this.colors,
+  });
   final String name;
   final int px;
   final List<LampColor> colors;
+
+  /// [name], or [roleLabel] when a pre-segment-feature lamp migrated with no
+  /// name (firmware config_codec's flat-colors fallback).
+  String displayName(String roleLabel) => name.isEmpty ? roleLabel : name;
 
   factory Segment.fromJson(Map<String, dynamic> json) => Segment(
         name: json['name'] as String? ?? '',
@@ -191,6 +199,17 @@ class Segment {
             .whereType<String>()
             .map(LampColor.fromHex)
             .toList(),
+      );
+
+  Segment copyWith({
+    String? name,
+    int? px,
+    List<LampColor>? colors,
+  }) =>
+      Segment(
+        name: name ?? this.name,
+        px: px ?? this.px,
+        colors: colors ?? this.colors,
       );
 
   @override
@@ -291,6 +310,29 @@ class BaseSection {
     );
   }
 
+  BaseSection copyWith({
+    int? px,
+    int? bpp,
+    String? byteOrder,
+    List<LampColor>? colors,
+    Map<int, int>? knockout,
+    bool? colorsEditable,
+    List<Segment>? segments,
+    int? drawIdleMa,
+    int? drawFullMa,
+  }) =>
+      BaseSection(
+        px: px ?? this.px,
+        bpp: bpp ?? this.bpp,
+        byteOrder: byteOrder ?? this.byteOrder,
+        colors: colors ?? this.colors,
+        knockout: knockout ?? this.knockout,
+        colorsEditable: colorsEditable ?? this.colorsEditable,
+        segments: segments ?? this.segments,
+        drawIdleMa: drawIdleMa ?? this.drawIdleMa,
+        drawFullMa: drawFullMa ?? this.drawFullMa,
+      );
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -369,6 +411,23 @@ class ShadeSection {
           .toList(),
     );
   }
+
+  ShadeSection copyWith({
+    int? px,
+    int? bpp,
+    String? byteOrder,
+    List<LampColor>? colors,
+    bool? colorsEditable,
+    List<Segment>? segments,
+  }) =>
+      ShadeSection(
+        px: px ?? this.px,
+        bpp: bpp ?? this.bpp,
+        byteOrder: byteOrder ?? this.byteOrder,
+        colors: colors ?? this.colors,
+        colorsEditable: colorsEditable ?? this.colorsEditable,
+        segments: segments ?? this.segments,
+      );
 
   @override
   bool operator ==(Object other) =>

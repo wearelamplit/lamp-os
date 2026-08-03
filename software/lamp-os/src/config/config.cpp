@@ -43,24 +43,22 @@ Config::Config(ConfigStore* inStore) {
   // The raw payload would leak `lamp.password` to anyone on the serial
   // console (USB physical access). If you need the full shape while
   // debugging a parse bug, attach a temporary `Serial.println(json)`
-  // for that session; don't roll back this redaction.
-  {
-    JsonDocument peek;
-    if (deserializeJson(peek, json) == DeserializationError::Ok) {
-      const char* loadedName = peek["lamp"]["name"] | "<unset>";
-      const char* pwField = peek["lamp"]["password"] | "";
-      const bool hasPassword = pwField != nullptr && pwField[0] != '\0';
-      const int exprCount = peek["expressions"].is<JsonArray>()
-                                ? (int)peek["expressions"].as<JsonArray>().size()
-                                : 0;
-      Serial.printf(
-          "[cfg] loaded name=%s pw=%s expressions=%d nvs_bytes=%u\n",
-          loadedName, hasPassword ? "set" : "unset", exprCount,
-          (unsigned)json.length());
-    } else {
-      Serial.printf("[cfg] loaded nvs_bytes=%u (parse failed; full dump suppressed)\n",
-                    (unsigned)json.length());
-    }
+  // for that session; don't roll back this redaction. Reads off `doc`
+  // (already parsed above) rather than a second JsonDocument + parse.
+  if (error == DeserializationError::Ok) {
+    const char* loadedName = doc["lamp"]["name"] | "<unset>";
+    const char* pwField = doc["lamp"]["password"] | "";
+    const bool hasPassword = pwField != nullptr && pwField[0] != '\0';
+    const int exprCount = doc["expressions"].is<JsonArray>()
+                              ? (int)doc["expressions"].as<JsonArray>().size()
+                              : 0;
+    Serial.printf(
+        "[cfg] loaded name=%s pw=%s expressions=%d nvs_bytes=%u\n",
+        loadedName, hasPassword ? "set" : "unset", exprCount,
+        (unsigned)json.length());
+  } else {
+    Serial.printf("[cfg] loaded nvs_bytes=%u (parse failed; full dump suppressed)\n",
+                  (unsigned)json.length());
   }
 #endif
 

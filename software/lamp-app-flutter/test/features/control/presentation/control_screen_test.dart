@@ -158,6 +158,45 @@ void main() {
     expect(find.text('BASE'), findsOneWidget);
   });
 
+  testWidgets(
+      'migrated lamp with empty-name segments shows "Shade"/"Base", not blank',
+      (tester) async {
+    // Pre-segment-feature firmware migrates its old flat colors[] into a
+    // single segment with no name (config_codec's fallback). The app must
+    // still render a label, not an empty Text widget.
+    SharedPreferences.setMockInitialValues({});
+    final ble = InMemoryBleClient();
+    await seedControlBle(
+      ble,
+      deviceId: _devId,
+      name: 'jacko',
+      baseSegmentsJson: '[{"name":"","px":35,"colors":["#300783FF"]}]',
+      shadeSegmentsJson: '[{"name":"","px":38,"colors":["#000000FF"]}]',
+    );
+    final c = ProviderContainer(
+      overrides: [
+        bleClientProvider.overrideWithValue(ble),
+        bleScannerProvider.overrideWithValue(FakeBleScanner()),
+      ],
+    );
+    addTearDown(c.dispose);
+    await c.read(inventoryNotifierProvider.future);
+    await c.read(inventoryNotifierProvider.notifier).add(const InventoryLamp(
+        id: _devId, name: 'jacko', controlPassword: 'secret'));
+
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: c,
+      child: const MaterialApp(
+        home: Scaffold(body: ControlScreen(lampId: _devId)),
+      ),
+    ));
+    await _pumpToData(tester);
+
+    expect(find.text('Shade'), findsOneWidget);
+    expect(find.text('Base'), findsOneWidget);
+    expect(find.text(''), findsNothing);
+  });
+
   // ---------------------------------------------------------------------------
   // Defense-in-depth redirect: a stale `isMesh: false` adv in the cache must
   // NOT yank a user out of ControlScreen when the BLE connection actually

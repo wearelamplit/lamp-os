@@ -91,7 +91,21 @@ void PulseExpression::updateWavePosition() {
     if (loopContinuous_) waveDirection = 1;
   }
 
-  wavePosition = travelStart_ + applyEasing(easing_, progress_) * travelSpan_;
+  wavePosition = wavePositionFromProgress();
+}
+
+float PulseExpression::wavePositionFromProgress() const {
+  if (loopContinuous_) {
+    return travelStart_ + applyEasing(easing_, progress_) * travelSpan_;
+  }
+  const float linearPos = travelStart_ + progress_ * travelSpan_;
+  const float lo = static_cast<float>(zone_.posMin);
+  const float hi = static_cast<float>(zone_.posMax);
+  if (hi <= lo || linearPos <= lo || linearPos >= hi) {
+    return linearPos;
+  }
+  const float u = (linearPos - lo) / (hi - lo);
+  return lo + applyEasing(easing_, u) * (hi - lo);
 }
 
 const ExpressionDescriptor& PulseExpression::classDescriptor() {

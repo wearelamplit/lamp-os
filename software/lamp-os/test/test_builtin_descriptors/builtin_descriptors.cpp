@@ -111,7 +111,7 @@ void test_glitchy_duration_range() {
 void test_glitchy_interval_bounds_and_min_gap() {
   auto iv = findById("glitchy")["interval"];
   TEST_ASSERT_TRUE(iv.is<JsonObject>());
-  TEST_ASSERT_EQUAL_INT(600,   iv["min"].as<int>());
+  TEST_ASSERT_EQUAL_INT(300,   iv["min"].as<int>());
   TEST_ASSERT_EQUAL_INT(18000, iv["max"].as<int>());
   TEST_ASSERT_EQUAL_INT(1800,  iv["minGap"].as<int>());
   auto def = iv["default"].as<JsonArray>();
@@ -176,10 +176,10 @@ void test_shifty_duration_hold_time() {
 void test_shifty_interval_bounds_and_help() {
   auto iv = findById("shifty")["interval"];
   TEST_ASSERT_TRUE(iv.is<JsonObject>());
-  TEST_ASSERT_EQUAL_INT(60,  iv["min"].as<int>());
-  TEST_ASSERT_EQUAL_INT(900, iv["max"].as<int>());
+  TEST_ASSERT_EQUAL_INT(300,   iv["min"].as<int>());
+  TEST_ASSERT_EQUAL_INT(18000, iv["max"].as<int>());
   auto def = iv["default"].as<JsonArray>();
-  TEST_ASSERT_EQUAL_INT(60,  def[0].as<int>());
+  TEST_ASSERT_EQUAL_INT(300, def[0].as<int>());
   TEST_ASSERT_EQUAL_INT(900, def[1].as<int>());
   TEST_ASSERT_EQUAL_STRING("A random time in this range is picked before each trigger.",
                            iv["help"].as<const char*>());

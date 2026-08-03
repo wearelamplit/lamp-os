@@ -54,11 +54,11 @@ inline constexpr ExpressionDescriptor kPulseDescriptorData{
   .name     = "Pulse",
   .colors   = { .max = 8, .label = "Colors" },
   .interval = RangeSpec{
-    .min   = 60,
-    .max   = 900,
+    .min   = 300,
+    .max   = 18000,
     .step  = 30,
     .unit  = "s",
-    .defLo = 60,
+    .defLo = 300,
     .defHi = 900,
     .help  = kIntervalHelp,
   },
@@ -105,6 +105,12 @@ class PulseExpression : public Expression {
    * Update wave position based on elapsed time.
    */
   void updateWavePosition();
+
+  // Map the linear travel phase progress_ to a wave-center pixel. Continuous
+  // eases the whole sweep. Trigger mode is 3-phase: the off-strip entrance and
+  // exit legs stay linear, and only the on-strip sweep between the visible
+  // edges carries the configured easing, so the entrance/exit don't feel rushed.
+  float wavePositionFromProgress() const;
 
   /**
    * Select next pulse color from palette.

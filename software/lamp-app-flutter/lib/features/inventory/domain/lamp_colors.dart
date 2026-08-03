@@ -12,9 +12,12 @@ import 'inventory_lamp.dart';
 ///   by `controlNotifier._updateSeen`; supplies W and covers the offline case.
 ///
 /// Policy: adv present -> adv RGB + cached W; adv absent -> cached RGBW; both
-/// absent -> null. A `shadeRgb` of 0 is treated as "missing" not "black"
-/// (transitional v2 firmware ships 0 as a sentinel), so it falls through to
-/// cache. Length-3 legacy cache entries parse as W=0.
+/// absent -> null. A `baseRgb`/`shadeRgb` of 0 is treated as "missing" not
+/// "black" (adv carries no W byte, so an all-warm-white base/shade reads as
+/// 0 RGB), so it falls through to cache. A resolved swatch that's still
+/// fully black (cache also 0 or absent) resolves to null so the tile's
+/// neutral fallback renders instead. Length-3 legacy cache entries parse as
+/// W=0.
 class LampColors {
   const LampColors({this.shade, this.base});
   final Color? shade;
@@ -45,15 +48,21 @@ LampColors resolveLampColors({
         w: w,
       ).toSwatch();
 
-  final Color? base = (near != null)
-      ? swatchFromAdv(near.baseRgb, cachedW(inv?.lastBaseColor))
-      : swatchFromList(inv?.lastBaseColor);
+  Color? base;
+  if (near != null && near.baseRgb != 0) {
+    base = swatchFromAdv(near.baseRgb, cachedW(inv?.lastBaseColor));
+  }
+  base ??= swatchFromList(inv?.lastBaseColor);
 
   Color? shade;
   if (near != null && near.shadeRgb != 0) {
     shade = swatchFromAdv(near.shadeRgb, cachedW(inv?.lastShadeColor));
   }
   shade ??= swatchFromList(inv?.lastShadeColor);
+
+  const black = Color.fromARGB(0xFF, 0, 0, 0);
+  if (base == black) base = null;
+  if (shade == black) shade = null;
 
   return LampColors(shade: shade, base: base);
 }

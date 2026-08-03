@@ -5,6 +5,7 @@
 #include <unity.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 
 #include "expressions/primitives.hpp"
@@ -71,7 +72,7 @@ struct PulseTravelRig {
       progress = 0.0f;
       if (loop) waveDirection = 1;
     }
-    wavePosition = travelStart + lamp::applyEasing(easing, progress) * travelSpan;
+    wavePosition = positionFor(progress);
     const bool triggerExit = !loop && progress >= 1.0f;
     const bool cycleReturned = loop && reachedFarEnd && progress <= 0.0f;
     bool previewCycleDone = false;
@@ -79,6 +80,19 @@ struct PulseTravelRig {
       previewCycleDone = ++previewCyclesDone >= lamp::kPreviewCycles;
     }
     if (triggerExit || previewCycleDone) ended = true;
+  }
+
+  // Mirrors PulseExpression::wavePositionFromProgress(): continuous eases the
+  // whole sweep; trigger mode keeps the off-strip entrance/exit legs linear and
+  // eases only the on-strip span between the visible edges.
+  float positionFor(float p) const {
+    if (loop) return travelStart + lamp::applyEasing(easing, p) * travelSpan;
+    const float linearPos = travelStart + p * travelSpan;
+    if (posMax <= posMin || linearPos <= posMin || linearPos >= posMax) {
+      return linearPos;
+    }
+    const float u = (linearPos - posMin) / (posMax - posMin);
+    return posMin + lamp::applyEasing(easing, u) * (posMax - posMin);
   }
 };
 
@@ -179,6 +193,44 @@ void test_trigger_mode_ends_on_exit() {
   }
   TEST_ASSERT_TRUE(rig.ended);
   TEST_ASSERT_FLOAT_WITHIN(1e-6f, 1.0f, rig.progress);
+}
+
+void test_trigger_three_phase_easing() {
+  // Non-continuous: off-strip entrance and exit legs run LINEAR; the on-strip
+  // sweep between the visible edges [posMin, posMax] carries the easing.
+  test::PulseTravelRig rig;
+  rig.easing = lamp::Easing::Swell;  // t*t, clearly nonlinear, stays in [0,1]
+  rig.loop = false;
+  rig.pulseSpeedMs = 10;
+  rig.trigger(/*posMin=*/10, /*posMax=*/40, /*pulseWidth=*/5);
+  // travelStart=5, travelSpan=45; center enters at 5, exits at 50.
+
+  bool sawEntrance = false, sawMain = false, sawExit = false, sawMainDiverges = false;
+
+  uint32_t nowMs = 1000;
+  int guard = 0;
+  while (!rig.ended && guard++ < 100000) {
+    nowMs += 16;
+    rig.step(nowMs);
+    const float linearPos = rig.travelStart + rig.progress * rig.travelSpan;
+    if (linearPos <= 10.0f) {
+      sawEntrance = true;
+      TEST_ASSERT_FLOAT_WITHIN(1e-4f, linearPos, rig.wavePosition);
+    } else if (linearPos >= 40.0f) {
+      sawExit = true;
+      TEST_ASSERT_FLOAT_WITHIN(1e-4f, linearPos, rig.wavePosition);
+    } else {
+      sawMain = true;
+      const float u = (linearPos - 10.0f) / 30.0f;
+      const float eased = 10.0f + lamp::applyEasing(rig.easing, u) * 30.0f;
+      TEST_ASSERT_FLOAT_WITHIN(1e-4f, eased, rig.wavePosition);
+      if (std::fabs(rig.wavePosition - linearPos) > 0.1f) sawMainDiverges = true;
+    }
+  }
+  TEST_ASSERT_TRUE(sawEntrance);
+  TEST_ASSERT_TRUE(sawMain);
+  TEST_ASSERT_TRUE(sawExit);
+  TEST_ASSERT_TRUE(sawMainDiverges);  // the eased sweep actually departs from linear
 }
 
 void test_continuous_first_entrance_starts_off_strip() {
@@ -401,6 +453,7 @@ int main(int, char**) {
   RUN_TEST(test_size_out_of_range_folds_to_default_step);
   RUN_TEST(test_linear_travel_matches_legacy);
   RUN_TEST(test_trigger_mode_ends_on_exit);
+  RUN_TEST(test_trigger_three_phase_easing);
   RUN_TEST(test_continuous_first_entrance_starts_off_strip);
   RUN_TEST(test_continuous_repoints_to_visible_edges_after_entrance);
   RUN_TEST(test_continuous_reverses_and_never_ends);

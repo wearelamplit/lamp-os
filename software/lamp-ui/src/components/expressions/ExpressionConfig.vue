@@ -1,8 +1,9 @@
 <script setup lang="ts">
 // Renders the subset of the catalog the web UI owns: colors, interval,
 // duration, int sliders (honoring invert + end labels), and enum selects.
-// Zones and requiresZoning params are skipped; ExpressionsList round-trips
-// every un-rendered instance key untouched.
+// Zones, requiresZoning params, and the shared "easing" motion control are
+// skipped (easing stays app-only); ExpressionsList round-trips every
+// un-rendered instance key untouched.
 import { computed } from 'vue'
 import FormField from '../FormField.vue'
 import ColorPicker from '../ColorPicker.vue'
@@ -54,7 +55,7 @@ const minColors = computed(() => (props.descriptor.colors.inheritsSurface ? 0 : 
 
 const shownParams = computed(() =>
   (props.descriptor.params ?? []).filter(
-    (p) => !p.requiresZoning && (p.type === 'int' || p.type === 'enum'),
+    (p) => !p.requiresZoning && p.key !== 'easing' && (p.type === 'int' || p.type === 'enum'),
   ),
 )
 

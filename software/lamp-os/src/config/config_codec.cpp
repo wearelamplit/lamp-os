@@ -11,14 +11,16 @@ namespace config_codec {
 // color so broadcastColors() is always dereferenceable.
 // Fallback: if `segments` is absent/empty but the old flat `colors` array
 // is present (blobs from before the per-segment schema), migrate to a single
-// segment so custom colors survive the upgrade.
+// segment named `roleName` so custom colors survive the upgrade and the app
+// doesn't render a blank segment label.
 static void parseSegments(JsonObject node, std::vector<SegmentSettings>& segs,
-                          const Color& fallback) {
+                          const Color& fallback, const std::string& roleName) {
   JsonArray arr = node["segments"];
   if (arr.isNull() || arr.size() == 0) {
     JsonArray flat = node["colors"];
     if (flat.isNull() || flat.size() == 0) return;
     SegmentSettings seg;
+    seg.name = roleName;
     seg.px = node["px"] | 0;
     for (JsonVariant c : flat) seg.colors.push_back(hexStringToColor(c));
     if (seg.colors.empty()) seg.colors.push_back(fallback);
@@ -37,7 +39,7 @@ static void parseSegments(JsonObject node, std::vector<SegmentSettings>& segs,
     if (seg.colors.empty()) seg.colors.push_back(fallback);
     segs.push_back(std::move(seg));
   }
-  if (segs.empty()) segs.push_back({"", 0, {fallback}});
+  if (segs.empty()) segs.push_back({roleName, 0, {fallback}});
 }
 
 // Σ segment px ≤ 255 (uint8 pixelCount + boot buffer sizing). This is the one
@@ -94,7 +96,7 @@ void fromJson(JsonObject root, LampSettings& lamp, BaseSettings& base,
 
   JsonObject baseNode = root["base"];
   base.byteOrder = std::string(baseNode["byteOrder"] | "");
-  parseSegments(baseNode, base.segments, kBaseDefaultColor);
+  parseSegments(baseNode, base.segments, kBaseDefaultColor, "Base");
   clampSumPx(base.segments);
   // Keep knockoutPixels in sync with the active pixel count. Drops stale
   // entries when px shrinks and 100-fills ("no knockout") any slots when px
@@ -113,7 +115,7 @@ void fromJson(JsonObject root, LampSettings& lamp, BaseSettings& base,
 
   JsonObject shadeNode = root["shade"];
   shade.byteOrder = std::string(shadeNode["byteOrder"] | "");
-  parseSegments(shadeNode, shade.segments, kShadeDefaultColor);
+  parseSegments(shadeNode, shade.segments, kShadeDefaultColor, "Shade");
   clampSumPx(shade.segments);
   // colorsEditable is firmware-owned (set by Lamp subclass defaults via
   // applyDefaults). Inbound writes intentionally do not update it.

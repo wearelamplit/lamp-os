@@ -12,7 +12,8 @@ class Color;
 // Snapshot of the active greeting. Populated while an animation plays;
 // cleared when it stops. peerLampId is the canonical uppercase colon-hex
 // mac of the greeted peer (empty when idle). kind is a stable short
-// label: "warm", "reserved", "snub" (SocialBehavior) or "glitch" (snafu).
+// label: "warm", "reserved", "snub" (SocialBehavior), "glitch" (snafu), or
+// "pulse" (Lioness).
 struct GreetingState {
   bool        active      = false;
   std::string peerLampId;

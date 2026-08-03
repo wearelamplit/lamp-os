@@ -86,7 +86,7 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
         final useHeaders = shadeSegs.length > 1 || baseSegs.length > 1;
         final baseName = state.base.segments.isEmpty
             ? 'Base'
-            : state.base.segments.first.name;
+            : state.base.segments.first.displayName('Base');
         return Column(
           children: [
             Expanded(
@@ -140,9 +140,14 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
                   if (!useHeaders)
                     ShadeCard(
                       lampId: lampId,
-                      title: shadeSegs.isEmpty ? 'Shade' : shadeSegs.first.name,
+                      title: shadeSegs.isEmpty
+                          ? 'Shade'
+                          : shadeSegs.first.displayName('Shade'),
                       spec: shadeSegmentSpec(
-                          0, shadeSegs.isEmpty ? 'Shade' : shadeSegs.first.name),
+                          0,
+                          shadeSegs.isEmpty
+                              ? 'Shade'
+                              : shadeSegs.first.displayName('Shade')),
                       onEditSessionChanged: (open) =>
                           notifier.setEditSession(EditSurface.shade, open),
                     )
@@ -151,8 +156,9 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
                     for (var i = 0; i < shadeSegs.length; i++)
                       ShadeCard(
                         lampId: lampId,
-                        title: shadeSegs[i].name,
-                        spec: shadeSegmentSpec(i, shadeSegs[i].name),
+                        title: shadeSegs[i].displayName('Shade'),
+                        spec: shadeSegmentSpec(
+                            i, shadeSegs[i].displayName('Shade')),
                         onEditSessionChanged: i == 0
                             ? (open) =>
                                 notifier.setEditSession(EditSurface.shade, open)

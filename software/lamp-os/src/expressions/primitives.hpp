@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <vector>
 
 #include "expressions/param_utils.hpp"
 
@@ -81,6 +82,26 @@ struct Zone {
     return static_cast<uint16_t>(posMax - posMin + 1);
   }
 };
+
+// Tile `count` contiguous equal Zones across [0, windowSize). Each zone is
+// windowSize/count wide; the final zone absorbs any remainder so the tiling
+// covers the whole window. Empty when count or windowSize is zero.
+inline std::vector<Zone> evenZones(uint16_t count, uint16_t windowSize) {
+  std::vector<Zone> zones;
+  if (count == 0 || windowSize == 0) return zones;
+  const uint16_t base = windowSize / count;
+  uint16_t start = 0;
+  for (uint16_t i = 0; i < count; ++i) {
+    const uint16_t sz = (i + 1 == count) ? static_cast<uint16_t>(windowSize - start) : base;
+    Zone z;
+    z.posMin = start;
+    z.posMax = sz == 0 ? start : static_cast<uint16_t>(start + sz - 1);
+    if (sz == 0) z.posMin = static_cast<uint16_t>(start + 1);
+    zones.push_back(z);
+    start = static_cast<uint16_t>(start + sz);
+  }
+  return zones;
+}
 
 // Zone from the whole-strip/region toggle: fullStrip=1 (default) spans the
 // window, ignoring any stale posMin/posMax the Region mode left behind.

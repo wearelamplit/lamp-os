@@ -11,6 +11,7 @@
 
 using lamp::getParam;
 using lamp::Zone;
+using lamp::evenZones;
 using lamp::Points;
 using lamp::parseSize;
 using lamp::spotBlendPercent;
@@ -50,6 +51,28 @@ void test_zone_swaps_reversed() {
 void test_zone_zero_window_is_empty() {
   Zone r = Zone::fromParameters(empty(), 0);
   TEST_ASSERT_EQUAL_UINT16(0, r.size());
+}
+
+void test_even_zones_exact_split() {
+  std::vector<Zone> z = evenZones(3, 18);
+  TEST_ASSERT_EQUAL_UINT16(3, z.size());
+  TEST_ASSERT_EQUAL_UINT16(0,  z[0].posMin);  TEST_ASSERT_EQUAL_UINT16(5,  z[0].posMax);
+  TEST_ASSERT_EQUAL_UINT16(6,  z[1].posMin);  TEST_ASSERT_EQUAL_UINT16(11, z[1].posMax);
+  TEST_ASSERT_EQUAL_UINT16(12, z[2].posMin);  TEST_ASSERT_EQUAL_UINT16(17, z[2].posMax);
+  for (const Zone& zn : z) TEST_ASSERT_EQUAL_UINT16(6, zn.size());
+}
+
+void test_even_zones_remainder_to_last() {
+  std::vector<Zone> z = evenZones(3, 7);   // 2,2,3
+  TEST_ASSERT_EQUAL_UINT16(2, z[0].size());
+  TEST_ASSERT_EQUAL_UINT16(2, z[1].size());
+  TEST_ASSERT_EQUAL_UINT16(3, z[2].size());
+  TEST_ASSERT_EQUAL_UINT16(6, z[2].posMax);   // contiguous, covers the window
+}
+
+void test_even_zones_degenerate() {
+  TEST_ASSERT_TRUE(evenZones(0, 18).empty());
+  TEST_ASSERT_TRUE(evenZones(3, 0).empty());
 }
 
 void test_points_absent_returns_default() {
@@ -366,6 +389,9 @@ int main(int, char**) {
   RUN_TEST(test_zone_clamps_to_window);
   RUN_TEST(test_zone_swaps_reversed);
   RUN_TEST(test_zone_zero_window_is_empty);
+  RUN_TEST(test_even_zones_exact_split);
+  RUN_TEST(test_even_zones_remainder_to_last);
+  RUN_TEST(test_even_zones_degenerate);
   RUN_TEST(test_points_absent_returns_default);
   RUN_TEST(test_points_clamps_to_window);
   RUN_TEST(test_points_floor_is_one);

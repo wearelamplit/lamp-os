@@ -7,6 +7,11 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 
 ## 1.2.2
 
+### Added
+- **Lioness lamp.** A new fixed-install custom variant. Its base carries three
+  "lion" zones that each mirror a nearby lamp's colours; when a new lamp shows
+  up the lions pulse its colour and the shade glitches to greet it.
+
 ### Fixed
 - **Continuous Pulse loops right away.** A Pulse set to continuous could take up
   to ~15 minutes to start and wouldn't restart on its own if it ever stopped — it
@@ -14,6 +19,24 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 - **Testing a looping expression actually shows it loop.** Previewing a
   continuous expression (Pulse, Breathing, Spotty) now runs a couple of cycles
   instead of a single one, so you can see the motion before saving it.
+- **My Lamps keeps a lamp's colour instead of flashing a black base.** When
+  fresh detail is missing it falls back to the last known colour rather than
+  showing an empty swatch.
+- **Shade and Base always keep their labels** on the colour pickers, including
+  on older lamps upgrading from before named surfaces.
+- **BLE-only lamps reappear on the Social tab** — the app scans for nearby
+  lamps while that tab is open, so lamps that don't gossip over the mesh show
+  up again.
+
+### Changed
+- **Expression trigger intervals share one 5 minute – 5 hour range** across
+  Pulse, Shifty, and Glitchy, instead of each expression capping somewhere
+  different.
+- **Pulse's easing shapes only the on-strip sweep.** The wave enters and
+  leaves the strip at a steady pace and the chosen easing applies to the
+  travel across the strip, so an eased Pulse no longer feels rushed.
+- **The web config UI drops the easing control** — it duplicated the app's and
+  had grown unwieldy; set an expression's easing from the app.
 
 ## 1.2.0
 
