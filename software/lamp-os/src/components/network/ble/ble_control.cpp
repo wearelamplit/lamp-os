@@ -29,6 +29,7 @@
 #include "ble_gap.hpp"
 #include "crypto.hpp"
 #include "components/network/ble/gatt_layout.hpp"
+#include "components/network/ble/social_scan.hpp"
 #include "expressions/expression_manager.hpp"
 #include "components/network/mesh/lamp_roster.hpp"
 #include "components/network/mesh/proximity.hpp"
@@ -92,6 +93,20 @@ static volatile bool         s_homeModePageActive = false;
 static volatile bool         s_scanPausedForGattClient = false;
 // Held true for an OTA window (pauseRadioForOta): quiets adv + scan.
 static volatile bool         s_otaRadioPaused = false;
+// Set by the app (CHAR_EDIT_SESSION social-view selector) while the
+// Social/Network page is open. Gates the duty-cycled passive scan below.
+// Cleared on BLE disconnect.
+static volatile bool         s_socialViewActive = false;
+// millis() of the last throughput-sensitive BLE write (color/brightness/
+// knockout/OTA chunk). The social scan skips a window while a write fired
+// within SocialScanTuning::idleGuardMs so it never competes during a live
+// drag or OTA. Written on Core 0, read on Core 1.
+static volatile uint32_t     s_lastAppWriteMs = 0;
+
+// Core 1 only (tick): duty-cycled passive-scan state for the Social view.
+static SocialScanGate        s_socialScan;
+static const SocialScanTuning s_socialScanTuning;
+static bool                  s_socialScanPrevActive = false;
 
 static          uint16_t     s_currentConnHandle = 0xFFFF;
 
@@ -104,6 +119,8 @@ static constexpr uint16_t kSupervisionTimeoutUnits = 400;  // 4.0 s (units of 10
 bool isClientConnected()   { return s_clientConnected;   }
 bool isHomeModePageActive() { return s_homeModePageActive; }
 bool isScanPaused()        { return s_scanPausedForGattClient; }
+
+void noteAppWriteActivity() { s_lastAppWriteMs = millis(); }
 
 // Per-connection state. NimBLE caps at CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
 // (advertising stops on connect, so only one app connects at a time), so a
@@ -299,6 +316,7 @@ class ControlServerCallbacks : public NimBLEServerCallbacks {
 
     s_clientConnected = false;
     s_homeModePageActive = false;
+    s_socialViewActive = false;
     // Clear editing flags so a crashed/backgrounded app can't keep the
     // wisp's overrides locked out; reconnected sessions re-open via
     // CHAR_EDIT_SESSION.
@@ -358,6 +376,7 @@ class BrightnessCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
     if (lamp::ota_quiet_mode::isQuiet()) return;
+    noteAppWriteActivity();
     std::string val = c->getValue();
     if (val.empty()) return;
     uint8_t level = static_cast<uint8_t>(val[0]);
@@ -381,6 +400,9 @@ class EditSessionCallback : public NimBLECharacteristicCallbacks {
     if (surface & 0x01) lamp::overrides.base.setOperatorEditing(open);
     if (surface & 0x02) lamp::overrides.shade.setOperatorEditing(open);
     if (surface & 0x04) lamp::overrides.brightness.setOperatorEditing(open);
+    // 0x08 is not an edit surface: the app on the Social/Network page toggles
+    // the duty-cycled passive scan that sights BLE-only peers while connected.
+    if (surface & 0x08) s_socialViewActive = open;
 #ifdef LAMP_DEBUG
     Serial.printf("[ble_control] editSession surface=0x%02x %s\n",
                   surface, open ? "open" : "closed");
@@ -407,6 +429,7 @@ class BaseKnockoutCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
     if (lamp::ota_quiet_mode::isQuiet()) return;
+    noteAppWriteActivity();
     std::string val = c->getValue();
     if (val.size() < 2) return;
     uint8_t pixelIndex = static_cast<uint8_t>(val[0]);
@@ -1031,6 +1054,7 @@ class FwChunkCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
     if (!s_firmwareReceiver) return;
+    noteAppWriteActivity();
     const std::string raw = c->getValue();
     lamp_protocol::ParsedFwChunk p;
     if (!lamp_protocol::parseFwChunk(
@@ -1053,6 +1077,27 @@ void tick() {
   if (nowMs - s_lastPruneMs >= 1000) {
     s_lastPruneMs = nowMs;
     lamp::lampRoster.prune(LAMP_PRUNE_TIME_MS);
+  }
+
+  // Duty-cycled passive scan for the Social/Network view. The connect-time
+  // pause stops the central scan to protect write throughput; while the app
+  // holds the Social page open this reopens short windows so BLE-only peers
+  // still get sighted into the roster. Windows tear down only while a client
+  // holds the link; onDisconnect resumes the continuous scan itself.
+  {
+    const bool active =
+        s_socialViewActive && s_clientConnected && !s_otaRadioPaused;
+    if (active && !s_socialScanPrevActive) s_socialScan.arm(nowMs);
+    s_socialScanPrevActive = active;
+    const SocialScanAction act =
+        s_socialScan.step(nowMs, active, s_lastAppWriteMs, s_socialScanTuning);
+    if (act == SocialScanAction::OpenWindow) {
+      NimBLEScan* scan = NimBLEDevice::getScan();
+      scan->setActiveScan(false);
+      scan->start(0);
+    } else if (act == SocialScanAction::CloseWindow) {
+      if (s_scanPausedForGattClient) NimBLEDevice::getScan()->stop();
+    }
   }
 
   // Proactively rebuild dirty section caches on Core 1 so the BLE host

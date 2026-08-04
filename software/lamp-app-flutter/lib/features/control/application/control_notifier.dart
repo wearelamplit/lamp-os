@@ -768,6 +768,31 @@ class ControlNotifier extends _$ControlNotifier {
     );
   }
 
+  /// Selector byte on CHAR_EDIT_SESSION for the Social/Network view. Additive
+  /// value on the existing edit-session characteristic (no GATT layout change);
+  /// matches the firmware-side 0x08 bit.
+  static const int _editSurfaceSocialView = 0x08;
+
+  /// Tell the connected lamp the Social/Network page is open (or closed) so it
+  /// runs a low-duty passive BLE scan and sights BLE-only (non-mesh) peers into
+  /// its nearby list while the app holds the link. Call `true` on page enter,
+  /// `false` on leave. Firmware also clears the flag on BLE disconnect, so a
+  /// missed `false` (crash, force-stop) self-heals. Fire-and-forget: a dropped
+  /// write just means the lamp doesn't scan this session.
+  Future<void> setSocialViewActive(bool active) async {
+    try {
+      await _ble.write(
+        _deviceId,
+        BleUuids.controlService,
+        BleUuids.editSession,
+        Uint8List.fromList([_editSurfaceSocialView, active ? 1 : 0]),
+        withoutResponse: true,
+      );
+    } catch (_) {
+      // Same contract as the other live-preview writes: dropped silently.
+    }
+  }
+
   Future<void> setBrightness(int value) async {
     final v = value.clamp(0, 100);
     final cur = state.value;

@@ -58,6 +58,7 @@ class _CapturingControl extends ControlNotifier {
   _CapturingControl(this._selfName);
   final String _selfName;
   final List<String> greetedAddrs = [];
+  final List<bool> socialViewCalls = [];
 
   @override
   Future<ControlState> build(String deviceId) async => _fakeState(_selfName);
@@ -65,6 +66,11 @@ class _CapturingControl extends ControlNotifier {
   @override
   Future<void> triggerGreet(String lampId) async {
     greetedAddrs.add(lampId);
+  }
+
+  @override
+  Future<void> setSocialViewActive(bool active) async {
+    socialViewCalls.add(active);
   }
 }
 
@@ -392,6 +398,50 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(capturer.greetedAddrs, ['AA:BB:CC:DD:EE:FF']);
+  });
+
+  testWidgets(
+      'signals social-view active on page enter and clears on leave',
+      (tester) async {
+    final ble = InMemoryBleClient();
+    await _seedDispositions(ble, 'floral-id', const {});
+    late _CapturingControl capturer;
+    var show = true;
+    late StateSetter setShow;
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        bleClientProvider.overrideWithValue(ble),
+        controlNotifierProvider('floral-id').overrideWith(() {
+          capturer = _CapturingControl('floral');
+          return capturer;
+        }),
+        lampNearbyPeersNotifierProvider('floral-id')
+            .overrideWith(() => _FakeLampNearbyPeers(const [])),
+      ],
+      child: MaterialApp(
+        home: Scaffold(
+          body: StatefulBuilder(builder: (context, setState) {
+            setShow = setState;
+            return show
+                ? const SocialScreen(lampId: 'floral-id')
+                : const SizedBox.shrink();
+          }),
+        ),
+      ),
+    ));
+    // Resolve the control future, rebuild the body, then run the post-frame
+    // callback that fires setSocialViewActive(true) from initState.
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(capturer.socialViewCalls, [true]);
+
+    // Leave the page: unmount SocialScreen → State.dispose → clear.
+    setShow(() => show = false);
+    await tester.pump();
+
+    expect(capturer.socialViewCalls, [true, false]);
   });
 
   testWidgets(

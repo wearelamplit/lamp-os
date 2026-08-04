@@ -34,12 +34,44 @@ import '../domain/social_mode.dart';
 /// neutral → fond → smitten) wired to the dispositions provider.
 /// Writes are debounced 500ms after the last slider movement and
 /// flushed on tab leave so a drag-then-navigate doesn't drop the edit.
-class SocialScreen extends ConsumerWidget {
+class SocialScreen extends ConsumerStatefulWidget {
   const SocialScreen({super.key, required this.lampId});
   final String lampId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SocialScreen> createState() => _SocialScreenState();
+}
+
+class _SocialScreenState extends ConsumerState<SocialScreen> {
+  // Captured in initState: Riverpod forbids reading `ref` in dispose, so the
+  // notifier handle is held in a field for the leave-clear.
+  late final ControlNotifier _control =
+      ref.read(controlNotifierProvider(widget.lampId).notifier);
+
+  @override
+  void initState() {
+    super.initState();
+    // Signal the connected lamp to run its low-duty passive BLE scan while
+    // this page is open, so BLE-only (non-mesh) peers get sighted into the
+    // nearby list below. Post-frame so the control notifier has finished its
+    // synchronous build() and cached the BLE link.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _control.setSocialViewActive(true);
+    });
+  }
+
+  @override
+  void dispose() {
+    // Clear the flag on leave. The lamp also clears it on BLE disconnect, so a
+    // missed clear self-heals.
+    _control.setSocialViewActive(false);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final lampId = widget.lampId;
     // .select() so this screen only rebuilds when (mode, selfLampId, hasState)
     // changes, NOT on every slider tick or color drag that goes through
     // controlNotifierProvider.

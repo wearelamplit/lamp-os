@@ -109,14 +109,17 @@ constexpr const char* CHAR_FW_CONTROL      = "5f64f4e7-d6d9-4a44-9b3f-3a8d6f7e6b
 // the ESP-NOW chunk handler.
 constexpr const char* CHAR_FW_CHUNK        = "5f64f4e8-d6d9-4a44-9b3f-3a8d6f7e6b40";
 
-// CHAR_EDIT_SESSION (auth-gated, WRITE_NR): app signals "operator has
-// the colour-picker / brightness-slider for surface X open" so the
-// lamp can drop wisp-sourced overrides for that surface until the
-// picker closes. Payload is 2 bytes [surface, state] with:
-//   surface: 0x01 = Base, 0x02 = Shade, 0x04 = Brightness
+// CHAR_EDIT_SESSION (auth-gated, WRITE_NR): app signals a transient
+// per-connection selector so the lamp reacts for the duration of the
+// session. Payload is 2 bytes [selector, state] with:
+//   selector: 0x01 = Base, 0x02 = Shade, 0x04 = Brightness (operator has
+//             that surface's picker/slider open; lamp drops wisp-sourced
+//             overrides for it until closed)
+//             0x08 = Social/Network view open (lamp runs a duty-cycled
+//             passive scan to sight BLE-only peers into its roster while
+//             connected)
 //   state:   0x00 = closed (clear flag), 0x01 = open (set flag)
-// Multiple-surface picker sessions are handled by sending one frame
-// per surface. Cleared on BLE disconnect.
+// One frame per selector. All flags cleared on BLE disconnect.
 constexpr const char* CHAR_EDIT_SESSION    = "5f64f4e9-d6d9-4a44-9b3f-3a8d6f7e6b40";
 // CHAR_COMMIT (write-with-response, auth-gated): parameterless commit
 // signal. Payload bytes are semantically ignored: the arrival of the

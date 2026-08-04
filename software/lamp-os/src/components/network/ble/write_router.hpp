@@ -40,6 +40,10 @@
 
 namespace ble_control {
 
+// Defined in ble_control.cpp. Stamps the last-write clock the Social-view
+// duty-cycled scan reads to skip a scan window during active app writes.
+void noteAppWriteActivity();
+
 // The post hop is the single bytes-into-pending-slot call defined in
 // lamp.cpp. WriteRouter does not own the slot; it just forwards.
 using PostFn = void (*)(const char* data, size_t len);
@@ -133,6 +137,7 @@ class WriteRouter : public NimBLECharacteristicCallbacks {
     // shade, brightness, expression, settings, page) is gated here so
     // the phone can't fight the OTA for radio time / config state.
     if (lamp::ota_quiet_mode::isQuiet()) return;
+    noteAppWriteActivity();
 
     const uint16_t handle = info.getConnHandle();
     const std::string raw = c->getValue();

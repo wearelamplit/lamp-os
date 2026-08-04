@@ -426,7 +426,7 @@ Service UUID `5f64f4d0-d6d9-4a44-9b3f-3a8d6f7e6b40`. UUIDs share that base; the 
 - `CHAR_BASE_COLORS` (0xd4), write+wnr: JSON array of hex color strings.
 - `CHAR_BASE_KNOCKOUT` (0xd5), write+wnr: 2 bytes `[pixelIndex, brightness 0..100]`.
 - `CHAR_HOME_MODE_FOCUS` (0xe5), write+wnr: 1 byte 0/1 — app sets 1 while the user is on the Home-Mode setup page (forces preview + reroutes brightness). Auto-cleared on disconnect.
-- `CHAR_EDIT_SESSION` (0xe9), write+wnr: 2 bytes `[surface, state]` — operator-priority lockout against wisp overrides. `surface` bitmask: 0x01 base, 0x02 shade, 0x04 brightness; `state` != 0 opens.
+- `CHAR_EDIT_SESSION` (0xe9), write+wnr: 2 bytes `[selector, state]`, `state` != 0 opens, all cleared on disconnect. `selector` 0x01 base / 0x02 shade / 0x04 brightness are the operator-priority lockout against wisp overrides. `selector` 0x08 is the Social/Network view flag: while set (app on the Social page), the lamp reopens a low-duty passive BLE scan during the connected session — short windows (~30 ms scan / 300 ms gap, ~10% duty), skipped for `idleGuardMs` after any throughput-sensitive write and bounded by a safety timeout — so BLE-only (non-mesh) peers keep being sighted into the roster and surface in the `nearby` section. The connect-time scan pause (which protects write throughput) otherwise stops those sightings for the whole session.
 
 **Commit:**
 - `CHAR_COMMIT` (`48537d49-…`), write+wnr: parameterless commit signal — the *arrival* of the write is the signal (bytes ignored). Flushes pending slider/color writes to NVS off the NimBLE host task; result returns via `CHAR_STATE_NOTIFY`. Also force-flushed on disconnect.
