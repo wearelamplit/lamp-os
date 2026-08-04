@@ -8,6 +8,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 ## 1.2.2
 
 ### Added
+- **Loaf lamp.** A new custom variant: two rings drawn as seamless circular
+  gradients of your own colours, with the base ring slowly rotating. When two
+  loaf lamps are near each other, their base rings spin up faster as a greeting.
 - **Lioness lamp.** A new fixed-install custom variant. Its base carries three
   "lion" zones that each mirror a nearby lamp's colours; when a new lamp shows
   up the lions pulse its colour and the shade glitches to greet it.
