@@ -185,6 +185,9 @@ void BluetoothComponent::begin(std::string name, Color inBaseColor,
   // (scan-response off), so an active SCAN_REQ is wasted TX that also flips a
   // listen window into a transmit window under BLE/ESP-NOW coex.
   pScan->setActiveScan(false);
+  // Callback-only scan: at the default maxResults (0xFF) NimBLE retains every
+  // distinct advertiser for the whole uptime; 0 frees each right after onResult.
+  pScan->setMaxResults(0);
   pScan->start(0);  // continuous 1.5% duty; onScanEnd/onDisconnect resume it
 
   NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
