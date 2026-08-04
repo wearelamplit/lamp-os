@@ -237,6 +237,36 @@ ack-coupled, one greet per call) drives a custom greeting like snafu's;
 the staff's friend-bloom. The social reads (`dispositionOf` / `greetingFor` /
 `crowd` / `crowdWeight`) are on the same `BehaviorContext`.
 
+### React to who's around — `PeerView::variant`
+
+Every `PeerView` handed to `forEachNearby` / `forEachArrival` / `onArrival`
+carries `variant`, a `lamp_protocol::LampVariant` (`Unknown, Standard, Snafu,
+Staff, Lioness, Loaf`). It rides the mesh as an additive HELLO TLV, so a
+behavior can react to *what kind* of lamp a peer is. Legacy / BLE-only peers
+read `Unknown`. `variantName(v)` gives the display string.
+
+Loaf's base ring is the worked example: it spins slowly on its own and speeds
+up while another loaf is nearby, easing back when it leaves.
+
+```cpp
+void LoafRingBehavior::control() {
+  // ... rebuild the ring from live config ...
+  if (companionRevMs_ != 0 && context_) {
+    bool loafNear = false;
+    context_->forEachNearby([&](const PeerView& p) {
+      if (p.variant == lamp_protocol::LampVariant::Loaf) { loafNear = true; return true; }
+      return false;
+    });
+    setRevolutionMs(loafNear ? companionRevMs_ : baseRevMs_);  // eased in draw()
+  }
+}
+```
+
+The trigger is presence, not a one-shot greeting: it re-evaluates every control
+tick and self-corrects when the peer leaves the nearby set. Ramp the *value*
+you change (here the revolution period), not the phase, so the animation eases
+instead of snapping.
+
 ## 5. Custom internal expressions
 
 `registerExpressions(ExpressionRegistry&)` populates the expression catalog, and

@@ -15,6 +15,7 @@ namespace lamp { namespace loaf {
 
 namespace {
 constexpr uint32_t kRingFrames = 600;   // loop length; never playOnce
+constexpr float kRevRampMs = 400.0f;    // period ease window (companion speed-up)
 
 // Interpolate between two hues the short way around the wheel at full
 // saturation + value. Linear-RGB interpolation between dim stops produces
@@ -27,9 +28,11 @@ Color hueLerp(uint16_t a, uint16_t b, float t) {
 }
 }  // namespace
 
-LoafRingBehavior::LoafRingBehavior(FrameBuffer* fb, bool isBase, uint32_t revMs)
+LoafRingBehavior::LoafRingBehavior(FrameBuffer* fb, bool isBase, uint32_t revMs,
+                                   uint32_t companionRevMs)
     : AnimatedBehavior(fb, kRingFrames, /*inAutoPlay=*/true),
-      isBase_(isBase), revMs_(revMs) {}
+      isBase_(isBase), baseRevMs_(revMs), companionRevMs_(companionRevMs),
+      targetRevMs_(revMs), curRevMs_(static_cast<float>(revMs)) {}
 
 void LoafRingBehavior::rebuild() {
   ring_.clear();
@@ -57,15 +60,33 @@ void LoafRingBehavior::control() {
     stops_ = live;
     rebuild();
   }
+  if (companionRevMs_ != 0 && context_) {
+    bool loafNear = false;
+    context_->forEachNearby([&](const PeerView& p) {
+      if (p.variant == lamp_protocol::LampVariant::Loaf) { loafNear = true; return true; }
+      return false;
+    });
+    setRevolutionMs(loafNear ? companionRevMs_ : baseRevMs_);
+  }
 }
 
 void LoafRingBehavior::draw() {
   if (!fb || ring_.empty()) { nextFrame(); return; }
   const uint16_t n = windowSize();
-  const float phase =
-      revMs_ ? std::fmod(static_cast<float>(millis()) / revMs_, 1.0f) * n : 0.0f;
+  const uint32_t now = millis();
+  const uint32_t dt = lastDrawMs_ ? (now - lastDrawMs_) : 0;
+  lastDrawMs_ = now;
+  if (dt) {
+    float step = static_cast<float>(dt) / kRevRampMs;
+    if (step > 1.0f) step = 1.0f;
+    curRevMs_ += (static_cast<float>(targetRevMs_) - curRevMs_) * step;
+    if (curRevMs_ >= 1.0f) {
+      phase_ = std::fmod(phase_ + static_cast<float>(dt) / curRevMs_, 1.0f);
+    }
+  }
+  const float phasePx = phase_ * n;
   for (uint16_t i = 0; i < n && i < fb->buffer.size(); ++i) {
-    const float src = static_cast<float>(i) + phase;
+    const float src = static_cast<float>(i) + phasePx;
     const float fl = std::floor(src);
     const uint16_t lo = static_cast<uint16_t>(fl) % n;
     const uint16_t hi = (lo + 1) % n;

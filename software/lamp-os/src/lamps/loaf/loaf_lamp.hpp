@@ -40,7 +40,8 @@ class LoafLamp : public Lamp {
 
   void createBehaviors(BehaviorStackBuilder&) override {
     if (baseFb()) {
-      base_ = std::make_unique<loaf::LoafRingBehavior>(baseFb(), /*isBase=*/true, kBaseRevolutionMs);
+      base_ = std::make_unique<loaf::LoafRingBehavior>(
+          baseFb(), /*isBase=*/true, kBaseRevolutionMs, kCompanionRevolutionMs);
       compositor.addBaseBehavior(base_.get());
     }
     if (shadeFb()) {
@@ -50,8 +51,10 @@ class LoafLamp : public Lamp {
   }
 
  private:
-  // One base-ring revolution. Bench-tune: lower = faster spin.
+  // Base-ring revolution period. Bench-tune: lower = faster spin.
   static constexpr uint32_t kBaseRevolutionMs = 25000;
+  // Faster period the base ring eases to while another loaf is nearby.
+  static constexpr uint32_t kCompanionRevolutionMs = 8000;
 
   std::unique_ptr<loaf::LoafRingBehavior> base_;
   std::unique_ptr<loaf::LoafRingBehavior> shade_;
