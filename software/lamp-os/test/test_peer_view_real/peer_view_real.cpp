@@ -82,11 +82,39 @@ void test_strongest_rssi_first() {
   TEST_ASSERT_EQUAL_STRING("close", PeerView::from(out).name);
 }
 
+// A HELLO carrying a variant stores it on the roster entry, and PeerView::from
+// surfaces it to behaviors.
+void test_espnow_variant_stored_and_surfaced() {
+  LampRoster r;
+  const uint8_t mac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+  r.addOrUpdateFromEspNow("loaf1", mac, Color(), Color(), 0, 0, 5, nullptr,
+                          nullptr, false, 0, false, nullptr, false, -50,
+                          lamp_protocol::LampVariant::Loaf);
+  RosterEntry out;
+  TEST_ASSERT_TRUE(r.findByMac(mac, out));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(lamp_protocol::LampVariant::Loaf),
+                          static_cast<uint8_t>(PeerView::from(out).variant));
+}
+
+// A HELLO with no variant TLV (the default arg) leaves the entry Unknown, the
+// legacy / BLE-only case.
+void test_espnow_absent_variant_is_unknown() {
+  LampRoster r;
+  const uint8_t mac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+  r.addOrUpdateFromEspNow("old", mac, Color(), Color());
+  RosterEntry out;
+  TEST_ASSERT_TRUE(r.findByMac(mac, out));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(lamp_protocol::LampVariant::Unknown),
+                          static_cast<uint8_t>(PeerView::from(out).variant));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_peerview_from_populates_all_fields);
   RUN_TEST(test_greet_acks_by_mac);
   RUN_TEST(test_scan_without_ack_leaves_arrival);
   RUN_TEST(test_strongest_rssi_first);
+  RUN_TEST(test_espnow_variant_stored_and_surfaced);
+  RUN_TEST(test_espnow_absent_variant_is_unknown);
   return UNITY_END();
 }

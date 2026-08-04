@@ -32,7 +32,7 @@ void BehaviorContext::forEachNearby(
       lampRoster->snapshotNear(LAMP_PRUNE_TIME_MS);
   for (const NearbyCopy& e : near) {
     PeerView v = PeerView::make(e.name, e.mac, e.hasMac, e.baseColor,
-                                e.shadeColor, e.lastRssi);
+                                e.shadeColor, e.lastRssi, e.variant);
     if (cb(v)) return;
   }
 }

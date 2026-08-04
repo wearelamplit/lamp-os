@@ -92,6 +92,9 @@ struct RosterEntry {
   // nearby JSON so the app can name the send edge and mark the silent receiver.
   bool    hasOtaSendingTo = false;
   uint8_t otaSendingTo[6] = {0};
+  // Peer's lamp variant from HELLO_TLV_VARIANT. Unknown on legacy / BLE-only
+  // peers (no TLV). Surfaced to behaviors via PeerView::variant.
+  lamp_protocol::LampVariant variant = lamp_protocol::LampVariant::Unknown;
   // BLE-scan RSSI (dBm). Written only by addOrUpdateFromBle (single-transport
   // invariant for PersonalityEngine hysteresis). -127 = unknown, sorts to back.
   // getNear() sorts descending; getMesh() does not.
@@ -127,6 +130,7 @@ struct NearbyCopy {
   Color    shadeColor = Color();
   int8_t   lastRssi = -127;
   uint32_t lastSeenNearMs = 0;
+  lamp_protocol::LampVariant variant = lamp_protocol::LampVariant::Unknown;
 };
 static_assert(std::is_trivially_copyable<NearbyCopy>::value,
               "snapshot entries must be a trivial copy");
@@ -162,7 +166,9 @@ class LampRoster {
                              bool needsFs = false,
                              const uint8_t* otaSendingTo = nullptr,
                              bool hasOtaSendingTo = false,
-                             int8_t rssi = -127);
+                             int8_t rssi = -127,
+                             lamp_protocol::LampVariant variant =
+                                 lamp_protocol::LampVariant::Unknown);
 
   // Drop entries whose most-recent sighting (max of the two transports)
   // is older than `maxAgeMs`.

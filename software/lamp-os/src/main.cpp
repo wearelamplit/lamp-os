@@ -48,6 +48,7 @@ void setup() {
     config.setLampType(compiled);
   }
   Serial.printf("[lamp] lampType=\"%s\"\n", compiled);
+  config.setLampVariant(lamp::compiledLampVariant());
 
   g_lamp = lamp::createCompiledLamp();
   g_lamp->setup();

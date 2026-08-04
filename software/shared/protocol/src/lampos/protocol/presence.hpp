@@ -22,7 +22,8 @@
 //              HELLO_TLV_FS_STATE (0x03, HELLO_FS_DIGEST_LEN=8B),
 //              HELLO_TLV_FW_MAX_CHUNK (0x04, 2B),
 //              HELLO_TLV_NEED_FS (0x05, 1B),
-//              HELLO_TLV_OTA_SENDING_TO (0x06, 6B).
+//              HELLO_TLV_OTA_SENDING_TO (0x06, 6B),
+//              HELLO_TLV_VARIANT (0x07, 1B).
 //              Unknown types are skipped by their len byte (forward-compat).
 //
 // Fixed prefix through nameLen is HELLO_FIXED_SIZE (24) + 1; the whole frame
@@ -83,6 +84,34 @@ constexpr uint8_t HELLO_TLV_NEED_FS = 0x05;
 constexpr uint8_t HELLO_TLV_OTA_SENDING_TO = 0x06;
 constexpr size_t  HELLO_OTA_SENDING_TO_LEN = 6;
 
+// value: 1 byte, the sender's compile-time LampVariant. Lets a variant-aware
+// behavior react to what kind of lamp a peer is. Absent on legacy / BLE-only
+// peers, which read as LampVariant::Unknown.
+constexpr uint8_t HELLO_TLV_VARIANT = 0x07;
+
+// Lamp hardware/behavior variant, carried in HELLO_TLV_VARIANT. Append-only:
+// a new variant takes the next value, and older firmware reads it as Unknown.
+enum class LampVariant : uint8_t {
+  Unknown  = 0,
+  Standard = 1,
+  Snafu    = 2,
+  Staff    = 3,
+  Lioness  = 4,
+  Loaf     = 5,
+};
+
+inline const char* variantName(LampVariant v) {
+  switch (v) {
+    case LampVariant::Standard: return "standard";
+    case LampVariant::Snafu:    return "snafu";
+    case LampVariant::Staff:    return "staff";
+    case LampVariant::Lioness:  return "lioness";
+    case LampVariant::Loaf:     return "loaf";
+    case LampVariant::Unknown:  break;
+  }
+  return "unknown";
+}
+
 // Compact OTA-state enum carried in HELLO_TLV_OTA_STATE. Maps to:
 //   firmwareDistributor.isInProgress() → kOtaStateSending
 //   firmwareReceiver.isInProgress()    → kOtaStateReceiving
@@ -127,6 +156,9 @@ struct ParsedHello {
   // hasOtaSendingTo=false when absent (idle sender or older firmware).
   bool    hasOtaSendingTo = false;
   uint8_t otaSendingTo[6] = {0};
+  // HELLO_TLV_VARIANT, the peer's lamp variant. Unknown when the TLV is absent
+  // (legacy / BLE-only peers).
+  LampVariant variant = LampVariant::Unknown;
 };
 
 // Build a HELLO frame into `buf`. `name` is utf-8, NOT null-terminated on the wire.
@@ -146,7 +178,8 @@ inline size_t buildHello(uint8_t* buf, size_t bufLen, uint16_t seq,
                          const uint8_t* fsDigest = nullptr,
                          uint16_t maxChunk = 0,
                          bool needsFs = false,
-                         const uint8_t* otaSendingTo = nullptr) {
+                         const uint8_t* otaSendingTo = nullptr,
+                         LampVariant variant = LampVariant::Unknown) {
   if (!buf || !sourceMac || !shadeRGBW || !baseRGBW) return 0;
   if (nameLen > HELLO_MAX_NAME) nameLen = HELLO_MAX_NAME;
   // TLV trailer: tlv_count(1) + (type(1) + len(1) + value(N)) per emitted TLV.
@@ -159,12 +192,14 @@ inline size_t buildHello(uint8_t* buf, size_t bufLen, uint16_t seq,
   const bool emitMaxChunk  = (maxChunk != 0);
   const bool emitNeedFs    = needsFs;
   const bool emitSendingTo = (otaSendingTo != nullptr);
+  const bool emitVariant   = (variant != LampVariant::Unknown);
   const size_t tlvBytes = 1 + (emitOtaState ? 3 : 0) +
                           (emitFwChannel ? (2 + HELLO_FW_CHANNEL_LEN) : 0) +
                           (emitFsDigest ? (2 + HELLO_FS_DIGEST_LEN) : 0) +
                           (emitMaxChunk ? 4 : 0) +
                           (emitNeedFs ? 3 : 0) +
-                          (emitSendingTo ? (2 + HELLO_OTA_SENDING_TO_LEN) : 0);
+                          (emitSendingTo ? (2 + HELLO_OTA_SENDING_TO_LEN) : 0) +
+                          (emitVariant ? 3 : 0);
   const size_t total = HELLO_FIXED_SIZE + 1 + nameLen + tlvBytes;
   if (bufLen < total) return 0;
   buf[0] = MAGIC_0;
@@ -191,7 +226,8 @@ inline size_t buildHello(uint8_t* buf, size_t bufLen, uint16_t seq,
                                     (emitFsDigest ? 1 : 0) +
                                     (emitMaxChunk ? 1 : 0) +
                                     (emitNeedFs ? 1 : 0) +
-                                    (emitSendingTo ? 1 : 0));  // tlv_count
+                                    (emitSendingTo ? 1 : 0) +
+                                    (emitVariant ? 1 : 0));  // tlv_count
   if (emitOtaState) {
     buf[off++] = HELLO_TLV_OTA_STATE;
     buf[off++] = 1;          // len
@@ -229,6 +265,11 @@ inline size_t buildHello(uint8_t* buf, size_t bufLen, uint16_t seq,
     std::memcpy(&buf[off], otaSendingTo, HELLO_OTA_SENDING_TO_LEN);
     off += HELLO_OTA_SENDING_TO_LEN;
   }
+  if (emitVariant) {
+    buf[off++] = HELLO_TLV_VARIANT;
+    buf[off++] = 1;  // len
+    buf[off++] = static_cast<uint8_t>(variant);
+  }
   return total;
 }
 
@@ -256,6 +297,7 @@ inline bool parseHello(const uint8_t* data, size_t len, ParsedHello& out) {
   out.maxChunk = 0;
   out.needsFs = false;
   out.hasOtaSendingTo = false;
+  out.variant = LampVariant::Unknown;
   size_t off = HELLO_FIXED_SIZE + 1 + nameLen;
   if (len <= off) return true;
   const uint8_t tlvCount = data[off++];
@@ -287,6 +329,8 @@ inline bool parseHello(const uint8_t* data, size_t len, ParsedHello& out) {
                tlvLen == HELLO_OTA_SENDING_TO_LEN) {
       std::memcpy(out.otaSendingTo, &data[off], HELLO_OTA_SENDING_TO_LEN);
       out.hasOtaSendingTo = true;
+    } else if (tlvType == HELLO_TLV_VARIANT && tlvLen == 1) {
+      out.variant = static_cast<LampVariant>(data[off]);
     }
     off += tlvLen;
   }

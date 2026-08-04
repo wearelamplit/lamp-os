@@ -356,7 +356,8 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
         h.needsFs,
         h.hasOtaSendingTo ? h.otaSendingTo : nullptr,
         h.hasOtaSendingTo,
-        rssi);
+        rssi,
+        h.variant);
     if (isDirectHello(srcMac, h.sourceMac) && isNearRssi(rssi, kNearRssiEspNow)) {
       lampRoster.markNear(h.sourceMac);
     }
@@ -872,7 +873,8 @@ void MeshLink::emitHello(uint8_t otaState) {
                                        fs_ota::localDigestPrefix(),
                                        lamp_protocol::FW_CHUNK_SIZE_MAX,
                                        fs_ota::needsFs(),
-                                       hasSendingTo ? sendingTo : nullptr);
+                                       hasSendingTo ? sendingTo : nullptr,
+                                       config_->lampVariant());
   if (n) {
     link_.broadcast(buf, n);
   }

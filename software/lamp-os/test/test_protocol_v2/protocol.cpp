@@ -657,6 +657,34 @@ void test_hello_unknown_tlv_is_skipped() {
   TEST_ASSERT_EQUAL_UINT8(lp::kOtaStateReceiving, out.otaState);
 }
 
+void test_hello_variant_round_trip() {
+  uint8_t buf[lp::HELLO_MAX_SIZE];
+  const size_t n = lp::buildHello(buf, sizeof(buf), 20, kSrcMac,
+                                  kHelloShade, kHelloBase, 0xBEEF,
+                                  "loaf1", 5, lp::kOtaStateIdle,
+                                  /*fwChannel=*/nullptr, /*fsDigest=*/nullptr,
+                                  /*maxChunk=*/0, /*needsFs=*/false,
+                                  /*otaSendingTo=*/nullptr,
+                                  lp::LampVariant::Loaf);
+  // Idle + VARIANT TLV: tlv_count(1) + type(1) + len(1) + value(1).
+  TEST_ASSERT_EQUAL_UINT32(lp::HELLO_FIXED_SIZE + 1 + 5 + 1 + 3, n);
+  lp::ParsedHello out;
+  TEST_ASSERT_TRUE(lp::parseHello(buf, n, out));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(lp::LampVariant::Loaf),
+                          static_cast<uint8_t>(out.variant));
+}
+
+void test_hello_absent_variant_is_unknown() {
+  uint8_t buf[lp::HELLO_MAX_SIZE];
+  const size_t n = lp::buildHello(buf, sizeof(buf), 21, kSrcMac,
+                                  kHelloShade, kHelloBase, 0xBEEF,
+                                  "old", 3, lp::kOtaStateIdle);
+  lp::ParsedHello out;
+  TEST_ASSERT_TRUE(lp::parseHello(buf, n, out));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(lp::LampVariant::Unknown),
+                          static_cast<uint8_t>(out.variant));
+}
+
 // A malformed trailer (TLV claims more bytes than the frame holds)
 // must be rejected, not crash.
 void test_hello_tlv_with_oversized_length_is_rejected() {
@@ -697,6 +725,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_hello_max_chunk_with_channel_and_fs_state_all_emit);
   RUN_TEST(test_hello_ota_sending_to_round_trip);
   RUN_TEST(test_hello_absent_ota_sending_to_is_false);
+  RUN_TEST(test_hello_variant_round_trip);
+  RUN_TEST(test_hello_absent_variant_is_unknown);
   RUN_TEST(test_hello_unknown_tlv_is_skipped);
   RUN_TEST(test_hello_tlv_with_oversized_length_is_rejected);
 

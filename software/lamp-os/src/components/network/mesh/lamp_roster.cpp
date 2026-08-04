@@ -127,7 +127,8 @@ void LampRoster::addOrUpdateFromEspNow(const char* name, const uint8_t mac[6],
                                        bool needsFs,
                                        const uint8_t* otaSendingTo,
                                        bool hasOtaSendingTo,
-                                       int8_t rssi) {
+                                       int8_t rssi,
+                                       lamp_protocol::LampVariant variant) {
   uint32_t now = millis();
   // WiFi task: bounded take so a stall doesn't block recv frames or the
   // link_.broadcast(). On timeout the write drops; the next HELLO retries.
@@ -172,6 +173,7 @@ void LampRoster::addOrUpdateFromEspNow(const char* name, const uint8_t mac[6],
     if (hasOtaSendingTo && otaSendingTo) {
       std::memcpy(e.otaSendingTo, otaSendingTo, 6);
     }
+    e.variant = variant;
     e.espnowRssi = rssi;
     store_[count_++] = e;
   } else {
@@ -215,6 +217,10 @@ void LampRoster::addOrUpdateFromEspNow(const char* name, const uint8_t mac[6],
     }
     // Zero from BLE-only callers or older peers leaves a known value intact.
     if (maxChunk != 0) store_[idx].maxChunk = maxChunk;
+    // Unknown from BLE-only callers or older peers leaves a known variant intact.
+    if (variant != lamp_protocol::LampVariant::Unknown) {
+      store_[idx].variant = variant;
+    }
     // Freshens every HELLO like lastRssi does for BLE adv; -127 sentinel
     // (unavailable RSSI) leaves the last known reading intact.
     if (rssi != -127) store_[idx].espnowRssi = rssi;
@@ -286,6 +292,7 @@ const std::vector<NearbyCopy>& LampRoster::snapshotNear(uint32_t maxAgeMs) {
     c.shadeColor = e.shadeColor;
     c.lastRssi = e.lastRssi;
     c.lastSeenNearMs = e.lastSeenNearMs;
+    c.variant = e.variant;
     nearSnapshot_.push_back(c);
   }
   return nearSnapshot_;

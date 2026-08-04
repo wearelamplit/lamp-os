@@ -6,6 +6,8 @@
 #include <utility>
 #include <vector>
 
+#include <lampos/protocol/presence.hpp>
+
 #include "config_store.hpp"
 #include "config_types.hpp"
 #include "disposition_store.hpp"
@@ -132,6 +134,12 @@ class Config {
   void setLampType(const std::string& type);     // persists + updates in-memory
   std::string loadLampType();                     // reads NVS, returns empty if unset
 
+  // Compile-time lamp variant, seeded once at boot from compiledLampVariant().
+  // Emitted in HELLO_TLV_VARIANT; the enum keeps variant-header includes out of
+  // the mesh component.
+  void setLampVariant(lamp_protocol::LampVariant v) { lampVariant_ = v; }
+  lamp_protocol::LampVariant lampVariant() const { return lampVariant_; }
+
   // This lamp's own mesh mac in canonical colon-hex, the same bytes peers
   // store for it as `mac` (the value it broadcasts as HELLO sourceMac). Seeded
   // once at mesh init; surfaced as `lampId` in the lamp section.
@@ -255,6 +263,7 @@ class Config {
   std::string expressionsSectionJson_;
   std::string homeSectionJson_;
   std::string lampId_;
+  lamp_protocol::LampVariant lampVariant_ = lamp_protocol::LampVariant::Unknown;
   uint16_t drawIdleMa_ = 0;
   uint16_t drawFullMa_ = 0;
   uint8_t lampOtaState_ = 0;

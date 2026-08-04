@@ -8,6 +8,8 @@
 #pragma once
 #include <memory>
 
+#include <lampos/protocol/presence.hpp>
+
 #ifdef LAMP_BUILD_VARIANT_STANDARD
 #include "lamps/standard/standard_lamp.hpp"
 #endif
@@ -46,18 +48,22 @@ inline std::unique_ptr<Lamp> createCompiledLamp() {
 #endif
 }
 
-inline const char* compiledLampType() {
+inline lamp_protocol::LampVariant compiledLampVariant() {
 #ifdef LAMP_BUILD_VARIANT_STANDARD
-  return "standard";
+  return lamp_protocol::LampVariant::Standard;
 #elif defined(LAMP_BUILD_VARIANT_SNAFU)
-  return "snafu";
+  return lamp_protocol::LampVariant::Snafu;
 #elif defined(LAMP_BUILD_VARIANT_STAFF)
-  return "staff";
+  return lamp_protocol::LampVariant::Staff;
 #elif defined(LAMP_BUILD_VARIANT_LIONESS)
-  return "lioness";
+  return lamp_protocol::LampVariant::Lioness;
 #elif defined(LAMP_BUILD_VARIANT_LOAF)
-  return "loaf";
+  return lamp_protocol::LampVariant::Loaf;
 #endif
+}
+
+inline const char* compiledLampType() {
+  return lamp_protocol::variantName(compiledLampVariant());
 }
 
 }  // namespace lamp

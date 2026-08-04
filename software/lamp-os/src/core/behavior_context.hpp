@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include <lampos/protocol/presence.hpp>
+
 #include "util/color.hpp"
 
 namespace lamp {
@@ -42,6 +44,9 @@ struct PeerView {
   Color shadeColor;
   int8_t rssi = -127;
   char lampId[18] = {0};
+  // Peer's lamp variant. Unknown for legacy / BLE-only peers. A behavior reads
+  // this to react to what kind of lamp a peer is (see building-custom-lamps.md).
+  lamp_protocol::LampVariant variant = lamp_protocol::LampVariant::Unknown;
 
   // Single conversion from a roster entry. `mac` aliases the entry, so the
   // view outlives it only as long as the entry does.
@@ -51,7 +56,9 @@ struct PeerView {
   // stack copy rather than a RosterEntry reference). `name` and `mac` must
   // outlive the view.
   static PeerView make(const char* name, const uint8_t* mac, bool hasMac,
-                       Color baseColor, Color shadeColor, int8_t rssi);
+                       Color baseColor, Color shadeColor, int8_t rssi,
+                       lamp_protocol::LampVariant variant =
+                           lamp_protocol::LampVariant::Unknown);
 };
 
 /**
