@@ -5,6 +5,18 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## 1.2.3
+
+### Fixed
+- **Updating a lamp no longer resets its Web Config.** A lamp that was already
+  set up could be treated as brand-new after a firmware update and have its Web
+  Config hotspot reset to a short window. An already-named lamp is now
+  recognized as configured and keeps its settings across updates.
+
+### Changed
+- **The Social page now lists only lamps that are physically nearby** — so it
+  reads as who's actually in the room, rather than every lamp on the mesh.
+
 ## 1.2.2
 
 ### Added
@@ -19,10 +31,6 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   only reachable over the mesh.
 
 ### Fixed
-- **Updating a lamp no longer resets its Web Config.** A lamp that was already
-  set up could be treated as brand-new after a firmware update and have its Web
-  Config hotspot reset to a short window. An already-named lamp is now
-  recognized as configured and keeps its settings across updates.
 - **Lamps no longer restart themselves after a while in a crowd.** A slow
   memory leak — the Bluetooth scanner kept a record of every nearby phone and
   wearable it had ever seen, and those addresses rotate constantly — gradually
