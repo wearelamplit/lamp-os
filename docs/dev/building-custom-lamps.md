@@ -14,14 +14,17 @@ dual-core split, power governor, boot invariants) is
 [`lamp-framework.md`](lamp-framework.md). Three shipped variants are the worked
 examples:
 
-- **`lamps/snafu/`** — the **social** reference. Replaces `SocialBehavior` with
-  its own greeting driven by `forEachArrival`.
-- **`lamps/staff/`** — the **physical** reference. Declares `HwConfig.inputs`
-  (a button + touch pads), drives per-surface brightness and a mood scrub from
-  gestures, and blooms on a friend's arrival.
+- **`lamps/snafu/`** — the **social** reference, and the default walk-through
+  through this page. Custom visuals on three fanned dot-strips, an arrival
+  greeting driven by `forEachArrival`, and a masked-off `SocialBehavior`. The
+  common case for a custom lamp: its own look, its own greeting, no physical
+  inputs.
 - **`lamps/lioness/`** — the **multi-strip social ambient** reference (walked
   through below). Three fixed strips, peer-color mirroring across zones of a
   shared strip, and a two-object always-on-ambient + one-shot-greeting split.
+- **`lamps/staff/`** — the **physical-input** reference. Declares
+  `HwConfig.inputs` (a button + touch pads) and drives gestures off them (§6).
+  In development — read it for the input pattern, not as a proven shipping lamp.
 
 `lamps/standard/` is the minimal baseline: two strips, all features on, no
 custom behaviors.
@@ -48,15 +51,12 @@ Your subclass passes an `HwConfig` to the `Lamp` base constructor. It is a POD:
 strips, inputs, and two power numbers (`core/hw_config.hpp`).
 
 ```cpp
-StaffLamp() : Lamp(HwConfig{
+SnafuLamp() : Lamp(HwConfig{
   .strips = {
-    {.role=Surface::Shade, .pin=12, .byteOrder=ByteOrder::GRBW, .name="Shade", .broadcast=1},
-    {.role=Surface::Base,  .pin=14, .byteOrder=ByteOrder::GRBW, .name="Base", .reversed=true},
-  },
-  .inputs = {
-    {.id=kStoke,     .type=InputType::Button, .pin=19},
-    {.id=kTopPad,    .type=InputType::Touch,  .pin=4},
-    {.id=kBottomPad, .type=InputType::Touch,  .pin=15},
+    {.role=Surface::Shade, .pin=14, .byteOrder=ByteOrder::GRBW, .pixelCount=16, .name="Small Dots"},
+    {.role=Surface::Shade, .pin=27, .byteOrder=ByteOrder::GRBW, .pixelCount=12, .name="Medium Dots"},
+    {.role=Surface::Shade, .pin=26, .byteOrder=ByteOrder::GRBW, .pixelCount=9,  .name="Big Dots"},
+    {.role=Surface::Base,  .pin=12, .byteOrder=ByteOrder::GRBW, .pixelCount=24, .name="Stem", .broadcast=1, .reversed=true},
   },
   .maxBrightness = 230,
   .supplyBudgetMa = 1400,
@@ -65,15 +65,17 @@ StaffLamp() : Lamp(HwConfig{
 
 **`StripSpec`** — one physical NeoPixel run. `role` is `Surface::Shade` or
 `Surface::Base` (the two logical surfaces every lamp has); a role may fan
-several strips (snafu's three dot rings all share `Shade`). `pixelCount=0` means
-"resolve from `Config` at runtime" — the core roles do this; a fixed-geometry
-strip states its own count. Exactly one strip per role may set `broadcast=1`:
-that's the representative segment whose color the lamp advertises to peers.
+several strips (snafu's three dot rings all share `Shade`, its `Stem` is the
+lone `Base`). `pixelCount=0` means "resolve from `Config` at runtime" — the core
+roles do this; a fixed-geometry strip like snafu's dots states its own count.
+Exactly one strip per role may set `broadcast=1`: that's the representative
+segment whose color the lamp advertises to peers (snafu's `Stem`).
 `reversed=true` when pixel 0 is the far end of the winding.
 
-**`InputSpec`** — one button or capacitive pad (see §2's input layer). `id` is a
-variant-chosen handle you look up later; touch-tuning fields are ignored for
-buttons.
+**`InputSpec`** — one button or capacitive pad. snafu declares none, and most
+lamps don't: physical inputs are the staff specialization, so the `.inputs`
+field and its driver are §6. `id` is a variant-chosen handle you look up later;
+touch-tuning fields are ignored for buttons.
 
 **`validateHwConfig(hw)`** is a fatal gate `Lamp::setup()` runs before it sizes
 any buffer. It rejects: no strip for a role, a duplicate pin, `Σ pixelCount > 255`
@@ -89,31 +91,12 @@ numbers, pixel counts, brightness caps — every variant-specific constant — r
 into the framework through this `HwConfig` POD and `Config::Defaults`, never a
 cross-include. The framework receives values; it never reaches into a variant.
 
-### The input layer
-
-`HwConfig.inputs` builds one `input::InputSource` per spec at boot
-(`components/input/`). Each source ticks itself once per loop, immediately
-before the compositor, on Core 1 — **never call `delay()`** in a gesture
-handler; it stalls the render and the mesh. Two concrete FSMs sit behind the
-source, reached without RTTI:
-
-- **`Button`** (`components/input/button.hpp`) — edge events
-  `ButtonEvent::{Click, DoubleClick, LongPressStart, LongPressStop}`, plus
-  pollable `isHeld()` / `heldMs(now)` for ramps.
-- **`Touch`** (`components/input/touch.hpp`) — a capacitive pad; events
-  `TouchEvent::{Tap, HoldStart, Release}`, plus `isHeld()` / `heldMs(now)`.
-  Touched means the raw read drops **below** the boot-calibrated baseline. The
-  driver calibrates *after* RF is up, so the baseline captures a radio-live
-  ambient; RF bursts couple noise into a pad, absorbed by hysteresis.
-
-You don't tick these yourself. You bind them in `createBehaviors` (§2, Attach).
-
 ## 2. Subclass the lamp + register the variant
 
 ### The override hooks
 
 ```cpp
-class StaffLamp : public Lamp {
+class SnafuLamp : public Lamp {
  protected:
   Features featuresEnabled() const override { return Features::All; }
   void registerExpressions(ExpressionRegistry& reg) override;
@@ -138,7 +121,7 @@ class StaffLamp : public Lamp {
   ```
 
 - **`registerExpressions(ExpressionRegistry&)`** — populate the expression
-  catalog (§6). Call `Lamp::registerExpressions(reg)` first to keep the shared
+  catalog (§5). Call `Lamp::registerExpressions(reg)` first to keep the shared
   built-ins, or skip it to define a wholly custom set.
 - **`defaults() → Config::Defaults`** — the **configure** level: first-boot
   name, colors, per-surface pixel counts, `colorsEditable` flags, multi-segment
@@ -202,8 +185,7 @@ Inside a behavior, `behaviorContext()` returns the `BehaviorContext*`. **Every
 service pointer on it is nullable — null-check before you dereference.** The
 full surface (roster views, social reads, greeting seam, mesh send) is the
 [`lamp-social-api.md`](lamp-social-api.md) reference; this section covers the
-**physical facade** — the paint / brightness verbs a hardware lamp drives from
-gestures.
+paint / brightness verbs any behavior uses to drive its surfaces.
 
 ```cpp
 void MyBehavior::control() {
@@ -217,8 +199,8 @@ void MyBehavior::control() {
 **Color.** Two verbs, different heap cost:
 
 - `setSolidColor(Color)` — a non-allocating in-place fill of both surface
-  configurators. This is the hot path: the staff's mood scrub repaints one solid
-  color *per scrub step*, so it must not allocate.
+  configurators. This is the hot path: reach for it on anything that repaints
+  every frame, where an allocation would fragment the heap.
 - `setGradient(const std::vector<Color>& stops)` — the vector fade path. Fine
   for a rare repaint, wrong for a per-frame one. Allocates.
 
@@ -231,8 +213,8 @@ would fight crowd-dim, the OTA pulse, and the wisp override):
 - `setBrightness(uint8_t level)` — master brightness, through the user-brightness
   micro-fade. Stacks with crowd-dim and the OTA pulse.
 - `setSurfaceBrightness(Surface, uint8_t level)` — a 0–100 percent per-surface
-  trim riding *under* master. Scales one surface down only; `100` clears the
-  trim. The staff's two pads trim shade and base independently.
+  trim riding *under* master. Scales one surface down without touching the
+  other; `100` clears the trim.
 
 **Social reads** (per-tick, by value, allocate nothing): `dispositionOf(lampId)`
 (1–5, 3 = neutral), `greetingFor(lampId)` (the per-peer waveform),
@@ -257,91 +239,94 @@ the staff's friend-bloom. The social reads (`dispositionOf` / `greetingFor` /
 
 ## 5. Custom internal expressions
 
-An expression that only your variant triggers — never offered in the app's
-editable catalog — is an **internal** descriptor. Set `internal = true` on the
-`ExpressionDescriptor` (`expressions/expression_schema.hpp`); it stays
+`registerExpressions(ExpressionRegistry&)` populates the expression catalog, and
+you have two moves. **Extend** the shared editable set (call
+`Lamp::registerExpressions(reg)` first, then add yours), or **replace** it
+wholesale (skip the base call and register your own). snafu replaces it: it
+masks `Features::DefaultExpressions` in `featuresEnabled()`, then registers its
+own four in the variant hook — **not** the shared built-ins (their 6-descriptor
+catalog is pinned by a native test):
+
+```cpp
+void SnafuLamp::registerExpressions(ExpressionRegistry& reg) {
+  reg.add(GlitchyExpression::classDescriptor());
+  reg.add(PulseExpression::classDescriptor());
+  reg.add(SpottyExpression::classDescriptor());
+  reg.add(ShimmerExpression::classDescriptor());
+}
+```
+
+These are shared expression types (`expressions/`); registering them here offers
+them in the app's editable catalog for this variant.
+
+**Internal descriptors.** An expression your variant *fires* but never wants in
+that editable catalog is an **internal** descriptor. Set `internal = true` on
+the `ExpressionDescriptor` (`expressions/expression_schema.hpp`); it stays
 registry-backed so `triggerInvocation` can fire it by id, but
 `ExpressionRegistry::serializeCatalog` skips it, so it never reaches the app.
+`bloom` (`expressions/bloom/bloom_expression.hpp`) is the shipped example: a
+one-shot white-ward luminance swell carrying `.internal = true`, fired
+programmatically as a transient (staff fires it from a friend-arrival
+side-reaction, §4). It reads the live buffer each frame and lerps every pixel
+toward white by one eased scalar (integer per-channel, no per-pixel float), so
+it composites *over* a greeting as a luminance add instead of repainting the
+hue. The general expression-authoring contract is [`expressions.md`](expressions.md).
 
-Register it in your variant's `registerExpressions` — **not** the shared
-built-ins (the 6-descriptor catalog is pinned by a native test):
+## 6. Input hardware (optional)
+
+Most lamps have no physical inputs — skip this unless yours does.
+
+`HwConfig.inputs` builds one `input::InputSource` per spec at boot
+(`components/input/input_driver.cpp`). Each source ticks itself once per loop,
+immediately before the compositor, on Core 1 — **never call `delay()`** in a
+handler; it stalls the render and the mesh. You don't tick them; you look one up
+by id and bind to its FSM. Two concrete FSMs sit behind a source, reached
+without RTTI via `asButton()` / `asTouch()`
+(`components/input/input_source.hpp`):
+
+- **`Button`** (`components/input/button.hpp`) — edge events
+  `ButtonEvent::{Click, DoubleClick, LongPressStart, LongPressStop}` through a
+  callback, plus pollable `isHeld()` / `heldMs(now)` for ramps.
+- **`Touch`** (`components/input/touch.hpp`) — a capacitive pad; events
+  `TouchEvent::{Tap, HoldStart, Release}`, plus `isHeld()` / `heldMs(now)`.
+  Touched means the raw read drops **below** the boot-calibrated baseline. The
+  driver calibrates *after* RF is up, so the baseline captures a radio-live
+  ambient; RF bursts couple noise into a pad, absorbed by hysteresis.
+
+**The seam, minimally.** Declare one button in the `HwConfig` (§1) with a
+variant-chosen id:
 
 ```cpp
-void StaffLamp::registerExpressions(ExpressionRegistry& reg) {
-  Lamp::registerExpressions(reg);              // the shared editable catalog
-  reg.add(BloomExpression::classDescriptor()); // internal; skipped by the catalog
-}
+enum InputId : uint8_t { kPower = 1 };
+// … in the HwConfig .inputs list:
+.inputs = { {.id=kPower, .type=InputType::Button, .pin=19} },
 ```
 
-`bloom` (`expressions/bloom/bloom_expression.hpp`) is the worked example: a
-one-shot white-ward luminance swell. Its descriptor carries `.internal = true`;
-it reads the live buffer each frame and lerps every pixel toward white by one
-eased scalar (`bloomSwell` → `bloomWhiten`, integer per-channel — no per-pixel
-float), so it composites *over* a greeting as a luminance add instead of
-repainting the hue. Fired from the friend-bloom `onArrival` in §4. The general
-expression-authoring contract is [`expressions.md`](expressions.md).
-
-## 6. A whimsy gallery
-
-Copy-startable gesture recipes, all from `lamps/staff/staff_input_behavior.cpp`.
-Bind the callbacks in `createBehaviors` after looking the driver up by id:
+Then in `createBehaviors` (attach-once), look it up and bind a callback:
 
 ```cpp
-auto* stoke = inputById(kStoke);
-input_ = std::make_unique<staff::StaffInputBehavior>(
-    shadeFb(), config,
-    stoke ? stoke->asButton() : nullptr, /* … */);
-b.add(input_.get());
-```
-
-**Stoke toggle** — click flips full-bright ↔ configured, clearing the per-surface
-trims on the way up:
-
-```cpp
-case lamp::ButtonEvent::Click:
-  stoked_ = !stoked_;
-  if (stoked_) {
-    ctx->setSurfaceBrightness(lamp::Surface::Shade, 100);
-    ctx->setSurfaceBrightness(lamp::Surface::Base, 100);
+if (auto* src = inputById(kPower)) {
+  if (auto* btn = src->asButton()) {
+    btn->setCallback([this](lamp::ButtonEvent e) {
+      if (e == lamp::ButtonEvent::Click) toggle();
+    });
   }
-  ctx->setBrightness(stoked_ ? 100 : configuredBrightness_);
-  break;
-```
-
-**Mood scrub-and-freeze** — a long-press-hold scrubs the hue continuously via the
-non-allocating solid fill; releasing freezes it. Seed the hue once from the
-configured color (`colorToHue`), advance by elapsed time in `control()`:
-
-```cpp
-if (scrubbing_) {
-  const uint32_t dt = now - lastScrubMs_;
-  lastScrubMs_ = now;
-  moodHue_ = static_cast<uint16_t>((moodHue_ + dt * kScrubDegPerSec / 1000) % 360);
-  ctx->setSolidColor(lamp::colorFromHue(moodHue_));
 }
 ```
 
-**Per-surface pad brightness** — hold a touch pad to sweep one surface's trim; a
-triangle wave off `heldMs` gives a breathing ramp:
+That's the whole general contract: declare a spec, resolve
+`inputById(id)->asButton()` (or `->asTouch()`), then react to events or poll
+`isHeld()`. `inputById` returns null for an undeclared id and `asButton()` /
+`asTouch()` return null on a type mismatch — null-check both, since you're
+crossing from the variant into framework-built objects.
 
-```cpp
-if (topPad_ && topPad_->isHeld()) {
-  ctx->setSurfaceBrightness(
-      lamp::Surface::Shade,
-      triangle(topPad_->heldMs(now), kRampPeriodMs, kBrightLo, kBrightHi));
-}
-```
-
-**Unlock combo** — gate the touch gestures behind a deliberate sequence
-(`lamps/staff/unlock_combo.hpp`): a stoke long-press-release, then a top-pad tap
-inside a window; a mistimed tap re-locks, and touch does nothing until unlocked.
-It's a tiny pure-logic state machine with an injected clock, ticked at the top
-of `control()`:
-
-```cpp
-unlock_.tick(now);
-if (!unlock_.unlocked()) return;   // touch gestures gated until unlocked
-```
+**See also — a complex real-world example.** staff layers a whole gesture
+vocabulary on this seam: a stoke-button brightness toggle, a long-press mood
+scrub over the non-allocating solid fill, per-pad brightness ramps off `heldMs`,
+and a two-step unlock combo gating the touch gestures
+(`lamps/staff/staff_input_behavior.cpp`, `lamps/staff/unlock_combo.hpp`). Those
+gestures are idiosyncratic and staff is still in development — read them for the
+pattern, not as a proven shipping lamp.
 
 ## Worked example: Lioness
 

@@ -194,7 +194,8 @@ the snafu variant, or `"pulse"` from the Lioness variant. `peer` carries
 ## Cross-references
 
 - [`building-custom-lamps.md`](building-custom-lamps.md) — the author task guide;
-  the physical facade verbs, the whimsy gallery, the register-a-variant recipe.
+  the paint / brightness verbs, the input-hardware seam, the register-a-variant
+  recipe.
 - [`social.md`](social.md) — how greetings and crowd-dim fit together
   conceptually.
 - [`personality-signals.md`](personality-signals.md) — the crowd/disposition
