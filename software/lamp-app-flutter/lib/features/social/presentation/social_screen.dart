@@ -9,7 +9,6 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/critter_icon.dart';
 import '../../../core/widgets/empty_state_pane.dart';
 import '../../../core/widgets/section_header.dart';
-import '../../control/application/advanced_session.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/domain/lamp_color.dart';
 import '../../inventory/application/inventory_notifier.dart';
@@ -136,8 +135,6 @@ class _SocialScreenState extends ConsumerState<SocialScreen> {
                 displayRgbw(l.baseRgbw, legacyOnlyBle: l.viaBle && !l.viaEspNow)),
             shadeColor: _colorFromRgbw(
                 displayRgbw(l.shadeRgbw, legacyOnlyBle: l.viaBle && !l.viaEspNow)),
-            rssi: l.rssi,
-            near: l.near,
           ),
     ];
 
@@ -234,17 +231,11 @@ class _SocialLampRow {
     required this.lampId,
     required this.baseColor,
     required this.shadeColor,
-    required this.rssi,
-    required this.near,
   });
   final String name;
   final String lampId;
   final Color baseColor;
   final Color shadeColor;
-  // TEMP DEBUG: most recent BLE-scan RSSI from the lamp's perspective.
-  // Strip once bench tuning settles.
-  final int rssi;
-  final bool near;
 }
 
 class _LampDispositionRow extends ConsumerStatefulWidget {
@@ -360,19 +351,6 @@ class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
                         style: textTheme.titleMedium?.copyWith(fontSize: 14),
                       ),
                     ),
-                    if (row.near) ...[
-                      Icon(Icons.sensors, size: 14, color: colorScheme.secondary),
-                      const SizedBox(width: AppSpace.xs),
-                    ],
-                    if (_advancedDbm(ref, lampId, row.rssi) case final dbm?)
-                      Text(
-                        dbm,
-                        style: textTheme.bodySmall?.copyWith(
-                          color: colorScheme.secondary,
-                          fontSize: 10,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
                   ],
                 ),
                 if (!hasLampId)
@@ -517,15 +495,4 @@ String _dispositionLabel(int value) {
 Color _colorFromRgbw(List<int> rgbw) {
   if (rgbw.length < 4) return const Color(0xFF000000);
   return LampColor(r: rgbw[0], g: rgbw[1], b: rgbw[2], w: rgbw[3]).toSwatch();
-}
-
-/// Returns the `"-72 dBm"` string when (a) the session is in advanced
-/// mode for this lamp, AND (b) the peer has a real RSSI reading
-/// (not the -127 sentinel). Returns null otherwise so the caller can
-/// conditionally render via the `case ... ?` pattern.
-String? _advancedDbm(WidgetRef ref, String lampId, int rssi) {
-  if (rssi == -127) return null;
-  final advanced = ref.watch(effectiveAdvancedProvider(lampId));
-  if (!advanced) return null;
-  return '$rssi dBm';
 }

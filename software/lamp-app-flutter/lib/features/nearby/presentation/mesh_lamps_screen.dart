@@ -298,6 +298,10 @@ class _PeerCard extends StatelessWidget {
             const SizedBox(width: AppSpace.sm),
             _WispDots(base: wispPaint!.base, shade: wispPaint!.shade),
           ],
+          if (peer.near) ...[
+            const SizedBox(width: AppSpace.sm),
+            Icon(Icons.sensors, size: 16, color: colorScheme.secondary),
+          ],
         ],
       ),
     );
