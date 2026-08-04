@@ -96,7 +96,10 @@ class _SocialScreenState extends ConsumerState<SocialScreen> {
     // The user might be 30 ft from the connected lamp; what matters
     // for dispositions is what the LAMP can hear, not the phone.
     final nearbyAsync = ref.watch(lampNearbyPeersNotifierProvider(lampId));
-    final List<LampNearbyPeer> nearby = nearbyAsync.value ?? const [];
+    final List<LampNearbyPeer> nearby =
+        (nearbyAsync.value ?? const <LampNearbyPeer>[])
+            .where((l) => l.near)
+            .toList();
     final nearbyLoaded = nearbyAsync.hasValue;
     final inventory =
         ref.watch(inventoryNotifierProvider).value ?? const [];

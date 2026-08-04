@@ -252,6 +252,7 @@ void main() {
               name: 'floral',
               lampId: 'AA:BB:CC:DD:EE:FF',
               rssi: -72,
+              near: true,
             ),
           ]),
         ),
@@ -284,6 +285,7 @@ void main() {
               name: 'ghost',
               lampId: 'aa:bb:cc:dd:ee:ff',
               rssi: -72,
+              near: true,
             ),
           ]),
         ),
@@ -314,6 +316,7 @@ void main() {
         name: 'jacko',
         lampId: 'AA:BB:CC:DD:EE:FF',
         rssi: -72,
+        near: true,
       ),
     ]);
     await tester.pumpWidget(ProviderScope(
@@ -344,6 +347,7 @@ void main() {
         name: 'jacko-test',
         lampId: 'AA:BB:CC:DD:EE:FF',
         rssi: -72,
+        near: true,
       ),
     ]);
     await tester.pump();
@@ -377,6 +381,7 @@ void main() {
               name: 'jacko',
               lampId: 'AA:BB:CC:DD:EE:FF',
               rssi: -72,
+              near: true,
             ),
           ]),
         ),
@@ -472,6 +477,7 @@ void main() {
               name: 'jacko',
               lampId: 'AA:BB:CC:DD:EE:FF',
               rssi: -72,
+              near: true,
             ),
           ]),
         ),

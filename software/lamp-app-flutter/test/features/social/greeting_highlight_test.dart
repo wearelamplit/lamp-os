@@ -131,6 +131,7 @@ Widget _buildApp(
               baseRgbw: _peerABaseRgbw,
               shadeRgbw: [0, 0, 0, 0],
               rssi: -72,
+              near: true,
             ),
             LampNearbyPeer(
               name: 'peer-b',
@@ -138,6 +139,7 @@ Widget _buildApp(
               baseRgbw: _peerBBaseRgbw,
               shadeRgbw: [0, 0, 0, 0],
               rssi: -65,
+              near: true,
             ),
           ]),
         ),
@@ -242,7 +244,7 @@ void main() {
         baseRgbw: _peerBBaseRgbw,
         shadeRgbw: [0, 0, 0, 0],
         rssi: -65,
-        near: false,
+        near: true,
       ),
     ]);
 
@@ -261,12 +263,12 @@ void main() {
     ));
     await _pump(tester);
 
-    // peer-b is greeted but sorts last (far); peer-a sorts first (near).
+    // Both near: peer-a sorts first (untinted), peer-b second (greeted, tinted).
     expect(_rowColor(tester, 'peer-a')?.a ?? 0.0, equals(0.0));
     expect(_rowColor(tester, 'peer-b')?.a, greaterThan(0.0));
 
-    // Flip near flags so peer-b now sorts first and peer-a sorts second:
-    // the two rows swap slots without either peer's greeting state changing.
+    // Drop peer-a from the near set: it leaves the list and greeted peer-b
+    // slides up into its slot, a reorder with no change to peer-b's greeting.
     fakePeers.setPeers(const [
       LampNearbyPeer(
         name: 'peer-a',
@@ -290,10 +292,9 @@ void main() {
     await tester.pump(Duration.zero);
 
     expect(_rowColor(tester, 'peer-b')?.a, greaterThan(0.0),
-        reason: 'still-greeted peer-b must stay tinted after reorder');
+        reason: 'still-greeted peer-b must keep its tint after sliding into '
+            "peer-a's old slot, not inherit that slot's untinted decoration");
     expect(_rowColor(tester, 'peer-a')?.a ?? 0.0, equals(0.0),
-        reason:
-            'peer-a was never greeted; it must not inherit the tint left '
-            'behind by whichever row previously occupied its slot');
+        reason: 'peer-a left the near set and must be gone, not lingering tinted');
   });
 }
