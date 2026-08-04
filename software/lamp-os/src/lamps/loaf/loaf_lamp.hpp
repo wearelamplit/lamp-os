@@ -25,10 +25,6 @@ class LoafLamp : public Lamp {
   }) {}
 
  protected:
-  Features featuresEnabled() const override {
-    return Features::All & ~Features::DefaultExpressions;   // no expressions over the ring
-  }
-
   Config::Defaults defaults() const override {
     return {
       .name = "stray",             // fresh-lamp sentinel (same as standard)
