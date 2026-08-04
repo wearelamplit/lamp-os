@@ -7,14 +7,14 @@
 
 namespace lamp { namespace loaf {
 
-// Renders one ring surface as a seamless circular gradient of the user's own
-// colors. A plain linear gradient leaves a hard seam where the ring's last
-// pixel meets its first; this closes the loop (interpolating the last stop
-// back to the first) so the wrap is continuous. When revMs_ != 0 the whole
-// gradient rotates once per revMs_ around the ring.
+// Renders one ring surface as a seamless circular hue sweep through the user's
+// own colors at full brightness. Interpolating hue (not linear RGB) keeps every
+// pixel bright and fully saturated, so gamma can't crush the dim inter-stop
+// mixes to off; the sweep closes the loop (last hue back to the first) so the
+// wrap is continuous. When revMs_ != 0 the whole ring rotates once per revMs_.
 //
 // isBase selects which surface's user stops to read (base vs shade); the
-// stops come live from Config, so a picker edit rebuilds the gradient.
+// stops come live from Config, so a picker edit rebuilds the ring.
 class LoafRingBehavior : public AnimatedBehavior {
  public:
   LoafRingBehavior(FrameBuffer* fb, bool isBase, uint32_t revMs);
