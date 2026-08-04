@@ -3,14 +3,44 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#ifdef LAMP_DEBUG
+#include <cstdlib>
+#endif
 
 namespace lamp {
 
+#ifdef LAMP_DEBUG
+LampRoster::DebugGetterViolationFn LampRoster::s_debugGetterViolation = nullptr;
+
+void LampRoster::debugGetterEnter() {
+  TaskHandle_t cur = xTaskGetCurrentTaskHandle();
+  if (getterTask_ == nullptr) getterTask_ = cur;
+  const char* reason = nullptr;
+  if (getterTask_ != cur) {
+    reason = "roster getter called from unexpected task";
+  } else if (getterInUse_) {
+    reason = "re-entrant roster getter (nested getNear/getMesh/getAll)";
+  }
+  if (reason) {
+    if (s_debugGetterViolation) {
+      s_debugGetterViolation(reason);
+    } else {
+      Serial.printf("[roster] FATAL %s\n", reason);
+      abort();
+    }
+  }
+  getterInUse_ = true;
+}
+
+void LampRoster::debugGetterExit() { getterInUse_ = false; }
+#endif
+
 namespace {
 // Truncate-on-copy into the fixed name slot; always NUL-terminated.
+// `src` must be NUL-terminated (HELLO parse and NimBLE names both are).
 void copyName(char (&dst)[lamp_protocol::HELLO_MAX_NAME + 1],
-              const std::string& src) {
-  std::snprintf(dst, sizeof(dst), "%s", src.c_str());
+              const char* src) {
+  std::snprintf(dst, sizeof(dst), "%s", src ? src : "");
 }
 
 // Most-recent sighting across either transport. Eviction and prune sort key.
@@ -60,7 +90,7 @@ void LampRoster::addOrUpdateFromBle(const std::string& name,
   if (idx == count_) {
     evictOldestIfFullLocked();
     RosterEntry e;
-    copyName(e.name, name);
+    copyName(e.name, name.c_str());
     std::memcpy(e.mac, recoveredMac, 6);
     e.hasMac = true;
     e.baseColor = base;
@@ -71,7 +101,7 @@ void LampRoster::addOrUpdateFromBle(const std::string& name,
   } else {
     // Empty name from a nameless BLE adv must not erase a known display name
     // on the merged entry.
-    if (!name.empty()) copyName(store_[idx].name, name);
+    if (!name.empty()) copyName(store_[idx].name, name.c_str());
     store_[idx].baseColor = base;
     store_[idx].shadeColor = shade;
     store_[idx].lastSeenNearMs = now;
@@ -85,7 +115,7 @@ void LampRoster::addOrUpdateFromBle(const std::string& name,
   xSemaphoreGive(mutex_);
 }
 
-void LampRoster::addOrUpdateFromEspNow(const std::string& name, const uint8_t mac[6],
+void LampRoster::addOrUpdateFromEspNow(const char* name, const uint8_t mac[6],
                                        const Color& base, const Color& shade,
                                        uint32_t firmwareVersion,
                                        uint8_t otaState,
@@ -107,7 +137,7 @@ void LampRoster::addOrUpdateFromEspNow(const std::string& name, const uint8_t ma
     uint32_t logNow = millis();
     if (logNow - lastDropLogMs > 1000) {
       Serial.printf("[roster] addOrUpdateFromEspNow: mutex contended, dropped (name=%s)\n",
-                    name.c_str());
+                    name ? name : "");
       lastDropLogMs = logNow;
     }
 #endif
@@ -147,7 +177,7 @@ void LampRoster::addOrUpdateFromEspNow(const std::string& name, const uint8_t ma
   } else {
     // A HELLO whose nameLen was 0 arrives with an empty name; keep the last
     // known display name rather than blanking the merged entry.
-    if (!name.empty()) copyName(store_[idx].name, name);
+    if (name && name[0] != '\0') copyName(store_[idx].name, name);
     store_[idx].baseColor = base;
     store_[idx].shadeColor = shade;
     std::memcpy(store_[idx].mac, mac, 6);
@@ -209,51 +239,92 @@ void LampRoster::prune(uint32_t maxAgeMs) {
   xSemaphoreGive(mutex_);
 }
 
-// Copy store_ under lock, filter outside. Bounds the critical section so
-// ESP-NOW recv-side bounded takes don't time out on a loop-task reader.
-std::vector<RosterEntry> LampRoster::getNear(uint32_t maxAgeMs) {
+// Copy store_ into a reused buffer under lock, filter outside. Bounds the
+// critical section so ESP-NOW recv-side bounded takes don't time out on a
+// loop-task reader, and reuses the buffer so steady-state queries don't churn
+// the fragmented heap.
+std::vector<RosterEntry>& LampRoster::getNear(uint32_t maxAgeMs) {
+#ifdef LAMP_DEBUG
+  debugGetterEnter();
+#endif
   uint32_t now = millis();
+  nearBuf_.clear();
   xSemaphoreTake(mutex_, portMAX_DELAY);
-  std::vector<RosterEntry> snapshot(store_.begin(), store_.begin() + count_);
+  nearBuf_.insert(nearBuf_.end(), store_.begin(), store_.begin() + count_);
   xSemaphoreGive(mutex_);
-  std::vector<RosterEntry> out;
-  out.reserve(snapshot.size());
-  for (const auto& e : snapshot) {
-    if (e.lastSeenNearMs != 0 && (now - e.lastSeenNearMs) <= maxAgeMs) {
-      out.push_back(e);
-    }
-  }
+  nearBuf_.erase(
+      std::remove_if(nearBuf_.begin(), nearBuf_.end(),
+                     [&](const RosterEntry& e) {
+                       return !(e.lastSeenNearMs != 0 &&
+                                (now - e.lastSeenNearMs) <= maxAgeMs);
+                     }),
+      nearBuf_.end());
   // Highest RSSI first: `peers.front()` gives the nearest lamp
   // (cascade-stagger sort key). -127 sorts to the back. std::sort (in-place
   // introsort, no merge-buffer alloc) avoids bad_alloc on the fragmented
   // heap; the mac tiebreak gives equal-RSSI peers a deterministic order.
-  std::sort(out.begin(), out.end(),
+  std::sort(nearBuf_.begin(), nearBuf_.end(),
             [](const RosterEntry& a, const RosterEntry& b) {
               if (a.lastRssi != b.lastRssi) return a.lastRssi > b.lastRssi;
               return std::memcmp(a.mac, b.mac, 6) < 0;
             });
-  return out;
-}
-std::vector<RosterEntry> LampRoster::getMesh(uint32_t maxAgeMs) {
-  uint32_t now = millis();
-  xSemaphoreTake(mutex_, portMAX_DELAY);
-  std::vector<RosterEntry> snapshot(store_.begin(), store_.begin() + count_);
-  xSemaphoreGive(mutex_);
-  std::vector<RosterEntry> out;
-  out.reserve(snapshot.size());
-  for (const auto& e : snapshot) {
-    if (e.lastSeenMeshMs != 0 && (now - e.lastSeenMeshMs) <= maxAgeMs) {
-      out.push_back(e);
-    }
-  }
-  return out;
+#ifdef LAMP_DEBUG
+  debugGetterExit();
+#endif
+  return nearBuf_;
 }
 
-std::vector<RosterEntry> LampRoster::getAll() {
+const std::vector<NearbyCopy>& LampRoster::snapshotNear(uint32_t maxAgeMs) {
+  std::vector<RosterEntry>& near = getNear(maxAgeMs);
+  nearSnapshot_.clear();
+  for (const RosterEntry& e : near) {
+    NearbyCopy c;
+    std::memcpy(c.name, e.name, sizeof(c.name));
+    std::memcpy(c.mac, e.mac, 6);
+    c.hasMac = e.hasMac;
+    c.baseColor = e.baseColor;
+    c.shadeColor = e.shadeColor;
+    c.lastRssi = e.lastRssi;
+    c.lastSeenNearMs = e.lastSeenNearMs;
+    nearSnapshot_.push_back(c);
+  }
+  return nearSnapshot_;
+}
+
+std::vector<RosterEntry>& LampRoster::getMesh(uint32_t maxAgeMs) {
+#ifdef LAMP_DEBUG
+  debugGetterEnter();
+#endif
+  uint32_t now = millis();
+  meshBuf_.clear();
   xSemaphoreTake(mutex_, portMAX_DELAY);
-  std::vector<RosterEntry> snapshot(store_.begin(), store_.begin() + count_);
+  meshBuf_.insert(meshBuf_.end(), store_.begin(), store_.begin() + count_);
   xSemaphoreGive(mutex_);
-  return snapshot;
+  meshBuf_.erase(
+      std::remove_if(meshBuf_.begin(), meshBuf_.end(),
+                     [&](const RosterEntry& e) {
+                       return !(e.lastSeenMeshMs != 0 &&
+                                (now - e.lastSeenMeshMs) <= maxAgeMs);
+                     }),
+      meshBuf_.end());
+#ifdef LAMP_DEBUG
+  debugGetterExit();
+#endif
+  return meshBuf_;
+}
+
+std::vector<RosterEntry>& LampRoster::getAll() {
+#ifdef LAMP_DEBUG
+  debugGetterEnter();
+#endif
+  allBuf_.clear();
+  xSemaphoreTake(mutex_, portMAX_DELAY);
+  allBuf_.insert(allBuf_.end(), store_.begin(), store_.begin() + count_);
+  xSemaphoreGive(mutex_);
+#ifdef LAMP_DEBUG
+  debugGetterExit();
+#endif
+  return allBuf_;
 }
 
 bool LampRoster::findByMac(const uint8_t mac[6], RosterEntry& out) {

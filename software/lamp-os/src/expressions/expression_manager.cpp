@@ -154,7 +154,7 @@ void ExpressionManager::maybeCascade(const ExpressionEntry& entry,
   inv.target = static_cast<uint8_t>(entry.expression->getTarget());
   inv.parameters = parametersWithoutCascadeKeys(entry.config.parameters);
 
-  auto peers = lampRoster.getMesh(LAMP_PRUNE_TIME_MS);
+  const auto& peers = lampRoster.getMesh(LAMP_PRUNE_TIME_MS);
   uint8_t myMac[6];
   meshLink_->getMyMac(myMac);
   std::vector<RosterEntry> targets;

@@ -46,6 +46,12 @@ struct PeerView {
   // Single conversion from a roster entry. `mac` aliases the entry, so the
   // view outlives it only as long as the entry does.
   static PeerView from(const RosterEntry& e);
+
+  // Build from raw fields (the roster-snapshot iteration path, which holds a
+  // stack copy rather than a RosterEntry reference). `name` and `mac` must
+  // outlive the view.
+  static PeerView make(const char* name, const uint8_t* mac, bool hasMac,
+                       Color baseColor, Color shadeColor, int8_t rssi);
 };
 
 /**

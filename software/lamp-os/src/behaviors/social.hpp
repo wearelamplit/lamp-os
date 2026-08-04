@@ -109,12 +109,12 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   void markGreeted(const uint8_t mac[6], uint32_t nowMs);
 
   // Throttle the gossip-OTA peer scan to this cadence. Lamps emit HELLO
-  // every 1-2s, so 500 ms catches every fresh sighting while saving the
-  // ~60 Hz vector allocation that control() would otherwise do per
-  // frame. Skipped entirely while distributor.isInProgress(); the
-  // single-source mutex blocks a second concurrent session anyway, so
-  // there's nothing useful to scan for.
-  static constexpr uint32_t kOtaScanIntervalMs  = 500;
+  // every 1-2s, so 1s catches every fresh sighting while halving the
+  // getMesh snapshot rate that control() would otherwise pay per frame.
+  // Skipped entirely while distributor.isInProgress(); the single-source
+  // mutex blocks a second concurrent session anyway, so there's nothing
+  // useful to scan for.
+  static constexpr uint32_t kOtaScanIntervalMs  = 1000;
 
  private:
   static constexpr size_t MAX_GREETED_TRACKED = 32;

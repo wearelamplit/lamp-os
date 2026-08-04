@@ -26,8 +26,13 @@ void BehaviorContext::forEachArrival(
 void BehaviorContext::forEachNearby(
     const std::function<bool(const PeerView&)>& cb) {
   if (!lampRoster) return;
-  for (const RosterEntry& e : lampRoster->getNear(LAMP_PRUNE_TIME_MS)) {
-    PeerView v = PeerView::from(e);
+  // Snapshot before invoking `cb`: a callback re-entering getNear/getMesh/getAll
+  // fills a distinct buffer, so this snapshot stays valid across the walk.
+  const std::vector<NearbyCopy>& near =
+      lampRoster->snapshotNear(LAMP_PRUNE_TIME_MS);
+  for (const NearbyCopy& e : near) {
+    PeerView v = PeerView::make(e.name, e.mac, e.hasMac, e.baseColor,
+                                e.shadeColor, e.lastRssi);
     if (cb(v)) return;
   }
 }

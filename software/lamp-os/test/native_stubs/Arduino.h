@@ -26,6 +26,9 @@ struct NativeSerialStub {
     vprintf(fmt, args);
     va_end(args);
   }
+  template <typename T> void print(const T&) {}
   void println(const char* s = "") { printf("%s\n", s); }
+  template <typename T> void println(const T&) {}
+  void begin(unsigned long) {}
 };
 inline NativeSerialStub Serial;

@@ -139,7 +139,7 @@ class PersonalityEngine {
 
   // Get the current BLE-reachable snapshot (or the test override). Pure
   // read; called only at the sample cadence to refresh blePeerCache_.
-  std::vector<RosterEntry> snapshotBlePeers_() const;
+  const std::vector<RosterEntry>& snapshotBlePeers_() const;
 
   Config* config_ = nullptr;
 

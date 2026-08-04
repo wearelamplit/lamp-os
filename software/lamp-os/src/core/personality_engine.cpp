@@ -64,7 +64,7 @@ float PersonalityEngine::smoothedCrowdWeight() const {
 CrowdComposition PersonalityEngine::crowdComposition() const {
   CrowdComposition c;
   if (!config_) return c;
-  const std::vector<RosterEntry> peers = snapshotBlePeers_();
+  const std::vector<RosterEntry>& peers = snapshotBlePeers_();
   for (const auto& p : peers) {
     if (p.name[0] == '\0') continue;
     const uint8_t d = p.hasMac ? config_->getDisposition(p.mac) : 3;
@@ -174,7 +174,7 @@ float PersonalityEngine::dimFactorForCount_(float weightedCount, float floor) co
   return factor;
 }
 
-std::vector<RosterEntry> PersonalityEngine::snapshotBlePeers_() const {
+const std::vector<RosterEntry>& PersonalityEngine::snapshotBlePeers_() const {
   // Gate must match setNearbyOverride() in the header; that method
   // compiles under (LAMP_TEST || LAMP_DEBUG), so the read side has to
   // honor the override in both build flavors. Without LAMP_DEBUG here,

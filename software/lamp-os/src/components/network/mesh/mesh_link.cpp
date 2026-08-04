@@ -338,9 +338,10 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
 #endif
 #endif
     // RSSI feeds the cascade sort so physically closer peers fire first.
-    const std::string peerName = h.nameLen ? std::string(h.name, h.nameLen) : std::string();
+    // h.name is a NUL-terminated fixed field; pass it straight through so the
+    // hot HELLO path never allocates a transient std::string.
     lampRoster.addOrUpdateFromEspNow(
-        peerName,
+        h.name,
         h.sourceMac,
         Color(h.base[0],  h.base[1],  h.base[2],  h.base[3]),
         Color(h.shade[0], h.shade[1], h.shade[2], h.shade[3]),

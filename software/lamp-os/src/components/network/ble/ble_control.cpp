@@ -453,14 +453,18 @@ static void logNearbyHeapSkip(uint32_t largest, uint32_t needed, uint32_t lamps)
 
 static constexpr uint32_t kNearbyHeapMargin = 1024;
 
-static std::string buildNearbyJson(uint32_t& membershipHashOut,
-                                   std::vector<lamp::RosterEntry>& lamps) {
+// Builds into `out`, reused in place (cleared, capacity retained) so a
+// steady-state rebuild never allocates once the buffer has grown to the
+// fleet's high-water size.
+static void buildNearbyJson(uint32_t& membershipHashOut,
+                            std::vector<lamp::RosterEntry>& lamps,
+                            std::string& out) {
   // Sort by name for stable rendering.
   std::sort(lamps.begin(), lamps.end(),
             [](const lamp::RosterEntry& a, const lamp::RosterEntry& b) {
               return std::strcmp(a.name, b.name) < 0;
             });
-  std::string out;
+  out.clear();
   // Upper bound: ~240 B of fixed fields per entry (fwChannel added) plus
   // worst-case 6 B per escaped name char, so the string never reallocs
   // mid-build.
@@ -501,8 +505,10 @@ static std::string buildNearbyJson(uint32_t& membershipHashOut,
              lamp::isNearNow(p.lastSeenNearMs, now, LAMP_PRUNE_TIME_MS) ? "true" : "false");
     out += buf;
     if (p.hasMac) {
+      char macBuf[18];
+      lamp::formatBdAddr(p.mac, macBuf);
       out += ",\"lampId\":\"";
-      out += p.macStr();
+      out += macBuf;
       out += '"';
     }
     if (p.lastRssi != -127) {
@@ -536,7 +542,6 @@ static std::string buildNearbyJson(uint32_t& membershipHashOut,
   }
   out += ']';
   membershipHashOut = hash;
-  return out;
 }
 
 // nearby is served from a Core 1-built cache like the Config section
@@ -572,7 +577,7 @@ static void refreshNearbyJsonCache() {
   const uint32_t now = millis();
   if (now - lastBuildMs < 1000) return;
 
-  auto lamps = lamp::lampRoster.getAll();
+  auto& lamps = lamp::lampRoster.getAll();
   uint32_t needed = 2;
   for (auto& e : lamps) needed += 240 + 6 * std::strlen(e.name);
   const uint32_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
@@ -583,16 +588,19 @@ static void refreshNearbyJsonCache() {
   }
 
   uint32_t hash = 0;
-  std::string json;
+  // Persistent scratch: buildNearbyJson refills it in place, then it swaps
+  // buffers with the cache. Both are long-lived, so after warmup the two
+  // heap buffers just ping-pong with no per-build alloc/free.
+  static std::string s_nearbyBuildScratch;
   try {
-    json = buildNearbyJson(hash, lamps);
+    buildNearbyJson(hash, lamps, s_nearbyBuildScratch);
   } catch (const std::bad_alloc&) {
     logBleSectionOom("nearby");
     lastBuildMs = now;
     return;
   }
   xSemaphoreTake(nearbyCacheMutex(), portMAX_DELAY);
-  s_nearbyJsonCache.swap(json);
+  s_nearbyJsonCache.swap(s_nearbyBuildScratch);
   xSemaphoreGive(nearbyCacheMutex());
   builtGen    = gen;
   lastBuildMs = now;

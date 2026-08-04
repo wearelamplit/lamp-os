@@ -46,7 +46,11 @@ void ArrivalNotifier::tick(uint32_t nowMs, LampRoster& roster, uint32_t nearWind
 
   bool present[kMaxFired] = {};
 
-  for (const RosterEntry& e : roster.getNear(nearWindowMs)) {
+  // Snapshot before firing: an observer is arbitrary user code that may
+  // re-enter getNear/getMesh/getAll, which fills a distinct buffer, so this
+  // snapshot stays valid across the fire loop.
+  const std::vector<NearbyCopy>& near = roster.snapshotNear(nearWindowMs);
+  for (const NearbyCopy& e : near) {
     if (!e.hasMac) continue;
     int idx = firedIndex(e.mac);
     if (idx >= 0) {
@@ -63,7 +67,8 @@ void ArrivalNotifier::tick(uint32_t nowMs, LampRoster& roster, uint32_t nearWind
     std::memcpy(fired_[slot], e.mac, 6);
     firedUsed_[slot] = true;
     present[slot] = true;
-    fire(PeerView::from(e));
+    fire(PeerView::make(e.name, e.mac, e.hasMac, e.baseColor, e.shadeColor,
+                        e.lastRssi));
   }
 
   for (size_t i = 0; i < kMaxFired; ++i) {

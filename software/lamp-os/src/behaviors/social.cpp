@@ -200,9 +200,8 @@ void SocialBehavior::control() {
   //   (1) Skip entirely while distributor.isInProgress(); the single-
   //       source mutex blocks concurrent sessions, so scanning during
   //       OTA finds nothing actionable.
-  //   (2) Throttle the ESP-NOW vector snapshot to kOtaScanIntervalMs
-  //       (500 ms). Lamps emit HELLO every 1-2s, so this still catches
-  //       every fresh sighting while collapsing the 60 Hz tick rate.
+  //   (2) Throttle the ESP-NOW vector snapshot to kOtaScanIntervalMs,
+  //       collapsing the 60 Hz tick rate.
   //
   // Iterates ESP-NOW-reachable peers (not BLE) because firmwareVersion is
   // only populated by ESP-NOW HELLO; BLE-only sightings carry no version.
@@ -222,7 +221,7 @@ void SocialBehavior::control() {
        static_cast<int32_t>(now - lastOtaScanMs_) >=
            static_cast<int32_t>(kOtaScanIntervalMs))) {
     lastOtaScanMs_ = now;
-    std::vector<RosterEntry> espNowPeers =
+    const std::vector<RosterEntry>& espNowPeers =
         lampRoster.getMesh(LAMP_PRUNE_TIME_MS);
     bool peerHigherSeen = false;
     for (const auto& p : espNowPeers) {

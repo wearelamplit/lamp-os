@@ -3,6 +3,9 @@
 #include <Arduino.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#ifdef LAMP_DEBUG
+#include <freertos/task.h>
+#endif
 
 #include <array>
 #include <cstdint>
@@ -111,6 +114,23 @@ struct RosterEntry {
 static_assert(std::is_trivially_copyable<RosterEntry>::value,
               "roster snapshots must not touch the heap per entry");
 
+// Compact projection of a near peer for the callback-iteration path. A caller
+// that invokes a user callback per peer copies the near set (snapshotNear)
+// before iterating, so a callback that re-enters getNear/getMesh/getAll can't
+// invalidate the in-flight iteration. Smaller than RosterEntry to keep the
+// reused snapshot buffer light on the fragmented heap.
+struct NearbyCopy {
+  char     name[lamp_protocol::HELLO_MAX_NAME + 1] = {0};
+  uint8_t  mac[6] = {0};
+  bool     hasMac = false;
+  Color    baseColor = Color();
+  Color    shadeColor = Color();
+  int8_t   lastRssi = -127;
+  uint32_t lastSeenNearMs = 0;
+};
+static_assert(std::is_trivially_copyable<NearbyCopy>::value,
+              "snapshot entries must be a trivial copy");
+
 /**
  * Single source of truth for "lamps I can hear right now."
  *        Mutated from NimBLE scan callback (Core 0) and ESP-NOW HELLO
@@ -130,7 +150,7 @@ class LampRoster {
                           const std::string& bleAddr,
                           const Color& base, const Color& shade,
                           int8_t rssi = -127);
-  void addOrUpdateFromEspNow(const std::string& name, const uint8_t mac[6],
+  void addOrUpdateFromEspNow(const char* name, const uint8_t mac[6],
                              const Color& base, const Color& shade,
                              uint32_t firmwareVersion = 0,
                              uint8_t otaState = 0,
@@ -149,8 +169,23 @@ class LampRoster {
   void prune(uint32_t maxAgeMs);
 
   // Peers seen via BLE within maxAgeMs, sorted by RSSI descending
-  // (front = physically closest).
-  std::vector<RosterEntry> getNear(uint32_t maxAgeMs);
+  // (front = physically closest). Returns a reference to an internal buffer
+  // reused across calls to avoid per-call heap churn on the fragmented lamp
+  // heap. Loop-task (Core 1) callers only (LAMP_DEBUG asserts the task); the
+  // result is invalidated by the next getNear/getMesh/getAll call, so a path
+  // that hands each peer to a user callback must snapshotNear first rather
+  // than iterate this reference across the callbacks.
+  std::vector<RosterEntry>& getNear(uint32_t maxAgeMs);
+
+  // Near peers (getNear order, all within maxAgeMs up to kCapacity) projected
+  // into a reused internal buffer. The seam for paths that invoke a user
+  // callback per peer: iterate the returned reference, which a callback
+  // re-entering getNear/getMesh/getAll cannot invalidate (distinct buffers).
+  // Keep near-walks non-nested: a snapshotNear called from inside a callback
+  // walking this reference (a forEachNearby/crowd inside a Lions ambient or
+  // Staff arrival callback) silently clobbers the buffer mid-walk. The
+  // LAMP_DEBUG getter guard catches an off-task caller, not a same-task nest.
+  const std::vector<NearbyCopy>& snapshotNear(uint32_t maxAgeMs);
 
   // Highest-RSSI near arrival (hasMac, unacknowledged, seen within maxAgeMs)
   // that `accept` also passes, copied into `out`. Scans store_ in place under
@@ -182,15 +217,29 @@ class LampRoster {
   }
 
   // Peers seen via ESP-NOW within maxAgeMs (mesh-reachable; OTA and
-  // remote-config candidates).
-  std::vector<RosterEntry> getMesh(uint32_t maxAgeMs);
+  // remote-config candidates). Same reused-buffer contract as getNear.
+  std::vector<RosterEntry>& getMesh(uint32_t maxAgeMs);
 
   // Full snapshot, used by CHAR_NEARBY_LAMPS for the app's unified list.
-  std::vector<RosterEntry> getAll();
+  // Same reused-buffer contract as getNear.
+  std::vector<RosterEntry>& getAll();
 
   // Monotonic counter, bumped on every entry mutation. Change detection
   // for the nearby-JSON cache rebuild in ble_control::tick().
   uint32_t generation();
+
+#ifdef LAMP_DEBUG
+  // The shared getter buffers are non-reentrant and read outside the mutex, so
+  // their safety rests on "one loop task, no nested getter call." These catch a
+  // violation loud + fast on the bench instead of a silent field heap corrupt:
+  // a getter called from an unexpected task, or a getter re-entered mid-fill.
+  // Zero cost in release (compiled out).
+  using DebugGetterViolationFn = void (*)(const char* reason);
+  // Test seam: replaces the default log + abort. Null on the bench.
+  static DebugGetterViolationFn s_debugGetterViolation;
+  void debugGetterEnter();
+  void debugGetterExit();
+#endif
 
   // Returns true and fills [out] on hit; false on miss. Only matches entries
   // with hasMac=true; BLE-only entries (no HELLO received) are excluded.
@@ -299,9 +348,19 @@ class LampRoster {
  private:
   LampWispStateProvider lampWispStateProvider_ = nullptr;
   std::array<RosterEntry, kCapacity> store_;
+  // Reused snapshot buffers for getNear/getMesh/getAll. Core-1-only, refilled
+  // in place so a steady-state query never allocates once warmed.
+  std::vector<RosterEntry> nearBuf_;
+  std::vector<RosterEntry> meshBuf_;
+  std::vector<RosterEntry> allBuf_;
+  std::vector<NearbyCopy> nearSnapshot_;
   size_t count_ = 0;
   uint32_t generation_ = 0;
   SemaphoreHandle_t mutex_ = nullptr;
+#ifdef LAMP_DEBUG
+  TaskHandle_t getterTask_ = nullptr;
+  bool getterInUse_ = false;
+#endif
   WispCache wispCache_;
   WispFleetCache wispFleet_;
 
