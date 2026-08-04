@@ -19,6 +19,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   only reachable over the mesh.
 
 ### Fixed
+- **Updating a lamp no longer resets its Web Config.** A lamp that was already
+  set up could be treated as brand-new after a firmware update and have its Web
+  Config hotspot reset to a short window. An already-named lamp is now
+  recognized as configured and keeps its settings across updates.
 - **Lamps no longer restart themselves after a while in a crowd.** A slow
   memory leak — the Bluetooth scanner kept a record of every nearby phone and
   wearable it had ever seen, and those addresses rotate constantly — gradually

@@ -428,6 +428,10 @@ void Config::applyDefaults(const Defaults& d) {
   // substitute the variant default only for a lamp the user never named. A
   // named lamp keeps its stored name even when it equals a default word.
   lamp.named = resolveNamed(namedKeyPresent_, lamp.named, lamp.name, d.name);
+  // A named lamp is already configured; never let the app re-adopt it (which
+  // would reset its Web Config window) after an upgrade from firmware that
+  // predates the setup flag.
+  if (lamp.named) lamp.setup = true;
   if (!d.name.empty() && !lamp.named) {
     lamp.name = d.name;
   }

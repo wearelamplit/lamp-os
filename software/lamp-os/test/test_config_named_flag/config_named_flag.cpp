@@ -37,6 +37,17 @@ static std::string resolvedName(bool keyPresent, bool loaded,
   return name;
 }
 
+// Mirror applyDefaults' setup step: `if (lamp.named) lamp.setup = true` — a
+// named lamp is marked configured regardless of any stored/seed value, so the
+// app never re-adopts it and resets its Web Config after an upgrade.
+static bool resolvedSetup(bool storedSetup, bool keyPresent, bool loaded,
+                          const std::string& name,
+                          const std::string& variantDefault) {
+  bool setup = storedSetup;
+  if (resolveNamed(keyPresent, loaded, name, variantDefault)) setup = true;
+  return setup;
+}
+
 // Fresh lamp: empty NVS loads name="stray"; every variant reads unnamed and
 // gets its own default name.
 void test_fresh_lamp_infers_unnamed_and_gets_default() {
@@ -80,6 +91,26 @@ void test_flag_present_is_authoritative() {
                            resolvedName(true, true, "stray", "stray").c_str());
   // Present-and-false stays false even if the name looks custom.
   TEST_ASSERT_FALSE(resolveNamed(true, false, "kitchen", "snafu"));
+}
+
+// Old NVS (no setup field) with a custom name migrates to setup=true, so an
+// upgraded already-configured lamp is never re-adopted (Web Config preserved).
+void test_migration_named_lamp_is_setup() {
+  TEST_ASSERT_TRUE(resolvedSetup(false, false, false, "kitchen", "snafu"));
+  TEST_ASSERT_TRUE(resolvedSetup(false, false, false, "snafu", "stray"));
+}
+
+// A genuinely fresh/unnamed lamp (name == variant default, no setup field)
+// stays setup=false so it remains adoptable.
+void test_fresh_lamp_stays_unconfigured() {
+  TEST_ASSERT_FALSE(resolvedSetup(false, false, false, "stray", "stray"));
+  TEST_ASSERT_FALSE(resolvedSetup(false, false, false, "snafu", "snafu"));
+}
+
+// An explicit stored setup=false on a named lamp is overridden to true; being
+// named is authoritative for "already configured".
+void test_named_overrides_stored_setup_false() {
+  TEST_ASSERT_TRUE(resolvedSetup(false, true, true, "kitchen", "snafu"));
 }
 
 // The app-rename apply path sets named=true; it round-trips through the codec
@@ -126,6 +157,9 @@ int main(int, char**) {
   RUN_TEST(test_migration_stored_default_name_is_unnamed);
   RUN_TEST(test_migration_custom_name_preserved);
   RUN_TEST(test_flag_present_is_authoritative);
+  RUN_TEST(test_migration_named_lamp_is_setup);
+  RUN_TEST(test_fresh_lamp_stays_unconfigured);
+  RUN_TEST(test_named_overrides_stored_setup_false);
   RUN_TEST(test_named_round_trips_through_codec);
   RUN_TEST(test_named_key_presence_detection);
   return UNITY_END();
