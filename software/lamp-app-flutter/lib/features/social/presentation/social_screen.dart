@@ -105,6 +105,7 @@ class SocialScreen extends ConsumerWidget {
             shadeColor: _colorFromRgbw(
                 displayRgbw(l.shadeRgbw, legacyOnlyBle: l.viaBle && !l.viaEspNow)),
             rssi: l.rssi,
+            near: l.near,
           ),
     ];
 
@@ -202,6 +203,7 @@ class _SocialLampRow {
     required this.baseColor,
     required this.shadeColor,
     required this.rssi,
+    required this.near,
   });
   final String name;
   final String lampId;
@@ -210,6 +212,7 @@ class _SocialLampRow {
   // TEMP DEBUG: most recent BLE-scan RSSI from the lamp's perspective.
   // Strip once bench tuning settles.
   final int rssi;
+  final bool near;
 }
 
 class _LampDispositionRow extends ConsumerStatefulWidget {
@@ -325,6 +328,10 @@ class _LampDispositionRowState extends ConsumerState<_LampDispositionRow> {
                         style: textTheme.titleMedium?.copyWith(fontSize: 14),
                       ),
                     ),
+                    if (row.near) ...[
+                      Icon(Icons.sensors, size: 14, color: colorScheme.secondary),
+                      const SizedBox(width: AppSpace.xs),
+                    ],
                     if (_advancedDbm(ref, lampId, row.rssi) case final dbm?)
                       Text(
                         dbm,
