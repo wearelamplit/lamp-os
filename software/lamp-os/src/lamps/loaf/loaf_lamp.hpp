@@ -51,7 +51,7 @@ class LoafLamp : public Lamp {
 
  private:
   // One base-ring revolution. Bench-tune: lower = faster spin.
-  static constexpr uint32_t kBaseRevolutionMs = 45000;
+  static constexpr uint32_t kBaseRevolutionMs = 25000;
 
   std::unique_ptr<loaf::LoafRingBehavior> base_;
   std::unique_ptr<loaf::LoafRingBehavior> shade_;
