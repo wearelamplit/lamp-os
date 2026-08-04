@@ -263,9 +263,11 @@ void LoafRingBehavior::control() {
 ```
 
 The trigger is presence, not a one-shot greeting: it re-evaluates every control
-tick and self-corrects when the peer leaves the nearby set. Ramp the *value*
-you change (here the revolution period), not the phase, so the animation eases
-instead of snapping.
+tick and self-corrects when the peer leaves the nearby set. Calling
+`forEachNearby` per frame is fine — the framework caches the nearby snapshot for
+a 1 s freshness window, so a per-tick call does not re-lock or re-sort the
+roster; don't roll your own throttle. Ramp the *value* you change (here the
+revolution period), not the phase, so the animation eases instead of snapping.
 
 ## 5. Custom internal expressions
 

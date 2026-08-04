@@ -80,7 +80,10 @@ Two properties make it lethal:
    warmed), so a callback re-entering `getNear`/`getMesh`/`getAll` fills a
    different buffer and cannot invalidate the walk. The one uncovered case is a
    nested `snapshotNear` (no near-walk nests today); `LAMP_DEBUG` catches an
-   off-task caller of it.
+   off-task caller of it. `snapshotNear` also caches: repeated calls with the
+   same `maxAgeMs` within `kSnapshotCacheMs` (1 s) return the existing copy
+   without re-locking or sorting, so a behavior calls it per frame and does not
+   roll its own throttle. A different `maxAgeMs` rebuilds.
 
 ## Why it recurs
 

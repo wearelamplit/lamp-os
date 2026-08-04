@@ -7,6 +7,7 @@
 #include <unity.h>
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <vector>
 
@@ -37,6 +38,16 @@ void churn(LampRoster& r, uint8_t n) {
     r.addOrUpdateFromEspNow("peer", mac, kNoColor, kNoColor, 0x010203, 0, 5,
                             nullptr, nullptr, false, 0, false, nullptr, false,
                             -60);
+  }
+}
+
+// Add `n` distinct near peers via the BLE path (each sighting sets the near
+// timestamp; distinct addresses recover distinct MACs, so count_ == n).
+void addNear(LampRoster& r, uint8_t n) {
+  for (uint8_t i = 0; i < n; i++) {
+    char addr[18];
+    std::snprintf(addr, sizeof(addr), "AA:BB:CC:DD:EE:%02X", i);
+    r.addOrUpdateFromBle("peer", addr, kNoColor, kNoColor, -50);
   }
 }
 
@@ -84,11 +95,41 @@ void test_steady_state_queries_do_not_realloc() {
   }
 }
 
+void test_snapshot_near_reuses_cached_copy_within_window() {
+  LampRoster r;
+  set_mock_millis(100000);
+  addNear(r, 1);
+  TEST_ASSERT_EQUAL_size_t(1, r.snapshotNear(240000).size());
+
+  // A mutation inside the freshness window is not reflected: the cached copy
+  // comes back unchanged.
+  addNear(r, 2);
+  TEST_ASSERT_EQUAL_size_t(1, r.snapshotNear(240000).size());
+
+  // Past the window, the rebuild reflects the mutation.
+  set_mock_millis(100000 + LampRoster::kSnapshotCacheMs);
+  TEST_ASSERT_EQUAL_size_t(2, r.snapshotNear(240000).size());
+}
+
+void test_snapshot_near_rebuilds_on_different_max_age() {
+  LampRoster r;
+  set_mock_millis(100000);
+  addNear(r, 1);
+  TEST_ASSERT_EQUAL_size_t(1, r.snapshotNear(240000).size());
+
+  // Same instant, different maxAgeMs: the age-filter differs, so the cache
+  // must not be reused even though the window has not elapsed.
+  addNear(r, 2);
+  TEST_ASSERT_EQUAL_size_t(2, r.snapshotNear(120000).size());
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
   UNITY_BEGIN();
   RUN_TEST(test_getters_return_stable_buffer_reference);
   RUN_TEST(test_steady_state_queries_do_not_realloc);
+  RUN_TEST(test_snapshot_near_reuses_cached_copy_within_window);
+  RUN_TEST(test_snapshot_near_rebuilds_on_different_max_age);
   return UNITY_END();
 }

@@ -2,9 +2,9 @@
 //
 // Fire-once-per-new-near-peer, re-arm on the near-window edge (departure, NOT
 // roster prune), no coupling to the greeting `acknowledged` flag, a heap-free
-// capacity-bounded fired set, and throttle honoured. The notifier's fired set
-// and re-arm are the unique logic; the roster + PeerView::from are exercised
-// as shipped (test_lamp_roster_rssi convention).
+// capacity-bounded fired set, and freshness gated by the roster snapshot cache.
+// The notifier's fired set and re-arm are the unique logic; the roster +
+// PeerView::from are exercised as shipped (test_lamp_roster_rssi convention).
 
 #include <unity.h>
 
@@ -70,7 +70,10 @@ void test_fires_once_per_new_near_peer() {
   TEST_ASSERT_EQUAL_size_t(1, n.firedCount());
 }
 
-void test_no_fire_within_throttle_gate() {
+// A newly-near peer is invisible until the roster's snapshot freshness cache
+// (LampRoster::kSnapshotCacheMs) rebuilds; then it fires. The notifier has no
+// throttle of its own; snapshotNear's cache is the single freshness gate.
+void test_new_peer_fires_after_snapshot_cache_window() {
   LampRoster roster;
   ArrivalNotifier n;
   Sink sink;
@@ -81,13 +84,16 @@ void test_no_fire_within_throttle_gate() {
   n.tick(100000, roster, 240000);
   TEST_ASSERT_EQUAL_INT(1, sink.fires);
 
+  // Within the cache window bob is not yet in the snapshot: no fire.
   set_mock_millis(100100);
   seedNear(roster, "bob", "AA:BB:CC:DD:EE:B0", -55);
-  n.tick(100100, roster, 240000);  // 100 ms < kThrottleMs: no-op
+  n.tick(100100, roster, 240000);
   TEST_ASSERT_EQUAL_INT(1, sink.fires);
 
-  set_mock_millis(100800);
-  n.tick(100800, roster, 240000);  // gate elapsed: bob fires
+  // Past the window the snapshot rebuilds and bob fires.
+  const uint32_t rebuilt = 100000 + LampRoster::kSnapshotCacheMs;
+  set_mock_millis(rebuilt);
+  n.tick(rebuilt, roster, 240000);
   TEST_ASSERT_EQUAL_INT(2, sink.fires);
   TEST_ASSERT_EQUAL_STRING("bob", sink.names[1].c_str());
 }
@@ -187,7 +193,7 @@ void test_only_fresh_arrivals_fire() {
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_fires_once_per_new_near_peer);
-  RUN_TEST(test_no_fire_within_throttle_gate);
+  RUN_TEST(test_new_peer_fires_after_snapshot_cache_window);
   RUN_TEST(test_rearms_on_near_window_edge_not_prune);
   RUN_TEST(test_no_greeting_ack_coupling);
   RUN_TEST(test_fired_set_heap_safe_and_capacity_bounded);

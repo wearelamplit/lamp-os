@@ -40,9 +40,6 @@ void ArrivalNotifier::fire(const PeerView& v) {
 
 void ArrivalNotifier::tick(uint32_t nowMs, LampRoster& roster, uint32_t nearWindowMs) {
   if (observerCount_ == 0) return;
-  if (everTicked_ && (nowMs - lastTickMs_) < kThrottleMs) return;
-  lastTickMs_ = nowMs;
-  everTicked_ = true;
 
   bool present[kMaxFired] = {};
 

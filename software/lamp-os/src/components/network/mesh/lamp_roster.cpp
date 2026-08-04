@@ -281,6 +281,11 @@ std::vector<RosterEntry>& LampRoster::getNear(uint32_t maxAgeMs) {
 }
 
 const std::vector<NearbyCopy>& LampRoster::snapshotNear(uint32_t maxAgeMs) {
+  uint32_t now = millis();
+  if (lastSnapshotValid_ && maxAgeMs == lastSnapshotMaxAge_ &&
+      (now - lastSnapshotMs_) < kSnapshotCacheMs) {
+    return nearSnapshot_;
+  }
   std::vector<RosterEntry>& near = getNear(maxAgeMs);
   nearSnapshot_.clear();
   for (const RosterEntry& e : near) {
@@ -295,6 +300,9 @@ const std::vector<NearbyCopy>& LampRoster::snapshotNear(uint32_t maxAgeMs) {
     c.variant = e.variant;
     nearSnapshot_.push_back(c);
   }
+  lastSnapshotMs_ = now;
+  lastSnapshotMaxAge_ = maxAgeMs;
+  lastSnapshotValid_ = true;
   return nearSnapshot_;
 }
 

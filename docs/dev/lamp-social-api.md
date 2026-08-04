@@ -140,9 +140,10 @@ compositor.behaviorContext().onArrival([](const lamp::PeerView& peer) {
   near window and returns.
 - A fresh arrival is bounded by a short window (`kArrivalMaxAgeMs`, 5 s), so a
   stale sighting doesn't read as an arrival.
-- The near-set diff is millis-gated (`kThrottleMs`, 750 ms), never per-frame, so
-  it never snapshots the roster on the hot path. Ticked on Core 1; a no-op when
-  no callback is registered.
+- The near-set diff runs every tick over `snapshotNear`, whose freshness cache
+  (`LampRoster::kSnapshotCacheMs`, 1 s) keeps the roster snapshot off the hot
+  path, so an arrival surfaces within that window. Ticked on Core 1; a no-op
+  when no callback is registered.
 
 ### Which to use
 

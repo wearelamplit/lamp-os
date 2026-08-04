@@ -16,8 +16,9 @@ class LampRoster;
 // flag: a fixed MAC set records who has fired. A peer re-fires only after it
 // leaves the near window (departure, an edge on lastSeenNearMs vs the near
 // window) and later returns; roster prune/lifetime is irrelevant, a
-// mesh-reachable peer that walks out of BLE range never prunes. The diff is
-// millis-gated, not per-frame, so the roster snapshot stays off the hot path
+// mesh-reachable peer that walks out of BLE range never prunes. The diff runs
+// every tick over `snapshotNear`, whose freshness cache
+// (LampRoster::kSnapshotCacheMs) keeps the roster snapshot off the hot path
 // (docs/dev/embedded-heap.md). Per-peer state is raw MAC bytes; the callbacks
 // are a small attach-once set, not per-peer.
 class ArrivalNotifier {
@@ -26,17 +27,16 @@ class ArrivalNotifier {
 
   static constexpr size_t kMaxObservers = 4;
   static constexpr size_t kMaxFired = 16;
-  static constexpr uint32_t kThrottleMs = 750;
   // A sighting older than this is "been around", not a fresh arrival.
   static constexpr uint32_t kArrivalMaxAgeMs = 5000;
 
   // Attach-once at boot. Bounded; an excess registration is dropped.
   void onArrival(Callback cb);
 
-  // Throttled near-set diff. `nearWindowMs` is the departure hysteresis: a
-  // fired peer re-arms once its last near sighting falls outside it, distinct
-  // from the short kArrivalMaxAgeMs that bounds a fresh arrival. No-op when no
-  // observer is registered or inside the throttle window.
+  // Near-set diff. `nearWindowMs` is the departure hysteresis: a fired peer
+  // re-arms once its last near sighting falls outside it, distinct from the
+  // short kArrivalMaxAgeMs that bounds a fresh arrival. No-op when no observer
+  // is registered.
   void tick(uint32_t nowMs, LampRoster& roster, uint32_t nearWindowMs);
 
   size_t observerCount() const { return observerCount_; }
@@ -50,8 +50,6 @@ class ArrivalNotifier {
   size_t observerCount_ = 0;
   uint8_t fired_[kMaxFired][6] = {};
   bool firedUsed_[kMaxFired] = {};
-  uint32_t lastTickMs_ = 0;
-  bool everTicked_ = false;
 };
 
 }  // namespace lamp

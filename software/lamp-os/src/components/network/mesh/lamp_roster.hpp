@@ -148,6 +148,11 @@ class LampRoster {
   // broader wisp-claim set, which stays 100 so wisps claim all nearby lamps).
   static constexpr size_t kCapacity = 50;
 
+  // Presence-freshness window; repeated snapshotNear calls with the same
+  // maxAgeMs within it reuse the cached copy instead of re-locking, filtering,
+  // and sorting, so a behavior may call snapshotNear per frame.
+  static constexpr uint32_t kSnapshotCacheMs = 1000;
+
   LampRoster();
 
   void addOrUpdateFromBle(const std::string& name,
@@ -187,6 +192,9 @@ class LampRoster {
   // into a reused internal buffer. The seam for paths that invoke a user
   // callback per peer: iterate the returned reference, which a callback
   // re-entering getNear/getMesh/getAll cannot invalidate (distinct buffers).
+  // Repeated calls with the same maxAgeMs within kSnapshotCacheMs return the
+  // cached copy without re-locking or sorting, so a behavior may call this
+  // per frame; a different maxAgeMs rebuilds.
   // Keep near-walks non-nested: a snapshotNear called from inside a callback
   // walking this reference (a forEachNearby/crowd inside a Lions ambient or
   // Staff arrival callback) silently clobbers the buffer mid-walk. The
@@ -360,6 +368,9 @@ class LampRoster {
   std::vector<RosterEntry> meshBuf_;
   std::vector<RosterEntry> allBuf_;
   std::vector<NearbyCopy> nearSnapshot_;
+  uint32_t lastSnapshotMs_ = 0;
+  uint32_t lastSnapshotMaxAge_ = 0;
+  bool lastSnapshotValid_ = false;
   size_t count_ = 0;
   uint32_t generation_ = 0;
   SemaphoreHandle_t mutex_ = nullptr;
