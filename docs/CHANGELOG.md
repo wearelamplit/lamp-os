@@ -11,8 +11,20 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 - **Lioness lamp.** A new fixed-install custom variant. Its base carries three
   "lion" zones that each mirror a nearby lamp's colours; when a new lamp shows
   up the lions pulse its colour and the shade glitches to greet it.
+- **A "near" marker on the Lamp Network page.** Lamps that are physically
+  close now show a small sensor icon, so you can tell them apart from lamps
+  only reachable over the mesh.
 
 ### Fixed
+- **Lamps no longer restart themselves after a while in a crowd.** A slow
+  memory leak — the Bluetooth scanner kept a record of every nearby phone and
+  wearable it had ever seen, and those addresses rotate constantly — gradually
+  filled a lamp's memory until it rebooted, worst in busy, phone-dense spaces.
+  Fixed.
+- **Steadier around lots of lamps.** Nearby-lamp tracking is lighter on the
+  lamp's limited memory and no longer caps the nearby view at 16 lamps, so
+  large groups are handled without the memory fragmentation that built up
+  before.
 - **Continuous Pulse loops right away.** A Pulse set to continuous could take up
   to ~15 minutes to start and wouldn't restart on its own if it ever stopped — it
   now begins immediately and keeps looping.
