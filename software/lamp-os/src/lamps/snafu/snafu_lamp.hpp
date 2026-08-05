@@ -5,6 +5,7 @@
 #include "config/config.hpp"
 #include "core/compositor.hpp"
 #include "core/lamp.hpp"
+#include "expressions/expr_variant_sets.hpp"
 #include "expressions/expression_registry.hpp"
 #include "expressions/shimmer/shimmer_expression.hpp"
 #include "expressions/glitchy/glitchy_expression.hpp"
@@ -61,10 +62,9 @@ class SnafuLamp : public Lamp {
   }
 
   void registerExpressions(ExpressionRegistry& reg) override {
-    reg.add(GlitchyExpression::classDescriptor());
-    reg.add(PulseExpression::classDescriptor());
-    reg.add(SpottyExpression::classDescriptor());
-    reg.add(ShimmerExpression::classDescriptor());
+#define X(N) reg.add(N##Expression::classDescriptor());
+    LAMPOS_SNAFU_EXPRESSIONS(X)
+#undef X
   }
 
   void createBehaviors(BehaviorStackBuilder& b) override {
