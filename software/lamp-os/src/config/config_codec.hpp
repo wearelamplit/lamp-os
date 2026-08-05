@@ -24,5 +24,12 @@ void toJson(JsonObject root, const LampSettings& lamp, const BaseSettings& base,
             const ShadeSettings& shade, const ExpressionSettings& expressions,
             const HomeModeSettings& homeMode);
 
+// True when `json` is a whole config document safe to persist: it parses and
+// carries a `lamp` object. persistRawJson gates on this so a truncated or
+// unparseable blob (Arduino String silently truncates on a fragmented-heap
+// OOM) can't overwrite a good stored config. A parse OOM returns non-Ok, so
+// it also rejects rather than persisting a partial write.
+bool configBlobPersistable(const char* json);
+
 }  // namespace config_codec
 }  // namespace lamp

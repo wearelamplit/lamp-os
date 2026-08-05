@@ -152,7 +152,16 @@ static void handlePutSettings(AsyncWebServerRequest* req, JsonVariant& json) {
   const char* nm = obj["lamp"]["name"] | "";
   if (nm[0] != '\0') obj["lamp"]["named"] = true;
   String out;
+  // Reserve the exact size so a fragmented heap fails loud instead of Arduino
+  // String silently truncating mid-serialize; a short write is a 500, not a
+  // truncated blob handed to persist.
+  const size_t need = measureJson(json);
+  out.reserve(need);
   serializeJson(json, out);
+  if (out.length() != need) {
+    req->send(500, "application/json", "{\"ok\":false}");
+    return;
+  }
   if (!s_config->persistRawJson(out.c_str())) {
     req->send(500, "application/json", "{\"ok\":false}");
     return;

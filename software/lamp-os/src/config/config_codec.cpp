@@ -254,5 +254,12 @@ void toJson(JsonObject root, const LampSettings& lamp, const BaseSettings& base,
   for (const auto& s : homeMode.disabledExpressionTypes) disArr.add(s);
 }
 
+bool configBlobPersistable(const char* json) {
+  if (json == nullptr) return false;
+  JsonDocument doc;
+  if (deserializeJson(doc, json) != DeserializationError::Ok) return false;
+  return doc["lamp"].is<JsonObject>();
+}
+
 }  // namespace config_codec
 }  // namespace lamp

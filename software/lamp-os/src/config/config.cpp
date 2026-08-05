@@ -117,6 +117,12 @@ bool Config::persistConfig(const char* via) {
 
 bool Config::persistRawJson(const char* json) {
   if (!store_) return false;
+  if (!config_codec::configBlobPersistable(json)) {
+#ifdef LAMP_DEBUG
+    Serial.println("[nvs] persistRawJson rejected: blob did not validate; NVS left intact");
+#endif
+    return false;
+  }
   return store_->write("cfg", json) > 0;
 }
 
