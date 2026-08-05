@@ -276,5 +276,24 @@ void main() {
       ));
       expect(s.brightness, 100);
     });
+
+    test('wifiChannelMismatch + wifiApChannel parse from JSON', () {
+      final s = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","wifiConnected":false,'
+        '"wifiChannelMismatch":true,"wifiApChannel":1}',
+      ));
+      expect(s.wifiChannelMismatch, isTrue);
+      expect(s.wifiApChannel, 1);
+      expect(s.wifiConnected, isFalse);
+    });
+
+    test('wifiChannelMismatch defaults false and wifiApChannel 0 when absent',
+        () {
+      final s = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF"}',
+      ));
+      expect(s.wifiChannelMismatch, isFalse);
+      expect(s.wifiApChannel, 0);
+    });
   });
 }

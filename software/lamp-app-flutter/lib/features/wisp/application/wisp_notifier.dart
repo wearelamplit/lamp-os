@@ -480,6 +480,18 @@ class WispNotifier extends _$WispNotifier {
     }
   }
 
+  /// Ask the wisp to re-attempt WiFi with its stored credentials, clearing a
+  /// channel-mismatch rejection. The wisp's connection state surfaces back
+  /// through `WispStatus` on the next status notify; no optimistic flip here.
+  Future<void> wifiReconnect() async {
+    try {
+      await _repo.wifiReconnect();
+    } catch (e, st) {
+      debugPrint('WispNotifier.wifiReconnect() failed: $e\n$st');
+      rethrow;
+    }
+  }
+
   /// Pick the color the wisp renders on its own 30-pixel ring while
   /// sourceMode is Off. Off mode keeps PaintDistributor held off;
   /// this color exists only on the wisp ring. Optimistically reflects

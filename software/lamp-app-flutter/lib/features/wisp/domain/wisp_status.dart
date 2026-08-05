@@ -28,6 +28,8 @@ class WispStatus {
     this.zoneSource = ZoneSource.none,
     this.observedZones = const <int>[],
     this.wifiConnected = false,
+    this.wifiChannelMismatch = false,
+    this.wifiApChannel = 0,
     this.auroraConnected = false,
     this.paletteIdPrefix = '',
     this.lastSeenMs,
@@ -71,6 +73,16 @@ class WispStatus {
 
   /// Wisp's WiFi radio link to the home AP.
   final bool wifiConnected;
+
+  /// True when the wisp rejected the home AP because it was on a channel
+  /// other than the mesh's channel 6. The single radio can't span two
+  /// channels, so the wisp stays on the mesh and reports this instead.
+  /// [wifiConnected] is false whenever this is true.
+  final bool wifiChannelMismatch;
+
+  /// The channel the home AP was on when [wifiChannelMismatch] tripped.
+  /// 0 when absent/unknown.
+  final int wifiApChannel;
 
   /// Wisp's TCP/WS link to Aurora. False whenever WiFi is down; can
   /// also be false while WiFi is up but Aurora is unreachable.
@@ -271,6 +283,8 @@ class WispStatus {
       zoneSource: parseZoneSource(zoneSrc.isEmpty ? null : zoneSrc),
       observedZones: asIntList(json['observedZones']),
       wifiConnected: asBool(json['wifiConnected']),
+      wifiChannelMismatch: asBool(json['wifiChannelMismatch']),
+      wifiApChannel: asInt(json['wifiApChannel']) ?? 0,
       auroraConnected: asBool(json['auroraConnected']),
       paletteIdPrefix: asString(json['paletteIdPrefix']),
       lastSeenMs: asInt(json['lastSeenMs']),
@@ -322,6 +336,8 @@ class WispStatus {
       zoneSource: zoneSource ?? this.zoneSource,
       observedZones: observedZones ?? this.observedZones,
       wifiConnected: wifiConnected,
+      wifiChannelMismatch: wifiChannelMismatch,
+      wifiApChannel: wifiApChannel,
       auroraConnected: auroraConnected,
       paletteIdPrefix: paletteIdPrefix,
       lastSeenMs: lastSeenMs,
@@ -357,6 +373,8 @@ class WispStatus {
           zoneSource == other.zoneSource &&
           _observedZonesEq.equals(observedZones, other.observedZones) &&
           wifiConnected == other.wifiConnected &&
+          wifiChannelMismatch == other.wifiChannelMismatch &&
+          wifiApChannel == other.wifiApChannel &&
           auroraConnected == other.auroraConnected &&
           paletteIdPrefix == other.paletteIdPrefix &&
           lastSeenMs == other.lastSeenMs &&
@@ -393,7 +411,8 @@ class WispStatus {
         lastSeenMs,
         wispMac,
         wispVersion,
-        Object.hash(helloFlags, helloPaletteIdPrefix, helloLastSeenMs),
+        Object.hash(wifiChannelMismatch, wifiApChannel, helloFlags,
+            helloPaletteIdPrefix, helloLastSeenMs),
         statusLastSeenMs,
         source,
         offColor,

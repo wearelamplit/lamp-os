@@ -232,6 +232,16 @@ class WispRepository {
     });
   }
 
+  /// Ask the wisp to re-attempt WiFi association using its stored NVS
+  /// credentials, clearing a channel-mismatch rejection. No payload: the
+  /// wisp already holds the SSID/password.
+  Future<void> wifiReconnect() async {
+    await _writeOp({
+      'char': 'wispOp',
+      'op': 'wifiReconnect',
+    });
+  }
+
   /// Configure the wisp LED strip byte order and pixel count. Persisted in
   /// wisp NVS; the wisp re-inits the strip at the new format and length.
   Future<void> setLedStrip(String ledType, int pixelCount) async {
