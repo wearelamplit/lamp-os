@@ -13,6 +13,7 @@ import '../../../core/ble/uuids.dart';
 import '../../../core/ble/write_coalescer.dart';
 import '../../../core/lifecycle/app_lifecycle.dart';
 import '../../inventory/application/inventory_notifier.dart';
+import '../data/catalog_store.dart';
 import 'advanced_session.dart';
 import '../../lamp_shell/domain/expression_catalog.dart';
 import '../domain/lamp_color.dart';
@@ -152,6 +153,7 @@ class ControlNotifier extends _$ControlNotifier {
   // own dispose timing.
   late BleClient _ble;
   late InventoryNotifier _inv;
+  final _catalogStore = const CatalogStore();
 
   /// RGBW list shape persisted in inventory (and read back by
   /// `resolveLampColors`). Includes the warm-white byte so warm-heavy
@@ -558,25 +560,49 @@ class ControlNotifier extends _$ControlNotifier {
     final shadeJson = await readJsonSection('shade');
     final homeJson = await readJsonSection('home');
     final exprList = await readJsonListSection('expr');
+    final lamp = LampSection.fromJson(lampJson);
     return ControlState(
-      lamp: LampSection.fromJson(lampJson),
+      lamp: lamp,
       base: BaseSection.fromJson(baseJson),
       shade: ShadeSection.fromJson(shadeJson),
       home: HomeSection.fromJson(homeJson),
       expressions: ExpressionsSection.fromJson(exprList),
-      catalog: await _readCatalog(ble),
+      catalog: await _readCatalog(ble, lamp.catalogHash),
     );
   }
 
-  /// Reads the firmware-declared expression catalog. Returns null on older
-  /// firmware that doesn't serve the section (empty bytes) or on a malformed
-  /// payload, so the editor degrades instead of crashing.
-  Future<ExpressionCatalog?> _readCatalog(BleClient ble) async {
+  /// Resolves the firmware-declared expression catalog, content-addressed by
+  /// the lamp-reported [catalogHash]. On a cache hit the `exprcat` read is
+  /// skipped entirely and the stored copy is reused. On a miss (or an absent
+  /// hash, older firmware) the section is read; a fresh read under a known
+  /// hash is stored for next time. The lamp's hash is trusted verbatim; the
+  /// received bytes are never re-hashed. Returns null on older firmware that
+  /// doesn't serve the section (empty bytes) or a malformed payload, so the
+  /// editor degrades instead of crashing.
+  Future<ExpressionCatalog?> _readCatalog(
+      BleClient ble, String? catalogHash) async {
+    final hash = (catalogHash != null && catalogHash.isNotEmpty)
+        ? catalogHash
+        : null;
+    if (hash != null) {
+      final cached = await _catalogStore.load(hash);
+      if (cached != null) {
+        try {
+          return ExpressionCatalog.fromJson(
+              jsonDecode(cached) as Map<String, dynamic>);
+        } catch (_) {
+          // Corrupt cache entry: fall through to a fresh read + overwrite.
+        }
+      }
+    }
     try {
       final bytes = await ble.readSection(_deviceId, 'exprcat');
       if (bytes.isEmpty) return null;
-      return ExpressionCatalog.fromJson(
-          jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>);
+      final raw = utf8.decode(bytes);
+      final catalog =
+          ExpressionCatalog.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+      if (hash != null) await _catalogStore.save(hash, raw);
+      return catalog;
     } catch (_) {
       return null;
     }
@@ -679,6 +705,14 @@ class ControlNotifier extends _$ControlNotifier {
 
   @visibleForTesting
   void scheduleCommitDebouncedForTest() => _scheduleCommitDebounced();
+
+  /// Test-only access to [_readCatalog] so the cache decision (hit skips the
+  /// `exprcat` read; miss/absent/corrupt read + heal) can be exercised
+  /// directly with a fake [BleClient].
+  @visibleForTesting
+  Future<ExpressionCatalog?> readCatalogForTest(
+          BleClient ble, String? catalogHash) =>
+      _readCatalog(ble, catalogHash);
 
   /// Writes an arbitrary settings_blob JSON map to the lamp.
   ///

@@ -4,6 +4,8 @@
 // Registers the make-less kExprDescriptorData constants (serializeCatalog never
 // emits .make, so make-less bytes == on-device bytes) and renders the committed
 // generated/<variant>/expr_catalog.h. Never compiled into firmware.
+#include <cstdint>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -50,6 +52,15 @@ inline std::string buildCatalog(const VariantSpec& v) {
   return reg.serializeCatalog();
 }
 
+inline uint32_t fnv1a32(const std::string& bytes) {
+  uint32_t h = 2166136261u;
+  for (unsigned char c : bytes) {
+    h ^= c;
+    h *= 16777619u;
+  }
+  return h;
+}
+
 inline std::string emitHeader(const VariantSpec& v) {
   const std::string json = buildCatalog(v);
   std::string lit;
@@ -64,12 +75,18 @@ inline std::string emitHeader(const VariantSpec& v) {
   out += "// Expression catalog for the ";
   out += v.name;
   out += " build, held in .rodata (flash), served by reference.\n";
-  out += "#include <cstddef>\n\n";
+  out += "#include <cstddef>\n";
+  out += "#include <cstdint>\n\n";
   out += "namespace lamp {\n\n";
   out += "inline constexpr char kExprCatalog[] = \"";
   out += lit;
   out += "\";\n";
-  out += "inline constexpr size_t kExprCatalogLen = sizeof(kExprCatalog) - 1;\n\n";
+  out += "inline constexpr size_t kExprCatalogLen = sizeof(kExprCatalog) - 1;\n";
+  char hashLit[24];
+  std::snprintf(hashLit, sizeof(hashLit), "0x%08xu", fnv1a32(json));
+  out += "inline constexpr uint32_t kExprCatalogHash = ";
+  out += hashLit;
+  out += ";\n\n";
   out += "}  // namespace lamp\n";
   return out;
 }

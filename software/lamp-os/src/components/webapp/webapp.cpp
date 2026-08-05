@@ -109,7 +109,11 @@ static void handleGetNearby(AsyncWebServerRequest* req) {
 
 static void handleGetDispositions(AsyncWebServerRequest* req) {
   bumpDeadline();
-  req->send(200, "application/json", s_config->asDispositionsJson());
+  try {
+    req->send(200, "application/json", s_config->asDispositionsJson());
+  } catch (const std::bad_alloc&) {
+    req->send(200, "application/json", "{}");
+  }
 }
 
 // Bulk replace of the per-peer disposition map, mirroring the auth-gated
