@@ -342,8 +342,4 @@ class ExpressionManager {
   bool isAnyTestActive() const { return !activeTests_.empty(); }
 };
 
-// Serialized expression catalog. Immutable after boot registration, so it's
-// built once on first call and cached for the process lifetime.
-const std::string& expressionCatalogJson();
-
 }  // namespace lamp

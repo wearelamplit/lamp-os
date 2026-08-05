@@ -27,6 +27,9 @@
 #include "util/color.hpp"
 #include "util/heap_probe.hpp"
 
+// Owned by lamp.cpp; mirror the declaration like ble_control.cpp does.
+extern lamp::ExpressionManager expressionManager;
+
 // Same Core 0 → Core 1 drain handoff the BLE writes use; mutating config
 // directly from the AsyncTCP task would race the main loop.
 void postPendingBaseColorsJson(const char* data, size_t len);
@@ -95,7 +98,10 @@ static void handleGetSettings(AsyncWebServerRequest* req) {
 }
 
 static void handleGetExpressions(AsyncWebServerRequest* req) {
-  req->send(200, "application/json", lamp::expressionCatalogJson().c_str());
+  // AP-only and rare, so serialize the catalog on demand rather than pinning it
+  // in the heap: the ~9.6 KB block stays reclaimable when no one is on this page.
+  const std::string catalog = expressionManager.registry().serializeCatalog();
+  req->send(200, "application/json", catalog.c_str());
 }
 
 static void handleGetNearby(AsyncWebServerRequest* req) {

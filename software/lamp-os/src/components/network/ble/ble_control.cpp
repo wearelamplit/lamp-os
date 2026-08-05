@@ -185,7 +185,7 @@ static void freeSlot(uint16_t handle) {
     s->handle = kUnusedHandle;
     s->authed = false;
     s->crypto = lamp::crypto::PerConnState{};
-    s->pageSnapshot.clear();  // keeps capacity
+    std::string().swap(s->pageSnapshot);  // reclaim, not just .clear()
     s->pageCursor = 0;
     s->pageMtu    = 0;
     s->pageSource = nullptr;
@@ -198,7 +198,7 @@ static void clearAllSlots() {
     s.handle = kUnusedHandle;
     s.authed = false;
     s.crypto = lamp::crypto::PerConnState{};
-    s.pageSnapshot.clear();
+    std::string().swap(s.pageSnapshot);
     s.pageCursor = 0;
     s.pageMtu    = 0;
     s.pageSource = nullptr;
@@ -463,6 +463,31 @@ static void logBleSectionOom(const char* what) {
   if (now - lastMs < 5000 && lastMs != 0) return;
   lastMs = now;
   Serial.printf("[ble_control] %s OOM; serving graceful-empty\n", what);
+}
+
+// The ~9.6 KB expression catalog is the single largest resident heap block, so
+// it isn't pinned for the process lifetime. Built once per connection on Core 1
+// (tick, off the NimBLE host task) and freed on disconnect so the block is
+// reclaimable for roster growth while no app is connected. The exprcat page
+// section serves it by reference; immutable for the connection's lifetime, so
+// no torn read against the Core 0 read path.
+static std::string s_exprCatalog;
+static bool        s_exprCatalogAttempted = false;
+
+static void maintainExprCatalog() {
+  if (s_clientConnected) {
+    if (s_exprCatalogAttempted) return;
+    s_exprCatalogAttempted = true;
+    try {
+      s_exprCatalog = ::expressionManager.registry().serializeCatalog();
+    } catch (const std::bad_alloc&) {
+      std::string().swap(s_exprCatalog);
+      logBleSectionOom("exprcat");
+    }
+  } else if (s_exprCatalogAttempted) {
+    s_exprCatalogAttempted = false;
+    std::string().swap(s_exprCatalog);
+  }
 }
 
 static void logNearbyHeapSkip(uint32_t largest, uint32_t needed, uint32_t lamps) {
@@ -849,7 +874,8 @@ struct SectionEntry {
 // under Config's cache mutex, so calling here on the Core 0 host task is
 // safe against a concurrent Core 1 rebuild; tick() pre-warms the caches so
 // the rebuild rarely runs here. nearby copies the Core 1-built cache under
-// its own mutex. exprcat is immutable (built once), no race.
+// its own mutex. exprcat is immutable for the connection's lifetime, built by
+// maintainExprCatalog() on Core 1 before the app can auth-and-open it, no race.
 // wispclaims is binary, not JSON: the full accumulated fleet blob exceeds
 // the 512-byte ATT ceiling that caps the CHAR_WISP_CLAIMS direct read.
 // wisppalette is binary too (raw RGBW): a dedicated read path so the
@@ -861,7 +887,7 @@ static const std::array<SectionEntry, 9> kSections = {{
   {"expr",    [](std::string& out) { s_config->expressionsSectionJsonCached(out); }, nullptr},
   {"home",    [](std::string& out) { s_config->homeSectionJsonCached(out); }, nullptr},
   {"nearby",  [](std::string& out) { copyNearbyJson(out); }, nullptr},
-  {"exprcat", nullptr, []() -> const std::string& { return lamp::expressionCatalogJson(); }},
+  {"exprcat", nullptr, []() -> const std::string& { return s_exprCatalog; }},
   {"wispclaims", [](std::string& out) {
     static uint8_t buf[1 + lamp::WispFleetCache::kCapacity * 12];
     const size_t n = lamp::lampRoster.buildWispClaimsBlob(buf, sizeof(buf),
@@ -1109,9 +1135,10 @@ void tick() {
   s_config->homeSectionRebuildIfDirty();
   refreshNearbyJsonCache();
 
-  // Build the immutable catalog once here so the first client read doesn't
-  // serialize it inside a Core 0 NimBLE callback.
-  lamp::expressionCatalogJson();
+  // Build the expression catalog once per connection (and free it on
+  // disconnect) here on Core 1 so the first client read doesn't serialize it
+  // inside a Core 0 NimBLE callback and it isn't pinned while no app is on.
+  maintainExprCatalog();
 }
 
 void setGreetingStateProvider(std::function<lamp::GreetingState()> fn) {

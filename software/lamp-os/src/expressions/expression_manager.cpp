@@ -12,16 +12,7 @@
 #include "core/behavior_context.hpp"
 #include "core/compositor.hpp"
 
-// Owned by lamp.cpp; the private lamp_internal.hpp extern isn't includable
-// from here, so mirror the declaration like ble_control.cpp does.
-extern lamp::ExpressionManager expressionManager;
-
 namespace lamp {
-
-const std::string& expressionCatalogJson() {
-  static const std::string cat = expressionManager.registry().serializeCatalog();
-  return cat;
-}
 
 void ExpressionManager::begin(FrameBuffer* shade, FrameBuffer* base) {
   shadeBuffer = shade;
