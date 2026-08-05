@@ -12,6 +12,7 @@
     "lamp:flash": "cd software/lamp-os && LAMP_FIRMWARE_CHANNEL=dev ${PORT:+env PLATFORMIO_UPLOAD_PORT=$PORT} pio run -e upesy_wroom_${VARIANT:-standard} -t upload && npm run lamp:flashfs",
     "lamp:flash:release": "bash scripts/flash_signed_release.sh",
     "lamp:test": "cd software/lamp-os && pio test -e native",
+    "catalog:gen": "python3 scripts/gen_expr_catalog.py",
     "lamp:monitor": "cd software/lamp-os && pio device monitor -e upesy_wroom_standard",
     "//lamp:tap": "Reset-safe multi-port serial tail (holds DTR high so lamps don't auto-reset on connect). Use this, NOT raw pyserial/screen, to watch OTA/mesh across lamps: npm run lamp:tap -- /dev/cu.usbserial-7:jacko /dev/cu.usbserial-10:flora -o /tmp/bench.log",
     "lamp:tap": "python3 scripts/bench_tap.py",
