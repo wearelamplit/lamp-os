@@ -468,25 +468,51 @@ static void logBleSectionOom(const char* what) {
 // The ~9.6 KB expression catalog is the single largest resident heap block, so
 // it isn't pinned for the process lifetime. Built once per connection on Core 1
 // (tick, off the NimBLE host task) and freed on disconnect so the block is
-// reclaimable for roster growth while no app is connected. The exprcat page
-// section serves it by reference; immutable for the connection's lifetime, so
-// no torn read against the Core 0 read path.
-static std::string s_exprCatalog;
-static bool        s_exprCatalogAttempted = false;
+// reclaimable for roster growth while no app is connected. Guarded like the
+// nearby cache: Core 1 swaps a validated build in under the mutex, and the
+// exprcat section copies it out under the same mutex on section-open, so the
+// Core 0 host task never reads a string being reallocated mid-flight.
+static SemaphoreHandle_t exprCatalogMutex() {
+  static SemaphoreHandle_t m = xSemaphoreCreateMutex();
+  return m;
+}
+static std::string s_exprCatalog;             // guarded by exprCatalogMutex()
+static bool        s_exprCatalogReady = false;  // guarded by exprCatalogMutex()
 
+// Core 1 (tick). Build once per connection, free on disconnect. Publishes only
+// a validated non-empty catalog; a failed/partial serialize leaves it not-ready
+// so the next tick retries. The app reads exprcat last in its section load
+// (after five other multi-chunk reads), so this has the whole settings-load
+// window to finish before the section is opened.
 static void maintainExprCatalog() {
+  static bool builtThisConn = false;
   if (s_clientConnected) {
-    if (s_exprCatalogAttempted) return;
-    s_exprCatalogAttempted = true;
+    if (builtThisConn) return;
+    std::string local;
     try {
-      s_exprCatalog = ::expressionManager.registry().serializeCatalog();
+      local = ::expressionManager.registry().serializeCatalog();
     } catch (const std::bad_alloc&) {
-      std::string().swap(s_exprCatalog);
       logBleSectionOom("exprcat");
+      return;
     }
-  } else if (s_exprCatalogAttempted) {
-    s_exprCatalogAttempted = false;
+    // ArduinoJson's allocator does not throw; a partial-heap serialize yields a
+    // truncated or "null" document. Require a plausible object before
+    // publishing so a short build is retried, never served as the catalog.
+    if (local.size() < 2 || local.front() != '{') {
+      logBleSectionOom("exprcat");
+      return;
+    }
+    xSemaphoreTake(exprCatalogMutex(), portMAX_DELAY);
+    s_exprCatalog.swap(local);
+    s_exprCatalogReady = true;
+    xSemaphoreGive(exprCatalogMutex());
+    builtThisConn = true;
+  } else if (builtThisConn) {
+    builtThisConn = false;
+    xSemaphoreTake(exprCatalogMutex(), portMAX_DELAY);
     std::string().swap(s_exprCatalog);
+    s_exprCatalogReady = false;
+    xSemaphoreGive(exprCatalogMutex());
   }
 }
 
@@ -860,45 +886,47 @@ class SettingsBlobCallback : public NimBLECharacteristicCallbacks {
 
 using SectionSerializer = void(*)(std::string&);
 
-// A section is either build-based (fn serialises into pageSnapshot) or
-// reference-based (ref returns an immutable static paged in place, no copy).
-// Exactly one of fn/ref is set.
+// fn serialises the section into the connection's pageSnapshot on open.
 struct SectionEntry {
   const char*                 name;
   SectionSerializer           fn;
-  const std::string&        (*ref)();
 };
 
 // Lambdas capture only globals so they decay to plain function pointers
 // (no std::function footprint). Cached() accessors rebuild and copy out
 // under Config's cache mutex, so calling here on the Core 0 host task is
 // safe against a concurrent Core 1 rebuild; tick() pre-warms the caches so
-// the rebuild rarely runs here. nearby copies the Core 1-built cache under
-// its own mutex. exprcat is immutable for the connection's lifetime, built by
-// maintainExprCatalog() on Core 1 before the app can auth-and-open it, no race.
+// the rebuild rarely runs here. nearby and exprcat copy their Core 1-built
+// caches out under a mutex; exprcat serves empty until maintainExprCatalog()
+// has published a validated build, so a not-yet-ready catalog reads as "no
+// catalog" (older-firmware path) rather than a truncated one.
 // wispclaims is binary, not JSON: the full accumulated fleet blob exceeds
 // the 512-byte ATT ceiling that caps the CHAR_WISP_CLAIMS direct read.
 // wisppalette is binary too (raw RGBW): a dedicated read path so the
 // frequent palette-less status NOTIFY can't clobber it.
 static const std::array<SectionEntry, 9> kSections = {{
-  {"lamp",    [](std::string& out) { s_config->lampSectionJsonCached(out); }, nullptr},
-  {"base",    [](std::string& out) { s_config->baseSectionJsonCached(out); }, nullptr},
-  {"shade",   [](std::string& out) { s_config->shadeSectionJsonCached(out); }, nullptr},
-  {"expr",    [](std::string& out) { s_config->expressionsSectionJsonCached(out); }, nullptr},
-  {"home",    [](std::string& out) { s_config->homeSectionJsonCached(out); }, nullptr},
-  {"nearby",  [](std::string& out) { copyNearbyJson(out); }, nullptr},
-  {"exprcat", nullptr, []() -> const std::string& { return s_exprCatalog; }},
+  {"lamp",    [](std::string& out) { s_config->lampSectionJsonCached(out); }},
+  {"base",    [](std::string& out) { s_config->baseSectionJsonCached(out); }},
+  {"shade",   [](std::string& out) { s_config->shadeSectionJsonCached(out); }},
+  {"expr",    [](std::string& out) { s_config->expressionsSectionJsonCached(out); }},
+  {"home",    [](std::string& out) { s_config->homeSectionJsonCached(out); }},
+  {"nearby",  [](std::string& out) { copyNearbyJson(out); }},
+  {"exprcat", [](std::string& out) {
+    xSemaphoreTake(exprCatalogMutex(), portMAX_DELAY);
+    if (s_exprCatalogReady) out = s_exprCatalog; else out.clear();
+    xSemaphoreGive(exprCatalogMutex());
+  }},
   {"wispclaims", [](std::string& out) {
     static uint8_t buf[1 + lamp::WispFleetCache::kCapacity * 12];
     const size_t n = lamp::lampRoster.buildWispClaimsBlob(buf, sizeof(buf),
                                                           millis());
     out.assign(reinterpret_cast<const char*>(buf), n);
-  }, nullptr},
+  }},
   {"wisppalette", [](std::string& out) {
     static uint8_t buf[200];
     const size_t n = lamp::lampRoster.copyManualPaletteBlob(buf, sizeof(buf));
     out.assign(reinterpret_cast<const char*>(buf), n);
-  }, nullptr},
+  }},
 }};
 
 class PageCtrlCallback : public NimBLECharacteristicCallbacks {
@@ -913,23 +941,18 @@ class PageCtrlCallback : public NimBLECharacteristicCallbacks {
 
     for (const auto& entry : kSections) {
       if (name == entry.name) {
-        if (entry.ref) {
-          slot->pageSource = &entry.ref();
-        } else {
-          // assign() reuses the string's existing capacity (heap growth, not
-          // churn).
-          try {
-            entry.fn(slot->pageSnapshot);
-          } catch (const std::bad_alloc&) {
-            slot->pageSnapshot.clear();
-            slot->pageCursor = 0;
-            slot->pageMtu    = 0;
-            slot->pageSource = nullptr;
-            logBleSectionOom(entry.name);
-            return;
-          }
-          slot->pageSource = &slot->pageSnapshot;
+        // Serialises into pageSnapshot, reusing its existing capacity.
+        try {
+          entry.fn(slot->pageSnapshot);
+        } catch (const std::bad_alloc&) {
+          slot->pageSnapshot.clear();
+          slot->pageCursor = 0;
+          slot->pageMtu    = 0;
+          slot->pageSource = nullptr;
+          logBleSectionOom(entry.name);
+          return;
         }
+        slot->pageSource = &slot->pageSnapshot;
         slot->pageCursor = 0;
         // Cap the chunk at the baseline-MTU page size even when this link
         // negotiated higher; the app reads until an empty terminator, so

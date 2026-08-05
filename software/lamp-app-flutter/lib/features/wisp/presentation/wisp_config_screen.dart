@@ -125,9 +125,7 @@ class _WispBodyState extends ConsumerState<_WispBody> {
     final notifier = ref.read(wispNotifierProvider(widget.lampId).notifier);
     final source = status.source;
     final draft = ref.watch(manualPaletteDraftProvider(widget.lampId));
-    // Aurora selection is disabled app-wide: the feature is untested against
-    // real hardware. A wisp already in Aurora mode still displays normally.
-    const auroraEnabled = false;
+    const auroraEnabled = true;
 
     // Schedule on the next frame to avoid mutating notifier state mid-build.
     if (source == WispSourceMode.manual &&
