@@ -6,7 +6,6 @@ it, writing software/lamp-os/generated/<variant>/expr_catalog.h. Idempotent:
 re-running produces no git diff unless a descriptor or the variant subset
 changed. Wired to `npm run catalog:gen`.
 """
-import glob
 import os
 import subprocess
 import sys
@@ -16,8 +15,8 @@ LAMP = os.path.join(ROOT, "software", "lamp-os")
 
 
 def find_arduinojson():
-    hits = glob.glob(os.path.join(LAMP, ".pio", "libdeps", "*", "ArduinoJson", "src"))
-    return hits[0] if hits else None
+    path = os.path.join(LAMP, ".pio", "libdeps", "native", "ArduinoJson", "src")
+    return path if os.path.isdir(path) else None
 
 
 def main():

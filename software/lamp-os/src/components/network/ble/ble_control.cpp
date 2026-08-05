@@ -12,8 +12,11 @@
 #include <cstring>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
+
+#include "expr_catalog.h"
 
 #include "config/config.hpp"
 #include "behaviors/fade_out.hpp"
@@ -132,16 +135,17 @@ struct ConnSlot {
   std::string                 pageSnapshot;
   uint16_t                    pageCursor;
   uint16_t                    pageMtu;
-  // The section currently being paged out: &pageSnapshot once a section is
-  // open, null between sections. Every section serialises (or copies its
-  // Core 1-built cache) into pageSnapshot on open, so an unknown/empty
-  // section clears this and the next DATA read returns end-of-section.
-  const std::string*          pageSource;
+  // View of the bytes currently being paged out. A heap section serialises
+  // into pageSnapshot and points here at it; a flash section points straight
+  // at its .rodata catalog with zero copy. Empty between sections, so an
+  // unknown/empty section clears this and the next DATA read returns
+  // end-of-section.
+  std::string_view            pageSource;
 };
 static constexpr uint16_t kUnusedHandle = 0xFFFF;
 static constexpr size_t   kMaxConns     = 1;
 static std::array<ConnSlot, kMaxConns> s_conn{{
-  {kUnusedHandle, false, {}, {}, 0, 0, nullptr},
+  {kUnusedHandle, false, {}, {}, 0, 0, {}},
 }};
 
 // Pinned to ATT_MTU 247 minus the 3-byte ATT header rather than reading
@@ -175,7 +179,7 @@ static ConnSlot* findOrAllocSlot(uint16_t handle) {
     freeSlot->pageSnapshot.clear();  // keeps capacity
     freeSlot->pageCursor = 0;
     freeSlot->pageMtu    = 0;
-    freeSlot->pageSource = nullptr;
+    freeSlot->pageSource = {};
   }
   return freeSlot;
 }
@@ -189,7 +193,7 @@ static void freeSlot(uint16_t handle) {
     std::string().swap(s->pageSnapshot);  // reclaim, not just .clear()
     s->pageCursor = 0;
     s->pageMtu    = 0;
-    s->pageSource = nullptr;
+    s->pageSource = {};
   }
 }
 
@@ -202,7 +206,7 @@ static void clearAllSlots() {
     std::string().swap(s.pageSnapshot);
     s.pageCursor = 0;
     s.pageMtu    = 0;
-    s.pageSource = nullptr;
+    s.pageSource = {};
   }
 }
 
@@ -573,8 +577,7 @@ static void buildNearbyJson(uint32_t& membershipHashOut,
 // materialized on Core 1 only while an app or webapp client is connected and
 // freed the moment neither is, so a crowded lamp with no app open holds zero
 // nearby-JSON heap. copyNearbyJson serves it under the mutex, so the Core 0
-// host task never reads a string Core 1 is reallocating (same discipline as
-// the exprcat catalog).
+// host task never reads a string Core 1 is reallocating.
 static SemaphoreHandle_t nearbyCacheMutex() {
   static SemaphoreHandle_t m = xSemaphoreCreateMutex();
   return m;
@@ -891,10 +894,15 @@ class SettingsBlobCallback : public NimBLECharacteristicCallbacks {
 
 using SectionSerializer = void(*)(std::string&);
 
-// fn serialises the section into the connection's pageSnapshot on open.
+// A section serves one of two ways. fn serialises into the connection's
+// pageSnapshot on open (heap). flashData/flashLen instead point the page
+// source straight at a committed .rodata buffer, served by reference with
+// zero heap; fn is null for those.
 struct SectionEntry {
   const char*                 name;
   SectionSerializer           fn;
+  const char*                 flashData = nullptr;
+  size_t                      flashLen  = 0;
 };
 
 // Lambdas capture only globals so they decay to plain function pointers
@@ -902,9 +910,8 @@ struct SectionEntry {
 // under Config's cache mutex, so calling here on the Core 0 host task is
 // safe against a concurrent Core 1 rebuild; tick() pre-warms the caches so
 // the rebuild rarely runs here. nearby copies its Core 1-built cache out
-// under a mutex; exprcat serializes on read into pageSnapshot, so an
-// under-built catalog reads as "no catalog" (older-firmware path) rather
-// than a truncated one.
+// under a mutex; exprcat serves the committed per-variant flash catalog by
+// reference, so it can never OOM.
 // wispclaims is binary, not JSON: the full accumulated fleet blob exceeds
 // the 512-byte ATT ceiling that caps the CHAR_WISP_CLAIMS direct read.
 // wisppalette is binary too (raw RGBW): a dedicated read path so the
@@ -916,12 +923,7 @@ static const std::array<SectionEntry, 9> kSections = {{
   {"expr",    [](std::string& out) { s_config->expressionsSectionJsonCached(out); }},
   {"home",    [](std::string& out) { s_config->homeSectionJsonCached(out); }},
   {"nearby",  [](std::string& out) { copyNearbyJson(out); }},
-  {"exprcat", [](std::string& out) {
-    out = ::expressionManager.registry().serializeCatalog();
-    // never serve a truncated/failed catalog; empty reads as "no catalog"
-    // (older-firmware path) rather than a partial one.
-    if (out.size() < 2 || out.front() != '{') out.clear();
-  }},
+  {"exprcat", nullptr, lamp::kExprCatalog, lamp::kExprCatalogLen},
   {"wispclaims", [](std::string& out) {
     static uint8_t buf[1 + lamp::WispFleetCache::kCapacity * 12];
     const size_t n = lamp::lampRoster.buildWispClaimsBlob(buf, sizeof(buf),
@@ -947,18 +949,23 @@ class PageCtrlCallback : public NimBLECharacteristicCallbacks {
 
     for (const auto& entry : kSections) {
       if (name == entry.name) {
-        // Serialises into pageSnapshot, reusing its existing capacity.
-        try {
-          entry.fn(slot->pageSnapshot);
-        } catch (const std::bad_alloc&) {
-          slot->pageSnapshot.clear();
-          slot->pageCursor = 0;
-          slot->pageMtu    = 0;
-          slot->pageSource = nullptr;
-          logBleSectionOom(entry.name);
-          return;
+        if (entry.flashData) {
+          // Serve the committed catalog straight from .rodata; no heap.
+          slot->pageSource = std::string_view(entry.flashData, entry.flashLen);
+        } else {
+          // Serialises into pageSnapshot, reusing its existing capacity.
+          try {
+            entry.fn(slot->pageSnapshot);
+          } catch (const std::bad_alloc&) {
+            slot->pageSnapshot.clear();
+            slot->pageCursor = 0;
+            slot->pageMtu    = 0;
+            slot->pageSource = {};
+            logBleSectionOom(entry.name);
+            return;
+          }
+          slot->pageSource = slot->pageSnapshot;
         }
-        slot->pageSource = &slot->pageSnapshot;
         slot->pageCursor = 0;
         // Cap the chunk at the baseline-MTU page size even when this link
         // negotiated higher; the app reads until an empty terminator, so
@@ -969,7 +976,7 @@ class PageCtrlCallback : public NimBLECharacteristicCallbacks {
                                                               : kPageMaxChunkSize;
 #ifdef LAMP_DEBUG
         Serial.printf("[ble_control] page CTRL section=%s len=%u mtu=%u chunk=%u\n",
-                      entry.name, (unsigned)slot->pageSource->size(),
+                      entry.name, (unsigned)slot->pageSource.size(),
                       (unsigned)mtu, (unsigned)slot->pageMtu);
 #endif
         return;
@@ -981,7 +988,7 @@ class PageCtrlCallback : public NimBLECharacteristicCallbacks {
     slot->pageSnapshot.clear();
     slot->pageCursor = 0;
     slot->pageMtu    = 0;
-    slot->pageSource = nullptr;
+    slot->pageSource = {};
 #ifdef LAMP_DEBUG
     Serial.printf("[ble_control] page CTRL unknown section='%.*s'\n",
                   (int)name.size(), name.data());
@@ -997,23 +1004,23 @@ class PageDataCallback : public NimBLECharacteristicCallbacks {
       return;
     }
     ConnSlot* slot = findSlot(handle);
-    if (!slot || slot->pageMtu == 0 || slot->pageSource == nullptr ||
-        slot->pageCursor >= slot->pageSource->size()) {
+    if (!slot || slot->pageMtu == 0 ||
+        slot->pageCursor >= slot->pageSource.size()) {
       // Empty response signals end-of-section: the app reads chunks until empty.
       c->setValue("");
       return;
     }
-    const size_t remaining = slot->pageSource->size() - slot->pageCursor;
+    const size_t remaining = slot->pageSource.size() - slot->pageCursor;
     const size_t take      = remaining < slot->pageMtu ? remaining
                                                        : slot->pageMtu;
-    c->setValue(reinterpret_cast<const uint8_t*>(slot->pageSource->data() +
+    c->setValue(reinterpret_cast<const uint8_t*>(slot->pageSource.data() +
                                                   slot->pageCursor),
                 static_cast<size_t>(take));
     slot->pageCursor += static_cast<uint16_t>(take);
 #ifdef LAMP_DEBUG
     Serial.printf("[ble_control] page DATA cursor=%u/%u take=%u\n",
                   (unsigned)slot->pageCursor,
-                  (unsigned)slot->pageSource->size(),
+                  (unsigned)slot->pageSource.size(),
                   (unsigned)take);
 #endif
   }

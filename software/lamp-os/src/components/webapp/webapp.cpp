@@ -17,18 +17,15 @@
 #include <cstring>
 #include <string>
 
+#include "expr_catalog.h"
 #include "components/firmware/ota_quiet_mode.hpp"
 #include "components/network/ble/ble_control.hpp"
 #include "components/network/transport/wifi.hpp"
 #include "components/webapp/webapp_deadline.hpp"
 #include "config/config_types.hpp"
 #include "core/pending_json_slot.hpp"
-#include "expressions/expression_manager.hpp"
 #include "util/color.hpp"
 #include "util/heap_probe.hpp"
-
-// Owned by lamp.cpp; mirror the declaration like ble_control.cpp does.
-extern lamp::ExpressionManager expressionManager;
 
 // Same Core 0 → Core 1 drain handoff the BLE writes use; mutating config
 // directly from the AsyncTCP task would race the main loop.
@@ -98,10 +95,10 @@ static void handleGetSettings(AsyncWebServerRequest* req) {
 }
 
 static void handleGetExpressions(AsyncWebServerRequest* req) {
-  // AP-only and rare, so serialize the catalog on demand rather than pinning it
-  // in the heap: the ~9.6 KB block stays reclaimable when no one is on this page.
-  const std::string catalog = expressionManager.registry().serializeCatalog();
-  req->send(200, "application/json", catalog.c_str());
+  // Streamed straight from the committed .rodata catalog; no heap copy.
+  req->send_P(200, "application/json",
+              reinterpret_cast<const uint8_t*>(lamp::kExprCatalog),
+              lamp::kExprCatalogLen);
 }
 
 static void handleGetNearby(AsyncWebServerRequest* req) {
