@@ -11,6 +11,8 @@
 #include <Arduino.h>
 #include <IPAddress.h>
 
+#include <atomic>
+#include <functional>
 #include <string>
 
 namespace wisp {
@@ -27,7 +29,16 @@ class WifiLink {
 
   // Re-read creds, drop any association, attempt a fresh WiFi.begin(). Called
   // after a setWifi op persists new creds. No-ops (with a log) if creds empty.
+  // Clears any channel-mismatch guard and re-enables auto-reconnect. After a
+  // mismatch the wisp does not retry on its own; recovery is an explicit
+  // reconnect (a fresh setWifi or the wifiReconnect op).
   void reconnect();
+
+  // Drains a deferred STA_GOT_IP verdict on the loop task. The GOT_IP event
+  // only records the associated channel; the heavy radio work (drop the
+  // wrong-channel association, re-pin the radio to the mesh channel) runs
+  // here to keep the WiFi event task out of re-entrant radio calls.
+  void loop();
 
   // softAP role on the mesh channel (WIFI_AP_STA so ESP-NOW keeps working).
   // ssid/pass are the wisp's own network, not the WispConfig STA creds.
@@ -47,6 +58,18 @@ class WifiLink {
 
   // Snapshot accessors. Cheap. Callable from any task.
   bool isConnected() const;
+
+  // True once an AP association landed on a channel other than the mesh
+  // channel and the guard dropped it. Cleared by reconnect() or a clean
+  // mesh-channel association. apChannel() is the offending channel (0 when
+  // no mismatch). Loop-task state, read by the status emitter.
+  bool channelMismatch() const { return channelMismatch_; }
+  int apChannel() const { return lastStaChannel_; }
+
+  // Fired from loop() only when channelMismatch() flips, so the status emitter
+  // can re-emit at once instead of waiting for the next heartbeat.
+  void setOnChangeCallback(std::function<void()> cb) { onChange_ = std::move(cb); }
+
   // SSID/password reflected from the bound WispConfig. Returns empty
   // strings before begin() is called or when the store has no creds.
   std::string ssid() const;
@@ -57,6 +80,14 @@ class WifiLink {
   bool started_ = false;
   Mode mode_ = Mode::Off;
   bool apUp_ = false;
+
+  // Channel carried by a STA_GOT_IP event, handed from the WiFi event task to
+  // loop(). 0 means nothing pending; loop() exchanges it back to 0.
+  std::atomic<int> pendingStaChannel_{0};
+  bool channelMismatch_ = false;
+  int lastStaChannel_ = 0;
+
+  std::function<void()> onChange_;
 };
 
 }  // namespace wisp

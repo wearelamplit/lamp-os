@@ -37,7 +37,9 @@ Four links carry everything:
 - **lamp ↔ lamp** — ESP-NOW broadcast mesh, channel 6. Presence, greetings,
   transient overrides, expression announce, firmware distribution.
 - **Aurora → wisp** — LAN WiFi (mDNS discovery, WebSocket palette subscription,
-  HTTP palette fetch).
+  HTTP palette fetch). One shared radio serves both WiFi and ESP-NOW, so the
+  STA join is guarded to mesh channel 6: an association landing off-channel is
+  dropped rather than left to drag the radio off the mesh.
 - **wisp → lamps** — ESP-NOW mesh (paint state + status beacon). The wisp reaches
   the app only by proxy: it broadcasts, lamps cache, the app reads off a
   connected lamp.

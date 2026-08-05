@@ -29,6 +29,7 @@ namespace wisp {
 
 class CurrentPalette;
 class MeshLink;
+class WifiLink;
 class WispConfig;
 class ZoneSelector;
 struct SeqSource;
@@ -36,7 +37,8 @@ struct SeqSource;
 class StatusEmitter {
  public:
   void begin(MeshLink* mesh, ZoneSelector* zone, AuroraPaletteClient* aurora,
-             WispConfig* config, CurrentPalette* palette, SeqSource* seq);
+             WispConfig* config, CurrentPalette* palette, SeqSource* seq,
+             WifiLink* wifi);
 
   // One-shot wiring of the 30s heartbeat timer. Call once after begin().
   void startTimer();
@@ -65,6 +67,7 @@ class StatusEmitter {
   WispConfig* config_ = nullptr;
   CurrentPalette* palette_ = nullptr;
   SeqSource* seq_ = nullptr;
+  WifiLink* wifi_ = nullptr;
   StatusEmitterTimerHandle statusTimer_ = nullptr;
 
   // Set from the timer task / triggerOnChange, cleared in pump() on the loop task.

@@ -18,6 +18,7 @@ void AuroraPaletteClient::setActive(bool on) {
     if (on == (state_ != State::Idle)) return;
     if (!on) {
         ws_.close();
+        discovery_.cancel();
         group_ = GroupResolve{};
         state_ = State::Idle;
         Serial.println("[client] aurora client idle");
@@ -31,20 +32,23 @@ void AuroraPaletteClient::setActive(bool on) {
 }
 
 void AuroraPaletteClient::loop() {
+    // Reap a query abandoned by setActive(false); Idle never enters the switch.
+    discovery_.drain();
     switch (state_) {
         case State::Discovering:
-            // Skip mDNS until STA is up. Without this gate the wisp issues
-            // MDNS.queryService("aurora","tcp") even when ssid='';
-            // each query blocks the WiFi task ~50-300ms and starves the
-            // ESP-NOW send-callback path, causing bursty paint FAILs.
+            // An async query with no STA interface just fails; skip until up.
             if (!WiFi.isConnected()) break;
+            if (discovery_.inFlight()) {
+                if (discovery_.poll() && discovery_.found()) {
+                    ws_.setTarget(discovery_.ip(), discovery_.port());
+                    fetcher_.setTarget(discovery_.ip(), discovery_.port());
+                    state_ = State::Connecting;
+                }
+                break;
+            }
             if (millis() - lastDiscoverMs_ < kDiscoverRetryMs) break;
             lastDiscoverMs_ = millis();
-            if (discovery_.discover()) {
-                ws_.setTarget(discovery_.ip(), discovery_.port());
-                fetcher_.setTarget(discovery_.ip(), discovery_.port());
-                state_ = State::Connecting;
-            }
+            discovery_.start();
             break;
         case State::Connecting:
         case State::Streaming:

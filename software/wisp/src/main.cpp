@@ -160,7 +160,8 @@ void setup() {
 
   // carriedFw* zero-fill; wire layout retained for back-compat with older lamps.
   statusEmitter.begin(&mesh, &zoneSelector, &auroraClient, &wispConfig,
-                      &currentPalette, &wispSeq);
+                      &currentPalette, &wispSeq, &wifi);
+  wifi.setOnChangeCallback([] { statusEmitter.triggerOnChange(); });
   presenceBeacon.begin(&mesh, &paintDistributor, &currentPalette,
                        &auroraClient, &wispRoster, &wispSeq, &statusEmitter,
                        &wispConfig);
@@ -181,6 +182,7 @@ void loop() {
   const uint32_t now = millis();
 
   auroraClient.loop();
+  wifi.loop();
   serialConsole.pump();
   meshRouter.drainPendingOps();
   // Beacon work runs here on the 8KB loop stack; the FreeRTOS timers only flag.

@@ -8,6 +8,7 @@
 
 #include "paint/current_palette.hpp"
 #include "net/mesh_link.hpp"
+#include "net/wifi_link.hpp"
 #include "config/wisp_config.hpp"
 #include "config/zone_selector.hpp"
 #include "aurora/AuroraPaletteClient.h"
@@ -26,13 +27,15 @@ constexpr size_t kPaletteIdPrefixLen = lamp_protocol::WISP_HELLO_PALETTE_ID_PREF
 
 void StatusEmitter::begin(MeshLink* mesh, ZoneSelector* zone,
                           AuroraPaletteClient* aurora, WispConfig* config,
-                          CurrentPalette* palette, SeqSource* seq) {
+                          CurrentPalette* palette, SeqSource* seq,
+                          WifiLink* wifi) {
   mesh_ = mesh;
   zone_ = zone;
   aurora_ = aurora;
   config_ = config;
   palette_ = palette;
   seq_ = seq;
+  wifi_ = wifi;
 }
 
 void StatusEmitter::startTimer() {
@@ -111,6 +114,8 @@ void StatusEmitter::emitStatus() {
 
   const bool wifiConn   = WiFi.isConnected();
   const bool auroraConn = aurora_ && aurora_->isStreaming();
+  const bool wifiChannelMismatch = wifi_ && wifi_->channelMismatch();
+  const int  wifiApChannel = wifi_ ? wifi_->apChannel() : 0;
   const int  currentZone = zone_ ? zone_->currentZone() : -1;
   const char* zoneSrc    = zone_ ? zoneSourceName(zone_->source())
                                  : zoneSourceName(ZoneSource::None);
@@ -171,7 +176,8 @@ void StatusEmitter::emitStatus() {
       wifiConn, auroraConn, paletteIdPrefix, lastSeenMs,
       sourceName, offR, offG, offB, offW, hasOffColor, shuffleSeed,
       driftIntervalMs, driftFadePct, wispName, hasPassword,
-      ledType, pixelCount, opSeq, brightness };
+      ledType, pixelCount, opSeq, brightness,
+      wifiChannelMismatch, wifiApChannel };
 
   char jsonBuf[kStatusJsonBufLen];
   const size_t jsonLen = buildWispStatusJson(

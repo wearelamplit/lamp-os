@@ -232,9 +232,10 @@ void test_brightness_omitted_at_default_emitted_when_dimmed() {
   TEST_ASSERT_EQUAL_INT(40, d2["brightness"].as<int>());
 }
 
-// Untruncated worst case: every field at its widest non-default value, all
-// 16 observed zones, a generous cap so nothing gets dropped. Pins the number
-// CONTROL_MAX_PAYLOAD is sized from (see docs/dev/networking.md).
+// Untruncated worst case without the wifi-mismatch fields: every other field
+// at its widest non-default value, all 16 observed zones, a generous cap so
+// nothing gets dropped. The absolute worst case (with the mismatch fields) is
+// pinned by test_wifi_mismatch_untruncated_length below.
 void test_true_worst_case_untruncated_length() {
   int zones[16];
   for (int i = 0; i < 16; ++i) zones[i] = 2147483647;
@@ -290,10 +291,46 @@ void test_worst_case_fits_control_op_at_production_cap() {
   TEST_ASSERT_TRUE(frameLen > 0);
 }
 
+// Absolute worst case: the true worst case plus the wifi channel-mismatch
+// fields. Untruncated it overflows CONTROL_MAX_PAYLOAD, so at the production
+// cap a field must shed. px (app-critical, drives pixel count) and the
+// mismatch signal must survive; the cosmetic brightness is what drops.
+void test_wifi_mismatch_untruncated_length() {
+  int zones[16];
+  for (int i = 0; i < 16; ++i) zones[i] = 2147483647;
+  wisp::WispStatusFields f{ INT32_MIN, "firstSeen", zones, 16,
+                            true, true, "abcdef12", 4294967295u, "aurora",
+                            255, 255, 255, 255, true, /*shuffleSeed=*/255,
+                            /*driftIntervalMs=*/3600000, /*driftFadePct=*/100,
+                            /*name=*/"12345678901234567890",
+                            /*hasPassword=*/true,
+                            /*ledType=*/"GRBW", /*pixelCount=*/65535,
+                            /*opSeq=*/4294967295u,
+                            /*brightness=*/99,
+                            /*wifiChannelMismatch=*/true,
+                            /*wifiApChannel=*/11 };
+  char out[1024];
+  size_t n = wisp::buildWispStatusJson(f, out, sizeof(out), /*cap=*/4096);
+  TEST_ASSERT_EQUAL_UINT32(602, n);
+  TEST_ASSERT_TRUE(602 > lamp_protocol::CONTROL_MAX_PAYLOAD);
+
+  // At the production cap the frame truncates; px and the mismatch bool ride,
+  // brightness (the only true cosmetic) drops.
+  n = wisp::buildWispStatusJson(f, out, sizeof(out),
+                                lamp_protocol::CONTROL_MAX_PAYLOAD);
+  TEST_ASSERT_TRUE(n > 0 && n <= lamp_protocol::CONTROL_MAX_PAYLOAD);
+  JsonDocument d;
+  TEST_ASSERT_FALSE(deserializeJson(d, out));
+  TEST_ASSERT_EQUAL_INT(65535, d["px"].as<int>());
+  TEST_ASSERT_TRUE(d["wifiChannelMismatch"].as<bool>());
+  TEST_ASSERT_TRUE(d["brightness"].isNull());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_core_worst_case_pinned_under_cap);
   RUN_TEST(test_true_worst_case_untruncated_length);
+  RUN_TEST(test_wifi_mismatch_untruncated_length);
   RUN_TEST(test_worst_case_fits_control_op_at_production_cap);
   RUN_TEST(test_brightness_omitted_at_default_emitted_when_dimmed);
   RUN_TEST(test_fully_loaded_worst_case_never_fails);

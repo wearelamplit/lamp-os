@@ -26,6 +26,8 @@ struct WispStatusFields {
   uint16_t     pixelCount;
   uint32_t     opSeq;
   uint8_t      brightness = 100;
+  bool         wifiChannelMismatch = false;
+  int          wifiApChannel = 0;
 };
 
 // Serialize a wispStatus JSON into `out` (capacity `outCap`). A guaranteed

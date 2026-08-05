@@ -73,7 +73,7 @@ Serial-ingress commands (`scripts/bench_cmd.py`), `core/lamp_test_action.cpp`:
 | `[wisploop]` | `wisp/src/main.cpp` | Loop stall (`stall=..ms`) |
 | `[wispheap]` | `wisp/src/status/status_emitter.cpp` | Wisp free + largest heap (`free=.. largest=..`) |
 | `[mesh]` | `wisp/src/net/mesh_link.cpp` | Wisp ESP-NOW init / ready (ch, mac) |
-| `[wifi]` | `wisp/src/net/wifi_link.cpp`, `console/serial_console.cpp` | Wisp WiFi link state |
+| `[wifi]` | `wisp/src/net/wifi_link.cpp`, `console/serial_console.cpp` | Wisp WiFi link state; channel-6 guard drop logs `AP ch=N != mesh ch=6; dropping association, re-pinning radio to mesh, auto-reconnect off` |
 | `[bright]` | `wisp/src/paint/paint_distributor.cpp` | Per-lamp brightness send (`send %u->mac seq=..`) |
 | `[client]` | `wisp/src/aurora/AuroraPaletteClient.cpp` | Aurora client idle / armed / static-host |
 | `[ws]` | `wisp/src/aurora/AuroraWsConnection.cpp` | Aurora WebSocket connecting / lost |

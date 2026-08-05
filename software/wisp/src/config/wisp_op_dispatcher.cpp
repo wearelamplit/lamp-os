@@ -261,6 +261,16 @@ DispatchResult WispOpDispatcher::dispatchJson(const char* json, size_t len) {
     return DispatchResult::AppliedWifiChange;
   }
 
+  if (strcmp(op, "wifiReconnect") == 0) {
+    if (wifiLink_) {
+      Serial.println("[wisp.op] wifiReconnect: retrying with stored creds");
+      wifiLink_->reconnect();
+    } else {
+      Serial.println("[wisp.op] wifiReconnect: no WifiLink bound; skipping");
+    }
+    return DispatchResult::AppliedWifiChange;
+  }
+
   if (strcmp(op, "setBrightness") == 0) {
     if (!doc["brightness"].is<int>()) {
       Serial.println("[wisp.op] setBrightness missing/invalid 'brightness'");

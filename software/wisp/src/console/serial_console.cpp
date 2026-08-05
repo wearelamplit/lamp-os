@@ -98,6 +98,9 @@ void SerialConsole::handleCommand(const String& cmd) {
     Serial.printf("[wifi] ssid='%s' connected=%d ip=%s\n",
                   wifi_.ssid().c_str(), wifi_.isConnected() ? 1 : 0,
                   WiFi.localIP().toString().c_str());
+  } else if (cmd == "wifi:retry") {
+    wifi_.reconnect();
+    Serial.println("[wisp.cmd] wifi retry: reconnecting with stored creds");
   } else if (cmd == "wifi:clear") {
     // WiFi.disconnect alone doesn't reset the radio channel; need
     // esp_wifi_set_channel to snap back to LAMP_ESPNOW_CHANNEL.

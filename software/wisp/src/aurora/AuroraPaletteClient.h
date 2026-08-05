@@ -85,6 +85,6 @@ private:
 
     static constexpr uint32_t kFetchRetryMs    = 1000;  // min spacing between GETs
     static constexpr uint32_t kRediscoverFails = 5;     // re-run mDNS after N WS fails
-    // queryService blocks 50-300 ms per call; pacing bounds the loop-stall duty.
+    // Discovery is async (non-blocking poll); this paces query STARTS.
     static constexpr uint32_t kDiscoverRetryMs = 5000;
 };

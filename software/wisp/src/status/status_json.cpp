@@ -90,6 +90,13 @@ size_t buildWispStatusJson(const WispStatusFields& f, char* out,
   if (f.pixelCount > 0 && f.pixelCount != kDefaultPixelCount) {
     addIfFits(doc, cap, "px", f.pixelCount);
   }
+  // Explains a wifiConnected=false the app would otherwise blame on bad creds.
+  // Below px (app-critical) but above brightness: only a true cosmetic sheds
+  // under budget pressure, never px.
+  if (f.wifiChannelMismatch) {
+    addIfFits(doc, cap, "wifiChannelMismatch", true);
+    if (f.wifiApChannel > 0) addIfFits(doc, cap, "wifiApChannel", f.wifiApChannel);
+  }
   if (f.brightness != kDefaultBrightness) {
     addIfFits(doc, cap, "brightness", f.brightness);
   }

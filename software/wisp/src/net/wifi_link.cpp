@@ -1,17 +1,25 @@
 #include "net/wifi_link.hpp"
 
 #include <WiFi.h>
+#include <esp_wifi.h>
 
 #include "config/wisp_config.hpp"
 #include "net/mesh_link.hpp"  // LAMP_ESPNOW_CHANNEL
 
 namespace wisp {
 
+namespace {
+// The capture-less WiFi.onEvent lambda runs on the event task; it reaches the
+// bound WifiLink through this. begin() is idempotent, so one instance.
+WifiLink* s_self = nullptr;
+}  // namespace
+
 void WifiLink::begin(WispConfig* config) {
   if (started_) return;
   started_ = true;
   config_ = config;
   mode_ = Mode::Sta;
+  s_self = this;
 
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
@@ -21,12 +29,11 @@ void WifiLink::begin(WispConfig* config) {
     if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
       Serial.printf("[wifi] got IP: %s\n",
                     WiFi.localIP().toString().c_str());
-      // One shared radio: STA follows the AP's channel, dragging ESP-NOW with it.
-      const int ch = WiFi.channel();
-      if (ch != LAMP_ESPNOW_CHANNEL) {
-        Serial.printf("[wifi] FAULT: STA on ch=%d but ESP-NOW mesh is ch=%d; "
-                      "mesh unreachable on this AP's channel\n",
-                      ch, LAMP_ESPNOW_CHANNEL);
+      // One shared radio: STA follows the AP's channel, dragging ESP-NOW with
+      // it. Hand the channel to loop(); the radio fix runs off the event task.
+      if (s_self) {
+        s_self->pendingStaChannel_.store(WiFi.channel(),
+                                         std::memory_order_relaxed);
       }
     } else if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
       Serial.println("[wifi] disconnected");
@@ -49,11 +56,39 @@ void WifiLink::begin(WispConfig* config) {
   reconnect();
 }
 
+void WifiLink::loop() {
+  const int ch = pendingStaChannel_.exchange(0, std::memory_order_relaxed);
+  if (ch == 0) return;
+  const bool wasMismatch = channelMismatch_;
+  if (ch == LAMP_ESPNOW_CHANNEL) {
+    channelMismatch_ = false;
+    lastStaChannel_ = 0;
+    if (wasMismatch && onChange_) onChange_();
+    return;
+  }
+  channelMismatch_ = true;
+  lastStaChannel_ = ch;
+  Serial.printf("[wifi] AP ch=%d != mesh ch=%d; dropping association, "
+                "re-pinning radio to mesh, auto-reconnect off\n",
+                ch, LAMP_ESPNOW_CHANNEL);
+  // Keep radio + stored creds up, just shed the wrong-channel association, then
+  // snap the radio back so ESP-NOW is restored. setAutoReconnect(false) stops
+  // the association churn that would re-drag the radio every few seconds.
+  WiFi.setAutoReconnect(false);
+  WiFi.disconnect(false, false);
+  esp_wifi_set_channel(LAMP_ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
+  if (!wasMismatch && onChange_) onChange_();
+}
+
 void WifiLink::reconnect() {
   if (!config_) {
     Serial.println("[wifi] reconnect called before begin(); ignoring");
     return;
   }
+  channelMismatch_ = false;
+  lastStaChannel_ = 0;
+  pendingStaChannel_.store(0, std::memory_order_relaxed);
+  WiFi.setAutoReconnect(true);
   const std::string s = ssid();
   const std::string p = password();
   if (s.empty() || p.empty()) {
