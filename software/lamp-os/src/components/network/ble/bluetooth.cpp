@@ -158,6 +158,8 @@ BluetoothComponent::BluetoothComponent() {};
 void BluetoothComponent::begin(std::string name, Color inBaseColor,
                                Color inShadeColor, bool configured) {
   s_configured = configured;
+  m_pendingAdvBase = inBaseColor;
+  m_pendingAdvShade = inShadeColor;
 #ifdef LAMP_DEBUG
   Serial.printf("Starting Bluetooth Async Client\n");
 #endif
