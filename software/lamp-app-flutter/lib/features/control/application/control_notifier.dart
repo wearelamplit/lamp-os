@@ -706,6 +706,14 @@ class ControlNotifier extends _$ControlNotifier {
   @visibleForTesting
   void scheduleCommitDebouncedForTest() => _scheduleCommitDebounced();
 
+  /// Test-only access to [_readCatalog] so the cache decision (hit skips the
+  /// `exprcat` read; miss/absent/corrupt read + heal) can be exercised
+  /// directly with a fake [BleClient].
+  @visibleForTesting
+  Future<ExpressionCatalog?> readCatalogForTest(
+          BleClient ble, String? catalogHash) =>
+      _readCatalog(ble, catalogHash);
+
   /// Writes an arbitrary settings_blob JSON map to the lamp.
   ///
   /// The `reboot` flag is merged into the map before encryption.
