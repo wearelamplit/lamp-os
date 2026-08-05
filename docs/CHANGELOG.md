@@ -5,6 +5,18 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## 1.2.4
+
+### Fixed
+- **Steadier in a crowded room.** In a space full of lamps, a lamp could slowly
+  fill its memory and restart itself. The lamp now builds its app-facing lists
+  (the nearby-lamps view and the expression catalogue) only while a phone is
+  connected, frees them the rest of the time, and caps the nearby list — so a big
+  crowd no longer chips away at its memory.
+- **A bad save can't wipe your config.** A configuration save is now checked
+  before it's stored, so an interrupted or partial write can no longer overwrite
+  a good config with a broken one and drop the lamp back to defaults.
+
 ## 1.2.3
 
 ### Fixed
