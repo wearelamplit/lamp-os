@@ -6,10 +6,17 @@
 #include "core/compositor.hpp"
 #include "core/lamp.hpp"
 #include "expressions/bloom/bloom_expression.hpp"
+#include "expressions/breathing/breathing_expression.hpp"
+#include "expressions/expr_variant_sets.hpp"
 #include "expressions/expression.hpp"
 #include "expressions/expression_invocation.hpp"
 #include "expressions/expression_manager.hpp"
 #include "expressions/expression_registry.hpp"
+#include "expressions/glitchy/glitchy_expression.hpp"
+#include "expressions/pulse/pulse_expression.hpp"
+#include "expressions/shifty/shifty_expression.hpp"
+#include "expressions/shimmer/shimmer_expression.hpp"
+#include "expressions/spotty/spotty_expression.hpp"
 #include "lamps/staff/staff_input_behavior.hpp"
 
 extern lamp::Compositor compositor;
@@ -49,8 +56,9 @@ class StaffLamp : public Lamp {
   Features featuresEnabled() const override { return Features::All; }
 
   void registerExpressions(ExpressionRegistry& reg) override {
-    Lamp::registerExpressions(reg);  // the shared editable catalog
-    reg.add(BloomExpression::classDescriptor());  // internal; skipped by the catalog
+#define X(N) reg.add(N##Expression::classDescriptor());
+    LAMPOS_STAFF_EXPRESSIONS(X)
+#undef X
   }
 
   Config::Defaults defaults() const override {

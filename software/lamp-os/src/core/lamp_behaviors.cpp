@@ -29,6 +29,7 @@
 #include "core/override_aggregate.hpp"
 #include "core/personality_engine.hpp"
 #include "expressions/breathing/breathing_expression.hpp"
+#include "expressions/expr_variant_sets.hpp"
 #include "expressions/expression_manager.hpp"
 #include "expressions/shimmer/shimmer_expression.hpp"
 #include "expressions/glitchy/glitchy_expression.hpp"
@@ -43,12 +44,9 @@ using lamp::applyEffectiveBrightness;
 
 void lamp::Lamp::registerExpressions(lamp::ExpressionRegistry& reg) {
   if (!lamp::any(featuresEnabled(), lamp::Features::DefaultExpressions)) return;
-  reg.add(lamp::GlitchyExpression::classDescriptor());
-  reg.add(lamp::PulseExpression::classDescriptor());
-  reg.add(lamp::BreathingExpression::classDescriptor());
-  reg.add(lamp::ShiftyExpression::classDescriptor());
-  reg.add(lamp::SpottyExpression::classDescriptor());
-  reg.add(lamp::ShimmerExpression::classDescriptor());
+#define X(N) reg.add(lamp::N##Expression::classDescriptor());
+  LAMPOS_BASE_EXPRESSIONS(X)
+#undef X
 }
 
 void initBehaviors(lamp::Features features, lamp::Lamp& self) {
