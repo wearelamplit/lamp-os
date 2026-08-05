@@ -350,29 +350,7 @@ class ControlNotifier extends _$ControlNotifier {
           .updatePassword(deviceId, null);
     }
 
-    // Pipe the lamp's variant identity from the LampSection read into
-    // inventory so the OTA flow can fetch the matching per-variant
-    // firmware binary even when the lamp is offline.
-    final lampType = fresh.lamp.lampType;
-    if (lampType != null && lampType.isNotEmpty) {
-      await _inv.updateLampType(deviceId, lampType);
-    }
-    // Mirror fwVersion + fwChannel onto inventory so My Lamps can render
-    // each tile's firmware identity offline (and CachedFirmwareNotifier
-    // can decide which variants need a fresh fetch).
-    if (fresh.lamp.fwVersion != null || fresh.lamp.fwChannel != null) {
-      await _inv.updateFirmwareInfo(
-        deviceId,
-        fwVersion: fresh.lamp.fwVersion,
-        fwChannel: fresh.lamp.fwChannel,
-      );
-    }
-    // Mirror the lamp's own mesh MAC so the Social tab can cross-reference
-    // nearby peers by address on iOS, where `deviceId` is a CoreBluetooth UUID.
-    final lampId = fresh.lamp.lampId;
-    if (lampId != null && lampId.isNotEmpty) {
-      await _inv.updateLampId(deviceId, lampId);
-    }
+    await _mirrorIdentityToInventory(fresh);
 
     // Live-preview writes are fire-and-forget. Swallow errors here so a
     // pending debounce timer that fires after the lamp disconnects (e.g.
@@ -534,6 +512,28 @@ class ControlNotifier extends _$ControlNotifier {
     await _completeExpressionTest(ble);
 
     return fresh;
+  }
+
+  /// Mirror the lamp's self-reported identity from a fresh section read onto
+  /// its inventory record, so offline surfaces (My Lamps, Social self-card,
+  /// OTA-eligibility) match what the lamp reports. Runs on every connect AND
+  /// reconnect; a post-OTA reboot reconnect is where the version changes.
+  Future<void> _mirrorIdentityToInventory(ControlState fresh) async {
+    final lampType = fresh.lamp.lampType;
+    if (lampType != null && lampType.isNotEmpty) {
+      await _inv.updateLampType(_deviceId, lampType);
+    }
+    if (fresh.lamp.fwVersion != null || fresh.lamp.fwChannel != null) {
+      await _inv.updateFirmwareInfo(
+        _deviceId,
+        fwVersion: fresh.lamp.fwVersion,
+        fwChannel: fresh.lamp.fwChannel,
+      );
+    }
+    final lampId = fresh.lamp.lampId;
+    if (lampId != null && lampId.isNotEmpty) {
+      await _inv.updateLampId(_deviceId, lampId);
+    }
   }
 
   /// Reads every section via the page protocol and returns a fresh
@@ -1842,6 +1842,8 @@ class ControlNotifier extends _$ControlNotifier {
       // Bail if disposed during the awaits; touching state would throw.
       // The notifier dispose path already cancels everything that matters here.
       final fresh = await _readSections(ble);
+      if (!ref.mounted) return;
+      await _mirrorIdentityToInventory(fresh);
       if (!ref.mounted) return;
       _reconnectTimer?.cancel();
       state = AsyncData(fresh.copyWith(connected: true, reconnectAttempt: 0));
