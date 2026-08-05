@@ -45,15 +45,27 @@ void main() {
       );
     });
 
-    test('updating → otaBusy, winning over the held connection', () {
+    test('receiving → otaReceiving, winning over the held connection', () {
       expect(
         statusFor(
           lampId: 'a',
           nearby: const [],
           connected: true,
-          updating: true,
+          receiving: true,
         ),
-        StatusKind.otaBusy,
+        StatusKind.otaReceiving,
+      );
+    });
+
+    test('sending → otaSending, winning over the held connection', () {
+      expect(
+        statusFor(
+          lampId: 'a',
+          nearby: const [],
+          connected: true,
+          sending: true,
+        ),
+        StatusKind.otaSending,
       );
     });
 
@@ -74,15 +86,27 @@ void main() {
   });
 
   group('statusForById', () {
-    test('updating → otaBusy', () {
+    test('receiving → otaReceiving', () {
       expect(
         statusForById(
           lampId: 'a',
           nearbyById: const {},
           connected: true,
-          updating: true,
+          receiving: true,
         ),
-        StatusKind.otaBusy,
+        StatusKind.otaReceiving,
+      );
+    });
+
+    test('sending → otaSending', () {
+      expect(
+        statusForById(
+          lampId: 'a',
+          nearbyById: const {},
+          connected: true,
+          sending: true,
+        ),
+        StatusKind.otaSending,
       );
     });
   });

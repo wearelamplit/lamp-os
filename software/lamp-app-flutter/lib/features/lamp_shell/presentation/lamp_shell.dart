@@ -96,7 +96,7 @@ class _LampShellState extends ConsumerState<LampShell> {
       firmwareNotifierProvider(widget.lampId).select((s) => s.isBusy),
     );
     final status = updating
-        ? StatusKind.otaBusy
+        ? StatusKind.otaReceiving
         : (connected ? StatusKind.mesh : StatusKind.searching);
 
     return Scaffold(
