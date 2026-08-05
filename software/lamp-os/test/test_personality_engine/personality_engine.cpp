@@ -130,13 +130,12 @@ class PersonalityEngine {
         pendingApplyCount_++;
       }
     }
-    // Mirrors production: the roster snapshot is copied once per sample
-    // period, not per tick.
+    // Mirrors production: the roster snapshot is sampled once per sample
+    // period, not per tick, and consumed by reference.
     if (nowMs - lastSampleMs_ >= kSamplePeriodMs || lastSampleMs_ == 0) {
       lastSampleMs_ = nowMs;
-      blePeerCache_ = nearbyOverride_;
       snapshotCount_++;
-      sampleAndSmoothCrowd_(nowMs);
+      sampleAndSmoothCrowd_(nowMs, nearbyOverride_);
     }
   }
 
@@ -307,9 +306,10 @@ class PersonalityEngine {
     if (f > 1.0f)  f = 1.0f;
     return f;
   }
-  void sampleAndSmoothCrowd_(uint32_t /*nowMs*/) {
+  void sampleAndSmoothCrowd_(uint32_t /*nowMs*/,
+                             const std::vector<RosterEntry>& peers) {
     const SocialMode mode = config_->socialMode;
-    const float rawW = computeWeightedCount_(blePeerCache_, mode);
+    const float rawW = computeWeightedCount_(peers, mode);
     sampleBuf_[sampleHead_] = rawW;
     sampleHead_ = (sampleHead_ + 1) % kSampleWindow;
     if (sampleCount_ < kSampleWindow) sampleCount_++;
@@ -342,7 +342,6 @@ class PersonalityEngine {
 
   FakeConfig* config_ = nullptr;
   std::vector<RosterEntry> nearbyOverride_;
-  std::vector<RosterEntry> blePeerCache_;
   int snapshotCount_ = 0;
   uint32_t lastSampleMs_ = 0;
   float sampleBuf_[kSampleWindow] = {0};

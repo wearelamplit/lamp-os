@@ -144,9 +144,6 @@ class PersonalityEngine {
   Config* config_ = nullptr;
 
   uint32_t lastSampleMs_ = 0;
-  // Roster snapshot for the sampler, refreshed at kSamplePeriodMs in
-  // tick(); BLE scan reports only update the roster ~1/s anyway.
-  std::vector<RosterEntry> blePeerCache_;
   // Rolling buffer of W samples; the median absorbs the occasional
   // outlier from a peer briefly fading in/out at the edge.
   float sampleBuf_[kSampleWindow] = {0};

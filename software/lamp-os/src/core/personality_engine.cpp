@@ -46,8 +46,7 @@ void PersonalityEngine::tick(uint32_t nowMs) {
   // window is uniformly-spaced regardless of loop jitter.
   if (nowMs - lastSampleMs_ >= kSamplePeriodMs || lastSampleMs_ == 0) {
     lastSampleMs_ = nowMs;
-    blePeerCache_ = snapshotBlePeers_();
-    sampleAndSmoothCrowd_(nowMs, blePeerCache_);
+    sampleAndSmoothCrowd_(nowMs, snapshotBlePeers_());
   }
 }
 
