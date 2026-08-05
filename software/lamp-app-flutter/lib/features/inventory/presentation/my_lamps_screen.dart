@@ -55,12 +55,12 @@ class MyLampsScreen extends ConsumerWidget {
       body: SafeArea(
         child: GridView(
           padding: const EdgeInsets.fromLTRB(
-              AppSpace.lg, AppSpace.md, AppSpace.lg, AppSpace.xl),
-          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: 200, // deliberate dimension, not spacing
-            mainAxisSpacing: AppSpace.md,
-            crossAxisSpacing: AppSpace.md,
-            childAspectRatio: 0.88,
+              AppSpace.md, AppSpace.md, AppSpace.md, AppSpace.xl),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 4,
+            mainAxisSpacing: AppSpace.sm,
+            crossAxisSpacing: AppSpace.sm,
+            childAspectRatio: 0.62,
           ),
           children: [
             for (final lamp in ordered)
@@ -261,8 +261,8 @@ class _AddLampTile extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 64, // deliberate dimension, not spacing
-              height: 64,
+              width: 56, // deliberate dimension, not spacing
+              height: 56,
               decoration: BoxDecoration(
                 color: colorScheme.surfaceContainerHighest,
                 shape: BoxShape.circle,
