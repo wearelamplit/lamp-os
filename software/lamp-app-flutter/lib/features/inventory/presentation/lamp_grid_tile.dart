@@ -8,7 +8,7 @@ import '../domain/signal_level.dart';
 
 /// Critter tile shared by the My Lamps picker and the Adopt scan list, so both
 /// grids read identically. Callers own the data; this renders the visual: a
-/// 64px critter with a corner [StatusDot] badge and a centered name.
+/// 56px critter with a corner [StatusDot] badge and a centered name.
 /// [highlighted] draws the active-lamp border; an [StatusKind.offline] status
 /// dims the critter and greys the name. [rssi] grades the mesh dot's green
 /// brightness by signal strength (null = medium).
@@ -45,7 +45,7 @@ class LampGridTile extends StatelessWidget {
       onLongPress: onLongPress,
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.all(AppSpace.md),
+        padding: const EdgeInsets.all(AppSpace.sm),
         decoration: BoxDecoration(
           color: colorScheme.surfaceContainerHighest
               .withValues(alpha: highlighted ? 1.0 : 0.4),
@@ -70,7 +70,7 @@ class LampGridTile extends StatelessWidget {
                     deviceId: deviceId,
                     shade: colors.shade ?? colorScheme.onSurfaceVariant,
                     base: colors.base ?? colorScheme.onSurfaceVariant,
-                    size: 64, // deliberate dimension, not spacing
+                    size: 56, // deliberate dimension, not spacing
                   ),
                 ),
                 Positioned(

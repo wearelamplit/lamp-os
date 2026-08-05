@@ -7,7 +7,9 @@
 #include <string>
 #include <vector>
 
+#include "expressions/bloom/bloom_expression.hpp"
 #include "expressions/breathing/breathing_expression.hpp"
+#include "expressions/expr_variant_sets.hpp"
 #include "expressions/glitchy/glitchy_expression.hpp"
 #include "expressions/pulse/pulse_expression.hpp"
 #include "expressions/shifty/shifty_expression.hpp"
@@ -23,21 +25,22 @@ struct VariantSpec {
   std::vector<const ExpressionDescriptor*> subset;
 };
 
-// The editable-expression subset each variant registers at runtime
-// (Lamp::registerExpressions and the variant overrides). Keep in step with
-// those; the drift test guards the committed bytes, not this list vs runtime.
+// The editable-expression subset each variant registers at runtime, expanded
+// from the SAME per-variant X-macro the runtime registration uses
+// (expressions/expr_variant_sets.hpp), so the generated catalog cannot drift
+// from what the device serves.
 inline std::vector<VariantSpec> variantSpecs() {
-  const std::vector<const ExpressionDescriptor*> base6 = {
-      &kGlitchyDescriptorData, &kPulseDescriptorData, &kBreathingDescriptorData,
-      &kShiftyDescriptorData,  &kSpottyDescriptorData, &kShimmerDescriptorData};
+#define X(N) &k##N##DescriptorData,
+  const std::vector<const ExpressionDescriptor*> base = {LAMPOS_BASE_EXPRESSIONS(X)};
+  const std::vector<const ExpressionDescriptor*> staff = {LAMPOS_STAFF_EXPRESSIONS(X)};
+  const std::vector<const ExpressionDescriptor*> snafu = {LAMPOS_SNAFU_EXPRESSIONS(X)};
+#undef X
   return {
-      {"standard", base6},
-      {"staff", base6},
-      {"lioness", base6},
-      {"loaf", base6},
-      {"snafu",
-       {&kGlitchyDescriptorData, &kPulseDescriptorData, &kSpottyDescriptorData,
-        &kShimmerDescriptorData}},
+      {"standard", base},
+      {"staff", staff},
+      {"lioness", base},
+      {"loaf", base},
+      {"snafu", snafu},
   };
 }
 
