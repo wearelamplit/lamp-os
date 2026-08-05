@@ -132,9 +132,10 @@ struct ConnSlot {
   std::string                 pageSnapshot;
   uint16_t                    pageCursor;
   uint16_t                    pageMtu;
-  // Points at the buffer being paged out. For build-based sections it is
-  // &pageSnapshot; for reference-based sections (exprcat) it is the immutable
-  // static, so no ~9.6 KB per-connection copy is pinned for the session.
+  // The section currently being paged out: &pageSnapshot once a section is
+  // open, null between sections. Every section serialises (or copies its
+  // Core 1-built cache) into pageSnapshot on open, so an unknown/empty
+  // section clears this and the next DATA read returns end-of-section.
   const std::string*          pageSource;
 };
 static constexpr uint16_t kUnusedHandle = 0xFFFF;
@@ -618,40 +619,93 @@ static void buildNearbyJson(uint32_t& membershipHashOut,
   membershipHashOut = hash;
 }
 
-// nearby is served from a Core 1-built cache like the Config section
-// caches: the NimBLE host task must never run the bulk build (roster
-// copy + serialize) on Core 0.
+// nearby JSON is app-facing only (the Social/Network screens, webapp
+// /api/nearby); the lamp's own logic reads roster structs directly. It is
+// materialized on Core 1 only while an app or webapp client is connected and
+// freed the moment neither is, so a crowded lamp with no app open holds zero
+// nearby-JSON heap. copyNearbyJson serves it under the mutex, so the Core 0
+// host task never reads a string Core 1 is reallocating (same discipline as
+// the exprcat catalog).
 static SemaphoreHandle_t nearbyCacheMutex() {
   static SemaphoreHandle_t m = xSemaphoreCreateMutex();
   return m;
 }
-static std::string s_nearbyJsonCache = "[]";
+static std::string s_nearbyJson  = "[]";   // guarded by nearbyCacheMutex()
+static bool        s_nearbyReady = false;  // guarded by nearbyCacheMutex()
 
-// Bumped by refreshNearbyJsonCache when the app-visible roster fields change
-// (excluding the ~30 Hz rssi/lastSeen churn). Surfaced in every stateNotify
-// payload so the app re-reads nearby on a push instead of polling.
+// Contiguous build is bounded to ~N*276 B regardless of fleet size. The cut
+// keeps the most-relevant peers, so a crowd past this many drops the farthest
+// and stalest first; the app surfaces "there may be more".
+static constexpr size_t kNearbyMaxLamps = 25;
+
+// Bumped by maintainNearbyJson when the app-visible fields of the served
+// (top-N) set change (excluding the ~30 Hz rssi/lastSeen churn). Surfaced in
+// every stateNotify payload so the app re-reads nearby on a push, not a poll.
 static uint32_t s_nearbyRev = 0;
 
 void copyNearbyJson(std::string& out) {
   xSemaphoreTake(nearbyCacheMutex(), portMAX_DELAY);
-  out = s_nearbyJsonCache;
+  out = s_nearbyJson;
   xSemaphoreGive(nearbyCacheMutex());
 }
 
-// Core 1 only (tick). Rebuilds only when the roster changed, at most
-// once per second; BLE advs freshen lastSeen at ~30 Hz per peer, so an
-// unthrottled rebuild would run every loop.
-static void refreshNearbyJsonCache() {
+// Keep the kNearbyMaxLamps most-relevant entries at the front of `lamps` and
+// drop the rest: near peers before mesh-only, then most-recently-seen, then
+// strongest RSSI. buildNearbyJson re-sorts the survivors by name.
+static void capNearby(std::vector<lamp::RosterEntry>& lamps, uint32_t now) {
+  if (lamps.size() <= kNearbyMaxLamps) return;
+  auto moreRelevant = [now](const lamp::RosterEntry& a,
+                            const lamp::RosterEntry& b) {
+    const bool an = lamp::isNearNow(a.lastSeenNearMs, now, LAMP_PRUNE_TIME_MS);
+    const bool bn = lamp::isNearNow(b.lastSeenNearMs, now, LAMP_PRUNE_TIME_MS);
+    if (an != bn) return an;
+    const uint32_t as = std::max(a.lastSeenNearMs, a.lastSeenMeshMs);
+    const uint32_t bs = std::max(b.lastSeenNearMs, b.lastSeenMeshMs);
+    if (as != bs) return as > bs;
+    return a.lastRssi > b.lastRssi;
+  };
+  std::partial_sort(lamps.begin(), lamps.begin() + kNearbyMaxLamps,
+                    lamps.end(), moreRelevant);
+  lamps.resize(kNearbyMaxLamps);
+}
+
+// Core 1 only (tick). Materializes the nearby JSON while an app/webapp client
+// is connected, rebuilding when the roster changes (throttled to 1 Hz;
+// BLE advs freshen lastSeen at ~30 Hz per peer). Frees the buffer the moment
+// no client is connected, so no nearby-JSON heap is resident in the
+// crowded-no-app case. ponytail: boundary rssi jitter at >kNearbyMaxLamps can
+// churn the served set at up to the 1 Hz rebuild rate; add a hysteresis
+// margin only if that shows up as rev thrash.
+static void maintainNearbyJson() {
   static uint32_t builtGen    = 0;
   static uint32_t lastBuildMs = 0;
   static uint32_t lastHash    = 0;
   static bool     seeded      = false;
+
+  bool wanted = s_clientConnected;
+#if LAMP_WEBAPP_ENABLED
+  wanted = wanted || webapp::hasClient();
+#endif
+  if (!wanted) {
+    xSemaphoreTake(nearbyCacheMutex(), portMAX_DELAY);
+    if (s_nearbyReady) {
+      std::string("[]").swap(s_nearbyJson);  // SSO, reclaims the build heap
+      s_nearbyReady = false;
+    }
+    xSemaphoreGive(nearbyCacheMutex());
+    builtGen    = 0;
+    lastBuildMs = 0;
+    seeded      = false;
+    return;
+  }
+
   const uint32_t gen = lamp::lampRoster.generation();
-  if (gen == builtGen) return;
+  if (gen == builtGen && s_nearbyReady) return;
   const uint32_t now = millis();
-  if (now - lastBuildMs < 1000) return;
+  if (s_nearbyReady && now - lastBuildMs < 1000) return;
 
   auto& lamps = lamp::lampRoster.getAll();
+  capNearby(lamps, now);
   uint32_t needed = 2;
   for (auto& e : lamps) needed += 240 + 6 * std::strlen(e.name);
   const uint32_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
@@ -662,19 +716,22 @@ static void refreshNearbyJsonCache() {
   }
 
   uint32_t hash = 0;
-  // Persistent scratch: buildNearbyJson refills it in place, then it swaps
-  // buffers with the cache. Both are long-lived, so after warmup the two
-  // heap buffers just ping-pong with no per-build alloc/free.
-  static std::string s_nearbyBuildScratch;
+  std::string local;
   try {
-    buildNearbyJson(hash, lamps, s_nearbyBuildScratch);
+    buildNearbyJson(hash, lamps, local);
   } catch (const std::bad_alloc&) {
     logBleSectionOom("nearby");
     lastBuildMs = now;
     return;
   }
+  if (local.size() < 2 || local.front() != '[') {
+    logBleSectionOom("nearby");
+    lastBuildMs = now;
+    return;
+  }
   xSemaphoreTake(nearbyCacheMutex(), portMAX_DELAY);
-  s_nearbyJsonCache.swap(s_nearbyBuildScratch);
+  s_nearbyJson.swap(local);
+  s_nearbyReady = true;
   xSemaphoreGive(nearbyCacheMutex());
   builtGen    = gen;
   lastBuildMs = now;
@@ -1156,7 +1213,7 @@ void tick() {
   s_config->shadeSectionRebuildIfDirty();
   s_config->expressionsSectionRebuildIfDirty();
   s_config->homeSectionRebuildIfDirty();
-  refreshNearbyJsonCache();
+  maintainNearbyJson();
 
   // Build the expression catalog once per connection (and free it on
   // disconnect) here on Core 1 so the first client read doesn't serialize it

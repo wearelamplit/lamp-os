@@ -137,8 +137,10 @@ bool isRunning();
 bool deinitForWebapp();
 bool isDownForWebapp();
 
-// Copies the cached nearby-lamps JSON out. Safe to call from any task;
-// never serializes on the caller's thread.
+// Copies the nearby-lamps JSON out. Materialized on Core 1 only while an app
+// or webapp client is connected (and freed otherwise), so it reads back "[]"
+// when no client is attached. Safe to call from any task; never serializes on
+// the caller's thread.
 void copyNearbyJson(std::string& out);
 
 /**
