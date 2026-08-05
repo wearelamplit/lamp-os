@@ -1,6 +1,7 @@
 #include "config.hpp"
 
 #include <ArduinoJson.h>
+#include <cstdio>
 #include <cstring>
 #include <new>
 #include <freertos/FreeRTOS.h>
@@ -8,6 +9,7 @@
 
 #include "config/config_codec.hpp"
 #include "core/lamp.hpp"
+#include "expr_catalog.h"
 #include "util/bd_addr.hpp"
 #include "util/color.hpp"
 #include "version.hpp"
@@ -222,6 +224,12 @@ String Config::asLampJson() {
   // picks these up the first time it's built.
   doc["fwVersion"] = FIRMWARE_VERSION;
   doc["fwChannel"] = FIRMWARE_CHANNEL_STR;
+  // Content address for the flash expr catalog, so the app fetches a given
+  // catalog at most once. Hash precomputed at build time over the exact bytes
+  // served by the exprcat section.
+  char catalogHash[9];
+  std::snprintf(catalogHash, sizeof(catalogHash), "%08x", lamp::kExprCatalogHash);
+  doc["catalogHash"] = catalogHash;
   // lampType is firmware-owned; the app can read it but settings_blob
   // writes do NOT update it (see parser block below).
   doc["lampType"] = lamp.lampType;

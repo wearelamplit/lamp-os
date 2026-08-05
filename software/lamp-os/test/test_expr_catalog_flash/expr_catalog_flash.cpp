@@ -60,9 +60,35 @@ void test_only_two_distinct_catalogs() {
   TEST_ASSERT_EQUAL_size_t(2, catalogs.size());
 }
 
+std::string committedHash(const std::string& variant) {
+  const std::string header = readFile(generatedDir() / variant / "expr_catalog.h");
+  const std::string key = "kExprCatalogHash = ";
+  const size_t at = header.find(key);
+  TEST_ASSERT_TRUE_MESSAGE(at != std::string::npos,
+                           (std::string("no kExprCatalogHash in ") + variant).c_str());
+  const size_t start = at + key.size();
+  return header.substr(start, header.find(';', start) - start);
+}
+
+void test_committed_hash_matches_fnv() {
+  for (const auto& v : variantSpecs()) {
+    char expected[24];
+    std::snprintf(expected, sizeof(expected), "0x%08xu", fnv1a32(buildCatalog(v)));
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(expected, committedHash(v.name).c_str(), v.name);
+  }
+}
+
+void test_distinct_catalogs_have_distinct_hashes() {
+  std::set<std::string> hashes;
+  for (const auto& v : variantSpecs()) hashes.insert(committedHash(v.name));
+  TEST_ASSERT_EQUAL_size_t(2, hashes.size());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_committed_headers_match_generator);
   RUN_TEST(test_only_two_distinct_catalogs);
+  RUN_TEST(test_committed_hash_matches_fnv);
+  RUN_TEST(test_distinct_catalogs_have_distinct_hashes);
   return UNITY_END();
 }
