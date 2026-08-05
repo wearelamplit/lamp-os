@@ -35,6 +35,11 @@ inline void lampLocal(JsonObject obj, uint8_t maxBrightness) {
     ::config.lamp.named = true;
     ::lamp::updateAdvertisedDeviceName(::config.lamp.name.c_str());
   }
+  // Present (even empty) overwrites; empty clears. Absent leaves the stored
+  // password intact so a partial write carrying only other fields can't wipe it.
+  if (obj["password"].is<const char*>()) {
+    ::config.lamp.password = std::string(obj["password"].as<const char*>());
+  }
   if (obj["brightness"].is<int>()) {
     int level = obj["brightness"].as<int>();
     if (level >= 0 && level <= 100) {
