@@ -62,8 +62,10 @@ Two properties make it lethal:
 6. **No heavy work under a spinlock or on the BLE task.** A JSON build inside
    `portENTER_CRITICAL` masks interrupts for milliseconds; a 10 KB JSON built on the
    NimBLE host task competes with the largest free block. Pre-build on a Core-1
-   cache and let the mux cover only the pointer swap. Every section payload but one
-   already works this way; match it.
+   cache and let the mux cover only the pointer swap. Every section payload works
+   this way except `exprcat`, which is generated into `.rodata` at build time and
+   served by reference, so it never builds on the host task at all; match one or
+   the other.
 7. **Prefer a shared roster view over a new snapshot.** "Who's around" gets asked
    from many features, so a single allocation-free roster iterator earns its keep.
    Do not let the next feature roll its own vector-of-strings copy. The shared

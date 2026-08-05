@@ -17,7 +17,7 @@ Files:
 | `software/lamp-os/src/expressions/primitives.hpp` | Shared Zone/Points/Size clamped helpers + `resolveZone` (whole-strip/region toggle → Zone, shared by every zonable expression) + `pulseWidthFromPercent` (pulse `size` percent → capped fade radius) + `glitchBlockPlan` (glitchy scatter level→distinct grain blocks) + `usableSections` (breathing bands that fit the zone at ≥ `kMinSectionPx`) + `edgeTaper` (edge-taper weight: flat interior, curve-parameterized taper near the ends; `TaperCurve::Linear` or `Quadratic`) + `randomPermutation` (Fisher–Yates fill of a 0..n-1 order array over an injected rng; breathing's random band order) |
 | `software/lamp-os/src/expressions/param_utils.hpp` | `getParam` — one-arg (descriptor keys, always present after `applyDefaults`) and two-arg (explicit fallback) lookups |
 | `software/lamp-os/src/expressions/expression_schema.hpp` | `ExpressionDescriptor` / `ParamSpec` / `Bound` / `ColorSpec` / `RangeSpec` — the per-type schema each subclass declares |
-| `software/lamp-os/src/expressions/expression_registry.{hpp,cpp}` | `ExpressionRegistry`: `add`/`remove`/`find`, `applyDefaults()`, `serializeCatalog()` (the `exprcat` wire JSON) |
+| `software/lamp-os/src/expressions/expression_registry.{hpp,cpp}` | `ExpressionRegistry`: `add`/`remove`/`find`, `applyDefaults()`, `serializeCatalog()` (the `exprcat` JSON, run at build time to generate the flash catalog) |
 | `software/lamp-os/src/core/lamp_behaviors.cpp` | `Lamp::registerExpressions()` — the default set (`reg.add(T::classDescriptor())`); a variant overrides it |
 | `software/lamp-os/src/config/config_types.hpp` | `ExpressionConfig` class (persisted form) |
 | `software/lamp-os/src/config/config_codec.cpp` | JSON serialisation + parsing; the top-level-field skip chain (`keyStr == …` in `fromJson`) |
@@ -36,7 +36,7 @@ The editor shell (`expression_editor_screen.dart`) owns only colors + target; `e
 
 ### `exprcat` wire format
 
-`{ "schemaVersion": 1, "expressions": [ <descriptor>… ] }`. Each descriptor (emitted by `ExpressionRegistry::serializeCatalog`, parsed by `expression_catalog.dart`):
+`{ "schemaVersion": 1, "expressions": [ <descriptor>… ] }`. The per-variant catalog is generated at build time by `ExpressionRegistry::serializeCatalog` into `generated/<variant>/expr_catalog.h` (`kExprCatalog`) and served from `.rodata` by reference — no runtime serialization, no per-connection heap copy. Each descriptor (parsed by `expression_catalog.dart`):
 
 - `id`, `name`, `continuous` (bool); `colors: {max, label?, help?, inheritsSurface?}`.
 - `advanced` (bool, optional, default false) — expression is offered in the app only when advanced mode is on. Absent = standard. Additive; no `schemaVersion` bump.
