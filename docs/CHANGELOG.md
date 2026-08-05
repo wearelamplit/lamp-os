@@ -5,6 +5,28 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## 1.2.6
+
+### Fixed
+- **The expression tab is reliable in a crowded room.** Opening, adding, or
+  editing expressions could come up blank when a lot of lamps were around — the
+  lamp couldn't build the expression catalogue under memory pressure. The
+  catalogue now lives in the lamp's flash and is handed to the app without using
+  any working memory, so the list, add, and edit always work no matter how busy
+  the room. The app also fetches a given catalogue once and reuses it.
+- **Nearby lamps actually show up in Social.** "Nearby" was tuned so tight that
+  only a lamp on the same desk counted; a lamp across a normal room never
+  registered as near. Lamps a room apart now show up.
+- **Lamps don't flash black in Social during an update.** While a lamp was
+  passing a firmware update to its neighbours it blanked its own advertised
+  colour, so it briefly showed black in other lamps' Social lists. It keeps its
+  real colour throughout now.
+
+### Changed
+- **My Lamps shows four lamps per row** for a tighter overview.
+- **The updating indicator shows direction** — blue while a lamp is receiving an
+  update, purple while it's sending one to another lamp.
+
 ## 1.2.5
 
 ### Added
