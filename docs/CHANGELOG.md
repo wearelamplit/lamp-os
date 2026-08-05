@@ -5,6 +5,25 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## 1.2.5
+
+### Added
+- **The app tells you when your router is on the wrong Wi-Fi channel.** If you
+  point the wisp at a home network that isn't on channel 6 (the channel the
+  lamps use to talk to each other), the Wi-Fi screen now explains the conflict
+  and offers a Retry button, instead of a misleading "not connected."
+
+### Fixed
+- **Connecting the wisp to Wi-Fi no longer stops it lighting the lamps.** The
+  wisp has a single radio and the lamps talk on channel 6; joining a home
+  network on a different channel used to pull the wisp off that channel so it
+  could no longer reach the lamps. It now refuses to leave the lamps' channel,
+  stays on the mesh, and reports the mismatch so you can fix it (set your
+  router's 2.4 GHz band to channel 6).
+- **The wisp no longer stalls while looking for Aurora.** Searching for the
+  Aurora server could briefly freeze the wisp and drop lamps from its view; that
+  search now runs in the background without pausing everything else.
+
 ## 1.2.4
 
 ### Fixed
