@@ -30,4 +30,23 @@ inline bool isDirectHello(const uint8_t frameSrc[6],
   return std::memcmp(frameSrc, helloOriginator, 6) == 0;
 }
 
+// Relevance order for the app-facing nearby list: near peers before mesh-only,
+// then most-recently-seen, then strongest RSSI. Strict-weak-ordering (a
+// lexicographic compose of total preorders), so ble_control's partial_sort
+// cap keeps the front-N and drops the farthest/stalest. Templated on the entry
+// so this header stays free of the RosterEntry (and its Arduino) dependency.
+template <typename Entry>
+bool nearbyMoreRelevant(const Entry& a, const Entry& b, uint32_t nowMs,
+                        uint32_t maxAgeMs) {
+  const bool an = isNearNow(a.lastSeenNearMs, nowMs, maxAgeMs);
+  const bool bn = isNearNow(b.lastSeenNearMs, nowMs, maxAgeMs);
+  if (an != bn) return an;
+  const uint32_t as =
+      a.lastSeenNearMs > a.lastSeenMeshMs ? a.lastSeenNearMs : a.lastSeenMeshMs;
+  const uint32_t bs =
+      b.lastSeenNearMs > b.lastSeenMeshMs ? b.lastSeenNearMs : b.lastSeenMeshMs;
+  if (as != bs) return as > bs;
+  return a.lastRssi > b.lastRssi;
+}
+
 }  // namespace lamp

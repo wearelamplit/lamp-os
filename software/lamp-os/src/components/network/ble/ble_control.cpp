@@ -654,18 +654,13 @@ void copyNearbyJson(std::string& out) {
 // strongest RSSI. buildNearbyJson re-sorts the survivors by name.
 static void capNearby(std::vector<lamp::RosterEntry>& lamps, uint32_t now) {
   if (lamps.size() <= kNearbyMaxLamps) return;
-  auto moreRelevant = [now](const lamp::RosterEntry& a,
-                            const lamp::RosterEntry& b) {
-    const bool an = lamp::isNearNow(a.lastSeenNearMs, now, LAMP_PRUNE_TIME_MS);
-    const bool bn = lamp::isNearNow(b.lastSeenNearMs, now, LAMP_PRUNE_TIME_MS);
-    if (an != bn) return an;
-    const uint32_t as = std::max(a.lastSeenNearMs, a.lastSeenMeshMs);
-    const uint32_t bs = std::max(b.lastSeenNearMs, b.lastSeenMeshMs);
-    if (as != bs) return as > bs;
-    return a.lastRssi > b.lastRssi;
-  };
   std::partial_sort(lamps.begin(), lamps.begin() + kNearbyMaxLamps,
-                    lamps.end(), moreRelevant);
+                    lamps.end(),
+                    [now](const lamp::RosterEntry& a,
+                          const lamp::RosterEntry& b) {
+                      return lamp::nearbyMoreRelevant(a, b, now,
+                                                      LAMP_PRUNE_TIME_MS);
+                    });
   lamps.resize(kNearbyMaxLamps);
 }
 
@@ -735,12 +730,13 @@ static void maintainNearbyJson() {
   xSemaphoreGive(nearbyCacheMutex());
   builtGen    = gen;
   lastBuildMs = now;
-  if (!seeded) {
-    seeded   = true;
-    lastHash = hash;
-    return;
-  }
-  if (hash != lastHash) {
+  // The first build after a (re)connect always notifies: a heap-skip can defer
+  // it past the app's first read of the idle "[]", and without a push the app
+  // wouldn't know to re-read the now-populated list. Subsequent builds keep the
+  // rssi/lastSeen churn-exclusion and only notify on a real membership change.
+  const bool firstSinceConnect = !seeded;
+  seeded = true;
+  if (firstSinceConnect || hash != lastHash) {
     lastHash = hash;
     ++s_nearbyRev;
     notifyStateChange();
