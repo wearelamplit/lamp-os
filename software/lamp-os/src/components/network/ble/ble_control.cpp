@@ -790,6 +790,9 @@ class WispStatusCallback : public NimBLECharacteristicCallbacks {
 
 void notifyWispStatus() {
   if (!s_wispStatusChar) return;
+  // No subscriber to push to, and the onRead callback rebuilds fresh, so
+  // skip the serialize+notify churn on every wisp mesh event with no client.
+  if (!s_clientConnected) return;
   auto json = lamp::lampRoster.getWispStatusReadJson();
 #ifdef LAMP_DEBUG
   const bool sawCB = json.find("\"controllingBase\":true") != std::string::npos;
