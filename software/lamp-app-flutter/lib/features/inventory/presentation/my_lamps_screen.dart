@@ -211,18 +211,21 @@ class _LampTile extends ConsumerWidget {
         ));
     // Keyed by BLE deviceId (== lamp.id), the firmwareNotifier family key.
     // `.select` so a Streaming chunk-progress tick doesn't rebuild the tile;
-    // only a push-phase transition does.
-    final updating = ref.watch(
+    // only a push-phase transition does. A phone push means the lamp is
+    // receiving; the advertised `otaDistributing` bit means it's sending to a
+    // mesh peer.
+    final receiving = ref.watch(
       firmwareNotifierProvider(lamp.id).select((s) => s.isPushing),
     );
+    final hit = nearbyById[lamp.id];
     final status = statusForById(
       lampId: lamp.id,
       nearbyById: nearbyById,
       connected: connectedToThisLamp || notifierConnected,
-      updating: updating,
+      receiving: receiving,
+      sending: hit?.otaDistributing ?? false,
       inScanGrace: inScanGrace,
     );
-    final hit = nearbyById[lamp.id];
     final colors = resolveLampColors(inv: lamp, near: hit);
 
     // Every tile is tappable, even offline ones. The user may want to

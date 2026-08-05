@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/brand_extras.dart';
 
-enum StatusKind { offline, bluetooth, mesh, searching, otaBusy }
+enum StatusKind { offline, bluetooth, mesh, searching, otaReceiving, otaSending }
 
 class StatusDot extends StatefulWidget {
   const StatusDot({
@@ -82,12 +82,15 @@ class _StatusDotState extends State<StatusDot>
     // state). BT-only is tertiary at ~70 % so it reads as "online but not
     // the live link." Offline is a dimmed grey; must read as more muted
     // than bluetooth so the inactive state isn't louder than the active one.
+    // OTA direction is colour-coded: receiving (the lamp is learning a new
+    // image) reads blue, sending (the lamp is teaching a peer) reads purple.
     final color = switch (widget.kind) {
       StatusKind.offline => colorScheme.onSurfaceVariant.withValues(alpha: 0.35),
       StatusKind.bluetooth => colorScheme.tertiary.withValues(alpha: 0.7),
       StatusKind.mesh =>
         context.brandExtras.success.withValues(alpha: widget.brightness),
-      StatusKind.otaBusy => colorScheme.secondary,
+      StatusKind.otaReceiving => colorScheme.tertiary,
+      StatusKind.otaSending => colorScheme.primary,
       StatusKind.searching =>
         colorScheme.onSurfaceVariant.withValues(alpha: 0.35), // unreachable
     };
@@ -98,7 +101,8 @@ class _StatusDotState extends State<StatusDot>
       StatusKind.offline => 'Offline',
       StatusKind.bluetooth => 'Bluetooth only',
       StatusKind.mesh => 'Mesh connected',
-      StatusKind.otaBusy => 'Updating',
+      StatusKind.otaReceiving => 'Receiving update',
+      StatusKind.otaSending => 'Sending update',
       StatusKind.searching => 'Searching', // unreachable
     };
 
@@ -108,7 +112,10 @@ class _StatusDotState extends State<StatusDot>
         animation: _ctrl,
         builder: (context, _) {
           final glow = switch (widget.kind) {
-            StatusKind.mesh || StatusKind.otaBusy => 6 + _ctrl.value * 8,
+            StatusKind.mesh ||
+            StatusKind.otaReceiving ||
+            StatusKind.otaSending =>
+              6 + _ctrl.value * 8,
             StatusKind.bluetooth => 4.0,
             _ => 0.0,
           };
