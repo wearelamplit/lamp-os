@@ -29,6 +29,17 @@ void main() {
     expect(s.lampId, 'C4:DD:57:EB:64:60');
   });
 
+  test('LampSection parses catalogHash when emitted', () {
+    final s = LampSection.fromJson(
+        {'name': 'jacko', 'brightness': 42, 'catalogHash': 'a2207d10'});
+    expect(s.catalogHash, 'a2207d10');
+  });
+
+  test('LampSection.catalogHash null on legacy firmware', () {
+    final s = LampSection.fromJson({'name': 'jacko', 'brightness': 42});
+    expect(s.catalogHash, isNull);
+  });
+
   test('LampSection parses otaState when emitted', () {
     final s = LampSection.fromJson(
         {'name': 'jacko', 'brightness': 42, 'otaState': 2});

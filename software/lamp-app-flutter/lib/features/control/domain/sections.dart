@@ -32,6 +32,7 @@ class LampSection {
     this.lampId,
     this.otaState = 0,
     this.otaSendingTo,
+    this.catalogHash,
   });
 
   final String name;
@@ -87,6 +88,12 @@ class LampSection {
   /// `lampId` to name the receiver.
   final String? otaSendingTo;
 
+  /// FNV-1a hex digest of the firmware's expression-catalog bytes. Constant
+  /// for a given catalog, so the app content-addresses its catalog cache by
+  /// this key and skips the `exprcat` read on a hit. Null on older firmware
+  /// that doesn't emit it (the app then always reads the catalog).
+  final String? catalogHash;
+
   factory LampSection.fromJson(Map<String, dynamic> json) => LampSection(
         name: (json['name'] as String?) ?? '',
         brightness: (json['brightness'] as num?)?.toInt() ?? 100,
@@ -104,6 +111,7 @@ class LampSection {
         lampId: json['lampId'] as String?,
         otaState: (json['otaState'] as num?)?.toInt() ?? 0,
         otaSendingTo: json['otaSendingTo'] as String?,
+        catalogHash: json['catalogHash'] as String?,
       );
 
   LampSection copyWith({
@@ -121,6 +129,7 @@ class LampSection {
     String? lampId,
     int? otaState,
     String? otaSendingTo,
+    String? catalogHash,
   }) =>
       LampSection(
         name: name ?? this.name,
@@ -137,6 +146,7 @@ class LampSection {
         lampId: lampId ?? this.lampId,
         otaState: otaState ?? this.otaState,
         otaSendingTo: otaSendingTo ?? this.otaSendingTo,
+        catalogHash: catalogHash ?? this.catalogHash,
       );
 
   @override
@@ -156,7 +166,8 @@ class LampSection {
           lampType == other.lampType &&
           lampId == other.lampId &&
           otaState == other.otaState &&
-          otaSendingTo == other.otaSendingTo;
+          otaSendingTo == other.otaSendingTo &&
+          catalogHash == other.catalogHash;
 
   @override
   int get hashCode => Object.hash(
@@ -174,6 +185,7 @@ class LampSection {
         lampId,
         otaState,
         otaSendingTo,
+        catalogHash,
       );
 }
 
