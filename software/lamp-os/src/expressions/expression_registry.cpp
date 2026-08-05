@@ -176,6 +176,7 @@ std::string ExpressionRegistry::serializeCatalog() const {
   std::string out;
   out.reserve(measureJson(doc) + 1);
   serializeJson(doc, out);
+  if (doc.overflowed()) return {};  // partial build under heap pressure, signal failure
   return out;
 }
 

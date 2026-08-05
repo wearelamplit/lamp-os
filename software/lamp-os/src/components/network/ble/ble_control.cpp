@@ -466,57 +466,6 @@ static void logBleSectionOom(const char* what) {
   Serial.printf("[ble_control] %s OOM; serving graceful-empty\n", what);
 }
 
-// The ~9.6 KB expression catalog is the single largest resident heap block, so
-// it isn't pinned for the process lifetime. Built once per connection on Core 1
-// (tick, off the NimBLE host task) and freed on disconnect so the block is
-// reclaimable for roster growth while no app is connected. Guarded like the
-// nearby cache: Core 1 swaps a validated build in under the mutex, and the
-// exprcat section copies it out under the same mutex on section-open, so the
-// Core 0 host task never reads a string being reallocated mid-flight.
-static SemaphoreHandle_t exprCatalogMutex() {
-  static SemaphoreHandle_t m = xSemaphoreCreateMutex();
-  return m;
-}
-static std::string s_exprCatalog;             // guarded by exprCatalogMutex()
-static bool        s_exprCatalogReady = false;  // guarded by exprCatalogMutex()
-
-// Core 1 (tick). Build once per connection, free on disconnect. Publishes only
-// a validated non-empty catalog; a failed/partial serialize leaves it not-ready
-// so the next tick retries. The app reads exprcat last in its section load
-// (after five other multi-chunk reads), so this has the whole settings-load
-// window to finish before the section is opened.
-static void maintainExprCatalog() {
-  static bool builtThisConn = false;
-  if (s_clientConnected) {
-    if (builtThisConn) return;
-    std::string local;
-    try {
-      local = ::expressionManager.registry().serializeCatalog();
-    } catch (const std::bad_alloc&) {
-      logBleSectionOom("exprcat");
-      return;
-    }
-    // ArduinoJson's allocator does not throw; a partial-heap serialize yields a
-    // truncated or "null" document. Require a plausible object before
-    // publishing so a short build is retried, never served as the catalog.
-    if (local.size() < 2 || local.front() != '{') {
-      logBleSectionOom("exprcat");
-      return;
-    }
-    xSemaphoreTake(exprCatalogMutex(), portMAX_DELAY);
-    s_exprCatalog.swap(local);
-    s_exprCatalogReady = true;
-    xSemaphoreGive(exprCatalogMutex());
-    builtThisConn = true;
-  } else if (builtThisConn) {
-    builtThisConn = false;
-    xSemaphoreTake(exprCatalogMutex(), portMAX_DELAY);
-    std::string().swap(s_exprCatalog);
-    s_exprCatalogReady = false;
-    xSemaphoreGive(exprCatalogMutex());
-  }
-}
-
 static void logNearbyHeapSkip(uint32_t largest, uint32_t needed, uint32_t lamps) {
   static uint32_t lastMs = 0;
   const uint32_t now = millis();
@@ -952,10 +901,10 @@ struct SectionEntry {
 // (no std::function footprint). Cached() accessors rebuild and copy out
 // under Config's cache mutex, so calling here on the Core 0 host task is
 // safe against a concurrent Core 1 rebuild; tick() pre-warms the caches so
-// the rebuild rarely runs here. nearby and exprcat copy their Core 1-built
-// caches out under a mutex; exprcat serves empty until maintainExprCatalog()
-// has published a validated build, so a not-yet-ready catalog reads as "no
-// catalog" (older-firmware path) rather than a truncated one.
+// the rebuild rarely runs here. nearby copies its Core 1-built cache out
+// under a mutex; exprcat serializes on read into pageSnapshot, so an
+// under-built catalog reads as "no catalog" (older-firmware path) rather
+// than a truncated one.
 // wispclaims is binary, not JSON: the full accumulated fleet blob exceeds
 // the 512-byte ATT ceiling that caps the CHAR_WISP_CLAIMS direct read.
 // wisppalette is binary too (raw RGBW): a dedicated read path so the
@@ -968,9 +917,10 @@ static const std::array<SectionEntry, 9> kSections = {{
   {"home",    [](std::string& out) { s_config->homeSectionJsonCached(out); }},
   {"nearby",  [](std::string& out) { copyNearbyJson(out); }},
   {"exprcat", [](std::string& out) {
-    xSemaphoreTake(exprCatalogMutex(), portMAX_DELAY);
-    if (s_exprCatalogReady) out = s_exprCatalog; else out.clear();
-    xSemaphoreGive(exprCatalogMutex());
+    out = ::expressionManager.registry().serializeCatalog();
+    // never serve a truncated/failed catalog; empty reads as "no catalog"
+    // (older-firmware path) rather than a partial one.
+    if (out.size() < 2 || out.front() != '{') out.clear();
   }},
   {"wispclaims", [](std::string& out) {
     static uint8_t buf[1 + lamp::WispFleetCache::kCapacity * 12];
@@ -1213,11 +1163,6 @@ void tick() {
   s_config->expressionsSectionRebuildIfDirty();
   s_config->homeSectionRebuildIfDirty();
   maintainNearbyJson();
-
-  // Build the expression catalog once per connection (and free it on
-  // disconnect) here on Core 1 so the first client read doesn't serialize it
-  // inside a Core 0 NimBLE callback and it isn't pinned while no app is on.
-  maintainExprCatalog();
 }
 
 void setGreetingStateProvider(std::function<lamp::GreetingState()> fn) {
