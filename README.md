@@ -20,12 +20,6 @@ With these sorts of subtle changes, people may begin to realize things are not a
 
 [![Conversion kit Guide](hardware/build/images/conversion-kit.jpg)](hardware/build/README.md)
 
-## Build Tutorials
-
-[![Assembly Guide](hardware/build/images/assembly-guide.jpg)](hardware/build/files/lamp-build-instructions.pdf)
-
-[![Conversion kit Guide](hardware/build/images/conversion-kit.jpg)](hardware/build/README.md)
-
 ## Lamp OS
 
 Three components live under [`software/`](software/):
