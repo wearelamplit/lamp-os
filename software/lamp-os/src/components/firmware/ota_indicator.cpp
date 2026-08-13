@@ -1,0 +1,294 @@
+#include "components/firmware/ota_indicator.hpp"
+
+#include <math.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <vector>
+
+#include "components/firmware/firmware_distributor.hpp"
+#include "components/firmware/firmware_receiver.hpp"
+#include "components/network/mesh/lamp_roster.hpp"
+#include "core/frame_buffer.hpp"
+#include "util/color.hpp"
+#include "util/fade.hpp"
+
+// `firmwareReceiver` lives at file scope in lamp.cpp; `lamp::firmwareDistributor`
+// is in the lamp namespace (declared via extern in firmware_distributor.hpp).
+// lamp_internal.hpp is private to the lamp TUs, so the receiver is
+// forward-declared extern here in the same shape.
+extern lamp::FirmwareReceiver firmwareReceiver;
+
+namespace lamp {
+namespace ota_indicator {
+
+namespace {
+
+// Per-channel scale by a 0..255 numerator: out = in * num / 255.
+inline Color scaleColor(const Color& c, uint8_t num) {
+  return Color(
+      static_cast<uint8_t>((static_cast<uint16_t>(c.r) * num) / 255),
+      static_cast<uint8_t>((static_cast<uint16_t>(c.g) * num) / 255),
+      static_cast<uint8_t>((static_cast<uint16_t>(c.b) * num) / 255),
+      static_cast<uint8_t>((static_cast<uint16_t>(c.w) * num) / 255));
+}
+
+// Tuned for gamma-corrected output; bench-adjustable. gamma8(128)≈42 → ~16%
+// physical: a visible dim background while the peer-color band reads as foreground.
+constexpr uint8_t kDimScale255 = 128;
+
+// Quadratic ease off the frozen pre-quiet frame onto defaultColors. Shorter
+// reads as a snap-cut; longer leaves the stale mid-animation frame visible
+// into the OTA.
+constexpr uint32_t kBaseSettleDurationMs = 600;
+
+// Per-surface settle state. Shade and base settle independently (silent
+// mode drives both), so each needs its own entry timestamp + start frame
+// rather than sharing one set of function-local statics.
+struct SettleState {
+  uint32_t entryMs = 0;
+  std::vector<Color> start;
+};
+
+// Settle fb toward its defaultColors, then hold static once elapsed reaches
+// kBaseSettleDurationMs.
+void settleSurface(FrameBuffer* fb, uint32_t nowMs, bool quietEntered,
+                   SettleState& state) {
+  if (fb == nullptr) return;
+  const size_t pixelCount = fb->buffer.size();
+  const size_t defaultCount = fb->defaultColors.size();
+  if (pixelCount == 0 || defaultCount == 0) return;
+
+  if (quietEntered) {
+    state.entryMs = nowMs;
+    state.start = fb->buffer;
+  }
+
+  const uint32_t elapsed = nowMs - state.entryMs;
+  const uint32_t settleStep =
+      elapsed >= kBaseSettleDurationMs ? kBaseSettleDurationMs : elapsed;
+
+  for (size_t i = 0; i < pixelCount; i++) {
+    const Color& target = fb->defaultColors[i < defaultCount ? i : defaultCount - 1];
+    const Color& start = i < state.start.size() ? state.start[i] : target;
+    fb->buffer[i] = fade(start, target, kBaseSettleDurationMs, settleStep);
+  }
+}
+
+SettleState s_baseSettle;
+SettleState s_shadeSettle;
+
+void paintBase(FrameBuffer* baseFb, uint32_t nowMs, bool quietEntered) {
+  settleSurface(baseFb, nowMs, quietEntered, s_baseSettle);
+}
+
+// Crossfade the just-computed shade indicator back toward the frozen pre-quiet
+// frame captured on quiet entry. settleStep 0 holds the frozen frame;
+// >= kBaseSettleDurationMs yields the pure indicator.
+void blendShadeToFrozen(FrameBuffer* fb, uint32_t nowMs) {
+  const size_t pixelCount = fb->buffer.size();
+  const uint32_t elapsed = nowMs - s_shadeSettle.entryMs;
+  const uint32_t settleStep =
+      elapsed >= kBaseSettleDurationMs ? kBaseSettleDurationMs : elapsed;
+  for (size_t i = 0; i < pixelCount; i++) {
+    if (i >= s_shadeSettle.start.size()) continue;
+    fb->buffer[i] =
+        fade(s_shadeSettle.start[i], fb->buffer[i], kBaseSettleDurationMs, settleStep);
+  }
+}
+
+}  // namespace
+
+void paint(FrameBuffer* fb, const Color& localBase, uint32_t nowMs,
+           FrameBuffer* baseFb, bool quietEntered) {
+  if (fb == nullptr) {
+    paintBase(baseFb, nowMs, quietEntered);
+    return;
+  }
+  const size_t pixelCount = fb->buffer.size();
+  if (pixelCount == 0) {
+    paintBase(baseFb, nowMs, quietEntered);
+    return;
+  }
+
+  // Snapshot the frozen pre-quiet shade frame before any write to fb->buffer,
+  // so blendShadeToFrozen can crossfade the indicator out of it.
+  if (quietEntered) {
+    s_shadeSettle.entryMs = nowMs;
+    s_shadeSettle.start = fb->buffer;
+  }
+
+  // Probe the in-flight OTA side. The cross-state-machine guard in lamp.cpp
+  // prevents simultaneous distribute + receive; if both ever read true,
+  // receiver wins.
+  bool haveSession = false;
+  uint8_t peerMac[6] = {0};
+  uint32_t done = 0;
+  uint32_t total = 0;
+
+  // Inter-session hold flag: when the distributor finishes one session in a
+  // multi-peer OTA wave it holds quiet for a few seconds so the strip
+  // doesn't flash back to normal animations between sessions. During that
+  // hold there's no live session; pin the bar at 100% of the just-completed
+  // peer's color so it reads as "just finished sending to X" until the next
+  // session takes over.
+  bool inHoldRender = false;
+
+  if (::firmwareReceiver.isInProgress() &&
+      ::firmwareReceiver.getPeerMac(peerMac)) {
+    haveSession = true;
+    done = ::firmwareReceiver.recvChunksCount();
+    total = ::firmwareReceiver.totalChunks();
+  } else if (lamp::firmwareDistributor.isInProgress() &&
+             lamp::firmwareDistributor.getPeerMac(peerMac)) {
+    haveSession = true;
+    done = lamp::firmwareDistributor.sentChunksCount();
+    total = lamp::firmwareDistributor.totalChunks();
+  } else {
+    // No live session: check if the distributor is in the inter-session
+    // hold window. If so, render as if the just-completed session is at
+    // 100% (done=total) so the bar freezes at the end of the prior peer's
+    // progress through the gap to the next session.
+    uint16_t txHoldTotal = 0;
+    if (lamp::firmwareDistributor.getLastSession(peerMac, txHoldTotal) &&
+        txHoldTotal > 0) {
+      haveSession  = true;
+      inHoldRender = true;
+      total        = txHoldTotal;
+      done         = txHoldTotal;  // pin to 100%
+    }
+  }
+
+  // No session: write the dim background only. The compositor's caller
+  // gated on ota_quiet_mode::isQuiet() so this branch is rare (transition
+  // window between quiet-mode entry and the state machine populating its
+  // fields).
+  const Color dim = scaleColor(localBase, kDimScale255);
+  for (size_t i = 0; i < pixelCount; i++) {
+    fb->buffer[i] = dim;
+  }
+
+#ifdef LAMP_DEBUG
+  static const char* lastBranch = nullptr;
+  static uint32_t   lastSameMs  = 0;
+  const char* branch;
+  if (!haveSession) branch = "NO-SESSION (dim only)";
+  else if (total == 0) branch = "HAVE-SESSION total=0 (dim only)";
+  else if (inHoldRender) branch = "HOLD-RENDER";
+  else branch = "LIVE";
+  if (branch != lastBranch || (nowMs - lastSameMs) >= 1000) {
+    Serial.printf("[ota_ind] t=%u br=%s rxInProgress=%d rxTotal=%u "
+                  "txInProgress=%d txTotal=%u done=%u total=%u\n",
+                  (unsigned)nowMs, branch,
+                  (int)::firmwareReceiver.isInProgress(),
+                  (unsigned)::firmwareReceiver.totalChunks(),
+                  (int)lamp::firmwareDistributor.isInProgress(),
+                  (unsigned)lamp::firmwareDistributor.totalChunks(),
+                  (unsigned)done, (unsigned)total);
+    lastBranch = branch;
+    lastSameMs = nowMs;
+  }
+#endif
+
+  if (!haveSession || total == 0) {
+    blendShadeToFrozen(fb, nowMs);
+    paintBase(baseFb, nowMs, quietEntered);
+    return;
+  }
+  (void)inHoldRender;  // identical render path for hold and live.
+
+  // Session-stable peer color. The bar paints in the SENDER's base color so
+  // the strip reads as "who's flashing me". findByMac can miss (LampRoster
+  // is cold right after a flash, and HELLO processing is starved in OTA
+  // quiet mode), so resolving every frame oscillates between the sender's
+  // color and the fallback, which IS the flicker. Resolve ONCE per session:
+  // latch the first hit and hold it; until then show the lamp's OWN base
+  // color (stable), never a jarring white.
+  static uint8_t s_latchMac[6] = {0};
+  static bool    s_latched     = false;
+  static Color   s_peerColor;
+  if (std::memcmp(s_latchMac, peerMac, 6) != 0) {
+    std::memcpy(s_latchMac, peerMac, 6);
+    s_latched = false;
+  }
+  if (!s_latched) {
+    RosterEntry peer;
+    if (lampRoster.findByMac(peerMac, peer)) {
+      s_peerColor = peer.baseColor;
+      s_latched   = true;
+    }
+  }
+  const Color peerSolid = s_latched ? s_peerColor : localBase;
+
+  // Clamp done at total: if the sender races ahead of the receiver briefly,
+  // progress must not exceed 100%.
+  if (done > total) done = total;
+
+  // Sub-pixel progress in fixed 8.8 fractional form. wholePixels is the
+  // count of fully-peer-color pixels; fracEdge255 is the fractional part
+  // of the boundary pixel, 0..255. Without this the boundary pixel snaps
+  // hard from dim→peer once per ~total/pixelCount chunks, which reads
+  // as a flicker; with anti-alias it ramps smoothly.
+  const uint64_t scaledProgress =
+      (static_cast<uint64_t>(pixelCount) * static_cast<uint64_t>(done) * 256u) /
+      static_cast<uint64_t>(total);
+  const size_t wholePixels = static_cast<size_t>(scaledProgress >> 8);
+  const uint8_t fracEdge255 = static_cast<uint8_t>(scaledProgress & 0xFFu);
+
+  for (size_t i = 0; i < wholePixels && i < pixelCount; i++) {
+    fb->buffer[i] = peerSolid;
+  }
+  // Edge pixel: blend dim background and peer color by the fractional edge
+  // amount. fracEdge255=0 keeps dim; 255 hits peerSolid.
+  if (wholePixels < pixelCount) {
+    const Color& a = dim;
+    const Color& b = peerSolid;
+    const uint8_t f = fracEdge255;
+    const uint8_t inv = static_cast<uint8_t>(255u - f);
+    fb->buffer[wholePixels] = Color(
+        static_cast<uint8_t>(
+            (static_cast<uint16_t>(a.r) * inv +
+             static_cast<uint16_t>(b.r) * f) / 255),
+        static_cast<uint8_t>(
+            (static_cast<uint16_t>(a.g) * inv +
+             static_cast<uint16_t>(b.g) * f) / 255),
+        static_cast<uint8_t>(
+            (static_cast<uint16_t>(a.b) * inv +
+             static_cast<uint16_t>(b.b) * f) / 255),
+        static_cast<uint8_t>(
+            (static_cast<uint16_t>(a.w) * inv +
+             static_cast<uint16_t>(b.w) * f) / 255));
+  }
+
+#ifdef LAMP_DEBUG
+  static uint32_t lastLogMs = 0;
+  if (nowMs - lastLogMs > 500) {
+    lastLogMs = nowMs;
+    Serial.printf("[ota_ind] done=%u total=%u whole=%u frac=%u "
+                  "dim=(%u,%u,%u,%u) peer=(%u,%u,%u,%u) "
+                  "px0=(%u,%u,%u,%u) pxEdge=(%u,%u,%u,%u)\n",
+                  (unsigned)done, (unsigned)total,
+                  (unsigned)wholePixels, (unsigned)fracEdge255,
+                  dim.r, dim.g, dim.b, dim.w,
+                  peerSolid.r, peerSolid.g, peerSolid.b, peerSolid.w,
+                  fb->buffer[0].r, fb->buffer[0].g, fb->buffer[0].b, fb->buffer[0].w,
+                  fb->buffer[wholePixels < pixelCount ? wholePixels : 0].r,
+                  fb->buffer[wholePixels < pixelCount ? wholePixels : 0].g,
+                  fb->buffer[wholePixels < pixelCount ? wholePixels : 0].b,
+                  fb->buffer[wholePixels < pixelCount ? wholePixels : 0].w);
+  }
+#endif
+
+  blendShadeToFrozen(fb, nowMs);
+  paintBase(baseFb, nowMs, quietEntered);
+}
+
+void paintSilent(FrameBuffer* shadeFb, FrameBuffer* baseFb, uint32_t nowMs,
+                 bool quietEntered) {
+  settleSurface(shadeFb, nowMs, quietEntered, s_shadeSettle);
+  settleSurface(baseFb, nowMs, quietEntered, s_baseSettle);
+}
+
+}  // namespace ota_indicator
+}  // namespace lamp

@@ -16,15 +16,7 @@
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
       >
-        <path
-          v-if="icon === 'star'"
-          d="M9.99999 1.66666L12.575 6.88332L18.3333 7.72499L14.1667 11.7833L15.15 17.5167L9.99999 14.8083L4.84999 17.5167L5.83332 11.7833L1.66666 7.72499L7.42499 6.88332L9.99999 1.66666Z"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-        <g v-else-if="icon === 'clone'">
+        <g v-if="icon === 'clone'">
           <rect
             x="7"
             y="7"
@@ -74,16 +66,14 @@
 
 <script setup lang="ts">
 interface Props {
-  icon?: 'star' | 'clone' | 'remove' | 'plus' | 'minus'
+  icon: 'clone' | 'remove' | 'plus' | 'minus'
   title?: string
-  variant?: 'star' | 'clone' | 'remove' | 'plus' | 'minus'
+  variant: 'clone' | 'remove' | 'plus' | 'minus'
   disabled?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  icon: 'star',
   title: '',
-  variant: 'star',
   disabled: false,
 })
 
@@ -130,11 +120,6 @@ import { computed } from 'vue'
 
 .icon-button:active {
   transform: scale(0.95);
-}
-
-.star-button:hover {
-  color: var(--brand-amber-gold);
-  border-color: var(--brand-amber-gold);
 }
 
 .clone-button:hover {

@@ -1,0 +1,263 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
+
+/// BLE Manufacturer ID the firmware advertises (0xA455). The 6 bytes after
+/// the company-ID prefix carry base RGB + shade RGB. See firmware:
+/// software/lamp-os/src/components/network/bluetooth.cpp:83-93.
+///
+/// IMPORTANT: 0xA455 is NOT a registered Bluetooth SIG company identifier.
+/// Any third-party device that picked the same 16-bit value would be
+/// parsed as a lamp by [parseLampAdvertisement] were the payload length
+/// not also checked against the three known shapes (4, 6, or 7 bytes);
+/// see the length check below.
+const _lampMfgId = 0xA455;
+
+/// Valid lamp adv payload sizes (after the 2-byte company-ID prefix that
+/// fbp strips). Anything outside this set is treated as non-lamp.
+///
+///   4 bytes [bR,bG,bB,meshFlag]: transitional v2 build that dropped
+///                                 shade. Adv shadeRgb defaults to 0.
+///   6 bytes [bR,bG,bB,sR,sG,sB]: v1 firmware (legacy). Real base + shade.
+///   7 bytes [bR,bG,bB,sR,sG,sB,capabilities]: current firmware. Byte 6
+///                                 is the capability bitfield.
+const Set<int> _validLampPayloadLengths = {4, 6, 7};
+
+/// Pure parser: turns a raw lamp adv (the mfg payload + envelope fields)
+/// into a [BleAdvertisement], or null when the payload doesn't match a
+/// lamp shape or the name is empty. Extracted into a top-level function
+/// so it can be unit-tested without mocking flutter_blue_plus.
+BleAdvertisement? parseLampAdvertisement({
+  required Map<int, List<int>> manufacturerData,
+  required String advName,
+  required String platformName,
+  required String remoteId,
+  required int rssi,
+}) {
+  final mfg = manufacturerData[_lampMfgId];
+  if (mfg == null) return null;
+  if (!_validLampPayloadLengths.contains(mfg.length)) return null;
+  // Bit 1 of byte 6: "speaks the v0x03 mesh protocol". Byte-for-byte
+  // identical to the prior `mfg[6] >= 2` check on existing fielded
+  // firmware; forward-compatible for v3+ firmware that sets additional
+  // bits. See software/lamp-os/.../bluetooth.cpp `kBleCapMeshProtocol`.
+  const kBleCapMeshProtocol = 0x02;
+  const kBleCapConfigured = 0x04;
+  const kBleCapOtaDistributing = 0x08;
+  final hasShade = mfg.length >= 6;
+  final isMesh =
+      mfg.length >= 7 && (mfg[6] & kBleCapMeshProtocol) != 0;
+  // Capability bit 2: the lamp has been claimed/set up. Fresh and custom
+  // lamps advertise it clear, so the app routes them into the adopt wizard.
+  final configured =
+      mfg.length >= 7 && (mfg[6] & kBleCapConfigured) != 0;
+  // Capability bit 3: sourcing firmware to a peer right now. The OTA bursts
+  // starve BLE connect, so the app paints the lamp busy at scan time.
+  final otaDistributing =
+      mfg.length >= 7 && (mfg[6] & kBleCapOtaDistributing) != 0;
+  final name = advName.isNotEmpty ? advName : platformName;
+  // Empty-name advs are noise: non-lamp devices that happen to collide
+  // on the 16-bit mfg ID, lamps with a corrupted name chunk, or platform
+  // glitches where the scan-response was lost. A nearby-list entry with
+  // name='' renders as a blank, unselectable row in My Lamps.
+  if (name.isEmpty) return null;
+  return BleAdvertisement(
+    id: remoteId,
+    name: name,
+    serviceUuids: const [],
+    baseRgb: (mfg[0] << 16) | (mfg[1] << 8) | mfg[2],
+    shadeRgb: hasShade
+        ? (mfg[3] << 16) | (mfg[4] << 8) | mfg[5]
+        : 0,
+    rssi: rssi,
+    isMesh: isMesh,
+    configured: configured,
+    otaDistributing: otaDistributing,
+  );
+}
+
+class BleAdvertisement {
+  const BleAdvertisement({
+    required this.id,
+    required this.name,
+    required this.serviceUuids,
+    required this.baseRgb,
+    required this.shadeRgb,
+    required this.rssi,
+    this.isMesh = false,
+    this.configured = false,
+    this.otaDistributing = false,
+  });
+
+  final String id;
+  final String name;
+  final List<String> serviceUuids;
+  /// Base color in 0xRRGGBB form, parsed from the lamp manufacturer data.
+  final int baseRgb;
+  /// Shade color in 0xRRGGBB form, parsed from the lamp manufacturer data.
+  /// `0` for legacy 6-byte-payload v2 firmware (no shade in adv).
+  final int shadeRgb;
+  final int rssi;
+
+  /// True iff this lamp's firmware advertises the version byte
+  /// (mfg.length >= 7 && mfg[6] >= 2): it speaks the app's
+  /// mesh protocol and is fully app-controllable. v1 lamps and
+  /// transitional pre-shade-restore v2 builds get `false` (the
+  /// former because they're genuinely BT-only, the latter because
+  /// they won't be on the network long).
+  final bool isMesh;
+
+  /// True iff the lamp's capability byte has the "configured" bit set
+  /// (`mfg[6] & 0x04`): it has been claimed/set up. Fresh and custom lamps
+  /// advertise it clear, so the app routes them into the onboarding wizard.
+  final bool configured;
+
+  /// True iff the lamp's capability byte has the "OTA-distributing" bit set
+  /// (`mfg[6] & 0x08`): it is sourcing firmware to a peer right now and is
+  /// hard to connect to. The app paints it busy at scan time.
+  final bool otaDistributing;
+}
+
+abstract class BleScanner {
+  /// Stream of scan results. Implementations must filter to lamp
+  /// advertisements (manufacturer-data magic 0xA455) so callers don't see
+  /// unrelated BLE traffic.
+  Stream<BleAdvertisement> results();
+
+  /// Begin scanning. Must be called once before [results] yields anything
+  /// on the real driver. Idempotent: calling twice is a no-op.
+  Future<void> start();
+
+  /// Stop scanning (frees the radio).
+  Future<void> stop();
+}
+
+class FbpBleScanner implements BleScanner {
+  StreamSubscription<List<fbp.ScanResult>>? _sub;
+  StreamSubscription<bool>? _scanningSub;
+  StreamSubscription<fbp.BluetoothAdapterState>? _adapterSub;
+  final _ctrl = StreamController<BleAdvertisement>.broadcast();
+  bool _running = false;
+  bool _restarting = false;
+
+  // Delay before re-issuing a scan so a persistently failing startScan
+  // (permission revoked, adapter mid-cycle) can't spin a hot retry loop.
+  static const _restartBackoff = Duration(seconds: 3);
+
+  @override
+  Stream<BleAdvertisement> results() => _ctrl.stream;
+
+  Future<void> _startNativeScan() async {
+    await fbp.FlutterBluePlus.startScan(
+      timeout: const Duration(minutes: 5),
+      continuousUpdates: true,
+    );
+  }
+
+  void _onScanResults(List<fbp.ScanResult> results) {
+    for (final r in results) {
+      final ad = parseLampAdvertisement(
+        manufacturerData: r.advertisementData.manufacturerData,
+        advName: r.advertisementData.advName,
+        platformName: r.device.platformName,
+        remoteId: r.device.remoteId.str,
+        rssi: r.rssi,
+      );
+      if (ad != null) _ctrl.add(ad);
+    }
+  }
+
+  // fbp's own 5-min startScan timeout, an unexpected radio stop, or the BLE
+  // adapter flipping back on all route here. Backoff-gated and re-entrancy
+  // guarded so overlapping triggers collapse to one delayed restart.
+  Future<void> _restartScan() async {
+    if (!_running || _restarting) return;
+    _restarting = true;
+    try {
+      await Future<void>.delayed(_restartBackoff);
+      if (!_running || fbp.FlutterBluePlus.isScanningNow) return;
+      await _startNativeScan();
+    } catch (e) {
+      debugPrint('[ble_scanner] scan restart failed: $e');
+    } finally {
+      _restarting = false;
+    }
+  }
+
+  @override
+  Future<void> start() async {
+    if (_running) return;
+    _running = true;
+    // Arm every listener before the first startScan so a throw below still
+    // leaves recovery wired: the next isScanning=false or adapter=on event
+    // drives _restartScan.
+    _sub = fbp.FlutterBluePlus.scanResults.listen(
+      _onScanResults,
+      onError: (Object e) =>
+          debugPrint('[ble_scanner] scanResults stream error: $e'),
+    );
+    _scanningSub = fbp.FlutterBluePlus.isScanning.listen(
+      (isScanning) {
+        if (!_running || isScanning) return;
+        unawaited(_restartScan());
+      },
+      onError: (Object e) =>
+          debugPrint('[ble_scanner] isScanning stream error: $e'),
+    );
+    _adapterSub = fbp.FlutterBluePlus.adapterState.listen(
+      (adapter) {
+        if (!_running) return;
+        if (adapter == fbp.BluetoothAdapterState.on &&
+            !fbp.FlutterBluePlus.isScanningNow) {
+          unawaited(_restartScan());
+        }
+      },
+      onError: (Object e) =>
+          debugPrint('[ble_scanner] adapterState stream error: $e'),
+    );
+    try {
+      await _startNativeScan();
+    } catch (e) {
+      debugPrint('[ble_scanner] initial startScan failed: $e');
+    }
+  }
+
+  @override
+  Future<void> stop() async {
+    if (!_running) return;
+    _running = false;
+    await fbp.FlutterBluePlus.stopScan();
+    await _sub?.cancel();
+    _sub = null;
+    await _scanningSub?.cancel();
+    _scanningSub = null;
+    await _adapterSub?.cancel();
+    _adapterSub = null;
+  }
+}
+
+class FakeBleScanner implements BleScanner {
+  final _ctrl = StreamController<BleAdvertisement>.broadcast();
+  bool _started = false;
+
+  @override
+  Stream<BleAdvertisement> results() => _ctrl.stream;
+
+  @override
+  Future<void> start() async {
+    _started = true;
+  }
+
+  @override
+  Future<void> stop() async {
+    _started = false;
+  }
+
+  void emit(BleAdvertisement ad) {
+    if (!_started) {
+      throw StateError('scanner not started');
+    }
+    _ctrl.add(ad);
+  }
+}

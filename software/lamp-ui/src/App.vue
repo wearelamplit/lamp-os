@@ -1,432 +1,595 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 
-import ColorGradient from '@/components/ColorGradient.vue'
-import BrightnessSlider from '@/components/BrightnessSlider.vue'
-import NumberInput from '@/components/NumberInput.vue'
-import TextInput from '@/components/TextInput.vue'
-import BooleanInput from '@/components/BooleanInput.vue'
-import FormField from '@/components/FormField.vue'
-import TopNavigation from '@/components/TopNavigation.vue'
-import LamplitLogo from '@/components/LamplitLogo.vue'
-import CritterNameplate from '@/components/CritterNameplate.vue'
-import ExpressionsList from '@/components/expressions/ExpressionsList.vue'
-import type { Settings } from '@/types'
+import NavBar from './components/NavBar.vue'
+import LamplitLogo from './components/LamplitLogo.vue'
+import CritterNameplate from './components/CritterNameplate.vue'
+import CritterIcon from './components/CritterIcon.vue'
+import FormField from './components/FormField.vue'
+import BrightnessSlider from './components/BrightnessSlider.vue'
+import ColorGradient from './components/ColorGradient.vue'
+import TextInput from './components/TextInput.vue'
+import BooleanInput from './components/BooleanInput.vue'
+import NumberInput from './components/NumberInput.vue'
+import ExpressionsList from './components/expressions/ExpressionsList.vue'
+import type { Config, ExpressionDescriptor, NearbyLamp } from './types'
+import {
+  SAFE_COLOR,
+  paletteFromSegments,
+  pxFromSegments,
+  segmentsFromPalette,
+} from './utils/configShape'
+import { blendedIdentity, hexwwToRgb } from './utils/colorUtils'
+import { toTitleCase } from './utils/stringCase'
 
-// Additional type definitions for expressions
-interface Expression {
-  type: string
-  enabled: boolean
-  colors: string[]
-  intervalMin: number
-  intervalMax: number
-  target: number
-  duration?: number
-  durationMin?: number
-  durationMax?: number
-}
+// Firmware does a full-replace on PUT: any field omitted from the body resets
+// to its firmware default on the post-save reboot. So we GET the whole doc,
+// mutate only the editable fields in place, and PUT the entire doc back.
+const defaultConfig = (): Config => ({
+  lamp: {
+    name: '',
+    brightness: 100,
+    brightnessCeiling: 170,
+    setup: true,
+    advancedEnabled: false,
+    webappEnabled: true,
+    socialMode: 1,
+    apBootMinutes: 2,
+  },
+  base: { segments: [{ px: 0, colors: [SAFE_COLOR] }], knockout: [] },
+  shade: { segments: [{ px: 0, colors: [SAFE_COLOR] }] },
+  expressions: [],
+  homeMode: {
+    ssid: '',
+    brightness: 60,
+    enabled: false,
+    networkBound: false,
+    socialDisabled: true,
+    disabledExpressionTypes: ['glitchy'],
+  },
+})
 
-// Extend Settings interface
-declare module '@/types' {
-  interface Settings {
-    expressions?: Expression[]
-  }
-}
+// The UI edits one palette per surface plus base px; these mirror the
+// firmware's segments (single source on load, fanned back on save).
+const baseColors = ref<string[]>([SAFE_COLOR])
+const basePx = ref(0)
+const shadeColors = ref<string[]>([SAFE_COLOR])
 
-// configuration ==============
-
-const maxReconnectAttempts = 60
-const reconnectInterval = 2500
-const websocketDebounceInterval = 10
-const maxLedsBase = 50
-
-// state ======================
-
-const settings = ref<Settings>({})
-const loaded = ref(false)
-const disabled = ref(false)
-const originalSettings = ref<string>('')
-const saving = ref(false)
-const resetUnsavedChanges = ref(0)
-const activeTab = ref('home')
-
-// Tab configuration
 const tabs = [
   { id: 'home', label: 'Home' },
   { id: 'expressions', label: 'Expressions' },
+  { id: 'social', label: 'Social' },
   { id: 'lamp-setup', label: 'Setup' },
   { id: 'info', label: 'Info' },
 ]
 
-// Send tab state when it changes
-watch(activeTab, (newTab) => {
-  // Tell the lamp what tab is active
-  if (ws.value?.readyState === WebSocket.OPEN) {
-    websocketSend({ a: 'tab', v: newTab })
-  }
-})
+const brightnessCeilingOptions = [
+  { label: 'Saver', value: 120 },
+  { label: 'Standard', value: 170 },
+  { label: 'Bright', value: 230 },
+]
 
-const ws = ref<WebSocket | null>(null)
-const wsConnected = ref(false)
-const reconnectAttempts = ref(0)
-let reconnectTimeout: number | null = null
-let websocketDebounceTimeout: number | null = null
+const socialModeOptions = [
+  { label: 'Introvert', value: 0 },
+  { label: 'Ambivert', value: 1 },
+  { label: 'Extrovert', value: 2 },
+]
 
-// Computed property to check if settings have changed
-const hasChanges = computed(() => {
-  return JSON.stringify(settings.value) !== originalSettings.value
-})
+const DISPOSITION_DEFAULT = 3
+const dispositionOptions = [
+  { value: 1, label: 'salty' },
+  { value: 2, label: 'wary' },
+  { value: 3, label: 'neutral' },
+  { value: 4, label: 'fond' },
+  { value: 5, label: 'smitten' },
+]
 
-// Generic function to update settings -- except knockout pixels
-const updateSetting = (path: string, value: unknown) => {
-  const pathParts = path.split('.')
-  let current: Record<string, unknown> = settings.value
+const cfg = ref<Config>(defaultConfig())
+const shadePx = computed(() => pxFromSegments(cfg.value.shade.segments))
 
-  for (let i = 0; i < pathParts.length - 1; i++) {
-    if (!current[pathParts[i]]) {
-      current[pathParts[i]] = {}
-    }
-    current = current[pathParts[i]] as Record<string, unknown>
-  }
-
-  const finalKey = pathParts[pathParts.length - 1]
-  current[finalKey] = value
-
-  let action: Record<string, unknown> | undefined
-  switch (path) {
-    case 'lamp.brightness':
-      // If home mode is OFF, apply this brightness immediately
-      if (!settings.value.lamp?.homeMode) {
-        action = { a: 'bright', v: value }
-      }
-      break
-    case 'lamp.homeModeBrightness':
-      // If home mode is ON, apply this brightness immediately
-      if (settings.value.lamp?.homeMode) {
-        action = { a: 'bright', v: value }
-      }
-      break
-    case 'lamp.homeMode':
-      // When toggling home mode, apply the appropriate brightness
-      if (value) {
-        // Turning ON: apply home mode brightness
-        action = { a: 'bright', v: settings.value.lamp?.homeModeBrightness ?? 80 }
-      } else {
-        // Turning OFF: apply regular brightness
-        action = { a: 'bright', v: settings.value.lamp?.brightness || 100 }
-      }
-      break
-    case 'shade.colors':
-      action = { a: 'shade', c: value }
-      break
-    case 'base.colors':
-      action = { a: 'base', c: value }
-      break
-    // Don't send real-time updates for expressions
-    // They are cleared when entering tab and reloaded when leaving
-  }
-  if (action) {
-    websocketSend(action)
+// Advanced mode: 5 taps on the Info logo within ~2s reveals the LED-type
+// pickers. Session-only, resets on reload.
+const advanced = ref(false)
+const byteOrderOptions = ['GRBW', 'GRB', 'BGR']
+let logoTapCount = 0
+let logoTapTimer: ReturnType<typeof setTimeout> | null = null
+const tapLogo = () => {
+  if (advanced.value) return
+  logoTapCount += 1
+  if (logoTapTimer) clearTimeout(logoTapTimer)
+  logoTapTimer = setTimeout(() => (logoTapCount = 0), 2000)
+  if (logoTapCount >= 5) {
+    advanced.value = true
+    logoTapCount = 0
   }
 }
+const baseByteOrder = computed(() => cfg.value.base.byteOrder ?? 'GRBW')
+const shadeByteOrder = computed(() => cfg.value.shade.byteOrder ?? 'GRBW')
+const expressionCatalog = ref<ExpressionDescriptor[]>([])
 
-const updateKnockoutPixel = (ledIndex: number, brightness: number) => {
-  if (!settings.value.base) {
-    settings.value.base = {}
-  }
-  if (!settings.value.base) {
-    settings.value.base = {}
-  }
-  if (!settings.value.base?.knockout) {
-    settings.value.base.knockout = []
-  }
+const nearbyLamps = ref<NearbyLamp[]>([])
+const sortedNearby = computed(() =>
+  [...nearbyLamps.value].sort((a, b) => b.lastSeenMs - a.lastSeenMs),
+)
+let nearbyTimer: ReturnType<typeof setInterval> | null = null
 
-  const existingIndex = settings.value.base.knockout.findIndex((kp) => kp.p === ledIndex)
-
-  if (brightness === 100) {
-    if (existingIndex !== -1) {
-      settings.value.base.knockout.splice(existingIndex, 1)
-    }
-  } else {
-    if (existingIndex !== -1) {
-      settings.value.base.knockout[existingIndex].b = brightness
-    } else {
-      settings.value.base.knockout.push({ p: ledIndex, b: brightness })
-    }
-  }
-
-  const action = { a: 'knockout', p: ledIndex, b: brightness }
-  websocketSend(action)
-}
-
-// Get brightness for a specific LED (returns 100 if not in knockout array)
-const getKnockoutBrightness = (ledIndex: number): number => {
-  if (!settings.value.base?.knockout) return 100
-  const knockout = settings.value.base.knockout.find((kp) => kp.p === ledIndex)
-  return knockout ? knockout.b : 100
-}
-
-const saveSettings = async () => {
-  if (!hasChanges.value || saving.value) return
-
-  saving.value = true
-
-  // apply an extra filter on settings.value.base.knockout to remove any empty objects and knockout pixels values that are 100
-  if (!settings.value.base) {
-    settings.value.base = {}
-  }
-  settings.value.base.knockout =
-    settings.value.base?.knockout?.filter(({ p, b }) => p !== undefined && p !== null && b < 100) ??
-    []
-
+const fetchNearby = async () => {
   try {
-    const response = await fetch(`${import.meta.env.VITE_SERVER_HTTP}/settings`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(settings.value),
-    })
+    const res = await fetch('/api/nearby')
+    if (!res.ok) return
+    const data = await res.json()
+    if (Array.isArray(data)) nearbyLamps.value = data as NearbyLamp[]
+  } catch {
+    // Keep the last list on a failed poll.
+  }
+}
 
-    if (response.ok) {
-      originalSettings.value = JSON.stringify(settings.value)
+const stopNearbyPolling = () => {
+  if (nearbyTimer) clearInterval(nearbyTimer)
+  nearbyTimer = null
+}
+
+// PUT /api/dispositions is a full-map replace, so the local map is the source
+// of truth: GET it on entering Social, mutate one key on a pick, PUT it whole.
+const dispositions = ref<Record<string, number>>({})
+const dispositionsLoaded = ref(false)
+const dispModalLamp = ref<NearbyLamp | null>(null)
+const dispError = ref('')
+
+const dispositionLabel = (lampId?: string) =>
+  lampId && dispositions.value[lampId]
+    ? dispositionOptions.find((o) => o.value === dispositions.value[lampId])?.label
+    : ''
+
+const currentDisposition = computed(() => {
+  const id = dispModalLamp.value?.lampId
+  return id ? (dispositions.value[id] ?? DISPOSITION_DEFAULT) : DISPOSITION_DEFAULT
+})
+
+const fetchDispositions = async () => {
+  dispositionsLoaded.value = false
+  try {
+    const res = await fetch('/api/dispositions')
+    if (!res.ok) return
+    const data = await res.json()
+    if (data && typeof data === 'object') {
+      dispositions.value = data as Record<string, number>
+      dispositionsLoaded.value = true
     }
-    saving.value = false
-  } catch (error) {
-    console.error('Error saving settings:', error)
+  } catch {
+    // Keep the last map on a failed fetch.
+  }
+}
+
+const openDisposition = (lamp: NearbyLamp) => {
+  if (!lamp.lampId) return
+  dispError.value = ''
+  dispModalLamp.value = lamp
+}
+
+const closeDisposition = () => {
+  dispModalLamp.value = null
+}
+
+const onDispKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Escape') closeDisposition()
+}
+
+watch(dispModalLamp, (lamp) => {
+  if (lamp) window.addEventListener('keydown', onDispKeydown)
+  else window.removeEventListener('keydown', onDispKeydown)
+})
+
+const pickDisposition = async (value: number) => {
+  const id = dispModalLamp.value?.lampId
+  if (!id) return
+  if (!dispositionsLoaded.value) {
+    dispError.value = 'Reconnecting — try again'
+    fetchDispositions()
+    return
+  }
+  const prev = dispositions.value[id]
+  dispositions.value = { ...dispositions.value, [id]: value }
+  let ok = false
+  try {
+    // ponytail: whole-map replace capped at 512 bytes (~23 peers) shared with the BLE path; single-key PATCH if peer count grows.
+    const res = await fetch('/api/dispositions', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(dispositions.value),
+    })
+    ok = res.ok
+  } catch {
+    ok = false
+  }
+  if (ok) {
+    closeDisposition()
+    return
+  }
+  const reverted = { ...dispositions.value }
+  if (prev === undefined) delete reverted[id]
+  else reverted[id] = prev
+  dispositions.value = reverted
+  dispError.value = 'Save failed — try again'
+}
+
+// Firmware stores the muted state; the toggle reads as "social ON".
+const socialEnabled = computed({
+  get: () => !cfg.value.homeMode.socialDisabled,
+  set: (v: boolean) => (cfg.value.homeMode.socialDisabled = !v),
+})
+
+const isExpressionEnabled = (id: string) =>
+  !cfg.value.homeMode.disabledExpressionTypes.includes(id)
+
+const setExpressionEnabled = (id: string, enabled: boolean) => {
+  const disabled = cfg.value.homeMode.disabledExpressionTypes
+  if (enabled) {
+    cfg.value.homeMode.disabledExpressionTypes = disabled.filter((t) => t !== id)
+  } else if (!disabled.includes(id)) {
+    disabled.push(id)
+  }
+}
+
+const ready = ref(false)
+const saving = ref(false)
+// Set only after a real GET succeeds; Save is a full-replace PUT, so saving
+// before this is true would blast defaultConfig() onto the lamp.
+const loadedRealConfig = ref(false)
+const activeTab = ref('home')
+const errorMessage = ref('')
+
+// Firmware-owned: false = the variant fixes its colors, hide the picker.
+const baseColorsEditable = computed(() => cfg.value.base.colorsEditable !== false)
+const shadeColorsEditable = computed(() => cfg.value.shade.colorsEditable !== false)
+
+// Matches the lamp's own blendedIdentity() so the favicon + nameplate glow
+// the same color the device actually shows for a multi-stop base.
+const blendedBaseColor = computed(() => blendedIdentity(baseColors.value) ?? SAFE_COLOR)
+
+const nameValid = computed(() => {
+  const n = cfg.value.lamp.name.trim()
+  return n.length >= 3 && n.length <= 12
+})
+const passwordValid = computed(() => {
+  const p = password.value
+  return p === '' || (p.length >= 8 && p.length <= 16)
+})
+// Build-time version, injected by the lamp-ui build (VITE_FW_VERSION). Shown
+// in the info tab; doubles as a visible signal of which build's UI is live.
+const fwVersion = import.meta.env.VITE_FW_VERSION || 'dev'
+const wsConnected = ref(false)
+
+// Password is write-only: GET never returns it, so this starts empty. Only a
+// non-empty value is injected into the PUT body; empty keeps the existing one.
+// A typed value replaces the password (and is length-gated); empty keeps it.
+const password = ref('')
+// The current password revealed by /api/unlock, shown read-only so the user
+// can see it without the value counting as an edit or hitting the length gate.
+const revealedPassword = ref('')
+
+// A password-protected lamp gates the editor until /api/unlock confirms.
+const locked = ref(false)
+const unlockPassword = ref('')
+const unlockError = ref('')
+
+const unlock = async () => {
+  unlockError.value = ''
+  try {
+    const res = await fetch('/api/unlock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: unlockPassword.value }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      revealedPassword.value = data.password ?? ''
+      locked.value = false
+      unlockPassword.value = ''
+    } else {
+      unlockError.value = 'Incorrect password'
+    }
+  } catch {
+    unlockError.value = 'Incorrect password'
+  }
+}
+
+// Baseline for change detection; password + editable palettes live outside cfg
+// so track them too.
+const originalSettings = ref('')
+const editSnapshot = () =>
+  JSON.stringify([cfg.value, baseColors.value, basePx.value, shadeColors.value])
+const hasChanges = computed(
+  () => editSnapshot() !== originalSettings.value || password.value !== '',
+)
+
+const disabled = computed(() => !wsConnected.value)
+
+let ws: WebSocket | null = null
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+
+const sendPreview = (payload: Record<string, string[] | number | string | boolean>) => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(payload))
+  }
+}
+
+const testExpression = (type: string, target: number) => {
+  sendPreview({ a: 'test_expression', type, target })
+}
+
+// surface 1=base, 2=shade. Tells the lamp to pause expressions on that
+// surface while its color editor is open so the picked color reads clean.
+const sendEditSession = (surface: number, open: boolean) => {
+  sendPreview({ a: 'edit_session', surface, open })
+}
+
+// Surface the expression-color preview is currently pausing expressions on,
+// as the sendEditSession mask (1=base, 2=shade, 3=both); 0 = none open.
+let previewEditSurface = 0
+
+// Expression target (1=Shade, 2=Base, 3=Both) inverted onto the
+// sendEditSession surface mask (1=Base, 2=Shade); target 3 sets both bits.
+const surfaceMaskForTarget = (target: number) =>
+  target === 1 ? 2 : target === 2 ? 1 : target === 3 ? 3 : 0
+
+// Re-assert the saved base/shade colors on the lamp to undo an
+// expression-color preview when leaving the expressions tab.
+const restoreColorPreview = () => {
+  if (previewEditSurface) {
+    sendEditSession(previewEditSurface, false)
+    previewEditSurface = 0
+  }
+  if (!ready.value) return
+  sendPreview({
+    a: 'test_expression_complete',
+    baseColors: [...baseColors.value],
+    shadeColors: [...shadeColors.value],
+  })
+}
+
+// Light the lamp with an expression's palette while its colors are edited,
+// routed to the surface the expression targets (1=Shade, 2=Base, 3=Both).
+// Pauses expressions on that surface (edit_session) so the preview reads
+// clean; restoreColorPreview() closes the session and puts the real colors back.
+const previewExpressionColors = (colors: string[], target: number) => {
+  if (!ready.value || !colors.length) return
+  const mask = surfaceMaskForTarget(target)
+  if (mask && mask !== previewEditSurface) {
+    if (previewEditSurface) sendEditSession(previewEditSurface, false)
+    sendEditSession(mask, true)
+    previewEditSurface = mask
+  }
+  if (target === 1 || target === 3) sendPreview({ shadeColors: [...colors] })
+  if (target === 2 || target === 3) sendPreview({ baseColors: [...colors] })
+}
+
+const connectWs = () => {
+  ws = new WebSocket(`ws://${location.host}/ws`)
+  ws.onopen = () => {
+    wsConnected.value = true
+  }
+  ws.onclose = () => {
+    wsConnected.value = false
+    previewEditSurface = 0
+    reconnectTimer = setTimeout(connectWs, 2000)
+  }
+}
+
+// Live preview is FLAT and only covers base/shade colors + brightness.
+// Knockout / expressions / home mode apply on save+reboot — no preview.
+watch(
+  baseColors,
+  (value) => ready.value && sendPreview({ baseColors: [...value] }),
+  { deep: true },
+)
+
+watch(
+  shadeColors,
+  (value) => ready.value && sendPreview({ shadeColors: [...value] }),
+  { deep: true },
+)
+
+watch(
+  () => cfg.value.lamp.brightness,
+  (value) => ready.value && sendPreview({ brightness: value }),
+)
+
+// Leaving the expressions tab undoes any lingering expression-color preview;
+// the Social tab polls /api/nearby only while it's open.
+watch(activeTab, async (tab, prev) => {
+  if (prev === 'expressions') restoreColorPreview()
+  if (tab === 'social') {
+    fetchNearby()
+    await fetchDispositions()
+    nearbyTimer = setInterval(fetchNearby, 10000)
+  } else {
+    dispositionsLoaded.value = false
+    stopNearbyPolling()
+  }
+})
+
+// Keep the dense per-pixel knockout array sized to the base pixel count.
+watch(basePx, (px) => {
+  if (!ready.value) return
+  const k = cfg.value.base.knockout
+  if (px > k.length) while (k.length < px) k.push(100)
+  else if (px < k.length) k.length = px
+})
+
+const save = async () => {
+  if (!loadedRealConfig.value) return
+  if (!hasChanges.value || saving.value) return
+  if (!nameValid.value || !passwordValid.value) return
+  saving.value = true
+  errorMessage.value = ''
+  if (password.value) cfg.value.lamp.password = password.value
+  // Saving through the web UI claims the lamp (stray -> adopted).
+  cfg.value.lamp.setup = true
+  // Fan the edited palettes back into the segments the firmware parses (it
+  // prefers `segments` over any flat `colors`); px only touches base.
+  cfg.value.base.segments = segmentsFromPalette(
+    cfg.value.base.segments,
+    baseColors.value,
+    basePx.value,
+  )
+  cfg.value.shade.segments = segmentsFromPalette(cfg.value.shade.segments, shadeColors.value)
+  try {
+    const res = await fetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cfg.value),
+    })
+    if (res.ok) {
+      // Don't keep the password in the held doc once it's been sent.
+      delete cfg.value.lamp.password
+      password.value = ''
+      originalSettings.value = editSnapshot()
+    } else {
+      errorMessage.value = 'Save failed — try again'
+    }
+  } catch {
+    // leave hasChanges true so the user can retry
+    errorMessage.value = 'Save failed — try again'
   } finally {
     saving.value = false
   }
 }
 
-function connectWebSocket() {
-  if (reconnectTimeout) {
-    clearTimeout(reconnectTimeout)
-    reconnectTimeout = null
-  }
-
-  if (ws.value) {
-    ws.value.close()
-  }
-
-  ws.value = new WebSocket(`${import.meta.env.VITE_SERVER_WS}`)
-
-  ws.value.onopen = () => {
-    wsConnected.value = true
-    disabled.value = false
-    reconnectAttempts.value = 0
-
-    // Send current brightness based on home mode state
-    if (settings.value.lamp) {
-      const brightness = settings.value.lamp.homeMode
-        ? (settings.value.lamp.homeModeBrightness ?? 80)
-        : (settings.value.lamp.brightness ?? 100)
-      websocketSend({ a: 'bright', v: brightness })
-    }
-
-    // Send current tab state
-    websocketSend({ a: 'tab', v: activeTab.value })
-
-    // Send current colors to establish preview
-    if (settings.value.shade?.colors) {
-      websocketSend({ a: 'shade', c: settings.value.shade.colors })
-    }
-    if (settings.value.base?.colors) {
-      websocketSend({ a: 'base', c: settings.value.base.colors })
-    }
-
-    ws.value?.send(
-      JSON.stringify({
-        type: 'test',
-        message: 'Hello WebSocket!',
-        timestamp: new Date().toISOString(),
-      }),
-    )
-  }
-
-  ws.value.onclose = () => {
-    wsConnected.value = false
-    disabled.value = true
-    if (reconnectAttempts.value < maxReconnectAttempts) {
-      reconnectAttempts.value++
-      reconnectTimeout = window.setTimeout(() => {
-        connectWebSocket()
-      }, reconnectInterval)
-    } else {
-      console.log('Max reconnection attempts reached. Stopping reconnection attempts.')
-    }
-  }
-
-  ws.value.onerror = (error) => {
-    console.error('WebSocket error:', error)
-    wsConnected.value = false
-    disabled.value = true
-  }
-
-  return ws.value
-}
-
-const websocketSend = (action: Record<string, unknown>) => {
-  // Clear any existing debounce timeout
-  if (websocketDebounceTimeout) {
-    clearTimeout(websocketDebounceTimeout)
-  }
-
-  // Set a new timeout to send the message after 25ms
-  websocketDebounceTimeout = window.setTimeout(() => {
-    ws.value?.send(JSON.stringify(action))
-    websocketDebounceTimeout = null
-  }, websocketDebounceInterval)
-}
-
-const handleTestExpression = (type: string) => {
-  const action = { a: 'test_expression', type }
-  websocketSend(action)
-}
-
-const handleTestExpressionComplete = () => {
-  // Re-enable configurator and restore preview colors
-  const action = {
-    a: 'test_expression_complete',
-    shadeColors: settings.value.shade?.colors || [],
-    baseColors: settings.value.base?.colors || [],
-  }
-  websocketSend(action)
-}
-
-const handleExpressionColorPreview = (color: string, target: number) => {
-  // Send single color as array for solid color preview
-  if (target === 1 || target === 3) {
-    // Shade or Both
-    websocketSend({ a: 'shade', c: [color] })
-  }
-  if (target === 2 || target === 3) {
-    // Base or Both
-    websocketSend({ a: 'base', c: [color] })
-  }
-}
-
-const handleExpressionColorPickerOpen = () => {
-  // Configurator stays enabled, expression color will override temporarily
-}
-
-const handleExpressionColorPickerClose = () => {
-  // Restore the colors from the colors tab settings
-  if (settings.value.shade?.colors) {
-    websocketSend({ a: 'shade', c: settings.value.shade.colors })
-  }
-  if (settings.value.base?.colors) {
-    websocketSend({ a: 'base', c: settings.value.base.colors })
-  }
-}
-
-// Removed - configurator now uses 60-second timeout instead of explicit stop
-
-const handleSaveAndRestart = async () => {
-  await saveSettings()
-  // Increment to trigger reset in ExpressionsList component
-  resetUnsavedChanges.value++
-}
-
 onMounted(async () => {
-  const response = await fetch(`${import.meta.env.VITE_SERVER_HTTP}/settings`)
-  const data = await response.json()
-  settings.value = data
-  originalSettings.value = JSON.stringify(data)
-  loaded.value = true
-  connectWebSocket()
+  try {
+    const res = await fetch('/api/settings')
+    if (!res.ok) throw new Error('settings request failed')
+    const data = await res.json()
+    if (!data || !data.lamp) throw new Error('malformed settings response')
+    cfg.value = data as Config
+    // Derive the editable palettes from the firmware's segments.
+    baseColors.value = paletteFromSegments(cfg.value.base.segments)
+    basePx.value = pxFromSegments(cfg.value.base.segments)
+    shadeColors.value = paletteFromSegments(cfg.value.shade.segments)
+    if (!Array.isArray(cfg.value.base.knockout)) cfg.value.base.knockout = []
+    if (!Array.isArray(cfg.value.expressions)) cfg.value.expressions = []
+    if (!Array.isArray(cfg.value.homeMode.disabledExpressionTypes))
+      cfg.value.homeMode.disabledExpressionTypes = []
+    locked.value = cfg.value.lamp.hasPassword === true
+    delete cfg.value.lamp.hasPassword
+    loadedRealConfig.value = true
+  } catch {
+    // Leave defaults on screen but keep Save gated; see loadedRealConfig.
+    errorMessage.value = "Couldn't load settings from the lamp"
+  }
+  try {
+    const res = await fetch('/api/expressions')
+    if (!res.ok) throw new Error('expressions request failed')
+    const data = await res.json()
+    if (data && Array.isArray(data.expressions)) {
+      expressionCatalog.value = data.expressions as ExpressionDescriptor[]
+    }
+  } catch {
+    // Old firmware without the catalog endpoint; expressions tab degrades.
+  }
+  originalSettings.value = editSnapshot()
+  ready.value = true
+  connectWs()
 })
 
 onUnmounted(() => {
-  // Clean up WebSocket connection and reconnection timeout
-  if (reconnectTimeout) {
-    clearTimeout(reconnectTimeout)
-    reconnectTimeout = null
+  if (ws) {
+    ws.onclose = null
+    ws.close()
   }
-
-  // Clean up websocket debounce timeout
-  if (websocketDebounceTimeout) {
-    clearTimeout(websocketDebounceTimeout)
-    websocketDebounceTimeout = null
-  }
-
-  if (ws.value) {
-    ws.value.close()
-    ws.value = null
-  }
-
-  wsConnected.value = false
-  disabled.value = true
+  if (reconnectTimer) clearTimeout(reconnectTimer)
+  stopNearbyPolling()
+  window.removeEventListener('keydown', onDispKeydown)
 })
 </script>
 
 <template>
   <div class="home">
-    <!-- WebSocket Status Indicator -->
-    <div
-      class="ws-status-indicator"
-      :class="{ connected: wsConnected }"
-      :title="wsConnected ? 'WebSocket Connected' : 'WebSocket Disconnected'"
-    >
-      <div class="ws-status-dot"></div>
+    <div v-if="errorMessage" class="error-banner" role="alert">
+      <span>{{ errorMessage }}</span>
+      <button type="button" class="error-dismiss" aria-label="Dismiss" @click="errorMessage = ''">×</button>
     </div>
 
-    <div v-if="loaded" class="container">
-      <main class="main-content">
-        <!-- Tab Navigation -->
-        <TopNavigation
-          :tabs="tabs"
-          :active-tab="activeTab"
-          @update:active-tab="activeTab = $event"
-        />
+    <div v-if="ready && locked" class="container">
+      <main>
+        <div class="unlock-gate">
+          <h1 class="gold">Locked</h1>
+          <p>This lamp is password protected. Enter its password to make changes.</p>
+          <FormField id="unlock-password">
+            <TextInput
+              v-model="unlockPassword"
+              type="password"
+              placeholder="Password"
+              :max-length="16"
+              @keyup.enter="unlock"
+            />
+          </FormField>
+          <div v-if="unlockError" class="unlock-error">{{ unlockError }}</div>
+          <button type="button" class="unlock-button" @click="unlock">Unlock</button>
+        </div>
+      </main>
+    </div>
 
-        <!-- Tab Content -->
+    <div v-if="ready && !locked" class="container">
+      <main>
+        <NavBar :tabs="tabs" :active-tab="activeTab" @update:active-tab="activeTab = $event" />
+
         <div class="tab-content">
-          <!-- Home Tab -->
+          <!-- Home -->
           <section v-if="activeTab === 'home'" class="tab-panel" aria-label="Home settings">
-            <CritterNameplate v-model="settings" id="nameplate" />
+            <CritterNameplate
+              :name="cfg.lamp.name"
+              :lamp-id="cfg.lamp.lampId"
+              :base-color="blendedBaseColor"
+              :shade-color="shadeColors[0]"
+              :size="96"
+            />
 
-            <h1 class="gold">Lamp Brightness</h1>
+            <h1 class="gold">
+              Lamp Brightness
+              <span v-if="hasChanges" class="preview-badge">Preview, not saved</span>
+            </h1>
             <FormField id="brightness">
               <BrightnessSlider
-                :model-value="settings.lamp?.brightness || 0"
-                @update:model-value="(value) => updateSetting('lamp.brightness', value)"
+                v-model="cfg.lamp.brightness"
                 id="brightness"
                 :min="0"
                 :max="100"
                 append="%"
-                :disabled="disabled || settings.lamp?.homeMode"
+                :disabled="disabled || cfg.homeMode.enabled"
               />
             </FormField>
 
-            <h1 class="yellow">Lamp Color Settings</h1>
+            <h1 class="yellow">
+              Lamp Color Settings
+              <span v-if="hasChanges" class="preview-badge">Preview, not saved</span>
+            </h1>
             <FormField label="Shade" id="shadeColors">
               <ColorGradient
-                :model-value="settings.shade?.colors || ['#FF0000FF']"
-                @update:model-value="(value) => updateSetting('shade.colors', value)"
-                :show-add-button="false"
-                :max-colors="1"
+                v-if="shadeColorsEditable"
+                v-model="shadeColors"
+                :max-colors="5"
                 :disabled="disabled"
+                @edit-session="(open) => sendEditSession(2, open)"
               />
+              <div v-else class="info-text">Shade color is set by firmware.</div>
             </FormField>
 
             <FormField label="Base" id="baseColors">
               <ColorGradient
-                :model-value="settings.base?.colors || ['#FF0000FF']"
-                @update:model-value="(value) => updateSetting('base.colors', value)"
+                v-if="baseColorsEditable"
+                v-model="baseColors"
+                :max-colors="5"
                 :disabled="disabled"
-                :active-color="settings.base?.ac || 0"
-                @update:active-color="(value) => updateSetting('base.ac', value)"
+                @edit-session="(open) => sendEditSession(1, open)"
               />
+              <div v-else class="info-text">Base color is set by firmware.</div>
             </FormField>
           </section>
 
-          <!-- Expressions Tab -->
-          <section
-            v-if="activeTab === 'expressions'"
-            class="tab-panel"
-            aria-label="Expression settings"
-          >
+          <!-- Expressions -->
+          <section v-if="activeTab === 'expressions'" class="tab-panel" aria-label="Expression settings">
             <div class="expressions-instructions">
               <p>
                 Add expressions to give your lamp personality. Expressions are behaviors that
@@ -434,69 +597,172 @@ onUnmounted(() => {
               </p>
             </div>
             <ExpressionsList
-              :model-value="settings.expressions || []"
-              @update:model-value="(value) => updateSetting('expressions', value)"
-              @test-expression="handleTestExpression"
-              @test-expression-complete="handleTestExpressionComplete"
-              @save-and-restart="handleSaveAndRestart"
-              @preview-color="handleExpressionColorPreview"
-              @color-picker-open="handleExpressionColorPickerOpen"
-              @color-picker-close="handleExpressionColorPickerClose"
-              :reset-unsaved-changes="resetUnsavedChanges"
+              v-model="cfg.expressions"
+              :catalog="expressionCatalog"
+              :base-px="basePx"
+              :shade-px="shadePx"
               :disabled="disabled"
+              @preview="previewExpressionColors"
+              @preview-end="restoreColorPreview"
+              @test-expression="testExpression"
             />
           </section>
 
-          <!-- Lamp Setup Tab -->
+          <!-- Social -->
+          <section v-if="activeTab === 'social'" class="tab-panel" aria-label="Social settings">
+            <h1 class="gold">Personality</h1>
+            <FormField label="Sociability" id="socialMode">
+              <div class="targets">
+                <button
+                  v-for="opt in socialModeOptions"
+                  :key="opt.value"
+                  type="button"
+                  class="target"
+                  :class="{ active: cfg.lamp.socialMode === opt.value }"
+                  :disabled="disabled"
+                  @click="cfg.lamp.socialMode = opt.value"
+                >
+                  {{ opt.label }}
+                </button>
+              </div>
+              <div class="info-text">
+                How sociable your lamp is: an introvert keeps to itself, an extrovert greets and
+                reacts to nearby lamps often.
+              </div>
+            </FormField>
+
+            <h1 class="lime">Recently Seen</h1>
+            <div v-if="sortedNearby.length" class="nearby-list">
+              <div
+                v-for="lamp in sortedNearby"
+                :key="lamp.lampId ?? lamp.name + lamp.lastSeenMs"
+                class="nearby-row"
+                :class="{ tappable: lamp.lampId }"
+                :role="lamp.lampId ? 'button' : undefined"
+                :tabindex="lamp.lampId ? 0 : undefined"
+                @click="openDisposition(lamp)"
+                @keyup.enter="openDisposition(lamp)"
+              >
+                <div class="nearby-critter">
+                  <CritterIcon
+                    v-if="lamp.lampId"
+                    :lamp-id="lamp.lampId"
+                    :shade="lamp.shade"
+                    :base="lamp.base"
+                  />
+                </div>
+                <div class="nearby-name">
+                  {{ toTitleCase(lamp.name) }}
+                  <span v-if="dispositionLabel(lamp.lampId)" class="nearby-disposition">
+                    {{ dispositionLabel(lamp.lampId) }}
+                  </span>
+                </div>
+                <div class="nearby-swatches">
+                  <span
+                    class="nearby-swatch"
+                    :style="{ background: hexwwToRgb(lamp.shade) }"
+                    title="Shade"
+                  ></span>
+                  <span
+                    class="nearby-swatch"
+                    :style="{ background: hexwwToRgb(lamp.base) }"
+                    title="Base"
+                  ></span>
+                </div>
+                <span v-if="lamp.lampId" class="nearby-chevron" aria-hidden="true">›</span>
+              </div>
+            </div>
+            <div v-else class="info-text">No lamps nearby yet.</div>
+          </section>
+
+          <!-- Lamp Setup -->
           <section v-if="activeTab === 'lamp-setup'" class="tab-panel" aria-label="Setup settings">
             <h1 class="gold">Lamp Name</h1>
             <FormField id="name">
               <TextInput
-                :model-value="settings.lamp?.name || ''"
-                @update:model-value="(value) => updateSetting('lamp.name', value)"
+                v-model="cfg.lamp.name"
                 placeholder="Enter a name for your lamp"
                 :disabled="disabled"
                 :max-length="12"
                 pattern="[a-z]+"
                 transform="lowercase"
               />
-              <div class="password-info-text">
+              <div class="info-text">
                 Names must be all lowercase letters and between 3-12 characters.
+              </div>
+              <div v-if="!nameValid" class="field-error">
+                Name must be between 3 and 12 characters.
               </div>
             </FormField>
 
             <h1 class="yellow">Lamp Password</h1>
+            <FormField v-if="revealedPassword" label="Current Password" id="currentPassword">
+              <input class="revealed-password" :value="revealedPassword" readonly />
+            </FormField>
             <FormField id="password">
               <TextInput
-                :model-value="settings.lamp?.password || ''"
-                @update:model-value="(value) => updateSetting('lamp.password', value)"
-                placeholder="Optional password"
+                v-model="password"
+                placeholder="Leave unchanged"
                 :disabled="disabled"
-                pattern="[ -~]+"
                 :max-length="16"
+                pattern="[ -~]+"
               />
-              <div class="password-info-text">
+              <div class="info-text">
                 Optional password to protect your lamp from changes. Between 8-16 characters. Leave
-                empty for no password.
+                empty to keep the current password.
+              </div>
+              <div v-if="!passwordValid" class="field-error">
+                Password must be between 8 and 16 characters.
+              </div>
+            </FormField>
+
+            <h1 class="gold">Setup Access</h1>
+            <FormField label="Keep Setup Available" id="apBootMinutes">
+              <select
+                v-model.number="cfg.lamp.apBootMinutes"
+                class="ap-boot-select"
+                :disabled="disabled"
+              >
+                <option :value="2">2 minutes</option>
+                <option :value="5">5 minutes</option>
+                <option :value="10">10 minutes</option>
+                <option :value="0">Always on</option>
+              </select>
+              <div class="info-text">
+                How long the setup WiFi network stays available after the lamp boots.
+              </div>
+            </FormField>
+
+            <h1 class="yellow">Power</h1>
+            <FormField label="Battery Saver" id="brightnessCeiling">
+              <div class="targets">
+                <button
+                  v-for="opt in brightnessCeilingOptions"
+                  :key="opt.value"
+                  type="button"
+                  class="target"
+                  :class="{ active: cfg.lamp.brightnessCeiling === opt.value }"
+                  :disabled="disabled"
+                  @click="cfg.lamp.brightnessCeiling = opt.value"
+                >
+                  {{ opt.label }}
+                </button>
+              </div>
+              <div class="info-text">
+                Caps the lamp's maximum brightness. Lower saves power; higher runs brighter.
               </div>
             </FormField>
 
             <h1 class="lime">At-Home Mode</h1>
             <div class="mode-toggles">
               <FormField label="Home Mode" id="homeMode">
-                <BooleanInput
-                  :model-value="settings.lamp?.homeMode || false"
-                  @update:model-value="(value) => updateSetting('lamp.homeMode', value)"
-                  :disabled="disabled"
-                />
+                <BooleanInput v-model="cfg.homeMode.enabled" :disabled="disabled" />
               </FormField>
 
-              <!-- Home Mode Settings -->
-              <div v-if="settings.lamp?.homeMode" class="home-mode-settings">
+              <div v-if="cfg.homeMode.enabled" class="home-mode-settings">
                 <FormField label="Home Mode Brightness" id="homeModeBrightness">
                   <BrightnessSlider
-                    :model-value="settings.lamp?.homeModeBrightness ?? 80"
-                    @update:model-value="(value) => updateSetting('lamp.homeModeBrightness', value)"
+                    v-model="cfg.homeMode.brightness"
                     id="homeModeBrightness"
                     :min="0"
                     :max="100"
@@ -505,18 +771,49 @@ onUnmounted(() => {
                   />
                 </FormField>
 
-                <FormField label="Home Network SSID" id="homeModeSSID">
+                <FormField label="Only on my home network" id="homeModeNetworkBound">
+                  <BooleanInput v-model="cfg.homeMode.networkBound" :disabled="disabled" />
+                  <div class="info-text">
+                    Home mode activates only when your WiFi network is in range.
+                  </div>
+                </FormField>
+
+                <FormField
+                  v-if="cfg.homeMode.networkBound"
+                  label="Home Network SSID"
+                  id="homeModeSSID"
+                >
                   <TextInput
-                    :model-value="settings.lamp?.homeModeSSID || ''"
-                    @update:model-value="(value) => updateSetting('lamp.homeModeSSID', value)"
+                    v-model="cfg.homeMode.ssid"
                     placeholder="Enter your home WiFi name"
                     :disabled="disabled"
                     :max-length="32"
                     pattern="[ -~]+"
                   />
-                  <div id="home-ssid-info" class="info-text">
-                    When the lamp detects this WiFi network, it will automatically activate special
-                    home-only features and behaviors.
+                  <div class="info-text">
+                    When the lamp detects this WiFi network, it activates home-only behaviors.
+                  </div>
+                </FormField>
+
+                <FormField label="Social behaviours" id="homeModeSocial">
+                  <BooleanInput v-model="socialEnabled" :disabled="disabled" />
+                  <div class="info-text">Greetings and nearby-lamp reactions.</div>
+                </FormField>
+
+                <FormField
+                  v-if="expressionCatalog.length"
+                  label="Expressions"
+                  id="homeModeExpressions"
+                >
+                  <div class="home-mode-expressions">
+                    <div v-for="d in expressionCatalog" :key="d.id" class="expression-toggle-row">
+                      <span class="expression-toggle-label">{{ d.name }}</span>
+                      <BooleanInput
+                        :model-value="isExpressionEnabled(d.id)"
+                        :disabled="disabled"
+                        @update:model-value="(v) => setExpressionEnabled(d.id, v)"
+                      />
+                    </div>
                   </div>
                 </FormField>
               </div>
@@ -525,10 +822,9 @@ onUnmounted(() => {
             <h1 class="green">Lamp Base LED Profile</h1>
             <FormField label="Base LED Count" id="baseLeds">
               <NumberInput
-                :model-value="settings.base?.px || 36"
-                @update:model-value="(value) => updateSetting('base.px', value)"
+                v-model="basePx"
                 :min="5"
-                :max="maxLedsBase"
+                :max="50"
                 placeholder="Number of LEDs"
                 :disabled="disabled"
               />
@@ -536,71 +832,126 @@ onUnmounted(() => {
 
             <FormField label="Per-Pixel Brightness Adjustment" id="baseKnockoutPixels" expandable>
               <div class="pixel-grid">
-                <div
-                  v-for="ledIndex in Array.from(
-                    { length: settings.base?.px || 36 },
-                    (_, i) => (settings.base?.px || 36) - i,
-                  )"
-                  :key="ledIndex - 1"
-                  class="pixel-row"
-                >
-                  <label class="pixel-label">LED {{ ledIndex }}</label>
+                <div v-for="(_, i) in cfg.base.knockout" :key="i" class="pixel-row">
+                  <label class="pixel-label">LED {{ i + 1 }}</label>
                   <BrightnessSlider
-                    :model-value="getKnockoutBrightness(ledIndex - 1)"
-                    @update:model-value="(value) => updateKnockoutPixel(ledIndex - 1, value)"
-                    :id="`knockout-pixel-${ledIndex - 1}`"
+                    :model-value="cfg.base.knockout[i]"
+                    :id="`knockout-pixel-${i}`"
                     :min="0"
                     :max="100"
                     append="%"
                     :disabled="disabled"
+                    @update:model-value="(v) => (cfg.base.knockout[i] = v)"
                   />
                 </div>
               </div>
             </FormField>
+
+            <template v-if="advanced">
+              <h1 class="gold">Advanced</h1>
+              <FormField label="Base LED Type" id="baseByteOrder">
+                <div class="targets">
+                  <button
+                    v-for="opt in byteOrderOptions"
+                    :key="opt"
+                    type="button"
+                    class="target"
+                    :class="{ active: baseByteOrder === opt }"
+                    :disabled="disabled"
+                    @click="cfg.base.byteOrder = opt"
+                  >
+                    {{ opt }}
+                  </button>
+                </div>
+              </FormField>
+
+              <FormField label="Shade LED Type" id="shadeByteOrder">
+                <div class="targets">
+                  <button
+                    v-for="opt in byteOrderOptions"
+                    :key="opt"
+                    type="button"
+                    class="target"
+                    :class="{ active: shadeByteOrder === opt }"
+                    :disabled="disabled"
+                    @click="cfg.shade.byteOrder = opt"
+                  >
+                    {{ opt }}
+                  </button>
+                </div>
+                <div class="info-text">
+                  LED channel order. Change only if your lamp's colors are wrong.
+                </div>
+              </FormField>
+            </template>
           </section>
 
-          <!-- Information Tab -->
+          <!-- Info -->
           <section v-if="activeTab === 'info'" class="tab-panel" aria-label="Information">
             <div class="info-content">
-              <div class="logo-container">
+              <div class="logo-container" @click="tapLogo">
                 <LamplitLogo />
               </div>
+              <p v-if="advanced" class="advanced-note">Advanced unlocked</p>
               <p>
-                Lamplit Art Society is a non-profit collective dedicated to sparking inspiration and
-                providing opportunities for people to connect, celebrate, grow, and inspire others
-                through shared creative experiences.
+                Lamplit Art Society is a non-profit collective sparking connection and creativity
+                through shared lamp art. More at
+                <a href="https://lamplit.ca" target="_blank" rel="noopener">lamplit.ca</a>
               </p>
-              <p>
-                The lamps are the art project from which our society grew. Their surreal and vivid
-                presence captivates audiences, fosters unexpected connections, inspires creativity
-                and play, and illuminates spaces.
-              </p>
-              <p>
-                As stewards of this decentralized and open source project, we maintain its core
-                vision while welcoming contributors and artists to build, adopt, or share these
-                lamps with their communities.
-              </p>
-              <p>Find more info at <b>lamplit.ca</b></p>
+              <p class="version">Firmware {{ fwVersion }}</p>
             </div>
           </section>
         </div>
       </main>
     </div>
 
+    <div v-if="dispModalLamp" class="disp-overlay" @click.self="closeDisposition">
+      <div class="disp-modal" role="dialog" aria-modal="true" aria-label="Set disposition">
+        <div class="disp-header">
+          <div class="disp-critter">
+            <CritterIcon
+              v-if="dispModalLamp.lampId"
+              :lamp-id="dispModalLamp.lampId"
+              :shade="dispModalLamp.shade"
+              :base="dispModalLamp.base"
+            />
+          </div>
+          <div class="disp-name">{{ toTitleCase(dispModalLamp.name) }}</div>
+          <button type="button" class="disp-close" aria-label="Close" @click="closeDisposition">×</button>
+        </div>
+        <p class="disp-prompt">How does your lamp feel about this one?</p>
+        <div class="disp-options">
+          <button
+            v-for="opt in dispositionOptions"
+            :key="opt.value"
+            type="button"
+            class="disp-option"
+            :class="{ active: currentDisposition === opt.value }"
+            @click="pickDisposition(opt.value)"
+          >
+            {{ opt.label }}
+          </button>
+        </div>
+        <div v-if="dispError" class="disp-error">{{ dispError }}</div>
+      </div>
+    </div>
+
     <!-- Floating Save Button -->
-    <div v-if="loaded" class="floating-save-container">
+    <div v-if="ready && !locked" class="floating-save-container">
       <button
         class="floating-save-button"
         :class="{
-          'has-changes': hasChanges,
+          'has-changes': hasChanges && !disabled && nameValid && passwordValid && loadedRealConfig,
           saving: saving,
-          'no-changes': !hasChanges || disabled,
+          'no-changes': !hasChanges || disabled || !nameValid || !passwordValid || !loadedRealConfig,
         }"
-        @click="saveSettings"
-        :disabled="!hasChanges || saving || disabled"
+        @click="save"
+        :disabled="!hasChanges || saving || disabled || !nameValid || !passwordValid || !loadedRealConfig"
       >
-        <span v-if="disabled">Connecting...</span>
+        <span v-if="!loadedRealConfig">Unavailable</span>
+        <span v-else-if="disabled">Connecting...</span>
         <span v-else-if="saving">Saving...</span>
+        <span v-else-if="!nameValid || !passwordValid">Fix errors</span>
         <span v-else-if="hasChanges">Save Changes</span>
         <span v-else>No Changes</span>
       </button>
@@ -610,11 +961,9 @@ onUnmounted(() => {
 
 <style>
 #app {
-  min-height: 100vh;
   width: 100%;
 }
 
-/* Prevent zooming on mobile devices for all interactive elements */
 button,
 input,
 select,
@@ -625,55 +974,42 @@ a,
   touch-action: manipulation;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
-  -khtml-user-select: none;
   -moz-user-select: none;
-  -ms-user-select: none;
   user-select: none;
 }
 
-/* Allow text selection in input fields and textareas */
 input[type='text'],
-input[type='email'],
+input[type='number'],
 input[type='password'],
-input[type='search'],
-input[type='url'],
-input[type='tel'],
 textarea {
   -webkit-user-select: text;
-  -khtml-user-select: text;
   -moz-user-select: text;
-  -ms-user-select: text;
   user-select: text;
 }
 </style>
 
 <style scoped>
 .home {
-  min-height: 100vh;
+  --nav-h: 58px;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
   background: var(--brand-midnight-black);
-  padding: 16px;
-  padding-bottom: 10px !important;
   width: 100%;
 }
 
 .container {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   width: 100%;
-  max-width: 100%;
-  margin: 0 auto;
 }
 
-.main-content {
-  background: var(--color-background-soft);
-  border-radius: 16px;
-  padding: 20px;
-  padding-bottom: 40px !important;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(10px);
-}
-
-/* Tab Content Styles */
 .tab-content {
   min-height: 200px;
+  padding: 16px 16px calc(var(--nav-h) + 80px + env(safe-area-inset-bottom));
 }
 
 .tab-panel {
@@ -691,19 +1027,32 @@ textarea {
   }
 }
 
-.empty-state {
-  color: var(--brand-slate-grey);
-  font-style: italic;
-  text-align: center;
-  padding: 40px 20px;
-  background: rgba(253, 253, 253, 0.02);
-  border-radius: 8px;
-  border: 1px dashed var(--color-border);
+h1 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 24px 0 12px;
+}
+
+.preview-badge {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(68, 108, 156, 0.15);
+  color: var(--brand-aurora-blue);
+  font-size: 0.65rem;
+  font-weight: 500;
+  vertical-align: middle;
 }
 
 .info-content {
   padding: 20px;
   color: var(--brand-slate-grey);
+}
+
+.info-content a {
+  color: var(--brand-aurora-blue);
+  text-decoration: underline;
+  font-weight: 600;
 }
 
 .logo-container {
@@ -712,25 +1061,42 @@ textarea {
   margin-bottom: 24px;
 }
 
-.logo {
-  width: 200px;
+.info-content :deep(.logo) {
+  width: 120px;
   max-width: 40%;
   height: auto;
-  border-radius: 8px;
 }
 
-.info-content h2 {
-  color: var(--brand-fog-grey);
-  margin-bottom: 16px;
-  font-size: 1.5rem;
-  font-weight: 600;
+.advanced-note {
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--brand-lumen-green);
 }
 
-.info-content h3 {
-  color: var(--brand-fog-grey);
-  margin: 24px 0 12px 0;
-  font-size: 1.1rem;
-  font-weight: 500;
+.targets {
+  display: flex;
+  gap: 8px;
+}
+
+.target {
+  flex: 1;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--brand-light-grey);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.target.active {
+  background: rgba(64, 176, 0, 0.2);
+  color: var(--brand-lumen-green);
+  border-color: var(--brand-lumen-green);
+}
+
+.target:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .info-content p {
@@ -738,63 +1104,6 @@ textarea {
   margin-bottom: 16px;
 }
 
-.info-content ul {
-  margin: 0 0 16px 0;
-  padding-left: 20px;
-}
-
-.info-content li {
-  margin-bottom: 8px;
-  line-height: 1.5;
-}
-
-.connection-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-
-.status-indicator {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  display: inline-block;
-}
-
-.status-indicator.connected {
-  background: #4ade80;
-  box-shadow: 0 0 8px rgba(74, 222, 128, 0.4);
-}
-
-.status-indicator.disconnected {
-  background: #ef4444;
-  box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
-}
-
-/* Mobile-first design - always mobile-like */
-@media (min-width: 480px) {
-  .container {
-    max-width: 400px;
-  }
-
-  .home {
-    padding: 20px;
-  }
-
-  .main-content {
-    padding: 20px;
-    padding-bottom: 40px !important;
-  }
-}
-
-@media (min-width: 1024px) {
-  .container {
-    max-width: 450px;
-  }
-}
-
-/* Mode Toggles Styles */
 .mode-toggles {
   display: flex;
   flex-direction: column;
@@ -805,7 +1114,6 @@ textarea {
   width: 100%;
 }
 
-/* Home Mode SSID Styles */
 .home-mode-settings {
   animation: fadeIn 0.3s ease-in-out;
 }
@@ -815,7 +1123,33 @@ textarea {
   margin-bottom: 32px;
 }
 
-.home-mode-settings .info-text {
+.home-mode-expressions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.expression-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 8px;
+  background: rgba(253, 253, 253, 0.02);
+  border-radius: 6px;
+}
+
+.expression-toggle-label {
+  font-size: 0.9rem;
+  color: var(--brand-fog-grey);
+  font-weight: 500;
+}
+
+.expression-toggle-row :deep(.boolean-input-container) {
+  width: auto;
+}
+
+.info-text {
   margin-top: 12px;
   padding: 8px 12px;
   background: rgba(68, 108, 156, 0.08);
@@ -826,10 +1160,114 @@ textarea {
   color: var(--brand-slate-grey);
 }
 
-/* Tab Instructions */
-.colors-instructions,
-.home-instructions,
-.setup-instructions,
+.revealed-password {
+  width: 100%;
+  height: 52px;
+  padding: 14px 16px;
+  border: 2px solid var(--color-background-mute);
+  border-radius: 12px;
+  font-size: 1rem;
+  font-weight: 500;
+  background-color: var(--color-background-mute);
+  color: var(--color-text);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  opacity: 0.8;
+}
+
+.field-error {
+  margin-top: 8px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--color-error);
+}
+
+.error-banner {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  z-index: 1002;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  max-width: 450px;
+  margin: 0 auto;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: rgba(248, 113, 113, 0.15);
+  border: 1px solid var(--color-error);
+  color: var(--color-error);
+  font-size: 0.85rem;
+  font-weight: 500;
+  backdrop-filter: blur(10px);
+}
+
+.error-dismiss {
+  background: none;
+  border: none;
+  color: var(--color-error);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.ap-boot-select {
+  width: 100%;
+  height: 52px;
+  padding: 14px 16px;
+  border: 2px solid var(--color-background-mute);
+  border-radius: 12px;
+  font-size: 1rem;
+  font-weight: 500;
+  background-color: var(--color-background);
+  color: var(--color-text);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+}
+
+.ap-boot-select:focus {
+  outline: none;
+  border-color: var(--brand-aurora-blue);
+  box-shadow: 0 0 0 3px rgba(68, 108, 156, 0.2);
+}
+
+.ap-boot-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.unlock-gate {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 48px 20px;
+}
+
+.unlock-gate p {
+  color: var(--brand-slate-grey);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.unlock-error {
+  color: var(--color-error);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.unlock-button {
+  padding: 14px;
+  border: none;
+  border-radius: 12px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: linear-gradient(135deg, var(--brand-aurora-blue), var(--brand-glow-pink));
+  color: var(--brand-lamp-white);
+}
+
 .expressions-instructions {
   margin-bottom: 24px;
   padding: 12px 16px;
@@ -837,9 +1275,6 @@ textarea {
   border-radius: 6px;
 }
 
-.colors-instructions p,
-.home-instructions p,
-.setup-instructions p,
 .expressions-instructions p {
   margin: 0;
   font-size: 0.85rem;
@@ -847,19 +1282,162 @@ textarea {
   color: var(--brand-fog-grey);
 }
 
-/* Password Info Text */
-.password-info-text {
-  margin-top: 12px;
-  padding: 8px 12px;
-  background: rgba(68, 108, 156, 0.08);
-  border-left: 2px solid var(--brand-aurora-blue);
-  border-radius: 4px;
-  font-size: 0.75rem;
-  line-height: 1.4;
+.nearby-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nearby-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: rgba(253, 253, 253, 0.02);
+  border-radius: 8px;
+}
+
+.nearby-critter {
+  width: 32px;
+  flex-shrink: 0;
+}
+
+.nearby-name {
+  flex: 1;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--brand-fog-grey);
+}
+
+.nearby-swatches {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.nearby-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.nearby-row.tappable {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.nearby-row.tappable:hover {
+  background: rgba(253, 253, 253, 0.06);
+}
+
+.nearby-disposition {
+  margin-left: 8px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--brand-glow-pink);
+}
+
+.nearby-chevron {
+  flex-shrink: 0;
+  font-size: 1.3rem;
+  line-height: 1;
   color: var(--brand-slate-grey);
 }
 
-/* Knockout Pixels Styles */
+.disp-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+}
+
+.disp-modal {
+  width: 100%;
+  max-width: 360px;
+  padding: 20px;
+  border-radius: 16px;
+  background: var(--color-background-soft);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+  animation: fadeIn 0.2s ease-in-out;
+}
+
+.disp-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.disp-critter {
+  width: 36px;
+  flex-shrink: 0;
+}
+
+.disp-name {
+  flex: 1;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--brand-lamp-white);
+}
+
+.disp-close {
+  background: none;
+  border: none;
+  color: var(--brand-slate-grey);
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.disp-prompt {
+  margin: 16px 0 12px;
+  font-size: 0.85rem;
+  color: var(--brand-slate-grey);
+}
+
+.disp-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.disp-option {
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--brand-light-grey);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 500;
+  text-transform: capitalize;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.disp-option:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.disp-option.active {
+  background: linear-gradient(135deg, var(--brand-aurora-blue), var(--brand-glow-pink));
+  color: var(--brand-lamp-white);
+  border-color: transparent;
+}
+
+.disp-error {
+  margin-top: 12px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--color-error);
+}
 
 .pixel-grid {
   display: flex;
@@ -888,14 +1466,14 @@ textarea {
   font-weight: 500;
 }
 
-.pixel-row .number-slider {
+.pixel-row :deep(.number-slider) {
   flex: 1;
 }
 
-/* Floating Save Button Styles */
+/* Floating Save Button */
 .floating-save-container {
   position: fixed;
-  bottom: 15px;
+  bottom: calc(var(--nav-h) + 14px + env(safe-area-inset-bottom));
   z-index: 1000;
   pointer-events: none;
   display: flex;
@@ -954,36 +1532,8 @@ textarea {
   cursor: not-allowed;
 }
 
-/* WebSocket Status Indicator */
-.ws-status-indicator {
-  position: fixed;
-  bottom: 16px;
-  right: 16px;
-  z-index: 1001;
-  background: rgba(0, 0, 0, 0.6);
-  border-radius: 50%;
-  backdrop-filter: blur(10px);
-  transition: all 0.3s ease;
-}
-
-.ws-status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--color-error);
-  transition: all 0.3s ease;
-  box-shadow: 0 0 8px rgba(248, 113, 113, 0.5);
-}
-
-.ws-status-indicator.connected .ws-status-dot {
-  background: var(--color-success);
-  box-shadow: 0 0 8px rgba(141, 205, 166, 0.5);
-}
-
-/* Mobile adjustments */
 @media (max-width: 479px) {
   .floating-save-container {
-    bottom: 16px;
     left: 16px;
     right: 16px;
     transform: none;
@@ -994,11 +1544,6 @@ textarea {
     width: 100%;
     max-width: 300px;
     min-width: auto;
-  }
-
-  .ws-status-indicator {
-    bottom: 12px;
-    right: 12px;
   }
 }
 </style>

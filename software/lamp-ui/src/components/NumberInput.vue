@@ -24,7 +24,8 @@ const updateValue = (event: Event) => {
   if (props.disabled) return
   const target = event.target as HTMLInputElement
   const value = parseInt(target.value) || 0
-  emit('update:modelValue', value)
+  const clamped = Math.min(Math.max(value, props.min), props.max)
+  emit('update:modelValue', clamped)
 }
 
 const increment = () => {

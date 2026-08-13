@@ -1,0 +1,13 @@
+# Wisp partition layout for ESP32-C6 4 MB flash.
+#
+# Standard OTA-capable layout: two ~1.9 MB app slots (app0/app1) + small
+# SPIFFS + coredump. The wisp does not gossip-OTA today (lamps do), but
+# leaving the dual-app layout in place means a future wisp self-OTA path
+# (e.g. BLE-direct from the app) doesn't require a partition migration.
+#
+# Name,    Type, SubType,  Offset,   Size,     Flags
+nvs,       data, nvs,      0x9000,   0x5000,
+otadata,   data, ota,      0xE000,   0x2000,
+app0,      app,  ota_0,    0x10000,  0x1E0000,
+app1,      app,  ota_1,    0x1F0000, 0x1E0000,
+coredump,  data, coredump, 0x3F0000, 0x10000,

@@ -1,0 +1,10 @@
+{
+  "name": "lampos-crypto",
+  "version": "1.0.0",
+  "description": "Shared AES-256-GCM op-decrypt core (HKDF-SHA256 derive + GCM auth-decrypt) for lamp and wisp. Replay windowing stays in each firmware's own wrapper.",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": {
+    "libLDFMode": "chain"
+  }
+}

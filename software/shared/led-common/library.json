@@ -1,0 +1,10 @@
+{
+  "name": "lampos-led",
+  "version": "1.0.0",
+  "description": "Shared LED output helpers for lamp and wisp: power model, pixel formats, blended identity.",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": {
+    "libLDFMode": "chain"
+  }
+}

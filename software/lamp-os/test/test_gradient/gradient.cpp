@@ -1,6 +1,7 @@
 #include <unity.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <format>
@@ -51,22 +52,25 @@ Color fadeLinear(Color start, Color end, uint32_t steps, uint32_t currentStep) {
                          : easeLinear(start.w, end.w, steps, currentStep));
 };
 
+constexpr uint8_t kMaxStops = 8;
+
+void calculateGradientInto(Color inColorStart, Color inColorEnd, Color* dst,
+                           uint8_t steps) {
+  for (uint8_t i = 0; i < steps; i++) {
+    dst[i] = fadeLinear(inColorStart, inColorEnd, steps, i);
+  }
+}
+
 std::vector<Color> calculateGradient(Color inColorStart, Color inColorEnd,
                                      uint8_t inSteps) {
-  std::vector<Color> output;
-
-  for (int i = 0; i < inSteps; i++) {
-    output.push_back(fadeLinear(inColorStart, inColorEnd, inSteps, i));
-  }
-
+  std::vector<Color> output(inSteps);
+  calculateGradientInto(inColorStart, inColorEnd, output.data(), inSteps);
   return output;
 };
 
 std::vector<Color> buildGradientWithStops(uint8_t inNumberPixels,
                                           std::vector<Color> inColorStops) {
   uint8_t numberColors = inColorStops.size();
-  uint8_t i = 0;
-  std::vector<Color> gradient;
 
   // input color stops are empty
   if (numberColors < 1) {
@@ -78,19 +82,31 @@ std::vector<Color> buildGradientWithStops(uint8_t inNumberPixels,
     return std::vector<Color>{inNumberPixels, inColorStops[0]};
   }
 
+  if (numberColors > kMaxStops) {
+    numberColors = kMaxStops;
+  }
+
   // two colors - return a single gradient
   if (numberColors == 2) {
-    return calculateGradient(inColorStops[0], inColorStops[1], inNumberPixels);
+    std::vector<Color> buf(inNumberPixels);
+    calculateGradientInto(inColorStops[0], inColorStops[1], buf.data(),
+                          inNumberPixels);
+    return buf;
   }
 
   // multiple colors - use integer math to calculate an even fit for all the
   // stops
   uint8_t steps = floor(inNumberPixels / (numberColors - 1));
   uint8_t remainder = inNumberPixels % (numberColors - 1);
-  std::vector<uint8_t> breaks = std::vector<uint8_t>(numberColors - 1, steps);
+
+  std::array<uint8_t, kMaxStops - 1> breaks{};
+  const uint8_t numBreaks = numberColors - 1;
+  for (uint8_t i = 0; i < numBreaks; i++) {
+    breaks[i] = steps;
+  }
 
   if (remainder != 0) {
-    for (i = 0; i < numberColors - 1; i++) {
+    for (uint8_t i = 0; i < numBreaks; i++) {
       breaks[i] = breaks[i] + 1;
 
       remainder--;
@@ -103,11 +119,12 @@ std::vector<Color> buildGradientWithStops(uint8_t inNumberPixels,
 
   // with all the breakpoints identified, build the gradients
   std::vector<Color> buf;
-  buf.reserve(inNumberPixels);
-  for (i = 0; i < breaks.size(); i++) {
-    gradient =
-        calculateGradient(inColorStops[i], inColorStops[i + 1], breaks[i]);
-    buf.insert(buf.end(), gradient.begin(), gradient.end());
+  buf.resize(inNumberPixels);
+  size_t offset = 0;
+  for (uint8_t i = 0; i < numBreaks; i++) {
+    calculateGradientInto(inColorStops[i], inColorStops[i + 1],
+                          buf.data() + offset, breaks[i]);
+    offset += breaks[i];
   }
 
   return buf;

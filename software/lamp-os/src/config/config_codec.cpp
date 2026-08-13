@@ -1,0 +1,265 @@
+#include "config/config_codec.hpp"
+
+#include "util/color.hpp"
+#include "util/str.hpp"
+
+namespace lamp {
+namespace config_codec {
+
+// Replace a role's segment list from `node["segments"]`. Absent/empty array
+// keeps the current (variant-default) list. Every segment is left with ≥1
+// color so broadcastColors() is always dereferenceable.
+// Fallback: if `segments` is absent/empty but the old flat `colors` array
+// is present (blobs from before the per-segment schema), migrate to a single
+// segment named `roleName` so custom colors survive the upgrade and the app
+// doesn't render a blank segment label.
+static void parseSegments(JsonObject node, std::vector<SegmentSettings>& segs,
+                          const Color& fallback, const std::string& roleName) {
+  JsonArray arr = node["segments"];
+  if (arr.isNull() || arr.size() == 0) {
+    JsonArray flat = node["colors"];
+    if (flat.isNull() || flat.size() == 0) return;
+    SegmentSettings seg;
+    seg.name = roleName;
+    seg.px = node["px"] | 0;
+    for (JsonVariant c : flat) seg.colors.push_back(hexStringToColor(c));
+    if (seg.colors.empty()) seg.colors.push_back(fallback);
+    segs.clear();
+    segs.push_back(std::move(seg));
+    return;
+  }
+  segs.clear();
+  for (JsonObject segNode : arr) {
+    SegmentSettings seg;
+    seg.name = std::string(segNode["name"] | "");
+    seg.px = segNode["px"] | 0;
+    for (JsonVariant c : segNode["colors"].as<JsonArray>()) {
+      seg.colors.push_back(hexStringToColor(c));
+    }
+    if (seg.colors.empty()) seg.colors.push_back(fallback);
+    segs.push_back(std::move(seg));
+  }
+  if (segs.empty()) segs.push_back({roleName, 0, {fallback}});
+}
+
+// Σ segment px ≤ 255 (uint8 pixelCount + boot buffer sizing). This is the one
+// boundary every NVS load crosses (settings-blob apply AND webapp raw-persist
+// both re-parse here on boot), so clamp the running sum: a garbage oversized
+// blob can't blow the boot buffer.
+static void clampSumPx(std::vector<SegmentSettings>& segs) {
+  unsigned budget = 255;
+  for (auto& s : segs) {
+    if (s.px > budget) s.px = static_cast<uint8_t>(budget);
+    budget -= s.px;
+  }
+}
+
+static void writeSegments(JsonObject node,
+                          const std::vector<SegmentSettings>& segs) {
+  JsonArray arr = node["segments"].to<JsonArray>();
+  for (const auto& s : segs) {
+    JsonObject o = arr.add<JsonObject>();
+    o["name"] = s.name;
+    o["px"] = s.px;
+    JsonArray colors = o["colors"].to<JsonArray>();
+    for (const auto& c : s.colors) colors.add(colorToHexString(c));
+  }
+}
+
+void fromJson(JsonObject root, LampSettings& lamp, BaseSettings& base,
+              ShadeSettings& shade, ExpressionSettings& expressions,
+              HomeModeSettings& homeMode) {
+  JsonObject lampNode = root["lamp"];
+  // lampType is firmware-owned (see Config::setLampType).
+  // Inbound settings_blob writes intentionally do not update it; the app
+  // can read but not write the variant identity.
+  lamp.name = asciiLower(std::string(lampNode["name"] | kDefaultLampName));
+  lamp.brightness = lampNode["brightness"] | 100;
+  std::string password = std::string(lampNode["password"] | "");
+  if (!password.empty()) {
+    lamp.password = password;
+  }
+  lamp.setup = lampNode["setup"] | false;
+  lamp.named = lampNode["named"] | false;
+  lamp.advancedEnabled = lampNode["advancedEnabled"] | false;
+  lamp.webappEnabled = lampNode["webappEnabled"] | true;
+  lamp.apBootMinutes = lampNode["apBootMinutes"] | 0;
+  lamp.brightnessCeiling = lampNode["brightnessCeiling"] | 170;
+  // SocialMode persists as uint8_t (0=Introvert, 1=Ambivert, 2=Extrovert).
+  // Out-of-range values fall back to Ambivert so a corrupt or future-versioned
+  // payload doesn't strand the lamp in an unknown personality.
+  {
+    uint32_t modeRaw = lampNode["socialMode"] | 1;
+    if (modeRaw > 2) modeRaw = 1;
+    lamp.socialMode = static_cast<SocialMode>(modeRaw);
+  }
+
+  JsonObject baseNode = root["base"];
+  base.byteOrder = std::string(baseNode["byteOrder"] | "");
+  parseSegments(baseNode, base.segments, kBaseDefaultColor, "Base");
+  clampSumPx(base.segments);
+  // Keep knockoutPixels in sync with the active pixel count. Drops stale
+  // entries when px shrinks and 100-fills ("no knockout") any slots when px
+  // grows. The input loop below then overwrites slots 0..sumPx-1 from JSON.
+  base.knockoutPixels.resize(base.sumPx(), 100);
+  // Knockout: positional uint8 array, one entry per pixel. Index = pixel;
+  // value = brightness % (0..100, default 100). Matches `asBaseJson` /
+  // `asJsonDocument` emit shape.
+  JsonArray baseKnockoutPixels = baseNode["knockout"];
+  for (size_t i = 0;
+       i < baseKnockoutPixels.size() && i < base.knockoutPixels.size();
+       i++) {
+    int value = baseKnockoutPixels[i] | 100;
+    base.knockoutPixels[i] = (uint8_t)value;
+  }
+
+  JsonObject shadeNode = root["shade"];
+  shade.byteOrder = std::string(shadeNode["byteOrder"] | "");
+  parseSegments(shadeNode, shade.segments, kShadeDefaultColor, "Shade");
+  clampSumPx(shade.segments);
+  // colorsEditable is firmware-owned (set by Lamp subclass defaults via
+  // applyDefaults). Inbound writes intentionally do not update it.
+
+  // Load expressions
+  JsonArray expressionsNode = root["expressions"];
+  if (expressionsNode) {
+    expressions.expressions.clear();
+    for (JsonObject exprNode : expressionsNode) {
+      ExpressionConfig expr;
+      expr.type = std::string(exprNode["type"] | "");
+      expr.enabled = exprNode["enabled"] | false;
+      expr.intervalMin = exprNode["intervalMin"] | 60;
+      expr.intervalMax = exprNode["intervalMax"] | 900;
+      expr.target = exprNode["target"] | 3;
+      // disabledDuringWispOverride is a pure type-property, not loaded from
+      // NVS. Old blobs carrying the key are tolerated; the skip-list below
+      // drops it from the generic parameter loop.
+      // Load generic parameters
+      for (JsonPair kv : exprNode) {
+        const char* key = kv.key().c_str();
+        std::string keyStr(key);
+
+        // Common fields already handled above.
+        if (keyStr == "type" || keyStr == "enabled" || keyStr == "intervalMin" ||
+            keyStr == "intervalMax" || keyStr == "target" || keyStr == "colors" ||
+            keyStr == "disabledDuringWispOverride") {
+          continue;
+        }
+
+        // Store the parameter value
+        JsonVariant value = kv.value();
+        if (value.is<uint32_t>()) {
+          expr.setParameter(keyStr, value.as<uint32_t>());
+        } else if (value.is<int>()) {
+          expr.setParameter(keyStr, static_cast<uint32_t>(value.as<int>()));
+        }
+      }
+
+      JsonArray exprColors = exprNode["colors"];
+      if (exprColors.size()) {
+        for (JsonVariant color : exprColors) {
+          expr.colors.push_back(hexStringToColor(color));
+        }
+      }
+
+      expressions.expressions.push_back(expr);
+    }
+  }
+
+  // Load home mode. A legacy "password" field in NVS is silently ignored
+  // (presence-only home mode stores no password).
+  JsonObject homeModeNode = root["homeMode"];
+  if (homeModeNode) {
+    homeMode.ssid = std::string(homeModeNode["ssid"] | "");
+    homeMode.brightness = homeModeNode["brightness"] | 60;
+    // Migration: lamps configured before `enabled` existed have no
+    // "enabled" key in their NVS-stored JSON. Treat "has SSID" as proxy
+    // for "user wanted home mode on" so they keep working post-update.
+    homeMode.enabled = homeModeNode["enabled"] | !homeMode.ssid.empty();
+    homeMode.networkBound = homeModeNode["networkBound"] | !homeMode.ssid.empty();
+    homeMode.socialDisabled = homeModeNode["socialDisabled"] | true;
+    if (homeModeNode["disabledExpressionTypes"].is<JsonArray>()) {
+      homeMode.disabledExpressionTypes.clear();
+      for (JsonVariant v : homeModeNode["disabledExpressionTypes"].as<JsonArray>())
+        if (const char* s = v.as<const char*>())
+          homeMode.disabledExpressionTypes.push_back(s);
+    } else {
+      homeMode.disabledExpressionTypes = {"glitchy"};
+    }
+  }
+}
+
+void toJson(JsonObject root, const LampSettings& lamp, const BaseSettings& base,
+            const ShadeSettings& shade, const ExpressionSettings& expressions,
+            const HomeModeSettings& homeMode) {
+  JsonObject lampNode = root["lamp"].to<JsonObject>();
+  lampNode["name"] = lamp.name;
+  lampNode["brightness"] = lamp.brightness;
+  if (!lamp.password.empty()) {
+    lampNode["password"] = lamp.password;
+  }
+  lampNode["setup"] = lamp.setup;
+  lampNode["named"] = lamp.named;
+  lampNode["advancedEnabled"] = lamp.advancedEnabled;
+  lampNode["webappEnabled"] = lamp.webappEnabled;
+  lampNode["apBootMinutes"] = lamp.apBootMinutes;
+  lampNode["brightnessCeiling"] = lamp.brightnessCeiling;
+  lampNode["socialMode"] = static_cast<uint8_t>(lamp.socialMode);
+  JsonObject baseNode = root["base"].to<JsonObject>();
+  if (!base.byteOrder.empty()) baseNode["byteOrder"] = base.byteOrder;
+  baseNode["colorsEditable"] = base.colorsEditable;
+  writeSegments(baseNode, base.segments);
+  // Positional uint8 array, same shape as asBaseJson. Keeps the on-disk
+  // NVS format consistent with the BLE per-section read.
+  JsonArray baseKnockoutNode = baseNode["knockout"].to<JsonArray>();
+  for (int i = 0; i < base.knockoutPixels.size(); i++) {
+    baseKnockoutNode.add((int)base.knockoutPixels[i]);
+  }
+
+  JsonObject shadeNode = root["shade"].to<JsonObject>();
+  if (!shade.byteOrder.empty()) shadeNode["byteOrder"] = shade.byteOrder;
+  shadeNode["colorsEditable"] = shade.colorsEditable;
+  writeSegments(shadeNode, shade.segments);
+
+  // Serialize expressions
+  JsonArray expressionsNode = root["expressions"].to<JsonArray>();
+  for (const auto& expr : expressions.expressions) {
+    JsonObject exprNode = expressionsNode.add<JsonObject>();
+    exprNode["type"] = expr.type;
+    exprNode["enabled"] = expr.enabled;
+    exprNode["intervalMin"] = expr.intervalMin;
+    exprNode["intervalMax"] = expr.intervalMax;
+    exprNode["target"] = expr.target;
+    // disabledDuringWispOverride is a pure type-property, not persisted.
+    // Serialize generic parameters
+    for (const auto& param : expr.parameters) {
+      const std::string& key = param.first;
+      const uint32_t& value = param.second;
+      exprNode[key] = value;
+    }
+
+    JsonArray colorsNode = exprNode["colors"].to<JsonArray>();
+    for (const auto& color : expr.colors) {
+      colorsNode.add(colorToHexString(color));
+    }
+  }
+
+  JsonObject homeModeNode = root["homeMode"].to<JsonObject>();
+  homeModeNode["ssid"] = homeMode.ssid;
+  homeModeNode["brightness"] = homeMode.brightness;
+  homeModeNode["enabled"] = homeMode.enabled;
+  homeModeNode["networkBound"] = homeMode.networkBound;
+  homeModeNode["socialDisabled"] = homeMode.socialDisabled;
+  JsonArray disArr = homeModeNode["disabledExpressionTypes"].to<JsonArray>();
+  for (const auto& s : homeMode.disabledExpressionTypes) disArr.add(s);
+}
+
+bool configBlobPersistable(const char* json) {
+  if (json == nullptr) return false;
+  JsonDocument doc;
+  if (deserializeJson(doc, json) != DeserializationError::Ok) return false;
+  return doc["lamp"].is<JsonObject>();
+}
+
+}  // namespace config_codec
+}  // namespace lamp

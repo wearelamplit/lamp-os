@@ -1,21 +1,18 @@
-#include "./expression.hpp"
+#include "expression.hpp"
 
 #include <Arduino.h>
 
-#include "../core/compositor.hpp"
-#include "./expression_manager.hpp"
+#include <algorithm>
 
-// Global frame buffer references (set by ExpressionManager)
-namespace lamp {
-  extern std::vector<FrameBuffer*> expressionFrameBuffers;
-
-  // Global compositor pointer (set by standard_lamp)
-  static Compositor* globalCompositor = nullptr;
-
-  void setGlobalCompositor(Compositor* compositor) {
-    globalCompositor = compositor;
-  }
-}
+#include "components/network/protocol/lamp_protocol.hpp"
+#include "components/transient_override/color_override.hpp"
+#include "core/override_aggregate.hpp"
+#include "core/behavior_context.hpp"
+#include "core/compositor.hpp"
+#include "expression_manager.hpp"
+#include "expressions/param_utils.hpp"
+#include "expressions/primitives.hpp"
+#include "util/eased_scalar.hpp"
 
 namespace lamp {
 
@@ -24,33 +21,51 @@ void Expression::configure(const std::vector<Color>& inColors,
                           uint32_t inIntervalMax,
                           ExpressionTarget inTarget) {
   colors = inColors;
-  intervalMinMs = inIntervalMin * 1000;
-  intervalMaxMs = inIntervalMax * 1000;
+  intervalMinMs = inIntervalMin * kMsPerSecond;
+  intervalMaxMs = inIntervalMax * kMsPerSecond;
   target = inTarget;
   scheduleNextTrigger();
 }
 
 void Expression::scheduleNextTrigger() {
-  std::uniform_int_distribution<uint32_t> dist(intervalMinMs, intervalMaxMs);
-  nextTriggerMs = millis() + dist(rng);
+  nextTriggerMs = millis() + rng.range(intervalMinMs, intervalMaxMs);
 }
 
 void Expression::saveBufferState() {
   savedBuffer = fb->buffer;
 }
 
-bool Expression::shouldAffectBuffer() {
-  if (expressionFrameBuffers.empty()) return false;
+namespace {
+// The ColorOverride owning this fb's surface, or nullptr when the buffer
+// list isn't wired yet (or fb isn't one of the two surfaces). Shade is
+// published first, base second (ExpressionManager::begin()).
+ColorOverride* surfaceOverrideFor(BehaviorContext* ctx, FrameBuffer* fb) {
+  if (!ctx || ctx->expressionFrameBuffers.size() < 2) return nullptr;
+  if (fb == ctx->expressionFrameBuffers[1]) return &lamp::overrides.base;
+  if (fb == ctx->expressionFrameBuffers[0]) return &lamp::overrides.shade;
+  return nullptr;
+}
+}  // namespace
 
-  // Check if current buffer matches our target
-  bool isShade = (fb == expressionFrameBuffers[0]);  // Shade is first
-  bool isBase = (fb == expressionFrameBuffers[1]);   // Base is second
+bool Expression::shouldAffectBuffer() {
+  // Context is wired by Compositor::addBehavior at register time (or by
+  // ExpressionManager::setCompositor for transients). Until both are wired
+  // and ExpressionManager::begin() has published the buffer list, treat as
+  // not-yet-routable and skip.
+  if (!context_ || context_->expressionFrameBuffers.size() < 2) return false;
+
+  ColorOverride* ov = surfaceOverrideFor(context_, fb);
+
+  // While the operator has this surface's color editor open, pause all
+  // expressions on it so the color being picked reads clean instead of
+  // getting overdrawn. Per-surface: editing base leaves shade alone.
+  if (ov && ov->operatorEditing()) return false;
 
   switch (target) {
     case TARGET_SHADE:
-      return isShade;
+      return fb == context_->expressionFrameBuffers[0];
     case TARGET_BASE:
-      return isBase;
+      return fb == context_->expressionFrameBuffers[1];
     case TARGET_BOTH:
       return true;
     default:
@@ -58,13 +73,33 @@ bool Expression::shouldAffectBuffer() {
   }
 }
 
+float Expression::wispDimScale() {
+  if (!context_ || !context_->compositor ||
+      context_->expressionFrameBuffers.size() < 2) {
+    return 1.0f;
+  }
+  const bool isBase = fb == context_->expressionFrameBuffers[1];
+  const bool isShade = fb == context_->expressionFrameBuffers[0];
+  if (!isBase && !isShade) return 1.0f;
+  const float w = context_->compositor->wispPresence(isBase);
+  return opacityTarget(true, opacityPct_ / 100.0f, wispDimFloor(), w);
+}
+
+void Expression::configureOpacity(const std::map<std::string, uint32_t>& parameters) {
+  opacityPct_ = static_cast<uint8_t>(
+      std::clamp<uint32_t>(getParam(parameters, "opacity", 100), 10, 100));
+}
+
+void Expression::configureEasing(const std::map<std::string, uint32_t>& parameters, uint32_t defVal) {
+  easingRaw_ = getParam(parameters, "easing", defVal);
+  easing_ = (easingRaw_ == static_cast<uint32_t>(Easing::Random))
+                ? randomEasing(rng)
+                : static_cast<Easing>(easingRaw_);
+}
+
 void Expression::control() {
-  // Pause if an exclusive behavior is running (unless we are exclusive)
-  if (shouldPause()) return;
-
-
   // Check for automatic trigger
-  if (animationState == STOPPED && millis() > nextTriggerMs) {
+  if (autoTriggerEnabled && animationState == STOPPED && timeReached(millis(), nextTriggerMs)) {
     trigger();
   }
 
@@ -73,43 +108,56 @@ void Expression::control() {
     onUpdate();
   }
 
-  // Handle completion - check if we just stopped
+  // Handle completion when the animation just stopped
   if (animationState == STOPPED && currentLoop > lastCompletedLoop) {
     onComplete();
     lastCompletedLoop = currentLoop;
   }
 }
 
-bool Expression::shouldPause() const {
-  // Don't pause if this expression is exclusive
-  if (isExclusive) return false;
+void Expression::continuousControl() {
+  if (autoTriggerEnabled && animationState == STOPPED) trigger();
+}
 
-  // Check if compositor has an active exclusive
-  return globalCompositor && globalCompositor->hasActiveExclusive();
+bool Expression::previewCycleComplete() {
+  if (autoTriggerEnabled) return false;
+  return ++previewCyclesDone_ >= kPreviewCycles;
 }
 
 Color Expression::getRandomColor() {
   if (colors.empty()) {
-    return Color(0, 0, 0, 0);
+    return kSafeFallbackColor;
   }
-  std::uniform_int_distribution<size_t> dist(0, colors.size() - 1);
-  return colors[dist(rng)];
+  return colors[rng.range(0, colors.size() - 1)];
 }
 
-void Expression::trigger() {
+Color Expression::firstColorOr(Color fallback) const {
+  return colors.empty() ? fallback : colors.front();
+}
 
+bool Expression::trigger() {
   // Only trigger if this expression should affect this buffer
   // This ensures expressions respect their target configuration
   if (!shouldAffectBuffer()) {
-    return;
+    return false;
   }
 
+  if (easingRaw_ == static_cast<uint32_t>(Easing::Random)) easing_ = randomEasing(rng);
 
-  // Save current state and start immediately
-  saveBufferState();
+  // Start immediately
   onTrigger();            // Expression-specific setup
   scheduleNextTrigger();  // Reset next automatic trigger
   playOnce();
+
+  // Notify the manager so the cascade convention fires for all trigger
+  // paths, including the per-entry auto-trigger from control().
+  // triggerExpression/triggerInvocation set a suppress flag around their
+  // own loops so this callback doesn't double-cascade.
+  if (context_ && context_->expressionManager) {
+    context_->expressionManager->onExpressionFired(this);
+  }
+  return true;
 }
 
+// Lives in lamp.cpp as globals; defined in lamp namespace.
 }  // namespace lamp

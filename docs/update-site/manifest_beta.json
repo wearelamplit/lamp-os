@@ -1,0 +1,13 @@
+{
+  "name": "LampOS (beta)",
+  "version": "beta",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        { "path": "/dl/beta/distribution-standard.bin", "offset": 0 }
+      ]
+    }
+  ]
+}

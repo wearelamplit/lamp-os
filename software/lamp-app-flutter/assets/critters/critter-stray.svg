@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 60">
+  <defs>
+    <linearGradient id="critterStrayShade" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#fffdd1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#fffdd1;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="critterStrayBody" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#fffdd1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#fffdd1;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <path fill="url(#critterStrayShade)" d="M19.4,5.8C15.2,7.4,12.5,11.2,12.8,15.6c.3,3.9,3.6,6.8,7.5,7.2c3.8.4,7.8-1.1,9.4-4.6c1.4-3.1,1-7-1.4-9.4C25.9,6.4,22.3,4.7,19.4,5.8Z"/>
+  <path fill="url(#critterStrayShade)" d="M30.8,4.2c-1.1-0.5-1.7,1-1.2,1.9c0.5,0.9,1.7,1.4,2.6,0.9C33.1,6.5,32.1,4.7,30.8,4.2Z"/>
+  <path fill="url(#critterStrayBody)" d="M14.6,24.9c-2.8,2.6-4.1,6.6-3.7,10.4c0.4,4.2,3.3,7.9,7.1,9.7c4.1,1.9,9,1.7,12.7-0.8c3.4-2.3,5.1-6.5,4.2-10.6c-1-4.3-4.6-7.7-8.9-8.5C22.1,24.4,18,22.9,14.6,24.9Z"/>
+  <path fill="url(#critterStrayBody)" d="M18.9,46.2c-0.6,2.7-0.4,5.7,1,8.1c1,1.7,3.4,2.1,4.5,0.4c1.1-1.7,0.4-4.1-0.4-5.9C23.1,46.9,20.5,45.2,18.9,46.2Z"/>
+  <path fill="url(#critterStrayBody)" d="M29.2,47.6c-1,1.8-1.2,4.1-0.3,6c0.7,1.5,2.7,2.1,3.9,0.8c1.2-1.4,1-3.6,0.3-5.2C32.4,47.7,30.5,46.4,29.2,47.6Z"/>
+  <path fill="url(#critterStrayBody)" d="M40.5,40.8c-0.6,0.4-0.4,1.4,0.2,1.6c0.7,0.2,1.3-0.5,1.1-1.2C41.7,40.7,41.1,40.5,40.5,40.8Z"/>
+  <path fill="url(#critterStrayBody)" d="M43.2,44.6c-0.4,0.3-0.3,0.9,0.1,1c0.4,0.1,0.8-0.3,0.6-0.7C43.9,44.5,43.5,44.4,43.2,44.6Z"/>
+  <path fill="url(#critterStrayBody)" d="M45.3,47.4c-0.3,0.2-0.2,0.6,0.1,0.7c0.3,0.1,0.6-0.2,0.4-0.5C45.7,47.4,45.5,47.3,45.3,47.4Z"/>
+</svg>

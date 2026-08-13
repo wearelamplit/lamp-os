@@ -1,0 +1,97 @@
+# Social system overview
+
+How a lamp behaves around other lamps — greeting them and dimming in a crowd.
+This is the map; the per-subsystem detail lives in the linked docs. **The
+code wins ties**; update these docs when it doesn't.
+
+## Two inputs drive everything
+
+Every social behavior is a function of the same two values:
+
+- **SocialMode** — the lamp's own personality, `Introvert` / `Ambivert` /
+  `Extrovert`. One per lamp, persisted in NVS. Ambivert is the default /
+  neutral baseline.
+- **Disposition** — how *this* lamp feels about *that* peer, `1=Salty`,
+  `2=Wary`, `3=Neutral`, `4=Fond`, `5=Smitten`. Per peer, per lamp,
+  asymmetric (A can be Smitten with B while B is Wary with A), persisted
+  in NVS keyed by peer `lampId` (mesh mac). Unknown peers default to
+  Neutral.
+
+A peer's BLE presence (and RSSI) comes from the unified `LampRoster`
+store. Disposition lookups come from `Config`. Both feed both
+subsystems below.
+
+## Two subsystems
+
+| Subsystem | What it does | Lives in | Detail doc |
+|---|---|---|---|
+| **Greetings** | A one-shot waveform on the shade when the lamp meets a peer — fade to their color, hold, fade back. Shape varies by SocialMode × Disposition. | `behaviors/social.cpp` (renderer), `core/personality_engine.cpp` (timing source) | [`personality-greetings.md`](personality-greetings.md) |
+| **Crowd-dim** | Continuous brightness damping as the room fills with peers, weighted by disposition and floored per mode. Introverts hide harder; Extroverts never dim. | `core/personality_engine.cpp` | [`personality-signals.md`](personality-signals.md) |
+
+### Greetings
+
+When a peer is heard close by (short-range BLE) and isn't on cooldown,
+`SocialBehavior` plays a greeting. `PersonalityEngine::greetingFor(lampId)`
+maps `(SocialMode × Disposition)` to a `GreetingTuning` (ease-in / hold /
+fade-out frames + dim parameters); the behavior renders it on the shade.
+Warm relationships greet longer and pop in faster, and the warmest ones
+*breathe* — one or more slow pulses during the hold (Fond/Smitten);
+neutral greetings are a plain in/hold/out; cold ones snub (fade to
+dark-in-their-color and back). Cooldowns + introvert fatigue throttle how
+often greetings fire. Full waveform + cadence contract:
+[`personality-greetings.md`](personality-greetings.md).
+
+The **snafu** variant replaces `SocialBehavior` with its own greeting
+stack, `snafu::Greeting` plus a `DotsBehavior` borrow/melt afterglow, in
+`lamps/snafu/greeting.{hpp,cpp}` and `lamps/snafu/dots_behavior.{hpp,cpp}`;
+the description above doesn't apply to snafu.
+
+### Crowd-dim
+
+`PersonalityEngine` samples BLE-reachable peers at 1 Hz, weights each by
+disposition (mode-dependent — Ambivert ignores Fond/Smitten pressure,
+Introvert weights almost everyone), medians over a short window + EMA-
+smooths, then maps the weighted count through a log curve to a brightness
+multiplier floored per mode (Introvert dims further than Ambivert;
+Extrovert disabled = 1.0; floors in `personality_engine.cpp`). A small
+deadband stops jitter from committing. The result is applied to the lamp's
+baseline brightness — a
+busy room makes an introverted lamp recede. The read-only accessors a
+custom lamp can react to (`crowdDimFactor()`, `smoothedCrowdWeight()`,
+`crowdComposition()`) are in [`personality-signals.md`](personality-signals.md).
+
+## How they interact
+
+- **Shared inputs, independent outputs.** Both read the same
+  presence + disposition state, but render on different paths — greetings
+  on the lamp's own surfaces via the behavior stack, crowd-dim via the
+  brightness pipeline. They can both be active at once (e.g. dimmed for the
+  crowd while mid-greeting on a new arrival).
+- **Extrovert disengages crowd-dim.** In Extrovert mode `crowdDimFactor()`
+  is hard 1.0 — an extrovert lamp greets eagerly (short cooldowns) and
+  never recedes.
+- **OTA outranks personality.** Firmware propagation is gated separately
+  from the visual greeting; a lamp distributes/receives OTA regardless of
+  social mode. The greeting's appearance is personality's department, not
+  whether bytes move. (See the OTA notes in the firmware components.)
+
+## Code map
+
+- `core/personality_engine.{hpp,cpp}` — the engine: greeting tuning lookup,
+  crowd-dim sampler/smoother. Global singleton `personalityEngine`, wired +
+  ticked by the framework.
+- `behaviors/social.{hpp,cpp}` — the greeting renderer + discovery /
+  cooldown / fatigue gating.
+- `config/` — SocialMode + per-peer dispositions storage (NVS) and their
+  BLE sync surfaces.
+
+## Cross-references
+
+- [`personality-greetings.md`](personality-greetings.md) — greeting
+  waveforms, the profile shapes, cooldown + fatigue rules.
+- [`personality-signals.md`](personality-signals.md) — the read-only
+  signal API custom lamps react to, with worked examples.
+- [`lamp-social-api.md`](lamp-social-api.md) — the author-facing API a custom
+  behavior reaches these signals through: `forEachArrival` / `onArrival` /
+  `greetingFor` / `dispositionOf` / `crowd` / `crowdWeight`, via its
+  `BehaviorContext` rather than the globals.

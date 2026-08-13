@@ -1,7 +1,7 @@
 <template>
   <div class="number-slider-group">
     <span class="number-slider-value">{{
-      prepend === 'time' ? 'Time' : prepend + localValue + append
+      format ? format(localValue) : prepend === 'time' ? 'Time' : prepend + localValue + append
     }}</span>
     <input
       :id="id"
@@ -9,11 +9,11 @@
       type="range"
       :min="min"
       :max="max"
+      :step="step"
       :disabled="disabled"
       class="number-slider"
       :class="{ disabled: disabled }"
       :style="sliderStyle"
-      @input="updateValue"
       @touchstart="handleTouchStart"
       @touchmove="handleTouchMove"
       @touchend="handleTouchEnd"
@@ -29,15 +29,19 @@ interface Props {
   id: string
   min?: number
   max?: number
+  step?: number
   color?: string
   append?: string
   prepend?: string
   disabled?: boolean
+  /** Overrides the `prepend + value + append` label when set. */
+  format?: (v: number) => string
 }
 
 const props = withDefaults(defineProps<Props>(), {
   min: 0,
   max: 255,
+  step: 1,
   color: '#666666',
   append: '',
   prepend: '',
@@ -56,10 +60,6 @@ const sliderStyle = computed(() => {
     '--slider-thumb-hover-color': props.color,
   }
 })
-
-const updateValue = () => {
-  emit('update:modelValue', localValue.value)
-}
 
 // Touch event handlers to prevent page swiping
 const handleTouchStart = (event: TouchEvent) => {

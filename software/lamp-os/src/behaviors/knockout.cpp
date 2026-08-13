@@ -1,6 +1,6 @@
-#include "./knockout.hpp"
+#include "knockout.hpp"
 
-#include "./util/levels.hpp"
+#include "util/levels.hpp"
 
 namespace lamp {
 void KnockoutBehavior::draw() {

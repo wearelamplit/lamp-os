@@ -1,0 +1,10 @@
+{
+  "name": "lampos-protocol",
+  "version": "1.0.0",
+  "description": "Shared ESP-NOW mesh wire-format core (header/version scheme, MSG_HELLO/CONTROL_OP/WISP_*/OVERRIDE-RESTORE builders+parsers, DedupRing) for lamp and wisp. Lamp-only families (OTA/FS, directed command/color, event) compose on top in the lamp firmware.",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": {
+    "libLDFMode": "chain"
+  }
+}

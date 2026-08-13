@@ -1,63 +1,165 @@
-#include "./compositor.hpp"
+#include "compositor.hpp"
 
-#include "./behaviors/fade_in.hpp"
-#include "./behaviors/idle.hpp"
+#include <Arduino.h>
+
+#include "behaviors/configurator.hpp"
+#include "components/firmware/firmware_distributor.hpp"
+#include "components/firmware/firmware_receiver.hpp"
+#include "components/firmware/ota_indicator.hpp"
+#include "components/firmware/ota_quiet_mode.hpp"
+#include "core/override_aggregate.hpp"
+
+extern lamp::FirmwareReceiver firmwareReceiver;
 
 namespace lamp {
-Compositor::Compositor() {};
+Compositor::Compositor() {
+  // Self-publish so behaviors registered later can reach the compositor
+  // without a global. ExpressionManager / FrameBuffer fields are wired by
+  // their respective owners (lamp.cpp).
+  context_.compositor = this;
+};
 
-void Compositor::begin(std::vector<AnimatedBehavior*> inBehaviors, std::vector<FrameBuffer*> inFrameBuffers, bool homeMode) {
+void Compositor::begin(std::vector<AnimatedBehavior*> inBehaviors,
+                       std::vector<FrameBuffer*> inFrameBuffers,
+                       std::vector<AnimatedBehavior*> inUnderlayBehaviors,
+                       std::vector<AnimatedBehavior*> inStartupBehaviors,
+                       bool homeMode) {
   frameBuffers = inFrameBuffers;
   this->homeMode = homeMode;
 
-  // Adds some basic behavior layers that are common to all framebuffers
-  for (i = 0; i < frameBuffers.size(); i++) {
-    underlayBehaviors.push_back(new IdleBehavior(frameBuffers[i], 0, true));
-    startupBehaviors.push_back(new FadeInBehavior(frameBuffers[i], STARTUP_ANIMATION_FRAMES));
+  // Caller-provided underlay + startup behaviors. Construction of concrete
+  // types (IdleBehavior, FadeInBehavior) is the caller's responsibility;
+  // the compositor only wires context and stores the pointers.
+  for (auto* b : inUnderlayBehaviors) {
+    b->setBehaviorContext(&context_);
+    underlayBehaviors.push_back(b);
+  }
+  for (auto* b : inStartupBehaviors) {
+    b->setBehaviorContext(&context_);
+    startupBehaviors.push_back(b);
   }
 
   // append all of the non critical behaviors
-  for (i = 0; i < inBehaviors.size(); i++) {
+  for (size_t i = 0; i < inBehaviors.size(); i++) {
+    inBehaviors[i]->setBehaviorContext(&context_);
     behaviors.push_back(inBehaviors[i]);
   }
 };
 
-bool Compositor::hasActiveExclusive() const {
-  return activeExclusive && activeExclusive->animationState != STOPPED;
-}
-
 void Compositor::tick() {
+#ifdef LAMP_DEBUG
+  // Flicker diagnostic: count branch invocations + correlate with OTA
+  // state. If non-quiet branch fires while either OTA state machine is
+  // in progress, that is the bug — IdleBehavior is the only underlay
+  // that draws when nothing else is animating, so the strip strobes
+  // between the indicator and full defaultColors.
+  static uint32_t s_quietCount    = 0;
+  static uint32_t s_normalCount   = 0;
+  static uint32_t s_otaQuietHits  = 0;   // non-quiet branch while OTA in progress
+  static uint32_t s_lastLogMs     = 0;
+  const bool otaActive = ::firmwareReceiver.isInProgress() ||
+                         lamp::firmwareDistributor.isInProgress();
+#endif
+  // OTA quiet mode: skip the normal behavior pipeline, but paint the OTA
+  // progress indicator (see ota_indicator.hpp) and flush so the user sees
+  // a live "I'm in OTA right now" signal instead of a frozen frame.
+  // Indicator is cheap (fill + per-pixel scale), well within frame budget.
+  if (ota_quiet_mode::isQuiet()) {
+    const uint32_t nowMs = millis();
+#ifdef LAMP_DEBUG
+    s_quietCount++;
+#endif
+    // Cap the indicator repaint to the normal pipeline's ~60 Hz frame rate
+    // (MINIMUM_FRAME_DRAW_TIME_MS). FrameBuffer::flush() already content-dedups
+    // and gates the strip write on the driver's reset window, so this is a CPU
+    // cap. Without it the quiet branch re-runs the
+    // paint every loop iteration for no visible gain.
+    if (millis() < lastDrawTimeMs + MINIMUM_FRAME_DRAW_TIME_MS) {
+      return;
+    }
+    lastDrawTimeMs = millis();
+    const bool quietEntered = !otaQuietPainted_;
+    otaQuietPainted_ = true;
+    // frameBuffers[0]/[1] per lamp_behaviors.cpp ordering: {shade, base}.
+    // Visible (firmware) OTA paints the progress bar on shade and settles +
+    // pulses base; silent (FS) OTA settles both surfaces with no signaling.
+    if (!frameBuffers.empty() && frameBuffers[0]) {
+      FrameBuffer* shade = frameBuffers[0];
+      FrameBuffer* base = frameBuffers.size() > 1 ? frameBuffers[1] : nullptr;
+      if (ota_quiet_mode::visibleOtaActive()) {
+        const Color localBase = shade->defaultColors.empty()
+                                    ? Color(0, 0, 255, 0)
+                                    : shade->defaultColors.front();
+        ota_indicator::paint(shade, localBase, nowMs, base, quietEntered);
+      } else {
+        ota_indicator::paintSilent(shade, base, nowMs, quietEntered);
+      }
+    }
+    if (preFlushHook) preFlushHook();
+    for (size_t i = 0; i < frameBuffers.size(); i++) {
+      if (frameBuffers[i]) frameBuffers[i]->flush();
+    }
+#ifdef LAMP_DEBUG
+    if (millis() - s_lastLogMs >= 1000) {
+      s_lastLogMs = millis();
+      Serial.printf("[compos] quiet=%u normal=%u otaQuietHits=%u (ota=%d)\n",
+                    (unsigned)s_quietCount, (unsigned)s_normalCount,
+                    (unsigned)s_otaQuietHits, (int)otaActive);
+      s_quietCount   = 0;
+      s_normalCount  = 0;
+      s_otaQuietHits = 0;
+    }
+#endif
+    return;
+  }
+  otaQuietPainted_ = false;
+
+#ifdef LAMP_DEBUG
+  // Non-quiet branch. If OTA is active here we have the bug — the
+  // pipeline is going to underlay (IdleBehavior) → defaultColors and
+  // overwrite the indicator's just-flushed bar.
+  s_normalCount++;
+  if (otaActive) s_otaQuietHits++;
+  if (millis() - s_lastLogMs >= 1000) {
+    s_lastLogMs = millis();
+    Serial.printf("[compos] quiet=%u normal=%u otaQuietHits=%u (ota=%d)\n",
+                  (unsigned)s_quietCount, (unsigned)s_normalCount,
+                  (unsigned)s_otaQuietHits, (int)otaActive);
+    s_quietCount   = 0;
+    s_normalCount  = 0;
+    s_otaQuietHits = 0;
+  }
+#endif
+
   if (!behaviorsComputed) {
-    for (i = 0; i < underlayBehaviors.size(); i++) {
+    for (size_t i = 0; i < underlayBehaviors.size(); i++) {
       underlayBehaviors[i]->control();
       underlayBehaviors[i]->draw();
     }
 
     if (startupComplete) {
-      // Update active exclusive tracker
-      if (activeExclusive && activeExclusive->animationState == STOPPED) {
-        activeExclusive = nullptr;
-      }
-
-      for (i = 0; i < behaviors.size(); i++) {
-        if (!homeMode || behaviors[i]->allowedInHomeMode) {
-          // Check if this behavior should run
-          bool canRun = !activeExclusive || behaviors[i]->isExclusive || behaviors[i] == activeExclusive;
-
-          if (canRun) {
-            behaviors[i]->control();
-            if (behaviors[i]->animationState != STOPPED) {
-              // Track if this is a new exclusive starting
-              if (behaviors[i]->isExclusive && behaviors[i] != activeExclusive) {
-                activeExclusive = behaviors[i];
-              }
-              behaviors[i]->draw();
-            }
+      // The configurators write the base scene; the wisp layer composites over
+      // it and beneath the first overlay (greeting / expressions) so those still
+      // render on top, matching the layering from when the wisp lived in
+      // configurator.colors.
+      bool wispComposited = false;
+      for (size_t i = 0; i < behaviors.size(); i++) {
+        AnimatedBehavior* b = behaviors[i];
+        if (!wispComposited && b != context_.baseConfigurator &&
+            b != context_.shadeConfigurator) {
+          compositeWisp();
+          wispComposited = true;
+        }
+        if (!homeMode || !homeModeSkips(b)) {
+          b->control();
+          if (b->animationState != STOPPED) {
+            b->draw();
           }
         }
       }
+      if (!wispComposited) compositeWisp();
     } else {
-      for (i = 0; i < startupBehaviors.size(); i++) {
+      for (size_t i = 0; i < startupBehaviors.size(); i++) {
         startupBehaviors[i]->control();
         if (startupBehaviors[i]->animationState != STOPPED) {
           startupBehaviors[i]->draw();
@@ -68,7 +170,7 @@ void Compositor::tick() {
       }
     }
 
-    for (i = 0; i < overlayBehaviors.size(); i++) {
+    for (size_t i = 0; i < overlayBehaviors.size(); i++) {
       overlayBehaviors[i]->control();
       overlayBehaviors[i]->draw();
     }
@@ -79,11 +181,41 @@ void Compositor::tick() {
   if (behaviorsComputed && millis() >= lastDrawTimeMs + MINIMUM_FRAME_DRAW_TIME_MS) {
     lastDrawTimeMs = millis();
     behaviorsComputed = false;
-    for (i = 0; i < frameBuffers.size(); i++) {
+    if (preFlushHook) preFlushHook();
+    for (size_t i = 0; i < frameBuffers.size(); i++) {
       frameBuffers[i]->flush();
     }
   };
 };
+
+bool Compositor::wispActive() const {
+  return wispStatePresent_ &&
+         (millis() - wispStateFreshMs_) < kWispStateFreshMs;
+}
+
+void Compositor::compositeWisp() {
+  // MSG_WISP_STATE is the sole wisp render source: presence holds while the
+  // freshest STATE from this lamp's wisp paints it, eases home on a fresh
+  // frame that drops this lamp, and ages out if STATE goes silent.
+  // Fade the wisp layer off the surface an operator is editing so the live
+  // color edit shows through; the other surface keeps its wisp paint.
+  const bool active = wispActive();
+  const bool baseHeld = active && !overrides.base.operatorEditing();
+  const bool shadeHeld = active && !overrides.shade.operatorEditing();
+  wispBasePresence_.setTarget(baseHeld ? 1.0f : 0.0f);
+  wispShadePresence_.setTarget(shadeHeld ? 1.0f : 0.0f);
+  wispBasePresence_.tick();
+  wispShadePresence_.tick();
+  wispShadeStack_.tick(wispShadePresence_.value());
+  wispBaseStack_.tick(wispBasePresence_.value());
+  // frameBuffers[0]=shade, [1]=base per lamp_behaviors.cpp ordering.
+  if (!frameBuffers.empty() && frameBuffers[0]) {
+    for (Color& px : frameBuffers[0]->buffer) px = wispShadeStack_.composite(px);
+  }
+  if (frameBuffers.size() > 1 && frameBuffers[1]) {
+    for (Color& px : frameBuffers[1]->buffer) px = wispBaseStack_.composite(px);
+  }
+}
 
 void Compositor::setHomeMode(bool homeMode) {
   if (this->homeMode != homeMode) {
@@ -91,4 +223,58 @@ void Compositor::setHomeMode(bool homeMode) {
     behaviorsComputed = false;  // Force recomputation of active behaviors
   }
 };
+
+void Compositor::setExpressionBand(size_t start, size_t end) {
+  expressionBandStart = start;
+  expressionBandEnd = end;
+}
+
+void Compositor::addBehavior(AnimatedBehavior* b) {
+  if (!b) return;
+  // Wire the shared context on register so behaviors don't need to grab a
+  // global to reach the compositor / expression manager / buffer list.
+  b->setBehaviorContext(&context_);
+  if (expressionBandEnd > behaviors.size()) expressionBandEnd = behaviors.size();
+  behaviors.insert(behaviors.begin() + expressionBandEnd, b);
+  expressionBandEnd++;
+}
+
+void Compositor::addBaseBehavior(AnimatedBehavior* b) {
+  if (!b) return;
+  b->setBehaviorContext(&context_);
+  if (expressionBandStart > behaviors.size()) expressionBandStart = behaviors.size();
+  behaviors.insert(behaviors.begin() + expressionBandStart, b);
+  expressionBandStart++;
+  expressionBandEnd++;
+}
+
+void Compositor::removeBehavior(AnimatedBehavior* b) {
+  if (!b) return;
+  for (size_t idx = 0; idx < behaviors.size(); idx++) {
+    if (behaviors[idx] == b) {
+      behaviors.erase(behaviors.begin() + idx);
+      if (idx < expressionBandStart) expressionBandStart--;
+      if (idx < expressionBandEnd) expressionBandEnd--;
+      return;
+    }
+  }
+}
+
+void Compositor::setHomeModePolicy(bool socialDisabled, std::vector<std::string> disabledIds) {
+  if (homeSocialDisabled_ != socialDisabled || homeDisabledExprIds_ != disabledIds) {
+    homeSocialDisabled_ = socialDisabled;
+    homeDisabledExprIds_ = std::move(disabledIds);
+    behaviorsComputed = false;
+  }
+}
+
+bool Compositor::homeModeSkips(AnimatedBehavior* b) const {
+  if (b->isSocialBehavior()) return homeSocialDisabled_;
+  return homeModeExpressionSkips(b->homeModeExpressionId(), homeDisabledExprIds_);
+}
+
+bool Compositor::homeModeSkipsType(const std::string& type) const {
+  return homeMode && homeModeExpressionSkips(type.c_str(), homeDisabledExprIds_);
+}
+
 };  // namespace lamp

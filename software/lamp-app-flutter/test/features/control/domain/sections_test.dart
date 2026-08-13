@@ -1,0 +1,454 @@
+import 'dart:convert';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:lamp_app/features/control/domain/lamp_color.dart';
+import 'package:lamp_app/features/control/domain/sections.dart';
+import 'package:lamp_app/features/social/domain/social_mode.dart';
+
+void main() {
+  test('LampSection parses brightness + name', () {
+    final s = LampSection.fromJson(jsonDecode(
+      '{"name":"jacko","brightness":42,"advancedEnabled":false}',
+    ) as Map<String, dynamic>);
+    expect(s.name, 'jacko');
+    expect(s.brightness, 42);
+  });
+
+  test('LampSection parses fwVersion + fwChannel when emitted', () {
+    final s = LampSection.fromJson(jsonDecode(
+      '{"name":"jacko","brightness":42,"advancedEnabled":false,'
+      '"fwVersion":65536,"fwChannel":"stable"}',
+    ) as Map<String, dynamic>);
+    expect(s.fwVersion, 0x010000);
+    expect(s.fwChannel, 'stable');
+  });
+
+  test('LampSection parses lampId', () {
+    final s = LampSection.fromJson(
+        {'lampType': 'standard', 'lampId': 'C4:DD:57:EB:64:60'});
+    expect(s.lampId, 'C4:DD:57:EB:64:60');
+  });
+
+  test('LampSection parses catalogHash when emitted', () {
+    final s = LampSection.fromJson(
+        {'name': 'jacko', 'brightness': 42, 'catalogHash': 'a2207d10'});
+    expect(s.catalogHash, 'a2207d10');
+  });
+
+  test('LampSection.catalogHash null on legacy firmware', () {
+    final s = LampSection.fromJson({'name': 'jacko', 'brightness': 42});
+    expect(s.catalogHash, isNull);
+  });
+
+  test('LampSection parses otaState when emitted', () {
+    final s = LampSection.fromJson(
+        {'name': 'jacko', 'brightness': 42, 'otaState': 2});
+    expect(s.otaState, 2);
+  });
+
+  test('LampSection.otaState defaults to 0 (idle) on older firmware', () {
+    final s = LampSection.fromJson({'name': 'jacko', 'brightness': 42});
+    expect(s.otaState, 0);
+  });
+
+  test('LampSection.fwVersion + fwChannel null on legacy firmware', () {
+    // Old firmware that doesn't yet emit fwVersion/fwChannel — the Info
+    // tab renders these as "..." rather than crashing on a null cast.
+    final s = LampSection.fromJson(jsonDecode(
+      '{"name":"jacko","brightness":42,"advancedEnabled":false}',
+    ) as Map<String, dynamic>);
+    expect(s.fwVersion, isNull);
+    expect(s.fwChannel, isNull);
+  });
+
+  test('LampSection.copyWith preserves untouched fields (incl. lampType)', () {
+    final s = LampSection.fromJson(jsonDecode(
+      '{"name":"jacko","brightness":42,"advancedEnabled":true,'
+      '"fwVersion":65536,"fwChannel":"stable","hasPassword":true,'
+      '"lampType":"snafu"}',
+    ) as Map<String, dynamic>);
+    final copy = s.copyWith(brightness: 80);
+    expect(copy.brightness, 80);
+    expect(copy.name, 'jacko');
+    expect(copy.advancedEnabled, true);
+    expect(copy.fwVersion, 0x010000);
+    expect(copy.fwChannel, 'stable');
+    expect(copy.hasPassword, true);
+    expect(copy.lampType, 'snafu');
+  });
+
+  test('BaseSection parses colors, px', () {
+    final s = BaseSection.fromJson(jsonDecode(
+      '{"px":35,"ac":1,"bpp":4,"colors":["#300783FF","#FF0000AA"],"knockout":[]}',
+    ) as Map<String, dynamic>);
+    expect(s.px, 35);
+    expect(s.colors.length, 2);
+    expect(s.colors[0], const LampColor(r: 0x30, g: 0x07, b: 0x83, w: 0xFF));
+    expect(s.colors[1].w, 0xAA);
+  });
+
+  test('BaseSection.knockout is empty when the JSON omits it', () {
+    final s = BaseSection.fromJson(jsonDecode(
+      '{"px":35,"ac":0,"bpp":4,"colors":[]}',
+    ) as Map<String, dynamic>);
+    expect(s.knockout, isEmpty);
+  });
+
+  test('BaseSection.knockout folds entries into a map', () {
+    // Positional knockout: index = pixel, value = brightness %. Default
+    // (100) entries are skipped on parse, so only non-defaults end up in
+    // the map.
+    final s = BaseSection.fromJson(jsonDecode(
+      '{"px":35,"ac":0,"bpp":4,"colors":[],"knockout":[100,100,100,50,100,100,100,25,100,100]}',
+    ) as Map<String, dynamic>);
+    expect(s.knockout, {3: 50, 7: 25});
+  });
+
+  test('ShadeSection parses single color', () {
+    final s = ShadeSection.fromJson(jsonDecode(
+      '{"px":38,"bpp":4,"colors":["#000000FF"]}',
+    ) as Map<String, dynamic>);
+    expect(s.colors.single.w, 0xFF);
+  });
+
+  test('ShadeSection segments empty when absent', () {
+    final s = ShadeSection.fromJson(jsonDecode(
+      '{"px":38,"bpp":4,"colors":["#000000FF"]}',
+    ) as Map<String, dynamic>);
+    expect(s.segments, isEmpty);
+  });
+
+  test('ShadeSection parses segments array', () {
+    final s = ShadeSection.fromJson(jsonDecode(
+      '{"px":24,"bpp":4,"colors":["#000000FF"],'
+      '"segments":[{"name":"Small Dots","px":12,"colors":["#000000FF"]},'
+      '{"name":"Big Dots","px":12,"colors":["#FF0000FF"]}]}',
+    ) as Map<String, dynamic>);
+    expect(s.segments, hasLength(2));
+    expect(s.segments[0].name, 'Small Dots');
+    expect(s.segments[0].px, 12);
+    expect(s.segments[1].name, 'Big Dots');
+    expect(s.segments[1].colors.single.r, 0xFF);
+  });
+
+  test('BaseSection parses segments array', () {
+    final s = BaseSection.fromJson(jsonDecode(
+      '{"px":35,"ac":0,"bpp":4,"colors":["#300783FF"],"knockout":[],'
+      '"segments":[{"name":"Stem","px":35,"colors":["#300783FF"]}]}',
+    ) as Map<String, dynamic>);
+    expect(s.segments, hasLength(1));
+    expect(s.segments.first.name, 'Stem');
+  });
+
+  test('Segment.displayName falls back to roleLabel when name is empty', () {
+    const migrated = Segment(name: '', px: 35, colors: []);
+    expect(migrated.displayName('Base'), 'Base');
+  });
+
+  test('Segment.displayName keeps a non-empty name', () {
+    const named = Segment(name: 'Left rail', px: 35, colors: []);
+    expect(named.displayName('Base'), 'Left rail');
+  });
+
+  test('Segment equality', () {
+    const a = Segment(
+      name: 'Shade',
+      px: 38,
+      colors: [LampColor(r: 0, g: 0, b: 0, w: 255)],
+    );
+    const b = Segment(
+      name: 'Shade',
+      px: 38,
+      colors: [LampColor(r: 0, g: 0, b: 0, w: 255)],
+    );
+    expect(a, equals(b));
+    expect(a.hashCode, b.hashCode);
+  });
+
+  test('HomeSection parses ssid + brightness (legacy password field ignored)',
+      () {
+    // Legacy lamps wrote a "password" field — we silently ignore it now.
+    final s = HomeSection.fromJson(jsonDecode(
+      '{"ssid":"home","password":"********","brightness":40}',
+    ) as Map<String, dynamic>);
+    expect(s.ssid, 'home');
+    expect(s.brightness, 40);
+  });
+
+  test('HomeSection defaults on a sparse JSON', () {
+    final s = HomeSection.fromJson(<String, dynamic>{});
+    expect(s.ssid, '');
+    expect(s.brightness, 60);
+  });
+
+  group('HomeSection new fields — migration parity with firmware', () {
+    test('networkBound absent → false when ssid empty', () {
+      final s = HomeSection.fromJson(<String, dynamic>{'ssid': ''});
+      expect(s.networkBound, isFalse);
+    });
+
+    test('networkBound absent → true when ssid non-empty', () {
+      final s = HomeSection.fromJson(<String, dynamic>{'ssid': 'myhome'});
+      expect(s.networkBound, isTrue);
+    });
+
+    test('networkBound explicit false preserved', () {
+      final s = HomeSection.fromJson(
+          <String, dynamic>{'ssid': 'myhome', 'networkBound': false});
+      expect(s.networkBound, isFalse);
+    });
+
+    test('socialDisabled absent → true', () {
+      final s = HomeSection.fromJson(<String, dynamic>{});
+      expect(s.socialDisabled, isTrue);
+    });
+
+    test('socialDisabled explicit false preserved', () {
+      final s = HomeSection.fromJson(
+          <String, dynamic>{'socialDisabled': false});
+      expect(s.socialDisabled, isFalse);
+    });
+
+    test('disabledExpressionTypes absent → [glitchy]', () {
+      final s = HomeSection.fromJson(<String, dynamic>{});
+      expect(s.disabledExpressionTypes, equals(['glitchy']));
+    });
+
+    test('disabledExpressionTypes explicit [] preserved (not defaulted)', () {
+      final s = HomeSection.fromJson(
+          <String, dynamic>{'disabledExpressionTypes': <dynamic>[]});
+      expect(s.disabledExpressionTypes, isEmpty);
+    });
+
+    test('disabledExpressionTypes populated list preserved', () {
+      final s = HomeSection.fromJson(<String, dynamic>{
+        'disabledExpressionTypes': ['breathing', 'glitchy'],
+      });
+      expect(s.disabledExpressionTypes, equals(['breathing', 'glitchy']));
+    });
+
+    test('HomeSection.toJson round-trips all fields', () {
+      const src = HomeSection(
+        ssid: 'myhome',
+        brightness: 42,
+        enabled: true,
+        networkBound: true,
+        socialDisabled: false,
+        disabledExpressionTypes: ['breathing'],
+      );
+      final json = src.toJson();
+      expect(json['ssid'], 'myhome');
+      expect(json['brightness'], 42);
+      expect(json['enabled'], isTrue);
+      expect(json['networkBound'], isTrue);
+      expect(json['socialDisabled'], isFalse);
+      expect(json['disabledExpressionTypes'], equals(['breathing']));
+    });
+
+    test('HomeSection.toJson round-trip: empty disabledExpressionTypes', () {
+      const src = HomeSection(
+        ssid: '',
+        brightness: 60,
+        enabled: false,
+        networkBound: false,
+        socialDisabled: true,
+        disabledExpressionTypes: [],
+      );
+      final json = src.toJson();
+      expect(json['disabledExpressionTypes'], isEmpty);
+    });
+  });
+
+  test('ExpressionConfig round-trips through toJson + fromJson', () {
+    final original = ExpressionConfig(
+      type: 'glitchy',
+      enabled: true,
+      colors: [LampColor.fromHex('#FF00FFAA')],
+      intervalMin: 30,
+      intervalMax: 120,
+      target: 2,
+      parameters: {'flickerRate': 5, 'jitter': 100},
+    );
+    final round = ExpressionConfig.fromJson(
+      Map<String, dynamic>.from(
+          jsonDecode(jsonEncode(original.toJson())) as Map),
+    );
+    expect(round.type, 'glitchy');
+    expect(round.enabled, isTrue);
+    expect(round.colors.single.toHex(), '#FF00FFAA');
+    expect(round.intervalMin, 30);
+    expect(round.intervalMax, 120);
+    expect(round.target, 2);
+    expect(round.parameters, {'flickerRate': 5, 'jitter': 100});
+  });
+
+  test('ExpressionsSection parses an empty array', () {
+    expect(ExpressionsSection.fromJson([]).expressions, isEmpty);
+  });
+
+  test('ExpressionsSection parses two entries', () {
+    final s = ExpressionsSection.fromJson(
+      (jsonDecode(
+        '[{"type":"breathing","enabled":true,"colors":[],"intervalMin":10,"intervalMax":20,"target":1},'
+        '{"type":"glitchy","enabled":false,"colors":[],"intervalMin":60,"intervalMax":900,"target":3}]',
+      ) as List).cast<Map<String, dynamic>>(),
+    );
+    expect(s.expressions, hasLength(2));
+    expect(s.expressions[0].type, 'breathing');
+    expect(s.expressions[1].target, 3);
+  });
+
+  group('ExpressionConfig drops legacy disabledDuringWispOverride', () {
+    // The field is no longer a per-instance config. fromJson/toJson must
+    // tolerate the legacy key (older firmware/payloads may still ship it)
+    // but never surface it as a parameter or carry it forward.
+    test('legacy disabledDuringWispOverride is dropped, not stored as param',
+        () {
+      final e = ExpressionConfig.fromJson(<String, dynamic>{
+        'type': 'breathing',
+        'enabled': true,
+        'disabledDuringWispOverride': true,
+        'someRealParam': 42,
+      });
+      expect(e.type, 'breathing');
+      expect(e.parameters.containsKey('disabledDuringWispOverride'), isFalse);
+      expect(e.parameters['someRealParam'], 42);
+    });
+    test('toJson does not emit disabledDuringWispOverride', () {
+      const e = ExpressionConfig(
+        type: 'breathing',
+        enabled: true,
+        colors: [],
+        intervalMin: 60,
+        intervalMax: 900,
+        target: 3,
+        parameters: {},
+      );
+      expect(e.toJson().containsKey('disabledDuringWispOverride'), isFalse);
+    });
+  });
+
+  group('value-class equality', () {
+    // The point of overriding ==/hashCode on these is so Riverpod's
+    // `.select` and AsyncValue equality can short-circuit on unchanged
+    // sections. The tests pin that behaviour against accidental
+    // regression.
+
+    test('LampSection equal-by-field but distinct instances are ==', () {
+      // Build the second instance via fromJson so dart's const-literal
+      // canonicalisation doesn't make `identical(a, b)` true and mask a
+      // missing ==/hashCode override.
+      const a = LampSection(
+        name: 'a',
+        brightness: 100,
+        advancedEnabled: false,
+        webappEnabled: true,
+        socialMode: SocialMode.ambivert,
+        fwVersion: 1,
+        fwChannel: 'stable',
+      );
+      final b = LampSection.fromJson(<String, dynamic>{
+        'name': 'a',
+        'brightness': 100,
+        'advancedEnabled': false,
+        'socialMode': SocialMode.ambivert.wire,
+        'fwVersion': 1,
+        'fwChannel': 'stable',
+      });
+      expect(identical(a, b), isFalse);
+      expect(a, equals(b));
+      expect(a.hashCode, b.hashCode);
+    });
+
+    test('BaseSection parses a stale out-of-range ac without a RangeError', () {
+      // A stored blob can carry ac past the end of a shrunk colors list.
+      // The section ignores ac; the representative color comes from
+      // blendedIdentity, which for a single stop is that stop.
+      final s = BaseSection.fromJson(<String, dynamic>{
+        'px': 35,
+        'ac': 2,
+        'colors': ['#112233FF'],
+      });
+      expect(s.colors.length, 1);
+      const only = LampColor(r: 0x11, g: 0x22, b: 0x33, w: 0xFF);
+      expect(LampColor.blendedIdentity(s.colors), only);
+    });
+
+    test('BaseSection equality uses deep colors + knockout', () {
+      // Build with mutable lists/maps so Dart's const-literal
+      // canonicalisation can't make `identical(a, b)` true and mask a
+      // missing == override.
+      // ignore: prefer_const_constructors
+      final a = BaseSection(
+        px: 35,
+        bpp: 4,
+        byteOrder: 'GRBW',
+        colors: [const LampColor(r: 255, g: 0, b: 0, w: 0)],
+        knockout: {1: 50, 7: 75},
+      );
+      // ignore: prefer_const_constructors
+      final b = BaseSection(
+        px: 35,
+        bpp: 4,
+        byteOrder: 'GRBW',
+        colors: [const LampColor(r: 255, g: 0, b: 0, w: 0)],
+        knockout: {1: 50, 7: 75},
+      );
+      expect(identical(a, b), isFalse);
+      expect(a, equals(b));
+      expect(a.hashCode, b.hashCode);
+
+      // Mutating one slot in the knockout map should produce inequality.
+      // ignore: prefer_const_constructors
+      final c = BaseSection(
+        px: 35,
+        bpp: 4,
+        byteOrder: 'GRBW',
+        colors: [const LampColor(r: 255, g: 0, b: 0, w: 0)],
+        knockout: {1: 50, 7: 80},
+      );
+      expect(a, isNot(equals(c)));
+    });
+
+    test('ExpressionConfig equality uses deep parameters map', () {
+      const a = ExpressionConfig(
+        type: 'breathing',
+        enabled: true,
+        colors: [LampColor(r: 1, g: 2, b: 3, w: 0)],
+        intervalMin: 60,
+        intervalMax: 900,
+        target: 3,
+        parameters: {'rate': 5, 'depth': 10},
+      );
+      const b = ExpressionConfig(
+        type: 'breathing',
+        enabled: true,
+        colors: [LampColor(r: 1, g: 2, b: 3, w: 0)],
+        intervalMin: 60,
+        intervalMax: 900,
+        target: 3,
+        parameters: {'rate': 5, 'depth': 10},
+      );
+      expect(a, equals(b));
+      expect(a.hashCode, b.hashCode);
+    });
+  });
+
+  test('BaseSection tolerates non-string and malformed colors', () {
+    final s = BaseSection.fromJson(jsonDecode(
+      '{"px":35,"bpp":4,"colors":["#300783FF",123,"FFFFFF","xy"],'
+      '"knockout":[]}',
+    ) as Map<String, dynamic>);
+    expect(s.colors, [
+      const LampColor(r: 0x30, g: 0x07, b: 0x83, w: 0xFF),
+      const LampColor(r: 0xFF, g: 0xFF, b: 0xFF, w: 0),
+    ]);
+  });
+
+  test('ShadeSection tolerates non-string and malformed colors', () {
+    final s = ShadeSection.fromJson(jsonDecode(
+      '{"px":38,"bpp":4,"colors":[null,"#000000FF","GG"]}',
+    ) as Map<String, dynamic>);
+    expect(s.colors, [const LampColor(r: 0, g: 0, b: 0, w: 0xFF)]);
+  });
+}

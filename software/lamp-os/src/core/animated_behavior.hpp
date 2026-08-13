@@ -1,9 +1,9 @@
-#ifndef LAMP_CORE_ANIMATED_BEHAVIOR_H
-#define LAMP_CORE_ANIMATED_BEHAVIOR_H
+#pragma once
 
 #include <cstdint>
 
-#include "./frame_buffer.hpp"
+#include "behavior_context.hpp"
+#include "frame_buffer.hpp"
 
 namespace lamp {
 enum AnimationState {
@@ -13,16 +13,13 @@ enum AnimationState {
   // Animation is about to stop dead in its tracks
   PAUSING = 2,
 
-  // Animation will no longer contribute pixels to the scene and will keep
-  // its playhead at the last frame position
+  // Animation does not contribute pixels; playhead holds at last frame
   PAUSED = 3,
 
-  // Animation will stop gracefully and let the total frame count continue
-  // to contribute to the scene
+  // Animation stops gracefully; lets the current frame count finish
   STOPPING = 4,
 
-  // Animation will no longer contribute to the scene and it will
-  // resume from the beginning of the frame count
+  // Animation does not contribute pixels; resumes from frame 0 on play
   STOPPED = 5,
 
   // Animation is playing only one loop
@@ -31,7 +28,7 @@ enum AnimationState {
 
 /**
  * An Animated behavior is any lamp behavior that will have a side effect on the
- * LEDs. Any animation will run at roughly 30 frames per second
+ * LEDs. Any animation will run at roughly 60 frames per second
  */
 class AnimatedBehavior {
  public:
@@ -39,16 +36,14 @@ class AnimatedBehavior {
   uint32_t frames = 60;
   uint32_t frame = 0;
   uint32_t currentLoop = 0;
-  bool allowedInHomeMode = true;
-  bool isExclusive = false;  // If true, pauses other non-exclusive behaviors
   AnimationState animationState = STOPPED;
 
   /**
    * Animated Behavior Base class - integrators implement draw and control
    * functions of their own to control the lamp's LEDs
    * @param [in] inBuffer the frame buffer to interact with
-   * @param [in] inFrames the frame duration for the behaviour eg (60 frames ~ 2
-   *                      seconds of animation)
+   * @param [in] inFrames the frame duration for the behaviour eg (60 frames ~ 1
+   *                      second of animation)
    * @param [in] autoPlay if true the animation will begin immediately
    */
   AnimatedBehavior();
@@ -56,47 +51,71 @@ class AnimatedBehavior {
   virtual ~AnimatedBehavior();
 
   /**
-   * @brief A virtual function to make changes to the frame buffer per frame
+   * Make changes to the frame buffer per frame.
    */
   virtual void draw();
 
   /**
-   * @brief A virtual function to do calculations and coordinate animation state
-   *        for each animation layer
+   * Do calculations and coordinate animation state for each animation layer.
    */
   virtual void control();
 
   /**
-   * @brief Pause the animation and redraw the paused frame
+   * Pause the animation and redraw the paused frame.
    */
   void pause();
 
   /**
-   * @brief Stop the animation at the last frame
+   * Stop the animation at the last frame.
    */
   void stop();
 
   /**
-   * @brief Play the animation in a loop
+   * Play the animation in a loop.
    */
   void play();
 
   /**
-   * @brief Play the animation for one full frame cycle
+   * Play the animation for one full frame cycle.
    */
   void playOnce();
 
   /**
-   * @brief Check for the last frame
    * @return true if the playhead is at the last frame of the animation
    */
   bool isLastFrame();
 
   /**
-   * @brief conclude the draw procedure and advance the internal frame counters
+   * Conclude the draw procedure and advance the internal frame counters.
    */
   void nextFrame();
+
+  /**
+   * Pixel count of the wired frame buffer, floored at 1 so callers can
+   * divide or clamp without a null / zero guard.
+   */
+  uint16_t windowSize() const;
+
+  /**
+   * Wire a BehaviorContext into this behavior. Called by the Compositor
+   * the moment a behavior is registered (via addBehavior or begin()),
+   * and by ExpressionManager just before handing a transient to the
+   * compositor. The context is owned by the Compositor; behaviors only
+   * hold a non-owning pointer.
+   */
+  void setBehaviorContext(BehaviorContext* ctx) { context_ = ctx; }
+  BehaviorContext* behaviorContext() const { return context_; }
+
+  // Home-mode compositor queries. isSocialBehavior returns true on
+  // SocialBehavior; homeModeExpressionId returns the expression type id
+  // string on Expression subclasses (used to match disabledExpressionTypes),
+  // or nullptr for non-expression behaviors.
+  virtual bool isSocialBehavior() const { return false; }
+  virtual const char* homeModeExpressionId() const { return nullptr; }
+
+ protected:
+  // Non-owning. Null until the Compositor (or ExpressionManager, for
+  // transients) wires it during registration. Consumers must null-check.
+  BehaviorContext* context_ = nullptr;
 };
 }  // namespace lamp
-
-#endif

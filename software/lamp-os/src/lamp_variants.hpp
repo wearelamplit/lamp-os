@@ -1,0 +1,69 @@
+// software/lamp-os/src/lamp_variants.hpp
+//
+// Compile-time variant identity. Each per-variant binary compiles in exactly
+// one LAMP_BUILD_VARIANT_* (set by the [env:upesy_wroom_<type>] block in
+// platformio.ini). createCompiledLamp() and compiledLampType() return the
+// compiled-in instance/name directly. No runtime registry lookup.
+
+#pragma once
+#include <memory>
+
+#include <lampos/protocol/presence.hpp>
+
+#ifdef LAMP_BUILD_VARIANT_STANDARD
+#include "lamps/standard/standard_lamp.hpp"
+#endif
+#ifdef LAMP_BUILD_VARIANT_SNAFU
+#include "lamps/snafu/snafu_lamp.hpp"
+#endif
+#ifdef LAMP_BUILD_VARIANT_STAFF
+#include "lamps/staff/staff_lamp.hpp"
+#endif
+#ifdef LAMP_BUILD_VARIANT_LIONESS
+#include "lamps/lioness/lioness_lamp.hpp"
+#endif
+#ifdef LAMP_BUILD_VARIANT_LOAF
+#include "lamps/loaf/loaf_lamp.hpp"
+#endif
+
+#if (defined(LAMP_BUILD_VARIANT_STANDARD) + defined(LAMP_BUILD_VARIANT_SNAFU) + defined(LAMP_BUILD_VARIANT_STAFF) + defined(LAMP_BUILD_VARIANT_LIONESS) + defined(LAMP_BUILD_VARIANT_LOAF)) != 1
+#error "Exactly one LAMP_BUILD_VARIANT_* must be defined (check platformio.ini env)"
+#endif
+
+namespace lamp {
+
+class Lamp;
+
+inline std::unique_ptr<Lamp> createCompiledLamp() {
+#ifdef LAMP_BUILD_VARIANT_STANDARD
+  return std::make_unique<StandardLamp>();
+#elif defined(LAMP_BUILD_VARIANT_SNAFU)
+  return std::make_unique<SnafuLamp>();
+#elif defined(LAMP_BUILD_VARIANT_STAFF)
+  return std::make_unique<StaffLamp>();
+#elif defined(LAMP_BUILD_VARIANT_LIONESS)
+  return std::make_unique<LionessLamp>();
+#elif defined(LAMP_BUILD_VARIANT_LOAF)
+  return std::make_unique<LoafLamp>();
+#endif
+}
+
+inline lamp_protocol::LampVariant compiledLampVariant() {
+#ifdef LAMP_BUILD_VARIANT_STANDARD
+  return lamp_protocol::LampVariant::Standard;
+#elif defined(LAMP_BUILD_VARIANT_SNAFU)
+  return lamp_protocol::LampVariant::Snafu;
+#elif defined(LAMP_BUILD_VARIANT_STAFF)
+  return lamp_protocol::LampVariant::Staff;
+#elif defined(LAMP_BUILD_VARIANT_LIONESS)
+  return lamp_protocol::LampVariant::Lioness;
+#elif defined(LAMP_BUILD_VARIANT_LOAF)
+  return lamp_protocol::LampVariant::Loaf;
+#endif
+}
+
+inline const char* compiledLampType() {
+  return lamp_protocol::variantName(compiledLampVariant());
+}
+
+}  // namespace lamp

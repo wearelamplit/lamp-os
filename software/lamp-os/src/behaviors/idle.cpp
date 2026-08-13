@@ -1,5 +1,5 @@
 
-#include "./idle.hpp"
+#include "idle.hpp"
 
 namespace lamp {
 void IdleBehavior::draw() {
