@@ -1096,10 +1096,11 @@ class WispNotifier extends _$WispNotifier {
     _bumpState();
   }
 
-  /// Resolve true once a wispStatus arrives whose `paletteIdPrefix` matches
-  /// [expectedHash] (the wisp stored and re-broadcast this exact palette), or
-  /// false when [_sourceConfirmTimeout] elapses. Mirrors [_confirmSourceLanded]:
-  /// every wispStatus NOTIFY carries the palette id prefix, so no READ-poll.
+  /// Resolve true once a wispStatus arrives whose `paletteIdPrefix` equals
+  /// [expectedHash] (the wisp stored and re-broadcast this exact palette; an
+  /// empty hash matches a status that omits the prefix), or false when
+  /// [_sourceConfirmTimeout] elapses. Mirrors [_confirmSourceLanded]: every
+  /// wispStatus NOTIFY carries the palette id state, so no READ-poll.
   ///
   /// If the wisp's `source` leaves Manual (or a local [_pendingSourceMode]
   /// already did) the palette write is moot; records

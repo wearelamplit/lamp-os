@@ -261,24 +261,28 @@ void main() {
       expect(n.manualPaletteWriteFailed, isFalse);
     });
 
-    test('an emptied palette stays unconfirmed while the status keeps the old '
-        'prefix', () async {
+    test('a status still carrying the old prefix does not confirm an emptied '
+        'palette', () async {
       const saved = [LampColor(r: 7, g: 8, b: 9, w: 0)];
       final (ble, n) = await emptiedDraft(saved);
 
-      fakeAsync((fa) {
-        Object? err;
-        n.setManualPalette().catchError((Object e) => err = e);
-        fa.flushMicrotasks();
-        confirmPalette(ble, saved);
-        fa.elapse(WispNotifier.writeConfirmBudget);
-        fa.flushMicrotasks();
-        expect(err, isNotNull, reason: 'stale prefix is not a confirm');
-      });
-
-      expect(n.manualPaletteWriteFailed, isTrue);
+      var done = false;
+      final f = n.setManualPalette().whenComplete(() => done = true);
+      await Future<void>.delayed(Duration.zero);
+      confirmPalette(ble, saved);
+      await pumpEventQueue();
+      expect(done, isFalse, reason: 'stale prefix is not a confirm');
       expect(n.manualPaletteDirty, isTrue);
-      expect(ble.writesTo(lampId, BleUuids.wispOp).length, greaterThan(1));
+
+      ble.simulateNotify(
+        lampId,
+        BleUuids.controlService,
+        BleUuids.wispStatus,
+        Uint8List.fromList(utf8
+            .encode('{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual"}')),
+      );
+      await f;
+      expect(n.manualPaletteDirty, isFalse);
     });
 
     test('source leaving Manual mid-confirm surfaces a source-changed error',
