@@ -146,9 +146,7 @@ void test_role_scene_picks_loop_only_when_on() {
   TEST_ASSERT_FALSE(open.rotation.on);
 }
 
-// The scene keeps `on` exactly when the builders would close a loop. The
-// loop-differs check holds while the pixels outnumber the stops the builders
-// use and those stops differ, as here.
+// The scene keeps `on` exactly when the builders would close a loop.
 void test_role_scene_counts_stops_as_the_builders_do() {
   for (size_t n : {0, 1, 2, 3, 8, 9, 255, 256, 257, 258, 300}) {
     std::vector<Color> s(n);
