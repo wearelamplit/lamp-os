@@ -61,7 +61,54 @@ Build a ramp of colors to lay across a strip.
 std::vector<Color> calculateGradient(Color start, Color end, uint8_t steps);
 std::vector<Color> buildGradientWithStops(uint8_t numPixels,
                                           std::vector<Color> colorStops); // multi-stop
+std::vector<Color> buildGradientLoop(uint8_t px, const std::vector<Color>& stops);
 ```
+
+`buildGradientWithStops` runs open, first stop to last. `buildGradientLoop`
+is its closed form: one more segment, from the last stop back to the first, so
+the last pixel leads into pixel 0 as any stop boundary does. Both fill their
+segments the same way and use the first 8 stops, cutting the rest. With fewer
+than 2 stops the loop builder returns what `buildGradientWithStops` does.
+
+### Colour rotation: `util/color_rotation.hpp`
+A role's colours (one surface's scene, shade or base) flowing round a closed
+loop, one loop every `periodS` seconds. Code that writes a role's scene builds
+it with these; `ConfiguratorBehavior` draws it.
+
+```cpp
+enum class RotationDir : uint8_t { Up, Down };   // physical direction on the surface
+struct ColorRotation { bool on; uint8_t periodS; RotationDir dir; };
+constexpr uint8_t clampRotationPeriodS(int32_t s);  // into [kRotationMinPeriodS, kRotationMaxPeriodS]
+
+struct RoleScene { std::vector<Color> colors; ColorRotation rotation; };
+RoleScene buildRoleScene(uint8_t px, const std::vector<Color>& stops,
+                         const ColorRotation& rotation);
+
+class RotationClock {
+  void     advance(uint32_t nowMs, uint8_t periodS, bool towardZero);
+  void     reset();          // back to the settled position
+  uint32_t phase() const;    // 2^32 is one loop
+};
+uint32_t loopOffset(uint32_t phase, size_t len);  // shift in 1/256 px
+Color    sampleLoop(const std::vector<Color>& loop, uint32_t offset, size_t i);
+```
+
+- `buildRoleScene` is the one choice between an open gradient and a loop:
+  rotation on with 2 or more stops builds the loop and keeps `on`; anything
+  else builds the open gradient and clears `on`. Build every role scene
+  through it, so `on` is set only on a loop.
+- `periodS` runs from `kRotationMinPeriodS` (5) to `kRotationMaxPeriodS` (120),
+  default `kRotationDefaultPeriodS` (40). `advance` clamps it with
+  `clampRotationPeriodS`.
+- `advance` steps by the time since the last call, capped at
+  `kMaxRotationStepMs` (100 ms). The cap keeps a stall from jumping the
+  pattern on resume; the cost is that advances spaced more than 100 ms apart
+  run slower than `periodS`. `towardZero` moves the colours toward buffer
+  index 0. Turning a physical `RotationDir` into it is the caller's job,
+  because which end is up depends on the surface.
+- `loopOffset` takes the loop's pixel count as `len`. `sampleLoop` reads pixel
+  `i` shifted by that offset, blending the two pattern pixels it falls
+  between. `loop` must be non-empty.
 
 ### Brightness — `util/levels.hpp`
 Scale a channel or color down by a percentage (0–100).
@@ -85,6 +132,7 @@ the right one as `this->fb` (target-bound — don't capture `baseBuffer` /
 | `buffer` | `std::vector<Color>` | Your write target — index `[0, pixelCount)`, one entry per pixel |
 | `pixelCount` | `uint8_t` | Loop bound; never hardcode strip length |
 | `defaultColors` | `std::vector<Color>` | The user's configured palette — your "resting" colors |
+| `defaultRotation` | `ColorRotation` | The saved scene's rotation, set with `defaultColors` from one `buildRoleScene`; on only when `defaultColors` is a loop |
 | `previousBuffer` / `previousBrightness` | `std::vector<Color>` / `uint8_t` | Last committed frame, for change detection (skip redraw when nothing moved) |
 | `flush()` | `void` | Push `buffer` to the NeoPixel driver — the framework calls this; authors rarely do |
 

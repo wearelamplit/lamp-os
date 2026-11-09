@@ -207,6 +207,10 @@ void MyBehavior::control() {
 Reach for `setSolidColor` on anything continuous; `setGradient` only when a
 multi-stop gradient genuinely changes and rarely.
 
+Colour written through either verb is raw content: drawn as written, never
+rotated, even on a surface whose saved scene rotates. `setGradient` builds an
+open gradient and keeps the first 8 stops.
+
 **Brightness.** Two axes, both composing (never a raw strip write — a raw write
 would fight crowd-dim, the OTA pulse, and the wisp override):
 
