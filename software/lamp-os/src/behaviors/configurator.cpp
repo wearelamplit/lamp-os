@@ -167,10 +167,9 @@ bool ConfiguratorBehavior::showsRotatingSaved() const {
          rotation_.dir == fb->defaultRotation.dir && colors == fb->defaultColors;
 }
 
-// Past the timeout a rotating saved scene plays on and never stops. A static
-// one takes the static path's run-out to STOPPED (frames - easeFrames draws),
-// which outlasts the crossfade at the compositor's 16 ms frame floor, so idle
-// takes over on the saved frame.
+// A static saved scene takes the static path's run-out to STOPPED
+// (frames - easeFrames draws), which outlasts the crossfade at the
+// compositor's 16 ms frame floor, so idle takes over on the saved frame.
 void ConfiguratorBehavior::controlRotating(uint32_t now) {
   const bool editing = lastWebSocketUpdateTimeMs > 0 &&
                        now <= lastWebSocketUpdateTimeMs + CONFIGURATOR_WEBSOCKET_TIMEOUT_MS;

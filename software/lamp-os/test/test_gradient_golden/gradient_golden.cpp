@@ -1,5 +1,5 @@
 // Pins buildGradientWithStops byte for byte. Each hash is FNV-1a over the real
-// builder's output, recorded on the shipped code. A refactor that changes any
+// builder's output. A refactor that changes any
 // byte of any open gradient fails here.
 
 #include <unity.h>

@@ -62,13 +62,15 @@ std::vector<Color> calculateGradient(Color start, Color end, uint8_t steps);
 std::vector<Color> buildGradientWithStops(uint8_t numPixels,
                                           std::vector<Color> colorStops); // multi-stop
 std::vector<Color> buildGradientLoop(uint8_t px, const std::vector<Color>& stops);
+uint8_t gradientStopCount(const std::vector<Color>& stops);  // stops the builders use
 ```
 
 `buildGradientWithStops` runs open, first stop to last. `buildGradientLoop`
-is its closed form: one more segment, from the last stop back to the first, so
-the last pixel leads into pixel 0 as any stop boundary does. Both fill their
-segments the same way and use the first 8 stops, cutting the rest. With fewer
-than 2 stops the loop builder returns what `buildGradientWithStops` does.
+is its closed form, with one more segment from the last stop back to the
+first, so the last pixel leads into pixel 0 as any stop boundary does. Both
+fill their segments the same way and use the first `gradientStopCount` stops,
+at most 8. With fewer than 2 the loop builder returns what
+`buildGradientWithStops` does.
 
 ### Colour rotation: `util/color_rotation.hpp`
 A role's colours (one surface's scene, shade or base) flowing round a closed
@@ -93,9 +95,9 @@ uint32_t loopOffset(uint32_t phase, size_t len);  // shift in 1/256 px
 Color    sampleLoop(const std::vector<Color>& loop, uint32_t offset, size_t i);
 ```
 
-- `buildRoleScene` is the one choice between an open gradient and a loop:
-  rotation on with 2 or more stops builds the loop and keeps `on`; anything
-  else builds the open gradient and clears `on`. Build every role scene
+- `buildRoleScene` is the one choice between an open gradient and a loop.
+  Rotation on with a `gradientStopCount` of 2 or more builds the loop and keeps
+  `on`; anything else builds the open gradient and clears `on`. Build every role scene
   through it, so `on` is set only on a loop.
 - `periodS` runs from `kRotationMinPeriodS` (5) to `kRotationMaxPeriodS` (120),
   default `kRotationDefaultPeriodS` (40). `advance` clamps it with

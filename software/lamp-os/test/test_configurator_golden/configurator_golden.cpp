@@ -1,6 +1,6 @@
 // Pins ConfiguratorBehavior frame by frame. Each hash is FNV-1a over the play
 // state, frame counter and buffer of the real configurator after every tick of
-// a scripted sequence, recorded on the shipped code. A tick runs control() and
+// a scripted sequence. A tick runs control() and
 // then draw() unless STOPPED, as the compositor does.
 
 #include <unity.h>

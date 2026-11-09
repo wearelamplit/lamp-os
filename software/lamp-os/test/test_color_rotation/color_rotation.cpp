@@ -55,7 +55,7 @@ static std::vector<Color> shifted(const std::vector<Color>& loop, uint32_t offse
   return out;
 }
 
-// R3. N segments over L pixels, split as the open gradient splits its N-1,
+// N segments over L pixels, split as the open gradient splits its N-1,
 // each filled by the same linear fade, the closing one back to stop 0.
 void test_loop_segments() {
   for (size_t n = 2; n <= 8; ++n) {
@@ -118,7 +118,6 @@ void test_one_stop_with_fewer_than_two_stops_falls_back() {
   assertFrame(buildGradientWithStops(38, {}), buildGradientLoop(38, {}));
 }
 
-// R4 and the role-scene choice.
 void test_role_scene_one_stop_is_solid_and_keeps_the_setting() {
   const ColorRotation on{true, 17, RotationDir::Down};
   const Color c(0x12, 0xF0, 0x08, 0x77);
@@ -148,8 +147,8 @@ void test_role_scene_picks_loop_only_when_on() {
 }
 
 // The scene keeps `on` exactly when the builders would close a loop. The
-// loop-differs check needs more pixels than stops and distinct first stops,
-// which this fixture has.
+// loop-differs check holds while the pixels outnumber the stops and the first
+// stops differ, as here.
 void test_role_scene_counts_stops_as_the_builders_do() {
   for (size_t n : {0, 1, 2, 3, 8, 9, 255, 256, 257, 258, 300}) {
     std::vector<Color> s(n);
@@ -189,7 +188,6 @@ void test_default_rotation() {
   TEST_ASSERT_TRUE(r.dir == RotationDir::Up);
 }
 
-// R5.
 void test_shift_whole_pixels() {
   const auto loop = buildGradientLoop(38, stops(4));
   assertFrame(loop, shifted(loop, 0));
@@ -224,7 +222,7 @@ void test_loop_offset_spans_the_loop() {
   TEST_ASSERT_EQUAL_UINT32(0, loopOffset(UINT32_MAX, 1) >> 8);
 }
 
-// R6 at the clock. Toward index 0, stops reach pixel 0 in list order; away,
+// At the clock, toward index 0, stops reach pixel 0 in list order; away,
 // in reverse.
 static std::vector<int> arrivalsAtPixelZero(bool towardZero) {
   const std::vector<Color> rgb = {{255, 0, 0, 0}, {0, 255, 0, 0}, {0, 0, 255, 0}};
@@ -253,7 +251,7 @@ void test_direction_order_at_pixel_zero() {
   TEST_ASSERT_EQUAL_INT_ARRAY(reverse.data(), away.data(), 4);
 }
 
-// R7. Three spacings summing to the same time land on the same phase, across
+// Three spacings summing to the same time land on the same phase, across
 // the millis() wrap.
 void test_frame_rate_independence() {
   for (bool toward : {true, false}) {
@@ -283,7 +281,7 @@ void test_frame_rate_independence() {
   }
 }
 
-// R8. One period of draws comes back within 0.01 px on any strip up to 255.
+// One period of draws comes back within 0.01 px on any strip up to 255.
 void test_one_period_is_one_loop() {
   for (int period = kRotationMinPeriodS; period <= kRotationMaxPeriodS; ++period) {
     for (bool toward : {true, false}) {
@@ -303,7 +301,6 @@ void test_one_period_is_one_loop() {
   }
 }
 
-// R9.
 void test_a_stall_resumes_where_it_stopped() {
   RotationClock fresh;
   fresh.advance(50000, 40, true);
@@ -319,7 +316,6 @@ void test_a_stall_resumes_where_it_stopped() {
   TEST_ASSERT_EQUAL_HEX32((kMaxRotationStepMs + 16) * perMs(40), clock.phase() - before);
 }
 
-// R10.
 void test_period_change_keeps_the_position() {
   RotationClock clock;
   uint32_t t = 1000;
@@ -357,7 +353,6 @@ void test_reset_returns_to_the_settled_position() {
   TEST_ASSERT_EQUAL_HEX32(16 * perMs(5), clock.phase());
 }
 
-// R12.
 void test_period_clamp() {
   struct Case {
     int32_t in;
@@ -382,7 +377,7 @@ void test_clock_clamps_the_period_it_is_given() {
   }
 }
 
-// R23. Equal 16 ms steps across a full loop that crosses the wrap move the
+// Equal 16 ms steps across a full loop that crosses the wrap move the
 // offset by equal amounts within one unit, none of them zero.
 void test_constant_flow() {
   for (int len : {38, 35, 255}) {
