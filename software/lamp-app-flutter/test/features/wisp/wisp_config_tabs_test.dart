@@ -93,7 +93,7 @@ void main() {
       expect(settingsPos, lessThan(lampsPos));
     });
 
-    testWidgets('default tab is Palette — source picker visible on open',
+    testWidgets('default tab is Palette, source picker visible on open',
         (tester) async {
       final c = await _makeContainer();
       addTearDown(c.dispose);
@@ -199,13 +199,13 @@ void main() {
       addTearDown(c.dispose);
       await _pumpScreen(tester, c);
 
-      // On the Palette tab by default — no drift.
+      // On the Palette tab by default, no drift.
       expect(find.text('COLOR DRIFT'), findsNothing);
 
       await tester.tap(find.text('Lamps'));
       await tester.pumpAndSettle();
 
-      // On the Lamps tab — still no drift.
+      // On the Lamps tab, still no drift.
       expect(find.text('COLOR DRIFT'), findsNothing);
     });
 

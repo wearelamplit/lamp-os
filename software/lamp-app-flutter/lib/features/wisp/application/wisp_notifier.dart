@@ -61,8 +61,8 @@ class WispNotifier extends _$WispNotifier {
   static const int _writeConfirmAttempts = 4;
   static const Duration _sourceConfirmTimeout = Duration(seconds: 5);
 
-  /// Sum of every resend's confirm window: how long an unconfirmed op takes
-  /// to surface failure when each BLE write returns promptly.
+  /// Sum of every resend's confirm window. An unconfirmed op surfaces failure
+  /// after this long when each BLE write returns promptly.
   @visibleForTesting
   static Duration get writeConfirmBudget =>
       _sourceConfirmTimeout * _writeConfirmAttempts;
