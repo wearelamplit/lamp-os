@@ -96,7 +96,7 @@ struct Rig {
   ConfiguratorBehavior cfg;
   Surface surface;
   uint32_t now = 10000;
-  // The expected clock: advanced on every rotating draw, as the configurator's is.
+  // The expected clock, advanced on every rotating draw as the configurator's is.
   RotationClock mirror;
 
   explicit Rig(Surface s) : cfg(&fb, 120, s), surface(s) {
@@ -139,7 +139,7 @@ struct Rig {
   }
 };
 
-// R5, R6: each surface and direction draws the loop shifted by its clock.
+// R5, R6. Each surface and direction draws the loop shifted by its clock.
 void test_frame_is_the_shifted_loop() {
   for (Surface s : {Surface::Shade, Surface::Base}) {
     for (RotationDir d : {RotationDir::Up, RotationDir::Down}) {
@@ -163,7 +163,7 @@ static int reddest(const std::vector<Color>& frame) {
   return best;
 }
 
-// R6 physically: shade index 0 is its bottom and base index 0 its top, so Up
+// R6 physically. Shade index 0 is its bottom and base index 0 its top, so Up
 // carries the red stop to higher shade indices and lower base indices.
 void test_up_rises_on_both_surfaces() {
   struct Case {
@@ -186,7 +186,7 @@ void test_up_rises_on_both_surfaces() {
   }
 }
 
-// R4: one stop never rotates.
+// R4. One stop never rotates.
 void test_one_stop_scene_is_solid_and_still() {
   Rig r(Surface::Shade);
   const Color c(0x30, 0x60, 0x90, 0xC0);
@@ -198,7 +198,7 @@ void test_one_stop_scene_is_solid_and_still() {
   }
 }
 
-// R10: a change of loop length or direction keeps the frame and the phase.
+// R10. A change of loop length or direction keeps the frame and the phase.
 void test_speed_and_direction_change_keep_the_position() {
   for (bool flip : {false, true}) {
     Rig r(Surface::Shade);
@@ -245,7 +245,7 @@ void test_rotating_draw_allocates_nothing() {
   }
 }
 
-// R14: every change crossfades over kDefaultFadeMs from the frame on show.
+// R14. Every change crossfades over kDefaultFadeMs from the frame on show.
 void test_changes_crossfade_from_the_drawn_frame() {
   const RoleScene open = buildRoleScene(kPx, stopsA(), ColorRotation{});
   const RoleScene fast = rotatingScene(stopsA(), 5, RotationDir::Up);
@@ -311,7 +311,7 @@ void test_change_mid_crossfade_starts_from_the_drawn_frame() {
   }
 }
 
-// R15: raw writes draw unshifted and hold still.
+// R15. Raw writes draw unshifted and hold still.
 void test_raw_writes_never_rotate() {
   Rig r(Surface::Base);
   r.write(rotatingScene(stopsA(), 5, RotationDir::Up), 0);
@@ -336,7 +336,7 @@ void test_raw_writes_never_rotate() {
   }
 }
 
-// R16: the zone marker holds still; release resumes from where the role was.
+// R16. The zone marker holds still; release resumes from where the role was.
 void test_zone_marker_holds_and_rotation_resumes() {
   Rig r(Surface::Shade);
   const RoleScene scene = rotatingScene(stopsA(), 5, RotationDir::Up);
@@ -357,7 +357,7 @@ void test_zone_marker_holds_and_rotation_resumes() {
   }
 }
 
-// R18: a rotating saved scene rotates from boot, from the frame the fade-in
+// R18. A rotating saved scene rotates from boot, from the frame the fade-in
 // ends on, and never stops.
 void test_saved_rotating_scene_rotates_from_boot() {
   Rig r(Surface::Base);
@@ -380,7 +380,7 @@ void test_saved_rotating_scene_rotates_from_boot() {
   }
 }
 
-// R19, rotating saved scene: an abandoned preview crossfades back to it and it
+// R19, rotating saved scene. An abandoned preview crossfades back to it and it
 // keeps rotating; when it already shows, no pixel changes.
 void test_abandoned_preview_returns_to_the_rotating_saved_scene() {
   for (bool same : {false, true}) {
@@ -418,7 +418,7 @@ void test_abandoned_preview_returns_to_the_rotating_saved_scene() {
   }
 }
 
-// R19, static saved scene: the rotating preview crossfades to it, then the
+// R19, static saved scene. The rotating preview crossfades to it, then the
 // configurator runs on to STOPPED with the saved frame showing.
 void test_abandoned_rotating_preview_settles_on_the_static_saved_scene() {
   Rig r(Surface::Base);
@@ -449,7 +449,7 @@ void test_abandoned_rotating_preview_settles_on_the_static_saved_scene() {
   TEST_ASSERT_EQUAL(STOPPED, r.cfg.animationState);
 }
 
-// R20: knockout dims its pixels in place while the colours move under them,
+// R20. Knockout dims its pixels in place while the colours move under them,
 // and the configurator never reads the dimmed frame back.
 void test_knocked_out_pixels_stay_put() {
   Rig r(Surface::Base);
@@ -482,7 +482,7 @@ void test_knocked_out_pixels_stay_put() {
 
 static constexpr uint32_t kPerMs5 = static_cast<uint32_t>((uint64_t{1} << 32) / 5000);
 
-// R21: quiet entry's reset puts the next frame at the settled position,
+// R21. Quiet entry's reset puts the next frame at the settled position,
 // moved by at most one kMaxRotationStepMs step.
 void test_reset_resumes_from_the_settled_frame() {
   Rig r(Surface::Shade);
@@ -521,7 +521,7 @@ void test_reset_resumes_from_the_settled_frame() {
   TEST_ASSERT_EQUAL_HEX32(0u - kMaxRotationStepMs * kPerMs5, r.mirror.phase());
 }
 
-// R22: home mode with social off and every expression type disabled still
+// R22. Home mode with social off and every expression type disabled still
 // runs a rotating configurator.
 void test_home_mode_keeps_rotation_running() {
   const std::vector<std::string> everyType = {"bloom", "breathing", "flicker", "glitchy",

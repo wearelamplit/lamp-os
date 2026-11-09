@@ -62,8 +62,8 @@ class RotationClock {
 // How far `phase` has moved a loop of `len` pixels, in 1/256 px.
 uint32_t loopOffset(uint32_t phase, size_t len);
 
-// Pixel `i` of `loop` shifted by `offset` (from loopOffset): the two pattern
-// pixels it falls between, blended linearly. `loop` must be non-empty.
+// Pixel `i` of `loop` shifted by `offset` (from loopOffset), blending the two
+// pattern pixels it falls between. `loop` must be non-empty.
 Color sampleLoop(const std::vector<Color>& loop, uint32_t offset, size_t i);
 
 }  // namespace lamp

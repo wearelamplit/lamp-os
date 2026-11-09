@@ -55,7 +55,7 @@ static std::vector<Color> shifted(const std::vector<Color>& loop, uint32_t offse
   return out;
 }
 
-// R3: N segments over L pixels, split as the open gradient splits its N-1,
+// R3. N segments over L pixels, split as the open gradient splits its N-1,
 // each filled by the same linear fade, the closing one back to stop 0.
 void test_loop_segments() {
   for (size_t n = 2; n <= 8; ++n) {
@@ -84,7 +84,7 @@ void test_loop_cuts_past_eight_stops() {
     assertFrame(buildGradientLoop(px, stops(8)), buildGradientLoop(px, stops(12)));
   }
   const auto loop = buildGradientLoop(38, stops(12));
-  // 38 px over 8 segments: the last is 4 px from stop 7 toward stop 0.
+  // 38 px over 8 segments puts the last 4 px from stop 7 toward stop 0.
   for (size_t i = 0; i < 4; ++i) {
     assertColor(fadeLinear(stops(12)[7], stops(12)[0], 4, i), loop[34 + i]);
   }
@@ -96,7 +96,7 @@ void test_loop_shorter_than_its_stops() {
   TEST_ASSERT_EQUAL_size_t(0, buildGradientLoop(0, stops(4)).size());
 }
 
-// The wrap is an ordinary stop boundary: L-1 to 0 of loop(A, B) steps as
+// The wrap is an ordinary stop boundary. L-1 to 0 of loop(A, B) steps as
 // L/2-1 to L/2 of loop(B, A).
 void test_wrap_steps_like_a_stop_boundary() {
   const Color a(0x00, 0xFF, 0x00, 0xFF);
@@ -147,7 +147,9 @@ void test_role_scene_picks_loop_only_when_on() {
   TEST_ASSERT_FALSE(open.rotation.on);
 }
 
-// The scene keeps `on` exactly when the builders would close a loop.
+// The scene keeps `on` exactly when the builders would close a loop. The
+// loop-differs check needs more pixels than stops and distinct first stops,
+// which this fixture has.
 void test_role_scene_counts_stops_as_the_builders_do() {
   for (size_t n : {0, 1, 2, 3, 8, 9, 255, 256, 257, 258, 300}) {
     std::vector<Color> s(n);
@@ -222,7 +224,7 @@ void test_loop_offset_spans_the_loop() {
   TEST_ASSERT_EQUAL_UINT32(0, loopOffset(UINT32_MAX, 1) >> 8);
 }
 
-// R6 at the clock: toward index 0, stops reach pixel 0 in list order; away,
+// R6 at the clock. Toward index 0, stops reach pixel 0 in list order; away,
 // in reverse.
 static std::vector<int> arrivalsAtPixelZero(bool towardZero) {
   const std::vector<Color> rgb = {{255, 0, 0, 0}, {0, 255, 0, 0}, {0, 0, 255, 0}};
@@ -251,7 +253,7 @@ void test_direction_order_at_pixel_zero() {
   TEST_ASSERT_EQUAL_INT_ARRAY(reverse.data(), away.data(), 4);
 }
 
-// R7: three spacings summing to the same time land on the same phase, across
+// R7. Three spacings summing to the same time land on the same phase, across
 // the millis() wrap.
 void test_frame_rate_independence() {
   for (bool toward : {true, false}) {
@@ -281,7 +283,7 @@ void test_frame_rate_independence() {
   }
 }
 
-// R8: one period of draws comes back within 0.01 px on any strip up to 255.
+// R8. One period of draws comes back within 0.01 px on any strip up to 255.
 void test_one_period_is_one_loop() {
   for (int period = kRotationMinPeriodS; period <= kRotationMaxPeriodS; ++period) {
     for (bool toward : {true, false}) {
@@ -380,7 +382,7 @@ void test_clock_clamps_the_period_it_is_given() {
   }
 }
 
-// R23: equal 16 ms steps across a full loop that crosses the wrap move the
+// R23. Equal 16 ms steps across a full loop that crosses the wrap move the
 // offset by equal amounts within one unit, none of them zero.
 void test_constant_flow() {
   for (int len : {38, 35, 255}) {

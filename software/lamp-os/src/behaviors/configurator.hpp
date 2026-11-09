@@ -54,7 +54,7 @@ class ConfiguratorBehavior : public AnimatedBehavior {
   // so the transition stays smooth (no rubber-banding back to the old
   // start). When `fadeDurationMs == 0` (or `targetColors` is empty) this
   // is effectively an instant set.
-  // The content it installs is raw: drawn unshifted, never rotated.
+  // The content it installs is raw, drawn unshifted and never rotated.
   void beginFade(const std::vector<Color>& targetColors,
                  uint32_t fadeDurationMs);
 

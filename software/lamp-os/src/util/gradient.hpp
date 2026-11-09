@@ -34,7 +34,7 @@ std::vector<Color> buildGradientWithStops(uint8_t inNumberPixels,
 uint8_t gradientStopCount(const std::vector<Color>& stops);
 
 /**
- * the closed form of buildGradientWithStops: one more segment, from the last
+ * the closed form of buildGradientWithStops, with one more segment from the last
  * stop back to the first, so pixel px - 1 leads into pixel 0 as any stop
  * boundary does. Fewer than 2 stops build what buildGradientWithStops builds.
  */

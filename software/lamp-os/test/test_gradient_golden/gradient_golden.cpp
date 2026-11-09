@@ -1,4 +1,4 @@
-// Pins buildGradientWithStops byte for byte: each hash is FNV-1a over the real
+// Pins buildGradientWithStops byte for byte. Each hash is FNV-1a over the real
 // builder's output, recorded on the shipped code. A refactor that changes any
 // byte of any open gradient fails here.
 
