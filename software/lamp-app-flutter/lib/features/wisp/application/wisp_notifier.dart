@@ -188,7 +188,7 @@ class WispNotifier extends _$WispNotifier {
 
   // Every status the wisp sent, config merged, ahead of the source-write
   // guard. The confirm waits listen here so a status that only a section
-  // re-read could recover still confirms. Only wisp statuses land here: the
+  // re-read could recover still confirms. Only wisp statuses land here. The
   // held state can be optimistic, and a confirm read off it confirms itself.
   late StreamController<WispStatus> _incoming;
 
@@ -1081,8 +1081,9 @@ class WispNotifier extends _$WispNotifier {
   /// it stored the palette. Sends once and awaits the confirm/retry loop; sets
   /// [manualPaletteWriteFailed] and throws when it can't be confirmed. The Save
   /// caller fires this without awaiting the confirm, so the throw is swallowed
-  /// and the failure surfaces via the flag. A later save supersedes this one:
-  /// it stops resending and returns without touching the saved snapshot.
+  /// and the failure surfaces via the flag. A later save supersedes this one,
+  /// which then stops resending and returns without touching the saved
+  /// snapshot.
   Future<void> setManualPalette() async {
     final committed = List<LampColor>.from(_draft);
     // The wisp stores an empty palette and clears its palette id, so a Manual
@@ -1095,7 +1096,7 @@ class WispNotifier extends _$WispNotifier {
     final ok = await _sendConfirmed(
       send: () => _repo.setManualPalette(committed),
       confirm: () async {
-        // sourceChanged is terminal within a save: a later retry's timeout
+        // sourceChanged is terminal within a save. A later retry's timeout
         // must not downgrade it to a generic notConfirmed.
         if (outcome != PaletteConfirmOutcome.sourceChanged) {
           outcome = await _confirmPaletteLanded(expectedHash, wispMac);
@@ -1134,7 +1135,7 @@ class WispNotifier extends _$WispNotifier {
   /// READ-poll is needed.
   ///
   /// If that wisp's `source` leaves Manual (or a local [_pendingSourceMode]
-  /// already did) the palette write is moot:
+  /// already did) the palette write is moot and the outcome is
   /// [PaletteConfirmOutcome.sourceChanged].
   Future<PaletteConfirmOutcome> _confirmPaletteLanded(
     String expectedHash,

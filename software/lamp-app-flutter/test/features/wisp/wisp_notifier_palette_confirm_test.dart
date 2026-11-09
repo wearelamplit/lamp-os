@@ -74,7 +74,7 @@ void main() {
 
   // A wisp in Off, on a lamp serving the sections, with a `wispconfig` read
   // held in flight. setSource(manual) then leaves the held state saying
-  // Manual with no palette prefix, which is the app's own optimism: the wisp
+  // Manual with no palette prefix, which is the app's own optimism. The wisp
   // has said neither.
   test('a config read completing during an empty save confirms neither the '
       'save nor the pending setSource', () async {
@@ -143,8 +143,8 @@ void main() {
     expect(n.manualPaletteWriteFailed, isFalse);
   });
 
-  // Real time: A's first confirm window has to lapse before its loop either
-  // resends or sees itself superseded.
+  // Runs in real time, since A's first confirm window has to lapse before its
+  // loop either resends or sees itself superseded.
   test('a newer palette save supersedes an older one\'s resends', () async {
     const a = [LampColor(r: 200, g: 10, b: 10, w: 0)];
     const b = [LampColor(r: 10, g: 10, b: 200, w: 0)];
