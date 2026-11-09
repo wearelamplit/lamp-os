@@ -197,7 +197,7 @@ void main() {
       fakeAsync((fa) {
         Object? err;
         n.setManualPalette().catchError((Object e) => err = e);
-        fa.elapse(const Duration(seconds: 12));
+        fa.elapse(WispNotifier.writeConfirmBudget);
         fa.flushMicrotasks();
         expect(err, isNotNull, reason: 'unconfirmed write surfaces error');
         expect(err.toString(), contains('not confirmed'));
@@ -431,7 +431,7 @@ void main() {
         Object? err;
         // No confirming echo; every attempt times out.
         n.setSource(WispSourceMode.off).catchError((Object e) => err = e);
-        fa.elapse(const Duration(seconds: 15));
+        fa.elapse(WispNotifier.writeConfirmBudget);
         fa.flushMicrotasks();
         expect(err, isNotNull, reason: 'unconfirmed setSource surfaces error');
       });

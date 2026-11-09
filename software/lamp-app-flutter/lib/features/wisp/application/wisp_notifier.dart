@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../control/domain/lamp_color.dart';
@@ -60,6 +60,12 @@ class WispNotifier extends _$WispNotifier {
   /// mid-retry.
   static const int _writeConfirmAttempts = 4;
   static const Duration _sourceConfirmTimeout = Duration(seconds: 5);
+
+  /// Longest a confirmed op resends before it gives up and surfaces failure.
+  @visibleForTesting
+  static Duration get writeConfirmBudget =>
+      _sourceConfirmTimeout * _writeConfirmAttempts;
+
   Timer? _offColorWriteTimer;
   Timer? _driftWriteTimer;
   Timer? _brightnessWriteTimer;
