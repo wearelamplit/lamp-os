@@ -90,6 +90,9 @@ void main() {
       final label = batteryEstimateLabel(200, 1400, 170);
       expect(label, contains('20000 mAh bank'));
       expect(label, isNotEmpty);
+      // The same interpolated LED draw (1000 mA) gives the same runtime.
+      expect(label, batteryEstimateLabel(1000, 2000, 0));
+      expect(label, batteryEstimateLabel(0, 1000, 255));
     });
 
     test('higher ceiling yields a shorter runtime', () {

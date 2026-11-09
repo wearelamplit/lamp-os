@@ -93,7 +93,7 @@ void main() {
       expect(settingsPos, lessThan(lampsPos));
     });
 
-    testWidgets('default tab is Palette source — source picker visible on open',
+    testWidgets('default tab is Palette — source picker visible on open',
         (tester) async {
       final c = await _makeContainer();
       addTearDown(c.dispose);
@@ -105,13 +105,13 @@ void main() {
       expect(find.text('Straylight'), findsOneWidget);
     });
 
-    testWidgets('Palette source tab shows per-mode widget (manual palette editor)',
+    testWidgets('Palette tab shows per-mode widget (manual palette editor)',
         (tester) async {
       final c = await _makeContainer();
       addTearDown(c.dispose);
       await _pumpScreen(tester, c);
 
-      // Still on Palette source tab (default); manual source is active in seed JSON.
+      // Still on Palette tab (default); manual source is active in seed JSON.
       expect(find.text('MANUAL PALETTE'), findsOneWidget);
     });
 
@@ -193,13 +193,13 @@ void main() {
       expect(find.text('Straylight'), findsNothing);
     });
 
-    testWidgets('DriftControls does NOT appear on Palette source or Lamps tabs',
+    testWidgets('DriftControls does NOT appear on Palette or Lamps tabs',
         (tester) async {
       final c = await _makeContainer();
       addTearDown(c.dispose);
       await _pumpScreen(tester, c);
 
-      // On the Palette source tab by default — no drift.
+      // On the Palette tab by default — no drift.
       expect(find.text('COLOR DRIFT'), findsNothing);
 
       await tester.tap(find.text('Lamps'));
