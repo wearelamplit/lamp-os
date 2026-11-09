@@ -5,6 +5,22 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## Unreleased
+
+### Fixed
+- **Clearing a wisp's manual palette reaches the wisp.** Remove every colour
+  from the manual palette and save, and the wisp stops painting: lamps under
+  it ease back to their own colours. The app shows the palette as saved once
+  the wisp confirms it, and if the wisp never does, the app says the palette
+  didn't reach the wisp, as it does for any other palette. Before, the app
+  showed the palette empty but never sent it, so the wisp kept painting the
+  old colours. Only the app needs updating, with the wisp on 1.2.8 or later;
+  an older wisp keeps its colours and the app says the palette didn't reach
+  it.
+- **A palette saved back from another phone shows up again.** After the
+  manual palette is emptied, if someone on another phone saves the old
+  colours back, your phone shows them again.
+
 ## 1.3.0
 
 ### Fixed
