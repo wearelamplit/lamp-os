@@ -14,12 +14,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   the wisp confirms it, and if the wisp never does, the app says the palette
   didn't reach the wisp, as it does for any other palette. Before, the app
   showed the palette empty but never sent it, so the wisp kept painting the
-  old colours. Only the app needs updating, with the wisp on 1.2.8 or later;
-  an older wisp keeps its colours and the app says the palette didn't reach
-  it.
-- **A palette saved back from another phone shows up again.** After the
-  manual palette is emptied, if someone on another phone saves the old
-  colours back, your phone shows them again.
+  old colours. Only the app needs updating, with the wisp on 1.2.8 or later.
+  A wisp older than 1.2.8 stores the cleared palette but keeps painting the
+  old colours until it restarts, and the app says the palette didn't reach it.
 
 ## 1.3.0
 

@@ -325,6 +325,7 @@ void main() {
       confirmPalette(ble, palette);
       await pumpEventQueue();
       expect(n.savedManualPalette, palette);
+      expect(n.draftManualPalette, palette);
     });
 
     test('source leaving Manual mid-confirm surfaces a source-changed error',
