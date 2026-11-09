@@ -14,10 +14,7 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   the wisp confirms it, and if the wisp never does, the app says the palette
   didn't reach the wisp, as it does for any other palette. Before, the app
   showed the palette empty but never sent it, so the wisp kept painting the
-  old colours. Only the app needs updating, with the wisp on 1.2.8 or later.
-  A wisp older than 1.2.8 stores the cleared palette without fully applying
-  it, so its lamps can keep the old colours until the wisp restarts or changes
-  source, and the app says the palette didn't reach it.
+  old colours.
 
 ## 1.3.0
 
