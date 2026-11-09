@@ -550,7 +550,13 @@ class WispNotifier extends _$WispNotifier {
   // Don't consume the prefix while a read is busy; retry on the next notify.
   void _maybeRereadForPalette(WispStatus next) {
     final prefix = next.paletteIdPrefix;
-    if (prefix.isEmpty || prefix == _lastPaletteIdPrefix) return;
+    if (prefix == _lastPaletteIdPrefix) return;
+    // An empty prefix has no palette to read, but recording it lets the same
+    // palette coming back register as a change.
+    if (prefix.isEmpty) {
+      _lastPaletteIdPrefix = prefix;
+      return;
+    }
     if (_readBusy) return;
     _lastPaletteIdPrefix = prefix;
     unawaited(_readManualPaletteSection());

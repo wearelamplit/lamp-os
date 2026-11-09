@@ -304,6 +304,29 @@ void main() {
           reason: 'op resent, not fire-and-forget once');
     });
 
+    test('after an emptied palette lands, the old palette coming back is '
+        're-read', () async {
+      const palette = [LampColor(r: 7, g: 8, b: 9, w: 0)];
+      final (ble, n) = await emptiedDraft(palette);
+      final f = n.setManualPalette();
+      await Future<void>.delayed(Duration.zero);
+      ble.simulateNotify(
+        lampId,
+        BleUuids.controlService,
+        BleUuids.wispStatus,
+        Uint8List.fromList(utf8
+            .encode('{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual"}')),
+      );
+      await f;
+      expect(n.savedManualPalette, isEmpty);
+
+      // Another client saves the same palette back onto the wisp.
+      seedPalette(ble, palette);
+      confirmPalette(ble, palette);
+      await pumpEventQueue();
+      expect(n.savedManualPalette, palette);
+    });
+
     test('source leaving Manual mid-confirm surfaces a source-changed error',
         () async {
       final ble = InMemoryBleClient();
