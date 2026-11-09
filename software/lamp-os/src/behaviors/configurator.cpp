@@ -122,8 +122,8 @@ void ConfiguratorBehavior::draw() {
   // Duration-controlled fade. When fadeDurationMs_ is 0 (set by
   // legacy callers that never went through beginFade, i.e. boot-time
   // initBehaviors which assigns colors directly) or the window has
-  // elapsed, write target colors directly. Otherwise per-pixel lerp
-  // between fadeFromColors_[i] and colors[i] using the existing quad
+  // elapsed, write the target directly. Otherwise per-pixel lerp
+  // between fadeFromColors_[i] and the target using the existing quad
   // ease-in-out LUT (via fade()).
   const uint32_t now = millis();
   uint32_t offset = 0;
@@ -174,9 +174,9 @@ bool ConfiguratorBehavior::showsRotatingSaved() const {
 }
 
 // Past the timeout a rotating saved scene plays on and never stops. A static
-// one takes the static path's 60-frame run-out to STOPPED, which outlasts the
-// crossfade at the compositor's 16 ms frame floor, so idle takes over on the
-// saved frame.
+// one takes the static path's run-out to STOPPED (frames - easeFrames draws),
+// which outlasts the crossfade at the compositor's 16 ms frame floor, so idle
+// takes over on the saved frame.
 void ConfiguratorBehavior::controlRotating(uint32_t now) {
   const bool editing = lastWebSocketUpdateTimeMs > 0 &&
                        now <= lastWebSocketUpdateTimeMs + CONFIGURATOR_WEBSOCKET_TIMEOUT_MS;

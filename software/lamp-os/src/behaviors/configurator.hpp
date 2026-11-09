@@ -34,8 +34,8 @@ class ConfiguratorBehavior : public AnimatedBehavior {
   // Frame-count knob for control() state-machine timing; per-pixel
   // interpolation uses fadeStartMs_/fadeDurationMs_.
   uint32_t easeFrames = 60;
-  // Assign directly only to seed the configurator before it draws; every
-  // later write goes through beginFade, setSolid or showScene.
+  // A direct assignment draws under the current scene's rotation; raw content
+  // goes through beginFade or setSolid.
   std::vector<Color> colors;
   unsigned long lastWebSocketUpdateTimeMs = 0;
 

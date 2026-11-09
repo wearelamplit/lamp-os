@@ -281,6 +281,36 @@ void test_changes_crossfade_from_the_drawn_frame() {
   }
 }
 
+// R14 for a write that lands while a crossfade runs, as a slider drag does:
+// the next one starts from the frame on show mid-fade.
+void test_change_mid_crossfade_starts_from_the_drawn_frame() {
+  Rig r(Surface::Shade);
+  const RoleScene first = rotatingScene(stopsA(), 5, RotationDir::Up);
+  r.write(first, 0);
+  r.rotate(first, 60);
+  const RoleScene drag = rotatingScene(stopsB(), 5, RotationDir::Up);
+  r.write(drag, kDefaultFadeMs);
+  r.tick(r.now);
+  r.expect(drag, r.now);
+  r.step(23);
+  r.expect(drag, r.now);
+  r.step(23);
+  r.expect(drag, r.now);
+  const std::vector<Color> held = r.fb.buffer;
+  const RoleScene next = rotatingScene(stopsA(), 9, RotationDir::Down);
+  r.write(next, kDefaultFadeMs);
+  const uint32_t start = r.now;
+  r.tick(r.now);
+  assertFrame(held, r.fb.buffer);
+  r.expect(next, r.now);
+  while (r.now - start < 160) {
+    r.step();
+    const auto target = r.expect(next, r.now);
+    const uint32_t elapsed = r.now - start;
+    assertFrame(elapsed < kDefaultFadeMs ? faded(held, target, elapsed) : target, r.fb.buffer);
+  }
+}
+
 // R15: raw writes draw unshifted and hold still.
 void test_raw_writes_never_rotate() {
   Rig r(Surface::Base);
@@ -517,6 +547,7 @@ int main(int, char**) {
   RUN_TEST(test_speed_and_direction_change_keep_the_position);
   RUN_TEST(test_rotating_draw_allocates_nothing);
   RUN_TEST(test_changes_crossfade_from_the_drawn_frame);
+  RUN_TEST(test_change_mid_crossfade_starts_from_the_drawn_frame);
   RUN_TEST(test_raw_writes_never_rotate);
   RUN_TEST(test_zone_marker_holds_and_rotation_resumes);
   RUN_TEST(test_saved_rotating_scene_rotates_from_boot);

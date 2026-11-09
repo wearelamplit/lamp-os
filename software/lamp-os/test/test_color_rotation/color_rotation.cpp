@@ -147,6 +147,24 @@ void test_role_scene_picks_loop_only_when_on() {
   TEST_ASSERT_FALSE(open.rotation.on);
 }
 
+// A stop list whose size wraps the builders' 8-bit count to under 2 builds an
+// open gradient, so `on` is cleared with it.
+void test_role_scene_counts_stops_as_the_builders_do() {
+  const ColorRotation on{true, 9, RotationDir::Up};
+  for (size_t n : {256, 257}) {
+    std::vector<Color> many(n, Color(1, 2, 3, 4));
+    many[0] = Color(200, 0, 0, 0);
+    const RoleScene scene = buildRoleScene(35, many, on);
+    assertFrame(buildGradientWithStops(35, many), scene.colors);
+    TEST_ASSERT_FALSE(scene.rotation.on);
+  }
+  std::vector<Color> wrapsToTwo(258, Color(1, 2, 3, 4));
+  wrapsToTwo[0] = Color(200, 0, 0, 0);
+  const RoleScene loop = buildRoleScene(35, wrapsToTwo, on);
+  assertFrame(buildGradientLoop(35, wrapsToTwo), loop.colors);
+  TEST_ASSERT_TRUE(loop.rotation.on);
+}
+
 void test_default_rotation() {
   const ColorRotation r;
   TEST_ASSERT_FALSE(r.on);
@@ -388,6 +406,7 @@ int main(int, char**) {
   RUN_TEST(test_one_stop_with_fewer_than_two_stops_falls_back);
   RUN_TEST(test_role_scene_one_stop_is_solid_and_keeps_the_setting);
   RUN_TEST(test_role_scene_picks_loop_only_when_on);
+  RUN_TEST(test_role_scene_counts_stops_as_the_builders_do);
   RUN_TEST(test_default_rotation);
   RUN_TEST(test_shift_whole_pixels);
   RUN_TEST(test_shift_between_pixels_blends_neighbours);

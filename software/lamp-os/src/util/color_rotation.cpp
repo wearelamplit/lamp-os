@@ -10,7 +10,8 @@ namespace lamp {
 RoleScene buildRoleScene(uint8_t px, const std::vector<Color>& stops,
                          const ColorRotation& rotation) {
   RoleScene scene{{}, rotation};
-  if (rotation.on && stops.size() >= 2) {
+  // Counted as the gradient builders count stops, so `on` stays only on a loop.
+  if (rotation.on && static_cast<uint8_t>(stops.size()) >= 2) {
     scene.colors = buildGradientLoop(px, stops);
   } else {
     scene.colors = buildGradientWithStops(px, stops);
