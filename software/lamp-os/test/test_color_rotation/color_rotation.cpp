@@ -157,8 +157,10 @@ void test_role_scene_counts_stops_as_the_builders_do() {
     }
     const RoleScene scene = buildRoleScene(20, s, ColorRotation{true, 9, RotationDir::Up});
     TEST_ASSERT_EQUAL(gradientStopCount(s) >= 2, scene.rotation.on);
-    assertFrame(scene.rotation.on ? buildGradientLoop(20, s) : buildGradientWithStops(20, s),
-                scene.colors);
+    const auto loop = buildGradientLoop(20, s);
+    const auto open = buildGradientWithStops(20, s);
+    TEST_ASSERT_EQUAL(scene.rotation.on, !(loop == open));
+    assertFrame(scene.rotation.on ? loop : open, scene.colors);
   }
   TEST_ASSERT_EQUAL_UINT8(8, gradientStopCount(std::vector<Color>(12)));
   TEST_ASSERT_EQUAL_UINT8(0, gradientStopCount(std::vector<Color>(256)));

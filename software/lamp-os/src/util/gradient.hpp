@@ -28,7 +28,7 @@ std::vector<Color> buildGradientWithStops(uint8_t inNumberPixels,
                                           std::vector<Color> inColorStops);
 
 /**
- * how many of `stops` the gradient builders use: at most 8, counted in
+ * how many of `stops` the gradient builders use, at most 8, counted in
  * 8 bits as they count them
  */
 uint8_t gradientStopCount(const std::vector<Color>& stops);
