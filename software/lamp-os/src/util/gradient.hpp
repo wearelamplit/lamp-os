@@ -28,6 +28,12 @@ std::vector<Color> buildGradientWithStops(uint8_t inNumberPixels,
                                           std::vector<Color> inColorStops);
 
 /**
+ * how many of `stops` the gradient builders use: at most 8, counted in
+ * 8 bits as they count them
+ */
+uint8_t gradientStopCount(const std::vector<Color>& stops);
+
+/**
  * the closed form of buildGradientWithStops: one more segment, from the last
  * stop back to the first, so pixel px - 1 leads into pixel 0 as any stop
  * boundary does. Fewer than 2 stops build what buildGradientWithStops builds.

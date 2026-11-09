@@ -20,11 +20,6 @@ void calculateGradientInto(Color inColorStart, Color inColorEnd, Color* dst,
   }
 }
 
-uint8_t usableStops(const std::vector<Color>& stops) {
-  const auto n = static_cast<uint8_t>(stops.size());
-  return n > kMaxStops ? kMaxStops : n;
-}
-
 // The one segment filler for open gradients and loops. Segment k blends
 // stops[k] toward stops[(k + 1) % count] over whole pixels; the remainder
 // pixels go one each to the first segments.
@@ -43,6 +38,11 @@ std::vector<Color> fillSegments(uint8_t px, const std::vector<Color>& stops,
 }
 }  // namespace
 
+uint8_t gradientStopCount(const std::vector<Color>& stops) {
+  const auto n = static_cast<uint8_t>(stops.size());
+  return n > kMaxStops ? kMaxStops : n;
+}
+
 std::vector<Color> calculateGradient(Color inColorStart, Color inColorEnd,
                                      uint8_t inSteps) {
   std::vector<Color> output(inSteps);
@@ -52,7 +52,7 @@ std::vector<Color> calculateGradient(Color inColorStart, Color inColorEnd,
 
 std::vector<Color> buildGradientWithStops(uint8_t inNumberPixels,
                                           std::vector<Color> inColorStops) {
-  const uint8_t numberColors = usableStops(inColorStops);
+  const uint8_t numberColors = gradientStopCount(inColorStops);
   if (numberColors < 1) {
     return std::vector<Color>(inNumberPixels, Color());
   }
@@ -63,7 +63,7 @@ std::vector<Color> buildGradientWithStops(uint8_t inNumberPixels,
 };
 
 std::vector<Color> buildGradientLoop(uint8_t px, const std::vector<Color>& stops) {
-  const uint8_t count = usableStops(stops);
+  const uint8_t count = gradientStopCount(stops);
   if (count < 2) {
     return buildGradientWithStops(px, stops);
   }

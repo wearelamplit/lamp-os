@@ -38,9 +38,9 @@ struct RoleScene {
   ColorRotation rotation;
 };
 
-// The one choice between an open gradient and a loop: rotation on with 2+
-// stops builds the loop and keeps `on`; anything else builds the open
-// gradient with `on` cleared.
+// The one choice between an open gradient and a loop: rotation on with a
+// gradientStopCount of 2 or more builds the loop and keeps `on`; anything
+// else builds the open gradient with `on` cleared.
 RoleScene buildRoleScene(uint8_t px, const std::vector<Color>& stops,
                          const ColorRotation& rotation);
 

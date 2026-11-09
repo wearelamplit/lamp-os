@@ -147,9 +147,22 @@ void test_role_scene_picks_loop_only_when_on() {
   TEST_ASSERT_FALSE(open.rotation.on);
 }
 
-// A stop list whose size wraps the builders' 8-bit count to under 2 builds an
-// open gradient, so `on` is cleared with it.
+// The scene keeps `on` exactly when the builders would close a loop.
 void test_role_scene_counts_stops_as_the_builders_do() {
+  for (size_t n : {0, 1, 2, 3, 8, 9, 255, 256, 257, 258, 300}) {
+    std::vector<Color> s(n);
+    for (size_t k = 0; k < n; ++k) {
+      s[k] = Color(static_cast<uint8_t>(k * 37), static_cast<uint8_t>(255 - k * 11),
+                   static_cast<uint8_t>(k * 5), static_cast<uint8_t>(k));
+    }
+    const RoleScene scene = buildRoleScene(20, s, ColorRotation{true, 9, RotationDir::Up});
+    TEST_ASSERT_EQUAL(gradientStopCount(s) >= 2, scene.rotation.on);
+    assertFrame(scene.rotation.on ? buildGradientLoop(20, s) : buildGradientWithStops(20, s),
+                scene.colors);
+  }
+  TEST_ASSERT_EQUAL_UINT8(8, gradientStopCount(std::vector<Color>(12)));
+  TEST_ASSERT_EQUAL_UINT8(0, gradientStopCount(std::vector<Color>(256)));
+
   const ColorRotation on{true, 9, RotationDir::Up};
   for (size_t n : {256, 257}) {
     std::vector<Color> many(n, Color(1, 2, 3, 4));

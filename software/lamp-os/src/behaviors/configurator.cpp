@@ -119,12 +119,6 @@ void ConfiguratorBehavior::setSolid(Color c) {
 }
 
 void ConfiguratorBehavior::draw() {
-  // Duration-controlled fade. When fadeDurationMs_ is 0 (set by
-  // legacy callers that never went through beginFade, i.e. boot-time
-  // initBehaviors which assigns colors directly) or the window has
-  // elapsed, write the target directly. Otherwise per-pixel lerp
-  // between fadeFromColors_[i] and the target using the existing quad
-  // ease-in-out LUT (via fade()).
   const uint32_t now = millis();
   uint32_t offset = 0;
   if (rotating_) {

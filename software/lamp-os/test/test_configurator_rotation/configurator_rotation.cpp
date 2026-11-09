@@ -281,8 +281,8 @@ void test_changes_crossfade_from_the_drawn_frame() {
   }
 }
 
-// R14 for a write that lands while a crossfade runs, as a slider drag does:
-// the next one starts from the frame on show mid-fade.
+// R14 for a write that lands while a crossfade runs, as a slider drag does.
+// The next crossfade starts from the frame on show mid-fade.
 void test_change_mid_crossfade_starts_from_the_drawn_frame() {
   Rig r(Surface::Shade);
   const RoleScene first = rotatingScene(stopsA(), 5, RotationDir::Up);
