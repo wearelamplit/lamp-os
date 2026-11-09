@@ -1097,10 +1097,10 @@ class WispNotifier extends _$WispNotifier {
   }
 
   /// Resolve true once a wispStatus arrives whose `paletteIdPrefix` equals
-  /// [expectedHash] (the wisp stored and re-broadcast this exact palette; an
-  /// empty hash matches a status that omits the prefix), or false when
-  /// [_sourceConfirmTimeout] elapses. Mirrors [_confirmSourceLanded]: every
-  /// wispStatus NOTIFY carries the palette id state, so no READ-poll.
+  /// [expectedHash], meaning the wisp stored and re-broadcast this exact
+  /// palette, or false when [_sourceConfirmTimeout] elapses. An empty
+  /// [expectedHash] matches a status that omits the prefix. Every wispStatus
+  /// NOTIFY carries the palette id state, so no READ-poll is needed.
   ///
   /// If the wisp's `source` leaves Manual (or a local [_pendingSourceMode]
   /// already did) the palette write is moot; records

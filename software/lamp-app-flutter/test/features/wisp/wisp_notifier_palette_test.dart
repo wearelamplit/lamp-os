@@ -285,6 +285,25 @@ void main() {
       expect(n.manualPaletteDirty, isFalse);
     });
 
+    test('an emptied palette the wisp never confirms resends then surfaces '
+        'failure + stays dirty', () async {
+      final (ble, n) =
+          await emptiedDraft(const [LampColor(r: 7, g: 8, b: 9, w: 0)]);
+
+      fakeAsync((fa) {
+        Object? err;
+        n.setManualPalette().catchError((Object e) => err = e);
+        fa.elapse(WispNotifier.writeConfirmBudget);
+        fa.flushMicrotasks();
+        expect(err, isNotNull, reason: 'unconfirmed empty save surfaces error');
+      });
+
+      expect(n.manualPaletteWriteFailed, isTrue);
+      expect(n.manualPaletteDirty, isTrue);
+      expect(ble.writesTo(lampId, BleUuids.wispOp).length, greaterThan(1),
+          reason: 'op resent, not fire-and-forget once');
+    });
+
     test('source leaving Manual mid-confirm surfaces a source-changed error',
         () async {
       final ble = InMemoryBleClient();
