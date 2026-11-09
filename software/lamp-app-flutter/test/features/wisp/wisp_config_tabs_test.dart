@@ -69,24 +69,24 @@ Future<void> _pumpScreen(WidgetTester tester, ProviderContainer c) async {
   // Pump until the tab bar appears, up to 20 frames.
   for (var i = 0; i < 20; i++) {
     await tester.pump(const Duration(milliseconds: 16));
-    if (find.text('Palette source').evaluate().isNotEmpty) return;
+    if (find.text('Palette').evaluate().isNotEmpty) return;
   }
 }
 
 void main() {
   group('WispConfigScreen tabs', () {
-    testWidgets('renders Palette source, Settings, and Lamps tabs in order',
+    testWidgets('renders Palette, Settings, and Lamps tabs in order',
         (tester) async {
       final c = await _makeContainer();
       addTearDown(c.dispose);
       await _pumpScreen(tester, c);
 
-      expect(find.text('Palette source'), findsOneWidget);
+      expect(find.text('Palette'), findsOneWidget);
       expect(find.text('Settings'), findsOneWidget);
       expect(find.text('Lamps'), findsOneWidget);
 
-      // Verify order: Palette source comes before Settings, Settings before Lamps.
-      final sourcesPos = tester.getCenter(find.text('Palette source')).dx;
+      // Verify order: Palette comes before Settings, Settings before Lamps.
+      final sourcesPos = tester.getCenter(find.text('Palette')).dx;
       final settingsPos = tester.getCenter(find.text('Settings')).dx;
       final lampsPos = tester.getCenter(find.text('Lamps')).dx;
       expect(sourcesPos, lessThan(settingsPos));
