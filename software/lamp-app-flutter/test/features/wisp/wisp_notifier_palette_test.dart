@@ -210,6 +210,77 @@ void main() {
           reason: 'op resent, not fire-and-forget once');
     });
 
+    // A wisp holding [saved] in Manual, its status stamped with that palette's
+    // prefix, and a notifier whose draft has been emptied.
+    Future<(InMemoryBleClient, WispNotifier)> emptiedDraft(
+        List<LampColor> saved) async {
+      final ble = InMemoryBleClient();
+      seedPalette(ble, saved);
+      final prefix = WispRepository.paletteIdHash(saved);
+      await primeStatus(ble,
+          '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual","paletteIdPrefix":"$prefix"}');
+      final c = makeContainer(ble: ble);
+      c.listen(wispNotifierProvider(lampId), (_, _) {});
+      await c.read(wispNotifierProvider(lampId).future);
+      final n = c.read(wispNotifierProvider(lampId).notifier);
+      expect(n.savedManualPalette, saved);
+      n.resetManualPaletteDraft();
+      for (var i = saved.length - 1; i >= 0; i--) {
+        n.removeManualPaletteColor(i);
+      }
+      expect(n.manualPaletteDirty, isTrue);
+      return (ble, n);
+    }
+
+    test('saving an emptied palette writes it and confirms on a prefix-less '
+        'Manual status', () async {
+      final (ble, n) =
+          await emptiedDraft(const [LampColor(r: 7, g: 8, b: 9, w: 0)]);
+
+      final f = n.setManualPalette();
+      await Future<void>.delayed(Duration.zero);
+      // The wisp clears its palette id on an empty set, so its status omits
+      // paletteIdPrefix.
+      ble.simulateNotify(
+        lampId,
+        BleUuids.controlService,
+        BleUuids.wispStatus,
+        Uint8List.fromList(utf8
+            .encode('{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual"}')),
+      );
+      await f;
+
+      final writes = ble.writesTo(lampId, BleUuids.wispOp);
+      expect(writes, isNotEmpty);
+      final decoded =
+          jsonDecode(utf8.decode(writes.last)) as Map<String, dynamic>;
+      expect(decoded['op'], 'setManualPalette');
+      expect(decoded['colors'], isEmpty);
+      expect(n.savedManualPalette, isEmpty);
+      expect(n.manualPaletteDirty, isFalse);
+      expect(n.manualPaletteWriteFailed, isFalse);
+    });
+
+    test('an emptied palette stays unconfirmed while the status keeps the old '
+        'prefix', () async {
+      const saved = [LampColor(r: 7, g: 8, b: 9, w: 0)];
+      final (ble, n) = await emptiedDraft(saved);
+
+      fakeAsync((fa) {
+        Object? err;
+        n.setManualPalette().catchError((Object e) => err = e);
+        fa.flushMicrotasks();
+        confirmPalette(ble, saved);
+        fa.elapse(WispNotifier.writeConfirmBudget);
+        fa.flushMicrotasks();
+        expect(err, isNotNull, reason: 'stale prefix is not a confirm');
+      });
+
+      expect(n.manualPaletteWriteFailed, isTrue);
+      expect(n.manualPaletteDirty, isTrue);
+      expect(ble.writesTo(lampId, BleUuids.wispOp).length, greaterThan(1));
+    });
+
     test('source leaving Manual mid-confirm surfaces a source-changed error',
         () async {
       final ble = InMemoryBleClient();

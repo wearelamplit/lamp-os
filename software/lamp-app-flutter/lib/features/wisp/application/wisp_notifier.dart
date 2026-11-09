@@ -1066,13 +1066,10 @@ class WispNotifier extends _$WispNotifier {
   /// and the failure surfaces via the flag.
   Future<void> setManualPalette() async {
     final committed = List<LampColor>.from(_draft);
-    if (committed.isEmpty) {
-      // Wisp keeps its fallback on an empty palette and never stamps the empty
-      // hash, so there's no status prefix to await -- treat as landed.
-      _applyPaletteConfirm(committed, true);
-      return;
-    }
-    final expectedHash = WispRepository.paletteIdHash(committed);
+    // The wisp stores an empty palette and clears its palette id, so a Manual
+    // status that omits paletteIdPrefix confirms it.
+    final expectedHash =
+        committed.isEmpty ? '' : WispRepository.paletteIdHash(committed);
     _paletteConfirmOutcome = PaletteConfirmOutcome.notConfirmed;
     final ok = await _sendConfirmed(
       send: () => _repo.setManualPalette(committed),
