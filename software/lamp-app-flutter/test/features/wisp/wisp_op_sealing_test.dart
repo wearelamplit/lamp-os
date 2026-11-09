@@ -9,9 +9,11 @@ import '../../_support/in_memory_ble_client.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/core/ble/lamp_crypto.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
+import 'package:lamp_app/features/control/domain/lamp_color.dart';
 import 'package:lamp_app/features/wisp/application/wisp_notifier.dart';
 import 'package:lamp_app/features/wisp/domain/wisp_source_mode.dart';
 import 'package:lamp_app/features/wisp/data/wisp_password_store.dart';
+import 'package:lamp_app/features/wisp/data/wisp_repository.dart';
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
@@ -102,8 +104,20 @@ void main() {
       final n = c.read(wispNotifierProvider(lampId).notifier);
 
       await n.cachePassword(wispMac, 'hunter2');
-      // Trigger a setManualPalette write via the notifier (empty palette is valid).
-      await n.setManualPalette();
+      // An empty palette sends nothing, so commit one colour and confirm it.
+      const committed = [LampColor(r: 1, g: 2, b: 3, w: 0)];
+      n.appendManualPaletteColor(committed[0]);
+      final f = n.setManualPalette();
+      await Future<void>.delayed(Duration.zero);
+      final prefix = WispRepository.paletteIdHash(committed);
+      ble.simulateNotify(
+        lampId,
+        BleUuids.controlService,
+        BleUuids.wispStatus,
+        Uint8List.fromList(utf8.encode(
+            '{"wispMac":"$wispMac","source":"manual","paletteIdPrefix":"$prefix"}')),
+      );
+      await f;
 
       final wire = ble.writesTo(lampId, BleUuids.wispOp).last;
       // setManualPalette is always plaintext regardless of cached password.
