@@ -97,6 +97,9 @@ class WispNotifier extends _$WispNotifier {
   // after a newer one.
   int _setSourceEpoch = 0;
 
+  // Bumped on every setManualPalette, the same way [_setSourceEpoch] is.
+  int _paletteSaveEpoch = 0;
+
   // Palette comes from the dedicated `wisppalette` page section, not the
   // status char (whose palette-less NOTIFY would clobber it). A changed
   // `paletteIdPrefix` in a NOTIFY triggers a fresh section read.
@@ -113,8 +116,6 @@ class WispNotifier extends _$WispNotifier {
   bool _currentPaletteKnown = false;
   String _lastPaletteIdPrefix = '';
   bool _paletteRereadInFlight = false;
-  PaletteConfirmOutcome _paletteConfirmOutcome =
-      PaletteConfirmOutcome.notConfirmed;
 
   Set<String>? _claimedMacs;
   Map<String, ({LampColor base, LampColor shade})> _livePaint = const {};
@@ -185,10 +186,14 @@ class WispNotifier extends _$WispNotifier {
   bool _statusRereadInFlight = false;
   DateTime? _lastConfigPollAt;
 
-  // Every status as it arrives, config merged, ahead of the source-write
+  // Every status the wisp sent, config merged, ahead of the source-write
   // guard. The confirm waits listen here so a status that only a section
-  // re-read could recover still confirms.
+  // re-read could recover still confirms. Only wisp statuses land here: the
+  // held state can be optimistic, and a confirm read off it confirms itself.
   late StreamController<WispStatus> _incoming;
+
+  // Every opSeq the wisp reports, from a status or a `wispconfig` read.
+  late StreamController<int> _opSeqs;
 
   // FbpBleClient has no internal lock, so two concurrent characteristic
   // reads stall the GATT flow on Android; every read here skips while
@@ -226,11 +231,13 @@ class WispNotifier extends _$WispNotifier {
     _statusRereadInFlight = false;
     _lastConfigPollAt = null;
     final incoming = _incoming = StreamController<WispStatus>.broadcast();
+    final opSeqs = _opSeqs = StreamController<int>.broadcast();
 
     ref.onDispose(() {
       _disposed = true;
       _sub?.cancel();
       unawaited(incoming.close());
+      unawaited(opSeqs.close());
       _offColorWriteTimer?.cancel();
       _driftWriteTimer?.cancel();
       _brightnessWriteTimer?.cancel();
@@ -362,18 +369,17 @@ class WispNotifier extends _$WispNotifier {
       final palette = await _repo.readManualPalette();
       if (_disposed) return;
       _currentPaletteKnown = true;
-      _ingestManualPalette(palette);
+      if (palette.isNotEmpty) _adoptSavedPalette(palette);
       if (bumpState) _bumpState();
     } finally {
       _paletteRereadInFlight = false;
     }
   }
 
-  /// Seed the editor from a freshly-read palette. Empty leaves the saved
-  /// palette untouched. Doesn't touch the draft if the user is mid-edit (draft
-  /// diverged from the previous saved); the next save replaces the wisp's view.
-  void _ingestManualPalette(List<LampColor> palette) {
-    if (palette.isEmpty) return;
+  /// Take [palette] as the wisp's stored palette. Doesn't touch the draft if
+  /// the user is mid-edit (draft diverged from the previous saved); the next
+  /// save replaces the wisp's view.
+  void _adoptSavedPalette(List<LampColor> palette) {
     if (_palettesEqual(_savedManualPalette, palette)) return;
     final wasDraftPristine =
         _draft.isEmpty || _palettesEqual(_draft, _savedManualPalette);
@@ -434,6 +440,7 @@ class WispNotifier extends _$WispNotifier {
     if (_disposed) return;
     var next = _withHeldConfig(raw);
     _incoming.add(next);
+    _opSeqs.add(next.opSeq);
     // A frame that decodes to "no wisp" while already holding a present
     // status is a transient empty/short BLE notify. Drop it to prevent
     // the icon, source, and palette from blinking out for a tick.
@@ -541,7 +548,7 @@ class WispNotifier extends _$WispNotifier {
     final cur = state.value;
     if (cur == null) return;
     final merged = _withHeldConfig(cur);
-    _incoming.add(merged);
+    _opSeqs.add(merged.opSeq);
     state = AsyncData(merged);
   }
 
@@ -550,6 +557,12 @@ class WispNotifier extends _$WispNotifier {
   // Don't consume the prefix while a read is busy; retry on the next notify.
   void _maybeRereadForPalette(WispStatus next) {
     final prefix = next.paletteIdPrefix;
+    // In Manual the wisp omits the prefix only when its stored palette is
+    // empty, and an empty section read can't be told from a missing one.
+    if (prefix.isEmpty && next.source == WispSourceMode.manual) {
+      _currentPaletteKnown = true;
+      _adoptSavedPalette(const <LampColor>[]);
+    }
     if (prefix == _lastPaletteIdPrefix) return;
     // An empty prefix has no palette to read, but recording it lets the same
     // palette coming back register as a change.
@@ -743,8 +756,7 @@ class WispNotifier extends _$WispNotifier {
   /// [baseline], or false when [_opConfirmTimeout] elapses first. A reboot
   /// resets `opSeq` to 0, so only a strict advance counts as confirmation.
   Future<bool> _awaitOpSeqAdvance(int baseline) {
-    return _incoming.stream
-        .map((s) => s.opSeq)
+    return _opSeqs.stream
         .firstWhere((seq) => seq > baseline)
         .timeout(_opConfirmTimeout)
         .then((_) => true)
@@ -1069,22 +1081,33 @@ class WispNotifier extends _$WispNotifier {
   /// it stored the palette. Sends once and awaits the confirm/retry loop; sets
   /// [manualPaletteWriteFailed] and throws when it can't be confirmed. The Save
   /// caller fires this without awaiting the confirm, so the throw is swallowed
-  /// and the failure surfaces via the flag.
+  /// and the failure surfaces via the flag. A later save supersedes this one:
+  /// it stops resending and returns without touching the saved snapshot.
   Future<void> setManualPalette() async {
     final committed = List<LampColor>.from(_draft);
     // The wisp stores an empty palette and clears its palette id, so a Manual
     // status that omits paletteIdPrefix confirms it.
     final expectedHash =
         committed.isEmpty ? '' : WispRepository.paletteIdHash(committed);
-    _paletteConfirmOutcome = PaletteConfirmOutcome.notConfirmed;
+    final wispMac = state.value?.wispMac;
+    final epoch = ++_paletteSaveEpoch;
+    var outcome = PaletteConfirmOutcome.notConfirmed;
     final ok = await _sendConfirmed(
       send: () => _repo.setManualPalette(committed),
-      confirm: () => _confirmPaletteLanded(expectedHash),
+      confirm: () async {
+        // sourceChanged is terminal within a save: a later retry's timeout
+        // must not downgrade it to a generic notConfirmed.
+        if (outcome != PaletteConfirmOutcome.sourceChanged) {
+          outcome = await _confirmPaletteLanded(expectedHash, wispMac);
+        }
+        return outcome == PaletteConfirmOutcome.confirmed;
+      },
+      isSuperseded: () => _paletteSaveEpoch != epoch,
     );
-    if (_disposed) return;
+    if (_disposed || _paletteSaveEpoch != epoch) return;
     _applyPaletteConfirm(committed, ok);
     if (!ok) {
-      if (_paletteConfirmOutcome == PaletteConfirmOutcome.sourceChanged) {
+      if (outcome == PaletteConfirmOutcome.sourceChanged) {
         throw Exception('wisp manual palette write source changed');
       }
       throw Exception('wisp manual palette write not confirmed');
@@ -1102,43 +1125,35 @@ class WispNotifier extends _$WispNotifier {
     _bumpState();
   }
 
-  /// Resolve true once a wispStatus arrives whose `paletteIdPrefix` equals
-  /// [expectedHash], meaning the wisp stored and re-broadcast this exact
-  /// palette, or false when [_sourceConfirmTimeout] elapses. An empty
-  /// [expectedHash] matches a status that omits the prefix. Every wispStatus
-  /// NOTIFY carries the palette id state, so no READ-poll is needed.
+  /// Resolve [PaletteConfirmOutcome.confirmed] once a status from the wisp
+  /// at [wispMac] arrives whose `paletteIdPrefix` equals [expectedHash],
+  /// meaning the wisp stored and re-broadcast this exact palette, or
+  /// [PaletteConfirmOutcome.notConfirmed] when [_sourceConfirmTimeout]
+  /// elapses. An empty [expectedHash] matches a status that omits the
+  /// prefix. Every wispStatus NOTIFY carries the palette id state, so no
+  /// READ-poll is needed.
   ///
-  /// If the wisp's `source` leaves Manual (or a local [_pendingSourceMode]
-  /// already did) the palette write is moot; records
-  /// [PaletteConfirmOutcome.sourceChanged] so the caller can surface a
-  /// distinct error instead of a generic "not confirmed".
-  Future<bool> _confirmPaletteLanded(String expectedHash) {
+  /// If that wisp's `source` leaves Manual (or a local [_pendingSourceMode]
+  /// already did) the palette write is moot:
+  /// [PaletteConfirmOutcome.sourceChanged].
+  Future<PaletteConfirmOutcome> _confirmPaletteLanded(
+    String expectedHash,
+    String? wispMac,
+  ) {
     final localFlip = _pendingSourceMode != null &&
         _pendingSourceMode != WispSourceMode.manual;
-    // sourceChanged is terminal within a commit: once seen, don't let a later
-    // retry's timeout downgrade it to a generic notConfirmed.
-    if (localFlip ||
-        _paletteConfirmOutcome == PaletteConfirmOutcome.sourceChanged) {
-      _paletteConfirmOutcome = PaletteConfirmOutcome.sourceChanged;
-      return Future.value(false);
-    }
+    if (localFlip) return Future.value(PaletteConfirmOutcome.sourceChanged);
     return _incoming.stream
         .firstWhere((s) =>
             s.present &&
+            s.wispMac == wispMac &&
             (s.paletteIdPrefix == expectedHash ||
                 s.source != WispSourceMode.manual))
         .timeout(_sourceConfirmTimeout)
-        .then((s) {
-      if (s.source != WispSourceMode.manual) {
-        _paletteConfirmOutcome = PaletteConfirmOutcome.sourceChanged;
-        return false;
-      }
-      _paletteConfirmOutcome = PaletteConfirmOutcome.confirmed;
-      return true;
-    }).catchError((_) {
-      _paletteConfirmOutcome = PaletteConfirmOutcome.notConfirmed;
-      return false;
-    });
+        .then((s) => s.source == WispSourceMode.manual
+            ? PaletteConfirmOutcome.confirmed
+            : PaletteConfirmOutcome.sourceChanged)
+        .catchError((_) => PaletteConfirmOutcome.notConfirmed);
   }
 
   /// Re-emit the held [WispStatus] to nudge consumers of the field-backed
