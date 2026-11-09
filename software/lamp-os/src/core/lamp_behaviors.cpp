@@ -52,9 +52,9 @@ void lamp::Lamp::registerExpressions(lamp::ExpressionRegistry& reg) {
 
 void initBehaviors(lamp::Features features, lamp::Lamp& self) {
   // Configurators are always needed (they hold saved colors + wisp paint).
-  shadeConfiguratorBehavior = lamp::ConfiguratorBehavior(&shade, 120);
+  shadeConfiguratorBehavior = lamp::ConfiguratorBehavior(&shade, 120, lamp::Surface::Shade);
   shadeConfiguratorBehavior.colors = shade.defaultColors;
-  baseConfiguratorBehavior = lamp::ConfiguratorBehavior(&base, 120);
+  baseConfiguratorBehavior = lamp::ConfiguratorBehavior(&base, 120, lamp::Surface::Base);
   baseConfiguratorBehavior.colors = base.defaultColors;
 
   // ExpressionManager always begins (it owns the expression band in the

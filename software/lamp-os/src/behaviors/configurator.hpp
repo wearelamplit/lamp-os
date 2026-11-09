@@ -5,7 +5,9 @@
 
 #include "config/config_types.hpp"
 #include "core/animated_behavior.hpp"
+#include "core/hw_config.hpp"
 #include "util/color.hpp"
+#include "util/color_rotation.hpp"
 
 #define CONFIGURATOR_WEBSOCKET_TIMEOUT_MS 60000
 
@@ -24,17 +26,23 @@ namespace lamp {
 constexpr uint16_t kDefaultFadeMs = 100;
 
 class ConfiguratorBehavior : public AnimatedBehavior {
-  using AnimatedBehavior::AnimatedBehavior;
-
  public:
+  ConfiguratorBehavior() = default;
+  // `surface` fixes which way is physically up in `inBuffer`.
+  ConfiguratorBehavior(FrameBuffer* inBuffer, uint32_t inFrames, Surface surface);
+
   // Frame-count knob for control() state-machine timing; per-pixel
   // interpolation uses fadeStartMs_/fadeDurationMs_.
   uint32_t easeFrames = 60;
+  // Assign directly only to seed the configurator before it draws; every
+  // later write goes through beginFade, setSolid or showScene.
   std::vector<Color> colors;
   unsigned long lastWebSocketUpdateTimeMs = 0;
 
   void draw() override;
 
+  // A timeout after the last edit it returns to fb's saved scene; a rotating
+  // saved scene draws on and never stops.
   void control() override;
 
   // Drive a duration-controlled fade from the current buffer state
@@ -46,13 +54,24 @@ class ConfiguratorBehavior : public AnimatedBehavior {
   // so the transition stays smooth (no rubber-banding back to the old
   // start). When `fadeDurationMs == 0` (or `targetColors` is empty) this
   // is effectively an instant set.
+  // The content it installs is raw: drawn unshifted, never rotated.
   void beginFade(const std::vector<Color>& targetColors,
                  uint32_t fadeDurationMs);
+
+  // Installs a role scene from buildRoleScene, crossfading over `fadeMs` from
+  // the frame being drawn. Only content installed this way rotates.
+  void showScene(const RoleScene& scene, uint32_t fadeMs);
+
+  bool rotating() const { return rotating_; }
+
+  // Returns the rotation to the settled position, the frame quiet mode
+  // settles each surface to, so motion resumes from it.
+  void resetRotation() { clock_.reset(); }
 
   // Non-allocating instant solid fill. Fills `colors` in place (no per-call
   // vector alloc, unlike beginFade) and keeps the configurator playing so
   // draw() writes it. The mood scrub calls this per step; a raw beginFade
-  // there would fragment the heap.
+  // there would fragment the heap. Raw, like beginFade.
   void setSolid(Color c);
 
   // ColorOverride/BLE color writes need to read back the
@@ -71,6 +90,18 @@ class ConfiguratorBehavior : public AnimatedBehavior {
   std::vector<Color> fadeFromColors_;
   uint32_t fadeStartMs_ = 0;
   uint32_t fadeDurationMs_ = 0;
+
+  Surface surface_ = Surface::Shade;
+  bool rotating_ = false;
+  ColorRotation rotation_;
+  RotationClock clock_;
+
+  void install(const std::vector<Color>& target, uint32_t fadeMs,
+               const ColorRotation& rotation);
+  void controlRotating(uint32_t now);
+  bool showsRotatingSaved() const;
+  bool towardZero() const;
+  Color target(size_t i, uint32_t offset) const;
 };
 
 }  // namespace lamp

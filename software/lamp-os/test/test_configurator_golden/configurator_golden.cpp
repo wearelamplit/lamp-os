@@ -15,6 +15,7 @@
 #include "../../src/core/animated_behavior.cpp"
 #include "../../src/core/frame_buffer.cpp"
 #include "../../src/util/color.cpp"
+#include "../../src/util/color_rotation.cpp"
 #include "../../src/util/fade.cpp"
 #include "../../src/util/gradient.cpp"
 
