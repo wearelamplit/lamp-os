@@ -15,6 +15,14 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   didn't reach the wisp, as it does for any other palette. Before, the app
   showed the palette empty but never sent it, so the wisp kept painting the
   old colours.
+- **Wisp palette and source changes show as saved only once the wisp reports
+  them.** Save a palette, empty one, or change the wisp's source, and the app
+  marks it saved when the wisp itself reports the change; for a palette, only
+  a report from the wisp you saved to counts. Save twice in quick succession
+  and the newer save wins: the older one stops resending and reports no
+  failure. Empty a wisp's palette through one lamp and it shows empty through
+  any other lamp that relays that wisp too. Before, a background settings read
+  could mark a change saved that the wisp never confirmed.
 
 ## 1.3.0
 
