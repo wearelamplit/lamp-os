@@ -124,9 +124,9 @@ class SnafuLamp : public Lamp {
   catalog (§5). Call `Lamp::registerExpressions(reg)` first to keep the shared
   built-ins, or skip it to define a wholly custom set.
 - **`defaults() → Config::Defaults`** — the **configure** level: first-boot
-  name, colors, per-surface pixel counts, `colorsEditable` flags, multi-segment
-  role seeds, and `setup=true` for a fixed install that ships curated colors and
-  skips the random first-boot roll. Full field list in `config/config.hpp`; the
+  name, colors, per-surface pixel counts, `colorsEditable` flags,
+  `rotationSupported`, multi-segment role seeds, and `setup=true` for a fixed
+  install that ships curated colors and skips the random first-boot roll. Full field list in `config/config.hpp`; the
   color-slot / multi-segment mechanics are in
   [`lamp-framework.md`](lamp-framework.md#color-slots).
 
@@ -137,6 +137,21 @@ design. When `false`, the app hides that surface's color picker. Set it in
 `defaults()` (`shadeColorsEditable` / `baseColorsEditable`); it is firmware-owned,
 read by the app from the lamp's JSON, and not updatable via a settings-blob
 write. An absent field defaults to `true`.
+
+**`rotationSupported`.** One flag per variant, off unless `defaults()` sets it
+(only `StandardLamp` does). With it on, each single-segment role can rotate its
+colours ([`lamp-framework.md`](lamp-framework.md#colour-rotation)): the role's
+section carries `rotate`, the app shows the Rotate box, and the configurator
+renders it, with no app change. A role with other than one segment never
+rotates. With it off the lamp still stores a single-segment role's `rotate`
+(from a web document, a colour write or a config moved between variants) and
+never renders or reports it. Up follows the same per-role rule a single-surface
+Pulse's Up uses, so the strips' `reversed` flags decide which way it runs
+physically. Two known limits on a custom variant that sets the flag: nothing
+documents where its shade's pixel 0 sits, so Up may run physically down there,
+and the app draws its shade previews with the first colour at the top, which
+may cycle in the reverse of the lamp's order. Both wait on the lamp reporting
+which end of its shade holds stop 0.
 
 ### Register the variant
 

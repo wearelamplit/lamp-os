@@ -7,6 +7,16 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 
 ## Unreleased
 
+### Added
+- **Rotate colors (lamp firmware).** A standard lamp's shade and base can
+  flow their own colors round a loop, one constant speed, from one loop every
+  5 s to one every 120 s, rising or falling on each surface (by default the
+  shade falls and the base rises, meeting in the middle). The setting
+  previews live, saves with the colors, and keeps flowing after a reboot, a
+  web config save, an expression test and a firmware update. A surface with
+  one color, or split into segments, stays still. Shifty's color shift
+  follows a moving base through its fades and lands on it with no jump.
+
 ### Fixed
 - **Clearing a wisp's manual palette reaches the wisp.** Remove every colour
   from the manual palette and save, and the wisp stops painting: lamps under
