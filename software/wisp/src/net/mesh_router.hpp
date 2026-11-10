@@ -23,19 +23,13 @@ inline int8_t helloRssiForRecord(const uint8_t* radioSrcMac,
   return direct ? rssi : INT8_MIN;
 }
 
-// A CONTROL_OP applies here only when addressed to this wisp or broadcast
-// (all-0xFF). Single-hop scope: a wisp acts on ops aimed at it, not at a
-// sibling. An unset self MAC (all-zero, pre-setSelfMac) matches only broadcast.
-// The lamps' relays of this wisp's own status and config are dropped: the
-// op slot holds one frame, so an echo would overwrite a pending app op whose
-// unicast resends the dedup then swallows.
+// A CONTROL_OP applies here only when addressed to this wisp. Every broadcast
+// op on the mesh is a wisp's own status or config, a peer's or this wisp's
+// relayed back; the op slot holds one frame, so accepting one could displace a
+// pending app op whose unicast resends the dedup then swallows.
 inline bool controlOpForWisp(const uint8_t targetMac[6],
-                             const uint8_t sourceMac[6],
                              const uint8_t myMac[6]) {
-  static const uint8_t bcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-  if (std::memcmp(sourceMac, myMac, 6) == 0) return false;
-  return std::memcmp(targetMac, bcast, 6) == 0 ||
-         std::memcmp(targetMac, myMac, 6) == 0;
+  return std::memcmp(targetMac, myMac, 6) == 0;
 }
 
 class MeshRouter {
