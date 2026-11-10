@@ -5,6 +5,21 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## Unreleased
+
+### Fixed
+- **Lamps and wisps left on for weeks keep working past day 49.** A lamp's
+  millisecond clock rolls back to zero every 49.7 days of uptime. Around that
+  moment a lamp could freeze its light, keep showing the update indicator
+  after a firmware update gave up, stall a firmware update it was passing to a
+  neighbour or keep skipping that neighbour, close the web config page while
+  you used it, drop a lamp it had just heard from its nearby list, greet a lamp
+  it had just greeted again, relay every mesh check-in instead of thinning
+  them, and for a minute accept the BOOT-button password reset as if it had
+  just started. A wisp could keep lamps and other wisps that had gone silent,
+  forget ones it had just heard, or hold back its brightness re-sends. All of
+  these now carry on through the rollover.
+
 ## 1.3.2
 
 ### Fixed
