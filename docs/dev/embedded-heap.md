@@ -633,7 +633,12 @@ teardown for the web config). The timeout is the task watchdog's 5 s, widened to
 30 s while a firmware or filesystem image is being received. The watchdog
 interrupts whatever is running on core 1: for a loop that spins, `pc` and `bt`
 point at the stall; for a loop blocked on a lock they point at the task that
-ran instead (often the idle task), and only the serial log names `loopTask`. A stall
+ran instead (often the idle task), and only the serial log names `loopTask`.
+After 3 task-watchdog resets in a row, each before its boot reached 60 s of
+uptime, the next boot leaves the loop unwatched and prints `[loopwd] 3 watchdog
+resets in a row` on every build, so a loop that stalls on every boot freezes
+instead of resetting forever. The streak lives in RTC memory, and any other
+reset (a power cycle, an update, a web save's reboot) starts the watch again. A stall
 within 30 s of a firmware update's first boot makes the bootloader roll back,
 and the record's `fw` is then the version that booted after it. `setup()` runs
 unwatched: a hang there leaves the lamp dark with no record until a power

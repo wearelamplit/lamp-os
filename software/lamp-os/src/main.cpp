@@ -68,6 +68,6 @@ void setup() {
 }
 
 void loop() {
-  lamp::loop_watchdog::feed();
+  lamp::loop_watchdog::startIteration();
   g_lamp->tick();
 }

@@ -33,23 +33,34 @@ task watchdog from the end of `setup()` (`util/loop_watchdog.hpp`): 5 s, or
    of `core/lamp_test_action.cpp`.
 2. **Margin on an ordinary session.** Boot, connect the app, drag colours,
    open and close every sheet, save, then, with the app still connected, turn
-   the web config on and join its softAP (this runs the BLE teardown). Grep
-   the log for `[loopwd] longest unfed span`: the last value must be at or
-   under 2500 ms, half the 5 s timeout. A new longest always prints within
-   about a second, so the last line covers the teardown. Record it. Repeat
-   the softAP join with the phone carried out of BLE range just before it,
-   and record the last value again.
+   the web config on and join its softAP (this runs the BLE teardown). The
+   2x rule reads the unfed span: the last `[loopwd] longest unfed span` must
+   be at or under 2500 ms, half the 5 s timeout. A new longest always prints
+   within about a second, so the last line covers the teardown. Record it,
+   and the last `[loopwd] longest loop iteration` for reference (the teardown
+   feeds mid-iteration, so the iteration can run longer than the span).
+   Repeat the softAP join with the phone carried out of BLE range just before
+   it, and record both again.
 3. **Margin across an OTA.** Receive a mesh OTA on the tapped lamp. The upfront
    erase, the verify and the reboot must run through with no `task_wdt` line,
    and the post-reboot lamp boots the new version. The erase runs under the
    30 s timeout and the verify under 5 s; the stat covers both, so hold it to
    the tighter bound: the last `[loopwd] longest unfed span` before the
-   reboot must be at or under 2500 ms. Record it.
+   reboot must be at or under 2500 ms. Record it, and the last `[loopwd]
+   longest loop iteration`: the erase runs in one iteration, so this is how
+   long the lamp stopped animating, and no bound applies to it.
 4. **No reset loop on a normal boot.** Power-cycle the lamp three times. Each
    boot reaches the app with `resetReason` 1 (power-on) and no new
    `lastCrash` entry.
 
-## Known limit
+5. **Boot-loop guard.** Run row 1's `loopwd.hang` three times, each within
+   60 s of the previous boot. After the third reset the boot log shows
+   `[loopwd] 3 watchdog resets in a row; loop unwatched until the next
+   restart`, and a fourth `loopwd.hang` freezes the lamp with no reset. Power
+   cycle it: the next boot is watched again, and a `loopwd.hang` resets it.
+
+## Known limits
 
 `setup()` runs unwatched, so a hang there still leaves the lamp dark until a
-power cycle.
+power cycle. After the boot-loop guard trips, the loop stays unwatched until
+the lamp next restarts for any reason other than the task watchdog.
