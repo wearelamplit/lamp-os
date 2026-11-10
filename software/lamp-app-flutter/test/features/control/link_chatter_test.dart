@@ -4,6 +4,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:fake_async/fake_async.dart';
@@ -498,6 +499,85 @@ void main() {
         expect(climbed, isEmpty);
         expect(r.connected, isTrue);
         _close(r);
+      });
+    });
+
+    group('outlasting the save', () {
+      /// Drops the link unprompted; the ladder's third try cycles the adapter
+      /// from 4.5 s for [cycleTakes]. A save at 5.5 s, once the lamp is up,
+      /// reloads it at about 8 s unless [lampDownFor] keeps it away.
+      _Rig saveDuringCycle(
+        FakeAsync async, {
+        required Duration cycleTakes,
+        Duration lampDownFor = const Duration(seconds: 5),
+      }) {
+        final r = _open(async, password: pw);
+        r.ble
+          ..rebootTakes = lampDownFor
+          ..cycleTakes = cycleTakes
+          ..rebootOnSave = false;
+        r.ble._reboot();
+        async.elapse(const Duration(milliseconds: 5500));
+        expect(r.ble.cycles, 1);
+        final s = r.state.value!;
+        r.control.applyAdvancedLedsAndReboot(base: s.base, shade: s.shade);
+        return r;
+      }
+
+      test('it climbs the ladder for a drop after the save restored the '
+          'link', () {
+        fakeAsync((async) {
+          final r = saveDuringCycle(
+            async,
+            cycleTakes: const Duration(seconds: 10),
+          );
+          async.elapse(const Duration(seconds: 3));
+          expect(r.connected, isTrue);
+          // The drop's first step fires at 9.5 s, while the try still cycles.
+          r.ble.disconnect(_id);
+          async.elapse(const Duration(minutes: 1));
+
+          expect(r.connected, isTrue);
+          _close(r);
+        });
+      });
+
+      test('it leaves a step the drop already armed to run', () {
+        fakeAsync((async) {
+          final r = saveDuringCycle(
+            async,
+            cycleTakes: const Duration(seconds: 10),
+          );
+          // The try stands down at 14.5 s, with the drop's step due 14.7 s.
+          async.elapse(const Duration(milliseconds: 8700));
+          final statesAt = r.states.length;
+          r.ble.disconnect(_id);
+          async.elapse(const Duration(minutes: 1));
+
+          final attempts = r.states
+              .skip(statesAt)
+              .map((s) => s.value?.reconnectAttempt ?? 0);
+          expect(attempts.reduce(max), 1);
+          expect(r.connected, isTrue);
+          _close(r);
+        });
+      });
+
+      test('it leaves the error of a save that gave up', () {
+        fakeAsync((async) {
+          final r = saveDuringCycle(
+            async,
+            cycleTakes: const Duration(seconds: 40),
+            lampDownFor: const Duration(minutes: 5),
+          );
+          // The save gives up at about 25 s; the try stands down at 44.5 s.
+          async.elapse(const Duration(seconds: 30));
+          expect(r.state.hasError, isTrue);
+          async.elapse(const Duration(seconds: 20));
+
+          expect(r.state.hasError, isTrue);
+          _close(r);
+        });
       });
     });
   });
