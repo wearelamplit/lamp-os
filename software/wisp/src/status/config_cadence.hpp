@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include "status/status_cadence.hpp"
+
 namespace wisp {
 
 // Decides when wispConfig goes out. A config is sent after a status emit that
@@ -14,8 +16,8 @@ class ConfigCadence {
  public:
   static constexpr uint32_t kGapMs = 250;
   static constexpr uint32_t kMinIntervalMs = 5000;
-  static constexpr uint32_t kBurstMs = 20000;
-  static constexpr uint32_t kBurstIntervalMs = 2000;
+  static constexpr uint32_t kBurstMs = StatusCadence::kBurstMs;
+  static constexpr uint32_t kBurstIntervalMs = StatusCadence::kBurstIntervalMs;
 
   // After each wispStatus emit, with a fingerprint of the current config.
   void onStatusEmitted(uint32_t nowMs, uint32_t configHash);
