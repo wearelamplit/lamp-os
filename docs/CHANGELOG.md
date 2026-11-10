@@ -20,9 +20,8 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   marks it saved when the wisp itself reports the change; for a palette, only
   a report from the wisp you saved to counts. Save twice in quick succession
   and the newer save wins: the older one stops resending and reports no
-  failure. Empty a wisp's palette through one lamp and it shows empty through
-  any other lamp that relays that wisp too. Before, a background settings read
-  could mark a change saved that the wisp never confirmed.
+  failure. Before, a background settings read could mark a change saved that
+  the wisp never confirmed.
 
 ## 1.3.0
 
