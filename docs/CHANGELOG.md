@@ -12,13 +12,14 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   from the manual palette and save, and the wisp stops painting: lamps under
   it ease back to their own colours. The app shows the palette as saved once
   the wisp reports it after the save, so a lamp re-sending an older report
-  can't mark it saved. If the wisp never does, the app says the palette
-  didn't reach the wisp, as it does for any other palette. If the wisp
-  restarts while the lamp is open in the app, an emptied palette shows as
-  not reaching the wisp even when it did, until the wisp has been up as long
-  as before the restart. The same happens if the lamp stays open while the
-  wisp's uptime passes about 49 days. Before, the app showed the palette empty but never
-  sent it, so the wisp kept painting the old colours.
+  can't mark it saved, and a wisp restart doesn't get in the way. If the
+  wisp never reports it, the app says the palette didn't reach the wisp, as
+  it does for any other palette. Rarely, an emptied palette still shows as
+  not reaching the wisp even when it did: after a wisp restart, when you
+  save before the app has had a wisp report since connecting or the lamp's
+  report comes through trimmed; and on a connection held while the lamp's
+  uptime passes about 49 days, until the app reconnects. Before, the app showed the palette
+  empty but never sent it, so the wisp kept painting the old colours.
 - **Wisp palette and source changes show as saved only once the wisp reports
   them.** Save a palette, empty one, or change the wisp's source, and the app
   marks it saved when the wisp itself reports the change; for a palette, only
