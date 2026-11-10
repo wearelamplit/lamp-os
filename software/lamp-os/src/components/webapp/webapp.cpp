@@ -18,7 +18,6 @@
 #include <memory>
 #include <string>
 
-#include <lampos/clock.hpp>
 
 #include "expr_catalog.h"
 #include "components/firmware/firmware_receiver.hpp"
@@ -81,10 +80,7 @@ static constexpr uint16_t kHttpPort = 80;
 static void bumpDeadline() {
   const uint32_t now = millis();
   const uint32_t idle = now + LAMP_WEBAPP_IDLE_TIMEOUT_MS;
-  uint32_t deadline = s_deadlineMs.load();
-  while (lampos::isLater(idle, deadline) &&
-         !s_deadlineMs.compare_exchange_weak(deadline, idle)) {
-  }
+  raiseDeadline(s_deadlineMs, idle);
 }
 
 // 128 covers 5 × (9 hex + 3 quote/comma) + brackets + NUL with headroom.
@@ -531,9 +527,7 @@ static void rebootNow() {
 void tick() {
   drainWebSave();
   const uint32_t now = millis();
-  uint32_t deadline = s_deadlineMs.load();
-  const uint32_t held = holdPassedDeadline(now, deadline);
-  if (held != deadline) s_deadlineMs.compare_exchange_strong(deadline, held);
+  holdPassedDeadline(s_deadlineMs, now, s_deadlineMs.load());
   // An armed reboot fires even after the AP went down (an OTA's
   // shutdownForOta): a landed web save freezes config saves until it. It
   // waits while OTA quiet mode is held. A received update's own reboot loads

@@ -22,8 +22,8 @@ struct SocialScanTuning {
 
 enum class SocialScanAction { None, OpenWindow, CloseWindow };
 
-// Runs on lamp::uptimeMs(), which never wraps, since a session or a write
-// stamp can sit for weeks while the app stays connected.
+// A session or a write stamp can sit for weeks while the app stays connected,
+// so the gate runs on lamp::uptimeMs(), which never wraps.
 class SocialScanGate {
  public:
   // Reset the session clock. Call on the rising edge of the active signal.

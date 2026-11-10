@@ -88,6 +88,28 @@ void test_hold_leaves_a_deadline_ahead() {
   TEST_ASSERT_EQUAL_UINT32(9000, webapp::holdPassedDeadline(5000, 9000));
 }
 
+// The idle deadline passed; the loop loads it to hold it, then a request on
+// another task raises it before the hold lands. The raise must survive.
+void test_raise_between_load_and_hold_wins() {
+  std::atomic<uint32_t> deadline{1000};
+  const uint32_t now = 5000;
+  const uint32_t seen = deadline.load();
+  webapp::raiseDeadline(deadline, now + 120000);
+  webapp::holdPassedDeadline(deadline, now, seen);
+  TEST_ASSERT_EQUAL_UINT32(now + 120000, deadline.load());
+}
+
+// A raise never lowers a later deadline, and a held deadline is raised past.
+void test_raise_only_moves_the_deadline_later() {
+  std::atomic<uint32_t> deadline{9000};
+  webapp::raiseDeadline(deadline, 8000);
+  TEST_ASSERT_EQUAL_UINT32(9000, deadline.load());
+  webapp::holdPassedDeadline(deadline, 9500, deadline.load());
+  TEST_ASSERT_EQUAL_UINT32(9500, deadline.load());
+  webapp::raiseDeadline(deadline, 9600);
+  TEST_ASSERT_EQUAL_UINT32(9600, deadline.load());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_never_expire_always_false);
@@ -99,5 +121,7 @@ int main(int, char**) {
   RUN_TEST(test_a_reboot_armed_at_zero_fires);
   RUN_TEST(test_passed_deadline_stays_passed_past_half_a_wrap);
   RUN_TEST(test_hold_leaves_a_deadline_ahead);
+  RUN_TEST(test_raise_between_load_and_hold_wins);
+  RUN_TEST(test_raise_only_moves_the_deadline_later);
   return UNITY_END();
 }
