@@ -501,6 +501,19 @@ void main() {
         status(ours, stamp: 73600, lamp: 6000),
         status(ours, stamp: 73601, lamp: 6001),
       ),
+      (
+        'the whole copy of a status heard only shed, after an older copy '
+            'arrived last and repeated',
+        [
+          status(ours, stamp: 73500, lamp: 5000),
+          status(ours, stamp: 73600),
+          status(ours, stamp: 73550),
+          status(ours, stamp: 73550),
+          status(ours, stamp: 73550),
+        ],
+        status(ours, stamp: 73600, lamp: 6000),
+        status(ours, stamp: 73601, lamp: 6001),
+      ),
     ]) {
       test('$label does not confirm an emptied palette', () async {
         // The lamp serves the last status heard, so the read before the save
