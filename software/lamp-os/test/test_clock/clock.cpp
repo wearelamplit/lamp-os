@@ -103,8 +103,9 @@ void test_frame_delta_passes_a_normal_frame_across_the_wrap() {
   TEST_ASSERT_EQUAL_UINT32(kMaxFrameDeltaMs, frameDeltaMs(kMaxFrameDeltaMs, 0));
 }
 
-// Frozen for three weeks, then for long enough that the wrap leaves the raw
-// delta at ten days: either way the first frame steps one capped frame.
+// Frozen for three weeks, for thirty days (a raw delta past 2^31), and for
+// long enough that the wrap leaves the raw delta at ten days. Each first frame
+// steps one capped frame.
 void test_frame_delta_caps_the_first_frame_after_weeks_frozen() {
   constexpr uint64_t kDayMs = 24ull * 60 * 60 * 1000;
   const uint32_t last = UINT32_MAX - 1000;
@@ -113,6 +114,8 @@ void test_frame_delta_caps_the_first_frame_after_weeks_frozen() {
   const uint64_t frozen = (1ull << 32) + 10 * kDayMs;
   TEST_ASSERT_EQUAL_UINT32(kMaxFrameDeltaMs,
                            frameDeltaMs(static_cast<uint32_t>(last + frozen), last));
+  TEST_ASSERT_EQUAL_UINT32(kMaxFrameDeltaMs,
+                           frameDeltaMs(static_cast<uint32_t>(last + 30 * kDayMs), last));
   TEST_ASSERT_EQUAL_UINT32(kMaxFrameDeltaMs, frameDeltaMs(last + kMaxFrameDeltaMs + 1, last));
 }
 

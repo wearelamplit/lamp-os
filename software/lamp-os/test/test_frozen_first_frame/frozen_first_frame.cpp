@@ -14,6 +14,7 @@
 #include "../../src/core/frame_buffer.cpp"
 #include "../../src/expressions/breathing/breathing_expression.cpp"
 #include "../../src/expressions/expression.cpp"
+#include "../../src/expressions/pulse/pulse_expression.cpp"
 #include "../../src/expressions/shimmer/shimmer_expression.cpp"
 #include "../../src/expressions/spotty/spotty_expression.cpp"
 #include "../../src/util/color.cpp"
@@ -136,9 +137,15 @@ void test_shimmer_resumes_mid_flicker() {
                                                   kStartMs + 1500, 4);
 }
 
-// A 2 s burst paused just after it starts to fall: its first frame back is a
-// normal step of the fall. The burst's own length runs on uptime, so only that
-// first frame compares.
+void test_pulse_resumes_mid_travel() {
+  checkResumesLikeANormalFrame<PulseExpression>(
+      {{"pulseSpeed", 20}, {"size", 4}, {"loop", 1}, {"opacity", 100}}, false,
+      kStartMs + 600, 4);
+}
+
+// A 2 s burst paused just after it starts to fall comes back with a normal
+// step of the fall. The burst's own length runs on uptime, so only that first
+// frame compares.
 void test_shimmer_burst_resumes_mid_fall() {
   checkResumesLikeANormalFrame<ShimmerExpression>(
       {{"fire", 0}, {"count", 5}, {"durationMax", 2000}, {"opacity", 100}}, true,
@@ -153,5 +160,6 @@ int main(int argc, char** argv) {
   RUN_TEST(test_spotty_resumes_without_respawning_its_spots);
   RUN_TEST(test_shimmer_resumes_mid_flicker);
   RUN_TEST(test_shimmer_burst_resumes_mid_fall);
+  RUN_TEST(test_pulse_resumes_mid_travel);
   return UNITY_END();
 }
