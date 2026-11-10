@@ -56,4 +56,8 @@ void capturePanic(const char* reason, const void* pc,
 
 const Record& last();
 
+// The RTC snapshot when it passed its magic check, else null. Before boot() it
+// is the previous boot's; after boot(), this boot's.
+const Snapshot* rtcSnapshot();
+
 }  // namespace lamp::crash_record

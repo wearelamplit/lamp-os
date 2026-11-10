@@ -61,6 +61,7 @@
 #include "core/compositor.hpp"
 #include "core/frame_buffer.hpp"
 #include "core/boot_recovery.hpp"
+#include "core/boot_history.hpp"
 #include "core/crash_record.hpp"
 #include "version.hpp"
 #include "core/power_governor.hpp"
@@ -638,6 +639,7 @@ void lamp::Lamp::setup() {
     Serial.println(
         "[power] brownout reset — supply budget constants may be mis-sized");
   }
+  boot_history::boot(FIRMWARE_VERSION);
   crash_record::boot(FIRMWARE_VERSION);
   lamp_register_panic_handler();
 
@@ -1023,6 +1025,7 @@ void lamp::Lamp::tick() {
   }
 #endif
   crash_record::tick(millis(), [] { return lampRoster.size(); });
+  boot_history::tick(millis());
 
   // Drain pending BLE actions on the loop task (Core 1). All heap allocation
   // (JsonDocument parse, std::vector, gradient construction) happens here,

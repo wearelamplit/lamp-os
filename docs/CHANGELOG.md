@@ -7,6 +7,16 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 
 ## Unreleased
 
+### Added
+- **A lamp remembers its last few boots.** Every lamp, release builds
+  included, keeps its last 5 starts and prints the finished ones on the USB
+  serial console as it boots, one line each: firmware, how long it ran, how
+  low its free memory got, and how it ended (power cut, restart, crash,
+  watchdog, brownout). After a lamp misbehaves, plug it into a computer and
+  open `npm run lamp:tap`: the lamp restarts and prints its history straight
+  away. A boot that ended in a power cut shows the run time it had reached by
+  its last check (1 minute, 1 hour, 1 day).
+
 ### Changed
 - **Smaller firmware, a little more free memory.** The lamp no longer builds
   in code that saves a crash dump to flash. It never had room to store one,

@@ -116,6 +116,8 @@ void capturePanic(const char* reason, const void* pc,
 
 const Record& last() { return s_last; }
 
+const Snapshot* rtcSnapshot() { return s_rtc.magic == kRtcMagic ? &s_rtc.snap : nullptr; }
+
 #endif
 
 }  // namespace lamp::crash_record
