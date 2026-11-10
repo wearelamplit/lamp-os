@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "util/high_water.hpp"
+#include "util/log_rate_limiter.hpp"
 
 // The Arduino loop task under the ESP-IDF task watchdog: a loop task that
 // stops feeding for the watchdog's timeout panics, and the crash record
@@ -12,8 +13,8 @@ namespace lamp::loop_watchdog {
 
 // Subscribes the calling task. Call once, from the loop task, at the end of
 // setup; setup itself runs unwatched. Skips subscribing after
-// kResetStreakLimit task-watchdog resets in a row, so a loop that stalls on
-// every boot freezes instead of resetting forever.
+// kResetStreakLimit task-watchdog resets in a row, leaving the loop unwatched
+// until a reset other than the task watchdog's.
 void begin();
 
 // Resets the loop task's watchdog. Called between the steps of any loop-task
@@ -25,15 +26,21 @@ void feed();
 void startIteration();
 
 constexpr uint8_t kResetStreakLimit = 3;
-// A boot that runs this long ends the streak.
+// A task-watchdog reset after this much uptime does not count toward the
+// streak.
 constexpr uint32_t kStableUptimeMs = 60000;
 
-// This boot's count of task-watchdog resets in a row. `prevStreak` is what
-// the previous boot left, zeroed once it reached kStableUptimeMs; `stateValid`
-// is false when that state did not survive the reset (a power cycle).
+constexpr bool reachedStable(uint32_t uptimeMs) {
+  return uptimeMs >= kStableUptimeMs;
+}
+
+// This boot's count of task-watchdog resets in a row, each before its boot
+// reached kStableUptimeMs. `prevStreak` and `prevReachedStable` are what the
+// previous boot left; `stateValid` is false when they did not survive the
+// reset.
 constexpr uint8_t bootStreak(bool stateValid, uint8_t prevStreak,
-                             bool taskWdtReset) {
-  return !stateValid || !taskWdtReset ? 0
+                             bool prevReachedStable, bool taskWdtReset) {
+  return !stateValid || !taskWdtReset || prevReachedStable ? 0
          : prevStreak < kResetStreakLimit ? static_cast<uint8_t>(prevStreak + 1)
                                           : kResetStreakLimit;
 }
@@ -62,5 +69,10 @@ class LongestGap {
   HighWaterMark longest_;
   bool unreported_ = false;
 };
+
+// Takes the gap's report into `longestMs` when one is due and `log` admits a
+// line at nowMs. A refused report stays due.
+bool takeDueReport(LongestGap& gap, LogRateLimiter& log, uint32_t nowMs,
+                   uint32_t& longestMs);
 
 }  // namespace lamp::loop_watchdog

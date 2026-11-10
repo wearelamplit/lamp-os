@@ -1,18 +1,23 @@
 // Pins the loop watchdog's bookkeeping: the longest span between marks (feeds,
-// or loop iteration starts) across the millis() wrap, a new longest held for report until taken, the feed gate
-// that keeps every other task off the watchdog, and the reset streak that
-// stops a boot loop.
+// or loop iteration starts) across the millis() wrap, a new longest held for
+// report until a line is admitted, the feed gate that keeps every other task
+// off the watchdog, and the reset streak that stops a boot loop.
 
 #include <unity.h>
 #include <cstdint>
 
 #include "util/loop_watchdog.hpp"
+#include "../../src/util/log_rate_limiter.cpp"
 #include "../../src/util/loop_watchdog.cpp"
 
 using lamp::loop_watchdog::bootStreak;
 using lamp::loop_watchdog::LongestGap;
 using lamp::loop_watchdog::feedsFrom;
+using lamp::LogRateLimiter;
 using lamp::loop_watchdog::kResetStreakLimit;
+using lamp::loop_watchdog::kStableUptimeMs;
+using lamp::loop_watchdog::reachedStable;
+using lamp::loop_watchdog::takeDueReport;
 using lamp::loop_watchdog::watchesBoot;
 
 void setUp(void) {}
@@ -81,27 +86,64 @@ void test_feeds_only_from_the_subscribed_task() {
 void test_consecutive_watchdog_resets_stop_the_watch_at_the_limit() {
   uint8_t streak = 0;
   for (uint8_t reset = 1; reset < kResetStreakLimit; ++reset) {
-    streak = bootStreak(true, streak, true);
+    streak = bootStreak(true, streak, false, true);
     TEST_ASSERT_EQUAL_UINT8(reset, streak);
     TEST_ASSERT_TRUE(watchesBoot(streak));
   }
-  streak = bootStreak(true, streak, true);
+  streak = bootStreak(true, streak, false, true);
   TEST_ASSERT_FALSE(watchesBoot(streak));
   // Further watchdog resets hold it there without overflowing.
-  for (int i = 0; i < 300; ++i) streak = bootStreak(true, streak, true);
+  for (int i = 0; i < 300; ++i) streak = bootStreak(true, streak, false, true);
   TEST_ASSERT_EQUAL_UINT8(kResetStreakLimit, streak);
   TEST_ASSERT_FALSE(watchesBoot(streak));
 }
 
 void test_any_other_reset_rearms() {
-  TEST_ASSERT_EQUAL_UINT8(0, bootStreak(true, kResetStreakLimit, false));
-  TEST_ASSERT_TRUE(watchesBoot(bootStreak(true, kResetStreakLimit, false)));
+  TEST_ASSERT_EQUAL_UINT8(0, bootStreak(true, kResetStreakLimit, false, false));
+  TEST_ASSERT_TRUE(watchesBoot(bootStreak(true, kResetStreakLimit, false, false)));
 }
 
 void test_lost_state_rearms_even_after_a_watchdog_reset() {
-  // A power cycle leaves the RTC state unreadable.
-  TEST_ASSERT_EQUAL_UINT8(0, bootStreak(false, kResetStreakLimit, true));
-  TEST_ASSERT_EQUAL_UINT8(0, bootStreak(false, 200, true));
+  // RTC state that fails its magic check counts as no streak.
+  TEST_ASSERT_EQUAL_UINT8(0, bootStreak(false, kResetStreakLimit, false, true));
+  TEST_ASSERT_EQUAL_UINT8(0, bootStreak(false, 200, false, true));
+}
+
+void test_a_late_watchdog_reset_does_not_count() {
+  // A stall after the boot reached kStableUptimeMs, then two early ones.
+  uint8_t streak = bootStreak(true, 0, true, true);
+  TEST_ASSERT_EQUAL_UINT8(0, streak);
+  streak = bootStreak(true, streak, false, true);
+  streak = bootStreak(true, streak, false, true);
+  TEST_ASSERT_EQUAL_UINT8(2, streak);
+  TEST_ASSERT_TRUE(watchesBoot(streak));
+  // A late one mid-streak ends it too.
+  TEST_ASSERT_EQUAL_UINT8(0, bootStreak(true, 2, true, true));
+}
+
+void test_stable_from_the_threshold() {
+  TEST_ASSERT_FALSE(reachedStable(kStableUptimeMs - 1));
+  TEST_ASSERT_TRUE(reachedStable(kStableUptimeMs));
+}
+
+void test_refused_report_stays_due_until_a_line_is_admitted() {
+  LongestGap g;
+  LogRateLimiter log(1000, 1);
+  uint32_t longest = 0;
+  g.start(10000);
+  g.mark(10100);  // 100
+  TEST_ASSERT_TRUE(takeDueReport(g, log, 10100, longest));
+  TEST_ASSERT_EQUAL_UINT32(100, longest);
+  g.mark(10400);  // 300, inside the limiter's second: refused
+  TEST_ASSERT_FALSE(takeDueReport(g, log, 10400, longest));
+  TEST_ASSERT_TRUE(g.reportDue());
+  g.mark(11200);  // 800
+  g.mark(11210);
+  TEST_ASSERT_TRUE(takeDueReport(g, log, 11210, longest));
+  TEST_ASSERT_EQUAL_UINT32(800, longest);
+  TEST_ASSERT_FALSE(g.reportDue());
+  // Nothing due: no line, whatever the limiter allows.
+  TEST_ASSERT_FALSE(takeDueReport(g, log, 20000, longest));
 }
 
 int main(int, char**) {
@@ -115,5 +157,8 @@ int main(int, char**) {
   RUN_TEST(test_consecutive_watchdog_resets_stop_the_watch_at_the_limit);
   RUN_TEST(test_any_other_reset_rearms);
   RUN_TEST(test_lost_state_rearms_even_after_a_watchdog_reset);
+  RUN_TEST(test_a_late_watchdog_reset_does_not_count);
+  RUN_TEST(test_stable_from_the_threshold);
+  RUN_TEST(test_refused_report_stays_due_until_a_line_is_admitted);
   return UNITY_END();
 }

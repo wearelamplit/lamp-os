@@ -6,9 +6,6 @@
 #include <esp_system.h>
 #include <esp_task_wdt.h>
 
-#ifdef LAMP_DEBUG
-#include "util/log_rate_limiter.hpp"
-#endif
 #endif
 
 namespace lamp::loop_watchdog {
@@ -25,6 +22,13 @@ uint32_t LongestGap::takeReport() {
   return longest_.peek();
 }
 
+bool takeDueReport(LongestGap& gap, LogRateLimiter& log, uint32_t nowMs,
+                   uint32_t& longestMs) {
+  if (!gap.reportDue() || !log.admit(nowMs).print) return false;
+  longestMs = gap.takeReport();
+  return true;
+}
+
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 
 namespace {
@@ -34,11 +38,11 @@ constexpr uint32_t kRtcMagic = 0x4c574447u;
 struct RtcState {
   uint32_t magic;
   uint8_t streak;
+  uint8_t reachedStable;
 };
 
 RTC_NOINIT_ATTR RtcState s_rtc;
 TaskHandle_t s_loopTask = nullptr;
-bool s_streakCleared = false;
 
 #ifdef LAMP_DEBUG
 LongestGap s_unfed;
@@ -48,9 +52,9 @@ LogRateLimiter s_iterationLog(/*windowMs=*/1000, /*linesPerWindow=*/1);
 
 void report(LongestGap& gap, LogRateLimiter& log, uint32_t nowMs,
             const char* what) {
-  if (gap.reportDue() && log.admit(nowMs).print) {
-    Serial.printf("[loopwd] longest %s %u ms\n", what,
-                  (unsigned)gap.takeReport());
+  uint32_t longestMs = 0;
+  if (takeDueReport(gap, log, nowMs, longestMs)) {
+    Serial.printf("[loopwd] longest %s %u ms\n", what, (unsigned)longestMs);
   }
 }
 #endif
@@ -60,13 +64,14 @@ void report(LongestGap& gap, LogRateLimiter& log, uint32_t nowMs,
 void begin() {
   if (s_loopTask != nullptr) return;
   const uint8_t streak =
-      bootStreak(s_rtc.magic == kRtcMagic, s_rtc.streak,
+      bootStreak(s_rtc.magic == kRtcMagic, s_rtc.streak, s_rtc.reachedStable != 0,
                  esp_reset_reason() == ESP_RST_TASK_WDT);
   s_rtc.magic = kRtcMagic;
   s_rtc.streak = streak;
+  s_rtc.reachedStable = 0;
   if (!watchesBoot(streak)) {
     Serial.printf("[loopwd] %u watchdog resets in a row; loop unwatched until "
-                  "the next restart\n",
+                  "a non-watchdog reset\n",
                   (unsigned)streak);
     return;
   }
@@ -88,10 +93,7 @@ void feed() {
   if (!feedsFrom(xTaskGetCurrentTaskHandle(), s_loopTask)) return;
   esp_task_wdt_reset();
   const uint32_t nowMs = millis();
-  if (!s_streakCleared && nowMs >= kStableUptimeMs) {
-    s_rtc.streak = 0;
-    s_streakCleared = true;
-  }
+  if (s_rtc.reachedStable == 0 && reachedStable(nowMs)) s_rtc.reachedStable = 1;
 #ifdef LAMP_DEBUG
   s_unfed.mark(nowMs);
   report(s_unfed, s_unfedLog, nowMs, "unfed span");

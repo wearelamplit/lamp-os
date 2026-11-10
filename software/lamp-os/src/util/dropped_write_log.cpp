@@ -20,8 +20,8 @@ LogRateLimiter s_limiter(kWindowMs, kLinesPerWindow);
 }  // namespace
 
 void logDroppedWrite(const char* characteristic, const char* reason) {
-  // millis() inside the lock: a timestamp older than the window's start
-  // would reopen it.
+  // Read millis() inside the lock, since a timestamp older than the window's
+  // start reopens it.
   portENTER_CRITICAL(&s_mux);
   const LogRateLimiter::Admission a = s_limiter.admit(millis());
   portEXIT_CRITICAL(&s_mux);
