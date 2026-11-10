@@ -287,6 +287,31 @@ void main() {
     expect(rig.brightness, 100);
   });
 
+  testWidgets('a second failed push restarts the bound', (tester) async {
+    final rig = await _pump(tester);
+    await _failWhileQuiet(tester, rig);
+    await tester.pump(const Duration(seconds: 50));
+    await _failWhileQuiet(tester, rig);
+    await tester.pump(
+      ControlNotifier.quietAfterPushBound - const Duration(seconds: 49),
+    );
+    expect(find.textContaining(_banner), findsOneWidget);
+    await tester.pump(const Duration(seconds: 50));
+    await _settle(tester);
+    expect(find.textContaining(_banner), findsNothing);
+  });
+
+  testWidgets('the bound firing after the notifier is gone is harmless', (
+    tester,
+  ) async {
+    final rig = await _pump(tester);
+    await _failWhileQuiet(tester, rig);
+    await tester.pumpWidget(const SizedBox.shrink());
+    rig.container.dispose();
+    await tester.pump(ControlNotifier.quietAfterPushBound);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('a rebuild during the hold keeps the bound', (tester) async {
     final rig = await _pump(tester);
     await _failWhileQuiet(tester, rig);

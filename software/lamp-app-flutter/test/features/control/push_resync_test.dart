@@ -307,6 +307,7 @@ void main() {
       expect(r.connected, isTrue);
 
       final mark = r.mark();
+      final reads = r.ble.sectionReads;
       r.notify(quiet: true);
       await _pump();
       expect(r.frozen, isTrue, reason: 'the lamp is still quiet');
@@ -316,6 +317,7 @@ void main() {
       await _pump();
       expect(r.frozen, isFalse);
       expect(r.focusSince(mark), [1], reason: 'the reconnect cleared it');
+      expect(r.ble.sectionReads, reads, reason: 'the reconnect re-read it');
     });
   });
 
@@ -359,9 +361,11 @@ void main() {
       await _pump();
       await r.reconnect();
       final mark = r.mark();
+      final reads = r.ble.sectionReads;
       r.notify(quiet: false);
       await _pump();
       expect(r.focusSince(mark), [1]);
+      expect(r.ble.sectionReads, reads);
     },
   );
 
@@ -489,6 +493,16 @@ void main() {
         [BleUuids.brightness, 60],
       ]);
     });
+  });
+
+  test('a notify without quiet re-sends nothing', () async {
+    final r = await _rig();
+    r.control.setHomeModeFocus(true);
+    await r.reconnect();
+    final mark = r.mark();
+    r.notify();
+    await _pump();
+    expect(r.writesSince(mark), isEmpty);
   });
 
   test('with no push, a brightness write sends no focus', () async {
