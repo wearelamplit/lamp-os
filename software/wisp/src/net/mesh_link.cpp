@@ -82,11 +82,9 @@ bool MeshLink::begin() {
   esp_now_register_send_cb(sendTrampoline);
 #endif
 
-  // 1M DSSS: the wisp's traffic is dominated by small per-lamp unicast
-  // (keepalive/drift/paint), where 1M robustness beats 2M airtime; bench A/B
-  // measured 1M's send-fail rate lower. TX-side only; receivers auto-detect
-  // from the PLCP header, so lamps can run 2M independently.
-  esp_wifi_config_espnow_rate(WIFI_IF_STA, WIFI_PHY_RATE_1M_L);
+  // Every peer sends at the IDF's ESP-NOW default, 1 Mbps DSSS, the 802.11
+  // rate that carries farthest. Far lamps already receive near -94 dBm, so
+  // nothing here sets a faster one.
 
   // Broadcast peer. channel=0 means "use the radio's current channel", just
   // pinned above so this lands on LAMP_ESPNOW_CHANNEL.
