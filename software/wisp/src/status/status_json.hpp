@@ -38,7 +38,8 @@ struct WispConfigFields {
 // document still fits (fields matching the app parser's defaults are
 // omitted). `configCopy`, when given, adds the config fields at the lowest
 // priority for lamps that predate wispConfig. lastSeenMs is the wisp's
-// uptime at the call (wisp::uptimeMs()). Never returns 0 when outCap > cap. See docs/dev/networking.md for the field priority order.
+// uptime at the call (wisp::uptimeMs()). Never returns 0 when
+// outCap > cap. See docs/dev/networking.md for the field priority order.
 size_t buildWispStatusJson(const WispStatusFields& f,
                            const WispConfigFields* configCopy, char* out,
                            size_t outCap, size_t cap);

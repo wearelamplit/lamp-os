@@ -117,13 +117,17 @@ void test_peer_idle_for_a_full_wrap_is_evicted_first() {
 // asks for the add again.
 void test_released_mac_is_added_again() {
   PeerSlots slots;
-  uint8_t m[6];
-  macFor(m, 1);
-  touchAt(slots, m, 1000);
-  slots.release(m);
-  const PeerSlots::Change again = touchAt(slots, m, 2000);
+  uint8_t kept[6], released[6];
+  macFor(kept, 1);
+  macFor(released, 2);
+  touchAt(slots, kept, 1000);
+  touchAt(slots, released, 1100);
+  slots.release(released);
+
+  const PeerSlots::Change again = touchAt(slots, released, 2000);
   TEST_ASSERT_TRUE(again.added);
   TEST_ASSERT_FALSE(again.evicted);
+  TEST_ASSERT_FALSE(touchAt(slots, kept, 2100).added);
 }
 
 // A released slot is reused before any peer is evicted.
@@ -138,6 +142,11 @@ void test_release_frees_a_slot_in_a_full_table() {
   const PeerSlots::Change c = touchAt(slots, fresh, 5000);
   TEST_ASSERT_TRUE(c.added);
   TEST_ASSERT_FALSE(c.evicted);
+  for (uint8_t i = 1; i <= PeerSlots::kCapacity; ++i) {
+    if (i == 7) continue;
+    macFor(m, i);
+    TEST_ASSERT_FALSE(touchAt(slots, m, 6000 + i).added);
+  }
 }
 
 int main() {
