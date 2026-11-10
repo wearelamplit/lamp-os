@@ -9,8 +9,6 @@
 #include <array>
 #include <cstring>
 
-#include <lampos/clock.hpp>
-
 #include "paint/current_palette.hpp"
 #include "paint/drift.hpp"
 #include "fleet/lamp_inventory.hpp"
@@ -70,7 +68,9 @@ void PaintDistributor::tick(uint32_t nowMs) {
       (nowMs - lastBrWalkMs_) >= kBrightnessReassertMs) {
     beginBrightnessWalk();
   }
-  if (brRepeatsLeft_ > 0 && !brWalkActive_ && lampos::timeReached(nowMs, nextBrPassMs_)) {
+  if (brRepeatsLeft_ > 0 && !brWalkActive_ &&
+      (!brPassGapArmed_ || nowMs - brWalkEndMs_ >= kRestorePassGapMs)) {
+    brPassGapArmed_ = false;
     brRepeatsLeft_--;
     beginBrightnessWalk();
   }
@@ -82,7 +82,10 @@ void PaintDistributor::tick(uint32_t nowMs) {
     sendBrightnessToPeer(brWalkMacs_[brWalkIdx_++]);
     if (brWalkIdx_ >= brWalkCount_) {
       brWalkActive_ = false;
-      if (brRepeatsLeft_ > 0) nextBrPassMs_ = nowMs + kRestorePassGapMs;
+      if (brRepeatsLeft_ > 0) {
+        brWalkEndMs_ = nowMs;
+        brPassGapArmed_ = true;
+      }
     }
   }
 }
@@ -95,7 +98,6 @@ void PaintDistributor::assignAllClaimed() {
 void PaintDistributor::setBrightness(uint8_t pct) {
   brightness_ = pct > 100 ? 100 : pct;
   brRepeatsLeft_ = brightness_ >= 100 ? kRestoreRepeats : 0;
-  nextBrPassMs_ = millis();
   beginBrightnessWalk();
 }
 

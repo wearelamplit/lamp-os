@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "components/firmware/inter_session_quiet_hold.hpp"
 #include "components/network/protocol/lamp_protocol.hpp"
 #include "util/high_water.hpp"
 
@@ -347,12 +348,9 @@ class FirmwareReceiver {
   // Inter-session quiet hold. In a 3+ lamp mesh a receiver can be OFFERed by
   // several distributors in quick succession; if one session aborts, exiting
   // quiet immediately flashes the base color before the next OFFER lands. Defer
-  // exitQuiet by kInterSessionQuietHoldMs to bridge that gap. Receiver-side
-  // mirror of the distributor cooldown, minus the last-session indicator hold.
-  static constexpr uint32_t kInterSessionQuietHoldMs = 10000;
-  bool     quietHeld_              = false;
-  bool     quietHoldPending_       = false;
-  uint32_t quietHoldUntilMs_       = 0;
+  // exitQuiet by InterSessionQuietHold::kHoldMs to bridge that gap. The
+  // receiver never inherits a hold, so it always ends sessions as not done.
+  InterSessionQuietHold quietHold_;
 };
 
 }  // namespace lamp

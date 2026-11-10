@@ -7,7 +7,7 @@ namespace lampos {
 
 // How far ahead of a reader's nowMs a stamp another task wrote after it may
 // sit, such as across a loop stall.
-inline constexpr uint32_t kStampSkewMs = 60000;
+inline constexpr uint32_t kStampLeadMs = 60000;
 
 // True once nowMs has reached deadlineMs. Holds while the deadline lies within
 // 2^31 ms (24.8 days) of nowMs on either side.
@@ -21,11 +21,11 @@ constexpr bool isLater(uint32_t a, uint32_t b) {
   return static_cast<int32_t>(a - b) > 0;
 }
 
-// Age of `stampMs` at nowMs. A stamp up to kStampSkewMs ahead of nowMs reads
-// as age 0, so ages hold up to 49.7 days less kStampSkewMs.
+// Age of `stampMs` at nowMs. A stamp up to kStampLeadMs ahead of nowMs reads
+// as age 0, so ages hold up to 49.7 days less kStampLeadMs.
 constexpr uint32_t msSince(uint32_t nowMs, uint32_t stampMs) {
   const uint32_t age = nowMs - stampMs;
-  return age >= UINT32_MAX - kStampSkewMs ? 0 : age;
+  return age > UINT32_MAX - kStampLeadMs ? 0 : age;
 }
 
 }  // namespace lampos

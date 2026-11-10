@@ -197,7 +197,6 @@ void SocialBehavior::control() {
   if (lamp::overrides.shade.operatorEditing()) return;
 
   // Wraparound-safe time comparison (millis() rolls over at ~49 days).
-  // The re-greet check below uses the same idiom for consistency.
   if (static_cast<int32_t>(now - nextAcknowledgeTimeMs) < 0) return;
 
   const SocialMode mode = config_ ? config_->lamp.socialMode : SocialMode::Ambivert;

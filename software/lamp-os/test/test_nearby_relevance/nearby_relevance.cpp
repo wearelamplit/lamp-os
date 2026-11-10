@@ -107,6 +107,18 @@ void test_most_recent_seen_across_the_wrap() {
   TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, lamp::sinceLastSeen(0, 0, now));
 }
 
+// Stamps another task wrote just after the reader took `now` sit ahead of it
+// and read as age 0; the later stamp still wins.
+void test_stamps_ahead_of_now_order_by_stamp() {
+  const uint32_t now = 5000;
+  TEST_ASSERT_EQUAL_UINT32(now + 20, lamp::mostRecentSeenMs(now + 10, now + 20, now));
+  TEST_ASSERT_EQUAL_UINT32(now + 20, lamp::mostRecentSeenMs(now + 20, now + 10, now));
+  const Entry later = meshE(now + 20);
+  const Entry earlier = meshE(now + 10);
+  TEST_ASSERT_TRUE(lamp::nearbyMoreRelevant(later, earlier, now, kMaxAgeMs));
+  TEST_ASSERT_FALSE(lamp::nearbyMoreRelevant(earlier, later, now, kMaxAgeMs));
+}
+
 }  // namespace
 
 int main(int, char**) {
@@ -118,5 +130,6 @@ int main(int, char**) {
   RUN_TEST(test_sort_partitions_near_first);
   RUN_TEST(test_most_recent_wins_across_the_wrap);
   RUN_TEST(test_most_recent_seen_across_the_wrap);
+  RUN_TEST(test_stamps_ahead_of_now_order_by_stamp);
   return UNITY_END();
 }

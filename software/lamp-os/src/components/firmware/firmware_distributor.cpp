@@ -779,7 +779,7 @@ void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
                 (unsigned)peerVersion);
     return;
   }
-  if (peerIsInBackoff(peerMac, nowMs)) {
+  if (penalties_.inBackoff(peerMac, nowMs)) {
     FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X v=0x%08X skip: "
                 "peer in backoff\n",
                 peerMac[0], peerMac[1], peerMac[2],
@@ -843,75 +843,12 @@ bool FirmwareDistributor::getLastSession(uint8_t outMac[6],
   return true;
 }
 
-bool FirmwareDistributor::peerIsInBackoff(const uint8_t mac[6],
-                                          uint32_t nowMs) const {
-  for (size_t i = 0; i < kPenaltyRingSize; ++i) {
-    const auto& p = penalties_[i];
-    if (!p.used) continue;
-    if (!macsEqual(p.mac, mac)) continue;
-    if (p.persistent) return true;
-    if (lampos::msSince(nowMs, p.sinceMs) < p.durationMs) return true;
-  }
-  return false;
-}
-
-void FirmwareDistributor::notePeerBackoff(const uint8_t mac[6], uint32_t nowMs,
-                                          uint32_t durationMs,
-                                          bool persistent) {
-  for (size_t i = 0; i < kPenaltyRingSize; ++i) {
-    if (penalties_[i].used && macsEqual(penalties_[i].mac, mac)) {
-      penalties_[i].sinceMs    = nowMs;
-      penalties_[i].durationMs = durationMs;
-      penalties_[i].persistent = persistent;
-      return;
-    }
-  }
-
-  // Slot priority for a new mac: free > expired transient > active transient.
-  // A persistent (cross-variant-block) slot is never picked here, so a later
-  // transient penalty can't evict an earlier permanent block.
-  int freeSlot = -1, expiredTransient = -1, activeTransient = -1, oldestPersistent = -1;
-  for (size_t i = 0; i < kPenaltyRingSize; ++i) {
-    PeerPenalty& p = penalties_[i];
-    if (!p.used) {
-      if (freeSlot < 0) freeSlot = static_cast<int>(i);
-    } else if (!p.persistent) {
-      if (lampos::msSince(nowMs, p.sinceMs) >= p.durationMs) {
-        if (expiredTransient < 0) expiredTransient = static_cast<int>(i);
-      } else if (activeTransient < 0) {
-        activeTransient = static_cast<int>(i);
-      }
-    } else if (oldestPersistent < 0 ||
-               lampos::msSince(nowMs, p.sinceMs) >
-                   lampos::msSince(nowMs, penalties_[oldestPersistent].sinceMs)) {
-      oldestPersistent = static_cast<int>(i);
-    }
-  }
-
-  int slot = freeSlot >= 0 ? freeSlot
-           : expiredTransient >= 0 ? expiredTransient
-           : activeTransient;
-  if (slot < 0) {
-    // Ring is entirely persistent blocks. A transient penalty re-arms on its
-    // next failure, so skip it rather than evict a permanent block; a new
-    // permanent block replaces the oldest one (bounded, least-bad choice).
-    if (!persistent) return;
-    slot = oldestPersistent;
-  }
-
-  penalties_[slot].used           = true;
-  penalties_[slot].persistent     = persistent;
-  std::memcpy(penalties_[slot].mac, mac, 6);
-  penalties_[slot].sinceMs        = nowMs;
-  penalties_[slot].durationMs     = durationMs;
-}
-
 void FirmwareDistributor::recordPeerFailure(uint32_t nowMs) {
   bool nonzero = false;
   for (int i = 0; i < 6; ++i) {
     if (targetMac_[i] != 0) { nonzero = true; break; }
   }
-  if (nonzero) notePeerBackoff(targetMac_, nowMs, kPeerBackoffMs);
+  if (nonzero) penalties_.note(targetMac_, nowMs, kPeerBackoffMs, /*persistent=*/false);
 }
 
 void FirmwareDistributor::recordPeerFailureFinalize(uint32_t nowMs) {
@@ -919,7 +856,7 @@ void FirmwareDistributor::recordPeerFailureFinalize(uint32_t nowMs) {
   for (int i = 0; i < 6; ++i) {
     if (targetMac_[i] != 0) { nonzero = true; break; }
   }
-  if (nonzero) notePeerBackoff(targetMac_, nowMs, kPeerFinalizeBackoffMs);
+  if (nonzero) penalties_.note(targetMac_, nowMs, kPeerFinalizeBackoffMs, /*persistent=*/false);
 }
 
 void FirmwareDistributor::recordPeerBlocklist(uint32_t nowMs) {
@@ -927,7 +864,7 @@ void FirmwareDistributor::recordPeerBlocklist(uint32_t nowMs) {
   for (int i = 0; i < 6; ++i) {
     if (targetMac_[i] != 0) { nonzero = true; break; }
   }
-  if (nonzero) notePeerBackoff(targetMac_, nowMs, 0, /*persistent=*/true);
+  if (nonzero) penalties_.note(targetMac_, nowMs, 0, /*persistent=*/true);
 }
 
 void FirmwareDistributor::emitOffer(const uint8_t targetMac[6],

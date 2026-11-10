@@ -2,8 +2,6 @@
 
 #include <cstring>
 
-#include <lampos/clock.hpp>
-
 #include "ota_channel.hpp"
 
 #include "firmware_signature.hpp"
@@ -130,11 +128,9 @@ void FirmwareReceiver::tick(uint32_t nowMs) {
       // Inter-session quiet hold expiry: a prior session deferred its exitQuiet
       // (abortOta / State::Failed) so the strip doesn't flash between
       // back-to-back OFFERs.
-      if (quietHeld_ && quietHoldPending_ &&
-          lampos::timeReached(nowMs, quietHoldUntilMs_)) {
+      if (quietHold_.dueToExit(nowMs)) {
         ::lamp::ota_quiet_mode::exitQuiet();
-        quietHeld_        = false;
-        quietHoldPending_ = false;
+        quietHold_.release();
       }
       // Reclaim the chunk bitmap once back in Idle. The gate is disarmed and the
       // abort/verify path that set Idle ran a prior tick, so any Core 0 write has
@@ -238,10 +234,7 @@ void FirmwareReceiver::tick(uint32_t nowMs) {
       // exit. The verify-fail branch in handleDoneOnLoop sets State::Failed
       // directly, so defer here too to keep the strip in indicator mode through
       // a fast multi-distributor handoff. The Idle tick expires the hold.
-      if (quietHeld_) {
-        quietHoldUntilMs_ = nowMs + kInterSessionQuietHoldMs;
-        quietHoldPending_ = true;
-      }
+      if (quietHold_.held) quietHold_.sessionEnded(nowMs, /*done=*/false);
       return;
     }
 
@@ -533,16 +526,15 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
   // GATT client; BLE-pushed OTA keeps the connection (the phone is the chunk
   // transport) but still drops non-OTA writes. Exited in abortOta, the Failed
   // tick, and verifyAndApply.
-  // Inter-session hold: skip enterQuiet when quietHeld_ is already set (a prior
-  // session deferred its exit). Disarm the hold so the Idle tick won't
-  // expire-and-exit mid-session.
-  if (!quietHeld_) {
+  // Inter-session hold: skip enterQuiet when the hold is already held (a prior
+  // session deferred its exit). Re-entering disarms the pending exit so the
+  // Idle tick won't expire-and-exit mid-session.
+  if (!quietHold_.held) {
     ::lamp::ota_quiet_mode::enterQuiet(
         activeTransportKind_ == FirmwareTransportKind::EspNow,
         /*visible=*/fsHooks_ == nullptr);
-    quietHeld_ = true;
   }
-  quietHoldPending_ = false;
+  quietHold_.sessionEnteredQuiet();
 
 #ifdef LAMP_DEBUG
   Serial.printf("[fw_receiver] OFFER from %02X:%02X:%02X:%02X:%02X:%02X "
@@ -622,11 +614,10 @@ void FirmwareReceiver::onDoneOnLoop(const PendingFirmwareControl& ctrl,
     // Pause so the broadcast leaves the radio before the CPU resets.
     delay(kPostResultPauseMs);
     // exitQuiet before reboot (firmware path) and before returning to Idle
-    // (FS path, which remounts without rebooting). Clear quietHeld_ so the FS
+    // (FS path, which remounts without rebooting). Release the hold so the FS
     // path leaves quiet accounting balanced; the firmware path reboots past it.
     ::lamp::ota_quiet_mode::exitQuiet();
-    quietHeld_        = false;
-    quietHoldPending_ = false;
+    quietHold_.release();
     // FS image OTA finalizes without a reboot: SPIFFS is only read by the
     // onboarding webapp, so a remount makes the new UI live. Firmware OTA
     // reboots.
@@ -959,14 +950,13 @@ void FirmwareReceiver::abortOta() {
   // Defer exitQuiet to keep the strip in indicator mode through a fast
   // multi-distributor handoff (the next OFFER can land within ms; avoid a
   // defaultColors flash). The Idle tick exits for real if no retry arrives
-  // within kInterSessionQuietHoldMs.
-  if (quietHeld_) {
+  // within InterSessionQuietHold::kHoldMs.
+  if (quietHold_.held) {
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-    quietHoldUntilMs_ = millis() + kInterSessionQuietHoldMs;
+    quietHold_.sessionEnded(millis(), /*done=*/false);
 #else
-    quietHoldUntilMs_ = kInterSessionQuietHoldMs;
+    quietHold_.sessionEnded(0, /*done=*/false);
 #endif
-    quietHoldPending_ = true;
   }
 }
 

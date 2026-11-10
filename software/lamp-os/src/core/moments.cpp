@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include <lampos/clock.hpp>
+
 #include "components/network/protocol/event.hpp"
 #include "expressions/bloom/bloom_expression.hpp"
 #include "expressions/expression.hpp"

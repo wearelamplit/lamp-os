@@ -121,7 +121,8 @@ class PaintDistributor {
   uint32_t lastBrWalkMs_       = 0;
   uint32_t lastBrSendMs_       = 0;
   uint8_t  brRepeatsLeft_      = 0;
-  uint32_t nextBrPassMs_       = 0;
+  uint32_t brWalkEndMs_        = 0;
+  bool     brPassGapArmed_     = false;  // next re-pass waits kRestorePassGapMs after brWalkEndMs_
   static constexpr uint8_t  kRestoreRepeats     = 2;
   static constexpr uint32_t kRestorePassGapMs   = 500;
 

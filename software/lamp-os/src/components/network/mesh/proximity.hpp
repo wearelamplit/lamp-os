@@ -30,9 +30,10 @@ inline uint32_t mostRecentSeenMs(uint32_t lastSeenNearMs, uint32_t lastSeenMeshM
                                  uint32_t nowMs) {
   if (lastSeenNearMs == 0) return lastSeenMeshMs;
   if (lastSeenMeshMs == 0) return lastSeenNearMs;
-  return lampos::msSince(nowMs, lastSeenNearMs) <= lampos::msSince(nowMs, lastSeenMeshMs)
-             ? lastSeenNearMs
-             : lastSeenMeshMs;
+  const uint32_t nearAge = lampos::msSince(nowMs, lastSeenNearMs);
+  const uint32_t meshAge = lampos::msSince(nowMs, lastSeenMeshMs);
+  if (nearAge != meshAge) return nearAge < meshAge ? lastSeenNearMs : lastSeenMeshMs;
+  return lampos::isLater(lastSeenMeshMs, lastSeenNearMs) ? lastSeenMeshMs : lastSeenNearMs;
 }
 
 // Age at nowMs of a peer's most recent sighting on either transport;
@@ -62,6 +63,9 @@ bool nearbyMoreRelevant(const Entry& a, const Entry& b, uint32_t nowMs,
   const uint32_t aAge = sinceLastSeen(a.lastSeenNearMs, a.lastSeenMeshMs, nowMs);
   const uint32_t bAge = sinceLastSeen(b.lastSeenNearMs, b.lastSeenMeshMs, nowMs);
   if (aAge != bAge) return aAge < bAge;
+  const uint32_t as = mostRecentSeenMs(a.lastSeenNearMs, a.lastSeenMeshMs, nowMs);
+  const uint32_t bs = mostRecentSeenMs(b.lastSeenNearMs, b.lastSeenMeshMs, nowMs);
+  if (as != bs) return lampos::isLater(as, bs);
   return a.lastRssi > b.lastRssi;
 }
 

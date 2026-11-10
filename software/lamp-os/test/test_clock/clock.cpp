@@ -8,7 +8,7 @@
 #include <lampos/clock.hpp>
 
 using lampos::isLater;
-using lampos::kStampSkewMs;
+using lampos::kStampLeadMs;
 using lampos::msSince;
 using lampos::timeReached;
 
@@ -56,10 +56,10 @@ void test_ms_since_counts_across_the_wrap() {
 // it reads as fresh, including when the two straddle the wrap.
 void test_ms_since_reads_a_stamp_ahead_as_fresh() {
   TEST_ASSERT_EQUAL_UINT32(0, msSince(UINT32_MAX - 2, 3));
-  TEST_ASSERT_EQUAL_UINT32(0, msSince(5000, 5000 + kStampSkewMs));
+  TEST_ASSERT_EQUAL_UINT32(0, msSince(5000, 5000 + kStampLeadMs));
   TEST_ASSERT_EQUAL_UINT32(0, msSince(5000, 5000 + 1));
-  // Past the skew, the stamp reads as old: nearly a whole wrap.
-  TEST_ASSERT_TRUE(msSince(5000, 5000 + kStampSkewMs + 2) > UINT32_MAX / 2);
+  // Past the lead, the stamp reads as old: nearly a whole wrap.
+  TEST_ASSERT_TRUE(msSince(5000, 5000 + kStampLeadMs + 1) > UINT32_MAX / 2);
 }
 
 int main(int argc, char** argv) {
