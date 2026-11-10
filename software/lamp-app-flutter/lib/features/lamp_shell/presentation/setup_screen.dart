@@ -93,7 +93,13 @@ class _SetupBody extends ConsumerWidget {
             label: 'Name',
             inputFormatters: lampNameFormatters,
             initial: state.lamp.name.toTitleCase(),
-            onSave: (name) => n().setLampName(name),
+            onSave: (name) => unawaited(
+              n().setLampName(name).catchError((Object _) {
+                if (context.mounted) {
+                  AppSnackbar.error(context, "Couldn't set name. Try again.");
+                }
+              }),
+            ),
           ),
         ),
         SettingsRow(

@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../_support/in_memory_ble_client.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
+import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/features/inventory/application/inventory_notifier.dart';
 import 'package:lamp_app/features/inventory/domain/inventory_lamp.dart';
 import 'package:lamp_app/features/control/application/dev_mode.dart';
@@ -18,6 +19,7 @@ import '../../_support/seed.dart';
 const _devId = 'lamp-x';
 
 Future<ProviderContainer> _makeContainer({
+  InMemoryBleClient? client,
   String homeSsid = '',
   bool advancedEnabled = false,
   bool? hasPassword,
@@ -25,7 +27,7 @@ Future<ProviderContainer> _makeContainer({
   int shadePx = 38,
 }) async {
   SharedPreferences.setMockInitialValues({});
-  final ble = InMemoryBleClient();
+  final ble = client ?? InMemoryBleClient();
   await seedControlBle(
     ble,
     deviceId: _devId,
@@ -154,6 +156,29 @@ void main() {
       c.read(controlNotifierProvider(_devId)).value!.lamp.name,
       'foyer',
     );
+  });
+
+  testWidgets('a rename the lamp refuses says so and keeps the old name',
+      (tester) async {
+    final ble = InMemoryBleClient();
+    final c = await _makeContainer(client: ble);
+    addTearDown(c.dispose);
+    await tester.pumpWidget(_wrap(c));
+    await _pumpToData(tester);
+    ble.scheduleEncryptionFailure(
+        _devId, BleUuids.controlService, BleUuids.settingsBlob);
+
+    await tester.tap(find.text('Name'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.enterText(find.byType(TextField).first, 'foyer');
+    await tester.tap(find.text('Save'));
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+
+    expect(find.text("Couldn't set name. Try again."), findsOneWidget);
+    expect(find.text('Jacko'), findsOneWidget);
   });
 
   testWidgets(
