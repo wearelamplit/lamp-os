@@ -85,9 +85,12 @@ with one colour, or with other than one segment, never rotates.
   rotation to position 0 (`resetRotation()`), the frame quiet mode settles each
   surface to, so a stretch that ends without a reboot resumes from it.
 - **Raw content never rotates.** The zone marker, `setGradient` / `setSolidColor`
-  and other `beginFade` writes draw unshifted; a zone preview released on a
-  rotating role resumes rotating from where the marker stopped it, and an
-  expression Test that completes restores the role scene, so it keeps rotating.
+  and other `beginFade` writes draw unshifted. A zone preview's release puts
+  back the scene on show when the marker went up (`ZonePreviewSurface` keeps
+  `ConfiguratorBehavior::scene()`), so a rotating role resumes rotating from
+  where the marker stopped it, even when RAM config holds an abandoned edit.
+  An expression Test that completes restores the role scene, so it keeps
+  rotating.
 
 ### Multi-segment roles
 
