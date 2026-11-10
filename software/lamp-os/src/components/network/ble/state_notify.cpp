@@ -2,6 +2,7 @@
 
 #include <cstdio>
 
+#include "components/firmware/ota_quiet_mode.hpp"
 #include "util/json_escape.hpp"
 
 namespace ble_control {
@@ -23,12 +24,12 @@ void buildStateNotifyJson(const StateNotifyFields& f, std::string& out) {
   char buf[48];
   std::snprintf(buf, sizeof(buf), ",\"nearbyRev\":%lu,\"quiet\":%s}",
                 static_cast<unsigned long>(f.nearbyRev),
-                f.quiet ? "true" : "false");
+                lamp::ota_quiet_mode::isQuiet() ? "true" : "false");
   out += buf;
 }
 
-bool StateNotifyTrigger::step(bool clientConnected, bool subscribed,
-                              bool quiet) {
+bool StateNotifyTrigger::step(bool clientConnected, bool subscribed) {
+  const bool quiet = lamp::ota_quiet_mode::isQuiet();
   const bool due = clientConnected &&
                    (!wasConnected_ || subscribed || quiet != wasQuiet_);
   wasConnected_ = clientConnected;

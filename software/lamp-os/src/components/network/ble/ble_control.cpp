@@ -1210,8 +1210,7 @@ void tick() {
   // with no reader, and a rebuild per cascade is pure heap churn.
   static StateNotifyTrigger s_stateNotifyTrigger;
   if (s_stateNotifyTrigger.step(s_clientConnected,
-                                s_stateSubscribed.exchange(false),
-                                lamp::ota_quiet_mode::isQuiet())) {
+                                s_stateSubscribed.exchange(false))) {
     notifyStateChange();
   }
 
@@ -1243,7 +1242,6 @@ void notifyStateChange() {
     fields.greeting = &gs;
   }
   fields.nearbyRev = s_nearbyRev;
-  fields.quiet     = lamp::ota_quiet_mode::isQuiet();
   std::string payload;
   buildStateNotifyJson(fields, payload);
   s_stateNotify->setValue(payload);

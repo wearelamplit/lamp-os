@@ -13,11 +13,10 @@ struct StateNotifyFields {
   // Null when no greeting source is wired; the payload then omits `greeting`.
   const lamp::GreetingState* greeting = nullptr;
   uint32_t nearbyRev = 0;
-  // ota_quiet_mode::isQuiet(), the predicate every live-control write gate
-  // tests.
-  bool quiet = false;
 };
 
+// Adds `quiet` from ota_quiet_mode::isQuiet(), the predicate every
+// live-control write gate tests.
 void buildStateNotifyJson(const StateNotifyFields& f, std::string& out);
 
 // When tick() sends CHAR_STATE_NOTIFY on its own: on a new client connection,
@@ -25,7 +24,7 @@ void buildStateNotifyJson(const StateNotifyFields& f, std::string& out);
 // connected, so the app learns when its writes land again.
 class StateNotifyTrigger {
  public:
-  bool step(bool clientConnected, bool subscribed, bool quiet);
+  bool step(bool clientConnected, bool subscribed);
 
  private:
   bool wasConnected_ = false;
