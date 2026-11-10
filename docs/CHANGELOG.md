@@ -67,6 +67,12 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   recently used lamp's radio slot instead of that one's. Both now count on
   a clock that never restarts while the wisp stays on. Reflash the wisp
   over USB.
+- **The wisp's Color drift Fade slider works again.** Every drift step had
+  snapped to its new color in about a second whatever the slider said. Each
+  lamp now fades into its next color over at least 20 s: toward Snappy every
+  step takes about 20 s, toward Flowing a step can stretch across the whole
+  How often interval. The fade moves in small steps every 2 s, so a long fade
+  can look slightly stepped up close. Only the wisp needs a USB reflash.
 
 ### Changed
 - **Smaller firmware, a little more free memory.** The lamp no longer builds

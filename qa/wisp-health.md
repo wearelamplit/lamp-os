@@ -25,11 +25,10 @@ A HEALTHY wisp prints a roster dump every 10 s:
 [wisp] zone=... source=... observed=...
 ```
 
-plus, when painting: `[paint] walk Paint peers=N`,
-`[paint] send Pair-><mac> seq=N base=r,g,b,w shade=r,g,b,w`, and for drift
-`[drift] send Pair-><mac> seq=N fade=Nms`. Lamp-side confirmation of a
-working link (LAMP_DEBUG build): `[loop] drain wispHello flags=... v=...`
-and `[recv] OVERRIDE_COLORS surface=... src=... seq=... fade=...`.
+plus, when painting, one `[drift] <mac> fade=Nms` per drift step (dev
+build). Lamp-side confirmation of a working link (LAMP_DEBUG build):
+`[loop] drain wispHello flags=... v=...` and
+`[loop] drain wispState base=r,g,b,w shade=r,g,b,w`.
 
 ## Check order
 
