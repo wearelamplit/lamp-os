@@ -219,6 +219,8 @@ in range, that's `PersonalityEngine::crowdComposition()` /
 | `isValidBdAddr(const char*)` | `util/bd_addr.hpp` | Validate canonical `AA:BB:CC:DD:EE:FF` colon-hex form before keying a disposition on a `lampId` |
 | `base64::encode(const uint8_t*, size_t)` | `util/base64.hpp` | Tiny header-only encoder (wisp palette payloads) |
 | `lampos::timeReached(now, deadline)`, `lampos::isLater(a, b)`, `lampos::msSince(now, stamp)` | `lampos/clock.hpp` (`software/shared/clock`) | Compare 32-bit `millis()` stamps across the 49.7-day wrap. Every deadline, elapsed-time and most-recent comparison on a millis stamp goes through these or an unsigned `now - start`, never a raw `<` / `>` between stamps |
+| `lampos::retireStamp(now, stamp)`, `lampos::kRetiredAgeMs` | `lampos/clock.hpp` | Hold a stamp no older than 24.8 days, so it stays outside every shorter window instead of reading as recent again one wrap later. A stamp read against a window either gets retired this way (or by clearing its owner's valid flag) from a path that runs at least every 24.8 days, or is refreshed that often by design |
+| `lamp::uptimeMs()` | `util/uptime.hpp` | 64-bit milliseconds since boot, the clock `millis()` truncates; it never wraps. Use it for a stamp read only on an event or from code home mode can skip for weeks, where no periodic path can retire it. Native tests drive it through `g_mock_millis_wraps` in the `esp_timer.h` stub |
 
 ---
 

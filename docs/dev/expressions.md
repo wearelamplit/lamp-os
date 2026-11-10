@@ -279,7 +279,7 @@ Host-side tests are per-folder PlatformIO suites under `software/lamp-os/test/` 
 
 - `test/test_personality_engine/personality_engine.cpp`, auto-trigger cadence, enable/disable
 - `test/test_transient_override/transient_override.cpp`, the ColorOverride state machine that drives per-surface wisp presence
-- `test/test_cascade_dedup/cascade_dedup.cpp`, `RecentCascade` ring keying and eviction
+- `test/test_cascade_dedup/cascade_dedup.cpp`, `RecentCascade` (`expressions/recent_cascade.hpp`) keying, eviction and retire
 - `test/test_expression_primitives/expression_primitives.cpp`, Zone/Points/Size primitive helpers, `timeReached` wrap safety, `rewindBeforeExhaust`
 - `test/test_builtin_descriptors/builtin_descriptors.cpp`, the exprcat wire JSON pinned against the production header-defined descriptor data
 - `test/test_glitchy_timing/glitchy_timing.cpp`, glitchy's millis-driven duration gate (≥1 painted frame, wrap-safe deadline)
