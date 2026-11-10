@@ -50,6 +50,9 @@ bool     brightnessFadeSeeded();
 void     setBrightnessFade(uint8_t source, uint8_t target, uint32_t startMs);
 void     clearBrightnessFadeSeed();
 void     settleBrightnessFade();
+// Holds a finished micro-fade's start past its window, so a fade left unsettled
+// under a wisp override cannot replay one millis() wrap later. Call every loop.
+void     retireBrightnessFade(uint32_t nowMs);
 uint8_t  computeUserBrightnessNow(uint32_t nowMs);
 
 // Bookkeeping the brightness drain performs.

@@ -171,6 +171,9 @@ class MomentDirector {
   KindState kinds_[kMomentKindCount];
   uint32_t likedFingerprint_ = 0;
   uint32_t likedSinceMs_ = 0;
+  // Latched once the liked set has held kStableLikedMs, so the still clock
+  // cannot restart one millis() wrap later.
+  bool likedStable_ = false;
   uint8_t likedCount_ = 0;
   uint32_t lastEvalMs_ = 0;
   ActiveMoment moment_;

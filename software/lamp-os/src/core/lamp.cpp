@@ -1133,6 +1133,7 @@ void lamp::Lamp::tick() {
         lamp::settleBrightnessFade();
       }
     }
+    lamp::retireBrightnessFade(now);
 
     // Personality engine. Runs after the transient-override block so it
     // reads a consistent post-fade view this tick. Cheap when nothing's

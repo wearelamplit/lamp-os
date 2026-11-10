@@ -700,6 +700,25 @@ void test_ten_still_minutes_make_fireflies_possible() {
   TEST_ASSERT_TRUE(r.director.backoffArmed(MomentKind::Fireflies) || r.director.active());
 }
 
+// The liked set unchanged for a whole wrap while a suppressor holds moments
+// off: once it lifts, the still clock has run, not restarted at the wrap.
+void test_still_clock_stays_run_a_wrap_later() {
+  Rig r(1, 9, 0);
+  readyForFireflies(r);
+  r.host.suppress = "home";
+  auto tickAt = [&](uint32_t now) {
+    for (NearbyCopy& p : r.host.peers) seeAt(p, now);
+    r.host.nowMs = now;
+    r.director.tick(now);
+  };
+  for (uint64_t t = 1ull << 28; t < (1ull << 32); t += 1ull << 28) {
+    tickAt(static_cast<uint32_t>(t));
+  }
+  r.host.suppress = nullptr;
+  tickAt(5000);
+  TEST_ASSERT_TRUE(r.director.backoffArmed(MomentKind::Fireflies) || r.director.active());
+}
+
 void test_a_liked_departure_resets_the_still_clock() {
   Rig r(1, 9, 0);
   const uint32_t t = 100 * kMin;
@@ -1385,6 +1404,7 @@ int main(int, char**) {
   RUN_TEST(test_liked_fingerprint_tracks_the_liked_set_only);
   RUN_TEST(test_ten_still_minutes_make_fireflies_possible);
   RUN_TEST(test_a_liked_departure_resets_the_still_clock);
+  RUN_TEST(test_still_clock_stays_run_a_wrap_later);
   RUN_TEST(test_next_hop_picks_the_strongest_liked_fresh_unvisited);
   RUN_TEST(test_next_hop_ties_go_to_smitten_then_lower_mac);
   RUN_TEST(test_no_candidate_ends_the_chain);
