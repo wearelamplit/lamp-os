@@ -377,8 +377,7 @@ class WispNotifier extends _$WispNotifier {
   }
 
   /// Seed the editor from a freshly-read palette. Doesn't touch the draft if
-  /// the user is mid-edit (draft diverged from the previous saved). The next
-  /// save replaces the wisp's view.
+  /// the user is mid-edit (draft diverged from the previous saved).
   void _ingestManualPalette(List<LampColor> palette) {
     if (palette.isEmpty) return;
     if (_palettesEqual(_savedManualPalette, palette)) return;
