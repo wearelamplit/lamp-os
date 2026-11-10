@@ -144,9 +144,7 @@ void ConfiguratorBehavior::draw() {
 };
 
 void ConfiguratorBehavior::retireStale(uint32_t now) {
-  if (lastWebSocketUpdateTimeMs > 0) {
-    lastWebSocketUpdateTimeMs = lampos::retireStamp(now, lastWebSocketUpdateTimeMs);
-  }
+  lastWebSocketUpdateTimeMs = lampos::retireStamp(now, lastWebSocketUpdateTimeMs);
   if (!fadeActive(now)) fadeDurationMs_ = 0;
 }
 

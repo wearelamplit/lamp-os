@@ -35,7 +35,7 @@ inline constexpr uint32_t kRetiredAgeMs = 1u << 31;
 // window shorter than that instead of coming round to read as recent one wrap
 // later; a younger stamp, or one up to kStampLeadMs ahead, comes back
 // unchanged, and a held stamp is never 0. The owner calls it at least once
-// per kRetiredAgeMs and does not pass a 0 "never set" sentinel.
+// per kRetiredAgeMs, and skips a stamp whose 0 it reads as never set.
 constexpr uint32_t retireStamp(uint32_t nowMs, uint32_t stampMs) {
   if (msSince(nowMs, stampMs) <= kRetiredAgeMs) return stampMs;
   const uint32_t held = nowMs - kRetiredAgeMs;
