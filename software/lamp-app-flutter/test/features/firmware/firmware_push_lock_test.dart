@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -171,6 +172,27 @@ Future<void> _tapBrightnessMax(WidgetTester tester) async {
   await _settle(tester);
 }
 
+/// CHAR_STATE_NOTIFY from a lamp that reports OTA quiet mode.
+void _lampQuiet(_Rig rig, bool quiet) => rig.ble.simulateNotify(
+  _lampId,
+  BleUuids.controlService,
+  BleUuids.stateNotify,
+  Uint8List.fromList(
+    utf8.encode('{"previewActive":false,"nearbyRev":0,"quiet":$quiet}'),
+  ),
+);
+
+/// A push the lamp goes quiet for, failing while it is still quiet.
+Future<void> _failWhileQuiet(WidgetTester tester, _Rig rig) async {
+  rig
+      .firmware(_lampId)
+      .emit(FirmwareStreaming(footer: _footer, chunksSent: 3, totalChunks: 10));
+  _lampQuiet(rig, true);
+  await _settle(tester);
+  rig.firmware(_lampId).emit(const FirmwareFailed(reason: 'lost the lamp'));
+  await _settle(tester);
+}
+
 double _opacityAbove(WidgetTester tester, Finder f) {
   var o = 1.0;
   for (final w in tester.widgetList<Opacity>(
@@ -227,6 +249,38 @@ void main() {
     expect(rig.brightness, 50);
 
     rig.firmware(_lampId).emit(const FirmwareFailed(reason: 'lost the lamp'));
+    await _settle(tester);
+    expect(find.textContaining(_banner), findsNothing);
+    await _tapBrightnessMax(tester);
+    expect(rig.brightness, 100);
+  });
+
+  testWidgets('after a failed push the banner and freeze hold until the lamp '
+      'says it listens', (tester) async {
+    final rig = await _pump(tester);
+    await _failWhileQuiet(tester, rig);
+    expect(find.textContaining(_banner), findsOneWidget);
+    expect(_opacityAbove(tester, find.byType(BrightnessCard)), lessThan(1));
+    await _tapBrightnessMax(tester);
+    expect(rig.brightness, 50);
+
+    _lampQuiet(rig, false);
+    await _settle(tester);
+    expect(find.textContaining(_banner), findsNothing);
+    await _tapBrightnessMax(tester);
+    expect(rig.brightness, 100);
+  });
+
+  testWidgets('a lamp that never says it listens thaws at the bound', (
+    tester,
+  ) async {
+    final rig = await _pump(tester);
+    await _failWhileQuiet(tester, rig);
+    await tester.pump(
+      ControlNotifier.quietAfterPushBound - const Duration(seconds: 1),
+    );
+    expect(find.textContaining(_banner), findsOneWidget);
+    await tester.pump(const Duration(seconds: 2));
     await _settle(tester);
     expect(find.textContaining(_banner), findsNothing);
     await _tapBrightnessMax(tester);

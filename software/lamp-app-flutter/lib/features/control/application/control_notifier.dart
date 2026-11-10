@@ -15,6 +15,7 @@ import '../../../core/ble/write_coalescer.dart';
 import '../../../core/lifecycle/app_lifecycle.dart';
 import '../../../core/utils/clock.dart';
 import '../../firmware/application/firmware_notifier.dart';
+import '../../firmware/application/quiet_after_push.dart';
 import '../../firmware/domain/firmware_state.dart';
 import '../../inventory/application/inventory_notifier.dart';
 import '../data/catalog_store.dart';
@@ -163,9 +164,39 @@ class ControlNotifier extends _$ControlNotifier {
   /// [setHomeModeFocus].
   bool _homeModeFocus = false;
 
-  /// Set when a push ends without a reboot. The focus then goes out again
-  /// ahead of each brightness write until the next reconnect.
+  /// Set when a push to a lamp that never reports `quiet` ends without a
+  /// reboot. The focus then goes out again ahead of each brightness write
+  /// until the next reconnect.
   bool _reassertHomeModeFocus = false;
+
+  /// Session flags the app holds on the lamp, keyed by characteristic and
+  /// selector. The lamp reports none of them back, drops them in OTA quiet
+  /// mode and clears them all on connect.
+  final _heldFlags = <(String, int), Uint8List>{};
+
+  /// The lamp's `quiet` from CHAR_STATE_NOTIFY on this link: true while it
+  /// drops every live-control write. Null until it reports one, and always
+  /// on firmware without the field.
+  bool? _lampQuiet;
+
+  /// The lamp may have missed [_heldFlags]; they go out when it is next
+  /// heard listening.
+  bool _flagsPending = false;
+
+  /// A push ended without a reboot; the lamp's sections are re-read when it
+  /// is next heard listening.
+  bool _rereadPending = false;
+
+  Timer? _quietBound;
+
+  /// How long editing stays frozen after a push while the lamp has not said
+  /// it is listening: its receiver's no-progress abort (`kNoProgressAbortMs`,
+  /// 60 s) plus its inter-session quiet hold
+  /// (`FirmwareReceiver::kInterSessionQuietHoldMs`, 10 s), plus 5 s for its
+  /// loop tick and the notify.
+  @visibleForTesting
+  static const quietAfterPushBound = Duration(seconds: 75);
+
   late InventoryNotifier _inv;
   late DateTime Function() _now;
   final _catalogStore = const CatalogStore();
@@ -244,6 +275,9 @@ class ControlNotifier extends _$ControlNotifier {
       }
 
       state = AsyncData(fresh);
+      _lampQuiet = null;
+      _flagsPending = true;
+      _subscribeStateNotify(ble);
       try {
         await postReload(fresh);
       } catch (e, st) {
@@ -299,6 +333,12 @@ class ControlNotifier extends _$ControlNotifier {
   @override
   Future<ControlState> build(String deviceId) async {
     _deviceId = deviceId;
+    // A rebuild keeps this instance and its held flags; the lamp clears them
+    // on the new connection.
+    _lampQuiet = null;
+    _flagsPending = true;
+    _rereadPending = false;
+    ref.listen(quietAfterPushProvider(deviceId), (_, _) {});
     ref.listen(firmwareNotifierProvider(deviceId), _onFirmwareState);
 
     // Cache provider refs once. Used by Timer / coalescer callbacks
@@ -480,18 +520,11 @@ class ControlNotifier extends _$ControlNotifier {
       _probeTimer?.cancel();
     });
 
-    // Watch CHAR_STATE_NOTIFY: previewActive drives the expression editor
-    // Test button morph + auto-reset, greeting drives Social's isGreeting
-    // tint. Other state-change clients re-fetch via the page protocol,
-    // same as before.
-    _stateNotifySub = ble
-        .subscribe(deviceId, BleUuids.controlService, BleUuids.stateNotify)
-        .listen(
-          _onStateNotify,
-          onError: (Object e) =>
-              debugPrint('[control_notifier] stateNotify stream error: $e'),
-        );
-    ref.onDispose(() => _stateNotifySub?.cancel());
+    _subscribeStateNotify(ble);
+    ref.onDispose(() {
+      _stateNotifySub?.cancel();
+      _quietBound?.cancel();
+    });
 
     // Probe the BLE link whenever the app comes back to the foreground.
     // Backgrounded apps can have their GATT connection torn down by the
@@ -634,35 +667,127 @@ class ControlNotifier extends _$ControlNotifier {
   /// Safe to call after this notifier is disposed.
   void setHomeModeFocus(bool active) {
     _homeModeFocus = active;
-    unawaited(_ble
-        .write(_deviceId, BleUuids.controlService, BleUuids.homeModeFocus,
-            _homeModeFocusByte(),
-            withoutResponse: true)
-        .catchError((_) {}));
+    final payload = _homeModeFocusByte();
+    _heldFlags[(BleUuids.homeModeFocus, 0)] = payload;
+    unawaited(
+      _ble
+          .write(
+            _deviceId,
+            BleUuids.controlService,
+            BleUuids.homeModeFocus,
+            payload,
+            withoutResponse: true,
+          )
+          .catchError((_) {}),
+    );
   }
 
   Uint8List _homeModeFocusByte() =>
       Uint8List.fromList([_homeModeFocus ? 1 : 0]);
 
   /// A push that ends without a reboot leaves the lamp missing every write
-  /// sent during it, so the app takes the lamp's word for its state again.
+  /// sent while it was quiet. Once it reports it is listening the app sends
+  /// its session flags again and takes the lamp's word for everything else.
+  /// A lamp that never reports `quiet` gets the re-read at once instead.
   void _onFirmwareState(FirmwareState? previous, FirmwareState next) {
-    if (!(previous?.isBusy ?? false) || next.isBusy) return;
+    if (!(previous?.isPushing ?? false) || next.isBusy) return;
     if (next is FirmwareSucceeded) return;
-    _reassertHomeModeFocus = true;
-    unawaited(_resyncAfterPush());
+    final quiet = _lampQuiet;
+    if (quiet == null) {
+      _reassertHomeModeFocus = true;
+      unawaited(_rereadSections());
+      return;
+    }
+    _flagsPending = true;
+    _rereadPending = true;
+    if (quiet) {
+      _quietBound?.cancel();
+      _quietBound = Timer(quietAfterPushBound, () {
+        _quietBound = null;
+        _setQuietAfterPush(false);
+      });
+      _setQuietAfterPush(true);
+    } else {
+      unawaited(_resyncWithLamp());
+    }
   }
 
-  Future<void> _resyncAfterPush() async {
+  void _onLampListening() {
+    if (!_flagsPending && !_rereadPending && _quietBound == null) return;
+    if (!ref.mounted) return;
+    if (ref.read(firmwareNotifierProvider(_deviceId)).isPushing) return;
+    unawaited(_resyncWithLamp());
+  }
+
+  Future<void> _resyncWithLamp() async {
+    if (state.value?.connected != true) return;
+    final reread = _rereadPending;
+    _flagsPending = false;
+    _rereadPending = false;
+    _quietBound?.cancel();
+    _quietBound = null;
+    try {
+      for (final MapEntry(key: (charUuid, _), :value)
+          in _heldFlags.entries.toList()) {
+        await _ble
+            .write(
+              _deviceId,
+              BleUuids.controlService,
+              charUuid,
+              value,
+              withoutResponse: true,
+            )
+            .catchError((_) {});
+      }
+      if (reread) await _rereadSections();
+    } finally {
+      _setQuietAfterPush(false);
+    }
+  }
+
+  Future<void> _rereadSections() async {
     if (state.value?.connected != true) return;
     try {
       final fresh = await _readSections(_ble);
-      if (!ref.mounted || state.value?.connected != true) return;
-      state = AsyncData(fresh.copyWith(connected: true, reconnectAttempt: 0));
+      final cur = state.value;
+      if (!ref.mounted || cur == null || !cur.connected) return;
+      // previewActive and greeting come only from CHAR_STATE_NOTIFY.
+      state = AsyncData(
+        fresh.copyWith(
+          connected: true,
+          reconnectAttempt: 0,
+          previewActive: cur.previewActive,
+          greeting: cur.greeting,
+        ),
+      );
     } catch (_) {
       // A dead link surfaces through the probe and the reconnect ladder,
       // which re-reads on its own.
     }
+  }
+
+  void _setQuietAfterPush(bool quiet) {
+    if (!ref.mounted) return;
+    ref.read(quietAfterPushProvider(_deviceId).notifier).set(quiet);
+  }
+
+  /// CHAR_STATE_NOTIFY: previewActive drives the expression editor's Test
+  /// button, greeting Social's is-greeting tint, quiet the post-push re-sync.
+  /// Notify-only so a value cached from an earlier link never replays; a
+  /// lamp that reports `quiet` notifies its current state on subscribe.
+  void _subscribeStateNotify(BleClient ble) {
+    unawaited(_stateNotifySub?.cancel());
+    _stateNotifySub = ble
+        .subscribeNotifyOnly(
+          _deviceId,
+          BleUuids.controlService,
+          BleUuids.stateNotify,
+        )
+        .listen(
+          _onStateNotify,
+          onError: (Object e) =>
+              debugPrint('[control_notifier] stateNotify stream error: $e'),
+        );
   }
 
   /// Commit fence. Writes a single byte to CHAR_COMMIT. The firmware
@@ -852,10 +977,9 @@ class ControlNotifier extends _$ControlNotifier {
   /// state per surface: drag-tap-drag-tap on the brightness slider
   /// becomes one open + one close, not a queue of N pairs.
   void setEditSession(EditSurface surface, bool open) {
-    _editSessionWriter?.schedule(
-      surface,
-      Uint8List.fromList([surface.bit, open ? 1 : 0]),
-    );
+    final payload = Uint8List.fromList([surface.bit, open ? 1 : 0]);
+    _heldFlags[(BleUuids.editSession, surface.bit)] = payload;
+    _editSessionWriter?.schedule(surface, payload);
   }
 
   /// Selector byte on CHAR_EDIT_SESSION for the Social/Network view. Additive
@@ -870,12 +994,17 @@ class ControlNotifier extends _$ControlNotifier {
   /// missed `false` (crash, force-stop) self-heals. Fire-and-forget: a dropped
   /// write just means the lamp doesn't scan this session.
   Future<void> setSocialViewActive(bool active) async {
+    final payload = Uint8List.fromList([
+      _editSurfaceSocialView,
+      active ? 1 : 0,
+    ]);
+    _heldFlags[(BleUuids.editSession, _editSurfaceSocialView)] = payload;
     try {
       await _ble.write(
         _deviceId,
         BleUuids.controlService,
         BleUuids.editSession,
-        Uint8List.fromList([_editSurfaceSocialView, active ? 1 : 0]),
+        payload,
         withoutResponse: true,
       );
     } catch (_) {
@@ -1755,13 +1884,14 @@ class ControlNotifier extends _$ControlNotifier {
   }
 
   /// Handles CHAR_STATE_NOTIFY payloads.
-  /// Fields: `previewActive` (bool), `greeting` (object or absent).
-  /// Older firmware emits `{}`; missing fields stay at their defaults.
+  /// Fields: `previewActive` (bool), `greeting` (object or absent), `quiet`
+  /// (bool). Older firmware omits fields; they stay at their defaults and
+  /// [_lampQuiet] stays null.
   void _onStateNotify(Uint8List bytes) {
-    final cur = state.value;
-    if (cur == null || bytes.isEmpty) return;
+    if (bytes.isEmpty) return;
     bool previewActive = false;
     GreetingState? greeting;
+    Object? quiet;
     try {
       final obj = jsonDecode(utf8.decode(bytes));
       if (obj is Map<String, dynamic>) {
@@ -1772,12 +1902,20 @@ class ControlNotifier extends _$ControlNotifier {
           final kind = (g['kind'] as String?) ?? '';
           if (peer.isNotEmpty) greeting = GreetingState(peer: peer, kind: kind);
         }
+        quiet = obj['quiet'];
       }
     } catch (_) {
       return;
     }
-    if (previewActive == cur.previewActive && greeting == cur.greeting) return;
-    state = AsyncData(cur.copyWith(previewActive: previewActive, greeting: greeting));
+    if (quiet is bool) _lampQuiet = quiet;
+    final cur = state.value;
+    if (cur != null &&
+        (previewActive != cur.previewActive || greeting != cur.greeting)) {
+      state = AsyncData(
+        cur.copyWith(previewActive: previewActive, greeting: greeting),
+      );
+    }
+    if (quiet == false) _onLampListening();
   }
 
   void _onConnectionChange(bool isConnected) {
@@ -1935,7 +2073,12 @@ class ControlNotifier extends _$ControlNotifier {
       if (!ref.mounted) return;
       _reconnectTimer?.cancel();
       _reassertHomeModeFocus = false;
+      _lampQuiet = null;
+      _flagsPending = true;
+      _rereadPending = false;
       state = AsyncData(fresh.copyWith(connected: true, reconnectAttempt: 0));
+      // The lamp dropped the subscription with the link.
+      _subscribeStateNotify(ble);
     } catch (_) {
       // Bail if the notifier was disposed while awaiting; touching
       // `state` after dispose throws. This happens in tests that

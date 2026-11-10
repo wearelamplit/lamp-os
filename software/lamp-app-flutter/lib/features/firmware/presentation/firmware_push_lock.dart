@@ -6,18 +6,21 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/string_case.dart';
 import '../../control/application/control_notifier.dart';
 import '../application/firmware_notifier.dart';
+import '../application/quiet_after_push.dart';
 import '../domain/firmware_state.dart';
 
 const double _frozenOpacity = 0.4;
 
-bool _busy(WidgetRef ref, String lampId) =>
-    ref.watch(firmwareNotifierProvider(lampId).select((s) => s.isBusy));
+bool _frozen(WidgetRef ref, String lampId) =>
+    ref.watch(firmwareNotifierProvider(lampId).select((s) => s.isBusy)) ||
+    ref.watch(quietAfterPushProvider(lampId));
 
-/// Freezes [child] while the app pushes firmware to [lampId]. The lamp drops
-/// every non-OTA write in that window, so its controls must not look live.
-/// Wrap every surface that writes to the lamp. Sheets and dialogs opened from
-/// a context inside [child] freeze with it and keep their draft until the
-/// push ends. A tap outside a frozen popup still dismisses it.
+/// Freezes [child] while the app pushes firmware to [lampId], and after a
+/// push until the lamp reports it is listening again. The lamp drops every
+/// non-OTA write in that window, so its controls must not look live. Wrap
+/// every surface that writes to the lamp. Sheets and dialogs opened from a
+/// context inside [child] freeze with it and keep their draft until the
+/// window ends. A tap outside a frozen popup still dismisses it.
 class FirmwarePushLock extends ConsumerWidget {
   const FirmwarePushLock({
     super.key,
@@ -30,7 +33,7 @@ class FirmwarePushLock extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final frozen = _busy(ref, lampId);
+    final frozen = _frozen(ref, lampId);
     return _PushLockScope(
       lampId: lampId,
       child: ExcludeFocus(
@@ -102,10 +105,10 @@ class _RenderInert extends RenderProxyBox {
   }
 }
 
-/// App-level strip that reads "Teaching `name` new tricks" while the app
-/// pushes firmware to [lampId], the lamp of the current route (null off a
-/// lamp route). Sits above the navigator so it stays visible over sheets and
-/// dialogs; [child] is laid out below it.
+/// App-level strip that reads "Teaching `name` new tricks" while
+/// [FirmwarePushLock] freezes [lampId], the lamp of the current route (null
+/// off a lamp route). Sits above the navigator so it stays visible over
+/// sheets and dialogs; [child] is laid out below it.
 class FirmwarePushBanner extends ConsumerWidget {
   const FirmwarePushBanner({
     super.key,
@@ -119,7 +122,7 @@ class FirmwarePushBanner extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final id = lampId;
-    final showing = id != null && _busy(ref, id);
+    final showing = id != null && _frozen(ref, id);
     return Column(
       children: [
         if (showing) _TeachingStrip(lampId: id) else const SizedBox.shrink(),
