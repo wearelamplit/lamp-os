@@ -186,7 +186,7 @@ class _KnockoutScreenState extends ConsumerState<KnockoutScreen> {
               final notifier =
                   ref.read(controlNotifierProvider(widget.lampId).notifier);
               final pixelCount = state.base.px;
-  
+
               void handle(PointerEvent event) {
                 final vp = _viewportKey.currentContext?.findRenderObject()
                     as RenderBox?;
@@ -194,7 +194,7 @@ class _KnockoutScreenState extends ConsumerState<KnockoutScreen> {
                     as RenderBox?;
                 if (vp == null || col == null) return;
                 final vpLocal = vp.globalToLocal(event.position);
-  
+
                 if (_inScrollZone(vpLocal.dx, vp.size.width)) {
                   // Scroll zone: drag y → scroll. PointerDown does nothing
                   // (don't want a tap to nudge the list); only PointerMove
@@ -206,13 +206,13 @@ class _KnockoutScreenState extends ConsumerState<KnockoutScreen> {
                   }
                   return;
                 }
-  
+
                 // Paint zone: translate to the inner column's space so the
                 // row index calculation is stable across any scroll offset.
                 final colLocal = col.globalToLocal(event.position);
                 _paintAt(colLocal, pixelCount, notifier);
               }
-  
+
               return Column(
                 children: [
                   Expanded(

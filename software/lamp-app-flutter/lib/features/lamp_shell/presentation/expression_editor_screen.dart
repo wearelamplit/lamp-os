@@ -178,6 +178,7 @@ class _ExpressionEditorScreenState
   /// restored: the preview writes were for preview only; the expression's own
   /// colors are committed by Save via `upsertExpression`.
   Future<void> _editColorsLive(
+    BuildContext sheetContext,
     ControlState state,
     ControlNotifier notifier,
     List<LampColor> initial,
@@ -209,7 +210,7 @@ class _ExpressionEditorScreenState
 
     try {
       await showColorStopsSheet(
-        context,
+        sheetContext,
         initial: initial,
         title: 'Colors',
         description: 'This effect picks colors from this set at random.',
@@ -319,7 +320,7 @@ class _ExpressionEditorScreenState
             // Capture the open-time newness once; retargeting flips `isNew`
             // but must not change how far the back-out pops.
             _openedNew ??= isNew;
-  
+
             // Surfaces this expression can't target, from the catalog. Both
             // (target 3) is excluded whenever either surface is.
             final excludedTargets = <int>{};
@@ -334,7 +335,7 @@ class _ExpressionEditorScreenState
             final colorMax = descriptor?.colors.max ?? 8;
             // inheritsSurface makes an empty palette valid ("follow surface").
             final canEmpty = descriptor?.colors.inheritsSurface ?? false;
-  
+
             // Two-row Column: scrolling form body up top, action row pinned
             // to the bottom inside a SafeArea so it stays above the system
             // gesture bar / nav bar on Android. Matches the layout pattern
@@ -391,10 +392,14 @@ class _ExpressionEditorScreenState
                       // descriptor declares no colors (max 0), e.g. shimmer.
                       if (colorMax > 0) ...[
                         const SettingsGroupHeading('Colors'),
-                        ColorBlocksBar(
-                          colors: draft.colors,
-                          onTap: () => _editColorsLive(
-                              state, notifier, draft.colors, colorMax, canEmpty),
+                        // The sheet launches from below the push lock so it
+                        // freezes with the screen.
+                        Builder(
+                          builder: (sheetContext) => ColorBlocksBar(
+                            colors: draft.colors,
+                            onTap: () => _editColorsLive(sheetContext, state,
+                                notifier, draft.colors, colorMax, canEmpty),
+                          ),
                         ),
                       ],
                       if (descriptor != null)
@@ -418,7 +423,7 @@ class _ExpressionEditorScreenState
                           onZonePreviewEnd: () =>
                               unawaited(notifier.completeExpressionTest()),
                         ),
-  
+
                       // Timing / Mesh render generically from the firmware
                       // catalog descriptor into their own yellow-headed cards.
                       // Colors + target above are the editor shell's own concern.

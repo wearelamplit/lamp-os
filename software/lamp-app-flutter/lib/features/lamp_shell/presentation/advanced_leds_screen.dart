@@ -116,7 +116,7 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
             _origBasePxs ??= state.base.segments.isEmpty
                 ? [state.base.px]
                 : state.base.segments.map((s) => s.px).toList();
-  
+
             final notifier =
                 ref.read(controlNotifierProvider(widget.lampId).notifier);
             final showByteOrder =

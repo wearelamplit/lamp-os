@@ -130,7 +130,9 @@ sends: a strip at the top reads "Teaching <name> new tricks 🎓" with a
 progress line; the Colors, Social, Expressions and Config tabs are greyed and
 ignore taps; Info stays live. Open a colour sheet first, then reconnect so the
 update starts with it open: the sheet greys and keeps your colours, a tap
-outside still closes it, and once the update ends it saves normally. The strip
+outside still closes it (after a live "Discard changes?" if you changed
+anything), and once the update ends it saves normally. The expression
+editor's colours sheet does the same. The strip
 goes when the update ends (the lamp reboots, or fails) and editing comes
 back. A second lamp's screen shows nothing while the first updates.
 

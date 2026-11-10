@@ -115,7 +115,8 @@ class _LampShellState extends ConsumerState<LampShell> {
         ),
         actions: const [],
       ),
-      // Info stays live: it carries the push progress and its cancel.
+      // Info stays live. It shows the push progress, and in dev mode the
+      // panel that cancels it.
       body: _tab == LampTab.info
           ? body
           : FirmwarePushLock(lampId: widget.lampId, child: body),

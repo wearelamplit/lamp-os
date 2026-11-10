@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -14,6 +15,8 @@ import 'package:lamp_app/core/routing/router.dart';
 import 'package:lamp_app/core/routing/routes.dart';
 import 'package:lamp_app/features/control/application/control_notifier.dart';
 import 'package:lamp_app/features/control/presentation/widgets/brightness_card.dart';
+import 'package:lamp_app/features/control/presentation/widgets/color_blocks_bar.dart';
+import 'package:lamp_app/features/control/presentation/widgets/color_stops_sheet.dart';
 import 'package:lamp_app/features/firmware/application/cached_firmware_notifier.dart';
 import 'package:lamp_app/features/firmware/application/firmware_notifier.dart';
 import 'package:lamp_app/features/firmware/data/cached_firmware.dart';
@@ -95,10 +98,17 @@ class _Rig {
 Future<_Rig> _pump(
   WidgetTester tester, {
   String location = '/lamp/$_lampId/control',
+  String baseColorsJson = '["#300783FF"]',
 }) async {
   SharedPreferences.setMockInitialValues({});
   final ble = InMemoryBleClient();
-  await seedControlBle(ble, deviceId: _lampId, name: 'jacko', brightness: 50);
+  await seedControlBle(
+    ble,
+    deviceId: _lampId,
+    name: 'jacko',
+    brightness: 50,
+    baseColorsJson: baseColorsJson,
+  );
   final router = _router(location);
   final c = ProviderContainer(
     overrides: [
@@ -339,6 +349,93 @@ void main() {
     rig.firmware(_lampId).emit(FirmwareSucceeded(footer: _footer));
     await _settle(tester);
     expect(test().onPressed, isNotNull);
+  });
+
+  testWidgets('frozen controls refuse screen-reader actions', (tester) async {
+    final semantics = tester.ensureSemantics();
+    final rig = await _pump(tester);
+    bool canIncrease() =>
+        find.semantics.byAction(SemanticsAction.increase).evaluate().isNotEmpty;
+    expect(canIncrease(), isTrue);
+    rig.firmware(_lampId).emit(FirmwareOfferSent(footer: _footer));
+    await _settle(tester);
+    expect(canIncrease(), isFalse);
+    rig.firmware(_lampId).emit(const FirmwareFailed(reason: 'x'));
+    await _settle(tester);
+    expect(canIncrease(), isTrue);
+    semantics.dispose();
+  });
+
+  testWidgets('the banner takes the status-bar inset from the screen below', (
+    tester,
+  ) async {
+    tester.view.padding = const FakeViewPadding(top: 48);
+    addTearDown(tester.view.resetPadding);
+    final rig = await _pump(tester);
+    final before = tester.getSize(find.byType(AppBar)).height;
+    rig.firmware(_lampId).emit(FirmwareOfferSent(footer: _footer));
+    await _settle(tester);
+    final inset = 48 / tester.view.devicePixelRatio;
+    expect(tester.getSize(find.byType(AppBar)).height, before - inset);
+    final strip = find
+        .ancestor(
+          of: find.textContaining(_banner),
+          matching: find.byType(Material),
+        )
+        .first;
+    expect(
+      tester.getTopLeft(find.byType(AppBar)).dy,
+      tester.getBottomLeft(strip).dy,
+    );
+  });
+
+  testWidgets('a dirty colour sheet frozen mid-push can still be discarded', (
+    tester,
+  ) async {
+    final rig = await _pump(
+      tester,
+      baseColorsJson: '["#300783FF","#FF0000FF"]',
+    );
+    await tester.tap(find.text('Base'));
+    await _settle(tester);
+    await tester.tap(find.byIcon(Icons.close).first);
+    await _settle(tester);
+    rig.firmware(_lampId).emit(FirmwareOfferSent(footer: _footer));
+    await _settle(tester);
+    final sheetTop = tester.getTopLeft(find.byType(BottomSheet)).dy;
+    await tester.tapAt(Offset(400, sheetTop - 8));
+    await _settle(tester);
+    expect(find.text('Discard changes?'), findsOneWidget);
+    expect(_opacityAbove(tester, find.text('Discard changes?')), 1);
+    await tester.tap(find.text('Discard'));
+    await _settle(tester);
+    expect(find.byType(BottomSheet), findsNothing);
+  });
+
+  testWidgets("the expression editor's colours sheet freezes with the screen", (
+    tester,
+  ) async {
+    final rig = await _pump(
+      tester,
+      location: '/lamp/$_lampId/expressions/breathing/0',
+    );
+    await tester.tap(find.byType(ColorBlocksBar));
+    await _settle(tester);
+    expect(find.byType(ColorStopsSheet), findsOneWidget);
+    rig.firmware(_lampId).emit(FirmwareOfferSent(footer: _footer));
+    await _settle(tester);
+    expect(_opacityAbove(tester, find.byType(ColorStopsSheet)), lessThan(1));
+    final writes =
+        rig.ble.writesTo(_lampId, BleUuids.shadeColors).length +
+        rig.ble.writesTo(_lampId, BleUuids.baseColors).length;
+    await tester.tap(find.text('Add Color'));
+    await _settle(tester);
+    expect(
+      rig.ble.writesTo(_lampId, BleUuids.shadeColors).length +
+          rig.ble.writesTo(_lampId, BleUuids.baseColors).length,
+      writes,
+    );
+    expect(find.byType(BottomSheet), findsOneWidget);
   });
 
   for (final path in [
