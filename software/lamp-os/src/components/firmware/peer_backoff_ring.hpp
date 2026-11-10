@@ -22,6 +22,9 @@ class PeerBackoffRing {
   // is dropped.
   void note(const uint8_t mac[6], uint32_t nowMs, uint32_t durationMs,
             bool persistent);
+  // Holds each expired transient penalty just past its duration, so none reads
+  // as active again one millis() wrap later. Call at least once per wrap.
+  void retire(uint32_t nowMs);
 
  private:
   struct Entry {

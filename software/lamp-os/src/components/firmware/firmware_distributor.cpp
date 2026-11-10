@@ -545,10 +545,12 @@ void FirmwareDistributor::tick(uint32_t nowMs) {
   portENTER_CRITICAL(&stateMux_);
   s = state_;
   stateEnteredMsLocal = stateEnteredMs_;
+  penalties_.retire(nowMs);
   portEXIT_CRITICAL(&stateMux_);
 #else
   State s = state_;
   uint32_t stateEnteredMsLocal = stateEnteredMs_;
+  penalties_.retire(nowMs);
 #endif
 
 #ifdef LAMP_DEBUG

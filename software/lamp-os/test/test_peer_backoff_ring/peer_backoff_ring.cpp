@@ -118,6 +118,35 @@ void test_expired_transient_slot_reused_across_the_wrap() {
   TEST_ASSERT_TRUE(ring.inBackoff(active, 6000));
 }
 
+// A penalty that ran out, then a whole wrap with no other: retired every few
+// days, it must not read as active again.
+void test_expired_backoff_stays_expired_a_wrap_later() {
+  PeerBackoffRing ring;
+  uint8_t a[6];
+  macFor(1, a);
+  const uint32_t notedMs = 1000;
+  ring.note(a, notedMs, kBackoffMs, false);
+  for (uint64_t t = notedMs; t < notedMs + (1ull << 32); t += 1ull << 28) {
+    ring.retire(static_cast<uint32_t>(t));
+  }
+  TEST_ASSERT_FALSE(ring.inBackoff(a, notedMs + 10));
+}
+
+// Retire leaves a running penalty and a persistent block alone.
+void test_retire_keeps_running_and_persistent_backoffs() {
+  PeerBackoffRing ring;
+  uint8_t a[6], b[6];
+  macFor(1, a);
+  macFor(2, b);
+  ring.note(a, 1000, kBackoffMs, false);
+  ring.note(b, 1000, 0, true);
+  ring.retire(1000 + kBackoffMs - 1);
+  TEST_ASSERT_TRUE(ring.inBackoff(a, 1000 + kBackoffMs - 1));
+  ring.retire(1000 + 3 * kBackoffMs);
+  TEST_ASSERT_FALSE(ring.inBackoff(a, 1000 + 3 * kBackoffMs));
+  TEST_ASSERT_TRUE(ring.inBackoff(b, 1000 + 3 * kBackoffMs));
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
@@ -128,5 +157,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_persistent_block_never_expires);
   RUN_TEST(test_full_persistent_ring_replaces_longest_held_across_the_wrap);
   RUN_TEST(test_expired_transient_slot_reused_across_the_wrap);
+  RUN_TEST(test_expired_backoff_stays_expired_a_wrap_later);
+  RUN_TEST(test_retire_keeps_running_and_persistent_backoffs);
   return UNITY_END();
 }

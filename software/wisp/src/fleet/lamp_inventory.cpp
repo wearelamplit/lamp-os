@@ -85,7 +85,7 @@ void LampInventory::prune(uint32_t nowMs, uint32_t maxAgeMs) {
   xSemaphoreTake(asHandle(mutex_), portMAX_DELAY);
   for (size_t i = 0; i < count_; ) {
     const uint32_t last = entries_[i].lastSeenMs;
-    if (last != 0 && lampos::msSince(nowMs, last) > maxAgeMs) {
+    if (lampos::msSince(nowMs, last) > maxAgeMs) {
       if (i != count_ - 1) entries_[i] = entries_[count_ - 1];
       count_--;
       continue;

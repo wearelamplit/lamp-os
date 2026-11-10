@@ -13,7 +13,7 @@
 //   ✓ Idle → OfferSent → Streaming → Finalizing → Done/Failed state
 //     transitions, including the time-driven timeouts and the recv-
 //     driven onAccept / onReq / onResult paths
-//   ✓ Per-peer backoff ring: notePeerBackoff, peerIsInBackoff, ring
+//   ✓ Per-peer backoff through the shipped PeerBackoffRing: ring
 //     eviction, ring-slot reuse for the same MAC
 //   ✓ considerPeerForOta gating: peer-in-backoff, peer-already-current,
 //     distributor-not-Idle
@@ -40,6 +40,7 @@
 #include "components/firmware/ota_channel.cpp"
 #include "components/firmware/firmware_signature.hpp"
 #include "../../src/components/firmware/discover_image_length.cpp"
+#include "../../src/components/firmware/peer_backoff_ring.cpp"
 
 // computeShaPrefixOnce streams the signed region through mbedtls SHA-256 in
 // fixed-size blocks. This dir vendors the same native SHA-256 stub the
@@ -90,13 +91,6 @@ enum class FwAcceptStatus : uint8_t {
   DeclineUnverified   = 3,
 };
 
-struct Penalty {
-  uint8_t  mac[6];
-  uint32_t backoffUntilMs;
-  bool     used;
-  bool     persistent;
-};
-
 // --- DistAlgo: lamp state machine mirror --------------------------------
 
 // Differences from the wisp's algorithm mirror:
@@ -131,70 +125,21 @@ struct DistAlgo {
   uint8_t  doneAttempts_      = 0;
   bool     doneRetryAborted_  = false;
 
-  static constexpr size_t kPenaltyRingSize = 8;
-  Penalty penalties_[kPenaltyRingSize] = {};
+  static constexpr size_t kPenaltyRingSize = lamp::PeerBackoffRing::kSize;
+  lamp::PeerBackoffRing penalties_;
 
   static bool macsEqual(const uint8_t a[6], const uint8_t b[6]) {
     return std::memcmp(a, b, 6) == 0;
   }
 
   bool peerIsInBackoff(const uint8_t mac[6], uint32_t nowMs) const {
-    for (size_t i = 0; i < kPenaltyRingSize; ++i) {
-      const auto& p = penalties_[i];
-      if (!p.used) continue;
-      if (!macsEqual(p.mac, mac)) continue;
-      if (p.persistent) return true;
-      if (nowMs < p.backoffUntilMs) return true;
-    }
-    return false;
+    return penalties_.inBackoff(mac, nowMs);
   }
 
-  // Mirror of the lamp-side slot-selection fix: a free/expired/active
-  // transient slot is always preferred for a new mac, so a persistent
-  // (cross-variant-block) slot is never evicted by a later transient
-  // penalty. Only when the ring is entirely persistent does a new
-  // persistent block replace the oldest one; a new transient penalty in
-  // that state is dropped (it re-arms on its next failure).
   void notePeerBackoff(const uint8_t mac[6], uint32_t nowMs,
                        uint32_t durationMs = kPeerBackoffMs,
                        bool persistent = false) {
-    for (size_t i = 0; i < kPenaltyRingSize; ++i) {
-      if (penalties_[i].used && macsEqual(penalties_[i].mac, mac)) {
-        penalties_[i].backoffUntilMs = nowMs + durationMs;
-        penalties_[i].persistent     = persistent;
-        return;
-      }
-    }
-
-    int freeSlot = -1, expiredTransient = -1, activeTransient = -1, oldestPersistent = -1;
-    for (size_t i = 0; i < kPenaltyRingSize; ++i) {
-      Penalty& p = penalties_[i];
-      if (!p.used) {
-        if (freeSlot < 0) freeSlot = static_cast<int>(i);
-      } else if (!p.persistent) {
-        if (nowMs >= p.backoffUntilMs) {
-          if (expiredTransient < 0) expiredTransient = static_cast<int>(i);
-        } else if (activeTransient < 0) {
-          activeTransient = static_cast<int>(i);
-        }
-      } else if (oldestPersistent < 0 ||
-                 p.backoffUntilMs < penalties_[oldestPersistent].backoffUntilMs) {
-        oldestPersistent = static_cast<int>(i);
-      }
-    }
-
-    int slot = freeSlot >= 0 ? freeSlot
-             : expiredTransient >= 0 ? expiredTransient
-             : activeTransient;
-    if (slot < 0) {
-      if (!persistent) return;
-      slot = oldestPersistent;
-    }
-
-    penalties_[slot].used           = true;
-    penalties_[slot].persistent     = persistent;
-    std::memcpy(penalties_[slot].mac, mac, 6);
-    penalties_[slot].backoffUntilMs = nowMs + durationMs;
+    penalties_.note(mac, nowMs, durationMs, persistent);
   }
 
   void resetSession() {
@@ -1022,12 +967,15 @@ void test_backoff_ring_reuses_slot_for_same_mac(void) {
   d.notePeerBackoff(mac, 1000);
   d.notePeerBackoff(mac, 2000);  // refreshes existing entry
   d.notePeerBackoff(mac, 3000);
-  // Only ONE slot used after three notes for the same MAC.
-  size_t usedSlots = 0;
-  for (size_t i = 0; i < DistAlgo::kPenaltyRingSize; ++i) {
-    if (d.penalties_[i].used) usedSlots++;
+  // One slot for the three notes leaves room for every other peer.
+  for (uint8_t i = 1; i < DistAlgo::kPenaltyRingSize; ++i) {
+    uint8_t other[6]; macFromTail(other, static_cast<uint8_t>(i + 1));
+    d.notePeerBackoff(other, 3000);
   }
-  TEST_ASSERT_EQUAL_UINT(1, usedSlots);
+  for (uint8_t i = 0; i < DistAlgo::kPenaltyRingSize; ++i) {
+    uint8_t peer[6]; macFromTail(peer, static_cast<uint8_t>(i + 1));
+    TEST_ASSERT_TRUE(d.peerIsInBackoff(peer, 3001));
+  }
 }
 
 void test_backoff_ring_holds_distinct_peers(void) {
@@ -1036,11 +984,10 @@ void test_backoff_ring_holds_distinct_peers(void) {
     uint8_t mac[6]; macFromTail(mac, static_cast<uint8_t>(i + 1));
     d.notePeerBackoff(mac, 1000);
   }
-  size_t usedSlots = 0;
-  for (size_t i = 0; i < DistAlgo::kPenaltyRingSize; ++i) {
-    if (d.penalties_[i].used) usedSlots++;
+  for (uint8_t i = 0; i < DistAlgo::kPenaltyRingSize; ++i) {
+    uint8_t mac[6]; macFromTail(mac, static_cast<uint8_t>(i + 1));
+    TEST_ASSERT_TRUE(d.peerIsInBackoff(mac, 1001));
   }
-  TEST_ASSERT_EQUAL_UINT(DistAlgo::kPenaltyRingSize, usedSlots);
 }
 
 // A persistent (cross-variant) block must survive later transient backoffs

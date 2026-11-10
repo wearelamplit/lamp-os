@@ -15,6 +15,13 @@ bool PeerBackoffRing::inBackoff(const uint8_t mac[6], uint32_t nowMs) const {
   return false;
 }
 
+void PeerBackoffRing::retire(uint32_t nowMs) {
+  for (Entry& e : entries_) {
+    if (!e.used || e.persistent || e.durationMs == 0) continue;
+    e.sinceMs = lampos::retireStamp(nowMs, e.sinceMs, e.durationMs - 1);
+  }
+}
+
 void PeerBackoffRing::note(const uint8_t mac[6], uint32_t nowMs,
                            uint32_t durationMs, bool persistent) {
   for (Entry& e : entries_) {

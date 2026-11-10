@@ -126,6 +126,17 @@ void test_prune_ages_across_the_wrap(void) {
   TEST_ASSERT_EQUAL_size_t(0, inv.size());
 }
 
+// Last heard on the very millisecond millis() wraps to 0, then silent: prune
+// drops it once the window passes, like any other stamp.
+void test_prune_drops_a_lamp_last_heard_at_zero(void) {
+  wisp::LampInventory inv;
+  hear(inv, 1, -60, 0);
+  inv.prune(/*nowMs=*/30000, /*maxAgeMs=*/30000);
+  TEST_ASSERT_EQUAL_size_t(1, inv.size());
+  inv.prune(/*nowMs=*/30001, /*maxAgeMs=*/30000);
+  TEST_ASSERT_EQUAL_size_t(0, inv.size());
+}
+
 // A full inventory heard before the wrap; lamp 1, the first heard, is heard
 // again after it. The next newcomer evicts lamp 2, now the stalest.
 void test_full_roster_evicts_stalest_across_the_wrap(void) {
@@ -159,6 +170,7 @@ int main(int, char**) {
   RUN_TEST(test_prune_drops_aged_entries);
   RUN_TEST(test_full_roster_evicts_oldest);
   RUN_TEST(test_prune_ages_across_the_wrap);
+  RUN_TEST(test_prune_drops_a_lamp_last_heard_at_zero);
   RUN_TEST(test_full_roster_evicts_stalest_across_the_wrap);
   return UNITY_END();
 }
