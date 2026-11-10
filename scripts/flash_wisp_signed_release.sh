@@ -11,7 +11,7 @@
 #
 # Env vars:
 #   PORT         esptool upload port (required if multiple boards attached)
-#   RELEASE_TAG  GitHub release tag to pull from: beta (default) or stable
+#   RELEASE_TAG  GitHub release tag to pull from: beta (default) or a version tag such as v1.3.0
 #
 # For people WITHOUT the signing key: downloads a prebuilt image, never builds
 # or signs. Requires: curl, esptool (pip install esptool).

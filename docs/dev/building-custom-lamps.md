@@ -443,7 +443,8 @@ bracket-tagged log catalog is [`debug-instruments.md`](debug-instruments.md).
 variant: open a PR. Once merged, every push to `dev` builds a signed release,
 and CI publishes the full `distribution.bin` (bootloader + partitions + firmware
 + SPIFFS) to GitHub Releases. Install it over USB with the download-and-flash
-task, which pulls that signed image — no build, no key:
+task, which pulls that signed image and writes its firmware and web UI (NVS
+kept). No build, no key:
 
 ```sh
 VARIANT=<name> npm run lamp:flash:release
