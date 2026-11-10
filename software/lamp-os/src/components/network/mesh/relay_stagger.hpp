@@ -41,8 +41,7 @@ struct RelayStaggerWindow {
 template <size_t BufMax, size_t Slots>
 class RelayStagger {
  public:
-  // Set before the first enqueue that should be desynchronized; a frame
-  // queued earlier still relays once.
+  // Set before the first enqueue that should be desynchronized.
   void begin(const uint8_t ownMac[6]) {
     LAMP_PROTOCOL_PORTMUX_ENTER(&mux_);
     std::memcpy(ownMac_, ownMac, 6);

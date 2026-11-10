@@ -375,7 +375,7 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     // Dedup by (sourceMac, seq) so a loop-relayed copy doesn't fire twice.
     if (!controlOpDedup_.record(op.sourceMac, lamp_protocol::MSG_CONTROL_OP, op.seq)) return;
     // Rebroadcast for grid relay: extends mesh reach beyond direct radio
-    // range. CONTROL_OP is unconditionally gossip-relayed, after a stagger.
+    // range. CONTROL_OP is gossip-relayed whatever its target, after a stagger.
     if (!controlRelay_.enqueue(data, len, msgType, op.sourceMac, op.seq, millis())) {
       relay(data, len);
     }

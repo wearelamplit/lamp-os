@@ -131,7 +131,7 @@ bool EspNowLink::broadcast(const uint8_t* data, size_t len) {
   const bool ok = submit(bcast, data, len, err);
 #ifdef LAMP_DEBUG
   // A refused submit never reaches the driver queue and the send callback
-  // never fires. Callers discard this return value.
+  // never fires.
   if (!ok) {
     Serial.printf("[espnow.tx] submit FAIL err=%d (0x%x) len=%u inflight=%u\n",
                   (int)err, (unsigned)err, (unsigned)len,
