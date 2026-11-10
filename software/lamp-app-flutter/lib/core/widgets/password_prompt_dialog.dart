@@ -14,8 +14,8 @@ import 'friendly_error.dart';
 /// the callback receives the typed password and should return `null` on
 /// success (dialog pops, returning the password to the caller) or a
 /// `(errorMessage, rawError)` record to show an inline error and keep
-/// the dialog open. Buttons and field are disabled while the call is
-/// in flight.
+/// the dialog open. Buttons and field are disabled, and the confirm button
+/// shows progress, while the call is in flight.
 Future<String?> showPasswordPromptDialog(
   BuildContext context, {
   required String title,
@@ -182,7 +182,12 @@ class _PasswordPromptDialogState extends State<_PasswordPromptDialog> {
         FilledButton(
           key: const Key('password-prompt-confirm'),
           onPressed: _busy ? null : _confirm,
-          child: Text(widget.confirmLabel),
+          child: _busy
+              ? const SizedBox.square(
+                  dimension: 16, // deliberate dimension, not spacing
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Text(widget.confirmLabel),
         ),
       ],
     );

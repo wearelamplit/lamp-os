@@ -111,7 +111,7 @@ class _SetupBody extends ConsumerWidget {
             null => null,
           },
           onTap: () async {
-            final pw = await showPasswordPromptDialog(
+            await showPasswordPromptDialog(
               context,
               title: 'Change password',
               subtitle: 'Also locks the lamp\'s setup WiFi, so you\'ll need '
@@ -119,8 +119,15 @@ class _SetupBody extends ConsumerWidget {
                   'the lamp (~10s).',
               confirmLabel: 'Save',
               validate: lampPasswordError,
+              onSubmit: (pw) async {
+                try {
+                  await n().setLampPassword(pw);
+                  return null;
+                } catch (e) {
+                  return ("Couldn't set password. Try again.", e);
+                }
+              },
             );
-            if (pw != null) unawaited(n().setLampPassword(pw));
           },
         ),
         const SettingsGroupHeading('Connectivity'),

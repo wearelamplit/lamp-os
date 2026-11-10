@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../_support/held_save_ble_client.dart';
 import '../../_support/in_memory_ble_client.dart';
+import 'package:lamp_app/core/ble/ble_client.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/features/inventory/application/inventory_notifier.dart';
@@ -179,6 +183,45 @@ void main() {
 
     expect(find.text("Couldn't set name. Try again."), findsOneWidget);
     expect(find.text('Jacko'), findsOneWidget);
+  });
+
+  testWidgets('a password save in flight disables Save and shows progress',
+      (tester) async {
+    final ble = HeldSaveBleClient();
+    final c = await _makeContainer(client: ble);
+    addTearDown(c.dispose);
+    await tester.pumpWidget(_wrap(c));
+    await _pumpToData(tester);
+
+    await tester.tap(find.text('Password'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.enterText(
+        find.byKey(const Key('password-prompt-field')), 'hunter22');
+    final hold = ble.hold = Completer<void>();
+    final save = find.byKey(const Key('password-prompt-confirm'));
+    await tester.tap(save);
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+
+    expect(ble.saves, 1);
+    expect(tester.widget<FilledButton>(save).onPressed, isNull);
+    expect(
+      find.descendant(
+          of: save, matching: find.byType(CircularProgressIndicator)),
+      findsOneWidget,
+    );
+    await tester.tap(save, warnIfMissed: false);
+    await tester.pump();
+    expect(ble.saves, 1);
+
+    hold.completeError(const BleEncryptionRequired(_devId));
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(find.text("Couldn't set password. Try again."), findsOneWidget);
+    expect(tester.widget<FilledButton>(save).onPressed, isNotNull);
   });
 
   testWidgets(
