@@ -163,10 +163,8 @@ class ControlNotifier extends _$ControlNotifier {
   /// [setHomeModeFocus].
   bool _homeModeFocus = false;
 
-  /// Set when a firmware push ends without a reboot. The lamp dropped any
-  /// focus write made during the push, so the focus goes out again ahead of
-  /// each brightness write (the only write it reroutes) until the next
-  /// reconnect. A push that ends later without a reboot sets it again.
+  /// Set when a push ends without a reboot. The focus then goes out again
+  /// ahead of each brightness write until the next reconnect.
   bool _reassertHomeModeFocus = false;
   late InventoryNotifier _inv;
   late DateTime Function() _now;

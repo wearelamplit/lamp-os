@@ -122,6 +122,29 @@ void main() {
     );
   }
 
+  test(
+    'progress within a push, and dismissing its result, read nothing',
+    () async {
+      final r = await _rig();
+      r.firmware.emit(FirmwareOfferSent(footer: _footer));
+      await _pump();
+      final reads = r.ble.sectionReads;
+      r.firmware.emit(_streaming);
+      await _pump();
+      r.firmware.emit(
+        FirmwareStreaming(footer: _footer, chunksSent: 4, totalChunks: 10),
+      );
+      await _pump();
+      expect(r.ble.sectionReads, reads, reason: 'still pushing');
+      r.firmware.emit(const FirmwareFailed(reason: 'x'));
+      await _pump();
+      final afterEnd = r.ble.sectionReads;
+      r.firmware.emit(const FirmwareIdle());
+      await _pump();
+      expect(r.ble.sectionReads, afterEnd, reason: 'no push was running');
+    },
+  );
+
   test('a push that succeeds leaves the re-read to the reboot', () async {
     final r = await _rig();
     r.firmware.emit(_streaming);
@@ -146,7 +169,11 @@ void main() {
       for (final level in [60, 70]) {
         await r.control.setBrightness(level);
         await _pump();
-        expect(r.beforeLastBrightness(), BleUuids.homeModeFocus);
+        final chars = r.ble.charsWrittenTo(_id);
+        expect(chars.sublist(chars.length - 2), [
+          BleUuids.homeModeFocus,
+          BleUuids.brightness,
+        ]);
         expect(r.lastFocus, open ? 1 : 0);
       }
     });
