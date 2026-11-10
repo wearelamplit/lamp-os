@@ -5,8 +5,6 @@
 #include <array>
 #include <cstring>
 
-#include <lampos/clock.hpp>
-
 #include "components/network/mesh/mesh_link.hpp"
 
 #include "components/network/mesh/lamp_roster.hpp"
@@ -19,6 +17,7 @@
 #include "util/easing.hpp"
 #include "util/fade.hpp"
 #include "util/gradient.hpp"
+#include "util/uptime.hpp"
 
 namespace lamp {
 
@@ -175,6 +174,7 @@ void SocialBehavior::draw() {
 
 void SocialBehavior::control() {
   const uint32_t now = millis();
+  const uint64_t up = uptimeMs();
 
   // onGreetingChange_ is the sole path to CHAR_STATE_NOTIFY; keeps behaviors
   // free of BLE includes.
@@ -196,14 +196,12 @@ void SocialBehavior::control() {
 
   if (lamp::overrides.shade.operatorEditing()) return;
 
-  // Wraparound-safe time comparison (millis() rolls over at ~49 days).
-  if (static_cast<int32_t>(now - nextAcknowledgeTimeMs) < 0) return;
+  if (up < nextAcknowledgeTimeMs) return;
 
   const SocialMode mode = config_ ? config_->lamp.socialMode : SocialMode::Ambivert;
 
   // Introvert fatigue gate: skip if the lamp is in its post-fatigue rest window.
-  if (mode == SocialMode::Introvert &&
-      static_cast<int32_t>(now - tiredUntilMs_) < 0) {
+  if (mode == SocialMode::Introvert && up < tiredUntilMs_) {
     return;
   }
 
@@ -226,7 +224,7 @@ void SocialBehavior::control() {
         std::memcpy(key.data(), e.mac, 6);
         auto last = lastGreetedAtMs_.find(key);
         return last == lastGreetedAtMs_.end() ||
-               (now - last->second) >= regreetWindowMs;
+               up - last->second >= regreetWindowMs;
       },
       arrival);
   if (!haveArrival) return;
@@ -252,18 +250,18 @@ void SocialBehavior::control() {
   }
   applyTuning(tuning);
 
-  markGreeted(arrival.mac, now);
+  markGreeted(arrival.mac, up);
 
   // Introvert: trim the fatigue window, enter "tired" after too many
   // greetings burned through recently.
   if (mode == SocialMode::Introvert) {
-    recentGreetMs_.push_back(now);
+    recentGreetMs_.push_back(up);
     while (!recentGreetMs_.empty() &&
-           now - recentGreetMs_.front() > INTROVERT_FATIGUE_WINDOW_MS) {
+           up - recentGreetMs_.front() > INTROVERT_FATIGUE_WINDOW_MS) {
       recentGreetMs_.erase(recentGreetMs_.begin());
     }
     if (recentGreetMs_.size() >= INTROVERT_FATIGUE_COUNT) {
-      tiredUntilMs_ = now + INTROVERT_TIRED_DURATION_MS;
+      tiredUntilMs_ = up + INTROVERT_TIRED_DURATION_MS;
       recentGreetMs_.clear();
 #ifdef LAMP_DEBUG
       Serial.printf("[social] introvert tired until +%u ms\n",
@@ -288,7 +286,6 @@ void SocialBehavior::cancelGreeting() {
 }
 
 void SocialBehavior::triggerGreeting(const PeerView& peer) {
-  const uint32_t now = millis();
   const GreetingTuning tuning = personalityEngine.greetingFor(peer.mac);
   foundLampColor = peer.baseColor;
   std::memcpy(greetedMac_, peer.mac, 6);
@@ -305,7 +302,7 @@ void SocialBehavior::triggerGreeting(const PeerView& peer) {
   playOnce();
   greetingWasActive_ = true;
   if (onGreetingChange_) onGreetingChange_();
-  markGreeted(peer.mac, now);
+  markGreeted(peer.mac, uptimeMs());
 }
 
 void SocialBehavior::onColorInfo(const uint8_t srcMac[6],
@@ -318,14 +315,14 @@ void SocialBehavior::onColorInfo(const uint8_t srcMac[6],
   greetedBaseStops_ = baseStops;
 }
 
-void SocialBehavior::markGreeted(const uint8_t mac[6], uint32_t nowMs) {
+void SocialBehavior::markGreeted(const uint8_t mac[6], uint64_t upMs) {
   std::array<uint8_t, 6> key;
   std::memcpy(key.data(), mac, 6);
-  lastGreetedAtMs_[key] = nowMs;
+  lastGreetedAtMs_[key] = upMs;
   if (lastGreetedAtMs_.size() > MAX_GREETED_TRACKED) {
     auto oldest = lastGreetedAtMs_.begin();
     for (auto i = lastGreetedAtMs_.begin(); i != lastGreetedAtMs_.end(); ++i) {
-      if (lampos::msSince(nowMs, i->second) > lampos::msSince(nowMs, oldest->second)) oldest = i;
+      if (i->second < oldest->second) oldest = i;
     }
     lastGreetedAtMs_.erase(oldest);
   }
@@ -336,7 +333,7 @@ void SocialBehavior::markGreeted(const uint8_t mac[6], uint32_t nowMs) {
     case SocialMode::Ambivert:  cooldown = AMBIVERT_BASE_COOLDOWN_MS; break;
     case SocialMode::Introvert: cooldown = INTROVERT_BASE_COOLDOWN_MS; break;
   }
-  nextAcknowledgeTimeMs = nowMs + cooldown;
+  nextAcknowledgeTimeMs = upMs + cooldown;
 }
 
 }  // namespace lamp
