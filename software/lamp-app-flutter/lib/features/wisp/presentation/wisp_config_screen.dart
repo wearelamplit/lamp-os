@@ -126,16 +126,6 @@ class _WispBodyState extends ConsumerState<_WispBody> {
     final source = status.source;
     final draft = ref.watch(manualPaletteDraftProvider(widget.lampId));
 
-    // Schedule on the next frame to avoid mutating notifier state mid-build.
-    if (source == WispSourceMode.manual &&
-        draft.isEmpty &&
-        notifier.savedManualPalette.isNotEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        notifier.resetManualPaletteDraft();
-      });
-    }
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [

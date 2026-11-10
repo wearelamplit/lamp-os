@@ -224,7 +224,6 @@ void main() {
       await c.read(wispNotifierProvider(lampId).future);
       final n = c.read(wispNotifierProvider(lampId).notifier);
       expect(n.savedManualPalette, saved);
-      n.resetManualPaletteDraft();
       for (var i = saved.length - 1; i >= 0; i--) {
         n.removeManualPaletteColor(i);
       }

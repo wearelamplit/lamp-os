@@ -376,13 +376,13 @@ class WispNotifier extends _$WispNotifier {
     }
   }
 
-  /// Seed the editor from a freshly-read palette. Doesn't touch the draft if
-  /// the user is mid-edit (draft diverged from the previous saved).
+  /// Seed the editor from a freshly-read palette, the draft's only seed. A
+  /// draft that differs from the previous saved palette, an emptied one
+  /// included, is the user's edit and stays.
   void _ingestManualPalette(List<LampColor> palette) {
     if (palette.isEmpty) return;
     if (_palettesEqual(_savedManualPalette, palette)) return;
-    final wasDraftPristine =
-        _draft.isEmpty || _palettesEqual(_draft, _savedManualPalette);
+    final wasDraftPristine = _palettesEqual(_draft, _savedManualPalette);
     _savedManualPalette = List<LampColor>.unmodifiable(palette);
     if (wasDraftPristine) {
       _setDraft(_savedManualPalette);
@@ -1015,12 +1015,6 @@ class WispNotifier extends _$WispNotifier {
   // Each helper emits a fresh draft list so the provider's watchers rebuild.
   // Editing is local preview only; the draft reaches the wisp on an explicit
   // [setManualPalette] (Save), never per edit.
-
-  /// Seed the draft from the saved snapshot. Called by the UI on first
-  /// open of the editor so the swatches reflect what was last committed.
-  void resetManualPaletteDraft() {
-    _setDraft(_savedManualPalette);
-  }
 
   /// Replace the whole draft palette in one shot (the color-stops editor
   /// streams the full list per edit). Caps at 10; extra swatches are dropped.
