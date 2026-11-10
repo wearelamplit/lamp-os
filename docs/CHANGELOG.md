@@ -14,7 +14,11 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   Now a strip at the top reads "Teaching <name> new tricks 🎓" with a progress
   line, and every control that changes the lamp greys out until the update
   ends. A sheet or dialog that was open freezes with your edit kept, and
-  thaws when the update ends. The Info tab stays live.
+  thaws when the update ends. The Info tab stays live. If the update fails
+  or is cancelled, the app reads the lamp's settings back so the screen
+  matches the lamp, and Home Mode's brightness routing is put right on your
+  next brightness change. A change made in the few seconds the lamp stays
+  quiet after a failed update can still be lost (tracker 5eba30c).
 
 ## 1.3.1
 

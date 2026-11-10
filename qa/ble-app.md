@@ -134,7 +134,14 @@ outside still closes it (after a live "Discard changes?" if you changed
 anything), and once the update ends it saves normally. The expression
 editor's colours sheet does the same. The strip
 goes when the update ends (the lamp reboots, or fails) and editing comes
-back. A second lamp's screen shows nothing while the first updates.
+back. A second lamp's screen shows nothing while the first updates. Then
+make an update fail (walk the phone out of range mid-send, or cancel it from
+the dev-mode Firmware panel) after dragging brightness as it started: once
+the strip goes the slider shows the lamp's real brightness. Open Home Mode
+during an update, leave it, let the update fail, then move the Colors
+brightness slider: the lamp's live brightness follows, not its home
+brightness. Within about 10 s of a failure the lamp may still ignore changes
+(tracker 5eba30c).
 
 ## Pass criteria
 
@@ -146,7 +153,8 @@ back. A second lamp's screen shows nothing while the first updates.
 - P4 reconnect fully functional with zero re-pair steps.
 - P5: zero greet lines while connected (outside the connect race window).
 - P6: no control takes a tap during the update, the strip names the lamp,
-  and editing returns when it ends.
+  editing returns when it ends, and after a failed update the screen and
+  the lamp's brightness routing match the lamp.
 
 ## Not covered here
 

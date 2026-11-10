@@ -415,9 +415,10 @@ void main() {
   testWidgets("the expression editor's colours sheet freezes with the screen", (
     tester,
   ) async {
+    // Target 1 (shade) so the sheet's edits stream to the lamp live.
     final rig = await _pump(
       tester,
-      location: '/lamp/$_lampId/expressions/breathing/0',
+      location: '/lamp/$_lampId/expressions/breathing/1',
     );
     await tester.tap(find.byType(ColorBlocksBar));
     await _settle(tester);
@@ -437,6 +438,42 @@ void main() {
     );
     expect(find.byType(BottomSheet), findsOneWidget);
   });
+
+  testWidgets(
+    'a lock with no layout change still drops screen-reader actions',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final c = ProviderContainer(
+        overrides: [
+          firmwareNotifierProvider.overrideWith2((_) => _DrivenFirmware()),
+        ],
+      );
+      addTearDown(c.dispose);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: c,
+          child: MaterialApp(
+            home: Scaffold(
+              body: FirmwarePushLock(
+                lampId: _lampId,
+                child: Slider(value: 0.5, onChanged: (_) {}),
+              ),
+            ),
+          ),
+        ),
+      );
+      bool canIncrease() => find.semantics
+          .byAction(SemanticsAction.increase)
+          .evaluate()
+          .isNotEmpty;
+      expect(canIncrease(), isTrue);
+      (c.read(firmwareNotifierProvider(_lampId).notifier) as _DrivenFirmware)
+          .emit(FirmwareOfferSent(footer: _footer));
+      await tester.pump();
+      expect(canIncrease(), isFalse);
+      semantics.dispose();
+    },
+  );
 
   for (final path in [
     AppRoutes.setup(_lampId),

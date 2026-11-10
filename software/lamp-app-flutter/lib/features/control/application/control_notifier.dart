@@ -14,6 +14,8 @@ import '../../../core/ble/uuids.dart';
 import '../../../core/ble/write_coalescer.dart';
 import '../../../core/lifecycle/app_lifecycle.dart';
 import '../../../core/utils/clock.dart';
+import '../../firmware/application/firmware_notifier.dart';
+import '../../firmware/domain/firmware_state.dart';
 import '../../inventory/application/inventory_notifier.dart';
 import '../data/catalog_store.dart';
 import 'advanced_session.dart';
@@ -156,6 +158,16 @@ class ControlNotifier extends _$ControlNotifier {
   // own dispose timing.
   late BleClient _ble;
   final _linkOwner = Object();
+
+  /// Whether the Home Mode screen is open, as last told by
+  /// [setHomeModeFocus].
+  bool _homeModeFocus = false;
+
+  /// Set when a firmware push ends without a reboot. The lamp dropped any
+  /// focus write made during the push, so the focus goes out again ahead of
+  /// each brightness write (the only write it reroutes) until the next
+  /// reconnect. A push that ends later without a reboot sets it again.
+  bool _reassertHomeModeFocus = false;
   late InventoryNotifier _inv;
   late DateTime Function() _now;
   final _catalogStore = const CatalogStore();
@@ -289,6 +301,7 @@ class ControlNotifier extends _$ControlNotifier {
   @override
   Future<ControlState> build(String deviceId) async {
     _deviceId = deviceId;
+    ref.listen(firmwareNotifierProvider(deviceId), _onFirmwareState);
 
     // Cache provider refs once. Used by Timer / coalescer callbacks
     // that can fire after this notifier's onDispose has run.
@@ -399,7 +412,12 @@ class ControlNotifier extends _$ControlNotifier {
     _baseColorsWriter?.dispose();
     _editSessionWriter?.dispose();
     _brightnessWriter = WriteCoalescer(
-      onWrite: (v) => safeWrite(BleUuids.brightness, v),
+      onWrite: (v) async {
+        if (_reassertHomeModeFocus) {
+          await safeWrite(BleUuids.homeModeFocus, _homeModeFocusByte());
+        }
+        await safeWrite(BleUuids.brightness, v);
+      },
       debounce: _writeDebounce,
     );
     _shadeColorsWriter = WriteCoalescer(
@@ -612,6 +630,42 @@ class ControlNotifier extends _$ControlNotifier {
     }
   }
 
+
+  /// Tells the lamp whether the Home Mode screen is open. While it is, the
+  /// lamp previews home brightness and routes CHAR_BRIGHTNESS writes to it.
+  /// Safe to call after this notifier is disposed.
+  void setHomeModeFocus(bool active) {
+    _homeModeFocus = active;
+    unawaited(_ble
+        .write(_deviceId, BleUuids.controlService, BleUuids.homeModeFocus,
+            _homeModeFocusByte(),
+            withoutResponse: true)
+        .catchError((_) {}));
+  }
+
+  Uint8List _homeModeFocusByte() =>
+      Uint8List.fromList([_homeModeFocus ? 1 : 0]);
+
+  /// A push that ends without a reboot leaves the lamp missing every write
+  /// sent during it, so the app takes the lamp's word for its state again.
+  void _onFirmwareState(FirmwareState? previous, FirmwareState next) {
+    if (!(previous?.isBusy ?? false) || next.isBusy) return;
+    if (next is FirmwareSucceeded) return;
+    _reassertHomeModeFocus = true;
+    unawaited(_resyncAfterPush());
+  }
+
+  Future<void> _resyncAfterPush() async {
+    if (state.value?.connected != true) return;
+    try {
+      final fresh = await _readSections(_ble);
+      if (!ref.mounted || state.value?.connected != true) return;
+      state = AsyncData(fresh.copyWith(connected: true, reconnectAttempt: 0));
+    } catch (_) {
+      // A dead link surfaces through the probe and the reconnect ladder,
+      // which re-reads on its own.
+    }
+  }
 
   /// Commit fence. Writes a single byte to CHAR_COMMIT. The firmware
   /// persists current RAM state to NVS. The whole fleet exposes
@@ -1882,6 +1936,7 @@ class ControlNotifier extends _$ControlNotifier {
       await _mirrorIdentityToInventory(fresh);
       if (!ref.mounted) return;
       _reconnectTimer?.cancel();
+      _reassertHomeModeFocus = false;
       state = AsyncData(fresh.copyWith(connected: true, reconnectAttempt: 0));
     } catch (_) {
       // Bail if the notifier was disposed while awaiting; touching

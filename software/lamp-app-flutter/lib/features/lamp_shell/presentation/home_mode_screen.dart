@@ -1,13 +1,8 @@
-import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/ble/ble_client.dart';
-import '../../../core/ble/ble_client_provider.dart';
-import '../../../core/ble/uuids.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/form_section.dart';
 import '../../../core/widgets/friendly_error.dart';
@@ -44,40 +39,24 @@ class _HomeModeScreenState extends ConsumerState<HomeModeScreen> {
   // touching `ref` after super.dispose(). ref.read(...) in dispose trips
   // `_lifecycleState != _ElementLifecycle.defunct` framework asserts
   // because the Element is mid-teardown by then.
-  late BleClient _ble;
+  late ControlNotifier _control;
 
   @override
   void initState() {
     super.initState();
-    _ble = ref.read(bleClientProvider);
-    // Tell the lamp "user is on the Home Mode page": forces home-mode
-    // gate ON so the brightness slider previews home brightness live,
-    // and routes incoming CHAR_BRIGHTNESS writes to homeMode.brightness.
+    _control = ref.read(controlNotifierProvider(widget.lampId).notifier);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _writeFocus(true);
+      _control.setHomeModeFocus(true);
     });
   }
 
   @override
   void dispose() {
-    // Tell the lamp "user is leaving": fire-and-forget via the captured
-    // BleClient. The firmware also clears the flag on BT disconnect, so
-    // a missed exit (app killed mid-page) is recovered.
-    _writeFocus(false);
+    // The firmware also clears the flag on BT disconnect, so a missed exit
+    // (app killed mid-page) is recovered.
+    _control.setHomeModeFocus(false);
     super.dispose();
-  }
-
-  void _writeFocus(bool active) {
-    unawaited(_ble.write(
-      widget.lampId,
-      BleUuids.controlService,
-      BleUuids.homeModeFocus,
-      Uint8List.fromList([active ? 1 : 0]),
-      withoutResponse: true,
-    ).catchError((_) {
-      // BT may already be torn down by route pop
-    }));
   }
 
   @override
