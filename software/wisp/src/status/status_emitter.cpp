@@ -16,6 +16,7 @@
 #include "status/status_json.hpp"
 #include "status/seq_source.hpp"
 #include "util/fnv1a.hpp"
+#include "util/uptime.hpp"
 
 namespace wisp {
 
@@ -129,7 +130,7 @@ void StatusEmitter::emitStatus() {
     paletteIdPrefix[n] = '\0';
   }
 
-  const uint32_t lastSeenMs = millis();
+  const uint64_t lastSeenMs = uptimeMs();
 
   // manualPalette excluded: emitted separately via MSG_WISP_PALETTE (buildWispPalette).
   const char* sourceName = "off";

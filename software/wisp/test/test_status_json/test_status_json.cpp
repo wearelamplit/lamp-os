@@ -12,6 +12,10 @@ constexpr size_t CAP = 230;
 // before bumping.
 constexpr size_t CORE_PIN = 179;
 
+// The widest lastSeenMs a wisp can send: esp_timer_get_time() / 1000 at the
+// top of its int64 range.
+constexpr uint64_t kWidestStampMs = INT64_MAX / 1000;
+
 void setUp() {}
 void tearDown() {}
 
@@ -19,7 +23,7 @@ void tearDown() {}
 // source with oscRole), both mismatch fields and the widest Ethernet address.
 static wisp::WispStatusFields worstCase() {
   return wisp::WispStatusFields{
-      false, false, "abcdef12", 4294967295u, "manual", "secondary",
+      false, false, "abcdef12", kWidestStampMs, "manual", "secondary",
       255, 255, 255, 255, true,
       /*name=*/"12345678901234567890", /*hasPassword=*/true,
       /*wifiChannelMismatch=*/true, /*wifiApChannel=*/11,
@@ -59,12 +63,12 @@ static size_t build(const wisp::WispStatusFields& f, char* out, size_t outCap,
   return build(f, wisp::WispConfigFields{}, out, outCap, cap);
 }
 
-// Guaranteed core at pathological widths: 10-digit lastSeenMs, widest
+// Guaranteed core at pathological widths: 16-digit lastSeenMs, widest
 // source, both bools false (wider than true), hasPassword present. All
 // optional fields at their app defaults (omitted).
 void test_core_worst_case_pinned_under_cap() {
   wisp::WispStatusFields f = plain();
-  f.lastSeenMs = 4294967295u;
+  f.lastSeenMs = kWidestStampMs;
   f.hasPassword = true;
   char out[256];
   size_t n = build(f, out, sizeof(out), CAP);
@@ -81,6 +85,29 @@ void test_core_worst_case_pinned_under_cap() {
   TEST_ASSERT_TRUE(d["auroraConnected"].isNull());
   TEST_ASSERT_TRUE(d["currentZone"].isNull());
   TEST_ASSERT_TRUE(d["zoneSource"].isNull());
+}
+
+// The app keeps the newest lastSeenMs it has heard from a wisp and needs a
+// later emission to carry a larger one, so the stamp keeps growing past the
+// 49.7 days of uptime at which millis() wraps.
+void test_last_seen_ms_keeps_growing_past_the_millis_wrap() {
+  constexpr uint64_t kWrap = uint64_t{1} << 32;
+  wisp::WispStatusFields f = plain();
+  char out[256];
+
+  f.lastSeenMs = kWrap - 1000;
+  TEST_ASSERT_TRUE(build(f, out, sizeof(out), CAP) > 0);
+  JsonDocument before;
+  TEST_ASSERT_FALSE(deserializeJson(before, out));
+
+  f.lastSeenMs = kWrap + 1000;
+  TEST_ASSERT_TRUE(build(f, out, sizeof(out), CAP) > 0);
+  JsonDocument after;
+  TEST_ASSERT_FALSE(deserializeJson(after, out));
+
+  TEST_ASSERT_TRUE(after["lastSeenMs"].as<uint64_t>() >
+                   before["lastSeenMs"].as<uint64_t>());
+  TEST_ASSERT_TRUE(after["lastSeenMs"].as<uint64_t>() == kWrap + 1000);
 }
 
 // sourceLive rides the core both ways, so the app never reads absence.
@@ -336,16 +363,16 @@ void test_no_config_copy_carries_no_config_field() {
 // Absolute worst case, untruncated: every field widest, Off mode (offColor
 // beside the drift fields), both mismatch fields, ethIp, the config copy. It
 // fits CONTROL_MAX_PAYLOAD with room to spare, so at the production cap
-// nothing sheds. Manual mode, without offColor, is 402.
+// nothing sheds. Manual mode, without offColor, is 408.
 void test_worst_case_untruncated_length() {
   char out[1024];
   wisp::WispStatusFields f = worstCase();
   f.source = "off";
   size_t n = build(f, worstConfig(), out, sizeof(out), /*cap=*/4096);
-  TEST_ASSERT_EQUAL_UINT32(421, n);
+  TEST_ASSERT_EQUAL_UINT32(427, n);
   TEST_ASSERT_TRUE(n <= lamp_protocol::CONTROL_MAX_PAYLOAD);
   n = build(worstCase(), worstConfig(), out, sizeof(out), /*cap=*/4096);
-  TEST_ASSERT_EQUAL_UINT32(402, n);
+  TEST_ASSERT_EQUAL_UINT32(408, n);
 }
 
 // The widest status without its config copy: Off mode (offColor outweighs
@@ -360,11 +387,11 @@ void test_status_only_worst_case_pinned() {
   f.source = "off";
   char out[1024];
   size_t n = wisp::buildWispStatusJson(f, nullptr, out, sizeof(out), 4096);
-  TEST_ASSERT_EQUAL_UINT32(295, n);
+  TEST_ASSERT_EQUAL_UINT32(301, n);
 
   f.name = "\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"";
   n = wisp::buildWispStatusJson(f, nullptr, out, sizeof(out), 4096);
-  TEST_ASSERT_EQUAL_UINT32(315, n);
+  TEST_ASSERT_EQUAL_UINT32(321, n);
   TEST_ASSERT_TRUE(n <= lamp_protocol::CONTROL_MAX_PAYLOAD);
 }
 
@@ -375,7 +402,7 @@ void test_worst_case_fits_control_op_at_production_cap() {
   char json[1024];
   size_t jsonLen = build(worstCase(), worstConfig(), json, sizeof(json),
                          lamp_protocol::CONTROL_MAX_PAYLOAD);
-  TEST_ASSERT_EQUAL_UINT32(402, jsonLen);
+  TEST_ASSERT_EQUAL_UINT32(408, jsonLen);
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, json));
   TEST_ASSERT_EQUAL_STRING("secondary", d["oscRole"].as<const char*>());
@@ -452,6 +479,7 @@ int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_core_worst_case_pinned_under_cap);
   RUN_TEST(test_source_live_always_present);
+  RUN_TEST(test_last_seen_ms_keeps_growing_past_the_millis_wrap);
   RUN_TEST(test_worst_case_untruncated_length);
   RUN_TEST(test_status_only_worst_case_pinned);
   RUN_TEST(test_worst_case_fits_control_op_at_production_cap);

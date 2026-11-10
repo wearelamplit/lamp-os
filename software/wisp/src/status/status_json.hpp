@@ -10,7 +10,7 @@ struct WispStatusFields {
   bool         wifiConnected;
   bool         sourceLive;
   const char*  paletteIdPrefix;
-  uint32_t     lastSeenMs;
+  uint64_t     lastSeenMs;  // ms since boot; never wraps
   const char*  source;
   const char*  oscRole;  // omitted at "primary"
   uint8_t      offR, offG, offB, offW;
