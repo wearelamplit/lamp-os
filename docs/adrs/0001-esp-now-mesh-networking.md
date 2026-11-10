@@ -39,7 +39,8 @@ protocol layered on top.
   (palette/claim), `FW_*` (OTA). Every frame carries a 2-byte magic + a
   protocol-version byte + a message-type byte.
 - **Gossip relay** for the message types that need fleet-wide reach beyond a
-  single hop: a lamp re-broadcasts a relayable frame on first sight, deduped by
+  single hop: a lamp re-broadcasts a relayable frame once, a per-lamp delay
+  after first sight (`relayDelayMs`, see `networking.md`), deduped by
   **per-message-type** `DedupRing`s (each sized to its traffic) keyed on
   `(sourceMac, msgType, seq)`. Relayed: `MSG_HELLO`, `MSG_CONTROL_OP`, `MSG_WISP_HELLO`,
   `MSG_WISP_PALETTE`, `MSG_EVENT` — so presence and beacons reach lamps beyond

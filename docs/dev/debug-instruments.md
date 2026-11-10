@@ -29,6 +29,7 @@ source file is where the tag's format strings live.
 | `[show]` | `components/network/mesh/mesh_link.cpp` | Lamp ESP-NOW init / ready (mac) / HELLO recv |
 | `[meshmix]` | `components/network/mesh/mesh_link.cpp` | 30 s mesh RX mix window (`hello / wisp_hello / paint / …` counts) |
 | `[hellosupp]` | `components/network/mesh/mesh_link.cpp` | 30 s HELLO relay-suppression rate (`win=30s suppressed=.. relayed=.. rate=..%`) |
+| `[relaystagger]` | `components/network/mesh/mesh_link.cpp` | 30 s staggered wisp-frame relays (`win=30s queued=.. failopen=.. deferred=.. dropped=.. maxlate=..ms`): relays queued, relayed inline because the table was full, passes a due relay waited for a TX credit, copies dropped 1 s late, and the latest a relay went out past its fire time. `relayed_out` in `[meshmix]` less `[hellosupp] relayed` should equal queued + failopen over a run |
 | `[wispstate]` | `components/network/mesh/mesh_link.cpp` | MSG_WISP_STATE adopt / release + 30 s window summary |
 | `[wispcoex]` | `components/network/mesh/mesh_link.cpp` | Wisp-frame coex reception meter (`recv=.. maxgap=..ms`) |
 | `[wispdirect]` | `components/network/mesh/mesh_link.cpp` | Direct wisp-paint receive (srcMac) |

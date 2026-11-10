@@ -547,6 +547,14 @@ scale with the number of peers or the mesh's message rate, so each is bounded:
   on every build (at most every 10 s); the running counts show as `txstalls`
   (resets) and `txrefused` (sends dropped for want of a credit, a mesh
   resend among them) in `heap.get` and the `[heap]` trend line.
+- **Staggered relays.** `MeshLink` holds the wisp-frame relays it delays
+  (`RelayStagger`, `components/network/mesh/relay_stagger.hpp`) in fixed .bss
+  tables, about 2.1 KB off free heap: 2 control-op slots of 608 bytes and 4
+  WISP_HELLO / WISP_PALETTE slots of 224, sized for two wisps. Nothing
+  allocates; a full table relays inline. The loop sends a due relay only while
+  a TX credit is free (`MeshLink::txReady`), so queued relays share the 6
+  credits with the cascade drain and the mesh resends and never count in
+  `txrefused`; an inline relay can.
 - **Cascade fan-out.** A locally fired cascade (a cascading expression, or the
   app's Test) reaches every mesh peer, closest first. `CascadeScheduler`
   (`expressions/cascade_scheduler.hpp`) holds up to two fan-outs (peers and one
