@@ -9,6 +9,8 @@
 #include <array>
 #include <cstring>
 
+#include <lampos/clock.hpp>
+
 #include "paint/current_palette.hpp"
 #include "paint/drift.hpp"
 #include "fleet/lamp_inventory.hpp"
@@ -53,6 +55,11 @@ void PaintDistributor::onPaletteChanged() {
 }
 
 void PaintDistributor::tick(uint32_t nowMs) {
+  // Gates read off these only when painting or walking, so each can sit for
+  // weeks; retiring them keeps a stale one from reading as recent a wrap later.
+  lastDriftFireMs_ = lampos::retireStamp(nowMs, lastDriftFireMs_);
+  brWalkEndMs_ = lampos::retireStamp(nowMs, brWalkEndMs_);
+  lastUnicastMs_ = lampos::retireStamp(nowMs, lastUnicastMs_);
   // Re-color one lamp per drift slot so every lamp shifts within one interval;
   // STATE broadcasts the roster colors on its own cadence.
   if (painting() && driftSlotMs_ > 0 && driftCount_ > 0 &&

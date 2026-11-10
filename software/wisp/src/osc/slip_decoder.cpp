@@ -1,6 +1,10 @@
 #include "osc/slip_decoder.hpp"
 
+#include <lampos/clock.hpp>
+
 namespace wisp {
+
+void SlipDecoder::retire(uint32_t nowMs) { lastByteMs_ = lampos::retireStamp(nowMs, lastByteMs_); }
 
 SlipDecoder::Result SlipDecoder::feed(uint8_t b, uint32_t nowMs) {
   if (justEmitted_) {

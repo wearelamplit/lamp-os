@@ -30,6 +30,7 @@ SerialConsole::SerialConsole(PaintDistributor& paint, WispConfig& config,
       onSourceTransition_(std::move(onSourceTransition)) {}
 
 void SerialConsole::pump() {
+  slip_.retire(millis());
   while (Serial.available() > 0) {
     int ch = Serial.read();
     if (ch < 0) break;

@@ -279,6 +279,19 @@ void test_slip_carries_straylight_bundle(void) {
   TEST_ASSERT_TRUE(got);
 }
 
+// A frame cut off mid-way, then silence for a whole wrap: the next byte is
+// console text, not the frame's continuation.
+void test_slip_partial_frame_resets_a_wrap_later(void) {
+  static SlipDecoder slip;
+  const uint32_t cutMs = 1000;
+  slip.feed(SlipDecoder::kEnd, cutMs);
+  slip.feed('x', cutMs);
+  for (uint64_t t = cutMs; t < cutMs + (1ull << 32); t += 1ull << 28) {
+    slip.retire(static_cast<uint32_t>(t));
+  }
+  TEST_ASSERT_TRUE(slip.feed('a', cutMs + 10) == SlipDecoder::Result::Text);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_bare_straylight_palette);
@@ -293,5 +306,6 @@ int main(int, char**) {
   RUN_TEST(test_slip_back_to_back_and_oversize);
   RUN_TEST(test_slip_carries_straylight_bundle);
   RUN_TEST(test_slip_idle_reset_returns_to_text);
+  RUN_TEST(test_slip_partial_frame_resets_a_wrap_later);
   return UNITY_END();
 }
