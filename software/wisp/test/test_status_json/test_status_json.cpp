@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstring>
 #include "status/status_json.hpp"
+#include "esp_timer.h"
 #include "wire/lamp_protocol.hpp"
 
 constexpr size_t CAP = 230;
@@ -16,14 +17,20 @@ constexpr size_t CORE_PIN = 179;
 // top of its int64 range.
 constexpr uint64_t kWidestStampMs = INT64_MAX / 1000;
 
-void setUp() {}
+static void setUptimeMs(uint64_t ms) {
+  g_mock_uptime_us = static_cast<int64_t>(ms * 1000);
+}
+
+void setUp() { setUptimeMs(1000); }
 void tearDown() {}
 
 // Every live field at its widest non-default value, Manual mode (widest
 // source with oscRole), both mismatch fields and the widest Ethernet address.
+// Sets the clock to the widest lastSeenMs.
 static wisp::WispStatusFields worstCase() {
+  setUptimeMs(kWidestStampMs);
   return wisp::WispStatusFields{
-      false, false, "abcdef12", kWidestStampMs, "manual", "secondary",
+      false, false, "abcdef12", "manual", "secondary",
       255, 255, 255, 255, true,
       /*name=*/"12345678901234567890", /*hasPassword=*/true,
       /*wifiChannelMismatch=*/true, /*wifiApChannel=*/11,
@@ -46,7 +53,7 @@ static wisp::WispConfigFields worstConfig() {
 // Defaults everywhere, Manual mode.
 static wisp::WispStatusFields plain() {
   return wisp::WispStatusFields{
-      false, false, "", 1000u, "manual", "primary",
+      false, false, "", "manual", "primary",
       0, 0, 0, 0, false,
       /*name=*/"", /*hasPassword=*/false };
 }
@@ -68,7 +75,7 @@ static size_t build(const wisp::WispStatusFields& f, char* out, size_t outCap,
 // optional fields at their app defaults (omitted).
 void test_core_worst_case_pinned_under_cap() {
   wisp::WispStatusFields f = plain();
-  f.lastSeenMs = kWidestStampMs;
+  setUptimeMs(kWidestStampMs);
   f.hasPassword = true;
   char out[256];
   size_t n = build(f, out, sizeof(out), CAP);
@@ -95,12 +102,12 @@ void test_last_seen_ms_keeps_growing_past_the_millis_wrap() {
   wisp::WispStatusFields f = plain();
   char out[256];
 
-  f.lastSeenMs = kWrap - 1000;
+  setUptimeMs(kWrap - 1000);
   TEST_ASSERT_TRUE(build(f, out, sizeof(out), CAP) > 0);
   JsonDocument before;
   TEST_ASSERT_FALSE(deserializeJson(before, out));
 
-  f.lastSeenMs = kWrap + 1000;
+  setUptimeMs(kWrap + 1000);
   TEST_ASSERT_TRUE(build(f, out, sizeof(out), CAP) > 0);
   JsonDocument after;
   TEST_ASSERT_FALSE(deserializeJson(after, out));
