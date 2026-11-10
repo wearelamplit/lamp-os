@@ -39,12 +39,13 @@ void test_change_emits_burst() {
     StatusCadence c;
     c.change();
     TEST_ASSERT_EQUAL_INT(
-        StatusCadence::kBurstMs / StatusCadence::kBurstIntervalMs,
+        (StatusCadence::kBurstMs + StatusCadence::kBurstIntervalMs - 1) /
+            StatusCadence::kBurstIntervalMs,
         countEmits(c, start, kSpanMs + 5 * kStepMs));
   }
 }
 
-// A request inside a running burst neither extends nor shortens it: the last
+// A request inside a running burst neither extends nor shortens it. The last
 // burst emit lands where it would have without the request.
 void test_request_inside_burst_keeps_burst_end() {
   StatusCadence c;
@@ -58,6 +59,21 @@ void test_request_inside_burst_keeps_burst_end() {
   const uint32_t burstLastEmit =
       start + StatusCadence::kBurstMs - StatusCadence::kBurstIntervalMs;
   TEST_ASSERT_EQUAL_UINT32(burstLastEmit, lastEmit);
+}
+
+// A second change inside a running burst restarts its kBurstMs.
+void test_change_inside_burst_restarts_burst() {
+  StatusCadence c;
+  const uint32_t start = 40000;
+  const uint32_t again = start + 7300;
+  c.change();
+  uint32_t lastEmit = 0;
+  for (uint32_t t = start; t - start < 3 * kSpanMs; t += kStepMs) {
+    if (t == again) c.change();
+    if (c.takeEmit(t, true)) lastEmit = t;
+  }
+  TEST_ASSERT_UINT32_WITHIN(StatusCadence::kBurstIntervalMs,
+                            again + StatusCadence::kBurstMs, lastEmit);
 }
 
 // A request 1 s after an emit waits out the 5 s window, then fires.
@@ -90,6 +106,7 @@ int main(int, char**) {
   RUN_TEST(test_request_emits_once_over_burst_span);
   RUN_TEST(test_change_emits_burst);
   RUN_TEST(test_request_inside_burst_keeps_burst_end);
+  RUN_TEST(test_change_inside_burst_restarts_burst);
   RUN_TEST(test_request_after_emit_deferred_not_dropped);
   RUN_TEST(test_held_until_status_clear);
   return UNITY_END();

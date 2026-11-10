@@ -6,7 +6,7 @@
 namespace wisp {
 
 // Decides when wispStatus goes out. A request sends one status, coalesced to
-// one per kMinIntervalMs: a request inside the window is deferred until it
+// one per kMinIntervalMs. A request inside the window is deferred until it
 // opens, never dropped. A change also opens a kBurstMs burst, timed from the
 // next takeEmit call, that re-sends the status every kBurstIntervalMs so an
 // op's confirmation outlasts a multi-second coex reception gap on the lamps.

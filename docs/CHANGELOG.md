@@ -10,12 +10,13 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 ### Changed
 - **The wisp sends less status chatter.** Opening the wisp screen in the app,
   the wisp's WiFi or Ethernet connecting or dropping, and its OSC feed going
-  quiet or coming back now send one status update instead of repeating it
-  every 2 seconds for 20 seconds. A flapping WiFi network costs at most one
+  quiet or coming back now send a status update once (twice at most, 5
+  seconds apart) instead of repeating it every 2 seconds for 20 seconds. A flapping WiFi network costs at most one
   update every 5 seconds. Changes you make from the app still repeat for 20
   seconds, so their confirmation gets through. The wisp only updates over
-  USB: reflash it to pick this up.
+  USB, so reflash it to pick this up.
 
+## 1.3.2
 
 ### Fixed
 - **A frozen lamp restarts itself.** If the lamp's main loop ever stops

@@ -46,9 +46,8 @@ class StatusEmitter {
   void startTimer();
 
   // Mark one wispStatus emit due, with no burst. For a read-only poll or a
-  // connectivity / source-liveness edge: the app sees it without waiting up
-  // to 30s, and a flapping edge costs at most one emit per 5 s. Safe from any
-  // task; the emit runs from pump().
+  // connectivity / source-liveness edge, so the app sees it without waiting
+  // up to 30s. Safe from any task; the emit runs from pump().
   void requestEmit();
 
   // Mark a wispStatus emit due, open the 20 s re-send burst and reschedule
