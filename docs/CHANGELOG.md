@@ -11,7 +11,8 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 - **Clearing a wisp's manual palette reaches the wisp.** Remove every colour
   from the manual palette and save, and the wisp stops painting: lamps under
   it ease back to their own colours. The app shows the palette as saved once
-  the wisp confirms it, and if the wisp never does, the app says the palette
+  the wisp reports it after the save, so a lamp re-sending an older report
+  can't mark it saved. If the wisp never does, the app says the palette
   didn't reach the wisp, as it does for any other palette. Before, the app
   showed the palette empty but never sent it, so the wisp kept painting the
   old colours.
