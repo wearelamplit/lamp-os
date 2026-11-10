@@ -57,7 +57,7 @@ All tasks run from the repo root.
 
 | Task | What it does |
 |---|---|
-| `npm run lamp:flash:release` | Download the CI-signed release + flash whole image over USB (no build, no key) |
+| `npm run lamp:flash:release` | Download the CI-signed release and update the lamp over USB: firmware (app0) + web UI (spiffs), boot slot reset to app0, NVS kept (no build, no key). `RELEASE_TAG` picks the release (default `beta`) |
 | `npm run lamp:flash` | Build unsigned locally + flash over USB (`VARIANT`/`CHANNEL`/`PORT` env params) — dev flashes; boots and meshes fine, can't source OTA |
 | `npm run lamp:build` | Build lamp firmware, unsigned (`VARIANT` env param) |
 | `npm run lamp:test` | Native firmware unit tests (the CI suite) |
