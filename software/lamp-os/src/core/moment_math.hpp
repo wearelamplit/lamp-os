@@ -10,6 +10,8 @@
 #include <cstdint>
 #include <vector>
 
+#include <lampos/clock.hpp>
+
 #include "components/network/mesh/lamp_roster.hpp"
 #include "config/config_types.hpp"
 #include "util/fast_rng.hpp"
@@ -53,15 +55,11 @@ uint32_t momentHash(uint32_t x);
 uint32_t momentHashMac(const uint8_t mac[6]);
 uint32_t macLow32(const uint8_t mac[6]);
 
-// A stamp another task wrote just after the loop read the clock reads as up
-// to this far in the future.
-inline constexpr uint32_t kStampSkewMs = 1000;
-
-// True when `stampMs` lies within `windowMs` before `nowMs`, or within the
-// skew after it. A stamp of any other age, however old, is outside.
+// True when `stampMs` lies within `windowMs` before `nowMs`, or within
+// lampos::kStampSkewMs after it. A stamp of any other age, however old, is
+// outside.
 inline bool withinMs(uint32_t stampMs, uint32_t nowMs, uint32_t windowMs) {
-  const uint32_t age = nowMs - stampMs;
-  return age <= windowMs || age >= UINT32_MAX - kStampSkewMs;
+  return lampos::msSince(nowMs, stampMs) <= windowMs;
 }
 
 inline bool isLiked(uint8_t disposition) { return disposition >= kDispositionFond; }

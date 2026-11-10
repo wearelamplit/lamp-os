@@ -116,7 +116,7 @@ being the reference pattern. The frame counter exists only as the
   fires through the normal base-class path.
 
 Deadline comparisons use the wrap-safe `timeReached(now, deadline)` from
-`primitives.hpp`, never `millis() > deadline`. Glitchy additionally guarantees
+`lampos/clock.hpp`, never `millis() > deadline`. Glitchy additionally guarantees
 at least one painted frame even when its duration is shorter than a flush
 window.
 

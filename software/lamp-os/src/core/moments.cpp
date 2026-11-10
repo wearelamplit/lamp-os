@@ -29,8 +29,6 @@ constexpr size_t kBorrowedColors = 4;
 constexpr uint32_t kBorrowSameColor = 48;
 constexpr uint8_t kBorrowWhiten = 102;
 
-bool later(uint32_t a, uint32_t b) { return static_cast<int32_t>(a - b) > 0; }
-
 }  // namespace
 
 void MomentDirector::begin(MomentHost* host, const uint8_t selfMac[6], uint32_t rngSeed,
@@ -149,7 +147,7 @@ void MomentDirector::hearCrowd(MomentKind kind, uint32_t nowMs) {
   const uint32_t cooldown = momentPacing(kind).crowdCooldownMs;
   if (cooldown == 0) return;
   const uint32_t until = nowMs + cooldown;
-  if (!s.cooling || later(until, s.coolUntilMs)) s.coolUntilMs = until;
+  if (!s.cooling || lampos::isLater(until, s.coolUntilMs)) s.coolUntilMs = until;
   s.cooling = true;
 }
 
@@ -291,7 +289,7 @@ void MomentDirector::startFireflies(uint32_t seed, uint32_t t0, const uint8_t or
   moment_.offset = firefliesFirstOffset(seed, self_);
   // A late joiner starts at its first blink still ahead.
   while (moment_.blink <= kFirefliesBlinks &&
-         later(nowMs, firefliesBlinkMs(t0, moment_.periodMs, moment_.blink, moment_.offset))) {
+         lampos::isLater(nowMs, firefliesBlinkMs(t0, moment_.periodMs, moment_.blink, moment_.offset))) {
     moment_.offset = firefliesNextOffset(moment_.offset, moment_.blink);
     ++moment_.blink;
   }

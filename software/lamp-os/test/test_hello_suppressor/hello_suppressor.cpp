@@ -197,6 +197,46 @@ void test_counters_classify_suppressed_relayed_and_failopen() {
   TEST_ASSERT_EQUAL_UINT32(1, s.relayedWindow());
 }
 
+// First seen 20 ms before the millis() wrap, so its fire time lands after it.
+// A tick still before the wrap is inside the jitter and must not relay, or
+// suppression is skipped.
+void test_fire_time_past_the_wrap_waits_for_it() {
+  HelloRelaySuppressor s;
+  RelayLog log;
+  const uint8_t frame[8] = {0x01, 0x05, 0, 1, 2, 3, 4, 5};
+  const uint32_t t0 = UINT32_MAX - 20;
+  const uint32_t fireAt = t0 + HelloRelaySuppressor::jitterMs(kMacA, 7);
+  TEST_ASSERT_TRUE(fireAt < t0);
+
+  s.onFirstSeen(kMacA, 7, frame, sizeof(frame), t0);
+  s.tick(t0 + 5, log.fn());
+  s.tick(fireAt - 1, log.fn());
+  TEST_ASSERT_EQUAL_UINT32(0, log.frames.size());
+
+  s.tick(fireAt, log.fn());
+  TEST_ASSERT_EQUAL_UINT32(1, log.frames.size());
+}
+
+// Fire time before the wrap, first tick after it (a loop stalled across the
+// wrap): the entry still fires and frees its slot, so the table keeps its
+// full capacity instead of failing open early.
+void test_fire_time_before_the_wrap_fires_after_it() {
+  HelloRelaySuppressor s;
+  RelayLog log;
+  const uint8_t frame[8] = {0x01, 0x05, 0, 1, 2, 3, 4, 5};
+  const uint32_t t0 = UINT32_MAX - 300;
+  const uint32_t fireAt = t0 + HelloRelaySuppressor::jitterMs(kMacA, 7);
+  TEST_ASSERT_TRUE(fireAt > t0);
+
+  s.onFirstSeen(kMacA, 7, frame, sizeof(frame), t0);
+  s.tick(0x200, log.fn());
+  TEST_ASSERT_EQUAL_UINT32(1, log.frames.size());
+
+  for (uint16_t seq = 0; seq < kHelloPendingSlots; ++seq) {
+    TEST_ASSERT_FALSE(s.onFirstSeen(kMacB, seq, frame, sizeof(frame), 0x300));
+  }
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
@@ -211,5 +251,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_relayed_frame_is_byte_identical);
   RUN_TEST(test_slot_freed_after_fire);
   RUN_TEST(test_counters_classify_suppressed_relayed_and_failopen);
+  RUN_TEST(test_fire_time_past_the_wrap_waits_for_it);
+  RUN_TEST(test_fire_time_before_the_wrap_fires_after_it);
   return UNITY_END();
 }

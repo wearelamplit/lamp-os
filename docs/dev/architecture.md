@@ -78,7 +78,7 @@ Full topology and channel details: [`networking.md`](networking.md#topology).
 | Firmware OTA | `software/lamp-os/src/components/firmware/` |
 | Config / NVS | `software/lamp-os/src/config/` |
 | Variants | `software/lamp-os/src/lamps/{standard,snafu,staff}/` |
-| Shared protocol / crypto / LED | `software/shared/{protocol,crypto,led-common}/` |
+| Shared protocol / crypto / LED / clock | `software/shared/{protocol,crypto,led-common,clock}/` |
 | Wisp OSC / paint / status | `software/wisp/src/{osc,paint,status}/` |
 | Wisp ArtNet bridge (pre-mesh lamps) | `software/wisp/src/artnet/`, `src/net/{wifi_link,stage_beacon}` |
 | Wisp wired Ethernet (W5500) | `software/wisp/src/net/eth_link`, STA rule `staWanted()` in `src/net/sta_join.hpp` |

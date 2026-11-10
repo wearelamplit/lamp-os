@@ -218,6 +218,7 @@ in range, that's `PersonalityEngine::crowdComposition()` /
 |---|---|---|
 | `isValidBdAddr(const char*)` | `util/bd_addr.hpp` | Validate canonical `AA:BB:CC:DD:EE:FF` colon-hex form before keying a disposition on a `lampId` |
 | `base64::encode(const uint8_t*, size_t)` | `util/base64.hpp` | Tiny header-only encoder (wisp palette payloads) |
+| `lampos::timeReached(now, deadline)`, `lampos::isLater(a, b)`, `lampos::msSince(now, stamp)` | `lampos/clock.hpp` (`software/shared/clock`) | Compare 32-bit `millis()` stamps across the 49.7-day wrap. Every deadline, elapsed-time and most-recent comparison on a millis stamp goes through these or an unsigned `now - start`, never a raw `<` / `>` between stamps |
 
 ---
 

@@ -2,6 +2,8 @@
 
 #include <cstring>
 
+#include <lampos/clock.hpp>
+
 namespace lamp {
 
 uint32_t HelloRelaySuppressor::jitterMs(const uint8_t mac[6], uint16_t seq) {
@@ -72,7 +74,7 @@ void HelloRelaySuppressor::tick(uint32_t nowMs, const RelayFn& relay) {
     uint8_t frame[lamp_protocol::HELLO_MAX_SIZE];
     uint16_t len = 0;
     LAMP_PROTOCOL_PORTMUX_ENTER(&mux_);
-    if (e.used && nowMs >= e.fireAtMs) {
+    if (e.used && lampos::timeReached(nowMs, e.fireAtMs)) {
       if (e.dupCount < kHelloSuppressThreshold) {
         std::memcpy(frame, e.frame, e.len);
         len = e.len;
