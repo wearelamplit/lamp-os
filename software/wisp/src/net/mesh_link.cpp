@@ -7,7 +7,7 @@
 
 #include <cstring>
 
-#include <lampos/clock.hpp>
+#include "util/uptime.hpp"
 
 namespace wisp {
 
@@ -115,81 +115,28 @@ bool MeshLink::broadcast(const uint8_t* data, size_t len) {
   return esp_now_send(bcast, data, len) == ESP_OK;
 }
 
-int MeshLink::findPeerSlot(const uint8_t mac[6]) const {
-  for (size_t i = 0; i < MAX_TRACKED_PEERS; ++i) {
-    if (peers_[i].used && std::memcmp(peers_[i].mac, mac, 6) == 0) {
-      return static_cast<int>(i);
-    }
-  }
-  return -1;
-}
-
-size_t MeshLink::pickLruSlot(uint32_t nowMs) const {
-  size_t bestIdx = 0;
-  bool found = false;
-  uint32_t bestAge = 0;
-  for (size_t i = 0; i < MAX_TRACKED_PEERS; ++i) {
-    if (!peers_[i].used) continue;
-    const uint32_t age = lampos::msSince(nowMs, peers_[i].lastUsedMs);
-    if (!found || age > bestAge) {
-      found = true;
-      bestAge = age;
-      bestIdx = i;
-    }
-  }
-  return bestIdx;
-}
-
 bool MeshLink::send(const uint8_t targetMac[6], const uint8_t* data, size_t len) {
   if (!targetMac || !data) return false;
 
-  // Two-stage: capture insert/evict decision under mux, then call ESP-NOW APIs outside it.
-  uint8_t  macToDel[6] = {0};
-  bool     needDel = false;
-  bool     needAdd = false;
-
-  const uint32_t nowMs = millis();
+  // Decide under the mux; the ESP-NOW calls can't run inside it.
+  const uint64_t nowMs = uptimeMs();
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   portENTER_CRITICAL(&peerMux_);
 #endif
-  int existing = findPeerSlot(targetMac);
-  if (existing >= 0) {
-    peers_[existing].lastUsedMs = nowMs;
-  } else if (peerCount_ < MAX_TRACKED_PEERS) {
-    // Find the first empty slot. Linear scan is fine (table is small).
-    for (size_t i = 0; i < MAX_TRACKED_PEERS; ++i) {
-      if (!peers_[i].used) {
-        peers_[i].used = true;
-        std::memcpy(peers_[i].mac, targetMac, 6);
-        peers_[i].lastUsedMs = nowMs;
-        peerCount_++;
-        needAdd = true;
-        break;
-      }
-    }
-  } else {
-    // Full → evict LRU. Copy the old MAC out for esp_now_del_peer; IDF
-    // APIs can't run under the critical section.
-    const size_t lru = pickLruSlot(nowMs);
-    std::memcpy(macToDel, peers_[lru].mac, 6);
-    needDel = true;
-    std::memcpy(peers_[lru].mac, targetMac, 6);
-    peers_[lru].lastUsedMs = nowMs;
-    needAdd = true;
-  }
+  const PeerSlots::Change change = peers_.touch(targetMac, nowMs);
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   portEXIT_CRITICAL(&peerMux_);
 #endif
 
-  if (needDel) {
-    esp_now_del_peer(macToDel);
+  if (change.evicted) {
+    const uint8_t* old = change.evictedMac;
+    esp_now_del_peer(old);
 #ifdef LAMP_DEBUG
     Serial.printf("[mesh] LRU evict %02X:%02X:%02X:%02X:%02X:%02X\n",
-                  macToDel[0], macToDel[1], macToDel[2],
-                  macToDel[3], macToDel[4], macToDel[5]);
+                  old[0], old[1], old[2], old[3], old[4], old[5]);
 #endif
   }
-  if (needAdd) {
+  if (change.added) {
     esp_now_peer_info_t peer = {};
     std::memset(&peer, 0, sizeof(peer));
     std::memcpy(peer.peer_addr, targetMac, 6);

@@ -221,6 +221,7 @@ in range, that's `PersonalityEngine::crowdComposition()` /
 | `lampos::timeReached(now, deadline)`, `lampos::isLater(a, b)`, `lampos::msSince(now, stamp)` | `lampos/clock.hpp` (`software/shared/clock`) | Compare 32-bit `millis()` stamps across the 49.7-day wrap. Every deadline, elapsed-time and most-recent comparison on a millis stamp goes through these or an unsigned `now - start`, never a raw `<` / `>` between stamps |
 | `lampos::retireStamp(now, stamp)`, `lampos::kRetiredAgeMs` | `lampos/clock.hpp` | Hold a stamp no older than 24.8 days, so it stays outside every shorter window and never reads as recent again one wrap later. A stamp read against a window either gets retired this way (or by clearing its owner's valid flag) from a path that runs at least every 24.8 days, or is refreshed that often by design |
 | `lamp::uptimeMs()`, `lamp::uptimeSince(stamp)` | `util/uptime.hpp` | 64-bit milliseconds since boot, the clock `millis()` truncates; it never wraps. Use it for a stamp read only on an event or from code home mode can skip for weeks, where no periodic path can retire it. `uptimeSince` gives an uptime stamp's age, saturated to 32 bits. Native tests drive the clock through `g_mock_millis_wraps` in the `esp_timer.h` stub |
+| `wisp::uptimeMs()` | `software/wisp/src/util/uptime.hpp` | The wisp's 64-bit milliseconds since boot, for the same kind of stamp: the unicast peer table's last-use stamps (`PeerSlots`) and the `lastSeenMs` the wisp puts in its status |
 
 ---
 
