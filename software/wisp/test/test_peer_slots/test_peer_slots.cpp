@@ -134,8 +134,9 @@ void test_released_mac_is_added_again() {
 void test_release_frees_a_slot_in_a_full_table() {
   PeerSlots slots;
   fill(slots, [](uint8_t i) { return uint64_t{1000} + i; });
+  constexpr uint8_t kReleased = 7;
   uint8_t m[6];
-  macFor(m, 7);
+  macFor(m, kReleased);
   slots.release(m);
   uint8_t fresh[6];
   macFor(fresh, 200);
@@ -143,7 +144,7 @@ void test_release_frees_a_slot_in_a_full_table() {
   TEST_ASSERT_TRUE(c.added);
   TEST_ASSERT_FALSE(c.evicted);
   for (uint8_t i = 1; i <= PeerSlots::kCapacity; ++i) {
-    if (i == 7) continue;
+    if (i == kReleased) continue;
     macFor(m, i);
     TEST_ASSERT_FALSE(touchAt(slots, m, 6000 + i).added);
   }
