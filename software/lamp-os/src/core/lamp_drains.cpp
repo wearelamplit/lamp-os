@@ -30,6 +30,7 @@
 #include "core/moments.hpp"
 #include "core/override_aggregate.hpp"
 #include "core/pending_slot_aggregate.hpp"
+#include "util/dropped_write_log.hpp"
 
 
 namespace lamp {
@@ -94,6 +95,8 @@ void Lamp::drainShadeColors() {
     JsonDocument doc;
     if (deserializeJson(doc, buf) == DeserializationError::Ok) {
       lamp::apply::shadeColorsWriteToConfig(doc.as<JsonVariant>());
+    } else {
+      lamp::logDroppedWrite("shadeColors", "parse failed");
     }
     lamp::stampConfiguratorActivity(millis());
   }
@@ -115,6 +118,8 @@ void Lamp::drainBaseColors() {
     JsonDocument doc;
     if (deserializeJson(doc, buf) == DeserializationError::Ok) {
       lamp::apply::baseColorsWriteToConfig(doc.as<JsonVariant>());
+    } else {
+      lamp::logDroppedWrite("baseColors", "parse failed");
     }
     lamp::stampConfiguratorActivity(millis());
   }
@@ -155,6 +160,8 @@ void Lamp::drainExpressionOp() {
     if (deserializeJson(doc, buf) == DeserializationError::Ok) {
       lamp::apply::expressionOpToConfig(doc.as<JsonObject>());
       applied = true;
+    } else {
+      lamp::logDroppedWrite("expressionOp", "parse failed");
     }
     config.invalidateExpressionsSection();
 
@@ -290,7 +297,9 @@ void Lamp::drainSocialDispositions() {
 #ifdef LAMP_DEBUG
     Serial.printf("[loop] drain socialDispositions len=%u\n", (unsigned)len);
 #endif
-    config.setDispositionsFromJson(buf, len);
+    if (!config.setDispositionsFromJson(buf, len)) {
+      lamp::logDroppedWrite("socialDispositions", "parse failed");
+    }
   }
 }
 
@@ -344,6 +353,8 @@ void Lamp::drainWifiOp() {
       if (op && strcmp(op, "scan") == 0) {
         wifi::startScan();
       }
+    } else {
+      lamp::logDroppedWrite("wifiOp", "parse failed");
     }
   }
 }
