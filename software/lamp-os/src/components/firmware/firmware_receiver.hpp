@@ -348,8 +348,8 @@ class FirmwareReceiver {
   // Inter-session quiet hold. In a 3+ lamp mesh a receiver can be OFFERed by
   // several distributors in quick succession; if one session aborts, exiting
   // quiet immediately flashes the base color before the next OFFER lands. Defer
-  // exitQuiet by InterSessionQuietHold::kHoldMs to bridge that gap. The
-  // receiver never inherits a hold, so it always ends sessions as not done.
+  // exitQuiet by InterSessionQuietHold::kHoldMs to bridge that gap; an OFFER
+  // inside the hold keeps its quiet. Loop task only.
   InterSessionQuietHold quietHold_;
 };
 

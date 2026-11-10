@@ -331,7 +331,8 @@ class FirmwareDistributor {
   PeerBackoffRing penalties_;
 
   // The last peer is remembered so the indicator paints a held full bar
-  // through the hold.
+  // through the hold. The loop task writes it in Idle, OfferSent and the
+  // Done/Failed reap, the streaming task in Streaming under stateMux_.
   InterSessionQuietHold quietHold_;
   // Set once the streaming task has entered quiet + torn down the radio for the
   // active session; reset in resetSession(). Radio teardown is deferred off the

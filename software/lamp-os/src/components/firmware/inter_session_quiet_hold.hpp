@@ -12,7 +12,7 @@ namespace lamp {
 struct InterSessionQuietHold {
   static constexpr uint32_t kHoldMs = 10000;
 
-  bool held = false;     // this distributor owns one ota_quiet_mode count
+  bool held = false;     // the owner holds one ota_quiet_mode count
   bool pending = false;  // a session has ended and the hold's exit is pending
   uint32_t endedAtMs = 0;
   bool endedDone = false;

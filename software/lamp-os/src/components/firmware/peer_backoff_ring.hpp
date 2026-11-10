@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -30,7 +31,7 @@ class PeerBackoffRing {
     bool used = false;
     bool persistent = false;
   };
-  Entry entries_[kSize] = {};
+  std::array<Entry, kSize> entries_{};
 };
 
 }  // namespace lamp

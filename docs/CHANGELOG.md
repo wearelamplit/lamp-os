@@ -16,9 +16,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   neighbour, close the web config page while you used it, drop a lamp it had
   just heard from its nearby list, greet a lamp it had just greeted again,
   relay every mesh check-in instead of thinning them, and for a minute accept
-  the BOOT-button password reset as if it had just started. A wisp could keep lamps and other wisps that had gone silent,
-  forget ones it had just heard, or hold back its brightness re-sends. All of
-  these now carry on through the rollover.
+  the BOOT-button password reset as if it had just started. A wisp could keep
+  lamps and other wisps that had gone silent, forget ones it had just heard,
+  or hold back its brightness re-sends. All of these now carry on through the
+  rollover.
 
 ## 1.3.2
 
