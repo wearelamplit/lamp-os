@@ -68,7 +68,7 @@ Four behavioral tiers, each with its own crypto posture, reach, and lifetime:
 | `MSG_WISP_HELLO` (0x20) | broadcast | one hop, relayed only when heard direct from the wisp | `wispHelloDedup_` 32-slot ring |
 | `MSG_WISP_CLAIM` (0x25) | broadcast | **no**, direct radio range only | `wispClaimDedup_` 16-slot ring |
 | `MSG_WISP_PALETTE` (0x26) | broadcast | one hop, relayed only when heard direct from the wisp | `wispPaletteDedup_` 32-slot ring |
-| `MSG_WISP_PAINT` (0x27) | broadcast | **no**, direct radio range only | `wispPaintDedup_` 16-slot ring — **retired**, wisp no longer emits it; STATE carries per-lamp colors |
+| `MSG_WISP_PAINT` (0x27) | broadcast | **no**, ignored on receive | n/a — **retired**, wisp no longer emits it; STATE carries per-lamp colors |
 | `MSG_WISP_STATE` (0x28) | broadcast | **no**, direct radio range only | `wispStateDedup_` 16-slot ring — sole wisp paint render path |
 | `MSG_OVERRIDE_COLORS` (0x21) | unicast | **no**, single-hop, addressedToUs filter | n/a (no relay) — **retired** as the wisp paint path; parser kept, no sender |
 | `MSG_RESTORE_COLORS` (0x22) | unicast or broadcast | **no**, single-hop | n/a — **retired**, STATE-absence eases a lamp home |
@@ -165,7 +165,7 @@ header(6) + sourceMac(6) + count(1) + rgb[count*3] + w[count]
 - **Manual only**: the frame carries the stored manual palette in every source mode. An OSC palette is never broadcast here, so in Osc mode the app has no copy of the live palette beyond `paletteIdPrefix`.
 - **Lamp-side cache**: each lamp stores the latest `(mac, rgbw[], count)` in `LampRoster::WispCache.manualPaletteRgbw` (interleaved R,G,B,W). The app reads it raw from the `wisppalette` page section (see the page protocol below), off the status, whose frequent palette-less notify would clobber it.
 
-**`MSG_WISP_PAINT` (0x27)**, **retired**. The wisp no longer emits it; `MSG_WISP_STATE` carries the same per-lamp base/shade colors and feeds the app's "Painted lamps" preview. The wire format (`header(6) + sourceMac(6) + count(1) + entries[count*12]`, entry `lampMac(6) + baseRGB(3) + shadeRGB(3)`) and its parser remain for backward-compat; the lamp's receive routing is dormant.
+**`MSG_WISP_PAINT` (0x27)**, **retired**. The wisp no longer emits it; `MSG_WISP_STATE` carries the same per-lamp base/shade colors and feeds the app's "Painted lamps" preview. The wire format (`header(6) + sourceMac(6) + count(1) + entries[count*12]`, entry `lampMac(6) + baseRGB(3) + shadeRGB(3)`) stays documented and the type ID stays reserved, because a wisp older than beta-1.1.8 still broadcasts it. A lamp ignores the frame on receive: no parse, no dedup, no slot.
 
 **`MSG_WISP_STATE` (0x28)**, Declarative per-lamp state: base+shade per claimed lamp plus the wisp's per-frame globals — the **sole** wisp paint render path. A lamp gates the frame to its display wisp (`sourceMac` match), then scans for its own mesh MAC: on a hit it edge-triggers the eased wisp `LayerStack` base/shade targets and holds presence; on a miss in a fresh frame (Off, or unclaimed) it eases home promptly. Every entry also feeds the app's painted-lamps preview (`WispFleetCache`), the role `MSG_WISP_PAINT` used to fill. `brightness` / `driftRateMs` are carried but not yet consumed by the lamp render path (space-dim still rides `MSG_OVERRIDE_BRIGHTNESS`).
 ```

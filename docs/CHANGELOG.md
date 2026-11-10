@@ -13,6 +13,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   so nothing you see changes: a crash still prints its report on the USB
   serial console and still lands in the lamp's crash record. The firmware is
   about 12 KB smaller and the lamp has about 0.9 KB more free memory.
+- **About 2.6 KB more free memory.** The lamp stops setting aside room for
+  an old wisp paint message that wisps stopped sending in beta 1.1.8. Wisp
+  paint itself is unchanged, and a lamp near an older wisp ignores that
+  message as before.
 
 ## 1.3.2
 

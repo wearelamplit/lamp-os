@@ -183,7 +183,6 @@ void postPendingRestoreBrightness(const PendingRestoreBrightness& src)   { pendi
 void postPendingWispHello(const PendingWispHello& src)                   { pendingSlots.wispHello.post(pendingMux, src); }
 void postPendingWispPalette(const PendingWispPalette& src)               { pendingSlots.wispPalette.post(pendingMux, src); }
 void postPendingWispClaim(const PendingWispClaim& src)                   { pendingSlots.wispClaim.post(pendingMux, src); }
-void postPendingWispPaint(const PendingWispPaint& src)                   { pendingSlots.wispPaint.post(pendingMux, src); }
 void postPendingWispState(const PendingWispState& src)                   { pendingSlots.wispState.post(pendingMux, src); }
 void postPendingCommand(const PendingCommand& src)                       { pendingSlots.command.post(pendingMux, src); }
 void postPendingEvent(const PendingEvent& src)                           { pendingSlots.event.post(pendingMux, src); }
