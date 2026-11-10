@@ -44,6 +44,20 @@ void test_long_busy_spell_never_locks_the_scan_out() {
   TEST_ASSERT_TRUE(t.due({}, 1000 + 0x80000000u));
 }
 
+// A scan, then busy for a whole wrap: the first idle tick after scans at
+// once instead of reading the old scan as 100 ms ago.
+void test_scan_after_a_wrap_long_busy_spell_runs_at_once() {
+  OtaOfferThrottle t;
+  OtaOfferBusy busy;
+  busy.quiet = true;
+  const uint32_t scannedMs = 1000;
+  TEST_ASSERT_TRUE(t.due({}, scannedMs));
+  for (uint64_t at = scannedMs; at < scannedMs + (1ull << 32); at += 1ull << 28) {
+    TEST_ASSERT_FALSE(t.due(busy, static_cast<uint32_t>(at)));
+  }
+  TEST_ASSERT_TRUE(t.due({}, scannedMs + 100));
+}
+
 void test_each_busy_source_blocks_the_scan() {
   OtaOfferBusy sending;   sending.firmwareSending = true;
   OtaOfferBusy receiving; receiving.firmwareReceiving = true;
@@ -234,6 +248,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_scans_once_per_interval);
   RUN_TEST(test_interval_survives_millis_wrap);
   RUN_TEST(test_long_busy_spell_never_locks_the_scan_out);
+  RUN_TEST(test_scan_after_a_wrap_long_busy_spell_runs_at_once);
   RUN_TEST(test_each_busy_source_blocks_the_scan);
   RUN_TEST(test_startup_phase_holds_offers);
   RUN_TEST(test_offer_busy_holds_until_startup_completes);
