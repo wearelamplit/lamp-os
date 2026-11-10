@@ -116,6 +116,46 @@ void main() {
     expect(tester.widget<FilledButton>(update).onPressed, isNotNull);
   });
 
+  testWidgets('Update stays disabled while the lamp restarts after it',
+      (tester) async {
+    final ble = InMemoryBleClient();
+    final c = await _makeContainer(client: ble);
+    addTearDown(c.dispose);
+    final nav = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: c,
+      child: MaterialApp(
+        navigatorKey: nav,
+        home: const Scaffold(body: Text('home')),
+      ),
+    ));
+    unawaited(nav.currentState!.push(MaterialPageRoute<void>(
+      builder: (_) => const AdvancedLedsScreen(lampId: _devId),
+    )));
+    await _pumpToData(tester);
+    await tester.pump(const Duration(milliseconds: 500));
+
+    await tester.tap(find.text('Update'));
+    await tester.pump(const Duration(milliseconds: 16));
+    // The restart drops the link; the screen shows its form again while the
+    // save waits to reconnect.
+    await ble.disconnect(_devId);
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    final update = find.ancestor(
+      of: find.text('Update'),
+      matching: find.byWidgetPredicate((w) => w is FilledButton),
+    );
+    expect(update, findsOneWidget);
+    expect(tester.widget<FilledButton>(update).onPressed, isNull);
+
+    for (var i = 0; i < 40; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.text('home'), findsOneWidget, reason: 'the save finished');
+  });
+
   testWidgets('Shade strip section renders above Base strip', (tester) async {
     final c = await _makeContainer();
     addTearDown(c.dispose);
