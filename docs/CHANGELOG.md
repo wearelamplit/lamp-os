@@ -23,6 +23,13 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   failure. Before, a background settings read could mark a change saved that
   the wisp never confirmed.
 
+### Changed
+- **The Colors page draws a standard lamp's shade the way the lamp shows it.**
+  The lamp picture at the top and the Shade card put the shade's first colour
+  at the bottom, where the standard lamp's shade starts. The Shade sheet's
+  colour list keeps the first colour in the top row. Other lamps look as
+  before.
+
 ## 1.3.0
 
 ### Fixed

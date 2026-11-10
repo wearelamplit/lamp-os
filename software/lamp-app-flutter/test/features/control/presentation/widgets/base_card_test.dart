@@ -15,11 +15,18 @@ const _devId = 'aa:bb:cc:dd:ee:ff';
 
 Future<ProviderContainer> _buildContainer({
   String baseColorsJson = '["#300783FF","#FF0000FF"]',
+  String? lampType,
+  String? baseSegmentsJson,
+  String? baseRotateJson,
 }) async {
   SharedPreferences.setMockInitialValues({});
   final ble = InMemoryBleClient();
   await seedControlBle(ble,
-      deviceId: _devId, baseColorsJson: baseColorsJson);
+      deviceId: _devId,
+      baseColorsJson: baseColorsJson,
+      lampType: lampType,
+      baseSegmentsJson: baseSegmentsJson,
+      baseRotateJson: baseRotateJson);
   final c = ProviderContainer(
     overrides: [bleClientProvider.overrideWithValue(ble)],
   );
@@ -94,5 +101,40 @@ void main() {
       return d is BoxDecoration && d.gradient is LinearGradient;
     }).toList();
     expect(hasGradient, isNotEmpty);
+  });
+
+  group('still swatch stop order', () {
+    const rgb = '["#FF000000","#00FF0000","#0000FF00"]';
+    for (final (lampType, segs) in [
+      ('standard', null),
+      ('snafu', '[{"name":"Stem","px":35,"colors":$rgb}]'),
+    ]) {
+      testWidgets('$lampType: top to bottom in list order', (tester) async {
+        final c = await _buildContainer(
+            lampType: lampType, baseColorsJson: rgb, baseSegmentsJson: segs);
+        addTearDown(c.dispose);
+        await tester.pumpWidget(UncontrolledProviderScope(
+          container: c,
+          child: MaterialApp(
+            home: Scaffold(body: BaseCard(lampId: _devId, onTap: () {})),
+          ),
+        ));
+        await tester.pumpAndSettle();
+        final g = tester
+            .widgetList<Container>(find.byType(Container))
+            .map((b) => b.decoration)
+            .whereType<BoxDecoration>()
+            .map((d) => d.gradient)
+            .whereType<LinearGradient>()
+            .single;
+        expect(g.begin, Alignment.topCenter);
+        expect(g.end, Alignment.bottomCenter);
+        expect(g.colors, const [
+          Color(0xFFFF0000),
+          Color(0xFF00FF00),
+          Color(0xFF0000FF),
+        ]);
+      });
+    }
   });
 }

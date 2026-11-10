@@ -7,22 +7,31 @@ import '../../application/control_notifier.dart';
 import '../../domain/lamp_color.dart';
 import 'shade_editor_sheet.dart';
 
-/// Slice of ControlState ShadeCard needs: colors list + colorsEditable. Used
-/// as the `.select` projection so sibling state changes don't trigger a rebuild.
-/// (Matches `_BaseSlice` in base_card.dart now that shade is a gradient too.)
+/// Slice of ControlState ShadeCard needs. Used as the `.select` projection so
+/// sibling state changes don't trigger a rebuild.
 class _ShadeSlice {
-  const _ShadeSlice(this.colors, {required this.colorsEditable});
+  const _ShadeSlice(
+    this.colors, {
+    required this.colorsEditable,
+    required this.stop0AtBottom,
+  });
   final List<LampColor> colors;
   final bool colorsEditable;
+
+  /// The standard lamp's shade has stop 0 at the bottom; every other variant's
+  /// previews keep it at the top.
+  final bool stop0AtBottom;
 
   @override
   bool operator ==(Object other) =>
       other is _ShadeSlice &&
       colorsEditable == other.colorsEditable &&
+      stop0AtBottom == other.stop0AtBottom &&
       const ListEquality<LampColor>().equals(colors, other.colors);
 
   @override
-  int get hashCode => Object.hash(Object.hashAll(colors), colorsEditable);
+  int get hashCode =>
+      Object.hash(Object.hashAll(colors), colorsEditable, stop0AtBottom);
 }
 
 class ShadeCard extends ConsumerWidget {
@@ -72,6 +81,7 @@ class ShadeCard extends ConsumerWidget {
         return _ShadeSlice(
           state == null ? const [] : spec.selectColors(state),
           colorsEditable: state == null || state.shade.colorsEditable,
+          stop0AtBottom: state?.lamp.isStandard ?? true,
         );
       }),
     );
@@ -98,8 +108,12 @@ class ShadeCard extends ConsumerWidget {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(14),
                 gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
+                  begin: slice.stop0AtBottom
+                      ? Alignment.bottomCenter
+                      : Alignment.topCenter,
+                  end: slice.stop0AtBottom
+                      ? Alignment.topCenter
+                      : Alignment.bottomCenter,
                   colors: _gradientColors(slice.colors),
                 ),
               ),
