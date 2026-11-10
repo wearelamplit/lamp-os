@@ -25,8 +25,6 @@ import '../../control/presentation/widgets/color_stops_sheet.dart';
 import '../domain/expression_catalog.dart';
 import '../domain/expression_presentation.dart';
 import 'widgets/expression_params_panel.dart';
-import '../../firmware/application/firmware_notifier.dart';
-import '../../firmware/domain/firmware_state.dart';
 import '../../firmware/presentation/firmware_push_lock.dart';
 
 class ExpressionEditorScreen extends ConsumerStatefulWidget {
@@ -268,22 +266,21 @@ class _ExpressionEditorScreenState
           // Test previews the in-flight draft transiently (no persist); the
           // test_expression envelope carries colors + params. A continuous
           // expression plays one cycle. Disabled while the BLE link is down so
-          // writes don't queue against a dead connection, and during a firmware
-          // push, when the lamp drops it.
+          // writes don't queue against a dead connection, and while a firmware
+          // push leaves the lamp dropping it.
           if (descriptor != null)
           Consumer(
             builder: (context, ref, _) {
               final connected = ref.watch(controlNotifierProvider(widget.lampId)
                   .select((a) => a.value?.connected ?? false));
-              final pushing = ref.watch(firmwareNotifierProvider(widget.lampId)
-                  .select((s) => s.isBusy));
+              final frozen = watchFirmwarePushFrozen(ref, widget.lampId);
               return IconButton(
                 icon: const Icon(Icons.play_arrow_rounded),
                 tooltip: 'Test',
                 // Read the draft on tap, not on build: watching it here would
                 // force the keep-alive draft to seed during the loading frame,
                 // before the catalog + pixel counts have landed.
-                onPressed: (!connected || pushing || _cooling)
+                onPressed: (!connected || frozen || _cooling)
                     ? null
                     : () async {
                         final draft = ref.read(expressionDraftProvider(

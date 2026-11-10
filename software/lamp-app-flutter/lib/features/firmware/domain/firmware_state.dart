@@ -50,15 +50,47 @@ class FirmwareFinalizing extends FirmwareState {
 
 /// Lamp reported success; will reboot momentarily.
 class FirmwareSucceeded extends FirmwareState {
-  const FirmwareSucceeded({required this.footer});
+  const FirmwareSucceeded({required this.footer, this.alreadyCurrent = false});
   final LsigFooter footer;
+
+  /// The lamp already runs this version or newer and turned the offer down.
+  /// It installs nothing and does not reboot.
+  final bool alreadyCurrent;
 }
 
-/// Terminal failure surface. Wraps a user-presentable reason. The
-/// `cause` is preserved for logging but not shown to the user.
+/// Why a push failed, as the app explains it to the lamp's owner.
+enum FirmwareFailure {
+  noAnswer,
+  setupFailed,
+  busy,
+  untrustedAtOffer,
+  untrusted,
+  linkLost,
+  missingPieces,
+  noResult,
+  scrambled,
+  storeFailed,
+  unknown,
+  cacheMissing,
+  cacheUnverified,
+  wrongLamp,
+  cancelled;
+
+  /// The lamp turned the offer down, so no lesson ran.
+  bool get declined => this == busy || this == untrustedAtOffer;
+}
+
+/// Terminal failure surface. [reason] is the technical account, shown only
+/// in dev mode beneath the friendly line for [failure]. The `cause` is
+/// preserved for logging but not shown.
 class FirmwareFailed extends FirmwareState {
-  const FirmwareFailed({required this.reason, this.cause});
+  const FirmwareFailed({
+    required this.reason,
+    required this.failure,
+    this.cause,
+  });
   final String reason;
+  final FirmwareFailure failure;
   final Object? cause;
 }
 

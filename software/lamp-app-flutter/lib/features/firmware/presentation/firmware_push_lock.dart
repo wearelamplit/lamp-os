@@ -3,15 +3,19 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_spacing.dart';
-import '../../../core/utils/string_case.dart';
 import '../../control/application/control_notifier.dart';
 import '../application/firmware_notifier.dart';
 import '../application/quiet_after_push.dart';
 import '../domain/firmware_state.dart';
+import 'firmware_copy.dart';
 
 const double _frozenOpacity = 0.4;
 
-bool _frozen(WidgetRef ref, String lampId) =>
+/// Watches whether the lamp drops writes because of a push: while the app
+/// pushes it firmware, and after a push until it reports it is listening.
+/// A control that writes to the lamp outside [FirmwarePushLock] disables
+/// itself on this.
+bool watchFirmwarePushFrozen(WidgetRef ref, String lampId) =>
     ref.watch(firmwareNotifierProvider(lampId).select((s) => s.isBusy)) ||
     ref.watch(quietAfterPushProvider(lampId));
 
@@ -33,7 +37,7 @@ class FirmwarePushLock extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final frozen = _frozen(ref, lampId);
+    final frozen = watchFirmwarePushFrozen(ref, lampId);
     return _PushLockScope(
       lampId: lampId,
       child: ExcludeFocus(
@@ -105,10 +109,11 @@ class _RenderInert extends RenderProxyBox {
   }
 }
 
-/// App-level strip that reads "Teaching `name` new tricks" while
-/// [FirmwarePushLock] freezes [lampId], the lamp of the current route (null
-/// off a lamp route). Sits above the navigator so it stays visible over
-/// sheets and dialogs; [child] is laid out below it.
+/// App-level strip shown while [FirmwarePushLock] freezes [lampId], the lamp
+/// of the current route (null off a lamp route). It says the lamp is being
+/// taught during the push, and that it is settling once the push has ended
+/// and the lamp is still quiet. Sits above the navigator so it stays visible
+/// over sheets and dialogs; [child] is laid out below it.
 class FirmwarePushBanner extends ConsumerWidget {
   const FirmwarePushBanner({
     super.key,
@@ -122,7 +127,7 @@ class FirmwarePushBanner extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final id = lampId;
-    final showing = id != null && _frozen(ref, id);
+    final showing = id != null && watchFirmwarePushFrozen(ref, id);
     return Column(
       children: [
         if (showing) _TeachingStrip(lampId: id) else const SizedBox.shrink(),
@@ -147,13 +152,11 @@ class _TeachingStrip extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
-    final name =
-        ref.watch(
-          controlNotifierProvider(
-            lampId,
-          ).select((s) => s.value?.lamp.name.toTitleCase()),
-        ) ??
-        'your lamp';
+    final name = ref.watch(
+      controlNotifierProvider(
+        lampId,
+      ).select((s) => FirmwareCopy.nameOf(s.value)),
+    );
     final state = ref.watch(firmwareNotifierProvider(lampId));
     final progress = switch (state) {
       FirmwareStreaming(:final progress) => progress,
@@ -174,7 +177,9 @@ class _TeachingStrip extends ConsumerWidget {
                   vertical: AppSpace.sm,
                 ),
                 child: Text(
-                  'Teaching $name new tricks 🎓',
+                  state.isBusy
+                      ? FirmwareCopy.teaching(name)
+                      : FirmwareCopy.settling(name),
                   textAlign: TextAlign.center,
                   style: tt.labelLarge?.copyWith(color: cs.onTertiaryContainer),
                 ),

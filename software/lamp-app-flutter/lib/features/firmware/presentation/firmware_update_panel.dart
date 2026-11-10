@@ -4,12 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/brand_extras.dart';
 import '../../../core/widgets/info_panel.dart';
+import '../../control/application/control_notifier.dart';
 import '../../inventory/application/inventory_notifier.dart';
 import '../application/cached_firmware_notifier.dart';
 import '../application/firmware_gate.dart';
 import '../application/firmware_notifier.dart';
 import '../data/cached_firmware.dart';
 import '../domain/firmware_state.dart';
+import 'firmware_copy.dart';
 
 class FirmwareUpdatePanel extends ConsumerWidget {
   const FirmwareUpdatePanel({
@@ -29,6 +31,8 @@ class FirmwareUpdatePanel extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(firmwareNotifierProvider(deviceId));
     final notifier = ref.read(firmwareNotifierProvider(deviceId).notifier);
+    final name = ref.watch(controlNotifierProvider(deviceId)
+        .select((s) => FirmwareCopy.nameOf(s.value)));
 
     // Fall back to inventory's persisted values when the live LampSection
     // hasn't reported lampType / fwChannel / fwVersion yet (pre-section-read
@@ -74,11 +78,15 @@ class FirmwareUpdatePanel extends ConsumerWidget {
             onCancel: notifier.cancel,
           ),
         FirmwareFinalizing() => const _BusyView(label: 'Finishing up…'),
-        FirmwareSucceeded(:final footer) => _SucceededView(
-            versionString: footer.versionString,
+        FirmwareSucceeded(:final footer, :final alreadyCurrent) =>
+          _SucceededView(
+            message: alreadyCurrent
+                ? FirmwareCopy.alreadyKnows(name)
+                : 'Installed v${footer.versionString}. The lamp is rebooting.',
             onDismiss: notifier.reset,
           ),
-        FirmwareFailed(:final reason) => _FailedView(
+        FirmwareFailed(:final failure, :final reason) => _FailedView(
+            friendly: FirmwareCopy.failure(failure, name),
             reason: reason,
             onRetry: notifier.reset,
           ),
@@ -270,8 +278,8 @@ class _StreamingView extends StatelessWidget {
 }
 
 class _SucceededView extends StatelessWidget {
-  const _SucceededView({required this.versionString, required this.onDismiss});
-  final String versionString;
+  const _SucceededView({required this.message, required this.onDismiss});
+  final String message;
   final VoidCallback onDismiss;
 
   @override
@@ -282,7 +290,7 @@ class _SucceededView extends StatelessWidget {
         const SizedBox(width: AppSpace.md),
         Expanded(
           child: Text(
-            'Installed v$versionString. The lamp is rebooting.',
+            message,
             style: Theme.of(context).textTheme.bodyLarge,
           ),
         ),
@@ -293,20 +301,36 @@ class _SucceededView extends StatelessWidget {
 }
 
 class _FailedView extends StatelessWidget {
-  const _FailedView({required this.reason, required this.onRetry});
+  const _FailedView({
+    required this.friendly,
+    required this.reason,
+    required this.onRetry,
+  });
+  final String friendly;
   final String reason;
   final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Row(
       children: [
-        Icon(Icons.error_outline, color: Theme.of(context).colorScheme.secondary),
+        Icon(Icons.error_outline, color: theme.colorScheme.secondary),
         const SizedBox(width: AppSpace.md),
         Expanded(
-          child: Text(
-            reason,
-            style: Theme.of(context).textTheme.bodyLarge,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(friendly, style: theme.textTheme.bodyLarge),
+              const SizedBox(height: AppSpace.xs),
+              SelectableText(
+                reason,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ],
           ),
         ),
         TextButton(onPressed: onRetry, child: const Text('Dismiss')),

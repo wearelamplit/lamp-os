@@ -551,7 +551,12 @@ void main() {
         r.probe();
         expect(r.ble.ops.skip(mark), isEmpty);
 
-        fw.emit(const FirmwareFailed(reason: 'lost it'));
+        fw.emit(
+          const FirmwareFailed(
+            reason: 'lost it',
+            failure: FirmwareFailure.linkLost,
+          ),
+        );
         async.elapse(const Duration(seconds: 1));
         final after = r.ble.ops.length;
         r.probe();

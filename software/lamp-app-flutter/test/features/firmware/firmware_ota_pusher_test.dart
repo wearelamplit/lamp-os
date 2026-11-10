@@ -11,6 +11,7 @@ import 'package:lamp_app/core/ble/ble_client.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/features/firmware/data/firmware_ota_pusher.dart';
 import 'package:lamp_app/features/firmware/domain/firmware_protocol.dart';
+import 'package:lamp_app/features/firmware/domain/firmware_state.dart';
 
 class RecordedWrite {
   RecordedWrite(this.serviceUuid, this.charUuid, this.value,
@@ -256,6 +257,7 @@ void main() {
 
     final result = await pendingResult;
     expect(result.success, isTrue);
+    expect(result.alreadyCurrent, isFalse);
     expect(result.lampReportedVersion, equals(0x00010205));
   });
 
@@ -325,6 +327,8 @@ void main() {
     final result = await pending;
     expect(result.success, isFalse);
     expect(result.message, contains('Another update'));
+    expect(result.failure, FirmwareFailure.busy);
+    expect(result.failure!.declined, isTrue);
   });
 
   test('ACCEPT(DeclineUnverified) ends with success=false + signature-rejected message', () async {
@@ -352,6 +356,8 @@ void main() {
     final result = await pending;
     expect(result.success, isFalse);
     expect(result.message, contains('signature'));
+    expect(result.failure, FirmwareFailure.untrustedAtOffer);
+    expect(result.failure!.declined, isTrue);
   });
 
   test('ACCEPT(DeclineAlreadyCurrent) reports success=true + already-current message', () async {
@@ -375,6 +381,7 @@ void main() {
     final result = await pending;
     expect(result.success, isTrue);
     expect(result.message, contains('already running'));
+    expect(result.alreadyCurrent, isTrue);
   });
 
   test('REQ rewinds chunk cursor mid-stream', () async {
@@ -472,6 +479,8 @@ void main() {
     final result = await pending;
     expect(result.success, isFalse);
     expect(result.message, contains('signature'));
+    expect(result.failure, FirmwareFailure.untrusted);
+    expect(result.failure!.declined, isFalse);
   });
 
   test('stale cached RESULT replayed at subscribe time does not complete the session', () async {
@@ -646,6 +655,7 @@ void main() {
     final result = await pending;
     expect(result.success, isFalse);
     expect(result.message, contains('after the update finished'));
+    expect(result.failure, FirmwareFailure.missingPieces);
   });
 
   test('replayed ACCEPT does not start a second streaming loop', () async {
@@ -698,5 +708,6 @@ void main() {
     final result = await pending;
     expect(result.success, isFalse);
     expect(result.message, contains('cancel'));
+    expect(result.failure, FirmwareFailure.cancelled);
   });
 }
