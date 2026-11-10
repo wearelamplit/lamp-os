@@ -7,6 +7,16 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 
 ## Unreleased
 
+### Added
+- **The app tells you how an update went.** When a lamp comes back after
+  the app updates it, a message reads "<name> learned some new tricks ✨".
+  When an update fails, a message reads "<name> didn't catch the new tricks
+  this time. Trying again next time you connect." once the lamp is listening
+  again, and the app does try again the next time it connects to that lamp.
+  An update the lamp turns down, because it's busy or doesn't trust the
+  download, gets no message, and neither does a lamp that's already up to
+  date.
+
 ### Fixed
 - **LED setup saves on snafu.** Tapping Update on snafu's Advanced LEDs
   screen used to fail with "Save failed" and leave the lamp unchanged, because
@@ -18,9 +28,34 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 - **One reconnect after a save that restarts the lamp.** After a password
   change or an LED setup save, the app used to reconnect to the lamp twice,
   and when the lamp was slow to restart it could drop the link it had just
-  restored. It now reconnects once.
+  restored. It now reconnects once. If the link drops again after the save
+  finished, the app always goes back to reconnecting instead of sometimes
+  sitting on "reconnecting" for good.
+- **The Test button waits out an update.** In the expression editor, Test
+  stayed pressable while a lamp settled after an update, and the lamp
+  ignored it. It now greys out until the lamp is listening again.
+- **Renaming a lamp says when it didn't work.** A rename the lamp didn't take
+  used to snap back to the old name without a word; now it says "Couldn't set
+  name. Try again."
+- **Lamp names stop at the lamp's limit.** Name fields (renaming on Config,
+  naming a new lamp) stop at 32 bytes, the most a lamp keeps, so the app
+  never shows a longer name than the lamp has. An emoji or accented letter
+  takes more than one of those bytes.
+- **One save at a time.** The LED setup Update button and the password Save
+  button grey out and show a spinner while a save is under way, so a second
+  tap can't start another save while the lamp restarts.
 
 ### Changed
+- **Friendlier update wording.** After an update ends, while the lamp
+  settles, the strip at the top reads "Giving <name> a moment to settle… 🎓"
+  instead of still saying it's teaching. On Info, the last stretch of an
+  update reads "Practising the new tricks 🪄" instead of going back to
+  "Warming up". A lamp too busy teaching another lamp to connect is named the
+  way the app shows it everywhere else. In dev mode, a failed update leads
+  with a plain line (such as "Lost <name> partway through. Bring your phone
+  closer and try again.") with the technical reason in small type beneath,
+  and a lamp that already has the update reads "<name> already knows these
+  tricks." instead of claiming it installed and is restarting.
 - **Less Bluetooth chatter while a lamp is open.** The app's check that the
   lamp is still there now reads one byte every 3 seconds instead of the
   lamp's whole settings page, and it pauses while the app updates the lamp's
