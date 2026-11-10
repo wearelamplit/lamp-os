@@ -160,7 +160,7 @@ void PresenceBeacon::emit() {
   lastHelloSourceLive_ = sourceLiveNow;
   haveLastHelloConn_ = true;
   if (helloFlagsChanged && statusEmitter_) {
-    statusEmitter_->triggerOnChange();
+    statusEmitter_->requestEmit();
   }
 }
 

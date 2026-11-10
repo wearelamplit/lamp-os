@@ -170,7 +170,7 @@ void WispController::holdOscStream() {
   resetOscStream();
   paint_.setSourceLive(false);
   renderRing();
-  status_.triggerOnChange();
+  status_.requestEmit();
 }
 
 void WispController::pushOscPaint() {
@@ -278,7 +278,7 @@ void WispController::applyOpResult(DispatchResult res) {
       status_.triggerOnChange();
       break;
     case wisp::DispatchResult::PollStatus:
-      status_.triggerOnChange();
+      status_.requestEmit();
       break;
     case wisp::DispatchResult::PollConfig:
       status_.pollConfig();
@@ -336,7 +336,7 @@ void WispController::onOscPalette(const float* rgb, size_t colours,
     oscPaintGate_.request(nowMs);
     paint_.setSourceLive(true);
     artnet_.onPaletteChanged();
-    status_.triggerOnChange();
+    status_.requestEmit();
   } else if (oscPaintGate_.request(nowMs)) {
     pushOscPaint();
   }

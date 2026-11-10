@@ -1,13 +1,12 @@
 // StatusEmitter drives the wispStatus heartbeat on a 30s FreeRTOS timer.
 //
-// Broadcasts MSG_CONTROL_OP (wispStatus JSON) then MSG_WISP_PALETTE. The timer
-// (and triggerOnChange) only flag the emit due; pump() runs the build +
-// broadcast on the loop task so nothing heavy touches the 2KB timer stack.
-// pump() also detects wifi connectivity edges and flags an emit for them;
-// the controller flags source-liveness edges itself. Emits are coalesced to
-// one per 5 s minimum: a due flag inside the window is deferred until the
-// window opens, never dropped. wispConfig follows on the cadence ConfigCadence
-// sets, always in a separate pump pass from the status.
+// Broadcasts MSG_CONTROL_OP (wispStatus JSON) then MSG_WISP_PALETTE. The timer,
+// requestEmit and triggerOnChange only flag the emit due; pump() runs the
+// build + broadcast on the loop task so nothing heavy touches the 2KB timer
+// stack. pump() also detects wifi connectivity edges and requests an emit for
+// them. StatusCadence decides when a status goes out; wispConfig follows on
+// the cadence ConfigCadence sets, always in a separate pump pass from the
+// status.
 
 #pragma once
 
@@ -16,6 +15,7 @@
 #include <cstdint>
 
 #include "status/config_cadence.hpp"
+#include "status/status_cadence.hpp"
 #include "status/status_json.hpp"
 #include "wire/lamp_protocol.hpp"
 
@@ -45,11 +45,16 @@ class StatusEmitter {
   // One-shot wiring of the 30s heartbeat timer. Call once after begin().
   void startTimer();
 
-  // Mark a wispStatus emit due AND reschedule the heartbeat from now. Call
-  // after applying an op that changes reported state so the app sees it
-  // without waiting up to 30s. The emit runs from pump() on the loop task
-  // (subject to the 5 s coalescer), so this is safe from any task and does
-  // no heavy work itself.
+  // Mark one wispStatus emit due, with no burst. For a read-only poll or a
+  // connectivity / source-liveness edge: the app sees it without waiting up
+  // to 30s, and a flapping edge costs at most one emit per 5 s. Safe from any
+  // task; the emit runs from pump().
+  void requestEmit();
+
+  // Mark a wispStatus emit due, open the 20 s re-send burst and reschedule
+  // the heartbeat from now. Call after applying an op that changes reported
+  // state, so the app's confirmation survives a coex reception gap. The emit
+  // runs from pump() on the loop task.
   void triggerOnChange();
 
   // Mark a wispConfig emit due (pollConfig). Safe from any task; the emit
@@ -81,28 +86,16 @@ class StatusEmitter {
   WifiLink* wifi_ = nullptr;
   StatusEmitterTimerHandle statusTimer_ = nullptr;
 
-  // Set from the timer task / triggerOnChange, cleared in pump() on the loop task.
-  std::atomic<bool> statusDue_{false};
   std::atomic<bool> configPollDue_{false};
 
   bool lastWifiConnected_ = false;
   bool lastEthUp_ = false;
   bool haveLastConnState_ = false;
 
-  uint32_t lastEmitMs_ = 0;
-  bool haveEmitted_    = false;
-
-  // After a state change the status re-broadcasts at kStatusBurstIntervalMs
-  // until kStatusBurstMs elapses, so the confirmation survives a multi-second
-  // coex reception burst on the lamps.
-  uint32_t burstUntilMs_ = 0;
-
+  StatusCadence statusCadence_;
   ConfigCadence configCadence_;
 
   static constexpr uint32_t kStatusIntervalMs = 30000;
-  static constexpr uint32_t kMinEmitIntervalMs = 5000;
-  static constexpr uint32_t kStatusBurstMs = 20000;
-  static constexpr uint32_t kStatusBurstIntervalMs = 2000;
   static constexpr size_t kStatusJsonBufLen =
       lamp_protocol::CONTROL_MAX_PAYLOAD + 1;
   static constexpr size_t kConfigJsonBufLen = 256;

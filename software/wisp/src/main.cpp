@@ -152,7 +152,7 @@ void setup() {
   // carriedFw* zero-fill; wire layout retained for back-compat with older lamps.
   statusEmitter.begin(&mesh, &controller, &wispConfig, &currentPalette,
                       &wispSeq, &wifi);
-  wifi.setOnChangeCallback([] { statusEmitter.triggerOnChange(); });
+  wifi.setOnChangeCallback([] { statusEmitter.requestEmit(); });
   presenceBeacon.begin(&mesh, &paintDistributor, &currentPalette,
                        &controller, &wispRoster, &wispSeq, &statusEmitter,
                        &wispConfig);
