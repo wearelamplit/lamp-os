@@ -12,6 +12,7 @@ import '../../../core/ble/connect_with_retry.dart';
 import '../../../core/ble/lamp_crypto.dart';
 import '../../../core/ble/uuids.dart';
 import '../../../core/ble/write_coalescer.dart';
+import '../../../core/lamp_name.dart';
 import '../../../core/lifecycle/app_lifecycle.dart';
 import '../../../core/utils/clock.dart';
 import '../../firmware/application/firmware_notifier.dart';
@@ -1242,7 +1243,8 @@ class ControlNotifier extends _$ControlNotifier {
   // writeSettingsBlob. name / SSID use reboot:false (instant);
   // password / advanced-LED use reboot:true (triggers reboot + ~8–12s reconnect).
 
-  Future<void> setLampName(String name) async {
+  Future<void> setLampName(String typed) async {
+    final name = fitLampName(typed);
     await _mutate(
       (s) => s.copyWith(
         lamp: s.lamp.copyWith(name: name),

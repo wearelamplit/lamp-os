@@ -43,6 +43,15 @@ void main() {
     expect(s.step, AddLampStep.adoptConfirm);
   });
 
+  test('a name still being composed past the cap is claimed at the cap', () {
+    final c = ProviderContainer(
+      overrides: [bleClientProvider.overrideWithValue(InMemoryBleClient())],
+    );
+    addTearDown(c.dispose);
+    c.read(addLampNotifierProvider.notifier).setName('か' * 12);
+    expect(c.read(addLampNotifierProvider).name, 'か' * 10);
+  });
+
   test('next() from adoptConfirm goes to name', () {
     final c = ProviderContainer(
       overrides: [bleClientProvider.overrideWithValue(InMemoryBleClient())],

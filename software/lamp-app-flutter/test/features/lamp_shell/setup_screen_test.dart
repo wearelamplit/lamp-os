@@ -162,6 +162,18 @@ void main() {
     );
   });
 
+  testWidgets('a rename still being composed past the cap saves at the cap',
+      (tester) async {
+    final c = await _makeContainer();
+    addTearDown(c.dispose);
+    await tester.pumpWidget(_wrap(c));
+    await _pumpToData(tester);
+    await c
+        .read(controlNotifierProvider(_devId).notifier)
+        .setLampName('か' * 12);
+    expect(c.read(controlNotifierProvider(_devId)).value!.lamp.name, 'か' * 10);
+  });
+
   testWidgets('a rename the lamp refuses says so and keeps the old name',
       (tester) async {
     final ble = InMemoryBleClient();

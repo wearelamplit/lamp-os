@@ -94,6 +94,45 @@ void main() {
       expect(out.text, 'p' * kMaxLampNameBytes);
     });
 
+    test('a paste over a selected name that shares its ending keeps the '
+        'start of the paste', () {
+      const name = 'Living Room Lamp';
+      const paste = "Grandmother's Upstairs Bedroom Lamp";
+      final out = cap.formatEditUpdate(
+        const TextEditingValue(
+          text: name,
+          selection: TextSelection(baseOffset: 0, extentOffset: name.length),
+        ),
+        const TextEditingValue(
+          text: paste,
+          selection: TextSelection.collapsed(offset: paste.length),
+        ),
+      );
+      expect(out.text, "Grandmother's Upstairs Bedroom L");
+    });
+
+    test('a letter typed into a full name leaves the cursor where it was',
+        () {
+      final full = 'n' * kMaxLampNameBytes;
+      final out = cap.formatEditUpdate(
+        TextEditingValue(
+          text: full,
+          selection: const TextSelection.collapsed(offset: 5),
+        ),
+        TextEditingValue(
+          text: 'n' * (kMaxLampNameBytes + 1),
+          selection: const TextSelection.collapsed(offset: 6),
+        ),
+      );
+      expect(out.text, full);
+      expect(out.selection, const TextSelection.collapsed(offset: 5));
+    });
+
+    test('a name leaving its field is fitted to the cap', () {
+      expect(fitLampName('か' * 12), 'か' * 10);
+      expect(fitLampName('lamp'), 'lamp');
+    });
+
     test('a paste at the start keeps the name and puts the cursor after it',
         () {
       final name = 'n' * 30;
@@ -148,10 +187,9 @@ void main() {
         '(Android)', () {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
-      expect(
-        cap.formatEditUpdate(TextEditingValue.empty, composing).text,
-        'か' * 10,
-      );
+      final out = cap.formatEditUpdate(TextEditingValue.empty, composing);
+      expect(out.text, 'か' * 10);
+      expect(out.composing, const TextRange(start: 0, end: 10));
     });
 
     test('a word still being composed waits until it commits where the '
