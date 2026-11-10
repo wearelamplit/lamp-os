@@ -200,12 +200,14 @@ void test_an_unwatched_iteration_still_marks_the_minute() {
   TEST_ASSERT_TRUE(g.atBoot(true, true));
 }
 
-void test_a_watched_iteration_feeds_only_from_the_loop_task() {
+void test_a_watched_iteration_feeds_and_marks_the_minute() {
   BootGuard g{};
   g.atBoot(false, false);
   int loopTask = 0;
   int otherTask = 0;
-  TEST_ASSERT_TRUE(markIteration(g, 1000, &loopTask, &loopTask));
+  TEST_ASSERT_TRUE(markIteration(g, kStableUptimeMs, &loopTask, &loopTask));
+  g.atBoot(true, true);
+  TEST_ASSERT_EQUAL_UINT8(0, g.streak);
   TEST_ASSERT_FALSE(markIteration(g, 1000, &otherTask, &loopTask));
 }
 
@@ -227,6 +229,6 @@ int main(int, char**) {
   RUN_TEST(test_a_boot_that_ran_a_minute_breaks_the_streak);
   RUN_TEST(test_an_unwatched_boot_that_runs_a_minute_rearms_after_its_reset);
   RUN_TEST(test_an_unwatched_iteration_still_marks_the_minute);
-  RUN_TEST(test_a_watched_iteration_feeds_only_from_the_loop_task);
+  RUN_TEST(test_a_watched_iteration_feeds_and_marks_the_minute);
   return UNITY_END();
 }
