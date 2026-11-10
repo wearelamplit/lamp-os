@@ -23,7 +23,7 @@ static constexpr std::array<uint8_t, 9> kPixelCounts = {1, 2, 7, 12, 35, 36, 38,
 static constexpr std::array<size_t, 11> kStopCounts = {1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 23};
 
 // Every channel varies from stop to stop, with ascending and descending pairs
-// on each channel inside the first eight stops; a descending pair takes the
+// on each channel inside the first eight stops. A descending pair takes the
 // unsigned-wrap path of easeLinear.
 static std::vector<Color> stopFixture(size_t n) {
   static constexpr std::array<Color, 23> kStops = {{

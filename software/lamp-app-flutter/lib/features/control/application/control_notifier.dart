@@ -1684,7 +1684,7 @@ class ControlNotifier extends _$ControlNotifier {
   }
 
   // A role that offers rotation gets the object form, carrying the whole
-  // state so the coalescer's latest-wins never drops a rotation change; any
+  // state so the coalescer's latest-wins never drops a rotation change. Any
   // other role keeps the bare array older firmware parses.
   Uint8List _encodeColors(List<LampColor> colors, ColorRotation? rotation) {
     final arr = colors.map((c) => c.toHex()).toList();

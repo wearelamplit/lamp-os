@@ -111,7 +111,7 @@ void main() {
       addTearDown(c.dispose);
       await _pumpScreen(tester, c);
 
-      // Still on Palette tab (default); manual source is active in seed JSON.
+      // Still on Palette tab (default). Manual source is active in seed JSON.
       expect(find.text('MANUAL PALETTE'), findsOneWidget);
     });
 

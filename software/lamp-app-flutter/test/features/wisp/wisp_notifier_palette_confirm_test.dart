@@ -218,7 +218,7 @@ void main() {
     n1.setManualPaletteDraft(const []);
     final save = n1.setManualPalette();
     await pumpEventQueue();
-    // The wisp stored the empty palette; its status reaches both lamps. The
+    // The wisp stored the empty palette. Its status reaches both lamps. The
     // lamps' palette caches now hold nothing, which reads as no section.
     for (final lamp in [_lampId, lamp2]) {
       ble.seedSection(lamp, 'wisppalette', Uint8List(0));

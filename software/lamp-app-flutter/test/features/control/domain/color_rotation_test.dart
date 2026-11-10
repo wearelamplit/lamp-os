@@ -14,7 +14,7 @@ void main() {
   });
 
   test('a never-set role shows the dir its section sends', () {
-    // Firmware always sends dir on a role that offers rotation; a never-set
+    // Firmware always sends dir on a role that offers rotation. A never-set
     // shade sends "down" and a never-set base "up".
     final shade = ColorRotation.fromJson(
         {'on': false, 'periodS': 40, 'dir': 'down'},

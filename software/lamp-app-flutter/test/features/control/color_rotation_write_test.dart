@@ -127,7 +127,7 @@ void main() {
     test('rotation then colours in one write window: the last write has both',
         () async {
       final (:c, :ble, :n) = await _build(shadeRotateJson: _shadeRotate);
-      // Opens the window; the next two calls coalesce behind it.
+      // Opens the window. The next two calls coalesce behind it.
       await n.setShadeColors(const [_red, _green]);
       await n.setShadeRotation(const ColorRotation(
           on: true, periodS: 25, direction: RotationDirection.up));

@@ -179,7 +179,7 @@ void test_write_exactly_keeps_only_an_exact_pass_and_the_last_good_otherwise() {
   TEST_ASSERT_EQUAL_STRING("[\"abc\"]", out.c_str());
 }
 
-// Rotation on the one-segment shade is stored after its segments; the
+// Rotation on the one-segment shade is stored after its segments. The
 // two-segment base never stores it, whatever it holds.
 void test_rotation_written_identically_by_both_writers() {
   Model m = fullModel();

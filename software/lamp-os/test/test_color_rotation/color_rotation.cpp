@@ -220,7 +220,7 @@ void test_loop_offset_spans_the_loop() {
   TEST_ASSERT_EQUAL_UINT32(0, loopOffset(UINT32_MAX, 1) >> 8);
 }
 
-// At the clock, toward index 0, stops reach pixel 0 in list order; away,
+// At the clock, toward index 0, stops reach pixel 0 in list order. Away,
 // in reverse.
 static std::vector<int> arrivalsAtPixelZero(bool towardZero) {
   const std::vector<Color> rgb = {{255, 0, 0, 0}, {0, 255, 0, 0}, {0, 0, 255, 0}};

@@ -72,7 +72,7 @@ class LampSection {
   final String? lampType;
 
   /// The standard lamp's layout, the one whose shade has stop 0 at the bottom.
-  /// Absent [lampType] (older firmware) reads as standard; an empty one does
+  /// Absent [lampType] (older firmware) reads as standard. An empty one does
   /// not. `advanced_leds_screen.dart` repeats this expression inline, so a
   /// change to the key must change both.
   bool get isStandard => (lampType ?? 'standard') == 'standard';
@@ -420,7 +420,7 @@ class ShadeSection {
   /// directly. When non-empty, `px == Σ segments[*].px`.
   final List<Segment> segments;
 
-  /// Colour rotation; see [BaseSection.rotation].
+  /// Colour rotation, as [BaseSection.rotation].
   final ColorRotation? rotation;
 
   factory ShadeSection.fromJson(Map<String, dynamic> json) {

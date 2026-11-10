@@ -131,10 +131,10 @@ class ShadeSettings {
   static constexpr ColorRotation kDefaultRotation{false, kRotationDefaultPeriodS,
                                                   RotationDir::Down};
   // The stored rotation. Only the codec, the apply layer and renderedRotation
-  // read it; a scene writer that read it directly would render a rotation the
+  // read it. A scene writer that read it directly would render a rotation the
   // variant does not offer.
   ColorRotation rotation = kDefaultRotation;
-  // Firmware-owned (Config::Defaults::rotationSupported); never stored.
+  // Firmware-owned (Config::Defaults::rotationSupported) and never stored.
   bool rotationSupported = false;
 
   uint8_t sumPx() const { return segmentsSumPx(segments); }

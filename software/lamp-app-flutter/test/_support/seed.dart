@@ -38,7 +38,7 @@ Future<void> seedControlBle(
   // Optional segments JSON array for the shade role, e.g.
   // '[{"name":"Small Dots","px":12,"colors":["#000000FF"]},...]'.
   String? shadeSegmentsJson,
-  // Optional `rotate` object for the shade section; see baseRotateJson.
+  // Optional `rotate` object for the shade section, as baseRotateJson.
   String? shadeRotateJson,
   String? lampType,
   String homeSsid = '',

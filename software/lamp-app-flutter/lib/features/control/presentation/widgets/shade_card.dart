@@ -23,7 +23,7 @@ class _ShadeSlice {
   final bool colorsEditable;
   final ColorRotation? rotation;
 
-  /// The standard lamp's shade has stop 0 at the bottom; every other variant's
+  /// The standard lamp's shade has stop 0 at the bottom. Every other variant's
   /// previews keep it at the top.
   final bool stop0AtBottom;
 

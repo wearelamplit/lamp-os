@@ -21,7 +21,7 @@ void calculateGradientInto(Color inColorStart, Color inColorEnd, Color* dst,
 }
 
 // The one segment filler for open gradients and loops. Segment k blends
-// stops[k] toward stops[(k + 1) % count] over whole pixels; the remainder
+// stops[k] toward stops[(k + 1) % count] over whole pixels. The remainder
 // pixels go one each to the first segments.
 std::vector<Color> fillSegments(uint8_t px, const std::vector<Color>& stops,
                                 uint8_t count, uint8_t segments) {

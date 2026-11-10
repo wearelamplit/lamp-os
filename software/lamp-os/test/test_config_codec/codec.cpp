@@ -551,7 +551,7 @@ void test_stored_rotation_absent_keys_read_the_role_default() {
   assertRotation(true, 40, RotationDir::Up, m.base.rotation);
 }
 
-// The segment count alone decides what loads; the flag plays no part.
+// The segment count alone decides what loads. The flag plays no part.
 void test_stored_rotation_kept_on_one_segment_and_dropped_on_two() {
   const char* oneSegment =
       "{\"shade\":{\"segments\":[{\"name\":\"Shade\",\"px\":38,\"colors\":[\"#ff000000\","

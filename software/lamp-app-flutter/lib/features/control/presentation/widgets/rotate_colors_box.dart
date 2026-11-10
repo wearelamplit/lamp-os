@@ -22,7 +22,7 @@ class RotateColorsBox extends StatelessWidget {
   final ColorRotation rotation;
   final List<LampColor> colors;
 
-  /// Which end of the preview holds the first colour; see
+  /// Which end of the preview holds the first colour, as
   /// [RotatingGradient.stop0AtBottom].
   final bool stop0AtBottom;
   final ValueChanged<ColorRotation> onChanged;

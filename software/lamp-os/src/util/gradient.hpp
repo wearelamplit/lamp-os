@@ -21,7 +21,7 @@ std::vector<Color> calculateGradient(Color inColorStart, Color inColorEnd,
  * given a list of colors, evenly fill a pixel buffer with a smooth
  * gradient
  * @param [in] inNumberPixels the total Neopixel count to spread the gradient
- * @param [in] inColorSteps the colors to fade between; past 8 are cut
+ * @param [in] inColorSteps the colors to fade between, cut past 8
  * @return gradiented colors for the total strip length specified
  */
 std::vector<Color> buildGradientWithStops(uint8_t inNumberPixels,

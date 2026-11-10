@@ -8,15 +8,15 @@
 
 namespace lamp {
 
-// Physical direction on the surface; the configurator maps it to buffer order.
+// Physical direction on the surface. The configurator maps it to buffer order.
 enum class RotationDir : uint8_t { Up, Down };
 
 constexpr uint8_t kRotationMinPeriodS = 5;
 constexpr uint8_t kRotationMaxPeriodS = 120;
 constexpr uint8_t kRotationDefaultPeriodS = 40;
 
-// The most one clock step covers. Smaller turns a busy loop into slow motion;
-// larger lets a stall jump the pattern on resume.
+// The most one clock step covers. Smaller turns a busy loop into slow motion.
+// Larger lets a stall jump the pattern on resume.
 constexpr uint32_t kMaxRotationStepMs = 100;
 
 // A role's colours flowing round a closed loop, one loop every periodS seconds.
@@ -44,7 +44,7 @@ struct RoleScene {
 };
 
 // The one choice between an open gradient and a loop. Rotation on with a
-// gradientStopCount of 2 or more builds the loop and keeps `on`; anything
+// gradientStopCount of 2 or more builds the loop and keeps `on`. Anything
 // else builds the open gradient with `on` cleared.
 RoleScene buildRoleScene(uint8_t px, const std::vector<Color>& stops,
                          const ColorRotation& rotation);

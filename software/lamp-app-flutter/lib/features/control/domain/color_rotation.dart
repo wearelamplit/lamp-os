@@ -42,8 +42,8 @@ class ColorRotation {
   final int periodS;
   final RotationDirection direction;
 
-  /// Reads a `rotate` object. A missing or mistyped key takes its default;
-  /// [defaultDirection] is the role's.
+  /// Reads a `rotate` object. A missing or mistyped key takes its default,
+  /// and [defaultDirection] is the role's.
   factory ColorRotation.fromJson(
     Map<String, dynamic> json, {
     required RotationDirection defaultDirection,
@@ -89,7 +89,7 @@ class ColorRotation {
 
 /// Advances a rotating preview's position by [dt]. [moved] is how far its
 /// pattern has moved toward the top of the preview, as a fraction of one loop
-/// in [0, 1). One constant rate, one loop per [periodS];
+/// in [0, 1). One constant rate, one loop per [periodS], and
 /// [RotationDirection.down] runs the other way. Stepping from the current
 /// position keeps the frame where it is when the period or direction changes,
 /// as the lamp does.
