@@ -38,6 +38,27 @@ bool listed(LampRoster& r, uint8_t i) {
   return false;
 }
 
+// Steps the clock from `fromMs` to just short of one full wrap later, a prune
+// every 2^28 ms (about three days), running `keep` before each so the peer
+// stays listed on its other transport.
+template <typename Keep>
+void pruneThroughAWrap(LampRoster& r, uint32_t fromMs, Keep keep) {
+  for (uint64_t t = fromMs + (1ull << 28); t < fromMs + (1ull << 32); t += 1ull << 28) {
+    set_mock_millis(static_cast<uint32_t>(t));
+    keep();
+    r.prune(kMaxAgeMs);
+  }
+}
+
+bool meshListed(LampRoster& r, uint8_t i) {
+  uint8_t mac[6];
+  macFor(i, mac);
+  for (const auto& p : r.getMesh(kMaxAgeMs)) {
+    if (std::memcmp(p.mac, mac, 6) == 0) return true;
+  }
+  return false;
+}
+
 }  // namespace
 
 void setUp(void) {}
@@ -84,11 +105,69 @@ void test_prune_keeps_a_peer_heard_after_the_wrap() {
   TEST_ASSERT_FALSE(listed(r, 1));
 }
 
+// Seen nearby once, then heard only over the mesh for a whole wrap: one wrap
+// on, the old near sighting must not read as 5 s old.
+void test_near_sighting_stays_stale_a_wrap_later() {
+  LampRoster r;
+  uint8_t mac[6];
+  macFor(1, mac);
+  const uint32_t seenMs = 1000;
+  set_mock_millis(seenMs);
+  hello(r, 1);
+  r.markNear(mac);
+  pruneThroughAWrap(r, seenMs, [&] { hello(r, 1); });
+
+  set_mock_millis(seenMs + 5000);
+  hello(r, 1);
+  TEST_ASSERT_TRUE(listed(r, 1));
+  TEST_ASSERT_EQUAL_size_t(0, r.snapshotNear(kMaxAgeMs).size());
+}
+
+// Heard over the mesh once, then only seen nearby for a whole wrap.
+void test_mesh_sighting_stays_stale_a_wrap_later() {
+  LampRoster r;
+  uint8_t mac[6];
+  macFor(2, mac);
+  const uint32_t heardMs = 2000;
+  set_mock_millis(heardMs);
+  hello(r, 2);
+  r.markNear(mac);
+  pruneThroughAWrap(r, heardMs, [&] { r.markNear(mac); });
+
+  set_mock_millis(heardMs + 5000);
+  r.markNear(mac);
+  TEST_ASSERT_TRUE(listed(r, 2));
+  TEST_ASSERT_FALSE(meshListed(r, 2));
+}
+
+// A BT sighting once, then near only through direct HELLOs for a whole wrap:
+// the BT stamp must read as old, not 5 s.
+void test_bt_sighting_stays_stale_a_wrap_later() {
+  LampRoster r;
+  const uint8_t ble[6] = {0x02, 0x00, 0x00, 0x00, 0x07, 0x33};
+  const uint32_t seenMs = 3000;
+  set_mock_millis(seenMs);
+  r.addOrUpdateFromBle("peer", ble, kNoColor, kNoColor, -50);
+  uint8_t mac[6];
+  std::memcpy(mac, r.snapshotNear(kMaxAgeMs).front().mac, 6);
+  pruneThroughAWrap(r, seenMs, [&] { r.markNear(mac); });
+
+  const uint32_t nowMs = seenMs + 5000;
+  set_mock_millis(nowMs);
+  r.markNear(mac);
+  const auto& near = r.snapshotNear(kMaxAgeMs);
+  TEST_ASSERT_EQUAL_size_t(1, near.size());
+  TEST_ASSERT_TRUE(lampos::msSince(nowMs, near.front().lastSeenBleMs) > kMaxAgeMs);
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
   UNITY_BEGIN();
   RUN_TEST(test_eviction_keeps_a_peer_heard_after_the_wrap);
   RUN_TEST(test_prune_keeps_a_peer_heard_after_the_wrap);
+  RUN_TEST(test_near_sighting_stays_stale_a_wrap_later);
+  RUN_TEST(test_mesh_sighting_stays_stale_a_wrap_later);
+  RUN_TEST(test_bt_sighting_stays_stale_a_wrap_later);
   return UNITY_END();
 }

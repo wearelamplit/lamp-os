@@ -2,6 +2,8 @@
 
 #include "proximity.hpp"
 
+#include <lampos/clock.hpp>
+
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -309,6 +311,10 @@ void LampRoster::prune(uint32_t maxAgeMs) {
       generation_++;
       continue;
     }
+    RosterEntry& e = store_[i];
+    e.lastSeenNearMs = lampos::retireStamp(now, e.lastSeenNearMs, maxAgeMs);
+    e.lastSeenMeshMs = lampos::retireStamp(now, e.lastSeenMeshMs, maxAgeMs);
+    e.lastSeenBleMs = lampos::retireStamp(now, e.lastSeenBleMs, maxAgeMs);
     i++;
   }
   xSemaphoreGive(mutex_);

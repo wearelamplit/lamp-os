@@ -28,4 +28,15 @@ constexpr uint32_t msSince(uint32_t nowMs, uint32_t stampMs) {
   return age > UINT32_MAX - kStampLeadMs ? 0 : age;
 }
 
+// `stampMs` once it has aged past windowMs, held at windowMs + 1 old so it
+// keeps reading as outside the window instead of coming round to read as
+// recent one wrap later; any other stamp comes back unchanged. 0 means never
+// set and comes back as is, and a set stamp never comes back as 0. The owner
+// calls it at least once per wrap.
+constexpr uint32_t retireStamp(uint32_t nowMs, uint32_t stampMs, uint32_t windowMs) {
+  if (stampMs == 0 || msSince(nowMs, stampMs) <= windowMs) return stampMs;
+  const uint32_t held = nowMs - windowMs - 1;
+  return held != 0 ? held : UINT32_MAX;
+}
+
 }  // namespace lampos
