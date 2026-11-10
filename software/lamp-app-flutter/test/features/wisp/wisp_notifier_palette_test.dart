@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -5,6 +6,7 @@ import 'package:fake_async/fake_async.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import '../../_support/in_memory_ble_client.dart';
+import 'package:lamp_app/core/ble/ble_client.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/features/control/domain/lamp_color.dart';
@@ -320,12 +322,21 @@ void main() {
         BleUuids.wispStatus,
         Uint8List.fromList(utf8.encode(json)));
 
+    // The lamp's status read returns [json] from now on.
+    Future<void> serve(InMemoryBleClient ble, String json) => ble.write(
+        lampId,
+        BleUuids.controlService,
+        BleUuids.wispStatus,
+        Uint8List.fromList(utf8.encode(json)));
+
     // The app first reads [heard].first, then takes the rest as notifies,
-    // while the lamp's palette section holds [saved]. The draft is then
+    // while the lamp's palette section holds [saved]. The lamp's status read
+    // then returns [serves] when given, else [heard].first. The draft is then
     // emptied.
     Future<(InMemoryBleClient, ProviderContainer, WispNotifier)>
-        emptiedAfterHearing(List<String> heard) async {
-      final ble = InMemoryBleClient();
+        emptiedAfterHearing(List<String> heard,
+            {String? serves, InMemoryBleClient? client}) async {
+      final ble = client ?? InMemoryBleClient();
       seedPalette(ble, saved);
       await primeStatus(ble, heard.first);
       final c = makeContainer(ble: ble);
@@ -335,6 +346,7 @@ void main() {
         notify(ble, json);
         await pumpEventQueue();
       }
+      if (serves != null) await serve(ble, serves);
       final n = c.read(wispNotifierProvider(lampId).notifier);
       expect(n.savedManualPalette, saved);
       n.setManualPaletteDraft(const []);
@@ -401,7 +413,8 @@ void main() {
       ),
     ]) {
       test('$label does not confirm an emptied palette', () async {
-        final (ble, c, n) = await emptiedAfterHearing(heard);
+        final (ble, c, n) =
+            await emptiedAfterHearing(heard, serves: heard.last);
 
         var done = false;
         final f = n.setManualPalette().whenComplete(() => done = true);
@@ -427,7 +440,8 @@ void main() {
           [status(rival, stamp: 900000), status(ours)], 1001),
     ]) {
       test('$label confirms an emptied palette', () async {
-        final (ble, _, n) = await emptiedAfterHearing(heard);
+        final (ble, _, n) =
+            await emptiedAfterHearing(heard, serves: heard.last);
 
         final f = n.setManualPalette();
         await Future<void>.delayed(Duration.zero);
@@ -447,7 +461,7 @@ void main() {
         'a re-served copy of a lamp-stamped status from before the save',
         [status(ours, stamp: 73500, lamp: 5000)],
         status(ours, stamp: 73500, lamp: 5000),
-        status(ours, stamp: 73500, lamp: 5001),
+        status(ours, stamp: 73501, lamp: 5001),
       ),
       (
         'a status the lamp cached before the newest one heard',
@@ -466,24 +480,33 @@ void main() {
         status(ours, stamp: 73600, lamp: 9001),
       ),
       (
-        'a re-served copy of the newest lamp-stamped status, after an older '
+        'a status the lamp cached before the newest one heard, after an older '
             'one arrived last',
         [
           status(ours, stamp: 73500, lamp: 5000),
           status(ours, stamp: 73400, lamp: 4000),
         ],
-        status(ours, stamp: 73500, lamp: 5000),
-        status(ours, stamp: 73500, lamp: 5001),
+        status(ours, stamp: 73450, lamp: 4500),
+        status(ours, stamp: 73501, lamp: 5001),
       ),
       (
         'a status without a lamp stamp, judged by its wisp stamp',
         [status(ours, stamp: 73500, lamp: 5000)],
-        status(ours, stamp: 73500),
+        status(ours, stamp: 73400),
         status(ours, stamp: 73501),
+      ),
+      (
+        'the whole copy of a status heard only shed',
+        [status(ours, stamp: 73500, lamp: 5000), status(ours, stamp: 73600)],
+        status(ours, stamp: 73600, lamp: 6000),
+        status(ours, stamp: 73601, lamp: 6001),
       ),
     ]) {
       test('$label does not confirm an emptied palette', () async {
-        final (ble, _, n) = await emptiedAfterHearing(heard);
+        // The lamp serves the last status heard, so the read before the save
+        // brings in nothing the notifies did not.
+        final (ble, _, n) =
+            await emptiedAfterHearing(heard, serves: heard.last);
 
         var done = false;
         final f = n.setManualPalette().whenComplete(() => done = true);
@@ -513,21 +536,26 @@ void main() {
       expect(n.manualPaletteWriteFailed, isFalse);
     });
 
-    // A lamp reboot drops the link and restarts the lamp's clock, while the
-    // notifier lives on under the open lamp screen.
-    Future<(InMemoryBleClient, WispNotifier)> emptiedAcrossLampReboot() async {
-      final (ble, _, n) =
-          await emptiedAfterHearing([status(ours, stamp: 73500, lamp: 900000)]);
+    // The link drops and comes back while the notifier lives on under the
+    // open lamp screen. The lamp's status read then returns [serves], else
+    // the status heard before the drop.
+    Future<(InMemoryBleClient, WispNotifier)> emptiedAcrossReconnect(
+        {String? serves, InMemoryBleClient? client}) async {
+      final (ble, _, n) = await emptiedAfterHearing(
+          [status(ours, stamp: 73500, lamp: 900000)],
+          client: client);
       await ble.disconnect(lampId);
       await pumpEventQueue();
       await ble.connect(lampId);
       await pumpEventQueue();
+      if (serves != null) await serve(ble, serves);
       return (ble, n);
     }
 
     test('after a lamp reboot, a new status confirms the empty save',
         () async {
-      final (ble, n) = await emptiedAcrossLampReboot();
+      // A rebooted lamp holds no status yet, and its clock restarts.
+      final (ble, n) = await emptiedAcrossReconnect(serves: '{}');
 
       final f = n.setManualPalette();
       await Future<void>.delayed(Duration.zero);
@@ -538,9 +566,82 @@ void main() {
       expect(n.manualPaletteWriteFailed, isFalse);
     });
 
+    test('after a reconnect and a wisp reboot, a new status confirms the '
+        'empty save', () async {
+      final (ble, n) = await emptiedAcrossReconnect();
+
+      final f = n.setManualPalette();
+      await Future<void>.delayed(Duration.zero);
+      notify(ble, status(ours, stamp: 2100, lamp: 900500));
+      await f;
+
+      expect(n.savedManualPalette, isEmpty);
+      expect(n.manualPaletteWriteFailed, isFalse);
+    });
+
+    for (final (label, serves) in [
+      ('a shed status', status(ours, stamp: 73500)),
+      ('a failed status read', 'x' * (kBleMaxReadBytes + 1)),
+    ]) {
+      test('after a reconnect, $label before the save leaves it judged by '
+          'the wisp stamp', () async {
+        final (ble, n) = await emptiedAcrossReconnect(serves: serves);
+
+        var done = false;
+        final f = n.setManualPalette().whenComplete(() => done = true);
+        await Future<void>.delayed(Duration.zero);
+        expect(ble.writesTo(lampId, BleUuids.wispOp), isNotEmpty);
+        notify(ble, status(ours, stamp: 2100, lamp: 900500));
+        await pumpEventQueue();
+        expect(done, isFalse);
+
+        notify(ble, status(ours, stamp: 73501, lamp: 900501));
+        await f;
+        expect(n.savedManualPalette, isEmpty);
+      });
+    }
+
+    test('the status read before an empty save waits out a read in flight',
+        () async {
+      final ble = _GatedReadsBle();
+      final (_, n) = await emptiedAcrossReconnect(client: ble);
+      final paletteRead = ble.gates['wisppalette'] = Completer<void>();
+      notify(ble,
+          status(ours, stamp: 73500, lamp: 900000, prefix: 'feedface'));
+      await pumpEventQueue();
+      expect(ble.sectionReads.last, 'wisppalette');
+
+      final f = n.setManualPalette();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(ble.sectionReads.last, 'wisppalette');
+      expect(ble.writesTo(lampId, BleUuids.wispOp), isEmpty);
+
+      paletteRead.complete();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(ble.sectionReads.last, 'wispstatus');
+      notify(ble, status(ours, stamp: 2100, lamp: 900500));
+      await f;
+      expect(n.savedManualPalette, isEmpty);
+      expect(ble.maxInFlight, 1);
+    });
+
+    test('a status read that never returns does not hold back the empty save',
+        () async {
+      final ble = _GatedReadsBle();
+      final (_, n) = await emptiedAcrossReconnect(client: ble);
+      ble.gates['wispstatus'] = Completer<void>();
+
+      fakeAsync((fa) {
+        n.setManualPalette().catchError((Object _) {});
+        fa.elapse(WispNotifier.writeConfirmBudget);
+        fa.flushMicrotasks();
+        expect(ble.writesTo(lampId, BleUuids.wispOp), isNotEmpty);
+      });
+    });
+
     test('after a reconnect, a re-served copy from before it does not '
         'confirm the empty save', () async {
-      final (ble, n) = await emptiedAcrossLampReboot();
+      final (ble, n) = await emptiedAcrossReconnect();
 
       var done = false;
       final f = n.setManualPalette().whenComplete(() => done = true);
@@ -962,4 +1063,35 @@ void main() {
       expect(prefs.getString('wisp.manualPalette.v1.$lampId'), isNull);
     });
   });
+}
+
+// Holds a section read until its gate completes, and records how many reads
+// overlap.
+class _GatedReadsBle extends InMemoryBleClient {
+  final Map<String, Completer<void>> gates = {};
+  final List<String> sectionReads = [];
+  int maxInFlight = 0;
+  int _inFlight = 0;
+
+  Future<T> _tracked<T>(Future<T> Function() read) async {
+    _inFlight++;
+    if (_inFlight > maxInFlight) maxInFlight = _inFlight;
+    try {
+      return await read();
+    } finally {
+      _inFlight--;
+    }
+  }
+
+  @override
+  Future<Uint8List> readSection(String deviceId, String name) =>
+      _tracked(() async {
+        sectionReads.add(name);
+        await gates[name]?.future;
+        return super.readSection(deviceId, name);
+      });
+
+  @override
+  Future<Uint8List> read(String d, String s, String c) =>
+      _tracked(() => super.read(d, s, c));
 }

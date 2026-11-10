@@ -90,17 +90,20 @@ void main() {
     await pumpEventQueue();
     final n = c.read(wispNotifierProvider(_lampId).notifier);
 
+    // The save's own status read finds a new config stamp, so the config read
+    // it starts is still held once the save has sent.
     ble.holdConfig = Completer<void>();
     ble.seedSection(_lampId, 'wispconfig', _b(_config(brightness: 25)));
-    notify(ble, '$off,"configLastSeenMs":200}');
-    await pumpEventQueue();
+    ble.seedSection(_lampId, 'wispstatus', _b('$off,"configLastSeenMs":200}'));
 
-    var sourceDone = false;
-    final source =
-        n.setSource(WispSourceMode.manual).whenComplete(() => sourceDone = true);
     expect(n.draftManualPalette, isEmpty);
     var saveDone = false;
     final save = n.setManualPalette().whenComplete(() => saveDone = true);
+    await pumpEventQueue();
+    expect(paletteOps(ble), isNotEmpty, reason: 'the save has sent');
+    var sourceDone = false;
+    final source =
+        n.setSource(WispSourceMode.manual).whenComplete(() => sourceDone = true);
     await pumpEventQueue();
 
     ble.holdConfig!.complete();

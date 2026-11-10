@@ -106,6 +106,14 @@ class WispNotifier extends _$WispNotifier {
   // larger stamp is a status emitted since.
   final Map<String, int> _newestStamps = {};
 
+  // The last distinct `lastSeenMs` values heard, oldest first, each naming one
+  // wisp emission whatever form it arrived in. The lamp caches one status at a
+  // time, so only a recent emission can come back. Too small a cap lets a
+  // section read that lands behind a newer notify push out the stamp the lamp
+  // still holds.
+  final List<(String, int)> _heardStamps = [];
+  static const int _heardStampCap = 4;
+
   // Newest `statusLastSeenMs` on this connection. Every status comes from the
   // one lamp's clock, whichever wisp sent it, so one value orders them all.
   // Cleared on disconnect, since a lamp reboot restarts that clock.
@@ -503,6 +511,11 @@ class WispNotifier extends _$WispNotifier {
     final mac = status.wispMac;
     final stamp = status.lastSeenMs;
     if (mac == null || stamp == null) return;
+    final heard = (mac, stamp);
+    _heardStamps
+      ..remove(heard)
+      ..add(heard);
+    if (_heardStamps.length > _heardStampCap) _heardStamps.removeAt(0);
     final newest = _newestStamps[mac];
     if (newest == null || stamp > newest) _newestStamps[mac] = stamp;
   }
@@ -1111,10 +1124,25 @@ class WispNotifier extends _$WispNotifier {
     final expectedHash =
         committed.isEmpty ? '' : WispRepository.paletteIdHash(committed);
     final wispMac = state.value?.wispMac;
-    final emittedAfter = committed.isEmpty && wispMac != null
-        ? (lamp: _newestLampStamp, wisp: _newestStamps[wispMac])
-        : null;
     final epoch = ++_paletteSaveEpoch;
+    final judgeByStamps = committed.isEmpty && wispMac != null;
+    if (judgeByStamps) {
+      // Take the stamps of the status the lamp holds now, so its own clock
+      // gives a baseline even when nothing heard so far carried one.
+      await _awaitReadsIdle();
+      await _rereadStatusSection()
+          .timeout(_readIdleTimeout, onTimeout: () {});
+    }
+    final emittedAfter = judgeByStamps
+        ? (
+            lamp: _newestLampStamp,
+            wisp: _newestStamps[wispMac],
+            heard: {
+              for (final (mac, stamp) in _heardStamps)
+                if (mac == wispMac) stamp,
+            },
+          )
+        : null;
     var outcome = PaletteConfirmOutcome.notConfirmed;
     final ok = await _sendConfirmed(
       send: () => _repo.setManualPalette(committed),
@@ -1165,7 +1193,7 @@ class WispNotifier extends _$WispNotifier {
   Future<PaletteConfirmOutcome> _confirmPaletteLanded(
     String expectedHash,
     String? wispMac, {
-    ({int? lamp, int? wisp})? emittedAfter,
+    ({int? lamp, int? wisp, Set<int> heard})? emittedAfter,
   }) {
     final localFlip = _pendingSourceMode != null &&
         _pendingSourceMode != WispSourceMode.manual;
@@ -1187,14 +1215,19 @@ class WispNotifier extends _$WispNotifier {
   }
 
   /// Whether [s] is newer than the stamps heard before the save. A
-  /// `statusLastSeenMs` above `after.lamp` decides when both are known.
-  /// Otherwise [s] needs a `lastSeenMs` above `after.wisp`, unchecked when
-  /// `after.wisp` is unset.
-  static bool _emittedSince(WispStatus s, ({int? lamp, int? wisp}) after) {
+  /// `lastSeenMs` in `after.heard` is an emission heard before it and never
+  /// counts. Otherwise a `statusLastSeenMs` above `after.lamp` decides when
+  /// both are known, and failing that [s] needs a `lastSeenMs` above
+  /// `after.wisp`, unchecked when `after.wisp` is unset.
+  static bool _emittedSince(
+    WispStatus s,
+    ({int? lamp, int? wisp, Set<int> heard}) after,
+  ) {
+    final stamp = s.lastSeenMs;
+    if (stamp != null && after.heard.contains(stamp)) return false;
     final lampStamp = s.statusLastSeenMs;
     final lampAfter = after.lamp;
     if (lampStamp != null && lampAfter != null) return lampStamp > lampAfter;
-    final stamp = s.lastSeenMs;
     final wispAfter = after.wisp;
     return wispAfter == null || (stamp != null && stamp > wispAfter);
   }
