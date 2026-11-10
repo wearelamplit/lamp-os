@@ -31,16 +31,16 @@ Color ConfiguratorBehavior::target(size_t i, uint32_t offset) const {
 
 void ConfiguratorBehavior::beginFade(const std::vector<Color>& targetColors,
                                      uint32_t fadeDurationMs) {
-  install(targetColors, fadeDurationMs, ColorRotation{});
+  install(targetColors, fadeDurationMs, ColorRotation{}, millis());
 }
 
 void ConfiguratorBehavior::showScene(const RoleScene& scene, uint32_t fadeMs) {
-  install(scene.colors, fadeMs, scene.rotation);
+  install(scene.colors, fadeMs, scene.rotation, millis());
 }
 
 void ConfiguratorBehavior::install(const std::vector<Color>& targetColors,
                                    uint32_t fadeDurationMs,
-                                   const ColorRotation& rotation) {
+                                   const ColorRotation& rotation, uint32_t now) {
   // Snapshot the fade-FROM endpoint from the configurator's PREVIOUS
   // intended output (the `colors` field, optionally lerped when
   // interrupting a fade in flight), NOT from fb->buffer. fb->buffer
@@ -58,7 +58,6 @@ void ConfiguratorBehavior::install(const std::vector<Color>& targetColors,
   // the interpolation has landed, just from the lerp math, not from
   // the post-overlay buffer.
   const size_t n = fb ? static_cast<size_t>(fb->pixelCount) : 0;
-  const uint32_t now = millis();
   const bool wasFading = fadeActive(now);
   // Stash the pre-mutation source so the mid-fade branch can read it
   // without aliasing the destination assignment below.
@@ -188,14 +187,14 @@ void ConfiguratorBehavior::controlRotating(uint32_t now) {
   }
   if (fb->defaultRotation.on) {
     if (animationState != PLAYING) {
-      if (!showsRotatingSaved()) install(fb->defaultColors, kDefaultFadeMs, fb->defaultRotation);
+      if (!showsRotatingSaved()) install(fb->defaultColors, kDefaultFadeMs, fb->defaultRotation, now);
       play();
     }
     return;
   }
   if (animationState == STOPPED) return;
   if (rotating_) {
-    install(fb->defaultColors, kDefaultFadeMs, fb->defaultRotation);
+    install(fb->defaultColors, kDefaultFadeMs, fb->defaultRotation, now);
     play();
   }
   if (!fadeActive(now)) {

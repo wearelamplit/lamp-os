@@ -481,7 +481,7 @@ void test_static_saved_fallback_stops_only_after_the_crossfade() {
 }
 
 // A raw write and a static saved scene landing while a rotating saved scene
-// plays put the configurator on the static path: it matches one that never
+// plays put the configurator on the static path. It matches one that never
 // rotated, through the timeout to STOPPED.
 void test_rotation_off_while_playing_takes_the_static_path() {
   Rig a(Surface::Shade);

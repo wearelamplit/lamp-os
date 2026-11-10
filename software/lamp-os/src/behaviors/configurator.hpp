@@ -96,8 +96,9 @@ class ConfiguratorBehavior : public AnimatedBehavior {
   ColorRotation rotation_;
   RotationClock clock_;
 
+  // `now` is the caller's tick clock, so a fade started this tick is active at it.
   void install(const std::vector<Color>& target, uint32_t fadeMs,
-               const ColorRotation& rotation);
+               const ColorRotation& rotation, uint32_t now);
   void controlRotating(uint32_t now);
   bool showsRotatingSaved() const;
   bool towardZero() const;
