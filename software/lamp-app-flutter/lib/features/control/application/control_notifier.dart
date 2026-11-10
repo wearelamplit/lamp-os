@@ -1673,6 +1673,16 @@ class ControlNotifier extends _$ControlNotifier {
             : segs);
   }
 
+  /// Stage a segment's data pin (0 = the lamp's built-in pin). Takes effect
+  /// on the reboot [applyAdvancedLedsAndReboot] triggers.
+  void setSegmentPin(String role, int segIdx, int pin) {
+    _updateSegments(
+        role,
+        (segs) => segIdx < segs.length
+            ? (segs..[segIdx] = segs[segIdx].copyWith(pin: pin))
+            : segs);
+  }
+
   /// Apply Advanced LED settings ([advancedLedsBlob]) via
   /// settings_blob with reboot:true. Mirrors the setLampPassword pattern:
   /// write → firmware reboots (drops link) → reconnect ladder →
@@ -1711,6 +1721,12 @@ class ControlNotifier extends _$ControlNotifier {
             mismatches.add('shade.byteOrder');
           }
           if (fresh.shade.bpp != shade.bpp) mismatches.add('shade.bpp');
+          if (!_pinsMatch(fresh.base.segments, base.segments)) {
+            mismatches.add('base.pin');
+          }
+          if (!_pinsMatch(fresh.shade.segments, shade.segments)) {
+            mismatches.add('shade.pin');
+          }
         },
       );
     } catch (e) {
@@ -1732,8 +1748,8 @@ class ControlNotifier extends _$ControlNotifier {
             shade.segments, shade.px, shade.bpp, shade.byteOrder),
       };
 
-  // Firmware that reports segments reads byteOrder and each segment's px;
-  // a role without segments comes from firmware that reads px and bpp.
+  // Firmware that reports segments reads byteOrder and each segment's px and
+  // pin; a role without segments comes from firmware that reads px and bpp.
   static Map<String, dynamic> _stripFormatJson(
           List<Segment> segments, int px, int bpp, String byteOrder) =>
       segments.isEmpty
@@ -1741,9 +1757,16 @@ class ControlNotifier extends _$ControlNotifier {
           : {
               'byteOrder': byteOrder,
               'segments': [
-                for (final s in segments) {'px': s.px},
+                for (final s in segments) {'px': s.px, 'pin': s.pin},
               ],
             };
+
+  static bool _pinsMatch(List<Segment> fresh, List<Segment> shipped) {
+    for (var i = 0; i < shipped.length && i < fresh.length; i++) {
+      if (fresh[i].pin != shipped[i].pin) return false;
+    }
+    return true;
+  }
 
   static String _normalizeByteOrder(String order) {
     final up = order.toUpperCase();

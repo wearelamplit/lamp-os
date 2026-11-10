@@ -5,6 +5,8 @@
 // Arduino).
 
 #include <unity.h>
+
+#include <string>
 #include "core/hw_config.hpp"
 
 void setUp(void) {}
@@ -115,9 +117,85 @@ void test_input_colliding_with_input_pin_invalid() {
   TEST_ASSERT_FALSE(lamp::validateHwConfig(hw));
 }
 
+static lamp::HwConfig standardLike() {
+  lamp::HwConfig hw{};
+  hw.strips.push_back({lamp::Surface::Shade, 12, lamp::ByteOrder::GRBW});
+  hw.strips.push_back({lamp::Surface::Base, 14, lamp::ByteOrder::GRBW});
+  return hw;
+}
+
+void test_strip_data_pin_predicate() {
+  for (uint8_t ok : {2, 4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33}) {
+    TEST_ASSERT_TRUE_MESSAGE(lamp::isStripDataPin(ok), std::to_string(ok).c_str());
+  }
+  for (uint8_t bad : {0, 1, 3, 6, 7, 8, 9, 10, 11, 20, 24, 28, 31, 34, 36, 39, 40, 255}) {
+    TEST_ASSERT_FALSE_MESSAGE(lamp::isStripDataPin(bad), std::to_string(bad).c_str());
+  }
+}
+
+void test_no_request_keeps_variant_pins() {
+  const auto pins = lamp::resolveStripPins(standardLike(), {0, 0});
+  TEST_ASSERT_EQUAL_UINT8(12, pins[0]);
+  TEST_ASSERT_EQUAL_UINT8(14, pins[1]);
+  const auto empty = lamp::resolveStripPins(standardLike(), {});
+  TEST_ASSERT_EQUAL_UINT8(14, empty[1]);
+}
+
+void test_requested_pin_replaces_variant_pin() {
+  const auto pins = lamp::resolveStripPins(standardLike(), {0, 27});
+  TEST_ASSERT_EQUAL_UINT8(12, pins[0]);
+  TEST_ASSERT_EQUAL_UINT8(27, pins[1]);
+}
+
+void test_unusable_request_keeps_variant_pin() {
+  const auto pins = lamp::resolveStripPins(standardLike(), {0, 34});
+  TEST_ASSERT_EQUAL_UINT8(14, pins[1]);
+}
+
+void test_request_onto_another_strips_pin_rejected() {
+  const auto pins = lamp::resolveStripPins(standardLike(), {0, 12});
+  TEST_ASSERT_EQUAL_UINT8(12, pins[0]);
+  TEST_ASSERT_EQUAL_UINT8(14, pins[1]);
+}
+
+void test_two_requests_for_same_pin_both_rejected() {
+  const auto pins = lamp::resolveStripPins(standardLike(), {27, 27});
+  TEST_ASSERT_EQUAL_UINT8(12, pins[0]);
+  TEST_ASSERT_EQUAL_UINT8(14, pins[1]);
+}
+
+void test_swapped_pins_allowed() {
+  const auto pins = lamp::resolveStripPins(standardLike(), {14, 12});
+  TEST_ASSERT_EQUAL_UINT8(14, pins[0]);
+  TEST_ASSERT_EQUAL_UINT8(12, pins[1]);
+}
+
+void test_revert_cascades_to_dependent_request() {
+  // Shade's 34 is unusable so it stays on 12, which the base asked for.
+  const auto pins = lamp::resolveStripPins(standardLike(), {34, 12});
+  TEST_ASSERT_EQUAL_UINT8(12, pins[0]);
+  TEST_ASSERT_EQUAL_UINT8(14, pins[1]);
+}
+
+void test_request_onto_input_pin_rejected() {
+  lamp::HwConfig hw = standardLike();
+  hw.inputs.push_back({1, lamp::InputType::Button, 27});
+  const auto pins = lamp::resolveStripPins(hw, {0, 27});
+  TEST_ASSERT_EQUAL_UINT8(14, pins[1]);
+}
+
 int main(int argc, char** argv) {
   (void)argc; (void)argv;
   UNITY_BEGIN();
+  RUN_TEST(test_strip_data_pin_predicate);
+  RUN_TEST(test_no_request_keeps_variant_pins);
+  RUN_TEST(test_requested_pin_replaces_variant_pin);
+  RUN_TEST(test_unusable_request_keeps_variant_pin);
+  RUN_TEST(test_request_onto_another_strips_pin_rejected);
+  RUN_TEST(test_two_requests_for_same_pin_both_rejected);
+  RUN_TEST(test_swapped_pins_allowed);
+  RUN_TEST(test_revert_cascades_to_dependent_request);
+  RUN_TEST(test_request_onto_input_pin_rejected);
   RUN_TEST(test_zero_supply_budget_invalid);
   RUN_TEST(test_inputs_valid_distinct_pins);
   RUN_TEST(test_input_colliding_with_strip_pin_invalid);

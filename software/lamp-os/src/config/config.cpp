@@ -317,6 +317,7 @@ static void emitRoleTopology(JsonDocument& doc,
     JsonObject o = segsNode.add<JsonObject>();
     o["name"] = s.name;
     o["px"] = s.px;
+    if (s.pin) o["pin"] = s.pin;
     JsonArray sc = o["colors"].to<JsonArray>();
     for (const auto& c : s.colors) sc.add(colorToHexString(c));
   }

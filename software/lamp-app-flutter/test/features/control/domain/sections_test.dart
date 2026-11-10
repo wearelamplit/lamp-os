@@ -151,6 +151,17 @@ void main() {
     expect(named.displayName('Base'), 'Left rail');
   });
 
+  test('Segment parses pin, 0 when absent', () {
+    final withPin = Segment.fromJson(
+        {'name': 'Base', 'px': 38, 'pin': 27, 'colors': <String>[]});
+    final without =
+        Segment.fromJson({'name': 'Base', 'px': 38, 'colors': <String>[]});
+    expect(withPin.pin, 27);
+    expect(without.pin, 0);
+    expect(withPin == without, isFalse);
+    expect(without.copyWith(pin: 27), withPin);
+  });
+
   test('Segment equality', () {
     const a = Segment(
       name: 'Shade',

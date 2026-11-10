@@ -16,8 +16,9 @@ import '../../control/application/control_notifier.dart';
 import '../../control/application/settings_blob_too_large_exception.dart';
 import '../../firmware/presentation/firmware_push_lock.dart';
 
-/// Advanced LED settings: pixel count per segment + strip-type (LED byte
-/// order). Unlocked from the Info tab via the 5-tap secret on the lamplit
+/// Advanced LED settings: pixel count per segment, data pin per segment, and
+/// strip-type (LED byte order). Data pin and strip type show only in advanced
+/// mode. Unlocked from the Info tab via the 5-tap secret on the lamplit
 /// wordmark, or directly toggleable from the Setup screen once advanced is on.
 ///
 /// Per-segment px is editable only on single-segment roles (standard); on
@@ -71,6 +72,8 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
   String? _origShadeByteOrder;
   List<int>? _origBasePxs;
   String? _origBaseByteOrder;
+  List<int>? _origShadePins;
+  List<int>? _origBasePins;
 
   /// True from an Update tap until its write and the reboot reload after it
   /// end.
@@ -86,6 +89,12 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
       n.setSegmentPx('base', i, _origBasePxs![i]);
     }
     if (_origBaseByteOrder != null) n.setBaseByteOrder(_origBaseByteOrder!);
+    for (var i = 0; i < (_origShadePins?.length ?? 0); i++) {
+      n.setSegmentPin('shade', i, _origShadePins![i]);
+    }
+    for (var i = 0; i < (_origBasePins?.length ?? 0); i++) {
+      n.setSegmentPin('base', i, _origBasePins![i]);
+    }
     Navigator.of(context).pop();
   }
 
@@ -122,6 +131,8 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
             _origBasePxs ??= state.base.segments.isEmpty
                 ? [state.base.px]
                 : state.base.segments.map((s) => s.px).toList();
+            _origShadePins ??= state.shade.segments.map((s) => s.pin).toList();
+            _origBasePins ??= state.base.segments.map((s) => s.pin).toList();
 
             final notifier =
                 ref.read(controlNotifierProvider(widget.lampId).notifier);
@@ -180,6 +191,16 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
                               onChanged: (v) => notifier.setSegmentPx('shade', 0, v),
                             ),
                           if (showByteOrder)
+                            for (var i = 0; i < state.shade.segments.length; i++)
+                              _DataPinRow(
+                                label: state.shade.segments.length > 1
+                                    ? '${state.shade.segments[i].name} data pin'
+                                    : 'Data pin',
+                                pin: state.shade.segments[i].pin,
+                                onChanged: (p) =>
+                                    notifier.setSegmentPin('shade', i, p),
+                              ),
+                          if (showByteOrder)
                             _StripTypePicker(
                               selected: state.shade.byteOrder,
                               onChanged: notifier.setShadeByteOrder,
@@ -208,6 +229,16 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
                               readOnly: !ledCountsEditable,
                               onChanged: (v) => notifier.setSegmentPx('base', 0, v),
                             ),
+                          if (showByteOrder)
+                            for (var i = 0; i < state.base.segments.length; i++)
+                              _DataPinRow(
+                                label: state.base.segments.length > 1
+                                    ? '${state.base.segments[i].name} data pin'
+                                    : 'Data pin',
+                                pin: state.base.segments[i].pin,
+                                onChanged: (p) =>
+                                    notifier.setSegmentPin('base', i, p),
+                              ),
                           if (showByteOrder)
                             _StripTypePicker(
                               selected: state.base.byteOrder,
@@ -385,6 +416,52 @@ class _BatterySaverPicker extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+// GPIOs the firmware accepts for a strip's data line (isStripDataPin).
+const _stripDataPins = [
+  2, 4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33,
+];
+
+class _DataPinRow extends StatelessWidget {
+  const _DataPinRow({
+    required this.label,
+    required this.pin,
+    required this.onChanged,
+  });
+  final String label;
+  final int pin;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return NavRow(
+      icon: Icons.settings_input_component,
+      title: label,
+      subtitle: pin == 0 ? 'Built-in pin' : 'GPIO $pin',
+      onTap: () async {
+        final picked = await showDialog<int>(
+          context: context,
+          builder: (ctx) => SimpleDialog(
+            title: Text(label),
+            children: [
+              for (final p in [0, ..._stripDataPins])
+                SimpleDialogOption(
+                  onPressed: () => Navigator.of(ctx).pop(p),
+                  child: Text(
+                    p == 0 ? 'Built-in pin' : 'GPIO $p',
+                    style: p == pin
+                        ? const TextStyle(fontWeight: FontWeight.bold)
+                        : null,
+                  ),
+                ),
+            ],
+          ),
+        );
+        if (picked != null) onChanged(picked);
+      },
     );
   }
 }

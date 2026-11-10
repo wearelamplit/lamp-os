@@ -654,6 +654,43 @@ void test_rendered_rotation_is_gated_by_flag_and_segments() {
   assertRotation(false, 40, RotationDir::Up, base.renderedRotation());
 }
 
+void test_segment_pin_round_trip() {
+  Model a;
+  parseInto("{\"base\":{\"segments\":[{\"name\":\"Base\",\"px\":38,\"pin\":27,"
+            "\"colors\":[\"#ff006200\"]}]}}", a);
+  TEST_ASSERT_EQUAL_UINT8(27, a.base.segments[0].pin);
+
+  JsonDocument out;
+  config_codec::toJson(out.to<JsonObject>(), a.lamp, a.base, a.shade,
+                       a.expressions, a.homeMode);
+  std::string serialized;
+  serializeJson(out, serialized);
+
+  Model b;
+  parseInto(serialized.c_str(), b);
+  TEST_ASSERT_EQUAL_UINT8(27, b.base.segments[0].pin);
+}
+
+void test_segment_pin_absent_or_unusable_loads_zero() {
+  Model m;
+  parseInto("{\"base\":{\"segments\":[{\"name\":\"A\",\"px\":10,\"colors\":[]},"
+            "{\"name\":\"B\",\"px\":10,\"pin\":6,\"colors\":[]},"
+            "{\"name\":\"C\",\"px\":10,\"pin\":283,\"colors\":[]}]}}", m);
+  TEST_ASSERT_EQUAL_UINT8(0, m.base.segments[0].pin);
+  TEST_ASSERT_EQUAL_UINT8(0, m.base.segments[1].pin);
+  TEST_ASSERT_EQUAL_UINT8(0, m.base.segments[2].pin);
+}
+
+void test_unset_segment_pin_not_serialized() {
+  Model m;
+  JsonDocument out;
+  config_codec::toJson(out.to<JsonObject>(), m.lamp, m.base, m.shade,
+                       m.expressions, m.homeMode);
+  std::string serialized;
+  serializeJson(out, serialized);
+  TEST_ASSERT_NULL(strstr(serialized.c_str(), "\"pin\""));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_empty_blob_uses_class_defaults);
@@ -662,6 +699,9 @@ int main(int, char**) {
   RUN_TEST(test_brightnessceiling_defaults_and_round_trip);
   RUN_TEST(test_socialmode_out_of_range_falls_back_to_ambivert);
   RUN_TEST(test_three_segment_shade_round_trip);
+  RUN_TEST(test_segment_pin_round_trip);
+  RUN_TEST(test_segment_pin_absent_or_unusable_loads_zero);
+  RUN_TEST(test_unset_segment_pin_not_serialized);
   RUN_TEST(test_sum_px_clamped_to_255);
   RUN_TEST(test_homemode_enabled_migration);
   RUN_TEST(test_round_trip_preserves_fields);
