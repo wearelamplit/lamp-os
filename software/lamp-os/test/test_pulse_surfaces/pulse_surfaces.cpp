@@ -269,6 +269,20 @@ int firesForPlan(const ExpressionDescriptor* d) {
   return g_fired;
 }
 
+// An auto-trigger pulse whose control() is skipped for over 24.8 days, as
+// home mode skips a disabled type, fires on its first control() after.
+void test_auto_trigger_fires_after_a_long_skip() {
+  Rig rig;
+  g_fired = 0;
+  set_mock_millis(0);
+  PulseExpression p(&rig.base);
+  build(rig, p, TARGET_BASE, {});
+  p.autoTriggerEnabled = true;
+  set_mock_millis((1u << 31) + 2000000);
+  p.control();
+  TEST_ASSERT_EQUAL_INT(1, g_fired);
+}
+
 void test_both_fires_once_per_logical_trigger() {
   TEST_ASSERT_EQUAL_INT(1, firesForPlan(&PulseExpression::classDescriptor()));
   const ExpressionDescriptor perSurface{};
@@ -469,6 +483,7 @@ int main(int, char**) {
   RUN_TEST(test_plan_both_other_type_builds_one_per_surface);
   RUN_TEST(test_plan_single_surface_targets_unjoined);
   RUN_TEST(test_both_fires_once_per_logical_trigger);
+  RUN_TEST(test_auto_trigger_fires_after_a_long_skip);
   RUN_TEST(test_both_wave_crosses_join_continuously);
   RUN_TEST(test_both_maps_each_surface_zone);
   RUN_TEST(test_both_speed_spans_whole_strip);

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include "util/fade.hpp"
+#include "util/uptime.hpp"
 
 namespace lamp {
 
@@ -120,7 +121,7 @@ void GlitchyExpression::onComplete() {
   // class's scheduleNextTrigger() handles the next regular trigger
   // when this short-circuit doesn't fire.
   if (rng.range(0, 99) < 33) {
-    nextTriggerMs = millis() + rng.range(200, 600);
+    nextTriggerMs = uptimeMs() + rng.range(200, 600);
   }
 }
 
