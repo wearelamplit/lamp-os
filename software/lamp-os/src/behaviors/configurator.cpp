@@ -144,7 +144,8 @@ void ConfiguratorBehavior::draw() {
 
 void ConfiguratorBehavior::control() {
   uint32_t now = millis();
-  if (rotating_ || fb->defaultRotation.on) {
+  // Only rotation puts the configurator in PLAYING.
+  if (rotating_ || fb->defaultRotation.on || animationState == PLAYING) {
     controlRotating(now);
     return;
   }
@@ -167,9 +168,9 @@ bool ConfiguratorBehavior::showsRotatingSaved() const {
          rotation_.dir == fb->defaultRotation.dir && colors == fb->defaultColors;
 }
 
-// A static saved scene takes the static path's run-out to STOPPED
-// (frames - easeFrames draws), which outlasts the crossfade at the
-// compositor's 16 ms frame floor, so idle takes over on the saved frame.
+// An edit pauses at easeFrames, where the static path pauses. A static saved
+// scene plays until its crossfade ends, then takes the static path's run-out
+// to STOPPED, so idle takes over on the saved frame.
 void ConfiguratorBehavior::controlRotating(uint32_t now) {
   const bool editing = lastWebSocketUpdateTimeMs > 0 &&
                        now <= lastWebSocketUpdateTimeMs + CONFIGURATOR_WEBSOCKET_TIMEOUT_MS;
@@ -178,6 +179,7 @@ void ConfiguratorBehavior::controlRotating(uint32_t now) {
       playOnce();
     } else if (animationState == PLAYING) {
       pause();
+      frame = easeFrames;
     }
     if (animationState == PLAYING_ONCE && frame == easeFrames) {
       pause();
@@ -191,8 +193,12 @@ void ConfiguratorBehavior::controlRotating(uint32_t now) {
     }
     return;
   }
-  if (animationState != STOPPED) {
+  if (animationState == STOPPED) return;
+  if (rotating_) {
     install(fb->defaultColors, kDefaultFadeMs, fb->defaultRotation);
+    play();
+  }
+  if (!fadeActive(now)) {
     frame = easeFrames;
     playOnce();
   }

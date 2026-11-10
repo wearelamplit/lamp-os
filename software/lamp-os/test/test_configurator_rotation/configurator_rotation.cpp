@@ -448,6 +448,79 @@ void test_abandoned_rotating_preview_settles_on_the_static_saved_scene() {
   TEST_ASSERT_EQUAL(STOPPED, r.cfg.animationState);
 }
 
+// Run-out to STOPPED waits for the crossfade however fast the configurator
+// ticks and however few frames it counts.
+void test_static_saved_fallback_stops_only_after_the_crossfade() {
+  struct Case {
+    uint32_t dt, frames;
+  };
+  for (const Case& c : {Case{1, 120}, Case{16, 62}}) {
+    Rig r(Surface::Base);
+    r.cfg.frames = c.frames;
+    const RoleScene preview = rotatingScene(stopsA(), 5, RotationDir::Up);
+    r.write(preview, 0);
+    const uint32_t edited = r.now;
+    std::vector<Color> held;
+    while (r.now + c.dt <= edited + CONFIGURATOR_WEBSOCKET_TIMEOUT_MS) {
+      r.step(c.dt);
+      held = r.expect(preview, r.now);
+    }
+    r.step(c.dt);
+    const uint32_t start = r.now;
+    assertFrame(held, r.fb.buffer);
+    while (r.cfg.animationState != STOPPED) {
+      r.step(c.dt);
+      const uint32_t elapsed = r.now - start;
+      TEST_ASSERT_TRUE(elapsed < 3000);
+      assertFrame(elapsed < kDefaultFadeMs ? faded(held, r.fb.defaultColors, elapsed)
+                                           : r.fb.defaultColors,
+                  r.fb.buffer);
+    }
+    assertFrame(r.fb.defaultColors, r.fb.buffer);
+  }
+}
+
+// A raw write and a static saved scene landing while a rotating saved scene
+// plays put the configurator on the static path: it matches one that never
+// rotated, through the timeout to STOPPED.
+void test_rotation_off_while_playing_takes_the_static_path() {
+  Rig a(Surface::Shade);
+  a.saveScene(rotatingScene(stopsA(), 40, RotationDir::Up));
+  a.cfg.colors = a.fb.defaultColors;
+  a.tick(5000);
+  for (int k = 0; k < 37; ++k) a.step();
+  TEST_ASSERT_EQUAL(PLAYING, a.cfg.animationState);
+
+  Rig b(Surface::Shade);
+  b.cfg.colors = b.fb.defaultColors;
+  b.tick(a.now);
+  TEST_ASSERT_EQUAL(STOPPED, b.cfg.animationState);
+
+  const uint32_t edited = a.now;
+  const std::vector<Color> raw = buildGradientWithStops(kPx, rgb());
+  for (Rig* x : {&a, &b}) {
+    x->cfg.beginFade(raw, 0);
+    x->cfg.lastWebSocketUpdateTimeMs = edited;
+  }
+  a.fb.defaultColors = b.fb.defaultColors;
+  a.fb.defaultRotation = ColorRotation{};
+
+  bool twinPaused = false;
+  while (a.cfg.animationState != STOPPED || b.cfg.animationState != STOPPED) {
+    a.step();
+    b.tick(a.now);
+    TEST_ASSERT_TRUE(a.now < edited + CONFIGURATOR_WEBSOCKET_TIMEOUT_MS + 5000);
+    TEST_ASSERT_FALSE(a.cfg.rotating());
+    assertFrame(raw, a.fb.buffer);
+    twinPaused |= b.cfg.animationState == PAUSED;
+    if (twinPaused) {
+      TEST_ASSERT_EQUAL(b.cfg.animationState, a.cfg.animationState);
+      TEST_ASSERT_EQUAL_UINT32(b.cfg.frame, a.cfg.frame);
+    }
+  }
+  TEST_ASSERT_TRUE(a.now > edited + CONFIGURATOR_WEBSOCKET_TIMEOUT_MS);
+}
+
 // A rotating scene built for another pixel count, or for none, draws unrotated.
 void test_scene_for_another_strip_never_rotates() {
   const ColorRotation on{true, 5, RotationDir::Up};
@@ -572,6 +645,8 @@ int main(int, char**) {
   RUN_TEST(test_saved_rotating_scene_rotates_from_boot);
   RUN_TEST(test_abandoned_preview_returns_to_the_rotating_saved_scene);
   RUN_TEST(test_abandoned_rotating_preview_settles_on_the_static_saved_scene);
+  RUN_TEST(test_static_saved_fallback_stops_only_after_the_crossfade);
+  RUN_TEST(test_rotation_off_while_playing_takes_the_static_path);
   RUN_TEST(test_scene_for_another_strip_never_rotates);
   RUN_TEST(test_knocked_out_pixels_stay_put);
   RUN_TEST(test_reset_resumes_from_the_settled_frame);
