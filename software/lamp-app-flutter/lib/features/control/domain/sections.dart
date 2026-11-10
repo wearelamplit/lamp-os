@@ -195,10 +195,15 @@ class Segment {
     required this.name,
     required this.px,
     required this.colors,
+    this.pin = 0,
   });
   final String name;
   final int px;
   final List<LampColor> colors;
+
+  /// Data GPIO for this segment's strip; 0 = the lamp's built-in pin.
+  /// Absent on firmware without per-segment pins, which reads as 0.
+  final int pin;
 
   /// [name], or [roleLabel] when a pre-segment-feature lamp migrated with no
   /// name (firmware config_codec's flat-colors fallback).
@@ -211,17 +216,20 @@ class Segment {
             .whereType<String>()
             .map(LampColor.fromHex)
             .toList(),
+        pin: (json['pin'] as num?)?.toInt() ?? 0,
       );
 
   Segment copyWith({
     String? name,
     int? px,
     List<LampColor>? colors,
+    int? pin,
   }) =>
       Segment(
         name: name ?? this.name,
         px: px ?? this.px,
         colors: colors ?? this.colors,
+        pin: pin ?? this.pin,
       );
 
   @override
@@ -230,10 +238,11 @@ class Segment {
       other is Segment &&
           name == other.name &&
           px == other.px &&
+          pin == other.pin &&
           _listEq.equals(colors, other.colors);
 
   @override
-  int get hashCode => Object.hash(name, px, _listEq.hash(colors));
+  int get hashCode => Object.hash(name, px, pin, _listEq.hash(colors));
 }
 
 /// CHAR_BASE_SECTION payload, see firmware Config::asBaseJson.

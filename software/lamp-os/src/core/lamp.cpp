@@ -723,6 +723,21 @@ void lamp::Lamp::setup() {
   // strip pixelCount of 0 resolves from the role's Config px (core
   // single-strip roles, seeded first-boot from defaults()::{base,shade}Px);
   // a custom variant sets an explicit per-strip count.
+  // A role's config segments pair with its strips in declaration order; a
+  // segment's saved pin overrides that strip's StripSpec pin.
+  std::vector<uint8_t> requestedPins(hw_.strips.size(), 0);
+  {
+    size_t shadeK = 0, baseK = 0;
+    for (size_t i = 0; i < hw_.strips.size(); ++i) {
+      const bool isShade = hw_.strips[i].role == lamp::Surface::Shade;
+      const auto& segs = isShade ? config.shade.segments : config.base.segments;
+      size_t& k = isShade ? shadeK : baseK;
+      if (k < segs.size()) requestedPins[i] = segs[k].pin;
+      ++k;
+    }
+  }
+  const std::vector<uint8_t> stripPins = lamp::resolveStripPins(hw_, requestedPins);
+
   auto buildRole = [&](lamp::Surface role, uint8_t configPx,
                        const std::vector<lamp::Color>& colors,
                        const std::string& configByteOrder,
@@ -731,13 +746,20 @@ void lamp::Lamp::setup() {
     // role; empty or unrecognized falls back to the compile-time default.
     std::vector<lamp::StripSegment> segments;
     uint16_t offset = 0;
-    for (const auto& s : hw_.strips) {
+    for (size_t i = 0; i < hw_.strips.size(); ++i) {
+      const auto& s = hw_.strips[i];
       if (s.role != role) continue;
       const uint16_t px = s.pixelCount ? s.pixelCount : configPx;
       lamp::ByteOrder order = s.byteOrder;
       byteOrderFromString(configByteOrder.c_str(), order);
-      auto* driver =
-          new Adafruit_NeoPixel(px, s.pin, lampos::led::neoPixelFormat(order) + NEO_KHZ800);
+#ifdef LAMP_DEBUG
+      if (stripPins[i] != s.pin) {
+        Serial.printf("[hw] %s strip on GPIO %u (variant pin %u)\n",
+                      s.name ? s.name : "?", stripPins[i], s.pin);
+      }
+#endif
+      auto* driver = new Adafruit_NeoPixel(
+          px, stripPins[i], lampos::led::neoPixelFormat(order) + NEO_KHZ800);
       segments.push_back({driver, s.name, offset, px, s.reversed});
       offset += px;
     }

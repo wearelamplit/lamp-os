@@ -59,7 +59,7 @@ Model fullModel() {
   m.lamp.setup = true;
   m.lamp.apBootMinutes = 7;
   m.base.byteOrder = "GRBW";
-  m.base.segments = {{"Base \"main\"", 35, {Color(1, 2, 3, 4), Color(255, 254, 0, 9)}},
+  m.base.segments = {{"Base \"main\"", 35, {Color(1, 2, 3, 4), Color(255, 254, 0, 9)}, 27},
                      {"Lions", 18, {Color(0x30, 0x07, 0x83, 0)}}};
   m.shade.segments = {{"Shade", 38, {Color(0xab, 0xcd, 0xef, 0x10)}}};
   m.homeMode.ssid = "caf\xc3\xa9 \b\f\r";

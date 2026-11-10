@@ -100,11 +100,14 @@ class LampSettings {
  *        count. Geometry (driver/pin/offset) lives in the variant's StripSpec;
  *        this is the persisted, editable half.
  * @property px - 0 = unset; applyDefaults fills from the variant default. See resolveConfiguredPx.
+ * @property pin - data GPIO for this segment's strip; 0 = the variant StripSpec pin.
+ *   Applied at boot through resolveStripPins.
  */
 struct SegmentSettings {
   std::string name;
   uint8_t px = 0;
   std::vector<Color> colors;
+  uint8_t pin = 0;
 };
 
 // Role pixel-space size. ≤255 by construction (config_codec::fromJson clamps

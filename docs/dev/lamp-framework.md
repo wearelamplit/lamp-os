@@ -63,7 +63,9 @@ through segments, one palette per segment, rendered by the segment-aware
 
 `HwConfig.strips` lists every physical NeoPixel strip; each entry carries a
 `role` (`Surface::Shade` or `Surface::Base`), pin, byte order, pixel count, and
-optional `name` / `broadcast` / `reversed` flags. Multiple strips can share a
+optional `name` / `broadcast` / `reversed` flags. A saved segment `pin`
+overrides its strip's default pin at boot; see `StripSpec` in
+[building-custom-lamps.md](building-custom-lamps.md). Multiple strips can share a
 role (as the snafu shade does), and one `broadcast=1` strip per role is the
 representative for advertisement / HELLO.
 

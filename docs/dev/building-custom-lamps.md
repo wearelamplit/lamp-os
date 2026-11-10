@@ -71,6 +71,12 @@ roles do this; a fixed-geometry strip like snafu's dots states its own count.
 Exactly one strip per role may set `broadcast=1`: that's the representative
 segment whose color the lamp advertises to peers (snafu's `Stem`).
 `reversed=true` when pixel 0 is the far end of the winding.
+`pin` is the default data GPIO. A lamp can override it per strip from the
+app's LED setup screen in advanced mode: the role's config segments pair with
+its strips in declaration order, and a segment's saved `pin` (0 = the
+`StripSpec` pin) replaces the strip's at boot. `resolveStripPins` keeps the
+`StripSpec` pin for any value that fails `isStripDataPin` or lands on another
+strip's or an input's pin, so a bad saved pin can't stop a lamp booting.
 
 **`InputSpec`** — one button or capacitive pad. snafu declares none, and most
 lamps don't: physical inputs are the staff specialization, so the `.inputs`

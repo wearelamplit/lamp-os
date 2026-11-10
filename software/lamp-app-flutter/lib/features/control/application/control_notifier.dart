@@ -1441,7 +1441,17 @@ class ControlNotifier extends _$ControlNotifier {
             : segs);
   }
 
-  /// Apply Advanced LED settings (px, byteOrder, bpp) via
+  /// Stage a segment's data pin (0 = the lamp's built-in pin). Takes effect
+  /// on the reboot [applyAdvancedLedsAndReboot] triggers.
+  void setSegmentPin(String role, int segIdx, int pin) {
+    _updateSegments(
+        role,
+        (segs) => segIdx < segs.length
+            ? (segs..[segIdx] = segs[segIdx].copyWith(pin: pin))
+            : segs);
+  }
+
+  /// Apply Advanced LED settings (px, pin, byteOrder, bpp) via
   /// settings_blob with reboot:true. Mirrors the setLampPassword pattern:
   /// write → firmware reboots (drops link) → reconnect ladder →
   /// reload sections. After reload, diffs the freshly-read base/shade
@@ -1495,6 +1505,12 @@ class ControlNotifier extends _$ControlNotifier {
             mismatches.add('shade.byteOrder');
           }
           if (fresh.shade.bpp != shade.bpp) mismatches.add('shade.bpp');
+          if (!_pinsMatch(fresh.base.segments, base.segments)) {
+            mismatches.add('base.pin');
+          }
+          if (!_pinsMatch(fresh.shade.segments, shade.segments)) {
+            mismatches.add('shade.pin');
+          }
         },
       );
     } catch (e) {
@@ -1506,8 +1522,16 @@ class ControlNotifier extends _$ControlNotifier {
   static Map<String, dynamic> _segmentJson(Segment s) => {
         'name': s.name,
         'px': s.px,
+        'pin': s.pin,
         'colors': s.colors.map((c) => c.toHex()).toList(),
       };
+
+  static bool _pinsMatch(List<Segment> fresh, List<Segment> shipped) {
+    for (var i = 0; i < shipped.length && i < fresh.length; i++) {
+      if (fresh[i].pin != shipped[i].pin) return false;
+    }
+    return true;
+  }
 
   static String _normalizeByteOrder(String order) {
     final up = order.toUpperCase();
