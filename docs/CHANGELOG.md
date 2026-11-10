@@ -23,9 +23,8 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   addressed to it. Lamps on firmware older than 1.1.5 send wisp commands to
   every wisp at once, so a wisp on this firmware ignores them: update those
   lamps first.
-- **Wisps need a USB reflash** for both fixes
-  (`PLATFORMIO_UPLOAD_PORT=<wisp-port> npm run wisp:flash`); wisps don't
-  update over the mesh.
+- **Wisps need a USB reflash** for both fixes (`npm run wisp:flash:release`
+  with the wisp plugged in); wisps don't update over the mesh.
 
 ## 1.3.2
 

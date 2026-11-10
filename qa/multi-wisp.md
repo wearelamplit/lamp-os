@@ -37,6 +37,7 @@ wisp's CONTROL_OP filter (`controlOpForWisp`).
 | 1 | A lamp that leaves A's range moves to B | Put L beside A, B across the room where it still hears L. Wait for A's dump to show L with a real `rssi=` and L painting A's palette. Carry L out of A's radio range, still in B's and in range of the relaying lamp. | Within about 2 min A's dump shows L with `rssi=-128` while `age` stays under ~30 s, and L paints B's palette (`[loop] drain wispState base=` lines resume with B's colours). It must not stay on `not painted (ease home)` past ~3 min. |
 | 2 | One wisp keeps a present lamp | Power B off. L beside A for 5 min. | A's dump keeps a real `rssi=` for L and L paints A's palette throughout, no ease-home lines. |
 | 3 | App ops to A survive B's status bursts | Both wisps on, L's display wisp is A. Hold B in its 20 s status burst with `src:manual` every 15 s: `python3 scripts/bench_cmd.py <wisp-B-port> $(for i in $(seq 24); do printf -- "--cmd src:manual --cmd sleep:15 "; done) -o /tmp/wispB.log`. In the app, toggle A's source Off / Manual 20 times, waiting for each confirm. | A's console prints a `[wisp.op] setSource mode=` line for every toggle and the app confirms all 20; no "couldn't reach the wisp". |
+| 4 | Two wisps keep a present lamp steady | Both wisps on, L beside A where B also hears it, for 60 min. Count `rssi=-128` dumps for L in A's log (`grep -c` on L's MAC with `rssi=-128`). | Zero: A never loses L's direct RSSI and L never switches to B's palette. Any hit means A missed three of L's HELLOs in a row; record the count and the times, since it settles whether the 90 s window is long enough. |
 
 Restore A and B to their original source and palette afterwards. The loss
 row 3 guards is rare (an estimated 1 op in 100 during a burst, not measured),
@@ -47,4 +48,5 @@ so a clean run is a regression check rather than proof.
 - Row 1: the handoff completes within ~3 min and L ends painted by B.
 - Row 2: no ease-home and no `rssi=-128` for L while B is off.
 - Row 3: 20 of 20 ops applied and confirmed.
+- Row 4: no `rssi=-128` for L and no switch to B in the hour.
 - No crash signatures (`BOD|Guru|abort`) on any port.
