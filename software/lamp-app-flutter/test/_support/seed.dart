@@ -29,12 +29,17 @@ Future<void> seedControlBle(
   // Optional segments JSON array for the base role, e.g.
   // '[{"name":"Base","px":35,"colors":["#300783FF"]}]'.
   String? baseSegmentsJson,
+  // Optional `rotate` object for the base section, e.g.
+  // '{"on":true,"periodS":40,"dir":"up"}'. Absent = a role that can't rotate.
+  String? baseRotateJson,
   int shadePx = 38,
   int shadeBpp = 4,
   String shadeColorsJson = '["#000000FF"]',
   // Optional segments JSON array for the shade role, e.g.
   // '[{"name":"Small Dots","px":12,"colors":["#000000FF"]},...]'.
   String? shadeSegmentsJson,
+  // Optional `rotate` object for the shade section; see baseRotateJson.
+  String? shadeRotateJson,
   String? lampType,
   String homeSsid = '',
   int homeBrightness = 60,
@@ -71,6 +76,10 @@ Future<void> seedControlBle(
       '"brightnessCeiling":$brightnessCeiling$fwTail$hpTail$typeTail}',
     )),
   );
+  final baseRotateTail =
+      baseRotateJson != null ? ',"rotate":$baseRotateJson' : '';
+  final shadeRotateTail =
+      shadeRotateJson != null ? ',"rotate":$shadeRotateJson' : '';
   final baseSegsTail =
       baseSegmentsJson != null ? ',"segments":$baseSegmentsJson' : '';
   ble.seedSection(
@@ -80,7 +89,7 @@ Future<void> seedControlBle(
       '{"px":$basePx,"ac":$baseAc,"bpp":$baseBpp,'
       '"colors":$baseColorsJson,"knockout":$baseKnockoutJson,'
       '"drawIdleMa":$drawIdleMa,"drawFullMa":$drawFullMa'
-      '$baseSegsTail}',
+      '$baseSegsTail$baseRotateTail}',
     )),
   );
   final shadeSegsTail =
@@ -90,7 +99,7 @@ Future<void> seedControlBle(
     'shade',
     Uint8List.fromList(utf8.encode(
       '{"px":$shadePx,"bpp":$shadeBpp,"colors":$shadeColorsJson'
-      '$shadeSegsTail}',
+      '$shadeSegsTail$shadeRotateTail}',
     )),
   );
   ble.seedSection(

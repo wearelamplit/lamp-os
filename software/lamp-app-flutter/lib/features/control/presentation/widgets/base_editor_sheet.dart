@@ -33,6 +33,9 @@ class BaseEditorSheet extends ConsumerWidget {
       description: 'These colors blend into a gradient along the strip.',
       max: _kMaxBaseStops,
       bpp: base.bpp,
+      contentSized: true,
+      rotation: base.rotation,
+      onRotationChanged: notifier.setBaseRotation,
       onChanged: (colors) => notifier.setBaseColors(colors),
       onSave: (colors) async {
         await notifier.setBaseColors(colors);
@@ -49,8 +52,7 @@ Future<void> showBaseEditorSheet(
 }) {
   return showAppSheet<void>(
     context,
-    builder: (ctx) => FractionallySizedBox(
-      heightFactor: 0.6,
+    builder: (ctx) => ColorSheetHeight(
       child: BaseEditorSheet(lampId: lampId, title: title),
     ),
   );

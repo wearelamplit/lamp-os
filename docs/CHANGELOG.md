@@ -16,6 +16,18 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   web config save, an expression test and a firmware update. A surface with
   one color, or split into segments, stays still. Shifty's color shift
   follows a moving base through its fades and lands on it with no jump.
+- **Rotate colors, in the app.** On a lamp whose firmware offers it (the
+  standard lamp), the Shade and Base colour sheets carry a Rotate colors
+  switch: your own colours flow along the strip in an endless loop. Set the Loop
+  length (5 seconds to 2 minutes, slow on the left) and the Direction (Up or
+  Down; the shade starts Down and the base Up, so they meet at the seam). The
+  lamp follows live while you edit, Save keeps it and Cancel puts it back.
+  With one colour the switch greys out with "Add a second color to rotate."
+  and keeps your setting for when you add another. While a role rotates, its
+  card on the Colors page moves and reads "Rotating · 40s loop". The Base and
+  Shade sheets now grow to fit their colours, up to most of the screen, on
+  every lamp. Lamps that can't rotate show no Rotate switch and no moving
+  card.
 
 ### Fixed
 - **Clearing a wisp's manual palette reaches the wisp.** Remove every colour
@@ -40,6 +52,13 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   and the newer save wins: the older one stops resending and reports no
   failure. Before, a background settings read could mark a change saved that
   the wisp never confirmed.
+
+### Changed
+- **The Colors page draws a standard lamp's shade the way the lamp shows it.**
+  The lamp picture at the top and the Shade card put the shade's first colour
+  at the bottom, where the standard lamp's shade starts. The Shade sheet's
+  colour list keeps the first colour in the top row. Other lamps look as
+  before.
 
 ## 1.3.0
 
