@@ -100,8 +100,7 @@ void main() {
       final ble = InMemoryBleClient();
       await primeStatus(ble, '{"wispMac":"$wispMac","source":"manual"}');
       final c = makeContainer(ble: ble);
-      // Hold the autoDispose provider alive so the save runs to its confirm
-      // instead of stopping on disposal.
+      // Hold the autoDispose provider alive so the save runs to its confirm.
       c.listen(wispNotifierProvider(lampId), (_, _) {});
       await c.read(wispNotifierProvider(lampId).future);
       final n = c.read(wispNotifierProvider(lampId).notifier);

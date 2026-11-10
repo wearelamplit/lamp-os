@@ -24,8 +24,9 @@ String _config({int brightness = 80}) =>
     '{"char":"wispConfig","ledType":"GRBW","px":60,"brightness":$brightness,'
     '"driftIntervalMs":90000,"driftFadePct":40,"shuffleSeed":7,"opSeq":3}';
 
-/// Which wisp statuses may confirm a palette or source write, and how a
-/// newer palette save and a second notifier for the same wisp behave.
+/// Which wisp statuses may confirm a palette or source write, how a newer
+/// palette save and a second notifier for the same wisp behave, and which
+/// statuses and palette reads change the palette a notifier holds.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
@@ -230,6 +231,7 @@ void main() {
     expect(n2.draftManualPalette, saved);
     expect(n2.manualPaletteDirty, isFalse);
   });
+
   test('an empty palette read keeps the saved palette and draft', () async {
     const saved = [LampColor(r: 1, g: 2, b: 3, w: 0)];
     const moved = [LampColor(r: 9, g: 8, b: 7, w: 0)];
@@ -255,6 +257,32 @@ void main() {
     expect(n.savedManualPalette, saved);
     expect(n.draftManualPalette, saved);
     expect(n.manualPaletteDirty, isFalse);
+  });
+
+  test('a status without a palette prefix starts no palette read', () async {
+    const saved = [
+      LampColor(r: 1, g: 2, b: 3, w: 0),
+      LampColor(r: 60, g: 0, b: 90, w: 20),
+    ];
+    final ble = _HeldConfigBle();
+    seedPalette(ble, saved);
+    await ble.connect(_lampId);
+    await ble.write(_lampId, BleUuids.controlService, BleUuids.wispStatus,
+        _b(manualWith(saved)));
+    final c = makeContainer(ble);
+    c.listen(wispNotifierProvider(_lampId), (_, _) {});
+    await c.read(wispNotifierProvider(_lampId).future);
+    final n = c.read(wispNotifierProvider(_lampId).notifier);
+    expect(n.savedManualPalette, saved);
+
+    final readsBefore = ble.paletteReads;
+    for (final source in ['manual', 'off', 'osc']) {
+      notify(ble, '{"wispMac":"$_mac","source":"$source"}');
+      await pumpEventQueue();
+    }
+
+    expect(ble.paletteReads, readsBefore);
+    expect(n.savedManualPalette, saved);
   });
 }
 
