@@ -70,6 +70,36 @@ Model fullModel() {
 
 }  // namespace
 
+// The stored JSON a lamp that never touches rotation writes. Pinned
+// literally so a field added to the stored shape cannot slip in at default.
+constexpr const char* kDefaultStoredJson =
+    "{\"lamp\":{\"name\":\"stray\",\"brightness\":100,\"setup\":false,\"named\":false,\"advance"
+    "dEnabled\":false,\"webappEnabled\":true,\"apBootMinutes\":0,\"brightnessCeiling\":170,\"so"
+    "cialMode\":1},\"base\":{\"colorsEditable\":true,\"segments\":[{\"name\":\"Base\",\"px\":0,"
+    "\"colors\":[\"#30078300\"]}]},\"shade\":{\"colorsEditable\":true,\"segments\":[{\"name\":\""
+    "Shade\",\"px\":0,\"colors\":[\"#000000ff\"]}]},\"homeMode\":{\"ssid\":\"\",\"brightness\":"
+    "60,\"enabled\":false,\"networkBound\":false,\"socialDisabled\":true,\"disabledExpressionTy"
+    "pes\":[\"glitchy\"]}}";
+
+constexpr const char* kFullStoredJson =
+    "{\"lamp\":{\"name\":\"jacko\",\"brightness\":255,\"password\":\"p\\\"a\\\\s\\ns\\tw\x01""r"
+    "d/\",\"setup\":true,\"named\":false,\"advancedEnabled\":false,\"webappEnabled\":true,\"apB"
+    "ootMinutes\":7,\"brightnessCeiling\":170,\"socialMode\":1},\"base\":{\"byteOrder\":\"GRBW\""
+    ",\"colorsEditable\":true,\"segments\":[{\"name\":\"Base \\\"main\\\"\",\"px\":35,\"colors\""
+    ":[\"#01020304\",\"#fffe0009\"]},{\"name\":\"Lions\",\"px\":18,\"colors\":[\"#30078300\"]}]"
+    "},\"shade\":{\"colorsEditable\":true,\"segments\":[{\"name\":\"Shade\",\"px\":38,\"colors\""
+    ":[\"#abcdef10\"]}]},\"homeMode\":{\"ssid\":\"caf\xc3""\xa9"" \\b\\f\\r\",\"brightness\":60"
+    ",\"enabled\":true,\"networkBound\":false,\"socialDisabled\":true,\"disabledExpressionTypes"
+    "\":[\"glitchy\",\"pulse\"]}}";
+
+void test_default_stored_json_golden() {
+  TEST_ASSERT_EQUAL_STRING(kDefaultStoredJson, viaWriter(Model{}).c_str());
+}
+
+void test_full_stored_json_golden() {
+  TEST_ASSERT_EQUAL_STRING(kFullStoredJson, viaWriter(fullModel()).c_str());
+}
+
 void test_stored_json_matches_arduinojson() {
   const Model m = fullModel();
   TEST_ASSERT_EQUAL_STRING(viaArduinoJson(m).c_str(), viaWriter(m).c_str());
@@ -150,6 +180,8 @@ void test_write_exactly_keeps_only_an_exact_pass_and_the_last_good_otherwise() {
 
 int main(int, char**) {
   UNITY_BEGIN();
+  RUN_TEST(test_default_stored_json_golden);
+  RUN_TEST(test_full_stored_json_golden);
   RUN_TEST(test_stored_json_matches_arduinojson);
   RUN_TEST(test_default_stored_json_matches_arduinojson);
   RUN_TEST(test_expression_json_matches_arduinojson);
