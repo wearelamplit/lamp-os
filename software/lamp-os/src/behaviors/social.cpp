@@ -5,6 +5,8 @@
 #include <array>
 #include <cstring>
 
+#include <lampos/clock.hpp>
+
 #include "components/network/mesh/mesh_link.hpp"
 
 #include "components/network/mesh/lamp_roster.hpp"
@@ -324,7 +326,7 @@ void SocialBehavior::markGreeted(const uint8_t mac[6], uint32_t nowMs) {
   if (lastGreetedAtMs_.size() > MAX_GREETED_TRACKED) {
     auto oldest = lastGreetedAtMs_.begin();
     for (auto i = lastGreetedAtMs_.begin(); i != lastGreetedAtMs_.end(); ++i) {
-      if (i->second < oldest->second) oldest = i;
+      if (lampos::msSince(nowMs, i->second) > lampos::msSince(nowMs, oldest->second)) oldest = i;
     }
     lastGreetedAtMs_.erase(oldest);
   }

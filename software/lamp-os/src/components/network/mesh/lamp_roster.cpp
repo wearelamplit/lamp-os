@@ -45,11 +45,6 @@ void copyName(char (&dst)[lamp_protocol::HELLO_MAX_NAME + 1],
   std::snprintf(dst, sizeof(dst), "%s", src ? src : "");
 }
 
-// Most-recent sighting across either transport. Eviction and prune sort key.
-uint32_t lastSeen(const RosterEntry& e) {
-  return std::max(e.lastSeenNearMs, e.lastSeenMeshMs);
-}
-
 // A BLE advert carries RGB only. Keep the W a HELLO supplied while the
 // advert's RGB still agrees with it, so a W-heavy colour does not read as dark.
 Color keepHelloWhite(Color advert, Color known) {
@@ -126,13 +121,13 @@ size_t LampRoster::findIndexLocked(const uint8_t mac[6]) const {
   return count_;
 }
 
-void LampRoster::evictOldestIfFullLocked() {
+void LampRoster::evictOldestIfFullLocked(uint32_t nowMs) {
   if (count_ < kCapacity) return;
   size_t oldestIdx = 0;
-  uint32_t oldestMax = lastSeen(store_[0]);
+  uint32_t oldestAge = sinceLastSeen(store_[0].lastSeenNearMs, store_[0].lastSeenMeshMs, nowMs);
   for (size_t i = 1; i < count_; i++) {
-    uint32_t m = lastSeen(store_[i]);
-    if (m < oldestMax) { oldestMax = m; oldestIdx = i; }
+    const uint32_t age = sinceLastSeen(store_[i].lastSeenNearMs, store_[i].lastSeenMeshMs, nowMs);
+    if (age > oldestAge) { oldestAge = age; oldestIdx = i; }
   }
   if (oldestIdx != count_ - 1) {
     store_[oldestIdx] = store_[count_ - 1];
@@ -158,7 +153,7 @@ void LampRoster::addOrUpdateFromBle(const char* name, const uint8_t ble[6],
   xSemaphoreTake(mutex_, portMAX_DELAY);
   size_t idx = findIndexLocked(recoveredMac);
   if (idx == count_) {
-    evictOldestIfFullLocked();
+    evictOldestIfFullLocked(now);
     RosterEntry e;
     copyName(e.name, name);
     std::memcpy(e.mac, recoveredMac, 6);
@@ -222,7 +217,7 @@ void LampRoster::addOrUpdateFromEspNow(const char* name, const uint8_t mac[6],
   // cross-transport contamination in PersonalityEngine's hysteresis.
   size_t idx = findIndexLocked(mac);
   if (idx == count_) {
-    evictOldestIfFullLocked();
+    evictOldestIfFullLocked(now);
     RosterEntry e;
     copyName(e.name, name);
     e.baseColor = base;
@@ -307,8 +302,8 @@ void LampRoster::prune(uint32_t maxAgeMs) {
   uint32_t now = millis();
   xSemaphoreTake(mutex_, portMAX_DELAY);
   for (size_t i = 0; i < count_; ) {
-    uint32_t mostRecent = lastSeen(store_[i]);
-    if (mostRecent != 0 && (now - mostRecent) > maxAgeMs) {
+    const uint32_t age = sinceLastSeen(store_[i].lastSeenNearMs, store_[i].lastSeenMeshMs, now);
+    if (age != UINT32_MAX && age > maxAgeMs) {
       if (i != count_ - 1) store_[i] = store_[count_ - 1];
       count_--;
       generation_++;

@@ -79,7 +79,7 @@ void Compositor::tick() {
     // and gates the strip write on the driver's reset window, so this is a CPU
     // cap. Without it the quiet branch re-runs the
     // paint every loop iteration for no visible gain.
-    if (millis() < lastDrawTimeMs + MINIMUM_FRAME_DRAW_TIME_MS) {
+    if (millis() - lastDrawTimeMs < MINIMUM_FRAME_DRAW_TIME_MS) {
       return;
     }
     lastDrawTimeMs = millis();
@@ -196,7 +196,7 @@ void Compositor::tick() {
     behaviorsComputed = true;
   }
 
-  if (behaviorsComputed && millis() >= lastDrawTimeMs + MINIMUM_FRAME_DRAW_TIME_MS) {
+  if (behaviorsComputed && millis() - lastDrawTimeMs >= MINIMUM_FRAME_DRAW_TIME_MS) {
     lastDrawTimeMs = millis();
     behaviorsComputed = false;
     if (preFlushHook) preFlushHook();

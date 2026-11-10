@@ -79,6 +79,7 @@
 #include "util/gradient.hpp"
 #include "util/heap_probe.hpp"
 #include "util/levels.hpp"
+#include "util/uptime.hpp"
 
 lamp::NvsConfigStore configStore;
 
@@ -576,7 +577,7 @@ void lamp::Lamp::tickBootRecovery() {
     pinMode(0, INPUT_PULLUP);
     s_pinReady = true;
   }
-  if (!bootRecovery_.update(digitalRead(0) == LOW, millis())) return;
+  if (!bootRecovery_.update(digitalRead(0) == LOW, lamp::uptimeMs())) return;
   ::config.lamp.password.clear();
   ::config.persistConfig("boot_recovery");
   // BLE auth reads the password live, so the app is usable immediately. The

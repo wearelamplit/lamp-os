@@ -2,6 +2,8 @@
 
 #include <cstring>
 
+#include <lampos/clock.hpp>
+
 #include "ota_channel.hpp"
 
 #include "firmware_signature.hpp"
@@ -127,12 +129,12 @@ void FirmwareReceiver::tick(uint32_t nowMs) {
     case State::Idle:
       // Inter-session quiet hold expiry: a prior session deferred its exitQuiet
       // (abortOta / State::Failed) so the strip doesn't flash between
-      // back-to-back OFFERs. quietHoldUntilMs_==0 is the sentinel; without the
-      // !=0 guard, nowMs>=0 is always true and any Idle tick exits prematurely.
-      if (quietHeld_ && quietHoldUntilMs_ != 0 && nowMs >= quietHoldUntilMs_) {
+      // back-to-back OFFERs.
+      if (quietHeld_ && quietHoldPending_ &&
+          lampos::timeReached(nowMs, quietHoldUntilMs_)) {
         ::lamp::ota_quiet_mode::exitQuiet();
         quietHeld_        = false;
-        quietHoldUntilMs_ = 0;
+        quietHoldPending_ = false;
       }
       // Reclaim the chunk bitmap once back in Idle. The gate is disarmed and the
       // abort/verify path that set Idle ran a prior tick, so any Core 0 write has
@@ -238,6 +240,7 @@ void FirmwareReceiver::tick(uint32_t nowMs) {
       // a fast multi-distributor handoff. The Idle tick expires the hold.
       if (quietHeld_) {
         quietHoldUntilMs_ = nowMs + kInterSessionQuietHoldMs;
+        quietHoldPending_ = true;
       }
       return;
     }
@@ -531,7 +534,7 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
   // transport) but still drops non-OTA writes. Exited in abortOta, the Failed
   // tick, and verifyAndApply.
   // Inter-session hold: skip enterQuiet when quietHeld_ is already set (a prior
-  // session deferred its exit). Clear quietHoldUntilMs_ so the Idle tick won't
+  // session deferred its exit). Disarm the hold so the Idle tick won't
   // expire-and-exit mid-session.
   if (!quietHeld_) {
     ::lamp::ota_quiet_mode::enterQuiet(
@@ -539,7 +542,7 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
         /*visible=*/fsHooks_ == nullptr);
     quietHeld_ = true;
   }
-  quietHoldUntilMs_ = 0;
+  quietHoldPending_ = false;
 
 #ifdef LAMP_DEBUG
   Serial.printf("[fw_receiver] OFFER from %02X:%02X:%02X:%02X:%02X:%02X "
@@ -623,7 +626,7 @@ void FirmwareReceiver::onDoneOnLoop(const PendingFirmwareControl& ctrl,
     // path leaves quiet accounting balanced; the firmware path reboots past it.
     ::lamp::ota_quiet_mode::exitQuiet();
     quietHeld_        = false;
-    quietHoldUntilMs_ = 0;
+    quietHoldPending_ = false;
     // FS image OTA finalizes without a reboot: SPIFFS is only read by the
     // onboarding webapp, so a remount makes the new UI live. Firmware OTA
     // reboots.
@@ -963,6 +966,7 @@ void FirmwareReceiver::abortOta() {
 #else
     quietHoldUntilMs_ = kInterSessionQuietHoldMs;
 #endif
+    quietHoldPending_ = true;
   }
 }
 

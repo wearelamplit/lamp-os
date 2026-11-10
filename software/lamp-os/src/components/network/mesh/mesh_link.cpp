@@ -11,6 +11,7 @@
 #include "components/firmware/fs_ota.hpp"
 #include "components/network/mesh/proximity.hpp"
 #include "components/network/protocol/command_auth.hpp"
+#include "util/uptime.hpp"
 #include "version.hpp"
 
 #include <lampos/blended_identity.hpp>
@@ -83,8 +84,9 @@ void MeshLink::tick() {
     prevOtaState_ = otaState;
     lastHelloMs_ = 0;
   }
-  if (lastHelloMs_ == 0 && now < helloBootPhaseMs_) return;
-  if (now - lastHelloMs_ < helloIntervalMs(now) && lastHelloMs_ != 0) return;
+  const uint64_t uptime = uptimeMs();
+  if (lastHelloMs_ == 0 && uptime < helloBootPhaseMs_) return;
+  if (now - lastHelloMs_ < helloIntervalMs(uptime) && lastHelloMs_ != 0) return;
   lastHelloMs_ = now;
   // Only a receiver goes silent; it needs the airtime for the chunk stream. A
   // pure distributor keeps emitting so its otaState=Sending reaches peers.

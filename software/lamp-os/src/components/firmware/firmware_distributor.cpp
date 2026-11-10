@@ -2,6 +2,8 @@
 
 #include <cstring>
 
+#include <lampos/clock.hpp>
+
 #include "firmware_receiver.hpp"  // FirmwareTransport interface
 #include "firmware_signature.hpp"  // kLsigFooterLen
 #include "ota_channel.hpp"
@@ -577,8 +579,7 @@ void FirmwareDistributor::tick(uint32_t nowMs) {
     }
 
     case State::OfferSent: {
-      if (nowMs >= stateEnteredMsLocal &&
-          (nowMs - stateEnteredMsLocal) > kAcceptTimeoutMs) {
+      if (lampos::msSince(nowMs, stateEnteredMsLocal) > kAcceptTimeoutMs) {
         FWDIST_LOGLN("[fwdist] OFFER timeout; backing off peer");
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
         portENTER_CRITICAL(&stateMux_);
@@ -622,8 +623,7 @@ void FirmwareDistributor::tick(uint32_t nowMs) {
       uint16_t lastSentChunkLocal  = lastSentChunk_;
 #endif
       if (nextChunkLocal >= totalChunksLocal) break;
-      if (nowMs >= lastSentMsLocal &&
-          (nowMs - lastSentMsLocal) > kChunkResendMs) {
+      if (lampos::msSince(nowMs, lastSentMsLocal) > kChunkResendMs) {
         if (currentRetriesLocal >= kRetriesPerChunk) {
           FWDIST_LOGLN("[fwdist] chunk retry budget exhausted; failing peer");
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
@@ -656,8 +656,7 @@ void FirmwareDistributor::tick(uint32_t nowMs) {
     }
 
     case State::Finalizing: {
-      if (nowMs >= stateEnteredMsLocal &&
-          (nowMs - stateEnteredMsLocal) > kFinalizeTimeoutMs) {
+      if (lampos::msSince(nowMs, stateEnteredMsLocal) > kFinalizeTimeoutMs) {
         FWDIST_LOGLN("[fwdist] FINALIZE timeout; short-backing off peer");
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
         portENTER_CRITICAL(&stateMux_);
@@ -851,7 +850,7 @@ bool FirmwareDistributor::peerIsInBackoff(const uint8_t mac[6],
     if (!p.used) continue;
     if (!macsEqual(p.mac, mac)) continue;
     if (p.persistent) return true;
-    if (nowMs < p.backoffUntilMs) return true;
+    if (lampos::msSince(nowMs, p.sinceMs) < p.durationMs) return true;
   }
   return false;
 }
@@ -861,8 +860,9 @@ void FirmwareDistributor::notePeerBackoff(const uint8_t mac[6], uint32_t nowMs,
                                           bool persistent) {
   for (size_t i = 0; i < kPenaltyRingSize; ++i) {
     if (penalties_[i].used && macsEqual(penalties_[i].mac, mac)) {
-      penalties_[i].backoffUntilMs = nowMs + durationMs;
-      penalties_[i].persistent     = persistent;
+      penalties_[i].sinceMs    = nowMs;
+      penalties_[i].durationMs = durationMs;
+      penalties_[i].persistent = persistent;
       return;
     }
   }
@@ -876,13 +876,14 @@ void FirmwareDistributor::notePeerBackoff(const uint8_t mac[6], uint32_t nowMs,
     if (!p.used) {
       if (freeSlot < 0) freeSlot = static_cast<int>(i);
     } else if (!p.persistent) {
-      if (nowMs >= p.backoffUntilMs) {
+      if (lampos::msSince(nowMs, p.sinceMs) >= p.durationMs) {
         if (expiredTransient < 0) expiredTransient = static_cast<int>(i);
       } else if (activeTransient < 0) {
         activeTransient = static_cast<int>(i);
       }
     } else if (oldestPersistent < 0 ||
-               p.backoffUntilMs < penalties_[oldestPersistent].backoffUntilMs) {
+               lampos::msSince(nowMs, p.sinceMs) >
+                   lampos::msSince(nowMs, penalties_[oldestPersistent].sinceMs)) {
       oldestPersistent = static_cast<int>(i);
     }
   }
@@ -901,7 +902,8 @@ void FirmwareDistributor::notePeerBackoff(const uint8_t mac[6], uint32_t nowMs,
   penalties_[slot].used           = true;
   penalties_[slot].persistent     = persistent;
   std::memcpy(penalties_[slot].mac, mac, 6);
-  penalties_[slot].backoffUntilMs = nowMs + durationMs;
+  penalties_[slot].sinceMs        = nowMs;
+  penalties_[slot].durationMs     = durationMs;
 }
 
 void FirmwareDistributor::recordPeerFailure(uint32_t nowMs) {

@@ -22,9 +22,8 @@ static_assert(LAMP_HELLO_INTERVAL_MS == 30000,
 
 namespace lamp {
 
-// millis() is uptime-since-boot, so uptimeMs < window naturally IS the boot
-// window.
-inline uint32_t helloIntervalMs(uint32_t uptimeMs) {
+// `uptimeMs` is milliseconds since boot from a clock that never wraps.
+inline uint32_t helloIntervalMs(uint64_t uptimeMs) {
   return uptimeMs < LAMP_HELLO_BURST_WINDOW_MS ? LAMP_HELLO_BURST_INTERVAL_MS
                                                : LAMP_HELLO_INTERVAL_MS;
 }

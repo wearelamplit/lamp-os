@@ -84,6 +84,29 @@ void test_sort_partitions_near_first() {
   }
 }
 
+// Just after the millis() wrap, a mesh-only peer heard 500 ms ago outranks
+// one heard 2 s ago, before the wrap.
+void test_most_recent_wins_across_the_wrap() {
+  const uint32_t now = 1000;
+  const Entry fresh = meshE(500);
+  const Entry stale = meshE(UINT32_MAX - 999);
+  TEST_ASSERT_TRUE(lamp::nearbyMoreRelevant(fresh, stale, now, kMaxAgeMs));
+  TEST_ASSERT_FALSE(lamp::nearbyMoreRelevant(stale, fresh, now, kMaxAgeMs));
+}
+
+// A peer's last sighting is its most recent one on either transport, even
+// when the other transport's stamp is from before the wrap.
+void test_most_recent_seen_across_the_wrap() {
+  const uint32_t now = 1000;
+  const uint32_t beforeWrap = UINT32_MAX - 300000;
+  TEST_ASSERT_EQUAL_UINT32(500, lamp::mostRecentSeenMs(beforeWrap, 500, now));
+  TEST_ASSERT_EQUAL_UINT32(500, lamp::mostRecentSeenMs(500, beforeWrap, now));
+  TEST_ASSERT_EQUAL_UINT32(beforeWrap, lamp::mostRecentSeenMs(beforeWrap, 0, now));
+  TEST_ASSERT_EQUAL_UINT32(0, lamp::mostRecentSeenMs(0, 0, now));
+  TEST_ASSERT_EQUAL_UINT32(500, lamp::sinceLastSeen(beforeWrap, 500, now));
+  TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, lamp::sinceLastSeen(0, 0, now));
+}
+
 }  // namespace
 
 int main(int, char**) {
@@ -93,5 +116,7 @@ int main(int, char**) {
   RUN_TEST(test_transitive);
   RUN_TEST(test_near_beats_mesh_regardless);
   RUN_TEST(test_sort_partitions_near_first);
+  RUN_TEST(test_most_recent_wins_across_the_wrap);
+  RUN_TEST(test_most_recent_seen_across_the_wrap);
   return UNITY_END();
 }

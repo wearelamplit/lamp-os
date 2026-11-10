@@ -18,6 +18,8 @@
 #include <memory>
 #include <string>
 
+#include <lampos/clock.hpp>
+
 #include "expr_catalog.h"
 #include "components/firmware/firmware_receiver.hpp"
 #include "components/firmware/ota_quiet_mode.hpp"
@@ -77,7 +79,7 @@ static constexpr uint16_t kHttpPort = 80;
 static void bumpDeadline() {
   const uint32_t now = millis();
   const uint32_t idle = now + LAMP_WEBAPP_IDLE_TIMEOUT_MS;
-  if (idle > s_deadlineMs) s_deadlineMs = idle;
+  if (lampos::isLater(idle, s_deadlineMs)) s_deadlineMs = idle;
 }
 
 // 128 covers 5 × (9 hex + 3 quote/comma) + brackets + NUL with headroom.

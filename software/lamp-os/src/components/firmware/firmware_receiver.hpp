@@ -351,6 +351,7 @@ class FirmwareReceiver {
   // mirror of the distributor cooldown, minus the last-session indicator hold.
   static constexpr uint32_t kInterSessionQuietHoldMs = 10000;
   bool     quietHeld_              = false;
+  bool     quietHoldPending_       = false;
   uint32_t quietHoldUntilMs_       = 0;
 };
 

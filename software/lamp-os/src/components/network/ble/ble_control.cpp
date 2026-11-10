@@ -542,8 +542,7 @@ static void buildNearbyJson(uint32_t& membershipHashOut,
     if (p.hasOtaSendingTo) fnv1a(hash, p.otaSendingTo, 6);
     out += "{\"name\":\"";
     lamp::appendJsonEscaped(out, p.name);
-    // Max of both transport timestamps is the canonical lastSeen.
-    const uint32_t lastSeenMs = std::max(p.lastSeenNearMs, p.lastSeenMeshMs);
+    const uint32_t lastSeenMs = lamp::mostRecentSeenMs(p.lastSeenNearMs, p.lastSeenMeshMs, now);
     snprintf(buf, sizeof(buf), "\",\"lastSeenMs\":%lu,\"viaBle\":%s,\"viaEspNow\":%s,\"near\":%s",
              static_cast<unsigned long>(lastSeenMs),
              p.lastSeenNearMs != 0 ? "true" : "false",

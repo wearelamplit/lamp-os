@@ -252,9 +252,10 @@ class FirmwareDistributor {
   static constexpr size_t kPenaltyRingSize = 8;
   struct PeerPenalty {
     uint8_t  mac[6];
-    uint32_t backoffUntilMs;
+    uint32_t sinceMs;
+    uint32_t durationMs;
     bool     used;
-    // True = never expires (backoffUntilMs unused). Session-lifetime block,
+    // True = never expires (durationMs unused). Session-lifetime block,
     // not a timed backoff.
     bool     persistent;
   };

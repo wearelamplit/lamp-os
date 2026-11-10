@@ -451,7 +451,7 @@ class LampRoster {
   size_t findIndexLocked(const uint8_t mac[6]) const;
   // Caller must hold the mutex. Evicts the entry with the oldest combined
   // last-seen if the store is at capacity.
-  void evictOldestIfFullLocked();
+  void evictOldestIfFullLocked(uint32_t nowMs);
 };
 
 extern LampRoster lampRoster;  // single global instance, defined in .cpp
