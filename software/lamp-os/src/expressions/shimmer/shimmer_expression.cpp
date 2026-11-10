@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <algorithm>
 
+#include <lampos/clock.hpp>
+
 #include "expressions/primitives.hpp"
 #include "util/fade.hpp"
 #include "util/uptime.hpp"
@@ -107,7 +109,7 @@ void ShimmerExpression::control() {
 
 void ShimmerExpression::drawBurst() {
   const uint32_t nowMs = millis();
-  const uint32_t deltaMs = (lastUpdateMs_ == 0) ? 0 : nowMs - lastUpdateMs_;
+  const uint32_t deltaMs = (lastUpdateMs_ == 0) ? 0 : lampos::frameDeltaMs(nowMs, lastUpdateMs_);
   lastUpdateMs_ = nowMs;
   const uint32_t elapsedMs = uptimeSince(burstStartMs_);
 
@@ -148,7 +150,7 @@ void ShimmerExpression::draw() {
     return;
   }
   const uint32_t nowMs = millis();
-  const uint32_t deltaMs = (lastUpdateMs_ == 0) ? 0 : nowMs - lastUpdateMs_;
+  const uint32_t deltaMs = (lastUpdateMs_ == 0) ? 0 : lampos::frameDeltaMs(nowMs, lastUpdateMs_);
   lastUpdateMs_ = nowMs;
 
   const bool paint = shouldAffectBuffer() && zone_.size() > 0 && fb &&

@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <algorithm>
 
+#include <lampos/clock.hpp>
+
 #include "util/fade.hpp"
 
 namespace lamp {
@@ -45,7 +47,7 @@ void BreathingExpression::updateBreathPhase() {
     return;
   }
 
-  uint32_t deltaMs = currentMs - lastBreathUpdateMs;
+  const uint32_t deltaMs = lampos::frameDeltaMs(currentMs, lastBreathUpdateMs);
 
   // Update phase based on breath speed
   // breathSpeedMs is the total cycle time, so increment is deltaMs / breathSpeedMs

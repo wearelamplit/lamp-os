@@ -7,7 +7,9 @@
 
 #include <lampos/clock.hpp>
 
+using lampos::frameDeltaMs;
 using lampos::isLater;
+using lampos::kMaxFrameDeltaMs;
 using lampos::kStampLeadMs;
 using lampos::kRetiredAgeMs;
 using lampos::msSince;
@@ -94,6 +96,26 @@ void test_retired_stamp_stays_aged_out_a_wrap_later() {
   TEST_ASSERT_TRUE(msSince(aWrapLater, held) > kRetiredAgeMs / 2);
 }
 
+void test_frame_delta_passes_a_normal_frame_across_the_wrap() {
+  TEST_ASSERT_EQUAL_UINT32(16, frameDeltaMs(10, UINT32_MAX - 5));
+  TEST_ASSERT_EQUAL_UINT32(kMaxFrameDeltaMs - 1,
+                           frameDeltaMs(kMaxFrameDeltaMs - 1, 0));
+  TEST_ASSERT_EQUAL_UINT32(kMaxFrameDeltaMs, frameDeltaMs(kMaxFrameDeltaMs, 0));
+}
+
+// Frozen for three weeks, then for long enough that the wrap leaves the raw
+// delta at ten days: either way the first frame steps one capped frame.
+void test_frame_delta_caps_the_first_frame_after_weeks_frozen() {
+  constexpr uint64_t kDayMs = 24ull * 60 * 60 * 1000;
+  const uint32_t last = UINT32_MAX - 1000;
+  TEST_ASSERT_EQUAL_UINT32(kMaxFrameDeltaMs,
+                           frameDeltaMs(static_cast<uint32_t>(last + 21 * kDayMs), last));
+  const uint64_t frozen = (1ull << 32) + 10 * kDayMs;
+  TEST_ASSERT_EQUAL_UINT32(kMaxFrameDeltaMs,
+                           frameDeltaMs(static_cast<uint32_t>(last + frozen), last));
+  TEST_ASSERT_EQUAL_UINT32(kMaxFrameDeltaMs, frameDeltaMs(last + kMaxFrameDeltaMs + 1, last));
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
@@ -106,5 +128,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_retire_stamp_leaves_a_stamp_younger_than_half_a_wrap);
   RUN_TEST(test_retire_stamp_holds_an_older_stamp_at_half_a_wrap);
   RUN_TEST(test_retired_stamp_stays_aged_out_a_wrap_later);
+  RUN_TEST(test_frame_delta_passes_a_normal_frame_across_the_wrap);
+  RUN_TEST(test_frame_delta_caps_the_first_frame_after_weeks_frozen);
   return UNITY_END();
 }

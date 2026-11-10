@@ -672,7 +672,7 @@ void test_knocked_out_pixels_stay_put() {
 static constexpr uint32_t kPerMs5 = static_cast<uint32_t>((uint64_t{1} << 32) / 5000);
 
 // Quiet entry's reset puts the next frame at the settled position,
-// moved by at most one kMaxRotationStepMs step.
+// moved by at most one lampos::kMaxFrameDeltaMs step.
 void test_reset_resumes_from_the_settled_frame() {
   Rig r(Surface::Shade);
   const RoleScene saved = rotatingScene(stopsA(), 5, RotationDir::Up);
@@ -695,7 +695,7 @@ void test_reset_resumes_from_the_settled_frame() {
   r.tick(r.now + 10000);
   const auto settled = r.expect(saved, r.now);
   assertFrame(settled, r.fb.buffer);
-  TEST_ASSERT_EQUAL_HEX32(0u - kMaxRotationStepMs * kPerMs5, r.mirror.phase());
+  TEST_ASSERT_EQUAL_HEX32(0u - lampos::kMaxFrameDeltaMs * kPerMs5, r.mirror.phase());
 
   // Raw content on show at quiet entry resumes from the settled position too.
   r.rotate(saved, 60);
@@ -707,7 +707,7 @@ void test_reset_resumes_from_the_settled_frame() {
   r.cfg.showScene(saved, 0);
   r.step();
   assertFrame(r.expect(saved, r.now), r.fb.buffer);
-  TEST_ASSERT_EQUAL_HEX32(0u - kMaxRotationStepMs * kPerMs5, r.mirror.phase());
+  TEST_ASSERT_EQUAL_HEX32(0u - lampos::kMaxFrameDeltaMs * kPerMs5, r.mirror.phase());
 }
 
 // Home mode with social off and every expression type disabled still

@@ -42,4 +42,16 @@ constexpr uint32_t retireStamp(uint32_t nowMs, uint32_t stampMs) {
   return held != 0 ? held : UINT32_MAX;
 }
 
+// The most time one animation frame steps by. Smaller turns a busy loop into
+// slow motion. Larger lets a stall, or weeks frozen in home mode, jump the
+// animation on resume.
+inline constexpr uint32_t kMaxFrameDeltaMs = 100;
+
+// Time since the previous frame at lastMs, capped at kMaxFrameDeltaMs, so the
+// first frame after any length of idle steps like a normal one.
+constexpr uint32_t frameDeltaMs(uint32_t nowMs, uint32_t lastMs) {
+  const uint32_t delta = msSince(nowMs, lastMs);
+  return delta < kMaxFrameDeltaMs ? delta : kMaxFrameDeltaMs;
+}
+
 }  // namespace lampos

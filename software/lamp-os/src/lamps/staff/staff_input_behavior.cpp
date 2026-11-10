@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+#include <lampos/clock.hpp>
+
 #include "behaviors/configurator.hpp"
 #include "core/behavior_context.hpp"
 #include "core/hw_config.hpp"
@@ -115,7 +117,7 @@ void StaffInputBehavior::control() {
   if (!ctx) return;
 
   if (scrubbing_) {
-    const uint32_t dt = now - lastScrubMs_;
+    const uint32_t dt = lampos::frameDeltaMs(now, lastScrubMs_);
     lastScrubMs_ = now;
     moodHue_ = static_cast<uint16_t>(
         (moodHue_ + dt * kScrubDegPerSec / 1000) % 360);

@@ -1,6 +1,7 @@
 #include "expressions/spotty/spotty_expression.hpp"
 #include <Arduino.h>
 #include <algorithm>
+#include <lampos/clock.hpp>
 #include "expressions/spotty/spotty_math.hpp"
 #include "util/fade.hpp"
 
@@ -71,7 +72,7 @@ void SpottyExpression::control() {
 
 void SpottyExpression::draw() {
   const uint32_t nowMs = millis();
-  const uint32_t deltaMs = (lastUpdateMs_ == 0) ? 0 : nowMs - lastUpdateMs_;
+  const uint32_t deltaMs = (lastUpdateMs_ == 0) ? 0 : lampos::frameDeltaMs(nowMs, lastUpdateMs_);
   lastUpdateMs_ = nowMs;
 
   const uint16_t regionSize = zone_.size();
