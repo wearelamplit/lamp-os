@@ -237,7 +237,6 @@ class ControlNotifier extends _$ControlNotifier {
     // is keepAlive, so this reference stays valid past this notifier's own dispose.
     final saveStatus = ref.read(lampSaveStatusProvider(_deviceId).notifier);
     _rebootReloadOwnsLink = true;
-    _reconnectTimer?.cancel();
     try {
       // Initial grace: give the lamp a head start on the reboot so the
       // first attempt isn't guaranteed to race the disconnect. ~2s lets
@@ -297,6 +296,9 @@ class ControlNotifier extends _$ControlNotifier {
       }
     } finally {
       _rebootReloadOwnsLink = false;
+      // A ladder step scheduled before or during the reload would otherwise
+      // fire onto the link the reload restored.
+      _reconnectTimer?.cancel();
       saveStatus.stop();
     }
   }
@@ -2021,7 +2023,6 @@ class ControlNotifier extends _$ControlNotifier {
   static const int _cycleAdapterAttempt = 3;
 
   void _scheduleReconnect() {
-    if (_rebootReloadOwnsLink) return;
     final cur = state.value;
     if (cur == null) return;
     final attempt = cur.reconnectAttempt;

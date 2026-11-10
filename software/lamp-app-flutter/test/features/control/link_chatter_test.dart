@@ -68,6 +68,14 @@ class _Lamp extends InMemoryBleClient {
   /// Makes every GATT op throw as a link the phone still lists but is dead.
   bool zombie = false;
 
+  /// Withholds the connected edge from watchers, as the phone's BLE stack
+  /// sometimes does.
+  bool missConnectEdges = false;
+
+  @override
+  Stream<bool> watchConnected(String deviceId) =>
+      super.watchConnected(deviceId).where((up) => !(up && missConnectEdges));
+
   int sectionReads(String name) =>
       ops.where((o) => o == 'section $name').length;
 
@@ -277,6 +285,32 @@ void main() {
         _close(r);
       });
     });
+
+    for (final missEdge in [false, true]) {
+      test('a long ladder step pending when the save starts never fires '
+          '(connect edge missed: $missEdge)', () {
+        fakeAsync((async) {
+          final r = _open(async);
+          r.ble
+            ..rebootTakes = const Duration(seconds: 10)
+            ..missConnectEdges = missEdge;
+          r.ble._reboot();
+          // Four failed steps leave the next one 8 s out.
+          async.elapse(const Duration(seconds: 10));
+          expect(r.state.value!.reconnectAttempt, greaterThanOrEqualTo(4));
+          final connects = r.ble.connects;
+          final cycles = r.ble.cycles;
+          final s = r.state.value!;
+          r.control.applyAdvancedLedsAndReboot(base: s.base, shade: s.shade);
+          async.elapse(const Duration(minutes: 2));
+
+          expect(r.ble.connects - connects, 1);
+          expect(r.ble.cycles - cycles, 0);
+          expect(r.connected, isTrue);
+          _close(r);
+        });
+      });
+    }
 
     test('an unsolicited drop still climbs the reconnect ladder', () {
       fakeAsync((async) {
