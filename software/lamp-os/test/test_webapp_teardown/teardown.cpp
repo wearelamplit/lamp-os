@@ -94,7 +94,7 @@ void test_raise_between_load_and_hold_wins() {
   std::atomic<uint32_t> deadline{1000};
   const uint32_t now = 5000;
   const uint32_t seen = deadline.load();
-  webapp::raiseDeadline(deadline, now + 120000);
+  webapp::raiseDeadline(deadline, now + 120000, deadline.load());
   webapp::holdPassedDeadline(deadline, now, seen);
   TEST_ASSERT_EQUAL_UINT32(now + 120000, deadline.load());
 }
@@ -102,12 +102,21 @@ void test_raise_between_load_and_hold_wins() {
 // A raise never lowers a later deadline, and a held deadline is raised past.
 void test_raise_only_moves_the_deadline_later() {
   std::atomic<uint32_t> deadline{9000};
-  webapp::raiseDeadline(deadline, 8000);
+  webapp::raiseDeadline(deadline, 8000, deadline.load());
   TEST_ASSERT_EQUAL_UINT32(9000, deadline.load());
   webapp::holdPassedDeadline(deadline, 9500, deadline.load());
   TEST_ASSERT_EQUAL_UINT32(9500, deadline.load());
-  webapp::raiseDeadline(deadline, 9600);
+  webapp::raiseDeadline(deadline, 9600, deadline.load());
   TEST_ASSERT_EQUAL_UINT32(9600, deadline.load());
+}
+
+// Another write raised the deadline after this raise loaded it: the raise
+// must not lower it.
+void test_raise_never_lowers_a_later_write() {
+  std::atomic<uint32_t> deadline{9000};
+  const uint32_t staleSeen = 1000;
+  webapp::raiseDeadline(deadline, 8000, staleSeen);
+  TEST_ASSERT_EQUAL_UINT32(9000, deadline.load());
 }
 
 int main(int, char**) {
@@ -123,5 +132,6 @@ int main(int, char**) {
   RUN_TEST(test_hold_leaves_a_deadline_ahead);
   RUN_TEST(test_raise_between_load_and_hold_wins);
   RUN_TEST(test_raise_only_moves_the_deadline_later);
+  RUN_TEST(test_raise_never_lowers_a_later_write);
   return UNITY_END();
 }

@@ -3,6 +3,8 @@
 #include <atomic>
 #include <cstdint>
 
+#include <lampos/clock.hpp>
+
 namespace webapp {
 
 // Boot-window expiry decision, inline so it's unit-testable without WiFi.
@@ -28,12 +30,10 @@ inline uint32_t holdPassedDeadline(uint32_t now, uint32_t deadlineMs) {
   return static_cast<int32_t>(now - deadlineMs) >= 0 ? now : deadlineMs;
 }
 
-// Raises `deadline` to `idleMs` when that is later. Safe against a concurrent
-// holdPassedDeadline: neither lowers what the other wrote.
-inline void raiseDeadline(std::atomic<uint32_t>& deadline, uint32_t idleMs) {
-  uint32_t seen = deadline.load();
-  while (static_cast<int32_t>(idleMs - seen) > 0 &&
-         !deadline.compare_exchange_weak(seen, idleMs)) {
+// Raises `deadline`, whose value the caller loaded as `seen`, to `idleMs`
+// when that is later. A write that lands after the load is never lowered.
+inline void raiseDeadline(std::atomic<uint32_t>& deadline, uint32_t idleMs, uint32_t seen) {
+  while (lampos::isLater(idleMs, seen) && !deadline.compare_exchange_weak(seen, idleMs)) {
   }
 }
 
