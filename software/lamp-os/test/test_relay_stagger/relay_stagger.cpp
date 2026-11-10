@@ -122,6 +122,7 @@ void test_exactly_once() {
   }
   TEST_ASSERT_EQUAL_UINT32(kFrames, s.window().queued);
   TEST_ASSERT_EQUAL_UINT32(0, s.window().failOpen);
+  TEST_ASSERT_EQUAL_UINT32(0, s.window().dropped);
 }
 
 // Serviced every ms with a credit ready, a frame goes out at its fire time:
@@ -225,6 +226,7 @@ void test_late_cap() {
   TEST_ASSERT_EQUAL_UINT32(1, s.window().dropped);
   for (uint32_t t = fire + kMaxRelayLateMs + 1; t < fire + 3000; ++t) link.service(s, t);
   TEST_ASSERT_EQUAL_UINT32(kMaxRelayLateMs, link.attempts);
+  TEST_ASSERT_EQUAL_UINT32(1, s.window().dropped);
   const auto g = frameFor(12);
   TEST_ASSERT_TRUE(s.enqueue(g.data(), g.size(), kType, kWisp, 12, fire + 3000));
 }

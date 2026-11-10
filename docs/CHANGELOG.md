@@ -74,9 +74,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   the wisp now waits a short moment of its own (up to 0.15 seconds) before
   repeating the message for lamps farther out, instead of every nearby lamp
   repeating it at the same instant, where the copies can collide. Lamps
-  repeating each other's check-ins now also pick their own moment. Nothing
-  changes on screen, and lamps on older firmware keep working beside updated
-  ones.
+  repeating each other's check-ins now also pick their own moment. Lamps on
+  older firmware keep working beside updated ones. Holding those messages
+  takes about 2 KB of the lamp's memory.
 - **The wisp sends less status chatter.** Opening the wisp screen in the app,
   the wisp's WiFi or Ethernet connecting or dropping, and its OSC feed going
   quiet or coming back now send a status update once (twice at most, 5

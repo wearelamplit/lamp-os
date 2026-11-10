@@ -553,8 +553,10 @@ scale with the number of peers or the mesh's message rate, so each is bounded:
   WISP_HELLO / WISP_PALETTE slots of 224, sized for two wisps. Nothing
   allocates; a full table relays inline. The loop sends a due relay only while
   a TX credit is free (`MeshLink::txReady`), so queued relays share the 6
-  credits with the cascade drain and the mesh resends and never count in
-  `txrefused`; an inline relay can.
+  credits with the cascade drain and the mesh resends without hammering a
+  stalled driver. A queued relay is refused, counted in `txrefused` and retried
+  next pass only when another task takes the last credit between the check and
+  the submit; an inline relay is refused like any other send.
 - **Cascade fan-out.** A locally fired cascade (a cascading expression, or the
   app's Test) reaches every mesh peer, closest first. `CascadeScheduler`
   (`expressions/cascade_scheduler.hpp`) holds up to two fan-outs (peers and one
