@@ -28,14 +28,17 @@ constexpr uint32_t msSince(uint32_t nowMs, uint32_t stampMs) {
   return age > UINT32_MAX - kStampLeadMs ? 0 : age;
 }
 
-// `stampMs` once it has aged past windowMs, held at windowMs + 1 old so it
-// keeps reading as outside the window instead of coming round to read as
-// recent one wrap later; any other stamp comes back unchanged. 0 means never
-// set and comes back as is, and a set stamp never comes back as 0. The owner
-// calls it at least once per wrap.
-constexpr uint32_t retireStamp(uint32_t nowMs, uint32_t stampMs, uint32_t windowMs) {
-  if (stampMs == 0 || msSince(nowMs, stampMs) <= windowMs) return stampMs;
-  const uint32_t held = nowMs - windowMs - 1;
+// Oldest age retireStamp lets a stamp reach: half a wrap, 24.8 days.
+inline constexpr uint32_t kRetiredAgeMs = 1u << 31;
+
+// `stampMs` held no more than kRetiredAgeMs old, so it reads as outside any
+// window shorter than that instead of coming round to read as recent one wrap
+// later; a younger stamp, or one up to kStampLeadMs ahead, comes back
+// unchanged, and a held stamp is never 0. The owner calls it at least once
+// per kRetiredAgeMs and does not pass a 0 "never set" sentinel.
+constexpr uint32_t retireStamp(uint32_t nowMs, uint32_t stampMs) {
+  if (msSince(nowMs, stampMs) <= kRetiredAgeMs) return stampMs;
+  const uint32_t held = nowMs - kRetiredAgeMs;
   return held != 0 ? held : UINT32_MAX;
 }
 

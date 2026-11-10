@@ -227,9 +227,8 @@ class LampRoster {
                                  lamp_protocol::LampVariant::Unknown);
 
   // Drop entries whose most-recent sighting (max of the two transports)
-  // is older than `maxAgeMs`, and retire a kept entry's older sighting stamps
-  // (lampos::retireStamp), so every window read off them must be no wider
-  // than `maxAgeMs`. Call at least once per millis() wrap.
+  // is older than `maxAgeMs`, and retire a kept entry's sighting stamps
+  // (lampos::retireStamp). Call at least once per lampos::kRetiredAgeMs.
   void prune(uint32_t maxAgeMs);
 
   // Peers seen near within maxAgeMs, sorted by RSSI descending (front =

@@ -312,9 +312,9 @@ void LampRoster::prune(uint32_t maxAgeMs) {
       continue;
     }
     RosterEntry& e = store_[i];
-    e.lastSeenNearMs = lampos::retireStamp(now, e.lastSeenNearMs, maxAgeMs);
-    e.lastSeenMeshMs = lampos::retireStamp(now, e.lastSeenMeshMs, maxAgeMs);
-    e.lastSeenBleMs = lampos::retireStamp(now, e.lastSeenBleMs, maxAgeMs);
+    for (uint32_t* stamp : {&e.lastSeenNearMs, &e.lastSeenMeshMs, &e.lastSeenBleMs}) {
+      if (*stamp != 0) *stamp = lampos::retireStamp(now, *stamp);
+    }
     i++;
   }
   xSemaphoreGive(mutex_);

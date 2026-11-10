@@ -76,7 +76,7 @@ void setBrightnessFade(uint8_t source, uint8_t target, uint32_t startMs) {
 
 void retireBrightnessFade(uint32_t nowMs) {
   s_userBrightnessFadeStartMs =
-      lampos::retireStamp(nowMs, s_userBrightnessFadeStartMs, kUserBrightnessFadeMs);
+      lampos::retireStamp(nowMs, s_userBrightnessFadeStartMs);
 }
 
 void clearBrightnessFadeSeed() {

@@ -9,6 +9,7 @@
 
 using lampos::isLater;
 using lampos::kStampLeadMs;
+using lampos::kRetiredAgeMs;
 using lampos::msSince;
 using lampos::retireStamp;
 using lampos::timeReached;
@@ -63,21 +64,21 @@ void test_ms_since_reads_a_stamp_ahead_as_fresh() {
   TEST_ASSERT_TRUE(msSince(5000, 5000 + kStampLeadMs + 1) > UINT32_MAX / 2);
 }
 
-void test_retire_stamp_leaves_a_stamp_inside_its_window() {
+void test_retire_stamp_leaves_a_stamp_younger_than_half_a_wrap() {
   const uint32_t stamp = UINT32_MAX - 99;
-  TEST_ASSERT_EQUAL_UINT32(stamp, retireStamp(stamp + 400, stamp, 500));
-  TEST_ASSERT_EQUAL_UINT32(stamp, retireStamp(stamp + 500, stamp, 500));
-  TEST_ASSERT_EQUAL_UINT32(stamp, retireStamp(stamp - 30, stamp, 500));
-  TEST_ASSERT_EQUAL_UINT32(0, retireStamp(123456, 0, 500));
+  TEST_ASSERT_EQUAL_UINT32(stamp, retireStamp(stamp + 400, stamp));
+  TEST_ASSERT_EQUAL_UINT32(stamp, retireStamp(stamp + kRetiredAgeMs, stamp));
+  TEST_ASSERT_EQUAL_UINT32(stamp, retireStamp(stamp - kStampLeadMs, stamp));
 }
 
-void test_retire_stamp_holds_an_aged_stamp_just_past_its_window() {
+void test_retire_stamp_holds_an_older_stamp_at_half_a_wrap() {
   const uint32_t stamp = UINT32_MAX - 99;
-  const uint32_t now = stamp + 9000;
-  TEST_ASSERT_EQUAL_UINT32(501, msSince(now, retireStamp(now, stamp, 500)));
-  // The held stamp would land on 0, which reads as never set.
-  TEST_ASSERT_NOT_EQUAL(0, retireStamp(501, UINT32_MAX - 10, 500));
-  TEST_ASSERT_TRUE(msSince(501, retireStamp(501, UINT32_MAX - 10, 500)) > 500);
+  const uint32_t now = stamp + kRetiredAgeMs + 9000;
+  TEST_ASSERT_EQUAL_UINT32(kRetiredAgeMs, msSince(now, retireStamp(now, stamp)));
+  // The held stamp would land on 0, which a caller may read as never set.
+  const uint32_t nowAtHalf = kRetiredAgeMs;
+  TEST_ASSERT_NOT_EQUAL(0, retireStamp(nowAtHalf, UINT32_MAX - 10));
+  TEST_ASSERT_TRUE(msSince(nowAtHalf, retireStamp(nowAtHalf, UINT32_MAX - 10)) > kRetiredAgeMs / 2);
 }
 
 // An owner retiring a stamp every few days keeps it aged out through the
@@ -86,11 +87,11 @@ void test_retired_stamp_stays_aged_out_a_wrap_later() {
   const uint32_t stamp = 1000;
   uint32_t held = stamp;
   for (uint64_t t = stamp; t < stamp + (1ull << 32); t += 1ull << 28) {
-    held = retireStamp(static_cast<uint32_t>(t), held, 500);
+    held = retireStamp(static_cast<uint32_t>(t), held);
   }
   const uint32_t aWrapLater = stamp + 300;
   TEST_ASSERT_EQUAL_UINT32(300, msSince(aWrapLater, stamp));
-  TEST_ASSERT_TRUE(msSince(aWrapLater, held) > 500);
+  TEST_ASSERT_TRUE(msSince(aWrapLater, held) > kRetiredAgeMs / 2);
 }
 
 int main(int argc, char** argv) {
@@ -102,8 +103,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_is_later_orders_stamps_across_the_wrap);
   RUN_TEST(test_ms_since_counts_across_the_wrap);
   RUN_TEST(test_ms_since_reads_a_stamp_ahead_as_fresh);
-  RUN_TEST(test_retire_stamp_leaves_a_stamp_inside_its_window);
-  RUN_TEST(test_retire_stamp_holds_an_aged_stamp_just_past_its_window);
+  RUN_TEST(test_retire_stamp_leaves_a_stamp_younger_than_half_a_wrap);
+  RUN_TEST(test_retire_stamp_holds_an_older_stamp_at_half_a_wrap);
   RUN_TEST(test_retired_stamp_stays_aged_out_a_wrap_later);
   return UNITY_END();
 }
