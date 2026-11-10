@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include <lampos/clock.hpp>
+
 #include "components/network/transport/tx_credit.hpp"
 #include "expressions/expression_invocation.hpp"
 
@@ -71,6 +73,12 @@ class CascadeScheduler {
     lastBatchMs_ = nowMs;
     if (d.next >= d.count) pop();
     return sent;
+  }
+
+  // Lifts the gap after the last batch once it has passed, so it cannot hold a
+  // later fan-out one millis() wrap on. Call at least once per wrap.
+  void retireBatchGap(uint32_t nowMs) {
+    if (batched_ && lampos::msSince(nowMs, lastBatchMs_) >= kBatchGapMs) batched_ = false;
   }
 
   // tick() for a sender that never refuses, gated on `ready()`: a frame waits

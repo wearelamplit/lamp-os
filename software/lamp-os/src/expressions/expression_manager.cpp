@@ -226,6 +226,13 @@ void ExpressionManager::cascade(const ExpressionInvocation& shape,
   tickCascade(nowMs);
 }
 
+void ExpressionManager::retireStale(uint32_t nowMs) {
+  recentCascades_.retire(nowMs);
+  recentEvents_.retire(nowMs);
+  localCooldown_.retire(nowMs);
+  cascade_.retireBatchGap(nowMs);
+}
+
 void ExpressionManager::tickCascade(uint32_t nowMs) {
   if (!cascade_.active() || !meshLink_) return;
   if (meshLink_->isOtaInProgress()) {

@@ -1260,6 +1260,7 @@ void lamp::Lamp::tick() {
   // the final frame of the animation is drawn before removal.
   expressionManager.gcTransients();
   expressionManager.tickCascade(millis());
+  expressionManager.retireStale(millis());
 
   // Reap the active-test set (entries fired via dispatchLampAction
   // "test_expression"). When the last one transitions to STOPPED, flip

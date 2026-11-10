@@ -110,12 +110,34 @@ void test_a_refused_local_type_cools_down() {
   TEST_ASSERT_FALSE(cooldown.waiting("shifty", 101));
 }
 
+// Refused once, then a whole wrap with no other refusal: the cooldown retired
+// every few days must not read as running again.
+void test_cooldown_stays_ended_a_wrap_later() {
+  LocalCooldown cooldown;
+  const uint32_t refusedMs = 1000;
+  cooldown.refused("pulse", refusedMs);
+  for (uint64_t t = refusedMs; t < refusedMs + (1ull << 32); t += 1ull << 28) {
+    cooldown.retire(static_cast<uint32_t>(t));
+  }
+  TEST_ASSERT_FALSE(cooldown.waiting("pulse", refusedMs + 10));
+}
+
+// Retire leaves a cooldown that is still running.
+void test_retire_keeps_a_running_cooldown() {
+  LocalCooldown cooldown;
+  cooldown.refused("pulse", 1000);
+  cooldown.retire(1000 + LocalCooldown::kMs - 1);
+  TEST_ASSERT_TRUE(cooldown.waiting("pulse", 1000 + LocalCooldown::kMs - 1));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_cap_bounds_every_source);
   RUN_TEST(test_remote_cannot_starve_local);
   RUN_TEST(test_a_local_broadcast_cascades_even_when_refused_here);
   RUN_TEST(test_a_refused_local_type_cools_down);
+  RUN_TEST(test_cooldown_stays_ended_a_wrap_later);
+  RUN_TEST(test_retire_keeps_a_running_cooldown);
   RUN_TEST(test_heap_gate_refuses_any_source);
   RUN_TEST(test_admission_counts_live_sources);
   RUN_TEST(test_lookup_finds_only_the_matching_entry);
