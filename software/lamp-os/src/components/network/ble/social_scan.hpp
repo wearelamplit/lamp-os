@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include <lampos/clock.hpp>
+
 namespace ble_control {
 
 // Duty-cycled passive-scan gate for the app's Social/Network view. On GATT
@@ -28,16 +30,24 @@ class SocialScanGate {
   void arm(uint32_t now) {
     sessionStartMs_ = now;
     windowEndMs_    = now;
+    sessionOver_    = false;
   }
 
   bool windowOpen() const { return windowOpen_; }
 
   // Advance one step. `active` folds the app flag, a live GATT client, and the
   // absence of an OTA radio pause. `lastWriteMs` is the last BLE-write stamp
-  // for app-idle gating. Returns the scan action the caller applies.
+  // for app-idle gating. Returns the scan action the caller applies. Call it
+  // at least once per millis() wrap, active or not, so the session cap and a
+  // write stamp past the idle guard stay retired.
   SocialScanAction step(uint32_t now, bool active, uint32_t lastWriteMs,
                         const SocialScanTuning& t) {
-    const bool want = active && (now - sessionStartMs_ < t.maxSessionMs);
+    if (lampos::msSince(now, sessionStartMs_) >= t.maxSessionMs) sessionOver_ = true;
+    if (lampos::msSince(now, lastWriteMs) >= t.idleGuardMs) {
+      idleWriteMs_ = lastWriteMs;
+      idleWriteKnown_ = true;
+    }
+    const bool want = active && !sessionOver_ && (now - sessionStartMs_ < t.maxSessionMs);
     if (!want) {
       if (windowOpen_) {
         windowOpen_  = false;
@@ -55,7 +65,8 @@ class SocialScanGate {
       return SocialScanAction::None;
     }
     if (now - windowEndMs_ < t.gapMs) return SocialScanAction::None;
-    if (now - lastWriteMs < t.idleGuardMs) return SocialScanAction::None;
+    const bool writeIdle = idleWriteKnown_ && lastWriteMs == idleWriteMs_;
+    if (!writeIdle && now - lastWriteMs < t.idleGuardMs) return SocialScanAction::None;
     windowOpen_    = true;
     windowStartMs_ = now;
     return SocialScanAction::OpenWindow;
@@ -66,6 +77,11 @@ class SocialScanGate {
   uint32_t windowStartMs_  = 0;
   uint32_t windowEndMs_    = 0;
   uint32_t sessionStartMs_ = 0;
+  bool     sessionOver_    = false;
+  // The last write stamp seen past the idle guard: that stamp no longer holds
+  // a window off, however its age reads after a wrap.
+  uint32_t idleWriteMs_    = 0;
+  bool     idleWriteKnown_ = false;
 };
 
 }  // namespace ble_control

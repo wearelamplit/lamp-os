@@ -12,6 +12,16 @@ uint32_t g_mock_millis = 0;
 inline uint32_t millis() { return g_mock_millis; }
 inline void set_mock_millis(uint32_t ms) { g_mock_millis = ms; }
 
+// Pin reads for the input drivers. touchRead returns g_mock_touch_raw.
+namespace {
+uint16_t g_mock_touch_raw = 0;
+}
+constexpr uint8_t INPUT_PULLUP = 0x05;
+constexpr int LOW = 0;
+inline void pinMode(uint8_t, uint8_t) {}
+inline int digitalRead(uint8_t) { return 1; }
+inline uint16_t touchRead(uint8_t) { return g_mock_touch_raw; }
+
 // ArduinoJson 7 serializes/deserializes std::string natively; aliasing lets
 // String-returning production code (config.cpp) link in the native test env.
 using String = std::string;
