@@ -343,14 +343,14 @@ runs no per-lamp keep-alive, and it retries no unicast that FAILs. The space-dim
 brightness walk (`MSG_OVERRIDE_BRIGHTNESS`) is its only unicast, re-asserted
 every 40 s inside the lamp's 60 s watchdog. `PaintDistributor` samples a per-lamp base/shade color
 (deterministic per-MAC for a fresh paint, re-rolled per drift slot) and writes
-it into the `WispRoster` claim — no wire send. A fresh paint shows at once; a
-drift step fades linearly on the wisp over `driftFadeMs` from the colors the lamp
-shows at that moment (`WispRoster::setLampDrift`), and each STATE frame packs
-the colors as they stand. The lamp eases to each frame's colors with its own
-short ease, so a fade reaches the lamp in steps of one STATE frame (2 s). `MSG_WISP_STATE` then broadcasts
+it into the `WispRoster` claim — no wire send. `MSG_WISP_STATE` then broadcasts
 the whole claimed set on its cadence, and a lamp holds paint while STATE keeps
 naming it (see `MSG_WISP_STATE`). This drops the paint traffic from O(N) unicast
-per cycle to one O(1) broadcast.
+per cycle to one O(1) broadcast. A fresh paint shows at once. A drift step fades
+linearly on the wisp over `driftFadeMs`, from the colors the claim carried at
+that moment (`WispRoster::setLampDrift`), and each STATE frame packs the colors
+as they stand. The lamp eases to each frame's colors with its own short ease,
+so a fade reaches the lamp in steps of one STATE frame (2 s).
 
 **`MSG_RESTORE_COLORS` (0x22)**, **retired** (STATE-absence eases a lamp home). Drop colors override, restore baseline.
 ```

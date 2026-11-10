@@ -12,6 +12,7 @@
 #include <cstdint>
 
 #include "fleet/wisp_roster.hpp"
+#include "paint/drift.hpp"
 #include "paint/tuple_sampler.hpp"
 
 namespace wisp {
@@ -32,15 +33,19 @@ inline void storeTuplePaint(WispRoster& roster, const uint8_t mac[6],
   roster.setLampPaint(mac, base, shade);
 }
 
-// Fade `mac`'s claim to `t` over `fadeMs` from `nowMs`, as one drift step.
-inline void storeTupleDrift(WispRoster& roster, const uint8_t mac[6],
-                            const ColorTuple& t, uint32_t nowMs,
-                            uint32_t fadeMs) {
+// One drift step: fade `mac`'s claim to `t` from `nowMs` over a length drawn
+// by driftFadeMs from the drift settings and `rnd`. Returns that length.
+inline uint32_t storeTupleDrift(WispRoster& roster, const uint8_t mac[6],
+                                const ColorTuple& t, uint32_t nowMs,
+                                uint32_t intervalMs, uint8_t fadePct,
+                                uint32_t rnd) {
   uint8_t base[4];
   uint8_t shade[4];
   t.rgbw(0, base);
   t.rgbw(1, shade);
+  const uint32_t fadeMs = driftFadeMs(intervalMs, fadePct, rnd);
   roster.setLampDrift(mac, base, shade, nowMs, fadeMs);
+  return fadeMs;
 }
 
 class PaintDistributor {
@@ -72,8 +77,7 @@ class PaintDistributor {
   void setShuffleSeed(uint8_t s) { shuffleSeed_ = s; }
 
   // intervalMs: how often each lamp is re-colored [30000..3600000].
-  // fadePct: how long each re-color fades, as % of the interval [0..100]
-  // (see driftFadeMs).
+  // fadePct [0..100]: sets each re-color's fade length (see driftFadeMs).
   void setDrift(uint32_t intervalMs, uint8_t fadePct);
 
   // Space-dim factor (0..100) asserted on claimed lamps via unicast

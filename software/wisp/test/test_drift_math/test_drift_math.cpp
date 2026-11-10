@@ -58,6 +58,11 @@ void test_drift_fade_bounds() {
     TEST_ASSERT_TRUE(f <= c.intervalMs);
   }
 }
+void test_drift_fade_floors_an_interval_under_the_minimum() {
+  for (uint8_t pct : {0, 50, 100}) {
+    TEST_ASSERT_EQUAL_UINT32(20000, wisp::driftFadeMs(10000, pct, 0xFFFFFFFFu));
+  }
+}
 void test_drift_fade_longer_with_higher_pct() {
   // Same draw, higher setting: the fade range widens, so the pick grows.
   const uint32_t rnd = 70001u;
@@ -103,6 +108,7 @@ int main() {
   RUN_TEST(test_drift_fade_with_max_pct_min_rnd);
   RUN_TEST(test_drift_fade_with_max_pct_reaches_interval);
   RUN_TEST(test_drift_fade_bounds);
+  RUN_TEST(test_drift_fade_floors_an_interval_under_the_minimum);
   RUN_TEST(test_drift_fade_longer_with_higher_pct);
   RUN_TEST(test_fade_weight_starts_at_zero);
   RUN_TEST(test_fade_weight_rises_with_elapsed);

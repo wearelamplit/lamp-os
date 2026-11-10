@@ -914,18 +914,29 @@ void assertMidDrift(wisp::WispRoster& r, uint32_t nowMs) {
   assertStrictlyBetween(kFromShade, kToShade, shade);
 }
 
+// kLampX claimed and painted kFrom, then one drift step to kTo at
+// kDriftStartMs through the distributor's store path. Returns the fade length.
+uint32_t claimPaintDriftStep(wisp::WispRoster& r, uint32_t intervalMs,
+                             uint8_t fadePct, uint32_t rnd) {
+  r.setSelfMac(kSelfMac);
+  auto lamp = obs(kLampX, -60);
+  r.recomputeClaims(&lamp, 1, /*nowMs=*/1000);
+  r.setLampPaint(kLampX, kFromBase, kFromShade);
+  wisp::ColorTuple t;
+  t.r[0] = kToBase[0];  t.g[0] = kToBase[1];  t.b[0] = kToBase[2];  t.w[0] = kToBase[3];
+  t.r[1] = kToShade[0]; t.g[1] = kToShade[1]; t.b[1] = kToShade[2]; t.w[1] = kToShade[3];
+  return wisp::storeTupleDrift(r, kLampX, t, kDriftStartMs, intervalMs, fadePct, rnd);
+}
+
 void test_drift_fade_setting_changes_what_lamps_receive(void) {
   // Same interval and random draw: only the app's Fade setting differs.
   constexpr uint32_t kIntervalMs = 120000;
   constexpr uint32_t kRnd = 90000;
-  const uint32_t snappyMs = wisp::driftFadeMs(kIntervalMs, 0, kRnd);
-  const uint32_t flowingMs = wisp::driftFadeMs(kIntervalMs, 100, kRnd);
-  TEST_ASSERT_TRUE(flowingMs > snappyMs);
-
   wisp::WispRoster snappy;
   wisp::WispRoster flowing;
-  claimPaintDrift(snappy, snappyMs);
-  claimPaintDrift(flowing, flowingMs);
+  const uint32_t snappyMs = claimPaintDriftStep(snappy, kIntervalMs, 0, kRnd);
+  const uint32_t flowingMs = claimPaintDriftStep(flowing, kIntervalMs, 100, kRnd);
+  TEST_ASSERT_TRUE(flowingMs > snappyMs);
 
   // A step starts from the colors the lamp shows; neither jumps.
   assertStateColors(snappy, kDriftStartMs, kFromBase, kFromShade);

@@ -68,7 +68,7 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   a clock that never restarts while the wisp stays on. Reflash the wisp
   over USB.
 - **The wisp's Color drift Fade slider works again.** Every drift step had
-  snapped to its new color in about a second whatever the slider said. Each
+  snapped to its new color in under a second whatever the slider said. Each
   lamp now fades into its next color over at least 20 s: toward Snappy every
   step takes about 20 s, toward Flowing a step can stretch across the whole
   How often interval. The fade moves in small steps every 2 s, so a long fade
