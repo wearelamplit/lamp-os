@@ -54,7 +54,7 @@ void ShiftyExpression::startShift() {
   shiftedColor = getRandomColor();
 
   // The whole shift cycle (fade + hold + fade, up to 2400 s) outruns any
-  // frame budget; onUpdate ends each phase on millis() and concludes the
+  // frame budget; onUpdate ends each phase on the uptime clock and concludes the
   // cycle by capping frames, so the counter never ends a phase itself.
   frames = kContinuousMaxFrames;
   frame = 0;

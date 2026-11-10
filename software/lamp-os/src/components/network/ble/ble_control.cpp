@@ -1193,8 +1193,8 @@ class FwChunkCallback : public NimBLECharacteristicCallbacks {
 };
 
 void tick() {
-  // Stamp retirement runs whether or not BLE came up: the roster also fills
-  // over ESP-NOW.
+  // Stamp retirement runs whether or not BLE came up, since the roster also
+  // fills over ESP-NOW.
   static uint32_t s_lastRetireMs = 0;
   if (millis() - s_lastRetireMs >= 1000) {
     s_lastRetireMs = millis();

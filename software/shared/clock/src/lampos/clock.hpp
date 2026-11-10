@@ -28,8 +28,8 @@ constexpr uint32_t msSince(uint32_t nowMs, uint32_t stampMs) {
   return age > UINT32_MAX - kStampLeadMs ? 0 : age;
 }
 
-// Oldest age retireStamp lets a stamp reach: just under half a wrap, 24.8
-// days, so a signed compare (timeReached, isLater) still reads it as past.
+// Oldest age retireStamp lets a stamp reach, just under half a wrap: 24.8
+// days.
 inline constexpr uint32_t kRetiredAgeMs = INT32_MAX;
 
 // `stampMs` held no more than kRetiredAgeMs old, so it reads as outside any
