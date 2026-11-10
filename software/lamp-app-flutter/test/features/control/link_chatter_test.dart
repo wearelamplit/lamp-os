@@ -50,6 +50,21 @@ class _Lamp extends InMemoryBleClient {
 
   Duration connectTakes = const Duration(milliseconds: 500);
   Duration rebootTakes = const Duration(seconds: 3);
+  Duration cycleTakes = Duration.zero;
+  Duration authTakes = Duration.zero;
+  Duration sectionTakes = Duration.zero;
+
+  /// False makes a settings_blob write land without restarting the lamp.
+  bool rebootOnSave = true;
+
+  /// False for a lamp from before GATT schema v1.
+  bool servesSchemaVersion = true;
+
+  /// Drops the link as the app next subscribes to state notifies.
+  bool dropOnStateSubscribe = false;
+
+  /// When each connect was asked for.
+  final connectCalls = <Duration>[];
 
   /// When the lamp drops the link after a settings_blob write lands.
   Duration dropAfterSave = Duration.zero;
@@ -86,6 +101,7 @@ class _Lamp extends InMemoryBleClient {
 
   @override
   Future<void> connect(String deviceId) async {
+    connectCalls.add(elapsed());
     await Future<void>.delayed(connectTakes);
     if (!_up) throw TimeoutException('connect timed out');
     connects++;
@@ -96,20 +112,35 @@ class _Lamp extends InMemoryBleClient {
   Future<void> cycleAdapter(String deviceId) async {
     cycles++;
     await super.cycleAdapter(deviceId);
+    await Future<void>.delayed(cycleTakes);
   }
 
   @override
   Future<Uint8List> read(String d, String s, String c) {
     ops.add('read $c');
+    // The phone finds a missing characteristic in its discovered services,
+    // before any radio op.
+    if (c == _schemaVersionUuid && !servesSchemaVersion) throw BleNotFound(c);
     if (zombie) throw BleDisconnectedException(d);
     return super.read(d, s, c);
   }
 
   @override
-  Future<Uint8List> readSection(String deviceId, String name) {
+  Future<Uint8List> readSection(String deviceId, String name) async {
     ops.add('section $name');
     if (zombie) throw BleDisconnectedException(deviceId);
+    await Future<void>.delayed(sectionTakes);
     return super.readSection(deviceId, name);
+  }
+
+  @override
+  Stream<Uint8List> subscribeNotifyOnly(String d, String s, String c) {
+    final stream = super.subscribeNotifyOnly(d, s, c);
+    if (c == BleUuids.stateNotify && dropOnStateSubscribe) {
+      dropOnStateSubscribe = false;
+      unawaited(disconnect(d));
+    }
+    return stream;
   }
 
   @override
@@ -123,6 +154,7 @@ class _Lamp extends InMemoryBleClient {
   }) async {
     ops.add('write $c');
     if (zombie) throw BleDisconnectedException(d);
+    if (c == BleUuids.auth) await Future<void>.delayed(authTakes);
     await super.write(
       d,
       s,
@@ -131,7 +163,7 @@ class _Lamp extends InMemoryBleClient {
       withoutResponse: withoutResponse,
       allowLongWrite: allowLongWrite,
     );
-    if (c == BleUuids.settingsBlob) {
+    if (c == BleUuids.settingsBlob && rebootOnSave) {
       if (dropAfterSave == Duration.zero) {
         _reboot();
       } else {
@@ -142,7 +174,7 @@ class _Lamp extends InMemoryBleClient {
 }
 
 class _Rig {
-  _Rig(this.async, this.c, this.ble);
+  _Rig(this.async, this.c, this.ble, this.states);
   final FakeAsync async;
   final ProviderContainer c;
   final _Lamp ble;
@@ -150,6 +182,9 @@ class _Rig {
   ControlNotifier get control => c.read(controlNotifierProvider(_id).notifier);
   AsyncValue<ControlState> get state => c.read(controlNotifierProvider(_id));
   bool get connected => state.value?.connected == true;
+
+  /// Every state the notifier emitted, in order.
+  final List<AsyncValue<ControlState>> states;
 
   void probe() {
     final life = c.read(appLifecycleStateProvider.notifier);
@@ -160,8 +195,13 @@ class _Rig {
   }
 }
 
-_Rig _open(FakeAsync async, {String lampJson = _lampJson, int? schema = 4}) {
-  final ble = _Lamp(() => async.elapsed);
+_Rig _open(
+  FakeAsync async, {
+  String lampJson = _lampJson,
+  int? schema = 4,
+  String password = '',
+}) {
+  final ble = _Lamp(() => async.elapsed)..servesSchemaVersion = schema != null;
   seedControlBle(ble, deviceId: _id);
   ble.seedSection(_id, 'lamp', Uint8List.fromList(utf8.encode(lampJson)));
   final c = ProviderContainer(
@@ -174,7 +214,7 @@ _Rig _open(FakeAsync async, {String lampJson = _lampJson, int? schema = 4}) {
   async.flushMicrotasks();
   c
       .read(inventoryNotifierProvider.notifier)
-      .add(const InventoryLamp(id: _id, name: 'jacko', controlPassword: ''));
+      .add(InventoryLamp(id: _id, name: 'jacko', controlPassword: password));
   async.flushMicrotasks();
   if (schema != null) {
     // A connected write seeds the fake's readable value.
@@ -188,10 +228,11 @@ _Rig _open(FakeAsync async, {String lampJson = _lampJson, int? schema = 4}) {
     );
     async.flushMicrotasks();
   }
-  c.listen(controlNotifierProvider(_id), (_, _) {});
+  final states = <AsyncValue<ControlState>>[];
+  c.listen(controlNotifierProvider(_id), (_, next) => states.add(next));
   c.listen(firmwareNotifierProvider(_id), (_, _) {});
   async.elapse(const Duration(seconds: 2));
-  return _Rig(async, c, ble);
+  return _Rig(async, c, ble, states);
 }
 
 const _lampJson =
@@ -267,20 +308,14 @@ void main() {
       });
     });
 
-    test('a reconnect already under way when the save starts stands down', () {
+    test('the link dropping just after the reload restores it climbs the '
+        'ladder', () {
       fakeAsync((async) {
         final r = _open(async);
-        r.ble.connectTakes = const Duration(seconds: 3);
-        r.ble.disconnect(_id);
-        // The ladder's first step starts its slow connect at 500 ms.
-        async.elapse(const Duration(milliseconds: 700));
-        final lampReads = r.ble.sectionReads('lamp');
-        final s = r.state.value!;
-        r.control.applyAdvancedLedsAndReboot(base: s.base, shade: s.shade);
-        async.elapse(const Duration(minutes: 2));
-
-        expect(r.ble.sectionReads('lamp') - lampReads, 1);
-        expect(r.ble.cycles, 0);
+        r.ble.dropOnStateSubscribe = true;
+        r.control.setLampPassword('');
+        async.elapse(const Duration(seconds: 30));
+        expect(r.ble.dropOnStateSubscribe, isFalse);
         expect(r.connected, isTrue);
         _close(r);
       });
@@ -318,6 +353,149 @@ void main() {
         r.ble.rebootTakes = const Duration(seconds: 3);
         r.ble._reboot();
         async.elapse(const Duration(seconds: 30));
+        expect(r.connected, isTrue);
+        _close(r);
+      });
+    });
+  });
+
+  group('a ladder try under way when a save starts leaves the link alone', () {
+    const pw = 'hunter22';
+    const authWrite = 'write ${BleUuids.auth}';
+
+    /// Drops the link unprompted, lets the ladder run for [lead], then saves.
+    /// Returns the index into [_Rig.states] and [_Lamp.ops] at the save.
+    (int, int) dropThenSave(_Rig r, Duration lead) {
+      r.ble.disconnect(_id);
+      r.async.elapse(lead);
+      final marks = (r.states.length, r.ble.ops.length);
+      final s = r.state.value!;
+      r.control.applyAdvancedLedsAndReboot(base: s.base, shade: s.shade);
+      return marks;
+    }
+
+    test('while connecting', () {
+      fakeAsync((async) {
+        final r = _open(async, password: pw);
+        r.ble.connectTakes = const Duration(seconds: 3);
+        // The ladder's first try starts its slow connect at 500 ms.
+        final (_, opsAt) = dropThenSave(r, const Duration(milliseconds: 700));
+        async.elapse(const Duration(minutes: 2));
+
+        final after = r.ble.ops.skip(opsAt);
+        expect(after.where((o) => o == authWrite), hasLength(1));
+        expect(after.where((o) => o == 'section lamp'), hasLength(1));
+        expect(r.ble.cycles, 0);
+        expect(r.connected, isTrue);
+        _close(r);
+      });
+    });
+
+    test('while authenticating', () {
+      fakeAsync((async) {
+        final r = _open(async, password: pw);
+        r.ble
+          ..authTakes = const Duration(seconds: 1)
+          ..rebootOnSave = false;
+        // Connected at 1 s, authenticating until 2 s.
+        final (_, opsAt) = dropThenSave(r, const Duration(milliseconds: 1300));
+        async.elapse(const Duration(minutes: 2));
+
+        final after = r.ble.ops.skip(opsAt);
+        expect(after.where((o) => o == 'section lamp'), hasLength(1));
+        expect(r.connected, isTrue);
+        _close(r);
+      });
+    });
+
+    test('while reading sections', () {
+      fakeAsync((async) {
+        final r = _open(async, password: pw);
+        r.ble
+          ..sectionTakes = const Duration(milliseconds: 300)
+          ..rebootOnSave = false;
+        // Reading from 1 s to about 2.8 s.
+        final (statesAt, _) = dropThenSave(
+          r,
+          const Duration(milliseconds: 1500),
+        );
+        async.elapse(const Duration(minutes: 2));
+
+        final restored = r.states
+            .skip(statesAt)
+            .where((s) => s.hasValue && !s.isLoading && s.value!.connected);
+        expect(restored, hasLength(1));
+        expect(r.connected, isTrue);
+        _close(r);
+      });
+    });
+
+    test('while reading a lamp section the lamp refuses', () {
+      fakeAsync((async) {
+        final r = _open(async, password: pw);
+        r.ble
+          ..sectionTakes = const Duration(milliseconds: 300)
+          ..rebootOnSave = false
+          ..seedSection(_id, 'lamp', Uint8List(0));
+        // The lamp section read runs from 1 s to 1.3 s.
+        final (statesAt, _) = dropThenSave(
+          r,
+          const Duration(milliseconds: 1100),
+        );
+        async.elapse(const Duration(minutes: 2));
+
+        final prompts = r.states
+            .skip(statesAt)
+            .where((s) => s.error is LampAuthRequiredException);
+        expect(prompts, hasLength(1));
+        _close(r);
+      });
+    });
+
+    test('while cycling the adapter', () {
+      fakeAsync((async) {
+        final r = _open(async, password: pw);
+        r.ble
+          ..rebootTakes = const Duration(seconds: 20)
+          ..cycleTakes = const Duration(milliseconds: 1500);
+        r.ble._reboot();
+        // The third try cycles from 4.5 s to 6 s.
+        async.elapse(const Duration(milliseconds: 4600));
+        expect(r.ble.cycles, 1);
+        async.elapse(const Duration(milliseconds: 400));
+        final savedAt = async.elapsed;
+        final s = r.state.value!;
+        r.control.applyAdvancedLedsAndReboot(base: s.base, shade: s.shade);
+        async.elapse(const Duration(minutes: 2));
+
+        final duringGrace = r.ble.connectCalls.where(
+          (t) => t >= savedAt && t < savedAt + const Duration(seconds: 2),
+        );
+        expect(duringGrace, isEmpty);
+        expect(r.connected, isTrue);
+        _close(r);
+      });
+    });
+
+    test('when its connect fails', () {
+      fakeAsync((async) {
+        final r = _open(async, password: pw);
+        r.ble
+          ..rebootTakes = const Duration(seconds: 20)
+          ..connectTakes = const Duration(seconds: 3);
+        r.ble._reboot();
+        // The first try's connect runs from 0.5 s and fails at 3.5 s.
+        async.elapse(const Duration(seconds: 1));
+        final attempt = r.state.value!.reconnectAttempt;
+        final statesAt = r.states.length;
+        final s = r.state.value!;
+        r.control.applyAdvancedLedsAndReboot(base: s.base, shade: s.shade);
+        async.elapse(const Duration(minutes: 3));
+
+        final climbed = r.states
+            .skip(statesAt)
+            .where((s) => (s.value?.reconnectAttempt ?? 0) > attempt);
+        expect(climbed, isEmpty);
         expect(r.connected, isTrue);
         _close(r);
       });

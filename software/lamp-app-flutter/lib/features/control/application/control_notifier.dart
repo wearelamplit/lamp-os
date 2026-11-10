@@ -107,10 +107,15 @@ class ControlNotifier extends _$ControlNotifier {
   /// reads on top of each other.
   bool _reconnectInFlight = false;
 
-  /// Set while a save that reboots the lamp owns reconnecting to it. The
-  /// reconnect ladder stands down for the whole of that reload, so the
-  /// reload's restored link is never reconnected or cycled a second time.
+  /// Set while a save that reboots the lamp owns reconnecting to it, from
+  /// the save until its reload restores the link or gives up. The reconnect
+  /// ladder starts no try meanwhile, so the restored link is never
+  /// reconnected or cycled a second time.
   bool _rebootReloadOwnsLink = false;
+
+  /// Reboot-save reloads started. A ladder try that sees this change while
+  /// it runs leaves the link to the reload for good.
+  int _rebootReloadsStarted = 0;
   static const _reconnectDelays = [500, 1000, 2000, 4000, 8000]; // ms, capped
   /// Max consecutive reconnect attempts before giving up and surfacing an
   /// error state instead of polling forever.
@@ -237,6 +242,7 @@ class ControlNotifier extends _$ControlNotifier {
     // is keepAlive, so this reference stays valid past this notifier's own dispose.
     final saveStatus = ref.read(lampSaveStatusProvider(_deviceId).notifier);
     _rebootReloadOwnsLink = true;
+    _rebootReloadsStarted++;
     try {
       // Initial grace: give the lamp a head start on the reboot so the
       // first attempt isn't guaranteed to race the disconnect. ~2s lets
@@ -284,6 +290,7 @@ class ControlNotifier extends _$ControlNotifier {
         return;
       }
 
+      _endRebootReload();
       state = AsyncData(fresh);
       _lampQuiet = null;
       _flagsPending = true;
@@ -295,12 +302,18 @@ class ControlNotifier extends _$ControlNotifier {
         if (ref.mounted) state = AsyncError(e, st);
       }
     } finally {
-      _rebootReloadOwnsLink = false;
-      // A ladder step scheduled before or during the reload would otherwise
-      // fire onto the link the reload restored.
-      _reconnectTimer?.cancel();
+      _endRebootReload();
       saveStatus.stop();
     }
+  }
+
+  /// Hands reconnecting back to the ladder. A ladder step armed while the
+  /// reload owned the link is dropped, so it never fires onto the link the
+  /// reload restored; one armed after this keeps running.
+  void _endRebootReload() {
+    if (!_rebootReloadOwnsLink) return;
+    _rebootReloadOwnsLink = false;
+    _reconnectTimer?.cancel();
   }
 
   Future<void> _updateSeen({
@@ -2052,7 +2065,8 @@ class ControlNotifier extends _$ControlNotifier {
     final ble = ref.read(bleClientProvider);
     // A reboot-save reload that starts while this attempt awaits takes the
     // link over; the attempt leaves it alone from then on.
-    bool standDown() => !ref.mounted || _rebootReloadOwnsLink;
+    final reloads = _rebootReloadsStarted;
+    bool standDown() => !ref.mounted || _rebootReloadsStarted != reloads;
     try {
       final attempt = state.value?.reconnectAttempt ?? 0;
       // Tier 3: if soft reconnects have failed enough times, soft-cycle
@@ -2096,7 +2110,6 @@ class ControlNotifier extends _$ControlNotifier {
         if (!standDown()) state = AsyncError(e, st);
         return;
       }
-      if (standDown()) return;
       await _mirrorIdentityToInventory(fresh);
       if (standDown()) return;
       _reconnectTimer?.cancel();
@@ -2112,8 +2125,9 @@ class ControlNotifier extends _$ControlNotifier {
       // `state` after dispose throws. This happens in tests that
       // dispose the ProviderContainer while a reconnect is mid-flight,
       // and could also happen in production if the user navigates
-      // away (lamp picker → other lamp) during a slow reconnect.
-      if (!ref.mounted) {
+      // away (lamp picker → other lamp) during a slow reconnect. A
+      // reboot-save reload that took over owns the retrying.
+      if (standDown()) {
         _reconnectInFlight = false;
         return;
       }
