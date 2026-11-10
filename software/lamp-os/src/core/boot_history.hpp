@@ -16,7 +16,8 @@ constexpr uint16_t kVersion = 1;
 constexpr uint32_t kUptimeExact = 1u << 31;
 
 // One boot. `uptime` holds seconds; kUptimeExact marks a figure taken from the
-// RTC snapshot at the next boot rather than from the last milestone.
+// RTC snapshot at the next boot. Unmarked, it is a lower bound: the last
+// milestone reached, or a saturated snapshot.
 struct BootEntry {
   uint32_t uptime;
   uint16_t minFreeHeap;
