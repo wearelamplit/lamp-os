@@ -121,7 +121,7 @@ class RotateColorsBox extends StatelessWidget {
         ),
       ],
     );
-    // An inset panel in the sheet: LampCard shares the sheet's own colour and
+    // An inset panel in the sheet. LampCard shares the sheet's own colour and
     // would not show, so this draws one shade up.
     return Container(
       padding: const EdgeInsets.symmetric(

@@ -136,8 +136,8 @@ void main() {
   group('a change while moving keeps the frame', () {
     const third = Duration(milliseconds: _period * 1000 ~/ 3);
 
-    // Base layout (stop 0 at the top), Up, run two loops and a third: green
-    // sits at the top edge.
+    // Base layout (stop 0 at the top), Up, run two loops and a third, which
+    // puts green at the top edge.
     Future<void> runToGreen(WidgetTester tester) async {
       await _pump(tester, stop0AtBottom: false, direction: RotationDirection.up);
       await tester.pump();
@@ -153,9 +153,10 @@ void main() {
           stop0AtBottom: false, direction: RotationDirection.up, periodS: 20);
       await tester.pump();
       expect(await _edge(tester, bottom: false), _Hue.green);
-      // A third of a 20 s loop.
-      await tester.pump(const Duration(milliseconds: 20000 ~/ 3));
-      expect(await _edge(tester, bottom: false), _Hue.blue);
+      // Two thirds of a 20 s loop brings stop 0 back; at the old 40 s rate
+      // the same time would show blue.
+      await tester.pump(const Duration(milliseconds: 40000 ~/ 3));
+      expect(await _edge(tester, bottom: false), _Hue.red);
     });
 
     testWidgets('a direction flip reverses in place', (tester) async {
@@ -179,6 +180,21 @@ void main() {
       expect(tester.binding.transientCallbackCount, 0);
       expect(await _edge(tester, bottom: false), _Hue.red);
       expect(await _edge(tester, bottom: false, inset: 1 / 3), _Hue.green);
+    });
+
+    testWidgets('motion back on resumes from stop 0 at the steady rate',
+        (tester) async {
+      await runToGreen(tester);
+      await _pump(tester,
+          stop0AtBottom: false,
+          direction: RotationDirection.up,
+          reduceMotion: true);
+      await tester.pump(const Duration(seconds: 1));
+      await _pump(tester, stop0AtBottom: false, direction: RotationDirection.up);
+      await tester.pump();
+      expect(await _edge(tester, bottom: false), _Hue.red);
+      await tester.pump(third);
+      expect(await _edge(tester, bottom: false), _Hue.green);
     });
   });
 }
