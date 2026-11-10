@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <vector>
 
+#include <lampos/clock.hpp>
+
 #include "components/network/mesh/lamp_roster.hpp"
 
 namespace lamp {
@@ -50,8 +52,11 @@ class OtaOfferThrottle {
   // keeping the roster snapshot off the per-frame path.
   static constexpr uint32_t kIntervalMs = 1000;
 
-  // True when a scan should run at nowMs; stamps nowMs as the last scan.
+  // True when a scan should run at nowMs; stamps nowMs as the last scan. Call
+  // at least once per lampos::kRetiredAgeMs, busy or not, so a stale stamp
+  // retires.
   bool due(const OtaOfferBusy& busy, uint32_t nowMs) {
+    if (lastScanMs_ != 0 && lampos::msSince(nowMs, lastScanMs_) >= kIntervalMs) lastScanMs_ = 0;
     if (busy.any()) return false;
     if (lastScanMs_ != 0 && nowMs - lastScanMs_ < kIntervalMs) return false;
     lastScanMs_ = nowMs;

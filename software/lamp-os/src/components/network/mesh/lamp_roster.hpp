@@ -230,6 +230,11 @@ class LampRoster {
   // is older than `maxAgeMs`.
   void prune(uint32_t maxAgeMs);
 
+  // Retires every entry's sighting stamps, so a stale one cannot read as
+  // recent again one millis() wrap later. Call at least once per
+  // lampos::kRetiredAgeMs.
+  void retireSightings(uint32_t nowMs);
+
   // Peers seen near within maxAgeMs, sorted by RSSI descending (front =
   // physically closest; equal RSSI breaks on mac ascending), projected into a
   // member buffer reserved to kCapacity at construction. Loop-task (Core 1)
@@ -391,6 +396,11 @@ class LampRoster {
   // bounded take times out. The unicast target for the lamp's wisp control op.
   bool copyDisplayWispMac(uint8_t out[6], uint32_t nowMs);
 
+  // Ages out the wisp slot and fleet stamps that have passed their windows, so
+  // none reads fresh again one millis() wrap later. Call at least once per
+  // lampos::kRetiredAgeMs.
+  void retireStaleWisp(uint32_t nowMs);
+
   // Build and return the merged wispStatus JSON (see mergeWispStatusJson).
   // `maxLen` 0 serves it whole for the `wispstatus` page section;
   // CHAR_WISP_STATUS passes kWispStatusCharMaxLen.
@@ -451,7 +461,7 @@ class LampRoster {
   size_t findIndexLocked(const uint8_t mac[6]) const;
   // Caller must hold the mutex. Evicts the entry with the oldest combined
   // last-seen if the store is at capacity.
-  void evictOldestIfFullLocked();
+  void evictOldestIfFullLocked(uint32_t nowMs);
 };
 
 extern LampRoster lampRoster;  // single global instance, defined in .cpp

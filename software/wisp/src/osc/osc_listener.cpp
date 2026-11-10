@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <lwip/sockets.h>
 
+#include <lampos/clock.hpp>
+
 #include "config/wisp_config.hpp"
 #include "core/wisp_controller.hpp"
 #include "osc/osc_message.hpp"
@@ -48,6 +50,7 @@ void OscListener::close() {
 }
 
 void OscListener::poll(bool active, uint32_t nowMs) {
+  lastOpenAttemptMs_ = lampos::retireStamp(nowMs, lastOpenAttemptMs_);
   if (!active) {
     close();
     return;

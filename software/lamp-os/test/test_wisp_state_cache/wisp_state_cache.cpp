@@ -129,10 +129,75 @@ void test_state_slot_past_capacity_keeps_frame_head() {
   for (size_t i = kCap; i < kOver; ++i) TEST_ASSERT_FALSE(seen[i]);
 }
 
+namespace {
+// Retires once every 2^28 ms (about three days) from `fromMs` to just short of
+// one full wrap later.
+void retireThroughAWrap(LampRoster& roster, uint32_t fromMs) {
+  for (uint64_t t = fromMs; t < fromMs + (1ull << 32); t += 1ull << 28) {
+    roster.retireStaleWisp(static_cast<uint32_t>(t));
+  }
+}
+
+void hello(LampRoster& roster) {
+  roster.cacheWispHello(kSrc, 1, 0, "pal00000", "beta0000", 0);
+}
+}  // namespace
+
+// A wisp heard once, then silent for a whole wrap: neither its display slot
+// nor its control target may read fresh again.
+void test_silent_wisp_slot_stays_stale_a_wrap_later() {
+  LampRoster roster;
+  const uint32_t heardMs = 1000;
+  set_mock_millis(heardMs);
+  hello(roster);
+  retireThroughAWrap(roster, heardMs);
+  uint8_t mac[6];
+  TEST_ASSERT_FALSE(roster.isClaimingWisp(kSrc, heardMs + 5000));
+  TEST_ASSERT_FALSE(roster.copyDisplayWispMac(mac, heardMs + 5000));
+}
+
+// A STATE once, then silence: its fleet entries are gone a wrap later.
+void test_silent_fleet_entries_stay_stale_a_wrap_later() {
+  LampRoster roster;
+  fill(true);
+  roster.cacheWispState(gSlot, 1000);
+  retireThroughAWrap(roster, 1000);
+  uint8_t blob[1 + 2 * WispFleetCache::kBlobEntrySize];
+  roster.buildWispClaimsBlob(blob, sizeof(blob), 1000 + 5000);
+  TEST_ASSERT_EQUAL_UINT8(0, blob[0]);
+}
+
+// Away from the wrap retiring changes nothing: a fresh slot stays fresh, and
+// a hello after an age-out makes it fresh again.
+void test_retire_keeps_a_fresh_wisp_slot() {
+  LampRoster roster;
+  set_mock_millis(1000);
+  hello(roster);
+  fill(true);
+  roster.cacheWispState(gSlot, 1000);
+  roster.retireStaleWisp(1000 + 11000);
+  uint8_t mac[6];
+  TEST_ASSERT_TRUE(roster.isClaimingWisp(kSrc, 1000 + 11000));
+  TEST_ASSERT_TRUE(roster.copyDisplayWispMac(mac, 1000 + 11000));
+  uint8_t blob[1 + 2 * WispFleetCache::kBlobEntrySize];
+  roster.buildWispClaimsBlob(blob, sizeof(blob), 1000 + 11000);
+  TEST_ASSERT_EQUAL_UINT8(2, blob[0]);
+
+  roster.retireStaleWisp(1000 + 70000);
+  TEST_ASSERT_FALSE(roster.isClaimingWisp(kSrc, 1000 + 70000));
+  set_mock_millis(1000 + 80000);
+  hello(roster);
+  TEST_ASSERT_TRUE(roster.isClaimingWisp(kSrc, 1000 + 80001));
+  TEST_ASSERT_TRUE(roster.copyDisplayWispMac(mac, 1000 + 80001));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_state_slot_reaches_claims_blob);
   RUN_TEST(test_state_slot_without_w_caches_w_zero);
   RUN_TEST(test_state_slot_past_capacity_keeps_frame_head);
+  RUN_TEST(test_silent_wisp_slot_stays_stale_a_wrap_later);
+  RUN_TEST(test_silent_fleet_entries_stay_stale_a_wrap_later);
+  RUN_TEST(test_retire_keeps_a_fresh_wisp_slot);
   return UNITY_END();
 }

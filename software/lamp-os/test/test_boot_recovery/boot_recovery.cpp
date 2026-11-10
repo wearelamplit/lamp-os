@@ -52,6 +52,16 @@ void test_hold_started_after_the_window_never_fires() {
   TEST_ASSERT_FALSE(r.update(true, late + 10 * kBootRecoveryHoldMs));
 }
 
+// millis() restarts from 0 every 49.7 days; the window is the first minute
+// after boot, so it must not reopen once uptime passes 2^32 ms.
+void test_window_stays_closed_past_the_millis_wrap() {
+  BootRecovery r;
+  const uint64_t wrapped = (uint64_t{1} << 32) + 1000;
+  TEST_ASSERT_FALSE(r.update(true, wrapped));
+  TEST_ASSERT_FALSE(r.update(true, wrapped + kBootRecoveryHoldMs));
+  TEST_ASSERT_FALSE(r.update(true, wrapped + 10 * kBootRecoveryHoldMs));
+}
+
 void test_brief_presses_never_fire() {
   BootRecovery r;
   for (uint32_t t = 0; t < kBootRecoveryWindowMs; t += 1000) {
@@ -73,6 +83,7 @@ int main(int, char**) {
   RUN_TEST(test_release_resets_the_accumulator);
   RUN_TEST(test_hold_begun_inside_window_completes_past_it);
   RUN_TEST(test_hold_started_after_the_window_never_fires);
+  RUN_TEST(test_window_stays_closed_past_the_millis_wrap);
   RUN_TEST(test_brief_presses_never_fire);
   RUN_TEST(test_button_never_pressed_never_fires);
   return UNITY_END();

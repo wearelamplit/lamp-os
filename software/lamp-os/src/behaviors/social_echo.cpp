@@ -22,8 +22,8 @@ void SocialEchoObserver::onPeerExpression(const uint8_t sourceMac[6],
   uint32_t fireAt = 0;
   if (!mirrorDecision(disp, config_.lamp.socialMode,
                       static_cast<uint8_t>(rng_.range(1, 100)),
-                      rng_.range(0, kMirrorJitterMs), now, everMirrored_,
-                      lastMirrorMs_, fireAt)) {
+                      rng_.range(0, kMirrorJitterMs), now, cooldown_.ever,
+                      cooldown_.lastMs, fireAt)) {
     return;
   }
 
@@ -37,11 +37,11 @@ void SocialEchoObserver::onPeerExpression(const uint8_t sourceMac[6],
   std::memcpy(slot->srcMac, sourceMac, 6);
   slot->fireAt = fireAt;
   slot->used = true;
-  lastMirrorMs_ = now;
-  everMirrored_ = true;
+  cooldown_.mirrored(now);
 }
 
 void SocialEchoObserver::tick(uint32_t nowMs) {
+  cooldown_.retire(nowMs);
   // A mirror booked before home mode began is dropped.
   if (manager_.ignoresPeers()) {
     for (auto& p : pending_) p.used = false;

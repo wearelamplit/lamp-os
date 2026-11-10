@@ -1,5 +1,7 @@
 #include "status/config_cadence.hpp"
 
+#include <lampos/clock.hpp>
+
 namespace wisp {
 
 bool ConfigCadence::bursting(uint32_t nowMs) const {
@@ -37,6 +39,10 @@ void ConfigCadence::onConfigEmitted(uint32_t nowMs) {
   pending_ = false;
   haveConfig_ = true;
   lastConfigMs_ = nowMs;
+}
+
+void ConfigCadence::retire(uint32_t nowMs) {
+  lastConfigMs_ = lampos::retireStamp(nowMs, lastConfigMs_);
 }
 
 bool ConfigCadence::statusClear(uint32_t nowMs) const {

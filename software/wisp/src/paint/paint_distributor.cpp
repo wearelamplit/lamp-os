@@ -9,6 +9,8 @@
 #include <array>
 #include <cstring>
 
+#include <lampos/clock.hpp>
+
 #include "paint/current_palette.hpp"
 #include "paint/drift.hpp"
 #include "fleet/lamp_inventory.hpp"
@@ -53,6 +55,11 @@ void PaintDistributor::onPaletteChanged() {
 }
 
 void PaintDistributor::tick(uint32_t nowMs) {
+  // Gates read off these only when painting or walking, so each can sit for
+  // weeks; retiring them keeps a stale one from reading as recent a wrap later.
+  lastDriftFireMs_ = lampos::retireStamp(nowMs, lastDriftFireMs_);
+  brWalkEndMs_ = lampos::retireStamp(nowMs, brWalkEndMs_);
+  lastUnicastMs_ = lampos::retireStamp(nowMs, lastUnicastMs_);
   // Re-color one lamp per drift slot so every lamp shifts within one interval;
   // STATE broadcasts the roster colors on its own cadence.
   if (painting() && driftSlotMs_ > 0 && driftCount_ > 0 &&
@@ -68,7 +75,9 @@ void PaintDistributor::tick(uint32_t nowMs) {
       (nowMs - lastBrWalkMs_) >= kBrightnessReassertMs) {
     beginBrightnessWalk();
   }
-  if (brRepeatsLeft_ > 0 && !brWalkActive_ && nowMs >= nextBrPassMs_) {
+  if (brRepeatsLeft_ > 0 && !brWalkActive_ &&
+      (!brPassGapArmed_ || nowMs - brWalkEndMs_ >= kRestorePassGapMs)) {
+    brPassGapArmed_ = false;
     brRepeatsLeft_--;
     beginBrightnessWalk();
   }
@@ -80,7 +89,10 @@ void PaintDistributor::tick(uint32_t nowMs) {
     sendBrightnessToPeer(brWalkMacs_[brWalkIdx_++]);
     if (brWalkIdx_ >= brWalkCount_) {
       brWalkActive_ = false;
-      if (brRepeatsLeft_ > 0) nextBrPassMs_ = nowMs + kRestorePassGapMs;
+      if (brRepeatsLeft_ > 0) {
+        brWalkEndMs_ = nowMs;
+        brPassGapArmed_ = true;
+      }
     }
   }
 }

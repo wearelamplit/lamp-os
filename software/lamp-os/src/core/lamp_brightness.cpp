@@ -13,6 +13,8 @@
 #include <algorithm>
 #include <cstdint>
 
+#include <lampos/clock.hpp>
+
 #include "components/firmware/ota_quiet_mode.hpp"
 #include "components/network/ble/ble_control.hpp"
 #include "components/network/transport/wifi.hpp"
@@ -70,6 +72,11 @@ void setBrightnessFade(uint8_t source, uint8_t target, uint32_t startMs) {
   s_userBrightnessTarget      = target;
   s_userBrightnessFadeStartMs = startMs;
   s_userBrightnessSeeded      = true;
+}
+
+void retireBrightnessFade(uint32_t nowMs) {
+  s_userBrightnessFadeStartMs =
+      lampos::retireStamp(nowMs, s_userBrightnessFadeStartMs);
 }
 
 void clearBrightnessFadeSeed() {

@@ -41,7 +41,9 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   using AnimatedBehavior::AnimatedBehavior;
 
  public:
-  uint32_t nextAcknowledgeTimeMs = 0;
+  // Greeting cooldowns, re-greet stamps and fatigue run on lamp::uptimeMs(),
+  // which never wraps, so a stamp left for weeks cannot read as recent.
+  uint64_t nextAcknowledgeTimeMs = 0;
   Color foundLampColor;
 
   // Waveform parameters, copied from PersonalityEngine::greetingFor()
@@ -110,7 +112,7 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   // running the discovery / cooldown gates. Called by triggerGreeting so
   // forced greetings still enforce the natural cooldown on the next sighting.
   // `mac` is the peer's raw 6-byte mesh MAC.
-  void markGreeted(const uint8_t mac[6], uint32_t nowMs);
+  void markGreeted(const uint8_t mac[6], uint64_t upMs);
 
  private:
   static constexpr size_t MAX_GREETED_TRACKED = 32;
@@ -133,9 +135,9 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   // Keyed on the raw 6-byte mac so a tracked peer never spawns a per-entry
   // heap string (see docs/dev/embedded-heap.md rule 3); the control() lookup
   // runs inside the roster mutex.
-  std::map<std::array<uint8_t, 6>, uint32_t> lastGreetedAtMs_;
-  std::vector<uint32_t> recentGreetMs_;
-  uint32_t tiredUntilMs_ = 0;
+  std::map<std::array<uint8_t, 6>, uint64_t> lastGreetedAtMs_;
+  std::vector<uint64_t> recentGreetMs_;
+  uint64_t tiredUntilMs_ = 0;
   std::function<void()> onGreetingChange_;
   // Tracks whether the animation was active last control() so stop-edge fires.
   bool greetingWasActive_ = false;

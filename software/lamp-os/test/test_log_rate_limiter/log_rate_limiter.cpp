@@ -17,7 +17,7 @@ namespace {
 constexpr uint32_t kWindowMs = 1000;
 constexpr uint32_t kLines = 3;
 
-uint32_t countPrinted(LogRateLimiter& l, uint32_t fromMs, uint32_t n, uint32_t stepMs) {
+uint32_t countPrinted(LogRateLimiter& l, uint64_t fromMs, uint32_t n, uint32_t stepMs) {
   uint32_t printed = 0;
   for (uint32_t i = 0; i < n; ++i) {
     if (l.admit(fromMs + i * stepMs).print) ++printed;
@@ -59,9 +59,10 @@ void test_spaced_lines_never_suppress() {
   TEST_ASSERT_EQUAL_UINT32(9, countPrinted(l, 777, 9, kWindowMs));
 }
 
-void test_window_survives_millis_wrap() {
+// The uptime clock runs on past 2^32 ms, where millis() would wrap.
+void test_window_runs_past_the_millis_wrap() {
   LogRateLimiter l(kWindowMs, kLines);
-  const uint32_t nearWrap = UINT32_MAX - 300;
+  const uint64_t nearWrap = (1ull << 32) - 300;
   TEST_ASSERT_EQUAL_UINT32(kLines, countPrinted(l, nearWrap, kLines + 2, 50));
   // 600 ms past the window's start, across the wrap: still refused.
   TEST_ASSERT_FALSE(l.admit(nearWrap + 600).print);
@@ -70,12 +71,22 @@ void test_window_survives_millis_wrap() {
   TEST_ASSERT_EQUAL_UINT32(3, a.suppressed);
 }
 
+// A full window, then nothing for a whole millis() wrap: the next line opens
+// a fresh window.
+void test_full_window_is_closed_a_wrap_later() {
+  LogRateLimiter l(kWindowMs, kLines);
+  const uint64_t start = 5000;
+  TEST_ASSERT_EQUAL_UINT32(kLines, countPrinted(l, start, kLines + 1, 1));
+  TEST_ASSERT_TRUE(l.admit(start + (1ull << 32) + 10).print);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_admits_the_cap_then_refuses_within_a_window);
   RUN_TEST(test_first_admit_of_next_window_reports_the_refused_count);
   RUN_TEST(test_window_opens_at_the_first_line_after_the_last_expired);
   RUN_TEST(test_spaced_lines_never_suppress);
-  RUN_TEST(test_window_survives_millis_wrap);
+  RUN_TEST(test_window_runs_past_the_millis_wrap);
+  RUN_TEST(test_full_window_is_closed_a_wrap_later);
   return UNITY_END();
 }

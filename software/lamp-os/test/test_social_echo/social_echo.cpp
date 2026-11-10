@@ -169,6 +169,31 @@ void test_emitevent_skips_continuous() {
   TEST_ASSERT_TRUE(emitEventContinuousGate(false));
 }
 
+// An introvert that mirrored once, then nothing for a whole wrap: the
+// cooldown retired every few days must not gate the next mirror.
+void test_introvert_cooldown_stays_ended_a_wrap_later() {
+  lamp::MirrorCooldown cooldown;
+  const uint32_t mirroredMs = 1000;
+  cooldown.mirrored(mirroredMs);
+  for (uint64_t t = mirroredMs; t < mirroredMs + (1ull << 32); t += 1ull << 28) {
+    cooldown.retire(static_cast<uint32_t>(t));
+  }
+  uint32_t fireAt = 0;
+  TEST_ASSERT_TRUE(mirrorDecision(5, SocialMode::Introvert, 1, 0, mirroredMs + 10,
+                                  cooldown.ever, cooldown.lastMs, fireAt));
+}
+
+// Inside the cooldown retire keeps it.
+void test_retire_keeps_a_running_introvert_cooldown() {
+  lamp::MirrorCooldown cooldown;
+  cooldown.mirrored(1000);
+  const uint32_t nowMs = 1000 + lamp::kIntrovertMirrorCooldownMs - 1;
+  cooldown.retire(nowMs);
+  uint32_t fireAt = 0;
+  TEST_ASSERT_FALSE(mirrorDecision(5, SocialMode::Introvert, 1, 0, nowMs, cooldown.ever,
+                                   cooldown.lastMs, fireAt));
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_grid_cold_dispositions_never_mirror);
@@ -182,5 +207,7 @@ int main() {
   RUN_TEST(test_fireat_window);
   RUN_TEST(test_pending_fires_once_at_deadline);
   RUN_TEST(test_emitevent_skips_continuous);
+  RUN_TEST(test_introvert_cooldown_stays_ended_a_wrap_later);
+  RUN_TEST(test_retire_keeps_a_running_introvert_cooldown);
   return UNITY_END();
 }

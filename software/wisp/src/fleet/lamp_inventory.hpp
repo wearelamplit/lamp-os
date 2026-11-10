@@ -92,7 +92,7 @@ class LampInventory {
  private:
   // Find by MAC. Caller holds the mutex. Returns count_ if missing.
   size_t findByMacLocked(const uint8_t mac[6]) const;
-  void evictOldestIfFullLocked();
+  void evictOldestIfFullLocked(uint32_t nowMs);
 
   std::array<InventoryEntry, MAX_LAMPS> entries_{};
   size_t count_ = 0;

@@ -68,6 +68,9 @@ class PowerGovernor {
   uint32_t lastGlideMs_ = 0;
   uint32_t lastPaceMs_ = 0;
   bool pendingApply_ = false;
+  // Latched once the boot window has passed: nowMs - beginMs_ re-enters it
+  // when millis() wraps.
+  bool bootWindowOver_ = false;
 };
 
 }  // namespace lamp

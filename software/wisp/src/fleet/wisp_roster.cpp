@@ -6,6 +6,8 @@
 #include <climits>
 #include <cstring>
 
+#include <lampos/clock.hpp>
+
 namespace wisp {
 
 namespace {
@@ -59,13 +61,14 @@ void WispRoster::recordPeerClaim(const uint8_t peerWispMac[6],
     if (peerCount_ < WISP_ROSTER_MAX_PEERS) {
       idx = peerCount_++;
     } else {
-      // Evict the peer with the OLDEST lastSeenMs; it's the most likely
-      // to have gone silent, and the next prune would drop it anyway.
-      uint32_t oldest = peers_[0].lastSeenMs;
+      // Evict the peer seen longest ago; it's the most likely to have gone
+      // silent, and the next prune would drop it anyway.
+      uint32_t oldestAge = lampos::msSince(nowMs, peers_[0].lastSeenMs);
       idx = 0;
       for (size_t i = 1; i < peerCount_; ++i) {
-        if (peers_[i].lastSeenMs < oldest) {
-          oldest = peers_[i].lastSeenMs;
+        const uint32_t age = lampos::msSince(nowMs, peers_[i].lastSeenMs);
+        if (age > oldestAge) {
+          oldestAge = age;
           idx = i;
         }
       }
@@ -279,9 +282,7 @@ size_t WispRoster::peerCount() const {
 
 void WispRoster::prunePeersLocked(uint32_t nowMs) {
   for (size_t i = 0; i < peerCount_; ) {
-    const uint32_t last = peers_[i].lastSeenMs;
-    const uint32_t age  = (nowMs >= last) ? nowMs - last : 0;
-    if (age > WISP_ROSTER_PEER_AGE_MS) {
+    if (lampos::msSince(nowMs, peers_[i].lastSeenMs) > WISP_ROSTER_PEER_AGE_MS) {
       // Swap-with-back-and-pop.
       if (i != peerCount_ - 1) {
         peers_[i] = peers_[peerCount_ - 1];

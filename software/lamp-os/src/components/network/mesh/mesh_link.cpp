@@ -11,6 +11,7 @@
 #include "components/firmware/fs_ota.hpp"
 #include "components/network/mesh/proximity.hpp"
 #include "components/network/protocol/command_auth.hpp"
+#include "util/uptime.hpp"
 #include "version.hpp"
 
 #include <lampos/blended_identity.hpp>
@@ -83,8 +84,9 @@ void MeshLink::tick() {
     prevOtaState_ = otaState;
     lastHelloMs_ = 0;
   }
-  if (lastHelloMs_ == 0 && now < helloBootPhaseMs_) return;
-  if (now - lastHelloMs_ < helloIntervalMs(now) && lastHelloMs_ != 0) return;
+  const uint64_t uptime = uptimeMs();
+  if (lastHelloMs_ == 0 && uptime < helloBootPhaseMs_) return;
+  if (now - lastHelloMs_ < helloIntervalMs(uptime) && lastHelloMs_ != 0) return;
   lastHelloMs_ = now;
   // Only a receiver goes silent; it needs the airtime for the chunk stream. A
   // pure distributor keeps emitting so its otaState=Sending reaches peers.
@@ -215,8 +217,9 @@ constexpr uint32_t kMeshMixWindowMs = 30000;
 // loss. maxGapMs resets each emit; recv stays cumulative for the boot.
 void MeshLink::reportWispCoex(const uint8_t mac[6], uint32_t nowMs) {
   WispCoexSlot& s = wispCoexMeter_.record(mac, nowMs);
-  if (nowMs - s.lastEmitMs < kWispCoexEmitIntervalMs) return;
-  s.lastEmitMs = nowMs;
+  const uint64_t upMs = uptimeMs();
+  if (upMs - s.lastEmitMs < kWispCoexEmitIntervalMs) return;
+  s.lastEmitMs = upMs;
   Serial.printf("[wispcoex] wisp=%02X:%02X recv=%u maxgap=%ums\n",
                 mac[0], mac[1], (unsigned)s.recv, (unsigned)s.maxGapMs);
   s.maxGapMs = 0;
@@ -249,7 +252,7 @@ void MeshLink::reportWispState(const uint8_t sourceMac[6],
 // meshmix airtime instrument (docs/dev/networking.md): once per window, dump
 // the received-frame mix and relay count, then reset. windowStartMs seeds on
 // the first frame so the first line reflects a full window.
-void MeshLink::reportMeshMix(uint32_t nowMs) {
+void MeshLink::reportMeshMix(uint64_t nowMs) {
   if (meshMix_.windowStartMs == 0) meshMix_.windowStartMs = nowMs;
   if (nowMs - meshMix_.windowStartMs < kMeshMixWindowMs) return;
   Serial.printf("[meshmix] win=30s rx: hello=%u wisp_hello=%u paint=%u "
@@ -287,7 +290,7 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
   const uint8_t msgType = lamp_protocol::inspect(data, len);
 #ifdef LAMP_DEBUG
   meshMix_.countRx(msgType);
-  reportMeshMix(millis());
+  reportMeshMix(uptimeMs());
 #endif
   if (msgType == lamp_protocol::MSG_HELLO) {
     lamp_protocol::ParsedHello h;
@@ -303,9 +306,9 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
 #ifdef LAMP_DEBUG
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
     {
-      static uint32_t lastHelloRxLogMs = 0;
+      static uint64_t lastHelloRxLogMs = 0;
       static uint8_t  lastHelloRxMac[6] = {0};
-      uint32_t nowMsLog = millis();
+      const uint64_t nowMsLog = uptimeMs();
       const bool macChanged = std::memcmp(h.sourceMac, lastHelloRxMac, 6) != 0;
       if (macChanged || (nowMsLog - lastHelloRxLogMs) > 10000) {
         lastHelloRxLogMs = nowMsLog;

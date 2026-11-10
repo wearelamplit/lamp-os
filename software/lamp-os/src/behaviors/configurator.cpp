@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cstdint>
 
+#include <lampos/clock.hpp>
+
 #include "util/color.hpp"
 #include "util/fade.hpp"
 
@@ -141,8 +143,14 @@ void ConfiguratorBehavior::draw() {
   nextFrame();
 };
 
+void ConfiguratorBehavior::retireStale(uint32_t now) {
+  lastWebSocketUpdateTimeMs = lampos::retireStamp(now, lastWebSocketUpdateTimeMs);
+  if (!fadeActive(now)) fadeDurationMs_ = 0;
+}
+
 void ConfiguratorBehavior::control() {
   uint32_t now = millis();
+  retireStale(now);
   // Only rotation puts the configurator in PLAYING.
   if (rotating_ || fb->defaultRotation.on || animationState == PLAYING) {
     controlRotating(now);
@@ -150,14 +158,15 @@ void ConfiguratorBehavior::control() {
   }
   if (animationState == STOPPED) {
     if (lastWebSocketUpdateTimeMs > 0 &&
-        now < lastWebSocketUpdateTimeMs + CONFIGURATOR_WEBSOCKET_TIMEOUT_MS) {
+        lampos::msSince(now, lastWebSocketUpdateTimeMs) < CONFIGURATOR_WEBSOCKET_TIMEOUT_MS) {
       playOnce();
     }
   }
   if (animationState == PLAYING_ONCE && frame == easeFrames) {
     pause();
   }
-  if (animationState == PAUSED && now > lastWebSocketUpdateTimeMs + CONFIGURATOR_WEBSOCKET_TIMEOUT_MS) {
+  if (animationState == PAUSED &&
+      lampos::msSince(now, lastWebSocketUpdateTimeMs) > CONFIGURATOR_WEBSOCKET_TIMEOUT_MS) {
     playOnce();
   }
 };
@@ -172,7 +181,8 @@ bool ConfiguratorBehavior::showsRotatingSaved() const {
 // to STOPPED, so idle takes over on the saved frame.
 void ConfiguratorBehavior::controlRotating(uint32_t now) {
   const bool editing = lastWebSocketUpdateTimeMs > 0 &&
-                       now <= lastWebSocketUpdateTimeMs + CONFIGURATOR_WEBSOCKET_TIMEOUT_MS;
+                       lampos::msSince(now, lastWebSocketUpdateTimeMs) <=
+                           CONFIGURATOR_WEBSOCKET_TIMEOUT_MS;
   if (editing) {
     if (animationState == STOPPED) {
       playOnce();

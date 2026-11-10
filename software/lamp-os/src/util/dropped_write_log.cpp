@@ -4,6 +4,7 @@
 #include <Arduino.h>
 
 #include "util/log_rate_limiter.hpp"
+#include "util/uptime.hpp"
 
 namespace lamp {
 
@@ -20,10 +21,10 @@ LogRateLimiter s_limiter(kWindowMs, kLinesPerWindow);
 }  // namespace
 
 void logDroppedWrite(const char* characteristic, const char* reason) {
-  // Read millis() inside the lock, since a timestamp older than the window's
+  // Read the clock inside the lock, since a timestamp older than the window's
   // start reopens it.
   portENTER_CRITICAL(&s_mux);
-  const LogRateLimiter::Admission a = s_limiter.admit(millis());
+  const LogRateLimiter::Admission a = s_limiter.admit(uptimeMs());
   portEXIT_CRITICAL(&s_mux);
   if (!a.print) return;
   if (a.suppressed == 0) {

@@ -7,6 +7,8 @@
 
 #include <cstring>
 
+#include <lampos/clock.hpp>
+
 namespace wisp {
 
 MeshLink* MeshLink::s_instance = nullptr;
@@ -127,12 +129,16 @@ int MeshLink::findPeerSlot(const uint8_t mac[6]) const {
   return -1;
 }
 
-size_t MeshLink::pickLruSlot() const {
+size_t MeshLink::pickLruSlot(uint32_t nowMs) const {
   size_t bestIdx = 0;
-  uint32_t bestMs = UINT32_MAX;
+  bool found = false;
+  uint32_t bestAge = 0;
   for (size_t i = 0; i < MAX_TRACKED_PEERS; ++i) {
-    if (peers_[i].used && peers_[i].lastUsedMs < bestMs) {
-      bestMs = peers_[i].lastUsedMs;
+    if (!peers_[i].used) continue;
+    const uint32_t age = lampos::msSince(nowMs, peers_[i].lastUsedMs);
+    if (!found || age > bestAge) {
+      found = true;
+      bestAge = age;
       bestIdx = i;
     }
   }
@@ -169,7 +175,7 @@ bool MeshLink::send(const uint8_t targetMac[6], const uint8_t* data, size_t len)
   } else {
     // Full → evict LRU. Copy the old MAC out for esp_now_del_peer; IDF
     // APIs can't run under the critical section.
-    const size_t lru = pickLruSlot();
+    const size_t lru = pickLruSlot(nowMs);
     std::memcpy(macToDel, peers_[lru].mac, 6);
     needDel = true;
     std::memcpy(peers_[lru].mac, targetMac, 6);

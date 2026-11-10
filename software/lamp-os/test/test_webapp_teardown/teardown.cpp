@@ -70,6 +70,55 @@ void test_armed_reboot_waits_out_ota_up_to_the_ceiling() {
   TEST_ASSERT_FALSE(webapp::webappRebootDue(at + webapp::kRebootOtaWaitMaxMs, false, at, true));
 }
 
+// A deadline that passed while a station stayed joined, then over 24.8 days
+// with no request: held each loop, it still reads as passed when the station
+// leaves, so the AP comes down.
+void test_passed_deadline_stays_passed_past_half_a_wrap() {
+  const uint32_t deadline = 1000;
+  uint32_t held = deadline;
+  for (uint64_t t = deadline; t <= deadline + (1ull << 31); t += 1ull << 28) {
+    held = webapp::holdPassedDeadline(static_cast<uint32_t>(t), held);
+  }
+  const uint32_t now = deadline + (1u << 31) + 5000;
+  TEST_ASSERT_TRUE(webapp::webappShouldTeardown(now, webapp::holdPassedDeadline(now, held), false));
+}
+
+// A deadline still ahead is left alone.
+void test_hold_leaves_a_deadline_ahead() {
+  TEST_ASSERT_EQUAL_UINT32(9000, webapp::holdPassedDeadline(5000, 9000));
+}
+
+// The idle deadline passed; the loop loads it to hold it, then a request on
+// another task raises it before the hold lands. The raise must survive.
+void test_raise_between_load_and_hold_wins() {
+  std::atomic<uint32_t> deadline{1000};
+  const uint32_t now = 5000;
+  const uint32_t seen = deadline.load();
+  webapp::raiseDeadline(deadline, now + 120000, deadline.load());
+  webapp::holdPassedDeadline(deadline, now, seen);
+  TEST_ASSERT_EQUAL_UINT32(now + 120000, deadline.load());
+}
+
+// A raise never lowers a later deadline, and a held deadline is raised past.
+void test_raise_only_moves_the_deadline_later() {
+  std::atomic<uint32_t> deadline{9000};
+  webapp::raiseDeadline(deadline, 8000, deadline.load());
+  TEST_ASSERT_EQUAL_UINT32(9000, deadline.load());
+  webapp::holdPassedDeadline(deadline, 9500, deadline.load());
+  TEST_ASSERT_EQUAL_UINT32(9500, deadline.load());
+  webapp::raiseDeadline(deadline, 9600, deadline.load());
+  TEST_ASSERT_EQUAL_UINT32(9600, deadline.load());
+}
+
+// Another write raised the deadline after this raise loaded it: the raise
+// must not lower it.
+void test_raise_never_lowers_a_later_write() {
+  std::atomic<uint32_t> deadline{9000};
+  const uint32_t staleSeen = 1000;
+  webapp::raiseDeadline(deadline, 8000, staleSeen);
+  TEST_ASSERT_EQUAL_UINT32(9000, deadline.load());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_never_expire_always_false);
@@ -79,5 +128,10 @@ int main(int, char**) {
   RUN_TEST(test_armed_reboot_waits_for_ota_only);
   RUN_TEST(test_armed_reboot_waits_out_ota_up_to_the_ceiling);
   RUN_TEST(test_a_reboot_armed_at_zero_fires);
+  RUN_TEST(test_passed_deadline_stays_passed_past_half_a_wrap);
+  RUN_TEST(test_hold_leaves_a_deadline_ahead);
+  RUN_TEST(test_raise_between_load_and_hold_wins);
+  RUN_TEST(test_raise_only_moves_the_deadline_later);
+  RUN_TEST(test_raise_never_lowers_a_later_write);
   return UNITY_END();
 }

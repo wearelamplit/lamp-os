@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include "util/fade.hpp"
+#include "util/uptime.hpp"
 
 namespace lamp {
 
@@ -38,7 +39,7 @@ void GlitchyExpression::configureFromParameters(const ExpressionParams& paramete
 void GlitchyExpression::onTrigger() {
   saveBufferState();
   glitchColor = getRandomColor();
-  glitchEndMs = millis() + rng.range(glitchDurationMinMs, glitchDurationMaxMs);
+  glitchEndMs = uptimeMs() + rng.range(glitchDurationMinMs, glitchDurationMaxMs);
   painted_ = false;
   frames = kContinuousMaxFrames;
   frame = 0;
@@ -50,7 +51,7 @@ void GlitchyExpression::draw() {
     return;
   }
 
-  if (painted_ && timeReached(millis(), glitchEndMs)) {
+  if (painted_ && uptimeMs() >= glitchEndMs) {
     restoreSaved_();
     // Cap the counter; nextFrame() flips PLAYING_ONCE to STOPPED and
     // onComplete may chain a follow-up glitch.
@@ -120,7 +121,7 @@ void GlitchyExpression::onComplete() {
   // class's scheduleNextTrigger() handles the next regular trigger
   // when this short-circuit doesn't fire.
   if (rng.range(0, 99) < 33) {
-    nextTriggerMs = millis() + rng.range(200, 600);
+    nextTriggerMs = uptimeMs() + rng.range(200, 600);
   }
 }
 

@@ -5,7 +5,7 @@ namespace lamp {
 LogRateLimiter::LogRateLimiter(uint32_t windowMs, uint32_t linesPerWindow)
     : windowMs_(windowMs), linesPerWindow_(linesPerWindow) {}
 
-LogRateLimiter::Admission LogRateLimiter::admit(uint32_t nowMs) {
+LogRateLimiter::Admission LogRateLimiter::admit(uint64_t nowMs) {
   if (nowMs - windowStartMs_ >= windowMs_) {
     windowStartMs_ = nowMs;
     used_ = 0;

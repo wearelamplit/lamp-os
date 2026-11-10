@@ -116,7 +116,7 @@ inline float rollWindTarget(const FireStyle& s, Rng& rng) {
 }
 
 template <class Rng>
-inline uint32_t nextGustAt(uint32_t nowMs, const FireStyle& s, Rng& rng) {
+inline uint64_t nextGustAt(uint64_t nowMs, const FireStyle& s, Rng& rng) {
   return nowMs + rng.range(s.gustLoMs, s.gustHiMs);
 }
 

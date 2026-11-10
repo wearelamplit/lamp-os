@@ -2,6 +2,8 @@
 
 #include <cstring>
 
+#include <lampos/clock.hpp>
+
 namespace lamp {
 
 namespace {
@@ -129,6 +131,15 @@ size_t WispFleetCache::buildClaimsBlob(uint8_t* out, size_t outCap,
     ext[2] = shade[3];
   }
   return withPaint ? 1 + n * kBlobEntrySize : extBase;
+}
+
+void WispFleetCache::retire(uint32_t nowMs) {
+  for (ClaimEntry& e : claims) {
+    if (lampos::msSince(nowMs, e.lastSeenMs) > kStaleMs) e.valid = false;
+  }
+  for (PaintEntry& e : paints) {
+    if (lampos::msSince(nowMs, e.lastSeenMs) > kStaleMs) e.valid = false;
+  }
 }
 
 void WispFleetCache::clear() {

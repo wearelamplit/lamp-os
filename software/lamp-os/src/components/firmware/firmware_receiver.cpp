@@ -7,6 +7,7 @@
 #include "firmware_signature.hpp"
 #include "components/network/protocol/fw_ota.hpp"
 #include "components/network/ble/ble_control.hpp"  // pauseRadioForOta / resumeRadioAfterOta
+#include "util/uptime.hpp"
 #include "components/firmware/ota_quiet_mode.hpp"     // enterQuiet / exitQuiet
 #include "components/network/mesh/mesh_link.hpp"
 #include "util/heap_guard.hpp"
@@ -127,12 +128,10 @@ void FirmwareReceiver::tick(uint32_t nowMs) {
     case State::Idle:
       // Inter-session quiet hold expiry: a prior session deferred its exitQuiet
       // (abortOta / State::Failed) so the strip doesn't flash between
-      // back-to-back OFFERs. quietHoldUntilMs_==0 is the sentinel; without the
-      // !=0 guard, nowMs>=0 is always true and any Idle tick exits prematurely.
-      if (quietHeld_ && quietHoldUntilMs_ != 0 && nowMs >= quietHoldUntilMs_) {
+      // back-to-back OFFERs.
+      if (quietHold_.dueToExit(nowMs)) {
         ::lamp::ota_quiet_mode::exitQuiet();
-        quietHeld_        = false;
-        quietHoldUntilMs_ = 0;
+        quietHold_.release();
       }
       // Reclaim the chunk bitmap once back in Idle. The gate is disarmed and the
       // abort/verify path that set Idle ran a prior tick, so any Core 0 write has
@@ -236,9 +235,7 @@ void FirmwareReceiver::tick(uint32_t nowMs) {
       // exit. The verify-fail branch in handleDoneOnLoop sets State::Failed
       // directly, so defer here too to keep the strip in indicator mode through
       // a fast multi-distributor handoff. The Idle tick expires the hold.
-      if (quietHeld_) {
-        quietHoldUntilMs_ = nowMs + kInterSessionQuietHoldMs;
-      }
+      if (quietHold_.held) quietHold_.sessionEnded(nowMs, /*done=*/false);
       return;
     }
 
@@ -530,16 +527,15 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
   // GATT client; BLE-pushed OTA keeps the connection (the phone is the chunk
   // transport) but still drops non-OTA writes. Exited in abortOta, the Failed
   // tick, and verifyAndApply.
-  // Inter-session hold: skip enterQuiet when quietHeld_ is already set (a prior
-  // session deferred its exit). Clear quietHoldUntilMs_ so the Idle tick won't
-  // expire-and-exit mid-session.
-  if (!quietHeld_) {
+  // Inter-session hold: skip enterQuiet when the hold is already held (a prior
+  // session deferred its exit). Re-entering disarms the pending exit so the
+  // Idle tick won't expire-and-exit mid-session.
+  if (!quietHold_.held) {
     ::lamp::ota_quiet_mode::enterQuiet(
         activeTransportKind_ == FirmwareTransportKind::EspNow,
         /*visible=*/fsHooks_ == nullptr);
-    quietHeld_ = true;
   }
-  quietHoldUntilMs_ = 0;
+  quietHold_.sessionEnteredQuiet();
 
 #ifdef LAMP_DEBUG
   Serial.printf("[fw_receiver] OFFER from %02X:%02X:%02X:%02X:%02X:%02X "
@@ -619,11 +615,10 @@ void FirmwareReceiver::onDoneOnLoop(const PendingFirmwareControl& ctrl,
     // Pause so the broadcast leaves the radio before the CPU resets.
     delay(kPostResultPauseMs);
     // exitQuiet before reboot (firmware path) and before returning to Idle
-    // (FS path, which remounts without rebooting). Clear quietHeld_ so the FS
+    // (FS path, which remounts without rebooting). Release the hold so the FS
     // path leaves quiet accounting balanced; the firmware path reboots past it.
     ::lamp::ota_quiet_mode::exitQuiet();
-    quietHeld_        = false;
-    quietHoldUntilMs_ = 0;
+    quietHold_.release();
     // FS image OTA finalizes without a reboot: SPIFFS is only read by the
     // onboarding webapp, so a remount makes the new UI live. Firmware OTA
     // reboots.
@@ -669,8 +664,8 @@ void FirmwareReceiver::handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk&
     // Rate-limited: at ~130 chunks/s of "not armed" this would flood the UART.
     // Throttle to once per second.
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-    static uint32_t lastUnarmedLogMs = 0;
-    const uint32_t nowMs = millis();
+    static uint64_t lastUnarmedLogMs = 0;
+    const uint64_t nowMs = lamp::uptimeMs();
     if (nowMs - lastUnarmedLogMs > 1000) {
       lastUnarmedLogMs = nowMs;
       Serial.printf("[fw_receiver] chunk drop: not armed (chunkIdx=%u)\n",
@@ -956,12 +951,12 @@ void FirmwareReceiver::abortOta() {
   // Defer exitQuiet to keep the strip in indicator mode through a fast
   // multi-distributor handoff (the next OFFER can land within ms; avoid a
   // defaultColors flash). The Idle tick exits for real if no retry arrives
-  // within kInterSessionQuietHoldMs.
-  if (quietHeld_) {
+  // within InterSessionQuietHold::kHoldMs.
+  if (quietHold_.held) {
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-    quietHoldUntilMs_ = millis() + kInterSessionQuietHoldMs;
+    quietHold_.sessionEnded(millis(), /*done=*/false);
 #else
-    quietHoldUntilMs_ = kInterSessionQuietHoldMs;
+    quietHold_.sessionEnded(0, /*done=*/false);
 #endif
   }
 }

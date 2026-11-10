@@ -8,6 +8,7 @@
 #include "expressions/cascade_scheduler.hpp"
 #include "expressions/surface_plan.hpp"
 #include "util/heap_guard.hpp"
+#include "util/uptime.hpp"
 
 #include "components/network/protocol/lamp_protocol.hpp"
 #include "components/network/mesh/lamp_roster.hpp"
@@ -224,6 +225,13 @@ void ExpressionManager::cascade(const ExpressionInvocation& shape,
                 (unsigned)cascade_.pending());
 #endif
   tickCascade(nowMs);
+}
+
+void ExpressionManager::retireStale(uint32_t nowMs) {
+  recentCascades_.retire(nowMs);
+  recentEvents_.retire(nowMs);
+  localCooldown_.retire(nowMs);
+  cascade_.retireBatchGap(nowMs);
 }
 
 void ExpressionManager::tickCascade(uint32_t nowMs) {
@@ -445,8 +453,8 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
                                             heapCanSpare(kTransientHeapBytes * targetCount));
   if (!admitted) {
     if (source == TransientSource::Local) localCooldown_.refused(inv.type.c_str(), nowMs);
-    static uint32_t s_lastDropLogMs = 0;
-    const uint32_t now = millis();
+    static uint64_t s_lastDropLogMs = 0;
+    const uint64_t now = uptimeMs();
     if (s_lastDropLogMs == 0 || now - s_lastDropLogMs >= kTransientDropLogMs) {
       s_lastDropLogMs = now;
       Serial.printf("[expr] transient drop %s (%s, %u in flight)\n", inv.type.c_str(),

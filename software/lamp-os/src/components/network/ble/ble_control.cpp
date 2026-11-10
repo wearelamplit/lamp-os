@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "expr_catalog.h"
+#include "util/uptime.hpp"
 
 #include "config/config.hpp"
 #include "behaviors/fade_out.hpp"
@@ -107,7 +108,7 @@ static volatile bool         s_socialViewActive = false;
 // knockout/OTA chunk). The social scan skips a window while a write fired
 // within SocialScanTuning::idleGuardMs so it never competes during a live
 // drag or OTA. Written on Core 0, read on Core 1.
-static volatile uint32_t     s_lastAppWriteMs = 0;
+static std::atomic<uint64_t> s_lastAppWriteMs{0};  // lamp::uptimeMs()
 
 // Core 1 only (tick): duty-cycled passive-scan state for the Social view.
 static SocialScanGate        s_socialScan;
@@ -130,7 +131,7 @@ bool isClientConnected()   { return s_clientConnected;   }
 bool isHomeModePageActive() { return s_homeModePageActive; }
 bool isScanPaused()        { return s_scanPausedForGattClient; }
 
-void noteAppWriteActivity() { s_lastAppWriteMs = millis(); }
+void noteAppWriteActivity() { s_lastAppWriteMs.store(lamp::uptimeMs(), std::memory_order_relaxed); }
 
 // Per-connection state. NimBLE caps at CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
 // (advertising stops on connect, so only one app connects at a time), so a
@@ -482,16 +483,16 @@ static inline void fnv1a(uint32_t& h, const void* data, size_t len) {
 // A BLE section OOM degrades to a graceful-empty serve; keep it visible on
 // every channel, throttled to one line per 5000ms.
 static void logBleSectionOom(const char* what) {
-  static uint32_t lastMs = 0;
-  const uint32_t now = millis();
+  static uint64_t lastMs = 0;
+  const uint64_t now = lamp::uptimeMs();
   if (now - lastMs < 5000 && lastMs != 0) return;
   lastMs = now;
   Serial.printf("[ble_control] %s OOM; serving graceful-empty\n", what);
 }
 
 static void logNearbyHeapSkip(uint32_t largest, uint32_t needed, uint32_t lamps) {
-  static uint32_t lastMs = 0;
-  const uint32_t now = millis();
+  static uint64_t lastMs = 0;
+  const uint64_t now = lamp::uptimeMs();
   if (now - lastMs < 5000 && lastMs != 0) return;
   lastMs = now;
   Serial.printf("[ble_control] nearby build skipped, low heap: largest=%u needed=%u lamps=%u\n",
@@ -542,8 +543,7 @@ static void buildNearbyJson(uint32_t& membershipHashOut,
     if (p.hasOtaSendingTo) fnv1a(hash, p.otaSendingTo, 6);
     out += "{\"name\":\"";
     lamp::appendJsonEscaped(out, p.name);
-    // Max of both transport timestamps is the canonical lastSeen.
-    const uint32_t lastSeenMs = std::max(p.lastSeenNearMs, p.lastSeenMeshMs);
+    const uint32_t lastSeenMs = lamp::mostRecentSeenMs(p.lastSeenNearMs, p.lastSeenMeshMs, now);
     snprintf(buf, sizeof(buf), "\",\"lastSeenMs\":%lu,\"viaBle\":%s,\"viaEspNow\":%s,\"near\":%s",
              static_cast<unsigned long>(lastSeenMs),
              p.lastSeenNearMs != 0 ? "true" : "false",
@@ -653,7 +653,7 @@ static void releaseNearby() {
 // margin only if that shows up as rev thrash.
 static void maintainNearbyJson() {
   static uint32_t builtGen    = 0;
-  static uint32_t lastBuildMs = 0;
+  static uint64_t lastBuildMs = 0;
   static uint32_t lastHash    = 0;
   static bool     seeded      = false;
 
@@ -672,16 +672,17 @@ static void maintainNearbyJson() {
   const uint32_t gen = lamp::lampRoster.generation();
   if (gen == builtGen && s_nearbyReady) return;
   const uint32_t now = millis();
+  const uint64_t up = lamp::uptimeMs();
   // lastBuildMs is 0 only before the first attempt since connect; after a
   // failed attempt it holds the retry to the same 1 Hz.
-  if (lastBuildMs != 0 && now - lastBuildMs < 1000) return;
+  if (lastBuildMs != 0 && up - lastBuildMs < 1000) return;
 
   std::vector<lamp::ListedPeer>* all = nullptr;
   try {
     all = &lamp::lampRoster.getAll();
   } catch (const std::bad_alloc&) {
     logBleSectionOom("nearby roster");
-    lastBuildMs = now;
+    lastBuildMs = up;
     return;
   }
   auto& lamps = *all;
@@ -690,7 +691,7 @@ static void maintainNearbyJson() {
   for (auto& e : lamps) needed += 240 + 6 * std::strlen(e.name);
   const uint32_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
   if (largest < needed + kNearbyHeapMargin) {
-    lastBuildMs = now;
+    lastBuildMs = up;
     logNearbyHeapSkip(largest, needed, lamps.size());
     return;
   }
@@ -701,12 +702,12 @@ static void maintainNearbyJson() {
     buildNearbyJson(hash, lamps, local);
   } catch (const std::bad_alloc&) {
     logBleSectionOom("nearby");
-    lastBuildMs = now;
+    lastBuildMs = up;
     return;
   }
   if (local.size() < 2 || local.front() != '[') {
     logBleSectionOom("nearby");
-    lastBuildMs = now;
+    lastBuildMs = up;
     return;
   }
   xSemaphoreTake(nearbyCacheMutex(), portMAX_DELAY);
@@ -714,7 +715,7 @@ static void maintainNearbyJson() {
   s_nearbyReady = true;
   xSemaphoreGive(nearbyCacheMutex());
   builtGen    = gen;
-  lastBuildMs = now;
+  lastBuildMs = up;
   // The first build after a (re)connect always notifies: a heap-skip can defer
   // it past the app's first read of the idle "[]", and without a push the app
   // wouldn't know to re-read the now-populated list. Subsequent builds keep the
@@ -1192,6 +1193,14 @@ class FwChunkCallback : public NimBLECharacteristicCallbacks {
 };
 
 void tick() {
+  // Stamp retirement runs whether or not BLE came up, since the roster also
+  // fills over ESP-NOW.
+  static uint32_t s_lastRetireMs = 0;
+  if (millis() - s_lastRetireMs >= 1000) {
+    s_lastRetireMs = millis();
+    lamp::lampRoster.retireSightings(s_lastRetireMs);
+    lamp::lampRoster.retireStaleWisp(s_lastRetireMs);
+  }
   if (!s_running || !s_config) return;
 
   // Continuous scan means onScanEnd rarely fires, so prune here at ~1 Hz to
@@ -1211,10 +1220,11 @@ void tick() {
   {
     const bool active =
         s_socialViewActive && s_clientConnected && !s_otaRadioPaused;
-    if (active && !s_socialScanPrevActive) s_socialScan.arm(nowMs);
+    const uint64_t upMs = lamp::uptimeMs();
+    if (active && !s_socialScanPrevActive) s_socialScan.arm(upMs);
     s_socialScanPrevActive = active;
-    const SocialScanAction act =
-        s_socialScan.step(nowMs, active, s_lastAppWriteMs, s_socialScanTuning);
+    const SocialScanAction act = s_socialScan.step(
+        upMs, active, s_lastAppWriteMs.load(std::memory_order_relaxed), s_socialScanTuning);
     if (act == SocialScanAction::OpenWindow) {
       NimBLEScan* scan = NimBLEDevice::getScan();
       scan->setActiveScan(false);

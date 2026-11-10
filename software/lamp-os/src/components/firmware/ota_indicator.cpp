@@ -13,6 +13,7 @@
 #include "core/frame_buffer.hpp"
 #include "util/color.hpp"
 #include "util/fade.hpp"
+#include "util/uptime.hpp"
 
 // `firmwareReceiver` lives at file scope in lamp.cpp; `lamp::firmwareDistributor`
 // is in the lamp namespace (declared via extern in firmware_distributor.hpp).
@@ -171,13 +172,14 @@ void paint(FrameBuffer* fb, const Color& localBase, uint32_t nowMs,
 
 #ifdef LAMP_DEBUG
   static const char* lastBranch = nullptr;
-  static uint32_t   lastSameMs  = 0;
+  static uint64_t   lastSameMs  = 0;
   const char* branch;
   if (!haveSession) branch = "NO-SESSION (dim only)";
   else if (total == 0) branch = "HAVE-SESSION total=0 (dim only)";
   else if (inHoldRender) branch = "HOLD-RENDER";
   else branch = "LIVE";
-  if (branch != lastBranch || (nowMs - lastSameMs) >= 1000) {
+  const uint64_t upMs = lamp::uptimeMs();
+  if (branch != lastBranch || (upMs - lastSameMs) >= 1000) {
     Serial.printf("[ota_ind] t=%u br=%s rxInProgress=%d rxTotal=%u "
                   "txInProgress=%d txTotal=%u done=%u total=%u\n",
                   (unsigned)nowMs, branch,
@@ -262,9 +264,9 @@ void paint(FrameBuffer* fb, const Color& localBase, uint32_t nowMs,
   }
 
 #ifdef LAMP_DEBUG
-  static uint32_t lastLogMs = 0;
-  if (nowMs - lastLogMs > 500) {
-    lastLogMs = nowMs;
+  static uint64_t lastLogMs = 0;
+  if (lamp::uptimeMs() - lastLogMs > 500) {
+    lastLogMs = lamp::uptimeMs();
     Serial.printf("[ota_ind] done=%u total=%u whole=%u frac=%u "
                   "dim=(%u,%u,%u,%u) peer=(%u,%u,%u,%u) "
                   "px0=(%u,%u,%u,%u) pxEdge=(%u,%u,%u,%u)\n",

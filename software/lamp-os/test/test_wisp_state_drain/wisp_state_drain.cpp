@@ -135,6 +135,38 @@ void test_drain_without_w_plane_applies_w_zero() {
   assertColor(Color(70, 80, 90, 0), c.wispStateShadeColor());
 }
 
+// A wisp that paints this lamp then goes silent ages out after
+// kWispStateFreshMs. A whole millis() wrap later, with no STATE since, its
+// paint must not read fresh again.
+void test_silent_wisp_stays_aged_out_a_wrap_later() {
+  const uint8_t rgb[6] = {40, 50, 60, 70, 80, 90};
+  const uint8_t w[4] = {0, 0, 0, 0};
+  fillTwo(rgb, w, true);
+  Compositor c;
+  const uint32_t paintedMs = 1000;
+  TEST_ASSERT_TRUE(c.applyWispStateSlot(gSlot, kMine, paintedMs));
+  for (uint64_t t = paintedMs; t < paintedMs + (1ull << 32); t += 1ull << 28) {
+    c.retireWispState(static_cast<uint32_t>(t));
+  }
+  TEST_ASSERT_FALSE(c.wispStateFresh(paintedMs + 10));
+}
+
+// Away from the wrap the latch changes nothing: still fresh inside the
+// window, and a STATE after an age-out paints again.
+void test_wisp_state_retire_keeps_a_fresh_paint() {
+  const uint8_t rgb[6] = {40, 50, 60, 70, 80, 90};
+  const uint8_t w[4] = {0, 0, 0, 0};
+  fillTwo(rgb, w, true);
+  Compositor c;
+  TEST_ASSERT_TRUE(c.applyWispStateSlot(gSlot, kMine, 1000));
+  c.retireWispState(1000 + Compositor::kWispStateFreshMs - 1);
+  TEST_ASSERT_TRUE(c.wispStateFresh(1000 + Compositor::kWispStateFreshMs - 1));
+  c.retireWispState(1000 + Compositor::kWispStateFreshMs);
+  TEST_ASSERT_FALSE(c.wispStateFresh(1000 + Compositor::kWispStateFreshMs));
+  TEST_ASSERT_TRUE(c.applyWispStateSlot(gSlot, kMine, 90000));
+  TEST_ASSERT_TRUE(c.wispStateFresh(90001));
+}
+
 void test_drain_absent_entry_reports_unpainted() {
   const uint8_t kStranger[6] = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01};
   const uint8_t rgb[6] = {1, 2, 3, 4, 5, 6};
@@ -153,5 +185,7 @@ int main(int, char**) {
   RUN_TEST(test_drain_applies_black);
   RUN_TEST(test_drain_without_w_plane_applies_w_zero);
   RUN_TEST(test_drain_absent_entry_reports_unpainted);
+  RUN_TEST(test_silent_wisp_stays_aged_out_a_wrap_later);
+  RUN_TEST(test_wisp_state_retire_keeps_a_fresh_paint);
   return UNITY_END();
 }

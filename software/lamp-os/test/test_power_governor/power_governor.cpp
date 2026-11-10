@@ -82,6 +82,22 @@ void test_boot_window_uses_radio_hot_reserve() {
   TEST_ASSERT_EQUAL_UINT16(1600, gov.pixelBudgetMa());
 }
 
+// millis() restarts from 0 every 49.7 days. Past the boot window, a frame
+// after the wrap keeps the quiet reserve and the full ceiling instead of
+// replaying the boot ramp.
+void test_boot_window_stays_closed_past_the_millis_wrap() {
+  uint32_t now = 0;
+  PowerGovernor gov = dormantGov(now);
+  now = 500;  // 2^32 + 500 ms of uptime, as millis() reads it
+  gov.senseFrame(now, 100.0f, 255, 0, false);
+  TEST_ASSERT_EQUAL_UINT16(1800, gov.pixelBudgetMa());
+  gov.tick(now);
+  TEST_ASSERT_EQUAL(State::Dormant, gov.state());
+  frames(gov, now, 3000, 1700.0f);
+  TEST_ASSERT_EQUAL(State::Dormant, gov.state());
+  TEST_ASSERT_EQUAL_UINT8(255, gov.ceiling(now));
+}
+
 void test_dormant_ceiling_always_255() {
   uint32_t now = 0;
   PowerGovernor gov = dormantGov(now);
@@ -276,6 +292,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_begin_seeds_boot_ramp_at_half_ceiling);
   RUN_TEST(test_boot_hold_then_glide_then_dormant);
   RUN_TEST(test_boot_window_uses_radio_hot_reserve);
+  RUN_TEST(test_boot_window_stays_closed_past_the_millis_wrap);
   RUN_TEST(test_dormant_ceiling_always_255);
   RUN_TEST(test_mild_exceedance_clamps_same_frame);
   RUN_TEST(test_gross_exceedance_clamps_same_frame);

@@ -5,6 +5,32 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## Unreleased
+
+### Fixed
+- **Lamps and wisps left on for weeks keep working past day 25 and day 49.**
+  A lamp's millisecond clock rolls back to zero every 49.7 days of uptime.
+  Around that moment a lamp could freeze its light or dim to half for a few
+  seconds, keep showing the update indicator after a firmware update gave up,
+  stall a firmware update it was passing to a neighbour or keep skipping that
+  neighbour, close the web config page while you used it, drop a lamp it had
+  just heard from its nearby list, greet a lamp it had just greeted again,
+  relay every mesh check-in instead of thinning them, and for a minute accept
+  the BOOT-button password reset as if it had just started. Anything a lamp
+  or wisp remembered and then left alone for 49.7 days could also read as
+  brand new again: a switched-off wisp's paint came back for a minute, a
+  neighbour seen long ago showed as nearby, an old colour change replayed its
+  fade or paused the colour rotation, a long-past home Wi-Fi scan counted as
+  fresh, a peer greeted weeks ago was skipped, and touch was ignored for half
+  a second. A lamp that had greeted no one for 25 days stopped greeting for
+  up to 25 days more, an introvert that had never tired stopped from day 25
+  to day 50, and an expression that home mode had paused for 25 days stopped
+  firing on its own. A web config page could stay up for weeks after its last
+  visitor left. A wisp could keep lamps and other wisps that had gone silent,
+  forget ones it had just heard, hold back its brightness re-sends, or wait
+  to reopen its OSC port or send its config. All of these now carry on
+  through the rollover.
+
 ## 1.3.2
 
 ### Fixed

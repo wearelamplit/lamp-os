@@ -3,6 +3,8 @@
 #include <WiFi.h>
 #include <esp_wifi.h>
 
+#include <lampos/clock.hpp>
+
 #include "config/wisp_config.hpp"
 #include "fleet/lamp_inventory.hpp"
 #include "net/mesh_link.hpp"
@@ -28,6 +30,7 @@ SerialConsole::SerialConsole(PaintDistributor& paint, WispConfig& config,
       onSourceTransition_(std::move(onSourceTransition)) {}
 
 void SerialConsole::pump() {
+  slip_.retire(millis());
   while (Serial.available() > 0) {
     int ch = Serial.read();
     if (ch < 0) break;
@@ -71,7 +74,7 @@ void SerialConsole::dumpInventory() {
   Serial.printf("[wisp] roster (%u lamp%s):\n",
                 (unsigned)roster.size(), roster.size() == 1 ? "" : "s");
   for (const auto& e : roster) {
-    const uint32_t ageMs = (nowMs >= e.lastSeenMs) ? nowMs - e.lastSeenMs : 0;
+    const uint32_t ageMs = lampos::msSince(nowMs, e.lastSeenMs);
     Serial.printf("  %02X:%02X:%02X:%02X:%02X:%02X  %-12s  fw=%s  age=%lums\n",
                   e.mac[0], e.mac[1], e.mac[2], e.mac[3], e.mac[4], e.mac[5],
                   e.name, formatVersion(e.firmwareVersion).c_str(),

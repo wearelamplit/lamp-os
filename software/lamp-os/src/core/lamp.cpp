@@ -79,6 +79,7 @@
 #include "util/gradient.hpp"
 #include "util/heap_probe.hpp"
 #include "util/levels.hpp"
+#include "util/uptime.hpp"
 
 lamp::NvsConfigStore configStore;
 
@@ -576,7 +577,7 @@ void lamp::Lamp::tickBootRecovery() {
     pinMode(0, INPUT_PULLUP);
     s_pinReady = true;
   }
-  if (!bootRecovery_.update(digitalRead(0) == LOW, millis())) return;
+  if (!bootRecovery_.update(digitalRead(0) == LOW, lamp::uptimeMs())) return;
   ::config.lamp.password.clear();
   ::config.persistConfig("boot_recovery");
   // BLE auth reads the password live, so the app is usable immediately. The
@@ -1132,6 +1133,7 @@ void lamp::Lamp::tick() {
         lamp::settleBrightnessFade();
       }
     }
+    lamp::retireBrightnessFade(now);
 
     // Personality engine. Runs after the transient-override block so it
     // reads a consistent post-fade view this tick. Cheap when nothing's
@@ -1259,6 +1261,7 @@ void lamp::Lamp::tick() {
   // the final frame of the animation is drawn before removal.
   expressionManager.gcTransients();
   expressionManager.tickCascade(millis());
+  expressionManager.retireStale(millis());
 
   // Reap the active-test set (entries fired via dispatchLampAction
   // "test_expression"). When the last one transitions to STOPPED, flip

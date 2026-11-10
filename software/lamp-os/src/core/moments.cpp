@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include <lampos/clock.hpp>
+
 #include "components/network/protocol/event.hpp"
 #include "expressions/bloom/bloom_expression.hpp"
 #include "expressions/expression.hpp"
@@ -28,8 +30,6 @@ constexpr size_t kBorrowedColors = 4;
 // A colour this close to the base's own is whitened so it still stands out.
 constexpr uint32_t kBorrowSameColor = 48;
 constexpr uint8_t kBorrowWhiten = 102;
-
-bool later(uint32_t a, uint32_t b) { return static_cast<int32_t>(a - b) > 0; }
 
 }  // namespace
 
@@ -100,6 +100,7 @@ void MomentDirector::evaluate(uint32_t nowMs) {
     likedFingerprint_ = fp;
     likedSinceMs_ = nowMs;
   }
+  likedSinceMs_ = lampos::retireStamp(nowMs, likedSinceMs_);
   // Latching both deadlines keeps a lamp idle past the 24-day signed-compare
   // horizon eligible and out of cooldown.
   for (KindState& s : kinds_) {
@@ -149,7 +150,7 @@ void MomentDirector::hearCrowd(MomentKind kind, uint32_t nowMs) {
   const uint32_t cooldown = momentPacing(kind).crowdCooldownMs;
   if (cooldown == 0) return;
   const uint32_t until = nowMs + cooldown;
-  if (!s.cooling || later(until, s.coolUntilMs)) s.coolUntilMs = until;
+  if (!s.cooling || lampos::isLater(until, s.coolUntilMs)) s.coolUntilMs = until;
   s.cooling = true;
 }
 
@@ -291,7 +292,7 @@ void MomentDirector::startFireflies(uint32_t seed, uint32_t t0, const uint8_t or
   moment_.offset = firefliesFirstOffset(seed, self_);
   // A late joiner starts at its first blink still ahead.
   while (moment_.blink <= kFirefliesBlinks &&
-         later(nowMs, firefliesBlinkMs(t0, moment_.periodMs, moment_.blink, moment_.offset))) {
+         lampos::isLater(nowMs, firefliesBlinkMs(t0, moment_.periodMs, moment_.blink, moment_.offset))) {
     moment_.offset = firefliesNextOffset(moment_.offset, moment_.blink);
     ++moment_.blink;
   }

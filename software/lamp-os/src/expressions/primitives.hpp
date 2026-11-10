@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include <lampos/clock.hpp>
+
 #include "expressions/param_utils.hpp"
 #include "util/eased_scalar.hpp"
 
@@ -24,10 +26,7 @@ constexpr uint32_t kContinuousMaxFrames = 100000;
 // it after (the 180 s lifetime cap backstops it either way).
 constexpr uint8_t kPreviewCycles = 2;
 
-// Wrap-safe "now has reached deadline" for millis()-domain timestamps.
-inline bool timeReached(uint32_t nowMs, uint32_t deadlineMs) {
-  return static_cast<int32_t>(nowMs - deadlineMs) >= 0;
-}
+using lampos::timeReached;
 
 enum class TaperCurve : uint8_t { Linear, Quadratic };
 

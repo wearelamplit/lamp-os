@@ -27,7 +27,10 @@ class Expression : public AnimatedBehavior {
  protected:
   std::vector<Color> savedBuffer;
   std::vector<Color> colors;
-  uint32_t nextTriggerMs = 0;
+  // On lamp::uptimeMs(), which never wraps: control() is skipped through home
+  // mode, so a deadline on 32-bit millis() could sit long enough to read as
+  // weeks away.
+  uint64_t nextTriggerMs = 0;
   uint32_t intervalMinMs = 60000;   // 1 min default
   uint32_t intervalMaxMs = 900000;  // 15 min default
   uint32_t lastCompletedLoop = 0;   // Track last completed animation loop

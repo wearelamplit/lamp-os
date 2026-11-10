@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include <lampos/clock.hpp>
+
 #include "config/config_types.hpp"
 #include "expressions/expression_invocation.hpp"
 #include "expressions/expression_observer.hpp"
@@ -41,6 +43,22 @@ inline uint8_t mirrorRatePct(uint8_t disposition, SocialMode mode) {
                         kMirrorModeFactorX10[modeIdx] / 10;
   return rate > 100 ? 100 : static_cast<uint8_t>(rate);
 }
+
+// The introvert cooldown's last mirror. retire() forgets one older than the
+// cooldown, so it cannot gate a mirror again one millis() wrap later; the
+// owner calls it at least once per lampos::kRetiredAgeMs.
+struct MirrorCooldown {
+  bool ever = false;
+  uint32_t lastMs = 0;
+
+  void mirrored(uint32_t nowMs) {
+    ever = true;
+    lastMs = nowMs;
+  }
+  void retire(uint32_t nowMs) {
+    if (ever && lampos::msSince(nowMs, lastMs) >= kIntrovertMirrorCooldownMs) ever = false;
+  }
+};
 
 // Pure mirror decision. `roll` is a 1..100 chance draw, `jitterRoll` a
 // 0..kMirrorJitterMs draw. `everMirrored`/`lastMirrorMs` carry the
@@ -93,8 +111,7 @@ class SocialEchoObserver : public IExpressionObserver {
   MeshLink& mesh_;
   FastRng rng_;
   Pending pending_[kMaxPending];
-  uint32_t lastMirrorMs_ = 0;
-  bool everMirrored_ = false;
+  MirrorCooldown cooldown_;
 };
 
 }  // namespace lamp

@@ -1,6 +1,9 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
+
+#include <lampos/clock.hpp>
 
 namespace webapp {
 
@@ -18,6 +21,27 @@ inline bool webappShouldTeardown(uint32_t now, uint32_t deadlineMs,
 inline bool webappShouldRestoreBle(uint32_t now, uint32_t deadlineMs,
                                    bool bleDown) {
   return bleDown && static_cast<int32_t>(now - deadlineMs) >= 0;
+}
+
+// `deadlineMs` once reached, moved up to `now` so it keeps reading as reached;
+// a passed deadline left over 24.8 days would read as weeks ahead. Unchanged
+// while still ahead. The owner applies it at least once per 24.8 days.
+inline uint32_t holdPassedDeadline(uint32_t now, uint32_t deadlineMs) {
+  return static_cast<int32_t>(now - deadlineMs) >= 0 ? now : deadlineMs;
+}
+
+// Raises `deadline`, whose value the caller loaded as `seen`, to `idleMs`
+// when that is later. A write that lands after the load is never lowered.
+inline void raiseDeadline(std::atomic<uint32_t>& deadline, uint32_t idleMs, uint32_t seen) {
+  while (lampos::isLater(idleMs, seen) && !deadline.compare_exchange_weak(seen, idleMs)) {
+  }
+}
+
+// holdPassedDeadline applied to `deadline`, whose value the caller loaded as
+// `seen`; a raise that lands after that load wins.
+inline void holdPassedDeadline(std::atomic<uint32_t>& deadline, uint32_t now, uint32_t seen) {
+  const uint32_t held = holdPassedDeadline(now, seen);
+  if (held != seen) deadline.compare_exchange_strong(seen, held);
 }
 
 // The longest an armed reboot waits on OTA quiet mode; a transfer holding it

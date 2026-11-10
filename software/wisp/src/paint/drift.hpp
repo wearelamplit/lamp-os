@@ -6,6 +6,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include <lampos/clock.hpp>
+
 namespace wisp {
 
 // Slot between per-lamp drift sends: one lamp advances each slot, so a full
@@ -51,7 +53,7 @@ inline bool unicastGateOpen(uint32_t nowMs, uint32_t lastUnicastMs, uint32_t min
 // the fade has already settled, i.e. a steady hold or a lamp recovering
 // after a drop.
 inline uint32_t reaffirmFadeMs(uint32_t nowMs, uint32_t fadeEndMs, uint32_t minFadeMs) {
-  const uint32_t remaining = fadeEndMs > nowMs ? fadeEndMs - nowMs : 0;
+  const uint32_t remaining = lampos::timeReached(nowMs, fadeEndMs) ? 0 : fadeEndMs - nowMs;
   return remaining > minFadeMs ? remaining : minFadeMs;
 }
 

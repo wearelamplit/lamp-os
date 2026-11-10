@@ -10,6 +10,7 @@
 #include "expression.hpp"
 #include "expression_invocation.hpp"
 #include "expressions/cascade_scheduler.hpp"
+#include "expressions/recent_cascade.hpp"
 #include "expressions/transient_admission.hpp"
 #include "expression_registry.hpp"
 #include "expressions/glitchy/glitchy_expression.hpp"
@@ -19,14 +20,6 @@
 #include "expressions/spotty/spotty_expression.hpp"
 
 namespace lamp {
-
-// Cascade dedup window. The TARGET_BOTH auto-trigger from Expression::control()
-// fires shade+base entries back-to-back in the same loop tick (microseconds
-// apart), so anything wider than a frame would catch the double-fire; 250 ms
-// also tolerates a generous control()-iteration slip without being so loose
-// it suppresses a deliberate back-to-back manual trigger. Pinned by
-// test/test_cascade_dedup/cascade_dedup.cpp.
-static constexpr uint32_t kCascadeDedupWindowMs = 250;
 
 class Compositor;
 class ExpressionManager;
@@ -108,52 +101,9 @@ class ExpressionManager {
   // previewActive bit broadcast on CHAR_STATE_NOTIFY.
   std::vector<Expression*> activeTests_;
 
-  // Small ring of (type, intervalIdx, fireMs) for cascades that have
-  // already fanned out, so a TARGET_BOTH expression's per-entry auto-
-  // trigger from Expression::control() doesn't double-cascade through
-  // onExpressionFired(). The shade entry fires, records (type, idx, now),
-  // then the base entry fires microseconds later; recentCascades_.seen()
-  // returns true and maybeCascade() short-circuits. The pure data shape
-  // (keying, eviction, window check) is mirrored in
-  // test/test_cascade_dedup/cascade_dedup.cpp.
-  //
-  // CAPACITY=8 is generous: a logical trigger emits at most two entries
-  // (TARGET_BOTH), and entries age out of the window (250 ms) inside a
-  // few control() iterations.
-  struct RecentCascade {
-    static constexpr size_t CAPACITY = 8;
-
-    bool seen(const std::string& type, uint32_t intervalIdx,
-              uint32_t nowMs) const {
-      for (size_t i = 0; i < CAPACITY; ++i) {
-        const Entry& e = entries[i];
-        if (!e.used) continue;
-        if (e.type != type || e.intervalIdx != intervalIdx) continue;
-        if (nowMs - e.fireMs <= kCascadeDedupWindowMs) return true;
-      }
-      return false;
-    }
-
-    void record(const std::string& type, uint32_t intervalIdx,
-                uint32_t nowMs) {
-      Entry& slot = entries[head];
-      slot.used = true;
-      slot.type = type;
-      slot.intervalIdx = intervalIdx;
-      slot.fireMs = nowMs;
-      head = (head + 1) % CAPACITY;
-    }
-
-   private:
-    struct Entry {
-      bool used = false;
-      std::string type;
-      uint32_t intervalIdx = 0;
-      uint32_t fireMs = 0;
-    };
-    Entry entries[CAPACITY];
-    size_t head = 0;
-  };
+  // Cascades already fanned out, so a TARGET_BOTH expression's shade and base
+  // auto-triggers from Expression::control() cascade once: the base entry
+  // fires microseconds after the shade and maybeCascade() short-circuits.
   RecentCascade recentCascades_;
   LocalCooldown localCooldown_;
 
@@ -341,6 +291,10 @@ class ExpressionManager {
   // Loop drain: sends the next batch of a cascade fan-out when due, and stops
   // the drain when an OTA starts.
   void tickCascade(uint32_t nowMs);
+
+  // Retires the dedup, cooldown and batch-gap stamps that have passed their
+  // windows. Call every loop tick.
+  void retireStale(uint32_t nowMs);
 
   std::vector<Color> getExpressionColors(const std::string& type) const;
 

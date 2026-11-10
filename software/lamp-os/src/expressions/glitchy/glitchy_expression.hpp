@@ -61,7 +61,7 @@ class GlitchyExpression : public Expression {
   Color glitchColor;
   uint32_t glitchDurationMinMs = 30;
   uint32_t glitchDurationMaxMs = 120;
-  uint32_t glitchEndMs = 0;
+  uint64_t glitchEndMs = 0;  // lamp::uptimeMs(): home mode can freeze a glitch for weeks
   // A glitch shorter than one flush window still paints one frame before the
   // deadline-driven restore.
   bool painted_ = false;

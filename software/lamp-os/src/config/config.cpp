@@ -16,6 +16,7 @@
 #include "util/color.hpp"
 #include "util/heap_guard.hpp"
 #include "util/json_writer.hpp"
+#include "util/uptime.hpp"
 #include "version.hpp"
 
 #include <lampos/protocol/presence.hpp>
@@ -393,8 +394,8 @@ static bool assignNoThrow(std::string& dst, const char* src, size_t len) {
 // on every channel, throttled to one line per LAMP_SECTION_OOM_MIN_MS.
 static void logSectionOom(const char* msg) {
   static constexpr uint32_t LAMP_SECTION_OOM_MIN_MS = 5000;
-  static uint32_t lastMs = 0;
-  const uint32_t now = millis();
+  static uint64_t lastMs = 0;
+  const uint64_t now = lamp::uptimeMs();
   if (now - lastMs < LAMP_SECTION_OOM_MIN_MS && lastMs != 0) return;
   lastMs = now;
   Serial.printf("[cfg] %s section OOM; serving stale\n", msg);

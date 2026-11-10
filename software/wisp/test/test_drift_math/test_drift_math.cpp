@@ -102,6 +102,15 @@ void test_reaffirm_remaining_below_floor_uses_floor() {
   TEST_ASSERT_EQUAL_UINT32(1500, wisp::reaffirmFadeMs(39000, 40000, 1500));
 }
 
+// Fade ending 30 s past the millis() wrap, re-affirmed 10 s before it: 40 s
+// remain. Once the fade end has passed, after the wrap, it floors.
+void test_reaffirm_across_the_wrap() {
+  const uint32_t fadeEnd = 30000;
+  TEST_ASSERT_EQUAL_UINT32(40000, wisp::reaffirmFadeMs(UINT32_MAX - 9999, fadeEnd, 1500));
+  TEST_ASSERT_EQUAL_UINT32(1500, wisp::reaffirmFadeMs(fadeEnd + 5000, fadeEnd, 1500));
+  TEST_ASSERT_EQUAL_UINT32(1500, wisp::reaffirmFadeMs(5000, UINT32_MAX - 1000, 1500));
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_slot_divides_interval_by_count);
@@ -123,5 +132,6 @@ int main() {
   RUN_TEST(test_reaffirm_post_fade_floors_at_min);
   RUN_TEST(test_reaffirm_exactly_at_fade_end_floors_at_min);
   RUN_TEST(test_reaffirm_remaining_below_floor_uses_floor);
+  RUN_TEST(test_reaffirm_across_the_wrap);
   return UNITY_END();
 }

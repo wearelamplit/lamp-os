@@ -5,6 +5,8 @@
 #include <esp_attr.h>
 #include <esp_system.h>
 #include <esp_task_wdt.h>
+
+#include "util/uptime.hpp"
 #endif
 
 namespace lamp::loop_watchdog {
@@ -37,7 +39,7 @@ bool markIteration(BootGuard& guard, uint32_t uptimeMs, const void* current,
   return feedsFrom(current, subscribed);
 }
 
-bool takeDueReport(LongestGap& gap, LogRateLimiter& log, uint32_t nowMs,
+bool takeDueReport(LongestGap& gap, LogRateLimiter& log, uint64_t nowMs,
                    uint32_t& longestMs) {
   if (!gap.reportDue() || !log.admit(nowMs).print) return false;
   longestMs = gap.takeReport();
@@ -64,10 +66,9 @@ LongestGap s_iteration;
 LogRateLimiter s_unfedLog(/*windowMs=*/1000, /*linesPerWindow=*/1);
 LogRateLimiter s_iterationLog(/*windowMs=*/1000, /*linesPerWindow=*/1);
 
-void report(LongestGap& gap, LogRateLimiter& log, uint32_t nowMs,
-            const char* what) {
+void report(LongestGap& gap, LogRateLimiter& log, const char* what) {
   uint32_t longestMs = 0;
-  if (takeDueReport(gap, log, nowMs, longestMs)) {
+  if (takeDueReport(gap, log, uptimeMs(), longestMs)) {
     Serial.printf("[loopwd] longest %s %u ms\n", what, (unsigned)longestMs);
   }
 }
@@ -107,7 +108,7 @@ void feed() {
 #ifdef LAMP_DEBUG
   const uint32_t nowMs = millis();
   s_unfed.mark(nowMs);
-  report(s_unfed, s_unfedLog, nowMs, "unfed span");
+  report(s_unfed, s_unfedLog, "unfed span");
 #endif
 }
 
@@ -120,7 +121,7 @@ void startIteration() {
 #ifdef LAMP_DEBUG
   const uint32_t nowMs = millis();
   s_iteration.mark(nowMs);
-  report(s_iteration, s_iterationLog, nowMs, "loop iteration");
+  report(s_iteration, s_iterationLog, "loop iteration");
 #endif
 }
 

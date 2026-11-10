@@ -194,7 +194,7 @@ class ControlNotifier extends _$ControlNotifier {
   /// How long editing stays frozen after a push while the lamp has not said
   /// it is listening: its receiver's no-progress abort (`kNoProgressAbortMs`,
   /// 60 s) plus its inter-session quiet hold
-  /// (`FirmwareReceiver::kInterSessionQuietHoldMs`, 10 s), plus 5 s for its
+  /// (`InterSessionQuietHold::kHoldMs`, 10 s), plus 5 s for its
   /// loop tick and the notify.
   @visibleForTesting
   static const quietAfterPushBound = Duration(seconds: 75);

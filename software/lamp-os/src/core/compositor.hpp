@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include <lampos/clock.hpp>
+
 #include "animated_behavior.hpp"
 #include "components/network/mesh/pending_slots.hpp"
 #include "behavior_context.hpp"
@@ -239,6 +241,16 @@ class Compositor {
     }
     applyWispState(base, shade, nowMs);
     return true;
+  }
+
+  // wispActive at nowMs.
+  bool wispStateFresh(uint32_t nowMs) const {
+    return wispStatePresent_ && (nowMs - wispStateFreshMs_) < kWispStateFreshMs;
+  }
+  // Retires the last STATE's stamp so a silent wisp cannot read fresh again
+  // one millis() wrap later. Called every frame.
+  void retireWispState(uint32_t nowMs) {
+    wispStateFreshMs_ = lampos::retireStamp(nowMs, wispStateFreshMs_);
   }
 
   // Failsafe window: presence ages out this long after the last STATE frame
