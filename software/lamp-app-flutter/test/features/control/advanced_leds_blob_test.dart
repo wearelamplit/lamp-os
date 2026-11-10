@@ -186,6 +186,8 @@ void main() {
     await seedControlBle(
       ble,
       deviceId: devId,
+      // GRB base against a GRBW shade, so a role mix-up shows.
+      baseBpp: 3,
       baseSegmentsJson: segsJson(snafu.base),
       shadeSegmentsJson: segsJson(snafu.shade),
     );
@@ -224,5 +226,6 @@ void main() {
       (jsonDecode(utf8.decode(plain)) as Map)['shade']['segments'],
       hasLength(3),
     );
+    expect((jsonDecode(utf8.decode(plain)) as Map)['base']['byteOrder'], 'GRB');
   });
 }
