@@ -16,7 +16,8 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   didn't reach the wisp, as it does for any other palette. If the wisp
   restarts while the lamp is open in the app, an emptied palette shows as
   not reaching the wisp even when it did, until the wisp has been up as long
-  as before the restart. Before, the app showed the palette empty but never
+  as before the restart. The same happens if the lamp stays open while the
+  wisp's uptime passes about 49 days. Before, the app showed the palette empty but never
   sent it, so the wisp kept painting the old colours.
 - **Wisp palette and source changes show as saved only once the wisp reports
   them.** Save a palette, empty one, or change the wisp's source, and the app
