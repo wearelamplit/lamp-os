@@ -75,6 +75,7 @@ two scripts:
 | [personality-matrix.md](personality-matrix.md) | injected-crowd dim, disposition extremes on the greet profile, triggerGreet, cooldown/no-respam, greet-gradient verify | 1 lamp on serial + 1 real powered peer lamp (bdAddr from the app); no wisp |
 | [heap-health.md](heap-health.md) | heap leak/fragmentation detection: `heap.get` sampling across scripted return-to-idle cycles, quick + soak modes, minever high-water | 1 lamp on serial; optional 2nd powered lamp for greet/roster churn realism |
 | [loop-stack.md](loop-stack.md) | `loopTask` peak stack measurement before shrinking `LAMP_LOOP_STACK_SIZE`: `-fstack-usage` chain re-derivation, canary prereq, HWM probe, worst-case recipe, ceiling + margin | 1 lamp on serial (dev, runtime paths); key-holder signed build for the boot-SHA path; both variants |
+| [loop-watchdog.md](loop-watchdog.md) | loop-task watchdog: a forced stall resets and lands in `lastCrash`, the longest unfed span across a session and an OTA, no reset loop on a normal boot | 1 lamp on serial + app or bleak; 2nd lamp on a newer signed image for the OTA row |
 
 Each runbook opens with its own Hardware section repeating this. Findings go
 to `BENCH_BUGS.md` at the repo root.

@@ -16,6 +16,7 @@ source file is where the tag's format strings live.
 | `[heap]` | `util/heap_probe.hpp`, `core/lamp.cpp` | Free + largest contiguous block at named checkpoints (`at=%s free=%u largest=%u`): boot, mesh, webapp, ble-connect/disconnect/pre/post, ota-stream, web-save; every 30 s in a debug build a `trend` checkpoint and `txstalls=.. txrefused=..`, the TX credit resets and the sends dropped for want of a credit |
 | `[loop]` | `core/lamp.cpp`, `core/lamp_drains.cpp` | Main-loop health: stack high-water mark, delayed-trigger queue eviction, knockout-drain pixel/brightness; `settingsBlob: save deferred; reboot waits for it`, a settings blob that needs a reboot whose save failed, and `settingsBlob: save never landed; no reboot`, the wait given up after 5 minutes (every build) |
 | `[lamp]` | `core/lamp.cpp`, `main.cpp` | Boot: `FATAL` malformed HwConfig (halt), compiled vs NVS `lampType` |
+| `[loopwd]` | `util/loop_watchdog.cpp` | Loop watchdog: `longest unfed span N ms`, the longest time the loop task went without feeding the task watchdog since boot, printed when it sets a new high, at most once every 5 s; `subscribe FAILED; loop unwatched` |
 | `[gov]` | `core/lamp.cpp` | Power governor clamp / release (`clamp demand=.. budget=.. ceiling=..`, `release demand=..`) |
 | `[power]` | `core/lamp.cpp` | Brownout-reset warning (supply-budget constants may be mis-sized) |
 | `[ota]` | `core/lamp.cpp` | OTA boot health: `PENDING_VERIFY` self-check arm, new-partition-marked-valid, `mark_app_valid` failure |
@@ -65,7 +66,7 @@ Serial-ingress commands (`scripts/bench_cmd.py`), `core/lamp_test_action.cpp`:
 
 | Tag | Prints |
 |---|---|
-| `[cmd]` | Serial command parse (`ok a=%s`, parse / missing-action errors) |
+| `[cmd]` | Serial command parse (`ok a=%s`, parse / missing-action errors); `ok loopwd.hang` before the `loopwd.hang` command stalls the loop task until the watchdog resets the lamp ([`qa/loop-watchdog.md`](../../qa/loop-watchdog.md)) |
 | `[test]` | Transient pulse / configured-trigger echo |
 | `[personality]` | `inject_nearby` / `clear_nearby` bench overrides |
 

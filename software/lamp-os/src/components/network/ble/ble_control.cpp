@@ -26,6 +26,7 @@
 #include "util/dropped_write_log.hpp"
 #include "util/json_escape.hpp"
 #include "util/heap_probe.hpp"
+#include "util/loop_watchdog.hpp"
 #include "core/pending_slot_aggregate.hpp"
 #include "core/override_aggregate.hpp"
 #include "components/firmware/ota_quiet_mode.hpp"
@@ -1538,9 +1539,11 @@ bool deinitForWebapp() {
   disconnectGattClientsForOta();
   NimBLEDevice::getScan()->stop();
   stop();
+  lamp::loop_watchdog::feed();
   NimBLEDevice::deinit(true);
   esp_bt_controller_disable();
   esp_bt_controller_deinit();
+  lamp::loop_watchdog::feed();
   s_bleDown = true;
   lamp::logHeap("ble-post");
   return true;

@@ -5,6 +5,21 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## Unreleased
+
+### Fixed
+- **A frozen lamp restarts itself.** If the lamp's main loop ever stops
+  making progress, the lamp now resets after about 5 seconds (30 while it
+  receives a firmware update) instead of staying frozen or dark until it is
+  unplugged, and the reset shows in the lamp's crash record. A freeze in the
+  first 30 seconds after a firmware update rolls the lamp back to its
+  previous firmware. A freeze while the lamp is still starting up is not
+  caught yet.
+- **Dropped writes show on the debug console.** On a development build, a
+  colour or control write the lamp ignores, during a firmware update or
+  because it could not read it, prints a `[drop]` line naming the setting
+  and why.
+
 ## 1.3.1
 
 ### Added

@@ -11,6 +11,7 @@
 #include "components/network/mesh/mesh_link.hpp"
 #include "util/heap_guard.hpp"
 #include "util/heap_probe.hpp"
+#include "util/loop_watchdog.hpp"
 #include "../../version.hpp"
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
@@ -36,9 +37,8 @@ namespace {
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 // Restore the default TWDT (5 s, IDLE0 subscribed) on every OTA flow exit.
-// Don't subscribe the Arduino loop task: arduino-esp32 leaves
-// loopTaskWDTEnabled=false and never calls esp_task_wdt_reset() from the loop
-// body, so subscribing it would panic the instant the timeout elapsed.
+// The timeout also governs the loop task (util/loop_watchdog.hpp); a
+// reconfigure leaves its subscription in place.
 void restoreDefaultWdt() {
   esp_task_wdt_config_t wdtDefault = {
       .timeout_ms     = 5000,
@@ -436,7 +436,8 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
 
   // Widen the TWDT for the whole OTA window. The block-erase loop re-enables
   // interrupts between blocks so IDLE0 still runs (well within 30 s), and
-  // per-chunk writes are sub-ms. The Arduino loop task stays unsubscribed.
+  // per-chunk writes are sub-ms. The loop task feeds once per block: a slow
+  // flash's whole-image erase can outlast even the widened timeout.
   esp_task_wdt_config_t wdtWide = {
       .timeout_ms     = 30000,
       .idle_core_mask = (1u << 0),
@@ -460,6 +461,7 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
     while (eoff < eraseLen) {
       const size_t span = (eraseLen - eoff) < kBlock ? (eraseLen - eoff) : kBlock;
       widenIwdt();
+      loop_watchdog::feed();
       eraseErr = esp_partition_erase_range(part, eoff, span);
       if (eraseErr != ESP_OK) break;
       eoff += span;
@@ -987,6 +989,7 @@ lamp_protocol::FwResultStatus FirmwareReceiver::verifyAndApply() {
   {
     uint32_t waitMs = 0;
     while (writesInFlight_.load(std::memory_order_acquire) > 0) {
+      loop_watchdog::feed();
       vTaskDelay(pdMS_TO_TICKS(2));
       waitMs += 2;
       if (waitMs > 5000) {
@@ -1019,6 +1022,7 @@ lamp_protocol::FwResultStatus FirmwareReceiver::verifyAndApply() {
 #endif
     return lamp_protocol::FwResultStatus::PartitionWriteFail;
   }
+  loop_watchdog::feed();
   // FS-image OTA: the hook mounts the freshly-written spiffs partition,
   // recomputes the manifest digest, ed25519-verifies against fw.lsig, and checks
   // the version. No boot-partition flip (the partition is read at runtime, not
@@ -1036,6 +1040,7 @@ lamp_protocol::FwResultStatus FirmwareReceiver::verifyAndApply() {
   // chunk can race.
   auto reader = [otaPartition](size_t offset, size_t wantBytes,
                                uint8_t* out) -> int {
+    loop_watchdog::feed();
     const esp_err_t err = esp_partition_read(
         otaPartition, offset, out, wantBytes);
     if (err != ESP_OK) return -1;
