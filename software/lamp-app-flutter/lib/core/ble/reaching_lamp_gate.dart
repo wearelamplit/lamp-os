@@ -12,6 +12,7 @@ import '../routing/router.dart';
 import '../routing/routes.dart';
 import '../../features/control/application/control_notifier.dart';
 import '../../features/control/presentation/widgets/critter_asset.dart';
+import '../../features/firmware/presentation/firmware_push_lock.dart';
 import 'reaching_lamp_lines.dart';
 
 final _lampRoute =
@@ -26,6 +27,7 @@ String? activeLampId(String uri) => _lampRoute.firstMatch(uri)?.group(1);
 /// App-level gate: shows a whimsical blocking overlay whenever the app is
 /// actively reaching the lamp of the current route (initial connect, drop, or
 /// save-reboot). Mounted above the router so it covers pushed routes too.
+/// Also hosts the current lamp's [FirmwarePushBanner].
 ///
 /// Reads the current location off the [GoRouter] instance rather than
 /// `GoRouterState.of(context)`: this widget sits in `MaterialApp.router`'s
@@ -75,7 +77,7 @@ class _ReachingLampGateState extends ConsumerState<ReachingLampGate> {
       }
     }
     final stack = Stack(children: [
-      widget.child,
+      FirmwarePushBanner(lampId: id, child: widget.child),
       Positioned.fill(
         child: IgnorePointer(
           ignoring: overlay == null,

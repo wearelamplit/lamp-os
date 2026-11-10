@@ -11,6 +11,7 @@ import '../../control/application/control_notifier.dart';
 import '../../control/domain/sections.dart';
 import '../domain/expression_catalog.dart';
 import '../domain/expression_presentation.dart';
+import '../../firmware/presentation/firmware_push_lock.dart';
 
 /// Entry point for adding a new expression. The user picks Target first
 /// (Shade / Base / Both), then picks one of the expression types from a
@@ -48,24 +49,27 @@ class _AddExpressionPickerScreenState
         ),
         title: const Text('New expression'),
       ),
-      body: async.when(
-        loading: () => const SizedBox.expand(),
-        error: (e, _) => FriendlyError.page(
-          title: "Couldn't reach your lamp.",
-          subtitle:
-              "They may have wandered out of range. Bring your phone closer "
-              'and try again.',
-          rawError: e,
-          onRetry: () =>
-              ref.invalidate(controlNotifierProvider(widget.lampId)),
-        ),
-        data: (state) => _Body(
-          lampId: widget.lampId,
-          target: _target,
-          onTargetChanged: (t) => setState(() => _target = t),
-          existing: state.expressions.expressions,
-          catalog: state.catalog,
-          showAdvanced: ref.watch(effectiveAdvancedProvider(widget.lampId)),
+      body: FirmwarePushLock(
+        lampId: widget.lampId,
+        child: async.when(
+          loading: () => const SizedBox.expand(),
+          error: (e, _) => FriendlyError.page(
+            title: "Couldn't reach your lamp.",
+            subtitle:
+                "They may have wandered out of range. Bring your phone closer "
+                'and try again.',
+            rawError: e,
+            onRetry: () =>
+                ref.invalidate(controlNotifierProvider(widget.lampId)),
+          ),
+          data: (state) => _Body(
+            lampId: widget.lampId,
+            target: _target,
+            onTargetChanged: (t) => setState(() => _target = t),
+            existing: state.expressions.expressions,
+            catalog: state.catalog,
+            showAdvanced: ref.watch(effectiveAdvancedProvider(widget.lampId)),
+          ),
         ),
       ),
     );

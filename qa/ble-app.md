@@ -124,6 +124,16 @@ and the greet fires on the peer's next sighting. **Known race window
 connects is already in the roster as an ungreeted arrival, so a greet can
 still start right after connect. That is current behavior, not a failure.
 
+P6 — **editing pauses while the app updates a lamp.** Connect to a lamp the
+app holds a newer cached build for, so the update starts on connect. While it
+sends: a strip at the top reads "Teaching <name> new tricks 🎓" with a
+progress line; the Colors, Social, Expressions and Config tabs are greyed and
+ignore taps; Info stays live. Open a colour sheet first, then reconnect so the
+update starts with it open: the sheet greys and keeps your colours, a tap
+outside still closes it, and once the update ends it saves normally. The strip
+goes when the update ends (the lamp reboots, or fails) and editing comes
+back. A second lamp's screen shows nothing while the first updates.
+
 ## Pass criteria
 
 - H1 completes: mfg-data scan finds the lamp, schema reads 4, section reads
@@ -133,6 +143,8 @@ still start right after connect. That is current behavior, not a failure.
 - App round-trips (P2, P3) byte-accurate and reboot-persistent.
 - P4 reconnect fully functional with zero re-pair steps.
 - P5: zero greet lines while connected (outside the connect race window).
+- P6: no control takes a tap during the update, the strip names the lamp,
+  and editing returns when it ends.
 
 ## Not covered here
 

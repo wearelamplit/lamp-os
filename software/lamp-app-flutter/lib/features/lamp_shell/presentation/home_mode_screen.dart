@@ -17,6 +17,7 @@ import '../../control/application/control_notifier.dart';
 import '../../control/application/control_state.dart';
 import '../../control/domain/sections.dart';
 import 'widgets/wifi_network_picker.dart';
+import '../../firmware/presentation/firmware_push_lock.dart';
 
 /// Home Mode pane. Quiets the lamp for everyday use.
 ///
@@ -91,18 +92,21 @@ class _HomeModeScreenState extends ConsumerState<HomeModeScreen> {
         ),
         title: const Text('Home Mode'),
       ),
-      body: controlAsync.when(
-        loading: () => const SizedBox.expand(),
-        error: (e, _) => FriendlyError.page(
-          title: "Couldn't reach your lamp.",
-          subtitle:
-              "They may have wandered out of range. Bring your phone closer "
-              'and try again.',
-          rawError: e,
-          onRetry: () =>
-              ref.invalidate(controlNotifierProvider(widget.lampId)),
+      body: FirmwarePushLock(
+        lampId: widget.lampId,
+        child: controlAsync.when(
+          loading: () => const SizedBox.expand(),
+          error: (e, _) => FriendlyError.page(
+            title: "Couldn't reach your lamp.",
+            subtitle:
+                "They may have wandered out of range. Bring your phone closer "
+                'and try again.',
+            rawError: e,
+            onRetry: () =>
+                ref.invalidate(controlNotifierProvider(widget.lampId)),
+          ),
+          data: (state) => _HomeModeBody(lampId: widget.lampId, state: state),
         ),
-        data: (state) => _HomeModeBody(lampId: widget.lampId, state: state),
       ),
     );
   }
