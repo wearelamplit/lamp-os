@@ -4,6 +4,8 @@
 
 #include <lampos/clock.hpp>
 
+#include "util/uptime.hpp"
+
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -205,8 +207,8 @@ void LampRoster::addOrUpdateFromEspNow(const char* name, const uint8_t mac[6],
   // link_.broadcast(). On timeout the write drops; the next HELLO retries.
   if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(2)) != pdTRUE) {
 #ifdef LAMP_DEBUG
-    static uint32_t lastDropLogMs = 0;
-    uint32_t logNow = millis();
+    static uint64_t lastDropLogMs = 0;
+    const uint64_t logNow = lamp::uptimeMs();
     if (logNow - lastDropLogMs > 1000) {
       Serial.printf("[roster] addOrUpdateFromEspNow: mutex contended, dropped (name=%s)\n",
                     name ? name : "");
@@ -311,11 +313,18 @@ void LampRoster::prune(uint32_t maxAgeMs) {
       generation_++;
       continue;
     }
+    i++;
+  }
+  xSemaphoreGive(mutex_);
+}
+
+void LampRoster::retireSightings(uint32_t nowMs) {
+  xSemaphoreTake(mutex_, portMAX_DELAY);
+  for (size_t i = 0; i < count_; i++) {
     RosterEntry& e = store_[i];
     for (uint32_t* stamp : {&e.lastSeenNearMs, &e.lastSeenMeshMs, &e.lastSeenBleMs}) {
-      if (*stamp != 0) *stamp = lampos::retireStamp(now, *stamp);
+      if (*stamp != 0) *stamp = lampos::retireStamp(nowMs, *stamp);
     }
-    i++;
   }
   xSemaphoreGive(mutex_);
 }

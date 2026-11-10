@@ -1193,6 +1193,14 @@ class FwChunkCallback : public NimBLECharacteristicCallbacks {
 };
 
 void tick() {
+  // Stamp retirement runs whether or not BLE came up: the roster also fills
+  // over ESP-NOW.
+  static uint32_t s_lastRetireMs = 0;
+  if (millis() - s_lastRetireMs >= 1000) {
+    s_lastRetireMs = millis();
+    lamp::lampRoster.retireSightings(s_lastRetireMs);
+    lamp::lampRoster.retireStaleWisp(s_lastRetireMs);
+  }
   if (!s_running || !s_config) return;
 
   // Continuous scan means onScanEnd rarely fires, so prune here at ~1 Hz to
@@ -1202,7 +1210,6 @@ void tick() {
   if (nowMs - s_lastPruneMs >= 1000) {
     s_lastPruneMs = nowMs;
     lamp::lampRoster.prune(LAMP_PRUNE_TIME_MS);
-    lamp::lampRoster.retireStaleWisp(nowMs);
   }
 
   // Duty-cycled passive scan for the Social/Network view. The connect-time

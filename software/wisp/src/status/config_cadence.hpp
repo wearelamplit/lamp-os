@@ -22,6 +22,10 @@ class ConfigCadence {
   void poll();
   bool configDue(uint32_t nowMs) const;
   void onConfigEmitted(uint32_t nowMs);
+  // Retires the last-config stamp, which a quiet wisp can leave for weeks, so
+  // it cannot hold a status or a config one millis() wrap later. Call at least
+  // once per lampos::kRetiredAgeMs.
+  void retire(uint32_t nowMs);
   // False while a status would land too close behind the last config.
   bool statusClear(uint32_t nowMs) const;
 

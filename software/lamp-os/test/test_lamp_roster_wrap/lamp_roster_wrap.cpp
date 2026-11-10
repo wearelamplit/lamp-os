@@ -39,14 +39,15 @@ bool listed(LampRoster& r, uint8_t i) {
 }
 
 // Steps the clock from `fromMs` to just short of one full wrap later, a prune
-// every 2^28 ms (about three days), running `keep` before each so the peer
-// stays listed on its other transport.
+// and retire every 2^28 ms (about three days), running `keep` before each so
+// the peer stays listed on its other transport.
 template <typename Keep>
 void pruneThroughAWrap(LampRoster& r, uint32_t fromMs, Keep keep) {
   for (uint64_t t = fromMs + (1ull << 28); t < fromMs + (1ull << 32); t += 1ull << 28) {
     set_mock_millis(static_cast<uint32_t>(t));
     keep();
     r.prune(kMaxAgeMs);
+    r.retireSightings(static_cast<uint32_t>(t));
   }
 }
 

@@ -227,9 +227,13 @@ class LampRoster {
                                  lamp_protocol::LampVariant::Unknown);
 
   // Drop entries whose most-recent sighting (max of the two transports)
-  // is older than `maxAgeMs`, and retire a kept entry's sighting stamps
-  // (lampos::retireStamp). Call at least once per lampos::kRetiredAgeMs.
+  // is older than `maxAgeMs`.
   void prune(uint32_t maxAgeMs);
+
+  // Retires every entry's sighting stamps, so a stale one cannot read as
+  // recent again one millis() wrap later. Call at least once per
+  // lampos::kRetiredAgeMs.
+  void retireSightings(uint32_t nowMs);
 
   // Peers seen near within maxAgeMs, sorted by RSSI descending (front =
   // physically closest; equal RSSI breaks on mac ascending), projected into a
@@ -393,7 +397,8 @@ class LampRoster {
   bool copyDisplayWispMac(uint8_t out[6], uint32_t nowMs);
 
   // Ages out the wisp slot and fleet stamps that have passed their windows, so
-  // none reads fresh again one millis() wrap later. Call at least once per wrap.
+  // none reads fresh again one millis() wrap later. Call at least once per
+  // lampos::kRetiredAgeMs.
   void retireStaleWisp(uint32_t nowMs);
 
   // Build and return the merged wispStatus JSON (see mergeWispStatusJson).

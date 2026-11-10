@@ -71,6 +71,7 @@ void StatusEmitter::pollConfig() {
 bool StatusEmitter::pump() {
   checkConnEdges();
   const uint32_t now = millis();
+  configCadence_.retire(now);
   if (configPollDue_.exchange(false, std::memory_order_relaxed)) {
     configCadence_.poll();
   }
