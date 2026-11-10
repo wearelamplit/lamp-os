@@ -41,8 +41,8 @@ class ConfiguratorBehavior : public AnimatedBehavior {
 
   void draw() override;
 
-  // A timeout after the last edit it returns to fb's saved scene; a rotating
-  // saved scene draws on and never stops.
+  // CONFIGURATOR_WEBSOCKET_TIMEOUT_MS after the last edit, returns to fb's
+  // saved scene. A rotating saved scene keeps drawing and never stops.
   void control() override;
 
   // Drive a duration-controlled fade from the current buffer state
