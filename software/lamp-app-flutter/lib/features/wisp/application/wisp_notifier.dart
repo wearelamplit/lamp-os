@@ -369,17 +369,18 @@ class WispNotifier extends _$WispNotifier {
       final palette = await _repo.readManualPalette();
       if (_disposed) return;
       _currentPaletteKnown = true;
-      if (palette.isNotEmpty) _adoptSavedPalette(palette);
+      _ingestManualPalette(palette);
       if (bumpState) _bumpState();
     } finally {
       _paletteRereadInFlight = false;
     }
   }
 
-  /// Take [palette] as the wisp's stored palette. Doesn't touch the draft if
-  /// the user is mid-edit (draft diverged from the previous saved); the next
-  /// save replaces the wisp's view.
-  void _adoptSavedPalette(List<LampColor> palette) {
+  /// Seed the editor from a freshly-read palette. Empty leaves the saved
+  /// palette untouched. Doesn't touch the draft if the user is mid-edit (draft
+  /// diverged from the previous saved); the next save replaces the wisp's view.
+  void _ingestManualPalette(List<LampColor> palette) {
+    if (palette.isEmpty) return;
     if (_palettesEqual(_savedManualPalette, palette)) return;
     final wasDraftPristine =
         _draft.isEmpty || _palettesEqual(_draft, _savedManualPalette);
@@ -557,12 +558,6 @@ class WispNotifier extends _$WispNotifier {
   // Don't consume the prefix while a read is busy; retry on the next notify.
   void _maybeRereadForPalette(WispStatus next) {
     final prefix = next.paletteIdPrefix;
-    // In Manual the wisp omits the prefix only when its stored palette is
-    // empty, and an empty section read can't be told from a missing one.
-    if (prefix.isEmpty && next.source == WispSourceMode.manual) {
-      _currentPaletteKnown = true;
-      _adoptSavedPalette(const <LampColor>[]);
-    }
     if (prefix == _lastPaletteIdPrefix) return;
     // An empty prefix has no palette to read, but recording it lets the same
     // palette coming back register as a change.

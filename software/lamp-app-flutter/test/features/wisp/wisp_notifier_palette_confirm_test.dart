@@ -185,8 +185,11 @@ void main() {
     expect(n.manualPaletteWriteFailed, isFalse);
   }, timeout: const Timeout(Duration(seconds: 40)));
 
-  test('a second notifier for the same wisp shows the palette empty after '
-      'another notifier empties it', () async {
+  // A Manual status without a prefix can be a stale copy, so only a
+  // non-empty palette read or the user's own save changes what a notifier
+  // holds.
+  test('a second notifier keeps its palette after another notifier empties '
+      'it', () async {
     const saved = [
       LampColor(r: 1, g: 2, b: 3, w: 0),
       LampColor(r: 4, g: 5, b: 6, w: 0),
@@ -221,8 +224,8 @@ void main() {
     await pumpEventQueue();
 
     expect(n1.savedManualPalette, isEmpty);
-    expect(n2.savedManualPalette, isEmpty);
-    expect(n2.draftManualPalette, isEmpty);
+    expect(n2.savedManualPalette, saved);
+    expect(n2.draftManualPalette, saved);
     expect(n2.manualPaletteDirty, isFalse);
   });
 }
