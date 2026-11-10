@@ -193,9 +193,9 @@ start of the paste. Do the same on a new lamp's naming step. On an iPhone
 with the Japanese keyboard, type 12 kana without confirming and tap Save: My
 Lamps and the lamp's web config both show the first 10. Tap the Advanced LEDs
 Update, and the password Save, twice fast: the button greys with a spinner
-after the first tap and the lamp restarts once. A rename the
-lamp refuses ("Couldn't set name. Try again.") can't be set up from the app's
-screens and is covered by setup_screen_test.dart.
+after the first tap and the lamp restarts once. A rename the lamp refuses
+("Couldn't set name. Try again.") can't be set up from the app's screens and
+is covered by setup_screen_test.dart.
 
 ## Pass criteria
 

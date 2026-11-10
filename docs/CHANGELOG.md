@@ -51,8 +51,8 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 - **Friendlier update wording.** After an update ends, while the lamp
   settles, the strip at the top reads "Giving <name> a moment to settle… 🎓"
   instead of still saying it's teaching. On Info, the last stretch of an
-  update reads "Practising the new tricks 🪄" instead of going back to
-  "Warming up". A lamp too busy teaching another lamp to connect is named the
+  update, while the lamp checks it, reads "Practising the new tricks 🪄"
+  instead of sitting on a full "Learning some new tricks" bar. A lamp too busy teaching another lamp to connect is named the
   way the app shows it everywhere else. In dev mode, a failed update leads
   with a plain line (such as "Lost <name> partway through. Bring your phone
   closer and try again.") with the technical reason in small type beneath,

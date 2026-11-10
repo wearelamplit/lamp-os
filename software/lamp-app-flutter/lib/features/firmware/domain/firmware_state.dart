@@ -42,7 +42,7 @@ class FirmwareStreaming extends FirmwareState {
   }
 }
 
-/// All chunks acked; DONE on the wire; waiting for the lamp's RESULT.
+/// Every chunk is sent; DONE follows and the app waits for the lamp's RESULT.
 class FirmwareFinalizing extends FirmwareState {
   const FirmwareFinalizing({required this.footer});
   final LsigFooter footer;
@@ -97,16 +97,14 @@ class FirmwareFailed extends FirmwareState {
 extension FirmwarePushing on FirmwareState {
   /// The phone is actively pushing an image to this lamp (offer through
   /// finalize). Excludes Succeeded so the post-reboot presence takes over.
-  bool get isPushing =>
-      this is FirmwareOfferSent ||
-      this is FirmwareStreaming ||
-      this is FirmwareFinalizing;
+  bool get isPushing => pushedVersion != null;
 
   /// Pushing plus the local verify step that precedes OfferSent. Drives the
   /// whimsical badge + card so the verify window isn't a blank gap.
   bool get isBusy => isPushing || this is FirmwareVerifying;
 
-  /// The version being pushed, while [isPushing].
+  /// The version being pushed, from the offer until the lamp's result; null
+  /// in every other state.
   int? get pushedVersion => switch (this) {
     FirmwareOfferSent(:final footer) ||
     FirmwareStreaming(:final footer) ||
@@ -115,9 +113,9 @@ extension FirmwarePushing on FirmwareState {
   };
 }
 
-/// The push state after the lamp has acked [chunksSent] of [totalChunks]:
-/// streaming until the last chunk is out, then finalizing while the lamp
-/// verifies and reports.
+/// The push state once [chunksSent] of [totalChunks] are sent: streaming
+/// until the last chunk is out, then finalizing while the lamp verifies and
+/// reports.
 FirmwareState pushProgress(
   LsigFooter footer, {
   required int chunksSent,
