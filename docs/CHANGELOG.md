@@ -7,6 +7,19 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 
 ## Unreleased
 
+### Added
+- **Rotate colors, in the app.** On a lamp whose firmware offers it (the
+  standard lamp), the Shade and Base colour sheets carry a Rotate colors
+  switch: your own colours flow along the strip in an endless loop. Set the Loop
+  length (5 seconds to 2 minutes, slow on the left) and the Direction (Up or
+  Down; the shade starts Down and the base Up, so they meet at the seam). The
+  lamp follows live while you edit, Save keeps it and Cancel puts it back.
+  With one colour the switch greys out with "Add a second color to rotate."
+  and keeps your setting for when you add another. While a role rotates, its
+  card on the Colors page moves and reads "Rotating · 40s loop". The Base and
+  Shade sheets now grow to fit their colours, up to most of the screen.
+  Lamps that can't rotate look as before.
+
 ### Fixed
 - **Clearing a wisp's manual palette reaches the wisp.** Remove every colour
   from the manual palette and save, and the wisp stops painting: lamps under

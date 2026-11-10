@@ -4,7 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/app_spacing.dart';
 import '../../application/control_notifier.dart';
+import '../../domain/color_rotation.dart';
 import '../../domain/lamp_color.dart';
+import 'rotating_gradient.dart';
+import 'rotation_card_parts.dart';
 import 'shade_editor_sheet.dart';
 
 /// Slice of ControlState ShadeCard needs. Used as the `.select` projection so
@@ -14,9 +17,11 @@ class _ShadeSlice {
     this.colors, {
     required this.colorsEditable,
     required this.stop0AtBottom,
+    required this.rotation,
   });
   final List<LampColor> colors;
   final bool colorsEditable;
+  final ColorRotation? rotation;
 
   /// The standard lamp's shade has stop 0 at the bottom; every other variant's
   /// previews keep it at the top.
@@ -27,11 +32,13 @@ class _ShadeSlice {
       other is _ShadeSlice &&
       colorsEditable == other.colorsEditable &&
       stop0AtBottom == other.stop0AtBottom &&
+      rotation == other.rotation &&
       const ListEquality<LampColor>().equals(colors, other.colors);
 
   @override
   int get hashCode =>
-      Object.hash(Object.hashAll(colors), colorsEditable, stop0AtBottom);
+      Object.hash(
+          Object.hashAll(colors), colorsEditable, stop0AtBottom, rotation);
 }
 
 class ShadeCard extends ConsumerWidget {
@@ -82,10 +89,12 @@ class ShadeCard extends ConsumerWidget {
           state == null ? const [] : spec.selectColors(state),
           colorsEditable: state == null || state.shade.colorsEditable,
           stop0AtBottom: state?.lamp.isStandard ?? true,
+          rotation: state == null ? null : spec.selectRotation(state),
         );
       }),
     );
     final cs = Theme.of(context).colorScheme;
+    final rotating = effectiveRotation(slice.rotation, slice.colors);
     return InkWell(
       // Gate the tap: if the firmware marks shade as non-editable, the card
       // is still visible (shows the current gradient) but tapping does nothing.
@@ -102,29 +111,33 @@ class ShadeCard extends ConsumerWidget {
         ),
         child: Row(
           children: [
-            Container(
+            SizedBox(
               width: 56, // deliberate dimension, not spacing
               height: 56,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                gradient: LinearGradient(
-                  begin: slice.stop0AtBottom
-                      ? Alignment.bottomCenter
-                      : Alignment.topCenter,
-                  end: slice.stop0AtBottom
-                      ? Alignment.topCenter
-                      : Alignment.bottomCenter,
-                  colors: _gradientColors(slice.colors),
-                ),
-              ),
+              child: rotating == null
+                  ? Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(14),
+                        gradient: LinearGradient(
+                          begin: slice.stop0AtBottom
+                              ? Alignment.bottomCenter
+                              : Alignment.topCenter,
+                          end: slice.stop0AtBottom
+                              ? Alignment.topCenter
+                              : Alignment.bottomCenter,
+                          colors: _gradientColors(slice.colors),
+                        ),
+                      ),
+                    )
+                  : RotatingGradient(
+                      colors: slice.colors,
+                      rotation: rotating,
+                      stop0AtBottom: slice.stop0AtBottom,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
             ),
             const SizedBox(width: AppSpace.lg),
-            Expanded(
-              child: Text(
-                title,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-            ),
+            Expanded(child: CardTitle(title: title, rotation: rotating)),
             if (slice.colorsEditable)
               Icon(Icons.chevron_right, color: cs.onSurfaceVariant),
           ],

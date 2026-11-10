@@ -81,6 +81,10 @@ class ColorRotation {
 
   @override
   int get hashCode => Object.hash(on, periodS, direction);
+
+  @override
+  String toString() =>
+      'ColorRotation(on: $on, periodS: $periodS, ${direction.wire})';
 }
 
 /// How far a rotating preview's pattern has moved toward the top of the

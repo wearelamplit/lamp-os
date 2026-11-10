@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/widgets/app_sheet.dart';
 import '../../application/control_notifier.dart';
 import '../../application/control_state.dart';
+import '../../domain/color_rotation.dart';
 import '../../domain/lamp_color.dart';
 import 'color_stops_sheet.dart';
 
@@ -17,21 +18,27 @@ class ColorChannelSpec {
     required this.title,
     required this.selectColors,
     required this.setLive,
+    required this.selectRotation,
   });
 
   final String title;
   final List<LampColor> Function(ControlState) selectColors;
   final void Function(ControlNotifier, List<LampColor>) setLive;
+
+  /// This list's rotation, null where it cannot rotate.
+  final ColorRotation? Function(ControlState) selectRotation;
 }
 
 /// Spec for shade segment [segIdx]. Every segment live-previews over
-/// CHAR_SHADE_COLORS and persists through CHAR_COMMIT on Save.
+/// CHAR_SHADE_COLORS and persists through CHAR_COMMIT on Save. Only segment 0
+/// carries the shade's rotation.
 ColorChannelSpec shadeSegmentSpec(int segIdx, String title) => ColorChannelSpec(
       title: title,
       selectColors: (s) => segIdx < s.shade.segments.length
           ? s.shade.segments[segIdx].colors
           : s.shade.colors,
       setLive: (n, c) => n.setShadeSegmentColors(segIdx, c),
+      selectRotation: (s) => segIdx == 0 ? s.shade.rotation : null,
     );
 
 /// Modal sheet for editing the shade gradient stops. A thin [ColorStopsSheet]
@@ -62,6 +69,10 @@ class ShadeEditorSheet extends ConsumerWidget {
       description: 'These colors blend into a gradient along the strip.',
       max: _kMaxShadeStops,
       bpp: state.shade.bpp,
+      contentSized: true,
+      rotation: spec.selectRotation(state),
+      onRotationChanged: notifier.setShadeRotation,
+      rotationStop0AtBottom: state.lamp.isStandard,
       onChanged: (colors) => spec.setLive(notifier, colors),
       onSave: (colors) async {
         spec.setLive(notifier, colors);
@@ -78,8 +89,7 @@ Future<void> showShadeEditorSheet(
 }) {
   return showAppSheet<void>(
     context,
-    builder: (ctx) => FractionallySizedBox(
-      heightFactor: 0.6,
+    builder: (ctx) => ColorSheetHeight(
       child: ShadeEditorSheet(lampId: lampId, spec: spec),
     ),
   );
