@@ -5,6 +5,16 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## Unreleased
+
+### Fixed
+- **LED setup saves on multi-strip lamps.** Tapping Update on the Advanced
+  LEDs screen of a lamp with several strips, such as snafu or lioness, used
+  to fail with "Save failed" and leave the lamp unchanged. The save now sends
+  only the strip settings it changes, so it fits in one Bluetooth write on
+  every lamp. If a setting is ever too big to send, the app tells you so
+  instead of trying and failing.
+
 ## 1.3.2
 
 ### Fixed
