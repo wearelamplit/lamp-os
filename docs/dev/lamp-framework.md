@@ -46,10 +46,51 @@ Every lamp has two **core** slots, always present:
   Configured via `Config::Defaults::baseColor` and `basePx`; app visibility
   controlled by `baseColorsEditable`.
 
-A slot with exactly 1 color renders static; 2 or more animate. First-boot
+A slot with 2 or more colors renders a still gradient; with rotation on (below)
+they flow round a closed loop. First-boot
 randomization only touches surfaces whose variant left `baseColor` / `shadeColor`
 empty in `Config::Defaults`; a non-empty default survives randomization
 unchanged.
+
+### Colour rotation
+
+A single-segment slot can rotate: its colours, closed into a loop (last colour
+blending back to the first), flow along the surface at one constant speed, one
+loop every `periodS` seconds (5 to 120), toward `dir` (`Up` or `Down`, physically
+up or down on that surface). The defaults are per role: off, 40 s, Down on the
+shade and Up on the base, so on a standard lamp both flow toward the seam
+(`ShadeSettings::kDefaultRotation`, `BaseSettings::kDefaultRotation`). A slot
+with one colour, or with other than one segment, never rotates.
+
+- **Who can rotate.** A variant opts in with `Config::Defaults::rotationSupported`
+  (only `StandardLamp` sets it). The flag gates behaviour, never data: the
+  config keeps a single-segment role's `rotate` through load, save and the web
+  document whatever the flag says, and every scene writer reads the role's
+  `renderedRotation()`, which is the default (off) where the role does not
+  `offersRotation()`. The raw `rotation` field is read only by the codec, the
+  colour-write apply layer and that accessor.
+- **Which way is up.** The configurator is built with its `Surface` and maps
+  `dir` onto buffer order with the layout in
+  [`expressions.md`](expressions.md#frame-buffer--targets): index 0 at the shade's
+  bottom and the base's top, so Up runs away from index 0 on the shade and
+  toward it on the base.
+- **Live and saved.** A colour write's object form sets rotation in RAM config
+  and renders it at once (`buildRoleScene`, then `ConfiguratorBehavior::showScene`);
+  `CHAR_COMMIT` persists it with the colours and re-seeds the saved scene
+  (`FrameBuffer::defaultColors` plus `defaultRotation`, set together by
+  `refreshDefaultScene` and at boot). A saved scene that rotates keeps rotating
+  from boot; an abandoned preview crossfades back to it after
+  `CONFIGURATOR_WEBSOCKET_TIMEOUT_MS`.
+- **OTA quiet mode.** On quiet entry the compositor returns both configurators'
+  rotation to position 0 (`resetRotation()`), the frame quiet mode settles each
+  surface to, so a stretch that ends without a reboot resumes from it.
+- **Raw content never rotates.** The zone marker, `setGradient` / `setSolidColor`
+  and other `beginFade` writes draw unshifted. A zone preview's release puts
+  back the scene on show when the marker went up (`ZonePreviewSurface` keeps
+  `ConfiguratorBehavior::scene()`), so a rotating role resumes rotating from
+  where the marker stopped it, even when RAM config holds an abandoned edit.
+  An expression Test that completes restores the role scene, so it keeps
+  rotating.
 
 ### Multi-segment roles
 

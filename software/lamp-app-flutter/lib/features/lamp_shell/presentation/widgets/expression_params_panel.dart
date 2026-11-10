@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/utils/duration_format.dart';
 import '../../../../core/widgets/lamp_card.dart';
+import '../../../../core/widgets/param_controls.dart';
 import '../../../../core/widgets/settings_row.dart';
 import '../../domain/expression_catalog.dart';
 import 'motion_picker.dart';
@@ -112,7 +113,7 @@ class ExpressionParamsPanel extends StatelessWidget {
     final motion = <Widget>[];
 
     if (descriptor.hasZone && descriptor.zoneOptional) {
-      placement.add(_segmented(
+      placement.add(ParamSegmented(
         label: 'Mode',
         options: const ['Whole strip', 'Region'],
         selectedIndex: _get('fullStrip', 1) == 1 ? 0 : 1,
@@ -132,7 +133,7 @@ class ExpressionParamsPanel extends StatelessWidget {
         ));
         continue;
       }
-      final control = _segmented(
+      final control = ParamSegmented(
         label: p.label,
         options: p.options.map((o) => o.label).toList(),
         selectedIndex: p.options
@@ -164,7 +165,7 @@ class ExpressionParamsPanel extends StatelessWidget {
       if (p.type == ParamType.enumeration) continue;
       if (p.requiresZoning && !zoning) continue;
       final maxV = p.max.resolve(pixelCount);
-      final slider = _ParamSlider(
+      final slider = ParamSlider(
         label: p.label,
         value: _get(p.key, p.def.resolve(pixelCount)),
         min: p.min,
@@ -241,7 +242,7 @@ class ExpressionParamsPanel extends StatelessWidget {
           ),
         ],
       ));
-      mesh.add(_ParamSlider(
+      mesh.add(ParamSlider(
         label: 'Delay between lamps',
         value: (_get('cascadeStaggerMs', 0) / 100).round().clamp(0, 50),
         min: 0,
@@ -306,151 +307,6 @@ String _fmtUnit(int value, String? unit) {
 const _zoneHelp =
     'Restricts the effect to a section of the strip rather than its full length.';
 
-Widget _controlLabel(BuildContext context, String text) => Padding(
-      padding: const EdgeInsets.only(bottom: AppSpace.xs),
-      child: Text(text, style: Theme.of(context).textTheme.bodyMedium),
-    );
-
-Widget _helpText(BuildContext context, String text) => Text(
-      text,
-      style: TextStyle(
-        color: Theme.of(context).colorScheme.onSurfaceVariant,
-        fontSize: 11,
-      ),
-    );
-
-Widget _segmented({
-  required String label,
-  required List<String> options,
-  required int selectedIndex,
-  required ValueChanged<int> onIndex,
-  String? help,
-}) =>
-    Builder(
-      builder: (context) => Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _controlLabel(context, label),
-          if (help != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: AppSpace.xs),
-              child: _helpText(context, help),
-            ),
-          SegmentedButton<int>(
-            showSelectedIcon: false,
-            style: SegmentedButton.styleFrom(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppRadius.card),
-              ),
-            ),
-            segments: [
-              for (var i = 0; i < options.length; i++)
-                ButtonSegment(value: i, label: Text(options[i])),
-            ],
-            selected: {selectedIndex},
-            onSelectionChanged: (s) => onIndex(s.first),
-          ),
-        ],
-      ),
-    );
-
-/// Snap [raw] to the nearest [step] within [min]..[max].
-int _snap(int raw, int min, int max, int step) {
-  if (step <= 1) return raw.clamp(min, max);
-  final snapped = min + ((raw - min) / step).round() * step;
-  return snapped.clamp(min, max);
-}
-
-int _divisions(int min, int max, int step) {
-  if (max <= min) return 1;
-  final d = ((max - min) / (step <= 0 ? 1 : step)).round();
-  return d < 1 ? 1 : d;
-}
-
-class _ParamSlider extends StatelessWidget {
-  const _ParamSlider({
-    required this.label,
-    required this.value,
-    required this.min,
-    required this.max,
-    required this.onChanged,
-    required this.format,
-    this.step = 1,
-    this.leftLabel,
-    this.rightLabel,
-    this.help,
-    this.invert = false,
-  });
-
-  final String label;
-  final int value;
-  final int min;
-  final int max;
-  final int step;
-
-  /// Null renders the disabled slider state (a parent toggle gates it off).
-  final ValueChanged<int>? onChanged;
-  final String Function(int) format;
-  final String? leftLabel;
-  final String? rightLabel;
-  final String? help;
-
-  /// Mirrors the thumb high↔low while storage stays in original units. Used
-  /// where "right = faster" conflicts with the stored value's direction.
-  final bool invert;
-
-  @override
-  Widget build(BuildContext context) {
-    final clamped = value.clamp(min, max);
-    final sliderValue = (invert ? (min + max) - clamped : clamped).toDouble();
-    final hasEnds = leftLabel != null && rightLabel != null;
-    final cb = onChanged;
-    final slider = Slider(
-      value: sliderValue.clamp(min.toDouble(), max.toDouble()),
-      min: min.toDouble(),
-      max: max.toDouble(),
-      divisions: _divisions(min, max, step),
-      onChanged: cb == null
-          ? null
-          : (v) {
-              final raw = _snap(v.round(), min, max, step);
-              cb(invert ? (min + max) - raw : raw);
-            },
-    );
-    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _controlLabel(context, label),
-        if (help != null) _helpText(context, help!),
-        Row(
-          children: [
-            if (hasEnds)
-              Text(leftLabel!, style: TextStyle(color: muted, fontSize: 11)),
-            Expanded(child: slider),
-            if (hasEnds)
-              Text(rightLabel!, style: TextStyle(color: muted, fontSize: 11)),
-          ],
-        ),
-        Align(
-          alignment: Alignment.centerRight,
-          child: Padding(
-            padding: const EdgeInsets.only(right: AppSpace.xs),
-            child: Text(
-              format(clamped),
-              style: TextStyle(
-                color: muted,
-                fontSize: 12,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _RangeParamSlider extends StatelessWidget {
   const _RangeParamSlider({
     required this.label,
@@ -499,10 +355,10 @@ class _RangeParamSlider extends StatelessWidget {
       values: RangeValues(loClamp.toDouble(), hiClamp.toDouble()),
       min: min.toDouble(),
       max: max.toDouble(),
-      divisions: _divisions(min, max, step),
+      divisions: sliderDivisions(min, max, step),
       onChanged: (v) {
-        var a = _snap(v.start.round(), min, max, step);
-        var b = _snap(v.end.round(), min, max, step);
+        var a = snapToStep(v.start.round(), min, max, step);
+        var b = snapToStep(v.end.round(), min, max, step);
         if (b - a < minGap) {
           // Push whichever thumb didn't move; if lo moved, raise hi (cap at
           // max and pull lo back down when hi hits the ceiling).
@@ -523,8 +379,8 @@ class _RangeParamSlider extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _controlLabel(context, label),
-        if (help != null) _helpText(context, help!),
+        controlLabel(context, label),
+        if (help != null) paramHelpText(context, help!),
         Row(
           children: [
             if (hasEnds)

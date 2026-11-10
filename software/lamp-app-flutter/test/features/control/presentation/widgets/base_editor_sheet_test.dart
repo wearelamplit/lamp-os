@@ -12,7 +12,12 @@ import 'package:lamp_app/features/inventory/application/inventory_notifier.dart'
 import 'package:lamp_app/features/inventory/domain/inventory_lamp.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:lamp_app/features/control/domain/color_rotation.dart';
+import 'package:lamp_app/features/control/presentation/widgets/rotate_colors_box.dart';
+import 'package:lamp_app/features/control/presentation/widgets/rotating_gradient.dart';
+
 import '../../../../_support/seed.dart';
+import 'rotation_sheet_fixture.dart';
 
 // Test strategy: BaseEditorSheet is a ConsumerStatefulWidget that reads live
 // state from controlNotifierProvider. Tests create a ProviderContainer, seed
@@ -264,5 +269,101 @@ void main() {
     final colors = c.read(controlNotifierProvider(_devId)).value!.base.colors;
     expect(colors.length, 2);
     expect(colors.first, _baselineColor);
+  });
+
+  group('rotation', () {
+    Future<void> openBase(BuildContext ctx) =>
+        showBaseEditorSheet(ctx, lampId: rotDevId);
+
+    Future<ProviderContainer> pumpBase(
+      WidgetTester tester, {
+      String? lampType,
+      String? rotate,
+      String? segments,
+      int stops = 2,
+    }) async {
+      final (:c, :ble) = await buildRotationLamp(
+          lampType: lampType,
+          baseStops: stops,
+          baseRotateJson: rotate,
+          baseSegmentsJson: segments);
+      await tester.pumpWidget(sheetHost(c, openBase));
+      await tester.tap(find.text('open'));
+      await settleSheet(tester);
+      return c;
+    }
+
+    const stem = '[{"name":"Stem","px":35,"colors":["#FF000000","#00FF0000"]}]';
+
+    for (final (label, lampType, rotate, segs, shows) in [
+      ('a standard lamp whose section carries rotate', 'standard', baseRotateOff, null, true),
+      ('a standard lamp whose section has none', 'standard', null, null, false),
+      ('older firmware (no lampType, no rotate)', null, null, null, false),
+      ('a snafu lamp whose section carries rotate', 'snafu', baseRotateOff, stem, true),
+      ('a snafu lamp whose section has none', 'snafu', null, stem, false),
+    ]) {
+      testWidgets('$label: box ${shows ? 'shown' : 'absent'}', (tester) async {
+        await pumpBase(tester, lampType: lampType, rotate: rotate, segments: segs);
+        expect(find.byType(RotateColorsBox), shows ? findsOneWidget : findsNothing);
+      });
+    }
+
+    testWidgets('a never-set base shows Up', (tester) async {
+      await pumpBase(tester, rotate: baseRotateOff);
+      await tapInView(tester, find.byType(Switch));
+      await settleSheet(tester);
+      final seg = tester.widget<SegmentedButton<int>>(find.byType(SegmentedButton<int>));
+      expect(seg.selected, {0});
+    });
+
+    testWidgets("the box's bar holds stop 0 at the top", (tester) async {
+      await pumpBase(tester, lampType: 'standard', rotate: baseRotateOn);
+      expect(tester.widget<RotatingGradient>(find.byType(RotatingGradient)).stop0AtBottom,
+          isFalse);
+    });
+
+    testWidgets('Save persists the rotation through CHAR_COMMIT', (tester) async {
+      final (:c, :ble) = await buildRotationLamp(baseRotateJson: baseRotateOff);
+      await tester.pumpWidget(sheetHost(c, openBase));
+      await tester.tap(find.text('open'));
+      await settleSheet(tester);
+      await tapInView(tester, find.byType(Switch));
+      await settleSheet(tester);
+      await tapInView(tester, find.widgetWithText(FilledButton, 'Save'));
+      await settleSheet(tester);
+      expect(find.byType(BaseEditorSheet), findsNothing);
+      expect(ble.writesTo(rotDevId, BleUuids.commit), isNotEmpty);
+      final last = String.fromCharCodes(ble.writesTo(rotDevId, BleUuids.baseColors).last);
+      expect(last, contains('"rotate":{"on":true,"periodS":40,"dir":"up"}'));
+      expect(c.read(controlNotifierProvider(rotDevId)).value!.base.rotation!.on, isTrue);
+    });
+
+    testWidgets('Cancel restores the opened rotation on the lamp and in the app',
+        (tester) async {
+      final (:c, :ble) = await buildRotationLamp(baseRotateJson: baseRotateOn);
+      final opened = c.read(controlNotifierProvider(rotDevId)).value!.base.rotation;
+      await tester.pumpWidget(sheetHost(c, openBase));
+      await tester.tap(find.text('open'));
+      await settleSheet(tester);
+      await tapInView(tester, find.text('Down'));
+      await settleSheet(tester);
+      expect(c.read(controlNotifierProvider(rotDevId)).value!.base.rotation!.direction,
+          RotationDirection.down);
+      await tapInView(tester, find.text('Cancel'));
+      await settleSheet(tester);
+      expect(c.read(controlNotifierProvider(rotDevId)).value!.base.rotation, opened);
+      final last = String.fromCharCodes(ble.writesTo(rotDevId, BleUuids.baseColors).last);
+      expect(last, contains('"rotate":{"on":true,"periodS":40,"dir":"up"}'));
+    });
+
+    group('sheet height', () {
+      sheetSizingCases(
+        build: (n, rotate) async =>
+            (await buildRotationLamp(baseStops: n, baseRotateJson: rotate)).c,
+        open: openBase,
+        rotateOn: baseRotateOn,
+        rotateOff: baseRotateOff,
+      );
+    });
   });
 }

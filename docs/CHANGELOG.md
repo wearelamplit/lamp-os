@@ -5,6 +5,56 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## Unreleased
+
+### Added
+- **Rotate colours.** A standard lamp's shade and base can each flow their
+  own colours round an endless loop. In the app, the Shade and Base colour
+  sheets carry a Rotate colors switch with a Loop length (5 seconds to 2
+  minutes, slow on the left) and a Direction (Up or Down, with the shade
+  starting Down and the base Up so they meet at the seam). The lamp follows
+  live while you edit, Save keeps it and Cancel puts it back, and it keeps
+  flowing after a reboot, a web config save, an expression test and a
+  firmware update. With one colour the switch greys out with "Add a second
+  color to rotate." and keeps your setting for when you add another. A
+  surface split into segments stays still. While a role rotates, its card on
+  the Colors page moves and reads "Rotating · 40s loop". Shifty's colour
+  shift follows a moving base through its fades and lands on it with no
+  jump. The Base and Shade sheets now grow to fit their colours, up to most
+  of the screen, on every lamp. Lamps that can't rotate show no Rotate switch
+  and no moving card.
+
+### Fixed
+- **Clearing a wisp's manual palette reaches the wisp.** Remove every colour
+  from the manual palette and save, and the wisp stops painting: lamps under
+  it ease back to their own colours. The app shows the palette as saved once
+  the wisp reports it after the save, so a lamp re-sending a report the app
+  already had doesn't mark it saved, and a wisp restart doesn't get in the
+  way. If the wisp never reports it, the app says the palette didn't reach
+  the wisp, as it does for any other palette. When the wisp's palette was
+  already empty, a report from just before the save can still mark it saved.
+  Rarely, an emptied palette still shows as not reaching the wisp even when
+  it did: after a wisp restart, or once the wisp's uptime passes about 49
+  days, when no report from the lamp since connecting has carried the lamp's
+  own timestamp, or the report answering the save comes through trimmed
+  without it; and on a connection held while the lamp's uptime passes about
+  49 days, until the app reconnects. Before, the app showed the palette empty
+  but never sent it, so the wisp kept painting the old colours.
+- **Wisp palette and source changes show as saved only once the wisp reports
+  them.** Save a palette, empty one, or change the wisp's source, and the app
+  marks it saved when the wisp itself reports the change; for a palette, only
+  a report from the wisp you saved to counts. Save twice in quick succession
+  and the newer save wins: the older one stops resending and reports no
+  failure. Before, a background settings read could mark a change saved that
+  the wisp never confirmed.
+
+### Changed
+- **The Colors page draws a standard lamp's shade the way the lamp shows it.**
+  The lamp picture at the top and the Shade card put the shade's first colour
+  at the bottom, where the standard lamp's shade starts. The Shade sheet's
+  colour list keeps the first colour in the top row. Other lamps look as
+  before.
+
 ## 1.3.0
 
 ### Fixed

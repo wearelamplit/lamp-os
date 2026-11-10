@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "util/color.hpp"
+#include "util/color_rotation.hpp"
 
 namespace lamp {
 
@@ -21,6 +22,9 @@ struct StripSegment {
 class FrameBuffer {
  public:
   std::vector<Color> defaultColors;
+  // The saved scene's rotation, set with defaultColors from one
+  // buildRoleScene. On only when defaultColors is a closed loop.
+  ColorRotation defaultRotation;
   std::vector<Color> previousBuffer;
   uint8_t previousBrightness = 0;
   uint8_t pixelCount = 0;

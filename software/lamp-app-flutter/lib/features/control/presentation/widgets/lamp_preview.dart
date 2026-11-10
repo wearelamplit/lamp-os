@@ -68,7 +68,12 @@ _PreviewSlice _previewSliceFrom(AsyncValue<ControlState> async) {
   if (state == null) {
     return const _PreviewSlice([], []);
   }
-  return _PreviewSlice(state.shade.colors, state.base.colors);
+  // Each critter's Shade gradient runs top to bottom. The standard lamp's
+  // shade has stop 0 at the bottom, so it is handed over top first.
+  final shade = state.lamp.isStandard
+      ? state.shade.colors.reversed.toList()
+      : state.shade.colors;
+  return _PreviewSlice(shade, state.base.colors);
 }
 
 class _LampPreviewState extends ConsumerState<LampPreview> {
