@@ -9,7 +9,8 @@ task watchdog from the end of `setup()` (`util/loop_watchdog.hpp`): 5 s, or
 
 - **1 lamp on USB serial**, dev build (`npm run lamp:flash`), tailed with
   `npm run lamp:tap -- <port>:lamp -o /tmp/loopwd.log`. `loopwd.hang` and the
-  `[loopwd]` line are dev-only.
+  `[loopwd]` line are dev-only. Stop the tap before row 1: `bench_cmd.py`
+  needs the port to itself.
 - The app or host BLE (bleak) to read the `lamp` section.
 - For row 3, a 2nd lamp on a newer signed image to send a mesh OTA (see
   [ota.md](ota.md)).
@@ -17,8 +18,8 @@ task watchdog from the end of `setup()` (`util/loop_watchdog.hpp`): 5 s, or
 ## Rows
 
 1. **Stall resets and is recorded.** Note `lastCrash.count` in the `lamp`
-   section (absent counts as 0). Send `scripts/bench_cmd.py <port> --cmd
-   'loopwd.hang'`. Expect `[cmd] ok loopwd.hang`, then within about 5 s
+   section (absent counts as 0). Run `scripts/bench_cmd.py <port> --cmd
+   'loopwd.hang' --duration 20 -o /tmp/loopwd-hang.log`. Expect `[cmd] ok loopwd.hang`, then within about 5 s
    `task_wdt: Task watchdog got triggered` naming `loopTask (CPU 1)`, a panic
    and a reboot. After it boots, the `lamp` section shows `resetReason` 6 (task
    watchdog) and `lastCrash` with `count` one higher, `reset` 6, `core` 1, and
