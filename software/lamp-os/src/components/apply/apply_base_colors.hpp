@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "config/config.hpp"
+#include "config/config_codec.hpp"
 #include "util/color.hpp"
 
 // config is defined as `lamp::Config config;` at file scope in
@@ -44,6 +45,24 @@ inline void baseColorsToConfig(JsonArray arr) {
   }
   ::config.base.broadcastColors() = next;
   ::lamp::renderBaseColors(arr);
+}
+
+// A CHAR_BASE_COLORS write: a bare colour array or
+// {"colors":[...],"rotate":{...}}. `rotate` reaches RAM config before the
+// render, and only on a rotatable role. An object without a non-empty
+// `colors` array changes nothing. Persists nothing.
+inline void baseColorsWriteToConfig(JsonVariant payload) {
+  if (payload.is<JsonArray>()) {
+    baseColorsToConfig(payload.as<JsonArray>());
+    return;
+  }
+  if (!payload.is<JsonObject>()) return;
+  JsonArray colors = payload["colors"];
+  if (colors.isNull() || colors.size() == 0) return;
+  if (::config.base.rotatable()) {
+    config_codec::parseRotation(payload["rotate"], ::config.base.rotation);
+  }
+  baseColorsToConfig(colors);
 }
 
 // Remote-op variant. Render-only.

@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "config/config.hpp"
+#include "config/config_codec.hpp"
 #include "util/color.hpp"
 
 // config is defined as `lamp::Config config;` at file scope in
@@ -60,6 +61,25 @@ inline void shadeSegmentColorsToConfig(uint8_t seg, JsonArray arr) {
   }
   ::config.shade.segments[seg].colors = next;
   if (seg == 0) ::lamp::renderShadeColors(arr);
+}
+
+// A CHAR_SHADE_COLORS write: a bare colour array, {"seg":k,"colors":[...]},
+// or {"colors":[...],"rotate":{...}}. `rotate` reaches RAM config before the
+// render, and only on a rotatable role with seg 0 or no seg. An object without
+// a non-empty `colors` array changes nothing. Persists nothing.
+inline void shadeColorsWriteToConfig(JsonVariant payload) {
+  if (payload.is<JsonArray>()) {
+    shadeColorsToConfig(payload.as<JsonArray>());
+    return;
+  }
+  if (!payload.is<JsonObject>()) return;
+  JsonArray colors = payload["colors"];
+  if (colors.isNull() || colors.size() == 0) return;
+  const int seg = payload["seg"] | 0;
+  if (seg == 0 && ::config.shade.rotatable()) {
+    config_codec::parseRotation(payload["rotate"], ::config.shade.rotation);
+  }
+  shadeSegmentColorsToConfig(seg, colors);
 }
 
 // Remote-op variant. Render-only.
