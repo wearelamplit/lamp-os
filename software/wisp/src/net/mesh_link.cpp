@@ -80,9 +80,9 @@ bool MeshLink::begin() {
   esp_now_register_send_cb(sendTrampoline);
 #endif
 
-  // Every peer sends at the IDF's ESP-NOW default, 1 Mbps DSSS, the 802.11
-  // rate that carries farthest. Far lamps already receive near -94 dBm, so
-  // nothing here sets a faster one.
+  // The wisp sends to every peer at the IDF's ESP-NOW default, 1 Mbps DSSS,
+  // the 802.11 rate that carries farthest. Far lamps already receive near
+  // -94 dBm, so nothing here sets a faster one.
 
   // Broadcast peer. channel=0 means "use the radio's current channel", just
   // pinned above so this lands on LAMP_ESPNOW_CHANNEL.

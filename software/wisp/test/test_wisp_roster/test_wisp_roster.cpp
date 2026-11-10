@@ -433,11 +433,11 @@ void fleetMac(uint8_t out[6], uint8_t last) {
   std::memcpy(out, m, 6);
 }
 
-// True when `mac` appears in a packed 7-byte-entry claim buffer.
-bool bufHasMac(const uint8_t* buf, size_t entries, const uint8_t mac[6],
-               size_t entryBytes = 7) {
+// True when `mac` appears in a packed claim buffer.
+bool bufHasMac(const uint8_t* buf, size_t entries, const uint8_t mac[6]) {
   for (size_t i = 0; i < entries; ++i) {
-    if (std::memcmp(buf + i * entryBytes, mac, 6) == 0) return true;
+    const uint8_t* entry = buf + i * lamp_protocol::WISP_CLAIM_ENTRY_SIZE;
+    if (std::memcmp(entry, mac, 6) == 0) return true;
   }
   return false;
 }

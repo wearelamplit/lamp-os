@@ -329,7 +329,7 @@ changelog, per [`CLAUDE.md`](../../CLAUDE.md)).
 | `software/lamp-os/src/core/animated_behavior.hpp` | `AnimatedBehavior` base class: control/draw interface |
 | `software/lamp-os/src/core/frame_buffer.hpp/.cpp` | `FrameBuffer`: the per-surface pixel buffer `draw()` writes into |
 | `software/lamp-os/src/core/pending_slot_aggregate.hpp/.cpp` | Core 0→1 hand-off mechanism for async work |
-| `software/lamp-os/src/core/override_aggregate.hpp/.cpp` | Transient color/brightness overrides (colour watchdog 100 s, wisp keep-alive-held; brightness watchdog a separate 60 s) |
+| `software/lamp-os/src/core/override_aggregate.hpp/.cpp` | Transient color/brightness overrides (colour watchdog 100 s; brightness watchdog a separate 60 s) |
 | `software/lamp-os/src/core/personality_engine.hpp/.cpp` | Personality gate for expression suppression + crowd-dim |
 | `software/lamp-os/src/core/arrival_notifier.hpp/.cpp` | Push-notifies `onArrival` observers once per new near peer |
 | `software/lamp-os/src/core/power_governor.hpp/.cpp` | Current estimator + supply-budget brightness governor |
