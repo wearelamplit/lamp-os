@@ -1200,6 +1200,7 @@ void tick() {
   if (nowMs - s_lastPruneMs >= 1000) {
     s_lastPruneMs = nowMs;
     lamp::lampRoster.prune(LAMP_PRUNE_TIME_MS);
+    lamp::lampRoster.retireStaleWisp(nowMs);
   }
 
   // Duty-cycled passive scan for the Social/Network view. The connect-time

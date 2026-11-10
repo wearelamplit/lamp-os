@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include <lampos/clock.hpp>
+
 #include "animated_behavior.hpp"
 #include "components/network/mesh/pending_slots.hpp"
 #include "behavior_context.hpp"
@@ -58,6 +60,7 @@ class Compositor {
   // fresh STATE from this lamp's wisp painted it; freshMs_ ages present out as
   // a failsafe when STATE stops arriving. base/shade drive the app indicator.
   bool     wispStatePresent_ = false;
+  bool     wispStateAgedOut_ = false;
   uint32_t wispStateFreshMs_ = 0;
   Color    wispStateBase_;
   Color    wispStateShade_;
@@ -220,6 +223,7 @@ class Compositor {
     wispStateBase_ = base;
     wispStateShade_ = shade;
     wispStatePresent_ = true;
+    wispStateAgedOut_ = false;
     wispStateFreshMs_ = nowMs;
   }
   void clearWispState(uint32_t nowMs) {
@@ -239,6 +243,19 @@ class Compositor {
     }
     applyWispState(base, shade, nowMs);
     return true;
+  }
+
+  // wispActive at nowMs.
+  bool wispStateFresh(uint32_t nowMs) const {
+    return wispStatePresent_ && !wispStateAgedOut_ &&
+           (nowMs - wispStateFreshMs_) < kWispStateFreshMs;
+  }
+  // Latches a STATE gone silent past kWispStateFreshMs so it cannot read fresh
+  // again one millis() wrap later. Called every frame.
+  void retireWispState(uint32_t nowMs) {
+    if (wispStatePresent_ && lampos::msSince(nowMs, wispStateFreshMs_) >= kWispStateFreshMs) {
+      wispStateAgedOut_ = true;
+    }
   }
 
   // Failsafe window: presence ages out this long after the last STATE frame

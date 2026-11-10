@@ -393,6 +393,10 @@ class LampRoster {
   // bounded take times out. The unicast target for the lamp's wisp control op.
   bool copyDisplayWispMac(uint8_t out[6], uint32_t nowMs);
 
+  // Ages out the wisp slot and fleet stamps that have passed their windows, so
+  // none reads fresh again one millis() wrap later. Call at least once per wrap.
+  void retireStaleWisp(uint32_t nowMs);
+
   // Build and return the merged wispStatus JSON (see mergeWispStatusJson).
   // `maxLen` 0 serves it whole for the `wispstatus` page section;
   // CHAR_WISP_STATUS passes kWispStatusCharMaxLen.

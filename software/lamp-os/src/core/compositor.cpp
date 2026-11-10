@@ -206,10 +206,7 @@ void Compositor::tick() {
   };
 };
 
-bool Compositor::wispActive() const {
-  return wispStatePresent_ &&
-         (millis() - wispStateFreshMs_) < kWispStateFreshMs;
-}
+bool Compositor::wispActive() const { return wispStateFresh(millis()); }
 
 void Compositor::compositeWisp() {
   // MSG_WISP_STATE is the sole wisp render source: presence holds while the
@@ -217,7 +214,9 @@ void Compositor::compositeWisp() {
   // frame that drops this lamp, and ages out if STATE goes silent.
   // Fade the wisp layer off the surface an operator is editing so the live
   // color edit shows through; the other surface keeps its wisp paint.
-  const bool active = wispActive();
+  const uint32_t nowMs = millis();
+  retireWispState(nowMs);
+  const bool active = wispStateFresh(nowMs);
   const bool baseHeld = active && !overrides.base.operatorEditing();
   const bool shadeHeld = active && !overrides.shade.operatorEditing();
   wispBasePresence_.setTarget(baseHeld ? 1.0f : 0.0f);

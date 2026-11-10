@@ -60,6 +60,9 @@ struct WispFleetCache {
   size_t buildClaimsBlob(uint8_t* out, size_t outCap, uint32_t nowMs) const;
 
   void clear();
+  // Drops entries gone stale, so they cannot read fresh again one millis()
+  // wrap later. Call at least once per wrap.
+  void retire(uint32_t nowMs);
 };
 
 }  // namespace lamp
