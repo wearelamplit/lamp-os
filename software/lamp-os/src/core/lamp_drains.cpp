@@ -93,14 +93,7 @@ void Lamp::drainShadeColors() {
 
     JsonDocument doc;
     if (deserializeJson(doc, buf) == DeserializationError::Ok) {
-      // Object payload {"seg":k,"colors":[...]} targets one segment (per-segment
-      // live preview); a bare array targets the broadcast segment (seg 0).
-      if (doc.is<JsonObject>()) {
-        lamp::apply::shadeSegmentColorsToConfig(
-            doc["seg"] | 0, doc["colors"].as<JsonArray>());
-      } else {
-        lamp::apply::shadeColorsToConfig(doc.as<JsonArray>());
-      }
+      lamp::apply::shadeColorsWriteToConfig(doc.as<JsonVariant>());
     }
     lamp::stampConfiguratorActivity(millis());
   }
@@ -121,9 +114,7 @@ void Lamp::drainBaseColors() {
 
     JsonDocument doc;
     if (deserializeJson(doc, buf) == DeserializationError::Ok) {
-      // User-source: ToConfig mutates config.base.colors so a subsequent
-      // CHAR_COMMIT can persist the user's color choice.
-      lamp::apply::baseColorsToConfig(doc.as<JsonArray>());
+      lamp::apply::baseColorsWriteToConfig(doc.as<JsonVariant>());
     }
     lamp::stampConfiguratorActivity(millis());
   }

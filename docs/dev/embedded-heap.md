@@ -50,7 +50,10 @@ Two properties make it lethal:
    craters the block. Measure the fragmenter; do not theorize it.
 2. **No heap churn on the hot path.** Never rebuild-and-sort a fresh allocation per
    loop tick. Throttle it, dirty-gate it (rebuild only when the roster changed), or
-   reuse a member buffer `reserve()`d once to its max.
+   reuse a member buffer `reserve()`d once to its max. A rotating configurator,
+   the resting state of a lamp whose colours flow, draws every frame without
+   allocating (`test_configurator_rotation` counts zero allocations over 1,000
+   rotating draws); the loop pattern is built once per colour or rotation change.
 3. **No per-entry `std::string` for addresses or short keys.** Use a fixed
    `char[18]` or the raw 6-byte address. Anything past ~15 chars heap-allocates.
 4. **Scan in place, do not snapshot.** "Closest Smitten peer", "nearest by RSSI",
@@ -289,6 +292,16 @@ order; `fromJson` also bounds what it loads (truncating a password or SSID
 stored before the cap; the BOOT button clears a password), so no field can
 make every save fail. A repeated (type, target) in the stored JSON loads
 once, the first kept, as the records do.
+
+A role's `rotate` (at most 49 B, `,"rotate":{"on":false,"periodS":120,"dir":"down"}`)
+is stored only on a single-segment role and only when it differs from that
+role's default, whatever the variant's `rotationSupported` says. A one-segment
+role is at least 480 B shorter than the four-segment role the worst case
+assumes, so the widest rest that carries `rotate` (one four-segment role, one
+single-segment role with `rotate` at its widest) is 1316 B fully escaped,
+with its NUL, under the 1746 B worst case, so the caps and NVS figures above
+stand. `test_config_records` prints it as `[budget] rotating rest` and pins it
+below the worst case.
 
 Arduino's `initArduino` runs `nvs_flash_init` before `setup()`, erasing and
 re-initializing on `NO_FREE_PAGES` or `NEW_VERSION_FOUND`.

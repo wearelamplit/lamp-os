@@ -126,6 +126,8 @@ window.
 
 A descriptor that sets `spansSurfaces` (Pulse) instead gets **one** instance for `target=3`, bound to `baseBuffer`, unless the base has no pixels; `makeExpression` hands it the shade through `joinSurfaceAbove()` before `configureFromParameters`. It runs the two surfaces as one strip, base first. Its one trigger is one `onExpressionFired`, so one cascade and one event with no dedup needed, and a received both-surface Pulse takes one transient slot. Per-surface state the base class keys off `fb` takes the surface explicitly: `shouldAffectBuffer(surface)` (operator-edit pause) and `wispDimScale(surface)` (wisp dim), so editing either surface's colour pauses only that half. The trigger gate, the virtual `shouldAffectBuffer()`, is live while either joined surface is, so a both-surface Pulse still fires and plays on the other surface while one editor is open. This applies on every variant: where base and shade don't stack vertically (snafu's dots, for one), a both-surface Pulse sweeps one surface and then the other. `test_surface_wiring` links the real manager against a stub compositor and mesh to pin this wiring.
 
+Logical layout: `FrameBuffer::flush` applies each strip's `reversed` winding, so on the standard lamp (base strip `reversed`) logical index 0 is the shade's bottom and the base's top. Two features read physical up from this rule, keyed on the surface: a single-surface Pulse's Up, and colour rotation's `dir` in the configurator ([`lamp-framework.md`](lamp-framework.md#colour-rotation)). A custom variant gets the same rule; nothing documents where its shade's pixel 0 sits, so there Up may run physically down.
+
 `Expression::fb` is the `FrameBuffer*` the instance writes to. Don't capture `shadeBuffer` / `baseBuffer` from the manager, use the one already wired on `this`.
 
 ## Adding a new expression type: minimum viable diff
@@ -184,6 +186,8 @@ The Zone is toggle-driven (`fullStrip=1` whole strip, `fullStrip=0` region), ind
 | 3 | Bloom — center pixels lead on fade-in; outside-in on fade-back |
 
 A directional mode staggers each pixel's fade start by up to `fadeDuration/2`, so the transition holds `FADING_*` for `fadeDuration + maxOffset` (up to `1.5× fadeDuration`) to let the last-staged edge pixel reach the target before the state flips. Uniform has no offset and flips at exactly `fadeDuration`.
+
+Both fades and the hold blend against the live pixel the layers below drew that frame, never a snapshot, so over a rotating base the zone follows the flow through the fades and the release lands on the base as it is now, with no pop.
 
 ## Trigger cadence
 

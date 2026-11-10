@@ -222,23 +222,25 @@ void ShiftyExpression::draw() {
     case FADING_TO_PALETTE:
     case FADING_BACK: {
       // One end of every fade is the uniform shiftedColor; the other is the
-      // base snapshot in savedBuffer (taken at the trigger, refreshed through
-      // the hold), so no per-pixel fade buffers are kept.
+      // live base the layers below drew this frame, so the zone follows a
+      // moving base and no per-pixel fade buffers are kept.
       const bool toPalette = state == FADING_TO_PALETTE;
-      auto fadeStart = [&](int i) { return toPalette ? savedBuffer[i] : shiftedColor; };
-      auto fadeTarget = [&](int i) { return toPalette ? shiftedColor : savedBuffer[i]; };
+      auto fadeStart = [&](Color live) { return toPalette ? live : shiftedColor; };
+      auto fadeTarget = [&](Color live) { return toPalette ? shiftedColor : live; };
       if (fillMode_ == 0) {
         if (cachedFadeAtEnd_) {
           for (int i = zone_.posMin; i <= zone_.posMax; i++) {
             if (i >= fb->pixelCount) break;
-            fb->buffer[i] = mixColorWeight(fb->buffer[i], fadeTarget(i), wispWeight);
+            const Color live = fb->buffer[i];
+            fb->buffer[i] = mixColorWeight(live, fadeTarget(live), wispWeight);
           }
         } else {
           for (int i = zone_.posMin; i <= zone_.posMax; i++) {
             if (i >= fb->pixelCount) break;
-            const Color shifted = mixColorLinear(fadeStart(i), fadeTarget(i),
+            const Color live = fb->buffer[i];
+            const Color shifted = mixColorLinear(fadeStart(live), fadeTarget(live),
                                                  cachedFadeFactor_);
-            fb->buffer[i] = mixColorWeight(fb->buffer[i], shifted, wispWeight);
+            fb->buffer[i] = mixColorWeight(live, shifted, wispWeight);
           }
         }
       } else {
@@ -246,32 +248,28 @@ void ShiftyExpression::draw() {
         const uint32_t perFade = (fadeDurationMs > 1u) ? fadeDurationMs / 2u : 1u;
         for (int i = zone_.posMin; i <= zone_.posMax; i++) {
           if (i >= fb->pixelCount) break;
+          const Color live = fb->buffer[i];
           const uint32_t offset = pixelStartOffsetMs_[static_cast<size_t>(i)];
           Color shifted;
           if (elapsed < offset) {
-            shifted = fadeStart(i);
+            shifted = fadeStart(live);
           } else {
             const uint32_t pixelElapsed = elapsed - offset;
             if (pixelElapsed >= perFade) {
-              shifted = fadeTarget(i);
+              shifted = fadeTarget(live);
             } else {
               shifted = mixColorLinear(
-                  fadeStart(i), fadeTarget(i),
+                  fadeStart(live), fadeTarget(live),
                   computeLinearFactor(easeStep(pixelElapsed, perFade, easing_), perFade));
             }
           }
-          fb->buffer[i] = mixColorWeight(fb->buffer[i], shifted, wispWeight);
+          fb->buffer[i] = mixColorWeight(live, shifted, wispWeight);
         }
       }
       break;
     }
 
     case SHIFTED:
-      // Re-snapshot the live base (configurator drew it this frame, before
-      // shifty) so startUnshift fades back to the CURRENT base, not the one
-      // captured at onTrigger; an operator base change mid-hold otherwise
-      // pops in one frame when shifty releases.
-      savedBuffer = fb->buffer;
       for (int i = zone_.posMin; i <= zone_.posMax; i++) {
         if (i >= fb->pixelCount) break;
         fb->buffer[i] = mixColorWeight(fb->buffer[i], shiftedColor, wispWeight);
