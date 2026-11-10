@@ -133,15 +133,21 @@ update starts with it open: the sheet greys and keeps your colours, a tap
 outside still closes it (after a live "Discard changes?" if you changed
 anything), and once the update ends it saves normally. The expression
 editor's colours sheet does the same. The strip
-goes when the update ends (the lamp reboots, or fails) and editing comes
-back. A second lamp's screen shows nothing while the first updates. Then
-make an update fail (walk the phone out of range mid-send, or cancel it from
-the dev-mode Firmware panel) after dragging brightness as it started: once
-the strip goes the slider shows the lamp's real brightness. Open Home Mode
-during an update, leave it, let the update fail, then move the Colors
-brightness slider: the lamp's live brightness follows, not its home
-brightness. Within about 10 s of a failure the lamp may still ignore changes
-(tracker 5eba30c).
+goes when the lamp reboots after a good update and editing comes back. A
+second lamp's screen shows nothing while the first updates.
+
+P7 — **a failed update holds editing until the lamp listens.** Open Home Mode,
+walk out of range until the app loses the lamp, and come back so the update
+restarts on reconnect with Home Mode open. Press back to leave Home Mode while
+it sends, open Info and cancel the update from the dev-mode Firmware panel.
+The strip and the grey stay up while the lamp shows its update indicator
+(about 10 s), then both go together. Without touching anything, the lamp
+drops its Home Mode preview (normal brightness and behaviours). Repeat with
+Home Mode open and a walk out of range mid-send as the failure: after the
+reconnect the strip and grey hold until the lamp's indicator ends (up to
+about 70 s, since the lamp waits a minute for chunks), then the
+Home Mode slider moves the home brightness. On a lamp running 1.3.1, editing
+comes back the moment the update ends.
 
 ## Pass criteria
 
@@ -153,8 +159,10 @@ brightness. Within about 10 s of a failure the lamp may still ignore changes
 - P4 reconnect fully functional with zero re-pair steps.
 - P5: zero greet lines while connected (outside the connect race window).
 - P6: no control takes a tap during the update, the strip names the lamp,
-  editing returns when it ends, and after a failed update the screen and
-  the lamp's brightness routing match the lamp.
+  and editing returns when it ends.
+- P7: after a failed update editing stays frozen until the lamp leaves its
+  update indicator, never past 75 s, and then the lamp's Home Mode state
+  matches the open screen without a slider touch.
 
 ## Not covered here
 
