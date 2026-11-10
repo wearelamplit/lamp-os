@@ -178,8 +178,8 @@ void test_object_without_colours_changes_nothing() {
   TEST_ASSERT_EQUAL(0, g_base.calls);
 }
 
-// A `seg` the role cannot take is dropped whole: the base has no per-segment
-// form, and a shade `seg` must be an integer 0-255.
+// A `seg` the role cannot take drops the write whole. The base has no
+// per-segment form, and a shade `seg` must be an integer 0-255.
 void test_unusable_seg_changes_nothing() {
   for (const char* json : {"{\"seg\":1,\"colors\":[\"#00ff0000\"],\"rotate\":{\"on\":true}}",
                            "{\"seg\":\"0\",\"colors\":[\"#00ff0000\"],\"rotate\":{\"on\":true}}"}) {
