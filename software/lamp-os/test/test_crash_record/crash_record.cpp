@@ -63,6 +63,15 @@ void test_watchdogs_are_crashes() {
   TEST_ASSERT_FALSE(isCrashReset(ESP_RST_DEEPSLEEP));
 }
 
+void test_uptime_saturates_instead_of_wrapping() {
+  TEST_ASSERT_EQUAL_UINT32(0, uptimeMsFrom(999));
+  TEST_ASSERT_EQUAL_UINT32(1234, uptimeMsFrom(1234567));
+  const int64_t lastMs = int64_t{kUptimeSaturated} - 1;
+  TEST_ASSERT_EQUAL_UINT32(kUptimeSaturated - 1, uptimeMsFrom(lastMs * 1000));
+  TEST_ASSERT_EQUAL_UINT32(kUptimeSaturated, uptimeMsFrom((lastMs + 1) * 1000));
+  TEST_ASSERT_EQUAL_UINT32(kUptimeSaturated, uptimeMsFrom(int64_t{60} * 86400 * 1000000));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_clean_restart_is_not_a_crash);
@@ -70,5 +79,6 @@ int main(int, char**) {
   RUN_TEST(test_brownout_with_garbage_rtc_counts_without_a_snapshot);
   RUN_TEST(test_captured_panic_counts_under_any_reset_reason);
   RUN_TEST(test_watchdogs_are_crashes);
+  RUN_TEST(test_uptime_saturates_instead_of_wrapping);
   return UNITY_END();
 }

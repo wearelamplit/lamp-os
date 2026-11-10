@@ -273,8 +273,7 @@ IDF's cleanup of a failed blob write, and every store shape (empty, the
 largest whole, split at every escaped worst case, the standard variant's 18
 full expressions) is saved in seeded order with system keys and
 dispositions rewritten between saves and 29 padding entries beside them.
-Every write must land and every save load back as saved; seed 1 still holds
-with 37 padding entries.
+Every write must land and every save load back as saved.
 
 An expression record holds at most 12 parameters (`kMaxExpressionParams`;
 every type carries at most 11, guarded by `test_builtin_descriptors`) and
@@ -622,6 +621,7 @@ Read it from the BLE `lamp` section:
 6 task WDT, 7 other WDT, 9 brownout, 3 clean restart, 1 power-on). The heap and
 roster fields are absent when RTC memory failed its check (a brownout often
 does); `reason`/`core`/`pc`/`bt` are absent unless the panic handler ran.
+`uptimeMs` stops at 4294967295 (49.7 days) on a longer boot.
 `minLargestBlock` near 1-2 KB with a high `rosterPeak` points at fragmentation.
 Feed `pc` and `bt` to `xtensa-esp32-elf-addr2line -e firmware.elf` for the build
 matching `fw` (packed `major<<16 | minor<<8 | patch`).
@@ -663,13 +663,19 @@ once. One line per boot, oldest first, `-1` the boot before this one:
 smallest largest free block, both in bytes and capped at 65535. `end` is the
 reset that started the next boot: `power` (a power-on reset), `restart` (a
 clean `esp_restart`: OTA, web reboot), `panic`, `intwdt`, `taskwdt`, `wdt`,
-`brownout`, `ext`, `sleep`, `unknown`.
-The figures come from the crash record's RTC snapshot: when it survives the
-reset they are exact. When it does not (a power cut, often a brownout), the
+`brownout`, `ext`, `sleep`, `unknown`. The reset that USB plug-in and
+`lamp:tap` cause reports as a power-on on the ESP32, so the boot they
+interrupt reads `end power`.
+
+The figures come from the crash record's RTC snapshot, sampled each second
+from the first loop iteration on: when it survives the reset they are those
+of the last sample. When it does not (a power cut, often a brownout), the
 boot keeps the figures from the last milestone it reached, 1 min, 1 h or 1
-day, and `up` reads `>` that milestone; `free - big -` means the boot died
-before its first minute. A boot writes the history once at start and once
-per milestone, so at most four NVS writes per boot.
+day, and `up` reads `>` that milestone. `free - big -` means the boot died
+before any figure was taken: in `setup()`, or in its first minute after a
+power cut. Past 49.7 days the snapshot's uptime saturates and reads
+`>49d17h`. A boot writes the history once at start and once per milestone,
+so at most four NVS writes per boot.
 
 ## Why it recurs
 

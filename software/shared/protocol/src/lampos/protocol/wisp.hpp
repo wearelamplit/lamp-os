@@ -8,7 +8,7 @@
 // The wisp coordination family: MSG_WISP_HELLO (0x20), MSG_WISP_CLAIM (0x25),
 // MSG_WISP_PALETTE (0x26), MSG_WISP_PAINT (0x27), MSG_WISP_STATE (0x28).
 // build/parse: buildWispHello/parseWispHello, buildWispClaim/parseWispClaim,
-//              buildWispPalette/parseWispPalette, buildWispPaint/parseWispPaint,
+//              buildWispPalette/parseWispPalette,
 //              buildWispState/parseWispState.
 //
 // MSG_WISP_HELLO (0x20), wisp presence beacon (WISP_HELLO_FIXED_SIZE == 45):
@@ -180,15 +180,6 @@ struct ParsedWispPalette {
   const uint8_t* w;
 };
 
-struct ParsedWispPaint {
-  uint16_t seq;
-  uint8_t  sourceMac[6];
-  uint8_t  count;
-  // Pointer into the recv buffer; caller must not retain past this call.
-  // `count * WISP_PAINT_ENTRY_SIZE` bytes of packed lampMac(6)+baseRGB(3)+shadeRGB(3).
-  const uint8_t* entries;
-};
-
 struct ParsedWispState {
   uint16_t seq;
   uint8_t  sourceMac[6];
@@ -251,29 +242,6 @@ inline size_t buildWispPalette(uint8_t* buf, size_t bufLen, uint16_t seq,
     std::memcpy(&buf[WISP_PALETTE_FIXED_PREFIX], rgb,
                 count * WISP_PALETTE_ENTRY_SIZE);
     if (w) std::memcpy(&buf[rgbEnd], w, count);
-  }
-  return total;
-}
-
-// Build a MSG_WISP_PAINT frame. `entries` is `count` packed records, each
-// WISP_PAINT_ENTRY_SIZE bytes: lampMac(6) + baseRGB(3) + shadeRGB(3). `count`
-// must be ≤ WISP_PAINT_MAX_ENTRIES. Returns total bytes written on success, 0
-// on bad args / insufficient buffer / count overflow.
-inline size_t buildWispPaint(uint8_t* buf, size_t bufLen, uint16_t seq,
-                             const uint8_t sourceMac[6],
-                             const uint8_t* entries,
-                             uint8_t count) {
-  if (!buf || !sourceMac) return 0;
-  if (count > WISP_PAINT_MAX_ENTRIES) return 0;
-  if (count > 0 && !entries) return 0;
-  const size_t total = WISP_PAINT_FIXED_PREFIX + count * WISP_PAINT_ENTRY_SIZE;
-  if (bufLen < total) return 0;
-  detail::writeHeader(buf, MSG_WISP_PAINT, seq);
-  std::memcpy(&buf[6], sourceMac, 6);
-  buf[12] = count;
-  if (count) {
-    std::memcpy(&buf[WISP_PAINT_FIXED_PREFIX], entries,
-                count * WISP_PAINT_ENTRY_SIZE);
   }
   return total;
 }
@@ -397,21 +365,6 @@ inline bool parseWispPalette(const uint8_t* data, size_t len,
   out.count = count;
   out.rgb = count ? &data[WISP_PALETTE_FIXED_PREFIX] : nullptr;
   out.w = (count && len >= expected + count) ? &data[expected] : nullptr;
-  return true;
-}
-
-inline bool parseWispPaint(const uint8_t* data, size_t len, ParsedWispPaint& out) {
-  if (inspect(data, len) != MSG_WISP_PAINT) return false;
-  if (len < WISP_PAINT_FIXED_PREFIX) return false;
-  const uint8_t count = data[12];
-  if (count > WISP_PAINT_MAX_ENTRIES) return false;
-  const size_t expected = WISP_PAINT_FIXED_PREFIX +
-                          static_cast<size_t>(count) * WISP_PAINT_ENTRY_SIZE;
-  if (len < expected) return false;
-  out.seq = static_cast<uint16_t>(data[4]) | (static_cast<uint16_t>(data[5]) << 8);
-  std::memcpy(out.sourceMac, &data[6], 6);
-  out.count = count;
-  out.entries = count ? &data[WISP_PAINT_FIXED_PREFIX] : nullptr;
   return true;
 }
 

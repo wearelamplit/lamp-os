@@ -58,9 +58,16 @@ void test_append_starts_the_new_boot_blank() {
   TEST_ASSERT_EQUAL_UINT8(1, e.fw[2]);
 }
 
+static void setFigures(BootEntry& e, uint32_t uptime, uint16_t minFree, uint16_t minLargest) {
+  e.uptime = uptime;
+  e.minFreeHeap = minFree;
+  e.minLargestBlock = minLargest;
+}
+
 void test_finish_takes_exact_figures_from_the_rtc() {
   History h = historyOf(3);
-  update(h, snapshot(7000, 30000, 20000));
+  setFigures(h.entries[1], 7, 30000, 20000);
+  setFigures(h.entries[2], 60, 30000, 20000);
   const BootEntry before = h.entries[1];
   const Snapshot rtc = snapshot(5412345, 70000, 1300);
   finish(h, &rtc);
@@ -73,7 +80,7 @@ void test_finish_takes_exact_figures_from_the_rtc() {
 
 void test_finish_without_rtc_keeps_the_milestone() {
   History h = historyOf(2);
-  update(h, snapshot(3601000, 25000, 9000));
+  setFigures(h.entries[1], 3601, 25000, 9000);
   finish(h, nullptr);
   const BootEntry& e = h.entries[1];
   TEST_ASSERT_EQUAL_UINT32(3601, e.uptime);
@@ -89,12 +96,46 @@ void test_finish_on_an_empty_history_adds_nothing() {
   TEST_ASSERT_EQUAL_UINT32(0, h.entries[0].uptime);
 }
 
-void test_update_touches_only_the_running_boot() {
+void test_finish_ignores_a_boot_that_died_before_its_loop_sampled() {
   History h = historyOf(2);
-  update(h, snapshot(61500, 41000, 33000));
-  TEST_ASSERT_EQUAL_UINT32(61, h.entries[1].uptime);
+  const Snapshot rearm = snapshot(0, 120000, 110000);
+  finish(h, &rearm);
+  const BootEntry& e = h.entries[1];
+  TEST_ASSERT_EQUAL_UINT32(0, e.uptime);
+  TEST_ASSERT_EQUAL_UINT16(0, e.minFreeHeap);
+  TEST_ASSERT_EQUAL_UINT16(0, e.minLargestBlock);
+}
+
+void test_finish_marks_a_saturated_uptime_as_a_lower_bound() {
+  History h = historyOf(2);
+  const Snapshot rtc = snapshot(lamp::crash_record::kUptimeSaturated, 20000, 9000);
+  finish(h, &rtc);
+  TEST_ASSERT_EQUAL_UINT32(lamp::crash_record::kUptimeSaturated / 1000, h.entries[1].uptime);
+}
+
+void test_milestone_records_the_milestone_reached() {
+  History h = historyOf(2);
+  uint8_t next = 0;
+  const Snapshot now = snapshot(3599800, 41000, 33000);
+  TEST_ASSERT_FALSE(milestoneUpdate(h, next, 59999, &now));
+  TEST_ASSERT_TRUE(milestoneUpdate(h, next, 60250, &now));
+  TEST_ASSERT_EQUAL_UINT32(60, h.entries[1].uptime);
   TEST_ASSERT_EQUAL_UINT16(41000, h.entries[1].minFreeHeap);
   TEST_ASSERT_EQUAL_UINT16(33000, h.entries[1].minLargestBlock);
+  TEST_ASSERT_EQUAL_UINT32(0, h.entries[0].uptime);
+  TEST_ASSERT_FALSE(milestoneUpdate(h, next, 61000, &now));
+  TEST_ASSERT_TRUE(milestoneUpdate(h, next, 3600100, &now));
+  TEST_ASSERT_EQUAL_UINT32(3600, h.entries[1].uptime);
+}
+
+void test_milestone_needs_a_boot_and_a_snapshot() {
+  uint8_t next = 0;
+  const Snapshot now = snapshot(61000, 41000, 33000);
+  History empty = historyOf(0);
+  TEST_ASSERT_FALSE(milestoneUpdate(empty, next, 61000, &now));
+  TEST_ASSERT_EQUAL_UINT32(0, empty.entries[0].uptime);
+  History h = historyOf(1);
+  TEST_ASSERT_FALSE(milestoneUpdate(h, next, 61000, nullptr));
   TEST_ASSERT_EQUAL_UINT32(0, h.entries[0].uptime);
 }
 
@@ -156,14 +197,30 @@ void test_line_uptime_units() {
   TEST_ASSERT_NOT_NULL(std::strstr(line, " up 3d04h "));
 }
 
-void test_valid_rejects_a_foreign_blob() {
+void test_line_names_an_unknown_reset() {
+  History h = historyOf(2);
+  h.entries[1].resetReason = 200;
+  char line[96];
+  formatLine(line, sizeof(line), h, 0);
+  TEST_ASSERT_NOT_NULL(std::strstr(line, " end ?"));
+}
+
+void test_loaded_rejects_a_foreign_blob() {
   History h = historyOf(3);
-  TEST_ASSERT_TRUE(valid(h));
+  TEST_ASSERT_TRUE(loaded(h, sizeof(History)));
+  TEST_ASSERT_FALSE(loaded(h, sizeof(History) - sizeof(BootEntry)));
   h.version = kVersion + 1;
-  TEST_ASSERT_FALSE(valid(h));
+  TEST_ASSERT_FALSE(loaded(h, sizeof(History)));
   h.version = kVersion;
   h.count = kBoots + 1;
-  TEST_ASSERT_FALSE(valid(h));
+  TEST_ASSERT_FALSE(loaded(h, sizeof(History)));
+}
+
+void test_the_running_boot_has_not_ended() {
+  TEST_ASSERT_EQUAL_UINT32(0, endedCount(historyOf(0)));
+  TEST_ASSERT_EQUAL_UINT32(0, endedCount(historyOf(1)));
+  TEST_ASSERT_EQUAL_UINT32(3, endedCount(historyOf(4)));
+  TEST_ASSERT_EQUAL_UINT32(kBoots - 1, endedCount(historyOf(9)));
 }
 
 int main(int, char**) {
@@ -173,12 +230,17 @@ int main(int, char**) {
   RUN_TEST(test_finish_takes_exact_figures_from_the_rtc);
   RUN_TEST(test_finish_without_rtc_keeps_the_milestone);
   RUN_TEST(test_finish_on_an_empty_history_adds_nothing);
-  RUN_TEST(test_update_touches_only_the_running_boot);
+  RUN_TEST(test_finish_ignores_a_boot_that_died_before_its_loop_sampled);
+  RUN_TEST(test_finish_marks_a_saturated_uptime_as_a_lower_bound);
+  RUN_TEST(test_milestone_records_the_milestone_reached);
+  RUN_TEST(test_milestone_needs_a_boot_and_a_snapshot);
   RUN_TEST(test_milestones_fire_once_each);
   RUN_TEST(test_a_late_first_check_writes_once);
   RUN_TEST(test_line_reads_the_end_from_the_next_boot);
   RUN_TEST(test_line_marks_a_boot_with_no_figures);
   RUN_TEST(test_line_uptime_units);
-  RUN_TEST(test_valid_rejects_a_foreign_blob);
+  RUN_TEST(test_line_names_an_unknown_reset);
+  RUN_TEST(test_loaded_rejects_a_foreign_blob);
+  RUN_TEST(test_the_running_boot_has_not_ended);
   return UNITY_END();
 }

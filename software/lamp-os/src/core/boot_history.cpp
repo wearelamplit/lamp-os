@@ -46,13 +46,18 @@ void formatUptime(char* out, size_t cap, uint32_t s) {
 
 }  // namespace
 
-bool valid(const History& h) { return h.version == kVersion && h.count <= kBoots; }
+bool loaded(const History& h, size_t len) {
+  return len == sizeof(History) && h.version == kVersion && h.count <= kBoots;
+}
+
+size_t endedCount(const History& h) { return h.count == 0 ? 0 : h.count - 1; }
 
 void finish(History& h, const crash_record::Snapshot* rtc) {
-  if (h.count == 0 || rtc == nullptr) return;
+  // uptimeMs 0 is the re-arm sample: the boot died before its loop sampled.
+  if (h.count == 0 || rtc == nullptr || rtc->uptimeMs == 0) return;
   BootEntry& e = h.entries[h.count - 1];
   takeFigures(e, *rtc);
-  e.uptime |= kUptimeExact;
+  if (rtc->uptimeMs != crash_record::kUptimeSaturated) e.uptime |= kUptimeExact;
 }
 
 void append(History& h, uint32_t fwVersion, esp_reset_reason_t reason) {
@@ -68,11 +73,6 @@ void append(History& h, uint32_t fwVersion, esp_reset_reason_t reason) {
   e.resetReason = static_cast<uint8_t>(reason);
 }
 
-void update(History& h, const crash_record::Snapshot& now) {
-  if (h.count == 0) return;
-  takeFigures(h.entries[h.count - 1], now);
-}
-
 bool milestoneDue(uint32_t nowMs, uint8_t& next) {
   constexpr size_t kCount = sizeof(kMilestonesS) / sizeof(kMilestonesS[0]);
   if (next >= kCount || nowMs / 1000 < kMilestonesS[next]) return false;
@@ -80,7 +80,16 @@ bool milestoneDue(uint32_t nowMs, uint8_t& next) {
   return true;
 }
 
-int formatLine(char* out, size_t cap, const History& h, size_t i) {
+bool milestoneUpdate(History& h, uint8_t& next, uint32_t nowMs,
+                     const crash_record::Snapshot* now) {
+  if (h.count == 0 || now == nullptr || !milestoneDue(nowMs, next)) return false;
+  BootEntry& e = h.entries[h.count - 1];
+  takeFigures(e, *now);
+  e.uptime = nowMs / 1000;
+  return true;
+}
+
+void formatLine(char* out, size_t cap, const History& h, size_t i) {
   const BootEntry& e = h.entries[i];
   char up[16];
   formatUptime(up, sizeof(up), e.uptime & ~kUptimeExact);
@@ -89,10 +98,10 @@ int formatLine(char* out, size_t cap, const History& h, size_t i) {
   if (e.uptime != 0) {
     std::snprintf(heap, sizeof(heap), "free %u big %u", e.minFreeHeap, e.minLargestBlock);
   }
-  return std::snprintf(out, cap, "[boots] -%u fw%u.%u.%u up %s%s %s end %s",
-                       static_cast<unsigned>(h.count - 1 - i), e.fw[0], e.fw[1], e.fw[2],
-                       (e.uptime & kUptimeExact) ? "" : ">", up, heap,
-                       resetName(h.entries[i + 1].resetReason));
+  std::snprintf(out, cap, "[boots] -%u fw%u.%u.%u up %s%s %s end %s",
+                static_cast<unsigned>(h.count - 1 - i), e.fw[0], e.fw[1], e.fw[2],
+                (e.uptime & kUptimeExact) ? "" : ">", up, heap,
+                resetName(h.entries[i + 1].resetReason));
 }
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
@@ -118,8 +127,7 @@ void boot(uint32_t fwVersion) {
   nvs_handle_t h;
   if (nvs_open(kNvsNamespace, NVS_READONLY, &h) == ESP_OK) {
     size_t len = sizeof(History);
-    if (nvs_get_blob(h, kNvsKey, &s_history, &len) != ESP_OK || len != sizeof(History) ||
-        !valid(s_history)) {
+    if (nvs_get_blob(h, kNvsKey, &s_history, &len) != ESP_OK || !loaded(s_history, len)) {
       s_history = History{};
     }
     nvs_close(h);
@@ -130,18 +138,14 @@ void boot(uint32_t fwVersion) {
   save();
 
   char line[96];
-  for (size_t i = 0; i + 1 < s_history.count; ++i) {
+  for (size_t i = 0; i < endedCount(s_history); ++i) {
     formatLine(line, sizeof(line), s_history, i);
     Serial.println(line);
   }
 }
 
 void tick(uint32_t nowMs) {
-  if (!milestoneDue(nowMs, s_nextMilestone)) return;
-  const crash_record::Snapshot* now = crash_record::rtcSnapshot();
-  if (now == nullptr) return;
-  update(s_history, *now);
-  save();
+  if (milestoneUpdate(s_history, s_nextMilestone, nowMs, crash_record::rtcSnapshot())) save();
 }
 
 #endif

@@ -143,8 +143,7 @@ enum MsgType : uint8_t {
   MSG_WISP_PAINT          = 0x27,
   // Declarative per-lamp state the wisp broadcasts (~2 s, no relay). Per-lamp
   // {mac,base,shade} entries plus per-frame globals (brightness, drift-rate,
-  // presence); lamps chase the targets. Supersedes the WISP_PAINT/CLAIM/OVERRIDE
-  // path.
+  // presence); lamps chase the targets.
   MSG_WISP_STATE          = 0x28,
   MSG_EVENT               = 0x30,
   // Targeted expression invocation. Lamp directs a specific nearby lamp to

@@ -14,8 +14,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   low its free memory got, and how it ended (power cut, restart, crash,
   watchdog, brownout). After a lamp misbehaves, plug it into a computer and
   open `npm run lamp:tap`: the lamp restarts and prints its history straight
-  away. A boot that ended in a power cut shows the run time it had reached by
-  its last check (1 minute, 1 hour, 1 day).
+  away. Plugging in restarts the lamp the way a power cut does, so the boot
+  that was running reads as ending in a power cut. A boot that ended in a
+  power cut shows the run time it had reached by its last check (1 minute,
+  1 hour, 1 day).
 
 ### Changed
 - **Smaller firmware, a little more free memory.** The lamp no longer builds

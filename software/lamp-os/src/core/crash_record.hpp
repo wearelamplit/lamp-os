@@ -11,6 +11,8 @@ namespace lamp::crash_record {
 
 constexpr size_t kReasonLen = 32;
 constexpr size_t kBacktraceLen = 4;
+// uptimeMs past 49.7 days.
+constexpr uint32_t kUptimeSaturated = UINT32_MAX;
 
 // Last-known state of the running boot, held in RTC memory across a reset.
 struct Snapshot {
@@ -35,6 +37,9 @@ struct Record {
 };
 
 bool isCrashReset(esp_reset_reason_t reason);
+
+// Uptime in ms for a Snapshot, saturating at kUptimeSaturated.
+uint32_t uptimeMsFrom(int64_t microseconds);
 
 // Folds this boot into the stored record. `rtc` is null when the RTC state
 // failed its magic check. Returns true when `rec` changed and must be written.

@@ -1,5 +1,5 @@
-// Full-set (100-entry) MSG_WISP_PAINT / MSG_WISP_CLAIM build+parse round-trip.
-// The v2 frame carries the whole claim/paint set in one broadcast (no
+// Full-set MSG_WISP_CLAIM / MSG_WISP_STATE build+parse round-trip, and the frame caps.
+// The v2 frame carries the whole claim set in one broadcast (no
 // windowing); these pin the caps + the round-trip at the maximum entry count.
 
 #include <unity.h>
@@ -27,24 +27,6 @@ void test_frame_caps() {
   TEST_ASSERT_TRUE(lp::WISP_CLAIM_MAX_SIZE <= lp::ESPNOW_V2_FRAME_MAX);
 }
 
-void test_paint_fullset_round_trip() {
-  uint8_t entries[lp::WISP_PAINT_MAX_ENTRIES * lp::WISP_PAINT_ENTRY_SIZE];
-  for (size_t i = 0; i < sizeof(entries); ++i) {
-    entries[i] = static_cast<uint8_t>(i * 7 + 3);
-  }
-  uint8_t buf[lp::WISP_PAINT_MAX_SIZE];
-  const size_t n = lp::buildWispPaint(buf, sizeof(buf), /*seq=*/9, kSrc,
-                                      entries, lp::WISP_PAINT_MAX_ENTRIES);
-  TEST_ASSERT_EQUAL_UINT32(lp::WISP_PAINT_MAX_SIZE, n);
-
-  lp::ParsedWispPaint out;
-  TEST_ASSERT_TRUE(lp::parseWispPaint(buf, n, out));
-  TEST_ASSERT_EQUAL_UINT8(lp::WISP_PAINT_MAX_ENTRIES, out.count);
-  TEST_ASSERT_EQUAL_UINT16(9, out.seq);
-  TEST_ASSERT_EQUAL_MEMORY(kSrc, out.sourceMac, 6);
-  TEST_ASSERT_EQUAL_MEMORY(entries, out.entries, sizeof(entries));
-}
-
 void test_claim_fullset_round_trip() {
   uint8_t entries[lp::kMaxWispClaimEntries * lp::WISP_CLAIM_ENTRY_SIZE];
   for (size_t i = 0; i < sizeof(entries); ++i) {
@@ -61,14 +43,6 @@ void test_claim_fullset_round_trip() {
   TEST_ASSERT_EQUAL_UINT16(11, out.seq);
   TEST_ASSERT_EQUAL_MEMORY(kSrc, out.sourceMac, 6);
   TEST_ASSERT_EQUAL_MEMORY(entries, out.entries, sizeof(entries));
-}
-
-void test_paint_over_cap_rejected() {
-  uint8_t entries[lp::WISP_PAINT_ENTRY_SIZE] = {0};
-  uint8_t buf[lp::WISP_PAINT_MAX_SIZE];
-  const size_t n = lp::buildWispPaint(buf, sizeof(buf), 1, kSrc, entries,
-                                      lp::WISP_PAINT_MAX_ENTRIES + 1);
-  TEST_ASSERT_EQUAL_UINT32(0, n);
 }
 
 void test_state_frame_caps() {
@@ -331,9 +305,7 @@ int main(int argc, char** argv) {
   (void)argv;
   UNITY_BEGIN();
   RUN_TEST(test_frame_caps);
-  RUN_TEST(test_paint_fullset_round_trip);
   RUN_TEST(test_claim_fullset_round_trip);
-  RUN_TEST(test_paint_over_cap_rejected);
   RUN_TEST(test_state_frame_caps);
   RUN_TEST(test_state_fullset_round_trip);
   RUN_TEST(test_state_zero_entries_round_trip);
