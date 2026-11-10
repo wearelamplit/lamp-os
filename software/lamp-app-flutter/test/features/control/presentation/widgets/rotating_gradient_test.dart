@@ -153,7 +153,7 @@ void main() {
           stop0AtBottom: false, direction: RotationDirection.up, periodS: 20);
       await tester.pump();
       expect(await _edge(tester, bottom: false), _Hue.green);
-      // Two thirds of a 20 s loop brings stop 0 back; at the old 40 s rate
+      // Two thirds of a 20 s loop brings stop 0 back. At the old 40 s rate
       // the same time would show blue.
       await tester.pump(const Duration(milliseconds: 40000 ~/ 3));
       expect(await _edge(tester, bottom: false), _Hue.red);
