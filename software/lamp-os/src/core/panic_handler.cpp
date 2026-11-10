@@ -2,7 +2,7 @@
 // Dumps a tagged [LAMP PANIC] block (reason/core/pc/backtrace) over UART with
 // ets_printf (interrupt-safe direct UART; interrupts are off at panic time).
 // pc may be _invalid_pc_placeholder when ESP-IDF cannot determine the fault address.
-// Coredump-to-flash is disabled on this build (SPIFFS occupies that partition;
+// Coredump is disabled on this build (SPIFFS occupies that partition;
 // see platformio.ini), so this hook is the only crash-diagnostic path before
 // reset. It also stamps the RTC crash record, which the next boot persists.
 

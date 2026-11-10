@@ -5,6 +5,15 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## Unreleased
+
+### Changed
+- **Smaller firmware, a little more free memory.** The lamp no longer builds
+  in code that saves a crash dump to flash. It never had room to store one,
+  so nothing you see changes: a crash still prints its report on the USB
+  serial console and still lands in the lamp's crash record. The firmware is
+  about 12 KB smaller and the lamp has about 0.9 KB more free memory.
+
 ## 1.3.2
 
 ### Fixed
