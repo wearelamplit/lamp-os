@@ -18,6 +18,7 @@ import '../../inventory/application/inventory_notifier.dart';
 import '../data/catalog_store.dart';
 import 'advanced_session.dart';
 import '../../lamp_shell/domain/expression_catalog.dart';
+import '../domain/color_rotation.dart';
 import '../domain/lamp_color.dart';
 import '../domain/sections.dart';
 import '../../social/domain/social_mode.dart';
@@ -875,7 +876,7 @@ class ControlNotifier extends _$ControlNotifier {
     state = AsyncData(cur.copyWith(
       shade: cur.shade.copyWith(colors: colors, segments: segs),
     ));
-    _shadeColorsWriter?.schedule(_encodeColors(colors));
+    _shadeColorsWriter?.schedule(_encodeColors(colors, cur.shade.rotation));
     // Inventory "last seen" cache mirrors the blended identity color, same
     // as base, so the lamp picker's swatch preview stays representative.
     if (colors.isNotEmpty) {
@@ -915,10 +916,32 @@ class ControlNotifier extends _$ControlNotifier {
     state = AsyncData(cur.copyWith(
       base: cur.base.copyWith(colors: colors, segments: segs),
     ));
-    _baseColorsWriter?.schedule(_encodeColors(colors));
+    _baseColorsWriter?.schedule(_encodeColors(colors, cur.base.rotation));
     if (colors.isNotEmpty) {
       _queueSeen(base: LampColor.blendedIdentity(colors));
     }
+  }
+
+  /// Live-previews the shade's rotation over CHAR_SHADE_COLORS, with the
+  /// colours in the same write. A no-op on a lamp whose shade section carries
+  /// no `rotate`. Persisted by CHAR_COMMIT, as the colours are.
+  Future<void> setShadeRotation(ColorRotation rotation) async {
+    final cur = state.value;
+    if (cur == null || cur.shade.rotation == null) return;
+    state = AsyncData(cur.copyWith(
+      shade: cur.shade.copyWith(rotation: rotation),
+    ));
+    _shadeColorsWriter?.schedule(_encodeColors(cur.shade.colors, rotation));
+  }
+
+  /// Base twin of [setShadeRotation], over CHAR_BASE_COLORS.
+  Future<void> setBaseRotation(ColorRotation rotation) async {
+    final cur = state.value;
+    if (cur == null || cur.base.rotation == null) return;
+    state = AsyncData(cur.copyWith(
+      base: cur.base.copyWith(rotation: rotation),
+    ));
+    _baseColorsWriter?.schedule(_encodeColors(cur.base.colors, rotation));
   }
 
   Future<void> setKnockoutPixel(int index, int brightness) async {
@@ -1660,9 +1683,15 @@ class ControlNotifier extends _$ControlNotifier {
     );
   }
 
-  Uint8List _encodeColors(List<LampColor> colors) {
+  // A role that offers rotation gets the object form, carrying the whole
+  // state so the coalescer's latest-wins never drops a rotation change. Any
+  // other role keeps the bare array older firmware parses.
+  Uint8List _encodeColors(List<LampColor> colors, ColorRotation? rotation) {
     final arr = colors.map((c) => c.toHex()).toList();
-    return Uint8List.fromList(utf8.encode(jsonEncode(arr)));
+    final Object payload = rotation == null
+        ? arr
+        : {'colors': arr, 'rotate': rotation.toJson()};
+    return Uint8List.fromList(utf8.encode(jsonEncode(payload)));
   }
 
   // Per-segment live-preview payload: {"seg":k,"colors":[...]}. The firmware

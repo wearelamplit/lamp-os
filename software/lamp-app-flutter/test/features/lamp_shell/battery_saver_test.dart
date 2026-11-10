@@ -51,7 +51,7 @@ Widget _wrap(ProviderContainer c) => UncontrolledProviderScope(
     );
 
 String _estimateText(WidgetTester tester) =>
-    tester.widget<Text>(find.textContaining('20 Ah battery')).data!;
+    tester.widget<Text>(find.textContaining('20000 mAh bank')).data!;
 
 void main() {
   testWidgets('Battery Saver estimate renders and updates on Bright',
@@ -63,7 +63,7 @@ void main() {
     await _pumpToData(tester);
 
     // Default Standard (170) shows a non-empty estimate caption.
-    expect(find.textContaining('20 Ah battery'), findsOneWidget);
+    expect(find.textContaining('20000 mAh bank'), findsOneWidget);
     final standardEstimate = _estimateText(tester);
 
     await tester.tap(find.text('Bright'));
@@ -87,10 +87,12 @@ void main() {
 
   group('batteryEstimateLabel', () {
     test('interpolates sensibly for a known triple', () {
-      // 200 + (1400-200)*170/255 = 1000 mA. 20000/1000 = 20.0 h.
       final label = batteryEstimateLabel(200, 1400, 170);
-      expect(label, contains('20 Ah battery'));
+      expect(label, contains('20000 mAh bank'));
       expect(label, isNotEmpty);
+      // The same interpolated LED draw (1000 mA) gives the same runtime.
+      expect(label, batteryEstimateLabel(1000, 2000, 0));
+      expect(label, batteryEstimateLabel(0, 1000, 255));
     });
 
     test('higher ceiling yields a shorter runtime', () {

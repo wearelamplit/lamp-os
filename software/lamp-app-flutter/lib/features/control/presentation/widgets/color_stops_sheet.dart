@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/widgets/app_sheet.dart';
 import '../../../../core/widgets/confirm_discard.dart';
+import '../../domain/color_rotation.dart';
 import '../../domain/lamp_color.dart';
 import 'color_picker_sheet.dart';
+import 'rotate_colors_box.dart';
 
 /// Reusable bottom sheet for editing a list of color stops: full-width color
 /// bar + hex per row, add / remove / (optional) reorder, tap-a-row to edit its
@@ -24,6 +26,10 @@ class ColorStopsSheet extends StatefulWidget {
     this.reorderable = true,
     this.bpp = 4,
     this.onChanged,
+    this.rotation,
+    this.onRotationChanged,
+    this.rotationStop0AtBottom = false,
+    this.contentSized = false,
   });
 
   final List<LampColor> initial;
@@ -52,6 +58,20 @@ class ColorStopsSheet extends StatefulWidget {
   /// open and surfaces the error).
   final Future<void> Function(List<LampColor>) onSave;
 
+  /// The rotation the sheet opens with. Null hides the Rotate box.
+  final ColorRotation? rotation;
+
+  /// Streams every rotation edit for live preview, and the opened rotation on
+  /// Cancel. Save persists it with the colours.
+  final ValueChanged<ColorRotation>? onRotationChanged;
+
+  /// The Rotate box's preview holds the first colour at its bottom.
+  final bool rotationStop0AtBottom;
+
+  /// The sheet sizes to its content, for a launcher that bounds the height
+  /// with [ColorSheetHeight]. Off, it fills a launcher's fixed height.
+  final bool contentSized;
+
   @override
   State<ColorStopsSheet> createState() => _ColorStopsSheetState();
 }
@@ -62,19 +82,33 @@ class _ColorStopsSheetState extends State<ColorStopsSheet> {
   // revert target must key off the colors the sheet opened with, not the prop.
   late final List<LampColor> _original = List.of(widget.initial);
   late List<LampColor> _colors = List.of(widget.initial);
+  late final ColorRotation? _originalRotation = widget.rotation;
+  late ColorRotation? _rotation = widget.rotation;
   bool _allowPop = false;
 
   int get _minCount => widget.allowEmpty ? 0 : 1;
 
-  bool get _dirty => !listEquals(_colors, _original);
+  bool get _dirty =>
+      !listEquals(_colors, _original) || _rotation != _originalRotation;
 
   void _apply(List<LampColor> next) {
     setState(() => _colors = next);
     widget.onChanged?.call(List.of(next));
   }
 
+  void _applyRotation(ColorRotation next) {
+    setState(() => _rotation = next);
+    widget.onRotationChanged?.call(next);
+  }
+
   void _close({required bool revert}) {
-    if (revert && _dirty) widget.onChanged?.call(List.of(_original));
+    if (revert && !listEquals(_colors, _original)) {
+      widget.onChanged?.call(List.of(_original));
+    }
+    final opened = _originalRotation;
+    if (revert && opened != null && _rotation != opened) {
+      widget.onRotationChanged?.call(opened);
+    }
     setState(() => _allowPop = true);
     // Pop after the frame so PopScope picks up _allowPop=true (setState +
     // synchronous Navigator.pop would still see the old canPop=false).
@@ -187,6 +221,133 @@ class _ColorStopsSheetState extends State<ColorStopsSheet> {
     );
   }
 
+  Widget _rows({required bool shrinkWrap}) {
+    final physics = shrinkWrap ? const NeverScrollableScrollPhysics() : null;
+    return widget.reorderable
+        ? ReorderableListView.builder(
+            shrinkWrap: shrinkWrap,
+            physics: physics,
+            itemCount: _colors.length,
+            onReorderItem: _reorder,
+            buildDefaultDragHandles: false,
+            itemBuilder: _row,
+          )
+        : ListView.builder(
+            shrinkWrap: shrinkWrap,
+            physics: physics,
+            itemCount: _colors.length,
+            itemBuilder: _row,
+          );
+  }
+
+  List<Widget> _header(BuildContext context) => [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                widget.title,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+            if (_colors.length < widget.max)
+              TextButton.icon(
+                onPressed: _addStop,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Add Color'),
+              ),
+          ],
+        ),
+        if (widget.description != null) ...[
+          const SizedBox(height: AppSpace.xs),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              widget.description!,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          ),
+        ],
+        const SizedBox(height: AppSpace.md),
+      ];
+
+  List<Widget> _rotateBox() {
+    final rotation = _rotation;
+    if (rotation == null) return const [];
+    return [
+      const SizedBox(height: AppSpace.sm),
+      RotateColorsBox(
+        rotation: rotation,
+        colors: _colors,
+        stop0AtBottom: widget.rotationStop0AtBottom,
+        onChanged: _applyRotation,
+      ),
+    ];
+  }
+
+  Widget _buttons() => Row(
+        children: [
+          TextButton(
+            onPressed: () => _close(revert: true),
+            child: const Text('Cancel'),
+          ),
+          const Spacer(),
+          FilledButton.icon(
+            icon: const Icon(Icons.check, size: 18),
+            label: const Text('Save'),
+            onPressed: _save,
+          ),
+        ],
+      );
+
+  Widget _fixedLayout(BuildContext context) => Padding(
+        padding: const EdgeInsets.all(AppSpace.lg),
+        child: Column(
+          children: [
+            ..._header(context),
+            Expanded(child: _rows(shrinkWrap: false)),
+            ..._rotateBox(),
+            const SizedBox(height: AppSpace.sm),
+            _buttons(),
+          ],
+        ),
+      );
+
+  // Grows with its content inside the launcher's bounds. While the content is
+  // shorter than the lower bound the buttons sit at the bottom, as in the
+  // fixed layout.
+  Widget _contentSizedLayout(BuildContext context) => LayoutBuilder(
+        builder: (context, constraints) => SingleChildScrollView(
+          padding: const EdgeInsets.all(AppSpace.lg),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: (constraints.minHeight - 2 * AppSpace.lg)
+                  .clamp(0, double.infinity),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  children: [
+                    ..._header(context),
+                    _rows(shrinkWrap: true),
+                    ..._rotateBox(),
+                  ],
+                ),
+                Column(
+                  children: [
+                    const SizedBox(height: AppSpace.sm),
+                    _buttons(),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     return PopScope(
@@ -197,73 +358,35 @@ class _ColorStopsSheetState extends State<ColorStopsSheet> {
         if (discard) _close(revert: true);
       },
       child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpace.lg),
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      widget.title,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                  ),
-                  if (_colors.length < widget.max)
-                    TextButton.icon(
-                      onPressed: _addStop,
-                      icon: const Icon(Icons.add, size: 18),
-                      label: const Text('Add Color'),
-                    ),
-                ],
-              ),
-              if (widget.description != null) ...[
-                const SizedBox(height: AppSpace.xs),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    widget.description!,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                  ),
-                ),
-              ],
-              const SizedBox(height: AppSpace.md),
-              Expanded(
-                child: widget.reorderable
-                    ? ReorderableListView.builder(
-                        itemCount: _colors.length,
-                        onReorderItem: _reorder,
-                        buildDefaultDragHandles: false,
-                        itemBuilder: _row,
-                      )
-                    : ListView.builder(
-                        itemCount: _colors.length,
-                        itemBuilder: _row,
-                      ),
-              ),
-              const SizedBox(height: AppSpace.sm),
-              Row(
-                children: [
-                  TextButton(
-                    onPressed: () => _close(revert: true),
-                    child: const Text('Cancel'),
-                  ),
-                  const Spacer(),
-                  FilledButton.icon(
-                    icon: const Icon(Icons.check, size: 18),
-                    label: const Text('Save'),
-                    onPressed: _save,
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
+        child: widget.contentSized
+            ? _contentSizedLayout(context)
+            : _fixedLayout(context),
       ),
     );
   }
+}
+
+/// Bounds a content-sized colour sheet ([ColorStopsSheet.contentSized]):
+/// never shorter than [minFactor] of the available height, never taller than
+/// [maxFactor], past which the sheet body scrolls.
+class ColorSheetHeight extends StatelessWidget {
+  const ColorSheetHeight({super.key, required this.child});
+
+  static const minFactor = 0.6;
+  static const maxFactor = 0.9;
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+        builder: (context, constraints) => ConstrainedBox(
+          constraints: BoxConstraints(
+            minHeight: constraints.maxHeight * minFactor,
+            maxHeight: constraints.maxHeight * maxFactor,
+          ),
+          child: child,
+        ),
+      );
 }
 
 /// Opens [ColorStopsSheet] as a modal bottom sheet. Mirrors

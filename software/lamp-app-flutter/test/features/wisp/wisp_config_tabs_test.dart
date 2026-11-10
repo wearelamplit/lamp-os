@@ -69,31 +69,31 @@ Future<void> _pumpScreen(WidgetTester tester, ProviderContainer c) async {
   // Pump until the tab bar appears, up to 20 frames.
   for (var i = 0; i < 20; i++) {
     await tester.pump(const Duration(milliseconds: 16));
-    if (find.text('Palette source').evaluate().isNotEmpty) return;
+    if (find.text('Palette').evaluate().isNotEmpty) return;
   }
 }
 
 void main() {
   group('WispConfigScreen tabs', () {
-    testWidgets('renders Palette source, Settings, and Lamps tabs in order',
+    testWidgets('renders Palette, Settings, and Lamps tabs in order',
         (tester) async {
       final c = await _makeContainer();
       addTearDown(c.dispose);
       await _pumpScreen(tester, c);
 
-      expect(find.text('Palette source'), findsOneWidget);
+      expect(find.text('Palette'), findsOneWidget);
       expect(find.text('Settings'), findsOneWidget);
       expect(find.text('Lamps'), findsOneWidget);
 
-      // Verify order: Palette source comes before Settings, Settings before Lamps.
-      final sourcesPos = tester.getCenter(find.text('Palette source')).dx;
+      // Verify order: Palette comes before Settings, Settings before Lamps.
+      final sourcesPos = tester.getCenter(find.text('Palette')).dx;
       final settingsPos = tester.getCenter(find.text('Settings')).dx;
       final lampsPos = tester.getCenter(find.text('Lamps')).dx;
       expect(sourcesPos, lessThan(settingsPos));
       expect(settingsPos, lessThan(lampsPos));
     });
 
-    testWidgets('default tab is Palette source — source picker visible on open',
+    testWidgets('default tab is Palette, source picker visible on open',
         (tester) async {
       final c = await _makeContainer();
       addTearDown(c.dispose);
@@ -105,13 +105,13 @@ void main() {
       expect(find.text('Straylight'), findsOneWidget);
     });
 
-    testWidgets('Palette source tab shows per-mode widget (manual palette editor)',
+    testWidgets('Palette tab shows per-mode widget (manual palette editor)',
         (tester) async {
       final c = await _makeContainer();
       addTearDown(c.dispose);
       await _pumpScreen(tester, c);
 
-      // Still on Palette source tab (default); manual source is active in seed JSON.
+      // Still on Palette tab (default). Manual source is active in seed JSON.
       expect(find.text('MANUAL PALETTE'), findsOneWidget);
     });
 
@@ -193,19 +193,19 @@ void main() {
       expect(find.text('Straylight'), findsNothing);
     });
 
-    testWidgets('DriftControls does NOT appear on Palette source or Lamps tabs',
+    testWidgets('DriftControls does NOT appear on Palette or Lamps tabs',
         (tester) async {
       final c = await _makeContainer();
       addTearDown(c.dispose);
       await _pumpScreen(tester, c);
 
-      // On the Palette source tab by default — no drift.
+      // On the Palette tab by default, no drift.
       expect(find.text('COLOR DRIFT'), findsNothing);
 
       await tester.tap(find.text('Lamps'));
       await tester.pumpAndSettle();
 
-      // On the Lamps tab — still no drift.
+      // On the Lamps tab, still no drift.
       expect(find.text('COLOR DRIFT'), findsNothing);
     });
 

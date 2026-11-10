@@ -154,13 +154,18 @@ build with a missing key FATALs.
 `standard`) and, for flash, `PORT` (passed to `--upload-port` for when more than
 one board is attached). `VARIANT=snafu PORT=/dev/cu.usbserial-6 npm run lamp:flash`.
 
-`lamp:flash:release` is the console equivalent of the web installer at
-update.lamplit.ca: it downloads the full `distribution.bin`
-(bootloader + partitions + firmware + spiffs, so the web config UI ships too)
-from the GitHub release and flashes it whole over USB. No build, no key needed.
-A fresh flash does not assume the old SPIFFS carries over; NVS (name/config) is
-not in the image, so it persists. `VARIANT` (default `standard`), `RELEASE_TAG`
-(default `beta`), and `PORT` env params apply. Every push to `dev` auto-publishes
+`lamp:flash:release` is the console update path for a lamp that already boots:
+it downloads `distribution-<variant>.bin` from the GitHub release, carves out
+app0 (0x10000) and spiffs (0x3d0000, so the web config UI ships too), writes
+just those two over USB, then erases otadata so the lamp boots app0. The
+bootloader, partition table and NVS are never written, so name and config
+persist. A blank board needs the web installer at update.lamplit.ca. No build,
+no key needed. Env params: `VARIANT` (default `standard`), `RELEASE_TAG`
+(default `beta`; stable releases are tagged by version, e.g. `v1.3.0`, there is
+no `stable` tag), `PORT`, `IMAGE` (flash a local image, skip the download),
+`CACHE_DIR` and `REFRESH`. Downloads are cached per variant and tag as
+`$CACHE_DIR/release-<variant>-<tag>.bin` (default `~/.cache/lamp-os`);
+`REFRESH=1` re-downloads. Every push to `dev` auto-publishes
 a fresh `beta` release (`release-beta.yml`), built at whatever version the
 root `VERSION` file carries.
 

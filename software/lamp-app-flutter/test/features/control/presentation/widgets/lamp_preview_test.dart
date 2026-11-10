@@ -11,17 +11,20 @@ import 'package:lamp_app/features/inventory/domain/inventory_lamp.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../_support/seed.dart';
+import 'svg_gradient_probe.dart';
 
 const _devId = 'dev-1';
 
 Future<ProviderContainer> _buildContainer({
   String shadeColorsJson = '["#ABCDEFFF"]',
   String baseColorsJson = '["#FF0000FF","#00FF00FF"]',
+  String? lampType,
 }) async {
   SharedPreferences.setMockInitialValues({});
   final ble = InMemoryBleClient();
   await seedControlBle(ble,
       deviceId: _devId,
+      lampType: lampType,
       shadeColorsJson: shadeColorsJson,
       baseColorsJson: baseColorsJson);
   final c = ProviderContainer(
@@ -71,4 +74,43 @@ void main() {
   // (control_notifier.dart:374). The internal `_buildStops` fallback
   // stays for the (state.value == null) early-load case; it's not
   // directly drivable via the state machine.
+
+  group('stop order', () {
+    const rgb = '["#FF000000","#00FF0000","#0000FF00"]';
+    const base = '["#FFFF0000","#00FFFF00","#FF00FF00"]';
+
+    for (final lampType in ['standard', null]) {
+      testWidgets('lampType $lampType: the shade lists stop 0 at the bottom',
+          (tester) async {
+        final c = await _buildContainer(
+            lampType: lampType, shadeColorsJson: rgb, baseColorsJson: base);
+        addTearDown(c.dispose);
+        await tester.pumpWidget(wrap(c, const LampPreview(deviceId: _devId)));
+        await tester.pumpAndSettle();
+        final svg = renderedSvg(tester);
+        expect(gradientStops(svg, 'Shade'),
+            ['0%:0000FF', '50%:00FF00', '100%:FF0000']);
+        expect(gradientOpenTag(svg, 'Shade'), contains(kAssetShadeAxis));
+        expect(gradientStops(svg, 'Body'),
+            ['0%:FFFF00', '50%:00FFFF', '100%:FF00FF']);
+      });
+    }
+
+    for (final lampType in ['snafu', 'lioness']) {
+      testWidgets('lampType $lampType: the shade keeps stop 0 at the top',
+          (tester) async {
+        final c = await _buildContainer(
+            lampType: lampType, shadeColorsJson: rgb, baseColorsJson: base);
+        addTearDown(c.dispose);
+        await tester.pumpWidget(wrap(c, const LampPreview(deviceId: _devId)));
+        await tester.pumpAndSettle();
+        final svg = renderedSvg(tester);
+        expect(gradientStops(svg, 'Shade'),
+            ['0%:FF0000', '50%:00FF00', '100%:0000FF']);
+        expect(gradientOpenTag(svg, 'Shade'), contains(kAssetShadeAxis));
+        expect(gradientStops(svg, 'Body'),
+            ['0%:FFFF00', '50%:00FFFF', '100%:FF00FF']);
+      });
+    }
+  });
 }

@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "util/color.hpp"
+#include "util/color_rotation.hpp"
 
 namespace lamp {
 
@@ -127,8 +128,23 @@ class ShadeSettings {
   std::vector<SegmentSettings> segments = {{"Shade", 0, {kShadeDefaultColor}}};
   std::string byteOrder = "";
   bool colorsEditable = true;  // Emitted in asShadeJson; app hides color picker when false.
+  static constexpr ColorRotation kDefaultRotation{false, kRotationDefaultPeriodS,
+                                                  RotationDir::Down};
+  // The stored rotation. Only the codec, the apply layer and renderedRotation
+  // read it. A scene writer that read it directly would render a rotation the
+  // variant does not offer.
+  ColorRotation rotation = kDefaultRotation;
+  // Firmware-owned (Config::Defaults::rotationSupported) and never stored.
+  bool rotationSupported = false;
 
   uint8_t sumPx() const { return segmentsSumPx(segments); }
+  // Whether rotation is stored: exactly one segment, whatever the flag says.
+  bool rotatable() const { return segments.size() == 1; }
+  // Whether the lamp renders and reports rotation for this role.
+  bool offersRotation() const { return rotationSupported && rotatable(); }
+  ColorRotation renderedRotation() const {
+    return offersRotation() ? rotation : kDefaultRotation;
+  }
   // Representative palette (HELLO/greet/adv): the broadcast segment, first.
   std::vector<Color>& broadcastColors() { return segments.front().colors; }
   const std::vector<Color>& broadcastColors() const { return segments.front().colors; }
@@ -146,8 +162,18 @@ class BaseSettings {
   std::vector<uint8_t> knockoutPixels = std::vector<uint8_t>(50, (uint8_t)100);
   std::string byteOrder = "";
   bool colorsEditable = true;  // Emitted in asBaseJson; app hides color picker when false.
+  static constexpr ColorRotation kDefaultRotation{false, kRotationDefaultPeriodS,
+                                                  RotationDir::Up};
+  // See ShadeSettings::rotation.
+  ColorRotation rotation = kDefaultRotation;
+  bool rotationSupported = false;
 
   uint8_t sumPx() const { return segmentsSumPx(segments); }
+  bool rotatable() const { return segments.size() == 1; }
+  bool offersRotation() const { return rotationSupported && rotatable(); }
+  ColorRotation renderedRotation() const {
+    return offersRotation() ? rotation : kDefaultRotation;
+  }
   std::vector<Color>& broadcastColors() { return segments.front().colors; }
   const std::vector<Color>& broadcastColors() const { return segments.front().colors; }
 };

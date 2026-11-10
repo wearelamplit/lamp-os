@@ -39,7 +39,7 @@ if [ -z "${IMAGE:-}" ]; then
   )
   if [ "${#IMAGES[@]}" -eq 0 ]; then
     echo "ERROR: no prebuilt images (distribution-*.bin) in ${CACHE_DIR}." >&2
-    echo "       Build or download a variant image there first." >&2
+    echo "       Build a variant image there first (release downloads are cached as release-*.bin and are not listed)." >&2
     exit 1
   fi
   echo "Prebuilt images in ${CACHE_DIR}:" >&2

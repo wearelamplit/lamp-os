@@ -9,7 +9,9 @@ import '../../_support/in_memory_ble_client.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/core/ble/lamp_crypto.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
+import 'package:lamp_app/features/control/domain/lamp_color.dart';
 import 'package:lamp_app/features/wisp/application/wisp_notifier.dart';
+import 'package:lamp_app/features/wisp/data/wisp_repository.dart';
 import 'package:lamp_app/features/wisp/domain/wisp_source_mode.dart';
 import 'package:lamp_app/features/wisp/data/wisp_password_store.dart';
 
@@ -96,14 +98,27 @@ void main() {
 
     test('setManualPalette always plaintext even when password is cached', () async {
       final ble = InMemoryBleClient();
-      await primeStatus(ble, '{"wispMac":"$wispMac"}');
+      await primeStatus(ble, '{"wispMac":"$wispMac","source":"manual"}');
       final c = makeContainer(ble: ble);
+      // Hold the autoDispose provider alive so the save runs to its confirm.
+      c.listen(wispNotifierProvider(lampId), (_, _) {});
       await c.read(wispNotifierProvider(lampId).future);
       final n = c.read(wispNotifierProvider(lampId).notifier);
 
       await n.cachePassword(wispMac, 'hunter2');
-      // Trigger a setManualPalette write via the notifier (empty palette is valid).
-      await n.setManualPalette();
+      const committed = [LampColor(r: 255, g: 128, b: 64, w: 0)];
+      n.setManualPaletteDraft(committed);
+      final save = n.setManualPalette();
+      await Future<void>.delayed(Duration.zero);
+      ble.simulateNotify(
+        lampId,
+        BleUuids.controlService,
+        BleUuids.wispStatus,
+        Uint8List.fromList(utf8.encode(
+            '{"wispMac":"$wispMac","source":"manual",'
+            '"paletteIdPrefix":"${WispRepository.paletteIdHash(committed)}"}')),
+      );
+      await save;
 
       final wire = ble.writesTo(lampId, BleUuids.wispOp).last;
       // setManualPalette is always plaintext regardless of cached password.
@@ -111,6 +126,10 @@ void main() {
       expect(wire[0], isNot(LampCrypto.magicCiphertext));
       final decoded = jsonDecode(utf8.decode(wire)) as Map<String, dynamic>;
       expect(decoded['op'], 'setManualPalette');
+      expect(n.savedManualPalette, committed,
+          reason: 'the save confirmed against the wisp status');
+      expect(n.manualPaletteDirty, isFalse);
+      expect(n.manualPaletteWriteFailed, isFalse);
     });
   });
 

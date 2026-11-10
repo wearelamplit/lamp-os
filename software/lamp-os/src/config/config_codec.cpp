@@ -83,6 +83,62 @@ static void writeSegments(JsonObject node,
   }
 }
 
+static const char* rotationDirName(RotationDir dir) {
+  return dir == RotationDir::Down ? "down" : "up";
+}
+
+// A role stores `rotate` only with one segment and a rotation off its default,
+// so a lamp that never touches rotation writes what it always has.
+template <class Role>
+static bool storesRotation(const Role& role) {
+  return role.rotatable() && role.rotation != Role::kDefaultRotation;
+}
+
+static void writeRotate(JsonObject node, const ColorRotation& rotation) {
+  JsonObject o = node["rotate"].to<JsonObject>();
+  o["on"] = rotation.on;
+  o["periodS"] = rotation.periodS;
+  o["dir"] = rotationDirName(rotation.dir);
+}
+
+static void writeRotateJson(JsonWriter& w, const ColorRotation& rotation) {
+  w.key("rotate");
+  w.beginObject();
+  w.key("on");
+  w.value(rotation.on);
+  w.key("periodS");
+  w.value(static_cast<uint32_t>(rotation.periodS));
+  w.key("dir");
+  w.value(rotationDirName(rotation.dir));
+  w.endObject();
+}
+
+void parseRotation(JsonObjectConst node, ColorRotation& out) {
+  JsonVariantConst on = node["on"];
+  if (on.is<bool>()) out.on = on.as<bool>();
+  JsonVariantConst period = node["periodS"];
+  if (period.is<int32_t>()) out.periodS = clampRotationPeriodS(period.as<int32_t>());
+  const char* dir = node["dir"].is<const char*>() ? node["dir"].as<const char*>() : "";
+  if (!strcmp(dir, "up")) {
+    out.dir = RotationDir::Up;
+  } else if (!strcmp(dir, "down")) {
+    out.dir = RotationDir::Down;
+  }
+}
+
+template <class Role>
+static void writeRoleSectionRotate(JsonObject section, const Role& role) {
+  if (role.offersRotation()) writeRotate(section, role.rotation);
+}
+
+void writeSectionRotate(JsonObject section, const ShadeSettings& shade) {
+  writeRoleSectionRotate(section, shade);
+}
+
+void writeSectionRotate(JsonObject section, const BaseSettings& base) {
+  writeRoleSectionRotate(section, base);
+}
+
 const ExpressionParams* findExpressionParams(const ExpressionSettings& settings,
                                              const std::string& type, uint8_t target) {
   for (const auto& e : settings.expressions) {
@@ -193,6 +249,8 @@ bool fromJson(JsonObject root, LampSettings& lamp, BaseSettings& base,
   base.byteOrder = storableByteOrder(baseNode["byteOrder"] | "");
   parseSegments(baseNode, base.segments, kBaseDefaultColor, "Base");
   clampSumPx(base.segments);
+  base.rotation = BaseSettings::kDefaultRotation;
+  if (base.rotatable()) parseRotation(baseNode["rotate"], base.rotation);
   // Keep knockoutPixels in sync with the active pixel count. Drops stale
   // entries when px shrinks and 100-fills ("no knockout") any slots when px
   // grows. The input loop below then overwrites slots 0..sumPx-1 from JSON.
@@ -212,6 +270,8 @@ bool fromJson(JsonObject root, LampSettings& lamp, BaseSettings& base,
   shade.byteOrder = storableByteOrder(shadeNode["byteOrder"] | "");
   parseSegments(shadeNode, shade.segments, kShadeDefaultColor, "Shade");
   clampSumPx(shade.segments);
+  shade.rotation = ShadeSettings::kDefaultRotation;
+  if (shade.rotatable()) parseRotation(shadeNode["rotate"], shade.rotation);
   // colorsEditable is firmware-owned (set by Lamp subclass defaults via
   // applyDefaults). Inbound writes intentionally do not update it.
 
@@ -363,6 +423,7 @@ void writeStoredJson(JsonWriter& w, const LampSettings* lamp, const BaseSettings
   w.key("colorsEditable");
   w.value(base.colorsEditable);
   writeSegmentsJson(w, base.segments);
+  if (storesRotation(base)) writeRotateJson(w, base.rotation);
   if (whole) {
     w.key("knockout");
     w.beginArray();
@@ -379,6 +440,7 @@ void writeStoredJson(JsonWriter& w, const LampSettings* lamp, const BaseSettings
   w.key("colorsEditable");
   w.value(shade.colorsEditable);
   writeSegmentsJson(w, shade.segments);
+  if (storesRotation(shade)) writeRotateJson(w, shade.rotation);
   w.endObject();
   w.key("homeMode");
   w.beginObject();
@@ -437,11 +499,13 @@ void toStoredJson(JsonObject root, const LampSettings& lamp,
   if (!base.byteOrder.empty()) baseNode["byteOrder"] = base.byteOrder;
   baseNode["colorsEditable"] = base.colorsEditable;
   writeSegments(baseNode, base.segments);
+  if (storesRotation(base)) writeRotate(baseNode, base.rotation);
 
   JsonObject shadeNode = root["shade"].to<JsonObject>();
   if (!shade.byteOrder.empty()) shadeNode["byteOrder"] = shade.byteOrder;
   shadeNode["colorsEditable"] = shade.colorsEditable;
   writeSegments(shadeNode, shade.segments);
+  if (storesRotation(shade)) writeRotate(shadeNode, shade.rotation);
 
   JsonObject homeModeNode = root["homeMode"].to<JsonObject>();
   homeModeNode["ssid"] = homeMode.ssid;
