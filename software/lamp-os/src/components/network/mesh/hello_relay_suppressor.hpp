@@ -32,10 +32,14 @@ constexpr size_t kHelloPendingSlots = 16;
 // mesh already covered it); otherwise the stored frame is relayed verbatim.
 //
 // Clock is injected: onFirstSeen/tick take nowMs so native tests drive a fake
-// clock. Jitter is derived deterministically from (mac, seq), never rand().
+// clock. Jitter is relayDelayMs over this lamp's MAC and the (mac, seq), never
+// rand().
 class HelloRelaySuppressor {
  public:
   using RelayFn = std::function<void(const uint8_t* frame, size_t len)>;
+
+  // This lamp's MAC, which desynchronizes its relay delay from its neighbors'.
+  void begin(const uint8_t ownMac[6]);
 
   // Enqueue a first-seen HELLO. Returns true if the caller must relay it now
   // (table full or frame over cap, fail-open); false once enqueued.
@@ -51,7 +55,7 @@ class HelloRelaySuppressor {
 
   // Relay delay for a (mac, seq), spread across [min, max]. Public for the
   // native timing test to compute the exact fire boundary.
-  static uint32_t jitterMs(const uint8_t mac[6], uint16_t seq);
+  uint32_t jitterMs(const uint8_t mac[6], uint16_t seq) const;
 
 #ifdef LAMP_DEBUG
   uint32_t suppressedWindow() const {
@@ -88,6 +92,7 @@ class HelloRelaySuppressor {
   Pending* find(const uint8_t mac[6], uint16_t seq);
 
   Pending slots_[kHelloPendingSlots];
+  uint8_t ownMac_[6] = {0};
   // slots_ is written from the recv task (onFirstSeen/onDuplicate) and the loop
   // task (tick/resetWindow); guard every access.
   mutable LAMP_PROTOCOL_PORTMUX_TYPE mux_ = LAMP_PROTOCOL_PORTMUX_INIT;

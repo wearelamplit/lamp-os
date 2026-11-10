@@ -46,6 +46,9 @@ void MeshLink::begin(Config* cfg) {
     return;
   }
   link_.getMac(myMac_);
+  helloSuppressor_.begin(myMac_);
+  controlRelay_.begin(myMac_);
+  wispRelay_.begin(myMac_);
   // Random boot seq: a fixed start replays (mac, seq) tuples that peers still
   // hold in their HELLO dedup rings after a quick reboot, so the fresh HELLOs
   // drop before the roster's version/state update and the peer stalls stale.
@@ -70,6 +73,12 @@ void MeshLink::tick() {
   helloSuppressor_.tick(now, [this](const uint8_t* frame, size_t len) {
     relay(frame, len);
   });
+  auto ready = [this](uint32_t t) { return txReady(t); };
+  auto relaySend = [this](const uint8_t* frame, size_t len) {
+    return relay(frame, len);
+  };
+  controlRelay_.service(now, ready, relaySend);
+  wispRelay_.service(now, ready, relaySend);
   const uint8_t otaState = currentOtaState();
   uint8_t sendingTo[6];
   const bool hasSendingTo =
@@ -266,7 +275,7 @@ void MeshLink::reportMeshMix(uint64_t nowMs) {
                 (unsigned)meshMix_.rx[MeshMix::kClaim],
                 (unsigned)meshMix_.rx[MeshMix::kStatus],
                 (unsigned)meshMix_.rx[MeshMix::kOther],
-                (unsigned)meshMix_.relayedOut,
+                (unsigned)meshMix_.relayedOut.load(),
                 (unsigned)meshMix_.totalRx());
   const uint32_t supp = helloSuppressor_.suppressedWindow();
   const uint32_t rel = helloSuppressor_.relayedWindow();
@@ -280,7 +289,18 @@ void MeshLink::reportMeshMix(uint64_t nowMs) {
                 (unsigned)wispStateMeter_.releases(),
                 (unsigned)wispStateMeter_.selfPresent());
   wispStateMeter_.resetWindow();
+  const RelayStaggerWindow c = controlRelay_.window();
+  const RelayStaggerWindow w = wispRelay_.window();
+  Serial.printf("[relaystagger] win=30s queued=%u failopen=%u deferred=%u "
+                "dropped=%u maxlate=%ums\n",
+                (unsigned)(c.queued + w.queued),
+                (unsigned)(c.failOpen + w.failOpen),
+                (unsigned)(c.deferred + w.deferred),
+                (unsigned)(c.dropped + w.dropped),
+                (unsigned)std::max(c.maxLateMs, w.maxLateMs));
   helloSuppressor_.resetWindow();
+  controlRelay_.resetWindow();
+  wispRelay_.resetWindow();
   meshMix_.reset(nowMs);
 }
 #endif
@@ -355,8 +375,10 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     // Dedup by (sourceMac, seq) so a loop-relayed copy doesn't fire twice.
     if (!controlOpDedup_.record(op.sourceMac, lamp_protocol::MSG_CONTROL_OP, op.seq)) return;
     // Rebroadcast for grid relay: extends mesh reach beyond direct radio
-    // range. CONTROL_OP is unconditionally gossip-relayed.
-    relay(data, len);
+    // range. CONTROL_OP is unconditionally gossip-relayed, after a stagger.
+    if (!controlRelay_.enqueue(data, len, msgType, op.sourceMac, op.seq, millis())) {
+      relay(data, len);
+    }
     // Apply locally when the target is this lamp or broadcast.
     static const uint8_t bcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
     const bool forUs = (std::memcmp(op.targetMac, myMac_, 6) == 0) ||
@@ -392,7 +414,10 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     // Single-hop relay: only a frame heard straight from the wisp propagates,
     // so lamps behind a coex-dropped broadcast still converge on presence
     // without a fleet-wide flood. A relayed copy (srcMac != sourceMac) stops.
-    if (isDirectHello(srcMac, h.sourceMac)) relay(data, len);
+    if (isDirectHello(srcMac, h.sourceMac) &&
+        !wispRelay_.enqueue(data, len, msgType, h.sourceMac, h.seq, millis())) {
+      relay(data, len);
+    }
     PendingWispHello slot;
     std::memcpy(slot.sourceMac, h.sourceMac, 6);
     slot.wispVersion = h.wispVersion;
@@ -438,7 +463,10 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     }
     // Single-hop relay: only a frame heard straight from the wisp propagates
     // one hop; a relayed copy (srcMac != sourceMac) stops.
-    if (isDirectHello(srcMac, wp.sourceMac)) relay(data, len);
+    if (isDirectHello(srcMac, wp.sourceMac) &&
+        !wispRelay_.enqueue(data, len, msgType, wp.sourceMac, wp.seq, millis())) {
+      relay(data, len);
+    }
     PendingWispPalette slot;
     std::memcpy(slot.sourceMac, wp.sourceMac, 6);
     slot.count = wp.count;

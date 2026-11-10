@@ -14,6 +14,7 @@
 #include "hello_interval.hpp"
 #include "hello_relay_suppressor.hpp"
 #include "lamp_roster.hpp"
+#include "relay_stagger.hpp"
 #include "resend_ring.hpp"
 #include "pending_slots.hpp"
 #include "wisp_coex.hpp"
@@ -163,6 +164,12 @@ class MeshLink {
   // relayed the same (mac, seq). Bounds HELLO airtime below the ~N^2 that
   // relaying every first sight costs. Receive-side only, no wire change.
   HelloRelaySuppressor helloSuppressor_;
+  // Staggered relays of the wisp's frames (control ops, WISP_HELLO,
+  // WISP_PALETTE): one wisp has at most one control and two small frames
+  // pending per window, and the tables hold two wisps.
+  static_assert(lamp_protocol::WISP_HELLO_MAX_SIZE <= lamp_protocol::WISP_PALETTE_MAX_SIZE);
+  RelayStagger<lamp_protocol::CONTROL_MAX_SIZE, 2> controlRelay_;
+  RelayStagger<lamp_protocol::WISP_PALETTE_MAX_SIZE, 4> wispRelay_;
   lamp_protocol::DedupRing<64> controlOpDedup_;
   // Per-type dedup. Each new MSG_* gets its own ring so a
   // CONTROL_OP seq doesn't accidentally suppress an OVERRIDE_COLORS seq
@@ -245,12 +252,13 @@ class MeshLink {
   void reportMeshMix(uint64_t nowMs);
 #endif
 
-  // Re-broadcast a received frame for gossip relay.
-  void relay(const uint8_t* data, size_t len) {
-    link_.broadcast(data, len);
+  // Re-broadcast a received frame for gossip relay. Runs on both cores.
+  bool relay(const uint8_t* data, size_t len) {
+    const bool ok = link_.broadcast(data, len);
 #ifdef LAMP_DEBUG
     meshMix_.relayedOut++;
 #endif
+    return ok;
   }
 };
 
