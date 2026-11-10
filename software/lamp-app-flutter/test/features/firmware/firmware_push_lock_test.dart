@@ -287,6 +287,17 @@ void main() {
     expect(rig.brightness, 100);
   });
 
+  testWidgets('a rebuild during the hold keeps the bound', (tester) async {
+    final rig = await _pump(tester);
+    await _failWhileQuiet(tester, rig);
+    rig.container.invalidate(controlNotifierProvider(_lampId));
+    await _settle(tester);
+    expect(find.textContaining(_banner), findsOneWidget);
+    await tester.pump(ControlNotifier.quietAfterPushBound);
+    await _settle(tester);
+    expect(find.textContaining(_banner), findsNothing);
+  });
+
   testWidgets("another lamp's push changes nothing here", (tester) async {
     final rig = await _pump(tester);
     rig

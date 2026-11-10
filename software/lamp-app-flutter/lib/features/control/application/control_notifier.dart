@@ -187,6 +187,8 @@ class ControlNotifier extends _$ControlNotifier {
   /// is next heard listening.
   bool _rereadPending = false;
 
+  /// Survives a rebuild, which keeps this instance; after a dispose it
+  /// fires into a no-op.
   Timer? _quietBound;
 
   /// How long editing stays frozen after a push while the lamp has not said
@@ -521,10 +523,7 @@ class ControlNotifier extends _$ControlNotifier {
     });
 
     _subscribeStateNotify(ble);
-    ref.onDispose(() {
-      _stateNotifySub?.cancel();
-      _quietBound?.cancel();
-    });
+    ref.onDispose(() => _stateNotifySub?.cancel());
 
     // Probe the BLE link whenever the app comes back to the foreground.
     // Backgrounded apps can have their GATT connection torn down by the
