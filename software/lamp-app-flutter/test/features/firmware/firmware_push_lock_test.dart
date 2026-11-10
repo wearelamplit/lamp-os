@@ -22,6 +22,7 @@ import 'package:lamp_app/features/control/presentation/widgets/color_blocks_bar.
 import 'package:lamp_app/features/control/presentation/widgets/color_stops_sheet.dart';
 import 'package:lamp_app/features/firmware/application/cached_firmware_notifier.dart';
 import 'package:lamp_app/features/firmware/application/firmware_notifier.dart';
+import 'package:lamp_app/features/firmware/application/quiet_after_push.dart';
 import 'package:lamp_app/features/firmware/data/cached_firmware.dart';
 import 'package:lamp_app/features/firmware/domain/firmware_state.dart';
 import 'package:lamp_app/features/firmware/domain/lsig_footer.dart';
@@ -58,6 +59,12 @@ class _EmptyCache extends CachedFirmwareNotifier {
   @override
   Future<void> syncForInventory(List<InventoryLamp> inventory) async {}
 }
+
+/// A failure the lamp reports over a link that stays up.
+const _stored = FirmwareFailed(
+  reason: 'Lamp could not write the firmware partition.',
+  failure: FirmwareFailure.storeFailed,
+);
 
 const _lost = FirmwareFailed(
   reason: 'lost the lamp',
@@ -201,13 +208,17 @@ void _lampQuiet(_Rig rig, bool quiet) => rig.ble.simulateNotify(
 );
 
 /// A push the lamp goes quiet for, failing while it is still quiet.
-Future<void> _failWhileQuiet(WidgetTester tester, _Rig rig) async {
+Future<void> _failWhileQuiet(
+  WidgetTester tester,
+  _Rig rig, {
+  FirmwareFailed failure = _lost,
+}) async {
   rig
       .firmware(_lampId)
       .emit(FirmwareStreaming(footer: _footer, chunksSent: 3, totalChunks: 10));
   _lampQuiet(rig, true);
   await _settle(tester);
-  rig.firmware(_lampId).emit(_lost);
+  rig.firmware(_lampId).emit(failure);
   await _settle(tester);
 }
 
@@ -717,7 +728,7 @@ void main() {
       tester,
     ) async {
       final rig = await _pump(tester);
-      await _failWhileQuiet(tester, rig);
+      await _failWhileQuiet(tester, rig, failure: _stored);
       expect(find.text(missed), findsNothing);
 
       _lampQuiet(rig, false);
@@ -725,8 +736,7 @@ void main() {
       expect(find.text(missed), findsOneWidget);
 
       await outlast(tester);
-      _lampQuiet(rig, true);
-      await _settle(tester);
+      await rebootInto(tester, rig, _footer.version - 1);
       _lampQuiet(rig, false);
       await _settle(tester);
       expect(find.text(missed), findsNothing);
@@ -736,7 +746,7 @@ void main() {
       // Mounted bare, it subscribes to the push before the lamp's notifier
       // does, so it hears the push end before the hold starts.
       final rig = await _pump(tester, location: '/outcome/$_lampId');
-      await _failWhileQuiet(tester, rig);
+      await _failWhileQuiet(tester, rig, failure: _stored);
       expect(find.text(missed), findsNothing);
       _lampQuiet(rig, false);
       await _settle(tester);
@@ -751,9 +761,97 @@ void main() {
             FirmwareStreaming(footer: _footer, chunksSent: 3, totalChunks: 10),
           );
       await _settle(tester);
-      rig.firmware(_lampId).emit(_lost);
+      rig.firmware(_lampId).emit(_stored);
       await _settle(tester);
       expect(find.text(missed), findsOneWidget);
+    });
+
+    testWidgets('a push that lost the link waits to read the lamp again', (
+      tester,
+    ) async {
+      final rig = await _pump(tester);
+      rig
+          .firmware(_lampId)
+          .emit(
+            FirmwareStreaming(footer: _footer, chunksSent: 3, totalChunks: 10),
+          );
+      await _settle(tester);
+      rig.firmware(_lampId).emit(_lost);
+      await _settle(tester);
+      expect(find.text(missed), findsNothing);
+      await rebootInto(tester, rig, _footer.version - 1);
+      expect(find.text(missed), findsOneWidget);
+    });
+
+    testWidgets('a push that lost the link after the last chunk, on a lamp '
+        'that never says quiet, says learned when the lamp took it', (
+      tester,
+    ) async {
+      final rig = await _pump(tester);
+      rig.firmware(_lampId).emit(FirmwareFinalizing(footer: _footer));
+      await _settle(tester);
+      rig.firmware(_lampId).emit(_lost);
+      await _settle(tester);
+      expect(find.text(missed), findsNothing);
+      await rebootInto(tester, rig, _footer.version);
+      expect(find.text(learned), findsOneWidget);
+      await outlast(tester);
+      expect(find.text(missed), findsNothing);
+    });
+
+    testWidgets('a hold that ends while the link is down waits for the '
+        'reconnect', (tester) async {
+      final rig = await _pump(tester);
+      await _failWhileQuiet(tester, rig, failure: _stored);
+      // The failure landed 500 ms ago; stop 100 ms short of the bound.
+      await tester.pump(
+        ControlNotifier.quietAfterPushBound -
+            const Duration(milliseconds: 600),
+      );
+      expect(rig.container.read(quietAfterPushProvider(_lampId)), isTrue);
+      await rig.ble.disconnect(_lampId);
+      await tester.pump();
+      // The bound ends at 100 ms; the ladder's first step is due at 500 ms.
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(rig.container.read(quietAfterPushProvider(_lampId)), isFalse);
+      expect(
+        rig.container.read(controlNotifierProvider(_lampId)).value?.connected,
+        isFalse,
+      );
+      expect(find.text(missed), findsNothing);
+      for (var i = 0; i < 60; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      expect(find.text(missed), findsOneWidget);
+    });
+
+    testWidgets('mounted mid-push, a failure on a lamp that reports no '
+        'version still says missed', (tester) async {
+      final rig = await _pump(tester, location: AppRoutes.myLamps);
+      rig.container.listen(firmwareNotifierProvider(_lampId), (_, _) {});
+      rig.firmware(_lampId).emit(FirmwareFinalizing(footer: _footer));
+      rig.container.read(appRouterProvider).go('/outcome/$_lampId');
+      for (var i = 0; i < 60; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      rig.firmware(_lampId).emit(_stored);
+      await _settle(tester);
+      expect(find.text(missed), findsOneWidget);
+    });
+
+    testWidgets('mounted mid-push, it still says learned', (tester) async {
+      final rig = await _pump(tester, location: AppRoutes.myLamps);
+      // The lamp's shell holds the push alive in the app.
+      rig.container.listen(firmwareNotifierProvider(_lampId), (_, _) {});
+      rig.firmware(_lampId).emit(FirmwareFinalizing(footer: _footer));
+      rig.container.read(appRouterProvider).go('/outcome/$_lampId');
+      for (var i = 0; i < 60; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      rig.firmware(_lampId).emit(FirmwareSucceeded(footer: _footer));
+      await _settle(tester);
+      await rebootInto(tester, rig, _footer.version);
+      expect(find.text(learned), findsOneWidget);
     });
 
     for (final declined in [
@@ -796,7 +894,7 @@ void main() {
 
     testWidgets('the next push replaces a line still waiting', (tester) async {
       final rig = await _pump(tester);
-      await _failWhileQuiet(tester, rig);
+      await _failWhileQuiet(tester, rig, failure: _stored);
       rig.firmware(_lampId).emit(FirmwareOfferSent(footer: _footer));
       await _settle(tester);
       rig

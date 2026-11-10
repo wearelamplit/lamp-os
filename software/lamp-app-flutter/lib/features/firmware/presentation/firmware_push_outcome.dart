@@ -12,10 +12,12 @@ import '../domain/firmware_state.dart';
 import 'firmware_copy.dart';
 
 /// Tells the owner how a push to [lampId] ended, once: that the lamp learned
-/// its new tricks when it reports the pushed version, or that it didn't when
-/// a failed push's quiet hold ends. A lamp that installs the push after the
-/// phone lost track of it still counts as learned. A declined or cancelled
-/// offer says nothing, and the next push supersedes a line still waiting.
+/// its new tricks when it reports the pushed version, or that it didn't once
+/// a failed push's quiet hold has ended and the connected lamp reports
+/// another version. A push that lost the link waits for the next connect to
+/// read the lamp, since the lamp may have installed it anyway. A declined or
+/// cancelled offer says nothing, and the next push supersedes a line still
+/// waiting.
 class FirmwarePushOutcome extends ConsumerStatefulWidget {
   const FirmwarePushOutcome({
     super.key,
@@ -37,6 +39,10 @@ class _FirmwarePushOutcomeState extends ConsumerState<FirmwarePushOutcome> {
   int? _pushedVersion;
   bool _missed = false;
 
+  /// The push lost the link, so the lamp's version is unknown until the
+  /// next connect reads it.
+  bool _awaitingConnect = false;
+
   ControlState? get _lamp =>
       ref.read(controlNotifierProvider(widget.lampId)).value;
 
@@ -45,6 +51,7 @@ class _FirmwarePushOutcomeState extends ConsumerState<FirmwarePushOutcome> {
   void _onFirmware(FirmwareState? previous, FirmwareState next) {
     if (next.isBusy) {
       _missed = false;
+      _awaitingConnect = false;
       _pushedVersion = switch (next) {
         FirmwareOfferSent(:final footer) ||
         FirmwareStreaming(:final footer) ||
@@ -55,12 +62,15 @@ class _FirmwarePushOutcomeState extends ConsumerState<FirmwarePushOutcome> {
     }
     if (!(previous?.isPushing ?? false)) return;
     switch (next) {
-      case FirmwareSucceeded(alreadyCurrent: false):
-        break;
+      case FirmwareSucceeded(:final footer, alreadyCurrent: false):
+        _pushedVersion = footer.version;
       case FirmwareFailed(:final failure)
           when !failure.declined && failure != FirmwareFailure.cancelled:
-        if (_lamp?.lamp.fwVersion == _pushedVersion) return;
+        if (_lamp?.lamp.fwVersion case final v? when v == _pushedVersion) {
+          return;
+        }
         _missed = true;
+        _awaitingConnect = failure == FirmwareFailure.linkLost;
         // The lamp's ControlNotifier starts the quiet hold on this same
         // transition; look once it has.
         scheduleMicrotask(_sayMissed);
@@ -70,15 +80,23 @@ class _FirmwarePushOutcomeState extends ConsumerState<FirmwarePushOutcome> {
   }
 
   void _sayMissed() {
-    if (!mounted || !_missed) return;
+    if (!mounted || !_missed || _awaitingConnect) return;
     if (ref.read(quietAfterPushProvider(widget.lampId))) return;
+    if (_lamp?.connected != true) return;
+    _missed = false;
     AppSnackbar.error(context, FirmwareCopy.missed(_name));
   }
 
-  void _onLampVersion(int? fwVersion) {
-    if (fwVersion == null || fwVersion != _pushedVersion) return;
-    _missed = false;
-    AppSnackbar.info(context, FirmwareCopy.learned(_name));
+  void _onLamp((int?, bool)? previous, (int?, bool) next) {
+    final (version, connected) = next;
+    if (connected && !(previous?.$2 ?? false)) _awaitingConnect = false;
+    if (version != null &&
+        version != previous?.$1 &&
+        version == _pushedVersion) {
+      _missed = false;
+      AppSnackbar.info(context, FirmwareCopy.learned(_name));
+    }
+    _sayMissed();
   }
 
   @override
@@ -89,8 +107,10 @@ class _FirmwarePushOutcomeState extends ConsumerState<FirmwarePushOutcome> {
       if (!quiet) _sayMissed();
     });
     ref.listen(
-      controlNotifierProvider(id).select((s) => s.value?.lamp.fwVersion),
-      (_, version) => _onLampVersion(version),
+      controlNotifierProvider(id).select(
+        (s) => (s.value?.lamp.fwVersion, s.value?.connected ?? false),
+      ),
+      _onLamp,
     );
     return widget.child;
   }
