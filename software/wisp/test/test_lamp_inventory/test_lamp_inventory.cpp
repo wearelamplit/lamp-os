@@ -156,14 +156,14 @@ void test_direct_rssi_heard_within_window_is_kept(void) {
   uint32_t heardAt = 3300;
   for (int8_t rssi : samples) {
     hear(inv, 1, rssi, heardAt);
-    for (uint32_t p = heardAt + 1700; p <= heardAt + wisp::kDirectRssiMaxAgeMs;
-         p += 29000) {
+    const uint32_t nextHeard = heardAt + 3 * wisp::kLampHelloIntervalMs;
+    for (uint32_t p = heardAt + 1700; p <= nextHeard; p += 29000) {
       inv.prune(p, LAMP_PRUNE_TIME_MS);
       TEST_ASSERT_EQUAL_INT8(rssi, rssiOf(inv));
     }
-    inv.prune(heardAt + wisp::kDirectRssiMaxAgeMs, LAMP_PRUNE_TIME_MS);
+    inv.prune(nextHeard, LAMP_PRUNE_TIME_MS);
     TEST_ASSERT_EQUAL_INT8(rssi, rssiOf(inv));
-    heardAt += 3 * wisp::kLampHelloIntervalMs;
+    heardAt = nextHeard;
   }
 }
 

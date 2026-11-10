@@ -313,19 +313,20 @@ void test_two_wisps_hand_off_a_lamp_whose_direct_signal_aged_out(void) {
   TEST_ASSERT_TRUE(b.claims(kLampX));
 }
 
-// Both wisps hear X directly every third HELLO (two lost in a row); A stays
-// the owner throughout and B never takes it.
+// A hears X directly only every third HELLO (two lost in a row), B hears every
+// one; A stays the owner throughout and B never takes it.
 void test_lamp_heard_directly_within_window_stays_claimed(void) {
   wisp::LampInventory invA, invB;
   wisp::WispRoster a, b;
   a.setSelfMac(kSelfMac);
   b.setSelfMac(kPeerHighMac);
 
+  hearX(invA, -50, 1000);
   for (uint32_t t = 1000; t <= 400000; t += 2000) {
-    if ((t - 1000) % (3 * wisp::kLampHelloIntervalMs) == 0) {
+    if (t >= 7000 && (t - 7000) % (3 * wisp::kLampHelloIntervalMs) == 0) {
       hearX(invA, -50, t);
-      hearX(invB, -72, t);
     }
+    if ((t - 1000) % wisp::kLampHelloIntervalMs == 0) hearX(invB, -72, t);
     const bool prune = (t - 1000) % 30000 == 0;
     claimTick(invA, a, t, prune);
     claimTick(invB, b, t, prune);
