@@ -484,7 +484,7 @@ void main() {
           status(ours, stamp: 73500),
         ],
         status(ours, stamp: 73600, lamp: 7000),
-        status(ours, stamp: 73600, lamp: 9001),
+        status(ours, stamp: 73601, lamp: 9001),
       ),
       (
         'a status the lamp cached before the newest one heard, after an older '
