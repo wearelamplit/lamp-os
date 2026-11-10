@@ -28,6 +28,7 @@ import 'widgets/wisp_password_field.dart';
 import 'widgets/space_brightness_slider.dart';
 import 'widgets/wisp_source_picker.dart';
 import 'widgets/wisp_wifi_config.dart';
+import '../../firmware/presentation/firmware_push_lock.dart';
 
 /// Wisp config screen. Controls how the wisp drives the lamp grid's paint.
 ///
@@ -62,17 +63,20 @@ class WispConfigScreen extends ConsumerWidget {
       appBar: AppBar(
         title: appBarTitle,
       ),
-      body: controlAsync.when(
-        loading: () => const SizedBox.expand(),
-        error: (e, _) => FriendlyError.page(
-          title: "Couldn't reach your lamp.",
-          subtitle:
-              "They may have wandered out of range. Bring your phone closer "
-              'and try again.',
-          rawError: e,
-          onRetry: () => ref.invalidate(controlNotifierProvider(lampId)),
+      body: FirmwarePushLock(
+        lampId: lampId,
+        child: controlAsync.when(
+          loading: () => const SizedBox.expand(),
+          error: (e, _) => FriendlyError.page(
+            title: "Couldn't reach your lamp.",
+            subtitle:
+                "They may have wandered out of range. Bring your phone closer "
+                'and try again.',
+            rawError: e,
+            onRetry: () => ref.invalidate(controlNotifierProvider(lampId)),
+          ),
+          data: (state) => _WispBody(lampId: lampId),
         ),
-        data: (state) => _WispBody(lampId: lampId),
       ),
     );
   }

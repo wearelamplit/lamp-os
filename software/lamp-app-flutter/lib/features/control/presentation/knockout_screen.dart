@@ -7,6 +7,7 @@ import '../../../core/widgets/back_button_leading.dart';
 import '../../../core/widgets/friendly_error.dart';
 import '../../inventory/application/inventory_notifier.dart';
 import '../application/control_notifier.dart';
+import '../../firmware/presentation/firmware_push_lock.dart';
 
 /// Per-pixel knockout editor with a region-split gesture model:
 /// - Touch in the **left+middle zone** (label + bar): paint. y picks
@@ -167,115 +168,118 @@ class _KnockoutScreenState extends ConsumerState<KnockoutScreen> {
             ),
           ],
         ),
-        body: async.when(
-          loading: () => const SizedBox.expand(),
-          error: (e, _) => FriendlyError.page(
-            title: "Couldn't reach your lamp.",
-            subtitle:
-                "They may have wandered out of range. Bring your phone closer "
-                'and try again.',
-            rawError: e,
-            onRetry: () =>
-                ref.invalidate(controlNotifierProvider(widget.lampId)),
-          ),
-          data: (state) {
-            _original ??= Map.of(state.base.knockout);
-            final notifier =
-                ref.read(controlNotifierProvider(widget.lampId).notifier);
-            final pixelCount = state.base.px;
+        body: FirmwarePushLock(
+          lampId: widget.lampId,
+          child: async.when(
+            loading: () => const SizedBox.expand(),
+            error: (e, _) => FriendlyError.page(
+              title: "Couldn't reach your lamp.",
+              subtitle:
+                  "They may have wandered out of range. Bring your phone closer "
+                  'and try again.',
+              rawError: e,
+              onRetry: () =>
+                  ref.invalidate(controlNotifierProvider(widget.lampId)),
+            ),
+            data: (state) {
+              _original ??= Map.of(state.base.knockout);
+              final notifier =
+                  ref.read(controlNotifierProvider(widget.lampId).notifier);
+              final pixelCount = state.base.px;
 
-            void handle(PointerEvent event) {
-              final vp = _viewportKey.currentContext?.findRenderObject()
-                  as RenderBox?;
-              final col = _columnKey.currentContext?.findRenderObject()
-                  as RenderBox?;
-              if (vp == null || col == null) return;
-              final vpLocal = vp.globalToLocal(event.position);
+              void handle(PointerEvent event) {
+                final vp = _viewportKey.currentContext?.findRenderObject()
+                    as RenderBox?;
+                final col = _columnKey.currentContext?.findRenderObject()
+                    as RenderBox?;
+                if (vp == null || col == null) return;
+                final vpLocal = vp.globalToLocal(event.position);
 
-              if (_inScrollZone(vpLocal.dx, vp.size.width)) {
-                // Scroll zone: drag y → scroll. PointerDown does nothing
-                // (don't want a tap to nudge the list); only PointerMove
-                // scrolls by the delta.
-                if (event is PointerMoveEvent && _scrollCtrl.hasClients) {
-                  final next = (_scrollCtrl.offset - event.delta.dy)
-                      .clamp(0.0, _scrollCtrl.position.maxScrollExtent);
-                  _scrollCtrl.jumpTo(next);
+                if (_inScrollZone(vpLocal.dx, vp.size.width)) {
+                  // Scroll zone: drag y → scroll. PointerDown does nothing
+                  // (don't want a tap to nudge the list); only PointerMove
+                  // scrolls by the delta.
+                  if (event is PointerMoveEvent && _scrollCtrl.hasClients) {
+                    final next = (_scrollCtrl.offset - event.delta.dy)
+                        .clamp(0.0, _scrollCtrl.position.maxScrollExtent);
+                    _scrollCtrl.jumpTo(next);
+                  }
+                  return;
                 }
-                return;
+
+                // Paint zone: translate to the inner column's space so the
+                // row index calculation is stable across any scroll offset.
+                final colLocal = col.globalToLocal(event.position);
+                _paintAt(colLocal, pixelCount, notifier);
               }
 
-              // Paint zone: translate to the inner column's space so the
-              // row index calculation is stable across any scroll offset.
-              final colLocal = col.globalToLocal(event.position);
-              _paintAt(colLocal, pixelCount, notifier);
-            }
-
-            return Column(
-              children: [
-                Expanded(
-                  child: Listener(
-                    behavior: HitTestBehavior.opaque,
-                    onPointerDown: handle,
-                    onPointerMove: handle,
-                    child: SingleChildScrollView(
-                      key: _viewportKey,
-                      controller: _scrollCtrl,
-                      physics: const NeverScrollableScrollPhysics(),
-                      child: Column(
-                        key: _columnKey,
+              return Column(
+                children: [
+                  Expanded(
+                    child: Listener(
+                      behavior: HitTestBehavior.opaque,
+                      onPointerDown: handle,
+                      onPointerMove: handle,
+                      child: SingleChildScrollView(
+                        key: _viewportKey,
+                        controller: _scrollCtrl,
+                        physics: const NeverScrollableScrollPhysics(),
+                        child: Column(
+                          key: _columnKey,
+                          children: [
+                            for (var i = 0; i < pixelCount; i++)
+                              _PixelBar(lampId: widget.lampId, index: i),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Action row: Cancel (discards live-applied changes by
+                  // rewriting every drifted pixel back to its original value),
+                  // Reset all (set every pixel to 100%), Update (just pop;
+                  // changes were already live-applied during the drag).
+                  // Matches the editor pattern used elsewhere in the app.
+                  SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpace.lg, vertical: AppSpace.sm),
+                      child: Row(
                         children: [
-                          for (var i = 0; i < pixelCount; i++)
-                            _PixelBar(lampId: widget.lampId, index: i),
+                          // Button labels match what they do (changes are
+                          // live-applied during the drag):
+                          //   "Discard changes" rewrites every drifted pixel
+                          //   back to its original.
+                          //   "Done" just closes the screen.
+                          TextButton.icon(
+                            icon: const Icon(Icons.undo, size: 18),
+                            label: const Text('Discard changes'),
+                            onPressed: _cancel,
+                          ),
+                          Tooltip(
+                            message: state.base.knockout.isEmpty
+                                ? 'No knockout pixels to reset'
+                                : 'Reset every pixel to 100%',
+                            child: TextButton(
+                              onPressed: state.base.knockout.isEmpty
+                                  ? null
+                                  : () => notifier.clearKnockout(),
+                              child: const Text('Reset all'),
+                            ),
+                          ),
+                          const Spacer(),
+                          FilledButton.icon(
+                            icon: const Icon(Icons.check, size: 18),
+                            label: const Text('Done'),
+                            onPressed: () => Navigator.of(context).pop(),
+                          ),
                         ],
                       ),
                     ),
                   ),
-                ),
-                // Action row: Cancel (discards live-applied changes by
-                // rewriting every drifted pixel back to its original value),
-                // Reset all (set every pixel to 100%), Update (just pop;
-                // changes were already live-applied during the drag).
-                // Matches the editor pattern used elsewhere in the app.
-                SafeArea(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpace.lg, vertical: AppSpace.sm),
-                    child: Row(
-                      children: [
-                        // Button labels match what they do (changes are
-                        // live-applied during the drag):
-                        //   "Discard changes" rewrites every drifted pixel
-                        //   back to its original.
-                        //   "Done" just closes the screen.
-                        TextButton.icon(
-                          icon: const Icon(Icons.undo, size: 18),
-                          label: const Text('Discard changes'),
-                          onPressed: _cancel,
-                        ),
-                        Tooltip(
-                          message: state.base.knockout.isEmpty
-                              ? 'No knockout pixels to reset'
-                              : 'Reset every pixel to 100%',
-                          child: TextButton(
-                            onPressed: state.base.knockout.isEmpty
-                                ? null
-                                : () => notifier.clearKnockout(),
-                            child: const Text('Reset all'),
-                          ),
-                        ),
-                        const Spacer(),
-                        FilledButton.icon(
-                          icon: const Icon(Icons.check, size: 18),
-                          label: const Text('Done'),
-                          onPressed: () => Navigator.of(context).pop(),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
+                ],
+              );
+            },
+          ),
         ),
       ),
     );

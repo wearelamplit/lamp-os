@@ -64,6 +64,13 @@ class InMemoryBleClient extends BleClient {
         .toList();
   }
 
+  /// Every write to [deviceId] in write order, each as the characteristic
+  /// followed by the payload bytes.
+  List<List<Object>> writesToDevice(String deviceId) => [
+    for (final w in _writeLog.where((w) => w.deviceId == deviceId))
+      [w.charUuid, ...w.value],
+  ];
+
   @override
   Future<void> connect(String deviceId) async {
     _connected.add(deviceId);

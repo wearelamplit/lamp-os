@@ -124,6 +124,29 @@ and the greet fires on the peer's next sighting. **Known race window
 connects is already in the roster as an ungreeted arrival, so a greet can
 still start right after connect. That is current behavior, not a failure.
 
+P6 — **editing pauses while the app updates a lamp.** Connect to a lamp the
+app holds a newer cached build for, so the update starts on connect. While it
+sends: a strip at the top reads "Teaching <name> new tricks 🎓" with a
+progress line; the Colors, Social, Expressions and Config tabs are greyed and
+ignore taps; Info stays live. Open a colour sheet first, then reconnect so the
+update starts with it open: the sheet greys and keeps your colours, a tap
+outside still closes it (after a live "Discard changes?" if you changed
+anything), and once the update ends it saves normally. The expression
+editor's colours sheet does the same. The strip
+goes when the lamp reboots after a good update and editing comes back. A
+second lamp's screen shows nothing while the first updates.
+
+P7 — **a cancelled update holds editing until the lamp listens.** On Info,
+start an update from the dev-mode Firmware panel and cancel it there partway.
+The app sends the lamp no cancel, so the lamp keeps its update indicator for
+about 70 s (it waits a minute for more chunks, then holds 10 s). Open Colors:
+the strip and the grey stay up the whole time, then both go together when the
+lamp's indicator ends. Change the base colour: the lamp follows. On a lamp
+running 1.3.1 the strip and the grey go the moment you cancel, and a colour
+change in the next minute does nothing on the lamp. The Home Mode cases (a
+focus change dropped mid-update, a reconnect while Home Mode is open) can't be
+set up from the app's screens and are covered by push_resync_test.dart.
+
 ## Pass criteria
 
 - H1 completes: mfg-data scan finds the lamp, schema reads 4, section reads
@@ -133,6 +156,10 @@ still start right after connect. That is current behavior, not a failure.
 - App round-trips (P2, P3) byte-accurate and reboot-persistent.
 - P4 reconnect fully functional with zero re-pair steps.
 - P5: zero greet lines while connected (outside the connect race window).
+- P6: no control takes a tap during the update, the strip names the lamp,
+  and editing returns when it ends.
+- P7: after a cancelled update editing stays frozen until the lamp leaves
+  its update indicator, never past 75 s, and the first edit after lands.
 
 ## Not covered here
 

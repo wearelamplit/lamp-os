@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstring>
 #include <functional>
 #include <string>
@@ -34,6 +35,7 @@
 #include "crypto.hpp"
 #include "components/network/ble/gatt_layout.hpp"
 #include "components/network/ble/social_scan.hpp"
+#include "components/network/ble/state_notify.hpp"
 #include "expressions/expression_manager.hpp"
 #include "components/network/mesh/lamp_roster.hpp"
 #include "components/network/mesh/proximity.hpp"
@@ -115,6 +117,10 @@ static bool                  s_socialScanPrevActive = false;
 static          uint16_t     s_currentConnHandle = 0xFFFF;
 
 static std::function<lamp::GreetingState()> s_greetingStateProvider;
+
+// Set on Core 0 when the app enables CHAR_STATE_NOTIFY; tick() sends the
+// current state then, since a notify sent before the subscribe is lost.
+static std::atomic<bool>     s_stateSubscribed{false};
 
 static constexpr uint16_t kTightMinUnits = 12;   //  15.0 ms (units of 1.25 ms)
 static constexpr uint16_t kTightMaxUnits = 24;   //  30.0 ms
@@ -1161,6 +1167,13 @@ class FwControlCallback : public NimBLECharacteristicCallbacks {
   }
 };
 
+class StateNotifyCallback : public NimBLECharacteristicCallbacks {
+  void onSubscribe(NimBLECharacteristic*, NimBLEConnInfo&,
+                   uint16_t subValue) override {
+    if (subValue != 0) s_stateSubscribed.store(true);
+  }
+};
+
 class FwChunkCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
@@ -1215,11 +1228,11 @@ void tick() {
   // task (Core 0) rarely serialises JSON inside a NimBLE callback. Only while
   // a client holds the link: a mesh cascade dirties the expressions section
   // with no reader, and a rebuild per cascade is pure heap churn.
-  // notifyStateChange skips with no client, so the characteristic may hold a
-  // stale greeting; refresh it once on connect.
-  static bool s_wasConnected = false;
-  if (s_clientConnected && !s_wasConnected) notifyStateChange();
-  s_wasConnected = s_clientConnected;
+  static StateNotifyTrigger s_stateNotifyTrigger;
+  if (s_stateNotifyTrigger.step(s_clientConnected,
+                                s_stateSubscribed.exchange(false))) {
+    notifyStateChange();
+  }
 
   if (!s_clientConnected) {
     s_config->releaseSectionCaches();
@@ -1241,25 +1254,16 @@ void notifyStateChange() {
   // A greeting edge fires this with no phone attached; the payload has no
   // reader then, and a connecting client reads the state fresh.
   if (!s_stateNotify || !s_clientConnected) return;
-  const bool preview = ::expressionManager.isAnyTestActive();
-  std::string payload = "{\"previewActive\":";
-  payload += preview ? "true" : "false";
+  StateNotifyFields fields;
+  fields.previewActive = ::expressionManager.isAnyTestActive();
+  lamp::GreetingState gs;
   if (s_greetingStateProvider) {
-    const lamp::GreetingState gs = s_greetingStateProvider();
-    if (gs.active) {
-      payload += ",\"greeting\":{\"active\":true,\"peer\":\"";
-      lamp::appendJsonEscaped(payload, gs.peerLampId.c_str());
-      payload += "\",\"kind\":\"";
-      lamp::appendJsonEscaped(payload, gs.kind.c_str());
-      payload += "\"}";
-    } else {
-      payload += ",\"greeting\":{\"active\":false}";
-    }
+    gs = s_greetingStateProvider();
+    fields.greeting = &gs;
   }
-  char buf[32];
-  snprintf(buf, sizeof(buf), ",\"nearbyRev\":%lu}",
-           static_cast<unsigned long>(s_nearbyRev));
-  payload += buf;
+  fields.nearbyRev = s_nearbyRev;
+  std::string payload;
+  buildStateNotifyJson(fields, payload);
   s_stateNotify->setValue(payload);
   s_stateNotify->notify();
 }
@@ -1401,7 +1405,7 @@ void start(lamp::Config* config) {
       {CHAR_SETTINGS_BLOB, new SettingsBlobCallback(), nullptr},
       {CHAR_FW_CONTROL, new FwControlCallback(), &s_fwControlChar},
       {CHAR_FW_CHUNK, new FwChunkCallback(), nullptr},
-      {CHAR_STATE_NOTIFY, nullptr, &s_stateNotify},
+      {CHAR_STATE_NOTIFY, new StateNotifyCallback(), &s_stateNotify},
       // Read-only. The app reads this to detect the lamp's attribute-layout
       // version; lamps predating it read as absent and the app falls back to
       // legacy behavior. See gatt_layout.hpp.

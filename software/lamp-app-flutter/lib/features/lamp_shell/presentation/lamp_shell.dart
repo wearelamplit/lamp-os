@@ -13,6 +13,7 @@ import '../../../core/widgets/status_dot.dart';
 import '../../firmware/application/firmware_auto_installer.dart';
 import '../../firmware/application/firmware_notifier.dart';
 import '../../firmware/domain/firmware_state.dart';
+import '../../firmware/presentation/firmware_push_lock.dart';
 import '../../inventory/application/inventory_notifier.dart';
 import '../../social/presentation/social_screen.dart';
 import '../../wisp/application/wisp_notifier.dart';
@@ -114,7 +115,11 @@ class _LampShellState extends ConsumerState<LampShell> {
         ),
         actions: const [],
       ),
-      body: body,
+      // Info stays live. It shows the push progress, and in dev mode the
+      // panel that cancels it.
+      body: _tab == LampTab.info
+          ? body
+          : FirmwarePushLock(lampId: widget.lampId, child: body),
       // Tab nav is gated on the BLE connection. When the link is
       // down (post-disconnect, mid-reconnect), the per-tab views would
       // either render stale data or hang on a write the lamp can't

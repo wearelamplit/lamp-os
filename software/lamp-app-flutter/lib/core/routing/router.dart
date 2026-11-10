@@ -4,6 +4,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../features/control/presentation/knockout_screen.dart';
 import '../../features/firmware/application/cached_firmware_notifier.dart';
+import '../../features/firmware/presentation/firmware_push_lock.dart';
 import '../../features/inventory/application/inventory_notifier.dart';
 import '../../features/inventory/presentation/my_lamps_screen.dart';
 import '../../features/lamp_shell/presentation/add_expression_picker_screen.dart';
@@ -107,7 +108,10 @@ GoRouter appRouter(Ref ref) {
             leading: const BackButtonLeading(),
             title: const Text('Configuration'),
           ),
-          body: SetupScreen(lampId: state.pathParameters['id']!),
+          body: FirmwarePushLock(
+            lampId: state.pathParameters['id']!,
+            child: SetupScreen(lampId: state.pathParameters['id']!),
+          ),
         ),
       ),
       // /info redirects to /setup; About content lives at the bottom of /setup.
