@@ -43,6 +43,9 @@ class _CountingBle extends InMemoryBleClient {
     return super.disconnect(deviceId);
   }
 
+  /// A reboot the fake never sees as a disconnect.
+  void dropSubscriptions() => _link++;
+
   @override
   Stream<Uint8List> subscribeNotifyOnly(String d, String s, String c) {
     final link = _link;
@@ -339,14 +342,28 @@ void main() {
   test('state notifies reach the app after a save reboots the lamp', () async {
     final r = await _rig();
     await r.control.setLampPassword('');
-    await r.ble.disconnect(_id);
-    await r.ble.connect(_id);
+    r.ble.dropSubscriptions();
     await Future<void>.delayed(const Duration(seconds: 3));
-    expect(r.c.read(controlNotifierProvider(_id)).value?.connected, isTrue);
+    expect(r.connected, isTrue);
     r.notify(quiet: false, previewActive: true);
     await _pump();
     expect(r.c.read(controlNotifierProvider(_id)).value!.previewActive, isTrue);
   });
+
+  test(
+    'a reconnect sends Home Mode focus back once the lamp listens',
+    () async {
+      final r = await _rig();
+      r.notify(quiet: false);
+      r.control.setHomeModeFocus(true);
+      await _pump();
+      await r.reconnect();
+      final mark = r.mark();
+      r.notify(quiet: false);
+      await _pump();
+      expect(r.focusSince(mark), [1]);
+    },
+  );
 
   group('push boundaries', () {
     test(
