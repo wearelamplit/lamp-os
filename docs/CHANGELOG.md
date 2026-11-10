@@ -47,8 +47,8 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 - **Breathing, Spotty and Shimmer pick up smoothly after home mode.** An
   expression home mode had paused, for an hour or for weeks, could flash
   through colours or jump on its first frames back. A loaf's ring and a
-  staff's colour scrub did the same after a firmware update paused them. Each
-  now picks up with one normal step.
+  staff's colour scrub did the same after passing a firmware update to a
+  neighbour paused them. Each now picks up with one normal step.
 - **With two or more wisps, a lamp follows the wisp that can still reach
   it.** A wisp used to keep claiming a lamp that had moved out of its radio
   range, as long as other lamps passed that lamp's check-ins along, so the
