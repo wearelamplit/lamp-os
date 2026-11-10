@@ -154,10 +154,9 @@ set. Start one tap and leave it open: `npm run lamp:tap -- <port>:lamp -o
 type and tap Update. After the lamp's boot banner, count the lines in the log:
 exactly one `[ble_control] Client connected` and one `Auth via ciphertext ...
 OK`, and no `Client disconnected` in the minute after them. Two of each means
-two reconnects ran; a disconnect right after the second connect is the old
-adapter-cycle kick. Then leave the lamp open and idle for a minute:
-`page CTRL section=lamp` should not appear at all (it used to appear about 20
-times a minute).
+two reconnects ran; a disconnect right after the second connect is the app
+cycling a link it had already restored. Then leave the lamp open and idle for
+a minute: `page CTRL section=lamp` should not appear at all.
 
 ## Pass criteria
 

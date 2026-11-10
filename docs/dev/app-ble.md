@@ -144,11 +144,13 @@ on a dead link, and a probe would queue behind its chunks.
 `cycleAdapter` before each try from the third, parked in an error after 30. A
 save that restarts the lamp (a password change, an Advanced LEDs save)
 reconnects through `_awaitReconnectAndReload` instead: 2 s of grace, then up to
-12 polls of connect, auth and section read. While that reload runs
-(`_rebootReloadOwnsLink`), the ladder stands down: `_tryReconnect` returns at
-once, a try already in flight stops at its next step, and a ladder step still
-pending when the reload ends is cancelled. A reload that gives up leaves its
-error on screen; the ladder does not take over.
+12 polls of connect, auth and section read. From the save until the reload
+restores the link or gives up (`_rebootReloadOwnsLink`), the ladder stands
+down: `_tryReconnect` returns at once, a try already in flight when a reload
+starts stops at its next step for good (`_rebootReloadsStarted`), and a ladder
+step still pending when the reload restores the link or gives up is cancelled.
+A drop after the restore climbs the ladder as usual. A reload that gives up
+leaves its error on screen; the ladder does not take over.
 
 ## Scan hold during a connect
 

@@ -608,8 +608,8 @@ class ControlNotifier extends _$ControlNotifier {
   /// Reads every section via the page protocol and returns a fresh
   /// ControlState. Assumes the BLE link is connected and authenticated.
   /// Throws [LampAuthRequiredException] when the `lamp` section reads back
-  /// empty: the lamp withholds it, password included, from a link that has
-  /// not authenticated.
+  /// empty. The lamp withholds that section, password included, from a link
+  /// that has not authenticated.
   Future<ControlState> _readSections(BleClient ble) async {
     // A section a legacy lamp doesn't serve comes back as empty bytes;
     // jsonDecode('') throws. Default missing sections to an empty object /
@@ -2014,10 +2014,8 @@ class ControlNotifier extends _$ControlNotifier {
     }
   }
 
-  /// The smallest GATT round-trip the lamp answers: one read of
-  /// CHAR_SCHEMA_VERSION. A lamp that predates it has its `lamp` section
-  /// read instead; the missing characteristic costs no radio time, since
-  /// the client finds it absent from the services it already discovered.
+  /// One read of CHAR_SCHEMA_VERSION, a single byte. A lamp that predates it
+  /// has its `lamp` section read instead.
   Future<void> _readForProbe(BleClient ble) async {
     try {
       await ble.read(
