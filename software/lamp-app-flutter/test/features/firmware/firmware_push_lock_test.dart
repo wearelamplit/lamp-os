@@ -106,7 +106,7 @@ Future<_Rig> _pump(
       bleScannerProvider.overrideWithValue(FakeBleScanner()),
       appRouterProvider.overrideWithValue(router),
       cachedFirmwareNotifierProvider.overrideWith(_EmptyCache.new),
-      firmwareNotifierProvider.overrideWith(_DrivenFirmware.new),
+      firmwareNotifierProvider.overrideWith2((_) => _DrivenFirmware()),
     ],
   );
   addTearDown(c.dispose);
@@ -362,7 +362,7 @@ void main() {
           bleClientProvider.overrideWithValue(ble),
           bleScannerProvider.overrideWithValue(FakeBleScanner()),
           cachedFirmwareNotifierProvider.overrideWith(_EmptyCache.new),
-          firmwareNotifierProvider.overrideWith(_DrivenFirmware.new),
+          firmwareNotifierProvider.overrideWith2((_) => _DrivenFirmware()),
         ],
       );
       addTearDown(c.dispose);
