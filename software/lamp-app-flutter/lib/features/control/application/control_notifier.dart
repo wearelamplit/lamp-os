@@ -103,8 +103,8 @@ class ControlNotifier extends _$ControlNotifier {
   /// the top of `_tryReconnect`, cleared in `finally`. Allows safely
   /// kicking `_tryReconnect` from BOTH the scheduled timer
   /// (`_scheduleReconnect`) AND the watchConnected→true edge
-  /// (`_onConnectionChange`) without stacking ble.connect + auth + canary
-  /// calls on top of each other.
+  /// (`_onConnectionChange`) without stacking ble.connect + auth + section
+  /// reads on top of each other.
   bool _reconnectInFlight = false;
 
   /// Set while a save that reboots the lamp owns reconnecting to it. The
@@ -1942,10 +1942,10 @@ class ControlNotifier extends _$ControlNotifier {
       // fbp's connectionState emitted `true` mid-reconnect, but the
       // GATT services aren't necessarily discovered yet (observed on
       // hardware: a 4-second window where writes failed with
-      // "primary service not found" before the canary lands).
+      // "primary service not found" before the section reads land).
       //
       // Don't flip the UI to "connected" on this edge. _tryReconnect's
-      // canary read is the truthful "the link can actually be used"
+      // section read is the truthful "the link can actually be used"
       // signal. Kick _tryReconnect immediately rather than waiting for
       // the soft 500ms reconnect timer; the in-flight guard prevents
       // doubling up with a timer-scheduled run that's already running.
