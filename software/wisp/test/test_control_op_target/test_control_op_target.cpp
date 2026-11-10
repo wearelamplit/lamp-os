@@ -1,6 +1,5 @@
-// Native tests for the CONTROL_OP target filter in MeshRouter. onPacket is
-// Arduino/dispatcher-coupled and not natively buildable; controlOpForWisp is
-// the pure predicate it gates on, so this pins what reaches the single op slot:
+// Native tests for controlOpForWisp, the target filter ControlOpInbox admits
+// ops through:
 //   - an op addressed to this wisp applies.
 //   - an op addressed to a sibling wisp is dropped.
 //   - a broadcast op is dropped, whoever sent it: a peer wisp's status or
@@ -10,7 +9,7 @@
 
 #include <cstdint>
 
-#include "net/mesh_router.hpp"
+#include "net/control_op_inbox.hpp"
 
 namespace {
 
