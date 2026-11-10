@@ -2,11 +2,13 @@
 
 #include <cstdint>
 
+#include <lampos/protocol/presence.hpp>
+
 // HELLO broadcast interval. Airtime scales N²/interval as the fleet grows,
 // so this is the steady-state mesh-traffic knob. Must stay well under
 // LAMP_PRUNE_TIME_MS so a couple of lost beacons don't prune a live peer
 // (prune tolerates 8 missed emits at 30s).
-#define LAMP_HELLO_INTERVAL_MS 30000
+#define LAMP_HELLO_INTERVAL_MS (lamp_protocol::kLampHelloIntervalMs)
 
 static_assert(LAMP_HELLO_INTERVAL_MS == 30000,
               "LAMP_HELLO_INTERVAL_MS is the fleet airtime budget (N²/interval) "

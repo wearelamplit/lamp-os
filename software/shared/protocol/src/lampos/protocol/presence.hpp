@@ -31,6 +31,10 @@
 
 namespace lamp_protocol {
 
+// The steady interval a lamp emits MSG_HELLO at once past its boot burst.
+// The wisp ages a lamp's direct RSSI against it.
+constexpr uint32_t kLampHelloIntervalMs = 30000;
+
 // HELLO fixed prefix: header(6) + sourceMac(6) + shade(4) + base(4) + firmwareVersion(4).
 // Name length byte + name bytes follow this prefix.
 // 6 + 6 + 4 + 4 + 4 = 24 bytes.

@@ -122,8 +122,8 @@ void setup() {
     Serial.println("[wisp] mesh init failed; will retry in 5s");
   }
 
-  // Set self-MAC before any packet can reach onPacket, else a real unicast
-  // CONTROL_OP addressed to us drops against a zero self-MAC.
+  // Set self-MAC as soon as the radio is up. Until then a unicast CONTROL_OP
+  // addressed to this wisp drops against a zero self-MAC.
   uint8_t selfMac[6] = {0};
   mesh.getMac(selfMac);
   wispRoster.setSelfMac(selfMac);

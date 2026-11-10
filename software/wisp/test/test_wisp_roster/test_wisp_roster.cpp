@@ -9,6 +9,9 @@
 //   - Peer goes silent → its entries age out after 20s → survivor adopts.
 //   - RSSI jitter inside hysteresis → no claim flip (no flicker).
 //   - INT8_MIN lamp RSSI (never measured) → never claimed.
+//   - A claimed lamp whose direct RSSI aged out is held while no peer hears it
+//     directly, advertised without a signal, and handed to a peer that hears
+//     it; a lamp heard directly within the window stays claimed.
 //   - setLampPaint stores on the matched entry; no-op for unclaimed mac.
 //   - recomputeClaims carries paint on stable claim; zeroes for new entry.
 //   - STATE packs every painted claim (black included) with its W plane and
@@ -43,6 +46,40 @@ uint8_t kLampY[6] = {0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0x02};
 void packEntry(uint8_t* buf, const uint8_t mac[6], int8_t rssi) {
   std::memcpy(buf, mac, 6);
   buf[6] = static_cast<uint8_t>(rssi);
+}
+
+const uint8_t kColor[4] = {1, 2, 3, 4};
+
+void hearX(wisp::LampInventory& inv, int8_t rssi, uint32_t nowMs) {
+  inv.recordHello(kLampX, "x", kColor, kColor, 1, nowMs, rssi);
+}
+
+// One 2 s claim tick as main.cpp runs it, with the 30 s prune due when
+// `prune` is set.
+void claimTick(wisp::LampInventory& inv, wisp::WispRoster& r, uint32_t nowMs,
+               bool prune) {
+  if (prune) inv.prune(nowMs, LAMP_PRUNE_TIME_MS);
+  wisp::LampObservation o[wisp::WISP_ROSTER_MAX_LAMPS];
+  const size_t n = inv.copyObservations(o, wisp::WISP_ROSTER_MAX_LAMPS);
+  r.recomputeClaims(o, n, nowMs);
+}
+
+// Both wisps claim a lamp until the first CLAIM exchange; by this tick the
+// arbitration has settled.
+constexpr uint32_t kSettledMs = 5000;
+
+// Deliver `from`'s CLAIM frame entries to `to`.
+void sendClaim(wisp::WispRoster& from, const uint8_t fromMac[6],
+               wisp::WispRoster& to, uint32_t nowMs) {
+  uint8_t buf[wisp::WISP_ROSTER_MAX_LAMPS * 7];
+  const size_t n = from.snapshotClaimsForBroadcast(buf, sizeof(buf));
+  to.recordPeerClaim(fromMac, buf, static_cast<uint8_t>(n), nowMs);
+}
+
+int8_t advertisedRssi(wisp::WispRoster& r) {
+  uint8_t buf[7];
+  TEST_ASSERT_EQUAL_size_t(1, r.snapshotClaimsForBroadcast(buf, sizeof(buf)));
+  return static_cast<int8_t>(buf[6]);
 }
 
 wisp::LampObservation obs(const uint8_t mac[6], int8_t rssi) {
@@ -288,6 +325,88 @@ void test_never_measured_rssi_skips_claim(void) {
   r.recomputeClaims(&lamps, 1, /*nowMs=*/1000);
   TEST_ASSERT_FALSE(r.claims(kLampX));
   TEST_ASSERT_EQUAL_size_t(0, r.claimedCount());
+}
+
+// Lamp X sits near wisp A (-50) and is heard by B (-72). It moves out of A's
+// direct range: A hears it only through lamp relays, B still directly. For
+// three HELLO intervals after A's last direct HELLO A keeps it; by the first
+// prune past that plus two CLAIM rounds, B has it and A has let go.
+void test_two_wisps_hand_off_a_lamp_whose_direct_signal_aged_out(void) {
+  wisp::LampInventory invA, invB;
+  wisp::WispRoster a, b;
+  a.setSelfMac(kSelfMac);
+  b.setSelfMac(kPeerHighMac);
+
+  const uint32_t moved = 31000;
+  const uint32_t lastDirect = moved - lamp_protocol::kLampHelloIntervalMs;
+  const uint32_t windowEnd = lastDirect + 3 * lamp_protocol::kLampHelloIntervalMs;
+  const uint32_t handedOffBy = windowEnd + 30000 + 8000;
+  bool aClaimedInWindow = true;
+  for (uint32_t t = 1000; t <= moved + 150000; t += 2000) {
+    if ((t - 1000) % lamp_protocol::kLampHelloIntervalMs == 0) {
+      hearX(invA, t < moved ? -50 : INT8_MIN, t);
+      hearX(invB, -72, t);
+    }
+    const bool prune = (t - 1000) % 30000 == 0;
+    claimTick(invA, a, t, prune);
+    claimTick(invB, b, t, prune);
+    if ((t - 1000) % 4000 == 0) {
+      sendClaim(a, kSelfMac, b, t);
+      sendClaim(b, kPeerHighMac, a, t);
+    }
+    if (t <= windowEnd && !a.claims(kLampX)) aClaimedInWindow = false;
+    if (t >= kSettledMs && t < moved) TEST_ASSERT_FALSE(b.claims(kLampX));
+    if (t >= handedOffBy) {
+      TEST_ASSERT_FALSE_MESSAGE(a.claims(kLampX), "A still holds past the window");
+      TEST_ASSERT_TRUE_MESSAGE(b.claims(kLampX), "B has not taken over");
+    }
+  }
+  TEST_ASSERT_TRUE_MESSAGE(aClaimedInWindow, "A let go inside the window");
+}
+
+// A hears X directly only every third HELLO (two lost in a row), B hears every
+// one; A stays the owner throughout and B never takes it.
+void test_lamp_heard_directly_within_window_stays_claimed(void) {
+  wisp::LampInventory invA, invB;
+  wisp::WispRoster a, b;
+  a.setSelfMac(kSelfMac);
+  b.setSelfMac(kPeerHighMac);
+
+  hearX(invA, -50, 1000);
+  for (uint32_t t = 1000; t <= 400000; t += 2000) {
+    if (t >= 7000 && (t - 7000) % (3 * lamp_protocol::kLampHelloIntervalMs) == 0) {
+      hearX(invA, -50, t);
+    }
+    if ((t - 1000) % lamp_protocol::kLampHelloIntervalMs == 0) hearX(invB, -72, t);
+    const bool prune = (t - 1000) % 30000 == 0;
+    claimTick(invA, a, t, prune);
+    claimTick(invB, b, t, prune);
+    if ((t - 1000) % 4000 == 0) {
+      sendClaim(a, kSelfMac, b, t);
+      sendClaim(b, kPeerHighMac, a, t);
+    }
+    if (t < kSettledMs) continue;
+    TEST_ASSERT_TRUE(a.claims(kLampX));
+    TEST_ASSERT_FALSE(b.claims(kLampX));
+  }
+}
+
+// Single wisp: a lamp that goes silent (an OTA receiver stops sending HELLO)
+// stays claimed after its direct RSSI ages out, advertised without a signal.
+void test_aged_out_claim_held_without_peer(void) {
+  wisp::LampInventory inv;
+  wisp::WispRoster r;
+  r.setSelfMac(kSelfMac);
+  hearX(inv, -64, 1000);
+  claimTick(inv, r, 1000, false);
+  TEST_ASSERT_TRUE(r.claims(kLampX));
+  TEST_ASSERT_EQUAL_INT8(-64, advertisedRssi(r));
+
+  for (uint32_t t = 3000; t <= 1000 + LAMP_PRUNE_TIME_MS; t += 2000) {
+    claimTick(inv, r, t, (t - 1000) % 30000 == 0);
+    TEST_ASSERT_TRUE(r.claims(kLampX));
+  }
+  TEST_ASSERT_EQUAL_INT8(INT8_MIN, advertisedRssi(r));
 }
 
 void test_snapshot_for_broadcast_packs_correctly(void) {
@@ -872,6 +991,9 @@ int main(int, char**) {
   RUN_TEST(test_peer_silence_ages_out_and_we_adopt);
   RUN_TEST(test_rssi_jitter_inside_hysteresis_no_flap);
   RUN_TEST(test_never_measured_rssi_skips_claim);
+  RUN_TEST(test_two_wisps_hand_off_a_lamp_whose_direct_signal_aged_out);
+  RUN_TEST(test_lamp_heard_directly_within_window_stays_claimed);
+  RUN_TEST(test_aged_out_claim_held_without_peer);
   RUN_TEST(test_peer_not_pruned_when_lastseen_ahead_of_now);
   RUN_TEST(test_peer_ages_out_across_the_wrap);
   RUN_TEST(test_peer_eviction_keeps_a_peer_heard_after_the_wrap);

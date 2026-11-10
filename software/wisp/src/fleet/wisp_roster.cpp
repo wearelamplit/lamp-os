@@ -128,15 +128,19 @@ void WispRoster::recomputeClaims(const LampObservation* observations,
                          : count;
   for (size_t i = 0; i < cap; ++i) {
     const LampObservation& obs = observations[i];
-    // No direct measurement → don't claim. Claiming is gated on lamps
-    // this wisp hears itself; the lamp re-evaluates once RSSI lands.
-    if (obs.rssi == INT8_MIN) continue;
-
     const size_t prevIdx = findOwnLocked(obs.mac);
     const bool weClaimedLast = prevIdx != ownCount_;
+    if (obs.rssi == INT8_MIN && !weClaimedLast) continue;
 
     uint8_t bestPeerMac[6] = {0};
     const int8_t bestPeerRssi = bestPeerRssiLocked(obs.mac, bestPeerMac);
+
+    // A held claim whose direct signal aged out yields to any peer that hears
+    // the lamp directly, and is advertised without a signal.
+    if (obs.rssi == INT8_MIN) {
+      if (bestPeerRssi == INT8_MIN) appendClaim(obs, prevIdx);
+      continue;
+    }
 
     // No peer claims this lamp → claim it unconditionally.
     if (bestPeerRssi == INT8_MIN) {

@@ -4,6 +4,13 @@
 //   - copyObservations fills (mac, rssi) in entry order and returns the count.
 //   - copyObservations caps at `max`; null/zero args return 0.
 //   - recordHello keeps the stored RSSI when the update carries INT8_MIN.
+//   - prune forgets a direct RSSI older than kDirectRssiMaxAgeMs, relays or not,
+//     and keeps one heard within it, across the millis() wrap and when the
+//     stamp sits just ahead of nowMs.
+//   - kDirectRssiMaxAgeMs tolerates two lost lamp HELLOs and lapses before
+//     the prune.
+//   - prune drops an entry whose last HELLO is older than maxAgeMs across the
+//     millis() wrap.
 //   - prune drops aged entries from the observation feed.
 //   - roster full → oldest entry evicted for the newcomer.
 
@@ -28,6 +35,12 @@ void hear(wisp::LampInventory& inv, uint8_t last, int8_t rssi, uint32_t nowMs) {
   uint8_t m[6];
   mac(m, last);
   inv.recordHello(m, "lamp", kColor, kColor, 1, nowMs, rssi);
+}
+
+int8_t rssiOf(wisp::LampInventory& inv) {
+  wisp::LampObservation obs[1];
+  TEST_ASSERT_EQUAL_size_t(1, inv.copyObservations(obs, 1));
+  return obs[0].rssi;
 }
 
 }  // namespace
@@ -162,6 +175,86 @@ void test_full_roster_evicts_stalest_across_the_wrap(void) {
   TEST_ASSERT_FALSE(sawSecond);
 }
 
+// The lamp moved out of direct range: relays keep the entry alive, but the
+// direct measurement goes once it is older than the window.
+void test_direct_rssi_ages_out_while_relays_arrive(void) {
+  wisp::LampInventory inv;
+  const uint32_t t0 = 7000;
+  hear(inv, 1, -52, t0);
+  for (uint32_t t = t0 + lamp_protocol::kLampHelloIntervalMs;
+       t <= t0 + wisp::kDirectRssiMaxAgeMs; t += lamp_protocol::kLampHelloIntervalMs) {
+    hear(inv, 1, INT8_MIN, t);
+    inv.prune(t, LAMP_PRUNE_TIME_MS);
+    TEST_ASSERT_EQUAL_INT8(-52, rssiOf(inv));
+  }
+  inv.prune(t0 + wisp::kDirectRssiMaxAgeMs + 1, LAMP_PRUNE_TIME_MS);
+  TEST_ASSERT_EQUAL_INT8(INT8_MIN, rssiOf(inv));
+  TEST_ASSERT_EQUAL_size_t(1, inv.size());
+
+  hear(inv, 1, INT8_MIN, t0 + wisp::kDirectRssiMaxAgeMs + 5000);
+  TEST_ASSERT_EQUAL_INT8(INT8_MIN, rssiOf(inv));
+  hear(inv, 1, -67, t0 + wisp::kDirectRssiMaxAgeMs + 9000);
+  TEST_ASSERT_EQUAL_INT8(-67, rssiOf(inv));
+}
+
+// A present lamp that loses two HELLOs in a row is heard directly on the third;
+// its measurement never lapses at any prune in between.
+void test_direct_rssi_heard_within_window_is_kept(void) {
+  wisp::LampInventory inv;
+  const int8_t samples[] = {-58, -63, -49, -71};
+  uint32_t heardAt = 3300;
+  for (int8_t rssi : samples) {
+    hear(inv, 1, rssi, heardAt);
+    const uint32_t nextHeard = heardAt + 3 * lamp_protocol::kLampHelloIntervalMs;
+    for (uint32_t p = heardAt + 1700; p <= nextHeard; p += 29000) {
+      inv.prune(p, LAMP_PRUNE_TIME_MS);
+      TEST_ASSERT_EQUAL_INT8(rssi, rssiOf(inv));
+    }
+    inv.prune(nextHeard, LAMP_PRUNE_TIME_MS);
+    TEST_ASSERT_EQUAL_INT8(rssi, rssiOf(inv));
+    heardAt = nextHeard;
+  }
+}
+
+// The recv task can stamp a HELLO after the loop read nowMs.
+void test_direct_rssi_stamped_ahead_of_now_is_kept(void) {
+  wisp::LampInventory inv;
+  hear(inv, 1, -55, 100000);
+  inv.prune(99990, LAMP_PRUNE_TIME_MS);
+  TEST_ASSERT_EQUAL_INT8(-55, rssiOf(inv));
+}
+
+void test_direct_rssi_ages_across_millis_wrap(void) {
+  wisp::LampInventory inv;
+  const uint32_t heardAt = UINT32_MAX - 12000;
+  hear(inv, 1, -61, heardAt);
+  inv.prune(heardAt + 5000, LAMP_PRUNE_TIME_MS);
+  TEST_ASSERT_EQUAL_INT8(-61, rssiOf(inv));
+  inv.prune(heardAt + 40000, LAMP_PRUNE_TIME_MS);
+  TEST_ASSERT_EQUAL_INT8(-61, rssiOf(inv));
+  hear(inv, 1, INT8_MIN, heardAt + 60000);
+  inv.prune(heardAt + wisp::kDirectRssiMaxAgeMs + 1, LAMP_PRUNE_TIME_MS);
+  TEST_ASSERT_EQUAL_INT8(INT8_MIN, rssiOf(inv));
+}
+
+void test_direct_rssi_window_spans_two_lost_hellos(void) {
+  TEST_ASSERT_TRUE(wisp::kDirectRssiMaxAgeMs >=
+                   3u * lamp_protocol::kLampHelloIntervalMs);
+  TEST_ASSERT_TRUE(wisp::kDirectRssiMaxAgeMs < LAMP_PRUNE_TIME_MS);
+}
+
+void test_prune_drops_entry_across_millis_wrap(void) {
+  wisp::LampInventory inv;
+  const uint32_t heardAt = UINT32_MAX - 5000;
+  hear(inv, 1, -60, heardAt);
+  inv.prune(heardAt + 4000, LAMP_PRUNE_TIME_MS);
+  TEST_ASSERT_EQUAL_size_t(1, inv.size());
+  inv.prune(heardAt + LAMP_PRUNE_TIME_MS, LAMP_PRUNE_TIME_MS);
+  TEST_ASSERT_EQUAL_size_t(1, inv.size());
+  inv.prune(heardAt + LAMP_PRUNE_TIME_MS + 1, LAMP_PRUNE_TIME_MS);
+  TEST_ASSERT_EQUAL_size_t(0, inv.size());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_copy_observations_fills_mac_and_rssi);
@@ -172,5 +265,11 @@ int main(int, char**) {
   RUN_TEST(test_prune_ages_across_the_wrap);
   RUN_TEST(test_prune_drops_a_lamp_last_heard_at_zero);
   RUN_TEST(test_full_roster_evicts_stalest_across_the_wrap);
+  RUN_TEST(test_direct_rssi_ages_out_while_relays_arrive);
+  RUN_TEST(test_direct_rssi_heard_within_window_is_kept);
+  RUN_TEST(test_direct_rssi_stamped_ahead_of_now_is_kept);
+  RUN_TEST(test_direct_rssi_ages_across_millis_wrap);
+  RUN_TEST(test_direct_rssi_window_spans_two_lost_hellos);
+  RUN_TEST(test_prune_drops_entry_across_millis_wrap);
   return UNITY_END();
 }

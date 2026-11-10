@@ -75,10 +75,10 @@ void SerialConsole::dumpInventory() {
                 (unsigned)roster.size(), roster.size() == 1 ? "" : "s");
   for (const auto& e : roster) {
     const uint32_t ageMs = lampos::msSince(nowMs, e.lastSeenMs);
-    Serial.printf("  %02X:%02X:%02X:%02X:%02X:%02X  %-12s  fw=%s  age=%lums\n",
+    Serial.printf("  %02X:%02X:%02X:%02X:%02X:%02X  %-12s  fw=%s  age=%lums  rssi=%d\n",
                   e.mac[0], e.mac[1], e.mac[2], e.mac[3], e.mac[4], e.mac[5],
                   e.name, formatVersion(e.firmwareVersion).c_str(),
-                  (unsigned long)ageMs);
+                  (unsigned long)ageMs, e.rssi);
   }
 #endif
 }

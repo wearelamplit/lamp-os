@@ -252,8 +252,9 @@ class WispRepository {
   /// through `WispStatus.wifiConnected` on the next status notify.
   ///
   /// Accepted threat: the WiFi PSK leaks both here on the BLE write to
-  /// `CHAR_WISP_OP` and downstream when the lamp re-broadcasts the wispOp as
-  /// plaintext MSG_CONTROL_OP on the mesh (ESP-NOW range ~30 m LoS). Fleet-wide
+  /// `CHAR_WISP_OP` and downstream when the lamp unicasts the wispOp as
+  /// plaintext MSG_CONTROL_OP to its display wisp, readable over the air
+  /// (ESP-NOW range ~30 m LoS). Fleet-wide
   /// mesh auth would close it but is rejected; bounded by physical proximity.
   Future<void> setWifi(String ssid, String password) async {
     await _writeOp({

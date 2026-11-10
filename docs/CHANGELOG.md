@@ -42,6 +42,23 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   forget ones it had just heard, hold back its brightness re-sends, or wait
   to reopen its OSC port or send its config. All of these now carry on
   through the rollover.
+- **With two or more wisps, a lamp follows the wisp that can still reach
+  it.** A wisp used to keep claiming a lamp that had moved out of its radio
+  range, as long as other lamps passed that lamp's check-ins along, so the
+  nearer wisp stood back and the lamp sat at its own colours. Now a wisp lets
+  go of a lamp it hasn't heard directly for about 90 seconds (up to two
+  minutes) whenever another wisp hears it, and that wisp takes over. With one
+  wisp nothing changes: it keeps painting a lamp that goes quiet, such as one
+  receiving a firmware update.
+- **App commands to a wisp no longer get lost when a second wisp is
+  nearby.** The other wisp's status updates could occasionally knock a
+  just-arrived command out before the wisp acted on it, and the app showed
+  that it couldn't reach the wisp. A wisp now only listens to commands
+  addressed to it. Lamps on firmware older than 1.1.5 send wisp commands to
+  every wisp at once, so a wisp on this firmware ignores them: update those
+  lamps first.
+- **Wisps need a USB reflash** for both fixes (`npm run wisp:flash:release`
+  with the wisp plugged in); wisps don't update over the mesh.
 
 ### Changed
 - **Smaller firmware, a little more free memory.** The lamp no longer builds
