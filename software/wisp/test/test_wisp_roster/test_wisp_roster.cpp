@@ -234,6 +234,53 @@ void test_peer_not_pruned_when_lastseen_ahead_of_now(void) {
   TEST_ASSERT_FALSE(r.claims(kLampX));          // buggy code prunes & adopts
 }
 
+// A peer heard 5 s before the millis() wrap still owns its lamp 10 s after
+// it, then ages out once its silence passes the 20 s window.
+void test_peer_ages_out_across_the_wrap(void) {
+  wisp::WispRoster r;
+  r.setSelfMac(kSelfMac);
+  uint8_t entries[7];
+  packEntry(entries, kLampX, -55);
+  r.recordPeerClaim(kPeerLowMac, entries, 1, /*nowMs=*/UINT32_MAX - 4999);
+  auto lamps = obs(kLampX, -75);
+  r.recomputeClaims(&lamps, 1, /*nowMs=*/10000);
+  TEST_ASSERT_FALSE(r.claims(kLampX));
+  r.recomputeClaims(&lamps, 1, /*nowMs=*/15001);
+  TEST_ASSERT_TRUE(r.claims(kLampX));
+}
+
+// A full peer table heard before the wrap; peer 0, the first heard, is heard
+// again after it. The next new peer evicts peer 1, now the stalest, so its
+// lamp falls to us and peer 0's does not.
+void test_peer_eviction_keeps_a_peer_heard_after_the_wrap(void) {
+  wisp::WispRoster r;
+  r.setSelfMac(kSelfMac);
+  const uint32_t start = UINT32_MAX - 1000;
+  uint8_t lampMacs[wisp::WISP_ROSTER_MAX_PEERS + 1][6];
+  wisp::LampObservation lamps[wisp::WISP_ROSTER_MAX_PEERS + 1];
+  auto claim = [&](size_t i, uint32_t nowMs) {
+    const uint8_t peer[6] = {0x10, 0x11, 0x22, 0x33, 0x44, static_cast<uint8_t>(i)};
+    uint8_t entries[7];
+    packEntry(entries, lampMacs[i], -50);
+    r.recordPeerClaim(peer, entries, 1, nowMs);
+  };
+  for (size_t i = 0; i <= wisp::WISP_ROSTER_MAX_PEERS; i++) {
+    const uint8_t m[6] = {0xCC, 0xCC, 0xCC, 0xCC, 0xCC, static_cast<uint8_t>(i)};
+    std::memcpy(lampMacs[i], m, 6);
+    lamps[i] = obs(lampMacs[i], -80);
+  }
+  for (size_t i = 0; i < wisp::WISP_ROSTER_MAX_PEERS; i++) {
+    claim(i, start + static_cast<uint32_t>(i) * 10);
+  }
+  claim(0, 100);
+  claim(wisp::WISP_ROSTER_MAX_PEERS, 200);
+
+  r.recomputeClaims(lamps, wisp::WISP_ROSTER_MAX_PEERS + 1, /*nowMs=*/300);
+  TEST_ASSERT_FALSE(r.claims(lampMacs[0]));
+  TEST_ASSERT_TRUE(r.claims(lampMacs[1]));
+  TEST_ASSERT_FALSE(r.claims(lampMacs[wisp::WISP_ROSTER_MAX_PEERS]));
+}
+
 void test_never_measured_rssi_skips_claim(void) {
   wisp::WispRoster r;
   r.setSelfMac(kSelfMac);
@@ -826,6 +873,8 @@ int main(int, char**) {
   RUN_TEST(test_rssi_jitter_inside_hysteresis_no_flap);
   RUN_TEST(test_never_measured_rssi_skips_claim);
   RUN_TEST(test_peer_not_pruned_when_lastseen_ahead_of_now);
+  RUN_TEST(test_peer_ages_out_across_the_wrap);
+  RUN_TEST(test_peer_eviction_keeps_a_peer_heard_after_the_wrap);
   RUN_TEST(test_snapshot_for_broadcast_packs_correctly);
   RUN_TEST(test_set_lamp_paint_stores_on_claimed_entry);
   RUN_TEST(test_set_lamp_paint_noop_for_unclaimed_mac);

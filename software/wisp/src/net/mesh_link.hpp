@@ -78,9 +78,9 @@ class MeshLink {
   // Locate a tracked peer by MAC. Returns the slot index or -1.
   // Caller must hold peerMux_.
   int findPeerSlot(const uint8_t mac[6]) const;
-  // Pick the slot with the smallest lastUsedMs. Used on overflow.
+  // Pick the slot used longest ago. Used on overflow.
   // Caller must hold peerMux_.
-  size_t pickLruSlot() const;
+  size_t pickLruSlot(uint32_t nowMs) const;
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   // Guards the peer table. send() runs on the loop task; without this, two

@@ -9,6 +9,8 @@
 #include <array>
 #include <cstring>
 
+#include <lampos/clock.hpp>
+
 #include "paint/current_palette.hpp"
 #include "paint/drift.hpp"
 #include "fleet/lamp_inventory.hpp"
@@ -68,7 +70,7 @@ void PaintDistributor::tick(uint32_t nowMs) {
       (nowMs - lastBrWalkMs_) >= kBrightnessReassertMs) {
     beginBrightnessWalk();
   }
-  if (brRepeatsLeft_ > 0 && !brWalkActive_ && nowMs >= nextBrPassMs_) {
+  if (brRepeatsLeft_ > 0 && !brWalkActive_ && lampos::timeReached(nowMs, nextBrPassMs_)) {
     brRepeatsLeft_--;
     beginBrightnessWalk();
   }
@@ -93,6 +95,7 @@ void PaintDistributor::assignAllClaimed() {
 void PaintDistributor::setBrightness(uint8_t pct) {
   brightness_ = pct > 100 ? 100 : pct;
   brRepeatsLeft_ = brightness_ >= 100 ? kRestoreRepeats : 0;
+  nextBrPassMs_ = millis();
   beginBrightnessWalk();
 }
 
