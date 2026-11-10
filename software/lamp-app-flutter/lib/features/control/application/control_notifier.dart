@@ -1649,7 +1649,7 @@ class ControlNotifier extends _$ControlNotifier {
             : segs);
   }
 
-  /// Apply Advanced LED settings (px, byteOrder, bpp) via
+  /// Apply Advanced LED settings ([advancedLedsBlob]) via
   /// settings_blob with reboot:true. Mirrors the setLampPassword pattern:
   /// write → firmware reboots (drops link) → reconnect ladder →
   /// reload sections. After reload, diffs the freshly-read base/shade
@@ -1695,9 +1695,9 @@ class ControlNotifier extends _$ControlNotifier {
     return mismatches;
   }
 
-  /// The settings_blob an Advanced LEDs save writes: each role's strip
-  /// format and nothing else, so a lamp with many segments still fits one
-  /// write.
+  /// The settings_blob an Advanced LEDs save writes. It carries each role's
+  /// strip format and nothing else, so a lamp with many segments still fits
+  /// one write.
   @visibleForTesting
   static Map<String, dynamic> advancedLedsBlob(
           BaseSection base, ShadeSection shade) =>

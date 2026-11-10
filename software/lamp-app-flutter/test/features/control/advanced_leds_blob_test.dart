@@ -1,8 +1,18 @@
+import 'dart:convert';
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/core/ble/lamp_crypto.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/features/control/application/control_notifier.dart';
 import 'package:lamp_app/features/control/domain/sections.dart';
+import 'package:lamp_app/features/inventory/application/inventory_notifier.dart';
+import 'package:lamp_app/features/inventory/domain/inventory_lamp.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../_support/in_memory_ble_client.dart';
+import '../../_support/seed.dart';
 
 // The ATT attribute value limit both the phone's BLE stack and the lamp's
 // NimBLE enforce on one write.
@@ -37,7 +47,8 @@ class _Variant {
 String _hex(int i) =>
     '#${(i * 37 % 256).toRadixString(16).padLeft(2, '0')}a5c3ff';
 
-// Each variant's Config::Defaults (software/lamp-os/src/lamps/*), and one lamp
+// Each variant's Config::Defaults (software/lamp-os/src/lamps/*), lioness sent
+// as GRB so the byte order is seen to pass through, and one lamp
 // at every cap in config_types.hpp (kMaxSegments, kMaxSegmentNameLen,
 // kMaxSurfaceColors) with three-digit pixel counts, which no variant exceeds.
 final _variants = <_Variant>[
@@ -162,5 +173,56 @@ void main() {
       expect(blob['base'], {'px': 41, 'bpp': 3, 'byteOrder': 'BGR'});
       expect(blob['shade'], {'px': 27, 'bpp': 4, 'byteOrder': 'GRBW'});
     });
+  });
+  test('applyAdvancedLedsAndReboot writes that blob to a snafu', () async {
+    SharedPreferences.setMockInitialValues({});
+    const devId = 'snafu-1';
+    const pw = 'hunter22';
+    final snafu = _variants.firstWhere((v) => v.name == 'snafu');
+    String segsJson(List<_Seg> segs) => jsonEncode([
+      for (final s in segs) {'name': s.$1, 'px': s.$2, 'colors': s.$3},
+    ]);
+    final ble = InMemoryBleClient();
+    await seedControlBle(
+      ble,
+      deviceId: devId,
+      baseSegmentsJson: segsJson(snafu.base),
+      shadeSegmentsJson: segsJson(snafu.shade),
+    );
+    final c = ProviderContainer(
+      overrides: [bleClientProvider.overrideWithValue(ble)],
+    );
+    addTearDown(c.dispose);
+    await c.read(inventoryNotifierProvider.future);
+    await c
+        .read(inventoryNotifierProvider.notifier)
+        .add(
+          const InventoryLamp(id: devId, name: 'snafu', controlPassword: pw),
+        );
+    final sub = c.listen(controlNotifierProvider(devId), (_, _) {});
+    addTearDown(sub.close);
+    final state = await c.read(controlNotifierProvider(devId).future);
+
+    await c
+        .read(controlNotifierProvider(devId).notifier)
+        .applyAdvancedLedsAndReboot(base: state.base, shade: state.shade);
+
+    final writes = ble.writesTo(devId, BleUuids.settingsBlob);
+    expect(writes, hasLength(1));
+    expect(writes.single.length, lessThanOrEqualTo(_attValueMax));
+    final plain = await LampCrypto.decryptOpForTesting(
+      writes.single,
+      password: pw,
+      saltUuid16: uuidSaltLE16(BleUuids.settingsBlob),
+      charShortName: 'settingsBlob',
+    );
+    expect(jsonDecode(utf8.decode(plain)), {
+      ...ControlNotifier.advancedLedsBlob(state.base, state.shade),
+      'reboot': true,
+    });
+    expect(
+      (jsonDecode(utf8.decode(plain)) as Map)['shade']['segments'],
+      hasLength(3),
+    );
   });
 }

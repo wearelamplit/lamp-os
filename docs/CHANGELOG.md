@@ -8,12 +8,13 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 ## Unreleased
 
 ### Fixed
-- **LED setup saves on multi-strip lamps.** Tapping Update on the Advanced
-  LEDs screen of a lamp with several strips, such as snafu or lioness, used
-  to fail with "Save failed" and leave the lamp unchanged. The save now sends
-  only the strip settings it changes, so it fits in one Bluetooth write on
-  every lamp. If a setting is ever too big to send, the app tells you so
-  instead of trying and failing.
+- **LED setup saves on snafu.** Tapping Update on snafu's Advanced LEDs
+  screen used to fail with "Save failed" and leave the lamp unchanged, because
+  the save carried every strip's colours and came out too big for one
+  Bluetooth write. It now sends only the strip type and LED counts, which fit
+  on every lamp, and it no longer rewrites the lamp's colours. If an LED setup
+  save is ever too big to send, the screen says so instead of failing with a
+  raw error.
 
 ## 1.3.2
 

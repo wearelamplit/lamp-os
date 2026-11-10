@@ -1,8 +1,8 @@
 import '../../../core/ble/ble_client.dart';
 
-/// Thrown by [ControlNotifier.writeSettingsBlob] before it writes anything,
-/// when the blob encrypted would not fit one GATT write. [message] is written
-/// for the user; [toString] carries the sizes.
+/// A settings blob that would not fit one GATT write once encrypted, from
+/// [ControlNotifier.writeSettingsBlob]. [message] is written for the user and
+/// [toString] carries the sizes.
 class SettingsBlobTooLargeException implements Exception {
   const SettingsBlobTooLargeException(this.encryptedLength);
 
