@@ -13,8 +13,9 @@ namespace lamp::loop_watchdog {
 
 // Subscribes the calling task. Call once, from the loop task, at the end of
 // setup; setup itself runs unwatched. Skips subscribing after
-// kResetStreakLimit task-watchdog resets in a row, leaving the loop unwatched
-// until a reset other than the task watchdog's.
+// kResetStreakLimit task-watchdog resets in a row, each from a boot whose loop
+// never started an iteration at kStableUptimeMs; any other reset subscribes
+// again.
 void begin();
 
 // Resets the loop task's watchdog. Called between the steps of any loop-task
@@ -64,6 +65,11 @@ struct BootGuard {
 inline bool feedsFrom(const void* current, const void* subscribed) {
   return subscribed != nullptr && current == subscribed;
 }
+
+// The start of a loop iteration at `uptimeMs`, marked on `guard` whether or not
+// the loop is watched. True when the iteration feeds the watchdog.
+bool markIteration(BootGuard& guard, uint32_t uptimeMs, const void* current,
+                   const void* subscribed);
 
 // Longest span between consecutive marks, held for report until taken, so a
 // new longest refused by a rate limit still prints later. Not thread-safe.

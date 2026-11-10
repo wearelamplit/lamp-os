@@ -17,6 +17,7 @@ using lamp::loop_watchdog::feedsFrom;
 using lamp::LogRateLimiter;
 using lamp::loop_watchdog::kResetStreakLimit;
 using lamp::loop_watchdog::kStableUptimeMs;
+using lamp::loop_watchdog::markIteration;
 using lamp::loop_watchdog::reachedStable;
 using lamp::loop_watchdog::takeDueReport;
 using lamp::loop_watchdog::watchesBoot;
@@ -187,6 +188,27 @@ void test_an_unwatched_boot_that_runs_a_minute_rearms_after_its_reset() {
   TEST_ASSERT_TRUE(g.atBoot(true, true));
 }
 
+void test_an_unwatched_iteration_still_marks_the_minute() {
+  BootGuard g{};
+  g.atBoot(false, false);
+  g.atBoot(true, true);
+  g.atBoot(true, true);
+  TEST_ASSERT_FALSE(g.atBoot(true, true));
+  int loopTask = 0;
+  // Tripped, so begin() subscribed nothing and the iteration does not feed.
+  TEST_ASSERT_FALSE(markIteration(g, kStableUptimeMs, &loopTask, nullptr));
+  TEST_ASSERT_TRUE(g.atBoot(true, true));
+}
+
+void test_a_watched_iteration_feeds_only_from_the_loop_task() {
+  BootGuard g{};
+  g.atBoot(false, false);
+  int loopTask = 0;
+  int otherTask = 0;
+  TEST_ASSERT_TRUE(markIteration(g, 1000, &loopTask, &loopTask));
+  TEST_ASSERT_FALSE(markIteration(g, 1000, &otherTask, &loopTask));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_longest_is_the_widest_span_not_the_latest);
@@ -204,5 +226,7 @@ int main(int, char**) {
   RUN_TEST(test_guard_trips_on_the_third_early_reset_in_a_row);
   RUN_TEST(test_a_boot_that_ran_a_minute_breaks_the_streak);
   RUN_TEST(test_an_unwatched_boot_that_runs_a_minute_rearms_after_its_reset);
+  RUN_TEST(test_an_unwatched_iteration_still_marks_the_minute);
+  RUN_TEST(test_a_watched_iteration_feeds_only_from_the_loop_task);
   return UNITY_END();
 }

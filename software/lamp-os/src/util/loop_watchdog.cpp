@@ -31,6 +31,12 @@ void BootGuard::markUptime(uint32_t uptimeMs) {
   if (reachedStable(uptimeMs)) stableSeen = 1;
 }
 
+bool markIteration(BootGuard& guard, uint32_t uptimeMs, const void* current,
+                   const void* subscribed) {
+  guard.markUptime(uptimeMs);
+  return feedsFrom(current, subscribed);
+}
+
 bool takeDueReport(LongestGap& gap, LogRateLimiter& log, uint32_t nowMs,
                    uint32_t& longestMs) {
   if (!gap.reportDue() || !log.admit(nowMs).print) return false;
@@ -76,7 +82,8 @@ void begin() {
   if (!s_rtc.guard.atBoot(stateValid,
                           esp_reset_reason() == ESP_RST_TASK_WDT)) {
     Serial.printf("[loopwd] %u watchdog resets in a row; loop unwatched "
-                  "until a non-watchdog reset\n",
+                  "until a reset that is not a task-watchdog reset within "
+                  "60 s of boot\n",
                   (unsigned)s_rtc.guard.streak);
     return;
   }
@@ -105,10 +112,12 @@ void feed() {
 }
 
 void startIteration() {
-  s_rtc.guard.markUptime(millis());
+  if (!markIteration(s_rtc.guard, millis(), xTaskGetCurrentTaskHandle(),
+                     s_loopTask)) {
+    return;
+  }
   feed();
 #ifdef LAMP_DEBUG
-  if (!feedsFrom(xTaskGetCurrentTaskHandle(), s_loopTask)) return;
   const uint32_t nowMs = millis();
   s_iteration.mark(nowMs);
   report(s_iteration, s_iterationLog, nowMs, "loop iteration");
