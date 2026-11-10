@@ -1089,7 +1089,10 @@ lamp_protocol::FwResultStatus FirmwareReceiver::verifyAndApply() {
   // Set boot to the inactive slot. Next reboot lands PENDING_VERIFY; the
   // post-boot self-health path in lamp.cpp (g_pendingVerify / mark_app_valid)
   // handles the health check.
+  // set_boot_partition re-reads and hashes the whole image before it flips.
+  loop_watchdog::feed();
   const esp_err_t bootErr = esp_ota_set_boot_partition(otaPartition);
+  loop_watchdog::feed();
   if (bootErr != ESP_OK) {
 #ifdef LAMP_DEBUG
     Serial.printf("[fw_receiver] set_boot_partition failed: 0x%X\n", (unsigned)bootErr);

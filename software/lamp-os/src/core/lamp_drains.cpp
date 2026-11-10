@@ -240,9 +240,7 @@ void Lamp::drainSettingsBlob() {
 
     JsonDocument incomingDoc;
     if (deserializeJson(incomingDoc, buf, len) != DeserializationError::Ok) {
-#ifdef LAMP_DEBUG
-      Serial.printf("[loop] settingsBlob: incoming JSON parse failed\n");
-#endif
+      lamp::logDroppedWrite("settingsBlob", "parse failed");
     } else if (incomingDoc["factoryReset"].as<bool>()) {
       // Warning is unconditional: factoryReset co-shipped with other keys
       // must surface in fleet logs regardless of debug mode.
@@ -264,10 +262,7 @@ void Lamp::drainSettingsBlob() {
       }
     } else if (firmwareReceiver.isInProgress()) {
       // NVS write during OTA risks chunk-write contention; discard the blob.
-#ifdef LAMP_DEBUG
-      Serial.println(
-          "[loop] settingsBlob: OTA in progress, discarding write");
-#endif
+      lamp::logDroppedWrite("settingsBlob", "ota receiving");
     } else {
       bool wantsReboot = lamp::apply::settingsBlobLocal(incomingDoc.as<JsonObject>(), s_hwMaxBrightness);
       recomputeEffectiveCeiling();  // new brightnessCeiling takes effect without reboot

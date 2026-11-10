@@ -11,11 +11,16 @@
 
 namespace lamp::loop_watchdog {
 
-bool FeedGap::feed(uint32_t nowMs) {
+void FeedGap::feed(uint32_t nowMs) {
   const uint32_t gap = nowMs - lastFeedMs_;
   lastFeedMs_ = nowMs;
   const uint32_t before = longest_.peek();
-  return longest_.observe(gap) > before;
+  if (longest_.observe(gap) > before) unreported_ = true;
+}
+
+uint32_t FeedGap::takeReport() {
+  unreported_ = false;
+  return longest_.peek();
 }
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
@@ -26,8 +31,7 @@ TaskHandle_t s_loopTask = nullptr;
 
 #ifdef LAMP_DEBUG
 FeedGap s_gap;
-bool s_gapUnreported = false;
-LogRateLimiter s_gapLog(/*windowMs=*/5000, /*linesPerWindow=*/1);
+LogRateLimiter s_gapLog(/*windowMs=*/1000, /*linesPerWindow=*/1);
 #endif
 
 }  // namespace
@@ -48,15 +52,14 @@ void begin() {
 }
 
 void feed() {
-  if (s_loopTask == nullptr || xTaskGetCurrentTaskHandle() != s_loopTask) return;
+  if (!feedsFrom(xTaskGetCurrentTaskHandle(), s_loopTask)) return;
   esp_task_wdt_reset();
 #ifdef LAMP_DEBUG
   const uint32_t nowMs = millis();
-  if (s_gap.feed(nowMs)) s_gapUnreported = true;
-  if (s_gapUnreported && s_gapLog.admit(nowMs).print) {
-    s_gapUnreported = false;
+  s_gap.feed(nowMs);
+  if (s_gap.reportDue() && s_gapLog.admit(nowMs).print) {
     Serial.printf("[loopwd] longest unfed span %u ms\n",
-                  (unsigned)s_gap.longestMs());
+                  (unsigned)s_gap.takeReport());
   }
 #endif
 }

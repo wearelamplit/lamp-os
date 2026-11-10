@@ -18,22 +18,33 @@ task watchdog from the end of `setup()` (`util/loop_watchdog.hpp`): 5 s, or
 ## Rows
 
 1. **Stall resets and is recorded.** Note `lastCrash.count` in the `lamp`
-   section (absent counts as 0). Run `scripts/bench_cmd.py <port> --cmd
-   'loopwd.hang' --duration 20 -o /tmp/loopwd-hang.log`. Expect `[cmd] ok loopwd.hang`, then within about 5 s
+   section (absent counts as 0). Run:
+
+   ```sh
+   scripts/bench_cmd.py <port> --cmd 'loopwd.hang' --duration 20 \
+       -o /tmp/loopwd-hang.log
+   ```
+
+   Expect `[cmd] ok loopwd.hang`, then within about 5 s
    `task_wdt: Task watchdog got triggered` naming `loopTask (CPU 1)`, a panic
    and a reboot. After it boots, the `lamp` section shows `resetReason` 6 (task
    watchdog) and `lastCrash` with `count` one higher, `reset` 6, `core` 1, and
    a `pc` that `xtensa-esp32-elf-addr2line` puts in the `loopwd.hang` branch
    of `core/lamp_test_action.cpp`.
 2. **Margin on an ordinary session.** Boot, connect the app, drag colours,
-   open and close every sheet, save, then turn the web config on and join its
-   softAP (this runs the BLE teardown). Grep the log for `[loopwd] longest
-   unfed span`: the last value must stay well under 5000 ms. Record it.
+   open and close every sheet, save, then, with the app still connected, turn
+   the web config on and join its softAP (this runs the BLE teardown). Grep
+   the log for `[loopwd] longest unfed span`: the last value must be at or
+   under 2500 ms, half the 5 s timeout. A new longest always prints within
+   about a second, so the last line covers the teardown. Record it. Repeat
+   the softAP join with the phone carried out of BLE range just before it,
+   and record the last value again.
 3. **Margin across an OTA.** Receive a mesh OTA on the tapped lamp. The upfront
-   erase, the verify and the reboot must run through with no
-   `task_wdt` line, and the post-reboot lamp boots the new version. Record the
-   last `[loopwd] longest unfed span` before the reboot (the 30 s timeout
-   applies here).
+   erase, the verify and the reboot must run through with no `task_wdt` line,
+   and the post-reboot lamp boots the new version. The erase runs under the
+   30 s timeout and the verify under 5 s; the stat covers both, so hold it to
+   the tighter bound: the last `[loopwd] longest unfed span` before the
+   reboot must be at or under 2500 ms. Record it.
 4. **No reset loop on a normal boot.** Power-cycle the lamp three times. Each
    boot reaches the app with `resetReason` 1 (power-on) and no new
    `lastCrash` entry.
