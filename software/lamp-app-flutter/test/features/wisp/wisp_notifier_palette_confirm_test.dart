@@ -224,19 +224,49 @@ void main() {
     await pumpEventQueue();
 
     expect(n1.savedManualPalette, isEmpty);
+    expect(c.read(wispNotifierProvider(lamp2)).value!.paletteIdPrefix, isEmpty,
+        reason: 'the second notifier took the prefix-less status');
     expect(n2.savedManualPalette, saved);
     expect(n2.draftManualPalette, saved);
     expect(n2.manualPaletteDirty, isFalse);
   });
+  test('an empty palette read keeps the saved palette and draft', () async {
+    const saved = [LampColor(r: 1, g: 2, b: 3, w: 0)];
+    const moved = [LampColor(r: 9, g: 8, b: 7, w: 0)];
+    final ble = _HeldConfigBle();
+    seedPalette(ble, saved);
+    await ble.connect(_lampId);
+    await ble.write(_lampId, BleUuids.controlService, BleUuids.wispStatus,
+        _b(manualWith(saved)));
+    final c = makeContainer(ble);
+    c.listen(wispNotifierProvider(_lampId), (_, _) {});
+    await c.read(wispNotifierProvider(_lampId).future);
+    final n = c.read(wispNotifierProvider(_lampId).notifier);
+    expect(n.savedManualPalette, saved);
+
+    // A failed or empty section read decodes to no colours.
+    ble.seedSection(_lampId, 'wisppalette', Uint8List(0));
+    final readsBefore = ble.paletteReads;
+    notify(ble, manualWith(moved));
+    await pumpEventQueue();
+
+    expect(ble.paletteReads, greaterThan(readsBefore),
+        reason: 'the changed prefix triggered a palette read');
+    expect(n.savedManualPalette, saved);
+    expect(n.draftManualPalette, saved);
+    expect(n.manualPaletteDirty, isFalse);
+  });
 }
 
 /// Holds every `wispconfig` read while [holdConfig] is set, so a test can
-/// leave a config read in flight.
+/// leave a config read in flight, and counts `wisppalette` reads.
 class _HeldConfigBle extends InMemoryBleClient {
   Completer<void>? holdConfig;
+  int paletteReads = 0;
 
   @override
   Future<Uint8List> readSection(String deviceId, String name) async {
+    if (name == 'wisppalette') paletteReads++;
     final hold = holdConfig;
     if (name == 'wispconfig' && hold != null) await hold.future;
     return super.readSection(deviceId, name);
