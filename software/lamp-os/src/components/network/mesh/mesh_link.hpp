@@ -246,7 +246,7 @@ class MeshLink {
   void reportWispCoex(const uint8_t mac[6], uint32_t nowMs);
   void reportWispState(const uint8_t sourceMac[6],
                        const lamp_protocol::ParsedWispState& ws, uint32_t nowMs);
-  void reportMeshMix(uint32_t nowMs);
+  void reportMeshMix(uint64_t nowMs);
 #endif
 
   // Re-broadcast a received frame for gossip relay.

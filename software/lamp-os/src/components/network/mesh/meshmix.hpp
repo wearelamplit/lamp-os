@@ -26,7 +26,9 @@ struct MeshMix {
 
   uint32_t rx[kBucketCount] = {0};
   uint32_t relayedOut = 0;
-  uint32_t windowStartMs = 0;
+  // On lamp::uptimeMs(), so a window opened before weeks without a frame is
+  // not read as still running.
+  uint64_t windowStartMs = 0;
 
   static Bucket bucketFor(uint8_t msgType) {
     switch (msgType) {
@@ -50,7 +52,7 @@ struct MeshMix {
     return t;
   }
 
-  void reset(uint32_t nowMs) {
+  void reset(uint64_t nowMs) {
     for (uint32_t& v : rx) v = 0;
     relayedOut = 0;
     windowStartMs = nowMs;

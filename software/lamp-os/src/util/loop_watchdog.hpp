@@ -90,7 +90,7 @@ class LongestGap {
 
 // Takes the gap's report into `longestMs` when one is due and `log` admits a
 // line at nowMs. A refused report stays due.
-bool takeDueReport(LongestGap& gap, LogRateLimiter& log, uint32_t nowMs,
+bool takeDueReport(LongestGap& gap, LogRateLimiter& log, uint64_t nowMs,
                    uint32_t& longestMs);
 
 }  // namespace lamp::loop_watchdog

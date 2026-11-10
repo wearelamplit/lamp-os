@@ -16,7 +16,7 @@ struct WispCoexSlot {
   uint32_t recv = 0;
   uint32_t lastHelloMs = 0;
   uint32_t maxGapMs = 0;
-  uint32_t lastEmitMs = 0;
+  uint64_t lastEmitMs = 0;  // lamp::uptimeMs(), so a wisp back after weeks logs at once
 };
 
 // Per-wisp presence tracker: fixed slot array keyed by MAC, linear scan, no

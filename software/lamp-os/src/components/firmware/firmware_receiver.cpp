@@ -7,6 +7,7 @@
 #include "firmware_signature.hpp"
 #include "components/network/protocol/fw_ota.hpp"
 #include "components/network/ble/ble_control.hpp"  // pauseRadioForOta / resumeRadioAfterOta
+#include "util/uptime.hpp"
 #include "components/firmware/ota_quiet_mode.hpp"     // enterQuiet / exitQuiet
 #include "components/network/mesh/mesh_link.hpp"
 #include "util/heap_guard.hpp"
@@ -663,8 +664,8 @@ void FirmwareReceiver::handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk&
     // Rate-limited: at ~130 chunks/s of "not armed" this would flood the UART.
     // Throttle to once per second.
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-    static uint32_t lastUnarmedLogMs = 0;
-    const uint32_t nowMs = millis();
+    static uint64_t lastUnarmedLogMs = 0;
+    const uint64_t nowMs = lamp::uptimeMs();
     if (nowMs - lastUnarmedLogMs > 1000) {
       lastUnarmedLogMs = nowMs;
       Serial.printf("[fw_receiver] chunk drop: not armed (chunkIdx=%u)\n",

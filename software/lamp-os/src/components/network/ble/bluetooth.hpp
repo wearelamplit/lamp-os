@@ -68,6 +68,8 @@ class BluetoothComponent {
   Color m_pendingAdvShade;
   bool m_pendingOtaDistributing = false;
   bool m_advDirty = false;
-  uint32_t m_lastAdvFlushMs = 0;
+  // On lamp::uptimeMs(), so a colour change after weeks unchanged is not held
+  // off as if the last flush were recent.
+  uint64_t m_lastAdvFlushMs = 0;
 };
 }  // namespace lamp

@@ -5,6 +5,8 @@
 #include <esp_attr.h>
 #include <esp_system.h>
 #include <esp_task_wdt.h>
+
+#include "util/uptime.hpp"
 #endif
 
 namespace lamp::loop_watchdog {
@@ -37,7 +39,7 @@ bool markIteration(BootGuard& guard, uint32_t uptimeMs, const void* current,
   return feedsFrom(current, subscribed);
 }
 
-bool takeDueReport(LongestGap& gap, LogRateLimiter& log, uint32_t nowMs,
+bool takeDueReport(LongestGap& gap, LogRateLimiter& log, uint64_t nowMs,
                    uint32_t& longestMs) {
   if (!gap.reportDue() || !log.admit(nowMs).print) return false;
   longestMs = gap.takeReport();
@@ -67,7 +69,7 @@ LogRateLimiter s_iterationLog(/*windowMs=*/1000, /*linesPerWindow=*/1);
 void report(LongestGap& gap, LogRateLimiter& log, uint32_t nowMs,
             const char* what) {
   uint32_t longestMs = 0;
-  if (takeDueReport(gap, log, nowMs, longestMs)) {
+  if (takeDueReport(gap, log, uptimeMs(), longestMs)) {
     Serial.printf("[loopwd] longest %s %u ms\n", what, (unsigned)longestMs);
   }
 }

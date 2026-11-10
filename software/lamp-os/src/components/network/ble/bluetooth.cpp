@@ -25,6 +25,7 @@ extern "C" bool btInUse() { return true; }
 #include "util/color.hpp"
 #include "ble_control.hpp"
 #include "components/network/mesh/lamp_roster.hpp"
+#include "util/uptime.hpp"
 
 namespace lamp {
 
@@ -266,7 +267,7 @@ void BluetoothComponent::setAdvertisedOtaDistributing(bool distributing) {
 
 void BluetoothComponent::tickAdvertising() {
   if (!m_advDirty) return;
-  const uint32_t now = millis();
+  const uint64_t now = lamp::uptimeMs();
   if (now - m_lastAdvFlushMs < ADV_FLUSH_MIN_GAP_MS) return;
   if (s_advertisementData.size() < 9) return;  // begin() hasn't run
 

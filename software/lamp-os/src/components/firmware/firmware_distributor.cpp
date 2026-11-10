@@ -17,6 +17,8 @@
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
 #include <mbedtls/sha256.h>
+
+#include "util/uptime.hpp"
 #endif
 
 #if defined(LAMP_DEBUG) && (defined(ARDUINO) || defined(ESP_PLATFORM))
@@ -471,13 +473,14 @@ int FirmwareDistributor::streamOneChunk(uint32_t nowMs) {
   // Send outside the mux. sendFrame returns false on NO_MEM/queue-full.
   if (!transport_->sendFrame(buf, framed)) {
 #ifdef LAMP_DEBUG
-    static uint32_t lastSendFailLogMs = 0;
+    static uint64_t lastSendFailLogMs = 0;
     static uint32_t failCount = 0;
     failCount++;
-    if (nowMs - lastSendFailLogMs > 1000) {
+    const uint64_t upMs = lamp::uptimeMs();
+    if (upMs - lastSendFailLogMs > 1000) {
       FWDIST_LOGF("[fwdist] sendFrame fail chunkIdx=%u (n=%u in last sec)\n",
                   (unsigned)chunkIdx, (unsigned)failCount);
-      lastSendFailLogMs = nowMs;
+      lastSendFailLogMs = upMs;
       failCount = 0;
     }
 #endif
