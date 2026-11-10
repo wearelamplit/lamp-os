@@ -303,6 +303,121 @@ void main() {
           reason: 'op resent, not fire-and-forget once');
     });
 
+    const ours = 'AA:BB:CC:DD:EE:FF';
+    const rival = '11:22:33:44:55:66';
+    const saved = [
+      LampColor(r: 7, g: 8, b: 9, w: 0),
+      LampColor(r: 120, g: 0, b: 64, w: 30),
+    ];
+    String status(String mac, {int? stamp, String prefix = ''}) =>
+        '{"wispMac":"$mac","source":"manual"'
+        '${stamp == null ? '' : ',"lastSeenMs":$stamp'}'
+        '${prefix.isEmpty ? '' : ',"paletteIdPrefix":"$prefix"'}}';
+    void notify(InMemoryBleClient ble, String json) => ble.simulateNotify(
+        lampId,
+        BleUuids.controlService,
+        BleUuids.wispStatus,
+        Uint8List.fromList(utf8.encode(json)));
+
+    // The app first reads [heard].first, then takes the rest as notifies,
+    // while the lamp's palette section holds [saved]. The draft is then
+    // emptied.
+    Future<(InMemoryBleClient, ProviderContainer, WispNotifier)>
+        emptiedAfterHearing(List<String> heard) async {
+      final ble = InMemoryBleClient();
+      seedPalette(ble, saved);
+      await primeStatus(ble, heard.first);
+      final c = makeContainer(ble: ble);
+      c.listen(wispNotifierProvider(lampId), (_, _) {});
+      await c.read(wispNotifierProvider(lampId).future);
+      for (final json in heard.skip(1)) {
+        notify(ble, json);
+        await pumpEventQueue();
+      }
+      final n = c.read(wispNotifierProvider(lampId).notifier);
+      expect(n.savedManualPalette, saved);
+      n.setManualPaletteDraft(const []);
+      return (ble, c, n);
+    }
+
+    final savedPrefix = WispRepository.paletteIdHash(saved);
+    for (final (label, heard, stale, newer) in [
+      (
+        'a re-sent copy of the status from before the save',
+        [status(ours, stamp: 73500)],
+        73500,
+        73501,
+      ),
+      (
+        'a status stamped before the save, as after a wisp reboot',
+        [status(ours, stamp: 73500)],
+        2100,
+        73501,
+      ),
+      (
+        'a status without a stamp',
+        [status(ours, stamp: 73500)],
+        null,
+        73501,
+      ),
+      (
+        'a status older than the newest heard, after an older copy arrived '
+            'last',
+        [
+          status(ours, stamp: 73500),
+          status(ours, stamp: 90000, prefix: savedPrefix),
+          status(ours, stamp: 73500),
+        ],
+        80000,
+        90001,
+      ),
+      (
+        'a re-sent copy after the lamp switched from another wisp',
+        [status(rival, stamp: 900000), status(ours, stamp: 1000)],
+        1000,
+        1001,
+      ),
+    ]) {
+      test('$label does not confirm an emptied palette', () async {
+        final (ble, c, n) = await emptiedAfterHearing(heard);
+
+        var done = false;
+        final f = n.setManualPalette().whenComplete(() => done = true);
+        await Future<void>.delayed(Duration.zero);
+        notify(ble, status(ours, stamp: stale));
+        await pumpEventQueue();
+        expect(c.read(wispNotifierProvider(lampId)).value!.lastSeenMs, stale,
+            reason: 'the notifier took the status');
+        expect(done, isFalse);
+        expect(n.savedManualPalette, saved);
+        expect(n.manualPaletteDirty, isTrue);
+
+        notify(ble, status(ours, stamp: newer));
+        await f;
+        expect(n.savedManualPalette, isEmpty);
+      });
+    }
+
+    for (final (label, heard, newer) in [
+      ('a prefix-less status stamped after the save',
+          [status(ours, stamp: 73500)], 73501),
+      ('a stamped status after an unstamped one from a new wisp',
+          [status(rival, stamp: 900000), status(ours)], 1001),
+    ]) {
+      test('$label confirms an emptied palette', () async {
+        final (ble, _, n) = await emptiedAfterHearing(heard);
+
+        final f = n.setManualPalette();
+        await Future<void>.delayed(Duration.zero);
+        notify(ble, status(ours, stamp: newer));
+        await f;
+
+        expect(n.savedManualPalette, isEmpty);
+        expect(n.manualPaletteDirty, isFalse);
+        expect(n.manualPaletteWriteFailed, isFalse);
+      });
+    }
+
     test('after an emptied palette lands, the old palette coming back is '
         're-read', () async {
       const palette = [LampColor(r: 7, g: 8, b: 9, w: 0)];

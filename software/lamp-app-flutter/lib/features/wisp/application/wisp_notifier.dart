@@ -100,6 +100,12 @@ class WispNotifier extends _$WispNotifier {
   // Bumped on every setManualPalette, the same way [_setSourceEpoch] is.
   int _paletteSaveEpoch = 0;
 
+  // Newest `lastSeenMs` heard from the wisp at [_newestStampMac]. A lamp
+  // re-serves its cached status with the wisp's stamp unchanged, so only a
+  // larger stamp is a status emitted since.
+  String? _newestStampMac;
+  int? _newestStamp;
+
   // Palette comes from the dedicated `wisppalette` page section, not the
   // status char (whose palette-less NOTIFY would clobber it). A changed
   // `paletteIdPrefix` in a NOTIFY triggers a fresh section read.
@@ -311,6 +317,7 @@ class WispNotifier extends _$WispNotifier {
         if (_disposed) return WispStatus.empty;
       }
       _lastPaletteIdPrefix = initial.paletteIdPrefix;
+      _noteStamp(initial);
       // Palette rides its own reliable section read, decoupled from the
       // notify-clobbered status char. Awaited before _loadClaims so the two
       // BLE reads don't collide on FbpBleClient's lockless flow.
@@ -439,6 +446,7 @@ class WispNotifier extends _$WispNotifier {
   void _onIncoming(WispStatus raw) {
     if (_disposed) return;
     var next = _withHeldConfig(raw);
+    _noteStamp(next);
     _incoming.add(next);
     _opSeqs.add(next.opSeq);
     // A frame that decodes to "no wisp" while already holding a present
@@ -473,6 +481,17 @@ class WispNotifier extends _$WispNotifier {
       '[wisp_notifier] notify lamp=$lampId '
       'wispMac=${next.wispMac} present=${next.present} source=${next.source}',
     );
+  }
+
+  void _noteStamp(WispStatus status) {
+    final mac = status.wispMac;
+    final stamp = status.lastSeenMs;
+    if (mac == null || stamp == null) return;
+    final newest = _newestStamp;
+    if (mac != _newestStampMac || newest == null || stamp > newest) {
+      _newestStampMac = mac;
+      _newestStamp = stamp;
+    }
   }
 
   Future<void> _rereadStatusSection() async {
@@ -1075,10 +1094,13 @@ class WispNotifier extends _$WispNotifier {
   Future<void> setManualPalette() async {
     final committed = List<LampColor>.from(_draft);
     // The wisp stores an empty palette and clears its palette id, so a Manual
-    // status that omits paletteIdPrefix confirms it.
+    // status it emits after the save without paletteIdPrefix confirms it.
     final expectedHash =
         committed.isEmpty ? '' : WispRepository.paletteIdHash(committed);
     final wispMac = state.value?.wispMac;
+    final emittedAfter = committed.isEmpty && wispMac == _newestStampMac
+        ? _newestStamp
+        : null;
     final epoch = ++_paletteSaveEpoch;
     var outcome = PaletteConfirmOutcome.notConfirmed;
     final ok = await _sendConfirmed(
@@ -1087,7 +1109,8 @@ class WispNotifier extends _$WispNotifier {
         // sourceChanged is terminal within a save. A later retry's timeout
         // must not downgrade it to a generic notConfirmed.
         if (outcome != PaletteConfirmOutcome.sourceChanged) {
-          outcome = await _confirmPaletteLanded(expectedHash, wispMac);
+          outcome = await _confirmPaletteLanded(expectedHash, wispMac,
+              emittedAfter: emittedAfter);
         }
         return outcome == PaletteConfirmOutcome.confirmed;
       },
@@ -1119,25 +1142,32 @@ class WispNotifier extends _$WispNotifier {
   /// meaning the wisp stored and re-broadcast this exact palette, or
   /// [PaletteConfirmOutcome.notConfirmed] when [_sourceConfirmTimeout]
   /// elapses. An empty [expectedHash] matches a status that omits the
-  /// prefix. Every wispStatus NOTIFY carries the palette id state, so no
-  /// READ-poll is needed.
+  /// prefix. With [emittedAfter], a prefix match also needs a `lastSeenMs`
+  /// above it, so a status the wisp emitted before the save can't confirm.
+  /// Every wispStatus NOTIFY carries the palette id state, so no READ-poll is
+  /// needed.
   ///
   /// If that wisp's `source` leaves Manual (or a local [_pendingSourceMode]
   /// already did) the palette write is moot and the outcome is
   /// [PaletteConfirmOutcome.sourceChanged].
   Future<PaletteConfirmOutcome> _confirmPaletteLanded(
     String expectedHash,
-    String? wispMac,
-  ) {
+    String? wispMac, {
+    int? emittedAfter,
+  }) {
     final localFlip = _pendingSourceMode != null &&
         _pendingSourceMode != WispSourceMode.manual;
     if (localFlip) return Future.value(PaletteConfirmOutcome.sourceChanged);
     return _incoming.stream
-        .firstWhere((s) =>
-            s.present &&
-            s.wispMac == wispMac &&
-            (s.paletteIdPrefix == expectedHash ||
-                s.source != WispSourceMode.manual))
+        .firstWhere((s) {
+          final stamp = s.lastSeenMs;
+          final emittedSince = emittedAfter == null ||
+              (stamp != null && stamp > emittedAfter);
+          return s.present &&
+              s.wispMac == wispMac &&
+              ((s.paletteIdPrefix == expectedHash && emittedSince) ||
+                  s.source != WispSourceMode.manual);
+        })
         .timeout(_sourceConfirmTimeout)
         .then((s) => s.source == WispSourceMode.manual
             ? PaletteConfirmOutcome.confirmed
