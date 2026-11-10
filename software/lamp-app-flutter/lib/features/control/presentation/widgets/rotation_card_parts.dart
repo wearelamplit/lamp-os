@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/utils/duration_format.dart';
 import '../../domain/color_rotation.dart';
 import '../../domain/lamp_color.dart';
@@ -26,15 +27,27 @@ class CardTitle extends StatelessWidget {
     final r = rotation;
     final heading = Text(title, style: text.titleMedium);
     if (r == null) return heading;
+    final accent = Theme.of(context).colorScheme.onPrimaryContainer;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         heading,
-        Text(
-          'Rotating · ${formatDuration(Duration(seconds: r.periodS))} loop',
-          style: text.bodySmall?.copyWith(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
+        const SizedBox(height: AppSpace.xs),
+        Row(
+          children: [
+            Icon(
+              Icons.refresh,
+              size: 14, // deliberate dimension, not spacing
+              color: accent,
+            ),
+            const SizedBox(width: AppSpace.sm),
+            Flexible(
+              child: Text(
+                'Rotating · ${formatDuration(Duration(seconds: r.periodS))} loop',
+                style: text.bodySmall?.copyWith(color: accent),
+              ),
+            ),
+          ],
         ),
       ],
     );

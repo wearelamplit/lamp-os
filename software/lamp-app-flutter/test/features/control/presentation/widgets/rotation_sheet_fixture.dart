@@ -137,8 +137,7 @@ void expectRowsInsideSheet(WidgetTester tester, int n) {
   }
 }
 
-/// The A10 sizing cases shared by the Base and Shade sheets, at 375 × 667.
-/// [build] seeds a lamp with `n` colours on the role under test and its
+/// The sizing cases shared by the Base and Shade sheets. [build] seeds a lamp with `n` colours on the role under test and its
 /// `rotate` JSON (null for a role that cannot rotate); [open] opens its sheet.
 void sheetSizingCases({
   required Future<ProviderContainer> Function(int n, String? rotate) build,
@@ -195,7 +194,7 @@ void sheetSizingCases({
     ('no rotate in the section, 375 × 667', null, const Size(375, 667)),
     ('Rotate off, 390 × 844', rotateOff, const Size(390, 844)),
   ]) {
-    testWidgets('2 colours, $label: 0.6 as today, Save at the bottom',
+    testWidgets('2 colours, $label: 0.6, Save at the bottom',
         (tester) async {
       useSmallPhone(tester, size);
       final c = await build(2, rotate);

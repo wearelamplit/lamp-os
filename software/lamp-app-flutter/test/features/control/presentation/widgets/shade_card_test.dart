@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import '../../../../_support/in_memory_ble_client.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/features/control/application/control_notifier.dart';
+import 'package:lamp_app/features/control/domain/color_rotation.dart';
 import 'package:lamp_app/features/control/presentation/widgets/rotating_gradient.dart';
 import 'package:lamp_app/features/control/presentation/widgets/shade_card.dart';
 import 'package:lamp_app/features/control/presentation/widgets/shade_editor_sheet.dart';
@@ -237,5 +238,21 @@ void main() {
             atBottom);
       });
     }
+
+    testWidgets('a rotation-only change reaches the card live', (tester) async {
+      final c = await _buildContainer(
+          shadeColorsJson: _rgb,
+          shadeRotateJson: '{"on":false,"periodS":40,"dir":"down"}');
+      addTearDown(c.dispose);
+      await pumpCard(tester, c);
+      expect(find.byType(RotatingGradient), findsNothing);
+      await c.read(controlNotifierProvider(_devId).notifier).setShadeRotation(
+          const ColorRotation(
+              on: true, periodS: 65, direction: RotationDirection.down));
+      // Past the notifier's 60 ms write window, so its timer is spent.
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.byType(RotatingGradient), findsOneWidget);
+      expect(find.text('Rotating · 1m 5s loop'), findsOneWidget);
+    });
   });
 }

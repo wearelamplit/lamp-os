@@ -40,7 +40,7 @@ class RotateColorsBox extends StatelessWidget {
         Icon(
           Icons.refresh,
           size: 22, // deliberate dimension, not spacing
-          color: active ? cs.primary : cs.onSurfaceVariant,
+          color: active ? cs.onPrimaryContainer : cs.onSurfaceVariant,
         ),
         const SizedBox(width: AppSpace.md),
         Expanded(
@@ -49,7 +49,7 @@ class RotateColorsBox extends StatelessWidget {
             children: [
               Text(
                 'Rotate colors',
-                style: text.titleSmall?.copyWith(
+                style: text.titleMedium?.copyWith(
                   color: canRotate ? null : cs.onSurfaceVariant,
                 ),
               ),
@@ -121,6 +121,8 @@ class RotateColorsBox extends StatelessWidget {
         ),
       ],
     );
+    // An inset panel in the sheet: LampCard shares the sheet's own colour and
+    // would not show, so this draws one shade up.
     return Container(
       padding: const EdgeInsets.symmetric(
           horizontal: AppSpace.lg, vertical: AppSpace.md),

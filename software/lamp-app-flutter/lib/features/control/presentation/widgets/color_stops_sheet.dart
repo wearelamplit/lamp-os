@@ -68,10 +68,8 @@ class ColorStopsSheet extends StatefulWidget {
   /// The Rotate box's preview holds the first colour at its bottom.
   final bool rotationStop0AtBottom;
 
-  /// Lays the title, rows, Rotate box and buttons out in one scroll view
-  /// sized to its content, for a launcher that bounds the height with
-  /// [ColorSheetHeight]. Off, the rows fill a fixed-height sheet and scroll
-  /// inside it.
+  /// The sheet sizes to its content, for a launcher that bounds the height
+  /// with [ColorSheetHeight]. Off, it fills a launcher's fixed height.
   final bool contentSized;
 
   @override

@@ -256,7 +256,7 @@ void main() {
     });
   });
 
-  group('showColorStopsSheet keeps its fixed 0.6 height', () {
+  group('showColorStopsSheet is a fixed 0.6 high', () {
     for (final n in [2, 6]) {
       testWidgets('$n colours', (tester) async {
         useSmallPhone(tester);
