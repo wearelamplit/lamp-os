@@ -56,8 +56,9 @@ task watchdog from the end of `setup()` (`util/loop_watchdog.hpp`): 5 s, or
 5. **Boot-loop guard.** Run row 1's `loopwd.hang` three times, each within
    60 s of the previous boot. After the third reset the boot log shows
    `[loopwd] 3 watchdog resets in a row; loop unwatched until a
-   non-watchdog reset`, and a fourth `loopwd.hang` freezes the lamp with no reset. Power
-   cycle it: the next boot is watched again, and a `loopwd.hang` resets it.
+   non-watchdog reset`, and a fourth `loopwd.hang` freezes the lamp with no
+   reset. Power cycle it: the next boot is watched again, and a
+   `loopwd.hang` resets it.
 
 ## Known limits
 

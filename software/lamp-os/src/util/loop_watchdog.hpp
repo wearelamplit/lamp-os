@@ -22,22 +22,22 @@ void begin();
 // begin().
 void feed();
 
-// feed(), and marks the start of a loop iteration. First thing in loop().
+// Marks the start of a loop iteration, then feed(). First thing in loop(),
+// whether or not the loop is watched.
 void startIteration();
 
 constexpr uint8_t kResetStreakLimit = 3;
-// A task-watchdog reset after this much uptime does not count toward the
-// streak.
+// A boot whose loop starts an iteration this far into uptime ends the streak.
 constexpr uint32_t kStableUptimeMs = 60000;
 
 constexpr bool reachedStable(uint32_t uptimeMs) {
   return uptimeMs >= kStableUptimeMs;
 }
 
-// This boot's count of task-watchdog resets in a row, each before its boot
-// reached kStableUptimeMs. `prevStreak` and `prevReachedStable` are what the
-// previous boot left; `stateValid` is false when they did not survive the
-// reset.
+// This boot's count of task-watchdog resets in a row, each from a boot whose
+// loop never started an iteration at kStableUptimeMs. `prevStreak` and
+// `prevReachedStable` are what the previous boot left; `stateValid` is false
+// when they did not survive the reset.
 constexpr uint8_t bootStreak(bool stateValid, uint8_t prevStreak,
                              bool prevReachedStable, bool taskWdtReset) {
   return !stateValid || !taskWdtReset || prevReachedStable ? 0
@@ -45,7 +45,19 @@ constexpr uint8_t bootStreak(bool stateValid, uint8_t prevStreak,
                                           : kResetStreakLimit;
 }
 
-constexpr bool watchesBoot(uint8_t streak) { return streak < kResetStreakLimit; }
+constexpr bool watchesBoot(uint8_t streak) {
+  return streak < kResetStreakLimit;
+}
+
+// The boot-loop guard's state, kept across resets in RTC memory.
+struct BootGuard {
+  uint8_t streak;
+  uint8_t stableSeen;
+  // Folds in this boot's reset; true when the loop is watched this boot.
+  bool atBoot(bool stateValid, bool taskWdtReset);
+  // Each loop iteration, watched or not.
+  void markUptime(uint32_t uptimeMs);
+};
 
 // True when a feed from `current` resets the watchdog: begin() has
 // subscribed a task, and `current` is that task.

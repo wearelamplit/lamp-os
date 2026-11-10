@@ -10,6 +10,7 @@
 #include "../../src/util/log_rate_limiter.cpp"
 #include "../../src/util/loop_watchdog.cpp"
 
+using lamp::loop_watchdog::BootGuard;
 using lamp::loop_watchdog::bootStreak;
 using lamp::loop_watchdog::LongestGap;
 using lamp::loop_watchdog::feedsFrom;
@@ -100,7 +101,8 @@ void test_consecutive_watchdog_resets_stop_the_watch_at_the_limit() {
 
 void test_any_other_reset_rearms() {
   TEST_ASSERT_EQUAL_UINT8(0, bootStreak(true, kResetStreakLimit, false, false));
-  TEST_ASSERT_TRUE(watchesBoot(bootStreak(true, kResetStreakLimit, false, false)));
+  TEST_ASSERT_TRUE(
+      watchesBoot(bootStreak(true, kResetStreakLimit, false, false)));
 }
 
 void test_lost_state_rearms_even_after_a_watchdog_reset() {
@@ -134,7 +136,7 @@ void test_refused_report_stays_due_until_a_line_is_admitted() {
   g.mark(10100);  // 100
   TEST_ASSERT_TRUE(takeDueReport(g, log, 10100, longest));
   TEST_ASSERT_EQUAL_UINT32(100, longest);
-  g.mark(10400);  // 300, inside the limiter's second: refused
+  g.mark(10400);  // 300, refused inside the limiter's second
   TEST_ASSERT_FALSE(takeDueReport(g, log, 10400, longest));
   TEST_ASSERT_TRUE(g.reportDue());
   g.mark(11200);  // 800
@@ -142,8 +144,47 @@ void test_refused_report_stays_due_until_a_line_is_admitted() {
   TEST_ASSERT_TRUE(takeDueReport(g, log, 11210, longest));
   TEST_ASSERT_EQUAL_UINT32(800, longest);
   TEST_ASSERT_FALSE(g.reportDue());
-  // Nothing due: no line, whatever the limiter allows.
+  // With nothing due, no line prints and the limiter's window stays unspent.
   TEST_ASSERT_FALSE(takeDueReport(g, log, 20000, longest));
+  g.mark(20500);
+  TEST_ASSERT_TRUE(takeDueReport(g, log, 20500, longest));
+}
+
+void test_guard_trips_on_the_third_early_reset_in_a_row() {
+  BootGuard g{};
+  TEST_ASSERT_TRUE(g.atBoot(false, false));  // first boot, RTC unreadable
+  g.markUptime(5000);
+  TEST_ASSERT_TRUE(g.atBoot(true, true));
+  g.markUptime(kStableUptimeMs - 1);
+  TEST_ASSERT_TRUE(g.atBoot(true, true));
+  g.markUptime(12000);
+  TEST_ASSERT_FALSE(g.atBoot(true, true));
+}
+
+void test_a_boot_that_ran_a_minute_breaks_the_streak() {
+  BootGuard g{};
+  g.atBoot(false, false);
+  g.atBoot(true, true);
+  g.atBoot(true, true);
+  g.markUptime(kStableUptimeMs);
+  // Its later watchdog reset scores 0, and the flag does not carry past it,
+  // so three more early resets trip the guard.
+  TEST_ASSERT_TRUE(g.atBoot(true, true));
+  TEST_ASSERT_TRUE(g.atBoot(true, true));
+  TEST_ASSERT_TRUE(g.atBoot(true, true));
+  TEST_ASSERT_FALSE(g.atBoot(true, true));
+}
+
+void test_an_unwatched_boot_that_runs_a_minute_rearms_after_its_reset() {
+  BootGuard g{};
+  g.atBoot(false, false);
+  g.atBoot(true, true);
+  g.atBoot(true, true);
+  TEST_ASSERT_FALSE(g.atBoot(true, true));
+  // Unwatched, the loop keeps iterating; core 0's idle task trips the
+  // watchdog ten minutes in.
+  g.markUptime(600000);
+  TEST_ASSERT_TRUE(g.atBoot(true, true));
 }
 
 int main(int, char**) {
@@ -160,5 +201,8 @@ int main(int, char**) {
   RUN_TEST(test_a_late_watchdog_reset_does_not_count);
   RUN_TEST(test_stable_from_the_threshold);
   RUN_TEST(test_refused_report_stays_due_until_a_line_is_admitted);
+  RUN_TEST(test_guard_trips_on_the_third_early_reset_in_a_row);
+  RUN_TEST(test_a_boot_that_ran_a_minute_breaks_the_streak);
+  RUN_TEST(test_an_unwatched_boot_that_runs_a_minute_rearms_after_its_reset);
   return UNITY_END();
 }

@@ -5,7 +5,6 @@
 #include <esp_attr.h>
 #include <esp_system.h>
 #include <esp_task_wdt.h>
-
 #endif
 
 namespace lamp::loop_watchdog {
@@ -20,6 +19,16 @@ void LongestGap::mark(uint32_t nowMs) {
 uint32_t LongestGap::takeReport() {
   unreported_ = false;
   return longest_.peek();
+}
+
+bool BootGuard::atBoot(bool stateValid, bool taskWdtReset) {
+  streak = bootStreak(stateValid, streak, stableSeen != 0, taskWdtReset);
+  stableSeen = 0;
+  return watchesBoot(streak);
+}
+
+void BootGuard::markUptime(uint32_t uptimeMs) {
+  if (reachedStable(uptimeMs)) stableSeen = 1;
 }
 
 bool takeDueReport(LongestGap& gap, LogRateLimiter& log, uint32_t nowMs,
@@ -37,8 +46,7 @@ constexpr uint32_t kRtcMagic = 0x4c574447u;
 
 struct RtcState {
   uint32_t magic;
-  uint8_t streak;
-  uint8_t reachedStable;
+  BootGuard guard;
 };
 
 RTC_NOINIT_ATTR RtcState s_rtc;
@@ -63,16 +71,13 @@ void report(LongestGap& gap, LogRateLimiter& log, uint32_t nowMs,
 
 void begin() {
   if (s_loopTask != nullptr) return;
-  const uint8_t streak =
-      bootStreak(s_rtc.magic == kRtcMagic, s_rtc.streak, s_rtc.reachedStable != 0,
-                 esp_reset_reason() == ESP_RST_TASK_WDT);
+  const bool stateValid = s_rtc.magic == kRtcMagic;
   s_rtc.magic = kRtcMagic;
-  s_rtc.streak = streak;
-  s_rtc.reachedStable = 0;
-  if (!watchesBoot(streak)) {
-    Serial.printf("[loopwd] %u watchdog resets in a row; loop unwatched until "
-                  "a non-watchdog reset\n",
-                  (unsigned)streak);
+  if (!s_rtc.guard.atBoot(stateValid,
+                          esp_reset_reason() == ESP_RST_TASK_WDT)) {
+    Serial.printf("[loopwd] %u watchdog resets in a row; loop unwatched "
+                  "until a non-watchdog reset\n",
+                  (unsigned)s_rtc.guard.streak);
     return;
   }
   const TaskHandle_t self = xTaskGetCurrentTaskHandle();
@@ -92,15 +97,15 @@ void begin() {
 void feed() {
   if (!feedsFrom(xTaskGetCurrentTaskHandle(), s_loopTask)) return;
   esp_task_wdt_reset();
-  const uint32_t nowMs = millis();
-  if (s_rtc.reachedStable == 0 && reachedStable(nowMs)) s_rtc.reachedStable = 1;
 #ifdef LAMP_DEBUG
+  const uint32_t nowMs = millis();
   s_unfed.mark(nowMs);
   report(s_unfed, s_unfedLog, nowMs, "unfed span");
 #endif
 }
 
 void startIteration() {
+  s_rtc.guard.markUptime(millis());
   feed();
 #ifdef LAMP_DEBUG
   if (!feedsFrom(xTaskGetCurrentTaskHandle(), s_loopTask)) return;
