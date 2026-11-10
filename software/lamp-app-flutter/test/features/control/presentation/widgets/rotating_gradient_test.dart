@@ -22,6 +22,7 @@ Future<void> _pump(
   required bool stop0AtBottom,
   required RotationDirection direction,
   bool reduceMotion = false,
+  int periodS = _period,
 }) =>
     tester.pumpWidget(MediaQuery(
       data: MediaQueryData(disableAnimations: reduceMotion),
@@ -34,7 +35,7 @@ Future<void> _pump(
             child: RotatingGradient(
               colors: _rgb,
               rotation: ColorRotation(
-                  on: true, periodS: _period, direction: direction),
+                  on: true, periodS: periodS, direction: direction),
               stop0AtBottom: stop0AtBottom,
             ),
           ),
@@ -130,5 +131,54 @@ void main() {
   testWidgets('animates while motion is allowed', (tester) async {
     await _pump(tester, stop0AtBottom: false, direction: RotationDirection.up);
     expect(tester.binding.transientCallbackCount, greaterThan(0));
+  });
+
+  group('a change while moving keeps the frame', () {
+    const third = Duration(milliseconds: _period * 1000 ~/ 3);
+
+    // Base layout (stop 0 at the top), Up, run two loops and a third: green
+    // sits at the top edge.
+    Future<void> runToGreen(WidgetTester tester) async {
+      await _pump(tester, stop0AtBottom: false, direction: RotationDirection.up);
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 2 * _period));
+      await tester.pump(third);
+      expect(await _edge(tester, bottom: false), _Hue.green);
+    }
+
+    testWidgets('a new loop length keeps the colour, then runs at its rate',
+        (tester) async {
+      await runToGreen(tester);
+      await _pump(tester,
+          stop0AtBottom: false, direction: RotationDirection.up, periodS: 20);
+      await tester.pump();
+      expect(await _edge(tester, bottom: false), _Hue.green);
+      // A third of a 20 s loop.
+      await tester.pump(const Duration(milliseconds: 20000 ~/ 3));
+      expect(await _edge(tester, bottom: false), _Hue.blue);
+    });
+
+    testWidgets('a direction flip reverses in place', (tester) async {
+      await runToGreen(tester);
+      await _pump(tester,
+          stop0AtBottom: false, direction: RotationDirection.down);
+      await tester.pump();
+      expect(await _edge(tester, bottom: false), _Hue.green);
+      await tester.pump(third);
+      expect(await _edge(tester, bottom: false), _Hue.red);
+    });
+
+    testWidgets('reduce-motion turned on mid-loop settles at stop 0',
+        (tester) async {
+      await runToGreen(tester);
+      await _pump(tester,
+          stop0AtBottom: false,
+          direction: RotationDirection.up,
+          reduceMotion: true);
+      await tester.pump(const Duration(seconds: 1));
+      expect(tester.binding.transientCallbackCount, 0);
+      expect(await _edge(tester, bottom: false), _Hue.red);
+      expect(await _edge(tester, bottom: false, inset: 1 / 3), _Hue.green);
+    });
   });
 }

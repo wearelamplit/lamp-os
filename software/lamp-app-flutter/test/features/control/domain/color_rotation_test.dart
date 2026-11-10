@@ -46,42 +46,69 @@ void main() {
     expect(ColorRotation.fromJson(r.toJson(), defaultDirection: RotationDirection.up), r);
   });
 
-  group('rotationPosition', () {
+  group('advanceRotation', () {
     const period = 40;
-    Duration at(double loops) =>
-        Duration(microseconds: (loops * period * 1e6).round());
+    // Distance around the loop, so 0.9999999 and 0 read as equal.
+    double around(double a, double b) {
+      final d = (a - b).abs() % 1.0;
+      return d > 0.5 ? 1 - d : d;
+    }
+
+    double run(double from, int ticks, Duration dt, int periodS,
+        RotationDirection d) {
+      var m = from;
+      for (var i = 0; i < ticks; i++) {
+        m = advanceRotation(m, dt, periodS, d);
+      }
+      return m;
+    }
+
+    const frame = Duration(milliseconds: 16);
 
     test('advances at one constant rate going up', () {
-      final samples = [for (var i = 0; i < 8; i++) rotationPosition(at(i / 8), period, RotationDirection.up)];
-      for (var i = 0; i < 8; i++) {
-        expect(samples[i], closeTo(i / 8, 1e-9));
+      final step = advanceRotation(0, frame, period, RotationDirection.up);
+      expect(step, closeTo(0.016 / period, 1e-12));
+      for (final n in [10, 100, 1000]) {
+        expect(run(0, n, frame, period, RotationDirection.up),
+            closeTo(n * 0.016 / period, 1e-9));
       }
     });
 
     test('down runs the other way at the same rate', () {
-      for (final loops in [0.1, 0.37, 0.5, 0.9]) {
-        final up = rotationPosition(at(loops), period, RotationDirection.up);
-        final down = rotationPosition(at(loops), period, RotationDirection.down);
-        expect((up + down) % 1.0, closeTo(0, 1e-9), reason: '$loops');
-        expect(down, closeTo(1 - loops, 1e-9));
+      for (final start in [0.1, 0.5, 0.9]) {
+        final up = advanceRotation(start, frame, period, RotationDirection.up);
+        final down = advanceRotation(start, frame, period, RotationDirection.down);
+        expect(up - start, closeTo(start - down, 1e-12), reason: '$start');
       }
+      expect(advanceRotation(0, frame, period, RotationDirection.down),
+          closeTo(1 - 0.016 / period, 1e-12));
     });
 
-    test('is back at its start after periodS, either way', () {
+    test('stays in [0, 1) and is back at its start after periodS', () {
       for (final d in RotationDirection.values) {
-        expect(rotationPosition(Duration.zero, period, d), 0);
-        expect(rotationPosition(const Duration(seconds: period), period, d), 0);
-        expect(rotationPosition(const Duration(seconds: 3 * period), period, d), 0);
-        expect(rotationPosition(at(1.25), period, d),
-            closeTo(rotationPosition(at(0.25), period, d), 1e-9));
+        final end = run(0.25, 2500, frame, period, d);
+        expect(end, inInclusiveRange(0, 1));
+        expect(end, lessThan(1));
+        expect(around(end, 0.25), lessThan(1e-9), reason: d.wire);
+        expect(around(advanceRotation(0.25, const Duration(seconds: 3 * period),
+                period, d), 0.25), lessThan(1e-9));
       }
     });
 
     test('the loop length sets the rate', () {
-      expect(rotationPosition(const Duration(seconds: 5), 10, RotationDirection.up),
-          closeTo(0.5, 1e-9));
-      expect(rotationPosition(const Duration(seconds: 5), 20, RotationDirection.up),
-          closeTo(0.25, 1e-9));
+      expect(advanceRotation(0, const Duration(seconds: 5), 10, RotationDirection.up),
+          closeTo(0.5, 1e-12));
+      expect(advanceRotation(0, const Duration(seconds: 5), 20, RotationDirection.up),
+          closeTo(0.25, 1e-12));
+    });
+
+    test('steps from where it is, whatever the period was', () {
+      // A change of period or direction moves nothing until time passes.
+      for (final d in RotationDirection.values) {
+        for (final p in [5, 41, 120]) {
+          expect(advanceRotation(0.3, Duration.zero, p, d), closeTo(0.3, 1e-12));
+        }
+      }
     });
   });
 }

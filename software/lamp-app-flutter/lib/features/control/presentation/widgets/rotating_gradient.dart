@@ -31,10 +31,16 @@ class RotatingGradient extends StatefulWidget {
 
 class _RotatingGradientState extends State<RotatingGradient>
     with SingleTickerProviderStateMixin {
-  late final Ticker _ticker = createTicker(
-    (elapsed) => setState(() => _elapsed = elapsed),
-  );
-  Duration _elapsed = Duration.zero;
+  late final Ticker _ticker = createTicker(_tick);
+  Duration _lastTick = Duration.zero;
+  double _moved = 0;
+
+  void _tick(Duration elapsed) {
+    final dt = elapsed - _lastTick;
+    _lastTick = elapsed;
+    final r = widget.rotation;
+    setState(() => _moved = advanceRotation(_moved, dt, r.periodS, r.direction));
+  }
 
   @override
   void didChangeDependencies() {
@@ -42,8 +48,9 @@ class _RotatingGradientState extends State<RotatingGradient>
     final still = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
     if (still && _ticker.isActive) {
       _ticker.stop();
-      _elapsed = Duration.zero;
+      _moved = 0;
     } else if (!still && !_ticker.isActive) {
+      _lastTick = Duration.zero;
       _ticker.start();
     }
   }
@@ -56,15 +63,13 @@ class _RotatingGradientState extends State<RotatingGradient>
 
   @override
   Widget build(BuildContext context) {
-    final r = widget.rotation;
-    final moved = rotationPosition(_elapsed, r.periodS, r.direction);
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: widget.borderRadius,
         gradient: _loopGradient(
           widget.colors,
           stop0AtBottom: widget.stop0AtBottom,
-          movedUp: moved,
+          movedUp: _moved,
         ),
       ),
     );

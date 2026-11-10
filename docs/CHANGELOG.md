@@ -17,8 +17,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   With one colour the switch greys out with "Add a second color to rotate."
   and keeps your setting for when you add another. While a role rotates, its
   card on the Colors page moves and reads "Rotating · 40s loop". The Base and
-  Shade sheets now grow to fit their colours, up to most of the screen.
-  Lamps that can't rotate look as before.
+  Shade sheets now grow to fit their colours, up to most of the screen, on
+  every lamp. Lamps that can't rotate show no Rotate switch and no moving
+  card.
 
 ### Fixed
 - **Clearing a wisp's manual palette reaches the wisp.** Remove every colour

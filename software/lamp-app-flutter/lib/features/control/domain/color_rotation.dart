@@ -87,16 +87,19 @@ class ColorRotation {
       'ColorRotation(on: $on, periodS: $periodS, ${direction.wire})';
 }
 
-/// How far a rotating preview's pattern has moved toward the top of the
-/// preview after [elapsed], as a fraction of one loop in [0, 1). One constant
-/// rate, one loop per [periodS]; [RotationDirection.down] runs the other way.
-double rotationPosition(
-  Duration elapsed,
+/// Advances a rotating preview's position by [dt]. [moved] is how far its
+/// pattern has moved toward the top of the preview, as a fraction of one loop
+/// in [0, 1). One constant rate, one loop per [periodS];
+/// [RotationDirection.down] runs the other way. Stepping from the current
+/// position keeps the frame where it is when the period or direction changes,
+/// as the lamp does.
+double advanceRotation(
+  double moved,
+  Duration dt,
   int periodS,
   RotationDirection direction,
 ) {
-  final periodUs = periodS * Duration.microsecondsPerSecond;
-  final f = (elapsed.inMicroseconds % periodUs) / periodUs;
-  if (direction == RotationDirection.up) return f;
-  return f == 0 ? 0 : 1 - f;
+  final step = dt.inMicroseconds / (periodS * Duration.microsecondsPerSecond);
+  final next = direction == RotationDirection.up ? moved + step : moved - step;
+  return next - next.floorToDouble();
 }
