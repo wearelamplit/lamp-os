@@ -330,6 +330,7 @@ void test_raw_writes_never_rotate() {
   const Color mood(0x44, 0x00, 0xAA, 0x10);
   r.cfg.setSolid(mood);
   TEST_ASSERT_FALSE(r.cfg.rotating());
+  TEST_ASSERT_FALSE(r.cfg.scene().rotation.on);
   for (int k = 0; k < 200; ++k) {
     r.step();
     assertFrame(std::vector<Color>(kPx, mood), r.fb.buffer);
@@ -398,6 +399,50 @@ void test_zone_release_restores_the_scene_shown_after_an_abandoned_edit() {
       assertFrame(savedRotates ? r.expect(saved, r.now) : shown, r.fb.buffer);
     }
   }
+}
+
+// A marker that goes up mid-edit snapshots the edit, not the saved scene.
+void test_zone_release_restores_the_edit_when_the_marker_goes_up_mid_edit() {
+  Rig r(Surface::Shade);
+  const RoleScene saved = buildRoleScene(kPx, stopsA(), ColorRotation{});
+  const RoleScene edit = rotatingScene(stopsB(), 5, RotationDir::Down);
+  r.saveScene(saved);
+  r.cfg.colors = saved.colors;
+  r.tick(5000);
+  r.write(edit, 0);
+  r.rotate(edit, 20);
+
+  ZonePreviewSurface marker;
+  const Color white(255, 255, 255, 255);
+  for (uint32_t pos = 4; pos < 8; ++pos) {
+    set_mock_millis(r.now);
+    marker.show(r.cfg, kPx, pos, pos + 9, white);
+    r.cfg.lastWebSocketUpdateTimeMs = r.now;
+    r.step();
+    assertFrame(buildZonePreviewBuffer(kPx, pos, pos + 9, white), r.fb.buffer);
+  }
+  set_mock_millis(r.now);
+  marker.release(r.cfg);
+  TEST_ASSERT_TRUE(r.cfg.rotating());
+  for (int k = 0; k < 200; ++k) {
+    r.step();
+    assertFrame(r.expect(edit, r.now), r.fb.buffer);
+  }
+}
+
+// Releasing with no marker up leaves the configurator as it was.
+void test_zone_release_without_a_marker_changes_nothing() {
+  Rig r(Surface::Shade);
+  const RoleScene scene = rotatingScene(stopsA(), 5, RotationDir::Up);
+  r.write(scene, 0);
+  r.rotate(scene, 20);
+  ZonePreviewSurface marker;
+  set_mock_millis(r.now);
+  marker.release(r.cfg);
+  TEST_ASSERT_FALSE(marker.active());
+  TEST_ASSERT_TRUE(r.cfg.rotating());
+  TEST_ASSERT_EQUAL(kPx, r.cfg.colors.size());
+  r.rotate(scene, 100);
 }
 
 // A rotating saved scene rotates from boot, from the frame the fade-in
@@ -695,6 +740,8 @@ int main(int, char**) {
   RUN_TEST(test_raw_writes_never_rotate);
   RUN_TEST(test_zone_marker_holds_and_rotation_resumes);
   RUN_TEST(test_zone_release_restores_the_scene_shown_after_an_abandoned_edit);
+  RUN_TEST(test_zone_release_restores_the_edit_when_the_marker_goes_up_mid_edit);
+  RUN_TEST(test_zone_release_without_a_marker_changes_nothing);
   RUN_TEST(test_saved_rotating_scene_rotates_from_boot);
   RUN_TEST(test_abandoned_preview_returns_to_the_rotating_saved_scene);
   RUN_TEST(test_abandoned_rotating_preview_settles_on_the_static_saved_scene);
