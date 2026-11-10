@@ -108,9 +108,10 @@ class ShiftyExpression : public Expression {
   uint32_t fadeDurationMs = 60000;
 
   // Runtime state
-  uint32_t shiftStartMs = 0;
+  // Phase starts on lamp::uptimeMs(): home mode can freeze a shift for weeks.
+  uint64_t shiftStartMs = 0;
   uint32_t currentShiftDurationMs = 0;
-  uint32_t fadeStartMs = 0;
+  uint64_t fadeStartMs = 0;
 
   // Per-frame cache (perf): the factor from (elapsed, fadeDurationMs) is
   // identical for every pixel within a fade frame. Hoisted out of the

@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 #include "util/fade.hpp"
+#include "util/uptime.hpp"
 #include "expressions/expression_manager.hpp"
 
 namespace lamp {
@@ -57,13 +58,13 @@ void ShiftyExpression::startShift() {
   // cycle by capping frames, so the counter never ends a phase itself.
   frames = kContinuousMaxFrames;
   frame = 0;
-  fadeStartMs = millis();
+  fadeStartMs = uptimeMs();
   state = FADING_TO_PALETTE;
   if (fillMode_ != 0) populatePixelStartOffsets(false);
 
   // Determine how long to stay shifted
   currentShiftDurationMs = getRandomShiftDuration();
-  shiftStartMs = millis();
+  shiftStartMs = uptimeMs();
 #ifdef LAMP_DEBUG
   Serial.printf("[shifty] fade-start t=%lu fadeMs=%u holdMs=%u\n",
                 (unsigned long)fadeStartMs, (unsigned)fadeDurationMs,
@@ -72,7 +73,7 @@ void ShiftyExpression::startShift() {
 }
 
 void ShiftyExpression::startUnshift() {
-  fadeStartMs = millis();
+  fadeStartMs = uptimeMs();
   state = FADING_BACK;
 #ifdef LAMP_DEBUG
   Serial.printf("[shifty] fade-back-start t=%lu\n", (unsigned long)fadeStartMs);
@@ -127,7 +128,7 @@ void ShiftyExpression::onTrigger() {
 }
 
 void ShiftyExpression::onUpdate() {
-  const uint32_t nowMs = millis();
+  const uint64_t nowMs = uptimeMs();
 
   // Directional fills stagger each pixel's fade start; the window must outlast
   // the last-staged pixel or the edges freeze mid-fade (0 for uniform).
@@ -172,7 +173,7 @@ void ShiftyExpression::onUpdate() {
   // Only meaningful in FADING_* states; SHIFTED and IDLE branches in draw()
   // don't consult the factor.
   if (state == FADING_TO_PALETTE || state == FADING_BACK) {
-    const uint32_t elapsed = nowMs - fadeStartMs;
+    const uint32_t elapsed = uptimeSince(fadeStartMs);
     cachedFadeAtEnd_ = (elapsed >= fadeDurationMs);
     // When cachedFadeAtEnd_ is true, draw() short-circuits to the end color
     // and never reads cachedFadeFactor_, so a divide-by-zero in
@@ -244,7 +245,7 @@ void ShiftyExpression::draw() {
           }
         }
       } else {
-        const uint32_t elapsed = millis() - fadeStartMs;
+        const uint32_t elapsed = uptimeSince(fadeStartMs);
         const uint32_t perFade = (fadeDurationMs > 1u) ? fadeDurationMs / 2u : 1u;
         for (int i = zone_.posMin; i <= zone_.posMax; i++) {
           if (i >= fb->pixelCount) break;

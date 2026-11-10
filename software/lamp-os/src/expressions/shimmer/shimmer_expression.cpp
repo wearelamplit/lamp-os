@@ -5,6 +5,7 @@
 
 #include "expressions/primitives.hpp"
 #include "util/fade.hpp"
+#include "util/uptime.hpp"
 
 namespace lamp {
 
@@ -58,7 +59,7 @@ void ShimmerExpression::onTrigger() {
 
   cells_.resize(regionSize);
   if (bursting()) {
-    burstStartMs_ = millis();
+    burstStartMs_ = uptimeMs();
     burstTinted_ = !colors.empty();
     if (burstTinted_) burstTint_ = getRandomColor();
     // Selection sampling: exactly burstCount_ distinct cells spark, so a
@@ -79,14 +80,15 @@ void ShimmerExpression::onTrigger() {
   }
 }
 
-void ShimmerExpression::advanceWind(uint32_t nowMs, uint32_t deltaMs) {
+void ShimmerExpression::advanceWind(uint32_t deltaMs) {
   if (style_.windAmp <= 0.0f) {
     windOffset_ = 0.0f;
     return;
   }
-  if (nextGustMs_ == 0 || timeReached(nowMs, nextGustMs_)) {
+  const uint64_t up = uptimeMs();
+  if (nextGustMs_ == 0 || up >= nextGustMs_) {
     windTarget_ = rollWindTarget(style_, rng);
-    nextGustMs_ = nextGustAt(nowMs, style_, rng);
+    nextGustMs_ = nextGustAt(up, style_, rng);
   }
   windOffset_ = approachHeat(
       windOffset_, windTarget_,
@@ -107,7 +109,7 @@ void ShimmerExpression::drawBurst() {
   const uint32_t nowMs = millis();
   const uint32_t deltaMs = (lastUpdateMs_ == 0) ? 0 : nowMs - lastUpdateMs_;
   lastUpdateMs_ = nowMs;
-  const uint32_t elapsedMs = nowMs - burstStartMs_;
+  const uint32_t elapsedMs = uptimeSince(burstStartMs_);
 
   const bool falling = burstFalling(elapsedMs, burstMs_);
   const uint32_t stepMs = burstStepMs(burstMs_);
@@ -152,7 +154,7 @@ void ShimmerExpression::draw() {
   const bool paint = shouldAffectBuffer() && zone_.size() > 0 && fb &&
                      fb->pixelCount > 0 && !cells_.empty();
 
-  advanceWind(nowMs, deltaMs);
+  advanceWind(deltaMs);
   const float flutter = advanceFlutter(flutter_, style_.flutterAmp,
                                        style_.flutterStepMs, deltaMs, rng);
   const float heatFactor = approachFactor(deltaMs, style_.stepMs);

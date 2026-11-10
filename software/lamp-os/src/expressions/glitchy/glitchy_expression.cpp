@@ -39,7 +39,7 @@ void GlitchyExpression::configureFromParameters(const ExpressionParams& paramete
 void GlitchyExpression::onTrigger() {
   saveBufferState();
   glitchColor = getRandomColor();
-  glitchEndMs = millis() + rng.range(glitchDurationMinMs, glitchDurationMaxMs);
+  glitchEndMs = uptimeMs() + rng.range(glitchDurationMinMs, glitchDurationMaxMs);
   painted_ = false;
   frames = kContinuousMaxFrames;
   frame = 0;
@@ -51,7 +51,7 @@ void GlitchyExpression::draw() {
     return;
   }
 
-  if (painted_ && timeReached(millis(), glitchEndMs)) {
+  if (painted_ && uptimeMs() >= glitchEndMs) {
     restoreSaved_();
     // Cap the counter; nextFrame() flips PLAYING_ONCE to STOPPED and
     // onComplete may chain a follow-up glitch.

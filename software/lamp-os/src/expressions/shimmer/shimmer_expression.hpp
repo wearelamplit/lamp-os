@@ -62,7 +62,7 @@ class ShimmerExpression : public Expression {
     float heat = 0.0f;
     float target = 0.0f;
   };
-  void advanceWind(uint32_t nowMs, uint32_t deltaMs);
+  void advanceWind(uint32_t deltaMs);
   void drawBurst();
 
   Zone zone_;
@@ -71,7 +71,9 @@ class ShimmerExpression : public Expression {
   float windOffset_ = 0.0f;
   float windTarget_ = 0.0f;
   Flutter flutter_;
-  uint32_t nextGustMs_ = 0;
+  // Gust deadline and burst start on lamp::uptimeMs(): home mode can freeze a
+  // shimmer for weeks.
+  uint64_t nextGustMs_ = 0;
   uint32_t lastUpdateMs_ = 0;
   // Hidden burst params: `count` stars over `durationMax` ms, both > 0, make a
   // transient's trigger one short burst that completes; a colour in the
@@ -80,7 +82,7 @@ class ShimmerExpression : public Expression {
   bool bursting() const { return burstMs_ > 0 && isTransient; }
   uint16_t burstCount_ = 0;
   uint32_t burstMs_ = 0;
-  uint32_t burstStartMs_ = 0;
+  uint64_t burstStartMs_ = 0;
   bool burstTinted_ = false;
   Color burstTint_;
 };
