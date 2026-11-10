@@ -37,9 +37,9 @@ void at(uint64_t uptime) {
 
 // One control() pass with the peer freshly sighted nearby; true when it
 // starts a greeting.
-bool greetsAt(SocialBehavior& social, uint64_t uptime) {
+bool greetsAt(SocialBehavior& social, uint64_t uptime, const char* ble = kPeerBle) {
   at(uptime);
-  lampRoster.addOrUpdateFromBle("near", kPeerBle, Color(), Color(), -50);
+  lampRoster.addOrUpdateFromBle("near", ble, Color(), Color(), -50);
   social.animationState = STOPPED;
   social.control();
   return social.animationState != STOPPED;
@@ -83,10 +83,27 @@ void test_introvert_greets_after_half_a_wrap() {
   TEST_ASSERT_TRUE(greetsAt(social, (1ull << 31) + 1000));
 }
 
+// Two greetings, then one a whole wrap later: the old two must not count
+// toward the introvert's fatigue, so a fourth peer is still greeted.
+void test_introvert_fatigue_forgets_greetings_a_wrap_old() {
+  Config cfg;
+  cfg.lamp.socialMode = SocialMode::Introvert;
+  BehaviorContext ctx;
+  SocialBehavior social(nullptr, 1200);
+  social.setConfig(&cfg);
+  social.setBehaviorContext(&ctx);
+  const uint64_t t0 = 100000;
+  TEST_ASSERT_TRUE(greetsAt(social, t0, "AA:BB:CC:DD:EE:01"));
+  TEST_ASSERT_TRUE(greetsAt(social, t0 + 70000, "AA:BB:CC:DD:EE:02"));
+  TEST_ASSERT_TRUE(greetsAt(social, t0 + kWrapMs + 140000, "AA:BB:CC:DD:EE:03"));
+  TEST_ASSERT_TRUE(greetsAt(social, t0 + kWrapMs + 210000, "AA:BB:CC:DD:EE:04"));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_first_greeting_after_half_a_wrap);
   RUN_TEST(test_regreet_a_wrap_later);
   RUN_TEST(test_introvert_greets_after_half_a_wrap);
+  RUN_TEST(test_introvert_fatigue_forgets_greetings_a_wrap_old);
   return UNITY_END();
 }
