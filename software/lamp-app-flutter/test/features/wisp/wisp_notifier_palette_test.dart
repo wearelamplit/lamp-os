@@ -436,6 +436,13 @@ void main() {
     for (final (label, heard, newer) in [
       ('a prefix-less status stamped after the save',
           [status(ours, stamp: 73500)], 73501),
+      ('a status whose stamp only another wisp sent before the save',
+          [
+            status(ours, stamp: 73500),
+            status(rival, stamp: 73600),
+            status(ours, stamp: 73500),
+          ],
+          73600),
       ('a stamped status after an unstamped one from a new wisp',
           [status(rival, stamp: 900000), status(ours)], 1001),
     ]) {
@@ -467,7 +474,7 @@ void main() {
         'a status the lamp cached before the newest one heard',
         [status(ours, stamp: 73500, lamp: 5000)],
         status(ours, stamp: 73600, lamp: 4000),
-        status(ours, stamp: 73600, lamp: 5001),
+        status(ours, stamp: 73601, lamp: 5001),
       ),
       (
         'a status of this wisp the lamp cached before another wisp\'s',
@@ -646,10 +653,21 @@ void main() {
 
       fakeAsync((fa) {
         n.setManualPalette().catchError((Object _) {});
-        fa.elapse(WispNotifier.writeConfirmBudget);
+        fa.elapse(
+            WispNotifier.saveStatusReadTimeout + const Duration(milliseconds: 1));
         fa.flushMicrotasks();
         expect(ble.writesTo(lampId, BleUuids.wispOp), isNotEmpty);
       });
+    });
+
+    test('the heard stamps stay bounded however many statuses arrive',
+        () async {
+      final (_, c, _) = await emptiedAfterHearing([
+        for (var i = 0; i < 20; i++) status(ours, stamp: 1000 + i),
+      ]);
+      final n = c.read(wispNotifierProvider(lampId).notifier);
+      expect(n.heardStampCount, lessThan(20));
+      expect(n.heardStampCount, greaterThan(1));
     });
 
     test('after a reconnect, a re-served copy from before it does not '

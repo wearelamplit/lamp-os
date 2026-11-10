@@ -106,13 +106,20 @@ class WispNotifier extends _$WispNotifier {
   // larger stamp is a status emitted since.
   final Map<String, int> _newestStamps = {};
 
-  // The last distinct `lastSeenMs` values heard, oldest first, each naming one
-  // wisp emission whatever form it arrived in. The lamp caches one status at a
-  // time, so only a recent emission can come back. Too small a cap lets a
-  // section read that lands behind a newer notify push out the stamp the lamp
-  // still holds.
+  // The last distinct (wispMac, lastSeenMs) pairs heard, oldest first, each
+  // naming one wisp emission in whatever form it arrived. The lamp caches one
+  // status at a time, so only a recent emission can come back. Too small a cap
+  // lets repeats of a late older copy push out the stamp the lamp still holds.
   final List<(String, int)> _heardStamps = [];
   static const int _heardStampCap = 4;
+
+  /// How many heard stamps the notifier holds, bounded however many it hears.
+  @visibleForTesting
+  int get heardStampCount => _heardStamps.length;
+
+  /// How long an empty save's status read may take before the save sends.
+  @visibleForTesting
+  static Duration get saveStatusReadTimeout => _readIdleTimeout;
 
   // Newest `statusLastSeenMs` on this connection. Every status comes from the
   // one lamp's clock, whichever wisp sent it, so one value orders them all.
