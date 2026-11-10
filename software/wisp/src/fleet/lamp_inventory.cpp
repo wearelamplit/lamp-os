@@ -62,17 +62,18 @@ void LampInventory::recordHello(const uint8_t mac[6], const char* name,
     e.firmwareVersion = firmwareVersion;
     e.lastSeenMs = nowMs;
     e.rssi = rssi;
+    e.rssiMs = nowMs;
   } else {
     copyName(entries_[idx].name, name);
     std::memcpy(entries_[idx].baseColor, baseRGBW, 4);
     std::memcpy(entries_[idx].shadeColor, shadeRGBW, 4);
     entries_[idx].firmwareVersion = firmwareVersion;
     entries_[idx].lastSeenMs = nowMs;
-    // Preserve the "never measured" sentinel: if the caller didn't have
-    // a real RSSI, keep the stored value. A real measurement overwrites
-    // with the latest sample.
+    // A relayed HELLO carries the relayer's RSSI, so it leaves the stored
+    // direct measurement alone.
     if (rssi != INT8_MIN) {
       entries_[idx].rssi = rssi;
+      entries_[idx].rssiMs = nowMs;
     }
   }
   xSemaphoreGive(asHandle(mutex_));
@@ -87,6 +88,11 @@ void LampInventory::prune(uint32_t nowMs, uint32_t maxAgeMs) {
       if (i != count_ - 1) entries_[i] = entries_[count_ - 1];
       count_--;
       continue;
+    }
+    // Signed: the recv task may stamp a HELLO after the caller read nowMs.
+    if (static_cast<int32_t>(nowMs - entries_[i].rssiMs) >
+        static_cast<int32_t>(kDirectRssiMaxAgeMs)) {
+      entries_[i].rssi = INT8_MIN;
     }
     i++;
   }

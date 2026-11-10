@@ -14,8 +14,16 @@ namespace wisp {
 #define LAMP_PRUNE_TIME_MS 240000
 #endif
 
+// The lamps' steady HELLO interval (LAMP_HELLO_INTERVAL_MS on the lamp; the
+// native inventory test pins the two equal).
+constexpr uint32_t kLampHelloIntervalMs = 30000;
+
+// A direct RSSI older than this is forgotten: three HELLO intervals, so two
+// lost beacons in a row keep a present lamp's measurement.
+constexpr uint32_t kDirectRssiMaxAgeMs = 3 * kLampHelloIntervalMs;
+
 // Minimal (mac, rssi) view of an inventory entry, sized for stack arrays.
-// rssi INT8_MIN means "never measured".
+// rssi INT8_MIN means no current direct measurement.
 struct LampObservation {
   uint8_t mac[6] = {0};
   int8_t rssi = INT8_MIN;
@@ -34,13 +42,12 @@ struct InventoryEntry {
   uint8_t shadeColor[4] = {0};  // RGBW
   uint32_t firmwareVersion = 0;
   uint32_t lastSeenMs = 0;
-  // RSSI of the most recent MSG_HELLO from this lamp, as reported by
-  // ESP-NOW. Used by the WispRoster claim-decision logic to figure out
-  // which wisp is closest to each lamp. Defaults to INT8_MIN to mean
-  // "never measured". Entries that came in via a code path that didn't
-  // surface RSSI keep this sentinel and won't be chosen as the closer
-  // wisp until a real measurement lands.
+  // RSSI of the most recent MSG_HELLO this wisp heard directly from the lamp,
+  // stamped at rssiMs. WispRoster's claim arbitration compares it with peer
+  // wisps'. INT8_MIN means no current direct measurement: never heard
+  // directly, or aged out past kDirectRssiMaxAgeMs.
   int8_t rssi = INT8_MIN;
+  uint32_t rssiMs = 0;
 };
 
 static_assert(std::is_trivially_copyable<InventoryEntry>::value,
@@ -63,8 +70,8 @@ class LampInventory {
   LampInventory();
 
   // Called from MeshLink recv handler (WiFi task). Bounded mutex take so a
-  // contended loop reader can't stall recv; on contention the update is dropped.
-  // HELLOs repeat every 5 s, so the lamp is caught on the next beacon.
+  // contended loop reader can't stall recv; on contention the update is dropped
+  // and the lamp is caught on its next beacon.
   // `name` is a null-terminated string, truncated at HELLO_MAX_NAME.
   // `rssi` is the signed ESP-NOW RX RSSI for the frame that delivered this
   // hello, or INT8_MIN to mean "no measurement available" (test rigs etc.).
@@ -73,7 +80,9 @@ class LampInventory {
                    uint32_t firmwareVersion, uint32_t nowMs,
                    int8_t rssi = INT8_MIN);
 
-  // Drop entries older than maxAgeMs. Call periodically from loop().
+  // Drop entries older than maxAgeMs, and forget a direct RSSI older than
+  // kDirectRssiMaxAgeMs so a lamp heard only through relays stops counting
+  // toward this wisp's claim. Call periodically from loop().
   void prune(uint32_t nowMs, uint32_t maxAgeMs);
 
   // Copy of the current roster. Caller can do whatever they want with it

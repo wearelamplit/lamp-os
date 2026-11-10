@@ -76,7 +76,9 @@ class WispRoster {
   // Ages out stale peers along the way. Runs on the 2 s tick; the CLAIM
   // broadcast rides the 4 s odd-tick sub-multiple. Claims every lamp this
   // wisp directly hears, deferring to a peer only when the peer's RSSI
-  // wins the advantage/hysteresis arbitration.
+  // wins the advantage/hysteresis arbitration. A claimed lamp whose direct
+  // RSSI has aged out (INT8_MIN) stays claimed only while no peer reports a
+  // direct RSSI for it; a lamp never heard directly is not claimed.
   //
   // The observations array is borrowed for the duration of the call;
   // the roster doesn't retain it.
