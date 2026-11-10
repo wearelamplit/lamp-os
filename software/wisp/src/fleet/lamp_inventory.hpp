@@ -14,13 +14,10 @@ namespace wisp {
 #define LAMP_PRUNE_TIME_MS 240000
 #endif
 
-// The lamps' steady HELLO interval (LAMP_HELLO_INTERVAL_MS on the lamp; the
-// native inventory test pins the two equal).
-constexpr uint32_t kLampHelloIntervalMs = 30000;
-
-// A direct RSSI older than this is forgotten: three HELLO intervals, so two
-// lost beacons in a row keep a present lamp's measurement.
-constexpr uint32_t kDirectRssiMaxAgeMs = 3 * kLampHelloIntervalMs;
+// A direct RSSI older than this is forgotten. Three lamp HELLO intervals, so
+// two lost beacons in a row keep a present lamp's measurement.
+constexpr uint32_t kDirectRssiMaxAgeMs =
+    3 * lamp_protocol::kLampHelloIntervalMs;
 
 // Minimal (mac, rssi) view of an inventory entry, sized for stack arrays.
 // rssi INT8_MIN means no current direct measurement.

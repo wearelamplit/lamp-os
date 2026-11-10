@@ -7,7 +7,10 @@
 //   - prune forgets a direct RSSI older than kDirectRssiMaxAgeMs, relays or not,
 //     and keeps one heard within it, across the millis() wrap and when the
 //     stamp sits just ahead of nowMs.
-//   - kDirectRssiMaxAgeMs derives from the lamp's HELLO interval.
+//   - kDirectRssiMaxAgeMs tolerates two lost lamp HELLOs and lapses before
+//     the prune.
+//   - prune drops an entry whose last HELLO is older than maxAgeMs across the
+//     millis() wrap.
 //   - prune drops aged entries from the observation feed.
 //   - roster full → oldest entry evicted for the newcomer.
 
@@ -18,7 +21,6 @@
 #include <cstring>
 
 #include "fleet/lamp_inventory.hpp"
-#include "../../../lamp-os/src/components/network/mesh/hello_interval.hpp"
 
 namespace {
 
@@ -132,8 +134,8 @@ void test_direct_rssi_ages_out_while_relays_arrive(void) {
   wisp::LampInventory inv;
   const uint32_t t0 = 7000;
   hear(inv, 1, -52, t0);
-  for (uint32_t t = t0 + wisp::kLampHelloIntervalMs;
-       t <= t0 + wisp::kDirectRssiMaxAgeMs; t += wisp::kLampHelloIntervalMs) {
+  for (uint32_t t = t0 + lamp_protocol::kLampHelloIntervalMs;
+       t <= t0 + wisp::kDirectRssiMaxAgeMs; t += lamp_protocol::kLampHelloIntervalMs) {
     hear(inv, 1, INT8_MIN, t);
     inv.prune(t, LAMP_PRUNE_TIME_MS);
     TEST_ASSERT_EQUAL_INT8(-52, rssiOf(inv));
@@ -156,7 +158,7 @@ void test_direct_rssi_heard_within_window_is_kept(void) {
   uint32_t heardAt = 3300;
   for (int8_t rssi : samples) {
     hear(inv, 1, rssi, heardAt);
-    const uint32_t nextHeard = heardAt + 3 * wisp::kLampHelloIntervalMs;
+    const uint32_t nextHeard = heardAt + 3 * lamp_protocol::kLampHelloIntervalMs;
     for (uint32_t p = heardAt + 1700; p <= nextHeard; p += 29000) {
       inv.prune(p, LAMP_PRUNE_TIME_MS);
       TEST_ASSERT_EQUAL_INT8(rssi, rssiOf(inv));
@@ -179,6 +181,8 @@ void test_direct_rssi_ages_across_millis_wrap(void) {
   wisp::LampInventory inv;
   const uint32_t heardAt = UINT32_MAX - 12000;
   hear(inv, 1, -61, heardAt);
+  inv.prune(heardAt + 5000, LAMP_PRUNE_TIME_MS);
+  TEST_ASSERT_EQUAL_INT8(-61, rssiOf(inv));
   inv.prune(heardAt + 40000, LAMP_PRUNE_TIME_MS);
   TEST_ASSERT_EQUAL_INT8(-61, rssiOf(inv));
   hear(inv, 1, INT8_MIN, heardAt + 60000);
@@ -186,10 +190,20 @@ void test_direct_rssi_ages_across_millis_wrap(void) {
   TEST_ASSERT_EQUAL_INT8(INT8_MIN, rssiOf(inv));
 }
 
-void test_direct_rssi_window_derives_from_lamp_hello_interval(void) {
-  TEST_ASSERT_EQUAL_UINT32(LAMP_HELLO_INTERVAL_MS, wisp::kLampHelloIntervalMs);
-  TEST_ASSERT_TRUE(wisp::kDirectRssiMaxAgeMs >= 3u * LAMP_HELLO_INTERVAL_MS);
+void test_direct_rssi_window_spans_two_lost_hellos(void) {
+  TEST_ASSERT_TRUE(wisp::kDirectRssiMaxAgeMs >=
+                   3u * lamp_protocol::kLampHelloIntervalMs);
   TEST_ASSERT_TRUE(wisp::kDirectRssiMaxAgeMs < LAMP_PRUNE_TIME_MS);
+}
+
+void test_prune_drops_entry_across_millis_wrap(void) {
+  wisp::LampInventory inv;
+  const uint32_t heardAt = UINT32_MAX - 5000;
+  hear(inv, 1, -60, heardAt);
+  inv.prune(heardAt + LAMP_PRUNE_TIME_MS, LAMP_PRUNE_TIME_MS);
+  TEST_ASSERT_EQUAL_size_t(1, inv.size());
+  inv.prune(heardAt + LAMP_PRUNE_TIME_MS + 1, LAMP_PRUNE_TIME_MS);
+  TEST_ASSERT_EQUAL_size_t(0, inv.size());
 }
 
 int main(int, char**) {
@@ -203,6 +217,7 @@ int main(int, char**) {
   RUN_TEST(test_direct_rssi_heard_within_window_is_kept);
   RUN_TEST(test_direct_rssi_stamped_ahead_of_now_is_kept);
   RUN_TEST(test_direct_rssi_ages_across_millis_wrap);
-  RUN_TEST(test_direct_rssi_window_derives_from_lamp_hello_interval);
+  RUN_TEST(test_direct_rssi_window_spans_two_lost_hellos);
+  RUN_TEST(test_prune_drops_entry_across_millis_wrap);
   return UNITY_END();
 }

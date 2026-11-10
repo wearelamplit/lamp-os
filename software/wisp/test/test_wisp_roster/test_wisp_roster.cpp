@@ -281,8 +281,9 @@ void test_never_measured_rssi_skips_claim(void) {
 }
 
 // Lamp X sits near wisp A (-50) and is heard by B (-72). It moves out of A's
-// direct range: A hears it only through lamp relays, B still directly. Within
-// the window A keeps it; after the window B takes it and A lets go.
+// direct range: A hears it only through lamp relays, B still directly. For
+// three HELLO intervals after A's last direct HELLO A keeps it; by the first
+// prune past that plus two CLAIM rounds, B has it and A has let go.
 void test_two_wisps_hand_off_a_lamp_whose_direct_signal_aged_out(void) {
   wisp::LampInventory invA, invB;
   wisp::WispRoster a, b;
@@ -290,9 +291,12 @@ void test_two_wisps_hand_off_a_lamp_whose_direct_signal_aged_out(void) {
   b.setSelfMac(kPeerHighMac);
 
   const uint32_t moved = 31000;
+  const uint32_t lastDirect = moved - lamp_protocol::kLampHelloIntervalMs;
+  const uint32_t windowEnd = lastDirect + 3 * lamp_protocol::kLampHelloIntervalMs;
+  const uint32_t handedOffBy = windowEnd + 30000 + 8000;
   bool aClaimedInWindow = true;
   for (uint32_t t = 1000; t <= moved + 150000; t += 2000) {
-    if ((t - 1000) % wisp::kLampHelloIntervalMs == 0) {
+    if ((t - 1000) % lamp_protocol::kLampHelloIntervalMs == 0) {
       hearX(invA, t < moved ? -50 : INT8_MIN, t);
       hearX(invB, -72, t);
     }
@@ -303,14 +307,14 @@ void test_two_wisps_hand_off_a_lamp_whose_direct_signal_aged_out(void) {
       sendClaim(a, kSelfMac, b, t);
       sendClaim(b, kPeerHighMac, a, t);
     }
-    if (t <= moved - 1000 + wisp::kDirectRssiMaxAgeMs && !a.claims(kLampX)) {
-      aClaimedInWindow = false;
-    }
+    if (t <= windowEnd && !a.claims(kLampX)) aClaimedInWindow = false;
     if (t >= kSettledMs && t < moved) TEST_ASSERT_FALSE(b.claims(kLampX));
+    if (t >= handedOffBy) {
+      TEST_ASSERT_FALSE_MESSAGE(a.claims(kLampX), "A still holds past the window");
+      TEST_ASSERT_TRUE_MESSAGE(b.claims(kLampX), "B has not taken over");
+    }
   }
   TEST_ASSERT_TRUE_MESSAGE(aClaimedInWindow, "A let go inside the window");
-  TEST_ASSERT_FALSE(a.claims(kLampX));
-  TEST_ASSERT_TRUE(b.claims(kLampX));
 }
 
 // A hears X directly only every third HELLO (two lost in a row), B hears every
@@ -323,10 +327,10 @@ void test_lamp_heard_directly_within_window_stays_claimed(void) {
 
   hearX(invA, -50, 1000);
   for (uint32_t t = 1000; t <= 400000; t += 2000) {
-    if (t >= 7000 && (t - 7000) % (3 * wisp::kLampHelloIntervalMs) == 0) {
+    if (t >= 7000 && (t - 7000) % (3 * lamp_protocol::kLampHelloIntervalMs) == 0) {
       hearX(invA, -50, t);
     }
-    if ((t - 1000) % wisp::kLampHelloIntervalMs == 0) hearX(invB, -72, t);
+    if ((t - 1000) % lamp_protocol::kLampHelloIntervalMs == 0) hearX(invB, -72, t);
     const bool prune = (t - 1000) % 30000 == 0;
     claimTick(invA, a, t, prune);
     claimTick(invB, b, t, prune);

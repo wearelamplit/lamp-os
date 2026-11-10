@@ -82,14 +82,15 @@ void LampInventory::recordHello(const uint8_t mac[6], const char* name,
 void LampInventory::prune(uint32_t nowMs, uint32_t maxAgeMs) {
   xSemaphoreTake(asHandle(mutex_), portMAX_DELAY);
   for (size_t i = 0; i < count_; ) {
+    // Signed ages, since the recv task may stamp a HELLO after the caller
+    // read nowMs.
     const uint32_t last = entries_[i].lastSeenMs;
-    const uint32_t age  = (nowMs >= last) ? nowMs - last : 0;
-    if (last != 0 && age > maxAgeMs) {
+    if (last != 0 &&
+        static_cast<int32_t>(nowMs - last) > static_cast<int32_t>(maxAgeMs)) {
       if (i != count_ - 1) entries_[i] = entries_[count_ - 1];
       count_--;
       continue;
     }
-    // Signed: the recv task may stamp a HELLO after the caller read nowMs.
     if (static_cast<int32_t>(nowMs - entries_[i].rssiMs) >
         static_cast<int32_t>(kDirectRssiMaxAgeMs)) {
       entries_[i].rssi = INT8_MIN;

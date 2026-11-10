@@ -71,7 +71,8 @@ void SerialConsole::dumpInventory() {
   Serial.printf("[wisp] roster (%u lamp%s):\n",
                 (unsigned)roster.size(), roster.size() == 1 ? "" : "s");
   for (const auto& e : roster) {
-    const uint32_t ageMs = (nowMs >= e.lastSeenMs) ? nowMs - e.lastSeenMs : 0;
+    const int32_t sinceMs = static_cast<int32_t>(nowMs - e.lastSeenMs);
+    const uint32_t ageMs = sinceMs > 0 ? static_cast<uint32_t>(sinceMs) : 0;
     Serial.printf("  %02X:%02X:%02X:%02X:%02X:%02X  %-12s  fw=%s  age=%lums  rssi=%d\n",
                   e.mac[0], e.mac[1], e.mac[2], e.mac[3], e.mac[4], e.mac[5],
                   e.name, formatVersion(e.firmwareVersion).c_str(),
