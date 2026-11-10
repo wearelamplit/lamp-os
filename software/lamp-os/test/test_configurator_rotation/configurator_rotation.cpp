@@ -728,9 +728,54 @@ void test_home_mode_keeps_rotation_running() {
   }
 }
 
+// A static edit that ran its crossfade and edit window, then a whole wrap with
+// no other: the configurator stays settled on the edited frame, with neither
+// the edit window nor the crossfade coming back.
+void test_a_settled_edit_stays_settled_a_wrap_later() {
+  Rig r(Surface::Shade);
+  r.tick(r.now);
+  const RoleScene edit = buildRoleScene(kPx, stopsA(), ColorRotation{});
+  r.write(edit, kDefaultFadeMs);
+  const uint32_t edited = r.now;
+  while (r.now < edited + CONFIGURATOR_WEBSOCKET_TIMEOUT_MS + 1000) r.step();
+  TEST_ASSERT_EQUAL(STOPPED, r.cfg.animationState);
+  const std::vector<Color> settled = r.fb.buffer;
+  for (uint64_t t = r.now; t < edited + (1ull << 32); t += 1ull << 28) {
+    r.tick(static_cast<uint32_t>(t));
+  }
+  r.tick(edited + 50);
+  TEST_ASSERT_EQUAL(STOPPED, r.cfg.animationState);
+  assertFrame(settled, r.fb.buffer);
+}
+
+// A rotating scene's crossfade, ended, must not replay a wrap later.
+void test_a_finished_crossfade_does_not_replay_a_wrap_later() {
+  Rig r(Surface::Shade);
+  const RoleScene first = rotatingScene(stopsA(), 40, RotationDir::Up);
+  r.saveScene(first);
+  r.write(first, 0);
+  r.rotate(first, 30);
+  const RoleScene second = rotatingScene(stopsB(), 40, RotationDir::Up);
+  r.saveScene(second);
+  r.write(second, kDefaultFadeMs);
+  const uint32_t faded = r.now;
+  while (r.now < faded + CONFIGURATOR_WEBSOCKET_TIMEOUT_MS + 1000) {
+    r.step();
+    r.expect(second, r.now);
+  }
+  for (uint64_t t = r.now; t < faded + (1ull << 32); t += 1ull << 28) {
+    r.tick(static_cast<uint32_t>(t));
+    r.expect(second, r.now);
+  }
+  r.tick(faded + 50);
+  assertFrame(r.expect(second, r.now), r.fb.buffer);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_frame_is_the_shifted_loop);
+  RUN_TEST(test_a_settled_edit_stays_settled_a_wrap_later);
+  RUN_TEST(test_a_finished_crossfade_does_not_replay_a_wrap_later);
   RUN_TEST(test_up_rises_on_both_surfaces);
   RUN_TEST(test_one_stop_scene_is_solid_and_still);
   RUN_TEST(test_speed_and_direction_change_keep_the_position);

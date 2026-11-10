@@ -143,8 +143,15 @@ void ConfiguratorBehavior::draw() {
   nextFrame();
 };
 
+void ConfiguratorBehavior::retireStale(uint32_t now) {
+  lastWebSocketUpdateTimeMs =
+      lampos::retireStamp(now, lastWebSocketUpdateTimeMs, CONFIGURATOR_WEBSOCKET_TIMEOUT_MS);
+  if (!fadeActive(now)) fadeDurationMs_ = 0;
+}
+
 void ConfiguratorBehavior::control() {
   uint32_t now = millis();
+  retireStale(now);
   // Only rotation puts the configurator in PLAYING.
   if (rotating_ || fb->defaultRotation.on || animationState == PLAYING) {
     controlRotating(now);
