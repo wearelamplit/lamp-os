@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -42,6 +43,7 @@ void main() {
 
   group("the name is capped at the firmware's byte limit", () {
     int bytes(String s) => utf8.encode(s).length;
+    const cap = Utf8ByteLimitFormatter(kMaxLampNameBytes);
 
     test('in UTF-8 bytes, so a multi-byte character counts in full', () {
       // 30 bytes of ASCII plus a 4-byte emoji is 32 UTF-16 units, under a
@@ -75,15 +77,87 @@ void main() {
       expect(_typed('$nearly🎓', old: nearly), nearly);
     });
 
-    test('text an input method is still composing waits until it commits',
+    test('a paste over a selected name keeps as much of the paste as fits',
         () {
-      final long = 'か' * 11;
-      final composing = TextEditingValue(
-        text: long,
-        selection: TextSelection.collapsed(offset: long.length),
-        composing: TextRange(start: 0, end: long.length),
+      final full = 'c' * kMaxLampNameBytes;
+      final paste = 'p' * 40;
+      final out = cap.formatEditUpdate(
+        TextEditingValue(
+          text: full,
+          selection: TextSelection(baseOffset: 0, extentOffset: full.length),
+        ),
+        TextEditingValue(
+          text: paste,
+          selection: TextSelection.collapsed(offset: paste.length),
+        ),
       );
-      const cap = Utf8ByteLimitFormatter(kMaxLampNameBytes);
+      expect(out.text, 'p' * kMaxLampNameBytes);
+    });
+
+    test('a paste at the start keeps the name and puts the cursor after it',
+        () {
+      final name = 'n' * 30;
+      final out = cap.formatEditUpdate(
+        TextEditingValue(
+          text: name,
+          selection: const TextSelection.collapsed(offset: 0),
+        ),
+        TextEditingValue(
+          text: 'XYZW$name',
+          selection: const TextSelection.collapsed(offset: 4),
+        ),
+      );
+      expect(out.text, 'XY$name');
+      expect(out.selection, const TextSelection.collapsed(offset: 2));
+    });
+
+    TextEditingValue replace(String old, int from, int to, String typed) {
+      final text = old.replaceRange(from, to, typed);
+      return cap.formatEditUpdate(
+        TextEditingValue(
+          text: old,
+          selection: TextSelection(baseOffset: from, extentOffset: to),
+        ),
+        TextEditingValue(
+          text: text,
+          selection: TextSelection.collapsed(offset: from + typed.length),
+        ),
+      );
+    }
+
+    test('an edit next to an emoji never splits it', () {
+      // 😀 and 😁 share their first UTF-16 unit; 😀 and 🨀 their second.
+      final a28 = 'a' * 28;
+      expect(replace('$a28😀', 28, 30, '😁x').text, '$a28😁');
+      expect(replace('😀$a28', 0, 2, 'xy🨀').text, 'xy$a28');
+    });
+
+    test('a name already past the cap is cut back on the next edit', () {
+      final over = 'z' * 40;
+      expect(replace(over, 40, 40, 'q').text, 'z' * kMaxLampNameBytes);
+    });
+
+    final long = 'か' * 11;
+    final composing = TextEditingValue(
+      text: long,
+      selection: TextSelection.collapsed(offset: long.length),
+      composing: TextRange(start: 0, end: long.length),
+    );
+
+    test('a word still being composed is capped where the platform caps it '
+        '(Android)', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      expect(
+        cap.formatEditUpdate(TextEditingValue.empty, composing).text,
+        'か' * 10,
+      );
+    });
+
+    test('a word still being composed waits until it commits where the '
+        'platform waits (iOS)', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
       expect(cap.formatEditUpdate(TextEditingValue.empty, composing), composing);
       expect(
         cap
