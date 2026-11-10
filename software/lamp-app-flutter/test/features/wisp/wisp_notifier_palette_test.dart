@@ -309,9 +309,10 @@ void main() {
       LampColor(r: 7, g: 8, b: 9, w: 0),
       LampColor(r: 120, g: 0, b: 64, w: 30),
     ];
-    String status(String mac, {int? stamp, String prefix = ''}) =>
+    String status(String mac, {int? stamp, int? lamp, String prefix = ''}) =>
         '{"wispMac":"$mac","source":"manual"'
         '${stamp == null ? '' : ',"lastSeenMs":$stamp'}'
+        '${lamp == null ? '' : ',"statusLastSeenMs":$lamp'}'
         '${prefix.isEmpty ? '' : ',"paletteIdPrefix":"$prefix"'}}';
     void notify(InMemoryBleClient ble, String json) => ble.simulateNotify(
         lampId,
@@ -438,6 +439,114 @@ void main() {
         expect(n.manualPaletteWriteFailed, isFalse);
       });
     }
+
+    // `lamp` is the connected lamp's statusLastSeenMs, `stamp` the wisp's
+    // lastSeenMs.
+    for (final (label, heard, stale, newer) in [
+      (
+        'a re-served copy of a lamp-stamped status from before the save',
+        [status(ours, stamp: 73500, lamp: 5000)],
+        status(ours, stamp: 73500, lamp: 5000),
+        status(ours, stamp: 73500, lamp: 5001),
+      ),
+      (
+        'a status the lamp cached before the newest one heard',
+        [status(ours, stamp: 73500, lamp: 5000)],
+        status(ours, stamp: 73600, lamp: 4000),
+        status(ours, stamp: 73600, lamp: 5001),
+      ),
+      (
+        'a status of this wisp the lamp cached before another wisp\'s',
+        [
+          status(ours, stamp: 73500, lamp: 5000),
+          status(rival, stamp: 900, lamp: 9000),
+          status(ours, stamp: 73500),
+        ],
+        status(ours, stamp: 73600, lamp: 7000),
+        status(ours, stamp: 73600, lamp: 9001),
+      ),
+      (
+        'a status without a lamp stamp, judged by its wisp stamp',
+        [status(ours, stamp: 73500, lamp: 5000)],
+        status(ours, stamp: 73500),
+        status(ours, stamp: 73501),
+      ),
+    ]) {
+      test('$label does not confirm an emptied palette', () async {
+        final (ble, c, n) = await emptiedAfterHearing(heard);
+
+        var done = false;
+        final f = n.setManualPalette().whenComplete(() => done = true);
+        await Future<void>.delayed(Duration.zero);
+        notify(ble, stale);
+        await pumpEventQueue();
+        final held = c.read(wispNotifierProvider(lampId)).value!;
+        expect(held.lastSeenMs, isNotNull,
+            reason: 'the notifier took the status');
+        expect(done, isFalse);
+        expect(n.savedManualPalette, saved);
+
+        notify(ble, newer);
+        await f;
+        expect(n.savedManualPalette, isEmpty);
+      });
+    }
+
+    test('after a wisp reboot, a new status confirms the empty save',
+        () async {
+      final (ble, _, n) =
+          await emptiedAfterHearing([status(ours, stamp: 73500, lamp: 5000)]);
+
+      final f = n.setManualPalette();
+      await Future<void>.delayed(Duration.zero);
+      notify(ble, status(ours, stamp: 2100, lamp: 6000));
+      await f;
+
+      expect(n.savedManualPalette, isEmpty);
+      expect(n.manualPaletteWriteFailed, isFalse);
+    });
+
+    // A lamp reboot drops the link and restarts the lamp's clock, while the
+    // notifier lives on under the open lamp screen.
+    Future<(InMemoryBleClient, WispNotifier)> emptiedAcrossLampReboot() async {
+      final (ble, _, n) =
+          await emptiedAfterHearing([status(ours, stamp: 73500, lamp: 900000)]);
+      await ble.disconnect(lampId);
+      await pumpEventQueue();
+      await ble.connect(lampId);
+      await pumpEventQueue();
+      return (ble, n);
+    }
+
+    test('after a lamp reboot, a new status confirms the empty save',
+        () async {
+      final (ble, n) = await emptiedAcrossLampReboot();
+
+      final f = n.setManualPalette();
+      await Future<void>.delayed(Duration.zero);
+      notify(ble, status(ours, stamp: 74000, lamp: 3000));
+      await f;
+
+      expect(n.savedManualPalette, isEmpty);
+      expect(n.manualPaletteWriteFailed, isFalse);
+    });
+
+    test('after a reconnect, a re-served copy from before it does not '
+        'confirm the empty save', () async {
+      final (ble, n) = await emptiedAcrossLampReboot();
+
+      var done = false;
+      final f = n.setManualPalette().whenComplete(() => done = true);
+      await Future<void>.delayed(Duration.zero);
+      notify(ble, status(ours, stamp: 73500, lamp: 900000));
+      await pumpEventQueue();
+      expect(done, isFalse);
+      expect(n.savedManualPalette, saved);
+
+      notify(ble, status(ours, stamp: 73501, lamp: 900001));
+      await f;
+      expect(n.savedManualPalette, isEmpty);
+    });
 
     test('after an emptied palette lands, the old palette coming back is '
         're-read', () async {

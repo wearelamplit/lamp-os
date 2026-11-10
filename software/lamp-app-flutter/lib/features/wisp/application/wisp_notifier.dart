@@ -36,6 +36,7 @@ enum PaletteConfirmOutcome { confirmed, notConfirmed, sourceChanged }
 @Riverpod(name: 'wispNotifierProvider')
 class WispNotifier extends _$WispNotifier {
   StreamSubscription<Uint8List>? _sub;
+  StreamSubscription<bool>? _connSub;
   late WispRepository _repo;
   final _store = WispPasswordStore();
   // In-memory password cache; seeded from WispPasswordStore on build once
@@ -104,6 +105,11 @@ class WispNotifier extends _$WispNotifier {
   // re-serves its cached status with the wisp's stamp unchanged, so only a
   // larger stamp is a status emitted since.
   final Map<String, int> _newestStamps = {};
+
+  // Newest `statusLastSeenMs` on this connection. Every status comes from the
+  // one lamp's clock, whichever wisp sent it, so one value orders them all.
+  // Cleared on disconnect, since a lamp reboot restarts that clock.
+  int? _newestLampStamp;
 
   // Palette comes from the dedicated `wisppalette` page section, not the
   // status char (whose palette-less NOTIFY would clobber it). A changed
@@ -229,6 +235,7 @@ class WispNotifier extends _$WispNotifier {
     _colorsRecalculating = false;
     _shuffleSnapshot = null;
 
+    _newestLampStamp = null;
     _config = null;
     _configMac = null;
     _lastConfigSeenMs = null;
@@ -241,6 +248,7 @@ class WispNotifier extends _$WispNotifier {
     ref.onDispose(() {
       _disposed = true;
       _sub?.cancel();
+      _connSub?.cancel();
       unawaited(incoming.close());
       unawaited(opSeqs.close());
       _offColorWriteTimer?.cancel();
@@ -269,6 +277,10 @@ class WispNotifier extends _$WispNotifier {
     debugPrint(
       '[wisp_notifier] build lamp=$lampId -- connected, subscribing + reading',
     );
+
+    _connSub = ble.watchConnected(lampId).listen((connected) {
+      if (!connected) _newestLampStamp = null;
+    });
 
     // Subscribe before the initial read to never miss a notify that
     // fires between the read returning and the listener attaching.
@@ -483,6 +495,11 @@ class WispNotifier extends _$WispNotifier {
   }
 
   void _noteStamp(WispStatus status) {
+    final lampStamp = status.statusLastSeenMs;
+    final newestLamp = _newestLampStamp;
+    if (lampStamp != null && (newestLamp == null || lampStamp > newestLamp)) {
+      _newestLampStamp = lampStamp;
+    }
     final mac = status.wispMac;
     final stamp = status.lastSeenMs;
     if (mac == null || stamp == null) return;
@@ -1094,8 +1111,9 @@ class WispNotifier extends _$WispNotifier {
     final expectedHash =
         committed.isEmpty ? '' : WispRepository.paletteIdHash(committed);
     final wispMac = state.value?.wispMac;
-    final emittedAfter =
-        committed.isEmpty && wispMac != null ? _newestStamps[wispMac] : null;
+    final emittedAfter = committed.isEmpty && wispMac != null
+        ? (lamp: _newestLampStamp, wisp: _newestStamps[wispMac])
+        : null;
     final epoch = ++_paletteSaveEpoch;
     var outcome = PaletteConfirmOutcome.notConfirmed;
     final ok = await _sendConfirmed(
@@ -1137,9 +1155,10 @@ class WispNotifier extends _$WispNotifier {
   /// meaning the wisp stored and re-broadcast this exact palette, or
   /// [PaletteConfirmOutcome.notConfirmed] when [_sourceConfirmTimeout]
   /// elapses. An empty [expectedHash] matches a status that omits the
-  /// prefix. With [emittedAfter], a prefix match also needs a `lastSeenMs`
-  /// above it, so a status stamped no later than one heard before the save
-  /// can't confirm.
+  /// prefix. With [emittedAfter], a prefix match also needs a status the
+  /// lamp cached after the newest one heard before the save: a
+  /// `statusLastSeenMs` above `emittedAfter.lamp` when both are known,
+  /// otherwise a `lastSeenMs` above `emittedAfter.wisp`.
   /// Every wispStatus NOTIFY carries the palette id state, so no READ-poll is
   /// needed.
   ///
@@ -1149,16 +1168,15 @@ class WispNotifier extends _$WispNotifier {
   Future<PaletteConfirmOutcome> _confirmPaletteLanded(
     String expectedHash,
     String? wispMac, {
-    int? emittedAfter,
+    ({int? lamp, int? wisp})? emittedAfter,
   }) {
     final localFlip = _pendingSourceMode != null &&
         _pendingSourceMode != WispSourceMode.manual;
     if (localFlip) return Future.value(PaletteConfirmOutcome.sourceChanged);
     return _incoming.stream
         .firstWhere((s) {
-          final stamp = s.lastSeenMs;
-          final emittedSince = emittedAfter == null ||
-              (stamp != null && stamp > emittedAfter);
+          final emittedSince =
+              emittedAfter == null || _emittedSince(s, emittedAfter);
           return s.present &&
               s.wispMac == wispMac &&
               ((s.paletteIdPrefix == expectedHash && emittedSince) ||
@@ -1169,6 +1187,15 @@ class WispNotifier extends _$WispNotifier {
             ? PaletteConfirmOutcome.confirmed
             : PaletteConfirmOutcome.sourceChanged)
         .catchError((_) => PaletteConfirmOutcome.notConfirmed);
+  }
+
+  static bool _emittedSince(WispStatus s, ({int? lamp, int? wisp}) after) {
+    final lampStamp = s.statusLastSeenMs;
+    final lampAfter = after.lamp;
+    if (lampStamp != null && lampAfter != null) return lampStamp > lampAfter;
+    final stamp = s.lastSeenMs;
+    final wispAfter = after.wisp;
+    return wispAfter == null || (stamp != null && stamp > wispAfter);
   }
 
   /// Re-emit the held [WispStatus] to nudge consumers of the field-backed
