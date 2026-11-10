@@ -24,7 +24,9 @@
 #   IMAGE        flash this local distribution.bin, skip the download (used for
 #                a locally-built signed variant with no release asset, e.g. loaf)
 #   CACHE_DIR    where downloads are cached and reused, one file per variant and
-#                release tag: distribution-<variant>-<tag>.bin (default ~/.cache/lamp-os)
+#                release tag: release-<variant>-<tag>.bin, any "/" in the tag
+#                becomes "_" (default ~/.cache/lamp-os). The name stays clear of
+#                the distribution-*.bin local builds that flash_prebuilt.sh picks.
 #   REFRESH      set to force a re-download even if a cached image exists
 #
 # For people WITHOUT the signing key: downloads a prebuilt image, never builds
@@ -41,7 +43,7 @@ URL="https://github.com/${REPO}/releases/download/${RELEASE_TAG}/${ASSET}"
 # re-pulling 4 MiB. IMAGE=<path> flashes a local image (e.g. a locally-built
 # signed loaf) and skips the network entirely.
 CACHE_DIR="${CACHE_DIR:-$HOME/.cache/lamp-os}"
-CACHED_NAME="distribution-${VARIANT}-${RELEASE_TAG//\//_}.bin"
+CACHED_NAME="release-${VARIANT}-${RELEASE_TAG//\//_}.bin"
 TMPFILE="${IMAGE:-$CACHE_DIR/$CACHED_NAME}"
 APP0FILE="$(mktemp -t lamp-app0-XXXX.bin)"
 SPIFFSFILE="$(mktemp -t lamp-spiffs-XXXX.bin)"
@@ -69,7 +71,11 @@ if [ -z "${OTADATA_OFF:-}" ] || [ -z "${OTADATA_SIZE:-}" ]; then
 fi
 
 if [ -s "$TMPFILE" ]; then
-  echo "[flash:release] using cached image ${TMPFILE} (release '${RELEASE_TAG}'; REFRESH=1 to re-download)"
+  if [ -n "${IMAGE:-}" ]; then
+    echo "[flash:release] using local image ${TMPFILE}"
+  else
+    echo "[flash:release] using cached image ${TMPFILE} (release '${RELEASE_TAG}'; REFRESH=1 to re-download)"
+  fi
   [ -n "${REFRESH:-}" ] && [ -z "${IMAGE:-}" ] && rm -f "$TMPFILE"
 fi
 
