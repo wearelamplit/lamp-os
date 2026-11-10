@@ -70,6 +70,24 @@ void test_armed_reboot_waits_out_ota_up_to_the_ceiling() {
   TEST_ASSERT_FALSE(webapp::webappRebootDue(at + webapp::kRebootOtaWaitMaxMs, false, at, true));
 }
 
+// A deadline that passed while a station stayed joined, then over 24.8 days
+// with no request: held each loop, it still reads as passed when the station
+// leaves, so the AP comes down.
+void test_passed_deadline_stays_passed_past_half_a_wrap() {
+  const uint32_t deadline = 1000;
+  uint32_t held = deadline;
+  for (uint64_t t = deadline; t <= deadline + (1ull << 31); t += 1ull << 28) {
+    held = webapp::holdPassedDeadline(static_cast<uint32_t>(t), held);
+  }
+  const uint32_t now = deadline + (1u << 31) + 5000;
+  TEST_ASSERT_TRUE(webapp::webappShouldTeardown(now, webapp::holdPassedDeadline(now, held), false));
+}
+
+// A deadline still ahead is left alone.
+void test_hold_leaves_a_deadline_ahead() {
+  TEST_ASSERT_EQUAL_UINT32(9000, webapp::holdPassedDeadline(5000, 9000));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_never_expire_always_false);
@@ -79,5 +97,7 @@ int main(int, char**) {
   RUN_TEST(test_armed_reboot_waits_for_ota_only);
   RUN_TEST(test_armed_reboot_waits_out_ota_up_to_the_ceiling);
   RUN_TEST(test_a_reboot_armed_at_zero_fires);
+  RUN_TEST(test_passed_deadline_stays_passed_past_half_a_wrap);
+  RUN_TEST(test_hold_leaves_a_deadline_ahead);
   return UNITY_END();
 }

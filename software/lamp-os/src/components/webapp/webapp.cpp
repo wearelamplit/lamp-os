@@ -526,6 +526,7 @@ static void rebootNow() {
 void tick() {
   drainWebSave();
   const uint32_t now = millis();
+  s_deadlineMs = holdPassedDeadline(now, s_deadlineMs);
   // An armed reboot fires even after the AP went down (an OTA's
   // shutdownForOta): a landed web save freezes config saves until it. It
   // waits while OTA quiet mode is held. A received update's own reboot loads

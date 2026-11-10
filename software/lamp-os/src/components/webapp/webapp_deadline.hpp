@@ -20,6 +20,13 @@ inline bool webappShouldRestoreBle(uint32_t now, uint32_t deadlineMs,
   return bleDown && static_cast<int32_t>(now - deadlineMs) >= 0;
 }
 
+// `deadlineMs` once reached, moved up to `now` so it keeps reading as reached;
+// a passed deadline left over 24.8 days would read as weeks ahead. Unchanged
+// while still ahead. The owner applies it at least once per 24.8 days.
+inline uint32_t holdPassedDeadline(uint32_t now, uint32_t deadlineMs) {
+  return static_cast<int32_t>(now - deadlineMs) >= 0 ? now : deadlineMs;
+}
+
 // The longest an armed reboot waits on OTA quiet mode; a transfer holding it
 // longer is stuck, and the reboot goes ahead.
 constexpr uint32_t kRebootOtaWaitMaxMs = 10u * 60u * 1000u;
