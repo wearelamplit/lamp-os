@@ -1106,8 +1106,8 @@ class WispNotifier extends _$WispNotifier {
   /// snapshot.
   Future<void> setManualPalette() async {
     final committed = List<LampColor>.from(_draft);
-    // The wisp stores an empty palette and clears its palette id, so a Manual
-    // status it emits after the save without paletteIdPrefix confirms it.
+    // The wisp stores an empty palette and clears its palette id, so a later
+    // Manual status without paletteIdPrefix confirms it.
     final expectedHash =
         committed.isEmpty ? '' : WispRepository.paletteIdHash(committed);
     final wispMac = state.value?.wispMac;
@@ -1155,10 +1155,7 @@ class WispNotifier extends _$WispNotifier {
   /// meaning the wisp stored and re-broadcast this exact palette, or
   /// [PaletteConfirmOutcome.notConfirmed] when [_sourceConfirmTimeout]
   /// elapses. An empty [expectedHash] matches a status that omits the
-  /// prefix. With [emittedAfter], a prefix match also needs a status the
-  /// lamp cached after the newest one heard before the save: a
-  /// `statusLastSeenMs` above `emittedAfter.lamp` when both are known,
-  /// otherwise a `lastSeenMs` above `emittedAfter.wisp`.
+  /// prefix. With [emittedAfter], a prefix match also needs [_emittedSince].
   /// Every wispStatus NOTIFY carries the palette id state, so no READ-poll is
   /// needed.
   ///
@@ -1189,6 +1186,10 @@ class WispNotifier extends _$WispNotifier {
         .catchError((_) => PaletteConfirmOutcome.notConfirmed);
   }
 
+  /// Whether [s] is newer than the stamps heard before the save. A
+  /// `statusLastSeenMs` above `after.lamp` decides when both are known.
+  /// Otherwise [s] needs a `lastSeenMs` above `after.wisp`, unchecked when
+  /// `after.wisp` is unset.
   static bool _emittedSince(WispStatus s, ({int? lamp, int? wisp}) after) {
     final lampStamp = s.statusLastSeenMs;
     final lampAfter = after.lamp;

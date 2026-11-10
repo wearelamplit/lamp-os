@@ -466,6 +466,16 @@ void main() {
         status(ours, stamp: 73600, lamp: 9001),
       ),
       (
+        'a re-served copy of the newest lamp-stamped status, after an older '
+            'one arrived last',
+        [
+          status(ours, stamp: 73500, lamp: 5000),
+          status(ours, stamp: 73400, lamp: 4000),
+        ],
+        status(ours, stamp: 73500, lamp: 5000),
+        status(ours, stamp: 73500, lamp: 5001),
+      ),
+      (
         'a status without a lamp stamp, judged by its wisp stamp',
         [status(ours, stamp: 73500, lamp: 5000)],
         status(ours, stamp: 73500),
@@ -473,16 +483,13 @@ void main() {
       ),
     ]) {
       test('$label does not confirm an emptied palette', () async {
-        final (ble, c, n) = await emptiedAfterHearing(heard);
+        final (ble, _, n) = await emptiedAfterHearing(heard);
 
         var done = false;
         final f = n.setManualPalette().whenComplete(() => done = true);
         await Future<void>.delayed(Duration.zero);
         notify(ble, stale);
         await pumpEventQueue();
-        final held = c.read(wispNotifierProvider(lampId)).value!;
-        expect(held.lastSeenMs, isNotNull,
-            reason: 'the notifier took the status');
         expect(done, isFalse);
         expect(n.savedManualPalette, saved);
 

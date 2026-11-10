@@ -12,7 +12,7 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   from the manual palette and save, and the wisp stops painting: lamps under
   it ease back to their own colours. The app shows the palette as saved once
   the wisp reports it after the save, so a lamp re-sending an older report
-  can't mark it saved, and a wisp restart doesn't get in the way. If the
+  almost never marks it saved, and a wisp restart doesn't get in the way. If the
   wisp never reports it, the app says the palette didn't reach the wisp, as
   it does for any other palette. Rarely, an emptied palette still shows as
   not reaching the wisp even when it did: after a wisp restart, when you
