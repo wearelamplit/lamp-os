@@ -73,10 +73,11 @@ fi
 if [ -s "$TMPFILE" ]; then
   if [ -n "${IMAGE:-}" ]; then
     echo "[flash:release] using local image ${TMPFILE}"
+  elif [ -n "${REFRESH:-}" ]; then
+    rm -f "$TMPFILE"
   else
     echo "[flash:release] using cached image ${TMPFILE} (release '${RELEASE_TAG}'; REFRESH=1 to re-download)"
   fi
-  [ -n "${REFRESH:-}" ] && [ -z "${IMAGE:-}" ] && rm -f "$TMPFILE"
 fi
 
 if [ ! -s "$TMPFILE" ]; then
