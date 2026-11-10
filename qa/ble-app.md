@@ -148,11 +148,11 @@ Open Colors: the strip now reads "Giving <name> a moment to settle… 🎓", and
 and the grey stay up the whole time, then both go together when the lamp's
 indicator ends, with no message (a cancel says nothing). Open an expression in
 the editor during the hold: Test is greyed. Change the base colour after: the
-lamp follows. On a lamp
-running 1.3.1 the strip and the grey go the moment you cancel, and a colour
-change in the next minute does nothing on the lamp. The Home Mode cases (a
-focus change dropped mid-update, a reconnect while Home Mode is open) can't be
-set up from the app's screens and are covered by push_resync_test.dart.
+lamp follows. On a lamp running 1.3.1 the strip and the grey go the moment you
+cancel, and a colour change in the next minute does nothing on the lamp. The
+Home Mode cases (a focus change dropped mid-update, a reconnect while Home Mode
+is open) can't be set up from the app's screens and are covered by
+push_resync_test.dart.
 
 P8 — **one reconnect after a save that restarts the lamp.** Needs a dev build
 on the lamp (the `[ble_control]` lines below are debug-only) and a password
@@ -191,9 +191,9 @@ underlining the word as you type, and the lamp's web config shows the same
 name. Select the whole name and paste a longer one: the field keeps the
 start of the paste. Do the same on a new lamp's naming step. On an iPhone
 with the Japanese keyboard, type 12 kana without confirming and tap Save: My
-Lamps and the lamp's web config both show the first 10. Tap
-the Advanced LEDs Update, and the password Save, twice fast: the button greys
-with a spinner after the first tap and the lamp restarts once. A rename the
+Lamps and the lamp's web config both show the first 10. Tap the Advanced LEDs
+Update, and the password Save, twice fast: the button greys with a spinner
+after the first tap and the lamp restarts once. A rename the
 lamp refuses ("Couldn't set name. Try again.") can't be set up from the app's
 screens and is covered by setup_screen_test.dart.
 

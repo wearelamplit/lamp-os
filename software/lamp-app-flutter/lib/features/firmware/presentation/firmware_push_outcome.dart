@@ -34,8 +34,8 @@ class FirmwarePushOutcome extends ConsumerStatefulWidget {
 }
 
 class _FirmwarePushOutcomeState extends ConsumerState<FirmwarePushOutcome> {
-  /// The version of the push on the wire, kept after it ends unless the lamp
-  /// turned it down.
+  /// The version of the push on the wire, kept after it ends in a result or
+  /// a failure the lamp may still have installed.
   int? _pushedVersion;
   bool _missed = false;
 
@@ -52,20 +52,10 @@ class _FirmwarePushOutcomeState extends ConsumerState<FirmwarePushOutcome> {
     if (next.isBusy) {
       _missed = false;
       _awaitingConnect = false;
-      _pushedVersion = switch (next) {
-        FirmwareOfferSent(:final footer) ||
-        FirmwareStreaming(:final footer) ||
-        FirmwareFinalizing(:final footer) => footer.version,
-        _ => null,
-      };
+      _pushedVersion = next.pushedVersion;
       return;
     }
-    final pushed = switch (previous) {
-      FirmwareOfferSent(:final footer) ||
-      FirmwareStreaming(:final footer) ||
-      FirmwareFinalizing(:final footer) => footer.version,
-      _ => null,
-    };
+    final pushed = previous?.pushedVersion;
     if (pushed == null) return;
     _pushedVersion = pushed;
     switch (next) {

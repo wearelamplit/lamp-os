@@ -105,4 +105,27 @@ extension FirmwarePushing on FirmwareState {
   /// Pushing plus the local verify step that precedes OfferSent. Drives the
   /// whimsical badge + card so the verify window isn't a blank gap.
   bool get isBusy => isPushing || this is FirmwareVerifying;
+
+  /// The version being pushed, while [isPushing].
+  int? get pushedVersion => switch (this) {
+    FirmwareOfferSent(:final footer) ||
+    FirmwareStreaming(:final footer) ||
+    FirmwareFinalizing(:final footer) => footer.version,
+    _ => null,
+  };
 }
+
+/// The push state after the lamp has acked [chunksSent] of [totalChunks]:
+/// streaming until the last chunk is out, then finalizing while the lamp
+/// verifies and reports.
+FirmwareState pushProgress(
+  LsigFooter footer, {
+  required int chunksSent,
+  required int totalChunks,
+}) => chunksSent >= totalChunks
+    ? FirmwareFinalizing(footer: footer)
+    : FirmwareStreaming(
+        footer: footer,
+        chunksSent: chunksSent,
+        totalChunks: totalChunks,
+      );

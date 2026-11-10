@@ -90,8 +90,8 @@ class FirmwareNotifier extends _$FirmwareNotifier {
       footerLen: lsigFooterLen,
       onProgress: (sent, total) {
         if (state is FirmwareStreaming || state is FirmwareOfferSent) {
-          state = FirmwareStreaming(
-            footer: verified.footer,
+          state = pushProgress(
+            verified.footer,
             chunksSent: sent,
             totalChunks: total,
           );
