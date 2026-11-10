@@ -225,26 +225,6 @@ void WispRoster::setLampPaint(const uint8_t mac[6], const uint8_t base[4],
   xSemaphoreGive(asHandle(mutex_));
 }
 
-size_t WispRoster::snapshotPaintForBroadcast(uint8_t* out, size_t cap) {
-  if (!out) return 0;
-  if (xSemaphoreTake(asHandle(mutex_), portMAX_DELAY) != pdTRUE) return 0;
-  constexpr size_t kPaintEntry = 12;  // mac(6) + base(3) + shade(3)
-  const size_t maxByBuf = cap / kPaintEntry;
-  const size_t maxEntries = lamp_protocol::WISP_PAINT_MAX_ENTRIES < maxByBuf
-                                ? lamp_protocol::WISP_PAINT_MAX_ENTRIES
-                                : maxByBuf;
-  const size_t n = ownCount_ < maxEntries ? ownCount_ : maxEntries;
-  for (size_t i = 0; i < n; ++i) {
-    const OwnClaim& c = ownClaims_[i];
-    uint8_t* dst = out + i * kPaintEntry;
-    std::memcpy(dst,     c.lampMac, 6);
-    std::memcpy(dst + 6, c.base,    3);
-    std::memcpy(dst + 9, c.shade,   3);
-  }
-  xSemaphoreGive(asHandle(mutex_));
-  return n;
-}
-
 size_t WispRoster::snapshotStateForBroadcast(uint8_t* out, size_t cap,
                                              uint8_t* w, size_t wCap) {
   if (!out || !w) return 0;

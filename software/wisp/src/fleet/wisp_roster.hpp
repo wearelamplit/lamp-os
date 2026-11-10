@@ -101,12 +101,6 @@ class WispRoster {
   void setLampPaint(const uint8_t mac[6], const uint8_t base[4],
                     const uint8_t shade[4]);
 
-  // ponytail: orphaned — MSG_WISP_PAINT broadcast retired, STATE carries paint
-  // via snapshotStateForBroadcast. Kept with its roster test; drop in cleanup.
-  // Packs the own-claim paint set as lampMac(6)+base(3)+shade(3) = 12-byte
-  // entries; `cap` limits the byte budget. Returns entry count written.
-  size_t snapshotPaintForBroadcast(uint8_t* out, size_t cap);
-
   // Pack every painted claim for `MSG_WISP_STATE` broadcasting: 12-byte
   // lampMac+baseRGB+shadeRGB entries into `out`, and the matching baseW,shadeW
   // pairs into `w`. A claim with no paint assigned yet is left out so the lamp
