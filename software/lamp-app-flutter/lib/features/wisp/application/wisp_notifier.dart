@@ -100,11 +100,10 @@ class WispNotifier extends _$WispNotifier {
   // Bumped on every setManualPalette, the same way [_setSourceEpoch] is.
   int _paletteSaveEpoch = 0;
 
-  // Newest `lastSeenMs` heard from the wisp at [_newestStampMac]. A lamp
+  // Newest `lastSeenMs` heard from each wisp, keyed by wispMac. A lamp
   // re-serves its cached status with the wisp's stamp unchanged, so only a
   // larger stamp is a status emitted since.
-  String? _newestStampMac;
-  int? _newestStamp;
+  final Map<String, int> _newestStamps = {};
 
   // Palette comes from the dedicated `wisppalette` page section, not the
   // status char (whose palette-less NOTIFY would clobber it). A changed
@@ -487,11 +486,8 @@ class WispNotifier extends _$WispNotifier {
     final mac = status.wispMac;
     final stamp = status.lastSeenMs;
     if (mac == null || stamp == null) return;
-    final newest = _newestStamp;
-    if (mac != _newestStampMac || newest == null || stamp > newest) {
-      _newestStampMac = mac;
-      _newestStamp = stamp;
-    }
+    final newest = _newestStamps[mac];
+    if (newest == null || stamp > newest) _newestStamps[mac] = stamp;
   }
 
   Future<void> _rereadStatusSection() async {
@@ -1098,9 +1094,8 @@ class WispNotifier extends _$WispNotifier {
     final expectedHash =
         committed.isEmpty ? '' : WispRepository.paletteIdHash(committed);
     final wispMac = state.value?.wispMac;
-    final emittedAfter = committed.isEmpty && wispMac == _newestStampMac
-        ? _newestStamp
-        : null;
+    final emittedAfter =
+        committed.isEmpty && wispMac != null ? _newestStamps[wispMac] : null;
     final epoch = ++_paletteSaveEpoch;
     var outcome = PaletteConfirmOutcome.notConfirmed;
     final ok = await _sendConfirmed(
@@ -1143,7 +1138,8 @@ class WispNotifier extends _$WispNotifier {
   /// [PaletteConfirmOutcome.notConfirmed] when [_sourceConfirmTimeout]
   /// elapses. An empty [expectedHash] matches a status that omits the
   /// prefix. With [emittedAfter], a prefix match also needs a `lastSeenMs`
-  /// above it, so a status the wisp emitted before the save can't confirm.
+  /// above it, so a status stamped no later than one heard before the save
+  /// can't confirm.
   /// Every wispStatus NOTIFY carries the palette id state, so no READ-poll is
   /// needed.
   ///

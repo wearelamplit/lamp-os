@@ -377,6 +377,27 @@ void main() {
         1000,
         1001,
       ),
+      (
+        'an older copy after the lamp followed another wisp in between',
+        [
+          status(ours, stamp: 80000),
+          status(rival, stamp: 900000),
+          status(ours, stamp: 1000),
+        ],
+        73500,
+        80001,
+      ),
+      (
+        'a status older than one heard before another wisp and an unstamped '
+            'status',
+        [
+          status(ours, stamp: 80000),
+          status(rival, stamp: 900000),
+          status(ours),
+        ],
+        1000,
+        80001,
+      ),
     ]) {
       test('$label does not confirm an emptied palette', () async {
         final (ble, c, n) = await emptiedAfterHearing(heard);
