@@ -60,10 +60,17 @@ class _FirmwarePushOutcomeState extends ConsumerState<FirmwarePushOutcome> {
       };
       return;
     }
-    if (!(previous?.isPushing ?? false)) return;
+    final pushed = switch (previous) {
+      FirmwareOfferSent(:final footer) ||
+      FirmwareStreaming(:final footer) ||
+      FirmwareFinalizing(:final footer) => footer.version,
+      _ => null,
+    };
+    if (pushed == null) return;
+    _pushedVersion = pushed;
     switch (next) {
-      case FirmwareSucceeded(:final footer, alreadyCurrent: false):
-        _pushedVersion = footer.version;
+      case FirmwareSucceeded(alreadyCurrent: false):
+        break;
       case FirmwareFailed(:final failure)
           when !failure.declined && failure != FirmwareFailure.cancelled:
         if (_lamp?.lamp.fwVersion case final v? when v == _pushedVersion) {

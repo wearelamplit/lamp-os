@@ -839,6 +839,23 @@ void main() {
       expect(find.text(missed), findsOneWidget);
     });
 
+    testWidgets('mounted mid-push, a lost push the lamp took says learned '
+        'alone', (tester) async {
+      final rig = await _pump(tester, location: AppRoutes.myLamps);
+      rig.container.listen(firmwareNotifierProvider(_lampId), (_, _) {});
+      rig.firmware(_lampId).emit(FirmwareFinalizing(footer: _footer));
+      rig.container.read(appRouterProvider).go('/outcome/$_lampId');
+      for (var i = 0; i < 60; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      rig.firmware(_lampId).emit(_lost);
+      await _settle(tester);
+      await rebootInto(tester, rig, _footer.version);
+      expect(find.text(learned), findsOneWidget);
+      await outlast(tester);
+      expect(find.text(missed), findsNothing);
+    });
+
     testWidgets('mounted mid-push, it still says learned', (tester) async {
       final rig = await _pump(tester, location: AppRoutes.myLamps);
       // The lamp's shell holds the push alive in the app.

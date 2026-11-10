@@ -174,14 +174,14 @@ didn't catch the new tricks this time. Trying again next time you connect."
 message is for an update that fails while the phone stays connected (a
 lamp-side failure, shown once the lamp is listening again); it can't be set
 up from the app's screens and is covered by firmware_push_lock_test.dart. In
-dev mode, the
-Firmware panel shows a plain line first (for a dropped link, "Lost <name>
-partway through. Bring your phone closer and try again.") with the raw reason
-in small monospace beneath. Walk out of range right as the bar fills
-instead: if the lamp still installs and comes back on the new version, the
-message is "<name> learned some new tricks ✨", with no miss before it, on a
-lamp running 1.3.1 too. Install a build the lamp already has from the panel:
-it reads "<name> already knows these tricks." and the lamp does not restart. Open a lamp that is busy teaching another lamp from My Lamps: the
+dev mode, the Firmware panel shows a plain line first (for a dropped link,
+"Lost <name> partway through. Bring your phone closer and try again.") with
+the raw reason in small monospace beneath. Walk out of range right as the bar
+fills instead: if the lamp still installs and comes back on the new version,
+the message is "<name> learned some new tricks ✨", with no miss before it,
+on a lamp running 1.3.1 too. Install a build the lamp already has from the
+panel: it reads "<name> already knows these tricks." and the lamp does not
+restart. Open a lamp that is busy teaching another lamp from My Lamps: the
 page reads "<Name> is busy teaching a lamp new tricks 🎓" with the name
 capitalized as elsewhere, and "It's hard to reach while teaching".
 
