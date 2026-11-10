@@ -1,14 +1,14 @@
 import '../../../core/utils/string_case.dart';
-import '../../control/application/control_state.dart';
 import '../domain/firmware_state.dart';
 
 /// Every line the app shows its owner about a firmware push, in the lamp's
 /// "new tricks" voice. `name` is the lamp's display name from [nameOf]; a
 /// line that opens with it is capitalized, so the fallback reads right.
 abstract class FirmwareCopy {
-  /// The lamp's name as the app shows it, or "your lamp" before it loads.
-  static String nameOf(ControlState? state) =>
-      state?.lamp.name.toTitleCase() ?? 'your lamp';
+  /// The lamp's stored [name] as the app shows it, or "your lamp" before it
+  /// loads or when it has none.
+  static String nameOf(String? name) =>
+      (name == null || name.isEmpty) ? 'your lamp' : name.toTitleCase();
 
   static String teaching(String name) => 'Teaching $name new tricks 🎓';
 

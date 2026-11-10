@@ -859,6 +859,38 @@ void main() {
       expect(find.text(learned), findsNothing);
     });
 
+    testWidgets('a push the phone lost after the lamp took it says learned, '
+        'not missed', (tester) async {
+      final rig = await _pump(tester);
+      await _failWhileQuiet(tester, rig);
+      await rebootInto(tester, rig, _footer.version);
+      expect(find.text(learned), findsOneWidget);
+      await outlast(tester);
+      _lampQuiet(rig, false);
+      await _settle(tester);
+      expect(find.text(missed), findsNothing);
+    });
+
+    testWidgets('a push that ends after the lamp is back on its version says '
+        'learned, not missed', (tester) async {
+      final rig = await _pump(tester);
+      rig.firmware(_lampId).emit(FirmwareFinalizing(footer: _footer));
+      await _settle(tester);
+      await rebootInto(tester, rig, _footer.version);
+      expect(find.text(learned), findsOneWidget);
+      await outlast(tester);
+      rig
+          .firmware(_lampId)
+          .emit(
+            const FirmwareFailed(
+              reason: 'Lamp did not report an OTA result within the budget.',
+              failure: FirmwareFailure.noResult,
+            ),
+          );
+      await _settle(tester);
+      expect(find.text(missed), findsNothing);
+    });
+
     testWidgets('a good push says nothing while the lamp comes back on its '
         'old version', (tester) async {
       final rig = await _pump(tester);

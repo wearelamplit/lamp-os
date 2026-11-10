@@ -68,6 +68,12 @@ void main() {
     });
   });
 
+  test('a lamp with no name yet, or an empty one, is "your lamp"', () {
+    expect(FirmwareCopy.nameOf(null), 'your lamp');
+    expect(FirmwareCopy.nameOf(''), 'your lamp');
+    expect(FirmwareCopy.nameOf('jacko'), 'Jacko');
+  });
+
   test('a line that opens with the fallback name is capitalized', () {
     expect(FirmwareCopy.learned('your lamp'), startsWith('Your lamp '));
     expect(FirmwareCopy.missed('your lamp'), startsWith('Your lamp '));

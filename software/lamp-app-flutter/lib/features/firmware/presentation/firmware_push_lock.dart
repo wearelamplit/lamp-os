@@ -155,7 +155,7 @@ class _TeachingStrip extends ConsumerWidget {
     final name = ref.watch(
       controlNotifierProvider(
         lampId,
-      ).select((s) => FirmwareCopy.nameOf(s.value)),
+      ).select((s) => FirmwareCopy.nameOf(s.value?.lamp.name)),
     );
     final state = ref.watch(firmwareNotifierProvider(lampId));
     final progress = switch (state) {

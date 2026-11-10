@@ -5,15 +5,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/widgets/app_snackbar.dart';
 import '../../control/application/control_notifier.dart';
+import '../../control/application/control_state.dart';
 import '../application/firmware_notifier.dart';
 import '../application/quiet_after_push.dart';
 import '../domain/firmware_state.dart';
 import 'firmware_copy.dart';
 
 /// Tells the owner how a push to [lampId] ended, once: that the lamp learned
-/// its new tricks when it is back on the new version, or that it didn't when
-/// a failed push's quiet hold ends. A declined or cancelled offer says
-/// nothing, and the next push supersedes a line still waiting.
+/// its new tricks when it reports the pushed version, or that it didn't when
+/// a failed push's quiet hold ends. A lamp that installs the push after the
+/// phone lost track of it still counts as learned. A declined or cancelled
+/// offer says nothing, and the next push supersedes a line still waiting.
 class FirmwarePushOutcome extends ConsumerStatefulWidget {
   const FirmwarePushOutcome({
     super.key,
@@ -30,31 +32,40 @@ class FirmwarePushOutcome extends ConsumerStatefulWidget {
 }
 
 class _FirmwarePushOutcomeState extends ConsumerState<FirmwarePushOutcome> {
-  /// The version the lamp reboots into after a good push.
-  int? _learnedVersion;
+  /// The version of the push on the wire, kept after it ends unless the lamp
+  /// turned it down.
+  int? _pushedVersion;
   bool _missed = false;
 
-  String get _name => FirmwareCopy.nameOf(
-    ref.read(controlNotifierProvider(widget.lampId)).value,
-  );
+  ControlState? get _lamp =>
+      ref.read(controlNotifierProvider(widget.lampId)).value;
+
+  String get _name => FirmwareCopy.nameOf(_lamp?.lamp.name);
 
   void _onFirmware(FirmwareState? previous, FirmwareState next) {
     if (next.isBusy) {
-      _learnedVersion = null;
       _missed = false;
+      _pushedVersion = switch (next) {
+        FirmwareOfferSent(:final footer) ||
+        FirmwareStreaming(:final footer) ||
+        FirmwareFinalizing(:final footer) => footer.version,
+        _ => null,
+      };
       return;
     }
     if (!(previous?.isPushing ?? false)) return;
     switch (next) {
-      case FirmwareSucceeded(:final footer, alreadyCurrent: false):
-        _learnedVersion = footer.version;
+      case FirmwareSucceeded(alreadyCurrent: false):
+        break;
       case FirmwareFailed(:final failure)
           when !failure.declined && failure != FirmwareFailure.cancelled:
+        if (_lamp?.lamp.fwVersion == _pushedVersion) return;
         _missed = true;
         // The lamp's ControlNotifier starts the quiet hold on this same
         // transition; look once it has.
         scheduleMicrotask(_sayMissed);
       default:
+        _pushedVersion = null;
     }
   }
 
@@ -65,8 +76,8 @@ class _FirmwarePushOutcomeState extends ConsumerState<FirmwarePushOutcome> {
   }
 
   void _onLampVersion(int? fwVersion) {
-    final learned = _learnedVersion;
-    if (learned == null || fwVersion != learned) return;
+    if (fwVersion == null || fwVersion != _pushedVersion) return;
+    _missed = false;
     AppSnackbar.info(context, FirmwareCopy.learned(_name));
   }
 

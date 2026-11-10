@@ -32,7 +32,7 @@ class FirmwareUpdatePanel extends ConsumerWidget {
     final state = ref.watch(firmwareNotifierProvider(deviceId));
     final notifier = ref.read(firmwareNotifierProvider(deviceId).notifier);
     final name = ref.watch(controlNotifierProvider(deviceId)
-        .select((s) => FirmwareCopy.nameOf(s.value)));
+        .select((s) => FirmwareCopy.nameOf(s.value?.lamp.name)));
 
     // Fall back to inventory's persisted values when the live LampSection
     // hasn't reported lampType / fwChannel / fwVersion yet (pre-section-read
