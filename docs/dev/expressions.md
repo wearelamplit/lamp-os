@@ -103,7 +103,7 @@ The compositor's flush cadence (`MINIMUM_FRAME_DRAW_TIME_MS`) is not a
 stable timebase — it runs near its target rate steady but dips during BLE
 coex windows — so **no user-facing duration is counted in frames**. Every labeled
 duration (glitch duration, shifty fade + hold, spot lifetime, breath cycle,
-pulse transit) derives from `millis()` deltas, breathing's `updateBreathPhase`
+pulse transit) derives from wall-clock deltas, breathing's `updateBreathPhase`
 being the reference pattern. The frame counter exists only as the
 `AnimatedBehavior` completion plumbing, driven by two idioms from
 `primitives.hpp`:
@@ -115,8 +115,12 @@ being the reference pattern. The frame counter exists only as the
   `PLAYING_ONCE` → `STOPPED` and increments `currentLoop`, so `onComplete`
   fires through the normal base-class path.
 
-Deadline comparisons use the wrap-safe `timeReached(now, deadline)` from
-`lampos/clock.hpp`, never `millis() > deadline`. Glitchy additionally guarantees
+A deadline or phase start that must survive a long freeze (home mode skips a
+disabled type's `control()` and `draw()` for as long as it lasts) is a 64-bit
+`lamp::uptimeMs()` stamp: glitchy's end, shimmer's gust and burst, shifty's
+phases, the auto-trigger. A 32-bit `millis()` deadline uses the wrap-safe
+`timeReached(now, deadline)` from `lampos/clock.hpp`, never
+`millis() > deadline`. Glitchy additionally guarantees
 at least one painted frame even when its duration is shorter than a flush
 window.
 
@@ -191,7 +195,7 @@ Both fades and the hold blend against the live pixel the layers below drew that 
 
 ## Trigger cadence
 
-`Expression::control()` checks `timeReached(millis(), nextTriggerMs)` (wrap-safe) and fires `trigger()` if so. After every fire the schedule is reset with `nextTriggerMs = millis() + rng.range(intervalMinMs, intervalMaxMs)` (`rng` is the per-instance `FastRng`). Subclasses that override `control()` (breathing, spotty, shimmer) are continuous and don't gate on `nextTriggerMs`. Pulse overrides `control()` as well: in continuous mode it skips `nextTriggerMs` and auto-retriggers immediately, in trigger mode it keeps this interval schedule.
+`Expression::control()` checks `uptimeMs() >= nextTriggerMs` and fires `trigger()` if so; the deadline is on the 64-bit `lamp::uptimeMs()` because home mode can skip a type's `control()` for weeks. After every fire the schedule is reset with `nextTriggerMs = uptimeMs() + rng.range(intervalMinMs, intervalMaxMs)` (`rng` is the per-instance `FastRng`). Subclasses that override `control()` (breathing, spotty, shimmer) are continuous and don't gate on `nextTriggerMs`. Pulse overrides `control()` as well: in continuous mode it skips `nextTriggerMs` and auto-retriggers immediately, in trigger mode it keeps this interval schedule.
 
 `enabled = false` clears `autoTriggerEnabled` at load time, which suppresses the auto-trigger in `control()`. Manual `trigger()` from the test path still works.
 
@@ -282,7 +286,7 @@ Host-side tests are per-folder PlatformIO suites under `software/lamp-os/test/` 
 - `test/test_cascade_dedup/cascade_dedup.cpp`, `RecentCascade` (`expressions/recent_cascade.hpp`) keying, eviction and retire
 - `test/test_expression_primitives/expression_primitives.cpp`, Zone/Points/Size primitive helpers, `timeReached` wrap safety, `rewindBeforeExhaust`
 - `test/test_builtin_descriptors/builtin_descriptors.cpp`, the exprcat wire JSON pinned against the production header-defined descriptor data
-- `test/test_glitchy_timing/glitchy_timing.cpp`, glitchy's millis-driven duration gate (≥1 painted frame, wrap-safe deadline)
+- `test/test_glitchy_timing/glitchy_timing.cpp`, glitchy's uptime-driven duration gate (≥1 painted frame, deadline past 2^32 ms)
 - `test/test_glitchy_coverage/glitchy_coverage.cpp`, `glitchBlockPlan` scatter→grain-block math (solid sentinel, grain-1 at max, exact per-level density, monotonic sparsity, empty/undersized region)
 - `test/test_transient_lifetime/transient_lifetime.cpp`, transient GC backstop + never-started-transient rejection
 - `test/test_shimmer_math/shimmer_math.cpp`, flicker heat/warmth math and the burst (spark band, the anchor-neutral paint threshold, a spark lit mid-burst and dark at completion)

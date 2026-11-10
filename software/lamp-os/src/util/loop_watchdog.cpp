@@ -66,8 +66,7 @@ LongestGap s_iteration;
 LogRateLimiter s_unfedLog(/*windowMs=*/1000, /*linesPerWindow=*/1);
 LogRateLimiter s_iterationLog(/*windowMs=*/1000, /*linesPerWindow=*/1);
 
-void report(LongestGap& gap, LogRateLimiter& log, uint32_t nowMs,
-            const char* what) {
+void report(LongestGap& gap, LogRateLimiter& log, const char* what) {
   uint32_t longestMs = 0;
   if (takeDueReport(gap, log, uptimeMs(), longestMs)) {
     Serial.printf("[loopwd] longest %s %u ms\n", what, (unsigned)longestMs);
@@ -109,7 +108,7 @@ void feed() {
 #ifdef LAMP_DEBUG
   const uint32_t nowMs = millis();
   s_unfed.mark(nowMs);
-  report(s_unfed, s_unfedLog, nowMs, "unfed span");
+  report(s_unfed, s_unfedLog, "unfed span");
 #endif
 }
 
@@ -122,7 +121,7 @@ void startIteration() {
 #ifdef LAMP_DEBUG
   const uint32_t nowMs = millis();
   s_iteration.mark(nowMs);
-  report(s_iteration, s_iterationLog, nowMs, "loop iteration");
+  report(s_iteration, s_iterationLog, "loop iteration");
 #endif
 }
 

@@ -61,7 +61,7 @@ struct WispFleetCache {
 
   void clear();
   // Drops entries gone stale, so they cannot read fresh again one millis()
-  // wrap later. Call at least once per wrap.
+  // wrap later. Call at least once per lampos::kRetiredAgeMs.
   void retire(uint32_t nowMs);
 };
 

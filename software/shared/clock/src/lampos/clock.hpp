@@ -33,8 +33,8 @@ constexpr uint32_t msSince(uint32_t nowMs, uint32_t stampMs) {
 inline constexpr uint32_t kRetiredAgeMs = INT32_MAX;
 
 // `stampMs` held no more than kRetiredAgeMs old, so it reads as outside any
-// window shorter than that instead of coming round to read as recent one wrap
-// later; a younger stamp, or one up to kStampLeadMs ahead, comes back
+// window shorter than that and never comes round to read as recent one wrap
+// later. A younger stamp, or one up to kStampLeadMs ahead, comes back
 // unchanged, and a held stamp is never 0. The owner calls it at least once
 // per kRetiredAgeMs, and skips a stamp whose 0 it reads as never set.
 constexpr uint32_t retireStamp(uint32_t nowMs, uint32_t stampMs) {

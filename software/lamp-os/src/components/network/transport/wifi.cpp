@@ -95,7 +95,7 @@ void begin() {
   // is fragile (just came up from WiFi.disconnect+WIFI_STA), and a failed
   // scan in this window strands the radio off LAMP_ESPNOW_CHANNEL,
   // killing mesh recv entirely. Seed
-  // s_lastBackgroundScanMs with the current millis() so the first
+  // s_lastBackgroundScanMs with the current uptime so the first
   // periodic scan fires BACKGROUND_SCAN_INTERVAL_MS *after* boot, when
   // the WiFi stack has settled.
   s_lastBackgroundScanMs = lamp::uptimeMs();
@@ -188,7 +188,7 @@ bool homeSsidVisible(const std::string& ssid) {
   }
   portEXIT_CRITICAL(&s_scanMux);
   if (!seen) return false;
-  // Staleness check is OUTSIDE the critical section; millis() is fast
+  // Staleness check is OUTSIDE the critical section; the clock read is fast
   // but no point holding the lock for a wall-clock read.
   return (lamp::uptimeMs() - lastMs) <= SCAN_STALENESS_MS;
 }

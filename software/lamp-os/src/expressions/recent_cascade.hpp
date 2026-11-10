@@ -44,7 +44,7 @@ class RecentCascade {
   }
 
   // Drops fires past the window, so none reads as recent again one millis()
-  // wrap later. Call at least once per wrap.
+  // wrap later. Call at least once per lampos::kRetiredAgeMs.
   void retire(uint32_t nowMs) {
     for (Entry& e : entries_) {
       if (e.used && lampos::msSince(nowMs, e.fireMs) > kCascadeDedupWindowMs) e.used = false;

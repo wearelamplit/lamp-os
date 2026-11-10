@@ -76,7 +76,8 @@ class CascadeScheduler {
   }
 
   // Lifts the gap after the last batch once it has passed, so it cannot hold a
-  // later fan-out one millis() wrap on. Call at least once per wrap.
+  // later fan-out one millis() wrap on. Call at least once per
+  // lampos::kRetiredAgeMs.
   void retireBatchGap(uint32_t nowMs) {
     if (batched_ && lampos::msSince(nowMs, lastBatchMs_) >= kBatchGapMs) batched_ = false;
   }

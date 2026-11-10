@@ -25,9 +25,11 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   a second. A lamp that had greeted no one for 25 days stopped greeting for
   up to 25 days more, an introvert that had never tired stopped from day 25
   to day 50, and an expression that home mode had paused for 25 days stopped
-  firing on its own. A wisp could keep lamps and other wisps that had gone
-  silent, forget ones it had just heard, or hold back its brightness re-
-  sends. All of these now carry on through the rollover.
+  firing on its own. A web config page could stay up for weeks after its last
+  visitor left. A wisp could keep lamps and other wisps that had gone silent,
+  forget ones it had just heard, hold back its brightness re-sends, or wait
+  to reopen its OSC port or send its config. All of these now carry on
+  through the rollover.
 
 ## 1.3.2
 

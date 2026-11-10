@@ -22,9 +22,9 @@ class PeerBackoffRing {
   // is dropped.
   void note(const uint8_t mac[6], uint32_t nowMs, uint32_t durationMs,
             bool persistent);
-  // Retires each transient penalty's stamp (lampos::retireStamp), so an expired
-  // one cannot read as active again one millis() wrap later. Call at least once
-  // per lampos::kRetiredAgeMs.
+  // Retires each transient penalty's stamp, so an expired one cannot read as
+  // active again one millis() wrap later. Call at least once per
+  // lampos::kRetiredAgeMs.
   void retire(uint32_t nowMs);
 
  private:

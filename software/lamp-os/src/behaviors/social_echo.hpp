@@ -46,7 +46,7 @@ inline uint8_t mirrorRatePct(uint8_t disposition, SocialMode mode) {
 
 // The introvert cooldown's last mirror. retire() forgets one older than the
 // cooldown, so it cannot gate a mirror again one millis() wrap later; the
-// owner calls it at least once per wrap.
+// owner calls it at least once per lampos::kRetiredAgeMs.
 struct MirrorCooldown {
   bool ever = false;
   uint32_t lastMs = 0;

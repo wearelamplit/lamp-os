@@ -53,7 +53,8 @@ class OtaOfferThrottle {
   static constexpr uint32_t kIntervalMs = 1000;
 
   // True when a scan should run at nowMs; stamps nowMs as the last scan. Call
-  // at least once per millis() wrap, busy or not, so a stale stamp retires.
+  // at least once per lampos::kRetiredAgeMs, busy or not, so a stale stamp
+  // retires.
   bool due(const OtaOfferBusy& busy, uint32_t nowMs) {
     if (lastScanMs_ != 0 && lampos::msSince(nowMs, lastScanMs_) >= kIntervalMs) lastScanMs_ = 0;
     if (busy.any()) return false;
