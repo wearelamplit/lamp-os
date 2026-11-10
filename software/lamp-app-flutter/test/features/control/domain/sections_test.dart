@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lamp_app/features/control/domain/color_rotation.dart';
 import 'package:lamp_app/features/control/domain/lamp_color.dart';
 import 'package:lamp_app/features/control/domain/sections.dart';
 import 'package:lamp_app/features/social/domain/social_mode.dart';
@@ -450,5 +451,88 @@ void main() {
       '{"px":38,"bpp":4,"colors":[null,"#000000FF","GG"]}',
     ) as Map<String, dynamic>);
     expect(s.colors, [const LampColor(r: 0, g: 0, b: 0, w: 0xFF)]);
+  });
+
+  group('rotate', () {
+    Map<String, dynamic> withRotate(String rotate) =>
+        {'px': 30, 'colors': ['#FF000000', '#00FF0000'], 'rotate': jsonDecode(rotate)};
+
+    test('absent rotate gives null on both roles', () {
+      expect(ShadeSection.fromJson({'px': 30, 'colors': ['#FF000000']}).rotation,
+          isNull);
+      expect(BaseSection.fromJson({'px': 30, 'colors': ['#FF000000']}).rotation,
+          isNull);
+    });
+
+    test('a rotate object is read as sent, dir included, on either role', () {
+      for (final dir in RotationDirection.values) {
+        final json = '{"on":true,"periodS":65,"dir":"${dir.wire}"}';
+        final expected =
+            ColorRotation(on: true, periodS: 65, direction: dir);
+        expect(ShadeSection.fromJson(withRotate(json)).rotation, expected);
+        expect(BaseSection.fromJson(withRotate(json)).rotation, expected);
+      }
+    });
+
+    test('a missing periodS reads 40 and a missing on reads off', () {
+      final r = ShadeSection.fromJson(withRotate('{"dir":"up"}')).rotation!;
+      expect(r.periodS, kRotationDefaultPeriodS);
+      expect(r.on, isFalse);
+    });
+
+    test('a missing dir reads as the role default: shade down, base up', () {
+      expect(ShadeSection.fromJson(withRotate('{"on":true}')).rotation!.direction,
+          kShadeDefaultDirection);
+      expect(BaseSection.fromJson(withRotate('{"on":true}')).rotation!.direction,
+          kBaseDefaultDirection);
+      expect(kShadeDefaultDirection, isNot(kBaseDefaultDirection));
+    });
+
+    test('an unknown dir reads as the role default', () {
+      expect(
+          ShadeSection.fromJson(withRotate('{"dir":"sideways"}'))
+              .rotation!
+              .direction,
+          kShadeDefaultDirection);
+    });
+
+    test('periodS is clamped to 5..120', () {
+      int period(int v) =>
+          BaseSection.fromJson(withRotate('{"periodS":$v}')).rotation!.periodS;
+      expect(period(1), kRotationMinPeriodS);
+      expect(period(4), kRotationMinPeriodS);
+      expect(period(6), 6);
+      expect(period(119), 119);
+      expect(period(121), kRotationMaxPeriodS);
+      expect(period(100000), kRotationMaxPeriodS);
+    });
+
+    test('rotation takes part in section equality', () {
+      final a = ShadeSection.fromJson(withRotate('{"on":true,"periodS":40}'));
+      final b = ShadeSection.fromJson(withRotate('{"on":true,"periodS":40}'));
+      final c = ShadeSection.fromJson(withRotate('{"on":true,"periodS":41}'));
+      final none = ShadeSection.fromJson({'px': 30, 'colors': ['#FF000000', '#00FF0000']});
+      expect(a, b);
+      expect(a.hashCode, b.hashCode);
+      expect(a, isNot(c));
+      expect(a, isNot(none));
+      final ba = BaseSection.fromJson(withRotate('{"on":false}'));
+      final bb = BaseSection.fromJson(withRotate('{"on":true}'));
+      expect(ba, isNot(bb));
+      expect(ba.copyWith(rotation: bb.rotation), bb);
+    });
+  });
+
+  group('LampSection.isStandard', () {
+    test('true with no lampType (older firmware) and for standard', () {
+      expect(LampSection.fromJson(const {}).isStandard, isTrue);
+      expect(LampSection.fromJson({'lampType': 'standard'}).isStandard, isTrue);
+    });
+    test('false for snafu, lioness and the empty string', () {
+      for (final t in ['snafu', 'lioness', '']) {
+        expect(LampSection.fromJson({'lampType': t}).isStandard, isFalse,
+            reason: t);
+      }
+    });
   });
 }

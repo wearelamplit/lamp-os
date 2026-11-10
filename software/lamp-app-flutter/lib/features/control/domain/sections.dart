@@ -1,6 +1,7 @@
 import 'package:collection/collection.dart';
 
 import '../../social/domain/social_mode.dart';
+import 'color_rotation.dart';
 import 'lamp_color.dart';
 
 const _listEq = ListEquality<Object?>();
@@ -69,6 +70,12 @@ class LampSection {
   /// to fetch the matching per-variant firmware binary at OTA time. Nullable
   /// for backward compat with older firmware that doesn't yet emit the field.
   final String? lampType;
+
+  /// The standard lamp's layout, the one whose shade has stop 0 at the bottom.
+  /// Absent [lampType] (older firmware) reads as standard; an empty one does
+  /// not. `advanced_leds_screen.dart` repeats this expression inline, so a
+  /// change to the key must change both.
+  bool get isStandard => (lampType ?? 'standard') == 'standard';
 
   /// The lamp's raw mesh MAC (uppercase colon-hex), same wire form as the peer
   /// `lampId` in the nearby section. Lets the app match this lamp against
@@ -248,6 +255,7 @@ class BaseSection {
     this.segments = const [],
     this.drawIdleMa = 0,
     this.drawFullMa = 0,
+    this.rotation,
   });
 
   final int px;
@@ -281,6 +289,10 @@ class BaseSection {
   /// predates the segments field; in that case `colors` and `px` are used
   /// directly. When non-empty, `px == Σ segments[*].px`.
   final List<Segment> segments;
+
+  /// Colour rotation, non-null exactly when the firmware offers it for this
+  /// role (the section carries `rotate`).
+  final ColorRotation? rotation;
 
   factory BaseSection.fromJson(Map<String, dynamic> json) {
     // Knockout is a positional int array: index = pixel, value = brightness
@@ -319,6 +331,7 @@ class BaseSection {
           .toList(),
       drawIdleMa: (json['drawIdleMa'] as num?)?.toInt() ?? 0,
       drawFullMa: (json['drawFullMa'] as num?)?.toInt() ?? 0,
+      rotation: _rotationFrom(json, kBaseDefaultDirection),
     );
   }
 
@@ -332,6 +345,7 @@ class BaseSection {
     List<Segment>? segments,
     int? drawIdleMa,
     int? drawFullMa,
+    ColorRotation? rotation,
   }) =>
       BaseSection(
         px: px ?? this.px,
@@ -343,6 +357,7 @@ class BaseSection {
         segments: segments ?? this.segments,
         drawIdleMa: drawIdleMa ?? this.drawIdleMa,
         drawFullMa: drawFullMa ?? this.drawFullMa,
+        rotation: rotation ?? this.rotation,
       );
 
   @override
@@ -357,7 +372,8 @@ class BaseSection {
           colorsEditable == other.colorsEditable &&
           _listEq.equals(segments, other.segments) &&
           drawIdleMa == other.drawIdleMa &&
-          drawFullMa == other.drawFullMa;
+          drawFullMa == other.drawFullMa &&
+          rotation == other.rotation;
 
   @override
   int get hashCode => Object.hash(
@@ -370,6 +386,7 @@ class BaseSection {
         _listEq.hash(segments),
         drawIdleMa,
         drawFullMa,
+        rotation,
       );
 }
 
@@ -382,6 +399,7 @@ class ShadeSection {
     required this.colors,
     this.colorsEditable = true,
     this.segments = const [],
+    this.rotation,
   });
 
   final int px;
@@ -402,6 +420,9 @@ class ShadeSection {
   /// directly. When non-empty, `px == Σ segments[*].px`.
   final List<Segment> segments;
 
+  /// Colour rotation; see [BaseSection.rotation].
+  final ColorRotation? rotation;
+
   factory ShadeSection.fromJson(Map<String, dynamic> json) {
     final bpp = (json['bpp'] as num?)?.toInt() ?? 4;
     final byteOrder = (json['byteOrder'] as String?)?.trim().isNotEmpty == true
@@ -421,6 +442,7 @@ class ShadeSection {
           .whereType<Map<String, dynamic>>()
           .map(Segment.fromJson)
           .toList(),
+      rotation: _rotationFrom(json, kShadeDefaultDirection),
     );
   }
 
@@ -431,6 +453,7 @@ class ShadeSection {
     List<LampColor>? colors,
     bool? colorsEditable,
     List<Segment>? segments,
+    ColorRotation? rotation,
   }) =>
       ShadeSection(
         px: px ?? this.px,
@@ -439,6 +462,7 @@ class ShadeSection {
         colors: colors ?? this.colors,
         colorsEditable: colorsEditable ?? this.colorsEditable,
         segments: segments ?? this.segments,
+        rotation: rotation ?? this.rotation,
       );
 
   @override
@@ -450,7 +474,8 @@ class ShadeSection {
           byteOrder == other.byteOrder &&
           _listEq.equals(colors, other.colors) &&
           colorsEditable == other.colorsEditable &&
-          _listEq.equals(segments, other.segments);
+          _listEq.equals(segments, other.segments) &&
+          rotation == other.rotation;
 
   @override
   int get hashCode => Object.hash(
@@ -460,7 +485,18 @@ class ShadeSection {
         _listEq.hash(colors),
         colorsEditable,
         _listEq.hash(segments),
+        rotation,
       );
+}
+
+ColorRotation? _rotationFrom(
+  Map<String, dynamic> json,
+  RotationDirection defaultDirection,
+) {
+  final raw = json['rotate'];
+  return raw is Map<String, dynamic>
+      ? ColorRotation.fromJson(raw, defaultDirection: defaultDirection)
+      : null;
 }
 
 /// CHAR_HOME_SECTION payload. See firmware Config::asHomeJson.
