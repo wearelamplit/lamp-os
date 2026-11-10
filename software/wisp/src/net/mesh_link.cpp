@@ -36,23 +36,18 @@ static void recvTrampoline(const esp_now_recv_info_t* info,
   handler(info->src_addr, data, static_cast<size_t>(len), rssi);
 }
 
-// ESP-NOW send-complete callback. Fires from the WiFi task with the
-// MAC-layer delivery result: ESP_NOW_SEND_SUCCESS = peer ACKed; FAIL =
-// no ACK received within hardware retries. Without this hook a
-// silently-dropped unicast looks like ESP_OK at the call site (the
-// IDF only reports the enqueue result).
-// arduino-esp32 v3.x / C6 send callback; MAC in info->des_addr.
+#ifdef LAMP_DEBUG
+// arduino-esp32 v3.x / C6 send callback; MAC in info->des_addr. FAIL means
+// no MAC-layer ACK within the hardware retries; esp_now_send's return only
+// reports the enqueue.
 static void sendTrampoline(const wifi_tx_info_t* info,
                            esp_now_send_status_t status) {
-  if (!MeshLink::s_instance || !info) return;
-  if (status == ESP_NOW_SEND_SUCCESS) return;
+  if (!info || status == ESP_NOW_SEND_SUCCESS) return;
   const uint8_t* mac = info->des_addr;
-#ifdef LAMP_DEBUG
   Serial.printf("[mesh.send] FAIL to %02X:%02X:%02X:%02X:%02X:%02X\n",
                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-#endif
-  MeshLink::s_instance->notifySendFail(mac);
 }
+#endif
 
 bool MeshLink::begin() {
   s_instance = this;
@@ -83,7 +78,9 @@ bool MeshLink::begin() {
   }
 
   esp_now_register_recv_cb(recvTrampoline);
+#ifdef LAMP_DEBUG
   esp_now_register_send_cb(sendTrampoline);
+#endif
 
   // 1M DSSS: the wisp's traffic is dominated by small per-lamp unicast
   // (keepalive/drift/paint), where 1M robustness beats 2M airtime; bench A/B
@@ -219,27 +216,6 @@ bool MeshLink::send(const uint8_t targetMac[6], const uint8_t* data, size_t len)
 
 void MeshLink::getMac(uint8_t out[6]) const {
   esp_wifi_get_mac(WIFI_IF_STA, out);
-}
-
-void MeshLink::notifySendFail(const uint8_t mac[6]) {
-#if defined(ARDUINO) || defined(ESP_PLATFORM)
-  portENTER_CRITICAL(&failedSendMux_);
-#endif
-  failedSends_.push(mac);
-#if defined(ARDUINO) || defined(ESP_PLATFORM)
-  portEXIT_CRITICAL(&failedSendMux_);
-#endif
-}
-
-bool MeshLink::pollFailedSend(uint8_t macOut[6]) {
-#if defined(ARDUINO) || defined(ESP_PLATFORM)
-  portENTER_CRITICAL(&failedSendMux_);
-#endif
-  const bool ok = failedSends_.pop(macOut);
-#if defined(ARDUINO) || defined(ESP_PLATFORM)
-  portEXIT_CRITICAL(&failedSendMux_);
-#endif
-  return ok;
 }
 
 }  // namespace wisp

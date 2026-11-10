@@ -77,6 +77,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   update every 5 seconds. Changes you make from the app still repeat for 20
   seconds, so their confirmation gets through. The wisp only updates over
   USB, so reflash it to pick this up.
+- **Wisp firmware sheds code that never ran.** A per-lamp repaint timer and
+  a retry queue for failed sends were still built into the wisp after paint
+  moved to its 2-second broadcast, but nothing used them. Paint behaves as
+  before: a lamp that misses a broadcast catches the next one 2 seconds later.
 
 ## 1.3.2
 

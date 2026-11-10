@@ -338,8 +338,10 @@ surface = 0x03 (BaseAndShade) carries TWO RGBW colors in a single frame:
 colors[0] → base, colors[1] → shade.
 ```
 
-**Paint hold (STATE-driven)**: the wisp no longer unicasts per-lamp paint or a
-per-lamp keep-alive. `PaintDistributor` samples a per-lamp base/shade color
+**Paint hold (STATE-driven)**: the wisp sends no per-lamp paint unicast and
+runs no per-lamp keep-alive, and it retries no unicast that FAILs. The space-dim
+brightness walk (`MSG_OVERRIDE_BRIGHTNESS`) is its only unicast, re-asserted
+every 40 s inside the lamp's 60 s watchdog. `PaintDistributor` samples a per-lamp base/shade color
 (deterministic per-MAC for a fresh paint, re-rolled per drift slot) and writes
 it into the `WispRoster` claim — no wire send. `MSG_WISP_STATE` then broadcasts
 the whole claimed set on its cadence, and a lamp holds paint while STATE keeps
