@@ -15,11 +15,13 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   line, and every control that changes the lamp greys out until the update
   ends. A sheet or dialog that was open freezes with your edit kept, and
   thaws when the update ends. The Info tab stays live. If the update fails
-  or is cancelled, the strip stays until the lamp says it's listening again
-  (usually about 10 seconds, never more than 75), then the app re-sends what
-  the lamp missed while it was busy (Home Mode, an open colour sheet, the
-  Social page) and reads the lamp's settings back so the screen matches it.
-  Lamps now tell the app when they stop ignoring changes. A lamp on older
+  or is cancelled, the strip stays until the lamp says it's listening again.
+  The lamp waits up to a minute for the rest of an update before giving up,
+  so that can take about 70 seconds, never more than 75. Then the app
+  re-sends what the lamp missed while it was busy (Home Mode, an open colour
+  sheet, the Social page) and reads the lamp's settings back so the screen
+  matches it. The app re-sends the same after every reconnect too. Lamps now
+  tell the app when they stop ignoring changes. A lamp on older
   firmware can't, so editing comes back as soon as the update ends and Home
   Mode's brightness routing is put right on your next brightness change.
 

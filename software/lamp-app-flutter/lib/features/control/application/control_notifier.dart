@@ -171,7 +171,7 @@ class ControlNotifier extends _$ControlNotifier {
 
   /// Session flags the app holds on the lamp, keyed by characteristic and
   /// selector. The lamp reports none of them back, drops them in OTA quiet
-  /// mode and clears them all on connect.
+  /// mode and clears them all with the link.
   final _heldFlags = <(String, int), Uint8List>{};
 
   /// The lamp's `quiet` from CHAR_STATE_NOTIFY on this link: true while it

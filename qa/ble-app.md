@@ -136,18 +136,16 @@ editor's colours sheet does the same. The strip
 goes when the lamp reboots after a good update and editing comes back. A
 second lamp's screen shows nothing while the first updates.
 
-P7 — **a failed update holds editing until the lamp listens.** Open Home Mode,
-walk out of range until the app loses the lamp, and come back so the update
-restarts on reconnect with Home Mode open. Press back to leave Home Mode while
-it sends, open Info and cancel the update from the dev-mode Firmware panel.
-The strip and the grey stay up while the lamp shows its update indicator
-(about 10 s), then both go together. Without touching anything, the lamp
-drops its Home Mode preview (normal brightness and behaviours). Repeat with
-Home Mode open and a walk out of range mid-send as the failure: after the
-reconnect the strip and grey hold until the lamp's indicator ends (up to
-about 70 s, since the lamp waits a minute for chunks), then the
-Home Mode slider moves the home brightness. On a lamp running 1.3.1, editing
-comes back the moment the update ends.
+P7 — **a cancelled update holds editing until the lamp listens.** On Info,
+start an update from the dev-mode Firmware panel and cancel it there partway.
+The app sends the lamp no cancel, so the lamp keeps its update indicator for
+about 70 s (it waits a minute for more chunks, then holds 10 s). Open Colors:
+the strip and the grey stay up the whole time, then both go together when the
+lamp's indicator ends. Change the base colour: the lamp follows. On a lamp
+running 1.3.1 the strip and the grey go the moment you cancel, and a colour
+change in the next minute does nothing on the lamp. The Home Mode cases (a
+focus change dropped mid-update, a reconnect while Home Mode is open) can't be
+set up from the app's screens and are covered by push_resync_test.dart.
 
 ## Pass criteria
 
@@ -160,9 +158,8 @@ comes back the moment the update ends.
 - P5: zero greet lines while connected (outside the connect race window).
 - P6: no control takes a tap during the update, the strip names the lamp,
   and editing returns when it ends.
-- P7: after a failed update editing stays frozen until the lamp leaves its
-  update indicator, never past 75 s, and then the lamp's Home Mode state
-  matches the open screen without a slider touch.
+- P7: after a cancelled update editing stays frozen until the lamp leaves
+  its update indicator, never past 75 s, and the first edit after lands.
 
 ## Not covered here
 

@@ -8,20 +8,23 @@ part of 'quiet_after_push.dart';
 
 // GENERATED CODE - DO NOT MODIFY BY HAND
 // ignore_for_file: type=lint, type=warning
-/// True while a push to the lamp has ended without a reboot and the lamp
-/// still reports OTA quiet mode, so it drops every edit. The lamp's
+/// True from a push to the lamp ending without a reboot while the lamp still
+/// reports OTA quiet mode, so it drops every edit, until the lamp reports it
+/// is listening or ControlNotifier.quietAfterPushBound passes. The lamp's
 /// ControlNotifier sets it and keeps it alive.
 
 @ProviderFor(QuietAfterPushNotifier)
 final quietAfterPushProvider = QuietAfterPushNotifierFamily._();
 
-/// True while a push to the lamp has ended without a reboot and the lamp
-/// still reports OTA quiet mode, so it drops every edit. The lamp's
+/// True from a push to the lamp ending without a reboot while the lamp still
+/// reports OTA quiet mode, so it drops every edit, until the lamp reports it
+/// is listening or ControlNotifier.quietAfterPushBound passes. The lamp's
 /// ControlNotifier sets it and keeps it alive.
 final class QuietAfterPushNotifierProvider
     extends $NotifierProvider<QuietAfterPushNotifier, bool> {
-  /// True while a push to the lamp has ended without a reboot and the lamp
-  /// still reports OTA quiet mode, so it drops every edit. The lamp's
+  /// True from a push to the lamp ending without a reboot while the lamp still
+  /// reports OTA quiet mode, so it drops every edit, until the lamp reports it
+  /// is listening or ControlNotifier.quietAfterPushBound passes. The lamp's
   /// ControlNotifier sets it and keeps it alive.
   QuietAfterPushNotifierProvider._({
     required QuietAfterPushNotifierFamily super.from,
@@ -71,8 +74,9 @@ final class QuietAfterPushNotifierProvider
 String _$quietAfterPushNotifierHash() =>
     r'4c6402848a2cbdd0bb998907f384aec5e17868c7';
 
-/// True while a push to the lamp has ended without a reboot and the lamp
-/// still reports OTA quiet mode, so it drops every edit. The lamp's
+/// True from a push to the lamp ending without a reboot while the lamp still
+/// reports OTA quiet mode, so it drops every edit, until the lamp reports it
+/// is listening or ControlNotifier.quietAfterPushBound passes. The lamp's
 /// ControlNotifier sets it and keeps it alive.
 
 final class QuietAfterPushNotifierFamily extends $Family
@@ -87,8 +91,9 @@ final class QuietAfterPushNotifierFamily extends $Family
         isAutoDispose: true,
       );
 
-  /// True while a push to the lamp has ended without a reboot and the lamp
-  /// still reports OTA quiet mode, so it drops every edit. The lamp's
+  /// True from a push to the lamp ending without a reboot while the lamp still
+  /// reports OTA quiet mode, so it drops every edit, until the lamp reports it
+  /// is listening or ControlNotifier.quietAfterPushBound passes. The lamp's
   /// ControlNotifier sets it and keeps it alive.
 
   QuietAfterPushNotifierProvider call(String lampId) =>
@@ -98,8 +103,9 @@ final class QuietAfterPushNotifierFamily extends $Family
   String toString() => r'quietAfterPushProvider';
 }
 
-/// True while a push to the lamp has ended without a reboot and the lamp
-/// still reports OTA quiet mode, so it drops every edit. The lamp's
+/// True from a push to the lamp ending without a reboot while the lamp still
+/// reports OTA quiet mode, so it drops every edit, until the lamp reports it
+/// is listening or ControlNotifier.quietAfterPushBound passes. The lamp's
 /// ControlNotifier sets it and keeps it alive.
 
 abstract class _$QuietAfterPushNotifier extends $Notifier<bool> {
