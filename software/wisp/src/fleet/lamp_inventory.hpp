@@ -14,8 +14,9 @@ namespace wisp {
 #define LAMP_PRUNE_TIME_MS 240000
 #endif
 
-// A direct RSSI older than this is forgotten. Three lamp HELLO intervals, so
-// two lost beacons in a row keep a present lamp's measurement.
+// A direct RSSI older than this is forgotten. Three lamp HELLO intervals: a
+// lamp that loses two beacons in a row lapses only when a prune lands in the
+// moments before its third arrives.
 constexpr uint32_t kDirectRssiMaxAgeMs =
     3 * lamp_protocol::kLampHelloIntervalMs;
 

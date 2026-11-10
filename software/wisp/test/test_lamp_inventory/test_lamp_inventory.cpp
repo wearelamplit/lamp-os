@@ -200,6 +200,8 @@ void test_prune_drops_entry_across_millis_wrap(void) {
   wisp::LampInventory inv;
   const uint32_t heardAt = UINT32_MAX - 5000;
   hear(inv, 1, -60, heardAt);
+  inv.prune(heardAt + 4000, LAMP_PRUNE_TIME_MS);
+  TEST_ASSERT_EQUAL_size_t(1, inv.size());
   inv.prune(heardAt + LAMP_PRUNE_TIME_MS, LAMP_PRUNE_TIME_MS);
   TEST_ASSERT_EQUAL_size_t(1, inv.size());
   inv.prune(heardAt + LAMP_PRUNE_TIME_MS + 1, LAMP_PRUNE_TIME_MS);
