@@ -29,6 +29,7 @@ import 'auth_client.dart';
 import 'control_state.dart';
 import 'lamp_auth_required_exception.dart';
 import 'lamp_save_status.dart';
+import 'settings_blob_too_large_exception.dart';
 
 part 'control_notifier.g.dart';
 
@@ -911,7 +912,10 @@ class ControlNotifier extends _$ControlNotifier {
   /// When `reboot == false` a disconnect is a real error and is
   /// rethrown so the caller can surface it.
   ///
-  /// Throws on BLE write failure (caller wraps + snackbars).
+  /// Throws [SettingsBlobTooLargeException], before writing anything, when
+  /// the blob encrypted would not fit one GATT write, whether or not this
+  /// lamp has a password. Throws on BLE write failure (caller wraps +
+  /// snackbars).
   Future<void> writeSettingsBlob(
     Map<String, dynamic> blob, {
     bool reboot = true,
@@ -928,13 +932,14 @@ class ControlNotifier extends _$ControlNotifier {
       ...blob,
       'reboot': reboot,
     };
-    final blobJson = jsonEncode(payloadBlob);
+    final blobBytes = utf8.encode(jsonEncode(payloadBlob));
+    final encryptedLength = LampCrypto.frameOverhead + blobBytes.length;
+    if (encryptedLength > kBleMaxWriteBytes) {
+      throw SettingsBlobTooLargeException(encryptedLength);
+    }
 
     final payload = pw.isEmpty
-        ? Uint8List.fromList([
-            LampCrypto.magicPlaintext,
-            ...utf8.encode(blobJson),
-          ])
+        ? Uint8List.fromList([LampCrypto.magicPlaintext, ...blobBytes])
         : await LampCrypto.encryptOp(
             op: payloadBlob,
             password: pw,
@@ -1690,32 +1695,31 @@ class ControlNotifier extends _$ControlNotifier {
     return mismatches;
   }
 
-  /// The settings_blob an Advanced LEDs save writes.
+  /// The settings_blob an Advanced LEDs save writes: each role's strip
+  /// format and nothing else, so a lamp with many segments still fits one
+  /// write.
   @visibleForTesting
   static Map<String, dynamic> advancedLedsBlob(
           BaseSection base, ShadeSection shade) =>
       {
-        'base': {
-          'px': base.px,
-          'byteOrder': base.byteOrder,
-          'bpp': base.bpp,
-          'colors': base.colors.map((c) => c.toHex()).toList(),
-          'segments': base.segments.map(_segmentJson).toList(),
-        },
-        'shade': {
-          'px': shade.px,
-          'byteOrder': shade.byteOrder,
-          'bpp': shade.bpp,
-          'colors': shade.colors.map((c) => c.toHex()).toList(),
-          'segments': shade.segments.map(_segmentJson).toList(),
-        },
+        'base': _stripFormatJson(
+            base.segments, base.px, base.bpp, base.byteOrder),
+        'shade': _stripFormatJson(
+            shade.segments, shade.px, shade.bpp, shade.byteOrder),
       };
 
-  static Map<String, dynamic> _segmentJson(Segment s) => {
-        'name': s.name,
-        'px': s.px,
-        'colors': s.colors.map((c) => c.toHex()).toList(),
-      };
+  // Firmware that reports segments reads byteOrder and each segment's px;
+  // a role without segments comes from firmware that reads px and bpp.
+  static Map<String, dynamic> _stripFormatJson(
+          List<Segment> segments, int px, int bpp, String byteOrder) =>
+      segments.isEmpty
+          ? {'px': px, 'bpp': bpp, 'byteOrder': byteOrder}
+          : {
+              'byteOrder': byteOrder,
+              'segments': [
+                for (final s in segments) {'px': s.px},
+              ],
+            };
 
   static String _normalizeByteOrder(String order) {
     final up = order.toUpperCase();

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/routing/routes.dart';
 import '../../../core/theme/app_spacing.dart';
+import '../../../core/widgets/app_snackbar.dart';
 import '../../../core/widgets/back_button_leading.dart';
 import '../../../core/widgets/form_section.dart';
 import '../../../core/widgets/friendly_error.dart';
@@ -12,6 +13,7 @@ import '../../../core/widgets/nav_row.dart';
 import '../../../core/widgets/number_input_dialog.dart';
 import '../../control/application/advanced_session.dart';
 import '../../control/application/control_notifier.dart';
+import '../../control/application/settings_blob_too_large_exception.dart';
 import '../../firmware/presentation/firmware_push_lock.dart';
 
 /// Advanced LED settings: pixel count per segment + strip-type (LED byte
@@ -261,6 +263,9 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
                                   ),
                                 );
                               }
+                            } on SettingsBlobTooLargeException catch (e) {
+                              if (!context.mounted) return;
+                              AppSnackbar.error(context, e.message);
                             } catch (e) {
                               if (!context.mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
