@@ -4,7 +4,6 @@ import 'dart:typed_data';
 
 import 'package:lamp_app/features/firmware/domain/firmware_protocol.dart';
 
-// Hand-build a synthetic ACCEPT frame.
 Uint8List makeAccept({
   required int seq,
   required int offerSeq,
