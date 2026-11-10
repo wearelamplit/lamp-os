@@ -5,7 +5,7 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
-## Unreleased
+## 1.3.1
 
 ### Added
 - **Rotate colours.** A standard lamp's shade and base can each flow their
@@ -47,6 +47,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   and the newer save wins: the older one stops resending and reports no
   failure. Before, a background settings read could mark a change saved that
   the wisp never confirmed.
+- **`lamp:flash:release` no longer flashes another release's cached image.**
+  Downloads are cached per variant and release tag, so flashing one tag
+  can't silently reuse the image cached for a different one.
 
 ### Changed
 - **The Colors page draws a standard lamp's shade the way the lamp shows it.**
