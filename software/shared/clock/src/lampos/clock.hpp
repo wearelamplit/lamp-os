@@ -50,7 +50,7 @@ inline constexpr uint32_t kMaxFrameDeltaMs = 100;
 // Time since the previous frame at lastMs, capped at kMaxFrameDeltaMs, so the
 // first frame after any length of idle steps like a normal one.
 constexpr uint32_t frameDeltaMs(uint32_t nowMs, uint32_t lastMs) {
-  const uint32_t delta = msSince(nowMs, lastMs);
+  const uint32_t delta = nowMs - lastMs;
   return delta < kMaxFrameDeltaMs ? delta : kMaxFrameDeltaMs;
 }
 
