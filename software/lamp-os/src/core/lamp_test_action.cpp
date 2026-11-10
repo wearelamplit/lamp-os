@@ -1,7 +1,7 @@
 // core/lamp_test_action.cpp: test-panel action dispatcher.
 // dispatchLampAction handles WebSocket test actions from the app
 // (test_expression, test_zone_preview, test_expression_complete, etc.).
-// ZonePreview helpers manage live zone-preview state + restore.
+// A ZonePreviewSurface per surface holds the live Zone marker.
 // Called from Lamp::drainTestAction() in lamp_drains.cpp.
 //
 // Sibling TU of lamp.cpp; shares file-scope state via core/lamp_internal.hpp.
@@ -23,6 +23,7 @@
 
 #include "behaviors/configurator.hpp"
 #include "behaviors/greetable.hpp"
+#include "behaviors/zone_preview_surface.hpp"
 #include "components/apply/apply_brightness.hpp"
 #include "components/apply/apply_expressions.hpp"
 #include "components/apply/apply_lamp.hpp"
@@ -36,40 +37,14 @@
 #include "core/personality_engine.hpp"
 #include "expressions/expression_invocation.hpp"
 #include "expressions/expression_manager.hpp"
-#include "expressions/zone_preview.hpp"
 #include "util/bd_addr.hpp"
 #include "util/color.hpp"
 #include "util/gradient.hpp"
 
 namespace {
 
-// Live Zone-preview state per surface. The saved buffer is the configurator
-// baseline snapshotted on the first preview of a drag so clearZonePreview()
-// restores it even when the release payload carries no colors. A surface that
-// was rotating restores its role scene instead, so it rotates on from where
-// the marker stopped it.
-struct ZonePreview {
-  bool shadeActive = false;
-  bool baseActive = false;
-  bool shadeRotating = false;
-  bool baseRotating = false;
-  std::vector<lamp::Color> savedShade;
-  std::vector<lamp::Color> savedBase;
-};
-ZonePreview s_zonePreview;
-
-void paintZonePreview(lamp::ConfiguratorBehavior& cfg, uint16_t pixelCount,
-                      bool& active, bool& rotating, std::vector<lamp::Color>& saved,
-                      uint32_t posMin, uint32_t posMax, lamp::Color color) {
-  if (pixelCount == 0) return;
-  if (!active) {
-    saved = cfg.colors;
-    rotating = cfg.rotating();
-    active = true;
-  }
-  cfg.beginFade(lamp::buildZonePreviewBuffer(pixelCount, posMin, posMax, color),
-                0);
-}
+lamp::ZonePreviewSurface s_shadeZonePreview;
+lamp::ZonePreviewSurface s_baseZonePreview;
 
 void applyZonePreview(uint32_t posMin, uint32_t posMax,
                       lamp::ExpressionTarget target, lamp::Color color) {
@@ -77,46 +52,23 @@ void applyZonePreview(uint32_t posMin, uint32_t posMax,
   // so wisp paint + expressions don't cover it (same gate the color editor
   // uses). Yield tracks the active flags so it can't outlive the preview.
   if (target == lamp::TARGET_SHADE || target == lamp::TARGET_BOTH) {
-    paintZonePreview(shadeConfiguratorBehavior, shade.pixelCount, s_zonePreview.shadeActive,
-                     s_zonePreview.shadeRotating, s_zonePreview.savedShade,
-                     posMin, posMax, color);
-    lamp::overrides.setSurfacePreview(0x02, s_zonePreview.shadeActive);
+    s_shadeZonePreview.show(shadeConfiguratorBehavior, shade.pixelCount, posMin, posMax, color);
+    lamp::overrides.setSurfacePreview(0x02, s_shadeZonePreview.active());
   }
   if (target == lamp::TARGET_BASE || target == lamp::TARGET_BOTH) {
-    paintZonePreview(baseConfiguratorBehavior, base.pixelCount, s_zonePreview.baseActive,
-                     s_zonePreview.baseRotating, s_zonePreview.savedBase,
-                     posMin, posMax, color);
-    lamp::overrides.setSurfacePreview(0x01, s_zonePreview.baseActive);
-  }
-}
-
-void restoreZoneSurface(lamp::ConfiguratorBehavior& cfg, bool rotating,
-                        const std::vector<lamp::Color>& saved, uint8_t pixelCount,
-                        const std::vector<lamp::Color>& stops,
-                        const lamp::ColorRotation& rotation) {
-  if (rotating) {
-    cfg.showScene(lamp::buildRoleScene(pixelCount, stops, rotation), 0);
-  } else {
-    cfg.beginFade(saved, 0);
+    s_baseZonePreview.show(baseConfiguratorBehavior, base.pixelCount, posMin, posMax, color);
+    lamp::overrides.setSurfacePreview(0x01, s_baseZonePreview.active());
   }
 }
 
 void clearZonePreview() {
-  if (s_zonePreview.shadeActive) {
-    restoreZoneSurface(shadeConfiguratorBehavior, s_zonePreview.shadeRotating,
-                       s_zonePreview.savedShade, shade.pixelCount,
-                       config.shade.broadcastColors(), config.shade.renderedRotation());
+  if (s_shadeZonePreview.active()) {
+    s_shadeZonePreview.release(shadeConfiguratorBehavior);
     lamp::overrides.setSurfacePreview(0x02, false);
-    s_zonePreview.savedShade.clear();
-    s_zonePreview.shadeActive = false;
   }
-  if (s_zonePreview.baseActive) {
-    restoreZoneSurface(baseConfiguratorBehavior, s_zonePreview.baseRotating,
-                       s_zonePreview.savedBase, base.pixelCount,
-                       config.base.broadcastColors(), config.base.renderedRotation());
+  if (s_baseZonePreview.active()) {
+    s_baseZonePreview.release(baseConfiguratorBehavior);
     lamp::overrides.setSurfacePreview(0x01, false);
-    s_zonePreview.savedBase.clear();
-    s_zonePreview.baseActive = false;
   }
 }
 

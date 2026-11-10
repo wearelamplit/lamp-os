@@ -34,8 +34,8 @@ class ConfiguratorBehavior : public AnimatedBehavior {
   // Frame-count knob for control() state-machine timing; per-pixel
   // interpolation uses fadeStartMs_/fadeDurationMs_.
   uint32_t easeFrames = 60;
-  // A direct assignment draws under the current scene's rotation; raw content
-  // goes through beginFade or setSolid.
+  // Holds fb->pixelCount colours. A direct write draws under the current
+  // scene's rotation, so raw content goes through beginFade or setSolid.
   std::vector<Color> colors;
   unsigned long lastWebSocketUpdateTimeMs = 0;
 
@@ -63,6 +63,9 @@ class ConfiguratorBehavior : public AnimatedBehavior {
   void showScene(const RoleScene& scene, uint32_t fadeMs);
 
   bool rotating() const { return rotating_; }
+
+  // The scene on show. showScene reinstalls it with the rotation position kept.
+  RoleScene scene() const { return {colors, rotating_ ? rotation_ : ColorRotation{}}; }
 
   // Returns the rotation to the settled position, the frame quiet mode
   // settles each surface to, so motion resumes from it.

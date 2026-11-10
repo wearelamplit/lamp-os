@@ -14,6 +14,7 @@
 
 #include "../../src/behaviors/configurator.cpp"
 #include "../../src/behaviors/knockout.cpp"
+#include "../../src/behaviors/zone_preview_surface.cpp"
 #include "../../src/core/animated_behavior.cpp"
 #include "../../src/core/frame_buffer.cpp"
 #include "../../src/util/color.cpp"
@@ -335,7 +336,7 @@ void test_raw_writes_never_rotate() {
   }
 }
 
-// The zone marker holds still; release resumes from where the role was.
+// The zone marker holds still. Release resumes from where the role was.
 void test_zone_marker_holds_and_rotation_resumes() {
   Rig r(Surface::Shade);
   const RoleScene scene = rotatingScene(stopsA(), 5, RotationDir::Up);
@@ -353,6 +354,49 @@ void test_zone_marker_holds_and_rotation_resumes() {
   for (int k = 0; k < 100; ++k) {
     r.step();
     assertFrame(r.expect(scene, r.now), r.fb.buffer);
+  }
+}
+
+// An abandoned edit leaves the lamp on its saved scene while RAM config keeps
+// the edit. A Zone marker put up after that releases to the saved scene on
+// show, rotating on from where the marker stopped it, or the static saved frame.
+void test_zone_release_restores_the_scene_shown_after_an_abandoned_edit() {
+  const RoleScene edit = rotatingScene(stopsB(), 5, RotationDir::Down);
+  for (bool savedRotates : {true, false}) {
+    Rig r(Surface::Shade);
+    const RoleScene saved = savedRotates ? rotatingScene(stopsA(), 40, RotationDir::Up)
+                                         : buildRoleScene(kPx, stopsA(), ColorRotation{});
+    r.saveScene(saved);
+    r.cfg.colors = saved.colors;
+    r.tick(5000);
+    if (savedRotates) r.expect(saved, r.now);
+    r.rotate(saved, 20);
+    r.write(edit, 0);
+    const uint32_t edited = r.now;
+    while (r.now <= edited + CONFIGURATOR_WEBSOCKET_TIMEOUT_MS + 1000) {
+      r.step();
+      r.expect(r.now <= edited + CONFIGURATOR_WEBSOCKET_TIMEOUT_MS ? edit : saved, r.now);
+    }
+    const std::vector<Color> shown = r.fb.buffer;
+    TEST_ASSERT_EQUAL(savedRotates, r.cfg.rotating());
+
+    ZonePreviewSurface marker;
+    const Color white(255, 255, 255, 255);
+    for (uint32_t pos = 4; pos < 12; ++pos) {
+      set_mock_millis(r.now);
+      marker.show(r.cfg, kPx, pos, pos + 9, white);
+      r.cfg.lastWebSocketUpdateTimeMs = r.now;
+      r.step();
+      assertFrame(buildZonePreviewBuffer(kPx, pos, pos + 9, white), r.fb.buffer);
+    }
+    set_mock_millis(r.now);
+    marker.release(r.cfg);
+    TEST_ASSERT_FALSE(marker.active());
+    TEST_ASSERT_EQUAL(savedRotates, r.cfg.rotating());
+    for (int k = 0; k < 200; ++k) {
+      r.step();
+      assertFrame(savedRotates ? r.expect(saved, r.now) : shown, r.fb.buffer);
+    }
   }
 }
 
@@ -380,17 +424,25 @@ void test_saved_rotating_scene_rotates_from_boot() {
 }
 
 // With a rotating saved scene, an abandoned preview crossfades back to it and it
-// keeps rotating; when it already shows, no pixel changes.
+// keeps rotating, whichever of colours, loop length and direction the preview
+// changed. When it already shows, no pixel changes.
 void test_abandoned_preview_returns_to_the_rotating_saved_scene() {
-  for (bool same : {false, true}) {
+  const RoleScene saved = rotatingScene(stopsA(), 40, RotationDir::Up);
+  const RoleScene previews[] = {
+      rotatingScene(stopsB(), 5, RotationDir::Down),   // everything
+      rotatingScene(stopsB(), 40, RotationDir::Up),    // colours
+      rotatingScene(stopsA(), 5, RotationDir::Up),     // loop length
+      rotatingScene(stopsA(), 40, RotationDir::Down),  // direction
+      saved,
+  };
+  for (const RoleScene& preview : previews) {
+    const bool same = preview.colors == saved.colors && preview.rotation == saved.rotation;
     Rig r(Surface::Shade);
-    const RoleScene saved = rotatingScene(stopsA(), 40, RotationDir::Up);
     r.saveScene(saved);
     r.cfg.colors = saved.colors;
     r.tick(5000);
     r.expect(saved, r.now);
     r.rotate(saved, 20);
-    const RoleScene preview = same ? saved : rotatingScene(stopsB(), 5, RotationDir::Down);
     r.write(preview, 0);
     const uint32_t edited = r.now;
     std::vector<Color> held;
@@ -642,6 +694,7 @@ int main(int, char**) {
   RUN_TEST(test_change_mid_crossfade_starts_from_the_drawn_frame);
   RUN_TEST(test_raw_writes_never_rotate);
   RUN_TEST(test_zone_marker_holds_and_rotation_resumes);
+  RUN_TEST(test_zone_release_restores_the_scene_shown_after_an_abandoned_edit);
   RUN_TEST(test_saved_rotating_scene_rotates_from_boot);
   RUN_TEST(test_abandoned_preview_returns_to_the_rotating_saved_scene);
   RUN_TEST(test_abandoned_rotating_preview_settles_on_the_static_saved_scene);
