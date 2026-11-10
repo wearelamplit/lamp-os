@@ -14,9 +14,11 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   unplugged, and the reset shows in the lamp's crash record. A freeze in the
   first 30 seconds after a firmware update rolls the lamp back to its
   previous firmware. A lamp that freezes again and again right after
-  starting stops restarting after the third time and stays as it is until
-  you unplug it, so it never flickers through endless restarts. A freeze
-  while the lamp is still starting up is not caught yet.
+  starting stops restarting after the third time, so it never flickers
+  through endless restarts; if it freezes again it stays frozen until you
+  unplug it. Unplugging it, or any other restart, brings the freeze check
+  back, unless that restart is itself a freeze in the lamp's first minute.
+  A freeze while the lamp is still starting up is not caught yet.
 - **Dropped writes show on the debug console.** On a development build, a
   colour or control write the lamp ignores, during a firmware update or
   because it could not read it, prints a `[drop]` line naming the setting

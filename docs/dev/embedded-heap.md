@@ -637,12 +637,12 @@ ran instead (often the idle task), and only the serial log names `loopTask`.
 After 3 task-watchdog resets in a row, each from a boot whose loop never
 started an iteration 60 s into uptime, the next boot leaves the loop unwatched
 and prints `[loopwd] 3 watchdog resets in a row` on every build, so a loop that
-stalls on every boot freezes and stops resetting. The streak lives in RTC memory, and any other reset (a
-power cycle, an update, a web save's reboot) starts the watch again. A stall
-within 30 s of a firmware update's first boot makes the bootloader roll back,
-and the record's `fw` is then the version that booted after it. `setup()` runs
-unwatched: a hang there leaves the lamp dark with no record until a power
-cycle.
+stalls on every boot freezes and stops resetting. The streak lives in RTC
+memory, and any other reset (a power cycle, an update, a web save's reboot)
+starts the watch again. A stall within 30 s of a firmware update's first boot
+makes the bootloader roll back, and the record's `fw` is then the version that
+booted after it. `setup()` runs unwatched: a hang there leaves the lamp dark
+with no record until a power cycle.
 
 ## Why it recurs
 

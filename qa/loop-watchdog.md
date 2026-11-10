@@ -55,13 +55,15 @@ task watchdog from the end of `setup()` (`util/loop_watchdog.hpp`): 5 s, or
 
 5. **Boot-loop guard.** Run row 1's `loopwd.hang` three times, each within
    60 s of the previous boot. After the third reset the boot log shows
-   `[loopwd] 3 watchdog resets in a row; loop unwatched until a
-   non-watchdog reset`, and a fourth `loopwd.hang` freezes the lamp with no
-   reset. Power cycle it: the next boot is watched again, and a
-   `loopwd.hang` resets it.
+   `[loopwd] 3 watchdog resets in a row; loop unwatched until a reset that
+   is not a task-watchdog reset within 60 s of boot`, and a fourth
+   `loopwd.hang` freezes the lamp with no reset. Power cycle it: the next
+   boot is watched again, and a `loopwd.hang` resets it.
 
 ## Known limits
 
 `setup()` runs unwatched, so a hang there still leaves the lamp dark until a
 power cycle. After the boot-loop guard trips, the loop stays unwatched until
-the lamp next restarts for any reason other than the task watchdog.
+the next reset that is not a task-watchdog reset within 60 s of boot: a power
+cycle, an update's or web save's reboot, or any reset once the loop has run a
+minute.
