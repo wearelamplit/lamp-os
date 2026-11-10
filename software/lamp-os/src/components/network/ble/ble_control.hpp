@@ -82,8 +82,8 @@ constexpr const char* CHAR_HOME_MODE_FOCUS = "5f64f4e5-d6d9-4a44-9b3f-3a8d6f7e6b
 constexpr const char* CHAR_SOCIAL_DISPOSITIONS = "5f64f4e6-d6d9-4a44-9b3f-3a8d6f7e6b40";
 // wisp_op (write-with-response, plaintext JSON): forward a wisp-bound op
 // from the app over ESP-NOW. The lamp does NOT apply this locally; it
-// only broadcasts a MSG_CONTROL_OP carrying the payload, and the wisp(s)
-// on the mesh consume it. Open-set by design: the wire format is
+// only unicasts a MSG_CONTROL_OP carrying the payload to its display wisp,
+// which consumes it. Open-set by design: the wire format is
 // {"char":"wispOp","op":"setOscRole","role":"fill",...} and the wisp owns the
 // op vocabulary; lamps never interpret. Auth-gated like the rest of the
 // write surface.
