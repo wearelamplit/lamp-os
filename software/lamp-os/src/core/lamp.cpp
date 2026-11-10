@@ -318,13 +318,12 @@ namespace lamp {
 void renderShadeColors(JsonArray arr) {
   if (arr.isNull() || arr.size() == 0) return;
   std::vector<lamp::Color> colors = jsonArrayToColors(arr);
-  std::vector<lamp::Color> gradient =
-      lamp::buildGradientWithStops(shade.pixelCount, colors);
-  // beginFade keeps the color-picker's ~250ms ease. On a rapid write mid-fade
-  // it re-anchors fade-from to the in-progress lerp value, so drags
-  // rubber-band smoothly instead of snapping.
-  shadeConfiguratorBehavior.beginFade(gradient, lamp::kDefaultFadeMs);
-  lamp::overrides.shade.rebaseline(gradient);
+  const lamp::RoleScene scene =
+      lamp::buildRoleScene(shade.pixelCount, colors, config.shade.renderedRotation());
+  // A rapid write mid-fade re-anchors fade-from to the in-progress value, so
+  // drags rubber-band smoothly instead of snapping.
+  shadeConfiguratorBehavior.showScene(scene, lamp::kDefaultFadeMs);
+  lamp::overrides.shade.rebaseline(scene.colors);
   // Reflect the new shade in the BLE adv so phones and v1 neighbours see it
   // without connecting. Base and shade both carry their blended identity
   // color.
@@ -340,14 +339,13 @@ void renderShadeColors(JsonArray arr) {
 void renderBaseColors(JsonArray arr) {
   if (arr.isNull() || arr.size() == 0) return;
   std::vector<lamp::Color> colors = jsonArrayToColors(arr);
-  std::vector<lamp::Color> gradient =
-      lamp::buildGradientWithStops(base.pixelCount, colors);
-  // See renderShadeColors: the fade-snapshot-from-buffer flicker on knockout
-  // pixels is handled inside ConfiguratorBehavior::beginFade (it snapshots
-  // from `colors` / in-progress lerp, not fb->buffer). No mid-fade guard
-  // needed here.
-  baseConfiguratorBehavior.beginFade(gradient, lamp::kDefaultFadeMs);
-  lamp::overrides.base.rebaseline(gradient);
+  const lamp::RoleScene scene =
+      lamp::buildRoleScene(base.pixelCount, colors, config.base.renderedRotation());
+  // The fade-snapshot-from-buffer flicker on knockout pixels is handled inside
+  // the configurator (it snapshots from its own output, not fb->buffer). No
+  // mid-fade guard needed here.
+  baseConfiguratorBehavior.showScene(scene, lamp::kDefaultFadeMs);
+  lamp::overrides.base.rebaseline(scene.colors);
   // Reflect the new base in the BLE adv as its blended identity color.
   const auto& shadeStops = config.shade.broadcastColors();
   bt.setAdvertisedColors(
@@ -452,11 +450,16 @@ void updateAdvertisedDeviceName(const char* newName) {
 
 namespace lamp {
 
+static void saveScene(FrameBuffer& fb, RoleScene scene) {
+  fb.defaultColors = std::move(scene.colors);
+  fb.defaultRotation = scene.rotation;
+}
+
 void refreshDefaultScene() {
-  shade.defaultColors =
-      buildGradientWithStops(shade.pixelCount, ::config.shade.broadcastColors());
-  base.defaultColors =
-      buildGradientWithStops(base.pixelCount, ::config.base.broadcastColors());
+  saveScene(shade, buildRoleScene(shade.pixelCount, ::config.shade.broadcastColors(),
+                                  ::config.shade.renderedRotation()));
+  saveScene(base, buildRoleScene(base.pixelCount, ::config.base.broadcastColors(),
+                                 ::config.base.renderedRotation()));
 }
 
 void applyKnockoutPixel(uint8_t pixel, uint8_t brightness) {
@@ -725,6 +728,7 @@ void lamp::Lamp::setup() {
   // a custom variant sets an explicit per-strip count.
   auto buildRole = [&](lamp::Surface role, uint8_t configPx,
                        const std::vector<lamp::Color>& colors,
+                       const lamp::ColorRotation& rotation,
                        const std::string& configByteOrder,
                        lamp::FrameBuffer& fb) {
     // Config byteOrder overrides the StripSpec default for every strip in the
@@ -741,10 +745,15 @@ void lamp::Lamp::setup() {
       segments.push_back({driver, s.name, offset, px, s.reversed});
       offset += px;
     }
-    fb.begin(lamp::buildGradientWithStops(offset, colors), std::move(segments));
+    lamp::RoleScene scene =
+        lamp::buildRoleScene(static_cast<uint8_t>(offset), colors, rotation);
+    fb.begin(std::move(scene.colors), std::move(segments));
+    fb.defaultRotation = scene.rotation;
   };
-  buildRole(lamp::Surface::Shade, config.shade.sumPx(), config.shade.broadcastColors(), config.shade.byteOrder, shade);
-  buildRole(lamp::Surface::Base,  config.base.sumPx(),  config.base.broadcastColors(),  config.base.byteOrder,  base);
+  buildRole(lamp::Surface::Shade, config.shade.sumPx(), config.shade.broadcastColors(),
+            config.shade.renderedRotation(), config.shade.byteOrder, shade);
+  buildRole(lamp::Surface::Base, config.base.sumPx(), config.base.broadcastColors(),
+            config.base.renderedRotation(), config.base.byteOrder, base);
 
   // Governor sense inputs: per-role transmitted channel count resolved with
   // the same config-over-StripSpec byteOrder fallback buildRole uses.

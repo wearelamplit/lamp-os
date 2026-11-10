@@ -45,21 +45,26 @@ namespace {
 
 // Live Zone-preview state per surface. The saved buffer is the configurator
 // baseline snapshotted on the first preview of a drag so clearZonePreview()
-// restores it even when the release payload carries no colors.
+// restores it even when the release payload carries no colors. A surface that
+// was rotating restores its role scene instead, so it rotates on from where
+// the marker stopped it.
 struct ZonePreview {
   bool shadeActive = false;
   bool baseActive = false;
+  bool shadeRotating = false;
+  bool baseRotating = false;
   std::vector<lamp::Color> savedShade;
   std::vector<lamp::Color> savedBase;
 };
 ZonePreview s_zonePreview;
 
 void paintZonePreview(lamp::ConfiguratorBehavior& cfg, uint16_t pixelCount,
-                      bool& active, std::vector<lamp::Color>& saved,
+                      bool& active, bool& rotating, std::vector<lamp::Color>& saved,
                       uint32_t posMin, uint32_t posMax, lamp::Color color) {
   if (pixelCount == 0) return;
   if (!active) {
     saved = cfg.colors;
+    rotating = cfg.rotating();
     active = true;
   }
   cfg.beginFade(lamp::buildZonePreviewBuffer(pixelCount, posMin, posMax, color),
@@ -72,28 +77,43 @@ void applyZonePreview(uint32_t posMin, uint32_t posMax,
   // so wisp paint + expressions don't cover it (same gate the color editor
   // uses). Yield tracks the active flags so it can't outlive the preview.
   if (target == lamp::TARGET_SHADE || target == lamp::TARGET_BOTH) {
-    paintZonePreview(shadeConfiguratorBehavior, shade.pixelCount,
-                     s_zonePreview.shadeActive, s_zonePreview.savedShade,
+    paintZonePreview(shadeConfiguratorBehavior, shade.pixelCount, s_zonePreview.shadeActive,
+                     s_zonePreview.shadeRotating, s_zonePreview.savedShade,
                      posMin, posMax, color);
     lamp::overrides.setSurfacePreview(0x02, s_zonePreview.shadeActive);
   }
   if (target == lamp::TARGET_BASE || target == lamp::TARGET_BOTH) {
-    paintZonePreview(baseConfiguratorBehavior, base.pixelCount,
-                     s_zonePreview.baseActive, s_zonePreview.savedBase,
+    paintZonePreview(baseConfiguratorBehavior, base.pixelCount, s_zonePreview.baseActive,
+                     s_zonePreview.baseRotating, s_zonePreview.savedBase,
                      posMin, posMax, color);
     lamp::overrides.setSurfacePreview(0x01, s_zonePreview.baseActive);
   }
 }
 
+void restoreZoneSurface(lamp::ConfiguratorBehavior& cfg, bool rotating,
+                        const std::vector<lamp::Color>& saved, uint8_t pixelCount,
+                        const std::vector<lamp::Color>& stops,
+                        const lamp::ColorRotation& rotation) {
+  if (rotating) {
+    cfg.showScene(lamp::buildRoleScene(pixelCount, stops, rotation), 0);
+  } else {
+    cfg.beginFade(saved, 0);
+  }
+}
+
 void clearZonePreview() {
   if (s_zonePreview.shadeActive) {
-    shadeConfiguratorBehavior.beginFade(s_zonePreview.savedShade, 0);
+    restoreZoneSurface(shadeConfiguratorBehavior, s_zonePreview.shadeRotating,
+                       s_zonePreview.savedShade, shade.pixelCount,
+                       config.shade.broadcastColors(), config.shade.renderedRotation());
     lamp::overrides.setSurfacePreview(0x02, false);
     s_zonePreview.savedShade.clear();
     s_zonePreview.shadeActive = false;
   }
   if (s_zonePreview.baseActive) {
-    baseConfiguratorBehavior.beginFade(s_zonePreview.savedBase, 0);
+    restoreZoneSurface(baseConfiguratorBehavior, s_zonePreview.baseRotating,
+                       s_zonePreview.savedBase, base.pixelCount,
+                       config.base.broadcastColors(), config.base.renderedRotation());
     lamp::overrides.setSurfacePreview(0x01, false);
     s_zonePreview.savedBase.clear();
     s_zonePreview.baseActive = false;
@@ -205,7 +225,10 @@ void dispatchLampAction(JsonDocument& doc, unsigned long updateTimeMs) {
         for (JsonVariant shadeColor : shadeColors) {
           updatedColors.push_back(lamp::hexStringToColor(shadeColor));
         }
-        shadeConfiguratorBehavior.colors = lamp::buildGradientWithStops(shade.pixelCount, updatedColors);
+        shadeConfiguratorBehavior.showScene(
+            lamp::buildRoleScene(shade.pixelCount, updatedColors,
+                                 config.shade.renderedRotation()),
+            0);
       }
     }
     if (doc["baseColors"]) {
@@ -215,7 +238,10 @@ void dispatchLampAction(JsonDocument& doc, unsigned long updateTimeMs) {
         for (JsonVariant baseColor : baseColors) {
           updatedColors.push_back(lamp::hexStringToColor(baseColor));
         }
-        baseConfiguratorBehavior.colors = lamp::buildGradientWithStops(base.pixelCount, updatedColors);
+        baseConfiguratorBehavior.showScene(
+            lamp::buildRoleScene(base.pixelCount, updatedColors,
+                                 config.base.renderedRotation()),
+            0);
       }
     }
     // If the wisp was painting either surface before the expression

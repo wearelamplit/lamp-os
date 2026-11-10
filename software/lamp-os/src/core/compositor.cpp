@@ -85,6 +85,12 @@ void Compositor::tick() {
     lastDrawTimeMs = millis();
     const bool quietEntered = !otaQuietPainted_;
     otaQuietPainted_ = true;
+    // Quiet mode settles each surface to its saved scene at position 0, so a
+    // stretch that ends without a reboot resumes rotating from that frame.
+    if (quietEntered) {
+      if (context_.shadeConfigurator) context_.shadeConfigurator->resetRotation();
+      if (context_.baseConfigurator) context_.baseConfigurator->resetRotation();
+    }
     // frameBuffers[0]/[1] per lamp_behaviors.cpp ordering: {shade, base}.
     // Visible (firmware) OTA paints the progress bar on shade and settles +
     // pulses base; silent (FS) OTA settles both surfaces with no signaling.
