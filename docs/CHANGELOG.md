@@ -5,7 +5,17 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
-## 1.3.2
+## Unreleased
+
+### Changed
+- **The wisp sends less status chatter.** Opening the wisp screen in the app,
+  the wisp's WiFi or Ethernet connecting or dropping, and its OSC feed going
+  quiet or coming back now send one status update instead of repeating it
+  every 2 seconds for 20 seconds. A flapping WiFi network costs at most one
+  update every 5 seconds. Changes you make from the app still repeat for 20
+  seconds, so their confirmation gets through. The wisp only updates over
+  USB: reflash it to pick this up.
+
 
 ### Fixed
 - **A frozen lamp restarts itself.** If the lamp's main loop ever stops
