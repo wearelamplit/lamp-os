@@ -193,7 +193,7 @@ void PresenceBeacon::emitState(const uint8_t srcMac[6], uint8_t presenceFlags) {
   WISP_SEQ_PORTMUX_EXIT(&seq_->mux);
   const size_t stateLen = buildStateFrame(
       *roster_, stateBuf, sizeof(stateBuf), stateSeq, srcMac, brightness,
-      driftRateMs, presenceFlags, paint_ && paint_->painting());
+      driftRateMs, presenceFlags, paint_ && paint_->painting(), millis());
   // No resend: at up to 1461 B STATE overflows the claim-sized resend slot.
   // Edge coverage comes from the burst window in pump(); the 2s cadence backs
   // both up.

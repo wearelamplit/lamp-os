@@ -65,7 +65,7 @@ void PaintDistributor::tick(uint32_t nowMs) {
   if (painting() && driftSlotMs_ > 0 && driftCount_ > 0 &&
       (nowMs - lastDriftFireMs_) >= driftSlotMs_) {
     lastDriftFireMs_ = nowMs;
-    assignDriftColor(driftIdx_ % driftCount_);
+    assignDriftColor(driftIdx_ % driftCount_, nowMs);
     driftIdx_ = nextDriftIdx(driftIdx_, driftCount_);
   }
 
@@ -143,8 +143,9 @@ void PaintDistributor::sendBrightnessToPeer(const uint8_t mac[6]) {
 #endif
 }
 
-void PaintDistributor::setDriftInterval(uint32_t intervalMs) {
+void PaintDistributor::setDrift(uint32_t intervalMs, uint8_t fadePct) {
   driftIntervalMs_ = intervalMs;
+  driftFadePct_ = fadePct;
   refreshDriftRoster();
 }
 
@@ -181,12 +182,19 @@ void PaintDistributor::refreshDriftRoster(bool paintNewcomers) {
   }
 }
 
-void PaintDistributor::assignDriftColor(size_t idx) {
+void PaintDistributor::assignDriftColor(size_t idx, uint32_t nowMs) {
   if (!roster_ || !palette_) return;
   if (palette_->colors().empty()) return;
-  storeTuplePaint(*roster_, driftMacs_[idx],
+  const uint8_t* mac = driftMacs_[idx];
+  const uint32_t fadeMs = driftFadeMs(driftIntervalMs_, driftFadePct_, esp_random());
+  storeTupleDrift(*roster_, mac,
                   sampleTupleAtPositions(palette_->colors(), esp_random(),
-                                         esp_random()));
+                                         esp_random()),
+                  nowMs, fadeMs);
+#ifdef LAMP_DEBUG
+  Serial.printf("[drift] %02X:%02X:%02X:%02X:%02X:%02X fade=%lums\n", mac[0],
+                mac[1], mac[2], mac[3], mac[4], mac[5], (unsigned long)fadeMs);
+#endif
 }
 
 void PaintDistributor::assignPaintColor(const uint8_t mac[6]) {
