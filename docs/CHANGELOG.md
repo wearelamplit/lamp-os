@@ -10,11 +10,12 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 ### Added
 - **The app tells you how an update went.** When a lamp comes back after
   the app updates it, a message reads "<name> learned some new tricks ✨".
-  When an update fails, a message reads "<name> didn't catch the new tricks
-  this time. Trying again next time you connect." once the lamp is listening
-  again, and the app does try again the next time it connects to that lamp.
-  If the phone loses touch with the lamp right at the end but the lamp
-  finishes the update anyway, the message says it learned them.
+  When an update fails while the phone stays connected, a message reads
+  "<name> didn't catch the new tricks this time. Trying again next time you
+  connect." once the lamp is listening again, and the app does try again the
+  next time it connects to that lamp. When an update loses the phone's
+  connection, the app waits until it reconnects and reads the lamp: if the
+  lamp finished the update anyway, the message says it learned them.
   An update the lamp turns down, because it's busy or doesn't trust the
   download, gets no message, and neither does a lamp that's already up to
   date.

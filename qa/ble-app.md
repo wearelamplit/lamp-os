@@ -165,21 +165,23 @@ two reconnects ran; a disconnect right after the second connect is the app
 cycling a link it had already restored. Then leave the lamp open and idle for
 a minute: `page CTRL section=lamp` should not appear at all.
 
-P9 — **a failed update says so, once.** Start an update in normal mode and
-walk the phone out of range partway (or switch the lamp off) so it fails,
-and stay away over a minute so the lamp gives up on the lesson (a quicker
-return is unmeasured: the lamp may turn the retry down as busy). While the
-lamp is still quiet the strip reads "Giving <name> a moment to
-settle… 🎓"; once it listens again a message reads "<name> didn't catch the new
-tricks this time. Trying again next time you connect." exactly once. Leave the
-lamp and open it again: the update starts again on its own. In dev mode, the
+P9 — **how an update ended.** Start an update in normal mode and walk the
+phone out of range partway so it fails, and stay away over a minute so the
+lamp gives up on the lesson (a quicker return is unmeasured: the lamp may
+turn the retry down as busy). Come back: the app reconnects and the update
+starts again on its own, with no message for the lost one. The "<name>
+didn't catch the new tricks this time. Trying again next time you connect."
+message is for an update that fails while the phone stays connected (a
+lamp-side failure, shown once the lamp is listening again); it can't be set
+up from the app's screens and is covered by firmware_push_lock_test.dart. In
+dev mode, the
 Firmware panel shows a plain line first (for a dropped link, "Lost <name>
 partway through. Bring your phone closer and try again.") with the raw reason
 in small monospace beneath. Walk out of range right as the bar fills
 instead: if the lamp still installs and comes back on the new version, the
-message is "<name> learned some new tricks ✨", not the miss. Install a build
-the lamp already has from the panel: it reads "<name> already knows these tricks." and the lamp does not
-restart. Open a lamp that is busy teaching another lamp from My Lamps: the
+message is "<name> learned some new tricks ✨", with no miss before it, on a
+lamp running 1.3.1 too. Install a build the lamp already has from the panel:
+it reads "<name> already knows these tricks." and the lamp does not restart. Open a lamp that is busy teaching another lamp from My Lamps: the
 page reads "<Name> is busy teaching a lamp new tricks 🎓" with the name
 capitalized as elsewhere, and "It's hard to reach while teaching".
 
@@ -187,7 +189,9 @@ P10 — **names and saves.** Rename a lamp on Config to a long name: the field
 stops at 32 bytes (an emoji takes 4, an accented letter 2) even with Gboard
 underlining the word as you type, and the lamp's web config shows the same
 name. Select the whole name and paste a longer one: the field keeps the
-start of the paste. Do the same on a new lamp's naming step. Tap
+start of the paste. Do the same on a new lamp's naming step. On an iPhone
+with the Japanese keyboard, type 12 kana without confirming and tap Save: My
+Lamps and the lamp's web config both show the first 10. Tap
 the Advanced LEDs Update, and the password Save, twice fast: the button greys
 with a spinner after the first tap and the lamp restarts once. A rename the
 lamp refuses ("Couldn't set name. Try again.") can't be set up from the app's
@@ -208,8 +212,8 @@ screens and is covered by setup_screen_test.dart.
   its update indicator, never past 75 s, and the first edit after lands.
 - P8: one connect and one auth after an Advanced LEDs save, no disconnect
   after them, and no `lamp` section reads while the lamp sits open.
-- P9: one message per update outcome, none for a cancel or a declined offer,
-  and the retry on the next connect.
+- P9: the retry on the next connect, a lamp that took a lost update says
+  learned with no miss, and no message for a cancel or a declined offer.
 - P10: no name field takes more than 32 bytes, a refused rename says so, and
   a double tap on a restarting save restarts the lamp once.
 
