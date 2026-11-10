@@ -37,6 +37,7 @@
 #include <string>
 
 #include "components/firmware/ota_quiet_mode.hpp"
+#include "util/dropped_write_log.hpp"
 
 namespace ble_control {
 
@@ -136,7 +137,10 @@ class WriteRouter : public NimBLECharacteristicCallbacks {
     // for the BLE-pushed OTA chunk transport. Everything else (color,
     // shade, brightness, expression, settings, page) is gated here so
     // the phone can't fight the OTA for radio time / config state.
-    if (lamp::ota_quiet_mode::isQuiet()) return;
+    if (lamp::ota_quiet_mode::isQuiet()) {
+      lamp::logDroppedWrite(debugTag_ ? debugTag_ : "write", "ota quiet");
+      return;
+    }
     noteAppWriteActivity();
 
     const uint16_t handle = info.getConnHandle();

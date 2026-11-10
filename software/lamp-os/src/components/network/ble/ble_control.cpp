@@ -23,8 +23,10 @@
 #include "components/transient_override/color_override.hpp"
 #include "components/webapp/webapp.hpp"
 #include "util/color.hpp"
+#include "util/dropped_write_log.hpp"
 #include "util/json_escape.hpp"
 #include "util/heap_probe.hpp"
+#include "util/loop_watchdog.hpp"
 #include "core/pending_slot_aggregate.hpp"
 #include "core/override_aggregate.hpp"
 #include "components/firmware/ota_quiet_mode.hpp"
@@ -379,7 +381,10 @@ class AuthCallback : public NimBLECharacteristicCallbacks {
 class BrightnessCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
-    if (lamp::ota_quiet_mode::isQuiet()) return;
+    if (lamp::ota_quiet_mode::isQuiet()) {
+      lamp::logDroppedWrite("brightness", "ota quiet");
+      return;
+    }
     noteAppWriteActivity();
     std::string val = c->getValue();
     if (val.empty()) return;
@@ -396,7 +401,10 @@ class BrightnessCallback : public NimBLECharacteristicCallbacks {
 class EditSessionCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
-    if (lamp::ota_quiet_mode::isQuiet()) return;
+    if (lamp::ota_quiet_mode::isQuiet()) {
+      lamp::logDroppedWrite("editSession", "ota quiet");
+      return;
+    }
     std::string val = c->getValue();
     if (val.size() < 2) return;
     const uint8_t surface = static_cast<uint8_t>(val[0]);
@@ -417,7 +425,10 @@ class EditSessionCallback : public NimBLECharacteristicCallbacks {
 class HomeModeFocusCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
-    if (lamp::ota_quiet_mode::isQuiet()) return;
+    if (lamp::ota_quiet_mode::isQuiet()) {
+      lamp::logDroppedWrite("homeModeFocus", "ota quiet");
+      return;
+    }
     std::string val = c->getValue();
     if (val.empty()) return;
     const bool active = val[0] != 0;
@@ -432,7 +443,10 @@ class HomeModeFocusCallback : public NimBLECharacteristicCallbacks {
 class BaseKnockoutCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
-    if (lamp::ota_quiet_mode::isQuiet()) return;
+    if (lamp::ota_quiet_mode::isQuiet()) {
+      lamp::logDroppedWrite("knockout", "ota quiet");
+      return;
+    }
     noteAppWriteActivity();
     std::string val = c->getValue();
     if (val.size() < 2) return;
@@ -731,7 +745,10 @@ class SocialDispositionsCallback : public NimBLECharacteristicCallbacks {
   }
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
-    if (lamp::ota_quiet_mode::isQuiet()) return;
+    if (lamp::ota_quiet_mode::isQuiet()) {
+      lamp::logDroppedWrite("socialDispositions", "ota quiet");
+      return;
+    }
     std::string val = c->getValue();
     if (val.size() > lamp::kPendingJsonOp) return;
 #ifdef LAMP_DEBUG
@@ -850,7 +867,10 @@ void notifyWifiState() {
 class SettingsBlobCallback : public NimBLECharacteristicCallbacks {
   // Write-and-reboot save target; reads go through the page protocol.
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
-    if (lamp::ota_quiet_mode::isQuiet()) return;
+    if (lamp::ota_quiet_mode::isQuiet()) {
+      lamp::logDroppedWrite("settingsBlob", "ota quiet");
+      return;
+    }
     static const auto uuid = uuidSaltLE(CHAR_SETTINGS_BLOB);
     const uint16_t handle = connInfo.getConnHandle();
     const std::string raw = c->getValue();
@@ -1519,9 +1539,11 @@ bool deinitForWebapp() {
   disconnectGattClientsForOta();
   NimBLEDevice::getScan()->stop();
   stop();
+  lamp::loop_watchdog::feed();
   NimBLEDevice::deinit(true);
   esp_bt_controller_disable();
   esp_bt_controller_deinit();
+  lamp::loop_watchdog::feed();
   s_bleDown = true;
   lamp::logHeap("ble-post");
   return true;

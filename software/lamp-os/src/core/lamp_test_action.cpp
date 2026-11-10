@@ -299,6 +299,15 @@ void runSerialCommand(char* line, size_t len) {
     return;
   }
 
+  // Stalls the loop task so the loop watchdog's reset can be seen on the rig.
+  if (strcmp(line, "loopwd.hang") == 0) {
+    Serial.println("[cmd] ok loopwd.hang");
+    Serial.flush();
+    volatile bool spin = true;
+    while (spin) {
+    }
+  }
+
   if (strcmp(line, "heap.get") == 0) {
     Serial.printf("[cmd] ok heap free=%u largest=%u minever=%u txstalls=%lu txrefused=%lu\n",
                   (unsigned)esp_get_free_heap_size(),

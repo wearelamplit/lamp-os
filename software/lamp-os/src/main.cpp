@@ -13,6 +13,7 @@
 #include "config/nvs_config_store.hpp"
 #include "core/lamp.hpp"
 #include "lamp_variants.hpp"
+#include "util/loop_watchdog.hpp"
 
 extern lamp::Config config;            // file-scope singleton, defined in lamp.cpp
 extern lamp::NvsConfigStore configStore;  // file-scope NVS store, defined in lamp.cpp
@@ -63,6 +64,10 @@ void setup() {
 
   g_lamp = lamp::createCompiledLamp();
   g_lamp->setup();
+  lamp::loop_watchdog::begin();
 }
 
-void loop() { g_lamp->tick(); }
+void loop() {
+  lamp::loop_watchdog::startIteration();
+  g_lamp->tick();
+}
