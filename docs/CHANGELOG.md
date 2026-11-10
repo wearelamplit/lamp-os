@@ -13,6 +13,8 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   When an update fails, a message reads "<name> didn't catch the new tricks
   this time. Trying again next time you connect." once the lamp is listening
   again, and the app does try again the next time it connects to that lamp.
+  If the phone loses touch with the lamp right at the end but the lamp
+  finishes the update anyway, the message says it learned them.
   An update the lamp turns down, because it's busy or doesn't trust the
   download, gets no message, and neither does a lamp that's already up to
   date.
@@ -28,9 +30,7 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 - **One reconnect after a save that restarts the lamp.** After a password
   change or an LED setup save, the app used to reconnect to the lamp twice,
   and when the lamp was slow to restart it could drop the link it had just
-  restored. It now reconnects once. If the link drops again after the save
-  finished, the app always goes back to reconnecting instead of sometimes
-  sitting on "reconnecting" for good.
+  restored. It now reconnects once.
 - **The Test button waits out an update.** In the expression editor, Test
   stayed pressable while a lamp settled after an update, and the lamp
   ignored it. It now greys out until the lamp is listening again.
@@ -38,9 +38,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   used to snap back to the old name without a word; now it says "Couldn't set
   name. Try again."
 - **Lamp names stop at the lamp's limit.** Name fields (renaming on Config,
-  naming a new lamp) stop at 32 bytes, the most a lamp keeps, so the app
-  never shows a longer name than the lamp has. An emoji or accented letter
-  takes more than one of those bytes.
+  naming a new lamp) stop at 32 bytes, the most a lamp keeps. An emoji or
+  accented letter takes more than one of those bytes. Pasting over a name
+  keeps as much of the paste as fits, and typing in the middle of a full
+  name leaves the rest of it alone.
 - **One save at a time.** The LED setup Update button and the password Save
   button grey out and show a spinner while a save is under way, so a second
   tap can't start another save while the lamp restarts.

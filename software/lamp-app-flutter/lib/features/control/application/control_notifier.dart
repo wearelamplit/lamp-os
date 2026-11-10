@@ -2148,8 +2148,10 @@ class ControlNotifier extends _$ControlNotifier {
   /// A try that stood down for a reload arms nothing, and a step that fired
   /// while it ran returned on [_reconnectInFlight]. When that reload has
   /// already handed the link back and the link has dropped since, nothing
-  /// else would climb the ladder. A reload still running holds the state in
-  /// loading, and one that gave up leaves its error, so neither is disturbed.
+  /// else would climb the ladder. A try runs only after a drop, so a reload it
+  /// stood down for started disconnected and holds the state in loading until
+  /// it restores the link; one that gave up leaves its error. Neither is
+  /// disturbed.
   void _resumeLadderAfterStandDown() {
     if (!ref.mounted) return;
     if (_reconnectTimer?.isActive ?? false) return;
