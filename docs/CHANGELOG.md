@@ -8,26 +8,21 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 ## Unreleased
 
 ### Added
-- **Rotate colors (lamp firmware).** A standard lamp's shade and base can
-  flow their own colors round a loop, one constant speed, from one loop every
-  5 s to one every 120 s, rising or falling on each surface (by default the
-  shade falls and the base rises, meeting in the middle). The setting
-  previews live, saves with the colors, and keeps flowing after a reboot, a
-  web config save, an expression test and a firmware update. A surface with
-  one color, or split into segments, stays still. Shifty's color shift
-  follows a moving base through its fades and lands on it with no jump.
-- **Rotate colors, in the app.** On a lamp whose firmware offers it (the
-  standard lamp), the Shade and Base colour sheets carry a Rotate colors
-  switch: your own colours flow along the strip in an endless loop. Set the Loop
-  length (5 seconds to 2 minutes, slow on the left) and the Direction (Up or
-  Down; the shade starts Down and the base Up, so they meet at the seam). The
-  lamp follows live while you edit, Save keeps it and Cancel puts it back.
-  With one colour the switch greys out with "Add a second color to rotate."
-  and keeps your setting for when you add another. While a role rotates, its
-  card on the Colors page moves and reads "Rotating · 40s loop". The Base and
-  Shade sheets now grow to fit their colours, up to most of the screen, on
-  every lamp. Lamps that can't rotate show no Rotate switch and no moving
-  card.
+- **Rotate colours.** A standard lamp's shade and base can each flow their
+  own colours round an endless loop. In the app, the Shade and Base colour
+  sheets carry a Rotate colors switch with a Loop length (5 seconds to 2
+  minutes, slow on the left) and a Direction (Up or Down, with the shade
+  starting Down and the base Up so they meet at the seam). The lamp follows
+  live while you edit, Save keeps it and Cancel puts it back, and it keeps
+  flowing after a reboot, a web config save, an expression test and a
+  firmware update. With one colour the switch greys out with "Add a second
+  color to rotate." and keeps your setting for when you add another. A
+  surface split into segments stays still. While a role rotates, its card on
+  the Colors page moves and reads "Rotating · 40s loop". Shifty's colour
+  shift follows a moving base through its fades and lands on it with no
+  jump. The Base and Shade sheets now grow to fit their colours, up to most
+  of the screen, on every lamp. Lamps that can't rotate show no Rotate switch
+  and no moving card.
 
 ### Fixed
 - **Clearing a wisp's manual palette reaches the wisp.** Remove every colour
