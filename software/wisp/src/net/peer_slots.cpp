@@ -2,9 +2,12 @@
 
 #include <cstring>
 
+#include "util/uptime.hpp"
+
 namespace wisp {
 
-PeerSlots::Change PeerSlots::touch(const uint8_t mac[6], uint64_t nowMs) {
+PeerSlots::Change PeerSlots::touch(const uint8_t mac[6]) {
+  const uint64_t nowMs = uptimeMs();
   Change change;
   Slot* target = nullptr;
   for (Slot& s : slots_) {
@@ -27,6 +30,12 @@ PeerSlots::Change PeerSlots::touch(const uint8_t mac[6], uint64_t nowMs) {
   target->used = true;
   change.added = true;
   return change;
+}
+
+void PeerSlots::release(const uint8_t mac[6]) {
+  for (Slot& s : slots_) {
+    if (s.used && std::memcmp(s.mac, mac, 6) == 0) s.used = false;
+  }
 }
 
 }  // namespace wisp

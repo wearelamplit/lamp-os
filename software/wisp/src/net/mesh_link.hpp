@@ -40,9 +40,8 @@ class MeshLink {
   // Broadcast to FF:FF:FF:FF:FF:FF. Returns true on send queued.
   bool broadcast(const uint8_t* data, size_t len);
 
-  // Unicast to a specific peer. Adds the peer on first use (idempotent).
-  // `msgType` is informational only. The payload is already a fully formed
-  // lamp_protocol frame.
+  // Unicast a fully formed lamp_protocol frame, registering the peer with
+  // ESP-NOW on first use. False when the frame was not queued.
   bool send(const uint8_t targetMac[6], const uint8_t* data, size_t len);
 
   // Wisp's STA MAC, for log lines.
@@ -57,11 +56,8 @@ class MeshLink {
   PeerSlots peers_;
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-  // Guards the peer table. send() runs on the loop task; without this, two
-  // concurrent first-touches of the same new MAC could both pass the
-  // "not present" check and both write peers_ at peerCount_++ (torn
-  // increment, duplicate slot, wrong eviction). portMUX fits: tiny,
-  // non-blocking mutations.
+  // Guards peers_: two sends racing on one new MAC could both miss it and
+  // take two slots. portMUX fits: tiny, non-blocking mutations.
   mutable portMUX_TYPE peerMux_ = portMUX_INITIALIZER_UNLOCKED;
 #endif
 };

@@ -22,14 +22,17 @@ class PeerSlots {
     uint8_t evictedMac[6] = {};
   };
 
-  // Records a send to `mac` at `nowMs`, a reading of a clock that never
-  // wraps (wisp::uptimeMs()).
-  Change touch(const uint8_t mac[6], uint64_t nowMs);
+  // Records a send to `mac` now.
+  Change touch(const uint8_t mac[6]);
+
+  // Frees `mac`'s slot, so its next touch adds it again. Call when ESP-NOW
+  // refused the add a touch asked for.
+  void release(const uint8_t mac[6]);
 
  private:
   struct Slot {
     uint8_t  mac[6];
-    uint64_t lastUsedMs;
+    uint64_t lastUsedMs;  // wisp::uptimeMs(), which never wraps
     bool     used;
   };
   std::array<Slot, kCapacity> slots_{};

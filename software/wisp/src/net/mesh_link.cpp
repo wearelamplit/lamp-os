@@ -7,8 +7,6 @@
 
 #include <cstring>
 
-#include "util/uptime.hpp"
-
 namespace wisp {
 
 MeshLink* MeshLink::s_instance = nullptr;
@@ -119,11 +117,10 @@ bool MeshLink::send(const uint8_t targetMac[6], const uint8_t* data, size_t len)
   if (!targetMac || !data) return false;
 
   // Decide under the mux; the ESP-NOW calls can't run inside it.
-  const uint64_t nowMs = uptimeMs();
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   portENTER_CRITICAL(&peerMux_);
 #endif
-  const PeerSlots::Change change = peers_.touch(targetMac, nowMs);
+  const PeerSlots::Change change = peers_.touch(targetMac);
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   portEXIT_CRITICAL(&peerMux_);
 #endif
@@ -145,10 +142,13 @@ bool MeshLink::send(const uint8_t targetMac[6], const uint8_t* data, size_t len)
     peer.encrypt = false;
     esp_err_t err = esp_now_add_peer(&peer);
     if (err != ESP_OK && err != ESP_ERR_ESPNOW_EXIST) {
-      // Tracking-table is committed (peers_ already written) but the
-      // ESP-NOW side rejected the add. esp_now_send will return NOT_FOUND.
-      // Surface this to caller so the distributor doesn't mistake it for a
-      // queue-full transient.
+#if defined(ARDUINO) || defined(ESP_PLATFORM)
+      portENTER_CRITICAL(&peerMux_);
+#endif
+      peers_.release(targetMac);
+#if defined(ARDUINO) || defined(ESP_PLATFORM)
+      portEXIT_CRITICAL(&peerMux_);
+#endif
       Serial.printf("[mesh] add_peer err=0x%x for %02X:%02X:%02X:%02X:%02X:%02X\n",
                     (unsigned)err,
                     targetMac[0], targetMac[1], targetMac[2],
