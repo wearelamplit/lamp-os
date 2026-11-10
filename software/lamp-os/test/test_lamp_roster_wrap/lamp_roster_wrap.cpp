@@ -158,6 +158,8 @@ void test_bt_sighting_stays_stale_a_wrap_later() {
   const auto& near = r.snapshotNear(kMaxAgeMs);
   TEST_ASSERT_EQUAL_size_t(1, near.size());
   TEST_ASSERT_TRUE(lampos::msSince(nowMs, near.front().lastSeenBleMs) > kMaxAgeMs);
+  // Never heard over the mesh: retiring keeps that a "never".
+  TEST_ASSERT_EQUAL_UINT32(0, r.getAll().front().lastSeenMeshMs);
 }
 
 int main(int argc, char** argv) {
