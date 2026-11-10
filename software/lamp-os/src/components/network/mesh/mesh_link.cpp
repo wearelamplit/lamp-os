@@ -449,27 +449,6 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
       slot.rgbw[i * 4 + 3] = wp.w ? wp.w[i] : 0;
     }
     postPendingWispPalette(slot);
-  } else if (msgType == lamp_protocol::MSG_WISP_PAINT) {
-    // No relay: the full-set PAINT frame re-covers a missed frame on its
-    // next cadence; a relay would multiply broadcast load fleet-wide. Dedup
-    // still runs to prevent repeat-fire on direct reception.
-    lamp_protocol::ParsedWispPaint wp;
-    if (!lamp_protocol::parseWispPaint(data, len, wp)) return;
-    if (!wispPaintDedup_.record(wp.sourceMac,
-                                lamp_protocol::MSG_WISP_PAINT, wp.seq)) {
-      return;
-    }
-    // static: the 1200 B entry array is too big for the recv-task stack; handleRecv
-    // is the only writer and runs single-threaded on the WiFi recv callback.
-    static PendingWispPaint slot;
-    std::memcpy(slot.sourceMac, wp.sourceMac, 6);
-    slot.count = wp.count;
-    if (wp.count > 0 && wp.entries) {
-      std::memcpy(slot.entries, wp.entries,
-                  static_cast<size_t>(wp.count) *
-                      lamp_protocol::WISP_PAINT_ENTRY_SIZE);
-    }
-    postPendingWispPaint(slot);
   } else if (msgType == lamp_protocol::MSG_WISP_STATE) {
     // No relay: the full-set STATE frame re-covers a missed frame on its next
     // cadence. Dedup prevents repeat-fire on direct reception.

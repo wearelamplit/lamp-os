@@ -54,7 +54,6 @@ void postPendingRestoreBrightness(const PendingRestoreBrightness& src);
 void postPendingWispHello(const PendingWispHello& src);
 void postPendingWispPalette(const PendingWispPalette& src);
 void postPendingWispClaim(const PendingWispClaim& src);
-void postPendingWispPaint(const PendingWispPaint& src);
 void postPendingWispState(const PendingWispState& src);
 void postPendingCommand(const PendingCommand& src);
 void postPendingEvent(const PendingEvent& src);
@@ -181,9 +180,6 @@ class MeshLink {
   // relay). Lamps DO act on the payload: cache it for the app to read via
   // CHAR_WISP_STATUS.
   lamp_protocol::DedupRing<32> wispPaletteDedup_;
-  // Retired MSG_WISP_PAINT. Parsed and deduped, never drained (see
-  // docs/dev/networking.md).
-  lamp_protocol::DedupRing<16> wispPaintDedup_;
   // Declarative per-lamp state from the wisp. No relay; dedup prevents
   // repeat-fire on direct reception.
   lamp_protocol::DedupRing<16> wispStateDedup_;

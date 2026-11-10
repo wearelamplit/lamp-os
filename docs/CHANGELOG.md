@@ -7,6 +7,18 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 
 ## Unreleased
 
+### Added
+- **A lamp remembers its last few boots.** Every lamp, release builds
+  included, keeps its last 5 starts and prints the finished ones on the USB
+  serial console as it boots, one line each: firmware, how long it ran, how
+  low its free memory got, and how it ended (power cut, restart, crash,
+  watchdog, brownout). After a lamp misbehaves, plug it into a computer and
+  open `npm run lamp:tap`: the lamp restarts and prints its history straight
+  away. Plugging in restarts the lamp the way a power cut does, so the boot
+  that was running reads as ending in a power cut. A boot that ended in a
+  power cut shows the run time it had reached by its last check (1 minute,
+  1 hour, 1 day).
+
 ### Fixed
 - **Lamps and wisps left on for weeks keep working past day 25 and day 49.**
   A lamp's millisecond clock rolls back to zero every 49.7 days of uptime.
@@ -30,6 +42,17 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   forget ones it had just heard, hold back its brightness re-sends, or wait
   to reopen its OSC port or send its config. All of these now carry on
   through the rollover.
+
+### Changed
+- **Smaller firmware, a little more free memory.** The lamp no longer builds
+  in code that saves a crash dump to flash. It never had room to store one,
+  so nothing you see changes: a crash still prints its report on the USB
+  serial console and still lands in the lamp's crash record. The firmware is
+  about 12 KB smaller and the lamp has about 0.9 KB more free memory.
+- **About 2.6 KB more free memory.** The lamp stops setting aside room for
+  an old wisp paint message that wisps stopped sending in beta 1.1.8. Wisp
+  paint itself is unchanged, and a lamp near an older wisp ignores that
+  message as before.
 
 ## 1.3.2
 

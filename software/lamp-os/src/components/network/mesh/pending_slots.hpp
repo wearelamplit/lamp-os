@@ -78,14 +78,6 @@ struct PendingWispClaim {
   uint8_t lampMacs[lamp_protocol::kMaxWispClaimEntries][6];
 };
 
-// MSG_WISP_PAINT pending slot. Holds one frame's per-lamp paint entries.
-struct PendingWispPaint {
-  uint8_t sourceMac[6];
-  uint8_t count;
-  uint8_t entries[lamp_protocol::WISP_PAINT_MAX_ENTRIES *
-                  lamp_protocol::WISP_PAINT_ENTRY_SIZE];
-};
-
 // MSG_WISP_STATE pending slot. Holds the declarative per-lamp state entries
 // until the Core 1 drain scans for this lamp's own MAC and feeds the wisp
 // LayerStack. sourceMac gates the drain to this lamp's display wisp so a

@@ -222,13 +222,14 @@ Two placement rules make the entry count alone overstate the room
 | `disp` | dispositions, `[mac:6][value:1]` per peer | 701 B | 24 |
 | `lampType` | variant id | under 16 B | 2 |
 
-Outside it, 166 entries (`systemKeys` in `test_config_records`):
+Outside it, 171 entries (`systemKeys` in `test_config_records`):
 
 - 5 namespace entries: `lamp`, `crash`, `phy`, `nvs.net80211`, `nimble_bond`.
 - PHY calibration: a 1904-byte blob (62), a 6-byte blob (3), a u32 (1): 66.
 - The WiFi driver's namespace: empty. The lamp keeps WiFi config in RAM and
   erases that namespace at boot.
-- The crash record: one blob under 64 bytes, 4.
+- The `crash` namespace: the crash record (`last`, an 80-byte blob, 5) and the
+  boot history (`boots`, a 64-byte blob, 4): 9.
 - NimBLE's bond store (`ble_store_nvs.c`, `nimble_bond`; bonding and
   host-based privacy are on, so legacy bonds may be present): with
   `MAX_BONDS` 3, `MAX_CCCDS` 8 and `MAX_CSFCS` 1 (the connection count),
@@ -238,21 +239,21 @@ Outside it, 166 entries (`systemKeys` in `test_config_records`):
   bytes, 3 each) for 8 is 24; `csfc_sec_N` (8 bytes) 3; `local_irk_N` and
   `rpa_rec_N` (under 32 bytes, 3 each) for 3 each is 18. Total 91.
 
-The arithmetic, every case with at least 32 entries to spare
+The arithmetic, every case with at least 29 entries to spare
 (`test_config_records`, figures for quote- or backslash-filled text):
 
-- **Whole string.** Live while it is rewritten: 166 + 2 + 24 + its old copy
-  or staged blob 57 = 249. The bound for 56 entries is 4 x 70 + 3 = 283:
-  34 spare.
-- **Lamp string.** Live beside every split key at its cap: 166 + 2 + 24 +
-  126 + 2 + 10 + 57 + its old copy or `cfgl` 14 = 401. The bound for 13 is
-  455: 54 spare.
+- **Whole string.** Live while it is rewritten: 171 + 2 + 24 + its old copy
+  or staged blob 57 = 254. The bound for 56 entries is 4 x 70 + 3 = 283:
+  29 spare.
+- **Lamp string.** Live beside every split key at its cap: 171 + 2 + 24 +
+  126 + 2 + 10 + 57 + its old copy or `cfgl` 14 = 406. The bound for 13 is
+  455: 49 spare.
 - **Small blobs.** The largest is a dispositions blob just under 400 bytes,
-  14 entries, at 400 live: bound 451, 51 spare. Records (6), `ko` (10) and
+  14 entries, at 405 live: bound 451, 46 spare. Records (6), `ko` (10) and
   `cfgl` (14) are no larger.
-- **Entries.** The split store holds 400; rewriting its largest blob, PHY
-  calibration (62) or the rest (57), peaks at 462 of 504. Switching from
-  whole peaks at 457 (every split key, the staged lamp section and the new
+- **Entries.** The split store holds 405; rewriting its largest blob, PHY
+  calibration (62) or the rest (57), peaks at 467 of 504. Switching from
+  whole peaks at 462 (every split key, the staged lamp section and the new
   rest blob beside the whole string), and so does staging a whole config
   beside the split store.
 - **The first save after an update.** An older release's `cfg` string can
@@ -262,7 +263,7 @@ The arithmetic, every case with at least 32 entries to spare
   only what the string held: a string full of fully escaped rest leaves room
   for few expressions, and one full of expressions has a short rest. Over
   every legacy shape up to 4,000 bytes, saved split and trimmed to whole, the
-  page model leaves 91 entries spare at the tightest
+  page model leaves 86 entries spare at the tightest
   (`test_the_first_save_after_an_update_fits`).
 
 Those bounds hold for any arrangement of entries across the pages. The
@@ -271,9 +272,8 @@ models the pages, one-page strings, chunked blobs, the collection rule and
 IDF's cleanup of a failed blob write, and every store shape (empty, the
 largest whole, split at every escaped worst case, the standard variant's 18
 full expressions) is saved in seeded order with system keys and
-dispositions rewritten between saves and 32 padding entries beside them.
-Every write must land and every save load back as saved; the closest of 150
-seeds leaves 34 entries to spare.
+dispositions rewritten between saves and 29 padding entries beside them.
+Every write must land and every save load back as saved.
 
 An expression record holds at most 12 parameters (`kMaxExpressionParams`;
 every type carries at most 11, guarded by `test_builtin_descriptors`) and
@@ -621,6 +621,7 @@ Read it from the BLE `lamp` section:
 6 task WDT, 7 other WDT, 9 brownout, 3 clean restart, 1 power-on). The heap and
 roster fields are absent when RTC memory failed its check (a brownout often
 does); `reason`/`core`/`pc`/`bt` are absent unless the panic handler ran.
+`uptimeMs` stops at 4294967295 (49.7 days) on a longer boot.
 `minLargestBlock` near 1-2 KB with a high `rosterPeak` points at fragmentation.
 Feed `pc` and `bt` to `xtensa-esp32-elf-addr2line -e firmware.elf` for the build
 matching `fw` (packed `major<<16 | minor<<8 | patch`).
@@ -643,6 +644,38 @@ starts the watch again. A stall within 30 s of a firmware update's first boot
 makes the bootloader roll back, and the record's `fw` is then the version that
 booted after it. `setup()` runs unwatched: a hang there leaves the lamp dark
 with no record until a power cycle.
+
+## Reading the boot history
+
+Every build, released ones included, keeps the last 5 boots in NVS
+(`core/boot_history`, namespace `crash`, key `boots`) and prints the ended ones
+to serial early in boot. Plugging a lamp into USB and opening `npm run
+lamp:tap` resets it through the auto-reset circuit, so the history prints at
+once. One line per boot, oldest first, `-1` the boot before this one:
+
+```
+[boots] -3 fw1.3.2 up 5h12m free 21480 big 1300 end panic
+[boots] -2 fw1.3.2 up >1h00m free 30112 big 18200 end power
+[boots] -1 fw1.3.2 up 42s free 40960 big 38000 end taskwdt
+```
+
+`up` is the uptime the boot reached, `free` its lowest free heap and `big` its
+smallest largest free block, both in bytes and capped at 65535. `end` is the
+reset that started the next boot: `power` (a power-on reset), `restart` (a
+clean `esp_restart`: OTA, web reboot), `panic`, `intwdt`, `taskwdt`, `wdt`,
+`brownout`, `ext`, `sleep`, `unknown`. The reset that USB plug-in and
+`lamp:tap` cause reports as a power-on on the ESP32, so the boot they
+interrupt reads `end power`.
+
+The figures come from the crash record's RTC snapshot, sampled each second
+from the first loop iteration on: when it survives the reset they are those
+of the last sample. When it does not (a power cut, often a brownout), the
+boot keeps the figures from the last milestone it reached, 1 min, 1 h or 1
+day, and `up` reads `>` that milestone. `free - big -` means the boot died
+before any figure was taken: in `setup()`, or in its first minute after a
+power cut. Past 49.7 days the snapshot's uptime saturates and reads
+`>49d17h`. A boot writes the history once at start and once per milestone,
+so at most four NVS writes per boot.
 
 ## Why it recurs
 

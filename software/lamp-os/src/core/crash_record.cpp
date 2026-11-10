@@ -4,6 +4,7 @@
 #include <nvs.h>
 #include <esp_attr.h>
 #include <esp_heap_caps.h>
+#include <esp_timer.h>
 #endif
 
 namespace lamp::crash_record {
@@ -19,6 +20,11 @@ bool isCrashReset(esp_reset_reason_t reason) {
     default:
       return false;
   }
+}
+
+uint32_t uptimeMsFrom(int64_t microseconds) {
+  const int64_t ms = microseconds / 1000;
+  return ms >= int64_t{kUptimeSaturated} ? kUptimeSaturated : static_cast<uint32_t>(ms);
 }
 
 bool foldBoot(Record& rec, esp_reset_reason_t reason, const Snapshot* rtc,
@@ -51,13 +57,13 @@ struct RtcState {
 RTC_NOINIT_ATTR RtcState s_rtc;
 Record s_last{};
 
-void sample(uint32_t nowMs, size_t rosterCount) {
+void sample(uint32_t uptimeMs, size_t rosterCount) {
   Snapshot& s = s_rtc.snap;
   const uint32_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
   if (largest < s.minLargestBlock) s.minLargestBlock = largest;
   s.minFreeHeap = heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT);
   if (rosterCount > s.rosterPeak) s.rosterPeak = static_cast<uint16_t>(rosterCount);
-  s.uptimeMs = nowMs;
+  s.uptimeMs = uptimeMs;
 }
 
 }  // namespace
@@ -94,7 +100,7 @@ void tick(uint32_t nowMs, size_t (*rosterCount)()) {
   static uint32_t s_nextMs = 0;
   if (static_cast<int32_t>(nowMs - s_nextMs) < 0) return;
   s_nextMs = nowMs + kSampleIntervalMs;
-  sample(nowMs, rosterCount());
+  sample(uptimeMsFrom(esp_timer_get_time()), rosterCount());
 }
 
 void capturePanic(const char* reason, const void* pc,
@@ -115,6 +121,8 @@ void capturePanic(const char* reason, const void* pc,
 }
 
 const Record& last() { return s_last; }
+
+const Snapshot* rtcSnapshot() { return s_rtc.magic == kRtcMagic ? &s_rtc.snap : nullptr; }
 
 #endif
 

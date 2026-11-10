@@ -14,6 +14,8 @@
 
 #include "config/config_codec.hpp"
 #include "config/disposition_store.hpp"
+#include "core/boot_history.hpp"
+#include "core/crash_record.hpp"
 #include "paged_nvs.hpp"
 
 #include "../../src/util/color.cpp"
@@ -740,7 +742,7 @@ void test_unregistered_type_record_loads() {
 // free for garbage collection. docs/dev/embedded-heap.md shows the arithmetic.
 constexpr size_t kPageEntries = PagedNvs::kEntries;
 constexpr size_t kDataPages = PagedNvs::kPages - 1;
-constexpr size_t kMargin = 32;
+constexpr size_t kMargin = 29;
 
 // The keys outside the lamp namespace, as measured or bounded from each
 // owner's store format. `pad` adds that many one-entry keys.
@@ -748,7 +750,7 @@ constexpr size_t kMargin = 32;
 // - PHY calibration: a 1904-byte cal_data blob, a 6-byte cal_mac blob and a
 //   u32 cal_version;
 // - the WiFi driver's namespace: empty, erased at boot (its config is in RAM);
-// - the crash record: one blob under 64 bytes;
+// - the crash namespace: the crash record and the boot history, one blob each;
 // - NimBLE's bond store (ble_store_nvs.c, bonding on, privacy on): our_sec_N
 //   and peer_sec_N blobs of ble_store_value_sec (88 bytes on the ESP32) for
 //   each of MAX_BONDS (3), p_dev_rec_N blobs of ble_hs_dev_records (44 bytes)
@@ -768,7 +770,8 @@ std::vector<SystemKey> systemKeys() {
   keys.push_back({"phy/cal_data", 1904});
   keys.push_back({"phy/cal_mac", 6});
   keys.push_back({"phy/cal_version", 0});
-  keys.push_back({"crash/record", 64});
+  keys.push_back({"crash/last", sizeof(lamp::crash_record::Record)});
+  keys.push_back({"crash/boots", sizeof(lamp::boot_history::History)});
   for (int i = 0; i < 3; ++i) {
     keys.push_back({"bond/our_sec_" + std::to_string(i), 88});
     keys.push_back({"bond/peer_sec_" + std::to_string(i), 88});
@@ -1595,7 +1598,7 @@ void test_the_first_save_after_an_update_fits() {
 
 void test_every_store_shape_survives_churn_with_margin() {
   Churn churn;
-  // Seed 107 leaves the least room of the first 150 (34 spare entries); seed
+  // Seed 107 leaves the least room of the first 150; seed
   // 69 switches to split where no page has room for the lamp string beside
   // the whole one.
   for (uint32_t seed : {1u, 7u, 42u, 69u, 107u}) {
