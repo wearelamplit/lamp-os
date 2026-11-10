@@ -16,9 +16,9 @@ namespace lamp {
 // wisp frames for lamps one hop out; shorter lets relayers collide.
 constexpr uint32_t kRelayStaggerWindowMs = 150;
 
-// A queued relay still unsent this long after its fire time is dropped. Under
-// the wisp's 2 s status cadence, so a late copy never lands after the next
-// status and rolls a lamp's cached status back.
+// A queued relay still unsent this long after its fire time is dropped: half
+// the 2 s between statuses in an op's burst, so a copy this lamp sends late
+// never follows the next status it relays and rolls a lamp's cache back.
 constexpr uint32_t kMaxRelayLateMs = 1000;
 
 #ifdef LAMP_DEBUG
