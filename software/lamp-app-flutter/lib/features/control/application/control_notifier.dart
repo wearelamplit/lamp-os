@@ -1655,23 +1655,7 @@ class ControlNotifier extends _$ControlNotifier {
     required BaseSection base,
     required ShadeSection shade,
   }) async {
-    final shipped = <String, dynamic>{
-      'base': {
-        'px': base.px,
-        'byteOrder': base.byteOrder,
-        'bpp': base.bpp,
-        'colors': base.colors.map((c) => c.toHex()).toList(),
-        'segments': base.segments.map(_segmentJson).toList(),
-      },
-      'shade': {
-        'px': shade.px,
-        'byteOrder': shade.byteOrder,
-        'bpp': shade.bpp,
-        'colors': shade.colors.map((c) => c.toHex()).toList(),
-        'segments': shade.segments.map(_segmentJson).toList(),
-      },
-    };
-    await writeSettingsBlob(shipped, reboot: true);
+    await writeSettingsBlob(advancedLedsBlob(base, shade), reboot: true);
 
     final mismatches = <String>[];
     final ble = ref.read(bleClientProvider);
@@ -1705,6 +1689,27 @@ class ControlNotifier extends _$ControlNotifier {
     }
     return mismatches;
   }
+
+  /// The settings_blob an Advanced LEDs save writes.
+  @visibleForTesting
+  static Map<String, dynamic> advancedLedsBlob(
+          BaseSection base, ShadeSection shade) =>
+      {
+        'base': {
+          'px': base.px,
+          'byteOrder': base.byteOrder,
+          'bpp': base.bpp,
+          'colors': base.colors.map((c) => c.toHex()).toList(),
+          'segments': base.segments.map(_segmentJson).toList(),
+        },
+        'shade': {
+          'px': shade.px,
+          'byteOrder': shade.byteOrder,
+          'bpp': shade.bpp,
+          'colors': shade.colors.map((c) => c.toHex()).toList(),
+          'segments': shade.segments.map(_segmentJson).toList(),
+        },
+      };
 
   static Map<String, dynamic> _segmentJson(Segment s) => {
         'name': s.name,
