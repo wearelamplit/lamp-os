@@ -88,7 +88,7 @@ skew:
    HELLOs.
 
 6. **Channel/type gate ({type}-{channel} LSIG slot).** Re-flash the peer to
-   stable: `RELEASE_TAG=stable PORT=<peer-port> npm run lamp:flash:release`,
+   stable: `RELEASE_TAG=<stable version tag, e.g. v1.3.0> PORT=<peer-port> npm run lamp:flash:release`,
    source back to the signed higher-version beta build. In `otaAcceptable()`
    only a beta lamp accepts a stable offer (a beta lamp promotes UP to
    stable); a stable lamp never accepts a beta offer. Here the peer is stable

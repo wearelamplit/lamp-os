@@ -20,7 +20,7 @@
 # Env vars:
 #   VARIANT      lamp variant: standard (default) or snafu
 #   PORT         esptool upload port (required if multiple boards attached)
-#   RELEASE_TAG  GitHub release tag to pull from: beta (default) or stable
+#   RELEASE_TAG  GitHub release tag to pull from: beta (default) or a version tag such as v1.3.0
 #   IMAGE        flash this local distribution.bin, skip the download (used for
 #                a locally-built signed variant with no release asset, e.g. loaf)
 #   CACHE_DIR    where downloads are cached and reused, one file per variant and
