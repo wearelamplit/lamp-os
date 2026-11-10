@@ -108,7 +108,7 @@ static volatile bool         s_socialViewActive = false;
 // knockout/OTA chunk). The social scan skips a window while a write fired
 // within SocialScanTuning::idleGuardMs so it never competes during a live
 // drag or OTA. Written on Core 0, read on Core 1.
-static volatile uint32_t     s_lastAppWriteMs = 0;
+static std::atomic<uint64_t> s_lastAppWriteMs{0};  // lamp::uptimeMs()
 
 // Core 1 only (tick): duty-cycled passive-scan state for the Social view.
 static SocialScanGate        s_socialScan;
@@ -131,7 +131,7 @@ bool isClientConnected()   { return s_clientConnected;   }
 bool isHomeModePageActive() { return s_homeModePageActive; }
 bool isScanPaused()        { return s_scanPausedForGattClient; }
 
-void noteAppWriteActivity() { s_lastAppWriteMs = millis(); }
+void noteAppWriteActivity() { s_lastAppWriteMs.store(lamp::uptimeMs(), std::memory_order_relaxed); }
 
 // Per-connection state. NimBLE caps at CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
 // (advertising stops on connect, so only one app connects at a time), so a
@@ -1220,10 +1220,11 @@ void tick() {
   {
     const bool active =
         s_socialViewActive && s_clientConnected && !s_otaRadioPaused;
-    if (active && !s_socialScanPrevActive) s_socialScan.arm(nowMs);
+    const uint64_t upMs = lamp::uptimeMs();
+    if (active && !s_socialScanPrevActive) s_socialScan.arm(upMs);
     s_socialScanPrevActive = active;
-    const SocialScanAction act =
-        s_socialScan.step(nowMs, active, s_lastAppWriteMs, s_socialScanTuning);
+    const SocialScanAction act = s_socialScan.step(
+        upMs, active, s_lastAppWriteMs.load(std::memory_order_relaxed), s_socialScanTuning);
     if (act == SocialScanAction::OpenWindow) {
       NimBLEScan* scan = NimBLEDevice::getScan();
       scan->setActiveScan(false);

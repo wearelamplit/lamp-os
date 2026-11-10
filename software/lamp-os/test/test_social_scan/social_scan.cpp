@@ -110,16 +110,14 @@ void test_safety_timeout_stops_new_windows() {
   TEST_ASSERT_FALSE(g.windowOpen());
 }
 
-// A session past its cap, still active for a whole wrap: windows must not
-// reopen when the session age wraps round.
+// A session past its cap, still active a whole millis() wrap later: windows
+// stay shut, since the uptime clock runs past 2^32 ms.
 void test_session_cap_holds_a_wrap_later() {
   SocialScanGate g;
-  const uint32_t armedMs = 100000;
+  const uint64_t armedMs = 100000;
   g.arm(armedMs);
-  for (uint64_t t = armedMs; t < armedMs + (1ull << 32); t += 1ull << 28) {
-    g.step(static_cast<uint32_t>(t), true, kIdle, kT);
-  }
-  TEST_ASSERT_EQUAL(SocialScanAction::None, g.step(armedMs + kT.gapMs, true, kIdle, kT));
+  TEST_ASSERT_EQUAL(SocialScanAction::None,
+                    g.step(armedMs + (1ull << 32) + kT.gapMs, true, kIdle, kT));
   TEST_ASSERT_FALSE(g.windowOpen());
 }
 
@@ -127,13 +125,11 @@ void test_session_cap_holds_a_wrap_later() {
 // of a fresh session.
 void test_old_write_does_not_hold_a_window_a_wrap_later() {
   SocialScanGate g;
-  const uint32_t wroteMs = 100000;
-  for (uint64_t t = wroteMs; t < wroteMs + (1ull << 32); t += 1ull << 28) {
-    g.step(static_cast<uint32_t>(t), false, wroteMs, kT);
-  }
-  const uint32_t armedMs = wroteMs - kT.gapMs;
+  const uint64_t wroteMs = 100000;
+  const uint64_t armedMs = wroteMs + (1ull << 32) - kT.gapMs;
   g.arm(armedMs);
-  TEST_ASSERT_EQUAL(SocialScanAction::OpenWindow, g.step(wroteMs + 10, true, wroteMs, kT));
+  TEST_ASSERT_EQUAL(SocialScanAction::OpenWindow,
+                    g.step(wroteMs + (1ull << 32) + 10, true, wroteMs, kT));
 }
 
 // The pipeline the open window feeds: a BLE-only advert enters the roster

@@ -52,7 +52,6 @@ void MomentDirector::begin(MomentHost* host, const uint8_t selfMac[6], uint32_t 
       host_->nearbyPeers(), [this](const uint8_t* m) { return host_->disposition(m); },
       &likedCount_);
   likedSinceMs_ = nowMs;
-  likedStable_ = false;
   lastEvalMs_ = nowMs;
 }
 
@@ -100,10 +99,8 @@ void MomentDirector::evaluate(uint32_t nowMs) {
   if (fp != likedFingerprint_) {
     likedFingerprint_ = fp;
     likedSinceMs_ = nowMs;
-    likedStable_ = false;
-  } else if (nowMs - likedSinceMs_ >= kStableLikedMs) {
-    likedStable_ = true;
   }
+  likedSinceMs_ = lampos::retireStamp(nowMs, likedSinceMs_);
   // Latching both deadlines keeps a lamp idle past the 24-day signed-compare
   // horizon eligible and out of cooldown.
   for (KindState& s : kinds_) {
@@ -127,8 +124,7 @@ bool MomentDirector::conditionsHold(MomentKind kind, uint32_t nowMs) {
   auto disposition = [this](const uint8_t* m) { return host_->disposition(m); };
   switch (kind) {
     case MomentKind::Fireflies:
-      return likedCount_ >= kFirefliesMinLiked &&
-             (likedStable_ || nowMs - likedSinceMs_ >= kStableLikedMs);
+      return likedCount_ >= kFirefliesMinLiked && nowMs - likedSinceMs_ >= kStableLikedMs;
     case MomentKind::Whisper:
       return hasWhisperTarget(host_->nearbyPeers(), nowMs, disposition);
   }
