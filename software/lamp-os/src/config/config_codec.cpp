@@ -126,8 +126,17 @@ void parseRotation(JsonObjectConst node, ColorRotation& out) {
   }
 }
 
-void writeSectionRotate(JsonObject section, bool offersRotation, const ColorRotation& rotation) {
-  if (offersRotation) writeRotate(section, rotation);
+template <class Role>
+static void writeRoleSectionRotate(JsonObject section, const Role& role) {
+  if (role.offersRotation()) writeRotate(section, role.rotation);
+}
+
+void writeSectionRotate(JsonObject section, const ShadeSettings& shade) {
+  writeRoleSectionRotate(section, shade);
+}
+
+void writeSectionRotate(JsonObject section, const BaseSettings& base) {
+  writeRoleSectionRotate(section, base);
 }
 
 const ExpressionParams* findExpressionParams(const ExpressionSettings& settings,

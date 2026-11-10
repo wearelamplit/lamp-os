@@ -1,7 +1,8 @@
 // The colour characteristics' write paths, over the real apply headers and a
 // real Config: a bare array, the `seg` form and the object form with
 // `rotate`. The render functions are stubs that record the RAM rotation and
-// colours they see. No config.cpp is linked, so these paths cannot persist.
+// colours they see. No config.cpp is linked, so a persist call on these paths
+// cannot build.
 
 #include <unity.h>
 
@@ -177,10 +178,28 @@ void test_object_without_colours_changes_nothing() {
   TEST_ASSERT_EQUAL(0, g_base.calls);
 }
 
-void test_writes_leave_nothing_to_persist() {
-  writeShade("{\"colors\":[\"#00ff0000\"],\"rotate\":{\"on\":true}}");
-  writeBase("[\"#00ff0000\"]");
-  TEST_ASSERT_FALSE(::config.persistPending());
+// A `seg` the role cannot take is dropped whole: the base has no per-segment
+// form, and a shade `seg` must be an integer 0-255.
+void test_unusable_seg_changes_nothing() {
+  for (const char* json : {"{\"seg\":1,\"colors\":[\"#00ff0000\"],\"rotate\":{\"on\":true}}",
+                           "{\"seg\":\"0\",\"colors\":[\"#00ff0000\"],\"rotate\":{\"on\":true}}"}) {
+    writeBase(json);
+    TEST_ASSERT_TRUE_MESSAGE(::config.base.rotation == BaseSettings::kDefaultRotation, json);
+    TEST_ASSERT_TRUE_MESSAGE(::config.base.broadcastColors() == BaseSettings{}.broadcastColors(),
+                             json);
+  }
+  for (const char* json : {"{\"seg\":256,\"colors\":[\"#00ff0000\"],\"rotate\":{\"on\":true}}",
+                           "{\"seg\":-1,\"colors\":[\"#00ff0000\"],\"rotate\":{\"on\":true}}",
+                           "{\"seg\":\"0\",\"colors\":[\"#00ff0000\"],\"rotate\":{\"on\":true}}"}) {
+    writeShade(json);
+    TEST_ASSERT_TRUE_MESSAGE(::config.shade.rotation == ShadeSettings::kDefaultRotation, json);
+    TEST_ASSERT_TRUE_MESSAGE(::config.shade.broadcastColors() == ShadeSettings{}.broadcastColors(),
+                             json);
+  }
+  TEST_ASSERT_EQUAL(0, g_shade.calls);
+  TEST_ASSERT_EQUAL(0, g_base.calls);
+  writeBase("{\"seg\":0,\"colors\":[\"#00ff0000\"],\"rotate\":{\"on\":true}}");
+  TEST_ASSERT_TRUE(::config.base.rotation.on);
 }
 
 int main(int, char**) {
@@ -194,6 +213,6 @@ int main(int, char**) {
   RUN_TEST(test_flag_plays_no_part_in_the_stored_rotation);
   RUN_TEST(test_defaults_leave_the_flag_off);
   RUN_TEST(test_object_without_colours_changes_nothing);
-  RUN_TEST(test_writes_leave_nothing_to_persist);
+  RUN_TEST(test_unusable_seg_changes_nothing);
   return UNITY_END();
 }

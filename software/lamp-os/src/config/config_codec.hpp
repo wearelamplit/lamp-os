@@ -40,9 +40,10 @@ bool parseExpression(JsonObject node, ExpressionConfig& out, bool enabledDefault
 // [kRotationMinPeriodS, kRotationMaxPeriodS], `dir` "up" or "down". Any other
 // key, type or value leaves that field as it was.
 void parseRotation(JsonObjectConst node, ColorRotation& out);
-// Adds `rotate`, every key present, to a base or shade page section when the
-// role offers rotation, and nothing otherwise.
-void writeSectionRotate(JsonObject section, bool offersRotation, const ColorRotation& rotation);
+// Adds `rotate`, every key present, to the role's page section when the role
+// offers rotation, and nothing otherwise.
+void writeSectionRotate(JsonObject section, const ShadeSettings& shade);
+void writeSectionRotate(JsonObject section, const BaseSettings& base);
 // Parse the "cfg" blob into the model. Applies the field defaults, clamps,
 // byte-order derivation, and legacy migrations the loader relies on. Leaves
 // each struct at its class default for any absent key. Returns false when an

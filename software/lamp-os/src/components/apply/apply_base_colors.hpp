@@ -49,8 +49,9 @@ inline void baseColorsToConfig(JsonArray arr) {
 
 // A CHAR_BASE_COLORS write: a bare colour array or
 // {"colors":[...],"rotate":{...}}. `rotate` reaches RAM config before the
-// render, and only on a rotatable role. An object without a non-empty
-// `colors` array changes nothing. Persists nothing.
+// render, and only on a rotatable role. The base has no per-segment form, so
+// an object with a `seg` other than 0 changes nothing, as does one without a
+// non-empty `colors` array. Persists nothing.
 inline void baseColorsWriteToConfig(JsonVariant payload) {
   if (payload.is<JsonArray>()) {
     baseColorsToConfig(payload.as<JsonArray>());
@@ -59,6 +60,8 @@ inline void baseColorsWriteToConfig(JsonVariant payload) {
   if (!payload.is<JsonObject>()) return;
   JsonArray colors = payload["colors"];
   if (colors.isNull() || colors.size() == 0) return;
+  JsonVariant seg = payload["seg"];
+  if (!seg.isNull() && !(seg.is<uint8_t>() && seg.as<uint8_t>() == 0)) return;
   if (::config.base.rotatable()) {
     config_codec::parseRotation(payload["rotate"], ::config.base.rotation);
   }

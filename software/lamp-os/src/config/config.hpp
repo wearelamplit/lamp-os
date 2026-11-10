@@ -43,7 +43,7 @@ class Config {
     bool baseColorsEditable  = true;
     bool shadeColorsEditable = true;
     // The variant renders and reports colour rotation on its single-segment
-    // roles. Gates behaviour only: stored rotation never depends on it.
+    // roles. The flag gates behaviour only. Stored rotation never depends on it.
     bool rotationSupported = false;
     // Per-surface pixel count for a first-boot lamp. 0 = no override
     // (leave whatever the loader / class default produced). When non-zero,

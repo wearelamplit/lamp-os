@@ -66,7 +66,8 @@ inline void shadeSegmentColorsToConfig(uint8_t seg, JsonArray arr) {
 // A CHAR_SHADE_COLORS write: a bare colour array, {"seg":k,"colors":[...]},
 // or {"colors":[...],"rotate":{...}}. `rotate` reaches RAM config before the
 // render, and only on a rotatable role with seg 0 or no seg. An object without
-// a non-empty `colors` array changes nothing. Persists nothing.
+// a non-empty `colors` array, or with a `seg` that is not an integer 0-255,
+// changes nothing. Persists nothing.
 inline void shadeColorsWriteToConfig(JsonVariant payload) {
   if (payload.is<JsonArray>()) {
     shadeColorsToConfig(payload.as<JsonArray>());
@@ -75,7 +76,9 @@ inline void shadeColorsWriteToConfig(JsonVariant payload) {
   if (!payload.is<JsonObject>()) return;
   JsonArray colors = payload["colors"];
   if (colors.isNull() || colors.size() == 0) return;
-  const int seg = payload["seg"] | 0;
+  JsonVariant segNode = payload["seg"];
+  if (!segNode.isNull() && !segNode.is<uint8_t>()) return;
+  const uint8_t seg = segNode | 0;
   if (seg == 0 && ::config.shade.rotatable()) {
     config_codec::parseRotation(payload["rotate"], ::config.shade.rotation);
   }

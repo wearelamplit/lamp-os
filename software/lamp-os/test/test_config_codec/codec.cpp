@@ -458,9 +458,10 @@ void assertRotation(bool on, uint8_t periodS, RotationDir dir, const ColorRotati
   TEST_ASSERT_EQUAL(static_cast<int>(dir), static_cast<int>(r.dir));
 }
 
-std::string sectionRotate(bool offers, const ColorRotation& r) {
+template <class Role>
+std::string sectionRotate(const Role& role) {
   JsonDocument doc;
-  config_codec::writeSectionRotate(doc.to<JsonObject>(), offers, r);
+  config_codec::writeSectionRotate(doc.to<JsonObject>(), role);
   std::string out;
   serializeJson(doc, out);
   return out;
@@ -616,21 +617,21 @@ void test_section_rotate_only_where_the_role_offers_it() {
   BaseSettings base;
   shade.rotationSupported = base.rotationSupported = true;
   TEST_ASSERT_EQUAL_STRING("{\"rotate\":{\"on\":false,\"periodS\":40,\"dir\":\"down\"}}",
-                           sectionRotate(shade.offersRotation(), shade.rotation).c_str());
+                           sectionRotate(shade).c_str());
   TEST_ASSERT_EQUAL_STRING("{\"rotate\":{\"on\":false,\"periodS\":40,\"dir\":\"up\"}}",
-                           sectionRotate(base.offersRotation(), base.rotation).c_str());
+                           sectionRotate(base).c_str());
   shade.rotation = {true, 9, RotationDir::Up};
   TEST_ASSERT_EQUAL_STRING("{\"rotate\":{\"on\":true,\"periodS\":9,\"dir\":\"up\"}}",
-                           sectionRotate(shade.offersRotation(), shade.rotation).c_str());
+                           sectionRotate(shade).c_str());
 
   shade.rotationSupported = false;
   TEST_ASSERT_FALSE(shade.offersRotation());
-  TEST_ASSERT_EQUAL_STRING("{}", sectionRotate(shade.offersRotation(), shade.rotation).c_str());
+  TEST_ASSERT_EQUAL_STRING("{}", sectionRotate(shade).c_str());
 
   base.rotation = {true, 9, RotationDir::Down};
   base.segments.push_back({"Lions", 10, {Color(1, 2, 3, 4)}});
   TEST_ASSERT_FALSE(base.offersRotation());
-  TEST_ASSERT_EQUAL_STRING("{}", sectionRotate(base.offersRotation(), base.rotation).c_str());
+  TEST_ASSERT_EQUAL_STRING("{}", sectionRotate(base).c_str());
 }
 
 // Scene writers read renderedRotation: the stored rotation where the role

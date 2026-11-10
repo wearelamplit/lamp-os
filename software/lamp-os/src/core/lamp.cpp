@@ -341,9 +341,8 @@ void renderBaseColors(JsonArray arr) {
   std::vector<lamp::Color> colors = jsonArrayToColors(arr);
   const lamp::RoleScene scene =
       lamp::buildRoleScene(base.pixelCount, colors, config.base.renderedRotation());
-  // The fade-snapshot-from-buffer flicker on knockout pixels is handled inside
-  // the configurator (it snapshots from its own output, not fb->buffer). No
-  // mid-fade guard needed here.
+  // The configurator snapshots each fade from its own output, so the knockout
+  // dimming in fb->buffer cannot flicker a fade. No mid-fade guard needed here.
   baseConfiguratorBehavior.showScene(scene, lamp::kDefaultFadeMs);
   lamp::overrides.base.rebaseline(scene.colors);
   // Reflect the new base in the BLE adv as its blended identity color.

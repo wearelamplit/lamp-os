@@ -338,7 +338,7 @@ JsonDocument Config::asBaseJson() {
   // Emitted so the app can hide the color picker for surfaces the subclass
   // has opted out of (e.g. SnafuLamp shade).
   doc["colorsEditable"] = base.colorsEditable;
-  config_codec::writeSectionRotate(doc.as<JsonObject>(), base.offersRotation(), base.rotation);
+  config_codec::writeSectionRotate(doc.as<JsonObject>(), base);
   doc["drawIdleMa"] = drawIdleMa_;
   doc["drawFullMa"] = drawFullMa_;
   return doc;
@@ -352,7 +352,7 @@ JsonDocument Config::asShadeJson() {
   // Emitted so the app can hide the color picker for surfaces the subclass
   // has opted out of (e.g. SnafuLamp shade).
   doc["colorsEditable"] = shade.colorsEditable;
-  config_codec::writeSectionRotate(doc.as<JsonObject>(), shade.offersRotation(), shade.rotation);
+  config_codec::writeSectionRotate(doc.as<JsonObject>(), shade);
   return doc;
 }
 
