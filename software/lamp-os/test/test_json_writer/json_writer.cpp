@@ -6,6 +6,7 @@
 
 #include <ArduinoJson.h>
 
+#include <cstring>
 #include <string>
 
 #include "config/config_codec.hpp"
@@ -178,6 +179,39 @@ void test_write_exactly_keeps_only_an_exact_pass_and_the_last_good_otherwise() {
   TEST_ASSERT_EQUAL_STRING("[\"abc\"]", out.c_str());
 }
 
+// Rotation on the one-segment shade is stored after its segments; the
+// two-segment base never stores it, whatever it holds.
+void test_rotation_written_identically_by_both_writers() {
+  Model m = fullModel();
+  m.shade.rotation = {true, 5, RotationDir::Down};
+  m.base.rotation = {true, 9, RotationDir::Up};
+  const std::string written = viaWriter(m);
+  TEST_ASSERT_EQUAL_STRING(viaArduinoJson(m).c_str(), written.c_str());
+  TEST_ASSERT_NOT_NULL(strstr(written.c_str(),
+                              "\"shade\":{\"colorsEditable\":true,\"segments\":[{\"name\":\"Shade\","
+                              "\"px\":38,\"colors\":[\"#abcdef10\"]}],\"rotate\":{\"on\":true,"
+                              "\"periodS\":5,\"dir\":\"down\"}}"));
+  TEST_ASSERT_EQUAL(written.find("\"rotate\""), written.rfind("\"rotate\""));
+}
+
+// The variant flag is never stored: a one-segment role writes the same JSON
+// with it on and off, rotation set or at its default.
+void test_rotation_flag_never_reaches_stored_json() {
+  for (const ColorRotation& r :
+       {ShadeSettings::kDefaultRotation, ColorRotation{true, 5, RotationDir::Up}}) {
+    Model off = fullModel();
+    off.shade.rotation = r;
+    Model on = off;
+    on.shade.rotationSupported = on.base.rotationSupported = true;
+    TEST_ASSERT_EQUAL_STRING(viaWriter(off).c_str(), viaWriter(on).c_str());
+    TEST_ASSERT_EQUAL_STRING(viaArduinoJson(off).c_str(), viaArduinoJson(on).c_str());
+  }
+  Model d;
+  d.shade.rotationSupported = d.base.rotationSupported = true;
+  TEST_ASSERT_EQUAL_STRING(kDefaultStoredJson, viaWriter(d).c_str());
+  TEST_ASSERT_EQUAL_STRING(kDefaultStoredJson, viaArduinoJson(d).c_str());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_default_stored_json_golden);
@@ -188,5 +222,7 @@ int main(int, char**) {
   RUN_TEST(test_short_buffer_reports_overflow);
   RUN_TEST(test_nested_arrays_and_empty_containers);
   RUN_TEST(test_write_exactly_keeps_only_an_exact_pass_and_the_last_good_otherwise);
+  RUN_TEST(test_rotation_written_identically_by_both_writers);
+  RUN_TEST(test_rotation_flag_never_reaches_stored_json);
   return UNITY_END();
 }

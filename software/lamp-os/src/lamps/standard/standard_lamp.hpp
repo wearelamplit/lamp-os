@@ -34,6 +34,7 @@ class StandardLamp : public Lamp {
       // colors anyway. shadeColor differs from the class default, so it
       // stays as the pre-randomization baseline.
       .shadeColor = "#5A170000",
+      .rotationSupported = true,
       .basePx  = 35,
       .shadePx = 38,
     };

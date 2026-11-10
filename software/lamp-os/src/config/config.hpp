@@ -42,6 +42,9 @@ class Config {
     std::string shadeColor;
     bool baseColorsEditable  = true;
     bool shadeColorsEditable = true;
+    // The variant renders and reports colour rotation on its single-segment
+    // roles. Gates behaviour only: stored rotation never depends on it.
+    bool rotationSupported = false;
     // Per-surface pixel count for a first-boot lamp. 0 = no override
     // (leave whatever the loader / class default produced). When non-zero,
     // applyDefaults only overwrites NVS-loaded values that still match a

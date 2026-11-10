@@ -338,6 +338,7 @@ JsonDocument Config::asBaseJson() {
   // Emitted so the app can hide the color picker for surfaces the subclass
   // has opted out of (e.g. SnafuLamp shade).
   doc["colorsEditable"] = base.colorsEditable;
+  config_codec::writeSectionRotate(doc.as<JsonObject>(), base.offersRotation(), base.rotation);
   doc["drawIdleMa"] = drawIdleMa_;
   doc["drawFullMa"] = drawFullMa_;
   return doc;
@@ -351,6 +352,7 @@ JsonDocument Config::asShadeJson() {
   // Emitted so the app can hide the color picker for surfaces the subclass
   // has opted out of (e.g. SnafuLamp shade).
   doc["colorsEditable"] = shade.colorsEditable;
+  config_codec::writeSectionRotate(doc.as<JsonObject>(), shade.offersRotation(), shade.rotation);
   return doc;
 }
 
@@ -570,6 +572,8 @@ void Config::applyDefaults(const Defaults& d) {
   }
   base.colorsEditable  = d.baseColorsEditable;
   shade.colorsEditable = d.shadeColorsEditable;
+  base.rotationSupported = d.rotationSupported;
+  shade.rotationSupported = d.rotationSupported;
   if (d.setup) lamp.setup = true;
 
   // Per-segment pixel count. A loaded px of 0 means "unset" (a fresh lamp, or

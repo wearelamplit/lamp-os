@@ -844,6 +844,49 @@ void test_save_buffer_holds_the_worst_rest() {
   }
 }
 
+// The widest rest that can carry `rotate`: one four-segment role and one
+// single-segment role with `rotate` at its widest, every other field at its
+// cap. It stays under the four-segment worst case, so the caps stand.
+void test_widest_rotating_rest_fits_under_the_worst_rest() {
+  for (char fill : {'z', '"', '\\'}) {
+    const size_t worst = savedString(worstCaseModel(fill), Part::Rest).size();
+    for (bool singleShade : {true, false}) {
+      Model m = worstCaseModel(fill);
+      (singleShade ? m.shade.segments : m.base.segments).resize(1);
+      (singleShade ? m.shade.rotation : m.base.rotation) = {false, 120, RotationDir::Down};
+      const std::string rest = savedString(m, Part::Rest);
+      TEST_ASSERT_NOT_NULL(
+          strstr(rest.c_str(), "\"rotate\":{\"on\":false,\"periodS\":120,\"dir\":\"down\"}"));
+      printf("[budget] rotating rest '%c' (%s single): %zu of %zu bytes\n", fill,
+             singleShade ? "shade" : "base", rest.size() + 1, config_codec::kMaxStoredCfgJsonLen);
+      TEST_ASSERT_TRUE(rest.size() + 1 <= config_codec::kMaxStoredCfgJsonLen);
+      TEST_ASSERT_TRUE(rest.size() < worst);
+    }
+  }
+}
+
+// The web GET document carries a one-segment role's rotation and its PUT
+// brings it back. The PUT parses into default-constructed settings, whose
+// flag is off, the only way this path runs.
+void test_web_document_round_trip_keeps_rotation() {
+  Model m;
+  m.shade.rotation = {true, 7, RotationDir::Up};
+  m.base.rotation = {true, 33, RotationDir::Down};
+  m.shade.rotationSupported = m.base.rotationSupported = true;
+  JsonDocument doc;
+  config_codec::toJson(doc.to<JsonObject>(), m.lamp, m.base, m.shade, m.expressions, m.homeMode);
+  std::string body;
+  serializeJson(doc, body);
+  InMemoryConfigStore store;
+  static char cfg[config_codec::kMaxStoredCfgJsonLen + 1];
+  TEST_ASSERT_TRUE(config_codec::saveRawJson(store, body.c_str(), cfg, sizeof(cfg), "") ==
+                   SaveResult::Ok);
+  Model back;
+  load(store, back);
+  TEST_ASSERT_TRUE(back.shade.rotation == m.shade.rotation);
+  TEST_ASSERT_TRUE(back.base.rotation == m.base.rotation);
+}
+
 // The whole cfg string at kMaxWholeCfgLen with everything else at its cap:
 // rewritten over its old copy, or placed after a staged rest blob of the same
 // size once the old string and the split keys are erased.
@@ -1598,6 +1641,8 @@ int main(int, char**) {
   RUN_TEST(test_a_store_with_both_rest_keys_loads_and_saves_on);
   RUN_TEST(test_a_staged_whole_save_places_cfg_without_cfgl);
   RUN_TEST(test_save_buffer_holds_the_worst_rest);
+  RUN_TEST(test_widest_rotating_rest_fits_under_the_worst_rest);
+  RUN_TEST(test_web_document_round_trip_keeps_rotation);
   RUN_TEST(test_whole_cfg_string_is_always_placed);
   RUN_TEST(test_lamp_cfg_string_is_always_placed);
   RUN_TEST(test_small_blobs_are_always_placed);

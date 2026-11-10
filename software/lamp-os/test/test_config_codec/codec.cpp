@@ -7,6 +7,7 @@
 
 #include <ArduinoJson.h>
 
+#include <cstring>
 #include <string>
 
 #include "config/config_codec.hpp"
@@ -442,6 +443,216 @@ void test_homemode_round_trip_new_fields() {
   TEST_ASSERT_EQUAL_STRING("breathing", b.homeMode.disabledExpressionTypes[1].c_str());
 }
 
+namespace {
+// `rotate` parsed over `start`.
+ColorRotation parsedOver(const char* rotateJson, ColorRotation start) {
+  JsonDocument doc;
+  deserializeJson(doc, rotateJson);
+  config_codec::parseRotation(doc.as<JsonObjectConst>(), start);
+  return start;
+}
+
+void assertRotation(bool on, uint8_t periodS, RotationDir dir, const ColorRotation& r) {
+  TEST_ASSERT_EQUAL(on, r.on);
+  TEST_ASSERT_EQUAL_UINT8(periodS, r.periodS);
+  TEST_ASSERT_EQUAL(static_cast<int>(dir), static_cast<int>(r.dir));
+}
+
+std::string sectionRotate(bool offers, const ColorRotation& r) {
+  JsonDocument doc;
+  config_codec::writeSectionRotate(doc.to<JsonObject>(), offers, r);
+  std::string out;
+  serializeJson(doc, out);
+  return out;
+}
+
+std::string storedJson(const Model& m) {
+  JsonDocument doc;
+  config_codec::toStoredJson(doc.to<JsonObject>(), m.lamp, m.base, m.shade, m.homeMode);
+  std::string out;
+  serializeJson(doc, out);
+  return out;
+}
+
+const ColorRotation kOddRotation{true, 77, RotationDir::Down};
+}  // namespace
+
+void test_rotation_period_reads_a_32_bit_integer_and_clamps() {
+  struct Case {
+    const char* json;
+    uint8_t expected;
+  };
+  const Case cases[] = {
+      {"{\"periodS\":0}", 5},       {"{\"periodS\":-1}", 5},
+      {"{\"periodS\":4}", 5},       {"{\"periodS\":5}", 5},
+      {"{\"periodS\":120}", 120},   {"{\"periodS\":121}", 120},
+      {"{\"periodS\":266}", 120},   {"{\"periodS\":70000}", 120},
+      {"{\"periodS\":40.5}", 77},   {"{\"periodS\":\"40\"}", 77},
+      {"{\"periodS\":true}", 77},   {"{\"periodS\":1099511627776}", 77},
+      {"{\"periodS\":null}", 77},   {"{}", 77},
+  };
+  for (const Case& c : cases) {
+    const ColorRotation r = parsedOver(c.json, kOddRotation);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(c.expected, r.periodS, c.json);
+    TEST_ASSERT_TRUE_MESSAGE(r.on, c.json);
+    TEST_ASSERT_TRUE_MESSAGE(r.dir == RotationDir::Down, c.json);
+  }
+}
+
+void test_rotation_dir_reads_up_and_down_only() {
+  for (RotationDir start : {RotationDir::Up, RotationDir::Down}) {
+    const ColorRotation from{false, 40, start};
+    TEST_ASSERT_TRUE(parsedOver("{\"dir\":\"up\"}", from).dir == RotationDir::Up);
+    TEST_ASSERT_TRUE(parsedOver("{\"dir\":\"down\"}", from).dir == RotationDir::Down);
+    for (const char* json : {"{\"dir\":\"UP\"}", "{\"dir\":\"left\"}", "{\"dir\":1}",
+                             "{\"dir\":null}", "{\"dir\":\"\"}"}) {
+      TEST_ASSERT_TRUE_MESSAGE(parsedOver(json, from).dir == start, json);
+    }
+  }
+}
+
+void test_rotation_on_takes_booleans_only() {
+  for (bool start : {false, true}) {
+    const ColorRotation from{start, 40, RotationDir::Up};
+    TEST_ASSERT_TRUE(parsedOver("{\"on\":true}", from).on);
+    TEST_ASSERT_FALSE(parsedOver("{\"on\":false}", from).on);
+    for (const char* json : {"{\"on\":1}", "{\"on\":0}", "{\"on\":\"true\"}", "{\"on\":null}"}) {
+      TEST_ASSERT_EQUAL_MESSAGE(start, parsedOver(json, from).on, json);
+    }
+  }
+}
+
+// The defaults per role: shade Down, base Up, both off at 40 s.
+void test_rotation_defaults_per_role() {
+  assertRotation(false, 40, RotationDir::Down, ShadeSettings{}.rotation);
+  assertRotation(false, 40, RotationDir::Up, BaseSettings{}.rotation);
+  assertRotation(false, 40, RotationDir::Down, parsedOver("{}", ShadeSettings{}.rotation));
+  assertRotation(false, 40, RotationDir::Up, parsedOver("{}", BaseSettings{}.rotation));
+  assertRotation(true, 40, RotationDir::Down,
+                 parsedOver("{\"on\":true}", ShadeSettings{}.rotation));
+  assertRotation(true, 40, RotationDir::Up, parsedOver("{\"on\":true}", BaseSettings{}.rotation));
+}
+
+// A stored config with no `rotate`, or one with no `dir`, loads each role's
+// own default, whatever the model held before.
+void test_stored_rotation_absent_keys_read_the_role_default() {
+  Model m;
+  m.shade.rotation = {true, 7, RotationDir::Up};
+  m.base.rotation = {true, 9, RotationDir::Down};
+  parseInto("{}", m);
+  assertRotation(false, 40, RotationDir::Down, m.shade.rotation);
+  assertRotation(false, 40, RotationDir::Up, m.base.rotation);
+
+  m.shade.rotation = {false, 7, RotationDir::Up};
+  m.base.rotation = {false, 9, RotationDir::Down};
+  parseInto("{\"shade\":{\"rotate\":{\"on\":true}},\"base\":{\"rotate\":{\"on\":true}}}", m);
+  assertRotation(true, 40, RotationDir::Down, m.shade.rotation);
+  assertRotation(true, 40, RotationDir::Up, m.base.rotation);
+}
+
+// The segment count alone decides what loads; the flag plays no part.
+void test_stored_rotation_kept_on_one_segment_and_dropped_on_two() {
+  const char* oneSegment =
+      "{\"shade\":{\"segments\":[{\"name\":\"Shade\",\"px\":38,\"colors\":[\"#ff000000\","
+      "\"#0000ff00\"]}],\"rotate\":{\"on\":true,\"periodS\":12,\"dir\":\"up\"}},"
+      "\"base\":{\"segments\":[{\"name\":\"Base\",\"px\":35,\"colors\":[\"#ff000000\"]}],"
+      "\"rotate\":{\"on\":true,\"periodS\":13,\"dir\":\"down\"}}}";
+  for (bool flag : {false, true}) {
+    Model m;
+    m.shade.rotationSupported = m.base.rotationSupported = flag;
+    parseInto(oneSegment, m);
+    assertRotation(true, 12, RotationDir::Up, m.shade.rotation);
+    assertRotation(true, 13, RotationDir::Down, m.base.rotation);
+  }
+  const char* twoSegments =
+      "{\"shade\":{\"segments\":[{\"name\":\"A\",\"px\":10,\"colors\":[\"#ff000000\"]},"
+      "{\"name\":\"B\",\"px\":10,\"colors\":[\"#00ff0000\"]}],"
+      "\"rotate\":{\"on\":true,\"periodS\":12,\"dir\":\"up\"}},"
+      "\"base\":{\"segments\":[{\"name\":\"A\",\"px\":10,\"colors\":[\"#ff000000\"]},"
+      "{\"name\":\"B\",\"px\":10,\"colors\":[\"#00ff0000\"]}],"
+      "\"rotate\":{\"on\":true,\"periodS\":13,\"dir\":\"down\"}}}";
+  Model m;
+  m.shade.rotationSupported = m.base.rotationSupported = true;
+  parseInto(twoSegments, m);
+  assertRotation(false, 40, RotationDir::Down, m.shade.rotation);
+  assertRotation(false, 40, RotationDir::Up, m.base.rotation);
+}
+
+void test_rotation_save_load_round_trip() {
+  Model a;
+  a.shade.rotation = {true, 5, RotationDir::Up};
+  a.base.rotation = {true, 120, RotationDir::Down};
+  JsonDocument out;
+  config_codec::toJson(out.to<JsonObject>(), a.lamp, a.base, a.shade, a.expressions, a.homeMode);
+  std::string serialized;
+  serializeJson(out, serialized);
+  Model b;
+  parseInto(serialized.c_str(), b);
+  assertRotation(true, 5, RotationDir::Up, b.shade.rotation);
+  assertRotation(true, 120, RotationDir::Down, b.base.rotation);
+}
+
+// A shade stored off, 40 s, Up differs from its own default, so it writes
+// `rotate` and loads back Up.
+void test_shade_up_at_otherwise_default_round_trips() {
+  Model a;
+  a.shade.rotation = {false, 40, RotationDir::Up};
+  a.base.rotation = BaseSettings::kDefaultRotation;
+  const std::string json = storedJson(a);
+  TEST_ASSERT_NOT_NULL(strstr(json.c_str(),
+                              "\"shade\":{\"colorsEditable\":true,\"segments\":[{\"name\":\"Shade\","
+                              "\"px\":0,\"colors\":[\"#000000ff\"]}],\"rotate\":{\"on\":false,"
+                              "\"periodS\":40,\"dir\":\"up\"}}"));
+  TEST_ASSERT_EQUAL(json.find("\"rotate\""), json.rfind("\"rotate\""));
+  Model b;
+  parseInto(json.c_str(), b);
+  assertRotation(false, 40, RotationDir::Up, b.shade.rotation);
+}
+
+// The section carries `rotate`, every key, exactly where the role offers
+// rotation, so it never reports what the lamp will not render.
+void test_section_rotate_only_where_the_role_offers_it() {
+  ShadeSettings shade;
+  BaseSettings base;
+  shade.rotationSupported = base.rotationSupported = true;
+  TEST_ASSERT_EQUAL_STRING("{\"rotate\":{\"on\":false,\"periodS\":40,\"dir\":\"down\"}}",
+                           sectionRotate(shade.offersRotation(), shade.rotation).c_str());
+  TEST_ASSERT_EQUAL_STRING("{\"rotate\":{\"on\":false,\"periodS\":40,\"dir\":\"up\"}}",
+                           sectionRotate(base.offersRotation(), base.rotation).c_str());
+  shade.rotation = {true, 9, RotationDir::Up};
+  TEST_ASSERT_EQUAL_STRING("{\"rotate\":{\"on\":true,\"periodS\":9,\"dir\":\"up\"}}",
+                           sectionRotate(shade.offersRotation(), shade.rotation).c_str());
+
+  shade.rotationSupported = false;
+  TEST_ASSERT_FALSE(shade.offersRotation());
+  TEST_ASSERT_EQUAL_STRING("{}", sectionRotate(shade.offersRotation(), shade.rotation).c_str());
+
+  base.rotation = {true, 9, RotationDir::Down};
+  base.segments.push_back({"Lions", 10, {Color(1, 2, 3, 4)}});
+  TEST_ASSERT_FALSE(base.offersRotation());
+  TEST_ASSERT_EQUAL_STRING("{}", sectionRotate(base.offersRotation(), base.rotation).c_str());
+}
+
+// Scene writers read renderedRotation: the stored rotation where the role
+// offers it, the role's default otherwise.
+void test_rendered_rotation_is_gated_by_flag_and_segments() {
+  ShadeSettings shade;
+  shade.rotation = {true, 9, RotationDir::Up};
+  shade.rotationSupported = true;
+  assertRotation(true, 9, RotationDir::Up, shade.renderedRotation());
+  shade.rotationSupported = false;
+  assertRotation(false, 40, RotationDir::Down, shade.renderedRotation());
+  BaseSettings base;
+  base.rotation = {true, 9, RotationDir::Down};
+  base.rotationSupported = true;
+  assertRotation(true, 9, RotationDir::Down, base.renderedRotation());
+  base.rotationSupported = false;
+  assertRotation(false, 40, RotationDir::Up, base.renderedRotation());
+  base.rotationSupported = true;
+  base.segments.push_back({"Lions", 10, {Color(1, 2, 3, 4)}});
+  assertRotation(false, 40, RotationDir::Up, base.renderedRotation());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_empty_blob_uses_class_defaults);
@@ -474,5 +685,15 @@ int main(int, char**) {
   RUN_TEST(test_social_disabled_absent_defaults_true);
   RUN_TEST(test_social_disabled_explicit_false);
   RUN_TEST(test_homemode_round_trip_new_fields);
+  RUN_TEST(test_rotation_period_reads_a_32_bit_integer_and_clamps);
+  RUN_TEST(test_rotation_dir_reads_up_and_down_only);
+  RUN_TEST(test_rotation_on_takes_booleans_only);
+  RUN_TEST(test_rotation_defaults_per_role);
+  RUN_TEST(test_stored_rotation_absent_keys_read_the_role_default);
+  RUN_TEST(test_stored_rotation_kept_on_one_segment_and_dropped_on_two);
+  RUN_TEST(test_rotation_save_load_round_trip);
+  RUN_TEST(test_shade_up_at_otherwise_default_round_trips);
+  RUN_TEST(test_section_rotate_only_where_the_role_offers_it);
+  RUN_TEST(test_rendered_rotation_is_gated_by_flag_and_segments);
   return UNITY_END();
 }

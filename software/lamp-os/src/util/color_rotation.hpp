@@ -24,6 +24,11 @@ struct ColorRotation {
   bool on = false;
   uint8_t periodS = kRotationDefaultPeriodS;
   RotationDir dir = RotationDir::Up;
+
+  constexpr bool operator==(const ColorRotation& o) const {
+    return on == o.on && periodS == o.periodS && dir == o.dir;
+  }
+  constexpr bool operator!=(const ColorRotation& o) const { return !(*this == o); }
 };
 
 constexpr uint8_t clampRotationPeriodS(int32_t s) {
