@@ -448,6 +448,26 @@ void test_abandoned_rotating_preview_settles_on_the_static_saved_scene() {
   TEST_ASSERT_EQUAL(STOPPED, r.cfg.animationState);
 }
 
+// A rotating scene built for another pixel count, or for none, draws unrotated.
+void test_scene_for_another_strip_never_rotates() {
+  const ColorRotation on{true, 5, RotationDir::Up};
+  for (int px : {kPx - 1, kPx + 1, int{kPx}}) {
+    Rig r(Surface::Shade);
+    const RoleScene scene = buildRoleScene(static_cast<uint8_t>(px), stopsA(), on);
+    TEST_ASSERT_TRUE(scene.rotation.on);
+    r.cfg.showScene(scene, 0);
+    TEST_ASSERT_EQUAL(px == kPx, r.cfg.rotating());
+  }
+  Rig r(Surface::Shade);
+  r.fb.pixelCount = 0;
+  r.fb.buffer.clear();
+  const RoleScene empty = buildRoleScene(0, stopsA(), on);
+  TEST_ASSERT_TRUE(empty.rotation.on);
+  TEST_ASSERT_EQUAL_size_t(0, empty.colors.size());
+  r.cfg.showScene(empty, 0);
+  TEST_ASSERT_FALSE(r.cfg.rotating());
+}
+
 // Knockout dims its pixels in place while the colours move under them,
 // and the configurator never reads the dimmed frame back.
 void test_knocked_out_pixels_stay_put() {
@@ -552,6 +572,7 @@ int main(int, char**) {
   RUN_TEST(test_saved_rotating_scene_rotates_from_boot);
   RUN_TEST(test_abandoned_preview_returns_to_the_rotating_saved_scene);
   RUN_TEST(test_abandoned_rotating_preview_settles_on_the_static_saved_scene);
+  RUN_TEST(test_scene_for_another_strip_never_rotates);
   RUN_TEST(test_knocked_out_pixels_stay_put);
   RUN_TEST(test_reset_resumes_from_the_settled_frame);
   RUN_TEST(test_home_mode_keeps_rotation_running);
