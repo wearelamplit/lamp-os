@@ -43,6 +43,7 @@
 #include <lampos/protocol/wisp.hpp>
 #include <lampos/protocol/override.hpp>
 #include <lampos/protocol/dedup_ring.hpp>
+#include <lampos/protocol/sender_seq.hpp>
 #include <lampos/protocol/paint_timing.hpp>
 
 namespace lamp_protocol {

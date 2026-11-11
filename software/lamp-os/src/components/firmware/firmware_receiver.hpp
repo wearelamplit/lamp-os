@@ -277,7 +277,7 @@ class FirmwareReceiver {
   uint8_t  offerDigest_[lamp_protocol::FW_SHA256_FULL_LEN] = {0};
 
   // Sequence counters for outbound FW frames (ACCEPT/REQ/RESULT).
-  uint16_t fwOutSeq_ = 0;
+  lamp_protocol::SenderSeq fwOutSeq_;
 
   // One bit per chunk (set = received), ceil(totalChunks/8).
   std::vector<uint8_t> bitmap_;

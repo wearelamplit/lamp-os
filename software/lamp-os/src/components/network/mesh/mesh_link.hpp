@@ -217,8 +217,8 @@ class MeshLink {
   // boot-burst in lockstep. Applied once, to the first emit only.
   uint32_t helloBootPhaseMs_ = 0;
   uint8_t prevOtaState_ = lamp_protocol::kOtaStateIdle;
-  uint16_t helloSeq_ = 0;
-  uint16_t controlOpSeq_ = 0;
+  lamp_protocol::SenderSeq helloSeq_;
+  lamp_protocol::SenderSeq controlOpSeq_;
 
   // Spaced re-broadcast of the unacked types that must survive the C6's
   // bursty RX-scan gaps. Per-type instances (not one shared ring) so a
@@ -233,10 +233,10 @@ class MeshLink {
   ResendRing<kCommandResendMax, 10> commandResend_;
   ResendRing<lamp_protocol::COLOR_QUERY_SIZE, 1> colorQueryResend_;
   ResendRing<lamp_protocol::COLOR_INFO_MAX_SIZE, 4> colorInfoResend_;
-  uint16_t commandSeq_    = 0;
-  uint16_t eventSeq_      = 0;
-  uint16_t colorQuerySeq_ = 0;
-  uint16_t colorInfoSeq_  = 0;
+  lamp_protocol::SenderSeq commandSeq_;
+  lamp_protocol::SenderSeq eventSeq_;
+  lamp_protocol::SenderSeq colorQuerySeq_;
+  lamp_protocol::SenderSeq colorInfoSeq_;
 
   ControlOpHandler controlOpHandler_;
   FirmwareReceiver*    firmwareReceiver_    = nullptr;

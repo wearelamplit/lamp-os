@@ -458,7 +458,7 @@ int FirmwareDistributor::streamOneChunk(uint32_t nowMs) {
   // bump under mux for safety.
   uint16_t seq;
   portENTER_CRITICAL(&stateMux_);
-  seq = seqCounter_++;
+  seq = seqCounter_.next();
   portEXIT_CRITICAL(&stateMux_);
 
   static uint8_t buf[lamp_protocol::FW_CHUNK_MAX_SIZE];
@@ -894,7 +894,7 @@ void FirmwareDistributor::emitOffer(const uint8_t targetMac[6],
     return;
   }
   std::memcpy(targetMac_, targetMac, 6);
-  sessionOfferSeq_  = seqCounter_++;
+  sessionOfferSeq_  = seqCounter_.next();
   // Recomputed per session: sessionChunkSize_ (set just before this call, in
   // considerPeerForOta) can differ from the chunk size begin() assumed, so
   // firmwareTotalChunks_ (that stale baseline count) isn't reused here.
@@ -1047,7 +1047,7 @@ void FirmwareDistributor::emitDone(uint32_t nowMs) {
   sessionTotalLenLocal = sessionTotalLen_;
   std::memcpy(sha, sha256Prefix_, 8);
   std::memcpy(targetMacLocal, targetMac_, 6);
-  seq = seqCounter_++;
+  seq = seqCounter_.next();
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   portEXIT_CRITICAL(&stateMux_);
 #endif

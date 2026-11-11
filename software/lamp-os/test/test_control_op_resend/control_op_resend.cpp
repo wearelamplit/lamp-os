@@ -154,7 +154,8 @@ void test_resend_copies_dedup_to_one_apply() {
   for (int copy = 0; copy < 1 + kResends; ++copy) {
     lp::ParsedControlOp parsed;
     TEST_ASSERT_TRUE(lp::parseControlOp(frame, n, parsed));
-    if (dedup.record(parsed.sourceMac, lp::MSG_CONTROL_OP, parsed.seq)) {
+    if (dedup.record(parsed.sourceMac, lp::MSG_CONTROL_OP, parsed.seq,
+                     static_cast<uint32_t>(copy) * kGapMs)) {
       ++applyCount;
     }
   }

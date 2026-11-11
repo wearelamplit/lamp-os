@@ -894,7 +894,7 @@ bool FirmwareReceiver::sendAccept(const PendingFirmwareControl& ctrl,
   uint8_t buf[lamp_protocol::FW_ACCEPT_FIXED_SIZE];
   // Reply at the version the OFFER arrived on so old-protocol senders can parse.
   const size_t n = lamp_protocol::buildFwAccept(
-      buf, sizeof(buf), fwOutSeq_++, myMac_, ctrl.sourceMac,
+      buf, sizeof(buf), fwOutSeq_.next(), myMac_, ctrl.sourceMac,
       ctrl.seq, ctrl.offer.version, status, /*resumeOffset=*/0,
       ctrl.wireVersion,
       fsHooks_ ? fsHooks_->acceptType : lamp_protocol::MSG_FW_ACCEPT);
@@ -909,7 +909,7 @@ bool FirmwareReceiver::sendReq(uint16_t firstChunkIdx, uint16_t chunkCount,
   if (!t) return false;
   uint8_t buf[lamp_protocol::FW_REQ_FIXED_SIZE];
   const size_t n = lamp_protocol::buildFwReq(
-      buf, sizeof(buf), fwOutSeq_++, myMac_, wispMac_,
+      buf, sizeof(buf), fwOutSeq_.next(), myMac_, wispMac_,
       firstChunkIdx, chunkCount, reason, activeWireVersion_,
       fsHooks_ ? fsHooks_->reqType : lamp_protocol::MSG_FW_REQ);
   if (!n) return false;
@@ -923,7 +923,7 @@ bool FirmwareReceiver::sendResult(lamp_protocol::FwResultStatus status,
   if (!t) return false;
   uint8_t buf[lamp_protocol::FW_RESULT_FIXED_SIZE];
   const size_t n = lamp_protocol::buildFwResult(
-      buf, sizeof(buf), fwOutSeq_++, myMac_, wispMac_,
+      buf, sizeof(buf), fwOutSeq_.next(), myMac_, wispMac_,
       status, detail, offerVersion_, activeWireVersion_,
       fsHooks_ ? fsHooks_->resultType : lamp_protocol::MSG_FW_RESULT);
   if (!n) return false;

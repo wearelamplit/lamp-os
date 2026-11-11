@@ -20,6 +20,8 @@
 #include "components/firmware/peer_backoff_ring.hpp"
 #include "components/network/protocol/fw_ota.hpp"  // FW_CHUNK_SIZE_BASELINE/_MAX
 
+#include <lampos/protocol/sender_seq.hpp>
+
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -282,7 +284,7 @@ class FirmwareDistributor {
   uint16_t sessionOfferSeq_        = 0;
   uint32_t sessionVersion_         = 0;
   uint32_t sessionTotalLen_        = 0;
-  uint16_t seqCounter_             = 0;
+  lamp_protocol::SenderSeq seqCounter_;
   uint32_t lastOfferSendMs_        = 0;
   uint8_t  offerRetryCount_        = 0;
   uint16_t lastBurstSentChunks_    = 0;

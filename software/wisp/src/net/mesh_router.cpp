@@ -29,7 +29,7 @@ void MeshRouter::onPacket(const uint8_t* srcMac, const uint8_t* data,
   if (msgType == lamp_protocol::MSG_CONTROL_OP) {
     lamp_protocol::ParsedControlOp op;
     if (!lamp_protocol::parseControlOp(data, len, op)) return;
-    inbox_.offer(op);
+    inbox_.offer(op, millis());
     return;
   }
 }

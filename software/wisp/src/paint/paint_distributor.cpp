@@ -129,7 +129,7 @@ void PaintDistributor::sendBrightnessToPeer(const uint8_t mac[6]) {
   uint8_t srcMac[6] = {0};
   mesh_->getMac(srcMac);
   uint8_t buf[lamp_protocol::OVERRIDE_BRIGHTNESS_FIXED_SIZE];
-  const uint16_t seq = seqCounter_++;
+  const uint16_t seq = seqCounter_.next();
   const size_t n = lamp_protocol::buildOverrideBrightness(
       buf, sizeof(buf), seq, srcMac, mac,
       lamp_protocol::OverrideSurface::BaseAndShade,

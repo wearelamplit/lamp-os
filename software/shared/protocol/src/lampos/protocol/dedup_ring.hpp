@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <cstring>
 
+#include <lampos/clock.hpp>
+
 // portMUX is FreeRTOS-only. The header is also compiled by native unit tests;
 // guard the include so a native compile of this header builds, and provide a
 // no-op fallback.
@@ -25,12 +27,16 @@ struct LampProtocolNullMux {};
 // receive-side state that makes gossip relay terminate. It keys on the
 // (sourceMac, msgType, seq) tuple carried in
 // every frame header (bytes 3..5 + the src MAC each family places at byte 6),
-// holding the last CAPACITY tuples seen. record() returns
-// false for a tuple already in the ring (drop the relay) and true for a fresh
-// one (relay it once). Carries the FreeRTOS portMUX shim it needs, since the
-// critical section runs from both the ESP-NOW recv task and the loop task.
+// holding the last CAPACITY tuples seen. Carries the FreeRTOS portMUX shim it
+// needs, since the critical section runs from both the ESP-NOW recv task and
+// the loop task.
 
 namespace lamp_protocol {
+
+// How long a recorded tuple suppresses a repeat. Shorter than this and a late
+// relay copy or offer retry re-applies; longer and a sender whose seq restarts
+// at a fixed value each boot loses that much traffic after a reboot.
+inline constexpr uint32_t kDedupMaxAgeMs = 20000;
 
 // Gossip dedup: small fixed-size ring tracking (sourceMac, msgType, seq) tuples
 // seen recently. Drops duplicates so re-broadcasts terminate.
@@ -49,12 +55,20 @@ namespace lamp_protocol {
 template <size_t CAPACITY = 64>
 class DedupRing {
  public:
-  // Returns true if (mac, msgType, seq) is new (and records it); false if seen.
-  bool record(const uint8_t mac[6], uint8_t msgType, uint16_t seq) {
+  // True if (mac, msgType, seq) is new, and records it at nowMs; false if it
+  // was recorded within kDedupMaxAgeMs. nowMs is millis(), and the ring needs
+  // a record() at least once per 49 days for its ages to hold.
+  bool record(const uint8_t mac[6], uint8_t msgType, uint16_t seq,
+              uint32_t nowMs) {
     LAMP_PROTOCOL_PORTMUX_ENTER(&mux_);
     for (size_t i = 0; i < CAPACITY; i++) {
-      const Entry& e = entries_[i];
-      if (e.used && e.msgType == msgType && e.seq == seq &&
+      Entry& e = entries_[i];
+      if (!e.used) continue;
+      if (lampos::msSince(nowMs, e.seenMs) > kDedupMaxAgeMs) {
+        e.used = false;
+        continue;
+      }
+      if (e.msgType == msgType && e.seq == seq &&
           std::memcmp(e.mac, mac, 6) == 0) {
         LAMP_PROTOCOL_PORTMUX_EXIT(&mux_);
         return false;
@@ -64,6 +78,7 @@ class DedupRing {
     slot.used = true;
     slot.msgType = msgType;
     slot.seq = seq;
+    slot.seenMs = nowMs;
     std::memcpy(slot.mac, mac, 6);
     head_ = (head_ + 1) % CAPACITY;
     LAMP_PROTOCOL_PORTMUX_EXIT(&mux_);
@@ -76,6 +91,7 @@ class DedupRing {
     uint8_t msgType = 0;
     uint16_t seq = 0;
     uint8_t mac[6] = {0, 0, 0, 0, 0, 0};
+    uint32_t seenMs = 0;
   };
   Entry entries_[CAPACITY];
   size_t head_ = 0;
