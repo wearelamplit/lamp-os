@@ -98,8 +98,8 @@ enum class SaveResult : uint8_t { Ok, WriteFailed, TooLarge, Invalid, NoHeap, He
 
 // The save buffer's length: it holds a whole config up to kMaxWholeCfgLen
 // and a split save's rest at the caps with every escapable string fully
-// escaped (1746 bytes, measured by test_config_records).
-constexpr size_t kMaxStoredCfgJsonLen = 1792;
+// escaped (1818 bytes, measured by test_config_records).
+constexpr size_t kMaxStoredCfgJsonLen = 1824;
 // The largest whole config saved as the one "cfg" string. A string must fit
 // in a single NVS page; at this size NVS can always place it with every
 // other key at its cap (docs/dev/embedded-heap.md, pinned by

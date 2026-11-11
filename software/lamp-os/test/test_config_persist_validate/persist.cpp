@@ -255,7 +255,7 @@ std::string document(size_t n, size_t nameLen = 8) {
 }  // namespace
 
 // A lamp at every cap: 21 full expressions, 4 base and 4 shade segments of 8
-// colours with 16-byte names, 252 knockout levels and a full disabled list.
+// colours with 16-byte names and two-digit pins, 252 knockout levels and a full disabled list.
 std::string atCapsDocument() {
   LampSettings lamp;
   lamp.name = std::string(kMaxLampNameLen, 'n');
@@ -268,6 +268,7 @@ std::string atCapsDocument() {
       SegmentSettings seg;
       seg.name = std::string(kMaxSegmentNameLen, 's');
       seg.px = 63;
+      seg.pin = 33;
       seg.colors.assign(kMaxSurfaceColors, Color(255, 255, 255, 255));
       segs->push_back(seg);
     }

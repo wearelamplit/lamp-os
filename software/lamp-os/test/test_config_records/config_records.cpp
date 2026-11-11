@@ -77,6 +77,7 @@ Model worstCaseModel(char fill = 'z') {
       SegmentSettings seg;
       seg.name = std::string(kMaxSegmentNameLen, fill);
       seg.px = 255;
+      seg.pin = 33;
       seg.colors.assign(kMaxSurfaceColors, Color(255, 255, 255, 255));
       segs->push_back(seg);
     }
@@ -994,7 +995,10 @@ bool sameLamp(const Model& a, const Model& b) {
 bool sameSegments(const std::vector<SegmentSettings>& a, const std::vector<SegmentSettings>& b) {
   if (a.size() != b.size()) return false;
   for (size_t i = 0; i < a.size(); ++i) {
-    if (a[i].name != b[i].name || a[i].px != b[i].px || a[i].colors != b[i].colors) return false;
+    if (a[i].name != b[i].name || a[i].px != b[i].px || a[i].pin != b[i].pin ||
+        a[i].colors != b[i].colors) {
+      return false;
+    }
   }
   return true;
 }
