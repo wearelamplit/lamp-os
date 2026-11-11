@@ -5,6 +5,19 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## Unreleased
+
+### Fixed
+- **A crash record says where the lamp crashed.** The lamp's crash record
+  (`lastCrash` in the lamp's settings) now carries the core, the code address
+  and the first few backtrace addresses for every crash and watchdog reset,
+  and the uptime at the moment it happened. Before, the record held only the
+  reset type, and an uptime of 0 for a lamp whose loop stalled.
+- **Web Config's on-time picker sticks.** Choosing how long Web Config stays
+  up after boot (say 5 min) on a lamp that was already set up saved nothing,
+  and the next boot still gave 2 minutes. The choice now applies from the next
+  boot, and the app reads back what you chose.
+
 ## 1.3.3
 
 ### Added

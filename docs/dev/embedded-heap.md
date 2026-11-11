@@ -611,7 +611,10 @@ whole, which creates the lock at boot.
 Every build, released ones included, keeps a crash record (`core/crash_record`).
 The loop samples the running minimum largest block, minimum free heap, roster
 peak, and uptime into RTC memory at 1 Hz; the panic handler adds the reason, pc,
-first four backtrace addresses, and core. RTC memory survives a panic or
+first four backtrace addresses, and core, and replaces the uptime with the
+uptime at the fault. The handler is Arduino-ESP32's panic hook, which runs only
+because the link wraps `esp_panic_handler` (`-Wl,--wrap=esp_panic_handler` in
+`platformio.ini`); a build without the flag fails to link. RTC memory survives a panic or
 watchdog reset but not power loss, so a magic value gates it. On the next boot a
 panic, int/task/other watchdog, or brownout reset (or a captured panic under any
 reset) bumps a counter and writes the record to NVS (namespace `crash`, key
@@ -630,8 +633,12 @@ Read it from the BLE `lamp` section:
 `reset` and `resetReason` are `esp_reset_reason_t` ordinals (4 panic, 5 int WDT,
 6 task WDT, 7 other WDT, 9 brownout, 3 clean restart, 1 power-on). The heap and
 roster fields are absent when RTC memory failed its check (a brownout often
-does); `reason`/`core`/`pc`/`bt` are absent unless the panic handler ran.
-`uptimeMs` stops at 4294967295 (49.7 days) on a longer boot.
+does); `core`/`pc`/`bt` are absent unless the panic handler ran. `reason` is the
+CPU exception (`LoadProhibited`, `IllegalInstruction`), or the abort message for
+an `abort()`; a task-watchdog abort has no message, so its record carries no
+`reason` and `reset` 6 names it. `uptimeMs` is the uptime at the fault when the
+panic handler ran, else the last 1 Hz sample (0 when the boot died before its
+loop sampled). It stops at 4294967295 (49.7 days) on a longer boot.
 `minLargestBlock` near 1-2 KB with a high `rosterPeak` points at fragmentation.
 Feed `pc` and `bt` to `xtensa-esp32-elf-addr2line -e firmware.elf` for the build
 matching `fw` (packed `major<<16 | minor<<8 | patch`).
