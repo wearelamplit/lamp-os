@@ -97,6 +97,11 @@ struct PendingWispState {
 void fillPendingWispState(PendingWispState& slot,
                           const lamp_protocol::ParsedWispState& ws);
 
+// Copy a parsed MSG_WISP_CLAIM's lamp MACs into the slot, at most
+// kMaxWispClaimEntries of them.
+void fillPendingWispClaim(PendingWispClaim& slot,
+                          const lamp_protocol::ParsedWispClaim& wc);
+
 // This lamp's RGBW base/shade from the slot. False when `mac` has no entry.
 bool wispStateColorsFor(const PendingWispState& slot, const uint8_t mac[6],
                         Color& base, Color& shade);
@@ -109,6 +114,11 @@ struct PendingCommand {
   uint16_t payloadLen;
   uint8_t  payload[lamp_protocol::COMMAND_MAX_PAYLOAD];
 };
+
+// Copy a parsed MSG_COMMAND's source and payload into the slot. parseCommand
+// bounds payloadLen to COMMAND_MAX_PAYLOAD.
+void fillPendingCommand(PendingCommand& slot,
+                        const lamp_protocol::ParsedCommand& p);
 
 struct PendingColorQuery {
   uint8_t sourceMac[6];

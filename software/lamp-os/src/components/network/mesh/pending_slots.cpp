@@ -20,6 +20,30 @@ void fillPendingWispState(PendingWispState& slot,
   }
 }
 
+void fillPendingWispClaim(PendingWispClaim& slot,
+                          const lamp_protocol::ParsedWispClaim& wc) {
+  std::memcpy(slot.sourceMac, wc.sourceMac, 6);
+  const uint8_t count =
+      wc.count > lamp_protocol::kMaxWispClaimEntries
+          ? static_cast<uint8_t>(lamp_protocol::kMaxWispClaimEntries)
+          : wc.count;
+  slot.count = count;
+  for (uint8_t i = 0; i < count; ++i) {
+    // An entry is lampMac[6] + int8 rssi; the slot keeps only the MAC.
+    std::memcpy(slot.lampMacs[i],
+                wc.entries + static_cast<size_t>(i) *
+                                 lamp_protocol::WISP_CLAIM_ENTRY_SIZE,
+                6);
+  }
+}
+
+void fillPendingCommand(PendingCommand& slot,
+                        const lamp_protocol::ParsedCommand& p) {
+  std::memcpy(slot.sourceMac, p.sourceMac, 6);
+  slot.payloadLen = static_cast<uint16_t>(p.payloadLen);
+  std::memcpy(slot.payload, p.payload, p.payloadLen);
+}
+
 bool wispStateColorsFor(const PendingWispState& slot, const uint8_t mac[6],
                         Color& base, Color& shade) {
   const uint8_t* e =
