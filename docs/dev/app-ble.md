@@ -114,6 +114,44 @@ away from is not held open.
 A caller of `connectWithRetry` passes an owner that is stable for its session
 (`ControlNotifier` uses one `_linkOwner` object per notifier).
 
+## Holding an open lamp's link
+
+`ControlNotifier` (`features/control/application/control_notifier.dart`)
+watches an open lamp's link and reconnects it.
+
+**Section read.** Every connect (opening the lamp, a ladder reconnect, a
+reboot-save reload) authenticates, then reads each section once through
+`_readSections`, the `lamp` section first. The lamp serves that section empty
+to a link that has not authenticated, since it carries the password, so empty
+bytes make `_readSections` throw `LampAuthRequiredException`. The control
+screen turns that into a password prompt; on a ladder reconnect it also parks
+the ladder.
+
+**Liveness probe.** flutter_blue_plus can miss the link-down edge when the lamp
+drops the link itself (a mesh OTA kicking the GATT client, a reboot), so
+`_probeLink` makes one real GATT round trip every 3 s while the lamp is open,
+and when the app returns to the foreground. It reads `CHAR_SCHEMA_VERSION`, one
+byte. A lamp from before GATT schema v1 has no such characteristic; the client
+finds it absent from the services it already discovered, with no radio time,
+and the probe reads the `lamp` section instead (a page-protocol session: a CTRL
+write and at least two reads). A disconnect error from either read starts the
+reconnect ladder; any other error is ignored. The probe skips while the app
+pushes the lamp firmware (`FirmwareState.isPushing`): the push's own writes fail
+on a dead link, and a probe would queue behind its chunks.
+
+**Reconnect owners.** An unsolicited drop climbs the reconnect ladder,
+`_scheduleReconnect` then `_tryReconnect`: delays from 0.5 s doubling to 8 s,
+`cycleAdapter` before each try from the third, parked in an error after 30. A
+save that restarts the lamp (a password change, an Advanced LEDs save)
+reconnects through `_awaitReconnectAndReload` instead: 2 s of grace, then up to
+12 polls of connect, auth and section read. From the save until the reload
+restores the link or gives up (`_rebootReloadOwnsLink`), the ladder stands
+down: `_tryReconnect` returns at once, a try already in flight when a reload
+starts stops at its next step for good (`_rebootReloadsStarted`), and a ladder
+step still pending when the reload restores the link or gives up is cancelled.
+A drop after the restore climbs the ladder as usual. A reload that gives up
+leaves its error on screen; the ladder does not take over.
+
 ## Scan hold during a connect
 
 The phone has one BLE scan, and a running scan competes with a connect

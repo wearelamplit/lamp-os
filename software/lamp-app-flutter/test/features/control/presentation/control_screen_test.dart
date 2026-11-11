@@ -41,13 +41,13 @@ Future<ProviderContainer> _withLamp() async {
 }
 
 /// Inventory + BLE state where the firmware's auth gate would reject our
-/// stored credential: lampSection reads back empty bytes. controlNotifier's
-/// canary trips and the provider goes to AsyncError(LampAuthRequiredException).
+/// stored credential: lampSection reads back empty bytes, so controlNotifier
+/// goes to AsyncError(LampAuthRequiredException).
 Future<(ProviderContainer, InMemoryBleClient)> _withAuthGatedLamp() async {
   SharedPreferences.setMockInitialValues({});
   final ble = InMemoryBleClient();
   await seedControlBle(ble, deviceId: _devId, name: 'jacko');
-  // Wipe the lamp section so the canary read returns empty bytes.
+  // Wipe the lamp section so it reads back as empty bytes.
   ble.seedSection(_devId, 'lamp', Uint8List(0));
   final c = ProviderContainer(
     overrides: [

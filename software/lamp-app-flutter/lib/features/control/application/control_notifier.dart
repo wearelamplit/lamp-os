@@ -103,9 +103,19 @@ class ControlNotifier extends _$ControlNotifier {
   /// the top of `_tryReconnect`, cleared in `finally`. Allows safely
   /// kicking `_tryReconnect` from BOTH the scheduled timer
   /// (`_scheduleReconnect`) AND the watchConnected→true edge
-  /// (`_onConnectionChange`) without stacking ble.connect + auth + canary
-  /// calls on top of each other.
+  /// (`_onConnectionChange`) without stacking ble.connect + auth + section
+  /// reads on top of each other.
   bool _reconnectInFlight = false;
+
+  /// Set while a save that reboots the lamp owns reconnecting to it, from
+  /// the save until its reload restores the link or gives up. The reconnect
+  /// ladder starts no try meanwhile, so the restored link is never
+  /// reconnected or cycled a second time.
+  bool _rebootReloadOwnsLink = false;
+
+  /// Reboot-save reloads started. A ladder try that sees this change while
+  /// it runs leaves the link to the reload for good.
+  int _rebootReloadsStarted = 0;
   static const _reconnectDelays = [500, 1000, 2000, 4000, 8000]; // ms, capped
   /// Max consecutive reconnect attempts before giving up and surfacing an
   /// error state instead of polling forever.
@@ -219,6 +229,7 @@ class ControlNotifier extends _$ControlNotifier {
   /// Each attempt: `ble.connect` → `authenticate(password)` →
   /// `_readSections`. Transient disconnect-like errors retry. Non-
   /// transient errors and final-attempt failures surface as `AsyncError`.
+  /// The reconnect ladder stays out of it from the call until it returns.
   Future<void> _awaitReconnectAndReload({
     required BleClient ble,
     required String password,
@@ -230,6 +241,8 @@ class ControlNotifier extends _$ControlNotifier {
     // mid-reconnect when the user leaves the page). lampSaveStatusProvider
     // is keepAlive, so this reference stays valid past this notifier's own dispose.
     final saveStatus = ref.read(lampSaveStatusProvider(_deviceId).notifier);
+    _rebootReloadOwnsLink = true;
+    _rebootReloadsStarted++;
     try {
       // Initial grace: give the lamp a head start on the reboot so the
       // first attempt isn't guaranteed to race the disconnect. ~2s lets
@@ -277,6 +290,7 @@ class ControlNotifier extends _$ControlNotifier {
         return;
       }
 
+      _endRebootReload();
       state = AsyncData(fresh);
       _lampQuiet = null;
       _flagsPending = true;
@@ -288,8 +302,18 @@ class ControlNotifier extends _$ControlNotifier {
         if (ref.mounted) state = AsyncError(e, st);
       }
     } finally {
+      _endRebootReload();
       saveStatus.stop();
     }
+  }
+
+  /// Hands reconnecting back to the ladder. A ladder step armed while the
+  /// reload owned the link is dropped, so it never fires onto the link the
+  /// reload restored; one armed after this keeps running.
+  void _endRebootReload() {
+    if (!_rebootReloadOwnsLink) return;
+    _rebootReloadOwnsLink = false;
+    _reconnectTimer?.cancel();
   }
 
   Future<void> _updateSeen({
@@ -380,16 +404,8 @@ class ControlNotifier extends _$ControlNotifier {
     await AuthClient(ble: ble)
         .authenticate(deviceId: deviceId, password: lamp.controlPassword);
 
-    // Auth-gate canary. Firmware returns empty bytes from lampSection on
-    // unauthenticated reads so an unauth'd peer can't exfiltrate the
-    // password embedded in the section blob. Empty bytes here mean the
-    // stored credential is missing or stale → typed sentinel the UI
-    // catches and converts into a password prompt.
-    final canaryBytes = await ble.readSection(deviceId, 'lamp');
-    if (canaryBytes.isEmpty) {
-      throw const LampAuthRequiredException();
-    }
-
+    // Throws LampAuthRequiredException, which the UI turns into a password
+    // prompt, when the stored credential is missing or stale.
     final fresh = await _readSections(ble);
 
     // Heal password divergence: lamp's NVS pw got wiped (re-flash, factory
@@ -591,6 +607,9 @@ class ControlNotifier extends _$ControlNotifier {
 
   /// Reads every section via the page protocol and returns a fresh
   /// ControlState. Assumes the BLE link is connected and authenticated.
+  /// Throws [LampAuthRequiredException] when the `lamp` section reads back
+  /// empty. The lamp withholds that section, password included, from a link
+  /// that has not authenticated.
   Future<ControlState> _readSections(BleClient ble) async {
     // A section a legacy lamp doesn't serve comes back as empty bytes;
     // jsonDecode('') throws. Default missing sections to an empty object /
@@ -608,7 +627,10 @@ class ControlNotifier extends _$ControlNotifier {
       return jsonDecode(utf8.decode(bytes)) as List<dynamic>;
     }
 
-    final lampJson = await readJsonSection('lamp');
+    final lampBytes = await ble.readSection(_deviceId, 'lamp');
+    if (lampBytes.isEmpty) throw const LampAuthRequiredException();
+    final lampJson =
+        jsonDecode(utf8.decode(lampBytes)) as Map<String, dynamic>;
     final baseJson = await readJsonSection('base');
     final shadeJson = await readJsonSection('shade');
     final homeJson = await readJsonSection('home');
@@ -1933,10 +1955,10 @@ class ControlNotifier extends _$ControlNotifier {
       // fbp's connectionState emitted `true` mid-reconnect, but the
       // GATT services aren't necessarily discovered yet (observed on
       // hardware: a 4-second window where writes failed with
-      // "primary service not found" before the canary lands).
+      // "primary service not found" before the section reads land).
       //
       // Don't flip the UI to "connected" on this edge. _tryReconnect's
-      // canary read is the truthful "the link can actually be used"
+      // section read is the truthful "the link can actually be used"
       // signal. Kick _tryReconnect immediately rather than waiting for
       // the soft 500ms reconnect timer; the in-flight guard prevents
       // doubling up with a timer-scheduled run that's already running.
@@ -1963,9 +1985,12 @@ class ControlNotifier extends _$ControlNotifier {
   /// No-op when:
   ///   - notifier state is still loading / errored (nothing connected yet)
   ///   - already in a reconnect cycle (banner showing attempts)
+  ///   - the app is pushing the lamp firmware, whose own writes fail on a
+  ///     dead link
   Future<void> _probeLink() async {
     final cur = state.value;
     if (cur == null || !cur.connected) return;
+    if (ref.read(firmwareNotifierProvider(_deviceId)).isPushing) return;
     final ble = ref.read(bleClientProvider);
     if (!ble.isConnected(_deviceId)) {
       // fbp itself has dropped the link; surface the missing false edge.
@@ -1973,10 +1998,7 @@ class ControlNotifier extends _$ControlNotifier {
       return;
     }
     try {
-      // Cheap real GATT op: read the lamp section (small payload, part
-      // of the cold-start sweep, no side effects). If this throws a
-      // disconnect-shaped error, the slot is zombified.
-      await ble.readSection(_deviceId, 'lamp');
+      await _readForProbe(ble);
     } on BleDisconnectedException {
       // The await above is the dispose window: the user can switch
       // lamps mid-probe, disposing the notifier. Touching state after
@@ -1989,6 +2011,17 @@ class ControlNotifier extends _$ControlNotifier {
       // not a clean disconnect signal. Don't disturb the connection
       // state; the next user action will surface a real failure if
       // the link is actually dead.
+    }
+  }
+
+  /// One read of CHAR_SCHEMA_VERSION, a single byte. A lamp that predates it
+  /// has its `lamp` section read instead.
+  Future<void> _readForProbe(BleClient ble) async {
+    try {
+      await ble.read(
+          _deviceId, BleUuids.controlService, BleUuids.schemaVersion);
+    } on BleNotFound {
+      await ble.readSection(_deviceId, 'lamp');
     }
   }
 
@@ -2023,11 +2056,15 @@ class ControlNotifier extends _$ControlNotifier {
   }
 
   Future<void> _tryReconnect() async {
-    if (_reconnectInFlight) {
+    if (_reconnectInFlight || _rebootReloadOwnsLink) {
       return;
     }
     _reconnectInFlight = true;
     final ble = ref.read(bleClientProvider);
+    // A reboot-save reload that starts while this attempt awaits takes the
+    // link over; the attempt leaves it alone from then on.
+    final reloads = _rebootReloadsStarted;
+    bool standDown() => !ref.mounted || _rebootReloadsStarted != reloads;
     try {
       final attempt = state.value?.reconnectAttempt ?? 0;
       // Tier 3: if soft reconnects have failed enough times, soft-cycle
@@ -2036,6 +2073,7 @@ class ControlNotifier extends _$ControlNotifier {
       // fingerprint that "force-stop fixes it" reports map onto.
       if (attempt >= _cycleAdapterAttempt) {
         await ble.cycleAdapter(_deviceId);
+        if (standDown()) return;
       }
       if (!await connectWithRetry(ble, _deviceId,
           attempts: 1, owner: _linkOwner, shouldAbort: () => !ref.mounted)) {
@@ -2047,38 +2085,31 @@ class ControlNotifier extends _$ControlNotifier {
         (l) => l.id == _deviceId,
         orElse: () => throw StateError('lamp $_deviceId not in inventory'),
       );
+      if (standDown()) return;
       await AuthClient(ble: ble)
           .authenticate(deviceId: _deviceId, password: lamp.controlPassword);
-      // Same canary as build(): if the firmware still returns empty bytes
-      // after this auth attempt, the stored password no longer works (e.g.
-      // it was changed on another device). Drop to error so the UI re-
-      // prompts instead of leaving the user in a silent-write-rejected
-      // state with the banner clearing as if everything was fine.
-      final canaryBytes = await ble.readSection(_deviceId, 'lamp');
-      if (canaryBytes.isEmpty) {
-        state = AsyncError(
-            const LampAuthRequiredException(), StackTrace.current);
-        return;
-      }
-      // Canary succeeded → the link is fully usable (GATT connected
-      // AND services discovered AND auth restored). Pull every section
-      // fresh from the lamp before flipping the UI to connected. During
-      // the disconnect window the firmware state could have changed via
-      // the webapp, a lamp reboot, or a mesh override, and the locally-
-      // cached state is stale. The lamp is authoritative.
+      if (standDown()) return;
+      // Pull every section fresh from the lamp before flipping the UI to
+      // connected. During the disconnect window the firmware state could
+      // have changed via the webapp, a lamp reboot, or a mesh override,
+      // and the locally-cached state is stale. The lamp is authoritative.
       //
       // Trade-off: if the user dragged a slider mid-disconnect (the
       // live-preview writes failed silently during the gap), that input
       // is lost. The alternative (pushing the stale local cache) would
       // overwrite any genuine lamp-side change with old data, which
       // breaks trust in a way the missing-gesture case doesn't.
-      //
-      // Bail if disposed during the awaits; touching state would throw.
-      // The notifier dispose path already cancels everything that matters here.
-      final fresh = await _readSections(ble);
-      if (!ref.mounted) return;
+      final ControlState fresh;
+      try {
+        fresh = await _readSections(ble);
+      } on LampAuthRequiredException catch (e, st) {
+        // The stored password no longer works (e.g. changed on another
+        // device). Parks the ladder so the UI prompts for it.
+        if (!standDown()) state = AsyncError(e, st);
+        return;
+      }
       await _mirrorIdentityToInventory(fresh);
-      if (!ref.mounted) return;
+      if (standDown()) return;
       _reconnectTimer?.cancel();
       _reassertHomeModeFocus = false;
       _lampQuiet = null;
@@ -2092,8 +2123,9 @@ class ControlNotifier extends _$ControlNotifier {
       // `state` after dispose throws. This happens in tests that
       // dispose the ProviderContainer while a reconnect is mid-flight,
       // and could also happen in production if the user navigates
-      // away (lamp picker → other lamp) during a slow reconnect.
-      if (!ref.mounted) {
+      // away (lamp picker → other lamp) during a slow reconnect. A
+      // reboot-save reload that took over owns the retrying.
+      if (standDown()) {
         _reconnectInFlight = false;
         return;
       }

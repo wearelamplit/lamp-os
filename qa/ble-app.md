@@ -147,6 +147,17 @@ change in the next minute does nothing on the lamp. The Home Mode cases (a
 focus change dropped mid-update, a reconnect while Home Mode is open) can't be
 set up from the app's screens and are covered by push_resync_test.dart.
 
+P8 — **one reconnect after a save that restarts the lamp.** Needs a dev build
+on the lamp (the `[ble_control]` lines below are debug-only) and a password
+set. Start one tap and leave it open: `npm run lamp:tap -- <port>:lamp -o
+/tmp/p8.log`. Open the lamp in the app, go to Advanced LEDs, change the strip
+type and tap Update. After the lamp's boot banner, count the lines in the log:
+exactly one `[ble_control] Client connected` and one `Auth via ciphertext ...
+OK`, and no `Client disconnected` in the minute after them. Two of each means
+two reconnects ran; a disconnect right after the second connect is the app
+cycling a link it had already restored. Then leave the lamp open and idle for
+a minute: `page CTRL section=lamp` should not appear at all.
+
 ## Pass criteria
 
 - H1 completes: mfg-data scan finds the lamp, schema reads 4, section reads
@@ -160,6 +171,8 @@ set up from the app's screens and are covered by push_resync_test.dart.
   and editing returns when it ends.
 - P7: after a cancelled update editing stays frozen until the lamp leaves
   its update indicator, never past 75 s, and the first edit after lands.
+- P8: one connect and one auth after an Advanced LEDs save, no disconnect
+  after them, and no `lamp` section reads while the lamp sits open.
 
 ## Not covered here
 

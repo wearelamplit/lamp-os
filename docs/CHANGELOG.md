@@ -81,6 +81,18 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   on every lamp, and it no longer rewrites the lamp's colours. If an LED setup
   save is ever too big to send, the screen says so instead of failing with a
   raw error.
+- **One reconnect after a save that restarts the lamp.** After a password
+  change or an LED setup save, the app used to reconnect to the lamp twice,
+  and when the lamp was slow to restart it could drop the link it had just
+  restored. It now reconnects once.
+
+### Changed
+- **Less Bluetooth chatter while a lamp is open.** The app's check that the
+  lamp is still there now reads one byte every 3 seconds instead of the
+  lamp's whole settings page, and it pauses while the app updates the lamp's
+  firmware. Lamps from before Bluetooth schema version 1 still get the full
+  read. Opening or reconnecting to a lamp reads its settings page once
+  instead of twice.
 
 ### Changed
 - **Smaller firmware, a little more free memory.** The lamp no longer builds
