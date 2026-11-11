@@ -515,6 +515,8 @@ scale with the number of peers or the mesh's message rate, so each is bounded:
   crowd of any size takes no heap to decide a copy; a full table rolls
   nothing new until a slot ages out. The self-echo check reads 16 fixed
   per-type play stamps (`RecentPlays`, 128 bytes) in `ExpressionManager`.
+  Yawn-backs keep a second 16-slot table of their own in `YawnContagion`
+  and share the 4 pending copies.
   Detail in `docs/dev/expressions.md`.
 - **Fondness engine.** `FondnessEngine` gathers peer expressions in 16 fixed
   slots (384 bytes) and a 16-entry step log (256 bytes); a full slot table

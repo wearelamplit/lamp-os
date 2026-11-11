@@ -122,6 +122,9 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   // `mac` is the peer's raw 6-byte mesh MAC.
   void markGreeted(const uint8_t mac[6], uint64_t upMs);
 
+  // True while an introvert rests after too many greetings.
+  bool tired() const;
+
  private:
   static constexpr size_t MAX_GREETED_TRACKED = 32;
   // Must exceed the longest greeting animation (~23.75s for Effusive) or

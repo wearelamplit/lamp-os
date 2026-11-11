@@ -160,6 +160,20 @@ after an absence, but the hint still rolls. Turn home mode on for A with
 social left on: B's return logs neither line. `reunion.set reunionX 9` prints
 `[cmd] err reunion.set`; a reboot restores the defaults.
 
+**M8 — yawn contagion.** M6's three lamps, B Smitten toward A, C Salty
+toward A, all Ambivert. Give A a yawn expression at the shortest interval
+(5 min): each time A yawns, B logs `[fondness] yawn from <A> hop 1 p=<n>%`
+(about 60 times 8/(8 + lamps near)) and, on `fired`, yawns ~0.5 s later; C
+logs nothing for A (it may log `hop 2` for B's yawn-back). `yawn.set
+yawnRollCooldownMs 600000` on B: A's next yawn 5 min later logs `cooldown`
+on B. Make A an
+introvert and tire it (three greetings inside 5 min, `[social] introvert tired`):
+A logs `[fondness] yawn tired p=35%` about every 90 s while tired, and none
+once rested. `yawn.set yawn.smitten 100` on B makes B yawn back every roll;
+when B's yawn reaches A inside A's minute floor A logs `self`. Home mode on
+for B: no `[fondness] yawn` line on B. `yawn.get` confirms the numbers; a
+reboot restores them.
+
 ## Pass criteria
 
 - M1: inject/clear ACK lines; visible dim toward the mode floor and full
@@ -177,6 +191,9 @@ social left on: B's return logs neither line. `reunion.set reunionX 9` prints
 - M7: one reunion line and a doubled hold after the absence, none straight
   after; one hint per window, faint, toward stop 0, scene unchanged after;
   neither line in home mode.
+- M8: B logs yawn-back lines for A and C none for A; `cooldown` on B at the
+  10 min window; tired lines
+  only while A is tired; `self` on A for B's yawn; no yawn line in home mode.
 
 ## Not covered here
 

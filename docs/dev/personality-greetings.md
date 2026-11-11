@@ -88,7 +88,9 @@ the timing behind each profile is in **Profiles** above.
 
 Longest cooldown between greetings, a per-peer regreet window, and
 **fatigue** — a burst of greetings in a short span triggers a rest window
-during which it won't greet. Cadence constants in `social.cpp`.
+during which it won't greet. Cadence constants in `social.cpp`. A tired
+introvert yawns now and then
+([`expressions.md`](expressions.md#yawn-contagion)).
 
 | Disposition | Profile | Effect |
 |---|---|---|

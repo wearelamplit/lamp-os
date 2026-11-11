@@ -43,6 +43,11 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   lamp breathes a faint shimmer of that friend's colour across its shade,
   then settles back to its own scene. At most once every 10 minutes, and
   less often in a crowd. Neither this nor reunions happen in home mode.
+- **Yawns are catching.** An introvert lamp worn out from greeting now and
+  then yawns, and a lamp nearby that sees it may yawn back a moment later.
+  The fonder it is of the yawner the likelier, a crowded room makes it
+  rarer, and a lamp yawns back at any one lamp at most once every 5 minutes.
+  Home mode keeps it out.
 
 ### Fixed
 - **Mesh updates reach lamps after the sending lamp restarts.** A lamp that

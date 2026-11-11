@@ -234,6 +234,11 @@ contract: [`moments.md`](moments.md).
   no arrival and leaves peer effects already running to finish. With social
   left on at home, peer effects still play, but the lamp copies none of them.
   Detail in [`lamp-framework.md`](lamp-framework.md#home-mode).
+- **Yawns spread.** A tired introvert yawns now and then, and a lamp that
+  sees a peer yawn may yawn back, likelier the fonder it is of that peer and
+  less likely in a crowd. Both run only while the social engine is on and
+  home mode is off. Detail in
+  [`expressions.md`](expressions.md#yawn-contagion).
 - **OTA outranks personality.** Offering an update is not a social
   behaviour. The offer scan (`tickOtaOffers`, `components/firmware/ota_offer.cpp`)
   runs in the framework loop on every variant, so a lamp distributes and
