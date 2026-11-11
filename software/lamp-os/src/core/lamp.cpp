@@ -1094,9 +1094,9 @@ void lamp::Lamp::tick() {
     reapplyHomeModeState();
   }
 
-  // Like the drains, no NVS save runs while OTA chunks are being written.
   const bool otaReceiving = firmwareReceiver.isInProgress() || fs_ota::fsReceiving();
   config.maybeFlushDispositions(lamp::uptimeMs(), otaReceiving);
+  // Like the drains, no NVS save runs while firmware chunks are being written.
   if (!firmwareReceiver.isInProgress()) config.maybeRetryPersist(millis());
   if (pendingFlushDispositionsRequested) {
     // Phone disconnected (set on Core 0 in ble_control's onDisconnect).

@@ -267,13 +267,12 @@ class Config {
   bool setDispositionsFromJson(const char* json, size_t len);
 
   // Called from the loop drain on Core 1 every iteration with uptimeMs().
-  // Cheap when nothing is dirty; flushes whichever tier is due. Writes nothing
-  // while otaReceiving (DispositionStore::maybeFlush).
+  // Cheap when nothing is dirty; flushes whichever tier is due.
   void maybeFlushDispositions(uint64_t nowMs, bool otaReceiving);
   // Synchronous flush for when deferring is unsafe (BLE disconnect: phone is
   // gone, power may drop before the next loop tick). Must run on Core 1 (NVS
   // is not Core-0-safe). No-op when not dirty so onDisconnect can call it
-  // unconditionally. Deferred like maybeFlushDispositions while otaReceiving.
+  // unconditionally.
   void flushDispositionsNow(bool otaReceiving);
 
   // The social rows, for the fondness engine and its behaviours. Reads go

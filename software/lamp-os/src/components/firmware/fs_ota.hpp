@@ -44,8 +44,7 @@ void tick(uint32_t nowMs);
 // firmware start gate consults it so fw and FS OTA never stream at once.
 bool fsPathBusy();
 
-// True while an FS image is being received (and written to the spiffs
-// partition).
+// True while an FS image is being received.
 bool fsReceiving();
 
 // 8-byte prefix of the local FS manifest digest for HELLO_TLV_FS_STATE, or

@@ -156,8 +156,8 @@ class DispositionStore {
 
   // Core 1 loop drain: flushes whichever tier is due. A failed write (NVS
   // full) keeps the rows dirty and backs off, 5 s doubling to 60 s. Pass
-  // otaReceiving while a firmware or FS image is being written: nothing is
-  // written then, and the dirty tiers flush on the first call after it ends.
+  // otaReceiving while a firmware or FS image is being received. Nothing is
+  // written then; a tier that came due flushes on the first call after.
   void maybeFlush(uint64_t nowMs, bool otaReceiving);
   // Synchronous flush of a pending user edit (BLE disconnect); held to the
   // same backoff and the same otaReceiving deferral.
