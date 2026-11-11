@@ -95,12 +95,14 @@ takes neither.
   `reunionMin` on-minutes or more, the greeting holds `reunionX` times as
   long, so a warm profile breathes that many times more; every other field
   is the profile's own. The greeting then calls `markSeen`, and once a minute
-  every near peer the roster has acknowledged (greeted since it arrived) is
+  every near peer the roster has acknowledged (greeted, or consumed by home
+  mode, since it arrived) is
   marked seen too, so the next greeting is ordinary until the peer is away
-  that long again. A greeting reads the clock before it acknowledges its
-  arrival, so an arrival waiting out a cooldown keeps its reunion. An arrival
-  home mode consumes (social off) is acknowledged without a greeting, so once
-  home mode ends the sweep marks it seen and it gets no reunion. Any other greeting is
+  that long again. The organic greeting, while tracking, reads the clock
+  before it acknowledges its arrival, so an arrival waiting out a cooldown
+  keeps its reunion. One acknowledged any other way (an app greeting, a
+  greeting at home, an arrival home mode consumes) is marked seen by the next
+  sweep while it stays near, so it gets no reunion. Any other greeting is
   exactly the profile's. A reunion's cooldown runs from its end, since it
   outlasts the base cooldown that runs from greeting start.
 - **Colour hint.** When a greeting of a Fond or Smitten peer ends, the lamp

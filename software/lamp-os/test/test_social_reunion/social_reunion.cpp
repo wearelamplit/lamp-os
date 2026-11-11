@@ -282,7 +282,7 @@ void test_home_mode_blocks_reunion_and_hint() {
   }
   TEST_ASSERT_TRUE(r.row().unseenMin > ReunionTuning{}.reunionMin);
 
-  // Home mode ends: the reunion still waits.
+  // Home mode ends and the peer arrives again: the reunion still waits.
   r.compositor.homeMode = false;
   r.advance(20 * kMinMs);
   TEST_ASSERT_TRUE(r.greet());
