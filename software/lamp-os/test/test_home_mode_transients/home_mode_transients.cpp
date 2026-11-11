@@ -236,6 +236,35 @@ void test_echo_books_nothing_at_home_with_social_on() {
   TEST_ASSERT_EQUAL_size_t(0, mirrorsBookedThenFired(r, true, false));
 }
 
+// A frame heard at home spends none of the peer's roll window, so its first
+// frame after home mode ends still rolls with the default cooldown on.
+static size_t copiesAfterHome(bool frameAtHome) {
+  Rig r;
+  r.compositor.setHomeModePolicy(/*socialDisabled=*/false, {});
+  Config config;
+  config.lamp.socialMode = SocialMode::Extrovert;
+  MeshLink mesh;
+  SocialEchoObserver echo(config, r.manager, mesh);
+  ExpressionInvocation inv;
+  inv.type = "probe";
+  inv.target = TARGET_SHADE;
+  if (frameAtHome) {
+    r.compositor.homeMode = true;
+    echo.onPeerExpression(kPeerMac, inv);
+    r.compositor.homeMode = false;
+  }
+  echo.onPeerExpression(kPeerMac, inv);
+  set_mock_millis(10000 + kMirrorDelayFloorMs + kMirrorJitterMs + 1);
+  echo.tick(millis());
+  return s_registered.size();
+}
+
+void test_frames_at_home_spend_no_roll() {
+  TEST_ASSERT_EQUAL_size_t(1, copiesAfterHome(false));
+  set_mock_millis(10000);
+  TEST_ASSERT_EQUAL_size_t(1, copiesAfterHome(true));
+}
+
 // A mirror booked just before home mode begins is dropped, so it does not
 // fire once home mode ends, whether or not home mode ignores peers.
 static size_t mirrorsBookedBeforeHomeThenFired(bool socialDisabled) {
@@ -387,6 +416,7 @@ int main(int, char**) {
   RUN_TEST(test_echo_books_outside_home_mode);
   RUN_TEST(test_echo_books_nothing_at_home_or_in_preview);
   RUN_TEST(test_echo_books_nothing_at_home_with_social_on);
+  RUN_TEST(test_frames_at_home_spend_no_roll);
   RUN_TEST(test_manager_ignores_peers_in_home_and_preview);
   RUN_TEST(test_echo_booked_before_home_is_dropped);
   RUN_TEST(test_retiring_transient_does_not_coalesce);

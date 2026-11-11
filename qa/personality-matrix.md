@@ -129,12 +129,12 @@ color for a peer whose base is clearly multi-colored. Record the observation
 either way — this exchange is merged but has never been bench-verified.
 
 **M6 — copycat chains and the roll cooldown.** Three debug lamps A, B, C in
-a line, B Smitten toward A and C toward B (the M3 `inject_nearby` lever),
+a line, B Smitten toward A and C toward B (the M2 lampId-as-name `inject_nearby` lever),
 B and C Extrovert. Give A a triggered expression with cascade off and a short
 interval, and let it fire on its own: the app Test button also cascades to B,
 and B's copy then coalesces with the cascaded one and is never passed on. B
 logs `[fondness] roll <type> from <A> hop 1 p=75% fired` and plays it ~0.5 s
-later, then C logs `hop 2 p=37%` for B's copy; wait for a fire C plays.
+later (`fired` is the roll; a copy still coalesces if one from A is running), then C logs `hop 2 p=37%` for B's copy; wait for a fire C plays.
 `copy.set chainMaxHops 1` on B: B still copies, C logs nothing for it. With A
 firing every few seconds for 5 min, B logs one roll per 3 min for A, the rest
 `cooldown`. `copy.get` confirms the numbers; a reboot restores them. Turn home

@@ -52,14 +52,8 @@ inline constexpr uint8_t kFamiliarBoostMeets = 10;
 // Chance (0..100) of copying a frame `frameHops` from its origin, from the
 // mirror chance `basePct` and `meets` with its sender. 0 when the copy would
 // pass chainMaxHops. Pure.
-inline uint8_t copyChancePct(uint8_t basePct, uint8_t frameHops, uint8_t meets,
-                             const ContagionTuning& t) {
-  if (frameHops >= t.chainMaxHops) return 0;
-  const uint32_t counted = meets < kFamiliarBoostMeets ? meets : kFamiliarBoostMeets;
-  uint32_t pct = static_cast<uint32_t>(basePct) * (100 + counted * t.familiarBoostPct) / 100;
-  for (uint8_t h = 0; h < frameHops; ++h) pct = pct * t.chainHopPct / 100;
-  return pct > 100 ? 100 : static_cast<uint8_t>(pct);
-}
+uint8_t copyChancePct(uint8_t basePct, uint8_t frameHops, uint8_t meets,
+                      const ContagionTuning& t);
 
 // Sets ContagionTuning field `key` (its member name) to `value`. False, with
 // `t` unchanged, for an unknown key or a value out of range.

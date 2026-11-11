@@ -73,6 +73,7 @@ constexpr ExpressionDescriptor kProbe{.id = "probe", .name = "Probe", .make = &m
 const ExpressionDescriptor& Probe::descriptor() const { return kProbe; }
 
 const uint8_t kPeerMac[6] = {1, 2, 3, 4, 5, 6};
+const uint8_t kOtherPeerMac[6] = {1, 2, 3, 4, 5, 7};
 
 struct Rig {
   FrameBuffer shade;
@@ -106,7 +107,10 @@ struct Rig {
     inv.type = "probe";
     inv.target = TARGET_SHADE;
     inv.hops = hops;
-    for (int i = 0; i < 20; ++i) echo.onPeerExpression(kPeerMac, inv);
+    hear(inv);
+  }
+  void hear(const ExpressionInvocation& inv, const uint8_t* mac = kPeerMac) {
+    for (int i = 0; i < 20; ++i) echo.onPeerExpression(mac, inv);
     set_mock_millis(millis() + kMirrorDelayFloorMs + kMirrorJitterMs + 1);
     echo.tick(millis());
   }
@@ -176,6 +180,47 @@ void test_coalesced_copy_is_not_announced() {
   TEST_ASSERT_EQUAL_size_t(1, s_events.size());
 }
 
+// An origin frame that fits but has no room for `hp` is copied and played,
+// and the copy is not announced.
+void test_copy_without_room_for_hp_is_not_announced() {
+  ExpressionInvocation inv;
+  inv.type = "probe";
+  inv.target = TARGET_SHADE;
+  std::string json;
+  bool found = false;
+  for (size_t k = 0; k < kExpressionParamKeyCount && !found; ++k) {
+    if (std::strncmp(kExpressionParamKeys[k], "cascade", 7) == 0) continue;
+    for (uint32_t v = 1; v <= 1000000000u && !found; v *= 10) {
+      inv.parameters.set(kExpressionParamKeys[k], v);
+      json.clear();
+      serializeInvocation(inv, json);
+      found = json.size() + 7 > lamp_protocol::EVENT_MAX_PAYLOAD &&
+              json.size() <= lamp_protocol::EVENT_MAX_PAYLOAD;
+      if (json.size() > lamp_protocol::EVENT_MAX_PAYLOAD) {
+        inv.parameters.erase(kExpressionParamKeys[k]);
+        break;
+      }
+    }
+  }
+  TEST_ASSERT_TRUE(found);
+  Rig r;
+  r.hear(inv);
+  TEST_ASSERT_EQUAL_size_t(1, s_registered.size());
+  TEST_ASSERT_EQUAL_size_t(0, s_events.size());
+}
+
+// An Introvert's booked copy holds every peer's copy until the floor ends.
+void test_introvert_floor_holds_across_peers() {
+  Rig r;
+  r.config.lamp.socialMode = SocialMode::Introvert;
+  ExpressionInvocation inv;
+  inv.type = "probe";
+  inv.target = TARGET_SHADE;
+  r.hear(inv, kPeerMac);
+  r.hear(inv, kOtherPeerMac);
+  TEST_ASSERT_EQUAL_size_t(1, s_registered.size());
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_copy_announces_one_hop_on);
@@ -183,5 +228,7 @@ int main() {
   RUN_TEST(test_frame_at_max_is_not_copied);
   RUN_TEST(test_max_one_never_announces);
   RUN_TEST(test_coalesced_copy_is_not_announced);
+  RUN_TEST(test_copy_without_room_for_hp_is_not_announced);
+  RUN_TEST(test_introvert_floor_holds_across_peers);
   return UNITY_END();
 }

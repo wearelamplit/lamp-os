@@ -58,19 +58,19 @@ ExpressionParams parametersWithoutCascadeKeys(
     const ExpressionParams& parameters);
 
 // Serialize `inv` to JSON for MSG_COMMAND and MSG_EVENT payloads. `out` is
-// set to the serialized string. Always succeeds. `hp` is written only when
-// `hops` is nonzero. `colors` is packed hex
+// set to the serialized string. Always succeeds. `colors` is packed hex
 // ("rrggbbww" per color, no '#', no separators); the key is omitted when
-// empty. Packed keeps the worst-case config inside COMMAND_MAX_PAYLOAD.
+// empty. Packed keeps the worst-case config inside COMMAND_MAX_PAYLOAD. `hp`
+// is written only when `hops` is nonzero.
 void serializeInvocation(const ExpressionInvocation& inv, std::string& out);
 
 
 // Parse an ExpressionInvocation payload (an ArduinoJson object extracted from
 // an incoming MSG_COMMAND or MSG_EVENT frame) into `out`. Returns false if
-// `type` is missing or empty. Unknown keys are ignored. A missing or
-// non-numeric `hp` reads as hop 0; a larger one clamps to 255. A malformed `colors`
-// string (bad length or non-hex char) is dropped whole; the invocation still
-// parses and fires with the configured palette.
+// `type` is missing or empty. Unknown keys are ignored. An `hp` that is a
+// uint32 clamps to 255; anything else, or none, reads as hop 0. A malformed
+// `colors` string (bad length or non-hex char) is dropped whole; the
+// invocation still parses and fires with the configured palette.
 bool parseInvocation(JsonObjectConst doc, ExpressionInvocation& out);
 
 }  // namespace lamp

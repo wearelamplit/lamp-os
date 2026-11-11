@@ -16,6 +16,7 @@
 #include "components/network/transport/espnow_link.hpp"
 #include "esp_system.h"
 
+#include <cctype>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -391,7 +392,7 @@ void runSerialCommand(char* line, size_t len) {
     if (sep) *sep = '\0';
     char* end = nullptr;
     const unsigned long value = sep ? strtoul(sep + 1, &end, 10) : 0;
-    if (!sep || end == sep + 1 || *end != '\0' ||
+    if (!sep || !isdigit(static_cast<unsigned char>(sep[1])) || *end != '\0' ||
         !lamp::setContagionTuning(socialEchoObserver.tuning(), key, value)) {
       Serial.println("[cmd] err copy.set");
       return;

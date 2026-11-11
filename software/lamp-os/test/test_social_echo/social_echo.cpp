@@ -309,6 +309,32 @@ void test_peer_quiet_for_a_wrap_rolls_again() {
                     c.decide(mac, 5, SocialMode::Ambivert, 0, rolledMs + 10, 100, 0).outcome);
 }
 
+// A booked Introvert copy starts the floor: another peer's winning roll is
+// held until it ends.
+void test_booked_copy_starts_the_introvert_floor() {
+  uint8_t a[6], b[6], c[6];
+  macFor(20, a);
+  macFor(21, b);
+  macFor(22, c);
+  Copycat unbooked;
+  TEST_ASSERT_EQUAL(CopyOutcome::Fire,
+                    unbooked.decide(a, 5, SocialMode::Introvert, 0, 1000, 1, 0).outcome);
+  TEST_ASSERT_EQUAL(CopyOutcome::Fire,
+                    unbooked.decide(b, 5, SocialMode::Introvert, 0, 2000, 1, 0).outcome);
+
+  Copycat booked;
+  TEST_ASSERT_EQUAL(CopyOutcome::Fire,
+                    booked.decide(a, 5, SocialMode::Introvert, 0, 1000, 1, 0).outcome);
+  booked.booked(1000);
+  TEST_ASSERT_EQUAL(CopyOutcome::Skip,
+                    booked.decide(b, 5, SocialMode::Introvert, 0, 2000, 1, 0).outcome);
+  TEST_ASSERT_EQUAL(CopyOutcome::Fire,
+                    booked
+                        .decide(c, 5, SocialMode::Introvert, 0,
+                                1000 + lamp::kIntrovertMirrorCooldownMs, 1, 0)
+                        .outcome);
+}
+
 // 500 warm peers each fire once inside one window: at most kSlots roll.
 void test_crowd_of_500_rolls_at_most_the_table() {
   Copycat c;
@@ -382,6 +408,7 @@ int main() {
   RUN_TEST(test_copy_carries_one_more_hop);
   RUN_TEST(test_peer_firing_every_second_rolls_once_per_window);
   RUN_TEST(test_peer_quiet_for_a_wrap_rolls_again);
+  RUN_TEST(test_booked_copy_starts_the_introvert_floor);
   RUN_TEST(test_crowd_of_500_rolls_at_most_the_table);
   RUN_TEST(test_cold_peers_take_no_roll);
   RUN_TEST(test_set_tuning_checks_key_and_range);

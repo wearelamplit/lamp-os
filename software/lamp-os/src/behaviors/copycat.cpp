@@ -4,6 +4,15 @@
 
 namespace lamp {
 
+uint8_t copyChancePct(uint8_t basePct, uint8_t frameHops, uint8_t meets,
+                      const ContagionTuning& t) {
+  if (frameHops >= t.chainMaxHops) return 0;
+  const uint32_t counted = meets < kFamiliarBoostMeets ? meets : kFamiliarBoostMeets;
+  uint32_t pct = static_cast<uint32_t>(basePct) * (100 + counted * t.familiarBoostPct) / 100;
+  for (uint8_t h = 0; h < frameHops; ++h) pct = pct * t.chainHopPct / 100;
+  return pct > 100 ? 100 : static_cast<uint8_t>(pct);
+}
+
 bool setContagionTuning(ContagionTuning& t, const char* key, uint32_t value) {
   if (std::strcmp(key, "copyRollCooldownMs") == 0) {
     if (value > kMaxCopyRollCooldownMs) return false;
