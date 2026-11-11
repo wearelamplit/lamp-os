@@ -381,6 +381,29 @@ void test_engine_gate_covers_yawns() {
   TEST_ASSERT_FALSE(eventHasHops(s_events[0]));
 }
 
+// The yawn-back roll counts the store's meetings with the yawner. At a crowd
+// that damps a certain chance to 0 without them, ten meetings lift it to 1%,
+// so across 2000 yawns some yawn-back fires; with none, never.
+void test_yawn_back_counts_the_store_meetings() {
+  for (uint8_t meets : {0, 10}) {
+    Rig r;
+    r.config.lamp.socialMode = SocialMode::Ambivert;
+    r.echo.yawnTuning().backPct = {0, 0, 0, 0, 100};
+    r.echo.yawnTuning().yawnRollCooldownMs = 0;
+    r.echo.yawnTuning().yawnSelfFloorMs = 0;
+    r.echo.tuning().crowdHalf = 1;
+    r.echo.setNearbyCount([] { return static_cast<size_t>(101); });
+    for (uint8_t k = 0; k < meets; ++k) r.config.dispositions().meet(kPeerMac, 0, 0);
+    TEST_ASSERT_EQUAL_UINT8(meets, r.config.dispositions().peer(kPeerMac, 0).meets);
+    for (int i = 0; i < 2000; ++i) r.hear(yawnAt(0));
+    if (meets == 0) {
+      TEST_ASSERT_EQUAL_size_t(0, s_registered.size());
+    } else {
+      TEST_ASSERT_TRUE(s_registered.size() > 0);
+    }
+  }
+}
+
 // A yawn-back short of chainMaxHops announces itself one hop on.
 void test_yawn_back_announces_one_hop_on() {
   Rig r;
@@ -553,5 +576,6 @@ int main() {
   RUN_TEST(test_roll_stamp_stays_old_a_wrap_later);
   RUN_TEST(test_tuning_range_checks);
   RUN_TEST(test_engine_gate_covers_yawns);
+  RUN_TEST(test_yawn_back_counts_the_store_meetings);
   return UNITY_END();
 }

@@ -11,7 +11,6 @@
 namespace lamp {
 
 class Config;
-class DispositionStore;
 class ExpressionManager;
 class FondnessEngine;
 class MeshLink;
@@ -45,11 +44,6 @@ class SocialEchoObserver : public IExpressionObserver {
 
   ContagionTuning& tuning() { return copycat_.tuning; }
   YawnTuning& yawnTuning() { return yawns_.tuning; }
-
-  // The meetings with `mac` the copy odds count: the store's while the
-  // fondness engine is on, 0 while it is off.
-  static uint8_t boostMeets(const DispositionStore& store, const uint8_t mac[6],
-                            uint64_t nowMs);
 
   // Lamps in the near view, for crowd damping. Unset counts none.
   void setNearbyCount(size_t (*count)()) { nearbyCount_ = count; }

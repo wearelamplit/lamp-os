@@ -509,9 +509,8 @@ void runSerialCommand(char* line, size_t len) {
     return;
   }
 
-  // `<scope>.set <key> <value>`: `fond.set` reaches every social table, and
-  // `copy.set`, `reunion.set` and `yawn.set` their own. RAM only, so a reboot
-  // restores the defaults.
+  // `fond.set` reaches every social table, and `copy.set`, `reunion.set` and
+  // `yawn.set` their own. RAM only, so a reboot restores the defaults.
   for (const char* scope : {"fond", "copy", "reunion", "yawn"}) {
     const size_t n = strlen(scope);
     if (strncmp(line, scope, n) != 0 || strncmp(line + n, ".set ", 5) != 0) continue;

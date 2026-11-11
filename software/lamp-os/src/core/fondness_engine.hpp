@@ -92,9 +92,9 @@ class FondnessEngine {
   // COLOR_INFO stop 0 from `mac` against this lamp's base stop 0. Counts only
   // as the reply to the greet before it.
   void observeColour(const uint8_t mac[6], Color peerStop0, Color ownStop0, uint64_t nowMs);
-  // Restarts `mac`'s unseen clock. Pass only a peer this lamp has acknowledged
-  // (greeted, or consumed by home mode): one still waiting for its greeting
-  // would lose its reunion.
+  // Restarts `mac`'s unseen clock. Pass only a peer this lamp has greeted or
+  // home mode has consumed, since one still waiting for its greeting would
+  // lose its reunion.
   void seen(const uint8_t mac[6], uint64_t nowMs);
 
   size_t slotsInUse() const;

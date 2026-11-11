@@ -357,19 +357,28 @@ void test_engine_off_copies_as_1_3_3() {
   TEST_ASSERT_EQUAL_size_t(sent, s_events.size());
 }
 
-// The copy odds count the store's meetings only while the engine is on.
-void test_boost_meets_follow_the_switch() {
-  DispositionStore ds(100);
-  const uint8_t mac[6] = {9, 8, 7, 6, 5, 4};
-  for (int k = 0; k < 5; ++k) ds.meet(mac, 0, 0);
-  TEST_ASSERT_EQUAL_UINT8(5, SocialEchoObserver::boostMeets(ds, mac, 0));
-  ds.setEngineEnabled(false, 0);
-  TEST_ASSERT_EQUAL_UINT8(0, SocialEchoObserver::boostMeets(ds, mac, 0));
+// A copy plays without announcing when the engine stops tracking between its
+// booking and its play, and a plain mirror copy booked while the engine was
+// off stays unannounced when it comes back on before the copy plays.
+void test_engine_switch_between_booking_and_play_announces_nothing() {
+  ExpressionInvocation inv;
+  inv.type = "probe";
+  inv.target = TARGET_SHADE;
+  for (bool offAtBooking : {false, true}) {
+    set_mock_millis(10000);
+    Rig r;
+    r.config.dispositions().setEngineEnabled(!offAtBooking, 0);
+    for (int i = 0; i < 20; ++i) r.echo.onPeerExpression(kPeerMac, inv);
+    r.config.dispositions().setEngineEnabled(offAtBooking, 0);
+    set_mock_millis(millis() + kMirrorDelayFloorMs + kMirrorJitterMs + 1);
+    r.echo.tick(millis());
+    TEST_ASSERT_EQUAL_size_t(1, s_registered.size());
+    TEST_ASSERT_EQUAL_size_t(0, s_events.size());
+  }
 }
 
 int main() {
   UNITY_BEGIN();
-  RUN_TEST(test_boost_meets_follow_the_switch);
   RUN_TEST(test_copy_announces_one_hop_on);
   RUN_TEST(test_copy_at_max_plays_without_announcing);
   RUN_TEST(test_frame_at_max_is_not_copied);
@@ -382,5 +391,6 @@ int main() {
   RUN_TEST(test_nearby_count_damps_copies);
   RUN_TEST(test_play_stamp_stays_old_a_wrap_later);
   RUN_TEST(test_engine_off_copies_as_1_3_3);
+  RUN_TEST(test_engine_switch_between_booking_and_play_announces_nothing);
   return UNITY_END();
 }

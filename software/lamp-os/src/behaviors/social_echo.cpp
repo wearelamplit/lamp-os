@@ -51,11 +51,6 @@ bool SocialEchoObserver::yawnedRecently(uint32_t nowMs) const {
          manager_.playedWithin(kYawnDescriptorData.id, yawns_.tuning.yawnSelfFloorMs, nowMs);
 }
 
-uint8_t SocialEchoObserver::boostMeets(const DispositionStore& store, const uint8_t mac[6],
-                                       uint64_t nowMs) {
-  return store.engineEnabled() ? store.peer(mac, nowMs).meets : 0;
-}
-
 void SocialEchoObserver::onPeerExpression(const uint8_t sourceMac[6],
                                           const ExpressionInvocation& inv) {
   if (manager_.inHomeMode()) return;
@@ -77,7 +72,7 @@ void SocialEchoObserver::onPeerExpression(const uint8_t sourceMac[6],
     catchYawn(sourceMac, inv, now);
     return;
   }
-  const uint8_t meets = boostMeets(config_.dispositions(), sourceMac, uptimeMs());
+  const uint8_t meets = config_.dispositions().peer(sourceMac, uptimeMs()).meets;
   const CopyDecision d = copycat_.decide(
       sourceMac, config_.getDisposition(sourceMac), config_.lamp.socialMode, inv.hops, now,
       static_cast<uint8_t>(rng_.range(1, 100)), rng_.range(0, kMirrorJitterMs),
@@ -100,7 +95,7 @@ void SocialEchoObserver::catchYawn(const uint8_t sourceMac[6], const ExpressionI
                                    uint32_t nowMs) {
   const CopyDecision d = yawns_.catchYawn(
       sourceMac, config_.getDisposition(sourceMac), config_.lamp.socialMode, inv.hops,
-      boostMeets(config_.dispositions(), sourceMac, uptimeMs()), nowMs,
+      config_.dispositions().peer(sourceMac, uptimeMs()).meets, nowMs,
       static_cast<uint8_t>(rng_.range(1, 100)), rng_.range(0, kMirrorJitterMs),
       nearbyCount_ ? nearbyCount_() : 0,
       yawnedRecently(nowMs), copycat_.tuning);
