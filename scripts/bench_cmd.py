@@ -13,6 +13,8 @@ stable firmware ignores serial input). Command grammar:
     expr.set <json>                                     apply expressions section JSON
                                                         (array of entries, or a single
                                                         {"op":...} object)
+    yawn [dur=4500 depth=35 lift=8 hold=500 rec=1800    play one yawn now (local only;
+          warm=0.3 lag=200 surf=both]                   absent keys take defaults)
 
 Every command is ACKed on the lamp's serial output as '[cmd] ok ...' or
 '[cmd] err <reason>'.
