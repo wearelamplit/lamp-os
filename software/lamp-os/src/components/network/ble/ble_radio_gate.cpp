@@ -48,7 +48,7 @@ void BleRadioGate::openScanWindow() {
 
 void BleRadioGate::closeScanWindow() {
   std::lock_guard<std::mutex> lock(mu_);
-  if (otaPaused_ || clientHoldsScan_) radio_.stopScan();
+  if (clientHoldsScan_) radio_.stopScan();
 }
 
 void BleRadioGate::restartAdvertising() {
@@ -56,6 +56,11 @@ void BleRadioGate::restartAdvertising() {
   if (otaPaused_) return;
   radio_.stopAdvertising();
   radio_.startAdvertising();
+}
+
+void BleRadioGate::enforcePause() {
+  std::lock_guard<std::mutex> lock(mu_);
+  if (otaPaused_ && radio_.isAdvertising()) radio_.stopAdvertising();
 }
 
 }  // namespace ble_control

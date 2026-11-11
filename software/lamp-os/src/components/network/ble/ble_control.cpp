@@ -117,6 +117,9 @@ class NimBleRadio : public BleRadio {
   void stopScan() override {
     if (NimBLEDevice::isInitialized()) NimBLEDevice::getScan()->stop();
   }
+  bool isAdvertising() override {
+    return NimBLEDevice::isInitialized() && NimBLEDevice::getAdvertising()->isAdvertising();
+  }
 };
 static NimBleRadio           s_nimBleRadio;
 static BleRadioGate          s_radioGate{s_nimBleRadio};
@@ -1219,6 +1222,7 @@ void tick() {
     lamp::lampRoster.retireStaleWisp(s_lastRetireMs);
   }
   if (!s_running || !s_config) return;
+  s_radioGate.enforcePause();
 
   // Continuous scan means onScanEnd rarely fires, so prune here at ~1 Hz to
   // age out silent roster peers.

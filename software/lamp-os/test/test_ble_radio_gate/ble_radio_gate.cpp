@@ -15,7 +15,9 @@
 using ble_control::BleRadio;
 using ble_control::BleRadioGate;
 
-// Counts a start while already running, NimBLE's "already active" no-op.
+// Counts a start while already running, NimBLE's "already active" no-op. Each
+// hook fires inside the call before it takes effect, so a test can hold a call
+// in flight.
 class FakeRadio : public BleRadio {
  public:
   bool advertising = false;
@@ -24,21 +26,28 @@ class FakeRadio : public BleRadio {
   int  scanStarts  = 0;
   int  redundantAdvStarts  = 0;
   int  redundantScanStarts = 0;
+  std::function<void()> onAdvStart;
   std::function<void()> onScanStart;
+  std::function<void()> onIsAdvertising;
 
   void startAdvertising() override {
+    if (onAdvStart) onAdvStart();
     ++advStarts;
     if (advertising) ++redundantAdvStarts;
     advertising = true;
   }
   void stopAdvertising() override { advertising = false; }
   void startScan() override {
+    if (onScanStart) onScanStart();
     ++scanStarts;
     if (scanning) ++redundantScanStarts;
     scanning = true;
-    if (onScanStart) onScanStart();
   }
   void stopScan() override { scanning = false; }
+  bool isAdvertising() override {
+    if (onIsAdvertising) onIsAdvertising();
+    return advertising;
+  }
 
   void clearCounts() { advStarts = scanStarts = redundantAdvStarts = redundantScanStarts = 0; }
 };
@@ -204,43 +213,121 @@ void test_social_window_closes_only_under_a_hold() {
   TEST_ASSERT_FALSE(r.scanning);
 }
 
-// A pause taken on another task while a disconnect is mid-restart must still
-// hold once both finish. The disconnect stalls inside its scan start; a pause
-// that slips into that stall would leave advertising running under it.
+// Runs `inFlight` on a second thread and holds it inside the radio call `hook`
+// fires from, runs `racer` on this thread meanwhile, then lets it finish. The
+// gate serializes its calls, so `racer` blocks until `inFlight` is done; were
+// it to slip in, the final state shows the hold undone.
+static void race(std::function<void()>& hook, const std::function<void()>& inFlight,
+                 const std::function<void()>& racer) {
+  std::mutex m;
+  std::condition_variable cv;
+  bool stalled = false;
+  bool racerDone = false;
+  hook = [&] {
+    std::unique_lock<std::mutex> lk(m);
+    if (stalled) return;
+    stalled = true;
+    cv.notify_all();
+    cv.wait_for(lk, std::chrono::milliseconds(100), [&] { return racerDone; });
+  };
+  std::thread t(inFlight);
+  {
+    std::unique_lock<std::mutex> lk(m);
+    cv.wait(lk, [&] { return stalled; });
+  }
+  racer();
+  {
+    std::lock_guard<std::mutex> lk(m);
+    racerDone = true;
+  }
+  cv.notify_all();
+  t.join();
+  hook = nullptr;
+}
+
 void test_pause_racing_a_disconnect_still_holds() {
   FakeRadio r;
   BleRadioGate g(r);
   boot(r);
   g.clientConnected();
   r.advertising = false;
-
-  std::mutex m;
-  std::condition_variable cv;
-  bool stalled = false;
-  bool pauseReturned = false;
-  r.onScanStart = [&] {
-    std::unique_lock<std::mutex> lk(m);
-    stalled = true;
-    cv.notify_all();
-    cv.wait_for(lk, std::chrono::milliseconds(100), [&] { return pauseReturned; });
-  };
-
-  std::thread host([&] { g.clientDisconnected(); });
-  {
-    std::unique_lock<std::mutex> lk(m);
-    cv.wait(lk, [&] { return stalled; });
-  }
-  g.pauseForOta();
-  {
-    std::lock_guard<std::mutex> lk(m);
-    pauseReturned = true;
-  }
-  cv.notify_all();
-  host.join();
-
+  race(r.onScanStart, [&] { g.clientDisconnected(); }, [&] { g.pauseForOta(); });
   TEST_ASSERT_TRUE(g.otaPaused());
   TEST_ASSERT_FALSE(r.advertising);
   TEST_ASSERT_FALSE(r.scanning);
+}
+
+void test_pause_racing_a_scan_end_still_holds() {
+  FakeRadio r;
+  BleRadioGate g(r);
+  race(r.onScanStart, [&] { g.scanEnded(); }, [&] { g.pauseForOta(); });
+  TEST_ASSERT_TRUE(g.otaPaused());
+  TEST_ASSERT_FALSE(r.scanning);
+}
+
+void test_pause_racing_a_social_window_still_holds() {
+  FakeRadio r;
+  BleRadioGate g(r);
+  g.clientConnected();
+  race(r.onScanStart, [&] { g.openScanWindow(); }, [&] { g.pauseForOta(); });
+  TEST_ASSERT_TRUE(g.otaPaused());
+  TEST_ASSERT_FALSE(r.scanning);
+}
+
+void test_pause_racing_an_advertising_restart_still_holds() {
+  FakeRadio r;
+  BleRadioGate g(r);
+  boot(r);
+  race(r.onAdvStart, [&] { g.restartAdvertising(); }, [&] { g.pauseForOta(); });
+  TEST_ASSERT_TRUE(g.otaPaused());
+  TEST_ASSERT_FALSE(r.advertising);
+}
+
+void test_connect_racing_a_resume_keeps_the_client_scan_hold() {
+  FakeRadio r;
+  BleRadioGate g(r);
+  boot(r);
+  g.pauseForOta();
+  race(r.onScanStart, [&] { g.resumeAfterOta(); }, [&] { g.clientConnected(); });
+  TEST_ASSERT_FALSE(r.scanning);
+  g.scanEnded();
+  TEST_ASSERT_FALSE(r.scanning);
+}
+
+void test_enforce_stops_advertising_nimble_restarts_under_the_pause() {
+  FakeRadio r;
+  BleRadioGate g(r);
+  boot(r);
+  g.pauseForOta();
+  r.advertising = true;  // host reset re-sync restarts it inside NimBLE
+  g.enforcePause();
+  TEST_ASSERT_FALSE(r.advertising);
+  TEST_ASSERT_TRUE(g.resumeAfterOta());
+  TEST_ASSERT_EQUAL_INT(1, r.advStarts);
+  TEST_ASSERT_EQUAL_INT(0, r.redundantAdvStarts);
+}
+
+void test_enforce_leaves_advertising_alone_outside_the_pause() {
+  FakeRadio r;
+  BleRadioGate g(r);
+  boot(r);
+  g.enforcePause();
+  TEST_ASSERT_TRUE(r.advertising);
+  g.pauseForOta();
+  g.resumeAfterOta();
+  g.enforcePause();
+  TEST_ASSERT_TRUE(r.advertising);
+}
+
+void test_resume_racing_enforce_leaves_advertising_on() {
+  FakeRadio r;
+  BleRadioGate g(r);
+  boot(r);
+  g.pauseForOta();
+  r.advertising = true;
+  race(r.onIsAdvertising, [&] { g.enforcePause(); }, [&] { g.resumeAfterOta(); });
+  TEST_ASSERT_FALSE(g.otaPaused());
+  TEST_ASSERT_TRUE(r.advertising);
 }
 
 int main(int argc, char** argv) {
@@ -260,5 +347,12 @@ int main(int argc, char** argv) {
   RUN_TEST(test_scan_end_restarts_only_without_a_hold);
   RUN_TEST(test_social_window_closes_only_under_a_hold);
   RUN_TEST(test_pause_racing_a_disconnect_still_holds);
+  RUN_TEST(test_pause_racing_a_scan_end_still_holds);
+  RUN_TEST(test_pause_racing_a_social_window_still_holds);
+  RUN_TEST(test_pause_racing_an_advertising_restart_still_holds);
+  RUN_TEST(test_connect_racing_a_resume_keeps_the_client_scan_hold);
+  RUN_TEST(test_enforce_stops_advertising_nimble_restarts_under_the_pause);
+  RUN_TEST(test_enforce_leaves_advertising_alone_outside_the_pause);
+  RUN_TEST(test_resume_racing_enforce_leaves_advertising_on);
   return UNITY_END();
 }
