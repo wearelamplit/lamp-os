@@ -60,7 +60,7 @@ Model fullModel() {
   m.lamp.setup = true;
   m.lamp.apBootMinutes = 7;
   m.base.byteOrder = "GRBW";
-  m.base.segments = {{"Base \"main\"", 35, {Color(1, 2, 3, 4), Color(255, 254, 0, 9)}},
+  m.base.segments = {{"Base \"main\"", 35, {Color(1, 2, 3, 4), Color(255, 254, 0, 9)}, 27},
                      {"Lions", 18, {Color(0x30, 0x07, 0x83, 0)}}};
   m.shade.segments = {{"Shade", 38, {Color(0xab, 0xcd, 0xef, 0x10)}}};
   m.homeMode.ssid = "caf\xc3\xa9 \b\f\r";
@@ -86,8 +86,8 @@ constexpr const char* kFullStoredJson =
     "{\"lamp\":{\"name\":\"jacko\",\"brightness\":255,\"password\":\"p\\\"a\\\\s\\ns\\tw\x01""r"
     "d/\",\"setup\":true,\"named\":false,\"advancedEnabled\":false,\"webappEnabled\":true,\"apB"
     "ootMinutes\":7,\"brightnessCeiling\":170,\"socialMode\":1},\"base\":{\"byteOrder\":\"GRBW\""
-    ",\"colorsEditable\":true,\"segments\":[{\"name\":\"Base \\\"main\\\"\",\"px\":35,\"colors\""
-    ":[\"#01020304\",\"#fffe0009\"]},{\"name\":\"Lions\",\"px\":18,\"colors\":[\"#30078300\"]}]"
+    ",\"colorsEditable\":true,\"segments\":[{\"name\":\"Base \\\"main\\\"\",\"px\":35,\"pin\":27,"
+    "\"colors\":[\"#01020304\",\"#fffe0009\"]},{\"name\":\"Lions\",\"px\":18,\"colors\":[\"#30078300\"]}]"
     "},\"shade\":{\"colorsEditable\":true,\"segments\":[{\"name\":\"Shade\",\"px\":38,\"colors\""
     ":[\"#abcdef10\"]}]},\"homeMode\":{\"ssid\":\"caf\xc3""\xa9"" \\b\\f\\r\",\"brightness\":60"
     ",\"enabled\":true,\"networkBound\":false,\"socialDisabled\":true,\"disabledExpressionTypes"

@@ -117,8 +117,8 @@ Two properties make it lethal:
    page): the expression records and knockout are written from stack buffers, and the
    JSON streams through `JsonWriter` (`util/json_writer.hpp`, compact JSON
    straight into a fixed buffer, byte-identical to ArduinoJson) into a
-   1792-byte buffer reserved in .bss (`kMaxStoredCfgJsonLen`, above both a
-   whole config's 1759-byte ceiling and the split rest's 1746-byte worst case
+   1824-byte buffer reserved in .bss (`kMaxStoredCfgJsonLen`, above both a
+   whole config's 1759-byte ceiling and the split rest's 1818-byte worst case
    with every free-text field fully escaped and every number at its widest).
    A whole web document is parsed once, on the loop: the web PUT gathers the
    body (at most 16 KB, `kMaxSettingsBody`; a lamp at every cap sends about
@@ -216,7 +216,7 @@ Two placement rules make the entry count alone overstate the room
 | `x0`..`x20` | one expression each, compact record (`encodeExpression`) | 121 B | 21 x 6 = 126 |
 | `xn` | expression count, a decimal string | 2 B | 2 |
 | `ko` | knockout level per pixel | 255 B | 10 |
-| `cfgb` or `cfgc` | base, shade and home mode as JSON (`writeStoredJson` without the lamp section) | 1746 B fully escaped | 57 |
+| `cfgb` or `cfgc` | base, shade and home mode as JSON (`writeStoredJson` without the lamp section) | 1818 B fully escaped | 59 |
 | `cfg` | the lamp section as a JSON string, the one an older release reads | 376 B fully escaped | 13 |
 | `cfgl` | the lamp section, staged while `cfg` is replaced | 376 B | 14 while it exists |
 | `disp` | dispositions, `[mac:6][value:1]` per peer | 701 B | 24 |
@@ -246,14 +246,14 @@ The arithmetic, every case with at least 29 entries to spare
   or staged blob 57 = 254. The bound for 56 entries is 4 x 70 + 3 = 283:
   29 spare.
 - **Lamp string.** Live beside every split key at its cap: 171 + 2 + 24 +
-  126 + 2 + 10 + 57 + its old copy or `cfgl` 14 = 406. The bound for 13 is
-  455: 49 spare.
+  126 + 2 + 10 + 59 + its old copy or `cfgl` 14 = 408. The bound for 13 is
+  455: 47 spare.
 - **Small blobs.** The largest is a dispositions blob just under 400 bytes,
-  14 entries, at 405 live: bound 451, 46 spare. Records (6), `ko` (10) and
+  14 entries, at 407 live: bound 451, 44 spare. Records (6), `ko` (10) and
   `cfgl` (14) are no larger.
-- **Entries.** The split store holds 405; rewriting its largest blob, PHY
-  calibration (62) or the rest (57), peaks at 467 of 504. Switching from
-  whole peaks at 462 (every split key, the staged lamp section and the new
+- **Entries.** The split store holds 407; rewriting its largest blob, PHY
+  calibration (62) or the rest (59), peaks at 469 of 504. Switching from
+  whole peaks at 464 (every split key, the staged lamp section and the new
   rest blob beside the whole string), and so does staging a whole config
   beside the split store.
 - **The first save after an update.** An older release's `cfg` string can
@@ -284,22 +284,28 @@ expression reads is dropped at parse.
 
 The caps that bound the stored JSON: 8 colours per surface segment (the app
 offers 6), 4 segments per role (variants define at most 3), 16-byte segment
-names, a 32-byte lamp name, a 64-byte password, a 32-byte SSID, a byte order
-the strip driver knows, 8 home-mode type names (type ids only). The BLE
-settings path and the web PUT both refuse an over-long password or SSID (BLE
-logs the refusal, the web answers 400), and both ignore an unknown byte
-order; `fromJson` also bounds what it loads (truncating a password or SSID
-stored before the cap; the BOOT button clears a password), so no field can
-make every save fail. A repeated (type, target) in the stored JSON loads
-once, the first kept, as the records do.
+names, a segment pin of at most two digits (`isStripDataPin`), a 32-byte lamp
+name, a 64-byte password, a 32-byte SSID, a byte order the strip driver knows,
+8 home-mode type names (type ids only). The BLE settings path and the web PUT
+both refuse an over-long password or SSID (BLE logs the refusal, the web
+answers 400), and both ignore an unknown byte order; `fromJson` also bounds
+what it loads (truncating a password or SSID stored before the cap; the BOOT
+button clears a password), so no field can make every save fail. A repeated
+(type, target) in the stored JSON loads once, the first kept, as the records
+do.
+
+Release 1.3.3 and older read a rest blob into a 1792-byte buffer, so a
+lamp flashed back to one from a rest over that (reached only with pins set
+near the other caps) serves defaults for the rest and skips the first-boot
+save; its next save writes those defaults over the stored rest.
 
 A role's `rotate` (at most 49 B, `,"rotate":{"on":false,"periodS":120,"dir":"down"}`)
 is stored only on a single-segment role and only when it differs from that
 role's default, whatever the variant's `rotationSupported` says. A one-segment
 role is at least 480 B shorter than the four-segment role the worst case
 assumes, so the widest rest that carries `rotate` (one four-segment role, one
-single-segment role with `rotate` at its widest) is 1316 B fully escaped,
-with its NUL, under the 1746 B worst case, so the caps and NVS figures above
+single-segment role with `rotate` at its widest) is 1361 B fully escaped,
+with its NUL, under the 1818 B worst case, so the caps and NVS figures above
 stand. `test_config_records` prints it as `[budget] rotating rest` and pins it
 below the worst case.
 

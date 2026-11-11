@@ -44,6 +44,8 @@ export interface Segment {
   name?: string
   px: number
   colors: string[]
+  // Data GPIO override; absent = the lamp's built-in pin. Set from the app.
+  pin?: number
 }
 
 export interface BaseConfig {

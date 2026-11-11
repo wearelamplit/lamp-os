@@ -151,6 +151,27 @@ void main() {
     expect(named.displayName('Base'), 'Left rail');
   });
 
+  test('Segment parses pin, null when absent', () {
+    final withPin = Segment.fromJson(
+        {'name': 'Base', 'px': 38, 'pin': 27, 'colors': <String>[]});
+    final without =
+        Segment.fromJson({'name': 'Base', 'px': 38, 'colors': <String>[]});
+    expect(withPin.pin, 27);
+    expect(without.pin, isNull);
+    expect(withPin == without, isFalse);
+    expect(without.copyWith(pin: 27), withPin);
+  });
+
+  test('Segment effectivePin is the saved pin, else the built-in one', () {
+    Segment seg(Map<String, dynamic> pins) =>
+        Segment.fromJson({'name': 'Base', 'px': 1, 'colors': <String>[], ...pins});
+    expect(seg({'pin': 27, 'builtinPin': 14}).effectivePin, 27);
+    expect(seg({'pin': 0, 'builtinPin': 14}).effectivePin, 14);
+    expect(seg({'pin': 0, 'builtinPin': 0}).effectivePin, isNull);
+    expect(seg({}).effectivePin, isNull);
+    expect(seg({'pin': 0, 'builtinPin': 14}).copyWith(pin: 13).builtinPin, 14);
+  });
+
   test('Segment equality', () {
     const a = Segment(
       name: 'Shade',

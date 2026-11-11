@@ -202,10 +202,28 @@ class Segment {
     required this.name,
     required this.px,
     required this.colors,
+    this.pin,
+    this.builtinPin,
   });
   final String name;
   final int px;
   final List<LampColor> colors;
+
+  /// Data GPIO for this segment's strip; 0 = the lamp's built-in pin. Null
+  /// when the lamp doesn't report one, which means its firmware can't move a
+  /// strip.
+  final int? pin;
+
+  /// The pin the lamp's own wiring puts this segment's strip on. Null when the
+  /// lamp doesn't report one; 0 when no strip drives the segment.
+  final int? builtinPin;
+
+  /// The pin the strip runs on, or null when the lamp reports none.
+  int? get effectivePin => switch ((pin, builtinPin)) {
+        (final p?, _) when p != 0 => p,
+        (_, final b?) when b != 0 => b,
+        _ => null,
+      };
 
   /// [name], or [roleLabel] when a pre-segment-feature lamp migrated with no
   /// name (firmware config_codec's flat-colors fallback).
@@ -218,17 +236,22 @@ class Segment {
             .whereType<String>()
             .map(LampColor.fromHex)
             .toList(),
+        pin: (json['pin'] as num?)?.toInt(),
+        builtinPin: (json['builtinPin'] as num?)?.toInt(),
       );
 
   Segment copyWith({
     String? name,
     int? px,
     List<LampColor>? colors,
+    int? pin,
   }) =>
       Segment(
         name: name ?? this.name,
         px: px ?? this.px,
         colors: colors ?? this.colors,
+        pin: pin ?? this.pin,
+        builtinPin: builtinPin,
       );
 
   @override
@@ -237,10 +260,12 @@ class Segment {
       other is Segment &&
           name == other.name &&
           px == other.px &&
+          pin == other.pin &&
+          builtinPin == other.builtinPin &&
           _listEq.equals(colors, other.colors);
 
   @override
-  int get hashCode => Object.hash(name, px, _listEq.hash(colors));
+  int get hashCode => Object.hash(name, px, pin, builtinPin, _listEq.hash(colors));
 }
 
 /// CHAR_BASE_SECTION payload, see firmware Config::asBaseJson.

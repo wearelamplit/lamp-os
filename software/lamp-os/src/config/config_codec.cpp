@@ -9,6 +9,7 @@
 
 #include <lampos/led_types.hpp>
 
+#include "core/hw_config.hpp"
 #include "util/color.hpp"
 #include "util/heap_guard.hpp"
 #include "util/json_writer.hpp"
@@ -49,6 +50,10 @@ static void parseSegments(JsonObject node, std::vector<SegmentSettings>& segs,
     seg.name = std::string(segNode["name"] | "");
     truncateUtf8(seg.name, kMaxSegmentNameLen);
     seg.px = segNode["px"] | 0;
+    const int pin = segNode["pin"] | 0;
+    if (isStripDataPin(pin)) {
+      seg.pin = static_cast<uint8_t>(pin);
+    }
     for (JsonVariant c : segNode["colors"].as<JsonArray>()) {
       if (seg.colors.size() == kMaxSurfaceColors) break;
       seg.colors.push_back(hexStringToColor(c));
@@ -71,16 +76,26 @@ static void clampSumPx(std::vector<SegmentSettings>& segs) {
   }
 }
 
-static void writeSegments(JsonObject node,
-                          const std::vector<SegmentSettings>& segs) {
+static void writeSegmentsArray(JsonObject node, const std::vector<SegmentSettings>& segs,
+                               bool everyPin) {
   JsonArray arr = node["segments"].to<JsonArray>();
   for (const auto& s : segs) {
     JsonObject o = arr.add<JsonObject>();
     o["name"] = s.name;
     o["px"] = s.px;
+    if (everyPin || s.pin) o["pin"] = s.pin;
+    if (everyPin) o["builtinPin"] = s.builtinPin;
     JsonArray colors = o["colors"].to<JsonArray>();
     for (const auto& c : s.colors) colors.add(colorToHexString(c));
   }
+}
+
+static void writeSegments(JsonObject node, const std::vector<SegmentSettings>& segs) {
+  writeSegmentsArray(node, segs, false);
+}
+
+void writeSectionSegments(JsonObject section, const std::vector<SegmentSettings>& segs) {
+  writeSegmentsArray(section, segs, true);
 }
 
 static const char* rotationDirName(RotationDir dir) {
@@ -366,6 +381,10 @@ static void writeSegmentsJson(JsonWriter& w, const std::vector<SegmentSettings>&
     w.value(seg.name.c_str());
     w.key("px");
     w.value(static_cast<uint32_t>(seg.px));
+    if (seg.pin) {
+      w.key("pin");
+      w.value(static_cast<uint32_t>(seg.pin));
+    }
     w.key("colors");
     w.beginArray();
     for (const auto& c : seg.colors) w.value(colorToHexString(c).c_str());

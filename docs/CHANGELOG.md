@@ -7,6 +7,16 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 
 ## Unreleased
 
+### Added
+- **Move a strip to another data pin from the app.** With advanced mode on,
+  LED setup shows a data pin row for each strip: pick a GPIO, tap Update, and
+  the lamp restarts driving that strip from the new pin. "Built-in (GPIO 12)"
+  puts it back. Handy when a board has a dead pin and the strip's wire moves
+  to another one. Pins other strips run on are greyed out in the list. A pin
+  the lamp still can't use (a button or touch pad's) leaves the strip on its
+  own pin, and the app says that pin didn't take and why. Lamps on older
+  firmware don't show the row.
+
 ### Fixed
 - **Mesh updates reach lamps after the sending lamp restarts.** A lamp that
   restarted kept offering its firmware to older lamps nearby, and they

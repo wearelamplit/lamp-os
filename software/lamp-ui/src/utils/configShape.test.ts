@@ -65,6 +65,15 @@ describe('segmentsFromPalette', () => {
     expect(out[0].colors).toEqual(['#ff000000'])
   })
 
+  it('keeps a saved data pin on every segment', () => {
+    const segs = [
+      { name: 'a', px: 10, colors: ['#00000000'], pin: 27 },
+      { name: 'b', px: 5, colors: ['#00000000'] },
+    ]
+    const out = segmentsFromPalette(segs, ['#ff000000'], 20)
+    expect(out.map((s) => s.pin)).toEqual([27, undefined])
+  })
+
   it('leaves px untouched when not provided', () => {
     const out = segmentsFromPalette([{ px: 7, colors: [] }], ['#ff000000'])
     expect(out[0].px).toBe(7)

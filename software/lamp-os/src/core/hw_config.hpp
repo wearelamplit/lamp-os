@@ -90,4 +90,85 @@ inline bool validateHwConfig(const HwConfig& hw) {
   return true;
 }
 
+// True for an ESP32-WROOM GPIO that can drive a strip's data line. Excludes
+// GPIO 0 (boot mode), 1 and 3 (the UART0 console), 6-11 (the SPI flash bus),
+// 34-39 (input-only), and numbers with no pad.
+inline bool isStripDataPin(int pin) {
+  switch (pin) {
+    case 2: case 4: case 5:
+    case 12: case 13: case 14: case 15: case 16: case 17: case 18: case 19:
+    case 21: case 22: case 23: case 25: case 26: case 27: case 32: case 33:
+      return true;
+    default:
+      return false;
+  }
+}
+
+// Effective data pin per hw.strips entry. `requested[i]` (0 = none) replaces
+// strips[i].pin when it is a strip data pin no other strip or input ends up
+// on; anything else keeps the StripSpec pin, so a bad saved value can't stop
+// a lamp from booting.
+inline std::vector<uint8_t> resolveStripPins(const HwConfig& hw,
+                                             const std::vector<uint8_t>& requested) {
+  std::vector<uint8_t> pins(hw.strips.size());
+  for (size_t i = 0; i < pins.size(); ++i) {
+    const uint8_t want = i < requested.size() ? requested[i] : 0;
+    pins[i] = isStripDataPin(want) ? want : hw.strips[i].pin;
+  }
+  // Every override in a clash reverts together, so no strip wins a contested
+  // pin. A revert can only collide with another override (StripSpec pins are
+  // distinct), so repeat until stable.
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    std::vector<bool> revert(pins.size(), false);
+    for (size_t i = 0; i < pins.size(); ++i) {
+      if (pins[i] == hw.strips[i].pin) continue;
+      for (size_t j = 0; j < pins.size(); ++j) {
+        if (j != i && pins[j] == pins[i]) revert[i] = true;
+      }
+      for (const InputSpec& in : hw.inputs) {
+        if (in.pin == pins[i]) revert[i] = true;
+      }
+    }
+    for (size_t i = 0; i < pins.size(); ++i) {
+      if (revert[i]) {
+        pins[i] = hw.strips[i].pin;
+        changed = true;
+      }
+    }
+  }
+  return pins;
+}
+
+// Effective data pin per hw.strips entry from the role segments' saved pins.
+// A role's segments pair with its strips in declaration order. A saved pin
+// that does not take effect, or sits on a segment with no strip, is cleared,
+// so every segment reports the pin in use. Each segment's builtinPin is set to
+// its strip's StripSpec pin, 0 with no strip.
+template <typename Seg>
+std::vector<uint8_t> applySegmentPins(const HwConfig& hw, std::vector<Seg>& shade,
+                                      std::vector<Seg>& base) {
+  std::vector<Seg*> paired(hw.strips.size(), nullptr);
+  std::vector<uint8_t> requested(hw.strips.size(), 0);
+  size_t shadeK = 0, baseK = 0;
+  for (size_t i = 0; i < hw.strips.size(); ++i) {
+    const bool isShade = hw.strips[i].role == Surface::Shade;
+    std::vector<Seg>& segs = isShade ? shade : base;
+    const size_t k = isShade ? shadeK++ : baseK++;
+    if (k < segs.size()) {
+      paired[i] = &segs[k];
+      requested[i] = segs[k].pin;
+      segs[k].builtinPin = hw.strips[i].pin;
+    }
+  }
+  for (size_t k = shadeK; k < shade.size(); ++k) shade[k].pin = shade[k].builtinPin = 0;
+  for (size_t k = baseK; k < base.size(); ++k) base[k].pin = base[k].builtinPin = 0;
+  const std::vector<uint8_t> pins = resolveStripPins(hw, requested);
+  for (size_t i = 0; i < pins.size(); ++i) {
+    if (paired[i] && paired[i]->pin != pins[i]) paired[i]->pin = 0;
+  }
+  return pins;
+}
+
 }  // namespace lamp

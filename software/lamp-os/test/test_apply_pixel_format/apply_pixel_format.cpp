@@ -25,6 +25,7 @@
 namespace lamp {
 struct Seg {
   uint8_t px = 0;
+  uint8_t pin = 0;
 };
 struct SurfaceMirror {
   std::vector<Seg> segments;
@@ -153,6 +154,42 @@ void test_byte_order_unrecognized_falls_back_to_default() {
                     static_cast<int>(order));
 }
 
+void test_segment_pin_applied_from_blob() {
+  lamp::SurfaceMirror s = twoSeg(16, 12);
+  JsonDocument doc = blob("{\"segments\":[{\"pin\":27},{\"px\":9}]}");
+  lamp::apply::pixelFormatLocal(doc.as<JsonObjectConst>(), s);
+  TEST_ASSERT_EQUAL_UINT8(27, s.segments[0].pin);
+  TEST_ASSERT_EQUAL_UINT8(16, s.segments[0].px);
+  TEST_ASSERT_EQUAL_UINT8(0, s.segments[1].pin);
+}
+
+void test_segment_pin_zero_restores_variant_pin() {
+  lamp::SurfaceMirror s = twoSeg(16, 12);
+  s.segments[0].pin = 27;
+  JsonDocument doc = blob("{\"segments\":[{\"pin\":0}]}");
+  lamp::apply::pixelFormatLocal(doc.as<JsonObjectConst>(), s);
+  TEST_ASSERT_EQUAL_UINT8(0, s.segments[0].pin);
+}
+
+void test_unusable_segment_pin_ignored() {
+  for (int bad : {1, 3, 6, 11, 34, 39, 40, 283, -1}) {
+    lamp::SurfaceMirror s = twoSeg(16, 12);
+    s.segments[0].pin = 27;
+    std::string json = "{\"segments\":[{\"pin\":" + std::to_string(bad) + "}]}";
+    JsonDocument doc = blob(json.c_str());
+    lamp::apply::pixelFormatLocal(doc.as<JsonObjectConst>(), s);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(27, s.segments[0].pin, json.c_str());
+  }
+}
+
+void test_absent_segment_pin_leaves_current() {
+  lamp::SurfaceMirror s = twoSeg(16, 12);
+  s.segments[0].pin = 27;
+  JsonDocument doc = blob("{\"segments\":[{\"px\":20}]}");
+  lamp::apply::pixelFormatLocal(doc.as<JsonObjectConst>(), s);
+  TEST_ASSERT_EQUAL_UINT8(27, s.segments[0].pin);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_segment_px_applied_from_blob);
@@ -160,6 +197,10 @@ int main(int, char**) {
   RUN_TEST(test_absent_px_on_segment_leaves_current);
   RUN_TEST(test_px_zero_ignored);
   RUN_TEST(test_extra_blob_segments_ignored);
+  RUN_TEST(test_segment_pin_applied_from_blob);
+  RUN_TEST(test_segment_pin_zero_restores_variant_pin);
+  RUN_TEST(test_unusable_segment_pin_ignored);
+  RUN_TEST(test_absent_segment_pin_leaves_current);
   RUN_TEST(test_byte_order_applied_from_blob);
   RUN_TEST(test_byte_order_applied_alongside_segments);
   RUN_TEST(test_byte_order_absent_leaves_current);

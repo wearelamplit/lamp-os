@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/routing/routes.dart';
 import '../../../core/theme/app_spacing.dart';
+import '../../../core/widgets/app_sheet.dart';
 import '../../../core/widgets/app_snackbar.dart';
 import '../../../core/widgets/back_button_leading.dart';
 import '../../../core/widgets/form_section.dart';
@@ -13,12 +14,16 @@ import '../../../core/widgets/nav_row.dart';
 import '../../../core/widgets/number_input_dialog.dart';
 import '../../control/application/advanced_session.dart';
 import '../../control/application/control_notifier.dart';
+import '../../control/application/control_state.dart';
+import '../../control/domain/sections.dart';
 import '../../control/application/settings_blob_too_large_exception.dart';
 import '../../firmware/presentation/firmware_push_lock.dart';
 
-/// Advanced LED settings: pixel count per segment + strip-type (LED byte
-/// order). Unlocked from the Info tab via the 5-tap secret on the lamplit
-/// wordmark, or directly toggleable from the Setup screen once advanced is on.
+/// Advanced LED settings: pixel count per segment, data pin per segment, and
+/// strip-type (LED byte order). Data pin and strip type show only in advanced
+/// mode, and data pin only for a lamp whose sections report a pin. Unlocked
+/// from the Info tab via the 5-tap secret on the lamplit wordmark, or directly
+/// toggleable from the Setup screen once advanced is on.
 ///
 /// Per-segment px is editable only on single-segment roles (standard); on
 /// multi-segment roles (snafu) the firmware owns the geometry via StripSpec.
@@ -71,6 +76,8 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
   String? _origShadeByteOrder;
   List<int>? _origBasePxs;
   String? _origBaseByteOrder;
+  List<int?>? _origShadePins;
+  List<int?>? _origBasePins;
 
   /// True from an Update tap until its write and the reboot reload after it
   /// end.
@@ -86,6 +93,14 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
       n.setSegmentPx('base', i, _origBasePxs![i]);
     }
     if (_origBaseByteOrder != null) n.setBaseByteOrder(_origBaseByteOrder!);
+    for (var i = 0; i < (_origShadePins?.length ?? 0); i++) {
+      final pin = _origShadePins![i];
+      if (pin != null) n.setSegmentPin('shade', i, pin);
+    }
+    for (var i = 0; i < (_origBasePins?.length ?? 0); i++) {
+      final pin = _origBasePins![i];
+      if (pin != null) n.setSegmentPin('base', i, pin);
+    }
     Navigator.of(context).pop();
   }
 
@@ -122,6 +137,8 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
             _origBasePxs ??= state.base.segments.isEmpty
                 ? [state.base.px]
                 : state.base.segments.map((s) => s.px).toList();
+            _origShadePins ??= state.shade.segments.map((s) => s.pin).toList();
+            _origBasePins ??= state.base.segments.map((s) => s.pin).toList();
 
             final notifier =
                 ref.read(controlNotifierProvider(widget.lampId).notifier);
@@ -138,12 +155,14 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
                   child: ListView(
                     padding: const EdgeInsets.all(AppSpace.lg),
                     children: [
-                      const InfoPanel(
+                      InfoPanel(
                         child: Text(
                           'Match these to the physical strips you built '
                           'into the lamp. Mis-matched LED count or '
                           'byte-order will show as wrong-coloured or '
-                          'partially-lit segments.',
+                          'partially-lit segments.'
+                          '${showByteOrder && _showsDataPin(state) ? ' A '
+                              'wrong data pin leaves that strip dark.' : ''}',
                         ),
                       ),
                       const SizedBox(height: AppSpace.lg),
@@ -180,6 +199,8 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
                               onChanged: (v) => notifier.setSegmentPx('shade', 0, v),
                             ),
                           if (showByteOrder)
+                            ..._dataPinRows(state, 'shade', notifier),
+                          if (showByteOrder)
                             _StripTypePicker(
                               selected: state.shade.byteOrder,
                               onChanged: notifier.setShadeByteOrder,
@@ -208,6 +229,8 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
                               readOnly: !ledCountsEditable,
                               onChanged: (v) => notifier.setSegmentPx('base', 0, v),
                             ),
+                          if (showByteOrder)
+                            ..._dataPinRows(state, 'base', notifier),
                           if (showByteOrder)
                             _StripTypePicker(
                               selected: state.base.byteOrder,
@@ -264,12 +287,12 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
                               if (mismatches.isEmpty) {
                                 Navigator.of(context).pop();
                               } else {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      "Save didn't take: ${mismatches.join(', ')}",
-                                    ),
-                                    duration: const Duration(seconds: 6),
+                                AppSnackbar.error(
+                                  context,
+                                  advancedLedsSaveMessage(
+                                    mismatches,
+                                    shadeStrips: state.shade.segments.length,
+                                    baseStrips: state.base.segments.length,
                                   ),
                                 );
                               }
@@ -299,7 +322,84 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
       ),
     );
   }
+  static bool _hasDataPin(Segment s) =>
+      s.pin != null && (s.builtinPin ?? 0) != 0;
+
+  static bool _showsDataPin(ControlState state) =>
+      [...state.shade.segments, ...state.base.segments].any(_hasDataPin);
+
+  /// A Data pin row per segment the lamp reports a pin and a strip for.
+  List<Widget> _dataPinRows(
+      ControlState state, String role, ControlNotifier notifier) {
+    final segs = role == 'shade' ? state.shade.segments : state.base.segments;
+    final roleLabel = role == 'shade' ? 'Shade' : 'Base';
+    return [
+      for (var i = 0; i < segs.length; i++)
+        if (_hasDataPin(segs[i]))
+          _DataPinRow(
+            label: segs.length > 1
+                ? '${segs[i].name} data pin'
+                : '$roleLabel data pin',
+            pin: segs[i].pin!,
+            builtinPin: segs[i].builtinPin!,
+            usedBy: _pinOwners(state, exceptRole: role, exceptIndex: i),
+            onChanged: (p) => notifier.setSegmentPin(role, i, p),
+          ),
+    ];
+  }
+
+  /// Every other strip's pin in use, named the way its rows are.
+  static Map<int, String> _pinOwners(ControlState state,
+      {required String exceptRole, required int exceptIndex}) {
+    final owners = <int, String>{};
+    for (final (role, label, segs) in [
+      ('shade', 'Shade strip', state.shade.segments),
+      ('base', 'Base strip', state.base.segments),
+    ]) {
+      for (var i = 0; i < segs.length; i++) {
+        if (role == exceptRole && i == exceptIndex) continue;
+        final pin = segs[i].effectivePin;
+        if (pin != null) owners[pin] = segs.length > 1 ? segs[i].name : label;
+      }
+    }
+    return owners;
+  }
 }
+
+/// The friendly message for the fields an Advanced LEDs save reported as not
+/// taken ([ControlNotifier.applyAdvancedLedsAndReboot]). The strip counts name
+/// a pin the way its rows are named.
+@visibleForTesting
+String advancedLedsSaveMessage(List<String> mismatches,
+    {required int shadeStrips, required int baseStrips}) {
+  final lines = <String>{};
+  for (final m in mismatches) {
+    final dot = m.indexOf('.');
+    final role = dot > 0 ? m.substring(0, dot) : '';
+    final field = dot > 0 ? m.substring(dot + 1) : '';
+    final label = switch (role) {
+      'shade' => 'Shade',
+      'base' => 'Base',
+      _ => null,
+    };
+    lines.add(switch ((label, field)) {
+      (final l?, 'pin') =>
+        "${_pinName(l, role == 'shade' ? shadeStrips : baseStrips)} didn't "
+            'take. It clashes with another strip, a button or a touch pad, so '
+            'the lamp kept its built-in pin.',
+      (final l?, 'byteOrder' || 'bpp') =>
+        "$l strip type didn't take, so the lamp kept its old one.",
+      (final l?, 'px') =>
+        "$l LED count didn't take, so the lamp kept its old count.",
+      _ => "Your lamp didn't come back after restarting. Bring your phone "
+          'closer and try again.',
+    });
+  }
+  return lines.join(' ');
+}
+
+String _pinName(String role, int strips) =>
+    strips > 1 ? 'A ${role.toLowerCase()} strip data pin' : '$role data pin';
 
 class _StripTypePicker extends StatelessWidget {
   const _StripTypePicker({required this.selected, required this.onChanged});
@@ -386,6 +486,101 @@ class _BatterySaverPicker extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+// GPIOs the firmware accepts for a strip's data line (isStripDataPin).
+const _stripDataPins = [
+  2, 4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33,
+];
+
+class _DataPinRow extends StatelessWidget {
+  const _DataPinRow({
+    required this.label,
+    required this.pin,
+    required this.builtinPin,
+    required this.usedBy,
+    required this.onChanged,
+  });
+  final String label;
+
+  /// The saved pin, 0 for the built-in one.
+  final int pin;
+  final int builtinPin;
+
+  /// Pins other strips run on, with the strip's name.
+  final Map<int, String> usedBy;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final current = pin == builtinPin ? 0 : pin;
+    String name(int p) => p == 0 ? 'Built-in (GPIO $builtinPin)' : 'GPIO $p';
+    return NavRow(
+      icon: Icons.settings_input_component,
+      title: label,
+      subtitle: name(current),
+      onTap: () => _pick(context, current, name),
+    );
+  }
+
+  Future<void> _pick(
+      BuildContext context, int current, String Function(int) name) async {
+    var changed = false;
+    final picked = await showAppSheet<int>(
+      context,
+      builder: (ctx) {
+        final colorScheme = Theme.of(ctx).colorScheme;
+        Widget option(int p) {
+          final owner = usedBy[p == 0 ? builtinPin : p];
+          return ListTile(
+            title: Text(name(p)),
+            subtitle: owner == null ? null : Text('Used by $owner'),
+            enabled: owner == null,
+            selected: p == current,
+            trailing: p == current
+                ? Icon(Icons.check, color: colorScheme.primary)
+                : null,
+            onTap: () {
+              changed = p != current;
+              Navigator.pop(ctx, p);
+            },
+          );
+        }
+
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(ctx).size.height * 0.7,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                      AppSpace.lg, AppSpace.md, AppSpace.lg, AppSpace.sm),
+                  child: Text(label,
+                      style: Theme.of(ctx).textTheme.titleMedium),
+                ),
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: [
+                      option(0),
+                      for (final p in _stripDataPins)
+                        if (p != builtinPin) option(p),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: AppSpace.sm),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    if (changed && picked != null) onChanged(picked);
   }
 }
 
