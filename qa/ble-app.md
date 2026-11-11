@@ -198,14 +198,19 @@ after the first tap and the lamp restarts once. A rename the lamp refuses
 is covered by setup_screen_test.dart.
 
 P11 — **a strip's data pin.** On a standard lamp with advanced mode off, LED
-setup shows no Data pin row. Turn advanced mode on: each strip shows Data
-pin, reading "Built-in pin". Set the base to a GPIO the base isn't wired to
-(say 27) and tap Update: the lamp restarts, the base stays dark, and the row
-reads GPIO 27. Set it back to Built-in pin and Update: the base lights again.
-Set the base to GPIO 12, the shade's pin, and Update: the lamp restarts with
-both strips lit as before, the app says the save didn't take, and the row
-reads Built-in pin. Save a colour from the lamp's web config with a pin set:
-the row still reads the pin afterwards.
+setup shows no data pin row. Turn advanced mode on: the Shade strip shows
+"Shade data pin" reading "Built-in (GPIO 12)" and the Base strip "Base data
+pin" reading "Built-in (GPIO 14)". Open the shade's list: GPIO 14 is greyed
+with "Used by Base strip", the built-in entry has the check, and the list
+stops short of the top of the screen and scrolls. Set the base to a GPIO the
+base isn't wired to (say 27) and tap Update: the lamp restarts, the base
+stays dark, and the row reads GPIO 27. Set it back to Built-in and Update:
+the base lights again. On a staff lamp, set the base to GPIO 19 (its button)
+and Update: both strips stay lit, the app reads "Base data pin didn't take.
+It clashes with another strip or a button, so the lamp kept its built-in
+pin.", and the row reads Built-in. Save a colour from the lamp's web config
+with a pin set: the row still reads the pin afterwards. On a lamp running
+1.3.3, LED setup in advanced mode shows no data pin row.
 
 ## Pass criteria
 
@@ -226,9 +231,9 @@ the row still reads the pin afterwards.
   learned with no miss, and no message for a cancel or a declined offer.
 - P10: no name field takes more than 32 bytes, a refused rename says so, and
   a double tap on a restarting save restarts the lamp once.
-- P11: the Data pin row shows only in advanced mode, a picked pin drives the
-  strip after the restart, and a pin another strip uses is reported as not
-  taken.
+- P11: the data pin row shows only in advanced mode on firmware that reports
+  pins, a picked pin drives the strip after the restart, another strip's pin
+  is greyed out, and a pin that clashes with a button is reported by name.
 
 ## Not covered here
 
