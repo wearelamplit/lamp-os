@@ -551,8 +551,8 @@ scale with the number of peers or the mesh's message rate, so each is bounded:
   (`RelayStagger`, `components/network/mesh/relay_stagger.hpp`) in fixed .bss
   tables, about 2.1 KB off free heap: 2 control-op slots of 608 bytes and 4
   WISP_HELLO / WISP_PALETTE slots of 224, sized for two wisps. Nothing
-  allocates; a full table, or a known loop stall, relays inline. The loop sends a due relay only while
-  a TX credit is free (`MeshLink::txReady`), so queued relays share the 6
+  allocates; a full table, or a known loop stall, relays inline. The loop
+  sends a due relay only while a TX credit is free (`MeshLink::txReady`), so queued relays share the 6
   credits with the cascade drain and the mesh resends without hammering a
   stalled driver. A queued relay is refused, counted in `txrefused` and retried
   next pass only when another task takes the last credit between the check and

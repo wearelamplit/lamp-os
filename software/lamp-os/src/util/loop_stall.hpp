@@ -9,8 +9,8 @@ namespace lamp {
 inline std::atomic<uint8_t> g_knownLoopStalls{0};
 
 // Marks a known multi-second loop-task block for its scope (the OTA upfront
-// erase, the BLE teardown for the web app), so work queued for the loop runs
-// inline on the recv task instead of waiting it out. Loop task only.
+// erase, the BLE teardown for the web app), so staggered relays go out inline
+// on the recv task instead of queuing behind it. Loop task only.
 class KnownLoopStall {
  public:
   KnownLoopStall() { g_knownLoopStalls.fetch_add(1); }

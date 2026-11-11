@@ -18,9 +18,10 @@ namespace lamp {
 constexpr uint32_t kRelayStaggerWindowMs = 150;
 
 // A queued relay still unsent this long after its fire time is dropped: half
-// the 2 s between statuses in an op's burst, so a copy this lamp sends late
-// never follows the next status it relays and rolls a lamp's cache back. Only
-// an unannounced loop stall reaches it; a known one relays inline.
+// the 2 s between statuses in an op's burst, so a late copy goes out before
+// this lamp relays a status heard 2 s after it, and never rolls a lamp's cache
+// back. A known loop stall queues nothing new, so the cap is reached by an
+// unannounced stall or by copies queued just before a known one.
 constexpr uint32_t kMaxRelayLateMs = 1000;
 
 #ifdef LAMP_DEBUG

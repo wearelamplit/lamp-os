@@ -319,14 +319,20 @@ void test_known_stall_fails_open() {
   Link link;
   const auto before = frameFor(20);
   TEST_ASSERT_TRUE(s.enqueue(before.data(), before.size(), kType, kWisp, 20, 6000));
+  // Asserts wait until the guard is gone: a failed assert unwinds without
+  // its destructor and would leave the flag set for later tests.
+  bool flagged = false;
+  uint32_t queuedInStall = 0;
   {
     const lamp::KnownLoopStall stall;
-    TEST_ASSERT_TRUE(lamp::inKnownLoopStall());
+    flagged = lamp::inKnownLoopStall();
     for (uint16_t seq = 21; seq < 21 + kSlots + 2; ++seq) {
       const auto f = frameFor(seq);
-      TEST_ASSERT_FALSE(s.enqueue(f.data(), f.size(), kType, kWisp, seq, 6000));
+      if (s.enqueue(f.data(), f.size(), kType, kWisp, seq, 6000)) ++queuedInStall;
     }
   }
+  TEST_ASSERT_TRUE(flagged);
+  TEST_ASSERT_EQUAL_UINT32(0, queuedInStall);
   TEST_ASSERT_FALSE(lamp::inKnownLoopStall());
   TEST_ASSERT_EQUAL_UINT32(kSlots + 2, s.window().failOpen);
   const auto after = frameFor(40);
