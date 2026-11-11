@@ -70,6 +70,14 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   an old wisp paint message that wisps stopped sending in beta 1.1.8. Wisp
   paint itself is unchanged, and a lamp near an older wisp ignores that
   message as before.
+- **Lamps take turns passing on the wisp's messages.** A lamp that hears
+  the wisp now waits a short moment of its own (up to 0.15 seconds) before
+  repeating the message for lamps farther out, instead of every nearby lamp
+  repeating it at the same instant, where the copies can collide. Lamps
+  repeating each other's check-ins now also pick their own moment. Lamps on
+  older firmware keep working beside updated ones. Holding those messages
+  takes about 2 KB of the lamp's memory. While a lamp starts a firmware update
+  or opens its web config page, it passes them on at once instead.
 - **The wisp sends less status chatter.** Opening the wisp screen in the app,
   the wisp's WiFi or Ethernet connecting or dropping, and its OSC feed going
   quiet or coming back now send a status update once (twice at most, 5

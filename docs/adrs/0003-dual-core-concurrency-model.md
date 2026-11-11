@@ -31,8 +31,11 @@ with tight spinlocks + a published-handle gate.**
 
 - **Core 0 (WiFi recv task):** ESP-NOW receive callbacks, frame parse/dispatch,
   and the OTA chunk write (`handleChunkOnRecvTask` → `esp_partition_write`).
-  Rule: **never block Core 0.** It never sends mesh frames, never does long work,
-  never holds a lock across I/O. Control frames it can't handle inline are handed
+  Rule: **never block Core 0.** It never originates mesh frames, never does long
+  work, never holds a lock across I/O. A relay is queued for Core 1 to send; one
+  that overflows its table, or arrives while Core 1 runs a known multi-second
+  block (`KnownLoopStall`), goes out inline (`esp_now_send` copies and does not
+  block). Control frames it can't handle inline are handed
   to Core 1 via **typed-slot forwarders** (lock-free single-slot handoff).
 - **Core 1 (Arduino loop):** the render loop + both OTA state machines (driven
   from `tick()` / `handleControlOnLoop`) + social/expression. All multi-step
