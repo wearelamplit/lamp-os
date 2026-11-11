@@ -74,6 +74,13 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   recently used lamp's radio slot instead of that one's. Both now count on
   a clock that never restarts while the wisp stays on. Reflash the wisp
   over USB.
+- **LED setup saves on snafu.** Tapping Update on snafu's Advanced LEDs
+  screen used to fail with "Save failed" and leave the lamp unchanged, because
+  the save carried every strip's colours and came out too big for one
+  Bluetooth write. It now sends only the strip type and LED counts, which fit
+  on every lamp, and it no longer rewrites the lamp's colours. If an LED setup
+  save is ever too big to send, the screen says so instead of failing with a
+  raw error.
 
 ### Changed
 - **Smaller firmware, a little more free memory.** The lamp no longer builds

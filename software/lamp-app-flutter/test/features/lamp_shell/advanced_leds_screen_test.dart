@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../_support/in_memory_ble_client.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
+import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/core/widgets/form_section.dart';
 import 'package:lamp_app/features/control/application/dev_mode.dart';
 import 'package:lamp_app/features/inventory/application/inventory_notifier.dart';
@@ -15,10 +16,16 @@ import '../../_support/seed.dart';
 
 const _devId = 'lamp-x';
 
-Future<ProviderContainer> _makeContainer() async {
+Future<ProviderContainer> _makeContainer({
+  InMemoryBleClient? client,
+  String? shadeSegmentsJson,
+}) async {
   SharedPreferences.setMockInitialValues({});
-  final ble = InMemoryBleClient();
-  await seedControlBle(ble, deviceId: _devId, baseKnockoutJson: '[100,50,0]');
+  final ble = client ?? InMemoryBleClient();
+  await seedControlBle(ble,
+      deviceId: _devId,
+      baseKnockoutJson: '[100,50,0]',
+      shadeSegmentsJson: shadeSegmentsJson);
   final c = ProviderContainer(
     overrides: [bleClientProvider.overrideWithValue(ble)],
   );
@@ -46,6 +53,28 @@ Widget _wrap(ProviderContainer c) => UncontrolledProviderScope(
     );
 
 void main() {
+  testWidgets('a save too big to send shows the friendly error, writes nothing',
+      (tester) async {
+    // More segments than any firmware reports, so the blob passes the cap.
+    final segs = [
+      for (var k = 0; k < 60; k++) '{"name":"s$k","px":200,"colors":[]}',
+    ].join(',');
+    final ble = InMemoryBleClient();
+    final c = await _makeContainer(client: ble, shadeSegmentsJson: '[$segs]');
+    addTearDown(c.dispose);
+    await tester.pumpWidget(_wrap(c));
+    await _pumpToData(tester);
+
+    await tester.tap(find.text('Update'));
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+
+    expect(find.text("Couldn't save: too much to send to the lamp at once."),
+        findsOneWidget);
+    expect(ble.writesTo(_devId, BleUuids.settingsBlob), isEmpty);
+  });
+
   testWidgets('Shade strip section renders above Base strip', (tester) async {
     final c = await _makeContainer();
     addTearDown(c.dispose);

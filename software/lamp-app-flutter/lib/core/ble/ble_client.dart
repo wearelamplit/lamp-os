@@ -60,6 +60,10 @@ class BleReadTooLarge implements Exception {
 /// probe.
 const int kBleMaxReadBytes = 4096;
 
+/// Largest value one GATT write can carry, the ATT attribute limit that the
+/// phone's BLE stack and the lamp's NimBLE both enforce.
+const int kBleMaxWriteBytes = 512;
+
 /// Applies [kBleMaxReadBytes] to a notify stream, dropping an oversized frame
 /// (not throwing) so one bad payload keeps the subscription alive. The read()
 /// path throws because a caller awaits a single value; a stream must survive.
