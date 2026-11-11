@@ -461,11 +461,7 @@ void updateAdvertisedDeviceName(const char* newName) {
   // advertising interval) is below human perception.
   if (!NimBLEDevice::isInitialized()) return;
   NimBLEDevice::setDeviceName(newName);
-  auto* adv = NimBLEDevice::getAdvertising();
-  if (adv != nullptr) {
-    adv->stop();
-    adv->start();
-  }
+  ble_control::restartAdvertising();
 }
 
 }  // namespace lamp

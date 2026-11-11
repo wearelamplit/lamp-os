@@ -194,12 +194,16 @@ bool isClientConnected();
 bool isHomeModePageActive();
 
 /**
- * True while the central scan is paused because a GATT client is
- *        connected. bluetooth.cpp's onScanEnd queries this to decide
- *        whether to auto-restart the scan. Flipped on GATT connect /
- *        disconnect inside ble_control.cpp.
+ * Restart the continuous central scan after NimBLE ends it, unless a
+ *        connected GATT client or an OTA radio pause holds the scan.
  */
-bool isScanPaused();
+void resumeScanAfterScanEnd();
+
+/**
+ * Re-emit the advertisement so a GAP change reaches scanning phones.
+ *        Does nothing while an OTA radio pause holds advertising.
+ */
+void restartAdvertising();
 
 /**
  * Stop BLE advertising + scan to free the radio for ESP-NOW
@@ -216,7 +220,9 @@ void pauseRadioForOta();
 
 /**
  * Restart BLE advertising + scan after pauseRadioForOta(). Called
- *        on OTA success or any failure path. Idempotent.
+ *        on OTA success or any failure path. Idempotent. Until then no
+ *        GATT disconnect or scan end restarts either, and tick() stops
+ *        advertising NimBLE restarts on its own.
  */
 void resumeRadioAfterOta();
 

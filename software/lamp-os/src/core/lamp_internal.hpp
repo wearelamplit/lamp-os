@@ -110,6 +110,11 @@ void applyInboundControlOp(const char* payloadJson, size_t len, const uint8_t sr
 // JsonDocument. Defined in lamp_test_action.cpp.
 void dispatchLampAction(JsonDocument& doc, unsigned long updateTimeMs);
 
+// Loop task only. Runs the zone-preview release a BLE disconnect posted with
+// postPendingClearZonePreview, since the release rewrites configurator state
+// the compositor draws.
+void drainZonePreviewClear();
+
 #ifdef LAMP_DEBUG
 // Bench serial command ingress. Reads newline-terminated commands from
 // Serial on the loop task and routes them into the same dispatch paths the

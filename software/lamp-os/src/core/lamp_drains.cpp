@@ -300,6 +300,7 @@ void Lamp::drainSocialDispositions() {
 
 // Manual test triggers; routes to dispatchLampAction.
 void Lamp::drainTestAction() {
+  drainZonePreviewClear();
   if (lamp::pendingSlots.testAction.valid) {
     char buf[lamp::kPendingJsonOp + 1];
     uint16_t len = lamp::pendingSlots.testAction.drain(pendingMux, buf);

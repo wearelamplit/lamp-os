@@ -81,7 +81,7 @@ Hard contract between firmware and every client, read by the firmware but delibe
 
 **Merge-patch on save.** Any client MUST edit a copy of the raw params in place and set only the keys it touched — never rebuild the params from its rendered fields. Keys the client never surfaced (a zone hidden behind a toggle, another client's cascade config) would otherwise be dropped. This is a data-loss contract, not a nicety.
 
-**Live zone preview.** Dragging a Zone slider writes a `test_zone_preview` action to `CHAR_EXPRESSION_TEST` (`{a, posMin, posMax, target, color}`). The lamp lights the selected zone in the expression's color and blanks the rest. Releasing the slider (the app sends `test_expression_complete`) or a disconnect puts back the scene the surface showed when the marker went up (`ZonePreviewSurface`).
+**Live zone preview.** Dragging a Zone slider writes a `test_zone_preview` action to `CHAR_EXPRESSION_TEST` (`{a, posMin, posMax, target, color}`). The lamp lights the selected zone in the expression's color and blanks the rest. Releasing the slider (the app sends `test_expression_complete`) or a disconnect puts back the scene the surface showed when the marker went up (`ZonePreviewSurface`). A disconnect posts that release to the loop task (`postPendingClearZonePreview`), since it rewrites configurator state the compositor draws.
 
 ### Web subset degradation
 
