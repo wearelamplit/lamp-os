@@ -552,10 +552,13 @@ void test_drift_finished_fade_holds_across_wrap() {
   fillFrame(kStartBase, kStartShade, Trailer::MineFull, kToBase, kToShade, 20000);
   r.apply();
   r.runTo(20000);
-  for (uint64_t t = 20000; t < 20000 + (1ull << 32) + 5000; t += 1ull << 26) {
+  for (uint64_t t = 20000; t < (1ull << 32); t += 1ull << 26) {
     r.c.tickWisp(static_cast<uint32_t>(t), true, true);
     assertColor(kToBase, r.base());
   }
+  // One wrap on, the clock reads mid-fade again.
+  r.c.tickWisp(10000, true, true);
+  assertColor(kToBase, r.base());
 }
 
 // A fade that spans the millis() wrap runs to its end.
