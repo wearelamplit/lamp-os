@@ -111,8 +111,9 @@ struct Rig {
     manager.setMeshLink(&mesh);
     config.lamp.socialMode = SocialMode::Extrovert;
     echo.setTired([] { return s_tired; });
-    // Every warm yawn-back and every tired roll fires.
+    // Every warm yawn-back, at any hop short of the max, and every tired roll fires.
     echo.yawnTuning().backPct = {0, 0, 0, 100, 100};
+    echo.tuning().chainHopPct = 100;
     echo.yawnTuning().tiredYawnPct = 100;
   }
 
