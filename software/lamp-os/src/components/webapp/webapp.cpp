@@ -150,7 +150,7 @@ static void handleGetDispositions(AsyncWebServerRequest* req) {
   req->send(503, "application/json", "{\"ok\":false}");
 }
 
-// Bulk replace of the per-peer disposition map, mirroring the auth-gated
+// Merge into the per-peer disposition map, mirroring the auth-gated
 // CHAR_SOCIAL_DISPOSITIONS BLE write: same Core-1 drain, same size guard,
 // same OTA-quiet drop.
 static void handlePutDispositions(AsyncWebServerRequest* req,

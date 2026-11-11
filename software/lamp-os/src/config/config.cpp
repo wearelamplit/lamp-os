@@ -95,7 +95,7 @@ Config::Config(ConfigStore* inStore) {
   namedKeyPresent_ = loaded.namedKeyPresent;
 
   // Per-peer dispositions live in a separate NVS key.
-  dispositions_.load();
+  dispositions_.load(uptimeMs());
 };
 
 static const char* saveFailure(config_codec::SaveResult result) {
@@ -191,32 +191,30 @@ bool Config::isOtaDistributing() const {
 }
 
 uint8_t Config::getDisposition(const uint8_t mac[6]) const {
-  return dispositions_.get(mac);
+  return dispositions_.peer(mac, uptimeMs()).disp;
 }
 
 uint8_t Config::getDisposition(const std::string& lampId) const {
   uint8_t mac[6];
   if (!parseBdAddr(lampId.c_str(), mac)) return DispositionStore::kDefault;
-  return dispositions_.get(mac);
+  return dispositions_.peer(mac, uptimeMs()).disp;
 }
 
 void Config::setDisposition(const std::string& lampId, uint8_t value) {
   uint8_t mac[6];
   if (!parseBdAddr(lampId.c_str(), mac)) return;
-  dispositions_.set(mac, value, millis());
+  dispositions_.set(mac, value, uptimeMs());
 }
 
 std::string Config::asDispositionsJson() const { return dispositions_.asJson(); }
 
 bool Config::setDispositionsFromJson(const char* json, size_t len) {
-  return dispositions_.setFromJson(json, len, millis());
+  return dispositions_.setFromJson(json, len, uptimeMs());
 }
 
-void Config::maybeFlushDispositions(uint32_t nowMs) {
-  dispositions_.maybeFlush(nowMs);
-}
+void Config::maybeFlushDispositions(uint64_t nowMs) { dispositions_.maybeFlush(nowMs); }
 
-void Config::flushDispositionsNow() { dispositions_.flushNow(millis()); }
+void Config::flushDispositionsNow() { dispositions_.flushNow(uptimeMs()); }
 
 JsonDocument Config::asJsonDocument() {
   JsonDocument doc;

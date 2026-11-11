@@ -22,6 +22,47 @@ A peer's BLE presence (and RSSI) comes from the unified `LampRoster`
 store. Disposition lookups come from `Config`. Both feed every
 subsystem below.
 
+## Stored social rows
+
+`DispositionStore` (`config/disposition_store.hpp`) owns every per-peer row
+and is the only thing that changes one. A row is the disposition plus what
+the fondness engine learns: a score (127 = one disposition step), the count
+of meetings, the on-hours since the last counted meeting and the on-minutes
+since the peer was last seen. The lamp has no wall clock, so every age counts
+on-time only. Everything reads a row through `DispositionStore::peer`
+(`Config::getDisposition` is its disposition); an unknown peer reads as
+Neutral with nothing learned.
+
+- **Capacity.** 100 rows, reserved once at boot. At capacity the weakest
+  relationship goes: strength is `|disp - 3| x 128 + |score| + min(meets, 16)
+  x 8`, ties to the one unseen longest. A user edit
+  always gets a row. A newcomer from the engine gets one only when stronger
+  than the weakest row, or as strong while that row has been unseen an hour,
+  so a crowd cannot churn out regulars or non-neutral peers.
+- **User edits.** A changed disposition (app slider, serial) sets it and
+  zeroes the score; an equal one leaves the row alone. The app's JSON write
+  merges: rows it does not list stay. The JSON the app reads is unchanged.
+- **Engine writes.** `nudge`, `meet`, `markSeen`, `decayTowardZero` and
+  `tickHour` do nothing while the master switch (`engineEnabled`, persisted
+  in the blob's flags byte, on by default) is off. Home mode is the caller's
+  gate. Familiarity alone moves a peer to Fond and no further.
+- **Flushes.** A user edit flushes 5 s after the slider goes idle (and on BLE
+  disconnect); an engine change at most once per 10 minutes and an age-only
+  change once per 60, both counted from the last flush, and any flush writes
+  everything, so while the engine runs a power cut loses at most an hour of
+  ages. With the engine off nothing marks ages for saving, so the stored ages
+  move only when some other flush writes them.
+- **Boot.** Neutral rows unseen for 14 on-days (20160 on-minutes) are dropped
+  at load, and the boot writes nothing.
+- **Formats.** The `disp` blob is format 2, `[2][flags]` then
+  `[mac:6][disp][score][meets][meetAgeH][unseenMin:2 LE]` per peer. Format 1
+  (`[1]` then `[mac:6][disp]`, up to 1.3.3) loads with score 0, meets 0,
+  unseen 0 and a next meeting that counts, and becomes format 2 on the first
+  flush; a legacy `dispositions` JSON key is moved at load and erased only
+  once the blob reads back as written. NVS figures are in
+  [`embedded-heap.md`](embedded-heap.md), downgrade loss under its
+  Downgrades.
+
 ## Three subsystems
 
 | Subsystem | What it does | Lives in | Detail doc |

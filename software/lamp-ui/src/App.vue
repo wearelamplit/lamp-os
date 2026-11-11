@@ -129,8 +129,8 @@ const stopNearbyPolling = () => {
   nearbyTimer = null
 }
 
-// PUT /api/dispositions is a full-map replace, so the local map is the source
-// of truth: GET it on entering Social, mutate one key on a pick, PUT it whole.
+// PUT /api/dispositions merges, a changed value counting as an edit: GET the
+// map on entering Social, mutate one key on a pick, PUT it whole.
 const dispositions = ref<Record<string, number>>({})
 const dispositionsLoaded = ref(false)
 const dispModalLamp = ref<NearbyLamp | null>(null)
