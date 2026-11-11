@@ -233,6 +233,11 @@ with the lamp's cached colours.
 
 **Lamps the scan hears** (`NearbyLampsNotifier`):
 
+- `FbpBleScanner` forwards a scan result only when its fbp `timeStamp` is
+  later than the scanner's start and than its last forward for that device.
+  fbp's `scanResults` lists every device heard since the scan started on each
+  emit and replays the previous scan's list on listen, so forwarding the list
+  as-is would stamp lamps unheard for minutes as seen now.
 - Each advertisement from a paired lamp calls `recordLastSeen` with
   `minStep: _lastSeenWriteStep` (30 s), which caps disk writes.
 - A lamp aging out of the roster has its exact last advertisement time

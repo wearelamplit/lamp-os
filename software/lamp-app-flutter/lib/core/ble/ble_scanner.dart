@@ -144,6 +144,11 @@ class FbpBleScanner implements BleScanner {
   bool _running = false;
   bool _restarting = false;
   bool _restartAgain = false;
+  // fbp's `scanResults` carries every device heard since its scan started on
+  // each emit, and replays the previous scan's list on listen. Only an entry
+  // heard after this scanner started and after its last forward is a sighting.
+  DateTime _startedAt = DateTime.now();
+  final _forwardedAt = <String, DateTime>{};
 
   // Delay before re-issuing a scan so a persistently failing startScan
   // (permission revoked, adapter mid-cycle) can't spin a hot retry loop.
@@ -161,6 +166,9 @@ class FbpBleScanner implements BleScanner {
 
   void _onScanResults(List<fbp.ScanResult> results) {
     for (final r in results) {
+      final id = r.device.remoteId.str;
+      if (!r.timeStamp.isAfter(_forwardedAt[id] ?? _startedAt)) continue;
+      _forwardedAt[id] = r.timeStamp;
       final ad = parseLampAdvertisement(
         manufacturerData: r.advertisementData.manufacturerData,
         advName: r.advertisementData.advName,
@@ -207,6 +215,8 @@ class FbpBleScanner implements BleScanner {
   Future<void> start() async {
     if (_running) return;
     _running = true;
+    _startedAt = DateTime.now();
+    _forwardedAt.clear();
     // Arm every listener before the first startScan so a throw below still
     // leaves recovery wired: the next isScanning=false or adapter=on event
     // drives _restartScan.
