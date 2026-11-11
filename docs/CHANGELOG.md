@@ -49,9 +49,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   seconds while the shuffle icon had already stopped. The chips now show the
   colours the wisp gave each lamp as soon as it gives them, through a lamp
   on this firmware; through a lamp on older firmware they still follow the
-  fade. The shuffle icon keeps spinning until the wisp has re-rolled and the
-  chips show it. With more than 57 lamps on one wisp all fading at once, a
-  lamp's chip can lag its new colour by up to about 50 s.
+  fade. The shuffle icon keeps spinning until the wisp reports the re-roll.
+  When more lamps on one wisp are fading at once than one frame has room
+  for (about 5 of 100 lamps, about 30 of 80), a chip can sit on its previous
+  colour, or a mid-fade colour, for one or more drift steps.
 - **Lamps and wisps left on for weeks keep working past day 25 and day 49.**
   A lamp's millisecond clock rolls back to zero every 49.7 days of uptime.
   Around that moment a lamp could freeze its light or dim to half for a few

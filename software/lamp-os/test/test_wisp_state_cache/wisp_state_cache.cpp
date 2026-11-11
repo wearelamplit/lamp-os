@@ -237,7 +237,8 @@ void fillDrift(uint8_t plain, Trailer t) {
     n = lp::appendWispStateDriftFade(buf, sizeof(buf), n, recs, 2, false);
   } else if (t == Trailer::PartialMineOnly) {
     put(0, kMineIdx, kMineTo);
-    n = lp::appendWispStateDriftFade(buf, sizeof(buf), n, recs, 1, true);  } else if (t == Trailer::PartialDriftNext) {
+    n = lp::appendWispStateDriftFade(buf, sizeof(buf), n, recs, 1, true);
+  } else if (t == Trailer::PartialDriftNext) {
     put(0, kDriftIdx, kDriftNext);
     n = lp::appendWispStateDriftFade(buf, sizeof(buf), n, recs, 1, true);
   }

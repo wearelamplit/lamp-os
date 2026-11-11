@@ -149,8 +149,9 @@ class WispNotifier extends _$WispNotifier {
   DateTime? _lastClaimsReadAt;
   DateTime? _lastStatusPollAt;
 
-  /// True from a shuffle tap until a claims read shows [_livePaint] actually
-  /// changed, so the preview can flag the residual mesh-relay lag instead of
+  /// True from a shuffle tap until a claims read, started after the wisp
+  /// reported a new shuffle seed, shows [_livePaint] changed from the tap, so
+  /// the preview can flag the residual mesh-relay lag instead of
   /// silently showing pre-shuffle colors. Bounded by [_recalcFallback] so a
   /// shuffle that produces no visible change (e.g. no claimed lamps) can't
   /// hang the indicator.
@@ -160,10 +161,9 @@ class WispNotifier extends _$WispNotifier {
   Timer? _recalcFallbackTimer;
 
   // The wisp's shuffle seed when Shuffle was tapped, null when unknown, and
-  // whether a status or config has since reported a different one. A claims
-  // read only ends [colorsRecalculating] once the seed has moved: before
-  // that the wisp may not have re-rolled yet, and a drift step alone can
-  // change the chips.
+  // whether a status or config has since reported a different one. Until the
+  // seed moves the wisp may not have re-rolled, and a drift step alone can
+  // change the chips, so no claims read ends [colorsRecalculating] before.
   int? _shuffleSeedAtTap;
   bool _shuffleSeedMoved = false;
 
