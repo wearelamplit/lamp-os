@@ -296,7 +296,8 @@ do.
 
 Release 1.3.3 and older read a rest blob into a 1792-byte buffer, so a
 lamp flashed back to one from a rest over that (reached only with pins set
-near the other caps) serves defaults for the rest without saving over it.
+near the other caps) serves defaults for the rest and skips the first-boot
+save; its next save writes those defaults over the stored rest.
 
 A role's `rotate` (at most 49 B, `,"rotate":{"on":false,"periodS":120,"dir":"down"}`)
 is stored only on a single-segment role and only when it differs from that

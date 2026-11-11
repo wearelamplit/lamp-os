@@ -1533,6 +1533,9 @@ void test_a_split_store_missing_its_rest_is_reported() {
 // one-colour expressions beside a plain or a fully escaped rest.
 Model legacyModel(size_t expressions, int kind, bool escapedRest) {
   Model m = escapedRest ? worstCaseModel('"') : Model{};
+  for (auto* segs : {&m.base.segments, &m.shade.segments}) {
+    for (auto& seg : *segs) seg.pin = 0;
+  }
   m.expressions.expressions.clear();
   for (size_t i = 0; i < expressions; ++i) {
     ExpressionConfig e = fullExpression("pulse", 1 + i % 3);
