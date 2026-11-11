@@ -12,6 +12,7 @@
 #include <cstdint>
 
 #include "fleet/wisp_roster.hpp"
+#include "wire/lamp_protocol.hpp"
 #include "paint/drift.hpp"
 #include "paint/tuple_sampler.hpp"
 
@@ -113,7 +114,7 @@ class PaintDistributor {
   bool paintMode_ = false;
   bool sourceLive_ = true;
   bool stateDirty_ = false;
-  uint16_t seqCounter_ = 0;
+  lamp_protocol::SenderSeq seqCounter_;
 
   static constexpr size_t kMaxWalkPeers = 100;  // matches LampInventory::MAX_LAMPS
 

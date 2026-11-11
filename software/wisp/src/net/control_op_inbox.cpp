@@ -2,9 +2,10 @@
 
 namespace wisp {
 
-void ControlOpInbox::offer(const lamp_protocol::ParsedControlOp& op) {
+void ControlOpInbox::offer(const lamp_protocol::ParsedControlOp& op,
+                           uint32_t nowMs) {
   if (!controlOpForWisp(op.targetMac, myMac_)) return;
-  if (!dedup_.record(op.sourceMac, lamp_protocol::MSG_CONTROL_OP, op.seq)) {
+  if (!dedup_.record(op.sourceMac, lamp_protocol::MSG_CONTROL_OP, op.seq, nowMs)) {
     return;
   }
   if (op.payloadLen > lamp_protocol::CONTROL_MAX_PAYLOAD) return;

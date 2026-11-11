@@ -18,13 +18,15 @@ inline bool controlOpForWisp(const uint8_t targetMac[6],
 
 // The one CONTROL_OP this wisp acts on next. offer() runs on the WiFi recv
 // task, take() on the loop task. Admits an op addressed to this wisp once per
-// (sourceMac, seq); a newly admitted op replaces one not yet taken.
+// (sourceMac, seq) within the dedup age; a newly admitted op replaces one not
+// yet taken.
 class ControlOpInbox {
  public:
   // Set once the radio is up; until then no real target is admitted.
   void setSelfMac(const uint8_t mac[6]) { std::memcpy(myMac_, mac, 6); }
 
-  void offer(const lamp_protocol::ParsedControlOp& op);
+  // nowMs is millis().
+  void offer(const lamp_protocol::ParsedControlOp& op, uint32_t nowMs);
 
   // Moves the pending payload into `out` (CONTROL_MAX_PAYLOAD bytes) and
   // sets `len`. False when nothing is pending.

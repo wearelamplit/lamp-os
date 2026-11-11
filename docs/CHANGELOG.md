@@ -5,6 +5,22 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## Unreleased
+
+### Fixed
+- **Mesh updates reach lamps after the sending lamp restarts.** A lamp that
+  restarted kept offering its firmware to older lamps nearby, and they
+  ignored every offer without a word, so an update seeded on one lamp never
+  spread. Lamps now number their messages from a fresh random point each
+  time they start, so older lamps take the offer.
+- **Wisp changes from the app land straight after the connected lamp
+  restarts.** After the lamp the app talks through restarted, the wisp
+  ignored the app's changes for a while (the app showed Fade 19% while the
+  wisp stayed at 100%). A restarted lamp's messages now reach the wisp
+  straight away. Lamps and wisps also forget a message they've seen after
+  20 seconds, so a lamp still on older firmware is heard again at most 20
+  seconds after the last message it sent before restarting.
+
 ## 1.3.3
 
 ### Added

@@ -1,6 +1,5 @@
 #include <Arduino.h>
 #include <Adafruit_NeoPixel.h>
-#include <esp_random.h>
 
 #include "paint/current_palette.hpp"
 #include "fleet/lamp_inventory.hpp"
@@ -144,10 +143,6 @@ void setup() {
   paintDistributor.setDrift(wispConfig.driftIntervalMs(),
                             wispConfig.driftFadePct());
   paintDistributor.setBrightness(wispConfig.brightness());
-
-  // Random start seq: after a quick double reboot, restarting at 0 would
-  // replay (mac, type, seq) tuples still cached in peers' dedup rings.
-  wispSeq.counter = static_cast<uint16_t>(esp_random());
 
   // carriedFw* zero-fill; wire layout retained for back-compat with older lamps.
   statusEmitter.begin(&mesh, &controller, &wispConfig, &currentPalette,
