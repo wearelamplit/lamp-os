@@ -295,8 +295,8 @@ void LampRoster::addOrUpdateFromEspNow(const char* name, const uint8_t mac[6],
     if (variant != lamp_protocol::LampVariant::Unknown) {
       store_[idx].variant = variant;
     }
-    // Freshens every HELLO like lastRssi does for BLE adv; -127 sentinel
-    // (unavailable RSSI) leaves the last known reading intact.
+    // -127 (unavailable, or a relayed copy) leaves the last known reading
+    // intact.
     if (rssi != -127) store_[idx].espnowRssi = rssi;
   }
   generation_++;

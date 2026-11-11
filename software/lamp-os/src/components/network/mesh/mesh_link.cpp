@@ -8,6 +8,7 @@
 #include "components/firmware/firmware_receiver.hpp"
 #include "components/firmware/firmware_distributor.hpp"
 #include "components/firmware/fs_ota.hpp"
+#include "components/network/mesh/frame_admission.hpp"
 #include "components/network/mesh/proximity.hpp"
 #include "components/network/protocol/command_auth.hpp"
 #include "util/uptime.hpp"
@@ -209,13 +210,6 @@ bool MeshLink::broadcastRaw(const uint8_t* data, size_t len) {
   return link_.broadcast(data, len);
 }
 
-// Broadcast is all-FF.
-static bool addressedToUs(const uint8_t targetMac[6], const uint8_t myMac[6]) {
-  static const uint8_t bcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-  return std::memcmp(targetMac, myMac, 6) == 0 ||
-         std::memcmp(targetMac, bcast, 6) == 0;
-}
-
 #ifdef LAMP_DEBUG
 namespace {
 constexpr uint32_t kWispCoexEmitIntervalMs = 10000;
@@ -318,14 +312,17 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
   if (msgType == lamp_protocol::MSG_HELLO) {
     lamp_protocol::ParsedHello h;
     if (!lamp_protocol::parseHello(data, len, h)) return;
-    // A duplicate still counts toward relay suppression (a neighbor already
-    // rebroadcast it) even though it skips the roster reprocess below.
-    if (!helloDedup_.record(h.sourceMac, lamp_protocol::MSG_HELLO, h.seq, nowMs)) {
-      helloSuppressor_.onDuplicate(h.sourceMac, h.seq);
-      return;
+    switch (admitHello(helloDedup_, h.sourceMac, h.seq, myMac_, nowMs)) {
+      case HelloAdmit::Own:
+        return;
+      case HelloAdmit::Repeat:
+        // A duplicate still counts toward relay suppression (a neighbor
+        // already rebroadcast it) even though it skips the roster reprocess.
+        helloSuppressor_.onDuplicate(h.sourceMac, h.seq);
+        return;
+      case HelloAdmit::Fresh:
+        break;
     }
-    // Don't rebroadcast own hellos.
-    if (std::memcmp(h.sourceMac, myMac_, 6) == 0) return;
 #ifdef LAMP_DEBUG
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
     {
@@ -364,7 +361,7 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
         h.needsFs,
         h.hasOtaSendingTo ? h.otaSendingTo : nullptr,
         h.hasOtaSendingTo,
-        rssi,
+        helloRosterRssi(srcMac, h.sourceMac, rssi),
         h.variant);
     if (isDirectHello(srcMac, h.sourceMac) && isNearRssi(rssi, kNearRssiEspNow)) {
       lampRoster.markNear(h.sourceMac);
@@ -635,8 +632,8 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     // ring guards against the wisp re-sending the OFFER mid-drain.
     lamp_protocol::ParsedFwOffer p;
     if (!lamp_protocol::parseFwOffer(data, len, p)) return;
-    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FW_OFFER, p.seq, nowMs)) return;
-    if (!addressedToUs(p.targetMac, myMac_)) return;
+    if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FW_OFFER, p.seq,
+                        p.targetMac, myMac_, nowMs)) return;
     // Receiver-side signal-floor gate, mirrors the sender's: a weak direct
     // hop drops the OFFER instead of streaming a doomed transfer. Unknown
     // RSSI isn't gated.
@@ -671,14 +668,14 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     // (~0.5 ms esp_ota_write_with_offset, portMUX only, no heap/blocking).
     lamp_protocol::ParsedFwChunk p;
     if (!lamp_protocol::parseFwChunk(data, len, p)) return;
-    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FW_CHUNK, p.seq, nowMs)) return;
-    if (!addressedToUs(p.targetMac, myMac_)) return;
+    if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FW_CHUNK, p.seq,
+                        p.targetMac, myMac_, nowMs)) return;
     if (firmwareReceiver_) firmwareReceiver_->handleChunkOnRecvTask(p);
   } else if (msgType == lamp_protocol::MSG_FW_DONE) {
     lamp_protocol::ParsedFwDone p;
     if (!lamp_protocol::parseFwDone(data, len, p)) return;
-    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FW_DONE, p.seq, nowMs)) return;
-    if (!addressedToUs(p.targetMac, myMac_)) return;
+    if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FW_DONE, p.seq,
+                        p.targetMac, myMac_, nowMs)) return;
     PendingFirmwareControl slot{};
     slot.msgType = lamp_protocol::MSG_FW_DONE;
     slot.seq = p.seq;
@@ -696,26 +693,26 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     // on this recv task; its state machine handles them under portMUX.
     lamp_protocol::ParsedFwAccept p;
     if (!lamp_protocol::parseFwAccept(data, len, p)) return;
-    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FW_ACCEPT, p.seq, nowMs)) return;
-    if (!addressedToUs(p.targetMac, myMac_)) return;
+    if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FW_ACCEPT, p.seq,
+                        p.targetMac, myMac_, nowMs)) return;
     if (firmwareDistributor_) firmwareDistributor_->onAcceptOnRecvTask(p);
   } else if (msgType == lamp_protocol::MSG_FW_REQ) {
     lamp_protocol::ParsedFwReq p;
     if (!lamp_protocol::parseFwReq(data, len, p)) return;
-    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FW_REQ, p.seq, nowMs)) return;
-    if (!addressedToUs(p.targetMac, myMac_)) return;
+    if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FW_REQ, p.seq,
+                        p.targetMac, myMac_, nowMs)) return;
     if (firmwareDistributor_) firmwareDistributor_->onReqOnRecvTask(p);
   } else if (msgType == lamp_protocol::MSG_FW_RESULT) {
     lamp_protocol::ParsedFwResult p;
     if (!lamp_protocol::parseFwResult(data, len, p)) return;
-    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FW_RESULT, p.seq, nowMs)) return;
-    if (!addressedToUs(p.targetMac, myMac_)) return;
+    if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FW_RESULT, p.seq,
+                        p.targetMac, myMac_, nowMs)) return;
     if (firmwareDistributor_) firmwareDistributor_->onResultOnRecvTask(p);
   } else if (msgType == lamp_protocol::MSG_FS_OFFER) {
     lamp_protocol::ParsedFwOffer p;
     if (!lamp_protocol::parseFwOffer(data, len, p, lamp_protocol::MSG_FS_OFFER)) return;
-    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FS_OFFER, p.seq, nowMs)) return;
-    if (!addressedToUs(p.targetMac, myMac_)) return;
+    if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FS_OFFER, p.seq,
+                        p.targetMac, myMac_, nowMs)) return;
     // Receiver-side signal-floor gate, mirrors the sender's: a weak direct
     // hop drops the OFFER instead of streaming a doomed transfer. Unknown
     // RSSI isn't gated.
@@ -747,14 +744,14 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
   } else if (msgType == lamp_protocol::MSG_FS_CHUNK) {
     lamp_protocol::ParsedFwChunk p;
     if (!lamp_protocol::parseFwChunk(data, len, p, lamp_protocol::MSG_FS_CHUNK)) return;
-    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FS_CHUNK, p.seq, nowMs)) return;
-    if (!addressedToUs(p.targetMac, myMac_)) return;
+    if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FS_CHUNK, p.seq,
+                        p.targetMac, myMac_, nowMs)) return;
     fs_ota::onChunk(p);
   } else if (msgType == lamp_protocol::MSG_FS_DONE) {
     lamp_protocol::ParsedFwDone p;
     if (!lamp_protocol::parseFwDone(data, len, p, lamp_protocol::MSG_FS_DONE)) return;
-    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FS_DONE, p.seq, nowMs)) return;
-    if (!addressedToUs(p.targetMac, myMac_)) return;
+    if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FS_DONE, p.seq,
+                        p.targetMac, myMac_, nowMs)) return;
     PendingFirmwareControl slot{};
     slot.msgType = lamp_protocol::MSG_FS_DONE;
     slot.seq = p.seq;
@@ -770,20 +767,20 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
   } else if (msgType == lamp_protocol::MSG_FS_ACCEPT) {
     lamp_protocol::ParsedFwAccept p;
     if (!lamp_protocol::parseFwAccept(data, len, p, lamp_protocol::MSG_FS_ACCEPT)) return;
-    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FS_ACCEPT, p.seq, nowMs)) return;
-    if (!addressedToUs(p.targetMac, myMac_)) return;
+    if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FS_ACCEPT, p.seq,
+                        p.targetMac, myMac_, nowMs)) return;
     fs_ota::onAccept(p);
   } else if (msgType == lamp_protocol::MSG_FS_REQ) {
     lamp_protocol::ParsedFwReq p;
     if (!lamp_protocol::parseFwReq(data, len, p, lamp_protocol::MSG_FS_REQ)) return;
-    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FS_REQ, p.seq, nowMs)) return;
-    if (!addressedToUs(p.targetMac, myMac_)) return;
+    if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FS_REQ, p.seq,
+                        p.targetMac, myMac_, nowMs)) return;
     fs_ota::onReq(p);
   } else if (msgType == lamp_protocol::MSG_FS_RESULT) {
     lamp_protocol::ParsedFwResult p;
     if (!lamp_protocol::parseFwResult(data, len, p, lamp_protocol::MSG_FS_RESULT)) return;
-    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FS_RESULT, p.seq, nowMs)) return;
-    if (!addressedToUs(p.targetMac, myMac_)) return;
+    if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FS_RESULT, p.seq,
+                        p.targetMac, myMac_, nowMs)) return;
     fs_ota::onResult(p);
   }
 }

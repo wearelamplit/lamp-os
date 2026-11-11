@@ -300,9 +300,12 @@ inline bool parseHello(const uint8_t* data, size_t len, ParsedHello& out) {
   // it still parses and gets default TLV-derived fields.
   out.otaState = kOtaStateIdle;
   out.fwChannel[0] = '\0';
+  out.hasFsDigest = false;
+  std::memset(out.fsDigest, 0, sizeof(out.fsDigest));
   out.maxChunk = 0;
   out.needsFs = false;
   out.hasOtaSendingTo = false;
+  std::memset(out.otaSendingTo, 0, sizeof(out.otaSendingTo));
   out.variant = LampVariant::Unknown;
   size_t off = HELLO_FIXED_SIZE + 1 + nameLen;
   if (len <= off) return true;

@@ -20,6 +20,13 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 - **Losing the app mid zone preview no longer risks a crash.** Dropping the
   connection while the expression editor's zone preview was up put the
   lamp's scene back from the Bluetooth task while the lamp was drawing it.
+- **Mesh updates judge a lamp's signal by that lamp.** A lamp read a peer's
+  signal from whichever lamp last passed its presence along, so a weak direct
+  link could look strong and draw a firmware offer that never got through. It
+  now goes by the signal heard straight from that lamp.
+- **A lamp mid-update only takes firmware from the lamp it agreed to.** Pieces
+  from a second lamp still sending to it could land in the new image and fail
+  the whole update at the final check.
 
 ## 1.3.4
 

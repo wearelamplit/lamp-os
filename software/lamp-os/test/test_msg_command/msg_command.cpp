@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstring>
 
+#include "components/network/mesh/frame_admission.hpp"
 #include "components/network/protocol/lamp_protocol.hpp"
 
 void setUp(void) {}
@@ -32,11 +33,7 @@ static const uint8_t kTarget[6] = {0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5};
 static const uint8_t kOther[6]  = {0xBB, 0xBB, 0xBB, 0xBB, 0xBB, 0xBB};
 static const uint8_t kBcast[6]  = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
-// addressedToUs mirror (matches mesh_link.cpp).
-static bool addressedToUs(const uint8_t targetMac[6], const uint8_t myMac[6]) {
-  return std::memcmp(targetMac, myMac, 6) == 0 ||
-         std::memcmp(targetMac, kBcast, 6) == 0;
-}
+using lamp::addressedToUs;
 
 // --- Round-trip ---
 
