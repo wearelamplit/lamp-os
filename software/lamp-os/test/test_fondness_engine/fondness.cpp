@@ -352,6 +352,16 @@ void test_clocks_pause_while_not_tracking() {
   after = rig.store.peer(m.data(), rig.now);
   TEST_ASSERT_EQUAL_UINT8(before.meetAgeH + 1, after.meetAgeH);
 
+  // A long stretch between ticks that ends home mode counts as home time.
+  const PeerRecord gapBefore = rig.store.peer(m.data(), rig.now);
+  g_home = true;
+  rig.engine.tick(rig.now);
+  rig.now += 10 * kHour;
+  g_home = false;
+  rig.engine.tick(rig.now);
+  TEST_ASSERT_EQUAL_UINT8(gapBefore.meetAgeH, rig.store.peer(m.data(), rig.now).meetAgeH);
+  TEST_ASSERT_EQUAL_UINT16(gapBefore.unseenMin, rig.store.peer(m.data(), rig.now).unseenMin);
+
   rig.engine.setEnabled(false, rig.now);
   const PeerRecord off = rig.store.peer(m.data(), rig.now);
   rig.run(10 * 60);
@@ -386,6 +396,24 @@ void test_master_off_changes_nothing() {
   reloaded.load(0);
   FondnessEngine engine(reloaded);
   TEST_ASSERT_FALSE(engine.tracking());
+}
+
+// A full table commits its least recently heard peer to make room, before
+// the minute ends.
+void test_full_table_commits_the_oldest() {
+  Rig rig;
+  for (unsigned p = 0; p < FondnessEngine::kSlots; ++p) {
+    rig.now += 1000;
+    rig.engine.observeExpression(peer(p).data(), "glitchy", false, SocialMode::Extrovert, rig.now);
+  }
+  rig.engine.observeExpression(peer(0).data(), "glitchy", false, SocialMode::Extrovert, rig.now);
+  TEST_ASSERT_EQUAL(3 * 127, level(rig.store, peer(1), rig.now));
+  rig.engine.observeExpression(peer(99).data(), "glitchy", false, SocialMode::Extrovert, rig.now);
+  TEST_ASSERT_EQUAL(FondnessEngine::kSlots, rig.engine.slotsInUse());
+  TEST_ASSERT_EQUAL(3 * 127 + rig.engine.tuning.energy * rig.engine.tuning.typeWeight[0],
+                    level(rig.store, peer(1), rig.now));
+  TEST_ASSERT_EQUAL(3 * 127, level(rig.store, peer(0), rig.now));
+  TEST_ASSERT_EQUAL(3 * 127, level(rig.store, peer(2), rig.now));
 }
 
 // A crowd of 500 peers holds 16 slots and allocates nothing.
@@ -450,6 +478,7 @@ int main(int, char**) {
   RUN_TEST(test_home_mode_records_nothing);
   RUN_TEST(test_clocks_pause_while_not_tracking);
   RUN_TEST(test_master_off_changes_nothing);
+  RUN_TEST(test_full_table_commits_the_oldest);
   RUN_TEST(test_crowd_stays_bounded);
   RUN_TEST(test_tuning_keys_are_checked);
   return UNITY_END();
