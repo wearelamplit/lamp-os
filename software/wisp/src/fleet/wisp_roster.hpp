@@ -96,19 +96,28 @@ class WispRoster {
   size_t snapshotClaimsForBroadcast(uint8_t* outBuf, size_t outCapacity);
 
   // Store the RGBW paint pick for a currently-claimed lamp and mark it painted.
-  // No-op if mac is not in the current own-claim set (the caller may have
-  // picked before the claim was established).
+  // It shows at once, ending any drift fade in progress. No-op if mac is not
+  // in the current own-claim set (the caller may have picked before the claim
+  // was established).
   void setLampPaint(const uint8_t mac[6], const uint8_t base[4],
                     const uint8_t shade[4]);
 
+  // Fade a claimed lamp's paint to `base` / `shade` over `fadeMs` from
+  // `nowMs`, starting from the colors it shows at `nowMs`. A claim with no
+  // paint yet, or fadeMs 0, takes the colors at once. No-op for an unclaimed
+  // mac.
+  void setLampDrift(const uint8_t mac[6], const uint8_t base[4],
+                    const uint8_t shade[4], uint32_t nowMs, uint32_t fadeMs);
+
   // Pack every painted claim for `MSG_WISP_STATE` broadcasting: 12-byte
   // lampMac+baseRGB+shadeRGB entries into `out`, and the matching baseW,shadeW
-  // pairs into `w`. A claim with no paint assigned yet is left out so the lamp
-  // holds its own scene; any assigned color, black included, is packed.
-  // `cap` / `wCap` bound the byte budgets, entries past either drop. Returns
-  // the entry count written (not bytes).
+  // pairs into `w`, each claim's colors as they show at `nowMs`. A claim with
+  // no paint assigned yet is left out so the lamp holds its own scene; any
+  // assigned color, black included, is packed. `cap` / `wCap` bound the byte
+  // budgets, entries past either drop. Returns the entry count written (not
+  // bytes).
   size_t snapshotStateForBroadcast(uint8_t* out, size_t cap, uint8_t* w,
-                                   size_t wCap);
+                                   size_t wCap, uint32_t nowMs);
 
   // Diagnostics. Both take the mutex briefly.
   size_t claimedCount() const;
@@ -134,14 +143,22 @@ class WispRoster {
   size_t   peerCount_ = 0;
 
   struct OwnClaim {
-    uint8_t lampMac[6];
-    int8_t  rssi;
-    uint8_t base[4];   // RGBW
-    uint8_t shade[4];  // RGBW
-    bool    painted;
+    uint8_t  lampMac[6];
+    int8_t   rssi;
+    uint8_t  base[4];   // RGBW
+    uint8_t  shade[4];  // RGBW
+    bool     painted;
+    uint8_t  fromBase[4];   // RGBW a drift fade starts from
+    uint8_t  fromShade[4];
+    uint32_t fadeStartMs;
+    uint32_t fadeMs;        // 0: base/shade show as stored
+
+    void shownAt(uint32_t nowMs, uint8_t outBase[4], uint8_t outShade[4]) const;
   };
   OwnClaim ownClaims_[WISP_ROSTER_MAX_LAMPS];
   size_t   ownCount_ = 0;
+  // recomputeClaims' working set; a member so it stays off the 8 KB loop stack.
+  OwnClaim nextClaims_[WISP_ROSTER_MAX_LAMPS];
 
   // Opaque; keeps FreeRTOS out of the header.
   void* mutex_ = nullptr;

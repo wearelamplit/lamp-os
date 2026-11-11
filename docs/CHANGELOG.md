@@ -110,6 +110,12 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 - **One save at a time.** The LED setup Update button and the password Save
   button grey out and show a spinner while a save is under way, so a second
   tap can't start another save while the lamp restarts.
+- **The wisp's Color drift Fade slider works again.** Every drift step had
+  snapped to its new color in under a second whatever the slider said. Each
+  lamp now fades into its next color over at least 20 s: toward Snappy every
+  step takes about 20 s, toward Flowing a step can stretch across the whole
+  How often interval. The fade moves in small steps every 2 s, so a long fade
+  can look slightly stepped up close. Only the wisp needs a USB reflash.
 
 ### Changed
 - **Friendlier update wording.** After an update ends, while the lamp
