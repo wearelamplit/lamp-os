@@ -35,6 +35,7 @@ void test_replay_refreshes_its_slot() {
   RecentPlays p;
   p.record(&g_types[0], 1000);
   p.record(&g_types[0], 100000);
+  TEST_ASSERT_TRUE(p.playedWithin(&g_types[0], kWindowMs, 1000 + kWindowMs + 10));
   for (size_t i = 1; i < RecentPlays::kSlots; ++i) p.record(&g_types[i], 100000 + i);
   TEST_ASSERT_TRUE(p.playedWithin(&g_types[0], kWindowMs, 1000 + kWindowMs + 10));
   for (size_t i = 1; i < RecentPlays::kSlots; ++i) {

@@ -250,6 +250,18 @@ void test_own_fire_blocks_copies_for_the_window() {
   TEST_ASSERT_TRUE(s_registered.size() > 1);
 }
 
+// The manager's retire keeps a play from reading as recent a millis() wrap later.
+void test_play_stamp_stays_old_a_wrap_later() {
+  Rig r;
+  TEST_ASSERT_TRUE(r.manager.triggerInvocation(probeAt(0), kPeerMac));
+  const uint32_t playedMs = millis();
+  for (uint64_t now = playedMs; now < playedMs + (1ull << 32); now += 1ull << 28) {
+    r.manager.retireStale(static_cast<uint32_t>(now));
+  }
+  TEST_ASSERT_FALSE(r.manager.playedWithin("probe", ContagionTuning{}.copyRollCooldownMs,
+                                           playedMs + 10));
+}
+
 // A, B, A: a lamp that copied a type does not copy the chain coming back.
 void test_copy_blocks_the_chain_coming_back() {
   Rig r;
@@ -292,5 +304,6 @@ int main() {
   RUN_TEST(test_own_fire_blocks_copies_for_the_window);
   RUN_TEST(test_copy_blocks_the_chain_coming_back);
   RUN_TEST(test_nearby_count_damps_copies);
+  RUN_TEST(test_play_stamp_stays_old_a_wrap_later);
   return UNITY_END();
 }
