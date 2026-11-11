@@ -197,6 +197,16 @@ after the first tap and the lamp restarts once. A rename the lamp refuses
 ("Couldn't set name. Try again.") can't be set up from the app's screens and
 is covered by setup_screen_test.dart.
 
+P11 — **a strip's data pin.** On a standard lamp with advanced mode off, LED
+setup shows no Data pin row. Turn advanced mode on: each strip shows Data
+pin, reading "Built-in pin". Set the base to a GPIO the base isn't wired to
+(say 27) and tap Update: the lamp restarts, the base stays dark, and the row
+reads GPIO 27. Set it back to Built-in pin and Update: the base lights again.
+Set the base to GPIO 12, the shade's pin, and Update: the lamp restarts with
+both strips lit as before, the app says the save didn't take, and the row
+reads Built-in pin. Save a colour from the lamp's web config with a pin set:
+the row still reads the pin afterwards.
+
 ## Pass criteria
 
 - H1 completes: mfg-data scan finds the lamp, schema reads 4, section reads
@@ -216,6 +226,9 @@ is covered by setup_screen_test.dart.
   learned with no miss, and no message for a cancel or a declined offer.
 - P10: no name field takes more than 32 bytes, a refused rename says so, and
   a double tap on a restarting save restarts the lamp once.
+- P11: the Data pin row shows only in advanced mode, a picked pin drives the
+  strip after the restart, and a pin another strip uses is reported as not
+  taken.
 
 ## Not covered here
 
