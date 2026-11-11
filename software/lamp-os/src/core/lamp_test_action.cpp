@@ -17,6 +17,7 @@
 #include "esp_system.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cstdint>
 #include <cstring>
@@ -50,6 +51,7 @@ namespace {
 
 lamp::ZonePreviewSurface s_shadeZonePreview;
 lamp::ZonePreviewSurface s_baseZonePreview;
+std::atomic<bool>        s_zonePreviewClearPending{false};
 
 void applyZonePreview(uint32_t posMin, uint32_t posMax,
                       lamp::ExpressionTarget target, lamp::Color color) {
@@ -79,7 +81,11 @@ void clearZonePreview() {
 
 }  // namespace
 
-void resetZonePreviewOnDisconnect() { clearZonePreview(); }
+void postPendingClearZonePreview() { s_zonePreviewClearPending.store(true); }
+
+void drainZonePreviewClear() {
+  if (s_zonePreviewClearPending.exchange(false)) clearZonePreview();
+}
 
 void dispatchLampAction(JsonDocument& doc, unsigned long updateTimeMs) {
   lamp::stampConfiguratorActivity(updateTimeMs);

@@ -67,7 +67,7 @@ void postPendingApplyEffectiveBrightness();
 // this flag; Core 1 force-flushes dispositions so a phone walk-off persists
 // the user's slider value.
 void postPendingFlushDispositions();
-void resetZonePreviewOnDisconnect();
+void postPendingClearZonePreview();
 
 // Read by notifyStateChange() to populate previewActive so the app can
 // reflect test state without its own timer.
@@ -362,7 +362,7 @@ class ControlServerCallbacks : public NimBLEServerCallbacks {
     lamp::overrides.base.setOperatorEditing(false);
     lamp::overrides.shade.setOperatorEditing(false);
     lamp::overrides.brightness.setOperatorEditing(false);
-    resetZonePreviewOnDisconnect();
+    postPendingClearZonePreview();
     // Re-assert wisp paint in case a BLE write stomped the target gradient
     // before disconnecting.
     lamp::overrides.base.reassertHold();
