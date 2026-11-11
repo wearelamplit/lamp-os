@@ -636,6 +636,272 @@ bool decodeExpression(const uint8_t* data, size_t len, ExpressionConfig& out) {
   return true;
 }
 
+namespace {
+
+constexpr uint8_t kSettingsFormat = 1;
+constexpr uint8_t kLampSetup = 0x01;
+constexpr uint8_t kLampNamed = 0x02;
+constexpr uint8_t kLampAdvanced = 0x04;
+constexpr uint8_t kLampWebapp = 0x08;
+constexpr uint8_t kRoleRotation = 0x01;  // the role stores a rotation
+constexpr uint8_t kRoleRotationOn = 0x02;
+constexpr uint8_t kRoleRotationDown = 0x04;
+constexpr uint8_t kHomeEnabled = 0x01;
+constexpr uint8_t kHomeNetworkBound = 0x02;
+constexpr uint8_t kHomeSocialDisabled = 0x04;
+// A byte order is stored as 1 + its ByteOrder value, 0 for the variant's.
+static_assert(static_cast<uint8_t>(lampos::led::ByteOrder::GRBW) == 0 &&
+                  static_cast<uint8_t>(lampos::led::ByteOrder::GRB) == 1 &&
+                  static_cast<uint8_t>(lampos::led::ByteOrder::BGR) == 2,
+              "stored byte order codes");
+constexpr uint8_t kByteOrderCodes = 4;
+
+// Writes bytes to a buffer, or compares them with a stored blob.
+class SettingsSink {
+ public:
+  explicit SettingsSink(uint8_t* out) : out_(out) {}
+  SettingsSink(const uint8_t* expect, size_t len) : expect_(expect), expectLen_(len) {}
+  void put(uint8_t b) {
+    if (out_) {
+      out_[n_] = b;
+    } else {
+      match_ = match_ && n_ < expectLen_ && expect_[n_] == b;
+    }
+    ++n_;
+  }
+  void bytes(const char* p, size_t n) {
+    for (size_t i = 0; i < n; ++i) put(static_cast<uint8_t>(p[i]));
+  }
+  void str(const char* p, size_t n) {
+    put(static_cast<uint8_t>(n));
+    bytes(p, n);
+  }
+  void prefix(const std::string& s, size_t max) {
+    str(s.data(), utf8PrefixLen(s.data(), s.size(), max));
+  }
+  size_t length() const { return n_; }
+  bool matched() const { return match_ && n_ == expectLen_; }
+
+ private:
+  uint8_t* out_ = nullptr;
+  const uint8_t* expect_ = nullptr;
+  size_t expectLen_ = 0;
+  size_t n_ = 0;
+  bool match_ = true;
+};
+
+// normalizeLampName(name) into `out`, taking no heap.
+size_t normalizedName(const std::string& name, char (&out)[kMaxLampNameLen + 1]) {
+  size_t n = 0;
+  for (const char c : name) {
+    if (std::isspace(static_cast<unsigned char>(c))) continue;
+    out[n++] = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (n == sizeof(out)) break;
+  }
+  return utf8PrefixLen(out, n, kMaxLampNameLen);
+}
+
+uint8_t byteOrderCode(const std::string& order) {
+  lampos::led::ByteOrder o;
+  return lampos::led::byteOrderFromString(order.c_str(), o) ? 1 + static_cast<uint8_t>(o) : 0;
+}
+
+template <class Role>
+void writeRole(SettingsSink& s, const Role& role) {
+  const bool rotation = storesRotation(role);
+  s.put((rotation ? kRoleRotation : 0) | (rotation && role.rotation.on ? kRoleRotationOn : 0) |
+        (rotation && role.rotation.dir == RotationDir::Down ? kRoleRotationDown : 0));
+  s.put(byteOrderCode(role.byteOrder));
+  s.put(rotation ? role.rotation.periodS : 0);
+  const size_t segments = std::min(role.segments.size(), kMaxSegments);
+  s.put(static_cast<uint8_t>(segments));
+  for (size_t i = 0; i < segments; ++i) {
+    const SegmentSettings& seg = role.segments[i];
+    s.prefix(seg.name, kMaxSegmentNameLen);
+    s.put(seg.px);
+    s.put(seg.pin);
+    const size_t colors = std::min(seg.colors.size(), kMaxSurfaceColors);
+    s.put(static_cast<uint8_t>(colors));
+    for (size_t c = 0; c < colors; ++c) {
+      s.put(seg.colors[c].r);
+      s.put(seg.colors[c].g);
+      s.put(seg.colors[c].b);
+      s.put(seg.colors[c].w);
+    }
+  }
+}
+
+void writeSettings(SettingsSink& s, const LampSettings& lamp, const BaseSettings& base,
+                   const ShadeSettings& shade, const HomeModeSettings& homeMode) {
+  s.put(kSettingsFormat);
+  s.put((lamp.setup ? kLampSetup : 0) | (lamp.named ? kLampNamed : 0) |
+        (lamp.advancedEnabled ? kLampAdvanced : 0) | (lamp.webappEnabled ? kLampWebapp : 0));
+  s.put(lamp.brightness);
+  s.put(lamp.apBootMinutes);
+  s.put(lamp.brightnessCeiling);
+  s.put(static_cast<uint8_t>(lamp.socialMode));
+  char name[kMaxLampNameLen + 1];
+  s.str(name, normalizedName(lamp.name, name));
+  s.prefix(lamp.password, kMaxPasswordLen);
+  writeRole(s, base);
+  writeRole(s, shade);
+  const size_t knockout = std::min(base.knockoutPixels.size(), kMaxKnockoutLevels);
+  s.put(static_cast<uint8_t>(knockout));
+  for (size_t i = 0; i < knockout; ++i) s.put(base.knockoutPixels[i]);
+  s.put((homeMode.enabled ? kHomeEnabled : 0) | (homeMode.networkBound ? kHomeNetworkBound : 0) |
+        (homeMode.socialDisabled ? kHomeSocialDisabled : 0));
+  s.put(homeMode.brightness);
+  s.prefix(homeMode.ssid, kMaxSsidLen);
+  // The first type ids that are valid, as fromJson keeps them.
+  size_t types = 0;
+  for (const auto& t : homeMode.disabledExpressionTypes) {
+    if (types < kMaxDisabledExpressionTypes && isExpressionTypeId(t.c_str())) ++types;
+  }
+  s.put(static_cast<uint8_t>(types));
+  for (const auto& t : homeMode.disabledExpressionTypes) {
+    if (types == 0) break;
+    if (!isExpressionTypeId(t.c_str())) continue;
+    s.str(t.data(), t.size());
+    --types;
+  }
+}
+
+class SettingsReader {
+ public:
+  SettingsReader(const uint8_t* data, size_t len) : p_(data), end_(data + len) {}
+  bool u8(uint8_t& out) {
+    if (p_ == end_) return false;
+    out = *p_++;
+    return true;
+  }
+  // A length byte, then that many bytes; false past `max` or the end.
+  bool str(size_t max, std::string& out) {
+    uint8_t n;
+    if (!u8(n) || n > max || static_cast<size_t>(end_ - p_) < n) return false;
+    out.assign(reinterpret_cast<const char*>(p_), n);
+    p_ += n;
+    return true;
+  }
+  bool atEnd() const { return p_ == end_; }
+
+ private:
+  const uint8_t* p_;
+  const uint8_t* end_;
+};
+
+template <class Role>
+bool readRole(SettingsReader& r, Role& role, const Color& fallback) {
+  uint8_t flags, order, period, segments;
+  if (!r.u8(flags) || (flags & ~(kRoleRotation | kRoleRotationOn | kRoleRotationDown)) ||
+      !r.u8(order) || order >= kByteOrderCodes || !r.u8(period) || !r.u8(segments) ||
+      segments > kMaxSegments) {
+    return false;
+  }
+  std::vector<SegmentSettings> segs(segments);
+  for (SegmentSettings& seg : segs) {
+    uint8_t pin, colors;
+    if (!r.str(kMaxSegmentNameLen, seg.name) || !r.u8(seg.px) || !r.u8(pin) || !r.u8(colors) ||
+        colors > kMaxSurfaceColors) {
+      return false;
+    }
+    seg.pin = isStripDataPin(pin) ? pin : 0;
+    seg.colors.resize(colors);
+    for (Color& c : seg.colors) {
+      if (!r.u8(c.r) || !r.u8(c.g) || !r.u8(c.b) || !r.u8(c.w)) return false;
+    }
+    if (seg.colors.empty()) seg.colors.push_back(fallback);
+  }
+  if (!segs.empty()) role.segments = std::move(segs);
+  clampSumPx(role.segments);
+  role.byteOrder =
+      order ? lampos::led::byteOrderToString(static_cast<lampos::led::ByteOrder>(order - 1)) : "";
+  role.rotation = Role::kDefaultRotation;
+  if ((flags & kRoleRotation) && role.rotatable()) {
+    role.rotation = {(flags & kRoleRotationOn) != 0, clampRotationPeriodS(period),
+                     (flags & kRoleRotationDown) ? RotationDir::Down : RotationDir::Up};
+  }
+  return true;
+}
+
+bool readSettings(SettingsReader& r, LampSettings& lamp, BaseSettings& base, ShadeSettings& shade,
+                  HomeModeSettings& homeMode) {
+  uint8_t format, flags, mode;
+  std::string password;
+  if (!r.u8(format) || format != kSettingsFormat || !r.u8(flags) ||
+      (flags & ~(kLampSetup | kLampNamed | kLampAdvanced | kLampWebapp)) ||
+      !r.u8(lamp.brightness) || !r.u8(lamp.apBootMinutes) || !r.u8(lamp.brightnessCeiling) ||
+      !r.u8(mode) || !r.str(kMaxLampNameLen, lamp.name) || !r.str(kMaxPasswordLen, password)) {
+    return false;
+  }
+  lamp.setup = flags & kLampSetup;
+  lamp.named = flags & kLampNamed;
+  lamp.advancedEnabled = flags & kLampAdvanced;
+  lamp.webappEnabled = flags & kLampWebapp;
+  lamp.socialMode = static_cast<SocialMode>(mode > 2 ? 1 : mode);
+  lamp.name = normalizeLampName(std::move(lamp.name));
+  if (!password.empty()) lamp.password = std::move(password);
+  if (!readRole(r, base, kBaseDefaultColor) || !readRole(r, shade, kShadeDefaultColor)) {
+    return false;
+  }
+  uint8_t knockout;
+  if (!r.u8(knockout)) return false;
+  base.knockoutPixels.resize(base.sumPx(), 100);
+  for (size_t i = 0; i < knockout; ++i) {
+    uint8_t level;
+    if (!r.u8(level)) return false;
+    if (i < base.knockoutPixels.size()) base.knockoutPixels[i] = level;
+  }
+  uint8_t types;
+  if (!r.u8(flags) || (flags & ~(kHomeEnabled | kHomeNetworkBound | kHomeSocialDisabled)) ||
+      !r.u8(homeMode.brightness) || !r.str(kMaxSsidLen, homeMode.ssid) || !r.u8(types) ||
+      types > kMaxDisabledExpressionTypes) {
+    return false;
+  }
+  homeMode.enabled = flags & kHomeEnabled;
+  homeMode.networkBound = flags & kHomeNetworkBound;
+  homeMode.socialDisabled = flags & kHomeSocialDisabled;
+  homeMode.disabledExpressionTypes.clear();
+  for (uint8_t i = 0; i < types; ++i) {
+    std::string type;
+    if (!r.str(kMaxExpressionTypeLen, type)) return false;
+    if (isExpressionTypeId(type.c_str())) homeMode.disabledExpressionTypes.push_back(type);
+  }
+  return r.atEnd();
+}
+
+}  // namespace
+
+size_t encodeSettings(const LampSettings& lamp, const BaseSettings& base,
+                      const ShadeSettings& shade, const HomeModeSettings& homeMode,
+                      uint8_t* out) {
+  SettingsSink s(out);
+  writeSettings(s, lamp, base, shade, homeMode);
+  return s.length();
+}
+
+bool settingsMatch(const uint8_t* data, size_t len, const LampSettings& lamp,
+                   const BaseSettings& base, const ShadeSettings& shade,
+                   const HomeModeSettings& homeMode) {
+  SettingsSink s(data, len);
+  writeSettings(s, lamp, base, shade, homeMode);
+  return s.matched();
+}
+
+bool decodeSettings(const uint8_t* data, size_t len, LampSettings& lamp, BaseSettings& base,
+                    ShadeSettings& shade, HomeModeSettings& homeMode) {
+  LampSettings l = lamp;
+  BaseSettings b = base;
+  ShadeSettings s = shade;
+  HomeModeSettings h = homeMode;
+  SettingsReader r(data, len);
+  if (!readSettings(r, l, b, s, h)) return false;
+  lamp = std::move(l);
+  base = std::move(b);
+  shade = std::move(s);
+  homeMode = std::move(h);
+  return true;
+}
+
 static void eraseSplitKeys(ConfigStore& store) {
   // Every record slot any build wrote, whatever the count says: a split save
   // cut short before its count landed leaves records the count never named.

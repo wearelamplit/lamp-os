@@ -17,11 +17,17 @@ inline std::string asciiLower(std::string s) {
 // Longest stored lamp name, the HELLO name field's width.
 constexpr size_t kMaxLampNameLen = 32;
 
+// The longest prefix of the `len` bytes at `s` that is at most `max` bytes
+// and splits no UTF-8 sequence.
+inline size_t utf8PrefixLen(const char* s, size_t len, size_t max) {
+  if (len <= max) return len;
+  while (max > 0 && (static_cast<unsigned char>(s[max]) & 0xC0) == 0x80) --max;
+  return max;
+}
+
 // Shortens `s` to at most `max` bytes without splitting a UTF-8 sequence.
 inline void truncateUtf8(std::string& s, size_t max) {
-  if (s.size() <= max) return;
-  while (max > 0 && (static_cast<unsigned char>(s[max]) & 0xC0) == 0x80) --max;
-  s.resize(max);
+  s.resize(utf8PrefixLen(s.data(), s.size(), max));
 }
 
 // Canonical stored lamp name, at most kMaxLampNameLen bytes. Whitespace is dropped, not just trimmed: the

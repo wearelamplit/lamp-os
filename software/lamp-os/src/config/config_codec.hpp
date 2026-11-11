@@ -7,6 +7,7 @@
 
 #include "config_store.hpp"
 #include "util/json_writer.hpp"
+#include "util/str.hpp"
 #include "config_types.hpp"
 
 // JSON codec for the persisted "cfg" blob. Pure functions over the config
@@ -95,6 +96,34 @@ constexpr size_t kMaxExpressionRecordLen =
     5 * kMaxExpressionParams;
 size_t encodeExpression(const ExpressionConfig& expr, uint8_t* out);
 bool decodeExpression(const uint8_t* data, size_t len, ExpressionConfig& out);
+
+// Everything stored but the expressions, as one compact blob: a format byte,
+// the lamp section, base and shade (segments, pins, byte order, rotation), the
+// base knockout levels, then home mode. Decoding loads the model fromJson
+// loads from the same model's stored JSON, field for field, so every JSON
+// shape built from the model is unchanged (pinned by test_config_settings_codec).
+// colorsEditable is not stored: applyDefaults sets it from the variant.
+// Longest at the caps is kMaxSettingsLen; `out` must hold kMaxSettingsBlobLen.
+constexpr size_t kMaxKnockoutLevels = 255;  // one per pixel, and a role holds 255
+constexpr size_t kMaxSettingsLen =
+    1 + (5 + 1 + kMaxLampNameLen + 1 + kMaxPasswordLen) +
+    2 * (4 + kMaxSegments * (1 + kMaxSegmentNameLen + 3 + 4 * kMaxSurfaceColors)) +
+    (1 + kMaxKnockoutLevels) +
+    (2 + 1 + kMaxSsidLen + 1 + kMaxDisabledExpressionTypes * (1 + kMaxExpressionTypeLen));
+constexpr size_t kMaxSettingsBlobLen = 1024;
+static_assert(kMaxSettingsLen <= kMaxSettingsBlobLen, "the settings blob holds the caps");
+size_t encodeSettings(const LampSettings& lamp, const BaseSettings& base,
+                      const ShadeSettings& shade, const HomeModeSettings& homeMode,
+                      uint8_t* out);
+// True when `data` is exactly what encodeSettings writes for the model.
+bool settingsMatch(const uint8_t* data, size_t len, const LampSettings& lamp,
+                   const BaseSettings& base, const ShadeSettings& shade,
+                   const HomeModeSettings& homeMode);
+// False, leaving the model untouched, for a truncated blob, an unknown format
+// byte, trailing bytes, a count or length over its cap, or an unknown flag or
+// code. Fields a role leaves out keep the value passed in, as fromJson's do.
+bool decodeSettings(const uint8_t* data, size_t len, LampSettings& lamp, BaseSettings& base,
+                    ShadeSettings& shade, HomeModeSettings& homeMode);
 
 // Invalid and NoHeap come from saveRawJson, Held from Config while a stored
 // web document waits for its reboot; each leaves the store untouched, as
