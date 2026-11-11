@@ -11,6 +11,7 @@ import 'package:lamp_app/core/ble/ble_client.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/core/widgets/form_section.dart';
+import 'package:lamp_app/features/control/application/control_notifier.dart';
 import 'package:lamp_app/features/control/application/dev_mode.dart';
 import 'package:lamp_app/features/inventory/application/inventory_notifier.dart';
 import 'package:lamp_app/features/inventory/domain/inventory_lamp.dart';
@@ -231,5 +232,40 @@ void main() {
     await _pumpToData(tester);
 
     expect(find.text('GRBW'), findsWidgets);
+  });
+
+  group('data pin', () {
+    const pinned = '[{"name":"Shade","px":38,"pin":27,"colors":[]}]';
+
+    testWidgets('hidden when advanced is locked', (tester) async {
+      final c = await _makeContainer(shadeSegmentsJson: pinned);
+      addTearDown(c.dispose);
+      await tester.pumpWidget(_wrap(c));
+      await _pumpToData(tester);
+
+      expect(find.text('Data pin'), findsNothing);
+      expect(find.text('GPIO 27'), findsNothing);
+    });
+
+    testWidgets('shows the saved pin and stages a new pick when unlocked',
+        (tester) async {
+      final c = await _makeContainer(shadeSegmentsJson: pinned);
+      addTearDown(c.dispose);
+      await c.read(devModeProvider.notifier).enable();
+      await tester.pumpWidget(_wrap(c));
+      await _pumpToData(tester);
+
+      expect(find.text('Data pin'), findsOneWidget);
+      expect(find.text('GPIO 27'), findsOneWidget);
+
+      await tester.tap(find.text('Data pin'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('GPIO 13'));
+      await tester.pumpAndSettle();
+
+      final state = c.read(controlNotifierProvider(_devId)).value!;
+      expect(state.shade.segments.single.pin, 13);
+      expect(find.text('GPIO 13'), findsOneWidget);
+    });
   });
 }
