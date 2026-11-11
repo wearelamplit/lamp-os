@@ -966,6 +966,76 @@ void test_the_tick_after_unseen_saturates_is_saved() {
   TEST_ASSERT_EQUAL_UINT16(UINT16_MAX, again.peer(m.data(), 0).unseenMin);
 }
 
+
+// A refused step holds the score one short of it, either way, and moves no
+// disposition; the next allowed nudge steps.
+void test_nudge_held_short_of_a_step() {
+  DispositionStore ds(100);
+  const auto m = peerMac(1);
+  ds.nudge(m.data(), 120, 0, 0);
+  NudgeResult r = ds.nudge(m.data(), 20, 0, 0, /*mayStep=*/false);
+  TEST_ASSERT_FALSE(r.stepped);
+  TEST_ASSERT_EQUAL_INT8(120, r.scoreFrom);
+  TEST_ASSERT_EQUAL_INT8(126, r.scoreTo);
+  TEST_ASSERT_EQUAL_UINT8(3, ds.peer(m.data(), 0).disp);
+  r = ds.nudge(m.data(), 1, 0, 0);
+  TEST_ASSERT_TRUE(r.stepped);
+  ds.nudge(m.data(), -126, 0, 0);
+  r = ds.nudge(m.data(), -50, 0, 0, false);
+  TEST_ASSERT_EQUAL_INT8(-126, r.scoreTo);
+  TEST_ASSERT_EQUAL_UINT8(4, ds.peer(m.data(), 0).disp);
+}
+
+// The unseen clock stands still while held and while the engine is off, in
+// reads and in what a flush stores, and runs on from where it stopped.
+void test_held_clocks_stop_unseen() {
+  InMemoryConfigStore backing;
+  DispositionStore ds(100);
+  ds.attachStore(&backing);
+  const auto m = peerMac(1);
+  const uint64_t min = 60000;
+  ds.set(m.data(), 4, 0);
+  TEST_ASSERT_EQUAL_UINT16(7, ds.peer(m.data(), 7 * min).unseenMin);
+  ds.holdClocks(true, 7 * min);
+  TEST_ASSERT_EQUAL_UINT16(7, ds.peer(m.data(), 300 * min).unseenMin);
+  ds.flushNow(300 * min);
+  ds.holdClocks(false, 300 * min);
+  TEST_ASSERT_EQUAL_UINT16(10, ds.peer(m.data(), 303 * min).unseenMin);
+  ds.setEngineEnabled(false, 303 * min);
+  TEST_ASSERT_EQUAL_UINT16(10, ds.peer(m.data(), 900 * min).unseenMin);
+  ds.setEngineEnabled(true, 900 * min);
+  TEST_ASSERT_EQUAL_UINT16(12, ds.peer(m.data(), 902 * min).unseenMin);
+  // Released while the engine is off, the clock still waits for the engine.
+  ds.holdClocks(true, 902 * min);
+  ds.setEngineEnabled(false, 902 * min);
+  ds.holdClocks(false, 950 * min);
+  TEST_ASSERT_EQUAL_UINT16(12, ds.peer(m.data(), 990 * min).unseenMin);
+
+  DispositionStore reloaded(100);
+  reloaded.attachStore(&backing);
+  reloaded.load(0);
+  TEST_ASSERT_EQUAL_UINT16(7, reloaded.peer(m.data(), 0).unseenMin);
+}
+
+// peerAt walks every row once in key order.
+void test_peer_at_lists_every_row() {
+  DispositionStore ds(100);
+  for (uint8_t i : {9, 2, 5}) ds.set(peerMac(i).data(), i == 2 ? 1 : 5, 0);
+  TEST_ASSERT_EQUAL(3, ds.peerCount());
+  uint8_t mac[6];
+  PeerRecord r;
+  std::array<uint8_t, 6> last{};
+  for (size_t i = 0; i < 3; ++i) {
+    TEST_ASSERT_TRUE(ds.peerAt(i, mac, r, 0));
+    std::array<uint8_t, 6> key;
+    std::memcpy(key.data(), mac, 6);
+    TEST_ASSERT_TRUE(key > last);
+    TEST_ASSERT_EQUAL_UINT8(ds.peer(mac, 0).disp, r.disp);
+    last = key;
+  }
+  TEST_ASSERT_FALSE(ds.peerAt(3, mac, r, 0));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_unknown_peer_returns_default);
@@ -1012,5 +1082,8 @@ int main(int, char**) {
   RUN_TEST(test_the_tick_reaching_saturation_is_saved);
   RUN_TEST(test_an_oversized_format1_blob_is_refused);
   RUN_TEST(test_the_tick_after_unseen_saturates_is_saved);
+  RUN_TEST(test_nudge_held_short_of_a_step);
+  RUN_TEST(test_held_clocks_stop_unseen);
+  RUN_TEST(test_peer_at_lists_every_row);
   return UNITY_END();
 }
