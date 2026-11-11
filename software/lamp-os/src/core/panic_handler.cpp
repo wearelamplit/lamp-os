@@ -8,16 +8,25 @@
 
 #include <Arduino.h>
 #include <esp32-hal.h>
+#include <esp_private/panic_internal.h>
 #include <rom/ets_sys.h>
 
 #include "core/crash_record.hpp"
 
+// Arduino-ESP32 calls this hook from __wrap_esp_panic_handler, which runs only
+// when the link carries -Wl,--wrap=esp_panic_handler (platformio.ini).
+extern "C" void __real_esp_panic_handler(panic_info_t* info);
+
 static void lamp_panic_handler(arduino_panic_info_t* info, void* arg) {
   (void)arg;
-  lamp::crash_record::capturePanic(info->reason, info->pc, info->backtrace,
+  // An abort reaches this hook as the CPU exception that carried it. The IDF
+  // replaces that with the abort's message, which a task-watchdog abort lacks.
+  const char* reason =
+      g_panic_abort ? lamp::crash_record::abortReason(g_panic_abort_details) : info->reason;
+  lamp::crash_record::capturePanic(reason, info->pc, info->backtrace,
                                    info->backtrace_len, info->core);
   ets_printf("\n\n[LAMP PANIC]\n");
-  ets_printf("  reason: %s\n", info->reason ? info->reason : "(null)");
+  ets_printf("  reason: %s\n", reason ? reason : "(null)");
   ets_printf("  core:   %d\n", info->core);
   ets_printf("  pc:     %p\n", info->pc);
   ets_printf("  bt_len: %u%s%s\n",
@@ -31,5 +40,8 @@ static void lamp_panic_handler(arduino_panic_info_t* info, void* arg) {
 }
 
 void lamp_register_panic_handler() {
+  // Fails the link when the wrap flag is missing. Without it the IDF calls
+  // esp_panic_handler directly and this hook never runs.
+  asm volatile("" : : "r"(&__real_esp_panic_handler));
   set_arduino_panic_handler(lamp_panic_handler, nullptr);
 }

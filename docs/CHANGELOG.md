@@ -20,6 +20,16 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   straight away. Lamps and wisps also forget a message they've seen after
   20 seconds, so a lamp still on older firmware is heard again at most 20
   seconds after the last message it sent before restarting.
+- **A crash record says where the lamp crashed.** After a crash or a stall
+  the task watchdog catches, the lamp's crash record (`lastCrash` in the
+  lamp's settings) now carries the core, the code address, the first few
+  backtrace addresses and the uptime at the moment it happened. Before, it
+  held only the reset type and the heap figures, with an uptime of 0 when the
+  lamp stalled before its first check.
+- **Web Config's on-time picker sticks.** Choosing how long Web Config stays
+  up after boot (say 5 min) on a lamp that was already set up saved nothing,
+  and the next boot still gave 2 minutes. The choice now applies from the next
+  boot, and the app reads back what you chose.
 
 ## 1.3.3
 

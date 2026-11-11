@@ -233,32 +233,6 @@ JsonDocument Config::asJsonDocument() {
   return doc;
 };
 
-static void emitLastCrash(JsonDocument& doc, const crash_record::Record& rec) {
-  if (rec.count == 0) return;
-  JsonObject o = doc["lastCrash"].to<JsonObject>();
-  o["count"] = rec.count;
-  o["reset"] = rec.resetReason;
-  o["fw"] = rec.fwVersion;
-  if (!rec.snapshotValid) return;
-  const crash_record::Snapshot& s = rec.snap;
-  o["uptimeMs"] = s.uptimeMs;
-  o["minLargestBlock"] = s.minLargestBlock;
-  o["minFreeHeap"] = s.minFreeHeap;
-  o["rosterPeak"] = s.rosterPeak;
-  if (s.core < 0) return;
-  char hex[11];
-  o["reason"] = static_cast<const char*>(s.reason);
-  o["core"] = s.core;
-  std::snprintf(hex, sizeof(hex), "0x%08x", static_cast<unsigned>(s.pc));
-  o["pc"] = hex;
-  JsonArray bt = o["bt"].to<JsonArray>();
-  for (uint32_t addr : s.backtrace) {
-    if (addr == 0) break;
-    std::snprintf(hex, sizeof(hex), "0x%08x", static_cast<unsigned>(addr));
-    bt.add(hex);
-  }
-}
-
 JsonDocument Config::asLampJson() {
   JsonDocument doc;
   doc["name"] = lamp.name;
@@ -300,7 +274,7 @@ JsonDocument Config::asLampJson() {
     doc["otaSendingTo"] = macBuf;
   }
   doc["resetReason"] = static_cast<uint8_t>(esp_reset_reason());
-  emitLastCrash(doc, crash_record::last());
+  crash_record::emitLastCrash(doc, crash_record::last());
   return doc;
 }
 
