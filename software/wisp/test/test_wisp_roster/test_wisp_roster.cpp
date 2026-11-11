@@ -1046,6 +1046,8 @@ void test_state_record_gone_once_fade_retires(void) {
   lamp_protocol::WispDriftFade f{};
   TEST_ASSERT_EQUAL(lamp_protocol::WispDriftFadeLookup::None,
                     fadeAt(r, kDriftStartMs + 60000, f));
+  TEST_ASSERT_EQUAL(lamp_protocol::WispDriftFadeLookup::None,
+                    fadeAt(r, kDriftStartMs + 70000, f));
 }
 
 void test_state_record_gone_after_set_lamp_paint(void) {

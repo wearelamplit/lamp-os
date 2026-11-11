@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 #include <lampos/protocol/wisp.hpp>
 
@@ -442,12 +443,14 @@ void test_state_malformed_trailer_reads_none() {
   buildTrailerFrame(f, 10, 5, true);
   lp::ParsedWispState ws{};
   lp::WispDriftFade got{};
-  // Truncated: the last TLV's len runs past the frame.
+  // Truncated: the last TLV's len byte is past the frame. The trailer sits in
+  // an exact-size buffer so a read past it trips ASan.
   TEST_ASSERT_TRUE(lp::parseWispState(f.full, f.fullLen - 1, ws));
   TEST_ASSERT_EQUAL_UINT8(10, ws.count);
   TEST_ASSERT_NOT_NULL(ws.w);
+  const std::vector<uint8_t> exact(ws.trailer, ws.trailer + ws.trailerLen);
   TEST_ASSERT_EQUAL(lp::WispDriftFadeLookup::None,
-                    lp::lookupWispDriftFade(ws.trailer, ws.trailerLen, 0, got));
+                    lp::lookupWispDriftFade(exact.data(), exact.size(), 0, got));
   // A TLV value runs past the frame.
   buildTrailerFrame(f, 10, 5, false);
   TEST_ASSERT_TRUE(lp::parseWispState(f.full, f.fullLen - 1, ws));
