@@ -231,9 +231,10 @@ static void race(std::function<void()>& hook, const std::function<void()>& inFli
     cv.wait_for(lk, std::chrono::milliseconds(100), [&] { return racerDone; });
   };
   std::thread t(inFlight);
+  bool reached = false;
   {
     std::unique_lock<std::mutex> lk(m);
-    cv.wait(lk, [&] { return stalled; });
+    reached = cv.wait_for(lk, std::chrono::seconds(1), [&] { return stalled; });
   }
   racer();
   {
@@ -243,6 +244,7 @@ static void race(std::function<void()>& hook, const std::function<void()>& inFli
   cv.notify_all();
   t.join();
   hook = nullptr;
+  TEST_ASSERT_TRUE_MESSAGE(reached, "the in-flight call never reached the hooked radio call");
 }
 
 void test_pause_racing_a_disconnect_still_holds() {
