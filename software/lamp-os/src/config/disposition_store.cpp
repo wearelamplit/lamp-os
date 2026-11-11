@@ -340,7 +340,9 @@ void DispositionStore::tickHour(uint64_t nowMs) {
   if (flags_ & kFlagEngineOn) {
     for (Row& r : entries_) {
       // A stored age still short of saturation goes stale until the next flush.
-      aging = aging || r.meetAgeH < UINT8_MAX || unseenMin(r, now) < UINT16_MAX;
+      // An unseen age that saturated within the last hour may be stored short.
+      const uint32_t unseen = now > r.seenAtMin ? now - r.seenAtMin : 0;
+      aging = aging || r.meetAgeH < UINT8_MAX || unseen < UINT16_MAX + 60u;
       if (r.meetAgeH < UINT8_MAX) ++r.meetAgeH;
     }
   }

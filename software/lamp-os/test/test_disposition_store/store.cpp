@@ -945,6 +945,27 @@ void test_an_oversized_format1_blob_is_refused() {
   TEST_ASSERT_EQUAL(DispositionStore::kMax, ds.rowCapacity());
 }
 
+// The tick after the unseen age saturates saves it, so it reloads saturated.
+void test_the_tick_after_unseen_saturates_is_saved() {
+  InMemoryConfigStore backing;
+  DispositionStore ds(100);
+  ds.attachStore(&backing);
+  const auto m = peerMac(1);
+  ds.set(m.data(), 5, 0);
+  const uint64_t at = (UINT16_MAX - 30) * kMinMs;
+  ds.set(m.data(), 4, at);
+  ds.flushNow(at);
+  DispositionStore back(100);
+  reload(back, backing);
+  TEST_ASSERT_EQUAL_UINT16(UINT16_MAX - 30, back.peer(m.data(), 0).unseenMin);
+  TEST_ASSERT_EQUAL_UINT8(UINT8_MAX, back.peer(m.data(), 0).meetAgeH);
+  back.tickHour(kHourMs);
+  back.maybeFlush(kHourMs + kMinMs);
+  DispositionStore again(100);
+  reload(again, backing);
+  TEST_ASSERT_EQUAL_UINT16(UINT16_MAX, again.peer(m.data(), 0).unseenMin);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_unknown_peer_returns_default);
@@ -990,5 +1011,6 @@ int main(int, char**) {
   RUN_TEST(test_the_hourly_tick_alone_flushes_ages);
   RUN_TEST(test_the_tick_reaching_saturation_is_saved);
   RUN_TEST(test_an_oversized_format1_blob_is_refused);
+  RUN_TEST(test_the_tick_after_unseen_saturates_is_saved);
   return UNITY_END();
 }
