@@ -5,7 +5,7 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
-## Unreleased
+## 1.3.5
 
 ### Fixed
 - **My Lamps hides lamps the phone hasn't heard lately again.** A lamp heard
@@ -24,12 +24,15 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   signal from whichever lamp last passed its presence along, so a weak direct
   link could look strong and draw a firmware offer that never got through. It
   now goes by the signal heard straight from that lamp.
-- **A lamp mid-update only takes firmware from the lamp it agreed to.** Pieces
-  from a second lamp still sending to it could land in the new image and fail
-  the whole update at the final check.
-- **A lamp mid-update ignores a finish signal from the wrong sender.** A
-  lamp that had stopped sending to it could fail the update another
-  lamp was still sending.
+- **A lamp mid-update only listens to the lamp it agreed to.** Firmware
+  pieces or a finish signal from a second lamp could
+  land in the new image or fail an update another lamp was still sending.
+- **Frames meant for other lamps no longer crowd out a lamp's own updates.**
+  A busy lamp's duplicate filter filled with other lamps' firmware traffic and
+  could drop or re-apply its own. Only frames addressed to it take a slot now.
+- **Presence frames from a lamp no longer inherit the previous lamp's
+  details.** A short presence frame could keep the update state, channel or
+  variant of the last frame read.
 
 ## 1.3.4
 
