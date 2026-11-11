@@ -12,6 +12,7 @@
 #include "components/network/mesh/mesh_link.hpp"
 #include "util/heap_guard.hpp"
 #include "util/heap_probe.hpp"
+#include "util/loop_stall.hpp"
 #include "util/loop_watchdog.hpp"
 #include "../../version.hpp"
 
@@ -450,6 +451,7 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
   // to re-widen the IWDT before each block (a block holds interrupts off for its
   // whole duration and the tick_hook re-clamps the IWDT between blocks).
   {
+    const KnownLoopStall stall;
     const uint32_t eraseT0 = millis();
     constexpr size_t kBlock = 64u * 1024u;
     const size_t eraseLen = numSectors * kSector;  // sector-aligned, covers image

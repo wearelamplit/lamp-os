@@ -8,6 +8,7 @@
 #include <lampos/protocol/dedup_ring.hpp>
 
 #include "relay_delay.hpp"
+#include "util/loop_stall.hpp"
 
 namespace lamp {
 
@@ -18,7 +19,8 @@ constexpr uint32_t kRelayStaggerWindowMs = 150;
 
 // A queued relay still unsent this long after its fire time is dropped: half
 // the 2 s between statuses in an op's burst, so a copy this lamp sends late
-// never follows the next status it relays and rolls a lamp's cache back.
+// never follows the next status it relays and rolls a lamp's cache back. Only
+// an unannounced loop stall reaches it; a known one relays inline.
 constexpr uint32_t kMaxRelayLateMs = 1000;
 
 #ifdef LAMP_DEBUG
@@ -48,13 +50,13 @@ class RelayStagger {
     LAMP_PROTOCOL_PORTMUX_EXIT(&mux_);
   }
 
-  // False when the table is full or the frame is over BufMax: the caller
-  // relays it now.
+  // False when the table is full, the frame is over BufMax or the loop is in
+  // a known stall (inKnownLoopStall): the caller relays it now.
   bool enqueue(const uint8_t* frame, size_t len, uint8_t msgType,
                const uint8_t sourceMac[6], uint16_t seq, uint32_t nowMs) {
     LAMP_PROTOCOL_PORTMUX_ENTER(&mux_);
     Slot* slot = nullptr;
-    if (len <= BufMax) {
+    if (len <= BufMax && !inKnownLoopStall()) {
       for (Slot& s : slots_) {
         if (!s.used) { slot = &s; break; }
       }

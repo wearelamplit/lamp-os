@@ -28,6 +28,7 @@
 #include "util/dropped_write_log.hpp"
 #include "util/json_escape.hpp"
 #include "util/heap_probe.hpp"
+#include "util/loop_stall.hpp"
 #include "util/loop_watchdog.hpp"
 #include "core/pending_slot_aggregate.hpp"
 #include "core/override_aggregate.hpp"
@@ -1549,6 +1550,7 @@ void disconnectGattClientsForOta() {
 
 bool deinitForWebapp() {
   if (s_bleDown || !NimBLEDevice::isInitialized()) return false;
+  const lamp::KnownLoopStall stall;
   lamp::logHeap("ble-pre");
   disconnectGattClientsForOta();
   NimBLEDevice::getScan()->stop();

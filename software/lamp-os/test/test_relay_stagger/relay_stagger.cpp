@@ -1,7 +1,7 @@
 // Native tests for RelayStagger and relayDelayMs: every queued relay goes out
 // once, byte-identical, at its fire time, only while a TX credit is ready, and
-// is dropped once kMaxRelayLateMs late; the delay desynchronizes relayers per
-// pair and per frame.
+// is dropped once kMaxRelayLateMs late, failing open during a known loop
+// stall; the delay desynchronizes relayers per pair and per frame.
 
 #define LAMP_DEBUG 1  // exercise the debug-gated window counters
 
@@ -310,6 +310,33 @@ void test_wrap() {
   }
 }
 
+// During a known loop stall nothing is queued: enqueue fails open so the
+// caller relays inline. A copy queued before the stall still goes out once
+// after it, and enqueue queues again once the stall ends.
+void test_known_stall_fails_open() {
+  RelayStagger<kBuf, kSlots> s;
+  beginAs(s, 11);
+  Link link;
+  const auto before = frameFor(20);
+  TEST_ASSERT_TRUE(s.enqueue(before.data(), before.size(), kType, kWisp, 20, 6000));
+  {
+    const lamp::KnownLoopStall stall;
+    TEST_ASSERT_TRUE(lamp::inKnownLoopStall());
+    for (uint16_t seq = 21; seq < 21 + kSlots + 2; ++seq) {
+      const auto f = frameFor(seq);
+      TEST_ASSERT_FALSE(s.enqueue(f.data(), f.size(), kType, kWisp, seq, 6000));
+    }
+  }
+  TEST_ASSERT_FALSE(lamp::inKnownLoopStall());
+  TEST_ASSERT_EQUAL_UINT32(kSlots + 2, s.window().failOpen);
+  const auto after = frameFor(40);
+  TEST_ASSERT_TRUE(s.enqueue(after.data(), after.size(), kType, kWisp, 40, 6000));
+  for (uint32_t t = 6000; t <= 6000 + kW + 10; ++t) link.service(s, t);
+  TEST_ASSERT_EQUAL_UINT32(2, link.sent.size());
+  TEST_ASSERT_EQUAL_UINT32(2, s.window().queued);
+  TEST_ASSERT_EQUAL_UINT32(0, s.window().dropped);
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
@@ -325,5 +352,6 @@ int main(int argc, char** argv) {
   RUN_TEST(test_pair_offset_varies);
   RUN_TEST(test_bounds);
   RUN_TEST(test_wrap);
+  RUN_TEST(test_known_stall_fails_open);
   return UNITY_END();
 }
