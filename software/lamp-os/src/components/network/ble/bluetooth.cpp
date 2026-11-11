@@ -142,15 +142,8 @@ class ScanCallbacks : public NimBLEScanCallbacks {
   };
 
   void onScanEnd(const NimBLEScanResults &results, int reason) override {
-    // Skip restart while a phone holds the GATT control service; ble_control
-    // resumes the scan on disconnect. The roster prune runs on the loop tick.
-    if (!ble_control::isScanPaused()) {
-      // Restart the continuous passive scan at its 1.5% duty window/interval.
-      NimBLEScan* scan = NimBLEDevice::getScan();
-      scan->setWindow(BLE_GAP_SCAN_WINDOW_MS);
-      scan->setInterval(BLE_GAP_ADV_INTERVAL_MS);
-      scan->start(0);
-    }
+    // The roster prune runs on the loop tick.
+    ble_control::resumeScanAfterScanEnd();
   }
 } scanCallbacks;
 

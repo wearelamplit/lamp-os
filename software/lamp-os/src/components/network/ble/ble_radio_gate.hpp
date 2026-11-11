@@ -1,0 +1,49 @@
+#pragma once
+
+#include <atomic>
+#include <mutex>
+
+namespace ble_control {
+
+// The advertising and central-scan controls BleRadioGate drives.
+class BleRadio {
+ public:
+  virtual ~BleRadio() = default;
+  virtual void startAdvertising() = 0;
+  virtual void stopAdvertising() = 0;
+  virtual void startScan() = 0;
+  virtual void stopScan() = 0;
+};
+
+// Decides when the lamp's BLE advertising and central scan may run, and is the
+// only caller that starts either. An OTA radio pause holds both; a connected
+// GATT client holds the scan. Each call runs whole against the others, so a
+// hold taken on one task is never undone by a restart racing it on another.
+// Callers on the NimBLE host task are safe: no BleRadio call re-enters here.
+class BleRadioGate {
+ public:
+  explicit BleRadioGate(BleRadio& radio) : radio_(radio) {}
+
+  // Each returns true on the transition and does nothing when already there.
+  bool pauseForOta();
+  bool resumeAfterOta();
+
+  void clientConnected();
+  void clientDisconnected();
+  // NimBLE ended the continuous scan on its own.
+  void scanEnded();
+  void openScanWindow();
+  void closeScanWindow();
+  // Re-emits the advertisement (stop + start) unless the OTA pause holds it.
+  void restartAdvertising();
+
+  bool otaPaused() const { return otaPaused_.load(); }
+
+ private:
+  BleRadio&         radio_;
+  std::mutex        mu_;
+  std::atomic<bool> otaPaused_{false};
+  bool              clientHoldsScan_ = false;
+};
+
+}  // namespace ble_control

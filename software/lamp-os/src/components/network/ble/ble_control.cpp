@@ -35,6 +35,7 @@
 #include "components/firmware/ota_quiet_mode.hpp"
 #include "ble_gap.hpp"
 #include "crypto.hpp"
+#include "components/network/ble/ble_radio_gate.hpp"
 #include "components/network/ble/gatt_layout.hpp"
 #include "components/network/ble/social_scan.hpp"
 #include "components/network/ble/state_notify.hpp"
@@ -96,11 +97,29 @@ static volatile bool         s_clientConnected   = false;
 // Forces effectiveHomeMode TRUE while set; routes CHAR_BRIGHTNESS to
 // home.brightness instead of lamp.brightness.
 static volatile bool         s_homeModePageActive = false;
-// Prevents the central scan from auto-restarting while a phone holds a
-// GATT connection (queried by isScanPaused()).
-static volatile bool         s_scanPausedForGattClient = false;
-// Held true for an OTA window (pauseRadioForOta): quiets adv + scan.
-static volatile bool         s_otaRadioPaused = false;
+
+class NimBleRadio : public BleRadio {
+ public:
+  void startAdvertising() override {
+    if (NimBLEDevice::isInitialized()) NimBLEDevice::getAdvertising()->start();
+  }
+  void stopAdvertising() override {
+    if (NimBLEDevice::isInitialized()) NimBLEDevice::getAdvertising()->stop();
+  }
+  void startScan() override {
+    if (!NimBLEDevice::isInitialized()) return;
+    NimBLEScan* scan = NimBLEDevice::getScan();
+    scan->setWindow(BLE_GAP_SCAN_WINDOW_MS);
+    scan->setInterval(BLE_GAP_ADV_INTERVAL_MS);
+    scan->setActiveScan(false);
+    scan->start(0);
+  }
+  void stopScan() override {
+    if (NimBLEDevice::isInitialized()) NimBLEDevice::getScan()->stop();
+  }
+};
+static NimBleRadio           s_nimBleRadio;
+static BleRadioGate          s_radioGate{s_nimBleRadio};
 // Set by the app (CHAR_EDIT_SESSION social-view selector) while the
 // Social/Network page is open. Gates the duty-cycled passive scan below.
 // Cleared on BLE disconnect.
@@ -130,7 +149,8 @@ static constexpr uint16_t kSupervisionTimeoutUnits = 400;  // 4.0 s (units of 10
 
 bool isClientConnected()   { return s_clientConnected;   }
 bool isHomeModePageActive() { return s_homeModePageActive; }
-bool isScanPaused()        { return s_scanPausedForGattClient; }
+void resumeScanAfterScanEnd() { s_radioGate.scanEnded(); }
+void restartAdvertising()      { s_radioGate.restartAdvertising(); }
 
 void noteAppWriteActivity() { s_lastAppWriteMs.store(lamp::uptimeMs(), std::memory_order_relaxed); }
 
@@ -305,8 +325,7 @@ class ControlServerCallbacks : public NimBLEServerCallbacks {
                              kSupervisionTimeoutUnits);
     s_currentConnHandle = handle;
 
-    s_scanPausedForGattClient = true;
-    NimBLEDevice::getScan()->stop();
+    s_radioGate.clientConnected();
 
     // wifi::tick skips background scans while a client is connected so the
     // radio stays focused on BT.
@@ -323,10 +342,6 @@ class ControlServerCallbacks : public NimBLEServerCallbacks {
   void onDisconnect(NimBLEServer* server, NimBLEConnInfo& connInfo, int reason) override {
     uint16_t handle = connInfo.getConnHandle();
     freeSlot(handle);
-
-    s_scanPausedForGattClient = false;
-    // Resume the continuous scan the connect paused.
-    NimBLEDevice::getScan()->start(0);
 
     s_clientConnected = false;
     s_homeModePageActive = false;
@@ -350,6 +365,7 @@ class ControlServerCallbacks : public NimBLEServerCallbacks {
     // Skip the commit idle window so a quick edit-then-disconnect doesn't
     // lose the user's last change.
     lamp::pendingSlots.forceCommitFlush = true;
+    s_radioGate.clientDisconnected();
 
 #ifdef LAMP_DEBUG
     Serial.printf("[ble_control] Client disconnected, handle=%u reason=%d\n", handle, reason);
@@ -1220,18 +1236,16 @@ void tick() {
   // holds the link; onDisconnect resumes the continuous scan itself.
   {
     const bool active =
-        s_socialViewActive && s_clientConnected && !s_otaRadioPaused;
+        s_socialViewActive && s_clientConnected && !s_radioGate.otaPaused();
     const uint64_t upMs = lamp::uptimeMs();
     if (active && !s_socialScanPrevActive) s_socialScan.arm(upMs);
     s_socialScanPrevActive = active;
     const SocialScanAction act = s_socialScan.step(
         upMs, active, s_lastAppWriteMs.load(std::memory_order_relaxed), s_socialScanTuning);
     if (act == SocialScanAction::OpenWindow) {
-      NimBLEScan* scan = NimBLEDevice::getScan();
-      scan->setActiveScan(false);
-      scan->start(0);
+      s_radioGate.openScanWindow();
     } else if (act == SocialScanAction::CloseWindow) {
-      if (s_scanPausedForGattClient) NimBLEDevice::getScan()->stop();
+      s_radioGate.closeScanWindow();
     }
   }
 
@@ -1307,9 +1321,9 @@ void start(lamp::Config* config) {
   // lifetime and must not be freed by NimBLE.
   s_server->setCallbacks(new ControlServerCallbacks(), false);
 
-  // NimBLE 2.x default is FALSE: advertising does not auto-restart on
-  // disconnect. Without this the lamp goes undiscoverable until reboot.
-  s_server->advertiseOnDisconnect(true);
+  // onDisconnect restarts advertising through s_radioGate so an OTA pause
+  // holds it; a NimBLE-side restart would bypass the pause.
+  s_server->advertiseOnDisconnect(false);
 
   s_service = s_server->createService(SERVICE_UUID);
 
@@ -1512,15 +1526,10 @@ void stop() {
 bool isRunning() { return s_running; }
 
 void pauseRadioForOta() {
-  if (s_otaRadioPaused) return;
-  s_otaRadioPaused = true;
   // Stop both adv and scan so the IDF coex arbiter stops gating WiFi RX
   // during BLE windows. Phone app loses connection briefly; reconnects
   // on resumeRadioAfterOta or after the OTA-driven reboot.
-  if (NimBLEDevice::isInitialized()) {
-    NimBLEDevice::getAdvertising()->stop();
-    NimBLEDevice::getScan()->stop();
-  }
+  if (!s_radioGate.pauseForOta()) return;
   // Also tear down the boot-window SoftAP webapp. AP beacons fire every
   // ~100 ms and contend with the ESP-NOW chunk stream for WiFi airtime;
   // shutting the AP off frees the band for the OTA. The webapp is a
@@ -1568,15 +1577,7 @@ bool deinitForWebapp() {
 bool isDownForWebapp() { return s_bleDown; }
 
 void resumeRadioAfterOta() {
-  if (!s_otaRadioPaused) return;
-  s_otaRadioPaused = false;
-  // Two independent scan-pause flags: OTA and active GATT client. Only
-  // restart if the client flag isn't also holding the scan down.
-  if (!NimBLEDevice::isInitialized()) return;
-  if (!s_scanPausedForGattClient) {
-    NimBLEDevice::getScan()->start(0);
-  }
-  NimBLEDevice::getAdvertising()->start();
+  if (!s_radioGate.resumeAfterOta()) return;
 #ifdef LAMP_DEBUG
   Serial.println("[ble_control] resumed adv + scan after OTA");
 #endif
