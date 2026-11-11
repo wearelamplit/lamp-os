@@ -100,10 +100,15 @@ void test_finish_on_an_empty_history_adds_nothing() {
 // The panic handler stamps the fault's uptime even when the loop never
 // sampled, so the re-arm's setup-time heap figures must still be refused.
 void test_finish_ignores_a_boot_that_died_before_its_loop_sampled() {
-  for (const uint32_t uptimeMs : {0u, 5900u}) {
+  struct Case {
+    uint32_t uptimeMs;
+    uint8_t flags;
+  };
+  for (const Case c : {Case{0, lamp::crash_record::kUnsampled},
+                       Case{5900, lamp::crash_record::kUnsampled}, Case{0, 0}}) {
     History h = historyOf(2);
-    Snapshot rearm = snapshot(uptimeMs, 120000, 110000);
-    rearm.flags = lamp::crash_record::kUnsampled;
+    Snapshot rearm = snapshot(c.uptimeMs, 120000, 110000);
+    rearm.flags = c.flags;
     finish(h, &rearm);
     const BootEntry& e = h.entries[1];
     TEST_ASSERT_EQUAL_UINT32(0, e.uptime);

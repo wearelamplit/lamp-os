@@ -129,11 +129,36 @@ void test_abort_reason_drops_the_caller_address() {
   TEST_ASSERT_NULL(abortReason(nullptr));
 }
 
-void test_loop_sample_clears_unsampled_only() {
+void test_rearm_reads_unsampled_until_the_first_sample() {
   Snapshot s{};
-  s.flags = kUnsampled | kPanicked;
-  TEST_ASSERT_FALSE(loopSampled(s));
   s.flags = kPanicked;
+  s.uptimeMs = 90000;
+  s.rosterPeak = 7;
+  rearm(s, 110580, 127848);
+  TEST_ASSERT_FALSE(loopSampled(s));
+  TEST_ASSERT_EQUAL_INT8(-1, s.core);
+  TEST_ASSERT_EQUAL_UINT8(kUnsampled, s.flags);
+  TEST_ASSERT_EQUAL_UINT16(0, s.rosterPeak);
+
+  recordPanic(s, nullptr, 0x401306d9, nullptr, 0, 1, 1600);
+  TEST_ASSERT_FALSE(loopSampled(s));
+
+  rearm(s, 110580, 127848);
+  takeSample(s, 1200, 29684, 28576, 3);
+  TEST_ASSERT_TRUE(loopSampled(s));
+  takeSample(s, 2200, 31000, 28100, 2);
+  TEST_ASSERT_EQUAL_UINT32(29684, s.minLargestBlock);
+  TEST_ASSERT_EQUAL_UINT32(28100, s.minFreeHeap);
+  TEST_ASSERT_EQUAL_UINT16(3, s.rosterPeak);
+  TEST_ASSERT_EQUAL_UINT32(2200, s.uptimeMs);
+}
+
+// A snapshot without the flag still reads unsampled at the re-arm's uptime 0.
+void test_zero_uptime_reads_unsampled_without_the_flag() {
+  Snapshot s{};
+  s.flags = kPanicked;
+  TEST_ASSERT_FALSE(loopSampled(s));
+  s.uptimeMs = 1000;
   TEST_ASSERT_TRUE(loopSampled(s));
 }
 
@@ -221,7 +246,8 @@ int main(int, char**) {
   RUN_TEST(test_panic_backtrace_shorter_than_the_record_zero_fills);
   RUN_TEST(test_panic_reason_truncates_to_the_record);
   RUN_TEST(test_abort_reason_drops_the_caller_address);
-  RUN_TEST(test_loop_sample_clears_unsampled_only);
+  RUN_TEST(test_rearm_reads_unsampled_until_the_first_sample);
+  RUN_TEST(test_zero_uptime_reads_unsampled_without_the_flag);
   RUN_TEST(test_last_crash_absent_before_any_crash);
   RUN_TEST(test_last_crash_task_watchdog_carries_core_pc_bt_and_uptime);
   RUN_TEST(test_last_crash_names_a_recorded_reason);

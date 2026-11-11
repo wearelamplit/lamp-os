@@ -43,6 +43,23 @@ bool foldBoot(Record& rec, esp_reset_reason_t reason, const Snapshot* rtc,
   return true;
 }
 
+void rearm(Snapshot& s, uint32_t largestBlock, uint32_t minFreeHeap) {
+  s = Snapshot{};
+  s.core = -1;
+  s.minLargestBlock = largestBlock;
+  s.minFreeHeap = minFreeHeap;
+  s.flags = kUnsampled;
+}
+
+void takeSample(Snapshot& s, uint32_t uptimeMs, uint32_t largestBlock, uint32_t minFreeHeap,
+                size_t rosterCount) {
+  if (largestBlock < s.minLargestBlock) s.minLargestBlock = largestBlock;
+  s.minFreeHeap = minFreeHeap;
+  if (rosterCount > s.rosterPeak) s.rosterPeak = static_cast<uint16_t>(rosterCount);
+  s.uptimeMs = uptimeMs;
+  s.flags &= static_cast<uint8_t>(~kUnsampled);
+}
+
 void recordPanic(Snapshot& s, const char* reason, uint32_t pc,
                  const unsigned int* backtrace, unsigned int backtraceLen, int core,
                  uint32_t uptimeMs) {
@@ -114,16 +131,6 @@ struct RtcState {
 RTC_NOINIT_ATTR RtcState s_rtc;
 Record s_last{};
 
-void sample(uint32_t uptimeMs, size_t rosterCount) {
-  Snapshot& s = s_rtc.snap;
-  const uint32_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-  if (largest < s.minLargestBlock) s.minLargestBlock = largest;
-  s.minFreeHeap = heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT);
-  if (rosterCount > s.rosterPeak) s.rosterPeak = static_cast<uint16_t>(rosterCount);
-  s.uptimeMs = uptimeMs;
-  s.flags &= static_cast<uint8_t>(~kUnsampled);
-}
-
 }  // namespace
 
 void boot(uint32_t fwVersion) {
@@ -147,19 +154,18 @@ void boot(uint32_t fwVersion) {
     nvs_close(h);
   }
 
-  s_rtc = RtcState{};
   s_rtc.magic = kRtcMagic;
-  s_rtc.snap.core = -1;
-  s_rtc.snap.minLargestBlock = UINT32_MAX;
-  sample(0, 0);
-  s_rtc.snap.flags = kUnsampled;
+  rearm(s_rtc.snap, heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+        heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT));
 }
 
 void tick(uint32_t nowMs, size_t (*rosterCount)()) {
   static uint32_t s_nextMs = 0;
   if (static_cast<int32_t>(nowMs - s_nextMs) < 0) return;
   s_nextMs = nowMs + kSampleIntervalMs;
-  sample(uptimeMsFrom(esp_timer_get_time()), rosterCount());
+  takeSample(s_rtc.snap, uptimeMsFrom(esp_timer_get_time()),
+             heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+             heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT), rosterCount());
 }
 
 void capturePanic(const char* reason, const void* pc,

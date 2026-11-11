@@ -15,11 +15,11 @@ constexpr size_t kBacktraceLen = 4;
 // uptimeMs past 49.7 days.
 constexpr uint32_t kUptimeSaturated = UINT32_MAX;
 
-// Snapshot::flags bits.
-// The panic handler filled reason/pc/backtrace/core and the fault's uptime.
+// Snapshot::flags bit set once the panic handler filled reason/pc/backtrace/
+// core and the fault's uptime.
 constexpr uint8_t kPanicked = 1u << 0;
-// Set from the re-arm until the loop's first sample: the heap and roster
-// figures are the re-arm's, taken early in setup.
+// Snapshot::flags bit set from the re-arm until the loop's first sample, while
+// the heap and roster figures are the re-arm's, taken early in setup.
 constexpr uint8_t kUnsampled = 1u << 1;
 
 // Last-known state of the running boot, held in RTC memory across a reset.
@@ -62,8 +62,18 @@ void boot(uint32_t fwVersion);
 // only when it samples. Allocation-free.
 void tick(uint32_t nowMs, size_t (*rosterCount)());
 
-// True when the loop sampled the boot's heap and roster figures.
-inline bool loopSampled(const Snapshot& s) { return (s.flags & kUnsampled) == 0; }
+// True when the loop sampled the boot's heap and roster figures. The re-arm's
+// uptime is 0, so a zero uptime also reads unsampled.
+inline bool loopSampled(const Snapshot& s) {
+  return (s.flags & kUnsampled) == 0 && s.uptimeMs != 0;
+}
+
+// Starts `s` for a new boot with the heap figures at the re-arm.
+void rearm(Snapshot& s, uint32_t largestBlock, uint32_t minFreeHeap);
+
+// Folds one loop sample into `s`.
+void takeSample(Snapshot& s, uint32_t uptimeMs, uint32_t largestBlock, uint32_t minFreeHeap,
+                size_t rosterCount);
 
 // The reason to record for an abort's message. abort()'s message ends in its
 // caller's address, which does not fit kReasonLen and which backtrace[3]
