@@ -481,16 +481,24 @@ void Lamp::drainWispState() {
   }
 
   const bool wasActive = compositor.wispActive();
-  const Color prevBase = compositor.wispStateBaseColor();
+  const Color prevHeading = compositor.wispStateHeadingColor();
   uint8_t selfMac[6];
   meshLink.getMyMac(selfMac);
   const bool painted = compositor.applyWispStateSlot(cmd, selfMac, now);
   const bool active = compositor.wispActive();
   if (active != wasActive ||
-      (active && !(compositor.wispStateBaseColor() == prevBase))) {
+      (active && !(compositor.wispStateHeadingColor() == prevHeading))) {
     ble_control::notifyWispStatus();
   }
 #ifdef LAMP_DEBUG
+  if (painted && cmd.fade == lamp_protocol::WispDriftFadeLookup::Record &&
+      compositor.wispFadeSync() != lamp::WispFadeSync::Kept) {
+    Serial.printf("[loop] wispState drift fade %s left=%lums\n",
+                  compositor.wispFadeSync() == lamp::WispFadeSync::Started
+                      ? "start"
+                      : "retime",
+                  static_cast<unsigned long>(cmd.fadeRecord.leftMs));
+  }
   if (painted) {
     const Color base = compositor.wispStateBaseColor();
     const Color shade = compositor.wispStateShadeColor();

@@ -9,6 +9,7 @@
 
 #include "components/network/mesh/pending_slots.cpp"
 #include "render/layer_stack.hpp"
+#include "util/fade.cpp"
 
 namespace lp = lamp_protocol;
 using lamp::Color;
@@ -116,7 +117,7 @@ void test_wisp_layer_renders_state_w() {
 
   lamp::LayerStack stack;
   stack.setWispTarget(base);
-  for (int i = 0; i < 600; ++i) stack.tick(1.0f);
+  for (int i = 0; i < 600; ++i) stack.tick(1.0f, 0);
   // Own scene is saturated RGB with no W; full wisp presence replaces it.
   assertColor(Color(0, 0, 0, 0xC8), stack.composite(Color(200, 100, 50, 0)));
 }

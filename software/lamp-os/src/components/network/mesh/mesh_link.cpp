@@ -492,7 +492,7 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     // static: the 1.4 KB slot is too big for the recv-task stack; handleRecv
     // is the only writer and runs single-threaded on the WiFi recv callback.
     static PendingWispState slot;
-    fillPendingWispState(slot, ws);
+    fillPendingWispState(slot, ws, myMac_);
     postPendingWispState(slot);
   } else if (msgType == lamp_protocol::MSG_OVERRIDE_COLORS) {
     lamp_protocol::ParsedOverrideColors p;
