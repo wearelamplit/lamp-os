@@ -475,6 +475,30 @@ void runSerialCommand(char* line, size_t len) {
     return;
   }
 
+  if (strcmp(line, "reunion.get") == 0) {
+    const lamp::ReunionTuning& t = shadeSocialBehavior.reunionTuning();
+    Serial.printf("[cmd] ok reunion reunionMin=%u reunionX=%u hintCooldownMs=%lu hintOpacity=%u\n",
+                  (unsigned)t.reunionMin, (unsigned)t.reunionX,
+                  (unsigned long)t.hintCooldownMs, (unsigned)t.hintOpacity);
+    return;
+  }
+
+  // `reunion.set <key> <value>`, key a ReunionTuning member; RAM only.
+  if (strncmp(line, "reunion.set ", 12) == 0) {
+    char* key = line + 12;
+    char* sep = strchr(key, ' ');
+    if (sep) *sep = '\0';
+    char* end = nullptr;
+    const unsigned long value = sep ? strtoul(sep + 1, &end, 10) : 0;
+    if (!sep || !isdigit(static_cast<unsigned char>(sep[1])) || *end != '\0' ||
+        !lamp::setReunionTuning(shadeSocialBehavior.reunionTuning(), key, value)) {
+      Serial.println("[cmd] err reunion.set");
+      return;
+    }
+    Serial.printf("[cmd] ok reunion.set %s=%lu\n", key, value);
+    return;
+  }
+
   if (strcmp(line, "cfg.get") == 0) {
     std::string base, shade;
     config.baseSectionJsonCached(base);

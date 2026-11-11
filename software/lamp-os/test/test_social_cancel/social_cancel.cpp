@@ -14,6 +14,11 @@
 #include "../../src/util/fade.cpp"
 #include "../../src/util/gradient.cpp"
 #include "../../src/core/frame_buffer.cpp"
+#include "../../src/config/disposition_store.cpp"
+#include "../../src/util/heap_guard.cpp"
+#include "../../src/behaviors/social_reunion.cpp"
+#include "../../src/behaviors/copycat.cpp"
+#include "../../src/behaviors/roll_cooldown.cpp"
 
 
 static bool g_ignore = false;
@@ -23,6 +28,14 @@ OverrideAggregate overrides;
 PersonalityEngine personalityEngine;
 GreetingTuning PersonalityEngine::greetingFor(const uint8_t*) const { return {}; }
 bool MeshLink::sendColorQuery(const uint8_t*) { return true; }
+const std::vector<NearbyCopy>& PersonalityEngine::nearbyPeers() const {
+  static const std::vector<NearbyCopy> none;
+  return none;
+}
+bool ExpressionManager::triggerInvocation(const ExpressionInvocation&, const uint8_t*, bool,
+                                          TransientSource) {
+  return false;
+}
 bool BehaviorContext::ignoresPeers() const { return g_ignore; }
 }  // namespace lamp
 

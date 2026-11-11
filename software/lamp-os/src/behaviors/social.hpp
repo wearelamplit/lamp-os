@@ -7,10 +7,12 @@
 #include <vector>
 
 #include "behaviors/greetable.hpp"
+#include "behaviors/social_reunion.hpp"
 #include "config/config_types.hpp"
 #include "core/animated_behavior.hpp"
 #include "util/color.hpp"
 #include "util/easing.hpp"
+#include "util/fast_rng.hpp"
 
 namespace lamp {
 
@@ -105,6 +107,10 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
 
   void setMeshLink(MeshLink* m) { meshLink_ = m; }
 
+  // Crowd damping for the colour hint; unset damps by the defaults.
+  void setContagionTuning(const ContagionTuning* t) { contagion_ = t; }
+  ReunionTuning& reunionTuning() { return reunion_; }
+
   void onColorInfo(const uint8_t srcMac[6], const std::vector<Color>& baseStops,
                    const std::vector<Color>& shadeStops) override;
 
@@ -152,6 +158,18 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   static constexpr uint8_t kGradientBlendStep = 21;  // ~255 over ~12 frames
   uint8_t greetedBlend_ = 0;
   std::vector<Color> gradientCache_;
+
+  // True while the social engine tracks peers: it is on and home mode is off.
+  bool tracking_() const;
+  // At a greeting's end, maybe borrow the greeted friend's colour.
+  void maybeColourHint_(uint64_t upMs);
+
+  ReunionTuning reunion_;
+  const ContagionTuning* contagion_ = nullptr;
+  ColourHint colourHint_;
+  FastRng rng_;
+  // True while the greeting playing is a reunion.
+  bool reunionPlaying_ = false;
 };
 
 }  // namespace lamp

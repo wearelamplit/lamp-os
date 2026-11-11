@@ -8,6 +8,7 @@
 #include "components/network/mesh/mesh_link.hpp"
 
 #include "components/network/mesh/lamp_roster.hpp"
+#include "core/compositor.hpp"
 #include "core/personality_engine.hpp"
 #include "core/override_aggregate.hpp"
 #include "behaviors/greetable.hpp"
@@ -18,6 +19,7 @@
 #include "util/fade.hpp"
 #include "util/gradient.hpp"
 #include "util/uptime.hpp"
+#include "expressions/expression_manager.hpp"
 
 namespace lamp {
 
@@ -180,6 +182,10 @@ void SocialBehavior::control() {
   // free of BLE includes.
   const bool greetingNowActive = (animationState != STOPPED);
   if (!greetingNowActive && greetingWasActive_) {
+    // A reunion outlasts the base cooldown, so its cooldown runs from its end.
+    if (reunionPlaying_) markGreeted(greetedMac_, up);
+    reunionPlaying_ = false;
+    maybeColourHint_(up);
     greetedHasMac_ = false;
     appGreeting_ = false;
     if (onGreetingChange_) onGreetingChange_();
@@ -229,7 +235,14 @@ void SocialBehavior::control() {
       arrival);
   if (!haveArrival) return;
 
-  const GreetingTuning tuning = personalityEngine.greetingFor(arrival.mac);
+  GreetingTuning tuning = personalityEngine.greetingFor(arrival.mac);
+  reunionPlaying_ = false;
+  if (arrival.hasMac && tracking_()) {
+    DispositionStore& store = config_->dispositions();
+    reunionPlaying_ = isReunion(store.peer(arrival.mac, up), reunion_);
+    if (reunionPlaying_) tuning = reunionGreeting(tuning, reunion_.reunionX);
+    store.markSeen(arrival.mac, up);
+  }
 
 #ifdef LAMP_DEBUG
   Serial.printf("[social] greet %s (mode=%u frames=%u pulse=%u count=%u)\n",
@@ -237,6 +250,11 @@ void SocialBehavior::control() {
                 (unsigned)tuning.totalFrames,
                 (unsigned)tuning.pulseBackStrength,
                 (unsigned)tuning.pulseBackCount);
+  if (reunionPlaying_) {
+    char id[18];
+    formatBdAddr(arrival.mac, id);
+    Serial.printf("[fondness] reunion %s\n", id);
+  }
 #endif
   lampRoster.acknowledge(arrival.mac);
   foundLampColor = arrival.baseColor;
@@ -299,6 +317,7 @@ void SocialBehavior::triggerGreeting(const PeerView& peer) {
   applyTuning(tuning);
   lampRoster.acknowledge(peer.mac);
   appGreeting_ = true;
+  reunionPlaying_ = false;
   playOnce();
   greetingWasActive_ = true;
   if (onGreetingChange_) onGreetingChange_();
@@ -313,6 +332,32 @@ void SocialBehavior::onColorInfo(const uint8_t srcMac[6],
   if (!greetedHasMac_ || std::memcmp(srcMac, greetedMac_, 6) != 0) return;
   if (baseStops.empty()) return;
   greetedBaseStops_ = baseStops;
+}
+
+bool SocialBehavior::tracking_() const {
+  const bool home = context_ && context_->compositor && context_->compositor->homeMode;
+  return config_ && config_->dispositions().engineEnabled() && !home;
+}
+
+void SocialBehavior::maybeColourHint_(uint64_t upMs) {
+  if (appGreeting_ || !greetedHasMac_ || !tracking_()) return;
+  if (!context_ || !context_->expressionManager) return;
+  const uint8_t disposition = config_->dispositions().peer(greetedMac_, upMs).disp;
+  const size_t nearby = personalityEngine.nearbyPeers().size();
+  const uint8_t chanceRoll = static_cast<uint8_t>(rng_.range(1, 100));
+  if (!colourHint_.roll(disposition, nearby, chanceRoll, upMs, reunion_,
+                        contagion_ ? *contagion_ : ContagionTuning{})) {
+    return;
+  }
+  const Color colour = greetedBaseStops_.empty() ? foundLampColor : greetedBaseStops_[0];
+#ifdef LAMP_DEBUG
+  char id[18];
+  formatBdAddr(greetedMac_, id);
+  Serial.printf("[fondness] colour hint %s\n", id);
+#endif
+  context_->expressionManager->triggerInvocation(
+      colourHintInvocation(colour, reunion_.hintOpacity), greetedMac_,
+      /*broadcast=*/false, TransientSource::Local);
 }
 
 void SocialBehavior::markGreeted(const uint8_t mac[6], uint64_t upMs) {

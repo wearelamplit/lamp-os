@@ -72,6 +72,7 @@ void initBehaviors(lamp::Features features, lamp::Lamp& self) {
     // is per-instance regardless).
     shadeSocialBehavior.setConfig(&config);
     shadeSocialBehavior.setMeshLink(&meshLink);
+    shadeSocialBehavior.setContagionTuning(&socialEchoObserver.tuning());
     compositor.behaviorContext().greeting = &shadeSocialBehavior;
     ble_control::setGreetingStateProvider(
         []() { return shadeSocialBehavior.greetingState(); });
