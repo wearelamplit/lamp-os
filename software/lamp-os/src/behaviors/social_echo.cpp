@@ -12,20 +12,30 @@ namespace lamp {
 
 void SocialEchoObserver::onPeerExpression(const uint8_t sourceMac[6],
                                           const ExpressionInvocation& inv) {
-  if (manager_.ignoresPeers()) return;
+  if (manager_.inHomeMode()) return;
   if (mesh_.isOtaInProgress()) return;
   if (manager_.isAnyTestActive()) return;
 
-  const uint8_t disp = config_.getDisposition(sourceMac);
-
   const uint32_t now = millis();
-  uint32_t fireAt = 0;
-  if (!mirrorDecision(disp, config_.lamp.socialMode,
-                      static_cast<uint8_t>(rng_.range(1, 100)),
-                      rng_.range(0, kMirrorJitterMs), now, cooldown_.ever,
-                      cooldown_.lastMs, fireAt)) {
-    return;
-  }
+  const CopyDecision d = copycat_.decide(
+      sourceMac, config_.getDisposition(sourceMac), config_.lamp.socialMode, inv.hops, now,
+      static_cast<uint8_t>(rng_.range(1, 100)), rng_.range(0, kMirrorJitterMs),
+      nearbyCount_ ? nearbyCount_() : 0,
+      manager_.playedWithin(inv.type.c_str(), copycat_.tuning.copyRollCooldownMs, now));
+  if (d.outcome == CopyOutcome::NoChance) return;
+#ifdef LAMP_DEBUG
+  const char* outcome = d.outcome == CopyOutcome::Fire       ? "fired"
+                        : d.outcome == CopyOutcome::Cooldown ? "cooldown"
+                        : d.outcome == CopyOutcome::SelfEcho ? "self"
+                                                             : "skip";
+  // Print::printf mallocs a line of 64 B or more. Two prints, the peer-sent type
+  // cut to 32, keep each under it.
+  Serial.printf("[fondness] roll %.32s from ", inv.type.c_str());
+  Serial.printf("%02X:%02X:%02X:%02X:%02X:%02X hop %u p=%u%% %s\n", sourceMac[0],
+                sourceMac[1], sourceMac[2], sourceMac[3], sourceMac[4], sourceMac[5],
+                static_cast<unsigned>(d.hops), static_cast<unsigned>(d.pct), outcome);
+#endif
+  if (d.outcome != CopyOutcome::Fire) return;
 
   Pending* slot = nullptr;
   for (auto& p : pending_) {
@@ -34,23 +44,28 @@ void SocialEchoObserver::onPeerExpression(const uint8_t sourceMac[6],
   if (!slot) return;
 
   slot->inv = inv;
+  slot->inv.hops = d.hops;
   std::memcpy(slot->srcMac, sourceMac, 6);
-  slot->fireAt = fireAt;
+  slot->fireAt = d.fireAt;
   slot->used = true;
-  cooldown_.mirrored(now);
+  copycat_.booked(now);
 }
 
 void SocialEchoObserver::tick(uint32_t nowMs) {
-  cooldown_.retire(nowMs);
-  // A mirror booked before home mode began is dropped.
-  if (manager_.ignoresPeers()) {
+  copycat_.retire(nowMs);
+  // A copy booked before home mode began is dropped.
+  if (manager_.inHomeMode()) {
     for (auto& p : pending_) p.used = false;
     return;
   }
   for (auto& p : pending_) {
     if (!p.used) continue;
     if (static_cast<int32_t>(nowMs - p.fireAt) < 0) continue;
-    manager_.triggerInvocation(p.inv, p.srcMac);
+    if (copycat_.announces(p.inv.hops)) {
+      manager_.replayAndAnnounce(p.inv, p.srcMac);
+    } else {
+      manager_.triggerInvocation(p.inv, p.srcMac);
+    }
     p.used = false;
   }
 }

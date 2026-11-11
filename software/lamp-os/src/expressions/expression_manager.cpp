@@ -232,6 +232,11 @@ void ExpressionManager::retireStale(uint32_t nowMs) {
   recentEvents_.retire(nowMs);
   localCooldown_.retire(nowMs);
   cascade_.retireBatchGap(nowMs);
+  recentPlays_.retire(nowMs);
+}
+
+bool ExpressionManager::playedWithin(const char* type, uint32_t windowMs, uint32_t nowMs) const {
+  return recentPlays_.playedWithin(registry_.find(type), windowMs, nowMs);
 }
 
 void ExpressionManager::tickCascade(uint32_t nowMs) {
@@ -260,6 +265,7 @@ void ExpressionManager::tickCascade(uint32_t nowMs) {
 
 void ExpressionManager::emitEvent(const ExpressionEntry& entry) {
   if (!entry.expression) return;
+  recentPlays_.record(registry_.find(entry.type.c_str()), millis());
   announce(shapeOf(entry), paramsOf(entry));
 }
 
@@ -283,6 +289,7 @@ void ExpressionManager::announce(const ExpressionInvocation& shape,
   inv.colors = shape.colors;
   inv.target = shape.target;
   inv.parameters = parametersWithoutCascadeKeys(params);
+  inv.hops = shape.hops;
 
   std::string json;
   serializeInvocation(inv, json);
@@ -438,8 +445,8 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
     return false;
   }
 
-  const SurfacePlan plan =
-      surfacePlan(registry_.find(inv.type.c_str()), invTarget, shadeBuffer, baseBuffer);
+  const ExpressionDescriptor* descriptor = registry_.find(inv.type.c_str());
+  const SurfacePlan plan = surfacePlan(descriptor, invTarget, shadeBuffer, baseBuffer);
   const size_t targetCount = plan.count;
   if (targetCount == 0) return false;
 
@@ -457,7 +464,7 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
     const uint64_t now = uptimeMs();
     if (s_lastDropLogMs == 0 || now - s_lastDropLogMs >= kTransientDropLogMs) {
       s_lastDropLogMs = now;
-      Serial.printf("[expr] transient drop %s (%s, %u in flight)\n", inv.type.c_str(),
+      Serial.printf("[expr] transient drop %.16s (%s, %u in flight)\n", inv.type.c_str(),
                     source == TransientSource::Local ? "local" : "remote",
                     (unsigned)transientExpressions_.size());
     }
@@ -483,7 +490,7 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
                                invTarget, inv.parameters, plan.above);
     if (!expr) {
 #ifdef LAMP_DEBUG
-      Serial.printf("[expr] transient rejected type=%s (unknown type)\n",
+      Serial.printf("[expr] transient rejected type=%.16s (unknown type)\n",
                     inv.type.c_str());
 #endif
       continue;
@@ -521,6 +528,7 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
   }
 
   suppressCascade_ = false;
+  if (triggered) recentPlays_.record(descriptor, nowMs);
 
   // `broadcast` originates a wave from this call, distinct from suppressCascade_
   // which only stops the transient's own trigger() from re-firing one.
@@ -531,6 +539,17 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
 
 bool ExpressionManager::ignoresPeers() const {
   return compositor_ && compositor_->blocksRemote(TransientSource::Remote);
+}
+
+bool ExpressionManager::inHomeMode() const {
+  return compositor_ && compositor_->homeMode;
+}
+
+bool ExpressionManager::replayAndAnnounce(const ExpressionInvocation& inv,
+                                          const uint8_t srcMac[6], TransientSource source) {
+  if (!triggerInvocation(inv, srcMac, /*broadcast=*/false, source)) return false;
+  announce(inv, inv.parameters);
+  return true;
 }
 
 // Evict a one-shot cascade even when isAnimationComplete() never fires; a

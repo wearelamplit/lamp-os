@@ -497,11 +497,18 @@ scale with the number of peers or the mesh's message rate, so each is bounded:
   Test plays nothing here and logs `[expr] transient drop` (every build, at
   most every 5 s), but its cascade still goes out to the crowd
   (`cascadesFrom`), built from the invocation with no Expression made for
-  it; a peer's invocation never re-sends. That type then waits a second
+  it; a peer's invocation never cascades, and a mirrored copy sends at most
+  one MSG_EVENT of its own. That type then waits a second
   (`LocalCooldown`) before the lamp tries it again, so a Test tapped over
   and over while the lamp is short neither retries nor resends each tap. The vector is reserved at
   `ExpressionManager::begin`, and the compositor reserves 16 behavior slots
   past its boot list for transients and live upserts.
+- **Mirror rolls.** `SocialEchoObserver` holds its roll cooldown in a fixed
+  16-slot `RollCooldownTable` (about 200 bytes) and 4 pending copies, so a
+  crowd of any size takes no heap to decide a copy; a full table rolls
+  nothing new until a slot ages out. The self-echo check reads 16 fixed
+  per-type play stamps (`RecentPlays`, 128 bytes) in `ExpressionManager`.
+  Detail in `docs/dev/expressions.md`.
 - **Moments.** A Moment allocates only its transients, one at a time: a
   `flicker` burst (about 8 bytes a cell plus the Expression) for 700 ms,
   or a `pulse` for about 6 s, admitted as a peer's like any cascade. A

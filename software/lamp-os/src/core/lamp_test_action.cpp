@@ -17,6 +17,7 @@
 #include "esp_system.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -444,6 +445,33 @@ void runSerialCommand(char* line, size_t len) {
                   (unsigned)s_powerGovernor.pixelBudgetMa(),
                   (unsigned)s_powerGovernor.ceiling(millis()),
                   (unsigned)lamp::requestedStripLevel());
+    return;
+  }
+
+  if (strcmp(line, "copy.get") == 0) {
+    const lamp::ContagionTuning& t = socialEchoObserver.tuning();
+    Serial.printf("[cmd] ok copy copyRollCooldownMs=%lu chainMaxHops=%u chainHopPct=%u "
+                  "familiarBoostPct=%u crowdHalf=%u\n",
+                  (unsigned long)t.copyRollCooldownMs, (unsigned)t.chainMaxHops,
+                  (unsigned)t.chainHopPct, (unsigned)t.familiarBoostPct,
+                  (unsigned)t.crowdHalf);
+    return;
+  }
+
+  // `copy.set <key> <value>`, key a ContagionTuning member; RAM only, so a
+  // reboot restores the defaults.
+  if (strncmp(line, "copy.set ", 9) == 0) {
+    char* key = line + 9;
+    char* sep = strchr(key, ' ');
+    if (sep) *sep = '\0';
+    char* end = nullptr;
+    const unsigned long value = sep ? strtoul(sep + 1, &end, 10) : 0;
+    if (!sep || !isdigit(static_cast<unsigned char>(sep[1])) || *end != '\0' ||
+        !lamp::setContagionTuning(socialEchoObserver.tuning(), key, value)) {
+      Serial.println("[cmd] err copy.set");
+      return;
+    }
+    Serial.printf("[cmd] ok copy.set %s=%lu\n", key, value);
     return;
   }
 

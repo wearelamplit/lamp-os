@@ -11,6 +11,7 @@
 #include "expression_invocation.hpp"
 #include "expressions/cascade_scheduler.hpp"
 #include "expressions/recent_cascade.hpp"
+#include "expressions/recent_plays.hpp"
 #include "expressions/transient_admission.hpp"
 #include "expression_registry.hpp"
 #include "expressions/glitchy/glitchy_expression.hpp"
@@ -113,6 +114,8 @@ class ExpressionManager {
   // the second announce so observers receive exactly one per logical trigger.
   RecentCascade recentEvents_;
 
+  RecentPlays recentPlays_;
+
   // Fan out MSG_COMMAND to each nearby lamp for an expression that just
   // fired locally, if its config opts in via cascadeEnabled. Continuous
   // descriptors never cascade. No-op when no MeshLink has been wired in.
@@ -130,8 +133,9 @@ class ExpressionManager {
   void maybeCascade(const ExpressionEntry& entry,
                     const uint8_t* excludeMac = nullptr);
 
-  // Broadcast a MSG_EVENT announce for a locally-fired expression. Gated on
-  // recentEvents_ so a TARGET_BOTH auto-trigger produces exactly one event.
+  // Broadcast a MSG_EVENT announce for a locally-fired expression, and stamp
+  // its play. Gated on recentEvents_ so a TARGET_BOTH auto-trigger produces
+  // exactly one event.
   void emitEvent(const ExpressionEntry& entry);
 
   // The cascade and the event for an expression of `shape`'s type, colours
@@ -241,6 +245,12 @@ class ExpressionManager {
                          const uint8_t srcMac[6], bool broadcast = false,
                          TransientSource source = TransientSource::Remote);
 
+  // triggerInvocation without its cascade, then, when it played, a MSG_EVENT
+  // for `inv` carrying `inv.hops`, so lamps near this one can copy the copy.
+  // The caller decides whether a copy may be copied again.
+  bool replayAndAnnounce(const ExpressionInvocation& inv, const uint8_t srcMac[6],
+                         TransientSource source = TransientSource::Remote);
+
   /**
    * Broadcast an invocation to the crowd WITHOUT firing it locally.
    * Synthesizes a cascading entry from `inv` and runs the same
@@ -275,6 +285,14 @@ class ExpressionManager {
   // peer's invocation is neither started nor booked for later.
   bool ignoresPeers() const;
 
+  // True while home mode is on, the app's preview included, whether or not it
+  // ignores other lamps.
+  bool inHomeMode() const;
+
+  // True when this lamp played an expression of registered `type`, its own
+  // fire or a transient, within windowMs before nowMs.
+  bool playedWithin(const char* type, uint32_t windowMs, uint32_t nowMs) const;
+
   /**
    * Garbage-collect transient one-shot expressions created by
    * triggerInvocation whose animation has finished, whose retire fade has
@@ -292,8 +310,8 @@ class ExpressionManager {
   // the drain when an OTA starts.
   void tickCascade(uint32_t nowMs);
 
-  // Retires the dedup, cooldown and batch-gap stamps that have passed their
-  // windows. Call every loop tick.
+  // Retires the dedup, cooldown, batch-gap and play stamps that have passed
+  // their windows. Call every loop tick.
   void retireStale(uint32_t nowMs);
 
   std::vector<Color> getExpressionColors(const std::string& type) const;

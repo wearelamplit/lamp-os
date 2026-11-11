@@ -21,6 +21,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   the lamp still can't use (a button or touch pad's) leaves the strip on its
   own pin, and the app says that pin didn't take and why. Lamps on older
   firmware don't show the row.
+- **Copycat chains.** A lamp that copies a fond peer's expression now passes
+  the copy on, so a lamp near it can copy the copy. Each hop is half as likely
+  as the one before and a chain stops after 3 hops. Lamps on older firmware
+  still copy, they just don't pass it on.
 
 ### Fixed
 - **Mesh updates reach lamps after the sending lamp restarts.** A lamp that
@@ -70,6 +74,18 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   colours and no password (it keeps its expressions); flashed forward again
   it gets its settings back, with its expressions as the older release left
   them.
+- **A chatty lamp gets copied less.** A lamp rolls for a copy of any one
+  peer's expressions at most once every 3 minutes, whether or not the roll
+  played, so a lamp full of expressions no longer gets mirrored by every
+  friend all the time.
+- **Crowds copy less.** Copy odds scale down with the lamps nearby: half
+  with 8 around, a quarter with 24. A single neighbour copies a touch less
+  often than before.
+- **No copying yourself.** A lamp skips copying an expression it played in
+  the last 3 minutes, so two lamps no longer bounce one expression back and
+  forth.
+- **Home mode copies nothing.** A lamp in home mode never copies another
+  lamp's expression, even with social left on at home.
 
 ## 1.3.3
 

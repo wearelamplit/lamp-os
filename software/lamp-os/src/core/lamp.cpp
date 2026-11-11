@@ -917,6 +917,8 @@ void lamp::Lamp::setup() {
   expressionManager.setCompositor(&compositor);
   // Expression mirror: replay a warm peer's triggered expression locally.
   expressionObserverRegistry.registerObserver(&socialEchoObserver);
+  socialEchoObserver.setNearbyCount(
+      [] { return lamp::personalityEngine.nearbyPeers().size(); });
   beginMoments(ownMac);
   // One-shot reservation so the loop-task drain never reallocates mid-frame.
   pendingTriggers.reserve(MAX_PENDING_TRIGGERS);

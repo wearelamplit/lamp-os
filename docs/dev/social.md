@@ -93,7 +93,8 @@ contract: [`moments.md`](moments.md).
   empty; peer effects already running fade out, crowd-dim eases back to full
   brightness over a second, and leaving home greets nobody who was near all
   along. The app's Home Mode preview blocks the same peer paths but consumes
-  no arrival and leaves peer effects already running to finish.
+  no arrival and leaves peer effects already running to finish. With social
+  left on at home, peer effects still play, but the lamp copies none of them.
   Detail in [`lamp-framework.md`](lamp-framework.md#home-mode).
 - **OTA outranks personality.** Offering an update is not a social
   behaviour. The offer scan (`tickOtaOffers`, `components/firmware/ota_offer.cpp`)

@@ -25,6 +25,9 @@ struct ExpressionInvocation {
   uint8_t target = 3;  // 1=SHADE, 2=BASE, 3=BOTH
   ExpressionParams parameters;
   uint32_t delayMs = 0;
+  // Copies between this frame and the lamp that first fired it: 0 for an
+  // origin, 1 for a copy of an origin. On the wire as `hp`, absent at 0.
+  uint8_t hops = 0;
 };
 
 // Cascade convention: the manager fans out any locally-triggered expression
@@ -57,15 +60,17 @@ ExpressionParams parametersWithoutCascadeKeys(
 // Serialize `inv` to JSON for MSG_COMMAND and MSG_EVENT payloads. `out` is
 // set to the serialized string. Always succeeds. `colors` is packed hex
 // ("rrggbbww" per color, no '#', no separators); the key is omitted when
-// empty. Packed keeps the worst-case config inside COMMAND_MAX_PAYLOAD.
+// empty. Packed keeps the worst-case config inside COMMAND_MAX_PAYLOAD. `hp`
+// is written only when `hops` is nonzero.
 void serializeInvocation(const ExpressionInvocation& inv, std::string& out);
 
 
 // Parse an ExpressionInvocation payload (an ArduinoJson object extracted from
 // an incoming MSG_COMMAND or MSG_EVENT frame) into `out`. Returns false if
-// `type` is missing or empty. Unknown keys are ignored. A malformed `colors`
-// string (bad length or non-hex char) is dropped whole; the invocation still
-// parses and fires with the configured palette.
+// `type` is missing or empty. Unknown keys are ignored. An `hp` that is a
+// uint32 clamps to 255; anything else, or none, reads as hop 0. A malformed
+// `colors` string (bad length or non-hex char) is dropped whole; the
+// invocation still parses and fires with the configured palette.
 bool parseInvocation(JsonObjectConst doc, ExpressionInvocation& out);
 
 }  // namespace lamp

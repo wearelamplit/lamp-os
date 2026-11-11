@@ -19,6 +19,7 @@
 #include <cstdint>
 
 #include "behaviors/configurator.hpp"
+#include "behaviors/social_echo.hpp"
 #include "components/firmware/firmware_receiver.hpp"
 #include "components/network/ble/bluetooth.hpp"
 #include "components/network/mesh/mesh_link.hpp"
@@ -72,6 +73,7 @@ extern lamp::FirmwareReceiver firmwareReceiver;
 extern lamp::MeshLink meshLink;
 extern lamp::ExpressionManager expressionManager;
 extern lamp::ExpressionObserverRegistry expressionObserverRegistry;
+extern lamp::SocialEchoObserver socialEchoObserver;
 extern lamp::ConfiguratorBehavior shadeConfiguratorBehavior;
 extern lamp::ConfiguratorBehavior baseConfiguratorBehavior;
 extern lamp::Config config;
