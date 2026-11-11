@@ -40,9 +40,7 @@ void fillPendingWispState(PendingWispState& slot,
   slot.ownIndex = own.index;
   slot.fadePartial = own.trailer == lamp_protocol::WispDriftFadeTrailer::Partial;
   std::memset(slot.targeted, 0, sizeof(slot.targeted));
-  if (!ws.w || own.trailer == lamp_protocol::WispDriftFadeTrailer::Malformed) {
-    return;
-  }
+  if (own.trailer == lamp_protocol::WispDriftFadeTrailer::Malformed) return;
   lamp_protocol::walkWispDriftFade(ws.trailer, ws.trailerLen, [&](const uint8_t* r) {
     const uint8_t i = r[0];
     if (i >= n || i == own.index) return;

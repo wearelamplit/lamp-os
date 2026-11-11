@@ -11,7 +11,7 @@ struct KvEntry { char key[16]; char val[32]; bool used = false; };
 constexpr size_t kKvCap = 32;
 KvEntry s_kv[kKvCap];
 
-// Removes of a key that isn't there: the real NVS logs each as an error.
+// The real NVS logs an error for each remove of a key that isn't there.
 int s_removeMissing = 0;
 
 static void kv_reset() {

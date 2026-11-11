@@ -40,10 +40,6 @@ struct WispFleetCache {
   // `lampMacs` is [count][6] MAC bytes from one claim frame.
   void upsertClaims(const uint8_t lampMacs[][6], uint8_t count,
                     uint32_t nowMs);
-  // `entries` is count * 12 bytes: lampMac(6)+baseRGB(3)+shadeRGB(3). `w` is
-  // count * 2 bytes of baseW,shadeW in entry order, or nullptr for W = 0.
-  void upsertPaints(const uint8_t* entries, const uint8_t* w, uint8_t count,
-                    uint32_t nowMs);
   // One lamp's RGBW paint. With keepColors, a lamp already held fresh keeps
   // its colours and only refreshes its age.
   void upsertPaint(const uint8_t mac[6], const uint8_t base[4],

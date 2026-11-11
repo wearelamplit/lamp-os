@@ -48,19 +48,6 @@ void WispFleetCache::upsertClaims(const uint8_t lampMacs[][6], uint8_t count,
   }
 }
 
-void WispFleetCache::upsertPaints(const uint8_t* entries, const uint8_t* w,
-                                  uint8_t count, uint32_t nowMs) {
-  if (!entries) return;
-  for (uint8_t i = 0; i < count; ++i) {
-    const uint8_t* src = entries + static_cast<size_t>(i) * 12;
-    const uint8_t base[4] = {src[6], src[7], src[8],
-                             static_cast<uint8_t>(w ? w[i * 2] : 0)};
-    const uint8_t shade[4] = {src[9], src[10], src[11],
-                              static_cast<uint8_t>(w ? w[i * 2 + 1] : 0)};
-    upsertPaint(src, base, shade, nowMs, false);
-  }
-}
-
 void WispFleetCache::upsertPaint(const uint8_t mac[6], const uint8_t base[4],
                                  const uint8_t shade[4], uint32_t nowMs,
                                  bool keepColors) {

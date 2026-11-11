@@ -88,7 +88,7 @@ struct PendingWispClaim {
 // entry (kNoOwnEntry when absent). Every other entry with a drift fade record
 // holds that record's target in place of the frame's colour, its bit set in
 // `targeted`; this lamp's own entry keeps the frame's colour for the render.
-// `fadePartial`: the frame carries records for only some fading entries.
+// `fadePartial` says the frame carries records for only some fading entries.
 struct PendingWispState {
   static constexpr uint8_t kNoOwnEntry = 0xFF;
   static_assert(lamp_protocol::WISP_STATE_MAX_ENTRIES < kNoOwnEntry,

@@ -36,7 +36,7 @@ const uint8_t kMine[6]  = {0x24, 0x6F, 0x28, 0x51, 0x9C, 0x3E};
 const uint8_t kWrong[6] = {0x24, 0x6F, 0x28, 0x51, 0x9C, 0x3F};
 
 enum class Form {
-  Full,              // records for 0, mine, 4
+  Full,              // records for 0, mine, 4, and one past the entries
   FullOther,         // records for 0 and 4 only
   PartialMine,       // records for 1 and mine, marked partial
   PartialOther,      // a record for 1, marked partial
@@ -83,7 +83,7 @@ void build(Frame& f, Form form, uint8_t seed) {
                              entries, form == Form::NoW ? nullptr : w, kCount);
   TEST_ASSERT_NOT_EQUAL(0, f.len);
 
-  uint8_t recs[3 * lp::WISP_STATE_DRIFT_FADE_RECORD_SIZE];
+  uint8_t recs[4 * lp::WISP_STATE_DRIFT_FADE_RECORD_SIZE];
   auto rec = [&](size_t at, uint8_t idx) {
     putRecord(recs + at * lp::WISP_STATE_DRIFT_FADE_RECORD_SIZE, idx,
               static_cast<uint8_t>(seed + idx));
@@ -91,7 +91,7 @@ void build(Frame& f, Form form, uint8_t seed) {
   size_t n = 0;
   bool partial = false;
   switch (form) {
-    case Form::Full: rec(0, 0); rec(1, kMineIdx); rec(2, 4); n = 3; break;
+    case Form::Full: rec(0, 0); rec(1, kMineIdx); rec(2, 4); rec(3, kCount); n = 4; break;
     case Form::FullOther: rec(0, 0); rec(1, 4); n = 2; break;
     case Form::PartialMine: rec(0, 1); rec(1, kMineIdx); n = 2; partial = true; break;
     case Form::PartialOther: rec(0, 1); n = 1; partial = true; break;

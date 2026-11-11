@@ -202,11 +202,14 @@ constexpr uint8_t kStillIdx = 2;
 const uint8_t kDriftTo[8] = {200, 10, 90, 7, 15, 180, 60, 3};
 const uint8_t kMineTo[8]  = {5, 220, 140, 9, 250, 40, 20, 11};
 
-enum class Trailer { None, Full, PartialMineOnly };
+const uint8_t kDriftNext[8] = {33, 66, 99, 12, 120, 140, 160, 13};
+
+enum class Trailer { None, Full, PartialMineOnly, PartialDriftNext };
 
 // kDrift, kMine and kStill painted `plain` + an offset each, the W plane on.
 // Full carries kDrift's and kMine's drift fade records toward kDriftTo /
-// kMineTo; PartialMineOnly carries kMine's alone, marked partial.
+// kMineTo; PartialMineOnly carries kMine's alone, marked partial, and
+// PartialDriftNext kDrift's alone toward kDriftNext, marked partial.
 void fillDrift(uint8_t plain, Trailer t) {
   const uint8_t* macs[3] = {kDrift, kMine, kStill};
   uint8_t entries[3 * lp::WISP_STATE_ENTRY_SIZE] = {};
@@ -234,6 +237,8 @@ void fillDrift(uint8_t plain, Trailer t) {
     n = lp::appendWispStateDriftFade(buf, sizeof(buf), n, recs, 2, false);
   } else if (t == Trailer::PartialMineOnly) {
     put(0, kMineIdx, kMineTo);
+    n = lp::appendWispStateDriftFade(buf, sizeof(buf), n, recs, 1, true);  } else if (t == Trailer::PartialDriftNext) {
+    put(0, kDriftIdx, kDriftNext);
     n = lp::appendWispStateDriftFade(buf, sizeof(buf), n, recs, 1, true);
   }
   lp::ParsedWispState ws;
@@ -333,6 +338,21 @@ void test_partial_frame_keeps_a_missing_lamps_target() {
   TEST_ASSERT_EQUAL_UINT8_ARRAY(want, got, 8);
 }
 
+// A partial frame that carries a lamp's record for its next step moves that
+// lamp's chip to the new target, while a lamp it leaves out keeps its own.
+void test_partial_frame_record_moves_its_lamp_to_the_new_target() {
+  LampRoster roster;
+  fillDrift(10, Trailer::Full);
+  roster.cacheWispState(gSlot, 1000);
+  fillDrift(30, Trailer::PartialDriftNext);
+  roster.cacheWispState(gSlot, 1100);
+  uint8_t got[8];
+  blobColors(roster, 1100, kDrift, got);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(kDriftNext, got, 8);
+  blobColors(roster, 1100, kMine, got);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(kMineTo, got, 8);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_state_slot_reaches_claims_blob);
@@ -341,6 +361,7 @@ int main(int, char**) {
   RUN_TEST(test_drifting_lamp_reads_as_its_target);
   RUN_TEST(test_frame_without_record_shows_new_colours_at_once);
   RUN_TEST(test_partial_frame_keeps_a_missing_lamps_target);
+  RUN_TEST(test_partial_frame_record_moves_its_lamp_to_the_new_target);
   RUN_TEST(test_silent_wisp_slot_stays_stale_a_wrap_later);
   RUN_TEST(test_silent_fleet_entries_stay_stale_a_wrap_later);
   RUN_TEST(test_retire_keeps_a_fresh_wisp_slot);
