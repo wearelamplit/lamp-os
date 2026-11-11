@@ -220,9 +220,8 @@ void pauseRadioForOta();
 
 /**
  * Restart BLE advertising + scan after pauseRadioForOta(). Called
- *        on OTA success or any failure path. Idempotent. Until then no
- *        GATT disconnect or scan end restarts either, and tick() stops
- *        advertising NimBLE restarts on its own.
+ *        on OTA success or any failure path. Idempotent. Until it runs,
+ *        nothing restarts advertising or the scan.
  */
 void resumeRadioAfterOta();
 

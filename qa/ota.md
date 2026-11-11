@@ -79,9 +79,9 @@ skew:
    after `resumed adv + scan after OTA`, and no `Advertising already active` after
    the resume. Once resumed, the app reconnects to it (on the sender, which
    resumes without a reboot, this proves the resume finds advertising off and
-   starts it). A phone link that completes under the pause logs `Client
-   connected`, then `kicked GATT client handle=N: OTA radio pause` and
-   `Client disconnected`; that is a pass.
+   starts it). A phone link that completes under the pause logs `kicked GATT
+   client handle=N: OTA radio pause`, then `Client connected` and `Client
+   disconnected`; that is a pass.
    A `Host reset; reason=` line during the transfer must not be followed by a
    `Client connected` that stays up before the resume, nor by `Advertising
    already active` at it. The bench cannot trigger a host reset on demand, so
