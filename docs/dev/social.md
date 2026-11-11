@@ -97,8 +97,10 @@ takes neither.
   is the profile's own. The greeting then calls `markSeen`, and once a minute
   every near peer the roster has acknowledged (greeted since it arrived) is
   marked seen too, so the next greeting is ordinary until the peer is away
-  that long again. An arrival is not acknowledged until its greeting has
-  read the clock, so the sweep never takes a reunion from it. Any other greeting is
+  that long again. A greeting reads the clock before it acknowledges its
+  arrival, so an arrival waiting out a cooldown keeps its reunion. An arrival
+  home mode consumes (social off) is acknowledged without a greeting, so once
+  home mode ends the sweep marks it seen and it gets no reunion. Any other greeting is
   exactly the profile's. A reunion's cooldown runs from its end, since it
   outlasts the base cooldown that runs from greeting start.
 - **Colour hint.** When a greeting of a Fond or Smitten peer ends, the lamp

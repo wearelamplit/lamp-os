@@ -145,13 +145,14 @@ mode off and reboot B (restoring `chainMaxHops` 3), then set B Smitten toward C 
 
 **M7 — reunion and colour hint.** Two debug lamps A and B, A Smitten toward B,
 A Extrovert (no re-greet window). On A: `reunion.set reunionMin 10`,
-`reunion.get` confirms. Carry B out of range for 10+ minutes (A prunes it
-after 4), then bring it back: A logs `[fondness] reunion <B>` and the greet
+`reunion.get` confirms. Carry B out of range for 15+ minutes (A keeps
+marking it seen until it drops out of the 4-minute near window), then bring it
+back: A logs `[fondness] reunion <B>` and the greet
 line shows `frames=2760` (Effusive's 1620 with its 1140-frame hold doubled),
 and the greeting visibly breathes twice as many times. When it ends A logs
 `[fondness] colour hint <B>` and the shade breathes faintly toward B's colour
 (stop 0 of B's base gradient) twice over about 16 s, then sits on A's own
-scene. Carry B away for 5 minutes and back: an ordinary greeting
+scene. Carry B away for 6 minutes and back: an ordinary greeting
 (`frames=1620`), no reunion line, and no hint, since 10 minutes have not
 passed since the last roll (`reunion.set hintCooldownMs 0` lets each greeting
 roll; in a crowd a roll misses more often). Set A Fond toward B: no reunion

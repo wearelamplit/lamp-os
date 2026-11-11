@@ -2,7 +2,7 @@
 // SocialBehavior, DispositionStore, PersonalityEngine and ExpressionManager: a
 // Smitten peer unseen for ReunionTuning::reunionMin is greeted with its hold
 // doubled, once; every other greeting is today's; the end of a Fond-or-better
-// greeting rolls a colour hint once per window, which plays one faint breath
+// greeting rolls a colour hint once per window, which plays faint breaths
 // and leaves; home mode and the engine's master switch block both. The
 // compositor and mesh are link stubs.
 
@@ -172,6 +172,9 @@ void test_reunion_doubles_smitten_hold_exactly_once() {
     TEST_ASSERT_TRUE(r.greet());
 
     const GreetingTuning today = greetingTuningFor(mode, 5);
+    // Breaths double with the hold only while the profile breathes through all of it.
+    TEST_ASSERT_EQUAL_UINT8(kPulseCountContinuous, today.pulseBackCount);
+    TEST_ASSERT_TRUE(today.pulseBackStrength > 0);
     GreetingTuning doubled = today;
     doubled.holdFrames = today.holdFrames * 2;
     doubled.totalFrames = today.easeInFrames + doubled.holdFrames + today.fadeOutFrames;
@@ -370,6 +373,8 @@ void test_hint_plays_faint_breaths_and_leaves() {
     int peakR = 0;
     int peakG = 0;
     int lastToward = 0;
+    int prevToward = 0;
+    int maxStep = 0;
     uint32_t frames = 0;
     while (!e->isAnimationComplete() && frames < 5000) {
       r.shade.buffer.assign(8, kScene);
@@ -382,6 +387,8 @@ void test_hint_plays_faint_breaths_and_leaves() {
         peakG = std::max(peakG, std::abs(px.g - kScene.g));
         lastToward = std::max(lastToward, std::abs(withStops ? px.r - kScene.r : px.g - kScene.g));
       }
+      maxStep = std::max(maxStep, std::abs(lastToward - prevToward));
+      prevToward = lastToward;
       for (const Color& px : r.base.buffer) TEST_ASSERT_TRUE(px == kScene);
       r.advance(16);
       ++frames;
@@ -395,7 +402,9 @@ void test_hint_plays_faint_breaths_and_leaves() {
     TEST_ASSERT_EQUAL_INT(0, away);
     TEST_ASSERT_TRUE(toward > span * cap / 200);
     TEST_ASSERT_TRUE(toward <= span * cap / 100 + 1);
-    // It fades out: its last frame is back on the scene.
+    // It fades in and out, never snapping between frames, and its last frame
+    // is back on the scene.
+    TEST_ASSERT_TRUE(maxStep <= 3);
     TEST_ASSERT_TRUE(lastToward <= 1);
     r.manager.gcTransients();
     TEST_ASSERT_EQUAL_size_t(0, hintsLive());

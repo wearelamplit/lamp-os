@@ -165,9 +165,9 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   bool tracking_() const;
   // At a greeting's end, maybe borrow the greeted friend's colour.
   void maybeColourHint_(uint64_t upMs);
-  // Once a minute, restart the unseen clock of every near peer already greeted
-  // since it arrived. An arrival waits for its greeting, which reads the clock
-  // first, so a reunion is never lost to this sweep.
+  // Once a minute, restart the unseen clock of every near peer the roster has
+  // acknowledged. A greeting reads the clock before it acknowledges its
+  // arrival, so an arrival waiting out a cooldown keeps its reunion.
   void markGreetedNearSeen_(uint64_t upMs);
   uint64_t lastSeenSweepMs_ = 0;
 
