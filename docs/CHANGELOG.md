@@ -40,8 +40,15 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   firing on its own. A web config page could stay up for weeks after its last
   visitor left. A wisp could keep lamps and other wisps that had gone silent,
   forget ones it had just heard, hold back its brightness re-sends, or wait
-  to reopen its OSC port or send its config. All of these now carry on
-  through the rollover.
+  to reopen its OSC port or send its config. A lamp beside many lamps of
+  other kinds could forget which of them it had just found can't take its
+  update, and offer it again. All of these now carry on through the
+  rollover.
+- **Breathing, Spotty and Shimmer pick up smoothly after home mode.** An
+  expression home mode had paused, for an hour or for weeks, could flash
+  through colours or jump on its first frames back. A loaf's ring and a
+  staff's colour scrub did the same after passing a firmware update to a
+  neighbour paused them. Each now picks up with one normal step.
 - **With two or more wisps, a lamp follows the wisp that can still reach
   it.** A wisp used to keep claiming a lamp that had moved out of its radio
   range, as long as other lamps passed that lamp's check-ins along, so the

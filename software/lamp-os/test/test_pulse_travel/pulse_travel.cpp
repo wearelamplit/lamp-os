@@ -8,6 +8,8 @@
 #include <cmath>
 #include <cstdint>
 
+#include <lampos/clock.hpp>
+
 #include "expressions/primitives.hpp"
 #include "util/easing.hpp"
 
@@ -52,7 +54,7 @@ struct PulseTravelRig {
 
   void step(uint32_t nowMs) {
     if (lastUpdateMs == 0) { lastUpdateMs = nowMs; return; }
-    const uint32_t delta = std::min(nowMs - lastUpdateMs, (uint32_t)100);
+    const uint32_t delta = lampos::frameDeltaMs(nowMs, lastUpdateMs);
     lastUpdateMs = nowMs;
     const float dt = static_cast<float>(delta) /
                      (static_cast<float>(pulseSpeedMs) * travelSpan);
@@ -109,7 +111,7 @@ struct LegacyRig {
   }
   void step(uint32_t nowMs) {
     if (lastUpdateMs == 0) { lastUpdateMs = nowMs; return; }
-    const uint32_t delta = std::min(nowMs - lastUpdateMs, (uint32_t)100);
+    const uint32_t delta = lampos::frameDeltaMs(nowMs, lastUpdateMs);
     lastUpdateMs = nowMs;
     wavePosition += static_cast<float>(delta) / static_cast<float>(pulseSpeedMs);
   }

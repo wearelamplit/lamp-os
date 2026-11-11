@@ -147,6 +147,37 @@ void test_retire_keeps_running_and_persistent_backoffs() {
   TEST_ASSERT_TRUE(ring.inBackoff(b, 1000 + 3 * kBackoffMs));
 }
 
+// A block held for a whole millis() wrap, retired every few days, is the one a
+// new block replaces once the ring is full, though its raw stamp reads younger
+// than every block noted since.
+void test_block_held_a_wrap_is_the_longest_held() {
+  PeerBackoffRing ring;
+  uint8_t mac[6];
+  const uint64_t notedMs = 1000;
+  macFor(0, mac);
+  ring.note(mac, notedMs, 0, true);
+  for (uint64_t t = notedMs; t < notedMs + (1ull << 32); t += 1ull << 28) {
+    ring.retire(static_cast<uint32_t>(t));
+  }
+  const uint64_t nowMs = notedMs + (1ull << 32) + 2000;
+  for (uint8_t i = 1; i < PeerBackoffRing::kSize; ++i) {
+    macFor(i, mac);
+    ring.note(mac, static_cast<uint32_t>(nowMs - 10000 + i * 1000u), 0, true);
+  }
+  ring.retire(static_cast<uint32_t>(nowMs));
+  uint8_t newcomer[6];
+  macFor(PeerBackoffRing::kSize, newcomer);
+  ring.note(newcomer, static_cast<uint32_t>(nowMs), 0, true);
+
+  macFor(0, mac);
+  TEST_ASSERT_FALSE(ring.inBackoff(mac, static_cast<uint32_t>(nowMs)));
+  for (uint8_t i = 1; i < PeerBackoffRing::kSize; ++i) {
+    macFor(i, mac);
+    TEST_ASSERT_TRUE(ring.inBackoff(mac, static_cast<uint32_t>(nowMs)));
+  }
+  TEST_ASSERT_TRUE(ring.inBackoff(newcomer, static_cast<uint32_t>(nowMs)));
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
@@ -159,5 +190,6 @@ int main(int argc, char** argv) {
   RUN_TEST(test_expired_transient_slot_reused_across_the_wrap);
   RUN_TEST(test_expired_backoff_stays_expired_a_wrap_later);
   RUN_TEST(test_retire_keeps_running_and_persistent_backoffs);
+  RUN_TEST(test_block_held_a_wrap_is_the_longest_held);
   return UNITY_END();
 }

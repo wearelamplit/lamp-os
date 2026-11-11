@@ -5,6 +5,8 @@
 #include <cmath>
 #include <vector>
 
+#include <lampos/clock.hpp>
+
 #include "config/config.hpp"
 #include "core/frame_buffer.hpp"
 #include "util/fade.hpp"
@@ -74,7 +76,7 @@ void LoafRingBehavior::draw() {
   if (!fb || ring_.empty()) { nextFrame(); return; }
   const uint16_t n = windowSize();
   const uint32_t now = millis();
-  const uint32_t dt = lastDrawMs_ ? (now - lastDrawMs_) : 0;
+  const uint32_t dt = lastDrawMs_ ? lampos::frameDeltaMs(now, lastDrawMs_) : 0;
   lastDrawMs_ = now;
   if (dt) {
     float step = static_cast<float>(dt) / kRevRampMs;
