@@ -247,7 +247,7 @@ static void emitLastCrash(JsonDocument& doc, const crash_record::Record& rec) {
   o["rosterPeak"] = s.rosterPeak;
   if (s.core < 0) return;
   char hex[11];
-  o["reason"] = static_cast<const char*>(s.reason);
+  if (s.reason[0] != '\0') o["reason"] = static_cast<const char*>(s.reason);
   o["core"] = s.core;
   std::snprintf(hex, sizeof(hex), "0x%08x", static_cast<unsigned>(s.pc));
   o["pc"] = hex;

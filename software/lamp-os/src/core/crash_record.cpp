@@ -40,6 +40,23 @@ bool foldBoot(Record& rec, esp_reset_reason_t reason, const Snapshot* rtc,
   return true;
 }
 
+void recordPanic(Snapshot& s, const char* reason, uint32_t pc,
+                 const unsigned int* backtrace, unsigned int backtraceLen, int core,
+                 uint32_t uptimeMs) {
+  size_t i = 0;
+  for (; reason != nullptr && reason[i] != '\0' && i < kReasonLen - 1; ++i) {
+    s.reason[i] = reason[i];
+  }
+  s.reason[i] = '\0';
+  s.pc = pc;
+  for (size_t b = 0; b < kBacktraceLen; ++b) {
+    s.backtrace[b] = b < backtraceLen ? backtrace[b] : 0;
+  }
+  s.core = static_cast<int8_t>(core);
+  s.uptimeMs = uptimeMs;
+  s.panicked = 1;
+}
+
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 
 namespace {
@@ -106,18 +123,8 @@ void tick(uint32_t nowMs, size_t (*rosterCount)()) {
 void capturePanic(const char* reason, const void* pc,
                   const unsigned int* backtrace, unsigned int backtraceLen,
                   int core) {
-  Snapshot& s = s_rtc.snap;
-  size_t i = 0;
-  for (; reason != nullptr && reason[i] != '\0' && i < kReasonLen - 1; ++i) {
-    s.reason[i] = reason[i];
-  }
-  s.reason[i] = '\0';
-  s.pc = reinterpret_cast<uint32_t>(pc);
-  for (size_t b = 0; b < kBacktraceLen; ++b) {
-    s.backtrace[b] = b < backtraceLen ? backtrace[b] : 0;
-  }
-  s.core = static_cast<int8_t>(core);
-  s.panicked = 1;
+  recordPanic(s_rtc.snap, reason, reinterpret_cast<uint32_t>(pc), backtrace, backtraceLen,
+              core, uptimeMsFrom(esp_timer_get_time()));
 }
 
 const Record& last() { return s_last; }

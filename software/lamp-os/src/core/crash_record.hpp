@@ -54,7 +54,13 @@ void boot(uint32_t fwVersion);
 // only when it samples. Allocation-free.
 void tick(uint32_t nowMs, size_t (*rosterCount)());
 
-// Panic context only: plain stores, no heap, no NVS.
+// Fills `s` with the fault: reason (truncated), pc, the first backtrace
+// addresses, core, and the uptime at the fault. Plain stores only.
+void recordPanic(Snapshot& s, const char* reason, uint32_t pc,
+                 const unsigned int* backtrace, unsigned int backtraceLen, int core,
+                 uint32_t uptimeMs);
+
+// Panic context only: recordPanic into the RTC snapshot. No heap, no NVS.
 void capturePanic(const char* reason, const void* pc,
                   const unsigned int* backtrace, unsigned int backtraceLen,
                   int core);
