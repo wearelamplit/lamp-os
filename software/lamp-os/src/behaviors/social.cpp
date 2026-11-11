@@ -200,10 +200,7 @@ void SocialBehavior::control() {
 
   const SocialMode mode = config_ ? config_->lamp.socialMode : SocialMode::Ambivert;
 
-  // Introvert fatigue gate: skip if the lamp is in its post-fatigue rest window.
-  if (mode == SocialMode::Introvert && up < tiredUntilMs_) {
-    return;
-  }
+  if (tired()) return;
 
   uint32_t regreetWindowMs = 0;
   switch (mode) {
@@ -313,6 +310,11 @@ void SocialBehavior::onColorInfo(const uint8_t srcMac[6],
   if (!greetedHasMac_ || std::memcmp(srcMac, greetedMac_, 6) != 0) return;
   if (baseStops.empty()) return;
   greetedBaseStops_ = baseStops;
+}
+
+bool SocialBehavior::tired() const {
+  const SocialMode mode = config_ ? config_->lamp.socialMode : SocialMode::Ambivert;
+  return mode == SocialMode::Introvert && uptimeMs() < tiredUntilMs_;
 }
 
 void SocialBehavior::markGreeted(const uint8_t mac[6], uint64_t upMs) {

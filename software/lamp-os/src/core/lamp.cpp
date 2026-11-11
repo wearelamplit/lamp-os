@@ -919,6 +919,7 @@ void lamp::Lamp::setup() {
   expressionObserverRegistry.registerObserver(&socialEchoObserver);
   socialEchoObserver.setNearbyCount(
       [] { return lamp::personalityEngine.nearbyPeers().size(); });
+  socialEchoObserver.setTired([] { return shadeSocialBehavior.tired(); });
   beginMoments(ownMac);
   // One-shot reservation so the loop-task drain never reallocates mid-frame.
   pendingTriggers.reserve(MAX_PENDING_TRIGGERS);

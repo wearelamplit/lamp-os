@@ -22,6 +22,7 @@
 #include "behaviors/social_echo.cpp"
 #include "behaviors/copycat.cpp"
 #include "behaviors/roll_cooldown.cpp"
+#include "behaviors/yawn_contagion.cpp"
 #include "config/disposition_store.cpp"
 
 namespace lamp {

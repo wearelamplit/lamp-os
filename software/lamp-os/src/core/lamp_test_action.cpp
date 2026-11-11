@@ -475,6 +475,35 @@ void runSerialCommand(char* line, size_t len) {
     return;
   }
 
+  if (strcmp(line, "yawn.get") == 0) {
+    const lamp::YawnTuning& t = socialEchoObserver.yawnTuning();
+    Serial.printf("[cmd] ok yawn yawnRollCooldownMs=%lu yawnSelfFloorMs=%lu tiredYawnPct=%u "
+                  "tiredYawnEveryMs=%lu\n",
+                  (unsigned long)t.yawnRollCooldownMs, (unsigned long)t.yawnSelfFloorMs,
+                  (unsigned)t.tiredYawnPct, (unsigned long)t.tiredYawnEveryMs);
+    Serial.printf("[cmd] ok yawn salty=%u wary=%u neutral=%u fond=%u smitten=%u\n",
+                  (unsigned)t.backPct[0], (unsigned)t.backPct[1], (unsigned)t.backPct[2],
+                  (unsigned)t.backPct[3], (unsigned)t.backPct[4]);
+    return;
+  }
+
+  // `yawn.set <key> <value>`, key a YawnTuning member or yawn.<disposition>;
+  // RAM only, so a reboot restores the defaults.
+  if (strncmp(line, "yawn.set ", 9) == 0) {
+    char* key = line + 9;
+    char* sep = strchr(key, ' ');
+    if (sep) *sep = '\0';
+    char* end = nullptr;
+    const unsigned long value = sep ? strtoul(sep + 1, &end, 10) : 0;
+    if (!sep || !isdigit(static_cast<unsigned char>(sep[1])) || *end != '\0' ||
+        !lamp::setYawnTuning(socialEchoObserver.yawnTuning(), key, value)) {
+      Serial.println("[cmd] err yawn.set");
+      return;
+    }
+    Serial.printf("[cmd] ok yawn.set %s=%lu\n", key, value);
+    return;
+  }
+
   if (strcmp(line, "cfg.get") == 0) {
     std::string base, shade;
     config.baseSectionJsonCached(base);

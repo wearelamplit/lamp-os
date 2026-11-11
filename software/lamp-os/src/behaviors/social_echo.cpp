@@ -7,8 +7,31 @@
 #include "components/network/mesh/mesh_link.hpp"
 #include "config/config.hpp"
 #include "expressions/expression_manager.hpp"
+#include "expressions/yawn/yawn_expression.hpp"
 
 namespace lamp {
+
+namespace {
+
+#ifdef LAMP_DEBUG
+const char* outcomeName(CopyOutcome o) {
+  return o == CopyOutcome::Fire       ? "fired"
+         : o == CopyOutcome::Cooldown ? "cooldown"
+         : o == CopyOutcome::SelfEcho ? "self"
+                                      : "skip";
+}
+
+void printMac(const uint8_t m[6]) {
+  Serial.printf("%02X:%02X:%02X:%02X:%02X:%02X", m[0], m[1], m[2], m[3], m[4], m[5]);
+}
+#endif
+
+}  // namespace
+
+// TODO: FondnessEngine::tracking() replaces this.
+bool SocialEchoObserver::tracking() const {
+  return config_.dispositions().engineEnabled() && !manager_.inHomeMode();
+}
 
 void SocialEchoObserver::onPeerExpression(const uint8_t sourceMac[6],
                                           const ExpressionInvocation& inv) {
@@ -17,6 +40,10 @@ void SocialEchoObserver::onPeerExpression(const uint8_t sourceMac[6],
   if (manager_.isAnyTestActive()) return;
 
   const uint32_t now = millis();
+  if (inv.type == kYawnDescriptorData.id && tracking()) {
+    catchYawn(sourceMac, inv, now);
+    return;
+  }
   const CopyDecision d = copycat_.decide(
       sourceMac, config_.getDisposition(sourceMac), config_.lamp.socialMode, inv.hops, now,
       static_cast<uint8_t>(rng_.range(1, 100)), rng_.range(0, kMirrorJitterMs),
@@ -24,35 +51,76 @@ void SocialEchoObserver::onPeerExpression(const uint8_t sourceMac[6],
       manager_.playedWithin(inv.type.c_str(), copycat_.tuning.copyRollCooldownMs, now));
   if (d.outcome == CopyOutcome::NoChance) return;
 #ifdef LAMP_DEBUG
-  const char* outcome = d.outcome == CopyOutcome::Fire       ? "fired"
-                        : d.outcome == CopyOutcome::Cooldown ? "cooldown"
-                        : d.outcome == CopyOutcome::SelfEcho ? "self"
-                                                             : "skip";
   // Print::printf mallocs a line of 64 B or more. Two prints, the peer-sent type
   // cut to 32, keep each under it.
   Serial.printf("[fondness] roll %.32s from ", inv.type.c_str());
-  Serial.printf("%02X:%02X:%02X:%02X:%02X:%02X hop %u p=%u%% %s\n", sourceMac[0],
-                sourceMac[1], sourceMac[2], sourceMac[3], sourceMac[4], sourceMac[5],
-                static_cast<unsigned>(d.hops), static_cast<unsigned>(d.pct), outcome);
+  printMac(sourceMac);
+  Serial.printf(" hop %u p=%u%% %s\n", static_cast<unsigned>(d.hops),
+                static_cast<unsigned>(d.pct), outcomeName(d.outcome));
 #endif
   if (d.outcome != CopyOutcome::Fire) return;
+  if (book(inv, sourceMac, d)) copycat_.booked(now);
+}
 
+void SocialEchoObserver::catchYawn(const uint8_t sourceMac[6], const ExpressionInvocation& inv,
+                                   uint32_t nowMs) {
+  // TODO: pass the sender's meeting count once the fondness engine reads it.
+  const CopyDecision d = yawns_.catchYawn(
+      sourceMac, config_.getDisposition(sourceMac), config_.lamp.socialMode, inv.hops,
+      /*meets=*/0, nowMs, static_cast<uint8_t>(rng_.range(1, 100)),
+      rng_.range(0, kMirrorJitterMs), nearbyCount_ ? nearbyCount_() : 0,
+      manager_.playedWithin(kYawnDescriptorData.id, yawns_.tuning.yawnSelfFloorMs, nowMs),
+      copycat_.tuning);
+  if (d.outcome == CopyOutcome::NoChance) return;
+#ifdef LAMP_DEBUG
+  Serial.print("[fondness] yawn from ");
+  printMac(sourceMac);
+  Serial.printf(" hop %u p=%u%% %s\n", static_cast<unsigned>(d.hops),
+                static_cast<unsigned>(d.pct), outcomeName(d.outcome));
+#endif
+  if (d.outcome == CopyOutcome::Fire) book(inv, sourceMac, d);
+}
+
+bool SocialEchoObserver::book(const ExpressionInvocation& inv, const uint8_t sourceMac[6],
+                              const CopyDecision& d) {
   Pending* slot = nullptr;
   for (auto& p : pending_) {
     if (!p.used) { slot = &p; break; }
   }
-  if (!slot) return;
+  if (!slot) return false;
 
   slot->inv = inv;
   slot->inv.hops = d.hops;
   std::memcpy(slot->srcMac, sourceMac, 6);
   slot->fireAt = d.fireAt;
   slot->used = true;
-  copycat_.booked(now);
+  return true;
+}
+
+void SocialEchoObserver::tickTired(uint32_t nowMs) {
+  const bool tired = tired_ && tired_() && !mesh_.isOtaInProgress() &&
+                     !manager_.isAnyTestActive() && tracking();
+  const TiredRoll r = yawns_.tiredRoll(
+      tired, nowMs, static_cast<uint8_t>(rng_.range(1, 100)),
+      manager_.playedWithin(kYawnDescriptorData.id, yawns_.tuning.yawnSelfFloorMs, nowMs));
+  if (r == TiredRoll::NotDue) return;
+#ifdef LAMP_DEBUG
+  Serial.printf("[fondness] yawn tired p=%u%% %s\n",
+                static_cast<unsigned>(yawns_.tuning.tiredYawnPct),
+                r == TiredRoll::Fire ? "fired" : r == TiredRoll::SelfFloor ? "self" : "skip");
+#endif
+  if (r != TiredRoll::Fire) return;
+  ExpressionInvocation inv;
+  inv.type = kYawnDescriptorData.id;
+  uint8_t own[6];
+  mesh_.getMyMac(own);
+  manager_.replayAndAnnounce(inv, own, TransientSource::Local);
 }
 
 void SocialEchoObserver::tick(uint32_t nowMs) {
   copycat_.retire(nowMs);
+  yawns_.retire(nowMs);
+  tickTired(nowMs);
   // A copy booked before home mode began is dropped.
   if (manager_.inHomeMode()) {
     for (auto& p : pending_) p.used = false;

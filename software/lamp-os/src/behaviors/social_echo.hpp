@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "behaviors/copycat.hpp"
+#include "behaviors/yawn_contagion.hpp"
 #include "expressions/expression_invocation.hpp"
 #include "expressions/expression_observer.hpp"
 #include "util/fast_rng.hpp"
@@ -19,7 +20,10 @@ class MeshLink;
 // of a second later, weighted by disposition and social mode. A copy short of
 // ContagionTuning::chainMaxHops announces itself one hop further on, at a
 // smaller chance per hop, so a chain fades out. The replay never cascades.
-// Mechanism and tuning: docs/dev/expressions.md, "Expression mirror".
+// A yawn takes its own contagion roll in place of the mirror's, and a tired
+// introvert yawns now and then on its own.
+// Mechanism and tuning: docs/dev/expressions.md, "Expression mirror" and
+// "Yawn contagion".
 
 class SocialEchoObserver : public IExpressionObserver {
  public:
@@ -36,9 +40,12 @@ class SocialEchoObserver : public IExpressionObserver {
   void tick(uint32_t nowMs);
 
   ContagionTuning& tuning() { return copycat_.tuning; }
+  YawnTuning& yawnTuning() { return yawns_.tuning; }
 
   // Lamps in the near view, for crowd damping. Unset counts none.
   void setNearbyCount(size_t (*count)()) { nearbyCount_ = count; }
+  // Whether the lamp is a tired introvert. Unset is never tired.
+  void setTired(bool (*tired)()) { tired_ = tired; }
 
  private:
   struct Pending {
@@ -49,13 +56,22 @@ class SocialEchoObserver : public IExpressionObserver {
   };
   static constexpr size_t kMaxPending = 4;
 
+  // The social engine's master switch and home mode allow its rolls.
+  bool tracking() const;
+  void catchYawn(const uint8_t sourceMac[6], const ExpressionInvocation& inv, uint32_t nowMs);
+  void tickTired(uint32_t nowMs);
+  // False when every pending slot is taken.
+  bool book(const ExpressionInvocation& inv, const uint8_t sourceMac[6], const CopyDecision& d);
+
   Config& config_;
   ExpressionManager& manager_;
   MeshLink& mesh_;
   FastRng rng_;
   Pending pending_[kMaxPending];
   Copycat copycat_;
+  YawnContagion yawns_;
   size_t (*nearbyCount_)() = nullptr;
+  bool (*tired_)() = nullptr;
 };
 
 }  // namespace lamp
