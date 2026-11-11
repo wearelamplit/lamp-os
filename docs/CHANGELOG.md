@@ -5,123 +5,97 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
-## Unreleased
+## 1.3.4
+
+Wisps are flashed over USB only: reflash each wisp to get the wisp changes
+below (the restart fix and the Lamps tab chips).
 
 ### Added
-- **Yawn expression.** A new expression where the lamp takes a slow breath
-  in, dims down to 70% of its scene, warms a little, holds for a beat, then
-  eases back. Base and shade move together by default. Depth, base lag, warmth,
-  lift, duration and which surface it runs on are all adjustable in the
-  expression's settings.
-- **Move a strip to another data pin from the app.** With advanced mode on,
-  LED setup shows a data pin row for each strip: pick a GPIO, tap Update, and
-  the lamp restarts driving that strip from the new pin. "Built-in (GPIO 12)"
-  puts it back. Handy when a board has a dead pin and the strip's wire moves
-  to another one. Pins other strips run on are greyed out in the list. A pin
-  the lamp still can't use (a button or touch pad's) leaves the strip on its
-  own pin, and the app says that pin didn't take and why. Lamps on older
-  firmware don't show the row.
-- **Copycat chains.** A lamp that copies a fond peer's expression now passes
-  the copy on, so a lamp near it can copy the copy. Each hop is half as likely
-  as the one before and a chain stops after 3 hops. Lamps on older firmware
-  still copy, they just don't pass it on.
-- **Lamps have a social life of their own.** Each lamp now remembers the
-  lamps it meets and lets its feelings about them drift. An introvert cools
+- **Lamps have a social life of their own.** Each lamp remembers the lamps it
+  meets (up to 100) and lets its feelings about them drift. An introvert cools
   toward a lamp that keeps firing loud expressions and an extrovert warms to
-  it; a lamp that shares your expressions or wears a matching or
-  complementary colour wins you over; lamps that meet day after day grow
-  fond of each other, an introvert twice as fast. Familiarity alone stops at
-  Fond. Feelings move at most one step per lamp per hour and four steps an
-  hour in all, and a lamp you meet often is a little more likely to be
-  copied or yawned back at.
-
-  Fond friends act like it. Greeting a smitten friend it hasn't seen for
-  four hours of on-time, a lamp holds the greeting twice as long and
-  breathes twice as many times, once per absence; a friend that turns up
-  while the lamp is still between greetings keeps its reunion for when its
-  turn comes. Now and then, after greeting a fond or smitten friend, a lamp
-  breathes a faint shimmer of that friend's colour across its shade and
-  settles back to its own scene, at most once every 10 minutes and less
-  often in a crowd. Yawns are catching: an introvert worn out from greeting
-  yawns now and then, and a lamp nearby may yawn back a moment later, the
-  likelier the fonder it is of the yawner, rarer in a crowded room, and at
-  most once every 5 minutes for any one lamp.
-
-  Home mode pauses all of it, and time at home counts toward nothing. On a
-  debug build `fond.off` turns it off (it stays off across restarts), and
-  lamps then copy each other as on 1.3.3 (home mode still copies nothing);
-  `fond.peers` lists what a lamp knows, and `fond.get` / `fond.set` show and
-  tune every social number live (`copy.set`, `reunion.set` and `yawn.set`
-  still work).
-
-  A lamp remembers up to 100 others, with how often they've met and how
-  long since it last saw them. When the list is full it forgets the one it
-  cares least about instead of whichever has the lowest address, so friends
-  and regulars stay, and a neutral lamp not seen for 14 days of the lamp
-  being on is forgotten at startup. Saving from the app merges: lamps the
-  app doesn't list are kept. Flashing a lamp back to 1.3.3 shows every lamp
-  as neutral until set again.
+  it; sharing expressions or wearing a matching or complementary colour wins a
+  lamp over; lamps that meet day after day grow fond, an introvert twice as
+  fast. Familiarity alone stops at Fond. Feelings move at most one step per
+  lamp per hour and four steps an hour in all.
+  - Fond friends act like it. After four hours of on-time apart, a smitten
+    friend gets a greeting held twice as long with twice the breaths (once per
+    absence). Now and then a lamp breathes a faint shimmer of a fond or
+    smitten friend's colour across its shade (at most every 10 minutes, less
+    in a crowd). Yawns are catching: a worn-out introvert yawns now and then,
+    and a nearby lamp may yawn back, likelier the fonder it is of the yawner,
+    rarer in a crowd, at most once every 5 minutes per lamp.
+  - Home mode pauses all of it, and time at home counts toward nothing.
+  - When the list is full a lamp forgets the one it cares least about, so
+    friends and regulars stay; a neutral lamp not seen for 14 days of on-time
+    is forgotten at startup. Saving from the app merges: lamps the app doesn't
+    list are kept. Flashing back to 1.3.3 shows every lamp as neutral.
+  - Debug builds: `fond.off` turns it off (stays off across restarts; lamps
+    then copy as on 1.3.3), `fond.peers` lists what a lamp knows, and
+    `fond.get` / `fond.set` show and tune every social number live.
+- **Copycat chains.** A lamp that copies a fond peer's expression passes the
+  copy on, so a lamp near it can copy the copy. Each hop is half as likely as
+  the one before and a chain stops after 3 hops. Lamps on older firmware still
+  copy, they just don't pass it on.
+- **Yawn expression.** The lamp takes a slow breath in, dims to 70% of its
+  scene, warms a little, holds for a beat, then eases back. Base and shade
+  move together by default. Depth, base lag, warmth, lift, duration and
+  surface are adjustable in the expression's settings.
+- **Move a strip to another data pin from the app.** With advanced mode on,
+  LED setup shows a data pin row per strip: pick a GPIO, tap Update, and the
+  lamp restarts driving that strip from the new pin. "Built-in (GPIO 12)" puts
+  it back. Handy when a board has a dead pin. Pins other strips use are greyed
+  out; a pin the lamp can't use (a button or touch pad's) leaves the strip
+  where it was and the app says why. Lamps on older firmware don't show the
+  row.
 
 ### Fixed
-- **Mesh updates reach lamps after the sending lamp restarts.** A lamp that
-  restarted kept offering its firmware to older lamps nearby, and they
-  ignored every offer without a word, so an update seeded on one lamp never
-  spread. Lamps now number their messages from a fresh random point each
-  time they start, so older lamps take the offer.
+- **Mesh updates reach lamps after the sending lamp restarts.** A restarted
+  lamp kept offering firmware that older lamps silently ignored, so an update
+  seeded on one lamp never spread. Lamps now number their messages from a fresh
+  random point at each start, so older lamps take the offer.
 - **Wisp changes from the app land straight after the connected lamp
-  restarts.** After the lamp the app talks through restarted, the wisp
-  ignored the app's changes for a while (the app showed Fade 19% while the
-  wisp stayed at 100%). A restarted lamp's messages now reach the wisp
-  straight away. Lamps and wisps also forget a message they've seen after
-  20 seconds, so a lamp still on older firmware is heard again at most 20
-  seconds after the last message it sent before restarting.
-- **A crash record says where the lamp crashed.** After a crash or a stall
-  the task watchdog catches, the lamp's crash record (`lastCrash` in the
-  lamp's settings) now carries the core, the code address, the first few
-  backtrace addresses and the uptime at the moment it happened. Before, it
-  held only the reset type and the heap figures, with an uptime of 0 when the
-  lamp stalled before its first check.
-- **Web Config's on-time picker sticks.** Choosing how long Web Config stays
-  up after boot (say 5 min) on a lamp that was already set up saved nothing,
-  and the next boot still gave 2 minutes. The choice now applies from the next
-  boot, and the app reads back what you chose.
-- **The wisp's Lamps tab shows each lamp's new colours right away.** While
-  a lamp faded to its next drift colour, its colour chips crept along with
-  the fade, and after a Shuffle they could sit on the old colours for a few
-  seconds while the shuffle icon had already stopped. The chips now show the
-  colours the wisp gave each lamp as soon as it gives them, through a lamp
+  restarts.** The wisp used to ignore the app's changes for a while (the app
+  showed Fade 19% while the wisp stayed at 100%). A restarted lamp's messages
+  now reach the wisp straight away. Lamps and wisps also forget a seen message
+  after 20 seconds, so a lamp on older firmware is heard again at most 20
+  seconds after its last message before restarting.
+- **The wisp's Lamps tab shows each lamp's new colours right away.** Chips
+  used to creep along with the fade, and after a Shuffle could sit on the old
+  colours for a few seconds while the shuffle icon had stopped. Chips now show
+  the colours the wisp gave each lamp as soon as it gives them, through a lamp
   on this firmware; through a lamp on older firmware they still follow the
   fade. The shuffle icon keeps spinning until the wisp reports the re-roll.
-  When more lamps on one wisp are fading at once than one frame has room
-  for (about 5 of 100 lamps, about 30 of 80), a chip can sit on its previous
-  colour, or a mid-fade colour, for one or more drift steps.
+  When more lamps on one wisp fade at once than one frame has room for (about
+  5 of 100 lamps, about 30 of 80), a chip can sit on its previous or a
+  mid-fade colour for a drift step or more.
+- **Web Config's on-time picker sticks.** Choosing how long Web Config stays up
+  after boot (say 5 min) on an already set-up lamp saved nothing and the next
+  boot still gave 2 minutes. The choice now applies from the next boot, and the
+  app reads back what you chose.
+- **A crash record says where the lamp crashed.** After a crash or a task
+  watchdog stall, `lastCrash` in the lamp's settings now carries the core, code
+  address, first few backtrace addresses and uptime, instead of only the reset
+  type and heap figures (with an uptime of 0 on a stall before the first
+  check).
 
 ### Changed
+- **Copying is rarer and calmer.** A lamp rolls for a copy of any one peer at
+  most once every 3 minutes, played or not; odds halve with 8 lamps around and
+  quarter with 24 (a single neighbour copies a touch less often); a lamp skips
+  copying an expression it played in the last 3 minutes, so two lamps stop
+  bouncing one back and forth; and home mode never copies another lamp's
+  expression, even with social left on.
+- **Settings take far less room on the lamp.** Name, password, colours, strips,
+  knockout and home mode are kept as one compact record, leaving room for more
+  remembered lamps and expressions. On first start the lamp moves its settings
+  over itself and checks the copy before removing the old one, so a power cut
+  at any moment leaves it with its settings; nothing changes in the app or Web
+  Config. Flashed back to an older release, a lamp starts with default name,
+  colours and no password (expressions kept); flashed forward again it gets its
+  settings back, with expressions as the older release left them.
 - **`npm run wisp:flash:release` takes `IMAGE=`.** Point it at a local
   `wisp-firmware-signed.bin` to flash that file and skip the download.
-- **Settings take far less room on the lamp.** A lamp now keeps its name,
-  password, colours, strips, knockout and home mode as one compact record
-  instead of the text it stored before, which leaves room for more
-  remembered lamps and more expressions beside them. The first time a lamp
-  starts on this firmware it moves its settings over by itself and checks
-  the copy before removing the old one, so a power cut at any moment leaves
-  it with its settings; nothing changes in the app or Web Config. A lamp
-  flashed back to an older release afterwards starts with default name,
-  colours and no password (it keeps its expressions); flashed forward again
-  it gets its settings back, with its expressions as the older release left
-  them.
-- **A chatty lamp gets copied less.** A lamp rolls for a copy of any one
-  peer's expressions at most once every 3 minutes, whether or not the roll
-  played, so a lamp full of expressions no longer gets mirrored by every
-  friend all the time.
-- **Crowds copy less.** Copy odds scale down with the lamps nearby: half
-  with 8 around, a quarter with 24. A single neighbour copies a touch less
-  often than before.
-- **No copying yourself.** A lamp skips copying an expression it played in
-  the last 3 minutes, so two lamps no longer bounce one expression back and
-  forth.
-- **Home mode copies nothing.** A lamp in home mode never copies another
-  lamp's expression, even with social left on at home.
 
 ## 1.3.3
 
