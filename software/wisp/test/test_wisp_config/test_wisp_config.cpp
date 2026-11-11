@@ -187,6 +187,18 @@ void test_osc_address_built_per_role() {
   TEST_ASSERT_FALSE(wisp::oscRoleFromName(nullptr, r));
 }
 
+// Clearing settings that were never stored removes nothing that isn't there,
+// so the wisp logs no NVS NOT_FOUND error.
+void test_clearing_unset_settings_removes_no_missing_key() {
+  wisp::WispConfig cfg;
+  cfg.begin();
+  cfg.setManualPalette({{10, 20, 30, 40}});
+  cfg.setManualPalette({});
+  cfg.setPassword("");
+  cfg.clearWifi();
+  TEST_ASSERT_EQUAL_INT(0, s_removeMissing);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_name_default_is_empty);
@@ -210,5 +222,6 @@ int main(int, char**) {
   RUN_TEST(test_osc_role_defaults_primary_and_persists);
   RUN_TEST(test_corrupt_osc_role_loads_as_primary);
   RUN_TEST(test_osc_address_built_per_role);
+  RUN_TEST(test_clearing_unset_settings_removes_no_missing_key);
   return UNITY_END();
 }
