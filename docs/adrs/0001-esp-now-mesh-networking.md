@@ -41,7 +41,7 @@ protocol layered on top.
 - **Gossip relay** for the message types that need fleet-wide reach beyond a
   single hop: a lamp re-broadcasts a relayable frame at most once, a per-lamp delay
   after first sight (`relayDelayMs`, see `networking.md`; at once when its
-  table is full), deduped by
+  table is full or the loop is in a known stall), deduped by
   **per-message-type** `DedupRing`s (each sized to its traffic) keyed on
   `(sourceMac, msgType, seq)`. Relayed: `MSG_HELLO`, `MSG_CONTROL_OP`, `MSG_WISP_HELLO`,
   `MSG_WISP_PALETTE` — so presence and beacons reach lamps beyond
