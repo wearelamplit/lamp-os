@@ -16,6 +16,7 @@
 #include "components/network/transport/espnow_link.hpp"
 #include "esp_system.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -37,6 +38,7 @@
 #include "core/personality_engine.hpp"
 #include "expressions/expression_invocation.hpp"
 #include "expressions/expression_manager.hpp"
+#include "expressions/yawn/yawn_expression.hpp"
 #include "util/bd_addr.hpp"
 #include "util/color.hpp"
 #include "util/gradient.hpp"
@@ -275,6 +277,72 @@ namespace {
 
 constexpr size_t kSerialCmdMax = 1024;
 
+struct YawnArg {
+  const char* name;
+  const char* key;
+  bool fraction;  // typed 0..1, stored as a percent
+};
+constexpr YawnArg kYawnArgs[] = {
+    {"dur", lamp::kYawnDurationKey, false},   {"depth", lamp::kYawnDepthKey, false},
+    {"lift", lamp::kYawnLiftKey, false},      {"hold", lamp::kYawnHoldKey, false},
+    {"rec", lamp::kYawnRecoverKey, false},    {"warm", lamp::kYawnWarmthKey, true},
+    {"lag", lamp::kYawnLagKey, false},        {"opacity", lamp::kOpacityParam.key, false},
+};
+
+// `yawn [dur=4500 depth=35 lift=8 hold=500 rec=1800 warm=0.3 lag=200
+// surf=shade|base|both]` plays one yawn now as a local transient that no peer
+// hears. Absent keys take the descriptor defaults; warm is 0..1.
+void runYawnCommand(char* args) {
+  static const uint8_t kLocalMac[6] = {0, 0, 0, 0, 0, 0};
+  lamp::ExpressionInvocation inv;
+  inv.type = lamp::YawnExpression::classDescriptor().id;
+  inv.target = lamp::TARGET_BOTH;
+  char* save = nullptr;
+  for (char* tok = strtok_r(args, " ", &save); tok; tok = strtok_r(nullptr, " ", &save)) {
+    char* eq = strchr(tok, '=');
+    if (!eq) {
+      Serial.printf("[cmd] err yawn arg %s\n", tok);
+      return;
+    }
+    *eq = '\0';
+    const char* value = eq + 1;
+    if (strcmp(tok, "surf") == 0) {
+      if (strcmp(value, "shade") == 0) inv.target = lamp::TARGET_SHADE;
+      else if (strcmp(value, "base") == 0) inv.target = lamp::TARGET_BASE;
+      else if (strcmp(value, "both") == 0) inv.target = lamp::TARGET_BOTH;
+      else {
+        Serial.printf("[cmd] err yawn surf %s\n", value);
+        return;
+      }
+      continue;
+    }
+    const YawnArg* arg = nullptr;
+    for (const YawnArg& a : kYawnArgs) {
+      if (strcmp(tok, a.name) == 0) arg = &a;
+    }
+    if (!arg) {
+      Serial.printf("[cmd] err yawn key %s\n", tok);
+      return;
+    }
+    const float number = strtof(value, nullptr);
+    inv.parameters.set(arg->key, static_cast<uint32_t>(std::max(
+                                     0.0f, arg->fraction ? number * 100.0f + 0.5f : number)));
+  }
+
+  lamp::ExpressionParams shown = inv.parameters;
+  expressionManager.registry().applyDefaults(lamp::YawnExpression::classDescriptor(), shown, 1);
+  const bool started = expressionManager.triggerInvocation(inv, kLocalMac, /*broadcast=*/false,
+                                                           lamp::TransientSource::Local);
+  Serial.printf(
+      "[cmd] %s yawn dur=%u depth=%u lift=%u hold=%u rec=%u warm=%.2f lag=%u opacity=%u "
+      "target=%u\n",
+      started ? "ok" : "err not started", (unsigned)shown.get(lamp::kYawnDurationKey, 0),
+      (unsigned)shown.get(lamp::kYawnDepthKey, 0), (unsigned)shown.get(lamp::kYawnLiftKey, 0),
+      (unsigned)shown.get(lamp::kYawnHoldKey, 0), (unsigned)shown.get(lamp::kYawnRecoverKey, 0),
+      shown.get(lamp::kYawnWarmthKey, 0) / 100.0, (unsigned)shown.get(lamp::kYawnLagKey, 0),
+      (unsigned)shown.get(lamp::kOpacityParam.key, 0), (unsigned)inv.target);
+}
+
 // Runs on the loop task (Core 1), same task as the pending-slot drains, so
 // commands call the drain-side appliers directly instead of posting slots.
 void runSerialCommand(char* line, size_t len) {
@@ -306,6 +374,11 @@ void runSerialCommand(char* line, size_t len) {
     volatile bool spin = true;
     while (spin) {
     }
+  }
+
+  if (strcmp(line, "yawn") == 0 || strncmp(line, "yawn ", 5) == 0) {
+    runYawnCommand(line + 4);
+    return;
   }
 
   if (strcmp(line, "heap.get") == 0) {

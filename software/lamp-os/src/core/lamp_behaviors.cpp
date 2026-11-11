@@ -37,6 +37,7 @@
 #include "expressions/pulse/pulse_expression.hpp"
 #include "expressions/shifty/shifty_expression.hpp"
 #include "expressions/spotty/spotty_expression.hpp"
+#include "expressions/yawn/yawn_expression.hpp"
 #include "util/levels.hpp"
 
 // Bring apply_brightness helpers into file scope so unqualified call sites
