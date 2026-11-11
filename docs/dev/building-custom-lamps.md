@@ -74,9 +74,11 @@ segment whose color the lamp advertises to peers (snafu's `Stem`).
 `pin` is the default data GPIO. A lamp can override it per strip from the
 app's LED setup screen in advanced mode: the role's config segments pair with
 its strips in declaration order, and a segment's saved `pin` (0 = the
-`StripSpec` pin) replaces the strip's at boot. `resolveStripPins` keeps the
-`StripSpec` pin for any value that fails `isStripDataPin` or lands on another
-strip's or an input's pin, so a bad saved pin can't stop a lamp booting.
+`StripSpec` pin) replaces the strip's at boot (`applySegmentPins`). The strip
+keeps its `StripSpec` pin when the saved value fails `isStripDataPin` or lands
+on another strip's or an input's pin, so a bad saved pin can't stop a lamp
+booting, and that segment's `pin` then reads back as 0 in the base or shade
+section, so the app's post-restart check reports the pin that didn't take.
 
 **`InputSpec`** — one button or capacitive pad. snafu declares none, and most
 lamps don't: physical inputs are the staff specialization, so the `.inputs`

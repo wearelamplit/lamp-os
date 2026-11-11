@@ -141,4 +141,29 @@ inline std::vector<uint8_t> resolveStripPins(const HwConfig& hw,
   return pins;
 }
 
+// Effective data pin per hw.strips entry from the role segments' saved pins.
+// A role's segments pair with its strips in declaration order. A saved pin
+// that does not take effect is cleared, so the segment reports the pin in use.
+template <typename Seg>
+std::vector<uint8_t> applySegmentPins(const HwConfig& hw, std::vector<Seg>& shade,
+                                      std::vector<Seg>& base) {
+  std::vector<Seg*> paired(hw.strips.size(), nullptr);
+  std::vector<uint8_t> requested(hw.strips.size(), 0);
+  size_t shadeK = 0, baseK = 0;
+  for (size_t i = 0; i < hw.strips.size(); ++i) {
+    const bool isShade = hw.strips[i].role == Surface::Shade;
+    std::vector<Seg>& segs = isShade ? shade : base;
+    const size_t k = isShade ? shadeK++ : baseK++;
+    if (k < segs.size()) {
+      paired[i] = &segs[k];
+      requested[i] = segs[k].pin;
+    }
+  }
+  const std::vector<uint8_t> pins = resolveStripPins(hw, requested);
+  for (size_t i = 0; i < pins.size(); ++i) {
+    if (paired[i] && paired[i]->pin != pins[i]) paired[i]->pin = 0;
+  }
+  return pins;
+}
+
 }  // namespace lamp

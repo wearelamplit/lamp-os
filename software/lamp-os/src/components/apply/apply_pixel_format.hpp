@@ -1,7 +1,7 @@
 // Applies a role section's strip format (per-segment pixel counts and data
 // pins + role-level byteOrder) from an incoming settings_blob. A segment pin
 // of 0 restores the variant pin; any other value must pass isStripDataPin,
-// and pin clashes are settled at boot by resolveStripPins. px is positional
+// and pin clashes are settled at boot by applySegmentPins. px is positional
 // against the role's existing segments; extra entries are ignored (segment
 // count is variant-fixed, not app-editable). byteOrder is a whole-role
 // string. Absent keys leave the current value. Takes effect on the reboot

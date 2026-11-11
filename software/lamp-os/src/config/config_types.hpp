@@ -102,7 +102,7 @@ class LampSettings {
  *        this is the persisted, editable half.
  * @property px - 0 = unset; applyDefaults fills from the variant default. See resolveConfiguredPx.
  * @property pin - data GPIO for this segment's strip; 0 = the variant StripSpec pin.
- *   Applied at boot through resolveStripPins.
+ *   Applied at boot through applySegmentPins.
  */
 struct SegmentSettings {
   std::string name;

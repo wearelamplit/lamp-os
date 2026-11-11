@@ -177,11 +177,68 @@ void test_revert_cascades_to_dependent_request() {
   TEST_ASSERT_EQUAL_UINT8(14, pins[1]);
 }
 
+// The shade's and base's clash reverts them only after the third strip's
+// request for the shade's pin was checked, so it takes a second pass.
+void test_revert_reaches_a_request_checked_before_it() {
+  lamp::HwConfig hw = standardLike();
+  hw.strips.push_back({lamp::Surface::Base, 26, lamp::ByteOrder::GRBW});
+  const auto pins = lamp::resolveStripPins(hw, {27, 27, 12});
+  TEST_ASSERT_EQUAL_UINT8(12, pins[0]);
+  TEST_ASSERT_EQUAL_UINT8(14, pins[1]);
+  TEST_ASSERT_EQUAL_UINT8(26, pins[2]);
+}
+
 void test_request_onto_input_pin_rejected() {
   lamp::HwConfig hw = standardLike();
   hw.inputs.push_back({1, lamp::InputType::Button, 27});
   const auto pins = lamp::resolveStripPins(hw, {0, 27});
   TEST_ASSERT_EQUAL_UINT8(14, pins[1]);
+}
+
+struct PinSeg {
+  uint8_t pin = 0;
+};
+
+// Roles interleaved and the base declared first, as loaf and snafu do.
+static lamp::HwConfig interleaved() {
+  lamp::HwConfig hw{};
+  hw.strips.push_back({lamp::Surface::Base, 14, lamp::ByteOrder::GRBW});
+  hw.strips.push_back({lamp::Surface::Shade, 12, lamp::ByteOrder::GRBW});
+  hw.strips.push_back({lamp::Surface::Base, 26, lamp::ByteOrder::GRBW});
+  hw.strips.push_back({lamp::Surface::Shade, 27, lamp::ByteOrder::GRBW});
+  return hw;
+}
+
+void test_segment_pins_pair_with_their_roles_strips_in_order() {
+  std::vector<PinSeg> shade = {{13}, {0}};
+  std::vector<PinSeg> base = {{0}, {32}};
+  const auto pins = lamp::applySegmentPins(interleaved(), shade, base);
+  TEST_ASSERT_EQUAL_UINT8(14, pins[0]);
+  TEST_ASSERT_EQUAL_UINT8(13, pins[1]);
+  TEST_ASSERT_EQUAL_UINT8(32, pins[2]);
+  TEST_ASSERT_EQUAL_UINT8(27, pins[3]);
+  TEST_ASSERT_EQUAL_UINT8(13, shade[0].pin);
+  TEST_ASSERT_EQUAL_UINT8(32, base[1].pin);
+}
+
+void test_segment_pin_that_does_not_take_effect_is_cleared() {
+  std::vector<PinSeg> shade = {{26}, {33}};
+  std::vector<PinSeg> base = {{0}, {0}};
+  const auto pins = lamp::applySegmentPins(interleaved(), shade, base);
+  TEST_ASSERT_EQUAL_UINT8(12, pins[1]);
+  TEST_ASSERT_EQUAL_UINT8(33, pins[3]);
+  TEST_ASSERT_EQUAL_UINT8(0, shade[0].pin);
+  TEST_ASSERT_EQUAL_UINT8(33, shade[1].pin);
+}
+
+void test_strip_without_a_segment_keeps_its_variant_pin() {
+  std::vector<PinSeg> shade = {{13}};
+  std::vector<PinSeg> base = {};
+  const auto pins = lamp::applySegmentPins(interleaved(), shade, base);
+  TEST_ASSERT_EQUAL_UINT8(14, pins[0]);
+  TEST_ASSERT_EQUAL_UINT8(13, pins[1]);
+  TEST_ASSERT_EQUAL_UINT8(26, pins[2]);
+  TEST_ASSERT_EQUAL_UINT8(27, pins[3]);
 }
 
 int main(int argc, char** argv) {
@@ -195,7 +252,11 @@ int main(int argc, char** argv) {
   RUN_TEST(test_two_requests_for_same_pin_both_rejected);
   RUN_TEST(test_swapped_pins_allowed);
   RUN_TEST(test_revert_cascades_to_dependent_request);
+  RUN_TEST(test_revert_reaches_a_request_checked_before_it);
   RUN_TEST(test_request_onto_input_pin_rejected);
+  RUN_TEST(test_segment_pins_pair_with_their_roles_strips_in_order);
+  RUN_TEST(test_segment_pin_that_does_not_take_effect_is_cleared);
+  RUN_TEST(test_strip_without_a_segment_keeps_its_variant_pin);
   RUN_TEST(test_zero_supply_budget_invalid);
   RUN_TEST(test_inputs_valid_distinct_pins);
   RUN_TEST(test_input_colliding_with_strip_pin_invalid);
