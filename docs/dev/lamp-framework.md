@@ -179,9 +179,10 @@ another lamp settings over `MSG_CONTROL_OP`, which carries only wisp traffic
   invocation: a cascade (`MSG_COMMAND`, immediate or delayed) and an event
   mirror (`MSG_EVENT` through `SocialEchoObserver`). Nothing is booked for
   later either: while `ExpressionManager::ignoresPeers()` the command drain
-  queues no delayed cascade and `SocialEchoObserver` books no mirror (its
-  introvert cooldown untouched), so nothing fires once home mode or the
-  preview ends. A retiring transient does not coalesce its sender's next
+  queues no delayed cascade, so nothing fires once home mode or the preview
+  ends. `SocialEchoObserver` goes further and rolls no copy while
+  `ExpressionManager::inHomeMode()`, social on or off, its introvert and
+  roll cooldowns untouched. A retiring transient does not coalesce its sender's next
   invocation.
 - `ExpressionManager::gcTransients` retires a Remote transient already running
   when home mode turns on: `Expression::retire()` ramps its contribution scale

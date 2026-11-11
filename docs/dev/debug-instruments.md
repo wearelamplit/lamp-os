@@ -70,6 +70,7 @@ Serial-ingress commands (`scripts/bench_cmd.py`), `core/lamp_test_action.cpp`:
 |---|---|
 | `[cmd]` | Serial command parse (`ok a=%s`, parse / missing-action errors); `ok loopwd.hang` before the `loopwd.hang` command stalls the loop task until the watchdog resets the lamp ([`qa/loop-watchdog.md`](../../qa/loop-watchdog.md)) |
 | `[test]` | Transient pulse / configured-trigger echo |
+| `[fondness]` | `roll <type> from <mac> hop <n> p=<pct>% fired\|skip\|cooldown`, one line per copycat roll (`behaviors/social_echo.cpp`); `copy.get` / `copy.set <key> <value>` read and set `ContagionTuning` ([`expressions.md`](expressions.md#expression-mirror)) |
 | `[personality]` | `inject_nearby` / `clear_nearby` bench overrides |
 
 ## Wisp firmware

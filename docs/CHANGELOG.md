@@ -5,6 +5,22 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## Unreleased
+
+### Added
+- **Copycat chains.** A lamp that copies a fond peer's expression now passes
+  the copy on, so a lamp near it can copy the copy. Each hop is half as likely
+  as the one before and a chain stops after 3 hops. Lamps on older firmware
+  still copy, they just don't pass it on.
+
+### Changed
+- **A chatty lamp gets copied less.** A lamp rolls for a copy of any one
+  peer's expressions at most once every 3 minutes, whether or not the roll
+  played, so a lamp full of expressions no longer gets mirrored by every
+  friend all the time.
+- **Home mode copies nothing.** A lamp in home mode never copies another
+  lamp's expression, even with social left on at home.
+
 ## 1.3.3
 
 ### Added

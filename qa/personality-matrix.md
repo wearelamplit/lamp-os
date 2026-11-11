@@ -128,6 +128,18 @@ color and blend into the peer's base GRADIENT over roughly a quarter second
 color for a peer whose base is clearly multi-colored. Record the observation
 either way — this exchange is merged but has never been bench-verified.
 
+**M6 — copycat chains and the roll cooldown.** Three debug lamps A, B, C in
+a line, B Smitten toward A and C toward B (the M3 `inject_nearby` lever),
+B and C Extrovert. Give A a triggered expression with cascade off and a short
+interval, and let it fire on its own: the app Test button also cascades to B,
+and B's copy then coalesces with the cascaded one and is never passed on. B
+logs `[fondness] roll <type> from <A> hop 1 p=75% fired` and plays it ~0.5 s
+later, then C logs `hop 2 p=37%` for B's copy; wait for a fire C plays.
+`copy.set chainMaxHops 1` on B: B still copies, C logs nothing for it. With A
+firing every few seconds for 5 min, B logs one roll per 3 min for A, the rest
+`cooldown`. `copy.get` confirms the numbers; a reboot restores them. Turn home
+mode on for B with social left on: B logs no `[fondness] roll` line.
+
 ## Pass criteria
 
 - M1: inject/clear ACK lines; visible dim toward the mode floor and full
@@ -138,6 +150,8 @@ either way — this exchange is merged but has never been bench-verified.
 - M4: zero greet lines inside the regreet window, greet resumes after it.
 - M5: gradient blend observed (or the flat-color failure recorded as a
   finding).
+- M6: hop 1 then hop 2 lines with the copies seen on B and C; no C line at
+  `chainMaxHops 1`; one roll per 3 min per peer; no roll line in home mode.
 
 ## Not covered here
 
