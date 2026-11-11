@@ -18,6 +18,12 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   peer's expressions at most once every 3 minutes, whether or not the roll
   played, so a lamp full of expressions no longer gets mirrored by every
   friend all the time.
+- **Crowds copy less.** Copy odds scale down with the lamps nearby: half
+  with 8 around, a quarter with 24. A single neighbour copies a touch less
+  often than before.
+- **No copying yourself.** A lamp skips copying an expression it played in
+  the last 3 minutes, so two lamps no longer bounce one expression back and
+  forth.
 - **Home mode copies nothing.** A lamp in home mode never copies another
   lamp's expression, even with social left on at home.
 

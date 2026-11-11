@@ -17,14 +17,16 @@ void SocialEchoObserver::onPeerExpression(const uint8_t sourceMac[6],
   if (manager_.isAnyTestActive()) return;
 
   const uint32_t now = millis();
-  const CopyDecision d =
-      copycat_.decide(sourceMac, config_.getDisposition(sourceMac), config_.lamp.socialMode,
-                      inv.hops, now, static_cast<uint8_t>(rng_.range(1, 100)),
-                      rng_.range(0, kMirrorJitterMs));
+  const CopyDecision d = copycat_.decide(
+      sourceMac, config_.getDisposition(sourceMac), config_.lamp.socialMode, inv.hops, now,
+      static_cast<uint8_t>(rng_.range(1, 100)), rng_.range(0, kMirrorJitterMs),
+      nearbyCount_ ? nearbyCount_() : 0,
+      manager_.playedWithin(inv.type.c_str(), copycat_.tuning.copyRollCooldownMs, now));
   if (d.outcome == CopyOutcome::NoChance) return;
 #ifdef LAMP_DEBUG
   const char* outcome = d.outcome == CopyOutcome::Fire       ? "fired"
                         : d.outcome == CopyOutcome::Cooldown ? "cooldown"
+                        : d.outcome == CopyOutcome::SelfEcho ? "self"
                                                              : "skip";
   // Two prints, the peer-sent type cut to 32: Print::printf mallocs a line of 64 B or more.
   Serial.printf("[fondness] roll %.32s from ", inv.type.c_str());

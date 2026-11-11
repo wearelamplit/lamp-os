@@ -10,6 +10,7 @@
 #include "core/animated_behavior.cpp"
 #include "expressions/expression.cpp"
 #include "expressions/expression_manager.cpp"
+#include "expressions/recent_plays.cpp"
 #include "expressions/cascade_scheduler.cpp"
 #include "expressions/expression_invocation.cpp"
 #include "expressions/expression_registry.cpp"

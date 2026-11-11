@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include <lampos/clock.hpp>
@@ -42,17 +43,21 @@ struct ContagionTuning {
   uint8_t chainHopPct = 50;
   // Odds rise this percent per meeting with the source, up to 10 meetings.
   uint8_t familiarBoostPct = 0;
+  // Every chance scales by crowdHalf / (crowdHalf + nearby lamps), so a room of
+  // crowdHalf lamps copies at half the odds.
+  uint8_t crowdHalf = 8;
 };
 
 inline constexpr uint8_t kMaxChainHops = 8;
 inline constexpr uint32_t kMaxCopyRollCooldownMs = 3600000;
 inline constexpr uint8_t kMaxFamiliarBoostPct = 3;
 inline constexpr uint8_t kFamiliarBoostMeets = 10;
+inline constexpr uint8_t kMaxCrowdHalf = 64;
 
 // Chance (0..100) of copying a frame `frameHops` from its origin, from the
-// mirror chance `basePct` and `meets` with its sender. 0 when the copy would
-// pass chainMaxHops. Pure.
-uint8_t copyChancePct(uint8_t basePct, uint8_t frameHops, uint8_t meets,
+// mirror chance `basePct`, `meets` with its sender and the `nearby` lamp
+// count. 0 when the copy would pass chainMaxHops. Pure.
+uint8_t copyChancePct(uint8_t basePct, uint8_t frameHops, uint8_t meets, size_t nearby,
                       const ContagionTuning& t);
 
 // Sets ContagionTuning field `key` (its member name) to `value`. False, with
@@ -95,7 +100,8 @@ inline bool mirrorDecision(uint8_t ratePct, SocialMode mode, uint8_t roll,
   return true;
 }
 
-enum class CopyOutcome : uint8_t { NoChance, Cooldown, Skip, Fire };
+// SelfEcho: this lamp played the type itself within the roll window.
+enum class CopyOutcome : uint8_t { NoChance, SelfEcho, Cooldown, Skip, Fire };
 
 struct CopyDecision {
   CopyOutcome outcome = CopyOutcome::NoChance;
@@ -112,10 +118,12 @@ struct CopyDecision {
 class Copycat {
  public:
   // A frame `frameHops` from its origin, from `mac`. `chanceRoll` is a 1..100
-  // draw, `jitterRoll` a 0..kMirrorJitterMs draw.
+  // draw, `jitterRoll` a 0..kMirrorJitterMs draw. `nearby` counts the lamps
+  // in the near view; `playedRecently` is whether this lamp played the frame's
+  // type within tuning.copyRollCooldownMs. Neither spends a roll.
   CopyDecision decide(const uint8_t mac[6], uint8_t disposition, SocialMode mode,
                       uint8_t frameHops, uint32_t nowMs, uint8_t chanceRoll,
-                      uint32_t jitterRoll);
+                      uint32_t jitterRoll, size_t nearby = 0, bool playedRecently = false);
   // A Fire's replay was booked; starts the introvert floor.
   void booked(uint32_t nowMs) { cooldown_.mirrored(nowMs); }
   // True when a copy carrying `hops` announces itself for the next lamp.

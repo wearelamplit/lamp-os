@@ -11,6 +11,7 @@
 #include "expression_invocation.hpp"
 #include "expressions/cascade_scheduler.hpp"
 #include "expressions/recent_cascade.hpp"
+#include "expressions/recent_plays.hpp"
 #include "expressions/transient_admission.hpp"
 #include "expression_registry.hpp"
 #include "expressions/glitchy/glitchy_expression.hpp"
@@ -113,6 +114,8 @@ class ExpressionManager {
   // the second announce so observers receive exactly one per logical trigger.
   RecentCascade recentEvents_;
 
+  RecentPlays recentPlays_;
+
   // Fan out MSG_COMMAND to each nearby lamp for an expression that just
   // fired locally, if its config opts in via cascadeEnabled. Continuous
   // descriptors never cascade. No-op when no MeshLink has been wired in.
@@ -130,8 +133,9 @@ class ExpressionManager {
   void maybeCascade(const ExpressionEntry& entry,
                     const uint8_t* excludeMac = nullptr);
 
-  // Broadcast a MSG_EVENT announce for a locally-fired expression. Gated on
-  // recentEvents_ so a TARGET_BOTH auto-trigger produces exactly one event.
+  // Broadcast a MSG_EVENT announce for a locally-fired expression, and stamp
+  // its play. Gated on recentEvents_ so a TARGET_BOTH auto-trigger produces
+  // exactly one event.
   void emitEvent(const ExpressionEntry& entry);
 
   // The cascade and the event for an expression of `shape`'s type, colours
@@ -284,6 +288,10 @@ class ExpressionManager {
   // True while home mode is on, the app's preview included, whether or not it
   // ignores other lamps.
   bool inHomeMode() const;
+
+  // True when this lamp played an expression of registered `type`, its own
+  // fire or a transient, within windowMs before nowMs.
+  bool playedWithin(const char* type, uint32_t windowMs, uint32_t nowMs) const;
 
   /**
    * Garbage-collect transient one-shot expressions created by

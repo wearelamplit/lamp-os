@@ -378,9 +378,10 @@ void runSerialCommand(char* line, size_t len) {
   if (strcmp(line, "copy.get") == 0) {
     const lamp::ContagionTuning& t = socialEchoObserver.tuning();
     Serial.printf("[cmd] ok copy copyRollCooldownMs=%lu chainMaxHops=%u chainHopPct=%u "
-                  "familiarBoostPct=%u\n",
+                  "familiarBoostPct=%u crowdHalf=%u\n",
                   (unsigned long)t.copyRollCooldownMs, (unsigned)t.chainMaxHops,
-                  (unsigned)t.chainHopPct, (unsigned)t.familiarBoostPct);
+                  (unsigned)t.chainHopPct, (unsigned)t.familiarBoostPct,
+                  (unsigned)t.crowdHalf);
     return;
   }
 

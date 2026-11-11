@@ -10,6 +10,7 @@
 #include "core/animated_behavior.cpp"
 #include "expressions/expression.cpp"
 #include "expressions/expression_manager.cpp"
+#include "expressions/recent_plays.cpp"
 #include "expressions/cascade_scheduler.cpp"
 #include "expressions/expression_invocation.cpp"
 #include "expressions/expression_registry.cpp"
@@ -108,6 +109,15 @@ struct Rig {
     inv.target = TARGET_SHADE;
     inv.hops = hops;
     hear(inv);
+  }
+  // One frame from each of twenty peers, so every roll window is fresh.
+  void hearCrowd(const ExpressionInvocation& inv, uint8_t crowdId) {
+    for (uint8_t i = 0; i < 20; ++i) {
+      const uint8_t mac[6] = {9, 9, 9, 9, crowdId, i};
+      echo.onPeerExpression(mac, inv);
+    }
+    set_mock_millis(millis() + kMirrorDelayFloorMs + kMirrorJitterMs + 1);
+    echo.tick(millis());
   }
   void hear(const ExpressionInvocation& inv, const uint8_t* mac = kPeerMac) {
     for (int i = 0; i < 20; ++i) echo.onPeerExpression(mac, inv);
@@ -209,6 +219,55 @@ void test_copy_without_room_for_hp_is_not_announced() {
   TEST_ASSERT_EQUAL_size_t(0, s_events.size());
 }
 
+static ExpressionInvocation probeAt(uint8_t hops) {
+  ExpressionInvocation inv;
+  inv.type = "probe";
+  inv.target = TARGET_SHADE;
+  inv.hops = hops;
+  return inv;
+}
+
+// A lamp that just played a type, its own fire, does not copy a peer's frame
+// of it until copyRollCooldownMs has passed.
+void test_own_fire_blocks_copies_for_the_window() {
+  Rig r;
+  r.echo.tuning().copyRollCooldownMs = ContagionTuning{}.copyRollCooldownMs;
+  ExpressionConfig config;
+  config.type = "probe";
+  config.target = TARGET_SHADE;
+  r.manager.addExpression(config, /*configBacked=*/false);
+  r.compositor.addBehavior(r.manager.getBehaviors()[0]);
+  TEST_ASSERT_TRUE(r.manager.triggerExpression("probe"));
+  TEST_ASSERT_EQUAL_size_t(1, s_registered.size());
+
+  r.hearCrowd(probeAt(0), 1);
+  TEST_ASSERT_EQUAL_size_t(1, s_registered.size());
+
+  set_mock_millis(millis() + r.echo.tuning().copyRollCooldownMs);
+  r.manager.retireStale(millis());
+  r.echo.tick(millis());
+  r.hearCrowd(probeAt(0), 2);
+  TEST_ASSERT_TRUE(s_registered.size() > 1);
+}
+
+// A, B, A: a lamp that copied a type does not copy the chain coming back.
+void test_copy_blocks_the_chain_coming_back() {
+  Rig r;
+  r.echo.tuning().copyRollCooldownMs = ContagionTuning{}.copyRollCooldownMs;
+  r.hear(probeAt(0), kPeerMac);
+  TEST_ASSERT_EQUAL_size_t(1, s_registered.size());
+  r.hearCrowd(probeAt(1), 1);
+  TEST_ASSERT_EQUAL_size_t(1, s_registered.size());
+}
+
+// A crowded room damps every copy: at 1000 lamps near, the chance rounds to 0.
+void test_nearby_count_damps_copies() {
+  Rig r;
+  r.echo.setNearbyCount([] { return static_cast<size_t>(1000); });
+  r.hearCrowd(probeAt(0), 1);
+  TEST_ASSERT_EQUAL_size_t(0, s_registered.size());
+}
+
 // An Introvert's booked copy holds every peer's copy until the floor ends.
 void test_introvert_floor_holds_across_peers() {
   Rig r;
@@ -230,5 +289,8 @@ int main() {
   RUN_TEST(test_coalesced_copy_is_not_announced);
   RUN_TEST(test_copy_without_room_for_hp_is_not_announced);
   RUN_TEST(test_introvert_floor_holds_across_peers);
+  RUN_TEST(test_own_fire_blocks_copies_for_the_window);
+  RUN_TEST(test_copy_blocks_the_chain_coming_back);
+  RUN_TEST(test_nearby_count_damps_copies);
   return UNITY_END();
 }

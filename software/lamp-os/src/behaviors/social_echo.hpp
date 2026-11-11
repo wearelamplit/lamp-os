@@ -37,6 +37,9 @@ class SocialEchoObserver : public IExpressionObserver {
 
   ContagionTuning& tuning() { return copycat_.tuning; }
 
+  // Lamps in the near view, for crowd damping. Unset counts none.
+  void setNearbyCount(size_t (*count)()) { nearbyCount_ = count; }
+
  private:
   struct Pending {
     ExpressionInvocation inv;
@@ -52,6 +55,7 @@ class SocialEchoObserver : public IExpressionObserver {
   FastRng rng_;
   Pending pending_[kMaxPending];
   Copycat copycat_;
+  size_t (*nearbyCount_)() = nullptr;
 };
 
 }  // namespace lamp

@@ -232,6 +232,11 @@ void ExpressionManager::retireStale(uint32_t nowMs) {
   recentEvents_.retire(nowMs);
   localCooldown_.retire(nowMs);
   cascade_.retireBatchGap(nowMs);
+  recentPlays_.retire(nowMs);
+}
+
+bool ExpressionManager::playedWithin(const char* type, uint32_t windowMs, uint32_t nowMs) const {
+  return recentPlays_.playedWithin(registry_.find(type), windowMs, nowMs);
 }
 
 void ExpressionManager::tickCascade(uint32_t nowMs) {
@@ -260,6 +265,7 @@ void ExpressionManager::tickCascade(uint32_t nowMs) {
 
 void ExpressionManager::emitEvent(const ExpressionEntry& entry) {
   if (!entry.expression) return;
+  recentPlays_.record(registry_.find(entry.type.c_str()), millis());
   announce(shapeOf(entry), paramsOf(entry));
 }
 
@@ -439,8 +445,8 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
     return false;
   }
 
-  const SurfacePlan plan =
-      surfacePlan(registry_.find(inv.type.c_str()), invTarget, shadeBuffer, baseBuffer);
+  const ExpressionDescriptor* descriptor = registry_.find(inv.type.c_str());
+  const SurfacePlan plan = surfacePlan(descriptor, invTarget, shadeBuffer, baseBuffer);
   const size_t targetCount = plan.count;
   if (targetCount == 0) return false;
 
@@ -522,6 +528,7 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
   }
 
   suppressCascade_ = false;
+  if (triggered) recentPlays_.record(descriptor, nowMs);
 
   // `broadcast` originates a wave from this call, distinct from suppressCascade_
   // which only stops the transient's own trigger() from re-firing one.

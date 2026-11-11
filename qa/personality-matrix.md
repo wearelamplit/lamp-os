@@ -129,16 +129,19 @@ color for a peer whose base is clearly multi-colored. Record the observation
 either way — this exchange is merged but has never been bench-verified.
 
 **M6 — copycat chains and the roll cooldown.** Three debug lamps A, B, C in
-a line, B Smitten toward A and C toward B (the M2 lampId-as-name `inject_nearby` lever),
-B and C Extrovert. Give A a triggered expression with cascade off and a short
+a line, B Smitten toward A and C toward B (the M2 lampId-as-name `inject_nearby` lever,
+then `clear_nearby`, since an active override is also the near count crowd
+damping reads), B and C Extrovert. Give A a triggered expression with cascade off and a short
 interval, and let it fire on its own: the app Test button also cascades to B,
 and B's copy then coalesces with the cascaded one and is never passed on. B
-logs `[fondness] roll <type> from <A> hop 1 p=75% fired` and plays it ~0.5 s
-later (`fired` is the roll; the copy is dropped if all 4 pending slots are full, and coalesces if one from A is running), then C logs `hop 2 p=37%` for B's copy; wait for a fire C plays.
+logs `[fondness] roll <type> from <A> hop 1 p=60% fired` and plays it ~0.5 s
+later (`fired` is the roll; the copy is dropped if all 4 pending slots are full, and coalesces if one from A is running), then C logs `hop 2 p=30%` for B's copy (two lamps near damp 75 and 37 by 8/10); wait for a fire C plays.
 `copy.set chainMaxHops 1` on B: B still copies, C logs nothing for it. With A
 firing every few seconds for 5 min, B logs one roll per 3 min for A, the rest
 `cooldown`. `copy.get` confirms the numbers; a reboot restores them. Turn home
-mode on for B with social left on: B logs no `[fondness] roll` line.
+mode on for B with social left on: B logs no `[fondness] roll` line. Set B Smitten
+toward C too: when C's copy comes back, B logs `self` and does not copy it.
+`copy.set crowdHalf 64` on B lifts its `p=` back near 75%.
 
 ## Pass criteria
 
@@ -151,7 +154,8 @@ mode on for B with social left on: B logs no `[fondness] roll` line.
 - M5: gradient blend observed (or the flat-color failure recorded as a
   finding).
 - M6: hop 1 then hop 2 lines with the copies seen on B and C; no C line at
-  `chainMaxHops 1`; one roll per 3 min per peer; no roll line in home mode.
+  `chainMaxHops 1`; one roll per 3 min per peer; no roll line in home mode;
+  `self` on B for the chain coming back.
 
 ## Not covered here
 

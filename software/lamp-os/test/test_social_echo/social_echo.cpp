@@ -219,7 +219,7 @@ void test_origin_copies_at_the_mirror_chance() {
   const ContagionTuning t;
   for (uint8_t d = 0; d <= 6; ++d) {
     for (SocialMode m : kModes) {
-      TEST_ASSERT_EQUAL_UINT8(mirrorRatePct(d, m), copyChancePct(mirrorRatePct(d, m), 0, 0, t));
+      TEST_ASSERT_EQUAL_UINT8(mirrorRatePct(d, m), copyChancePct(mirrorRatePct(d, m), 0, 0, 0, t));
     }
   }
 }
@@ -234,11 +234,11 @@ void test_hop_chance_scales_and_stops_at_max() {
       t.chainMaxHops = maxHops;
       uint8_t expected = 75;
       for (uint8_t h = 0; h < maxHops; ++h) {
-        TEST_ASSERT_EQUAL_UINT8(expected, copyChancePct(75, h, 0, t));
+        TEST_ASSERT_EQUAL_UINT8(expected, copyChancePct(75, h, 0, 0, t));
         expected = static_cast<uint8_t>(expected * hopPct / 100);
       }
-      TEST_ASSERT_EQUAL_UINT8(0, copyChancePct(75, maxHops, 0, t));
-      TEST_ASSERT_EQUAL_UINT8(0, copyChancePct(75, 255, 0, t));
+      TEST_ASSERT_EQUAL_UINT8(0, copyChancePct(75, maxHops, 0, 0, t));
+      TEST_ASSERT_EQUAL_UINT8(0, copyChancePct(75, 255, 0, 0, t));
     }
   }
 }
@@ -247,13 +247,13 @@ void test_hop_chance_scales_and_stops_at_max() {
 // per meeting up to kFamiliarBoostMeets and never passes 100.
 void test_familiar_boost() {
   ContagionTuning t;
-  TEST_ASSERT_EQUAL_UINT8(50, copyChancePct(50, 0, 7, t));
+  TEST_ASSERT_EQUAL_UINT8(50, copyChancePct(50, 0, 7, 0, t));
   t.familiarBoostPct = 3;
-  TEST_ASSERT_EQUAL_UINT8(50, copyChancePct(50, 0, 0, t));
-  TEST_ASSERT_EQUAL_UINT8(60, copyChancePct(50, 0, 7, t));
-  TEST_ASSERT_EQUAL_UINT8(65, copyChancePct(50, 0, lamp::kFamiliarBoostMeets, t));
-  TEST_ASSERT_EQUAL_UINT8(65, copyChancePct(50, 0, 200, t));
-  TEST_ASSERT_EQUAL_UINT8(100, copyChancePct(90, 0, 200, t));
+  TEST_ASSERT_EQUAL_UINT8(50, copyChancePct(50, 0, 0, 0, t));
+  TEST_ASSERT_EQUAL_UINT8(60, copyChancePct(50, 0, 7, 0, t));
+  TEST_ASSERT_EQUAL_UINT8(65, copyChancePct(50, 0, lamp::kFamiliarBoostMeets, 0, t));
+  TEST_ASSERT_EQUAL_UINT8(65, copyChancePct(50, 0, 200, 0, t));
+  TEST_ASSERT_EQUAL_UINT8(100, copyChancePct(90, 0, 200, 0, t));
 }
 
 // A copy of a frame h hops out is h + 1, and announces only short of the max.
@@ -335,6 +335,49 @@ void test_booked_copy_starts_the_introvert_floor() {
                         .outcome);
 }
 
+// Every chance scales by crowdHalf / (crowdHalf + nearby).
+void test_crowd_scales_every_chance() {
+  ContagionTuning t;
+  for (uint8_t half : {8, 16}) {
+    t.crowdHalf = half;
+    for (size_t n : {0, 1, 7, 24, 100}) {
+      TEST_ASSERT_EQUAL_UINT8(75 * half / (half + n), copyChancePct(75, 0, 0, n, t));
+      TEST_ASSERT_EQUAL_UINT8(75 * half / (half + n) / 2, copyChancePct(75, 1, 0, n, t));
+    }
+  }
+  TEST_ASSERT_EQUAL_UINT8(18, copyChancePct(75, 0, 0, 24, ContagionTuning{}));
+  TEST_ASSERT_EQUAL_UINT8(0, copyChancePct(75, 0, 0, SIZE_MAX, ContagionTuning{}));
+}
+
+// A Smitten peer heard among 24 nearby lamps, rolled once at every draw 1..100,
+// fires at the damped chance, well under the undamped one.
+void test_warm_crowd_copies_at_most_the_damped_rate() {
+  Copycat c;
+  c.tuning.copyRollCooldownMs = 0;
+  uint8_t mac[6];
+  unsigned fires = 0;
+  for (uint8_t roll = 1; roll <= 100; ++roll) {
+    macFor(roll, mac);
+    if (c.decide(mac, 5, SocialMode::Ambivert, 0, 1000 + roll, roll, 0, 24).outcome ==
+        CopyOutcome::Fire) {
+      ++fires;
+    }
+  }
+  TEST_ASSERT_EQUAL_UINT(copyChancePct(50, 0, 0, 24, c.tuning), fires);
+  TEST_ASSERT_TRUE(fires < mirrorRatePct(5, SocialMode::Ambivert));
+}
+
+// A type this lamp just played is not copied, and the refusal spends no roll.
+void test_self_echo_spends_no_roll() {
+  Copycat c;
+  uint8_t mac[6];
+  macFor(30, mac);
+  TEST_ASSERT_EQUAL(CopyOutcome::SelfEcho,
+                    c.decide(mac, 5, SocialMode::Extrovert, 1, 1000, 1, 0, 0, true).outcome);
+  TEST_ASSERT_EQUAL(CopyOutcome::Fire,
+                    c.decide(mac, 5, SocialMode::Extrovert, 1, 1001, 1, 0, 0, false).outcome);
+}
+
 // 500 warm peers each fire once inside one window: at most kSlots roll.
 void test_crowd_of_500_rolls_at_most_the_table() {
   Copycat c;
@@ -372,6 +415,8 @@ void test_set_tuning_checks_key_and_range() {
   TEST_ASSERT_EQUAL_UINT32(60000, t.copyRollCooldownMs);
   TEST_ASSERT_TRUE(lamp::setContagionTuning(t, "chainHopPct", 100));
   TEST_ASSERT_TRUE(lamp::setContagionTuning(t, "familiarBoostPct", lamp::kMaxFamiliarBoostPct));
+  TEST_ASSERT_TRUE(lamp::setContagionTuning(t, "crowdHalf", 16));
+  TEST_ASSERT_EQUAL_UINT8(16, t.crowdHalf);
 
   const ContagionTuning before = t;
   TEST_ASSERT_FALSE(lamp::setContagionTuning(t, "chainMaxHops", 0));
@@ -380,11 +425,14 @@ void test_set_tuning_checks_key_and_range() {
   TEST_ASSERT_FALSE(lamp::setContagionTuning(t, "familiarBoostPct", lamp::kMaxFamiliarBoostPct + 1));
   TEST_ASSERT_FALSE(
       lamp::setContagionTuning(t, "copyRollCooldownMs", lamp::kMaxCopyRollCooldownMs + 1));
+  TEST_ASSERT_FALSE(lamp::setContagionTuning(t, "crowdHalf", 0));
+  TEST_ASSERT_FALSE(lamp::setContagionTuning(t, "crowdHalf", lamp::kMaxCrowdHalf + 1));
   TEST_ASSERT_FALSE(lamp::setContagionTuning(t, "chainmaxhops", 2));
   TEST_ASSERT_EQUAL_UINT8(before.chainMaxHops, t.chainMaxHops);
   TEST_ASSERT_EQUAL_UINT8(before.chainHopPct, t.chainHopPct);
   TEST_ASSERT_EQUAL_UINT8(before.familiarBoostPct, t.familiarBoostPct);
   TEST_ASSERT_EQUAL_UINT32(before.copyRollCooldownMs, t.copyRollCooldownMs);
+  TEST_ASSERT_EQUAL_UINT8(before.crowdHalf, t.crowdHalf);
 }
 
 int main() {
@@ -410,6 +458,9 @@ int main() {
   RUN_TEST(test_peer_quiet_for_a_wrap_rolls_again);
   RUN_TEST(test_booked_copy_starts_the_introvert_floor);
   RUN_TEST(test_crowd_of_500_rolls_at_most_the_table);
+  RUN_TEST(test_crowd_scales_every_chance);
+  RUN_TEST(test_warm_crowd_copies_at_most_the_damped_rate);
+  RUN_TEST(test_self_echo_spends_no_roll);
   RUN_TEST(test_cold_peers_take_no_roll);
   RUN_TEST(test_set_tuning_checks_key_and_range);
   return UNITY_END();
