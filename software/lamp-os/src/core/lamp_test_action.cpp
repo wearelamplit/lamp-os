@@ -25,6 +25,7 @@
 
 #include "behaviors/configurator.hpp"
 #include "behaviors/greetable.hpp"
+#include "behaviors/social.hpp"
 #include "behaviors/zone_preview_surface.hpp"
 #include "components/apply/apply_brightness.hpp"
 #include "components/apply/apply_expressions.hpp"
