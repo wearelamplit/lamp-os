@@ -197,6 +197,7 @@ void test_request_onto_input_pin_rejected() {
 
 struct PinSeg {
   uint8_t pin = 0;
+  uint8_t builtinPin = 0;
 };
 
 // Roles interleaved and the base declared first, as loaf and snafu do.
@@ -219,6 +220,10 @@ void test_segment_pins_pair_with_their_roles_strips_in_order() {
   TEST_ASSERT_EQUAL_UINT8(27, pins[3]);
   TEST_ASSERT_EQUAL_UINT8(13, shade[0].pin);
   TEST_ASSERT_EQUAL_UINT8(32, base[1].pin);
+  TEST_ASSERT_EQUAL_UINT8(12, shade[0].builtinPin);
+  TEST_ASSERT_EQUAL_UINT8(27, shade[1].builtinPin);
+  TEST_ASSERT_EQUAL_UINT8(14, base[0].builtinPin);
+  TEST_ASSERT_EQUAL_UINT8(26, base[1].builtinPin);
 }
 
 void test_segment_pin_that_does_not_take_effect_is_cleared() {
@@ -242,11 +247,13 @@ void test_strip_without_a_segment_keeps_its_variant_pin() {
 }
 
 void test_segment_pin_without_a_strip_is_cleared() {
-  std::vector<PinSeg> shade = {{0}, {0}, {13}};
-  std::vector<PinSeg> base = {{0}, {0}, {32}};
+  std::vector<PinSeg> shade = {{0}, {0}, {13, 9}};
+  std::vector<PinSeg> base = {{0}, {0}, {32, 9}};
   lamp::applySegmentPins(interleaved(), shade, base);
   TEST_ASSERT_EQUAL_UINT8(0, shade[2].pin);
   TEST_ASSERT_EQUAL_UINT8(0, base[2].pin);
+  TEST_ASSERT_EQUAL_UINT8(0, shade[2].builtinPin);
+  TEST_ASSERT_EQUAL_UINT8(0, base[2].builtinPin);
 }
 
 int main(int argc, char** argv) {

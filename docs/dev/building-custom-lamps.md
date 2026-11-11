@@ -80,7 +80,9 @@ on another strip's or an input's pin, so a bad saved pin can't stop a lamp
 booting, and that segment's `pin` then reads back as 0 in the base or shade
 section, so the app's post-restart check reports the pin that didn't take. A
 pin on a segment with no strip (a role with more saved segments than the
-variant has strips) reads back as 0 too.
+variant has strips) reads back as 0 too. The section also carries each
+segment's `builtinPin` (its strip's `StripSpec` pin, 0 with no strip), so the
+app can name the built-in pin and grey out pins other strips run on.
 
 **`InputSpec`** — one button or capacitive pad. snafu declares none, and most
 lamps don't: physical inputs are the staff specialization, so the `.inputs`

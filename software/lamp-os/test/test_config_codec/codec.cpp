@@ -691,6 +691,30 @@ void test_unset_segment_pin_not_serialized() {
   TEST_ASSERT_NULL(strstr(serialized.c_str(), "\"pin\""));
 }
 
+void test_section_segments_carry_every_pin() {
+  std::vector<SegmentSettings> segs = {{"Main", 32, {Color(1, 2, 3, 4)}, 27, 4},
+                                       {"Lions", 18, {Color(5, 6, 7, 8)}, 0, 5}};
+  JsonDocument doc;
+  config_codec::writeSectionSegments(doc.to<JsonObject>(), segs);
+  TEST_ASSERT_EQUAL_INT(27, doc["segments"][0]["pin"].as<int>());
+  TEST_ASSERT_EQUAL_INT(4, doc["segments"][0]["builtinPin"].as<int>());
+  TEST_ASSERT_TRUE(doc["segments"][1]["pin"].is<int>());
+  TEST_ASSERT_EQUAL_INT(0, doc["segments"][1]["pin"].as<int>());
+  TEST_ASSERT_EQUAL_INT(5, doc["segments"][1]["builtinPin"].as<int>());
+}
+
+void test_stored_segments_never_carry_builtin_pin() {
+  Model m;
+  m.base.segments = {{"Base", 35, {Color(1, 2, 3, 4)}, 27, 14}};
+  JsonDocument out;
+  config_codec::toJson(out.to<JsonObject>(), m.lamp, m.base, m.shade, m.expressions,
+                       m.homeMode);
+  std::string serialized;
+  serializeJson(out, serialized);
+  TEST_ASSERT_NULL(strstr(serialized.c_str(), "builtinPin"));
+  TEST_ASSERT_NOT_NULL(strstr(serialized.c_str(), "\"pin\":27"));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_empty_blob_uses_class_defaults);
@@ -702,6 +726,8 @@ int main(int, char**) {
   RUN_TEST(test_segment_pin_round_trip);
   RUN_TEST(test_segment_pin_absent_or_unusable_loads_zero);
   RUN_TEST(test_unset_segment_pin_not_serialized);
+  RUN_TEST(test_section_segments_carry_every_pin);
+  RUN_TEST(test_stored_segments_never_carry_builtin_pin);
   RUN_TEST(test_sum_px_clamped_to_255);
   RUN_TEST(test_homemode_enabled_migration);
   RUN_TEST(test_round_trip_preserves_fields);

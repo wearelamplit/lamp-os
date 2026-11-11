@@ -144,7 +144,8 @@ inline std::vector<uint8_t> resolveStripPins(const HwConfig& hw,
 // Effective data pin per hw.strips entry from the role segments' saved pins.
 // A role's segments pair with its strips in declaration order. A saved pin
 // that does not take effect, or sits on a segment with no strip, is cleared,
-// so every segment reports the pin in use.
+// so every segment reports the pin in use. Each segment's builtinPin is set to
+// its strip's StripSpec pin, 0 with no strip.
 template <typename Seg>
 std::vector<uint8_t> applySegmentPins(const HwConfig& hw, std::vector<Seg>& shade,
                                       std::vector<Seg>& base) {
@@ -158,10 +159,11 @@ std::vector<uint8_t> applySegmentPins(const HwConfig& hw, std::vector<Seg>& shad
     if (k < segs.size()) {
       paired[i] = &segs[k];
       requested[i] = segs[k].pin;
+      segs[k].builtinPin = hw.strips[i].pin;
     }
   }
-  for (size_t k = shadeK; k < shade.size(); ++k) shade[k].pin = 0;
-  for (size_t k = baseK; k < base.size(); ++k) base[k].pin = 0;
+  for (size_t k = shadeK; k < shade.size(); ++k) shade[k].pin = shade[k].builtinPin = 0;
+  for (size_t k = baseK; k < base.size(); ++k) base[k].pin = base[k].builtinPin = 0;
   const std::vector<uint8_t> pins = resolveStripPins(hw, requested);
   for (size_t i = 0; i < pins.size(); ++i) {
     if (paired[i] && paired[i]->pin != pins[i]) paired[i]->pin = 0;

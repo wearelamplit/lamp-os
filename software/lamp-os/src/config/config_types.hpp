@@ -103,12 +103,15 @@ class LampSettings {
  * @property px - 0 = unset; applyDefaults fills from the variant default. See resolveConfiguredPx.
  * @property pin - data GPIO for this segment's strip; 0 = the variant StripSpec pin.
  *   Applied at boot through applySegmentPins.
+ * @property builtinPin - the StripSpec pin of the strip this segment drives, 0 when
+ *   none does. Set at boot by applySegmentPins and never stored.
  */
 struct SegmentSettings {
   std::string name;
   uint8_t px = 0;
   std::vector<Color> colors;
   uint8_t pin = 0;
+  uint8_t builtinPin = 0;
 };
 
 // Role pixel-space size. ≤255 by construction (config_codec::fromJson clamps
