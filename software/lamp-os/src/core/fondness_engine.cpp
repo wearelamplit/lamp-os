@@ -186,6 +186,13 @@ void FondnessEngine::seen(const uint8_t mac[6], uint64_t nowMs) {
   if (tracking()) store_.markSeen(mac, nowMs);
 }
 
+bool hasEnabledType(const ExpressionSettings& settings, const std::string& type) {
+  for (const ExpressionConfig& e : settings.expressions) {
+    if (e.enabled && e.type == type) return true;
+  }
+  return false;
+}
+
 size_t FondnessEngine::slotsInUse() const {
   return static_cast<size_t>(
       std::count_if(slots_.begin(), slots_.end(), [](const Slot& s) { return s.used; }));
@@ -203,10 +210,9 @@ FondnessEngine::Slot& FondnessEngine::slotFor_(const uint8_t mac[6], uint64_t no
     if (s.mac == key) return s;
     if (!oldest || s.lastObsMs < oldest->lastObsMs) oldest = &s;
   }
-  if (!free) {
-    commit_(*oldest, nowMs);
-    free = oldest;
-  }
+  // A churned peer would restart its count and cap within the minute, so the
+  // oldest slot's minute is dropped, never committed early.
+  if (!free) free = oldest;
   *free = Slot{};
   free->used = true;
   free->mac = key;

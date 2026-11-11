@@ -1021,7 +1021,6 @@ void test_held_clocks_stop_unseen() {
 void test_peer_at_lists_every_row() {
   DispositionStore ds(100);
   for (uint8_t i : {9, 2, 5}) ds.set(peerMac(i).data(), i == 2 ? 1 : 5, 0);
-  TEST_ASSERT_EQUAL(3, ds.peerCount());
   uint8_t mac[6];
   PeerRecord r;
   std::array<uint8_t, 6> last{};

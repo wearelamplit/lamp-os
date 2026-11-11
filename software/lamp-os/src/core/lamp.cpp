@@ -255,14 +255,8 @@ class FondnessFeed : public lamp::IExpressionObserver {
  public:
   void onPeerExpression(const uint8_t sourceMac[6],
                         const lamp::ExpressionInvocation& inv) override {
-    bool ownType = false;
-    for (const lamp::ExpressionConfig& e : config.expressions.expressions) {
-      if (e.enabled && e.type == inv.type) {
-        ownType = true;
-        break;
-      }
-    }
-    fondnessEngine.observeExpression(sourceMac, inv.type.c_str(), ownType,
+    fondnessEngine.observeExpression(sourceMac, inv.type.c_str(),
+                                     lamp::hasEnabledType(config.expressions, inv.type),
                                      config.lamp.socialMode, lamp::uptimeMs());
   }
 };

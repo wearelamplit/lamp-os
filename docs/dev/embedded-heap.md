@@ -518,7 +518,7 @@ scale with the number of peers or the mesh's message rate, so each is bounded:
   Detail in `docs/dev/expressions.md`.
 - **Fondness engine.** `FondnessEngine` gathers peer expressions in 16 fixed
   slots (384 bytes) and a 16-entry step log (256 bytes); a full slot table
-  commits its oldest peer to make room, so a crowd of any size takes no heap
+  drops its oldest peer's minute to make room, so a crowd of any size takes no heap
   on an input, a commit or the hourly tick. Detail in `docs/dev/social.md`.
 - **Moments.** A Moment allocates only its transients, one at a time: a
   `flicker` burst (about 8 bytes a cell plus the Expression) for 700 ms,

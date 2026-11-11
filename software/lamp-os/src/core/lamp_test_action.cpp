@@ -41,7 +41,6 @@
 #include "expressions/expression_manager.hpp"
 #include "expressions/yawn/yawn_expression.hpp"
 #include "util/bd_addr.hpp"
-#include "util/bd_addr.hpp"
 #include "util/color.hpp"
 #include "util/gradient.hpp"
 

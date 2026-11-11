@@ -42,6 +42,14 @@ std::array<uint8_t, 6> peer(unsigned i) {
           static_cast<uint8_t>(i)};
 }
 
+size_t rows(const DispositionStore& ds) {
+  uint8_t mac[6];
+  PeerRecord r;
+  size_t n = 0;
+  while (ds.peerAt(n, mac, r, 0)) ++n;
+  return n;
+}
+
 // Score units across steps: disposition x 127 + score.
 int level(const DispositionStore& ds, const std::array<uint8_t, 6>& m, uint64_t now) {
   const PeerRecord r = ds.peer(m.data(), now);
@@ -142,14 +150,17 @@ void test_burst_commits_at_most_the_cap() {
 void test_colour_relation() {
   const Color own(255, 0, 0, 0);
   struct Case {
+    Color own;
     Color peer;
     bool warms;
   } cases[] = {
-      {Color(255, 60, 0, 0), true},    // ~14 deg
-      {Color(0, 255, 255, 0), true},   // 180 deg
-      {Color(0, 255, 0, 0), false},    // 120 deg
-      {Color(0, 0, 0, 255), false},    // white only
-      {Color(200, 180, 180, 0), false},
+      {own, Color(255, 60, 0, 0), true},             // ~14 deg
+      {own, Color(0, 255, 255, 0), true},            // 180 deg
+      {own, Color(0, 255, 0, 0), false},             // 120 deg
+      {own, Color(0, 0, 255, 0), false},             // 240 deg one way, 120 the other
+      {Color(255, 0, 40, 0), Color(255, 40, 0, 0), true},  // 351 and 9 deg
+      {own, Color(0, 0, 0, 255), false},             // white only
+      {own, Color(200, 180, 180, 0), false},
   };
   const auto m = peer(1);
   for (const Case& c : cases) {
@@ -158,7 +169,7 @@ void test_colour_relation() {
     rig.store.meet(m.data(), 0, rig.now);
     rig.engine.observeGreeting(m.data(), SocialMode::Ambivert, rig.now);
     const int before = level(rig.store, m, rig.now);
-    rig.engine.observeColour(m.data(), c.peer, own, rig.now);
+    rig.engine.observeColour(m.data(), c.peer, c.own, rig.now);
     TEST_ASSERT_EQUAL(c.warms ? rig.engine.tuning.colour : 0,
                       level(rig.store, m, rig.now) - before);
   }
@@ -323,7 +334,7 @@ void test_home_mode_records_nothing() {
     if (k % 10 == 0) rig.run(10);
   }
   TEST_ASSERT_EQUAL(0, rig.engine.slotsInUse());
-  TEST_ASSERT_EQUAL(1, rig.store.peerCount());
+  TEST_ASSERT_EQUAL(1, rows(rig.store));
   const PeerRecord after = rig.store.peer(known.data(), rig.now);
   TEST_ASSERT_EQUAL_UINT8(before.disp, after.disp);
   TEST_ASSERT_EQUAL_INT8(before.score, after.score);
@@ -384,7 +395,7 @@ void test_master_off_changes_nothing() {
     rig.engine.observeGreeting(peer(k).data(), SocialMode::Extrovert, rig.now);
     rig.run(30);
   }
-  TEST_ASSERT_EQUAL(1, rig.store.peerCount());
+  TEST_ASSERT_EQUAL(1, rows(rig.store));
   const PeerRecord r = rig.store.peer(m.data(), rig.now);
   TEST_ASSERT_EQUAL_UINT8(2, r.disp);
   TEST_ASSERT_EQUAL_INT8(0, r.score);
@@ -398,22 +409,90 @@ void test_master_off_changes_nothing() {
   TEST_ASSERT_FALSE(engine.tracking());
 }
 
-// A full table commits its least recently heard peer to make room, before
-// the minute ends.
-void test_full_table_commits_the_oldest() {
+// A full table drops its least recently heard peer's minute to make room.
+void test_full_table_drops_the_oldest() {
   Rig rig;
   for (unsigned p = 0; p < FondnessEngine::kSlots; ++p) {
     rig.now += 1000;
     rig.engine.observeExpression(peer(p).data(), "glitchy", false, SocialMode::Extrovert, rig.now);
   }
   rig.engine.observeExpression(peer(0).data(), "glitchy", false, SocialMode::Extrovert, rig.now);
-  TEST_ASSERT_EQUAL(3 * 127, level(rig.store, peer(1), rig.now));
   rig.engine.observeExpression(peer(99).data(), "glitchy", false, SocialMode::Extrovert, rig.now);
   TEST_ASSERT_EQUAL(FondnessEngine::kSlots, rig.engine.slotsInUse());
-  TEST_ASSERT_EQUAL(3 * 127 + rig.engine.tuning.energy * rig.engine.tuning.typeWeight[0],
-                    level(rig.store, peer(1), rig.now));
-  TEST_ASSERT_EQUAL(3 * 127, level(rig.store, peer(0), rig.now));
-  TEST_ASSERT_EQUAL(3 * 127, level(rig.store, peer(2), rig.now));
+  rig.run(1);
+  const FondnessTuning& t = rig.engine.tuning;
+  TEST_ASSERT_EQUAL(3 * 127, level(rig.store, peer(1), rig.now));
+  TEST_ASSERT_EQUAL(3 * 127 + t.deltaCapPerMin, level(rig.store, peer(0), rig.now));
+  TEST_ASSERT_EQUAL(3 * 127 + t.energy * t.typeWeight[0], level(rig.store, peer(2), rig.now));
+}
+
+// A loud peer churned out of a full table between its own events still moves
+// no more than deltaCapPerMin in the minute.
+void test_churn_keeps_the_cap() {
+  const auto loud = peer(500);
+  Rig rig;
+  for (int cycle = 0; cycle < 12; ++cycle) {
+    rig.now += 4000;
+    rig.engine.observeExpression(loud.data(), "glitchy", false, SocialMode::Introvert, rig.now);
+    for (unsigned p = 0; p < FondnessEngine::kSlots; ++p) {
+      rig.now += 10;
+      rig.engine.observeExpression(peer(p).data(), "breathing", false, SocialMode::Ambivert,
+                                   rig.now);
+    }
+  }
+  rig.run(1);
+  TEST_ASSERT_TRUE(3 * 127 - level(rig.store, loud, rig.now) <= rig.engine.tuning.deltaCapPerMin);
+}
+
+// Entering home mode forgets the minute gathered so far and the armed colour
+// reading, so neither lands after home mode ends.
+void test_home_drops_the_pending_minute() {
+  const auto m = peer(1);
+  Rig rig;
+  rig.engine.tuning.meetEveryH = 255;
+  rig.store.meet(m.data(), 0, rig.now);
+  const int before = level(rig.store, m, rig.now);
+  rig.engine.observeExpression(m.data(), "glitchy", true, SocialMode::Extrovert, rig.now);
+  rig.engine.observeGreeting(m.data(), SocialMode::Ambivert, rig.now);
+  g_home = true;
+  rig.engine.tick(rig.now);
+  g_home = false;
+  rig.engine.tick(rig.now);
+  rig.engine.observeColour(m.data(), Color(255, 0, 0, 0), Color(255, 0, 0, 0), rig.now);
+  rig.run(2);
+  TEST_ASSERT_EQUAL(before, level(rig.store, m, rig.now));
+}
+
+// A step log full of steps inside the floor refuses every further step, since
+// the entry it would overwrite may be the stepping peer's own.
+void test_full_step_log_refuses() {
+  Rig rig;
+  rig.engine.tuning.deltaCapPerMin = 127;
+  rig.engine.tuning.notchFloorMin = 600;
+  rig.engine.tuning.notchesPerHour = FondnessEngine::kNotchLog;
+  for (unsigned p = 0; p < FondnessEngine::kNotchLog; ++p) {
+    const auto m = peer(p);
+    while (rig.store.peer(m.data(), rig.now).disp == 3) {
+      rig.burst(m, "glitchy", 4, false, SocialMode::Extrovert);
+    }
+  }
+  const auto next = peer(FondnessEngine::kNotchLog);
+  for (int k = 0; k < 30; ++k) rig.burst(next, "glitchy", 4, false, SocialMode::Extrovert);
+  TEST_ASSERT_EQUAL_UINT8(3, rig.store.peer(next.data(), rig.now).disp);
+  TEST_ASSERT_EQUAL_INT8(126, rig.store.peer(next.data(), rig.now).score);
+}
+
+// Overlap counts a type only when this lamp has it enabled.
+void test_has_enabled_type() {
+  ExpressionSettings s;
+  s.expressions.resize(2);
+  s.expressions[0].type = "pulse";
+  s.expressions[0].enabled = true;
+  s.expressions[1].type = "glitchy";
+  s.expressions[1].enabled = false;
+  TEST_ASSERT_TRUE(hasEnabledType(s, "pulse"));
+  TEST_ASSERT_FALSE(hasEnabledType(s, "glitchy"));
+  TEST_ASSERT_FALSE(hasEnabledType(s, "spotty"));
 }
 
 // A crowd of 500 peers holds 16 slots and allocates nothing.
@@ -431,7 +510,7 @@ void test_crowd_stays_bounded() {
   }
   rig.run(24 * 60);
   TEST_ASSERT_EQUAL(0, g_allocations - before);
-  TEST_ASSERT_TRUE(rig.store.peerCount() <= DispositionStore::kMax);
+  TEST_ASSERT_TRUE(rows(rig.store) <= DispositionStore::kMax);
 }
 
 // fond.set takes known keys in range and leaves the table alone otherwise.
@@ -478,7 +557,11 @@ int main(int, char**) {
   RUN_TEST(test_home_mode_records_nothing);
   RUN_TEST(test_clocks_pause_while_not_tracking);
   RUN_TEST(test_master_off_changes_nothing);
-  RUN_TEST(test_full_table_commits_the_oldest);
+  RUN_TEST(test_full_table_drops_the_oldest);
+  RUN_TEST(test_churn_keeps_the_cap);
+  RUN_TEST(test_home_drops_the_pending_minute);
+  RUN_TEST(test_full_step_log_refuses);
+  RUN_TEST(test_has_enabled_type);
   RUN_TEST(test_crowd_stays_bounded);
   RUN_TEST(test_tuning_keys_are_checked);
   return UNITY_END();

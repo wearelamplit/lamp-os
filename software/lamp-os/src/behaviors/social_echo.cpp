@@ -11,6 +11,11 @@
 
 namespace lamp {
 
+uint8_t SocialEchoObserver::boostMeets(const DispositionStore& store, const uint8_t mac[6],
+                                       uint64_t nowMs) {
+  return store.engineEnabled() ? store.peer(mac, nowMs).meets : 0;
+}
+
 void SocialEchoObserver::onPeerExpression(const uint8_t sourceMac[6],
                                           const ExpressionInvocation& inv) {
   if (manager_.inHomeMode()) return;
@@ -18,8 +23,7 @@ void SocialEchoObserver::onPeerExpression(const uint8_t sourceMac[6],
   if (manager_.isAnyTestActive()) return;
 
   const uint32_t now = millis();
-  const DispositionStore& store = config_.dispositions();
-  const uint8_t meets = store.engineEnabled() ? store.peer(sourceMac, uptimeMs()).meets : 0;
+  const uint8_t meets = boostMeets(config_.dispositions(), sourceMac, uptimeMs());
   const CopyDecision d = copycat_.decide(
       sourceMac, config_.getDisposition(sourceMac), config_.lamp.socialMode, inv.hops, now,
       static_cast<uint8_t>(rng_.range(1, 100)), rng_.range(0, kMirrorJitterMs),

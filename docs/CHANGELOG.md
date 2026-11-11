@@ -31,8 +31,8 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   shares your expressions or wears a matching or complementary colour wins
   you over, and lamps that meet day after day grow fond of each other, an
   introvert twice as fast. Familiarity alone stops at Fond. Feelings move at
-  most one step per lamp per hour and four steps an hour in all, and a fond
-  lamp is a little more likely to be copied. Home mode pauses all of it, and
+  most one step per lamp per hour and four steps an hour in all, and a lamp
+  you meet often is a little more likely to be copied. Home mode pauses all of it, and
   time at home counts toward nothing. On a debug build, `fond.off` turns it
   off (and it stays off across restarts), `fond.peers` lists what the lamp
   knows and `fond.set` tunes it live.

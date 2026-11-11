@@ -66,6 +66,7 @@ uint32_t DispositionStore::nowMin(uint64_t nowMs) {
   return UINT16_MAX + static_cast<uint32_t>(nowMs / 60000);
 }
 
+// The boot clock with the held stretches taken out; it never runs backwards.
 uint32_t DispositionStore::clockLocked_(uint64_t nowMs) const {
   return frozen_ ? frozenAtMin_ : nowMin(nowMs) - clockOffsetMin_;
 }
@@ -395,13 +396,6 @@ void DispositionStore::holdClocks(bool held, uint64_t nowMs) {
   held_ = held;
   syncClockLocked_(nowMs);
   xSemaphoreGive(mutex_);
-}
-
-size_t DispositionStore::peerCount() const {
-  xSemaphoreTake(mutex_, portMAX_DELAY);
-  const size_t n = entries_.size();
-  xSemaphoreGive(mutex_);
-  return n;
 }
 
 bool DispositionStore::peerAt(size_t index, uint8_t mac[6], PeerRecord& out,

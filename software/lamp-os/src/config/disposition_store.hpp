@@ -151,7 +151,6 @@ class DispositionStore {
   // time not tracked never counts toward an absence, a prune or a reunion.
   void holdClocks(bool held, uint64_t nowMs);
 
-  size_t peerCount() const;
   // Row `index` in key order; false past the end.
   bool peerAt(size_t index, uint8_t mac[6], PeerRecord& out, uint64_t nowMs) const;
 
@@ -205,8 +204,7 @@ class DispositionStore {
   // `"AA:BB:CC:DD:EE:FF":5` per entry, a comma between, and the braces.
   static size_t jsonLen(size_t entries);
   // Minutes on a clock that starts at UINT16_MAX each boot, so a row loaded
-  // with any stored age has a seenAtMin at or above 0. clockLocked_ is it
-  // with the held stretches taken out, and never runs backwards.
+  // with any stored age has a seenAtMin at or above 0.
   static uint32_t nowMin(uint64_t nowMs);
   uint32_t clockLocked_(uint64_t nowMs) const;
   void syncClockLocked_(uint64_t nowMs);

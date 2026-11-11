@@ -102,8 +102,9 @@ rule is in score units (127 = one step), from `FondnessTuning`:
 
 Expression energy and overlap gather per peer in 16 slots and commit once a
 minute, at most `deltaCapPerMin` (6) either way, so the fastest step from
-expression traffic takes about 22 minutes. A full table commits its least
-recently heard peer early to make room. Colour and familiarity land at the
+expression traffic takes about 22 minutes. A full table drops its least
+recently heard peer's minute to make room, so a crowd churning the table
+cannot move any peer past the cap. Colour and familiarity land at the
 greet. A step is refused, the score held one short of it, when the peer
 stepped within `notchFloorMin` (60) or `notchesPerHour` (4) steps across all
 peers already happened in the last hour; a full 16-entry step log refuses

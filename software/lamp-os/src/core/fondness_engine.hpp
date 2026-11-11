@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 #include "config/config_types.hpp"
 #include "util/color.hpp"
@@ -53,10 +54,14 @@ struct FondnessTuning {
 // unknown key or a value out of range.
 bool setFondnessTuning(FondnessTuning& t, const char* key, uint32_t value);
 
+// Whether this lamp has `type` enabled itself, the overlap rule's input.
+bool hasEnabledType(const ExpressionSettings& settings, const std::string& type);
+
 // Turns what this lamp observes of its peers into disposition drift through
 // the DispositionStore: expression energy and overlap batched per peer per
 // minute, colour and familiarity at a greet, absence each tracked hour. Fixed
-// RAM whatever the crowd, no allocation. Every input is Core 1 and a no-op
+// RAM whatever the crowd, no allocation; a full slot table drops its least
+// recently heard peer's minute. Every input is Core 1 and a no-op
 // while not tracking(). Rules and log lines: docs/dev/social.md.
 class FondnessEngine {
  public:
@@ -108,8 +113,6 @@ class FondnessEngine {
     bool used = false;
     uint64_t atMs = 0;
   };
-  enum class Rule : uint8_t { Energy, Overlap, Colour, Familiar };
-
   Slot& slotFor_(const uint8_t mac[6], uint64_t nowMs);
   void commit_(Slot& s, uint64_t nowMs);
   void commitAll_(uint64_t nowMs);
