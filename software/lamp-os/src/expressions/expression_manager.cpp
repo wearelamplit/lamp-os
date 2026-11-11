@@ -464,7 +464,7 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
     const uint64_t now = uptimeMs();
     if (s_lastDropLogMs == 0 || now - s_lastDropLogMs >= kTransientDropLogMs) {
       s_lastDropLogMs = now;
-      Serial.printf("[expr] transient drop %.32s (%s, %u in flight)\n", inv.type.c_str(),
+      Serial.printf("[expr] transient drop %.16s (%s, %u in flight)\n", inv.type.c_str(),
                     source == TransientSource::Local ? "local" : "remote",
                     (unsigned)transientExpressions_.size());
     }
@@ -490,7 +490,7 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
                                invTarget, inv.parameters, plan.above);
     if (!expr) {
 #ifdef LAMP_DEBUG
-      Serial.printf("[expr] transient rejected type=%.32s (unknown type)\n",
+      Serial.printf("[expr] transient rejected type=%.16s (unknown type)\n",
                     inv.type.c_str());
 #endif
       continue;
