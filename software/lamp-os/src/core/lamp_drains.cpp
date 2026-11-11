@@ -455,9 +455,9 @@ void Lamp::drainWispClaim() {
 
 // Drive the wisp render + app indicator from MSG_WISP_STATE, the sole wisp
 // paint path. Gated to this lamp's display wisp so a rival's frame can't ease
-// it home. This lamp's own entry present -> eased base/shade targets + active;
-// a fresh frame that omits it (Off, or unclaimed) -> ease home now. Every
-// entry feeds the app's painted-lamps preview.
+// it home. This lamp's own entry present -> eased base/shade targets, or its
+// drift fade, + active; a fresh frame that omits it (Off, or unclaimed) -> ease
+// home now. Every entry feeds the app's painted-lamps preview.
 void Lamp::drainWispState() {
   // static: the 1.4 KB slot is too big for the loop-task stack; this
   // drain is the slot's only consumer and runs only on Core 1.

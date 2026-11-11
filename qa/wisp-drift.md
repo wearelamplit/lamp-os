@@ -2,7 +2,8 @@
 
 Verifies the app's Color drift sliders change what the lamps show. Run after
 changes to drift scheduling (`PaintDistributor`), the drift fade
-(`driftFadeMs`, `WispRoster::setLampDrift`) or the STATE frame builder.
+(`driftFadeMs`, `WispRoster::setLampDrift`), the STATE frame builder or its
+drift fade trailer, or the lamp's wisp layer (`LayerStack::syncWispFade`).
 
 ## Hardware
 
@@ -10,7 +11,10 @@ changes to drift scheduling (`PaintDistributor`), the drift fade
   (`PLATFORMIO_UPLOAD_PORT=<wisp-port> npm run wisp:flash`, a dev build, so
   each drift step prints `[drift] <mac> fade=Nms`), in Manual with a palette
   of a few clearly different colours.
-- **Two or more lamps** the wisp claims, side by side.
+- **Two or more lamps** the wisp claims, side by side. For row 2, lamp A
+  dev-flashed from this tree (each drift fade start prints
+  `[loop] wispState drift fade start`, a retime `... retime`) and lamp B on
+  the 1.3.1 beta.
 - Phone with the app, paired to one of the lamps.
 - Optional: tap the wisp to read each step's fade
   (`npm run lamp:tap -- <wisp-port>:wisp -o /tmp/drift.log`; the C6 wisp does
@@ -29,3 +33,4 @@ changes to drift scheduling (`PaintDistributor`), the drift fade
 | # | Check | Do | Pass |
 |---|---|---|---|
 | 1 | Fade low vs high shows on the lamps | Set How often to 2 min and Fade to 0% (Snappy). Watch each lamp change colour twice. Then set Fade to 100% (Flowing) and watch two more changes. | At 0% each change settles in about 20 s and the wisp log shows `fade=20000ms` on every step. At 100% changes take visibly longer, often most of a minute or more, with log fades between 20000 and 120000 ms. No change at either setting snaps in a second. |
+| 2 | New lamps fade smoothly, older ones step | How often 30 s, Fade 100%. Open one `npm run lamp:tap -- <A-port>:a <B-port>:b -o /tmp/drift.log` and leave it open. Watch several steps. Power-cycle A mid-fade. Change the palette mid-fade. Then switch to a Manual colour and to Off. | A fades continuously; its log shows one `drift fade start` per step and no `retime`. B moves in 2 s steps as before. After the power cycle A fades in and settles beside B within about 1 s. A palette change moves both within about 0.5 s. Manual and Off land as before. (The partial-frame form needs 58+ claimed lamps; native tests cover it.) |

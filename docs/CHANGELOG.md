@@ -114,8 +114,12 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   snapped to its new color in under a second whatever the slider said. Each
   lamp now fades into its next color over at least 20 s: toward Snappy every
   step takes about 20 s, toward Flowing a step can stretch across the whole
-  How often interval. The fade moves in small steps every 2 s, so a long fade
-  can look slightly stepped up close. Only the wisp needs a USB reflash.
+  How often interval. Lamps on this firmware fade smoothly; a lamp that joins
+  mid-fade picks it up from the colour it should be showing. Lamps on older
+  firmware still fade, in small steps every 2 s. With more than 57 lamps on
+  one wisp all fading at once, a lamp starting a new color can take up to
+  about 50 s to get its smooth fade and steps until then. Reflash the wisp
+  over USB.
 
 ### Changed
 - **Friendlier update wording.** After an update ends, while the lamp
