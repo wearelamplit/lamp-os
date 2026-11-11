@@ -376,6 +376,22 @@ void test_drift_record_retimes_past_tolerance() {
   assertColor(kToBase, r.base());
 }
 
+void test_drift_record_retimes_a_later_end() {
+  const uint32_t tol = lamp::LayerStack::kDriftRetimeToleranceMs;
+  Rig r;
+  fillFrame(kStartBase, kStartShade, Trailer::MineFull, kToBase, kToShade, 20000);
+  r.apply();
+  r.runTo(2000);
+  const uint32_t later = 18000 + tol + lp::WISP_STATE_DRIFT_FADE_LEFT_UNIT_MS;
+  fillFrame(kStartBase, kStartShade, Trailer::MineFull, kToBase, kToShade, later);
+  r.apply();
+  TEST_ASSERT_TRUE(r.c.wispFadeSync() == lamp::WispFadeSync::Retimed);
+  r.runTo(20000);
+  TEST_ASSERT_TRUE(strictlyBetween(kStartBase, kToBase, r.base()));
+  r.runTo(2000 + later);
+  assertColor(kToBase, r.base());
+}
+
 // A new target mid-fade starts a fade from the colour shown, without a jump.
 void test_drift_record_new_target_starts_from_shown() {
   Rig r;
@@ -514,6 +530,7 @@ int main(int, char**) {
   RUN_TEST(test_drift_record_join_starts_at_shown_colour);
   RUN_TEST(test_drift_record_while_painted_continues_from_shown);
   RUN_TEST(test_drift_record_retimes_past_tolerance);
+  RUN_TEST(test_drift_record_retimes_a_later_end);
   RUN_TEST(test_drift_record_new_target_starts_from_shown);
   RUN_TEST(test_drift_partial_frame_keeps_running_fade);
   RUN_TEST(test_drift_partial_frame_without_fade_eases_to_plain);
