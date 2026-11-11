@@ -167,7 +167,7 @@ void main() {
         'bpp': 4,
         'colors': ['#5A170000'],
         'segments': [
-          {'name': 'Shade', 'px': 38, 'colors': <String>[]},
+          {'name': 'Shade', 'px': 38, 'pin': 0, 'colors': <String>[]},
         ],
       });
       final base = BaseSection.fromJson(const {
@@ -185,6 +185,33 @@ void main() {
       ]);
       expect(blob['base']['segments'], [
         {'px': 35, 'pin': 27},
+      ]);
+    });
+
+    test('a lamp that reports no pin is sent none', () {
+      final shade = ShadeSection.fromJson(const {
+        'px': 38,
+        'bpp': 4,
+        'colors': ['#5A170000'],
+        'segments': [
+          {'name': 'Shade', 'px': 38, 'colors': <String>[]},
+        ],
+      });
+      final base = BaseSection.fromJson(const {
+        'px': 35,
+        'bpp': 4,
+        'colors': ['#30078300'],
+        'knockout': [],
+        'segments': [
+          {'name': 'Base', 'px': 35, 'colors': <String>[]},
+        ],
+      });
+      final blob = ControlNotifier.advancedLedsBlob(base, shade);
+      expect(blob['shade']['segments'], [
+        {'px': 38},
+      ]);
+      expect(blob['base']['segments'], [
+        {'px': 35},
       ]);
     });
 

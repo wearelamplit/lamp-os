@@ -1748,8 +1748,9 @@ class ControlNotifier extends _$ControlNotifier {
             shade.segments, shade.px, shade.bpp, shade.byteOrder),
       };
 
-  // Firmware that reports segments reads byteOrder and each segment's px and
-  // pin; a role without segments comes from firmware that reads px and bpp.
+  // Firmware that reports segments reads byteOrder and each segment's px,
+  // and its pin when it reports one; a role without segments comes from
+  // firmware that reads px and bpp.
   static Map<String, dynamic> _stripFormatJson(
           List<Segment> segments, int px, int bpp, String byteOrder) =>
       segments.isEmpty
@@ -1757,7 +1758,7 @@ class ControlNotifier extends _$ControlNotifier {
           : {
               'byteOrder': byteOrder,
               'segments': [
-                for (final s in segments) {'px': s.px, 'pin': s.pin},
+                for (final s in segments) {'px': s.px, 'pin': ?s.pin},
               ],
             };
 
