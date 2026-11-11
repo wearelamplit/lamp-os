@@ -3,6 +3,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "util/uptime.hpp"
+
 namespace wisp {
 
 namespace {
@@ -65,7 +67,7 @@ size_t buildWispStatusJson(const WispStatusFields& f,
   doc["source"]        = f.source;
   doc["wifiConnected"] = f.wifiConnected;
   doc["sourceLive"]    = f.sourceLive;
-  doc["lastSeenMs"]    = f.lastSeenMs;
+  doc["lastSeenMs"]    = uptimeMs();
   if (f.hasPassword) {
     doc["hasPassword"] = true;
   }

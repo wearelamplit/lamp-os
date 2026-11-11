@@ -61,8 +61,7 @@ class PaintDistributor {
   void setShuffleSeed(uint8_t s) { shuffleSeed_ = s; }
 
   // intervalMs: how often each lamp is re-colored [30000..3600000].
-  // fadePct: fade length as % of interval [0..100], carried on STATE.
-  void setDriftInterval(uint32_t intervalMs, uint8_t fadePct);
+  void setDriftInterval(uint32_t intervalMs);
 
   // Space-dim factor (0..100) asserted on claimed lamps via unicast
   // MSG_OVERRIDE_BRIGHTNESS. Stores the value and kicks an immediate re-assert
@@ -102,7 +101,6 @@ class PaintDistributor {
   static constexpr size_t kMaxWalkPeers = 100;  // matches LampInventory::MAX_LAMPS
 
   uint32_t driftIntervalMs_    = 120000;
-  uint8_t  driftFadePct_       = 50;
   uint8_t  driftMacs_[kMaxWalkPeers][6];
   size_t   driftCount_         = 0;
   size_t   driftIdx_           = 0;

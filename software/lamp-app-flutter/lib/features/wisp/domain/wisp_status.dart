@@ -86,7 +86,8 @@ class WispStatus {
   /// Empty string when the wisp hasn't published a palette yet.
   final String paletteIdPrefix;
 
-  /// Wisp's local `millis()` at the moment it serialised this status.
+  /// Milliseconds since the wisp booted, at the moment it serialised this
+  /// status, on a clock that never wraps.
   /// NOT comparable across reboots; the UI shows "last seen" relative
   /// to the phone's local clock instead (computed at notify time).
   final int? lastSeenMs;

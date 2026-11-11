@@ -129,8 +129,6 @@ void StatusEmitter::emitStatus() {
     paletteIdPrefix[n] = '\0';
   }
 
-  const uint32_t lastSeenMs = millis();
-
   // manualPalette excluded: emitted separately via MSG_WISP_PALETTE (buildWispPalette).
   const char* sourceName = "off";
   const char* oscRole = nullptr;
@@ -155,7 +153,7 @@ void StatusEmitter::emitStatus() {
     hasPassword = config_->password().length() > 0;
   }
   const WispStatusFields fields{
-      wifiConn, sourceLive, paletteIdPrefix, lastSeenMs,
+      wifiConn, sourceLive, paletteIdPrefix,
       sourceName, oscRole, offR, offG, offB, offW, hasOffColor,
       wispName, hasPassword, wifiChannelMismatch, wifiApChannel, ethIp };
   const WispConfigFields configCopy = configFields();

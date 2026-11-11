@@ -141,8 +141,7 @@ void setup() {
 
   paintDistributor.begin(&inventory, &mesh, &currentPalette, &wispRoster);
   paintDistributor.setShuffleSeed(wispConfig.shuffleSeed());
-  paintDistributor.setDriftInterval(wispConfig.driftIntervalMs(),
-                                    wispConfig.driftFadePct());
+  paintDistributor.setDriftInterval(wispConfig.driftIntervalMs());
   paintDistributor.setBrightness(wispConfig.brightness());
 
   // Random start seq: after a quick double reboot, restarting at 0 would

@@ -13,13 +13,11 @@
 //     directly, advertised without a signal, and handed to a peer that hears
 //     it; a lamp heard directly within the window stays claimed.
 //   - setLampPaint stores on the matched entry; no-op for unclaimed mac.
-//   - recomputeClaims carries paint on stable claim; zeroes for new entry.
+//   - recomputeClaims carries paint on a stable claim.
 //   - STATE packs every painted claim (black included) with its W plane and
 //     omits a claim with no paint assigned yet.
-//   - snapshotPaintForBroadcast packs 12-byte entries; caps at WISP_PAINT_MAX_ENTRIES.
 //   - Full claim set (up to the wire cap) packs into one broadcast frame,
 //     contested entries included.
-//   - Full claim set packs into one paint frame.
 
 #include <unity.h>
 
@@ -426,170 +424,6 @@ void test_snapshot_for_broadcast_packs_correctly(void) {
   TEST_ASSERT_EQUAL_INT8(-70, static_cast<int8_t>(buf[13]));
 }
 
-// --- paint storage tests ---
-
-void test_set_lamp_paint_stores_on_claimed_entry(void) {
-  wisp::WispRoster r;
-  r.setSelfMac(kSelfMac);
-  auto lamp = obs(kLampX, -65);
-  r.recomputeClaims(&lamp, 1, /*nowMs=*/1000);
-  TEST_ASSERT_TRUE(r.claims(kLampX));
-
-  const uint8_t base[4]  = {0x11, 0x22, 0x33, 0x00};
-  const uint8_t shade[4] = {0xAA, 0xBB, 0xCC, 0x00};
-  r.setLampPaint(kLampX, base, shade);
-
-  uint8_t buf[lamp_protocol::WISP_PAINT_MAX_ENTRIES * 12];
-  const size_t n = r.snapshotPaintForBroadcast(buf, sizeof(buf));
-  TEST_ASSERT_EQUAL_size_t(1, n);
-  TEST_ASSERT_EQUAL_UINT8(0x11, buf[6]);
-  TEST_ASSERT_EQUAL_UINT8(0x22, buf[7]);
-  TEST_ASSERT_EQUAL_UINT8(0x33, buf[8]);
-  TEST_ASSERT_EQUAL_UINT8(0xAA, buf[9]);
-  TEST_ASSERT_EQUAL_UINT8(0xBB, buf[10]);
-  TEST_ASSERT_EQUAL_UINT8(0xCC, buf[11]);
-}
-
-void test_set_lamp_paint_noop_for_unclaimed_mac(void) {
-  wisp::WispRoster r;
-  r.setSelfMac(kSelfMac);
-  // kLampX is not claimed — no recomputeClaims call.
-  const uint8_t base[4]  = {0x11, 0x22, 0x33, 0x00};
-  const uint8_t shade[4] = {0xAA, 0xBB, 0xCC, 0x00};
-  r.setLampPaint(kLampX, base, shade);  // should be a no-op
-
-  uint8_t buf[12];
-  const size_t n = r.snapshotPaintForBroadcast(buf, sizeof(buf));
-  TEST_ASSERT_EQUAL_size_t(0, n);
-}
-
-void test_recompute_preserves_paint_on_stable_claim(void) {
-  wisp::WispRoster r;
-  r.setSelfMac(kSelfMac);
-  auto lamp = obs(kLampX, -65);
-  r.recomputeClaims(&lamp, 1, /*nowMs=*/1000);
-
-  const uint8_t base[4]  = {0x10, 0x20, 0x30, 0x00};
-  const uint8_t shade[4] = {0xA0, 0xB0, 0xC0, 0x00};
-  r.setLampPaint(kLampX, base, shade);
-
-  // Recompute again with kLampX still present.
-  lamp = obs(kLampX, -65);
-  r.recomputeClaims(&lamp, 1, /*nowMs=*/2000);
-  TEST_ASSERT_TRUE(r.claims(kLampX));
-
-  uint8_t buf[12];
-  const size_t n = r.snapshotPaintForBroadcast(buf, sizeof(buf));
-  TEST_ASSERT_EQUAL_size_t(1, n);
-  TEST_ASSERT_EQUAL_UINT8(0x10, buf[6]);
-  TEST_ASSERT_EQUAL_UINT8(0x20, buf[7]);
-  TEST_ASSERT_EQUAL_UINT8(0x30, buf[8]);
-  TEST_ASSERT_EQUAL_UINT8(0xA0, buf[9]);
-  TEST_ASSERT_EQUAL_UINT8(0xB0, buf[10]);
-  TEST_ASSERT_EQUAL_UINT8(0xC0, buf[11]);
-}
-
-void test_recompute_zeroes_paint_for_new_entry(void) {
-  wisp::WispRoster r;
-  r.setSelfMac(kSelfMac);
-
-  // Claim X and paint it.
-  auto lamps = obs(kLampX, -65);
-  r.recomputeClaims(&lamps, 1, /*nowMs=*/1000);
-  const uint8_t base[4]  = {0x10, 0x20, 0x30, 0x00};
-  const uint8_t shade[4] = {0xA0, 0xB0, 0xC0, 0x00};
-  r.setLampPaint(kLampX, base, shade);
-
-  // Now recompute with X + a brand-new Y.
-  wisp::LampObservation both[] = {obs(kLampX, -65), obs(kLampY, -70)};
-  r.recomputeClaims(both, 2, /*nowMs=*/2000);
-
-  uint8_t buf[2 * 12];
-  const size_t n = r.snapshotPaintForBroadcast(buf, sizeof(buf));
-  TEST_ASSERT_EQUAL_size_t(2, n);
-
-  // Find Y in the output (order may differ from insertion).
-  uint8_t* yEntry = nullptr;
-  for (size_t i = 0; i < n; ++i) {
-    if (std::memcmp(&buf[i * 12], kLampY, 6) == 0) {
-      yEntry = &buf[i * 12];
-      break;
-    }
-  }
-  TEST_ASSERT_NOT_NULL(yEntry);
-  // Y is newly added → base and shade must be zeroed.
-  TEST_ASSERT_EQUAL_UINT8(0, yEntry[6]);
-  TEST_ASSERT_EQUAL_UINT8(0, yEntry[7]);
-  TEST_ASSERT_EQUAL_UINT8(0, yEntry[8]);
-  TEST_ASSERT_EQUAL_UINT8(0, yEntry[9]);
-  TEST_ASSERT_EQUAL_UINT8(0, yEntry[10]);
-  TEST_ASSERT_EQUAL_UINT8(0, yEntry[11]);
-}
-
-void test_snapshot_paint_caps_at_max_entries(void) {
-  wisp::WispRoster r;
-  r.setSelfMac(kSelfMac);
-
-  // Build WISP_PAINT_MAX_ENTRIES + 1 distinct lamp MACs and claim them all.
-  constexpr size_t kOver = lamp_protocol::WISP_PAINT_MAX_ENTRIES + 1;
-  wisp::LampObservation lamps[kOver];
-  for (size_t i = 0; i < kOver; ++i) {
-    lamps[i].mac[0] = 0xCC;
-    lamps[i].mac[1] = 0x00;
-    lamps[i].mac[2] = 0x00;
-    lamps[i].mac[3] = 0x00;
-    lamps[i].mac[4] = 0x00;
-    lamps[i].mac[5] = static_cast<uint8_t>(i + 1);
-    lamps[i].rssi   = -60;
-  }
-  r.recomputeClaims(lamps, kOver, /*nowMs=*/1000);
-
-  // Provide a buffer large enough for kOver entries; cap must fire.
-  uint8_t buf[kOver * 12];
-  const size_t n = r.snapshotPaintForBroadcast(buf, sizeof(buf));
-  TEST_ASSERT_TRUE(n <= lamp_protocol::WISP_PAINT_MAX_ENTRIES);
-}
-
-void test_snapshot_paint_entries_12_bytes_each(void) {
-  wisp::WispRoster r;
-  r.setSelfMac(kSelfMac);
-  wisp::LampObservation lamps[] = {
-      obs(kLampX, -60),
-      obs(kLampY, -70),
-  };
-  r.recomputeClaims(lamps, 2, /*nowMs=*/1000);
-
-  const uint8_t baseX[4]  = {0x01, 0x02, 0x03, 0x00};
-  const uint8_t shadeX[4] = {0x04, 0x05, 0x06, 0x00};
-  const uint8_t baseY[4]  = {0x07, 0x08, 0x09, 0x00};
-  const uint8_t shadeY[4] = {0x0A, 0x0B, 0x0C, 0x00};
-  r.setLampPaint(kLampX, baseX, shadeX);
-  r.setLampPaint(kLampY, baseY, shadeY);
-
-  uint8_t buf[2 * 12];
-  const size_t n = r.snapshotPaintForBroadcast(buf, sizeof(buf));
-  TEST_ASSERT_EQUAL_size_t(2, n);
-
-  // Verify each entry is 12 bytes: mac(6) + base(3) + shade(3).
-  // Find X and Y entries by mac.
-  uint8_t* xEntry = nullptr;
-  uint8_t* yEntry = nullptr;
-  for (size_t i = 0; i < n; ++i) {
-    if (std::memcmp(&buf[i * 12], kLampX, 6) == 0) xEntry = &buf[i * 12];
-    if (std::memcmp(&buf[i * 12], kLampY, 6) == 0) yEntry = &buf[i * 12];
-  }
-  TEST_ASSERT_NOT_NULL(xEntry);
-  TEST_ASSERT_NOT_NULL(yEntry);
-  TEST_ASSERT_EQUAL_UINT8(0x01, xEntry[6]);
-  TEST_ASSERT_EQUAL_UINT8(0x02, xEntry[7]);
-  TEST_ASSERT_EQUAL_UINT8(0x03, xEntry[8]);
-  TEST_ASSERT_EQUAL_UINT8(0x04, xEntry[9]);
-  TEST_ASSERT_EQUAL_UINT8(0x05, xEntry[10]);
-  TEST_ASSERT_EQUAL_UINT8(0x06, xEntry[11]);
-  TEST_ASSERT_EQUAL_UINT8(0x07, yEntry[6]);
-  TEST_ASSERT_EQUAL_UINT8(0x0A, yEntry[9]);
-}
-
 // --- composite frame tests ---
 
 namespace {
@@ -599,11 +433,11 @@ void fleetMac(uint8_t out[6], uint8_t last) {
   std::memcpy(out, m, 6);
 }
 
-// True when `mac` appears in a packed 7-byte-entry claim buffer.
-bool bufHasMac(const uint8_t* buf, size_t entries, const uint8_t mac[6],
-               size_t entryBytes = 7) {
+// True when `mac` appears in a packed claim buffer.
+bool bufHasMac(const uint8_t* buf, size_t entries, const uint8_t mac[6]) {
   for (size_t i = 0; i < entries; ++i) {
-    if (std::memcmp(buf + i * entryBytes, mac, 6) == 0) return true;
+    const uint8_t* entry = buf + i * lamp_protocol::WISP_CLAIM_ENTRY_SIZE;
+    if (std::memcmp(entry, mac, 6) == 0) return true;
   }
   return false;
 }
@@ -663,29 +497,6 @@ void test_all_contested_entries_in_single_frame(void) {
                            "contested lamp X missing from the frame");
   TEST_ASSERT_TRUE_MESSAGE(bufHasMac(buf, n, kLampY),
                            "contested lamp Y missing from the frame");
-}
-
-void test_full_claim_set_fits_one_paint_frame(void) {
-  wisp::WispRoster r;
-  r.setSelfMac(kSelfMac);
-
-  constexpr size_t kFleet = 40;
-  wisp::LampObservation lamps[kFleet];
-  for (size_t i = 0; i < kFleet; ++i) {
-    fleetMac(lamps[i].mac, static_cast<uint8_t>(i + 1));
-    lamps[i].rssi = -60;
-  }
-  r.recomputeClaims(lamps, kFleet, /*nowMs=*/1000);
-
-  uint8_t buf[lamp_protocol::WISP_PAINT_MAX_ENTRIES * 12];
-  const size_t n = r.snapshotPaintForBroadcast(buf, sizeof(buf));
-  TEST_ASSERT_EQUAL_size_t(kFleet, n);
-  for (size_t i = 0; i < kFleet; ++i) {
-    uint8_t m[6];
-    fleetMac(m, static_cast<uint8_t>(i + 1));
-    TEST_ASSERT_TRUE_MESSAGE(bufHasMac(buf, n, m, /*entryBytes=*/12),
-                             "claimed lamp missing from the paint frame");
-  }
 }
 
 void test_snapshot_state_packs_full_set_with_globals(void) {
@@ -771,6 +582,52 @@ uint8_t gEntries[lamp_protocol::WISP_STATE_MAX_ENTRIES *
                  lamp_protocol::WISP_STATE_ENTRY_SIZE];
 uint8_t gW[lamp_protocol::WISP_STATE_MAX_ENTRIES *
            lamp_protocol::WISP_STATE_W_SIZE];
+
+void test_set_lamp_paint_stores_on_claimed_entry(void) {
+  wisp::WispRoster r;
+  r.setSelfMac(kSelfMac);
+  auto lamp = obs(kLampX, -65);
+  r.recomputeClaims(&lamp, 1, /*nowMs=*/1000);
+  TEST_ASSERT_TRUE(r.claims(kLampX));
+
+  const uint8_t base[4]  = {0x11, 0x22, 0x33, 0x00};
+  const uint8_t shade[4] = {0xAA, 0xBB, 0xCC, 0x00};
+  r.setLampPaint(kLampX, base, shade);
+
+  const size_t n = snapshotState(r, gEntries, gW);
+  TEST_ASSERT_EQUAL_size_t(1, n);
+  const uint8_t expected[6] = {0x11, 0x22, 0x33, 0xAA, 0xBB, 0xCC};
+  TEST_ASSERT_EQUAL_MEMORY(expected, &gEntries[6], 6);
+}
+
+void test_set_lamp_paint_noop_for_unclaimed_mac(void) {
+  wisp::WispRoster r;
+  r.setSelfMac(kSelfMac);
+  const uint8_t base[4]  = {0x11, 0x22, 0x33, 0x00};
+  const uint8_t shade[4] = {0xAA, 0xBB, 0xCC, 0x00};
+  r.setLampPaint(kLampX, base, shade);
+  TEST_ASSERT_EQUAL_size_t(0, snapshotState(r, gEntries, gW));
+}
+
+void test_recompute_preserves_paint_on_stable_claim(void) {
+  wisp::WispRoster r;
+  r.setSelfMac(kSelfMac);
+  auto lamp = obs(kLampX, -65);
+  r.recomputeClaims(&lamp, 1, /*nowMs=*/1000);
+
+  const uint8_t base[4]  = {0x10, 0x20, 0x30, 0x00};
+  const uint8_t shade[4] = {0xA0, 0xB0, 0xC0, 0x00};
+  r.setLampPaint(kLampX, base, shade);
+
+  lamp = obs(kLampX, -65);
+  r.recomputeClaims(&lamp, 1, /*nowMs=*/2000);
+  TEST_ASSERT_TRUE(r.claims(kLampX));
+
+  const size_t n = snapshotState(r, gEntries, gW);
+  TEST_ASSERT_EQUAL_size_t(1, n);
+  const uint8_t expected[6] = {0x10, 0x20, 0x30, 0xA0, 0xB0, 0xC0};
+  TEST_ASSERT_EQUAL_MEMORY(expected, &gEntries[6], 6);
+}
 
 void test_snapshot_state_skips_unassigned_claims(void) {
   wisp::WispRoster r;
@@ -998,16 +855,12 @@ int main(int, char**) {
   RUN_TEST(test_peer_ages_out_across_the_wrap);
   RUN_TEST(test_peer_eviction_keeps_a_peer_heard_after_the_wrap);
   RUN_TEST(test_snapshot_for_broadcast_packs_correctly);
+  RUN_TEST(test_full_claim_set_fits_one_frame);
+  RUN_TEST(test_all_contested_entries_in_single_frame);
+  RUN_TEST(test_snapshot_state_packs_full_set_with_globals);
   RUN_TEST(test_set_lamp_paint_stores_on_claimed_entry);
   RUN_TEST(test_set_lamp_paint_noop_for_unclaimed_mac);
   RUN_TEST(test_recompute_preserves_paint_on_stable_claim);
-  RUN_TEST(test_recompute_zeroes_paint_for_new_entry);
-  RUN_TEST(test_snapshot_paint_caps_at_max_entries);
-  RUN_TEST(test_snapshot_paint_entries_12_bytes_each);
-  RUN_TEST(test_full_claim_set_fits_one_frame);
-  RUN_TEST(test_all_contested_entries_in_single_frame);
-  RUN_TEST(test_full_claim_set_fits_one_paint_frame);
-  RUN_TEST(test_snapshot_state_packs_full_set_with_globals);
   RUN_TEST(test_snapshot_state_skips_unassigned_claims);
   RUN_TEST(test_snapshot_state_packs_black_claim);
   RUN_TEST(test_snapshot_state_reclaim_starts_unassigned);

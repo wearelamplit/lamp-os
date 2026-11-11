@@ -10,7 +10,6 @@ struct WispStatusFields {
   bool         wifiConnected;
   bool         sourceLive;
   const char*  paletteIdPrefix;
-  uint32_t     lastSeenMs;
   const char*  source;
   const char*  oscRole;  // omitted at "primary"
   uint8_t      offR, offG, offB, offW;
@@ -38,7 +37,8 @@ struct WispConfigFields {
 // core always fits under `cap`; every other field is added only if the
 // document still fits (fields matching the app parser's defaults are
 // omitted). `configCopy`, when given, adds the config fields at the lowest
-// priority for lamps that predate wispConfig. Never returns 0 when
+// priority for lamps that predate wispConfig. lastSeenMs is the wisp's
+// uptime at the call (wisp::uptimeMs()). Never returns 0 when
 // outCap > cap. See docs/dev/networking.md for the field priority order.
 size_t buildWispStatusJson(const WispStatusFields& f,
                            const WispConfigFields* configCopy, char* out,

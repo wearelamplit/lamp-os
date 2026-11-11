@@ -66,6 +66,14 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   lamps first.
 - **Wisps need a USB reflash** for both fixes (`npm run wisp:flash:release`
   with the wisp plugged in); wisps don't update over the mesh.
+- **A wisp left on past 49.7 days keeps its time stamps in order.** The
+  wisp's status time stamp restarted from zero at 49.7 days of uptime, so
+  an emptied manual palette that the app could judge only by that stamp
+  stayed unconfirmed until the stamp caught up. A wisp dimming more than 19
+  lamps could also, once a lamp had gone 49.7 days without a send, free a
+  recently used lamp's radio slot instead of that one's. Both now count on
+  a clock that never restarts while the wisp stays on. Reflash the wisp
+  over USB.
 
 ### Changed
 - **Smaller firmware, a little more free memory.** The lamp no longer builds
@@ -92,6 +100,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   update every 5 seconds. Changes you make from the app still repeat for 20
   seconds, so their confirmation gets through. The wisp only updates over
   USB, so reflash it to pick this up.
+- **Wisp firmware sheds code that never ran.** A per-lamp repaint timer and
+  a retry queue for failed sends were still built into the wisp after paint
+  moved to its 2-second broadcast, but nothing used them. Paint behaves as
+  before: a lamp that misses a broadcast catches the next one 2 seconds later.
 
 ## 1.3.2
 

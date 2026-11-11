@@ -222,6 +222,7 @@ in range, that's `PersonalityEngine::crowdComposition()` /
 | `lampos::retireStamp(now, stamp)`, `lampos::kRetiredAgeMs` | `lampos/clock.hpp` | Hold a stamp no older than 24.8 days, so it stays outside every shorter window and never reads as recent again one wrap later. A stamp read against a window either gets retired this way (or by clearing its owner's valid flag) from a path that runs at least every 24.8 days, or is refreshed that often by design |
 | `lampos::frameDeltaMs(now, last)`, `lampos::kMaxFrameDeltaMs` | `lampos/clock.hpp` | The time an animation steps by since its previous frame, capped at 100 ms, so the first frame after a stall or after weeks frozen in home mode steps like a normal one. Every per-frame animation delta on a millis stamp goes through it |
 | `lamp::uptimeMs()`, `lamp::uptimeSince(stamp)` | `util/uptime.hpp` | 64-bit milliseconds since boot, the clock `millis()` truncates; it never wraps. Use it for a stamp read only on an event or from code home mode can skip for weeks, where no periodic path can retire it. `uptimeSince` gives an uptime stamp's age, saturated to 32 bits. Native tests drive the clock through `g_mock_millis_wraps` in the `esp_timer.h` stub |
+| `wisp::uptimeMs()` | `software/wisp/src/util/uptime.hpp` | The wisp's 64-bit milliseconds since boot, for the same kind of stamp: the unicast peer table's last-use stamps (`PeerSlots`) and the `lastSeenMs` the wisp puts in its status |
 
 ---
 

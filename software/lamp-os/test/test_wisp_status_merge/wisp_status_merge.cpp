@@ -24,7 +24,7 @@ namespace {
 // status-only worst case on the wisp side): Off mode, every live field set.
 const char kStatusOnlyWorst[] =
     R"({"char":"wispStatus","source":"off","wifiConnected":false,)"
-    R"("sourceLive":false,"lastSeenMs":4294967295,"hasPassword":true,)"
+    R"("sourceLive":false,"lastSeenMs":9223372036854775,"hasPassword":true,)"
     R"("offColor":"ffffffff","oscRole":"secondary","paletteIdPrefix":"abcdef12",)"
     R"("name":"12345678901234567890","ethIp":"255.255.255.255",)"
     R"("wifiChannelMismatch":true,"wifiApChannel":11})";
@@ -78,9 +78,9 @@ void test_config_stamp_merged_only_when_config_cached() {
 // The merge adds 301 B at worst, so even the wisp's status with no config copy
 // overflows the 512 B characteristic whole; the page section serves all of it.
 void test_uncapped_merge_of_status_only_worst_case_pinned() {
-  TEST_ASSERT_EQUAL_size_t(295, std::strlen(kStatusOnlyWorst));
+  TEST_ASSERT_EQUAL_size_t(301, std::strlen(kStatusOnlyWorst));
   const std::string out = mergeWispStatusJson(widestMerge(kStatusOnlyWorst), 0);
-  TEST_ASSERT_EQUAL_size_t(596, out.size());
+  TEST_ASSERT_EQUAL_size_t(602, out.size());
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_FALSE(d["helloPaletteIdPrefix"].isNull());
@@ -92,7 +92,7 @@ void test_uncapped_merge_of_status_only_worst_case_pinned() {
 void test_capped_merge_sheds_diagnostics_to_fit() {
   const std::string out = mergeWispStatusJson(widestMerge(kStatusOnlyWorst),
                                               kWispStatusCharMaxLen);
-  TEST_ASSERT_EQUAL_size_t(503, out.size());
+  TEST_ASSERT_EQUAL_size_t(509, out.size());
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_TRUE(d["helloPaletteIdPrefix"].isNull());

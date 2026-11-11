@@ -143,9 +143,8 @@ void PaintDistributor::sendBrightnessToPeer(const uint8_t mac[6]) {
 #endif
 }
 
-void PaintDistributor::setDriftInterval(uint32_t intervalMs, uint8_t fadePct) {
+void PaintDistributor::setDriftInterval(uint32_t intervalMs) {
   driftIntervalMs_ = intervalMs;
-  driftFadePct_    = fadePct;
   refreshDriftRoster();
 }
 
