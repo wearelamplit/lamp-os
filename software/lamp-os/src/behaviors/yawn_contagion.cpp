@@ -1,6 +1,7 @@
 #include "behaviors/yawn_contagion.hpp"
 
 #include <cstring>
+#include <tuple>
 
 #include <lampos/clock.hpp>
 
@@ -8,8 +9,9 @@ namespace lamp {
 
 namespace {
 
-constexpr const char* kBackPctKeys[5] = {"yawn.salty", "yawn.wary", "yawn.neutral",
-                                         "yawn.fond", "yawn.smitten"};
+constexpr std::array<const char*, 5> kBackPctKeys = {"yawn.salty", "yawn.wary", "yawn.neutral",
+                                                     "yawn.fond", "yawn.smitten"};
+static_assert(kBackPctKeys.size() == std::tuple_size_v<decltype(YawnTuning::backPct)>);
 
 }  // namespace
 

@@ -147,7 +147,9 @@ mode off and reboot B (restoring `chainMaxHops` 3), then set B Smitten toward C 
 toward A, all Ambivert. Give A a yawn expression at the shortest interval
 (5 min): each time A yawns, B logs `[fondness] yawn from <A> hop 1 p=<n>%`
 (about 60 times 8/(8 + lamps near)) and, on `fired`, yawns ~0.5 s later; C
-logs nothing for A. Within 5 min of a roll B logs `cooldown` for A. Make A an
+logs nothing for A (it may log `hop 2` for B's yawn-back). `yawn.set
+yawnRollCooldownMs 600000` on B: A's next yawn 5 min later logs `cooldown`
+on B. Make A an
 introvert and tire it (three greetings inside 5 min, `[social] introvert tired`):
 A logs `[fondness] yawn tired p=35%` about every 90 s while tired, and none
 once rested. `yawn.set yawn.smitten 100` on B makes B yawn back every roll;
@@ -168,7 +170,8 @@ reboot restores them.
 - M6: hop 1 then hop 2 lines with the copies seen on B and C; no C line at
   `chainMaxHops 1`; one roll per 3 min per peer; no roll line in home mode;
   `self` on B for the chain coming back.
-- M7: yawn-back lines on B only, then `cooldown` inside 5 min; tired lines
+- M7: B logs yawn-back lines for A and C none for A; `cooldown` on B at the
+  10 min window; tired lines
   only while A is tired; `self` on A for B's yawn; no yawn line in home mode.
 
 ## Not covered here

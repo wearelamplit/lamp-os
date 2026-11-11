@@ -53,15 +53,20 @@ class SocialEchoObserver : public IExpressionObserver {
     uint8_t srcMac[6] = {};
     uint32_t fireAt = 0;
     bool used = false;
+    bool yawnBack = false;
   };
   static constexpr size_t kMaxPending = 4;
 
   // The social engine's master switch and home mode allow its rolls.
   bool tracking() const;
+  // Played within the own floor, or a yawn-back booked to play.
+  bool yawnedRecently(uint32_t nowMs) const;
+  bool yawnPending() const;
   void catchYawn(const uint8_t sourceMac[6], const ExpressionInvocation& inv, uint32_t nowMs);
   void tickTired(uint32_t nowMs);
   // False when every pending slot is taken.
-  bool book(const ExpressionInvocation& inv, const uint8_t sourceMac[6], const CopyDecision& d);
+  bool book(const ExpressionInvocation& inv, const uint8_t sourceMac[6], const CopyDecision& d,
+            bool yawnBack);
 
   Config& config_;
   ExpressionManager& manager_;

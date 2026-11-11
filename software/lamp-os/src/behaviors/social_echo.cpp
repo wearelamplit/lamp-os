@@ -33,6 +33,18 @@ bool SocialEchoObserver::tracking() const {
   return config_.dispositions().engineEnabled() && !manager_.inHomeMode();
 }
 
+bool SocialEchoObserver::yawnPending() const {
+  for (const auto& p : pending_) {
+    if (p.used && p.yawnBack) return true;
+  }
+  return false;
+}
+
+bool SocialEchoObserver::yawnedRecently(uint32_t nowMs) const {
+  return yawnPending() ||
+         manager_.playedWithin(kYawnDescriptorData.id, yawns_.tuning.yawnSelfFloorMs, nowMs);
+}
+
 void SocialEchoObserver::onPeerExpression(const uint8_t sourceMac[6],
                                           const ExpressionInvocation& inv) {
   if (manager_.inHomeMode()) return;
@@ -59,7 +71,7 @@ void SocialEchoObserver::onPeerExpression(const uint8_t sourceMac[6],
                 static_cast<unsigned>(d.pct), outcomeName(d.outcome));
 #endif
   if (d.outcome != CopyOutcome::Fire) return;
-  if (book(inv, sourceMac, d)) copycat_.booked(now);
+  if (book(inv, sourceMac, d, /*yawnBack=*/false)) copycat_.booked(now);
 }
 
 void SocialEchoObserver::catchYawn(const uint8_t sourceMac[6], const ExpressionInvocation& inv,
@@ -69,8 +81,7 @@ void SocialEchoObserver::catchYawn(const uint8_t sourceMac[6], const ExpressionI
       sourceMac, config_.getDisposition(sourceMac), config_.lamp.socialMode, inv.hops,
       /*meets=*/0, nowMs, static_cast<uint8_t>(rng_.range(1, 100)),
       rng_.range(0, kMirrorJitterMs), nearbyCount_ ? nearbyCount_() : 0,
-      manager_.playedWithin(kYawnDescriptorData.id, yawns_.tuning.yawnSelfFloorMs, nowMs),
-      copycat_.tuning);
+      yawnedRecently(nowMs), copycat_.tuning);
   if (d.outcome == CopyOutcome::NoChance) return;
 #ifdef LAMP_DEBUG
   Serial.print("[fondness] yawn from ");
@@ -78,11 +89,11 @@ void SocialEchoObserver::catchYawn(const uint8_t sourceMac[6], const ExpressionI
   Serial.printf(" hop %u p=%u%% %s\n", static_cast<unsigned>(d.hops),
                 static_cast<unsigned>(d.pct), outcomeName(d.outcome));
 #endif
-  if (d.outcome == CopyOutcome::Fire) book(inv, sourceMac, d);
+  if (d.outcome == CopyOutcome::Fire) book(inv, sourceMac, d, /*yawnBack=*/true);
 }
 
 bool SocialEchoObserver::book(const ExpressionInvocation& inv, const uint8_t sourceMac[6],
-                              const CopyDecision& d) {
+                              const CopyDecision& d, bool yawnBack) {
   Pending* slot = nullptr;
   for (auto& p : pending_) {
     if (!p.used) { slot = &p; break; }
@@ -94,6 +105,7 @@ bool SocialEchoObserver::book(const ExpressionInvocation& inv, const uint8_t sou
   std::memcpy(slot->srcMac, sourceMac, 6);
   slot->fireAt = d.fireAt;
   slot->used = true;
+  slot->yawnBack = yawnBack;
   return true;
 }
 
@@ -101,8 +113,7 @@ void SocialEchoObserver::tickTired(uint32_t nowMs) {
   const bool tired = tired_ && tired_() && !mesh_.isOtaInProgress() &&
                      !manager_.isAnyTestActive() && tracking();
   const TiredRoll r = yawns_.tiredRoll(
-      tired, nowMs, static_cast<uint8_t>(rng_.range(1, 100)),
-      manager_.playedWithin(kYawnDescriptorData.id, yawns_.tuning.yawnSelfFloorMs, nowMs));
+      tired, nowMs, static_cast<uint8_t>(rng_.range(1, 100)), yawnedRecently(nowMs));
   if (r == TiredRoll::NotDue) return;
 #ifdef LAMP_DEBUG
   Serial.printf("[fondness] yawn tired p=%u%% %s\n",
@@ -125,6 +136,12 @@ void SocialEchoObserver::tick(uint32_t nowMs) {
   if (manager_.inHomeMode()) {
     for (auto& p : pending_) p.used = false;
     return;
+  }
+  // A yawn-back booked before the engine went off is dropped.
+  if (yawnPending() && !tracking()) {
+    for (auto& p : pending_) {
+      if (p.yawnBack) p.used = false;
+    }
   }
   for (auto& p : pending_) {
     if (!p.used) continue;

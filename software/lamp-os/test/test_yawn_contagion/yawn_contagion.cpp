@@ -51,7 +51,8 @@ bool MeshLink::sendEvent(const uint8_t* payload, size_t len) {
   s_events.emplace_back(reinterpret_cast<const char*>(payload), len);
   return true;
 }
-bool MeshLink::isOtaInProgress() const { return false; }
+bool s_ota = false;
+bool MeshLink::isOtaInProgress() const { return s_ota; }
 void MeshLink::getMyMac(uint8_t* mac) const { std::memset(mac, 0, 6); }
 uint8_t Config::getDisposition(const uint8_t*) const { return s_disposition; }
 }  // namespace lamp
@@ -105,6 +106,7 @@ struct Rig {
     s_events.clear();
     s_disposition = 5;
     s_tired = false;
+    s_ota = false;
     manager.registry().add(kYawnProbe);
     manager.begin(&shade, &base);
     manager.setCompositor(&compositor);
@@ -349,6 +351,110 @@ void test_yawn_back_announces_one_hop_on() {
   TEST_ASSERT_TRUE(eventHasHops(s_events[0]));
 }
 
+// Each personality scales the yawn-back by the mirror mode factor.
+void test_mode_factor_scales_the_yawn_back() {
+  const YawnTuning y;
+  const ContagionTuning c;
+  const SocialMode modes[3] = {SocialMode::Introvert, SocialMode::Ambivert, SocialMode::Extrovert};
+  for (uint8_t m = 0; m < 3; ++m) {
+    TEST_ASSERT_EQUAL_UINT8(y.backPct[3] * kMirrorModeFactorX10[m] / 10,
+                            yawnBackPct(4, modes[m], 0, 0, 0, y, c));
+  }
+  TEST_ASSERT_TRUE(yawnBackPct(4, SocialMode::Introvert, 0, 0, 0, y, c) <
+                   yawnBackPct(4, SocialMode::Extrovert, 0, 0, 0, y, c));
+}
+
+// The decision rolls at the chance for the frame's hop, meetings and crowd.
+void test_catch_rolls_at_the_frames_chance() {
+  YawnContagion yc;
+  ContagionTuning c;
+  c.familiarBoostPct = kMaxFamiliarBoostPct;
+  const CopyDecision d =
+      yc.catchYawn(kPeerMac, 5, SocialMode::Extrovert, 1, 6, 1000, 100, 0, 8, false, c);
+  TEST_ASSERT_EQUAL_UINT8(yawnBackPct(5, SocialMode::Extrovert, 1, 6, 8, yc.tuning, c), d.pct);
+  TEST_ASSERT_TRUE(d.pct < yawnBackPct(5, SocialMode::Extrovert, 0, 0, 0, yc.tuning, c));
+  TEST_ASSERT_EQUAL_UINT8(2, d.hops);
+}
+
+// The observer hands the near count to the decision: a packed room damps a
+// certain yawn-back to nothing.
+void test_observer_damps_by_the_near_count() {
+  Rig r;
+  r.echo.setNearbyCount([] { return static_cast<size_t>(1000); });
+  r.hear(yawnAt(0));
+  TEST_ASSERT_EQUAL_size_t(0, s_registered.size());
+}
+
+// Two neighbours' yawns heard before either yawn-back plays book only one.
+void test_booked_yawn_back_holds_the_floor() {
+  Rig r;
+  r.echo.onPeerExpression(kPeerMac, yawnAt(0));
+  r.echo.onPeerExpression(kOtherPeerMac, yawnAt(0));
+  r.advance(kMirrorDelayFloorMs + kMirrorJitterMs + 1);
+  TEST_ASSERT_EQUAL_size_t(1, s_registered.size());
+}
+
+// A tired roll falling due while a yawn-back is booked does not fire.
+void test_tired_roll_waits_for_a_booked_yawn_back() {
+  Rig r;
+  s_tired = true;
+  r.tiredInterval();
+  TEST_ASSERT_EQUAL_size_t(0, s_registered.size());
+  r.echo.onPeerExpression(kPeerMac, yawnAt(0));
+  r.advance(kMirrorDelayFloorMs + kMirrorJitterMs + 1);
+  TEST_ASSERT_EQUAL_size_t(1, s_registered.size());
+}
+
+// A yawn-back booked before the engine goes off never plays.
+void test_engine_off_drops_a_booked_yawn_back() {
+  Rig r;
+  r.echo.onPeerExpression(kPeerMac, yawnAt(0));
+  r.config.dispositions().setEngineEnabled(false, 0);
+  r.advance(kMirrorDelayFloorMs + kMirrorJitterMs + 1);
+  TEST_ASSERT_EQUAL_size_t(0, s_registered.size());
+}
+
+// No tired yawn during an OTA or while a local Test plays.
+void test_tired_yawn_stands_down_for_ota_and_test() {
+  Rig r;
+  s_tired = true;
+  s_ota = true;
+  r.tiredInterval();
+  r.tiredInterval();
+  TEST_ASSERT_EQUAL_size_t(0, s_registered.size());
+  s_ota = false;
+
+  ExpressionConfig config;
+  config.type = kYawnDescriptorData.id;
+  config.target = TARGET_SHADE;
+  r.manager.addExpression(config, /*configBacked=*/false);
+  r.compositor.addBehavior(r.manager.getBehaviors()[0]);
+  TEST_ASSERT_TRUE(r.manager.markTestActive(kYawnDescriptorData.id, TARGET_SHADE));
+  r.tiredInterval();
+  r.tiredInterval();
+  TEST_ASSERT_EQUAL_size_t(1, s_registered.size());
+}
+
+// A peer's roll stamp reads as old a millis() wrap later, so it rolls again.
+void test_roll_stamp_stays_old_a_wrap_later() {
+  Rig r;
+  r.hear(yawnAt(0));
+  TEST_ASSERT_EQUAL_size_t(1, s_registered.size());
+  const uint64_t start = millis();
+  for (uint64_t now = start; now < start + (1ull << 32); now += 1ull << 26) {
+    set_mock_millis(static_cast<uint32_t>(now));
+    r.manager.retireStale(millis());
+    r.manager.gcTransients();
+    r.echo.tick(millis());
+  }
+  set_mock_millis(static_cast<uint32_t>(start + (1ull << 32) + 10));
+  r.manager.retireStale(millis());
+  r.manager.gcTransients();
+  TEST_ASSERT_EQUAL_size_t(0, s_registered.size());
+  r.hear(yawnAt(0));
+  TEST_ASSERT_EQUAL_size_t(1, s_registered.size());
+}
+
 void test_tuning_range_checks() {
   YawnTuning t;
   TEST_ASSERT_TRUE(setYawnTuning(t, "yawn.fond", 40));
@@ -377,6 +483,14 @@ int main() {
   RUN_TEST(test_yawn_never_takes_the_mirror_roll);
   RUN_TEST(test_engine_off_is_the_plain_mirror);
   RUN_TEST(test_yawn_back_announces_one_hop_on);
+  RUN_TEST(test_mode_factor_scales_the_yawn_back);
+  RUN_TEST(test_catch_rolls_at_the_frames_chance);
+  RUN_TEST(test_observer_damps_by_the_near_count);
+  RUN_TEST(test_booked_yawn_back_holds_the_floor);
+  RUN_TEST(test_tired_roll_waits_for_a_booked_yawn_back);
+  RUN_TEST(test_engine_off_drops_a_booked_yawn_back);
+  RUN_TEST(test_tired_yawn_stands_down_for_ota_and_test);
+  RUN_TEST(test_roll_stamp_stays_old_a_wrap_later);
   RUN_TEST(test_tuning_range_checks);
   return UNITY_END();
 }
