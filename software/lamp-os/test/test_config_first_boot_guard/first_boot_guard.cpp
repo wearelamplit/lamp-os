@@ -56,6 +56,15 @@ void test_valid_blob_not_flagged() {
   TEST_ASSERT_FALSE(lamp::shouldPersistFirstBoot(false, false));
 }
 
+// A store that predates the `named` flag, or is in a form an older release
+// wrote, persists at first boot; a binary store carrying the flag does not.
+void test_first_boot_save_wanted() {
+  TEST_ASSERT_FALSE(lamp::firstBootSaveWanted(true, false));
+  TEST_ASSERT_TRUE(lamp::firstBootSaveWanted(false, false));
+  TEST_ASSERT_TRUE(lamp::firstBootSaveWanted(true, true));
+  TEST_ASSERT_TRUE(lamp::firstBootSaveWanted(false, true));
+}
+
 void test_blob_has_data_boundaries() {
   TEST_ASSERT_FALSE(lamp::configBlobHasData(""));
   TEST_ASSERT_FALSE(lamp::configBlobHasData("{}"));
@@ -69,5 +78,6 @@ int main(int, char**) {
   RUN_TEST(test_empty_string_is_true_first_boot);
   RUN_TEST(test_valid_blob_not_flagged);
   RUN_TEST(test_blob_has_data_boundaries);
+  RUN_TEST(test_first_boot_save_wanted);
   return UNITY_END();
 }

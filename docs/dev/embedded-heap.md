@@ -433,10 +433,11 @@ leave records of the web document beside the running config's settings, so
 the running config's save goes pending and rewrites it (`SaveGate`). A
 record that fails to read drops only itself, logged as `[cfg] expression
 record xN unreadable`. The boot log's `[cfg] expressions=N from records|cfg
-json` is the loaded count; `[cfg] store binary|whole|split|empty` the form
+json|no records` is the loaded count; `[cfg] store binary|whole|split|empty` the form
 it loaded from; on a debug build `cfg_bytes` on the `[cfg] loaded` line is
 the legacy `cfg` string alone (0 for a binary store), and `[nvs] used U free
-F` after the first-boot save is the whole partition's entries
+F`, on every debug boot just after the first-boot save point, is the whole
+partition's entries
 (`nvs_get_stats`), to set beside the figures above.
 
 **Downgrades.** Downgrades happen only on the bench, so the layout does not

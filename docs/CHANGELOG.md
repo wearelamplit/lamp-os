@@ -61,7 +61,8 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   it with its settings; nothing changes in the app or Web Config. A lamp
   flashed back to an older release afterwards starts with default name,
   colours and no password (it keeps its expressions); flashed forward again
-  it gets its settings back.
+  it gets its settings back, with its expressions as the older release left
+  them.
 
 ## 1.3.3
 

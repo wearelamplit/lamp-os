@@ -52,7 +52,7 @@ Config::Config(ConfigStore* inStore) {
   storeForm_ = loaded.form;
 
 #ifdef LAMP_DEBUG
-  // A compact, secret-free summary: the raw store would leak `lamp.password`
+  // A compact summary with no secrets. The raw store would leak `lamp.password`
   // to anyone on the serial console (USB physical access).
   if (!loaded.parseFailed) {
     Serial.printf("[cfg] loaded name=%s pw=%s cfg_bytes=%u\n", lamp.name.c_str(),
@@ -72,10 +72,10 @@ Config::Config(ConfigStore* inStore) {
 
   const config_codec::LoadedRecords& records = loaded.records;
   if (records.unreadable) {
-    // A stored blob holding part of the config did not read; the parts it
-    // held load as defaults, which must not be saved over it.
+    // A stored blob holding part of the config did not read. What loaded in
+    // its place must not be saved over it.
     loadFailedWithData_ = true;
-    Serial.println("[cfg] STORED CONFIG BLOB UNREADABLE; serving defaults for it");
+    Serial.println("[cfg] STORED CONFIG BLOB UNREADABLE; first-boot save held");
   }
   if (!loaded.withinCaps) Serial.println("[cfg] stored expressions over caps; truncated on load");
   for (size_t i = 0; i < kMaxExpressions; ++i) {
@@ -89,7 +89,9 @@ Config::Config(ConfigStore* inStore) {
   }
   Serial.printf("[cfg] expressions=%u from %s\n",
                 (unsigned)expressions.expressions.size(),
-                records.present ? "records" : "cfg json");
+                records.present                                ? "records"
+                : loaded.form == config_codec::StoreForm::Binary ? "no records"
+                                                                 : "cfg json");
   namedKeyPresent_ = loaded.namedKeyPresent;
 
   // Per-peer dispositions live in a separate NVS key.

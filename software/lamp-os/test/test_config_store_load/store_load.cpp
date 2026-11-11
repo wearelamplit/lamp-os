@@ -128,11 +128,10 @@ Model legacyModel(Legacy form) {
   return form == Legacy::Whole || form == Legacy::StagedWhole ? smallModel() : splitModel();
 }
 
-void buildLegacy(ConfigStore& store, Legacy form) {
-  const Model m = legacyModel(form);
+void buildLegacy(ConfigStore& store, Legacy form, const Model& m) {
   switch (form) {
     case Legacy::Whole:
-      legacySave(store, smallModel());
+      legacySave(store, m);
       TEST_ASSERT_TRUE(store.read("cfg", "").find("\"expressions\":") != std::string::npos);
       break;
     case Legacy::Split:
@@ -167,6 +166,8 @@ Model loadedDefaults() {
   legacyLoad(empty, m);
   return m;
 }
+
+void buildLegacy(ConfigStore& store, Legacy form) { buildLegacy(store, form, legacyModel(form)); }
 
 bool anyLegacyKey(ConfigStore& store) {
   for (const char* key : kLegacyKeys) {
@@ -286,7 +287,9 @@ void test_an_undecodable_settings_blob_falls_back_to_the_legacy_store() {
 }
 
 // A settings blob always carries `named`; a legacy store carries it once the
-// release that wrote it knew the flag.
+// release that wrote it knew the flag, wherever its lamp section loaded from
+// ("cfg", a staged whole rest blob, or "cfgl" with "cfg" erased). A lamp
+// named its variant's default word keeps `named` through the migration.
 void test_named_key_presence() {
   InMemoryConfigStore binary;
   putSettings(binary, "st0", Model{});
@@ -300,9 +303,25 @@ void test_named_key_presence() {
     InMemoryConfigStore store;
     buildLegacy(store, form);
     Model l;
-    TEST_ASSERT_EQUAL(form != Legacy::StagedWhole && form != Legacy::LampInCfgl,
-                      load(store, l).namedKeyPresent);
+    TEST_ASSERT_TRUE(load(store, l).namedKeyPresent);
   }
+  for (Legacy form : {Legacy::StagedWhole, Legacy::LampInCfgl}) {
+    Model stray = legacyModel(form);
+    stray.lamp.name = "stray";
+    stray.lamp.named = true;
+    InMemoryConfigStore store;
+    buildLegacy(store, form, stray);
+    Model back;
+    const auto loaded = load(store, back);
+    TEST_ASSERT_TRUE(back.lamp.named);
+    TEST_ASSERT_TRUE(resolveNamed(loaded.namedKeyPresent, back.lamp.named, back.lamp.name, "stray"));
+  }
+  // A staged whole blob written before the flag carries none.
+  InMemoryConfigStore old;
+  const std::string staged = "{\"lamp\":{\"name\":\"stray\"},\"expressions\":[]}";
+  old.writeBlob("cfgb", staged.data(), staged.size());
+  Model o;
+  TEST_ASSERT_FALSE(load(old, o).namedKeyPresent);
 }
 
 // With no settings blob, each legacy store loads exactly as the legacy load

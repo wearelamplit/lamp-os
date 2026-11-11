@@ -28,8 +28,8 @@ and `[cfg] expressions=<n> from <records|cfg json>`.
 
 **C1 — boot/config load lines.** `--reset` reboot; expect in order:
 `[lamp] lampType="standard"` then the `[cfg] loaded ...` line matching the
-known config, `[cfg] store binary`, and after the first-boot save
-`[nvs] used <U> free <F>` (U at most about 419 at the caps; see
+known config, `[cfg] store binary`, and on every debug boot just after the
+first-boot save point `[nvs] used <U> free <F>` (U at most about 419 at the caps; see
 docs/dev/embedded-heap.md "The NVS budget"). A `STORED CONFIG FAILED TO
 PARSE` or `STORED CONFIG BLOB UNREADABLE` line = corrupt NVS, instant
 finding.

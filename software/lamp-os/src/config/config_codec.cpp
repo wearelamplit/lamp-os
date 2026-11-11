@@ -900,7 +900,7 @@ SaveResult saveConfig(ConfigStore& store, const LampSettings& lamp,
   }
   const LiveSettings live = liveSettings(store, buffer, kMaxSettingsBlobLen);
   if (live.slot >= 0 && settingsMatch(buffer, live.len, lamp, base, shade, homeMode)) {
-    // Unchanged: only a stale copy beside it goes.
+    // The live blob already holds the model, so only a stale copy beside it goes.
     const char* other = kSettingsKeys[live.slot == 0 ? 1 : 0];
     if (store.has(other) && !store.erase(other)) return SaveResult::WriteFailed;
   } else {
@@ -1026,6 +1026,28 @@ LoadedRecords loadStoredConfig(ConfigStore& store, JsonObject root, LampSettings
   return loaded;
 }
 
+// Whether the lamp section a legacy load took from a blob carries `named`.
+// With "cfg" erased, loadStoredConfig takes it from a staged whole rest
+// blob, else from "cfgl".
+static bool blobLampCarriesNamed(ConfigStore& store) {
+  const size_t cap = kMaxStoredCfgJsonLen + 1;
+  std::unique_ptr<char[]> buf(new (std::nothrow) char[cap]);
+  if (!buf) return false;
+  const RestBlob live = liveRest(store, buf.get(), cap);
+  size_t len = 0;
+  if (live.slot >= 0 && std::strstr(buf.get(), "\"expressions\":") != nullptr) {
+    len = std::strlen(buf.get());
+  } else {
+    len = store.readBlob(kLampCfgKey, buf.get(), cap - 1);
+  }
+  JsonDocument filter;
+  filter["lamp"]["named"] = true;
+  JsonDocument doc;
+  return len > 0 &&
+         deserializeJson(doc, buf.get(), len, DeserializationOption::Filter(filter)) ==
+             DeserializationError::Ok &&
+         doc["lamp"]["named"].is<bool>();
+}
 
 const char* storeFormName(StoreForm form) {
   switch (form) {
@@ -1063,7 +1085,8 @@ LoadedConfig loadConfig(ConfigStore& store, LampSettings& lamp, BaseSettings& ba
   loaded.records = loadStoredConfig(store, doc.as<JsonObject>(), lamp, base, shade, expressions,
                                     homeMode, loaded.withinCaps);
   loaded.records.unreadable |= settingsUnreadable;
-  loaded.namedKeyPresent = doc["lamp"]["named"].is<bool>();
+  loaded.namedKeyPresent = doc["lamp"].is<JsonObject>() ? doc["lamp"]["named"].is<bool>()
+                                                        : legacy && blobLampCarriesNamed(store);
   if (legacy) loaded.form = loaded.records.present ? StoreForm::Split : StoreForm::Whole;
   return loaded;
 }

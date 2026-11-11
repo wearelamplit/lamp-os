@@ -95,7 +95,7 @@ bool decodeExpression(const uint8_t* data, size_t len, ExpressionConfig& out);
 // base knockout levels, then home mode. Decoding loads the model fromJson
 // loads from the same model's stored JSON, field for field, so every JSON
 // shape built from the model is unchanged (pinned by test_config_settings_codec).
-// colorsEditable is not stored: applyDefaults sets it from the variant.
+// colorsEditable is not stored, since applyDefaults sets it from the variant.
 // Longest at the caps is kMaxSettingsLen; `out` must hold kMaxSettingsBlobLen.
 constexpr size_t kMaxKnockoutLevels = 255;  // one per pixel, and a role holds 255
 constexpr size_t kMaxSettingsLen =
@@ -127,21 +127,14 @@ enum class SaveResult : uint8_t { Ok, WriteFailed, TooLarge, Invalid, NoHeap, He
 // the legacy load reads (1818 bytes fully escaped, plus slack).
 constexpr size_t kMaxStoredCfgJsonLen = 1824;
 
-// Saves the model: each expression as a record ("x0", "x1", ...), the count
-// in "xn" (a decimal string), record slots past the count erased, then the
-// settings blob in "st0" and "st1" by turns, the one not live erased and
-// then written, read back and compared byte for byte (erased again when it
-// differs), and only then the live one erased, so a rewrite never touches
-// the live copy. A blob that already matches the model is not rewritten.
-// When the store still holds a form a release up to 1.3.3 wrote, every
-// record is read back and compared before the blob is written, and the
-// legacy keys are erased last: until the blob lands the legacy store loads,
-// and from then on the binary one does. `buffer` must hold
-// kMaxSettingsBlobLen bytes, else TooLarge with nothing written. A save
-// takes no heap: the blob goes through `buffer` and records come off the
-// stack, and only NVS itself allocates, a handle per call and small
-// bookkeeping per page. Stops at the first failed write or mismatched
-// read-back; the caller keeps its dirty state and retries.
+// Saves the model as expression records and the settings blob, moving a
+// store a release up to 1.3.3 wrote to that form. A reset at any write leaves
+// each section loading as before or as saved, and the legacy keys go only
+// once the new form has read back equal (docs/dev/embedded-heap.md, "The NVS
+// budget"). `buffer` must hold kMaxSettingsBlobLen bytes, else TooLarge with
+// nothing written. Takes no heap beyond NVS's own. A failed write or
+// mismatched read-back returns WriteFailed; the caller keeps its dirty state
+// and retries.
 SaveResult saveConfig(ConfigStore& store, const LampSettings& lamp,
                       const BaseSettings& base, const ShadeSettings& shade,
                       const ExpressionSettings& expressions,
@@ -151,18 +144,21 @@ struct LoadedRecords {
   bool present = false;      // the expressions came from records
   uint32_t droppedMask = 0;  // bit i: record "x<i>" missing or unreadable
   uint8_t duplicates = 0;    // records skipped as a repeat (type, target)
-  // A stored rest or lamp blob did not read, or a split store has no rest:
-  // Config then serves defaults without saving them over the store.
+  // A stored settings, rest or lamp blob did not read or decode, or a split
+  // store has no rest. Config then holds the first-boot save, so what loaded
+  // in their place is not saved over them.
   bool unreadable = false;
 };
 
-// Overlays what a split save keeps outside the stored JSON. The JSON wins
-// wherever it carries the data itself: knockout levels from "ko" only when it
-// has no base.knockout, expressions from their records only when it has no
-// expressions array (an older firmware always writes both, so a config it
-// saved after a downgrade is what loads). A record that fails to read drops
+// Overlays the records and the legacy knockout blob ("ko") on a loaded
+// model. The binary load passes cfgHasKnockout, its blob holding the levels.
+// For a legacy store the JSON wins wherever it carries the data itself:
+// knockout levels from "ko" only when it has no base.knockout, expressions
+// from their records only when it has no expressions array (an older
+// firmware always writes both, so a config it saved after a downgrade is
+// what loads). A record that fails to read drops
 // only itself (droppedMask); a repeated (type, target) keeps its first record.
-// Call after fromJson, which sizes the knockout.
+// Call after fromJson or decodeSettings, which size the knockout.
 LoadedRecords loadRecords(ConfigStore& store, BaseSettings& base,
                           ExpressionSettings& expressions, bool cfgHasKnockout,
                           bool cfgHasExpressions);
@@ -202,7 +198,8 @@ struct LoadedConfig {
 
 // Loads the stored config. A settings blob that reads is the authority: it
 // loads with the records, and every legacy key beside it is erased. With
-// none, the legacy keys load through loadStoredConfig as before. Both blobs
+// none, the legacy keys load through loadStoredConfig, as releases up to
+// 1.3.3 wrote them. Both blobs
 // present (a save cut short) loads "st0". A settings blob that is present
 // but does not read or decode is reported unreadable, and the legacy load
 // runs for whatever is left. The blob is read into `buffer`, which holds

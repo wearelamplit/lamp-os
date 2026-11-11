@@ -823,12 +823,13 @@ void test_a_legacy_boot_saves_once() {
   for (InMemoryConfigStore& store : legacyStores()) {
     Model m;
     const auto first = load(store, m);
-    TEST_ASSERT_TRUE(!first.namedKeyPresent || config_codec::isLegacyForm(first.form));
+    TEST_ASSERT_TRUE(firstBootSaveWanted(first.namedKeyPresent, config_codec::isLegacyForm(first.form)));
     TEST_ASSERT_TRUE(save(store, m) == SaveResult::Ok);
     SpyStore spy(store);
     Model again;
     const auto second = load(spy, again);
-    TEST_ASSERT_TRUE(second.namedKeyPresent && !config_codec::isLegacyForm(second.form));
+    TEST_ASSERT_FALSE(
+        firstBootSaveWanted(second.namedKeyPresent, config_codec::isLegacyForm(second.form)));
     for (const auto& op : spy.log) TEST_ASSERT_TRUE_MESSAGE(op.rfind("read ", 0) == 0, op.c_str());
     TEST_ASSERT_TRUE(allSections(again, m));
   }

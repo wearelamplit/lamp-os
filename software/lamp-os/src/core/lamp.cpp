@@ -662,10 +662,8 @@ void lamp::Lamp::setup() {
   // NOT touched; the NVS value is authoritative.
   config.applyDefaults(defaults());
 
-  // First-ever-boot housekeeping, persisted once so it sticks across reboots.
-  // Persist when NVS predated the `named` flag so applyDefaults' inferred value
-  // becomes authoritative, and when it holds a form an older release wrote, so
-  // the save moves it to the settings blob. Then latch a lamp the user named OR gave a control
+  // First-ever-boot housekeeping, persisted once so it sticks across reboots
+  // (firstBootSaveWanted). Then latch a lamp the user named OR gave a control
   // password to adopted, so the roll below sees it as configured. Then, only
   // while still unadopted, give it a random per-surface hue so units aren't
   // visually identical out of the box. Shade hue is offset from base by
@@ -673,7 +671,7 @@ void lamp::Lamp::setup() {
   // unit lands on a distinct hue. Guarded on `!setup` and the single-color
   // variant default, so it fires once and never on an adopted lamp; a variant
   // that forces `setup=true` (curated colors) skips it entirely.
-  bool persistFirstBoot = !config.namedKeyPresent() || config.storeIsLegacy();
+  bool persistFirstBoot = firstBootSaveWanted(config.namedKeyPresent(), config.storeIsLegacy());
   if (!config.lamp.setup &&
       (config.lamp.named || !config.lamp.password.empty())) {
     config.lamp.setup = true;
