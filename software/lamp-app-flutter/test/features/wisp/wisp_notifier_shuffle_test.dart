@@ -79,6 +79,18 @@ void main() {
     expect(n.livePaint.values.map((p) => p.base.r).toSet(), {40, 50});
   });
 
+  test('a status with no known settings is not a moved seed', () async {
+    final n = c.read(wispNotifierProvider(_lampId).notifier);
+    await setClaims(_claims(10, 90));
+    await n.shuffle();
+    // A settings-free status from another wisp reads its seed as the default.
+    ble.simulateNotify(_lampId, BleUuids.controlService, BleUuids.wispStatus,
+        _b('{"wispMac":"11:22:33:44:55:66","configSplit":true,'
+            '"source":"manual"}'));
+    await pumpEventQueue();
+    expect(n.colorsRecalculating, isTrue);
+  });
+
   test('a seed that moved with no chip change waits for one', () async {
     final n = c.read(wispNotifierProvider(_lampId).notifier);
     await n.shuffle();
