@@ -54,8 +54,12 @@ Neutral with nothing learned.
   change once per 60, both counted from the last flush, and any flush writes
   everything, so while the engine runs a power cut loses at most an hour of
   ages. With the engine off the ages stand still, in RAM and in the blob.
-  Nothing flushes while a firmware or FS image is being received; a flush
-  that comes due then waits and lands on the first loop after the OTA ends.
+  Nothing flushes while a firmware or FS image is being received. A flush
+  that comes due then waits for the first loop after the receive. An FS
+  receive and a failed firmware receive resume the loop, so the flush lands.
+  A successful firmware receive restarts the lamp first, so what came due
+  during it is lost: up to about 1 h 10 min of engine and age changes, or a
+  slider edit made during the update.
 - **Boot.** Neutral rows unseen for 14 on-days (20160 on-minutes) are dropped
   at load, and the boot writes nothing.
 - **Formats.** The `disp` blob is format 2, `[2][flags]` then
