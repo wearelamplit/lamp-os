@@ -241,6 +241,12 @@ class ExpressionManager {
                          const uint8_t srcMac[6], bool broadcast = false,
                          TransientSource source = TransientSource::Remote);
 
+  // triggerInvocation without its cascade, then, when it played, a MSG_EVENT
+  // for `inv` carrying `inv.hops`, so lamps near this one can copy the copy.
+  // The caller decides whether a copy may be copied again.
+  bool replayAndAnnounce(const ExpressionInvocation& inv, const uint8_t srcMac[6],
+                         TransientSource source = TransientSource::Remote);
+
   /**
    * Broadcast an invocation to the crowd WITHOUT firing it locally.
    * Synthesizes a cascading entry from `inv` and runs the same
@@ -274,6 +280,10 @@ class ExpressionManager {
   // True while home mode ignores other lamps (Compositor::blocksRemote): a
   // peer's invocation is neither started nor booked for later.
   bool ignoresPeers() const;
+
+  // True while home mode is on, the app's preview included, whether or not it
+  // ignores other lamps.
+  bool inHomeMode() const;
 
   /**
    * Garbage-collect transient one-shot expressions created by

@@ -283,6 +283,7 @@ void ExpressionManager::announce(const ExpressionInvocation& shape,
   inv.colors = shape.colors;
   inv.target = shape.target;
   inv.parameters = parametersWithoutCascadeKeys(params);
+  inv.hops = shape.hops;
 
   std::string json;
   serializeInvocation(inv, json);
@@ -531,6 +532,17 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
 
 bool ExpressionManager::ignoresPeers() const {
   return compositor_ && compositor_->blocksRemote(TransientSource::Remote);
+}
+
+bool ExpressionManager::inHomeMode() const {
+  return compositor_ && compositor_->homeMode;
+}
+
+bool ExpressionManager::replayAndAnnounce(const ExpressionInvocation& inv,
+                                          const uint8_t srcMac[6], TransientSource source) {
+  if (!triggerInvocation(inv, srcMac, /*broadcast=*/false, source)) return false;
+  announce(inv, inv.parameters);
+  return true;
 }
 
 // Evict a one-shot cascade even when isAnimationComplete() never fires; a

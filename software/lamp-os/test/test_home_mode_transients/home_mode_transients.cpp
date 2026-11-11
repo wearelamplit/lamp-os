@@ -21,6 +21,8 @@
 #include "expressions/bloom/bloom_expression.cpp"
 #include "expressions/glitchy/glitchy_expression.cpp"
 #include "behaviors/social_echo.cpp"
+#include "behaviors/copycat.cpp"
+#include "behaviors/roll_cooldown.cpp"
 #include "config/disposition_store.cpp"
 
 namespace lamp {
@@ -187,12 +189,13 @@ void test_preview_blocks_peers_without_retiring() {
 }
 
 // Ten announces from a Smitten peer book at least one mirror on an Extrovert
-// lamp outside home mode.
+// lamp outside home mode. The roll cooldown is off so all ten roll.
 static size_t mirrorsBookedThenFired(Rig& r, bool homeDuringAnnounce, bool preview) {
   Config config;
   config.lamp.socialMode = SocialMode::Extrovert;
   MeshLink mesh;
   SocialEchoObserver echo(config, r.manager, mesh);
+  echo.tuning().copyRollCooldownMs = 0;
   ExpressionInvocation inv;
   inv.type = "probe";
   inv.target = TARGET_SHADE;
@@ -225,14 +228,24 @@ void test_echo_books_nothing_at_home_or_in_preview() {
   }
 }
 
-// A mirror booked just before home mode begins is dropped, so it does not
-// fire once home mode ends.
-void test_echo_booked_before_home_is_dropped() {
+// Home mode with social on still lets a peer's own invocation play, but the
+// lamp rolls no copy of it.
+void test_echo_books_nothing_at_home_with_social_on() {
   Rig r;
+  r.compositor.setHomeModePolicy(/*socialDisabled=*/false, {});
+  TEST_ASSERT_EQUAL_size_t(0, mirrorsBookedThenFired(r, true, false));
+}
+
+// A mirror booked just before home mode begins is dropped, so it does not
+// fire once home mode ends, whether or not home mode ignores peers.
+static size_t mirrorsBookedBeforeHomeThenFired(bool socialDisabled) {
+  Rig r;
+  r.compositor.setHomeModePolicy(socialDisabled, {});
   Config config;
   config.lamp.socialMode = SocialMode::Extrovert;
   MeshLink mesh;
   SocialEchoObserver echo(config, r.manager, mesh);
+  echo.tuning().copyRollCooldownMs = 0;
   ExpressionInvocation inv;
   inv.type = "probe";
   inv.target = TARGET_SHADE;
@@ -243,7 +256,13 @@ void test_echo_booked_before_home_is_dropped() {
   r.compositor.homeMode = false;
   set_mock_millis(10000 + kMirrorDelayFloorMs + kMirrorJitterMs + 1);
   echo.tick(millis());
-  TEST_ASSERT_EQUAL_size_t(0, s_registered.size());
+  return s_registered.size();
+}
+
+void test_echo_booked_before_home_is_dropped() {
+  TEST_ASSERT_EQUAL_size_t(0, mirrorsBookedBeforeHomeThenFired(true));
+  set_mock_millis(10000);
+  TEST_ASSERT_EQUAL_size_t(0, mirrorsBookedBeforeHomeThenFired(false));
 }
 
 void test_manager_ignores_peers_in_home_and_preview() {
@@ -367,6 +386,7 @@ int main(int, char**) {
   RUN_TEST(test_preview_blocks_peers_without_retiring);
   RUN_TEST(test_echo_books_outside_home_mode);
   RUN_TEST(test_echo_books_nothing_at_home_or_in_preview);
+  RUN_TEST(test_echo_books_nothing_at_home_with_social_on);
   RUN_TEST(test_manager_ignores_peers_in_home_and_preview);
   RUN_TEST(test_echo_booked_before_home_is_dropped);
   RUN_TEST(test_retiring_transient_does_not_coalesce);
