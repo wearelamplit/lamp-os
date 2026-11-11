@@ -630,7 +630,8 @@ Read it from the BLE `lamp` section:
 "lastCrash": {"count": 3, "reset": 4, "fw": 66055,
   "uptimeMs": 5412000, "minLargestBlock": 1300, "minFreeHeap": 5120,
   "rosterPeak": 12, "reason": "abort() was called", "core": 0,
-  "pc": "0x4008a1b2", "bt": ["0x4008a1b2", "0x400d3c44", "0x400e0123"]}
+  "pc": "0x4008a1b2", "bt": ["0x4008a1b2", "0x400d3c44", "0x400e0123",
+  "0x400d5a10"]}
 ```
 
 `reset` and `resetReason` are `esp_reset_reason_t` ordinals (4 panic, 5 int WDT,
@@ -691,14 +692,15 @@ interrupt reads `end power`.
 
 The figures come from the crash record's RTC snapshot, sampled each second
 from the first loop iteration on: when it survives the reset they are those
-of the last sample, and after a panic or watchdog abort `up` is the uptime at
-the fault. When it does not (a power cut, often a brownout), the
-boot keeps the figures from the last milestone it reached, 1 min, 1 h or 1
-day, and `up` reads `>` that milestone. `free - big -` means the boot died
-before any figure was taken: in `setup()`, or in its first minute after a
-power cut. Past 49.7 days the snapshot's uptime saturates and reads
-`>49d17h`. A boot writes the history once at start and once per milestone,
-so at most four NVS writes per boot.
+of the last sample, and after a panic or watchdog abort in a boot its loop
+had sampled, `up` is the uptime at the fault. When it does not (a power cut,
+often a brownout), the boot keeps the figures from the last milestone it
+reached, 1 min, 1 h or 1 day, and `up` reads `>` that milestone.
+`free - big -` means the boot died before any figure was taken: in `setup()`,
+in its first loop iteration, or in its first minute after a power cut. Past
+49.7 days the snapshot's uptime saturates and reads `>49d17h`. A boot writes
+the history once at start and once per milestone, so at most four NVS writes
+per boot.
 
 ## Why it recurs
 
