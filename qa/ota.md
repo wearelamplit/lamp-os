@@ -155,9 +155,9 @@ skew:
 
 ## Not covered here
 
-- The BLE chunk path dropping a write into a mesh session
-  (`FirmwareReceiver::chunksArmedFor`). No native test reaches it (the
-  receiver test drives a mirror class) and the stock app cannot reach it: the
+- The BLE chunk path dropping a write into a mesh session. The drop rule
+  (`checkFwChunk`) is natively tested; its wiring (`FwChunkCallback` passing
+  `FirmwareTransportKind::Ble`) is not, and the stock app cannot reach it: the
   lamp drops any phone link under the mesh pause, so a write can land only
   between the session arming and the kick taking effect.
 

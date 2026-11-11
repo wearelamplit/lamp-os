@@ -323,16 +323,7 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
   // interrupt a mesh OTA) is DeclineBusy, which stops two concurrent flows
   // writing the same OTA partition.
   if (state_ == State::Streaming || state_ == State::Verify) {
-    const bool sameTransport = ctrl.transportKind == activeTransportKind_;
-    bool sameSource = false;
-    if (sameTransport) {
-      if (activeTransportKind_ == FirmwareTransportKind::EspNow) {
-        sameSource = (std::memcmp(ctrl.sourceMac, wispMac_, 6) == 0);
-      } else {
-        sameSource = (ctrl.bleConnHandle == activeBleConnHandle_);
-      }
-    }
-    if (ctrl.offer.version == offerVersion_ && sameTransport && sameSource) {
+    if (ctrl.offer.version == offerVersion_ && fromSessionSender(ctrl)) {
       sendAccept(ctrl, lamp_protocol::FwAcceptStatus::Accept);
       return;
     }
@@ -561,11 +552,25 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
 #endif
 }
 
+bool FirmwareReceiver::fromSessionSender(const PendingFirmwareControl& ctrl) const {
+  return lamp_protocol::fromFwSessionSender(
+      ctrl.transportKind == activeTransportKind_,
+      activeTransportKind_ == FirmwareTransportKind::Ble, ctrl.sourceMac, wispMac_,
+      ctrl.bleConnHandle, activeBleConnHandle_);
+}
+
 void FirmwareReceiver::onDoneOnLoop(const PendingFirmwareControl& ctrl,
                                     uint32_t /*nowMs*/) {
   if (state_ != State::Streaming) {
     // DONE in any other state is benign (late retry after verify+reboot, or a
     // DONE for a different flow). Ignore.
+    return;
+  }
+  // A stale sender's DONE must not verify or abort the live session.
+  if (!fromSessionSender(ctrl)) {
+#ifdef LAMP_DEBUG
+    Serial.printf("[fw_receiver] DONE drop: not the session's sender\n");
+#endif
     return;
   }
   // DONE.version must match the accepted OFFER.
@@ -643,7 +648,8 @@ void FirmwareReceiver::onDoneOnLoop(const PendingFirmwareControl& ctrl,
   state_ = State::Failed;
 }
 
-void FirmwareReceiver::handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk& p) {
+void FirmwareReceiver::handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk& p,
+                                             FirmwareTransportKind via) {
   // Bump writesInFlight_ before reading the armed gate so Core 1's
   // verifyAndApply barrier sees this write. The acquire fetch_add pairs with
   // Core 1's exchange(0, acq_rel) on publishedOtaHandle_: observing armed!=0
@@ -678,7 +684,8 @@ void FirmwareReceiver::handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk&
     return;
   }
   const lamp_protocol::FwChunkVerdict verdict =
-      lamp_protocol::checkFwChunk(p, wispMac_, offerTotalLen_, offerChunkSize_);
+      lamp_protocol::checkFwChunk(p, via == activeTransportKind_, wispMac_,
+                                  offerTotalLen_, offerChunkSize_);
   if (verdict == lamp_protocol::FwChunkVerdict::ForeignSource) return;
   // Bump the seen-stamp before the remaining checks; pairs with Core 1's
   // no-progress watchdog.

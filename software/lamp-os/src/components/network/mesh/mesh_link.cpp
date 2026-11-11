@@ -670,7 +670,9 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     if (!lamp_protocol::parseFwChunk(data, len, p)) return;
     if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FW_CHUNK, p.seq,
                         p.targetMac, myMac_, nowMs)) return;
-    if (firmwareReceiver_) firmwareReceiver_->handleChunkOnRecvTask(p);
+    if (firmwareReceiver_) {
+      firmwareReceiver_->handleChunkOnRecvTask(p, FirmwareTransportKind::EspNow);
+    }
   } else if (msgType == lamp_protocol::MSG_FW_DONE) {
     lamp_protocol::ParsedFwDone p;
     if (!lamp_protocol::parseFwDone(data, len, p)) return;

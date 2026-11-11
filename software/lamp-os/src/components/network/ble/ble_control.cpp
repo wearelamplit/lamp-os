@@ -1206,7 +1206,6 @@ class FwChunkCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
     if (!s_firmwareReceiver) return;
-    if (!s_firmwareReceiver->chunksArmedFor(lamp::FirmwareTransportKind::Ble)) return;
     noteAppWriteActivity();
     const std::string raw = c->getValue();
     lamp_protocol::ParsedFwChunk p;
@@ -1216,7 +1215,7 @@ class FwChunkCallback : public NimBLECharacteristicCallbacks {
     }
     // Direct call on the BLE host task; bounded ~0.5 ms (one OTA write +
     // bitmap set). A missed chunk triggers the receiver's REQ watchdog.
-    s_firmwareReceiver->handleChunkOnRecvTask(p);
+    s_firmwareReceiver->handleChunkOnRecvTask(p, lamp::FirmwareTransportKind::Ble);
   }
 };
 

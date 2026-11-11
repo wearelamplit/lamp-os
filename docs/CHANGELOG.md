@@ -27,6 +27,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 - **A lamp mid-update only takes firmware from the lamp it agreed to.** Pieces
   from a second lamp still sending to it could land in the new image and fail
   the whole update at the final check.
+- **A lamp mid-update ignores a finish signal from the wrong sender.** A
+  lamp that had stopped sending to it could fail the update another
+  lamp was still sending.
 
 ## 1.3.4
 

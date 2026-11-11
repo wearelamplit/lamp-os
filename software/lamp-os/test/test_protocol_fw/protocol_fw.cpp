@@ -554,11 +554,11 @@ void test_fw_chunk_from_session_source_is_written() {
   const auto c = sessionChunk(kWispMac, 1, kSessionChunk);
   TEST_ASSERT_EQUAL_UINT8(
       static_cast<uint8_t>(lp::FwChunkVerdict::Write),
-      static_cast<uint8_t>(lp::checkFwChunk(c, kWispMac, kSessionLen, kSessionChunk)));
+      static_cast<uint8_t>(lp::checkFwChunk(c, true, kWispMac, kSessionLen, kSessionChunk)));
   const auto last = sessionChunk(kWispMac, 3, 100);
   TEST_ASSERT_EQUAL_UINT8(
       static_cast<uint8_t>(lp::FwChunkVerdict::Write),
-      static_cast<uint8_t>(lp::checkFwChunk(last, kWispMac, kSessionLen, kSessionChunk)));
+      static_cast<uint8_t>(lp::checkFwChunk(last, true, kWispMac, kSessionLen, kSessionChunk)));
 }
 
 // A well-formed chunk from a source one byte off the accepted sender's.
@@ -569,28 +569,61 @@ void test_fw_chunk_from_other_source_is_dropped() {
   const auto c = sessionChunk(other, 1, kSessionChunk);
   TEST_ASSERT_EQUAL_UINT8(
       static_cast<uint8_t>(lp::FwChunkVerdict::ForeignSource),
-      static_cast<uint8_t>(lp::checkFwChunk(c, kWispMac, kSessionLen, kSessionChunk)));
+      static_cast<uint8_t>(lp::checkFwChunk(c, true, kWispMac, kSessionLen, kSessionChunk)));
+}
+
+// A chunk from the session's sender that arrived over the other transport
+// (a phone writing CHAR_FW_CHUNK into a mesh session).
+void test_fw_chunk_over_other_transport_is_dropped() {
+  const auto c = sessionChunk(kWispMac, 1, kSessionChunk);
+  TEST_ASSERT_EQUAL_UINT8(
+      static_cast<uint8_t>(lp::FwChunkVerdict::ForeignSource),
+      static_cast<uint8_t>(lp::checkFwChunk(c, false, kWispMac, kSessionLen, kSessionChunk)));
+}
+
+// --- fromFwSessionSender: OFFER/DONE from the accepted sender ---
+
+void test_fw_session_sender_over_mesh_is_matched_by_mac() {
+  uint8_t other[6];
+  std::memcpy(other, kWispMac, 6);
+  other[5] ^= 0x01;
+  TEST_ASSERT_TRUE(lp::fromFwSessionSender(true, false, kWispMac, kWispMac, 7, 9));
+  TEST_ASSERT_FALSE(lp::fromFwSessionSender(true, false, other, kWispMac, 7, 7));
+}
+
+// The app's sourceMac is self-reported, so over BLE only the connection counts.
+void test_fw_session_sender_over_ble_is_matched_by_connection() {
+  uint8_t other[6];
+  std::memcpy(other, kWispMac, 6);
+  other[0] ^= 0x80;
+  TEST_ASSERT_TRUE(lp::fromFwSessionSender(true, true, other, kWispMac, 7, 7));
+  TEST_ASSERT_FALSE(lp::fromFwSessionSender(true, true, kWispMac, kWispMac, 8, 7));
+}
+
+void test_fw_session_sender_over_other_transport_is_rejected() {
+  TEST_ASSERT_FALSE(lp::fromFwSessionSender(false, false, kWispMac, kWispMac, 7, 7));
+  TEST_ASSERT_FALSE(lp::fromFwSessionSender(false, true, kWispMac, kWispMac, 7, 7));
 }
 
 void test_fw_chunk_shape_checks_for_session_source() {
   auto past = sessionChunk(kWispMac, 3, 101);
   TEST_ASSERT_EQUAL_UINT8(
       static_cast<uint8_t>(lp::FwChunkVerdict::OutOfBounds),
-      static_cast<uint8_t>(lp::checkFwChunk(past, kWispMac, kSessionLen, kSessionChunk)));
+      static_cast<uint8_t>(lp::checkFwChunk(past, true, kWispMac, kSessionLen, kSessionChunk)));
   auto wrap = sessionChunk(kWispMac, 1, 2);
   wrap.offset = 0xFFFFFFFFu;
   TEST_ASSERT_EQUAL_UINT8(
       static_cast<uint8_t>(lp::FwChunkVerdict::OutOfBounds),
-      static_cast<uint8_t>(lp::checkFwChunk(wrap, kWispMac, kSessionLen, kSessionChunk)));
+      static_cast<uint8_t>(lp::checkFwChunk(wrap, true, kWispMac, kSessionLen, kSessionChunk)));
   const auto big = sessionChunk(kWispMac, 0, kSessionChunk + 1);
   TEST_ASSERT_EQUAL_UINT8(
       static_cast<uint8_t>(lp::FwChunkVerdict::Oversize),
-      static_cast<uint8_t>(lp::checkFwChunk(big, kWispMac, kSessionLen, kSessionChunk)));
+      static_cast<uint8_t>(lp::checkFwChunk(big, true, kWispMac, kSessionLen, kSessionChunk)));
   auto skew = sessionChunk(kWispMac, 2, kSessionChunk);
   skew.offset -= 4;
   TEST_ASSERT_EQUAL_UINT8(
       static_cast<uint8_t>(lp::FwChunkVerdict::Misaligned),
-      static_cast<uint8_t>(lp::checkFwChunk(skew, kWispMac, kSessionLen, kSessionChunk)));
+      static_cast<uint8_t>(lp::checkFwChunk(skew, true, kWispMac, kSessionLen, kSessionChunk)));
 }
 
 int main(int argc, char** argv) {
@@ -620,6 +653,10 @@ int main(int argc, char** argv) {
   RUN_TEST(test_fw_chunk_from_session_source_is_written);
   RUN_TEST(test_fw_chunk_from_other_source_is_dropped);
   RUN_TEST(test_fw_chunk_shape_checks_for_session_source);
+  RUN_TEST(test_fw_chunk_over_other_transport_is_dropped);
+  RUN_TEST(test_fw_session_sender_over_mesh_is_matched_by_mac);
+  RUN_TEST(test_fw_session_sender_over_ble_is_matched_by_connection);
+  RUN_TEST(test_fw_session_sender_over_other_transport_is_rejected);
 
   RUN_TEST(test_fw_req_roundtrip);
   RUN_TEST(test_fw_req_chunk_count_zero_rejected_by_builder);

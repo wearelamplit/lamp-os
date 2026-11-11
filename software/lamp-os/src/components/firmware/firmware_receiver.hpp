@@ -172,9 +172,12 @@ class FirmwareReceiver {
   // offer/done handler.
   void handleControlOnLoop(const PendingFirmwareControl& ctrl);
 
-  // Called DIRECTLY from the WiFi recv task (Core 0). Writes the chunk to flash
-  // and marks its bitmap bit. Bounded IO + bitmap set, no heap/JSON/blocking.
-  void handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk& p);
+  // Called DIRECTLY from the chunk's transport task (WiFi recv on Core 0, or the
+  // BLE host). Writes the chunk to flash and marks its bitmap bit when it came
+  // over `via` from the session's sender. Bounded IO + bitmap set, no
+  // heap/JSON/blocking.
+  void handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk& p,
+                             FirmwareTransportKind via);
 
   State state() const { return state_; }
 
@@ -183,13 +186,6 @@ class FirmwareReceiver {
   // ESP-NOW channel for the duration.
   bool isInProgress() const {
     return state_ != State::Idle && state_ != State::Failed;
-  }
-
-  // True while a session opened over `kind` accepts chunks. A transport's chunk
-  // path checks it so it writes only into a session that transport opened.
-  bool chunksArmedFor(FirmwareTransportKind kind) const {
-    return publishedOtaHandle_.load(std::memory_order_acquire) != 0 &&
-           activeTransportKind_ == kind;
   }
 
   // Snapshot the active OTA peer's MAC into out[6]. True only for an in-flight
@@ -215,6 +211,7 @@ class FirmwareReceiver {
   // Offer handling, called from handleControlOnLoop on Core 1.
   void onOfferOnLoop(const PendingFirmwareControl& ctrl, uint32_t nowMs);
   void onDoneOnLoop(const PendingFirmwareControl& ctrl, uint32_t nowMs);
+  bool fromSessionSender(const PendingFirmwareControl& ctrl) const;
 
   // One bit per expected chunk, sized off the OFFER's totalChunks.
   void resetBitmap(size_t totalChunks);

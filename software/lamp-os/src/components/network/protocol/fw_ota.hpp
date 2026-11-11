@@ -669,16 +669,17 @@ enum class FwChunkVerdict : uint8_t {
   Misaligned,
 };
 
-// Whether a CHUNK may be written into the open receive session. sessionSource
-// is the accepted OFFER's sourceMac: a chunk from any other source is never
-// written and never counts as session activity. totalLen and chunkSize are the
-// session's negotiated values; the last chunk may be short. A Write verdict
-// keeps the write inside the erased image. Runs on the receiver because only it
-// holds the session's chunkSize.
-inline FwChunkVerdict checkFwChunk(const ParsedFwChunk& c,
+// Whether a CHUNK may be written into the open receive session.
+// sessionTransport is true when the chunk arrived over the transport (mesh or
+// BLE) that opened the session, and sessionSource is the accepted OFFER's
+// sourceMac: a chunk failing either is never written and never counts as
+// session activity. totalLen and chunkSize are the session's negotiated values;
+// the last chunk may be short. A Write verdict keeps the write inside the erased
+// image. Runs on the receiver because only it holds the session's chunkSize.
+inline FwChunkVerdict checkFwChunk(const ParsedFwChunk& c, bool sessionTransport,
                                    const uint8_t sessionSource[6],
                                    uint32_t totalLen, uint16_t chunkSize) {
-  if (std::memcmp(c.sourceMac, sessionSource, 6) != 0) {
+  if (!sessionTransport || std::memcmp(c.sourceMac, sessionSource, 6) != 0) {
     return FwChunkVerdict::ForeignSource;
   }
   // Compared without adding so an offset near UINT32_MAX can't wrap the sum.
@@ -690,6 +691,18 @@ inline FwChunkVerdict checkFwChunk(const ParsedFwChunk& c,
     return FwChunkVerdict::Misaligned;
   }
   return FwChunkVerdict::Write;
+}
+
+// Whether an OFFER or DONE comes from the sender whose OFFER opened the
+// receive session. A mesh sender is named by its sourceMac. An app's sourceMac
+// is its own claim, so over BLE the connection handle names the sender.
+inline bool fromFwSessionSender(bool sameTransport, bool overBle,
+                                const uint8_t frameMac[6],
+                                const uint8_t sessionMac[6],
+                                uint16_t frameConn, uint16_t sessionConn) {
+  if (!sameTransport) return false;
+  if (overBle) return frameConn == sessionConn;
+  return std::memcmp(frameMac, sessionMac, 6) == 0;
 }
 
 }  // namespace lamp_protocol
