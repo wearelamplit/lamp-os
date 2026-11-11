@@ -401,7 +401,8 @@ void test_tired_roll_waits_for_a_booked_yawn_back() {
   r.tiredInterval();
   TEST_ASSERT_EQUAL_size_t(0, s_registered.size());
   r.echo.onPeerExpression(kPeerMac, yawnAt(0));
-  r.advance(kMirrorDelayFloorMs + kMirrorJitterMs + 1);
+  // The tired roll falls due on this tick, ahead of the yawn-back playing.
+  r.advance(1000);
   TEST_ASSERT_EQUAL_size_t(1, s_registered.size());
 }
 
