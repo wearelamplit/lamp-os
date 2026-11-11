@@ -19,7 +19,7 @@ class BleRadio {
 // only caller that starts either. An OTA radio pause holds both; a connected
 // GATT client holds the scan. Each call runs whole against the others, so a
 // hold taken on one task is never undone by a restart racing it on another.
-// Callers on the NimBLE host task are safe: no BleRadio call re-enters here.
+// Safe from NimBLE host-task callbacks, since no BleRadio call re-enters it.
 class BleRadioGate {
  public:
   explicit BleRadioGate(BleRadio& radio) : radio_(radio) {}

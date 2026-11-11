@@ -15,7 +15,7 @@
 using ble_control::BleRadio;
 using ble_control::BleRadioGate;
 
-// Models NimBLE: a start while already running is the "already active" no-op.
+// Counts a start while already running, NimBLE's "already active" no-op.
 class FakeRadio : public BleRadio {
  public:
   bool advertising = false;
