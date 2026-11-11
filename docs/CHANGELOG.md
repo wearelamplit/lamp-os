@@ -30,6 +30,16 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   up after boot (say 5 min) on a lamp that was already set up saved nothing,
   and the next boot still gave 2 minutes. The choice now applies from the next
   boot, and the app reads back what you chose.
+- **The wisp's Lamps tab shows each lamp's new colours right away.** While
+  a lamp faded to its next drift colour, its colour chips crept along with
+  the fade, and after a Shuffle they could sit on the old colours for a few
+  seconds while the shuffle icon had already stopped. The chips now show the
+  colours the wisp gave each lamp as soon as it gives them, through a lamp
+  on this firmware; through a lamp on older firmware they still follow the
+  fade. The shuffle icon keeps spinning until the wisp reports the re-roll.
+  When more lamps on one wisp are fading at once than one frame has room
+  for (about 5 of 100 lamps, about 30 of 80), a chip can sit on its previous
+  colour, or a mid-fade colour, for one or more drift steps.
 
 ## 1.3.3
 

@@ -10,11 +10,13 @@ OwnWispDriftFade decodeOwnWispDriftFade(const lamp_protocol::ParsedWispState& ws
   const uint8_t* e =
       lamp_protocol::findWispStateEntry(ws.entries, ws.count, selfMac);
   if (e) {
-    const auto idx = static_cast<uint8_t>((e - ws.entries) /
-                                          lamp_protocol::WISP_STATE_ENTRY_SIZE);
+    own.index = static_cast<uint8_t>((e - ws.entries) /
+                                     lamp_protocol::WISP_STATE_ENTRY_SIZE);
     own.fade = lamp_protocol::lookupWispDriftFade(
-        ws.trailer, ws.trailerLen, idx, own.record, &own.recordWritten);
+        ws.trailer, ws.trailerLen, own.index, own.record, &own.recordWritten);
   }
+  own.trailer = lamp_protocol::walkWispDriftFade(ws.trailer, ws.trailerLen,
+                                                 [](const uint8_t*) {});
   return own;
 }
 
@@ -35,6 +37,21 @@ void fillPendingWispState(PendingWispState& slot,
   }
   slot.fade = own.fade;
   if (own.recordWritten) slot.fadeRecord = own.record;
+  slot.ownIndex = own.index;
+  slot.fadePartial = own.trailer == lamp_protocol::WispDriftFadeTrailer::Partial;
+  std::memset(slot.targeted, 0, sizeof(slot.targeted));
+  if (own.trailer == lamp_protocol::WispDriftFadeTrailer::Malformed) return;
+  lamp_protocol::walkWispDriftFade(ws.trailer, ws.trailerLen, [&](const uint8_t* r) {
+    const uint8_t i = r[0];
+    if (i >= n || i == own.index) return;
+    uint8_t* e = &slot.entries[i * lamp_protocol::WISP_STATE_ENTRY_SIZE];
+    uint8_t* w = &slot.w[i * lamp_protocol::WISP_STATE_W_SIZE];
+    std::memcpy(e + 6, r + 1, 3);
+    w[0] = r[4];
+    std::memcpy(e + 9, r + 5, 3);
+    w[1] = r[8];
+    slot.targeted[i / 8] |= static_cast<uint8_t>(1u << (i % 8));
+  });
 }
 
 void fillPendingWispClaim(PendingWispClaim& slot,

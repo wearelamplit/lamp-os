@@ -11,7 +11,13 @@ struct KvEntry { char key[16]; char val[32]; bool used = false; };
 constexpr size_t kKvCap = 32;
 KvEntry s_kv[kKvCap];
 
-static void kv_reset() { for (auto& e : s_kv) e.used = false; }
+// The real NVS logs an error for each remove of a key that isn't there.
+int s_removeMissing = 0;
+
+static void kv_reset() {
+  for (auto& e : s_kv) e.used = false;
+  s_removeMissing = 0;
+}
 
 static KvEntry* kv_find(const char* k) {
   for (auto& e : s_kv) if (e.used && strcmp(e.key, k) == 0) return &e;
@@ -69,5 +75,11 @@ class Preferences {
   size_t getBytesLength(const char*) { return 0; }
   size_t getBytes(const char*, void*, size_t) { return 0; }
   size_t putBytes(const char*, const void*, size_t) { return 0; }
-  bool   remove(const char* k) { auto* e = kv_find(k); if (e) e->used = false; return true; }
+  bool   isKey(const char* k) { return kv_find(k) != nullptr; }
+  bool   remove(const char* k) {
+    auto* e = kv_find(k);
+    if (!e) { ++s_removeMissing; return false; }
+    e->used = false;
+    return true;
+  }
 };

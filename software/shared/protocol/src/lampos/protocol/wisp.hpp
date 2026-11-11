@@ -526,6 +526,47 @@ inline size_t appendWispStateDriftFade(uint8_t* buf, size_t bufLen,
   return total;
 }
 
+enum class WispDriftFadeTrailer : uint8_t {
+  Malformed,  // a TLV overruns the trailer, or a record TLV's length is ragged
+  Complete,   // a record for every fading entry
+  Partial,    // the PARTIAL mark: records for only some fading entries
+};
+
+// Walk a STATE trailer's drift fade records in order, calling
+// `onRecord(const uint8_t* record)` with each 11-byte record. Records before a
+// malformed TLV are still visited; the result says whether to trust them.
+template <typename OnRecord>
+inline WispDriftFadeTrailer walkWispDriftFade(const uint8_t* trailer,
+                                              size_t trailerLen,
+                                              OnRecord onRecord) {
+  if (!trailer || trailerLen < 1) return WispDriftFadeTrailer::Complete;
+  const uint8_t tlvCount = trailer[0];
+  size_t off = 1;
+  bool partial = false;
+  for (uint8_t i = 0; i < tlvCount; ++i) {
+    if (off + WISP_STATE_TLV_HEADER_SIZE > trailerLen) {
+      return WispDriftFadeTrailer::Malformed;
+    }
+    const uint8_t type = trailer[off];
+    const uint8_t len = trailer[off + 1];
+    off += WISP_STATE_TLV_HEADER_SIZE;
+    if (off + len > trailerLen) return WispDriftFadeTrailer::Malformed;
+    const uint8_t* v = &trailer[off];
+    off += len;
+    if (type == WISP_STATE_TLV_DRIFT_FADE_PARTIAL) {
+      partial = true;
+    } else if (type == WISP_STATE_TLV_DRIFT_FADE) {
+      if (len % WISP_STATE_DRIFT_FADE_RECORD_SIZE != 0) {
+        return WispDriftFadeTrailer::Malformed;
+      }
+      for (size_t r = 0; r < len; r += WISP_STATE_DRIFT_FADE_RECORD_SIZE) {
+        onRecord(&v[r]);
+      }
+    }
+  }
+  return partial ? WispDriftFadeTrailer::Partial : WispDriftFadeTrailer::Complete;
+}
+
 // Find entry `entryIndex`'s drift fade in a STATE trailer. A malformed trailer
 // reads None; the STATE itself still applies. `out` is written whenever the
 // record is found, a None from a later malformed TLV included, and
@@ -536,41 +577,22 @@ inline WispDriftFadeLookup lookupWispDriftFade(const uint8_t* trailer,
                                                WispDriftFade& out,
                                                bool* outWritten = nullptr) {
   if (outWritten) *outWritten = false;
-  if (!trailer || trailerLen < 1) return WispDriftFadeLookup::None;
-  const uint8_t tlvCount = trailer[0];
-  size_t off = 1;
-  bool partial = false;
   bool found = false;
-  for (uint8_t i = 0; i < tlvCount; ++i) {
-    if (off + WISP_STATE_TLV_HEADER_SIZE > trailerLen) {
-      return WispDriftFadeLookup::None;
-    }
-    const uint8_t type = trailer[off];
-    const uint8_t len = trailer[off + 1];
-    off += WISP_STATE_TLV_HEADER_SIZE;
-    if (off + len > trailerLen) return WispDriftFadeLookup::None;
-    const uint8_t* v = &trailer[off];
-    off += len;
-    if (type == WISP_STATE_TLV_DRIFT_FADE_PARTIAL) {
-      partial = true;
-    } else if (type == WISP_STATE_TLV_DRIFT_FADE) {
-      if (len % WISP_STATE_DRIFT_FADE_RECORD_SIZE != 0) {
-        return WispDriftFadeLookup::None;
-      }
-      for (size_t r = 0; r < len; r += WISP_STATE_DRIFT_FADE_RECORD_SIZE) {
-        if (found || v[r] != entryIndex) continue;
-        std::memcpy(out.base, &v[r + 1], 4);
-        std::memcpy(out.shade, &v[r + 5], 4);
-        const uint32_t ds = static_cast<uint32_t>(v[r + 9]) |
-                            (static_cast<uint32_t>(v[r + 10]) << 8);
+  const WispDriftFadeTrailer form =
+      walkWispDriftFade(trailer, trailerLen, [&](const uint8_t* r) {
+        if (found || r[0] != entryIndex) return;
+        std::memcpy(out.base, &r[1], 4);
+        std::memcpy(out.shade, &r[5], 4);
+        const uint32_t ds = static_cast<uint32_t>(r[9]) |
+                            (static_cast<uint32_t>(r[10]) << 8);
         out.leftMs = ds * WISP_STATE_DRIFT_FADE_LEFT_UNIT_MS;
         found = true;
         if (outWritten) *outWritten = true;
-      }
-    }
-  }
+      });
+  if (form == WispDriftFadeTrailer::Malformed) return WispDriftFadeLookup::None;
   if (found) return WispDriftFadeLookup::Record;
-  return partial ? WispDriftFadeLookup::Partial : WispDriftFadeLookup::None;
+  return form == WispDriftFadeTrailer::Partial ? WispDriftFadeLookup::Partial
+                                               : WispDriftFadeLookup::None;
 }
 
 // Locate this receiver's own entry inside a parsed MSG_WISP_STATE block.

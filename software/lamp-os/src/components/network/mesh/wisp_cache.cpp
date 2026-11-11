@@ -297,7 +297,21 @@ void LampRoster::cacheWispState(const PendingWispState& slot, uint32_t nowMs) {
     xSemaphoreGive(mutex_);
     return;
   }
-  wispFleet_.upsertPaints(slot.entries, slot.w, safeCount, nowMs);
+  const lamp_protocol::WispDriftFade& own = slot.fadeRecord;
+  for (uint8_t i = 0; i < safeCount; ++i) {
+    const uint8_t* e = &slot.entries[i * lamp_protocol::WISP_STATE_ENTRY_SIZE];
+    const uint8_t* w = &slot.w[i * lamp_protocol::WISP_STATE_W_SIZE];
+    const bool targeted = slot.entryTargeted(i);
+    if (i == slot.ownIndex && targeted) {
+      wispFleet_.upsertPaint(e, own.base, own.shade, nowMs, false);
+      continue;
+    }
+    const uint8_t base[4] = {e[6], e[7], e[8], w[0]};
+    const uint8_t shade[4] = {e[9], e[10], e[11], w[1]};
+    // A partial frame leaves some fading lamps out; theirs is the in-between.
+    wispFleet_.upsertPaint(e, base, shade, nowMs,
+                           slot.fadePartial && !targeted);
+  }
   xSemaphoreGive(mutex_);
 }
 

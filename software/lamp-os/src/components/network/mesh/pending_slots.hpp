@@ -84,8 +84,15 @@ struct PendingWispClaim {
 // rival's frame can't ease it home. Brightness / drift-rate globals are not
 // carried; the render path consumes base/shade only. `w` holds baseW,shadeW
 // per entry in entry order, zero for frames without a W plane. `fade` is this
-// lamp's own drift fade lookup, its record in `fadeRecord`.
+// lamp's own drift fade lookup, its record in `fadeRecord`, and `ownIndex` its
+// entry (kNoOwnEntry when absent). Every other entry with a drift fade record
+// holds that record's target in place of the frame's colour, its bit set in
+// `targeted`; this lamp's own entry keeps the frame's colour for the render.
+// `fadePartial` says the frame carries records for only some fading entries.
 struct PendingWispState {
+  static constexpr uint8_t kNoOwnEntry = 0xFF;
+  static_assert(lamp_protocol::WISP_STATE_MAX_ENTRIES < kNoOwnEntry,
+                "an entry index must not read as kNoOwnEntry");
   uint8_t sourceMac[6];
   uint8_t count;
   uint8_t entries[lamp_protocol::WISP_STATE_MAX_ENTRIES *
@@ -94,14 +101,28 @@ struct PendingWispState {
             lamp_protocol::WISP_STATE_W_SIZE];
   lamp_protocol::WispDriftFadeLookup fade;
   lamp_protocol::WispDriftFade fadeRecord;
+  uint8_t ownIndex;
+  bool fadePartial;
+  uint8_t targeted[(lamp_protocol::WISP_STATE_MAX_ENTRIES + 7) / 8];
+
+  // Whether entry `i` reads as its drift fade's target: a record's target
+  // copied over it, or this lamp's own record.
+  bool entryTargeted(uint8_t i) const {
+    if (i == ownIndex) return fade == lamp_protocol::WispDriftFadeLookup::Record;
+    return (targeted[i / 8] >> (i % 8)) & 1u;
+  }
 };
 
 // This lamp's drift fade in a STATE frame. `record` holds what the trailer
-// lookup wrote, and `recordWritten` says whether it wrote it.
+// lookup wrote, and `recordWritten` says whether it wrote it. `index` is this
+// lamp's entry, kNoOwnEntry when absent, and `trailer` the trailer's form.
 struct OwnWispDriftFade {
   lamp_protocol::WispDriftFadeLookup fade = lamp_protocol::WispDriftFadeLookup::None;
   bool recordWritten = false;
   lamp_protocol::WispDriftFade record{};
+  uint8_t index = PendingWispState::kNoOwnEntry;
+  lamp_protocol::WispDriftFadeTrailer trailer =
+      lamp_protocol::WispDriftFadeTrailer::Complete;
 };
 
 // Look up `selfMac`'s drift fade in a parsed MSG_WISP_STATE (None for a null
@@ -109,8 +130,9 @@ struct OwnWispDriftFade {
 OwnWispDriftFade decodeOwnWispDriftFade(const lamp_protocol::ParsedWispState& ws,
                                         const uint8_t selfMac[6]);
 
-// Copy a parsed MSG_WISP_STATE into the slot, W plane and `own` included. A
-// copy only, so it may run under portMUX.
+// Copy a parsed MSG_WISP_STATE into the slot, W plane, drift fade targets and
+// `own` included. Copies only, bounded by the frame, so it may run under
+// portMUX. `own` is decodeOwnWispDriftFade's result for the same frame.
 void fillPendingWispState(PendingWispState& slot,
                           const lamp_protocol::ParsedWispState& ws,
                           const OwnWispDriftFade& own);
