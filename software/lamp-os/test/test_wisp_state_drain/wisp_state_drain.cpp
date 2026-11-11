@@ -523,6 +523,29 @@ void test_drift_partial_after_absence_takes_plain() {
   takesPlainAfter([](Rig& r) { r.c.clearWispState(r.t); });
 }
 
+void test_drift_partial_after_silence_takes_plain() {
+  takesPlainAfter([](Rig& r) { r.runTo(r.t + Compositor::kWispStateFreshMs); });
+}
+
+// The notify edge: a heading change on either surface, none across a fade's
+// repeated records.
+void test_drift_heading_change_flags_notify() {
+  Rig r;
+  fillFrame(kStartBase, kStartShade, Trailer::MineFull, kToBase, kToShade, 20000);
+  r.apply();
+  TEST_ASSERT_TRUE(r.c.wispHeadingChanged());
+  r.runTo(2000);
+  fillFrame(wispPlain(kStartBase, kToBase, 2000, 20000),
+            wispPlain(kStartShade, kToShade, 2000, 20000), Trailer::MineFull,
+            kToBase, kToShade, 18000);
+  r.apply();
+  TEST_ASSERT_FALSE(r.c.wispHeadingChanged());
+  // Same base target, new shade target.
+  fillFrame(kToBase, kToShade, Trailer::MineFull, kToBase, kOtherToShade, 18000);
+  r.apply();
+  TEST_ASSERT_TRUE(r.c.wispHeadingChanged());
+}
+
 void test_drift_partial_from_new_wisp_takes_plain() {
   takesPlainAfter([](Rig&) {
     static const uint8_t kOtherWisp[6] = {0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5};
@@ -607,6 +630,8 @@ int main(int, char**) {
   RUN_TEST(test_drift_heading_steady_across_fade);
   RUN_TEST(test_drift_fade_across_millis_wrap);
   RUN_TEST(test_drift_partial_after_absence_takes_plain);
+  RUN_TEST(test_drift_partial_after_silence_takes_plain);
+  RUN_TEST(test_drift_heading_change_flags_notify);
   RUN_TEST(test_drift_partial_from_new_wisp_takes_plain);
   RUN_TEST(test_drift_record_new_target_same_end_starts);
   RUN_TEST(test_drift_finished_fade_holds_across_wrap);
