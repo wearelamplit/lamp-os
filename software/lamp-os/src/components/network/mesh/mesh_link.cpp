@@ -342,8 +342,7 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     }
 #endif
 #endif
-    // RSSI feeds the roster's espnowRssi, the OTA offer signal floor; only a
-    // direct HELLO measures the originator's link.
+    // RSSI feeds the roster's espnowRssi, the OTA offer signal floor.
     // h.name is a NUL-terminated fixed field; pass it straight through so the
     // hot HELLO path never allocates a transient std::string.
     lampRoster.addOrUpdateFromEspNow(

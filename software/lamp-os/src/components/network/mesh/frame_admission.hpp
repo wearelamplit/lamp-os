@@ -9,7 +9,6 @@
 
 namespace lamp {
 
-// True when targetMac is this lamp or the all-FF broadcast address.
 inline bool addressedToUs(const uint8_t targetMac[6], const uint8_t myMac[6]) {
   static constexpr uint8_t kBroadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
   return std::memcmp(targetMac, myMac, 6) == 0 ||

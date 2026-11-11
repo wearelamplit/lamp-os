@@ -104,9 +104,10 @@ struct RosterEntry {
   // invariant for PersonalityEngine hysteresis). -127 = unknown, sorts to back.
   // snapshotNear() sorts descending; getMesh() does not.
   int8_t lastRssi = -127;
-  // ESP-NOW HELLO RSSI (dBm), written only by addOrUpdateFromEspNow. Distinct
-  // from lastRssi (BLE-scan RSSI): feeds the OTA distributor's signal-floor
-  // gate. -127 = unknown, not gated.
+  // RSSI (dBm) of the peer's own direct ESP-NOW HELLO, written only by
+  // addOrUpdateFromEspNow; a relayed copy never writes it. Distinct from
+  // lastRssi (BLE-scan RSSI): feeds the OTA distributor's signal-floor gate.
+  // -127 = unknown, not gated.
   int8_t espnowRssi = -127;
 
   // Canonical uppercase colon-hex mac ("AA:BB:CC:DD:EE:FF"), the
