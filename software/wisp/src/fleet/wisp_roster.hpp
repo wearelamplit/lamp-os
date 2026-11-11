@@ -109,15 +109,26 @@ class WispRoster {
   void setLampDrift(const uint8_t mac[6], const uint8_t base[4],
                     const uint8_t shade[4], uint32_t nowMs, uint32_t fadeMs);
 
+  // Drift fade records for one STATE frame, in the wire record layout.
+  struct DriftFadeRecords {
+    uint8_t* buf = nullptr;
+    size_t   cap = 0;           // bytes
+    size_t   count = 0;         // records written
+    bool     partial = false;   // the records cover only some fading claims
+  };
+
   // Pack every painted claim for `MSG_WISP_STATE` broadcasting: 12-byte
   // lampMac+baseRGB+shadeRGB entries into `out`, and the matching baseW,shadeW
   // pairs into `w`, each claim's colors as they show at `nowMs`. A claim with
   // no paint assigned yet is left out so the lamp holds its own scene; any
   // assigned color, black included, is packed. `cap` / `wCap` bound the byte
-  // budgets, entries past either drop. Returns the entry count written (not
-  // bytes).
+  // budgets, entries past either drop. With `fades`, also packs a drift fade
+  // record (target colors, time left) per claim mid-fade: all of them when
+  // they fit one frame, else as many as fit, taking turns across calls.
+  // Returns the entry count written (not bytes).
   size_t snapshotStateForBroadcast(uint8_t* out, size_t cap, uint8_t* w,
-                                   size_t wCap, uint32_t nowMs);
+                                   size_t wCap, uint32_t nowMs,
+                                   DriftFadeRecords* fades = nullptr);
 
   // Diagnostics. Both take the mutex briefly.
   size_t claimedCount() const;
@@ -154,11 +165,15 @@ class WispRoster {
     uint32_t fadeMs;        // 0: base/shade show as stored
 
     void shownAt(uint32_t nowMs, uint8_t outBase[4], uint8_t outShade[4]) const;
+    uint32_t fadeLeftMs(uint32_t nowMs) const;
   };
   OwnClaim ownClaims_[WISP_ROSTER_MAX_LAMPS];
   size_t   ownCount_ = 0;
   // recomputeClaims' working set; a member so it stays off the 8 KB loop stack.
   OwnClaim nextClaims_[WISP_ROSTER_MAX_LAMPS];
+
+  // Entry index the next partial STATE frame's drift fade records start from.
+  size_t   fadeCursor_ = 0;
 
   // Opaque; keeps FreeRTOS out of the header.
   void* mutex_ = nullptr;
@@ -172,6 +187,10 @@ class WispRoster {
   // INT8_MIN if no peer claims the lamp.
   int8_t bestPeerRssiLocked(const uint8_t lampMac[6],
                             uint8_t peerWispMacOut[6]) const;
+  // Packs `fades` for the `entries` just snapshotted, `claimOf` mapping each
+  // entry to its claim, `fading` of them mid-fade.
+  void   packDriftFadesLocked(DriftFadeRecords& fades, const uint8_t* claimOf,
+                              size_t entries, size_t fading, uint32_t nowMs);
   // Returns true if `selfMac_` should win a tiebreak against `peerMac`.
   // Lower MAC wins (lexicographic comparison).
   bool   selfWinsTiebreakLocked(const uint8_t peerMac[6]) const;

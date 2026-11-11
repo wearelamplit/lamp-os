@@ -24,6 +24,8 @@
 //              HELLO_TLV_NEED_FS (0x05, 1B),
 //              HELLO_TLV_OTA_SENDING_TO (0x06, 6B),
 //              HELLO_TLV_VARIANT (0x07, 1B).
+//              MSG_WISP_STATE's trailer takes 0x10 and 0x11 from the same
+//              1-byte registry (wisp.hpp).
 //              Unknown types are skipped by their len byte (forward-compat).
 //
 // Fixed prefix through nameLen is HELLO_FIXED_SIZE (24) + 1; the whole frame

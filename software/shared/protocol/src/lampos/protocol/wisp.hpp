@@ -59,6 +59,11 @@
 //              trailer; frames without it parse with w == nullptr, W = 0).
 //              Fixed prefix WISP_STATE_FIXED_PREFIX = 19. The whole state rides
 //              one v2 frame; no windowing, no relay (re-covers on its cadence).
+//   +    …    TLV trailer, only after a W plane: [tlv_count][type,len,value]…
+//              WISP_STATE_TLV_DRIFT_FADE (0x10): drift fade records, 11 B each;
+//              WISP_STATE_TLV_DRIFT_FADE_PARTIAL (0x11, len 0): the records
+//              cover only some fading entries. Parsers that stop at the W plane
+//              ignore it.
 
 namespace lamp_protocol {
 
@@ -145,6 +150,74 @@ static_assert(WISP_STATE_FIXED_PREFIX == 19,
 static_assert(WISP_STATE_MAX_SIZE <= ESPNOW_V2_FRAME_MAX,
               "MSG_WISP_STATE exceeds ESP-NOW v2 frame cap");
 
+// MSG_WISP_STATE TLV trailer, HELLO-shaped. Its type ids sit outside HELLO's
+// 0x01..0x07 so one 1-byte registry stays unambiguous across both.
+// A DRIFT_FADE record: entryIndex(1, into this frame's entries) +
+// targetBase RGBW(4) + targetShade RGBW(4) + leftDs(2 LE, time left in the
+// fade, 100 ms units, rounded up). A TLV holds at most
+// WISP_STATE_DRIFT_FADE_RECORDS_PER_TLV records; more repeat the type. A frame
+// with records and no PARTIAL mark carries one for every fading entry.
+constexpr uint8_t WISP_STATE_TLV_DRIFT_FADE         = 0x10;
+constexpr uint8_t WISP_STATE_TLV_DRIFT_FADE_PARTIAL = 0x11;
+constexpr size_t  WISP_STATE_TLV_HEADER_SIZE        = 2;  // type + len
+constexpr size_t  WISP_STATE_DRIFT_FADE_RECORD_SIZE = 1 + 4 + 4 + 2;  // 11
+constexpr size_t  WISP_STATE_DRIFT_FADE_RECORDS_PER_TLV =
+    255 / WISP_STATE_DRIFT_FADE_RECORD_SIZE;  // 23
+constexpr uint32_t WISP_STATE_DRIFT_FADE_LEFT_UNIT_MS = 100;
+
+constexpr size_t wispStateFrameSize(size_t count) {
+  return WISP_STATE_FIXED_PREFIX +
+         count * (WISP_STATE_ENTRY_SIZE + WISP_STATE_W_SIZE);
+}
+
+// Trailer bytes for `records` DRIFT_FADE records, plus the PARTIAL mark.
+constexpr size_t wispStateDriftFadeTrailerSize(size_t records, bool partial) {
+  return 1 +
+         (records + WISP_STATE_DRIFT_FADE_RECORDS_PER_TLV - 1) /
+             WISP_STATE_DRIFT_FADE_RECORDS_PER_TLV * WISP_STATE_TLV_HEADER_SIZE +
+         records * WISP_STATE_DRIFT_FADE_RECORD_SIZE +
+         (partial ? WISP_STATE_TLV_HEADER_SIZE : 0);
+}
+
+// Most records whose trailer fits `room` bytes.
+constexpr size_t wispStateDriftFadeFit(size_t room, bool partial) {
+  size_t k = 0;
+  while (k < WISP_STATE_MAX_ENTRIES &&
+         wispStateDriftFadeTrailerSize(k + 1, partial) <= room) {
+    ++k;
+  }
+  return k;
+}
+
+// How many of `fading` records a STATE frame of `count` entries carries: all
+// of them when they fit one frame, else as many as fit beside the PARTIAL
+// mark, with `partial` set.
+constexpr size_t wispStateDriftFadeRecordsToSend(size_t count, size_t fading,
+                                                 bool& partial) {
+  partial = false;
+  if (fading == 0 || count > WISP_STATE_MAX_ENTRIES) return 0;
+  const size_t room = ESPNOW_V2_FRAME_MAX - wispStateFrameSize(count);
+  if (wispStateDriftFadeTrailerSize(fading, false) <= room) return fading;
+  partial = true;
+  const size_t k = wispStateDriftFadeFit(room, true);
+  return k < fading ? k : fading;
+}
+
+// Most records any STATE frame carries, over every entry count.
+constexpr size_t wispStateDriftFadeMaxRecords() {
+  size_t best = 0;
+  for (size_t n = 0; n <= WISP_STATE_MAX_ENTRIES; ++n) {
+    const size_t fit =
+        wispStateDriftFadeFit(ESPNOW_V2_FRAME_MAX - wispStateFrameSize(n), false);
+    const size_t k = fit < n ? fit : n;
+    if (k > best) best = k;
+  }
+  return best;
+}
+constexpr size_t WISP_STATE_DRIFT_FADE_MAX_RECORDS = wispStateDriftFadeMaxRecords();
+static_assert(WISP_STATE_DRIFT_FADE_MAX_RECORDS == 57,
+              "drift fade fit moved: update networking.md and the wisp scratch");
+
 struct ParsedWispHello {
   uint16_t seq;
   uint8_t  sourceMac[6];
@@ -194,6 +267,23 @@ struct ParsedWispState {
   // W plane (W reads as 0).
   const uint8_t* entries;
   const uint8_t* w;
+  // The TLV trailer past the W plane, nullptr (and 0) when the frame has
+  // none or no W plane.
+  const uint8_t* trailer;
+  size_t trailerLen;
+};
+
+// One lamp's drift fade from a STATE trailer.
+struct WispDriftFade {
+  uint8_t  base[4];   // target RGBW
+  uint8_t  shade[4];  // target RGBW
+  uint32_t leftMs;    // time left in the fade
+};
+
+enum class WispDriftFadeLookup : uint8_t {
+  None,     // no record, and the frame does not mark itself partial
+  Record,   // the entry's record, in `out`
+  Partial,  // no record in a frame that carries only some
 };
 
 // Build a MSG_WISP_CLAIM frame. `entries` is `count` packed records, each
@@ -390,7 +480,92 @@ inline bool parseWispState(const uint8_t* data, size_t len, ParsedWispState& out
   out.w = (count && len >= expected + count * WISP_STATE_W_SIZE)
               ? &data[expected]
               : nullptr;
+  const size_t wEnd = expected + count * WISP_STATE_W_SIZE;
+  out.trailer = (out.w && len > wEnd) ? &data[wEnd] : nullptr;
+  out.trailerLen = out.trailer ? len - wEnd : 0;
   return true;
+}
+
+// Append the drift fade trailer to a STATE frame of `frameLen` bytes that ends
+// in its W plane: `recordCount` packed records, and the PARTIAL mark when
+// `partial`. Returns the new length; `frameLen` unchanged when there is
+// nothing to add, the frame has no W plane, or the trailer would not fit
+// `bufLen` or one v2 frame.
+inline size_t appendWispStateDriftFade(uint8_t* buf, size_t bufLen,
+                                       size_t frameLen, const uint8_t* records,
+                                       size_t recordCount, bool partial) {
+  if (!buf || frameLen < WISP_STATE_FIXED_PREFIX) return frameLen;
+  if (recordCount == 0 && !partial) return frameLen;
+  if (recordCount > 0 && !records) return frameLen;
+  const uint8_t count = buf[18];
+  if (count == 0 || frameLen != wispStateFrameSize(count)) return frameLen;
+  const size_t total =
+      frameLen + wispStateDriftFadeTrailerSize(recordCount, partial);
+  if (total > bufLen || total > ESPNOW_V2_FRAME_MAX) return frameLen;
+  uint8_t* p = &buf[frameLen];
+  uint8_t* tlvCount = p++;
+  *tlvCount = 0;
+  for (size_t done = 0; done < recordCount;) {
+    size_t n = recordCount - done;
+    if (n > WISP_STATE_DRIFT_FADE_RECORDS_PER_TLV) {
+      n = WISP_STATE_DRIFT_FADE_RECORDS_PER_TLV;
+    }
+    *p++ = WISP_STATE_TLV_DRIFT_FADE;
+    *p++ = static_cast<uint8_t>(n * WISP_STATE_DRIFT_FADE_RECORD_SIZE);
+    std::memcpy(p, records + done * WISP_STATE_DRIFT_FADE_RECORD_SIZE,
+                n * WISP_STATE_DRIFT_FADE_RECORD_SIZE);
+    p += n * WISP_STATE_DRIFT_FADE_RECORD_SIZE;
+    done += n;
+    ++*tlvCount;
+  }
+  if (partial) {
+    *p++ = WISP_STATE_TLV_DRIFT_FADE_PARTIAL;
+    *p++ = 0;
+    ++*tlvCount;
+  }
+  return total;
+}
+
+// Find entry `entryIndex`'s drift fade in a STATE trailer. A malformed trailer
+// reads None; the STATE itself still applies.
+inline WispDriftFadeLookup lookupWispDriftFade(const uint8_t* trailer,
+                                               size_t trailerLen,
+                                               uint8_t entryIndex,
+                                               WispDriftFade& out) {
+  if (!trailer || trailerLen < 1) return WispDriftFadeLookup::None;
+  const uint8_t tlvCount = trailer[0];
+  size_t off = 1;
+  bool partial = false;
+  bool found = false;
+  for (uint8_t i = 0; i < tlvCount; ++i) {
+    if (off + WISP_STATE_TLV_HEADER_SIZE > trailerLen) {
+      return WispDriftFadeLookup::None;
+    }
+    const uint8_t type = trailer[off];
+    const uint8_t len = trailer[off + 1];
+    off += WISP_STATE_TLV_HEADER_SIZE;
+    if (off + len > trailerLen) return WispDriftFadeLookup::None;
+    const uint8_t* v = &trailer[off];
+    off += len;
+    if (type == WISP_STATE_TLV_DRIFT_FADE_PARTIAL) {
+      partial = true;
+    } else if (type == WISP_STATE_TLV_DRIFT_FADE) {
+      if (len % WISP_STATE_DRIFT_FADE_RECORD_SIZE != 0) {
+        return WispDriftFadeLookup::None;
+      }
+      for (size_t r = 0; r < len; r += WISP_STATE_DRIFT_FADE_RECORD_SIZE) {
+        if (found || v[r] != entryIndex) continue;
+        std::memcpy(out.base, &v[r + 1], 4);
+        std::memcpy(out.shade, &v[r + 5], 4);
+        const uint32_t ds = static_cast<uint32_t>(v[r + 9]) |
+                            (static_cast<uint32_t>(v[r + 10]) << 8);
+        out.leftMs = ds * WISP_STATE_DRIFT_FADE_LEFT_UNIT_MS;
+        found = true;
+      }
+    }
+  }
+  if (found) return WispDriftFadeLookup::Record;
+  return partial ? WispDriftFadeLookup::Partial : WispDriftFadeLookup::None;
 }
 
 // Locate this receiver's own entry inside a parsed MSG_WISP_STATE block.

@@ -20,6 +20,8 @@
 //     contested entries included.
 //   - A drift step fades in STATE over the length the fade setting picks,
 //     from the colors the lamp shows; a plain paint ends the fade at once.
+//   - STATE's trailer carries each fading lamp's target and time left: every
+//     record when they fit, else a partial frame that takes turns.
 
 #include <unity.h>
 
@@ -996,6 +998,188 @@ void test_recompute_retires_finished_drift_fade(void) {
   assertStateColors(r, kDriftStartMs + 5000, kToBase, kToShade);
 }
 
+// kLampX's drift fade as a lamp looks it up in the STATE frame built at nowMs.
+lamp_protocol::WispDriftFadeLookup fadeAt(wisp::WispRoster& r, uint32_t nowMs,
+                                          lamp_protocol::WispDriftFade& out) {
+  const uint8_t srcMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+  uint8_t frame[lamp_protocol::ESPNOW_V2_FRAME_MAX];
+  const size_t len = wisp::buildStateFrame(r, frame, sizeof(frame), 1, srcMac,
+                                           100, 120000, 0x01, true, nowMs);
+  lamp_protocol::ParsedWispState ws;
+  TEST_ASSERT_TRUE(lamp_protocol::parseWispState(frame, len, ws));
+  const uint8_t* e =
+      lamp_protocol::findWispStateEntry(ws.entries, ws.count, kLampX);
+  TEST_ASSERT_NOT_NULL(e);
+  const uint8_t idx = static_cast<uint8_t>(
+      (e - ws.entries) / lamp_protocol::WISP_STATE_ENTRY_SIZE);
+  return lamp_protocol::lookupWispDriftFade(ws.trailer, ws.trailerLen, idx, out);
+}
+
+void test_state_record_carries_target_and_time_left(void) {
+  wisp::WispRoster r;
+  claimPaintDrift(r, 60000);
+  lamp_protocol::WispDriftFade f{};
+  TEST_ASSERT_EQUAL(lamp_protocol::WispDriftFadeLookup::Record,
+                    fadeAt(r, kDriftStartMs + 10000, f));
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(kToBase, f.base, 4);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(kToShade, f.shade, 4);
+  TEST_ASSERT_EQUAL_UINT32(50000, f.leftMs);
+  const uint32_t firstLeft = f.leftMs;
+  TEST_ASSERT_EQUAL(lamp_protocol::WispDriftFadeLookup::Record,
+                    fadeAt(r, kDriftStartMs + 12000, f));
+  TEST_ASSERT_EQUAL_UINT32(firstLeft - 2000, f.leftMs);
+}
+
+void test_state_record_rounds_time_left_up(void) {
+  wisp::WispRoster r;
+  claimPaintDrift(r, 60000);
+  lamp_protocol::WispDriftFade f{};
+  TEST_ASSERT_EQUAL(lamp_protocol::WispDriftFadeLookup::Record,
+                    fadeAt(r, kDriftStartMs + 59999, f));
+  TEST_ASSERT_EQUAL_UINT32(lamp_protocol::WISP_STATE_DRIFT_FADE_LEFT_UNIT_MS,
+                           f.leftMs);
+}
+
+void test_state_record_gone_once_fade_retires(void) {
+  wisp::WispRoster r;
+  claimPaintDrift(r, 60000);
+  lamp_protocol::WispDriftFade f{};
+  TEST_ASSERT_EQUAL(lamp_protocol::WispDriftFadeLookup::None,
+                    fadeAt(r, kDriftStartMs + 60000, f));
+}
+
+void test_state_record_gone_after_set_lamp_paint(void) {
+  wisp::WispRoster r;
+  claimPaintDrift(r, 60000);
+  r.setLampPaint(kLampX, kOtherBase, kOtherShade);
+  lamp_protocol::WispDriftFade f{};
+  TEST_ASSERT_EQUAL(lamp_protocol::WispDriftFadeLookup::None,
+                    fadeAt(r, kDriftStartMs + 10000, f));
+}
+
+// `n` fleet lamps claimed and painted, each mid-drift on an hour-long fade.
+void claimFleetDrifting(wisp::WispRoster& r, size_t n) {
+  static wisp::LampObservation lamps[wisp::WISP_ROSTER_MAX_LAMPS];
+  for (size_t i = 0; i < n; ++i) {
+    fleetMac(lamps[i].mac, static_cast<uint8_t>(i + 1));
+    lamps[i].rssi = -60;
+  }
+  r.setSelfMac(kSelfMac);
+  r.recomputeClaims(lamps, n, /*nowMs=*/1000);
+  for (size_t i = 0; i < n; ++i) {
+    const uint8_t to[4] = {static_cast<uint8_t>(i), 9, 9, 9};
+    r.setLampPaint(lamps[i].mac, kFromBase, kFromShade);
+    r.setLampDrift(lamps[i].mac, to, kToShade, kDriftStartMs, 3600000);
+  }
+}
+
+struct FleetFrame {
+  uint8_t buf[lamp_protocol::ESPNOW_V2_FRAME_MAX];
+  size_t len;
+  lamp_protocol::ParsedWispState ws;
+};
+
+void buildFleetFrame(wisp::WispRoster& r, uint32_t nowMs, FleetFrame& f) {
+  const uint8_t srcMac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+  f.len = wisp::buildStateFrame(r, f.buf, sizeof(f.buf), 1, srcMac, 100,
+                                120000, 0x01, true, nowMs);
+  TEST_ASSERT_TRUE(lamp_protocol::parseWispState(f.buf, f.len, f.ws));
+}
+
+size_t recordsIn(const FleetFrame& f, bool seen[], size_t& partials) {
+  size_t records = 0;
+  partials = 0;
+  for (uint8_t e = 0; e < f.ws.count; ++e) {
+    lamp_protocol::WispDriftFade rec{};
+    const auto k =
+        lamp_protocol::lookupWispDriftFade(f.ws.trailer, f.ws.trailerLen, e, rec);
+    if (k == lamp_protocol::WispDriftFadeLookup::Record) {
+      ++records;
+      if (seen) seen[e] = true;
+      TEST_ASSERT_EQUAL_UINT8(e, rec.base[0]);
+    } else if (k == lamp_protocol::WispDriftFadeLookup::Partial) {
+      ++partials;
+    }
+  }
+  return records;
+}
+
+void test_state_all_fading_fits_full_up_to_fit_line(void) {
+  const size_t n = lamp_protocol::WISP_STATE_DRIFT_FADE_MAX_RECORDS;
+  wisp::WispRoster r;
+  claimFleetDrifting(r, n);
+  static FleetFrame f;
+  buildFleetFrame(r, kDriftStartMs + 1000, f);
+  TEST_ASSERT_EQUAL_size_t(n, f.ws.count);
+  size_t partials = 0;
+  TEST_ASSERT_EQUAL_size_t(n, recordsIn(f, nullptr, partials));
+  TEST_ASSERT_EQUAL_size_t(0, partials);
+  TEST_ASSERT_TRUE(f.len <= lamp_protocol::ESPNOW_V2_FRAME_MAX);
+}
+
+void test_state_past_fit_line_goes_partial(void) {
+  const size_t n = lamp_protocol::WISP_STATE_DRIFT_FADE_MAX_RECORDS + 1;
+  wisp::WispRoster r;
+  claimFleetDrifting(r, n);
+  static FleetFrame f;
+  buildFleetFrame(r, kDriftStartMs + 1000, f);
+  TEST_ASSERT_EQUAL_size_t(n, f.ws.count);
+  size_t partials = 0;
+  const size_t records = recordsIn(f, nullptr, partials);
+  TEST_ASSERT_TRUE(records > 0);
+  TEST_ASSERT_EQUAL_size_t(n - records, partials);
+  TEST_ASSERT_TRUE(f.len <= lamp_protocol::ESPNOW_V2_FRAME_MAX);
+}
+
+void test_state_records_past_scratch_mark_partial(void) {
+  wisp::WispRoster r;
+  claimFleetDrifting(r, 5);
+  uint8_t entries[5 * lamp_protocol::WISP_STATE_ENTRY_SIZE];
+  uint8_t w[5 * lamp_protocol::WISP_STATE_W_SIZE];
+  uint8_t recs[2 * lamp_protocol::WISP_STATE_DRIFT_FADE_RECORD_SIZE];
+  wisp::WispRoster::DriftFadeRecords fades;
+  fades.buf = recs;
+  fades.cap = sizeof(recs);
+  TEST_ASSERT_EQUAL_size_t(5, r.snapshotStateForBroadcast(
+                                  entries, sizeof(entries), w, sizeof(w),
+                                  kDriftStartMs + 1000, &fades));
+  TEST_ASSERT_EQUAL_size_t(2, fades.count);
+  TEST_ASSERT_TRUE(fades.partial);
+}
+
+// At the claim cap with every lamp fading, records take turns: each lamp's
+// arrives within ceil(claims / records per frame) frames, and not sooner for
+// all of them.
+void test_state_rotation_covers_every_lamp_at_the_cap(void) {
+  constexpr size_t n = wisp::WISP_ROSTER_MAX_LAMPS;
+  bool partial = false;
+  const size_t perFrame =
+      lamp_protocol::wispStateDriftFadeRecordsToSend(n, n, partial);
+  TEST_ASSERT_TRUE(partial);
+  TEST_ASSERT_TRUE(perFrame > 0);
+  const size_t frames = (n + perFrame - 1) / perFrame;
+
+  wisp::WispRoster r;
+  claimFleetDrifting(r, n);
+  bool seen[n] = {};
+  static FleetFrame f;
+  for (size_t i = 0; i < frames; ++i) {
+    buildFleetFrame(r, kDriftStartMs + 1000 + 2000 * i, f);
+    TEST_ASSERT_EQUAL_size_t(n, f.ws.count);
+    TEST_ASSERT_TRUE(f.len <= lamp_protocol::ESPNOW_V2_FRAME_MAX);
+    size_t partials = 0;
+    const size_t records = recordsIn(f, seen, partials);
+    TEST_ASSERT_EQUAL_size_t(perFrame, records);
+    TEST_ASSERT_EQUAL_size_t(n - records, partials);
+    if (i + 2 == frames) {
+      size_t covered = 0;
+      for (bool b : seen) covered += b ? 1 : 0;
+      TEST_ASSERT_TRUE(covered < n);
+    }
+  }
+  for (size_t e = 0; e < n; ++e) TEST_ASSERT_TRUE(seen[e]);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_single_wisp_claims_everything);
@@ -1036,5 +1220,13 @@ int main(int, char**) {
   RUN_TEST(test_drift_on_unpainted_claim_shows_at_once);
   RUN_TEST(test_recompute_carries_drift_fade);
   RUN_TEST(test_recompute_retires_finished_drift_fade);
+  RUN_TEST(test_state_record_carries_target_and_time_left);
+  RUN_TEST(test_state_record_rounds_time_left_up);
+  RUN_TEST(test_state_record_gone_once_fade_retires);
+  RUN_TEST(test_state_record_gone_after_set_lamp_paint);
+  RUN_TEST(test_state_all_fading_fits_full_up_to_fit_line);
+  RUN_TEST(test_state_past_fit_line_goes_partial);
+  RUN_TEST(test_state_records_past_scratch_mark_partial);
+  RUN_TEST(test_state_rotation_covers_every_lamp_at_the_cap);
   return UNITY_END();
 }
