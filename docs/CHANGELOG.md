@@ -12,6 +12,11 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   once stayed listed as online while any other lamp kept advertising, and
   coming back to My Lamps (after opening a lamp, say) brought back every lamp
   from the last scan, switched off or not.
+- **A lamp mid-update stays out of the app's reach until the update ends.**
+  An update between lamps kicks the app off so the firmware has the radio,
+  but the lamp started advertising again right away and the app reconnected
+  mid-transfer, slowing the update and squeezing the lamp's memory. The lamp
+  now stays hidden until the transfer finishes, then comes back.
 
 ## 1.3.4
 

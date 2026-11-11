@@ -73,7 +73,11 @@ skew:
    (sender's base color advancing over the receiver's dimmed base), and the base
    surface settles to its configured colors then subtly pulses (≤20%) toward the
    peer color. After the flow: `resumed adv + scan`. FS-image OTA runs this same
-   path but SILENT — see Indicator expectations.
+   path but SILENT — see Indicator expectations. With the app connected to
+   either lamp when the session starts, that lamp logs `kicked GATT client`
+   and `Client disconnected`, then no `Client connected` until after
+   `resumed adv + scan after OTA`, and no `Advertising already active` after
+   the resume. Once resumed, the app reconnects to it.
 
 4. **NVS/config survives.** Before step 2, note the peer's
    `[cfg] loaded name=...` and `[cfg] expressions=...` boot lines. After the
