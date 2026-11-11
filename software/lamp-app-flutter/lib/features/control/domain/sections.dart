@@ -210,7 +210,8 @@ class Segment {
   final List<LampColor> colors;
 
   /// Data GPIO for this segment's strip; 0 = the lamp's built-in pin. Null
-  /// when the lamp doesn't report one, as firmware that can't move a strip.
+  /// when the lamp doesn't report one, which means its firmware can't move a
+  /// strip.
   final int? pin;
 
   /// The pin the lamp's own wiring puts this segment's strip on. Null when the

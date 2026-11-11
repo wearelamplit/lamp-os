@@ -492,7 +492,8 @@ void main() {
   group('advancedLedsSaveMessage', () {
     test('names each field that did not take, once per strip', () {
       expect(
-        advancedLedsSaveMessage(['shade.byteOrder', 'shade.bpp', 'base.px']),
+        advancedLedsSaveMessage(['shade.byteOrder', 'shade.bpp', 'base.px'],
+            shadeStrips: 1, baseStrips: 1),
         "Shade strip type didn't take, so the lamp kept its old one. "
         "Base LED count didn't take, so the lamp kept its old count.",
       );
@@ -500,7 +501,8 @@ void main() {
 
     test('names a pin on a role of several strips without guessing which', () {
       expect(
-        advancedLedsSaveMessage(['shade.pin'], shadeStrips: 3),
+        advancedLedsSaveMessage(['shade.pin'],
+            shadeStrips: 3, baseStrips: 1),
         "A shade strip data pin didn't take. It clashes with another strip, "
         'a button or a touch pad, so the lamp kept its built-in pin.',
       );
@@ -508,7 +510,9 @@ void main() {
 
     test('a lamp that did not come back says so in plain words', () {
       final message = advancedLedsSaveMessage(
-          ['lamp did not reconnect after Advanced LED save: timeout']);
+          ['lamp did not reconnect after Advanced LED save: timeout'],
+          shadeStrips: 1,
+          baseStrips: 1);
       expect(message,
           "Your lamp didn't come back after restarting. Bring your phone "
           'closer and try again.');

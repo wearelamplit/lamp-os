@@ -371,7 +371,7 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
 /// a pin the way its rows are named.
 @visibleForTesting
 String advancedLedsSaveMessage(List<String> mismatches,
-    {int shadeStrips = 1, int baseStrips = 1}) {
+    {required int shadeStrips, required int baseStrips}) {
   final lines = <String>{};
   for (final m in mismatches) {
     final dot = m.indexOf('.');
