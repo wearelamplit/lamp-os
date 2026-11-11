@@ -475,7 +475,7 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
                                 lamp_protocol::MSG_WISP_STATE, ws.seq)) {
       return;
     }
-    postPendingWispState(ws);
+    postPendingWispState(ws, myMac_);
   } else if (msgType == lamp_protocol::MSG_OVERRIDE_COLORS) {
     lamp_protocol::ParsedOverrideColors p;
     if (!lamp_protocol::parseOverrideColors(data, len, p)) return;

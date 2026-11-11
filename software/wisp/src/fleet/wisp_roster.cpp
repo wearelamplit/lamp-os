@@ -8,6 +8,9 @@
 
 #include <lampos/clock.hpp>
 
+#include "paint/drift.hpp"
+#include "status/status_ring.hpp"
+
 namespace wisp {
 
 namespace {
@@ -104,22 +107,19 @@ void WispRoster::recomputeClaims(const LampObservation* observations,
   // The iteration order over `observations` differs from the existing
   // ownClaims_ order, and the previous ownership must be remembered for
   // hysteresis.
-  OwnClaim next[WISP_ROSTER_MAX_LAMPS];
+  OwnClaim* next = nextClaims_;
   size_t   nextCount = 0;
 
-  // Carries prior paint forward; a fresh claim starts unpainted.
+  // Carries prior paint and any drift fade forward; a fresh claim starts
+  // unpainted. A finished fade is retired so its start stamp can't read as
+  // recent again one millis() wrap later.
   auto appendClaim = [&](const LampObservation& o, size_t prevIdx) {
     OwnClaim& c = next[nextCount++];
+    c = prevIdx != ownCount_ ? ownClaims_[prevIdx] : OwnClaim{};
     std::memcpy(c.lampMac, o.mac, 6);
     c.rssi = o.rssi;
-    if (prevIdx != ownCount_) {
-      std::memcpy(c.base,  ownClaims_[prevIdx].base,  4);
-      std::memcpy(c.shade, ownClaims_[prevIdx].shade, 4);
-      c.painted = ownClaims_[prevIdx].painted;
-    } else {
-      std::memset(c.base,  0, 4);
-      std::memset(c.shade, 0, 4);
-      c.painted = false;
+    if (c.fadeMs != 0 && lampos::msSince(nowMs, c.fadeStartMs) >= c.fadeMs) {
+      c.fadeMs = 0;
     }
   };
 
@@ -213,20 +213,54 @@ size_t WispRoster::snapshotClaimsForBroadcast(uint8_t* outBuf,
   return n;
 }
 
+void WispRoster::OwnClaim::shownAt(uint32_t nowMs, uint8_t outBase[4],
+                                   uint8_t outShade[4]) const {
+  const uint8_t weight =
+      driftFadeWeight(lampos::msSince(nowMs, fadeStartMs), fadeMs);
+  lerpRing(fromBase, base, outBase, 4, weight);
+  lerpRing(fromShade, shade, outShade, 4, weight);
+}
+
+uint32_t WispRoster::OwnClaim::fadeLeftMs(uint32_t nowMs) const {
+  if (fadeMs == 0) return 0;
+  const uint32_t elapsed = lampos::msSince(nowMs, fadeStartMs);
+  return elapsed < fadeMs ? fadeMs - elapsed : 0;
+}
+
 void WispRoster::setLampPaint(const uint8_t mac[6], const uint8_t base[4],
                               const uint8_t shade[4]) {
+  setLampDrift(mac, base, shade, /*nowMs=*/0, /*fadeMs=*/0);
+}
+
+void WispRoster::setLampDrift(const uint8_t mac[6], const uint8_t base[4],
+                              const uint8_t shade[4], uint32_t nowMs,
+                              uint32_t fadeMs) {
   if (xSemaphoreTake(asHandle(mutex_), portMAX_DELAY) != pdTRUE) return;
   const size_t idx = findOwnLocked(mac);
   if (idx != ownCount_) {
-    std::memcpy(ownClaims_[idx].base,  base,  4);
-    std::memcpy(ownClaims_[idx].shade, shade, 4);
-    ownClaims_[idx].painted = true;
+    OwnClaim& c = ownClaims_[idx];
+    if (c.painted && fadeMs != 0) {
+      uint8_t shownBase[4];
+      uint8_t shownShade[4];
+      c.shownAt(nowMs, shownBase, shownShade);
+      std::memcpy(c.fromBase,  shownBase,  4);
+      std::memcpy(c.fromShade, shownShade, 4);
+      c.fadeStartMs = nowMs;
+      c.fadeMs = fadeMs;
+    } else {
+      c.fadeMs = 0;
+    }
+    std::memcpy(c.base,  base,  4);
+    std::memcpy(c.shade, shade, 4);
+    c.painted = true;
   }
   xSemaphoreGive(asHandle(mutex_));
 }
 
 size_t WispRoster::snapshotStateForBroadcast(uint8_t* out, size_t cap,
-                                             uint8_t* w, size_t wCap) {
+                                             uint8_t* w, size_t wCap,
+                                             uint32_t nowMs,
+                                             DriftFadeRecords* fades) {
   if (!out || !w) return 0;
   if (xSemaphoreTake(asHandle(mutex_), portMAX_DELAY) != pdTRUE) return 0;
   constexpr size_t kStateEntry = lamp_protocol::WISP_STATE_ENTRY_SIZE;
@@ -235,19 +269,68 @@ size_t WispRoster::snapshotStateForBroadcast(uint8_t* out, size_t cap,
   if (cap / kStateEntry < maxEntries) maxEntries = cap / kStateEntry;
   if (wCap / kStateW < maxEntries) maxEntries = wCap / kStateW;
   size_t out_i = 0;
+  uint8_t claimOf[lamp_protocol::WISP_STATE_MAX_ENTRIES];
+  size_t fading = 0;
   for (size_t i = 0; i < ownCount_ && out_i < maxEntries; ++i) {
     const OwnClaim& c = ownClaims_[i];
     if (!c.painted) continue;
+    uint8_t base[4];
+    uint8_t shade[4];
+    c.shownAt(nowMs, base, shade);
     uint8_t* dst = out + out_i * kStateEntry;
     std::memcpy(dst,     c.lampMac, 6);
-    std::memcpy(dst + 6, c.base,    3);
-    std::memcpy(dst + 9, c.shade,   3);
-    w[out_i * kStateW]     = c.base[3];
-    w[out_i * kStateW + 1] = c.shade[3];
+    std::memcpy(dst + 6, base,      3);
+    std::memcpy(dst + 9, shade,     3);
+    w[out_i * kStateW]     = base[3];
+    w[out_i * kStateW + 1] = shade[3];
+    claimOf[out_i] = static_cast<uint8_t>(i);
+    if (c.fadeLeftMs(nowMs) != 0) ++fading;
     ++out_i;
+  }
+  if (fades) {
+    fades->count = 0;
+    fades->partial = false;
+    if (fading > 0 && fades->buf) {
+      packDriftFadesLocked(*fades, claimOf, out_i, fading, nowMs);
+    }
   }
   xSemaphoreGive(asHandle(mutex_));
   return out_i;
+}
+
+void WispRoster::packDriftFadesLocked(DriftFadeRecords& fades,
+                                      const uint8_t* claimOf, size_t entries,
+                                      size_t fading, uint32_t nowMs) {
+  constexpr size_t kRecord = lamp_protocol::WISP_STATE_DRIFT_FADE_RECORD_SIZE;
+  bool partial = false;
+  size_t send =
+      lamp_protocol::wispStateDriftFadeRecordsToSend(entries, fading, partial);
+  if (send > fades.cap / kRecord) {
+    send = fades.cap / kRecord;
+    partial = true;
+  }
+  const size_t start = partial ? fadeCursor_ % entries : 0;
+  size_t last = start;
+  for (size_t step = 0; step < entries && fades.count < send; ++step) {
+    const size_t e = (start + step) % entries;
+    const OwnClaim& c = ownClaims_[claimOf[e]];
+    const uint32_t leftMs = c.fadeLeftMs(nowMs);
+    if (leftMs == 0) continue;
+    uint32_t leftDs =
+        (leftMs + lamp_protocol::WISP_STATE_DRIFT_FADE_LEFT_UNIT_MS - 1) /
+        lamp_protocol::WISP_STATE_DRIFT_FADE_LEFT_UNIT_MS;
+    if (leftDs > UINT16_MAX) leftDs = UINT16_MAX;
+    uint8_t* r = fades.buf + fades.count * kRecord;
+    r[0] = static_cast<uint8_t>(e);
+    std::memcpy(r + 1, c.base, 4);
+    std::memcpy(r + 5, c.shade, 4);
+    r[9] = static_cast<uint8_t>(leftDs & 0xFF);
+    r[10] = static_cast<uint8_t>(leftDs >> 8);
+    ++fades.count;
+    last = e;
+  }
+  fades.partial = partial;
+  if (partial) fadeCursor_ = (last + 1) % entries;
 }
 
 size_t WispRoster::claimedCount() const {

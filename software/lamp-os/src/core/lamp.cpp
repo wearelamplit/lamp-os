@@ -187,8 +187,8 @@ void postPendingWispPalette(const PendingWispPalette& src)               { pendi
 void postPendingWispClaim(const lamp_protocol::ParsedWispClaim& wc) {
   pendingSlots.wispClaim.postWith(pendingMux, [&wc](PendingWispClaim& s) { fillPendingWispClaim(s, wc); });
 }
-void postPendingWispState(const lamp_protocol::ParsedWispState& ws) {
-  pendingSlots.wispState.postWith(pendingMux, [&ws](PendingWispState& s) { fillPendingWispState(s, ws); });
+void postPendingWispState(const lamp_protocol::ParsedWispState& ws, const uint8_t selfMac[6]) {
+  pendingSlots.wispState.postWith(pendingMux, [&ws, selfMac](PendingWispState& s) { fillPendingWispState(s, ws, selfMac); });
 }
 void postPendingCommand(const lamp_protocol::ParsedCommand& p) {
   pendingSlots.command.postWith(pendingMux, [&p](PendingCommand& s) { fillPendingCommand(s, p); });

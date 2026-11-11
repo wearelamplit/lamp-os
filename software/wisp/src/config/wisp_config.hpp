@@ -71,7 +71,8 @@ class WispConfig {
   uint8_t shuffleSeed() const { return shuffleSeed_; }
   void bumpShuffleSeed();
 
-  // Color drift interval (ms) and fade strength (0..100%).
+  // Color drift interval (ms), and the Fade setting (0..100) that sets each
+  // drift step's fade length (see driftFadeMs).
   uint32_t driftIntervalMs() const { return driftIntervalMs_; }
   uint8_t driftFadePct() const { return driftFadePct_; }
   void setDrift(uint32_t intervalMs, uint8_t fadePct);

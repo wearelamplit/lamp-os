@@ -455,9 +455,9 @@ void Lamp::drainWispClaim() {
 
 // Drive the wisp render + app indicator from MSG_WISP_STATE, the sole wisp
 // paint path. Gated to this lamp's display wisp so a rival's frame can't ease
-// it home. This lamp's own entry present -> eased base/shade targets + active;
-// a fresh frame that omits it (Off, or unclaimed) -> ease home now. Every
-// entry feeds the app's painted-lamps preview.
+// it home. This lamp's own entry present -> eased base/shade targets, or its
+// drift fade, + active; a fresh frame that omits it (Off, or unclaimed) -> ease
+// home now. Every entry feeds the app's painted-lamps preview.
 void Lamp::drainWispState() {
   // static: the 1.4 KB slot is too big for the loop-task stack; this
   // drain is the slot's only consumer and runs only on Core 1.
@@ -481,16 +481,23 @@ void Lamp::drainWispState() {
   }
 
   const bool wasActive = compositor.wispActive();
-  const Color prevBase = compositor.wispStateBaseColor();
   uint8_t selfMac[6];
   meshLink.getMyMac(selfMac);
   const bool painted = compositor.applyWispStateSlot(cmd, selfMac, now);
   const bool active = compositor.wispActive();
   if (active != wasActive ||
-      (active && !(compositor.wispStateBaseColor() == prevBase))) {
+      (active && compositor.wispHeadingChanged())) {
     ble_control::notifyWispStatus();
   }
 #ifdef LAMP_DEBUG
+  if (painted && cmd.fade == lamp_protocol::WispDriftFadeLookup::Record &&
+      compositor.wispFadeSync() != lamp::WispFadeSync::Kept) {
+    Serial.printf("[loop] wispState drift fade %s left=%lums\n",
+                  compositor.wispFadeSync() == lamp::WispFadeSync::Started
+                      ? "start"
+                      : "retime",
+                  static_cast<unsigned long>(cmd.fadeRecord.leftMs));
+  }
   if (painted) {
     const Color base = compositor.wispStateBaseColor();
     const Color shade = compositor.wispStateShadeColor();

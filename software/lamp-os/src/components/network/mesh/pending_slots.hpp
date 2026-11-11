@@ -83,7 +83,8 @@ struct PendingWispClaim {
 // LayerStack. sourceMac gates the drain to this lamp's display wisp so a
 // rival's frame can't ease it home. Brightness / drift-rate globals are not
 // carried; the render path consumes base/shade only. `w` holds baseW,shadeW
-// per entry in entry order, zero for frames without a W plane.
+// per entry in entry order, zero for frames without a W plane. `fade` is this
+// lamp's own drift fade lookup, its record in `fadeRecord`.
 struct PendingWispState {
   uint8_t sourceMac[6];
   uint8_t count;
@@ -91,11 +92,15 @@ struct PendingWispState {
                   lamp_protocol::WISP_STATE_ENTRY_SIZE];
   uint8_t w[lamp_protocol::WISP_STATE_MAX_ENTRIES *
             lamp_protocol::WISP_STATE_W_SIZE];
+  lamp_protocol::WispDriftFadeLookup fade;
+  lamp_protocol::WispDriftFade fadeRecord;
 };
 
-// Copy a parsed MSG_WISP_STATE into the slot, W plane included.
+// Copy a parsed MSG_WISP_STATE into the slot, W plane included, and look up
+// `selfMac`'s drift fade (None for a null MAC).
 void fillPendingWispState(PendingWispState& slot,
-                          const lamp_protocol::ParsedWispState& ws);
+                          const lamp_protocol::ParsedWispState& ws,
+                          const uint8_t selfMac[6]);
 
 // Copy a parsed MSG_WISP_CLAIM's lamp MACs into the slot, at most
 // kMaxWispClaimEntries of them.

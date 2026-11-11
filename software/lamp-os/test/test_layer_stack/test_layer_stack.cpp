@@ -3,6 +3,7 @@
 #include "render/layer_stack.hpp"
 #include "util/color.hpp"
 #include "util/fade.hpp"
+#include "util/fade.cpp"
 
 using lamp::Color;
 using lamp::EasedScalar;
@@ -14,7 +15,7 @@ void tearDown() {}
 
 // Drive one stack's wisp color to its target under a fixed presence w.
 static void settle(LayerStack& s, float w, int frames = 60) {
-  for (int i = 0; i < frames; ++i) s.tick(w);
+  for (int i = 0; i < frames; ++i) s.tick(w, 0);
 }
 
 static void assertColorEq(Color expected, Color actual) {
@@ -27,7 +28,7 @@ static void assertColorEq(Color expected, Color actual) {
 void test_empty_stack_own_only() {
   LayerStack s;
   const Color own(120, 40, 200, 10);
-  s.tick(0.0f);
+  s.tick(0.0f, 0);
   assertColorEq(own, s.composite(own));
 }
 
@@ -89,8 +90,8 @@ void test_shared_w_drives_both_surfaces() {
   w.setTarget(1.0f);
   for (int i = 0; i < 60; ++i) {
     w.tick();
-    base.tick(w.value());
-    shade.tick(w.value());
+    base.tick(w.value(), 0);
+    shade.tick(w.value(), 0);
   }
   // One w at 1.0 fully reveals BOTH surfaces' wisp colors.
   assertColorEq(baseWisp, base.composite(baseOwn));
@@ -99,8 +100,8 @@ void test_shared_w_drives_both_surfaces() {
   w.setTarget(0.0f);
   for (int i = 0; i < 60; ++i) {
     w.tick();
-    base.tick(w.value());
-    shade.tick(w.value());
+    base.tick(w.value(), 0);
+    shade.tick(w.value(), 0);
   }
   // The same w at 0.0 hides BOTH wisp layers.
   assertColorEq(baseOwn, base.composite(baseOwn));
@@ -110,7 +111,7 @@ void test_shared_w_drives_both_surfaces() {
 void test_wisp_retarget_no_jump() {
   LayerStack s;
   s.setWispTarget(Color(255, 255, 255, 255));
-  for (int i = 0; i < 10; ++i) s.tick(1.0f);  // partway toward white
+  for (int i = 0; i < 10; ++i) s.tick(1.0f, 0);  // partway toward white
   const Color mid = s.wisp().value();
   // Retarget mid-ease: no jump at the retarget instant, then smooth to the new target.
   s.setWispTarget(Color(0, 0, 255, 0));
@@ -165,8 +166,8 @@ struct WispRig {
     shadePresence.setTarget(shadeHeld ? 1.0f : 0.0f);
     basePresence.tick();
     shadePresence.tick();
-    base.tick(basePresence.value());
-    shade.tick(shadePresence.value());
+    base.tick(basePresence.value(), 0);
+    shade.tick(shadePresence.value(), 0);
   }
 };
 

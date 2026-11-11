@@ -56,7 +56,8 @@ void postPendingRestoreBrightness(const PendingRestoreBrightness& src);
 void postPendingWispHello(const PendingWispHello& src);
 void postPendingWispPalette(const PendingWispPalette& src);
 void postPendingWispClaim(const lamp_protocol::ParsedWispClaim& wc);
-void postPendingWispState(const lamp_protocol::ParsedWispState& ws);
+void postPendingWispState(const lamp_protocol::ParsedWispState& ws,
+                          const uint8_t selfMac[6]);
 void postPendingCommand(const lamp_protocol::ParsedCommand& p);
 void postPendingEvent(const PendingEvent& src);
 void postPendingColorQuery(const PendingColorQuery& src);

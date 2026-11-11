@@ -260,7 +260,7 @@ void WispController::applyOpResult(DispatchResult res) {
       status_.triggerOnChange();
       break;
     case wisp::DispatchResult::AppliedDriftChange:
-      paint_.setDriftInterval(config_.driftIntervalMs());
+      paint_.setDrift(config_.driftIntervalMs(), config_.driftFadePct());
       status_.triggerOnChange();
       break;
     case wisp::DispatchResult::AppliedNameChange:

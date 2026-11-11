@@ -187,15 +187,18 @@ void initBehaviors(lamp::Features features, lamp::Lamp& self) {
   lamp::overrides.shade.bind(behaviorCtx, lamp_protocol::OverrideSurface::Shade);
   // Provider that the CHAR_WISP_STATUS read merges into the JSON. Wisp control
   // is driven by MSG_WISP_STATE, so both surfaces share the compositor's
-  // STATE-derived active flag + colors. drainWispState pushes the notify.
+  // STATE-derived active flag + the colours the wisp is taking them to.
+  // drainWispState pushes the notify.
   lamp::lampRoster.setLampWispStateProvider([]() {
     lamp::LampRoster::LampWispState ws;
     const bool active = compositor.wispActive();
     ws.controllingBase  = active;
     ws.controllingShade = active;
     if (active) {
-      ws.baseWispColor  = lamp::colorToHexString(compositor.wispStateBaseColor());
-      ws.shadeWispColor = lamp::colorToHexString(compositor.wispStateShadeColor());
+      ws.baseWispColor =
+          lamp::colorToHexString(compositor.wispStateHeadingBaseColor());
+      ws.shadeWispColor =
+          lamp::colorToHexString(compositor.wispStateHeadingShadeColor());
     }
 #ifdef LAMP_DEBUG
     Serial.printf("[wisp_state] provider active=%d\n", active ? 1 : 0);

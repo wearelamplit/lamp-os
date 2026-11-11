@@ -219,12 +219,7 @@ void Compositor::compositeWisp() {
   const bool active = wispStateFresh(nowMs);
   const bool baseHeld = active && !overrides.base.operatorEditing();
   const bool shadeHeld = active && !overrides.shade.operatorEditing();
-  wispBasePresence_.setTarget(baseHeld ? 1.0f : 0.0f);
-  wispShadePresence_.setTarget(shadeHeld ? 1.0f : 0.0f);
-  wispBasePresence_.tick();
-  wispShadePresence_.tick();
-  wispShadeStack_.tick(wispShadePresence_.value());
-  wispBaseStack_.tick(wispBasePresence_.value());
+  tickWisp(nowMs, baseHeld, shadeHeld);
   // frameBuffers[0]=shade, [1]=base per lamp_behaviors.cpp ordering.
   if (!frameBuffers.empty() && frameBuffers[0]) {
     for (Color& px : frameBuffers[0]->buffer) px = wispShadeStack_.composite(px);
