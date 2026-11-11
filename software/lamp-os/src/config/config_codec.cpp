@@ -690,12 +690,13 @@ class SettingsSink {
   bool match_ = true;
 };
 
-// normalizeLampName(name) into `out`, taking no heap.
-size_t normalizedName(const std::string& name, char (&out)[kMaxLampNameLen + 1]) {
+// The bytes normalizeLampName keeps of `name`, before it lowercases them,
+// into `out`, taking no heap. The decode lowercases.
+size_t spacelessName(const std::string& name, char (&out)[kMaxLampNameLen + 1]) {
   size_t n = 0;
   for (const char c : name) {
     if (std::isspace(static_cast<unsigned char>(c))) continue;
-    out[n++] = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    out[n++] = c;
     if (n == sizeof(out)) break;
   }
   return utf8PrefixLen(out, n, kMaxLampNameLen);
@@ -741,7 +742,7 @@ void writeSettings(SettingsSink& s, const LampSettings& lamp, const BaseSettings
   s.put(lamp.brightnessCeiling);
   s.put(static_cast<uint8_t>(lamp.socialMode));
   char name[kMaxLampNameLen + 1];
-  s.str(name, normalizedName(lamp.name, name));
+  s.str(name, spacelessName(lamp.name, name));
   s.prefix(lamp.password, kMaxPasswordLen);
   writeRole(s, base);
   writeRole(s, shade);
