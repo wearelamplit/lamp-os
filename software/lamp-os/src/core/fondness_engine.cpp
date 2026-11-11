@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "components/network/mesh/lamp_roster.hpp"
 #include "config/disposition_store.hpp"
 #include "util/bd_addr.hpp"
 
@@ -131,6 +132,10 @@ void FondnessEngine::tick(uint64_t nowMs) {
   if (nowMs - lastCommitMs_ < kCommitMs) return;
   lastCommitMs_ = nowMs;
   commitAll_(nowMs);
+  if (!near_) return;
+  for (const NearbyCopy& p : near_()) {
+    if (p.hasMac && p.acknowledged) store_.markSeen(p.mac, nowMs);
+  }
 }
 
 void FondnessEngine::observeExpression(const uint8_t mac[6], const char* type, bool ownType,

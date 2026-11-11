@@ -317,6 +317,37 @@ void test_absence_decays_toward_zero() {
   TEST_ASSERT_EQUAL_INT8(100, rig.store.peer(near.data(), rig.now).score);
 }
 
+// A lamp with no greeting of its own to mark peers seen gets the near view
+// from its near source: each minute's commit marks an acknowledged peer seen,
+// while one still waiting for its greeting keeps aging toward its reunion.
+// With no source, nothing is marked.
+void test_near_source_marks_only_acknowledged_peers() {
+  static std::vector<NearbyCopy> near;
+  near.clear();
+  const auto greeted = peer(1);
+  const auto waiting = peer(2);
+  for (const auto& m : {greeted, waiting}) {
+    NearbyCopy c;
+    std::memcpy(c.mac, m.data(), 6);
+    c.hasMac = true;
+    c.acknowledged = (m == greeted);
+    near.push_back(c);
+  }
+  for (bool wired : {true, false}) {
+    Rig rig;
+    if (wired) rig.engine.setNearSource([]() -> const std::vector<NearbyCopy>& { return near; });
+    rig.store.set(greeted.data(), 4, rig.now);
+    rig.store.set(waiting.data(), 4, rig.now);
+    rig.run(30);
+    TEST_ASSERT_TRUE(rig.store.peer(waiting.data(), rig.now).unseenMin >= 29);
+    if (wired) {
+      TEST_ASSERT_TRUE(rig.store.peer(greeted.data(), rig.now).unseenMin <= 1);
+    } else {
+      TEST_ASSERT_TRUE(rig.store.peer(greeted.data(), rig.now).unseenMin >= 29);
+    }
+  }
+}
+
 // In home mode no input reaches a row or a slot, and the row's clocks stand.
 void test_home_mode_records_nothing() {
   const auto known = peer(1);
@@ -543,6 +574,7 @@ void test_tuning_keys_are_checked() {
 
 int main(int, char**) {
   UNITY_BEGIN();
+  RUN_TEST(test_near_source_marks_only_acknowledged_peers);
   RUN_TEST(test_loud_peer_by_mode);
   RUN_TEST(test_type_weights);
   RUN_TEST(test_overlap_only_own_types);

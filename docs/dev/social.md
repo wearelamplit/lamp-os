@@ -101,7 +101,9 @@ rule is in score units (127 = one step), from `FondnessTuning`:
   A peer is marked seen (`FondnessEngine::seen`) only once acknowledged:
   at its greeting, and each minute after while it stays near (see Reunion
   and colour hint), so a peer still waiting for its greeting keeps its
-  reunion.
+  reunion. A variant without `SocialBehavior` (snafu, lioness) acknowledges
+  arrivals through its own greeting, and the engine's minute commit marks
+  every acknowledged near peer seen for it (`FondnessEngine::setNearSource`).
 - **Copycat odds.** While the engine is on, a copy roll's chance rises
   `familiarBoostPct` (3) percent per meeting with the sender, counting at most
   10, so +30% at most ([`expressions.md`](expressions.md#expression-mirror)).

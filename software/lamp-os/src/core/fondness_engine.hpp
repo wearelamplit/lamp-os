@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "config/config_types.hpp"
 #include "util/color.hpp"
@@ -11,6 +12,7 @@
 namespace lamp {
 
 class DispositionStore;
+struct NearbyCopy;
 
 // Expression types with their own energy weight, in FondnessTuning::typeWeight
 // order. Any other type weighs kUnknownTypeWeight.
@@ -74,6 +76,10 @@ class FondnessEngine {
 
   // Home mode's live state, read at every input. Unset reads as away.
   void setHomeSource(bool (*homeActive)()) { homeActive_ = homeActive; }
+  // The near view, for a lamp whose greeting does not mark peers seen itself:
+  // each minute's commit then marks every acknowledged peer in it seen. Unset
+  // marks none.
+  void setNearSource(const std::vector<NearbyCopy>& (*near)()) { near_ = near; }
 
   // The one gate: the persisted master switch on and home mode off.
   bool tracking() const;
@@ -127,6 +133,7 @@ class FondnessEngine {
 
   DispositionStore& store_;
   bool (*homeActive_)() = nullptr;
+  const std::vector<NearbyCopy>& (*near_)() = nullptr;
   std::array<Slot, kSlots> slots_{};
   std::array<Notch, kNotchLog> notches_{};
   std::array<uint8_t, 6> colourFrom_{};

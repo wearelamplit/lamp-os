@@ -64,6 +64,11 @@ void initBehaviors(lamp::Features features, lamp::Lamp& self) {
 
   self.registerExpressions(expressionManager.registry());
 
+  if (!lamp::any(features, lamp::Features::SocialBehavior)) {
+    fondnessEngine.setNearSource([]() -> const std::vector<lamp::NearbyCopy>& {
+      return lamp::lampRoster.snapshotNear(LAMP_PRUNE_TIME_MS);
+    });
+  }
   if (lamp::any(features, lamp::Features::SocialBehavior)) {
     shadeSocialBehavior = lamp::SocialBehavior(&shade, 1200);
     // Live config pointer so SocialBehavior::control reads the current
