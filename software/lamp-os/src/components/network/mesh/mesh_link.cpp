@@ -437,21 +437,7 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
                                 lamp_protocol::MSG_WISP_CLAIM, wc.seq)) {
       return;
     }
-    // static: the 600 B entry array is too big for the recv-task stack; handleRecv
-    // is the only writer and runs single-threaded on the WiFi recv callback.
-    static PendingWispClaim slot;
-    std::memcpy(slot.sourceMac, wc.sourceMac, 6);
-    const uint8_t safeCount = wc.count > lamp_protocol::kMaxWispClaimEntries
-                                  ? static_cast<uint8_t>(lamp_protocol::kMaxWispClaimEntries)
-                                  : wc.count;
-    slot.count = safeCount;
-    for (uint8_t i = 0; i < safeCount; ++i) {
-      // Each entry is 7 bytes: lampMac[6] + int8 rssi. Copy only the MAC.
-      std::memcpy(slot.lampMacs[i],
-                  wc.entries + static_cast<size_t>(i) * lamp_protocol::WISP_CLAIM_ENTRY_SIZE,
-                  6);
-    }
-    postPendingWispClaim(slot);
+    postPendingWispClaim(wc);
   } else if (msgType == lamp_protocol::MSG_WISP_PALETTE) {
     // Cache feeds CHAR_WISP_STATUS so the app sees the palette through the
     // connected lamp. Single-hop scope: adopt only a directly-heard wisp.
@@ -489,11 +475,7 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
                                 lamp_protocol::MSG_WISP_STATE, ws.seq)) {
       return;
     }
-    // static: the 1.4 KB slot is too big for the recv-task stack; handleRecv
-    // is the only writer and runs single-threaded on the WiFi recv callback.
-    static PendingWispState slot;
-    fillPendingWispState(slot, ws);
-    postPendingWispState(slot);
+    postPendingWispState(ws);
   } else if (msgType == lamp_protocol::MSG_OVERRIDE_COLORS) {
     lamp_protocol::ParsedOverrideColors p;
     if (!lamp_protocol::parseOverrideColors(data, len, p)) return;
@@ -613,13 +595,7 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
                   p.sourceMac[0], p.sourceMac[1], p.sourceMac[2],
                   p.sourceMac[3], p.sourceMac[4], p.sourceMac[5], (unsigned)p.seq);
 #endif
-    // static: the 1444 B payload is too big for the recv-task stack; handleRecv
-    // is the only writer and runs single-threaded on the WiFi recv callback.
-    static PendingCommand slot;
-    std::memcpy(slot.sourceMac, p.sourceMac, 6);
-    slot.payloadLen = static_cast<uint16_t>(p.payloadLen);
-    std::memcpy(slot.payload, p.payload, p.payloadLen);
-    postPendingCommand(slot);
+    postPendingCommand(p);
   } else if (msgType == lamp_protocol::MSG_EVENT) {
     lamp_protocol::ParsedEvent p;
     if (!lamp_protocol::parseEvent(data, len, p)) return;

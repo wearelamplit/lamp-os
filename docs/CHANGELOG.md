@@ -137,6 +137,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   an old wisp paint message that wisps stopped sending in beta 1.1.8. Wisp
   paint itself is unchanged, and a lamp near an older wisp ignores that
   message as before.
+- **About 3.5 KB more free memory.** A lamp stops keeping a spare copy of
+  the wisp's latest paint frame, its claimed-lamp list and the latest
+  lamp-to-lamp expression command while it hands each one from the radio to
+  the light. What the lamp receives, passes on and shows is unchanged.
 - **Lamps take turns passing on the wisp's messages.** A lamp that hears
   the wisp now waits a short moment of its own (up to 0.15 seconds) before
   repeating the message for lamps farther out, instead of every nearby lamp

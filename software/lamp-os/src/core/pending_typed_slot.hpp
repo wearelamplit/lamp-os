@@ -6,8 +6,8 @@
 // payload instead of a byte buffer.
 //
 // Used by transient override + wisp-hello ingest paths:
-//   - MeshLink::handleRecv (WiFi recv task / Core 0) does a single
-//     T copy under portMUX, no heap, no parsing.
+//   - MeshLink::handleRecv (WiFi recv task / Core 0) posts a T, or fills
+//     one in place through postWith, under portMUX, no heap, no parsing.
 //   - The loop task on Core 1 drains the typed payload via drain() and
 //     dispatches into the override / wisp-cache modules.
 //
@@ -16,6 +16,12 @@
 //                      Always returns true (the bounds check is on T
 //                      itself, which is required to be sized at compile
 //                      time). Newest writer wins.
+//   - postWith(mux, fill): as post, but fill(payload) writes the payload in
+//                      place under portMUX, so the poster needs no staging
+//                      copy of T. fill runs with interrupts off on this core,
+//                      so it must be a bounded copy that never blocks, logs
+//                      or allocates. payload holds the previous post's bytes on
+//                      entry.
 //   - drain(mux, out): if valid, copies payload into out, clears valid,
 //                      returns true. If not valid, returns false without
 //                      touching out.
@@ -40,11 +46,16 @@ struct PendingTypedSlot {
   T payload{};
 
   bool post(portMUX_TYPE& mux, const T& src) {
+    return postWith(mux, [&src](T& dst) { dst = src; });
+  }
+
+  template <typename Fill>
+  bool postWith(portMUX_TYPE& mux, Fill&& fill) {
     portENTER_CRITICAL(&mux);
 #ifdef LAMP_DEBUG
     const bool overwriting = valid;
 #endif
-    payload = src;
+    fill(payload);
     valid = true;
     portEXIT_CRITICAL(&mux);
 #ifdef LAMP_DEBUG

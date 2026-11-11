@@ -184,9 +184,15 @@ void postPendingOverrideBrightness(const PendingOverrideBrightness& src) { pendi
 void postPendingRestoreBrightness(const PendingRestoreBrightness& src)   { pendingSlots.restoreBrightness.post(pendingMux, src); }
 void postPendingWispHello(const PendingWispHello& src)                   { pendingSlots.wispHello.post(pendingMux, src); }
 void postPendingWispPalette(const PendingWispPalette& src)               { pendingSlots.wispPalette.post(pendingMux, src); }
-void postPendingWispClaim(const PendingWispClaim& src)                   { pendingSlots.wispClaim.post(pendingMux, src); }
-void postPendingWispState(const PendingWispState& src)                   { pendingSlots.wispState.post(pendingMux, src); }
-void postPendingCommand(const PendingCommand& src)                       { pendingSlots.command.post(pendingMux, src); }
+void postPendingWispClaim(const lamp_protocol::ParsedWispClaim& wc) {
+  pendingSlots.wispClaim.postWith(pendingMux, [&wc](PendingWispClaim& s) { fillPendingWispClaim(s, wc); });
+}
+void postPendingWispState(const lamp_protocol::ParsedWispState& ws) {
+  pendingSlots.wispState.postWith(pendingMux, [&ws](PendingWispState& s) { fillPendingWispState(s, ws); });
+}
+void postPendingCommand(const lamp_protocol::ParsedCommand& p) {
+  pendingSlots.command.postWith(pendingMux, [&p](PendingCommand& s) { fillPendingCommand(s, p); });
+}
 void postPendingEvent(const PendingEvent& src)                           { pendingSlots.event.post(pendingMux, src); }
 void postPendingColorQuery(const PendingColorQuery& src)                 { pendingSlots.colorQuery.post(pendingMux, src); }
 void postPendingColorInfo(const PendingColorInfo& src)                   { pendingSlots.colorInfo.post(pendingMux, src); }

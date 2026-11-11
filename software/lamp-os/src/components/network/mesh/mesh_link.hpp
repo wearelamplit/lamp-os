@@ -47,16 +47,17 @@ using ControlOpHandler = std::function<void(const uint8_t* payload, size_t len,
 // Forwarders implemented in lamp.cpp. MeshLink's WiFi-task recv path
 // calls these; they own posting into the loop-task pending slots so
 // handleRecv stays a thin parse-and-route layer with no knowledge of which
-// slot a message type lands in.
+// slot a message type lands in. A Parsed* forwarder copies out of the recv
+// buffer into its slot before returning.
 void postPendingOverrideColors(const PendingOverrideColors& src);
 void postPendingRestoreColors(const PendingRestoreColors& src);
 void postPendingOverrideBrightness(const PendingOverrideBrightness& src);
 void postPendingRestoreBrightness(const PendingRestoreBrightness& src);
 void postPendingWispHello(const PendingWispHello& src);
 void postPendingWispPalette(const PendingWispPalette& src);
-void postPendingWispClaim(const PendingWispClaim& src);
-void postPendingWispState(const PendingWispState& src);
-void postPendingCommand(const PendingCommand& src);
+void postPendingWispClaim(const lamp_protocol::ParsedWispClaim& wc);
+void postPendingWispState(const lamp_protocol::ParsedWispState& ws);
+void postPendingCommand(const lamp_protocol::ParsedCommand& p);
 void postPendingEvent(const PendingEvent& src);
 void postPendingColorQuery(const PendingColorQuery& src);
 void postPendingColorInfo(const PendingColorInfo& src);

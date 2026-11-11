@@ -36,7 +36,7 @@ with tight spinlocks + a published-handle gate.**
   that overflows its table, or arrives while Core 1 runs a known multi-second
   block (`KnownLoopStall`), goes out inline (`esp_now_send` copies and does not
   block). Control frames it can't handle inline are handed
-  to Core 1 via **typed-slot forwarders** (lock-free single-slot handoff).
+  to Core 1 via **typed-slot forwarders** (spinlocked single-slot handoff).
 - **Core 1 (Arduino loop):** the render loop + both OTA state machines (driven
   from `tick()` / `handleControlOnLoop`) + social/expression. All multi-step
   state-machine logic lives here, single-threaded with respect to itself.
