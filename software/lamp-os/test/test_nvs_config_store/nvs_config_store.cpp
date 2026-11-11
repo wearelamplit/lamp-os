@@ -74,6 +74,10 @@ esp_err_t nvs_erase_all(nvs_handle_t) { return ESP_OK; }
 esp_err_t nvs_find_key(nvs_handle_t, const char* key, nvs_type_t*) {
   return g_nvs->has(key) ? ESP_OK : ESP_ERR_NVS_NOT_FOUND;
 }
+esp_err_t nvs_get_stats(const char*, nvs_stats_t* stats) {
+  *stats = {g_nvs->liveEntries(), 0, 0, 0, 0};
+  return ESP_OK;
+}
 esp_err_t nvs_flash_init() { return ESP_OK; }
 esp_err_t nvs_flash_erase() { return ESP_OK; }
 
@@ -90,7 +94,7 @@ struct Model {
   HomeModeSettings homeMode;
 };
 
-char s_buf[config_codec::kMaxStoredCfgJsonLen + 1];
+uint8_t s_buf[config_codec::kMaxSettingsBlobLen];
 
 SaveResult save(ConfigStore& store, const Model& m) {
   return config_codec::saveConfig(store, m.lamp, m.base, m.shade, m.expressions, m.homeMode,
@@ -99,11 +103,8 @@ SaveResult save(ConfigStore& store, const Model& m) {
 
 Model load(ConfigStore& store) {
   Model m;
-  JsonDocument doc;
-  deserializeJson(doc, store.read("cfg", "{}"));
-  bool withinCaps = true;
-  config_codec::loadStoredConfig(store, doc.as<JsonObject>(), m.lamp, m.base, m.shade,
-                                 m.expressions, m.homeMode, withinCaps);
+  config_codec::loadConfig(store, m.lamp, m.base, m.shade, m.expressions, m.homeMode, s_buf,
+                           sizeof(s_buf));
   return m;
 }
 

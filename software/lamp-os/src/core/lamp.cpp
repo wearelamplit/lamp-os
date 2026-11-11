@@ -664,7 +664,8 @@ void lamp::Lamp::setup() {
 
   // First-ever-boot housekeeping, persisted once so it sticks across reboots.
   // Persist when NVS predated the `named` flag so applyDefaults' inferred value
-  // becomes authoritative. Then latch a lamp the user named OR gave a control
+  // becomes authoritative, and when it holds a form an older release wrote, so
+  // the save moves it to the settings blob. Then latch a lamp the user named OR gave a control
   // password to adopted, so the roll below sees it as configured. Then, only
   // while still unadopted, give it a random per-surface hue so units aren't
   // visually identical out of the box. Shade hue is offset from base by
@@ -672,7 +673,7 @@ void lamp::Lamp::setup() {
   // unit lands on a distinct hue. Guarded on `!setup` and the single-color
   // variant default, so it fires once and never on an adopted lamp; a variant
   // that forces `setup=true` (curated colors) skips it entirely.
-  bool persistFirstBoot = !config.namedKeyPresent();
+  bool persistFirstBoot = !config.namedKeyPresent() || config.storeIsLegacy();
   if (!config.lamp.setup &&
       (config.lamp.named || !config.lamp.password.empty())) {
     config.lamp.setup = true;
@@ -693,6 +694,9 @@ void lamp::Lamp::setup() {
   }
   if (shouldPersistFirstBoot(persistFirstBoot, config.loadFailedWithData()))
     config.persistConfig("first-boot-init");
+#ifdef LAMP_DEBUG
+  lamp::NvsConfigStore::logUsage();
+#endif
 
   // Space the radio bring-ups so their init inrush spikes don't stack into one
   // brownout-tripping surge on marginal USB power. Sub-100ms total, invisible

@@ -42,14 +42,13 @@ static void seedRoleSegments(std::vector<SegmentSettings>& segs,
 // load or save never waits for a large free block. Loop task only: the load
 // runs in setup, and every save, the webapp's included (webapp::tick drains
 // it), runs there.
-static char s_cfgJson[config_codec::kMaxStoredCfgJsonLen + 1];
+static uint8_t s_settingsBuf[config_codec::kMaxSettingsBlobLen];
 
 Config::Config(ConfigStore* inStore) {
   store_ = inStore;
   dispositions_.attachStore(store_);
   const config_codec::LoadedConfig loaded = config_codec::loadConfig(
-      *store_, lamp, base, shade, expressions, homeMode, reinterpret_cast<uint8_t*>(s_cfgJson),
-      sizeof(s_cfgJson));
+      *store_, lamp, base, shade, expressions, homeMode, s_settingsBuf, sizeof(s_settingsBuf));
   storeForm_ = loaded.form;
 
 #ifdef LAMP_DEBUG
@@ -114,9 +113,13 @@ bool Config::persistConfig(const char* via) {
     return false;
   }
   const config_codec::SaveResult result = config_codec::saveConfig(
-      *store_, lamp, base, shade, expressions, homeMode, s_cfgJson, sizeof(s_cfgJson));
+      *store_, lamp, base, shade, expressions, homeMode, s_settingsBuf, sizeof(s_settingsBuf));
   if (result == config_codec::SaveResult::Ok) {
     saveGate_.saved();
+    if (storeIsLegacy()) {
+      Serial.printf("[cfg] store migrated from %s\n", config_codec::storeFormName(storeForm_));
+      storeForm_ = config_codec::StoreForm::Binary;
+    }
 #ifdef LAMP_DEBUG
     Serial.printf("[nvs] config saved via=%s\n", via);
 #endif
@@ -138,7 +141,8 @@ config_codec::SaveResult Config::persistRawJson(const char* json) {
   if (!store_) return config_codec::SaveResult::WriteFailed;
   const config_codec::SaveResult result =
       saveGate_.allows()
-          ? config_codec::saveRawJson(*store_, json, s_cfgJson, sizeof(s_cfgJson), lamp.password)
+          ? config_codec::saveRawJson(*store_, json, s_settingsBuf, sizeof(s_settingsBuf),
+                                      lamp.password)
           : config_codec::SaveResult::Held;
   saveGate_.rawFinished(result, millis());
   if (result != config_codec::SaveResult::Ok) {

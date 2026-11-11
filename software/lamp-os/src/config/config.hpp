@@ -102,10 +102,7 @@ class Config {
 
   // True while the store is in a form a release up to 1.3.3 wrote. The first
   // save moves it to the settings blob, so the caller persists once at boot.
-  bool storeIsLegacy() const {
-    return storeForm_ == config_codec::StoreForm::Whole ||
-           storeForm_ == config_codec::StoreForm::Split;
-  }
+  bool storeIsLegacy() const { return config_codec::isLegacyForm(storeForm_); }
 
   /**
    * create a streamable json doc to send configs to the webserver
@@ -119,7 +116,7 @@ class Config {
    * Used by live-preview drains (e.g. expressionOp) that want their change
    * to survive a reboot WITHOUT going through the settings_blob path's
    * fade-out-and-reboot. The runtime state has already been applied by
-   * the caller; this just writes the canonical JSON to NVS.
+   * the caller; this just writes it to NVS.
    *
    * Returns true when every key landed. Never throws and takes no
    * config-sized heap (config_codec::saveConfig): when

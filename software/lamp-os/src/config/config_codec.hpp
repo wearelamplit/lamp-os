@@ -10,10 +10,11 @@
 #include "util/str.hpp"
 #include "config_types.hpp"
 
-// JSON codec for the persisted "cfg" blob. Pure functions over the config
-// model structs (no NVS, no Serial), so the parse/serialize logic runs in
-// the native suite (round-trip tested in test/test_config_codec). Config owns
-// the store, the section cache, and logging; the byte shape lives here.
+// Codec for the stored config: the settings blob and expression records it
+// saves, the JSON forms releases up to 1.3.3 stored (loaded, never written),
+// and the JSON the web document and BLE sections carry. Pure functions over
+// the config model structs and a ConfigStore (no Serial), so it runs in the
+// native suite. Config owns the store, the section cache, and logging.
 namespace lamp {
 namespace config_codec {
 
@@ -59,30 +60,22 @@ bool fromJson(JsonObject root, LampSettings& lamp, BaseSettings& base,
               ShadeSettings& shade, ExpressionSettings& expressions,
               HomeModeSettings& homeMode);
 
-// Serialize the model into root (the canonical "cfg" blob shape, also what
-// the constructor re-parses on the next boot).
+// Serialize the model into root: the web GET document, in the shape of the
+// whole "cfg" string releases up to 1.3.3 stored.
 void toJson(JsonObject root, const LampSettings& lamp, const BaseSettings& base,
             const ShadeSettings& shade, const ExpressionSettings& expressions,
             const HomeModeSettings& homeMode);
 
-// The same shapes written with no heap, byte-identical to serializeJson of
-// expressionToJson / toStoredJson (pinned by test_json_writer).
+// expressionToJson's shape written with no heap, byte-identical to
+// serializeJson of it (pinned by test_json_writer).
 void writeExpressionJson(JsonWriter& w, const ExpressionConfig& expr);
-// `lamp` null leaves out the lamp section; `whole` non-null adds
-// base.knockout and the expressions array, the shape of a whole save.
-// writeLampOnlyJson writes {"lamp":{...}}, the split save's cfg string.
-void writeLampOnlyJson(JsonWriter& w, const LampSettings& lamp);
-void writeStoredJson(JsonWriter& w, const LampSettings* lamp, const BaseSettings& base,
-                     const ShadeSettings& shade, const HomeModeSettings& homeMode,
-                     const ExpressionSettings* whole);
 
 // One expression's JSON object, the shape the BLE expressions section and the
 // webapp document both carry: type, enabled, the interval pair, target, each
 // parameter as its own key in key order, then colours.
 void expressionToJson(JsonObject node, const ExpressionConfig& expr);
 
-// Serialize everything but the expressions and the knockout levels (the "cfg"
-// key's stored shape).
+// Serialize everything but the expressions and the knockout levels.
 void toStoredJson(JsonObject root, const LampSettings& lamp,
                   const BaseSettings& base, const ShadeSettings& shade,
                   const HomeModeSettings& homeMode);
@@ -130,39 +123,29 @@ bool decodeSettings(const uint8_t* data, size_t len, LampSettings& lamp, BaseSet
 // TooLarge does.
 enum class SaveResult : uint8_t { Ok, WriteFailed, TooLarge, Invalid, NoHeap, Held };
 
-// The save buffer's length: it holds a whole config up to kMaxWholeCfgLen
-// and a split save's rest at the caps with every escapable string fully
-// escaped (1818 bytes, measured by test_config_records).
+// The longest rest or staged whole blob a release up to 1.3.3 wrote, which
+// the legacy load reads (1818 bytes fully escaped, plus slack).
 constexpr size_t kMaxStoredCfgJsonLen = 1824;
-// The largest whole config saved as the one "cfg" string. A string must fit
-// in a single NVS page; at this size NVS can always place it with every
-// other key at its cap (docs/dev/embedded-heap.md, pinned by
-// test_config_records).
-constexpr size_t kMaxWholeCfgLen = 1759;
-static_assert(kMaxWholeCfgLen <= kMaxStoredCfgJsonLen, "the save buffer holds a whole config");
 
-// Saves the model. A whole config up to kMaxWholeCfgLen is one "cfg"
-// string carrying the expressions and knockout too, the form any firmware
-// reads; when NVS cannot place it beside the split keys it is staged as a
-// rest blob first, and the other keys are erased once it is authoritative.
-// A larger config splits: each expression as a record ("x0", "x1", ...), the
-// knockout levels in "ko", the count in "xn" (a decimal string), record slots
-// past the count erased, the rest but the lamp section as a rest blob (JSON,
-// in "cfgb" and "cfgc" by turns, the one not live erased and then written, so
-// a rewrite never touches the live copy; with both present "cfgb" is live),
-// and last the lamp section alone as the "cfg" string, staged in "cfgl" while
-// "cfg" is replaced. The JSON is checked
-// before any write, so TooLarge leaves the store untouched; an unchanged key
-// is not rewritten (NVS skips identical writes). A save takes no
-// config-sized heap: the JSON goes into `cfgBuffer` and records come off the
-// stack, and only NVS itself allocates, a handle per call and small bookkeeping
-// per page. Stops at the first failed write; the caller keeps its dirty state
-// and retries.
+// Saves the model: each expression as a record ("x0", "x1", ...), the count
+// in "xn" (a decimal string), record slots past the count erased, then the
+// settings blob in "st0" and "st1" by turns, the one not live erased and
+// then written, read back and compared byte for byte (erased again when it
+// differs), and only then the live one erased, so a rewrite never touches
+// the live copy. A blob that already matches the model is not rewritten.
+// When the store still holds a form a release up to 1.3.3 wrote, every
+// record is read back and compared before the blob is written, and the
+// legacy keys are erased last: until the blob lands the legacy store loads,
+// and from then on the binary one does. `buffer` must hold
+// kMaxSettingsBlobLen bytes, else TooLarge with nothing written. A save
+// takes no heap: the blob goes through `buffer` and records come off the
+// stack, and only NVS itself allocates, a handle per call and small
+// bookkeeping per page. Stops at the first failed write or mismatched
+// read-back; the caller keeps its dirty state and retries.
 SaveResult saveConfig(ConfigStore& store, const LampSettings& lamp,
                       const BaseSettings& base, const ShadeSettings& shade,
                       const ExpressionSettings& expressions,
-                      const HomeModeSettings& homeMode, char* cfgBuffer,
-                      size_t cfgBufferLen);
+                      const HomeModeSettings& homeMode, uint8_t* buffer, size_t bufferLen);
 
 struct LoadedRecords {
   bool present = false;      // the expressions came from records
@@ -200,6 +183,10 @@ LoadedRecords loadStoredConfig(ConfigStore& store, JsonObject root, LampSettings
 // "cfgl" and "ko" beside the records); Binary is the settings blob.
 enum class StoreForm : uint8_t { Empty, Binary, Whole, Split };
 const char* storeFormName(StoreForm form);
+// A form the first save moves to the settings blob.
+inline bool isLegacyForm(StoreForm form) {
+  return form == StoreForm::Whole || form == StoreForm::Split;
+}
 
 struct LoadedConfig {
   StoreForm form = StoreForm::Empty;
@@ -269,8 +256,8 @@ SaveResult rawParseResult(DeserializationError error);
 // of memory all the same. A document with no password keeps `keptPassword`,
 // the GET document having redacted it, and one naming the lamp marks it
 // named.
-SaveResult saveRawJson(ConfigStore& store, const char* json, char* cfgBuffer,
-                       size_t cfgBufferLen, const std::string& keptPassword);
+SaveResult saveRawJson(ConfigStore& store, const char* json, uint8_t* buffer, size_t bufferLen,
+                       const std::string& keptPassword);
 
 }  // namespace config_codec
 }  // namespace lamp

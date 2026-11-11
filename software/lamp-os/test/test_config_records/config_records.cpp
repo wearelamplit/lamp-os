@@ -1,8 +1,8 @@
-// Native tests for the config storage: whole as one "cfg" string, or split
-// into a compact record per expression, the knockout levels and the rest as
-// blobs beside a lamp-only "cfg" string. Pins the
-// round trip, the migration from the single-JSON form, a failed write, and the
-// NVS budget at the caps (docs/dev/embedded-heap.md shows the arithmetic).
+// Native tests for the config storage: a compact record per expression and
+// the rest of the config as one settings blob ("st0" / "st1" by turns). Pins
+// the round trip, the migration from every form releases up to 1.3.3 wrote
+// (cut short at every write), a failed or mismatched write, and the NVS
+// budget at the caps (docs/dev/embedded-heap.md shows the arithmetic).
 
 #include <unity.h>
 
@@ -16,6 +16,8 @@
 #include "config/disposition_store.hpp"
 #include "core/boot_history.hpp"
 #include "core/crash_record.hpp"
+#include "config_model.hpp"
+#include "legacy_store.hpp"
 #include "paged_nvs.hpp"
 
 #include "../../src/util/color.cpp"
@@ -25,93 +27,44 @@
 
 using namespace lamp;
 using config_codec::SaveResult;
+using config_codec::StoreForm;
 
 void setUp(void) {}
 void tearDown(void) {}
 
 namespace {
 
-struct Model {
-  LampSettings lamp;
-  BaseSettings base;
-  ShadeSettings shade;
-  ExpressionSettings expressions;
-  HomeModeSettings homeMode;
-};
-
-ExpressionConfig fullExpression(const char* type, uint8_t target) {
-  ExpressionConfig e;
-  e.type = type;
-  e.enabled = true;
-  e.target = target;
-  e.intervalMin = 0xFFFFFFFFu;
-  e.intervalMax = 0xFFFFFFFFu;
-  for (size_t i = 0; i < kMaxExpressionColors; ++i) {
-    e.colors.push_back(Color(static_cast<uint8_t>(i), 2, 3, 4));
-  }
-  for (size_t i = 0; i < kMaxExpressionParams; ++i) {
-    e.parameters.set(kExpressionParamKeys[i], 0xFFFFFFFFu);
-  }
-  return e;
-}
-
-// Every capped field at its ceiling; `fill` is the character the free-text
-// fields are made of, so a '"' or '\\' fill gives the fully escaped worst case.
-Model worstCaseModel(char fill = 'z') {
-  Model m;
-  m.lamp.name = std::string(kMaxLampNameLen, fill);
-  m.lamp.password = std::string(kMaxPasswordLen, fill);
-  // Every number at its widest and every boolean "false", the longer form.
-  m.lamp.brightness = 255;
-  m.lamp.apBootMinutes = 255;
-  m.lamp.brightnessCeiling = 255;
-  m.lamp.socialMode = SocialMode::Extrovert;
-  m.lamp.setup = m.lamp.named = m.lamp.advancedEnabled = m.lamp.webappEnabled = false;
-  m.base.colorsEditable = m.shade.colorsEditable = false;
-  m.homeMode.brightness = 255;
-  m.homeMode.enabled = m.homeMode.networkBound = m.homeMode.socialDisabled = false;
-  m.lamp.lampType = "standard";
-  for (auto* segs : {&m.base.segments, &m.shade.segments}) {
-    segs->clear();
-    for (size_t s = 0; s < kMaxSegments; ++s) {
-      SegmentSettings seg;
-      seg.name = std::string(kMaxSegmentNameLen, fill);
-      seg.px = 255;
-      seg.pin = 33;
-      seg.colors.assign(kMaxSurfaceColors, Color(255, 255, 255, 255));
-      segs->push_back(seg);
-    }
-  }
-  m.base.byteOrder = "GRBW";
-  m.shade.byteOrder = "GRBW";
-  m.base.knockoutPixels.assign(255, 100);
-  m.homeMode.ssid = std::string(kMaxSsidLen, fill);
-  m.homeMode.disabledExpressionTypes.assign(kMaxDisabledExpressionTypes,
-                                            std::string(kMaxExpressionTypeLen, 't'));
-  for (size_t i = 0; i < kMaxExpressions; ++i) {
-    m.expressions.expressions.push_back(fullExpression(
-        std::string(kMaxExpressionTypeLen, 'a' + i % 26).c_str(), 1 + i % 3));
-  }
-  return m;
-}
+uint8_t s_buf[config_codec::kMaxSettingsBlobLen];
 
 SaveResult save(ConfigStore& store, const Model& m) {
-  static char cfg[config_codec::kMaxStoredCfgJsonLen + 1];
-  return config_codec::saveConfig(store, m.lamp, m.base, m.shade, m.expressions,
-                                  m.homeMode, cfg, sizeof(cfg));
+  return config_codec::saveConfig(store, m.lamp, m.base, m.shade, m.expressions, m.homeMode,
+                                  s_buf, sizeof(s_buf));
 }
 
-// The same load Config's constructor runs.
-void load(ConfigStore& store, Model& m) {
-  JsonDocument doc;
-  deserializeJson(doc, store.read("cfg", "{}"));
-  bool withinCaps = true;
-  config_codec::loadStoredConfig(store, doc.as<JsonObject>(), m.lamp, m.base, m.shade,
-                                 m.expressions, m.homeMode, withinCaps);
+// The load Config's constructor runs.
+config_codec::LoadedConfig load(ConfigStore& store, Model& m) {
+  return config_codec::loadConfig(store, m.lamp, m.base, m.shade, m.expressions, m.homeMode,
+                                  s_buf, sizeof(s_buf));
 }
 
-// Adds full expressions until the whole config cannot fit one cfg JSON, so the
-// save splits into records.
+// The save a release up to 1.3.3 ran.
+SaveResult legacySave(ConfigStore& store, const Model& m) {
+  static char buf[legacy133::kMaxStoredCfgJsonLen + 1];
+  return legacy133::saveConfig(store, m.lamp, m.base, m.shade, m.expressions, m.homeMode, buf,
+                               sizeof(buf));
+}
+
+std::string legacyJson(const Model& m) {
+  static char buf[8192];
+  JsonWriter w(buf, sizeof(buf));
+  legacy133::writeStoredJson(w, &m.lamp, m.base, m.shade, m.homeMode, &m.expressions);
+  w.finish();
+  TEST_ASSERT_TRUE(w.ok());
+  return std::string(buf, w.length());
+}
+
+// Adds full expressions until the whole config cannot fit one cfg JSON, so a
+// legacy save splits into records.
 void padToSplit(Model& m) {
   for (int i = 0; i < 4; ++i) {
     m.expressions.expressions.push_back(
@@ -123,6 +76,70 @@ void padToSplit(Model& m) {
 // plus its bytes (with the NUL); a blob adds an index entry to that.
 size_t stringEntries(size_t len) { return 1 + (len + 1 + 31) / 32; }
 size_t blobEntries(size_t len) { return 2 + (len + 31) / 32; }
+
+const char* const kLegacyKeys[] = {"cfg", "cfgb", "cfgc", "cfgl", "ko"};
+
+bool anyLegacyKey(ConfigStore& store) {
+  for (const char* key : kLegacyKeys) {
+    if (store.has(key)) return true;
+  }
+  return false;
+}
+
+bool sameExpression(const ExpressionConfig& a, const ExpressionConfig& b) {
+  return a.type == b.type && a.target == b.target && a.enabled == b.enabled &&
+         a.intervalMin == b.intervalMin && a.intervalMax == b.intervalMax &&
+         a.colors == b.colors && a.parameters == b.parameters;
+}
+
+// The settings blob's part of two models, the expressions aside.
+bool sameSettings(const Model& a, const Model& b) {
+  Model x = a;
+  Model y = b;
+  x.expressions = {};
+  y.expressions = {};
+  return firstDifference(x, y).empty();
+}
+
+// Every loaded expression is one `a` or `b` holds: a save cut short rewrites
+// some records and not others.
+bool expressionsFrom(const Model& back, const Model& a, const Model& b) {
+  for (const auto& e : back.expressions.expressions) {
+    bool found = false;
+    for (const Model* m : {&a, &b}) {
+      for (const auto& o : m->expressions.expressions) found |= sameExpression(o, e);
+    }
+    if (!found) return false;
+  }
+  return true;
+}
+
+// A save cut short leaves the settings as before or as saved, and each
+// expression as one of them held it.
+bool eachSectionOneOf(const Model& back, const Model& a, const Model& b) {
+  return (sameSettings(back, a) || sameSettings(back, b)) && expressionsFrom(back, a, b);
+}
+
+bool allSections(const Model& back, const Model& m) { return firstDifference(back, m).empty(); }
+
+// `m` as a load of its own save gives it back, so a comparison sees only
+// storage.
+Model canonical(const Model& m) {
+  InMemoryConfigStore store;
+  TEST_ASSERT_TRUE(save(store, m) == SaveResult::Ok);
+  Model back;
+  load(store, back);
+  return back;
+}
+
+ExpressionConfig tagged(const char* type, uint8_t target, uint32_t size) {
+  ExpressionConfig e;
+  e.type = type;
+  e.target = target;
+  e.colors = {Color(1, 2, 3, 4)};
+  e.setParameter("size", size);
+  return e;
+}
 
 }  // namespace
 
@@ -172,29 +189,24 @@ void test_truncated_record_rejected() {
   }
 }
 
+// A save writes the records, the count and one settings blob, and nothing a
+// release up to 1.3.3 wrote.
 void test_save_load_round_trip() {
-  InMemoryConfigStore store;
-  Model m = worstCaseModel();
-  TEST_ASSERT_TRUE(save(store, m) == SaveResult::Ok);
-  Model back;
-  load(store, back);
-  TEST_ASSERT_EQUAL(m.expressions.expressions.size(), back.expressions.expressions.size());
-  for (size_t i = 0; i < m.expressions.expressions.size(); ++i) {
-    const auto& a = m.expressions.expressions[i];
-    const auto& b = back.expressions.expressions[i];
-    TEST_ASSERT_EQUAL_STRING(a.type.c_str(), b.type.c_str());
-    TEST_ASSERT_TRUE(a.parameters == b.parameters);
-    TEST_ASSERT_TRUE(a.colors == b.colors);
+  for (char fill : {'z', '"', '\\'}) {
+    InMemoryConfigStore store;
+    const Model m = canonical(worstCaseModel(fill));
+    TEST_ASSERT_TRUE(save(store, m) == SaveResult::Ok);
+    Model back;
+    TEST_ASSERT_TRUE(load(store, back).form == StoreForm::Binary);
+    TEST_ASSERT_EQUAL_STRING("", firstDifference(m, back).c_str());
+    TEST_ASSERT_TRUE(store.has("st0") && !store.has("st1") && store.has("xn") && store.has("x20"));
+    TEST_ASSERT_FALSE(anyLegacyKey(store));
   }
-  TEST_ASSERT_TRUE(m.base.knockoutPixels == back.base.knockoutPixels);
-  TEST_ASSERT_EQUAL_STRING(m.lamp.password.c_str(), back.lamp.password.c_str());
-  TEST_ASSERT_FALSE(store.read("cfg", "").find("expressions") != std::string::npos);
-  TEST_ASSERT_FALSE(store.read("cfg", "").find("knockout") != std::string::npos);
 }
 
 // A lamp updating from the single-JSON form keeps its expressions and
-// knockout, and a config that fits stays in that form.
-void test_legacy_single_json_loads_and_small_config_stays_whole() {
+// knockout, and its first save moves it to the binary store.
+void test_a_legacy_whole_store_loads_and_migrates() {
   InMemoryConfigStore store;
   store.write("cfg",
               "{\"lamp\":{\"name\":\"jacko\"},\"base\":{\"segments\":[{\"name\":\"Base\","
@@ -202,70 +214,49 @@ void test_legacy_single_json_loads_and_small_config_stays_whole() {
               "\"expressions\":[{\"type\":\"pulse\",\"enabled\":true,\"target\":1,"
               "\"size\":4,\"colors\":[\"#ff000000\"]}]}");
   Model m;
-  load(store, m);
+  TEST_ASSERT_TRUE(load(store, m).form == StoreForm::Whole);
   TEST_ASSERT_EQUAL(1, m.expressions.expressions.size());
   TEST_ASSERT_EQUAL_UINT8(20, m.base.knockoutPixels[1]);
   TEST_ASSERT_TRUE(save(store, m) == SaveResult::Ok);
-  TEST_ASSERT_FALSE(store.has("xn") || store.has("x0") || store.has("ko"));
+  TEST_ASSERT_FALSE(anyLegacyKey(store));
   Model back;
-  load(store, back);
-  TEST_ASSERT_EQUAL(1, back.expressions.expressions.size());
+  TEST_ASSERT_TRUE(load(store, back).form == StoreForm::Binary);
+  TEST_ASSERT_EQUAL_STRING("", firstDifference(m, back).c_str());
   TEST_ASSERT_EQUAL_UINT32(4, back.expressions.expressions[0].getParameter("size", 0));
   TEST_ASSERT_EQUAL_UINT8(30, back.base.knockoutPixels[2]);
 }
 
-// A config too big for one cfg JSON splits into records; once it shrinks
-// back, the whole save erases the split keys.
-void test_split_then_whole_erases_split_keys() {
-  InMemoryConfigStore store;
-  Model m;
-  m.base.segments = {{"Base", 3, {Color(1, 2, 3, 4)}}};
-  m.base.knockoutPixels = {10, 20, 30};
-  padToSplit(m);
-  TEST_ASSERT_TRUE(save(store, m) == SaveResult::Ok);
-  TEST_ASSERT_TRUE(store.has("xn") && store.has("x3") && store.has("ko"));
-  TEST_ASSERT_TRUE(store.has("cfgb") || store.has("cfgc"));
-  TEST_ASSERT_TRUE(store.read("cfg", "").find("expressions") == std::string::npos);
-  m.expressions.expressions.resize(1);
-  TEST_ASSERT_TRUE(save(store, m) == SaveResult::Ok);
-  TEST_ASSERT_FALSE(store.has("xn") || store.has("x0") || store.has("ko"));
-  TEST_ASSERT_FALSE(store.has("cfgb") || store.has("cfgc") || store.has("cfgl"));
-  Model back;
-  load(store, back);
-  TEST_ASSERT_EQUAL(1, back.expressions.expressions.size());
-  TEST_ASSERT_EQUAL_UINT8(20, back.base.knockoutPixels[1]);
+// A lamp flashed back to 1.3.3 finds no "cfg" and saves its own, whole or
+// split, beside the settings blob; flashed forward again, the settings blob
+// loads, with the records the older release left (none after a whole save),
+// and the keys it wrote go.
+void test_a_store_saved_after_a_downgrade_loads_the_settings_blob() {
+  for (bool olderSplit : {false, true}) {
+    Model mine = canonical(worstCaseModel('z'));
+    mine.lamp.name = "mine";
+    mine = canonical(mine);
+    InMemoryConfigStore store;
+    TEST_ASSERT_TRUE(save(store, mine) == SaveResult::Ok);
+    Model older;
+    older.lamp.name = "older";
+    older.expressions.expressions = {tagged("spotty", 2, 5)};
+    if (olderSplit) padToSplit(older);
+    TEST_ASSERT_TRUE(legacySave(store, older) == SaveResult::Ok);
+    Model back;
+    TEST_ASSERT_TRUE(load(store, back).form == StoreForm::Binary);
+    TEST_ASSERT_TRUE(sameSettings(back, mine));
+    TEST_ASSERT_EQUAL(olderSplit ? older.expressions.expressions.size() : 0,
+                      back.expressions.expressions.size());
+    TEST_ASSERT_FALSE(anyLegacyKey(store));
+  }
 }
 
-// A lamp flashed back to a build that predates records rewrites the cfg JSON
-// with its own expressions and knockout; flashed forward again, that config
-// loads and the stale records and knockout blob are ignored.
-void test_config_saved_by_older_firmware_wins_over_stale_records() {
-  InMemoryConfigStore store;
-  Model m;
-  m.base.segments = {{"Base", 3, {Color(1, 2, 3, 4)}}};
-  m.base.knockoutPixels = {10, 20, 30};
-  padToSplit(m);
-  save(store, m);
-  store.write("cfg",
-              "{\"lamp\":{\"name\":\"jacko\"},\"base\":{\"segments\":[{\"name\":\"Base\","
-              "\"px\":3,\"colors\":[\"#11223300\"]}],\"knockout\":[1,2,3]},"
-              "\"expressions\":[{\"type\":\"spotty\",\"enabled\":true,\"target\":2}]}");
-  Model back;
-  load(store, back);
-  TEST_ASSERT_EQUAL(1, back.expressions.expressions.size());
-  TEST_ASSERT_EQUAL_STRING("spotty", back.expressions.expressions[0].type.c_str());
-  TEST_ASSERT_EQUAL_UINT8(2, back.base.knockoutPixels[1]);
-  TEST_ASSERT_TRUE(save(store, back) == SaveResult::Ok);
-  TEST_ASSERT_FALSE(store.has("xn") || store.has("x0") || store.has("ko"));
-}
-
-// A cfg JSON that cannot fit is refused before any record, count or
-// knockout write.
+// A buffer that cannot hold the settings blob is refused before any write.
 void test_too_large_writes_nothing() {
   InMemoryConfigStore store;
   Model m;
   padToSplit(m);
-  char small[64];
+  uint8_t small[config_codec::kMaxSettingsBlobLen - 1];
   TEST_ASSERT_TRUE(config_codec::saveConfig(store, m.lamp, m.base, m.shade, m.expressions,
                                             m.homeMode, small, sizeof(small)) ==
                    SaveResult::TooLarge);
@@ -324,6 +315,20 @@ void test_failed_write_reports_and_keeps_the_old_config() {
   TEST_ASSERT_EQUAL_STRING("jacko", back.lamp.name.c_str());
 }
 
+// An unchanged save writes no new settings blob.
+void test_an_unchanged_save_rewrites_no_blob() {
+  InMemoryConfigStore store;
+  const Model m = canonical(worstCaseModel('z'));
+  TEST_ASSERT_TRUE(save(store, m) == SaveResult::Ok);
+  TEST_ASSERT_TRUE(store.has("st0"));
+  TEST_ASSERT_TRUE(save(store, m) == SaveResult::Ok);
+  TEST_ASSERT_TRUE(store.has("st0") && !store.has("st1"));
+  Model edited = m;
+  edited.lamp.brightness ^= 1;
+  TEST_ASSERT_TRUE(save(store, edited) == SaveResult::Ok);
+  TEST_ASSERT_TRUE(store.has("st1") && !store.has("st0"));
+}
+
 namespace {
 
 std::vector<std::pair<std::string, uint8_t>> keysOf(const ExpressionSettings& s) {
@@ -333,27 +338,18 @@ std::vector<std::pair<std::string, uint8_t>> keysOf(const ExpressionSettings& s)
   return keys;
 }
 
-ExpressionConfig tagged(const char* type, uint8_t target, uint32_t size) {
-  ExpressionConfig e;
-  e.type = type;
-  e.target = target;
-  e.colors = {Color(1, 2, 3, 4)};
-  e.setParameter("size", size);
-  return e;
-}
-
 // Saves `before`, then saves `after` with the store reset partway through,
-// at every possible write; each load must be a whole config: the lamp section
-// and the rest each as one of the two saved them, every entry is one `before`
-// or `after` held (same type, target and contents), every entry both hold is
-// present, and nothing from neither appears.
+// at every possible write; each load must be a whole config: the settings as
+// one of the two saved them, every entry is one `before` or `after` held
+// (same type, target and contents), every entry both hold is present, and
+// nothing from neither appears.
 void assertCrashSafe(Model before, Model after) {
   before.lamp.name = "before";
   before.lamp.brightness = 1;
   after.lamp.name = "after";
   after.lamp.brightness = 2;
   after.homeMode.ssid = "after";
-  for (size_t crashAt = 0; crashAt < 64; ++crashAt) {
+  for (size_t crashAt = 0; crashAt < 80; ++crashAt) {
     InMemoryConfigStore store;
     save(store, before);
     store.writesBeforeCrash = crashAt;
@@ -361,16 +357,11 @@ void assertCrashSafe(Model before, Model after) {
     store.writesBeforeCrash = SIZE_MAX;
     Model back;
     load(store, back);
-    for (const Model* m : {&before, &after}) {
-      if (back.lamp.name == m->lamp.name) {
-        TEST_ASSERT_EQUAL_UINT8(m->lamp.brightness, back.lamp.brightness);
-      }
-    }
-    TEST_ASSERT_TRUE_MESSAGE(back.lamp.name == "before" || back.lamp.name == "after",
-                             "lamp section lost");
-    TEST_ASSERT_TRUE_MESSAGE(back.homeMode.ssid == before.homeMode.ssid ||
-                                 back.homeMode.ssid == "after",
-                             "rest lost");
+    TEST_ASSERT_TRUE_MESSAGE(
+        (back.lamp.name == "before" && back.lamp.brightness == 1 && back.homeMode.ssid.empty()) ||
+            (back.lamp.name == "after" && back.lamp.brightness == 2 &&
+             back.homeMode.ssid == "after"),
+        "settings lost or mixed");
     auto keys = keysOf(back.expressions);
     TEST_ASSERT_TRUE_MESSAGE(std::adjacent_find(keys.begin(), keys.end()) == keys.end(),
                              "an expression loaded twice");
@@ -406,11 +397,11 @@ void assertCrashSafe(Model before, Model after) {
 }  // namespace
 
 void test_crash_mid_save_removing_an_entry_keeps_the_rest() {
-  for (bool split : {false, true}) {
+  for (bool padded : {false, true}) {
     Model before;
     before.expressions.expressions = {tagged("pulse", 1, 1), tagged("shifty", 2, 2),
                                       tagged("spotty", 3, 3), tagged("glitchy", 1, 4)};
-    if (split) padToSplit(before);
+    if (padded) padToSplit(before);
     Model after = before;
     after.expressions.expressions.erase(after.expressions.expressions.begin());
     assertCrashSafe(before, after);
@@ -418,10 +409,10 @@ void test_crash_mid_save_removing_an_entry_keeps_the_rest() {
 }
 
 void test_crash_mid_save_adding_and_editing_keeps_the_rest() {
-  for (bool split : {false, true}) {
+  for (bool padded : {false, true}) {
     Model before;
     before.expressions.expressions = {tagged("pulse", 1, 1), tagged("shifty", 2, 2)};
-    if (split) padToSplit(before);
+    if (padded) padToSplit(before);
     Model after = before;
     after.expressions.expressions[1] = tagged("shifty", 2, 9);
     after.expressions.expressions.push_back(tagged("spotty", 3, 3));
@@ -429,8 +420,7 @@ void test_crash_mid_save_adding_and_editing_keeps_the_rest() {
   }
 }
 
-// Growing past one cfg JSON, or shrinking back under it, is reset-safe too.
-void test_crash_mid_save_crossing_the_split_keeps_the_rest() {
+void test_crash_mid_save_growing_and_shrinking_keeps_the_rest() {
   Model small;
   small.expressions.expressions = {tagged("pulse", 1, 1), tagged("shifty", 2, 2)};
   Model big = small;
@@ -440,8 +430,7 @@ void test_crash_mid_save_crossing_the_split_keeps_the_rest() {
 }
 
 // A reset during the first save after an update leaves the single-JSON form
-// readable: the records only take over once their count is written, and the
-// legacy JSON is rewritten last.
+// readable: it stays the authority until the settings blob lands.
 void test_crash_mid_migration_keeps_the_legacy_config() {
   for (size_t crashAt = 0; crashAt < 64; ++crashAt) {
     InMemoryConfigStore store;
@@ -463,32 +452,8 @@ void test_crash_mid_migration_keeps_the_legacy_config() {
   TEST_FAIL_MESSAGE("save never finished");
 }
 
-// An unreadable record drops itself and nothing else.
-// A cfg JSON that outgrows the fixed save buffer fails the save and leaves
-// the stored cfg as it was.
-void test_cfg_json_over_the_buffer_fails_cleanly() {
-  InMemoryConfigStore store;
-  Model m;
-  m.lamp.name = "jacko";
-  save(store, m);
-  const std::string before = store.read("cfg", "");
-  char small[64];
-  m.lamp.name = "other";
-  TEST_ASSERT_TRUE(config_codec::saveConfig(store, m.lamp, m.base, m.shade, m.expressions,
-                                            m.homeMode, small, sizeof(small)) ==
-                   SaveResult::TooLarge);
-  TEST_ASSERT_EQUAL_STRING(before.c_str(), store.read("cfg", "").c_str());
-}
-
-bool anyRecordLeft(InMemoryConfigStore& store) {
-  for (int i = 0; i < 32; ++i) {
-    if (store.has(("x" + std::to_string(i)).c_str())) return true;
-  }
-  return false;
-}
-
-// A whole save reset at any write, then a later whole save, leaves no record
-// behind: the records go before the count, and every slot is swept.
+// A save reset at any write, then a later save, leaves no record past its
+// count: every slot past it is swept.
 void test_no_record_is_orphaned_by_a_reset() {
   Model big;
   padToSplit(big);
@@ -502,18 +467,20 @@ void test_no_record_is_orphaned_by_a_reset() {
     save(store, small);
     store.writesBeforeCrash = SIZE_MAX;
     TEST_ASSERT_TRUE(save(store, small) == SaveResult::Ok);
-    TEST_ASSERT_FALSE(anyRecordLeft(store));
-    TEST_ASSERT_FALSE(store.has("xn"));
+    for (int i = 1; i < 32; ++i) {
+      TEST_ASSERT_FALSE(store.has(("x" + std::to_string(i)).c_str()));
+    }
+    TEST_ASSERT_EQUAL_STRING("1", store.read("xn", "").c_str());
   }
 }
 
-// A split save cut short before its count leaves records past the old
-// count; the next split save sweeps them.
-void test_split_save_sweeps_records_past_its_count() {
+// A save cut short before its count leaves records past the old count; the
+// next save sweeps them.
+void test_a_save_sweeps_records_past_its_count() {
   InMemoryConfigStore store;
   Model m;
   padToSplit(m);
-  padToSplit(m);  // 8 full expressions: every save below stays split
+  padToSplit(m);  // 8 full expressions
   save(store, m);
   Model grown = m;
   for (int i = 0; i < 4; ++i) grown.expressions.expressions.push_back(tagged("spotty", 1 + i % 3, i));
@@ -533,49 +500,47 @@ void test_split_save_sweeps_records_past_its_count() {
 }
 
 // A record slot past every count this build writes (an earlier build's cap
-// was higher) is swept by a whole save and by a split save alike.
+// was higher) is swept.
 void test_saves_sweep_record_slots_past_the_cap() {
   const uint8_t junk[3] = {1, 2, 3};
-  for (bool split : {false, true}) {
-    InMemoryConfigStore store;
-    store.writeBlob("x25", junk, sizeof(junk));
-    Model m;
-    if (split) padToSplit(m);
-    TEST_ASSERT_TRUE(save(store, m) == SaveResult::Ok);
-    TEST_ASSERT_EQUAL(split, store.has("xn"));
-    TEST_ASSERT_FALSE(store.has("x25"));
-  }
+  InMemoryConfigStore store;
+  store.writeBlob("x25", junk, sizeof(junk));
+  Model m;
+  TEST_ASSERT_TRUE(save(store, m) == SaveResult::Ok);
+  TEST_ASSERT_FALSE(store.has("x25"));
 }
 
-// Deleting every expression saves whole with an empty expressions array; a
-// reset before the old records are erased must still load none, never the
-// records the delete removed.
-void test_delete_all_survives_a_reset_before_the_record_erase() {
+// Deleting every expression writes a count of 0 before anything is swept: a
+// reset loads all of them or none, never some of the records it removed.
+void test_delete_all_survives_a_reset() {
   Model before;
   padToSplit(before);
   Model none;
-  for (size_t crashAt = 1; crashAt < 40; ++crashAt) {
+  for (size_t crashAt = 0; crashAt < 60; ++crashAt) {
     InMemoryConfigStore store;
     save(store, before);
     store.writesBeforeCrash = crashAt;
     const bool finished = save(store, none) == SaveResult::Ok;
     store.writesBeforeCrash = SIZE_MAX;
-    TEST_ASSERT_TRUE(store.read("cfg", "").find("\"expressions\":[]") != std::string::npos);
     Model back;
     load(store, back);
-    TEST_ASSERT_EQUAL(0, back.expressions.expressions.size());
-    if (finished) return;
+    const size_t n = back.expressions.expressions.size();
+    TEST_ASSERT_TRUE(n == 0 || n == before.expressions.expressions.size());
+    if (finished) {
+      TEST_ASSERT_EQUAL(0, n);
+      return;
+    }
   }
+  TEST_FAIL_MESSAGE("save never finished");
 }
 
-// A whole cfg string is the authority, so rest and lamp blobs beside it (a
-// save cut short, or left by a downgrade) go at load: a split save would
-// otherwise take a rest blob for a store split already.
-void test_load_of_a_whole_store_drops_stale_blobs() {
+// A whole cfg string is the legacy loader's authority, so rest and lamp
+// blobs beside it go at load.
+void test_load_of_a_legacy_whole_store_drops_stale_blobs() {
   InMemoryConfigStore store;
   Model m;
   m.lamp.name = "whole";
-  save(store, m);
+  TEST_ASSERT_TRUE(legacySave(store, m) == SaveResult::Ok);
   store.writeBlob("cfgb", "{}", 2);
   store.writeBlob("cfgc", "{}", 2);
   store.writeBlob("cfgl", "{}", 2);
@@ -585,115 +550,46 @@ void test_load_of_a_whole_store_drops_stale_blobs() {
   TEST_ASSERT_FALSE(store.has("cfgb") || store.has("cfgc") || store.has("cfgl"));
 }
 
-// A split config keeps the lamp section alone in the cfg string and the rest
-// in a rest blob.
-void test_split_keeps_the_lamp_section_alone_in_cfg() {
-  InMemoryConfigStore store;
-  Model m = worstCaseModel();
-  m.lamp.name = "split";
-  TEST_ASSERT_TRUE(save(store, m) == SaveResult::Ok);
-  JsonDocument doc;
-  TEST_ASSERT_TRUE(deserializeJson(doc, store.read("cfg", "")) == DeserializationError::Ok);
-  TEST_ASSERT_EQUAL_STRING("split", doc["lamp"]["name"] | "");
-  TEST_ASSERT_EQUAL(1, doc.as<JsonObject>().size());
-  TEST_ASSERT_TRUE(store.has("cfgb") != store.has("cfgc"));
-  TEST_ASSERT_FALSE(store.has("cfgl"));
-}
-
-// The whole cap is kMaxWholeCfgLen: a config whose whole JSON is that long
-// saves whole, and one a byte longer saves split.
-void test_the_whole_cap_is_exact() {
-  static char buf[config_codec::kMaxStoredCfgJsonLen + 1];
-  const auto wholeLen = [&](const Model& m) {
-    JsonWriter w(buf, sizeof(buf));
-    config_codec::writeStoredJson(w, &m.lamp, m.base, m.shade, m.homeMode, &m.expressions);
-    w.finish();
-    return w.ok() ? w.length() : SIZE_MAX;
-  };
-  for (size_t target : {config_codec::kMaxWholeCfgLen, config_codec::kMaxWholeCfgLen + 1}) {
-    bool found = false;
-    // Expressions and surface colours get within the lamp name and SSID's
-    // reach of the target; those two close the gap.
-    for (size_t full = 0; full < 4 && !found; ++full) {
-      for (size_t colors = 0; colors <= kMaxExpressionColors && !found; ++colors) {
-        Model m;
-        for (size_t i = 0; i < full; ++i) m.expressions.expressions.push_back(fullExpression("pulse", 1));
-        ExpressionConfig partial = fullExpression("shifty", 2);
-        partial.colors.resize(colors);
-        m.expressions.expressions.push_back(partial);
-        // Surface colours (about 12 bytes each) close most of the rest.
-        m.base.segments = {{"Base", 8, {}}};
-        size_t baseLen = wholeLen(m);
-        while (baseLen < target && target - baseLen > kMaxLampNameLen + kMaxSsidLen &&
-               m.base.segments[0].colors.size() < kMaxSurfaceColors) {
-          m.base.segments[0].colors.push_back(Color(9, 9, 9, 9));
-          baseLen = wholeLen(m);
-        }
-        if (baseLen > target || target - baseLen > kMaxLampNameLen + kMaxSsidLen) continue;
-        for (size_t name = 0; name <= kMaxLampNameLen && wholeLen(m) != target; ++name) {
-          m.lamp.name = std::string(name, 'n');
-          for (size_t ssid = 0; ssid <= kMaxSsidLen && wholeLen(m) != target; ++ssid) {
-            m.homeMode.ssid = std::string(ssid, 's');
-          }
-        }
-        if (wholeLen(m) != target) continue;
-        found = true;
-        InMemoryConfigStore store;
-        TEST_ASSERT_TRUE(save(store, m) == SaveResult::Ok);
-        const bool whole = store.read("cfg", "").find("\"expressions\":") != std::string::npos;
-        TEST_ASSERT_EQUAL(target == config_codec::kMaxWholeCfgLen, whole);
-        TEST_ASSERT_EQUAL(!whole, store.has("xn"));
-      }
-    }
-    TEST_ASSERT_TRUE(found);
-  }
-}
-
 bool loadsUnreadable(ConfigStore& store) {
   Model back;
-  JsonDocument doc;
-  deserializeJson(doc, store.read("cfg", "{}"));
-  bool withinCaps = true;
-  return config_codec::loadStoredConfig(store, doc.as<JsonObject>(), back.lamp, back.base,
-                                        back.shade, back.expressions, back.homeMode, withinCaps)
-      .unreadable;
+  return load(store, back).records.unreadable;
 }
 
-// A rest blob that holds something unreadable is reported, so Config serves
-// defaults without letting the first-boot save write them over it: JSON that
-// does not parse, a blob over the buffer, or a chunk that fails its CRC (the
-// first read after it; IDF erases the chunk then).
-void test_an_unreadable_rest_blob_is_reported() {
+// A legacy rest blob that holds something unreadable is reported, so Config
+// serves defaults without letting the first-boot save write them over it:
+// JSON that does not parse, a blob over the buffer, or a chunk that fails its
+// CRC (the first read after it; IDF erases the chunk then).
+void test_an_unreadable_legacy_rest_blob_is_reported() {
   {
     InMemoryConfigStore store;
-    save(store, worstCaseModel());
+    legacySave(store, worstCaseModel());
     TEST_ASSERT_FALSE(loadsUnreadable(store));
     store.writeBlob("cfgb", "{broken", 7);
     TEST_ASSERT_TRUE(loadsUnreadable(store));
   }
   {
     InMemoryConfigStore store;
-    save(store, worstCaseModel());
+    legacySave(store, worstCaseModel());
     const std::string over(config_codec::kMaxStoredCfgJsonLen + 1, ' ');
     store.writeBlob("cfgb", over.data(), over.size());
     TEST_ASSERT_TRUE(loadsUnreadable(store));
   }
   {
     PagedNvs nvs;
-    save(nvs, worstCaseModel());
+    legacySave(nvs, worstCaseModel());
     nvs.corruptBlob(nvs.has("cfgb") ? "cfgb" : "cfgc");
     TEST_ASSERT_TRUE(loadsUnreadable(nvs));
   }
 }
 
 // So is a "cfgl" holding the only lamp section when a chunk fails its CRC.
-void test_an_unreadable_lamp_blob_is_reported() {
+void test_an_unreadable_legacy_lamp_blob_is_reported() {
   PagedNvs nvs;
   const Model m = worstCaseModel();
-  save(nvs, m);
+  legacySave(nvs, m);
   static char lampJson[512];
   JsonWriter w(lampJson, sizeof(lampJson));
-  config_codec::writeLampOnlyJson(w, m.lamp);
+  legacy133::writeLampOnlyJson(w, m.lamp);
   w.finish();
   nvs.writeBlob("cfgl", lampJson, w.length());
   nvs.erase("cfg");
@@ -702,6 +598,17 @@ void test_an_unreadable_lamp_blob_is_reported() {
   TEST_ASSERT_TRUE(loadsUnreadable(nvs));
 }
 
+// A legacy split store whose rest blob is gone loads defaults for it, and
+// says so.
+void test_a_legacy_split_store_missing_its_rest_is_reported() {
+  InMemoryConfigStore store;
+  legacySave(store, worstCaseModel());
+  store.erase("cfgb");
+  store.erase("cfgc");
+  TEST_ASSERT_TRUE(loadsUnreadable(store));
+  InMemoryConfigStore fresh;
+  TEST_ASSERT_FALSE(loadsUnreadable(fresh));
+}
 
 // An unreadable record drops only itself.
 void test_unreadable_record_drops_only_itself() {
@@ -714,14 +621,9 @@ void test_unreadable_record_drops_only_itself() {
   const uint8_t junk[3] = {9, 9, 9};
   store.writeBlob("x1", junk, sizeof(junk));
   Model back;
-  JsonDocument doc;
-  deserializeJson(doc, store.read("cfg", "{}"));
-  config_codec::fromJson(doc.as<JsonObject>(), back.lamp, back.base, back.shade,
-                         back.expressions, back.homeMode);
-  const auto loaded = config_codec::loadRecords(store, back.base, back.expressions,
-                                                false, false);
-  TEST_ASSERT_TRUE(loaded.present);
-  TEST_ASSERT_EQUAL_UINT32(1u << 1, loaded.droppedMask);
+  const auto loaded = load(store, back);
+  TEST_ASSERT_TRUE(loaded.records.present);
+  TEST_ASSERT_EQUAL_UINT32(1u << 1, loaded.records.droppedMask);
   TEST_ASSERT_EQUAL(6, back.expressions.expressions.size());
   TEST_ASSERT_EQUAL_STRING("pulse", back.expressions.expressions[0].type.c_str());
   TEST_ASSERT_EQUAL_STRING("spotty", back.expressions.expressions[1].type.c_str());
@@ -739,6 +641,199 @@ void test_unregistered_type_record_loads() {
   TEST_ASSERT_EQUAL(2, back.expressions.expressions.size());
 }
 
+// The web GET document carries a one-segment role's rotation and its PUT
+// brings it back. The PUT parses into default-constructed settings, whose
+// flag is off, the only way this path runs.
+void test_web_document_round_trip_keeps_rotation() {
+  Model m;
+  m.shade.rotation = {true, 7, RotationDir::Up};
+  m.base.rotation = {true, 33, RotationDir::Down};
+  m.shade.rotationSupported = m.base.rotationSupported = true;
+  const std::string body = webDocument(m);
+  InMemoryConfigStore store;
+  TEST_ASSERT_TRUE(config_codec::saveRawJson(store, body.c_str(), s_buf, sizeof(s_buf), "") ==
+                   SaveResult::Ok);
+  Model back;
+  load(store, back);
+  TEST_ASSERT_TRUE(back.shade.rotation == m.shade.rotation);
+  TEST_ASSERT_TRUE(back.base.rotation == m.base.rotation);
+}
+
+std::vector<Model> distinctShapes();
+
+namespace {
+
+// Logs every store call a save makes, in order, and can corrupt what one key
+// is written with.
+class SpyStore : public ConfigStore {
+ public:
+  explicit SpyStore(ConfigStore& inner) : inner_(inner) {}
+  std::vector<std::string> log;
+  size_t longestString = 0;
+  std::string corruptKey;  // its next write lands with one byte flipped
+
+  std::string read(const char* key, const char* d) override {
+    log.push_back(std::string("read ") + key);
+    return inner_.read(key, d);
+  }
+  size_t readString(const char* key, char* out, size_t cap) override {
+    log.push_back(std::string("read ") + key);
+    return inner_.readString(key, out, cap);
+  }
+  size_t readBlob(const char* key, void* out, size_t cap) override {
+    log.push_back(std::string("read ") + key);
+    return inner_.readBlob(key, out, cap);
+  }
+  bool has(const char* key) override { return inner_.has(key); }
+  size_t write(const char* key, const char* value) override {
+    log.push_back(std::string("write ") + key);
+    longestString = std::max(longestString, std::strlen(value) + 1);
+    return inner_.write(key, value);
+  }
+  size_t writeBlob(const char* key, const void* data, size_t len) override {
+    log.push_back(std::string("write ") + key);
+    if (corruptKey == key && len > 0) {
+      corruptKey.clear();
+      std::string flipped(static_cast<const char*>(data), len);
+      flipped[len / 2] ^= 0x40;
+      return inner_.writeBlob(key, flipped.data(), len);
+    }
+    return inner_.writeBlob(key, data, len);
+  }
+  bool erase(const char* key) override {
+    log.push_back(std::string("erase ") + key);
+    return inner_.erase(key);
+  }
+  bool clear() override { return inner_.clear(); }
+
+  // The position of the first entry `what`, or SIZE_MAX.
+  size_t first(const std::string& what) const {
+    const auto it = std::find(log.begin(), log.end(), what);
+    return it == log.end() ? SIZE_MAX : static_cast<size_t>(it - log.begin());
+  }
+  size_t last(const std::string& what) const {
+    const auto it = std::find(log.rbegin(), log.rend(), what);
+    return it == log.rend() ? SIZE_MAX : static_cast<size_t>(log.rend() - it - 1);
+  }
+
+ private:
+  ConfigStore& inner_;
+};
+
+// The legacy stores the spy tests migrate: whole, and split at its worst.
+std::vector<InMemoryConfigStore> legacyStores() {
+  std::vector<InMemoryConfigStore> stores(2);
+  Model whole;
+  whole.lamp.name = "whole";
+  whole.expressions.expressions = {tagged("pulse", 1, 1), tagged("shifty", 2, 2)};
+  TEST_ASSERT_TRUE(legacySave(stores[0], whole) == SaveResult::Ok);
+  TEST_ASSERT_TRUE(legacySave(stores[1], worstCaseModel('"')) == SaveResult::Ok);
+  return stores;
+}
+
+}  // namespace
+
+// On a migrating save every record is read back before the settings blob is
+// written, no legacy key is erased until the blob has been read back, and the
+// live blob not until its replacement has.
+void test_no_legacy_key_goes_before_the_read_back() {
+  for (InMemoryConfigStore& store : legacyStores()) {
+    Model m;
+    load(store, m);
+    SpyStore spy(store);
+    TEST_ASSERT_TRUE(save(spy, m) == SaveResult::Ok);
+    const size_t blobWritten = spy.first("write st0");
+    const size_t blobRead = spy.last("read st0");
+    TEST_ASSERT_TRUE(blobWritten < blobRead && blobRead != SIZE_MAX);
+    size_t recordsRead = 0;
+    for (size_t i = 0; i < m.expressions.expressions.size(); ++i) {
+      recordsRead = std::max(recordsRead, spy.last("read x" + std::to_string(i)));
+    }
+    recordsRead = std::max(recordsRead, spy.last("read xn"));
+    TEST_ASSERT_TRUE(recordsRead < blobWritten);
+    for (const char* key : kLegacyKeys) {
+      const size_t erased = spy.first(std::string("erase ") + key);
+      if (erased == SIZE_MAX) continue;
+      TEST_ASSERT_TRUE_MESSAGE(erased > blobRead, key);
+    }
+    TEST_ASSERT_FALSE(anyLegacyKey(store));
+    // The next save replaces the live blob: its erase follows the new one's
+    // read-back.
+    m.lamp.brightness ^= 1;
+    SpyStore next(store);
+    TEST_ASSERT_TRUE(save(next, m) == SaveResult::Ok);
+    TEST_ASSERT_TRUE(next.first("erase st0") > next.last("read st1"));
+    TEST_ASSERT_TRUE(next.last("read st1") > next.first("write st1"));
+  }
+}
+
+// A settings blob or record that reads back other than written fails the
+// save and keeps the legacy store, which still loads.
+void test_a_mismatched_read_back_keeps_the_legacy_store() {
+  for (const char* key : {"st0", "x0"}) {
+    for (InMemoryConfigStore& store : legacyStores()) {
+      Model before;
+      const StoreForm form = load(store, before).form;
+      TEST_ASSERT_TRUE(config_codec::isLegacyForm(form));
+      Model m = before;
+      if (std::strcmp(key, "x0") == 0) m.expressions.expressions[0].intervalMin ^= 1;
+      SpyStore spy(store);
+      spy.corruptKey = key;
+      TEST_ASSERT_TRUE_MESSAGE(save(spy, m) == SaveResult::WriteFailed, key);
+      TEST_ASSERT_TRUE(anyLegacyKey(store));
+      Model back;
+      TEST_ASSERT_TRUE(load(store, back).form == form);
+      TEST_ASSERT_TRUE(sameSettings(back, before));
+      // The retry lands.
+      TEST_ASSERT_TRUE(save(store, m) == SaveResult::Ok);
+      TEST_ASSERT_FALSE(anyLegacyKey(store));
+    }
+  }
+  // A blob that reads back wrong in "st0" beside a live "st1" is erased, so
+  // the live one still loads.
+  InMemoryConfigStore store;
+  const auto shapes = distinctShapes();
+  TEST_ASSERT_TRUE(save(store, shapes[0]) == SaveResult::Ok);
+  TEST_ASSERT_TRUE(save(store, shapes[1]) == SaveResult::Ok);
+  TEST_ASSERT_TRUE(store.has("st1") && !store.has("st0"));
+  SpyStore spy(store);
+  spy.corruptKey = "st0";
+  TEST_ASSERT_TRUE(save(spy, shapes[2]) == SaveResult::WriteFailed);
+  TEST_ASSERT_FALSE(store.has("st0"));
+  Model back;
+  load(store, back);
+  TEST_ASSERT_TRUE(sameSettings(back, shapes[1]));
+}
+
+// The only string a save writes is the count.
+void test_no_save_writes_a_string_over_three_bytes() {
+  for (InMemoryConfigStore& store : legacyStores()) {
+    for (const Model& m : {worstCaseModel('z'), Model{}, worstCaseModel('\\')}) {
+      SpyStore spy(store);
+      TEST_ASSERT_TRUE(save(spy, m) == SaveResult::Ok);
+      TEST_ASSERT_TRUE(spy.longestString <= 3);
+    }
+  }
+}
+
+// A legacy store's first boot saves once (Lamp::setup persists while the
+// store is legacy or predates `named`); the next boot wants no save and its
+// load writes nothing.
+void test_a_legacy_boot_saves_once() {
+  for (InMemoryConfigStore& store : legacyStores()) {
+    Model m;
+    const auto first = load(store, m);
+    TEST_ASSERT_TRUE(!first.namedKeyPresent || config_codec::isLegacyForm(first.form));
+    TEST_ASSERT_TRUE(save(store, m) == SaveResult::Ok);
+    SpyStore spy(store);
+    Model again;
+    const auto second = load(spy, again);
+    TEST_ASSERT_TRUE(second.namedKeyPresent && !config_codec::isLegacyForm(second.form));
+    for (const auto& op : spy.log) TEST_ASSERT_TRUE_MESSAGE(op.rfind("read ", 0) == 0, op.c_str());
+    TEST_ASSERT_TRUE(allSections(again, m));
+  }
+}
+
 // NVS budget against the 20 KB partition: 5 pages of 126 entries, one held
 // free for garbage collection. docs/dev/embedded-heap.md shows the arithmetic.
 constexpr size_t kPageEntries = PagedNvs::kEntries;
@@ -746,7 +841,7 @@ constexpr size_t kDataPages = PagedNvs::kPages - 1;
 constexpr size_t kMargin = 29;
 
 // The keys outside the lamp namespace, as measured or bounded from each
-// owner's store format. `pad` adds that many one-entry keys.
+// owner's store format.
 // - 5 namespace entries: lamp, crash, phy, nvs.net80211, nimble_bond;
 // - PHY calibration: a 1904-byte cal_data blob, a 6-byte cal_mac blob and a
 //   u32 cal_version;
@@ -796,20 +891,16 @@ size_t lampExtraEntries() {
   return stringEntries(16) + blobEntries(DispositionStore::kMaxBlobLen);
 }
 
-enum class Part { Lamp, Rest, Whole };
+// Every record at its cap, and the count.
+size_t recordEntries() {
+  return kMaxExpressions * blobEntries(config_codec::kMaxExpressionRecordLen) + stringEntries(2);
+}
 
-std::string savedString(const Model& m, Part part) {
-  static char buf[config_codec::kMaxStoredCfgJsonLen + 1];
-  JsonWriter w(buf, sizeof(buf));
-  if (part == Part::Lamp) {
-    config_codec::writeLampOnlyJson(w, m.lamp);
-  } else {
-    config_codec::writeStoredJson(w, part == Part::Whole ? &m.lamp : nullptr, m.base, m.shade,
-                                  m.homeMode, part == Part::Whole ? &m.expressions : nullptr);
-  }
-  w.finish();
-  TEST_ASSERT_TRUE(w.ok());
-  return std::string(buf);
+size_t settingsEntries() { return blobEntries(config_codec::kMaxSettingsLen); }
+
+// Every key live in a binary store at the caps.
+size_t binaryLive() {
+  return systemEntries() + lampExtraEntries() + recordEntries() + settingsEntries();
 }
 
 // A string of `span` entries is placed when some page, compacted, has that
@@ -821,157 +912,80 @@ long stringPlacementMargin(size_t live, size_t span) {
          static_cast<long>(live);
 }
 
-size_t restBlobEntries(const Model& m) {
-  return blobEntries(savedString(m, Part::Rest).size());
-}
-
-// The split keys but the rest blob and the cfg string: records, the count
-// (a decimal string) and knockout.
-size_t splitKeyEntries(const Model& m) {
-  uint8_t buf[config_codec::kMaxExpressionRecordLen];
-  size_t records = 0;
-  for (const auto& e : m.expressions.expressions) {
-    records += blobEntries(config_codec::encodeExpression(e, buf));
+// The JSON a 1.3.3 split store holds at the caps: the rest blob and the
+// lamp-only cfg string.
+std::string legacyPart(const Model& m, bool lamp) {
+  static char buf[legacy133::kMaxStoredCfgJsonLen + 1];
+  JsonWriter w(buf, sizeof(buf));
+  if (lamp) {
+    legacy133::writeLampOnlyJson(w, m.lamp);
+  } else {
+    legacy133::writeStoredJson(w, nullptr, m.base, m.shade, m.homeMode, nullptr);
   }
-  return records + stringEntries(std::to_string(m.expressions.expressions.size()).size()) +
-         blobEntries(m.base.knockoutPixels.size());
+  w.finish();
+  TEST_ASSERT_TRUE(w.ok());
+  return std::string(buf, w.length());
 }
 
-// The save buffer holds a split save's rest, with its NUL, at
-// every escaped worst case.
-void test_save_buffer_holds_the_worst_rest() {
-  for (char fill : {'z', '"', '\\'}) {
-    const size_t len = savedString(worstCaseModel(fill), Part::Rest).size() + 1;
-    printf("[budget] rest blob '%c': %zu of %zu bytes\n", fill, len,
-           config_codec::kMaxStoredCfgJsonLen);
-    TEST_ASSERT_TRUE(len <= config_codec::kMaxStoredCfgJsonLen);
-  }
-}
-
-// The widest rest that can carry `rotate`: one four-segment role and one
-// single-segment role with `rotate` at its widest, every other field at its
-// cap. It stays under the four-segment worst case, so the caps stand.
-void test_widest_rotating_rest_fits_under_the_worst_rest() {
-  for (char fill : {'z', '"', '\\'}) {
-    const size_t worst = savedString(worstCaseModel(fill), Part::Rest).size();
-    for (bool singleShade : {true, false}) {
-      Model m = worstCaseModel(fill);
-      (singleShade ? m.shade.segments : m.base.segments).resize(1);
-      (singleShade ? m.shade.rotation : m.base.rotation) = {false, 120, RotationDir::Down};
-      const std::string rest = savedString(m, Part::Rest);
-      TEST_ASSERT_NOT_NULL(
-          strstr(rest.c_str(), "\"rotate\":{\"on\":false,\"periodS\":120,\"dir\":\"down\"}"));
-      printf("[budget] rotating rest '%c' (%s single): %zu of %zu bytes\n", fill,
-             singleShade ? "shade" : "base", rest.size() + 1, config_codec::kMaxStoredCfgJsonLen);
-      TEST_ASSERT_TRUE(rest.size() + 1 <= config_codec::kMaxStoredCfgJsonLen);
-      TEST_ASSERT_TRUE(rest.size() < worst);
-    }
-  }
-}
-
-// The web GET document carries a one-segment role's rotation and its PUT
-// brings it back. The PUT parses into default-constructed settings, whose
-// flag is off, the only way this path runs.
-void test_web_document_round_trip_keeps_rotation() {
-  Model m;
-  m.shade.rotation = {true, 7, RotationDir::Up};
-  m.base.rotation = {true, 33, RotationDir::Down};
-  m.shade.rotationSupported = m.base.rotationSupported = true;
-  JsonDocument doc;
-  config_codec::toJson(doc.to<JsonObject>(), m.lamp, m.base, m.shade, m.expressions, m.homeMode);
-  std::string body;
-  serializeJson(doc, body);
-  InMemoryConfigStore store;
-  static char cfg[config_codec::kMaxStoredCfgJsonLen + 1];
-  TEST_ASSERT_TRUE(config_codec::saveRawJson(store, body.c_str(), cfg, sizeof(cfg), "") ==
-                   SaveResult::Ok);
-  Model back;
-  load(store, back);
-  TEST_ASSERT_TRUE(back.shade.rotation == m.shade.rotation);
-  TEST_ASSERT_TRUE(back.base.rotation == m.base.rotation);
-}
-
-// The whole cfg string at kMaxWholeCfgLen with everything else at its cap:
-// rewritten over its old copy, or placed after a staged rest blob of the same
-// size once the old string and the split keys are erased.
-void test_whole_cfg_string_is_always_placed() {
-  const size_t span = stringEntries(config_codec::kMaxWholeCfgLen);
-  const size_t live = systemEntries() + lampExtraEntries() +
-                      std::max(span, blobEntries(config_codec::kMaxWholeCfgLen));
+// The only strings left are the count and lampType, rewritten beside every
+// key at its cap.
+void test_strings_are_always_placed() {
+  const size_t span = stringEntries(16);
+  const size_t live = binaryLive() + span;
   const long margin = stringPlacementMargin(live, span);
-  printf("[budget] whole cfg: %zu entries, %zu live, margin %ld\n", span, live, margin);
+  printf("[budget] strings: %zu entries, %zu live, margin %ld\n", span, live, margin);
   TEST_ASSERT_TRUE(margin >= static_cast<long>(kMargin));
-}
-
-// The split save's lamp string, rewritten over its old copy beside every
-// split key at its cap, or placed after a staged "cfgl" copy once a whole
-// string is erased.
-void test_lamp_cfg_string_is_always_placed() {
-  for (char fill : {'z', '"', '\\'}) {
-    const Model m = worstCaseModel(fill);
-    const size_t lampLen = savedString(m, Part::Lamp).size();
-    const size_t span = stringEntries(lampLen);
-    const size_t live = systemEntries() + lampExtraEntries() + splitKeyEntries(m) +
-                        restBlobEntries(m) + std::max(span, blobEntries(lampLen));
-    const long margin = stringPlacementMargin(live, span);
-    printf("[budget] lamp cfg '%c': %zu entries, %zu live, margin %ld\n", fill, span, live,
-           margin);
-    TEST_ASSERT_TRUE(margin >= static_cast<long>(kMargin));
-  }
 }
 
 // A blob under 400 bytes is placed like a string: IDF writes its one chunk
 // whole and moves to a fresh page rather than split it while the tail holds
 // less than 400 bytes. The largest is a disposition blob just under that
-// (14 entries), rewritten beside every split key at its cap.
+// (14 entries), rewritten beside every key at its cap.
 void test_small_blobs_are_always_placed() {
   const size_t span = 1 + (399 + 31) / 32;
-  for (char fill : {'z', '"', '\\'}) {
-    const Model m = worstCaseModel(fill);
-    const size_t live = systemEntries() + lampExtraEntries() + splitKeyEntries(m) +
-                        restBlobEntries(m) + stringEntries(savedString(m, Part::Lamp).size());
-    const long margin = stringPlacementMargin(live, span);
-    printf("[budget] small blob '%c': %zu entries, %zu live, margin %ld\n", fill, span, live,
-           margin);
-    TEST_ASSERT_TRUE(margin >= static_cast<long>(kMargin));
-  }
+  const long margin = stringPlacementMargin(binaryLive(), span);
+  printf("[budget] small blob: %zu entries, %zu live, margin %ld\n", span, binaryLive(), margin);
+  TEST_ASSERT_TRUE(margin >= static_cast<long>(kMargin));
 }
 
 // Blob writes need the new copy's entries before the old copy goes. The
-// split store's peak is its largest blob rewritten, PHY calibration (1904
-// bytes) or the rest; switching from whole adds every split key, the staged
-// lamp section and the new rest blob beside the whole string; staging a
-// whole config adds its blob beside the split store.
-void test_split_peaks_fit_the_entries() {
+// binary store's peak is its largest blob rewritten: PHY calibration (1904
+// bytes) or the settings blob. Migrating from the largest 1.3.3 split store
+// adds the settings blob beside every legacy key, its lamp section staged in
+// "cfgl" included; a 1.3.3 whole store is smaller than that.
+void test_peaks_fit_the_entries() {
+  const size_t steady = binaryLive() + std::max(settingsEntries(), blobEntries(1904));
+  const long spare = static_cast<long>(kDataPages * kPageEntries) - static_cast<long>(steady);
+  printf("[budget] binary: settings blob %zu entries, %zu live, peak %zu of %zu, spare %ld\n",
+         settingsEntries(), binaryLive(), steady, kDataPages * kPageEntries, spare);
+  TEST_ASSERT_TRUE(steady + kMargin <= kDataPages * kPageEntries);
   for (char fill : {'z', '"', '\\'}) {
     const Model m = worstCaseModel(fill);
-    const size_t lampLen = savedString(m, Part::Lamp).size();
-    const size_t base = systemEntries() + lampExtraEntries() + splitKeyEntries(m);
-    const size_t steady =
-        base + restBlobEntries(m) + stringEntries(lampLen) +
-        std::max(restBlobEntries(m), blobEntries(1904));
-    const size_t switching = base + stringEntries(config_codec::kMaxWholeCfgLen) +
-                             blobEntries(lampLen) + restBlobEntries(m);
-    const size_t staging = base + restBlobEntries(m) + stringEntries(lampLen) +
-                           blobEntries(config_codec::kMaxWholeCfgLen);
-    printf("[budget] split '%c': steady peak %zu, switch peak %zu, staging peak %zu of %zu\n",
-           fill, steady, switching, staging, kDataPages * kPageEntries);
-    for (size_t peak : {steady, switching, staging}) {
-      TEST_ASSERT_TRUE(peak + kMargin <= kDataPages * kPageEntries);
-    }
+    const size_t lampLen = legacyPart(m, true).size();
+    const size_t legacyLive = systemEntries() + lampExtraEntries() + recordEntries() +
+                              blobEntries(255) + blobEntries(legacyPart(m, false).size()) +
+                              stringEntries(lampLen) + blobEntries(lampLen);
+    const size_t migrating = legacyLive + settingsEntries();
+    const size_t whole = systemEntries() + lampExtraEntries() +
+                         stringEntries(legacy133::kMaxWholeCfgLen) + recordEntries() +
+                         settingsEntries();
+    printf("[budget] migrating '%c': from split %zu live, peak %zu; from whole peak %zu of %zu\n",
+           fill, legacyLive, migrating, whole, kDataPages * kPageEntries);
+    TEST_ASSERT_TRUE(migrating + kMargin <= kDataPages * kPageEntries);
+    TEST_ASSERT_TRUE(whole + kMargin <= kDataPages * kPageEntries);
   }
 }
 
-// The largest whole config: full expressions until the next would pass
-// kMaxWholeCfgLen.
+// The largest whole config 1.3.3 saved: full expressions until the next
+// would pass its whole cap.
 Model largestWholeModel() {
   Model m;
   m.lamp.name = std::string(kMaxLampNameLen, 'w');
-  static char buf[config_codec::kMaxWholeCfgLen + 1];
+  static char buf[legacy133::kMaxWholeCfgLen + 1];
   for (size_t i = 0; i < kMaxExpressions; ++i) {
     m.expressions.expressions.push_back(fullExpression("pulse", 1 + i % 3));
     JsonWriter w(buf, sizeof(buf));
-    config_codec::writeStoredJson(w, &m.lamp, m.base, m.shade, m.homeMode, &m.expressions);
+    legacy133::writeStoredJson(w, &m.lamp, m.base, m.shade, m.homeMode, &m.expressions);
     w.finish();
     if (!w.ok()) {
       m.expressions.expressions.pop_back();
@@ -987,63 +1001,9 @@ uint32_t nextRandom(uint32_t& state) {
   return state >> 8;
 }
 
-// The fields each storage key carries, compared after a load.
-bool sameLamp(const Model& a, const Model& b) {
-  return a.lamp.name == b.lamp.name && a.lamp.password == b.lamp.password &&
-         a.lamp.brightness == b.lamp.brightness;
-}
-bool sameSegments(const std::vector<SegmentSettings>& a, const std::vector<SegmentSettings>& b) {
-  if (a.size() != b.size()) return false;
-  for (size_t i = 0; i < a.size(); ++i) {
-    if (a[i].name != b[i].name || a[i].px != b[i].px || a[i].pin != b[i].pin ||
-        a[i].colors != b[i].colors) {
-      return false;
-    }
-  }
-  return true;
-}
-bool sameRest(const Model& a, const Model& b) {
-  return sameSegments(a.base.segments, b.base.segments) &&
-         sameSegments(a.shade.segments, b.shade.segments) &&
-         a.base.knockoutPixels == b.base.knockoutPixels && a.homeMode.ssid == b.homeMode.ssid;
-}
-bool sameExpressions(const Model& a, const Model& b) {
-  const auto& x = a.expressions.expressions;
-  const auto& y = b.expressions.expressions;
-  if (x.size() != y.size()) return false;
-  for (size_t i = 0; i < x.size(); ++i) {
-    if (x[i].type != y[i].type || x[i].intervalMin != y[i].intervalMin) return false;
-  }
-  return true;
-}
-// Every loaded expression is one `a` or `b` holds: a save cut short rewrites
-// some records and not others.
-bool expressionsFrom(const Model& back, const Model& a, const Model& b) {
-  for (const auto& e : back.expressions.expressions) {
-    bool found = false;
-    for (const Model* m : {&a, &b}) {
-      for (const auto& o : m->expressions.expressions) {
-        found |= o.type == e.type && o.target == e.target && o.intervalMin == e.intervalMin;
-      }
-    }
-    if (!found) return false;
-  }
-  return true;
-}
-// Every section loads as one of the two models it may: a save cut short
-// leaves the lamp section and the rest each as before or as saved, and each
-// expression as one of them held it.
-bool eachSectionOneOf(const Model& back, const Model& a, const Model& b) {
-  return (sameLamp(back, a) || sameLamp(back, b)) && (sameRest(back, a) || sameRest(back, b)) &&
-         expressionsFrom(back, a, b);
-}
-bool allSections(const Model& back, const Model& m) {
-  return sameLamp(back, m) && sameRest(back, m) && sameExpressions(back, m);
-}
-
 // Fails writes and erases past `budget`, the way a reset mid-save leaves NVS.
 // With `refuseWhole`, the first whole cfg string written is refused, the way
-// NVS refuses one it has no page for, which drives a staged whole save.
+// NVS refuses one it has no page for, which drives 1.3.3's staged whole save.
 class CrashAfter : public ConfigStore {
  public:
   CrashAfter(ConfigStore& inner, size_t budget, bool refuseWhole = false)
@@ -1089,28 +1049,44 @@ void reboot(PagedNvs& nvs) { nvs.boot(); }
 
 // Saves `m` over a copy of `start`, cut short after each write in turn, and
 // passes each cut store with what it loads as to `check`, until the save
-// finishes; the finished store must load as `m`. A save that has not
-// finished within four times the writes it takes uncut fails.
+// finishes; the finished store must load as `m`, in the binary form. A save
+// that has not finished within four times the writes it takes uncut fails.
 template <class Store, class Check>
-bool cutAtEveryWrite(const Store& start, const Model& m, bool refuseWhole, Check check) {
+bool cutAtEveryWrite(const Store& start, const Model& m, Check check) {
   size_t cap = 0;
   {
     Store store = start;
-    CrashAfter counting(store, SIZE_MAX, refuseWhole);
+    CrashAfter counting(store, SIZE_MAX);
     save(counting, m);
     cap = 4 * counting.spent + 4;
   }
   for (size_t budget = 0; budget <= cap; ++budget) {
     Store store = start;
-    CrashAfter crashing(store, budget, refuseWhole);
+    CrashAfter crashing(store, budget);
     const bool finished = save(crashing, m) == SaveResult::Ok && crashing.spent < budget;
     reboot(store);
     Model back;
-    load(store, back);
-    if (finished) return allSections(back, m);
+    const auto loaded = load(store, back);
+    if (finished) return loaded.form == StoreForm::Binary && allSections(back, m);
     if (!check(store, back)) return false;
   }
   return false;
+}
+
+// Every store a 1.3.3 save of `m` over `start` leaves, cut short after each
+// write in turn, the finished one last.
+template <class Store>
+std::vector<Store> legacyCutStores(const Store& start, const Model& m, bool refuseWhole) {
+  std::vector<Store> stores;
+  for (size_t budget = 0;; ++budget) {
+    Store store = start;
+    CrashAfter crashing(store, budget, refuseWhole);
+    const bool finished = legacySave(crashing, m) == SaveResult::Ok && crashing.spent < budget;
+    reboot(store);
+    stores.push_back(store);
+    if (finished || budget > 400) break;
+  }
+  return stores;
 }
 
 // From a store holding `a`, every cut-short save of `b`, and from each store
@@ -1118,11 +1094,11 @@ bool cutAtEveryWrite(const Store& start, const Model& m, bool refuseWhole, Check
 // store before that save loaded it, or as saved.
 template <class Store>
 bool survivesCutShortStarts(const Store& holdingA, const Model& a, const Model& b,
-                            bool refuseB, const Model& c, bool refuseC, size_t& checks) {
-  return cutAtEveryWrite(holdingA, b, refuseB, [&](const Store& cut, const Model& mid) {
+                            const Model& c, size_t& checks) {
+  return cutAtEveryWrite(holdingA, b, [&](const Store& cut, const Model& mid) {
     ++checks;
     if (!eachSectionOneOf(mid, a, b)) return false;
-    return cutAtEveryWrite(cut, c, refuseC, [&](const Store&, const Model& back) {
+    return cutAtEveryWrite(cut, c, [&](const Store&, const Model& back) {
       ++checks;
       return eachSectionOneOf(back, mid, c);
     });
@@ -1131,186 +1107,235 @@ bool survivesCutShortStarts(const Store& holdingA, const Model& a, const Model& 
 
 // Distinct in every section, so a load shows which save each came from.
 std::vector<Model> distinctShapes() {
-  Model small;  // whole
+  Model small;
   small.lamp.name = "small";
   small.lamp.brightness = 11;
   small.expressions.expressions = {tagged("pulse", 1, 1)};
   small.base.segments = {{"Base", 3, {Color(1, 1, 1, 1)}}};
-  Model wide = small;  // whole, the largest
+  Model wide = small;
   wide.lamp.name = "wide";
   wide.lamp.brightness = 22;
   wide.base.segments = {{"Base", 3, {Color(2, 2, 2, 2)}}};
   wide.expressions.expressions = {fullExpression("pulse", 1), fullExpression("shifty", 2)};
-  Model big = worstCaseModel('z');  // split
+  Model big = worstCaseModel('z');
   big.lamp.name = "big";
   big.lamp.brightness = 33;
   big.expressions.expressions.resize(3);
-  Model quoted = worstCaseModel('"');  // split, fully escaped
+  Model quoted = worstCaseModel('"');
   quoted.lamp.brightness = 44;
   quoted.base.segments[0].colors[0] = Color(4, 4, 4, 4);
   quoted.expressions.expressions.resize(2);
   quoted.expressions.expressions[0].intervalMin = 4;
-  // Each as a load gives it back, so a comparison sees only storage.
+  Model none;
+  none.lamp.name = "none";
   std::vector<Model> shapes;
-  for (const Model& m : {small, wide, big, quoted}) {
-    InMemoryConfigStore canonical;
-    save(canonical, m);
-    shapes.emplace_back();
-    load(canonical, shapes.back());
-  }
+  for (const Model& m : {small, wide, big, quoted, none}) shapes.push_back(canonical(m));
   return shapes;
 }
 
-// MAJOR path: every shape to every shape, staged or not, cut short at every
-// write, and from every store that leaves, the next save cut short too.
-// Every shape to every shape and on to every shape, each whole save also
-// with its string refused (the staged path), cut short at every write, and
-// the second save cut short from every store the first leaves.
+// Every shape to every shape and on to every shape, cut short at every write,
+// and the second save cut short from every store the first leaves.
 void test_every_cut_short_store_survives_the_next_save() {
   const auto shapes = distinctShapes();
-  // A whole target, also refused once; a split one has no string to refuse.
-  struct Target {
-    size_t shape;
-    bool refuse;
-  };
-  std::vector<Target> targets;
-  for (size_t i = 0; i < shapes.size(); ++i) {
-    targets.push_back({i, false});
-    if (i < 2) targets.push_back({i, true});
-  }
   size_t checks = 0;
-  for (size_t ai = 0; ai < shapes.size(); ++ai) {
+  for (size_t a = 0; a < shapes.size(); ++a) {
     InMemoryConfigStore holdingA;
-    TEST_ASSERT_TRUE(save(holdingA, shapes[ai]) == SaveResult::Ok);
-    for (const Target& b : targets) {
-      for (const Target& c : targets) {
-        const bool ok = survivesCutShortStarts(holdingA, shapes[ai], shapes[b.shape], b.refuse,
-                                               shapes[c.shape], c.refuse, checks);
+    TEST_ASSERT_TRUE(save(holdingA, shapes[a]) == SaveResult::Ok);
+    for (size_t b = 0; b < shapes.size(); ++b) {
+      for (size_t c = 0; c < shapes.size(); ++c) {
         char what[96];
-        std::snprintf(what, sizeof(what), "%s -> %s%s -> %s%s", shapes[ai].lamp.name.c_str(),
-                      shapes[b.shape].lamp.name.c_str(), b.refuse ? " (staged)" : "",
-                      shapes[c.shape].lamp.name.c_str(), c.refuse ? " (staged)" : "");
-        TEST_ASSERT_TRUE_MESSAGE(ok, what);
+        std::snprintf(what, sizeof(what), "%s -> %s -> %s", shapes[a].lamp.name.c_str(),
+                      shapes[b].lamp.name.c_str(), shapes[c].lamp.name.c_str());
+        TEST_ASSERT_TRUE_MESSAGE(
+            survivesCutShortStarts(holdingA, shapes[a], shapes[b], shapes[c], checks), what);
       }
     }
   }
   printf("[crash] %zu cut-short loads checked\n", checks);
 }
 
-// Three saves cut short in a row: a split save with "cfg" erased (its lamp
-// section in "cfgl"), then a whole save staged as a rest blob with "cfg"
-// erased. The staged whole now holds the lamp section and "cfgl" is stale, so
-// the next split save must stage its own rather than keep it.
-void test_a_stale_lamp_blob_under_a_staged_whole_is_replaced() {
-  const auto shapes = distinctShapes();
-  const Model& y = shapes[2];  // split
-  const Model& w = shapes[0];  // whole
-  const Model& z = shapes[3];  // split
+namespace {
+
+// One store a release up to 1.3.3 left, with what it loads as.
+struct LegacyStart {
+  std::string what;
   InMemoryConfigStore store;
-  TEST_ASSERT_TRUE(save(store, y) == SaveResult::Ok);
-  static char lampJson[256];
-  JsonWriter lw(lampJson, sizeof(lampJson));
-  config_codec::writeLampOnlyJson(lw, y.lamp);
-  lw.finish();
-  store.writeBlob("cfgl", lampJson, lw.length());
-  store.erase("cfg");
-  {
-    // A refused whole string, the rest blob erased and written, the older one
-    // erased, then "cfg": five writes.
-    CrashAfter crashing(store, 5, true);
-    TEST_ASSERT_TRUE(save(crashing, w) == SaveResult::WriteFailed);
-  }
-  TEST_ASSERT_TRUE(store.has("cfgl") && !store.has("cfg"));
-  Model mid;
-  load(store, mid);
-  TEST_ASSERT_TRUE(allSections(mid, w));
-  TEST_ASSERT_TRUE(cutAtEveryWrite(store, z, false, [&](const InMemoryConfigStore&,
-                                                        const Model& back) {
-    return eachSectionOneOf(back, w, z);
-  }));
+  Model loaded;
+};
+
+void addLegacyStart(std::vector<LegacyStart>& starts, const std::string& what,
+                    const InMemoryConfigStore& store) {
+  LegacyStart s{what, store, Model{}};
+  load(s.store, s.loaded);  // as the first boot's load leaves it
+  starts.push_back(std::move(s));
 }
 
-// A store cut between writing the new rest blob and erasing the old one has
-// both: either is a whole rest, and the load takes the same one the next save
-// treats as live.
-void test_a_store_with_both_rest_keys_loads_and_saves_on() {
+// Every form a release up to 1.3.3 left: a whole string (small, the largest
+// 1.3.3 wrote, and an older release's 4,000 bytes), split at every escaped
+// worst case, a whole config staged as a rest blob, and every store a 1.3.3
+// save cut short leaves going whole to split, split to whole (staged) and
+// split to split (its lamp section staged in "cfgl").
+std::vector<LegacyStart> legacyStarts() {
+  std::vector<LegacyStart> starts;
+  const auto shapes = distinctShapes();
+  Model whole = shapes[0];
+  Model split = worstCaseModel('z');
+  split.lamp.name = "split";
+  split.expressions.expressions.resize(6);
+  Model quoted = worstCaseModel('"');
+  quoted.lamp.name = "quoted";
+  {
+    InMemoryConfigStore s;
+    TEST_ASSERT_TRUE(legacySave(s, whole) == SaveResult::Ok);
+    addLegacyStart(starts, "whole", s);
+  }
+  {
+    InMemoryConfigStore s;
+    TEST_ASSERT_TRUE(legacySave(s, largestWholeModel()) == SaveResult::Ok);
+    addLegacyStart(starts, "largest whole", s);
+  }
+  {
+    Model older = worstCaseModel('\\');
+    older.lamp.name = "older";
+    older.expressions.expressions.clear();
+    std::string json = legacyJson(older);
+    for (size_t i = 0; i < kMaxExpressions; ++i) {
+      older.expressions.expressions.push_back(fullExpression("pulse", 1 + i % 3));
+      if (legacyJson(older).size() > 4000) {
+        older.expressions.expressions.pop_back();
+        break;
+      }
+      json = legacyJson(older);
+    }
+    TEST_ASSERT_TRUE(json.size() > 3500 && json.size() <= 4000);
+    InMemoryConfigStore s;
+    s.write("cfg", json.c_str());
+    addLegacyStart(starts, "older 4000-byte string", s);
+  }
+  for (char fill : {'z', '"', '\\'}) {
+    Model m = worstCaseModel(fill);
+    m.lamp.name = std::string("split ") + fill;
+    InMemoryConfigStore s;
+    TEST_ASSERT_TRUE(legacySave(s, m) == SaveResult::Ok);
+    TEST_ASSERT_TRUE(s.has("xn") && s.has("ko"));
+    addLegacyStart(starts, m.lamp.name, s);
+  }
+  {
+    InMemoryConfigStore s;
+    TEST_ASSERT_TRUE(legacySave(s, split) == SaveResult::Ok);
+    CrashAfter refusing(s, SIZE_MAX, true);
+    TEST_ASSERT_TRUE(legacySave(refusing, whole) == SaveResult::Ok);
+    addLegacyStart(starts, "staged whole", s);
+  }
+  struct Transition {
+    const char* what;
+    const Model* from;
+    const Model* to;
+    bool refuseWhole;
+  };
+  for (const Transition& t : {Transition{"whole to split", &whole, &split, false},
+                              Transition{"split to staged whole", &split, &whole, true},
+                              Transition{"split to split", &split, &quoted, false}}) {
+    InMemoryConfigStore s;
+    TEST_ASSERT_TRUE(legacySave(s, *t.from) == SaveResult::Ok);
+    const auto cuts = legacyCutStores(s, *t.to, t.refuseWhole);
+    for (size_t i = 0; i < cuts.size(); ++i) {
+      addLegacyStart(starts, std::string(t.what) + " cut at " + std::to_string(i), cuts[i]);
+    }
+  }
+  return starts;
+}
+
+}  // namespace
+
+// Migration from every legacy store, cut short at every write: unchanged (the
+// first boot's save) every load holds the whole config as it was; edited, each
+// section as it was or as saved. The finished store is binary and holds no
+// legacy key, and the save from each cut store lands too.
+void test_every_legacy_store_migrates_cut_at_every_write() {
+  size_t checks = 0;
+  size_t starts = 0;
+  bool sawCfgl = false;
+  for (LegacyStart& start : legacyStarts()) {
+    ++starts;
+    sawCfgl |= start.store.has("cfgl") && !start.store.has("cfg");
+    Model edited = start.loaded;
+    edited.lamp.name = "edited";
+    edited.lamp.brightness ^= 1;
+    edited.expressions.expressions.push_back(tagged("migrated", 2, 7));
+    edited = canonical(edited);
+    for (const Model* target : {&start.loaded, &edited}) {
+      const bool unchanged = target == &start.loaded;
+      const bool ok = cutAtEveryWrite(start.store, *target, [&](const InMemoryConfigStore& cut,
+                                                               const Model& back) {
+        ++checks;
+        if (unchanged ? !allSections(back, start.loaded)
+                      : !eachSectionOneOf(back, start.loaded, edited)) {
+          return false;
+        }
+        InMemoryConfigStore next = cut;
+        Model again;
+        return save(next, edited) == SaveResult::Ok &&
+               load(next, again).form == StoreForm::Binary && allSections(again, edited) &&
+               !anyLegacyKey(next);
+      });
+      char what[96];
+      std::snprintf(what, sizeof(what), "%s%s", start.what.c_str(),
+                    unchanged ? "" : " (edited)");
+      TEST_ASSERT_TRUE_MESSAGE(ok, what);
+    }
+  }
+  printf("[crash] %zu legacy stores migrated, %zu cut-short loads checked\n", starts, checks);
+  TEST_ASSERT_TRUE(sawCfgl);
+}
+
+// A store cut between writing the new settings blob and erasing the old one
+// has both: either is whole, the load takes "st0", and the next save lands.
+void test_a_store_with_both_settings_keys_loads_and_saves_on() {
   const auto shapes = distinctShapes();
   const Model& before = shapes[2];
   const Model& after = shapes[3];
   bool sawBoth = false;
-  for (bool beforeInB : {true, false}) {
+  for (bool beforeInSt0 : {true, false}) {
     InMemoryConfigStore start;
     TEST_ASSERT_TRUE(save(start, before) == SaveResult::Ok);
-    if (!beforeInB) {
-      TEST_ASSERT_TRUE(save(start, after) == SaveResult::Ok);  // live in cfgc
+    if (!beforeInSt0) {
+      TEST_ASSERT_TRUE(save(start, after) == SaveResult::Ok);  // live in st1
     }
-    TEST_ASSERT_TRUE(start.has("cfgb") != start.has("cfgc"));
-    const Model& old = beforeInB ? before : after;
-    const Model& next = beforeInB ? after : before;
-    TEST_ASSERT_TRUE(cutAtEveryWrite(start, next, false, [&](InMemoryConfigStore& cut,
-                                                            const Model& back) {
-      if (!(cut.has("cfgb") && cut.has("cfgc"))) return eachSectionOneOf(back, old, next);
+    TEST_ASSERT_TRUE(start.has("st0") != start.has("st1"));
+    const Model& old = beforeInSt0 ? before : after;
+    const Model& next = beforeInSt0 ? after : before;
+    TEST_ASSERT_TRUE(cutAtEveryWrite(start, next, [&](InMemoryConfigStore& cut,
+                                                     const Model& back) {
+      if (!(cut.has("st0") && cut.has("st1"))) return eachSectionOneOf(back, old, next);
       sawBoth = true;
       if (!eachSectionOneOf(back, old, next)) return false;
-      // The next save from here lands whole.
+      if (!sameSettings(back, beforeInSt0 ? old : next)) return false;
       InMemoryConfigStore copy = cut;
       Model again;
-      return save(copy, next) == SaveResult::Ok && (load(copy, again), allSections(again, next));
+      return save(copy, next) == SaveResult::Ok && (load(copy, again), allSections(again, next)) &&
+             copy.has("st0") != copy.has("st1");
     }));
   }
   TEST_ASSERT_TRUE(sawBoth);
 }
 
-// A staged whole save erases a "cfgl" a save cut short left before it places
-// the whole string, so the string's room is counted without it.
-void test_a_staged_whole_save_places_cfg_without_cfgl() {
-  struct Spy : CrashAfter {
-    using CrashAfter::CrashAfter;
-    ConfigStore* inner = nullptr;
-    bool cfglBeside = false;
-    size_t write(const char* key, const char* value) override {
-      const bool beside = inner->has("cfgl");
-      const size_t written = CrashAfter::write(key, value);
-      if (written > 0 && std::strcmp(key, "cfg") == 0 &&
-          std::strstr(value, "\"expressions\":") != nullptr) {
-        cfglBeside |= beside;
-      }
-      return written;
-    }
-  };
-  const auto shapes = distinctShapes();
-  InMemoryConfigStore store;
-  save(store, shapes[2]);
-  store.writeBlob("cfgl", "{\"lamp\":{}}", 11);
-  store.erase("cfg");
-  Spy spy(store, SIZE_MAX, true);
-  spy.inner = &store;
-  TEST_ASSERT_TRUE(save(spy, shapes[0]) == SaveResult::Ok);
-  TEST_ASSERT_FALSE(spy.cfglBeside);
-}
-
 struct Churn {
-  size_t wholeStaged = 0;  // whole saves whose string NVS refused at first
-  size_t shapeChanges = 0;
+  size_t saves = 0;
   size_t crashChecks = 0;
-  size_t followUps = 0;  // shape changes also cut short from every cut store
+  size_t followUps = 0;  // saves also cut short from every cut store
 };
 
-bool isWhole(PagedNvs& nvs) {
-  return nvs.read("cfg", "").find("\"expressions\":") != std::string::npos;
-}
-
-// Saves through every shape the store takes (whole, the largest whole, split
-// at every escaped worst case, the standard variant) in a seeded order, with
-// the system keys and dispositions rewritten between saves the way bonding,
-// boots and dispositions churn them, and `pad` one-entry keys beside them.
-// Every write but a refused string must land, and every save must load back
-// as saved. With `crashes`, a save that took a staged path or changed the
-// store's shape is also cut short after each of its writes, and the first
-// `followUpLimit` of them are cut short again from every store that leaves,
-// by the next shape's save.
+// Saves through every shape (empty, the largest 1.3.3 whole, every escaped
+// worst case, the standard variant) in a seeded order, from a legacy store at
+// its worst, with the system keys and dispositions rewritten between saves the
+// way bonding, boots and dispositions churn them, and `pad` one-entry keys
+// beside them. Every write must land, and every save must load back as saved.
+// With `crashes`, the first save (the migration) and every `crashEvery`th are
+// also cut short after each of their writes, and the first `followUpLimit` of
+// them are cut short again from every store that leaves, by the next save.
 bool churnFits(size_t pad, uint32_t seed, size_t rounds, bool crashes, Churn& churn,
-               size_t followUpLimit = 0) {
+               size_t followUpLimit = 0, size_t crashEvery = 25) {
   PagedNvs nvs;
   const auto system = systemKeys();
   for (const auto& k : system) {
@@ -1320,6 +1345,10 @@ bool churnFits(size_t pad, uint32_t seed, size_t rounds, bool crashes, Churn& ch
     if (!nvs.putSystem("pad/" + std::to_string(i), 0)) return false;
   }
   if (nvs.write("lampType", "standard") == 0) return false;
+  uint8_t disp[DispositionStore::kMaxBlobLen];
+  std::memset(disp, 1, sizeof(disp));
+  if (nvs.writeBlob("disp", disp, sizeof(disp)) == 0) return false;
+  if (legacySave(nvs, worstCaseModel('"')) != SaveResult::Ok) return false;
 
   Model standard = worstCaseModel();
   standard.expressions.expressions.clear();
@@ -1328,16 +1357,11 @@ bool churnFits(size_t pad, uint32_t seed, size_t rounds, bool crashes, Churn& ch
       standard.expressions.expressions.push_back(fullExpression(type, target));
     }
   }
-  // Each shape as a load gives it back, so a comparison sees only storage.
   std::vector<Model> shapes;
   for (const Model& m : {Model{}, largestWholeModel(), worstCaseModel('z'), worstCaseModel('"'),
                          worstCaseModel('\\'), standard}) {
-    InMemoryConfigStore canonical;
-    save(canonical, m);
-    shapes.emplace_back();
-    load(canonical, shapes.back());
+    shapes.push_back(canonical(m));
   }
-  uint8_t disp[DispositionStore::kMaxBlobLen];
   Model old;
   load(nvs, old);
   for (size_t round = 0; round < rounds; ++round) {
@@ -1348,23 +1372,18 @@ bool churnFits(size_t pad, uint32_t seed, size_t rounds, bool crashes, Churn& ch
           static_cast<uint32_t>(round);
     }
     const PagedNvs before = nvs;
-    const size_t refused = nvs.failedWrites;
-    const bool wasWhole = isWhole(nvs);
     if (save(nvs, m) != SaveResult::Ok) return false;
-    const bool staged = nvs.failedWrites != refused;
-    const bool changed = wasWhole != isWhole(nvs);
-    churn.wholeStaged += staged;
-    churn.shapeChanges += changed;
-    if (crashes && (staged || changed)) {
+    ++churn.saves;
+    if (crashes && round % crashEvery == 0) {
       Model next = shapes[(round + 1) % shapes.size()];
       next.lamp.brightness = static_cast<uint8_t>(round + 128);
       const bool follow = churn.followUps < followUpLimit;
       churn.followUps += follow;
-      const bool ok = cutAtEveryWrite(before, m, false, [&](const PagedNvs& cut, const Model& mid) {
+      const bool ok = cutAtEveryWrite(before, m, [&](const PagedNvs& cut, const Model& mid) {
         ++churn.crashChecks;
         if (!eachSectionOneOf(mid, old, m)) return false;
         if (!follow) return true;
-        return cutAtEveryWrite(cut, next, false, [&](const PagedNvs&, const Model& back) {
+        return cutAtEveryWrite(cut, next, [&](const PagedNvs&, const Model& back) {
           ++churn.crashChecks;
           return eachSectionOneOf(back, mid, next);
         });
@@ -1372,8 +1391,7 @@ bool churnFits(size_t pad, uint32_t seed, size_t rounds, bool crashes, Churn& ch
       if (!ok) return false;
     }
     Model back;
-    load(nvs, back);
-    if (!allSections(back, m)) return false;
+    if (load(nvs, back).form != StoreForm::Binary || !allSections(back, m)) return false;
     old = back;
     const auto& k = system[nextRandom(seed) % system.size()];
     if (!nvs.putSystem(k.key, k.len, static_cast<uint32_t>(round))) return false;
@@ -1414,7 +1432,6 @@ void test_page_model_failed_rewrite_takes_the_old_copy() {
   TEST_ASSERT_EQUAL(0, nvs.writeBlob("k", "new", 3));
   TEST_ASSERT_TRUE(nvs.has("k"));
   PagedNvs rebooted = nvs;
-  // The read finds the chunk missing and erases the blob, as a boot does.
   char back[3];
   TEST_ASSERT_EQUAL(0, nvs.readBlob("k", back, sizeof(back)));
   TEST_ASSERT_FALSE(nvs.has("k"));
@@ -1422,16 +1439,15 @@ void test_page_model_failed_rewrite_takes_the_old_copy() {
   TEST_ASSERT_FALSE(rebooted.has("k"));
 }
 
-// A rest blob rewrite that fails that way leaves the live rest readable: the
-// new one goes to the other key.
-void test_failed_rest_rewrite_keeps_the_live_copy() {
+// A settings blob rewrite that fails that way leaves the live blob readable:
+// the new one goes to the other key.
+void test_failed_settings_rewrite_keeps_the_live_copy() {
   PagedNvs nvs;
-  Model m = worstCaseModel();
+  Model m = canonical(worstCaseModel());
   TEST_ASSERT_TRUE(save(nvs, m) == SaveResult::Ok);
-  load(nvs, m);
   Model edited = m;
   edited.base.segments[0].colors[0] = Color(7, 7, 7, 7);
-  nvs.failBlobKey = nvs.has("cfgb") ? "cfgc" : "cfgb";
+  nvs.failBlobKey = nvs.has("st0") ? "st1" : "st0";
   TEST_ASSERT_TRUE(save(nvs, edited) == SaveResult::WriteFailed);
   Model back;
   load(nvs, back);
@@ -1443,32 +1459,34 @@ void test_failed_rest_rewrite_keeps_the_live_copy() {
 
 // A blob write whose bookkeeping allocation fails leaves an orphan chunk in
 // the version it was writing. The saves after it all land in the same
-// session, whichever key it was (a record, the knockout blob, the rest), and
-// the boot after them loads the latest: each such key's next write goes
-// through a throwaway version first. Without that, the next write doubles
-// the orphan's position and the boot drops the blob.
+// session, whichever key it was (a record, the settings blob), and the boot
+// after them loads the latest: each such key's next write goes through a
+// throwaway version first. Without that, the next write doubles the orphan's
+// position and the boot drops the blob.
 void test_saves_after_an_out_of_memory_write_land_and_survive_the_boot() {
   auto edit = [](Model& m, int i) {
     m.expressions.expressions[3].intervalMin = 100 + i;
     m.base.knockoutPixels[0] = static_cast<uint8_t>(i);
     m.base.segments[0].colors[0] = Color(i, i, i, i);
   };
-  for (const char* key : {"x3", "ko", "rest"}) {
+  for (const char* key : {"x3", "settings"}) {
     for (int later : {1, 2, 5}) {
       for (bool pastOrphans : {true, false}) {
         if (!pastOrphans && later != 1) continue;
         PagedNvs nvs;
         nvs.pastOrphans = pastOrphans;
-        Model latest = worstCaseModel();
+        Model latest = canonical(worstCaseModel());
         TEST_ASSERT_TRUE(save(nvs, latest) == SaveResult::Ok);
-        load(nvs, latest);
-        nvs.outOfMemoryKey =
-            std::strcmp(key, "rest") != 0 ? key : (nvs.has("cfgb") ? "cfgc" : "cfgb");
+        const bool settings = std::strcmp(key, "settings") == 0;
+        nvs.outOfMemoryKey = !settings ? key : (nvs.has("st0") ? "st1" : "st0");
         edit(latest, 1);
         TEST_ASSERT_TRUE(save(nvs, latest) == SaveResult::WriteFailed);
+        bool allLanded = true;
         for (int i = 0; i < later; ++i) {
           edit(latest, 2 + i);
-          TEST_ASSERT_TRUE_MESSAGE(save(nvs, latest) == SaveResult::Ok, key);
+          const bool landed = save(nvs, latest) == SaveResult::Ok;
+          if (pastOrphans) TEST_ASSERT_TRUE_MESSAGE(landed, key);
+          allLanded &= landed;
         }
         nvs.boot();
         Model back;
@@ -1476,7 +1494,9 @@ void test_saves_after_an_out_of_memory_write_land_and_survive_the_boot() {
         if (pastOrphans) {
           TEST_ASSERT_TRUE_MESSAGE(allSections(back, latest), key);
         } else {
-          TEST_ASSERT_FALSE_MESSAGE(allSections(back, latest), key);
+          // Without it the latest is lost, at the boot or, where the save
+          // reads its write back, reported by the save.
+          TEST_ASSERT_FALSE_MESSAGE(allLanded && allSections(back, latest), key);
         }
       }
     }
@@ -1508,30 +1528,18 @@ void test_a_key_is_written_past_its_orphan_until_boot() {
 // The orphan list names keys exactly, and past kMax keys holds every key.
 void test_the_orphan_list_holds_its_keys() {
   OrphanKeys keys;
-  keys.add("cfgc");
-  TEST_ASSERT_TRUE(keys.holds("cfgc"));
-  TEST_ASSERT_FALSE(keys.holds("cfgb"));
+  keys.add("st1");
+  TEST_ASSERT_TRUE(keys.holds("st1"));
+  TEST_ASSERT_FALSE(keys.holds("st0"));
   for (size_t i = 0; i <= OrphanKeys::kMax; ++i) keys.add(("x" + std::to_string(i)).c_str());
   TEST_ASSERT_TRUE(keys.holds("anything"));
-}
-
-// A split store whose rest blob is gone loads defaults for it, and says so,
-// so the first-boot save does not write those defaults over the store.
-void test_a_split_store_missing_its_rest_is_reported() {
-  InMemoryConfigStore store;
-  save(store, worstCaseModel());
-  store.erase("cfgb");
-  store.erase("cfgc");
-  TEST_ASSERT_TRUE(loadsUnreadable(store));
-  InMemoryConfigStore fresh;
-  TEST_ASSERT_FALSE(loadsUnreadable(fresh));
 }
 
 // A store an older release wrote: a whole cfg string of up to 4,000 bytes
 // (the most an NVS string holds), its dispositions JSON migrated to the blob
 // at load, and the system keys. `expressions` full, colour-only or
 // one-colour expressions beside a plain or a fully escaped rest.
-Model legacyModel(size_t expressions, int kind, bool escapedRest) {
+Model olderModel(size_t expressions, int kind, bool escapedRest) {
   Model m = escapedRest ? worstCaseModel('"') : Model{};
   for (auto* segs : {&m.base.segments, &m.shade.segments}) {
     for (auto& seg : *segs) seg.pin = 0;
@@ -1546,21 +1554,21 @@ Model legacyModel(size_t expressions, int kind, bool escapedRest) {
   return m;
 }
 
-// The first save after the update, of `m` as it loads (split) or trimmed to
-// one expression (whole), beside `pad` spare one-entry keys. -1 when the
-// legacy string would pass 4,000 bytes.
-int legacyFirstSave(const Model& m, bool trimToWhole, size_t pad) {
+// The first save after the update, of `m` as it loads, beside `pad` spare
+// one-entry keys. -1 when the older string would pass 4,000 bytes.
+int olderFirstSave(const Model& m, size_t pad) {
   PagedNvs nvs;
   for (const auto& k : systemKeys()) nvs.putSystem(k.key, k.len);
   for (size_t i = 0; i < pad; ++i) nvs.putSystem("pad/" + std::to_string(i), 0);
   nvs.write("lampType", "standard");
-  static char legacy[8192];
-  JsonWriter w(legacy, sizeof(legacy));
-  config_codec::writeStoredJson(w, &m.lamp, m.base, m.shade, m.homeMode, &m.expressions);
+  static char buf[8192];
+  JsonWriter w(buf, sizeof(buf));
+  legacy133::writeStoredJson(w, &m.lamp, m.base, m.shade, m.homeMode, &m.expressions);
   w.finish();
   if (!w.ok() || w.length() > 4000) return -1;
+  const std::string older(buf, w.length());
   const std::string legacyDispositions(2200, 'd');
-  if (nvs.write("cfg", legacy) == 0 ||
+  if (nvs.write("cfg", older.c_str()) == 0 ||
       nvs.write("dispositions", legacyDispositions.c_str()) == 0) {
     return 0;
   }
@@ -1569,34 +1577,28 @@ int legacyFirstSave(const Model& m, bool trimToWhole, size_t pad) {
   nvs.erase("dispositions");
   Model loaded;
   load(nvs, loaded);
-  if (trimToWhole) loaded.expressions.expressions.resize(1);
-  loaded.lamp.brightness ^= 1;
   if (save(nvs, loaded) != SaveResult::Ok) return 0;
   Model back;
-  load(nvs, back);
-  return allSections(back, loaded) ? 1 : 0;
+  return load(nvs, back).form == StoreForm::Binary && allSections(back, loaded) ? 1 : 0;
 }
 
-// Every legacy shape up to 4,000 bytes saves into both shapes after the
-// update with at least kMargin entries to spare: the split keys copy only
-// what the legacy string held.
+// Every older shape up to 4,000 bytes migrates with at least kMargin entries
+// to spare: the new keys copy only what the string held.
 void test_the_first_save_after_an_update_fits() {
   size_t tightest = SIZE_MAX;
   for (bool escaped : {false, true}) {
     for (int kind : {0, 1, 2}) {
       for (size_t n = 1; n <= kMaxExpressions; ++n) {
-        const Model m = legacyModel(n, kind, escaped);
-        for (bool whole : {false, true}) {
-          const int first = legacyFirstSave(m, whole, kMargin);
-          if (first < 0) continue;
-          TEST_ASSERT_EQUAL(1, first);
-          size_t lo = kMargin, hi = 400;
-          while (lo + 1 < hi) {
-            const size_t mid = (lo + hi) / 2;
-            (legacyFirstSave(m, whole, mid) == 1 ? lo : hi) = mid;
-          }
-          tightest = std::min(tightest, lo);
+        const Model m = olderModel(n, kind, escaped);
+        const int first = olderFirstSave(m, kMargin);
+        if (first < 0) continue;
+        TEST_ASSERT_EQUAL(1, first);
+        size_t lo = kMargin, hi = 400;
+        while (lo + 1 < hi) {
+          const size_t mid = (lo + hi) / 2;
+          (olderFirstSave(m, mid) == 1 ? lo : hi) = mid;
         }
+        tightest = std::min(tightest, lo);
       }
     }
   }
@@ -1605,17 +1607,11 @@ void test_the_first_save_after_an_update_fits() {
 
 void test_every_store_shape_survives_churn_with_margin() {
   Churn churn;
-  // Seed 107 leaves the least room of the first 150; seed
-  // 69 switches to split where no page has room for the lamp string beside
-  // the whole one.
   for (uint32_t seed : {1u, 7u, 42u, 69u, 107u}) {
-    TEST_ASSERT_TRUE(churnFits(kMargin, seed, 400, true, churn, seed == 1 ? 12 : 0));
+    TEST_ASSERT_TRUE(churnFits(kMargin, seed, 400, true, churn, seed == 1 ? 6 : 0));
   }
-  printf("[budget] churn: %zu staged whole saves, %zu shape changes, %zu follow-ups, "
-         "%zu crash points\n",
-         churn.wholeStaged, churn.shapeChanges, churn.followUps, churn.crashChecks);
-  TEST_ASSERT_TRUE(churn.wholeStaged > 0);
-  TEST_ASSERT_TRUE(churn.shapeChanges > 0);
+  printf("[budget] churn: %zu saves, %zu follow-ups, %zu crash points\n", churn.saves,
+         churn.followUps, churn.crashChecks);
   size_t pad = kMargin;
   while (churnFits(pad + 1, 1, 400, false, churn)) ++pad;
   printf("[budget] churn holds with %zu spare entries\n", pad);
@@ -1628,48 +1624,45 @@ int main(int, char**) {
   RUN_TEST(test_truncated_record_rejected);
   RUN_TEST(test_record_caps_parameters);
   RUN_TEST(test_save_load_round_trip);
-  RUN_TEST(test_legacy_single_json_loads_and_small_config_stays_whole);
-  RUN_TEST(test_split_then_whole_erases_split_keys);
-  RUN_TEST(test_config_saved_by_older_firmware_wins_over_stale_records);
+  RUN_TEST(test_a_legacy_whole_store_loads_and_migrates);
+  RUN_TEST(test_a_store_saved_after_a_downgrade_loads_the_settings_blob);
   RUN_TEST(test_too_large_writes_nothing);
   RUN_TEST(test_no_record_is_orphaned_by_a_reset);
-  RUN_TEST(test_delete_all_survives_a_reset_before_the_record_erase);
-  RUN_TEST(test_split_save_sweeps_records_past_its_count);
+  RUN_TEST(test_delete_all_survives_a_reset);
+  RUN_TEST(test_a_save_sweeps_records_past_its_count);
   RUN_TEST(test_saves_sweep_record_slots_past_the_cap);
   RUN_TEST(test_over_long_fields_cannot_fail_every_save);
   RUN_TEST(test_removed_expressions_erase_stale_records);
   RUN_TEST(test_failed_write_reports_and_keeps_the_old_config);
+  RUN_TEST(test_an_unchanged_save_rewrites_no_blob);
   RUN_TEST(test_page_model_confines_a_string_to_one_page);
   RUN_TEST(test_page_model_failed_rewrite_takes_the_old_copy);
-  RUN_TEST(test_failed_rest_rewrite_keeps_the_live_copy);
+  RUN_TEST(test_failed_settings_rewrite_keeps_the_live_copy);
   RUN_TEST(test_saves_after_an_out_of_memory_write_land_and_survive_the_boot);
-  RUN_TEST(test_a_split_store_missing_its_rest_is_reported);
   RUN_TEST(test_the_orphan_list_holds_its_keys);
   RUN_TEST(test_a_key_is_written_past_its_orphan_until_boot);
+  RUN_TEST(test_no_legacy_key_goes_before_the_read_back);
+  RUN_TEST(test_a_mismatched_read_back_keeps_the_legacy_store);
+  RUN_TEST(test_no_save_writes_a_string_over_three_bytes);
+  RUN_TEST(test_a_legacy_boot_saves_once);
   RUN_TEST(test_every_cut_short_store_survives_the_next_save);
-  RUN_TEST(test_a_stale_lamp_blob_under_a_staged_whole_is_replaced);
-  RUN_TEST(test_a_store_with_both_rest_keys_loads_and_saves_on);
-  RUN_TEST(test_a_staged_whole_save_places_cfg_without_cfgl);
-  RUN_TEST(test_save_buffer_holds_the_worst_rest);
-  RUN_TEST(test_widest_rotating_rest_fits_under_the_worst_rest);
+  RUN_TEST(test_every_legacy_store_migrates_cut_at_every_write);
+  RUN_TEST(test_a_store_with_both_settings_keys_loads_and_saves_on);
   RUN_TEST(test_web_document_round_trip_keeps_rotation);
-  RUN_TEST(test_whole_cfg_string_is_always_placed);
-  RUN_TEST(test_lamp_cfg_string_is_always_placed);
+  RUN_TEST(test_strings_are_always_placed);
   RUN_TEST(test_small_blobs_are_always_placed);
-  RUN_TEST(test_split_peaks_fit_the_entries);
+  RUN_TEST(test_peaks_fit_the_entries);
   RUN_TEST(test_the_first_save_after_an_update_fits);
   RUN_TEST(test_every_store_shape_survives_churn_with_margin);
   RUN_TEST(test_crash_mid_save_removing_an_entry_keeps_the_rest);
   RUN_TEST(test_crash_mid_save_adding_and_editing_keeps_the_rest);
-  RUN_TEST(test_crash_mid_save_crossing_the_split_keeps_the_rest);
+  RUN_TEST(test_crash_mid_save_growing_and_shrinking_keeps_the_rest);
   RUN_TEST(test_crash_mid_migration_keeps_the_legacy_config);
-  RUN_TEST(test_load_of_a_whole_store_drops_stale_blobs);
-  RUN_TEST(test_split_keeps_the_lamp_section_alone_in_cfg);
-  RUN_TEST(test_the_whole_cap_is_exact);
-  RUN_TEST(test_an_unreadable_rest_blob_is_reported);
-  RUN_TEST(test_an_unreadable_lamp_blob_is_reported);
+  RUN_TEST(test_load_of_a_legacy_whole_store_drops_stale_blobs);
+  RUN_TEST(test_an_unreadable_legacy_rest_blob_is_reported);
+  RUN_TEST(test_an_unreadable_legacy_lamp_blob_is_reported);
+  RUN_TEST(test_a_legacy_split_store_missing_its_rest_is_reported);
   RUN_TEST(test_unreadable_record_drops_only_itself);
-  RUN_TEST(test_cfg_json_over_the_buffer_fails_cleanly);
   RUN_TEST(test_unregistered_type_record_loads);
   return UNITY_END();
 }

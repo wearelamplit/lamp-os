@@ -116,18 +116,6 @@ static void writeRotate(JsonObject node, const ColorRotation& rotation) {
   o["dir"] = rotationDirName(rotation.dir);
 }
 
-static void writeRotateJson(JsonWriter& w, const ColorRotation& rotation) {
-  w.key("rotate");
-  w.beginObject();
-  w.key("on");
-  w.value(rotation.on);
-  w.key("periodS");
-  w.value(static_cast<uint32_t>(rotation.periodS));
-  w.key("dir");
-  w.value(rotationDirName(rotation.dir));
-  w.endObject();
-}
-
 void parseRotation(JsonObjectConst node, ColorRotation& out) {
   JsonVariantConst on = node["on"];
   if (on.is<bool>()) out.on = on.as<bool>();
@@ -372,121 +360,6 @@ void writeExpressionJson(JsonWriter& w, const ExpressionConfig& expr) {
   w.endObject();
 }
 
-static void writeSegmentsJson(JsonWriter& w, const std::vector<SegmentSettings>& segs) {
-  w.key("segments");
-  w.beginArray();
-  for (const auto& seg : segs) {
-    w.beginObject();
-    w.key("name");
-    w.value(seg.name.c_str());
-    w.key("px");
-    w.value(static_cast<uint32_t>(seg.px));
-    if (seg.pin) {
-      w.key("pin");
-      w.value(static_cast<uint32_t>(seg.pin));
-    }
-    w.key("colors");
-    w.beginArray();
-    for (const auto& c : seg.colors) w.value(colorToHexString(c).c_str());
-    w.endArray();
-    w.endObject();
-  }
-  w.endArray();
-}
-
-static void writeLampJson(JsonWriter& w, const LampSettings& lamp) {
-  w.key("lamp");
-  w.beginObject();
-  w.key("name");
-  w.value(lamp.name.c_str());
-  w.key("brightness");
-  w.value(static_cast<uint32_t>(lamp.brightness));
-  if (!lamp.password.empty()) {
-    w.key("password");
-    w.value(lamp.password.c_str());
-  }
-  w.key("setup");
-  w.value(lamp.setup);
-  w.key("named");
-  w.value(lamp.named);
-  w.key("advancedEnabled");
-  w.value(lamp.advancedEnabled);
-  w.key("webappEnabled");
-  w.value(lamp.webappEnabled);
-  w.key("apBootMinutes");
-  w.value(static_cast<uint32_t>(lamp.apBootMinutes));
-  w.key("brightnessCeiling");
-  w.value(static_cast<uint32_t>(lamp.brightnessCeiling));
-  w.key("socialMode");
-  w.value(static_cast<uint32_t>(lamp.socialMode));
-  w.endObject();
-}
-
-void writeLampOnlyJson(JsonWriter& w, const LampSettings& lamp) {
-  w.beginObject();
-  writeLampJson(w, lamp);
-  w.endObject();
-}
-
-void writeStoredJson(JsonWriter& w, const LampSettings* lamp, const BaseSettings& base,
-                     const ShadeSettings& shade, const HomeModeSettings& homeMode,
-                     const ExpressionSettings* whole) {
-  w.beginObject();
-  if (lamp) writeLampJson(w, *lamp);
-  w.key("base");
-  w.beginObject();
-  if (!base.byteOrder.empty()) {
-    w.key("byteOrder");
-    w.value(base.byteOrder.c_str());
-  }
-  w.key("colorsEditable");
-  w.value(base.colorsEditable);
-  writeSegmentsJson(w, base.segments);
-  if (storesRotation(base)) writeRotateJson(w, base.rotation);
-  if (whole) {
-    w.key("knockout");
-    w.beginArray();
-    for (uint8_t level : base.knockoutPixels) w.value(static_cast<uint32_t>(level));
-    w.endArray();
-  }
-  w.endObject();
-  w.key("shade");
-  w.beginObject();
-  if (!shade.byteOrder.empty()) {
-    w.key("byteOrder");
-    w.value(shade.byteOrder.c_str());
-  }
-  w.key("colorsEditable");
-  w.value(shade.colorsEditable);
-  writeSegmentsJson(w, shade.segments);
-  if (storesRotation(shade)) writeRotateJson(w, shade.rotation);
-  w.endObject();
-  w.key("homeMode");
-  w.beginObject();
-  w.key("ssid");
-  w.value(homeMode.ssid.c_str());
-  w.key("brightness");
-  w.value(static_cast<uint32_t>(homeMode.brightness));
-  w.key("enabled");
-  w.value(homeMode.enabled);
-  w.key("networkBound");
-  w.value(homeMode.networkBound);
-  w.key("socialDisabled");
-  w.value(homeMode.socialDisabled);
-  w.key("disabledExpressionTypes");
-  w.beginArray();
-  for (const auto& t : homeMode.disabledExpressionTypes) w.value(t.c_str());
-  w.endArray();
-  w.endObject();
-  if (whole) {
-    w.key("expressions");
-    w.beginArray();
-    for (const auto& expr : whole->expressions) writeExpressionJson(w, expr);
-    w.endArray();
-  }
-  w.endObject();
-}
-
 void expressionToJson(JsonObject node, const ExpressionConfig& expr) {
   node["type"] = expr.type;
   node["enabled"] = expr.enabled;
@@ -542,10 +415,10 @@ constexpr uint8_t kRecordFormat = 1;
 constexpr uint8_t kRecordEnabled = 0x01;
 constexpr const char* kCountKey = "xn";
 constexpr const char* kKnockoutKey = "ko";
-// The rest (or a staged whole config) as a JSON blob, in two keys by turns so
-// a rewrite never touches the live copy. With both present (a save cut short
+// The rest (or a staged whole config) as a JSON blob, which releases up to
+// 1.3.3 wrote to two keys by turns. With both present (a save cut short
 // between writing one and erasing the other) the first wins: either is a
-// whole copy, and saves and loads pick the same one.
+// whole copy, and those releases saved over the same one.
 constexpr const char* kRestKeys[2] = {"cfgb", "cfgc"};
 constexpr const char* kLampCfgKey = "cfgl";
 // Record slots every save sweeps ("x0".."x31"), past kMaxExpressions, so a
@@ -903,18 +776,6 @@ bool decodeSettings(const uint8_t* data, size_t len, LampSettings& lamp, BaseSet
   return true;
 }
 
-static void eraseSplitKeys(ConfigStore& store) {
-  // Every record slot any build wrote, whatever the count says: a split save
-  // cut short before its count landed leaves records the count never named.
-  char key[5];
-  for (size_t i = 0; i < kRecordKeySlots; ++i) {
-    recordKey(i, key);
-    store.erase(key);
-  }
-  store.erase(kCountKey);
-  store.erase(kKnockoutKey);
-}
-
 static void eraseRest(ConfigStore& store) {
   for (const char* key : kRestKeys) store.erase(key);
   store.erase(kLampCfgKey);
@@ -943,32 +804,52 @@ static RestBlob liveRest(ConfigStore& store, char* buf, size_t cap) {
   return found;
 }
 
-// Writes the JSON `write` produces to the rest key that is not live, erased
-// first, then erases the live one. A failed write touches only a key that
-// held nothing live: IDF's cleanup of a failed blob write can take a chunk of
-// the version it replaces.
-template <class Write>
-static bool writeRest(ConfigStore& store, char* buf, size_t cap, Write write) {
-  const RestBlob live = liveRest(store, buf, cap);
-  JsonWriter w(buf, cap);
-  write(w);
-  w.finish();
-  if (!w.ok()) return false;
-  const char* target = kRestKeys[live.slot == 0 ? 1 : 0];
-  if (!store.erase(target) || store.writeBlob(target, buf, w.length()) == 0) return false;
-  return live.slot < 0 || store.erase(kRestKeys[live.slot]);
+namespace {
+
+// The settings blob, in two keys by turns as the rest blob is: with both
+// present the first is live, for saves and loads alike.
+constexpr const char* kSettingsKeys[2] = {"st0", "st1"};
+// Every key a release up to 1.3.3 wrote the config to, besides the records.
+constexpr const char* kLegacyKeys[] = {"cfg", "cfgb", "cfgc", "cfgl", "ko"};
+
+struct LiveSettings {
+  int slot = -1;  // the key holding the live blob, -1 for none
+  size_t len = 0;
+  bool unreadable = false;  // a settings key holds a blob that did not read
+};
+
+LiveSettings liveSettings(ConfigStore& store, uint8_t* buf, size_t cap) {
+  LiveSettings found;
+  for (int i = 0; i < 2 && found.slot < 0; ++i) {
+    const size_t len = store.readBlob(kSettingsKeys[i], buf, cap);
+    if (len > 0) {
+      found.slot = i;
+      found.len = len;
+    } else if (store.has(kSettingsKeys[i])) {
+      found.unreadable = true;
+    }
+  }
+  return found;
 }
 
-template <class Write>
-static size_t build(char* buf, size_t cap, Write write) {
-  JsonWriter w(buf, cap);
-  write(w);
-  w.finish();
-  return w.ok() ? w.length() : 0;
+bool hasLegacyKey(ConfigStore& store) {
+  for (const char* key : kLegacyKeys) {
+    if (store.has(key)) return true;
+  }
+  return false;
 }
 
-static bool writeSplitKeys(ConfigStore& store, const BaseSettings& base,
-                           const ExpressionSettings& expressions) {
+bool eraseLegacyKeys(ConfigStore& store) {
+  bool erased = true;
+  for (const char* key : kLegacyKeys) {
+    if (store.has(key)) erased = store.erase(key) && erased;
+  }
+  return erased;
+}
+
+// The records, the count, then every slot past it, so a record left by a
+// save cut short is gone.
+bool writeRecords(ConfigStore& store, const ExpressionSettings& expressions) {
   char key[5];
   const size_t count = std::min(expressions.expressions.size(), kMaxExpressions);
   uint8_t record[kMaxExpressionRecordLen];
@@ -977,16 +858,10 @@ static bool writeSplitKeys(ConfigStore& store, const BaseSettings& base,
     recordKey(i, key);
     if (store.writeBlob(key, record, len) == 0) return false;
   }
-  if (!base.knockoutPixels.empty() &&
-      store.writeBlob(kKnockoutKey, base.knockoutPixels.data(), base.knockoutPixels.size()) ==
-          0) {
-    return false;
-  }
   // A string, which a failed rewrite leaves as it was.
   char countText[4];
   std::snprintf(countText, sizeof(countText), "%u", static_cast<unsigned>(count));
   if (store.write(kCountKey, countText) == 0) return false;
-  // Every slot past the count, so a record left by a save cut short is gone.
   for (size_t i = count; i < kRecordKeySlots; ++i) {
     recordKey(i, key);
     store.erase(key);
@@ -994,83 +869,55 @@ static bool writeSplitKeys(ConfigStore& store, const BaseSettings& base,
   return true;
 }
 
+// Every record and the count read back as written. `buf` holds a record.
+bool recordsMatch(ConfigStore& store, const ExpressionSettings& expressions, uint8_t* buf) {
+  char key[5];
+  const size_t count = std::min(expressions.expressions.size(), kMaxExpressions);
+  uint8_t record[kMaxExpressionRecordLen];
+  for (size_t i = 0; i < count; ++i) {
+    const size_t len = encodeExpression(expressions.expressions[i], record);
+    recordKey(i, key);
+    if (store.readBlob(key, buf, len) != len || std::memcmp(buf, record, len) != 0) return false;
+  }
+  char countText[4];
+  char stored[4];
+  std::snprintf(countText, sizeof(countText), "%u", static_cast<unsigned>(count));
+  return store.readString(kCountKey, stored, sizeof(stored)) > 0 &&
+         std::strcmp(stored, countText) == 0;
+}
+
+}  // namespace
+
 SaveResult saveConfig(ConfigStore& store, const LampSettings& lamp,
                       const BaseSettings& base, const ShadeSettings& shade,
                       const ExpressionSettings& expressions,
-                      const HomeModeSettings& homeMode, char* cfgBuffer,
-                      size_t cfgBufferLen) {
-  const auto whole = [&](JsonWriter& w) {
-    writeStoredJson(w, &lamp, base, shade, homeMode, &expressions);
-  };
-  const auto rest = [&](JsonWriter& w) {
-    writeStoredJson(w, nullptr, base, shade, homeMode, nullptr);
-  };
-  const auto lampOnly = [&](JsonWriter& w) { writeLampOnlyJson(w, lamp); };
-
-  // Whole: everything in the one "cfg" string, the form every firmware reads.
-  // A cfg string carrying an expressions array is the authority from the
-  // moment it lands, so every other key goes after it.
-  if (build(cfgBuffer, std::min(cfgBufferLen, kMaxWholeCfgLen + 1), whole) > 0) {
-    if (store.write("cfg", cfgBuffer) == 0) {
-      // NVS could not place the string beside the split keys. Stage it as a
-      // rest blob, which may span pages and is the authority once the cfg
-      // string is gone, then clear the room and place the string.
-      if (!writeRest(store, cfgBuffer, cfgBufferLen, whole) || !store.erase("cfg")) {
-        return SaveResult::WriteFailed;
-      }
-      // "cfgl" too: a save cut short can leave it, and the whole string is
-      // placed with only the staged blob beside the system keys.
-      eraseSplitKeys(store);
-      store.erase(kLampCfgKey);
-      if (build(cfgBuffer, cfgBufferLen, whole) == 0 || store.write("cfg", cfgBuffer) == 0) {
-        return SaveResult::WriteFailed;
-      }
-    }
-    eraseSplitKeys(store);
-    eraseRest(store);
-    return SaveResult::Ok;
+                      const HomeModeSettings& homeMode, uint8_t* buffer, size_t bufferLen) {
+  if (bufferLen < kMaxSettingsBlobLen) return SaveResult::TooLarge;
+  const bool legacy = hasLegacyKey(store);
+  if (!writeRecords(store, expressions) ||
+      (legacy && !recordsMatch(store, expressions, buffer))) {
+    return SaveResult::WriteFailed;
   }
-
-  // Split: the expressions as records beside the rest. The rest must fit the
-  // blob form, checked before any write so TooLarge writes nothing.
-  if (build(cfgBuffer, cfgBufferLen, rest) == 0) {
-    return SaveResult::TooLarge;
-  }
-
-  // The rest as a blob and the lamp section alone in "cfg". The lamp section
-  // lives in one of three places: a staged whole rest blob when that is the
-  // live one, else "cfg" when it holds the lamp section alone, else "cfgl"
-  // (a save cut short with "cfg" erased). Unless "cfg" holds it, the new lamp
-  // section is staged in "cfgl" first, since from when "cfg" is erased until
-  // the new one lands it is the only copy; a "cfgl" that is the current copy
-  // stays as it is. A stale lamp-only "cfg" (a staged whole is live) goes
-  // before the rest blob replaces that whole; any other "cfg" (a whole
-  // string) is the authority until the rest blob lands, and goes after.
-  const bool stagedWhole = liveRest(store, cfgBuffer, cfgBufferLen).slot >= 0 &&
-                           std::strstr(cfgBuffer, "\"expressions\":") != nullptr;
-  const bool cfgPresent = store.has("cfg");
-  const size_t cfgLen = store.readString("cfg", cfgBuffer, cfgBufferLen);
-  const bool cfgIsLampOnly = cfgLen > 0 && std::strstr(cfgBuffer, "\"base\":") == nullptr &&
-                             std::strstr(cfgBuffer, "\"expressions\":") == nullptr;
-  const bool cfgHoldsLamp = cfgIsLampOnly && !stagedWhole;
-  const bool cfgIsAuthority = cfgPresent && !cfgIsLampOnly;
-  const bool lampBlobHoldsLamp = !cfgPresent && !stagedWhole && store.has(kLampCfgKey);
-  if (!cfgHoldsLamp && !lampBlobHoldsLamp) {
-    const size_t len = build(cfgBuffer, cfgBufferLen, lampOnly);
-    if (len == 0 || store.writeBlob(kLampCfgKey, cfgBuffer, len) == 0) {
+  const LiveSettings live = liveSettings(store, buffer, kMaxSettingsBlobLen);
+  if (live.slot >= 0 && settingsMatch(buffer, live.len, lamp, base, shade, homeMode)) {
+    // Unchanged: only a stale copy beside it goes.
+    const char* other = kSettingsKeys[live.slot == 0 ? 1 : 0];
+    if (store.has(other) && !store.erase(other)) return SaveResult::WriteFailed;
+  } else {
+    const size_t len = encodeSettings(lamp, base, shade, homeMode, buffer);
+    const char* target = kSettingsKeys[live.slot == 0 ? 1 : 0];
+    if (!store.erase(target) || store.writeBlob(target, buffer, len) == 0) {
       return SaveResult::WriteFailed;
     }
+    if (store.readBlob(target, buffer, len) != len ||
+        !settingsMatch(buffer, len, lamp, base, shade, homeMode)) {
+      // "st0" loads over a live "st1", so a blob that reads back wrong must go.
+      store.erase(target);
+      return SaveResult::WriteFailed;
+    }
+    if (live.slot >= 0 && !store.erase(kSettingsKeys[live.slot])) return SaveResult::WriteFailed;
   }
-  if ((cfgIsLampOnly && !cfgHoldsLamp && !store.erase("cfg")) ||
-      !writeSplitKeys(store, base, expressions) ||
-      !writeRest(store, cfgBuffer, cfgBufferLen, rest) ||
-      (cfgIsAuthority && !store.erase("cfg"))) {
-    return SaveResult::WriteFailed;
-  }
-  if (build(cfgBuffer, cfgBufferLen, lampOnly) == 0 || store.write("cfg", cfgBuffer) == 0) {
-    return SaveResult::WriteFailed;
-  }
-  store.erase(kLampCfgKey);
+  if (legacy && !eraseLegacyKeys(store)) return SaveResult::WriteFailed;
   return SaveResult::Ok;
 }
 
@@ -1179,48 +1026,6 @@ LoadedRecords loadStoredConfig(ConfigStore& store, JsonObject root, LampSettings
   return loaded;
 }
 
-namespace {
-
-// The settings blob, in two keys by turns as the rest blob is: with both
-// present the first is live, for saves and loads alike.
-constexpr const char* kSettingsKeys[2] = {"st0", "st1"};
-// Every key a release up to 1.3.3 wrote the config to, besides the records.
-constexpr const char* kLegacyKeys[] = {"cfg", "cfgb", "cfgc", "cfgl", "ko"};
-
-struct LiveSettings {
-  int slot = -1;  // the key holding the live blob, -1 for none
-  size_t len = 0;
-  bool unreadable = false;  // a settings key holds a blob that did not read
-};
-
-LiveSettings liveSettings(ConfigStore& store, uint8_t* buf, size_t cap) {
-  LiveSettings found;
-  for (int i = 0; i < 2 && found.slot < 0; ++i) {
-    const size_t len = store.readBlob(kSettingsKeys[i], buf, cap);
-    if (len > 0) {
-      found.slot = i;
-      found.len = len;
-    } else if (store.has(kSettingsKeys[i])) {
-      found.unreadable = true;
-    }
-  }
-  return found;
-}
-
-bool hasLegacyKey(ConfigStore& store) {
-  for (const char* key : kLegacyKeys) {
-    if (store.has(key)) return true;
-  }
-  return false;
-}
-
-bool eraseLegacyKeys(ConfigStore& store) {
-  bool erased = true;
-  for (const char* key : kLegacyKeys) erased = store.erase(key) && erased;
-  return erased;
-}
-
-}  // namespace
 
 const char* storeFormName(StoreForm form) {
   switch (form) {
@@ -1368,8 +1173,8 @@ size_t RawJsonShape::largestBlock() const {
   return std::max(kRawPoolBytes, 2 * longest + kRawStringSlack);
 }
 
-SaveResult saveRawJson(ConfigStore& store, const char* json, char* cfgBuffer,
-                       size_t cfgBufferLen, const std::string& keptPassword) {
+SaveResult saveRawJson(ConfigStore& store, const char* json, uint8_t* buffer, size_t bufferLen,
+                       const std::string& keptPassword) {
   if (json == nullptr) return SaveResult::Invalid;
   const RawJsonShape shape = scanRawJson(json);
   if (!shape.strict) return SaveResult::Invalid;
@@ -1398,7 +1203,7 @@ SaveResult saveRawJson(ConfigStore& store, const char* json, char* cfgBuffer,
   // it) is an explicit configuration.
   if (lamp.password.empty()) lamp.password = keptPassword;
   if (bodyNamed && !lamp.name.empty()) lamp.named = true;
-  return saveConfig(store, lamp, base, shade, expressions, homeMode, cfgBuffer, cfgBufferLen);
+  return saveConfig(store, lamp, base, shade, expressions, homeMode, buffer, bufferLen);
 }
 
 }  // namespace config_codec

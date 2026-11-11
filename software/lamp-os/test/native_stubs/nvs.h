@@ -27,3 +27,11 @@ esp_err_t nvs_set_blob(nvs_handle_t h, const char* key, const void* value, size_
 esp_err_t nvs_erase_key(nvs_handle_t h, const char* key);
 esp_err_t nvs_erase_all(nvs_handle_t h);
 esp_err_t nvs_find_key(nvs_handle_t h, const char* key, nvs_type_t* type);
+struct nvs_stats_t {
+  size_t used_entries;
+  size_t free_entries;
+  size_t available_entries;
+  size_t total_entries;
+  size_t namespace_count;
+};
+esp_err_t nvs_get_stats(const char* part_name, nvs_stats_t* stats);
