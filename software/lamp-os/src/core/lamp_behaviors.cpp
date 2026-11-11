@@ -68,8 +68,7 @@ void initBehaviors(lamp::Features features, lamp::Lamp& self) {
     fondnessEngine.setNearSource([]() -> const std::vector<lamp::NearbyCopy>& {
       return lamp::lampRoster.snapshotNear(LAMP_PRUNE_TIME_MS);
     });
-  }
-  if (lamp::any(features, lamp::Features::SocialBehavior)) {
+  } else {
     shadeSocialBehavior = lamp::SocialBehavior(&shade, 1200);
     // Live config pointer so SocialBehavior::control reads the current
     // socialMode each tick (user can change personality at runtime; the

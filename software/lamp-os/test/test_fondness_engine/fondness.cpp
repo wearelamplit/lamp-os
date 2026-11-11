@@ -318,9 +318,9 @@ void test_absence_decays_toward_zero() {
 }
 
 // A lamp with no greeting of its own to mark peers seen gets the near view
-// from its near source: each minute's commit marks an acknowledged peer seen,
-// while one still waiting for its greeting keeps aging toward its reunion.
-// With no source, nothing is marked.
+// from its near source. Each tracked minute's commit marks an acknowledged
+// peer seen, while one still waiting for its greeting keeps aging toward its
+// reunion. With no source, or at home, nothing is marked.
 void test_near_source_marks_only_acknowledged_peers() {
   static std::vector<NearbyCopy> near;
   near.clear();
@@ -346,6 +346,14 @@ void test_near_source_marks_only_acknowledged_peers() {
       TEST_ASSERT_TRUE(rig.store.peer(greeted.data(), rig.now).unseenMin >= 29);
     }
   }
+
+  Rig rig;
+  rig.store.set(greeted.data(), 4, rig.now);
+  rig.run(30);
+  rig.engine.setNearSource([]() -> const std::vector<NearbyCopy>& { return near; });
+  g_home = true;
+  rig.run(5);
+  TEST_ASSERT_TRUE(rig.store.peer(greeted.data(), rig.now).unseenMin >= 29);
 }
 
 // In home mode no input reaches a row or a slot, and the row's clocks stand.

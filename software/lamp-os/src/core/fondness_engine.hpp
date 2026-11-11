@@ -76,8 +76,8 @@ class FondnessEngine {
 
   // Home mode's live state, read at every input. Unset reads as away.
   void setHomeSource(bool (*homeActive)()) { homeActive_ = homeActive; }
-  // The near view, for a lamp whose greeting does not mark peers seen itself:
-  // each minute's commit then marks every acknowledged peer in it seen. Unset
+  // The near view, for a lamp whose greeting does not mark peers seen itself.
+  // Each minute's commit then marks every acknowledged peer in it seen. Unset
   // marks none.
   void setNearSource(const std::vector<NearbyCopy>& (*near)()) { near_ = near; }
 
