@@ -84,10 +84,44 @@ dark-in-their-color and back). Cooldowns + introvert fatigue throttle how
 often greetings fire. Full waveform + cadence contract:
 [`personality-greetings.md`](personality-greetings.md).
 
+#### Reunion and colour hint
+
+Both run in `SocialBehavior`'s organic greeting, and only while the engine
+tracks peers: the master switch is on and home mode is off (home mode, its
+app preview included, opts out whatever its social policy). An app greeting
+takes neither.
+
+- **Reunion.** Greeting a Smitten peer reads its row first: unseen for
+  `reunionMin` on-minutes or more, the greeting holds `reunionX` times as
+  long, so a warm profile breathes that many times more; every other field
+  is the profile's own. The greeting then calls `markSeen`, so the next one
+  is ordinary until the peer is away that long again. Any other greeting is
+  exactly the profile's. A reunion's cooldown runs from its end, since it
+  outlasts the base cooldown that runs from greeting start.
+- **Colour hint.** When a greeting of a Fond or Smitten peer ends, the lamp
+  rolls once per `hintCooldownMs`, whether or not the roll plays, at 100%
+  damped by copycat's crowd (`crowdHalf / (crowdHalf + nearby)`, the same
+  `ContagionTuning`). A hit plays one breathing transient on the shade in the
+  friend's `MSG_COLOR_INFO` stop 0 (its roster base colour when none
+  arrived), capped at `hintOpacity` percent, `TransientSource::Local` and
+  never announced. It breathes out and back twice over 8 s each, stops on its
+  own and is reaped, so the scene underneath is untouched once it ends.
+
+`ReunionTuning` (`behaviors/social_reunion.hpp`) holds the four numbers:
+`reunionMin` 240, `reunionX` 2, `hintCooldownMs` 600000, `hintOpacity` 30.
+They live in RAM, so a reboot restores them; on a debug build `reunion.get`
+prints them and `reunion.set <key> <value>` sets one (`reunionMin` 0..65535,
+`reunionX` 1..4, `hintCooldownMs` 0..3600000, `hintOpacity` 10..100; anything
+else is `[cmd] err reunion.set`). A reunion logs `[fondness] reunion <mac>`
+and a hint `[fondness] colour hint <mac>`. Both are fixed RAM in
+`SocialBehavior` (the tuning, a roll stamp and a generator); the hint's
+transient takes one of the lamp's own slots and allocates like any transient.
+
 The **snafu** variant replaces `SocialBehavior` with its own greeting
 stack, `snafu::Greeting` plus a `DotsBehavior` borrow/melt afterglow, in
 `lamps/snafu/greeting.{hpp,cpp}` and `lamps/snafu/dots_behavior.{hpp,cpp}`;
-the description above doesn't apply to snafu.
+the description above, reunion and colour hint included, doesn't apply to
+snafu, nor to lioness, whose Lions ambient behaviour greets instead.
 
 ### Crowd-dim
 
@@ -152,6 +186,8 @@ contract: [`moments.md`](moments.md).
   ticked by the framework.
 - `behaviors/social.{hpp,cpp}` — the greeting renderer + discovery /
   cooldown / fatigue gating.
+- `behaviors/social_reunion.{hpp,cpp}` — `ReunionTuning`, the reunion test
+  and waveform, and the colour hint's roll and invocation.
 - `core/moments.{hpp,cpp}`, `core/moment_math.{hpp,cpp}` — the Moment
   director and its pure arithmetic; `core/lamp_moments.cpp` binds it to the
   lamp.

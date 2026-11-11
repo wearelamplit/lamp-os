@@ -143,12 +143,29 @@ mode on for B with social left on: B logs no `[fondness] roll` line. Turn home
 mode off and reboot B (restoring `chainMaxHops` 3), then set B Smitten toward C too: when C's copy comes back, B logs `self` and does not copy it.
 `copy.set crowdHalf 64` on B lifts its `p=` back near 75%.
 
+**M7 — reunion and colour hint.** Two debug lamps A and B, A Smitten toward B,
+A Extrovert (no re-greet window). On A: `reunion.set reunionMin 10`,
+`reunion.get` confirms. Carry B out of range for 10+ minutes (A prunes it
+after 4), then bring it back: A logs `[fondness] reunion <B>` and the greet
+line shows `frames=2760` (Effusive's 1620 with its 1140-frame hold doubled),
+and the greeting visibly breathes twice as many times. When it ends A logs
+`[fondness] colour hint <B>` and the shade breathes faintly toward B's colour
+(stop 0 of B's base gradient) twice over about 16 s, then sits on A's own
+scene. Carry B away for 5 minutes and back: an ordinary greeting
+(`frames=1620`), no reunion line, and no hint, since 10 minutes have not
+passed since the last roll (`reunion.set hintCooldownMs 0` lets each greeting
+roll; in a crowd a roll misses more often). Set A Fond toward B: no reunion
+after an absence, but the hint still rolls. Turn home mode on for A with
+social left on: B's return logs neither line. `reunion.set reunionX 9` prints
+`[cmd] err reunion.set`; a reboot restores the defaults.
+
 ## Pass criteria
 
 - M1: inject/clear ACK lines; visible dim toward the mode floor and full
   recovery after clear; zero crash lines.
 - M2: greet line fires with frames/pulse/count exactly matching the profile
-  table for each disposition × socialMode tried.
+  table for each disposition × socialMode tried (a Smitten peer unseen for
+  4 on-hours greets as a reunion instead, M7).
 - M3: correct waveform + duration by eye for both extremes; ACK present.
 - M4: zero greet lines inside the regreet window, greet resumes after it.
 - M5: gradient blend observed (or the flat-color failure recorded as a
@@ -156,6 +173,9 @@ mode off and reboot B (restoring `chainMaxHops` 3), then set B Smitten toward C 
 - M6: hop 1 then hop 2 lines with the copies seen on B and C; no C line at
   `chainMaxHops 1`; one roll per 3 min per peer; no roll line in home mode;
   `self` on B for the chain coming back.
+- M7: one reunion line and a doubled hold after the absence, none straight
+  after; one hint per window, faint, toward stop 0, scene unchanged after;
+  neither line in home mode.
 
 ## Not covered here
 
