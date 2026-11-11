@@ -294,6 +294,21 @@ void test_peer_firing_every_second_rolls_once_per_window() {
   TEST_ASSERT_EQUAL_UINT(600 - rolls, refused);
 }
 
+// A peer that rolled once and went quiet for a whole millis() wrap rolls again.
+void test_peer_quiet_for_a_wrap_rolls_again() {
+  Copycat c;
+  uint8_t mac[6];
+  macFor(11, mac);
+  const uint32_t rolledMs = 1000;
+  TEST_ASSERT_EQUAL(CopyOutcome::Skip,
+                    c.decide(mac, 5, SocialMode::Ambivert, 0, rolledMs, 100, 0).outcome);
+  for (uint64_t now = rolledMs; now < rolledMs + (1ull << 32); now += 1ull << 28) {
+    c.retire(static_cast<uint32_t>(now));
+  }
+  TEST_ASSERT_EQUAL(CopyOutcome::Skip,
+                    c.decide(mac, 5, SocialMode::Ambivert, 0, rolledMs + 10, 100, 0).outcome);
+}
+
 // 500 warm peers each fire once inside one window: at most kSlots roll.
 void test_crowd_of_500_rolls_at_most_the_table() {
   Copycat c;
@@ -366,6 +381,7 @@ int main() {
   RUN_TEST(test_familiar_boost);
   RUN_TEST(test_copy_carries_one_more_hop);
   RUN_TEST(test_peer_firing_every_second_rolls_once_per_window);
+  RUN_TEST(test_peer_quiet_for_a_wrap_rolls_again);
   RUN_TEST(test_crowd_of_500_rolls_at_most_the_table);
   RUN_TEST(test_cold_peers_take_no_roll);
   RUN_TEST(test_set_tuning_checks_key_and_range);
