@@ -12,6 +12,8 @@
 # Env vars:
 #   PORT         esptool upload port (required if multiple boards attached)
 #   RELEASE_TAG  GitHub release tag to pull from: beta (default) or a version tag such as v1.3.0
+#   IMAGE        flash this local wisp-firmware-signed.bin, skip the download (a
+#                locally built signed image)
 #
 # For people WITHOUT the signing key: downloads a prebuilt image, never builds
 # or signs. Requires: curl, esptool (pip install esptool).
@@ -37,11 +39,19 @@ fi
 cleanup() { rm -f "$TMPFILE"; }
 trap cleanup EXIT
 
-echo "[wisp:flash:release] downloading ${ASSET} from release '${RELEASE_TAG}' (${REPO})"
-if ! curl -fSL --retry 3 -o "${TMPFILE}" "${URL}"; then
-  echo "ERROR: asset '${ASSET}' not found in release '${RELEASE_TAG}'." >&2
-  echo "       Publish a release for tag '${RELEASE_TAG}' on GitHub, then retry." >&2
-  exit 1
+if [ -n "${IMAGE:-}" ]; then
+  if [ ! -s "$IMAGE" ]; then
+    echo "ERROR: IMAGE=${IMAGE} not found or empty." >&2
+    exit 1
+  fi
+  cp "$IMAGE" "$TMPFILE"
+else
+  echo "[wisp:flash:release] downloading ${ASSET} from release '${RELEASE_TAG}' (${REPO})"
+  if ! curl -fSL --retry 3 -o "${TMPFILE}" "${URL}"; then
+    echo "ERROR: asset '${ASSET}' not found in release '${RELEASE_TAG}'." >&2
+    echo "       Publish a release for tag '${RELEASE_TAG}' on GitHub, then retry." >&2
+    exit 1
+  fi
 fi
 
 if [ ! -s "$TMPFILE" ]; then
@@ -62,4 +72,4 @@ PORT_ARG=()
 "${ESPTOOL[@]}" ${PORT_ARG[@]+"${PORT_ARG[@]}"} --chip esp32c6 --baud 921600 write_flash \
   "${APP0_OFFSET}" "$TMPFILE"
 
-echo "[wisp:flash:release] done — wisp updated to ${RELEASE_TAG}, name/config kept."
+echo "[wisp:flash:release] done — wisp updated to ${IMAGE:-${RELEASE_TAG}}, name/config kept."
