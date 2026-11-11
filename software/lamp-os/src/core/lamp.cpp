@@ -1078,7 +1078,7 @@ void lamp::Lamp::tick() {
   // Debounced disposition commit: runs the actual NVS write once the user
   // has been idle for kDispositionFlushIdleMs (5s). Cheap when nothing is
   // dirty (single bool check + uint32_t subtraction).
-  config.maybeFlushDispositions(millis());
+  config.maybeFlushDispositions(lamp::uptimeMs());
   // Like the drains, no NVS save runs while firmware chunks are being written.
   if (!firmwareReceiver.isInProgress()) config.maybeRetryPersist(millis());
   if (pendingFlushDispositionsRequested) {
