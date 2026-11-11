@@ -12,6 +12,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   once stayed listed as online while any other lamp kept advertising, and
   coming back to My Lamps (after opening a lamp, say) brought back every lamp
   from the last scan, switched off or not.
+- **Mesh updates judge a lamp's signal by that lamp.** A lamp read a peer's
+  signal from whichever lamp last passed its presence along, so a weak direct
+  link could look strong and draw a firmware offer that never got through. It
+  now goes by the signal heard straight from that lamp.
 
 ## 1.3.4
 

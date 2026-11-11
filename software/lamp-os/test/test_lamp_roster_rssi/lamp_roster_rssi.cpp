@@ -21,6 +21,7 @@
 // Native-test seam: include the real .cpp so identity + RSSI rules are
 // exercised against the shipped class, not a hand-rolled mirror.
 #include "components/network/mesh/lamp_roster.cpp"
+#include "components/network/mesh/proximity.hpp"
 
 using namespace lamp;
 
@@ -118,6 +119,33 @@ void test_esp_now_only_peer_has_sentinel_last_rssi() {
   r.addOrUpdateFromEspNow("phantom", mac, kNoColor, kNoColor, 0, 0, 0, nullptr,
                           nullptr, false, 0, false, nullptr, false, -65);
   TEST_ASSERT_EQUAL_INT8(-127, lastRssiByName(r, "phantom"));
+}
+
+// A far peer's HELLO arrives once directly (weak) and again via a near relayer
+// (strong). The stored ESP-NOW RSSI must stay the direct reading, the link an
+// OFFER to that peer would actually use.
+void test_relayed_hello_keeps_direct_espnow_rssi() {
+  LampRoster r;
+  const uint8_t far[6]   = {0xC4, 0xDD, 0x57, 0xEB, 0x64, 0x60};
+  const uint8_t relay[6] = {0x10, 0x20, 0x30, 0x40, 0x50, 0x60};
+  r.addOrUpdateFromEspNow("far", far, kNoColor, kNoColor, 0, 0, 0, nullptr,
+                          nullptr, false, 0, false, nullptr, false,
+                          helloRosterRssi(far, far, -88));
+  r.addOrUpdateFromEspNow("far", far, kNoColor, kNoColor, 0, 0, 0, nullptr,
+                          nullptr, false, 0, false, nullptr, false,
+                          helloRosterRssi(relay, far, -51));
+  TEST_ASSERT_EQUAL_INT8(-88, espnowRssiByName(r, "far"));
+}
+
+// Heard only by relay: no direct reading exists, so the RSSI stays unknown.
+void test_relay_only_peer_has_unknown_espnow_rssi() {
+  LampRoster r;
+  const uint8_t far[6]   = {0xC4, 0xDD, 0x57, 0xEB, 0x64, 0x61};
+  const uint8_t relay[6] = {0x10, 0x20, 0x30, 0x40, 0x50, 0x60};
+  r.addOrUpdateFromEspNow("far", far, kNoColor, kNoColor, 0, 0, 0, nullptr,
+                          nullptr, false, 0, false, nullptr, false,
+                          helloRosterRssi(relay, far, -51));
+  TEST_ASSERT_EQUAL_INT8(-127, espnowRssiByName(r, "far"));
 }
 
 // ---- MAC identity --------------------------------------------------------
@@ -313,6 +341,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_unparseable_ble_address_dropped);
   RUN_TEST(test_empty_hello_name_does_not_clobber_known_name);
   RUN_TEST(test_empty_ble_name_does_not_clobber_known_name);
+  RUN_TEST(test_relayed_hello_keeps_direct_espnow_rssi);
+  RUN_TEST(test_relay_only_peer_has_unknown_espnow_rssi);
 
   return UNITY_END();
 }

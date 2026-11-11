@@ -49,6 +49,14 @@ inline bool isDirectHello(const uint8_t frameSrc[6],
   return std::memcmp(frameSrc, helloOriginator, 6) == 0;
 }
 
+// The RSSI a HELLO may record against its originator: a relayed copy measures
+// the relayer's link, so it reads as unknown (-127), which leaves a stored
+// reading intact.
+inline int8_t helloRosterRssi(const uint8_t frameSrc[6],
+                              const uint8_t helloOriginator[6], int8_t rssi) {
+  return isDirectHello(frameSrc, helloOriginator) ? rssi : -127;
+}
+
 // Relevance order for the app-facing nearby list: near peers before mesh-only,
 // then most-recently-seen, then strongest RSSI. Strict-weak-ordering (a
 // lexicographic compose of total preorders), so ble_control's partial_sort
