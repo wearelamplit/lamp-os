@@ -136,6 +136,7 @@ struct NearbyCopy {
   uint32_t lastSeenNearMs = 0;
   uint32_t lastSeenBleMs = 0;
   lamp_protocol::LampVariant variant = lamp_protocol::LampVariant::Unknown;
+  bool     acknowledged = false;  // greeted, or consumed by home mode, since it arrived
 };
 static_assert(std::is_trivially_copyable<NearbyCopy>::value,
               "snapshot entries must be a trivial copy");

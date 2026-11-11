@@ -25,6 +25,7 @@
 
 #include "behaviors/configurator.hpp"
 #include "behaviors/greetable.hpp"
+#include "behaviors/social.hpp"
 #include "behaviors/zone_preview_surface.hpp"
 #include "components/apply/apply_brightness.hpp"
 #include "components/apply/apply_expressions.hpp"
@@ -278,6 +279,18 @@ namespace {
 
 constexpr size_t kSerialCmdMax = 1024;
 
+// `<key> <decimal>`, a tuning command's arguments; ends `key` in place. False
+// when either is missing or the value is not a bare decimal.
+bool parseTuningArg(char* args, const char*& key, unsigned long& value) {
+  char* sep = strchr(args, ' ');
+  if (!sep || !isdigit(static_cast<unsigned char>(sep[1]))) return false;
+  *sep = '\0';
+  char* end = nullptr;
+  value = strtoul(sep + 1, &end, 10);
+  key = args;
+  return *end == '\0';
+}
+
 struct YawnArg {
   const char* name;
   const char* key;
@@ -461,12 +474,9 @@ void runSerialCommand(char* line, size_t len) {
   // `copy.set <key> <value>`, key a ContagionTuning member; RAM only, so a
   // reboot restores the defaults.
   if (strncmp(line, "copy.set ", 9) == 0) {
-    char* key = line + 9;
-    char* sep = strchr(key, ' ');
-    if (sep) *sep = '\0';
-    char* end = nullptr;
-    const unsigned long value = sep ? strtoul(sep + 1, &end, 10) : 0;
-    if (!sep || !isdigit(static_cast<unsigned char>(sep[1])) || *end != '\0' ||
+    const char* key = nullptr;
+    unsigned long value = 0;
+    if (!parseTuningArg(line + 9, key, value) ||
         !lamp::setContagionTuning(socialEchoObserver.tuning(), key, value)) {
       Serial.println("[cmd] err copy.set");
       return;
@@ -538,6 +548,27 @@ void runSerialCommand(char* line, size_t len) {
       ++n;
     }
     Serial.printf("[cmd] ok fond.peers n=%u\n", (unsigned)n);
+    return;
+  }
+
+  if (strcmp(line, "reunion.get") == 0) {
+    const lamp::ReunionTuning& t = shadeSocialBehavior.reunionTuning();
+    Serial.printf("[cmd] ok reunion reunionMin=%u reunionX=%u hintCooldownMs=%lu hintOpacity=%u\n",
+                  (unsigned)t.reunionMin, (unsigned)t.reunionX,
+                  (unsigned long)t.hintCooldownMs, (unsigned)t.hintOpacity);
+    return;
+  }
+
+  // `reunion.set <key> <value>`, key a ReunionTuning member; RAM only.
+  if (strncmp(line, "reunion.set ", 12) == 0) {
+    const char* key = nullptr;
+    unsigned long value = 0;
+    if (!parseTuningArg(line + 12, key, value) ||
+        !lamp::setReunionTuning(shadeSocialBehavior.reunionTuning(), key, value)) {
+      Serial.println("[cmd] err reunion.set");
+      return;
+    }
+    Serial.printf("[cmd] ok reunion.set %s=%lu\n", key, value);
     return;
   }
 

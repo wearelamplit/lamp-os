@@ -139,6 +139,11 @@ Introvert is the personality that gets drained; Ambivert is balanced;
 Extrovert is eager but bounded. Snub and PartialSnub greetings are
 gated by the same cooldown as warm greetings, no bypass paths.
 
+A Smitten peer back after a long absence gets a **reunion**: the same
+profile with its hold, and so its breaths, doubled, once per absence. The end
+of a Fond or Smitten greeting can also borrow a faint breath of the friend's
+colour. Both are in [`social.md`](social.md#reunion-and-colour-hint).
+
 ## Effect glossary
 
 - **Snub**, ease from the shade toward the peer color while dimming to
