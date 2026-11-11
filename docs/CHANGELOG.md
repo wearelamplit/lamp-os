@@ -51,6 +51,18 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   for (about 5 of 100 lamps, about 30 of 80), a chip can sit on its previous
   colour, or a mid-fade colour, for one or more drift steps.
 
+### Changed
+- **Settings take far less room on the lamp.** A lamp now keeps its name,
+  password, colours, strips, knockout and home mode as one compact record
+  instead of the text it stored before, which leaves room for more
+  remembered lamps and more expressions beside them. The first time a lamp
+  starts on this firmware it moves its settings over by itself and checks
+  the copy before removing the old one, so a power cut at any moment leaves
+  it with its settings; nothing changes in the app or Web Config. A lamp
+  flashed back to an older release afterwards starts with default name,
+  colours and no password (it keeps its expressions); flashed forward again
+  it gets its settings back.
+
 ## 1.3.3
 
 ### Added
