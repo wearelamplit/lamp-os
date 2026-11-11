@@ -56,10 +56,9 @@ template <size_t CAPACITY = 64>
 class DedupRing {
  public:
   // True if (mac, msgType, seq) is new, and records it at nowMs; false if it
-  // was recorded within kDedupMaxAgeMs. nowMs is millis(). A record() clears
-  // every entry past the age, so an entry no record() scans for a full 49.7-day
-  // millis() wrap reads young again, and a matching tuple in the ~80 s around
-  // that wrap point is dropped as a repeat.
+  // was recorded within kDedupMaxAgeMs. nowMs is millis(). An entry that sits
+  // a full 49.7-day millis() wrap without being aged out reads young again, so
+  // a matching tuple in the ~80 s around that wrap point drops as a repeat.
   bool record(const uint8_t mac[6], uint8_t msgType, uint16_t seq,
               uint32_t nowMs) {
     LAMP_PROTOCOL_PORTMUX_ENTER(&mux_);

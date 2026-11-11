@@ -1,5 +1,5 @@
-// Native tests for SeqSource, the one seq every wisp frame draws from: each
-// boot starts at a random value, never at a fixed one.
+// Native tests for SeqSource, the seq the wisp's beacons share: each boot
+// starts at a random value, never at a fixed one.
 
 #include <unity.h>
 
