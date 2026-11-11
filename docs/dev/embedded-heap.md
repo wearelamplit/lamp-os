@@ -263,7 +263,7 @@ The arithmetic, every case with at least 29 entries to spare
   only what the string held: a string full of fully escaped rest leaves room
   for few expressions, and one full of expressions has a short rest. Over
   every legacy shape up to 4,000 bytes, saved split and trimmed to whole, the
-  page model leaves 87 entries spare at the tightest
+  page model leaves 86 entries spare at the tightest
   (`test_the_first_save_after_an_update_fits`).
 
 Those bounds hold for any arrangement of entries across the pages. The
