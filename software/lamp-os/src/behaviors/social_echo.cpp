@@ -40,8 +40,15 @@ bool SocialEchoObserver::yawnPending() const {
   return false;
 }
 
+bool SocialEchoObserver::yawnBooked() const {
+  for (const auto& p : pending_) {
+    if (p.used && p.inv.type == kYawnDescriptorData.id) return true;
+  }
+  return false;
+}
+
 bool SocialEchoObserver::yawnedRecently(uint32_t nowMs) const {
-  return yawnPending() ||
+  return yawnBooked() ||
          manager_.playedWithin(kYawnDescriptorData.id, yawns_.tuning.yawnSelfFloorMs, nowMs);
 }
 

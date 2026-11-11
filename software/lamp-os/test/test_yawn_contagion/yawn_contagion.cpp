@@ -415,6 +415,25 @@ void test_engine_off_drops_a_booked_yawn_back() {
   TEST_ASSERT_EQUAL_size_t(0, s_registered.size());
 }
 
+// A yawn the mirror booked with the engine off holds the floor once it is on.
+void test_mirror_booked_yawn_holds_the_floor() {
+  Rig r;
+  // An Introvert books one mirror copy, its floor then holding every other
+  // peer; the yawn-back would fire for certain at 200% x 0.5.
+  r.config.lamp.socialMode = SocialMode::Introvert;
+  r.echo.tuning().copyRollCooldownMs = 0;
+  r.echo.yawnTuning().backPct = {0, 0, 0, 200, 200};
+  r.config.dispositions().setEngineEnabled(false, 0);
+  for (uint8_t i = 0; i < 60; ++i) {
+    const uint8_t mac[6] = {9, 9, 9, 9, 9, i};
+    r.echo.onPeerExpression(mac, yawnAt(0));
+  }
+  r.config.dispositions().setEngineEnabled(true, 0);
+  r.echo.onPeerExpression(kPeerMac, yawnAt(0));
+  r.advance(kMirrorDelayFloorMs + kMirrorJitterMs + 1);
+  TEST_ASSERT_EQUAL_size_t(1, s_registered.size());
+}
+
 // No tired yawn during an OTA or while a local Test plays.
 void test_tired_yawn_stands_down_for_ota_and_test() {
   Rig r;
@@ -490,6 +509,7 @@ int main() {
   RUN_TEST(test_booked_yawn_back_holds_the_floor);
   RUN_TEST(test_tired_roll_waits_for_a_booked_yawn_back);
   RUN_TEST(test_engine_off_drops_a_booked_yawn_back);
+  RUN_TEST(test_mirror_booked_yawn_holds_the_floor);
   RUN_TEST(test_tired_yawn_stands_down_for_ota_and_test);
   RUN_TEST(test_roll_stamp_stays_old_a_wrap_later);
   RUN_TEST(test_tuning_range_checks);
