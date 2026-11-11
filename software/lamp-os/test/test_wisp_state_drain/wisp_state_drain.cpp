@@ -47,7 +47,7 @@ void fillTwo(const uint8_t mineRgb[6], const uint8_t w[4], bool withW) {
                                       entries, withW ? w : nullptr, 2);
   lp::ParsedWispState ws;
   TEST_ASSERT_TRUE(lp::parseWispState(buf, n, ws));
-  lamp::fillPendingWispState(gSlot, ws, nullptr);
+  lamp::fillPendingWispState(gSlot, ws, {});
 }
 
 void assertColor(Color want, Color got) {
@@ -230,7 +230,7 @@ void fillFrame(Color base, Color shade, Trailer form, Color toBase = Color(),
   }
   lp::ParsedWispState ws;
   TEST_ASSERT_TRUE(lp::parseWispState(buf, n, ws));
-  lamp::fillPendingWispState(gSlot, ws, kMine);
+  lamp::fillPendingWispState(gSlot, ws, lamp::decodeOwnWispDriftFade(ws, kMine));
 }
 
 constexpr uint32_t kFrameMs = 10;

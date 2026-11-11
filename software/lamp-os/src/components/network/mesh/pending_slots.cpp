@@ -4,9 +4,23 @@
 
 namespace lamp {
 
+OwnWispDriftFade decodeOwnWispDriftFade(const lamp_protocol::ParsedWispState& ws,
+                                        const uint8_t selfMac[6]) {
+  OwnWispDriftFade own;
+  const uint8_t* e =
+      lamp_protocol::findWispStateEntry(ws.entries, ws.count, selfMac);
+  if (e) {
+    const auto idx = static_cast<uint8_t>((e - ws.entries) /
+                                          lamp_protocol::WISP_STATE_ENTRY_SIZE);
+    own.fade = lamp_protocol::lookupWispDriftFade(
+        ws.trailer, ws.trailerLen, idx, own.record, &own.recordWritten);
+  }
+  return own;
+}
+
 void fillPendingWispState(PendingWispState& slot,
                           const lamp_protocol::ParsedWispState& ws,
-                          const uint8_t selfMac[6]) {
+                          const OwnWispDriftFade& own) {
   std::memcpy(slot.sourceMac, ws.sourceMac, 6);
   slot.count = ws.count;
   const size_t n = ws.entries ? ws.count : 0;
@@ -19,16 +33,8 @@ void fillPendingWispState(PendingWispState& slot,
   } else {
     std::memset(slot.w, 0, n * lamp_protocol::WISP_STATE_W_SIZE);
   }
-  slot.fade = lamp_protocol::WispDriftFadeLookup::None;
-  const uint8_t* own =
-      selfMac ? lamp_protocol::findWispStateEntry(ws.entries, ws.count, selfMac)
-              : nullptr;
-  if (own) {
-    const auto idx = static_cast<uint8_t>((own - ws.entries) /
-                                          lamp_protocol::WISP_STATE_ENTRY_SIZE);
-    slot.fade = lamp_protocol::lookupWispDriftFade(ws.trailer, ws.trailerLen,
-                                                   idx, slot.fadeRecord);
-  }
+  slot.fade = own.fade;
+  if (own.recordWritten) slot.fadeRecord = own.record;
 }
 
 void fillPendingWispClaim(PendingWispClaim& slot,

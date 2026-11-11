@@ -7,7 +7,8 @@
 //
 // Used by transient override + wisp-hello ingest paths:
 //   - MeshLink::handleRecv (WiFi recv task / Core 0) posts a T, or fills
-//     one in place through postWith, under portMUX, no heap, no parsing.
+//     one in place through postWith. Under portMUX it only copies, with no
+//     heap; any decode runs before the post.
 //   - The loop task on Core 1 drains the typed payload via drain() and
 //     dispatches into the override / wisp-cache modules.
 //
