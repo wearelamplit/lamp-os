@@ -4,6 +4,7 @@
 //   - entries accumulate across frames (the wisp rotates a partial window).
 //   - per-entry staleness eviction at kStaleMs.
 //   - upsert refreshes in place; a full cache evicts the oldest entry.
+//   - keepColors holds a lamp's own fresh colours only.
 
 #include <unity.h>
 
@@ -170,6 +171,32 @@ void test_full_cache_evicts_oldest() {
   TEST_ASSERT_TRUE(cache.findPaint(secondOldest, nowMs, base, shade));
 }
 
+// keepColors holds only a lamp's own fresh colours: a lamp new to the cache
+// takes the ones given, the one it evicts from a full cache included.
+void test_keep_colors_takes_given_colours_for_a_new_lamp() {
+  WispFleetCache cache;
+  uint8_t mac[6];
+  for (uint8_t i = 0; i < WispFleetCache::kCapacity; ++i) {
+    uint8_t frame[12];
+    macForIndex(mac, i);
+    makePaintEntry(frame, mac, i, i);
+    cache.upsertPaints(frame, nullptr, 1, static_cast<uint32_t>(1000 + i));
+  }
+  const uint8_t base[4] = {0xE1, 0xE2, 0xE3, 0xE4};
+  const uint8_t shade[4] = {0xF1, 0xF2, 0xF3, 0xF4};
+  macForIndex(mac, 0xEE);
+  cache.upsertPaint(mac, base, shade, 1200, true);
+  uint8_t gotBase[4], gotShade[4];
+  TEST_ASSERT_TRUE(cache.findPaint(mac, 1200, gotBase, gotShade));
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(base, gotBase, 4);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(shade, gotShade, 4);
+
+  const uint8_t other[4] = {1, 2, 3, 4};
+  cache.upsertPaint(mac, other, other, 1300, true);
+  TEST_ASSERT_TRUE(cache.findPaint(mac, 1300, gotBase, gotShade));
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(base, gotBase, 4);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_two_entry_round_trip);
@@ -179,5 +206,6 @@ int main(int, char**) {
   RUN_TEST(test_boundary_age_still_fresh);
   RUN_TEST(test_upsert_refreshes_in_place);
   RUN_TEST(test_full_cache_evicts_oldest);
+  RUN_TEST(test_keep_colors_takes_given_colours_for_a_new_lamp);
   return UNITY_END();
 }

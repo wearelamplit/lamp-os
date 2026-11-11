@@ -43,10 +43,9 @@ void fillPendingWispState(PendingWispState& slot,
   if (!ws.w || own.trailer == lamp_protocol::WispDriftFadeTrailer::Malformed) {
     return;
   }
-  // First record per entry wins, as in lookupWispDriftFade.
   lamp_protocol::walkWispDriftFade(ws.trailer, ws.trailerLen, [&](const uint8_t* r) {
     const uint8_t i = r[0];
-    if (i >= n || i == own.index || slot.entryTargeted(i)) return;
+    if (i >= n || i == own.index) return;
     uint8_t* e = &slot.entries[i * lamp_protocol::WISP_STATE_ENTRY_SIZE];
     uint8_t* w = &slot.w[i * lamp_protocol::WISP_STATE_W_SIZE];
     std::memcpy(e + 6, r + 1, 3);

@@ -41,7 +41,7 @@ enum class Form {
   PartialMine,       // records for 1 and mine, marked partial
   PartialOther,      // a record for 1, marked partial
   OwnAbsent,         // a record at mine's index, mine not in the entries
-  FoundThenMalformed,// mine's record, then a TLV that overruns the frame
+  FoundThenMalformed,// records for mine and 0, then a TLV that overruns the frame
   NoTrailer,         // W plane, no trailer
   NoW,               // entries only
 };
@@ -96,7 +96,7 @@ void build(Frame& f, Form form, uint8_t seed) {
     case Form::PartialMine: rec(0, 1); rec(1, kMineIdx); n = 2; partial = true; break;
     case Form::PartialOther: rec(0, 1); n = 1; partial = true; break;
     case Form::OwnAbsent: rec(0, kMineIdx); n = 1; break;
-    case Form::FoundThenMalformed: rec(0, kMineIdx); n = 1; break;
+    case Form::FoundThenMalformed: rec(0, kMineIdx); rec(1, 0); n = 2; break;
     case Form::NoTrailer:
     case Form::NoW: break;
   }
