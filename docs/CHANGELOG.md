@@ -25,6 +25,11 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   the copy on, so a lamp near it can copy the copy. Each hop is half as likely
   as the one before and a chain stops after 3 hops. Lamps on older firmware
   still copy, they just don't pass it on.
+- **Yawns are catching.** An introvert lamp worn out from greeting now and
+  then yawns, and a lamp nearby that sees it may yawn back a moment later.
+  The fonder it is of the yawner the likelier, a crowded room makes it
+  rarer, and a lamp yawns back at any one lamp at most once every 5 minutes.
+  Home mode keeps it out.
 
 ### Fixed
 - **Mesh updates reach lamps after the sending lamp restarts.** A lamp that
