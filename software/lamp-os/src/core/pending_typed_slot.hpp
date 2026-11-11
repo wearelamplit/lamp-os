@@ -6,8 +6,8 @@
 // payload instead of a byte buffer.
 //
 // Used by transient override + wisp-hello ingest paths:
-//   - MeshLink::handleRecv (WiFi recv task / Core 0) does a single
-//     T copy under portMUX, no heap, no parsing.
+//   - MeshLink::handleRecv (WiFi recv task / Core 0) posts a T, or fills
+//     one in place through postWith, under portMUX, no heap, no parsing.
 //   - The loop task on Core 1 drains the typed payload via drain() and
 //     dispatches into the override / wisp-cache modules.
 //
@@ -18,9 +18,9 @@
 //                      time). Newest writer wins.
 //   - postWith(mux, fill): as post, but fill(payload) writes the payload in
 //                      place under portMUX, so the poster needs no staging
-//                      copy of T. fill runs with interrupts off on this core:
-//                      it must be a bounded copy that never blocks, logs or
-//                      allocates. payload holds the previous post's bytes on
+//                      copy of T. fill runs with interrupts off on this core,
+//                      so it must be a bounded copy that never blocks, logs
+//                      or allocates. payload holds the previous post's bytes on
 //                      entry.
 //   - drain(mux, out): if valid, copies payload into out, clears valid,
 //                      returns true. If not valid, returns false without

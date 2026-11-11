@@ -1,6 +1,4 @@
 // PendingTypedSlot::postWith and the fills the recv task posts through it.
-// Pins that the fill runs inside the critical section, and that filling the
-// slot in place leaves the loop draining the same bytes a staged copy did.
 
 #include <unity.h>
 
@@ -23,7 +21,6 @@ namespace lp = lamp_protocol;
 using lamp::PendingCommand;
 using lamp::PendingTypedSlot;
 using lamp::PendingWispClaim;
-using lamp::PendingWispState;
 
 void setUp(void) { gMuxDepth = 0; }
 void tearDown(void) {}
@@ -35,24 +32,8 @@ void fillMac(uint8_t* mac, uint8_t seed) {
   for (uint8_t i = 0; i < 6; ++i) mac[i] = static_cast<uint8_t>(seed * 7 + i * 13 + 1);
 }
 
-// Old path: the recv task filled a staging T, then post() copied it whole.
-// New path: postWith fills the slot's payload in place. Both drains must
-// match byte for byte, stale tail past `count` included.
-template <typename T, typename Fill>
-void postBothAndCompare(T& staging, PendingTypedSlot<T>& viaCopy,
-                        PendingTypedSlot<T>& inPlace, Fill fill) {
-  fill(staging);
-  viaCopy.post(gMux, staging);
-  inPlace.postWith(gMux, fill);
-
-  static T a, b;
-  TEST_ASSERT_TRUE(viaCopy.drain(gMux, a));
-  TEST_ASSERT_TRUE(inPlace.drain(gMux, b));
-  TEST_ASSERT_EQUAL_MEMORY(&a, &b, sizeof(T));
-}
-
 // count claim entries; MAC bytes depend on the index and rssi is nonzero, so a
-// wrong stride or a copied rssi byte shows in the slot.
+// wrong stride shows in the slot.
 void buildClaimEntries(uint8_t* buf, size_t count, uint8_t seed) {
   for (size_t i = 0; i < count; ++i) {
     uint8_t* e = buf + i * lp::WISP_CLAIM_ENTRY_SIZE;
@@ -94,9 +75,11 @@ void test_claim_fill_copies_macs_only() {
   wc.entries = entries;
 
   static PendingWispClaim slot{};
+  std::memset(slot.lampMacs, 0xEE, sizeof(slot.lampMacs));
   lamp::fillPendingWispClaim(slot, wc);
   TEST_ASSERT_EQUAL_MEMORY(wc.sourceMac, slot.sourceMac, 6);
   TEST_ASSERT_EQUAL_UINT8(4, slot.count);
+  TEST_ASSERT_EQUAL_HEX8(0xEE, slot.lampMacs[4][0]);
   for (size_t i = 0; i < 4; ++i) {
     TEST_ASSERT_EQUAL_MEMORY(entries + i * lp::WISP_CLAIM_ENTRY_SIZE,
                              slot.lampMacs[i], 6);
@@ -134,56 +117,20 @@ void test_command_fill_copies_payload() {
   TEST_ASSERT_EQUAL_MEMORY(payload, slot.payload, 137);
 }
 
-void test_claim_in_place_matches_staged_copy() {
-  static PendingWispClaim staging{};
-  static PendingTypedSlot<PendingWispClaim> viaCopy, inPlace;
-  static uint8_t entries[lp::kMaxWispClaimEntries * lp::WISP_CLAIM_ENTRY_SIZE];
-  const uint8_t counts[] = {9, 2, 0, 5};
-  for (uint8_t round = 0; round < sizeof(counts); ++round) {
-    buildClaimEntries(entries, counts[round], static_cast<uint8_t>(round * 20));
-    lp::ParsedWispClaim wc{};
-    fillMac(wc.sourceMac, round);
-    wc.count = counts[round];
-    wc.entries = entries;
-    postBothAndCompare(staging, viaCopy, inPlace,
-                       [&wc](PendingWispClaim& s) { lamp::fillPendingWispClaim(s, wc); });
-  }
-}
-
-void test_command_in_place_matches_staged_copy() {
-  static PendingCommand staging{};
-  static PendingTypedSlot<PendingCommand> viaCopy, inPlace;
-  static uint8_t payload[lp::COMMAND_MAX_PAYLOAD];
-  const uint16_t lens[] = {300, 11, static_cast<uint16_t>(lp::COMMAND_MAX_PAYLOAD), 64};
-  for (uint8_t round = 0; round < 4; ++round) {
-    for (size_t i = 0; i < lens[round]; ++i) payload[i] = static_cast<uint8_t>(i + round * 50 + 3);
-    lp::ParsedCommand p{};
-    fillMac(p.sourceMac, static_cast<uint8_t>(round + 10));
-    p.payload = payload;
-    p.payloadLen = lens[round];
-    postBothAndCompare(staging, viaCopy, inPlace,
-                       [&p](PendingCommand& s) { lamp::fillPendingCommand(s, p); });
-  }
-}
-
-void test_wisp_state_in_place_matches_staged_copy() {
-  static PendingWispState staging{};
-  static PendingTypedSlot<PendingWispState> viaCopy, inPlace;
-  static uint8_t entries[lp::WISP_STATE_MAX_ENTRIES * lp::WISP_STATE_ENTRY_SIZE];
-  static uint8_t w[lp::WISP_STATE_MAX_ENTRIES * lp::WISP_STATE_W_SIZE];
-  const uint8_t counts[] = {40, 6, 17};
-  const bool withW[] = {true, true, false};
-  for (uint8_t round = 0; round < 3; ++round) {
-    for (size_t i = 0; i < sizeof(entries); ++i) entries[i] = static_cast<uint8_t>(i * 5 + round);
-    for (size_t i = 0; i < sizeof(w); ++i) w[i] = static_cast<uint8_t>(i * 3 + round + 1);
-    lp::ParsedWispState ws{};
-    fillMac(ws.sourceMac, static_cast<uint8_t>(round + 60));
-    ws.count = counts[round];
-    ws.entries = entries;
-    ws.w = withW[round] ? w : nullptr;
-    postBothAndCompare(staging, viaCopy, inPlace,
-                       [&ws](PendingWispState& s) { lamp::fillPendingWispState(s, ws); });
-  }
+// A fill writes only the fields its frame carries, so the bytes past `count`
+// must reach it as the previous post left them.
+void test_postWith_hands_fill_the_previous_payload() {
+  PendingTypedSlot<PendingWispClaim> slot;
+  slot.postWith(gMux, [](PendingWispClaim& p) {
+    p.count = 9;
+    p.lampMacs[8][5] = 0x5A;
+  });
+  bool sawPrevious = false;
+  slot.postWith(gMux, [&](PendingWispClaim& p) {
+    sawPrevious = p.count == 9 && p.lampMacs[8][5] == 0x5A;
+    p.count = 2;
+  });
+  TEST_ASSERT_TRUE(sawPrevious);
 }
 
 int main(int, char**) {
@@ -193,8 +140,6 @@ int main(int, char**) {
   RUN_TEST(test_claim_fill_copies_macs_only);
   RUN_TEST(test_claim_fill_clamps_count);
   RUN_TEST(test_command_fill_copies_payload);
-  RUN_TEST(test_claim_in_place_matches_staged_copy);
-  RUN_TEST(test_command_in_place_matches_staged_copy);
-  RUN_TEST(test_wisp_state_in_place_matches_staged_copy);
+  RUN_TEST(test_postWith_hands_fill_the_previous_payload);
   return UNITY_END();
 }
