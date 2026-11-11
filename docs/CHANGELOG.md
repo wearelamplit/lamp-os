@@ -7,8 +7,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 
 ## 1.3.4
 
-Wisps are flashed over USB only: reflash each wisp to get the wisp changes
-below (the restart fix and the Lamps tab chips).
+Wisps update over USB only. Reflash each wisp so app commands still reach it
+after the lamp you're connected through restarts, and so it stops logging a
+stray error after saving settings.
 
 ### Added
 - **Lamps have a social life of their own.** Each lamp remembers the lamps it
