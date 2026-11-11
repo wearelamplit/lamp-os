@@ -25,9 +25,9 @@ inline uint32_t seqEntropy() { return nativeSeqEntropy(); }
 // value. Seqs carry no order: a receiver may only compare them for equality.
 // See docs/dev/networking.md ("Sequence numbers and dedup").
 //
-// The first next() draws the start, so it falls after the radio is up and
-// esp_random() has real entropy. Callers serialize next() the way they
-// would a bare counter.
+// The first next() draws the start from esp_random(), which has real entropy
+// only once the radio is up, so make that first call after radio start.
+// Callers serialize next() the way they would a bare counter.
 class SenderSeq {
  public:
   uint16_t next() {

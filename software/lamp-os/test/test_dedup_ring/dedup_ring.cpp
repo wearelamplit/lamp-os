@@ -107,6 +107,16 @@ void test_expiry_is_per_entry() {
   TEST_ASSERT_FALSE(ring.record(kMacB, 0x03, 1, later));
 }
 
+// A scan that finds an entry past the age clears it, so one wrap of millis()
+// later the same tuple, whose raw age reads near 0 again, is still new.
+void test_expired_entry_cleared_before_millis_wraps_back() {
+  lamp_protocol::DedupRing<16> ring;
+  TEST_ASSERT_TRUE(ring.record(kMacA, 0x40, 3, kT0));
+  TEST_ASSERT_TRUE(ring.record(kMacB, 0x40, 4, kT0 + 30000));
+  const uint32_t oneWrapLater = static_cast<uint32_t>(kT0 + (uint64_t{1} << 32));
+  TEST_ASSERT_TRUE(ring.record(kMacA, 0x40, 3, oneWrapLater));
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
@@ -122,5 +132,6 @@ int main(int argc, char** argv) {
   RUN_TEST(test_age_holds_across_millis_wrap);
   RUN_TEST(test_stamp_slightly_ahead_still_suppresses);
   RUN_TEST(test_expiry_is_per_entry);
+  RUN_TEST(test_expired_entry_cleared_before_millis_wraps_back);
   return UNITY_END();
 }
