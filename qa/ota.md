@@ -77,7 +77,16 @@ skew:
    either lamp when the session starts, that lamp logs `kicked GATT client`
    and `Client disconnected`, then no `Client connected` until after
    `resumed adv + scan after OTA`, and no `Advertising already active` after
-   the resume. Once resumed, the app reconnects to it.
+   the resume. Once resumed, the app reconnects to it (on the sender, which
+   resumes without a reboot, this proves the resume finds advertising off and
+   starts it). A `kicked GATT client handle=N: OTA radio pause` line (a phone
+   link that completed under the pause) is followed by `Client disconnected`.
+   A `Host reset; reason=` line during the transfer must not be followed by a
+   `Client connected` that stays up before the resume, nor by `Advertising
+   already active` at it. The bench cannot trigger a host reset on demand, so
+   this holds only when one happens; it is the one check on the
+   `enforcePause` call in `ble_control::tick` and on `NimBleRadio::isAdvertising`
+   reading true.
 
 4. **NVS/config survives.** Before step 2, note the peer's
    `[cfg] loaded name=...` and `[cfg] expressions=...` boot lines. After the

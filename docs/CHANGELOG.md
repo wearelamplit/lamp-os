@@ -17,6 +17,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   but the lamp started advertising again right away and the app reconnected
   mid-transfer, slowing the update and squeezing the lamp's memory. The lamp
   now stays hidden until the transfer finishes, then comes back.
+- **Losing the app mid zone preview no longer risks a crash.** Dropping the
+  connection while the expression editor's zone preview was up put the
+  lamp's scene back from the Bluetooth task while the lamp was drawing it.
 
 ## 1.3.4
 

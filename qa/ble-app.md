@@ -106,7 +106,12 @@ back and the boot log's `[cfg] loaded ...` reflects a persist.
 
 P3 — **expression editor round-trip.** Create an expression in the app's
 editor, save, then `expr.get` over serial: the entry must be present with the
-values as edited. Delete it in the app; `expr.get` shows it gone.
+values as edited. Delete it in the app; `expr.get` shows it gone. Then drag a
+Zone slider and hold it, and switch the phone's Bluetooth off mid-hold: the
+lamp puts back the scene it showed before the marker, serial shows `Client
+disconnected` with no `Guru Meditation` or `abort()`, and after reconnecting
+the `lamp` section's `lastCrash` is unchanged. Repeat a few times, some while
+the shade is still fading.
 
 P4 — **reconnect after force-stop (frozen GATT contract).** Force-stop the
 app (Android: App info → Force stop), reopen, reconnect. All reads and writes
@@ -137,7 +142,8 @@ new tricks 🪄" while it sends and "Practising the new tricks 🪄" once the ba
 is full. The strip goes when the lamp reboots after a good update and editing
 comes back; once the lamp reconnects, a message reads "<name> learned some
 new tricks ✨", and only once. A second lamp's screen shows nothing while the
-first updates.
+first updates. A good update here also proves the lamp's BLE chunk path takes
+chunks for a session the app opened.
 
 P7 — **a cancelled update holds editing until the lamp listens.** On Info,
 start an update from the dev-mode Firmware panel and cancel it there partway.
