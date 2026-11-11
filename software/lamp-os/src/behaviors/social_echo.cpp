@@ -26,8 +26,8 @@ void SocialEchoObserver::onPeerExpression(const uint8_t sourceMac[6],
   const char* outcome = d.outcome == CopyOutcome::Fire       ? "fired"
                         : d.outcome == CopyOutcome::Cooldown ? "cooldown"
                                                              : "skip";
-  // Two prints: Print::printf mallocs a line of 64 B or more.
-  Serial.printf("[fondness] roll %s from ", inv.type.c_str());
+  // Two prints, the peer-sent type cut to 32: Print::printf mallocs a line of 64 B or more.
+  Serial.printf("[fondness] roll %.32s from ", inv.type.c_str());
   Serial.printf("%02X:%02X:%02X:%02X:%02X:%02X hop %u p=%u%% %s\n", sourceMac[0],
                 sourceMac[1], sourceMac[2], sourceMac[3], sourceMac[4], sourceMac[5],
                 static_cast<unsigned>(d.hops), static_cast<unsigned>(d.pct), outcome);
