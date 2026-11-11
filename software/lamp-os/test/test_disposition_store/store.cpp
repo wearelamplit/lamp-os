@@ -1,5 +1,5 @@
 // Native-host tests for DispositionStore: get/set/clamp/eviction, the JSON
-// bulk replace, and a persist/reload round trip through an InMemoryConfigStore
+// merge, and a persist/reload round trip through an InMemoryConfigStore
 // (real persistence logic, no flash).
 
 #include <unity.h>
@@ -555,7 +555,7 @@ static void fillStrong(DispositionStore& ds, unsigned n, uint8_t top) {
 
 // At capacity the weakest row goes, whatever its MAC: strong low-MAC rows
 // stay and one weak high-MAC row is replaced.
-void test_eviction_takes_the_weakest_not_the_lowest_mac() {
+void test_eviction_takes_the_weakest_row() {
   DispositionStore ds(100);
   fillStrong(ds, DispositionStore::kMax - 1, 0x10);
   const auto weak = peerMac(0, 0xF0);
@@ -888,6 +888,63 @@ void test_eviction_ties_go_to_the_longest_unseen() {
   TEST_ASSERT_EQUAL_INT8(21, ds.peer(peerMac(1, 0x90).data(), 0).score);
 }
 
+// The hourly tick alone, with every peer away, still gets ages to NVS.
+void test_the_hourly_tick_alone_flushes_ages() {
+  InMemoryConfigStore backing;
+  DispositionStore ds(100);
+  ds.attachStore(&backing);
+  const auto m = peerMac(1);
+  ds.meet(m.data(), 0, 0);
+  ds.set(m.data(), 5, 0);
+  ds.maybeFlush(1000);
+  const size_t writes = backing.writeCount;
+  ds.tickHour(kHourMs);
+  for (uint64_t t = kHourMs; t <= kHourMs + 2 * kMinMs; t += kMinMs) ds.maybeFlush(t);
+  TEST_ASSERT_EQUAL(writes + 1, backing.writeCount);
+  DispositionStore back(100);
+  reload(back, backing);
+  TEST_ASSERT_EQUAL_UINT8(1, back.peer(m.data(), 0).meetAgeH);
+}
+
+// The tick that takes meetAgeH to saturation is saved even when the row's
+// unseen age is already saturated.
+void test_the_tick_reaching_saturation_is_saved() {
+  InMemoryConfigStore backing;
+  DispositionStore ds(100);
+  ds.attachStore(&backing);
+  const auto m = peerMac(1);
+  ds.set(m.data(), 5, 0);
+  ds.meet(m.data(), 0, 0);
+  for (unsigned h = 1; h <= 254; ++h) ds.tickHour(h * kHourMs);
+  const uint64_t late = (UINT16_MAX + 10) * kMinMs;
+  ds.set(m.data(), 4, late);
+  ds.flushNow(late);
+  DispositionStore back(100);
+  reload(back, backing);
+  TEST_ASSERT_EQUAL_UINT8(254, back.peer(m.data(), 0).meetAgeH);
+  TEST_ASSERT_EQUAL_UINT16(UINT16_MAX, back.peer(m.data(), 0).unseenMin);
+  back.tickHour(kHourMs);
+  back.maybeFlush(2 * kHourMs);
+  DispositionStore again(100);
+  reload(again, backing);
+  TEST_ASSERT_EQUAL_UINT8(255, again.peer(m.data(), 0).meetAgeH);
+}
+
+// A format 1 blob holding more than kMax rows is refused, and the rows stay
+// in their reserved storage.
+void test_an_oversized_format1_blob_is_refused() {
+  InMemoryConfigStore backing;
+  std::vector<std::pair<std::array<uint8_t, 6>, uint8_t>> rows;
+  for (unsigned i = 0; i <= DispositionStore::kMax; ++i) rows.push_back({peerMac(i), 4});
+  writeFormat1(backing, rows);
+  DispositionStore ds(100);
+  const void* data = ds.rowStorage();
+  reload(ds, backing);
+  TEST_ASSERT_EQUAL_UINT8(3, ds.peer(peerMac(0).data(), 0).disp);
+  TEST_ASSERT_TRUE(data == ds.rowStorage());
+  TEST_ASSERT_EQUAL(DispositionStore::kMax, ds.rowCapacity());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_unknown_peer_returns_default);
@@ -915,7 +972,7 @@ int main(int, char**) {
   RUN_TEST(test_migration_interrupted_at_every_write_keeps_every_disposition);
   RUN_TEST(test_a_blob_that_reads_back_wrong_keeps_the_json);
   RUN_TEST(test_meetings_count_once_per_window_across_a_reload);
-  RUN_TEST(test_eviction_takes_the_weakest_not_the_lowest_mac);
+  RUN_TEST(test_eviction_takes_the_weakest_row);
   RUN_TEST(test_a_regular_outlasts_an_equal_score_stranger);
   RUN_TEST(test_newcomer_admission);
   RUN_TEST(test_eviction_with_500_distinct_peers);
@@ -930,5 +987,8 @@ int main(int, char**) {
   RUN_TEST(test_absence_decays_scores_of_absent_rows);
   RUN_TEST(test_a_user_edit_always_gets_a_row);
   RUN_TEST(test_eviction_ties_go_to_the_longest_unseen);
+  RUN_TEST(test_the_hourly_tick_alone_flushes_ages);
+  RUN_TEST(test_the_tick_reaching_saturation_is_saved);
+  RUN_TEST(test_an_oversized_format1_blob_is_refused);
   return UNITY_END();
 }

@@ -85,7 +85,7 @@ struct NudgeResult {
 // mutation and flush runs on Core 1. A mutex serialises row access; JSON
 // parse and NVS I/O stay outside it.
 //
-// Two writers, two flush tiers: a user edit (set, setFromJson,
+// Three flush tiers: a user edit (set, setFromJson,
 // setEngineEnabled) flushes once idle for flushIdleMs; an engine change
 // (nudge, meet, decayTowardZero) flushes at most once per kEngineFlushFloorMs
 // and an age-only change (markSeen, tickHour) at most once per

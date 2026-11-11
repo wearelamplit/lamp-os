@@ -188,7 +188,7 @@ void DispositionStore::load(uint64_t nowMs) {
   Serial.printf("[disp] %u peers from %s, %u pruned\n", static_cast<unsigned>(rows),
                 fromJson ? "json" : (blob[0] == kBlobFormat ? "format 2" : "format 1"),
                 static_cast<unsigned>(pruned));
-  // The JSON is about three times the blob, and a lamp whose NVS is full gets
+  // The JSON is nearly twice the blob, and a lamp whose NVS is full gets
   // that space back on this boot. The blob lands and reads back before the
   // JSON goes, so a reset between them keeps a readable copy.
   if (fromJson && !persist_(nowMs)) debouncer_.markDirty(static_cast<uint32_t>(nowMs));
@@ -339,9 +339,9 @@ void DispositionStore::tickHour(uint64_t nowMs) {
   xSemaphoreTake(mutex_, portMAX_DELAY);
   if (flags_ & kFlagEngineOn) {
     for (Row& r : entries_) {
-      if (r.meetAgeH < UINT8_MAX) ++r.meetAgeH;
       // A stored age still short of saturation goes stale until the next flush.
       aging = aging || r.meetAgeH < UINT8_MAX || unseenMin(r, now) < UINT16_MAX;
+      if (r.meetAgeH < UINT8_MAX) ++r.meetAgeH;
     }
   }
   xSemaphoreGive(mutex_);

@@ -35,7 +35,7 @@ Neutral with nothing learned.
 
 - **Capacity.** 100 rows, reserved once at boot. At capacity the weakest
   relationship goes: strength is `|disp - 3| x 128 + |score| + min(meets, 16)
-  x 8`, ties to the one unseen longest, never the lowest MAC. A user edit
+  x 8`, ties to the one unseen longest. A user edit
   always gets a row. A newcomer from the engine gets one only when stronger
   than the weakest row, or as strong while that row has been unseen an hour,
   so a crowd cannot churn out regulars or non-neutral peers.
@@ -49,7 +49,9 @@ Neutral with nothing learned.
 - **Flushes.** A user edit flushes 5 s after the slider goes idle (and on BLE
   disconnect); an engine change at most once per 10 minutes and an age-only
   change once per 60, both counted from the last flush, and any flush writes
-  everything. A power cut so loses at most an hour of ages.
+  everything, so while the engine runs a power cut loses at most an hour of
+  ages. With the engine off nothing marks ages for saving, so the stored ages
+  move only when some other flush writes them.
 - **Boot.** Neutral rows unseen for 14 on-days (20160 on-minutes) are dropped
   at load, and the boot writes nothing.
 - **Formats.** The `disp` blob is format 2, `[2][flags]` then
