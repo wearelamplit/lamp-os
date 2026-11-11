@@ -59,6 +59,17 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 ### Changed
 - **`npm run wisp:flash:release` takes `IMAGE=`.** Point it at a local
   `wisp-firmware-signed.bin` to flash that file and skip the download.
+- **Settings take far less room on the lamp.** A lamp now keeps its name,
+  password, colours, strips, knockout and home mode as one compact record
+  instead of the text it stored before, which leaves room for more
+  remembered lamps and more expressions beside them. The first time a lamp
+  starts on this firmware it moves its settings over by itself and checks
+  the copy before removing the old one, so a power cut at any moment leaves
+  it with its settings; nothing changes in the app or Web Config. A lamp
+  flashed back to an older release afterwards starts with default name,
+  colours and no password (it keeps its expressions); flashed forward again
+  it gets its settings back, with its expressions as the older release left
+  them.
 
 ## 1.3.3
 

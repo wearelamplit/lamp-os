@@ -22,13 +22,26 @@ scaffolding).
 
 ## Steps
 
-Snapshot first: `expr.get`, and note the boot line
-`[cfg] loaded name=<n> pw=<set|unset> expressions=<n> nvs_bytes=<n>`.
+Snapshot first: `expr.get`, and note the boot lines
+`[cfg] loaded name=<n> pw=<set|unset> cfg_bytes=<n>`, `[cfg] store <form>`
+and `[cfg] expressions=<n> from <records|cfg json>`.
 
 **C1 — boot/config load lines.** `--reset` reboot; expect in order:
 `[lamp] lampType="standard"` then the `[cfg] loaded ...` line matching the
-known config. A `parse failed` variant of that line = corrupt NVS, instant
+known config, `[cfg] store binary`, and on every debug boot just after the
+first-boot save point `[nvs] used <U> free <F>` (U at most about 419 at the caps; see
+docs/dev/embedded-heap.md "The NVS budget"). A `STORED CONFIG FAILED TO
+PARSE` or `STORED CONFIG BLOB UNREADABLE` line = corrupt NVS, instant
 finding.
+
+**C1b — migration from an older release.** On a lamp running 1.3.3 (or
+older) with a known name, password, colours and expressions (screenshot the
+app first), flash this build. The first boot logs `[cfg] store whole` or
+`[cfg] store split`, then `[cfg] store migrated from whole|split`; every
+later boot logs `[cfg] store binary` and no first-boot save. Name, colours,
+expressions and password in the app match the screenshot. Pull power during
+a colour drag five times: every boot loads with no `UNREADABLE` line and no
+defaults. Zero `[nvs] save via=... failed` lines across the run.
 
 **C2 — persist across reboot.** `expr.set` a marker (dim pulse, long
 intervals per README conventions), reboot via
@@ -88,8 +101,9 @@ settings-blob sentinel `{"factoryReset":true}` — no serial verb, no button.
 Write it to CHAR_SETTINGS_BLOB (`5f64f4d7-d6d9-4a44-9b3f-3a8d6f7e6b40`) from
 bleak (plaintext, no password) or trigger it from the app. Expect:
 `[loop] settingsBlob: factoryReset sentinel, wiping NVS`, a fade-out, a
-self-reboot, then a fresh boot with `[cfg] loaded name=stray pw=unset
-expressions=0 ...` and the AP back as `stray-lamp`. A
+self-reboot, then a fresh boot with `[cfg] loaded name=stray pw=unset ...`,
+`[cfg] store empty`, `[cfg] expressions=0 ...` and the AP back as
+`stray-lamp`; the boot after that logs `[cfg] store binary`. A
 `[nvs] factory reset failed` line is an instant fail. (Co-shipping other
 keys with the sentinel logs a WARNING and drops them — by design.)
 
@@ -99,7 +113,10 @@ baseline.
 ## Pass criteria
 
 - Every row's boot line matches the expected config state; zero
-  `parse failed` / `persist wrote 0 bytes` / `factory reset failed` lines.
+  `FAILED TO PARSE` / `UNREADABLE` / `save via=... failed` / `factory reset
+  failed` lines.
+- A lamp flashed from an older release migrates once (`store migrated`) and
+  keeps every setting.
 - Config survives reboot and BOTH re-flash paths byte-identically
   (expressions diffed via `expr.get`).
 - Out-of-range values never crash and never render un-clamped.

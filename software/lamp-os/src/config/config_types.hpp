@@ -209,6 +209,13 @@ inline bool shouldPersistFirstBoot(bool wouldPersist, bool loadFailedWithData) {
   return wouldPersist && !loadFailedWithData;
 }
 
+// The first boot persists once when the store predates the `named` flag, so
+// applyDefaults' inferred value becomes authoritative, or is in a form an
+// older release wrote, so the save moves it to the settings blob.
+inline bool firstBootSaveWanted(bool namedKeyPresent, bool storeIsLegacy) {
+  return !namedKeyPresent || storeIsLegacy;
+}
+
 // Resolve the persisted `named` flag. When the flag was present in NVS
 // (namedKeyPresent), trust it. Otherwise migrate pre-flag NVS once by
 // inferring from the stored name: a name matching neither the fresh-lamp
@@ -259,7 +266,7 @@ inline bool isExpressionTypeId(const char* s) {
 }
 
 // Every parameter key an expression reads, in byte-wise order (the order the
-// wire JSON carries them). A split save's expression records carry a key as
+// wire JSON carries them). The stored expression records carry a key as
 // its index here, so the table is append-only: never reorder or remove an
 // entry, and an appended key out of byte-wise order changes the wire's key
 // order. A key not listed has no reader and is dropped at parse.

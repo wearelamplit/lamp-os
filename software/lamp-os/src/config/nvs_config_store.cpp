@@ -149,6 +149,13 @@ bool NvsConfigStore::initFlash() {
   return true;
 }
 
+void NvsConfigStore::logUsage() {
+  nvs_stats_t stats;
+  if (nvs_get_stats(nullptr, &stats) != ESP_OK) return;
+  Serial.printf("[nvs] used %u free %u\n", (unsigned)stats.used_entries,
+                (unsigned)stats.free_entries);
+}
+
 void NvsConfigStore::reclaimWifiNamespace() {
   // The WiFi driver keeps its config in RAM (wifi::begin), so whatever an
   // earlier build stored in its namespace is dead weight in a tight

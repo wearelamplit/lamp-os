@@ -29,6 +29,8 @@ class NvsConfigStore : public ConfigStore {
   // unusable (every stored key is lost then, and the lamp still boots with
   // BLE), then reclaims the WiFi driver's stored config. Returns true when NVS is usable.
   static bool initFlash();
+  // Logs the partition's used and free entries, every namespace's.
+  static void logUsage();
 
  private:
   static void reclaimWifiNamespace();

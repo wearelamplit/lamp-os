@@ -76,7 +76,7 @@ skew:
    path but SILENT — see Indicator expectations.
 
 4. **NVS/config survives.** Before step 2, note the peer's
-   `[cfg] loaded name=... expressions=... nvs_bytes=...` boot line. After the
+   `[cfg] loaded name=...` and `[cfg] expressions=...` boot lines. After the
    post-OTA reboot the same name/expression count must load. `expr.get` over
    serial for a byte-level check if the peer had expressions.
 

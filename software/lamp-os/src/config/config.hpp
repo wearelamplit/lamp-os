@@ -16,7 +16,7 @@
 
 namespace lamp {
 
-// Runtime lamp configuration; persisted to NVS under the "cfg" key.
+// Runtime lamp configuration; persisted to NVS (config_codec::saveConfig).
 class Config {
  private:
   ConfigStore* store_ = nullptr;
@@ -100,6 +100,10 @@ class Config {
   // is authoritative thereafter.
   bool namedKeyPresent() const { return namedKeyPresent_; }
 
+  // True while the store is in a form a release up to 1.3.3 wrote. The first
+  // save moves it to the settings blob, so the caller persists once at boot.
+  bool storeIsLegacy() const { return config_codec::isLegacyForm(storeForm_); }
+
   /**
    * create a streamable json doc to send configs to the webserver
    * @return a JsonDocument to serialize
@@ -107,12 +111,12 @@ class Config {
   JsonDocument asJsonDocument();
 
   /**
-   * Persist the current in-memory config to NVS under the "cfg" key.
+   * Persist the current in-memory config to NVS.
    *
    * Used by live-preview drains (e.g. expressionOp) that want their change
    * to survive a reboot WITHOUT going through the settings_blob path's
    * fade-out-and-reboot. The runtime state has already been applied by
-   * the caller; this just writes the canonical JSON to NVS.
+   * the caller; this just writes it to NVS.
    *
    * Returns true when every key landed. Never throws and takes no
    * config-sized heap (config_codec::saveConfig): when
@@ -300,6 +304,7 @@ class Config {
   uint8_t lampOtaSendingTo_[6] = {0};
   bool loadFailedWithData_ = false;
   bool namedKeyPresent_ = false;
+  config_codec::StoreForm storeForm_ = config_codec::StoreForm::Empty;
   bool lampSectionDirty_ = true;
   bool baseSectionDirty_ = true;
   bool shadeSectionDirty_ = true;
