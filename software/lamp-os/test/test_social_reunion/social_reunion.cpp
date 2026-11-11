@@ -249,6 +249,13 @@ void test_engine_off_blocks_reunion_and_hint() {
   assertPlays(greetingTuningFor(SocialMode::Ambivert, 5), r.social);
   r.endGreeting();
   TEST_ASSERT_EQUAL_size_t(0, hintsLive());
+
+  // Switched back on, the next greeting's end does borrow the colour.
+  config.dispositions().setEngineEnabled(true, r.now);
+  r.advance(6 * kMinMs);
+  TEST_ASSERT_TRUE(r.greet());
+  r.endGreeting();
+  TEST_ASSERT_EQUAL_size_t(1, hintsLive());
 }
 
 // Home mode opts out entirely: the greeting plays as today, the unseen clock
@@ -264,11 +271,56 @@ void test_home_mode_blocks_reunion_and_hint() {
   r.endGreeting();
   TEST_ASSERT_EQUAL_size_t(0, hintsLive());
 
+  // Near and greeted at home, the peer is still not marked seen.
+  for (int m = 0; m < 3; ++m) {
+    r.advance(kMinMs);
+    lampRoster.addOrUpdateFromBle("friend", kBle, kPeerBase, Color(), -50);
+    r.social.control();
+  }
+  TEST_ASSERT_TRUE(r.row().unseenMin > ReunionTuning{}.reunionMin);
+
   // Home mode ends: the reunion still waits.
   r.compositor.homeMode = false;
   r.advance(20 * kMinMs);
   TEST_ASSERT_TRUE(r.greet());
   TEST_ASSERT_EQUAL_UINT32(greetingTuningFor(SocialMode::Ambivert, 5).holdFrames * 2,
+                           r.social.holdFrames);
+  r.endGreeting();
+  TEST_ASSERT_EQUAL_size_t(1, hintsLive());
+}
+
+// A Smitten peer greeted and then near for hours is seen all along: gone just
+// long enough to prune and back, it gets today's greeting. One away past the
+// threshold that returns while the greeting cooldown holds is not seen until
+// greeted, so it still gets its reunion.
+void test_greeted_near_peer_is_seen_and_arrival_waits() {
+  Rig r(SocialMode::Extrovert);
+  config.dispositions().set(peerMac().data(), 5, r.now);
+  TEST_ASSERT_TRUE(r.greet());
+  r.endGreeting();
+  const uint16_t T = r.social.reunionTuning().reunionMin;
+  for (int m = 0; m < T + 60; ++m) {
+    r.advance(kMinMs);
+    lampRoster.addOrUpdateFromBle("friend", kBle, kPeerBase, Color(), -50);
+    r.social.control();
+    TEST_ASSERT_EQUAL(STOPPED, r.social.animationState);
+  }
+  r.advance(LAMP_PRUNE_TIME_MS + kMinMs);
+  TEST_ASSERT_TRUE(r.greet());
+  assertPlays(greetingTuningFor(SocialMode::Extrovert, 5), r.social);
+
+  r.endGreeting();
+  r.advance(T * kMinMs);
+  r.social.nextAcknowledgeTimeMs = r.now + 3 * kMinMs;
+  lampRoster = LampRoster();
+  for (int m = 0; m < 3; ++m) {
+    lampRoster.addOrUpdateFromBle("friend", kBle, kPeerBase, Color(), -50);
+    r.social.control();
+    TEST_ASSERT_EQUAL(STOPPED, r.social.animationState);
+    r.advance(kMinMs);
+  }
+  TEST_ASSERT_TRUE(r.greet());
+  TEST_ASSERT_EQUAL_UINT32(greetingTuningFor(SocialMode::Extrovert, 5).holdFrames * 2,
                            r.social.holdFrames);
 }
 
@@ -293,11 +345,11 @@ void test_hint_roll_is_rate_limited_and_crowd_damped() {
   }
 }
 
-// The end of a Fond greeting plays one shade-only breath in the friend's
+// The end of a Fond greeting plays shade-only breaths in the friend's
 // COLOR_INFO stop 0 (its roster base without one), capped at hintOpacity; it
 // stops by itself and is reaped, leaving the scene. A second greeting's end
 // inside the window plays none.
-void test_hint_plays_one_faint_breath_and_leaves() {
+void test_hint_plays_faint_breaths_and_leaves() {
   for (bool withStops : {true, false}) {
     Rig r(SocialMode::Extrovert);
     config.dispositions().set(peerMac().data(), 4, r.now);
@@ -317,15 +369,18 @@ void test_hint_plays_one_faint_breath_and_leaves() {
     const uint8_t cap = r.social.reunionTuning().hintOpacity;
     int peakR = 0;
     int peakG = 0;
+    int lastToward = 0;
     uint32_t frames = 0;
     while (!e->isAnimationComplete() && frames < 5000) {
       r.shade.buffer.assign(8, kScene);
       r.base.buffer.assign(8, kScene);
       e->control();
       e->draw();
+      lastToward = 0;
       for (const Color& px : r.shade.buffer) {
         peakR = std::max(peakR, std::abs(px.r - kScene.r));
         peakG = std::max(peakG, std::abs(px.g - kScene.g));
+        lastToward = std::max(lastToward, std::abs(withStops ? px.r - kScene.r : px.g - kScene.g));
       }
       for (const Color& px : r.base.buffer) TEST_ASSERT_TRUE(px == kScene);
       r.advance(16);
@@ -340,6 +395,8 @@ void test_hint_plays_one_faint_breath_and_leaves() {
     TEST_ASSERT_EQUAL_INT(0, away);
     TEST_ASSERT_TRUE(toward > span * cap / 200);
     TEST_ASSERT_TRUE(toward <= span * cap / 100 + 1);
+    // It fades out: its last frame is back on the scene.
+    TEST_ASSERT_TRUE(lastToward <= 1);
     r.manager.gcTransients();
     TEST_ASSERT_EQUAL_size_t(0, hintsLive());
 
@@ -399,7 +456,8 @@ int main(int, char**) {
   RUN_TEST(test_engine_off_blocks_reunion_and_hint);
   RUN_TEST(test_home_mode_blocks_reunion_and_hint);
   RUN_TEST(test_hint_roll_is_rate_limited_and_crowd_damped);
-  RUN_TEST(test_hint_plays_one_faint_breath_and_leaves);
+  RUN_TEST(test_hint_plays_faint_breaths_and_leaves);
+  RUN_TEST(test_greeted_near_peer_is_seen_and_arrival_waits);
   RUN_TEST(test_hint_only_after_a_fond_organic_greeting);
   RUN_TEST(test_reunion_tuning_setter_range_checks);
   return UNITY_END();

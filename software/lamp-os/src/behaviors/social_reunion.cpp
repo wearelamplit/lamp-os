@@ -1,6 +1,5 @@
 #include "behaviors/social_reunion.hpp"
 
-#include <algorithm>
 #include <cstring>
 
 #include "expressions/expression.hpp"
@@ -15,11 +14,6 @@ GreetingTuning reunionGreeting(const GreetingTuning& base, uint8_t x) {
   GreetingTuning out = base;
   out.holdFrames = base.holdFrames * x;
   out.totalFrames = base.easeInFrames + out.holdFrames + base.fadeOutFrames;
-  if (base.pulseBackCount != kPulseCountContinuous) {
-    out.pulseBackCount = static_cast<uint8_t>(
-        std::min<uint32_t>(static_cast<uint32_t>(base.pulseBackCount) * x,
-                           kPulseCountContinuous - 1));
-  }
   return out;
 }
 

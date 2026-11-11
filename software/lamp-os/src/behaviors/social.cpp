@@ -191,6 +191,7 @@ void SocialBehavior::control() {
     if (onGreetingChange_) onGreetingChange_();
   }
   greetingWasActive_ = greetingNowActive;
+  markGreetedNearSeen_(up);
 
   // Greeting / cooldown logic below only runs after the previous
   // greeting animation finishes.
@@ -337,6 +338,15 @@ void SocialBehavior::onColorInfo(const uint8_t srcMac[6],
 bool SocialBehavior::tracking_() const {
   const bool home = context_ && context_->compositor && context_->compositor->homeMode;
   return config_ && config_->dispositions().engineEnabled() && !home;
+}
+
+void SocialBehavior::markGreetedNearSeen_(uint64_t upMs) {
+  if (upMs - lastSeenSweepMs_ < kSeenSweepMs || !tracking_()) return;
+  lastSeenSweepMs_ = upMs;
+  DispositionStore& store = config_->dispositions();
+  for (const NearbyCopy& p : lampRoster.snapshotNear(LAMP_PRUNE_TIME_MS)) {
+    if (p.hasMac && p.acknowledged) store.markSeen(p.mac, upMs);
+  }
 }
 
 void SocialBehavior::maybeColourHint_(uint64_t upMs) {

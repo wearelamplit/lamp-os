@@ -69,6 +69,7 @@ NearbyCopy toNearbyCopy(const RosterEntry& e) {
   c.lastSeenNearMs = e.lastSeenNearMs;
   c.lastSeenBleMs = e.lastSeenBleMs;
   c.variant = e.variant;
+  c.acknowledged = e.acknowledged;
   return c;
 }
 

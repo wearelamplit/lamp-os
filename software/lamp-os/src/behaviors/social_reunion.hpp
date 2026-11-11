@@ -37,15 +37,16 @@ inline constexpr uint32_t kHintBreathSeconds = 8;
 // before markSeen restarts its unseen clock.
 bool isReunion(const PeerRecord& peer, const ReunionTuning& t);
 
-// `base` with its hold, and so its in-hold breaths, `x` times as long.
+// `base` with its hold `x` times as long. Every Smitten profile breathes
+// through its whole hold, so its breaths multiply with it.
 GreetingTuning reunionGreeting(const GreetingTuning& base, uint8_t x);
 
 // Sets ReunionTuning field `key` (its member name) to `value`. False, with `t`
 // unchanged, for an unknown key or a value out of range.
 bool setReunionTuning(ReunionTuning& t, const char* key, uint32_t value);
 
-// The colour hint for a friend whose colour is `colour`: one faint breath on
-// the shade, played Local and never announced.
+// The colour hint for a friend whose colour is `colour`: faint breaths on the
+// shade, played Local and never announced.
 ExpressionInvocation colourHintInvocation(const Color& colour, uint8_t opacityPct);
 
 // Whether the end of a greeting borrows the greeted friend's colour. Fixed RAM.

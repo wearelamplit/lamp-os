@@ -136,6 +136,8 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   static constexpr size_t   INTROVERT_FATIGUE_COUNT = 3;
   static constexpr uint32_t INTROVERT_FATIGUE_WINDOW_MS = 300000;
   static constexpr uint32_t INTROVERT_TIRED_DURATION_MS = 300000;
+  // The unseen clock counts minutes, so a finer sweep changes nothing.
+  static constexpr uint32_t kSeenSweepMs = 60000;
 
   Config* config_ = nullptr;
   // Keyed on the raw 6-byte mac so a tracked peer never spawns a per-entry
@@ -159,10 +161,15 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   uint8_t greetedBlend_ = 0;
   std::vector<Color> gradientCache_;
 
-  // True while the social engine tracks peers: it is on and home mode is off.
+  // True while the social engine tracks peers, so it is on and home mode is off.
   bool tracking_() const;
   // At a greeting's end, maybe borrow the greeted friend's colour.
   void maybeColourHint_(uint64_t upMs);
+  // Once a minute, restart the unseen clock of every near peer already greeted
+  // since it arrived. An arrival waits for its greeting, which reads the clock
+  // first, so a reunion is never lost to this sweep.
+  void markGreetedNearSeen_(uint64_t upMs);
+  uint64_t lastSeenSweepMs_ = 0;
 
   ReunionTuning reunion_;
   const ContagionTuning* contagion_ = nullptr;
