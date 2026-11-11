@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ArduinoJson.h>
 #include <esp_system.h>
 
 #include <cstddef>
@@ -14,6 +15,13 @@ constexpr size_t kBacktraceLen = 4;
 // uptimeMs past 49.7 days.
 constexpr uint32_t kUptimeSaturated = UINT32_MAX;
 
+// Snapshot::flags bits.
+// The panic handler filled reason/pc/backtrace/core and the fault's uptime.
+constexpr uint8_t kPanicked = 1u << 0;
+// Set from the re-arm until the loop's first sample: the heap and roster
+// figures are the re-arm's, taken early in setup.
+constexpr uint8_t kUnsampled = 1u << 1;
+
 // Last-known state of the running boot, held in RTC memory across a reset.
 struct Snapshot {
   char reason[kReasonLen];
@@ -24,7 +32,7 @@ struct Snapshot {
   uint32_t minFreeHeap;
   uint16_t rosterPeak;
   int8_t core;  // -1 until the panic handler fills reason/pc/backtrace
-  uint8_t panicked;
+  uint8_t flags;
 };
 
 // Persisted to NVS as a raw blob; a size mismatch on load reads as no record.
@@ -54,6 +62,14 @@ void boot(uint32_t fwVersion);
 // only when it samples. Allocation-free.
 void tick(uint32_t nowMs, size_t (*rosterCount)());
 
+// True when the loop sampled the boot's heap and roster figures.
+inline bool loopSampled(const Snapshot& s) { return (s.flags & kUnsampled) == 0; }
+
+// The reason to record for an abort's message. abort()'s message ends in its
+// caller's address, which does not fit kReasonLen and which backtrace[3]
+// holds, so it records without it.
+const char* abortReason(const char* details);
+
 // Fills `s` with the fault: reason (truncated), pc, the first backtrace
 // addresses, core, and the uptime at the fault. Plain stores only.
 void recordPanic(Snapshot& s, const char* reason, uint32_t pc,
@@ -64,6 +80,9 @@ void recordPanic(Snapshot& s, const char* reason, uint32_t pc,
 void capturePanic(const char* reason, const void* pc,
                   const unsigned int* backtrace, unsigned int backtraceLen,
                   int core);
+
+// Writes `lastCrash` into the BLE lamp section; nothing when no crash counted.
+void emitLastCrash(JsonDocument& doc, const Record& rec);
 
 const Record& last();
 

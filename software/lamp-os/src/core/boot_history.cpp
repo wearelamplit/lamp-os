@@ -53,8 +53,7 @@ bool loaded(const History& h, size_t len) {
 size_t endedCount(const History& h) { return h.count == 0 ? 0 : h.count - 1; }
 
 void finish(History& h, const crash_record::Snapshot* rtc) {
-  // uptimeMs 0 is the re-arm sample: the boot died before its loop sampled.
-  if (h.count == 0 || rtc == nullptr || rtc->uptimeMs == 0) return;
+  if (h.count == 0 || rtc == nullptr || !crash_record::loopSampled(*rtc)) return;
   BootEntry& e = h.entries[h.count - 1];
   takeFigures(e, *rtc);
   if (rtc->uptimeMs != crash_record::kUptimeSaturated) e.uptime |= kUptimeExact;

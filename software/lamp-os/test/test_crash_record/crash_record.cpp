@@ -15,7 +15,7 @@ static Snapshot panickedSnapshot() {
   std::strcpy(s.reason, "abort()");
   s.pc = 0x400d1234;
   s.core = 0;
-  s.panicked = 1;
+  s.flags = kPanicked;
   s.minLargestBlock = 1300;
   return s;
 }
@@ -92,7 +92,7 @@ void test_panic_records_the_fault_with_its_uptime() {
     TEST_ASSERT_EQUAL_HEX32(0x401306d9, rec.snap.pc);
     TEST_ASSERT_EQUAL_HEX32_ARRAY(bt, rec.snap.backtrace, kBacktraceLen);
     TEST_ASSERT_EQUAL_UINT32(29684, rec.snap.minLargestBlock);
-    TEST_ASSERT_EQUAL_UINT8(1, rec.snap.panicked);
+    TEST_ASSERT_TRUE((rec.snap.flags & kPanicked) != 0);
   }
 }
 
@@ -109,11 +109,104 @@ void test_panic_backtrace_shorter_than_the_record_zero_fills() {
 }
 
 void test_panic_reason_truncates_to_the_record() {
-  const char* details = "abort() was called at PC 0x400d4b6b on core 1";
+  const char* details = "assert failed: xQueueGenericSend queue.c:820 (pxQueue)";
   Snapshot s{};
   recordPanic(s, details, 0x400d4b6b, nullptr, 0, 1, 1);
   TEST_ASSERT_EQUAL_size_t(kReasonLen - 1, std::strlen(s.reason));
   TEST_ASSERT_EQUAL_INT(0, std::strncmp(details, s.reason, kReasonLen - 1));
+}
+
+// abort()'s message carries its caller's address, which would not fit whole.
+void test_abort_reason_drops_the_caller_address() {
+  for (const char* details : {"abort() was called at PC 0x400d4b6b on core 1",
+                              "abort() was called at PC 0x40081f2 on core 0"}) {
+    const char* reason = abortReason(details);
+    TEST_ASSERT_EQUAL_STRING("abort() was called", reason);
+    TEST_ASSERT_LESS_THAN_size_t(kReasonLen, std::strlen(reason));
+  }
+  const char* other = "***ERROR*** A stack overflow in task loopTask";
+  TEST_ASSERT_EQUAL_PTR(other, abortReason(other));
+  TEST_ASSERT_NULL(abortReason(nullptr));
+}
+
+void test_loop_sample_clears_unsampled_only() {
+  Snapshot s{};
+  s.flags = kUnsampled | kPanicked;
+  TEST_ASSERT_FALSE(loopSampled(s));
+  s.flags = kPanicked;
+  TEST_ASSERT_TRUE(loopSampled(s));
+}
+
+static JsonObject lastCrashOf(JsonDocument& doc, const Record& rec) {
+  emitLastCrash(doc, rec);
+  return doc["lastCrash"].as<JsonObject>();
+}
+
+static Record taskWdtRecord(uint8_t flags) {
+  const unsigned int bt[] = {0x401306d9, 0x40130ee2, 0x40125cfb};
+  Record rec{};
+  rec.count = 3;
+  rec.resetReason = ESP_RST_TASK_WDT;
+  rec.fwVersion = 0x010303;
+  rec.snapshotValid = 1;
+  rec.snap.core = -1;
+  rec.snap.minLargestBlock = 29684;
+  rec.snap.minFreeHeap = 28576;
+  rec.snap.rosterPeak = 4;
+  rec.snap.flags = flags;
+  recordPanic(rec.snap, nullptr, 0x401306d9, bt, 3, 1, 6500);
+  return rec;
+}
+
+void test_last_crash_absent_before_any_crash() {
+  JsonDocument doc;
+  Record rec{};
+  emitLastCrash(doc, rec);
+  TEST_ASSERT_FALSE(doc["lastCrash"].is<JsonObject>());
+}
+
+void test_last_crash_task_watchdog_carries_core_pc_bt_and_uptime() {
+  JsonDocument doc;
+  const JsonObject o = lastCrashOf(doc, taskWdtRecord(0));
+  TEST_ASSERT_EQUAL_UINT32(6500, o["uptimeMs"].as<uint32_t>());
+  TEST_ASSERT_EQUAL_INT(1, o["core"].as<int>());
+  TEST_ASSERT_EQUAL_STRING("0x401306d9", o["pc"].as<const char*>());
+  const JsonArray bt = o["bt"].as<JsonArray>();
+  TEST_ASSERT_EQUAL_size_t(3, bt.size());
+  TEST_ASSERT_EQUAL_STRING("0x40125cfb", bt[2].as<const char*>());
+  TEST_ASSERT_FALSE(o["reason"].is<const char*>());
+  TEST_ASSERT_EQUAL_UINT32(29684, o["minLargestBlock"].as<uint32_t>());
+  TEST_ASSERT_EQUAL_UINT32(4, o["rosterPeak"].as<uint32_t>());
+}
+
+void test_last_crash_names_a_recorded_reason() {
+  JsonDocument doc;
+  Record rec = taskWdtRecord(0);
+  recordPanic(rec.snap, "LoadProhibited", 0x400d1234, nullptr, 0, 0, 900);
+  const JsonObject o = lastCrashOf(doc, rec);
+  TEST_ASSERT_EQUAL_STRING("LoadProhibited", o["reason"].as<const char*>());
+  TEST_ASSERT_EQUAL_size_t(0, o["bt"].as<JsonArray>().size());
+}
+
+void test_last_crash_before_the_loop_sampled_has_no_heap_figures() {
+  JsonDocument doc;
+  const JsonObject o = lastCrashOf(doc, taskWdtRecord(kUnsampled));
+  TEST_ASSERT_EQUAL_UINT32(6500, o["uptimeMs"].as<uint32_t>());
+  TEST_ASSERT_EQUAL_INT(1, o["core"].as<int>());
+  TEST_ASSERT_FALSE(o["minLargestBlock"].is<uint32_t>());
+  TEST_ASSERT_FALSE(o["minFreeHeap"].is<uint32_t>());
+  TEST_ASSERT_FALSE(o["rosterPeak"].is<uint32_t>());
+}
+
+void test_last_crash_without_a_snapshot_has_only_the_reset() {
+  JsonDocument doc;
+  Record rec = taskWdtRecord(0);
+  rec.snapshotValid = 0;
+  const JsonObject o = lastCrashOf(doc, rec);
+  TEST_ASSERT_EQUAL_UINT32(3, o["count"].as<uint32_t>());
+  TEST_ASSERT_EQUAL_INT(ESP_RST_TASK_WDT, o["reset"].as<int>());
+  TEST_ASSERT_FALSE(o["uptimeMs"].is<uint32_t>());
+  TEST_ASSERT_FALSE(o["pc"].is<const char*>());
 }
 
 int main(int, char**) {
@@ -127,5 +220,12 @@ int main(int, char**) {
   RUN_TEST(test_panic_records_the_fault_with_its_uptime);
   RUN_TEST(test_panic_backtrace_shorter_than_the_record_zero_fills);
   RUN_TEST(test_panic_reason_truncates_to_the_record);
+  RUN_TEST(test_abort_reason_drops_the_caller_address);
+  RUN_TEST(test_loop_sample_clears_unsampled_only);
+  RUN_TEST(test_last_crash_absent_before_any_crash);
+  RUN_TEST(test_last_crash_task_watchdog_carries_core_pc_bt_and_uptime);
+  RUN_TEST(test_last_crash_names_a_recorded_reason);
+  RUN_TEST(test_last_crash_before_the_loop_sampled_has_no_heap_figures);
+  RUN_TEST(test_last_crash_without_a_snapshot_has_only_the_reset);
   return UNITY_END();
 }

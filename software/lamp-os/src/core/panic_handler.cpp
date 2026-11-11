@@ -19,9 +19,10 @@ extern "C" void __real_esp_panic_handler(panic_info_t* info);
 
 static void lamp_panic_handler(arduino_panic_info_t* info, void* arg) {
   (void)arg;
-  // An abort() or a task-watchdog abort reaches this hook as the CPU exception
-  // that carried it; the IDF reports the abort message instead, so record that.
-  const char* reason = g_panic_abort ? g_panic_abort_details : info->reason;
+  // An abort reaches this hook as the CPU exception that carried it. The IDF
+  // replaces that with the abort's message, which a task-watchdog abort lacks.
+  const char* reason =
+      g_panic_abort ? lamp::crash_record::abortReason(g_panic_abort_details) : info->reason;
   lamp::crash_record::capturePanic(reason, info->pc, info->backtrace,
                                    info->backtrace_len, info->core);
   ets_printf("\n\n[LAMP PANIC]\n");
@@ -39,7 +40,7 @@ static void lamp_panic_handler(arduino_panic_info_t* info, void* arg) {
 }
 
 void lamp_register_panic_handler() {
-  // Fails the link when the wrap flag is missing: without it the IDF calls
+  // Fails the link when the wrap flag is missing. Without it the IDF calls
   // esp_panic_handler directly and this hook never runs.
   asm volatile("" : : "r"(&__real_esp_panic_handler));
   set_arduino_panic_handler(lamp_panic_handler, nullptr);
