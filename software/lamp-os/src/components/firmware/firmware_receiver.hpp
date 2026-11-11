@@ -185,6 +185,13 @@ class FirmwareReceiver {
     return state_ != State::Idle && state_ != State::Failed;
   }
 
+  // True while a session opened over `kind` accepts chunks. A transport's chunk
+  // path checks it so it writes only into a session that transport opened.
+  bool chunksArmedFor(FirmwareTransportKind kind) const {
+    return publishedOtaHandle_.load(std::memory_order_acquire) != 0 &&
+           activeTransportKind_ == kind;
+  }
+
   // Snapshot the active OTA peer's MAC into out[6]. True only for an in-flight
   // ESP-NOW flow (the indicator looks up the peer's base color); false for BLE
   // (chunk source is the phone) and when not in progress.

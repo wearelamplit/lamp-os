@@ -1206,6 +1206,7 @@ class FwChunkCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
     if (!s_firmwareReceiver) return;
+    if (!s_firmwareReceiver->chunksArmedFor(lamp::FirmwareTransportKind::Ble)) return;
     noteAppWriteActivity();
     const std::string raw = c->getValue();
     lamp_protocol::ParsedFwChunk p;
