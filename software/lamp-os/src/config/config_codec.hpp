@@ -195,6 +195,35 @@ LoadedRecords loadStoredConfig(ConfigStore& store, JsonObject root, LampSettings
                                ExpressionSettings& expressions,
                                HomeModeSettings& homeMode, bool& withinCaps);
 
+// The form the stored config loaded from. Whole and Split are the forms
+// releases up to 1.3.3 wrote (a whole "cfg" string, or "cfg", "cfgb"/"cfgc",
+// "cfgl" and "ko" beside the records); Binary is the settings blob.
+enum class StoreForm : uint8_t { Empty, Binary, Whole, Split };
+const char* storeFormName(StoreForm form);
+
+struct LoadedConfig {
+  StoreForm form = StoreForm::Empty;
+  LoadedRecords records;
+  bool withinCaps = true;
+  // The lamp section carries `named`, so applyDefaults need not infer it.
+  bool namedKeyPresent = false;
+  // A "cfg" string holding data that did not parse; the model is left at
+  // class defaults and nothing else loads.
+  bool parseFailed = false;
+  size_t cfgBytes = 0;  // the "cfg" string's length, 0 for a binary store
+};
+
+// Loads the stored config. A settings blob that reads is the authority: it
+// loads with the records, and every legacy key beside it is erased. With
+// none, the legacy keys load through loadStoredConfig as before. Both blobs
+// present (a save cut short) loads "st0". A settings blob that is present
+// but does not read or decode is reported unreadable, and the legacy load
+// runs for whatever is left. The blob is read into `buffer`, which holds
+// kMaxSettingsBlobLen bytes.
+LoadedConfig loadConfig(ConfigStore& store, LampSettings& lamp, BaseSettings& base,
+                        ShadeSettings& shade, ExpressionSettings& expressions,
+                        HomeModeSettings& homeMode, uint8_t* buffer, size_t bufferLen);
+
 // Heap a raw save takes beside its document, bounded from the host
 // measurements in test_config_persist_validate (64-bit, so its slots and
 // pools are twice the ESP32's) with margin, over the documents that test

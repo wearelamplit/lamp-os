@@ -1179,6 +1179,90 @@ LoadedRecords loadStoredConfig(ConfigStore& store, JsonObject root, LampSettings
   return loaded;
 }
 
+namespace {
+
+// The settings blob, in two keys by turns as the rest blob is: with both
+// present the first is live, for saves and loads alike.
+constexpr const char* kSettingsKeys[2] = {"st0", "st1"};
+// Every key a release up to 1.3.3 wrote the config to, besides the records.
+constexpr const char* kLegacyKeys[] = {"cfg", "cfgb", "cfgc", "cfgl", "ko"};
+
+struct LiveSettings {
+  int slot = -1;  // the key holding the live blob, -1 for none
+  size_t len = 0;
+  bool unreadable = false;  // a settings key holds a blob that did not read
+};
+
+LiveSettings liveSettings(ConfigStore& store, uint8_t* buf, size_t cap) {
+  LiveSettings found;
+  for (int i = 0; i < 2 && found.slot < 0; ++i) {
+    const size_t len = store.readBlob(kSettingsKeys[i], buf, cap);
+    if (len > 0) {
+      found.slot = i;
+      found.len = len;
+    } else if (store.has(kSettingsKeys[i])) {
+      found.unreadable = true;
+    }
+  }
+  return found;
+}
+
+bool hasLegacyKey(ConfigStore& store) {
+  for (const char* key : kLegacyKeys) {
+    if (store.has(key)) return true;
+  }
+  return false;
+}
+
+bool eraseLegacyKeys(ConfigStore& store) {
+  bool erased = true;
+  for (const char* key : kLegacyKeys) erased = store.erase(key) && erased;
+  return erased;
+}
+
+}  // namespace
+
+const char* storeFormName(StoreForm form) {
+  switch (form) {
+    case StoreForm::Binary: return "binary";
+    case StoreForm::Whole: return "whole";
+    case StoreForm::Split: return "split";
+    default: return "empty";
+  }
+}
+
+LoadedConfig loadConfig(ConfigStore& store, LampSettings& lamp, BaseSettings& base,
+                        ShadeSettings& shade, ExpressionSettings& expressions,
+                        HomeModeSettings& homeMode, uint8_t* buffer, size_t bufferLen) {
+  LoadedConfig loaded;
+  const LiveSettings live =
+      liveSettings(store, buffer, std::min(bufferLen, kMaxSettingsBlobLen));
+  if (live.slot >= 0 && decodeSettings(buffer, live.len, lamp, base, shade, homeMode)) {
+    loaded.form = StoreForm::Binary;
+    loaded.namedKeyPresent = true;
+    loaded.records = loadRecords(store, base, expressions, true, false);
+    loaded.records.unreadable = live.unreadable;
+    eraseLegacyKeys(store);
+    return loaded;
+  }
+  const bool settingsUnreadable = live.unreadable || live.slot >= 0;
+  const std::string json = store.read("cfg", "{}");
+  loaded.cfgBytes = json.length();
+  JsonDocument doc;
+  if (deserializeJson(doc, json)) {
+    loaded.parseFailed = configBlobHasData(json);
+    loaded.records.unreadable = settingsUnreadable;
+    return loaded;
+  }
+  const bool legacy = hasLegacyKey(store);
+  loaded.records = loadStoredConfig(store, doc.as<JsonObject>(), lamp, base, shade, expressions,
+                                    homeMode, loaded.withinCaps);
+  loaded.records.unreadable |= settingsUnreadable;
+  loaded.namedKeyPresent = doc["lamp"]["named"].is<bool>();
+  if (legacy) loaded.form = loaded.records.present ? StoreForm::Split : StoreForm::Whole;
+  return loaded;
+}
+
 // The literal `lit` at `c`, followed by the end of a value: an ArduinoJson
 // unquoted string that starts with a literal's letters is no literal.
 static size_t literalAt(const char* c) {
