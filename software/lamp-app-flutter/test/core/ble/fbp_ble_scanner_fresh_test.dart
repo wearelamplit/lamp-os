@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
 import 'package:flutter_blue_plus_platform_interface/flutter_blue_plus_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,14 +14,26 @@ final class _Radio extends FlutterBluePlusPlatform {
 
   @override
   Stream<BmScanResponse> get onScanResponse => _responses.stream;
+  int failNextStarts = 0;
+
   @override
-  Future<bool> startScan(BmScanSettings request) async => true;
+  Future<bool> startScan(BmScanSettings request) async {
+    if (failNextStarts > 0) {
+      failNextStarts--;
+      throw StateError('radio refused the scan');
+    }
+    return true;
+  }
+
   @override
   Future<bool> stopScan(BmStopScanRequest request) async => true;
 
   Future<void> hear(String id) async {
-    // Distinct fbp timestamps between sightings of one device.
-    await Future<void>.delayed(const Duration(milliseconds: 2));
+    send(id);
+    await Future<void>.delayed(Duration.zero);
+  }
+
+  void send(String id) {
     _responses.add(
       BmScanResponse(
         advertisements: [
@@ -44,7 +57,6 @@ final class _Radio extends FlutterBluePlusPlatform {
         errorString: '',
       ),
     );
-    await Future<void>.delayed(Duration.zero);
   }
 }
 
@@ -105,13 +117,64 @@ void main() {
       await radio.hear('E');
       await s.stop();
       await s.start();
+      expect(heard, ['E'], reason: 'the replayed E is not a new sighting');
       await radio.hear('F');
+      await radio.hear('E');
       expect(heard, [
         'E',
         'F',
-      ], reason: 'E is not heard again after the restart');
+        'E',
+      ], reason: 'every advertisement heard after the restart is forwarded');
       await s.stop();
       await sub.cancel();
     },
   );
+
+  test('a lamp heard again after the scan restarts itself is forwarded', () {
+    fakeAsync((async) {
+      final s = FbpBleScanner();
+      final heard = <String>[];
+      s.results().listen((ad) => heard.add(ad.id));
+      s.start();
+      async.flushMicrotasks();
+      radio.send('G');
+      async.flushMicrotasks();
+      // The radio stopping on its own, as fbp's scan timeout does.
+      fbp.FlutterBluePlus.stopScan();
+      async.elapse(const Duration(seconds: 4));
+      expect(fbp.FlutterBluePlus.isScanningNow, isTrue);
+      radio.send('G');
+      async.flushMicrotasks();
+      expect(heard, ['G', 'G']);
+      s.stop();
+      async.flushMicrotasks();
+    });
+  });
+
+  test('a lamp heard after a failed start is retried and forwarded', () {
+    fakeAsync((async) {
+      final first = FbpBleScanner();
+      first.start();
+      async.flushMicrotasks();
+      radio.send('H');
+      async.flushMicrotasks();
+      first.stop();
+      async.flushMicrotasks();
+
+      radio.failNextStarts = 1;
+      final s = FbpBleScanner();
+      final heard = <String>[];
+      s.results().listen((ad) => heard.add(ad.id));
+      s.start();
+      async.flushMicrotasks();
+      expect(fbp.FlutterBluePlus.isScanningNow, isFalse);
+      async.elapse(const Duration(seconds: 4));
+      expect(fbp.FlutterBluePlus.isScanningNow, isTrue);
+      radio.send('H');
+      async.flushMicrotasks();
+      expect(heard, ['H'], reason: 'only the H heard after the retry counts');
+      s.stop();
+      async.flushMicrotasks();
+    });
+  });
 }

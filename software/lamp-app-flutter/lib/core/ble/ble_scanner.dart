@@ -145,10 +145,11 @@ class FbpBleScanner implements BleScanner {
   bool _restarting = false;
   bool _restartAgain = false;
   // fbp's `scanResults` carries every device heard since its scan started on
-  // each emit, and replays the previous scan's list on listen. Only an entry
-  // heard after this scanner started and after its last forward is a sighting.
-  DateTime _startedAt = DateTime.now();
-  final _forwardedAt = <String, DateTime>{};
+  // each emit, and replays its last list on listen. fbp builds one ScanResult
+  // per received advertisement and re-emits that same object, so an entry is a
+  // new sighting only when it is not the object last forwarded for its device.
+  // fbp's `==` compares the device only, hence `identical`.
+  final _lastForwarded = <String, fbp.ScanResult>{};
 
   // Delay before re-issuing a scan so a persistently failing startScan
   // (permission revoked, adapter mid-cycle) can't spin a hot retry loop.
@@ -167,8 +168,8 @@ class FbpBleScanner implements BleScanner {
   void _onScanResults(List<fbp.ScanResult> results) {
     for (final r in results) {
       final id = r.device.remoteId.str;
-      if (!r.timeStamp.isAfter(_forwardedAt[id] ?? _startedAt)) continue;
-      _forwardedAt[id] = r.timeStamp;
+      if (identical(_lastForwarded[id], r)) continue;
+      _lastForwarded[id] = r;
       final ad = parseLampAdvertisement(
         manufacturerData: r.advertisementData.manufacturerData,
         advName: r.advertisementData.advName,
@@ -215,8 +216,13 @@ class FbpBleScanner implements BleScanner {
   Future<void> start() async {
     if (_running) return;
     _running = true;
-    _startedAt = DateTime.now();
-    _forwardedAt.clear();
+    // The listen below replays this list, which was heard before this start.
+    _lastForwarded
+      ..clear()
+      ..addAll({
+        for (final r in fbp.FlutterBluePlus.lastScanResults)
+          r.device.remoteId.str: r,
+      });
     // Arm every listener before the first startScan so a throw below still
     // leaves recovery wired: the next isScanning=false or adapter=on event
     // drives _restartScan.
