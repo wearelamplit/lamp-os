@@ -18,7 +18,7 @@ static_assert(LAMP_HELLO_INTERVAL_MS == 30000,
 // Boot burst: the first LAMP_HELLO_BURST_WINDOW_MS of uptime emit HELLO every
 // LAMP_HELLO_BURST_INTERVAL_MS so a missed first HELLO refills the roster in
 // seconds; airtime is elevated only in this window, then settles to the steady
-// 60 s budget. Bench-tunable.
+// 30 s budget. Bench-tunable.
 #define LAMP_HELLO_BURST_WINDOW_MS 30000
 #define LAMP_HELLO_BURST_INTERVAL_MS 5000
 

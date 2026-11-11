@@ -64,7 +64,9 @@ traffic, relay-heavy types larger than single-hop / low-rate ones — receive-si
 state, not a wire contract, so nodes with different capacities interoperate and
 a resize needs no protocol bump. HELLO cadence (boot burst, then a steady
 interval) is defined in
-`software/lamp-os/src/components/network/mesh/hello_interval.hpp`. Past
+`software/lamp-os/src/components/network/mesh/hello_interval.hpp`, which
+derives the steady interval from `kLampHelloIntervalMs` in the shared
+`presence.hpp`. Past
 protocol bumps have widened the FW channel slot for per-variant OTA gating
 (`{type}-{channel}`) and added a TLV trailer to HELLO + WISP_HELLO (TLV enum in
 `software/shared/protocol/src/lampos/protocol/presence.hpp`). Unknown TLVs are

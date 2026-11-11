@@ -342,7 +342,7 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     }
 #endif
 #endif
-    // RSSI feeds the cascade sort so physically closer peers fire first.
+    // RSSI feeds the roster's espnowRssi, the OTA offer signal floor.
     // h.name is a NUL-terminated fixed field; pass it straight through so the
     // hot HELLO path never allocates a transient std::string.
     lampRoster.addOrUpdateFromEspNow(

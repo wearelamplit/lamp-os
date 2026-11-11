@@ -59,7 +59,7 @@ constexpr const char* CHAR_WIFI_STATE      = "5f64f4db-d6d9-4a44-9b3f-3a8d6f7e6b
 // streams host→lamp (write), pagination streams lamp→host (read).
 constexpr const char* CHAR_PAGE_CTRL       = "5f64f4dc-d6d9-4a44-9b3f-3a8d6f7e6b40";
 constexpr const char* CHAR_PAGE_DATA       = "5f64f4dd-d6d9-4a44-9b3f-3a8d6f7e6b40";
-// remote_op (write-with-response, encrypted): a render-only control write
+// remote_op (write-with-response, plaintext, auth-gated): a render-only control write
 // applied on this lamp when its targetMac is this lamp or "broadcast".
 constexpr const char* CHAR_REMOTE_OP       = "5f64f4e4-d6d9-4a44-9b3f-3a8d6f7e6b40";
 // home_mode_focus (write-without-response): single u8 bool. The app
@@ -74,7 +74,7 @@ constexpr const char* CHAR_REMOTE_OP       = "5f64f4e4-d6d9-4a44-9b3f-3a8d6f7e6b
 // home.ssid + wifi::homeSsidVisible(). Cleared automatically on BT
 // disconnect.
 constexpr const char* CHAR_HOME_MODE_FOCUS = "5f64f4e5-d6d9-4a44-9b3f-3a8d6f7e6b40";
-// social_dispositions (read + write, encrypted): JSON map of peer name to
+// social_dispositions (read + write, plaintext): JSON map of peer name to
 // disposition 1..5 (salty .. neutral .. smitten). Read returns the full
 // map; write replaces it. Auth-gated like the other write characteristics.
 // Stored separately from the main config blob in NVS namespace "lamp",

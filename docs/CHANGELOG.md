@@ -75,8 +75,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   addressed to it. Lamps on firmware older than 1.1.5 send wisp commands to
   every wisp at once, so a wisp on this firmware ignores them: update those
   lamps first.
-- **Wisps need a USB reflash** for both fixes (`npm run wisp:flash:release`
-  with the wisp plugged in); wisps don't update over the mesh.
+- **Wisps need a USB reflash** to pick up every wisp change in this release
+  (`npm run wisp:flash:release` with the wisp plugged in); wisps don't update
+  over the mesh.
 - **A wisp left on past 49.7 days keeps its time stamps in order.** The
   wisp's status time stamp restarted from zero at 49.7 days of uptime, so
   an emptied manual palette that the app could judge only by that stamp

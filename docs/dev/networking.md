@@ -672,7 +672,7 @@ The lamp partitions two app slots (`ota_0`/app0, `ota_1`/app1) plus an `otadata`
 
 ### RSSI gate
 
-`MSG_FW_OFFER`/`MSG_FS_OFFER` are single-hop unicast (no relay), so a weak direct link thrashes or fails a transfer regardless of chunk size. Both sides gate on `kOtaMinRssiDbm` (`components/network/protocol/fw_ota.hpp`, currently -80 dBm): the distributor (`considerPeerForOta`) skips offering below the floor using the peer's ESP-NOW HELLO RSSI (`LampRoster::espnowRssi`, distinct from the BLE-scan `lastRssi`); the receiver (`MeshLink::handleRecv`) independently drops an inbound OFFER whose frame RSSI is below the floor. The -127 "unknown RSSI" sentinel is never gated (allow). This is local, not on the wire — no `PROTOCOL_VERSION` involvement. Gating a weak direct hop doesn't strand a peer: cascade OTA still reaches it later via a nearer already-upgraded lamp.
+`MSG_FW_OFFER`/`MSG_FS_OFFER` are single-hop unicast (no relay), so a weak direct link thrashes or fails a transfer regardless of chunk size. Both sides gate on `kOtaMinRssiDbm` (`components/network/protocol/fw_ota.hpp`, currently -92 dBm): the distributor (`considerPeerForOta`) skips offering below the floor using the peer's ESP-NOW HELLO RSSI (`LampRoster::espnowRssi`, distinct from the BLE-scan `lastRssi`); the receiver (`MeshLink::handleRecv`) independently drops an inbound OFFER whose frame RSSI is below the floor. The -127 "unknown RSSI" sentinel is never gated (allow). This is local, not on the wire — no `PROTOCOL_VERSION` involvement. Gating a weak direct hop doesn't strand a peer: cascade OTA still reaches it later via a nearer already-upgraded lamp.
 
 ### Serve-once coordination
 
