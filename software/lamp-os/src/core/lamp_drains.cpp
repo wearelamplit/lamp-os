@@ -486,7 +486,7 @@ void Lamp::drainWispState() {
   const bool painted = compositor.applyWispStateSlot(cmd, selfMac, now);
   const bool active = compositor.wispActive();
   if (active != wasActive ||
-      (active && painted && compositor.wispHeadingChanged())) {
+      (active && compositor.wispHeadingChanged())) {
     ble_control::notifyWispStatus();
   }
 #ifdef LAMP_DEBUG
