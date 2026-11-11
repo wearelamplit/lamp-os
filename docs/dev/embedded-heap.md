@@ -614,11 +614,14 @@ peak, and uptime into RTC memory at 1 Hz; the panic handler adds the reason, pc,
 first four backtrace addresses, and core, and replaces the uptime with the
 uptime at the fault. The handler is Arduino-ESP32's panic hook, which runs only
 because the link wraps `esp_panic_handler` (`-Wl,--wrap=esp_panic_handler` in
-`platformio.ini`); a build without the flag fails to link. RTC memory survives a panic or
-watchdog reset but not power loss, so a magic value gates it. On the next boot a
-panic, int/task/other watchdog, or brownout reset (or a captured panic under any
-reset) bumps a counter and writes the record to NVS (namespace `crash`, key
-`last`). A clean `esp_restart` (OTA, webapp reboot) and power-on do not count.
+`platformio.ini`); a build without the flag fails to link. RTC memory survives
+a panic or watchdog reset but not power loss, so a magic value gates it. Until
+the loop's first sample the snapshot is marked unsampled, since its heap and
+roster figures are the ones taken at the re-arm early in setup. On the next
+boot a panic, int/task/other watchdog, or brownout reset (or a captured panic
+under any reset) bumps a counter and writes the record to NVS (namespace
+`crash`, key `last`). A clean `esp_restart` (OTA, webapp reboot) and power-on
+do not count.
 
 Read it from the BLE `lamp` section:
 
@@ -633,12 +636,14 @@ Read it from the BLE `lamp` section:
 `reset` and `resetReason` are `esp_reset_reason_t` ordinals (4 panic, 5 int WDT,
 6 task WDT, 7 other WDT, 9 brownout, 3 clean restart, 1 power-on). The heap and
 roster fields are absent when RTC memory failed its check (a brownout often
-does); `core`/`pc`/`bt` are absent unless the panic handler ran. `reason` is the
-CPU exception (`LoadProhibited`, `IllegalInstruction`), or the abort message for
-an `abort()`; a task-watchdog abort has no message, so its record carries no
-`reason` and `reset` 6 names it. `uptimeMs` is the uptime at the fault when the
-panic handler ran, else the last 1 Hz sample (0 when the boot died before its
-loop sampled). It stops at 4294967295 (49.7 days) on a longer boot.
+does) or the boot died before its loop sampled; `core`/`pc`/`bt` are absent
+unless the panic handler ran. `reason` is the CPU exception (`LoadProhibited`,
+`IllegalInstruction`) or the abort's message: an assert or stack-overflow
+message cut to 31 characters, or `abort() was called`, whose caller is the
+fourth `bt` entry. A task-watchdog abort has no message, so its record carries
+no `reason` and `reset` 6 names it. `uptimeMs` is the uptime at the fault when
+the panic handler ran, else the last 1 Hz sample (0 when the boot died before
+its loop sampled). It stops at 4294967295 (49.7 days) on a longer boot.
 `minLargestBlock` near 1-2 KB with a high `rosterPeak` points at fragmentation.
 Feed `pc` and `bt` to `xtensa-esp32-elf-addr2line -e firmware.elf` for the build
 matching `fw` (packed `major<<16 | minor<<8 | patch`).
@@ -686,7 +691,8 @@ interrupt reads `end power`.
 
 The figures come from the crash record's RTC snapshot, sampled each second
 from the first loop iteration on: when it survives the reset they are those
-of the last sample. When it does not (a power cut, often a brownout), the
+of the last sample, and after a panic or watchdog abort `up` is the uptime at
+the fault. When it does not (a power cut, often a brownout), the
 boot keeps the figures from the last milestone it reached, 1 min, 1 h or 1
 day, and `up` reads `>` that milestone. `free - big -` means the boot died
 before any figure was taken: in `setup()`, or in its first minute after a
