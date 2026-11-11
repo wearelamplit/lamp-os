@@ -40,7 +40,7 @@ size_t buildTwo(uint8_t* buf, size_t cap, const uint8_t mineRgb[6],
 void fillFrom(const uint8_t* buf, size_t len) {
   lp::ParsedWispState ws;
   TEST_ASSERT_TRUE(lp::parseWispState(buf, len, ws));
-  lamp::fillPendingWispState(gSlot, ws);
+  lamp::fillPendingWispState(gSlot, ws, nullptr);
 }
 
 void assertColor(Color want, Color got) {

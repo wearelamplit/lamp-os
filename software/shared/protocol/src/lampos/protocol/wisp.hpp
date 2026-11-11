@@ -216,7 +216,7 @@ constexpr size_t wispStateDriftFadeMaxRecords() {
 }
 constexpr size_t WISP_STATE_DRIFT_FADE_MAX_RECORDS = wispStateDriftFadeMaxRecords();
 static_assert(WISP_STATE_DRIFT_FADE_MAX_RECORDS == 57,
-              "drift fade fit moved: update networking.md and the wisp scratch");
+              "drift fade fit moved: update networking.md");
 
 struct ParsedWispHello {
   uint16_t seq;

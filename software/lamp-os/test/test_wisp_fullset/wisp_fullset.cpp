@@ -506,6 +506,25 @@ void test_state_trailer_needs_w_plane() {
                                       buf, withW + 2, withW, recs, 1, false));
 }
 
+// A roomy buffer still never takes a frame past one v2 frame.
+void test_state_trailer_never_exceeds_v2_frame() {
+  static uint8_t entries[lp::WISP_STATE_MAX_ENTRIES * lp::WISP_STATE_ENTRY_SIZE];
+  static uint8_t w[lp::WISP_STATE_MAX_ENTRIES * lp::WISP_STATE_W_SIZE];
+  static uint8_t recs[lp::WISP_STATE_DRIFT_FADE_MAX_RECORDS *
+                      lp::WISP_STATE_DRIFT_FADE_RECORD_SIZE];
+  fillRecords(recs, lp::WISP_STATE_DRIFT_FADE_MAX_RECORDS, 0);
+  static uint8_t buf[2 * lp::ESPNOW_V2_FRAME_MAX];
+  const size_t n = lp::buildWispState(buf, sizeof(buf), 1, kSrc, 64, 8000, 0,
+                                      entries, w, 100);
+  TEST_ASSERT_TRUE(n + lp::wispStateDriftFadeTrailerSize(
+                           lp::WISP_STATE_DRIFT_FADE_MAX_RECORDS, false) <
+                   sizeof(buf));
+  TEST_ASSERT_EQUAL_UINT32(
+      n, lp::appendWispStateDriftFade(buf, sizeof(buf), n, recs,
+                                      lp::WISP_STATE_DRIFT_FADE_MAX_RECORDS,
+                                      false));
+}
+
 void test_state_fit_line() {
   bool partial = true;
   const size_t fit = lp::WISP_STATE_DRIFT_FADE_MAX_RECORDS;
@@ -565,6 +584,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_state_malformed_trailer_reads_none);
   RUN_TEST(test_state_unknown_trailer_tlv_skipped);
   RUN_TEST(test_state_trailer_needs_w_plane);
+  RUN_TEST(test_state_trailer_never_exceeds_v2_frame);
   RUN_TEST(test_state_fit_line);
   return UNITY_END();
 }

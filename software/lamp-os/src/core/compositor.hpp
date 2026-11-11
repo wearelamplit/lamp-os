@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -64,7 +65,9 @@ class Compositor {
   Color    wispStateBase_;
   Color    wispStateShade_;
 
-  Color    wispStateHeading_;
+  Color    wispStateHeadingBase_;
+  Color    wispStateHeadingShade_;
+  uint8_t  wispStateSource_[6] = {};
   WispFadeSync wispFadeSync_ = WispFadeSync::Kept;
 
   // Overlay the wisp layer onto frameBuffers[0]=shade / [1]=base in place.
@@ -73,10 +76,10 @@ class Compositor {
   // One surface's share of a STATE frame that paints this lamp, `plain` being
   // its colour in the frame. A record runs the timed fade, joining from
   // `plain` while the layer is hidden. A partial frame without one leaves a
-  // running fade be. Otherwise the layer eases to `plain`, edge-triggered on
-  // `plainMoved`, ending any fade.
+  // running fade be when `continuing`. Otherwise the layer eases to `plain`,
+  // edge-triggered on `plainMoved`, ending any fade.
   static WispFadeSync feedWispSurface(LayerStack& s, float presence, Color plain,
-                                      bool plainMoved,
+                                      bool plainMoved, bool continuing,
                                       lamp_protocol::WispDriftFadeLookup fade,
                                       Color target, uint32_t leftMs,
                                       uint32_t nowMs) {
@@ -85,7 +88,7 @@ class Compositor {
       if (presence == 0.0f) s.snapWisp(plain);
       return s.syncWispFade(target, leftMs, nowMs);
     }
-    if (fade == Lookup::Partial && s.wispFadeRunning(nowMs)) {
+    if (fade == Lookup::Partial && continuing && s.wispFadeRunning(nowMs)) {
       return WispFadeSync::Kept;
     }
     if (plainMoved || s.wispTimed()) s.setWispTarget(plain);
@@ -251,30 +254,38 @@ class Compositor {
       clearWispState(nowMs);
       return false;
     }
+    // A fade only carries over between frames of one unbroken paint from one
+    // wisp; a lamp that was dropped or changed wisps takes the plain colour.
+    const bool continuing =
+        wispStatePresent_ && std::memcmp(wispStateSource_, slot.sourceMac, 6) == 0;
     const lamp_protocol::WispDriftFade& rec = slot.fadeRecord;
     const Color toBase(rec.base[0], rec.base[1], rec.base[2], rec.base[3]);
     const Color toShade(rec.shade[0], rec.shade[1], rec.shade[2], rec.shade[3]);
     wispFadeSync_ = feedWispSurface(
         wispBaseStack_, wispBasePresence_.value(), base,
-        !wispStatePresent_ || !(base == wispStateBase_), slot.fade, toBase,
+        !continuing || !(base == wispStateBase_), continuing, slot.fade, toBase,
         rec.leftMs, nowMs);
     feedWispSurface(wispShadeStack_, wispShadePresence_.value(), shade,
-                    !wispStatePresent_ || !(shade == wispStateShade_), slot.fade,
-                    toShade, rec.leftMs, nowMs);
-    if (slot.fade == lamp_protocol::WispDriftFadeLookup::Record) {
-      wispStateHeading_ = toBase;
-    } else if (!wispBaseStack_.wispFadeRunning(nowMs)) {
-      wispStateHeading_ = base;
+                    !continuing || !(shade == wispStateShade_), continuing,
+                    slot.fade, toShade, rec.leftMs, nowMs);
+    const bool record = slot.fade == lamp_protocol::WispDriftFadeLookup::Record;
+    if (record || !wispBaseStack_.wispFadeRunning(nowMs)) {
+      wispStateHeadingBase_ = record ? toBase : base;
     }
+    if (record || !wispShadeStack_.wispFadeRunning(nowMs)) {
+      wispStateHeadingShade_ = record ? toShade : shade;
+    }
+    std::memcpy(wispStateSource_, slot.sourceMac, 6);
     wispStateBase_ = base;
     wispStateShade_ = shade;
     wispStatePresent_ = true;
     wispStateFreshMs_ = nowMs;
     return true;
   }
-  // The base colour the wisp is taking this lamp to: a drift fade's target
-  // while one runs, else the last STATE colour. Steady across a fade's frames.
-  Color wispStateHeadingColor() const { return wispStateHeading_; }
+  // The colours the wisp is taking this lamp to: a drift fade's target while
+  // one runs, else the last STATE colour. Steady across a fade's frames.
+  Color wispStateHeadingBaseColor() const { return wispStateHeadingBase_; }
+  Color wispStateHeadingShadeColor() const { return wispStateHeadingShade_; }
   // What the last STATE's drift fade record did to the base surface.
   WispFadeSync wispFadeSync() const { return wispFadeSync_; }
 

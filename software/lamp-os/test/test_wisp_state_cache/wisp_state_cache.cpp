@@ -39,7 +39,7 @@ void fill(bool withW, const uint8_t w[4] = kWarmThenBlackW) {
                                       entries, withW ? w : nullptr, 2);
   lp::ParsedWispState ws;
   TEST_ASSERT_TRUE(lp::parseWispState(buf, n, ws));
-  lamp::fillPendingWispState(gSlot, ws);
+  lamp::fillPendingWispState(gSlot, ws, nullptr);
 }
 }  // namespace
 
@@ -109,7 +109,7 @@ void test_state_slot_past_capacity_keeps_frame_head() {
                                       static_cast<uint8_t>(kOver));
   lp::ParsedWispState ws;
   TEST_ASSERT_TRUE(lp::parseWispState(buf, n, ws));
-  lamp::fillPendingWispState(gSlot, ws);
+  lamp::fillPendingWispState(gSlot, ws, nullptr);
   TEST_ASSERT_EQUAL_UINT8(kOver, gSlot.count);
 
   LampRoster roster;

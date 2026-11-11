@@ -1133,6 +1133,44 @@ void test_state_past_fit_line_goes_partial(void) {
   TEST_ASSERT_TRUE(f.len <= lamp_protocol::ESPNOW_V2_FRAME_MAX);
 }
 
+// Only claims mid-fade get a record, and every one of them does.
+void test_state_records_only_for_fading_claims(void) {
+  wisp::WispRoster r;
+  wisp::LampObservation lamps[3];
+  for (size_t i = 0; i < 3; ++i) {
+    fleetMac(lamps[i].mac, static_cast<uint8_t>(i + 1));
+    lamps[i].rssi = -60;
+  }
+  r.setSelfMac(kSelfMac);
+  r.recomputeClaims(lamps, 3, /*nowMs=*/1000);
+  for (size_t i = 0; i < 3; ++i) r.setLampPaint(lamps[i].mac, kFromBase, kFromShade);
+  r.setLampDrift(lamps[2].mac, kToBase, kToShade, kDriftStartMs, 60000);
+  static FleetFrame f;
+  buildFleetFrame(r, kDriftStartMs + 1000, f);
+  TEST_ASSERT_EQUAL_size_t(3, f.ws.count);
+  lamp_protocol::WispDriftFade rec{};
+  for (uint8_t e = 0; e < 2; ++e) {
+    TEST_ASSERT_EQUAL(lamp_protocol::WispDriftFadeLookup::None,
+                      lamp_protocol::lookupWispDriftFade(f.ws.trailer,
+                                                         f.ws.trailerLen, e, rec));
+  }
+  TEST_ASSERT_EQUAL(lamp_protocol::WispDriftFadeLookup::Record,
+                    lamp_protocol::lookupWispDriftFade(f.ws.trailer,
+                                                       f.ws.trailerLen, 2, rec));
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(kToBase, rec.base, 4);
+}
+
+// A fade longer than the record's 16-bit time left carries the most it can.
+void test_state_record_time_left_clamps(void) {
+  wisp::WispRoster r;
+  claimPaintDrift(r, 7000000);
+  lamp_protocol::WispDriftFade f{};
+  TEST_ASSERT_EQUAL(lamp_protocol::WispDriftFadeLookup::Record,
+                    fadeAt(r, kDriftStartMs + 1000, f));
+  TEST_ASSERT_EQUAL_UINT32(
+      UINT16_MAX * lamp_protocol::WISP_STATE_DRIFT_FADE_LEFT_UNIT_MS, f.leftMs);
+}
+
 void test_state_records_past_scratch_mark_partial(void) {
   wisp::WispRoster r;
   claimFleetDrifting(r, 5);
@@ -1228,6 +1266,8 @@ int main(int, char**) {
   RUN_TEST(test_state_record_gone_after_set_lamp_paint);
   RUN_TEST(test_state_all_fading_fits_full_up_to_fit_line);
   RUN_TEST(test_state_past_fit_line_goes_partial);
+  RUN_TEST(test_state_records_only_for_fading_claims);
+  RUN_TEST(test_state_record_time_left_clamps);
   RUN_TEST(test_state_records_past_scratch_mark_partial);
   RUN_TEST(test_state_rotation_covers_every_lamp_at_the_cap);
   return UNITY_END();

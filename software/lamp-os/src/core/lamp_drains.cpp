@@ -481,13 +481,15 @@ void Lamp::drainWispState() {
   }
 
   const bool wasActive = compositor.wispActive();
-  const Color prevHeading = compositor.wispStateHeadingColor();
+  const Color prevBase = compositor.wispStateHeadingBaseColor();
+  const Color prevShade = compositor.wispStateHeadingShadeColor();
   uint8_t selfMac[6];
   meshLink.getMyMac(selfMac);
   const bool painted = compositor.applyWispStateSlot(cmd, selfMac, now);
   const bool active = compositor.wispActive();
   if (active != wasActive ||
-      (active && !(compositor.wispStateHeadingColor() == prevHeading))) {
+      (active && !(compositor.wispStateHeadingBaseColor() == prevBase &&
+                   compositor.wispStateHeadingShadeColor() == prevShade))) {
     ble_control::notifyWispStatus();
   }
 #ifdef LAMP_DEBUG

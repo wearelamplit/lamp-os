@@ -97,10 +97,10 @@ struct PendingWispState {
 };
 
 // Copy a parsed MSG_WISP_STATE into the slot, W plane included, and look up
-// `selfMac`'s drift fade (None without a MAC).
+// `selfMac`'s drift fade (None for a null MAC).
 void fillPendingWispState(PendingWispState& slot,
                           const lamp_protocol::ParsedWispState& ws,
-                          const uint8_t selfMac[6] = nullptr);
+                          const uint8_t selfMac[6]);
 
 // This lamp's RGBW base/shade from the slot. False when `mac` has no entry.
 bool wispStateColorsFor(const PendingWispState& slot, const uint8_t mac[6],

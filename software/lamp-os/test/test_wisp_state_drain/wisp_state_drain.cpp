@@ -47,7 +47,7 @@ void fillTwo(const uint8_t mineRgb[6], const uint8_t w[4], bool withW) {
                                       entries, withW ? w : nullptr, 2);
   lp::ParsedWispState ws;
   TEST_ASSERT_TRUE(lp::parseWispState(buf, n, ws));
-  lamp::fillPendingWispState(gSlot, ws);
+  lamp::fillPendingWispState(gSlot, ws, nullptr);
 }
 
 void assertColor(Color want, Color got) {
@@ -200,6 +200,8 @@ void putColor(uint8_t* p, Color c) {
 // A STATE with kOther at 0 and kMine at 1, kMine's plain colours `base` /
 // `shade`, and the drift fade trailer `form`: a record for kMine (or kOther)
 // heading to `to*` with `leftMs` left, marked partial or not.
+const uint8_t* gFrameSrc = kSrc;
+
 void fillFrame(Color base, Color shade, Trailer form, Color toBase = Color(),
                Color toShade = Color(), uint32_t leftMs = 0) {
   uint8_t entries[2 * lp::WISP_STATE_ENTRY_SIZE];
@@ -211,7 +213,7 @@ void fillFrame(Color base, Color shade, Trailer form, Color toBase = Color(),
   std::memcpy(entries + 18, mineRgb, 6);
   const uint8_t w[4] = {1, 2, base.w, shade.w};
   static uint8_t buf[lp::ESPNOW_V2_FRAME_MAX];
-  size_t n = lp::buildWispState(buf, sizeof(buf), 1, kSrc, 100, 60000, 0,
+  size_t n = lp::buildWispState(buf, sizeof(buf), 1, gFrameSrc, 100, 60000, 0,
                                 entries, w, 2);
   if (form != Trailer::None) {
     uint8_t rec[lp::WISP_STATE_DRIFT_FADE_RECORD_SIZE];
@@ -479,7 +481,8 @@ void test_drift_heading_steady_across_fade() {
   Rig r;
   fillFrame(kStartBase, kStartShade, Trailer::MineFull, kToBase, kToShade, 20000);
   r.apply();
-  assertColor(kToBase, r.c.wispStateHeadingColor());
+  assertColor(kToBase, r.c.wispStateHeadingBaseColor());
+  assertColor(kToShade, r.c.wispStateHeadingShadeColor());
   for (uint32_t at = 2000; at <= 6000; at += 2000) {
     r.runTo(at);
     fillFrame(wispPlain(kStartBase, kToBase, at, 20000),
@@ -487,11 +490,72 @@ void test_drift_heading_steady_across_fade() {
               at == 4000 ? Trailer::OtherPartial : Trailer::MineFull, kToBase,
               kToShade, 20000 - at);
     r.apply();
-    assertColor(kToBase, r.c.wispStateHeadingColor());
+    assertColor(kToBase, r.c.wispStateHeadingBaseColor());
+    assertColor(kToShade, r.c.wispStateHeadingShadeColor());
   }
   fillFrame(kOtherToBase, kOtherToShade, Trailer::None);
   r.apply();
-  assertColor(kOtherToBase, r.c.wispStateHeadingColor());
+  assertColor(kOtherToBase, r.c.wispStateHeadingBaseColor());
+  assertColor(kOtherToShade, r.c.wispStateHeadingShadeColor());
+}
+
+// A lamp dropped from the wisp's paint and taken back, or handed to another
+// wisp, takes the plain colour from a partial frame instead of an old fade.
+void takesPlainAfter(void (*interrupt)(Rig&)) {
+  Rig r;
+  fillFrame(kStartBase, kStartShade, Trailer::MineFull, kToBase, kToShade, 600000);
+  r.apply();
+  r.runTo(4000);
+  interrupt(r);
+  fillFrame(kOtherToBase, kOtherToShade, Trailer::OtherPartial, kOtherToBase,
+            kOtherToShade, 5000);
+  r.apply();
+  gFrameSrc = kSrc;
+  TEST_ASSERT_FALSE(r.c.wispLayer(true).wispTimed());
+  TEST_ASSERT_FALSE(r.c.wispLayer(false).wispTimed());
+  r.runTo(r.t + 1000);
+  assertColor(kOtherToBase, r.base());
+  assertColor(kOtherToShade, r.shade());
+  assertColor(kOtherToBase, r.c.wispStateHeadingBaseColor());
+}
+
+void test_drift_partial_after_absence_takes_plain() {
+  takesPlainAfter([](Rig& r) { r.c.clearWispState(r.t); });
+}
+
+void test_drift_partial_from_new_wisp_takes_plain() {
+  takesPlainAfter([](Rig&) {
+    static const uint8_t kOtherWisp[6] = {0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5};
+    gFrameSrc = kOtherWisp;
+  });
+}
+
+// A record with a new target starts a new fade even when its end matches the
+// running one's.
+void test_drift_record_new_target_same_end_starts() {
+  Rig r;
+  fillFrame(kStartBase, kStartShade, Trailer::MineFull, kToBase, kToShade, 20000);
+  r.apply();
+  r.runTo(5000);
+  fillFrame(kToBase, kToShade, Trailer::MineFull, kOtherToBase, kOtherToShade,
+            15000);
+  r.apply();
+  TEST_ASSERT_TRUE(r.c.wispFadeSync() == lamp::WispFadeSync::Started);
+  r.runTo(20000);
+  assertColor(kOtherToBase, r.base());
+  assertColor(kOtherToShade, r.shade());
+}
+
+// A finished fade holds its target however long the layer then sits.
+void test_drift_finished_fade_holds_across_wrap() {
+  Rig r;
+  fillFrame(kStartBase, kStartShade, Trailer::MineFull, kToBase, kToShade, 20000);
+  r.apply();
+  r.runTo(20000);
+  for (uint64_t t = 20000; t < 20000 + (1ull << 32) + 5000; t += 1ull << 26) {
+    r.c.tickWisp(static_cast<uint32_t>(t), true, true);
+    assertColor(kToBase, r.base());
+  }
 }
 
 // A fade that spans the millis() wrap runs to its end.
@@ -539,5 +603,9 @@ int main(int, char**) {
   RUN_TEST(test_drift_no_trailer_same_plain_ends_fade);
   RUN_TEST(test_drift_heading_steady_across_fade);
   RUN_TEST(test_drift_fade_across_millis_wrap);
+  RUN_TEST(test_drift_partial_after_absence_takes_plain);
+  RUN_TEST(test_drift_partial_from_new_wisp_takes_plain);
+  RUN_TEST(test_drift_record_new_target_same_end_starts);
+  RUN_TEST(test_drift_finished_fade_holds_across_wrap);
   return UNITY_END();
 }
