@@ -172,25 +172,36 @@ void test_colour_relation() {
   TEST_ASSERT_EQUAL(3 * 127, level(wrong.store, m, 0));
 }
 
-// Daily meetings alone take a neutral household lamp to Fond and no further,
-// each week adding less than the one before.
+// Daily meetings alone take a neutral household lamp to Fond and no further.
 void test_daily_meetings_stop_at_fond() {
   const auto m = peer(1);
   Rig rig;
-  int weekStart = level(rig.store, m, rig.now);
-  int lastGain = 1 << 30;
   for (int day = 1; day <= 30; ++day) {
     rig.run(24 * 60, &m);
     rig.engine.observeGreeting(m.data(), SocialMode::Ambivert, rig.now);
-    if (day % 7 == 0) {
-      const int gain = level(rig.store, m, rig.now) - weekStart;
-      if (lastGain > 0) TEST_ASSERT_LESS_THAN(lastGain, gain);
-      lastGain = gain;
-      weekStart = level(rig.store, m, rig.now);
-    }
   }
   TEST_ASSERT_EQUAL_UINT8(30, rig.store.peer(m.data(), rig.now).meets);
   TEST_ASSERT_EQUAL_UINT8(4, rig.store.peer(m.data(), rig.now).disp);
+}
+
+// From Salty, with room to climb, each week of daily meetings warms less than
+// the week before.
+void test_meeting_warmth_diminishes() {
+  const auto m = peer(1);
+  Rig rig;
+  rig.store.set(m.data(), 1, 0);
+  int weekStart = level(rig.store, m, rig.now);
+  int lastGain = 1 << 30;
+  for (int day = 1; day <= 28; ++day) {
+    rig.run(24 * 60, &m);
+    rig.engine.observeGreeting(m.data(), SocialMode::Ambivert, rig.now);
+    if (day % 7 != 0) continue;
+    const int gain = level(rig.store, m, rig.now) - weekStart;
+    TEST_ASSERT_GREATER_THAN(0, gain);
+    TEST_ASSERT_LESS_THAN(lastGain, gain);
+    lastGain = gain;
+    weekStart = level(rig.store, m, rig.now);
+  }
 }
 
 // Meetings closer than meetEveryH on-hours count once.
@@ -429,6 +440,7 @@ int main(int, char**) {
   RUN_TEST(test_burst_commits_at_most_the_cap);
   RUN_TEST(test_colour_relation);
   RUN_TEST(test_daily_meetings_stop_at_fond);
+  RUN_TEST(test_meeting_warmth_diminishes);
   RUN_TEST(test_meetings_need_the_gap);
   RUN_TEST(test_introvert_familiarity_doubles);
   RUN_TEST(test_score_steps_and_resets);
