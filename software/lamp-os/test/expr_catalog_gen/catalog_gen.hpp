@@ -17,6 +17,7 @@
 #include "expressions/shifty/shifty_expression.hpp"
 #include "expressions/shimmer/shimmer_expression.hpp"
 #include "expressions/spotty/spotty_expression.hpp"
+#include "expressions/yawn/yawn_expression.hpp"
 
 #include "../../src/expressions/expression_registry.cpp"
 

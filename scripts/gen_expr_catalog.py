@@ -37,6 +37,7 @@ def main():
         "-I", os.path.join(shared, "protocol", "src"),
         "-I", os.path.join(shared, "led-common", "src"),
         "-I", os.path.join(shared, "crypto", "src"),
+        "-I", os.path.join(shared, "clock", "src"),
         "-I", aj,
         os.path.join(LAMP, "test", "expr_catalog_gen", "gen_main.cpp"),
         "-o", out_bin,

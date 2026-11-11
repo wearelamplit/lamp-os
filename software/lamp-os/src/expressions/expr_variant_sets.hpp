@@ -10,7 +10,7 @@
 // runtime set and the generated catalog stay symmetric on both sides.
 
 #define LAMPOS_BASE_EXPRESSIONS(X) \
-  X(Glitchy) X(Pulse) X(Breathing) X(Shifty) X(Spotty) X(Shimmer)
+  X(Glitchy) X(Pulse) X(Breathing) X(Shifty) X(Spotty) X(Shimmer) X(Yawn)
 
 #define LAMPOS_SNAFU_EXPRESSIONS(X) \
   X(Glitchy) X(Pulse) X(Spotty) X(Shimmer)
