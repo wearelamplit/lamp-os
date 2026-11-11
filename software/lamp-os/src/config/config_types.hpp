@@ -97,9 +97,9 @@ class LampSettings {
 };
 
 /**
- * One physical strip run within a role: its app-editable palette + pixel
- *        count. Geometry (driver/pin/offset) lives in the variant's StripSpec;
- *        this is the persisted, editable half.
+ * One physical strip run within a role: its app-editable palette, pixel
+ *        count and data pin. Geometry (driver/offset) and the default pin live
+ *        in the variant's StripSpec; this is the persisted, editable half.
  * @property px - 0 = unset; applyDefaults fills from the variant default. See resolveConfiguredPx.
  * @property pin - data GPIO for this segment's strip; 0 = the variant StripSpec pin.
  *   Applied at boot through applySegmentPins.

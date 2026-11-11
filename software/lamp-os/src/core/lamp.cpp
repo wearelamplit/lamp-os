@@ -729,14 +729,16 @@ void lamp::Lamp::setup() {
   }
 #endif
 
-  // Build role FrameBuffers. Each role groups its hw_.strips in declaration
-  // order into one composite buffer: per strip a NeoPixel driver (pin +
-  // byte order from HwConfig) and a StripSegment at the running offset. A
-  // strip pixelCount of 0 resolves from the role's Config px (core
-  // single-strip roles, seeded first-boot from defaults()::{base,shade}Px);
-  // a custom variant sets an explicit per-strip count.
   const std::vector<uint8_t> stripPins =
       lamp::applySegmentPins(hw_, config.shade.segments, config.base.segments);
+
+  // Build role FrameBuffers. Each role groups its hw_.strips in declaration
+  // order into one composite buffer: per strip a NeoPixel driver (pin from
+  // applySegmentPins, byte order from HwConfig) and a StripSegment at the
+  // running offset. A strip pixelCount of 0 resolves from the role's Config
+  // px (core single-strip roles, seeded first-boot from
+  // defaults()::{base,shade}Px); a custom variant sets an explicit per-strip
+  // count.
 
   auto buildRole = [&](lamp::Surface role, uint8_t configPx,
                        const std::vector<lamp::Color>& colors,

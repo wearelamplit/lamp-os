@@ -12,8 +12,8 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   LED setup shows a Data pin row for each strip: pick a GPIO, tap Update, and
   the lamp restarts driving that strip from the new pin. Built-in pin puts it
   back. Handy when a board has a dead pin and the strip's wire moves to
-  another one. A pin the lamp can't use there (one another strip or a button
-  already uses) leaves the strip on its own pin, and the app says the save
+  another one. A pin the lamp can't use there (one another strip, a button or a
+  touch pad already uses) leaves the strip on its own pin, and the app says the save
   didn't take.
 
 ## 1.3.3
