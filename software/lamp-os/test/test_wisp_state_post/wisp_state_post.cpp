@@ -1,7 +1,7 @@
 // MSG_WISP_STATE post: decodeOwnWispDriftFade finds this lamp's record by its
 // own MAC, and decode-then-copy drains the same bytes as a reference fill that
-// does the lookup inside the copy, over full, partial, absent, malformed and
-// trailer-less frames posted back to back.
+// looks up every entry's record inside the copy, over full, partial, absent,
+// malformed and trailer-less frames posted back to back.
 
 #include <unity.h>
 
@@ -115,7 +115,7 @@ void build(Frame& f, Form form, uint8_t seed) {
   TEST_ASSERT_TRUE(lp::parseWispState(f.buf, f.len, f.ws));
 }
 
-// The own-fade lookup done inside the copy, straight into the slot. The
+// Every lookup done inside the copy, straight into the slot. The
 // reference every drained byte is held to.
 void referenceFill(PendingWispState& slot, const lp::ParsedWispState& ws,
                    const uint8_t selfMac[6]) {
@@ -136,6 +136,30 @@ void referenceFill(PendingWispState& slot, const lp::ParsedWispState& ws,
         static_cast<uint8_t>((own - ws.entries) / lp::WISP_STATE_ENTRY_SIZE);
     slot.fade = lp::lookupWispDriftFade(ws.trailer, ws.trailerLen, idx,
                                         slot.fadeRecord);
+    slot.ownIndex = idx;
+  } else {
+    slot.ownIndex = PendingWispState::kNoOwnEntry;
+  }
+  // No entry has index 0xFE, so its lookup reads only the PARTIAL mark.
+  lp::WispDriftFade none{};
+  slot.fadePartial = lp::lookupWispDriftFade(ws.trailer, ws.trailerLen, 0xFE,
+                                             none) ==
+                     lp::WispDriftFadeLookup::Partial;
+  std::memset(slot.targeted, 0, sizeof(slot.targeted));
+  for (size_t i = 0; i < n && ws.w; ++i) {
+    if (i == slot.ownIndex) continue;
+    lp::WispDriftFade rec{};
+    if (lp::lookupWispDriftFade(ws.trailer, ws.trailerLen,
+                                static_cast<uint8_t>(i), rec) !=
+        lp::WispDriftFadeLookup::Record) {
+      continue;
+    }
+    uint8_t* e = slot.entries + i * lp::WISP_STATE_ENTRY_SIZE;
+    std::memcpy(e + 6, rec.base, 3);
+    std::memcpy(e + 9, rec.shade, 3);
+    slot.w[i * lp::WISP_STATE_W_SIZE] = rec.base[3];
+    slot.w[i * lp::WISP_STATE_W_SIZE + 1] = rec.shade[3];
+    slot.targeted[i / 8] |= static_cast<uint8_t>(1u << (i % 8));
   }
 }
 
@@ -170,6 +194,10 @@ void assertSameDrain(const PendingWispState& want, const PendingWispState& got,
                                    4, where);
   TEST_ASSERT_EQUAL_UINT32_MESSAGE(want.fadeRecord.leftMs,
                                    got.fadeRecord.leftMs, where);
+  TEST_ASSERT_EQUAL_UINT8_MESSAGE(want.ownIndex, got.ownIndex, where);
+  TEST_ASSERT_EQUAL_MESSAGE(want.fadePartial, got.fadePartial, where);
+  TEST_ASSERT_EQUAL_MEMORY_MESSAGE(want.targeted, got.targeted,
+                                   sizeof(want.targeted), where);
 }
 
 const uint8_t* const kMacs[] = {kMine, nullptr, kWrong};

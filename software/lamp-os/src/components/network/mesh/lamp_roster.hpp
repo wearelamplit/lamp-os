@@ -371,7 +371,9 @@ class LampRoster {
                       const uint8_t selfMac[6], uint32_t nowMs);
 
   // Accumulate one drained MSG_WISP_STATE slot's entries, W included, into
-  // the fleet cache. Same display-slot admission as cacheWispHello.
+  // the fleet cache as the colours the wisp assigns: a fading lamp's drift
+  // target, else its frame colour. Same display-slot admission as
+  // cacheWispHello.
   // Loop-task-only writer (Core 1).
   void cacheWispState(const PendingWispState& slot, uint32_t nowMs);
 

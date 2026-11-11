@@ -43,6 +43,13 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   older firmware still fade, in small steps every 2 s. With more than 57
   lamps on one wisp all fading at once, a lamp starting a new color can take
   up to about 50 s to get its smooth fade, and steps until then.
+- **The wisp's Lamps tab shows each lamp's new colours right away.** While
+  a lamp faded to its next drift colour, its colour chips crept along with
+  the fade, and after a Shuffle they could sit on the old colours for a few
+  seconds while the shuffle icon had already stopped. The chips now show the
+  colours the wisp gave each lamp as soon as it gives them, through a lamp
+  on this firmware; through a lamp on older firmware they still follow the
+  fade.
 - **Lamps and wisps left on for weeks keep working past day 25 and day 49.**
   A lamp's millisecond clock rolls back to zero every 49.7 days of uptime.
   Around that moment a lamp could freeze its light or dim to half for a few

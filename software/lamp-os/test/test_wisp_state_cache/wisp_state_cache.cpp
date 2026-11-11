@@ -191,11 +191,156 @@ void test_retire_keeps_a_fresh_wisp_slot() {
   TEST_ASSERT_TRUE(roster.copyDisplayWispMac(mac, 1000 + 80001));
 }
 
+namespace {
+const uint8_t kMine[6]  = {0x30, 0x31, 0x32, 0x33, 0x34, 0x35};
+const uint8_t kDrift[6] = {0x40, 0x41, 0x42, 0x43, 0x44, 0x45};
+const uint8_t kStill[6] = {0x50, 0x51, 0x52, 0x53, 0x54, 0x55};
+constexpr uint8_t kDriftIdx = 0;
+constexpr uint8_t kMineIdx = 1;
+constexpr uint8_t kStillIdx = 2;
+
+const uint8_t kDriftTo[8] = {200, 10, 90, 7, 15, 180, 60, 3};
+const uint8_t kMineTo[8]  = {5, 220, 140, 9, 250, 40, 20, 11};
+
+enum class Trailer { None, Full, PartialMineOnly };
+
+// kDrift, kMine and kStill painted `plain` + an offset each, the W plane on.
+// Full carries kDrift's and kMine's drift fade records toward kDriftTo /
+// kMineTo; PartialMineOnly carries kMine's alone, marked partial.
+void fillDrift(uint8_t plain, Trailer t) {
+  const uint8_t* macs[3] = {kDrift, kMine, kStill};
+  uint8_t entries[3 * lp::WISP_STATE_ENTRY_SIZE] = {};
+  uint8_t w[3 * lp::WISP_STATE_W_SIZE] = {};
+  for (size_t i = 0; i < 3; ++i) {
+    uint8_t* e = entries + i * lp::WISP_STATE_ENTRY_SIZE;
+    std::memcpy(e, macs[i], 6);
+    for (size_t c = 6; c < 12; ++c) e[c] = static_cast<uint8_t>(plain + i * 13 + c);
+    w[i * 2] = static_cast<uint8_t>(plain + i);
+    w[i * 2 + 1] = static_cast<uint8_t>(plain + i + 1);
+  }
+  static uint8_t buf[lp::ESPNOW_V2_FRAME_MAX];
+  size_t n = lp::buildWispState(buf, sizeof(buf), plain, kSrc, 100, 60000, 0,
+                                entries, w, 3);
+  uint8_t recs[2 * lp::WISP_STATE_DRIFT_FADE_RECORD_SIZE] = {};
+  auto put = [&](size_t at, uint8_t idx, const uint8_t to[8]) {
+    uint8_t* r = recs + at * lp::WISP_STATE_DRIFT_FADE_RECORD_SIZE;
+    r[0] = idx;
+    std::memcpy(r + 1, to, 8);
+    r[9] = 200;
+  };
+  if (t == Trailer::Full) {
+    put(0, kDriftIdx, kDriftTo);
+    put(1, kMineIdx, kMineTo);
+    n = lp::appendWispStateDriftFade(buf, sizeof(buf), n, recs, 2, false);
+  } else if (t == Trailer::PartialMineOnly) {
+    put(0, kMineIdx, kMineTo);
+    n = lp::appendWispStateDriftFade(buf, sizeof(buf), n, recs, 1, true);
+  }
+  lp::ParsedWispState ws;
+  TEST_ASSERT_TRUE(lp::parseWispState(buf, n, ws));
+  lamp::fillPendingWispState(gSlot, ws, lamp::decodeOwnWispDriftFade(ws, kMine));
+}
+
+// The claims blob's RGBW pair for `mac`.
+void blobColors(LampRoster& roster, uint32_t nowMs, const uint8_t mac[6],
+                uint8_t out[8]) {
+  constexpr size_t kE = WispFleetCache::kBlobEntrySize;
+  uint8_t blob[1 + 3 * kE];
+  TEST_ASSERT_EQUAL_size_t(sizeof(blob),
+                           roster.buildWispClaimsBlob(blob, sizeof(blob), nowMs));
+  const uint8_t n = blob[0];
+  for (uint8_t i = 0; i < n; ++i) {
+    if (std::memcmp(blob + 1 + i * 6, mac, 6) != 0) continue;
+    const uint8_t* pair = blob + 1 + n * 6 + i * 6;
+    const uint8_t* ext = blob + 1 + n * 12 + i * 3;
+    TEST_ASSERT_EQUAL_UINT8(1, ext[0]);
+    const uint8_t got[8] = {pair[0], pair[1], pair[2], ext[1],
+                            pair[3], pair[4], pair[5], ext[2]};
+    std::memcpy(out, got, 8);
+    return;
+  }
+  TEST_FAIL_MESSAGE("mac missing from the claims blob");
+}
+
+// `mac`'s plain colours in the last fillDrift(plain, ...).
+void plainOf(uint8_t plain, size_t idx, uint8_t out[8]) {
+  for (size_t c = 0; c < 3; ++c) {
+    out[c] = static_cast<uint8_t>(plain + idx * 13 + 6 + c);
+    out[4 + c] = static_cast<uint8_t>(plain + idx * 13 + 9 + c);
+  }
+  out[3] = static_cast<uint8_t>(plain + idx);
+  out[7] = static_cast<uint8_t>(plain + idx + 1);
+}
+}  // namespace
+
+// The app's chips show each lamp's assignment: a lamp mid drift fade reads as
+// its fade's target in every frame, this lamp's own entry included, while the
+// frame's plain colour walks toward it.
+void test_drifting_lamp_reads_as_its_target() {
+  LampRoster roster;
+  uint8_t got[8];
+  for (uint8_t plain : {10, 30}) {
+    fillDrift(plain, Trailer::Full);
+    roster.cacheWispState(gSlot, 1000 + plain);
+    blobColors(roster, 1000 + plain, kDrift, got);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(kDriftTo, got, 8);
+    blobColors(roster, 1000 + plain, kMine, got);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(kMineTo, got, 8);
+    uint8_t still[8];
+    plainOf(plain, kStillIdx, still);
+    blobColors(roster, 1000 + plain, kStill, got);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(still, got, 8);
+  }
+}
+
+// A shuffle, palette change or manual colour ends every fade: the frame has
+// no trailer, and every chip takes its new colour from that frame.
+void test_frame_without_record_shows_new_colours_at_once() {
+  LampRoster roster;
+  fillDrift(10, Trailer::Full);
+  roster.cacheWispState(gSlot, 1000);
+  fillDrift(70, Trailer::None);
+  roster.cacheWispState(gSlot, 1100);
+  uint8_t got[8];
+  uint8_t want[8];
+  for (size_t i : {kDriftIdx, kMineIdx, kStillIdx}) {
+    const uint8_t* macs[3] = {kDrift, kMine, kStill};
+    plainOf(70, i, want);
+    blobColors(roster, 1100, macs[i], got);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(want, got, 8);
+  }
+}
+
+// A partial frame carries only some records: a lamp it leaves out keeps the
+// target it last read, and one never read takes the frame's colour.
+void test_partial_frame_keeps_a_missing_lamps_target() {
+  LampRoster roster;
+  fillDrift(10, Trailer::Full);
+  roster.cacheWispState(gSlot, 1000);
+  fillDrift(30, Trailer::PartialMineOnly);
+  roster.cacheWispState(gSlot, 1100);
+  uint8_t got[8];
+  blobColors(roster, 1100, kDrift, got);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(kDriftTo, got, 8);
+  blobColors(roster, 1100, kMine, got);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(kMineTo, got, 8);
+
+  LampRoster fresh;
+  fresh.cacheWispState(gSlot, 1100);
+  uint8_t want[8];
+  plainOf(30, kDriftIdx, want);
+  blobColors(fresh, 1100, kDrift, got);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(want, got, 8);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_state_slot_reaches_claims_blob);
   RUN_TEST(test_state_slot_without_w_caches_w_zero);
   RUN_TEST(test_state_slot_past_capacity_keeps_frame_head);
+  RUN_TEST(test_drifting_lamp_reads_as_its_target);
+  RUN_TEST(test_frame_without_record_shows_new_colours_at_once);
+  RUN_TEST(test_partial_frame_keeps_a_missing_lamps_target);
   RUN_TEST(test_silent_wisp_slot_stays_stale_a_wrap_later);
   RUN_TEST(test_silent_fleet_entries_stay_stale_a_wrap_later);
   RUN_TEST(test_retire_keeps_a_fresh_wisp_slot);
