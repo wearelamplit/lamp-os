@@ -115,8 +115,8 @@ void build(Frame& f, Form form, uint8_t seed) {
   TEST_ASSERT_TRUE(lp::parseWispState(f.buf, f.len, f.ws));
 }
 
-// The lookup inside the copy, as the slot fill did it before the decode moved
-// ahead of the lock. The reference every drained byte is held to.
+// The own-fade lookup done inside the copy, straight into the slot. The
+// reference every drained byte is held to.
 void referenceFill(PendingWispState& slot, const lp::ParsedWispState& ws,
                    const uint8_t selfMac[6]) {
   std::memcpy(slot.sourceMac, ws.sourceMac, 6);
@@ -236,6 +236,19 @@ void test_decode_reports_a_record_a_malformed_trailer_voids() {
   TEST_ASSERT_TRUE(own.recordWritten);
 }
 
+// A reused flag still holding true reads false after a lookup that finds no
+// record.
+void test_lookup_clears_a_stale_written_flag() {
+  build(gFrame, Form::Full, 7);
+  lp::WispDriftFade rec{};
+  bool written = true;
+  TEST_ASSERT_EQUAL(lp::WispDriftFadeLookup::None,
+                    lp::lookupWispDriftFade(gFrame.ws.trailer,
+                                            gFrame.ws.trailerLen, 2, rec,
+                                            &written));
+  TEST_ASSERT_FALSE(written);
+}
+
 void test_decode_then_copy_drains_as_reference_each_post() {
   runSequence(false, true);
   runSequence(true, true);
@@ -251,6 +264,7 @@ int main(int, char**) {
   RUN_TEST(test_decode_reads_own_record_at_its_index);
   RUN_TEST(test_decode_without_own_mac_reads_none);
   RUN_TEST(test_decode_reports_a_record_a_malformed_trailer_voids);
+  RUN_TEST(test_lookup_clears_a_stale_written_flag);
   RUN_TEST(test_decode_then_copy_drains_as_reference_each_post);
   RUN_TEST(test_decode_then_copy_drains_as_reference_over_overwrites);
   return UNITY_END();
