@@ -267,5 +267,43 @@ void main() {
       expect(state.shade.segments.single.pin, 13);
       expect(find.text('GPIO 13'), findsOneWidget);
     });
+
+    testWidgets('Cancel puts a picked pin back', (tester) async {
+      final c = await _makeContainer(shadeSegmentsJson: pinned);
+      addTearDown(c.dispose);
+      await c.read(devModeProvider.notifier).enable();
+      // Holds the notifier across the pop, so the restored state is readable.
+      final sub = c.listen(controlNotifierProvider(_devId), (_, _) {});
+      addTearDown(sub.close);
+      final nav = GlobalKey<NavigatorState>();
+      await tester.pumpWidget(UncontrolledProviderScope(
+        container: c,
+        child: MaterialApp(
+          navigatorKey: nav,
+          home: const Scaffold(body: Text('home')),
+        ),
+      ));
+      unawaited(nav.currentState!.push(MaterialPageRoute<void>(
+        builder: (_) => const AdvancedLedsScreen(lampId: _devId),
+      )));
+      await _pumpToData(tester);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Data pin'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('GPIO 13'));
+      await tester.pumpAndSettle();
+      expect(
+          c.read(controlNotifierProvider(_devId)).value!.shade.segments.single.pin,
+          13);
+
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('home'), findsOneWidget);
+      expect(
+          c.read(controlNotifierProvider(_devId)).value!.shade.segments.single.pin,
+          27);
+    });
   });
 }

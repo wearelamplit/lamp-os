@@ -265,4 +265,58 @@ void main() {
       _widestPin,
     );
   });
+
+  group('applyAdvancedLedsAndReboot pin check', () {
+    // The in-memory lamp ignores the write, so it reloads its seeded pins.
+    Future<(ProviderContainer, ControlNotifier)> pinnedSnafu() async {
+      SharedPreferences.setMockInitialValues({});
+      const devId = 'snafu-2';
+      final snafu = _variants.firstWhere((v) => v.name == 'snafu');
+      String segsJson(List<_Seg> segs) => jsonEncode([
+        for (final s in segs)
+          {'name': s.$1, 'px': s.$2, 'pin': _widestPin, 'colors': s.$3},
+      ]);
+      final ble = InMemoryBleClient();
+      await seedControlBle(
+        ble,
+        deviceId: devId,
+        baseSegmentsJson: segsJson(snafu.base),
+        shadeSegmentsJson: segsJson(snafu.shade),
+      );
+      final c = ProviderContainer(
+        overrides: [bleClientProvider.overrideWithValue(ble)],
+      );
+      await c.read(inventoryNotifierProvider.future);
+      await c.read(inventoryNotifierProvider.notifier).add(
+            const InventoryLamp(id: devId, name: 'snafu', controlPassword: 'pw'),
+          );
+      final sub = c.listen(controlNotifierProvider(devId), (_, _) {});
+      addTearDown(sub.close);
+      addTearDown(c.dispose);
+      await c.read(controlNotifierProvider(devId).future);
+      return (c, c.read(controlNotifierProvider(devId).notifier));
+    }
+
+    test('names the role whose pin did not read back', () async {
+      final (c, n) = await pinnedSnafu();
+      n.setSegmentPin('shade', 1, 13);
+      final state = c.read(controlNotifierProvider('snafu-2')).value!;
+      final mismatches = await n.applyAdvancedLedsAndReboot(
+        base: state.base,
+        shade: state.shade,
+      );
+      expect(mismatches, contains('shade.pin'));
+      expect(mismatches, isNot(contains('base.pin')));
+    });
+
+    test('reports nothing when every pin reads back', () async {
+      final (c, n) = await pinnedSnafu();
+      final state = c.read(controlNotifierProvider('snafu-2')).value!;
+      final mismatches = await n.applyAdvancedLedsAndReboot(
+        base: state.base,
+        shade: state.shade,
+      );
+      expect(mismatches, isEmpty);
+    });
+  });
 }
