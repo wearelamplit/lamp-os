@@ -25,6 +25,17 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   the copy on, so a lamp near it can copy the copy. Each hop is half as likely
   as the one before and a chain stops after 3 hops. Lamps on older firmware
   still copy, they just don't pass it on.
+- **Lamps warm to each other on their own.** A lamp now drifts its feeling
+  toward each peer from what it sees: an introvert cools toward a lamp that
+  keeps firing loud expressions and an extrovert warms to it, a lamp that
+  shares your expressions or wears a matching or complementary colour wins
+  you over, and lamps that meet day after day grow fond of each other, an
+  introvert twice as fast. Familiarity alone stops at Fond. Feelings move at
+  most one step per lamp per hour and four steps an hour in all, and a lamp
+  you meet often is a little more likely to be copied. Home mode pauses all of it, and
+  time at home counts toward nothing. On a debug build, `fond.off` turns it
+  off (and it stays off across restarts), `fond.peers` lists what the lamp
+  knows and `fond.set` tunes it live.
 
 ### Fixed
 - **Mesh updates reach lamps after the sending lamp restarts.** A lamp that

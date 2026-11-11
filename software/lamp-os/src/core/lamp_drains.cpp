@@ -625,6 +625,13 @@ void Lamp::drainColorQuery() {
 void Lamp::drainColorInfo() {
   lamp::PendingColorInfo info;
   if (!lamp::pendingSlots.colorInfo.drain(pendingMux, info)) return;
+  const std::vector<Color>& own = config.base.broadcastColors();
+  if (info.baseCount > 0 && !own.empty()) {
+    fondnessEngine.observeColour(
+        info.sourceMac,
+        Color(info.baseStops[0], info.baseStops[1], info.baseStops[2], info.baseStops[3]),
+        own.front(), lamp::uptimeMs());
+  }
   std::vector<Color> baseStops;
   baseStops.reserve(info.baseCount);
   for (uint8_t i = 0; i < info.baseCount; ++i) {

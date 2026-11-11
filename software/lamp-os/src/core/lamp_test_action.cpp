@@ -475,6 +475,72 @@ void runSerialCommand(char* line, size_t len) {
     return;
   }
 
+  if (strcmp(line, "fond.get") == 0) {
+    const lamp::FondnessTuning& t = fondnessEngine.tuning;
+    const lamp::ContagionTuning& c = socialEchoObserver.tuning();
+    Serial.printf("[cmd] ok fond on=%u tracking=%u energy=%u", (unsigned)config.dispositions().engineEnabled(),
+                  (unsigned)fondnessEngine.tracking(), (unsigned)t.energy);
+    for (size_t i = 0; i < lamp::kEnergyTypeCount; ++i) {
+      Serial.printf(" e.%s=%u", lamp::kEnergyTypes[i], (unsigned)t.typeWeight[i]);
+    }
+    Serial.printf(" eventsPerMin=%u overlap=%u colour=%u hueBand=%u", (unsigned)t.eventsPerMin,
+                  (unsigned)t.overlap, (unsigned)t.colour, (unsigned)t.hueBand);
+    Serial.printf(" familiar=%u familiarMode=%u,%u,%u meetEveryH=%u", (unsigned)t.familiar,
+                  (unsigned)t.familiarMode[0], (unsigned)t.familiarMode[1],
+                  (unsigned)t.familiarMode[2], (unsigned)t.meetEveryH);
+    Serial.printf(" absence=%u deltaCapPerMin=%u notchFloorMin=%u notchesPerHour=%u",
+                  (unsigned)t.absence, (unsigned)t.deltaCapPerMin, (unsigned)t.notchFloorMin,
+                  (unsigned)t.notchesPerHour);
+    Serial.printf(" copyRollCooldownMs=%lu chainMaxHops=%u chainHopPct=%u",
+                  (unsigned long)c.copyRollCooldownMs, (unsigned)c.chainMaxHops,
+                  (unsigned)c.chainHopPct);
+    Serial.printf(" familiarBoostPct=%u crowdHalf=%u\n", (unsigned)c.familiarBoostPct,
+                  (unsigned)c.crowdHalf);
+    return;
+  }
+
+  // `fond.set <key> <value>`, key a FondnessTuning or ContagionTuning name;
+  // RAM only, so a reboot restores the defaults.
+  if (strncmp(line, "fond.set ", 9) == 0) {
+    char* key = line + 9;
+    char* sep = strchr(key, ' ');
+    if (sep) *sep = '\0';
+    char* end = nullptr;
+    const unsigned long value = sep ? strtoul(sep + 1, &end, 10) : 0;
+    if (!sep || !isdigit(static_cast<unsigned char>(sep[1])) || *end != '\0' ||
+        !(lamp::setFondnessTuning(fondnessEngine.tuning, key, value) ||
+          lamp::setContagionTuning(socialEchoObserver.tuning(), key, value))) {
+      Serial.println("[cmd] err fond.set");
+      return;
+    }
+    Serial.printf("[cmd] ok fond.set %s=%lu\n", key, value);
+    return;
+  }
+
+  if (strcmp(line, "fond.on") == 0 || strcmp(line, "fond.off") == 0) {
+    const bool on = line[6] == 'n';
+    fondnessEngine.setEnabled(on, lamp::uptimeMs());
+    Serial.printf("[cmd] ok fond.%s\n", on ? "on" : "off");
+    return;
+  }
+
+  if (strcmp(line, "fond.peers") == 0) {
+    const uint64_t now = lamp::uptimeMs();
+    size_t n = 0;
+    uint8_t mac[6];
+    lamp::PeerRecord r;
+    while (config.dispositions().peerAt(n, mac, r, now)) {
+      char addr[18];
+      lamp::formatBdAddr(mac, addr);
+      Serial.printf("[fond] %s disp=%u score=%d", addr, (unsigned)r.disp, (int)r.score);
+      Serial.printf(" meets=%u meetAgeH=%u unseenMin=%u\n", (unsigned)r.meets,
+                    (unsigned)r.meetAgeH, (unsigned)r.unseenMin);
+      ++n;
+    }
+    Serial.printf("[cmd] ok fond.peers n=%u\n", (unsigned)n);
+    return;
+  }
+
   if (strcmp(line, "cfg.get") == 0) {
     std::string base, shade;
     config.baseSectionJsonCached(base);

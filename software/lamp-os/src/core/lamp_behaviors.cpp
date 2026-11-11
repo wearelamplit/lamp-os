@@ -77,6 +77,9 @@ void initBehaviors(lamp::Features features, lamp::Lamp& self) {
         []() { return shadeSocialBehavior.greetingState(); });
     shadeSocialBehavior.setOnGreetingChangeCallback(
         []() { ble_control::notifyStateChange(); });
+    shadeSocialBehavior.setOnOrganicGreet([](const uint8_t mac[6]) {
+      fondnessEngine.observeGreeting(mac, config.lamp.socialMode, lamp::uptimeMs());
+    });
   }
 
   if (lamp::any(features, lamp::Features::FadeOutBehavior)) {

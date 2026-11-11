@@ -243,10 +243,12 @@ void test_hop_chance_scales_and_stops_at_max() {
   }
 }
 
-// The default boost leaves every chance alone; a set boost adds its percent
-// per meeting up to kFamiliarBoostMeets and never passes 100.
+// The default boost adds 3% per meeting up to kFamiliarBoostMeets, so at most
+// +30%, and never passes 100; a boost of 0 leaves every chance alone.
 void test_familiar_boost() {
   ContagionTuning t;
+  TEST_ASSERT_EQUAL_UINT8(60, copyChancePct(50, 0, 7, 0, ContagionTuning{}));
+  t.familiarBoostPct = 0;
   TEST_ASSERT_EQUAL_UINT8(50, copyChancePct(50, 0, 7, 0, t));
   t.familiarBoostPct = 3;
   TEST_ASSERT_EQUAL_UINT8(50, copyChancePct(50, 0, 0, 0, t));
@@ -254,6 +256,17 @@ void test_familiar_boost() {
   TEST_ASSERT_EQUAL_UINT8(65, copyChancePct(50, 0, lamp::kFamiliarBoostMeets, 0, t));
   TEST_ASSERT_EQUAL_UINT8(65, copyChancePct(50, 0, 200, 0, t));
   TEST_ASSERT_EQUAL_UINT8(100, copyChancePct(90, 0, 200, 0, t));
+}
+
+// decide() rolls at the boosted chance for the sender's meetings.
+void test_decide_takes_the_meetings() {
+  uint8_t mac[6] = {1, 2, 3, 4, 5, 6};
+  Copycat a;
+  Copycat b;
+  const uint8_t base = mirrorRatePct(5, SocialMode::Ambivert);
+  TEST_ASSERT_EQUAL_UINT8(base, a.decide(mac, 5, SocialMode::Ambivert, 0, 1000, 1, 0, 0, false).pct);
+  TEST_ASSERT_EQUAL_UINT8(base * 130 / 100,
+                          b.decide(mac, 5, SocialMode::Ambivert, 0, 1000, 1, 0, 0, false, 10).pct);
 }
 
 // A copy of a frame h hops out is h + 1, and announces only short of the max.
@@ -456,6 +469,7 @@ int main() {
   RUN_TEST(test_origin_copies_at_the_mirror_chance);
   RUN_TEST(test_hop_chance_scales_and_stops_at_max);
   RUN_TEST(test_familiar_boost);
+  RUN_TEST(test_decide_takes_the_meetings);
   RUN_TEST(test_copy_carries_one_more_hop);
   RUN_TEST(test_peer_firing_every_second_rolls_once_per_window);
   RUN_TEST(test_peer_quiet_for_a_wrap_rolls_again);

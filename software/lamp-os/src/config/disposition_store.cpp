@@ -66,6 +66,22 @@ uint32_t DispositionStore::nowMin(uint64_t nowMs) {
   return UINT16_MAX + static_cast<uint32_t>(nowMs / 60000);
 }
 
+// The boot clock with the held stretches taken out; it never runs backwards.
+uint32_t DispositionStore::clockLocked_(uint64_t nowMs) const {
+  return frozen_ ? frozenAtMin_ : nowMin(nowMs) - clockOffsetMin_;
+}
+
+void DispositionStore::syncClockLocked_(uint64_t nowMs) {
+  const bool freeze = held_ || !(flags_ & kFlagEngineOn);
+  if (freeze == frozen_) return;
+  if (freeze) {
+    frozenAtMin_ = clockLocked_(nowMs);
+  } else {
+    clockOffsetMin_ = nowMin(nowMs) - frozenAtMin_;
+  }
+  frozen_ = freeze;
+}
+
 uint16_t DispositionStore::unseenMin(const Row& row, uint32_t now) {
   if (now <= row.seenAtMin) return 0;
   return static_cast<uint16_t>(std::min<uint32_t>(now - row.seenAtMin, UINT16_MAX));
@@ -123,7 +139,6 @@ bool DispositionStore::userSetLocked_(const uint8_t mac[6], uint8_t value, uint3
 
 void DispositionStore::load(uint64_t nowMs) {
   if (!store_) return;
-  const uint32_t now = nowMin(nowMs);
   std::array<uint8_t, kMaxBlobLen> blob;
   const size_t n = store_->readBlob(kBlobKey, blob.data(), blob.size());
   const int blobCount = n > 0 ? blobRows(blob.data(), n) : -1;
@@ -146,6 +161,8 @@ void DispositionStore::load(uint64_t nowMs) {
   xSemaphoreTake(mutex_, portMAX_DELAY);
   entries_.clear();
   flags_ = kFlagEngineOn;
+  syncClockLocked_(nowMs);
+  const uint32_t now = clockLocked_(nowMs);
   if (fromJson) {
     // Document order, so a repeated key's last value wins.
     for (JsonPair kv : doc.as<JsonObject>()) {
@@ -156,6 +173,7 @@ void DispositionStore::load(uint64_t nowMs) {
   } else {
     const bool v2 = blob[0] == kBlobFormat;
     if (v2) flags_ = blob[1];
+    syncClockLocked_(nowMs);
     const size_t header = v2 ? kBlobHeaderLen : 1;
     const size_t rowLen = v2 ? kBlobRowLen : kLegacyBlobRowLen;
     for (int i = 0; i < blobCount; ++i) {
@@ -205,7 +223,7 @@ PeerRecord DispositionStore::peer(const uint8_t mac[6], uint64_t nowMs) const {
     out.score = it->score;
     out.meets = it->meets;
     out.meetAgeH = it->meetAgeH;
-    out.unseenMin = unseenMin(*it, nowMin(nowMs));
+    out.unseenMin = unseenMin(*it, clockLocked_(nowMs));
   }
   xSemaphoreGive(mutex_);
   return out;
@@ -213,7 +231,7 @@ PeerRecord DispositionStore::peer(const uint8_t mac[6], uint64_t nowMs) const {
 
 void DispositionStore::set(const uint8_t mac[6], uint8_t value, uint64_t nowMs) {
   xSemaphoreTake(mutex_, portMAX_DELAY);
-  const bool changed = userSetLocked_(mac, clampDisp(value), nowMin(nowMs));
+  const bool changed = userSetLocked_(mac, clampDisp(value), clockLocked_(nowMs));
   xSemaphoreGive(mutex_);
   if (changed) debouncer_.markDirty(static_cast<uint32_t>(nowMs));
 }
@@ -222,9 +240,9 @@ bool DispositionStore::setFromJson(const char* json, size_t len, uint64_t nowMs)
   JsonDocument doc;
   if (deserializeJson(doc, json, len) != DeserializationError::Ok) return false;
   if (!doc.is<JsonObject>()) return false;
-  const uint32_t now = nowMin(nowMs);
   bool changed = false;
   xSemaphoreTake(mutex_, portMAX_DELAY);
+  const uint32_t now = clockLocked_(nowMs);
   for (JsonPair kv : doc.as<JsonObject>()) {
     uint8_t mac[6];
     if (!parseBdAddr(kv.key().c_str(), mac)) continue;
@@ -236,13 +254,14 @@ bool DispositionStore::setFromJson(const char* json, size_t len, uint64_t nowMs)
 }
 
 NudgeResult DispositionStore::nudge(const uint8_t mac[6], int16_t delta,
-                                    int16_t familiarityDelta, uint64_t nowMs) {
-  const uint32_t now = nowMin(nowMs);
+                                    int16_t familiarityDelta, uint64_t nowMs, bool mayStep) {
   NudgeResult result;
   xSemaphoreTake(mutex_, portMAX_DELAY);
+  const uint32_t now = clockLocked_(nowMs);
   Row* row = findLocked_(keyOf(mac));
   Row next = row ? *row : freshRow(mac, now);
   result.from = result.to = next.disp;
+  result.scoreFrom = result.scoreTo = next.score;
   const int familiarity = (familiarityDelta > 0 && next.disp >= 4) ? 0 : familiarityDelta;
   const int step = delta + familiarity;
   if (!(flags_ & kFlagEngineOn) || step == 0) {
@@ -251,14 +270,18 @@ NudgeResult DispositionStore::nudge(const uint8_t mac[6], int16_t delta,
   }
   int score = next.score + step;
   if (score >= 127) {
-    if (next.disp < 5) {
+    if (!mayStep && next.disp < 5) {
+      score = 126;
+    } else if (next.disp < 5) {
       ++next.disp;
       score = 0;
     } else {
       score = 127;
     }
   } else if (score <= -127) {
-    if (next.disp > 1) {
+    if (!mayStep && next.disp > 1) {
+      score = -126;
+    } else if (next.disp > 1) {
       --next.disp;
       score = 0;
     } else {
@@ -276,14 +299,15 @@ NudgeResult DispositionStore::nudge(const uint8_t mac[6], int16_t delta,
   xSemaphoreGive(mutex_);
   if (changed) engineDirty_ = true;
   result.to = next.disp;
+  result.scoreTo = next.score;
   result.stepped = result.to != result.from;
   return result;
 }
 
 bool DispositionStore::meet(const uint8_t mac[6], uint8_t meetEveryH, uint64_t nowMs) {
-  const uint32_t now = nowMin(nowMs);
   bool counted = false;
   xSemaphoreTake(mutex_, portMAX_DELAY);
+  const uint32_t now = clockLocked_(nowMs);
   if (flags_ & kFlagEngineOn) {
     Row* row = findLocked_(keyOf(mac));
     if (row) {
@@ -305,9 +329,9 @@ bool DispositionStore::meet(const uint8_t mac[6], uint8_t meetEveryH, uint64_t n
 }
 
 void DispositionStore::markSeen(const uint8_t mac[6], uint64_t nowMs) {
-  const uint32_t now = nowMin(nowMs);
   bool changed = false;
   xSemaphoreTake(mutex_, portMAX_DELAY);
+  const uint32_t now = clockLocked_(nowMs);
   Row* row = (flags_ & kFlagEngineOn) ? findLocked_(keyOf(mac)) : nullptr;
   if (row && unseenMin(*row, now) > 0) {
     row->seenAtMin = now;
@@ -318,9 +342,9 @@ void DispositionStore::markSeen(const uint8_t mac[6], uint64_t nowMs) {
 }
 
 void DispositionStore::decayTowardZero(uint8_t step, uint64_t nowMs) {
-  const uint32_t now = nowMin(nowMs);
   bool changed = false;
   xSemaphoreTake(mutex_, portMAX_DELAY);
+  const uint32_t now = clockLocked_(nowMs);
   if (flags_ & kFlagEngineOn) {
     for (Row& r : entries_) {
       if (r.score == 0 || unseenMin(r, now) < kAbsentMin) continue;
@@ -334,9 +358,9 @@ void DispositionStore::decayTowardZero(uint8_t step, uint64_t nowMs) {
 }
 
 void DispositionStore::tickHour(uint64_t nowMs) {
-  const uint32_t now = nowMin(nowMs);
   bool aging = false;
   xSemaphoreTake(mutex_, portMAX_DELAY);
+  const uint32_t now = clockLocked_(nowMs);
   if (flags_ & kFlagEngineOn) {
     for (Row& r : entries_) {
       // A stored age still short of saturation goes stale until the next flush.
@@ -362,8 +386,33 @@ void DispositionStore::setEngineEnabled(bool on, uint64_t nowMs) {
   const uint8_t next = on ? (flags_ | kFlagEngineOn) : (flags_ & ~kFlagEngineOn);
   const bool changed = next != flags_;
   flags_ = next;
+  syncClockLocked_(nowMs);
   xSemaphoreGive(mutex_);
   if (changed) debouncer_.markDirty(static_cast<uint32_t>(nowMs));
+}
+
+void DispositionStore::holdClocks(bool held, uint64_t nowMs) {
+  xSemaphoreTake(mutex_, portMAX_DELAY);
+  held_ = held;
+  syncClockLocked_(nowMs);
+  xSemaphoreGive(mutex_);
+}
+
+bool DispositionStore::peerAt(size_t index, uint8_t mac[6], PeerRecord& out,
+                              uint64_t nowMs) const {
+  xSemaphoreTake(mutex_, portMAX_DELAY);
+  const bool found = index < entries_.size();
+  if (found) {
+    const Row& r = entries_[index];
+    std::copy(r.mac.begin(), r.mac.end(), mac);
+    out.disp = r.disp;
+    out.score = r.score;
+    out.meets = r.meets;
+    out.meetAgeH = r.meetAgeH;
+    out.unseenMin = unseenMin(r, clockLocked_(nowMs));
+  }
+  xSemaphoreGive(mutex_);
+  return found;
 }
 
 size_t DispositionStore::jsonLen(size_t entries) {
@@ -451,12 +500,12 @@ bool DispositionStore::matchesLocked_(const uint8_t* blob, size_t len, uint32_t 
 
 bool DispositionStore::persist_(uint64_t nowMs) {
   if (!store_) return false;
-  const uint32_t now = nowMin(nowMs);
   // At most kMaxBlobLen bytes, so the stack holds it and a flush touches no
   // heap. Rows change only on Core 1, the flush's own task, so the read-back
   // compares against the rows as written.
   std::array<uint8_t, kMaxBlobLen> blob;
   xSemaphoreTake(mutex_, portMAX_DELAY);
+  const uint32_t now = clockLocked_(nowMs);
   const size_t len = encodeLocked_(blob.data(), now);
   xSemaphoreGive(mutex_);
   if (store_->writeBlob(kBlobKey, blob.data(), len) == 0) return false;

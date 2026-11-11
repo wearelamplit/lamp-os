@@ -7,8 +7,14 @@
 #include "components/network/mesh/mesh_link.hpp"
 #include "config/config.hpp"
 #include "expressions/expression_manager.hpp"
+#include "util/uptime.hpp"
 
 namespace lamp {
+
+uint8_t SocialEchoObserver::boostMeets(const DispositionStore& store, const uint8_t mac[6],
+                                       uint64_t nowMs) {
+  return store.engineEnabled() ? store.peer(mac, nowMs).meets : 0;
+}
 
 void SocialEchoObserver::onPeerExpression(const uint8_t sourceMac[6],
                                           const ExpressionInvocation& inv) {
@@ -17,11 +23,12 @@ void SocialEchoObserver::onPeerExpression(const uint8_t sourceMac[6],
   if (manager_.isAnyTestActive()) return;
 
   const uint32_t now = millis();
+  const uint8_t meets = boostMeets(config_.dispositions(), sourceMac, uptimeMs());
   const CopyDecision d = copycat_.decide(
       sourceMac, config_.getDisposition(sourceMac), config_.lamp.socialMode, inv.hops, now,
       static_cast<uint8_t>(rng_.range(1, 100)), rng_.range(0, kMirrorJitterMs),
       nearbyCount_ ? nearbyCount_() : 0,
-      manager_.playedWithin(inv.type.c_str(), copycat_.tuning.copyRollCooldownMs, now));
+      manager_.playedWithin(inv.type.c_str(), copycat_.tuning.copyRollCooldownMs, now), meets);
   if (d.outcome == CopyOutcome::NoChance) return;
 #ifdef LAMP_DEBUG
   const char* outcome = d.outcome == CopyOutcome::Fire       ? "fired"

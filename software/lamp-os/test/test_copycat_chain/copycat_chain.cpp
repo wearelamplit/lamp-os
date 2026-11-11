@@ -292,8 +292,19 @@ void test_introvert_floor_holds_across_peers() {
   TEST_ASSERT_EQUAL_size_t(1, s_registered.size());
 }
 
+// The copy odds count the store's meetings only while the engine is on.
+void test_boost_meets_follow_the_switch() {
+  DispositionStore ds(100);
+  const uint8_t mac[6] = {9, 8, 7, 6, 5, 4};
+  for (int k = 0; k < 5; ++k) ds.meet(mac, 0, 0);
+  TEST_ASSERT_EQUAL_UINT8(5, SocialEchoObserver::boostMeets(ds, mac, 0));
+  ds.setEngineEnabled(false, 0);
+  TEST_ASSERT_EQUAL_UINT8(0, SocialEchoObserver::boostMeets(ds, mac, 0));
+}
+
 int main() {
   UNITY_BEGIN();
+  RUN_TEST(test_boost_meets_follow_the_switch);
   RUN_TEST(test_copy_announces_one_hop_on);
   RUN_TEST(test_copy_at_max_plays_without_announcing);
   RUN_TEST(test_frame_at_max_is_not_copied);

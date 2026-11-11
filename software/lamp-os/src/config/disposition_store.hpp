@@ -69,6 +69,8 @@ struct NudgeResult {
   bool stepped = false;
   uint8_t from = 3;
   uint8_t to = 3;
+  int8_t scoreFrom = 0;
+  int8_t scoreTo = 0;
 };
 
 // Per-peer social rows (mesh MAC -> disposition, score, meetings, ages), the
@@ -91,7 +93,8 @@ struct NudgeResult {
 // and an age-only change (markSeen, tickHour) at most once per
 // kAgeFlushFloorMs, both counted from the last flush. Engine and age calls are
 // no-ops while the engine is off; any other gate on them (home mode) is the
-// caller's. Layout, migration and prune: docs/dev/social.md.
+// caller's, who also holds the unseen clock through holdClocks. Layout,
+// migration and prune: docs/dev/social.md.
 class DispositionStore {
  public:
   static constexpr uint8_t kDefault = 3;
@@ -126,9 +129,10 @@ class DispositionStore {
   // Moves the score by delta + familiarityDelta; positive familiarity is
   // dropped from disposition 4 up, so familiarity alone stops at Fond. A score
   // reaching +-127 steps the disposition and restarts at 0, clamping at 1 and
-  // 5. A new peer is admitted only when stronger than the weakest row.
+  // 5. A new peer is admitted only when stronger than the weakest row. With
+  // mayStep false the score stops one short of a step instead.
   NudgeResult nudge(const uint8_t mac[6], int16_t delta, int16_t familiarityDelta,
-                    uint64_t nowMs);
+                    uint64_t nowMs, bool mayStep = true);
   // Counts a meeting when at least meetEveryH on-hours passed since the last
   // counted one. True when counted.
   bool meet(const uint8_t mac[6], uint8_t meetEveryH, uint64_t nowMs);
@@ -143,6 +147,12 @@ class DispositionStore {
   // The persisted master switch, on by default.
   bool engineEnabled() const;
   void setEngineEnabled(bool on, uint64_t nowMs);
+  // Stops every row's unseen clock while held or while the engine is off, so
+  // time not tracked never counts toward an absence, a prune or a reunion.
+  void holdClocks(bool held, uint64_t nowMs);
+
+  // Row `index` in key order; false past the end.
+  bool peerAt(size_t index, uint8_t mac[6], PeerRecord& out, uint64_t nowMs) const;
 
   // Core 1 loop drain: flushes whichever tier is due. A failed write (NVS
   // full) keeps the rows dirty and backs off, 5 s doubling to 60 s.
@@ -196,6 +206,8 @@ class DispositionStore {
   // Minutes on a clock that starts at UINT16_MAX each boot, so a row loaded
   // with any stored age has a seenAtMin at or above 0.
   static uint32_t nowMin(uint64_t nowMs);
+  uint32_t clockLocked_(uint64_t nowMs) const;
+  void syncClockLocked_(uint64_t nowMs);
   static uint16_t unseenMin(const Row& row, uint32_t now);
   static uint16_t strength(const Row& row);
   static Row freshRow(const uint8_t mac[6], uint32_t now);
@@ -216,6 +228,10 @@ class DispositionStore {
 
   std::vector<Row> entries_;
   uint8_t flags_ = kFlagEngineOn;
+  bool held_ = false;
+  bool frozen_ = false;
+  uint32_t frozenAtMin_ = 0;
+  uint32_t clockOffsetMin_ = 0;
   DispositionDebouncer debouncer_;
   bool engineDirty_ = false;
   bool ageDirty_ = false;

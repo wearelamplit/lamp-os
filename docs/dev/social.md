@@ -45,13 +45,15 @@ Neutral with nothing learned.
 - **Engine writes.** `nudge`, `meet`, `markSeen`, `decayTowardZero` and
   `tickHour` do nothing while the master switch (`engineEnabled`, persisted
   in the blob's flags byte, on by default) is off. Home mode is the caller's
-  gate. Familiarity alone moves a peer to Fond and no further.
+  gate, and the caller holds the unseen clock through `holdClocks` while it
+  is on. The clock also stands while the engine is off, so untracked time
+  counts toward no absence, prune or reunion. Familiarity alone moves a peer
+  to Fond and no further.
 - **Flushes.** A user edit flushes 5 s after the slider goes idle (and on BLE
   disconnect); an engine change at most once per 10 minutes and an age-only
   change once per 60, both counted from the last flush, and any flush writes
   everything, so while the engine runs a power cut loses at most an hour of
-  ages. With the engine off nothing marks ages for saving, so the stored ages
-  move only when some other flush writes them.
+  ages. With the engine off the ages stand still, in RAM and in the blob.
 - **Boot.** Neutral rows unseen for 14 on-days (20160 on-minutes) are dropped
   at load, and the boot writes nothing.
 - **Formats.** The `disp` blob is format 2, `[2][flags]` then
@@ -62,6 +64,60 @@ Neutral with nothing learned.
   once the blob reads back as written. NVS figures are in
   [`embedded-heap.md`](embedded-heap.md), downgrade loss under its
   Downgrades.
+
+## Fondness engine
+
+`FondnessEngine` (`core/fondness_engine.hpp`) turns what the lamp sees of
+its peers into score drift, and changes rows only through the store. One
+gate covers every input: `tracking()` is the master switch on and home mode
+off. While it is false no observation, score, meeting, seen mark, absence
+decay or step happens, and the unseen and meeting clocks stand still. Every
+rule is in score units (127 = one step), from `FondnessTuning`:
+
+- **Energy.** Each counted peer expression (MSG_EVENT, Moment frames
+  excluded) adds `energy x typeWeight x` the mode's sign: an introvert cools
+  toward a loud peer, an extrovert warms, an ambivert does not move. Weights
+  start at glitchy 3, spotty / pulse / shimmer 2, shifty / breathing 1,
+  yawn 0, anything else 1, with `energy` 2. Only `eventsPerMin` (4) events
+  per peer per minute count.
+- **Overlap.** A counted event of a type this lamp has enabled itself adds
+  `overlap` (2), whatever the mode.
+- **Colour.** The COLOR_INFO reply to an organic greet compares its base
+  stop 0 with this lamp's: a hue within `hueBand` (30 degrees) of it or of
+  its complement adds `colour` (16). A grey on either side (saturation under
+  25%), a reply nobody asked for or a reply from another lamp counts nothing.
+- **Familiarity.** An organic greet (`SocialBehavior::setOnOrganicGreet`; an
+  app-triggered greet skips it) marks the peer seen and counts a meeting
+  when `meetEveryH` (12) on-hours passed since the last one. A counted
+  meeting adds `familiar x familiarMode x 8 / (8 + meetings)` (24, mode 2 1 1),
+  so an introvert warms twice as fast and every meeting less than the last.
+  It stops at Fond: a household lamp settles there, and colour, overlap or
+  energy take it further.
+- **Absence.** Each tracked hour, every row unseen an hour or more moves
+  `absence` (8) toward a score of 0; a disposition never moves by absence.
+  Every lamp in the near view is marked seen at each minute's commit.
+- **Copycat odds.** While the engine is on, a copy roll's chance rises
+  `familiarBoostPct` (3) percent per meeting with the sender, counting at most
+  10, so +30% at most ([`expressions.md`](expressions.md#expression-mirror)).
+
+Expression energy and overlap gather per peer in 16 slots and commit once a
+minute, at most `deltaCapPerMin` (6) either way, so the fastest step from
+expression traffic takes about 22 minutes. A full table drops its least
+recently heard peer's minute to make room, so a crowd churning the table
+cannot move any peer past the cap. Colour and familiarity land at the
+greet. A step is refused, the score held one short of it, when the peer
+stepped within `notchFloorMin` (60) or `notchesPerHour` (4) steps across all
+peers already happened in the last hour; a full 16-entry step log refuses
+while its oldest entry is inside the floor. The engine can step a
+disposition the user set by hand.
+
+RAM is fixed whatever the crowd: about 400 bytes of slots, 256 of step log
+and the tuning table. Nothing allocates on an input or a commit.
+
+`fond.get`, `fond.set <key> <value>`, `fond.on`, `fond.off` and `fond.peers`
+drive it over serial on a debug build, and each change logs a `[fondness]`
+line ([`debug-instruments.md`](debug-instruments.md)). Tuning lives in RAM;
+the master switch persists in the store's flags byte.
 
 ## Three subsystems
 
@@ -155,6 +211,8 @@ contract: [`moments.md`](moments.md).
 - `core/moments.{hpp,cpp}`, `core/moment_math.{hpp,cpp}` — the Moment
   director and its pure arithmetic; `core/lamp_moments.cpp` binds it to the
   lamp.
+- `core/fondness_engine.{hpp,cpp}` — the fondness rules, tuning table and
+  step limits. Global `fondnessEngine`, fed and ticked in `core/lamp.cpp`.
 - `config/` — SocialMode + per-peer dispositions storage (NVS) and their
   BLE sync surfaces.
 
