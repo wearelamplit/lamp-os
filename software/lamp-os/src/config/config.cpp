@@ -312,15 +312,7 @@ static void emitRoleTopology(JsonDocument& doc,
   doc["px"] = segmentsSumPx(segs);
   JsonArray colorsNode = doc["colors"].to<JsonArray>();
   for (const auto& c : segs.front().colors) colorsNode.add(colorToHexString(c));
-  JsonArray segsNode = doc["segments"].to<JsonArray>();
-  for (const auto& s : segs) {
-    JsonObject o = segsNode.add<JsonObject>();
-    o["name"] = s.name;
-    o["px"] = s.px;
-    if (s.pin) o["pin"] = s.pin;
-    JsonArray sc = o["colors"].to<JsonArray>();
-    for (const auto& c : s.colors) sc.add(colorToHexString(c));
-  }
+  config_codec::writeSegments(doc.as<JsonObject>(), segs);
 }
 
 JsonDocument Config::asBaseJson() {

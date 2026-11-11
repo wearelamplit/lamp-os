@@ -40,6 +40,9 @@ bool parseExpression(JsonObject node, ExpressionConfig& out, bool enabledDefault
 // [kRotationMinPeriodS, kRotationMaxPeriodS], `dir` "up" or "down". Any other
 // key, type or value leaves that field as it was.
 void parseRotation(JsonObjectConst node, ColorRotation& out);
+// Writes a role's `segments` array into `node`, the shape both the stored
+// config and the role's page section carry.
+void writeSegments(JsonObject node, const std::vector<SegmentSettings>& segs);
 // Adds `rotate`, every key present, to the role's page section when the role
 // offers rotation, and nothing otherwise.
 void writeSectionRotate(JsonObject section, const ShadeSettings& shade);

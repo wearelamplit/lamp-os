@@ -44,7 +44,7 @@ inline void pixelFormatLocal(JsonObjectConst section, Surface& surf) {
     }
     if (seg["pin"].is<int>()) {
       int pin = seg["pin"].as<int>();
-      if (pin == 0 || (pin > 0 && pin <= 255 && isStripDataPin(static_cast<uint8_t>(pin)))) {
+      if (pin == 0 || isStripDataPin(pin)) {
         surf.segments[k].pin = static_cast<uint8_t>(pin);
       }
     }

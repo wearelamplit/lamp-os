@@ -93,7 +93,7 @@ inline bool validateHwConfig(const HwConfig& hw) {
 // True for an ESP32-WROOM GPIO that can drive a strip's data line. Excludes
 // GPIO 0 (boot mode), 1 and 3 (the UART0 console), 6-11 (the SPI flash bus),
 // 34-39 (input-only), and numbers with no pad.
-inline bool isStripDataPin(uint8_t pin) {
+inline bool isStripDataPin(int pin) {
   switch (pin) {
     case 2: case 4: case 5:
     case 12: case 13: case 14: case 15: case 16: case 17: case 18: case 19:
@@ -143,7 +143,8 @@ inline std::vector<uint8_t> resolveStripPins(const HwConfig& hw,
 
 // Effective data pin per hw.strips entry from the role segments' saved pins.
 // A role's segments pair with its strips in declaration order. A saved pin
-// that does not take effect is cleared, so the segment reports the pin in use.
+// that does not take effect, or sits on a segment with no strip, is cleared,
+// so every segment reports the pin in use.
 template <typename Seg>
 std::vector<uint8_t> applySegmentPins(const HwConfig& hw, std::vector<Seg>& shade,
                                       std::vector<Seg>& base) {
@@ -159,6 +160,8 @@ std::vector<uint8_t> applySegmentPins(const HwConfig& hw, std::vector<Seg>& shad
       requested[i] = segs[k].pin;
     }
   }
+  for (size_t k = shadeK; k < shade.size(); ++k) shade[k].pin = 0;
+  for (size_t k = baseK; k < base.size(); ++k) base[k].pin = 0;
   const std::vector<uint8_t> pins = resolveStripPins(hw, requested);
   for (size_t i = 0; i < pins.size(); ++i) {
     if (paired[i] && paired[i]->pin != pins[i]) paired[i]->pin = 0;

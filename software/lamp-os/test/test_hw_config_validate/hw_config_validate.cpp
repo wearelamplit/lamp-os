@@ -241,6 +241,14 @@ void test_strip_without_a_segment_keeps_its_variant_pin() {
   TEST_ASSERT_EQUAL_UINT8(27, pins[3]);
 }
 
+void test_segment_pin_without_a_strip_is_cleared() {
+  std::vector<PinSeg> shade = {{0}, {0}, {13}};
+  std::vector<PinSeg> base = {{0}, {0}, {32}};
+  lamp::applySegmentPins(interleaved(), shade, base);
+  TEST_ASSERT_EQUAL_UINT8(0, shade[2].pin);
+  TEST_ASSERT_EQUAL_UINT8(0, base[2].pin);
+}
+
 int main(int argc, char** argv) {
   (void)argc; (void)argv;
   UNITY_BEGIN();
@@ -257,6 +265,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_segment_pins_pair_with_their_roles_strips_in_order);
   RUN_TEST(test_segment_pin_that_does_not_take_effect_is_cleared);
   RUN_TEST(test_strip_without_a_segment_keeps_its_variant_pin);
+  RUN_TEST(test_segment_pin_without_a_strip_is_cleared);
   RUN_TEST(test_zero_supply_budget_invalid);
   RUN_TEST(test_inputs_valid_distinct_pins);
   RUN_TEST(test_input_colliding_with_strip_pin_invalid);

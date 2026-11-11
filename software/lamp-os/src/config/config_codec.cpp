@@ -51,7 +51,7 @@ static void parseSegments(JsonObject node, std::vector<SegmentSettings>& segs,
     truncateUtf8(seg.name, kMaxSegmentNameLen);
     seg.px = segNode["px"] | 0;
     const int pin = segNode["pin"] | 0;
-    if (pin > 0 && pin <= UINT8_MAX && isStripDataPin(static_cast<uint8_t>(pin))) {
+    if (isStripDataPin(pin)) {
       seg.pin = static_cast<uint8_t>(pin);
     }
     for (JsonVariant c : segNode["colors"].as<JsonArray>()) {
@@ -76,8 +76,7 @@ static void clampSumPx(std::vector<SegmentSettings>& segs) {
   }
 }
 
-static void writeSegments(JsonObject node,
-                          const std::vector<SegmentSettings>& segs) {
+void writeSegments(JsonObject node, const std::vector<SegmentSettings>& segs) {
   JsonArray arr = node["segments"].to<JsonArray>();
   for (const auto& s : segs) {
     JsonObject o = arr.add<JsonObject>();
