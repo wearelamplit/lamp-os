@@ -207,8 +207,8 @@ base isn't wired to (say 27) and tap Update: the lamp restarts, the base
 stays dark, and the row reads GPIO 27. Set it back to Built-in and Update:
 the base lights again. On a staff lamp, set the base to GPIO 19 (its button)
 and Update: both strips stay lit, the app reads "Base data pin didn't take.
-It clashes with another strip or a button, so the lamp kept its built-in
-pin.", and the row reads Built-in. Save a colour from the lamp's web config
+It clashes with another strip, a button or a touch pad, so the lamp kept
+its built-in pin.", and the row reads Built-in. Save a colour from the lamp's web config
 with a pin set: the row still reads the pin afterwards. On a lamp running
 1.3.3, LED setup in advanced mode shows no data pin row.
 

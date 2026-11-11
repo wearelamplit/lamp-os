@@ -15,6 +15,7 @@ import '../../../core/widgets/number_input_dialog.dart';
 import '../../control/application/advanced_session.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/application/control_state.dart';
+import '../../control/domain/sections.dart';
 import '../../control/application/settings_blob_too_large_exception.dart';
 import '../../firmware/presentation/firmware_push_lock.dart';
 
@@ -160,8 +161,8 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
                           'into the lamp. Mis-matched LED count or '
                           'byte-order will show as wrong-coloured or '
                           'partially-lit segments.'
-                          '${showByteOrder ? ' A wrong data pin leaves '
-                              'that strip dark.' : ''}',
+                          '${showByteOrder && _showsDataPin(state) ? ' A '
+                              'wrong data pin leaves that strip dark.' : ''}',
                         ),
                       ),
                       const SizedBox(height: AppSpace.lg),
@@ -287,7 +288,13 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
                                 Navigator.of(context).pop();
                               } else {
                                 AppSnackbar.error(
-                                    context, advancedLedsSaveMessage(mismatches));
+                                  context,
+                                  advancedLedsSaveMessage(
+                                    mismatches,
+                                    shadeStrips: state.shade.segments.length,
+                                    baseStrips: state.base.segments.length,
+                                  ),
+                                );
                               }
                             } on SettingsBlobTooLargeException catch (e) {
                               if (!context.mounted) return;
@@ -315,6 +322,12 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
       ),
     );
   }
+  static bool _hasDataPin(Segment s) =>
+      s.pin != null && (s.builtinPin ?? 0) != 0;
+
+  static bool _showsDataPin(ControlState state) =>
+      [...state.shade.segments, ...state.base.segments].any(_hasDataPin);
+
   /// A Data pin row per segment the lamp reports a pin and a strip for.
   List<Widget> _dataPinRows(
       ControlState state, String role, ControlNotifier notifier) {
@@ -322,14 +335,13 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
     final roleLabel = role == 'shade' ? 'Shade' : 'Base';
     return [
       for (var i = 0; i < segs.length; i++)
-        if ((segs[i].pin, segs[i].builtinPin) case (final pin?, final builtin?)
-            when builtin != 0)
+        if (_hasDataPin(segs[i]))
           _DataPinRow(
             label: segs.length > 1
                 ? '${segs[i].name} data pin'
                 : '$roleLabel data pin',
-            pin: pin,
-            builtinPin: builtin,
+            pin: segs[i].pin!,
+            builtinPin: segs[i].builtinPin!,
             usedBy: _pinOwners(state, exceptRole: role, exceptIndex: i),
             onChanged: (p) => notifier.setSegmentPin(role, i, p),
           ),
@@ -355,9 +367,11 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
 }
 
 /// The friendly message for the fields an Advanced LEDs save reported as not
-/// taken ([ControlNotifier.applyAdvancedLedsAndReboot]).
+/// taken ([ControlNotifier.applyAdvancedLedsAndReboot]). The strip counts name
+/// a pin the way its rows are named.
 @visibleForTesting
-String advancedLedsSaveMessage(List<String> mismatches) {
+String advancedLedsSaveMessage(List<String> mismatches,
+    {int shadeStrips = 1, int baseStrips = 1}) {
   final lines = <String>{};
   for (final m in mismatches) {
     final dot = m.indexOf('.');
@@ -369,8 +383,10 @@ String advancedLedsSaveMessage(List<String> mismatches) {
       _ => null,
     };
     lines.add(switch ((label, field)) {
-      (final l?, 'pin') => "$l data pin didn't take. It clashes with another "
-          'strip or a button, so the lamp kept its built-in pin.',
+      (final l?, 'pin') =>
+        "${_pinName(l, role == 'shade' ? shadeStrips : baseStrips)} didn't "
+            'take. It clashes with another strip, a button or a touch pad, so '
+            'the lamp kept its built-in pin.',
       (final l?, 'byteOrder' || 'bpp') =>
         "$l strip type didn't take, so the lamp kept its old one.",
       (final l?, 'px') =>
@@ -381,6 +397,9 @@ String advancedLedsSaveMessage(List<String> mismatches) {
   }
   return lines.join(' ');
 }
+
+String _pinName(String role, int strips) =>
+    strips > 1 ? 'A ${role.toLowerCase()} strip data pin' : '$role data pin';
 
 class _StripTypePicker extends StatelessWidget {
   const _StripTypePicker({required this.selected, required this.onChanged});

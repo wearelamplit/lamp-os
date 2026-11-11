@@ -305,6 +305,28 @@ void main() {
 
       expect(find.text('GRBW'), findsWidgets);
       expect(find.text('Shade data pin'), findsNothing);
+      expect(find.textContaining('wrong data pin'), findsNothing);
+    });
+
+    testWidgets('hidden for a segment no strip drives', (tester) async {
+      await unlocked(tester,
+          shade: '[{"name":"Shade","px":38,"pin":0,"builtinPin":0,"colors":[]}]');
+
+      expect(find.text('GRBW'), findsWidgets);
+      expect(find.text('Shade data pin'), findsNothing);
+    });
+
+    testWidgets('re-picking the built-in entry keeps a pin saved on it',
+        (tester) async {
+      final c = await unlocked(tester,
+          shade: '[{"name":"Shade","px":38,"pin":12,"builtinPin":12,"colors":[]}]');
+      expect(find.text('Built-in (GPIO 12)'), findsOneWidget);
+
+      await openSheet(tester);
+      await tester.tap(option('Built-in (GPIO 12)'));
+      await tester.pumpAndSettle();
+
+      expect(shadePin(c), 12);
     });
 
     testWidgets('hidden when advanced is locked', (tester) async {
@@ -426,8 +448,8 @@ void main() {
       }
 
       expect(
-        find.text("Shade data pin didn't take. It clashes with another strip "
-            'or a button, so the lamp kept its built-in pin.'),
+        find.text("Shade data pin didn't take. It clashes with another strip, "
+            'a button or a touch pad, so the lamp kept its built-in pin.'),
         findsOneWidget,
       );
       expect(find.textContaining('shade.pin'), findsNothing);
@@ -464,6 +486,33 @@ void main() {
 
       expect(find.text('home'), findsOneWidget);
       expect(shadePin(c), 27);
+    });
+  });
+
+  group('advancedLedsSaveMessage', () {
+    test('names each field that did not take, once per strip', () {
+      expect(
+        advancedLedsSaveMessage(['shade.byteOrder', 'shade.bpp', 'base.px']),
+        "Shade strip type didn't take, so the lamp kept its old one. "
+        "Base LED count didn't take, so the lamp kept its old count.",
+      );
+    });
+
+    test('names a pin on a role of several strips without guessing which', () {
+      expect(
+        advancedLedsSaveMessage(['shade.pin'], shadeStrips: 3),
+        "A shade strip data pin didn't take. It clashes with another strip, "
+        'a button or a touch pad, so the lamp kept its built-in pin.',
+      );
+    });
+
+    test('a lamp that did not come back says so in plain words', () {
+      final message = advancedLedsSaveMessage(
+          ['lamp did not reconnect after Advanced LED save: timeout']);
+      expect(message,
+          "Your lamp didn't come back after restarting. Bring your phone "
+          'closer and try again.');
+      expect(message, isNot(contains('timeout')));
     });
   });
 }

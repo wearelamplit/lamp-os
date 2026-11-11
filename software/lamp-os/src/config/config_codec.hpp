@@ -42,8 +42,8 @@ bool parseExpression(JsonObject node, ExpressionConfig& out, bool enabledDefault
 void parseRotation(JsonObjectConst node, ColorRotation& out);
 // Writes a role's `segments` array into its page section. Every segment
 // carries `pin` (0 for the variant pin) and `builtinPin` (its strip's variant
-// pin, 0 with no strip): the app shows the pin control only to firmware that
-// sends them.
+// pin, 0 with no strip), and the app shows the pin control only to firmware
+// that sends them.
 void writeSectionSegments(JsonObject section, const std::vector<SegmentSettings>& segs);
 // Adds `rotate`, every key present, to the role's page section when the role
 // offers rotation, and nothing otherwise.

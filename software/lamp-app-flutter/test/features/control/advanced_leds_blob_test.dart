@@ -307,6 +307,8 @@ void main() {
       await seedControlBle(
         ble,
         deviceId: devId,
+        basePx: snafu.baseSection.px,
+        shadePx: snafu.shadeSection.px,
         baseSegmentsJson: segsJson(snafu.base),
         shadeSegmentsJson: segsJson(snafu.shade),
       );
@@ -332,8 +334,7 @@ void main() {
         base: state.base,
         shade: state.shade,
       );
-      expect(mismatches, contains('shade.pin'));
-      expect(mismatches, isNot(contains('base.pin')));
+      expect(mismatches, ['shade.pin']);
     });
 
     test('reports nothing when every pin reads back', () async {
