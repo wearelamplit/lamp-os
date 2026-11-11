@@ -72,6 +72,10 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
   List<int>? _origBasePxs;
   String? _origBaseByteOrder;
 
+  /// True from an Update tap until its write and the reboot reload after it
+  /// end.
+  bool _saving = false;
+
   void _cancel() {
     final n = ref.read(controlNotifierProvider(widget.lampId).notifier);
     for (var i = 0; i < (_origShadePxs?.length ?? 0); i++) {
@@ -241,9 +245,15 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
                         ),
                         const Spacer(),
                         FilledButton.icon(
-                          icon: const Icon(Icons.check, size: 18),
+                          icon: _saving
+                              ? const SizedBox.square(
+                                  dimension: 18, // deliberate dimension, not spacing
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.check, size: 18),
                           label: const Text('Update'),
-                          onPressed: () async {
+                          onPressed: _saving ? null : () async {
+                            setState(() => _saving = true);
                             try {
                               final mismatches =
                                   await notifier.applyAdvancedLedsAndReboot(
@@ -271,6 +281,8 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(content: Text('Save failed: $e')),
                               );
+                            } finally {
+                              if (mounted) setState(() => _saving = false);
                             }
                           },
                         ),

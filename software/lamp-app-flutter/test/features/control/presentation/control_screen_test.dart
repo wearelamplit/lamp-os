@@ -8,8 +8,11 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../_support/in_memory_ble_client.dart';
+import 'package:lamp_app/core/ble/ble_client.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/core/ble/ble_scanner.dart';
+import 'package:lamp_app/features/control/application/control_notifier.dart';
+import 'package:lamp_app/features/control/application/control_state.dart';
 import 'package:lamp_app/features/control/presentation/control_screen.dart';
 import 'package:lamp_app/features/control/presentation/widgets/base_card.dart';
 import 'package:lamp_app/features/control/presentation/widgets/brightness_card.dart';
@@ -18,6 +21,7 @@ import 'package:lamp_app/features/inventory/application/inventory_notifier.dart'
 import 'package:lamp_app/features/inventory/domain/inventory_lamp.dart';
 import 'package:lamp_app/features/lamp_shell/presentation/bt_only_lamp_screen.dart';
 import 'package:lamp_app/features/nearby/application/nearby_lamps_notifier.dart';
+import 'package:lamp_app/features/nearby/application/ota_busy_seen_provider.dart';
 import 'package:lamp_app/features/nearby/domain/nearby_lamp.dart';
 
 import '../../../_support/seed.dart';
@@ -88,6 +92,13 @@ Future<ProviderContainer> _withSnafuLamp() async {
   await c.read(inventoryNotifierProvider.notifier).add(const InventoryLamp(
         id: _devId, name: 'jacko', controlPassword: 'secret'));
   return c;
+}
+
+/// A lamp the app can't reach.
+class _Unreachable extends ControlNotifier {
+  @override
+  Future<ControlState> build(String deviceId) async =>
+      throw BleNotConnected(deviceId);
 }
 
 Future<void> _pumpUntil(WidgetTester tester, Finder finder,
@@ -336,5 +347,36 @@ void main() {
     expect(find.text('Enter password'), findsOneWidget,
         reason: 'Dialog stays open so the user can retry');
     expect(find.textContaining('Wrong password'), findsOneWidget);
+  });
+
+  testWidgets('a lamp the scan saw teaching is named as the app shows it',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final c = ProviderContainer(
+      overrides: [
+        bleClientProvider.overrideWithValue(InMemoryBleClient()),
+        bleScannerProvider.overrideWithValue(FakeBleScanner()),
+        controlNotifierProvider.overrideWith2((_) => _Unreachable()),
+      ],
+    );
+    addTearDown(c.dispose);
+    await c.read(inventoryNotifierProvider.future);
+    await c.read(inventoryNotifierProvider.notifier).add(const InventoryLamp(
+          id: _devId, name: 'jacko', controlPassword: 'secret'));
+    c.read(otaBusySeenProvider.notifier).observe(_devId, distributing: true);
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: c,
+      child: const MaterialApp(
+        home: Scaffold(body: ControlScreen(lampId: _devId)),
+      ),
+    ));
+    final title = find.text('Jacko is busy teaching a lamp new tricks 🎓');
+    await _pumpUntil(tester, title);
+    expect(title, findsOneWidget);
+    expect(
+      find.text(
+          "It's hard to reach while teaching. Give it a minute, then try again."),
+      findsOneWidget,
+    );
   });
 }

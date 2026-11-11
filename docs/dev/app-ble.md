@@ -149,8 +149,11 @@ restores the link or gives up (`_rebootReloadOwnsLink`), the ladder stands
 down: `_tryReconnect` returns at once, a try already in flight when a reload
 starts stops at its next step for good (`_rebootReloadsStarted`), and a ladder
 step still pending when the reload restores the link or gives up is cancelled.
-A drop after the restore climbs the ladder as usual. A reload that gives up
-leaves its error on screen; the ladder does not take over.
+A drop after the restore climbs the ladder as usual, even when a try from
+before the save is still running: when that try stands down it arms the next
+step if the link is down and none is pending
+(`_resumeLadderAfterStandDown`). A reload that gives up leaves its error on
+screen; the ladder does not take over.
 
 ## Scan hold during a connect
 

@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import '../../../core/ble/ble_client.dart';
 import '../../../core/ble/uuids.dart';
 import '../domain/firmware_protocol.dart';
+import '../domain/firmware_state.dart';
 
 /// Result of a single OTA push attempt. Returned from
 /// [FirmwareOtaPusher.start].
@@ -12,6 +13,8 @@ class FirmwareOtaResult {
   const FirmwareOtaResult({
     required this.success,
     required this.message,
+    this.failure,
+    this.alreadyCurrent = false,
     this.lampReportedVersion,
   });
 
@@ -20,10 +23,15 @@ class FirmwareOtaResult {
   /// The lamp drops it within ~100 ms.
   final bool success;
 
-  /// Short user-facing string. On success: a "shipped" confirmation.
-  /// On failure: a categorized message (e.g. "already up to date",
-  /// "another update in progress", "signature mismatch").
+  /// Short technical account of the outcome, for logs and dev mode.
   final String message;
+
+  /// Why the push failed. Null on success.
+  final FirmwareFailure? failure;
+
+  /// [success] without an install: the lamp already runs this version or
+  /// newer, so it does not reboot.
+  final bool alreadyCurrent;
 
   /// Lamp's report of the version it ended up on. Populated on success;
   /// null on failure.
@@ -155,11 +163,16 @@ class FirmwareOtaPusher {
           _finish(const FirmwareOtaResult(
             success: false,
             message: 'Lamp did not respond to the offer.',
+            failure: FirmwareFailure.noAnswer,
           ));
         }
       });
     } catch (e) {
-      _finish(FirmwareOtaResult(success: false, message: 'OTA setup failed: $e'));
+      _finish(FirmwareOtaResult(
+        success: false,
+        message: 'OTA setup failed: $e',
+        failure: FirmwareFailure.setupFailed,
+      ));
     }
     return _completer!.future;
   }
@@ -188,11 +201,13 @@ class FirmwareOtaPusher {
           _finish(const FirmwareOtaResult(
             success: false,
             message: 'Another update is already in progress on this lamp.',
+            failure: FirmwareFailure.busy,
           ));
           break;
         case FwAcceptStatus.declineAlreadyCurrent:
           _finish(const FirmwareOtaResult(
-            success: true,  // Not technically success, but no work to do.
+            success: true,
+            alreadyCurrent: true,
             message: 'Lamp is already running this version or newer.',
           ));
           break;
@@ -200,6 +215,7 @@ class FirmwareOtaPusher {
           _finish(const FirmwareOtaResult(
             success: false,
             message: 'Lamp rejected the firmware signature at offer time.',
+            failure: FirmwareFailure.untrustedAtOffer,
           ));
           break;
       }
@@ -220,6 +236,7 @@ class FirmwareOtaPusher {
     _finish(FirmwareOtaResult(
       success: false,
       message: 'BLE notification stream error: $err',
+      failure: FirmwareFailure.linkLost,
     ));
   }
 
@@ -255,6 +272,7 @@ class FirmwareOtaPusher {
       _finish(const FirmwareOtaResult(
         success: false,
         message: 'Lamp kept requesting chunks after the update finished.',
+        failure: FirmwareFailure.missingPieces,
       ));
       return;
     }
@@ -306,6 +324,7 @@ class FirmwareOtaPusher {
           _finish(FirmwareOtaResult(
             success: false,
             message: 'Chunk write failed at idx=$idx: $e',
+            failure: FirmwareFailure.linkLost,
           ));
           return;
         }
@@ -351,6 +370,7 @@ class FirmwareOtaPusher {
         _finish(FirmwareOtaResult(
           success: false,
           message: 'DONE write failed: $e',
+          failure: FirmwareFailure.linkLost,
         ));
         return;
       }
@@ -365,6 +385,7 @@ class FirmwareOtaPusher {
           _finish(const FirmwareOtaResult(
             success: false,
             message: 'Lamp did not report an OTA result within the budget.',
+            failure: FirmwareFailure.noResult,
           ));
         }
       });
@@ -385,46 +406,55 @@ class FirmwareOtaPusher {
         return const FirmwareOtaResult(
           success: false,
           message: 'Lamp rejected the firmware signature.',
+          failure: FirmwareFailure.untrusted,
         );
       case FwResultStatus.versionMismatch:
         return const FirmwareOtaResult(
           success: false,
           message: 'OFFER + DONE version mismatch.',
+          failure: FirmwareFailure.scrambled,
         );
       case FwResultStatus.partitionWriteFail:
         return const FirmwareOtaResult(
           success: false,
           message: 'Lamp could not write the firmware partition.',
+          failure: FirmwareFailure.storeFailed,
         );
       case FwResultStatus.partitionReadFail:
         return const FirmwareOtaResult(
           success: false,
           message: 'Lamp could not read back the firmware partition.',
+          failure: FirmwareFailure.storeFailed,
         );
       case FwResultStatus.otaBeginFail:
         return const FirmwareOtaResult(
           success: false,
           message: 'Lamp could not begin OTA write.',
+          failure: FirmwareFailure.storeFailed,
         );
       case FwResultStatus.otaEndFail:
         return const FirmwareOtaResult(
           success: false,
           message: 'Lamp could not finalize OTA write.',
+          failure: FirmwareFailure.storeFailed,
         );
       case FwResultStatus.setBootFail:
         return const FirmwareOtaResult(
           success: false,
           message: 'Lamp could not set the new boot partition.',
+          failure: FirmwareFailure.storeFailed,
         );
       case FwResultStatus.offerShaMismatch:
         return const FirmwareOtaResult(
           success: false,
           message: 'Lamp computed a different image fingerprint.',
+          failure: FirmwareFailure.scrambled,
         );
       case FwResultStatus.unknown:
         return const FirmwareOtaResult(
           success: false,
           message: 'Lamp reported an unknown OTA failure.',
+          failure: FirmwareFailure.unknown,
         );
     }
   }
@@ -452,6 +482,7 @@ class FirmwareOtaPusher {
     _finish(const FirmwareOtaResult(
       success: false,
       message: 'Update cancelled.',
+      failure: FirmwareFailure.cancelled,
     ));
   }
 }

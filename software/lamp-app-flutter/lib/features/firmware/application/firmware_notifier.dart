@@ -45,6 +45,7 @@ class FirmwareNotifier extends _$FirmwareNotifier {
     if (blob == null) {
       state = const FirmwareFailed(
         reason: 'That firmware is no longer in the download cache.',
+        failure: FirmwareFailure.cacheMissing,
       );
       return;
     }
@@ -55,6 +56,7 @@ class FirmwareNotifier extends _$FirmwareNotifier {
     } catch (e) {
       state = FirmwareFailed(
         reason: 'The cached firmware failed signature verification.',
+        failure: FirmwareFailure.cacheUnverified,
         cause: e,
       );
       return;
@@ -65,6 +67,7 @@ class FirmwareNotifier extends _$FirmwareNotifier {
       state = FirmwareFailed(
         reason: 'Cached firmware is for the wrong lamp type or channel '
             '(expected "$expectedChannel", got "${verified.footer.channel}").',
+        failure: FirmwareFailure.wrongLamp,
       );
       return;
     }
@@ -87,8 +90,8 @@ class FirmwareNotifier extends _$FirmwareNotifier {
       footerLen: lsigFooterLen,
       onProgress: (sent, total) {
         if (state is FirmwareStreaming || state is FirmwareOfferSent) {
-          state = FirmwareStreaming(
-            footer: verified.footer,
+          state = pushProgress(
+            verified.footer,
             chunksSent: sent,
             totalChunks: total,
           );
@@ -109,9 +112,15 @@ class FirmwareNotifier extends _$FirmwareNotifier {
       _activePusher = null;
 
       if (result.success) {
-        state = FirmwareSucceeded(footer: verified.footer);
+        state = FirmwareSucceeded(
+          footer: verified.footer,
+          alreadyCurrent: result.alreadyCurrent,
+        );
       } else {
-        state = FirmwareFailed(reason: result.message);
+        state = FirmwareFailed(
+          reason: result.message,
+          failure: result.failure ?? FirmwareFailure.unknown,
+        );
       }
       debugPrint('[firmware] OTA result: ${result.message}');
     } finally {

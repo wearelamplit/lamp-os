@@ -39,4 +39,11 @@ void main() {
         find.byType(LinearProgressIndicator));
     expect(bar.value, isNull);
   });
+
+  testWidgets('finalizing practises the tricks, not warming up again',
+      (tester) async {
+    await _pump(tester, FirmwareFinalizing(footer: _footer()));
+    expect(find.text('Practising the new tricks 🪄'), findsOneWidget);
+    expect(find.text('Warming up 🪄'), findsNothing);
+  });
 }

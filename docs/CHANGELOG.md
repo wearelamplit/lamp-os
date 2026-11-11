@@ -18,6 +18,17 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   that was running reads as ending in a power cut. A boot that ended in a
   power cut shows the run time it had reached by its last check (1 minute,
   1 hour, 1 day).
+- **The app tells you how an update went.** When a lamp comes back after
+  the app updates it, a message reads "<name> learned some new tricks ✨".
+  When an update fails while the phone stays connected, a message reads
+  "<name> didn't catch the new tricks this time. Trying again next time you
+  connect." once the lamp is listening again, and the app does try again the
+  next time it connects to that lamp. When an update loses the phone's
+  connection, the app waits until it reconnects and reads the lamp: if the
+  lamp finished the update anyway, the message says it learned them.
+  An update the lamp turns down, because it's busy or doesn't trust the
+  download, gets no message, and neither does a lamp that's already up to
+  date.
 
 ### Fixed
 - **Lamps and wisps left on for weeks keep working past day 25 and day 49.**
@@ -85,16 +96,38 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   change or an LED setup save, the app used to reconnect to the lamp twice,
   and when the lamp was slow to restart it could drop the link it had just
   restored. It now reconnects once.
+- **The Test button waits out an update.** In the expression editor, Test
+  stayed pressable while a lamp settled after an update, and the lamp
+  ignored it. It now greys out until the lamp is listening again.
+- **Renaming a lamp says when it didn't work.** A rename the lamp didn't take
+  used to snap back to the old name without a word; now it says "Couldn't set
+  name. Try again."
+- **Lamp names stop at the lamp's limit.** Name fields (renaming on Config,
+  naming a new lamp) stop at 32 bytes, the most a lamp keeps. An emoji or
+  accented letter takes more than one of those bytes. Pasting over a name
+  keeps as much of the paste as fits, and typing in the middle of a full
+  name leaves the rest of it alone.
+- **One save at a time.** The LED setup Update button and the password Save
+  button grey out and show a spinner while a save is under way, so a second
+  tap can't start another save while the lamp restarts.
 
 ### Changed
+- **Friendlier update wording.** After an update ends, while the lamp
+  settles, the strip at the top reads "Giving <name> a moment to settle… 🎓"
+  instead of still saying it's teaching. On Info, the last stretch of an
+  update, while the lamp checks it, reads "Practising the new tricks 🪄"
+  instead of sitting on a full "Learning some new tricks" bar. A lamp too busy teaching another lamp to connect is named the
+  way the app shows it everywhere else. In dev mode, a failed update leads
+  with a plain line (such as "Lost <name> partway through. Bring your phone
+  closer and try again.") with the technical reason in small type beneath,
+  and a lamp that already has the update reads "<name> already knows these
+  tricks." instead of claiming it installed and is restarting.
 - **Less Bluetooth chatter while a lamp is open.** The app's check that the
   lamp is still there now reads one byte every 3 seconds instead of the
   lamp's whole settings page, and it pauses while the app updates the lamp's
   firmware. Lamps from before Bluetooth schema version 1 still get the full
   read. Opening or reconnecting to a lamp reads its settings page once
   instead of twice.
-
-### Changed
 - **Smaller firmware, a little more free memory.** The lamp no longer builds
   in code that saves a crash dump to flash. It never had room to store one,
   so nothing you see changes: a crash still prints its report on the USB

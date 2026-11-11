@@ -12,6 +12,7 @@ import '../../../core/ble/connect_with_retry.dart';
 import '../../../core/ble/lamp_crypto.dart';
 import '../../../core/ble/uuids.dart';
 import '../../../core/ble/write_coalescer.dart';
+import '../../../core/lamp_name.dart';
 import '../../../core/lifecycle/app_lifecycle.dart';
 import '../../../core/utils/clock.dart';
 import '../../firmware/application/firmware_notifier.dart';
@@ -1242,7 +1243,8 @@ class ControlNotifier extends _$ControlNotifier {
   // writeSettingsBlob. name / SSID use reboot:false (instant);
   // password / advanced-LED use reboot:true (triggers reboot + ~8–12s reconnect).
 
-  Future<void> setLampName(String name) async {
+  Future<void> setLampName(String typed) async {
+    final name = fitLampName(typed);
     await _mutate(
       (s) => s.copyWith(
         lamp: s.lamp.copyWith(name: name),
@@ -2141,6 +2143,23 @@ class ControlNotifier extends _$ControlNotifier {
       // explicitly; finally covers the success path (and any future
       // catch branch that forgets to).
       _reconnectInFlight = false;
+      if (_rebootReloadsStarted != reloads) _resumeLadderAfterStandDown();
+    }
+  }
+
+  /// A try that stood down for a reload arms nothing, and a step that fired
+  /// while it ran returned on [_reconnectInFlight]. When that reload has
+  /// already handed the link back and the link has dropped since, nothing
+  /// else would climb the ladder. A try runs only after a drop, so a reload it
+  /// stood down for started disconnected and holds the state in loading until
+  /// it restores the link; one that gave up leaves its error. Neither is
+  /// disturbed.
+  void _resumeLadderAfterStandDown() {
+    if (!ref.mounted) return;
+    if (_reconnectTimer?.isActive ?? false) return;
+    final cur = state;
+    if (cur is AsyncData<ControlState> && !cur.value.connected) {
+      _scheduleReconnect();
     }
   }
 

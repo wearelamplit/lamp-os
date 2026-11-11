@@ -81,7 +81,10 @@ final _streaming = FirmwareStreaming(
   totalChunks: 10,
 );
 
-const _failed = FirmwareFailed(reason: 'lost it');
+const _failed = FirmwareFailed(
+  reason: 'lost it',
+  failure: FirmwareFailure.linkLost,
+);
 
 Future<void> _pump() async {
   for (var i = 0; i < 10; i++) {

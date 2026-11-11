@@ -42,7 +42,7 @@ class FirmwareStreaming extends FirmwareState {
   }
 }
 
-/// All chunks acked; DONE on the wire; waiting for the lamp's RESULT.
+/// Every chunk is sent; DONE follows and the app waits for the lamp's RESULT.
 class FirmwareFinalizing extends FirmwareState {
   const FirmwareFinalizing({required this.footer});
   final LsigFooter footer;
@@ -50,27 +50,80 @@ class FirmwareFinalizing extends FirmwareState {
 
 /// Lamp reported success; will reboot momentarily.
 class FirmwareSucceeded extends FirmwareState {
-  const FirmwareSucceeded({required this.footer});
+  const FirmwareSucceeded({required this.footer, this.alreadyCurrent = false});
   final LsigFooter footer;
+
+  /// The lamp already runs this version or newer and turned the offer down.
+  /// It installs nothing and does not reboot.
+  final bool alreadyCurrent;
 }
 
-/// Terminal failure surface. Wraps a user-presentable reason. The
-/// `cause` is preserved for logging but not shown to the user.
+/// Why a push failed, as the app explains it to the lamp's owner.
+enum FirmwareFailure {
+  noAnswer,
+  setupFailed,
+  busy,
+  untrustedAtOffer,
+  untrusted,
+  linkLost,
+  missingPieces,
+  noResult,
+  scrambled,
+  storeFailed,
+  unknown,
+  cacheMissing,
+  cacheUnverified,
+  wrongLamp,
+  cancelled;
+
+  /// The lamp turned the offer down, so no lesson ran.
+  bool get declined => this == busy || this == untrustedAtOffer;
+}
+
+/// Terminal failure surface. [reason] is the technical account, shown only
+/// in dev mode beneath the friendly line for [failure]. The `cause` is
+/// preserved for logging but not shown.
 class FirmwareFailed extends FirmwareState {
-  const FirmwareFailed({required this.reason, this.cause});
+  const FirmwareFailed({
+    required this.reason,
+    required this.failure,
+    this.cause,
+  });
   final String reason;
+  final FirmwareFailure failure;
   final Object? cause;
 }
 
 extension FirmwarePushing on FirmwareState {
   /// The phone is actively pushing an image to this lamp (offer through
   /// finalize). Excludes Succeeded so the post-reboot presence takes over.
-  bool get isPushing =>
-      this is FirmwareOfferSent ||
-      this is FirmwareStreaming ||
-      this is FirmwareFinalizing;
+  bool get isPushing => pushedVersion != null;
 
   /// Pushing plus the local verify step that precedes OfferSent. Drives the
   /// whimsical badge + card so the verify window isn't a blank gap.
   bool get isBusy => isPushing || this is FirmwareVerifying;
+
+  /// The version being pushed, from the offer until the lamp's result; null
+  /// in every other state.
+  int? get pushedVersion => switch (this) {
+    FirmwareOfferSent(:final footer) ||
+    FirmwareStreaming(:final footer) ||
+    FirmwareFinalizing(:final footer) => footer.version,
+    _ => null,
+  };
 }
+
+/// The push state once [chunksSent] of [totalChunks] are sent: streaming
+/// until the last chunk is out, then finalizing while the lamp verifies and
+/// reports.
+FirmwareState pushProgress(
+  LsigFooter footer, {
+  required int chunksSent,
+  required int totalChunks,
+}) => chunksSent >= totalChunks
+    ? FirmwareFinalizing(footer: footer)
+    : FirmwareStreaming(
+        footer: footer,
+        chunksSent: chunksSent,
+        totalChunks: totalChunks,
+      );

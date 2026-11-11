@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../_support/held_save_ble_client.dart';
 import '../../_support/in_memory_ble_client.dart';
+import 'package:lamp_app/core/ble/ble_client.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/core/widgets/form_section.dart';
@@ -73,6 +77,83 @@ void main() {
     expect(find.text("Couldn't save: too much to send to the lamp at once."),
         findsOneWidget);
     expect(ble.writesTo(_devId, BleUuids.settingsBlob), isEmpty);
+  });
+
+  testWidgets('an Update in flight disables Update and shows progress',
+      (tester) async {
+    final ble = HeldSaveBleClient();
+    final c = await _makeContainer(client: ble);
+    addTearDown(c.dispose);
+    await tester.pumpWidget(_wrap(c));
+    await _pumpToData(tester);
+
+    final hold = ble.hold = Completer<void>();
+    final update = find.ancestor(
+      of: find.text('Update'),
+      matching: find.byWidgetPredicate((w) => w is FilledButton),
+    );
+    await tester.tap(find.text('Update'));
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+
+    expect(ble.saves, 1);
+    expect(tester.widget<FilledButton>(update).onPressed, isNull);
+    expect(
+      find.descendant(
+          of: update, matching: find.byType(CircularProgressIndicator)),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Update'), warnIfMissed: false);
+    await tester.pump();
+    expect(ble.saves, 1);
+
+    hold.completeError(const BleEncryptionRequired(_devId));
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(find.textContaining('Save failed'), findsOneWidget);
+    expect(tester.widget<FilledButton>(update).onPressed, isNotNull);
+  });
+
+  testWidgets('Update stays disabled while the lamp restarts after it',
+      (tester) async {
+    final ble = InMemoryBleClient();
+    final c = await _makeContainer(client: ble);
+    addTearDown(c.dispose);
+    final nav = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: c,
+      child: MaterialApp(
+        navigatorKey: nav,
+        home: const Scaffold(body: Text('home')),
+      ),
+    ));
+    unawaited(nav.currentState!.push(MaterialPageRoute<void>(
+      builder: (_) => const AdvancedLedsScreen(lampId: _devId),
+    )));
+    await _pumpToData(tester);
+    await tester.pump(const Duration(milliseconds: 500));
+
+    await tester.tap(find.text('Update'));
+    await tester.pump(const Duration(milliseconds: 16));
+    // The restart drops the link; the screen shows its form again while the
+    // save waits to reconnect.
+    await ble.disconnect(_devId);
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    final update = find.ancestor(
+      of: find.text('Update'),
+      matching: find.byWidgetPredicate((w) => w is FilledButton),
+    );
+    expect(update, findsOneWidget);
+    expect(tester.widget<FilledButton>(update).onPressed, isNull);
+
+    for (var i = 0; i < 40; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.text('home'), findsOneWidget, reason: 'the save finished');
   });
 
   testWidgets('Shade strip section renders above Base strip', (tester) async {

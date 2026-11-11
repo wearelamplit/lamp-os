@@ -14,9 +14,10 @@ import 'package:lamp_app/features/firmware/data/cached_firmware.dart';
 import 'package:lamp_app/features/firmware/data/firmware_pubkey.dart';
 import 'package:lamp_app/features/firmware/data/firmware_release_client.dart';
 import 'package:lamp_app/features/firmware/data/firmware_release_client_provider.dart';
-import 'package:lamp_app/features/firmware/domain/lsig_footer.dart';
 import 'package:lamp_app/features/inventory/domain/inventory_lamp.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
+
+import '../../_support/signed_firmware.dart';
 
 void main() {
   group('shouldReplaceCachedFirmware', () {
@@ -71,7 +72,7 @@ void main() {
       // before this run (e.g. a prior app session).
       final cacheDir = Directory('${tempDir.path}/firmware-cache');
       await cacheDir.create(recursive: true);
-      final cachedImage = await _signedImage(
+      final cachedImage = await signedFirmwareImage(
         keyPair: keyPair,
         channel: '$lampType-${channel.name}',
         version: cachedVersion,
@@ -89,7 +90,7 @@ void main() {
       await File('${cacheDir.path}/lamp-firmware-$key.meta.json')
           .writeAsString(jsonEncode(meta.toJson()));
 
-      final githubImage = await _signedImage(
+      final githubImage = await signedFirmwareImage(
         keyPair: keyPair,
         channel: '$lampType-${channel.name}',
         version: githubVersion,
@@ -131,7 +132,7 @@ void main() {
       firmwarePublicKey.setAll(0, publicKey.bytes);
 
       const lampType = 'standard';
-      final image = await _signedImage(
+      final image = await signedFirmwareImage(
         keyPair: keyPair,
         channel: '$lampType-stable',
         version: 0x00010200,
@@ -188,7 +189,7 @@ void _cadenceTests() {
     });
 
     Future<Uint8List> image(String lampType, int version) =>
-        _signedImage(keyPair: keyPair, channel: '$lampType-stable', version: version);
+        signedFirmwareImage(keyPair: keyPair, channel: '$lampType-stable', version: version);
 
     ProviderContainer containerWith(FirmwareReleaseClient client) {
       final c = ProviderContainer(
@@ -351,50 +352,3 @@ class _StubReleaseClient extends FirmwareReleaseClient {
   }
 }
 
-Uint8List _lsigFooter({
-  required String channel,
-  required int version,
-  required int signedRegionLen,
-  required Uint8List signature,
-}) {
-  final out = Uint8List(lsigFooterLen);
-  final view = ByteData.view(out.buffer);
-  view.setUint8(0, 0x4C);
-  view.setUint8(1, 0x53);
-  view.setUint8(2, 0x49);
-  view.setUint8(3, 0x47);
-  final channelBytes = channel.codeUnits;
-  for (var i = 0; i < lsigChannelLen; ++i) {
-    view.setUint8(
-        lsigChannelOffset + i, i < channelBytes.length ? channelBytes[i] : 0);
-  }
-  view.setUint32(lsigVersionOffset, version, Endian.little);
-  view.setUint32(lsigSignedRegLenOffset, signedRegionLen, Endian.little);
-  for (var i = 0; i < lsigSignatureLen; ++i) {
-    view.setUint8(lsigSignatureOffset + i, signature[i]);
-  }
-  return out;
-}
-
-/// Builds a real signed image: SHA-256 over a synthetic signed region,
-/// Ed25519-signed with [keyPair] (whose public key must be installed into
-/// [firmwarePublicKey] for `verifyFirmwareImage` to accept it).
-Future<Uint8List> _signedImage({
-  required SimpleKeyPair keyPair,
-  required String channel,
-  required int version,
-  int signedRegionLen = 512,
-}) async {
-  final region =
-      Uint8List.fromList(List.generate(signedRegionLen, (i) => i & 0xFF));
-  final digest = await Sha256().hash(region);
-  final signature =
-      await Ed25519().sign(digest.bytes, keyPair: keyPair);
-  final footer = _lsigFooter(
-    channel: channel,
-    version: version,
-    signedRegionLen: signedRegionLen,
-    signature: Uint8List.fromList(signature.bytes),
-  );
-  return Uint8List.fromList([...region, ...footer]);
-}

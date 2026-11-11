@@ -52,12 +52,13 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
                   .read(inventoryNotifierProvider)
                   .value
                   ?.firstWhereOrNull((l) => l.id == lampId)
-                  ?.name ??
+                  ?.name
+                  .toTitleCase() ??
               'This lamp';
           return FriendlyError.page(
             title: otaBusyMessage(lampName: name),
             subtitle:
-                'It is hard to reach while teaching. Give it a minute, then '
+                "It's hard to reach while teaching. Give it a minute, then "
                 'try again.',
             rawError: e,
             onRetry: () => ref.invalidate(controlNotifierProvider(lampId)),
