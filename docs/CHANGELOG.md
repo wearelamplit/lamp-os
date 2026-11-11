@@ -5,6 +5,14 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## Unreleased
+
+### Fixed
+- **My Lamps hides lamps the phone hasn't heard lately again.** A lamp heard
+  once stayed listed as online while any other lamp kept advertising, and
+  coming back to My Lamps (after opening a lamp, say) brought back every lamp
+  from the last scan, switched off or not.
+
 ## 1.3.4
 
 Wisps update over USB only. Reflash each wisp so app commands still reach it
