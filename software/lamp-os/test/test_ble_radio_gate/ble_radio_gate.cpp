@@ -332,6 +332,31 @@ void test_resume_racing_enforce_leaves_advertising_on() {
   TEST_ASSERT_TRUE(r.advertising);
 }
 
+void test_connect_under_the_pause_is_refused() {
+  FakeRadio r;
+  BleRadioGate g(r);
+  boot(r);
+  TEST_ASSERT_TRUE(g.clientConnected());
+  g.clientDisconnected();
+  g.pauseForOta();
+  TEST_ASSERT_FALSE(g.clientConnected());
+  g.clientDisconnected();
+  g.resumeAfterOta();
+  TEST_ASSERT_TRUE(g.clientConnected());
+}
+
+void test_resume_after_an_unenforced_nimble_restart_starts_advertising_once() {
+  FakeRadio r;
+  BleRadioGate g(r);
+  boot(r);
+  g.pauseForOta();
+  r.advertising = true;  // host reset re-sync landed after the last enforcePause
+  r.clearCounts();
+  TEST_ASSERT_TRUE(g.resumeAfterOta());
+  TEST_ASSERT_TRUE(r.advertising);
+  TEST_ASSERT_EQUAL_INT(0, r.redundantAdvStarts);
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
@@ -356,5 +381,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_enforce_stops_advertising_nimble_restarts_under_the_pause);
   RUN_TEST(test_enforce_leaves_advertising_alone_outside_the_pause);
   RUN_TEST(test_resume_racing_enforce_leaves_advertising_on);
+  RUN_TEST(test_connect_under_the_pause_is_refused);
+  RUN_TEST(test_resume_after_an_unenforced_nimble_restart_starts_advertising_once);
   return UNITY_END();
 }

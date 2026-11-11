@@ -326,9 +326,16 @@ class ControlServerCallbacks : public NimBLEServerCallbacks {
     // at the default ~49ms interval to ~33-66/sec, eliminating slider lag.
     server->updateConnParams(handle, kTightMinUnits, kTightMaxUnits, 0,
                              kSupervisionTimeoutUnits);
+    // Set before the gate check so a racing OTA pause either kicks this
+    // handle or is seen by the check.
     s_currentConnHandle = handle;
 
-    s_radioGate.clientConnected();
+    if (!s_radioGate.clientConnected()) {
+      server->disconnect(handle);
+#ifdef LAMP_DEBUG
+      Serial.printf("[ble_control] kicked GATT client handle=%u: OTA radio pause\n", handle);
+#endif
+    }
 
     // wifi::tick skips background scans while a client is connected so the
     // radio stays focused on BT.

@@ -30,7 +30,8 @@ class BleRadioGate {
   bool pauseForOta();
   bool resumeAfterOta();
 
-  void clientConnected();
+  // Returns false while the OTA pause holds: the caller must drop the link.
+  bool clientConnected();
   void clientDisconnected();
   // NimBLE ended the continuous scan on its own.
   void scanEnded();

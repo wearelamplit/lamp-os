@@ -16,14 +16,15 @@ bool BleRadioGate::resumeAfterOta() {
   if (!otaPaused_) return false;
   otaPaused_ = false;
   if (!clientHoldsScan_) radio_.startScan();
-  radio_.startAdvertising();
+  if (!radio_.isAdvertising()) radio_.startAdvertising();
   return true;
 }
 
-void BleRadioGate::clientConnected() {
+bool BleRadioGate::clientConnected() {
   std::lock_guard<std::mutex> lock(mu_);
   clientHoldsScan_ = true;
   radio_.stopScan();
+  return !otaPaused_;
 }
 
 void BleRadioGate::clientDisconnected() {
