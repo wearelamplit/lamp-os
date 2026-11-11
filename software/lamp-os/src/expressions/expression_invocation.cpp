@@ -34,6 +34,7 @@ void serializeInvocation(const ExpressionInvocation& inv, std::string& out) {
   for (const auto& kv : inv.parameters) {
     paramsObj[kv.first] = kv.second;
   }
+  if (inv.hops != 0) doc["hp"] = inv.hops;
   serializeJson(doc, out);
 }
 
@@ -51,6 +52,9 @@ bool parseInvocation(JsonObjectConst doc, ExpressionInvocation& out) {
   // delayMs from a remote peer is untrusted: an unbounded value would hold
   // a pendingTriggers slot for ~49 days. Clamp to kMaxDelayMs (see header).
   out.delayMs = clampDelayMs(doc["delayMs"] | 0u);
+
+  const uint32_t hops = doc["hp"] | 0u;
+  out.hops = hops > UINT8_MAX ? UINT8_MAX : static_cast<uint8_t>(hops);
 
   out.colors.clear();
   const char* hex = doc["colors"].as<const char*>();

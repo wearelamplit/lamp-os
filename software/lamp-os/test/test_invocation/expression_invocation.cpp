@@ -6,6 +6,7 @@
 //      ("rrggbbww" per color, no '#', no separators; key omitted when empty).
 //   3. malformed colors (bad length / non-hex) drop whole; parse still succeeds.
 //   4. worst-case 8-color zoned glitchy payload fits COMMAND_MAX_PAYLOAD.
+//   5. the `hp` hop key: absent at hop 0, round trips, clamps on parse.
 
 #include <unity.h>
 
@@ -154,6 +155,55 @@ void test_serialize_omits_colors_when_empty() {
   TEST_ASSERT_EQUAL_UINT(0, out.colors.size());
 }
 
+// --- hp hop key ---
+
+static uint8_t parsedHops(const char* json) {
+  JsonDocument doc;
+  TEST_ASSERT_TRUE(deserializeJson(doc, json) == DeserializationError::Ok);
+  lamp::ExpressionInvocation out;
+  out.hops = 77;
+  TEST_ASSERT_TRUE(lamp::parseInvocation(doc.as<JsonObjectConst>(), out));
+  return out.hops;
+}
+
+// An origin frame is the same bytes a lamp that never heard of `hp` sends.
+void test_origin_frame_carries_no_hp() {
+  lamp::ExpressionInvocation in;
+  in.type = "glitchy";
+  in.target = 2;
+  in.colors.push_back(lamp::Color(0xFF, 0x23, 0x42, 0x12));
+  in.parameters.set("pulseSpeed", 5);
+  std::string json;
+  lamp::serializeInvocation(in, json);
+  TEST_ASSERT_EQUAL_STRING(
+      "{\"type\":\"glitchy\",\"target\":2,\"delayMs\":0,\"colors\":\"ff234212\","
+      "\"parameters\":{\"pulseSpeed\":5}}",
+      json.c_str());
+}
+
+void test_missing_hp_reads_as_hop_zero() {
+  TEST_ASSERT_EQUAL_UINT8(0, parsedHops("{\"type\":\"glitchy\"}"));
+}
+
+void test_hops_round_trip() {
+  for (uint8_t hops : {1, 2, 7, 255}) {
+    lamp::ExpressionInvocation in;
+    in.type = "glitchy";
+    in.hops = hops;
+    lamp::ExpressionInvocation out;
+    std::string json;
+    TEST_ASSERT_TRUE(roundTrip(in, out, json));
+    TEST_ASSERT_EQUAL_UINT8(hops, out.hops);
+  }
+}
+
+void test_hp_clamps_and_rejects_non_numbers() {
+  TEST_ASSERT_EQUAL_UINT8(255, parsedHops("{\"type\":\"glitchy\",\"hp\":300}"));
+  TEST_ASSERT_EQUAL_UINT8(255, parsedHops("{\"type\":\"glitchy\",\"hp\":4000000000}"));
+  TEST_ASSERT_EQUAL_UINT8(0, parsedHops("{\"type\":\"glitchy\",\"hp\":-1}"));
+  TEST_ASSERT_EQUAL_UINT8(0, parsedHops("{\"type\":\"glitchy\",\"hp\":\"2\"}"));
+}
+
 // --- malformed colors: dropped whole, invocation still parses ---
 
 static void assertColorsDropped(const char* json) {
@@ -242,6 +292,10 @@ int main() {
   RUN_TEST(test_round_trip_one_color);
   RUN_TEST(test_round_trip_eight_colors);
   RUN_TEST(test_serialize_omits_colors_when_empty);
+  RUN_TEST(test_origin_frame_carries_no_hp);
+  RUN_TEST(test_missing_hp_reads_as_hop_zero);
+  RUN_TEST(test_hops_round_trip);
+  RUN_TEST(test_hp_clamps_and_rejects_non_numbers);
   RUN_TEST(test_parse_drops_truncated_colors);
   RUN_TEST(test_parse_drops_odd_length_colors);
   RUN_TEST(test_parse_drops_non_hex_colors);
