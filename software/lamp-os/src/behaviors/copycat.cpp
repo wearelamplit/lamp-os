@@ -40,11 +40,10 @@ bool setContagionTuning(ContagionTuning& t, const char* key, uint32_t value) {
 
 CopyDecision Copycat::decide(const uint8_t mac[6], uint8_t disposition, SocialMode mode,
                              uint8_t frameHops, uint32_t nowMs, uint8_t chanceRoll,
-                             uint32_t jitterRoll, size_t nearby, bool playedRecently) {
+                             uint32_t jitterRoll, size_t nearby, bool playedRecently,
+                             uint8_t meets) {
   CopyDecision d;
-  // TODO: pass the sender's meeting count once the disposition store keeps one.
-  d.pct = copyChancePct(mirrorRatePct(disposition, mode), frameHops, /*meets=*/0, nearby,
-                        tuning);
+  d.pct = copyChancePct(mirrorRatePct(disposition, mode), frameHops, meets, nearby, tuning);
   if (d.pct == 0) return d;
   d.hops = static_cast<uint8_t>(frameHops + 1);
   if (playedRecently) {

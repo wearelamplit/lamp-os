@@ -247,6 +247,27 @@ lamp::ArrivalNotifier arrivalNotifier;
 lamp::Config config;
 lamp::MeshLink meshLink;
 lamp::SocialEchoObserver socialEchoObserver(config, expressionManager, meshLink);
+lamp::FondnessEngine fondnessEngine(config.dispositions());
+
+namespace {
+// Feeds every announced peer expression to the fondness engine.
+class FondnessFeed : public lamp::IExpressionObserver {
+ public:
+  void onPeerExpression(const uint8_t sourceMac[6],
+                        const lamp::ExpressionInvocation& inv) override {
+    bool ownType = false;
+    for (const lamp::ExpressionConfig& e : config.expressions.expressions) {
+      if (e.enabled && e.type == inv.type) {
+        ownType = true;
+        break;
+      }
+    }
+    fondnessEngine.observeExpression(sourceMac, inv.type.c_str(), ownType,
+                                     config.lamp.socialMode, lamp::uptimeMs());
+  }
+};
+FondnessFeed fondnessFeed;
+}  // namespace
 // Lamp-side OTA receiver. Bound to meshLink via
 // setFirmwareReceiver() in setup() so the WiFi recv path can hand
 // MSG_FW_CHUNK directly to handleChunkOnRecvTask (Core 0). OFFER/DONE
@@ -917,6 +938,8 @@ void lamp::Lamp::setup() {
   expressionManager.setCompositor(&compositor);
   // Expression mirror: replay a warm peer's triggered expression locally.
   expressionObserverRegistry.registerObserver(&socialEchoObserver);
+  fondnessEngine.setHomeSource([] { return expressionManager.inHomeMode(); });
+  expressionObserverRegistry.registerObserver(&fondnessFeed);
   socialEchoObserver.setNearbyCount(
       [] { return lamp::personalityEngine.nearbyPeers().size(); });
   beginMoments(ownMac);
@@ -1199,6 +1222,11 @@ void lamp::Lamp::tick() {
   }
 
   socialEchoObserver.tick(millis());
+  if (fondnessEngine.tick(lamp::uptimeMs())) {
+    for (const lamp::NearbyCopy& p : lamp::personalityEngine.nearbyPeers()) {
+      if (p.hasMac) fondnessEngine.seen(p.mac, lamp::uptimeMs());
+    }
+  }
   compositor.behaviorContext().tickArrivals(millis(), LAMP_PRUNE_TIME_MS);
 
   tickBootRecovery();

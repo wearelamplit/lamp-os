@@ -251,6 +251,7 @@ void SocialBehavior::control() {
   applyTuning(tuning);
 
   markGreeted(arrival.mac, up);
+  if (onOrganicGreet_) onOrganicGreet_(arrival.mac);
 
   // Introvert: trim the fatigue window, enter "tired" after too many
   // greetings burned through recently.

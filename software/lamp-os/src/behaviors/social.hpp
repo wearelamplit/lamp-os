@@ -98,6 +98,8 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   // Called when greeting starts or ends. Used by the framework wiring to
   // push CHAR_STATE_NOTIFY without coupling behaviors to the BLE layer.
   void setOnGreetingChangeCallback(std::function<void()> fn) { onGreetingChange_ = std::move(fn); }
+  // Called with the peer of each organic greet; an app-triggered greet skips it.
+  void setOnOrganicGreet(void (*fn)(const uint8_t mac[6])) { onOrganicGreet_ = fn; }
 
   // Wires the live Config so control() can read the current socialMode.
   // No setter = behaves as Ambivert (the spec's pre-personality default).
@@ -139,6 +141,7 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   std::vector<uint64_t> recentGreetMs_;
   uint64_t tiredUntilMs_ = 0;
   std::function<void()> onGreetingChange_;
+  void (*onOrganicGreet_)(const uint8_t mac[6]) = nullptr;
   // Tracks whether the animation was active last control() so stop-edge fires.
   bool greetingWasActive_ = false;
   // True while the greeting playing came from triggerGreeting.
