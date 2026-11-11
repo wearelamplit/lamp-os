@@ -26,6 +26,7 @@
 #include "behaviors/configurator.hpp"
 #include "behaviors/greetable.hpp"
 #include "behaviors/social.hpp"
+#include "behaviors/social_tuning.hpp"
 #include "behaviors/zone_preview_surface.hpp"
 #include "components/apply/apply_brightness.hpp"
 #include "components/apply/apply_expressions.hpp"
@@ -471,20 +472,6 @@ void runSerialCommand(char* line, size_t len) {
     return;
   }
 
-  // `copy.set <key> <value>`, key a ContagionTuning member; RAM only, so a
-  // reboot restores the defaults.
-  if (strncmp(line, "copy.set ", 9) == 0) {
-    const char* key = nullptr;
-    unsigned long value = 0;
-    if (!parseTuningArg(line + 9, key, value) ||
-        !lamp::setContagionTuning(socialEchoObserver.tuning(), key, value)) {
-      Serial.println("[cmd] err copy.set");
-      return;
-    }
-    Serial.printf("[cmd] ok copy.set %s=%lu\n", key, value);
-    return;
-  }
-
   if (strcmp(line, "fond.get") == 0) {
     const lamp::FondnessTuning& t = fondnessEngine.tuning;
     const lamp::ContagionTuning& c = socialEchoObserver.tuning();
@@ -504,26 +491,41 @@ void runSerialCommand(char* line, size_t len) {
     Serial.printf(" copyRollCooldownMs=%lu chainMaxHops=%u chainHopPct=%u",
                   (unsigned long)c.copyRollCooldownMs, (unsigned)c.chainMaxHops,
                   (unsigned)c.chainHopPct);
-    Serial.printf(" familiarBoostPct=%u crowdHalf=%u\n", (unsigned)c.familiarBoostPct,
+    Serial.printf(" familiarBoostPct=%u crowdHalf=%u", (unsigned)c.familiarBoostPct,
                   (unsigned)c.crowdHalf);
+    const lamp::ReunionTuning& r = shadeSocialBehavior.reunionTuning();
+    Serial.printf(" reunionMin=%u reunionX=%u hintCooldownMs=%lu hintOpacity=%u",
+                  (unsigned)r.reunionMin, (unsigned)r.reunionX,
+                  (unsigned long)r.hintCooldownMs, (unsigned)r.hintOpacity);
+    const lamp::YawnTuning& y = socialEchoObserver.yawnTuning();
+    Serial.printf(" yawnRollCooldownMs=%lu yawnSelfFloorMs=%lu tiredYawnPct=%u",
+                  (unsigned long)y.yawnRollCooldownMs, (unsigned long)y.yawnSelfFloorMs,
+                  (unsigned)y.tiredYawnPct);
+    Serial.printf(" tiredYawnEveryMs=%lu yawn.salty=%u yawn.wary=%u yawn.neutral=%u",
+                  (unsigned long)y.tiredYawnEveryMs, (unsigned)y.backPct[0],
+                  (unsigned)y.backPct[1], (unsigned)y.backPct[2]);
+    Serial.printf(" yawn.fond=%u yawn.smitten=%u\n", (unsigned)y.backPct[3],
+                  (unsigned)y.backPct[4]);
     return;
   }
 
-  // `fond.set <key> <value>`, key a FondnessTuning or ContagionTuning name;
-  // RAM only, so a reboot restores the defaults.
-  if (strncmp(line, "fond.set ", 9) == 0) {
-    char* key = line + 9;
-    char* sep = strchr(key, ' ');
-    if (sep) *sep = '\0';
-    char* end = nullptr;
-    const unsigned long value = sep ? strtoul(sep + 1, &end, 10) : 0;
-    if (!sep || !isdigit(static_cast<unsigned char>(sep[1])) || *end != '\0' ||
-        !(lamp::setFondnessTuning(fondnessEngine.tuning, key, value) ||
-          lamp::setContagionTuning(socialEchoObserver.tuning(), key, value))) {
-      Serial.println("[cmd] err fond.set");
+  // `<scope>.set <key> <value>`: `fond.set` reaches every social table, and
+  // `copy.set`, `reunion.set` and `yawn.set` their own. RAM only, so a reboot
+  // restores the defaults.
+  for (const char* scope : {"fond", "copy", "reunion", "yawn"}) {
+    const size_t n = strlen(scope);
+    if (strncmp(line, scope, n) != 0 || strncmp(line + n, ".set ", 5) != 0) continue;
+    const char* key = nullptr;
+    unsigned long value = 0;
+    const lamp::SocialTuningSet tunings{fondnessEngine.tuning, socialEchoObserver.tuning(),
+                                        shadeSocialBehavior.reunionTuning(),
+                                        socialEchoObserver.yawnTuning()};
+    if (!parseTuningArg(line + n + 5, key, value) ||
+        !lamp::setSocialTuning(tunings, scope, key, value)) {
+      Serial.printf("[cmd] err %s.set\n", scope);
       return;
     }
-    Serial.printf("[cmd] ok fond.set %s=%lu\n", key, value);
+    Serial.printf("[cmd] ok %s.set %s=%lu\n", scope, key, value);
     return;
   }
 
@@ -559,19 +561,6 @@ void runSerialCommand(char* line, size_t len) {
     return;
   }
 
-  // `reunion.set <key> <value>`, key a ReunionTuning member; RAM only.
-  if (strncmp(line, "reunion.set ", 12) == 0) {
-    const char* key = nullptr;
-    unsigned long value = 0;
-    if (!parseTuningArg(line + 12, key, value) ||
-        !lamp::setReunionTuning(shadeSocialBehavior.reunionTuning(), key, value)) {
-      Serial.println("[cmd] err reunion.set");
-      return;
-    }
-    Serial.printf("[cmd] ok reunion.set %s=%lu\n", key, value);
-    return;
-  }
-
   if (strcmp(line, "yawn.get") == 0) {
     const lamp::YawnTuning& t = socialEchoObserver.yawnTuning();
     Serial.printf("[cmd] ok yawn yawnRollCooldownMs=%lu yawnSelfFloorMs=%lu tiredYawnPct=%u "
@@ -581,23 +570,6 @@ void runSerialCommand(char* line, size_t len) {
     Serial.printf("[cmd] ok yawn salty=%u wary=%u neutral=%u fond=%u smitten=%u\n",
                   (unsigned)t.backPct[0], (unsigned)t.backPct[1], (unsigned)t.backPct[2],
                   (unsigned)t.backPct[3], (unsigned)t.backPct[4]);
-    return;
-  }
-
-  // `yawn.set <key> <value>`, key a YawnTuning member or yawn.<disposition>;
-  // RAM only, so a reboot restores the defaults.
-  if (strncmp(line, "yawn.set ", 9) == 0) {
-    char* key = line + 9;
-    char* sep = strchr(key, ' ');
-    if (sep) *sep = '\0';
-    char* end = nullptr;
-    const unsigned long value = sep ? strtoul(sep + 1, &end, 10) : 0;
-    if (!sep || !isdigit(static_cast<unsigned char>(sep[1])) || *end != '\0' ||
-        !lamp::setYawnTuning(socialEchoObserver.yawnTuning(), key, value)) {
-      Serial.println("[cmd] err yawn.set");
-      return;
-    }
-    Serial.printf("[cmd] ok yawn.set %s=%lu\n", key, value);
     return;
   }
 

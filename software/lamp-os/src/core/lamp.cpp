@@ -937,6 +937,7 @@ void lamp::Lamp::setup() {
   socialEchoObserver.setNearbyCount(
       [] { return lamp::personalityEngine.nearbyPeers().size(); });
   socialEchoObserver.setTired([] { return shadeSocialBehavior.tired(); });
+  socialEchoObserver.setFondness(&fondnessEngine);
   beginMoments(ownMac);
   // One-shot reservation so the loop-task drain never reallocates mid-frame.
   pendingTriggers.reserve(MAX_PENDING_TRIGGERS);
@@ -1217,11 +1218,7 @@ void lamp::Lamp::tick() {
   }
 
   socialEchoObserver.tick(millis());
-  if (fondnessEngine.tick(lamp::uptimeMs())) {
-    for (const lamp::NearbyCopy& p : lamp::personalityEngine.nearbyPeers()) {
-      if (p.hasMac) fondnessEngine.seen(p.mac, lamp::uptimeMs());
-    }
-  }
+  fondnessEngine.tick(lamp::uptimeMs());
   compositor.behaviorContext().tickArrivals(millis(), LAMP_PRUNE_TIME_MS);
 
   tickBootRecovery();

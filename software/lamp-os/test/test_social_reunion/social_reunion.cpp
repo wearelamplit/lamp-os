@@ -18,6 +18,9 @@
 #include "behaviors/roll_cooldown.cpp"
 #include "components/network/mesh/lamp_roster.cpp"
 #include "config/disposition_store.cpp"
+#include "core/fondness_engine.cpp"
+#include "behaviors/social_tuning.cpp"
+#include "behaviors/yawn_contagion.cpp"
 #include "core/frame_buffer.cpp"
 #include "core/peer_view.cpp"
 #include "core/personality_engine.cpp"
@@ -83,6 +86,12 @@ const Color kPeerStop0(0xF0, 0, 0, 0);
 
 void setClock(uint64_t ms) { set_mock_millis(static_cast<uint32_t>(ms)); }
 
+// The engine's home source, as the lamp wires it, plus a flag that tells the
+// engine alone the lamp is home.
+Compositor* s_compositor = nullptr;
+bool s_engineHome = false;
+bool engineHome() { return s_engineHome || (s_compositor && s_compositor->homeMode); }
+
 std::array<uint8_t, 6> peerMac() {
   uint8_t ble[6];
   parseBdAddr(kBle, ble);
@@ -97,9 +106,14 @@ struct Rig {
   Compositor compositor;
   ExpressionManager manager;
   SocialBehavior social{&shade, 1200};
+  FondnessEngine fondness{config.dispositions()};
   uint64_t now = kStartMs;
 
   explicit Rig(SocialMode mode = SocialMode::Ambivert) {
+    s_compositor = &compositor;
+    s_engineHome = false;
+    fondness.setHomeSource(engineHome);
+    social.setFondness(&fondness);
     for (FrameBuffer* fb : {&shade, &base}) {
       fb->pixelCount = 8;
       fb->buffer.assign(8, kScene);
@@ -443,6 +457,102 @@ void test_hint_only_after_a_fond_organic_greeting() {
   }
 }
 
+// Reunion and hint follow the fondness engine's gate alone. Told it is home
+// while the compositor is not, the engine tracks nothing: today's greeting and
+// no hint; told it is away, the reunion and the hint both play.
+void test_engine_gate_covers_reunion_and_hint() {
+  ContagionTuning sure;
+  sure.crowdHalf = kMaxCrowdHalf;
+  Rig r(SocialMode::Extrovert);
+  r.social.setContagionTuning(&sure);
+  config.dispositions().set(peerMac().data(), 5, r.now);
+  r.advance(ReunionTuning{}.reunionMin * kMinMs);
+  s_engineHome = true;
+  TEST_ASSERT_TRUE(r.greet());
+  assertPlays(greetingTuningFor(SocialMode::Extrovert, 5), r.social);
+  r.advance(30000);
+  r.endGreeting();
+  TEST_ASSERT_EQUAL_size_t(0, hintsLive());
+
+  s_engineHome = false;
+  r.advance(kMinMs);
+  TEST_ASSERT_TRUE(r.greet());
+  TEST_ASSERT_EQUAL_UINT32(greetingTuningFor(SocialMode::Extrovert, 5).holdFrames * 2,
+                           r.social.holdFrames);
+  r.advance(60000);
+  r.endGreeting();
+  TEST_ASSERT_EQUAL_size_t(1, hintsLive());
+}
+
+// A Smitten friend away past reunionMin arrives while the greeting cooldown
+// holds. Through the engine's minute commits it stays unseen until greeted,
+// so the greeting it waited for is still a reunion.
+void test_reunion_survives_an_arrival_waiting_out_its_cooldown() {
+  Rig r(SocialMode::Extrovert);
+  config.dispositions().set(peerMac().data(), 5, r.now);
+  const uint16_t T = r.social.reunionTuning().reunionMin;
+  for (uint16_t m = 0; m <= T; ++m) {
+    r.fondness.tick(r.now);
+    r.advance(kMinMs);
+  }
+  r.social.nextAcknowledgeTimeMs = r.now + 5 * kMinMs;
+  lampRoster = LampRoster();
+  for (int m = 0; m < 5; ++m) {
+    lampRoster.addOrUpdateFromBle("friend", kBle, kPeerBase, Color(), -50);
+    r.fondness.tick(r.now);
+    r.social.control();
+    TEST_ASSERT_EQUAL(STOPPED, r.social.animationState);
+    r.advance(kMinMs);
+  }
+  TEST_ASSERT_TRUE(r.row().unseenMin > T);
+  lampRoster.addOrUpdateFromBle("friend", kBle, kPeerBase, Color(), -50);
+  r.fondness.tick(r.now);
+  r.social.control();
+  TEST_ASSERT_TRUE(r.social.animationState != STOPPED);
+  TEST_ASSERT_EQUAL_UINT32(greetingTuningFor(SocialMode::Extrovert, 5).holdFrames * 2,
+                           r.social.holdFrames);
+}
+
+// `fond.set` reaches every social table; `copy.set`, `reunion.set` and
+// `yawn.set` each reach only their own; an unknown scope or key, or a value
+// out of range, changes nothing.
+void test_fond_set_folds_every_table_and_aliases_keep_theirs() {
+  FondnessTuning f;
+  ContagionTuning c;
+  ReunionTuning u;
+  YawnTuning y;
+  const SocialTuningSet t{f, c, u, y};
+  TEST_ASSERT_TRUE(setSocialTuning(t, "fond", "energy", 7));
+  TEST_ASSERT_TRUE(setSocialTuning(t, "fond", "crowdHalf", 20));
+  TEST_ASSERT_TRUE(setSocialTuning(t, "fond", "reunionX", 3));
+  TEST_ASSERT_TRUE(setSocialTuning(t, "fond", "yawn.fond", 44));
+  TEST_ASSERT_TRUE(setSocialTuning(t, "copy", "chainHopPct", 25));
+  TEST_ASSERT_TRUE(setSocialTuning(t, "reunion", "hintOpacity", 55));
+  TEST_ASSERT_TRUE(setSocialTuning(t, "yawn", "tiredYawnPct", 12));
+
+  struct Miss {
+    const char* scope;
+    const char* key;
+    uint32_t value;
+  };
+  const Miss misses[] = {
+      {"copy", "energy", 1},         {"copy", "reunionX", 1},      {"copy", "yawn.fond", 1},
+      {"reunion", "energy", 1},      {"reunion", "crowdHalf", 1},  {"reunion", "tiredYawnPct", 1},
+      {"yawn", "energy", 1},         {"yawn", "crowdHalf", 1},     {"yawn", "reunionX", 1},
+      {"cfg", "energy", 1},          {"fond", "bogus", 1},         {"fond", "reunionX", 9},
+      {"fond", "yawn.fond", 101},    {"fond", "crowdHalf", 0},     {"fond", "energy", 33},
+  };
+  for (const Miss& m : misses) TEST_ASSERT_FALSE(setSocialTuning(t, m.scope, m.key, m.value));
+
+  TEST_ASSERT_EQUAL_UINT8(7, f.energy);
+  TEST_ASSERT_EQUAL_UINT8(20, c.crowdHalf);
+  TEST_ASSERT_EQUAL_UINT8(25, c.chainHopPct);
+  TEST_ASSERT_EQUAL_UINT8(3, u.reunionX);
+  TEST_ASSERT_EQUAL_UINT8(55, u.hintOpacity);
+  TEST_ASSERT_EQUAL_UINT8(44, y.backPct[3]);
+  TEST_ASSERT_EQUAL_UINT8(12, y.tiredYawnPct);
+}
+
 void test_reunion_tuning_setter_range_checks() {
   ReunionTuning t;
   TEST_ASSERT_TRUE(setReunionTuning(t, "reunionMin", 2));
@@ -469,5 +579,8 @@ int main(int, char**) {
   RUN_TEST(test_greeted_near_peer_is_seen_and_arrival_waits);
   RUN_TEST(test_hint_only_after_a_fond_organic_greeting);
   RUN_TEST(test_reunion_tuning_setter_range_checks);
+  RUN_TEST(test_engine_gate_covers_reunion_and_hint);
+  RUN_TEST(test_reunion_survives_an_arrival_waiting_out_its_cooldown);
+  RUN_TEST(test_fond_set_folds_every_table_and_aliases_keep_theirs);
   return UNITY_END();
 }

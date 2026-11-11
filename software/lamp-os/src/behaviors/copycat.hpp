@@ -126,6 +126,11 @@ class Copycat {
                       uint8_t frameHops, uint32_t nowMs, uint8_t chanceRoll,
                       uint32_t jitterRoll, size_t nearby, bool playedRecently,
                       uint8_t meets = 0);
+  // The plain mirror for while the fondness engine is off: the grid chance and
+  // the introvert floor only, whatever the frame's hops, and the copy's hops
+  // stay 0. Fire or Skip, or NoChance at a zero chance.
+  CopyDecision mirror(uint8_t disposition, SocialMode mode, uint32_t nowMs, uint8_t chanceRoll,
+                      uint32_t jitterRoll) const;
   // A Fire's replay was booked; starts the introvert floor.
   void booked(uint32_t nowMs) { cooldown_.mirrored(nowMs); }
   // True when a copy carrying `hops` announces itself for the next lamp.

@@ -15,6 +15,7 @@
 #include "../../src/util/gradient.cpp"
 #include "../../src/core/frame_buffer.cpp"
 #include "../../src/config/disposition_store.cpp"
+#include "../../src/core/fondness_engine.cpp"
 #include "../../src/util/heap_guard.cpp"
 #include "../../src/behaviors/social_reunion.cpp"
 #include "../../src/behaviors/copycat.cpp"

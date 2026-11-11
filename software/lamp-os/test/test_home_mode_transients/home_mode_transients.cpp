@@ -26,6 +26,7 @@
 #include "behaviors/roll_cooldown.cpp"
 #include "behaviors/yawn_contagion.cpp"
 #include "config/disposition_store.cpp"
+#include "core/fondness_engine.cpp"
 
 namespace lamp {
 OverrideAggregate overrides;
@@ -197,6 +198,8 @@ static size_t mirrorsBookedThenFired(Rig& r, bool homeDuringAnnounce, bool previ
   config.lamp.socialMode = SocialMode::Extrovert;
   MeshLink mesh;
   SocialEchoObserver echo(config, r.manager, mesh);
+  FondnessEngine fondness(config.dispositions());
+  echo.setFondness(&fondness);
   echo.tuning().copyRollCooldownMs = 0;
   ExpressionInvocation inv;
   inv.type = "probe";
@@ -247,6 +250,8 @@ static size_t copiesAfterHome(bool frameAtHome) {
   config.lamp.socialMode = SocialMode::Extrovert;
   MeshLink mesh;
   SocialEchoObserver echo(config, r.manager, mesh);
+  FondnessEngine fondness(config.dispositions());
+  echo.setFondness(&fondness);
   ExpressionInvocation inv;
   inv.type = "probe";
   inv.target = TARGET_SHADE;
@@ -276,6 +281,8 @@ static size_t mirrorsBookedBeforeHomeThenFired(bool socialDisabled) {
   config.lamp.socialMode = SocialMode::Extrovert;
   MeshLink mesh;
   SocialEchoObserver echo(config, r.manager, mesh);
+  FondnessEngine fondness(config.dispositions());
+  echo.setFondness(&fondness);
   echo.tuning().copyRollCooldownMs = 0;
   ExpressionInvocation inv;
   inv.type = "probe";

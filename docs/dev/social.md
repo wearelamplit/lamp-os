@@ -71,7 +71,10 @@ Neutral with nothing learned.
 its peers into score drift, and changes rows only through the store. One
 gate covers every input: `tracking()` is the master switch on and home mode
 off. While it is false no observation, score, meeting, seen mark, absence
-decay or step happens, and the unseen and meeting clocks stand still. Every
+decay or step happens, and the unseen and meeting clocks stand still. The
+reunion, the colour hint, yawn contagion and the copycat chain rules read the
+same gate (`SocialBehavior::setFondness`, `SocialEchoObserver::setFondness`;
+unset reads as not tracking). Every
 rule is in score units (127 = one step), from `FondnessTuning`:
 
 - **Energy.** Each counted peer expression (MSG_EVENT, Moment frames
@@ -95,7 +98,10 @@ rule is in score units (127 = one step), from `FondnessTuning`:
   energy take it further.
 - **Absence.** Each tracked hour, every row unseen an hour or more moves
   `absence` (8) toward a score of 0; a disposition never moves by absence.
-  Every lamp in the near view is marked seen at each minute's commit.
+  A peer is marked seen (`FondnessEngine::seen`) only once acknowledged:
+  at its greeting, and each minute after while it stays near (see Reunion
+  and colour hint), so a peer still waiting for its greeting keeps its
+  reunion.
 - **Copycat odds.** While the engine is on, a copy roll's chance rises
   `familiarBoostPct` (3) percent per meeting with the sender, counting at most
   10, so +30% at most ([`expressions.md`](expressions.md#expression-mirror)).
@@ -116,8 +122,12 @@ and the tuning table. Nothing allocates on an input or a commit.
 
 `fond.get`, `fond.set <key> <value>`, `fond.on`, `fond.off` and `fond.peers`
 drive it over serial on a debug build, and each change logs a `[fondness]`
-line ([`debug-instruments.md`](debug-instruments.md)). Tuning lives in RAM;
-the master switch persists in the store's flags byte.
+line ([`debug-instruments.md`](debug-instruments.md)). `fond.get` prints and
+`fond.set` reaches every social table: `FondnessTuning`, `ContagionTuning`,
+`ReunionTuning` and `YawnTuning` (`setSocialTuning`,
+`behaviors/social_tuning.hpp`). `copy.set`, `reunion.set` and `yawn.set`
+stay as aliases that reach only their own table. Tuning lives in RAM; the
+master switch persists in the store's flags byte.
 
 ## Three subsystems
 
@@ -143,7 +153,7 @@ often greetings fire. Full waveform + cadence contract:
 #### Reunion and colour hint
 
 Both run in `SocialBehavior`'s organic greeting, and only while the engine
-tracks peers: the master switch is on and home mode is off (home mode, its
+tracks peers (`FondnessEngine::tracking()`): the master switch is on and home mode is off (home mode, its
 app preview included, opts out whatever its social policy). An app greeting
 takes neither.
 
@@ -173,7 +183,7 @@ takes neither.
 `ReunionTuning` (`behaviors/social_reunion.hpp`) holds the four numbers:
 `reunionMin` 240, `reunionX` 2, `hintCooldownMs` 600000, `hintOpacity` 30.
 They live in RAM, so a reboot restores them; on a debug build `reunion.get`
-prints them and `reunion.set <key> <value>` sets one (`reunionMin` 0..65535,
+prints them and `reunion.set <key> <value>` (or `fond.set`) sets one (`reunionMin` 0..65535,
 `reunionX` 1..4, `hintCooldownMs` 0..3600000, `hintOpacity` 10..100; anything
 else is `[cmd] err reunion.set`). A reunion logs `[fondness] reunion <mac>`
 and a hint `[fondness] colour hint <mac>`. Both are fixed RAM in
@@ -261,6 +271,8 @@ contract: [`moments.md`](moments.md).
   lamp.
 - `core/fondness_engine.{hpp,cpp}` — the fondness rules, tuning table and
   step limits. Global `fondnessEngine`, fed and ticked in `core/lamp.cpp`.
+- `behaviors/social_tuning.{hpp,cpp}` — `setSocialTuning`, the one setter
+  `fond.set` and its `copy.set` / `reunion.set` / `yawn.set` aliases share.
 - `config/` — SocialMode + per-peer dispositions storage (NVS) and their
   BLE sync surfaces.
 

@@ -6,6 +6,7 @@
 
 #include "components/network/mesh/mesh_link.hpp"
 #include "config/config.hpp"
+#include "core/fondness_engine.hpp"
 #include "expressions/expression_manager.hpp"
 #include "expressions/yawn/yawn_expression.hpp"
 #include "util/uptime.hpp"
@@ -29,10 +30,7 @@ void printMac(const uint8_t m[6]) {
 
 }  // namespace
 
-// TODO: FondnessEngine::tracking() replaces this.
-bool SocialEchoObserver::tracking() const {
-  return config_.dispositions().engineEnabled() && !manager_.inHomeMode();
-}
+bool SocialEchoObserver::tracking() const { return fondness_ && fondness_->tracking(); }
 
 bool SocialEchoObserver::yawnPending() const {
   for (const auto& p : pending_) {
@@ -65,7 +63,17 @@ void SocialEchoObserver::onPeerExpression(const uint8_t sourceMac[6],
   if (manager_.isAnyTestActive()) return;
 
   const uint32_t now = millis();
-  if (inv.type == kYawnDescriptorData.id && tracking()) {
+  if (!tracking()) {
+    const CopyDecision d =
+        copycat_.mirror(config_.getDisposition(sourceMac), config_.lamp.socialMode, now,
+                        static_cast<uint8_t>(rng_.range(1, 100)), rng_.range(0, kMirrorJitterMs));
+    if (d.outcome == CopyOutcome::Fire &&
+        book(inv, sourceMac, d, /*yawnBack=*/false, /*chained=*/false)) {
+      copycat_.booked(now);
+    }
+    return;
+  }
+  if (inv.type == kYawnDescriptorData.id) {
     catchYawn(sourceMac, inv, now);
     return;
   }
@@ -85,16 +93,16 @@ void SocialEchoObserver::onPeerExpression(const uint8_t sourceMac[6],
                 static_cast<unsigned>(d.pct), outcomeName(d.outcome));
 #endif
   if (d.outcome != CopyOutcome::Fire) return;
-  if (book(inv, sourceMac, d, /*yawnBack=*/false)) copycat_.booked(now);
+  if (book(inv, sourceMac, d, /*yawnBack=*/false, /*chained=*/true)) copycat_.booked(now);
 }
 
 void SocialEchoObserver::catchYawn(const uint8_t sourceMac[6], const ExpressionInvocation& inv,
                                    uint32_t nowMs) {
-  // TODO: pass the sender's meeting count once the fondness engine reads it.
   const CopyDecision d = yawns_.catchYawn(
       sourceMac, config_.getDisposition(sourceMac), config_.lamp.socialMode, inv.hops,
-      /*meets=*/0, nowMs, static_cast<uint8_t>(rng_.range(1, 100)),
-      rng_.range(0, kMirrorJitterMs), nearbyCount_ ? nearbyCount_() : 0,
+      boostMeets(config_.dispositions(), sourceMac, uptimeMs()), nowMs,
+      static_cast<uint8_t>(rng_.range(1, 100)), rng_.range(0, kMirrorJitterMs),
+      nearbyCount_ ? nearbyCount_() : 0,
       yawnedRecently(nowMs), copycat_.tuning);
   if (d.outcome == CopyOutcome::NoChance) return;
 #ifdef LAMP_DEBUG
@@ -103,11 +111,13 @@ void SocialEchoObserver::catchYawn(const uint8_t sourceMac[6], const ExpressionI
   Serial.printf(" hop %u p=%u%% %s\n", static_cast<unsigned>(d.hops),
                 static_cast<unsigned>(d.pct), outcomeName(d.outcome));
 #endif
-  if (d.outcome == CopyOutcome::Fire) book(inv, sourceMac, d, /*yawnBack=*/true);
+  if (d.outcome == CopyOutcome::Fire) {
+    book(inv, sourceMac, d, /*yawnBack=*/true, /*chained=*/true);
+  }
 }
 
 bool SocialEchoObserver::book(const ExpressionInvocation& inv, const uint8_t sourceMac[6],
-                              const CopyDecision& d, bool yawnBack) {
+                              const CopyDecision& d, bool yawnBack, bool chained) {
   Pending* slot = nullptr;
   for (auto& p : pending_) {
     if (!p.used) { slot = &p; break; }
@@ -120,6 +130,7 @@ bool SocialEchoObserver::book(const ExpressionInvocation& inv, const uint8_t sou
   slot->fireAt = d.fireAt;
   slot->used = true;
   slot->yawnBack = yawnBack;
+  slot->chained = chained;
   return true;
 }
 
@@ -160,7 +171,7 @@ void SocialEchoObserver::tick(uint32_t nowMs) {
   for (auto& p : pending_) {
     if (!p.used) continue;
     if (static_cast<int32_t>(nowMs - p.fireAt) < 0) continue;
-    if (copycat_.announces(p.inv.hops)) {
+    if (p.chained && tracking() && copycat_.announces(p.inv.hops)) {
       manager_.replayAndAnnounce(p.inv, p.srcMac);
     } else {
       manager_.triggerInvocation(p.inv, p.srcMac);

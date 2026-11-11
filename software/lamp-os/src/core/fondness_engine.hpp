@@ -80,9 +80,8 @@ class FondnessEngine {
   void setEnabled(bool on, uint64_t nowMs);
 
   // Call every loop pass. Holds the store's clocks while not tracking, commits
-  // the minute's slots and ages rows each tracked hour. True when the minute
-  // committed: the caller then passes each lamp in the near view to seen().
-  bool tick(uint64_t nowMs);
+  // the minute's slots and ages rows each tracked hour.
+  void tick(uint64_t nowMs);
 
   // A peer's announced expression of `type`; `ownType` when this lamp has the
   // type enabled itself.
@@ -93,6 +92,9 @@ class FondnessEngine {
   // COLOR_INFO stop 0 from `mac` against this lamp's base stop 0. Counts only
   // as the reply to the greet before it.
   void observeColour(const uint8_t mac[6], Color peerStop0, Color ownStop0, uint64_t nowMs);
+  // Restarts `mac`'s unseen clock. Pass only a peer this lamp has acknowledged
+  // (greeted, or consumed by home mode): one still waiting for its greeting
+  // would lose its reunion.
   void seen(const uint8_t mac[6], uint64_t nowMs);
 
   size_t slotsInUse() const;

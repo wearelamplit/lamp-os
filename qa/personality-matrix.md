@@ -141,7 +141,11 @@ firing every few seconds for 5 min, B logs one roll per 3 min for A, the rest
 `cooldown`. `copy.get` confirms the numbers; a reboot restores them. Turn home
 mode on for B with social left on: B logs no `[fondness] roll` line. Turn home
 mode off and reboot B (restoring `chainMaxHops` 3), then set B Smitten toward C too: when C's copy comes back, B logs `self` and does not copy it.
-`copy.set crowdHalf 64` on B lifts its `p=` back near 75%.
+`copy.set crowdHalf 64` on B lifts its `p=` back near 75%, and so does
+`fond.set crowdHalf 64` (`fond.get` lists it with every other social number).
+`fond.off` on B: B copies A about 3 times in 4 with no `[fondness] roll` line,
+every frame rolling, and C never logs `hop 2` for B; `fond.on` restores the
+chain.
 
 **M7 — reunion and colour hint.** Two debug lamps A and B, A Smitten toward B,
 A Extrovert (no re-greet window). On A: `reunion.set reunionMin 10`,
@@ -187,7 +191,8 @@ reboot restores them.
   finding).
 - M6: hop 1 then hop 2 lines with the copies seen on B and C; no C line at
   `chainMaxHops 1`; one roll per 3 min per peer; no roll line in home mode;
-  `self` on B for the chain coming back.
+  `self` on B for the chain coming back; `fond.set` reaching `crowdHalf`;
+  with `fond.off`, copies and no roll lines on B and no `hop 2` on C.
 - M7: one reunion line and a doubled hold after the absence, none straight
   after; one hint per window, faint, toward stop 0, scene unchanged after;
   neither line in home mode.

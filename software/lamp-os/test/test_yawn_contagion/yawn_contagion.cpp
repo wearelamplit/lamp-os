@@ -23,6 +23,7 @@
 #include "behaviors/roll_cooldown.cpp"
 #include "behaviors/yawn_contagion.cpp"
 #include "config/disposition_store.cpp"
+#include "core/fondness_engine.cpp"
 
 namespace lamp {
 OverrideAggregate overrides;
@@ -80,6 +81,11 @@ const ExpressionDescriptor& Probe::descriptor() const { return kYawnProbe; }
 const uint8_t kPeerMac[6] = {1, 2, 3, 4, 5, 6};
 const uint8_t kOtherPeerMac[6] = {1, 2, 3, 4, 5, 7};
 bool s_tired = false;
+// The engine's home source, as the lamp wires it, plus a flag that tells the
+// engine alone the lamp is home.
+Compositor* s_compositor = nullptr;
+bool s_engineHome = false;
+bool engineHome() { return s_engineHome || (s_compositor && s_compositor->homeMode); }
 
 ExpressionInvocation yawnAt(uint8_t hops) {
   ExpressionInvocation inv;
@@ -96,8 +102,13 @@ struct Rig {
   MeshLink mesh;
   ExpressionManager manager;
   Config config;
+  FondnessEngine fondness{config.dispositions()};
   SocialEchoObserver echo{config, manager, mesh};
   Rig() {
+    s_compositor = &compositor;
+    s_engineHome = false;
+    fondness.setHomeSource(engineHome);
+    echo.setFondness(&fondness);
     shade.pixelCount = 4;
     shade.buffer.assign(4, Color());
     base.pixelCount = 4;
@@ -342,6 +353,34 @@ void test_engine_off_is_the_plain_mirror() {
   TEST_ASSERT_TRUE(s_registered.size() > 0);
 }
 
+// Yawns follow the fondness engine's gate alone. Told it is home while the
+// compositor is not, the lamp fires no tired yawn and a peer's yawn gets only
+// the plain mirror, which announces nothing; told it is away, both run.
+void test_engine_gate_covers_yawns() {
+  Rig r;
+  s_engineHome = true;
+  s_tired = true;
+  r.tiredInterval();
+  r.tiredInterval();
+  TEST_ASSERT_EQUAL_size_t(0, s_registered.size());
+  s_tired = false;
+  r.hear(yawnAt(0));
+  TEST_ASSERT_EQUAL_size_t(0, s_events.size());
+
+  s_engineHome = false;
+  r.advance(r.echo.yawnTuning().yawnSelfFloorMs);
+  r.hear(yawnAt(0), kOtherPeerMac);
+  TEST_ASSERT_EQUAL_size_t(1, s_events.size());
+  TEST_ASSERT_TRUE(eventHasHops(s_events[0]));
+  s_events.clear();
+  s_tired = true;
+  r.advance(r.echo.yawnTuning().yawnSelfFloorMs);
+  r.tiredInterval();
+  r.tiredInterval();
+  TEST_ASSERT_EQUAL_size_t(1, s_events.size());
+  TEST_ASSERT_FALSE(eventHasHops(s_events[0]));
+}
+
 // A yawn-back short of chainMaxHops announces itself one hop on.
 void test_yawn_back_announces_one_hop_on() {
   Rig r;
@@ -513,5 +552,6 @@ int main() {
   RUN_TEST(test_tired_yawn_stands_down_for_ota_and_test);
   RUN_TEST(test_roll_stamp_stays_old_a_wrap_later);
   RUN_TEST(test_tuning_range_checks);
+  RUN_TEST(test_engine_gate_covers_yawns);
   return UNITY_END();
 }

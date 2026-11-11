@@ -99,7 +99,7 @@ void FondnessEngine::setEnabled(bool on, uint64_t nowMs) {
   store_.setEngineEnabled(on, nowMs);
 }
 
-bool FondnessEngine::tick(uint64_t nowMs) {
+void FondnessEngine::tick(uint64_t nowMs) {
   const bool on = tracking();
   if (!ticked_) {
     ticked_ = true;
@@ -121,17 +121,16 @@ bool FondnessEngine::tick(uint64_t nowMs) {
     else Serial.println("[fondness] off: paused");
 #endif
   }
-  if (!on) return false;
+  if (!on) return;
   if (wasTracking) trackedMs_ += elapsed;
   while (trackedMs_ >= kHourMs) {
     trackedMs_ -= kHourMs;
     store_.tickHour(nowMs);
     store_.decayTowardZero(tuning.absence, nowMs);
   }
-  if (nowMs - lastCommitMs_ < kCommitMs) return false;
+  if (nowMs - lastCommitMs_ < kCommitMs) return;
   lastCommitMs_ = nowMs;
   commitAll_(nowMs);
-  return true;
 }
 
 void FondnessEngine::observeExpression(const uint8_t mac[6], const char* type, bool ownType,

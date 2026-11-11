@@ -8,7 +8,7 @@
 #include "components/network/mesh/mesh_link.hpp"
 
 #include "components/network/mesh/lamp_roster.hpp"
-#include "core/compositor.hpp"
+#include "core/fondness_engine.hpp"
 #include "core/personality_engine.hpp"
 #include "core/override_aggregate.hpp"
 #include "behaviors/greetable.hpp"
@@ -239,7 +239,7 @@ void SocialBehavior::control() {
     DispositionStore& store = config_->dispositions();
     reunionPlaying_ = isReunion(store.peer(arrival.mac, up), reunion_);
     if (reunionPlaying_) tuning = reunionGreeting(tuning, reunion_.reunionX);
-    store.markSeen(arrival.mac, up);
+    fondness_->seen(arrival.mac, up);
   }
 
 #ifdef LAMP_DEBUG
@@ -334,16 +334,14 @@ void SocialBehavior::onColorInfo(const uint8_t srcMac[6],
 }
 
 bool SocialBehavior::tracking_() const {
-  const bool home = context_ && context_->compositor && context_->compositor->homeMode;
-  return config_ && config_->dispositions().engineEnabled() && !home;
+  return config_ && fondness_ && fondness_->tracking();
 }
 
 void SocialBehavior::markGreetedNearSeen_(uint64_t upMs) {
   if (upMs - lastSeenSweepMs_ < kSeenSweepMs || !tracking_()) return;
   lastSeenSweepMs_ = upMs;
-  DispositionStore& store = config_->dispositions();
   for (const NearbyCopy& p : lampRoster.snapshotNear(LAMP_PRUNE_TIME_MS)) {
-    if (p.hasMac && p.acknowledged) store.markSeen(p.mac, upMs);
+    if (p.hasMac && p.acknowledged) fondness_->seen(p.mac, upMs);
   }
 }
 

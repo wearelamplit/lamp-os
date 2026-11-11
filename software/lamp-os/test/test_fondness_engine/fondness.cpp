@@ -65,11 +65,13 @@ struct Rig {
     engine.setHomeSource(homeActive);
     engine.tick(now);
   }
-  // Ticks once a minute for `minutes`, marking `near` seen at each commit.
+  // Ticks once a minute for `minutes`, marking `near` seen each minute as the
+  // greeting's seen sweep does for a greeted peer that stays near.
   void run(uint64_t minutes, const std::array<uint8_t, 6>* near = nullptr) {
     for (uint64_t i = 0; i < minutes; ++i) {
       now += kMin;
-      if (engine.tick(now) && near) engine.seen(near->data(), now);
+      engine.tick(now);
+      if (near) engine.seen(near->data(), now);
     }
   }
   // `n` events of `type` from `m` inside one minute, then the commit.

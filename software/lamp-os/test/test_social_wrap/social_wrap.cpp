@@ -16,6 +16,7 @@
 #include "../../src/behaviors/copycat.cpp"
 #include "../../src/behaviors/roll_cooldown.cpp"
 #include "../../src/config/disposition_store.cpp"
+#include "../../src/core/fondness_engine.cpp"
 #include "../../src/util/heap_guard.cpp"
 
 namespace lamp {

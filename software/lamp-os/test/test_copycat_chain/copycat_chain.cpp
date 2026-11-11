@@ -24,6 +24,7 @@
 #include "behaviors/roll_cooldown.cpp"
 #include "behaviors/yawn_contagion.cpp"
 #include "config/disposition_store.cpp"
+#include "core/fondness_engine.cpp"
 
 namespace lamp {
 OverrideAggregate overrides;
@@ -84,8 +85,10 @@ struct Rig {
   MeshLink mesh;
   ExpressionManager manager;
   Config config;
+  FondnessEngine fondness{config.dispositions()};
   SocialEchoObserver echo{config, manager, mesh};
   Rig() {
+    echo.setFondness(&fondness);
     shade.pixelCount = 4;
     shade.buffer.assign(4, Color());
     base.pixelCount = 4;
@@ -293,6 +296,67 @@ void test_introvert_floor_holds_across_peers() {
   TEST_ASSERT_EQUAL_size_t(1, s_registered.size());
 }
 
+// release/1.3.3's mirror decision, verbatim, as the oracle for the engine-off
+// path.
+bool mirrorDecision133(uint8_t disposition, SocialMode mode, uint8_t roll, uint32_t jitterRoll,
+                       uint32_t nowMs, bool everMirrored, uint32_t lastMirrorMs,
+                       uint32_t& outFireAt) {
+  if (disposition < 4) return false;
+  const uint8_t rate = mirrorRatePct(disposition, mode);
+  if (rate == 0) return false;
+  if (roll > rate) return false;
+  if (mode == SocialMode::Introvert && everMirrored &&
+      nowMs - lastMirrorMs < kIntrovertMirrorCooldownMs) {
+    return false;
+  }
+  const uint32_t jitter = jitterRoll > kMirrorJitterMs ? kMirrorJitterMs : jitterRoll;
+  outFireAt = nowMs + kMirrorDelayFloorMs + jitter;
+  return true;
+}
+
+// With the engine off a copy is 1.3.3's: the same decision at every
+// disposition, mode, roll and jitter, the introvert floor included, and none
+// of the chain, roll cooldown, crowd damping or self-echo rules, so a frame
+// at chainMaxHops from a packed room, heard just after this lamp played the
+// type, is still copied, and the copy carries no hops and announces nothing.
+void test_engine_off_copies_as_1_3_3() {
+  const SocialMode modes[3] = {SocialMode::Introvert, SocialMode::Ambivert, SocialMode::Extrovert};
+  for (uint8_t disp = 0; disp <= 5; ++disp) {
+    for (SocialMode mode : modes) {
+      for (uint8_t roll = 1; roll <= 100; ++roll) {
+        for (uint32_t jitter : {0u, 137u, kMirrorJitterMs, kMirrorJitterMs + 50}) {
+          Copycat c;
+          uint32_t want = 0;
+          const bool fires = mirrorDecision133(disp, mode, roll, jitter, 5000, false, 0, want);
+          const CopyDecision d = c.mirror(disp, mode, 5000, roll, jitter);
+          TEST_ASSERT_EQUAL(fires, d.outcome == CopyOutcome::Fire);
+          if (fires) TEST_ASSERT_EQUAL_UINT32(want, d.fireAt);
+          c.booked(5000);
+          uint32_t unused = 0;
+          TEST_ASSERT_EQUAL(mirrorDecision133(disp, mode, roll, jitter, 6000, true, 5000, unused),
+                            c.mirror(disp, mode, 6000, roll, jitter).outcome == CopyOutcome::Fire);
+        }
+      }
+    }
+  }
+
+  Rig r;
+  r.config.dispositions().setEngineEnabled(false, 0);
+  r.echo.tuning().copyRollCooldownMs = kMaxCopyRollCooldownMs;
+  r.echo.setNearbyCount([] { return static_cast<size_t>(1000); });
+  ExpressionConfig own;
+  own.type = "probe";
+  own.target = TARGET_SHADE;
+  r.manager.addExpression(own, /*configBacked=*/false);
+  r.compositor.addBehavior(r.manager.getBehaviors()[0]);
+  TEST_ASSERT_TRUE(r.manager.triggerExpression("probe"));
+  const size_t played = s_registered.size();
+  const size_t sent = s_events.size();
+  r.hear(r.echo.tuning().chainMaxHops);
+  TEST_ASSERT_EQUAL_size_t(played + 1, s_registered.size());
+  TEST_ASSERT_EQUAL_size_t(sent, s_events.size());
+}
+
 // The copy odds count the store's meetings only while the engine is on.
 void test_boost_meets_follow_the_switch() {
   DispositionStore ds(100);
@@ -317,5 +381,6 @@ int main() {
   RUN_TEST(test_copy_blocks_the_chain_coming_back);
   RUN_TEST(test_nearby_count_damps_copies);
   RUN_TEST(test_play_stamp_stays_old_a_wrap_later);
+  RUN_TEST(test_engine_off_copies_as_1_3_3);
   return UNITY_END();
 }

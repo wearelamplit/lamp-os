@@ -25,29 +25,42 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   the copy on, so a lamp near it can copy the copy. Each hop is half as likely
   as the one before and a chain stops after 3 hops. Lamps on older firmware
   still copy, they just don't pass it on.
-- **Lamps warm to each other on their own.** A lamp now drifts its feeling
-  toward each peer from what it sees: an introvert cools toward a lamp that
-  keeps firing loud expressions and an extrovert warms to it, a lamp that
-  shares your expressions or wears a matching or complementary colour wins
-  you over, and lamps that meet day after day grow fond of each other, an
-  introvert twice as fast. Familiarity alone stops at Fond. Feelings move at
-  most one step per lamp per hour and four steps an hour in all, and a lamp
-  you meet often is a little more likely to be copied. Home mode pauses all of it, and
-  time at home counts toward nothing. On a debug build, `fond.off` turns it
-  off (and it stays off across restarts), `fond.peers` lists what the lamp
-  knows and `fond.set` tunes it live.
-- **Reunions.** A lamp greeting a smitten friend it hasn't seen for four
-  hours of on-time holds the greeting twice as long, breathing twice as many
-  times. It happens once per absence; the next greeting is the usual one.
-- **Colour hints.** Now and then, after greeting a fond or smitten friend, a
-  lamp breathes a faint shimmer of that friend's colour across its shade,
-  then settles back to its own scene. At most once every 10 minutes, and
-  less often in a crowd. Neither this nor reunions happen in home mode.
-- **Yawns are catching.** An introvert lamp worn out from greeting now and
-  then yawns, and a lamp nearby that sees it may yawn back a moment later.
-  The fonder it is of the yawner the likelier, a crowded room makes it
-  rarer, and a lamp yawns back at any one lamp at most once every 5 minutes.
-  Home mode keeps it out.
+- **Lamps have a social life of their own.** Each lamp now remembers the
+  lamps it meets and lets its feelings about them drift. An introvert cools
+  toward a lamp that keeps firing loud expressions and an extrovert warms to
+  it; a lamp that shares your expressions or wears a matching or
+  complementary colour wins you over; lamps that meet day after day grow
+  fond of each other, an introvert twice as fast. Familiarity alone stops at
+  Fond. Feelings move at most one step per lamp per hour and four steps an
+  hour in all, and a lamp you meet often is a little more likely to be
+  copied or yawned back at.
+
+  Fond friends act like it. Greeting a smitten friend it hasn't seen for
+  four hours of on-time, a lamp holds the greeting twice as long and
+  breathes twice as many times, once per absence; a friend that turns up
+  while the lamp is still between greetings keeps its reunion for when its
+  turn comes. Now and then, after greeting a fond or smitten friend, a lamp
+  breathes a faint shimmer of that friend's colour across its shade and
+  settles back to its own scene, at most once every 10 minutes and less
+  often in a crowd. Yawns are catching: an introvert worn out from greeting
+  yawns now and then, and a lamp nearby may yawn back a moment later, the
+  likelier the fonder it is of the yawner, rarer in a crowded room, and at
+  most once every 5 minutes for any one lamp.
+
+  Home mode pauses all of it, and time at home counts toward nothing. On a
+  debug build `fond.off` turns it off (it stays off across restarts), and
+  lamps then copy each other as on 1.3.3 (home mode still copies nothing);
+  `fond.peers` lists what a lamp knows, and `fond.get` / `fond.set` show and
+  tune every social number live (`copy.set`, `reunion.set` and `yawn.set`
+  still work).
+
+  A lamp remembers up to 100 others, with how often they've met and how
+  long since it last saw them. When the list is full it forgets the one it
+  cares least about instead of whichever has the lowest address, so friends
+  and regulars stay, and a neutral lamp not seen for 14 days of the lamp
+  being on is forgotten at startup. Saving from the app merges: lamps the
+  app doesn't list are kept. Flashing a lamp back to 1.3.3 shows every lamp
+  as neutral until set again.
 
 ### Fixed
 - **Mesh updates reach lamps after the sending lamp restarts.** A lamp that
@@ -84,14 +97,6 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   colour, or a mid-fade colour, for one or more drift steps.
 
 ### Changed
-- **Lamps remember more about the lamps they know.** Each lamp now keeps,
-  per peer, how often they've met and how long since it last saw them, ready
-  for lamps to warm to each other on their own. When the list is full (100
-  lamps) the lamp forgets the one it cares least about instead of whichever
-  has the lowest address, so friends and regulars stay. A neutral lamp not
-  seen for 14 days of the lamp being on is forgotten at startup. Saving from
-  the app merges: lamps the app doesn't list are kept. Flashing a lamp back
-  to 1.3.3 shows every lamp as neutral until set again.
 - **`npm run wisp:flash:release` takes `IMAGE=`.** Point it at a local
   `wisp-firmware-signed.bin` to flash that file and skip the download.
 - **Settings take far less room on the lamp.** A lamp now keeps its name,

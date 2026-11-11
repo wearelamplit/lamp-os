@@ -13,6 +13,7 @@ namespace lamp {
 class Config;
 class DispositionStore;
 class ExpressionManager;
+class FondnessEngine;
 class MeshLink;
 
 // Expression mirror. When a nearby lamp announces a triggered expression
@@ -22,7 +23,9 @@ class MeshLink;
 // ContagionTuning::chainMaxHops announces itself one hop further on, at a
 // smaller chance per hop, so a chain fades out. The replay never cascades.
 // A yawn takes its own contagion roll in place of the mirror's, and a tired
-// introvert yawns now and then on its own.
+// introvert yawns now and then on its own. While the fondness engine is not
+// tracking, a copy is the plain mirror: no chain, roll cooldown, crowd
+// damping, self-echo guard or yawn rule.
 // Mechanism and tuning: docs/dev/expressions.md, "Expression mirror" and
 // "Yawn contagion".
 
@@ -52,6 +55,9 @@ class SocialEchoObserver : public IExpressionObserver {
   void setNearbyCount(size_t (*count)()) { nearbyCount_ = count; }
   // Whether the lamp is a tired introvert. Unset is never tired.
   void setTired(bool (*tired)()) { tired_ = tired; }
+  // The engine whose tracking() gates everything past the plain mirror. Unset
+  // never tracks.
+  void setFondness(const FondnessEngine* fondness) { fondness_ = fondness; }
 
  private:
   struct Pending {
@@ -60,10 +66,11 @@ class SocialEchoObserver : public IExpressionObserver {
     uint32_t fireAt = 0;
     bool used = false;
     bool yawnBack = false;
+    // Booked while tracking, so it may announce by the chain rule.
+    bool chained = false;
   };
   static constexpr size_t kMaxPending = 4;
 
-  // The social engine's master switch and home mode allow its rolls.
   bool tracking() const;
   // Played within the own floor, or any yawn booked to play.
   bool yawnedRecently(uint32_t nowMs) const;
@@ -75,7 +82,7 @@ class SocialEchoObserver : public IExpressionObserver {
   void tickTired(uint32_t nowMs);
   // False when every pending slot is taken.
   bool book(const ExpressionInvocation& inv, const uint8_t sourceMac[6], const CopyDecision& d,
-            bool yawnBack);
+            bool yawnBack, bool chained);
 
   Config& config_;
   ExpressionManager& manager_;
@@ -86,6 +93,7 @@ class SocialEchoObserver : public IExpressionObserver {
   YawnContagion yawns_;
   size_t (*nearbyCount_)() = nullptr;
   bool (*tired_)() = nullptr;
+  const FondnessEngine* fondness_ = nullptr;
 };
 
 }  // namespace lamp

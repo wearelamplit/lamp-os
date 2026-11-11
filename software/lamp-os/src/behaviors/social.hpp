@@ -18,6 +18,7 @@ namespace lamp {
 
 class Config;  // fwd-decl; full include is heavy and only the .cpp uses it.
 class MeshLink;  // fwd-decl; only the .cpp calls sendColorQuery.
+class FondnessEngine;
 struct GreetingTuning;  // fwd-decl; defined in core/personality_engine.hpp.
 
 /**
@@ -109,6 +110,9 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
 
   void setMeshLink(MeshLink* m) { meshLink_ = m; }
 
+  // The engine whose tracking() gates the reunion, the colour hint and the
+  // seen marks. Unset never tracks.
+  void setFondness(FondnessEngine* fondness) { fondness_ = fondness; }
   // Crowd damping for the colour hint; unset damps by the defaults.
   void setContagionTuning(const ContagionTuning* t) { contagion_ = t; }
   ReunionTuning& reunionTuning() { return reunion_; }
@@ -167,7 +171,6 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   uint8_t greetedBlend_ = 0;
   std::vector<Color> gradientCache_;
 
-  // True while the social engine tracks peers, so it is on and home mode is off.
   bool tracking_() const;
   // At a greeting's end, maybe borrow the greeted friend's colour.
   void maybeColourHint_(uint64_t upMs);
@@ -179,6 +182,7 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   void markGreetedNearSeen_(uint64_t upMs);
   uint64_t lastSeenSweepMs_ = 0;
 
+  FondnessEngine* fondness_ = nullptr;
   ReunionTuning reunion_;
   const ContagionTuning* contagion_ = nullptr;
   ColourHint colourHint_;

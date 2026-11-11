@@ -61,6 +61,18 @@ CopyDecision Copycat::decide(const uint8_t mac[6], uint8_t disposition, SocialMo
   return d;
 }
 
+CopyDecision Copycat::mirror(uint8_t disposition, SocialMode mode, uint32_t nowMs,
+                             uint8_t chanceRoll, uint32_t jitterRoll) const {
+  CopyDecision d;
+  d.pct = mirrorRatePct(disposition, mode);
+  if (d.pct == 0) return d;
+  d.outcome = mirrorDecision(d.pct, mode, chanceRoll, jitterRoll, nowMs, cooldown_.ever,
+                             cooldown_.lastMs, d.fireAt)
+                  ? CopyOutcome::Fire
+                  : CopyOutcome::Skip;
+  return d;
+}
+
 void Copycat::retire(uint32_t nowMs) {
   cooldown_.retire(nowMs);
   rolls_.retire(nowMs, tuning.copyRollCooldownMs);
