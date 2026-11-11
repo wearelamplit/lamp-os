@@ -96,11 +96,24 @@ struct PendingWispState {
   lamp_protocol::WispDriftFade fadeRecord;
 };
 
-// Copy a parsed MSG_WISP_STATE into the slot, W plane included, and look up
-// `selfMac`'s drift fade (None for a null MAC).
+// This lamp's drift fade in a STATE frame. `record` holds what the trailer
+// lookup wrote, and `recordWritten` says whether it wrote it.
+struct OwnWispDriftFade {
+  lamp_protocol::WispDriftFadeLookup fade = lamp_protocol::WispDriftFadeLookup::None;
+  bool recordWritten = false;
+  lamp_protocol::WispDriftFade record{};
+};
+
+// Look up `selfMac`'s drift fade in a parsed MSG_WISP_STATE (None for a null
+// MAC). Reads the frame, so call it while the recv buffer is valid.
+OwnWispDriftFade decodeOwnWispDriftFade(const lamp_protocol::ParsedWispState& ws,
+                                        const uint8_t selfMac[6]);
+
+// Copy a parsed MSG_WISP_STATE into the slot, W plane and `own` included. A
+// copy only, so it may run under portMUX.
 void fillPendingWispState(PendingWispState& slot,
                           const lamp_protocol::ParsedWispState& ws,
-                          const uint8_t selfMac[6]);
+                          const OwnWispDriftFade& own);
 
 // Copy a parsed MSG_WISP_CLAIM's lamp MACs into the slot, at most
 // kMaxWispClaimEntries of them.

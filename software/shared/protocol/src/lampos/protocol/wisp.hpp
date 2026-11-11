@@ -527,11 +527,15 @@ inline size_t appendWispStateDriftFade(uint8_t* buf, size_t bufLen,
 }
 
 // Find entry `entryIndex`'s drift fade in a STATE trailer. A malformed trailer
-// reads None; the STATE itself still applies.
+// reads None; the STATE itself still applies. `out` is written whenever the
+// record is found, a None from a later malformed TLV included, and
+// `outWritten`, when given, reports whether it was.
 inline WispDriftFadeLookup lookupWispDriftFade(const uint8_t* trailer,
                                                size_t trailerLen,
                                                uint8_t entryIndex,
-                                               WispDriftFade& out) {
+                                               WispDriftFade& out,
+                                               bool* outWritten = nullptr) {
+  if (outWritten) *outWritten = false;
   if (!trailer || trailerLen < 1) return WispDriftFadeLookup::None;
   const uint8_t tlvCount = trailer[0];
   size_t off = 1;
@@ -561,6 +565,7 @@ inline WispDriftFadeLookup lookupWispDriftFade(const uint8_t* trailer,
                             (static_cast<uint32_t>(v[r + 10]) << 8);
         out.leftMs = ds * WISP_STATE_DRIFT_FADE_LEFT_UNIT_MS;
         found = true;
+        if (outWritten) *outWritten = true;
       }
     }
   }

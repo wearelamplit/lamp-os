@@ -176,8 +176,8 @@ void postPendingWispOpJson(const char* data, size_t len)            { lamp::pend
 
 namespace lamp {
 // Typed-payload posts called from MeshLink's WiFi recv task. Same
-// Core 0 → Core 1 hand-off as the JSON slots above: memcpy under portMUX,
-// no heap, no parsing on the recv task.
+// Core 0 → Core 1 hand-off as the JSON slots above: any decode runs before
+// portMUX is taken, and only a bounded copy runs under it, with no heap.
 void postPendingOverrideColors(const PendingOverrideColors& src)         { pendingSlots.overrideColors.post(pendingMux, src); }
 void postPendingRestoreColors(const PendingRestoreColors& src)           { pendingSlots.restoreColors.post(pendingMux, src); }
 void postPendingOverrideBrightness(const PendingOverrideBrightness& src) { pendingSlots.overrideBrightness.post(pendingMux, src); }
@@ -188,7 +188,8 @@ void postPendingWispClaim(const lamp_protocol::ParsedWispClaim& wc) {
   pendingSlots.wispClaim.postWith(pendingMux, [&wc](PendingWispClaim& s) { fillPendingWispClaim(s, wc); });
 }
 void postPendingWispState(const lamp_protocol::ParsedWispState& ws, const uint8_t selfMac[6]) {
-  pendingSlots.wispState.postWith(pendingMux, [&ws, selfMac](PendingWispState& s) { fillPendingWispState(s, ws, selfMac); });
+  const OwnWispDriftFade own = decodeOwnWispDriftFade(ws, selfMac);
+  pendingSlots.wispState.postWith(pendingMux, [&ws, &own](PendingWispState& s) { fillPendingWispState(s, ws, own); });
 }
 void postPendingCommand(const lamp_protocol::ParsedCommand& p) {
   pendingSlots.command.postWith(pendingMux, [&p](PendingCommand& s) { fillPendingCommand(s, p); });
