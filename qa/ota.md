@@ -75,12 +75,13 @@ skew:
    peer color. After the flow: `resumed adv + scan`. FS-image OTA runs this same
    path but SILENT — see Indicator expectations. With the app connected to
    either lamp when the session starts, that lamp logs `kicked GATT client`
-   and `Client disconnected`, then no `Client connected` until after
-   `resumed adv + scan after OTA`, and no `Advertising already active` after
+   and `Client disconnected`, then no `Client connected` that stays up until
+   after `resumed adv + scan after OTA`, and no `Advertising already active` after
    the resume. Once resumed, the app reconnects to it (on the sender, which
    resumes without a reboot, this proves the resume finds advertising off and
-   starts it). A `kicked GATT client handle=N: OTA radio pause` line (a phone
-   link that completed under the pause) is followed by `Client disconnected`.
+   starts it). A phone link that completes under the pause logs `Client
+   connected`, then `kicked GATT client handle=N: OTA radio pause` and
+   `Client disconnected`; that is a pass.
    A `Host reset; reason=` line during the transfer must not be followed by a
    `Client connected` that stays up before the resume, nor by `Advertising
    already active` at it. The bench cannot trigger a host reset on demand, so
@@ -153,6 +154,12 @@ skew:
   power is the known artifact).
 
 ## Not covered here
+
+- The BLE chunk path dropping a write into a mesh session
+  (`FirmwareReceiver::chunksArmedFor`). No native test reaches it (the
+  receiver test drives a mirror class) and the stock app cannot reach it: the
+  lamp drops any phone link under the mesh pause, so a write can land only
+  between the session arming and the kick taking effect.
 
 - True cross-variant gating (standard↔snafu) — needs a snafu lamp and a
   snafu-signed artifact; the channel-suffix row exercises the same
