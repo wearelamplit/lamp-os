@@ -8,6 +8,11 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 ## Unreleased
 
 ### Added
+- **Yawn expression.** A new expression where the lamp takes a slow breath
+  in, dims down to 70% of its scene, warms a little, holds for a beat, then
+  eases back. Base and shade move together by default. Depth, base lag, warmth,
+  lift, duration and which surface it runs on are all adjustable in the
+  expression's settings.
 - **Move a strip to another data pin from the app.** With advanced mode on,
   LED setup shows a data pin row for each strip: pick a GPIO, tap Update, and
   the lamp restarts driving that strip from the new pin. "Built-in (GPIO 12)"
@@ -50,6 +55,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   When more lamps on one wisp are fading at once than one frame has room
   for (about 5 of 100 lamps, about 30 of 80), a chip can sit on its previous
   colour, or a mid-fade colour, for one or more drift steps.
+
+### Changed
+- **`npm run wisp:flash:release` takes `IMAGE=`.** Point it at a local
+  `wisp-firmware-signed.bin` to flash that file and skip the download.
 
 ## 1.3.3
 

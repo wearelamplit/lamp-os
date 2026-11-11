@@ -26,7 +26,7 @@ namespace {
 
 YawnShape defaultShape() {
   return {.durationMs = 4500, .inhaleMs = 600, .holdMs = 500, .recoverMs = 1800,
-          .lift = 0.08f, .depth = 0.35f};
+          .lift = 0.08f, .depth = 0.70f};
 }
 
 // No inhale, a long recover and a hold that together overrun the fixed-phase
@@ -167,7 +167,7 @@ void test_yawn_leaves_the_scene_exact_outside_its_run_and_completes() {
   TEST_ASSERT_TRUE(onScene(s.shade));
   TEST_ASSERT_TRUE(onScene(s.base));
 
-  const uint32_t runMs = 4500 + 200;
+  const uint32_t runMs = 4500;
   uint8_t minRed = 255;
   uint32_t now = kStartMs;
   for (; now < kStartMs + runMs; now += kFrameMs) {
@@ -175,12 +175,28 @@ void test_yawn_leaves_the_scene_exact_outside_its_run_and_completes() {
     frame(e, s, now);
     minRed = std::min(minRed, s.shade.buffer[0].r);
   }
-  // Red is never warm-cut, so its floor is the depth: 35% of 180.
-  TEST_ASSERT_UINT8_WITHIN(1, 63, minRed);
+  // Red is never warm-cut, so its floor is the depth: 70% of 180.
+  TEST_ASSERT_UINT8_WITHIN(1, 126, minRed);
   for (int i = 0; i < 3; ++i) frame(e, s, now += kFrameMs);
   TEST_ASSERT_TRUE(e.isAnimationComplete());
   TEST_ASSERT_TRUE(onScene(s.shade));
   TEST_ASSERT_TRUE(onScene(s.base));
+}
+
+void test_base_and_shade_move_together_by_default() {
+  Surfaces s;
+  YawnExpression e(&s.base);
+  yawnOn(e, s, {});
+  e.trigger();
+  uint32_t shadeLeft = 0;
+  uint32_t baseLeft = 0;
+  for (uint32_t now = kStartMs; now < kStartMs + 2000; now += kFrameMs) {
+    frame(e, s, now);
+    if (!shadeLeft && !onScene(s.shade)) shadeLeft = now;
+    if (!baseLeft && !onScene(s.base)) baseLeft = now;
+  }
+  TEST_ASSERT_TRUE(shadeLeft > 0 && baseLeft > 0);
+  TEST_ASSERT_UINT32_WITHIN(kFrameMs, shadeLeft, baseLeft);
 }
 
 void test_base_trails_the_shade_by_the_lag() {
@@ -207,6 +223,7 @@ int main(int, char**) {
   RUN_TEST(test_scene_gains_leave_every_channel_exact);
   RUN_TEST(test_warmth_cuts_blue_more_than_green_and_spares_red);
   RUN_TEST(test_yawn_leaves_the_scene_exact_outside_its_run_and_completes);
+  RUN_TEST(test_base_and_shade_move_together_by_default);
   RUN_TEST(test_base_trails_the_shade_by_the_lag);
   return UNITY_END();
 }

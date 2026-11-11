@@ -24,7 +24,7 @@ inline constexpr ParamSpec kYawnParams[] = {
     .min = 2000, .max = 12000, .step = 100, .def = 4500, .unit = "ms",
     .help = "The whole yawn, from the inhale to back at the scene." },
   { .key = kYawnDepthKey, .kind = ParamKind::Int, .label = "Dims to",
-    .min = 5, .max = 95, .step = 5, .def = 35, .unit = "%",
+    .min = 5, .max = 95, .step = 5, .def = 70, .unit = "%",
     .help = "Brightness at the bottom of the yawn, as a share of the scene." },
   { .key = kYawnLiftKey, .kind = ParamKind::Int, .label = "Inhale lift",
     .min = 0, .max = 30, .step = 1, .def = 8, .unit = "%",
@@ -37,7 +37,7 @@ inline constexpr ParamSpec kYawnParams[] = {
     .min = 0, .max = 100, .step = 5, .def = 30, .unit = "%",
     .help = "How much warmer the scene turns at the bottom." },
   { .key = kYawnLagKey, .kind = ParamKind::Int, .label = "Base lag",
-    .min = 0, .max = 1000, .step = 50, .def = 200, .unit = "ms",
+    .min = 0, .max = 1000, .step = 50, .def = 0, .unit = "ms",
     .help = "How far the base trails the shade when the yawn runs on both." },
   kOpacityParam,
 };
