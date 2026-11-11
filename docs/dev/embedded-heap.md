@@ -557,6 +557,10 @@ scale with the number of peers or the mesh's message rate, so each is bounded:
   stalled driver. A queued relay is refused, counted in `txrefused` and retried
   next pass only when another task takes the last credit between the check and
   the submit; an inline relay is refused like any other send.
+- **Dedup rings.** `MeshLink`'s per-type `DedupRing`s hold 464 tuples in
+  fixed .bss, 16 bytes each with the `millis()` stamp that ages a tuple out
+  after 20 s: about 7.3 KB off free heap. Ring capacity is the knob; a slot
+  added to one ring costs 16 bytes.
 - **Cascade fan-out.** A locally fired cascade (a cascading expression, or the
   app's Test) reaches every mesh peer, closest first. `CascadeScheduler`
   (`expressions/cascade_scheduler.hpp`) holds up to two fan-outs (peers and one
