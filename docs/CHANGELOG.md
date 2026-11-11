@@ -16,6 +16,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   signal from whichever lamp last passed its presence along, so a weak direct
   link could look strong and draw a firmware offer that never got through. It
   now goes by the signal heard straight from that lamp.
+- **A lamp mid-update only takes firmware from the lamp it agreed to.** Pieces
+  from a second lamp still sending to it could land in the new image and fail
+  the whole update at the final check.
 
 ## 1.3.4
 

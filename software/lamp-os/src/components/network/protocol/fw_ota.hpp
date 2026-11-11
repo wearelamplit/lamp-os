@@ -661,4 +661,35 @@ inline FwAcceptStatus decideFwOfferAuth(bool hasAuth, bool authSignatureValid) {
                                            : FwAcceptStatus::Accept;
 }
 
+enum class FwChunkVerdict : uint8_t {
+  Write,
+  ForeignSource,
+  OutOfBounds,
+  Oversize,
+  Misaligned,
+};
+
+// Whether a CHUNK may be written into the open receive session. sessionSource
+// is the accepted OFFER's sourceMac: a chunk from any other source is never
+// written and never counts as session activity. totalLen and chunkSize are the
+// session's negotiated values; the last chunk may be short. A Write verdict
+// keeps the write inside the erased image. Runs on the receiver because only it
+// holds the session's chunkSize.
+inline FwChunkVerdict checkFwChunk(const ParsedFwChunk& c,
+                                   const uint8_t sessionSource[6],
+                                   uint32_t totalLen, uint16_t chunkSize) {
+  if (std::memcmp(c.sourceMac, sessionSource, 6) != 0) {
+    return FwChunkVerdict::ForeignSource;
+  }
+  // Compared without adding so an offset near UINT32_MAX can't wrap the sum.
+  if (c.offset > totalLen || c.len > totalLen - c.offset) {
+    return FwChunkVerdict::OutOfBounds;
+  }
+  if (c.len > chunkSize) return FwChunkVerdict::Oversize;
+  if (c.offset != static_cast<uint32_t>(c.chunkIdx) * chunkSize) {
+    return FwChunkVerdict::Misaligned;
+  }
+  return FwChunkVerdict::Write;
+}
+
 }  // namespace lamp_protocol

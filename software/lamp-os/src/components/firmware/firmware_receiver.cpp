@@ -677,46 +677,20 @@ void FirmwareReceiver::handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk&
 #endif
     return;
   }
-  // Bump the seen-stamp before any validation/write that may abort early; pairs
-  // with Core 1's no-progress watchdog. Gated on source-MAC == active session
-  // (wispMac_) so a rogue lamp blasting CHUNK frames can't keep the watchdog
-  // falsely fresh while no real progress lands.
-  if (std::memcmp(p.sourceMac, wispMac_, 6) == 0) {
+  const lamp_protocol::FwChunkVerdict verdict =
+      lamp_protocol::checkFwChunk(p, wispMac_, offerTotalLen_, offerChunkSize_);
+  if (verdict == lamp_protocol::FwChunkVerdict::ForeignSource) return;
+  // Bump the seen-stamp before the remaining checks; pairs with Core 1's
+  // no-progress watchdog.
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-    lastChunkSeenMs_ = millis();
+  lastChunkSeenMs_ = millis();
 #endif
-  }
-  // offset + len must fit within the offer's totalLen, else a malformed chunk
-  // could direct esp_partition_write past the erased range. Compared without
-  // adding so an offset near UINT32_MAX can't wrap the sum under the bound.
-  if (p.offset > offerTotalLen_ || p.len > offerTotalLen_ - p.offset) {
+  if (verdict != lamp_protocol::FwChunkVerdict::Write) {
 #ifdef LAMP_DEBUG
-    Serial.printf("[fw_receiver] chunk drop: oob chunkIdx=%u off=%u len=%u "
-                  "total=%u\n",
-                  (unsigned)p.chunkIdx, (unsigned)p.offset, (unsigned)p.len,
-                  (unsigned)offerTotalLen_);
-#endif
-    return;
-  }
-  // Chunk size must match (last chunk may be shorter; intermediate must
-  // be exactly offerChunkSize_).
-  if (p.len > offerChunkSize_) {
-#ifdef LAMP_DEBUG
-    Serial.printf("[fw_receiver] chunk drop: oversize chunkIdx=%u len=%u "
-                  "max=%u\n",
-                  (unsigned)p.chunkIdx, (unsigned)p.len,
-                  (unsigned)offerChunkSize_);
-#endif
-    return;
-  }
-  // offset == chunkIdx * offerChunkSize_ on every chunk (catches malformed
-  // senders that disagree with themselves). Only the receiver holds the
-  // session's negotiated chunkSize, so it validates this, not parseFwChunk.
-  if (p.offset != static_cast<uint32_t>(p.chunkIdx) * offerChunkSize_) {
-#ifdef LAMP_DEBUG
-    Serial.printf("[fw_receiver] chunk drop: offset misaligned chunkIdx=%u "
-                  "off=%u chunkSize=%u\n",
-                  (unsigned)p.chunkIdx, (unsigned)p.offset,
+    Serial.printf("[fw_receiver] chunk drop: verdict=%u chunkIdx=%u off=%u "
+                  "len=%u total=%u chunkSize=%u\n",
+                  (unsigned)verdict, (unsigned)p.chunkIdx, (unsigned)p.offset,
+                  (unsigned)p.len, (unsigned)offerTotalLen_,
                   (unsigned)offerChunkSize_);
 #endif
     return;
