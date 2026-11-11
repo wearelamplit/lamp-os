@@ -212,9 +212,13 @@ bool Config::setDispositionsFromJson(const char* json, size_t len) {
   return dispositions_.setFromJson(json, len, uptimeMs());
 }
 
-void Config::maybeFlushDispositions(uint64_t nowMs) { dispositions_.maybeFlush(nowMs); }
+void Config::maybeFlushDispositions(uint64_t nowMs, bool otaReceiving) {
+  dispositions_.maybeFlush(nowMs, otaReceiving);
+}
 
-void Config::flushDispositionsNow() { dispositions_.flushNow(uptimeMs()); }
+void Config::flushDispositionsNow(bool otaReceiving) {
+  dispositions_.flushNow(uptimeMs(), otaReceiving);
+}
 
 JsonDocument Config::asJsonDocument() {
   JsonDocument doc;

@@ -1094,17 +1094,16 @@ void lamp::Lamp::tick() {
     reapplyHomeModeState();
   }
 
-  // Disposition commit: flushes whichever tier is due (DispositionStore).
-  // Cheap when nothing is dirty.
-  config.maybeFlushDispositions(lamp::uptimeMs());
-  // Like the drains, no NVS save runs while firmware chunks are being written.
+  // Like the drains, no NVS save runs while OTA chunks are being written.
+  const bool otaReceiving = firmwareReceiver.isInProgress() || fs_ota::fsReceiving();
+  config.maybeFlushDispositions(lamp::uptimeMs(), otaReceiving);
   if (!firmwareReceiver.isInProgress()) config.maybeRetryPersist(millis());
   if (pendingFlushDispositionsRequested) {
     // Phone disconnected (set on Core 0 in ble_control's onDisconnect).
     // Force-commit so the user's final slider value survives even if
     // power is yanked before the next 5s idle window would fire.
     pendingFlushDispositionsRequested = false;
-    config.flushDispositionsNow();
+    config.flushDispositionsNow(otaReceiving);
   }
 
   drainBrightness();

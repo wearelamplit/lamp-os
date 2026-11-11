@@ -54,6 +54,8 @@ Neutral with nothing learned.
   change once per 60, both counted from the last flush, and any flush writes
   everything, so while the engine runs a power cut loses at most an hour of
   ages. With the engine off the ages stand still, in RAM and in the blob.
+  Nothing flushes while a firmware or FS image is being received; a flush
+  that comes due then waits and lands on the first loop after the OTA ends.
 - **Boot.** Neutral rows unseen for 14 on-days (20160 on-minutes) are dropped
   at load, and the boot writes nothing.
 - **Formats.** The `disp` blob is format 2, `[2][flags]` then

@@ -230,6 +230,8 @@ bool fsPathBusy() {
   return s_fsReceiver.isInProgress() || s_fsDistributor.isInProgress();
 }
 
+bool fsReceiving() { return s_fsReceiver.isInProgress(); }
+
 void begin(lamp::FirmwareTransport* meshTransport,
            lamp::FirmwareReceiver* fwReceiver,
            lamp::FirmwareDistributor* fwDistributor) {

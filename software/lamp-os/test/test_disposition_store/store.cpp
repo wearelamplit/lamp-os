@@ -88,9 +88,9 @@ void test_debounced_persist_and_reload_round_trip() {
   ds.attachStore(&backing);
 
   setMac(ds, "AA:BB:CC:DD:EE:01", 4, 1000);
-  ds.maybeFlush(1050);  // within window → no write yet
+  ds.maybeFlush(1050, false);  // within window → no write yet
   TEST_ASSERT_FALSE(backing.has(DispositionStore::kBlobKey));
-  ds.maybeFlush(1100);  // window elapsed → writes
+  ds.maybeFlush(1100, false);  // window elapsed → writes
   TEST_ASSERT_TRUE(backing.has(DispositionStore::kBlobKey));
 
   // A fresh store over the same backing loads the persisted value.
@@ -105,7 +105,7 @@ void test_flush_now_writes_immediately() {
   DispositionStore ds(100000);  // long window; only flushNow should write
   ds.attachStore(&backing);
   setMac(ds, "AA:BB:CC:DD:EE:09", 4, 0);
-  ds.flushNow(0);
+  ds.flushNow(0, false);
   TEST_ASSERT_TRUE(backing.has(DispositionStore::kBlobKey));
 }
 
@@ -147,19 +147,19 @@ void test_failed_write_backs_off_then_lands() {
   ds.attachStore(&backing);
   setMac(ds, "AA:BB:CC:DD:EE:01", 5, 0);
   backing.failWrites = true;
-  for (uint32_t t = 100; t < 4900; t += 10) ds.maybeFlush(t);
+  for (uint32_t t = 100; t < 4900; t += 10) ds.maybeFlush(t, false);
   TEST_ASSERT_EQUAL_UINT(1, backing.writeCount);
-  ds.maybeFlush(5100);  // first retry, 5 s after the failure
+  ds.maybeFlush(5100, false);  // first retry, 5 s after the failure
   TEST_ASSERT_EQUAL_UINT(2, backing.writeCount);
-  for (uint32_t t = 5110; t < 15100; t += 10) ds.maybeFlush(t);
+  for (uint32_t t = 5110; t < 15100; t += 10) ds.maybeFlush(t, false);
   TEST_ASSERT_EQUAL_UINT(2, backing.writeCount);  // second wait is 10 s
-  ds.flushNow(15000);  // a disconnect flush is held to the backoff too
+  ds.flushNow(15000, false);  // a disconnect flush is held to the backoff too
   TEST_ASSERT_EQUAL_UINT(2, backing.writeCount);
   backing.failWrites = false;
-  ds.maybeFlush(15100);
+  ds.maybeFlush(15100, false);
   TEST_ASSERT_EQUAL_UINT(3, backing.writeCount);
   TEST_ASSERT_TRUE(backing.has(DispositionStore::kBlobKey));
-  ds.maybeFlush(200000);  // clean after the success
+  ds.maybeFlush(200000, false);  // clean after the success
   TEST_ASSERT_EQUAL_UINT(3, backing.writeCount);
 }
 
@@ -172,7 +172,7 @@ void test_legacy_json_migrates_on_first_flush() {
   ds.attachStore(&backing);
   ds.load(0);
   setMac(ds, "AA:BB:CC:DD:EE:01", 2, 0);
-  ds.maybeFlush(100);
+  ds.maybeFlush(100, false);
   TEST_ASSERT_FALSE(backing.has("dispositions"));
   DispositionStore reloaded(100);
   reloaded.attachStore(&backing);
@@ -215,7 +215,7 @@ void test_json_written_after_a_downgrade_wins() {
   DispositionStore ds(100);
   ds.attachStore(&backing);
   setMac(ds, "11:22:33:44:55:66", 1, 0);
-  ds.flushNow(0);
+  ds.flushNow(0, false);
   backing.write("dispositions", "{\"11:22:33:44:55:66\":5}");
   DispositionStore reloaded(100);
   reloaded.attachStore(&backing);
@@ -230,7 +230,7 @@ void test_corrupt_or_empty_json_keeps_the_blob() {
     DispositionStore ds(100);
     ds.attachStore(&backing);
     setMac(ds, "11:22:33:44:55:66", 4, 0);
-    ds.flushNow(0);
+    ds.flushNow(0, false);
     backing.write("dispositions", bad);
     DispositionStore reloaded(100);
     reloaded.attachStore(&backing);
@@ -265,7 +265,7 @@ void test_full_store_blob_round_trip() {
     const uint8_t m[6] = {1, 2, 3, 4, 0, static_cast<uint8_t>(i)};
     ds.set(m, nonNeutral(i), 0);
   }
-  ds.flushNow(0);
+  ds.flushNow(0, false);
   TEST_ASSERT_EQUAL(DispositionStore::kMaxBlobLen,
                     backing.read(DispositionStore::kBlobKey, "").size());
   DispositionStore reloaded(100);
@@ -409,7 +409,7 @@ void test_v2_round_trip_at_kmax() {
     ds.markSeen(peerMac(i).data(), flushAt - i * kMinMs);
   }
   for (unsigned h = 0; h < 3; ++h) ds.tickHour(flushAt);
-  ds.flushNow(flushAt);
+  ds.flushNow(flushAt, false);
   std::string blob = backing.read(DispositionStore::kBlobKey, "");
   TEST_ASSERT_EQUAL(DispositionStore::kMaxBlobLen, blob.size());
   TEST_ASSERT_EQUAL_UINT8(DispositionStore::kBlobFormat, blob[0]);
@@ -448,7 +448,7 @@ void test_format1_loads_and_rides_the_first_flush() {
   }
   TEST_ASSERT_TRUE(ds.meet(peerMac(7).data(), kMeetEveryH, 5 * kHourMs));
   ds.setEngineEnabled(false, 5 * kHourMs);
-  ds.flushNow(5 * kHourMs);
+  ds.flushNow(5 * kHourMs, false);
   TEST_ASSERT_EQUAL_UINT8(DispositionStore::kBlobFormat,
                           backing.read(DispositionStore::kBlobKey, "")[0]);
 }
@@ -467,7 +467,7 @@ void test_migration_interrupted_at_every_write_keeps_every_disposition() {
     reload(ds, backing);
     ds.set(peerMac(1).data(), 2, 0);
     backing.writesBeforeCrash = crashAt;
-    ds.flushNow(0);
+    ds.flushNow(0, false);
     backing.writesBeforeCrash = SIZE_MAX;
     DispositionStore back(100);
     reload(back, backing);
@@ -518,7 +518,7 @@ void test_a_blob_that_reads_back_wrong_keeps_the_json() {
   ds.load(0);
   TEST_ASSERT_TRUE(backing.has("dispositions"));
   backing.corrupt = false;
-  ds.maybeFlush(10000);
+  ds.maybeFlush(10000, false);
   TEST_ASSERT_FALSE(backing.has("dispositions"));
   DispositionStore back(100);
   back.attachStore(&backing);
@@ -537,7 +537,7 @@ void test_meetings_count_once_per_window_across_a_reload() {
   TEST_ASSERT_FALSE(ds.meet(m.data(), kMeetEveryH, kHourMs));  // an hour apart
   TEST_ASSERT_EQUAL_UINT8(1, ds.peer(m.data(), kHourMs).meets);
   for (unsigned h = 2; h <= 6; ++h) ds.tickHour(h * kHourMs);
-  ds.maybeFlush(6 * kHourMs);
+  ds.maybeFlush(6 * kHourMs, false);
   DispositionStore back(100);
   reload(back, backing);
   TEST_ASSERT_EQUAL_UINT8(6, back.peer(m.data(), 0).meetAgeH);
@@ -703,7 +703,7 @@ void test_row_storage_is_fixed() {
         break;
       }
       case 2:
-        ds.flushNow(i);
+        ds.flushNow(i, false);
         ds.load(i);
         break;
       case 3:
@@ -730,7 +730,7 @@ void test_engine_flush_floor_and_user_debounce() {
     ds.nudge(m.data(), (t / 1000) % 2 ? 3 : -2, 0, t);
     if (t == userAt) ds.set(peerMac(2).data(), 5, t);
     const size_t before = backing.writeCount;
-    ds.maybeFlush(t);
+    ds.maybeFlush(t, false);
     if (t > userAt && !userLanded && backing.writeCount > before) userLanded = t;
   }
   TEST_ASSERT_EQUAL(userAt + 5000, userLanded);
@@ -740,7 +740,7 @@ void test_engine_flush_floor_and_user_debounce() {
   engineOnly.attachStore(&alone);
   for (uint64_t t = 0; t <= 30 * kMinMs; t += 1000) {
     engineOnly.nudge(m.data(), (t / 1000) % 2 ? 3 : -2, 0, t);
-    engineOnly.maybeFlush(t);
+    engineOnly.maybeFlush(t, false);
   }
   TEST_ASSERT_EQUAL(3, alone.writeCount);
 }
@@ -754,14 +754,14 @@ void test_age_flush_floor() {
   const auto m = peerMac(1);
   ds.set(m.data(), 5, 0);
   ds.meet(m.data(), 0, 0);
-  ds.maybeFlush(1000);
+  ds.maybeFlush(1000, false);
   TEST_ASSERT_EQUAL(1, backing.writeCount);
   uint64_t lastWrite = 1000;
   for (uint64_t t = kMinMs; t <= 3 * kHourMs + 2 * kMinMs; t += kMinMs) {
     if (t % kHourMs == 0) ds.tickHour(t);
     ds.markSeen(m.data(), t - kMinMs / 2);
     const size_t before = backing.writeCount;
-    ds.maybeFlush(t);
+    ds.maybeFlush(t, false);
     if (backing.writeCount > before) {
       TEST_ASSERT_TRUE(t - lastWrite >= kHourMs);
       TEST_ASSERT_TRUE(t - lastWrite <= kHourMs + kMinMs);
@@ -788,7 +788,7 @@ void test_boot_prunes_aged_neutral_rows_only() {
   ds.set(oldSmitten.data(), 5, 0);
   const uint64_t at = (DispositionStore::kPruneMin + 1) * kMinMs;
   ds.markSeen(youngNeutral.data(), at - (DispositionStore::kPruneMin - 1) * kMinMs);
-  ds.flushNow(at);
+  ds.flushNow(at, false);
   const size_t writes = backing.writeCount;
   DispositionStore back(100);
   reload(back, backing);
@@ -825,7 +825,7 @@ void test_master_switch_round_trips_and_gates_the_engine() {
   ds.nudge(m.data(), 10, 0, 0);
   ds.meet(m.data(), 0, 0);
   ds.setEngineEnabled(false, 0);
-  ds.flushNow(0);
+  ds.flushNow(0, false);
   DispositionStore back(100);
   reload(back, backing);
   TEST_ASSERT_FALSE(back.engineEnabled());
@@ -839,10 +839,10 @@ void test_master_switch_round_trips_and_gates_the_engine() {
   TEST_ASSERT_TRUE(samePeer(before, back.peer(m.data(), 2 * kHourMs)));
   TEST_ASSERT_EQUAL_UINT8(0, back.peer(peerMac(2).data(), 0).meets);
   const size_t writes = backing.writeCount;
-  back.maybeFlush(10 * kHourMs);
+  back.maybeFlush(10 * kHourMs, false);
   TEST_ASSERT_EQUAL(writes, backing.writeCount);
   back.setEngineEnabled(true, 10 * kHourMs);
-  back.flushNow(10 * kHourMs);
+  back.flushNow(10 * kHourMs, false);
   DispositionStore again(100);
   reload(again, backing);
   TEST_ASSERT_TRUE(again.engineEnabled());
@@ -896,10 +896,10 @@ void test_the_hourly_tick_alone_flushes_ages() {
   const auto m = peerMac(1);
   ds.meet(m.data(), 0, 0);
   ds.set(m.data(), 5, 0);
-  ds.maybeFlush(1000);
+  ds.maybeFlush(1000, false);
   const size_t writes = backing.writeCount;
   ds.tickHour(kHourMs);
-  for (uint64_t t = kHourMs; t <= kHourMs + 2 * kMinMs; t += kMinMs) ds.maybeFlush(t);
+  for (uint64_t t = kHourMs; t <= kHourMs + 2 * kMinMs; t += kMinMs) ds.maybeFlush(t, false);
   TEST_ASSERT_EQUAL(writes + 1, backing.writeCount);
   DispositionStore back(100);
   reload(back, backing);
@@ -918,13 +918,13 @@ void test_the_tick_reaching_saturation_is_saved() {
   for (unsigned h = 1; h <= 254; ++h) ds.tickHour(h * kHourMs);
   const uint64_t late = (UINT16_MAX + 10) * kMinMs;
   ds.set(m.data(), 4, late);
-  ds.flushNow(late);
+  ds.flushNow(late, false);
   DispositionStore back(100);
   reload(back, backing);
   TEST_ASSERT_EQUAL_UINT8(254, back.peer(m.data(), 0).meetAgeH);
   TEST_ASSERT_EQUAL_UINT16(UINT16_MAX, back.peer(m.data(), 0).unseenMin);
   back.tickHour(kHourMs);
-  back.maybeFlush(2 * kHourMs);
+  back.maybeFlush(2 * kHourMs, false);
   DispositionStore again(100);
   reload(again, backing);
   TEST_ASSERT_EQUAL_UINT8(255, again.peer(m.data(), 0).meetAgeH);
@@ -954,13 +954,13 @@ void test_the_tick_after_unseen_saturates_is_saved() {
   ds.set(m.data(), 5, 0);
   const uint64_t at = (UINT16_MAX - 30) * kMinMs;
   ds.set(m.data(), 4, at);
-  ds.flushNow(at);
+  ds.flushNow(at, false);
   DispositionStore back(100);
   reload(back, backing);
   TEST_ASSERT_EQUAL_UINT16(UINT16_MAX - 30, back.peer(m.data(), 0).unseenMin);
   TEST_ASSERT_EQUAL_UINT8(UINT8_MAX, back.peer(m.data(), 0).meetAgeH);
   back.tickHour(kHourMs);
-  back.maybeFlush(kHourMs + kMinMs);
+  back.maybeFlush(kHourMs + kMinMs, false);
   DispositionStore again(100);
   reload(again, backing);
   TEST_ASSERT_EQUAL_UINT16(UINT16_MAX, again.peer(m.data(), 0).unseenMin);
@@ -998,7 +998,7 @@ void test_held_clocks_stop_unseen() {
   TEST_ASSERT_EQUAL_UINT16(7, ds.peer(m.data(), 7 * min).unseenMin);
   ds.holdClocks(true, 7 * min);
   TEST_ASSERT_EQUAL_UINT16(7, ds.peer(m.data(), 300 * min).unseenMin);
-  ds.flushNow(300 * min);
+  ds.flushNow(300 * min, false);
   ds.holdClocks(false, 300 * min);
   TEST_ASSERT_EQUAL_UINT16(10, ds.peer(m.data(), 303 * min).unseenMin);
   ds.setEngineEnabled(false, 303 * min);
@@ -1033,6 +1033,41 @@ void test_peer_at_lists_every_row() {
     last = key;
   }
   TEST_ASSERT_FALSE(ds.peerAt(3, mac, r, 0));
+}
+
+// Every tier comes due during an OTA receive and none writes; the first flush
+// after it ends writes them all.
+void test_no_flush_while_ota_receiving() {
+  InMemoryConfigStore backing;
+  DispositionStore ds(5000);
+  ds.attachStore(&backing);
+  ds.set(peerMac(1).data(), 5, 0);
+  ds.nudge(peerMac(2).data(), 40, 0, 0);
+  ds.tickHour(kHourMs);
+  const uint64_t due = kHourMs + kMinMs;
+  for (uint64_t t = 1000; t <= due; t += kMinMs) ds.maybeFlush(t, true);
+  ds.flushNow(due, true);
+  TEST_ASSERT_EQUAL(0, backing.writeCount);
+  ds.maybeFlush(due + 1000, false);
+  TEST_ASSERT_EQUAL(1, backing.writeCount);
+  DispositionStore back(5000);
+  back.attachStore(&backing);
+  back.load(0);
+  TEST_ASSERT_EQUAL_UINT8(5, back.peer(peerMac(1).data(), 0).disp);
+  TEST_ASSERT_EQUAL_INT8(40, back.peer(peerMac(2).data(), 0).score);
+}
+
+// A disconnect flush during an OTA receive is deferred, and the edit lands on
+// the first loop flush after the OTA ends.
+void test_flush_now_while_ota_receiving_lands_after() {
+  InMemoryConfigStore backing;
+  DispositionStore ds(5000);
+  ds.attachStore(&backing);
+  ds.set(peerMac(1).data(), 2, 0);
+  ds.flushNow(100, true);
+  TEST_ASSERT_EQUAL(0, backing.writeCount);
+  ds.maybeFlush(6000, false);
+  TEST_ASSERT_EQUAL(1, backing.writeCount);
 }
 
 int main(int, char**) {
@@ -1084,5 +1119,7 @@ int main(int, char**) {
   RUN_TEST(test_nudge_held_short_of_a_step);
   RUN_TEST(test_held_clocks_stop_unseen);
   RUN_TEST(test_peer_at_lists_every_row);
+  RUN_TEST(test_no_flush_while_ota_receiving);
+  RUN_TEST(test_flush_now_while_ota_receiving_lands_after);
   return UNITY_END();
 }

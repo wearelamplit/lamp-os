@@ -155,11 +155,13 @@ class DispositionStore {
   bool peerAt(size_t index, uint8_t mac[6], PeerRecord& out, uint64_t nowMs) const;
 
   // Core 1 loop drain: flushes whichever tier is due. A failed write (NVS
-  // full) keeps the rows dirty and backs off, 5 s doubling to 60 s.
-  void maybeFlush(uint64_t nowMs);
+  // full) keeps the rows dirty and backs off, 5 s doubling to 60 s. Pass
+  // otaReceiving while a firmware or FS image is being written: nothing is
+  // written then, and the dirty tiers flush on the first call after it ends.
+  void maybeFlush(uint64_t nowMs, bool otaReceiving);
   // Synchronous flush of a pending user edit (BLE disconnect); held to the
-  // same backoff.
-  void flushNow(uint64_t nowMs);
+  // same backoff and the same otaReceiving deferral.
+  void flushNow(uint64_t nowMs, bool otaReceiving);
 
   // Native-test seam: the reserved row storage, fixed for the store's life.
   size_t rowCapacity() const { return entries_.capacity(); }

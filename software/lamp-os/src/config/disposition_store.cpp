@@ -534,7 +534,8 @@ void DispositionStore::flushIfDue_(uint64_t nowMs) {
   }
 }
 
-void DispositionStore::maybeFlush(uint64_t nowMs) {
+void DispositionStore::maybeFlush(uint64_t nowMs, bool otaReceiving) {
+  if (otaReceiving) return;
   const uint64_t since = nowMs >= lastFlushMs_ ? nowMs - lastFlushMs_ : 0;
   if (debouncer_.shouldFlush(static_cast<uint32_t>(nowMs)) ||
       (engineDirty_ && since >= kEngineFlushFloorMs) ||
@@ -543,8 +544,8 @@ void DispositionStore::maybeFlush(uint64_t nowMs) {
   }
 }
 
-void DispositionStore::flushNow(uint64_t nowMs) {
-  if (debouncer_.dirty()) flushIfDue_(nowMs);
+void DispositionStore::flushNow(uint64_t nowMs, bool otaReceiving) {
+  if (!otaReceiving && debouncer_.dirty()) flushIfDue_(nowMs);
 }
 
 }  // namespace lamp

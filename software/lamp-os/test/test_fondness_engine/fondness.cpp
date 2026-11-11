@@ -441,7 +441,7 @@ void test_master_off_changes_nothing() {
   TEST_ASSERT_EQUAL_UINT8(2, r.disp);
   TEST_ASSERT_EQUAL_INT8(0, r.score);
   TEST_ASSERT_EQUAL_UINT8(0, r.meets);
-  rig.store.flushNow(rig.now);
+  rig.store.flushNow(rig.now, false);
 
   DispositionStore reloaded(100);
   reloaded.attachStore(&backing);
