@@ -201,14 +201,19 @@ Disposition is the 1–5 scale the crowd weighting is built on.
 
 ```cpp
 uint8_t getDisposition(const std::string& lampId) const; // 1=Salty 2=Wary 3=Neutral 4=Fond 5=Smitten (3 = unknown peer)
-void    setDisposition(const std::string& lampId, uint8_t value); // debounced NVS flush
-String  asDispositionsJson() const;
+void    setDisposition(const std::string& lampId, uint8_t value); // a user edit, debounced NVS flush
+std::string asDispositionsJson() const;
+DispositionStore& dispositions(); // the full rows: peer(), and the engine's writes
 ```
 
 `getDisposition` answers "do I know this lamp, and how do I feel about
 it?" for a single peer. For the aggregate weighted view across everyone
 in range, that's `PersonalityEngine::crowdComposition()` /
 `smoothedCrowdWeight()`.
+
+`dispositions().peer(mac, uptimeMs())` returns the whole `PeerRecord`
+(disposition, score, meetings, ages); the store's rules are in
+[`social.md`](social.md#stored-social-rows).
 
 ---
 

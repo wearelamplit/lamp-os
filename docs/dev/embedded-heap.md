@@ -145,9 +145,10 @@ Two properties make it lethal:
    the body taken out of 46.5 KB free and a 23.5 KB largest block, the
    typical document and the 18 expressions pass; a setup near the caps may
    be refused by that check (500) and saves from the app instead. These are
-   host figures; the device's need a bench check. The dispositions flush
-   writes its blob from the stack, and its JSON for a reader is allocated
-   outside its lock. A failed save (a full NVS, or a JSON that outgrew its
+   host figures; the device's need a bench check. The dispositions rows
+   are reserved once at 100 peers (16 bytes each, 1.6 KB) and never grow, the
+   flush writes its blob from the stack, and its JSON for a reader is
+   allocated outside its lock. A failed save (a full NVS, or a JSON that outgrew its
    buffer) backs off 5 s doubling to 60 s (`util/retry_backoff.hpp`) for
    both, and the commit drain waits on the same backoff, so no failure path
    retries at loop rate. Old stored formats load unchanged and move to the
@@ -208,7 +209,7 @@ Two placement rules make the entry count alone overstate the room
 | `x0`..`x20` | one expression each, compact record (`encodeExpression`) | 121 B | 21 x 6 = 126 |
 | `xn` | expression count, a decimal string | 2 B | 2 |
 | `st0` or `st1` | the settings blob (`encodeSettings`): a format byte, the lamp section, base and shade (segments with name, pixel count, pin and colours; byte order; rotation), the base knockout levels, home mode | 948 B (`kMaxSettingsLen`, capped at 1024) | 32 |
-| `disp` | dispositions, `[mac:6][value:1]` per peer | 701 B | 24 |
+| `disp` | social rows: `[format][flags]`, then `[mac:6][disp][score][meets][meetAgeH][unseenMin:2]` per peer, 100 peers (`DispositionStore::kMaxBlobLen`) | 1202 B | 40 |
 | `lampType` | variant id | under 16 B | 2 |
 
 The blob does not store `colorsEditable`: nothing reads a stored value back
@@ -239,24 +240,24 @@ Outside it, 171 entries (`systemKeys` in `test_config_records`):
 The arithmetic, every case with at least 29 entries to spare
 (`test_config_records`, `kMargin`):
 
-- **Entries.** Live at the caps: 171 + 2 + 24 + 126 + 2 + 32 = 357.
+- **Entries.** Live at the caps: 171 + 2 + 40 + 126 + 2 + 32 = 373.
   Rewriting the largest blob, PHY calibration (62) or the settings blob (32),
-  peaks at 419 of 504: 85 spare.
+  peaks at 435 of 504: 69 spare.
 - **Strings.** The only strings are `xn` and `lampType` (2 entries each):
-  rewritten beside every key, 359 live against a bound of 4 x 124 + 3 = 499.
-- **Small blobs.** The largest is a dispositions blob just under 400 bytes,
-  14 entries, at 357 live: bound 451, 94 spare. A record (6) is smaller.
+  rewritten beside every key, 375 live against a bound of 4 x 124 + 3 = 499.
+- **Small blobs.** The largest is a dispositions blob just under 400 bytes
+  (33 peers), 14 entries, at 373 live: bound 451, 78 spare. A record (6) is smaller.
 - **The migration.** The first save over a 1.3.3 split store at its worst
   writes the settings blob beside every legacy key (records shared, `ko` 10,
-  the rest blob 59, the lamp-only `cfg` 13 and a staged `cfgl` 14): 421 live,
-  peak 453, 51 spare, once. Over a 1.3.3 whole store (at most 1759 bytes, 56
-  entries) it peaks at 413.
+  the rest blob 59, the lamp-only `cfg` 13 and a staged `cfgl` 14): 437 live,
+  peak 469, 35 spare, once. Over a 1.3.3 whole store (at most 1759 bytes, 56
+  entries) it peaks at 429.
 - **The first save after an update from an older release.** An older
   release's `cfg` string can hold 4,000 bytes (127 entries), beside its
-  dispositions JSON (about 2.2 KB, 71 entries, migrated to the 24-entry blob
+  dispositions JSON (about 2.2 KB, 71 entries, migrated to the 40-entry blob
   at the first load). The first save keeps that string until the new keys
   land, but those keys copy only what the string held. Over every such shape
-  up to 4,000 bytes the page model leaves 111 entries spare at the tightest
+  up to 4,000 bytes the page model leaves 95 entries spare at the tightest
   (`test_the_first_save_after_an_update_fits`).
 
 Those bounds hold for any arrangement of entries across the pages. The
@@ -267,7 +268,7 @@ its worst, every store shape (empty, the largest 1.3.3 whole config, every
 escaped worst case, the standard variant's 18 full expressions) is saved in
 seeded order with system keys and dispositions rewritten between saves and
 29 padding entries beside them; every write must land and every save load
-back as saved, and the same churn still holds with 63 padding entries. The
+back as saved, and the same churn still holds with 47 padding entries. The
 budget sizes `disp` at `DispositionStore::kMaxBlobLen`, so a longer
 dispositions blob flows into every figure.
 
@@ -304,7 +305,8 @@ skips every later BLE start, OTA radio pause and resume included.
 
 A partition that initializes but is full gets space back on the first boot:
 the WiFi driver's namespace is erased, and the legacy dispositions JSON (about
-2.2 KB) is rewritten as the 701-byte blob, blob first, then erased. A legacy
+2.2 KB) is rewritten as the dispositions blob, which must land and read back
+before the JSON is erased. A legacy
 JSON that does not parse, or parses to nothing while the blob holds entries,
 is erased without replacing the blob.
 
@@ -447,7 +449,12 @@ migrated lamp flashed back to 1.3.3 finds no `cfg`: it boots with the
 variant's default name and colours (rolled to a random hue, as a new lamp
 is), no password, default home mode and knockout, and unadopted, so the app
 offers it the setup flow; it keeps its expressions (it reads `xn` and the
-records) and its dispositions. Its first-boot save then writes its own form
+records). Its dispositions survive only while `disp` is still format 1 (no
+dispositions flush since the update): 1.3.3 refuses a format 2 blob and loads
+every peer Neutral, and its first disposition write replaces the blob with
+format 1, which drops every score, meeting count, age and the engine switch.
+Flashed forward with no such write, the format 2 blob loads intact. Its
+first-boot save then writes its own form
 beside the 32 entries of settings blob it cannot see, so a save can fail for
 room until a factory reset clears the namespace. A whole save of its own
 erases the records. Flashed forward again, the settings blob is the

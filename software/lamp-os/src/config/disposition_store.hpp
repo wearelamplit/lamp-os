@@ -91,7 +91,7 @@ struct NudgeResult {
 // and an age-only change (markSeen, tickHour) at most once per
 // kAgeFlushFloorMs, both counted from the last flush. Engine and age calls are
 // no-ops while the engine is off; any other gate on them (home mode) is the
-// caller's. Layout, migration and prune: docs/dev/lamp-social-api.md.
+// caller's. Layout, migration and prune: docs/dev/social.md.
 class DispositionStore {
  public:
   static constexpr uint8_t kDefault = 3;

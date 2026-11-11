@@ -823,6 +823,7 @@ void test_master_switch_round_trips_and_gates_the_engine() {
   ds.attachStore(&backing);
   const auto m = peerMac(1);
   ds.nudge(m.data(), 10, 0, 0);
+  ds.meet(m.data(), 0, 0);
   ds.setEngineEnabled(false, 0);
   ds.flushNow(0);
   DispositionStore back(100);
@@ -865,6 +866,28 @@ void test_absence_decays_scores_of_absent_rows() {
   TEST_ASSERT_EQUAL_UINT8(3, ds.peer(negative.data(), 0).disp);
 }
 
+// A user edit gets a row even when every row is stronger than it.
+void test_a_user_edit_always_gets_a_row() {
+  DispositionStore ds(100);
+  for (unsigned i = 0; i < DispositionStore::kMax; ++i) ds.set(peerMac(i).data(), 5, 0);
+  const auto m = peerMac(1, 0x90);
+  ds.set(m.data(), 4, 0);
+  TEST_ASSERT_EQUAL_UINT8(4, ds.peer(m.data(), 0).disp);
+}
+
+// Among equally weak rows the one unseen longest goes.
+void test_eviction_ties_go_to_the_longest_unseen() {
+  DispositionStore ds(100);
+  for (unsigned i = 0; i < DispositionStore::kMax; ++i) ds.nudge(peerMac(i).data(), 20, 0, 0);
+  for (unsigned i = 0; i < DispositionStore::kMax; ++i) {
+    if (i != 57) ds.markSeen(peerMac(i).data(), 30 * kMinMs);
+  }
+  ds.nudge(peerMac(1, 0x90).data(), 21, 0, 30 * kMinMs);
+  TEST_ASSERT_EQUAL_INT8(0, ds.peer(peerMac(57).data(), 0).score);
+  TEST_ASSERT_EQUAL_INT8(20, ds.peer(peerMac(0).data(), 0).score);
+  TEST_ASSERT_EQUAL_INT8(21, ds.peer(peerMac(1, 0x90).data(), 0).score);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_unknown_peer_returns_default);
@@ -905,5 +928,7 @@ int main(int, char**) {
   RUN_TEST(test_merge_keeps_unlisted_and_equal_rows);
   RUN_TEST(test_master_switch_round_trips_and_gates_the_engine);
   RUN_TEST(test_absence_decays_scores_of_absent_rows);
+  RUN_TEST(test_a_user_edit_always_gets_a_row);
+  RUN_TEST(test_eviction_ties_go_to_the_longest_unseen);
   return UNITY_END();
 }

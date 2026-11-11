@@ -191,5 +191,4 @@ overview in [`social.md`](social.md). This doc is greetings only:
   and Ambivert; Extrovert is unaffected), separate subsystem, weights
   peers by disposition.
 - The dispositions storage + sync surfaces (NVS, `CHAR_SOCIAL_DISPOSITIONS`
-  BLE characteristic), see `personality_engine.hpp` and
-  `config.{hpp,cpp}`.
+  BLE characteristic), see [`social.md`](social.md#stored-social-rows).

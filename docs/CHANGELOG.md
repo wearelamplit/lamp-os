@@ -61,6 +61,14 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   colour, or a mid-fade colour, for one or more drift steps.
 
 ### Changed
+- **Lamps remember more about the lamps they know.** Each lamp now keeps,
+  per peer, how often they've met and how long since it last saw them, ready
+  for lamps to warm to each other on their own. When the list is full (100
+  lamps) the lamp forgets the one it cares least about instead of whichever
+  has the lowest address, so friends and regulars stay. A neutral lamp not
+  seen for 14 days of the lamp being on is forgotten at startup. Saving from
+  the app merges: lamps the app doesn't list are kept. Flashing a lamp back
+  to 1.3.3 shows every lamp as neutral until set again.
 - **`npm run wisp:flash:release` takes `IMAGE=`.** Point it at a local
   `wisp-firmware-signed.bin` to flash that file and skip the download.
 - **Settings take far less room on the lamp.** A lamp now keeps its name,
