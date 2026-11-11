@@ -310,8 +310,8 @@ class ExpressionManager {
   // the drain when an OTA starts.
   void tickCascade(uint32_t nowMs);
 
-  // Retires the dedup, cooldown and batch-gap stamps that have passed their
-  // windows. Call every loop tick.
+  // Retires the dedup, cooldown, batch-gap and play stamps that have passed
+  // their windows. Call every loop tick.
   void retireStale(uint32_t nowMs);
 
   std::vector<Color> getExpressionColors(const std::string& type) const;

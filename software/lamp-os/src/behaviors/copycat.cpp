@@ -10,7 +10,8 @@ uint8_t copyChancePct(uint8_t basePct, uint8_t frameHops, uint8_t meets, size_t 
   const uint32_t counted = meets < kFamiliarBoostMeets ? meets : kFamiliarBoostMeets;
   uint32_t pct = static_cast<uint32_t>(basePct) * (100 + counted * t.familiarBoostPct) / 100;
   const uint32_t crowd = nearby < UINT16_MAX ? static_cast<uint32_t>(nearby) : UINT16_MAX;
-  pct = pct * t.crowdHalf / (t.crowdHalf + crowd);
+  const uint32_t half = t.crowdHalf ? t.crowdHalf : 1;
+  pct = pct * half / (half + crowd);
   for (uint8_t h = 0; h < frameHops; ++h) pct = pct * t.chainHopPct / 100;
   return pct > 100 ? 100 : static_cast<uint8_t>(pct);
 }

@@ -262,7 +262,7 @@ void test_copy_carries_one_more_hop() {
   uint8_t mac[6];
   for (uint8_t h = 0; h < c.tuning.chainMaxHops; ++h) {
     macFor(h, mac);
-    const CopyDecision d = c.decide(mac, 5, SocialMode::Extrovert, h, 1000, 1, 0);
+    const CopyDecision d = c.decide(mac, 5, SocialMode::Extrovert, h, 1000, 1, 0, 0, false);
     TEST_ASSERT_EQUAL(CopyOutcome::Fire, d.outcome);
     TEST_ASSERT_EQUAL_UINT8(h + 1, d.hops);
     TEST_ASSERT_EQUAL(d.hops < c.tuning.chainMaxHops, c.announces(d.hops));
@@ -270,7 +270,7 @@ void test_copy_carries_one_more_hop() {
   TEST_ASSERT_FALSE(c.announces(c.tuning.chainMaxHops));
   macFor(50, mac);
   TEST_ASSERT_EQUAL(CopyOutcome::NoChance,
-                    c.decide(mac, 5, SocialMode::Extrovert, c.tuning.chainMaxHops, 1000, 1, 0)
+                    c.decide(mac, 5, SocialMode::Extrovert, c.tuning.chainMaxHops, 1000, 1, 0, 0, false)
                         .outcome);
 }
 
@@ -284,7 +284,7 @@ void test_peer_firing_every_second_rolls_once_per_window() {
   for (uint32_t s = 0; s < 600; ++s) {
     const uint32_t now = 4321 + s * 1000;
     c.retire(now);
-    const CopyDecision d = c.decide(mac, 5, SocialMode::Ambivert, 0, now, 100, 0);
+    const CopyDecision d = c.decide(mac, 5, SocialMode::Ambivert, 0, now, 100, 0, 0, false);
     TEST_ASSERT_TRUE(d.outcome != CopyOutcome::Fire);
     if (d.outcome == CopyOutcome::Skip) ++rolls;
     if (d.outcome == CopyOutcome::Cooldown) ++refused;
@@ -301,12 +301,12 @@ void test_peer_quiet_for_a_wrap_rolls_again() {
   macFor(11, mac);
   const uint32_t rolledMs = 1000;
   TEST_ASSERT_EQUAL(CopyOutcome::Skip,
-                    c.decide(mac, 5, SocialMode::Ambivert, 0, rolledMs, 100, 0).outcome);
+                    c.decide(mac, 5, SocialMode::Ambivert, 0, rolledMs, 100, 0, 0, false).outcome);
   for (uint64_t now = rolledMs; now < rolledMs + (1ull << 32); now += 1ull << 28) {
     c.retire(static_cast<uint32_t>(now));
   }
   TEST_ASSERT_EQUAL(CopyOutcome::Skip,
-                    c.decide(mac, 5, SocialMode::Ambivert, 0, rolledMs + 10, 100, 0).outcome);
+                    c.decide(mac, 5, SocialMode::Ambivert, 0, rolledMs + 10, 100, 0, 0, false).outcome);
 }
 
 // A booked Introvert copy starts the floor: another peer's winning roll is
@@ -318,20 +318,20 @@ void test_booked_copy_starts_the_introvert_floor() {
   macFor(22, c);
   Copycat unbooked;
   TEST_ASSERT_EQUAL(CopyOutcome::Fire,
-                    unbooked.decide(a, 5, SocialMode::Introvert, 0, 1000, 1, 0).outcome);
+                    unbooked.decide(a, 5, SocialMode::Introvert, 0, 1000, 1, 0, 0, false).outcome);
   TEST_ASSERT_EQUAL(CopyOutcome::Fire,
-                    unbooked.decide(b, 5, SocialMode::Introvert, 0, 2000, 1, 0).outcome);
+                    unbooked.decide(b, 5, SocialMode::Introvert, 0, 2000, 1, 0, 0, false).outcome);
 
   Copycat booked;
   TEST_ASSERT_EQUAL(CopyOutcome::Fire,
-                    booked.decide(a, 5, SocialMode::Introvert, 0, 1000, 1, 0).outcome);
+                    booked.decide(a, 5, SocialMode::Introvert, 0, 1000, 1, 0, 0, false).outcome);
   booked.booked(1000);
   TEST_ASSERT_EQUAL(CopyOutcome::Skip,
-                    booked.decide(b, 5, SocialMode::Introvert, 0, 2000, 1, 0).outcome);
+                    booked.decide(b, 5, SocialMode::Introvert, 0, 2000, 1, 0, 0, false).outcome);
   TEST_ASSERT_EQUAL(CopyOutcome::Fire,
                     booked
                         .decide(c, 5, SocialMode::Introvert, 0,
-                                1000 + lamp::kIntrovertMirrorCooldownMs, 1, 0)
+                                1000 + lamp::kIntrovertMirrorCooldownMs, 1, 0, 0, false)
                         .outcome);
 }
 
@@ -347,6 +347,9 @@ void test_crowd_scales_every_chance() {
   }
   TEST_ASSERT_EQUAL_UINT8(18, copyChancePct(75, 0, 0, 24, ContagionTuning{}));
   TEST_ASSERT_EQUAL_UINT8(0, copyChancePct(75, 0, 0, SIZE_MAX, ContagionTuning{}));
+  t.crowdHalf = 0;
+  TEST_ASSERT_EQUAL_UINT8(75, copyChancePct(75, 0, 0, 0, t));
+  TEST_ASSERT_EQUAL_UINT8(37, copyChancePct(75, 0, 0, 1, t));
 }
 
 // A Smitten peer heard among 24 nearby lamps, rolled once at every draw 1..100,
@@ -358,7 +361,7 @@ void test_warm_crowd_copies_at_most_the_damped_rate() {
   unsigned fires = 0;
   for (uint8_t roll = 1; roll <= 100; ++roll) {
     macFor(roll, mac);
-    if (c.decide(mac, 5, SocialMode::Ambivert, 0, 1000 + roll, roll, 0, 24).outcome ==
+    if (c.decide(mac, 5, SocialMode::Ambivert, 0, 1000 + roll, roll, 0, 24, false).outcome ==
         CopyOutcome::Fire) {
       ++fires;
     }
@@ -387,7 +390,7 @@ void test_crowd_of_500_rolls_at_most_the_table() {
     const uint32_t now = 1000 + i * 100;
     c.retire(now);
     macFor(i, mac);
-    const CopyOutcome o = c.decide(mac, 5, SocialMode::Ambivert, 0, now, 100, 0).outcome;
+    const CopyOutcome o = c.decide(mac, 5, SocialMode::Ambivert, 0, now, 100, 0, 0, false).outcome;
     if (o == CopyOutcome::Skip || o == CopyOutcome::Fire) ++rolls;
   }
   TEST_ASSERT_EQUAL_UINT(lamp::RollCooldownTable::kSlots, rolls);
@@ -400,11 +403,11 @@ void test_cold_peers_take_no_roll() {
   for (uint32_t i = 0; i < 500; ++i) {
     macFor(i, mac);
     TEST_ASSERT_EQUAL(CopyOutcome::NoChance,
-                      c.decide(mac, 3, SocialMode::Extrovert, 0, 1000 + i, 1, 0).outcome);
+                      c.decide(mac, 3, SocialMode::Extrovert, 0, 1000 + i, 1, 0, 0, false).outcome);
   }
   macFor(9999, mac);
   TEST_ASSERT_EQUAL(CopyOutcome::Fire,
-                    c.decide(mac, 5, SocialMode::Extrovert, 0, 2000, 1, 0).outcome);
+                    c.decide(mac, 5, SocialMode::Extrovert, 0, 2000, 1, 0, 0, false).outcome);
 }
 
 void test_set_tuning_checks_key_and_range() {

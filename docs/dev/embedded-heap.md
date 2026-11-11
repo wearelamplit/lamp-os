@@ -503,7 +503,8 @@ scale with the number of peers or the mesh's message rate, so each is bounded:
   16-slot `RollCooldownTable` (about 200 bytes) and 4 pending copies, so a
   crowd of any size takes no heap to decide a copy; a full table rolls
   nothing new until a slot ages out. The self-echo check reads 16 fixed
-  per-type play stamps (`RecentPlays`, 128 bytes) in `ExpressionManager` (`docs/dev/expressions.md`).
+  per-type play stamps (`RecentPlays`, 128 bytes) in `ExpressionManager`.
+  Detail in `docs/dev/expressions.md`.
 - **Moments.** A Moment allocates only its transients, one at a time: a
   `flicker` burst (about 8 bytes a cell plus the Expression) for 700 ms,
   or a `pulse` for about 6 s, admitted as a peer's like any cascade. A

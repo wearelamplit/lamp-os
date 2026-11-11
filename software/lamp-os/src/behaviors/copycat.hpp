@@ -44,7 +44,7 @@ struct ContagionTuning {
   // Odds rise this percent per meeting with the source, up to 10 meetings.
   uint8_t familiarBoostPct = 0;
   // Every chance scales by crowdHalf / (crowdHalf + nearby lamps), so a room of
-  // crowdHalf lamps copies at half the odds.
+  // crowdHalf lamps copies at half the odds. 0 reads as 1.
   uint8_t crowdHalf = 8;
 };
 
@@ -123,7 +123,7 @@ class Copycat {
   // type within tuning.copyRollCooldownMs. Neither spends a roll.
   CopyDecision decide(const uint8_t mac[6], uint8_t disposition, SocialMode mode,
                       uint8_t frameHops, uint32_t nowMs, uint8_t chanceRoll,
-                      uint32_t jitterRoll, size_t nearby = 0, bool playedRecently = false);
+                      uint32_t jitterRoll, size_t nearby, bool playedRecently);
   // A Fire's replay was booked; starts the introvert floor.
   void booked(uint32_t nowMs) { cooldown_.mirrored(nowMs); }
   // True when a copy carrying `hops` announces itself for the next lamp.

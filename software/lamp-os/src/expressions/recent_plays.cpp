@@ -4,7 +4,7 @@
 
 namespace lamp {
 
-void RecentPlays::record(const void* type, uint32_t nowMs) {
+void RecentPlays::record(const ExpressionDescriptor* type, uint32_t nowMs) {
   if (!type) return;
   Stamp* slot = &stamps_[0];
   for (Stamp& s : stamps_) {
@@ -22,7 +22,7 @@ void RecentPlays::record(const void* type, uint32_t nowMs) {
   slot->atMs = nowMs;
 }
 
-bool RecentPlays::playedWithin(const void* type, uint32_t windowMs, uint32_t nowMs) const {
+bool RecentPlays::playedWithin(const ExpressionDescriptor* type, uint32_t windowMs, uint32_t nowMs) const {
   if (!type) return false;
   for (const Stamp& s : stamps_) {
     if (s.type == type) return lampos::msSince(nowMs, s.atMs) < windowMs;

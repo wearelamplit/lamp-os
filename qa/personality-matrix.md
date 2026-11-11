@@ -135,12 +135,12 @@ damping reads), B and C Extrovert. Give A a triggered expression with cascade of
 interval, and let it fire on its own: the app Test button also cascades to B,
 and B's copy then coalesces with the cascaded one and is never passed on. B
 logs `[fondness] roll <type> from <A> hop 1 p=60% fired` and plays it ~0.5 s
-later (`fired` is the roll; the copy is dropped if all 4 pending slots are full, and coalesces if one from A is running), then C logs `hop 2 p=30%` for B's copy (two lamps near damp 75 and 37 by 8/10); wait for a fire C plays.
+later (`fired` is the roll; the copy is dropped if all 4 pending slots are full, and coalesces if one from A is running), then C logs `hop 2 p=30%` for B's copy (two lamps near damp 75 by 8/10, then the hop halves it); wait for a fire C plays.
 `copy.set chainMaxHops 1` on B: B still copies, C logs nothing for it. With A
 firing every few seconds for 5 min, B logs one roll per 3 min for A, the rest
 `cooldown`. `copy.get` confirms the numbers; a reboot restores them. Turn home
-mode on for B with social left on: B logs no `[fondness] roll` line. Set B Smitten
-toward C too: when C's copy comes back, B logs `self` and does not copy it.
+mode on for B with social left on: B logs no `[fondness] roll` line. Turn home
+mode off and reboot B (restoring `chainMaxHops` 3), then set B Smitten toward C too: when C's copy comes back, B logs `self` and does not copy it.
 `copy.set crowdHalf 64` on B lifts its `p=` back near 75%.
 
 ## Pass criteria

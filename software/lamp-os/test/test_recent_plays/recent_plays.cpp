@@ -6,13 +6,14 @@
 
 #include <cstdint>
 
+#include "expressions/expression_schema.hpp"
 #include "expressions/recent_plays.cpp"
 
 using lamp::RecentPlays;
 
 namespace {
 constexpr uint32_t kWindowMs = 180000;
-int g_types[RecentPlays::kSlots + 1];
+lamp::ExpressionDescriptor g_types[RecentPlays::kSlots + 1]{};
 }  // namespace
 
 void setUp() {}
