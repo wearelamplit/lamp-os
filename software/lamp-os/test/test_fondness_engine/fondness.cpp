@@ -16,16 +16,14 @@
 #include "../../src/core/fondness_engine.cpp"
 #include "../../src/util/color.cpp"
 #include "../../src/util/heap_guard.cpp"
+#include "../replaced_new/replaced_new.hpp"
 
 static int g_allocations = 0;
-void* operator new(size_t size) {
+void* testAllocate(size_t size) {
   ++g_allocations;
-  void* p = std::malloc(size ? size : 1);
-  if (!p) throw std::bad_alloc();
-  return p;
+  return std::malloc(size);
 }
-void operator delete(void* p) noexcept { std::free(p); }
-void operator delete(void* p, size_t) noexcept { std::free(p); }
+void testRelease(void* p) noexcept { std::free(p); }
 
 using namespace lamp;
 

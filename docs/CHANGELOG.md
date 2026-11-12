@@ -5,6 +5,15 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## Unreleased
+
+### Fixed
+- **The native test suite passes on Linux, and CI runs on every push to dev.**
+  Four suites that passed on a Mac failed on the Linux CI runner. The web
+  save's memory check now sizes its largest block from the expression list
+  it actually builds, which on a lamp changes nothing today but keeps the
+  check honest as expressions grow.
+
 ## 1.3.5
 
 ### Fixed

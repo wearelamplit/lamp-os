@@ -218,13 +218,15 @@ LoadedConfig loadConfig(ConfigStore& store, LampSettings& lamp, BaseSettings& ba
 // string (grown by doubling while it is parsed, so up to twice it, then kept
 // and copied into the model) and
 // kRawModelBytes for the model at the caps, which carries some slack. The
-// largest single block is a pool of slots, at most kRawPoolBytes, or the
-// longest string's growth, at most twice it plus kRawStringSlack.
+// largest single block is a pool of slots, at most kRawPoolBytes, the
+// model's expression list at its cap, kRawExpressionListBytes, or the longest
+// string's growth, at most twice it plus kRawStringSlack.
 constexpr size_t kRawSlotBytes = 15;
 constexpr size_t kRawStringBytes = 24;
 constexpr size_t kRawLongestPerByte = 4;
 constexpr size_t kRawModelBytes = 4096;
 constexpr size_t kRawPoolBytes = 4096;
+constexpr size_t kRawExpressionListBytes = kMaxExpressions * sizeof(ExpressionConfig);
 constexpr size_t kRawStringSlack = 128;
 
 // What a raw save's heap gate reads off a document without parsing it.

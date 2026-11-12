@@ -1193,7 +1193,7 @@ size_t RawJsonShape::heapBytes() const {
 }
 
 size_t RawJsonShape::largestBlock() const {
-  return std::max(kRawPoolBytes, 2 * longest + kRawStringSlack);
+  return std::max({kRawPoolBytes, kRawExpressionListBytes, 2 * longest + kRawStringSlack});
 }
 
 SaveResult saveRawJson(ConfigStore& store, const char* json, uint8_t* buffer, size_t bufferLen,

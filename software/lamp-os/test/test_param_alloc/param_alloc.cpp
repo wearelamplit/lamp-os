@@ -12,16 +12,15 @@
 #include <string>
 
 #include "config/config_types.hpp"
+#include "../replaced_new/replaced_new.hpp"
 
 static size_t g_allocs = 0;
 
-void* operator new(size_t n) {
+void* testAllocate(size_t n) {
   ++g_allocs;
-  if (void* p = std::malloc(n ? n : 1)) return p;
-  throw std::bad_alloc();
+  return std::malloc(n);
 }
-void operator delete(void* p) noexcept { std::free(p); }
-void operator delete(void* p, size_t) noexcept { std::free(p); }
+void testRelease(void* p) noexcept { std::free(p); }
 
 using namespace lamp;
 

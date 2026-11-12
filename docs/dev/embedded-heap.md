@@ -134,7 +134,9 @@ Two properties make it lethal:
    4 per byte of the longest string (built by doubling, so up to twice it,
    then kept and copied into the model) and 4 KB for the model, which carries
    some slack. A parse that runs out of memory all the same answers 500. Largest
-   block: a 4 KB slot pool, or twice the longest string plus 128 bytes.
+   block: a 4 KB slot pool, the model's expression list at its cap
+   (`kRawExpressionListBytes`, 21 `ExpressionConfig`s: 3.6 KB on the ESP32,
+   4.2 KB on a 64-bit Linux host), or twice the longest string plus 128 bytes.
    Those are a counting allocator's host figures with margin
    (`test_config_persist_validate`: a 5.4 KB document peaks at 16 KB, the
    standard variant's 18 full expressions at 23 KB, a lamp at every cap at

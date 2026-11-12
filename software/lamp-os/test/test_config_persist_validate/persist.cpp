@@ -23,6 +23,7 @@
 #include "../../src/config/config_codec.cpp"
 #include "../../src/util/heap_guard.cpp"
 #include "../../src/util/json_writer.cpp"
+#include "../replaced_new/replaced_new.hpp"
 
 using namespace lamp;
 using config_codec::SaveResult;
@@ -82,20 +83,18 @@ class CountingAllocator : public ArduinoJson::Allocator {
 
 }  // namespace
 
-void* operator new(size_t size) {
+void* testAllocate(size_t size) {
   void* p = std::malloc(size + sizeof(size_t));
-  if (!p) throw std::bad_alloc();
+  if (!p) return nullptr;
   *static_cast<size_t*>(p) = size;
   if (g_counting) g_newTally.add(size);
   return static_cast<size_t*>(p) + 1;
 }
-void operator delete(void* p) noexcept {
-  if (!p) return;
+void testRelease(void* p) noexcept {
   size_t* base = static_cast<size_t*>(p) - 1;
   if (g_counting) g_newTally.live -= std::min(g_newTally.live, *base);
   std::free(base);
 }
-void operator delete(void* p, size_t) noexcept { operator delete(p); }
 
 void setUp(void) {
   g_mock_largest_free_block = 1 << 20;

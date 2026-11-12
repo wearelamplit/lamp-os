@@ -1,12 +1,13 @@
 # workflows adapted from the WLED project using PlatformIO
 name: LampOS CI
 
-# Compile + native-test gate for PRs and non-dev branch pushes. The full
-# distribution build (build.yml) is reserved for releases — not run per PR.
+# Compile + native-test gate for PRs and every branch push, dev included. The
+# branch filter leaves tag pushes out. The full distribution build (build.yml)
+# is reserved for releases — not run per PR.
 on:
   push:
-    branches-ignore:
-      - dev
+    branches:
+      - '**'
   pull_request:
 
 jobs:
