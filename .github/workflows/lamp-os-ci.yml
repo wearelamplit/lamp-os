@@ -3,7 +3,7 @@ name: LampOS CI
 
 # Compile + native-test gate for PRs and every branch push, dev included. The
 # branch filter leaves tag pushes out. The full distribution build (build.yml)
-# is reserved for releases — not run per PR.
+# is reserved for releases and not run per PR.
 on:
   push:
     branches:

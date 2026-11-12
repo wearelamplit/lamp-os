@@ -1,15 +1,16 @@
 #pragma once
 
 // Replaces every unaligned global operator new and delete with one allocate /
-// release pair the including test defines, so no block is ever freed by a
-// form other than the one that took it (ASan keeps any form left unreplaced).
+// release pair the including test defines, so every form takes from and
+// returns to the same allocator (ASan keeps any form left unreplaced).
 // Include from one translation unit per test binary.
 
 #include <cstddef>
 #include <new>
 
-// Returns nullptr to refuse: the throwing forms then throw std::bad_alloc and
-// the nothrow forms return nullptr. Never called with 0.
+// Returns a block aligned to __STDCPP_DEFAULT_NEW_ALIGNMENT__, or nullptr to
+// refuse, which the throwing forms turn into std::bad_alloc. Never called
+// with 0.
 void* testAllocate(std::size_t size);
 // Never called with nullptr.
 void testRelease(void* p) noexcept;

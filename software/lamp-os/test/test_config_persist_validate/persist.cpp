@@ -83,16 +83,21 @@ class CountingAllocator : public ArduinoJson::Allocator {
 
 }  // namespace
 
+// The size rides ahead of the block in a header as wide as new's alignment,
+// so the block keeps that alignment.
+constexpr size_t kSizeHeader = __STDCPP_DEFAULT_NEW_ALIGNMENT__;
+static_assert(kSizeHeader >= sizeof(size_t));
+
 void* testAllocate(size_t size) {
-  void* p = std::malloc(size + sizeof(size_t));
+  void* p = std::malloc(size + kSizeHeader);
   if (!p) return nullptr;
   *static_cast<size_t*>(p) = size;
   if (g_counting) g_newTally.add(size);
-  return static_cast<size_t*>(p) + 1;
+  return static_cast<char*>(p) + kSizeHeader;
 }
 void testRelease(void* p) noexcept {
-  size_t* base = static_cast<size_t*>(p) - 1;
-  if (g_counting) g_newTally.live -= std::min(g_newTally.live, *base);
+  void* base = static_cast<char*>(p) - kSizeHeader;
+  if (g_counting) g_newTally.live -= std::min(g_newTally.live, *static_cast<size_t*>(base));
   std::free(base);
 }
 
@@ -398,6 +403,19 @@ void test_typical_documents_pass_at_the_documented_heap() {
   }
 }
 
+// The counting allocator hands every form a block at new's alignment.
+void test_counted_new_keeps_new_alignment() {
+  void* plain = ::operator new(1);
+  void* array = ::operator new[](1);
+  void* nothrow = ::operator new(1, std::nothrow);
+  for (void* p : {plain, array, nothrow}) {
+    TEST_ASSERT_EQUAL_UINT(0, reinterpret_cast<uintptr_t>(p) % __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+  }
+  ::operator delete(plain);
+  ::operator delete[](array);
+  ::operator delete(nothrow);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_truncated_blob_rejected_and_store_untouched);
@@ -410,5 +428,6 @@ int main(int, char**) {
   RUN_TEST(test_web_document_fixups);
   RUN_TEST(test_lenient_json_is_refused_before_the_parse);
   RUN_TEST(test_a_parse_out_of_memory_is_no_heap);
+  RUN_TEST(test_counted_new_keeps_new_alignment);
   return UNITY_END();
 }
