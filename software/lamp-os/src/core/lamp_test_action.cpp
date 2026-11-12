@@ -16,6 +16,9 @@
 #include "components/network/transport/espnow_link.hpp"
 #include "esp_system.h"
 
+#include <algorithm>
+#include <atomic>
+#include <cctype>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -23,6 +26,8 @@
 
 #include "behaviors/configurator.hpp"
 #include "behaviors/greetable.hpp"
+#include "behaviors/social.hpp"
+#include "behaviors/social_tuning.hpp"
 #include "behaviors/zone_preview_surface.hpp"
 #include "components/apply/apply_brightness.hpp"
 #include "components/apply/apply_expressions.hpp"
@@ -37,6 +42,7 @@
 #include "core/personality_engine.hpp"
 #include "expressions/expression_invocation.hpp"
 #include "expressions/expression_manager.hpp"
+#include "expressions/yawn/yawn_expression.hpp"
 #include "util/bd_addr.hpp"
 #include "util/color.hpp"
 #include "util/gradient.hpp"
@@ -45,6 +51,7 @@ namespace {
 
 lamp::ZonePreviewSurface s_shadeZonePreview;
 lamp::ZonePreviewSurface s_baseZonePreview;
+std::atomic<bool>        s_zonePreviewClearPending{false};
 
 void applyZonePreview(uint32_t posMin, uint32_t posMax,
                       lamp::ExpressionTarget target, lamp::Color color) {
@@ -74,7 +81,11 @@ void clearZonePreview() {
 
 }  // namespace
 
-void resetZonePreviewOnDisconnect() { clearZonePreview(); }
+void postPendingClearZonePreview() { s_zonePreviewClearPending.store(true); }
+
+void drainZonePreviewClear() {
+  if (s_zonePreviewClearPending.exchange(false)) clearZonePreview();
+}
 
 void dispatchLampAction(JsonDocument& doc, unsigned long updateTimeMs) {
   lamp::stampConfiguratorActivity(updateTimeMs);
@@ -275,6 +286,84 @@ namespace {
 
 constexpr size_t kSerialCmdMax = 1024;
 
+// `<key> <decimal>`, a tuning command's arguments; ends `key` in place. False
+// when either is missing or the value is not a bare decimal.
+bool parseTuningArg(char* args, const char*& key, unsigned long& value) {
+  char* sep = strchr(args, ' ');
+  if (!sep || !isdigit(static_cast<unsigned char>(sep[1]))) return false;
+  *sep = '\0';
+  char* end = nullptr;
+  value = strtoul(sep + 1, &end, 10);
+  key = args;
+  return *end == '\0';
+}
+
+struct YawnArg {
+  const char* name;
+  const char* key;
+  bool fraction;  // typed 0..1, stored as a percent
+};
+constexpr YawnArg kYawnArgs[] = {
+    {"dur", lamp::kYawnDurationKey, false},   {"depth", lamp::kYawnDepthKey, false},
+    {"lift", lamp::kYawnLiftKey, false},      {"hold", lamp::kYawnHoldKey, false},
+    {"rec", lamp::kYawnRecoverKey, false},    {"warm", lamp::kYawnWarmthKey, true},
+    {"lag", lamp::kYawnLagKey, false},        {"opacity", lamp::kOpacityParam.key, false},
+};
+
+// `yawn [dur=4500 depth=35 lift=8 hold=500 rec=1800 warm=0.3 lag=200
+// surf=shade|base|both]` plays one yawn now as a local transient that no peer
+// hears. Absent keys take the descriptor defaults; warm is 0..1.
+void runYawnCommand(char* args) {
+  static const uint8_t kLocalMac[6] = {0, 0, 0, 0, 0, 0};
+  lamp::ExpressionInvocation inv;
+  inv.type = lamp::YawnExpression::classDescriptor().id;
+  inv.target = lamp::TARGET_BOTH;
+  char* save = nullptr;
+  for (char* tok = strtok_r(args, " ", &save); tok; tok = strtok_r(nullptr, " ", &save)) {
+    char* eq = strchr(tok, '=');
+    if (!eq) {
+      Serial.printf("[cmd] err yawn arg %s\n", tok);
+      return;
+    }
+    *eq = '\0';
+    const char* value = eq + 1;
+    if (strcmp(tok, "surf") == 0) {
+      if (strcmp(value, "shade") == 0) inv.target = lamp::TARGET_SHADE;
+      else if (strcmp(value, "base") == 0) inv.target = lamp::TARGET_BASE;
+      else if (strcmp(value, "both") == 0) inv.target = lamp::TARGET_BOTH;
+      else {
+        Serial.printf("[cmd] err yawn surf %s\n", value);
+        return;
+      }
+      continue;
+    }
+    const YawnArg* arg = nullptr;
+    for (const YawnArg& a : kYawnArgs) {
+      if (strcmp(tok, a.name) == 0) arg = &a;
+    }
+    if (!arg) {
+      Serial.printf("[cmd] err yawn key %s\n", tok);
+      return;
+    }
+    const float number = strtof(value, nullptr);
+    inv.parameters.set(arg->key, static_cast<uint32_t>(std::max(
+                                     0.0f, arg->fraction ? number * 100.0f + 0.5f : number)));
+  }
+
+  lamp::ExpressionParams shown = inv.parameters;
+  expressionManager.registry().applyDefaults(lamp::YawnExpression::classDescriptor(), shown, 1);
+  const bool started = expressionManager.triggerInvocation(inv, kLocalMac, /*broadcast=*/false,
+                                                           lamp::TransientSource::Local);
+  Serial.printf(
+      "[cmd] %s yawn dur=%u depth=%u lift=%u hold=%u rec=%u warm=%.2f lag=%u opacity=%u "
+      "target=%u\n",
+      started ? "ok" : "err not started", (unsigned)shown.get(lamp::kYawnDurationKey, 0),
+      (unsigned)shown.get(lamp::kYawnDepthKey, 0), (unsigned)shown.get(lamp::kYawnLiftKey, 0),
+      (unsigned)shown.get(lamp::kYawnHoldKey, 0), (unsigned)shown.get(lamp::kYawnRecoverKey, 0),
+      shown.get(lamp::kYawnWarmthKey, 0) / 100.0, (unsigned)shown.get(lamp::kYawnLagKey, 0),
+      (unsigned)shown.get(lamp::kOpacityParam.key, 0), (unsigned)inv.target);
+}
+
 // Runs on the loop task (Core 1), same task as the pending-slot drains, so
 // commands call the drain-side appliers directly instead of posting slots.
 void runSerialCommand(char* line, size_t len) {
@@ -296,6 +385,20 @@ void runSerialCommand(char* line, size_t len) {
     }
     dispatchLampAction(doc, millis());
     Serial.printf("[cmd] ok a=%s\n", a);
+    return;
+  }
+
+  // Stalls the loop task so the loop watchdog's reset can be seen on the rig.
+  if (strcmp(line, "loopwd.hang") == 0) {
+    Serial.println("[cmd] ok loopwd.hang");
+    Serial.flush();
+    volatile bool spin = true;
+    while (spin) {
+    }
+  }
+
+  if (strcmp(line, "yawn") == 0 || strncmp(line, "yawn ", 5) == 0) {
+    runYawnCommand(line + 4);
     return;
   }
 
@@ -362,6 +465,116 @@ void runSerialCommand(char* line, size_t len) {
                   (unsigned)s_powerGovernor.pixelBudgetMa(),
                   (unsigned)s_powerGovernor.ceiling(millis()),
                   (unsigned)lamp::requestedStripLevel());
+    return;
+  }
+
+  if (strcmp(line, "copy.get") == 0) {
+    const lamp::ContagionTuning& t = socialEchoObserver.tuning();
+    Serial.printf("[cmd] ok copy copyRollCooldownMs=%lu chainMaxHops=%u chainHopPct=%u "
+                  "familiarBoostPct=%u crowdHalf=%u\n",
+                  (unsigned long)t.copyRollCooldownMs, (unsigned)t.chainMaxHops,
+                  (unsigned)t.chainHopPct, (unsigned)t.familiarBoostPct,
+                  (unsigned)t.crowdHalf);
+    return;
+  }
+
+  if (strcmp(line, "fond.get") == 0) {
+    const lamp::FondnessTuning& t = fondnessEngine.tuning;
+    const lamp::ContagionTuning& c = socialEchoObserver.tuning();
+    Serial.printf("[cmd] ok fond on=%u tracking=%u energy=%u", (unsigned)config.dispositions().engineEnabled(),
+                  (unsigned)fondnessEngine.tracking(), (unsigned)t.energy);
+    for (size_t i = 0; i < lamp::kEnergyTypeCount; ++i) {
+      Serial.printf(" e.%s=%u", lamp::kEnergyTypes[i], (unsigned)t.typeWeight[i]);
+    }
+    Serial.printf(" eventsPerMin=%u overlap=%u colour=%u hueBand=%u", (unsigned)t.eventsPerMin,
+                  (unsigned)t.overlap, (unsigned)t.colour, (unsigned)t.hueBand);
+    Serial.printf(" familiar=%u familiarMode=%u,%u,%u meetEveryH=%u", (unsigned)t.familiar,
+                  (unsigned)t.familiarMode[0], (unsigned)t.familiarMode[1],
+                  (unsigned)t.familiarMode[2], (unsigned)t.meetEveryH);
+    Serial.printf(" absence=%u deltaCapPerMin=%u notchFloorMin=%u notchesPerHour=%u",
+                  (unsigned)t.absence, (unsigned)t.deltaCapPerMin, (unsigned)t.notchFloorMin,
+                  (unsigned)t.notchesPerHour);
+    Serial.printf(" copyRollCooldownMs=%lu chainMaxHops=%u chainHopPct=%u",
+                  (unsigned long)c.copyRollCooldownMs, (unsigned)c.chainMaxHops,
+                  (unsigned)c.chainHopPct);
+    Serial.printf(" familiarBoostPct=%u crowdHalf=%u", (unsigned)c.familiarBoostPct,
+                  (unsigned)c.crowdHalf);
+    const lamp::ReunionTuning& r = shadeSocialBehavior.reunionTuning();
+    Serial.printf(" reunionMin=%u reunionX=%u hintCooldownMs=%lu hintOpacity=%u",
+                  (unsigned)r.reunionMin, (unsigned)r.reunionX,
+                  (unsigned long)r.hintCooldownMs, (unsigned)r.hintOpacity);
+    const lamp::YawnTuning& y = socialEchoObserver.yawnTuning();
+    Serial.printf(" yawnRollCooldownMs=%lu yawnSelfFloorMs=%lu tiredYawnPct=%u",
+                  (unsigned long)y.yawnRollCooldownMs, (unsigned long)y.yawnSelfFloorMs,
+                  (unsigned)y.tiredYawnPct);
+    Serial.printf(" tiredYawnEveryMs=%lu yawn.salty=%u yawn.wary=%u yawn.neutral=%u",
+                  (unsigned long)y.tiredYawnEveryMs, (unsigned)y.backPct[0],
+                  (unsigned)y.backPct[1], (unsigned)y.backPct[2]);
+    Serial.printf(" yawn.fond=%u yawn.smitten=%u\n", (unsigned)y.backPct[3],
+                  (unsigned)y.backPct[4]);
+    return;
+  }
+
+  // `fond.set` reaches every social table, and `copy.set`, `reunion.set` and
+  // `yawn.set` their own. RAM only, so a reboot restores the defaults.
+  for (const char* scope : {"fond", "copy", "reunion", "yawn"}) {
+    const size_t n = strlen(scope);
+    if (strncmp(line, scope, n) != 0 || strncmp(line + n, ".set ", 5) != 0) continue;
+    const char* key = nullptr;
+    unsigned long value = 0;
+    const lamp::SocialTuningSet tunings{fondnessEngine.tuning, socialEchoObserver.tuning(),
+                                        shadeSocialBehavior.reunionTuning(),
+                                        socialEchoObserver.yawnTuning()};
+    if (!parseTuningArg(line + n + 5, key, value) ||
+        !lamp::setSocialTuning(tunings, scope, key, value)) {
+      Serial.printf("[cmd] err %s.set\n", scope);
+      return;
+    }
+    Serial.printf("[cmd] ok %s.set %s=%lu\n", scope, key, value);
+    return;
+  }
+
+  if (strcmp(line, "fond.on") == 0 || strcmp(line, "fond.off") == 0) {
+    const bool on = line[6] == 'n';
+    fondnessEngine.setEnabled(on, lamp::uptimeMs());
+    Serial.printf("[cmd] ok fond.%s\n", on ? "on" : "off");
+    return;
+  }
+
+  if (strcmp(line, "fond.peers") == 0) {
+    const uint64_t now = lamp::uptimeMs();
+    size_t n = 0;
+    uint8_t mac[6];
+    lamp::PeerRecord r;
+    while (config.dispositions().peerAt(n, mac, r, now)) {
+      char addr[18];
+      lamp::formatBdAddr(mac, addr);
+      Serial.printf("[fond] %s disp=%u score=%d", addr, (unsigned)r.disp, (int)r.score);
+      Serial.printf(" meets=%u meetAgeH=%u unseenMin=%u\n", (unsigned)r.meets,
+                    (unsigned)r.meetAgeH, (unsigned)r.unseenMin);
+      ++n;
+    }
+    Serial.printf("[cmd] ok fond.peers n=%u\n", (unsigned)n);
+    return;
+  }
+
+  if (strcmp(line, "reunion.get") == 0) {
+    const lamp::ReunionTuning& t = shadeSocialBehavior.reunionTuning();
+    Serial.printf("[cmd] ok reunion reunionMin=%u reunionX=%u hintCooldownMs=%lu hintOpacity=%u\n",
+                  (unsigned)t.reunionMin, (unsigned)t.reunionX,
+                  (unsigned long)t.hintCooldownMs, (unsigned)t.hintOpacity);
+    return;
+  }
+
+  if (strcmp(line, "yawn.get") == 0) {
+    const lamp::YawnTuning& t = socialEchoObserver.yawnTuning();
+    Serial.printf("[cmd] ok yawn yawnRollCooldownMs=%lu yawnSelfFloorMs=%lu tiredYawnPct=%u "
+                  "tiredYawnEveryMs=%lu\n",
+                  (unsigned long)t.yawnRollCooldownMs, (unsigned long)t.yawnSelfFloorMs,
+                  (unsigned)t.tiredYawnPct, (unsigned long)t.tiredYawnEveryMs);
+    Serial.printf("[cmd] ok yawn salty=%u wary=%u neutral=%u fond=%u smitten=%u\n",
+                  (unsigned)t.backPct[0], (unsigned)t.backPct[1], (unsigned)t.backPct[2],
+                  (unsigned)t.backPct[3], (unsigned)t.backPct[4]);
     return;
   }
 

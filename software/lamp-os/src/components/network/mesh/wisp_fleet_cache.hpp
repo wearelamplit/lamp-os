@@ -40,10 +40,10 @@ struct WispFleetCache {
   // `lampMacs` is [count][6] MAC bytes from one claim frame.
   void upsertClaims(const uint8_t lampMacs[][6], uint8_t count,
                     uint32_t nowMs);
-  // `entries` is count * 12 bytes: lampMac(6)+baseRGB(3)+shadeRGB(3). `w` is
-  // count * 2 bytes of baseW,shadeW in entry order, or nullptr for W = 0.
-  void upsertPaints(const uint8_t* entries, const uint8_t* w, uint8_t count,
-                    uint32_t nowMs);
+  // One lamp's RGBW paint. With keepColors, a lamp already held fresh keeps
+  // its colours and only refreshes its age.
+  void upsertPaint(const uint8_t mac[6], const uint8_t base[4],
+                   const uint8_t shade[4], uint32_t nowMs, bool keepColors);
 
   bool containsClaim(const uint8_t mac[6], uint32_t nowMs) const;
   // Fills baseOut/shadeOut (RGBW, 4 bytes each) on a fresh hit.
@@ -60,6 +60,9 @@ struct WispFleetCache {
   size_t buildClaimsBlob(uint8_t* out, size_t outCap, uint32_t nowMs) const;
 
   void clear();
+  // Drops entries gone stale, so they cannot read fresh again one millis()
+  // wrap later. Call at least once per lampos::kRetiredAgeMs.
+  void retire(uint32_t nowMs);
 };
 
 }  // namespace lamp

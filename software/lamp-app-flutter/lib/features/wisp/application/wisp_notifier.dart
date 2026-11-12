@@ -149,8 +149,9 @@ class WispNotifier extends _$WispNotifier {
   DateTime? _lastClaimsReadAt;
   DateTime? _lastStatusPollAt;
 
-  /// True from a shuffle tap until a claims read shows [_livePaint] actually
-  /// changed, so the preview can flag the residual mesh-relay lag instead of
+  /// True from a shuffle tap until a claims read, started after the wisp
+  /// reported a new shuffle seed, shows [_livePaint] changed from the tap, so
+  /// the preview can flag the residual mesh-relay lag instead of
   /// silently showing pre-shuffle colors. Bounded by [_recalcFallback] so a
   /// shuffle that produces no visible change (e.g. no claimed lamps) can't
   /// hang the indicator.
@@ -158,6 +159,13 @@ class WispNotifier extends _$WispNotifier {
   bool _colorsRecalculating = false;
   Map<String, ({LampColor base, LampColor shade})>? _shuffleSnapshot;
   Timer? _recalcFallbackTimer;
+
+  // The wisp's shuffle seed when Shuffle was tapped, null when unknown, and
+  // whether a status or config has since reported a different one. Until the
+  // seed moves the wisp may not have re-rolled, and a drift step alone can
+  // change the chips, so no claims read ends [colorsRecalculating] before.
+  int? _shuffleSeedAtTap;
+  bool _shuffleSeedMoved = false;
 
   /// True while a shuffle's new colors haven't propagated back through
   /// CHAR_WISP_CLAIMS yet. Drives a "recalculating" hint on the preview.
@@ -249,6 +257,8 @@ class WispNotifier extends _$WispNotifier {
     _lastStatusPollAt = null;
     _colorsRecalculating = false;
     _shuffleSnapshot = null;
+    _shuffleSeedAtTap = null;
+    _shuffleSeedMoved = false;
 
     _newestLampStamp = null;
     _config = null;
@@ -435,6 +445,7 @@ class WispNotifier extends _$WispNotifier {
   Future<void> _loadClaims() async {
     if (_readBusy || _disposed) return;
     _claimsReadInFlight = true;
+    final seedMoved = _shuffleSeedMoved;
     try {
       final parsed = await _repo.readClaims();
       if (_disposed) return;
@@ -442,6 +453,7 @@ class WispNotifier extends _$WispNotifier {
       _livePaint = parsed?.colors ?? const {};
       final snapshot = _shuffleSnapshot;
       if (_colorsRecalculating &&
+          seedMoved &&
           snapshot != null &&
           !_livePaintEqual(_livePaint, snapshot)) {
         _colorsRecalculating = false;
@@ -490,6 +502,7 @@ class WispNotifier extends _$WispNotifier {
       return;
     }
     next = guarded;
+    _noteShuffleSeed(next);
     _maybeRereadForPalette(next);
     _maybeRereadConfig(next);
     // Throttle: claims change rarely; re-read at most once per ~3 s so this
@@ -600,8 +613,16 @@ class WispNotifier extends _$WispNotifier {
     final cur = state.value;
     if (cur == null) return;
     final merged = _withHeldConfig(cur);
+    _noteShuffleSeed(merged);
     _opSeqs.add(merged.opSeq);
     state = AsyncData(merged);
+  }
+
+  void _noteShuffleSeed(WispStatus status) {
+    final atTap = _shuffleSeedAtTap;
+    if (atTap != null && status.configKnown && status.shuffleSeed != atTap) {
+      _shuffleSeedMoved = true;
+    }
   }
 
   // The small, reliable status NOTIFY carries paletteIdPrefix; a changed
@@ -857,6 +878,10 @@ class WispNotifier extends _$WispNotifier {
   /// the app preview re-rolls in lock-step without optimistic state here.
   Future<void> shuffle() async {
     _shuffleSnapshot = Map.of(_livePaint);
+    final held = state.value;
+    _shuffleSeedAtTap =
+        held != null && held.configKnown ? held.shuffleSeed : null;
+    _shuffleSeedMoved = _shuffleSeedAtTap == null;
     _colorsRecalculating = true;
     _recalcFallbackTimer?.cancel();
     _recalcFallbackTimer = Timer(_recalcFallback, () {

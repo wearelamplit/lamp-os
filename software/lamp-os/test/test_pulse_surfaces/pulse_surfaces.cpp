@@ -13,6 +13,7 @@
 #include "../../src/core/frame_buffer.cpp"
 #include "../../src/expressions/expression.cpp"
 #include "../../src/expressions/pulse/pulse_expression.cpp"
+#include "../../src/expressions/glitchy/glitchy_expression.cpp"
 #include "expressions/surface_plan.hpp"
 
 using namespace lamp;
@@ -269,6 +270,37 @@ int firesForPlan(const ExpressionDescriptor* d) {
   return g_fired;
 }
 
+// An auto-trigger pulse whose control() is skipped for over 24.8 days, as
+// home mode skips a disabled type, fires on its first control() after.
+void test_auto_trigger_fires_after_a_long_skip() {
+  Rig rig;
+  g_fired = 0;
+  set_mock_millis(0);
+  PulseExpression p(&rig.base);
+  build(rig, p, TARGET_BASE, {});
+  p.autoTriggerEnabled = true;
+  set_mock_millis((1u << 31) + 2000000);
+  p.control();
+  TEST_ASSERT_EQUAL_INT(1, g_fired);
+}
+
+// A glitch frozen mid-paint for over 24.8 days, as home mode freezes a
+// disabled type, ends on its next draw instead of holding for weeks more.
+void test_frozen_glitch_ends_after_a_long_skip() {
+  Rig rig;
+  set_mock_millis(1000);
+  GlitchyExpression g(&rig.base);
+  g.setBehaviorContext(&rig.ctx);
+  g.configure({kPulse}, 300, 900, TARGET_BASE);
+  g.autoTriggerEnabled = false;
+  g.configureFromParameters({});
+  TEST_ASSERT_TRUE(g.trigger());
+  g.draw();
+  set_mock_millis(1000 + (1u << 31) + 10000);
+  g.draw();
+  TEST_ASSERT_EQUAL_INT(STOPPED, g.animationState);
+}
+
 void test_both_fires_once_per_logical_trigger() {
   TEST_ASSERT_EQUAL_INT(1, firesForPlan(&PulseExpression::classDescriptor()));
   const ExpressionDescriptor perSurface{};
@@ -469,6 +501,8 @@ int main(int, char**) {
   RUN_TEST(test_plan_both_other_type_builds_one_per_surface);
   RUN_TEST(test_plan_single_surface_targets_unjoined);
   RUN_TEST(test_both_fires_once_per_logical_trigger);
+  RUN_TEST(test_auto_trigger_fires_after_a_long_skip);
+  RUN_TEST(test_frozen_glitch_ends_after_a_long_skip);
   RUN_TEST(test_both_wave_crosses_join_continuously);
   RUN_TEST(test_both_maps_each_surface_zone);
   RUN_TEST(test_both_speed_spans_whole_strip);

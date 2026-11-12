@@ -2,11 +2,13 @@
 
 #include <cstdint>
 
+#include <lampos/protocol/presence.hpp>
+
 // HELLO broadcast interval. Airtime scales N²/interval as the fleet grows,
 // so this is the steady-state mesh-traffic knob. Must stay well under
 // LAMP_PRUNE_TIME_MS so a couple of lost beacons don't prune a live peer
 // (prune tolerates 8 missed emits at 30s).
-#define LAMP_HELLO_INTERVAL_MS 30000
+#define LAMP_HELLO_INTERVAL_MS (lamp_protocol::kLampHelloIntervalMs)
 
 static_assert(LAMP_HELLO_INTERVAL_MS == 30000,
               "LAMP_HELLO_INTERVAL_MS is the fleet airtime budget (N²/interval) "
@@ -16,15 +18,14 @@ static_assert(LAMP_HELLO_INTERVAL_MS == 30000,
 // Boot burst: the first LAMP_HELLO_BURST_WINDOW_MS of uptime emit HELLO every
 // LAMP_HELLO_BURST_INTERVAL_MS so a missed first HELLO refills the roster in
 // seconds; airtime is elevated only in this window, then settles to the steady
-// 60 s budget. Bench-tunable.
+// 30 s budget. Bench-tunable.
 #define LAMP_HELLO_BURST_WINDOW_MS 30000
 #define LAMP_HELLO_BURST_INTERVAL_MS 5000
 
 namespace lamp {
 
-// millis() is uptime-since-boot, so uptimeMs < window naturally IS the boot
-// window.
-inline uint32_t helloIntervalMs(uint32_t uptimeMs) {
+// `uptimeMs` is milliseconds since boot from a clock that never wraps.
+inline uint32_t helloIntervalMs(uint64_t uptimeMs) {
   return uptimeMs < LAMP_HELLO_BURST_WINDOW_MS ? LAMP_HELLO_BURST_INTERVAL_MS
                                                : LAMP_HELLO_INTERVAL_MS;
 }

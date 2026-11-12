@@ -1,10 +1,12 @@
-// One monotonic seq for every wisp frame across both beacons. Receivers dedup
-// on (srcMac, msgType, seq), so PresenceBeacon and StatusEmitter must draw from
+// One seq for every wisp frame across both beacons. Receivers dedup on
+// (srcMac, msgType, seq), so PresenceBeacon and StatusEmitter must draw from
 // this single counter or their frames collide in the dedup ring.
 
 #pragma once
 
 #include <cstdint>
+
+#include "wire/lamp_protocol.hpp"
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 #include <freertos/FreeRTOS.h>
@@ -26,10 +28,10 @@ namespace wisp {
 // Bump and frame build stay under the same mux so the two beacon tasks never share a seq.
 struct SeqSource {
   WISP_SEQ_PORTMUX_TYPE mux = WISP_SEQ_PORTMUX_INIT;
-  uint16_t counter = 0;
+  lamp_protocol::SenderSeq counter;
 
   // Caller holds mux.
-  uint16_t next() { return counter++; }
+  uint16_t next() { return counter.next(); }
 };
 
 }  // namespace wisp

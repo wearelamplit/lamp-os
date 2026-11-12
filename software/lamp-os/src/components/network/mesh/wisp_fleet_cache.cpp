@@ -2,6 +2,8 @@
 
 #include <cstring>
 
+#include <lampos/clock.hpp>
+
 namespace lamp {
 
 namespace {
@@ -46,20 +48,19 @@ void WispFleetCache::upsertClaims(const uint8_t lampMacs[][6], uint8_t count,
   }
 }
 
-void WispFleetCache::upsertPaints(const uint8_t* entries, const uint8_t* w,
-                                  uint8_t count, uint32_t nowMs) {
-  if (!entries) return;
-  for (uint8_t i = 0; i < count; ++i) {
-    const uint8_t* src = entries + static_cast<size_t>(i) * 12;
-    PaintEntry& e = slotFor(paints, src, nowMs);
-    std::memcpy(e.mac, src, 6);
-    std::memcpy(e.base, src + 6, 3);
-    std::memcpy(e.shade, src + 9, 3);
-    e.base[3] = w ? w[i * 2] : 0;
-    e.shade[3] = w ? w[i * 2 + 1] : 0;
-    e.lastSeenMs = nowMs;
-    e.valid = true;
+void WispFleetCache::upsertPaint(const uint8_t mac[6], const uint8_t base[4],
+                                 const uint8_t shade[4], uint32_t nowMs,
+                                 bool keepColors) {
+  PaintEntry& e = slotFor(paints, mac, nowMs);
+  const bool held = fresh(e.valid, e.lastSeenMs, nowMs) &&
+                    std::memcmp(e.mac, mac, 6) == 0;
+  if (!(keepColors && held)) {
+    std::memcpy(e.mac, mac, 6);
+    std::memcpy(e.base, base, 4);
+    std::memcpy(e.shade, shade, 4);
   }
+  e.lastSeenMs = nowMs;
+  e.valid = true;
 }
 
 bool WispFleetCache::containsClaim(const uint8_t mac[6],
@@ -129,6 +130,15 @@ size_t WispFleetCache::buildClaimsBlob(uint8_t* out, size_t outCap,
     ext[2] = shade[3];
   }
   return withPaint ? 1 + n * kBlobEntrySize : extBase;
+}
+
+void WispFleetCache::retire(uint32_t nowMs) {
+  for (ClaimEntry& e : claims) {
+    if (lampos::msSince(nowMs, e.lastSeenMs) > kStaleMs) e.valid = false;
+  }
+  for (PaintEntry& e : paints) {
+    if (lampos::msSince(nowMs, e.lastSeenMs) > kStaleMs) e.valid = false;
+  }
 }
 
 void WispFleetCache::clear() {

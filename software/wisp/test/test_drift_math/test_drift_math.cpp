@@ -1,6 +1,7 @@
 #include <unity.h>
-#include <initializer_list>
 #include "paint/drift.hpp"
+
+#include <initializer_list>
 
 void setUp() {}
 void tearDown() {}
@@ -18,6 +19,7 @@ void test_rotation_wraps() {
   TEST_ASSERT_EQUAL_UINT32(0, wisp::nextDriftIdx(2, 3));   // wrap
   TEST_ASSERT_EQUAL_UINT32(0, wisp::nextDriftIdx(5, 0));   // n==0 guard
 }
+
 void test_drift_fade_with_zero_pct() {
   for (uint32_t rnd : {0u, 1u, 0xFFFFFFFFu}) {
     TEST_ASSERT_EQUAL_UINT32(20000, wisp::driftFadeMs(120000, 0, rnd));
@@ -29,8 +31,6 @@ void test_drift_fade_with_max_pct_min_rnd() {
   TEST_ASSERT_EQUAL_UINT32(20000, wisp::driftFadeMs(3600000, 100, 0));
 }
 void test_drift_fade_with_max_pct_reaches_interval() {
-  // When fadePct=100, fadeMax = intervalMs, so max achievable is intervalMs.
-  // Use rnd=(intervalMs-20000) to reach the maximum.
   TEST_ASSERT_EQUAL_UINT32(120000, wisp::driftFadeMs(120000, 100, 100000));
   TEST_ASSERT_EQUAL_UINT32(3600000, wisp::driftFadeMs(3600000, 100, 3580000));
 }
@@ -58,22 +58,35 @@ void test_drift_fade_bounds() {
     TEST_ASSERT_TRUE(f <= c.intervalMs);
   }
 }
-void test_keepalive_not_due_before_deadline() {
-  TEST_ASSERT_FALSE(wisp::keepaliveDue(44999, 0, 45000));
+void test_drift_fade_floors_an_interval_under_the_minimum() {
+  for (uint8_t pct : {0, 50, 100}) {
+    TEST_ASSERT_EQUAL_UINT32(20000, wisp::driftFadeMs(10000, pct, 0xFFFFFFFFu));
+  }
 }
-void test_keepalive_due_at_deadline() {
-  TEST_ASSERT_TRUE(wisp::keepaliveDue(45000, 0, 45000));
+void test_drift_fade_longer_with_higher_pct() {
+  // Same draw, higher setting: the fade range widens, so the pick grows.
+  const uint32_t rnd = 70001u;
+  TEST_ASSERT_TRUE(wisp::driftFadeMs(120000, 30, rnd) <
+                   wisp::driftFadeMs(120000, 90, rnd));
 }
-void test_keepalive_due_past_deadline() {
-  TEST_ASSERT_TRUE(wisp::keepaliveDue(100000, 0, 45000));
+
+void test_fade_weight_starts_at_zero() {
+  TEST_ASSERT_EQUAL_UINT8(0, wisp::driftFadeWeight(0, 37000));
 }
-void test_keepalive_force_due_overrides_deadline() {
-  // now=5000 is well inside the 30s window (the wisp boot-window gap): a
-  // FAILed send must still force a retry, not wait out the deadline.
-  TEST_ASSERT_TRUE(wisp::keepaliveDue(5000, 0, 30000, /*forceDue=*/true));
+void test_fade_weight_rises_with_elapsed() {
+  const uint8_t quarter = wisp::driftFadeWeight(9250, 37000);
+  const uint8_t half = wisp::driftFadeWeight(18500, 37000);
+  TEST_ASSERT_TRUE(quarter > 0 && quarter < half && half < 255);
 }
-void test_keepalive_not_force_due_still_honors_deadline() {
-  TEST_ASSERT_FALSE(wisp::keepaliveDue(5000, 0, 30000, /*forceDue=*/false));
+void test_fade_weight_full_once_done() {
+  TEST_ASSERT_EQUAL_UINT8(255, wisp::driftFadeWeight(37000, 37000));
+  TEST_ASSERT_EQUAL_UINT8(255, wisp::driftFadeWeight(90000, 37000));
+}
+void test_fade_weight_full_for_zero_fade() {
+  TEST_ASSERT_EQUAL_UINT8(255, wisp::driftFadeWeight(0, 0));
+}
+void test_fade_weight_just_short_of_longest_fade() {
+  TEST_ASSERT_TRUE(wisp::driftFadeWeight(3599999, 3600000) < 255);
 }
 
 void test_unicast_gate_closed_before_min_gap() {
@@ -86,22 +99,6 @@ void test_unicast_gate_open_past_min_gap() {
   TEST_ASSERT_TRUE(wisp::unicastGateOpen(5000, 1000, 18));
 }
 
-void test_reaffirm_mid_fade_returns_remaining() {
-  // Fade started at t=0 with a 70s duration; keep-alive fires at 45s.
-  TEST_ASSERT_EQUAL_UINT32(25000, wisp::reaffirmFadeMs(45000, 70000, 1500));
-}
-void test_reaffirm_post_fade_floors_at_min() {
-  // fadeEndMs already elapsed: held colour, floor to the reaffirm minimum.
-  TEST_ASSERT_EQUAL_UINT32(1500, wisp::reaffirmFadeMs(50000, 40000, 1500));
-}
-void test_reaffirm_exactly_at_fade_end_floors_at_min() {
-  TEST_ASSERT_EQUAL_UINT32(1500, wisp::reaffirmFadeMs(40000, 40000, 1500));
-}
-void test_reaffirm_remaining_below_floor_uses_floor() {
-  // 1s left on the fade, floor is 1.5s: floor wins so no snap.
-  TEST_ASSERT_EQUAL_UINT32(1500, wisp::reaffirmFadeMs(39000, 40000, 1500));
-}
-
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_slot_divides_interval_by_count);
@@ -111,17 +108,15 @@ int main() {
   RUN_TEST(test_drift_fade_with_max_pct_min_rnd);
   RUN_TEST(test_drift_fade_with_max_pct_reaches_interval);
   RUN_TEST(test_drift_fade_bounds);
-  RUN_TEST(test_keepalive_not_due_before_deadline);
-  RUN_TEST(test_keepalive_due_at_deadline);
-  RUN_TEST(test_keepalive_due_past_deadline);
-  RUN_TEST(test_keepalive_force_due_overrides_deadline);
-  RUN_TEST(test_keepalive_not_force_due_still_honors_deadline);
+  RUN_TEST(test_drift_fade_floors_an_interval_under_the_minimum);
+  RUN_TEST(test_drift_fade_longer_with_higher_pct);
+  RUN_TEST(test_fade_weight_starts_at_zero);
+  RUN_TEST(test_fade_weight_rises_with_elapsed);
+  RUN_TEST(test_fade_weight_full_once_done);
+  RUN_TEST(test_fade_weight_full_for_zero_fade);
+  RUN_TEST(test_fade_weight_just_short_of_longest_fade);
   RUN_TEST(test_unicast_gate_closed_before_min_gap);
   RUN_TEST(test_unicast_gate_open_at_min_gap);
   RUN_TEST(test_unicast_gate_open_past_min_gap);
-  RUN_TEST(test_reaffirm_mid_fade_returns_remaining);
-  RUN_TEST(test_reaffirm_post_fade_floors_at_min);
-  RUN_TEST(test_reaffirm_exactly_at_fade_end_floors_at_min);
-  RUN_TEST(test_reaffirm_remaining_below_floor_uses_floor);
   return UNITY_END();
 }

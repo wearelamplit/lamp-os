@@ -104,9 +104,10 @@ struct RosterEntry {
   // invariant for PersonalityEngine hysteresis). -127 = unknown, sorts to back.
   // snapshotNear() sorts descending; getMesh() does not.
   int8_t lastRssi = -127;
-  // ESP-NOW HELLO RSSI (dBm), written only by addOrUpdateFromEspNow. Distinct
-  // from lastRssi (BLE-scan RSSI): feeds the OTA distributor's signal-floor
-  // gate. -127 = unknown, not gated.
+  // RSSI (dBm) of the peer's own direct ESP-NOW HELLO, written only by
+  // addOrUpdateFromEspNow; a relayed copy never writes it. Distinct from
+  // lastRssi (BLE-scan RSSI): feeds the OTA distributor's signal-floor gate.
+  // -127 = unknown, not gated.
   int8_t espnowRssi = -127;
 
   // Canonical uppercase colon-hex mac ("AA:BB:CC:DD:EE:FF"), the
@@ -136,6 +137,7 @@ struct NearbyCopy {
   uint32_t lastSeenNearMs = 0;
   uint32_t lastSeenBleMs = 0;
   lamp_protocol::LampVariant variant = lamp_protocol::LampVariant::Unknown;
+  bool     acknowledged = false;  // greeted, or consumed by home mode, since it arrived
 };
 static_assert(std::is_trivially_copyable<NearbyCopy>::value,
               "snapshot entries must be a trivial copy");
@@ -229,6 +231,11 @@ class LampRoster {
   // Drop entries whose most-recent sighting (max of the two transports)
   // is older than `maxAgeMs`.
   void prune(uint32_t maxAgeMs);
+
+  // Retires every entry's sighting stamps, so a stale one cannot read as
+  // recent again one millis() wrap later. Call at least once per
+  // lampos::kRetiredAgeMs.
+  void retireSightings(uint32_t nowMs);
 
   // Peers seen near within maxAgeMs, sorted by RSSI descending (front =
   // physically closest; equal RSSI breaks on mac ascending), projected into a
@@ -366,7 +373,9 @@ class LampRoster {
                       const uint8_t selfMac[6], uint32_t nowMs);
 
   // Accumulate one drained MSG_WISP_STATE slot's entries, W included, into
-  // the fleet cache. Same display-slot admission as cacheWispHello.
+  // the fleet cache as the colours the wisp assigns: a fading lamp's drift
+  // target, else its frame colour. Same display-slot admission as
+  // cacheWispHello.
   // Loop-task-only writer (Core 1).
   void cacheWispState(const PendingWispState& slot, uint32_t nowMs);
 
@@ -390,6 +399,11 @@ class LampRoster {
   // fresh, returning true. False (out untouched) when empty, stale, or the
   // bounded take times out. The unicast target for the lamp's wisp control op.
   bool copyDisplayWispMac(uint8_t out[6], uint32_t nowMs);
+
+  // Ages out the wisp slot and fleet stamps that have passed their windows, so
+  // none reads fresh again one millis() wrap later. Call at least once per
+  // lampos::kRetiredAgeMs.
+  void retireStaleWisp(uint32_t nowMs);
 
   // Build and return the merged wispStatus JSON (see mergeWispStatusJson).
   // `maxLen` 0 serves it whole for the `wispstatus` page section;
@@ -451,7 +465,7 @@ class LampRoster {
   size_t findIndexLocked(const uint8_t mac[6]) const;
   // Caller must hold the mutex. Evicts the entry with the oldest combined
   // last-seen if the store is at capacity.
-  void evictOldestIfFullLocked();
+  void evictOldestIfFullLocked(uint32_t nowMs);
 };
 
 extern LampRoster lampRoster;  // single global instance, defined in .cpp

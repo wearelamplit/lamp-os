@@ -5,6 +5,320 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## 1.3.5
+
+### Fixed
+- **My Lamps hides lamps the phone hasn't heard lately again.** A lamp heard
+  once stayed listed as online while any other lamp kept advertising, and
+  coming back to My Lamps (after opening a lamp, say) brought back every lamp
+  from the last scan, switched off or not.
+- **A lamp mid-update stays out of the app's reach until the update ends.**
+  An update between lamps kicks the app off so the firmware has the radio,
+  but the lamp started advertising again right away and the app reconnected
+  mid-transfer, slowing the update and squeezing the lamp's memory. The lamp
+  now stays hidden until the transfer finishes, then comes back.
+- **Losing the app mid zone preview no longer risks a crash.** Dropping the
+  connection while the expression editor's zone preview was up put the
+  lamp's scene back from the Bluetooth task while the lamp was drawing it.
+- **Mesh updates judge a lamp's signal by that lamp.** A lamp read a peer's
+  signal from whichever lamp last passed its presence along, so a weak direct
+  link could look strong and draw a firmware offer that never got through. It
+  now goes by the signal heard straight from that lamp.
+- **A lamp mid-update only listens to the lamp it agreed to.** Firmware
+  pieces or a finish signal from a second lamp could
+  land in the new image or fail an update another lamp was still sending.
+- **Frames meant for other lamps no longer crowd out a lamp's own updates.**
+  A busy lamp's duplicate filter filled with other lamps' firmware traffic and
+  could drop or re-apply its own. Only frames addressed to it take a slot now.
+- **Presence frames from a lamp no longer inherit the previous lamp's
+  details.** A short presence frame could keep the update state, channel or
+  variant of the last frame read.
+
+## 1.3.4
+
+Wisps update over USB only. Reflash each wisp so app commands still reach it
+after the lamp you're connected through restarts, and so it stops logging a
+stray error after saving settings.
+
+### Added
+- **Lamps have a social life of their own.** Each lamp remembers the lamps it
+  meets (up to 100) and lets its feelings about them drift. An introvert cools
+  toward a lamp that keeps firing loud expressions and an extrovert warms to
+  it; sharing expressions or wearing a matching or complementary colour wins a
+  lamp over; lamps that meet day after day grow fond, an introvert twice as
+  fast. Familiarity alone stops at Fond. Feelings move at most one step per
+  lamp per hour and four steps an hour in all.
+  - Fond friends act like it. After four hours of on-time apart, a smitten
+    friend gets a greeting held twice as long with twice the breaths (once per
+    absence). Now and then a lamp breathes a faint shimmer of a fond or
+    smitten friend's colour across its shade (at most every 10 minutes, less
+    in a crowd). Yawns are catching: a worn-out introvert yawns now and then,
+    and a nearby lamp may yawn back, likelier the fonder it is of the yawner,
+    rarer in a crowd, at most once every 5 minutes per lamp.
+  - Home mode pauses all of it, and time at home counts toward nothing.
+  - When the list is full a lamp forgets the one it cares least about, so
+    friends and regulars stay; a neutral lamp not seen for 14 days of on-time
+    is forgotten at startup. Saving from the app merges: lamps the app doesn't
+    list are kept. Flashing back to 1.3.3 shows every lamp as neutral.
+  - Debug builds: `fond.off` turns it off (stays off across restarts; lamps
+    then copy as on 1.3.3), `fond.peers` lists what a lamp knows, and
+    `fond.get` / `fond.set` show and tune every social number live.
+- **Copycat chains.** A lamp that copies a fond peer's expression passes the
+  copy on, so a lamp near it can copy the copy. Each hop is half as likely as
+  the one before and a chain stops after 3 hops. Lamps on older firmware still
+  copy, they just don't pass it on.
+- **Yawn expression.** The lamp takes a slow breath in, dims to 70% of its
+  scene, warms a little, holds for a beat, then eases back. Base and shade
+  move together by default. Depth, base lag, warmth, lift, duration and
+  surface are adjustable in the expression's settings.
+- **Move a strip to another data pin from the app.** With advanced mode on,
+  LED setup shows a data pin row per strip: pick a GPIO, tap Update, and the
+  lamp restarts driving that strip from the new pin. "Built-in (GPIO 12)" puts
+  it back. Handy when a board has a dead pin. Pins other strips use are greyed
+  out; a pin the lamp can't use (a button or touch pad's) leaves the strip
+  where it was and the app says why. Lamps on older firmware don't show the
+  row.
+
+### Fixed
+- **Mesh updates reach lamps after the sending lamp restarts.** A restarted
+  lamp kept offering firmware that older lamps silently ignored, so an update
+  seeded on one lamp never spread. Lamps now number their messages from a fresh
+  random point at each start, so older lamps take the offer.
+- **Wisp changes from the app land straight after the connected lamp
+  restarts.** The wisp used to ignore the app's changes for a while (the app
+  showed Fade 19% while the wisp stayed at 100%). A restarted lamp's messages
+  now reach the wisp straight away. Lamps and wisps also forget a seen message
+  after 20 seconds, so a lamp on older firmware is heard again at most 20
+  seconds after its last message before restarting.
+- **The wisp's Lamps tab shows each lamp's new colours right away.** Chips
+  used to creep along with the fade, and after a Shuffle could sit on the old
+  colours for a few seconds while the shuffle icon had stopped. Chips now show
+  the colours the wisp gave each lamp as soon as it gives them, through a lamp
+  on this firmware; through a lamp on older firmware they still follow the
+  fade. The shuffle icon keeps spinning until the wisp reports the re-roll.
+  When more lamps on one wisp fade at once than one frame has room for (about
+  5 of 100 lamps, about 30 of 80), a chip can sit on its previous or a
+  mid-fade colour for a drift step or more.
+- **Web Config's on-time picker sticks.** Choosing how long Web Config stays up
+  after boot (say 5 min) on an already set-up lamp saved nothing and the next
+  boot still gave 2 minutes. The choice now applies from the next boot, and the
+  app reads back what you chose.
+- **A crash record says where the lamp crashed.** After a crash or a task
+  watchdog stall, `lastCrash` in the lamp's settings now carries the core, code
+  address, first few backtrace addresses and uptime, instead of only the reset
+  type and heap figures (with an uptime of 0 on a stall before the first
+  check).
+
+### Changed
+- **Copying is rarer and calmer.** A lamp rolls for a copy of any one peer at
+  most once every 3 minutes, played or not; odds halve with 8 lamps around and
+  quarter with 24 (a single neighbour copies a touch less often); a lamp skips
+  copying an expression it played in the last 3 minutes, so two lamps stop
+  bouncing one back and forth; and home mode never copies another lamp's
+  expression, even with social left on.
+- **Settings take far less room on the lamp.** Name, password, colours, strips,
+  knockout and home mode are kept as one compact record, leaving room for more
+  remembered lamps and expressions. On first start the lamp moves its settings
+  over itself and checks the copy before removing the old one, so a power cut
+  at any moment leaves it with its settings; nothing changes in the app or Web
+  Config. Flashed back to an older release, a lamp starts with default name,
+  colours and no password (expressions kept); flashed forward again it gets its
+  settings back, with expressions as the older release left them.
+- **`npm run wisp:flash:release` takes `IMAGE=`.** Point it at a local
+  `wisp-firmware-signed.bin` to flash that file and skip the download.
+
+## 1.3.3
+
+### Added
+- **A lamp remembers its last few boots.** Every lamp, release builds
+  included, keeps its last 5 starts and prints the finished ones on the USB
+  serial console as it boots, one line each: firmware, how long it ran, how
+  low its free memory got, and how it ended (power cut, restart, crash,
+  watchdog, brownout). After a lamp misbehaves, plug it into a computer and
+  open `npm run lamp:tap`: the lamp restarts and prints its history straight
+  away. Plugging in restarts the lamp the way a power cut does, so the boot
+  that was running reads as ending in a power cut. A boot that ended in a
+  power cut shows the run time it had reached by its last check (1 minute,
+  1 hour, 1 day).
+- **The app tells you how an update went.** When a lamp comes back after
+  the app updates it, a message reads "<name> learned some new tricks ✨".
+  When an update fails while the phone stays connected, a message reads
+  "<name> didn't catch the new tricks this time. Trying again next time you
+  connect." once the lamp is listening again, and the app does try again the
+  next time it connects to that lamp. When an update loses the phone's
+  connection, the app waits until it reconnects and reads the lamp: if the
+  lamp finished the update anyway, the message says it learned them. An
+  update the lamp turns down, because it's busy or doesn't trust the
+  download, gets no message, and neither does a lamp that's already up to
+  date.
+
+### Fixed
+- **Wisps need a USB reflash** to pick up any wisp change in this release
+  (`npm run wisp:flash:release` with the wisp plugged in); wisps don't update
+  over the mesh.
+- **The wisp's Color drift Fade slider works again.** Every drift step had
+  snapped to its new color in under a second whatever the slider said. Each
+  lamp now fades into its next color over at least 20 s: toward Snappy every
+  step takes about 20 s, toward Flowing a step can stretch across the whole
+  How often interval. Lamps on this firmware fade smoothly, and a lamp that
+  joins mid-fade picks it up from the colour it should be showing. Lamps on
+  older firmware still fade, in small steps every 2 s. With more than 57
+  lamps on one wisp all fading at once, a lamp starting a new color can take
+  up to about 50 s to get its smooth fade, and steps until then.
+- **Lamps and wisps left on for weeks keep working past day 25 and day 49.**
+  A lamp's millisecond clock rolls back to zero every 49.7 days of uptime.
+  Around that moment a lamp could freeze its light or dim to half for a few
+  seconds, keep showing the update indicator after a firmware update gave up,
+  stall a firmware update it was passing to a neighbour or keep skipping that
+  neighbour, close the web config page while you used it, drop a lamp it had
+  just heard from its nearby list, greet a lamp it had just greeted again,
+  relay every mesh check-in instead of thinning them, and for a minute accept
+  the BOOT-button password reset as if it had just started. Anything a lamp
+  or wisp remembered and then left alone for 49.7 days could also read as
+  brand new again: a switched-off wisp's paint came back for a minute, a
+  neighbour seen long ago showed as nearby, an old colour change replayed its
+  fade or paused the colour rotation, a long-past home Wi-Fi scan counted as
+  fresh, a peer greeted weeks ago was skipped, and touch was ignored for half
+  a second. A lamp that had greeted no one for 25 days stopped greeting for
+  up to 25 days more, an introvert that had never tired stopped from day 25
+  to day 50, and an expression that home mode had paused for 25 days stopped
+  firing on its own. A web config page could stay up for weeks after its last
+  visitor left. A wisp could keep lamps and other wisps that had gone silent,
+  forget ones it had just heard, hold back its brightness re-sends, or wait
+  to reopen its OSC port or send its config. The wisp's status time stamp
+  restarted from zero, so an emptied manual palette that the app could judge
+  only by that stamp stayed unconfirmed until the stamp caught up, and a wisp
+  dimming more than 19 lamps could, once a lamp had gone 49.7 days without a
+  send, free a recently used lamp's radio slot instead of that one's. A lamp beside many lamps of other kinds could
+  forget which of them it had just found can't take its update, and offer it
+  again. All of these now carry on through the rollover.
+- **Breathing, Spotty and Shimmer pick up smoothly after home mode.** An
+  expression home mode had paused, for an hour or for weeks, could flash
+  through colours or jump on its first frames back. A loaf's ring and a
+  staff's colour scrub did the same after passing a firmware update to a
+  neighbour paused them. Each now picks up with one normal step.
+- **With two or more wisps, a lamp follows the wisp that can still reach
+  it.** A wisp used to keep claiming a lamp that had moved out of its radio
+  range, as long as other lamps passed that lamp's check-ins along, so the
+  nearer wisp stood back and the lamp sat at its own colours. Now a wisp lets
+  go of a lamp it hasn't heard directly for about 90 seconds (up to two
+  minutes) whenever another wisp hears it, and that wisp takes over. With one
+  wisp nothing changes: it keeps painting a lamp that goes quiet, such as one
+  receiving a firmware update.
+- **App commands to a wisp no longer get lost when a second wisp is
+  nearby.** The other wisp's status updates could occasionally knock a
+  just-arrived command out before the wisp acted on it, and the app showed
+  that it couldn't reach the wisp. A wisp now only listens to commands
+  addressed to it. Lamps on firmware older than 1.1.5 send wisp commands to
+  every wisp at once, so a wisp on this firmware ignores them: update those
+  lamps first.
+- **LED setup saves on snafu.** Tapping Update on snafu's Advanced LEDs
+  screen used to fail with "Save failed" and leave the lamp unchanged, because
+  the save carried every strip's colours and came out too big for one
+  Bluetooth write. It now sends only the strip type and LED counts, which fit
+  on every lamp, and it no longer rewrites the lamp's colours. If an LED setup
+  save is ever too big to send, the screen says so instead of failing with a
+  raw error.
+- **Saves that restart the lamp go through once.** After a password change
+  or an LED setup save, the app used to reconnect to the lamp twice, and when
+  the lamp was slow to restart it could drop the link it had just restored.
+  It now reconnects once. The LED setup Update button and the password Save
+  button grey out and show a spinner while a save is under way, so a second
+  tap can't start another save while the lamp restarts.
+- **The Test button waits out an update.** In the expression editor, Test
+  stayed pressable while a lamp settled after an update, and the lamp
+  ignored it. It now greys out until the lamp is listening again.
+- **Lamp names behave.** A rename the lamp didn't take used to snap back to
+  the old name without a word; now it says "Couldn't set name. Try again."
+  Name fields (renaming on Config, naming a new lamp) stop at 32 bytes, the
+  most a lamp keeps. An emoji or accented letter takes more than one of
+  those bytes. Pasting over a name keeps as much of the paste as fits, and
+  typing in the middle of a full name leaves the rest of it alone.
+
+### Changed
+- **Friendlier update wording.** After an update ends, while the lamp
+  settles, the strip at the top reads "Giving <name> a moment to settle… 🎓"
+  instead of still saying it's teaching. On Info, the last stretch of an
+  update, while the lamp checks it, reads "Practising the new tricks 🪄"
+  instead of sitting on a full "Learning some new tricks" bar. A lamp too
+  busy teaching another lamp to connect is named the way the app shows it
+  everywhere else. In dev mode, a failed update leads with a plain line (such
+  as "Lost <name> partway through. Bring your phone closer and try again.")
+  with the technical reason in small type beneath, and a lamp that already
+  has the update reads "<name> already knows these tricks." instead of
+  claiming it installed and is restarting.
+- **Less Bluetooth chatter while a lamp is open.** The app's check that the
+  lamp is still there now reads one byte every 3 seconds instead of the
+  lamp's whole settings page, and it pauses while the app updates the lamp's
+  firmware. Lamps from before Bluetooth schema version 1 still get the full
+  read. Opening or reconnecting to a lamp reads its settings page once
+  instead of twice.
+- **Smaller lamp firmware and about 7 KB more free memory.** The lamp no
+  longer builds in code that saves a crash dump to flash, which it never had
+  room to store: the firmware is about 12 KB smaller and frees about 0.9 KB,
+  and a crash still prints its report on the USB serial console and still
+  lands in the lamp's crash record. It stops setting aside room for an old
+  wisp paint message that wisps stopped sending in beta 1.1.8 (about 2.6 KB),
+  and a lamp near an older wisp ignores that message as before. It stops
+  keeping a spare copy of the wisp's latest paint frame, its claimed-lamp
+  list and the latest lamp-to-lamp expression command while it hands each
+  one from the radio to the light (about 3.5 KB). What the lamp receives,
+  passes on and shows is unchanged.
+- **Lamps take turns passing on the wisp's messages.** A lamp that hears
+  the wisp now waits a short moment of its own (up to 0.15 seconds) before
+  repeating the message for lamps farther out, instead of every nearby lamp
+  repeating it at the same instant, where the copies can collide. Lamps
+  repeating each other's check-ins now also pick their own moment. Lamps on
+  older firmware keep working beside updated ones. Holding those messages
+  takes about 2 KB of the lamp's memory. While a lamp starts a firmware update
+  or opens its web config page, it passes them on at once instead.
+- **The wisp sends less status chatter.** Opening the wisp screen in the app,
+  the wisp's WiFi or Ethernet connecting or dropping, and its OSC feed going
+  quiet or coming back now send a status update once (twice at most, 5
+  seconds apart) instead of repeating it every 2 seconds for 20 seconds. A
+  flapping WiFi network costs at most one update every 5 seconds. Changes you
+  make from the app still repeat for 20 seconds, so their confirmation gets
+  through.
+- **Wisp firmware sheds code that never ran.** A per-lamp repaint timer and
+  a retry queue for failed sends were still built into the wisp after paint
+  moved to its 2-second broadcast, but nothing used them. Paint behaves as
+  before: a lamp that misses a broadcast catches the next one 2 seconds later.
+
+## 1.3.2
+
+### Fixed
+- **A frozen lamp restarts itself.** If the lamp's main loop ever stops
+  making progress, the lamp now resets after about 5 seconds (30 while it
+  receives a firmware update) instead of staying frozen or dark until it is
+  unplugged, and the reset shows in the lamp's crash record. A freeze in the
+  first 30 seconds after a firmware update rolls the lamp back to its
+  previous firmware. A lamp that freezes again and again right after
+  starting stops restarting after the third time, so it never flickers
+  through endless restarts; if it freezes again it stays frozen until you
+  unplug it. Unplugging it, or any other restart, brings the freeze check
+  back, unless that restart is itself a freeze in the lamp's first minute.
+  A freeze while the lamp is still starting up is not caught yet.
+- **Dropped writes show on the debug console.** On a development build, a
+  colour or control write the lamp ignores, during a firmware update or
+  because it could not read it, prints a `[drop]` line naming the setting
+  and why.
+- **No more edits that go nowhere while the app updates a lamp.** While the
+  app sends a lamp new firmware, the lamp ignores every other change, so the
+  app used to show your colour and brightness edits while the lamp stayed put.
+  Now a strip at the top reads "Teaching <name> new tricks 🎓" with a progress
+  line, and every control that changes the lamp greys out until the update
+  ends. A sheet or dialog that was open freezes with your edit kept, and
+  thaws when the update ends. The Info tab stays live. If the update fails
+  or is cancelled, the strip stays until the lamp says it's listening again.
+  The lamp waits up to a minute for the rest of an update before giving up,
+  so that can take about 70 seconds, never more than 75. Then the app
+  re-sends what the lamp missed while it was busy (Home Mode, an open colour
+  sheet, the Social page) and reads the lamp's settings back so the screen
+  matches it. The app re-sends the same after every reconnect too. Lamps now
+  tell the app when they stop ignoring changes. A lamp on older
+  firmware can't, so editing comes back as soon as the update ends and Home
+  Mode's brightness routing is put right on your next brightness change.
+
 ## 1.3.1
 
 ### Added

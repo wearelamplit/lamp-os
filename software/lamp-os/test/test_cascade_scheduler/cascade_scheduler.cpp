@@ -224,6 +224,31 @@ void test_worst_case_invocation_fits() {
   TEST_ASSERT_TRUE(json.size() <= CascadeScheduler::kMaxPayloadLen);
 }
 
+// One fan-out sent, then nothing for a whole wrap: the next fan-out's first
+// batch goes at once, not after the batch gap.
+void test_batch_gap_does_not_hold_a_fan_out_a_wrap_later() {
+  CascadeScheduler s;
+  std::vector<Sent> out;
+  const uint32_t sentMs = 1000;
+  beginWith(s, sampleInvocation(), 1, 100, sentMs);
+  TEST_ASSERT_EQUAL_size_t(1, drain(s, sentMs, out));
+  for (uint64_t t = sentMs; t < sentMs + (1ull << 32); t += 1ull << 28) {
+    s.retireBatchGap(static_cast<uint32_t>(t));
+  }
+  beginWith(s, sampleInvocation(), 1, 100, sentMs + 10);
+  TEST_ASSERT_EQUAL_size_t(1, drain(s, sentMs + 10, out));
+}
+
+// Inside the gap retire keeps it.
+void test_retire_keeps_a_running_batch_gap() {
+  CascadeScheduler s;
+  std::vector<Sent> out;
+  beginWith(s, sampleInvocation(), 2 * CascadeScheduler::kBatchSize, 100, 1000);
+  drain(s, 1000, out);
+  s.retireBatchGap(1000 + CascadeScheduler::kBatchGapMs - 1);
+  TEST_ASSERT_EQUAL_size_t(0, drain(s, 1000 + CascadeScheduler::kBatchGapMs - 1, out));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_delay_keeps_the_intended_fire_time);
@@ -235,5 +260,7 @@ int main(int, char**) {
   RUN_TEST(test_cancel_stops_the_drain);
   RUN_TEST(test_oversize_payload_is_refused);
   RUN_TEST(test_worst_case_invocation_fits);
+  RUN_TEST(test_batch_gap_does_not_hold_a_fan_out_a_wrap_later);
+  RUN_TEST(test_retire_keeps_a_running_batch_gap);
   return UNITY_END();
 }

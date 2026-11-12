@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <cstring>
 
+#include <lampos/clock.hpp>
+
 namespace lamp {
 
 // Who asked for a one-shot transient expression.
@@ -56,6 +58,13 @@ class LocalCooldown {
       }
     }
     return false;
+  }
+  // Ends cooldowns that have run out, so none reads as running again one
+  // millis() wrap later. Call at least once per lampos::kRetiredAgeMs.
+  void retire(uint32_t nowMs) {
+    for (Slot& s : slots_) {
+      if (s.used && lampos::msSince(nowMs, s.atMs) >= kMs) s.used = false;
+    }
   }
   void refused(const char* type, uint32_t nowMs) {
     Slot& s = slots_[next_];

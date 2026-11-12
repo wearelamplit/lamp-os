@@ -93,7 +93,13 @@ class _SetupBody extends ConsumerWidget {
             label: 'Name',
             inputFormatters: lampNameFormatters,
             initial: state.lamp.name.toTitleCase(),
-            onSave: (name) => n().setLampName(name),
+            onSave: (name) => unawaited(
+              n().setLampName(name).catchError((Object _) {
+                if (context.mounted) {
+                  AppSnackbar.error(context, "Couldn't set name. Try again.");
+                }
+              }),
+            ),
           ),
         ),
         SettingsRow(
@@ -105,7 +111,7 @@ class _SetupBody extends ConsumerWidget {
             null => null,
           },
           onTap: () async {
-            final pw = await showPasswordPromptDialog(
+            await showPasswordPromptDialog(
               context,
               title: 'Change password',
               subtitle: 'Also locks the lamp\'s setup WiFi, so you\'ll need '
@@ -113,8 +119,15 @@ class _SetupBody extends ConsumerWidget {
                   'the lamp (~10s).',
               confirmLabel: 'Save',
               validate: lampPasswordError,
+              onSubmit: (pw) async {
+                try {
+                  await n().setLampPassword(pw);
+                  return null;
+                } catch (e) {
+                  return ("Couldn't set password. Try again.", e);
+                }
+              },
             );
-            if (pw != null) unawaited(n().setLampPassword(pw));
           },
         ),
         const SettingsGroupHeading('Connectivity'),

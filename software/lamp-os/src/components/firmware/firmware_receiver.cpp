@@ -7,10 +7,13 @@
 #include "firmware_signature.hpp"
 #include "components/network/protocol/fw_ota.hpp"
 #include "components/network/ble/ble_control.hpp"  // pauseRadioForOta / resumeRadioAfterOta
+#include "util/uptime.hpp"
 #include "components/firmware/ota_quiet_mode.hpp"     // enterQuiet / exitQuiet
 #include "components/network/mesh/mesh_link.hpp"
 #include "util/heap_guard.hpp"
 #include "util/heap_probe.hpp"
+#include "util/loop_stall.hpp"
+#include "util/loop_watchdog.hpp"
 #include "../../version.hpp"
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
@@ -36,9 +39,8 @@ namespace {
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 // Restore the default TWDT (5 s, IDLE0 subscribed) on every OTA flow exit.
-// Don't subscribe the Arduino loop task: arduino-esp32 leaves
-// loopTaskWDTEnabled=false and never calls esp_task_wdt_reset() from the loop
-// body, so subscribing it would panic the instant the timeout elapsed.
+// The timeout also governs the loop task (util/loop_watchdog.hpp); a
+// reconfigure leaves its subscription in place.
 void restoreDefaultWdt() {
   esp_task_wdt_config_t wdtDefault = {
       .timeout_ms     = 5000,
@@ -127,12 +129,10 @@ void FirmwareReceiver::tick(uint32_t nowMs) {
     case State::Idle:
       // Inter-session quiet hold expiry: a prior session deferred its exitQuiet
       // (abortOta / State::Failed) so the strip doesn't flash between
-      // back-to-back OFFERs. quietHoldUntilMs_==0 is the sentinel; without the
-      // !=0 guard, nowMs>=0 is always true and any Idle tick exits prematurely.
-      if (quietHeld_ && quietHoldUntilMs_ != 0 && nowMs >= quietHoldUntilMs_) {
+      // back-to-back OFFERs.
+      if (quietHold_.dueToExit(nowMs)) {
         ::lamp::ota_quiet_mode::exitQuiet();
-        quietHeld_        = false;
-        quietHoldUntilMs_ = 0;
+        quietHold_.release();
       }
       // Reclaim the chunk bitmap once back in Idle. The gate is disarmed and the
       // abort/verify path that set Idle ran a prior tick, so any Core 0 write has
@@ -236,9 +236,7 @@ void FirmwareReceiver::tick(uint32_t nowMs) {
       // exit. The verify-fail branch in handleDoneOnLoop sets State::Failed
       // directly, so defer here too to keep the strip in indicator mode through
       // a fast multi-distributor handoff. The Idle tick expires the hold.
-      if (quietHeld_) {
-        quietHoldUntilMs_ = nowMs + kInterSessionQuietHoldMs;
-      }
+      if (quietHold_.held) quietHold_.sessionEnded(nowMs, /*done=*/false);
       return;
     }
 
@@ -325,16 +323,7 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
   // interrupt a mesh OTA) is DeclineBusy, which stops two concurrent flows
   // writing the same OTA partition.
   if (state_ == State::Streaming || state_ == State::Verify) {
-    const bool sameTransport = ctrl.transportKind == activeTransportKind_;
-    bool sameSource = false;
-    if (sameTransport) {
-      if (activeTransportKind_ == FirmwareTransportKind::EspNow) {
-        sameSource = (std::memcmp(ctrl.sourceMac, wispMac_, 6) == 0);
-      } else {
-        sameSource = (ctrl.bleConnHandle == activeBleConnHandle_);
-      }
-    }
-    if (ctrl.offer.version == offerVersion_ && sameTransport && sameSource) {
+    if (ctrl.offer.version == offerVersion_ && fromSessionSender(ctrl)) {
       sendAccept(ctrl, lamp_protocol::FwAcceptStatus::Accept);
       return;
     }
@@ -436,7 +425,8 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
 
   // Widen the TWDT for the whole OTA window. The block-erase loop re-enables
   // interrupts between blocks so IDLE0 still runs (well within 30 s), and
-  // per-chunk writes are sub-ms. The Arduino loop task stays unsubscribed.
+  // per-chunk writes are sub-ms. The loop task feeds once per block: a slow
+  // flash's whole-image erase can outlast even the widened timeout.
   esp_task_wdt_config_t wdtWide = {
       .timeout_ms     = 30000,
       .idle_core_mask = (1u << 0),
@@ -452,6 +442,7 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
   // to re-widen the IWDT before each block (a block holds interrupts off for its
   // whole duration and the tick_hook re-clamps the IWDT between blocks).
   {
+    const KnownLoopStall stall;
     const uint32_t eraseT0 = millis();
     constexpr size_t kBlock = 64u * 1024u;
     const size_t eraseLen = numSectors * kSector;  // sector-aligned, covers image
@@ -460,6 +451,7 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
     while (eoff < eraseLen) {
       const size_t span = (eraseLen - eoff) < kBlock ? (eraseLen - eoff) : kBlock;
       widenIwdt();
+      loop_watchdog::feed();
       eraseErr = esp_partition_erase_range(part, eoff, span);
       if (eraseErr != ESP_OK) break;
       eoff += span;
@@ -528,16 +520,15 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
   // GATT client; BLE-pushed OTA keeps the connection (the phone is the chunk
   // transport) but still drops non-OTA writes. Exited in abortOta, the Failed
   // tick, and verifyAndApply.
-  // Inter-session hold: skip enterQuiet when quietHeld_ is already set (a prior
-  // session deferred its exit). Clear quietHoldUntilMs_ so the Idle tick won't
-  // expire-and-exit mid-session.
-  if (!quietHeld_) {
+  // Inter-session hold: skip enterQuiet when the hold is already held (a prior
+  // session deferred its exit). Re-entering disarms the pending exit so the
+  // Idle tick won't expire-and-exit mid-session.
+  if (!quietHold_.held) {
     ::lamp::ota_quiet_mode::enterQuiet(
         activeTransportKind_ == FirmwareTransportKind::EspNow,
         /*visible=*/fsHooks_ == nullptr);
-    quietHeld_ = true;
   }
-  quietHoldUntilMs_ = 0;
+  quietHold_.sessionEnteredQuiet();
 
 #ifdef LAMP_DEBUG
   Serial.printf("[fw_receiver] OFFER from %02X:%02X:%02X:%02X:%02X:%02X "
@@ -561,11 +552,25 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
 #endif
 }
 
+bool FirmwareReceiver::fromSessionSender(const PendingFirmwareControl& ctrl) const {
+  return lamp_protocol::fromFwSessionSender(
+      ctrl.transportKind == activeTransportKind_,
+      activeTransportKind_ == FirmwareTransportKind::Ble, ctrl.sourceMac, wispMac_,
+      ctrl.bleConnHandle, activeBleConnHandle_);
+}
+
 void FirmwareReceiver::onDoneOnLoop(const PendingFirmwareControl& ctrl,
                                     uint32_t /*nowMs*/) {
   if (state_ != State::Streaming) {
     // DONE in any other state is benign (late retry after verify+reboot, or a
     // DONE for a different flow). Ignore.
+    return;
+  }
+  // A stale sender's DONE must not verify or abort the live session.
+  if (!fromSessionSender(ctrl)) {
+#ifdef LAMP_DEBUG
+    Serial.printf("[fw_receiver] DONE drop: not the session's sender\n");
+#endif
     return;
   }
   // DONE.version must match the accepted OFFER.
@@ -617,11 +622,10 @@ void FirmwareReceiver::onDoneOnLoop(const PendingFirmwareControl& ctrl,
     // Pause so the broadcast leaves the radio before the CPU resets.
     delay(kPostResultPauseMs);
     // exitQuiet before reboot (firmware path) and before returning to Idle
-    // (FS path, which remounts without rebooting). Clear quietHeld_ so the FS
+    // (FS path, which remounts without rebooting). Release the hold so the FS
     // path leaves quiet accounting balanced; the firmware path reboots past it.
     ::lamp::ota_quiet_mode::exitQuiet();
-    quietHeld_        = false;
-    quietHoldUntilMs_ = 0;
+    quietHold_.release();
     // FS image OTA finalizes without a reboot: SPIFFS is only read by the
     // onboarding webapp, so a remount makes the new UI live. Firmware OTA
     // reboots.
@@ -644,7 +648,8 @@ void FirmwareReceiver::onDoneOnLoop(const PendingFirmwareControl& ctrl,
   state_ = State::Failed;
 }
 
-void FirmwareReceiver::handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk& p) {
+void FirmwareReceiver::handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk& p,
+                                             FirmwareTransportKind via) {
   // Bump writesInFlight_ before reading the armed gate so Core 1's
   // verifyAndApply barrier sees this write. The acquire fetch_add pairs with
   // Core 1's exchange(0, acq_rel) on publishedOtaHandle_: observing armed!=0
@@ -667,8 +672,8 @@ void FirmwareReceiver::handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk&
     // Rate-limited: at ~130 chunks/s of "not armed" this would flood the UART.
     // Throttle to once per second.
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-    static uint32_t lastUnarmedLogMs = 0;
-    const uint32_t nowMs = millis();
+    static uint64_t lastUnarmedLogMs = 0;
+    const uint64_t nowMs = lamp::uptimeMs();
     if (nowMs - lastUnarmedLogMs > 1000) {
       lastUnarmedLogMs = nowMs;
       Serial.printf("[fw_receiver] chunk drop: not armed (chunkIdx=%u)\n",
@@ -678,46 +683,21 @@ void FirmwareReceiver::handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk&
 #endif
     return;
   }
-  // Bump the seen-stamp before any validation/write that may abort early; pairs
-  // with Core 1's no-progress watchdog. Gated on source-MAC == active session
-  // (wispMac_) so a rogue lamp blasting CHUNK frames can't keep the watchdog
-  // falsely fresh while no real progress lands.
-  if (std::memcmp(p.sourceMac, wispMac_, 6) == 0) {
+  const lamp_protocol::FwChunkVerdict verdict =
+      lamp_protocol::checkFwChunk(p, via == activeTransportKind_, wispMac_,
+                                  offerTotalLen_, offerChunkSize_);
+  if (verdict == lamp_protocol::FwChunkVerdict::ForeignSource) return;
+  // Bump the seen-stamp before the remaining checks; pairs with Core 1's
+  // no-progress watchdog.
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-    lastChunkSeenMs_ = millis();
+  lastChunkSeenMs_ = millis();
 #endif
-  }
-  // offset + len must fit within the offer's totalLen, else a malformed chunk
-  // could direct esp_partition_write past the erased range. Compared without
-  // adding so an offset near UINT32_MAX can't wrap the sum under the bound.
-  if (p.offset > offerTotalLen_ || p.len > offerTotalLen_ - p.offset) {
+  if (verdict != lamp_protocol::FwChunkVerdict::Write) {
 #ifdef LAMP_DEBUG
-    Serial.printf("[fw_receiver] chunk drop: oob chunkIdx=%u off=%u len=%u "
-                  "total=%u\n",
-                  (unsigned)p.chunkIdx, (unsigned)p.offset, (unsigned)p.len,
-                  (unsigned)offerTotalLen_);
-#endif
-    return;
-  }
-  // Chunk size must match (last chunk may be shorter; intermediate must
-  // be exactly offerChunkSize_).
-  if (p.len > offerChunkSize_) {
-#ifdef LAMP_DEBUG
-    Serial.printf("[fw_receiver] chunk drop: oversize chunkIdx=%u len=%u "
-                  "max=%u\n",
-                  (unsigned)p.chunkIdx, (unsigned)p.len,
-                  (unsigned)offerChunkSize_);
-#endif
-    return;
-  }
-  // offset == chunkIdx * offerChunkSize_ on every chunk (catches malformed
-  // senders that disagree with themselves). Only the receiver holds the
-  // session's negotiated chunkSize, so it validates this, not parseFwChunk.
-  if (p.offset != static_cast<uint32_t>(p.chunkIdx) * offerChunkSize_) {
-#ifdef LAMP_DEBUG
-    Serial.printf("[fw_receiver] chunk drop: offset misaligned chunkIdx=%u "
-                  "off=%u chunkSize=%u\n",
-                  (unsigned)p.chunkIdx, (unsigned)p.offset,
+    Serial.printf("[fw_receiver] chunk drop: verdict=%u chunkIdx=%u off=%u "
+                  "len=%u total=%u chunkSize=%u\n",
+                  (unsigned)verdict, (unsigned)p.chunkIdx, (unsigned)p.offset,
+                  (unsigned)p.len, (unsigned)offerTotalLen_,
                   (unsigned)offerChunkSize_);
 #endif
     return;
@@ -895,7 +875,7 @@ bool FirmwareReceiver::sendAccept(const PendingFirmwareControl& ctrl,
   uint8_t buf[lamp_protocol::FW_ACCEPT_FIXED_SIZE];
   // Reply at the version the OFFER arrived on so old-protocol senders can parse.
   const size_t n = lamp_protocol::buildFwAccept(
-      buf, sizeof(buf), fwOutSeq_++, myMac_, ctrl.sourceMac,
+      buf, sizeof(buf), fwOutSeq_.next(), myMac_, ctrl.sourceMac,
       ctrl.seq, ctrl.offer.version, status, /*resumeOffset=*/0,
       ctrl.wireVersion,
       fsHooks_ ? fsHooks_->acceptType : lamp_protocol::MSG_FW_ACCEPT);
@@ -910,7 +890,7 @@ bool FirmwareReceiver::sendReq(uint16_t firstChunkIdx, uint16_t chunkCount,
   if (!t) return false;
   uint8_t buf[lamp_protocol::FW_REQ_FIXED_SIZE];
   const size_t n = lamp_protocol::buildFwReq(
-      buf, sizeof(buf), fwOutSeq_++, myMac_, wispMac_,
+      buf, sizeof(buf), fwOutSeq_.next(), myMac_, wispMac_,
       firstChunkIdx, chunkCount, reason, activeWireVersion_,
       fsHooks_ ? fsHooks_->reqType : lamp_protocol::MSG_FW_REQ);
   if (!n) return false;
@@ -924,7 +904,7 @@ bool FirmwareReceiver::sendResult(lamp_protocol::FwResultStatus status,
   if (!t) return false;
   uint8_t buf[lamp_protocol::FW_RESULT_FIXED_SIZE];
   const size_t n = lamp_protocol::buildFwResult(
-      buf, sizeof(buf), fwOutSeq_++, myMac_, wispMac_,
+      buf, sizeof(buf), fwOutSeq_.next(), myMac_, wispMac_,
       status, detail, offerVersion_, activeWireVersion_,
       fsHooks_ ? fsHooks_->resultType : lamp_protocol::MSG_FW_RESULT);
   if (!n) return false;
@@ -954,12 +934,12 @@ void FirmwareReceiver::abortOta() {
   // Defer exitQuiet to keep the strip in indicator mode through a fast
   // multi-distributor handoff (the next OFFER can land within ms; avoid a
   // defaultColors flash). The Idle tick exits for real if no retry arrives
-  // within kInterSessionQuietHoldMs.
-  if (quietHeld_) {
+  // within InterSessionQuietHold::kHoldMs.
+  if (quietHold_.held) {
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-    quietHoldUntilMs_ = millis() + kInterSessionQuietHoldMs;
+    quietHold_.sessionEnded(millis(), /*done=*/false);
 #else
-    quietHoldUntilMs_ = kInterSessionQuietHoldMs;
+    quietHold_.sessionEnded(0, /*done=*/false);
 #endif
   }
 }
@@ -987,6 +967,7 @@ lamp_protocol::FwResultStatus FirmwareReceiver::verifyAndApply() {
   {
     uint32_t waitMs = 0;
     while (writesInFlight_.load(std::memory_order_acquire) > 0) {
+      loop_watchdog::feed();
       vTaskDelay(pdMS_TO_TICKS(2));
       waitMs += 2;
       if (waitMs > 5000) {
@@ -1019,6 +1000,7 @@ lamp_protocol::FwResultStatus FirmwareReceiver::verifyAndApply() {
 #endif
     return lamp_protocol::FwResultStatus::PartitionWriteFail;
   }
+  loop_watchdog::feed();
   // FS-image OTA: the hook mounts the freshly-written spiffs partition,
   // recomputes the manifest digest, ed25519-verifies against fw.lsig, and checks
   // the version. No boot-partition flip (the partition is read at runtime, not
@@ -1036,6 +1018,7 @@ lamp_protocol::FwResultStatus FirmwareReceiver::verifyAndApply() {
   // chunk can race.
   auto reader = [otaPartition](size_t offset, size_t wantBytes,
                                uint8_t* out) -> int {
+    loop_watchdog::feed();
     const esp_err_t err = esp_partition_read(
         otaPartition, offset, out, wantBytes);
     if (err != ESP_OK) return -1;
@@ -1084,7 +1067,10 @@ lamp_protocol::FwResultStatus FirmwareReceiver::verifyAndApply() {
   // Set boot to the inactive slot. Next reboot lands PENDING_VERIFY; the
   // post-boot self-health path in lamp.cpp (g_pendingVerify / mark_app_valid)
   // handles the health check.
+  // set_boot_partition re-reads and hashes the whole image before it flips.
+  loop_watchdog::feed();
   const esp_err_t bootErr = esp_ota_set_boot_partition(otaPartition);
+  loop_watchdog::feed();
   if (bootErr != ESP_OK) {
 #ifdef LAMP_DEBUG
     Serial.printf("[fw_receiver] set_boot_partition failed: 0x%X\n", (unsigned)bootErr);

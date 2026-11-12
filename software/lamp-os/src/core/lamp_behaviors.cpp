@@ -37,6 +37,7 @@
 #include "expressions/pulse/pulse_expression.hpp"
 #include "expressions/shifty/shifty_expression.hpp"
 #include "expressions/spotty/spotty_expression.hpp"
+#include "expressions/yawn/yawn_expression.hpp"
 #include "util/levels.hpp"
 
 // Bring apply_brightness helpers into file scope so unqualified call sites
@@ -63,7 +64,11 @@ void initBehaviors(lamp::Features features, lamp::Lamp& self) {
 
   self.registerExpressions(expressionManager.registry());
 
-  if (lamp::any(features, lamp::Features::SocialBehavior)) {
+  if (!lamp::any(features, lamp::Features::SocialBehavior)) {
+    fondnessEngine.setNearSource([]() -> const std::vector<lamp::NearbyCopy>& {
+      return lamp::lampRoster.snapshotNear(LAMP_PRUNE_TIME_MS);
+    });
+  } else {
     shadeSocialBehavior = lamp::SocialBehavior(&shade, 1200);
     // Live config pointer so SocialBehavior::control reads the current
     // socialMode each tick (user can change personality at runtime; the
@@ -71,11 +76,16 @@ void initBehaviors(lamp::Features features, lamp::Lamp& self) {
     // is per-instance regardless).
     shadeSocialBehavior.setConfig(&config);
     shadeSocialBehavior.setMeshLink(&meshLink);
+    shadeSocialBehavior.setContagionTuning(&socialEchoObserver.tuning());
+    shadeSocialBehavior.setFondness(&fondnessEngine);
     compositor.behaviorContext().greeting = &shadeSocialBehavior;
     ble_control::setGreetingStateProvider(
         []() { return shadeSocialBehavior.greetingState(); });
     shadeSocialBehavior.setOnGreetingChangeCallback(
         []() { ble_control::notifyStateChange(); });
+    shadeSocialBehavior.setOnOrganicGreet([](const uint8_t mac[6]) {
+      fondnessEngine.observeGreeting(mac, config.lamp.socialMode, lamp::uptimeMs());
+    });
   }
 
   if (lamp::any(features, lamp::Features::FadeOutBehavior)) {
@@ -187,15 +197,18 @@ void initBehaviors(lamp::Features features, lamp::Lamp& self) {
   lamp::overrides.shade.bind(behaviorCtx, lamp_protocol::OverrideSurface::Shade);
   // Provider that the CHAR_WISP_STATUS read merges into the JSON. Wisp control
   // is driven by MSG_WISP_STATE, so both surfaces share the compositor's
-  // STATE-derived active flag + colors. drainWispState pushes the notify.
+  // STATE-derived active flag + the colours the wisp is taking them to.
+  // drainWispState pushes the notify.
   lamp::lampRoster.setLampWispStateProvider([]() {
     lamp::LampRoster::LampWispState ws;
     const bool active = compositor.wispActive();
     ws.controllingBase  = active;
     ws.controllingShade = active;
     if (active) {
-      ws.baseWispColor  = lamp::colorToHexString(compositor.wispStateBaseColor());
-      ws.shadeWispColor = lamp::colorToHexString(compositor.wispStateShadeColor());
+      ws.baseWispColor =
+          lamp::colorToHexString(compositor.wispStateHeadingBaseColor());
+      ws.shadeWispColor =
+          lamp::colorToHexString(compositor.wispStateHeadingShadeColor());
     }
 #ifdef LAMP_DEBUG
     Serial.printf("[wisp_state] provider active=%d\n", active ? 1 : 0);

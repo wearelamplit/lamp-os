@@ -72,11 +72,26 @@ void test_poll_coalesced_then_served() {
   TEST_ASSERT_FALSE(c.configDue(100 + 3 * ConfigCadence::kMinIntervalMs));
 }
 
+// A config sent once, then none for a whole wrap: the next status goes out
+// and a polled config is served after only the status gap.
+void test_old_config_holds_nothing_a_wrap_later(void) {
+  ConfigCadence c;
+  c.poll();
+  c.onConfigEmitted(1000);
+  for (uint64_t t = 1000; t < 1000 + (1ull << 32); t += 1ull << 28) {
+    c.retire(static_cast<uint32_t>(t));
+  }
+  TEST_ASSERT_TRUE(c.statusClear(1000 + 10));
+  c.poll();
+  TEST_ASSERT_TRUE(c.configDue(1000 + 10));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_boot_config_sent_once_after_gap);
   RUN_TEST(test_status_held_off_inside_gap_after_config);
   RUN_TEST(test_change_bursts_config_with_status);
   RUN_TEST(test_poll_coalesced_then_served);
+  RUN_TEST(test_old_config_holds_nothing_a_wrap_later);
   return UNITY_END();
 }

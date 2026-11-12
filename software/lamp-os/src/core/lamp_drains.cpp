@@ -30,6 +30,7 @@
 #include "core/moments.hpp"
 #include "core/override_aggregate.hpp"
 #include "core/pending_slot_aggregate.hpp"
+#include "util/dropped_write_log.hpp"
 
 
 namespace lamp {
@@ -94,6 +95,8 @@ void Lamp::drainShadeColors() {
     JsonDocument doc;
     if (deserializeJson(doc, buf) == DeserializationError::Ok) {
       lamp::apply::shadeColorsWriteToConfig(doc.as<JsonVariant>());
+    } else {
+      lamp::logDroppedWrite("shadeColors", "parse failed");
     }
     lamp::stampConfiguratorActivity(millis());
   }
@@ -115,6 +118,8 @@ void Lamp::drainBaseColors() {
     JsonDocument doc;
     if (deserializeJson(doc, buf) == DeserializationError::Ok) {
       lamp::apply::baseColorsWriteToConfig(doc.as<JsonVariant>());
+    } else {
+      lamp::logDroppedWrite("baseColors", "parse failed");
     }
     lamp::stampConfiguratorActivity(millis());
   }
@@ -155,6 +160,8 @@ void Lamp::drainExpressionOp() {
     if (deserializeJson(doc, buf) == DeserializationError::Ok) {
       lamp::apply::expressionOpToConfig(doc.as<JsonObject>());
       applied = true;
+    } else {
+      lamp::logDroppedWrite("expressionOp", "parse failed");
     }
     config.invalidateExpressionsSection();
 
@@ -233,9 +240,7 @@ void Lamp::drainSettingsBlob() {
 
     JsonDocument incomingDoc;
     if (deserializeJson(incomingDoc, buf, len) != DeserializationError::Ok) {
-#ifdef LAMP_DEBUG
-      Serial.printf("[loop] settingsBlob: incoming JSON parse failed\n");
-#endif
+      lamp::logDroppedWrite("settingsBlob", "parse failed");
     } else if (incomingDoc["factoryReset"].as<bool>()) {
       // Warning is unconditional: factoryReset co-shipped with other keys
       // must surface in fleet logs regardless of debug mode.
@@ -257,10 +262,7 @@ void Lamp::drainSettingsBlob() {
       }
     } else if (firmwareReceiver.isInProgress()) {
       // NVS write during OTA risks chunk-write contention; discard the blob.
-#ifdef LAMP_DEBUG
-      Serial.println(
-          "[loop] settingsBlob: OTA in progress, discarding write");
-#endif
+      lamp::logDroppedWrite("settingsBlob", "ota receiving");
     } else {
       bool wantsReboot = lamp::apply::settingsBlobLocal(incomingDoc.as<JsonObject>(), s_hwMaxBrightness);
       recomputeEffectiveCeiling();  // new brightnessCeiling takes effect without reboot
@@ -290,12 +292,15 @@ void Lamp::drainSocialDispositions() {
 #ifdef LAMP_DEBUG
     Serial.printf("[loop] drain socialDispositions len=%u\n", (unsigned)len);
 #endif
-    config.setDispositionsFromJson(buf, len);
+    if (!config.setDispositionsFromJson(buf, len)) {
+      lamp::logDroppedWrite("socialDispositions", "parse failed");
+    }
   }
 }
 
 // Manual test triggers; routes to dispatchLampAction.
 void Lamp::drainTestAction() {
+  drainZonePreviewClear();
   if (lamp::pendingSlots.testAction.valid) {
     char buf[lamp::kPendingJsonOp + 1];
     uint16_t len = lamp::pendingSlots.testAction.drain(pendingMux, buf);
@@ -344,6 +349,8 @@ void Lamp::drainWifiOp() {
       if (op && strcmp(op, "scan") == 0) {
         wifi::startScan();
       }
+    } else {
+      lamp::logDroppedWrite("wifiOp", "parse failed");
     }
   }
 }
@@ -449,9 +456,9 @@ void Lamp::drainWispClaim() {
 
 // Drive the wisp render + app indicator from MSG_WISP_STATE, the sole wisp
 // paint path. Gated to this lamp's display wisp so a rival's frame can't ease
-// it home. This lamp's own entry present -> eased base/shade targets + active;
-// a fresh frame that omits it (Off, or unclaimed) -> ease home now. Every
-// entry feeds the app's painted-lamps preview.
+// it home. This lamp's own entry present -> eased base/shade targets, or its
+// drift fade, + active; a fresh frame that omits it (Off, or unclaimed) -> ease
+// home now. Every entry feeds the app's painted-lamps preview.
 void Lamp::drainWispState() {
   // static: the 1.4 KB slot is too big for the loop-task stack; this
   // drain is the slot's only consumer and runs only on Core 1.
@@ -475,16 +482,23 @@ void Lamp::drainWispState() {
   }
 
   const bool wasActive = compositor.wispActive();
-  const Color prevBase = compositor.wispStateBaseColor();
   uint8_t selfMac[6];
   meshLink.getMyMac(selfMac);
   const bool painted = compositor.applyWispStateSlot(cmd, selfMac, now);
   const bool active = compositor.wispActive();
   if (active != wasActive ||
-      (active && !(compositor.wispStateBaseColor() == prevBase))) {
+      (active && compositor.wispHeadingChanged())) {
     ble_control::notifyWispStatus();
   }
 #ifdef LAMP_DEBUG
+  if (painted && cmd.fade == lamp_protocol::WispDriftFadeLookup::Record &&
+      compositor.wispFadeSync() != lamp::WispFadeSync::Kept) {
+    Serial.printf("[loop] wispState drift fade %s left=%lums\n",
+                  compositor.wispFadeSync() == lamp::WispFadeSync::Started
+                      ? "start"
+                      : "retime",
+                  static_cast<unsigned long>(cmd.fadeRecord.leftMs));
+  }
   if (painted) {
     const Color base = compositor.wispStateBaseColor();
     const Color shade = compositor.wispStateShadeColor();
@@ -612,6 +626,13 @@ void Lamp::drainColorQuery() {
 void Lamp::drainColorInfo() {
   lamp::PendingColorInfo info;
   if (!lamp::pendingSlots.colorInfo.drain(pendingMux, info)) return;
+  const std::vector<Color>& own = config.base.broadcastColors();
+  if (info.baseCount > 0 && !own.empty()) {
+    fondnessEngine.observeColour(
+        info.sourceMac,
+        Color(info.baseStops[0], info.baseStops[1], info.baseStops[2], info.baseStops[3]),
+        own.front(), lamp::uptimeMs());
+  }
   std::vector<Color> baseStops;
   baseStops.reserve(info.baseCount);
   for (uint8_t i = 0; i < info.baseCount; ++i) {

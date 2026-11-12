@@ -703,10 +703,45 @@ void test_hello_tlv_with_oversized_length_is_rejected() {
   TEST_ASSERT_FALSE(lp::parseHello(buf, totalLen, out));
 }
 
+// A ParsedHello reused across frames: a bare HELLO after a TLV-rich one must
+// leave no TLV-derived field from the earlier frame.
+void test_hello_parse_resets_every_tlv_field_on_reuse() {
+  const uint8_t shade[4] = {1, 2, 3, 4};
+  const uint8_t base[4]  = {5, 6, 7, 8};
+  const uint8_t digest[lp::HELLO_FS_DIGEST_LEN] = {9, 8, 7, 6, 5, 4, 3, 2};
+  const uint8_t sendingTo[6] = {0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6};
+  uint8_t buf[lp::HELLO_MAX_SIZE];
+  lp::ParsedHello out;
+
+  size_t n = lp::buildHello(buf, sizeof(buf), 1, kSrcMac, shade, base, 0x00010300,
+                            "rich", 4, lp::kOtaStateSending, "standard-beta",
+                            digest, /*maxChunk=*/1444, /*needsFs=*/true, sendingTo,
+                            lp::LampVariant::Snafu);
+  TEST_ASSERT_TRUE(lp::parseHello(buf, n, out));
+  TEST_ASSERT_TRUE(out.hasFsDigest);
+  TEST_ASSERT_TRUE(out.hasOtaSendingTo);
+
+  n = lp::buildHello(buf, sizeof(buf), 2, kSrcMac, shade, base, 0x00010300,
+                     "bare", 4);
+  TEST_ASSERT_TRUE(lp::parseHello(buf, n, out));
+  const uint8_t zero[8] = {0};
+  TEST_ASSERT_EQUAL_UINT8(lp::kOtaStateIdle, out.otaState);
+  TEST_ASSERT_EQUAL_STRING("", out.fwChannel);
+  TEST_ASSERT_FALSE(out.hasFsDigest);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(zero, out.fsDigest, lp::HELLO_FS_DIGEST_LEN);
+  TEST_ASSERT_EQUAL_UINT16(0, out.maxChunk);
+  TEST_ASSERT_FALSE(out.needsFs);
+  TEST_ASSERT_FALSE(out.hasOtaSendingTo);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(zero, out.otaSendingTo, 6);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(lp::LampVariant::Unknown),
+                          static_cast<uint8_t>(out.variant));
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
   UNITY_BEGIN();
+  RUN_TEST(test_hello_parse_resets_every_tlv_field_on_reuse);
 
   RUN_TEST(test_wisp_hello_roundtrip);
   RUN_TEST(test_wisp_hello_too_short_rejected);

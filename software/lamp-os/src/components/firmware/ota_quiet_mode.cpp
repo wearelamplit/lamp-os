@@ -1,11 +1,33 @@
 #include "ota_quiet_mode.hpp"
 
+#include <mutex>
+
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 #include "components/network/ble/ble_control.hpp"
 #endif
 
 namespace lamp {
 namespace ota_quiet_mode {
+
+// The radio teardown and its undo, injectable so a native test can stall them.
+struct RadioOps {
+  void (*pause)();
+  void (*resume)();
+};
+
+#if defined(ARDUINO) || defined(ESP_PLATFORM)
+static void pauseRadioAndKickClients() {
+  ::ble_control::pauseRadioForOta();
+  ::ble_control::disconnectGattClientsForOta();
+}
+static RadioOps s_radio{pauseRadioAndKickClients, ::ble_control::resumeRadioAfterOta};
+#else
+static RadioOps s_radio{[] {}, [] {}};
+#endif
+
+// Held across a 0/1 count transition and its radio call, so a last exit's
+// resume can never land after another session's first entry.
+static std::mutex s_transitionMu;
 
 // Refcount. A single lamp commonly RECEIVES one OTA while
 // simultaneously DISTRIBUTING another to a third lamp during fleet
@@ -30,23 +52,20 @@ static std::atomic<bool> s_torndown{false};
 static std::atomic<bool> s_visible{true};
 
 void enterQuiet(bool tearDownRadio, bool visible) {
+  std::lock_guard<std::mutex> lock(s_transitionMu);
   const int prev = s_quietCount.fetch_add(1, std::memory_order_acq_rel);
   if (prev != 0) return;  // Already active; second-in is a no-op
                           // beyond bumping the count.
   s_visible.store(visible, std::memory_order_release);
 
-#if defined(ARDUINO) || defined(ESP_PLATFORM)
   if (tearDownRadio) {
-    ::ble_control::pauseRadioForOta();
-    ::ble_control::disconnectGattClientsForOta();
+    s_radio.pause();
     s_torndown.store(true, std::memory_order_release);
   }
-#else
-  (void)tearDownRadio;
-#endif
 }
 
 void exitQuiet() {
+  std::lock_guard<std::mutex> lock(s_transitionMu);
   const int prev = s_quietCount.fetch_sub(1, std::memory_order_acq_rel);
   if (prev > 1) return;   // Other session still active.
   if (prev <= 0) {
@@ -56,11 +75,7 @@ void exitQuiet() {
     return;
   }
 
-#if defined(ARDUINO) || defined(ESP_PLATFORM)
-  if (s_torndown.exchange(false, std::memory_order_acq_rel)) {
-    ::ble_control::resumeRadioAfterOta();
-  }
-#endif
+  if (s_torndown.exchange(false, std::memory_order_acq_rel)) s_radio.resume();
 }
 
 bool isQuiet() {

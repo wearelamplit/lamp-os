@@ -7,15 +7,18 @@
 #include <vector>
 
 #include "behaviors/greetable.hpp"
+#include "behaviors/social_reunion.hpp"
 #include "config/config_types.hpp"
 #include "core/animated_behavior.hpp"
 #include "util/color.hpp"
 #include "util/easing.hpp"
+#include "util/fast_rng.hpp"
 
 namespace lamp {
 
 class Config;  // fwd-decl; full include is heavy and only the .cpp uses it.
 class MeshLink;  // fwd-decl; only the .cpp calls sendColorQuery.
+class FondnessEngine;
 struct GreetingTuning;  // fwd-decl; defined in core/personality_engine.hpp.
 
 /**
@@ -41,7 +44,9 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   using AnimatedBehavior::AnimatedBehavior;
 
  public:
-  uint32_t nextAcknowledgeTimeMs = 0;
+  // Greeting cooldowns, re-greet stamps and fatigue run on lamp::uptimeMs(),
+  // which never wraps, so a stamp left for weeks cannot read as recent.
+  uint64_t nextAcknowledgeTimeMs = 0;
   Color foundLampColor;
 
   // Waveform parameters, copied from PersonalityEngine::greetingFor()
@@ -96,12 +101,21 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   // Called when greeting starts or ends. Used by the framework wiring to
   // push CHAR_STATE_NOTIFY without coupling behaviors to the BLE layer.
   void setOnGreetingChangeCallback(std::function<void()> fn) { onGreetingChange_ = std::move(fn); }
+  // Called with the peer of each organic greet; an app-triggered greet skips it.
+  void setOnOrganicGreet(void (*fn)(const uint8_t mac[6])) { onOrganicGreet_ = fn; }
 
   // Wires the live Config so control() can read the current socialMode.
   // No setter = behaves as Ambivert (the spec's pre-personality default).
   void setConfig(Config* config) { config_ = config; }
 
   void setMeshLink(MeshLink* m) { meshLink_ = m; }
+
+  // The engine whose tracking() gates the reunion, the colour hint and the
+  // seen marks. Unset never tracks.
+  void setFondness(FondnessEngine* fondness) { fondness_ = fondness; }
+  // Crowd damping for the colour hint; unset damps by the defaults.
+  void setContagionTuning(const ContagionTuning* t) { contagion_ = t; }
+  ReunionTuning& reunionTuning() { return reunion_; }
 
   void onColorInfo(const uint8_t srcMac[6], const std::vector<Color>& baseStops,
                    const std::vector<Color>& shadeStops) override;
@@ -110,7 +124,10 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   // running the discovery / cooldown gates. Called by triggerGreeting so
   // forced greetings still enforce the natural cooldown on the next sighting.
   // `mac` is the peer's raw 6-byte mesh MAC.
-  void markGreeted(const uint8_t mac[6], uint32_t nowMs);
+  void markGreeted(const uint8_t mac[6], uint64_t upMs);
+
+  // True while an introvert rests after too many greetings.
+  bool tired() const;
 
  private:
   static constexpr size_t MAX_GREETED_TRACKED = 32;
@@ -128,15 +145,18 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   static constexpr size_t   INTROVERT_FATIGUE_COUNT = 3;
   static constexpr uint32_t INTROVERT_FATIGUE_WINDOW_MS = 300000;
   static constexpr uint32_t INTROVERT_TIRED_DURATION_MS = 300000;
+  // The unseen clock counts minutes, so a finer sweep changes nothing.
+  static constexpr uint32_t kSeenSweepMs = 60000;
 
   Config* config_ = nullptr;
   // Keyed on the raw 6-byte mac so a tracked peer never spawns a per-entry
   // heap string (see docs/dev/embedded-heap.md rule 3); the control() lookup
   // runs inside the roster mutex.
-  std::map<std::array<uint8_t, 6>, uint32_t> lastGreetedAtMs_;
-  std::vector<uint32_t> recentGreetMs_;
-  uint32_t tiredUntilMs_ = 0;
+  std::map<std::array<uint8_t, 6>, uint64_t> lastGreetedAtMs_;
+  std::vector<uint64_t> recentGreetMs_;
+  uint64_t tiredUntilMs_ = 0;
   std::function<void()> onGreetingChange_;
+  void (*onOrganicGreet_)(const uint8_t mac[6]) = nullptr;
   // Tracks whether the animation was active last control() so stop-edge fires.
   bool greetingWasActive_ = false;
   // True while the greeting playing came from triggerGreeting.
@@ -150,6 +170,25 @@ class SocialBehavior : public AnimatedBehavior, public Greetable {
   static constexpr uint8_t kGradientBlendStep = 21;  // ~255 over ~12 frames
   uint8_t greetedBlend_ = 0;
   std::vector<Color> gradientCache_;
+
+  bool tracking_() const;
+  // At a greeting's end, maybe borrow the greeted friend's colour.
+  void maybeColourHint_(uint64_t upMs);
+  // Once a minute, restart the unseen clock of every near peer the roster has
+  // acknowledged. The organic greeting, while tracking, reads the clock before
+  // it acknowledges its arrival, so an arrival waiting out a cooldown keeps
+  // its reunion; one acknowledged any other way (an app greeting, home mode)
+  // gives it up.
+  void markGreetedNearSeen_(uint64_t upMs);
+  uint64_t lastSeenSweepMs_ = 0;
+
+  FondnessEngine* fondness_ = nullptr;
+  ReunionTuning reunion_;
+  const ContagionTuning* contagion_ = nullptr;
+  ColourHint colourHint_;
+  FastRng rng_;
+  // True while the greeting playing is a reunion.
+  bool reunionPlaying_ = false;
 };
 
 }  // namespace lamp

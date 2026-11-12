@@ -18,8 +18,9 @@
 //   override.hpp    MSG_OVERRIDE_COLORS (0x21) / RESTORE_COLORS (0x22) /
 //                   OVERRIDE_BRIGHTNESS (0x23) / RESTORE_BRIGHTNESS (0x24).
 //   dedup_ring.hpp  DedupRing (gossip-relay dup suppressor; not a message).
-//   paint_timing.hpp  Wisp paint watchdog/keep-alive constants (not a
-//                     message; compile-time timing shared lamp+wisp).
+//   sender_seq.hpp  SenderSeq (a node's per-boot random-start frame seq).
+//   paint_timing.hpp  Wisp paint watchdog constant (not a message;
+//                     compile-time timing).
 //
 // The version byte at data[2] is a receive range, not a single number.
 // PROTOCOL_VERSION_EMIT goes on the wire; inspect() accepts
@@ -43,6 +44,7 @@
 #include <lampos/protocol/wisp.hpp>
 #include <lampos/protocol/override.hpp>
 #include <lampos/protocol/dedup_ring.hpp>
+#include <lampos/protocol/sender_seq.hpp>
 #include <lampos/protocol/paint_timing.hpp>
 
 namespace lamp_protocol {

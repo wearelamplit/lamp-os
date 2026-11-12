@@ -14,6 +14,7 @@
 #include "hello_interval.hpp"
 #include "hello_relay_suppressor.hpp"
 #include "lamp_roster.hpp"
+#include "relay_stagger.hpp"
 #include "resend_ring.hpp"
 #include "pending_slots.hpp"
 #include "wisp_coex.hpp"
@@ -46,17 +47,18 @@ using ControlOpHandler = std::function<void(const uint8_t* payload, size_t len,
 // Forwarders implemented in lamp.cpp. MeshLink's WiFi-task recv path
 // calls these; they own posting into the loop-task pending slots so
 // handleRecv stays a thin parse-and-route layer with no knowledge of which
-// slot a message type lands in.
+// slot a message type lands in. A Parsed* forwarder copies out of the recv
+// buffer into its slot before returning.
 void postPendingOverrideColors(const PendingOverrideColors& src);
 void postPendingRestoreColors(const PendingRestoreColors& src);
 void postPendingOverrideBrightness(const PendingOverrideBrightness& src);
 void postPendingRestoreBrightness(const PendingRestoreBrightness& src);
 void postPendingWispHello(const PendingWispHello& src);
 void postPendingWispPalette(const PendingWispPalette& src);
-void postPendingWispClaim(const PendingWispClaim& src);
-void postPendingWispPaint(const PendingWispPaint& src);
-void postPendingWispState(const PendingWispState& src);
-void postPendingCommand(const PendingCommand& src);
+void postPendingWispClaim(const lamp_protocol::ParsedWispClaim& wc);
+void postPendingWispState(const lamp_protocol::ParsedWispState& ws,
+                          const uint8_t selfMac[6]);
+void postPendingCommand(const lamp_protocol::ParsedCommand& p);
 void postPendingEvent(const PendingEvent& src);
 void postPendingColorQuery(const PendingColorQuery& src);
 void postPendingColorInfo(const PendingColorInfo& src);
@@ -164,6 +166,12 @@ class MeshLink {
   // relayed the same (mac, seq). Bounds HELLO airtime below the ~N^2 that
   // relaying every first sight costs. Receive-side only, no wire change.
   HelloRelaySuppressor helloSuppressor_;
+  // Staggered relays of the wisp's frames (control ops, WISP_HELLO,
+  // WISP_PALETTE): one wisp has at most one control and two small frames
+  // pending per window, and the tables hold two wisps.
+  static_assert(lamp_protocol::WISP_HELLO_MAX_SIZE <= lamp_protocol::WISP_PALETTE_MAX_SIZE);
+  RelayStagger<lamp_protocol::CONTROL_MAX_SIZE, 2> controlRelay_;
+  RelayStagger<lamp_protocol::WISP_PALETTE_MAX_SIZE, 4> wispRelay_;
   lamp_protocol::DedupRing<64> controlOpDedup_;
   // Per-type dedup. Each new MSG_* gets its own ring so a
   // CONTROL_OP seq doesn't accidentally suppress an OVERRIDE_COLORS seq
@@ -181,9 +189,6 @@ class MeshLink {
   // relay). Lamps DO act on the payload: cache it for the app to read via
   // CHAR_WISP_STATUS.
   lamp_protocol::DedupRing<32> wispPaletteDedup_;
-  // Retired MSG_WISP_PAINT. Parsed and deduped, never drained (see
-  // docs/dev/networking.md).
-  lamp_protocol::DedupRing<16> wispPaintDedup_;
   // Declarative per-lamp state from the wisp. No relay; dedup prevents
   // repeat-fire on direct reception.
   lamp_protocol::DedupRing<16> wispStateDedup_;
@@ -212,8 +217,8 @@ class MeshLink {
   // boot-burst in lockstep. Applied once, to the first emit only.
   uint32_t helloBootPhaseMs_ = 0;
   uint8_t prevOtaState_ = lamp_protocol::kOtaStateIdle;
-  uint16_t helloSeq_ = 0;
-  uint16_t controlOpSeq_ = 0;
+  lamp_protocol::SenderSeq helloSeq_;
+  lamp_protocol::SenderSeq controlOpSeq_;
 
   // Spaced re-broadcast of the unacked types that must survive the C6's
   // bursty RX-scan gaps. Per-type instances (not one shared ring) so a
@@ -228,10 +233,10 @@ class MeshLink {
   ResendRing<kCommandResendMax, 10> commandResend_;
   ResendRing<lamp_protocol::COLOR_QUERY_SIZE, 1> colorQueryResend_;
   ResendRing<lamp_protocol::COLOR_INFO_MAX_SIZE, 4> colorInfoResend_;
-  uint16_t commandSeq_    = 0;
-  uint16_t eventSeq_      = 0;
-  uint16_t colorQuerySeq_ = 0;
-  uint16_t colorInfoSeq_  = 0;
+  lamp_protocol::SenderSeq commandSeq_;
+  lamp_protocol::SenderSeq eventSeq_;
+  lamp_protocol::SenderSeq colorQuerySeq_;
+  lamp_protocol::SenderSeq colorInfoSeq_;
 
   ControlOpHandler controlOpHandler_;
   FirmwareReceiver*    firmwareReceiver_    = nullptr;
@@ -246,15 +251,16 @@ class MeshLink {
   void reportWispCoex(const uint8_t mac[6], uint32_t nowMs);
   void reportWispState(const uint8_t sourceMac[6],
                        const lamp_protocol::ParsedWispState& ws, uint32_t nowMs);
-  void reportMeshMix(uint32_t nowMs);
+  void reportMeshMix(uint64_t nowMs);
 #endif
 
-  // Re-broadcast a received frame for gossip relay.
-  void relay(const uint8_t* data, size_t len) {
-    link_.broadcast(data, len);
+  // Re-broadcast a received frame for gossip relay. Runs on both cores.
+  bool relay(const uint8_t* data, size_t len) {
+    const bool ok = link_.broadcast(data, len);
 #ifdef LAMP_DEBUG
     meshMix_.relayedOut++;
 #endif
+    return ok;
   }
 };
 

@@ -6,8 +6,8 @@
 // frame before the deadline-driven restore, even when the duration is
 // shorter than one compositor flush window.
 //
-// The paint/restore gate mirrors glitchy_expression.cpp::draw(); the
-// deadline compare is the real lamp::timeReached.
+// The paint/restore gate mirrors glitchy_expression.cpp::draw(), which
+// compares 64-bit lamp::uptimeMs() stamps.
 
 #include <unity.h>
 
@@ -22,8 +22,8 @@ struct GlitchRig {
   int paints = 0;
   int restores = 0;
 
-  void draw(uint32_t nowMs, uint32_t glitchEndMs) {
-    if (painted && lamp::timeReached(nowMs, glitchEndMs)) {
+  void draw(uint64_t nowMs, uint64_t glitchEndMs) {
+    if (painted && nowMs >= glitchEndMs) {
       restores++;
     } else {
       paints++;
@@ -61,15 +61,15 @@ void test_paints_until_deadline_then_restores() {
   TEST_ASSERT_EQUAL_INT(1, rig.restores);
 }
 
-void test_deadline_survives_millis_wrap() {
-  // Trigger just before the uint32 wrap; deadline lands after it.
+void test_deadline_runs_past_the_millis_wrap() {
+  // Trigger just before 2^32 ms, where millis() wraps; the uptime runs on.
   test::GlitchRig rig;
-  const uint32_t endMs = 0xFFFFFFF0u + 100u;  // wraps to 0x54
-  rig.draw(0xFFFFFFF0u, endMs);
+  const uint64_t endMs = 0xFFFFFFF0ull + 100u;
+  rig.draw(0xFFFFFFF0ull, endMs);
   TEST_ASSERT_EQUAL_INT(1, rig.paints);
-  rig.draw(0x00000010u, endMs);   // wrapped, deadline not yet reached
+  rig.draw(0x100000010ull, endMs);  // past 2^32, deadline not yet reached
   TEST_ASSERT_EQUAL_INT(2, rig.paints);
-  rig.draw(0x00000060u, endMs);   // wrapped, past deadline
+  rig.draw(0x100000060ull, endMs);  // past the deadline
   TEST_ASSERT_EQUAL_INT(1, rig.restores);
 }
 
@@ -77,6 +77,6 @@ int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_expired_before_first_draw_still_paints_once);
   RUN_TEST(test_paints_until_deadline_then_restores);
-  RUN_TEST(test_deadline_survives_millis_wrap);
+  RUN_TEST(test_deadline_runs_past_the_millis_wrap);
   return UNITY_END();
 }

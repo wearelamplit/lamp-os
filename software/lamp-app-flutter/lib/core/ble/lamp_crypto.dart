@@ -31,6 +31,9 @@ class LampCrypto {
   static const int nonceLen = 12;
   static const int tagLen = 16;
 
+  /// Bytes [encryptOp] adds to the JSON: magic, nonce and tag.
+  static const int frameOverhead = 1 + nonceLen + tagLen;
+
   static final _aes = AesGcm.with256bits();
   static final _hkdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
 

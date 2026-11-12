@@ -29,6 +29,10 @@ struct WispCache {
   // paint), not hello alone. Control-op targeting keys on this so a command
   // survives a coex-dropped HELLO gap while the reliable unicast still lands.
   uint32_t lastSeenMs = 0;
+  // Latched once the slot's stamps age past the display (hello/adopted) and
+  // control (lastSeenMs) windows; their writers clear them.
+  bool displayAgedOut = false;
+  bool controlAgedOut = false;
   uint32_t wispVersion = 0;
   uint8_t flags = 0;
   // +1 for trailing NUL; on-wire slot is 8 bytes opaque (not ASCII-enforced).

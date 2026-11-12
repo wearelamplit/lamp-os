@@ -48,11 +48,11 @@ abstract class BleUuids {
   static const editSession    = '5f64f4e9-d6d9-4a44-9b3f-3a8d6f7e6b40';
 
   // wisp_op (write-with-response, plaintext): JSON op forwarded to the
-  // wisp via MSG_CONTROL_OP broadcast. Shape:
+  // lamp's display wisp as a MSG_CONTROL_OP unicast. Shape:
   //   {"char":"wispOp","op":"setSource","mode":"osc"}
   //   {"char":"wispOp","op":"setOscRole","role":"secondary"}
   //   {"char":"wispOp","op":"setWifi","ssid":"…","pw":"…"}
-  // The lamp broadcasts these on the mesh; it does not interpret them.
+  // The lamp sends these on the mesh; it does not interpret them.
   static const wispOp = '5f64f4e1-d6d9-4a44-9b3f-3a8d6f7e6b40';
 
   // wisp_status (read + notify): merged JSON of the last wispStatus
@@ -75,6 +75,10 @@ abstract class BleUuids {
   // yields a DeclineBusy notification.
   static const fwControl = '5f64f4e7-d6d9-4a44-9b3f-3a8d6f7e6b40';
   static const fwChunk   = '5f64f4e8-d6d9-4a44-9b3f-3a8d6f7e6b40';
+
+  // schema_version (read-only, no auth): one byte, the lamp's
+  // kGattSchemaVersion. Absent on lamps that predate GATT schema v1.
+  static const schemaVersion = '5f64f4ea-d6d9-4a44-9b3f-3a8d6f7e6b40';
 
   /// Commit signal (CHAR_COMMIT). 0/1-byte payload (ignored);
   /// firmware persists the current in-memory config to NVS on receipt,

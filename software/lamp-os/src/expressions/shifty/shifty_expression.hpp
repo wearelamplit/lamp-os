@@ -79,7 +79,7 @@ inline constexpr ExpressionDescriptor kShiftyDescriptorData{
  *
  * Creates subtle ambient shifts by slowly fading to a random color,
  * staying for a duration, then fading back to original colors. Every phase
- * is timed off millis(); the frame counter never ends a fade or a hold.
+ * is timed off the uptime clock; the frame counter never ends a fade or a hold.
  */
 class ShiftyExpression : public Expression {
  private:
@@ -108,9 +108,11 @@ class ShiftyExpression : public Expression {
   uint32_t fadeDurationMs = 60000;
 
   // Runtime state
-  uint32_t shiftStartMs = 0;
+  // Phase starts on lamp::uptimeMs(), since home mode can freeze a shift for
+  // weeks.
+  uint64_t shiftStartMs = 0;
   uint32_t currentShiftDurationMs = 0;
-  uint32_t fadeStartMs = 0;
+  uint64_t fadeStartMs = 0;
 
   // Per-frame cache (perf): the factor from (elapsed, fadeDurationMs) is
   // identical for every pixel within a fade frame. Hoisted out of the

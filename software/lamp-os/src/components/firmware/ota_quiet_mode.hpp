@@ -5,11 +5,11 @@
 namespace lamp {
 namespace ota_quiet_mode {
 
-// Single global flag that suspends the lamp's behavior + framebuffer stack
-// + live-control BLE writes for the duration of an OTA. Entered by the
-// firmware receiver on State::Streaming entry and by the firmware
-// distributor on first OFFER; exited on abort, failure tombstone, or
-// success (just before reboot).
+// Process-wide refcounted hold that suspends the lamp's behavior +
+// framebuffer stack + live-control BLE writes for the duration of an OTA.
+// Entered by the firmware receiver on State::Streaming entry and by the
+// firmware distributor on its first Streaming step; exited on abort, failure
+// tombstone, or success (just before reboot).
 //
 // `tearDownRadio` controls whether adv/scan/webapp also stop and any
 // connected GATT client is kicked. The mesh OTA path passes true (the phone

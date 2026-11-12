@@ -8,6 +8,7 @@
 
 #include "components/network/ble/ble_control.hpp"  // for ble_control::isClientConnected()
 #include "components/network/transport/wifi_psk.hpp"
+#include "util/uptime.hpp"
 
 // Grid channel. All unconnected grid lamps line up here so ESP-NOW peers
 // can hear each other. The radio never associates to a home AP,
@@ -26,8 +27,10 @@ static State s_state = IDLE;
 static std::string s_lastError;
 static std::vector<ScanResult> s_scanResults;          // drained by UI notify
 static std::vector<std::string> s_recentSsids;         // persistent presence cache
-static uint32_t s_lastScanCompleteMs = 0;
-static uint32_t s_lastBackgroundScanMs = 0;
+// On lamp::uptimeMs(): either can sit for weeks (home mode off, a client
+// connected), and a 32-bit stamp would then read as recent one wrap later.
+static uint64_t s_lastScanCompleteMs = 0;
+static uint64_t s_lastBackgroundScanMs = 0;
 static StateChangeCallback s_cb = nullptr;
 static HomeModeEnabledGetter s_homeModeEnabledGetter = nullptr;
 static OtaInProgressGetter   s_otaInProgressGetter   = nullptr;
@@ -92,10 +95,10 @@ void begin() {
   // is fragile (just came up from WiFi.disconnect+WIFI_STA), and a failed
   // scan in this window strands the radio off LAMP_ESPNOW_CHANNEL,
   // killing mesh recv entirely. Seed
-  // s_lastBackgroundScanMs with the current millis() so the first
+  // s_lastBackgroundScanMs with the current uptime so the first
   // periodic scan fires BACKGROUND_SCAN_INTERVAL_MS *after* boot, when
   // the WiFi stack has settled.
-  s_lastBackgroundScanMs = millis();
+  s_lastBackgroundScanMs = lamp::uptimeMs();
 }
 
 State state() { return s_state; }
@@ -175,7 +178,7 @@ bool homeSsidVisible(const std::string& ssid) {
   // negligible (string == is a no-alloc compare). The string compares run
   // inside the critical section; the loop is bounded (~30 SSIDs max).
   bool seen = false;
-  uint32_t lastMs = 0;
+  uint64_t lastMs = 0;
   portENTER_CRITICAL(&s_scanMux);
   lastMs = s_lastScanCompleteMs;
   if (lastMs != 0) {
@@ -185,9 +188,9 @@ bool homeSsidVisible(const std::string& ssid) {
   }
   portEXIT_CRITICAL(&s_scanMux);
   if (!seen) return false;
-  // Staleness check is OUTSIDE the critical section; millis() is fast
+  // Staleness check is OUTSIDE the critical section; the clock read is fast
   // but no point holding the lock for a wall-clock read.
-  return (millis() - lastMs) <= SCAN_STALENESS_MS;
+  return (lamp::uptimeMs() - lastMs) <= SCAN_STALENESS_MS;
 }
 
 static bool s_softApUp = false;
@@ -271,7 +274,7 @@ void tick() {
         });
         newSsids.push_back(ssidStr);
       }
-      const uint32_t completeMs = millis();
+      const uint64_t completeMs = lamp::uptimeMs();
       // Atomic publish: swap in the new buffers, free the old ones
       // OUTSIDE the critical section.
       std::vector<ScanResult> dropResults;
@@ -336,8 +339,8 @@ void tick() {
       s_webappActiveGetter && s_webappActiveGetter();
   if (s_state == IDLE && !ble_control::isClientConnected() &&
       homeModeEnabled && !otaInProgress && !webappActive) {
-    const uint32_t now = millis();
-    const uint32_t elapsed = now - s_lastBackgroundScanMs;
+    const uint64_t now = lamp::uptimeMs();
+    const uint64_t elapsed = now - s_lastBackgroundScanMs;
     if (elapsed > BACKGROUND_SCAN_INTERVAL_MS) {
 #ifdef LAMP_DEBUG
       Serial.printf("[wifi.sched] scan DECIDED elapsed=%u lastBgMs=%u now=%u\n",

@@ -45,6 +45,7 @@ void PowerGovernor::begin(uint16_t supplyBudgetMa, uint32_t nowMs) {
                        : 0;
   state_ = State::BootRamp;
   beginMs_ = nowMs;
+  bootWindowOver_ = false;
   lastGlideMs_ = nowMs;
   lastPaceMs_ = nowMs;
   current_ = kBootCeiling;
@@ -53,7 +54,8 @@ void PowerGovernor::begin(uint16_t supplyBudgetMa, uint32_t nowMs) {
 }
 
 bool PowerGovernor::inBootWindow(uint32_t nowMs) const {
-  return nowMs - beginMs_ < static_cast<uint32_t>(kBootHoldMs) + kBootGlideMs;
+  return !bootWindowOver_ &&
+         nowMs - beginMs_ < static_cast<uint32_t>(kBootHoldMs) + kBootGlideMs;
 }
 
 float PowerGovernor::rampCap(uint32_t nowMs) const {
@@ -108,6 +110,7 @@ void PowerGovernor::tick(uint32_t nowMs) {
   if (nowMs - lastPaceMs_ < kPaceMs) return;
   lastPaceMs_ = nowMs;
   const bool bootWindow = inBootWindow(nowMs);
+  if (!bootWindow) bootWindowOver_ = true;
   if (state_ == State::Clamped) {
     if (lastDemandMa_ >
         kReleaseFraction * static_cast<float>(pixelBudgetMa_)) {

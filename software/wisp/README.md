@@ -59,7 +59,7 @@ IP forwarding is on in the prebuilt framework (`CONFIG_LWIP_IP_FORWARD=y`), so t
 
 ## How the user talks to it
 
-Wisp has no BLE. The app talks to wisp via any nearby lamp acting as a proxy: the lamp surfaces wisp's last-overheard `MSG_WISP_HELLO` on a BLE characteristic, and forwards ops back to wisp over the mesh. WiFi credentials are configured the same way — out of the box, flash wisp once over USB and configure it from the app.
+Wisp takes no BLE connections: its only BLE is the non-connectable stage beacon that hands pre-mesh lamps the softAP credentials. The app talks to wisp via any nearby lamp acting as a proxy: the lamp surfaces wisp's last-overheard `MSG_WISP_HELLO` on a BLE characteristic, and forwards ops back to wisp over the mesh. WiFi credentials are configured the same way — out of the box, flash wisp once over USB and configure it from the app.
 
 ## Wire format
 

@@ -11,6 +11,9 @@ import 'package:lamp_app/core/ble/ble_client.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/features/firmware/data/firmware_ota_pusher.dart';
 import 'package:lamp_app/features/firmware/domain/firmware_protocol.dart';
+import 'package:lamp_app/features/firmware/domain/firmware_state.dart';
+
+import '../../_support/fw_frames.dart';
 
 class RecordedWrite {
   RecordedWrite(this.serviceUuid, this.charUuid, this.value,
@@ -80,10 +83,18 @@ class NotifyableBle extends BleClient {
   Future<Uint8List> readSection(String deviceId, String name) async =>
       throw UnimplementedError();
 
+  /// Writes to this characteristic throw as a dropped link.
+  String? failWritesTo;
+
+  /// Ends the notify stream on `(d, s, c)` with an error.
+  void simulateNotifyError(String d, String s, String c) =>
+      _ensure(d, s, c).addError(const BleDisconnectedException('lamp-A'));
+
   @override
   Future<void> write(String d, String s, String c, Uint8List v,
       {bool withoutResponse = false, bool allowLongWrite = false}) async {
     if (!_connected.contains(d)) throw BleNotConnected(d);
+    if (c == failWritesTo) throw BleDisconnectedException(d);
     writes.add(RecordedWrite(s, c, v, withoutResponse: withoutResponse));
   }
 
@@ -112,52 +123,6 @@ class NotifyableBle extends BleClient {
 
   @override
   Future<void> cycleAdapter(String deviceId) async {}
-}
-
-// Hand-build a synthetic ACCEPT frame.
-Uint8List makeAccept({
-  required int seq,
-  required int offerSeq,
-  required int version,
-  required FwAcceptStatus status,
-}) {
-  final buf = Uint8List(fwAcceptFixedSize);
-  final view = ByteData.view(buf.buffer);
-  view.setUint8(0, 0x4C);
-  view.setUint8(1, 0x4D);
-  view.setUint8(2, protocolVersion);
-  view.setUint8(3, msgFwAccept);
-  view.setUint16(4, seq, Endian.little);
-  view.setUint16(18, offerSeq, Endian.little);
-  view.setUint32(20, version, Endian.little);
-  view.setUint8(24, status.index);
-  return buf;
-}
-
-Uint8List makeReq({required int seq, required int firstIdx, required int count}) {
-  final buf = Uint8List(fwReqFixedSize);
-  final view = ByteData.view(buf.buffer);
-  view.setUint8(0, 0x4C);
-  view.setUint8(1, 0x4D);
-  view.setUint8(2, protocolVersion);
-  view.setUint8(3, msgFwReq);
-  view.setUint16(4, seq, Endian.little);
-  view.setUint16(18, firstIdx, Endian.little);
-  view.setUint16(20, count, Endian.little);
-  return buf;
-}
-
-Uint8List makeResult({required int seq, required FwResultStatus status, required int version}) {
-  final buf = Uint8List(fwResultFixedSize);
-  final view = ByteData.view(buf.buffer);
-  view.setUint8(0, 0x4C);
-  view.setUint8(1, 0x4D);
-  view.setUint8(2, protocolVersion);
-  view.setUint8(3, msgFwResult);
-  view.setUint16(4, seq, Endian.little);
-  view.setUint8(18, status.index);
-  view.setUint32(20, version, Endian.little);
-  return buf;
 }
 
 // Tiny synthetic signed image: a few chunks worth of bytes + 96-byte
@@ -256,6 +221,7 @@ void main() {
 
     final result = await pendingResult;
     expect(result.success, isTrue);
+    expect(result.alreadyCurrent, isFalse);
     expect(result.lampReportedVersion, equals(0x00010205));
   });
 
@@ -325,6 +291,8 @@ void main() {
     final result = await pending;
     expect(result.success, isFalse);
     expect(result.message, contains('Another update'));
+    expect(result.failure, FirmwareFailure.busy);
+    expect(result.failure!.declined, isTrue);
   });
 
   test('ACCEPT(DeclineUnverified) ends with success=false + signature-rejected message', () async {
@@ -352,6 +320,8 @@ void main() {
     final result = await pending;
     expect(result.success, isFalse);
     expect(result.message, contains('signature'));
+    expect(result.failure, FirmwareFailure.untrustedAtOffer);
+    expect(result.failure!.declined, isTrue);
   });
 
   test('ACCEPT(DeclineAlreadyCurrent) reports success=true + already-current message', () async {
@@ -375,6 +345,7 @@ void main() {
     final result = await pending;
     expect(result.success, isTrue);
     expect(result.message, contains('already running'));
+    expect(result.alreadyCurrent, isTrue);
   });
 
   test('REQ rewinds chunk cursor mid-stream', () async {
@@ -472,6 +443,8 @@ void main() {
     final result = await pending;
     expect(result.success, isFalse);
     expect(result.message, contains('signature'));
+    expect(result.failure, FirmwareFailure.untrusted);
+    expect(result.failure!.declined, isFalse);
   });
 
   test('stale cached RESULT replayed at subscribe time does not complete the session', () async {
@@ -646,6 +619,7 @@ void main() {
     final result = await pending;
     expect(result.success, isFalse);
     expect(result.message, contains('after the update finished'));
+    expect(result.failure, FirmwareFailure.missingPieces);
   });
 
   test('replayed ACCEPT does not start a second streaming loop', () async {
@@ -698,5 +672,120 @@ void main() {
     final result = await pending;
     expect(result.success, isFalse);
     expect(result.message, contains('cancel'));
+    expect(result.failure, FirmwareFailure.cancelled);
+  });
+
+  group('each failure carries the kind the app explains it by', () {
+    const lamp = 'lamp-A';
+
+    /// A pusher whose offer and result give up after 50 ms.
+    FirmwareOtaPusher quick(NotifyableBle ble) => FirmwareOtaPusher(
+      ble: ble,
+      deviceId: lamp,
+      signedImage: makeSignedImage(signedRegion: 400),
+      version: 0x00010205,
+      channel: 'stable',
+      digest: Uint8List(32),
+      signature: Uint8List(64),
+      totalLen: makeSignedImage(signedRegion: 400).length,
+      footerLen: 96,
+      chunkSpacingMs: 0,
+      acceptTimeout: const Duration(milliseconds: 50),
+      resultTimeout: const Duration(milliseconds: 50),
+    );
+
+    Future<void> accept(NotifyableBle ble) async {
+      await Future<void>.delayed(Duration.zero);
+      final offerSeq = ByteData.view(ble.writes.first.value.buffer)
+          .getUint16(4, Endian.little);
+      await ble.simulateNotify(
+        lamp,
+        BleUuids.controlService,
+        BleUuids.fwControl,
+        makeAccept(
+            seq: 1,
+            offerSeq: offerSeq,
+            version: 0x00010205,
+            status: FwAcceptStatus.accept),
+      );
+    }
+
+    for (final (status, kind) in [
+      (FwResultStatus.versionMismatch, FirmwareFailure.scrambled),
+      (FwResultStatus.offerShaMismatch, FirmwareFailure.scrambled),
+      (FwResultStatus.partitionWriteFail, FirmwareFailure.storeFailed),
+      (FwResultStatus.partitionReadFail, FirmwareFailure.storeFailed),
+      (FwResultStatus.otaBeginFail, FirmwareFailure.storeFailed),
+      (FwResultStatus.otaEndFail, FirmwareFailure.storeFailed),
+      (FwResultStatus.setBootFail, FirmwareFailure.storeFailed),
+      (FwResultStatus.unknown, FirmwareFailure.unknown),
+    ]) {
+      test('RESULT(${status.name}) is ${kind.name}', () async {
+        final ble = NotifyableBle();
+        await ble.connect(lamp);
+        final pending = makePusher(ble, makeSignedImage(signedRegion: 200))
+            .start();
+        await accept(ble);
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        await ble.simulateNotify(
+          lamp,
+          BleUuids.controlService,
+          BleUuids.fwControl,
+          makeResult(seq: 2, status: status, version: 0),
+        );
+        final result = await pending;
+        expect(result.success, isFalse);
+        expect(result.failure, kind);
+      });
+    }
+
+    test('no answer to the offer is noAnswer', () async {
+      final ble = NotifyableBle();
+      await ble.connect(lamp);
+      expect((await quick(ble).start()).failure, FirmwareFailure.noAnswer);
+    });
+
+    test('an offer that cannot go out is setupFailed', () async {
+      final ble = NotifyableBle();
+      expect((await quick(ble).start()).failure, FirmwareFailure.setupFailed);
+    });
+
+    test('no result after DONE is noResult', () async {
+      final ble = NotifyableBle();
+      await ble.connect(lamp);
+      final pending = quick(ble).start();
+      await accept(ble);
+      expect((await pending).failure, FirmwareFailure.noResult);
+    });
+
+    test('a notify stream error is linkLost', () async {
+      final ble = NotifyableBle();
+      await ble.connect(lamp);
+      final pending = quick(ble).start();
+      await Future<void>.delayed(Duration.zero);
+      ble.simulateNotifyError(
+          lamp, BleUuids.controlService, BleUuids.fwControl);
+      expect((await pending).failure, FirmwareFailure.linkLost);
+    });
+
+    test('a chunk that cannot be written is linkLost', () async {
+      final ble = NotifyableBle()..failWritesTo = BleUuids.fwChunk;
+      await ble.connect(lamp);
+      final pending = quick(ble).start();
+      await accept(ble);
+      expect((await pending).failure, FirmwareFailure.linkLost);
+    });
+
+    test('a DONE that cannot be written is linkLost', () async {
+      final ble = NotifyableBle();
+      await ble.connect(lamp);
+      final pending = quick(ble).start();
+      // The offer is the one control write before DONE.
+      ble.failWritesTo = BleUuids.fwControl;
+      await accept(ble);
+      final result = await pending;
+      expect(result.message, contains('DONE'));
+      expect(result.failure, FirmwareFailure.linkLost);
+    });
   });
 }

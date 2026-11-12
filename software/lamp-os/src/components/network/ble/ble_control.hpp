@@ -59,7 +59,7 @@ constexpr const char* CHAR_WIFI_STATE      = "5f64f4db-d6d9-4a44-9b3f-3a8d6f7e6b
 // streams host→lamp (write), pagination streams lamp→host (read).
 constexpr const char* CHAR_PAGE_CTRL       = "5f64f4dc-d6d9-4a44-9b3f-3a8d6f7e6b40";
 constexpr const char* CHAR_PAGE_DATA       = "5f64f4dd-d6d9-4a44-9b3f-3a8d6f7e6b40";
-// remote_op (write-with-response, encrypted): a render-only control write
+// remote_op (write-with-response, plaintext, auth-gated): a render-only control write
 // applied on this lamp when its targetMac is this lamp or "broadcast".
 constexpr const char* CHAR_REMOTE_OP       = "5f64f4e4-d6d9-4a44-9b3f-3a8d6f7e6b40";
 // home_mode_focus (write-without-response): single u8 bool. The app
@@ -74,7 +74,7 @@ constexpr const char* CHAR_REMOTE_OP       = "5f64f4e4-d6d9-4a44-9b3f-3a8d6f7e6b
 // home.ssid + wifi::homeSsidVisible(). Cleared automatically on BT
 // disconnect.
 constexpr const char* CHAR_HOME_MODE_FOCUS = "5f64f4e5-d6d9-4a44-9b3f-3a8d6f7e6b40";
-// social_dispositions (read + write, encrypted): JSON map of peer name to
+// social_dispositions (read + write, plaintext): JSON map of peer name to
 // disposition 1..5 (salty .. neutral .. smitten). Read returns the full
 // map; write replaces it. Auth-gated like the other write characteristics.
 // Stored separately from the main config blob in NVS namespace "lamp",
@@ -82,8 +82,8 @@ constexpr const char* CHAR_HOME_MODE_FOCUS = "5f64f4e5-d6d9-4a44-9b3f-3a8d6f7e6b
 constexpr const char* CHAR_SOCIAL_DISPOSITIONS = "5f64f4e6-d6d9-4a44-9b3f-3a8d6f7e6b40";
 // wisp_op (write-with-response, plaintext JSON): forward a wisp-bound op
 // from the app over ESP-NOW. The lamp does NOT apply this locally; it
-// only broadcasts a MSG_CONTROL_OP carrying the payload, and the wisp(s)
-// on the mesh consume it. Open-set by design: the wire format is
+// only unicasts a MSG_CONTROL_OP carrying the payload to its display wisp,
+// which consumes it. Open-set by design: the wire format is
 // {"char":"wispOp","op":"setOscRole","role":"fill",...} and the wisp owns the
 // op vocabulary; lamps never interpret. Auth-gated like the rest of the
 // write surface.
@@ -194,12 +194,16 @@ bool isClientConnected();
 bool isHomeModePageActive();
 
 /**
- * True while the central scan is paused because a GATT client is
- *        connected. bluetooth.cpp's onScanEnd queries this to decide
- *        whether to auto-restart the scan. Flipped on GATT connect /
- *        disconnect inside ble_control.cpp.
+ * Restart the continuous central scan after NimBLE ends it, unless a
+ *        connected GATT client or an OTA radio pause holds the scan.
  */
-bool isScanPaused();
+void resumeScanAfterScanEnd();
+
+/**
+ * Re-emit the advertisement so a GAP change reaches scanning phones.
+ *        Does nothing while an OTA radio pause holds advertising.
+ */
+void restartAdvertising();
 
 /**
  * Stop BLE advertising + scan to free the radio for ESP-NOW
@@ -216,7 +220,8 @@ void pauseRadioForOta();
 
 /**
  * Restart BLE advertising + scan after pauseRadioForOta(). Called
- *        on OTA success or any failure path. Idempotent.
+ *        on OTA success or any failure path. Idempotent. Until it runs,
+ *        nothing restarts advertising or the scan.
  */
 void resumeRadioAfterOta();
 

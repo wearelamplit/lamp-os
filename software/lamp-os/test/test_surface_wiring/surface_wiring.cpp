@@ -12,6 +12,7 @@
 #include "../../src/expressions/expression.cpp"
 #include "../../src/expressions/expression_invocation.cpp"
 #include "../../src/expressions/expression_manager.cpp"
+#include "../../src/expressions/recent_plays.cpp"
 #include "../../src/expressions/expression_registry.cpp"
 #include "../../src/expressions/pulse/pulse_expression.cpp"
 #include "../../src/util/color.cpp"

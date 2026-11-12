@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include <lampos/clock.hpp>
+
 #include "fade.hpp"
 #include "gradient.hpp"
 
@@ -20,7 +22,7 @@ RoleScene buildRoleScene(uint8_t px, const std::vector<Color>& stops,
 }
 
 void RotationClock::advance(uint32_t nowMs, uint8_t periodS, bool towardZero) {
-  const uint32_t elapsed = std::min(nowMs - lastMs_, kMaxRotationStepMs);
+  const uint32_t elapsed = lampos::frameDeltaMs(nowMs, lastMs_);
   lastMs_ = nowMs;
   // Whole phase units per ms keep the position a function of summed time
   // alone, whatever the frame spacing.

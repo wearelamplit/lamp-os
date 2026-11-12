@@ -49,7 +49,9 @@ static lamp::Config* s_config = nullptr;
 static AsyncWebServer* s_server = nullptr;
 static AsyncWebSocket* s_ws = nullptr;
 
-static uint32_t s_deadlineMs = 0;
+// Bumped by the AsyncTCP task's handlers and held by the loop task, so both
+// update it by compare-exchange.
+static std::atomic<uint32_t> s_deadlineMs{0};
 // An armed reboot and when it is due; millis() can read 0, so the flag, not
 // the time, says whether one is armed.
 static bool s_rebootArmed = false;
@@ -77,7 +79,7 @@ static constexpr uint16_t kHttpPort = 80;
 static void bumpDeadline() {
   const uint32_t now = millis();
   const uint32_t idle = now + LAMP_WEBAPP_IDLE_TIMEOUT_MS;
-  if (idle > s_deadlineMs) s_deadlineMs = idle;
+  raiseDeadline(s_deadlineMs, idle, s_deadlineMs.load());
 }
 
 // 128 covers 5 × (9 hex + 3 quote/comma) + brackets + NUL with headroom.
@@ -148,7 +150,7 @@ static void handleGetDispositions(AsyncWebServerRequest* req) {
   req->send(503, "application/json", "{\"ok\":false}");
 }
 
-// Bulk replace of the per-peer disposition map, mirroring the auth-gated
+// Merge into the per-peer disposition map, mirroring the auth-gated
 // CHAR_SOCIAL_DISPOSITIONS BLE write: same Core-1 drain, same size guard,
 // same OTA-quiet drop.
 static void handlePutDispositions(AsyncWebServerRequest* req,
@@ -524,6 +526,7 @@ static void rebootNow() {
 void tick() {
   drainWebSave();
   const uint32_t now = millis();
+  holdPassedDeadline(s_deadlineMs, now, s_deadlineMs.load());
   // An armed reboot fires even after the AP went down (an OTA's
   // shutdownForOta): a landed web save freezes config saves until it. It
   // waits while OTA quiet mode is held. A received update's own reboot loads
@@ -552,14 +555,14 @@ void tick() {
     armReboot(now);  // station left -> reboot restores BLE
   }
   if (!s_rebootArmed &&
-      webappShouldRestoreBle(now, s_deadlineMs, ble_control::isDownForWebapp())) {
+      webappShouldRestoreBle(now, s_deadlineMs.load(), ble_control::isDownForWebapp())) {
     armReboot(now);  // idle (browser closed) -> reboot
   }
 
   // A connected station blocks expiry indefinitely; never reboot someone still
   // associated. A station mid-save (reboot armed) is likewise left alone.
   if (!s_rebootArmed && WiFi.softAPgetStationNum() == 0 &&
-      webappShouldTeardown(now, s_deadlineMs, s_neverExpire)) {
+      webappShouldTeardown(now, s_deadlineMs.load(), s_neverExpire)) {
     if (s_serverUp) {
       rebootNow();  // reclaim the async task + server cleanly; delete races it
     } else {

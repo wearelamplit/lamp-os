@@ -138,14 +138,12 @@ enum MsgType : uint8_t {
   // which lamp they're connected to. Cadence: piggybacked on the 30 s
   // emitStatus() tick, plus an on-change emit from WispOpDispatcher.
   MSG_WISP_PALETTE        = 0x26,
-  // Per-lamp paint colors broadcast by the wisp. Each entry carries the lamp's
-  // current base + shade RGB so the app preview reflects drift, not just the
-  // deterministic newcomer prediction.
+  // Retired wisp paint broadcast. Wisps before beta-1.1.8 still send it and
+  // lamps ignore it; the ID stays reserved so no new message collides.
   MSG_WISP_PAINT          = 0x27,
   // Declarative per-lamp state the wisp broadcasts (~2 s, no relay). Per-lamp
   // {mac,base,shade} entries plus per-frame globals (brightness, drift-rate,
-  // presence); lamps chase the targets. Supersedes the WISP_PAINT/CLAIM/OVERRIDE
-  // path, which stays wired until later phases retire it.
+  // presence); lamps chase the targets.
   MSG_WISP_STATE          = 0x28,
   MSG_EVENT               = 0x30,
   // Targeted expression invocation. Lamp directs a specific nearby lamp to

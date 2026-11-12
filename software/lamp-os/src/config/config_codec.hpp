@@ -7,12 +7,14 @@
 
 #include "config_store.hpp"
 #include "util/json_writer.hpp"
+#include "util/str.hpp"
 #include "config_types.hpp"
 
-// JSON codec for the persisted "cfg" blob. Pure functions over the config
-// model structs (no NVS, no Serial), so the parse/serialize logic runs in
-// the native suite (round-trip tested in test/test_config_codec). Config owns
-// the store, the section cache, and logging; the byte shape lives here.
+// Codec for the stored config: the settings blob and expression records it
+// saves, the JSON forms releases up to 1.3.3 stored (loaded, never written),
+// and the JSON the web document and BLE sections carry. Pure functions over
+// the config model structs and a ConfigStore (no Serial), so it runs in the
+// native suite. Config owns the store, the section cache, and logging.
 namespace lamp {
 namespace config_codec {
 
@@ -40,6 +42,11 @@ bool parseExpression(JsonObject node, ExpressionConfig& out, bool enabledDefault
 // [kRotationMinPeriodS, kRotationMaxPeriodS], `dir` "up" or "down". Any other
 // key, type or value leaves that field as it was.
 void parseRotation(JsonObjectConst node, ColorRotation& out);
+// Writes a role's `segments` array into its page section. Every segment
+// carries `pin` (0 for the variant pin) and `builtinPin` (its strip's variant
+// pin, 0 with no strip), and the app shows the pin control only to firmware
+// that sends them.
+void writeSectionSegments(JsonObject section, const std::vector<SegmentSettings>& segs);
 // Adds `rotate`, every key present, to the role's page section when the role
 // offers rotation, and nothing otherwise.
 void writeSectionRotate(JsonObject section, const ShadeSettings& shade);
@@ -53,30 +60,22 @@ bool fromJson(JsonObject root, LampSettings& lamp, BaseSettings& base,
               ShadeSettings& shade, ExpressionSettings& expressions,
               HomeModeSettings& homeMode);
 
-// Serialize the model into root (the canonical "cfg" blob shape, also what
-// the constructor re-parses on the next boot).
+// Serialize the model into root: the web GET document, in the shape of the
+// whole "cfg" string releases up to 1.3.3 stored.
 void toJson(JsonObject root, const LampSettings& lamp, const BaseSettings& base,
             const ShadeSettings& shade, const ExpressionSettings& expressions,
             const HomeModeSettings& homeMode);
 
-// The same shapes written with no heap, byte-identical to serializeJson of
-// expressionToJson / toStoredJson (pinned by test_json_writer).
+// expressionToJson's shape written with no heap, byte-identical to
+// serializeJson of it (pinned by test_json_writer).
 void writeExpressionJson(JsonWriter& w, const ExpressionConfig& expr);
-// `lamp` null leaves out the lamp section; `whole` non-null adds
-// base.knockout and the expressions array, the shape of a whole save.
-// writeLampOnlyJson writes {"lamp":{...}}, the split save's cfg string.
-void writeLampOnlyJson(JsonWriter& w, const LampSettings& lamp);
-void writeStoredJson(JsonWriter& w, const LampSettings* lamp, const BaseSettings& base,
-                     const ShadeSettings& shade, const HomeModeSettings& homeMode,
-                     const ExpressionSettings* whole);
 
 // One expression's JSON object, the shape the BLE expressions section and the
 // webapp document both carry: type, enabled, the interval pair, target, each
 // parameter as its own key in key order, then colours.
 void expressionToJson(JsonObject node, const ExpressionConfig& expr);
 
-// Serialize everything but the expressions and the knockout levels (the "cfg"
-// key's stored shape).
+// Serialize everything but the expressions and the knockout levels.
 void toStoredJson(JsonObject root, const LampSettings& lamp,
                   const BaseSettings& base, const ShadeSettings& shade,
                   const HomeModeSettings& homeMode);
@@ -91,61 +90,75 @@ constexpr size_t kMaxExpressionRecordLen =
 size_t encodeExpression(const ExpressionConfig& expr, uint8_t* out);
 bool decodeExpression(const uint8_t* data, size_t len, ExpressionConfig& out);
 
+// Everything stored but the expressions, as one compact blob: a format byte,
+// the lamp section, base and shade (segments, pins, byte order, rotation), the
+// base knockout levels, then home mode. Decoding loads the model fromJson
+// loads from the same model's stored JSON, field for field, so every JSON
+// shape built from the model is unchanged (pinned by test_config_settings_codec).
+// colorsEditable is not stored, since applyDefaults sets it from the variant.
+// Longest at the caps is kMaxSettingsLen; `out` must hold kMaxSettingsBlobLen.
+constexpr size_t kMaxKnockoutLevels = 255;  // one per pixel, and a role holds 255
+constexpr size_t kMaxSettingsLen =
+    1 + (5 + 1 + kMaxLampNameLen + 1 + kMaxPasswordLen) +
+    2 * (4 + kMaxSegments * (1 + kMaxSegmentNameLen + 3 + 4 * kMaxSurfaceColors)) +
+    (1 + kMaxKnockoutLevels) +
+    (2 + 1 + kMaxSsidLen + 1 + kMaxDisabledExpressionTypes * (1 + kMaxExpressionTypeLen));
+constexpr size_t kMaxSettingsBlobLen = 1024;
+static_assert(kMaxSettingsLen <= kMaxSettingsBlobLen, "the settings blob holds the caps");
+size_t encodeSettings(const LampSettings& lamp, const BaseSettings& base,
+                      const ShadeSettings& shade, const HomeModeSettings& homeMode,
+                      uint8_t* out);
+// True when `data` is exactly what encodeSettings writes for the model.
+bool settingsMatch(const uint8_t* data, size_t len, const LampSettings& lamp,
+                   const BaseSettings& base, const ShadeSettings& shade,
+                   const HomeModeSettings& homeMode);
+// False, leaving the model untouched, for a truncated blob, an unknown format
+// byte, trailing bytes, a count or length over its cap, or an unknown flag or
+// code. Fields a role leaves out keep the value passed in, as fromJson's do.
+bool decodeSettings(const uint8_t* data, size_t len, LampSettings& lamp, BaseSettings& base,
+                    ShadeSettings& shade, HomeModeSettings& homeMode);
+
 // Invalid and NoHeap come from saveRawJson, Held from Config while a stored
 // web document waits for its reboot; each leaves the store untouched, as
 // TooLarge does.
 enum class SaveResult : uint8_t { Ok, WriteFailed, TooLarge, Invalid, NoHeap, Held };
 
-// The save buffer's length: it holds a whole config up to kMaxWholeCfgLen
-// and a split save's rest at the caps with every escapable string fully
-// escaped (1746 bytes, measured by test_config_records).
-constexpr size_t kMaxStoredCfgJsonLen = 1792;
-// The largest whole config saved as the one "cfg" string. A string must fit
-// in a single NVS page; at this size NVS can always place it with every
-// other key at its cap (docs/dev/embedded-heap.md, pinned by
-// test_config_records).
-constexpr size_t kMaxWholeCfgLen = 1759;
-static_assert(kMaxWholeCfgLen <= kMaxStoredCfgJsonLen, "the save buffer holds a whole config");
+// The longest rest or staged whole blob a release up to 1.3.3 wrote, which
+// the legacy load reads (1818 bytes fully escaped, plus slack).
+constexpr size_t kMaxStoredCfgJsonLen = 1824;
 
-// Saves the model. A whole config up to kMaxWholeCfgLen is one "cfg"
-// string carrying the expressions and knockout too, the form any firmware
-// reads; when NVS cannot place it beside the split keys it is staged as a
-// rest blob first, and the other keys are erased once it is authoritative.
-// A larger config splits: each expression as a record ("x0", "x1", ...), the
-// knockout levels in "ko", the count in "xn" (a decimal string), record slots
-// past the count erased, the rest but the lamp section as a rest blob (JSON,
-// in "cfgb" and "cfgc" by turns, the one not live erased and then written, so
-// a rewrite never touches the live copy; with both present "cfgb" is live),
-// and last the lamp section alone as the "cfg" string, staged in "cfgl" while
-// "cfg" is replaced. The JSON is checked
-// before any write, so TooLarge leaves the store untouched; an unchanged key
-// is not rewritten (NVS skips identical writes). A save takes no
-// config-sized heap: the JSON goes into `cfgBuffer` and records come off the
-// stack, and only NVS itself allocates, a handle per call and small bookkeeping
-// per page. Stops at the first failed write; the caller keeps its dirty state
+// Saves the model as expression records and the settings blob, moving a
+// store a release up to 1.3.3 wrote to that form. A reset at any write leaves
+// each section loading as before or as saved, and the legacy keys go only
+// once the new form has read back equal (docs/dev/embedded-heap.md, "The NVS
+// budget"). `buffer` must hold kMaxSettingsBlobLen bytes, else TooLarge with
+// nothing written. Takes no heap beyond NVS's own. A failed write or
+// mismatched read-back returns WriteFailed; the caller keeps its dirty state
 // and retries.
 SaveResult saveConfig(ConfigStore& store, const LampSettings& lamp,
                       const BaseSettings& base, const ShadeSettings& shade,
                       const ExpressionSettings& expressions,
-                      const HomeModeSettings& homeMode, char* cfgBuffer,
-                      size_t cfgBufferLen);
+                      const HomeModeSettings& homeMode, uint8_t* buffer, size_t bufferLen);
 
 struct LoadedRecords {
   bool present = false;      // the expressions came from records
   uint32_t droppedMask = 0;  // bit i: record "x<i>" missing or unreadable
   uint8_t duplicates = 0;    // records skipped as a repeat (type, target)
-  // A stored rest or lamp blob did not read, or a split store has no rest:
-  // Config then serves defaults without saving them over the store.
+  // A stored settings, rest or lamp blob did not read or decode, or a split
+  // store has no rest. Config then holds the first-boot save, so what loaded
+  // in their place is not saved over them.
   bool unreadable = false;
 };
 
-// Overlays what a split save keeps outside the stored JSON. The JSON wins
-// wherever it carries the data itself: knockout levels from "ko" only when it
-// has no base.knockout, expressions from their records only when it has no
-// expressions array (an older firmware always writes both, so a config it
-// saved after a downgrade is what loads). A record that fails to read drops
+// Overlays the records and the legacy knockout blob ("ko") on a loaded
+// model. The binary load passes cfgHasKnockout, its blob holding the levels.
+// For a legacy store the JSON wins wherever it carries the data itself:
+// knockout levels from "ko" only when it has no base.knockout, expressions
+// from their records only when it has no expressions array (an older
+// firmware always writes both, so a config it saved after a downgrade is
+// what loads). A record that fails to read drops
 // only itself (droppedMask); a repeated (type, target) keeps its first record.
-// Call after fromJson, which sizes the knockout.
+// Call after fromJson or decodeSettings, which size the knockout.
 LoadedRecords loadRecords(ConfigStore& store, BaseSettings& base,
                           ExpressionSettings& expressions, bool cfgHasKnockout,
                           bool cfgHasExpressions);
@@ -160,6 +173,40 @@ LoadedRecords loadStoredConfig(ConfigStore& store, JsonObject root, LampSettings
                                BaseSettings& base, ShadeSettings& shade,
                                ExpressionSettings& expressions,
                                HomeModeSettings& homeMode, bool& withinCaps);
+
+// The form the stored config loaded from. Whole and Split are the forms
+// releases up to 1.3.3 wrote (a whole "cfg" string, or "cfg", "cfgb"/"cfgc",
+// "cfgl" and "ko" beside the records); Binary is the settings blob.
+enum class StoreForm : uint8_t { Empty, Binary, Whole, Split };
+const char* storeFormName(StoreForm form);
+// A form the first save moves to the settings blob.
+inline bool isLegacyForm(StoreForm form) {
+  return form == StoreForm::Whole || form == StoreForm::Split;
+}
+
+struct LoadedConfig {
+  StoreForm form = StoreForm::Empty;
+  LoadedRecords records;
+  bool withinCaps = true;
+  // The lamp section carries `named`, so applyDefaults need not infer it.
+  bool namedKeyPresent = false;
+  // A "cfg" string holding data that did not parse; the model is left at
+  // class defaults and nothing else loads.
+  bool parseFailed = false;
+  size_t cfgBytes = 0;  // the "cfg" string's length, 0 for a binary store
+};
+
+// Loads the stored config. A settings blob that reads is the authority: it
+// loads with the records, and every legacy key beside it is erased. With
+// none, the legacy keys load through loadStoredConfig, as releases up to
+// 1.3.3 wrote them. Both blobs
+// present (a save cut short) loads "st0". A settings blob that is present
+// but does not read or decode is reported unreadable, and the legacy load
+// runs for whatever is left. The blob is read into `buffer`, which holds
+// kMaxSettingsBlobLen bytes.
+LoadedConfig loadConfig(ConfigStore& store, LampSettings& lamp, BaseSettings& base,
+                        ShadeSettings& shade, ExpressionSettings& expressions,
+                        HomeModeSettings& homeMode, uint8_t* buffer, size_t bufferLen);
 
 // Heap a raw save takes beside its document, bounded from the host
 // measurements in test_config_persist_validate (64-bit, so its slots and
@@ -206,8 +253,8 @@ SaveResult rawParseResult(DeserializationError error);
 // of memory all the same. A document with no password keeps `keptPassword`,
 // the GET document having redacted it, and one naming the lamp marks it
 // named.
-SaveResult saveRawJson(ConfigStore& store, const char* json, char* cfgBuffer,
-                       size_t cfgBufferLen, const std::string& keptPassword);
+SaveResult saveRawJson(ConfigStore& store, const char* json, uint8_t* buffer, size_t bufferLen,
+                       const std::string& keptPassword);
 
 }  // namespace config_codec
 }  // namespace lamp

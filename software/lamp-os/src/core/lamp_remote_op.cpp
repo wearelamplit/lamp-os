@@ -25,6 +25,7 @@
 #include "core/pending_slot_aggregate.hpp"
 #include "core/wisp_broadcast_peek.hpp"
 #include "core/remote_op_target.hpp"
+#include "util/dropped_write_log.hpp"
 
 // Forward-declared so the knockout op can post into the slot aggregate
 // without dragging ble_control.cpp's header into this TU.
@@ -87,7 +88,10 @@ static void applyLampOp(JsonObject doc) {
 
 void applyRemoteOp(const char* payloadJson, size_t len) {
   JsonDocument doc;
-  if (deserializeJson(doc, payloadJson, len) != DeserializationError::Ok) return;
+  if (deserializeJson(doc, payloadJson, len) != DeserializationError::Ok) {
+    lamp::logDroppedWrite("remoteOp", "parse failed");
+    return;
+  }
 
   const char* target = doc["targetMac"].as<const char*>();
   uint8_t myMac[6];

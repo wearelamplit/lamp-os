@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include "status/status_cadence.hpp"
+
 namespace wisp {
 
 // Decides when wispConfig goes out. A config is sent after a status emit that
@@ -14,14 +16,18 @@ class ConfigCadence {
  public:
   static constexpr uint32_t kGapMs = 250;
   static constexpr uint32_t kMinIntervalMs = 5000;
-  static constexpr uint32_t kBurstMs = 20000;
-  static constexpr uint32_t kBurstIntervalMs = 2000;
+  static constexpr uint32_t kBurstMs = StatusCadence::kBurstMs;
+  static constexpr uint32_t kBurstIntervalMs = StatusCadence::kBurstIntervalMs;
 
   // After each wispStatus emit, with a fingerprint of the current config.
   void onStatusEmitted(uint32_t nowMs, uint32_t configHash);
   void poll();
   bool configDue(uint32_t nowMs) const;
   void onConfigEmitted(uint32_t nowMs);
+  // Retires the last-config stamp, which a quiet wisp can leave for weeks, so
+  // it cannot hold a status or a config one millis() wrap later. Call at least
+  // once per lampos::kRetiredAgeMs.
+  void retire(uint32_t nowMs);
   // False while a status would land too close behind the last config.
   bool statusClear(uint32_t nowMs) const;
 

@@ -62,6 +62,11 @@ WispSourceMode coerceSourceMode(int raw) {
       return WispSourceMode::Off;
   }
 }
+
+// NVS logs an error for every remove of a key it doesn't hold.
+void removeIfStored(Preferences& prefs, const char* key) {
+  if (prefs.isKey(key)) prefs.remove(key);
+}
 }  // namespace
 
 WispConfig::WispConfig()  { mutex_ = xSemaphoreCreateMutex(); }
@@ -200,8 +205,8 @@ void WispConfig::clearWifi() {
   wifiSsid_ = String();
   wifiPw_   = String();
   if (opened_) {
-    prefs_.remove(kKeySsid);
-    prefs_.remove(kKeyPw);
+    removeIfStored(prefs_, kKeySsid);
+    removeIfStored(prefs_, kKeyPw);
   }
   Serial.println("[wisp.cfg] wifi cleared");
 }
@@ -229,9 +234,9 @@ void WispConfig::setManualPalette(
   manualPalette_.assign(colors.begin(), colors.begin() + n);
   xSemaphoreGive(asHandle(mutex_));
   if (opened_) {
-    prefs_.remove(kKeyManualPaletteRgb);
+    removeIfStored(prefs_, kKeyManualPaletteRgb);
     if (n == 0) {
-      prefs_.remove(kKeyManualPalette);
+      removeIfStored(prefs_, kKeyManualPalette);
     } else {
       uint8_t buf[kManualPaletteMaxColors * 4];
       for (size_t i = 0; i < n; ++i) {
@@ -285,7 +290,7 @@ void WispConfig::setPassword(const String& pw) {
   password_ = pw;
   if (opened_) {
     if (pw.length() == 0) {
-      prefs_.remove(kKeyPassword);
+      removeIfStored(prefs_, kKeyPassword);
     } else {
       prefs_.putString(kKeyPassword, pw);
     }

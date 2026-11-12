@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 
 #include "components/network/protocol/lamp_protocol.hpp"
@@ -9,8 +10,8 @@ namespace lamp {
 // Diagnostic-only ESP-NOW traffic-mix counter: buckets received frames by
 // broad category and counts gossip re-broadcasts, to measure the wisp + relay
 // share of airtime against lamp-to-lamp traffic. Fixed counters, no heap, no
-// per-peer state. Not thread-safe; the caller (handleRecv) runs single-threaded
-// on the ESP-NOW recv task.
+// per-peer state. The rx counts and the window belong to the ESP-NOW recv task;
+// relayedOut is bumped from both cores.
 struct MeshMix {
   enum Bucket : uint8_t {
     kHello,
@@ -25,8 +26,10 @@ struct MeshMix {
   };
 
   uint32_t rx[kBucketCount] = {0};
-  uint32_t relayedOut = 0;
-  uint32_t windowStartMs = 0;
+  std::atomic<uint32_t> relayedOut{0};
+  // On lamp::uptimeMs(), so a window opened before weeks without a frame is
+  // not read as still running.
+  uint64_t windowStartMs = 0;
 
   static Bucket bucketFor(uint8_t msgType) {
     switch (msgType) {
@@ -50,9 +53,9 @@ struct MeshMix {
     return t;
   }
 
-  void reset(uint32_t nowMs) {
+  void reset(uint64_t nowMs) {
     for (uint32_t& v : rx) v = 0;
-    relayedOut = 0;
+    relayedOut.store(0);
     windowStartMs = nowMs;
   }
 };

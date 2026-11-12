@@ -8,6 +8,7 @@
 #include "components/network/mesh/mesh_link.hpp"
 
 #include "components/network/mesh/lamp_roster.hpp"
+#include "core/fondness_engine.hpp"
 #include "core/personality_engine.hpp"
 #include "core/override_aggregate.hpp"
 #include "behaviors/greetable.hpp"
@@ -17,6 +18,8 @@
 #include "util/easing.hpp"
 #include "util/fade.hpp"
 #include "util/gradient.hpp"
+#include "util/uptime.hpp"
+#include "expressions/expression_manager.hpp"
 
 namespace lamp {
 
@@ -173,16 +176,22 @@ void SocialBehavior::draw() {
 
 void SocialBehavior::control() {
   const uint32_t now = millis();
+  const uint64_t up = uptimeMs();
 
   // onGreetingChange_ is the sole path to CHAR_STATE_NOTIFY; keeps behaviors
   // free of BLE includes.
   const bool greetingNowActive = (animationState != STOPPED);
   if (!greetingNowActive && greetingWasActive_) {
+    // A reunion outlasts the base cooldown, so its cooldown runs from its end.
+    if (reunionPlaying_) markGreeted(greetedMac_, up);
+    reunionPlaying_ = false;
+    maybeColourHint_(up);
     greetedHasMac_ = false;
     appGreeting_ = false;
     if (onGreetingChange_) onGreetingChange_();
   }
   greetingWasActive_ = greetingNowActive;
+  markGreetedNearSeen_(up);
 
   // Greeting / cooldown logic below only runs after the previous
   // greeting animation finishes.
@@ -194,17 +203,11 @@ void SocialBehavior::control() {
 
   if (lamp::overrides.shade.operatorEditing()) return;
 
-  // Wraparound-safe time comparison (millis() rolls over at ~49 days).
-  // The re-greet check below uses the same idiom for consistency.
-  if (static_cast<int32_t>(now - nextAcknowledgeTimeMs) < 0) return;
+  if (up < nextAcknowledgeTimeMs) return;
 
   const SocialMode mode = config_ ? config_->lamp.socialMode : SocialMode::Ambivert;
 
-  // Introvert fatigue gate: skip if the lamp is in its post-fatigue rest window.
-  if (mode == SocialMode::Introvert &&
-      static_cast<int32_t>(now - tiredUntilMs_) < 0) {
-    return;
-  }
+  if (tired()) return;
 
   uint32_t regreetWindowMs = 0;
   switch (mode) {
@@ -225,12 +228,19 @@ void SocialBehavior::control() {
         std::memcpy(key.data(), e.mac, 6);
         auto last = lastGreetedAtMs_.find(key);
         return last == lastGreetedAtMs_.end() ||
-               (now - last->second) >= regreetWindowMs;
+               up - last->second >= regreetWindowMs;
       },
       arrival);
   if (!haveArrival) return;
 
-  const GreetingTuning tuning = personalityEngine.greetingFor(arrival.mac);
+  GreetingTuning tuning = personalityEngine.greetingFor(arrival.mac);
+  reunionPlaying_ = false;
+  if (arrival.hasMac && tracking_()) {
+    DispositionStore& store = config_->dispositions();
+    reunionPlaying_ = isReunion(store.peer(arrival.mac, up), reunion_);
+    if (reunionPlaying_) tuning = reunionGreeting(tuning, reunion_.reunionX);
+    fondness_->seen(arrival.mac, up);
+  }
 
 #ifdef LAMP_DEBUG
   Serial.printf("[social] greet %s (mode=%u frames=%u pulse=%u count=%u)\n",
@@ -238,6 +248,11 @@ void SocialBehavior::control() {
                 (unsigned)tuning.totalFrames,
                 (unsigned)tuning.pulseBackStrength,
                 (unsigned)tuning.pulseBackCount);
+  if (reunionPlaying_) {
+    char id[18];
+    formatBdAddr(arrival.mac, id);
+    Serial.printf("[fondness] reunion %s\n", id);
+  }
 #endif
   lampRoster.acknowledge(arrival.mac);
   foundLampColor = arrival.baseColor;
@@ -251,18 +266,19 @@ void SocialBehavior::control() {
   }
   applyTuning(tuning);
 
-  markGreeted(arrival.mac, now);
+  markGreeted(arrival.mac, up);
+  if (onOrganicGreet_) onOrganicGreet_(arrival.mac);
 
   // Introvert: trim the fatigue window, enter "tired" after too many
   // greetings burned through recently.
   if (mode == SocialMode::Introvert) {
-    recentGreetMs_.push_back(now);
+    recentGreetMs_.push_back(up);
     while (!recentGreetMs_.empty() &&
-           now - recentGreetMs_.front() > INTROVERT_FATIGUE_WINDOW_MS) {
+           up - recentGreetMs_.front() > INTROVERT_FATIGUE_WINDOW_MS) {
       recentGreetMs_.erase(recentGreetMs_.begin());
     }
     if (recentGreetMs_.size() >= INTROVERT_FATIGUE_COUNT) {
-      tiredUntilMs_ = now + INTROVERT_TIRED_DURATION_MS;
+      tiredUntilMs_ = up + INTROVERT_TIRED_DURATION_MS;
       recentGreetMs_.clear();
 #ifdef LAMP_DEBUG
       Serial.printf("[social] introvert tired until +%u ms\n",
@@ -287,7 +303,6 @@ void SocialBehavior::cancelGreeting() {
 }
 
 void SocialBehavior::triggerGreeting(const PeerView& peer) {
-  const uint32_t now = millis();
   const GreetingTuning tuning = personalityEngine.greetingFor(peer.mac);
   foundLampColor = peer.baseColor;
   std::memcpy(greetedMac_, peer.mac, 6);
@@ -301,10 +316,11 @@ void SocialBehavior::triggerGreeting(const PeerView& peer) {
   applyTuning(tuning);
   lampRoster.acknowledge(peer.mac);
   appGreeting_ = true;
+  reunionPlaying_ = false;
   playOnce();
   greetingWasActive_ = true;
   if (onGreetingChange_) onGreetingChange_();
-  markGreeted(peer.mac, now);
+  markGreeted(peer.mac, uptimeMs());
 }
 
 void SocialBehavior::onColorInfo(const uint8_t srcMac[6],
@@ -317,10 +333,48 @@ void SocialBehavior::onColorInfo(const uint8_t srcMac[6],
   greetedBaseStops_ = baseStops;
 }
 
-void SocialBehavior::markGreeted(const uint8_t mac[6], uint32_t nowMs) {
+bool SocialBehavior::tracking_() const {
+  return config_ && fondness_ && fondness_->tracking();
+}
+
+void SocialBehavior::markGreetedNearSeen_(uint64_t upMs) {
+  if (upMs - lastSeenSweepMs_ < kSeenSweepMs || !tracking_()) return;
+  lastSeenSweepMs_ = upMs;
+  for (const NearbyCopy& p : lampRoster.snapshotNear(LAMP_PRUNE_TIME_MS)) {
+    if (p.hasMac && p.acknowledged) fondness_->seen(p.mac, upMs);
+  }
+}
+
+void SocialBehavior::maybeColourHint_(uint64_t upMs) {
+  if (appGreeting_ || !greetedHasMac_ || !tracking_()) return;
+  if (!context_ || !context_->expressionManager) return;
+  const uint8_t disposition = config_->dispositions().peer(greetedMac_, upMs).disp;
+  const size_t nearby = personalityEngine.nearbyPeers().size();
+  const uint8_t chanceRoll = static_cast<uint8_t>(rng_.range(1, 100));
+  if (!colourHint_.roll(disposition, nearby, chanceRoll, upMs, reunion_,
+                        contagion_ ? *contagion_ : ContagionTuning{})) {
+    return;
+  }
+  const Color colour = greetedBaseStops_.empty() ? foundLampColor : greetedBaseStops_[0];
+#ifdef LAMP_DEBUG
+  char id[18];
+  formatBdAddr(greetedMac_, id);
+  Serial.printf("[fondness] colour hint %s\n", id);
+#endif
+  context_->expressionManager->triggerInvocation(
+      colourHintInvocation(colour, reunion_.hintOpacity), greetedMac_,
+      /*broadcast=*/false, TransientSource::Local);
+}
+
+bool SocialBehavior::tired() const {
+  const SocialMode mode = config_ ? config_->lamp.socialMode : SocialMode::Ambivert;
+  return mode == SocialMode::Introvert && uptimeMs() < tiredUntilMs_;
+}
+
+void SocialBehavior::markGreeted(const uint8_t mac[6], uint64_t upMs) {
   std::array<uint8_t, 6> key;
   std::memcpy(key.data(), mac, 6);
-  lastGreetedAtMs_[key] = nowMs;
+  lastGreetedAtMs_[key] = upMs;
   if (lastGreetedAtMs_.size() > MAX_GREETED_TRACKED) {
     auto oldest = lastGreetedAtMs_.begin();
     for (auto i = lastGreetedAtMs_.begin(); i != lastGreetedAtMs_.end(); ++i) {
@@ -335,7 +389,7 @@ void SocialBehavior::markGreeted(const uint8_t mac[6], uint32_t nowMs) {
     case SocialMode::Ambivert:  cooldown = AMBIVERT_BASE_COOLDOWN_MS; break;
     case SocialMode::Introvert: cooldown = INTROVERT_BASE_COOLDOWN_MS; break;
   }
-  nextAcknowledgeTimeMs = nowMs + cooldown;
+  nextAcknowledgeTimeMs = upMs + cooldown;
 }
 
 }  // namespace lamp

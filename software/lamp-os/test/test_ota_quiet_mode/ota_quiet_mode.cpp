@@ -1,9 +1,14 @@
 // Native-host unit tests for ota_quiet_mode. Links the production .cpp
-// directly (same pattern as test_ota_channel / test_firmware_signature):
-// the ble_control coex calls are compiled out under neither ARDUINO nor
-// ESP_PLATFORM, so the refcount + visible-bit logic is host-testable as-is.
+// directly (same pattern as test_ota_channel / test_firmware_signature). The
+// radio calls are no-ops off-device; a test swaps in fakes through s_radio.
 
 #include <unity.h>
+
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 
 #include "components/firmware/ota_quiet_mode.hpp"
 #include "components/firmware/ota_quiet_mode.cpp"
@@ -109,6 +114,60 @@ void test_second_entrant_same_type_keeps_visible_until_last_exit(void) {
   TEST_ASSERT_FALSE(isQuiet());
 }
 
+// A receiver's last exit stalls inside its radio resume while a distributor's
+// first entry arrives on another task. The entry's pause must land after the
+// resume, so the radio stays paused for the distributor's send.
+static std::atomic<bool>       s_fakeRadioPaused{false};
+static std::mutex              s_raceMu;
+static std::condition_variable s_raceCv;
+static bool                    s_stallResume = false;
+static bool                    s_resumeStalled = false;
+static bool                    s_entryDone = false;
+
+static void fakePause() { s_fakeRadioPaused = true; }
+static void fakeResume() {
+  {
+    std::unique_lock<std::mutex> lk(s_raceMu);
+    if (s_stallResume) {
+      s_resumeStalled = true;
+      s_raceCv.notify_all();
+      s_raceCv.wait_for(lk, std::chrono::milliseconds(100), [] { return s_entryDone; });
+    }
+  }
+  s_fakeRadioPaused = false;
+}
+
+void test_last_exit_racing_a_first_entry_leaves_the_radio_paused(void) {
+  lamp::ota_quiet_mode::s_radio = {fakePause, fakeResume};
+  enterQuiet(/*tearDownRadio=*/true, /*visible=*/true);
+  TEST_ASSERT_TRUE(s_fakeRadioPaused);
+  s_stallResume = true;
+
+  std::thread exiter([] { exitQuiet(); });
+  bool reached = false;
+  {
+    std::unique_lock<std::mutex> lk(s_raceMu);
+    reached = s_raceCv.wait_for(lk, std::chrono::seconds(1), [] { return s_resumeStalled; });
+  }
+  std::thread entrant([] {
+    enterQuiet(/*tearDownRadio=*/true, /*visible=*/true);
+    std::lock_guard<std::mutex> lk(s_raceMu);
+    s_entryDone = true;
+    s_raceCv.notify_all();
+  });
+  exiter.join();
+  entrant.join();
+
+  TEST_ASSERT_TRUE_MESSAGE(reached, "the exit never reached the radio resume");
+  TEST_ASSERT_EQUAL_INT(1, holders());
+  TEST_ASSERT_TRUE(s_fakeRadioPaused);
+
+  s_stallResume = false;
+  exitQuiet();
+  TEST_ASSERT_FALSE(s_fakeRadioPaused);
+  lamp::ota_quiet_mode::s_radio = {[] {}, [] {}};
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
 
@@ -119,6 +178,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_fw_then_fs_no_stale_visible);
   RUN_TEST(test_fs_then_fw_no_stale_silent);
   RUN_TEST(test_second_entrant_same_type_keeps_visible_until_last_exit);
+  RUN_TEST(test_last_exit_racing_a_first_entry_leaves_the_radio_paused);
 
   return UNITY_END();
 }

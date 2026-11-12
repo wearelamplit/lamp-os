@@ -79,7 +79,7 @@ void Compositor::tick() {
     // and gates the strip write on the driver's reset window, so this is a CPU
     // cap. Without it the quiet branch re-runs the
     // paint every loop iteration for no visible gain.
-    if (millis() < lastDrawTimeMs + MINIMUM_FRAME_DRAW_TIME_MS) {
+    if (millis() - lastDrawTimeMs < MINIMUM_FRAME_DRAW_TIME_MS) {
       return;
     }
     lastDrawTimeMs = millis();
@@ -196,7 +196,7 @@ void Compositor::tick() {
     behaviorsComputed = true;
   }
 
-  if (behaviorsComputed && millis() >= lastDrawTimeMs + MINIMUM_FRAME_DRAW_TIME_MS) {
+  if (behaviorsComputed && millis() - lastDrawTimeMs >= MINIMUM_FRAME_DRAW_TIME_MS) {
     lastDrawTimeMs = millis();
     behaviorsComputed = false;
     if (preFlushHook) preFlushHook();
@@ -206,10 +206,7 @@ void Compositor::tick() {
   };
 };
 
-bool Compositor::wispActive() const {
-  return wispStatePresent_ &&
-         (millis() - wispStateFreshMs_) < kWispStateFreshMs;
-}
+bool Compositor::wispActive() const { return wispStateFresh(millis()); }
 
 void Compositor::compositeWisp() {
   // MSG_WISP_STATE is the sole wisp render source: presence holds while the
@@ -217,15 +214,12 @@ void Compositor::compositeWisp() {
   // frame that drops this lamp, and ages out if STATE goes silent.
   // Fade the wisp layer off the surface an operator is editing so the live
   // color edit shows through; the other surface keeps its wisp paint.
-  const bool active = wispActive();
+  const uint32_t nowMs = millis();
+  retireWispState(nowMs);
+  const bool active = wispStateFresh(nowMs);
   const bool baseHeld = active && !overrides.base.operatorEditing();
   const bool shadeHeld = active && !overrides.shade.operatorEditing();
-  wispBasePresence_.setTarget(baseHeld ? 1.0f : 0.0f);
-  wispShadePresence_.setTarget(shadeHeld ? 1.0f : 0.0f);
-  wispBasePresence_.tick();
-  wispShadePresence_.tick();
-  wispShadeStack_.tick(wispShadePresence_.value());
-  wispBaseStack_.tick(wispBasePresence_.value());
+  tickWisp(nowMs, baseHeld, shadeHeld);
   // frameBuffers[0]=shade, [1]=base per lamp_behaviors.cpp ordering.
   if (!frameBuffers.empty() && frameBuffers[0]) {
     for (Color& px : frameBuffers[0]->buffer) px = wispShadeStack_.composite(px);

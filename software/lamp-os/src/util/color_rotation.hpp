@@ -15,10 +15,6 @@ constexpr uint8_t kRotationMinPeriodS = 5;
 constexpr uint8_t kRotationMaxPeriodS = 120;
 constexpr uint8_t kRotationDefaultPeriodS = 40;
 
-// The most one clock step covers. Smaller turns a busy loop into slow motion.
-// Larger lets a stall jump the pattern on resume.
-constexpr uint32_t kMaxRotationStepMs = 100;
-
 // A role's colours flowing round a closed loop, one loop every periodS seconds.
 struct ColorRotation {
   bool on = false;
@@ -52,7 +48,7 @@ RoleScene buildRoleScene(uint8_t px, const std::vector<Color>& stops,
 // Position round a loop, where 2^32 is one loop.
 class RotationClock {
  public:
-  // Steps by the time since the last advance, capped at kMaxRotationStepMs.
+  // Steps by the time since the last advance, capped at lampos::kMaxFrameDeltaMs.
   // `towardZero` moves the colours toward buffer index 0.
   void advance(uint32_t nowMs, uint8_t periodS, bool towardZero);
   // The settled position.

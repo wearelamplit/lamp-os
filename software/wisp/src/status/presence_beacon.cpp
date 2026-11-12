@@ -160,7 +160,7 @@ void PresenceBeacon::emit() {
   lastHelloSourceLive_ = sourceLiveNow;
   haveLastHelloConn_ = true;
   if (helloFlagsChanged && statusEmitter_) {
-    statusEmitter_->triggerOnChange();
+    statusEmitter_->requestEmit();
   }
 }
 
@@ -186,15 +186,15 @@ void PresenceBeacon::emitClaim(const uint8_t srcMac[6]) {
 void PresenceBeacon::emitState(const uint8_t srcMac[6], uint8_t presenceFlags) {
   const uint8_t brightness = config_ ? config_->brightness() : 100;
   const uint32_t driftRateMs = config_ ? config_->driftIntervalMs() : 0;
-  uint8_t stateBuf[lamp_protocol::WISP_STATE_MAX_SIZE];
+  uint8_t stateBuf[lamp_protocol::ESPNOW_V2_FRAME_MAX];
   uint16_t stateSeq = 0;
   WISP_SEQ_PORTMUX_ENTER(&seq_->mux);
   stateSeq = seq_->next();
   WISP_SEQ_PORTMUX_EXIT(&seq_->mux);
   const size_t stateLen = buildStateFrame(
       *roster_, stateBuf, sizeof(stateBuf), stateSeq, srcMac, brightness,
-      driftRateMs, presenceFlags, paint_ && paint_->painting());
-  // No resend: at up to 1461 B STATE overflows the claim-sized resend slot.
+      driftRateMs, presenceFlags, paint_ && paint_->painting(), millis());
+  // No resend: at up to 1470 B STATE overflows the claim-sized resend slot.
   // Edge coverage comes from the burst window in pump(); the 2s cadence backs
   // both up.
   if (stateLen) {

@@ -2,16 +2,21 @@
 
 #include <cstring>
 
+#include <lampos/clock.hpp>
+
+#include "relay_delay.hpp"
+
 namespace lamp {
 
-uint32_t HelloRelaySuppressor::jitterMs(const uint8_t mac[6], uint16_t seq) {
-  uint32_t h = seq * 2654435761u;
-  for (int i = 0; i < 6; ++i) h = h * 31u + mac[i];
-  h ^= h >> 15;
-  h *= 0x2c1b3c6du;
-  h ^= h >> 12;
-  const uint32_t span = kHelloRelayJitterMaxMs - kHelloRelayJitterMinMs + 1;
-  return kHelloRelayJitterMinMs + (h % span);
+void HelloRelaySuppressor::begin(const uint8_t ownMac[6]) {
+  LAMP_PROTOCOL_PORTMUX_ENTER(&mux_);
+  std::memcpy(ownMac_, ownMac, 6);
+  LAMP_PROTOCOL_PORTMUX_EXIT(&mux_);
+}
+
+uint32_t HelloRelaySuppressor::jitterMs(const uint8_t mac[6], uint16_t seq) const {
+  return relayDelayMs(ownMac_, mac, lamp_protocol::MSG_HELLO, seq,
+                      kHelloRelayJitterMinMs, kHelloRelayJitterMaxMs);
 }
 
 HelloRelaySuppressor::Pending* HelloRelaySuppressor::find(const uint8_t mac[6],
@@ -72,7 +77,7 @@ void HelloRelaySuppressor::tick(uint32_t nowMs, const RelayFn& relay) {
     uint8_t frame[lamp_protocol::HELLO_MAX_SIZE];
     uint16_t len = 0;
     LAMP_PROTOCOL_PORTMUX_ENTER(&mux_);
-    if (e.used && nowMs >= e.fireAtMs) {
+    if (e.used && lampos::timeReached(nowMs, e.fireAtMs)) {
       if (e.dupCount < kHelloSuppressThreshold) {
         std::memcpy(frame, e.frame, e.len);
         len = e.len;

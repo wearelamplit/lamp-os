@@ -9,6 +9,8 @@
 #include <array>
 #include <cstring>
 
+#include <lampos/clock.hpp>
+
 #include "paint/current_palette.hpp"
 #include "paint/drift.hpp"
 #include "fleet/lamp_inventory.hpp"
@@ -53,12 +55,17 @@ void PaintDistributor::onPaletteChanged() {
 }
 
 void PaintDistributor::tick(uint32_t nowMs) {
+  // Gates read off these only when painting or walking, so each can sit for
+  // weeks; retiring them keeps a stale one from reading as recent a wrap later.
+  lastDriftFireMs_ = lampos::retireStamp(nowMs, lastDriftFireMs_);
+  brWalkEndMs_ = lampos::retireStamp(nowMs, brWalkEndMs_);
+  lastUnicastMs_ = lampos::retireStamp(nowMs, lastUnicastMs_);
   // Re-color one lamp per drift slot so every lamp shifts within one interval;
   // STATE broadcasts the roster colors on its own cadence.
   if (painting() && driftSlotMs_ > 0 && driftCount_ > 0 &&
       (nowMs - lastDriftFireMs_) >= driftSlotMs_) {
     lastDriftFireMs_ = nowMs;
-    assignDriftColor(driftIdx_ % driftCount_);
+    assignDriftColor(driftIdx_ % driftCount_, nowMs);
     driftIdx_ = nextDriftIdx(driftIdx_, driftCount_);
   }
 
@@ -68,7 +75,9 @@ void PaintDistributor::tick(uint32_t nowMs) {
       (nowMs - lastBrWalkMs_) >= kBrightnessReassertMs) {
     beginBrightnessWalk();
   }
-  if (brRepeatsLeft_ > 0 && !brWalkActive_ && nowMs >= nextBrPassMs_) {
+  if (brRepeatsLeft_ > 0 && !brWalkActive_ &&
+      (!brPassGapArmed_ || nowMs - brWalkEndMs_ >= kRestorePassGapMs)) {
+    brPassGapArmed_ = false;
     brRepeatsLeft_--;
     beginBrightnessWalk();
   }
@@ -80,7 +89,10 @@ void PaintDistributor::tick(uint32_t nowMs) {
     sendBrightnessToPeer(brWalkMacs_[brWalkIdx_++]);
     if (brWalkIdx_ >= brWalkCount_) {
       brWalkActive_ = false;
-      if (brRepeatsLeft_ > 0) nextBrPassMs_ = nowMs + kRestorePassGapMs;
+      if (brRepeatsLeft_ > 0) {
+        brWalkEndMs_ = nowMs;
+        brPassGapArmed_ = true;
+      }
     }
   }
 }
@@ -117,7 +129,7 @@ void PaintDistributor::sendBrightnessToPeer(const uint8_t mac[6]) {
   uint8_t srcMac[6] = {0};
   mesh_->getMac(srcMac);
   uint8_t buf[lamp_protocol::OVERRIDE_BRIGHTNESS_FIXED_SIZE];
-  const uint16_t seq = seqCounter_++;
+  const uint16_t seq = seqCounter_.next();
   const size_t n = lamp_protocol::buildOverrideBrightness(
       buf, sizeof(buf), seq, srcMac, mac,
       lamp_protocol::OverrideSurface::BaseAndShade,
@@ -131,9 +143,9 @@ void PaintDistributor::sendBrightnessToPeer(const uint8_t mac[6]) {
 #endif
 }
 
-void PaintDistributor::setDriftInterval(uint32_t intervalMs, uint8_t fadePct) {
+void PaintDistributor::setDrift(uint32_t intervalMs, uint8_t fadePct) {
   driftIntervalMs_ = intervalMs;
-  driftFadePct_    = fadePct;
+  driftFadePct_ = fadePct;
   refreshDriftRoster();
 }
 
@@ -170,12 +182,18 @@ void PaintDistributor::refreshDriftRoster(bool paintNewcomers) {
   }
 }
 
-void PaintDistributor::assignDriftColor(size_t idx) {
+void PaintDistributor::assignDriftColor(size_t idx, uint32_t nowMs) {
   if (!roster_ || !palette_) return;
   if (palette_->colors().empty()) return;
-  storeTuplePaint(*roster_, driftMacs_[idx],
-                  sampleTupleAtPositions(palette_->colors(), esp_random(),
-                                         esp_random()));
+  const uint8_t* mac = driftMacs_[idx];
+  const uint32_t fadeMs = storeTupleDrift(
+      *roster_, mac,
+      sampleTupleAtPositions(palette_->colors(), esp_random(), esp_random()),
+      nowMs, driftIntervalMs_, driftFadePct_, esp_random());
+#ifdef LAMP_DEBUG
+  Serial.printf("[drift] %02X:%02X:%02X:%02X:%02X:%02X fade=%lums\n", mac[0],
+                mac[1], mac[2], mac[3], mac[4], mac[5], (unsigned long)fadeMs);
+#endif
 }
 
 void PaintDistributor::assignPaintColor(const uint8_t mac[6]) {

@@ -8,6 +8,8 @@
 #include <atomic>
 #include <cstring>
 
+#include "util/uptime.hpp"
+
 namespace lamp {
 
 EspNowRecvFn EspNowLink::s_recv = nullptr;
@@ -24,10 +26,11 @@ static bool submit(const uint8_t* mac, const uint8_t* data, size_t len, esp_err_
   if (EspNowLink::s_txCredit.stalls() != stallsBefore) {
     // The loop and WiFi tasks both submit; the exchange lets one log.
     static std::atomic<bool> s_logged{false};
-    static std::atomic<uint32_t> s_lastLogMs{0};
-    uint32_t last = s_lastLogMs.load(std::memory_order_relaxed);
-    if ((!s_logged.load(std::memory_order_relaxed) || now - last >= kStallLogMs) &&
-        s_lastLogMs.compare_exchange_strong(last, now, std::memory_order_relaxed)) {
+    static std::atomic<uint64_t> s_lastLogMs{0};
+    const uint64_t upMs = uptimeMs();
+    uint64_t last = s_lastLogMs.load(std::memory_order_relaxed);
+    if ((!s_logged.load(std::memory_order_relaxed) || upMs - last >= kStallLogMs) &&
+        s_lastLogMs.compare_exchange_strong(last, upMs, std::memory_order_relaxed)) {
       s_logged.store(true, std::memory_order_relaxed);
       // Short enough for Print's stack buffer: no malloc on a starved heap.
       Serial.printf("[espnow.tx] no tx callback, credits reset n=%lu\n",
@@ -128,7 +131,7 @@ bool EspNowLink::broadcast(const uint8_t* data, size_t len) {
   const bool ok = submit(bcast, data, len, err);
 #ifdef LAMP_DEBUG
   // A refused submit never reaches the driver queue and the send callback
-  // never fires. Callers discard this return value.
+  // never fires.
   if (!ok) {
     Serial.printf("[espnow.tx] submit FAIL err=%d (0x%x) len=%u inflight=%u\n",
                   (int)err, (unsigned)err, (unsigned)len,

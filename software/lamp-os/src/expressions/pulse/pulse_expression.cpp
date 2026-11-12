@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include <lampos/clock.hpp>
+
 #include "util/fade.hpp"
 
 namespace lamp {
@@ -81,9 +83,7 @@ void PulseExpression::updateWavePosition() {
     return;
   }
 
-  // Cap deltaMs so a long pause before re-entry doesn't teleport the wave
-  // across the span before any pixels are drawn.
-  uint32_t deltaMs = std::min(currentMs - lastUpdateMs, (uint32_t)100);
+  const uint32_t deltaMs = lampos::frameDeltaMs(currentMs, lastUpdateMs);
   lastUpdateMs = currentMs;
 
   // Advance linear phase at pulseSpeedMs per pixel, normalized to the span.

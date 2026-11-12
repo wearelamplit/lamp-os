@@ -34,23 +34,18 @@ static void recvTrampoline(const esp_now_recv_info_t* info,
   handler(info->src_addr, data, static_cast<size_t>(len), rssi);
 }
 
-// ESP-NOW send-complete callback. Fires from the WiFi task with the
-// MAC-layer delivery result: ESP_NOW_SEND_SUCCESS = peer ACKed; FAIL =
-// no ACK received within hardware retries. Without this hook a
-// silently-dropped unicast looks like ESP_OK at the call site (the
-// IDF only reports the enqueue result).
-// arduino-esp32 v3.x / C6 send callback; MAC in info->des_addr.
+#ifdef LAMP_DEBUG
+// arduino-esp32 v3.x / C6 send callback; MAC in info->des_addr. FAIL means
+// no MAC-layer ACK within the hardware retries; esp_now_send's return only
+// reports the enqueue.
 static void sendTrampoline(const wifi_tx_info_t* info,
                            esp_now_send_status_t status) {
-  if (!MeshLink::s_instance || !info) return;
-  if (status == ESP_NOW_SEND_SUCCESS) return;
+  if (!info || status == ESP_NOW_SEND_SUCCESS) return;
   const uint8_t* mac = info->des_addr;
-#ifdef LAMP_DEBUG
   Serial.printf("[mesh.send] FAIL to %02X:%02X:%02X:%02X:%02X:%02X\n",
                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-#endif
-  MeshLink::s_instance->notifySendFail(mac);
 }
+#endif
 
 bool MeshLink::begin() {
   s_instance = this;
@@ -81,13 +76,13 @@ bool MeshLink::begin() {
   }
 
   esp_now_register_recv_cb(recvTrampoline);
+#ifdef LAMP_DEBUG
   esp_now_register_send_cb(sendTrampoline);
+#endif
 
-  // 1M DSSS: the wisp's traffic is dominated by small per-lamp unicast
-  // (keepalive/drift/paint), where 1M robustness beats 2M airtime; bench A/B
-  // measured 1M's send-fail rate lower. TX-side only; receivers auto-detect
-  // from the PLCP header, so lamps can run 2M independently.
-  esp_wifi_config_espnow_rate(WIFI_IF_STA, WIFI_PHY_RATE_1M_L);
+  // The wisp sends to every peer at the IDF's ESP-NOW default, 1 Mbps DSSS,
+  // the 802.11 rate that carries farthest. Far lamps already receive near
+  // -94 dBm, so nothing here sets a faster one.
 
   // Broadcast peer. channel=0 means "use the radio's current channel", just
   // pinned above so this lands on LAMP_ESPNOW_CHANNEL.
@@ -118,77 +113,27 @@ bool MeshLink::broadcast(const uint8_t* data, size_t len) {
   return esp_now_send(bcast, data, len) == ESP_OK;
 }
 
-int MeshLink::findPeerSlot(const uint8_t mac[6]) const {
-  for (size_t i = 0; i < MAX_TRACKED_PEERS; ++i) {
-    if (peers_[i].used && std::memcmp(peers_[i].mac, mac, 6) == 0) {
-      return static_cast<int>(i);
-    }
-  }
-  return -1;
-}
-
-size_t MeshLink::pickLruSlot() const {
-  size_t bestIdx = 0;
-  uint32_t bestMs = UINT32_MAX;
-  for (size_t i = 0; i < MAX_TRACKED_PEERS; ++i) {
-    if (peers_[i].used && peers_[i].lastUsedMs < bestMs) {
-      bestMs = peers_[i].lastUsedMs;
-      bestIdx = i;
-    }
-  }
-  return bestIdx;
-}
-
 bool MeshLink::send(const uint8_t targetMac[6], const uint8_t* data, size_t len) {
   if (!targetMac || !data) return false;
 
-  // Two-stage: capture insert/evict decision under mux, then call ESP-NOW APIs outside it.
-  uint8_t  macToDel[6] = {0};
-  bool     needDel = false;
-  bool     needAdd = false;
-
-  const uint32_t nowMs = millis();
+  // Decide under the mux; the ESP-NOW calls can't run inside it.
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   portENTER_CRITICAL(&peerMux_);
 #endif
-  int existing = findPeerSlot(targetMac);
-  if (existing >= 0) {
-    peers_[existing].lastUsedMs = nowMs;
-  } else if (peerCount_ < MAX_TRACKED_PEERS) {
-    // Find the first empty slot. Linear scan is fine (table is small).
-    for (size_t i = 0; i < MAX_TRACKED_PEERS; ++i) {
-      if (!peers_[i].used) {
-        peers_[i].used = true;
-        std::memcpy(peers_[i].mac, targetMac, 6);
-        peers_[i].lastUsedMs = nowMs;
-        peerCount_++;
-        needAdd = true;
-        break;
-      }
-    }
-  } else {
-    // Full → evict LRU. Copy the old MAC out for esp_now_del_peer; IDF
-    // APIs can't run under the critical section.
-    const size_t lru = pickLruSlot();
-    std::memcpy(macToDel, peers_[lru].mac, 6);
-    needDel = true;
-    std::memcpy(peers_[lru].mac, targetMac, 6);
-    peers_[lru].lastUsedMs = nowMs;
-    needAdd = true;
-  }
+  const PeerSlots::Change change = peers_.touch(targetMac);
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   portEXIT_CRITICAL(&peerMux_);
 #endif
 
-  if (needDel) {
-    esp_now_del_peer(macToDel);
+  if (change.evicted) {
+    const uint8_t* old = change.evictedMac;
+    esp_now_del_peer(old);
 #ifdef LAMP_DEBUG
     Serial.printf("[mesh] LRU evict %02X:%02X:%02X:%02X:%02X:%02X\n",
-                  macToDel[0], macToDel[1], macToDel[2],
-                  macToDel[3], macToDel[4], macToDel[5]);
+                  old[0], old[1], old[2], old[3], old[4], old[5]);
 #endif
   }
-  if (needAdd) {
+  if (change.added) {
     esp_now_peer_info_t peer = {};
     std::memset(&peer, 0, sizeof(peer));
     std::memcpy(peer.peer_addr, targetMac, 6);
@@ -197,10 +142,13 @@ bool MeshLink::send(const uint8_t targetMac[6], const uint8_t* data, size_t len)
     peer.encrypt = false;
     esp_err_t err = esp_now_add_peer(&peer);
     if (err != ESP_OK && err != ESP_ERR_ESPNOW_EXIST) {
-      // Tracking-table is committed (peers_ already written) but the
-      // ESP-NOW side rejected the add. esp_now_send will return NOT_FOUND.
-      // Surface this to caller so the distributor doesn't mistake it for a
-      // queue-full transient.
+#if defined(ARDUINO) || defined(ESP_PLATFORM)
+      portENTER_CRITICAL(&peerMux_);
+#endif
+      peers_.release(targetMac);
+#if defined(ARDUINO) || defined(ESP_PLATFORM)
+      portEXIT_CRITICAL(&peerMux_);
+#endif
       Serial.printf("[mesh] add_peer err=0x%x for %02X:%02X:%02X:%02X:%02X:%02X\n",
                     (unsigned)err,
                     targetMac[0], targetMac[1], targetMac[2],
@@ -213,27 +161,6 @@ bool MeshLink::send(const uint8_t targetMac[6], const uint8_t* data, size_t len)
 
 void MeshLink::getMac(uint8_t out[6]) const {
   esp_wifi_get_mac(WIFI_IF_STA, out);
-}
-
-void MeshLink::notifySendFail(const uint8_t mac[6]) {
-#if defined(ARDUINO) || defined(ESP_PLATFORM)
-  portENTER_CRITICAL(&failedSendMux_);
-#endif
-  failedSends_.push(mac);
-#if defined(ARDUINO) || defined(ESP_PLATFORM)
-  portEXIT_CRITICAL(&failedSendMux_);
-#endif
-}
-
-bool MeshLink::pollFailedSend(uint8_t macOut[6]) {
-#if defined(ARDUINO) || defined(ESP_PLATFORM)
-  portENTER_CRITICAL(&failedSendMux_);
-#endif
-  const bool ok = failedSends_.pop(macOut);
-#if defined(ARDUINO) || defined(ESP_PLATFORM)
-  portEXIT_CRITICAL(&failedSendMux_);
-#endif
-  return ok;
 }
 
 }  // namespace wisp

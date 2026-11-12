@@ -13,7 +13,7 @@ struct InputSpec;
 
 namespace input {
 
-// Build one driver per InputSpec. Firmware-only (reads pins); the returned
+// Build one driver per InputSpec, each reading its pin; the returned
 // sources are owned by the caller (Lamp) and ticked once per loop.
 std::vector<std::unique_ptr<InputSource>> buildInputs(
     const std::vector<InputSpec>& specs);

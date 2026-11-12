@@ -88,7 +88,9 @@ the timing behind each profile is in **Profiles** above.
 
 Longest cooldown between greetings, a per-peer regreet window, and
 **fatigue** — a burst of greetings in a short span triggers a rest window
-during which it won't greet. Cadence constants in `social.cpp`.
+during which it won't greet. Cadence constants in `social.cpp`. A tired
+introvert yawns now and then
+([`expressions.md`](expressions.md#yawn-contagion)).
 
 | Disposition | Profile | Effect |
 |---|---|---|
@@ -138,6 +140,11 @@ can drain the lamp.
 Introvert is the personality that gets drained; Ambivert is balanced;
 Extrovert is eager but bounded. Snub and PartialSnub greetings are
 gated by the same cooldown as warm greetings, no bypass paths.
+
+A Smitten peer back after a long absence gets a **reunion**: the same
+profile with its hold, and so its breaths, doubled, once per absence. The end
+of a Fond or Smitten greeting can also borrow a faint breath of the friend's
+colour. Both are in [`social.md`](social.md#reunion-and-colour-hint).
 
 ## Effect glossary
 
@@ -191,5 +198,4 @@ overview in [`social.md`](social.md). This doc is greetings only:
   and Ambivert; Extrovert is unaffected), separate subsystem, weights
   peers by disposition.
 - The dispositions storage + sync surfaces (NVS, `CHAR_SOCIAL_DISPOSITIONS`
-  BLE characteristic), see `personality_engine.hpp` and
-  `config.{hpp,cpp}`.
+  BLE characteristic), see [`social.md`](social.md#stored-social-rows).

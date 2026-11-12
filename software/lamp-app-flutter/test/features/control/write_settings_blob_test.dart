@@ -7,6 +7,7 @@ import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/core/ble/lamp_crypto.dart';
 import 'package:lamp_app/features/control/application/control_notifier.dart';
+import 'package:lamp_app/features/control/application/settings_blob_too_large_exception.dart';
 import 'package:lamp_app/features/inventory/application/inventory_notifier.dart';
 import 'package:lamp_app/features/inventory/domain/inventory_lamp.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -115,6 +116,65 @@ void main() {
       expect(json.containsKey('lamp'), isTrue);
       expect(json.containsKey('reboot'), isTrue);
       expect(json['reboot'], false);
+    });
+  });
+
+  group('controlNotifier.writeSettingsBlob size cap', () {
+    // Pads a name so the blob's encrypted wire size is exactly [encrypted].
+    Map<String, dynamic> blobOfEncryptedSize(int encrypted) {
+      final empty = utf8
+          .encode(jsonEncode({
+            'lamp': {'name': ''},
+            'reboot': false,
+          }))
+          .length;
+      final pad = encrypted - 1 - LampCrypto.nonceLen - LampCrypto.tagLen -
+          empty;
+      return {
+        'lamp': {'name': 'n' * pad},
+      };
+    }
+
+    Future<(ControlNotifier, InMemoryBleClient)> connect(
+        {String controlPassword = ''}) async {
+      final ble = InMemoryBleClient();
+      final c =
+          await _buildContainer(ble: ble, controlPassword: controlPassword);
+      addTearDown(c.dispose);
+      final sub = c.listen(controlNotifierProvider(_devId), (_, _) {});
+      addTearDown(sub.close);
+      await c.read(controlNotifierProvider(_devId).future);
+      return (c.read(controlNotifierProvider(_devId).notifier), ble);
+    }
+
+    test('writes a blob exactly at the 512 B cap', () async {
+      final (n, ble) = await connect(controlPassword: 'hunter22');
+      await n.writeSettingsBlob(blobOfEncryptedSize(512), reboot: false);
+
+      final writes = ble.writesTo(_devId, BleUuids.settingsBlob);
+      expect(writes.length, 1);
+      expect(writes.single.length, 512);
+    });
+
+    test('refuses a blob one byte over the cap and writes nothing', () async {
+      final (n, ble) = await connect(controlPassword: 'hunter22');
+      await expectLater(
+        n.writeSettingsBlob(blobOfEncryptedSize(513), reboot: false),
+        throwsA(isA<SettingsBlobTooLargeException>()
+            .having((e) => e.encryptedLength, 'encryptedLength', 513)
+            .having((e) => e.message, 'message', isNotEmpty)),
+      );
+      expect(ble.writesTo(_devId, BleUuids.settingsBlob), isEmpty);
+    });
+
+    test('refuses by encrypted size on a lamp without a password', () async {
+      final (n, ble) = await connect();
+      // 513 B encrypted is 485 B in plaintext, which alone would fit.
+      await expectLater(
+        n.writeSettingsBlob(blobOfEncryptedSize(513), reboot: false),
+        throwsA(isA<SettingsBlobTooLargeException>()),
+      );
+      expect(ble.writesTo(_devId, BleUuids.settingsBlob), isEmpty);
     });
   });
 }

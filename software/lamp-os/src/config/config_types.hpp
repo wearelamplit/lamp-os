@@ -97,15 +97,21 @@ class LampSettings {
 };
 
 /**
- * One physical strip run within a role: its app-editable palette + pixel
- *        count. Geometry (driver/pin/offset) lives in the variant's StripSpec;
- *        this is the persisted, editable half.
+ * One physical strip run within a role: its app-editable palette, pixel
+ *        count and data pin. Geometry (driver/offset) and the default pin live
+ *        in the variant's StripSpec; this is the persisted, editable half.
  * @property px - 0 = unset; applyDefaults fills from the variant default. See resolveConfiguredPx.
+ * @property pin - data GPIO for this segment's strip; 0 = the variant StripSpec pin.
+ *   Applied at boot through applySegmentPins.
+ * @property builtinPin - the StripSpec pin of the strip this segment drives, 0 when
+ *   none does. Set at boot by applySegmentPins and never stored.
  */
 struct SegmentSettings {
   std::string name;
   uint8_t px = 0;
   std::vector<Color> colors;
+  uint8_t pin = 0;
+  uint8_t builtinPin = 0;
 };
 
 // Role pixel-space size. ≤255 by construction (config_codec::fromJson clamps
@@ -203,6 +209,13 @@ inline bool shouldPersistFirstBoot(bool wouldPersist, bool loadFailedWithData) {
   return wouldPersist && !loadFailedWithData;
 }
 
+// The first boot persists once when the store predates the `named` flag, so
+// applyDefaults' inferred value becomes authoritative, or is in a form an
+// older release wrote, so the save moves it to the settings blob.
+inline bool firstBootSaveWanted(bool namedKeyPresent, bool storeIsLegacy) {
+  return !namedKeyPresent || storeIsLegacy;
+}
+
 // Resolve the persisted `named` flag. When the flag was present in NVS
 // (namedKeyPresent), trust it. Otherwise migrate pre-flag NVS once by
 // inferring from the stored name: a name matching neither the fresh-lamp
@@ -253,7 +266,7 @@ inline bool isExpressionTypeId(const char* s) {
 }
 
 // Every parameter key an expression reads, in byte-wise order (the order the
-// wire JSON carries them). A split save's expression records carry a key as
+// wire JSON carries them). The stored expression records carry a key as
 // its index here, so the table is append-only: never reorder or remove an
 // entry, and an appended key out of byte-wise order changes the wire's key
 // order. A key not listed has no reader and is dropped at parse.
@@ -263,7 +276,9 @@ inline constexpr const char* kExpressionParamKeys[] = {
     "fillMode",     "fire",             "fullStrip",        "loop",
     "opacity",      "posMax",           "posMin",           "pulseSpeed",
     "scatter",      "shiftDurationMax", "shiftDurationMin", "size",
-    "spotSpeed",    "travel",
+    "spotSpeed",    "travel",           "yawnDepth",        "yawnDuration",
+    "yawnHold",     "yawnLag",          "yawnLift",         "yawnRecover",
+    "yawnWarmth",
 };
 constexpr size_t kExpressionParamKeyCount =
     sizeof(kExpressionParamKeys) / sizeof(kExpressionParamKeys[0]);

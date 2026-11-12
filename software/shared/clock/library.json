@@ -1,0 +1,10 @@
+{
+  "name": "lampos-clock",
+  "version": "1.0.0",
+  "description": "Shared wrap-safe comparisons on 32-bit millis() stamps for lamp and wisp.",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": {
+    "libLDFMode": "chain"
+  }
+}

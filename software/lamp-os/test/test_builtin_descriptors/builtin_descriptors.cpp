@@ -14,6 +14,7 @@
 #include "expressions/shifty/shifty_expression.hpp"
 #include "expressions/spotty/spotty_expression.hpp"
 #include "expressions/bloom/bloom_expression.hpp"
+#include "expressions/yawn/yawn_expression.hpp"
 #include "expressions/expr_variant_sets.hpp"
 #include "config/config_types.hpp"
 #include "expressions/expression_invocation.hpp"
@@ -467,7 +468,7 @@ void test_every_descriptor_key_has_a_stored_index() {
   const ExpressionDescriptor* all[] = {
       &kGlitchyDescriptorData, &kPulseDescriptorData, &kBreathingDescriptorData,
       &kShiftyDescriptorData,  &kSpottyDescriptorData, &kShimmerDescriptorData,
-      &kBloomDescriptorData};
+      &kBloomDescriptorData,   &kYawnDescriptorData};
   for (const ExpressionDescriptor* d : all) {
     for (const ParamSpec& p : d->params) assertKeyStored(p.key);
     for (const auto* r : {&d->interval, &d->duration}) {
@@ -490,7 +491,7 @@ void test_every_type_fits_the_parameter_cap() {
   const ExpressionDescriptor* all[] = {
       &kGlitchyDescriptorData, &kPulseDescriptorData, &kBreathingDescriptorData,
       &kShiftyDescriptorData,  &kSpottyDescriptorData, &kShimmerDescriptorData,
-      &kBloomDescriptorData};
+      &kBloomDescriptorData,   &kYawnDescriptorData};
   for (const ExpressionDescriptor* d : all) {
     size_t keys = d->params.size() + 2;
     if (d->duration.has_value() && d->duration->minKey) keys += 2;

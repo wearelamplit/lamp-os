@@ -16,6 +16,7 @@
 #include "util/color.hpp"
 #include "util/heap_guard.hpp"
 #include "util/json_writer.hpp"
+#include "util/uptime.hpp"
 #include "version.hpp"
 
 #include <lampos/protocol/presence.hpp>
@@ -37,56 +38,46 @@ static void seedRoleSegments(std::vector<SegmentSettings>& segs,
   }
 }
 
+// The stored config is read and written through this reserved buffer, so a
+// load or save never waits for a large free block. Loop task only: the load
+// runs in setup, and every save, the webapp's included (webapp::tick drains
+// it), runs there.
+static uint8_t s_settingsBuf[config_codec::kMaxSettingsBlobLen];
+
 Config::Config(ConfigStore* inStore) {
-  JsonDocument doc;
   store_ = inStore;
   dispositions_.attachStore(store_);
-  std::string json = store_->read("cfg", "{}");
-  DeserializationError error = deserializeJson(doc, json);
+  const config_codec::LoadedConfig loaded = config_codec::loadConfig(
+      *store_, lamp, base, shade, expressions, homeMode, s_settingsBuf, sizeof(s_settingsBuf));
+  storeForm_ = loaded.form;
 
 #ifdef LAMP_DEBUG
-  // Print a compact, secret-free summary instead of the raw NVS JSON.
-  // The raw payload would leak `lamp.password` to anyone on the serial
-  // console (USB physical access). If you need the full shape while
-  // debugging a parse bug, attach a temporary `Serial.println(json)`
-  // for that session; don't roll back this redaction. Reads off `doc`
-  // (already parsed above) rather than a second JsonDocument + parse.
-  if (error == DeserializationError::Ok) {
-    const char* loadedName = doc["lamp"]["name"] | "<unset>";
-    const char* pwField = doc["lamp"]["password"] | "";
-    const bool hasPassword = pwField != nullptr && pwField[0] != '\0';
-    Serial.printf("[cfg] loaded name=%s pw=%s cfg_bytes=%u\n", loadedName,
-                  hasPassword ? "set" : "unset", (unsigned)json.length());
-  } else {
-    Serial.printf("[cfg] loaded nvs_bytes=%u (parse failed; full dump suppressed)\n",
-                  (unsigned)json.length());
+  // A compact summary with no secrets. The raw store would leak `lamp.password`
+  // to anyone on the serial console (USB physical access).
+  if (!loaded.parseFailed) {
+    Serial.printf("[cfg] loaded name=%s pw=%s cfg_bytes=%u\n", lamp.name.c_str(),
+                  lamp.password.empty() ? "unset" : "set", (unsigned)loaded.cfgBytes);
   }
 #endif
+  Serial.printf("[cfg] store %s\n", config_codec::storeFormName(loaded.form));
 
-  if (error) {
-    if (configBlobHasData(json)) {
-      loadFailedWithData_ = true;
-      Serial.printf(
-          "[cfg] STORED CONFIG FAILED TO PARSE (%u bytes) — serving defaults "
-          "WITHOUT overwriting NVS\n",
-          (unsigned)json.length());
-    }
-#ifdef LAMP_DEBUG
-    Serial.printf("ws deserializeJson() failed: %s\n", error.c_str());
-#endif
+  if (loaded.parseFailed) {
+    loadFailedWithData_ = true;
+    Serial.printf(
+        "[cfg] STORED CONFIG FAILED TO PARSE (%u bytes) — serving defaults "
+        "WITHOUT overwriting NVS\n",
+        (unsigned)loaded.cfgBytes);
     return;  // use class defaults
   }
 
-  bool withinCaps = true;
-  const config_codec::LoadedRecords records = config_codec::loadStoredConfig(
-      *store_, doc.as<JsonObject>(), lamp, base, shade, expressions, homeMode, withinCaps);
+  const config_codec::LoadedRecords& records = loaded.records;
   if (records.unreadable) {
-    // A stored blob holding part of the config did not read; the parts it
-    // held load as defaults, which must not be saved over it.
+    // A stored blob holding part of the config did not read. What loaded in
+    // its place must not be saved over it.
     loadFailedWithData_ = true;
-    Serial.println("[cfg] STORED CONFIG BLOB UNREADABLE; serving defaults for it");
+    Serial.println("[cfg] STORED CONFIG BLOB UNREADABLE; first-boot save held");
   }
-  if (!withinCaps) Serial.println("[cfg] stored expressions over caps; truncated on load");
+  if (!loaded.withinCaps) Serial.println("[cfg] stored expressions over caps; truncated on load");
   for (size_t i = 0; i < kMaxExpressions; ++i) {
     if (records.droppedMask & (1u << i)) {
       Serial.printf("[cfg] expression record x%u unreadable; dropped\n", (unsigned)i);
@@ -98,17 +89,14 @@ Config::Config(ConfigStore* inStore) {
   }
   Serial.printf("[cfg] expressions=%u from %s\n",
                 (unsigned)expressions.expressions.size(),
-                records.present ? "records" : "cfg json");
-  namedKeyPresent_ = doc["lamp"]["named"].is<bool>();
+                records.present                                ? "records"
+                : loaded.form == config_codec::StoreForm::Binary ? "no records"
+                                                                 : "cfg json");
+  namedKeyPresent_ = loaded.namedKeyPresent;
 
   // Per-peer dispositions live in a separate NVS key.
-  dispositions_.load();
+  dispositions_.load(uptimeMs());
 };
-
-// The stored JSON is written into this reserved buffer, so a save never
-// waits for a large free block. Loop task only: every save, the webapp's
-// included (webapp::tick drains it), runs there.
-static char s_cfgJson[config_codec::kMaxStoredCfgJsonLen + 1];
 
 static const char* saveFailure(config_codec::SaveResult result) {
   switch (result) {
@@ -127,9 +115,13 @@ bool Config::persistConfig(const char* via) {
     return false;
   }
   const config_codec::SaveResult result = config_codec::saveConfig(
-      *store_, lamp, base, shade, expressions, homeMode, s_cfgJson, sizeof(s_cfgJson));
+      *store_, lamp, base, shade, expressions, homeMode, s_settingsBuf, sizeof(s_settingsBuf));
   if (result == config_codec::SaveResult::Ok) {
     saveGate_.saved();
+    if (storeIsLegacy()) {
+      Serial.printf("[cfg] store migrated from %s\n", config_codec::storeFormName(storeForm_));
+      storeForm_ = config_codec::StoreForm::Binary;
+    }
 #ifdef LAMP_DEBUG
     Serial.printf("[nvs] config saved via=%s\n", via);
 #endif
@@ -151,7 +143,8 @@ config_codec::SaveResult Config::persistRawJson(const char* json) {
   if (!store_) return config_codec::SaveResult::WriteFailed;
   const config_codec::SaveResult result =
       saveGate_.allows()
-          ? config_codec::saveRawJson(*store_, json, s_cfgJson, sizeof(s_cfgJson), lamp.password)
+          ? config_codec::saveRawJson(*store_, json, s_settingsBuf, sizeof(s_settingsBuf),
+                                      lamp.password)
           : config_codec::SaveResult::Held;
   saveGate_.rawFinished(result, millis());
   if (result != config_codec::SaveResult::Ok) {
@@ -198,32 +191,34 @@ bool Config::isOtaDistributing() const {
 }
 
 uint8_t Config::getDisposition(const uint8_t mac[6]) const {
-  return dispositions_.get(mac);
+  return dispositions_.peer(mac, uptimeMs()).disp;
 }
 
 uint8_t Config::getDisposition(const std::string& lampId) const {
   uint8_t mac[6];
   if (!parseBdAddr(lampId.c_str(), mac)) return DispositionStore::kDefault;
-  return dispositions_.get(mac);
+  return dispositions_.peer(mac, uptimeMs()).disp;
 }
 
 void Config::setDisposition(const std::string& lampId, uint8_t value) {
   uint8_t mac[6];
   if (!parseBdAddr(lampId.c_str(), mac)) return;
-  dispositions_.set(mac, value, millis());
+  dispositions_.set(mac, value, uptimeMs());
 }
 
 std::string Config::asDispositionsJson() const { return dispositions_.asJson(); }
 
 bool Config::setDispositionsFromJson(const char* json, size_t len) {
-  return dispositions_.setFromJson(json, len, millis());
+  return dispositions_.setFromJson(json, len, uptimeMs());
 }
 
-void Config::maybeFlushDispositions(uint32_t nowMs) {
-  dispositions_.maybeFlush(nowMs);
+void Config::maybeFlushDispositions(uint64_t nowMs, bool otaReceiving) {
+  dispositions_.maybeFlush(nowMs, otaReceiving);
 }
 
-void Config::flushDispositionsNow() { dispositions_.flushNow(millis()); }
+void Config::flushDispositionsNow(bool otaReceiving) {
+  dispositions_.flushNow(uptimeMs(), otaReceiving);
+}
 
 JsonDocument Config::asJsonDocument() {
   JsonDocument doc;
@@ -231,32 +226,6 @@ JsonDocument Config::asJsonDocument() {
                        homeMode);
   return doc;
 };
-
-static void emitLastCrash(JsonDocument& doc, const crash_record::Record& rec) {
-  if (rec.count == 0) return;
-  JsonObject o = doc["lastCrash"].to<JsonObject>();
-  o["count"] = rec.count;
-  o["reset"] = rec.resetReason;
-  o["fw"] = rec.fwVersion;
-  if (!rec.snapshotValid) return;
-  const crash_record::Snapshot& s = rec.snap;
-  o["uptimeMs"] = s.uptimeMs;
-  o["minLargestBlock"] = s.minLargestBlock;
-  o["minFreeHeap"] = s.minFreeHeap;
-  o["rosterPeak"] = s.rosterPeak;
-  if (s.core < 0) return;
-  char hex[11];
-  o["reason"] = static_cast<const char*>(s.reason);
-  o["core"] = s.core;
-  std::snprintf(hex, sizeof(hex), "0x%08x", static_cast<unsigned>(s.pc));
-  o["pc"] = hex;
-  JsonArray bt = o["bt"].to<JsonArray>();
-  for (uint32_t addr : s.backtrace) {
-    if (addr == 0) break;
-    std::snprintf(hex, sizeof(hex), "0x%08x", static_cast<unsigned>(addr));
-    bt.add(hex);
-  }
-}
 
 JsonDocument Config::asLampJson() {
   JsonDocument doc;
@@ -299,7 +268,7 @@ JsonDocument Config::asLampJson() {
     doc["otaSendingTo"] = macBuf;
   }
   doc["resetReason"] = static_cast<uint8_t>(esp_reset_reason());
-  emitLastCrash(doc, crash_record::last());
+  crash_record::emitLastCrash(doc, crash_record::last());
   return doc;
 }
 
@@ -311,14 +280,7 @@ static void emitRoleTopology(JsonDocument& doc,
   doc["px"] = segmentsSumPx(segs);
   JsonArray colorsNode = doc["colors"].to<JsonArray>();
   for (const auto& c : segs.front().colors) colorsNode.add(colorToHexString(c));
-  JsonArray segsNode = doc["segments"].to<JsonArray>();
-  for (const auto& s : segs) {
-    JsonObject o = segsNode.add<JsonObject>();
-    o["name"] = s.name;
-    o["px"] = s.px;
-    JsonArray sc = o["colors"].to<JsonArray>();
-    for (const auto& c : s.colors) sc.add(colorToHexString(c));
-  }
+  config_codec::writeSectionSegments(doc.as<JsonObject>(), segs);
 }
 
 JsonDocument Config::asBaseJson() {
@@ -393,8 +355,8 @@ static bool assignNoThrow(std::string& dst, const char* src, size_t len) {
 // on every channel, throttled to one line per LAMP_SECTION_OOM_MIN_MS.
 static void logSectionOom(const char* msg) {
   static constexpr uint32_t LAMP_SECTION_OOM_MIN_MS = 5000;
-  static uint32_t lastMs = 0;
-  const uint32_t now = millis();
+  static uint64_t lastMs = 0;
+  const uint64_t now = lamp::uptimeMs();
   if (now - lastMs < LAMP_SECTION_OOM_MIN_MS && lastMs != 0) return;
   lastMs = now;
   Serial.printf("[cfg] %s section OOM; serving stale\n", msg);

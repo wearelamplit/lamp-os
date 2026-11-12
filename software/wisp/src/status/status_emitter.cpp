@@ -46,7 +46,7 @@ void StatusEmitter::startTimer() {
         this,
         [](TimerHandle_t t) {
           auto* self = static_cast<StatusEmitter*>(pvTimerGetTimerID(t));
-          if (self) self->statusDue_.store(true, std::memory_order_relaxed);
+          if (self) self->statusCadence_.request();
         });
     if (statusTimer_) {
       xTimerStart(statusTimer_, 0);
@@ -56,12 +56,13 @@ void StatusEmitter::startTimer() {
   }
 }
 
+void StatusEmitter::requestEmit() { statusCadence_.request(); }
+
 void StatusEmitter::triggerOnChange() {
-  statusDue_.store(true, std::memory_order_relaxed);
+  statusCadence_.change();
   if (statusTimer_) {
     xTimerReset(statusTimer_, 0);
   }
-  burstUntilMs_ = millis() + kStatusBurstMs;
 }
 
 void StatusEmitter::pollConfig() {
@@ -71,31 +72,17 @@ void StatusEmitter::pollConfig() {
 bool StatusEmitter::pump() {
   checkConnEdges();
   const uint32_t now = millis();
+  configCadence_.retire(now);
   if (configPollDue_.exchange(false, std::memory_order_relaxed)) {
     configCadence_.poll();
   }
-  bool bursting = false;
-  if (burstUntilMs_ != 0) {
-    if (static_cast<int32_t>(now - burstUntilMs_) < 0) {
-      bursting = true;
-    } else {
-      burstUntilMs_ = 0;
-    }
-  }
-  if (statusDue_.load(std::memory_order_relaxed) || bursting) {
-    const uint32_t minInterval = bursting ? kStatusBurstIntervalMs : kMinEmitIntervalMs;
-    if ((!haveEmitted_ || now - lastEmitMs_ >= minInterval) &&
-        configCadence_.statusClear(now)) {
-      statusDue_.store(false, std::memory_order_relaxed);
-      haveEmitted_ = true;
-      lastEmitMs_ = now;
-      emitStatus();
-      char configJson[kConfigJsonBufLen];
-      const size_t n = buildConfig(configJson, sizeof(configJson));
-      configCadence_.onStatusEmitted(
-          now, fnv1a(reinterpret_cast<const uint8_t*>(configJson), n));
-      return true;
-    }
+  if (statusCadence_.takeEmit(now, configCadence_.statusClear(now))) {
+    emitStatus();
+    char configJson[kConfigJsonBufLen];
+    const size_t n = buildConfig(configJson, sizeof(configJson));
+    configCadence_.onStatusEmitted(
+        now, fnv1a(reinterpret_cast<const uint8_t*>(configJson), n));
+    return true;
   }
   if (configCadence_.configDue(now)) {
     configCadence_.onConfigEmitted(now);
@@ -113,7 +100,7 @@ void StatusEmitter::checkConnEdges() {
   } else if (wifiConn != lastWifiConnected_ || ethUp != lastEthUp_) {
     Serial.printf("[wisp.beacon] connectivity edge wifi=%d eth=%d\n",
                   (int)wifiConn, (int)ethUp);
-    triggerOnChange();
+    requestEmit();
   }
   lastWifiConnected_ = wifiConn;
   lastEthUp_ = ethUp;
@@ -142,8 +129,6 @@ void StatusEmitter::emitStatus() {
     paletteIdPrefix[n] = '\0';
   }
 
-  const uint32_t lastSeenMs = millis();
-
   // manualPalette excluded: emitted separately via MSG_WISP_PALETTE (buildWispPalette).
   const char* sourceName = "off";
   const char* oscRole = nullptr;
@@ -168,7 +153,7 @@ void StatusEmitter::emitStatus() {
     hasPassword = config_->password().length() > 0;
   }
   const WispStatusFields fields{
-      wifiConn, sourceLive, paletteIdPrefix, lastSeenMs,
+      wifiConn, sourceLive, paletteIdPrefix,
       sourceName, oscRole, offR, offG, offB, offW, hasOffColor,
       wispName, hasPassword, wifiChannelMismatch, wifiApChannel, ethIp };
   const WispConfigFields configCopy = configFields();

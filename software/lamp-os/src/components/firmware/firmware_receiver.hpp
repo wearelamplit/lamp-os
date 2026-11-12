@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "components/firmware/inter_session_quiet_hold.hpp"
 #include "components/network/protocol/lamp_protocol.hpp"
 #include "util/high_water.hpp"
 
@@ -171,9 +172,12 @@ class FirmwareReceiver {
   // offer/done handler.
   void handleControlOnLoop(const PendingFirmwareControl& ctrl);
 
-  // Called DIRECTLY from the WiFi recv task (Core 0). Writes the chunk to flash
-  // and marks its bitmap bit. Bounded IO + bitmap set, no heap/JSON/blocking.
-  void handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk& p);
+  // Called DIRECTLY from the chunk's transport task (WiFi recv on Core 0, or the
+  // BLE host). Writes the chunk to flash and marks its bitmap bit when it came
+  // over `via` from the session's sender. Bounded IO + bitmap set, no
+  // heap/JSON/blocking.
+  void handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk& p,
+                             FirmwareTransportKind via);
 
   State state() const { return state_; }
 
@@ -207,6 +211,7 @@ class FirmwareReceiver {
   // Offer handling, called from handleControlOnLoop on Core 1.
   void onOfferOnLoop(const PendingFirmwareControl& ctrl, uint32_t nowMs);
   void onDoneOnLoop(const PendingFirmwareControl& ctrl, uint32_t nowMs);
+  bool fromSessionSender(const PendingFirmwareControl& ctrl) const;
 
   // One bit per expected chunk, sized off the OFFER's totalChunks.
   void resetBitmap(size_t totalChunks);
@@ -276,7 +281,7 @@ class FirmwareReceiver {
   uint8_t  offerDigest_[lamp_protocol::FW_SHA256_FULL_LEN] = {0};
 
   // Sequence counters for outbound FW frames (ACCEPT/REQ/RESULT).
-  uint16_t fwOutSeq_ = 0;
+  lamp_protocol::SenderSeq fwOutSeq_;
 
   // One bit per chunk (set = received), ceil(totalChunks/8).
   std::vector<uint8_t> bitmap_;
@@ -347,11 +352,9 @@ class FirmwareReceiver {
   // Inter-session quiet hold. In a 3+ lamp mesh a receiver can be OFFERed by
   // several distributors in quick succession; if one session aborts, exiting
   // quiet immediately flashes the base color before the next OFFER lands. Defer
-  // exitQuiet by kInterSessionQuietHoldMs to bridge that gap. Receiver-side
-  // mirror of the distributor cooldown, minus the last-session indicator hold.
-  static constexpr uint32_t kInterSessionQuietHoldMs = 10000;
-  bool     quietHeld_              = false;
-  uint32_t quietHoldUntilMs_       = 0;
+  // exitQuiet by InterSessionQuietHold::kHoldMs to bridge that gap; an OFFER
+  // inside the hold keeps its quiet. Loop task only.
+  InterSessionQuietHold quietHold_;
 };
 
 }  // namespace lamp

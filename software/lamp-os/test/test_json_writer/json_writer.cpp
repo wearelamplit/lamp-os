@@ -1,6 +1,7 @@
-// Pins JsonWriter, the heap-free serializer behind config saves and the BLE
-// expressions section, byte-for-byte against ArduinoJson's serializeJson of
-// the same documents, so a stored config and the wire stay unchanged.
+// Pins JsonWriter, the heap-free serializer behind the BLE expressions
+// section and the stored JSON releases up to 1.3.3 wrote, byte-for-byte
+// against ArduinoJson's serializeJson of the same documents, so the wire and
+// the legacy stores the tests build stay unchanged.
 
 #include <unity.h>
 
@@ -11,6 +12,7 @@
 
 #include "config/config_codec.hpp"
 #include "util/json_writer.hpp"
+#include "../test_config_records/legacy_store.hpp"
 
 #include "../../src/util/color.cpp"
 #include "../../src/util/heap_guard.cpp"
@@ -41,10 +43,10 @@ std::string viaArduinoJson(const Model& m) {
 
 std::string viaWriter(const Model& m) {
   JsonWriter measure(nullptr, 0);
-  config_codec::writeStoredJson(measure, &m.lamp, m.base, m.shade, m.homeMode, nullptr);
+  legacy133::writeStoredJson(measure, &m.lamp, m.base, m.shade, m.homeMode, nullptr);
   std::string out(measure.length() + 1, '\0');
   JsonWriter w(out.data(), out.size());
-  config_codec::writeStoredJson(w, &m.lamp, m.base, m.shade, m.homeMode, nullptr);
+  legacy133::writeStoredJson(w, &m.lamp, m.base, m.shade, m.homeMode, nullptr);
   w.finish();
   TEST_ASSERT_TRUE(w.ok());
   TEST_ASSERT_EQUAL(measure.length(), w.length());
@@ -60,7 +62,7 @@ Model fullModel() {
   m.lamp.setup = true;
   m.lamp.apBootMinutes = 7;
   m.base.byteOrder = "GRBW";
-  m.base.segments = {{"Base \"main\"", 35, {Color(1, 2, 3, 4), Color(255, 254, 0, 9)}},
+  m.base.segments = {{"Base \"main\"", 35, {Color(1, 2, 3, 4), Color(255, 254, 0, 9)}, 27},
                      {"Lions", 18, {Color(0x30, 0x07, 0x83, 0)}}};
   m.shade.segments = {{"Shade", 38, {Color(0xab, 0xcd, 0xef, 0x10)}}};
   m.homeMode.ssid = "caf\xc3\xa9 \b\f\r";
@@ -86,8 +88,8 @@ constexpr const char* kFullStoredJson =
     "{\"lamp\":{\"name\":\"jacko\",\"brightness\":255,\"password\":\"p\\\"a\\\\s\\ns\\tw\x01""r"
     "d/\",\"setup\":true,\"named\":false,\"advancedEnabled\":false,\"webappEnabled\":true,\"apB"
     "ootMinutes\":7,\"brightnessCeiling\":170,\"socialMode\":1},\"base\":{\"byteOrder\":\"GRBW\""
-    ",\"colorsEditable\":true,\"segments\":[{\"name\":\"Base \\\"main\\\"\",\"px\":35,\"colors\""
-    ":[\"#01020304\",\"#fffe0009\"]},{\"name\":\"Lions\",\"px\":18,\"colors\":[\"#30078300\"]}]"
+    ",\"colorsEditable\":true,\"segments\":[{\"name\":\"Base \\\"main\\\"\",\"px\":35,\"pin\":27,"
+    "\"colors\":[\"#01020304\",\"#fffe0009\"]},{\"name\":\"Lions\",\"px\":18,\"colors\":[\"#30078300\"]}]"
     "},\"shade\":{\"colorsEditable\":true,\"segments\":[{\"name\":\"Shade\",\"px\":38,\"colors\""
     ":[\"#abcdef10\"]}]},\"homeMode\":{\"ssid\":\"caf\xc3""\xa9"" \\b\\f\\r\",\"brightness\":60"
     ",\"enabled\":true,\"networkBound\":false,\"socialDisabled\":true,\"disabledExpressionTypes"
@@ -135,7 +137,7 @@ void test_short_buffer_reports_overflow() {
   const Model m = fullModel();
   char buf[32];
   JsonWriter w(buf, sizeof(buf));
-  config_codec::writeStoredJson(w, &m.lamp, m.base, m.shade, m.homeMode, nullptr);
+  legacy133::writeStoredJson(w, &m.lamp, m.base, m.shade, m.homeMode, nullptr);
   w.finish();
   TEST_ASSERT_FALSE(w.ok());
   TEST_ASSERT_EQUAL(31, std::string(buf).size());

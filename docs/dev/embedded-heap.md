@@ -112,14 +112,14 @@ Two properties make it lethal:
    the document, refuses one that overflowed while it was built (it would save
    truncated), and serializes into one exactly-sized buffer. A refused save
    never aborts: it logs, keeps the dirty state and retries later.
-   A config save takes no config-sized heap, so it never waits on a large free
-   block (NVS itself allocates a handle per call and small bookkeeping per
-   page): the expression records and knockout are written from stack buffers, and the
-   JSON streams through `JsonWriter` (`util/json_writer.hpp`, compact JSON
-   straight into a fixed buffer, byte-identical to ArduinoJson) into a
-   1792-byte buffer reserved in .bss (`kMaxStoredCfgJsonLen`, above both a
-   whole config's 1759-byte ceiling and the split rest's 1746-byte worst case
-   with every free-text field fully escaped and every number at its widest).
+   A config save takes no heap, so it never waits on a large free block (NVS
+   itself allocates a handle per call and small bookkeeping per page): the
+   expression records are written from stack buffers, and the settings blob
+   is encoded into a 1024-byte buffer reserved in .bss
+   (`kMaxSettingsBlobLen`, above its 948-byte worst case), read back into the
+   same buffer and compared with the model's encoding as it streams
+   (`settingsMatch`), so the read-back needs no second copy. The boot's load
+   reads the blob through that buffer too.
    A whole web document is parsed once, on the loop: the web PUT gathers the
    body (at most 16 KB, `kMaxSettingsBody`; a lamp at every cap sends about
    12.9 KB) into one block and hands that block over without parsing it, and
@@ -145,9 +145,10 @@ Two properties make it lethal:
    the body taken out of 46.5 KB free and a 23.5 KB largest block, the
    typical document and the 18 expressions pass; a setup near the caps may
    be refused by that check (500) and saves from the app instead. These are
-   host figures; the device's need a bench check. The dispositions flush
-   writes its blob from the stack, and its JSON for a reader is allocated
-   outside its lock. A failed save (a full NVS, or a JSON that outgrew its
+   host figures; the device's need a bench check. The dispositions rows
+   are reserved once at 100 peers (16 bytes each, 1.6 KB) and never grow, the
+   flush writes its blob from the stack, and its JSON for a reader is
+   allocated outside its lock. A failed save (a full NVS, or a JSON that outgrew its
    buffer) backs off 5 s doubling to 60 s (`util/retry_backoff.hpp`) for
    both, and the commit drain waits on the same backoff, so no failure path
    retries at loop rate. Old stored formats load unchanged and move to the
@@ -190,45 +191,43 @@ Two placement rules make the entry count alone overstate the room
   version starts at offset 0 can so erase the live version's chunk; the first
   read then finds the chunk missing and erases the whole blob
   (`readMultiPageBlob`), as the boot after a reset does
-  (`eraseMismatchedBlobIndexes`). The rest blob therefore alternates between
-  `cfgb` and `cfgc`, written to the one that is not live after erasing it
-  first, so a failed write never reaches the live copy; with both present (a
-  save cut short before the older is erased) `cfgb` is the live one, for
+  (`eraseMismatchedBlobIndexes`). The settings blob therefore alternates
+  between `st0` and `st1`, written to the one that is not live after erasing
+  it first, so a failed write never reaches the live copy; with both present
+  (a save cut short before the older is erased) `st0` is the live one, for
   saves and loads alike. The count is a string, which a failed write leaves
-  as it was. A record, `ko` or `disp` rewrite can still
-  lose its old copy that way, only when NVS has no page for it or the heap
-  cannot spare 12 bytes: the save fails and its retry writes it back from
-  RAM, and a reset before then drops that one record (logged at load), the
-  knockout levels or the dispositions.
+  as it was. A record or `disp` rewrite can still lose its old copy that way,
+  only when NVS has no page for it or the heap cannot spare 12 bytes: the
+  save fails and its retry writes it back from RAM, and a reset before then
+  drops that one record (logged at load) or the dispositions.
 
-`config_codec::saveConfig` writes one of two shapes, chosen per save:
-
-- **Whole**, up to 1759 bytes (`kMaxWholeCfgLen`, 56 entries): one `cfg`
-  string that carries the expressions and the knockout levels too. Every
-  firmware reads this form, so a lamp flashed back to an older release keeps
-  everything. Two expressions with every colour and parameter at its cap
-  fit; smaller ones fit more.
-- **Split**, for anything bigger. Every value but one small string is a blob,
-  at the caps (`config/config_types.hpp`):
+`config_codec::saveConfig` writes, in the `lamp` namespace (at the caps,
+`config/config_types.hpp`):
 
 | Key | Content | Worst case | Entries |
 |---|---|---|---|
 | `x0`..`x20` | one expression each, compact record (`encodeExpression`) | 121 B | 21 x 6 = 126 |
 | `xn` | expression count, a decimal string | 2 B | 2 |
-| `ko` | knockout level per pixel | 255 B | 10 |
-| `cfgb` or `cfgc` | base, shade and home mode as JSON (`writeStoredJson` without the lamp section) | 1746 B fully escaped | 57 |
-| `cfg` | the lamp section as a JSON string, the one an older release reads | 376 B fully escaped | 13 |
-| `cfgl` | the lamp section, staged while `cfg` is replaced | 376 B | 14 while it exists |
-| `disp` | dispositions, `[mac:6][value:1]` per peer | 701 B | 24 |
+| `st0` or `st1` | the settings blob (`encodeSettings`): a format byte, the lamp section, base and shade (segments with name, pixel count, pin and colours; byte order; rotation), the base knockout levels, home mode | 948 B (`kMaxSettingsLen`, capped at 1024) | 32 |
+| `disp` | social rows: `[format][flags]`, then `[mac:6][disp][score][meets][meetAgeH][unseenMin:2]` per peer, 100 peers (`DispositionStore::kMaxBlobLen`) | 1202 B | 40 |
 | `lampType` | variant id | under 16 B | 2 |
 
-Outside it, 166 entries (`systemKeys` in `test_config_records`):
+The blob does not store `colorsEditable`: nothing reads a stored value back
+(`fromJson` skips it, and `applyDefaults` sets it from the variant at every
+boot), and the sections and the web document still carry the variant's
+value. Decoding the blob loads, field for field, what `fromJson` loads from
+the same model's JSON, so every BLE section and the web document are
+byte-identical to what a JSON store gives (`test_config_settings_codec`,
+over 500 seeded models among others).
+
+Outside it, 171 entries (`systemKeys` in `test_config_records`):
 
 - 5 namespace entries: `lamp`, `crash`, `phy`, `nvs.net80211`, `nimble_bond`.
 - PHY calibration: a 1904-byte blob (62), a 6-byte blob (3), a u32 (1): 66.
 - The WiFi driver's namespace: empty. The lamp keeps WiFi config in RAM and
   erases that namespace at boot.
-- The crash record: one blob under 64 bytes, 4.
+- The `crash` namespace: the crash record (`last`, an 80-byte blob, 5) and the
+  boot history (`boots`, a 64-byte blob, 4): 9.
 - NimBLE's bond store (`ble_store_nvs.c`, `nimble_bond`; bonding and
   host-based privacy are on, so legacy bonds may be present): with
   `MAX_BONDS` 3, `MAX_CCCDS` 8 and `MAX_CSFCS` 1 (the connection count),
@@ -238,42 +237,40 @@ Outside it, 166 entries (`systemKeys` in `test_config_records`):
   bytes, 3 each) for 8 is 24; `csfc_sec_N` (8 bytes) 3; `local_irk_N` and
   `rpa_rec_N` (under 32 bytes, 3 each) for 3 each is 18. Total 91.
 
-The arithmetic, every case with at least 32 entries to spare
-(`test_config_records`, figures for quote- or backslash-filled text):
+The arithmetic, every case with at least 29 entries to spare
+(`test_config_records`, `kMargin`):
 
-- **Whole string.** Live while it is rewritten: 166 + 2 + 24 + its old copy
-  or staged blob 57 = 249. The bound for 56 entries is 4 x 70 + 3 = 283:
-  34 spare.
-- **Lamp string.** Live beside every split key at its cap: 166 + 2 + 24 +
-  126 + 2 + 10 + 57 + its old copy or `cfgl` 14 = 401. The bound for 13 is
-  455: 54 spare.
-- **Small blobs.** The largest is a dispositions blob just under 400 bytes,
-  14 entries, at 400 live: bound 451, 51 spare. Records (6), `ko` (10) and
-  `cfgl` (14) are no larger.
-- **Entries.** The split store holds 400; rewriting its largest blob, PHY
-  calibration (62) or the rest (57), peaks at 462 of 504. Switching from
-  whole peaks at 457 (every split key, the staged lamp section and the new
-  rest blob beside the whole string), and so does staging a whole config
-  beside the split store.
-- **The first save after an update.** An older release's `cfg` string can
-  hold 4,000 bytes (127 entries), beside its dispositions JSON (about 2.2 KB,
-  71 entries, migrated to the 24-entry blob at the first load). The first
-  split save keeps that string until the new keys land, but those keys copy
-  only what the string held: a string full of fully escaped rest leaves room
-  for few expressions, and one full of expressions has a short rest. Over
-  every legacy shape up to 4,000 bytes, saved split and trimmed to whole, the
-  page model leaves 91 entries spare at the tightest
+- **Entries.** Live at the caps: 171 + 2 + 40 + 126 + 2 + 32 = 373.
+  Rewriting the largest blob, PHY calibration (62) or the settings blob (32),
+  peaks at 435 of 504: 69 spare.
+- **Strings.** The only strings are `xn` and `lampType` (2 entries each):
+  rewritten beside every key, 375 live against a bound of 4 x 124 + 3 = 499.
+- **Small blobs.** The largest is a dispositions blob just under 400 bytes
+  (33 peers), 14 entries, at 373 live: bound 451, 78 spare. A record (6) is smaller.
+- **The migration.** The first save over a 1.3.3 split store at its worst
+  writes the settings blob beside every legacy key (records shared, `ko` 10,
+  the rest blob 59, the lamp-only `cfg` 13 and a staged `cfgl` 14): 437 live,
+  peak 469, 35 spare, once. Over a 1.3.3 whole store (at most 1759 bytes, 56
+  entries) it peaks at 429.
+- **The first save after an update from an older release.** An older
+  release's `cfg` string can hold 4,000 bytes (127 entries), beside its
+  dispositions JSON (about 2.2 KB, 71 entries, migrated to the 40-entry blob
+  at the first load). The first save keeps that string until the new keys
+  land, but those keys copy only what the string held. Over every such shape
+  up to 4,000 bytes the page model leaves 95 entries spare at the tightest
   (`test_the_first_save_after_an_update_fits`).
 
 Those bounds hold for any arrangement of entries across the pages. The
 native suite also runs NVS itself: `PagedNvs` (`test/test_config_records`)
 models the pages, one-page strings, chunked blobs, the collection rule and
-IDF's cleanup of a failed blob write, and every store shape (empty, the
-largest whole, split at every escaped worst case, the standard variant's 18
-full expressions) is saved in seeded order with system keys and
-dispositions rewritten between saves and 32 padding entries beside them.
-Every write must land and every save load back as saved; the closest of 150
-seeds leaves 34 entries to spare.
+IDF's cleanup of a failed blob write. Starting from a 1.3.3 split store at
+its worst, every store shape (empty, the largest 1.3.3 whole config, every
+escaped worst case, the standard variant's 18 full expressions) is saved in
+seeded order with system keys and dispositions rewritten between saves and
+29 padding entries beside them; every write must land and every save load
+back as saved, and the same churn still holds with 47 padding entries. The
+budget sizes `disp` at `DispositionStore::kMaxBlobLen`, so a longer
+dispositions blob flows into every figure.
 
 An expression record holds at most 12 parameters (`kMaxExpressionParams`;
 every type carries at most 11, guarded by `test_builtin_descriptors`) and
@@ -282,26 +279,19 @@ append-only, pinned by `test_builtin_descriptors`, and kept in byte-wise key
 order (`test_param_wire_compat`); the JSON forms carry key names. A key no
 expression reads is dropped at parse.
 
-The caps that bound the stored JSON: 8 colours per surface segment (the app
-offers 6), 4 segments per role (variants define at most 3), 16-byte segment
-names, a 32-byte lamp name, a 64-byte password, a 32-byte SSID, a byte order
-the strip driver knows, 8 home-mode type names (type ids only). The BLE
-settings path and the web PUT both refuse an over-long password or SSID (BLE
-logs the refusal, the web answers 400), and both ignore an unknown byte
-order; `fromJson` also bounds what it loads (truncating a password or SSID
-stored before the cap; the BOOT button clears a password), so no field can
-make every save fail. A repeated (type, target) in the stored JSON loads
-once, the first kept, as the records do.
-
-A role's `rotate` (at most 49 B, `,"rotate":{"on":false,"periodS":120,"dir":"down"}`)
-is stored only on a single-segment role and only when it differs from that
-role's default, whatever the variant's `rotationSupported` says. A one-segment
-role is at least 480 B shorter than the four-segment role the worst case
-assumes, so the widest rest that carries `rotate` (one four-segment role, one
-single-segment role with `rotate` at its widest) is 1316 B fully escaped,
-with its NUL, under the 1746 B worst case, so the caps and NVS figures above
-stand. `test_config_records` prints it as `[budget] rotating rest` and pins it
-below the worst case.
+The caps that bound the stored settings: 8 colours per surface segment (the
+app offers 6), 4 segments per role (variants define at most 3), 16-byte
+segment names, a segment pin the strip driver can drive (`isStripDataPin`),
+a 32-byte lamp name, a 64-byte password, a 32-byte SSID, a byte order the
+strip driver knows, 8 home-mode type names (type ids only), 255 knockout
+levels. The BLE settings path and the web PUT both refuse an over-long
+password or SSID (BLE logs the refusal, the web answers 400), and both ignore
+an unknown byte order; `fromJson` and `decodeSettings` also bound what they
+load (truncating a password or SSID stored before the cap; the BOOT button
+clears a password), so no field can make every save fail. A repeated (type,
+target) in a stored JSON loads once, the first kept, as the records do. A
+role's rotation costs the blob 3 bytes whatever it holds; it is applied only
+to a one-segment role, and only when it differs from that role's default.
 
 Arduino's `initArduino` runs `nvs_flash_init` before `setup()`, erasing and
 re-initializing on `NO_FREE_PAGES` or `NEW_VERSION_FOUND`.
@@ -315,7 +305,8 @@ skips every later BLE start, OTA radio pause and resume included.
 
 A partition that initializes but is full gets space back on the first boot:
 the WiFi driver's namespace is erased, and the legacy dispositions JSON (about
-2.2 KB) is rewritten as the 701-byte blob, blob first, then erased. A legacy
+2.2 KB) is rewritten as the dispositions blob, which must land and read back
+before the JSON is erased. A legacy
 JSON that does not parse, or parses to nothing while the blob holds entries,
 is erased without replacing the blob.
 
@@ -341,47 +332,54 @@ the change runs until the next one, logged as `[loop] settingsBlob: save
 never landed; no reboot`.
 
 A reset at any point of a save leaves a whole config, and so does a save that
-stops at a refused write. `test_config_records` cuts saves short at each of
-their writes and loads what is left, then cuts the next save short at each
-of its writes from every store that leaves. In memory that runs every shape
-to every shape and on to every shape, each whole save also staged (407,600
-loads); over the page model, the staged saves and
-shape changes of the churn. Each section must load as the store before the
-save had it or as saved.
+stops at a refused write or a read-back that differs. `test_config_records`
+cuts saves short at each of their writes and loads what is left, then cuts
+the next save short at each of its writes from every store that leaves: in
+memory, every shape to every shape and on to every shape (170,190 loads);
+from every store a release up to 1.3.3 left, its forms and every store one of
+its saves cut short leaves going whole to split, split to whole (staged) and
+split to split (170 stores, 12,926 loads), migrated unchanged and edited;
+over the page model, the churn's migration and every 25th save. Each section
+must load as the store before the save had it or as saved, and a migration
+of the unchanged config at first boot must load whole at every cut.
 
-- **Whole.** `cfg` is written (always with an `expressions` array, empty
-  included, so deleting every expression and losing power before the erase
-  cannot bring them back), then every record slot `x0`..`x31`, `xn`, `ko`,
-  both rest keys and `cfgl` are erased. When NVS refuses the string
-  (switching from split, it may have no page with room beside the split
-  keys), it is staged: the whole JSON goes to a rest blob, `cfg` is erased,
-  then the split keys and `cfgl`, then `cfg` is written and the rest keys
-  erased.
-- **Split.** The rest JSON is checked first (TooLarge writes nothing). The
-  lamp section lives in the live rest blob when that is a staged whole,
-  else in `cfg` when that holds the lamp section alone, else in `cfgl`. Unless
-  `cfg` holds it, the save first stages the new lamp section in `cfgl` (a
-  `cfgl` that is the current copy stays) and erases a stale lamp-only `cfg`.
-  Then the records, `ko`, the count `xn`, every record slot past the count
-  erased, and the rest blob, written to the rest key that is not live, erased
-  first, before the live one is erased. A whole `cfg` is the authority until
-  then and is erased only now. Last the lamp section goes to
-  `cfg` and `cfgl` is erased. Sweeping every slot means a save cut short
-  before its count lands leaves no record that a later save does not erase.
-- **Load.** A `cfg` string with an `expressions` array (a whole save, or any
-  older release's) is the authority and the load erases rest blobs and
-  `cfgl` beside it. Otherwise the live rest blob holds the config: a staged
-  whole one when it has an `expressions` array, else the rest beside the
-  records, with the lamp section from `cfg`, or from `cfgl` while a save has
-  `cfg` erased. A rest blob or `cfgl` that holds something unreadable sets
-  `loadFailedWithData`, as an unparseable `cfg` does, so the first-boot save
-  does not write defaults over it. On the device that is a blob over the
-  read buffer, a chunk that fails its CRC (IDF erases that chunk on the read,
-  and the blob on the next read or boot), or JSON that does not parse. A
-  blob with a chunk missing is gone by the time it is read, so a lamp-only
-  `cfg` with no rest blob beside it sets the flag too: a split store has
-  lost its rest. The dispositions JSON key wins over the blob unless it is
+- **Save.** The records, the count `xn`, then every record slot past the
+  count erased (`x0`..`x31`), so a save cut short before its count lands
+  leaves no record a later save does not erase. Over a legacy store each
+  record and the count are then read back and compared. Then the settings
+  blob: when the live one already matches the model nothing is written (a
+  stale copy in the other key is erased); otherwise the key that is not live
+  is erased, written, read back and compared byte for byte, erased again if
+  it differs (`st0` would load over a live `st1`), and only then the live key
+  is erased. Last, over a legacy store, `cfg`, `cfgb`, `cfgc`, `cfgl` and `ko`
+  are erased. Until the blob lands, the legacy store is the authority and
+  loads as before; from then on the binary one does. A write that fails or a
+  read-back that differs stops the save with `WriteFailed`, and the retry
+  runs it again.
+- **Load.** A settings blob that reads (`st0`, else `st1`) is the authority:
+  it loads with the records, and any legacy key beside it is erased. With
+  none, the legacy keys load as releases up to 1.3.3 wrote them
+  (`loadStoredConfig`, unchanged): a `cfg` string with an `expressions`
+  array is the authority and the load erases rest blobs and `cfgl` beside
+  it; otherwise the live rest blob holds the config, a staged whole one when
+  it has an `expressions` array, else the rest beside the records, with the
+  lamp section from `cfg`, or from `cfgl` while a save had `cfg` erased. A
+  settings blob that is present but does not read or decode, a legacy rest
+  blob or `cfgl` that holds something unreadable, or a lamp-only `cfg` with no
+  rest blob beside it sets `loadFailedWithData`, as an unparseable `cfg` does,
+  so the first-boot save does not write defaults over it. On the device that
+  is a blob over the read buffer, a chunk that fails its CRC (IDF erases that
+  chunk on the read, and the blob on the next read or boot), or JSON that
+  does not parse. The dispositions JSON key wins over the blob unless it is
   corrupt, or empty while the blob has entries.
+- **The migration.** `Lamp::setup` persists once at first boot while the
+  store is in a legacy form (`Config::storeIsLegacy`), through the same
+  first-boot save that persists a store predating the `named` flag, after
+  `applyDefaults` and only when nothing failed to load. When it lands Config
+  logs `[cfg] store migrated from whole|split`; every later boot logs
+  `[cfg] store binary` and saves nothing at boot. A migration that fails
+  leaves the lamp on its legacy store, which keeps loading, and the save
+  retries.
 - **A write that ran out of heap.** Two allocations inside a blob write can
   fail. The 12-byte `UsedPageNode` that records a chunk fails after the chunk
   is written: that chunk stays, uncleaned and named by no index, in the
@@ -404,20 +402,17 @@ save had it or as saved.
   does) both write through `writeBlobPastOrphan`; `test_nvs_config_store`
   runs the device store itself over the page model, and
   `test_saves_after_an_out_of_memory_write_land_and_survive_the_boot` covers
-  a record, the knockout blob and the rest.
+  a record and the settings blob.
 
-Accepted risks. None stalls saves, and none touches the lamp section held in
-`cfg`:
+Accepted risks. None stalls saves, and none touches the live settings blob:
 
 - A reset between a held key's throwaway and its value drops that key at
-  boot. For a rest key that is every setting outside the lamp section and the
-  expressions: they load as defaults, the load reports the store unreadable,
-  and the first-boot save is held off so the defaults are not written over it.
-  For a record, the knockout blob or `cfgl` it drops that record (logged at
-  load), the knockout levels, or the lamp section staged there.
+  boot. For a settings key the live copy beside it loads, and the load
+  reports the store unreadable, so the first-boot save is held off. For a
+  record it drops that record (logged at load).
 - The throwaway is a zero-length `nvs_set_blob`. `PagedNvs` accepts one; that
   IDF 5.5 does, and reads it back as an empty blob, wants a bench check.
-- A record, `ko` or `disp` rewrite whose IDF cleanup takes the old copy (a
+- A record or `disp` rewrite whose IDF cleanup takes the old copy (a
   failed rewrite, above) leaves that value missing until the save's retry
   writes it back from RAM; a reset before then loses it. Besides the two
   allocations, the cleanup runs when NVS cannot place a chunk or the index
@@ -426,30 +421,46 @@ Accepted risks. None stalls saves, and none touches the lamp section held in
   inside the figures there.
 - Everything the native suite proves about NVS is proved against `PagedNvs`,
   a model of IDF 5.5 (page placement, the 400-byte first-chunk rule,
-  collection, cleanup by position, the boot's blob checks), never against IDF
-  itself, so a divergence between the two goes unseen.
+  collection, cleanup by position, the boot's blob checks, the skipping of an
+  identical rewrite), never against IDF itself, so a divergence between the
+  two goes unseen.
 
 An edit rewrites one record and NVS skips the unchanged ones; a remove shifts
 later records down a slot, so a reset mid-shift can leave one record in two
 slots, and the load keeps the first of any repeated (type, target). The app's
 edits are removes, edits and appends. A web save sends the whole document and
-can reorder the list: saved whole that is one write and reset-safe, but saved
-split a reset mid-save can leave an entry that moved in two slots and drop
-the one it displaced. A web save that fails partway can leave records of the
-web document beside the running config's rest, so the running config's save
-goes pending and rewrites it whole (`SaveGate`). A record that fails to read
-drops only itself, logged as `[cfg] expression record xN unreadable`. The
-boot log's `[cfg] expressions=N from records|cfg json` is the loaded count;
-the `cfg_bytes` on the line before is the `cfg` string alone.
+can reorder the list, so a reset mid-save can leave an entry that moved in
+two slots and drop the one it displaced. A web save that fails partway can
+leave records of the web document beside the running config's settings, so
+the running config's save goes pending and rewrites it (`SaveGate`). A
+record that fails to read drops only itself, logged as `[cfg] expression
+record xN unreadable`. The boot log's `[cfg] expressions=N from records|cfg
+json|no records` is the loaded count; `[cfg] store binary|whole|split|empty` the form
+it loaded from; on a debug build `cfg_bytes` on the `[cfg] loaded` line is
+the legacy `cfg` string alone (0 for a binary store), and `[nvs] used U free
+F`, on every debug boot just after the first-boot save point, is the whole
+partition's entries
+(`nvs_get_stats`), to set beside the figures above.
 
-**Downgrades.** Downgrades happen only on the bench, so this layout does not
-try to serve one. An older release reads only the `cfg` string and the
-legacy dispositions JSON key. A whole-saved lamp keeps everything there but
-its dispositions. A split-saved lamp keeps only its lamp section (name,
-password, brightness, setup flags); everything else reads as defaults, and
-that release's own saves have to fit beside split keys it does not know.
-Flashed forward again, whatever the older release saved is what loads; if
-it saved nothing, the split store loads intact, dispositions included.
+**Downgrades.** Downgrades happen only on the bench, so the layout does not
+try to serve one. Release 1.3.3 and older read only `cfg`, its rest and lamp
+blobs, `ko`, the records and `disp`, and know nothing of `st0`/`st1`. A
+migrated lamp flashed back to 1.3.3 finds no `cfg`: it boots with the
+variant's default name and colours (rolled to a random hue, as a new lamp
+is), no password, default home mode and knockout, and unadopted, so the app
+offers it the setup flow; it keeps its expressions (it reads `xn` and the
+records). Its dispositions survive only while `disp` is still format 1 (no
+dispositions flush since the update): 1.3.3 refuses a format 2 blob and loads
+every peer Neutral, and its first disposition write replaces the blob with
+format 1, which drops every score, meeting count, age and the engine switch.
+Flashed forward with no such write, the format 2 blob loads intact. Its
+first-boot save then writes its own form
+beside the 32 entries of settings blob it cannot see, so a save can fail for
+room until a factory reset clears the namespace. A whole save of its own
+erases the records. Flashed forward again, the settings blob is the
+authority: the settings load as they were before the downgrade, the keys the
+older release wrote are erased at load, and the expressions are whatever
+that release left in the records (none if it saved whole).
 
 ## What expressions cost at runtime
 
@@ -493,11 +504,24 @@ scale with the number of peers or the mesh's message rate, so each is bounded:
   Test plays nothing here and logs `[expr] transient drop` (every build, at
   most every 5 s), but its cascade still goes out to the crowd
   (`cascadesFrom`), built from the invocation with no Expression made for
-  it; a peer's invocation never re-sends. That type then waits a second
+  it; a peer's invocation never cascades, and a mirrored copy sends at most
+  one MSG_EVENT of its own. That type then waits a second
   (`LocalCooldown`) before the lamp tries it again, so a Test tapped over
   and over while the lamp is short neither retries nor resends each tap. The vector is reserved at
   `ExpressionManager::begin`, and the compositor reserves 16 behavior slots
   past its boot list for transients and live upserts.
+- **Mirror rolls.** `SocialEchoObserver` holds its roll cooldown in a fixed
+  16-slot `RollCooldownTable` (about 200 bytes) and 4 pending copies, so a
+  crowd of any size takes no heap to decide a copy; a full table rolls
+  nothing new until a slot ages out. The self-echo check reads 16 fixed
+  per-type play stamps (`RecentPlays`, 128 bytes) in `ExpressionManager`.
+  Yawn-backs keep a second 16-slot table of their own in `YawnContagion`
+  and share the 4 pending copies.
+  Detail in `docs/dev/expressions.md`.
+- **Fondness engine.** `FondnessEngine` gathers peer expressions in 16 fixed
+  slots (384 bytes) and a 16-entry step log (256 bytes); a full slot table
+  drops its oldest peer's minute to make room, so a crowd of any size takes no heap
+  on an input, a commit or the hourly tick. Detail in `docs/dev/social.md`.
 - **Moments.** A Moment allocates only its transients, one at a time: a
   `flicker` burst (about 8 bytes a cell plus the Expression) for 700 ms,
   or a `pulse` for about 6 s, admitted as a peer's like any cascade. A
@@ -547,6 +571,20 @@ scale with the number of peers or the mesh's message rate, so each is bounded:
   on every build (at most every 10 s); the running counts show as `txstalls`
   (resets) and `txrefused` (sends dropped for want of a credit, a mesh
   resend among them) in `heap.get` and the `[heap]` trend line.
+- **Staggered relays.** `MeshLink` holds the wisp-frame relays it delays
+  (`RelayStagger`, `components/network/mesh/relay_stagger.hpp`) in fixed .bss
+  tables, about 2.1 KB off free heap: 2 control-op slots of 608 bytes and 4
+  WISP_HELLO / WISP_PALETTE slots of 224, sized for two wisps. Nothing
+  allocates; a full table, or a known loop stall, relays inline. The loop
+  sends a due relay only while a TX credit is free (`MeshLink::txReady`), so queued relays share the 6
+  credits with the cascade drain and the mesh resends without hammering a
+  stalled driver. A queued relay is refused, counted in `txrefused` and retried
+  next pass only when another task takes the last credit between the check and
+  the submit; an inline relay is refused like any other send.
+- **Dedup rings.** `MeshLink`'s per-type `DedupRing`s hold 464 tuples in
+  fixed .bss, 16 bytes each with the `millis()` stamp that ages a tuple out
+  after 20 s: about 7.3 KB off free heap. Ring capacity is the knob; a slot
+  added to one ring costs 16 bytes.
 - **Cascade fan-out.** A locally fired cascade (a cascading expression, or the
   app's Test) reaches every mesh peer, closest first. `CascadeScheduler`
   (`expressions/cascade_scheduler.hpp`) holds up to two fan-outs (peers and one
@@ -601,11 +639,17 @@ whole, which creates the lock at boot.
 Every build, released ones included, keeps a crash record (`core/crash_record`).
 The loop samples the running minimum largest block, minimum free heap, roster
 peak, and uptime into RTC memory at 1 Hz; the panic handler adds the reason, pc,
-first four backtrace addresses, and core. RTC memory survives a panic or
-watchdog reset but not power loss, so a magic value gates it. On the next boot a
-panic, int/task/other watchdog, or brownout reset (or a captured panic under any
-reset) bumps a counter and writes the record to NVS (namespace `crash`, key
-`last`). A clean `esp_restart` (OTA, webapp reboot) and power-on do not count.
+first four backtrace addresses, and core, and replaces the uptime with the
+uptime at the fault. The handler is Arduino-ESP32's panic hook, which runs only
+because the link wraps `esp_panic_handler` (`-Wl,--wrap=esp_panic_handler` in
+`platformio.ini`); a build without the flag fails to link. RTC memory survives
+a panic or watchdog reset but not power loss, so a magic value gates it. Until
+the loop's first sample the snapshot is marked unsampled, since its heap and
+roster figures are the ones taken at the re-arm early in setup. On the next
+boot a panic, int/task/other watchdog, or brownout reset (or a captured panic
+under any reset) bumps a counter and writes the record to NVS (namespace
+`crash`, key `last`). A clean `esp_restart` (OTA, webapp reboot) and power-on
+do not count.
 
 Read it from the BLE `lamp` section:
 
@@ -614,16 +658,77 @@ Read it from the BLE `lamp` section:
 "lastCrash": {"count": 3, "reset": 4, "fw": 66055,
   "uptimeMs": 5412000, "minLargestBlock": 1300, "minFreeHeap": 5120,
   "rosterPeak": 12, "reason": "abort() was called", "core": 0,
-  "pc": "0x4008a1b2", "bt": ["0x4008a1b2", "0x400d3c44", "0x400e0123"]}
+  "pc": "0x4008a1b2", "bt": ["0x4008a1b2", "0x400d3c44", "0x400e0123",
+  "0x400d5a10"]}
 ```
 
 `reset` and `resetReason` are `esp_reset_reason_t` ordinals (4 panic, 5 int WDT,
 6 task WDT, 7 other WDT, 9 brownout, 3 clean restart, 1 power-on). The heap and
 roster fields are absent when RTC memory failed its check (a brownout often
-does); `reason`/`core`/`pc`/`bt` are absent unless the panic handler ran.
+does) or the boot died before its loop sampled; `core`/`pc`/`bt` are absent
+unless the panic handler ran. `reason` is the CPU exception (`LoadProhibited`,
+`IllegalInstruction`) or the abort's message: an assert or stack-overflow
+message cut to 31 characters, or `abort() was called`, whose caller is the
+fourth `bt` entry. A task-watchdog abort has no message, so its record carries
+no `reason` and `reset` 6 names it. `uptimeMs` is the uptime at the fault when
+the panic handler ran, else the last 1 Hz sample (0 when the boot died before
+its loop sampled). It stops at 4294967295 (49.7 days) on a longer boot.
 `minLargestBlock` near 1-2 KB with a high `rosterPeak` points at fragmentation.
 Feed `pc` and `bt` to `xtensa-esp32-elf-addr2line -e firmware.elf` for the build
 matching `fw` (packed `major<<16 | minor<<8 | patch`).
+
+A stalled loop task records as `reset` 6 with `core` 1. The loop task is on the
+ESP-IDF task watchdog from the end of `setup()` (`util/loop_watchdog.hpp`): it
+feeds before every loop iteration, and between the steps of its longest blocking
+work (each 64 KB block of the OTA upfront erase, the post-stream verify, the BLE
+teardown for the web config). The timeout is the task watchdog's 5 s, widened to
+30 s while a firmware or filesystem image is being received. The watchdog
+interrupts whatever is running on core 1: for a loop that spins, `pc` and `bt`
+point at the stall; for a loop blocked on a lock they point at the task that
+ran instead (often the idle task), and only the serial log names `loopTask`.
+After 3 task-watchdog resets in a row, each from a boot whose loop never
+started an iteration 60 s into uptime, the next boot leaves the loop unwatched
+and prints `[loopwd] 3 watchdog resets in a row` on every build, so a loop that
+stalls on every boot freezes and stops resetting. The streak lives in RTC
+memory, and any other reset (a power cycle, an update, a web save's reboot)
+starts the watch again. A stall within 30 s of a firmware update's first boot
+makes the bootloader roll back, and the record's `fw` is then the version that
+booted after it. `setup()` runs unwatched: a hang there leaves the lamp dark
+with no record until a power cycle.
+
+## Reading the boot history
+
+Every build, released ones included, keeps the last 5 boots in NVS
+(`core/boot_history`, namespace `crash`, key `boots`) and prints the ended ones
+to serial early in boot. Plugging a lamp into USB and opening `npm run
+lamp:tap` resets it through the auto-reset circuit, so the history prints at
+once. One line per boot, oldest first, `-1` the boot before this one:
+
+```
+[boots] -3 fw1.3.2 up 5h12m free 21480 big 1300 end panic
+[boots] -2 fw1.3.2 up >1h00m free 30112 big 18200 end power
+[boots] -1 fw1.3.2 up 42s free 40960 big 38000 end taskwdt
+```
+
+`up` is the uptime the boot reached, `free` its lowest free heap and `big` its
+smallest largest free block, both in bytes and capped at 65535. `end` is the
+reset that started the next boot: `power` (a power-on reset), `restart` (a
+clean `esp_restart`: OTA, web reboot), `panic`, `intwdt`, `taskwdt`, `wdt`,
+`brownout`, `ext`, `sleep`, `unknown`. The reset that USB plug-in and
+`lamp:tap` cause reports as a power-on on the ESP32, so the boot they
+interrupt reads `end power`.
+
+The figures come from the crash record's RTC snapshot, sampled each second
+from the first loop iteration on: when it survives the reset they are those
+of the last sample, and after a panic or watchdog abort in a boot its loop
+had sampled, `up` is the uptime at the fault. When it does not (a power cut,
+often a brownout), the boot keeps the figures from the last milestone it
+reached, 1 min, 1 h or 1 day, and `up` reads `>` that milestone.
+`free - big -` means the boot died before any figure was taken: in `setup()`,
+in its first loop iteration, or in its first minute after a power cut. Past
+49.7 days the snapshot's uptime saturates and reads `>49d17h`. A boot writes
+the history once at start and once per milestone, so at most four NVS writes
+per boot.
 
 ## Why it recurs
 

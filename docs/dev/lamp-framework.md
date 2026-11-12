@@ -104,7 +104,9 @@ through segments, one palette per segment, rendered by the segment-aware
 
 `HwConfig.strips` lists every physical NeoPixel strip; each entry carries a
 `role` (`Surface::Shade` or `Surface::Base`), pin, byte order, pixel count, and
-optional `name` / `broadcast` / `reversed` flags. Multiple strips can share a
+optional `name` / `broadcast` / `reversed` flags. A saved segment `pin`
+overrides its strip's default pin at boot; see `StripSpec` in
+[building-custom-lamps.md](building-custom-lamps.md). Multiple strips can share a
 role (as the snafu shade does), and one `broadcast=1` strip per role is the
 representative for advertisement / HELLO.
 
@@ -179,9 +181,10 @@ another lamp settings over `MSG_CONTROL_OP`, which carries only wisp traffic
   invocation: a cascade (`MSG_COMMAND`, immediate or delayed) and an event
   mirror (`MSG_EVENT` through `SocialEchoObserver`). Nothing is booked for
   later either: while `ExpressionManager::ignoresPeers()` the command drain
-  queues no delayed cascade and `SocialEchoObserver` books no mirror (its
-  introvert cooldown untouched), so nothing fires once home mode or the
-  preview ends. A retiring transient does not coalesce its sender's next
+  queues no delayed cascade, so nothing fires once home mode or the preview
+  ends. `SocialEchoObserver` goes further and rolls no copy while
+  `ExpressionManager::inHomeMode()`, social on or off, its introvert and
+  roll cooldowns untouched. A retiring transient does not coalesce its sender's next
   invocation.
 - `ExpressionManager::gcTransients` retires a Remote transient already running
   when home mode turns on: `Expression::retire()` ramps its contribution scale
@@ -329,7 +332,7 @@ changelog, per [`CLAUDE.md`](../../CLAUDE.md)).
 | `software/lamp-os/src/core/animated_behavior.hpp` | `AnimatedBehavior` base class: control/draw interface |
 | `software/lamp-os/src/core/frame_buffer.hpp/.cpp` | `FrameBuffer`: the per-surface pixel buffer `draw()` writes into |
 | `software/lamp-os/src/core/pending_slot_aggregate.hpp/.cpp` | Core 0→1 hand-off mechanism for async work |
-| `software/lamp-os/src/core/override_aggregate.hpp/.cpp` | Transient color/brightness overrides (colour watchdog 100 s, wisp keep-alive-held; brightness watchdog a separate 60 s) |
+| `software/lamp-os/src/core/override_aggregate.hpp/.cpp` | Transient color/brightness overrides (colour watchdog 100 s; brightness watchdog a separate 60 s) |
 | `software/lamp-os/src/core/personality_engine.hpp/.cpp` | Personality gate for expression suppression + crowd-dim |
 | `software/lamp-os/src/core/arrival_notifier.hpp/.cpp` | Push-notifies `onArrival` observers once per new near peer |
 | `software/lamp-os/src/core/power_governor.hpp/.cpp` | Current estimator + supply-budget brightness governor |

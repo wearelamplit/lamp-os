@@ -10,7 +10,9 @@
 //     / firstMissingChunk)
 //   - The onOffer / onDone control-plane decisions: channel mismatch
 //     decline, version-not-greater decline, full-bitmap -> verify
-//     trigger, version mismatch detection on DONE.
+//     trigger, version mismatch detection on DONE, and the session
+//     sender check (mesh transport only).
+//   - handleChunk, through the real checkFwChunk in fw_ota.hpp.
 //
 // What we don't mirror:
 //   - esp_ota_* calls (we replace with a mock that records the call
@@ -111,11 +113,7 @@ struct PendingFirmwareControl {
   } done;
 };
 
-struct ParsedFwChunk {
-  uint16_t chunkIdx;
-  uint32_t offset;
-  uint16_t len;
-};
+using lamp_protocol::ParsedFwChunk;
 
 // --- Mock MeshLink -------------------------------------------------------
 
@@ -235,11 +233,13 @@ class FirmwareReceiver {
     }
   }
 
-  void handleChunk(const ParsedFwChunk& p) {
+  void handleChunk(const ParsedFwChunk& p, bool sessionTransport = true) {
     if (publishedHandle_ == 0) return;
-    if (static_cast<uint32_t>(p.offset) + p.len > offerTotalLen_) return;
-    if (p.len > offerChunkSize_) return;
-    if (p.offset != static_cast<uint32_t>(p.chunkIdx) * offerChunkSize_) return;
+    if (lamp_protocol::checkFwChunk(p, sessionTransport, wispMac_, offerTotalLen_,
+                                    offerChunkSize_) !=
+        lamp_protocol::FwChunkVerdict::Write) {
+      return;
+    }
     ota_->totalBytesWritten += p.len;
     markChunkReceived(p.chunkIdx);
     lastChunkMs_     = mockNow_;
@@ -392,6 +392,10 @@ class FirmwareReceiver {
 
   void onDone(const PendingFirmwareControl& ctrl) {
     if (state_ != State::Streaming) return;
+    if (!lamp_protocol::fromFwSessionSender(true, false, ctrl.sourceMac, wispMac_, 0,
+                                            0)) {
+      return;
+    }
     if (ctrl.done.version != offerVersion_) {
       abortOta();
       sendResult(FwResultStatus::VersionMismatch, 0);
@@ -516,6 +520,7 @@ static ParsedFwChunk makeChunk(uint16_t idx, uint16_t len = FW_CHUNK_SIZE) {
   p.chunkIdx = idx;
   p.offset = static_cast<uint32_t>(idx) * FW_CHUNK_SIZE;
   p.len = len;
+  std::memcpy(p.sourceMac, kWispMac, 6);
   return p;
 }
 
@@ -570,6 +575,42 @@ void test_offer_forged_totalChunks_bounded_by_totalLen() {
 
 // Cross-channel offer is now DeclineAlreadyCurrent (not silent drop); the
 // distributor's upstream filter is the primary gate against unwanted offers.
+void test_chunk_from_foreign_source_or_transport_is_ignored() {
+  test::MockMeshLink mock;
+  test::MockOta ota;
+  test::FirmwareReceiver fr;
+  fr.begin(&mock, &ota);
+  fr.handleControlOnLoop(test::makeOffer(1, 0x00010001, 600, 3));
+  auto foreign = test::makeChunk(0);
+  foreign.sourceMac[0] ^= 0xFF;
+  fr.handleChunk(foreign);
+  fr.handleChunk(test::makeChunk(1), false);
+  auto wrap = test::makeChunk(2);
+  wrap.offset = 0xFFFFFFF0u;
+  wrap.chunkIdx = 2;
+  fr.handleChunk(wrap);
+  TEST_ASSERT_EQUAL_UINT32(0u, ota.totalBytesWritten);
+  fr.handleChunk(test::makeChunk(0));
+  TEST_ASSERT_TRUE(ota.totalBytesWritten > 0);
+}
+
+void test_done_from_foreign_sender_is_ignored() {
+  test::MockMeshLink mock;
+  test::MockOta ota;
+  test::FirmwareReceiver fr;
+  fr.begin(&mock, &ota);
+  fr.handleControlOnLoop(test::makeOffer(1, 0x00010001, 600, 3));
+  auto done = test::makeDone(0x00010002, 600);
+  done.sourceMac[0] ^= 0xFF;
+  fr.handleControlOnLoop(done);
+  TEST_ASSERT_EQUAL(static_cast<int>(test::FirmwareReceiver::State::Streaming),
+                    static_cast<int>(fr.state()));
+  done.sourceMac[0] ^= 0xFF;
+  fr.handleControlOnLoop(done);
+  TEST_ASSERT_EQUAL(static_cast<int>(test::FirmwareReceiver::State::Failed),
+                    static_cast<int>(fr.state()));
+}
+
 void test_offer_channel_mismatch_declined() {
   test::MockMeshLink mock;
   test::MockOta ota;
@@ -1324,6 +1365,8 @@ int main(int argc, char** argv) {
   UNITY_BEGIN();
   RUN_TEST(test_offer_accept_transitions_to_streaming);
   RUN_TEST(test_offer_forged_totalChunks_bounded_by_totalLen);
+  RUN_TEST(test_chunk_from_foreign_source_or_transport_is_ignored);
+  RUN_TEST(test_done_from_foreign_sender_is_ignored);
   RUN_TEST(test_offer_channel_mismatch_declined);
   RUN_TEST(test_offer_version_not_greater_declined);
   RUN_TEST(test_offer_chunk_size_in_range_accepted);

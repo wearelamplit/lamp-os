@@ -10,6 +10,20 @@
 
 using lamp::WispFleetCache;
 
+// One STATE frame's entries into `cache`: count * 12 bytes of
+// lampMac(6)+baseRGB(3)+shadeRGB(3), `w` count * 2 bytes or nullptr for W = 0.
+void upsertFrame(WispFleetCache& cache, const uint8_t* entries,
+                 const uint8_t* w, uint8_t count, uint32_t nowMs) {
+  for (uint8_t i = 0; i < count; ++i) {
+    const uint8_t* src = entries + static_cast<size_t>(i) * 12;
+    const uint8_t base[4] = {src[6], src[7], src[8],
+                             static_cast<uint8_t>(w ? w[i * 2] : 0)};
+    const uint8_t shade[4] = {src[9], src[10], src[11],
+                              static_cast<uint8_t>(w ? w[i * 2 + 1] : 0)};
+    cache.upsertPaint(src, base, shade, nowMs, false);
+  }
+}
+
 void setUp() {}
 void tearDown() {}
 
@@ -50,7 +64,7 @@ void test_color_positional_alignment() {
   paint[12 + 9] = 0xD4;
   paint[12 + 10] = 0xE5;
   paint[12 + 11] = 0xF6;
-  cache.upsertPaints(paint, nullptr, 2, 1000);
+  upsertFrame(cache, paint, nullptr, 2, 1000);
 
   uint8_t buf[1 + 2 * lamp::WispFleetCache::kBlobEntrySize];
   const size_t n = cache.buildClaimsBlob(buf, sizeof(buf), 1000);
@@ -128,7 +142,7 @@ void test_paint_only_mac_appears_in_blob() {
   std::memcpy(paint, mac, 6);
   paint[6] = 0xAA; paint[7] = 0xBB; paint[8] = 0xCC;   // base
   paint[9] = 0xDD; paint[10] = 0xEE; paint[11] = 0xFF;  // shade
-  cache.upsertPaints(paint, nullptr, 1, 1000);
+  upsertFrame(cache, paint, nullptr, 1, 1000);
 
   uint8_t buf[1 + 1 * lamp::WispFleetCache::kBlobEntrySize];
   const size_t n = cache.buildClaimsBlob(buf, sizeof(buf), 1000);
@@ -151,7 +165,7 @@ void test_union_mac_appears_once_with_color() {
   std::memcpy(paint, mac, 6);
   paint[6] = 0x10; paint[7] = 0x20; paint[8] = 0x30;
   paint[9] = 0x40; paint[10] = 0x50; paint[11] = 0x60;
-  cache.upsertPaints(paint, nullptr, 1, 1000);
+  upsertFrame(cache, paint, nullptr, 1, 1000);
 
   uint8_t buf[1 + 2 * lamp::WispFleetCache::kBlobEntrySize];  // room for 2, but expect only 1
   const size_t n = cache.buildClaimsBlob(buf, sizeof(buf), 1000);
@@ -171,7 +185,7 @@ void test_stale_claim_fresh_paint_appears() {
   uint8_t paint[12] = {};
   std::memcpy(paint, mac, 6);
   paint[6] = 0x55;
-  cache.upsertPaints(paint, nullptr, 1, nowMs);
+  upsertFrame(cache, paint, nullptr, 1, nowMs);
 
   uint8_t buf[1 + 1 * lamp::WispFleetCache::kBlobEntrySize];
   const size_t n = cache.buildClaimsBlob(buf, sizeof(buf), nowMs);
@@ -239,7 +253,7 @@ void test_ext_section_carries_w_and_painted() {
   std::memcpy(paint, macs[0], 6);
   std::memcpy(paint + 12, macs[1], 6);
   const uint8_t w[4] = {0xC8, 0x37, 0x00, 0x00};
-  cache.upsertPaints(paint, w, 2, 1000);
+  upsertFrame(cache, paint, w, 2, 1000);
 
   uint8_t buf[1 + 3 * kE];
   TEST_ASSERT_EQUAL_size_t(1 + 3 * kE, cache.buildClaimsBlob(buf, sizeof(buf), 1000));
@@ -268,8 +282,8 @@ void test_ext_section_without_w_plane() {
   paint[6] = 0x40;
   paint[11] = 0x50;
   const uint8_t w[2] = {0x99, 0x88};
-  cache.upsertPaints(paint, w, 1, 1000);
-  cache.upsertPaints(paint, nullptr, 1, 2000);
+  upsertFrame(cache, paint, w, 1, 1000);
+  upsertFrame(cache, paint, nullptr, 1, 2000);
 
   uint8_t buf[1 + WispFleetCache::kBlobEntrySize];
   TEST_ASSERT_EQUAL_size_t(sizeof(buf), cache.buildClaimsBlob(buf, sizeof(buf), 2000));
@@ -293,7 +307,7 @@ void test_blob_prefix_matches_legacy_layout() {
   std::memcpy(paint, macs[0], 6);
   for (int i = 0; i < 6; ++i) paint[6 + i] = static_cast<uint8_t>(0x60 + i);
   const uint8_t w[2] = {7, 8};
-  cache.upsertPaints(paint, w, 1, 1000);
+  upsertFrame(cache, paint, w, 1, 1000);
 
   uint8_t buf[1 + 2 * WispFleetCache::kBlobEntrySize];
   TEST_ASSERT_EQUAL_size_t(sizeof(buf), cache.buildClaimsBlob(buf, sizeof(buf), 1000));

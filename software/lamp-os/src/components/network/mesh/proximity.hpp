@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <cstring>
 
+#include <lampos/clock.hpp>
+
 namespace lamp {
 
 // Gates "near enough to greet and list" for a direct ESP-NOW HELLO. A BT
@@ -22,9 +24,37 @@ inline bool isNearNow(uint32_t lastSeenNearMs, uint32_t nowMs, uint32_t maxAgeMs
   return lastSeenNearMs != 0 && (nowMs - lastSeenNearMs) <= maxAgeMs;
 }
 
+// The more recent of a peer's two sighting stamps, 0 meaning never, judged by
+// age at nowMs so the choice holds across the millis() wrap.
+inline uint32_t mostRecentSeenMs(uint32_t lastSeenNearMs, uint32_t lastSeenMeshMs,
+                                 uint32_t nowMs) {
+  if (lastSeenNearMs == 0) return lastSeenMeshMs;
+  if (lastSeenMeshMs == 0) return lastSeenNearMs;
+  const uint32_t nearAge = lampos::msSince(nowMs, lastSeenNearMs);
+  const uint32_t meshAge = lampos::msSince(nowMs, lastSeenMeshMs);
+  if (nearAge != meshAge) return nearAge < meshAge ? lastSeenNearMs : lastSeenMeshMs;
+  return lampos::isLater(lastSeenMeshMs, lastSeenNearMs) ? lastSeenMeshMs : lastSeenNearMs;
+}
+
+// Age at nowMs of a peer's most recent sighting on either transport;
+// UINT32_MAX for a peer never seen.
+inline uint32_t sinceLastSeen(uint32_t lastSeenNearMs, uint32_t lastSeenMeshMs,
+                              uint32_t nowMs) {
+  const uint32_t seen = mostRecentSeenMs(lastSeenNearMs, lastSeenMeshMs, nowMs);
+  return seen == 0 ? UINT32_MAX : lampos::msSince(nowMs, seen);
+}
+
 inline bool isDirectHello(const uint8_t frameSrc[6],
                           const uint8_t helloOriginator[6]) {
   return std::memcmp(frameSrc, helloOriginator, 6) == 0;
+}
+
+// The RSSI a HELLO may record against its originator: a relayed copy measures
+// the relayer's link, so it reads as unknown (-127), which leaves a stored
+// reading intact.
+inline int8_t helloRosterRssi(const uint8_t frameSrc[6],
+                              const uint8_t helloOriginator[6], int8_t rssi) {
+  return isDirectHello(frameSrc, helloOriginator) ? rssi : -127;
 }
 
 // Relevance order for the app-facing nearby list: near peers before mesh-only,
@@ -38,11 +68,12 @@ bool nearbyMoreRelevant(const Entry& a, const Entry& b, uint32_t nowMs,
   const bool an = isNearNow(a.lastSeenNearMs, nowMs, maxAgeMs);
   const bool bn = isNearNow(b.lastSeenNearMs, nowMs, maxAgeMs);
   if (an != bn) return an;
-  const uint32_t as =
-      a.lastSeenNearMs > a.lastSeenMeshMs ? a.lastSeenNearMs : a.lastSeenMeshMs;
-  const uint32_t bs =
-      b.lastSeenNearMs > b.lastSeenMeshMs ? b.lastSeenNearMs : b.lastSeenMeshMs;
-  if (as != bs) return as > bs;
+  const uint32_t aAge = sinceLastSeen(a.lastSeenNearMs, a.lastSeenMeshMs, nowMs);
+  const uint32_t bAge = sinceLastSeen(b.lastSeenNearMs, b.lastSeenMeshMs, nowMs);
+  if (aAge != bAge) return aAge < bAge;
+  const uint32_t as = mostRecentSeenMs(a.lastSeenNearMs, a.lastSeenMeshMs, nowMs);
+  const uint32_t bs = mostRecentSeenMs(b.lastSeenNearMs, b.lastSeenMeshMs, nowMs);
+  if (as != bs) return lampos::isLater(as, bs);
   return a.lastRssi > b.lastRssi;
 }
 

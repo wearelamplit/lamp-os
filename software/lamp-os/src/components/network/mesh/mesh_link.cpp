@@ -1,7 +1,6 @@
 #include "mesh_link.hpp"
 
 #include <Arduino.h>
-#include <esp_random.h>
 
 #include <algorithm>
 #include <cstring>
@@ -9,8 +8,10 @@
 #include "components/firmware/firmware_receiver.hpp"
 #include "components/firmware/firmware_distributor.hpp"
 #include "components/firmware/fs_ota.hpp"
+#include "components/network/mesh/frame_admission.hpp"
 #include "components/network/mesh/proximity.hpp"
 #include "components/network/protocol/command_auth.hpp"
+#include "util/uptime.hpp"
 #include "version.hpp"
 
 #include <lampos/blended_identity.hpp>
@@ -45,10 +46,9 @@ void MeshLink::begin(Config* cfg) {
     return;
   }
   link_.getMac(myMac_);
-  // Random boot seq: a fixed start replays (mac, seq) tuples that peers still
-  // hold in their HELLO dedup rings after a quick reboot, so the fresh HELLOs
-  // drop before the roster's version/state update and the peer stalls stale.
-  helloSeq_ = static_cast<uint16_t>(esp_random());
+  helloSuppressor_.begin(myMac_);
+  controlRelay_.begin(myMac_);
+  wispRelay_.begin(myMac_);
   helloBootPhaseMs_ =
       ((uint32_t(myMac_[4]) << 8) | myMac_[5]) % LAMP_HELLO_BURST_INTERVAL_MS;
   Serial.printf("[show] ready, mac=%02X:%02X:%02X:%02X:%02X:%02X\n",
@@ -69,6 +69,12 @@ void MeshLink::tick() {
   helloSuppressor_.tick(now, [this](const uint8_t* frame, size_t len) {
     relay(frame, len);
   });
+  auto ready = [this](uint32_t t) { return txReady(t); };
+  auto relaySend = [this](const uint8_t* frame, size_t len) {
+    return relay(frame, len);
+  };
+  controlRelay_.service(now, ready, relaySend);
+  wispRelay_.service(now, ready, relaySend);
   const uint8_t otaState = currentOtaState();
   uint8_t sendingTo[6];
   const bool hasSendingTo =
@@ -83,8 +89,9 @@ void MeshLink::tick() {
     prevOtaState_ = otaState;
     lastHelloMs_ = 0;
   }
-  if (lastHelloMs_ == 0 && now < helloBootPhaseMs_) return;
-  if (now - lastHelloMs_ < helloIntervalMs(now) && lastHelloMs_ != 0) return;
+  const uint64_t uptime = uptimeMs();
+  if (lastHelloMs_ == 0 && uptime < helloBootPhaseMs_) return;
+  if (now - lastHelloMs_ < helloIntervalMs(uptime) && lastHelloMs_ != 0) return;
   lastHelloMs_ = now;
   // Only a receiver goes silent; it needs the airtime for the chunk stream. A
   // pure distributor keeps emitting so its otaState=Sending reaches peers.
@@ -118,13 +125,15 @@ bool MeshLink::sendControlOpUnicast(const uint8_t targetMac[6],
                                     const uint8_t* payload, size_t payloadLen) {
   if (payloadLen > lamp_protocol::CONTROL_MAX_PAYLOAD) return false;
   uint8_t buf[lamp_protocol::CONTROL_MAX_SIZE];
-  const size_t n = lamp_protocol::buildControlOp(buf, sizeof(buf), controlOpSeq_++,
+  const uint16_t seq = controlOpSeq_.next();
+  const size_t n = lamp_protocol::buildControlOp(buf, sizeof(buf), seq,
                                                  targetMac, myMac_,
                                                  payload, payloadLen);
   if (!n) return false;
-  controlOpDedup_.record(myMac_, lamp_protocol::MSG_CONTROL_OP, controlOpSeq_ - 1);
+  const uint32_t nowMs = millis();
+  controlOpDedup_.record(myMac_, lamp_protocol::MSG_CONTROL_OP, seq, nowMs);
   const bool ok = link_.send(targetMac, buf, n);
-  controlOpUnicastResend_.enqueue(buf, n, millis(), kResends, kResendGapMs);
+  controlOpUnicastResend_.enqueue(buf, n, nowMs, kResends, kResendGapMs);
   return ok;
 }
 
@@ -135,14 +144,16 @@ bool MeshLink::sendCommand(const uint8_t targetMac[6],
   // sendCommand caller (cascade + greeting) runs on the Core 1 loop task.
   static uint8_t buf[lamp_protocol::COMMAND_FIXED_SIZE + lamp_protocol::COMMAND_MAX_PAYLOAD +
               lamp_protocol::COMMAND_TAG_SIZE];
-  const size_t n = lamp_protocol::buildCommand(buf, sizeof(buf), commandSeq_++,
+  const uint16_t seq = commandSeq_.next();
+  const size_t n = lamp_protocol::buildCommand(buf, sizeof(buf), seq,
                                                myMac_, targetMac,
                                                invocationJson, len);
   if (!n) return false;
   const size_t framed = lamp_protocol::command_auth::appendTag(buf, n, sizeof(buf));
-  commandDedup_.record(myMac_, lamp_protocol::MSG_COMMAND, commandSeq_ - 1);
+  const uint32_t nowMs = millis();
+  commandDedup_.record(myMac_, lamp_protocol::MSG_COMMAND, seq, nowMs);
   const bool ok = link_.broadcast(buf, framed);
-  if (!commandResend_.enqueue(buf, framed, millis(), kResends, kResendGapMs)) {
+  if (!commandResend_.enqueue(buf, framed, nowMs, kResends, kResendGapMs)) {
 #ifdef LAMP_DEBUG
     Serial.printf("[send] COMMAND resend dropped: frame=%u > ring cap, dst=%02X:%02X:%02X:%02X:%02X:%02X (single send only)\n",
                   (unsigned)framed, targetMac[0], targetMac[1], targetMac[2],
@@ -156,23 +167,25 @@ bool MeshLink::sendEvent(const uint8_t* payloadJson, size_t len) {
   if (len == 0 || len > lamp_protocol::EVENT_MAX_PAYLOAD) return false;
   uint8_t buf[lamp_protocol::EVENT_FIXED_SIZE + lamp_protocol::EVENT_MAX_PAYLOAD +
               lamp_protocol::EVENT_TAG_SIZE];
-  const size_t n = lamp_protocol::buildEvent(buf, sizeof(buf), eventSeq_++,
+  const uint16_t seq = eventSeq_.next();
+  const size_t n = lamp_protocol::buildEvent(buf, sizeof(buf), seq,
                                              myMac_, payloadJson, len);
   if (!n) return false;
   const size_t framed = lamp_protocol::command_auth::appendTag(buf, n, sizeof(buf));
-  eventDedup_.record(myMac_, lamp_protocol::MSG_EVENT, eventSeq_ - 1);
+  eventDedup_.record(myMac_, lamp_protocol::MSG_EVENT, seq, millis());
   return link_.broadcast(buf, framed);
 }
 
 bool MeshLink::sendColorQuery(const uint8_t targetMac[6]) {
   uint8_t buf[lamp_protocol::COLOR_QUERY_SIZE];
-  const size_t n = lamp_protocol::buildColorQuery(buf, sizeof(buf),
-                                                  colorQuerySeq_++,
+  const uint16_t seq = colorQuerySeq_.next();
+  const size_t n = lamp_protocol::buildColorQuery(buf, sizeof(buf), seq,
                                                   myMac_, targetMac);
   if (!n) return false;
-  colorQueryDedup_.record(myMac_, lamp_protocol::MSG_COLOR_QUERY, colorQuerySeq_ - 1);
+  const uint32_t nowMs = millis();
+  colorQueryDedup_.record(myMac_, lamp_protocol::MSG_COLOR_QUERY, seq, nowMs);
   const bool ok = link_.broadcast(buf, n);
-  colorQueryResend_.enqueue(buf, n, millis(), kResends, kResendGapMs);
+  colorQueryResend_.enqueue(buf, n, nowMs, kResends, kResendGapMs);
   return ok;
 }
 
@@ -180,27 +193,21 @@ bool MeshLink::sendColorInfo(const uint8_t targetMac[6],
                              const uint8_t* baseStops, uint8_t baseCount,
                              const uint8_t* shadeStops, uint8_t shadeCount) {
   uint8_t buf[lamp_protocol::COLOR_INFO_MAX_SIZE];
-  const size_t n = lamp_protocol::buildColorInfo(buf, sizeof(buf),
-                                                 colorInfoSeq_++,
+  const uint16_t seq = colorInfoSeq_.next();
+  const size_t n = lamp_protocol::buildColorInfo(buf, sizeof(buf), seq,
                                                  myMac_, targetMac,
                                                  baseStops, baseCount,
                                                  shadeStops, shadeCount);
   if (!n) return false;
-  colorInfoDedup_.record(myMac_, lamp_protocol::MSG_COLOR_INFO, colorInfoSeq_ - 1);
+  const uint32_t nowMs = millis();
+  colorInfoDedup_.record(myMac_, lamp_protocol::MSG_COLOR_INFO, seq, nowMs);
   const bool ok = link_.broadcast(buf, n);
-  colorInfoResend_.enqueue(buf, n, millis(), kResends, kResendGapMs);
+  colorInfoResend_.enqueue(buf, n, nowMs, kResends, kResendGapMs);
   return ok;
 }
 
 bool MeshLink::broadcastRaw(const uint8_t* data, size_t len) {
   return link_.broadcast(data, len);
-}
-
-// Broadcast is all-FF.
-static bool addressedToUs(const uint8_t targetMac[6], const uint8_t myMac[6]) {
-  static const uint8_t bcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-  return std::memcmp(targetMac, myMac, 6) == 0 ||
-         std::memcmp(targetMac, bcast, 6) == 0;
 }
 
 #ifdef LAMP_DEBUG
@@ -215,8 +222,9 @@ constexpr uint32_t kMeshMixWindowMs = 30000;
 // loss. maxGapMs resets each emit; recv stays cumulative for the boot.
 void MeshLink::reportWispCoex(const uint8_t mac[6], uint32_t nowMs) {
   WispCoexSlot& s = wispCoexMeter_.record(mac, nowMs);
-  if (nowMs - s.lastEmitMs < kWispCoexEmitIntervalMs) return;
-  s.lastEmitMs = nowMs;
+  const uint64_t upMs = uptimeMs();
+  if (upMs - s.lastEmitMs < kWispCoexEmitIntervalMs) return;
+  s.lastEmitMs = upMs;
   Serial.printf("[wispcoex] wisp=%02X:%02X recv=%u maxgap=%ums\n",
                 mac[0], mac[1], (unsigned)s.recv, (unsigned)s.maxGapMs);
   s.maxGapMs = 0;
@@ -249,7 +257,7 @@ void MeshLink::reportWispState(const uint8_t sourceMac[6],
 // meshmix airtime instrument (docs/dev/networking.md): once per window, dump
 // the received-frame mix and relay count, then reset. windowStartMs seeds on
 // the first frame so the first line reflects a full window.
-void MeshLink::reportMeshMix(uint32_t nowMs) {
+void MeshLink::reportMeshMix(uint64_t nowMs) {
   if (meshMix_.windowStartMs == 0) meshMix_.windowStartMs = nowMs;
   if (nowMs - meshMix_.windowStartMs < kMeshMixWindowMs) return;
   Serial.printf("[meshmix] win=30s rx: hello=%u wisp_hello=%u paint=%u "
@@ -263,7 +271,7 @@ void MeshLink::reportMeshMix(uint32_t nowMs) {
                 (unsigned)meshMix_.rx[MeshMix::kClaim],
                 (unsigned)meshMix_.rx[MeshMix::kStatus],
                 (unsigned)meshMix_.rx[MeshMix::kOther],
-                (unsigned)meshMix_.relayedOut,
+                (unsigned)meshMix_.relayedOut.load(),
                 (unsigned)meshMix_.totalRx());
   const uint32_t supp = helloSuppressor_.suppressedWindow();
   const uint32_t rel = helloSuppressor_.relayedWindow();
@@ -277,7 +285,18 @@ void MeshLink::reportMeshMix(uint32_t nowMs) {
                 (unsigned)wispStateMeter_.releases(),
                 (unsigned)wispStateMeter_.selfPresent());
   wispStateMeter_.resetWindow();
+  const RelayStaggerWindow c = controlRelay_.window();
+  const RelayStaggerWindow w = wispRelay_.window();
+  Serial.printf("[relaystagger] win=30s queued=%u failopen=%u deferred=%u "
+                "dropped=%u maxlate=%ums\n",
+                (unsigned)(c.queued + w.queued),
+                (unsigned)(c.failOpen + w.failOpen),
+                (unsigned)(c.deferred + w.deferred),
+                (unsigned)(c.dropped + w.dropped),
+                (unsigned)std::max(c.maxLateMs, w.maxLateMs));
   helloSuppressor_.resetWindow();
+  controlRelay_.resetWindow();
+  wispRelay_.resetWindow();
   meshMix_.reset(nowMs);
 }
 #endif
@@ -285,27 +304,31 @@ void MeshLink::reportMeshMix(uint32_t nowMs) {
 void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
                               size_t len, int8_t rssi) {
   const uint8_t msgType = lamp_protocol::inspect(data, len);
+  const uint32_t nowMs = millis();
 #ifdef LAMP_DEBUG
   meshMix_.countRx(msgType);
-  reportMeshMix(millis());
+  reportMeshMix(uptimeMs());
 #endif
   if (msgType == lamp_protocol::MSG_HELLO) {
     lamp_protocol::ParsedHello h;
     if (!lamp_protocol::parseHello(data, len, h)) return;
-    // A duplicate still counts toward relay suppression (a neighbor already
-    // rebroadcast it) even though it skips the roster reprocess below.
-    if (!helloDedup_.record(h.sourceMac, lamp_protocol::MSG_HELLO, h.seq)) {
-      helloSuppressor_.onDuplicate(h.sourceMac, h.seq);
-      return;
+    switch (admitHello(helloDedup_, h.sourceMac, h.seq, myMac_, nowMs)) {
+      case HelloAdmit::Own:
+        return;
+      case HelloAdmit::Repeat:
+        // A duplicate still counts toward relay suppression (a neighbor
+        // already rebroadcast it) even though it skips the roster reprocess.
+        helloSuppressor_.onDuplicate(h.sourceMac, h.seq);
+        return;
+      case HelloAdmit::Fresh:
+        break;
     }
-    // Don't rebroadcast own hellos.
-    if (std::memcmp(h.sourceMac, myMac_, 6) == 0) return;
 #ifdef LAMP_DEBUG
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
     {
-      static uint32_t lastHelloRxLogMs = 0;
+      static uint64_t lastHelloRxLogMs = 0;
       static uint8_t  lastHelloRxMac[6] = {0};
-      uint32_t nowMsLog = millis();
+      const uint64_t nowMsLog = uptimeMs();
       const bool macChanged = std::memcmp(h.sourceMac, lastHelloRxMac, 6) != 0;
       if (macChanged || (nowMsLog - lastHelloRxLogMs) > 10000) {
         lastHelloRxLogMs = nowMsLog;
@@ -319,7 +342,7 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     }
 #endif
 #endif
-    // RSSI feeds the cascade sort so physically closer peers fire first.
+    // RSSI feeds the roster's espnowRssi, the OTA offer signal floor.
     // h.name is a NUL-terminated fixed field; pass it straight through so the
     // hot HELLO path never allocates a transient std::string.
     lampRoster.addOrUpdateFromEspNow(
@@ -338,7 +361,7 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
         h.needsFs,
         h.hasOtaSendingTo ? h.otaSendingTo : nullptr,
         h.hasOtaSendingTo,
-        rssi,
+        helloRosterRssi(srcMac, h.sourceMac, rssi),
         h.variant);
     if (isDirectHello(srcMac, h.sourceMac) && isNearRssi(rssi, kNearRssiEspNow)) {
       lampRoster.markNear(h.sourceMac);
@@ -350,10 +373,12 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     lamp_protocol::ParsedControlOp op;
     if (!lamp_protocol::parseControlOp(data, len, op)) return;
     // Dedup by (sourceMac, seq) so a loop-relayed copy doesn't fire twice.
-    if (!controlOpDedup_.record(op.sourceMac, lamp_protocol::MSG_CONTROL_OP, op.seq)) return;
+    if (!controlOpDedup_.record(op.sourceMac, lamp_protocol::MSG_CONTROL_OP, op.seq, nowMs)) return;
     // Rebroadcast for grid relay: extends mesh reach beyond direct radio
-    // range. CONTROL_OP is unconditionally gossip-relayed.
-    relay(data, len);
+    // range. CONTROL_OP is gossip-relayed whatever its target, after a stagger.
+    if (!controlRelay_.enqueue(data, len, msgType, op.sourceMac, op.seq, millis())) {
+      relay(data, len);
+    }
     // Apply locally when the target is this lamp or broadcast.
     static const uint8_t bcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
     const bool forUs = (std::memcmp(op.targetMac, myMac_, 6) == 0) ||
@@ -385,11 +410,14 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
                     (int)isDirectHello(srcMac, h.sourceMac));
     }
 #endif
-    if (!wispHelloDedup_.record(h.sourceMac, lamp_protocol::MSG_WISP_HELLO, h.seq)) return;
+    if (!wispHelloDedup_.record(h.sourceMac, lamp_protocol::MSG_WISP_HELLO, h.seq, nowMs)) return;
     // Single-hop relay: only a frame heard straight from the wisp propagates,
     // so lamps behind a coex-dropped broadcast still converge on presence
     // without a fleet-wide flood. A relayed copy (srcMac != sourceMac) stops.
-    if (isDirectHello(srcMac, h.sourceMac)) relay(data, len);
+    if (isDirectHello(srcMac, h.sourceMac) &&
+        !wispRelay_.enqueue(data, len, msgType, h.sourceMac, h.seq, millis())) {
+      relay(data, len);
+    }
     PendingWispHello slot;
     std::memcpy(slot.sourceMac, h.sourceMac, 6);
     slot.wispVersion = h.wispVersion;
@@ -406,36 +434,25 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     lamp_protocol::ParsedWispClaim wc;
     if (!lamp_protocol::parseWispClaim(data, len, wc)) return;
     if (!wispClaimDedup_.record(wc.sourceMac,
-                                lamp_protocol::MSG_WISP_CLAIM, wc.seq)) {
+                                lamp_protocol::MSG_WISP_CLAIM, wc.seq, nowMs)) {
       return;
     }
-    // static: the 600 B entry array is too big for the recv-task stack; handleRecv
-    // is the only writer and runs single-threaded on the WiFi recv callback.
-    static PendingWispClaim slot;
-    std::memcpy(slot.sourceMac, wc.sourceMac, 6);
-    const uint8_t safeCount = wc.count > lamp_protocol::kMaxWispClaimEntries
-                                  ? static_cast<uint8_t>(lamp_protocol::kMaxWispClaimEntries)
-                                  : wc.count;
-    slot.count = safeCount;
-    for (uint8_t i = 0; i < safeCount; ++i) {
-      // Each entry is 7 bytes: lampMac[6] + int8 rssi. Copy only the MAC.
-      std::memcpy(slot.lampMacs[i],
-                  wc.entries + static_cast<size_t>(i) * lamp_protocol::WISP_CLAIM_ENTRY_SIZE,
-                  6);
-    }
-    postPendingWispClaim(slot);
+    postPendingWispClaim(wc);
   } else if (msgType == lamp_protocol::MSG_WISP_PALETTE) {
     // Cache feeds CHAR_WISP_STATUS so the app sees the palette through the
     // connected lamp. Single-hop scope: adopt only a directly-heard wisp.
     lamp_protocol::ParsedWispPalette wp;
     if (!lamp_protocol::parseWispPalette(data, len, wp)) return;
     if (!wispPaletteDedup_.record(wp.sourceMac,
-                                  lamp_protocol::MSG_WISP_PALETTE, wp.seq)) {
+                                  lamp_protocol::MSG_WISP_PALETTE, wp.seq, nowMs)) {
       return;
     }
     // Single-hop relay: only a frame heard straight from the wisp propagates
     // one hop; a relayed copy (srcMac != sourceMac) stops.
-    if (isDirectHello(srcMac, wp.sourceMac)) relay(data, len);
+    if (isDirectHello(srcMac, wp.sourceMac) &&
+        !wispRelay_.enqueue(data, len, msgType, wp.sourceMac, wp.seq, millis())) {
+      relay(data, len);
+    }
     PendingWispPalette slot;
     std::memcpy(slot.sourceMac, wp.sourceMac, 6);
     slot.count = wp.count;
@@ -446,27 +463,6 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
       slot.rgbw[i * 4 + 3] = wp.w ? wp.w[i] : 0;
     }
     postPendingWispPalette(slot);
-  } else if (msgType == lamp_protocol::MSG_WISP_PAINT) {
-    // No relay: the full-set PAINT frame re-covers a missed frame on its
-    // next cadence; a relay would multiply broadcast load fleet-wide. Dedup
-    // still runs to prevent repeat-fire on direct reception.
-    lamp_protocol::ParsedWispPaint wp;
-    if (!lamp_protocol::parseWispPaint(data, len, wp)) return;
-    if (!wispPaintDedup_.record(wp.sourceMac,
-                                lamp_protocol::MSG_WISP_PAINT, wp.seq)) {
-      return;
-    }
-    // static: the 1200 B entry array is too big for the recv-task stack; handleRecv
-    // is the only writer and runs single-threaded on the WiFi recv callback.
-    static PendingWispPaint slot;
-    std::memcpy(slot.sourceMac, wp.sourceMac, 6);
-    slot.count = wp.count;
-    if (wp.count > 0 && wp.entries) {
-      std::memcpy(slot.entries, wp.entries,
-                  static_cast<size_t>(wp.count) *
-                      lamp_protocol::WISP_PAINT_ENTRY_SIZE);
-    }
-    postPendingWispPaint(slot);
   } else if (msgType == lamp_protocol::MSG_WISP_STATE) {
     // No relay: the full-set STATE frame re-covers a missed frame on its next
     // cadence. Dedup prevents repeat-fire on direct reception.
@@ -476,20 +472,16 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     reportWispState(ws.sourceMac, ws, millis());
 #endif
     if (!wispStateDedup_.record(ws.sourceMac,
-                                lamp_protocol::MSG_WISP_STATE, ws.seq)) {
+                                lamp_protocol::MSG_WISP_STATE, ws.seq, nowMs)) {
       return;
     }
-    // static: the 1.4 KB slot is too big for the recv-task stack; handleRecv
-    // is the only writer and runs single-threaded on the WiFi recv callback.
-    static PendingWispState slot;
-    fillPendingWispState(slot, ws);
-    postPendingWispState(slot);
+    postPendingWispState(ws, myMac_);
   } else if (msgType == lamp_protocol::MSG_OVERRIDE_COLORS) {
     lamp_protocol::ParsedOverrideColors p;
     if (!lamp_protocol::parseOverrideColors(data, len, p)) return;
     if (!overrideColorsDedup_.record(p.sourceMac,
                                      lamp_protocol::MSG_OVERRIDE_COLORS,
-                                     p.seq)) return;
+                                     p.seq, nowMs)) return;
     // No relay: unicast paint scoped to direct radio range (no spillover).
     if (!addressedToUs(p.targetMac, myMac_)) return;
 #ifdef LAMP_DEBUG
@@ -516,7 +508,7 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     if (!lamp_protocol::parseRestoreColors(data, len, p)) return;
     if (!restoreColorsDedup_.record(p.sourceMac,
                                     lamp_protocol::MSG_RESTORE_COLORS,
-                                    p.seq)) return;
+                                    p.seq, nowMs)) return;
     // No relay.
     if (!addressedToUs(p.targetMac, myMac_)) return;
 #ifdef LAMP_DEBUG
@@ -537,7 +529,7 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     if (!lamp_protocol::parseOverrideBrightness(data, len, p)) return;
     if (!overrideBrightnessDedup_.record(p.sourceMac,
                                          lamp_protocol::MSG_OVERRIDE_BRIGHTNESS,
-                                         p.seq)) return;
+                                         p.seq, nowMs)) return;
     // No relay.
     if (!addressedToUs(p.targetMac, myMac_)) return;
     // Only the wisp claiming this lamp may dim it. Claims arrive in every
@@ -556,7 +548,7 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     if (!lamp_protocol::parseRestoreBrightness(data, len, p)) return;
     if (!restoreBrightnessDedup_.record(p.sourceMac,
                                         lamp_protocol::MSG_RESTORE_BRIGHTNESS,
-                                        p.seq)) return;
+                                        p.seq, nowMs)) return;
     // No relay.
     if (!addressedToUs(p.targetMac, myMac_)) return;
     PendingRestoreBrightness slot;
@@ -581,7 +573,7 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
 #endif
       return;
     }
-    if (!commandDedup_.record(p.sourceMac, lamp_protocol::MSG_COMMAND, p.seq)) {
+    if (!commandDedup_.record(p.sourceMac, lamp_protocol::MSG_COMMAND, p.seq, nowMs)) {
 #ifdef LAMP_DEBUG
       Serial.printf("[recv] COMMAND drop=dedup src=%02X:%02X:%02X:%02X:%02X:%02X seq=%u\n",
                     p.sourceMac[0], p.sourceMac[1], p.sourceMac[2],
@@ -603,18 +595,12 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
                   p.sourceMac[0], p.sourceMac[1], p.sourceMac[2],
                   p.sourceMac[3], p.sourceMac[4], p.sourceMac[5], (unsigned)p.seq);
 #endif
-    // static: the 1444 B payload is too big for the recv-task stack; handleRecv
-    // is the only writer and runs single-threaded on the WiFi recv callback.
-    static PendingCommand slot;
-    std::memcpy(slot.sourceMac, p.sourceMac, 6);
-    slot.payloadLen = static_cast<uint16_t>(p.payloadLen);
-    std::memcpy(slot.payload, p.payload, p.payloadLen);
-    postPendingCommand(slot);
+    postPendingCommand(p);
   } else if (msgType == lamp_protocol::MSG_EVENT) {
     lamp_protocol::ParsedEvent p;
     if (!lamp_protocol::parseEvent(data, len, p)) return;
     if (!lamp_protocol::command_auth::verify(data, len - lamp_protocol::EVENT_TAG_SIZE, p.tag)) return;
-    if (!eventDedup_.record(p.sourceMac, lamp_protocol::MSG_EVENT, p.seq)) return;
+    if (!eventDedup_.record(p.sourceMac, lamp_protocol::MSG_EVENT, p.seq, nowMs)) return;
     // No relay.
     PendingEvent slot;
     std::memcpy(slot.sourceMac, p.sourceMac, 6);
@@ -624,7 +610,7 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
   } else if (msgType == lamp_protocol::MSG_COLOR_QUERY) {
     lamp_protocol::ParsedColorQuery p;
     if (!lamp_protocol::parseColorQuery(data, len, p)) return;
-    if (!colorQueryDedup_.record(p.sourceMac, lamp_protocol::MSG_COLOR_QUERY, p.seq)) return;
+    if (!colorQueryDedup_.record(p.sourceMac, lamp_protocol::MSG_COLOR_QUERY, p.seq, nowMs)) return;
     if (!addressedToUs(p.targetMac, myMac_)) return;
     PendingColorQuery slot;
     std::memcpy(slot.sourceMac, p.sourceMac, 6);
@@ -632,7 +618,7 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
   } else if (msgType == lamp_protocol::MSG_COLOR_INFO) {
     lamp_protocol::ParsedColorInfo p;
     if (!lamp_protocol::parseColorInfo(data, len, p)) return;
-    if (!colorInfoDedup_.record(p.sourceMac, lamp_protocol::MSG_COLOR_INFO, p.seq)) return;
+    if (!colorInfoDedup_.record(p.sourceMac, lamp_protocol::MSG_COLOR_INFO, p.seq, nowMs)) return;
     if (!addressedToUs(p.targetMac, myMac_)) return;
     PendingColorInfo slot;
     std::memcpy(slot.sourceMac, p.sourceMac, 6);
@@ -646,8 +632,8 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     // ring guards against the wisp re-sending the OFFER mid-drain.
     lamp_protocol::ParsedFwOffer p;
     if (!lamp_protocol::parseFwOffer(data, len, p)) return;
-    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FW_OFFER, p.seq)) return;
-    if (!addressedToUs(p.targetMac, myMac_)) return;
+    if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FW_OFFER, p.seq,
+                        p.targetMac, myMac_, nowMs)) return;
     // Receiver-side signal-floor gate, mirrors the sender's: a weak direct
     // hop drops the OFFER instead of streaming a doomed transfer. Unknown
     // RSSI isn't gated.
@@ -682,14 +668,16 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     // (~0.5 ms esp_ota_write_with_offset, portMUX only, no heap/blocking).
     lamp_protocol::ParsedFwChunk p;
     if (!lamp_protocol::parseFwChunk(data, len, p)) return;
-    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FW_CHUNK, p.seq)) return;
-    if (!addressedToUs(p.targetMac, myMac_)) return;
-    if (firmwareReceiver_) firmwareReceiver_->handleChunkOnRecvTask(p);
+    if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FW_CHUNK, p.seq,
+                        p.targetMac, myMac_, nowMs)) return;
+    if (firmwareReceiver_) {
+      firmwareReceiver_->handleChunkOnRecvTask(p, FirmwareTransportKind::EspNow);
+    }
   } else if (msgType == lamp_protocol::MSG_FW_DONE) {
     lamp_protocol::ParsedFwDone p;
     if (!lamp_protocol::parseFwDone(data, len, p)) return;
-    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FW_DONE, p.seq)) return;
-    if (!addressedToUs(p.targetMac, myMac_)) return;
+    if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FW_DONE, p.seq,
+                        p.targetMac, myMac_, nowMs)) return;
     PendingFirmwareControl slot{};
     slot.msgType = lamp_protocol::MSG_FW_DONE;
     slot.seq = p.seq;
@@ -707,26 +695,26 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     // on this recv task; its state machine handles them under portMUX.
     lamp_protocol::ParsedFwAccept p;
     if (!lamp_protocol::parseFwAccept(data, len, p)) return;
-    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FW_ACCEPT, p.seq)) return;
-    if (!addressedToUs(p.targetMac, myMac_)) return;
+    if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FW_ACCEPT, p.seq,
+                        p.targetMac, myMac_, nowMs)) return;
     if (firmwareDistributor_) firmwareDistributor_->onAcceptOnRecvTask(p);
   } else if (msgType == lamp_protocol::MSG_FW_REQ) {
     lamp_protocol::ParsedFwReq p;
     if (!lamp_protocol::parseFwReq(data, len, p)) return;
-    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FW_REQ, p.seq)) return;
-    if (!addressedToUs(p.targetMac, myMac_)) return;
+    if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FW_REQ, p.seq,
+                        p.targetMac, myMac_, nowMs)) return;
     if (firmwareDistributor_) firmwareDistributor_->onReqOnRecvTask(p);
   } else if (msgType == lamp_protocol::MSG_FW_RESULT) {
     lamp_protocol::ParsedFwResult p;
     if (!lamp_protocol::parseFwResult(data, len, p)) return;
-    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FW_RESULT, p.seq)) return;
-    if (!addressedToUs(p.targetMac, myMac_)) return;
+    if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FW_RESULT, p.seq,
+                        p.targetMac, myMac_, nowMs)) return;
     if (firmwareDistributor_) firmwareDistributor_->onResultOnRecvTask(p);
   } else if (msgType == lamp_protocol::MSG_FS_OFFER) {
     lamp_protocol::ParsedFwOffer p;
     if (!lamp_protocol::parseFwOffer(data, len, p, lamp_protocol::MSG_FS_OFFER)) return;
-    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FS_OFFER, p.seq)) return;
-    if (!addressedToUs(p.targetMac, myMac_)) return;
+    if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FS_OFFER, p.seq,
+                        p.targetMac, myMac_, nowMs)) return;
     // Receiver-side signal-floor gate, mirrors the sender's: a weak direct
     // hop drops the OFFER instead of streaming a doomed transfer. Unknown
     // RSSI isn't gated.
@@ -758,14 +746,14 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
   } else if (msgType == lamp_protocol::MSG_FS_CHUNK) {
     lamp_protocol::ParsedFwChunk p;
     if (!lamp_protocol::parseFwChunk(data, len, p, lamp_protocol::MSG_FS_CHUNK)) return;
-    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FS_CHUNK, p.seq)) return;
-    if (!addressedToUs(p.targetMac, myMac_)) return;
+    if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FS_CHUNK, p.seq,
+                        p.targetMac, myMac_, nowMs)) return;
     fs_ota::onChunk(p);
   } else if (msgType == lamp_protocol::MSG_FS_DONE) {
     lamp_protocol::ParsedFwDone p;
     if (!lamp_protocol::parseFwDone(data, len, p, lamp_protocol::MSG_FS_DONE)) return;
-    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FS_DONE, p.seq)) return;
-    if (!addressedToUs(p.targetMac, myMac_)) return;
+    if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FS_DONE, p.seq,
+                        p.targetMac, myMac_, nowMs)) return;
     PendingFirmwareControl slot{};
     slot.msgType = lamp_protocol::MSG_FS_DONE;
     slot.seq = p.seq;
@@ -781,26 +769,27 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
   } else if (msgType == lamp_protocol::MSG_FS_ACCEPT) {
     lamp_protocol::ParsedFwAccept p;
     if (!lamp_protocol::parseFwAccept(data, len, p, lamp_protocol::MSG_FS_ACCEPT)) return;
-    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FS_ACCEPT, p.seq)) return;
-    if (!addressedToUs(p.targetMac, myMac_)) return;
+    if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FS_ACCEPT, p.seq,
+                        p.targetMac, myMac_, nowMs)) return;
     fs_ota::onAccept(p);
   } else if (msgType == lamp_protocol::MSG_FS_REQ) {
     lamp_protocol::ParsedFwReq p;
     if (!lamp_protocol::parseFwReq(data, len, p, lamp_protocol::MSG_FS_REQ)) return;
-    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FS_REQ, p.seq)) return;
-    if (!addressedToUs(p.targetMac, myMac_)) return;
+    if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FS_REQ, p.seq,
+                        p.targetMac, myMac_, nowMs)) return;
     fs_ota::onReq(p);
   } else if (msgType == lamp_protocol::MSG_FS_RESULT) {
     lamp_protocol::ParsedFwResult p;
     if (!lamp_protocol::parseFwResult(data, len, p, lamp_protocol::MSG_FS_RESULT)) return;
-    if (!firmwareDedup_.record(p.sourceMac, lamp_protocol::MSG_FS_RESULT, p.seq)) return;
-    if (!addressedToUs(p.targetMac, myMac_)) return;
+    if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FS_RESULT, p.seq,
+                        p.targetMac, myMac_, nowMs)) return;
     fs_ota::onResult(p);
   }
 }
 
 void MeshLink::emitHello(uint8_t otaState) {
   if (!config_) return;
+  const uint16_t seq = helloSeq_.next();
 #ifdef LAMP_DEBUG
   static uint32_t lastEmitLogMs = 0;
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
@@ -808,7 +797,7 @@ void MeshLink::emitHello(uint8_t otaState) {
   if (nowMsLog - lastEmitLogMs > 10000) {
     lastEmitLogMs = nowMsLog;
     Serial.printf("[show] emitHello v=0x%08X seq=%u\n",
-                  (unsigned)FIRMWARE_VERSION, (unsigned)helloSeq_);
+                  (unsigned)FIRMWARE_VERSION, (unsigned)seq);
   }
 #endif
 #endif
@@ -842,7 +831,7 @@ void MeshLink::emitHello(uint8_t otaState) {
   // distributor can negotiate a larger session chunk size than the baseline.
   // NEED_FS (re-evaluated every HELLO) asks peers to offer the UI image while
   // this lamp has no valid FS digest to advertise a mismatch against.
-  size_t n = lamp_protocol::buildHello(buf, sizeof(buf), helloSeq_++, myMac_,
+  size_t n = lamp_protocol::buildHello(buf, sizeof(buf), seq, myMac_,
                                        shade, base, FIRMWARE_VERSION,
                                        name.data(), nameLen, otaState,
                                        FIRMWARE_CHANNEL_STR,

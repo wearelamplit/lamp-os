@@ -1,6 +1,5 @@
 #include <Arduino.h>
 #include <Adafruit_NeoPixel.h>
-#include <esp_random.h>
 
 #include "paint/current_palette.hpp"
 #include "fleet/lamp_inventory.hpp"
@@ -122,8 +121,8 @@ void setup() {
     Serial.println("[wisp] mesh init failed; will retry in 5s");
   }
 
-  // Set self-MAC before any packet can reach onPacket, else a real unicast
-  // CONTROL_OP addressed to us drops against a zero self-MAC.
+  // Set self-MAC as soon as the radio is up. Until then a unicast CONTROL_OP
+  // addressed to this wisp drops against a zero self-MAC.
   uint8_t selfMac[6] = {0};
   mesh.getMac(selfMac);
   wispRoster.setSelfMac(selfMac);
@@ -141,18 +140,14 @@ void setup() {
 
   paintDistributor.begin(&inventory, &mesh, &currentPalette, &wispRoster);
   paintDistributor.setShuffleSeed(wispConfig.shuffleSeed());
-  paintDistributor.setDriftInterval(wispConfig.driftIntervalMs(),
-                                    wispConfig.driftFadePct());
+  paintDistributor.setDrift(wispConfig.driftIntervalMs(),
+                            wispConfig.driftFadePct());
   paintDistributor.setBrightness(wispConfig.brightness());
-
-  // Random start seq: after a quick double reboot, restarting at 0 would
-  // replay (mac, type, seq) tuples still cached in peers' dedup rings.
-  wispSeq.counter = static_cast<uint16_t>(esp_random());
 
   // carriedFw* zero-fill; wire layout retained for back-compat with older lamps.
   statusEmitter.begin(&mesh, &controller, &wispConfig, &currentPalette,
                       &wispSeq, &wifi);
-  wifi.setOnChangeCallback([] { statusEmitter.triggerOnChange(); });
+  wifi.setOnChangeCallback([] { statusEmitter.requestEmit(); });
   presenceBeacon.begin(&mesh, &paintDistributor, &currentPalette,
                        &controller, &wispRoster, &wispSeq, &statusEmitter,
                        &wispConfig);

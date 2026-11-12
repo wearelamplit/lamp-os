@@ -1,13 +1,7 @@
-import 'dart:async';
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/ble/ble_client.dart';
-import '../../../core/ble/ble_client_provider.dart';
-import '../../../core/ble/uuids.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/form_section.dart';
 import '../../../core/widgets/friendly_error.dart';
@@ -17,6 +11,7 @@ import '../../control/application/control_notifier.dart';
 import '../../control/application/control_state.dart';
 import '../../control/domain/sections.dart';
 import 'widgets/wifi_network_picker.dart';
+import '../../firmware/presentation/firmware_push_lock.dart';
 
 /// Home Mode pane. Quiets the lamp for everyday use.
 ///
@@ -43,40 +38,24 @@ class _HomeModeScreenState extends ConsumerState<HomeModeScreen> {
   // touching `ref` after super.dispose(). ref.read(...) in dispose trips
   // `_lifecycleState != _ElementLifecycle.defunct` framework asserts
   // because the Element is mid-teardown by then.
-  late BleClient _ble;
+  late ControlNotifier _control;
 
   @override
   void initState() {
     super.initState();
-    _ble = ref.read(bleClientProvider);
-    // Tell the lamp "user is on the Home Mode page": forces home-mode
-    // gate ON so the brightness slider previews home brightness live,
-    // and routes incoming CHAR_BRIGHTNESS writes to homeMode.brightness.
+    _control = ref.read(controlNotifierProvider(widget.lampId).notifier);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _writeFocus(true);
+      _control.setHomeModeFocus(true);
     });
   }
 
   @override
   void dispose() {
-    // Tell the lamp "user is leaving": fire-and-forget via the captured
-    // BleClient. The firmware also clears the flag on BT disconnect, so
-    // a missed exit (app killed mid-page) is recovered.
-    _writeFocus(false);
+    // The firmware also clears the flag on BT disconnect, so a missed exit
+    // (app killed mid-page) is recovered.
+    _control.setHomeModeFocus(false);
     super.dispose();
-  }
-
-  void _writeFocus(bool active) {
-    unawaited(_ble.write(
-      widget.lampId,
-      BleUuids.controlService,
-      BleUuids.homeModeFocus,
-      Uint8List.fromList([active ? 1 : 0]),
-      withoutResponse: true,
-    ).catchError((_) {
-      // BT may already be torn down by route pop
-    }));
   }
 
   @override
@@ -91,18 +70,21 @@ class _HomeModeScreenState extends ConsumerState<HomeModeScreen> {
         ),
         title: const Text('Home Mode'),
       ),
-      body: controlAsync.when(
-        loading: () => const SizedBox.expand(),
-        error: (e, _) => FriendlyError.page(
-          title: "Couldn't reach your lamp.",
-          subtitle:
-              "They may have wandered out of range. Bring your phone closer "
-              'and try again.',
-          rawError: e,
-          onRetry: () =>
-              ref.invalidate(controlNotifierProvider(widget.lampId)),
+      body: FirmwarePushLock(
+        lampId: widget.lampId,
+        child: controlAsync.when(
+          loading: () => const SizedBox.expand(),
+          error: (e, _) => FriendlyError.page(
+            title: "Couldn't reach your lamp.",
+            subtitle:
+                "They may have wandered out of range. Bring your phone closer "
+                'and try again.',
+            rawError: e,
+            onRetry: () =>
+                ref.invalidate(controlNotifierProvider(widget.lampId)),
+          ),
+          data: (state) => _HomeModeBody(lampId: widget.lampId, state: state),
         ),
-        data: (state) => _HomeModeBody(lampId: widget.lampId, state: state),
       ),
     );
   }

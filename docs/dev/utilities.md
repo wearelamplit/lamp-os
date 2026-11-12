@@ -102,12 +102,12 @@ Color    sampleLoop(const std::vector<Color>& loop, uint32_t offset, size_t i);
 - `periodS` runs from `kRotationMinPeriodS` (5) to `kRotationMaxPeriodS` (120),
   default `kRotationDefaultPeriodS` (40). `advance` clamps it with
   `clampRotationPeriodS`.
-- `advance` steps by the time since the last call, capped at
-  `kMaxRotationStepMs` (100 ms). The cap keeps a stall from jumping the
-  pattern on resume; the cost is that advances spaced more than 100 ms apart
-  run slower than `periodS`. `towardZero` moves the colours toward buffer
-  index 0. Turning a physical `RotationDir` into it is the caller's job,
-  because which end is up depends on the surface.
+- `advance` steps by `lampos::frameDeltaMs`, the time since the last call
+  capped at `lampos::kMaxFrameDeltaMs` (100 ms). The cap keeps a stall from
+  jumping the pattern on resume; the cost is that advances spaced more than
+  100 ms apart run slower than `periodS`. `towardZero` moves the colours
+  toward buffer index 0. Turning a physical `RotationDir` into it is the
+  caller's job, because which end is up depends on the surface.
 - `loopOffset` takes the loop's pixel count as `len`. `sampleLoop` reads pixel
   `i` shifted by that offset, blending the two pattern pixels it falls
   between. `loop` must be non-empty.
@@ -201,14 +201,19 @@ Disposition is the 1–5 scale the crowd weighting is built on.
 
 ```cpp
 uint8_t getDisposition(const std::string& lampId) const; // 1=Salty 2=Wary 3=Neutral 4=Fond 5=Smitten (3 = unknown peer)
-void    setDisposition(const std::string& lampId, uint8_t value); // debounced NVS flush
-String  asDispositionsJson() const;
+void    setDisposition(const std::string& lampId, uint8_t value); // a user edit, debounced NVS flush
+std::string asDispositionsJson() const;
+DispositionStore& dispositions(); // the full rows: peer(), and the engine's writes
 ```
 
 `getDisposition` answers "do I know this lamp, and how do I feel about
 it?" for a single peer. For the aggregate weighted view across everyone
 in range, that's `PersonalityEngine::crowdComposition()` /
 `smoothedCrowdWeight()`.
+
+`dispositions().peer(mac, uptimeMs())` returns the whole `PeerRecord`
+(disposition, score, meetings, ages); the store's rules are in
+[`social.md`](social.md#stored-social-rows).
 
 ---
 
@@ -218,6 +223,11 @@ in range, that's `PersonalityEngine::crowdComposition()` /
 |---|---|---|
 | `isValidBdAddr(const char*)` | `util/bd_addr.hpp` | Validate canonical `AA:BB:CC:DD:EE:FF` colon-hex form before keying a disposition on a `lampId` |
 | `base64::encode(const uint8_t*, size_t)` | `util/base64.hpp` | Tiny header-only encoder (wisp palette payloads) |
+| `lampos::timeReached(now, deadline)`, `lampos::isLater(a, b)`, `lampos::msSince(now, stamp)` | `lampos/clock.hpp` (`software/shared/clock`) | Compare 32-bit `millis()` stamps across the 49.7-day wrap. Every deadline, elapsed-time and most-recent comparison on a millis stamp goes through these or an unsigned `now - start`, never a raw `<` / `>` between stamps |
+| `lampos::retireStamp(now, stamp)`, `lampos::kRetiredAgeMs` | `lampos/clock.hpp` | Hold a stamp no older than 24.8 days, so it stays outside every shorter window and never reads as recent again one wrap later. A stamp read against a window either gets retired this way (or by clearing its owner's valid flag) from a path that runs at least every 24.8 days, or is refreshed that often by design |
+| `lampos::frameDeltaMs(now, last)`, `lampos::kMaxFrameDeltaMs` | `lampos/clock.hpp` | The time an animation steps by since its previous frame, capped at 100 ms, so the first frame after a stall or after weeks frozen in home mode steps like a normal one. Every per-frame animation delta on a millis stamp goes through it |
+| `lamp::uptimeMs()`, `lamp::uptimeSince(stamp)` | `util/uptime.hpp` | 64-bit milliseconds since boot, the clock `millis()` truncates; it never wraps. Use it for a stamp read only on an event or from code home mode can skip for weeks, where no periodic path can retire it. `uptimeSince` gives an uptime stamp's age, saturated to 32 bits. Native tests drive the clock through `g_mock_millis_wraps` in the `esp_timer.h` stub |
+| `wisp::uptimeMs()` | `software/wisp/src/util/uptime.hpp` | The wisp's 64-bit milliseconds since boot, for the same kind of stamp: the unicast peer table's last-use stamps (`PeerSlots`) and the `lastSeenMs` the wisp puts in its status |
 
 ---
 

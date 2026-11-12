@@ -1,7 +1,10 @@
 #pragma once
 
+#include <cstring>
 #include <string>
 #include <vector>
+
+#include <lampos/clock.hpp>
 
 #include "animated_behavior.hpp"
 #include "components/network/mesh/pending_slots.hpp"
@@ -62,8 +65,36 @@ class Compositor {
   Color    wispStateBase_;
   Color    wispStateShade_;
 
+  Color    wispStateHeadingBase_;
+  Color    wispStateHeadingShade_;
+  uint8_t  wispStateSource_[6] = {};
+  bool     wispHeadingChanged_ = false;
+  WispFadeSync wispFadeSync_ = WispFadeSync::Kept;
+
   // Overlay the wisp layer onto frameBuffers[0]=shade / [1]=base in place.
   void compositeWisp();
+
+  // One surface's share of a STATE frame that paints this lamp, `plain` being
+  // its colour in the frame. A record runs the timed fade, joining from
+  // `plain` while the layer is hidden. A partial frame without one leaves a
+  // running fade be when `continuing`. Otherwise the layer eases to `plain`,
+  // edge-triggered on `plainMoved`, ending any fade.
+  static WispFadeSync feedWispSurface(LayerStack& s, float presence, Color plain,
+                                      bool plainMoved, bool continuing,
+                                      lamp_protocol::WispDriftFadeLookup fade,
+                                      Color target, uint32_t leftMs,
+                                      uint32_t nowMs) {
+    using Lookup = lamp_protocol::WispDriftFadeLookup;
+    if (fade == Lookup::Record) {
+      if (presence == 0.0f) s.snapWisp(plain);
+      return s.syncWispFade(target, leftMs, nowMs);
+    }
+    if (fade == Lookup::Partial && continuing && s.wispFadeRunning(nowMs)) {
+      return WispFadeSync::Kept;
+    }
+    if (plainMoved || s.wispTimed()) s.setWispTarget(plain);
+    return WispFadeSync::Kept;
+  }
 
  public:
   // This frame's eased wisp presence for a surface, in [0,1]. Drives the
@@ -206,29 +237,16 @@ class Compositor {
   BehaviorContext& behaviorContext() { return context_; }
 
   // Edge-triggered on MSG_WISP_STATE receipt (from drainWispState), never
-  // per-frame. applyWispState feeds this lamp's entry (present); clearWispState
-  // marks a fresh STATE that no longer paints this lamp so presence eases home.
-  void applyWispState(Color base, Color shade, uint32_t nowMs) {
-    // setWispTarget is edge-triggered; re-arm only on the presence rising edge
-    // or a color change so the steady STATE cadence doesn't restart the ease.
-    if (!wispStatePresent_ || !(base == wispStateBase_)) {
-      wispBaseStack_.setWispTarget(base);
-    }
-    if (!wispStatePresent_ || !(shade == wispStateShade_)) {
-      wispShadeStack_.setWispTarget(shade);
-    }
-    wispStateBase_ = base;
-    wispStateShade_ = shade;
-    wispStatePresent_ = true;
-    wispStateFreshMs_ = nowMs;
-  }
+  // per-frame. clearWispState marks a fresh STATE that no longer paints this
+  // lamp so presence eases home.
   void clearWispState(uint32_t nowMs) {
     wispStatePresent_ = false;
     wispStateFreshMs_ = nowMs;
   }
-  // Feed a drained STATE slot: this lamp's RGBW entry is applied, its absence
-  // clears. Returns whether the slot paints `selfMac`. Header-inline as the
-  // native-test seam for the drain.
+  // Feed a drained STATE slot: this lamp's RGBW entry is applied, with its
+  // drift fade record when the slot holds one; its absence clears. Returns
+  // whether the slot paints `selfMac`. Header-inline as the native-test seam
+  // for the drain.
   bool applyWispStateSlot(const PendingWispState& slot, const uint8_t selfMac[6],
                           uint32_t nowMs) {
     Color base;
@@ -237,8 +255,67 @@ class Compositor {
       clearWispState(nowMs);
       return false;
     }
-    applyWispState(base, shade, nowMs);
+    // A fade only carries over between frames of one unbroken paint from one
+    // wisp; a lamp that was dropped, aged out or changed wisps takes the plain
+    // colour.
+    const bool continuing = wispStateFresh(nowMs) &&
+                            std::memcmp(wispStateSource_, slot.sourceMac, 6) == 0;
+    const lamp_protocol::WispDriftFade& rec = slot.fadeRecord;
+    const Color toBase(rec.base[0], rec.base[1], rec.base[2], rec.base[3]);
+    const Color toShade(rec.shade[0], rec.shade[1], rec.shade[2], rec.shade[3]);
+    wispFadeSync_ = feedWispSurface(
+        wispBaseStack_, wispBasePresence_.value(), base,
+        !continuing || !(base == wispStateBase_), continuing, slot.fade, toBase,
+        rec.leftMs, nowMs);
+    feedWispSurface(wispShadeStack_, wispShadePresence_.value(), shade,
+                    !continuing || !(shade == wispStateShade_), continuing,
+                    slot.fade, toShade, rec.leftMs, nowMs);
+    const bool record = slot.fade == lamp_protocol::WispDriftFadeLookup::Record;
+    const Color prevHeadingBase = wispStateHeadingBase_;
+    const Color prevHeadingShade = wispStateHeadingShade_;
+    if (record || !wispBaseStack_.wispFadeRunning(nowMs)) {
+      wispStateHeadingBase_ = record ? toBase : base;
+    }
+    if (record || !wispShadeStack_.wispFadeRunning(nowMs)) {
+      wispStateHeadingShade_ = record ? toShade : shade;
+    }
+    wispHeadingChanged_ = !(wispStateHeadingBase_ == prevHeadingBase &&
+                            wispStateHeadingShade_ == prevHeadingShade);
+    std::memcpy(wispStateSource_, slot.sourceMac, 6);
+    wispStateBase_ = base;
+    wispStateShade_ = shade;
+    wispStatePresent_ = true;
+    wispStateFreshMs_ = nowMs;
     return true;
+  }
+  // The colours the wisp is taking this lamp to: a drift fade's target while
+  // one runs, else the last STATE colour. Steady across a fade's frames.
+  Color wispStateHeadingBaseColor() const { return wispStateHeadingBase_; }
+  Color wispStateHeadingShadeColor() const { return wispStateHeadingShade_; }
+  // Whether the last painting STATE moved either heading colour.
+  bool wispHeadingChanged() const { return wispHeadingChanged_; }
+  // What the last STATE's drift fade record did to the base surface.
+  WispFadeSync wispFadeSync() const { return wispFadeSync_; }
+
+  // Advance the wisp presence and layers one frame, each surface's presence
+  // heading to 1 while held. Header-inline as the native-test seam.
+  void tickWisp(uint32_t nowMs, bool baseHeld, bool shadeHeld) {
+    wispBasePresence_.setTarget(baseHeld ? 1.0f : 0.0f);
+    wispShadePresence_.setTarget(shadeHeld ? 1.0f : 0.0f);
+    wispBasePresence_.tick();
+    wispShadePresence_.tick();
+    wispShadeStack_.tick(wispShadePresence_.value(), nowMs);
+    wispBaseStack_.tick(wispBasePresence_.value(), nowMs);
+  }
+
+  // wispActive at nowMs.
+  bool wispStateFresh(uint32_t nowMs) const {
+    return wispStatePresent_ && (nowMs - wispStateFreshMs_) < kWispStateFreshMs;
+  }
+  // Retires the last STATE's stamp so a silent wisp cannot read fresh again
+  // one millis() wrap later. Called every frame.
+  void retireWispState(uint32_t nowMs) {
+    wispStateFreshMs_ = lampos::retireStamp(nowMs, wispStateFreshMs_);
   }
 
   // Failsafe window: presence ages out this long after the last STATE frame

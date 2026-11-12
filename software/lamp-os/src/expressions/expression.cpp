@@ -13,6 +13,7 @@
 #include "expressions/param_utils.hpp"
 #include "expressions/primitives.hpp"
 #include "util/eased_scalar.hpp"
+#include "util/uptime.hpp"
 
 namespace lamp {
 
@@ -28,7 +29,7 @@ void Expression::configure(const std::vector<Color>& inColors,
 }
 
 void Expression::scheduleNextTrigger() {
-  nextTriggerMs = millis() + rng.range(intervalMinMs, intervalMaxMs);
+  nextTriggerMs = uptimeMs() + rng.range(intervalMinMs, intervalMaxMs);
 }
 
 void Expression::saveBufferState() {
@@ -117,7 +118,7 @@ void Expression::configureEasing(const ExpressionParams& parameters, uint32_t de
 
 void Expression::control() {
   // Check for automatic trigger
-  if (autoTriggerEnabled && animationState == STOPPED && timeReached(millis(), nextTriggerMs)) {
+  if (autoTriggerEnabled && animationState == STOPPED && uptimeMs() >= nextTriggerMs) {
     trigger();
   }
 

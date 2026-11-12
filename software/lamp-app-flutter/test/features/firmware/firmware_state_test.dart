@@ -33,4 +33,31 @@ void main() {
       expect(FirmwareSucceeded(footer: footer).isBusy, false);
     });
   });
+
+  group('pushProgress', () {
+    test('streams until the last chunk is out', () {
+      final s = pushProgress(footer, chunksSent: 6, totalChunks: 7);
+      expect(s, isA<FirmwareStreaming>());
+      expect((s as FirmwareStreaming).chunksSent, 6);
+    });
+
+    test('finalizes once every chunk is out', () {
+      expect(
+        pushProgress(footer, chunksSent: 7, totalChunks: 7),
+        isA<FirmwareFinalizing>(),
+      );
+    });
+  });
+
+  test('pushedVersion is the footer version exactly while pushing', () {
+    expect(FirmwareOfferSent(footer: footer).pushedVersion, footer.version);
+    expect(FirmwareFinalizing(footer: footer).pushedVersion, footer.version);
+    expect(
+      FirmwareStreaming(footer: footer, chunksSent: 1, totalChunks: 2)
+          .pushedVersion,
+      footer.version,
+    );
+    expect(const FirmwareVerifying().pushedVersion, isNull);
+    expect(FirmwareSucceeded(footer: footer).pushedVersion, isNull);
+  });
 }

@@ -228,6 +228,7 @@ class LearningTricksCard extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
     final (label, progress) = switch (state) {
       FirmwareStreaming(:final progress) => ('Learning some new tricks 🪄', progress),
+      FirmwareFinalizing() => ('Practising the new tricks 🪄', null),
       _ => ('Warming up 🪄', null),
     };
     return InfoPanel(

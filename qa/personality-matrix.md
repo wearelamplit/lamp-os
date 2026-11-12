@@ -128,16 +128,77 @@ color and blend into the peer's base GRADIENT over roughly a quarter second
 color for a peer whose base is clearly multi-colored. Record the observation
 either way — this exchange is merged but has never been bench-verified.
 
+**M6 — copycat chains and the roll cooldown.** Three debug lamps A, B, C in
+a line, B Smitten toward A and C toward B (the M2 lampId-as-name `inject_nearby` lever,
+then `clear_nearby`, since an active override is also the near count crowd
+damping reads), B and C Extrovert. Give A a triggered expression with cascade off and a short
+interval, and let it fire on its own: the app Test button also cascades to B,
+and B's copy then coalesces with the cascaded one and is never passed on. B
+logs `[fondness] roll <type> from <A> hop 1 p=60% fired` and plays it ~0.5 s
+later (`fired` is the roll; the copy is dropped if all 4 pending slots are full, and coalesces if one from A is running), then C logs `hop 2 p=30%` for B's copy (two lamps near damp 75 by 8/10, then the hop halves it); wait for a fire C plays.
+`copy.set chainMaxHops 1` on B: B still copies, C logs nothing for it. With A
+firing every few seconds for 5 min, B logs one roll per 3 min for A, the rest
+`cooldown`. `copy.get` confirms the numbers; a reboot restores them. Turn home
+mode on for B with social left on: B logs no `[fondness] roll` line. Turn home
+mode off and reboot B (restoring `chainMaxHops` 3), then set B Smitten toward C too: when C's copy comes back, B logs `self` and does not copy it.
+`copy.set crowdHalf 64` on B lifts its `p=` back near 75%, and so does
+`fond.set crowdHalf 64` (`fond.get` lists it with every other social number).
+`fond.off` on B: B copies A about 3 times in 4 with no `[fondness] roll` line,
+every frame rolling, and C never logs `hop 2` for B; `fond.on` restores the
+chain.
+
+**M7 — reunion and colour hint.** Two debug lamps A and B, A Smitten toward B,
+A Extrovert (no re-greet window). On A: `reunion.set reunionMin 10`,
+`reunion.get` confirms. Carry B out of range for 15+ minutes (A keeps
+marking it seen until it drops out of the 4-minute near window), then bring it
+back: A logs `[fondness] reunion <B>` and the greet
+line shows `frames=2760` (Effusive's 1620 with its 1140-frame hold doubled),
+and the greeting visibly breathes twice as many times. When it ends A logs
+`[fondness] colour hint <B>` and the shade breathes faintly toward B's colour
+(stop 0 of B's base gradient) twice over about 16 s, then sits on A's own
+scene. Carry B away for 6 minutes and back: an ordinary greeting
+(`frames=1620`), no reunion line, and no hint, since 10 minutes have not
+passed since the last roll (`reunion.set hintCooldownMs 0` lets each greeting
+roll; in a crowd a roll misses more often). Set A Fond toward B: no reunion
+after an absence, but the hint still rolls. Turn home mode on for A with
+social left on: B's return logs neither line. `reunion.set reunionX 9` prints
+`[cmd] err reunion.set`; a reboot restores the defaults.
+
+**M8 — yawn contagion.** M6's three lamps, B Smitten toward A, C Salty
+toward A, all Ambivert. Give A a yawn expression at the shortest interval
+(5 min): each time A yawns, B logs `[fondness] yawn from <A> hop 1 p=<n>%`
+(about 60 times 8/(8 + lamps near)) and, on `fired`, yawns ~0.5 s later; C
+logs nothing for A (it may log `hop 2` for B's yawn-back). `yawn.set
+yawnRollCooldownMs 600000` on B: A's next yawn 5 min later logs `cooldown`
+on B. Make A an
+introvert and tire it (three greetings inside 5 min, `[social] introvert tired`):
+A logs `[fondness] yawn tired p=35%` about every 90 s while tired, and none
+once rested. `yawn.set yawn.smitten 100` on B makes B yawn back every roll;
+when B's yawn reaches A inside A's minute floor A logs `self`. Home mode on
+for B: no `[fondness] yawn` line on B. `yawn.get` confirms the numbers; a
+reboot restores them.
+
 ## Pass criteria
 
 - M1: inject/clear ACK lines; visible dim toward the mode floor and full
   recovery after clear; zero crash lines.
 - M2: greet line fires with frames/pulse/count exactly matching the profile
-  table for each disposition × socialMode tried.
+  table for each disposition × socialMode tried (a Smitten peer unseen for
+  4 on-hours greets as a reunion instead, M7).
 - M3: correct waveform + duration by eye for both extremes; ACK present.
 - M4: zero greet lines inside the regreet window, greet resumes after it.
 - M5: gradient blend observed (or the flat-color failure recorded as a
   finding).
+- M6: hop 1 then hop 2 lines with the copies seen on B and C; no C line at
+  `chainMaxHops 1`; one roll per 3 min per peer; no roll line in home mode;
+  `self` on B for the chain coming back; `fond.set` reaching `crowdHalf`;
+  with `fond.off`, copies and no roll lines on B and no `hop 2` on C.
+- M7: one reunion line and a doubled hold after the absence, none straight
+  after; one hint per window, faint, toward stop 0, scene unchanged after;
+  neither line in home mode.
+- M8: B logs yawn-back lines for A and C none for A; `cooldown` on B at the
+  10 min window; tired lines
+  only while A is tired; `self` on A for B's yawn; no yawn line in home mode.
 
 ## Not covered here
 

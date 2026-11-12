@@ -78,32 +78,69 @@ struct PendingWispClaim {
   uint8_t lampMacs[lamp_protocol::kMaxWispClaimEntries][6];
 };
 
-// MSG_WISP_PAINT pending slot. Holds one frame's per-lamp paint entries.
-struct PendingWispPaint {
-  uint8_t sourceMac[6];
-  uint8_t count;
-  uint8_t entries[lamp_protocol::WISP_PAINT_MAX_ENTRIES *
-                  lamp_protocol::WISP_PAINT_ENTRY_SIZE];
-};
-
 // MSG_WISP_STATE pending slot. Holds the declarative per-lamp state entries
 // until the Core 1 drain scans for this lamp's own MAC and feeds the wisp
 // LayerStack. sourceMac gates the drain to this lamp's display wisp so a
 // rival's frame can't ease it home. Brightness / drift-rate globals are not
 // carried; the render path consumes base/shade only. `w` holds baseW,shadeW
-// per entry in entry order, zero for frames without a W plane.
+// per entry in entry order, zero for frames without a W plane. `fade` is this
+// lamp's own drift fade lookup, its record in `fadeRecord`, and `ownIndex` its
+// entry (kNoOwnEntry when absent). Every other entry with a drift fade record
+// holds that record's target in place of the frame's colour, its bit set in
+// `targeted`; this lamp's own entry keeps the frame's colour for the render.
+// `fadePartial` says the frame carries records for only some fading entries.
 struct PendingWispState {
+  static constexpr uint8_t kNoOwnEntry = 0xFF;
+  static_assert(lamp_protocol::WISP_STATE_MAX_ENTRIES < kNoOwnEntry,
+                "an entry index must not read as kNoOwnEntry");
   uint8_t sourceMac[6];
   uint8_t count;
   uint8_t entries[lamp_protocol::WISP_STATE_MAX_ENTRIES *
                   lamp_protocol::WISP_STATE_ENTRY_SIZE];
   uint8_t w[lamp_protocol::WISP_STATE_MAX_ENTRIES *
             lamp_protocol::WISP_STATE_W_SIZE];
+  lamp_protocol::WispDriftFadeLookup fade;
+  lamp_protocol::WispDriftFade fadeRecord;
+  uint8_t ownIndex;
+  bool fadePartial;
+  uint8_t targeted[(lamp_protocol::WISP_STATE_MAX_ENTRIES + 7) / 8];
+
+  // Whether entry `i` reads as its drift fade's target: a record's target
+  // copied over it, or this lamp's own record.
+  bool entryTargeted(uint8_t i) const {
+    if (i == ownIndex) return fade == lamp_protocol::WispDriftFadeLookup::Record;
+    return (targeted[i / 8] >> (i % 8)) & 1u;
+  }
 };
 
-// Copy a parsed MSG_WISP_STATE into the slot, W plane included.
+// This lamp's drift fade in a STATE frame. `record` holds what the trailer
+// lookup wrote, and `recordWritten` says whether it wrote it. `index` is this
+// lamp's entry, kNoOwnEntry when absent, and `trailer` the trailer's form.
+struct OwnWispDriftFade {
+  lamp_protocol::WispDriftFadeLookup fade = lamp_protocol::WispDriftFadeLookup::None;
+  bool recordWritten = false;
+  lamp_protocol::WispDriftFade record{};
+  uint8_t index = PendingWispState::kNoOwnEntry;
+  lamp_protocol::WispDriftFadeTrailer trailer =
+      lamp_protocol::WispDriftFadeTrailer::Complete;
+};
+
+// Look up `selfMac`'s drift fade in a parsed MSG_WISP_STATE (None for a null
+// MAC). Reads the frame, so call it while the recv buffer is valid.
+OwnWispDriftFade decodeOwnWispDriftFade(const lamp_protocol::ParsedWispState& ws,
+                                        const uint8_t selfMac[6]);
+
+// Copy a parsed MSG_WISP_STATE into the slot, W plane, drift fade targets and
+// `own` included. Copies only, bounded by the frame, so it may run under
+// portMUX. `own` is decodeOwnWispDriftFade's result for the same frame.
 void fillPendingWispState(PendingWispState& slot,
-                          const lamp_protocol::ParsedWispState& ws);
+                          const lamp_protocol::ParsedWispState& ws,
+                          const OwnWispDriftFade& own);
+
+// Copy a parsed MSG_WISP_CLAIM's lamp MACs into the slot, at most
+// kMaxWispClaimEntries of them.
+void fillPendingWispClaim(PendingWispClaim& slot,
+                          const lamp_protocol::ParsedWispClaim& wc);
 
 // This lamp's RGBW base/shade from the slot. False when `mac` has no entry.
 bool wispStateColorsFor(const PendingWispState& slot, const uint8_t mac[6],
@@ -117,6 +154,11 @@ struct PendingCommand {
   uint16_t payloadLen;
   uint8_t  payload[lamp_protocol::COMMAND_MAX_PAYLOAD];
 };
+
+// Copy a parsed MSG_COMMAND's source and payload into the slot. parseCommand
+// bounds payloadLen to COMMAND_MAX_PAYLOAD.
+void fillPendingCommand(PendingCommand& slot,
+                        const lamp_protocol::ParsedCommand& p);
 
 struct PendingColorQuery {
   uint8_t sourceMac[6];

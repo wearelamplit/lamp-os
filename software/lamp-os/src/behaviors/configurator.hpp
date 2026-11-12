@@ -103,6 +103,9 @@ class ConfiguratorBehavior : public AnimatedBehavior {
   void install(const std::vector<Color>& target, uint32_t fadeMs,
                const ColorRotation& rotation, uint32_t now);
   void controlRotating(uint32_t now);
+  // Ends the edit window and the crossfade once each has passed, so neither
+  // comes back one millis() wrap later.
+  void retireStale(uint32_t now);
   bool showsRotatingSaved() const;
   bool towardZero() const;
   Color target(size_t i, uint32_t offset) const;

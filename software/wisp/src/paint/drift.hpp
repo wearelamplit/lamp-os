@@ -1,6 +1,5 @@
-// Pure paint-scheduling math: drift slot cadence/rotation/fade roll, and the
-// keep-alive deadline/fade formulas. No Arduino deps so it unit-tests in the
-// native env and both the engine and tests share one source.
+// Pure paint-scheduling math: drift slot cadence, rotation and fade, and the
+// unicast gap gate. No Arduino deps so it unit-tests in the native env.
 #pragma once
 
 #include <cstddef>
@@ -19,7 +18,8 @@ inline size_t nextDriftIdx(size_t idx, size_t n) {
   return n ? (idx + 1) % n : 0;
 }
 
-// Fade duration within [20000, fadeMax] where fadeMax = 20000 + (intervalMs-20000)*fadePct/100.
+// Fade length of one drift step, drawn from `rnd`: within [20000, fadeMax]
+// where fadeMax = 20000 + (intervalMs - 20000) * fadePct / 100.
 inline uint32_t driftFadeMs(uint32_t intervalMs, uint8_t fadePct, uint32_t rnd) {
   const uint32_t lo = 20000;
   const uint32_t hi = intervalMs > lo
@@ -29,14 +29,11 @@ inline uint32_t driftFadeMs(uint32_t intervalMs, uint8_t fadePct, uint32_t rnd) 
   return lo + (rnd % span);
 }
 
-// True once a lamp's cached paint target has gone unrefreshed for
-// keepaliveMs, regardless of which send (drift, newcomer, keep-alive) last
-// stamped it, or forceDue is set (a send FAIL re-opened the deadline before
-// keepaliveMs has actually elapsed, e.g. within the boot window). Millis-
-// wraparound-safe (unsigned subtraction).
-inline bool keepaliveDue(uint32_t nowMs, uint32_t lastPaintMs, uint32_t keepaliveMs,
-                          bool forceDue = false) {
-  return forceDue || (nowMs - lastPaintMs) >= keepaliveMs;
+// Linear 0..255 progress `elapsedMs` into a `fadeMs` drift fade; 255 once the
+// fade is done, and for fadeMs 0.
+inline uint8_t driftFadeWeight(uint32_t elapsedMs, uint32_t fadeMs) {
+  if (elapsedMs >= fadeMs) return 255;
+  return static_cast<uint8_t>(static_cast<uint64_t>(elapsedMs) * 255u / fadeMs);
 }
 
 // True once at least minGapMs has elapsed since the last unicast send, any
@@ -44,15 +41,6 @@ inline bool keepaliveDue(uint32_t nowMs, uint32_t lastPaintMs, uint32_t keepaliv
 // pace so a no-ACK frame has room to ACK before the next goes out.
 inline bool unicastGateOpen(uint32_t nowMs, uint32_t lastUnicastMs, uint32_t minGapMs) {
   return (nowMs - lastUnicastMs) >= minGapMs;
-}
-
-// Keep-alive re-paint fade length: continues an in-flight fade to its
-// original fadeEndMs (no acceleration, no jerk), or floors at minFadeMs once
-// the fade has already settled, i.e. a steady hold or a lamp recovering
-// after a drop.
-inline uint32_t reaffirmFadeMs(uint32_t nowMs, uint32_t fadeEndMs, uint32_t minFadeMs) {
-  const uint32_t remaining = fadeEndMs > nowMs ? fadeEndMs - nowMs : 0;
-  return remaining > minFadeMs ? remaining : minFadeMs;
 }
 
 }  // namespace wisp

@@ -22,6 +22,7 @@ class OscListener {
   OscListener(WispController& controller, const WispConfig& config)
       : controller_(controller), config_(config) {}
 
+  // Call every loop pass, and at least once per lampos::kRetiredAgeMs.
   void poll(bool active, uint32_t nowMs);
   void handlePacket(const uint8_t* data, size_t len, const char* via);
 

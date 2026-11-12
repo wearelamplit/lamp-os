@@ -8,6 +8,7 @@ import '../../../core/ble/ble_client.dart';
 import '../../../core/ble/ble_client_provider.dart';
 import '../../../core/ble/lamp_crypto.dart';
 import '../../../core/ble/uuids.dart';
+import '../../../core/lamp_name.dart';
 import '../../control/application/auth_client.dart';
 import '../../inventory/application/active_lamp_notifier.dart';
 import '../../inventory/application/inventory_notifier.dart';
@@ -98,7 +99,7 @@ class AddLampNotifier extends _$AddLampNotifier {
     );
   }
 
-  void setName(String n) => state = state.copyWith(name: n);
+  void setName(String n) => state = state.copyWith(name: fitLampName(n));
   void setPassword(String p) => state = state.copyWith(password: p);
 
   void next() {

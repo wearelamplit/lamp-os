@@ -110,6 +110,28 @@ void test_safety_timeout_stops_new_windows() {
   TEST_ASSERT_FALSE(g.windowOpen());
 }
 
+// A session past its cap, still active a whole millis() wrap later: windows
+// stay shut, since the uptime clock runs past 2^32 ms.
+void test_session_cap_holds_a_wrap_later() {
+  SocialScanGate g;
+  const uint64_t armedMs = 100000;
+  g.arm(armedMs);
+  TEST_ASSERT_EQUAL(SocialScanAction::None,
+                    g.step(armedMs + (1ull << 32) + kT.gapMs, true, kIdle, kT));
+  TEST_ASSERT_FALSE(g.windowOpen());
+}
+
+// The app's last write a whole wrap ago does not hold off the first window
+// of a fresh session.
+void test_old_write_does_not_hold_a_window_a_wrap_later() {
+  SocialScanGate g;
+  const uint64_t wroteMs = 100000;
+  const uint64_t armedMs = wroteMs + (1ull << 32) - kT.gapMs;
+  g.arm(armedMs);
+  TEST_ASSERT_EQUAL(SocialScanAction::OpenWindow,
+                    g.step(wroteMs + (1ull << 32) + 10, true, wroteMs, kT));
+}
+
 // The pipeline the open window feeds: a BLE-only advert enters the roster
 // with the near/viaBle fields the nearby JSON reads.
 void test_ble_only_sighting_enters_roster() {
@@ -136,6 +158,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_idle_guard_skips_window_during_recent_write);
   RUN_TEST(test_close_on_flag_clear_while_window_open);
   RUN_TEST(test_safety_timeout_stops_new_windows);
+  RUN_TEST(test_session_cap_holds_a_wrap_later);
+  RUN_TEST(test_old_write_does_not_hold_a_window_a_wrap_later);
   RUN_TEST(test_ble_only_sighting_enters_roster);
   return UNITY_END();
 }

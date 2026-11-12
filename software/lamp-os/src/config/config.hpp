@@ -16,7 +16,7 @@
 
 namespace lamp {
 
-// Runtime lamp configuration; persisted to NVS under the "cfg" key.
+// Runtime lamp configuration; persisted to NVS (config_codec::saveConfig).
 class Config {
  private:
   ConfigStore* store_ = nullptr;
@@ -100,6 +100,10 @@ class Config {
   // is authoritative thereafter.
   bool namedKeyPresent() const { return namedKeyPresent_; }
 
+  // True while the store is in a form a release up to 1.3.3 wrote. The first
+  // save moves it to the settings blob, so the caller persists once at boot.
+  bool storeIsLegacy() const { return config_codec::isLegacyForm(storeForm_); }
+
   /**
    * create a streamable json doc to send configs to the webserver
    * @return a JsonDocument to serialize
@@ -107,12 +111,12 @@ class Config {
   JsonDocument asJsonDocument();
 
   /**
-   * Persist the current in-memory config to NVS under the "cfg" key.
+   * Persist the current in-memory config to NVS.
    *
    * Used by live-preview drains (e.g. expressionOp) that want their change
    * to survive a reboot WITHOUT going through the settings_blob path's
    * fade-out-and-reboot. The runtime state has already been applied by
-   * the caller; this just writes the canonical JSON to NVS.
+   * the caller; this just writes it to NVS.
    *
    * Returns true when every key landed. Never throws and takes no
    * config-sized heap (config_codec::saveConfig): when
@@ -230,20 +234,15 @@ class Config {
   // (settings_blob drain).
   void invalidateAllSections();
 
-  // Per-peer social disposition (1=Salty, 2=Wary, 3=Neutral, 4=Fond,
-  // 5=Smitten). Lives in a SEPARATE NVS key ("dispositions") from the
-  // main config blob so the peer list can grow without bloating
-  // CHAR_LAMP_SECTION / settings_blob. Stored as JSON object
-  // { "AA:BB:CC:DD:EE:FF": 1..5 }; keys are lampId (mesh mac,
-  // canonical-form colon-hex). Legacy name-keyed entries (older
-  // firmware) are silently dropped on load via lamp::isValidBdAddr in
-  // util/bd_addr.hpp. Bounded to ~100 entries. Per-lamp metadata,
-  // never synced cross-mesh; each lamp has its own view.
-  // Idle window before debounced disposition writes are committed to NVS.
+  // Per-peer social rows (1=Salty, 2=Wary, 3=Neutral, 4=Fond, 5=Smitten,
+  // plus the engine's score, meetings and ages), in their own NVS blob apart
+  // from the settings. Per-lamp, never synced cross-mesh; each lamp has its
+  // own view. See DispositionStore.
+  //
+  // Idle window before a user's disposition edits are committed to NVS.
   // 5s comfortably exceeds a worst-case slider-drag cadence (~20 Hz BLE
   // writes) while still feeling snappy if the user closes the app right
   // after touching the slider (the BLE disconnect path forces a flush).
-  // See DispositionStore for the write-amplification guard.
   static constexpr uint32_t kDispositionFlushIdleMs = 5000;
 
   // Returns kDispositionDefault when the peer isn't in the store. The raw
@@ -254,30 +253,32 @@ class Config {
   // default on an unparseable key.
   uint8_t getDisposition(const uint8_t mac[6]) const;
   uint8_t getDisposition(const std::string& lampId) const;
-  // Clamps `value` to [1,5] and marks the debouncer dirty; the NVS write
-  // happens later via maybeFlushDispositions() or flushDispositionsNow().
-  // Evicts the lowest-by-key entry when at kDispositionsMax and the lampId
-  // is new. A non-canonical `lampId` is a no-op.
+  // A user edit (DispositionStore::set); the NVS write happens later via
+  // maybeFlushDispositions() or flushDispositionsNow(). A non-canonical
+  // `lampId` is a no-op.
   void setDisposition(const std::string& lampId, uint8_t value);
   // Full JSON serialization for the CHAR_SOCIAL_DISPOSITIONS read path.
   // Empty when the heap cannot spare it.
   std::string asDispositionsJson() const;
-  // Bulk replace from the CHAR_SOCIAL_DISPOSITIONS write path. Caller
-  // provides a JSON object; parse, clamp, mark dirty. The NVS commit is
-  // deferred to the next maybeFlushDispositions/flushDispositionsNow call.
-  // Returns true on success.
+  // Merge from the CHAR_SOCIAL_DISPOSITIONS write path
+  // (DispositionStore::setFromJson). The NVS commit is deferred to the next
+  // maybeFlushDispositions/flushDispositionsNow call. Returns true on a
+  // valid parse.
   bool setDispositionsFromJson(const char* json, size_t len);
 
-  // Called from the loop drain on Core 1 every iteration. Cheap when no
-  // disposition writes have happened (a dirty-flag check + a subtraction).
-  // Triggers persistDispositions_() once the user has been idle for
-  // kDispositionFlushIdleMs and clears the dirty flag.
-  void maybeFlushDispositions(uint32_t nowMs);
+  // Called from the loop drain on Core 1 every iteration with uptimeMs().
+  // Cheap when nothing is dirty; flushes whichever tier is due.
+  void maybeFlushDispositions(uint64_t nowMs, bool otaReceiving);
   // Synchronous flush for when deferring is unsafe (BLE disconnect: phone is
   // gone, power may drop before the next loop tick). Must run on Core 1 (NVS
   // is not Core-0-safe). No-op when not dirty so onDisconnect can call it
   // unconditionally.
-  void flushDispositionsNow();
+  void flushDispositionsNow(bool otaReceiving);
+
+  // The social rows, for the fondness engine and its behaviours. Reads go
+  // through DispositionStore::peer; engine writes are gated by the caller.
+  DispositionStore& dispositions() { return dispositions_; }
+  const DispositionStore& dispositions() const { return dispositions_; }
 
  private:
   DispositionStore dispositions_{kDispositionFlushIdleMs};
@@ -300,6 +301,7 @@ class Config {
   uint8_t lampOtaSendingTo_[6] = {0};
   bool loadFailedWithData_ = false;
   bool namedKeyPresent_ = false;
+  config_codec::StoreForm storeForm_ = config_codec::StoreForm::Empty;
   bool lampSectionDirty_ = true;
   bool baseSectionDirty_ = true;
   bool shadeSectionDirty_ = true;

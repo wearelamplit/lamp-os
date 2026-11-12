@@ -22,10 +22,12 @@ struct SocialScanTuning {
 
 enum class SocialScanAction { None, OpenWindow, CloseWindow };
 
+// A session or a write stamp can sit for weeks while the app stays connected,
+// so the gate runs on lamp::uptimeMs(), which never wraps.
 class SocialScanGate {
  public:
   // Reset the session clock. Call on the rising edge of the active signal.
-  void arm(uint32_t now) {
+  void arm(uint64_t now) {
     sessionStartMs_ = now;
     windowEndMs_    = now;
   }
@@ -35,7 +37,7 @@ class SocialScanGate {
   // Advance one step. `active` folds the app flag, a live GATT client, and the
   // absence of an OTA radio pause. `lastWriteMs` is the last BLE-write stamp
   // for app-idle gating. Returns the scan action the caller applies.
-  SocialScanAction step(uint32_t now, bool active, uint32_t lastWriteMs,
+  SocialScanAction step(uint64_t now, bool active, uint64_t lastWriteMs,
                         const SocialScanTuning& t) {
     const bool want = active && (now - sessionStartMs_ < t.maxSessionMs);
     if (!want) {
@@ -63,9 +65,9 @@ class SocialScanGate {
 
  private:
   bool     windowOpen_     = false;
-  uint32_t windowStartMs_  = 0;
-  uint32_t windowEndMs_    = 0;
-  uint32_t sessionStartMs_ = 0;
+  uint64_t windowStartMs_  = 0;
+  uint64_t windowEndMs_    = 0;
+  uint64_t sessionStartMs_ = 0;
 };
 
 }  // namespace ble_control

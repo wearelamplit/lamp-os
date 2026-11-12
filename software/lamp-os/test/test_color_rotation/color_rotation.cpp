@@ -266,14 +266,14 @@ void test_frame_rate_independence() {
       t = 0;
       while (t < total) {
         seed = seed * 1103515245u + 12345u;
-        const uint32_t dt = 1 + (seed >> 16) % kMaxRotationStepMs;
+        const uint32_t dt = 1 + (seed >> 16) % lampos::kMaxFrameDeltaMs;
         t = t + dt > total ? total : t + dt;
         jitter.advance(start + t, period, toward);
       }
       TEST_ASSERT_EQUAL_HEX32(ones.phase(), frames.phase());
       TEST_ASSERT_EQUAL_HEX32(ones.phase(), jitter.phase());
       const uint32_t expected = static_cast<uint32_t>(uint64_t{total} * perMs(period) +
-                                                      kMaxRotationStepMs * perMs(period));
+                                                      lampos::kMaxFrameDeltaMs * perMs(period));
       TEST_ASSERT_EQUAL_HEX32(toward ? expected : 0u - expected, ones.phase());
     }
   }
@@ -302,16 +302,16 @@ void test_one_period_is_one_loop() {
 void test_a_stall_resumes_where_it_stopped() {
   RotationClock fresh;
   fresh.advance(50000, 40, true);
-  TEST_ASSERT_EQUAL_HEX32(kMaxRotationStepMs * perMs(40), fresh.phase());
+  TEST_ASSERT_EQUAL_HEX32(lampos::kMaxFrameDeltaMs * perMs(40), fresh.phase());
 
   RotationClock clock;
   clock.advance(1000, 40, true);
   clock.advance(1016, 40, true);
   const uint32_t before = clock.phase();
   clock.advance(91016, 40, true);
-  TEST_ASSERT_EQUAL_HEX32(kMaxRotationStepMs * perMs(40), clock.phase() - before);
+  TEST_ASSERT_EQUAL_HEX32(lampos::kMaxFrameDeltaMs * perMs(40), clock.phase() - before);
   clock.advance(91032, 40, true);
-  TEST_ASSERT_EQUAL_HEX32((kMaxRotationStepMs + 16) * perMs(40), clock.phase() - before);
+  TEST_ASSERT_EQUAL_HEX32((lampos::kMaxFrameDeltaMs + 16) * perMs(40), clock.phase() - before);
 }
 
 void test_period_change_keeps_the_position() {
@@ -366,12 +366,12 @@ void test_clock_clamps_the_period_it_is_given() {
   for (uint8_t in : {0, 1, 4}) {
     RotationClock clock;
     clock.advance(1000, in, true);
-    TEST_ASSERT_EQUAL_HEX32(kMaxRotationStepMs * perMs(5), clock.phase());
+    TEST_ASSERT_EQUAL_HEX32(lampos::kMaxFrameDeltaMs * perMs(5), clock.phase());
   }
   for (uint8_t in : {121, 255}) {
     RotationClock clock;
     clock.advance(1000, in, true);
-    TEST_ASSERT_EQUAL_HEX32(kMaxRotationStepMs * perMs(120), clock.phase());
+    TEST_ASSERT_EQUAL_HEX32(lampos::kMaxFrameDeltaMs * perMs(120), clock.phase());
   }
 }
 

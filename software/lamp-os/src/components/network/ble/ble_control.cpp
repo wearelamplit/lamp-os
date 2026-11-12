@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstring>
 #include <functional>
 #include <string>
@@ -16,6 +17,7 @@
 #include <vector>
 
 #include "expr_catalog.h"
+#include "util/uptime.hpp"
 
 #include "config/config.hpp"
 #include "behaviors/fade_out.hpp"
@@ -23,15 +25,20 @@
 #include "components/transient_override/color_override.hpp"
 #include "components/webapp/webapp.hpp"
 #include "util/color.hpp"
+#include "util/dropped_write_log.hpp"
 #include "util/json_escape.hpp"
 #include "util/heap_probe.hpp"
+#include "util/loop_stall.hpp"
+#include "util/loop_watchdog.hpp"
 #include "core/pending_slot_aggregate.hpp"
 #include "core/override_aggregate.hpp"
 #include "components/firmware/ota_quiet_mode.hpp"
 #include "ble_gap.hpp"
 #include "crypto.hpp"
+#include "components/network/ble/ble_radio_gate.hpp"
 #include "components/network/ble/gatt_layout.hpp"
 #include "components/network/ble/social_scan.hpp"
+#include "components/network/ble/state_notify.hpp"
 #include "expressions/expression_manager.hpp"
 #include "components/network/mesh/lamp_roster.hpp"
 #include "components/network/mesh/proximity.hpp"
@@ -60,7 +67,7 @@ void postPendingApplyEffectiveBrightness();
 // this flag; Core 1 force-flushes dispositions so a phone walk-off persists
 // the user's slider value.
 void postPendingFlushDispositions();
-void resetZonePreviewOnDisconnect();
+void postPendingClearZonePreview();
 
 // Read by notifyStateChange() to populate previewActive so the app can
 // reflect test state without its own timer.
@@ -90,11 +97,32 @@ static volatile bool         s_clientConnected   = false;
 // Forces effectiveHomeMode TRUE while set; routes CHAR_BRIGHTNESS to
 // home.brightness instead of lamp.brightness.
 static volatile bool         s_homeModePageActive = false;
-// Prevents the central scan from auto-restarting while a phone holds a
-// GATT connection (queried by isScanPaused()).
-static volatile bool         s_scanPausedForGattClient = false;
-// Held true for an OTA window (pauseRadioForOta): quiets adv + scan.
-static volatile bool         s_otaRadioPaused = false;
+
+class NimBleRadio : public BleRadio {
+ public:
+  void startAdvertising() override {
+    if (NimBLEDevice::isInitialized()) NimBLEDevice::getAdvertising()->start();
+  }
+  void stopAdvertising() override {
+    if (NimBLEDevice::isInitialized()) NimBLEDevice::getAdvertising()->stop();
+  }
+  void startScan() override {
+    if (!NimBLEDevice::isInitialized()) return;
+    NimBLEScan* scan = NimBLEDevice::getScan();
+    scan->setWindow(BLE_GAP_SCAN_WINDOW_MS);
+    scan->setInterval(BLE_GAP_ADV_INTERVAL_MS);
+    scan->setActiveScan(false);
+    scan->start(0);
+  }
+  void stopScan() override {
+    if (NimBLEDevice::isInitialized()) NimBLEDevice::getScan()->stop();
+  }
+  bool isAdvertising() override {
+    return NimBLEDevice::isInitialized() && NimBLEDevice::getAdvertising()->isAdvertising();
+  }
+};
+static NimBleRadio           s_nimBleRadio;
+static BleRadioGate          s_radioGate{s_nimBleRadio};
 // Set by the app (CHAR_EDIT_SESSION social-view selector) while the
 // Social/Network page is open. Gates the duty-cycled passive scan below.
 // Cleared on BLE disconnect.
@@ -103,7 +131,7 @@ static volatile bool         s_socialViewActive = false;
 // knockout/OTA chunk). The social scan skips a window while a write fired
 // within SocialScanTuning::idleGuardMs so it never competes during a live
 // drag or OTA. Written on Core 0, read on Core 1.
-static volatile uint32_t     s_lastAppWriteMs = 0;
+static std::atomic<uint64_t> s_lastAppWriteMs{0};  // lamp::uptimeMs()
 
 // Core 1 only (tick): duty-cycled passive-scan state for the Social view.
 static SocialScanGate        s_socialScan;
@@ -114,15 +142,20 @@ static          uint16_t     s_currentConnHandle = 0xFFFF;
 
 static std::function<lamp::GreetingState()> s_greetingStateProvider;
 
+// Set on Core 0 when the app enables CHAR_STATE_NOTIFY; tick() sends the
+// current state then, since a notify sent before the subscribe is lost.
+static std::atomic<bool>     s_stateSubscribed{false};
+
 static constexpr uint16_t kTightMinUnits = 12;   //  15.0 ms (units of 1.25 ms)
 static constexpr uint16_t kTightMaxUnits = 24;   //  30.0 ms
 static constexpr uint16_t kSupervisionTimeoutUnits = 400;  // 4.0 s (units of 10 ms)
 
 bool isClientConnected()   { return s_clientConnected;   }
 bool isHomeModePageActive() { return s_homeModePageActive; }
-bool isScanPaused()        { return s_scanPausedForGattClient; }
+void resumeScanAfterScanEnd() { s_radioGate.scanEnded(); }
+void restartAdvertising()      { s_radioGate.restartAdvertising(); }
 
-void noteAppWriteActivity() { s_lastAppWriteMs = millis(); }
+void noteAppWriteActivity() { s_lastAppWriteMs.store(lamp::uptimeMs(), std::memory_order_relaxed); }
 
 // Per-connection state. NimBLE caps at CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
 // (advertising stops on connect, so only one app connects at a time), so a
@@ -293,10 +326,16 @@ class ControlServerCallbacks : public NimBLEServerCallbacks {
     // at the default ~49ms interval to ~33-66/sec, eliminating slider lag.
     server->updateConnParams(handle, kTightMinUnits, kTightMaxUnits, 0,
                              kSupervisionTimeoutUnits);
+    // Set before the gate check so a racing OTA pause either kicks this
+    // handle or is seen by the check.
     s_currentConnHandle = handle;
 
-    s_scanPausedForGattClient = true;
-    NimBLEDevice::getScan()->stop();
+    if (!s_radioGate.clientConnected()) {
+      server->disconnect(handle);
+#ifdef LAMP_DEBUG
+      Serial.printf("[ble_control] kicked GATT client handle=%u: OTA radio pause\n", handle);
+#endif
+    }
 
     // wifi::tick skips background scans while a client is connected so the
     // radio stays focused on BT.
@@ -314,10 +353,6 @@ class ControlServerCallbacks : public NimBLEServerCallbacks {
     uint16_t handle = connInfo.getConnHandle();
     freeSlot(handle);
 
-    s_scanPausedForGattClient = false;
-    // Resume the continuous scan the connect paused.
-    NimBLEDevice::getScan()->start(0);
-
     s_clientConnected = false;
     s_homeModePageActive = false;
     s_socialViewActive = false;
@@ -327,7 +362,7 @@ class ControlServerCallbacks : public NimBLEServerCallbacks {
     lamp::overrides.base.setOperatorEditing(false);
     lamp::overrides.shade.setOperatorEditing(false);
     lamp::overrides.brightness.setOperatorEditing(false);
-    resetZonePreviewOnDisconnect();
+    postPendingClearZonePreview();
     // Re-assert wisp paint in case a BLE write stomped the target gradient
     // before disconnecting.
     lamp::overrides.base.reassertHold();
@@ -340,6 +375,7 @@ class ControlServerCallbacks : public NimBLEServerCallbacks {
     // Skip the commit idle window so a quick edit-then-disconnect doesn't
     // lose the user's last change.
     lamp::pendingSlots.forceCommitFlush = true;
+    s_radioGate.clientDisconnected();
 
 #ifdef LAMP_DEBUG
     Serial.printf("[ble_control] Client disconnected, handle=%u reason=%d\n", handle, reason);
@@ -379,7 +415,10 @@ class AuthCallback : public NimBLECharacteristicCallbacks {
 class BrightnessCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
-    if (lamp::ota_quiet_mode::isQuiet()) return;
+    if (lamp::ota_quiet_mode::isQuiet()) {
+      lamp::logDroppedWrite("brightness", "ota quiet");
+      return;
+    }
     noteAppWriteActivity();
     std::string val = c->getValue();
     if (val.empty()) return;
@@ -396,7 +435,10 @@ class BrightnessCallback : public NimBLECharacteristicCallbacks {
 class EditSessionCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
-    if (lamp::ota_quiet_mode::isQuiet()) return;
+    if (lamp::ota_quiet_mode::isQuiet()) {
+      lamp::logDroppedWrite("editSession", "ota quiet");
+      return;
+    }
     std::string val = c->getValue();
     if (val.size() < 2) return;
     const uint8_t surface = static_cast<uint8_t>(val[0]);
@@ -417,7 +459,10 @@ class EditSessionCallback : public NimBLECharacteristicCallbacks {
 class HomeModeFocusCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
-    if (lamp::ota_quiet_mode::isQuiet()) return;
+    if (lamp::ota_quiet_mode::isQuiet()) {
+      lamp::logDroppedWrite("homeModeFocus", "ota quiet");
+      return;
+    }
     std::string val = c->getValue();
     if (val.empty()) return;
     const bool active = val[0] != 0;
@@ -432,7 +477,10 @@ class HomeModeFocusCallback : public NimBLECharacteristicCallbacks {
 class BaseKnockoutCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
-    if (lamp::ota_quiet_mode::isQuiet()) return;
+    if (lamp::ota_quiet_mode::isQuiet()) {
+      lamp::logDroppedWrite("knockout", "ota quiet");
+      return;
+    }
     noteAppWriteActivity();
     std::string val = c->getValue();
     if (val.size() < 2) return;
@@ -462,16 +510,16 @@ static inline void fnv1a(uint32_t& h, const void* data, size_t len) {
 // A BLE section OOM degrades to a graceful-empty serve; keep it visible on
 // every channel, throttled to one line per 5000ms.
 static void logBleSectionOom(const char* what) {
-  static uint32_t lastMs = 0;
-  const uint32_t now = millis();
+  static uint64_t lastMs = 0;
+  const uint64_t now = lamp::uptimeMs();
   if (now - lastMs < 5000 && lastMs != 0) return;
   lastMs = now;
   Serial.printf("[ble_control] %s OOM; serving graceful-empty\n", what);
 }
 
 static void logNearbyHeapSkip(uint32_t largest, uint32_t needed, uint32_t lamps) {
-  static uint32_t lastMs = 0;
-  const uint32_t now = millis();
+  static uint64_t lastMs = 0;
+  const uint64_t now = lamp::uptimeMs();
   if (now - lastMs < 5000 && lastMs != 0) return;
   lastMs = now;
   Serial.printf("[ble_control] nearby build skipped, low heap: largest=%u needed=%u lamps=%u\n",
@@ -522,8 +570,7 @@ static void buildNearbyJson(uint32_t& membershipHashOut,
     if (p.hasOtaSendingTo) fnv1a(hash, p.otaSendingTo, 6);
     out += "{\"name\":\"";
     lamp::appendJsonEscaped(out, p.name);
-    // Max of both transport timestamps is the canonical lastSeen.
-    const uint32_t lastSeenMs = std::max(p.lastSeenNearMs, p.lastSeenMeshMs);
+    const uint32_t lastSeenMs = lamp::mostRecentSeenMs(p.lastSeenNearMs, p.lastSeenMeshMs, now);
     snprintf(buf, sizeof(buf), "\",\"lastSeenMs\":%lu,\"viaBle\":%s,\"viaEspNow\":%s,\"near\":%s",
              static_cast<unsigned long>(lastSeenMs),
              p.lastSeenNearMs != 0 ? "true" : "false",
@@ -633,7 +680,7 @@ static void releaseNearby() {
 // margin only if that shows up as rev thrash.
 static void maintainNearbyJson() {
   static uint32_t builtGen    = 0;
-  static uint32_t lastBuildMs = 0;
+  static uint64_t lastBuildMs = 0;
   static uint32_t lastHash    = 0;
   static bool     seeded      = false;
 
@@ -652,16 +699,17 @@ static void maintainNearbyJson() {
   const uint32_t gen = lamp::lampRoster.generation();
   if (gen == builtGen && s_nearbyReady) return;
   const uint32_t now = millis();
+  const uint64_t up = lamp::uptimeMs();
   // lastBuildMs is 0 only before the first attempt since connect; after a
   // failed attempt it holds the retry to the same 1 Hz.
-  if (lastBuildMs != 0 && now - lastBuildMs < 1000) return;
+  if (lastBuildMs != 0 && up - lastBuildMs < 1000) return;
 
   std::vector<lamp::ListedPeer>* all = nullptr;
   try {
     all = &lamp::lampRoster.getAll();
   } catch (const std::bad_alloc&) {
     logBleSectionOom("nearby roster");
-    lastBuildMs = now;
+    lastBuildMs = up;
     return;
   }
   auto& lamps = *all;
@@ -670,7 +718,7 @@ static void maintainNearbyJson() {
   for (auto& e : lamps) needed += 240 + 6 * std::strlen(e.name);
   const uint32_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
   if (largest < needed + kNearbyHeapMargin) {
-    lastBuildMs = now;
+    lastBuildMs = up;
     logNearbyHeapSkip(largest, needed, lamps.size());
     return;
   }
@@ -681,12 +729,12 @@ static void maintainNearbyJson() {
     buildNearbyJson(hash, lamps, local);
   } catch (const std::bad_alloc&) {
     logBleSectionOom("nearby");
-    lastBuildMs = now;
+    lastBuildMs = up;
     return;
   }
   if (local.size() < 2 || local.front() != '[') {
     logBleSectionOom("nearby");
-    lastBuildMs = now;
+    lastBuildMs = up;
     return;
   }
   xSemaphoreTake(nearbyCacheMutex(), portMAX_DELAY);
@@ -694,7 +742,7 @@ static void maintainNearbyJson() {
   s_nearbyReady = true;
   xSemaphoreGive(nearbyCacheMutex());
   builtGen    = gen;
-  lastBuildMs = now;
+  lastBuildMs = up;
   // The first build after a (re)connect always notifies: a heap-skip can defer
   // it past the app's first read of the idle "[]", and without a push the app
   // wouldn't know to re-read the now-populated list. Subsequent builds keep the
@@ -731,7 +779,10 @@ class SocialDispositionsCallback : public NimBLECharacteristicCallbacks {
   }
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
-    if (lamp::ota_quiet_mode::isQuiet()) return;
+    if (lamp::ota_quiet_mode::isQuiet()) {
+      lamp::logDroppedWrite("socialDispositions", "ota quiet");
+      return;
+    }
     std::string val = c->getValue();
     if (val.size() > lamp::kPendingJsonOp) return;
 #ifdef LAMP_DEBUG
@@ -850,7 +901,10 @@ void notifyWifiState() {
 class SettingsBlobCallback : public NimBLECharacteristicCallbacks {
   // Write-and-reboot save target; reads go through the page protocol.
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
-    if (lamp::ota_quiet_mode::isQuiet()) return;
+    if (lamp::ota_quiet_mode::isQuiet()) {
+      lamp::logDroppedWrite("settingsBlob", "ota quiet");
+      return;
+    }
     static const auto uuid = uuidSaltLE(CHAR_SETTINGS_BLOB);
     const uint16_t handle = connInfo.getConnHandle();
     const std::string raw = c->getValue();
@@ -1141,6 +1195,13 @@ class FwControlCallback : public NimBLECharacteristicCallbacks {
   }
 };
 
+class StateNotifyCallback : public NimBLECharacteristicCallbacks {
+  void onSubscribe(NimBLECharacteristic*, NimBLEConnInfo&,
+                   uint16_t subValue) override {
+    if (subValue != 0) s_stateSubscribed.store(true);
+  }
+};
+
 class FwChunkCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
@@ -1154,12 +1215,21 @@ class FwChunkCallback : public NimBLECharacteristicCallbacks {
     }
     // Direct call on the BLE host task; bounded ~0.5 ms (one OTA write +
     // bitmap set). A missed chunk triggers the receiver's REQ watchdog.
-    s_firmwareReceiver->handleChunkOnRecvTask(p);
+    s_firmwareReceiver->handleChunkOnRecvTask(p, lamp::FirmwareTransportKind::Ble);
   }
 };
 
 void tick() {
+  // Stamp retirement runs whether or not BLE came up, since the roster also
+  // fills over ESP-NOW.
+  static uint32_t s_lastRetireMs = 0;
+  if (millis() - s_lastRetireMs >= 1000) {
+    s_lastRetireMs = millis();
+    lamp::lampRoster.retireSightings(s_lastRetireMs);
+    lamp::lampRoster.retireStaleWisp(s_lastRetireMs);
+  }
   if (!s_running || !s_config) return;
+  s_radioGate.enforcePause();
 
   // Continuous scan means onScanEnd rarely fires, so prune here at ~1 Hz to
   // age out silent roster peers.
@@ -1177,17 +1247,16 @@ void tick() {
   // holds the link; onDisconnect resumes the continuous scan itself.
   {
     const bool active =
-        s_socialViewActive && s_clientConnected && !s_otaRadioPaused;
-    if (active && !s_socialScanPrevActive) s_socialScan.arm(nowMs);
+        s_socialViewActive && s_clientConnected && !s_radioGate.otaPaused();
+    const uint64_t upMs = lamp::uptimeMs();
+    if (active && !s_socialScanPrevActive) s_socialScan.arm(upMs);
     s_socialScanPrevActive = active;
-    const SocialScanAction act =
-        s_socialScan.step(nowMs, active, s_lastAppWriteMs, s_socialScanTuning);
+    const SocialScanAction act = s_socialScan.step(
+        upMs, active, s_lastAppWriteMs.load(std::memory_order_relaxed), s_socialScanTuning);
     if (act == SocialScanAction::OpenWindow) {
-      NimBLEScan* scan = NimBLEDevice::getScan();
-      scan->setActiveScan(false);
-      scan->start(0);
+      s_radioGate.openScanWindow();
     } else if (act == SocialScanAction::CloseWindow) {
-      if (s_scanPausedForGattClient) NimBLEDevice::getScan()->stop();
+      s_radioGate.closeScanWindow();
     }
   }
 
@@ -1195,11 +1264,11 @@ void tick() {
   // task (Core 0) rarely serialises JSON inside a NimBLE callback. Only while
   // a client holds the link: a mesh cascade dirties the expressions section
   // with no reader, and a rebuild per cascade is pure heap churn.
-  // notifyStateChange skips with no client, so the characteristic may hold a
-  // stale greeting; refresh it once on connect.
-  static bool s_wasConnected = false;
-  if (s_clientConnected && !s_wasConnected) notifyStateChange();
-  s_wasConnected = s_clientConnected;
+  static StateNotifyTrigger s_stateNotifyTrigger;
+  if (s_stateNotifyTrigger.step(s_clientConnected,
+                                s_stateSubscribed.exchange(false))) {
+    notifyStateChange();
+  }
 
   if (!s_clientConnected) {
     s_config->releaseSectionCaches();
@@ -1221,25 +1290,16 @@ void notifyStateChange() {
   // A greeting edge fires this with no phone attached; the payload has no
   // reader then, and a connecting client reads the state fresh.
   if (!s_stateNotify || !s_clientConnected) return;
-  const bool preview = ::expressionManager.isAnyTestActive();
-  std::string payload = "{\"previewActive\":";
-  payload += preview ? "true" : "false";
+  StateNotifyFields fields;
+  fields.previewActive = ::expressionManager.isAnyTestActive();
+  lamp::GreetingState gs;
   if (s_greetingStateProvider) {
-    const lamp::GreetingState gs = s_greetingStateProvider();
-    if (gs.active) {
-      payload += ",\"greeting\":{\"active\":true,\"peer\":\"";
-      lamp::appendJsonEscaped(payload, gs.peerLampId.c_str());
-      payload += "\",\"kind\":\"";
-      lamp::appendJsonEscaped(payload, gs.kind.c_str());
-      payload += "\"}";
-    } else {
-      payload += ",\"greeting\":{\"active\":false}";
-    }
+    gs = s_greetingStateProvider();
+    fields.greeting = &gs;
   }
-  char buf[32];
-  snprintf(buf, sizeof(buf), ",\"nearbyRev\":%lu}",
-           static_cast<unsigned long>(s_nearbyRev));
-  payload += buf;
+  fields.nearbyRev = s_nearbyRev;
+  std::string payload;
+  buildStateNotifyJson(fields, payload);
   s_stateNotify->setValue(payload);
   s_stateNotify->notify();
 }
@@ -1272,9 +1332,9 @@ void start(lamp::Config* config) {
   // lifetime and must not be freed by NimBLE.
   s_server->setCallbacks(new ControlServerCallbacks(), false);
 
-  // NimBLE 2.x default is FALSE: advertising does not auto-restart on
-  // disconnect. Without this the lamp goes undiscoverable until reboot.
-  s_server->advertiseOnDisconnect(true);
+  // onDisconnect restarts advertising through s_radioGate so an OTA pause
+  // holds it; a NimBLE-side restart would bypass the pause.
+  s_server->advertiseOnDisconnect(false);
 
   s_service = s_server->createService(SERVICE_UUID);
 
@@ -1381,7 +1441,7 @@ void start(lamp::Config* config) {
       {CHAR_SETTINGS_BLOB, new SettingsBlobCallback(), nullptr},
       {CHAR_FW_CONTROL, new FwControlCallback(), &s_fwControlChar},
       {CHAR_FW_CHUNK, new FwChunkCallback(), nullptr},
-      {CHAR_STATE_NOTIFY, nullptr, &s_stateNotify},
+      {CHAR_STATE_NOTIFY, new StateNotifyCallback(), &s_stateNotify},
       // Read-only. The app reads this to detect the lamp's attribute-layout
       // version; lamps predating it read as absent and the app falls back to
       // legacy behavior. See gatt_layout.hpp.
@@ -1477,15 +1537,10 @@ void stop() {
 bool isRunning() { return s_running; }
 
 void pauseRadioForOta() {
-  if (s_otaRadioPaused) return;
-  s_otaRadioPaused = true;
   // Stop both adv and scan so the IDF coex arbiter stops gating WiFi RX
   // during BLE windows. Phone app loses connection briefly; reconnects
   // on resumeRadioAfterOta or after the OTA-driven reboot.
-  if (NimBLEDevice::isInitialized()) {
-    NimBLEDevice::getAdvertising()->stop();
-    NimBLEDevice::getScan()->stop();
-  }
+  if (!s_radioGate.pauseForOta()) return;
   // Also tear down the boot-window SoftAP webapp. AP beacons fire every
   // ~100 ms and contend with the ESP-NOW chunk stream for WiFi airtime;
   // shutting the AP off frees the band for the OTA. The webapp is a
@@ -1515,13 +1570,16 @@ void disconnectGattClientsForOta() {
 
 bool deinitForWebapp() {
   if (s_bleDown || !NimBLEDevice::isInitialized()) return false;
+  const lamp::KnownLoopStall stall;
   lamp::logHeap("ble-pre");
   disconnectGattClientsForOta();
   NimBLEDevice::getScan()->stop();
   stop();
+  lamp::loop_watchdog::feed();
   NimBLEDevice::deinit(true);
   esp_bt_controller_disable();
   esp_bt_controller_deinit();
+  lamp::loop_watchdog::feed();
   s_bleDown = true;
   lamp::logHeap("ble-post");
   return true;
@@ -1530,15 +1588,7 @@ bool deinitForWebapp() {
 bool isDownForWebapp() { return s_bleDown; }
 
 void resumeRadioAfterOta() {
-  if (!s_otaRadioPaused) return;
-  s_otaRadioPaused = false;
-  // Two independent scan-pause flags: OTA and active GATT client. Only
-  // restart if the client flag isn't also holding the scan down.
-  if (!NimBLEDevice::isInitialized()) return;
-  if (!s_scanPausedForGattClient) {
-    NimBLEDevice::getScan()->start(0);
-  }
-  NimBLEDevice::getAdvertising()->start();
+  if (!s_radioGate.resumeAfterOta()) return;
 #ifdef LAMP_DEBUG
   Serial.println("[ble_control] resumed adv + scan after OTA");
 #endif

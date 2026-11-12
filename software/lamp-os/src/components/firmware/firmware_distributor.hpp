@@ -17,7 +17,10 @@
 #include <cstdint>
 
 #include "components/firmware/inter_session_quiet_hold.hpp"
+#include "components/firmware/peer_backoff_ring.hpp"
 #include "components/network/protocol/fw_ota.hpp"  // FW_CHUNK_SIZE_BASELINE/_MAX
+
+#include <lampos/protocol/sender_seq.hpp>
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 #include <freertos/FreeRTOS.h>
@@ -248,20 +251,6 @@ class FirmwareDistributor {
   bool        discoverImageLength(uint32_t* outLen) const;
 #endif
 
-  // Peer backoff ring.
-  static constexpr size_t kPenaltyRingSize = 8;
-  struct PeerPenalty {
-    uint8_t  mac[6];
-    uint32_t backoffUntilMs;
-    bool     used;
-    // True = never expires (backoffUntilMs unused). Session-lifetime block,
-    // not a timed backoff.
-    bool     persistent;
-  };
-  bool peerIsInBackoff(const uint8_t mac[6], uint32_t nowMs) const;
-  void notePeerBackoff(const uint8_t mac[6], uint32_t nowMs,
-                       uint32_t durationMs, bool persistent = false);
-
   FirmwareTransport* transport_ = nullptr;
   // nullptr = firmware distribution (default). Set on the FS distributor
   // instance by fs_ota::begin().
@@ -295,7 +284,7 @@ class FirmwareDistributor {
   uint16_t sessionOfferSeq_        = 0;
   uint32_t sessionVersion_         = 0;
   uint32_t sessionTotalLen_        = 0;
-  uint16_t seqCounter_             = 0;
+  lamp_protocol::SenderSeq seqCounter_;
   uint32_t lastOfferSendMs_        = 0;
   uint8_t  offerRetryCount_        = 0;
   uint16_t lastBurstSentChunks_    = 0;
@@ -341,10 +330,10 @@ class FirmwareDistributor {
   static TaskHandle_t         s_sharedTask;
 #endif
 
-  PeerPenalty penalties_[kPenaltyRingSize] = {};
+  PeerBackoffRing penalties_;
 
-  // The last peer is remembered so the indicator paints a held full bar
-  // through the hold.
+  // The loop task writes it in Idle, OfferSent and the Done/Failed reap, the
+  // streaming task in Streaming under stateMux_.
   InterSessionQuietHold quietHold_;
   // Set once the streaming task has entered quiet + torn down the radio for the
   // active session; reset in resetSession(). Radio teardown is deferred off the
@@ -353,6 +342,8 @@ class FirmwareDistributor {
   // streaming task's first Streaming step. Guards against re-tearing on a
   // Finalizing→Streaming REQ bounce.
   bool     sessionQuietArmed_          = false;
+  // The last peer, remembered so the indicator paints a held full bar through
+  // the hold.
   uint8_t  lastSessionPeerMac_[6]       = {0};
   uint16_t lastSessionTotalChunks_      = 0;
   bool     lastSessionValid_            = false;

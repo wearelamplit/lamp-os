@@ -230,6 +230,8 @@ bool fsPathBusy() {
   return s_fsReceiver.isInProgress() || s_fsDistributor.isInProgress();
 }
 
+bool fsReceiving() { return s_fsReceiver.isInProgress(); }
+
 void begin(lamp::FirmwareTransport* meshTransport,
            lamp::FirmwareReceiver* fwReceiver,
            lamp::FirmwareDistributor* fwDistributor) {
@@ -331,7 +333,9 @@ void handleControl(const lamp::PendingFirmwareControl& ctrl) {
   s_fsReceiver.handleControlOnLoop(mapped);
 }
 
-void onChunk(const lp::ParsedFwChunk& c)  { s_fsReceiver.handleChunkOnRecvTask(c); }
+void onChunk(const lp::ParsedFwChunk& c) {
+  s_fsReceiver.handleChunkOnRecvTask(c, lamp::FirmwareTransportKind::EspNow);
+}
 void onAccept(const lp::ParsedFwAccept& a) { s_fsDistributor.onAcceptOnRecvTask(a); }
 void onReq(const lp::ParsedFwReq& r)       { s_fsDistributor.onReqOnRecvTask(r); }
 void onResult(const lp::ParsedFwResult& r) { s_fsDistributor.onResultOnRecvTask(r); }

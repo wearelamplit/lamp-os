@@ -19,15 +19,18 @@
 #include <cstdint>
 
 #include "behaviors/configurator.hpp"
+#include "behaviors/social_echo.hpp"
 #include "components/firmware/firmware_receiver.hpp"
 #include "components/network/ble/bluetooth.hpp"
 #include "components/network/mesh/mesh_link.hpp"
 #include "config/config.hpp"
 #include "config/nvs_config_store.hpp"
+#include "core/fondness_engine.hpp"
 #include "core/lamp.hpp"
 #include "core/power_governor.hpp"
 #include "expressions/expression_manager.hpp"
 #include "expressions/expression_observer.hpp"
+#include "util/uptime.hpp"
 
 // Per-pixel knockout staging slot. Drain reads + clears, BLE callback
 // fills under portMUX. Struct definition is small so it lives here in
@@ -72,6 +75,8 @@ extern lamp::FirmwareReceiver firmwareReceiver;
 extern lamp::MeshLink meshLink;
 extern lamp::ExpressionManager expressionManager;
 extern lamp::ExpressionObserverRegistry expressionObserverRegistry;
+extern lamp::SocialEchoObserver socialEchoObserver;
+extern lamp::FondnessEngine fondnessEngine;
 extern lamp::ConfiguratorBehavior shadeConfiguratorBehavior;
 extern lamp::ConfiguratorBehavior baseConfiguratorBehavior;
 extern lamp::Config config;
@@ -104,6 +109,11 @@ void applyInboundControlOp(const char* payloadJson, size_t len, const uint8_t sr
 // Test-panel action dispatcher. drainTestAction calls this with a parsed
 // JsonDocument. Defined in lamp_test_action.cpp.
 void dispatchLampAction(JsonDocument& doc, unsigned long updateTimeMs);
+
+// Loop task only. Runs the zone-preview release a BLE disconnect posted with
+// postPendingClearZonePreview, since the release rewrites configurator state
+// the compositor draws.
+void drainZonePreviewClear();
 
 #ifdef LAMP_DEBUG
 // Bench serial command ingress. Reads newline-terminated commands from

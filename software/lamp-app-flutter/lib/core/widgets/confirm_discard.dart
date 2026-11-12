@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 
 /// Confirm-before-losing-edits dialog. Returns true to discard, false to
-/// keep editing (barrier-dismiss counts as keep editing).
+/// keep editing (barrier-dismiss counts as keep editing). Stays live under a
+/// firmware push freeze, so a frozen editor can still be left.
 Future<bool> confirmDiscard(BuildContext context) async {
+  // Launched from the navigator's own context so it captures no launch-site
+  // themes, the push lock's included. A revert write it leads to mid-push is
+  // dropped by the lamp and settled by the re-read when the push ends.
   final result = await showDialog<bool>(
-    context: context,
+    context: Navigator.of(context).context,
     builder: (ctx) => AlertDialog(
       title: const Text('Discard changes?'),
       content: const Text('Your unsaved changes will be lost.'),

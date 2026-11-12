@@ -7,6 +7,8 @@
 #include <cstring>
 #include <utility>
 
+#include <lampos/clock.hpp>
+
 namespace lamp {
 
 // Display-slot stickiness: a rival wisp is rejected until the current
@@ -25,8 +27,13 @@ static bool freshWithin(uint32_t stampMs, uint32_t nowMs, uint32_t windowMs) {
 }
 
 static bool wispSlotFresh(const WispCache& cache, uint32_t nowMs) {
-  return freshWithin(cache.lastHelloMs, nowMs, kWispDisplayStaleMs) ||
-         freshWithin(cache.slotAdoptedMs, nowMs, kWispDisplayStaleMs);
+  return !cache.displayAgedOut &&
+         (freshWithin(cache.lastHelloMs, nowMs, kWispDisplayStaleMs) ||
+          freshWithin(cache.slotAdoptedMs, nowMs, kWispDisplayStaleMs));
+}
+
+static bool recentWithin(uint32_t stampMs, uint32_t nowMs, uint32_t windowMs) {
+  return stampMs != 0 && lampos::msSince(nowMs, stampMs) <= windowMs;
 }
 
 void LampRoster::adoptWispLocked(const uint8_t mac[6], uint32_t nowMs) {
@@ -37,6 +44,8 @@ void LampRoster::adoptWispLocked(const uint8_t mac[6], uint32_t nowMs) {
   wispCache_.lastHelloMs = 0;
   wispCache_.slotAdoptedMs = nowMs;
   wispCache_.lastSeenMs = nowMs;
+  wispCache_.displayAgedOut = false;
+  wispCache_.controlAgedOut = false;
   wispCache_.wispVersion = 0;
   wispCache_.flags = 0;
   wispCache_.paletteIdPrefix[0] = '\0';
@@ -52,6 +61,7 @@ void LampRoster::adoptWispLocked(const uint8_t mac[6], uint32_t nowMs) {
 bool LampRoster::admitWispLocked(const uint8_t mac[6], uint32_t nowMs) {
   if (wispCache_.present && std::memcmp(wispCache_.mac, mac, 6) == 0) {
     wispCache_.lastSeenMs = nowMs;
+    wispCache_.controlAgedOut = false;
     return true;
   }
   if (wispCache_.present && wispSlotFresh(wispCache_, nowMs)) {
@@ -80,6 +90,7 @@ bool LampRoster::cacheWispHello(const uint8_t mac[6],
   }
   const bool presenceEdge = !wasPresent || std::memcmp(prevMac, mac, 6) != 0;
   wispCache_.lastHelloMs = nowMs;
+  wispCache_.displayAgedOut = false;
   wispCache_.wispVersion = wispVersion;
   wispCache_.flags = flags;
   // On-wire slots are 8 bytes, not NUL-terminated; add the NUL for safe logging.
@@ -182,11 +193,24 @@ bool LampRoster::copyDisplayWispMac(uint8_t out[6], uint32_t nowMs) {
   if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(2)) != pdTRUE) {
     return false;
   }
-  const bool have = wispCache_.present &&
+  const bool have = wispCache_.present && !wispCache_.controlAgedOut &&
                     freshWithin(wispCache_.lastSeenMs, nowMs, kWispControlStaleMs);
   if (have) std::memcpy(out, wispCache_.mac, 6);
   xSemaphoreGive(mutex_);
   return have;
+}
+
+void LampRoster::retireStaleWisp(uint32_t nowMs) {
+  xSemaphoreTake(mutex_, portMAX_DELAY);
+  if (!recentWithin(wispCache_.lastHelloMs, nowMs, kWispDisplayStaleMs) &&
+      !recentWithin(wispCache_.slotAdoptedMs, nowMs, kWispDisplayStaleMs)) {
+    wispCache_.displayAgedOut = true;
+  }
+  if (!recentWithin(wispCache_.lastSeenMs, nowMs, kWispControlStaleMs)) {
+    wispCache_.controlAgedOut = true;
+  }
+  wispFleet_.retire(nowMs);
+  xSemaphoreGive(mutex_);
 }
 
 std::string LampRoster::getWispStatusReadJson(size_t maxLen) {
@@ -273,7 +297,21 @@ void LampRoster::cacheWispState(const PendingWispState& slot, uint32_t nowMs) {
     xSemaphoreGive(mutex_);
     return;
   }
-  wispFleet_.upsertPaints(slot.entries, slot.w, safeCount, nowMs);
+  const lamp_protocol::WispDriftFade& own = slot.fadeRecord;
+  for (uint8_t i = 0; i < safeCount; ++i) {
+    const uint8_t* e = &slot.entries[i * lamp_protocol::WISP_STATE_ENTRY_SIZE];
+    const uint8_t* w = &slot.w[i * lamp_protocol::WISP_STATE_W_SIZE];
+    const bool targeted = slot.entryTargeted(i);
+    if (i == slot.ownIndex && targeted) {
+      wispFleet_.upsertPaint(e, own.base, own.shade, nowMs, false);
+      continue;
+    }
+    const uint8_t base[4] = {e[6], e[7], e[8], w[0]};
+    const uint8_t shade[4] = {e[9], e[10], e[11], w[1]};
+    // A partial frame leaves some fading lamps out; theirs is the in-between.
+    wispFleet_.upsertPaint(e, base, shade, nowMs,
+                           slot.fadePartial && !targeted);
+  }
   xSemaphoreGive(mutex_);
 }
 

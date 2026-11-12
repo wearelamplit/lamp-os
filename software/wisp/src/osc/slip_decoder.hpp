@@ -30,6 +30,9 @@ class SlipDecoder {
 
   // Frame: frame()/frameLen() hold a complete frame until the next feed().
   Result feed(uint8_t b, uint32_t nowMs);
+  // Retires the last-byte stamp, so a partial frame left for weeks still resets
+  // on its next byte. Call at least once per lampos::kRetiredAgeMs.
+  void retire(uint32_t nowMs);
 
   const uint8_t* frame() const { return buf_; }
   size_t frameLen() const { return len_; }

@@ -103,24 +103,27 @@ void setUp(void) {
 }
 void tearDown(void) {}
 
-static char s_buf[config_codec::kMaxStoredCfgJsonLen + 1];
+static uint8_t s_buf[config_codec::kMaxSettingsBlobLen];
 
 static SaveResult persist(InMemoryConfigStore& s, const char* json,
                           const std::string& kept = "") {
   return config_codec::saveRawJson(s, json, s_buf, sizeof(s_buf), kept);
 }
 
+// A lamp field as the store loads it, in the JSON the web document carries.
 static std::string storedField(InMemoryConfigStore& s, const char* field) {
+  LampSettings lamp;
+  BaseSettings base;
+  ShadeSettings shade;
+  ExpressionSettings expressions;
+  HomeModeSettings homeMode;
+  config_codec::loadConfig(s, lamp, base, shade, expressions, homeMode, s_buf, sizeof(s_buf));
   JsonDocument doc;
-  deserializeJson(doc, s.read("cfg", "{}"));
+  config_codec::toJson(doc.to<JsonObject>(), lamp, base, shade, expressions, homeMode);
   return doc["lamp"][field].as<std::string>();
 }
 
-static std::string storedName(InMemoryConfigStore& s) {
-  JsonDocument doc;
-  deserializeJson(doc, s.read("cfg", "{}"));
-  return doc["lamp"]["name"] | "";
-}
+static std::string storedName(InMemoryConfigStore& s) { return storedField(s, "name"); }
 
 static const char* kGood = R"({"lamp":{"name":"jacko","named":true}})";
 static const char* kTruncated = R"({"lamp":{"name":"jac)";  // silent-OOM shape
@@ -145,7 +148,7 @@ void test_valid_whole_document_saved_in_the_stored_shape() {
   InMemoryConfigStore s;
   TEST_ASSERT_TRUE(persist(s, kGood) == SaveResult::Ok);
   TEST_ASSERT_EQUAL_STRING("jacko", storedName(s).c_str());
-  TEST_ASSERT_TRUE(s.read("cfg", "").find("\"expressions\":[]") != std::string::npos);
+  TEST_ASSERT_TRUE(s.has("st0") && s.has("xn") && !s.has("cfg"));
 }
 
 void test_null_rejected() {
@@ -255,7 +258,7 @@ std::string document(size_t n, size_t nameLen = 8) {
 }  // namespace
 
 // A lamp at every cap: 21 full expressions, 4 base and 4 shade segments of 8
-// colours with 16-byte names, 252 knockout levels and a full disabled list.
+// colours with 16-byte names and two-digit pins, 252 knockout levels and a full disabled list.
 std::string atCapsDocument() {
   LampSettings lamp;
   lamp.name = std::string(kMaxLampNameLen, 'n');
@@ -268,6 +271,7 @@ std::string atCapsDocument() {
       SegmentSettings seg;
       seg.name = std::string(kMaxSegmentNameLen, 's');
       seg.px = 63;
+      seg.pin = 33;
       seg.colors.assign(kMaxSurfaceColors, Color(255, 255, 255, 255));
       segs->push_back(seg);
     }

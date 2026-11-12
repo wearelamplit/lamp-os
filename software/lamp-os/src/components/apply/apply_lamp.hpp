@@ -77,6 +77,12 @@ inline void lampLocal(JsonObject obj, uint8_t maxBrightness) {
   if (obj["webappEnabled"].is<bool>()) {
     ::config.lamp.webappEnabled = obj["webappEnabled"].as<bool>();
   }
+  if (obj["apBootMinutes"].is<int>()) {
+    int minutes = obj["apBootMinutes"].as<int>();
+    if (minutes >= 0 && minutes <= UINT8_MAX) {
+      ::config.lamp.apBootMinutes = static_cast<uint8_t>(minutes);
+    }
+  }
   if (obj["socialMode"].is<int>()) {
     int mode = obj["socialMode"].as<int>();
     if (mode >= 0 && mode <= 2) {  // Introvert / Ambivert / Extrovert

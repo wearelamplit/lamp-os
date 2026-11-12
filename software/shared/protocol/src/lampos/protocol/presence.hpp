@@ -24,12 +24,18 @@
 //              HELLO_TLV_NEED_FS (0x05, 1B),
 //              HELLO_TLV_OTA_SENDING_TO (0x06, 6B),
 //              HELLO_TLV_VARIANT (0x07, 1B).
+//              MSG_WISP_STATE's trailer takes 0x10 and 0x11 from the same
+//              1-byte registry (wisp.hpp).
 //              Unknown types are skipped by their len byte (forward-compat).
 //
 // Fixed prefix through nameLen is HELLO_FIXED_SIZE (24) + 1; the whole frame
 // is capped at HELLO_MAX_SIZE (128).
 
 namespace lamp_protocol {
+
+// The steady interval a lamp emits MSG_HELLO at once past its boot burst.
+// The wisp ages a lamp's direct RSSI against it.
+constexpr uint32_t kLampHelloIntervalMs = 30000;
 
 // HELLO fixed prefix: header(6) + sourceMac(6) + shade(4) + base(4) + firmwareVersion(4).
 // Name length byte + name bytes follow this prefix.
@@ -294,9 +300,12 @@ inline bool parseHello(const uint8_t* data, size_t len, ParsedHello& out) {
   // it still parses and gets default TLV-derived fields.
   out.otaState = kOtaStateIdle;
   out.fwChannel[0] = '\0';
+  out.hasFsDigest = false;
+  std::memset(out.fsDigest, 0, sizeof(out.fsDigest));
   out.maxChunk = 0;
   out.needsFs = false;
   out.hasOtaSendingTo = false;
+  std::memset(out.otaSendingTo, 0, sizeof(out.otaSendingTo));
   out.variant = LampVariant::Unknown;
   size_t off = HELLO_FIXED_SIZE + 1 + nameLen;
   if (len <= off) return true;

@@ -45,7 +45,10 @@ class TouchInput : public InputSource {
         createdMs_(millis()) {}
 
   void tick(uint32_t nowMs) override {
-    if (static_cast<uint32_t>(nowMs - createdMs_) < kWarmupMs) return;
+    if (!warm_) {
+      if (static_cast<uint32_t>(nowMs - createdMs_) < kWarmupMs) return;
+      warm_ = true;
+    }
     if (static_cast<uint32_t>(nowMs - lastReadMs_) < kReadIntervalMs) return;
     lastReadMs_ = nowMs;
     touch_.update(static_cast<uint16_t>(touchRead(pin_)), nowMs);
@@ -57,6 +60,9 @@ class TouchInput : public InputSource {
   uint8_t pin_;
   Touch touch_;
   uint32_t createdMs_;
+  // Latched once the warmup has passed, so it never comes back a millis()
+  // wrap later.
+  bool warm_ = false;
   uint32_t lastReadMs_ = 0;
 };
 

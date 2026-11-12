@@ -61,6 +61,7 @@
 #include "core/compositor.hpp"
 #include "core/frame_buffer.hpp"
 #include "core/boot_recovery.hpp"
+#include "core/boot_history.hpp"
 #include "core/crash_record.hpp"
 #include "version.hpp"
 #include "core/power_governor.hpp"
@@ -79,6 +80,7 @@
 #include "util/gradient.hpp"
 #include "util/heap_probe.hpp"
 #include "util/levels.hpp"
+#include "util/uptime.hpp"
 
 lamp::NvsConfigStore configStore;
 
@@ -174,18 +176,24 @@ void postPendingWispOpJson(const char* data, size_t len)            { lamp::pend
 
 namespace lamp {
 // Typed-payload posts called from MeshLink's WiFi recv task. Same
-// Core 0 → Core 1 hand-off as the JSON slots above: memcpy under portMUX,
-// no heap, no parsing on the recv task.
+// Core 0 → Core 1 hand-off as the JSON slots above: any decode runs before
+// portMUX is taken, and only a bounded copy runs under it, with no heap.
 void postPendingOverrideColors(const PendingOverrideColors& src)         { pendingSlots.overrideColors.post(pendingMux, src); }
 void postPendingRestoreColors(const PendingRestoreColors& src)           { pendingSlots.restoreColors.post(pendingMux, src); }
 void postPendingOverrideBrightness(const PendingOverrideBrightness& src) { pendingSlots.overrideBrightness.post(pendingMux, src); }
 void postPendingRestoreBrightness(const PendingRestoreBrightness& src)   { pendingSlots.restoreBrightness.post(pendingMux, src); }
 void postPendingWispHello(const PendingWispHello& src)                   { pendingSlots.wispHello.post(pendingMux, src); }
 void postPendingWispPalette(const PendingWispPalette& src)               { pendingSlots.wispPalette.post(pendingMux, src); }
-void postPendingWispClaim(const PendingWispClaim& src)                   { pendingSlots.wispClaim.post(pendingMux, src); }
-void postPendingWispPaint(const PendingWispPaint& src)                   { pendingSlots.wispPaint.post(pendingMux, src); }
-void postPendingWispState(const PendingWispState& src)                   { pendingSlots.wispState.post(pendingMux, src); }
-void postPendingCommand(const PendingCommand& src)                       { pendingSlots.command.post(pendingMux, src); }
+void postPendingWispClaim(const lamp_protocol::ParsedWispClaim& wc) {
+  pendingSlots.wispClaim.postWith(pendingMux, [&wc](PendingWispClaim& s) { fillPendingWispClaim(s, wc); });
+}
+void postPendingWispState(const lamp_protocol::ParsedWispState& ws, const uint8_t selfMac[6]) {
+  const OwnWispDriftFade own = decodeOwnWispDriftFade(ws, selfMac);
+  pendingSlots.wispState.postWith(pendingMux, [&ws, &own](PendingWispState& s) { fillPendingWispState(s, ws, own); });
+}
+void postPendingCommand(const lamp_protocol::ParsedCommand& p) {
+  pendingSlots.command.postWith(pendingMux, [&p](PendingCommand& s) { fillPendingCommand(s, p); });
+}
 void postPendingEvent(const PendingEvent& src)                           { pendingSlots.event.post(pendingMux, src); }
 void postPendingColorQuery(const PendingColorQuery& src)                 { pendingSlots.colorQuery.post(pendingMux, src); }
 void postPendingColorInfo(const PendingColorInfo& src)                   { pendingSlots.colorInfo.post(pendingMux, src); }
@@ -239,6 +247,21 @@ lamp::ArrivalNotifier arrivalNotifier;
 lamp::Config config;
 lamp::MeshLink meshLink;
 lamp::SocialEchoObserver socialEchoObserver(config, expressionManager, meshLink);
+lamp::FondnessEngine fondnessEngine(config.dispositions());
+
+namespace {
+// Feeds every announced peer expression to the fondness engine.
+class FondnessFeed : public lamp::IExpressionObserver {
+ public:
+  void onPeerExpression(const uint8_t sourceMac[6],
+                        const lamp::ExpressionInvocation& inv) override {
+    fondnessEngine.observeExpression(sourceMac, inv.type.c_str(),
+                                     lamp::hasEnabledType(config.expressions, inv.type),
+                                     config.lamp.socialMode, lamp::uptimeMs());
+  }
+};
+FondnessFeed fondnessFeed;
+}  // namespace
 // Lamp-side OTA receiver. Bound to meshLink via
 // setFirmwareReceiver() in setup() so the WiFi recv path can hand
 // MSG_FW_CHUNK directly to handleChunkOnRecvTask (Core 0). OFFER/DONE
@@ -438,11 +461,7 @@ void updateAdvertisedDeviceName(const char* newName) {
   // advertising interval) is below human perception.
   if (!NimBLEDevice::isInitialized()) return;
   NimBLEDevice::setDeviceName(newName);
-  auto* adv = NimBLEDevice::getAdvertising();
-  if (adv != nullptr) {
-    adv->stop();
-    adv->start();
-  }
+  ble_control::restartAdvertising();
 }
 
 }  // namespace lamp
@@ -576,7 +595,7 @@ void lamp::Lamp::tickBootRecovery() {
     pinMode(0, INPUT_PULLUP);
     s_pinReady = true;
   }
-  if (!bootRecovery_.update(digitalRead(0) == LOW, millis())) return;
+  if (!bootRecovery_.update(digitalRead(0) == LOW, lamp::uptimeMs())) return;
   ::config.lamp.password.clear();
   ::config.persistConfig("boot_recovery");
   // BLE auth reads the password live, so the app is usable immediately. The
@@ -639,6 +658,7 @@ void lamp::Lamp::setup() {
     Serial.println(
         "[power] brownout reset — supply budget constants may be mis-sized");
   }
+  boot_history::boot(FIRMWARE_VERSION);
   crash_record::boot(FIRMWARE_VERSION);
   lamp_register_panic_handler();
 
@@ -653,9 +673,8 @@ void lamp::Lamp::setup() {
   // NOT touched; the NVS value is authoritative.
   config.applyDefaults(defaults());
 
-  // First-ever-boot housekeeping, persisted once so it sticks across reboots.
-  // Persist when NVS predated the `named` flag so applyDefaults' inferred value
-  // becomes authoritative. Then latch a lamp the user named OR gave a control
+  // First-ever-boot housekeeping, persisted once so it sticks across reboots
+  // (firstBootSaveWanted). Then latch a lamp the user named OR gave a control
   // password to adopted, so the roll below sees it as configured. Then, only
   // while still unadopted, give it a random per-surface hue so units aren't
   // visually identical out of the box. Shade hue is offset from base by
@@ -663,7 +682,7 @@ void lamp::Lamp::setup() {
   // unit lands on a distinct hue. Guarded on `!setup` and the single-color
   // variant default, so it fires once and never on an adopted lamp; a variant
   // that forces `setup=true` (curated colors) skips it entirely.
-  bool persistFirstBoot = !config.namedKeyPresent();
+  bool persistFirstBoot = firstBootSaveWanted(config.namedKeyPresent(), config.storeIsLegacy());
   if (!config.lamp.setup &&
       (config.lamp.named || !config.lamp.password.empty())) {
     config.lamp.setup = true;
@@ -684,6 +703,9 @@ void lamp::Lamp::setup() {
   }
   if (shouldPersistFirstBoot(persistFirstBoot, config.loadFailedWithData()))
     config.persistConfig("first-boot-init");
+#ifdef LAMP_DEBUG
+  lamp::NvsConfigStore::logUsage();
+#endif
 
   // Space the radio bring-ups so their init inrush spikes don't stack into one
   // brownout-tripping surge on marginal USB power. Sub-100ms total, invisible
@@ -720,12 +742,17 @@ void lamp::Lamp::setup() {
   }
 #endif
 
+  const std::vector<uint8_t> stripPins =
+      lamp::applySegmentPins(hw_, config.shade.segments, config.base.segments);
+
   // Build role FrameBuffers. Each role groups its hw_.strips in declaration
-  // order into one composite buffer: per strip a NeoPixel driver (pin +
-  // byte order from HwConfig) and a StripSegment at the running offset. A
-  // strip pixelCount of 0 resolves from the role's Config px (core
-  // single-strip roles, seeded first-boot from defaults()::{base,shade}Px);
-  // a custom variant sets an explicit per-strip count.
+  // order into one composite buffer: per strip a NeoPixel driver (pin from
+  // applySegmentPins, byte order from HwConfig) and a StripSegment at the
+  // running offset. A strip pixelCount of 0 resolves from the role's Config
+  // px (core single-strip roles, seeded first-boot from
+  // defaults()::{base,shade}Px); a custom variant sets an explicit per-strip
+  // count.
+
   auto buildRole = [&](lamp::Surface role, uint8_t configPx,
                        const std::vector<lamp::Color>& colors,
                        const lamp::ColorRotation& rotation,
@@ -735,13 +762,20 @@ void lamp::Lamp::setup() {
     // role; empty or unrecognized falls back to the compile-time default.
     std::vector<lamp::StripSegment> segments;
     uint16_t offset = 0;
-    for (const auto& s : hw_.strips) {
+    for (size_t i = 0; i < hw_.strips.size(); ++i) {
+      const auto& s = hw_.strips[i];
       if (s.role != role) continue;
       const uint16_t px = s.pixelCount ? s.pixelCount : configPx;
       lamp::ByteOrder order = s.byteOrder;
       byteOrderFromString(configByteOrder.c_str(), order);
-      auto* driver =
-          new Adafruit_NeoPixel(px, s.pin, lampos::led::neoPixelFormat(order) + NEO_KHZ800);
+#ifdef LAMP_DEBUG
+      if (stripPins[i] != s.pin) {
+        Serial.printf("[hw] %s strip on GPIO %u (variant pin %u)\n",
+                      s.name ? s.name : "?", stripPins[i], s.pin);
+      }
+#endif
+      auto* driver = new Adafruit_NeoPixel(
+          px, stripPins[i], lampos::led::neoPixelFormat(order) + NEO_KHZ800);
       segments.push_back({driver, s.name, offset, px, s.reversed});
       offset += px;
     }
@@ -894,6 +928,12 @@ void lamp::Lamp::setup() {
   expressionManager.setCompositor(&compositor);
   // Expression mirror: replay a warm peer's triggered expression locally.
   expressionObserverRegistry.registerObserver(&socialEchoObserver);
+  fondnessEngine.setHomeSource([] { return expressionManager.inHomeMode(); });
+  expressionObserverRegistry.registerObserver(&fondnessFeed);
+  socialEchoObserver.setNearbyCount(
+      [] { return lamp::personalityEngine.nearbyPeers().size(); });
+  socialEchoObserver.setTired([] { return shadeSocialBehavior.tired(); });
+  socialEchoObserver.setFondness(&fondnessEngine);
   beginMoments(ownMac);
   // One-shot reservation so the loop-task drain never reallocates mid-frame.
   pendingTriggers.reserve(MAX_PENDING_TRIGGERS);
@@ -1024,6 +1064,7 @@ void lamp::Lamp::tick() {
   }
 #endif
   crash_record::tick(millis(), [] { return lampRoster.size(); });
+  boot_history::tick(millis());
 
   // Drain pending BLE actions on the loop task (Core 1). All heap allocation
   // (JsonDocument parse, std::vector, gradient construction) happens here,
@@ -1049,10 +1090,8 @@ void lamp::Lamp::tick() {
     reapplyHomeModeState();
   }
 
-  // Debounced disposition commit: runs the actual NVS write once the user
-  // has been idle for kDispositionFlushIdleMs (5s). Cheap when nothing is
-  // dirty (single bool check + uint32_t subtraction).
-  config.maybeFlushDispositions(millis());
+  const bool otaReceiving = firmwareReceiver.isInProgress() || fs_ota::fsReceiving();
+  config.maybeFlushDispositions(lamp::uptimeMs(), otaReceiving);
   // Like the drains, no NVS save runs while firmware chunks are being written.
   if (!firmwareReceiver.isInProgress()) config.maybeRetryPersist(millis());
   if (pendingFlushDispositionsRequested) {
@@ -1060,7 +1099,7 @@ void lamp::Lamp::tick() {
     // Force-commit so the user's final slider value survives even if
     // power is yanked before the next 5s idle window would fire.
     pendingFlushDispositionsRequested = false;
-    config.flushDispositionsNow();
+    config.flushDispositionsNow(otaReceiving);
   }
 
   drainBrightness();
@@ -1132,6 +1171,7 @@ void lamp::Lamp::tick() {
         lamp::settleBrightnessFade();
       }
     }
+    lamp::retireBrightnessFade(now);
 
     // Personality engine. Runs after the transient-override block so it
     // reads a consistent post-fade view this tick. Cheap when nothing's
@@ -1173,6 +1213,7 @@ void lamp::Lamp::tick() {
   }
 
   socialEchoObserver.tick(millis());
+  fondnessEngine.tick(lamp::uptimeMs());
   compositor.behaviorContext().tickArrivals(millis(), LAMP_PRUNE_TIME_MS);
 
   tickBootRecovery();
@@ -1259,6 +1300,7 @@ void lamp::Lamp::tick() {
   // the final frame of the animation is drawn before removal.
   expressionManager.gcTransients();
   expressionManager.tickCascade(millis());
+  expressionManager.retireStale(millis());
 
   // Reap the active-test set (entries fired via dispatchLampAction
   // "test_expression"). When the last one transitions to STOPPED, flip
