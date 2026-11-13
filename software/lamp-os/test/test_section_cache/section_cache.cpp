@@ -1,6 +1,7 @@
 // SectionCache, the per-section JSON cache behind every BLE section read: it
 // rebuilds only after an invalidate, and a section the heap cannot build or
-// copy out is reported as such, never served empty, stale or partial.
+// copy out is reported as such, never served empty, partial, or as the copy
+// from before a rebuild that failed.
 
 #include <unity.h>
 
@@ -123,8 +124,8 @@ void test_refused_first_build_fails_then_recovers() {
   TEST_ASSERT_EQUAL_STRING(b.json().c_str(), out.c_str());
 }
 
-// The last good copy is never served once the section changed: a reader gets
-// the failure instead of a section that no longer matches the lamp.
+// The copy from before a failed rebuild is never served: a reader gets the
+// failure instead of a section that no longer matches the lamp.
 void test_refused_rebuild_does_not_serve_stale() {
   SectionCache c;
   Builder b;
@@ -207,6 +208,52 @@ void test_refused_exact_rebuild_does_not_serve_stale() {
   TEST_ASSERT_TRUE(out.empty());
 }
 
+void test_exact_invalidate_during_rebuild_is_kept() {
+  SectionCache c;
+  int calls = 0;
+  auto write = [&](JsonWriter& w) {
+    if (++calls == 1) c.invalidate();
+    writeList(w, 4);
+  };
+  c.rebuildExactly("list", write);
+  std::string out;
+  TEST_ASSERT_TRUE(c.copyOut(out, "list"));
+  const int afterFirst = calls;
+  c.rebuildExactly("list", write);
+  TEST_ASSERT_GREATER_THAN_INT(afterFirst, calls);
+}
+
+// A build that throws after the section was taken for rebuilding leaves it
+// invalid and still dirty, so the old copy is not served and the next read
+// retries.
+void test_throwing_rebuild_does_not_serve_stale() {
+  SectionCache c;
+  Builder b;
+  rebuild(c, b);
+  c.invalidate();
+  c.rebuild("test", []() -> JsonDocument { throw std::bad_alloc(); });
+  std::string out;
+  out.reserve(256);
+  TEST_ASSERT_FALSE(c.copyOut(out, "test"));
+  b.n = 2;
+  rebuild(c, b);
+  TEST_ASSERT_TRUE(c.copyOut(out, "test"));
+  TEST_ASSERT_EQUAL_STRING(b.json().c_str(), out.c_str());
+}
+
+void test_throwing_exact_rebuild_does_not_serve_stale() {
+  SectionCache c;
+  c.rebuildExactly("list", [](JsonWriter& w) { writeList(w, 3); });
+  c.invalidate();
+  c.rebuildExactly("list", [](JsonWriter&) { throw std::bad_alloc(); });
+  std::string out;
+  out.reserve(256);
+  TEST_ASSERT_FALSE(c.copyOut(out, "list"));
+  c.rebuildExactly("list", [](JsonWriter& w) { writeList(w, 5); });
+  TEST_ASSERT_TRUE(c.copyOut(out, "list"));
+  TEST_ASSERT_NOT_NULL(strstr(out.c_str(), ",148]"));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_copy_before_any_build_fails_empty);
@@ -221,5 +268,8 @@ int main(int, char**) {
   RUN_TEST(test_release_invalidates);
   RUN_TEST(test_exact_rebuild_copies_out);
   RUN_TEST(test_refused_exact_rebuild_does_not_serve_stale);
+  RUN_TEST(test_exact_invalidate_during_rebuild_is_kept);
+  RUN_TEST(test_throwing_rebuild_does_not_serve_stale);
+  RUN_TEST(test_throwing_exact_rebuild_does_not_serve_stale);
   return UNITY_END();
 }

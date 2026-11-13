@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <new>
 #include <string>
 #include <utility>
 
@@ -32,29 +33,38 @@ class SectionCache {
   void invalidate() { dirty_.store(true); }
 
   // Rebuilds from `build()`, which returns a JsonDocument, when invalidated.
-  // A rebuild the heap cannot spare leaves the section invalid.
+  // A rebuild the heap cannot spare, or one that throws bad_alloc, leaves the
+  // section invalid.
   template <class Build>
   void rebuild(const char* name, Build build) {
     if (!dirty_.exchange(false)) return;
-    if (heapCanSpare(kHeapHeadroom)) {
-      store(build(), name);
-    } else {
+    try {
+      if (heapCanSpare(kHeapHeadroom)) {
+        store(build(), name);
+      } else {
+        fail(name);
+      }
+    } catch (const std::bad_alloc&) {
       fail(name);
     }
   }
 
   // Rebuilds by running `write(JsonWriter&)` twice, once to measure and once
   // into a single exactly-sized block, when invalidated. A rebuild the heap
-  // cannot spare leaves the section invalid.
+  // cannot spare, or one that throws bad_alloc, leaves the section invalid.
   template <class Write>
   void rebuildExactly(const char* name, Write write) {
     if (!dirty_.exchange(false)) return;
-    JsonWriter measure(nullptr, 0);
-    write(measure);
-    const size_t len = measure.length();
-    if (heapCanSpare(len + 1) && writeExactly(json_, len, write)) {
-      valid_ = true;
-    } else {
+    try {
+      JsonWriter measure(nullptr, 0);
+      write(measure);
+      const size_t len = measure.length();
+      if (heapCanSpare(len + 1) && writeExactly(json_, len, write)) {
+        valid_ = true;
+      } else {
+        fail(name);
+      }
+    } catch (const std::bad_alloc&) {
       fail(name);
     }
   }
