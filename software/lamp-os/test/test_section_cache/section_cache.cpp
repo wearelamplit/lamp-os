@@ -76,6 +76,37 @@ void test_rebuilds_only_after_invalidate() {
   TEST_ASSERT_EQUAL_STRING(b.json().c_str(), out.c_str());
 }
 
+// invalidate() runs on the other core without the owner's lock. One that
+// lands after the rebuild leaves the copy just built servable, and the next
+// read rebuilds.
+void test_invalidate_before_copy_still_copies_out() {
+  SectionCache c;
+  Builder b;
+  rebuild(c, b);
+  c.invalidate();
+  std::string out;
+  TEST_ASSERT_TRUE(c.copyOut(out, "test"));
+  TEST_ASSERT_EQUAL_STRING(b.json().c_str(), out.c_str());
+  rebuild(c, b);
+  TEST_ASSERT_EQUAL_INT(2, b.calls);
+}
+
+void test_invalidate_during_rebuild_is_kept() {
+  SectionCache c;
+  int calls = 0;
+  auto build = [&] {
+    if (++calls == 1) c.invalidate();
+    JsonDocument doc;
+    doc["calls"] = calls;
+    return doc;
+  };
+  c.rebuild("test", build);
+  std::string out;
+  TEST_ASSERT_TRUE(c.copyOut(out, "test"));
+  c.rebuild("test", build);
+  TEST_ASSERT_EQUAL_INT(2, calls);
+}
+
 void test_refused_first_build_fails_then_recovers() {
   SectionCache c;
   Builder b;
@@ -181,6 +212,8 @@ int main(int, char**) {
   RUN_TEST(test_copy_before_any_build_fails_empty);
   RUN_TEST(test_built_section_copies_out);
   RUN_TEST(test_rebuilds_only_after_invalidate);
+  RUN_TEST(test_invalidate_before_copy_still_copies_out);
+  RUN_TEST(test_invalidate_during_rebuild_is_kept);
   RUN_TEST(test_refused_first_build_fails_then_recovers);
   RUN_TEST(test_refused_rebuild_does_not_serve_stale);
   RUN_TEST(test_refused_copy_fails_empty);

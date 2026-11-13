@@ -28,25 +28,33 @@ void SectionCache::store(const JsonDocument& doc, const char* name) {
   const auto json = serializeGuarded(doc, len);
   if (json && (json_.capacity() >= len || heapCanSpare(len)) &&
       assignNoThrow(json_, json.get(), len)) {
-    dirty_ = false;
+    valid_ = true;
   } else {
-    logOom(name);
+    fail(name);
   }
 }
 
+// The section stays dirty so the next read retries once the heap recovers.
+void SectionCache::fail(const char* name) {
+  valid_ = false;
+  dirty_.store(true);
+  logOom(name);
+}
+
 bool SectionCache::copyOut(std::string& out, const char* name) const {
-  if (!dirty_ && (out.capacity() >= json_.size() || heapCanSpare(json_.size())) &&
+  if (valid_ && (out.capacity() >= json_.size() || heapCanSpare(json_.size())) &&
       assignNoThrow(out, json_.data(), json_.size())) {
     return true;
   }
   out.clear();
-  if (!dirty_) logOom(name);
+  if (valid_) logOom(name);
   return false;
 }
 
 void SectionCache::release() {
   std::string().swap(json_);
-  dirty_ = true;
+  valid_ = false;
+  dirty_.store(true);
 }
 
 // A field OOM must stay visible without spamming: warn on every channel,

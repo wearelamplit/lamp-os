@@ -330,27 +330,34 @@ JsonDocument Config::asHomeModeJson() {
   return doc;
 }
 
-// Per-section JSON caches. Invariant: a cache string is touched only while
-// this mutex is held, and a read rebuilds and copies out under one hold, so a
-// rebuild or a release on the other core never lands between the two. A
-// dirty flag is set without it (invalidate*), which at worst costs a rebuild.
+// Per-section JSON caches. Invariant: a cache is touched only while this mutex
+// is held, and a read rebuilds and copies out under one hold, so a rebuild or a
+// release on the other core never lands between the two. invalidate*() runs
+// without it.
 static SemaphoreHandle_t cacheMutex() {
   static SemaphoreHandle_t m = xSemaphoreCreateMutex();
   return m;
 }
 
+// Holds the cache mutex for a scope, so a throw from a rebuild cannot leave it
+// held and block every later section read.
+class CacheLock {
+ public:
+  CacheLock() { xSemaphoreTake(cacheMutex(), portMAX_DELAY); }
+  ~CacheLock() { xSemaphoreGive(cacheMutex()); }
+  CacheLock(const CacheLock&) = delete;
+  CacheLock& operator=(const CacheLock&) = delete;
+};
+
 #define LAMP_DEFINE_SECTION_CACHED(NAME, REBUILD)                                     \
   void Config::NAME##SectionRebuildIfDirty() {                                        \
-    xSemaphoreTake(cacheMutex(), portMAX_DELAY);                                      \
+    CacheLock lock;                                                                   \
     REBUILD;                                                                          \
-    xSemaphoreGive(cacheMutex());                                                     \
   }                                                                                   \
   bool Config::NAME##SectionJsonCached(std::string& out) {                            \
-    xSemaphoreTake(cacheMutex(), portMAX_DELAY);                                      \
+    CacheLock lock;                                                                   \
     REBUILD;                                                                          \
-    const bool ok = NAME##Section_.copyOut(out, #NAME);                               \
-    xSemaphoreGive(cacheMutex());                                                     \
-    return ok;                                                                        \
+    return NAME##Section_.copyOut(out, #NAME);                                        \
   }
 
 // The largest section (about 4 KB at the caps) is written straight into a
@@ -370,12 +377,11 @@ LAMP_DEFINE_SECTION_CACHED(expressions, expressionsSection_.rebuildExactly("expr
     [this](JsonWriter& w) { writeExpressionsSection(w, expressions); }))
 
 void Config::releaseSectionCaches() {
-  xSemaphoreTake(cacheMutex(), portMAX_DELAY);
+  CacheLock lock;
   for (auto* section : {&lampSection_, &baseSection_, &shadeSection_,
                         &expressionsSection_, &homeSection_}) {
     section->release();
   }
-  xSemaphoreGive(cacheMutex());
 }
 
 #undef LAMP_DEFINE_SECTION_CACHED

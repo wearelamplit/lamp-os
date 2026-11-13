@@ -491,14 +491,14 @@ static inline void fnv1a(uint32_t& h, const void* data, size_t len) {
   while (len--) { h ^= *p++; h *= 16777619u; }
 }
 
-// A BLE section OOM degrades to a graceful-empty serve; keep it visible on
-// every channel, throttled to one line per 5000ms.
+// A BLE section the heap cannot serve reads empty, or "!" for a config
+// section; keep it visible on every channel, throttled to one line per 5000ms.
 static void logBleSectionOom(const char* what) {
   static uint64_t lastMs = 0;
   const uint64_t now = lamp::uptimeMs();
   if (now - lastMs < 5000 && lastMs != 0) return;
   lastMs = now;
-  Serial.printf("[ble_control] %s OOM; serving graceful-empty\n", what);
+  Serial.printf("[ble_control] %s OOM\n", what);
 }
 
 static void logNearbyHeapSkip(uint32_t largest, uint32_t needed, uint32_t lamps) {
