@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstddef>
 #include <string>
+#include <utility>
 
 #include "util/heap_guard.hpp"
 #include "util/json_writer.hpp"
@@ -17,6 +18,17 @@ namespace lamp {
 // copy out costs one extra rebuild on the next read.
 class SectionCache {
  public:
+  SectionCache() = default;
+  // For Config's boot-time move assignment, before any reader or invalidate
+  // can run.
+  SectionCache(SectionCache&& other) noexcept { *this = std::move(other); }
+  SectionCache& operator=(SectionCache&& other) noexcept {
+    json_ = std::move(other.json_);
+    dirty_.store(other.dirty_.load());
+    valid_ = other.valid_;
+    return *this;
+  }
+
   void invalidate() { dirty_.store(true); }
 
   // Rebuilds from `build()`, which returns a JsonDocument, when invalidated.
