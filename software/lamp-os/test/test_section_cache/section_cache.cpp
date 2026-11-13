@@ -102,7 +102,9 @@ void test_refused_rebuild_does_not_serve_stale() {
   c.invalidate();
   g_mock_largest_free_block = kHeapHeadroom - 1;
   rebuild(c, b);
+  // Room for the copy, so only the failed rebuild can refuse it.
   std::string out;
+  out.reserve(256);
   TEST_ASSERT_FALSE(c.copyOut(out, "test"));
   TEST_ASSERT_TRUE(out.empty());
 
@@ -169,6 +171,7 @@ void test_refused_exact_rebuild_does_not_serve_stale() {
   g_mock_largest_free_block = kHeapHeadroom;
   c.rebuildExactly("list", [](JsonWriter& w) { writeList(w, 40); });
   std::string out;
+  out.reserve(256);
   TEST_ASSERT_FALSE(c.copyOut(out, "list"));
   TEST_ASSERT_TRUE(out.empty());
 }
