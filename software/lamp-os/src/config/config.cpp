@@ -339,80 +339,19 @@ static SemaphoreHandle_t cacheMutex() {
   return m;
 }
 
-// The heap check before each of these cannot reserve the block: another
-// task can take it first. The catch is the last line, best effort since the
-// build has no exception emergency pool.
-static bool assignNoThrow(std::string& dst, const char* src, size_t len) {
-  try {
-    dst.assign(src, len);
-    return true;
-  } catch (const std::bad_alloc&) {
-    return false;
-  }
-}
-
-// A field OOM must stay visible without spamming: warn on the degrade path
-// on every channel, throttled to one line per LAMP_SECTION_OOM_MIN_MS.
-static void logSectionOom(const char* msg) {
-  static constexpr uint32_t LAMP_SECTION_OOM_MIN_MS = 5000;
-  static uint64_t lastMs = 0;
-  const uint64_t now = lamp::uptimeMs();
-  if (now - lastMs < LAMP_SECTION_OOM_MIN_MS && lastMs != 0) return;
-  lastMs = now;
-  Serial.printf("[cfg] %s section OOM; serving stale\n", msg);
-}
-
-// A web/BLE section read must never panic the lamp or serve a truncated
-// section. The rebuild serializes into one guarded buffer (an Arduino String
-// grown on a fragmented heap silently stops appending and would cache a cut-off
-// JSON as valid). On failure keep the last-good cache, leave the dirty flag
-// set so it retries when heap recovers, and serve the stale (or empty) bytes.
-// Caller holds the cache mutex. A failed rebuild keeps the last good copy and
-// stays dirty.
-template <class Build>
-static void rebuildLocked(std::string& cache, bool& dirty, const char* name, Build build) {
-  if (!dirty) return;
-  size_t len = 0;
-  std::unique_ptr<char[]> json;
-  if (heapCanSpare(kHeapHeadroom)) {
-    JsonDocument doc = build();
-    json = serializeGuarded(doc, len);
-  }
-  if (json && (cache.capacity() >= len || heapCanSpare(len)) &&
-      assignNoThrow(cache, json.get(), len)) {
-    dirty = false;
-  } else {
-    logSectionOom(name);
-  }
-}
-
-static void copyOutLocked(const std::string& cache, std::string& out, const char* name) {
-  if (!((out.capacity() >= cache.size() || heapCanSpare(cache.size())) &&
-        assignNoThrow(out, cache.data(), cache.size()))) {
-    out.clear();
-    logSectionOom(name);
-  }
-}
-
-#define LAMP_DEFINE_SECTION_CACHED(NAME, BUILDER)                                     \
+#define LAMP_DEFINE_SECTION_CACHED(NAME, REBUILD)                                     \
   void Config::NAME##SectionRebuildIfDirty() {                                        \
     xSemaphoreTake(cacheMutex(), portMAX_DELAY);                                      \
-    rebuildLocked(NAME##SectionJson_, NAME##SectionDirty_, #NAME,                     \
-                  [this] { return BUILDER(); });                                      \
+    REBUILD;                                                                          \
     xSemaphoreGive(cacheMutex());                                                     \
   }                                                                                   \
-  void Config::NAME##SectionJsonCached(std::string& out) {                            \
+  bool Config::NAME##SectionJsonCached(std::string& out) {                            \
     xSemaphoreTake(cacheMutex(), portMAX_DELAY);                                      \
-    rebuildLocked(NAME##SectionJson_, NAME##SectionDirty_, #NAME,                     \
-                  [this] { return BUILDER(); });                                      \
-    copyOutLocked(NAME##SectionJson_, out, #NAME);                                    \
+    REBUILD;                                                                          \
+    const bool ok = NAME##Section_.copyOut(out, #NAME);                               \
     xSemaphoreGive(cacheMutex());                                                     \
+    return ok;                                                                        \
   }
-
-LAMP_DEFINE_SECTION_CACHED(lamp, asLampJson)
-LAMP_DEFINE_SECTION_CACHED(base, asBaseJson)
-LAMP_DEFINE_SECTION_CACHED(shade, asShadeJson)
-LAMP_DEFINE_SECTION_CACHED(home, asHomeModeJson)
 
 // The largest section (about 4 KB at the caps) is written straight into a
 // string measured first, so a rebuild takes one exactly-sized block and never
@@ -423,52 +362,30 @@ static void writeExpressionsSection(JsonWriter& w, const ExpressionSettings& s) 
   w.endArray();
 }
 
-void Config::expressionsSectionRebuildLocked() {
-  if (!expressionsSectionDirty_) return;
-  JsonWriter measure(nullptr, 0);
-  writeExpressionsSection(measure, expressions);
-  const size_t len = measure.length();
-  if (heapCanSpare(len + 1) &&
-      writeExactly(expressionsSectionJson_, len,
-                   [this](JsonWriter& w) { writeExpressionsSection(w, expressions); })) {
-    expressionsSectionDirty_ = false;
-  } else {
-    logSectionOom("expressions");
-  }
-}
-
-void Config::expressionsSectionRebuildIfDirty() {
-  xSemaphoreTake(cacheMutex(), portMAX_DELAY);
-  expressionsSectionRebuildLocked();
-  xSemaphoreGive(cacheMutex());
-}
-
-void Config::expressionsSectionJsonCached(std::string& out) {
-  xSemaphoreTake(cacheMutex(), portMAX_DELAY);
-  expressionsSectionRebuildLocked();
-  copyOutLocked(expressionsSectionJson_, out, "expressions");
-  xSemaphoreGive(cacheMutex());
-}
+LAMP_DEFINE_SECTION_CACHED(lamp, lampSection_.rebuild("lamp", [this] { return asLampJson(); }))
+LAMP_DEFINE_SECTION_CACHED(base, baseSection_.rebuild("base", [this] { return asBaseJson(); }))
+LAMP_DEFINE_SECTION_CACHED(shade, shadeSection_.rebuild("shade", [this] { return asShadeJson(); }))
+LAMP_DEFINE_SECTION_CACHED(home, homeSection_.rebuild("home", [this] { return asHomeModeJson(); }))
+LAMP_DEFINE_SECTION_CACHED(expressions, expressionsSection_.rebuildExactly("expressions",
+    [this](JsonWriter& w) { writeExpressionsSection(w, expressions); }))
 
 void Config::releaseSectionCaches() {
   xSemaphoreTake(cacheMutex(), portMAX_DELAY);
-  for (auto* entry : {&lampSectionJson_, &baseSectionJson_, &shadeSectionJson_,
-                      &expressionsSectionJson_, &homeSectionJson_}) {
-    if (entry->capacity() > 15) std::string().swap(*entry);
+  for (auto* section : {&lampSection_, &baseSection_, &shadeSection_,
+                        &expressionsSection_, &homeSection_}) {
+    section->release();
   }
-  lampSectionDirty_ = baseSectionDirty_ = shadeSectionDirty_ =
-      expressionsSectionDirty_ = homeSectionDirty_ = true;
   xSemaphoreGive(cacheMutex());
 }
 
 #undef LAMP_DEFINE_SECTION_CACHED
 
 void Config::invalidateLampSection() {
-  lampSectionDirty_ = true;
+  lampSection_.invalidate();
 }
 
 void Config::invalidateBaseSection() {
-  baseSectionDirty_ = true;
+  baseSection_.invalidate();
 }
 
 void Config::setDrawAnchors(uint16_t idleMa, uint16_t fullMa) {
@@ -479,23 +396,23 @@ void Config::setDrawAnchors(uint16_t idleMa, uint16_t fullMa) {
 }
 
 void Config::invalidateShadeSection() {
-  shadeSectionDirty_ = true;
+  shadeSection_.invalidate();
 }
 
 void Config::invalidateExpressionsSection() {
-  expressionsSectionDirty_ = true;
+  expressionsSection_.invalidate();
 }
 
 void Config::invalidateHomeSection() {
-  homeSectionDirty_ = true;
+  homeSection_.invalidate();
 }
 
 void Config::invalidateAllSections() {
-  lampSectionDirty_ = true;
-  baseSectionDirty_ = true;
-  shadeSectionDirty_ = true;
-  expressionsSectionDirty_ = true;
-  homeSectionDirty_ = true;
+  lampSection_.invalidate();
+  baseSection_.invalidate();
+  shadeSection_.invalidate();
+  expressionsSection_.invalidate();
+  homeSection_.invalidate();
 }
 
 void Config::applyDefaults(const Defaults& d) {

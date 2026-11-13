@@ -414,7 +414,10 @@ void runSerialCommand(char* line, size_t len) {
 
   if (strcmp(line, "expr.get") == 0) {
     std::string out;
-    config.expressionsSectionJsonCached(out);
+    if (!config.expressionsSectionJsonCached(out)) {
+      Serial.println("[cmd] err busy");
+      return;
+    }
     // write() streams the JSON; printf would malloc the whole line first.
     Serial.print("[cmd] ok ");
     Serial.write(reinterpret_cast<const uint8_t*>(out.data()), out.size());
@@ -580,8 +583,10 @@ void runSerialCommand(char* line, size_t len) {
 
   if (strcmp(line, "cfg.get") == 0) {
     std::string base, shade;
-    config.baseSectionJsonCached(base);
-    config.shadeSectionJsonCached(shade);
+    if (!config.baseSectionJsonCached(base) || !config.shadeSectionJsonCached(shade)) {
+      Serial.println("[cmd] err busy");
+      return;
+    }
     Serial.printf("[cmd] ok base=%s shade=%s\n", base.c_str(), shade.c_str());
     return;
   }
