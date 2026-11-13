@@ -184,6 +184,31 @@ void main() {
         reason: 'wrong password must not persist the lamp');
   });
 
+  test('submit() takes a busy lamp section as the password accepted',
+      () async {
+    // A lamp short of heap answers "!", which it serves only past the auth
+    // gate, so the password is right.
+    final ble = InMemoryBleClient();
+    ble.seedSection('dev1', 'lamp', Uint8List.fromList('!'.codeUnits));
+    final c = ProviderContainer(
+      overrides: [bleClientProvider.overrideWithValue(ble)],
+    );
+    addTearDown(c.dispose);
+    await c.read(inventoryNotifierProvider.future);
+    await c.read(activeLampNotifierProvider.future);
+
+    final n = c.read(addLampNotifierProvider.notifier);
+    n.select('dev1');
+    n.setName('jacko');
+    n.setPassword('secret');
+    await n.submit();
+    await n.verifyDone;
+
+    final s = c.read(addLampNotifierProvider);
+    expect(s.status, AddLampStatus.ready);
+    expect(s.error, AddLampError.none);
+  });
+
   test('submit() surfaces wrongPassword when post-claim read returns empty',
       () async {
     // Don't seed the lamp section — readSection returns Uint8List(0)

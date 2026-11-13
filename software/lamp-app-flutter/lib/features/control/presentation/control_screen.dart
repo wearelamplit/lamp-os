@@ -10,6 +10,7 @@ import '../../inventory/application/inventory_notifier.dart';
 import '../../nearby/application/ota_busy_seen_provider.dart';
 import '../application/control_notifier.dart';
 import '../application/lamp_auth_required_exception.dart';
+import '../application/lamp_busy_exception.dart';
 import 'widgets/base_card.dart';
 import 'widgets/base_editor_sheet.dart';
 import 'widgets/brightness_card.dart';
@@ -43,6 +44,14 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
       error: (e, _) {
         if (e is LampAuthRequiredException) {
           return ConnectPasswordPrompt(lampId: lampId);
+        }
+        if (e is LampBusyException) {
+          return FriendlyError.page(
+            title: 'Your lamp is low on memory.',
+            subtitle: 'Give them a moment, then try again.',
+            rawError: e,
+            onRetry: () => ref.invalidate(controlNotifierProvider(lampId)),
+          );
         }
         // A lamp sourcing firmware to a peer is hard to connect to (the OTA
         // bursts starve BLE connect). If the scan saw it busy just before we

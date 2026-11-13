@@ -326,6 +326,35 @@ void main() {
   });
 
   testWidgets(
+      'a lamp too low on memory shows that with a retry, not the password '
+      'prompt', (tester) async {
+    final (c, ble) = await _withAuthGatedLamp();
+    addTearDown(c.dispose);
+    ble.seedSection(_devId, 'lamp', Uint8List.fromList('!'.codeUnits));
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: c,
+      child: const MaterialApp(
+        home: Scaffold(body: ControlScreen(lampId: _devId)),
+      ),
+    ));
+    await _pumpUntil(tester, find.text('Your lamp is low on memory.'),
+        frames: 300);
+    expect(find.text('Your lamp is low on memory.'), findsOneWidget);
+    expect(find.text('Enter password'), findsNothing);
+
+    ble.seedSection(
+      _devId,
+      'lamp',
+      Uint8List.fromList(utf8.encode(
+        '{"name":"jacko","brightness":50,"advancedEnabled":false}',
+      )),
+    );
+    await tester.tap(find.text('Try again'));
+    await _pumpUntil(tester, find.byType(BrightnessCard), frames: 300);
+    expect(find.byType(BrightnessCard), findsOneWidget);
+  });
+
+  testWidgets(
       'Connect with wrong password shows inline error and keeps dialog open',
       (tester) async {
     final (c, _) = await _withAuthGatedLamp();
