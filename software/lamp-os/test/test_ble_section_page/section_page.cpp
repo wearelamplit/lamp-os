@@ -351,6 +351,22 @@ void test_next_open_keeps_a_small_abandoned_buffer() {
   TEST_ASSERT_TRUE(rereadsWithNoHeap(page, copyLamp));
 }
 
+// A build that grows the buffer past twice kKeptCapacity, then fails.
+static void serializeGrowThenThrow(std::string& out) {
+  out.reserve(3 * SectionPage::kKeptCapacity);
+  throw std::bad_alloc();
+}
+
+// The end of a section whose build failed frees the empty buffer it grew.
+void test_failed_build_frees_the_buffer_it_grew() {
+  SectionPage page;
+  const size_t before = g_liveBytes;
+  TEST_ASSERT_FALSE(page.open(serializeGrowThenThrow, 64));
+  TEST_ASSERT_TRUE(g_liveBytes - before > 2 * SectionPage::kKeptCapacity);
+  TEST_ASSERT_TRUE(drain(page).empty());
+  TEST_ASSERT_EQUAL_UINT(before, g_liveBytes);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_config_section_reads_whole_in_chunks);
@@ -372,5 +388,6 @@ int main(int, char**) {
   RUN_TEST(test_last_chunk_is_served_before_the_free);
   RUN_TEST(test_next_open_frees_a_buffer_an_abandoned_read_left);
   RUN_TEST(test_next_open_keeps_a_small_abandoned_buffer);
+  RUN_TEST(test_failed_build_frees_the_buffer_it_grew);
   return UNITY_END();
 }
