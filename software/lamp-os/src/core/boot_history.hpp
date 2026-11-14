@@ -124,10 +124,9 @@ bool milestoneUpdate(History& h, uint8_t& next, uint32_t nowMs,
 // Live state for a new boot of `fwVersion`.
 Live freshLive(uint32_t fwVersion);
 
-// True when a heap sample is due at `nowMs` while connected. The first is due
-// at once, each later one `intervalMs` after `lastMs`.
-bool connSampleDue(bool connected, bool sampledBefore, uint32_t lastMs, uint32_t nowMs,
-                   uint32_t intervalMs);
+// True when a heap sample is due at `nowMs` while connected, `intervalMs` after
+// the last one at `lastMs`, across the millis() wrap.
+bool connSampleDue(bool connected, uint32_t lastMs, uint32_t nowMs, uint32_t intervalMs);
 
 // Folds one heap sample taken while a client was connected.
 void foldConnectedSample(Live& live, uint32_t largestBlock);

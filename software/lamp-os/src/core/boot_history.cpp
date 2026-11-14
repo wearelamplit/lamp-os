@@ -145,9 +145,8 @@ Live freshLive(uint32_t fwVersion) {
   return live;
 }
 
-bool connSampleDue(bool connected, bool sampledBefore, uint32_t lastMs, uint32_t nowMs,
-                   uint32_t intervalMs) {
-  return connected && (!sampledBefore || nowMs - lastMs >= intervalMs);
+bool connSampleDue(bool connected, uint32_t lastMs, uint32_t nowMs, uint32_t intervalMs) {
+  return connected && nowMs - lastMs >= intervalMs;
 }
 
 void foldConnectedSample(Live& live, uint32_t largestBlock) {
@@ -240,7 +239,6 @@ constexpr uint32_t kConnSampleIntervalMs = 1000;
 
 History s_history{};
 uint8_t s_nextMilestone = 0;
-bool s_connSampled = false;
 uint32_t s_lastConnSampleMs = 0;
 
 bool save() {
@@ -286,9 +284,7 @@ void reach(Stage stage) {
 }
 
 void tick(uint32_t nowMs, bool clientConnected) {
-  if (connSampleDue(clientConnected, s_connSampled, s_lastConnSampleMs, nowMs,
-                    kConnSampleIntervalMs)) {
-    s_connSampled = true;
+  if (connSampleDue(clientConnected, s_lastConnSampleMs, nowMs, kConnSampleIntervalMs)) {
     s_lastConnSampleMs = nowMs;
     foldConnectedSample(s_live.live, heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   }

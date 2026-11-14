@@ -355,14 +355,14 @@ void test_finish_leaves_an_older_boot_alone_when_the_entry_was_never_stored() {
 
 void test_a_connected_sample_is_due_once_a_second_across_the_wrap() {
   constexpr uint32_t kEvery = 1000;
-  TEST_ASSERT_FALSE(connSampleDue(false, false, 0, 5000, kEvery));
-  // The first sample while connected, however late in the boot it comes.
-  TEST_ASSERT_TRUE(connSampleDue(true, false, 0, 0x80000000u + 5, kEvery));
-  TEST_ASSERT_TRUE(connSampleDue(true, false, 0, UINT32_MAX - 3, kEvery));
-  TEST_ASSERT_FALSE(connSampleDue(true, true, 7000, 7999, kEvery));
-  TEST_ASSERT_TRUE(connSampleDue(true, true, 7000, 8000, kEvery));
-  TEST_ASSERT_TRUE(connSampleDue(true, true, UINT32_MAX - 200, 900, kEvery));
-  TEST_ASSERT_FALSE(connSampleDue(true, true, UINT32_MAX - 200, 700, kEvery));
+  TEST_ASSERT_FALSE(connSampleDue(false, 0, 5000, kEvery));
+  // The first connection of a boot, however late it comes (lastMs still 0).
+  TEST_ASSERT_TRUE(connSampleDue(true, 0, 0x80000000u + 5, kEvery));
+  TEST_ASSERT_TRUE(connSampleDue(true, 0, UINT32_MAX - 3, kEvery));
+  TEST_ASSERT_FALSE(connSampleDue(true, 7000, 7999, kEvery));
+  TEST_ASSERT_TRUE(connSampleDue(true, 7000, 8000, kEvery));
+  TEST_ASSERT_TRUE(connSampleDue(true, UINT32_MAX - 200, 900, kEvery));
+  TEST_ASSERT_FALSE(connSampleDue(true, UINT32_MAX - 200, 700, kEvery));
 }
 
 void test_without_the_rtc_the_stage_is_the_last_one_written() {
