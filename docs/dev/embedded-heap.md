@@ -735,29 +735,52 @@ of it nonstop.
 
 ## Rollback after an update
 
-Rollback is not active. The bootloader supports it
-(`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`), but Arduino's `initArduino()` marks
-an image booting for the first time (`ESP_OTA_IMG_PENDING_VERIFY`) valid before
-`setup()` runs, unless the firmware overrides the weak `verifyRollbackLater()`
-to return true. The lamp does not, so every update is kept whatever it does
-after boot, and the lamp's own check (`MarkValidCheck` in
-`components/firmware/ota_mark_valid.hpp`) never arms. Turning rollback on is
-that one override, and is the owner's call: with it, any reset before the
-image is marked valid boots the previous image. That covers a hang (the
-watchdog resets it within 30 s in setup or 5 s in the loop) but also a
-brownout, a power cycle or a USB plug-in in an updated lamp's first ~30 s,
-after which the mesh offers the update again. The weak hook is C, so the
-override must be `extern "C" bool verifyRollbackLater() { return true; }`;
-without `extern "C"` it overrides nothing and rollback silently stays off.
+Rollback is on. An image the bootloader boots for the first time after an
+update (`ESP_OTA_IMG_PENDING_VERIFY`) stays unverified until the lamp marks it
+valid, and any reset before that boots the previous image instead. Arduino's
+`initArduino()` would mark it valid before `setup()` runs; the lamp overrides
+the core's weak C hook with `extern "C" bool verifyRollbackLater() { return
+true; }` in `components/firmware/ota_mark_valid.cpp`, so its own check
+(`MarkValidCheck` in `components/firmware/ota_mark_valid.hpp`) decides.
+Without `extern "C"` the override is an unrelated C++ symbol and rollback
+silently stays off; the symbol in the built ELF is the check.
 
-Once on, the check marks the image valid 30 s after setup ends, once BLE is
-running (it asks again every 5 s until then), and a failed mark leaves the
-image unverified until the next boot. Until then the receiver declines every
-firmware OFFER (`DeclineBusy`, which the sender retries later): it writes the
-other OTA slot raw, and the slot it would erase holds the image a rollback
-returns to. Filesystem offers still land. A stall within the first 30 s of
-an update's first boot then rolls the lamp back, and the next crash record's
-`fw` is the version that booted after it.
+The 30 s window: the check arms at the end of setup, and 30 s later, once BLE
+is running, marks the image valid (`[ota] new partition marked valid`). A
+failed mark is asked again every 5 s. Without BLE it asks again every 5 s, and
+an image whose BLE is still down 120 s after the window is rolled back on
+purpose (`[ota] BLE never started; rolling back`), since the app could never
+reach it. A hang in that time resets through the watchdog (within 30 s in
+setup, 5 s in the loop) and the bootloader rolls back. The watchdog's
+boot-loop backoff cannot hold an unverified image: the first boot of an
+update follows the receiver's restart, which ends any streak, and the first
+reset of an unverified image is already the rollback. So does every other
+reset in that window: a brownout, a power cycle, a USB plug-in, or a restart
+the lamp asks for itself (a settings save that reboots). In each case the
+lamp comes back on its previous firmware, and the mesh offers the update
+again later.
+
+Until the mark, the receiver declines every OFFER, firmware and filesystem,
+mesh and BLE (`DeclineBusy`; a mesh sender backs off that lamp for 10
+minutes, the app reports the update failed). A firmware image is written raw
+into the other OTA slot, which holds the image a rollback returns to. A
+filesystem image waits too, so the web UI is never replaced for a firmware
+that may not stay. The lamp's own distributors still offer while unverified;
+the gate for that is `lamp::offerBusy` in `components/firmware/ota_offer.hpp`,
+called from `tickOtaOffers`, the one place both firmware and filesystem offers
+start.
+
+A lamp whose bootloader predates rollback never boots an image as
+`PENDING_VERIFY` (it stays `NEW`), so the check never arms and it keeps every
+update as before. The bootloader built from this repo has rollback
+(`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` in `sdkconfig.defaults`); OTA never
+replaces a bootloader.
+
+The boot history marks the rolled-back boot (see below): `end <reset>
+rolledback` on the boot that ran the update, the next line on the previous
+firmware. The marker needs the rolled-back-to firmware to read this history
+layout, so a rollback to a firmware older than the one that added it shows
+only the history starting over.
 
 ## Reading the boot history
 
@@ -789,6 +812,13 @@ blanked), `behaviors`, `mesh`, `ota`, then `loop` (setup done, not printed). So
 distributors. A `>` before the stage marks a lower bound: the RTC state did not
 survive the reset, so only what NVS holds is known, `>boot` while setup ran.
 
+`rolledback` after the reset marks a boot that ran an update the lamp never
+marked valid, followed by a boot of other firmware: the bootloader rolled it
+back at that reset (see "Rollback after an update"). The flag is set when the
+boot's entry is first written and cleared when the image is marked valid, so
+it is lost when that first write never lands. A USB reflash of other firmware
+during an update's first 30 s reads the same.
+
 `refused` counts this lamp's own one-shot expressions refused because the heap
 could not spare them (`[expr] transient drop ... (local`): the app's Tests, its
 greetings, a tired yawn, a copycat replay, the serial `yawn` command. A refusal
@@ -807,8 +837,9 @@ keeps the figures from the last milestone it reached, 1 min, 1 h or 1 day, and
 `up` reads `>` that milestone. `free - big -` means the boot died before any
 figure was taken: in `setup()`, in its first loop iteration, or in its first
 minute after a power cut. Past 49.7 days the snapshot's uptime saturates and
-reads `>49d17h`. A boot writes the history at start, at the end of setup and at
-each milestone, so at most five NVS writes per boot. When none of a boot's
+reads `>49d17h`. A boot writes the history at start, at the end of setup, at
+each milestone and, on an update's first boot, when the image is marked
+valid, so at most six NVS writes per boot. When none of a boot's
 writes lands, the next boot rebuilds that boot's entry from the RTC state
 (firmware, the reset that started it, stage, counters) when it survived, so
 the boot before it keeps its own figures and end.

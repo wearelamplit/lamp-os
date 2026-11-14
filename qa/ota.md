@@ -61,12 +61,14 @@ skew:
      peer: `[fw_receiver] recv progress: N chunks received`
    - src: `[fwdist] DONE -> <peer-mac> (attempt 1/…, waiting RESULT)`
    - peer: signature verify passes (a `signature verify FAILED` line is an
-     instant fail), then a reboot into the new version. No `[ota]` line
-     follows: rollback is off, so Arduino marks the new image valid before
-     setup and the 30 s self-health check never arms (see
+     instant fail), then a reboot into the new version, `[ota] booted in
+     PENDING_VERIFY, 30s self-health check armed` at the end of its setup and
+     `[ota] new partition marked valid (post-OTA boot)` about 30 s later (see
      [embedded-heap.md](../docs/dev/embedded-heap.md#rollback-after-an-update)).
-     A `[ota] booted in PENDING_VERIFY` line means rollback has been turned
-     on.
+     Leave the peer's port alone until that line: a reset before it, the port
+     open's included, rolls the peer back. No `[ota]` line at all means the
+     peer's bootloader predates rollback; note it, the rollback rows below
+     cannot run on it.
    - src: `[fwdist] RESULT success from <peer-mac>`
    - monitor: `== VERSION <peer-mac>: <old> → <new>` (from the peer's
      post-reboot HELLOs on the src tap).
@@ -120,6 +122,44 @@ skew:
 
 7. Restore: flash both lamps back to the intended baseline, revert `VERSION`.
 
+## Rollback
+
+An updated lamp stays unverified for its first ~30 s of loop, and any reset
+in that window boots its previous firmware. These rows need serial commands
+on the peer, so both images are signed debug builds of this firmware
+(`DEBUG=1 ... scripts/build_signed_lamp.sh`, see Signed local builds): peer
+at version N, source at N+1. The peer runs on `bench_cmd.py` in place of the
+tap, opened before the transfer so the open's reset lands on the old image.
+
+8. **A hang in the first 30 s rolls back.** On the peer:
+
+   ```sh
+   scripts/bench_cmd.py <peer-port> --wait-ready '\[ota\] booted in PENDING_VERIFY' \
+       --wait-ready-timeout 900 --cmd 'loopwd.hang' --duration 1200 -o /tmp/qa_rollback.log
+   ```
+
+   Run step 2's transfer. Expect, on the peer: `[ota] booted in
+   PENDING_VERIFY`, `[cmd] ok loopwd.hang`, a `Task watchdog got triggered`
+   panic within about 5 s, and a boot of version N (its `[fwdist] online;
+   v=0x...` line) with `[boots] -1 fw<N+1> ... end taskwdt rolledback`. No
+   `marked valid` line before the reset. Later the source offers N+1 again
+   and the peer installs it and logs `marked valid`; that second pass is the
+   row's re-check that a rolled-back lamp takes the update again.
+
+9. **A marked image survives a reset.** After row 8's second pass logs
+   `[ota] new partition marked valid`, run `scripts/bench_cmd.py <peer-port>
+   --cmd 'loopwd.hang' --duration 30 -o /tmp/qa_rollback.log`. The peer resets
+   and boots N+1 again, and its `[boots] -1 fw<N+1> ... end taskwdt` line has
+   no `rolledback`. A power cycle in place of the hang reads the same with
+   `end power`.
+
+10. **No offer is taken while unverified.** With a third lamp on N+2 powered
+    in range, repeat row 8 without the hang (`--cmd` left out). Any OFFER
+    reaching the peer before its `marked valid` line logs `[fw_receiver] OFFER
+    while this image is unverified, declining`, filesystem offers included,
+    and no `ACCEPT` or `upfront erase` follows before that line. The third
+    lamp may take up to its 10-minute per-peer backoff to offer again.
+
 ## Indicator expectations
 
 - **Firmware OTA** — a DIM full-shade fill (~16% physical, own base color when
@@ -151,6 +191,9 @@ skew:
   bar/dim/pulse (silent by design) — a calm base settle is the pass, judged by
   `[fs_ota]`/chunk lines.
 - Peer's name/config identical across the OTA reboot.
+- Rollback (rows 8-10): a hang before `marked valid` boots version N with
+  `rolledback` on the N+1 line, a reset after it keeps N+1 with no
+  `rolledback`, and no offer is accepted before `marked valid`.
 - Dev source: the `disabled (dev channel)` line, zero OFFERs.
 - Gated pair (step 6): zero OFFERs from the source; any receiver-side decline
   is logged, never a silent flash.
@@ -172,6 +215,12 @@ skew:
   (known-slow DONE/REQ state-pivot behavior; parked).
 - FS-image (SPIFFS web UI) OTA — same transport, `[fsdist]`/`[fs_ota]` tags;
   gets incidental coverage only.
+- The rollback of an updated lamp whose BLE never starts (`[ota] BLE never
+  started; rolling back`): the bench cannot stop BLE starting. The decision is
+  natively tested in `test_ota_mark_valid`; the call it makes is not.
+- A hang in an updated lamp's setup: `loopwd.hangsetup` restarts the lamp as
+  it arms, so the hang lands on the old image. Row 8's loop hang takes the
+  same reset path.
 
 ## Signed local builds
 

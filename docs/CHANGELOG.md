@@ -16,6 +16,13 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   older firmware starts its history over.
 
 ### Fixed
+- **An update that hangs or crashes goes back to the previous firmware.**
+  Lamps were meant to undo a bad update but never did: every update was kept
+  whatever it did. Now an updated lamp that hangs, crashes or restarts in its
+  first ~30 s comes back on the firmware it had, and takes the update again
+  later. It also takes no other update, and no web-page update, until those
+  30 s have passed with Bluetooth up. A power cut in that window rolls back
+  too. The boot history marks a boot that was rolled back with `rolledback`.
 - **A lamp that hangs while starting up restarts itself.** A lamp could go
   dark during startup, after an update or not, and stay dark until it was
   unplugged. The startup is now watched: a step that hangs restarts the lamp
