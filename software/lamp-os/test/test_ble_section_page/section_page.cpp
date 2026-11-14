@@ -238,9 +238,11 @@ void test_last_chunk_is_served_before_the_free() {
   TEST_ASSERT_TRUE(page.read(true).empty());
 }
 
-static const std::string kShortJson(600, 's');
-static const std::string kLongerJson(700, 'l');
-static const std::string kHugeJson(4 * SectionPage::kKeptCapacity, 'h');
+// Grown from the shorter, the longer one's buffer doubles to just under twice
+// kKeptCapacity; the abandoned one's sits just over it.
+static const std::string kShortJson(SectionPage::kKeptCapacity - 24, 's');
+static const std::string kLongerJson(SectionPage::kKeptCapacity - 14, 'l');
+static const std::string kHugeJson(2 * SectionPage::kKeptCapacity + 64, 'h');
 static bool copyShort(std::string& out) {
   out.assign(kShortJson);
   return true;
@@ -258,10 +260,12 @@ static bool copyHuge(std::string& out) {
 // doubles, still keep it: the longer one re-reads with no heap to spare.
 void test_small_sections_keep_a_buffer_they_grew() {
   SectionPage page;
+  const size_t before = g_liveBytes;
   page.openConfig(copyShort, 64);
   drain(page);
   page.openConfig(copyLonger, 64);
   drain(page);
+  TEST_ASSERT_TRUE(g_liveBytes - before > SectionPage::kKeptCapacity);
   TEST_ASSERT_TRUE(rereadsWithNoHeap(page, copyLonger));
 }
 
