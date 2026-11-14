@@ -12,6 +12,7 @@
 
 #include "components/network/mesh/lamp_roster.cpp"
 #include "components/network/ble/nearby_list.cpp"
+#include "components/network/ble/social_view.hpp"
 #include "../replaced_new/replaced_new.hpp"
 
 using ble_control::NearbyList;
@@ -168,6 +169,36 @@ void test_ended_hold_frees_on_the_next_tick() {
   at(g_now + 50);
   TEST_ASSERT_TRUE(f.list.read(out, g_now));
   TEST_ASSERT_EQUAL_UINT(22, entries(out));
+}
+
+// N6 through the CHAR_EDIT_SESSION 0x08 rule: a close after an open frees
+// the list on the next tick, during OTA quiet too; a replayed close with the
+// view already closed keeps a mesh-lamps screen's hold; an open waits out quiet.
+void test_social_close_frees_and_a_replayed_close_keeps_the_hold() {
+  using ble_control::applySocialViewWrite;
+  Fixture f;
+  const size_t baseline = g_liveBytes;
+  std::string out;
+
+  bool active = applySocialViewWrite(false, 0x08, true, false, f.list);
+  TEST_ASSERT_TRUE(active);
+  f.list.read(out, g_now);
+  out = std::string();
+  active = applySocialViewWrite(active, 0x08, false, true, f.list);
+  TEST_ASSERT_FALSE(active);
+  at(g_now + 50);
+  f.list.tick(f.roster, true, g_now);
+  TEST_ASSERT_FALSE(f.list.built());
+  TEST_ASSERT_EQUAL_UINT(baseline, g_liveBytes);
+
+  f.list.read(out, g_now);
+  active = applySocialViewWrite(active, 0x08, false, false, f.list);
+  at(g_now + 50);
+  f.list.tick(f.roster, true, g_now);
+  TEST_ASSERT_TRUE(f.list.built());
+
+  TEST_ASSERT_FALSE(applySocialViewWrite(false, 0x08, true, true, f.list));
+  TEST_ASSERT_TRUE(applySocialViewWrite(true, 0x01, false, false, f.list));
 }
 
 // A disconnect frees it and ends the hold, so a reconnect holds nothing
@@ -485,6 +516,7 @@ int main(int, char**) {
   RUN_TEST(test_disconnect_frees_and_reconnect_waits_for_a_read);
   RUN_TEST(test_low_heap_shrink_refreshes_in_place);
   RUN_TEST(test_ended_hold_frees_on_the_next_tick);
+  RUN_TEST(test_social_close_frees_and_a_replayed_close_keeps_the_hold);
   RUN_TEST(test_read_at_millis_zero_counts);
   RUN_TEST(test_expired_read_never_revives_after_wrap);
   RUN_TEST(test_change_while_open_moves_the_rev);

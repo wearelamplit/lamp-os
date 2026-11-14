@@ -38,6 +38,7 @@
 #include "crypto.hpp"
 #include "components/network/ble/ble_radio_gate.hpp"
 #include "components/network/ble/nearby_list.hpp"
+#include "components/network/ble/social_view.hpp"
 #include "components/network/ble/section_page.hpp"
 #include "components/network/ble/gatt_layout.hpp"
 #include "components/network/ble/social_scan.hpp"
@@ -451,22 +452,17 @@ class EditSessionCallback : public NimBLECharacteristicCallbacks {
     if (val.size() < 2) return;
     const uint8_t surface = static_cast<uint8_t>(val[0]);
     const bool   open    = (val[1] != 0);
+    const bool quiet = lamp::ota_quiet_mode::isQuiet();
     // 0x08 is not an edit surface: the app on the Social/Network page toggles
     // the duty-cycled passive scan that sights BLE-only peers while connected.
-    // Leaving Social frees the nearby list even during an OTA. A reconnect
-    // replays the app's last flags, so only a close after an open ends the hold.
-    if ((surface & 0x08) && !open) {
-      if (s_socialViewActive) s_nearby.endHold();
-      s_socialViewActive = false;
-    }
-    if (lamp::ota_quiet_mode::isQuiet()) {
+    s_socialViewActive = applySocialViewWrite(s_socialViewActive, surface, open, quiet, s_nearby);
+    if (quiet) {
       lamp::logDroppedWrite("editSession", "ota quiet");
       return;
     }
     if (surface & 0x01) lamp::overrides.base.setOperatorEditing(open);
     if (surface & 0x02) lamp::overrides.shade.setOperatorEditing(open);
     if (surface & 0x04) lamp::overrides.brightness.setOperatorEditing(open);
-    if ((surface & 0x08) && open) s_socialViewActive = true;
 #ifdef LAMP_DEBUG
     Serial.printf("[ble_control] editSession surface=0x%02x %s\n",
                   surface, open ? "open" : "closed");
