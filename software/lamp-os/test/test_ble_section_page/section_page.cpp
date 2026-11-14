@@ -291,8 +291,8 @@ void test_small_section_end_frees_an_abandoned_large_buffer() {
   TEST_ASSERT_TRUE(g_liveBytes - before <= keeps);
 }
 
-// Abandoned sizes over kKeptCapacity, up to twice it: buffers a capacity test
-// cannot tell from one small sections grew.
+// Abandoned sizes over kKeptCapacity, up to twice it. A capacity test cannot
+// tell these buffers from one small sections grew.
 static const size_t kAbandonedSizes[] = {SectionPage::kKeptCapacity + 1,
                                          SectionPage::kKeptCapacity * 3 / 2 + 7,
                                          2 * SectionPage::kKeptCapacity};
