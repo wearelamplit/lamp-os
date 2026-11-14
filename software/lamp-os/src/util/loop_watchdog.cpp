@@ -111,6 +111,7 @@ void apply() {
 
 void subscribe() {
   if (s_subscribed.load() != nullptr) return;
+  s_lastSubscribeTryMs = millis();
   if (esp_task_wdt_add(s_loopTask) != ESP_OK) {
     if (!s_subscribeFailed) Serial.println("[loopwd] subscribe FAILED; retrying");
     s_subscribeFailed = true;
@@ -163,7 +164,6 @@ void feed() {
   if (s_loopTask == nullptr || self != s_loopTask) return;
   const uint32_t nowMs = millis();
   if (s_subscribed.load() == nullptr && subscribeRetryDue(s_lastSubscribeTryMs, nowMs)) {
-    s_lastSubscribeTryMs = nowMs;
     subscribe();
   }
   if (!feedsFrom(self, s_subscribed.load())) return;
