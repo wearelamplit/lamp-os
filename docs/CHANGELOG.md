@@ -8,6 +8,15 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 ## Unreleased
 
 ### Fixed
+- **A lamp that hangs while starting up restarts itself.** A lamp could go
+  dark during startup, after an update or not, and stay dark until it was
+  unplugged. The startup is now watched: a step that hangs restarts the lamp
+  within 30 s, and the boot history says which step it was.
+- **A lamp stuck in a restart loop no longer freezes for good.** After three
+  quick watchdog restarts in a row a lamp used to stop watching itself, so the
+  next hang froze it until it was unplugged. It now waits 5 minutes before
+  watching again, or less once it has run a minute, so it keeps trying without
+  restarting every few seconds.
 - **Lioness is easier on memory and the radio in a crowd.** Its lions took
   memory every frame, and asked a peer that never answered for its colours
   every frame. They now draw without taking memory, ask a silent peer at most
@@ -36,6 +45,14 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   save's memory check now sizes its largest block from the expression list
   it actually builds, which on a lamp changes nothing today but keeps the
   check honest as expressions grow.
+
+### Added
+- **The boot history (`[boots]` on serial) shows more.** For a boot that
+  never finished starting up, the last startup step it got through. For every
+  boot, how many Tests and greetings were refused for lack of memory, how many
+  times a phone connected, and the least memory left in one piece while one
+  was connected. Older lamps' history carries over on update; reflashing an
+  older firmware starts its history over.
 
 ## 1.3.5
 

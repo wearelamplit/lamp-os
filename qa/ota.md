@@ -61,8 +61,12 @@ skew:
      peer: `[fw_receiver] recv progress: N chunks received`
    - src: `[fwdist] DONE -> <peer-mac> (attempt 1/…, waiting RESULT)`
    - peer: signature verify passes (a `signature verify FAILED` line is an
-     instant fail), reboot, `[ota] booted in PENDING_VERIFY, 30s self-health
-     check armed`, then `[ota] new partition marked valid (post-OTA boot)`
+     instant fail), then a reboot into the new version. No `[ota]` line
+     follows: rollback is off, so Arduino marks the new image valid before
+     setup and the 30 s self-health check never arms (see
+     [embedded-heap.md](../docs/dev/embedded-heap.md#rollback-after-an-update)).
+     A `[ota] booted in PENDING_VERIFY` line means rollback has been turned
+     on.
    - src: `[fwdist] RESULT success from <peer-mac>`
    - monitor: `== VERSION <peer-mac>: <old> → <new>` (from the peer's
      post-reboot HELLOs on the src tap).
