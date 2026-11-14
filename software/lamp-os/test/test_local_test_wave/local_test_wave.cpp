@@ -5,9 +5,9 @@
 // cascadeEnabled; a Test that did not play sends nothing, and the next tap
 // tries again. The type-only trigger shifty chains into glitchy with follows
 // the same rule. A continuous type or a running OTA sends nothing. snafu's
-// crowd fan-out (broadcastInvocation)
-// keeps its forced cascade, and a peer's invocation sends neither. The
-// compositor and mesh are link stubs; the stub mesh counts each frame.
+// crowd fan-out (broadcastInvocation) keeps its forced cascade, and a peer's
+// invocation sends neither. The compositor and mesh are link stubs; the stub
+// mesh counts each frame.
 
 #include <unity.h>
 
