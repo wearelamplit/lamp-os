@@ -151,7 +151,7 @@ void test_released_a_hold_after_the_last_read() {
   TEST_ASSERT_EQUAL_UINT(baseline, g_liveBytes);
 }
 
-// N6: ending the hold frees the list and the roster copy on the next tick,
+// Ending the hold frees the list and the roster copy on the next tick,
 // well inside kHoldMs, and a later read builds it again.
 void test_ended_hold_frees_on_the_next_tick() {
   Fixture f;
@@ -171,9 +171,10 @@ void test_ended_hold_frees_on_the_next_tick() {
   TEST_ASSERT_EQUAL_UINT(22, entries(out));
 }
 
-// N6 through the CHAR_EDIT_SESSION 0x08 rule: a close after an open frees
-// the list on the next tick, during OTA quiet too; a replayed close with the
-// view already closed keeps a mesh-lamps screen's hold; an open waits out quiet.
+// Through the CHAR_EDIT_SESSION 0x08 rule: a close after an open frees the
+// list on the next tick, during OTA quiet too; a replayed close with the view
+// already closed keeps a mesh-lamps screen's hold; an open waits out quiet,
+// and a close in quiet frees the list though its open was dropped.
 void test_social_close_frees_and_a_replayed_close_keeps_the_hold() {
   using ble_control::applySocialViewWrite;
   Fixture f;
@@ -199,6 +200,15 @@ void test_social_close_frees_and_a_replayed_close_keeps_the_hold() {
 
   TEST_ASSERT_FALSE(applySocialViewWrite(false, 0x08, true, true, f.list));
   TEST_ASSERT_TRUE(applySocialViewWrite(true, 0x01, false, false, f.list));
+
+  f.list.read(out, g_now);
+  out = std::string();
+  TEST_ASSERT_FALSE(applySocialViewWrite(false, 0x08, true, true, f.list));
+  TEST_ASSERT_FALSE(applySocialViewWrite(false, 0x08, false, true, f.list));
+  at(g_now + 50);
+  f.list.tick(f.roster, true, g_now);
+  TEST_ASSERT_FALSE(f.list.built());
+  TEST_ASSERT_EQUAL_UINT(baseline, g_liveBytes);
 }
 
 // A disconnect frees it and ends the hold, so a reconnect holds nothing
