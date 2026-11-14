@@ -286,12 +286,10 @@ class LampRoster {
   // invalidated by the next getMesh call. Callers may reorder it in place.
   std::vector<MeshPeer>& getMesh(uint32_t maxAgeMs);
 
-  // Every roster entry, for the app-facing nearby list. The buffer is reserved
-  // to kCapacity in one allocation on first use and held until releaseAll, so
-  // it is resident only while an app/webapp client is connected. On a heap too
-  // fragmented for that it reserves just the current count instead, and throws
-  // std::bad_alloc only if that fails too. Same task/reentrancy contract as
-  // getMesh.
+  // Every roster entry, for the app-facing nearby list. The buffer is sized to
+  // the roster's count, reallocated only when the count moved, and held until
+  // releaseAll. Throws std::bad_alloc when the heap cannot size it. Same
+  // task/reentrancy contract as getMesh.
   std::vector<ListedPeer>& getAll();
   void releaseAll();
 

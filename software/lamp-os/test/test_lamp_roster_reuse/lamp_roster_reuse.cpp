@@ -1,8 +1,9 @@
 // Native-host proof that the roster snapshot buffers never reallocate after
 // their one reservation: snapshotNear/getMesh are reserved to kCapacity at
-// construction, getAll on first use. A growing roster or a steady-state query
-// loop must keep a stable data() pointer and capacity, which is what keeps the
-// fragmented lamp heap's largest free block high.
+// construction. A growing roster or a steady-state query loop must keep a
+// stable data() pointer and capacity, which is what keeps the fragmented lamp
+// heap's largest free block high. getAll is sized to the roster's count and
+// reallocates only when the count moves.
 
 #include <unity.h>
 
@@ -88,17 +89,15 @@ void test_steady_state_queries_do_not_realloc() {
   }
 }
 
-// Growing the roster 0 -> kCapacity must not move any snapshot buffer: each
-// is reserved to kCapacity up front, so a new roster high-water mark never
+// Growing the roster 0 -> kCapacity must not move the near or mesh buffer:
+// each is reserved to kCapacity up front, so a new roster high-water mark never
 // reallocates (the per-growth staircase is what fragments the lamp heap).
 void test_buffers_do_not_realloc_as_roster_grows_to_capacity() {
   LampRoster r;
   const NearbyCopy* nearData = r.snapshotNear(240000).data();
   const MeshPeer* meshData = r.getMesh(240000).data();
-  const ListedPeer* allData = r.getAll().data();
   TEST_ASSERT_EQUAL_size_t(LampRoster::kCapacity, r.snapshotNear(240000).capacity());
   TEST_ASSERT_EQUAL_size_t(LampRoster::kCapacity, r.getMesh(240000).capacity());
-  TEST_ASSERT_EQUAL_size_t(LampRoster::kCapacity, r.getAll().capacity());
 
   uint32_t now = 100000;
   for (size_t i = 0; i < LampRoster::kCapacity; i++) {
@@ -114,17 +113,42 @@ void test_buffers_do_not_realloc_as_roster_grows_to_capacity() {
     TEST_ASSERT_EQUAL_size_t(i + 1, r.getAll().size());
     TEST_ASSERT_EQUAL_PTR(nearData, r.snapshotNear(240000).data());
     TEST_ASSERT_EQUAL_PTR(meshData, r.getMesh(240000).data());
-    TEST_ASSERT_EQUAL_PTR(allData, r.getAll().data());
   }
 }
 
-void test_get_all_rereserves_after_release() {
+void addMesh(LampRoster& r, uint8_t from, uint8_t to) {
+  for (uint8_t i = from; i < to; i++) {
+    uint8_t mac[6] = {0x02, 0x00, 0x00, 0x00, 0x02, i};
+    r.addOrUpdateFromEspNow("peer", mac, kNoColor, kNoColor, 0x010203, 0, 5,
+                            nullptr, nullptr, false, 0, false, nullptr, false,
+                            -60);
+  }
+}
+
+void test_get_all_is_sized_to_the_roster() {
   LampRoster r;
-  seed(r, 4);
-  TEST_ASSERT_EQUAL_size_t(LampRoster::kCapacity, r.getAll().capacity());
+  TEST_ASSERT_EQUAL_size_t(0, r.getAll().capacity());
+  set_mock_millis(100000);
+  addMesh(r, 0, 22);
+  TEST_ASSERT_EQUAL_size_t(22, r.getAll().size());
+  TEST_ASSERT_EQUAL_size_t(22, r.getAll().capacity());
+  addMesh(r, 22, 30);
+  TEST_ASSERT_EQUAL_size_t(30, r.getAll().size());
+  TEST_ASSERT_EQUAL_size_t(30, r.getAll().capacity());
+  set_mock_millis(400000);
+  addMesh(r, 20, 30);
+  r.prune(240000);
+  TEST_ASSERT_EQUAL_size_t(10, r.getAll().size());
+  TEST_ASSERT_EQUAL_size_t(10, r.getAll().capacity());
+}
+
+void test_get_all_resizes_after_release() {
+  LampRoster r;
+  addMesh(r, 0, 4);
+  TEST_ASSERT_EQUAL_size_t(4, r.getAll().capacity());
   r.releaseAll();
   auto& all = r.getAll();
-  TEST_ASSERT_EQUAL_size_t(LampRoster::kCapacity, all.capacity());
+  TEST_ASSERT_EQUAL_size_t(4, all.capacity());
   TEST_ASSERT_EQUAL_size_t(r.size(), all.size());
 }
 
@@ -163,7 +187,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_getters_return_stable_buffer_reference);
   RUN_TEST(test_steady_state_queries_do_not_realloc);
   RUN_TEST(test_buffers_do_not_realloc_as_roster_grows_to_capacity);
-  RUN_TEST(test_get_all_rereserves_after_release);
+  RUN_TEST(test_get_all_is_sized_to_the_roster);
+  RUN_TEST(test_get_all_resizes_after_release);
   RUN_TEST(test_snapshot_near_reuses_cached_copy_within_window);
   RUN_TEST(test_snapshot_near_rebuilds_on_different_max_age);
   return UNITY_END();
