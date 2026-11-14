@@ -145,6 +145,23 @@ void markSetupDone(History& h) {
   h.entries[h.count - 1].stage = static_cast<uint8_t>(Stage::Loop);
 }
 
+void markUnverified(History& h) {
+  if (h.count == 0) return;
+  h.entries[h.count - 1].flags |= kUnverified;
+}
+
+void markVerified(History& h) {
+  if (h.count == 0) return;
+  h.entries[h.count - 1].flags &= static_cast<uint8_t>(~kUnverified);
+}
+
+bool rolledBack(const History& h, size_t i) {
+  if (i + 1 >= h.count) return false;
+  const BootEntry& e = h.entries[i];
+  return (e.flags & kUnverified) != 0 &&
+         std::memcmp(e.fw, h.entries[i + 1].fw, sizeof(e.fw)) != 0;
+}
+
 Live freshLive(uint32_t fwVersion, esp_reset_reason_t reason) {
   Live live{};
   live.stage = static_cast<uint8_t>(Stage::Boot);
@@ -192,10 +209,11 @@ void formatLine(char* out, size_t cap, const History& h, size_t i) {
   if (e.uptime != 0) {
     std::snprintf(heap, sizeof(heap), "free %u big %u", e.minFreeHeap, e.minLargestBlock);
   }
-  int n = std::snprintf(out, cap, "[boots] -%u fw%u.%u.%u up %s%s %s end %s",
+  int n = std::snprintf(out, cap, "[boots] -%u fw%u.%u.%u up %s%s %s end %s%s",
                         static_cast<unsigned>(h.count - 1 - i), e.fw[0], e.fw[1], e.fw[2],
                         (e.uptime & kUptimeExact) ? "" : ">", up, heap,
-                        resetName(h.entries[i + 1].resetReason));
+                        resetName(h.entries[i + 1].resetReason),
+                        rolledBack(h, i) ? " rolledback" : "");
   const Stage stage = static_cast<Stage>(e.stage);
   if (stage == Stage::Unknown || n < 0 || static_cast<size_t>(n) >= cap) return;
   if (stage < Stage::Loop) {
@@ -260,7 +278,7 @@ bool save() {
 
 }  // namespace
 
-void boot(uint32_t fwVersion) {
+void boot(uint32_t fwVersion, bool unverified) {
   nvs_handle_t h;
   if (nvs_open(kNvsNamespace, NVS_READONLY, &h) == ESP_OK) {
     alignas(History) uint8_t blob[sizeof(History)];
@@ -275,6 +293,7 @@ void boot(uint32_t fwVersion) {
   s_live.magic = kLiveMagic;
   s_live.live = freshLive(fwVersion, esp_reset_reason());
   append(s_history, fwVersion, esp_reset_reason());
+  if (unverified) markUnverified(s_history);
   s_live.live.stored = save() ? 1 : 0;
 
   char line[kLineCap];
@@ -288,6 +307,11 @@ void reach(Stage stage) {
   s_live.live.stage = static_cast<uint8_t>(stage);
   if (stage != Stage::Loop) return;
   markSetupDone(s_history);
+  if (save()) s_live.live.stored = 1;
+}
+
+void imageVerified() {
+  markVerified(s_history);
   if (save()) s_live.live.stored = 1;
 }
 

@@ -10,6 +10,7 @@
 #include <string>
 
 #include "config/config.hpp"
+#include "components/firmware/ota_mark_valid.hpp"
 #include "config/nvs_config_store.hpp"
 #include "core/boot_history.hpp"
 #include "core/crash_record.hpp"
@@ -49,7 +50,7 @@ void setup() {
   // Before anything opens NVS: a partition that reports itself unusable is
   // erased so the lamp still boots with Bluetooth.
   lamp::NvsConfigStore::initFlash();
-  lamp::boot_history::boot(lamp::FIRMWARE_VERSION);
+  lamp::boot_history::boot(lamp::FIRMWARE_VERSION, lamp::runningImagePendingVerify());
   lamp::crash_record::boot(lamp::FIRMWARE_VERSION);
   lamp_register_panic_handler();
 

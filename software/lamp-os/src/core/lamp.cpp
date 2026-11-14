@@ -888,15 +888,9 @@ void lamp::Lamp::setup() {
   setup_stage::reach(boot_history::Stage::Ota);
 
   {
-    esp_ota_img_states_t state;
-    const esp_partition_t* running = esp_ota_get_running_partition();
-    const bool pendingVerify = running &&
-                               esp_ota_get_state_partition(running, &state) == ESP_OK &&
-                               state == ESP_OTA_IMG_PENDING_VERIFY;
+    const bool pendingVerify = lamp::runningImagePendingVerify();
     lamp::otaMarkValid.arm(pendingVerify, millis());
-#ifdef LAMP_DEBUG
     if (pendingVerify) Serial.println("[ota] booted in PENDING_VERIFY, 30s self-health check armed");
-#endif
   }
   // Wire the cascade fan-out path. The manager only sends after this; before
   // begin/setMeshLink, local triggers fire but never cascade.
@@ -1208,16 +1202,26 @@ void lamp::Lamp::tick() {
   lamp::firmwareDistributor.tick(millis());
   fs_ota::tick(millis());
   lamp::tickOtaOffers(millis(), compositor.startupComplete);
-  if (lamp::otaMarkValid.due(millis(), ble_control::isRunning())) {
-    const esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
-    if (err == ESP_OK) lamp::otaMarkValid.validated();
-#ifdef LAMP_DEBUG
-    if (err == ESP_OK) {
-      Serial.println("[ota] new partition marked valid (post-OTA boot)");
-    } else {
-      Serial.printf("[ota] mark_app_valid failed: 0x%X\n", (unsigned)err);
+  switch (lamp::otaMarkValid.poll(millis(), ble_control::isRunning())) {
+    case lamp::MarkValidCheck::Step::MarkValid: {
+      const esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+      if (err == ESP_OK) {
+        lamp::otaMarkValid.validated();
+        boot_history::imageVerified();
+        Serial.println("[ota] new partition marked valid (post-OTA boot)");
+      } else {
+        Serial.printf("[ota] mark_app_valid failed: 0x%X\n", (unsigned)err);
+      }
+      break;
     }
-#endif
+    case lamp::MarkValidCheck::Step::RollBack:
+      Serial.println("[ota] BLE never started; rolling back to the previous image");
+      Serial.flush();
+      Serial.printf("[ota] rollback failed: 0x%X\n",
+                    (unsigned)esp_ota_mark_app_invalid_rollback_and_reboot());
+      break;
+    case lamp::MarkValidCheck::Step::Wait:
+      break;
   }
   // Rebuild + push any dirty section JSON to its NimBLE characteristic
   // so onRead callbacks (Core 0) hand back NimBLE's already-buffered

@@ -447,19 +447,83 @@ void test_the_widest_line_comes_out_whole() {
   e.minLargestBlock = UINT16_MAX;
   e.fw[0] = e.fw[1] = e.fw[2] = 255;
   e.stage = static_cast<uint8_t>(Stage::Behaviors);
-  e.flags = kCounted;
+  e.flags = kCounted | kUnverified;
   e.refusedLocal = e.connects = e.connMinLargest = UINT16_MAX;
   h.entries[1].resetReason = ESP_RST_BROWNOUT;
   char line[kLineCap];
   formatLine(line, sizeof(line), h, 0);
   TEST_ASSERT_EQUAL_STRING(
-      "[boots] -4 fw255.255.255 up >49d17h free 65535 big 65535 end brownout setup >behaviors "
-      "refused 65535 conn 65535 connbig 65535",
+      "[boots] -4 fw255.255.255 up >49d17h free 65535 big 65535 end brownout rolledback setup "
+      ">behaviors refused 65535 conn 65535 connbig 65535",
       line);
   // No stage name is longer than the one above.
   for (uint8_t i = 0; i <= static_cast<uint8_t>(Stage::Loop); ++i) {
     TEST_ASSERT_TRUE(std::strlen(stageName(static_cast<Stage>(i))) <= std::strlen("behaviors"));
   }
+}
+
+void test_an_unverified_boot_is_marked_and_cleared_on_the_running_entry() {
+  History h = historyOf(3);
+  markUnverified(h);
+  TEST_ASSERT_EQUAL_UINT8(kUnverified, h.entries[2].flags & kUnverified);
+  TEST_ASSERT_EQUAL_UINT8(0, h.entries[1].flags & kUnverified);
+  h.entries[2].flags |= kCounted;
+  markVerified(h);
+  TEST_ASSERT_EQUAL_UINT8(0, h.entries[2].flags & kUnverified);
+  TEST_ASSERT_EQUAL_UINT8(kCounted, h.entries[2].flags);
+  History empty{};
+  markUnverified(empty);
+  markVerified(empty);
+  TEST_ASSERT_EQUAL_UINT16(0, empty.count);
+}
+
+void test_an_unverified_boot_followed_by_other_firmware_was_rolled_back() {
+  History h{};
+  h.version = kVersion;
+  append(h, fwOf(1, 3, 7), ESP_RST_POWERON);
+  append(h, fwOf(1, 3, 8), ESP_RST_SW);
+  markUnverified(h);
+  append(h, fwOf(1, 3, 7), ESP_RST_TASK_WDT);
+  append(h, fwOf(1, 3, 7), ESP_RST_POWERON);
+  TEST_ASSERT_FALSE(rolledBack(h, 0));
+  TEST_ASSERT_TRUE(rolledBack(h, 1));
+  TEST_ASSERT_FALSE(rolledBack(h, 2));
+  TEST_ASSERT_FALSE(rolledBack(h, 3));
+  char line[kLineCap];
+  formatLine(line, sizeof(line), h, 1);
+  TEST_ASSERT_NOT_NULL(std::strstr(line, " fw1.3.8 "));
+  TEST_ASSERT_NOT_NULL(std::strstr(line, " end taskwdt rolledback setup >boot "));
+  formatLine(line, sizeof(line), h, 0);
+  TEST_ASSERT_NULL(std::strstr(line, "rolledback"));
+  formatLine(line, sizeof(line), h, 2);
+  TEST_ASSERT_NULL(std::strstr(line, "rolledback"));
+}
+
+void test_an_unverified_boot_on_the_same_firmware_was_not_rolled_back() {
+  History h{};
+  h.version = kVersion;
+  append(h, fwOf(1, 3, 8), ESP_RST_SW);
+  markUnverified(h);
+  append(h, fwOf(1, 3, 8), ESP_RST_TASK_WDT);
+  TEST_ASSERT_FALSE(rolledBack(h, 0));
+  h.entries[1].fw[0] = 2;
+  TEST_ASSERT_TRUE(rolledBack(h, 0));
+  h.entries[1].fw[0] = 1;
+  h.entries[1].fw[1] = 4;
+  TEST_ASSERT_TRUE(rolledBack(h, 0));
+}
+
+void test_a_verified_boot_followed_by_other_firmware_was_an_update() {
+  History h{};
+  h.version = kVersion;
+  append(h, fwOf(1, 3, 7), ESP_RST_POWERON);
+  markUnverified(h);
+  markVerified(h);
+  append(h, fwOf(1, 3, 8), ESP_RST_SW);
+  TEST_ASSERT_FALSE(rolledBack(h, 0));
+  char line[kLineCap];
+  formatLine(line, sizeof(line), h, 0);
+  TEST_ASSERT_NULL(std::strstr(line, "rolledback"));
 }
 
 void test_stage_names_round_trip() {
@@ -564,6 +628,10 @@ int main(int, char**) {
   RUN_TEST(test_line_names_the_setup_stage);
   RUN_TEST(test_line_prints_counters_and_marks_untaken_ones);
   RUN_TEST(test_the_widest_line_comes_out_whole);
+  RUN_TEST(test_an_unverified_boot_is_marked_and_cleared_on_the_running_entry);
+  RUN_TEST(test_an_unverified_boot_followed_by_other_firmware_was_rolled_back);
+  RUN_TEST(test_an_unverified_boot_on_the_same_firmware_was_not_rolled_back);
+  RUN_TEST(test_a_verified_boot_followed_by_other_firmware_was_an_update);
   RUN_TEST(test_stage_names_round_trip);
   RUN_TEST(test_counters_saturate);
   RUN_TEST(test_connected_low_point_is_the_smallest_sample);

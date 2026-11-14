@@ -261,7 +261,7 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
     sendAccept(ctrl, lamp_protocol::FwAcceptStatus::DeclineBusy);
     return;
   }
-  if (offerWaitsForMarkValid(fsHooks_ != nullptr, otaMarkValid.pending())) {
+  if (otaMarkValid.pending()) {
 #ifdef LAMP_DEBUG
     Serial.println("[fw_receiver] OFFER while this image is unverified, declining");
 #endif

@@ -41,6 +41,10 @@ Stage stageFromName(const char* name);
 constexpr uint8_t kStageExact = 1u << 0;
 // The counters hold figures; unset, they were never taken.
 constexpr uint8_t kCounted = 1u << 1;
+// The boot ran an image the bootloader had not seen marked valid, and its
+// last write still said so. The next boot running other firmware means the
+// bootloader rolled it back.
+constexpr uint8_t kUnverified = 1u << 2;
 
 // One boot. `uptime` holds seconds; kUptimeExact marks a figure taken from the
 // RTC snapshot at the next boot. Unmarked, it is a lower bound: the last
@@ -112,6 +116,13 @@ void append(History& h, uint32_t fwVersion, esp_reset_reason_t reason);
 // The running boot finished setup.
 void markSetupDone(History& h);
 
+// The running boot's image is unverified, or was just marked valid.
+void markUnverified(History& h);
+void markVerified(History& h);
+
+// The ended entry `i` ran an image that was rolled back at its end.
+bool rolledBack(const History& h, size_t i);
+
 // Uptime milestones that rewrite the running boot's entry. `next` starts at 0
 // and advances past each milestone reported due.
 bool milestoneDue(uint32_t nowMs, uint8_t& next);
@@ -146,8 +157,11 @@ void formatLine(char* out, size_t cap, const History& h, size_t i);
 
 // Call once in setup, right after NVS is up and before crash_record::boot()
 // re-arms the RTC snapshot: closes the previous boot, opens this one, writes
-// NVS, prints the history.
-void boot(uint32_t fwVersion);
+// NVS, prints the history. `unverified` is the running image's PENDING_VERIFY.
+void boot(uint32_t fwVersion, bool unverified);
+
+// The running image was marked valid. Writes NVS. Loop task only.
+void imageVerified();
 
 // Records that setup finished `stage`. Reaching Loop also writes NVS. Loop
 // task only.
