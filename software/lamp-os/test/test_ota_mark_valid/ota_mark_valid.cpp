@@ -60,6 +60,8 @@ void test_the_settle_window_spans_the_millis_wrap() {
   MarkValidCheck c;
   const uint32_t start = UINT32_MAX - 1000;
   c.arm(true, start);
+  // Still before the wrap, with the deadline already past it.
+  TEST_ASSERT_FALSE(c.due(start + 500, true));
   TEST_ASSERT_FALSE(c.due(start + 2000, true));
   TEST_ASSERT_TRUE(c.due(start + MarkValidCheck::kSettleMs, true));
 }
