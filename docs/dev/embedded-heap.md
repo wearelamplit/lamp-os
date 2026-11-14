@@ -632,14 +632,21 @@ scale with the number of peers or the mesh's message rate, so each is bounded:
   build is retried on the next read.
 - **The task boundary.** A `std::bad_alloc` that no closer catch takes ends at
   `catchBadAlloc` (`util/alloc_boundary.hpp`), which wraps each loop
-  iteration's `Lamp::tick` and every GATT characteristic callback: it logs
+  iteration's `Lamp::tick`, every GATT characteristic callback
+  (`AllocGuarded`) and the BLE scan callback: it logs
   `[heap] bad_alloc caught in <stage>` at most every 5 s and drops the rest of
   that tick, write or read (a read answers empty), where an uncaught one
   aborts the lamp. The boundary cannot give back a lock the thrower held, so
   a path that allocates under a lock (the wisp status and config cache
-  writes) catches inside the lock, and a hot path whose loss should not cost
-  the rest of the tick (the wisp-status merge on every entry, the state
-  notify payload, the colour-info drain) catches where it allocates.
+  writes and the wispconfig copy) catches inside the lock, and a hot path
+  whose loss should not cost the rest of the tick (the wisp-status merge on
+  every entry, the state notify payload, the colour-info drain) catches where
+  it allocates. A path that sets shared state before an allocation restores
+  it on the unwind: a transient's trigger takes its behavior back out of the
+  compositor, and the cascade suppression is a scoped guard. The boundary
+  reaches only firmware frames: NimBLE's own allocations on its host task
+  have none to catch in, and with no exception emergency pool a heap too
+  exhausted to hold the exception object itself still aborts.
 - **OTA sessions.** The receiver's chunk bitmap (up to 8 KB per OFFER) is
   allocated only when `heapCanSpare` allows it; otherwise the OFFER is declined
   busy and the sender retries.
