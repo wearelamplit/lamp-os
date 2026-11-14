@@ -21,6 +21,7 @@ void tearDown(void) { g_refuse = false; }
 void test_refused_serialize_reads_empty() {
   lamp::ExpressionInvocation inv;
   inv.type = "rainbow_cascade_long_type";
+  inv.colors = {lamp::Color(1, 2, 3, 4), lamp::Color(5, 6, 7, 8)};
   std::string out;
   lamp::serializeInvocation(inv, out);
   TEST_ASSERT_FALSE(out.empty());

@@ -13,6 +13,7 @@
 
 #include <lampos/clock.hpp>
 
+#include "util/alloc_boundary.hpp"
 #include "util/heap_guard.hpp"
 
 namespace lamp {
@@ -118,8 +119,10 @@ void LampRoster::cacheWispStatus(const uint8_t mac[6],
     xSemaphoreGive(mutex_);
     return;
   }
-  wispCache_.lastStatusJson.assign(json, jsonLen);
-  wispCache_.lastStatusMs = millis();
+  if (catchBadAlloc("wispStatus cache",
+                    [&] { wispCache_.lastStatusJson.assign(json, jsonLen); })) {
+    wispCache_.lastStatusMs = millis();
+  }
   xSemaphoreGive(mutex_);
 }
 
@@ -130,7 +133,10 @@ bool LampRoster::cacheWispConfig(const uint8_t mac[6],
     xSemaphoreGive(mutex_);
     return false;
   }
-  const bool changed = storeIfChanged(wispCache_.lastConfigJson, json, jsonLen);
+  bool changed = false;
+  catchBadAlloc("wispConfig cache", [&] {
+    changed = storeIfChanged(wispCache_.lastConfigJson, json, jsonLen);
+  });
   if (changed) wispCache_.lastConfigMs = millis();
   xSemaphoreGive(mutex_);
   return changed;
@@ -219,8 +225,8 @@ void LampRoster::retireStaleWisp(uint32_t nowMs) {
   xSemaphoreGive(mutex_);
 }
 
-// Serializing into a std::string grows it by doubling, so a build bounded
-// by kWispStatusCharMaxLen can briefly hold twice that.
+// A direct-read build, which a growing std::string can briefly hold twice
+// over. The uncapped section build can need more, and relies on the catch.
 static constexpr size_t kWispStatusBuildBytes = 2 * kWispStatusCharMaxLen;
 
 static bool wispStatusOom() {
@@ -276,9 +282,8 @@ bool LampRoster::getWispStatusReadJson(std::string& out, size_t maxLen) {
     out = mergeWispStatusJson(in, maxLen);
   } catch (const std::bad_alloc&) {
     std::string().swap(out);
-    return wispStatusOom();
   }
-  return true;
+  return out.empty() ? wispStatusOom() : true;
 }
 
 size_t LampRoster::copyManualPaletteBlob(uint8_t* out, size_t cap) {

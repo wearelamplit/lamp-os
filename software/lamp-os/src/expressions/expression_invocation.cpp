@@ -4,6 +4,8 @@
 
 #include <new>
 
+#include "util/alloc_boundary.hpp"
+
 #ifdef LAMP_DEBUG
 #include <Arduino.h>
 #endif
@@ -23,25 +25,27 @@ uint32_t clampDelayMs(uint32_t v) {
 }
 
 void serializeInvocation(const ExpressionInvocation& inv, std::string& out) {
-  JsonDocument doc;
-  doc["type"] = inv.type;
-  doc["target"] = inv.target;
-  doc["delayMs"] = inv.delayMs;
-
-  if (!inv.colors.empty()) {
-    doc["colors"] = colorsToPackedHex(inv.colors);
-  }
-
-  JsonObject paramsObj = doc["parameters"].to<JsonObject>();
-  for (const auto& kv : inv.parameters) {
-    paramsObj[kv.first] = kv.second;
-  }
-  if (inv.hops != 0) doc["hp"] = inv.hops;
   try {
-    serializeJson(doc, out);
+    JsonDocument doc;
+    doc["type"] = inv.type;
+    doc["target"] = inv.target;
+    doc["delayMs"] = inv.delayMs;
+    if (!inv.colors.empty()) {
+      doc["colors"] = colorsToPackedHex(inv.colors);
+    }
+    JsonObject paramsObj = doc["parameters"].to<JsonObject>();
+    for (const auto& kv : inv.parameters) {
+      paramsObj[kv.first] = kv.second;
+    }
+    if (inv.hops != 0) doc["hp"] = inv.hops;
+    if (!doc.overflowed()) {
+      serializeJson(doc, out);
+      return;
+    }
   } catch (const std::bad_alloc&) {
-    std::string().swap(out);
   }
+  std::string().swap(out);
+  logBadAlloc("invocation");
 }
 
 bool parseInvocation(JsonObjectConst doc, ExpressionInvocation& out) {

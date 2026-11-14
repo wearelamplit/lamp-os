@@ -26,6 +26,7 @@
 #include "components/webapp/webapp.hpp"
 #include "util/color.hpp"
 #include "util/dropped_write_log.hpp"
+#include "util/alloc_boundary.hpp"
 #include "util/heap_guard.hpp"
 #include "util/heap_probe.hpp"
 #include "util/loop_stall.hpp"
@@ -295,6 +296,29 @@ static bool decodeIncomingOp(const std::string& raw,
   return true;
 }
 
+// Wraps a characteristic's callbacks so a std::bad_alloc thrown on the host
+// task drops that write, or reads empty, instead of aborting the lamp.
+class AllocGuardedCallbacks : public NimBLECharacteristicCallbacks {
+ public:
+  explicit AllocGuardedCallbacks(NimBLECharacteristicCallbacks* inner) : inner_(inner) {}
+  void onRead(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
+    if (!lamp::catchBadAlloc("BLE onRead", [&] { inner_->onRead(c, connInfo); })) {
+      c->setValue("");
+    }
+  }
+  void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
+    lamp::catchBadAlloc("BLE onWrite", [&] { inner_->onWrite(c, connInfo); });
+  }
+  void onSubscribe(NimBLECharacteristic* c, NimBLEConnInfo& connInfo,
+                   uint16_t subValue) override {
+    lamp::catchBadAlloc("BLE onSubscribe",
+                        [&] { inner_->onSubscribe(c, connInfo, subValue); });
+  }
+
+ private:
+  NimBLECharacteristicCallbacks* inner_;
+};
+
 class ControlServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer* server, NimBLEConnInfo& connInfo) override {
     uint16_t handle = connInfo.getConnHandle();
@@ -437,8 +461,10 @@ class EditSessionCallback : public NimBLECharacteristicCallbacks {
     // 0x08 is not an edit surface: the app on the Social/Network page toggles
     // the duty-cycled passive scan that sights BLE-only peers while connected.
     if (surface & 0x08) {
+      // A reconnect replays the app's last flags, so only a close after an
+      // open ends the hold.
+      if (s_socialViewActive && !open) s_nearby.endHold();
       s_socialViewActive = open;
-      if (!open) s_nearby.endHold();
     }
 #ifdef LAMP_DEBUG
     Serial.printf("[ble_control] editSession surface=0x%02x %s\n",
@@ -1208,7 +1234,7 @@ void start(lamp::Config* config) {
                     def.uuid);
       continue;
     }
-    if (bound->cb) c->setCallbacks(bound->cb);
+    if (bound->cb) c->setCallbacks(new AllocGuardedCallbacks(bound->cb));
     if (bound->out) *bound->out = c;
   }
   for (size_t j = 0; j < kBindingCount; ++j) {
