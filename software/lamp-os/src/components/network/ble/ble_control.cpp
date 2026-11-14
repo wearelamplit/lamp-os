@@ -1015,29 +1015,22 @@ void setGreetingStateProvider(std::function<lamp::GreetingState()> fn) {
   s_greetingStateProvider = std::move(fn);
 }
 
-// A greeting peer id and kind at their longest, with the fixed fields.
-static constexpr size_t kStateNotifyBuildBytes = 256;
-
 void notifyStateChange() {
   // A greeting edge fires this with no phone attached; the payload has no
   // reader then, and a connecting client reads the state fresh.
   if (!s_stateNotify || !s_clientConnected) return;
-  if (!lamp::heapCanSpare(kStateNotifyBuildBytes)) {
-    logBleSectionOom("stateNotify");
-    return;
-  }
   std::string payload;
-  try {
-    StateNotifyFields fields;
-    fields.previewActive = ::expressionManager.isAnyTestActive();
-    lamp::GreetingState gs;
-    if (s_greetingStateProvider) {
-      gs = s_greetingStateProvider();
-      fields.greeting = &gs;
-    }
-    fields.nearbyRev = s_nearby.rev();
-    buildStateNotifyJson(fields, payload);
-  } catch (const std::bad_alloc&) {
+  const bool built = buildStateNotifyGuarded(
+      [](StateNotifyFields& fields, lamp::GreetingState& greeting) {
+        fields.previewActive = ::expressionManager.isAnyTestActive();
+        if (s_greetingStateProvider) {
+          greeting = s_greetingStateProvider();
+          fields.greeting = &greeting;
+        }
+        fields.nearbyRev = s_nearby.rev();
+      },
+      payload);
+  if (!built) {
     logBleSectionOom("stateNotify");
     return;
   }

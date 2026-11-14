@@ -1,9 +1,12 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <new>
 #include <string>
 
 #include "behaviors/greetable.hpp"
+#include "util/heap_guard.hpp"
 
 namespace ble_control {
 
@@ -18,6 +21,28 @@ struct StateNotifyFields {
 // Adds `quiet` from ota_quiet_mode::isQuiet(), the predicate every
 // live-control write gate tests.
 void buildStateNotifyJson(const StateNotifyFields& f, std::string& out);
+
+// A greeting peer id and kind at their longest, with the fixed fields.
+inline constexpr size_t kStateNotifyBuildBytes = 256;
+
+// Builds the payload from the fields `fill(fields, greeting)` sets, `fill`
+// inside the guard since the greeting it reads allocates. False, with `out`
+// empty, when the heap cannot spare the build or an allocation fails.
+template <class Fill>
+bool buildStateNotifyGuarded(Fill&& fill, std::string& out) {
+  out.clear();
+  if (!lamp::heapCanSpare(kStateNotifyBuildBytes)) return false;
+  try {
+    StateNotifyFields fields;
+    lamp::GreetingState greeting;
+    fill(fields, greeting);
+    buildStateNotifyJson(fields, out);
+    return true;
+  } catch (const std::bad_alloc&) {
+    std::string().swap(out);
+    return false;
+  }
+}
 
 // When tick() sends CHAR_STATE_NOTIFY on its own: on a new client connection,
 // when the client subscribes, and on every quiet-mode change while a client is
