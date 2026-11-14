@@ -403,10 +403,11 @@ class LampRoster {
   // lampos::kRetiredAgeMs.
   void retireStaleWisp(uint32_t nowMs);
 
-  // Build and return the merged wispStatus JSON (see mergeWispStatusJson).
+  // Builds the merged wispStatus JSON (see mergeWispStatusJson) into `out`.
   // `maxLen` 0 serves it whole for the `wispstatus` page section;
-  // CHAR_WISP_STATUS passes kWispStatusCharMaxLen.
-  std::string getWispStatusReadJson(size_t maxLen);
+  // CHAR_WISP_STATUS passes kWispStatusCharMaxLen. Any task; never throws.
+  // False, with `out` empty, when the heap cannot spare the build.
+  bool getWispStatusReadJson(std::string& out, size_t maxLen);
 
   // Copy the cached manual palette (interleaved R,G,B,W per color) into
   // `out`, returning bytes written. Served on the `wisppalette` page

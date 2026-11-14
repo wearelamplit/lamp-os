@@ -4,10 +4,16 @@
 #include "pending_slots.hpp"
 #include "wisp_status_merge.hpp"
 
+#include <Arduino.h>
+#include <esp_heap_caps.h>
+
 #include <cstring>
+#include <new>
 #include <utility>
 
 #include <lampos/clock.hpp>
+
+#include "util/heap_guard.hpp"
 
 namespace lamp {
 
@@ -213,12 +219,30 @@ void LampRoster::retireStaleWisp(uint32_t nowMs) {
   xSemaphoreGive(mutex_);
 }
 
-std::string LampRoster::getWispStatusReadJson(size_t maxLen) {
-  // BLE on-read callback (Core 0); bounded take so it doesn't block
-  // behind a loop-task writer. On timeout return "{}".
+// Serializing into a std::string grows it by doubling, so a build bounded
+// by kWispStatusCharMaxLen can briefly hold twice that.
+static constexpr size_t kWispStatusBuildBytes = 2 * kWispStatusCharMaxLen;
+
+static bool wispStatusOom() {
+  static uint32_t lastMs = 0;
+  const uint32_t now = millis();
+  if (lastMs == 0 || now - lastMs >= 5000) {
+    lastMs = now == 0 ? 1 : now;
+    Serial.printf("[wisp_cache] wispStatus OOM: largest=%u\n",
+                  static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+  }
+  return false;
+}
+
+bool LampRoster::getWispStatusReadJson(std::string& out, size_t maxLen) {
+  out.clear();
+  if (!heapCanSpare(kWispStatusBuildBytes)) return wispStatusOom();
   WispStatusMergeInput in;
+  // BLE on-read callback (Core 0); bounded take so it doesn't block
+  // behind a loop-task writer.
   if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(2)) != pdTRUE) {
-    return std::string("{}");
+    out = "{}";
+    return true;
   }
   in.present = wispCache_.present;
   std::memcpy(in.mac, wispCache_.mac, 6);
@@ -227,22 +251,34 @@ std::string LampRoster::getWispStatusReadJson(size_t maxLen) {
   in.lastHelloMs = wispCache_.lastHelloMs;
   std::memcpy(in.helloPaletteIdPrefix, wispCache_.paletteIdPrefix,
               sizeof(in.helloPaletteIdPrefix));
-  in.statusJson = wispCache_.lastStatusJson;
   in.lastStatusMs = wispCache_.lastStatusMs;
   in.lastConfigMs = wispCache_.lastConfigMs;
-  xSemaphoreGive(mutex_);
-
-  // Local wisp-control state from ColorOverride, not from the cache, so a
-  // fresh app connection sees it even before any hello has been cached.
-  if (lampWispStateProvider_ != nullptr) {
-    LampWispState ws = lampWispStateProvider_();
-    in.haveLampState = true;
-    in.controllingBase = ws.controllingBase;
-    in.controllingShade = ws.controllingShade;
-    in.baseWispColor = std::move(ws.baseWispColor);
-    in.shadeWispColor = std::move(ws.shadeWispColor);
+  bool copied = true;
+  try {
+    in.statusJson = wispCache_.lastStatusJson;
+  } catch (const std::bad_alloc&) {
+    copied = false;
   }
-  return mergeWispStatusJson(in, maxLen);
+  xSemaphoreGive(mutex_);
+  if (!copied) return wispStatusOom();
+
+  try {
+    // Local wisp-control state from ColorOverride, not from the cache, so a
+    // fresh app connection sees it even before any hello has been cached.
+    if (lampWispStateProvider_ != nullptr) {
+      LampWispState ws = lampWispStateProvider_();
+      in.haveLampState = true;
+      in.controllingBase = ws.controllingBase;
+      in.controllingShade = ws.controllingShade;
+      in.baseWispColor = std::move(ws.baseWispColor);
+      in.shadeWispColor = std::move(ws.shadeWispColor);
+    }
+    out = mergeWispStatusJson(in, maxLen);
+  } catch (const std::bad_alloc&) {
+    std::string().swap(out);
+    return wispStatusOom();
+  }
+  return true;
 }
 
 size_t LampRoster::copyManualPaletteBlob(uint8_t* out, size_t cap) {

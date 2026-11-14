@@ -202,6 +202,7 @@ void ExpressionManager::cascade(const ExpressionInvocation& shape,
   // replaces the one waiting.
   std::string json;
   serializeInvocation(inv, json);
+  if (json.empty()) return;
   const CascadeScheduler::Begin queued =
       cascade_.begin(json.data(), json.size(), staggerMs, nowMs);
   if (queued == CascadeScheduler::Begin::Replaced) {
@@ -292,7 +293,7 @@ void ExpressionManager::announce(const ExpressionInvocation& shape,
 
   std::string json;
   serializeInvocation(inv, json);
-  if (json.size() > lamp_protocol::EVENT_MAX_PAYLOAD) return;
+  if (json.empty() || json.size() > lamp_protocol::EVENT_MAX_PAYLOAD) return;
   meshLink_->sendEvent(reinterpret_cast<const uint8_t*>(json.data()), json.size());
 }
 
@@ -377,7 +378,7 @@ void ExpressionManager::sendInvocationTo(const uint8_t mac[6],
   if (!meshLink_) return;
   std::string json;
   serializeInvocation(inv, json);
-  if (json.size() > lamp_protocol::COMMAND_MAX_PAYLOAD) return;
+  if (json.empty() || json.size() > lamp_protocol::COMMAND_MAX_PAYLOAD) return;
   meshLink_->sendCommand(mac, reinterpret_cast<const uint8_t*>(json.data()),
                          json.size());
 }

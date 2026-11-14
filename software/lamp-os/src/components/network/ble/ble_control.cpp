@@ -26,6 +26,7 @@
 #include "components/webapp/webapp.hpp"
 #include "util/color.hpp"
 #include "util/dropped_write_log.hpp"
+#include "util/heap_guard.hpp"
 #include "util/heap_probe.hpp"
 #include "util/loop_stall.hpp"
 #include "util/loop_watchdog.hpp"
@@ -547,7 +548,9 @@ class WispStatusCallback : public NimBLECharacteristicCallbacks {
       c->setValue("");
       return;
     }
-    c->setValue(lamp::lampRoster.getWispStatusReadJson(lamp::kWispStatusCharMaxLen));
+    std::string json;
+    lamp::lampRoster.getWispStatusReadJson(json, lamp::kWispStatusCharMaxLen);
+    c->setValue(json);
   }
 };
 
@@ -556,7 +559,8 @@ void notifyWispStatus() {
   // No subscriber to push to, and the onRead callback rebuilds fresh, so
   // skip the serialize+notify churn on every wisp mesh event with no client.
   if (!s_clientConnected) return;
-  auto json = lamp::lampRoster.getWispStatusReadJson(lamp::kWispStatusCharMaxLen);
+  std::string json;
+  if (!lamp::lampRoster.getWispStatusReadJson(json, lamp::kWispStatusCharMaxLen)) return;
 #ifdef LAMP_DEBUG
   const bool sawCB = json.find("\"controllingBase\":true") != std::string::npos;
   const bool sawCS = json.find("\"controllingShade\":true") != std::string::npos;
@@ -756,8 +760,7 @@ static const std::array<SectionEntry, 11> kSections = {{
     out.assign(reinterpret_cast<const char*>(buf), n);
   }},
   {"wispstatus", [](std::string& out) {
-    const std::string json = lamp::lampRoster.getWispStatusReadJson(0);
-    out.assign(json.data(), json.size());
+    if (!lamp::lampRoster.getWispStatusReadJson(out, 0)) throw std::bad_alloc();
   }},
   {"wispconfig", [](std::string& out) {
     lamp::lampRoster.copyWispConfigJson(out);
@@ -1008,20 +1011,32 @@ void setGreetingStateProvider(std::function<lamp::GreetingState()> fn) {
   s_greetingStateProvider = std::move(fn);
 }
 
+// A greeting peer id and kind at their longest, with the fixed fields.
+static constexpr size_t kStateNotifyBuildBytes = 256;
+
 void notifyStateChange() {
   // A greeting edge fires this with no phone attached; the payload has no
   // reader then, and a connecting client reads the state fresh.
   if (!s_stateNotify || !s_clientConnected) return;
-  StateNotifyFields fields;
-  fields.previewActive = ::expressionManager.isAnyTestActive();
-  lamp::GreetingState gs;
-  if (s_greetingStateProvider) {
-    gs = s_greetingStateProvider();
-    fields.greeting = &gs;
+  if (!lamp::heapCanSpare(kStateNotifyBuildBytes)) {
+    logBleSectionOom("stateNotify");
+    return;
   }
-  fields.nearbyRev = s_nearby.rev();
   std::string payload;
-  buildStateNotifyJson(fields, payload);
+  try {
+    StateNotifyFields fields;
+    fields.previewActive = ::expressionManager.isAnyTestActive();
+    lamp::GreetingState gs;
+    if (s_greetingStateProvider) {
+      gs = s_greetingStateProvider();
+      fields.greeting = &gs;
+    }
+    fields.nearbyRev = s_nearby.rev();
+    buildStateNotifyJson(fields, payload);
+  } catch (const std::bad_alloc&) {
+    logBleSectionOom("stateNotify");
+    return;
+  }
   s_stateNotify->setValue(payload);
   s_stateNotify->notify();
 }
@@ -1204,9 +1219,18 @@ void start(lamp::Config* config) {
     }
   }
 
-  if (s_wifiStateChar) s_wifiStateChar->setValue(buildWifiStateJson(false));
+  if (s_wifiStateChar) {
+    try {
+      s_wifiStateChar->setValue(buildWifiStateJson(false));
+    } catch (const std::bad_alloc&) {
+      s_wifiStateChar->setValue("");
+      logBleSectionOom("wifi");
+    }
+  }
   if (s_wispStatusChar) {
-    s_wispStatusChar->setValue(lamp::lampRoster.getWispStatusReadJson(lamp::kWispStatusCharMaxLen));
+    std::string json;
+    lamp::lampRoster.getWispStatusReadJson(json, lamp::kWispStatusCharMaxLen);
+    s_wispStatusChar->setValue(json);
   }
   if (s_stateNotify) s_stateNotify->setValue("{}");
   if (schemaVersionChar) {

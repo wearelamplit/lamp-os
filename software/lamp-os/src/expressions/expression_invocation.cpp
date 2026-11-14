@@ -2,6 +2,8 @@
 
 #include "config/config_types.hpp"
 
+#include <new>
+
 #ifdef LAMP_DEBUG
 #include <Arduino.h>
 #endif
@@ -35,7 +37,11 @@ void serializeInvocation(const ExpressionInvocation& inv, std::string& out) {
     paramsObj[kv.first] = kv.second;
   }
   if (inv.hops != 0) doc["hp"] = inv.hops;
-  serializeJson(doc, out);
+  try {
+    serializeJson(doc, out);
+  } catch (const std::bad_alloc&) {
+    std::string().swap(out);
+  }
 }
 
 bool parseInvocation(JsonObjectConst doc, ExpressionInvocation& out) {

@@ -11,6 +11,7 @@
 #include "components/network/mesh/wisp_cache.cpp"
 #include "components/network/mesh/wisp_fleet_cache.cpp"
 #include "components/network/mesh/wisp_status_merge.cpp"
+#include "util/heap_guard.cpp"
 
 namespace lp = lamp_protocol;
 using lamp::LampRoster;
