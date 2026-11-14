@@ -89,8 +89,9 @@ Two properties make it lethal:
    that allocation throws. It is the exception to rules 2 and 5: it is held
    while a phone is connected, when the largest block is tightest, so it holds
    what the lamps there need, never the 50-slot maximum, and it holds nothing
-   on a screen that does not show the list. A new roster consumer reads one of these views, adding a field to its
-   projection if needed, and never takes a full `RosterEntry` copy per peer.
+   on a screen that does not show the list. A new roster consumer reads one of
+   these views, adding a field to its projection if needed, and never takes a
+   full `RosterEntry` copy per peer.
 
    The buffers are **single-task and non-reentrant**: loop task (Core 1) only,
    and a reference is invalidated by the next call to the same getter.

@@ -119,7 +119,7 @@ void NearbyList::render(const std::vector<lamp::ListedPeer>& lamps, uint32_t now
       out += buf;
     }
     out += ",\"fwChannel\":\"";
-    lamp::appendJsonEscaped(out, p.fwChannel);
+    lamp::appendJsonEscapedAscii(out, p.fwChannel);
     out += '"';
     if (p.otaState != 0) {
       snprintf(buf, sizeof(buf), ",\"otaState\":%u", p.otaState);
@@ -162,7 +162,8 @@ bool NearbyList::copy(std::string& out) {
 bool NearbyList::wanted(bool clientConnected, uint32_t nowMs) {
   uint32_t at = readAtMs_.load();
   if (at == 0) return false;
-  if (nowMs - at < kHoldMs) return clientConnected;
+  // Signed: a read on another core can stamp a time after the caller's nowMs.
+  if (static_cast<int32_t>(nowMs - at) < static_cast<int32_t>(kHoldMs)) return clientConnected;
   // A failed exchange means a read restamped it since the load.
   return !readAtMs_.compare_exchange_strong(at, 0) && clientConnected;
 }

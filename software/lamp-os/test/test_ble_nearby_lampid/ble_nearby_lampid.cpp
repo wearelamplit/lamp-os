@@ -7,7 +7,7 @@
 #include "util/bd_addr.hpp"
 
 // Keep in sync with the per-peer lampId emit in
-// ble_control.cpp::buildNearbyJson.
+// NearbyList::render.
 std::string emitNearbyPeerSnippet(bool hasMac, const uint8_t mac[6]) {
   std::string out = "{";
   if (hasMac) {

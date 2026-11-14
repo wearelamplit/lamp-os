@@ -391,9 +391,10 @@ std::vector<MeshPeer>& LampRoster::getMesh(uint32_t maxAgeMs) {
 std::vector<ListedPeer>& LampRoster::getAll() {
   const size_t n = size();
   if (allBuf_.capacity() != n) {
-    std::vector<ListedPeer> sized;
-    sized.reserve(n);
-    allBuf_.swap(sized);
+    // Free first: the contents are refilled below, so the old block need not
+    // outlive the new one.
+    std::vector<ListedPeer>().swap(allBuf_);
+    allBuf_.reserve(n);
   }
 #ifdef LAMP_DEBUG
   debugGetterEnter();

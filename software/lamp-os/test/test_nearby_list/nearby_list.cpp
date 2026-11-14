@@ -21,6 +21,7 @@ using lamp::ListedPeer;
 
 static size_t g_allocs = 0;
 static size_t g_liveBytes = 0;
+static size_t g_peakBytes = 0;
 static bool g_refuse = false;
 
 constexpr size_t kHeader = alignof(std::max_align_t);
@@ -32,6 +33,7 @@ void* testAllocate(size_t n) {
   if (!block) return nullptr;
   *reinterpret_cast<size_t*>(block) = n;
   g_liveBytes += n;
+  if (g_liveBytes > g_peakBytes) g_peakBytes = g_liveBytes;
   return block + kHeader;
 }
 void testRelease(void* p) noexcept {
@@ -251,6 +253,20 @@ void test_held_list_follows_the_roster() {
   TEST_ASSERT_TRUE(at4 < at22 / 4);
 }
 
+// Resizing the roster copy frees the old block before taking the new one, so
+// the two are never live together.
+void test_roster_copy_resize_never_holds_both() {
+  Fixture f;
+  f.roster.getAll();
+  at(g_now + 300000);
+  touch(f.roster, 0, 10);
+  f.roster.prune(LAMP_PRUNE_TIME_MS);
+  const size_t before = g_liveBytes;
+  g_peakBytes = before;
+  TEST_ASSERT_EQUAL_UINT(10, f.roster.getAll().capacity());
+  TEST_ASSERT_EQUAL_UINT(before, g_peakBytes);
+}
+
 // A heap too tight for a bigger buffer still refreshes into the one held.
 void test_low_heap_still_refreshes_in_place() {
   Fixture f;
@@ -295,6 +311,74 @@ void test_longest_entry_fits_its_bound() {
   TEST_ASSERT_TRUE(out.size() <= bound);
 }
 
+// A read stamped on another core just after the loop sampled its clock is
+// fresh, not 49 days old.
+void test_read_stamped_after_the_tick_clock_counts() {
+  Fixture f;
+  g_taskDelayHook = nullptr;
+  std::string out;
+  f.list.read(out, g_now + 1);
+  f.list.tick(f.roster, true, g_now);
+  TEST_ASSERT_TRUE(f.list.built());
+}
+
+// Each app-visible field moves the rev when it changes.
+void test_each_visible_field_moves_the_rev() {
+  Fixture f;
+  std::string out;
+  f.list.read(out, g_now);
+  const uint8_t mac[6] = {0x02, 0x00, 0x00, 0x00, 0x03, 0};
+  const uint8_t target[6] = {0x02, 0x00, 0x00, 0x00, 0x03, 9};
+  struct Change {
+    const char* what;
+    void (*apply)(LampRoster&, const uint8_t*, const uint8_t*);
+  };
+  static const Change kChanges[] = {
+      {"base", [](LampRoster& r, const uint8_t* m, const uint8_t*) {
+         r.addOrUpdateFromEspNow("lamp00", m, Color(9, 1, 2, 3), Color(4, 5, 6, 0), 0x010203);
+       }},
+      {"shade", [](LampRoster& r, const uint8_t* m, const uint8_t*) {
+         r.addOrUpdateFromEspNow("lamp00", m, Color(9, 1, 2, 3), Color(9, 5, 6, 0), 0x010203);
+       }},
+      {"fwVersion", [](LampRoster& r, const uint8_t* m, const uint8_t*) {
+         r.addOrUpdateFromEspNow("lamp00", m, Color(9, 1, 2, 3), Color(9, 5, 6, 0), 0x010204);
+       }},
+      {"otaState", [](LampRoster& r, const uint8_t* m, const uint8_t*) {
+         r.addOrUpdateFromEspNow("lamp00", m, Color(9, 1, 2, 3), Color(9, 5, 6, 0), 0x010204, 2);
+       }},
+      {"fwChannel", [](LampRoster& r, const uint8_t* m, const uint8_t*) {
+         r.addOrUpdateFromEspNow("lamp00", m, Color(9, 1, 2, 3), Color(9, 5, 6, 0), 0x010204, 2,
+                                 5, "standard-beta");
+       }},
+      {"otaSendingTo", [](LampRoster& r, const uint8_t* m, const uint8_t* t) {
+         r.addOrUpdateFromEspNow("lamp00", m, Color(9, 1, 2, 3), Color(9, 5, 6, 0), 0x010204, 1,
+                                 5, "standard-beta", nullptr, false, 0, false, t, true);
+       }},
+      {"near", [](LampRoster& r, const uint8_t* m, const uint8_t*) { r.markNear(m); }},
+  };
+  for (const Change& c : kChanges) {
+    const uint32_t rev = f.list.rev();
+    c.apply(f.roster, mac, target);
+    at(g_now + 1000);
+    f.list.tick(f.roster, true, g_now);
+    f.list.read(out, g_now);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(rev + 1, f.list.rev(), c.what);
+  }
+}
+
+// fwChannel is ASCII by contract, so a byte past 0x7F renders escaped and the
+// list stays valid UTF-8.
+void test_fw_channel_high_bytes_are_escaped() {
+  ListedPeer p;
+  std::strcpy(p.name, "x");
+  p.fwChannel[0] = static_cast<char>(0xFF);
+  p.fwChannel[1] = '\0';
+  std::string out;
+  NearbyList::render({p}, 0, out);
+  TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("\"fwChannel\":\"\\u00FF\""));
+  for (const char c : out) TEST_ASSERT_TRUE(static_cast<unsigned char>(c) < 0x80);
+}
+
 // fwChannel arrives over the air, so a quote in it cannot end the string.
 void test_fw_channel_is_escaped() {
   ListedPeer p;
@@ -334,10 +418,14 @@ int main(int, char**) {
   RUN_TEST(test_change_while_open_moves_the_rev);
   RUN_TEST(test_steady_rebuilds_allocate_nothing);
   RUN_TEST(test_held_list_follows_the_roster);
+  RUN_TEST(test_roster_copy_resize_never_holds_both);
   RUN_TEST(test_low_heap_still_refreshes_in_place);
   RUN_TEST(test_low_heap_first_read_is_empty);
   RUN_TEST(test_longest_entry_fits_its_bound);
   RUN_TEST(test_fw_channel_is_escaped);
+  RUN_TEST(test_read_stamped_after_the_tick_clock_counts);
+  RUN_TEST(test_each_visible_field_moves_the_rev);
+  RUN_TEST(test_fw_channel_high_bytes_are_escaped);
   RUN_TEST(test_refused_copy_gives_the_lock_back);
   return UNITY_END();
 }
