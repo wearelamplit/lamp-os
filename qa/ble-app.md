@@ -84,7 +84,16 @@ EOF
 - Other readable sections for `PAGE_CTRL`: `lamp`, `base`, `shade`, `home`,
   `nearby`, `exprcat`. A config section (`lamp`, `base`, `shade`, `expr`,
   `home`) reads `!` when the lamp is too short of heap to build it; read it
-  again after a moment.
+  again after a moment. `nearby` is built only while it is read: the first
+  read waits up to 100 ms for the lamp to build it and reads empty if it
+  could not; it is freed 30 s after the last read, or on the next loop tick
+  once the app leaves Social (`editSession surface=0x08 closed`), also when
+  Social is opened and left while the app pushes firmware.
+- A section's copy over 1 KB (nearby, a big expr) is freed by the read that
+  returns the empty chunk; a smaller one keeps its buffer, so re-reading the
+  same small section on a tight heap serves it. A small section read right
+  after a large one can still read `!` on a tight heap (needs a bench
+  number: `largest` during a re-read with a big expr).
 
 H2 — schema version is 4 (`kGattSchemaVersion`, `gatt_layout.hpp`); reading
 it must work even later, after a password is set (it is the one un-gated

@@ -25,6 +25,29 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   instead of waiting a second. The glitch shifty plays as it shifts back
   follows the same rule. The pulse a lamp plays when you add it in the app
   no longer forces nearby lamps to play it.
+- **A local Test plays while the app is connected, even in a crowd.** The
+  lamp built its list of nearby lamps the moment a phone connected and held
+  it, plus a 50-lamp copy of its roster, for the whole connection, on every
+  screen. With 20 or so lamps around that left too little memory for a Test.
+  The lamp now builds the list only while a Social, mesh or wisp screen is
+  showing it, sized to the bytes it actually holds, and frees it the moment
+  you leave the Social screen, or about 30 s after you leave a mesh or wisp
+  screen. The lamp also frees its copy of each large section the app reads
+  (the nearby list, a long expression list) as soon as the read ends or
+  the app opens another section, instead of holding the largest one until
+  the phone disconnects; small sections keep their buffer for the next
+  read.
+- **A lamp short on memory no longer crashes while a wisp paints it.** With
+  the app connected and a wisp nearby, building the wisp's status for the app
+  could run out of memory and restart the lamp. The lamp now skips that one
+  update and logs it; the app keeps the status it last showed. A memory
+  failure in the lamp's own loop, in its answers to the app, or in its
+  handling of a nearby lamp's advert now skips that one step and logs it
+  instead of restarting the lamp. One inside the Bluetooth stack itself, or
+  with too little memory left to raise it, still restarts the lamp.
+- **A lamp with a malformed firmware channel no longer blanks the nearby
+  list.** A quote, backslash, control character or non-ASCII byte in a peer's
+  channel broke the list's JSON, so the app could not read the list at all.
 - **A lamp low on memory no longer asks for its password.** When a lamp was
   too short of memory to send its settings, the app took the empty answer for
   a wrong password and showed the password prompt, or showed default colours

@@ -13,6 +13,7 @@
 #include "config/nvs_config_store.hpp"
 #include "core/lamp.hpp"
 #include "lamp_variants.hpp"
+#include "util/alloc_boundary.hpp"
 #include "util/loop_watchdog.hpp"
 
 extern lamp::Config config;            // file-scope singleton, defined in lamp.cpp
@@ -69,5 +70,5 @@ void setup() {
 
 void loop() {
   lamp::loop_watchdog::startIteration();
-  g_lamp->tick();
+  lamp::catchBadAlloc("Lamp::tick", [] { g_lamp->tick(); });
 }

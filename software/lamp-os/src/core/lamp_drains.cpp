@@ -30,6 +30,7 @@
 #include "core/moments.hpp"
 #include "core/override_aggregate.hpp"
 #include "core/pending_slot_aggregate.hpp"
+#include "util/alloc_boundary.hpp"
 #include "util/dropped_write_log.hpp"
 
 
@@ -633,21 +634,23 @@ void Lamp::drainColorInfo() {
         Color(info.baseStops[0], info.baseStops[1], info.baseStops[2], info.baseStops[3]),
         own.front(), lamp::uptimeMs());
   }
-  std::vector<Color> baseStops;
-  baseStops.reserve(info.baseCount);
-  for (uint8_t i = 0; i < info.baseCount; ++i) {
-    baseStops.emplace_back(info.baseStops[i * 4 + 0], info.baseStops[i * 4 + 1],
-                           info.baseStops[i * 4 + 2], info.baseStops[i * 4 + 3]);
-  }
-  std::vector<Color> shadeStops;
-  shadeStops.reserve(info.shadeCount);
-  for (uint8_t i = 0; i < info.shadeCount; ++i) {
-    shadeStops.emplace_back(info.shadeStops[i * 4 + 0], info.shadeStops[i * 4 + 1],
-                            info.shadeStops[i * 4 + 2], info.shadeStops[i * 4 + 3]);
-  }
-  if (auto* g = compositor.behaviorContext().greeting) {
-    g->onColorInfo(info.sourceMac, baseStops, shadeStops);
-  }
+  lamp::catchBadAlloc("colorInfo", [&] {
+    std::vector<Color> baseStops;
+    baseStops.reserve(info.baseCount);
+    for (uint8_t i = 0; i < info.baseCount; ++i) {
+      baseStops.emplace_back(info.baseStops[i * 4 + 0], info.baseStops[i * 4 + 1],
+                             info.baseStops[i * 4 + 2], info.baseStops[i * 4 + 3]);
+    }
+    std::vector<Color> shadeStops;
+    shadeStops.reserve(info.shadeCount);
+    for (uint8_t i = 0; i < info.shadeCount; ++i) {
+      shadeStops.emplace_back(info.shadeStops[i * 4 + 0], info.shadeStops[i * 4 + 1],
+                              info.shadeStops[i * 4 + 2], info.shadeStops[i * 4 + 3]);
+    }
+    if (auto* g = compositor.behaviorContext().greeting) {
+      g->onColorInfo(info.sourceMac, baseStops, shadeStops);
+    }
+  });
 }
 
 void Lamp::drainEvent() {

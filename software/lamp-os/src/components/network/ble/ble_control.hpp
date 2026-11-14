@@ -136,7 +136,7 @@ void disableBtModemSleep();
 
 void start(lamp::Config* config);
 
-// Loop task only: also frees the nearby-JSON cache and roster buffer, which
+// Loop task only: also frees the nearby list and its roster copy, which
 // tick() stops maintaining once the service is down.
 void stop();
 bool isRunning();
@@ -146,10 +146,9 @@ bool isRunning();
 bool deinitForWebapp();
 bool isDownForWebapp();
 
-// Copies the nearby-lamps JSON out. Materialized on Core 1 only while an app
-// or webapp client is connected (and freed otherwise), so it reads back "[]"
-// when no client is attached. Safe to call from any task; never serializes on
-// the caller's thread.
+// Copies the nearby-lamps JSON out, "[]" while the list is not built (it is
+// built only while the app reads it). Any task; never serializes on the
+// caller's thread.
 void copyNearbyJson(std::string& out);
 
 /**

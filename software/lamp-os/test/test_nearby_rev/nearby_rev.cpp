@@ -3,7 +3,7 @@
 // and stays fixed on an rssi-only or lastSeenMs-only refresh of an existing
 // peer (those churn at ~30 Hz and must not bump the rev).
 //
-// Mirror of ble_control.cpp::buildNearbyJson's per-entry fold. Keep in sync:
+// Mirror of nearby_list.cpp's membershipHash fold. Keep in sync:
 // the field set here is exactly what the app renders, minus lastSeenMs + rssi.
 
 #include <unity.h>

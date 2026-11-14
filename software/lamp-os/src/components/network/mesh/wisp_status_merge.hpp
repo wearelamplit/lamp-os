@@ -33,7 +33,8 @@ struct WispStatusMergeInput {
 // section: the wisp's cached wispStatus plus the lamp's own hello, staleness
 // and wisp-control fields. "{}" when nothing is known. With maxLen > 0 the
 // lamp-side diagnostic fields no app reads are shed until the document fits;
-// it can still exceed maxLen when the wisp's own payload does.
+// it can still exceed maxLen when the wisp's own payload does. Empty when the
+// heap could not hold the document; may throw std::bad_alloc.
 std::string mergeWispStatusJson(const WispStatusMergeInput& in, size_t maxLen);
 
 // Replace `cached` with the payload when its bytes differ, returning whether

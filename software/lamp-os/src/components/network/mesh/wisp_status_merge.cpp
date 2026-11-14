@@ -26,9 +26,11 @@ std::string mergeWispStatusJson(const WispStatusMergeInput& in, size_t maxLen) {
   }
 
   JsonDocument doc;
+  DeserializationError parsed;
+  if (!in.statusJson.empty()) parsed = deserializeJson(doc, in.statusJson);
+  if (parsed == DeserializationError::NoMemory) return std::string();
   // The wispStatus payload is open-set and wisp-owned; start from it.
-  if (in.statusJson.empty() || deserializeJson(doc, in.statusJson) ||
-      !doc.is<JsonObject>()) {
+  if (in.statusJson.empty() || parsed || !doc.is<JsonObject>()) {
     doc.clear();
     doc.to<JsonObject>();
     if (in.statusJson.empty()) doc["char"] = "wispStatus";
@@ -77,6 +79,7 @@ std::string mergeWispStatusJson(const WispStatusMergeInput& in, size_t maxLen) {
     }
   }
 
+  if (doc.overflowed()) return std::string();
   std::string out;
   serializeJson(doc, out);
   return out;

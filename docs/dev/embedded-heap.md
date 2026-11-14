@@ -82,11 +82,17 @@ Two properties make it lethal:
    the ESP-NOW receive path's bounded takes. The near and mesh buffers are
    `reserve()`d to `kCapacity` (50) when the roster is constructed at boot, so
    a growing roster never reallocates them. The `getAll` buffer serves only the
-   app-facing nearby list: it is reserved to `kCapacity` in one allocation on
-   the first build after an app or webapp client connects and released when the
-   last one disconnects, and the build skips (logging OOM) if that reservation
-   throws. A new roster consumer reads one of these views, adding a field to its
-   projection if needed, and never takes a full `RosterEntry` copy per peer.
+   app-facing nearby list, which exists only while the app reads it (see the
+   nearby section in [`networking.md`](networking.md), which also covers the
+   list's measured sizing and the Social-close release): it is sized to the
+   roster's count, reallocated only when the count moves (at most once a
+   second), and released with the list, and the build skips (logging OOM) if
+   that allocation throws. It is the exception to rules 2 and 5: it is held
+   while a phone is connected, when the largest block is tightest, so it holds
+   what the lamps there need, never the 50-slot maximum, and it holds nothing
+   on a screen that does not show the list. A new roster consumer reads one of
+   these views, adding a field to its projection if needed, and never takes a
+   full `RosterEntry` copy per peer.
 
    The buffers are **single-task and non-reentrant**: loop task (Core 1) only,
    and a reference is invalidated by the next call to the same getter.
@@ -624,6 +630,23 @@ scale with the number of peers or the mesh's message rate, so each is bounded:
   that failed to build or copy out (`SectionCache::copyOut` false) reads as `!`
   over BLE, served from flash, never as a stale or empty section, and a failed
   build is retried on the next read.
+- **The task boundary.** A `std::bad_alloc` that no closer catch takes ends at
+  `catchBadAlloc` (`util/alloc_boundary.hpp`), which wraps each loop
+  iteration's `Lamp::tick`, every GATT characteristic callback
+  (`AllocGuarded`) and the BLE scan callback: it logs
+  `[heap] bad_alloc caught in <stage>` at most every 5 s and drops the rest of
+  that tick, write or read (a read answers empty), where an uncaught one
+  aborts the lamp. The boundary cannot give back a lock the thrower held, so
+  a path that allocates under a lock (the wisp status and config cache
+  writes and the wispconfig copy) catches inside the lock, and a hot path
+  whose loss should not cost the rest of the tick (the wisp-status merge on
+  every entry, the state notify payload, the colour-info drain) catches where
+  it allocates. A path that sets shared state before an allocation restores
+  it on the unwind: a transient's trigger takes its behavior back out of the
+  compositor, and the cascade suppression is a scoped guard. The boundary
+  reaches only firmware frames: NimBLE's own allocations on its host task
+  have none to catch in, and with no exception emergency pool a heap too
+  exhausted to hold the exception object itself still aborts.
 - **OTA sessions.** The receiver's chunk bitmap (up to 8 KB per OFFER) is
   allocated only when `heapCanSpare` allows it; otherwise the OFFER is declined
   busy and the sender retries.

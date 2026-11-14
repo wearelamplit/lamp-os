@@ -58,10 +58,10 @@ ExpressionParams parametersWithoutCascadeKeys(
     const ExpressionParams& parameters);
 
 // Serialize `inv` to JSON for MSG_COMMAND and MSG_EVENT payloads. `out` is
-// set to the serialized string. Always succeeds. `colors` is packed hex
-// ("rrggbbww" per color, no '#', no separators); the key is omitted when
-// empty. Packed keeps the worst-case config inside COMMAND_MAX_PAYLOAD. `hp`
-// is written only when `hops` is nonzero.
+// set to the serialized string, or empty (logged) when the heap cannot hold
+// it. `colors` is packed hex ("rrggbbww" per color, no '#', no separators);
+// the key is omitted when empty. Packed keeps the worst-case config inside
+// COMMAND_MAX_PAYLOAD. `hp` is written only when `hops` is nonzero.
 void serializeInvocation(const ExpressionInvocation& inv, std::string& out);
 
 

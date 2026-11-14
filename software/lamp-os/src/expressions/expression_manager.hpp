@@ -62,6 +62,12 @@ class ExpressionManager {
   // intentionally skipping for remote-arrived invocations). Loop-task only,
   // no concurrency.
   bool suppressCascade_ = false;
+  // Holds suppressCascade_ set for its scope, an unwind included.
+  struct CascadeSuppressed {
+    explicit CascadeSuppressed(bool& flag) : flag_(flag) { flag_ = true; }
+    ~CascadeSuppressed() { flag_ = false; }
+    bool& flag_;
+  };
 
   ConfigParamsLookup configParams_ = nullptr;
   const ExpressionParams& paramsOf(const ExpressionEntry& entry) const;

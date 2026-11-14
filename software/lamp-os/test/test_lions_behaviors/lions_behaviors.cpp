@@ -42,7 +42,9 @@
 #include "../replaced_new/replaced_new.hpp"
 
 static int g_allocations = 0;
+static bool g_refuse = false;
 void* testAllocate(size_t size) {
+  if (g_refuse) return nullptr;
   ++g_allocations;
   return std::malloc(size);
 }
@@ -118,7 +120,7 @@ void setUp() {
   g_queryCount = 0;
   set_mock_millis(0);
 }
-void tearDown() {}
+void tearDown() { g_refuse = false; }
 
 // Base buffer: Main (offset 0, 32px) + Lions (offset 32, 18px). Matches the
 // lioness variant map. Manual segment fill avoids FrameBuffer::begin's driver
@@ -451,6 +453,35 @@ void test_cache_keeps_shown_peers() {
   for (int z = 0; z < 3; ++z) TEST_ASSERT_EQUAL_UINT8(tags[z], fb.buffer[32 + z * 6].r);
 }
 
+// An answer whose stops the heap cannot copy binds nothing, so the peer still
+// reads as uncached and its lion asks again; it never takes another peer's
+// stops, or none, as its own.
+void test_refused_answer_leaves_the_peer_uncached() {
+  FrameBuffer fb = makeFb();
+  BehaviorContext ctx;
+  LionsAmbientBehavior ambient(&fb);
+  ambient.setBehaviorContext(&ctx);
+  ambient.setMeshLink(&g_link);
+  g_nearby = {makePeer(0xB7, Color(), "peer")};
+
+  uint8_t mac[6];
+  std::memset(mac, 0xB7, 6);
+  const std::vector<Color> stops = twoStops(0xB7);
+  bool threw = false;
+  g_refuse = true;
+  try {
+    ambient.onColorInfo(mac, stops, {});
+  } catch (const std::bad_alloc&) {
+    threw = true;
+  }
+  g_refuse = false;
+  TEST_ASSERT_TRUE(threw);
+
+  ambient.control();
+  TEST_ASSERT_EQUAL_size_t(1, g_queryCount);
+  TEST_ASSERT_EQUAL_UINT8(0xB7, g_queries[0].tag);
+}
+
 // Seeding sends a query per lion in one control(); MeshLink's colour-query
 // ring keeps every one of them in flight for its resends, none overwritten.
 void test_seed_queries_all_keep_their_resends() {
@@ -503,5 +534,6 @@ int main(int, char**) {
   RUN_TEST(test_answer_frees_query_slot);
   RUN_TEST(test_cache_keeps_shown_peers);
   RUN_TEST(test_seed_queries_all_keep_their_resends);
+  RUN_TEST(test_refused_answer_leaves_the_peer_uncached);
   return UNITY_END();
 }

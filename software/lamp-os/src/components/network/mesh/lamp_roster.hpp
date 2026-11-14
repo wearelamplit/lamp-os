@@ -286,12 +286,10 @@ class LampRoster {
   // invalidated by the next getMesh call. Callers may reorder it in place.
   std::vector<MeshPeer>& getMesh(uint32_t maxAgeMs);
 
-  // Every roster entry, for the app-facing nearby list. The buffer is reserved
-  // to kCapacity in one allocation on first use and held until releaseAll, so
-  // it is resident only while an app/webapp client is connected. On a heap too
-  // fragmented for that it reserves just the current count instead, and throws
-  // std::bad_alloc only if that fails too. Same task/reentrancy contract as
-  // getMesh.
+  // Every roster entry, for the app-facing nearby list. The buffer is sized to
+  // the roster's count, reallocated only when the count moved, and held until
+  // releaseAll. Throws std::bad_alloc when the heap cannot size it. Same
+  // task/reentrancy contract as getMesh.
   std::vector<ListedPeer>& getAll();
   void releaseAll();
 
@@ -405,10 +403,11 @@ class LampRoster {
   // lampos::kRetiredAgeMs.
   void retireStaleWisp(uint32_t nowMs);
 
-  // Build and return the merged wispStatus JSON (see mergeWispStatusJson).
+  // Builds the merged wispStatus JSON (see mergeWispStatusJson) into `out`.
   // `maxLen` 0 serves it whole for the `wispstatus` page section;
-  // CHAR_WISP_STATUS passes kWispStatusCharMaxLen.
-  std::string getWispStatusReadJson(size_t maxLen);
+  // CHAR_WISP_STATUS passes kWispStatusCharMaxLen. Any task; never throws.
+  // False, with `out` empty, when the heap cannot spare the build.
+  bool getWispStatusReadJson(std::string& out, size_t maxLen);
 
   // Copy the cached manual palette (interleaved R,G,B,W per color) into
   // `out`, returning bytes written. Served on the `wisppalette` page
