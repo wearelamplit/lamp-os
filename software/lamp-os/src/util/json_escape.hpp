@@ -8,8 +8,9 @@ namespace lamp {
 // Append `s` to `out` with JSON string escaping (quote, backslash,
 // control chars as \u00XX). Peer names are attacker-reachable over BLE
 // adv and MSG_HELLO; an unescaped emit would let a crafted name inject
-// fields into the nearby JSON.
-inline void appendJsonEscaped(std::string& out, const char* s, bool asciiOnly = false) {
+// fields into the nearby JSON. `Out` takes `+= char` and `+= const char*`.
+template <class Out>
+inline void appendJsonEscaped(Out& out, const char* s, bool asciiOnly = false) {
   for (; *s; ++s) {
     const unsigned char c = static_cast<unsigned char>(*s);
     if (c == '"' || c == '\\') {
@@ -27,7 +28,8 @@ inline void appendJsonEscaped(std::string& out, const char* s, bool asciiOnly = 
 
 // For a field that is ASCII by contract: a byte past 0x7F is escaped too, so
 // a crafted value cannot make the payload invalid UTF-8.
-inline void appendJsonEscapedAscii(std::string& out, const char* s) {
+template <class Out>
+inline void appendJsonEscapedAscii(Out& out, const char* s) {
   appendJsonEscaped(out, s, true);
 }
 

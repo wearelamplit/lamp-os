@@ -49,10 +49,7 @@ class NearbyList {
   uint32_t rev() const { return rev_.load(); }
   bool built() const { return built_.load(); }
 
-  // The most bytes one peer's entry can render to, so a build sized from it
-  // never reallocates.
-  static size_t entryBound(const lamp::ListedPeer& p);
-  // Renders `lamps` into `out`, which the caller reserved from entryBound.
+  // Renders `lamps` into `out`.
   static void render(const std::vector<lamp::ListedPeer>& lamps, uint32_t nowMs,
                      std::string& out);
 

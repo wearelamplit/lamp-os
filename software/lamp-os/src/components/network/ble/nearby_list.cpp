@@ -20,10 +20,10 @@ namespace {
 constexpr uint32_t kRebuildGapMs = 1000;
 constexpr uint32_t kReadPollMs   = 5;
 constexpr size_t   kHeapMargin   = 1024;
-constexpr size_t   kEscapedChar  = 6;  // "\u00XX"
-// Every field of an entry at its longest, names and fwChannel aside, plus the
-// separating comma.
-constexpr size_t kEntryFixedBound = 248;
+// Room past the measured length, so a rebuild whose numbers gained digits
+// still fits the buffer held. A buffer this much over its list shrinks.
+constexpr size_t kBuildSlack  = 128;
+constexpr size_t kShrinkBytes = 2 * kBuildSlack;
 
 void logThrottled(const char* what, size_t largest, size_t needed, size_t lamps) {
   static uint32_t lastMs = 0;
@@ -71,17 +71,15 @@ uint32_t membershipHash(const std::vector<lamp::ListedPeer>& lamps, uint32_t now
   return hash;
 }
 
-}  // namespace
+// Counts what a render would write, so a build takes exactly that.
+struct LengthCount {
+  size_t n = 0;
+  LengthCount& operator+=(char) { ++n; return *this; }
+  LengthCount& operator+=(const char* s) { n += std::strlen(s); return *this; }
+};
 
-NearbyList::NearbyList() : mutex_(xSemaphoreCreateMutex()) {}
-
-size_t NearbyList::entryBound(const lamp::ListedPeer& p) {
-  return kEntryFixedBound +
-         kEscapedChar * (strnlen(p.name, sizeof(p.name)) + strnlen(p.fwChannel, sizeof(p.fwChannel)));
-}
-
-void NearbyList::render(const std::vector<lamp::ListedPeer>& lamps, uint32_t now,
-                        std::string& out) {
+template <class Out>
+void renderInto(const std::vector<lamp::ListedPeer>& lamps, uint32_t now, Out& out) {
   out += '[';
   char buf[96];
   bool first = true;
@@ -135,6 +133,21 @@ void NearbyList::render(const std::vector<lamp::ListedPeer>& lamps, uint32_t now
     out += '}';
   }
   out += ']';
+}
+
+size_t renderedLength(const std::vector<lamp::ListedPeer>& lamps, uint32_t now) {
+  LengthCount count;
+  renderInto(lamps, now, count);
+  return count.n;
+}
+
+}  // namespace
+
+NearbyList::NearbyList() : mutex_(xSemaphoreCreateMutex()) {}
+
+void NearbyList::render(const std::vector<lamp::ListedPeer>& lamps, uint32_t now,
+                        std::string& out) {
+  renderInto(lamps, now, out);
 }
 
 bool NearbyList::read(std::string& out, uint32_t nowMs) {
@@ -206,14 +219,14 @@ bool NearbyList::rebuild(lamp::LampRoster& roster, uint32_t gen, uint32_t nowMs)
             [](const lamp::ListedPeer& a, const lamp::ListedPeer& b) {
               return std::strcmp(a.name, b.name) < 0;
             });
-  size_t needed = 2;
-  for (const auto& p : lamps) needed += entryBound(p);
+  const size_t length = renderedLength(lamps, nowMs);
   const uint32_t hash = membershipHash(lamps, nowMs);
 
   // Only the loop writes json_, so its capacity reads safely here unlocked.
   const size_t cap = json_.capacity();
   std::string sized;
-  const bool resize = needed > cap || cap - needed >= kEntryFixedBound;
+  const bool resize = length > cap || cap - length >= kShrinkBytes;
+  const size_t needed = length + kBuildSlack;
   if (resize) {
     const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
     if (largest < needed + kHeapMargin) {

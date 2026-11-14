@@ -310,8 +310,9 @@ void test_low_heap_first_read_is_empty() {
   TEST_ASSERT_TRUE(out.empty());
 }
 
-// Every field at its longest still fits the bound the build reserves from.
-void test_longest_entry_fits_its_bound() {
+// The measure the build sizes from matches the render byte for byte, every
+// field at its longest.
+void test_measured_length_matches_the_render() {
   ListedPeer p;
   std::memset(p.name, 0x01, sizeof(p.name) - 1);
   std::memset(p.fwChannel, 0x02, sizeof(p.fwChannel) - 1);
@@ -327,8 +328,24 @@ void test_longest_entry_fits_its_bound() {
   std::vector<ListedPeer> lamps(NearbyList::kMaxLamps, p);
   std::string out;
   NearbyList::render(lamps, 4294967295u, out);
-  const size_t bound = 2 + NearbyList::kMaxLamps * NearbyList::entryBound(p);
-  TEST_ASSERT_TRUE(out.size() <= bound);
+  TEST_ASSERT_EQUAL_UINT(out.size(), ble_control::renderedLength(lamps, 4294967295u));
+}
+
+// The first build asks the heap for the list's own length plus a small
+// slack, so a block just that big serves it.
+void test_build_demand_tracks_the_list_length() {
+  size_t length = 0;
+  {
+    Fixture f;
+    std::string out;
+    TEST_ASSERT_TRUE(f.list.read(out, g_now));
+    length = out.size();
+  }
+  Fixture f;
+  g_mock_largest_free_block = length + ble_control::kBuildSlack + ble_control::kHeapMargin;
+  std::string out;
+  TEST_ASSERT_TRUE(f.list.read(out, g_now));
+  TEST_ASSERT_EQUAL_UINT(length, out.size());
 }
 
 // A read stamped on another core just after the loop sampled its clock is
@@ -456,7 +473,8 @@ int main(int, char**) {
   RUN_TEST(test_roster_copy_resize_never_holds_both);
   RUN_TEST(test_low_heap_still_refreshes_in_place);
   RUN_TEST(test_low_heap_first_read_is_empty);
-  RUN_TEST(test_longest_entry_fits_its_bound);
+  RUN_TEST(test_measured_length_matches_the_render);
+  RUN_TEST(test_build_demand_tracks_the_list_length);
   RUN_TEST(test_fw_channel_is_escaped);
   RUN_TEST(test_read_stamped_after_the_tick_clock_counts);
   RUN_TEST(test_each_visible_field_moves_the_rev);
