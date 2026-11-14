@@ -7,13 +7,13 @@ import 'package:go_router/go_router.dart';
 import '../../../core/routing/routes.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/empty_state_pane.dart';
-import '../../../core/widgets/friendly_error.dart';
 import '../../../core/widgets/settings_row.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/application/expression_draft.dart';
 import '../../control/domain/sections.dart';
 import '../domain/expression_catalog.dart';
 import '../domain/expression_presentation.dart';
+import '../../control/presentation/lamp_error_page.dart';
 
 class ExpressionsScreen extends ConsumerWidget {
   const ExpressionsScreen({super.key, required this.lampId});
@@ -38,14 +38,7 @@ class ExpressionsScreen extends ConsumerWidget {
     return Scaffold(
       body: async.when(
         loading: () => const SizedBox.expand(),
-        error: (e, _) => FriendlyError.page(
-          title: "Couldn't reach your lamp.",
-          subtitle:
-              "They may have wandered out of range. Bring your phone closer "
-              'and try again.',
-          rawError: e,
-          onRetry: () => ref.invalidate(controlNotifierProvider(lampId)),
-        ),
+        error: (e, _) => LampErrorPage(lampId: lampId, error: e),
         data: (exprSection) {
           final notifier =
               ref.read(controlNotifierProvider(lampId).notifier);

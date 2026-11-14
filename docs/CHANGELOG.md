@@ -16,6 +16,12 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   on their own, as they do for any expression it plays. A Test the lamp
   could not play sends nothing. The pulse a lamp plays when you add it in
   the app no longer forces nearby lamps to play it.
+- **A lamp low on memory no longer asks for its password.** When a lamp was
+  too short of memory to send its settings, the app took the empty answer for
+  a wrong password and showed the password prompt, or showed default colours
+  and settings for the parts it could not read. The lamp now says it is busy:
+  the app tries again a few times, then says the lamp is low on memory and
+  offers a retry.
 - **The native test suite passes on Linux, and CI runs on every push to dev.**
   Four suites that passed on a Mac failed on the Linux CI runner. The web
   save's memory check now sizes its largest block from the expression list

@@ -13,6 +13,7 @@
 #include "config_types.hpp"
 #include "disposition_store.hpp"
 #include "save_gate.hpp"
+#include "section_cache.hpp"
 
 namespace lamp {
 
@@ -194,16 +195,17 @@ class Config {
   JsonDocument asShadeJson();
   JsonDocument asHomeModeJson();
 
-  // Per-section JSON cache. Each section caches its serialised JSON plus a
-  // dirty flag; the accessor rebuilds if dirty and copies the JSON into out,
-  // both under a mutex in config.cpp, so it is safe from any task on either
-  // core (never an ISR, the mutex blocks). Mutation paths must call
-  // invalidateXSection() after touching any field that feeds asXJson().
-  void lampSectionJsonCached(std::string& out);
-  void baseSectionJsonCached(std::string& out);
-  void shadeSectionJsonCached(std::string& out);
-  void expressionsSectionJsonCached(std::string& out);
-  void homeSectionJsonCached(std::string& out);
+  // Per-section JSON cache. Each accessor rebuilds the section if dirty and
+  // copies it into out, both under a mutex in config.cpp, so it is safe from
+  // any task on either core (never an ISR, the mutex blocks). False, with out
+  // empty, when the heap could not build or copy out the section. Mutation
+  // paths must call invalidateXSection() after touching any field that feeds
+  // asXJson().
+  [[nodiscard]] bool lampSectionJsonCached(std::string& out);
+  [[nodiscard]] bool baseSectionJsonCached(std::string& out);
+  [[nodiscard]] bool shadeSectionJsonCached(std::string& out);
+  [[nodiscard]] bool expressionsSectionJsonCached(std::string& out);
+  [[nodiscard]] bool homeSectionJsonCached(std::string& out);
 
   // Frees every section cache (they rebuild on the next read). For when no
   // client can read them: a cache otherwise holds its heap, up to about 4 KB
@@ -284,14 +286,11 @@ class Config {
   DispositionStore dispositions_{kDispositionFlushIdleMs};
   SaveGate saveGate_{kPersistRetryBaseMs, kPersistRetryMaxMs};
 
-  // All dirty=true initially so the first cached() call computes and
-  // populates the string. After that, mutations on Core 1 must call
-  // invalidateXSection() before reading the cached value again.
-  std::string lampSectionJson_;
-  std::string baseSectionJson_;
-  std::string shadeSectionJson_;
-  std::string expressionsSectionJson_;
-  std::string homeSectionJson_;
+  SectionCache lampSection_;
+  SectionCache baseSection_;
+  SectionCache shadeSection_;
+  SectionCache expressionsSection_;
+  SectionCache homeSection_;
   std::string lampId_;
   lamp_protocol::LampVariant lampVariant_ = lamp_protocol::LampVariant::Unknown;
   uint16_t drawIdleMa_ = 0;
@@ -302,13 +301,5 @@ class Config {
   bool loadFailedWithData_ = false;
   bool namedKeyPresent_ = false;
   config_codec::StoreForm storeForm_ = config_codec::StoreForm::Empty;
-  bool lampSectionDirty_ = true;
-  bool baseSectionDirty_ = true;
-  bool shadeSectionDirty_ = true;
-  bool expressionsSectionDirty_ = true;
-  bool homeSectionDirty_ = true;
-
-  // Caller holds the cache mutex.
-  void expressionsSectionRebuildLocked();
 };
 }  // namespace lamp

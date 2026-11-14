@@ -10,6 +10,7 @@ import '../../../core/ble/ble_client.dart';
 import '../../../core/ble/ble_client_provider.dart';
 import '../../../core/ble/connect_with_retry.dart';
 import '../../../core/ble/lamp_crypto.dart';
+import '../../../core/ble/section_busy.dart';
 import '../../../core/ble/uuids.dart';
 import '../../../core/ble/write_coalescer.dart';
 import '../../../core/lamp_name.dart';
@@ -29,6 +30,7 @@ import '../../social/domain/social_mode.dart';
 import 'auth_client.dart';
 import 'control_state.dart';
 import 'lamp_auth_required_exception.dart';
+import 'lamp_busy_exception.dart';
 import 'lamp_save_status.dart';
 import 'settings_blob_too_large_exception.dart';
 
@@ -210,6 +212,15 @@ class ControlNotifier extends _$ControlNotifier {
   /// loop tick and the notify.
   @visibleForTesting
   static const quietAfterPushBound = Duration(seconds: 75);
+
+  /// Reads of a section after the first that came back busy, and the wait
+  /// before each, before a connect gives up with [LampBusyException]. The lamp
+  /// retries a failed build on its next loop tick, so a short dip clears well
+  /// inside the window.
+  @visibleForTesting
+  static const sectionBusyRetries = 3;
+  @visibleForTesting
+  static const sectionBusyRetryGap = Duration(milliseconds: 500);
 
   late InventoryNotifier _inv;
   late DateTime Function() _now;
@@ -610,25 +621,35 @@ class ControlNotifier extends _$ControlNotifier {
   /// ControlState. Assumes the BLE link is connected and authenticated.
   /// Throws [LampAuthRequiredException] when the `lamp` section reads back
   /// empty. The lamp withholds that section, password included, from a link
-  /// that has not authenticated.
+  /// that has not authenticated. Throws [LampBusyException] when a section
+  /// stays busy through [sectionBusyRetries] more reads.
   Future<ControlState> _readSections(BleClient ble) async {
+    Future<Uint8List> readSection(String name) async {
+      for (var retry = 0;; retry++) {
+        final bytes = await ble.readSection(_deviceId, name);
+        if (!isSectionBusy(bytes)) return bytes;
+        if (retry == sectionBusyRetries) throw const LampBusyException();
+        await Future<void>.delayed(sectionBusyRetryGap);
+      }
+    }
+
     // A section a legacy lamp doesn't serve comes back as empty bytes;
     // jsonDecode('') throws. Default missing sections to an empty object /
     // array so each fromJson falls through to its field defaults, same
     // tolerance as the optional exprcat catalog read.
     Future<Map<String, dynamic>> readJsonSection(String name) async {
-      final bytes = await ble.readSection(_deviceId, name);
+      final bytes = await readSection(name);
       if (bytes.isEmpty) return const {};
       return jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
     }
 
     Future<List<dynamic>> readJsonListSection(String name) async {
-      final bytes = await ble.readSection(_deviceId, name);
+      final bytes = await readSection(name);
       if (bytes.isEmpty) return const [];
       return jsonDecode(utf8.decode(bytes)) as List<dynamic>;
     }
 
-    final lampBytes = await ble.readSection(_deviceId, 'lamp');
+    final lampBytes = await readSection('lamp');
     if (lampBytes.isEmpty) throw const LampAuthRequiredException();
     final lampJson =
         jsonDecode(utf8.decode(lampBytes)) as Map<String, dynamic>;
@@ -2131,6 +2152,11 @@ class ControlNotifier extends _$ControlNotifier {
       } on LampAuthRequiredException catch (e, st) {
         // The stored password no longer works (e.g. changed on another
         // device). Parks the ladder so the UI prompts for it.
+        if (!standDown()) state = AsyncError(e, st);
+        return;
+      } on LampBusyException catch (e, st) {
+        // Reconnecting again would not free the lamp's heap; the error page
+        // retries on the user's word.
         if (!standDown()) state = AsyncError(e, st);
         return;
       }

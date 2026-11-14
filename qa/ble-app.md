@@ -82,7 +82,9 @@ EOF
 - The EOF heuristic (chunk shorter than the first) tracks the negotiated
   MTU; page chunks are `min(MTU-3, 244)` bytes.
 - Other readable sections for `PAGE_CTRL`: `lamp`, `base`, `shade`, `home`,
-  `nearby`, `exprcat`.
+  `nearby`, `exprcat`. A config section (`lamp`, `base`, `shade`, `expr`,
+  `home`) reads `!` when the lamp is too short of heap to build it; read it
+  again after a moment.
 
 H2 — schema version is 4 (`kGattSchemaVersion`, `gatt_layout.hpp`); reading
 it must work even later, after a password is set (it is the one un-gated

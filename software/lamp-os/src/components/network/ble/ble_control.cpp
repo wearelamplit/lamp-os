@@ -36,6 +36,7 @@
 #include "ble_gap.hpp"
 #include "crypto.hpp"
 #include "components/network/ble/ble_radio_gate.hpp"
+#include "components/network/ble/section_page.hpp"
 #include "components/network/ble/gatt_layout.hpp"
 #include "components/network/ble/social_scan.hpp"
 #include "components/network/ble/state_notify.hpp"
@@ -164,20 +165,12 @@ struct ConnSlot {
   uint16_t                    handle;
   bool                        authed;
   lamp::crypto::PerConnState  crypto;
-  std::string                 pageSnapshot;
-  uint16_t                    pageCursor;
-  uint16_t                    pageMtu;
-  // View of the bytes currently being paged out. A heap section serialises
-  // into pageSnapshot and points here at it; a flash section points straight
-  // at its .rodata catalog with zero copy. Empty between sections, so an
-  // unknown/empty section clears this and the next DATA read returns
-  // end-of-section.
-  std::string_view            pageSource;
+  SectionPage                 page;
 };
 static constexpr uint16_t kUnusedHandle = 0xFFFF;
 static constexpr size_t   kMaxConns     = 1;
 static std::array<ConnSlot, kMaxConns> s_conn{{
-  {kUnusedHandle, false, {}, {}, 0, 0, {}},
+  {kUnusedHandle, false, {}, {}},
 }};
 
 // Pinned to ATT_MTU 247 minus the 3-byte ATT header rather than reading
@@ -208,10 +201,7 @@ static ConnSlot* findOrAllocSlot(uint16_t handle) {
     freeSlot->handle = handle;
     freeSlot->authed = false;
     freeSlot->crypto = lamp::crypto::PerConnState{};
-    freeSlot->pageSnapshot.clear();  // keeps capacity
-    freeSlot->pageCursor = 0;
-    freeSlot->pageMtu    = 0;
-    freeSlot->pageSource = {};
+    freeSlot->page.close();
   }
   return freeSlot;
 }
@@ -222,10 +212,7 @@ static void freeSlot(uint16_t handle) {
     s->handle = kUnusedHandle;
     s->authed = false;
     s->crypto = lamp::crypto::PerConnState{};
-    std::string().swap(s->pageSnapshot);  // reclaim, not just .clear()
-    s->pageCursor = 0;
-    s->pageMtu    = 0;
-    s->pageSource = {};
+    s->page.release();
   }
 }
 
@@ -235,10 +222,7 @@ static void clearAllSlots() {
     s.handle = kUnusedHandle;
     s.authed = false;
     s.crypto = lamp::crypto::PerConnState{};
-    std::string().swap(s.pageSnapshot);
-    s.pageCursor = 0;
-    s.pageMtu    = 0;
-    s.pageSource = {};
+    s.page.release();
   }
 }
 
@@ -507,14 +491,14 @@ static inline void fnv1a(uint32_t& h, const void* data, size_t len) {
   while (len--) { h ^= *p++; h *= 16777619u; }
 }
 
-// A BLE section OOM degrades to a graceful-empty serve; keep it visible on
-// every channel, throttled to one line per 5000ms.
+// A BLE section the heap cannot serve reads empty, or "!" for a config
+// section; keep it visible on every channel, throttled to one line per 5000ms.
 static void logBleSectionOom(const char* what) {
   static uint64_t lastMs = 0;
   const uint64_t now = lamp::uptimeMs();
   if (now - lastMs < 5000 && lastMs != 0) return;
   lastMs = now;
-  Serial.printf("[ble_control] %s OOM; serving graceful-empty\n", what);
+  Serial.printf("[ble_control] %s OOM\n", what);
 }
 
 static void logNearbyHeapSkip(uint32_t largest, uint32_t needed, uint32_t lamps) {
@@ -964,15 +948,15 @@ class SettingsBlobCallback : public NimBLECharacteristicCallbacks {
 // <=kPageMaxChunkSize bytes forces the app to issue a new read per chunk
 // rather than using ATT_READ_BLOB_REQ against a cached value.
 
-using SectionSerializer = void(*)(std::string&);
-
-// A section serves one of two ways. fn serialises into the connection's
-// pageSnapshot on open (heap). flashData/flashLen instead point the page
-// source straight at a committed .rodata buffer, served by reference with
-// zero heap; fn is null for those.
+// A section serves one of three ways, exactly one of these set. fn serialises
+// into the connection's page buffer on open (heap). config copies a Config
+// section the same way, and reads as SectionPage::kBusy when the heap cannot
+// build or copy it. flashData/flashLen point the page straight at a committed
+// .rodata buffer, served by reference with zero heap.
 struct SectionEntry {
   const char*                 name;
-  SectionSerializer           fn;
+  SectionPage::Serializer     fn;
+  SectionPage::ConfigCopy     config    = nullptr;
   const char*                 flashData = nullptr;
   size_t                      flashLen  = 0;
 };
@@ -992,13 +976,14 @@ struct SectionEntry {
 // wispconfig serves the cached wispConfig, "{}" until one arrives, so an
 // empty read means a lamp that predates both.
 static const std::array<SectionEntry, 11> kSections = {{
-  {"lamp",    [](std::string& out) { s_config->lampSectionJsonCached(out); }},
-  {"base",    [](std::string& out) { s_config->baseSectionJsonCached(out); }},
-  {"shade",   [](std::string& out) { s_config->shadeSectionJsonCached(out); }},
-  {"expr",    [](std::string& out) { s_config->expressionsSectionJsonCached(out); }},
-  {"home",    [](std::string& out) { s_config->homeSectionJsonCached(out); }},
+  {"lamp",  nullptr, [](std::string& out) { return s_config->lampSectionJsonCached(out); }},
+  {"base",  nullptr, [](std::string& out) { return s_config->baseSectionJsonCached(out); }},
+  {"shade", nullptr, [](std::string& out) { return s_config->shadeSectionJsonCached(out); }},
+  {"expr",  nullptr,
+   [](std::string& out) { return s_config->expressionsSectionJsonCached(out); }},
+  {"home",  nullptr, [](std::string& out) { return s_config->homeSectionJsonCached(out); }},
   {"nearby",  [](std::string& out) { copyNearbyJson(out); }},
-  {"exprcat", nullptr, lamp::kExprCatalog, lamp::kExprCatalogLen},
+  {"exprcat", nullptr, nullptr, lamp::kExprCatalog, lamp::kExprCatalogLen},
   {"wispclaims", [](std::string& out) {
     static uint8_t buf[1 + lamp::WispFleetCache::kCapacity *
                               lamp::WispFleetCache::kBlobEntrySize];
@@ -1032,46 +1017,34 @@ class PageCtrlCallback : public NimBLECharacteristicCallbacks {
 
     for (const auto& entry : kSections) {
       if (name == entry.name) {
-        if (entry.flashData) {
-          // Serve the committed catalog straight from .rodata; no heap.
-          slot->pageSource = std::string_view(entry.flashData, entry.flashLen);
-        } else {
-          // Serialises into pageSnapshot, reusing its existing capacity.
-          try {
-            entry.fn(slot->pageSnapshot);
-          } catch (const std::bad_alloc&) {
-            slot->pageSnapshot.clear();
-            slot->pageCursor = 0;
-            slot->pageMtu    = 0;
-            slot->pageSource = {};
-            logBleSectionOom(entry.name);
-            return;
-          }
-          slot->pageSource = slot->pageSnapshot;
-        }
-        slot->pageCursor = 0;
         // Cap the chunk at the baseline-MTU page size even when this link
         // negotiated higher; the app reads until an empty terminator, so
         // chunk size is a transport bound, not an end-of-section signal.
         const uint16_t mtu = connInfo.getMTU();
         const uint16_t cap = mtu > 3 ? mtu - 3 : 0;
-        slot->pageMtu = (cap > 0 && cap < kPageMaxChunkSize) ? cap
-                                                              : kPageMaxChunkSize;
+        const uint16_t chunk =
+            (cap > 0 && cap < kPageMaxChunkSize) ? cap : kPageMaxChunkSize;
+        bool served = true;
+        if (entry.flashData) {
+          slot->page.openStatic(std::string_view(entry.flashData, entry.flashLen), chunk);
+        } else if (entry.config) {
+          served = slot->page.openConfig(entry.config, chunk);
+        } else {
+          served = slot->page.open(entry.fn, chunk);
+        }
+        if (!served) logBleSectionOom(entry.name);
 #ifdef LAMP_DEBUG
         Serial.printf("[ble_control] page CTRL section=%s len=%u mtu=%u chunk=%u\n",
-                      entry.name, (unsigned)slot->pageSource.size(),
-                      (unsigned)mtu, (unsigned)slot->pageMtu);
+                      entry.name, (unsigned)slot->page.size(), (unsigned)mtu,
+                      (unsigned)chunk);
 #endif
         return;
       }
     }
 
-    // Unknown section: clear so the next DATA read returns empty, which
-    // the app treats as "section not found".
-    slot->pageSnapshot.clear();
-    slot->pageCursor = 0;
-    slot->pageMtu    = 0;
-    slot->pageSource = {};
+    // Unknown section: the next DATA read returns empty, which the app
+    // treats as "section not found".
+    slot->page.close();
 #ifdef LAMP_DEBUG
     Serial.printf("[ble_control] page CTRL unknown section='%.*s'\n",
                   (int)name.size(), name.data());
@@ -1082,29 +1055,19 @@ class PageCtrlCallback : public NimBLECharacteristicCallbacks {
 class PageDataCallback : public NimBLECharacteristicCallbacks {
   void onRead(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     const uint16_t handle = connInfo.getConnHandle();
-    if (!isAuthed(handle)) {
-      c->setValue("");
-      return;
-    }
     ConnSlot* slot = findSlot(handle);
-    if (!slot || slot->pageMtu == 0 ||
-        slot->pageCursor >= slot->pageSource.size()) {
+    const std::string_view chunk =
+        slot ? slot->page.read(isAuthed(handle)) : std::string_view{};
+    if (chunk.empty()) {
       // Empty response signals end-of-section: the app reads chunks until empty.
       c->setValue("");
       return;
     }
-    const size_t remaining = slot->pageSource.size() - slot->pageCursor;
-    const size_t take      = remaining < slot->pageMtu ? remaining
-                                                       : slot->pageMtu;
-    c->setValue(reinterpret_cast<const uint8_t*>(slot->pageSource.data() +
-                                                  slot->pageCursor),
-                static_cast<size_t>(take));
-    slot->pageCursor += static_cast<uint16_t>(take);
+    c->setValue(reinterpret_cast<const uint8_t*>(chunk.data()), chunk.size());
 #ifdef LAMP_DEBUG
     Serial.printf("[ble_control] page DATA cursor=%u/%u take=%u\n",
-                  (unsigned)slot->pageCursor,
-                  (unsigned)slot->pageSource.size(),
-                  (unsigned)take);
+                  (unsigned)slot->page.cursor(), (unsigned)slot->page.size(),
+                  (unsigned)chunk.size());
 #endif
   }
 };

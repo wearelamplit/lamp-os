@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/form_section.dart';
-import '../../../core/widgets/friendly_error.dart';
 import '../../../core/widgets/info_panel.dart';
 import '../../../core/widgets/settings_row.dart';
 import '../../control/application/control_notifier.dart';
@@ -12,6 +11,7 @@ import '../../control/application/control_state.dart';
 import '../../control/domain/sections.dart';
 import 'widgets/wifi_network_picker.dart';
 import '../../firmware/presentation/firmware_push_lock.dart';
+import '../../control/presentation/lamp_error_page.dart';
 
 /// Home Mode pane. Quiets the lamp for everyday use.
 ///
@@ -74,15 +74,7 @@ class _HomeModeScreenState extends ConsumerState<HomeModeScreen> {
         lampId: widget.lampId,
         child: controlAsync.when(
           loading: () => const SizedBox.expand(),
-          error: (e, _) => FriendlyError.page(
-            title: "Couldn't reach your lamp.",
-            subtitle:
-                "They may have wandered out of range. Bring your phone closer "
-                'and try again.',
-            rawError: e,
-            onRetry: () =>
-                ref.invalidate(controlNotifierProvider(widget.lampId)),
-          ),
+          error: (e, _) => LampErrorPage(lampId: widget.lampId, error: e),
           data: (state) => _HomeModeBody(lampId: widget.lampId, state: state),
         ),
       ),

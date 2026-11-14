@@ -56,7 +56,7 @@ class JsonWriter {
 // measured length) and swaps it into `out`. False, with `out` unchanged, when
 // the string cannot be allocated or the second pass did not fill exactly
 // `len` bytes (the document changed between the passes), so a short or
-// truncated result is never kept and a reader keeps the last good copy.
+// truncated result is never kept.
 template <class Write>
 bool writeExactly(std::string& out, size_t len, Write&& write) {
   std::string fresh;

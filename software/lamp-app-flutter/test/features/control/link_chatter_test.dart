@@ -20,6 +20,7 @@ import 'package:lamp_app/core/lifecycle/app_lifecycle.dart';
 import 'package:lamp_app/features/control/application/control_notifier.dart';
 import 'package:lamp_app/features/control/application/control_state.dart';
 import 'package:lamp_app/features/control/application/lamp_auth_required_exception.dart';
+import 'package:lamp_app/features/control/application/lamp_busy_exception.dart';
 import 'package:lamp_app/features/firmware/application/firmware_notifier.dart';
 import 'package:lamp_app/features/firmware/domain/firmware_state.dart';
 import 'package:lamp_app/features/firmware/domain/lsig_footer.dart';
@@ -95,6 +96,9 @@ class _Lamp extends InMemoryBleClient {
   int sectionReads(String name) =>
       ops.where((o) => o == 'section $name').length;
 
+  /// Reads of each section the lamp answers busy, as one short of heap does.
+  final busyReads = <String, int>{};
+
   void _reboot() {
     unawaited(disconnect(_id));
     _upAt = elapsed() + rebootTakes;
@@ -131,6 +135,11 @@ class _Lamp extends InMemoryBleClient {
     ops.add('section $name');
     if (zombie) throw BleDisconnectedException(deviceId);
     await Future<void>.delayed(sectionTakes);
+    final busy = busyReads[name] ?? 0;
+    if (busy > 0) {
+      busyReads[name] = busy - 1;
+      return Uint8List.fromList('!'.codeUnits);
+    }
     return super.readSection(deviceId, name);
   }
 
@@ -201,8 +210,10 @@ _Rig _open(
   String lampJson = _lampJson,
   int? schema = 4,
   String password = '',
+  Map<String, int> busyReads = const {},
 }) {
   final ble = _Lamp(() => async.elapsed)..servesSchemaVersion = schema != null;
+  ble.busyReads.addAll(busyReads);
   seedControlBle(ble, deviceId: _id);
   ble.seedSection(_id, 'lamp', Uint8List.fromList(utf8.encode(lampJson)));
   final c = ProviderContainer(
@@ -683,6 +694,58 @@ void main() {
         r.ble.disconnect(_id);
         async.elapse(const Duration(seconds: 5));
         expect(r.state.error, isA<LampAuthRequiredException>());
+        final connects = r.ble.connects;
+        async.elapse(const Duration(minutes: 1));
+        expect(r.ble.connects, connects);
+        _close(r);
+      });
+    });
+
+    test('read busy on open retries, then says the lamp is low on memory', () {
+      fakeAsync((async) {
+        const retries = ControlNotifier.sectionBusyRetries;
+        final r = _open(async, busyReads: {'lamp': 99});
+        async.elapse(const Duration(seconds: 5));
+        expect(r.state.error, isA<LampBusyException>());
+        expect(r.ble.sectionReads('lamp'), 1 + retries);
+        expect(
+          r.states.where((s) => s.error is LampAuthRequiredException),
+          isEmpty,
+        );
+        _close(r);
+      });
+    });
+
+    test('read busy past the first read loads once the lamp has the heap', () {
+      fakeAsync((async) {
+        const retries = ControlNotifier.sectionBusyRetries;
+        final r = _open(async, busyReads: {'lamp': retries});
+        async.elapse(const Duration(seconds: 5));
+        expect(r.connected, isTrue);
+        expect(r.state.value!.lamp.name, 'jacko');
+        _close(r);
+      });
+    });
+
+    for (final name in ['base', 'shade', 'home', 'expr']) {
+      test('$name read busy fails the open, never showing defaults', () {
+        fakeAsync((async) {
+          final r = _open(async, busyReads: {name: 99});
+          async.elapse(const Duration(seconds: 5));
+          expect(r.state.error, isA<LampBusyException>());
+          expect(r.states.where((s) => s.hasValue), isEmpty);
+          _close(r);
+        });
+      });
+    }
+
+    test('read busy on a reconnect says so and stops the ladder', () {
+      fakeAsync((async) {
+        final r = _open(async);
+        r.ble.busyReads['lamp'] = 99;
+        r.ble.disconnect(_id);
+        async.elapse(const Duration(seconds: 8));
+        expect(r.state.error, isA<LampBusyException>());
         final connects = r.ble.connects;
         async.elapse(const Duration(minutes: 1));
         expect(r.ble.connects, connects);
