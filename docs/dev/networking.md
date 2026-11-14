@@ -454,7 +454,7 @@ surface(1) + sourceKind(1) + fadeDurationMs(2 LE)
 ```json
 {"type":"glitchy","target":3,"delayMs":0,"colors":"ff00000000ff0000","parameters":{"durationMin":250,"durationMax":900}}
 ```
-- **Known senders**: cascade fan-out (`ExpressionManager::maybeCascade`), and the app's Test (`test_expression` with colours) when its parameters set `cascadeEnabled`; snafu `Greeting::control()` on peer arrival — sends a fast glitch (`type="glitchy"`, `durationMin=durationMax=12`, `target=SHADE`) colored with the sender's stem first color (`config.base.colors[0]`). Only sent when the peer has a known ESP-NOW MAC (`hasMac=true`).
+- **Known senders**: cascade fan-out (`ExpressionManager::maybeCascade`), and the app's Test, once it has played on the lamp and when its parameters set `cascadeEnabled`; snafu `Greeting::control()` on peer arrival — sends a fast glitch (`type="glitchy"`, `durationMin=durationMax=12`, `target=SHADE`) colored with the sender's stem first color (`config.base.colors[0]`). Only sent when the peer has a known ESP-NOW MAC (`hasMac=true`).
 
 ### command_auth: shared-key tag on EVENT + COMMAND
 
