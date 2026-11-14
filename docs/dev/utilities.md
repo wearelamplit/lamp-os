@@ -60,7 +60,9 @@ Build a ramp of colors to lay across a strip.
 ```cpp
 std::vector<Color> calculateGradient(Color start, Color end, uint8_t steps);
 std::vector<Color> buildGradientWithStops(uint8_t numPixels,
-                                          std::vector<Color> colorStops); // multi-stop
+                                          const std::vector<Color>& colorStops); // multi-stop
+void buildGradientWithStopsInto(uint8_t px, const std::vector<Color>& stops,
+                                Color* dst);   // same bytes, caller's buffer
 std::vector<Color> buildGradientLoop(uint8_t px, const std::vector<Color>& stops);
 uint8_t gradientStopCount(const std::vector<Color>& stops);  // stops the builders use
 ```
@@ -70,7 +72,9 @@ is its closed form, with one more segment from the last stop back to the
 first, so the last pixel leads into pixel 0 as any stop boundary does. Both
 fill their segments the same way and use the first `gradientStopCount` stops,
 at most 8. With fewer than 2 the loop builder returns what
-`buildGradientWithStops` does.
+`buildGradientWithStops` does. Code that renders every frame calls
+`buildGradientWithStopsInto`, which writes exactly `px` colours into a buffer
+the caller owns and allocates nothing.
 
 ### Colour rotation: `util/color_rotation.hpp`
 A role's colours (one surface's scene, shade or base) flowing round a closed

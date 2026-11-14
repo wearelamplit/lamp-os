@@ -230,7 +230,6 @@ void ExpressionManager::cascade(const ExpressionInvocation& shape,
 void ExpressionManager::retireStale(uint32_t nowMs) {
   recentCascades_.retire(nowMs);
   recentEvents_.retire(nowMs);
-  localCooldown_.retire(nowMs);
   cascade_.retireBatchGap(nowMs);
   recentPlays_.retire(nowMs);
 }
@@ -319,17 +318,14 @@ bool ExpressionManager::triggerExpression(const std::string& type) {
   // a single cascade for the logical trigger is batched after the loop.
   suppressCascade_ = true;
   for (auto& entry : expressions) {
-    if (entry.type == type && entry.expression) {
-      entry.expression->trigger();
+    if (entry.type == type && entry.expression && entry.expression->trigger()) {
       triggered = true;
       if (!firstFired) firstFired = &entry;
     }
   }
   suppressCascade_ = false;
 #ifdef LAMP_DEBUG
-  Serial.printf("[trigger] '%s' fired=%d (matched %s)\n",
-                type.c_str(), triggered,
-                firstFired ? "≥1 entry" : "no entries");
+  Serial.printf("[trigger] '%s' fired=%d\n", type.c_str(), triggered);
 #endif
   // Cascade once per logical trigger. A TARGET_BOTH
   // expression has two entries (shade + base) but should fan out a single
@@ -343,8 +339,8 @@ bool ExpressionManager::triggerExpression(const std::string& type, ExpressionTar
   const ExpressionEntry* firstFired = nullptr;
   suppressCascade_ = true;
   for (auto& entry : expressions) {
-    if (entry.type == type && entry.expression && entry.expression->getTarget() == target) {
-      entry.expression->trigger();
+    if (entry.type == type && entry.expression && entry.expression->getTarget() == target &&
+        entry.expression->trigger()) {
       triggered = true;
       if (!firstFired) firstFired = &entry;
     }
@@ -366,19 +362,14 @@ ExpressionInvocation ExpressionManager::shapeOf(const ExpressionEntry& entry) {
   return shape;
 }
 
-void ExpressionManager::broadcastFrom(const ExpressionInvocation& inv,
-                                      const uint8_t* excludeMac) {
-  ExpressionParams params = inv.parameters;
-  params.set(kParamCascadeEnabled, 1);
-  cascade(inv, params, excludeMac);
-  announce(inv, params);
-}
-
 void ExpressionManager::broadcastInvocation(const ExpressionInvocation& inv,
                                             const uint8_t* excludeMac) {
   if (!shadeBuffer || !baseBuffer) return;
 
-  broadcastFrom(inv, excludeMac);
+  ExpressionParams params = inv.parameters;
+  params.set(kParamCascadeEnabled, 1);
+  cascade(inv, params, excludeMac);
+  announce(inv, params);
 }
 
 void ExpressionManager::sendInvocationTo(const uint8_t mac[6],
@@ -451,15 +442,11 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
   if (targetCount == 0) return false;
 
   const uint32_t nowMs = millis();
-  if (source == TransientSource::Local && localCooldown_.waiting(inv.type.c_str(), nowMs)) {
-    return false;
-  }
   // A crowd of distinct senders would otherwise stack one transient pair per
   // sender, each a heap Expression plus its buffers.
   const bool admitted = admitTransientAmong(transientExpressions_, targetCount, source,
                                             heapCanSpare(kTransientHeapBytes * targetCount));
   if (!admitted) {
-    if (source == TransientSource::Local) localCooldown_.refused(inv.type.c_str(), nowMs);
     static uint64_t s_lastDropLogMs = 0;
     const uint64_t now = uptimeMs();
     if (s_lastDropLogMs == 0 || now - s_lastDropLogMs >= kTransientDropLogMs) {
@@ -532,7 +519,10 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
 
   // `broadcast` originates a wave from this call, distinct from suppressCascade_
   // which only stops the transient's own trigger() from re-firing one.
-  if (cascadesFrom(broadcast, triggered, source)) broadcastFrom(inv);
+  if (broadcast && triggered) {
+    cascade(inv, inv.parameters);
+    announce(inv, inv.parameters);
+  }
 
   return triggered;
 }

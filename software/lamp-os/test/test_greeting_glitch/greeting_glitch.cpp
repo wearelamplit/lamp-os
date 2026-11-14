@@ -7,9 +7,8 @@
 //      NOT a glitchy-expression config; it stays verbatim.
 //   2. Crowd invocation — on arrival the greeting builds a `glitchy` in the
 //      STEM (base broadcast) color, target SHADE, fast duration, and hands it
-//      to expressionManager.broadcastInvocation (crowd cascade), REPLACING the
-//      old single directed meshLink.sendCommand(peer.mac, …). The invocation
-//      carries no peer MAC — it is a broadcast, not a directed send.
+//      to expressionManager.broadcastInvocation (crowd cascade). The
+//      invocation carries no peer MAC: it is a broadcast.
 
 #include <unity.h>
 

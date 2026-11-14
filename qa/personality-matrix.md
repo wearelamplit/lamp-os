@@ -132,8 +132,8 @@ either way — this exchange is merged but has never been bench-verified.
 a line, B Smitten toward A and C toward B (the M2 lampId-as-name `inject_nearby` lever,
 then `clear_nearby`, since an active override is also the near count crowd
 damping reads), B and C Extrovert. Give A a triggered expression with cascade off and a short
-interval, and let it fire on its own: the app Test button also cascades to B,
-and B's copy then coalesces with the cascaded one and is never passed on. B
+interval, and let it fire on its own (a Test from the app sends the same
+announcement, with no cascade while the toggle is off). B
 logs `[fondness] roll <type> from <A> hop 1 p=60% fired` and plays it ~0.5 s
 later (`fired` is the roll; the copy is dropped if all 4 pending slots are full, and coalesces if one from A is running), then C logs `hop 2 p=30%` for B's copy (two lamps near damp 75 by 8/10, then the hop halves it); wait for a fire C plays.
 `copy.set chainMaxHops 1` on B: B still copies, C logs nothing for it. With A

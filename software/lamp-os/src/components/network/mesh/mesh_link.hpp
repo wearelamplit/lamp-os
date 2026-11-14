@@ -154,6 +154,12 @@ class MeshLink {
   // after credits lost on a quiet link are reset).
   bool txReady(uint32_t nowMs) const { return EspNowLink::s_txCredit.available(nowMs); }
 
+  // Colour queries a caller may send in one tick with every one keeping its
+  // resends. A further query in the same tick takes over the oldest slot.
+  static constexpr size_t kColorQueryResendSlots = 3;
+  using ColorQueryResendRing =
+      ResendRing<lamp_protocol::COLOR_QUERY_SIZE, kColorQueryResendSlots>;
+
  private:
   EspNowLink link_;
   Config* config_ = nullptr;
@@ -231,7 +237,7 @@ class MeshLink {
       lamp_protocol::COMMAND_TAG_SIZE;
   ResendRing<lamp_protocol::CONTROL_MAX_SIZE, 1> controlOpUnicastResend_;
   ResendRing<kCommandResendMax, 10> commandResend_;
-  ResendRing<lamp_protocol::COLOR_QUERY_SIZE, 1> colorQueryResend_;
+  ColorQueryResendRing colorQueryResend_;
   ResendRing<lamp_protocol::COLOR_INFO_MAX_SIZE, 4> colorInfoResend_;
   lamp_protocol::SenderSeq commandSeq_;
   lamp_protocol::SenderSeq eventSeq_;

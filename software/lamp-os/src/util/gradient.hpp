@@ -25,7 +25,15 @@ std::vector<Color> calculateGradient(Color inColorStart, Color inColorEnd,
  * @return gradiented colors for the total strip length specified
  */
 std::vector<Color> buildGradientWithStops(uint8_t inNumberPixels,
-                                          std::vector<Color> inColorStops);
+                                          const std::vector<Color>& inColorStops);
+
+/**
+ * buildGradientWithStops into a caller buffer, for callers that render every
+ * frame. Writes exactly `px` colours to `dst`, which must hold that many, and
+ * allocates nothing.
+ */
+void buildGradientWithStopsInto(uint8_t px, const std::vector<Color>& stops,
+                                Color* dst);
 
 /**
  * how many of `stops` the gradient builders use, at most 8, counted in

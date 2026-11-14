@@ -8,6 +8,23 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 ## Unreleased
 
 ### Fixed
+- **Lioness is easier on memory and the radio in a crowd.** Its lions took
+  memory every frame, and asked a peer that never answered for its colours
+  every frame. They now draw without taking memory, ask a silent peer at most
+  once every three seconds, and keep the colours of every peer they show, so
+  a lion in a crowd of five or more no longer drops to the Main colour while
+  it waits for an answer it already had. Newcomers are now greeted one at a
+  time, in turn, where a crowd used to restart the greeting every frame.
+- **Testing an expression in the app no longer makes other lamps play it
+  when cascade is off.** Test sent the cascade command to every nearby lamp
+  whatever the cascade toggle said, even when the lamp itself could not play
+  it. It now sends it only with cascade on, and only once the lamp has
+  played it; nearby lamps still hear that the lamp played it and may copy it
+  on their own, as they do for any expression it plays. A Test the lamp
+  could not play sends nothing, and tapping it again tries again at once
+  instead of waiting a second. The glitch shifty plays as it shifts back
+  follows the same rule. The pulse a lamp plays when you add it in the app
+  no longer forces nearby lamps to play it.
 - **A local Test plays while the app is connected, even in a crowd.** The
   lamp built its list of nearby lamps the moment a phone connected and held
   it, plus a 50-lamp copy of its roster, for the whole connection, on every

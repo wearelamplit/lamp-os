@@ -508,15 +508,14 @@ scale with the number of peers or the mesh's message rate, so each is bounded:
   both halves takes both), and only when the largest free block holds 2 KB
   per target plus the 4 KB headroom (8 KB for both halves, 6 KB for one), so
   a transient that starts can finish allocating. Under that, the lamp's own
-  Test plays nothing here and logs `[expr] transient drop` (every build, at
-  most every 5 s), but its cascade still goes out to the crowd
-  (`cascadesFrom`), built from the invocation with no Expression made for
-  it; a peer's invocation never cascades, and a mirrored copy sends at most
-  one MSG_EVENT of its own. That type then waits a second
-  (`LocalCooldown`) before the lamp tries it again, so a Test tapped over
-  and over while the lamp is short neither retries nor resends each tap. The vector is reserved at
-  `ExpressionManager::begin`, and the compositor reserves 16 behavior slots
-  past its boot list for transients and live upserts.
+  Test plays nothing here, logs `[expr] transient drop` (every build, at
+  most every 5 s) and sends nothing to the crowd, since a Test announces and
+  cascades only after it plays; a peer's invocation never cascades, and a
+  mirrored copy sends at most one MSG_EVENT of its own. Each Test tap is
+  admitted afresh, so one tapped again once memory frees plays. The
+  vector is reserved at `ExpressionManager::begin`, and the compositor
+  reserves 16 behavior slots past its boot list for transients and live
+  upserts.
 - **Mirror rolls.** `SocialEchoObserver` holds its roll cooldown in a fixed
   16-slot `RollCooldownTable` (about 200 bytes) and 4 pending copies, so a
   crowd of any size takes no heap to decide a copy; a full table rolls
@@ -592,32 +591,32 @@ scale with the number of peers or the mesh's message rate, so each is bounded:
   fixed .bss, 16 bytes each with the `millis()` stamp that ages a tuple out
   after 20 s: about 7.3 KB off free heap. Ring capacity is the knob; a slot
   added to one ring costs 16 bytes.
-- **Cascade fan-out.** A locally fired cascade (a cascading expression, or the
-  app's Test) reaches every mesh peer, closest first. `CascadeScheduler`
-  (`expressions/cascade_scheduler.hpp`) holds up to two fan-outs (peers and one
-  serialized invocation each, about 2.2 KB of .bss: 50 MACs and a 768-byte
-  payload per fan-out, above the 536-byte worst case). The loop sends up to 6
-  frames per pass (`kBatchSize`, held to the 6 TX credits), only while credits
-  remain (`TxCredit::available`, which applies the 2 s reset itself, so
-  credits lost on a quiet link never hold the drain; a frame with none
-  waits for a later pass), and passes are 100 ms
-  apart, past a command's two resend copies
-  40 ms apart, so a batch never overwrites the previous batch's resends in the
-  10-slot ring. Each frame's `delayMs` is rewritten in place to keep the
-  peer's intended fire time, (i + 1) x stagger capped at 1 s from the original
-  fire, less the time the drain has taken, never below zero. Fifty peers take
-  9 passes, so the last leaves at least 800 ms after the fire, and with a
-  short stagger the far end of a 50-lamp crowd fires up to about a second
-  late. A second cascade waits behind the one draining, its first batch a
-  full gap after the last batch of the one before, so it never overwrites
-  that batch's resends; a third replaces the one waiting. Fired together, the second starts its 9 passes after the
-  first's, so its far end leaves about 1.7 s after its fire and fires that
-  late. Those are floors on an idle link: relay traffic and mesh resends
-  (each command's two copies 40 ms apart) take the same 6 credits, so a pass
-  under contention sends fewer frames and the far end is later still, and a
-  resend refused for want of a credit is dropped and counted in `txrefused`.
-  An OTA start stops the drain, and a frame whose delay rewrite would
-  overflow is dropped and logged.
+- **Cascade fan-out.** A locally fired cascade (a cascading expression firing
+  on its own or tested from the app) reaches every mesh peer, closest first.
+  `CascadeScheduler` (`expressions/cascade_scheduler.hpp`) holds up to two
+  fan-outs (peers and one serialized invocation each, about 2.2 KB of .bss: 50
+  MACs and a 768-byte payload per fan-out, above the 536-byte worst case). The
+  loop sends up to 6 frames per pass (`kBatchSize`, held to the 6 TX credits),
+  only while credits remain (`TxCredit::available`, which applies the 2 s
+  reset itself, so credits lost on a quiet link never hold the drain; a frame
+  with none waits for a later pass), and passes are 100 ms apart, past a
+  command's two resend copies 40 ms apart, so a batch never overwrites the
+  previous batch's resends in the 10-slot ring. Each frame's `delayMs` is
+  rewritten in place to keep the peer's intended fire time, (i + 1) x stagger
+  capped at 1 s from the original fire, less the time the drain has taken,
+  never below zero. Fifty peers take 9 passes, so the last leaves at least 800
+  ms after the fire, and with a short stagger the far end of a 50-lamp crowd
+  fires up to about a second late. A second cascade waits behind the one
+  draining, its first batch a full gap after the last batch of the one before,
+  so it never overwrites that batch's resends; a third replaces the one
+  waiting. Fired together, the second starts its 9 passes after the first's,
+  so its far end leaves about 1.7 s after its fire and fires that late. Those
+  are floors on an idle link: relay traffic and mesh resends (each command's
+  two copies 40 ms apart) take the same 6 credits, so a pass under contention
+  sends fewer frames and the far end is later still, and a resend refused for
+  want of a credit is dropped and counted in `txrefused`. An OTA start stops
+  the drain, and a frame whose delay rewrite would overflow is dropped and
+  logged.
 - **Reads nobody asked for.** The section caches warm, and the state notify
   builds its payload, only while a BLE client holds the link; with no client
   the caches are freed every tick and rebuild on the next read, and the tick

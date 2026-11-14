@@ -106,7 +106,6 @@ class ExpressionManager {
   // auto-triggers from Expression::control() cascade once: the base entry
   // fires microseconds after the shade and maybeCascade() short-circuits.
   RecentCascade recentCascades_;
-  LocalCooldown localCooldown_;
 
   // Parallel dedup ring for MSG_EVENT announces. Same keying and eviction
   // policy as recentCascades_: a TARGET_BOTH expression's shade and base
@@ -145,9 +144,6 @@ class ExpressionManager {
                const uint8_t* excludeMac = nullptr);
   void announce(const ExpressionInvocation& shape, const ExpressionParams& params);
   static ExpressionInvocation shapeOf(const ExpressionEntry& entry);
-  // An invocation's own wave: cascade and event with cascadeEnabled set,
-  // built from the invocation alone, with no Expression made for it.
-  void broadcastFrom(const ExpressionInvocation& inv, const uint8_t* excludeMac = nullptr);
 
   ExpressionRegistry registry_;
 
@@ -215,15 +211,17 @@ class ExpressionManager {
   void clear();
 
   /**
-   * Trigger every expression whose type matches. LOCAL path;
-   * honors the cascade convention if configured.
+   * Trigger every expression whose type matches. LOCAL path. Only when an
+   * instance actually fires does it announce the play and, if configured,
+   * cascade; returns whether one fired.
    */
   bool triggerExpression(const std::string& type);
 
   /**
    * Trigger expressions matching both type and target. Used by the
    * per-row Test button to fire exactly the configured instance.
-   * LOCAL path; honors the cascade convention if configured.
+   * LOCAL path. Only when an instance actually fires does it announce the
+   * play and, if configured, cascade; returns whether one fired.
    */
   bool triggerExpression(const std::string& type, ExpressionTarget target);
 
@@ -236,10 +234,13 @@ class ExpressionManager {
    *
    * The transient's own trigger() never re-cascades; that structural loop
    * break makes flood propagation safe. `broadcast` is a separate axis: true
-   * only for a local origination (the app Test button) that must fan a wave
-   * out, false for every receive/forward path so received cascades stay
-   * terminal. `source` decides which transient slots it may use: a peer's
-   * (Remote, the default) never takes the ones held for the lamp's own.
+   * only for a local origination (the app Test button), which, when it
+   * played here, announces the play to nearby lamps and sends the cascade
+   * command only when the invocation's own cascadeEnabled is set; one that did
+   * not play sends nothing. false for every receive/forward
+   * path so received cascades stay terminal. `source` decides which transient
+   * slots it may use: a peer's (Remote, the default) never takes the ones
+   * held for the lamp's own.
    */
   bool triggerInvocation(const ExpressionInvocation& inv,
                          const uint8_t srcMac[6], bool broadcast = false,
@@ -252,12 +253,11 @@ class ExpressionManager {
                          TransientSource source = TransientSource::Remote);
 
   /**
-   * Broadcast an invocation to the crowd WITHOUT firing it locally.
-   * Synthesizes a cascading entry from `inv` and runs the same
-   * maybeCascade (directed RSSI-staggered wave) + emitEvent (announce)
-   * path a locally-fired cascading expression uses, minus the local
-   * render. snafu's greeting uses it to fan a crowd glitch on arrival
-   * while its own scramble renders locally.
+   * Broadcast an invocation to the crowd WITHOUT firing it locally: the
+   * cascade command whatever `inv`'s cascadeEnabled says, and the event a
+   * locally-fired cascading expression sends. Sends nothing for an
+   * unregistered or continuous type, during an OTA, or for a type and target
+   * already sent within the dedup window; the command also needs a mesh peer.
    *
    * `excludeMac`: if non-null, that peer is skipped in the target loop.
    * Default nullptr sends to all reachable peers.
@@ -310,7 +310,7 @@ class ExpressionManager {
   // the drain when an OTA starts.
   void tickCascade(uint32_t nowMs);
 
-  // Retires the dedup, cooldown, batch-gap and play stamps that have passed
+  // Retires the dedup, batch-gap and play stamps that have passed
   // their windows. Call every loop tick.
   void retireStale(uint32_t nowMs);
 
