@@ -130,7 +130,8 @@ sections answers `!` instead (`isSectionBusy`). `_readSections` reads that
 section again, `ControlNotifier.sectionBusyRetries` more times
 `sectionBusyRetryGap` apart, then throws `LampBusyException`, which the control
 screen shows as a low-on-memory error with a retry and which parks the ladder
-the same way. A re-read after a push keeps the state it had.
+the same way. A re-read after a push that ends without a reboot
+(`_rereadSections`) keeps what is on screen, a busy section included.
 
 **Liveness probe.** flutter_blue_plus can miss the link-down edge when the lamp
 drops the link itself (a mesh OTA kicking the GATT client, a reboot), so

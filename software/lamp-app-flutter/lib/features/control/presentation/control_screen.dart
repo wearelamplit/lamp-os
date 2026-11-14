@@ -48,7 +48,7 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
         if (e is LampBusyException) {
           return FriendlyError.page(
             title: 'Your lamp is low on memory.',
-            subtitle: 'Give them a moment, then try again.',
+            subtitle: 'Give it a moment, then try again.',
             rawError: e,
             onRetry: () => ref.invalidate(controlNotifierProvider(lampId)),
           );

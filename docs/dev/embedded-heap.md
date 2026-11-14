@@ -620,10 +620,11 @@ scale with the number of peers or the mesh's message rate, so each is bounded:
   expressions section (about 4 KB at the worst case) is measured, then written
   by `JsonWriter` into one exactly-sized block; the smaller sections build
   their document only with the headroom free. A heap check cannot reserve
-  the block, so the cache assign and the copy-out also catch `bad_alloc`
-  (best effort, with no exception emergency pool). A section that failed to
-  build or copy out (`SectionCache::copyOut` false) reads as `!` over BLE,
-  served from flash, never as a stale or empty section.
+  the block, so the section rebuilds, the cache assign and the copy-out also
+  catch `bad_alloc` (best effort, with no exception emergency pool). A section
+  that failed to build or copy out (`SectionCache::copyOut` false) reads as `!`
+  over BLE, served from flash, never as a stale or empty section, and a failed
+  build is retried on the next read.
 - **OTA sessions.** The receiver's chunk bitmap (up to 8 KB per OFFER) is
   allocated only when `heapCanSpare` allows it; otherwise the OFFER is declined
   busy and the sender retries.
