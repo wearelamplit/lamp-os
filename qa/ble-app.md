@@ -84,7 +84,11 @@ EOF
 - Other readable sections for `PAGE_CTRL`: `lamp`, `base`, `shade`, `home`,
   `nearby`, `exprcat`. A config section (`lamp`, `base`, `shade`, `expr`,
   `home`) reads `!` when the lamp is too short of heap to build it; read it
-  again after a moment.
+  again after a moment. `nearby` is built only while it is read: the first
+  read waits up to 100 ms for the lamp to build it and reads empty if it
+  could not; it is freed 30 s after the last read.
+- Every section's copy is freed by the read that returns the empty chunk, so
+  draining a section to the empty chunk leaves nothing held for it.
 
 H2 — schema version is 4 (`kGattSchemaVersion`, `gatt_layout.hpp`); reading
 it must work even later, after a password is set (it is the one un-gated

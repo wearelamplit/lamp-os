@@ -82,10 +82,14 @@ Two properties make it lethal:
    the ESP-NOW receive path's bounded takes. The near and mesh buffers are
    `reserve()`d to `kCapacity` (50) when the roster is constructed at boot, so
    a growing roster never reallocates them. The `getAll` buffer serves only the
-   app-facing nearby list: it is reserved to `kCapacity` in one allocation on
-   the first build after an app or webapp client connects and released when the
-   last one disconnects, and the build skips (logging OOM) if that reservation
-   throws. A new roster consumer reads one of these views, adding a field to its
+   app-facing nearby list, which exists only while the app reads it (see the
+   nearby section in [`networking.md`](networking.md)): it is sized to the
+   roster's count, reallocated only when the count moves (at most once a
+   second), and released with the list, and the build skips (logging OOM) if
+   that allocation throws. It is the exception to rules 2 and 5: it is held
+   while a phone is connected, when the largest block is tightest, so it holds
+   what the lamps there need, never the 50-slot maximum, and it holds nothing
+   on a screen that does not show the list. A new roster consumer reads one of these views, adding a field to its
    projection if needed, and never takes a full `RosterEntry` copy per peer.
 
    The buffers are **single-task and non-reentrant**: loop task (Core 1) only,

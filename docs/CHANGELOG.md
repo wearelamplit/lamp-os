@@ -8,6 +8,18 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 ## Unreleased
 
 ### Fixed
+- **A local Test plays while the app is connected, even in a crowd.** The
+  lamp built its list of nearby lamps the moment a phone connected and held
+  it, plus a 50-lamp copy of its roster, for the whole connection, on every
+  screen. With 20 or so lamps around that left too little memory for a Test.
+  The lamp now builds the list only while a Social, mesh or wisp screen is
+  showing it, sized to the lamps actually there, and frees it about 30 s
+  after you leave. The lamp also frees its copy of each section the app reads
+  as soon as the read ends, instead of holding the largest one until the
+  phone disconnects.
+- **A lamp with a malformed firmware channel no longer blanks the nearby
+  list.** A quote or control character in a peer's channel broke the list's
+  JSON, so the app dropped every lamp in it.
 - **A lamp low on memory no longer asks for its password.** When a lamp was
   too short of memory to send its settings, the app took the empty answer for
   a wrong password and showed the password prompt, or showed default colours

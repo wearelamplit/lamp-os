@@ -108,6 +108,7 @@ bottom on purpose: it's low-risk, see the note under the table.)
 | **Config persist (NVS)** | `at=web-save`; expr.set drains | each write builds a `JsonDocument` + `std::string` then NVS write | `expr.set` upsert/remove; web config POST |
 | **Web serve** | `at=webapp` | AsyncTCP per-conn ~5.7 KB *contiguous* buffers; `/api/settings` + `/api/expressions` String responses | `curl` the softAP GETs + a POST, looped |
 | **Mesh message drains** | `at=mesh` | ~10 `JsonDocument` deserialize sites per inbound op (`lamp_drains.cpp`); `getWispStatusReadJson` `std::string`; `buildClaimsBlob` | inject peers + a live 2nd peer / wisp |
+| **Nearby list** | `[heap]` + serial `heap.get` | the app's nearby JSON + its roster copy, built only while a nearby screen reads it, freed 30 s after | phone on Colors with 20+ lamps around: `largest` stays where it was before the connect and a local Test plays; then open Social, back out, and check `largest` recovers within ~30 s |
 | **Roster growth to cap** | serial `heap.get` | snapshot vector + 17-char bdAddr strings (defeat SSO) at up to 50 peers | `inject_nearby` 50 peers then `clear_nearby` |
 | **Expression create/destroy** | serial `heap.get` | `new`/`delete` of varying-size Expression objects | `expr.set` upsert/remove + `test_expression` |
 | **Greeting / gradient** | serial `heap.get` | peer color query/info → gradient build | `triggerGreet` |
