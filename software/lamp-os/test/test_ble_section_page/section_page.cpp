@@ -238,6 +238,45 @@ void test_last_chunk_is_served_before_the_free() {
   TEST_ASSERT_TRUE(page.read(true).empty());
 }
 
+static const std::string kShortJson(600, 's');
+static const std::string kLongerJson(700, 'l');
+static const std::string kHugeJson(4 * SectionPage::kKeptCapacity, 'h');
+static bool copyShort(std::string& out) {
+  out.assign(kShortJson);
+  return true;
+}
+static bool copyLonger(std::string& out) {
+  out.assign(kLongerJson);
+  return true;
+}
+static bool copyHuge(std::string& out) {
+  out.assign(kHugeJson);
+  return true;
+}
+
+// Small sections that grow the kept buffer past kKeptCapacity, as a string
+// doubles, still keep it: the longer one re-reads with no heap to spare.
+void test_small_sections_keep_a_buffer_they_grew() {
+  SectionPage page;
+  page.openConfig(copyShort, 64);
+  drain(page);
+  page.openConfig(copyLonger, 64);
+  drain(page);
+  TEST_ASSERT_TRUE(rereadsWithNoHeap(page, copyLonger));
+}
+
+// A large read abandoned midway leaves its buffer; the next small section's
+// end frees it rather than holding it for the connection.
+void test_small_section_end_frees_an_abandoned_large_buffer() {
+  SectionPage page;
+  const size_t before = g_liveBytes;
+  page.openConfig(copyHuge, 64);
+  page.read(true);
+  page.openConfig(copyLamp, 64);
+  drain(page);
+  TEST_ASSERT_EQUAL_UINT(before, g_liveBytes);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_config_section_reads_whole_in_chunks);
@@ -254,6 +293,8 @@ int main(int, char**) {
   RUN_TEST(test_end_of_large_section_frees_the_copy);
   RUN_TEST(test_small_section_rereads_without_allocating);
   RUN_TEST(test_kept_buffer_threshold_and_a_smaller_section);
+  RUN_TEST(test_small_sections_keep_a_buffer_they_grew);
+  RUN_TEST(test_small_section_end_frees_an_abandoned_large_buffer);
   RUN_TEST(test_last_chunk_is_served_before_the_free);
   return UNITY_END();
 }

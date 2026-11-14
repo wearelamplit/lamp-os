@@ -15,9 +15,9 @@ class SectionPage {
  public:
   // What a config section reads as when the heap cannot build or copy it out.
   static constexpr std::string_view kBusy{"!"};
-  // A section this size or smaller keeps its buffer for the next open (up to
-  // twice this, as a growing string doubles), so a re-read of a small section
-  // needs no fresh block; a larger one is freed.
+  // A section this size or smaller keeps its buffer for the next open, so a
+  // re-read of a small section needs no fresh block; a larger section, or a
+  // buffer past twice this (one a read abandoned midway left), is freed.
   static constexpr size_t kKeptCapacity = 1024;
 
   // Fills `out` with a section; may throw std::bad_alloc.
