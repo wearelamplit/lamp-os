@@ -26,7 +26,6 @@
 #include "components/webapp/webapp.hpp"
 #include "util/color.hpp"
 #include "util/dropped_write_log.hpp"
-#include "util/json_escape.hpp"
 #include "util/heap_probe.hpp"
 #include "util/loop_stall.hpp"
 #include "util/loop_watchdog.hpp"
@@ -36,13 +35,13 @@
 #include "ble_gap.hpp"
 #include "crypto.hpp"
 #include "components/network/ble/ble_radio_gate.hpp"
+#include "components/network/ble/nearby_list.hpp"
 #include "components/network/ble/section_page.hpp"
 #include "components/network/ble/gatt_layout.hpp"
 #include "components/network/ble/social_scan.hpp"
 #include "components/network/ble/state_notify.hpp"
 #include "expressions/expression_manager.hpp"
 #include "components/network/mesh/lamp_roster.hpp"
-#include "components/network/mesh/proximity.hpp"
 #include "components/network/mesh/wisp_status_merge.hpp"
 #include "components/network/mesh/mesh_link.hpp"
 #include "components/network/transport/wifi.hpp"
@@ -478,19 +477,6 @@ class BaseKnockoutCallback : public NimBLECharacteristicCallbacks {
   }
 };
 
-// No separate per-flag recency window: a recency cutoff shorter than the
-// prune cutoff produces "ghost rows" (entry visible, both badges gone)
-// between the two deadlines.
-//
-// Direct string emit, no JsonDocument: at roster capacity the payload is
-// ~15 KB and an ArduinoJson build peaks at ~3x that. Colors emit as 8
-// uppercase hex chars "RRGGBBWW" (the app also parses the legacy 4-int
-// array). Zero/idle values are omitted to keep the JSON compact.
-static inline void fnv1a(uint32_t& h, const void* data, size_t len) {
-  const uint8_t* p = static_cast<const uint8_t*>(data);
-  while (len--) { h ^= *p++; h *= 16777619u; }
-}
-
 // A BLE section the heap cannot serve reads empty, or "!" for a config
 // section; keep it visible on every channel, throttled to one line per 5000ms.
 static void logBleSectionOom(const char* what) {
@@ -501,243 +487,12 @@ static void logBleSectionOom(const char* what) {
   Serial.printf("[ble_control] %s OOM\n", what);
 }
 
-static void logNearbyHeapSkip(uint32_t largest, uint32_t needed, uint32_t lamps) {
-  static uint64_t lastMs = 0;
-  const uint64_t now = lamp::uptimeMs();
-  if (now - lastMs < 5000 && lastMs != 0) return;
-  lastMs = now;
-  Serial.printf("[ble_control] nearby build skipped, low heap: largest=%u needed=%u lamps=%u\n",
-                largest, needed, lamps);
-}
-
-static constexpr uint32_t kNearbyHeapMargin = 1024;
-
-// Builds a fresh string into `out`, reserved to the worst-case size of `lamps`
-// so the build never reallocates mid-string.
-static void buildNearbyJson(uint32_t& membershipHashOut,
-                            std::vector<lamp::ListedPeer>& lamps,
-                            std::string& out) {
-  // Sort by name for stable rendering.
-  std::sort(lamps.begin(), lamps.end(),
-            [](const lamp::ListedPeer& a, const lamp::ListedPeer& b) {
-              return std::strcmp(a.name, b.name) < 0;
-            });
-  out.clear();
-  // Upper bound: ~240 B of fixed fields per entry (fwChannel added) plus
-  // worst-case 6 B per escaped name char, so the string never reallocs
-  // mid-build.
-  size_t cap = 2;
-  for (const auto& p : lamps) cap += 240 + 6 * std::strlen(p.name);
-  out.reserve(cap);
-  out += '[';
-  char buf[96];
-  bool first = true;
-  const uint32_t now = millis();
-  uint32_t hash = 2166136261u;
-  for (const auto& p : lamps) {
-    if (!first) out += ',';
-    first = false;
-    // Membership hash over the app-visible fields only. lastSeenMs and rssi
-    // freshen on every BLE adv (~30 Hz); folding them would churn the rev.
-    const uint8_t flags =
-        (p.lastSeenNearMs != 0 ? 1 : 0) | (p.lastSeenMeshMs != 0 ? 2 : 0) |
-        (lamp::isNearNow(p.lastSeenNearMs, now, LAMP_PRUNE_TIME_MS) ? 4 : 0) |
-        (p.hasMac ? 8 : 0) | (p.hasOtaSendingTo ? 16 : 0);
-    fnv1a(hash, p.name, std::strlen(p.name));
-    fnv1a(hash, &flags, 1);
-    if (p.hasMac) fnv1a(hash, p.mac, 6);
-    fnv1a(hash, &p.shadeColor, 4);
-    fnv1a(hash, &p.baseColor, 4);
-    fnv1a(hash, &p.firmwareVersion, sizeof(p.firmwareVersion));
-    fnv1a(hash, p.fwChannel, std::strlen(p.fwChannel));
-    fnv1a(hash, &p.otaState, 1);
-    if (p.hasOtaSendingTo) fnv1a(hash, p.otaSendingTo, 6);
-    out += "{\"name\":\"";
-    lamp::appendJsonEscaped(out, p.name);
-    const uint32_t lastSeenMs = lamp::mostRecentSeenMs(p.lastSeenNearMs, p.lastSeenMeshMs, now);
-    snprintf(buf, sizeof(buf), "\",\"lastSeenMs\":%lu,\"viaBle\":%s,\"viaEspNow\":%s,\"near\":%s",
-             static_cast<unsigned long>(lastSeenMs),
-             p.lastSeenNearMs != 0 ? "true" : "false",
-             p.lastSeenMeshMs != 0 ? "true" : "false",
-             lamp::isNearNow(p.lastSeenNearMs, now, LAMP_PRUNE_TIME_MS) ? "true" : "false");
-    out += buf;
-    if (p.hasMac) {
-      char macBuf[18];
-      lamp::formatBdAddr(p.mac, macBuf);
-      out += ",\"lampId\":\"";
-      out += macBuf;
-      out += '"';
-    }
-    if (p.lastRssi != -127) {
-      snprintf(buf, sizeof(buf), ",\"rssi\":%d", p.lastRssi);
-      out += buf;
-    }
-    snprintf(buf, sizeof(buf),
-             ",\"shade\":\"%02x%02x%02x%02x\",\"base\":\"%02x%02x%02x%02x\"",
-             p.shadeColor.r, p.shadeColor.g, p.shadeColor.b, p.shadeColor.w,
-             p.baseColor.r, p.baseColor.g, p.baseColor.b, p.baseColor.w);
-    out += buf;
-    if (p.firmwareVersion != 0) {
-      snprintf(buf, sizeof(buf), ",\"fwVersion\":%lu",
-               static_cast<unsigned long>(p.firmwareVersion));
-      out += buf;
-    }
-    snprintf(buf, sizeof(buf), ",\"fwChannel\":\"%s\"", p.fwChannel);
-    out += buf;
-    if (p.otaState != 0) {
-      snprintf(buf, sizeof(buf), ",\"otaState\":%u", p.otaState);
-      out += buf;
-    }
-    if (p.hasOtaSendingTo) {
-      char macBuf[18];
-      lamp::formatBdAddr(p.otaSendingTo, macBuf);
-      out += ",\"otaSendingTo\":\"";
-      out += macBuf;
-      out += '"';
-    }
-    out += '}';
-  }
-  out += ']';
-  membershipHashOut = hash;
-}
-
-// nearby JSON is app-facing only (the Social/Network screens, webapp
-// /api/nearby); the lamp's own logic reads roster structs directly. It is
-// materialized on Core 1 only while an app or webapp client is connected and
-// freed the moment neither is, so a crowded lamp with no app open holds zero
-// nearby-JSON heap. copyNearbyJson serves it under the mutex, so the Core 0
-// host task never reads a string Core 1 is reallocating.
-static SemaphoreHandle_t nearbyCacheMutex() {
-  static SemaphoreHandle_t m = xSemaphoreCreateMutex();
-  return m;
-}
-static std::string s_nearbyJson  = "[]";   // guarded by nearbyCacheMutex()
-static bool        s_nearbyReady = false;  // guarded by nearbyCacheMutex()
-
-// Contiguous build is bounded to ~N*276 B regardless of fleet size. The cut
-// keeps the most-relevant peers, so a crowd past this many drops the farthest
-// and stalest first; the app surfaces "there may be more".
-static constexpr size_t kNearbyMaxLamps = 25;
-
-// Bumped by maintainNearbyJson when the app-visible fields of the served
-// (top-N) set change (excluding the ~30 Hz rssi/lastSeen churn). Surfaced in
-// every stateNotify payload so the app re-reads nearby on a push, not a poll.
-static uint32_t s_nearbyRev = 0;
+// The app reads it only on its Social, mesh-lamps and wisp-painted-lamps
+// screens, so it is built on the loop while those reads keep coming.
+static NearbyList s_nearby;
 
 void copyNearbyJson(std::string& out) {
-  xSemaphoreTake(nearbyCacheMutex(), portMAX_DELAY);
-  out = s_nearbyJson;
-  xSemaphoreGive(nearbyCacheMutex());
-}
-
-// Keep the kNearbyMaxLamps most-relevant entries at the front of `lamps` and
-// drop the rest: near peers before mesh-only, then most-recently-seen, then
-// strongest RSSI. buildNearbyJson re-sorts the survivors by name.
-static void capNearby(std::vector<lamp::ListedPeer>& lamps, uint32_t now) {
-  if (lamps.size() <= kNearbyMaxLamps) return;
-  std::partial_sort(lamps.begin(), lamps.begin() + kNearbyMaxLamps,
-                    lamps.end(),
-                    [now](const lamp::ListedPeer& a,
-                          const lamp::ListedPeer& b) {
-                      return lamp::nearbyMoreRelevant(a, b, now,
-                                                      LAMP_PRUNE_TIME_MS);
-                    });
-  lamps.resize(kNearbyMaxLamps);
-}
-
-static void releaseNearby() {
-  xSemaphoreTake(nearbyCacheMutex(), portMAX_DELAY);
-  if (s_nearbyReady) {
-    std::string("[]").swap(s_nearbyJson);  // SSO, reclaims the build heap
-    s_nearbyReady = false;
-  }
-  xSemaphoreGive(nearbyCacheMutex());
-  lamp::lampRoster.releaseAll();
-}
-
-// Core 1 only (tick). Materializes the nearby JSON while an app/webapp client
-// is connected, rebuilding when the roster changes (throttled to 1 Hz;
-// BLE advs freshen lastSeen at ~30 Hz per peer). Frees the buffer the moment
-// no client is connected, so no nearby-JSON heap is resident in the
-// crowded-no-app case. ponytail: boundary rssi jitter at >kNearbyMaxLamps can
-// churn the served set at up to the 1 Hz rebuild rate; add a hysteresis
-// margin only if that shows up as rev thrash.
-static void maintainNearbyJson() {
-  static uint32_t builtGen    = 0;
-  static uint64_t lastBuildMs = 0;
-  static uint32_t lastHash    = 0;
-  static bool     seeded      = false;
-
-  bool wanted = s_clientConnected;
-#if LAMP_WEBAPP_ENABLED
-  wanted = wanted || webapp::hasClient();
-#endif
-  if (!wanted) {
-    releaseNearby();
-    builtGen    = 0;
-    lastBuildMs = 0;
-    seeded      = false;
-    return;
-  }
-
-  const uint32_t gen = lamp::lampRoster.generation();
-  if (gen == builtGen && s_nearbyReady) return;
-  const uint32_t now = millis();
-  const uint64_t up = lamp::uptimeMs();
-  // lastBuildMs is 0 only before the first attempt since connect; after a
-  // failed attempt it holds the retry to the same 1 Hz.
-  if (lastBuildMs != 0 && up - lastBuildMs < 1000) return;
-
-  std::vector<lamp::ListedPeer>* all = nullptr;
-  try {
-    all = &lamp::lampRoster.getAll();
-  } catch (const std::bad_alloc&) {
-    logBleSectionOom("nearby roster");
-    lastBuildMs = up;
-    return;
-  }
-  auto& lamps = *all;
-  capNearby(lamps, now);
-  uint32_t needed = 2;
-  for (auto& e : lamps) needed += 240 + 6 * std::strlen(e.name);
-  const uint32_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-  if (largest < needed + kNearbyHeapMargin) {
-    lastBuildMs = up;
-    logNearbyHeapSkip(largest, needed, lamps.size());
-    return;
-  }
-
-  uint32_t hash = 0;
-  std::string local;
-  try {
-    buildNearbyJson(hash, lamps, local);
-  } catch (const std::bad_alloc&) {
-    logBleSectionOom("nearby");
-    lastBuildMs = up;
-    return;
-  }
-  if (local.size() < 2 || local.front() != '[') {
-    logBleSectionOom("nearby");
-    lastBuildMs = up;
-    return;
-  }
-  xSemaphoreTake(nearbyCacheMutex(), portMAX_DELAY);
-  s_nearbyJson.swap(local);
-  s_nearbyReady = true;
-  xSemaphoreGive(nearbyCacheMutex());
-  builtGen    = gen;
-  lastBuildMs = up;
-  // The first build after a (re)connect always notifies: a heap-skip can defer
-  // it past the app's first read of the idle "[]", and without a push the app
-  // wouldn't know to re-read the now-populated list. Subsequent builds keep the
-  // rssi/lastSeen churn-exclusion and only notify on a real membership change.
-  const bool firstSinceConnect = !seeded;
-  seeded = true;
-  if (firstSinceConnect || hash != lastHash) {
-    lastHash = hash;
-    ++s_nearbyRev;
-    notifyStateChange();
-  }
+  if (!s_nearby.copy(out)) out = "[]";
 }
 
 // Auth-gated on read and write: the disposition map reveals peer
@@ -965,9 +720,10 @@ struct SectionEntry {
 // (no std::function footprint). Cached() accessors rebuild and copy out
 // under Config's cache mutex, so calling here on the Core 0 host task is
 // safe against a concurrent Core 1 rebuild; tick() pre-warms the caches so
-// the rebuild rarely runs here. nearby copies its Core 1-built cache out
-// under a mutex; exprcat serves the committed per-variant flash catalog by
-// reference, so it can never OOM.
+// the rebuild rarely runs here. nearby waits up to NearbyList::kReadWaitMs
+// for the loop to build it, then copies it out under a mutex, and reads
+// empty when it is not built; exprcat serves the committed per-variant flash
+// catalog by reference, so it can never OOM.
 // wispclaims is binary, not JSON: the full accumulated fleet blob exceeds
 // the 512-byte ATT ceiling that caps the CHAR_WISP_CLAIMS direct read.
 // wisppalette is binary too (raw RGBW): a dedicated read path so the
@@ -982,7 +738,7 @@ static const std::array<SectionEntry, 11> kSections = {{
   {"expr",  nullptr,
    [](std::string& out) { return s_config->expressionsSectionJsonCached(out); }},
   {"home",  nullptr, [](std::string& out) { return s_config->homeSectionJsonCached(out); }},
-  {"nearby",  [](std::string& out) { copyNearbyJson(out); }},
+  {"nearby",  [](std::string& out) { s_nearby.read(out, millis()); }},
   {"exprcat", nullptr, nullptr, lamp::kExprCatalog, lamp::kExprCatalogLen},
   {"wispclaims", [](std::string& out) {
     static uint8_t buf[1 + lamp::WispFleetCache::kCapacity *
@@ -1242,7 +998,7 @@ void tick() {
     s_config->expressionsSectionRebuildIfDirty();
     s_config->homeSectionRebuildIfDirty();
   }
-  maintainNearbyJson();
+  if (s_nearby.tick(lamp::lampRoster, s_clientConnected, millis())) notifyStateChange();
 }
 
 void setGreetingStateProvider(std::function<lamp::GreetingState()> fn) {
@@ -1260,7 +1016,7 @@ void notifyStateChange() {
     gs = s_greetingStateProvider();
     fields.greeting = &gs;
   }
-  fields.nearbyRev = s_nearbyRev;
+  fields.nearbyRev = s_nearby.rev();
   std::string payload;
   buildStateNotifyJson(fields, payload);
   s_stateNotify->setValue(payload);
@@ -1490,7 +1246,7 @@ void stop() {
   s_server  = nullptr;
   s_running = false;
   clearAllSlots();
-  releaseNearby();
+  s_nearby.release(lamp::lampRoster);
 
 #ifdef LAMP_DEBUG
   Serial.printf("[ble_control] GATT control service stopped\n");
