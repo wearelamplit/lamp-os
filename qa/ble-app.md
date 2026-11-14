@@ -86,7 +86,8 @@ EOF
   `home`) reads `!` when the lamp is too short of heap to build it; read it
   again after a moment. `nearby` is built only while it is read: the first
   read waits up to 100 ms for the lamp to build it and reads empty if it
-  could not; it is freed 30 s after the last read.
+  could not; it is freed 30 s after the last read, or on the next loop tick
+  once the app leaves Social (`editSession surface=0x08 closed`).
 - Every section's copy is freed by the read that returns the empty chunk, so
   draining a section to the empty chunk leaves nothing held for it.
 

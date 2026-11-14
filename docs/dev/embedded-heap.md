@@ -83,7 +83,8 @@ Two properties make it lethal:
    `reserve()`d to `kCapacity` (50) when the roster is constructed at boot, so
    a growing roster never reallocates them. The `getAll` buffer serves only the
    app-facing nearby list, which exists only while the app reads it (see the
-   nearby section in [`networking.md`](networking.md)): it is sized to the
+   nearby section in [`networking.md`](networking.md), which also covers the
+   list's measured sizing and the Social-close release): it is sized to the
    roster's count, reallocated only when the count moves (at most once a
    second), and released with the list, and the build skips (logging OOM) if
    that allocation throws. It is the exception to rules 2 and 5: it is held
