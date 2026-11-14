@@ -30,7 +30,9 @@ using lamp::loop_watchdog::kWideTimeoutMs;
 using lamp::loop_watchdog::Mode;
 using lamp::loop_watchdog::modeFor;
 using lamp::loop_watchdog::Phase;
+using lamp::loop_watchdog::kSubscribeRetryMs;
 using lamp::loop_watchdog::rearmDue;
+using lamp::loop_watchdog::subscribeRetryDue;
 using lamp::loop_watchdog::timeoutMs;
 
 static bool watchesBoot(uint8_t streak) { return modeFor(streak) == Mode::Normal; }
@@ -262,7 +264,7 @@ void test_idle_mask_has_one_bit_per_checked_core() {
   TEST_ASSERT_EQUAL_UINT32(3, idleCoreMask(true, true));
 }
 
-void test_a_boot_loop_backs_off_and_is_never_left_unwatched() {
+void test_a_boot_loop_stays_in_backoff_while_it_stalls_early() {
   BootGuard g{};
   g.atBoot(false, false);
   g.atBoot(true, true);
@@ -282,6 +284,16 @@ void test_backoff_rearms_in_the_boot_at_the_stable_minute() {
   // A normal boot already holds the normal timeouts.
   TEST_ASSERT_FALSE(rearmDue(Mode::Normal, kStableUptimeMs));
   TEST_ASSERT_FALSE(rearmDue(Mode::Normal, kBackoffTimeoutMs));
+}
+
+void test_a_failed_subscribe_is_retried_once_a_second_across_the_wrap() {
+  TEST_ASSERT_TRUE(subscribeRetryDue(0, kSubscribeRetryMs));
+  TEST_ASSERT_FALSE(subscribeRetryDue(0, kSubscribeRetryMs - 1));
+  TEST_ASSERT_FALSE(subscribeRetryDue(41000, 41999));
+  TEST_ASSERT_TRUE(subscribeRetryDue(41000, 42000));
+  TEST_ASSERT_FALSE(subscribeRetryDue(UINT32_MAX - 100, UINT32_MAX - 50));
+  TEST_ASSERT_TRUE(subscribeRetryDue(UINT32_MAX - 100, 900));
+  TEST_ASSERT_FALSE(subscribeRetryDue(UINT32_MAX - 100, 800));
 }
 
 int main(int, char**) {
@@ -307,7 +319,8 @@ int main(int, char**) {
   RUN_TEST(test_a_backoff_boot_holds_the_backoff_timeout_throughout);
   RUN_TEST(test_widening_never_shortens_the_timeout);
   RUN_TEST(test_idle_mask_has_one_bit_per_checked_core);
-  RUN_TEST(test_a_boot_loop_backs_off_and_is_never_left_unwatched);
+  RUN_TEST(test_a_boot_loop_stays_in_backoff_while_it_stalls_early);
   RUN_TEST(test_backoff_rearms_in_the_boot_at_the_stable_minute);
+  RUN_TEST(test_a_failed_subscribe_is_retried_once_a_second_across_the_wrap);
   return UNITY_END();
 }

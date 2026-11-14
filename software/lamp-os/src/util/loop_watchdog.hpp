@@ -23,6 +23,11 @@ constexpr uint32_t kLoopTimeoutMs = 5000;
 constexpr uint32_t kWideTimeoutMs = 30000;
 // Held through a backoff boot until its loop runs to kStableUptimeMs.
 constexpr uint32_t kBackoffTimeoutMs = 300000;
+constexpr uint32_t kSubscribeRetryMs = 1000;
+
+constexpr bool subscribeRetryDue(uint32_t lastTryMs, uint32_t nowMs) {
+  return nowMs - lastTryMs >= kSubscribeRetryMs;
+}
 
 enum class Phase : uint8_t { Setup, Loop };
 
@@ -47,8 +52,9 @@ void beginSetup();
 void beginLoop();
 
 // Resets the loop task's watchdog. Called between the steps of any loop-task
-// operation that can block for seconds. A no-op on any other task and before
-// the loop task is subscribed.
+// operation that can block for seconds. A no-op on any other task. On the loop
+// task before it is subscribed, retries a failed subscribe at most once each
+// kSubscribeRetryMs.
 void feed();
 
 // Marks the start of a loop iteration, then feed(). First thing in loop().
@@ -97,8 +103,8 @@ struct BootGuard {
   void markUptime(uint32_t uptimeMs);
 };
 
-// True when a feed from `current` resets the watchdog, which takes the loop
-// task subscribed and `current` being that task.
+// True when a feed from `current` resets the watchdog. `subscribed` is the
+// loop task once subscribed, else null, and `current` must be it.
 inline bool feedsFrom(const void* current, const void* subscribed) {
   return subscribed != nullptr && current == subscribed;
 }

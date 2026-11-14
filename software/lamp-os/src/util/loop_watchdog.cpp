@@ -85,7 +85,6 @@ Phase s_phase = Phase::Setup;
 bool s_wide = false;
 bool s_subscribeFailed = false;
 uint32_t s_lastSubscribeTryMs = 0;
-constexpr uint32_t kSubscribeRetryMs = 1000;
 
 #ifdef LAMP_DEBUG
 LongestGap s_unfed;
@@ -110,7 +109,6 @@ void apply() {
   esp_task_wdt_reconfigure(&config);
 }
 
-// A failed subscribe is retried each second from the loop until it lands.
 void subscribe() {
   if (s_subscribed.load() != nullptr) return;
   if (esp_task_wdt_add(s_loopTask) != ESP_OK) {
@@ -161,11 +159,18 @@ void restore() {
 }
 
 void feed() {
-  if (!feedsFrom(xTaskGetCurrentTaskHandle(), s_subscribed.load())) return;
+  const TaskHandle_t self = xTaskGetCurrentTaskHandle();
+  if (s_loopTask == nullptr || self != s_loopTask) return;
+  const uint32_t nowMs = millis();
+  if (s_subscribed.load() == nullptr && subscribeRetryDue(s_lastSubscribeTryMs, nowMs)) {
+    s_lastSubscribeTryMs = nowMs;
+    subscribe();
+  }
+  if (!feedsFrom(self, s_subscribed.load())) return;
   esp_task_wdt_reset();
 #ifdef LAMP_DEBUG
   if (s_phase != Phase::Loop) return;
-  s_unfed.mark(millis());
+  s_unfed.mark(nowMs);
   report(s_unfed, s_unfedLog, "unfed span");
 #endif
 }
@@ -178,15 +183,11 @@ void startIteration() {
     Serial.printf("[loopwd] loop ran a minute; timeout back to %u s\n",
                   (unsigned)(timeoutMs(s_phase, s_wide, false) / 1000));
   }
-  if (s_subscribed.load() == nullptr && nowMs - s_lastSubscribeTryMs >= kSubscribeRetryMs) {
-    s_lastSubscribeTryMs = nowMs;
-    subscribe();
-  }
+  feed();
   if (!markIteration(s_rtc.guard, nowMs, xTaskGetCurrentTaskHandle(),
                      s_subscribed.load())) {
     return;
   }
-  feed();
 #ifdef LAMP_DEBUG
   s_iteration.mark(nowMs);
   report(s_iteration, s_iterationLog, "loop iteration");
