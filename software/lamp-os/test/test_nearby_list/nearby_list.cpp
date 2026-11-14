@@ -351,8 +351,13 @@ void test_each_visible_field_moves_the_rev() {
                                  5, "standard-beta");
        }},
       {"otaSendingTo", [](LampRoster& r, const uint8_t* m, const uint8_t* t) {
-         r.addOrUpdateFromEspNow("lamp00", m, Color(9, 1, 2, 3), Color(9, 5, 6, 0), 0x010204, 1,
+         r.addOrUpdateFromEspNow("lamp00", m, Color(9, 1, 2, 3), Color(9, 5, 6, 0), 0x010204, 2,
                                  5, "standard-beta", nullptr, false, 0, false, t, true);
+       }},
+      {"otaSendingTo target", [](LampRoster& r, const uint8_t* m, const uint8_t* t) {
+         const uint8_t other[6] = {t[0], t[1], t[2], t[3], t[4], 10};
+         r.addOrUpdateFromEspNow("lamp00", m, Color(9, 1, 2, 3), Color(9, 5, 6, 0), 0x010204, 2,
+                                 5, "standard-beta", nullptr, false, 0, false, other, true);
        }},
       {"near", [](LampRoster& r, const uint8_t* m, const uint8_t*) { r.markNear(m); }},
   };
@@ -364,6 +369,15 @@ void test_each_visible_field_moves_the_rev() {
     f.list.read(out, g_now);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(rev + 1, f.list.rev(), c.what);
   }
+  // Near lapses while the peer stays listed over the mesh.
+  const uint32_t rev = f.list.rev();
+  at(g_now + LAMP_PRUNE_TIME_MS + 1000);
+  const uint8_t other[6] = {target[0], target[1], target[2], target[3], target[4], 10};
+  f.roster.addOrUpdateFromEspNow("lamp00", mac, Color(9, 1, 2, 3), Color(9, 5, 6, 0), 0x010204,
+                                 2, 5, "standard-beta", nullptr, false, 0, false, other, true);
+  f.list.read(out, g_now);
+  f.list.tick(f.roster, true, g_now);
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(rev + 1, f.list.rev(), "near lapsed");
 }
 
 // fwChannel is ASCII by contract, so a byte past 0x7F renders escaped and the
