@@ -396,6 +396,27 @@ void test_answering_crowd_queries_track_switches() {
   TEST_ASSERT_TRUE(g_queryCount <= span / lamp::lioness::kStaggerPhaseMs + 3);
 }
 
+// An answer frees its query slot at once: with three answered queries still
+// inside their window, a lion moving onto a fourth peer asks immediately.
+void test_answer_frees_query_slot() {
+  FrameBuffer fb = makeFb();
+  BehaviorContext ctx;
+  LionsAmbientBehavior ambient(&fb);
+  ambient.setBehaviorContext(&ctx);
+  ambient.setMeshLink(&g_link);
+  for (uint8_t t = 1; t <= 4; ++t) g_nearby.push_back(makePeer(t, Color(), "crowd"));
+
+  ambient.control();   // seeds lions on peers 1-3, one query each
+  TEST_ASSERT_EQUAL_size_t(3, g_queryCount);
+  for (size_t i = 0; i < 3; ++i) answer(ambient, g_queries[i].tag);
+
+  set_mock_millis(1);
+  g_nearby.erase(g_nearby.begin());   // peer 1 leaves; its lion moves to peer 4
+  ambient.control();
+  TEST_ASSERT_EQUAL_size_t(4, g_queryCount);
+  TEST_ASSERT_EQUAL_UINT8(4, g_queries[3].tag);
+}
+
 // Answers for peers no lion shows never evict a shown peer's stops.
 void test_cache_keeps_shown_peers() {
   FrameBuffer fb = makeFb();
@@ -431,6 +452,7 @@ int main(int, char**) {
   RUN_TEST(test_silent_peer_queried_once_per_window);
   RUN_TEST(test_silent_crowd_bounded_per_window);
   RUN_TEST(test_answering_crowd_queries_track_switches);
+  RUN_TEST(test_answer_frees_query_slot);
   RUN_TEST(test_cache_keeps_shown_peers);
   return UNITY_END();
 }
