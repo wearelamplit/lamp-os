@@ -32,7 +32,7 @@ using lamp::loop_watchdog::modeFor;
 using lamp::loop_watchdog::Phase;
 using lamp::loop_watchdog::kSubscribeRetryMs;
 using lamp::loop_watchdog::rearmDue;
-using lamp::loop_watchdog::subscribeRetryDue;
+using lamp::loop_watchdog::RetryClock;
 using lamp::loop_watchdog::timeoutMs;
 
 static bool watchesBoot(uint8_t streak) { return modeFor(streak) == Mode::Normal; }
@@ -287,13 +287,18 @@ void test_backoff_rearms_in_the_boot_at_the_stable_minute() {
 }
 
 void test_a_failed_subscribe_is_retried_once_a_second_across_the_wrap() {
-  TEST_ASSERT_TRUE(subscribeRetryDue(0, kSubscribeRetryMs));
-  TEST_ASSERT_FALSE(subscribeRetryDue(0, kSubscribeRetryMs - 1));
-  TEST_ASSERT_FALSE(subscribeRetryDue(41000, 41999));
-  TEST_ASSERT_TRUE(subscribeRetryDue(41000, 42000));
-  TEST_ASSERT_FALSE(subscribeRetryDue(UINT32_MAX - 100, UINT32_MAX - 50));
-  TEST_ASSERT_TRUE(subscribeRetryDue(UINT32_MAX - 100, 900));
-  TEST_ASSERT_FALSE(subscribeRetryDue(UINT32_MAX - 100, 800));
+  RetryClock clock;
+  TEST_ASSERT_FALSE(clock.due(kSubscribeRetryMs - 1));
+  TEST_ASSERT_TRUE(clock.due(kSubscribeRetryMs));
+  // An attempt holds the next one off for the whole interval.
+  clock.tried(41000);
+  TEST_ASSERT_FALSE(clock.due(41000));
+  TEST_ASSERT_FALSE(clock.due(41999));
+  TEST_ASSERT_TRUE(clock.due(42000));
+  clock.tried(UINT32_MAX - 100);
+  TEST_ASSERT_FALSE(clock.due(UINT32_MAX - 50));
+  TEST_ASSERT_FALSE(clock.due(800));
+  TEST_ASSERT_TRUE(clock.due(900));
 }
 
 int main(int, char**) {

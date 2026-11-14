@@ -84,7 +84,7 @@ Mode s_mode = Mode::Normal;
 Phase s_phase = Phase::Setup;
 bool s_wide = false;
 bool s_subscribeFailed = false;
-uint32_t s_lastSubscribeTryMs = 0;
+RetryClock s_subscribeRetry;
 
 #ifdef LAMP_DEBUG
 LongestGap s_unfed;
@@ -111,7 +111,7 @@ void apply() {
 
 void subscribe() {
   if (s_subscribed.load() != nullptr) return;
-  s_lastSubscribeTryMs = millis();
+  s_subscribeRetry.tried(millis());
   if (esp_task_wdt_add(s_loopTask) != ESP_OK) {
     if (!s_subscribeFailed) Serial.println("[loopwd] subscribe FAILED; retrying");
     s_subscribeFailed = true;
@@ -163,7 +163,7 @@ void feed() {
   const TaskHandle_t self = xTaskGetCurrentTaskHandle();
   if (s_loopTask == nullptr || self != s_loopTask) return;
   const uint32_t nowMs = millis();
-  if (s_subscribed.load() == nullptr && subscribeRetryDue(s_lastSubscribeTryMs, nowMs)) {
+  if (s_subscribed.load() == nullptr && s_subscribeRetry.due(nowMs)) {
     subscribe();
   }
   if (!feedsFrom(self, s_subscribed.load())) return;

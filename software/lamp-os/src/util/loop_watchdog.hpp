@@ -25,9 +25,15 @@ constexpr uint32_t kWideTimeoutMs = 30000;
 constexpr uint32_t kBackoffTimeoutMs = 300000;
 constexpr uint32_t kSubscribeRetryMs = 1000;
 
-constexpr bool subscribeRetryDue(uint32_t lastTryMs, uint32_t nowMs) {
-  return nowMs - lastTryMs >= kSubscribeRetryMs;
-}
+// Spaces subscribe attempts kSubscribeRetryMs apart, across the millis() wrap.
+class RetryClock {
+ public:
+  bool due(uint32_t nowMs) const { return nowMs - lastTryMs_ >= kSubscribeRetryMs; }
+  void tried(uint32_t nowMs) { lastTryMs_ = nowMs; }
+
+ private:
+  uint32_t lastTryMs_ = 0;
+};
 
 enum class Phase : uint8_t { Setup, Loop };
 
