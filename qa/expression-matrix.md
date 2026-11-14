@@ -75,4 +75,5 @@ or the cascade path. Last full pass: 2026-07-15 (release-1.1.1 baseline).
 ## Not covered here
 
 Receiver-side cascade (old lamp → this lamp) needs the app driving the
-second lamp's Test button; expectation matrix in `BENCH_BUGS.md`.
+second lamp's Test button with that expression's cascade toggle (dev mode)
+on; expectation matrix in `BENCH_BUGS.md`.

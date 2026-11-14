@@ -145,9 +145,6 @@ class ExpressionManager {
                const uint8_t* excludeMac = nullptr);
   void announce(const ExpressionInvocation& shape, const ExpressionParams& params);
   static ExpressionInvocation shapeOf(const ExpressionEntry& entry);
-  // An invocation's own wave: cascade and event with cascadeEnabled set,
-  // built from the invocation alone, with no Expression made for it.
-  void broadcastFrom(const ExpressionInvocation& inv, const uint8_t* excludeMac = nullptr);
 
   ExpressionRegistry registry_;
 
@@ -254,12 +251,11 @@ class ExpressionManager {
                          TransientSource source = TransientSource::Remote);
 
   /**
-   * Broadcast an invocation to the crowd WITHOUT firing it locally.
-   * Synthesizes a cascading entry from `inv` and runs the same
-   * maybeCascade (directed RSSI-staggered wave) + emitEvent (announce)
-   * path a locally-fired cascading expression uses, minus the local
-   * render. snafu's greeting uses it to fan a crowd glitch on arrival
-   * while its own scramble renders locally.
+   * Broadcast an invocation to the crowd WITHOUT firing it locally: the
+   * cascade (directed RSSI-staggered wave) whatever `inv`'s cascadeEnabled
+   * says, and the event (announce) a locally-fired cascading expression
+   * sends. snafu's greeting uses it to fan a crowd glitch on arrival while
+   * its own scramble renders locally.
    *
    * `excludeMac`: if non-null, that peer is skipped in the target loop.
    * Default nullptr sends to all reachable peers.

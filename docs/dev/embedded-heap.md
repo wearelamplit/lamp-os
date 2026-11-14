@@ -589,7 +589,8 @@ scale with the number of peers or the mesh's message rate, so each is bounded:
   after 20 s: about 7.3 KB off free heap. Ring capacity is the knob; a slot
   added to one ring costs 16 bytes.
 - **Cascade fan-out.** A locally fired cascade (a cascading expression firing
-  on its own or tested from the app) reaches every mesh peer, closest first. `CascadeScheduler`
+  on its own or tested from the app) reaches every mesh peer, closest first.
+  `CascadeScheduler`
   (`expressions/cascade_scheduler.hpp`) holds up to two fan-outs (peers and one
   serialized invocation each, about 2.2 KB of .bss: 50 MACs and a 768-byte
   payload per fan-out, above the 536-byte worst case). The loop sends up to 6

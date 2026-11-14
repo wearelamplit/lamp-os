@@ -366,19 +366,14 @@ ExpressionInvocation ExpressionManager::shapeOf(const ExpressionEntry& entry) {
   return shape;
 }
 
-void ExpressionManager::broadcastFrom(const ExpressionInvocation& inv,
-                                      const uint8_t* excludeMac) {
-  ExpressionParams params = inv.parameters;
-  params.set(kParamCascadeEnabled, 1);
-  cascade(inv, params, excludeMac);
-  announce(inv, params);
-}
-
 void ExpressionManager::broadcastInvocation(const ExpressionInvocation& inv,
                                             const uint8_t* excludeMac) {
   if (!shadeBuffer || !baseBuffer) return;
 
-  broadcastFrom(inv, excludeMac);
+  ExpressionParams params = inv.parameters;
+  params.set(kParamCascadeEnabled, 1);
+  cascade(inv, params, excludeMac);
+  announce(inv, params);
 }
 
 void ExpressionManager::sendInvocationTo(const uint8_t mac[6],
