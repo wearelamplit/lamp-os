@@ -278,7 +278,7 @@ void test_low_heap_first_read_is_empty() {
 void test_longest_entry_fits_its_bound() {
   ListedPeer p;
   std::memset(p.name, 0x01, sizeof(p.name) - 1);
-  std::memset(p.fwChannel, '"', sizeof(p.fwChannel) - 1);
+  std::memset(p.fwChannel, 0x02, sizeof(p.fwChannel) - 1);
   std::memset(p.mac, 0xAB, 6);
   std::memset(p.otaSendingTo, 0xCD, 6);
   p.hasMac = true;
@@ -291,7 +291,8 @@ void test_longest_entry_fits_its_bound() {
   std::vector<ListedPeer> lamps(NearbyList::kMaxLamps, p);
   std::string out;
   NearbyList::render(lamps, 4294967295u, out);
-  TEST_ASSERT_TRUE(out.size() <= 2 + NearbyList::kMaxLamps * NearbyList::entryBound(p));
+  const size_t bound = 2 + NearbyList::kMaxLamps * NearbyList::entryBound(p);
+  TEST_ASSERT_TRUE(out.size() <= bound);
 }
 
 // fwChannel arrives over the air, so a quote in it cannot end the string.
