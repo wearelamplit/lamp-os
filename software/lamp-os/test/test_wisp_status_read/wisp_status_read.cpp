@@ -107,10 +107,64 @@ void test_low_heap_refuses_without_allocating() {
   TEST_ASSERT_EQUAL_INT(0, g_semaphoresHeld);
 }
 
+// Several times the cached status, so storing it must grow the buffer.
+const char kNewStatus[] =
+    "{\"char\":\"wispStatus\",\"mode\":\"manual\",\"paletteName\":\"midnight garden\","
+    "\"note\":\"a status long enough that no rounded-up capacity of the cached one holds it, "
+    "padded well past two hundred bytes so the store has to take a fresh block\"}";
+const char kConfig[] = "{\"char\":\"wispConfig\",\"strip\":\"sk6812\",\"pixels\":120}";
+
+// A status or config the heap cannot store keeps the one cached, gives the
+// roster lock back, and never throws.
+void test_refused_cache_writes_keep_the_last_and_the_lock() {
+  LampRoster r;
+  seed(r);
+  TEST_ASSERT_TRUE(r.cacheWispConfig(kWisp, kConfig, sizeof(kConfig) - 1));
+  g_grants = 0;
+  bool threw = false;
+  bool changed = true;
+  try {
+    r.cacheWispStatus(kWisp, kNewStatus, sizeof(kNewStatus) - 1);
+    changed = r.cacheWispConfig(kWisp, kNewStatus, sizeof(kNewStatus) - 1);
+  } catch (...) {
+    threw = true;
+  }
+  g_grants = -1;
+  TEST_ASSERT_FALSE(threw);
+  TEST_ASSERT_FALSE(changed);
+  TEST_ASSERT_EQUAL_INT(0, g_semaphoresHeld);
+  std::string out;
+  TEST_ASSERT_TRUE(r.getWispStatusReadJson(out, 0));
+  TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("aurora borealis"));
+  r.copyWispConfigJson(out);
+  TEST_ASSERT_EQUAL_STRING(kConfig, out.c_str());
+}
+
+// The wispconfig section's copy throws bad_alloc for the page to serve empty,
+// with the roster lock already given back.
+void test_refused_config_copy_throws_with_the_lock_given_back() {
+  LampRoster r;
+  seed(r);
+  TEST_ASSERT_TRUE(r.cacheWispConfig(kWisp, kConfig, sizeof(kConfig) - 1));
+  std::string out;
+  g_grants = 0;
+  bool threw = false;
+  try {
+    r.copyWispConfigJson(out);
+  } catch (const std::bad_alloc&) {
+    threw = true;
+  }
+  g_grants = -1;
+  TEST_ASSERT_TRUE(threw);
+  TEST_ASSERT_EQUAL_INT(0, g_semaphoresHeld);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_fills_with_heap_to_spare);
   RUN_TEST(test_refused_allocation_at_each_step_is_a_refusal);
   RUN_TEST(test_low_heap_refuses_without_allocating);
+  RUN_TEST(test_refused_cache_writes_keep_the_last_and_the_lock);
+  RUN_TEST(test_refused_config_copy_throws_with_the_lock_given_back);
   return UNITY_END();
 }
