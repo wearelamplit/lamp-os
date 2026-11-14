@@ -40,9 +40,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   the app connected and a wisp nearby, building the wisp's status for the app
   could run out of memory and restart the lamp. The lamp now skips that one
   update and logs it; the app keeps the status it last showed. A memory
-  failure in the lamp's own loop, or while it answers the app or reads a
-  nearby lamp's advert, now skips that one step and logs it instead of
-  restarting the lamp.
+  failure in the lamp's own loop, in its answers to the app, or in its
+  handling of a nearby lamp's advert now skips that one step and logs it
+  instead of restarting the lamp. One inside the Bluetooth stack itself, or
+  with too little memory left to raise it, still restarts the lamp.
 - **A lamp with a malformed firmware channel no longer blanks the nearby
   list.** A quote, backslash, control character or non-ASCII byte in a peer's
   channel broke the list's JSON, so the app could not read the list at all.
