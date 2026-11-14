@@ -415,6 +415,10 @@ class BrightnessCallback : public NimBLECharacteristicCallbacks {
   }
 };
 
+// The app reads it only on its Social, mesh-lamps and wisp-painted-lamps
+// screens, so it is built on the loop while those reads keep coming.
+static NearbyList s_nearby;
+
 class EditSessionCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
@@ -431,7 +435,10 @@ class EditSessionCallback : public NimBLECharacteristicCallbacks {
     if (surface & 0x04) lamp::overrides.brightness.setOperatorEditing(open);
     // 0x08 is not an edit surface: the app on the Social/Network page toggles
     // the duty-cycled passive scan that sights BLE-only peers while connected.
-    if (surface & 0x08) s_socialViewActive = open;
+    if (surface & 0x08) {
+      s_socialViewActive = open;
+      if (!open) s_nearby.endHold();
+    }
 #ifdef LAMP_DEBUG
     Serial.printf("[ble_control] editSession surface=0x%02x %s\n",
                   surface, open ? "open" : "closed");
@@ -486,10 +493,6 @@ static void logBleSectionOom(const char* what) {
   lastMs = now;
   Serial.printf("[ble_control] %s OOM\n", what);
 }
-
-// The app reads it only on its Social, mesh-lamps and wisp-painted-lamps
-// screens, so it is built on the loop while those reads keep coming.
-static NearbyList s_nearby;
 
 void copyNearbyJson(std::string& out) {
   if (!s_nearby.copy(out)) out = "[]";

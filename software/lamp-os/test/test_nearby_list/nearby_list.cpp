@@ -150,6 +150,26 @@ void test_released_a_hold_after_the_last_read() {
   TEST_ASSERT_EQUAL_UINT(baseline, g_liveBytes);
 }
 
+// N6: ending the hold frees the list and the roster copy on the next tick,
+// well inside kHoldMs, and a later read builds it again.
+void test_ended_hold_frees_on_the_next_tick() {
+  Fixture f;
+  const size_t baseline = g_liveBytes;
+  std::string out;
+  f.list.read(out, g_now);
+  out = std::string();
+  TEST_ASSERT_TRUE(g_liveBytes > baseline);
+  f.list.endHold();
+  at(g_now + 50);
+  f.list.tick(f.roster, true, g_now);
+  TEST_ASSERT_FALSE(f.list.built());
+  TEST_ASSERT_EQUAL_UINT(baseline, g_liveBytes);
+  TEST_ASSERT_FALSE(f.list.copy(out));
+  at(g_now + 50);
+  TEST_ASSERT_TRUE(f.list.read(out, g_now));
+  TEST_ASSERT_EQUAL_UINT(22, entries(out));
+}
+
 // A disconnect frees it; a reconnect inside the hold builds it again at once,
 // and every fresh build moves the rev so the app re-reads.
 void test_disconnect_frees_and_reconnect_rebuilds() {
@@ -427,6 +447,7 @@ int main(int, char**) {
   RUN_TEST(test_first_read_returns_the_list);
   RUN_TEST(test_released_a_hold_after_the_last_read);
   RUN_TEST(test_disconnect_frees_and_reconnect_rebuilds);
+  RUN_TEST(test_ended_hold_frees_on_the_next_tick);
   RUN_TEST(test_read_at_millis_zero_counts);
   RUN_TEST(test_expired_read_never_revives_after_wrap);
   RUN_TEST(test_change_while_open_moves_the_rev);

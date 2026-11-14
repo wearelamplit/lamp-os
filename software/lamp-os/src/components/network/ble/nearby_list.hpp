@@ -33,6 +33,9 @@ class NearbyList {
   bool read(std::string& out, uint32_t nowMs);
   // Any task. Copies the list out without keeping it alive; same results.
   bool copy(std::string& out);
+  // Any task. Ends the hold, so the next tick frees the list unless a read
+  // comes first.
+  void endHold() { readAtMs_.store(0); }
 
   // Loop task only. Builds the list while a client is connected and a read
   // came within kHoldMs, rebuilds it on a roster change (at most once a
