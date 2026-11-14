@@ -230,7 +230,6 @@ void ExpressionManager::cascade(const ExpressionInvocation& shape,
 void ExpressionManager::retireStale(uint32_t nowMs) {
   recentCascades_.retire(nowMs);
   recentEvents_.retire(nowMs);
-  localCooldown_.retire(nowMs);
   cascade_.retireBatchGap(nowMs);
   recentPlays_.retire(nowMs);
 }
@@ -319,8 +318,7 @@ bool ExpressionManager::triggerExpression(const std::string& type) {
   // a single cascade for the logical trigger is batched after the loop.
   suppressCascade_ = true;
   for (auto& entry : expressions) {
-    if (entry.type == type && entry.expression) {
-      entry.expression->trigger();
+    if (entry.type == type && entry.expression && entry.expression->trigger()) {
       triggered = true;
       if (!firstFired) firstFired = &entry;
     }
@@ -446,15 +444,11 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
   if (targetCount == 0) return false;
 
   const uint32_t nowMs = millis();
-  if (source == TransientSource::Local && localCooldown_.waiting(inv.type.c_str(), nowMs)) {
-    return false;
-  }
   // A crowd of distinct senders would otherwise stack one transient pair per
   // sender, each a heap Expression plus its buffers.
   const bool admitted = admitTransientAmong(transientExpressions_, targetCount, source,
                                             heapCanSpare(kTransientHeapBytes * targetCount));
   if (!admitted) {
-    if (source == TransientSource::Local) localCooldown_.refused(inv.type.c_str(), nowMs);
     static uint64_t s_lastDropLogMs = 0;
     const uint64_t now = uptimeMs();
     if (s_lastDropLogMs == 0 || now - s_lastDropLogMs >= kTransientDropLogMs) {

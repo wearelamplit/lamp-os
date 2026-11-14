@@ -106,7 +106,6 @@ class ExpressionManager {
   // auto-triggers from Expression::control() cascade once: the base entry
   // fires microseconds after the shade and maybeCascade() short-circuits.
   RecentCascade recentCascades_;
-  LocalCooldown localCooldown_;
 
   // Parallel dedup ring for MSG_EVENT announces. Same keying and eviction
   // policy as recentCascades_: a TARGET_BOTH expression's shade and base
@@ -212,8 +211,9 @@ class ExpressionManager {
   void clear();
 
   /**
-   * Trigger every expression whose type matches. LOCAL path;
-   * honors the cascade convention if configured.
+   * Trigger every expression whose type matches. LOCAL path. Only when an
+   * instance actually fires does it announce the play and, if configured,
+   * cascade; returns whether one fired.
    */
   bool triggerExpression(const std::string& type);
 
@@ -310,7 +310,7 @@ class ExpressionManager {
   // the drain when an OTA starts.
   void tickCascade(uint32_t nowMs);
 
-  // Retires the dedup, cooldown, batch-gap and play stamps that have passed
+  // Retires the dedup, batch-gap and play stamps that have passed
   // their windows. Call every loop tick.
   void retireStale(uint32_t nowMs);
 

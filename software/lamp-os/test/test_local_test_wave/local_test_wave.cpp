@@ -2,8 +2,10 @@
 // ExpressionManager: a Test follows the same rule as the expression firing on
 // its own. Once it has played here it announces the play (MSG_EVENT) and
 // sends the cascade (MSG_COMMAND) only when its parameters set
-// cascadeEnabled; a Test that did not play sends nothing. A continuous type or
-// a running OTA sends nothing. snafu's crowd fan-out (broadcastInvocation)
+// cascadeEnabled; a Test that did not play sends nothing, and the next tap
+// tries again. The type-only trigger shifty chains into glitchy with follows
+// the same rule. A continuous type or a running OTA sends nothing. snafu's
+// crowd fan-out (broadcastInvocation)
 // keeps its forced cascade, and a peer's invocation sends neither. The
 // compositor and mesh are link stubs; the stub mesh counts each frame.
 
@@ -127,8 +129,7 @@ struct Rig {
                                      TransientSource::Local);
   }
 
-  // dispatchLampAction's `test_expression` without colours: a saved entry by name.
-  bool testSaved(Cascade cascade) {
+  void addSaved(Cascade cascade) {
     ExpressionConfig config;
     config.type = "probe";
     config.target = TARGET_SHADE;
@@ -136,7 +137,18 @@ struct Rig {
     config.parameters = probe(cascade).parameters;
     manager.addExpression(config, /*configBacked=*/false);
     for (AnimatedBehavior* b : manager.getBehaviors()) compositor.addBehavior(b);
+  }
+
+  // dispatchLampAction's `test_expression` without colours: a saved entry by name.
+  bool testSaved(Cascade cascade) {
+    addSaved(cascade);
     return manager.triggerExpression("probe", TARGET_SHADE);
+  }
+
+  // The type-only trigger shifty's onComplete chains into glitchy with.
+  bool chainByType(Cascade cascade) {
+    addSaved(cascade);
+    return manager.triggerExpression("probe");
   }
 };
 
@@ -219,6 +231,34 @@ void test_saved_test_that_did_not_play_sends_nothing() {
   TEST_ASSERT_FALSE(fired);
 }
 
+void test_a_test_tapped_again_after_a_refusal_plays() {
+  Rig r;
+  g_mock_largest_free_block = 0;
+  TEST_ASSERT_FALSE(r.testWithColours(Cascade::On));
+  g_mock_largest_free_block = 1 << 20;
+  set_mock_millis(millis() + 1);
+  TEST_ASSERT_TRUE(r.testWithColours(Cascade::On));
+  TEST_ASSERT_EQUAL_size_t(kPeerCount, s_commands);
+  TEST_ASSERT_EQUAL_size_t(1, s_events);
+}
+
+void test_type_only_trigger_sends_only_when_it_fired() {
+  {
+    Rig r;
+    TEST_ASSERT_TRUE(r.chainByType(Cascade::On));
+    TEST_ASSERT_EQUAL_size_t(kPeerCount, s_commands);
+    TEST_ASSERT_EQUAL_size_t(1, s_events);
+  }
+  {
+    Rig r;
+    overrides.setSurfacePreview(0x02, true);
+    const bool fired = r.chainByType(Cascade::On);
+    TEST_ASSERT_EQUAL_size_t(0, s_commands);
+    TEST_ASSERT_EQUAL_size_t(0, s_events);
+    TEST_ASSERT_FALSE(fired);
+  }
+}
+
 void test_continuous_type_sends_nothing() {
   {
     Rig r;
@@ -273,6 +313,8 @@ int main(int, char**) {
   RUN_TEST(test_colours_test_that_did_not_play_sends_nothing);
   RUN_TEST(test_saved_test_follows_the_same_toggle);
   RUN_TEST(test_saved_test_that_did_not_play_sends_nothing);
+  RUN_TEST(test_a_test_tapped_again_after_a_refusal_plays);
+  RUN_TEST(test_type_only_trigger_sends_only_when_it_fired);
   RUN_TEST(test_continuous_type_sends_nothing);
   RUN_TEST(test_ota_sends_nothing);
   RUN_TEST(test_crowd_fan_out_cascades_without_the_toggle);
