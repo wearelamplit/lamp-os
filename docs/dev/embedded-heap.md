@@ -720,7 +720,8 @@ until a power cycle, and a boot that only stalls early, for longer than 5 s
 but less than 300 s, gets through and is watched normally again in the same
 boot. The timeout is global, so until then a stall of the core 0 idle task is
 caught at 300 s too. A subscribe that fails (`[loopwd] subscribe FAILED;
-retrying`) is retried each second from the loop. The streak lives in RTC
+retrying`) is retried at most once a second from every loop-task feed, setup
+stages included. The streak lives in RTC
 memory; any other reset (a power cycle, an update, a web save's reboot) and any
 reset of a boot that reached 60 s start it again. A loop that stalls for more than
 5 s again and again, through the whole boot, cycles: three quick resets, then a
@@ -808,8 +809,9 @@ figure was taken: in `setup()`, in its first loop iteration, or in its first
 minute after a power cut. Past 49.7 days the snapshot's uptime saturates and
 reads `>49d17h`. A boot writes the history at start, at the end of setup and at
 each milestone, so at most five NVS writes per boot. When none of a boot's
-writes lands, the next boot leaves the stored lines as they were rather than
-pin that boot's RTC figures on the boot before it.
+writes lands, the next boot rebuilds that boot's entry from the RTC state
+(firmware, the reset that started it, stage, counters) when it survived, so
+the boot before it keeps its own figures and end.
 
 A hang before the history opens (in `Serial.begin` or `initFlash`, the first
 steps of `setup()`) still resets through the watchdog, but leaves no entry of
