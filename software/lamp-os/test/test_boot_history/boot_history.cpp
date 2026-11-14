@@ -304,6 +304,7 @@ void test_decode_rejects_a_foreign_blob() {
 static Live liveOf(uint32_t fw, Stage stage, uint16_t refused, uint16_t connects,
                    uint16_t connMin) {
   Live live = freshLive(fw);
+  live.stored = 1;
   live.stage = static_cast<uint8_t>(stage);
   live.refusedLocal = refused;
   live.connects = connects;
@@ -335,6 +336,33 @@ void test_finish_ignores_live_state_from_another_firmware() {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Stage::Boot), e.stage);
   TEST_ASSERT_EQUAL_UINT8(0, e.flags);
   TEST_ASSERT_EQUAL_UINT16(0, e.connects);
+}
+
+// The boot's entry never reached NVS, so the newest stored entry is an older
+// boot's and takes none of this RTC state.
+void test_finish_leaves_an_older_boot_alone_when_the_entry_was_never_stored() {
+  History h = historyOf(2);
+  const History before = h;
+  Live live = liveOf(fwOf(1, 3, 2), Stage::Mesh, 4, 9, 14000);
+  live.stored = 0;
+  const Snapshot rtc = snapshot(5412345, 30000, 1300);
+  finish(h, &rtc, &live);
+  TEST_ASSERT_EQUAL_MEMORY(&before, &h, sizeof(History));
+  // RTC lost too: nothing says otherwise, so the snapshot rule stands.
+  finish(h, &rtc, nullptr);
+  TEST_ASSERT_EQUAL_UINT32(5412 | kUptimeExact, h.entries[1].uptime);
+}
+
+void test_a_connected_sample_is_due_once_a_second_across_the_wrap() {
+  constexpr uint32_t kEvery = 1000;
+  TEST_ASSERT_FALSE(connSampleDue(false, false, 0, 5000, kEvery));
+  // The first sample while connected, however late in the boot it comes.
+  TEST_ASSERT_TRUE(connSampleDue(true, false, 0, 0x80000000u + 5, kEvery));
+  TEST_ASSERT_TRUE(connSampleDue(true, false, 0, UINT32_MAX - 3, kEvery));
+  TEST_ASSERT_FALSE(connSampleDue(true, true, 7000, 7999, kEvery));
+  TEST_ASSERT_TRUE(connSampleDue(true, true, 7000, 8000, kEvery));
+  TEST_ASSERT_TRUE(connSampleDue(true, true, UINT32_MAX - 200, 900, kEvery));
+  TEST_ASSERT_FALSE(connSampleDue(true, true, UINT32_MAX - 200, 700, kEvery));
 }
 
 void test_without_the_rtc_the_stage_is_the_last_one_written() {
@@ -453,6 +481,7 @@ void test_fresh_live_state_starts_at_boot() {
   TEST_ASSERT_EQUAL_UINT8(7, live.fw[2]);
   TEST_ASSERT_EQUAL_UINT16(0, live.refusedLocal);
   TEST_ASSERT_EQUAL_UINT16(0, live.connects);
+  TEST_ASSERT_EQUAL_UINT8(0, live.stored);
 }
 
 void test_milestone_copies_the_counters() {
@@ -501,6 +530,8 @@ int main(int, char**) {
   RUN_TEST(test_decode_rejects_a_foreign_blob);
   RUN_TEST(test_finish_takes_stage_and_counters_from_the_rtc);
   RUN_TEST(test_finish_ignores_live_state_from_another_firmware);
+  RUN_TEST(test_finish_leaves_an_older_boot_alone_when_the_entry_was_never_stored);
+  RUN_TEST(test_a_connected_sample_is_due_once_a_second_across_the_wrap);
   RUN_TEST(test_without_the_rtc_the_stage_is_the_last_one_written);
   RUN_TEST(test_line_names_the_setup_stage);
   RUN_TEST(test_line_prints_counters_and_marks_untaken_ones);

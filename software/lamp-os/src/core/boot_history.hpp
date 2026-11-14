@@ -16,7 +16,7 @@ constexpr uint16_t kVersion = 2;
 constexpr uint32_t kUptimeExact = 1u << 31;
 
 // The last setup step a boot finished, in setup order. Unknown marks an entry
-// an older firmware wrote. Append only: the value is stored.
+// an older firmware wrote. The value is stored, so append only.
 enum class Stage : uint8_t {
   Unknown,
   Boot,
@@ -91,16 +91,18 @@ struct Live {
   uint16_t refusedLocal;
   uint16_t connects;
   uint16_t connMinLargest;
+  uint8_t stored;  // the boot's entry reached NVS
 };
 
-// Fills `out` from a stored blob of `len` bytes: this layout, or version 1
-// migrated. False when the blob is neither.
+// Fills `out` from a stored blob of `len` bytes in this layout, or in version
+// 1, migrated. False when the blob is neither.
 bool decode(const void* blob, size_t len, History& out);
 
 // Closes the newest boot with the surviving RTC state of the boot that just
 // ended. A null `rtc`, or one never sampled past boot, leaves its last
 // milestone figures in place; a null `live`, or one another firmware wrote,
-// leaves its stage and counters.
+// leaves its stage and counters. A `live` whose boot never stored its entry
+// leaves the history untouched, since the newest entry is an older boot's.
 void finish(History& h, const crash_record::Snapshot* rtc, const Live* live);
 
 // Starts an entry for this boot, dropping the oldest when full.
@@ -121,6 +123,11 @@ bool milestoneUpdate(History& h, uint8_t& next, uint32_t nowMs,
 
 // Live state for a new boot of `fwVersion`.
 Live freshLive(uint32_t fwVersion);
+
+// True when a heap sample is due at `nowMs` while connected. The first is due
+// at once, each later one `intervalMs` after `lastMs`.
+bool connSampleDue(bool connected, bool sampledBefore, uint32_t lastMs, uint32_t nowMs,
+                   uint32_t intervalMs);
 
 // Folds one heap sample taken while a client was connected.
 void foldConnectedSample(Live& live, uint32_t largestBlock);

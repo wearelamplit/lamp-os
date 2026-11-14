@@ -109,7 +109,7 @@ bool decode(const void* blob, size_t len, History& out) {
 size_t endedCount(const History& h) { return h.count == 0 ? 0 : h.count - 1; }
 
 void finish(History& h, const crash_record::Snapshot* rtc, const Live* live) {
-  if (h.count == 0) return;
+  if (h.count == 0 || (live != nullptr && !live->stored)) return;
   BootEntry& e = h.entries[h.count - 1];
   if (live != nullptr && std::memcmp(live->fw, e.fw, sizeof(e.fw)) == 0) {
     takeCounters(e, *live);
@@ -143,6 +143,11 @@ Live freshLive(uint32_t fwVersion) {
   live.stage = static_cast<uint8_t>(Stage::Boot);
   packFw(live.fw, fwVersion);
   return live;
+}
+
+bool connSampleDue(bool connected, bool sampledBefore, uint32_t lastMs, uint32_t nowMs,
+                   uint32_t intervalMs) {
+  return connected && (!sampledBefore || nowMs - lastMs >= intervalMs);
 }
 
 void foldConnectedSample(Live& live, uint32_t largestBlock) {
@@ -203,7 +208,7 @@ void formatLine(char* out, size_t cap, const History& h, size_t i) {
 
 namespace {
 
-constexpr uint32_t kLiveMagic = 0x4c424855u;
+constexpr uint32_t kLiveMagic = 0x4c424856u;
 
 struct LiveState {
   uint32_t magic;
@@ -235,13 +240,16 @@ constexpr uint32_t kConnSampleIntervalMs = 1000;
 
 History s_history{};
 uint8_t s_nextMilestone = 0;
-uint32_t s_nextConnSampleMs = 0;
+bool s_connSampled = false;
+uint32_t s_lastConnSampleMs = 0;
 
-void save() {
+bool save() {
   nvs_handle_t h;
-  if (nvs_open(kNvsNamespace, NVS_READWRITE, &h) != ESP_OK) return;
-  if (nvs_set_blob(h, kNvsKey, &s_history, sizeof(History)) == ESP_OK) nvs_commit(h);
+  if (nvs_open(kNvsNamespace, NVS_READWRITE, &h) != ESP_OK) return false;
+  const bool ok = nvs_set_blob(h, kNvsKey, &s_history, sizeof(History)) == ESP_OK &&
+                  nvs_commit(h) == ESP_OK;
   nvs_close(h);
+  return ok;
 }
 
 }  // namespace
@@ -261,7 +269,7 @@ void boot(uint32_t fwVersion) {
   s_live.magic = kLiveMagic;
   s_live.live = freshLive(fwVersion);
   append(s_history, fwVersion, esp_reset_reason());
-  save();
+  s_live.live.stored = save() ? 1 : 0;
 
   char line[kLineCap];
   for (size_t i = 0; i < endedCount(s_history); ++i) {
@@ -274,17 +282,20 @@ void reach(Stage stage) {
   s_live.live.stage = static_cast<uint8_t>(stage);
   if (stage != Stage::Loop) return;
   markSetupDone(s_history);
-  save();
+  if (save()) s_live.live.stored = 1;
 }
 
 void tick(uint32_t nowMs, bool clientConnected) {
-  if (clientConnected && static_cast<int32_t>(nowMs - s_nextConnSampleMs) >= 0) {
-    s_nextConnSampleMs = nowMs + kConnSampleIntervalMs;
+  if (connSampleDue(clientConnected, s_connSampled, s_lastConnSampleMs, nowMs,
+                    kConnSampleIntervalMs)) {
+    s_connSampled = true;
+    s_lastConnSampleMs = nowMs;
     foldConnectedSample(s_live.live, heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   }
   if (milestoneUpdate(s_history, s_nextMilestone, nowMs, crash_record::rtcSnapshot(),
-                      rtcLive())) {
-    save();
+                      rtcLive()) &&
+      save()) {
+    s_live.live.stored = 1;
   }
 }
 
