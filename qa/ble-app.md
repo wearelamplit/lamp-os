@@ -87,7 +87,8 @@ EOF
   again after a moment. `nearby` is built only while it is read: the first
   read waits up to 100 ms for the lamp to build it and reads empty if it
   could not; it is freed 30 s after the last read, or on the next loop tick
-  once the app leaves Social (`editSession surface=0x08 closed`).
+  once the app leaves Social (`editSession surface=0x08 closed`), also when
+  Social is opened and left while the app pushes firmware.
 - A section's copy over 1 KB (nearby, a big expr) is freed by the read that
   returns the empty chunk; a smaller one keeps its buffer, so re-reading the
   same small section on a tight heap serves it. A small section read right

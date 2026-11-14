@@ -102,7 +102,7 @@ void tearDown(void) {
   g_refuse = false;
 }
 
-// N1: a connected phone that never reads nearby costs no list and no roster copy.
+// A connected phone that never reads nearby costs no list and no roster copy.
 void test_connected_without_a_read_holds_nothing() {
   Fixture f;
   const size_t baseline = g_liveBytes;
@@ -118,7 +118,7 @@ void test_connected_without_a_read_holds_nothing() {
   TEST_ASSERT_TRUE(out.empty());
 }
 
-// N2: the read that asks for the list gets it, built by the loop while it waits.
+// The read that asks for the list gets it, built by the loop while it waits.
 void test_first_read_returns_the_list() {
   Fixture f;
   std::string out;
@@ -129,7 +129,7 @@ void test_first_read_returns_the_list() {
   TEST_ASSERT_EQUAL_UINT32(1, f.list.rev());
 }
 
-// N1: held while reads keep coming, freed kHoldMs after the last one.
+// Held while reads keep coming, freed kHoldMs after the last one.
 void test_released_a_hold_after_the_last_read() {
   Fixture f;
   const size_t baseline = g_liveBytes;
@@ -171,44 +171,54 @@ void test_ended_hold_frees_on_the_next_tick() {
   TEST_ASSERT_EQUAL_UINT(22, entries(out));
 }
 
-// Through the CHAR_EDIT_SESSION 0x08 rule: a close after an open frees the
-// list on the next tick, during OTA quiet too; a replayed close with the view
-// already closed keeps a mesh-lamps screen's hold; an open waits out quiet,
-// and a close in quiet frees the list though its open was dropped.
+// Through CHAR_EDIT_SESSION 0x08: a close after an open frees the list on the
+// next tick, whether either came in OTA quiet; a close the app replays after
+// the first, or after a disconnect, keeps a mesh-lamps screen's hold, in quiet
+// too; an open waits out quiet, and other selectors leave the view alone.
 void test_social_close_frees_and_a_replayed_close_keeps_the_hold() {
-  using ble_control::applySocialViewWrite;
+  ble_control::SocialView view;
   Fixture f;
   const size_t baseline = g_liveBytes;
   std::string out;
+  auto readList = [&] {
+    f.list.read(out, g_now);
+    out = std::string();
+  };
+  auto freedNextTick = [&] {
+    at(g_now + 50);
+    f.list.tick(f.roster, true, g_now);
+    return !f.list.built() && g_liveBytes == baseline;
+  };
 
-  bool active = applySocialViewWrite(false, 0x08, true, false, f.list);
-  TEST_ASSERT_TRUE(active);
-  f.list.read(out, g_now);
-  out = std::string();
-  active = applySocialViewWrite(active, 0x08, false, true, f.list);
-  TEST_ASSERT_FALSE(active);
-  at(g_now + 50);
-  f.list.tick(f.roster, true, g_now);
-  TEST_ASSERT_FALSE(f.list.built());
-  TEST_ASSERT_EQUAL_UINT(baseline, g_liveBytes);
+  view.write(0x08, true, false, f.list);
+  TEST_ASSERT_TRUE(view.active());
+  readList();
+  view.write(0x08, false, true, f.list);
+  TEST_ASSERT_FALSE(view.active());
+  TEST_ASSERT_TRUE(freedNextTick());
 
-  f.list.read(out, g_now);
-  active = applySocialViewWrite(active, 0x08, false, false, f.list);
-  at(g_now + 50);
-  f.list.tick(f.roster, true, g_now);
-  TEST_ASSERT_TRUE(f.list.built());
+  readList();
+  view.write(0x08, false, false, f.list);
+  TEST_ASSERT_FALSE(freedNextTick());
+  view.write(0x08, false, true, f.list);
+  TEST_ASSERT_FALSE(freedNextTick());
 
-  TEST_ASSERT_FALSE(applySocialViewWrite(false, 0x08, true, true, f.list));
-  TEST_ASSERT_TRUE(applySocialViewWrite(true, 0x01, false, false, f.list));
+  view.write(0x08, true, true, f.list);
+  TEST_ASSERT_FALSE(view.active());
+  view.write(0x08, false, true, f.list);
+  TEST_ASSERT_TRUE(freedNextTick());
 
-  f.list.read(out, g_now);
-  out = std::string();
-  TEST_ASSERT_FALSE(applySocialViewWrite(false, 0x08, true, true, f.list));
-  TEST_ASSERT_FALSE(applySocialViewWrite(false, 0x08, false, true, f.list));
-  at(g_now + 50);
-  f.list.tick(f.roster, true, g_now);
-  TEST_ASSERT_FALSE(f.list.built());
-  TEST_ASSERT_EQUAL_UINT(baseline, g_liveBytes);
+  view.write(0x08, true, true, f.list);
+  view.write(0x08, true, false, f.list);
+  TEST_ASSERT_TRUE(view.active());
+  view.write(0x01, false, false, f.list);
+  TEST_ASSERT_TRUE(view.active());
+
+  readList();
+  view.clear();
+  TEST_ASSERT_FALSE(view.active());
+  view.write(0x08, false, true, f.list);
+  TEST_ASSERT_FALSE(freedNextTick());
 }
 
 // A disconnect frees it and ends the hold, so a reconnect holds nothing
@@ -268,7 +278,7 @@ void test_expired_read_never_revives_after_wrap() {
   TEST_ASSERT_FALSE(f.list.built());
 }
 
-// N2: while built, a roster change rebuilds within a second and moves the rev;
+// While built, a roster change rebuilds within a second and moves the rev;
 // an rssi or lastSeen refresh rebuilds without moving it.
 void test_change_while_open_moves_the_rev() {
   Fixture f;
@@ -290,7 +300,7 @@ void test_change_while_open_moves_the_rev() {
   TEST_ASSERT_EQUAL_UINT32(rev + 1, f.list.rev());
 }
 
-// N3: steady rebuilds render into the buffer already held.
+// Steady rebuilds render into the buffer already held.
 void test_steady_rebuilds_allocate_nothing() {
   Fixture f;
   std::string out;
@@ -307,7 +317,7 @@ void test_steady_rebuilds_allocate_nothing() {
                         out.find("\"lastSeenMs\":" + std::to_string(g_now)));
 }
 
-// N3: the held list follows the lamps there, growing and shrinking.
+// The held list follows the lamps there, growing and shrinking.
 void test_held_list_follows_the_roster() {
   Fixture f;
   const size_t baseline = g_liveBytes;

@@ -127,10 +127,8 @@ class NimBleRadio : public BleRadio {
 };
 static NimBleRadio           s_nimBleRadio;
 static BleRadioGate          s_radioGate{s_nimBleRadio};
-// Set by the app (CHAR_EDIT_SESSION social-view selector) while the
-// Social/Network page is open. Gates the duty-cycled passive scan below.
-// Cleared on BLE disconnect.
-static volatile bool         s_socialViewActive = false;
+// Gates the duty-cycled passive scan below.
+static SocialView            s_socialView;
 // millis() of the last throughput-sensitive BLE write (color/brightness/
 // knockout/OTA chunk). The social scan skips a window while a write fired
 // within SocialScanTuning::idleGuardMs so it never competes during a live
@@ -345,7 +343,7 @@ class ControlServerCallbacks : public NimBLEServerCallbacks {
 
     s_clientConnected = false;
     s_homeModePageActive = false;
-    s_socialViewActive = false;
+    s_socialView.clear();
     // Clear editing flags so a crashed/backgrounded app can't keep the
     // wisp's overrides locked out; reconnected sessions re-open via
     // CHAR_EDIT_SESSION.
@@ -436,7 +434,7 @@ class EditSessionCallback : public NimBLECharacteristicCallbacks {
     const bool quiet = lamp::ota_quiet_mode::isQuiet();
     // 0x08 is not an edit surface: the app on the Social/Network page toggles
     // the duty-cycled passive scan that sights BLE-only peers while connected.
-    s_socialViewActive = applySocialViewWrite(s_socialViewActive, surface, open, quiet, s_nearby);
+    s_socialView.write(surface, open, quiet, s_nearby);
     if (quiet) {
       lamp::logDroppedWrite("editSession", "ota quiet");
       return;
@@ -976,7 +974,7 @@ void tick() {
   // holds the link; onDisconnect resumes the continuous scan itself.
   {
     const bool active =
-        s_socialViewActive && s_clientConnected && !s_radioGate.otaPaused();
+        s_socialView.active() && s_clientConnected && !s_radioGate.otaPaused();
     const uint64_t upMs = lamp::uptimeMs();
     if (active && !s_socialScanPrevActive) s_socialScan.arm(upMs);
     s_socialScanPrevActive = active;
