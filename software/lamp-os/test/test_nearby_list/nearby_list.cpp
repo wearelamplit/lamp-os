@@ -170,9 +170,9 @@ void test_ended_hold_frees_on_the_next_tick() {
   TEST_ASSERT_EQUAL_UINT(22, entries(out));
 }
 
-// A disconnect frees it; a reconnect inside the hold builds it again at once,
-// and every fresh build moves the rev so the app re-reads.
-void test_disconnect_frees_and_reconnect_rebuilds() {
+// A disconnect frees it and ends the hold, so a reconnect holds nothing
+// until a read; every fresh build moves the rev so the app re-reads.
+void test_disconnect_frees_and_reconnect_waits_for_a_read() {
   Fixture f;
   const size_t baseline = g_liveBytes;
   std::string out;
@@ -183,9 +183,27 @@ void test_disconnect_frees_and_reconnect_rebuilds() {
   TEST_ASSERT_FALSE(f.list.built());
   TEST_ASSERT_EQUAL_UINT(baseline, g_liveBytes);
   at(g_now + 5000);
-  TEST_ASSERT_TRUE(f.list.tick(f.roster, true, g_now));
-  TEST_ASSERT_TRUE(f.list.built());
+  TEST_ASSERT_FALSE(f.list.tick(f.roster, true, g_now));
+  TEST_ASSERT_FALSE(f.list.built());
+  TEST_ASSERT_EQUAL_UINT(baseline, g_liveBytes);
+  TEST_ASSERT_TRUE(f.list.read(out, g_now));
   TEST_ASSERT_EQUAL_UINT32(2, f.list.rev());
+}
+
+// A list that shrinks while the heap is too tight for a smaller buffer still
+// refreshes, into the larger one held.
+void test_low_heap_shrink_refreshes_in_place() {
+  Fixture f;
+  std::string out;
+  f.list.read(out, g_now);
+  at(g_now + 300000);
+  touch(f.roster, 0, 4);
+  f.roster.prune(LAMP_PRUNE_TIME_MS);
+  g_mock_largest_free_block = 0;
+  f.list.read(out, g_now);
+  f.list.tick(f.roster, true, g_now);
+  f.list.read(out, g_now);
+  TEST_ASSERT_EQUAL_UINT(4, entries(out));
 }
 
 void test_read_at_millis_zero_counts() {
@@ -463,7 +481,8 @@ int main(int, char**) {
   RUN_TEST(test_connected_without_a_read_holds_nothing);
   RUN_TEST(test_first_read_returns_the_list);
   RUN_TEST(test_released_a_hold_after_the_last_read);
-  RUN_TEST(test_disconnect_frees_and_reconnect_rebuilds);
+  RUN_TEST(test_disconnect_frees_and_reconnect_waits_for_a_read);
+  RUN_TEST(test_low_heap_shrink_refreshes_in_place);
   RUN_TEST(test_ended_hold_frees_on_the_next_tick);
   RUN_TEST(test_read_at_millis_zero_counts);
   RUN_TEST(test_expired_read_never_revives_after_wrap);

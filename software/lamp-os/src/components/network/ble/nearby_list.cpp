@@ -175,10 +175,14 @@ bool NearbyList::copy(std::string& out) {
 bool NearbyList::wanted(bool clientConnected, uint32_t nowMs) {
   uint32_t at = readAtMs_.load();
   if (at == 0) return false;
+  if (!clientConnected) {
+    readAtMs_.compare_exchange_strong(at, 0);
+    return false;
+  }
   // Signed: a read on another core can stamp a time after the caller's nowMs.
-  if (static_cast<int32_t>(nowMs - at) < static_cast<int32_t>(kHoldMs)) return clientConnected;
+  if (static_cast<int32_t>(nowMs - at) < static_cast<int32_t>(kHoldMs)) return true;
   // A failed exchange means a read restamped it since the load.
-  return !readAtMs_.compare_exchange_strong(at, 0) && clientConnected;
+  return !readAtMs_.compare_exchange_strong(at, 0);
 }
 
 void NearbyList::release(lamp::LampRoster& roster) {
@@ -225,20 +229,25 @@ bool NearbyList::rebuild(lamp::LampRoster& roster, uint32_t gen, uint32_t nowMs)
   // Only the loop writes json_, so its capacity reads safely here unlocked.
   const size_t cap = json_.capacity();
   std::string sized;
-  const bool resize = length > cap || cap - length >= kShrinkBytes;
+  const bool grow = length > cap;
+  bool resize = grow || cap - length >= kShrinkBytes;
   const size_t needed = length + kBuildSlack;
   if (resize) {
     const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-    if (largest < needed + kHeapMargin) {
+    bool refused = largest < needed + kHeapMargin;
+    if (!refused) {
+      try {
+        sized.reserve(needed);
+      } catch (const std::bad_alloc&) {
+        refused = true;
+      }
+    }
+    if (refused && grow) {
       logThrottled("build skipped, low heap", largest, needed, lamps.size());
       return false;
     }
-    try {
-      sized.reserve(needed);
-    } catch (const std::bad_alloc&) {
-      logThrottled("OOM", largest, needed, lamps.size());
-      return false;
-    }
+    // A shrink the heap refuses renders into the larger buffer held.
+    resize = !refused;
   }
 
   xSemaphoreTake(mutex_, portMAX_DELAY);
