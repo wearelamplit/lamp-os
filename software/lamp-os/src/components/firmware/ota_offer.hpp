@@ -10,10 +10,13 @@
 namespace lamp {
 
 // Anything that holds the offer scan back: the compositor's startup phase, an
-// OTA moving in either direction for either image, or OTA quiet mode held by
-// anything but the firmware distributor's own inheritable inter-session hold.
+// OTA moving in either direction for either image, OTA quiet mode held by
+// anything but the firmware distributor's own inheritable inter-session hold,
+// or a running image not yet marked valid, which passes on neither image until
+// it has proven it runs.
 struct OtaOfferBusy {
   bool startingUp = false;
+  bool unverified = false;
   bool firmwareSending = false;
   bool firmwareReceiving = false;
   bool fsBusy = false;
@@ -21,7 +24,7 @@ struct OtaOfferBusy {
   bool firmwareIdleHold = false;
 
   bool any() const {
-    return startingUp || firmwareSending || firmwareReceiving || fsBusy || quiet;
+    return startingUp || unverified || firmwareSending || firmwareReceiving || fsBusy || quiet;
   }
 
   // An FS session started inside the firmware hold would inherit its visible
@@ -32,11 +35,13 @@ struct OtaOfferBusy {
 // quietHolders is ota_quiet_mode::holders(). quietIsOwnIdleHold is the
 // distributor's holdingIdleQuiet(): that hold exists so the next firmware offer
 // arms inside it and inherits its quiet, so it alone never blocks the scan.
+// imageUnverified is otaMarkValid.pending().
 inline OtaOfferBusy offerBusy(bool startupComplete, bool firmwareSending,
                               bool firmwareReceiving, bool fsBusy, int quietHolders,
-                              bool quietIsOwnIdleHold) {
+                              bool quietIsOwnIdleHold, bool imageUnverified) {
   OtaOfferBusy busy;
   busy.startingUp = !startupComplete;
+  busy.unverified = imageUnverified;
   busy.firmwareSending = firmwareSending;
   busy.firmwareReceiving = firmwareReceiving;
   busy.fsBusy = fsBusy;
