@@ -294,6 +294,16 @@ void test_longest_entry_fits_its_bound() {
   TEST_ASSERT_TRUE(out.size() <= 2 + NearbyList::kMaxLamps * NearbyList::entryBound(p));
 }
 
+// fwChannel arrives over the air, so a quote in it cannot end the string.
+void test_fw_channel_is_escaped() {
+  ListedPeer p;
+  std::strcpy(p.name, "x");
+  std::strcpy(p.fwChannel, "a\",\"z");
+  std::string out;
+  NearbyList::render({p}, 0, out);
+  TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("\"fwChannel\":\"a\\\",\\\"z\""));
+}
+
 // A copy the heap refuses gives the lock back, so the loop is never stuck.
 void test_refused_copy_gives_the_lock_back() {
   Fixture f;
@@ -326,6 +336,7 @@ int main(int, char**) {
   RUN_TEST(test_low_heap_still_refreshes_in_place);
   RUN_TEST(test_low_heap_first_read_is_empty);
   RUN_TEST(test_longest_entry_fits_its_bound);
+  RUN_TEST(test_fw_channel_is_escaped);
   RUN_TEST(test_refused_copy_gives_the_lock_back);
   return UNITY_END();
 }
