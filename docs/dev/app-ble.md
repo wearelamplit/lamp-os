@@ -128,9 +128,9 @@ screen turns that into a password prompt; on a ladder reconnect it also parks
 the ladder. A lamp too short of heap to build or copy out one of the five
 sections answers `!` instead (`isSectionBusy`). `_readSections` reads that
 section again, `ControlNotifier.sectionBusyRetries` more times
-`sectionBusyRetryGap` apart, then throws `LampBusyException`, which the control
-screen shows as a low-on-memory error with a retry and which parks the ladder
-the same way. A re-read after a push that ends without a reboot
+`sectionBusyRetryGap` apart, then throws `LampBusyException`, which every lamp
+screen shows as a low-on-memory error with a retry (`LampErrorPage`) and which
+parks the ladder the same way. A re-read after a push that ends without a reboot
 (`_rereadSections`) keeps what is on screen, a busy section included.
 
 **Liveness probe.** flutter_blue_plus can miss the link-down edge when the lamp

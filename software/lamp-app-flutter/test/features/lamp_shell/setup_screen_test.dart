@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -408,5 +409,23 @@ void main() {
 
     expect(webConfigDy, greaterThan(connectivityDy));
     expect(webConfigDy, lessThan(ledsDy));
+  });
+
+  testWidgets('a lamp too low on memory says so on the Setup tab',
+      (tester) async {
+    final ble = InMemoryBleClient();
+    final c = await _makeContainer(client: ble);
+    addTearDown(c.dispose);
+    ble.seedSection(_devId, 'home', Uint8List.fromList('!'.codeUnits));
+    await tester.pumpWidget(_wrap(c));
+    for (var i = 0; i < 100; i++) {
+      if (find.text('Your lamp is low on memory.').evaluate().isNotEmpty) {
+        break;
+      }
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.text('Your lamp is low on memory.'), findsOneWidget);
+    expect(find.text("Couldn't reach your lamp."), findsNothing);
+    expect(find.text('Try again'), findsOneWidget);
   });
 }

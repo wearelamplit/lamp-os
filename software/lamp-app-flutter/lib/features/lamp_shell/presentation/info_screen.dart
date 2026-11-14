@@ -7,7 +7,6 @@ import '../../../core/app_channel.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/tap_counter.dart';
 import '../../../core/widgets/app_snackbar.dart';
-import '../../../core/widgets/friendly_error.dart';
 import '../../../core/widgets/info_panel.dart';
 import '../../../core/widgets/settings_row.dart';
 import '../../control/application/advanced_session.dart';
@@ -17,6 +16,7 @@ import '../../control/application/dev_mode.dart';
 import '../../firmware/application/firmware_notifier.dart';
 import '../../firmware/domain/firmware_state.dart';
 import '../../firmware/presentation/firmware_update_panel.dart';
+import '../../control/presentation/lamp_error_page.dart';
 
 /// Info tab: Lamplit branding, firmware + app version footer, and the
 /// 5-tap-the-wordmark gesture that unlocks session-only advanced settings.
@@ -32,14 +32,7 @@ class InfoScreen extends ConsumerWidget {
     final async = ref.watch(controlNotifierProvider(lampId));
     return async.when(
       loading: () => const SizedBox.expand(),
-      error: (e, _) => FriendlyError.page(
-        title: "Couldn't reach your lamp.",
-        subtitle:
-            "They may have wandered out of range. Bring your phone closer "
-            'and try again.',
-        rawError: e,
-        onRetry: () => ref.invalidate(controlNotifierProvider(lampId)),
-      ),
+      error: (e, _) => LampErrorPage(lampId: lampId, error: e),
       data: (state) => _InfoBody(lampId: lampId, state: state),
     );
   }
