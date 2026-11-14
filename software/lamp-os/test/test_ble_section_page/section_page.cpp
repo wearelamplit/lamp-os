@@ -5,6 +5,7 @@
 
 #include <unity.h>
 
+#include <cstddef>
 #include <cstdlib>
 #include <new>
 #include <string>
@@ -16,14 +17,26 @@
 using ble_control::SectionPage;
 
 static size_t g_allocs = 0;
+static size_t g_liveBytes = 0;
 static bool g_refuse = false;
+
+// Each block carries its size in a header so a release can count it back.
+constexpr size_t kHeader = alignof(std::max_align_t);
 
 void* testAllocate(size_t n) {
   if (g_refuse) return nullptr;
   ++g_allocs;
-  return std::malloc(n);
+  auto* block = static_cast<unsigned char*>(std::malloc(n + kHeader));
+  if (!block) return nullptr;
+  *reinterpret_cast<size_t*>(block) = n;
+  g_liveBytes += n;
+  return block + kHeader;
 }
-void testRelease(void* p) noexcept { std::free(p); }
+void testRelease(void* p) noexcept {
+  auto* block = static_cast<unsigned char*>(p) - kHeader;
+  g_liveBytes -= *reinterpret_cast<size_t*>(block);
+  std::free(block);
+}
 
 // Longer than the small-string buffer, so a copy of it must allocate.
 static const std::string kLampJson =
@@ -150,6 +163,32 @@ void test_static_section_serves_by_reference() {
   TEST_ASSERT_EQUAL_STRING(kCatalog + 5, drain(page).c_str());
 }
 
+// A section's copy is freed by the read that ends it, so no section's bytes
+// stay held between reads.
+void test_end_of_section_frees_the_copy() {
+  SectionPage page;
+  const size_t before = g_liveBytes;
+  page.openConfig(copyLamp, 16);
+  TEST_ASSERT_TRUE(g_liveBytes > before);
+  drain(page);
+  TEST_ASSERT_EQUAL_UINT(before, g_liveBytes);
+
+  page.open(serializeLamp, 16);
+  TEST_ASSERT_TRUE(g_liveBytes > before);
+  TEST_ASSERT_EQUAL_STRING(kLampJson.c_str(), drain(page).c_str());
+  TEST_ASSERT_EQUAL_UINT(before, g_liveBytes);
+}
+
+// The read that serves the last bytes keeps them until that read is done.
+void test_last_chunk_is_served_before_the_free() {
+  SectionPage page;
+  page.openConfig(copyLamp, static_cast<uint16_t>(kLampJson.size()));
+  const std::string_view whole = page.read(true);
+  TEST_ASSERT_EQUAL_STRING(kLampJson.c_str(), std::string(whole).c_str());
+  TEST_ASSERT_TRUE(page.read(true).empty());
+  TEST_ASSERT_TRUE(page.read(true).empty());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_config_section_reads_whole_in_chunks);
@@ -163,5 +202,7 @@ int main(int, char**) {
   RUN_TEST(test_other_section_bad_alloc_reads_empty);
   RUN_TEST(test_other_section_reads_whole);
   RUN_TEST(test_static_section_serves_by_reference);
+  RUN_TEST(test_end_of_section_frees_the_copy);
+  RUN_TEST(test_last_chunk_is_served_before_the_free);
   return UNITY_END();
 }

@@ -41,7 +41,11 @@ void SectionPage::release() {
 }
 
 std::string_view SectionPage::read(bool authed) {
-  if (!authed || chunk_ == 0 || cursor_ >= source_.size()) return {};
+  if (!authed || chunk_ == 0) return {};
+  if (cursor_ >= source_.size()) {
+    release();
+    return {};
+  }
   const std::string_view chunk = source_.substr(cursor_, chunk_);
   cursor_ += chunk.size();
   return chunk;

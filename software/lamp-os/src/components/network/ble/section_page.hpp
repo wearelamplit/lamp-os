@@ -37,7 +37,8 @@ class SectionPage {
   void release();
 
   // The next chunk. Empty past the end, with no section open, and to a link
-  // that has not authenticated, which never sees a section.
+  // that has not authenticated, which never sees a section. The empty read
+  // that ends a section frees the buffer.
   std::string_view read(bool authed);
 
   size_t size() const { return source_.size(); }
