@@ -163,20 +163,40 @@ void test_static_section_serves_by_reference() {
   TEST_ASSERT_EQUAL_STRING(kCatalog + 5, drain(page).c_str());
 }
 
-// A section's copy is freed by the read that ends it, so no section's bytes
-// stay held between reads.
-void test_end_of_section_frees_the_copy() {
+static const std::string kBigJson(SectionPage::kKeptCapacity + 1, 'x');
+static bool copyBig(std::string& out) {
+  out.assign(kBigJson);
+  return true;
+}
+static void serializeBig(std::string& out) { out.assign(kBigJson); }
+
+// A large section's copy is freed by the read that ends it, so its bytes do
+// not stay held between reads.
+void test_end_of_large_section_frees_the_copy() {
   SectionPage page;
   const size_t before = g_liveBytes;
-  page.openConfig(copyLamp, 16);
+  page.openConfig(copyBig, 64);
   TEST_ASSERT_TRUE(g_liveBytes > before);
   drain(page);
   TEST_ASSERT_EQUAL_UINT(before, g_liveBytes);
 
-  page.open(serializeLamp, 16);
+  page.open(serializeBig, 64);
   TEST_ASSERT_TRUE(g_liveBytes > before);
-  TEST_ASSERT_EQUAL_STRING(kLampJson.c_str(), drain(page).c_str());
+  TEST_ASSERT_EQUAL_UINT(kBigJson.size(), drain(page).size());
   TEST_ASSERT_EQUAL_UINT(before, g_liveBytes);
+}
+
+// A small section keeps its buffer, so a re-read serves with no heap to spare
+// where a fresh copy would read busy.
+void test_small_section_rereads_without_allocating() {
+  SectionPage page;
+  page.openConfig(copyLamp, 16);
+  drain(page);
+  g_refuse = true;
+  const bool served = page.openConfig(copyLamp, 16);
+  g_refuse = false;
+  TEST_ASSERT_TRUE(served);
+  TEST_ASSERT_EQUAL_STRING(kLampJson.c_str(), drain(page).c_str());
 }
 
 // The read that serves the last bytes keeps them until that read is done.
@@ -202,7 +222,8 @@ int main(int, char**) {
   RUN_TEST(test_other_section_bad_alloc_reads_empty);
   RUN_TEST(test_other_section_reads_whole);
   RUN_TEST(test_static_section_serves_by_reference);
-  RUN_TEST(test_end_of_section_frees_the_copy);
+  RUN_TEST(test_end_of_large_section_frees_the_copy);
+  RUN_TEST(test_small_section_rereads_without_allocating);
   RUN_TEST(test_last_chunk_is_served_before_the_free);
   return UNITY_END();
 }

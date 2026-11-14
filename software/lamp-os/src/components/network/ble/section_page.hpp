@@ -15,6 +15,9 @@ class SectionPage {
  public:
   // What a config section reads as when the heap cannot build or copy it out.
   static constexpr std::string_view kBusy{"!"};
+  // A section this size or smaller keeps its buffer for the next open, so a
+  // re-read of a small section needs no fresh block; a larger one is freed.
+  static constexpr size_t kKeptCapacity = 1024;
 
   // Fills `out` with a section; may throw std::bad_alloc.
   using Serializer = void (*)(std::string& out);
@@ -38,7 +41,7 @@ class SectionPage {
 
   // The next chunk. Empty past the end, with no section open, and to a link
   // that has not authenticated, which never sees a section. The empty read
-  // that ends a section frees the buffer.
+  // that ends a section frees a buffer past kKeptCapacity.
   std::string_view read(bool authed);
 
   size_t size() const { return source_.size(); }

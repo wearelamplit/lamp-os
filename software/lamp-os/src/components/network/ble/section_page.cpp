@@ -43,7 +43,11 @@ void SectionPage::release() {
 std::string_view SectionPage::read(bool authed) {
   if (!authed || chunk_ == 0) return {};
   if (cursor_ >= source_.size()) {
-    release();
+    if (snapshot_.capacity() > kKeptCapacity) {
+      release();
+    } else {
+      close();
+    }
     return {};
   }
   const std::string_view chunk = source_.substr(cursor_, chunk_);
