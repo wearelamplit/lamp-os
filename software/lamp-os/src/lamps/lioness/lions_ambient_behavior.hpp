@@ -40,8 +40,8 @@ class LionsAmbientBehavior : public AnimatedBehavior, public lamp::Greetable {
   void triggerGreeting(const lamp::PeerView& peer) override;   // -> greeting_
   lamp::GreetingState greetingState() const override;          // -> greeting_
   void onColorInfo(const uint8_t srcMac[6],
-                   const std::vector<Color>& baseStops,
-                   const std::vector<Color>& shadeStops) override;
+                   std::span<const Color> baseStops,
+                   std::span<const Color> shadeStops) override;
 
   void setMeshLink(lamp::MeshLink* m) { meshLink_ = m; }
   void setGreeting(LionsGreetingBehavior* g) { greeting_ = g; }

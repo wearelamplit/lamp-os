@@ -58,11 +58,11 @@ void DotsBehavior::ensurePerm() {
   }
 }
 
-std::vector<Color> DotsBehavior::buildScene() { return buildSceneWith(borrowActive_); }
+void DotsBehavior::buildScene(std::vector<Color>& scene) { buildSceneWith(scene, borrowActive_); }
 
-std::vector<Color> DotsBehavior::buildSceneWith(bool useBorrow) {
+void DotsBehavior::buildSceneWith(std::vector<Color>& scene, bool useBorrow) {
   ensurePerm();
-  std::vector<Color> scene(fb->buffer.size());
+  scene.assign(fb->buffer.size(), Color());
   const auto& segs = cfg_->segments;
   for (size_t k = 0; k < fb->segments.size(); ++k) {
     const StripSegment& geo = fb->segments[k];
@@ -85,7 +85,20 @@ std::vector<Color> DotsBehavior::buildSceneWith(bool useBorrow) {
       scene[geo.offset + i] = grad[src];
     }
   }
-  return scene;
+}
+
+void DotsBehavior::rescatter() {
+  if (cur_.empty()) {
+    buildScene(prev_);
+  } else {
+    prev_.swap(cur_);
+  }
+  buildScene(cur_);
+}
+
+void DotsBehavior::releaseBorrow() {
+  std::vector<Color>().swap(borrowBase_);
+  std::vector<Color>().swap(borrowShade_);
 }
 
 bool DotsBehavior::anyMultiColor() const {
@@ -123,9 +136,9 @@ void DotsBehavior::borrowColors(const std::vector<Color>& baseStops,
   borrowDuration_ = durationFrames;
   sinceShuffle_   = 0;
   reshuffle();
-  prev_ = buildScene();
-  cur_  = buildScene();
-  ownMelt_ = buildSceneWith(false);
+  buildScene(prev_);
+  buildScene(cur_);
+  buildSceneWith(ownMelt_, false);
   frame = 0;
   sceneChange_ = false;
   frames = kBorrowSceneFrames;
@@ -135,6 +148,7 @@ void DotsBehavior::endDriftIfDone() {
   if (!drifting_ || sceneChange_) return;
   drifting_ = false;
   driftMeltSpan_ = 0;
+  std::vector<Color>().swap(ownMelt_);
   frames = kSceneFrames;
 }
 
@@ -145,26 +159,27 @@ void DotsBehavior::control() {
     // scene (mid-crossfade included) crossfades to the own scene beneath the
     // wisp mix, and a melt already under way keeps overlaying above it,
     // easing out over the same frames.
-    std::vector<Color> shown = cur_.empty() ? buildScene() : cur_;
-    if (sceneChange_ && prev_.size() == shown.size()) {
-      for (size_t j = 0; j < shown.size(); ++j) shown[j] = fade(prev_[j], cur_[j], frames, frame);
+    // prev_ becomes the frame on show, computed in place.
+    if (cur_.empty()) buildScene(cur_);
+    if (sceneChange_ && prev_.size() == cur_.size()) {
+      for (size_t j = 0; j < cur_.size(); ++j) prev_[j] = fade(prev_[j], cur_[j], frames, frame);
+    } else {
+      prev_ = cur_;
     }
     drifting_ = true;
     driftMeltSpan_ = 0;
-    if (borrowElapsed_ * 2 > borrowDuration_ && ownMelt_.size() == shown.size()) {
+    if (borrowElapsed_ * 2 > borrowDuration_ && ownMelt_.size() == prev_.size()) {
       const uint32_t half = borrowDuration_ / 2;
       driftMeltSpan_ = borrowDuration_ - half;
       driftMeltPos_  = borrowElapsed_ - half;
     }
     borrowActive_ = false;
-    borrowBase_.clear();
-    borrowShade_.clear();
+    releaseBorrow();
     sinceShuffle_ = 0;
     // A palette edited during the borrow lands in cur_ here; refresh the
     // snapshot so the next pass does not read the edit as new and snap.
     colorsChanged();
-    prev_ = std::move(shown);
-    cur_  = buildScene();
+    buildScene(cur_);
     frame = 0;
     sceneChange_ = true;
     frames = kBorrowSceneFrames;
@@ -173,12 +188,12 @@ void DotsBehavior::control() {
   if (borrowActive_) {
     if (++borrowElapsed_ >= borrowDuration_) {
       borrowActive_ = false;
-      borrowBase_.clear();
-      borrowShade_.clear();
+      releaseBorrow();
+      std::vector<Color>().swap(ownMelt_);
       sinceShuffle_ = 0;
       reshuffle();
-      prev_ = buildScene();
-      cur_  = buildScene();
+      buildScene(prev_);
+      buildScene(cur_);
       frame = 0;
       sceneChange_ = false;
       frames = kSceneFrames;
@@ -187,9 +202,8 @@ void DotsBehavior::control() {
     if (++sinceShuffle_ >= kBorrowHoldFrames) {
       sinceShuffle_ = 0;
       reshuffle();
-      prev_ = cur_.empty() ? buildScene() : cur_;
-      cur_  = buildScene();
-      ownMelt_ = buildSceneWith(false);
+      rescatter();
+      buildSceneWith(ownMelt_, false);
       frame = 0;
       sceneChange_ = true;
     }
@@ -198,7 +212,7 @@ void DotsBehavior::control() {
   if (colorsChanged()) {
     // Live preview: recolor in place (same scatter) now, and defer the next
     // ambient re-scatter so editing never shuffles the dots.
-    cur_ = buildScene();
+    buildScene(cur_);
     prev_ = cur_;
     sceneChange_ = false;
     frame = 0;
@@ -210,15 +224,14 @@ void DotsBehavior::control() {
   if (++sinceShuffle_ < kAmbientHoldFrames) return;  // hold before re-scattering
   sinceShuffle_ = 0;
   reshuffle();  // ambient cycle only: a color edit never reaches here
-  prev_ = cur_.empty() ? buildScene() : cur_;
-  cur_ = buildScene();
+  rescatter();
   frame = 0;
   sceneChange_ = true;
 }
 
 void DotsBehavior::draw() {
   if (!fb || fb->buffer.empty()) { nextFrame(); return; }
-  if (cur_.empty()) { cur_ = buildScene(); prev_ = cur_; }
+  if (cur_.empty()) { buildScene(cur_); prev_ = cur_; }
   endDriftIfDone();
   // Yield the shade to the wisp by its eased presence: at w==1 the dots hand
   // fully to the already-composited wisp, at w==0 they own the shade, and the

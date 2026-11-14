@@ -229,6 +229,15 @@ its built-in pin.", and the row reads Built-in. Save a colour from the lamp's we
 with a pin set: the row still reads the pin afterwards. On a lamp running
 1.3.3, LED setup in advanced mode shows no data pin row.
 
+P12 — **the network picker scans on first open.** On a lamp with Home Mode on
+and no phone connected for at least two minutes, connect and open Home Mode:
+the picker shows its spinner for about 5 s, then lists the networks it found.
+Close and reopen it: the list shows at once. Disconnect for a minute,
+reconnect and open it again: the spinner shows again. With no phone connected
+the lamp still goes into Home Mode within about a minute while the saved
+network is in range, and leaves it within about two once the network is gone.
+On a lamp running 1.3.5 the first open lists networks at once.
+
 ## Pass criteria
 
 - H1 completes: mfg-data scan finds the lamp, schema reads 4, section reads
@@ -251,6 +260,8 @@ with a pin set: the row still reads the pin afterwards. On a lamp running
 - P11: the data pin row shows only in advanced mode on firmware that reports
   pins, a picked pin drives the strip after the restart, another strip's pin
   is greyed out, and a pin that clashes with a button is reported by name.
+- P12: the first picker open after a connect scans before it lists, a reopen
+  lists at once, and home presence still follows the saved network.
 
 ## Not covered here
 

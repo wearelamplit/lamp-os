@@ -5,26 +5,17 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
-## 1.3.6
+## Unreleased
 
 ### Fixed
-- **Lioness is easier on memory and the radio in a crowd.** Its lions took
-  memory every frame, and asked a peer that never answered for its colours
-  every frame. They now draw without taking memory, ask a silent peer at most
-  once every three seconds, and keep the colours of every peer they show, so
-  a lion in a crowd of five or more no longer drops to the Main colour while
-  it waits for an answer it already had. Newcomers are now greeted one at a
-  time, in turn, where a crowd used to restart the greeting every frame.
-- **Testing an expression in the app no longer makes other lamps play it
-  when cascade is off.** Test sent the cascade command to every nearby lamp
-  whatever the cascade toggle said, even when the lamp itself could not play
-  it. It now sends it only with cascade on, and only once the lamp has
-  played it; nearby lamps still hear that the lamp played it and may copy it
-  on their own, as they do for any expression it plays. A Test the lamp
-  could not play sends nothing, and tapping it again tries again at once
-  instead of waiting a second. The glitch shifty plays as it shifts back
-  follows the same rule. The pulse a lamp plays when you add it in the app
-  no longer forces nearby lamps to play it.
+- **Lamps hold less memory between home-presence scans and greetings.** A
+  lamp with home mode on kept its last WiFi scan list (about 1-2 KB) between
+  the once-a-minute scans; it now keeps only which networks it saw. Snafu's
+  dots, the greeting frames, the OTA indicator and colour changes from the
+  app reuse or free their buffers instead of allocating afresh. One change you
+  can see: on a lamp with Home Mode on, opening the Home Mode or wisp network
+  picker on a newly connected lamp now scans for about 5 seconds before listing
+  networks, where it used to show the lamp's last background scan straight away.
 - **A local Test plays while the app is connected, even in a crowd.** The
   lamp built its list of nearby lamps the moment a phone connected and held
   it, plus a 50-lamp copy of its roster, for the whole connection, on every
@@ -48,6 +39,27 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 - **A lamp with a malformed firmware channel no longer blanks the nearby
   list.** A quote, backslash, control character or non-ASCII byte in a peer's
   channel broke the list's JSON, so the app could not read the list at all.
+
+## 1.3.6
+
+### Fixed
+- **Lioness is easier on memory and the radio in a crowd.** Its lions took
+  memory every frame, and asked a peer that never answered for its colours
+  every frame. They now draw without taking memory, ask a silent peer at most
+  once every three seconds, and keep the colours of every peer they show, so
+  a lion in a crowd of five or more no longer drops to the Main colour while
+  it waits for an answer it already had. Newcomers are now greeted one at a
+  time, in turn, where a crowd used to restart the greeting every frame.
+- **Testing an expression in the app no longer makes other lamps play it
+  when cascade is off.** Test sent the cascade command to every nearby lamp
+  whatever the cascade toggle said, even when the lamp itself could not play
+  it. It now sends it only with cascade on, and only once the lamp has
+  played it; nearby lamps still hear that the lamp played it and may copy it
+  on their own, as they do for any expression it plays. A Test the lamp
+  could not play sends nothing, and tapping it again tries again at once
+  instead of waiting a second. The glitch shifty plays as it shifts back
+  follows the same rule. The pulse a lamp plays when you add it in the app
+  no longer forces nearby lamps to play it.
 - **A lamp low on memory no longer asks for its password.** When a lamp was
   too short of memory to send its settings, the app took the empty answer for
   a wrong password and showed the password prompt, or showed default colours

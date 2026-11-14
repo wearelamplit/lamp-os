@@ -22,8 +22,11 @@ void begin();
 State state();
 std::string lastError();   // "scan" | ""; only ever set when a scan fails
 
+// Starts an app-requested scan; only its list is published, and only while
+// the app stays connected.
 void startScan();
-std::vector<ScanResult> peekScanResults();  // non-destructive copy of the latest scan
+// Non-destructive copy of that list; empty after a background scan.
+std::vector<ScanResult> peekScanResults();
 
 using StateChangeCallback = void (*)();
 void setStateChangeCallback(StateChangeCallback cb);
@@ -59,8 +62,10 @@ void tick();
 
 // Home-presence detection. The lamp periodically scans (when no BT client
 // is connected; scans during BT sessions stress the shared radio) and
-// caches the visible SSIDs. `homeSsidVisible(ssid)` returns true if a
-// recent scan saw the given SSID. No association, no credentials, no
+// keeps which SSIDs it saw. `homeSsidVisible(ssid)` returns true if a
+// recent scan saw the given SSID, exactly while a scan sees up to 64
+// distinct SSIDs (SsidPresence::kCapacity); past that a home AP weaker than
+// the 64 kept reads as not visible. No association, no credentials, no
 // password ever leaves the lamp.
 bool homeSsidVisible(const std::string& ssid);
 

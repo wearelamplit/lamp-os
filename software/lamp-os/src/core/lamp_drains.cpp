@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
+#include <array>
 #include <cstring>
 #include <new>
 #include <string>
@@ -584,6 +585,8 @@ void Lamp::drainCommand() {
       // Refused here too so a delayed cascade is never booked to fire after
       // home mode ends.
       if (expressionManager.ignoresPeers()) return;
+      // ponytail: heap pools per MSG_COMMAND, since ArduinoJson 7 always allocates
+      // to deserialize. A custom arena allocator on a static buffer removes them.
       JsonDocument doc;
       if (deserializeJson(doc, cmd.payload, cmd.payloadLen) != DeserializationError::Ok) return;
       lamp::ExpressionInvocation inv;
@@ -635,20 +638,18 @@ void Lamp::drainColorInfo() {
         own.front(), lamp::uptimeMs());
   }
   lamp::catchBadAlloc("colorInfo", [&] {
-    std::vector<Color> baseStops;
-    baseStops.reserve(info.baseCount);
-    for (uint8_t i = 0; i < info.baseCount; ++i) {
-      baseStops.emplace_back(info.baseStops[i * 4 + 0], info.baseStops[i * 4 + 1],
-                             info.baseStops[i * 4 + 2], info.baseStops[i * 4 + 3]);
-    }
-    std::vector<Color> shadeStops;
-    shadeStops.reserve(info.shadeCount);
-    for (uint8_t i = 0; i < info.shadeCount; ++i) {
-      shadeStops.emplace_back(info.shadeStops[i * 4 + 0], info.shadeStops[i * 4 + 1],
-                              info.shadeStops[i * 4 + 2], info.shadeStops[i * 4 + 3]);
-    }
+    std::array<Color, lamp_protocol::COLOR_INFO_MAX_STOPS> baseStops;
+    std::array<Color, lamp_protocol::COLOR_INFO_MAX_STOPS> shadeStops;
+    auto unpack = [](const uint8_t* in, uint8_t count, Color* out) {
+      for (uint8_t i = 0; i < count; ++i) {
+        out[i] = Color(in[i * 4 + 0], in[i * 4 + 1], in[i * 4 + 2], in[i * 4 + 3]);
+      }
+    };
+    unpack(info.baseStops, info.baseCount, baseStops.data());
+    unpack(info.shadeStops, info.shadeCount, shadeStops.data());
     if (auto* g = compositor.behaviorContext().greeting) {
-      g->onColorInfo(info.sourceMac, baseStops, shadeStops);
+      g->onColorInfo(info.sourceMac, {baseStops.data(), info.baseCount},
+                     {shadeStops.data(), info.shadeCount});
     }
   });
 }

@@ -20,6 +20,7 @@
 #include "../../src/behaviors/social_reunion.cpp"
 #include "../../src/behaviors/copycat.cpp"
 #include "../../src/behaviors/roll_cooldown.cpp"
+#include "../replaced_new/heap_tally.hpp"
 
 
 static bool g_ignore = false;
@@ -149,7 +150,7 @@ static bool greetingShowsPeerPalette(bool ignoring) {
   social.frames = 100;
 
   g_ignore = ignoring;
-  social.onColorInfo(kPeerMac, {Color(0xF0, 0, 0, 0)}, {});
+  social.onColorInfo(kPeerMac, std::vector<Color>{Color(0xF0, 0, 0, 0)}, {});
   bool red = false;
   for (int i = 0; i < 40; ++i) {
     fb.buffer.assign(4, Color());
@@ -168,6 +169,39 @@ void test_greeting_takes_no_peer_palette_while_ignoring() {
   TEST_ASSERT_FALSE(greetingShowsPeerPalette(true));
 }
 
+// The peer's palette and its gradient frame live only while the greeting plays:
+// ended by its own pass or cancelled, the greeting holds nothing it drew with.
+static size_t heldAfterGreeting(bool cancel) {
+  FrameBuffer fb;
+  fb.pixelCount = 4;
+  fb.buffer.assign(4, Color());
+  BehaviorContext ctx;
+  SocialBehavior social(&fb, 1200);
+  social.setBehaviorContext(&ctx);
+  social.triggerGreeting(peer());
+  const size_t before = heap_tally::g_liveBytes;
+  social.onColorInfo(kPeerMac, std::vector<Color>{Color(0xF0, 0, 0, 0), Color(0, 0, 0xF0, 0)},
+                     {});
+  social.control();
+  social.frame = 1;
+  social.draw();
+  if (cancel) {
+    social.cancelGreeting();
+  } else {
+    social.animationState = STOPPED;
+  }
+  social.control();
+  return heap_tally::g_liveBytes - before;
+}
+
+void test_ended_greeting_frees_its_gradient() {
+  TEST_ASSERT_EQUAL_size_t(0, heldAfterGreeting(false));
+}
+
+void test_cancelled_greeting_frees_its_gradient() {
+  TEST_ASSERT_EQUAL_size_t(0, heldAfterGreeting(true));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_cancel_ends_greeting_and_tells_app_once);
@@ -177,5 +211,7 @@ int main(int, char**) {
   RUN_TEST(test_no_peer_picked_after_app_greeting_while_ignoring);
   RUN_TEST(test_greeting_takes_peer_palette_outside_home_mode);
   RUN_TEST(test_greeting_takes_no_peer_palette_while_ignoring);
+  RUN_TEST(test_ended_greeting_frees_its_gradient);
+  RUN_TEST(test_cancelled_greeting_frees_its_gradient);
   return UNITY_END();
 }

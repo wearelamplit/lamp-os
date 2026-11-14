@@ -71,8 +71,8 @@ Color LionsAmbientBehavior::sampleMainColor() const {
 }
 
 void LionsAmbientBehavior::onColorInfo(const uint8_t srcMac[6],
-                                       const std::vector<Color>& baseStops,
-                                       const std::vector<Color>& /*shadeStops*/) {
+                                       std::span<const Color> baseStops,
+                                       std::span<const Color> /*shadeStops*/) {
   Mac m{}; std::memcpy(m.data(), srcMac, 6);
   for (PendingQuery& q : pending_) if (q.mac == m) q = {};
   Cached* slot = nullptr;
@@ -80,7 +80,7 @@ void LionsAmbientBehavior::onColorInfo(const uint8_t srcMac[6],
   for (Cached& c : stopCache_) if (!slot && c.mac == kIdle) slot = &c;
   for (Cached& c : stopCache_) if (!slot && !shown(c.mac)) slot = &c;
   if (!slot) return;
-  slot->baseStops = baseStops;
+  slot->baseStops.assign(baseStops.begin(), baseStops.end());
   slot->mac = m;
 }
 

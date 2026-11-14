@@ -27,9 +27,9 @@
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 #include <esp_partition.h>
+#endif
 
 #include "util/high_water.hpp"
-#endif
 
 namespace lamp_protocol {
 struct ParsedFwAccept;

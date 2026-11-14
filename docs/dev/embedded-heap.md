@@ -54,6 +54,20 @@ Two properties make it lethal:
    the resting state of a lamp whose colours flow, draws every frame without
    allocating (`test_configurator_rotation` counts zero allocations over 1,000
    rotating draws); the loop pattern is built once per colour or rotation change.
+   A write retargets its from-frame in place, so it allocates nothing either, and
+   the snafu dots build each scene into the buffer it replaces.
+   A buffer a pass needs only while it runs (a greeting's frames, the OTA
+   indicator's settle frame, a borrowed palette) is swapped empty when the pass
+   ends (`std::vector<T>().swap(v)`); `clear()` keeps the capacity. A native test
+   proves it with `test/replaced_new/heap_tally.hpp`, which tallies the bytes
+   `new` holds live, and asserts the tally is back where it started. The
+   compositor's call that ends the OTA indicator's settle when quiet mode ends,
+   and `Lamp::drainColorInfo`'s stack copy, have no test: no native test links
+   `compositor.cpp` (tests stub `Compositor`) or `lamp_drains.cpp`.
+   Home presence keeps the SSIDs a scan saw as fixed hashes (`SsidPresence`),
+   exact up to 64 distinct SSIDs per scan; the scan list exists only for the
+   app, published by an app-requested scan and dropped once the app
+   disconnects.
 3. **No per-entry `std::string` for addresses or short keys.** Use a fixed
    `char[18]` or the raw 6-byte address. Anything past ~15 chars heap-allocates.
 4. **Scan in place, do not snapshot.** "Closest Smitten peer", "nearest by RSSI",

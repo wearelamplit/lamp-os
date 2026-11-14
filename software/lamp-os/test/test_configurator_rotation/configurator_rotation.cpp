@@ -244,6 +244,25 @@ void test_rotating_draw_allocates_nothing() {
   }
 }
 
+// A write retargets the surface inside its own buffers: once it has drawn,
+// neither a write that cuts a crossfade short nor a fresh one allocates.
+void test_writes_allocate_nothing() {
+  Rig r(Surface::Base);
+  const RoleScene a = rotatingScene(stopsA(), 5, RotationDir::Up);
+  const RoleScene b = buildRoleScene(kPx, stopsB(), ColorRotation{});
+  r.write(a, kDefaultFadeMs);
+  r.step();
+  g_allocs = 0;
+  for (int k = 0; k < 20; ++k) {
+    r.write((k & 1) ? b : a, kDefaultFadeMs);
+    r.step();
+  }
+  r.step(kDefaultFadeMs + 1);
+  r.write(a, kDefaultFadeMs);
+  r.step();
+  TEST_ASSERT_EQUAL_size_t(0, g_allocs);
+}
+
 // Every change crossfades over kDefaultFadeMs from the frame on show.
 void test_changes_crossfade_from_the_drawn_frame() {
   const RoleScene open = buildRoleScene(kPx, stopsA(), ColorRotation{});
@@ -779,6 +798,7 @@ int main(int, char**) {
   RUN_TEST(test_one_stop_scene_is_solid_and_still);
   RUN_TEST(test_speed_and_direction_change_keep_the_position);
   RUN_TEST(test_rotating_draw_allocates_nothing);
+  RUN_TEST(test_writes_allocate_nothing);
   RUN_TEST(test_changes_crossfade_from_the_drawn_frame);
   RUN_TEST(test_change_mid_crossfade_starts_from_the_drawn_frame);
   RUN_TEST(test_raw_writes_never_rotate);

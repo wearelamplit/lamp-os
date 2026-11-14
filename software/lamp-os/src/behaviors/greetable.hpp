@@ -1,13 +1,14 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 #include <string>
-#include <vector>
+
+#include "util/color.hpp"
 
 namespace lamp {
 
 struct PeerView;  // fwd-decl; full definition lives in core/behavior_context.hpp.
-class Color;
 
 // Snapshot of the active greeting. Populated while an animation plays;
 // cleared when it stops. peerLampId is the canonical uppercase colon-hex
@@ -30,8 +31,8 @@ struct Greetable {
   // Peer's base + shade color stops from a MSG_COLOR_INFO reply. Default
   // no-op: a greeting that doesn't render peer palettes ignores it.
   virtual void onColorInfo(const uint8_t srcMac[6],
-                           const std::vector<Color>& baseStops,
-                           const std::vector<Color>& shadeStops) {}
+                           std::span<const Color> baseStops,
+                           std::span<const Color> shadeStops) {}
   virtual ~Greetable() = default;
 };
 

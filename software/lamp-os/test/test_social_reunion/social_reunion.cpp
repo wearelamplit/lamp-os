@@ -376,7 +376,7 @@ void test_hint_plays_faint_breaths_and_leaves() {
     sure.crowdHalf = kMaxCrowdHalf;
     r.social.setContagionTuning(&sure);
     TEST_ASSERT_TRUE(r.greet());
-    if (withStops) r.social.onColorInfo(peerMac().data(), {kPeerStop0}, {});
+    if (withStops) r.social.onColorInfo(peerMac().data(), std::vector<Color>{kPeerStop0}, {});
     r.advance(30000);
     r.endGreeting();
     TEST_ASSERT_EQUAL_size_t(1, hintsLive());

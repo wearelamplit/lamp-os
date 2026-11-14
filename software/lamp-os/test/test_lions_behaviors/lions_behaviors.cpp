@@ -167,7 +167,7 @@ void test_ambient_composes_cached_peer_colour() {
   const Color peerRed(0xF0, 0, 0, 0);
   FakePeer a = makePeer(0xA1, peerRed, "A1:A1:A1:A1:A1:A1");
   const uint8_t infoMac[6] = {0xA1, 0xA1, 0xA1, 0xA1, 0xA1, 0xA1};
-  ambient.onColorInfo(infoMac, {peerRed}, {});
+  ambient.onColorInfo(infoMac, std::vector<Color>{peerRed}, {});
   g_nearby = {a};
 
   ambient.control();                              // director -> all lions = A1

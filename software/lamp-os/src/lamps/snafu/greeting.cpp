@@ -114,6 +114,10 @@ void Greeting::control() {
                           hold * kBorrowHoldMultiplier);
     }
     greetedLampId_.clear();
+    std::vector<Color>().swap(targetColors_);
+    std::vector<Color>().swap(glitchColors_);
+    std::vector<Color>().swap(greetedBaseStops_);
+    std::vector<Color>().swap(greetedShadeStops_);
     if (onGreetingChange_) onGreetingChange_();
   }
   greetingWasActive_ = greetingNowActive;
@@ -188,13 +192,13 @@ void Greeting::draw() {
 }
 
 void Greeting::onColorInfo(const uint8_t srcMac[6],
-                           const std::vector<Color>& baseStops,
-                           const std::vector<Color>& shadeStops) {
+                           std::span<const Color> baseStops,
+                           std::span<const Color> shadeStops) {
   if (animationState == STOPPED) return;
   if (context_ && context_->ignoresPeers()) return;
   if (!greetedHasMac_ || std::memcmp(srcMac, greetedMac_, 6) != 0) return;
-  greetedBaseStops_  = baseStops;
-  greetedShadeStops_ = shadeStops;
+  greetedBaseStops_.assign(baseStops.begin(), baseStops.end());
+  greetedShadeStops_.assign(shadeStops.begin(), shadeStops.end());
 }
 
 }  // namespace lamp::snafu
