@@ -24,6 +24,10 @@ void packFw(uint8_t (&fw)[3], uint32_t version) {
   fw[2] = static_cast<uint8_t>(version);
 }
 
+uint32_t unpackFw(const uint8_t (&fw)[3]) {
+  return (uint32_t{fw[0]} << 16) | (uint32_t{fw[1]} << 8) | fw[2];
+}
+
 void takeCounters(BootEntry& e, const Live& live) {
   e.refusedLocal = live.refusedLocal;
   e.connects = live.connects;
@@ -109,7 +113,10 @@ bool decode(const void* blob, size_t len, History& out) {
 size_t endedCount(const History& h) { return h.count == 0 ? 0 : h.count - 1; }
 
 void finish(History& h, const crash_record::Snapshot* rtc, const Live* live) {
-  if (h.count == 0 || (live != nullptr && !live->stored)) return;
+  if (live != nullptr && !live->stored) {
+    append(h, unpackFw(live->fw), static_cast<esp_reset_reason_t>(live->resetReason));
+  }
+  if (h.count == 0) return;
   BootEntry& e = h.entries[h.count - 1];
   if (live != nullptr && std::memcmp(live->fw, e.fw, sizeof(e.fw)) == 0) {
     takeCounters(e, *live);
@@ -138,10 +145,11 @@ void markSetupDone(History& h) {
   h.entries[h.count - 1].stage = static_cast<uint8_t>(Stage::Loop);
 }
 
-Live freshLive(uint32_t fwVersion) {
+Live freshLive(uint32_t fwVersion, esp_reset_reason_t reason) {
   Live live{};
   live.stage = static_cast<uint8_t>(Stage::Boot);
   packFw(live.fw, fwVersion);
+  live.resetReason = static_cast<uint8_t>(reason);
   return live;
 }
 
@@ -207,7 +215,7 @@ void formatLine(char* out, size_t cap, const History& h, size_t i) {
 
 namespace {
 
-constexpr uint32_t kLiveMagic = 0x4c424856u;
+constexpr uint32_t kLiveMagic = 0x4c424857u;
 
 struct LiveState {
   uint32_t magic;
@@ -217,7 +225,7 @@ struct LiveState {
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 RTC_NOINIT_ATTR LiveState s_live;
 #else
-LiveState s_live{kLiveMagic, freshLive(0)};
+LiveState s_live{kLiveMagic, freshLive(0, ESP_RST_UNKNOWN)};
 #endif
 
 }  // namespace
@@ -265,7 +273,7 @@ void boot(uint32_t fwVersion) {
   s_history.version = kVersion;
   finish(s_history, crash_record::rtcSnapshot(), rtcLive());
   s_live.magic = kLiveMagic;
-  s_live.live = freshLive(fwVersion);
+  s_live.live = freshLive(fwVersion, esp_reset_reason());
   append(s_history, fwVersion, esp_reset_reason());
   s_live.live.stored = save() ? 1 : 0;
 

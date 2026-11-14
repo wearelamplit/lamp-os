@@ -303,7 +303,7 @@ void test_decode_rejects_a_foreign_blob() {
 
 static Live liveOf(uint32_t fw, Stage stage, uint16_t refused, uint16_t connects,
                    uint16_t connMin) {
-  Live live = freshLive(fw);
+  Live live = freshLive(fw, ESP_RST_SW);
   live.stored = 1;
   live.stage = static_cast<uint8_t>(stage);
   live.refusedLocal = refused;
@@ -338,19 +338,45 @@ void test_finish_ignores_live_state_from_another_firmware() {
   TEST_ASSERT_EQUAL_UINT16(0, e.connects);
 }
 
-// The boot's entry never reached NVS, so the newest stored entry is an older
-// boot's and takes none of this RTC state.
-void test_finish_leaves_an_older_boot_alone_when_the_entry_was_never_stored() {
+// The boot's entry never reached NVS, so it comes back from the RTC state
+// before the fold, and the boot before it keeps its own figures and end.
+void test_a_boot_whose_entry_never_stored_is_rebuilt_from_the_rtc() {
   History h = historyOf(2);
-  const History before = h;
-  Live live = liveOf(fwOf(1, 3, 2), Stage::Mesh, 4, 9, 14000);
-  live.stored = 0;
+  h.entries[1].stage = static_cast<uint8_t>(Stage::Loop);
+  h.entries[1].flags = kStageExact | kCounted;
+  const BootEntry olderBefore = h.entries[1];
+  Live live = freshLive(fwOf(1, 3, 6), ESP_RST_BROWNOUT);
+  live.stage = static_cast<uint8_t>(Stage::Ble);
+  live.connects = 2;
   const Snapshot rtc = snapshot(5412345, 30000, 1300);
   finish(h, &rtc, &live);
-  TEST_ASSERT_EQUAL_MEMORY(&before, &h, sizeof(History));
-  // RTC lost too: nothing says otherwise, so the snapshot rule stands.
-  finish(h, &rtc, nullptr);
-  TEST_ASSERT_EQUAL_UINT32(5412 | kUptimeExact, h.entries[1].uptime);
+  TEST_ASSERT_EQUAL_UINT16(3, h.count);
+  TEST_ASSERT_EQUAL_MEMORY(&olderBefore, &h.entries[1], sizeof(BootEntry));
+  const BootEntry& e = h.entries[2];
+  TEST_ASSERT_EQUAL_UINT8(6, e.fw[2]);
+  TEST_ASSERT_EQUAL_UINT8(ESP_RST_BROWNOUT, e.resetReason);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Stage::Ble), e.stage);
+  TEST_ASSERT_EQUAL_UINT8(kStageExact | kCounted, e.flags);
+  TEST_ASSERT_EQUAL_UINT16(2, e.connects);
+  TEST_ASSERT_EQUAL_UINT32(5412 | kUptimeExact, e.uptime);
+  append(h, fwOf(1, 3, 6), ESP_RST_TASK_WDT);
+  char line[kLineCap];
+  formatLine(line, sizeof(line), h, 1);
+  TEST_ASSERT_NOT_NULL(std::strstr(line, " end brownout refused 0"));
+  formatLine(line, sizeof(line), h, 2);
+  TEST_ASSERT_NOT_NULL(std::strstr(line, " fw1.3.6 "));
+  TEST_ASSERT_NOT_NULL(std::strstr(line, " end taskwdt setup ble refused 0 conn 2"));
+}
+
+// A full history drops its oldest to make room for the rebuilt entry.
+void test_a_rebuilt_entry_drops_the_oldest_when_full() {
+  History h = historyOf(kBoots);
+  Live live = freshLive(fwOf(1, 3, 9), ESP_RST_SW);
+  finish(h, nullptr, &live);
+  TEST_ASSERT_EQUAL_UINT16(kBoots, h.count);
+  TEST_ASSERT_EQUAL_UINT8(2, h.entries[0].fw[2]);
+  TEST_ASSERT_EQUAL_UINT8(9, h.entries[kBoots - 1].fw[2]);
+  TEST_ASSERT_EQUAL_UINT8(kStageExact | kCounted, h.entries[kBoots - 1].flags);
 }
 
 void test_a_connected_sample_is_due_once_a_second_across_the_wrap() {
@@ -459,7 +485,7 @@ void test_counters_saturate() {
 }
 
 void test_connected_low_point_is_the_smallest_sample() {
-  Live live = freshLive(fwOf(1, 3, 7));
+  Live live = freshLive(fwOf(1, 3, 7), ESP_RST_POWERON);
   TEST_ASSERT_EQUAL_UINT16(0, live.connMinLargest);
   foldConnectedSample(live, 30000);
   TEST_ASSERT_EQUAL_UINT16(30000, live.connMinLargest);
@@ -470,18 +496,19 @@ void test_connected_low_point_is_the_smallest_sample() {
   // A zero-byte block still reads as a sample, never as none.
   foldConnectedSample(live, 0);
   TEST_ASSERT_EQUAL_UINT16(1, live.connMinLargest);
-  Live big = freshLive(fwOf(1, 3, 7));
+  Live big = freshLive(fwOf(1, 3, 7), ESP_RST_POWERON);
   foldConnectedSample(big, 70000);
   TEST_ASSERT_EQUAL_UINT16(UINT16_MAX, big.connMinLargest);
 }
 
 void test_fresh_live_state_starts_at_boot() {
-  const Live live = freshLive(fwOf(1, 3, 7));
+  const Live live = freshLive(fwOf(1, 3, 7), ESP_RST_POWERON);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Stage::Boot), live.stage);
   TEST_ASSERT_EQUAL_UINT8(7, live.fw[2]);
   TEST_ASSERT_EQUAL_UINT16(0, live.refusedLocal);
   TEST_ASSERT_EQUAL_UINT16(0, live.connects);
   TEST_ASSERT_EQUAL_UINT8(0, live.stored);
+  TEST_ASSERT_EQUAL_UINT8(ESP_RST_POWERON, live.resetReason);
 }
 
 void test_milestone_copies_the_counters() {
@@ -530,7 +557,8 @@ int main(int, char**) {
   RUN_TEST(test_decode_rejects_a_foreign_blob);
   RUN_TEST(test_finish_takes_stage_and_counters_from_the_rtc);
   RUN_TEST(test_finish_ignores_live_state_from_another_firmware);
-  RUN_TEST(test_finish_leaves_an_older_boot_alone_when_the_entry_was_never_stored);
+  RUN_TEST(test_a_boot_whose_entry_never_stored_is_rebuilt_from_the_rtc);
+  RUN_TEST(test_a_rebuilt_entry_drops_the_oldest_when_full);
   RUN_TEST(test_a_connected_sample_is_due_once_a_second_across_the_wrap);
   RUN_TEST(test_without_the_rtc_the_stage_is_the_last_one_written);
   RUN_TEST(test_line_names_the_setup_stage);

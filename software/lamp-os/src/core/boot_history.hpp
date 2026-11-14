@@ -91,7 +91,8 @@ struct Live {
   uint16_t refusedLocal;
   uint16_t connects;
   uint16_t connMinLargest;
-  uint8_t stored;  // the boot's entry reached NVS
+  uint8_t resetReason;  // the reset that started the boot
+  uint8_t stored;       // the boot's entry reached NVS
 };
 
 // Fills `out` from a stored blob of `len` bytes in this layout, or in version
@@ -101,8 +102,8 @@ bool decode(const void* blob, size_t len, History& out);
 // Closes the newest boot with the surviving RTC state of the boot that just
 // ended. A null `rtc`, or one never sampled past boot, leaves its last
 // milestone figures in place; a null `live`, or one another firmware wrote,
-// leaves its stage and counters. A `live` whose boot never stored its entry
-// leaves the history untouched, since the newest entry is an older boot's.
+// leaves its stage and counters. A boot whose entry never reached NVS gets its
+// entry back from `live` before the fold.
 void finish(History& h, const crash_record::Snapshot* rtc, const Live* live);
 
 // Starts an entry for this boot, dropping the oldest when full.
@@ -121,8 +122,8 @@ bool milestoneDue(uint32_t nowMs, uint8_t& next);
 bool milestoneUpdate(History& h, uint8_t& next, uint32_t nowMs,
                      const crash_record::Snapshot* now, const Live* live);
 
-// Live state for a new boot of `fwVersion`.
-Live freshLive(uint32_t fwVersion);
+// Live state for a new boot of `fwVersion`, started by `reason`.
+Live freshLive(uint32_t fwVersion, esp_reset_reason_t reason);
 
 // True when a heap sample is due at `nowMs` while connected, `intervalMs` after
 // the last one at `lastMs`, across the millis() wrap.
