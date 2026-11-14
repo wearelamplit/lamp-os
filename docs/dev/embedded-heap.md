@@ -766,10 +766,10 @@ minutes, and the app reports "Another update is already in progress on this
 lamp."). A firmware image is written raw
 into the other OTA slot, which holds the image a rollback returns to. A
 filesystem image waits too, so the web UI is never replaced for a firmware
-that may not stay. The lamp's own distributors still offer while unverified;
-the gate for that is `lamp::offerBusy` in `components/firmware/ota_offer.hpp`,
-called from `tickOtaOffers`, the one place both firmware and filesystem offers
-start.
+that may not stay. The lamp offers neither image to its peers until the mark
+either, so an update spreads only from lamps it has run on: `tickOtaOffers`,
+the one place both firmware and filesystem offers start, holds its scan while
+`offerBusy` (`components/firmware/ota_offer.hpp`) reads the image unverified.
 
 A lamp whose bootloader predates rollback never boots an image as
 `PENDING_VERIFY` (it stays `NEW`), so the check never arms and it keeps every

@@ -153,12 +153,15 @@ tap, opened before the transfer so the open's reset lands on the old image.
    no `rolledback`. A power cycle in place of the hang reads the same with
    `end power`.
 
-10. **No offer is taken while unverified.** With a third lamp on N+2 powered
-    in range, repeat row 8 without the hang (`--cmd` left out). Any OFFER
-    reaching the peer before its `marked valid` line logs `[fw_receiver] OFFER
-    while this image is unverified, declining`, filesystem offers included,
-    and no `ACCEPT` or `upfront erase` follows before that line. The third
-    lamp may take up to its 10-minute per-peer backoff to offer again.
+10. **No offer is taken or sent while unverified.** Power two more lamps in
+    range: one on N+2, one on N (it needs N+1 too). Repeat row 8 without the
+    hang (`--cmd` left out). Any OFFER reaching the peer before its `marked
+    valid` line logs `[fw_receiver] OFFER while this image is unverified,
+    declining`, filesystem offers included, and no `ACCEPT` or `upfront erase`
+    follows before that line. The peer logs no `[fwdist] OFFER` to the N lamp
+    before that line either; after it, the peer may offer N+1 to it (the
+    source may get there first). The N+2 lamp may take up to its 10-minute
+    per-peer backoff to offer again.
 
 ## Indicator expectations
 
@@ -193,7 +196,7 @@ tap, opened before the transfer so the open's reset lands on the old image.
 - Peer's name/config identical across the OTA reboot.
 - Rollback (rows 8-10): a hang before `marked valid` boots version N with
   `rolledback` on the N+1 line, a reset after it keeps N+1 with no
-  `rolledback`, and no offer is accepted before `marked valid`.
+  `rolledback`, and no offer is accepted or sent before `marked valid`.
 - Dev source: the `disabled (dev channel)` line, zero OFFERs.
 - Gated pair (step 6): zero OFFERs from the source; any receiver-side decline
   is logged, never a silent flash.
