@@ -51,13 +51,6 @@ void LionsGreetingBehavior::startGreeting(const lamp::PeerView& peer) {
 void LionsGreetingBehavior::control() {
   if (!fb || lionsSegIndex_ < 0 || !context_) return;
 
-  // Latest-wins: forEachArrival hands one ungreeted near arrival per tick; a
-  // newer one mid-pulse restarts the pulse (startGreeting resets frame to 0).
-  context_->forEachArrival(5000, [this](const lamp::PeerView& p) {
-    startGreeting(p);
-    return true;   // ack this peer
-  });
-
   const bool active = (animationState == PLAYING ||
                        animationState == PLAYING_ONCE ||
                        animationState == STOPPING);
@@ -66,6 +59,14 @@ void LionsGreetingBehavior::control() {
     if (onGreetingChange_) onGreetingChange_();
   }
   greetingWasActive_ = active;
+
+  // Arrivals stay unacked while a greeting plays, so a crowd queues instead
+  // of restarting the pulse every tick.
+  if (active) return;
+  context_->forEachArrival(5000, [this](const lamp::PeerView& p) {
+    startGreeting(p);
+    return true;   // ack this peer
+  });
 }
 
 void LionsGreetingBehavior::draw() {

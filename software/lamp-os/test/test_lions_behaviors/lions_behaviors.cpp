@@ -8,7 +8,7 @@
 //      stops fill every zone when that peer is the only one nearby.
 //   3. Greetable delegation: ambient.triggerGreeting / greetingState route to
 //      the greeting object; ambient owns the slot, greeting owns the pulse.
-//   4. Latest-wins arrival: a newer arrival mid-pulse restarts the pulse.
+//   4. A newer arrival mid-pulse waits for the pulse to finish, then greets.
 //   5. Greeting draw() writes only the Lions slice and snaps it to the peer
 //      colour at the pulse peak.
 //   6. Ambient control() + draw() allocate nothing per frame once the stops
@@ -200,8 +200,9 @@ void test_ambient_delegates_greeting_to_greeting_object() {
   TEST_ASSERT_TRUE(greeting.greetingState().active);   // same underlying state
 }
 
-// A newer arrival mid-pulse restarts the pulse (frame back to 0, colour swaps).
-void test_greeting_latest_wins_restarts_pulse() {
+// A newer arrival mid-pulse does not restart it: the pulse plays through,
+// and the waiting arrival is greeted once it ends.
+void test_greeting_plays_through_before_next_arrival() {
   FrameBuffer fb = makeFb();
   BehaviorContext ctx;
   LionsGreetingBehavior greeting(&fb);
@@ -211,18 +212,28 @@ void test_greeting_latest_wins_restarts_pulse() {
   g_arrivals = {a};
   greeting.control();                          // greet A
   TEST_ASSERT_EQUAL_UINT32(0, greeting.frame);
-  TEST_ASSERT_EQUAL_STRING("0A:0A:0A:0A:0A:0A",
-                           greeting.greetingState().peerLampId.c_str());
 
   for (int f = 0; f < 5; ++f) greeting.draw();  // advance the playhead
-  TEST_ASSERT_TRUE(greeting.frame > 0);
+  const uint32_t midPulse = greeting.frame;
+  TEST_ASSERT_TRUE(midPulse > 0);
 
   FakePeer b = makePeer(0x0B, Color(0, 0, 0xF0, 0), "0B:0B:0B:0B:0B:0B");
   g_arrivals = {b};
-  greeting.control();                          // newer arrival restarts
+  greeting.control();                          // B arrives mid-pulse
+  TEST_ASSERT_EQUAL_UINT32(midPulse, greeting.frame);
+  TEST_ASSERT_EQUAL_STRING("0A:0A:0A:0A:0A:0A",
+                           greeting.greetingState().peerLampId.c_str());
+  TEST_ASSERT_EQUAL_size_t(1, g_arrivals.size());   // B left queued, unacked
+
+  for (uint32_t f = 0; f < 2 * lamp::lioness::kGreetFrames && greeting.greetingState().active; ++f)
+    greeting.draw();                           // A plays through
+  TEST_ASSERT_FALSE(greeting.greetingState().active);
+  greeting.control();                          // now B is greeted
   TEST_ASSERT_EQUAL_UINT32(0, greeting.frame);
+  TEST_ASSERT_TRUE(greeting.greetingState().active);
   TEST_ASSERT_EQUAL_STRING("0B:0B:0B:0B:0B:0B",
                            greeting.greetingState().peerLampId.c_str());
+  TEST_ASSERT_EQUAL_size_t(0, g_arrivals.size());
 }
 
 // Greeting draw() paints only the Lions slice and snaps it to the peer colour
@@ -445,7 +456,7 @@ int main(int, char**) {
   RUN_TEST(test_ambient_draw_owns_only_lions_slice);
   RUN_TEST(test_ambient_composes_cached_peer_colour);
   RUN_TEST(test_ambient_delegates_greeting_to_greeting_object);
-  RUN_TEST(test_greeting_latest_wins_restarts_pulse);
+  RUN_TEST(test_greeting_plays_through_before_next_arrival);
   RUN_TEST(test_greeting_draw_owns_only_lions_slice);
   RUN_TEST(test_ambient_draws_before_greeting_composites);
   RUN_TEST(test_ambient_steady_state_allocates_nothing);
