@@ -532,7 +532,10 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
 
   // `broadcast` originates a wave from this call, distinct from suppressCascade_
   // which only stops the transient's own trigger() from re-firing one.
-  if (cascadesFrom(broadcast, triggered, source)) broadcastFrom(inv);
+  if (cascadesFrom(broadcast, triggered, source)) {
+    cascade(inv, inv.parameters);
+    announce(inv, inv.parameters);
+  }
 
   return triggered;
 }

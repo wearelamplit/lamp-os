@@ -236,10 +236,12 @@ class ExpressionManager {
    *
    * The transient's own trigger() never re-cascades; that structural loop
    * break makes flood propagation safe. `broadcast` is a separate axis: true
-   * only for a local origination (the app Test button) that must fan a wave
-   * out, false for every receive/forward path so received cascades stay
-   * terminal. `source` decides which transient slots it may use: a peer's
-   * (Remote, the default) never takes the ones held for the lamp's own.
+   * only for a local origination (the app Test button), which announces the
+   * play to nearby lamps and sends the cascade command only when the
+   * invocation's own cascadeEnabled is set; false for every receive/forward
+   * path so received cascades stay terminal. `source` decides which transient
+   * slots it may use: a peer's (Remote, the default) never takes the ones
+   * held for the lamp's own.
    */
   bool triggerInvocation(const ExpressionInvocation& inv,
                          const uint8_t srcMac[6], bool broadcast = false,

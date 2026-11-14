@@ -8,6 +8,11 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 ## Unreleased
 
 ### Fixed
+- **Testing an expression in the app no longer makes other lamps play it
+  when cascade is off.** Test sent the cascade command to every nearby lamp
+  whatever the cascade toggle said. It now sends it only with cascade on;
+  nearby lamps still hear that the lamp played it and may copy it on their
+  own, as they do for any expression it plays.
 - **The native test suite passes on Linux, and CI runs on every push to dev.**
   Four suites that passed on a Mac failed on the Linux CI runner. The web
   save's memory check now sizes its largest block from the expression list
