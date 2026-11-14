@@ -220,7 +220,8 @@ class ExpressionManager {
   /**
    * Trigger expressions matching both type and target. Used by the
    * per-row Test button to fire exactly the configured instance.
-   * LOCAL path; honors the cascade convention if configured.
+   * LOCAL path. Only when an instance actually fires does it announce the
+   * play and, if configured, cascade; returns whether one fired.
    */
   bool triggerExpression(const std::string& type, ExpressionTarget target);
 
@@ -233,9 +234,10 @@ class ExpressionManager {
    *
    * The transient's own trigger() never re-cascades; that structural loop
    * break makes flood propagation safe. `broadcast` is a separate axis: true
-   * only for a local origination (the app Test button), which announces the
-   * play to nearby lamps and sends the cascade command only when the
-   * invocation's own cascadeEnabled is set; false for every receive/forward
+   * only for a local origination (the app Test button), which, when it
+   * played here, announces the play to nearby lamps and sends the cascade
+   * command only when the invocation's own cascadeEnabled is set; one that did
+   * not play sends nothing. false for every receive/forward
    * path so received cascades stay terminal. `source` decides which transient
    * slots it may use: a peer's (Remote, the default) never takes the ones
    * held for the lamp's own.
@@ -252,10 +254,10 @@ class ExpressionManager {
 
   /**
    * Broadcast an invocation to the crowd WITHOUT firing it locally: the
-   * cascade (directed RSSI-staggered wave) whatever `inv`'s cascadeEnabled
-   * says, and the event (announce) a locally-fired cascading expression
-   * sends. snafu's greeting uses it to fan a crowd glitch on arrival while
-   * its own scramble renders locally.
+   * cascade command whatever `inv`'s cascadeEnabled says, and the event a
+   * locally-fired cascading expression sends. Sends nothing for an
+   * unregistered or continuous type, during an OTA, or for a type and target
+   * already sent within the dedup window; the command also needs a mesh peer.
    *
    * `excludeMac`: if non-null, that peer is skipped in the target loop.
    * Default nullptr sends to all reachable peers.

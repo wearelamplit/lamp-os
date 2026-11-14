@@ -343,8 +343,8 @@ bool ExpressionManager::triggerExpression(const std::string& type, ExpressionTar
   const ExpressionEntry* firstFired = nullptr;
   suppressCascade_ = true;
   for (auto& entry : expressions) {
-    if (entry.type == type && entry.expression && entry.expression->getTarget() == target) {
-      entry.expression->trigger();
+    if (entry.type == type && entry.expression && entry.expression->getTarget() == target &&
+        entry.expression->trigger()) {
       triggered = true;
       if (!firstFired) firstFired = &entry;
     }
@@ -527,7 +527,7 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
 
   // `broadcast` originates a wave from this call, distinct from suppressCascade_
   // which only stops the transient's own trigger() from re-firing one.
-  if (cascadesFrom(broadcast, triggered, source)) {
+  if (broadcast && triggered) {
     cascade(inv, inv.parameters);
     announce(inv, inv.parameters);
   }

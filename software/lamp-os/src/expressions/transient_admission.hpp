@@ -33,18 +33,10 @@ constexpr bool admitTransient(size_t liveTotal, size_t liveRemote, size_t target
          liveRemote + targets <= TransientSlots::kMaxRemote;
 }
 
-// True when a triggered invocation fans out to the mesh: one this lamp
-// originates (`broadcast`) goes out whether or not it played here, when this
-// lamp asked for it (the app's Test), so a lamp short of room
-// still sends the wave; a peer's never does.
-constexpr bool cascadesFrom(bool broadcast, bool playedHere, TransientSource source) {
-  return broadcast && (playedHere || source == TransientSource::Local);
-}
-
 // After the lamp's own invocation of a type could not play (no room), that
 // type waits kMs before it is tried again, so a Test tapped repeatedly while
-// the lamp is short neither retries the admission nor resends its wave each
-// tap. Holds the last kSlots types refused.
+// the lamp is short does not retry the admission each tap. Holds the last
+// kSlots types refused.
 class LocalCooldown {
  public:
   static constexpr uint32_t kMs = 1000;

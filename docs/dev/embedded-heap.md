@@ -503,16 +503,15 @@ scale with the number of peers or the mesh's message rate, so each is bounded:
   both halves takes both), and only when the largest free block holds 2 KB
   per target plus the 4 KB headroom (8 KB for both halves, 6 KB for one), so
   a transient that starts can finish allocating. Under that, the lamp's own
-  Test plays nothing here and logs `[expr] transient drop` (every build, at
-  most every 5 s), but its MSG_EVENT, and its cascade when the tested
-  parameters set `cascadeEnabled`, still go out to the crowd
-  (`cascadesFrom`), built from the invocation with no Expression made for
-  it; a peer's invocation never cascades, and a mirrored copy sends at most
-  one MSG_EVENT of its own. That type then waits a second
-  (`LocalCooldown`) before the lamp tries it again, so a Test tapped over
-  and over while the lamp is short neither retries nor resends each tap. The vector is reserved at
-  `ExpressionManager::begin`, and the compositor reserves 16 behavior slots
-  past its boot list for transients and live upserts.
+  Test plays nothing here, logs `[expr] transient drop` (every build, at
+  most every 5 s) and sends nothing to the crowd, since a Test announces and
+  cascades only after it plays; a peer's invocation never cascades, and a
+  mirrored copy sends at most one MSG_EVENT of its own. That type then waits
+  a second (`LocalCooldown`) before the lamp tries it again, so a Test
+  tapped over and over while the lamp is short does not retry each tap. The
+  vector is reserved at `ExpressionManager::begin`, and the compositor
+  reserves 16 behavior slots past its boot list for transients and live
+  upserts.
 - **Mirror rolls.** `SocialEchoObserver` holds its roll cooldown in a fixed
   16-slot `RollCooldownTable` (about 200 bytes) and 4 pending copies, so a
   crowd of any size takes no heap to decide a copy; a full table rolls
@@ -590,8 +589,8 @@ scale with the number of peers or the mesh's message rate, so each is bounded:
   added to one ring costs 16 bytes.
 - **Cascade fan-out.** A locally fired cascade (a cascading expression firing
   on its own or tested from the app) reaches every mesh peer, closest first.
-  `CascadeScheduler`
-  (`expressions/cascade_scheduler.hpp`) holds up to two fan-outs (peers and one
+  `CascadeScheduler` (`expressions/cascade_scheduler.hpp`) holds up to two
+  fan-outs (peers and one
   serialized invocation each, about 2.2 KB of .bss: 50 MACs and a 768-byte
   payload per fan-out, above the 536-byte worst case). The loop sends up to 6
   frames per pass (`kBatchSize`, held to the 6 TX credits), only while credits
