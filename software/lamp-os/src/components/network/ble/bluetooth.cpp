@@ -22,6 +22,7 @@ extern "C" bool btInUse() { return true; }
 #include <vector>
 
 #include "config/config.hpp"
+#include "util/alloc_boundary.hpp"
 #include "util/color.hpp"
 #include "ble_control.hpp"
 #include "components/network/mesh/lamp_roster.hpp"
@@ -113,6 +114,10 @@ class ScanCallbacks : public NimBLEScanCallbacks {
   };
 
   void onResult(const NimBLEAdvertisedDevice *advertisedDevice) override {
+    lamp::catchBadAlloc("BLE scan", [&] { sight(advertisedDevice); });
+  }
+
+  void sight(const NimBLEAdvertisedDevice *advertisedDevice) {
     if (!advertisedDevice->haveName() || !advertisedDevice->haveManufacturerData()) return;
     if (advertisedDevice->getRSSI() <= BLE_MINIMUM_RSSI_VALUE) return;
     std::string data = advertisedDevice->getManufacturerData();

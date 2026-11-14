@@ -38,8 +38,9 @@ class NearbyList {
   void endHold() { readAtMs_.store(0); }
 
   // Loop task only. Builds the list while a client is connected and a read
-  // came within kHoldMs (a disconnect ends the hold), rebuilds it on a roster change (at most once a
-  // second), and frees it otherwise. True when rev() moved.
+  // came within kHoldMs (a disconnect ends the hold), rebuilds it on a roster
+  // change (at most once a second), and frees it otherwise. True when rev()
+  // moved.
   bool tick(lamp::LampRoster& roster, bool clientConnected, uint32_t nowMs);
   // Loop task only. Frees the list and the roster copy.
   void release(lamp::LampRoster& roster);

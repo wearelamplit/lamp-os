@@ -9,6 +9,7 @@
 
 #include <cstring>
 #include <new>
+#include <string_view>
 #include <utility>
 
 #include <lampos/clock.hpp>
@@ -148,12 +149,15 @@ void LampRoster::copyWispConfigJson(std::string& out) {
     out.assign("{}");
     return;
   }
-  if (wispCache_.lastConfigJson.empty()) {
-    out.assign("{}");
-  } else {
-    out.assign(wispCache_.lastConfigJson);
+  bool copied = true;
+  try {
+    out.assign(wispCache_.lastConfigJson.empty() ? std::string_view("{}")
+                                                 : std::string_view(wispCache_.lastConfigJson));
+  } catch (const std::bad_alloc&) {
+    copied = false;
   }
   xSemaphoreGive(mutex_);
+  if (!copied) throw std::bad_alloc();
 }
 
 void LampRoster::cacheWispPalette(const uint8_t mac[6],

@@ -186,6 +186,35 @@ void test_end_of_large_section_frees_the_copy() {
   TEST_ASSERT_EQUAL_UINT(before, g_liveBytes);
 }
 
+static const std::string kAtThresholdJson(SectionPage::kKeptCapacity, 't');
+static bool copyAtThreshold(std::string& out) {
+  out.assign(kAtThresholdJson);
+  return true;
+}
+
+static bool rereadsWithNoHeap(SectionPage& page, SectionPage::ConfigCopy copy) {
+  g_refuse = true;
+  const bool served = page.openConfig(copy, 64);
+  g_refuse = false;
+  drain(page);
+  return served;
+}
+
+// The keep-or-free line sits at kKeptCapacity: a section that size keeps its
+// buffer, so a different, smaller section re-reads into it with no heap to
+// spare; one byte more frees it, and the same re-read finds no buffer.
+void test_kept_buffer_threshold_and_a_smaller_section() {
+  SectionPage kept;
+  kept.openConfig(copyAtThreshold, 64);
+  drain(kept);
+  TEST_ASSERT_TRUE(rereadsWithNoHeap(kept, copyLamp));
+
+  SectionPage freed;
+  freed.openConfig(copyBig, 64);
+  drain(freed);
+  TEST_ASSERT_FALSE(rereadsWithNoHeap(freed, copyLamp));
+}
+
 // A small section keeps its buffer, so a re-read serves with no heap to spare
 // where a fresh copy would read busy.
 void test_small_section_rereads_without_allocating() {
@@ -224,6 +253,7 @@ int main(int, char**) {
   RUN_TEST(test_static_section_serves_by_reference);
   RUN_TEST(test_end_of_large_section_frees_the_copy);
   RUN_TEST(test_small_section_rereads_without_allocating);
+  RUN_TEST(test_kept_buffer_threshold_and_a_smaller_section);
   RUN_TEST(test_last_chunk_is_served_before_the_free);
   return UNITY_END();
 }

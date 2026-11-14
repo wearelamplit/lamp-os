@@ -360,6 +360,7 @@ void test_build_demand_tracks_the_list_length() {
     length = out.size();
   }
   Fixture f;
+  TEST_ASSERT_TRUE(ble_control::kBuildSlack <= length / 16);
   g_mock_largest_free_block = length + ble_control::kBuildSlack + ble_control::kHeapMargin;
   std::string out;
   TEST_ASSERT_TRUE(f.list.read(out, g_now));

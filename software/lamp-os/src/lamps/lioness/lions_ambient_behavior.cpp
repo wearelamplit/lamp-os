@@ -80,8 +80,8 @@ void LionsAmbientBehavior::onColorInfo(const uint8_t srcMac[6],
   for (Cached& c : stopCache_) if (!slot && c.mac == kIdle) slot = &c;
   for (Cached& c : stopCache_) if (!slot && !shown(c.mac)) slot = &c;
   if (!slot) return;
-  slot->mac = m;
   slot->baseStops = baseStops;
+  slot->mac = m;
 }
 
 void LionsAmbientBehavior::triggerGreeting(const lamp::PeerView& peer) {

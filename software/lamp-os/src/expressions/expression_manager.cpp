@@ -317,14 +317,15 @@ bool ExpressionManager::triggerExpression(const std::string& type) {
   const ExpressionEntry* firstFired = nullptr;
   // Suppress per-entry cascade callbacks from Expression::trigger();
   // a single cascade for the logical trigger is batched after the loop.
-  suppressCascade_ = true;
-  for (auto& entry : expressions) {
-    if (entry.type == type && entry.expression && entry.expression->trigger()) {
-      triggered = true;
-      if (!firstFired) firstFired = &entry;
+  {
+    const CascadeSuppressed suppressed(suppressCascade_);
+    for (auto& entry : expressions) {
+      if (entry.type == type && entry.expression && entry.expression->trigger()) {
+        triggered = true;
+        if (!firstFired) firstFired = &entry;
+      }
     }
   }
-  suppressCascade_ = false;
 #ifdef LAMP_DEBUG
   Serial.printf("[trigger] '%s' fired=%d\n", type.c_str(), triggered);
 #endif
@@ -338,15 +339,16 @@ bool ExpressionManager::triggerExpression(const std::string& type) {
 bool ExpressionManager::triggerExpression(const std::string& type, ExpressionTarget target) {
   bool triggered = false;
   const ExpressionEntry* firstFired = nullptr;
-  suppressCascade_ = true;
-  for (auto& entry : expressions) {
-    if (entry.type == type && entry.expression && entry.expression->getTarget() == target &&
-        entry.expression->trigger()) {
-      triggered = true;
-      if (!firstFired) firstFired = &entry;
+  {
+    const CascadeSuppressed suppressed(suppressCascade_);
+    for (auto& entry : expressions) {
+      if (entry.type == type && entry.expression && entry.expression->getTarget() == target &&
+          entry.expression->trigger()) {
+        triggered = true;
+        if (!firstFired) firstFired = &entry;
+      }
     }
   }
-  suppressCascade_ = false;
 #ifdef LAMP_DEBUG
   Serial.printf("[trigger] '%s' target=%d fired=%d\n",
                 type.c_str(), static_cast<int>(target), triggered);
@@ -462,10 +464,9 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
   // onExpressionFired via the global manager pointer; suppress so a
   // remote-received trigger can never re-cascade. Receivers are terminal in
   // the propagation graph.
-  suppressCascade_ = true;
-
   bool triggered = false;
   for (size_t b = 0; admitted && b < targetCount; ++b) {
+    const CascadeSuppressed suppressed(suppressCascade_);
     FrameBuffer* buffer = plan.buffers[b];
     // Build a fresh one-shot Expression instance directly from the
     // invocation. NEVER consults this lamp's `expressions` (configured)
@@ -492,7 +493,24 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
     // dead STOPPED transient would block same-sender coalescing for the
     // full GC lifetime.
     if (compositor_) compositor_->addBehavior(raw);
-    if (!raw->trigger()) {
+    bool started = false;
+    try {
+      started = raw->trigger();
+      if (started) {
+        TransientExpression t;
+        t.type = inv.type;
+        std::memcpy(t.srcMac, srcMac, 6);
+        t.expression = std::move(expr);
+        t.createdMs = millis();
+        t.source = source;
+        transientExpressions_.push_back(std::move(t));
+      }
+    } catch (const std::bad_alloc&) {
+      // The compositor must not keep a behavior this unwind frees.
+      if (compositor_) compositor_->removeBehavior(raw);
+      throw;
+    }
+    if (!started) {
       if (compositor_) compositor_->removeBehavior(raw);
 #ifdef LAMP_DEBUG
       Serial.printf("[expr] transient rejected type=%s (never started)\n",
@@ -500,13 +518,6 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
 #endif
       continue;
     }
-    TransientExpression t;
-    t.type = inv.type;
-    std::memcpy(t.srcMac, srcMac, 6);
-    t.expression = std::move(expr);
-    t.createdMs = millis();
-    t.source = source;
-    transientExpressions_.push_back(std::move(t));
     triggered = true;
 #ifdef LAMP_DEBUG
     Serial.printf("[expr] transient created type=%s target=%d t=%lu\n",
@@ -515,7 +526,6 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
 #endif
   }
 
-  suppressCascade_ = false;
   if (triggered) recentPlays_.record(descriptor, nowMs);
 
   // `broadcast` originates a wave from this call, distinct from suppressCascade_

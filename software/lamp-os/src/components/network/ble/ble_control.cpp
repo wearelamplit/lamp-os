@@ -447,25 +447,26 @@ static NearbyList s_nearby;
 class EditSessionCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     if (!isAuthed(connInfo.getConnHandle())) return;
-    if (lamp::ota_quiet_mode::isQuiet()) {
-      lamp::logDroppedWrite("editSession", "ota quiet");
-      return;
-    }
     std::string val = c->getValue();
     if (val.size() < 2) return;
     const uint8_t surface = static_cast<uint8_t>(val[0]);
     const bool   open    = (val[1] != 0);
+    // 0x08 is not an edit surface: the app on the Social/Network page toggles
+    // the duty-cycled passive scan that sights BLE-only peers while connected.
+    // Leaving Social frees the nearby list even during an OTA. A reconnect
+    // replays the app's last flags, so only a close after an open ends the hold.
+    if ((surface & 0x08) && !open) {
+      if (s_socialViewActive) s_nearby.endHold();
+      s_socialViewActive = false;
+    }
+    if (lamp::ota_quiet_mode::isQuiet()) {
+      lamp::logDroppedWrite("editSession", "ota quiet");
+      return;
+    }
     if (surface & 0x01) lamp::overrides.base.setOperatorEditing(open);
     if (surface & 0x02) lamp::overrides.shade.setOperatorEditing(open);
     if (surface & 0x04) lamp::overrides.brightness.setOperatorEditing(open);
-    // 0x08 is not an edit surface: the app on the Social/Network page toggles
-    // the duty-cycled passive scan that sights BLE-only peers while connected.
-    if (surface & 0x08) {
-      // A reconnect replays the app's last flags, so only a close after an
-      // open ends the hold.
-      if (s_socialViewActive && !open) s_nearby.endHold();
-      s_socialViewActive = open;
-    }
+    if ((surface & 0x08) && open) s_socialViewActive = true;
 #ifdef LAMP_DEBUG
     Serial.printf("[ble_control] editSession surface=0x%02x %s\n",
                   surface, open ? "open" : "closed");
