@@ -213,9 +213,10 @@ void test_saved_test_follows_the_same_toggle() {
 void test_saved_test_that_did_not_play_sends_nothing() {
   Rig r;
   overrides.setSurfacePreview(0x02, true);
-  TEST_ASSERT_FALSE(r.testSaved(Cascade::On));
+  const bool fired = r.testSaved(Cascade::On);
   TEST_ASSERT_EQUAL_size_t(0, s_commands);
   TEST_ASSERT_EQUAL_size_t(0, s_events);
+  TEST_ASSERT_FALSE(fired);
 }
 
 void test_continuous_type_sends_nothing() {
