@@ -11,6 +11,11 @@
 //   4. Latest-wins arrival: a newer arrival mid-pulse restarts the pulse.
 //   5. Greeting draw() writes only the Lions slice and snaps it to the peer
 //      colour at the pulse peak.
+//   6. Ambient control() + draw() allocate nothing per frame once the stops
+//      are settled, crossfade included.
+//   7. Colour queries are throttled: a silent peer at most once per
+//      kColorQueryRetryMs, at most three outstanding per window, and a shown
+//      peer's cached stops survive later answers.
 //
 // Adafruit_NeoPixel + esp_system are stubbed under test/native_stubs/.
 // forEachNearby / forEachArrival and the two mesh/expression sinks the
@@ -20,6 +25,7 @@
 #include <unity.h>
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <string>
@@ -33,6 +39,14 @@
 #include "../../src/util/color.cpp"
 #include "../../src/util/fade.cpp"
 #include "../../src/util/gradient.cpp"
+#include "../replaced_new/replaced_new.hpp"
+
+static int g_allocations = 0;
+void* testAllocate(size_t size) {
+  ++g_allocations;
+  return std::malloc(size);
+}
+void testRelease(void* p) noexcept { std::free(p); }
 
 using namespace lamp;
 using lamp::lioness::LionsAmbientBehavior;
@@ -48,6 +62,10 @@ struct FakePeer {
 
 std::vector<FakePeer> g_nearby;
 std::vector<FakePeer> g_arrivals;   // forEachArrival pops the front on ack
+
+struct SentQuery { uint8_t tag; uint32_t ms; };
+SentQuery g_queries[4096];
+size_t g_queryCount = 0;
 
 PeerView viewOf(const FakePeer& fp) {
   PeerView pv;
@@ -83,13 +101,23 @@ void BehaviorContext::forEachArrival(uint32_t,
 bool ExpressionManager::triggerInvocation(const ExpressionInvocation&,
                                           const uint8_t*, bool,
                                           TransientSource) { return false; }
-bool MeshLink::sendColorQuery(const uint8_t*) { return true; }
+bool MeshLink::sendColorQuery(const uint8_t* mac) {
+  if (g_queryCount < sizeof g_queries / sizeof g_queries[0])
+    g_queries[g_queryCount++] = {mac[0], millis()};
+  return true;
+}
 }  // namespace lamp
 
 static Adafruit_NeoPixel neoMain;
 static Adafruit_NeoPixel neoLions;
+static MeshLink g_link;
 
-void setUp() { g_nearby.clear(); g_arrivals.clear(); }
+void setUp() {
+  g_nearby.clear();
+  g_arrivals.clear();
+  g_queryCount = 0;
+  set_mock_millis(0);
+}
 void tearDown() {}
 
 // Base buffer: Main (offset 0, 32px) + Lions (offset 32, 18px). Matches the
@@ -251,6 +279,146 @@ void test_ambient_draws_before_greeting_composites() {
     TEST_ASSERT_EQUAL_UINT8(0x20, fb2.buffer[i].r);      // greeting lost
 }
 
+static std::vector<Color> twoStops(uint8_t tag) {
+  return {Color(tag, 0, 0xFF, 0), Color(0, tag, 0, 0xFF)};
+}
+
+static void answer(LionsAmbientBehavior& ambient, uint8_t tag) {
+  uint8_t mac[6];
+  std::memset(mac, tag, 6);
+  ambient.onColorInfo(mac, twoStops(tag), {});
+}
+
+// Three cached multi-stop peers: once the stops settle, control() + draw()
+// allocate nothing, through the peer-switch crossfade and after it.
+void test_ambient_steady_state_allocates_nothing() {
+  FrameBuffer fb = makeFb();
+  for (uint16_t i = 0; i < 32; ++i) fb.buffer[i] = Color(0x20, 0x08, 0x80, 0);
+  BehaviorContext ctx;
+  LionsAmbientBehavior ambient(&fb);
+  ambient.setBehaviorContext(&ctx);
+  ambient.setMeshLink(&g_link);
+
+  const uint8_t tags[3] = {0xA1, 0xB2, 0xC3};
+  for (uint8_t t : tags) {
+    g_nearby.push_back(makePeer(t, Color(t, 0, 0, 0), "peer"));
+    answer(ambient, t);
+  }
+
+  ambient.control();   // seeds the three lions, starts their crossfades
+  ambient.draw();
+
+  const int before = g_allocations;
+  for (uint32_t f = 0; f < 2 * lamp::lioness::kCrossfadeFrames; ++f) {
+    ambient.control();
+    ambient.draw();
+  }
+  TEST_ASSERT_EQUAL_INT(0, g_allocations - before);
+  TEST_ASSERT_EQUAL_size_t(0, g_queryCount);
+
+  for (int z = 0; z < 3; ++z) {   // every zone shows a gradient, not a solid
+    const Color first = fb.buffer[32 + z * 6];
+    const Color last = fb.buffer[32 + z * 6 + 5];
+    TEST_ASSERT_FALSE(first == last);
+    TEST_ASSERT_EQUAL_UINT8(tags[z], first.r);
+  }
+}
+
+// One silent peer shown by all three lions, polled every frame for several
+// windows: never more than one query per kColorQueryRetryMs, and it still
+// re-asks once each window has passed.
+void test_silent_peer_queried_once_per_window() {
+  FrameBuffer fb = makeFb();
+  BehaviorContext ctx;
+  LionsAmbientBehavior ambient(&fb);
+  ambient.setBehaviorContext(&ctx);
+  ambient.setMeshLink(&g_link);
+  g_nearby = {makePeer(0x5E, Color(0x5E, 0, 0, 0), "silent")};
+
+  const uint32_t window = lamp::lioness::kColorQueryRetryMs;
+  const uint32_t span = 4 * window + window / 2;
+  for (uint32_t t = 0; t <= span; t += 7) {
+    set_mock_millis(t);
+    ambient.control();
+  }
+
+  TEST_ASSERT_TRUE(g_queryCount >= 4);
+  for (size_t i = 1; i < g_queryCount; ++i)
+    TEST_ASSERT_TRUE(g_queries[i].ms - g_queries[i - 1].ms >= window);
+}
+
+// A crowd of silent peers rotating through the lions: within any window, at
+// most three queries go out and no peer is asked twice.
+void test_silent_crowd_bounded_per_window() {
+  FrameBuffer fb = makeFb();
+  BehaviorContext ctx;
+  LionsAmbientBehavior ambient(&fb);
+  ambient.setBehaviorContext(&ctx);
+  ambient.setMeshLink(&g_link);
+  for (uint8_t t = 1; t <= 6; ++t) g_nearby.push_back(makePeer(t, Color(), "crowd"));
+
+  const uint32_t window = lamp::lioness::kColorQueryRetryMs;
+  for (uint32_t t = 0; t <= 10 * window; t += 7) {
+    set_mock_millis(t);
+    ambient.control();
+  }
+
+  TEST_ASSERT_TRUE(g_queryCount > 3);   // the rotation does reach new peers
+  for (size_t i = 0; i < g_queryCount; ++i) {
+    int inWindow = 0;
+    for (size_t j = i; j < g_queryCount && g_queries[j].ms - g_queries[i].ms < window; ++j) {
+      ++inWindow;
+      if (j > i) TEST_ASSERT_NOT_EQUAL(g_queries[i].tag, g_queries[j].tag);
+    }
+    TEST_ASSERT_TRUE(inWindow <= 3);
+  }
+}
+
+// A crowd of answering peers: each lion switch asks at most once, so the
+// query count tracks the director's switch rate rather than the frame rate.
+void test_answering_crowd_queries_track_switches() {
+  FrameBuffer fb = makeFb();
+  BehaviorContext ctx;
+  LionsAmbientBehavior ambient(&fb);
+  ambient.setBehaviorContext(&ctx);
+  ambient.setMeshLink(&g_link);
+  for (uint8_t t = 1; t <= 6; ++t) g_nearby.push_back(makePeer(t, Color(), "crowd"));
+
+  const uint32_t span = 20 * lamp::lioness::kStaggerPhaseMs;
+  size_t answered = 0;
+  for (uint32_t t = 0; t <= span; t += 16) {
+    set_mock_millis(t);
+    ambient.control();
+    for (; answered < g_queryCount; ++answered) answer(ambient, g_queries[answered].tag);
+  }
+
+  TEST_ASSERT_TRUE(g_queryCount > 3);
+  TEST_ASSERT_TRUE(g_queryCount <= span / lamp::lioness::kStaggerPhaseMs + 3);
+}
+
+// Answers for peers no lion shows never evict a shown peer's stops.
+void test_cache_keeps_shown_peers() {
+  FrameBuffer fb = makeFb();
+  BehaviorContext ctx;
+  LionsAmbientBehavior ambient(&fb);
+  ambient.setBehaviorContext(&ctx);
+  ambient.setMeshLink(&g_link);
+
+  const uint8_t tags[3] = {0xA1, 0xB2, 0xC3};
+  for (uint8_t t : tags) {
+    g_nearby.push_back(makePeer(t, Color(), "peer"));
+    answer(ambient, t);
+  }
+  ambient.control();
+  answer(ambient, 0xD4);   // late answers from peers no lion shows
+  answer(ambient, 0xE5);
+  ambient.control();
+
+  TEST_ASSERT_EQUAL_size_t(0, g_queryCount);
+  for (uint32_t f = 0; f <= lamp::lioness::kCrossfadeFrames; ++f) ambient.draw();
+  for (int z = 0; z < 3; ++z) TEST_ASSERT_EQUAL_UINT8(tags[z], fb.buffer[32 + z * 6].r);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_ambient_draw_owns_only_lions_slice);
@@ -259,5 +427,10 @@ int main(int, char**) {
   RUN_TEST(test_greeting_latest_wins_restarts_pulse);
   RUN_TEST(test_greeting_draw_owns_only_lions_slice);
   RUN_TEST(test_ambient_draws_before_greeting_composites);
+  RUN_TEST(test_ambient_steady_state_allocates_nothing);
+  RUN_TEST(test_silent_peer_queried_once_per_window);
+  RUN_TEST(test_silent_crowd_bounded_per_window);
+  RUN_TEST(test_answering_crowd_queries_track_switches);
+  RUN_TEST(test_cache_keeps_shown_peers);
   return UNITY_END();
 }

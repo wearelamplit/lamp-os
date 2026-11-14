@@ -10,7 +10,8 @@ namespace lamp { namespace lioness {
 // Paint one lion zone into `out` (which must already span the zone). Empty
 // stops render solid `mainColor` (idle: mirror Main); otherwise
 // buildGradientWithStops(zoneSize, stops), with any gradient tail past its
-// length falling back to `mainColor`. Pure: no crossfade, no time.
+// length falling back to `mainColor`. Pure: no crossfade, no time, no
+// allocation.
 void renderZone(std::vector<Color>& out, const Zone& zn,
                 const std::vector<Color>& stops, Color mainColor);
 
