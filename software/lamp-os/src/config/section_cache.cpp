@@ -8,8 +8,8 @@
 
 namespace lamp {
 
-// The heap check before each of these cannot reserve the block: another
-// task can take it first. The catch is the last line, best effort since the
+// The heap check before each of these cannot reserve the block, since
+// another task can take it first. The catch is the last line, best effort since the
 // build has no exception emergency pool.
 static bool assignNoThrow(std::string& dst, const char* src, size_t len) {
   try {
@@ -20,7 +20,7 @@ static bool assignNoThrow(std::string& dst, const char* src, size_t len) {
   }
 }
 
-// The document serializes into one guarded buffer: an Arduino String grown on
+// The document serializes into one guarded buffer. An Arduino String grown on
 // a fragmented heap silently stops appending and would cache a cut-off JSON as
 // valid.
 void SectionCache::store(const JsonDocument& doc, const char* name) {
@@ -57,8 +57,8 @@ void SectionCache::release() {
   dirty_.store(true);
 }
 
-// A field OOM must stay visible without spamming: warn on every channel,
-// throttled to one line per kMinGapMs across all sections.
+// A field OOM must stay visible without spamming, so it warns on every
+// channel, throttled to one line per kMinGapMs across all sections.
 void SectionCache::logOom(const char* name) {
   static constexpr uint64_t kMinGapMs = 5000;
   static uint64_t lastMs = 0;

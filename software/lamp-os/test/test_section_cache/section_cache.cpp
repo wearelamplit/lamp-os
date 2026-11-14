@@ -254,9 +254,8 @@ void test_throwing_exact_rebuild_does_not_serve_stale() {
   TEST_ASSERT_NOT_NULL(strstr(out.c_str(), ",148]"));
 }
 
-// The second pass writes into the exactly-sized block. The BLE page catches a
-// throw that escapes the cache, so the test catches it too and checks only
-// what the section serves afterward.
+// The second pass writes into the exactly-sized block. The test also catches
+// an escaped throw, so a cache that stops catching fails at copyOut.
 void test_exact_rebuild_throwing_on_second_pass_does_not_serve_stale() {
   SectionCache c;
   c.rebuildExactly("list", [](JsonWriter& w) { writeList(w, 3); });

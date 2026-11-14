@@ -7,9 +7,10 @@
 
 namespace ble_control {
 
-// One connection's page-protocol read (docs/dev/networking.md): a
+// One connection's page-protocol read (docs/dev/networking.md). A
 // CHAR_PAGE_CTRL write opens a section, each CHAR_PAGE_DATA read takes the
-// next chunk, and an empty chunk ends it.
+// next chunk, and an empty chunk ends it. Each open replaces the section being
+// read, in chunks of at most `chunk` bytes (non-zero).
 class SectionPage {
  public:
   // What a config section reads as when the heap cannot build or copy it out.
@@ -21,8 +22,6 @@ class SectionPage {
   // cannot build or copy it out; may throw std::bad_alloc.
   using ConfigCopy = bool (*)(std::string& out);
 
-  // Each open replaces the section being read, in chunks of at most `chunk`
-  // bytes (non-zero).
   // Serves `bytes` by reference; they must outlive the page.
   void openStatic(std::string_view bytes, uint16_t chunk);
   // Serializes into the page's own buffer. A bad_alloc serves the section
