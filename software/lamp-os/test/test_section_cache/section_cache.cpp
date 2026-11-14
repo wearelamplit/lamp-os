@@ -254,6 +254,30 @@ void test_throwing_exact_rebuild_does_not_serve_stale() {
   TEST_ASSERT_NOT_NULL(strstr(out.c_str(), ",148]"));
 }
 
+// The second pass writes into the exactly-sized block. The BLE page catches a
+// throw that escapes the cache, so the test catches it too and checks only
+// what the section serves afterward.
+void test_exact_rebuild_throwing_on_second_pass_does_not_serve_stale() {
+  SectionCache c;
+  c.rebuildExactly("list", [](JsonWriter& w) { writeList(w, 3); });
+  c.invalidate();
+  int passes = 0;
+  try {
+    c.rebuildExactly("list", [&passes](JsonWriter& w) {
+      if (++passes == 2) throw std::bad_alloc();
+      writeList(w, 5);
+    });
+  } catch (const std::bad_alloc&) {
+  }
+  TEST_ASSERT_EQUAL_INT(2, passes);
+  std::string out;
+  out.reserve(256);
+  TEST_ASSERT_FALSE(c.copyOut(out, "list"));
+  c.rebuildExactly("list", [](JsonWriter& w) { writeList(w, 5); });
+  TEST_ASSERT_TRUE(c.copyOut(out, "list"));
+  TEST_ASSERT_NOT_NULL(strstr(out.c_str(), ",148]"));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_copy_before_any_build_fails_empty);
@@ -271,5 +295,6 @@ int main(int, char**) {
   RUN_TEST(test_exact_invalidate_during_rebuild_is_kept);
   RUN_TEST(test_throwing_rebuild_does_not_serve_stale);
   RUN_TEST(test_throwing_exact_rebuild_does_not_serve_stale);
+  RUN_TEST(test_exact_rebuild_throwing_on_second_pass_does_not_serve_stale);
   return UNITY_END();
 }
