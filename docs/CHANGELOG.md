@@ -33,8 +33,8 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   showing it, sized to the bytes it actually holds, and frees it the moment
   you leave the Social screen, or about 30 s after you leave a mesh or wisp
   screen. The lamp also frees its copy of each large section the app reads
-  (the nearby list, a long expression list) as soon as the read ends,
-  instead of holding the largest one until the phone disconnects; small
+  (the nearby list, a long expression list) as soon as the read ends or
+  the app opens another section, instead of holding the largest one until the phone disconnects; small
   sections keep their buffer for the next read.
 - **A lamp short on memory no longer crashes while a wisp paints it.** With
   the app connected and a wisp nearby, building the wisp's status for the app
