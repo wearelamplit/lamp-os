@@ -618,7 +618,7 @@ void lamp::Lamp::setup() {
     Serial.println("[lamp] FATAL: malformed HwConfig — halting");
     pinMode(LED_BUILTIN, OUTPUT);
     // A compiled-in HwConfig fails the same way every boot, so the halt feeds
-    // the watchdog: a reset loop would only hide the blink.
+    // the watchdog. A reset loop would only hide the blink.
     for (;;) {
       loop_watchdog::feed();
       digitalWrite(LED_BUILTIN, HIGH);
@@ -887,8 +887,6 @@ void lamp::Lamp::setup() {
   lamp::FirmwareDistributor::startSharedStreaming();
   setup_stage::reach(boot_history::Stage::Ota);
 
-  // Arms only on an image's first boot, and only once Arduino stops marking
-  // it valid before setup (verifyRollbackLater). See ota_mark_valid.hpp.
   {
     esp_ota_img_states_t state;
     const esp_partition_t* running = esp_ota_get_running_partition();

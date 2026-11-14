@@ -7,9 +7,9 @@ namespace lamp {
 // The post-update self-check. An image the bootloader booted for the first time
 // (PENDING_VERIFY) is marked valid once its loop has run kSettleMs with BLE up;
 // until then any reset boots the previous image. Arduino marks every image
-// valid before setup() unless verifyRollbackLater() returns true, so this check
-// only ever arms once that override exists. See docs/dev/embedded-heap.md
-// "Rollback after an update".
+// valid before setup() unless the C hook verifyRollbackLater() returns true, so
+// this check arms only once `extern "C" bool verifyRollbackLater()` is defined.
+// See docs/dev/embedded-heap.md "Rollback after an update".
 class MarkValidCheck {
  public:
   static constexpr uint32_t kSettleMs = 30000;

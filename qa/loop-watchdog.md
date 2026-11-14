@@ -58,13 +58,12 @@ while a firmware or filesystem image is being received.
 
 5. **Boot-loop backoff and re-arm.** Run row 1's `loopwd.hang` three times,
    each within 60 s of the previous boot. After the third reset the boot log
-   shows `[loopwd] 3 watchdog resets in a row; loop unwatched for 300 s or
-   until it runs a minute`. Leave it alone: at 60 s of uptime it prints
-   `[loopwd] loop ran a minute; watched again`, and a `loopwd.hang` then
-   resets it within about 5 s, with no power cycle. Repeat the three resets,
-   then send `loopwd.hang` straight after the backoff line, before 60 s: the
-   lamp freezes, prints `[loopwd] backoff over; loop watched` about 300 s
-   after boot, and resets within 5 s of that.
+   shows `[loopwd] 3 watchdog resets in a row; timeout 300 s until the loop
+   runs a minute`. Leave it alone: at 60 s of uptime it prints `[loopwd] loop
+   ran a minute; timeout back to 5 s`, and a `loopwd.hang` then resets it
+   within about 5 s, with no power cycle. Repeat the three resets, then send
+   `loopwd.hang` straight after the backoff line, before 60 s: the lamp
+   freezes and resets about 300 s after the hang.
 6. **Setup hang resets and names its stage.** For each of `wifi`, `mesh` and
    `ota`, run:
 
@@ -80,10 +79,10 @@ while a firmware or filesystem image is being received.
    and the `lamp` section shows `resetReason` 6 and `lastCrash` one higher.
 7. **Setup hang every boot backs off.** Run `loopwd.hangsetup ble 4`. Three
    boots hang and reset about 30 s apart; the fourth prints the backoff line,
-   hangs at `ble`, prints `[loopwd] backoff over; loop watched` about 300 s
-   after it booted and resets within 30 s (the setup timeout). The fifth boots
-   normally, still backing off, and prints `loop ran a minute; watched again`
-   at 60 s. Its `[boots]` lines `-4` to `-1` all read `end taskwdt setup ble`.
+   hangs at `ble` and resets about 300 s after the hang. The fifth boots
+   normally, still backing off, and prints `loop ran a minute; timeout back to
+   5 s` at 60 s. Its `[boots]` lines `-4` to `-1` all read `end taskwdt setup
+   ble`.
 8. **Setup stages stay inside the watchdog.** Flash a blank board with the web
    installer, then `npm run lamp:flash` the dev build, and tap its first boot
    (fresh NVS, PHY calibration). Then power-cycle and tap a normal boot. On
@@ -95,5 +94,6 @@ while a firmware or filesystem image is being received.
 The watchdog arms in `setup()` right after `Serial.begin`, so a hang in the
 ESP-IDF and Arduino start-up before `setup()` still leaves the lamp dark until
 a power cycle. A hang before the boot history opens (in `initFlash`) resets but
-leaves no `[boots]` entry of its own. The timeout is global, so during setup a
-stall on core 0's idle task is caught at 30 s rather than 5 s.
+leaves no `[boots]` entry of its own. The timeout is global, so a stall on
+core 0's idle task is caught at 30 s during setup, and at 300 s in a backoff
+boot until its loop has run a minute, rather than 5 s.

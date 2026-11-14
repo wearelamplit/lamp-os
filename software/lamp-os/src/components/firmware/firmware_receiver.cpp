@@ -1052,9 +1052,6 @@ lamp_protocol::FwResultStatus FirmwareReceiver::verifyAndApply() {
 #endif
     return lamp_protocol::FwResultStatus::OfferShaMismatch;
   }
-  // Set boot to the inactive slot. Next reboot lands PENDING_VERIFY; the
-  // post-boot self-health path in lamp.cpp (g_pendingVerify / mark_app_valid)
-  // handles the health check.
   // set_boot_partition re-reads and hashes the whole image before it flips.
   loop_watchdog::feed();
   const esp_err_t bootErr = esp_ota_set_boot_partition(otaPartition);

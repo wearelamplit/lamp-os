@@ -12,8 +12,8 @@ namespace lamp::setup_stage {
 void reach(boot_history::Stage stage);
 
 #ifdef LAMP_DEBUG
-// Bench: each of the next `boots` boots spins at `stage` until the watchdog
-// resets it. Survives resets in RTC memory; a power cut disarms it.
+// For the bench. Each of the next `boots` boots spins at `stage` until the
+// watchdog resets it. Survives resets in RTC memory; a power cut disarms it.
 void armBenchHang(boot_history::Stage stage, uint8_t boots);
 #endif
 

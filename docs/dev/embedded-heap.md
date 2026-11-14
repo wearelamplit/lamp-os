@@ -698,21 +698,33 @@ task that ran instead (often the idle task), and only the serial log names
 `loopTask`. A malformed compiled-in `HwConfig` halts with a blink and feeds the
 watchdog inside the halt, since a reset could only fail the same way again.
 
+The task watchdog was chosen over a setup-only watchdog and the RTC watchdog.
+It is the watchdog the loop already used, its panic goes through the crash
+record's handler (reset 6, `core`, `pc`, `bt`), and the boot-loop streak
+already counts it. The interrupt watchdog (1 s, both cores) covers a core with
+interrupts off, which the task watchdog cannot see. The RTC watchdog would add
+a bare `wdt` reset with no backtrace, timed on the inaccurate RC slow clock,
+and would catch nothing the two miss once the app has started; the
+bootloader's RTC watchdog is off before `setup()` (no
+`CONFIG_BOOTLOADER_WDT_DISABLE_IN_USER_CODE`), so the ESP-IDF and Arduino
+start-up before `setup()` is not watched.
+
 After 3 task-watchdog resets in a row, each from a boot whose loop never
 started an iteration 60 s into uptime, the next boot backs off: it prints
-`[loopwd] 3 watchdog resets in a row; loop unwatched for 300 s or until it runs
-a minute` on every build and leaves the loop task unsubscribed. A one-shot
-timer subscribes it 300 s after setup starts (`[loopwd] backoff over; loop
-watched`), or the loop's first iteration at 60 s of uptime does
-(`[loopwd] loop ran a minute; watched again`), whichever comes first. The core 0
-idle task stays on the watchdog throughout. So a boot that hangs every time
-resets every 5 to 6 minutes and is never left dark until a power cycle, and a
-boot that only stalls early, for longer than 5 s but less than 300 s, gets
-through and is watched again in the same boot. The streak lives in RTC memory;
-any other reset (a power cycle, an update, a web save's reboot) and any reset
-of a boot that reached 60 s start it again. A loop that stalls for more than
+`[loopwd] 3 watchdog resets in a row; timeout 300 s until the loop runs a
+minute` on every build and holds the task watchdog at 300 s, through setup and
+the loop, until the loop's first iteration at 60 s of uptime puts the normal
+timeouts back (`[loopwd] loop ran a minute; timeout back to 5 s`). So a boot
+that hangs every time resets every 5 minutes or so and is never left dark
+until a power cycle, and a boot that only stalls early, for longer than 5 s
+but less than 300 s, gets through and is watched normally again in the same
+boot. The timeout is global, so until then a stall of the core 0 idle task is
+caught at 300 s too. A subscribe that fails (`[loopwd] subscribe FAILED;
+retrying`) is retried each second from the loop. The streak lives in RTC
+memory; any other reset (a power cycle, an update, a web save's reboot) and any
+reset of a boot that reached 60 s start it again. A loop that stalls for more than
 5 s again and again, through the whole boot, cycles: three quick resets, then a
-backoff boot that is watched again at 60 s and resets at its next stall, which
+backoff boot that gets the normal timeouts back at 60 s and resets at its next stall, which
 ends the streak. Each boot writes about 17 NVS entries (the boot history twice,
 the crash record once). An estimate of the worst case, a stall every few
 seconds from about 10 s into each boot: four boots about every 2 minutes, some
@@ -733,15 +745,16 @@ that one override, and is the owner's call: with it, any reset before the
 image is marked valid boots the previous image. That covers a hang (the
 watchdog resets it within 30 s in setup or 5 s in the loop) but also a
 brownout, a power cycle or a USB plug-in in an updated lamp's first ~30 s,
-after which the mesh offers the update again.
+after which the mesh offers the update again. The weak hook is C, so the
+override must be `extern "C" bool verifyRollbackLater() { return true; }`;
+without `extern "C"` it overrides nothing and rollback silently stays off.
 
 Once on, the check marks the image valid 30 s after setup ends, once BLE is
 running (it asks again every 5 s until then), and a failed mark leaves the
 image unverified until the next boot. Until then the receiver declines every
 firmware OFFER (`DeclineBusy`, which the sender retries later): it writes the
 other OTA slot raw, and the slot it would erase holds the image a rollback
-returns to. Filesystem offers still land. Whether an unverified lamp should
-offer its own image to peers is still open. A stall within the first 30 s of
+returns to. Filesystem offers still land. A stall within the first 30 s of
 an update's first boot then rolls the lamp back, and the next crash record's
 `fw` is the version that booted after it.
 
@@ -775,9 +788,10 @@ blanked), `behaviors`, `mesh`, `ota`, then `loop` (setup done, not printed). So
 distributors. A `>` before the stage marks a lower bound: the RTC state did not
 survive the reset, so only what NVS holds is known, `>boot` while setup ran.
 
-`refused` counts the app's Tests and the lamp's own greetings refused because
-the heap could not spare them (`[expr] transient drop ... (local`; a refusal
-for full slots does not count), `conn` the BLE client connects, and `connbig`
+`refused` counts this lamp's own one-shot expressions refused because the heap
+could not spare them (`[expr] transient drop ... (local`): the app's Tests, its
+greetings, a tired yawn, a copycat replay, the serial `yawn` command. A refusal
+for full slots does not count. `conn` counts the BLE client connects, and `connbig`
 the smallest largest free block sampled each second while a client was
 connected (`-` when none was). They saturate at 65535 and read `-` when they
 were never taken. Boots an older firmware recorded print without the stage and
@@ -793,7 +807,9 @@ keeps the figures from the last milestone it reached, 1 min, 1 h or 1 day, and
 figure was taken: in `setup()`, in its first loop iteration, or in its first
 minute after a power cut. Past 49.7 days the snapshot's uptime saturates and
 reads `>49d17h`. A boot writes the history at start, at the end of setup and at
-each milestone, so at most five NVS writes per boot.
+each milestone, so at most five NVS writes per boot. When none of a boot's
+writes lands, the next boot leaves the stored lines as they were rather than
+pin that boot's RTC figures on the boot before it.
 
 A hang before the history opens (in `Serial.begin` or `initFlash`, the first
 steps of `setup()`) still resets through the watchdog, but leaves no entry of
