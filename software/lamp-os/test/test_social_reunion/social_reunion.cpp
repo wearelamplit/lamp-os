@@ -29,6 +29,7 @@
 #include "expressions/expression.cpp"
 #include "expressions/expression_invocation.cpp"
 #include "expressions/expression_manager.cpp"
+#include "core/boot_history.cpp"
 #include "expressions/expression_registry.cpp"
 #include "expressions/recent_plays.cpp"
 #include "util/color.cpp"

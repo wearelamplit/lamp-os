@@ -30,6 +30,7 @@
 #include "util/heap_probe.hpp"
 #include "util/loop_stall.hpp"
 #include "util/loop_watchdog.hpp"
+#include "core/boot_history.hpp"
 #include "core/pending_slot_aggregate.hpp"
 #include "core/override_aggregate.hpp"
 #include "components/firmware/ota_quiet_mode.hpp"
@@ -326,6 +327,7 @@ class ControlServerCallbacks : public NimBLEServerCallbacks {
     s_clientConnected = true;
     s_homeModePageActive = false;
     postPendingApplyEffectiveBrightness();
+    lamp::boot_history::noteClientConnect();
 
 #ifdef LAMP_DEBUG
     Serial.printf("[ble_control] Client connected, handle=%u (BT session active)\n", handle);

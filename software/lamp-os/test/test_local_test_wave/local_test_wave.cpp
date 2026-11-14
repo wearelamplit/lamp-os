@@ -14,6 +14,7 @@
 #include "core/animated_behavior.cpp"
 #include "expressions/expression.cpp"
 #include "expressions/expression_manager.cpp"
+#include "core/boot_history.cpp"
 #include "expressions/recent_plays.cpp"
 #include "expressions/cascade_scheduler.cpp"
 #include "expressions/expression_invocation.cpp"
@@ -305,6 +306,28 @@ void test_peer_invocation_sends_nothing() {
   TEST_ASSERT_EQUAL_size_t(0, s_events);
 }
 
+// The boot history counts a local transient the heap could not spare, and only
+// that: a peer's refusal and a refusal for full slots are not counted.
+void test_only_a_local_heap_refusal_is_counted() {
+  Rig r;
+  const uint16_t before = boot_history::rtcLive()->refusedLocal;
+  g_mock_largest_free_block = 0;
+  TEST_ASSERT_FALSE(r.testWithColours(Cascade::Off));
+  TEST_ASSERT_EQUAL_UINT16(before + 1, boot_history::rtcLive()->refusedLocal);
+  TEST_ASSERT_FALSE(r.manager.triggerInvocation(Rig::probe(Cascade::Off), kPeerMacs[0]));
+  TEST_ASSERT_EQUAL_UINT16(before + 1, boot_history::rtcLive()->refusedLocal);
+  g_mock_largest_free_block = 1 << 20;
+  // Distinct senders, so none coalesces with another in flight.
+  uint8_t mac[6] = {9, 9, 9, 9, 9, 0};
+  for (size_t i = 0; i <= TransientSlots::kMax; ++i) {
+    mac[5] = static_cast<uint8_t>(i);
+    const bool fired = r.manager.triggerInvocation(Rig::probe(Cascade::Off), mac,
+                                                   /*broadcast=*/true, TransientSource::Local);
+    TEST_ASSERT_EQUAL(i < TransientSlots::kMax, fired);
+  }
+  TEST_ASSERT_EQUAL_UINT16(before + 1, boot_history::rtcLive()->refusedLocal);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_colours_test_cascade_off_announces_only);
@@ -319,5 +342,6 @@ int main(int, char**) {
   RUN_TEST(test_ota_sends_nothing);
   RUN_TEST(test_crowd_fan_out_cascades_without_the_toggle);
   RUN_TEST(test_peer_invocation_sends_nothing);
+  RUN_TEST(test_only_a_local_heap_refusal_is_counted);
   return UNITY_END();
 }

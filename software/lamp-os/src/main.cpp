@@ -11,9 +11,15 @@
 
 #include "config/config.hpp"
 #include "config/nvs_config_store.hpp"
+#include "core/boot_history.hpp"
+#include "core/crash_record.hpp"
 #include "core/lamp.hpp"
+#include "core/setup_stage.hpp"
 #include "lamp_variants.hpp"
 #include "util/loop_watchdog.hpp"
+#include "version.hpp"
+
+extern void lamp_register_panic_handler();
 
 extern lamp::Config config;            // file-scope singleton, defined in lamp.cpp
 extern lamp::NvsConfigStore configStore;  // file-scope NVS store, defined in lamp.cpp
@@ -38,10 +44,14 @@ void setup() {
   fputs("\n", stdout);
   // Small delay so the boot log isn't lost while the host opens the port.
   delay(50);
+  lamp::loop_watchdog::beginSetup();
 
   // Before anything opens NVS: a partition that reports itself unusable is
   // erased so the lamp still boots with Bluetooth.
   lamp::NvsConfigStore::initFlash();
+  lamp::boot_history::boot(lamp::FIRMWARE_VERSION);
+  lamp::crash_record::boot(lamp::FIRMWARE_VERSION);
+  lamp_register_panic_handler();
 
   // Attach the store to the file-scope Config so loadLampType / setLampType
   // can hit NVS during the variant-resolution chain below. Lamp::setup()
@@ -63,8 +73,10 @@ void setup() {
   config.setLampVariant(lamp::compiledLampVariant());
 
   g_lamp = lamp::createCompiledLamp();
+  lamp::setup_stage::reach(lamp::boot_history::Stage::Variant);
   g_lamp->setup();
-  lamp::loop_watchdog::begin();
+  lamp::loop_watchdog::beginLoop();
+  lamp::setup_stage::reach(lamp::boot_history::Stage::Loop);
 }
 
 void loop() {

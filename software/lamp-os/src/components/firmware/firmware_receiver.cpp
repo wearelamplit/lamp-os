@@ -13,13 +13,13 @@
 #include "util/heap_guard.hpp"
 #include "util/heap_probe.hpp"
 #include "util/loop_stall.hpp"
+#include "components/firmware/ota_mark_valid.hpp"
 #include "util/loop_watchdog.hpp"
 #include "../../version.hpp"
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 #include <Arduino.h>
 #include <esp_partition.h>
-#include <esp_task_wdt.h>
 #include <spi_flash_mmap.h>  // SPI_FLASH_SEC_SIZE
 // Low-level IWDT (Interrupt-Watchdog) control. A W25Q block erase can take
 // 50-750 ms under cache-disable bursts, longer than the IWDT stage timeout,
@@ -36,20 +36,6 @@
 namespace lamp {
 
 namespace {
-
-#if defined(ARDUINO) || defined(ESP_PLATFORM)
-// Restore the default TWDT (5 s, IDLE0 subscribed) on every OTA flow exit.
-// The timeout also governs the loop task (util/loop_watchdog.hpp); a
-// reconfigure leaves its subscription in place.
-void restoreDefaultWdt() {
-  esp_task_wdt_config_t wdtDefault = {
-      .timeout_ms     = 5000,
-      .idle_core_mask = (1u << 0),  // CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0
-      .trigger_panic  = true,
-  };
-  esp_task_wdt_reconfigure(&wdtDefault);
-}
-#endif
 
 constexpr uint32_t kChunkStallReqMs    = 2000;   // emit REQ after 2s gap
 constexpr uint32_t kStreamingHardCapMs = 600000; // total OTA budget (10 min)
@@ -275,6 +261,13 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
     sendAccept(ctrl, lamp_protocol::FwAcceptStatus::DeclineBusy);
     return;
   }
+  if (offerWaitsForMarkValid(fsHooks_ != nullptr, otaMarkValid.pending())) {
+#ifdef LAMP_DEBUG
+    Serial.println("[fw_receiver] OFFER while this image is unverified, declining");
+#endif
+    sendAccept(ctrl, lamp_protocol::FwAcceptStatus::DeclineBusy);
+    return;
+  }
   // Firmware: reject if otaAcceptable returns false (wrong channel, downgrade,
   // cross-variant, or stable<-beta). FS: the hook owns its own accept logic.
   // Distributor is the upstream gate for unwanted offers; receiver sends
@@ -427,12 +420,7 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
   // interrupts between blocks so IDLE0 still runs (well within 30 s), and
   // per-chunk writes are sub-ms. The loop task feeds once per block: a slow
   // flash's whole-image erase can outlast even the widened timeout.
-  esp_task_wdt_config_t wdtWide = {
-      .timeout_ms     = 30000,
-      .idle_core_mask = (1u << 0),
-      .trigger_panic  = true,
-  };
-  esp_task_wdt_reconfigure(&wdtWide);
+  loop_watchdog::widen();
 
   // Erase the entire image region now, synchronously, before arming the gate or
   // sending ACCEPT: the gate is disarmed and no ACCEPT has gone out, so no chunk
@@ -463,7 +451,7 @@ void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
                     (unsigned)eoff, (unsigned)eraseErr);
 #endif
       sendResult(lamp_protocol::FwResultStatus::OtaBeginFail, 0xFD);
-      restoreDefaultWdt();
+      loop_watchdog::restore();
       state_ = State::Failed;
       return;
     }
@@ -643,7 +631,7 @@ void FirmwareReceiver::onDoneOnLoop(const PendingFirmwareControl& ctrl,
   // drop to Failed for the tick() tombstone path.
   sendResult(rc, 0);
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
-  restoreDefaultWdt();
+  loop_watchdog::restore();
 #endif
   state_ = State::Failed;
 }
@@ -926,7 +914,7 @@ void FirmwareReceiver::abortOta() {
   // No esp_ota_begin was called, so there's no handle to esp_ota_abort. The
   // erased region stays erased (the next OFFER re-erases anyway) and otadata is
   // untouched. Restore the wide WDT held across streaming.
-  restoreDefaultWdt();
+  loop_watchdog::restore();
 #else
   publishedOtaHandle_.store(0, std::memory_order_release);
   publishedPartition_.store(nullptr, std::memory_order_release);
@@ -948,7 +936,7 @@ lamp_protocol::FwResultStatus FirmwareReceiver::verifyAndApply() {
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   // Streaming is over (chunk floods stopped before DONE). Restore the normal
   // WDT; esp_partition_read + verify don't hammer the bus, so 5 s is safe.
-  restoreDefaultWdt();
+  loop_watchdog::restore();
   // Disarm the gate so no late Core 0 chunk races verify/apply. exchange(0) is
   // atomic but not synchronous: a handler already past the gate-check is still
   // in flight. writesInFlight_ below is the synchronous barrier.
