@@ -506,9 +506,8 @@ scale with the number of peers or the mesh's message rate, so each is bounded:
   Test plays nothing here, logs `[expr] transient drop` (every build, at
   most every 5 s) and sends nothing to the crowd, since a Test announces and
   cascades only after it plays; a peer's invocation never cascades, and a
-  mirrored copy sends at most one MSG_EVENT of its own. That type then waits
-  a second (`LocalCooldown`) before the lamp tries it again, so a Test
-  tapped over and over while the lamp is short does not retry each tap. The
+  mirrored copy sends at most one MSG_EVENT of its own. Each Test tap is
+  admitted afresh, so one tapped again once memory frees plays. The
   vector is reserved at `ExpressionManager::begin`, and the compositor
   reserves 16 behavior slots past its boot list for transients and live
   upserts.

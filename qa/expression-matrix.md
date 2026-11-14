@@ -65,7 +65,9 @@ or the cascade path. Last full pass: 2026-07-15 (release-1.1.1 baseline).
 - Spotty trigger: `[cascade] skip continuous`. Pulse (cascadeEnabled=0):
   `[cascade] skip not-enabled`.
 - Shifty phases within ~1% of configured (5/20/5 s → expect ~5000/20000/5000
-  ms), then `onComplete IDLE → triggerExpression(glitchy)`.
+  ms), then `onComplete IDLE → triggerExpression(glitchy)` and
+  `[trigger] 'glitchy' fired=1`; a `[cascade]` line for that glitch only
+  with `fired=1`.
 - Payload row: N/A on hardware — the 1444 B cap is unreachable by any slider
   config; the LOUD `[cascade] ERR payload …B over …B cap` drop is covered by
   the native tests.

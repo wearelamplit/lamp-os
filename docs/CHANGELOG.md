@@ -14,8 +14,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   it. It now sends it only with cascade on, and only once the lamp has
   played it; nearby lamps still hear that the lamp played it and may copy it
   on their own, as they do for any expression it plays. A Test the lamp
-  could not play sends nothing. The pulse a lamp plays when you add it in
-  the app no longer forces nearby lamps to play it.
+  could not play sends nothing, and tapping it again tries again at once
+  instead of waiting a second. The glitch shifty plays as it shifts back
+  follows the same rule. The pulse a lamp plays when you add it in the app
+  no longer forces nearby lamps to play it.
 - **A lamp low on memory no longer asks for its password.** When a lamp was
   too short of memory to send its settings, the app took the empty answer for
   a wrong password and showed the password prompt, or showed default colours

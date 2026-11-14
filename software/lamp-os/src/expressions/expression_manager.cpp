@@ -325,9 +325,7 @@ bool ExpressionManager::triggerExpression(const std::string& type) {
   }
   suppressCascade_ = false;
 #ifdef LAMP_DEBUG
-  Serial.printf("[trigger] '%s' fired=%d (matched %s)\n",
-                type.c_str(), triggered,
-                firstFired ? "≥1 entry" : "no entries");
+  Serial.printf("[trigger] '%s' fired=%d\n", type.c_str(), triggered);
 #endif
   // Cascade once per logical trigger. A TARGET_BOTH
   // expression has two entries (shade + base) but should fan out a single
