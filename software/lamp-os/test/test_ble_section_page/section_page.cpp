@@ -269,16 +269,86 @@ void test_small_sections_keep_a_buffer_they_grew() {
   TEST_ASSERT_TRUE(rereadsWithNoHeap(page, copyLonger));
 }
 
-// A large read abandoned midway leaves its buffer; the next small section's
-// end frees it rather than holding it for the connection.
+// Bytes a page keeps after reading kLampJson to its end from no buffer.
+static size_t smallSectionKeeps() {
+  SectionPage page;
+  const size_t before = g_liveBytes;
+  page.openConfig(copyLamp, 64);
+  drain(page);
+  return g_liveBytes - before;
+}
+
+// A large read abandoned midway leaves its buffer; once the next small section
+// ends, the page holds no more than that section keeps.
 void test_small_section_end_frees_an_abandoned_large_buffer() {
+  const size_t keeps = smallSectionKeeps();
   SectionPage page;
   const size_t before = g_liveBytes;
   page.openConfig(copyHuge, 64);
   page.read(true);
   page.openConfig(copyLamp, 64);
   drain(page);
-  TEST_ASSERT_EQUAL_UINT(before, g_liveBytes);
+  TEST_ASSERT_TRUE(g_liveBytes - before <= keeps);
+}
+
+// Abandoned sizes over kKeptCapacity, up to twice it: buffers a capacity test
+// cannot tell from one small sections grew.
+static const size_t kAbandonedSizes[] = {SectionPage::kKeptCapacity + 1,
+                                         SectionPage::kKeptCapacity * 3 / 2 + 7,
+                                         2 * SectionPage::kKeptCapacity};
+static size_t g_abandonedSize = 0;
+static bool copyAbandoned(std::string& out) {
+  out.assign(g_abandonedSize, 'a');
+  return true;
+}
+
+// Opens a section of g_abandonedSize bytes and stops after its first chunk.
+static void abandonMidway(SectionPage& page, size_t size) {
+  g_abandonedSize = size;
+  page.openConfig(copyAbandoned, 64);
+  TEST_ASSERT_EQUAL_UINT(64, page.read(true).size());
+}
+
+// The section that replaces an abandoned one over kKeptCapacity frees its
+// buffer, whatever capacity that buffer has.
+void test_next_open_frees_a_buffer_an_abandoned_read_left() {
+  const size_t keeps = smallSectionKeeps();
+  for (const size_t size : kAbandonedSizes) {
+    const size_t before = g_liveBytes;
+
+    SectionPage config;
+    abandonMidway(config, size);
+    config.openConfig(copyLamp, 64);
+    TEST_ASSERT_EQUAL_STRING(kLampJson.c_str(), drain(config).c_str());
+    TEST_ASSERT_TRUE(g_liveBytes - before <= keeps);
+
+    const size_t beforeOther = g_liveBytes;
+    SectionPage other;
+    abandonMidway(other, size);
+    other.open(serializeLamp, 64);
+    TEST_ASSERT_EQUAL_STRING(kLampJson.c_str(), drain(other).c_str());
+    TEST_ASSERT_TRUE(g_liveBytes - beforeOther <= keeps);
+
+    static const char kCatalog[] = "{\"catalog\":[1,2,3]}";
+    const size_t beforeFlash = g_liveBytes;
+    SectionPage flash;
+    abandonMidway(flash, size);
+    flash.openStatic(std::string_view(kCatalog, sizeof(kCatalog) - 1), 64);
+    TEST_ASSERT_EQUAL_UINT(beforeFlash, g_liveBytes);
+
+    const size_t beforeUnknown = g_liveBytes;
+    SectionPage unknown;
+    abandonMidway(unknown, size);
+    unknown.close();
+    TEST_ASSERT_EQUAL_UINT(beforeUnknown, g_liveBytes);
+  }
+}
+
+// An abandoned section within kKeptCapacity keeps its buffer for the next.
+void test_next_open_keeps_a_small_abandoned_buffer() {
+  SectionPage page;
+  abandonMidway(page, SectionPage::kKeptCapacity);
+  TEST_ASSERT_TRUE(rereadsWithNoHeap(page, copyLamp));
 }
 
 int main(int, char**) {
@@ -300,5 +370,7 @@ int main(int, char**) {
   RUN_TEST(test_small_sections_keep_a_buffer_they_grew);
   RUN_TEST(test_small_section_end_frees_an_abandoned_large_buffer);
   RUN_TEST(test_last_chunk_is_served_before_the_free);
+  RUN_TEST(test_next_open_frees_a_buffer_an_abandoned_read_left);
+  RUN_TEST(test_next_open_keeps_a_small_abandoned_buffer);
   return UNITY_END();
 }

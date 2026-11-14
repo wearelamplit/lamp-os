@@ -5,10 +5,12 @@
 namespace ble_control {
 
 void SectionPage::openStatic(std::string_view bytes, uint16_t chunk) {
+  close();
   serve(bytes, chunk);
 }
 
 bool SectionPage::open(Serializer serialize, uint16_t chunk) {
+  close();
   bool served = true;
   try {
     serialize(snapshot_);
@@ -21,6 +23,7 @@ bool SectionPage::open(Serializer serialize, uint16_t chunk) {
 }
 
 bool SectionPage::openConfig(ConfigCopy copy, uint16_t chunk) {
+  close();
   bool copied = false;
   try {
     copied = copy(snapshot_);
@@ -31,6 +34,10 @@ bool SectionPage::openConfig(ConfigCopy copy, uint16_t chunk) {
 }
 
 void SectionPage::close() {
+  if (snapshot_.size() > kKeptCapacity || snapshot_.capacity() > 2 * kKeptCapacity) {
+    release();
+    return;
+  }
   snapshot_.clear();
   serve({}, 0);
 }
@@ -43,11 +50,7 @@ void SectionPage::release() {
 std::string_view SectionPage::read(bool authed) {
   if (!authed || chunk_ == 0) return {};
   if (cursor_ >= source_.size()) {
-    if (snapshot_.size() > kKeptCapacity || snapshot_.capacity() > 2 * kKeptCapacity) {
-      release();
-    } else {
-      close();
-    }
+    close();
     return {};
   }
   const std::string_view chunk = source_.substr(cursor_, chunk_);
