@@ -8,6 +8,13 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 ## Unreleased
 
 ### Fixed
+- **Lioness is easier on memory and the radio in a crowd.** Its lions took
+  memory every frame, and asked a peer that never answered for its colours
+  every frame. They now draw without taking memory, ask a silent peer at most
+  once every three seconds, and keep the colours of every peer they show, so
+  a lion in a crowd of five or more no longer drops to the Main colour while
+  it waits for an answer it already had. A greeting now plays through before
+  the next arrival is greeted, where a crowd used to restart it every frame.
 - **Testing an expression in the app no longer makes other lamps play it
   when cascade is off.** Test sent the cascade command to every nearby lamp
   whatever the cascade toggle said, even when the lamp itself could not play

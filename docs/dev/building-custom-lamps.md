@@ -416,14 +416,21 @@ apart) to the next lamp not shown by the other two, so over time every nearby
 lamp gets shown, the trio stays distinct, and no two lions switch on the same
 tick (0 → all idle / mirror `Main`; 1 → all three show it; 2 → two lions show
 the pair, the third holds idle; ≥3 → the walk). It pulls stops via
-`MSG_COLOR_QUERY`/`onColorInfo` and renders with the pure `renderLions()`
-(`lions_scene.cpp`), crossfading a switched zone over `kCrossfadeFrames` with
-`util/fade`. `LionsGreetingBehavior::startGreeting()` snaps all three lions to
+`MSG_COLOR_QUERY`/`onColorInfo` and renders each zone with the pure
+`renderZone()` (`lions_scene.cpp`), crossfading a switched zone over
+`kCrossfadeFrames` with `util/fade`. A settled scene allocates nothing per
+frame. The stop cache holds one entry per lion and never evicts a peer a lion
+shows. A query waits in one of three slots until its peer answers or
+`kColorQueryRetryMs` passes, so a peer that never answers is asked once per
+window and at most three queries go out per window.
+`LionsGreetingBehavior::startGreeting()` snaps all three lions to
 the newcomer's `peer.baseColor`, breathes `kPulses` times via the pure
 `pulseEnvelope()` (`lions_greeting.hpp`), eases into the ambient pixels
 underneath, and fires the shared `GlitchyExpression` on the shade
 (`triggerInvocation(..., broadcast=false)` — already in the base catalog, no
-internal descriptor needed). `LionsDirector` / `renderLions` / `pulseEnvelope`
+internal descriptor needed). A greeting plays through before the next arrival
+is greeted: arrivals wait unacked while one plays.
+`LionsDirector` / `renderZone` / `pulseEnvelope`
 are pure and frame-driven, each with its own native test.
 
 One item wants a hardware pass: `maxBrightness=230` / `supplyBudgetMa=1400`
