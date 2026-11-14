@@ -72,11 +72,13 @@ class LionsAmbientBehavior : public AnimatedBehavior, public lamp::Greetable {
   struct Cached { Mac mac; std::vector<Color> baseStops; };
   std::array<Cached, 3> stopCache_{};
 
-  // Outstanding colour queries, one slot per lion. A slot is busy until its
-  // peer answers or kColorQueryRetryMs passes, so a silent peer is asked at
-  // most once per window and no more than three queries go out per window.
+  // Outstanding colour queries, a pool shared by the three lions. A slot is
+  // busy until its peer answers or kColorQueryRetryMs passes, so a silent peer
+  // is asked at most once per window and at most kQuerySlots queries are
+  // outstanding at once.
+  static constexpr size_t kQuerySlots = 3;
   struct PendingQuery { Mac mac; uint32_t sentMs; };
-  std::array<PendingQuery, 3> pending_{};
+  std::array<PendingQuery, kQuerySlots> pending_{};
 
   lamp::MeshLink* meshLink_ = nullptr;
   LionsGreetingBehavior* greeting_ = nullptr;

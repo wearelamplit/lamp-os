@@ -60,8 +60,7 @@ void LionsGreetingBehavior::control() {
   }
   greetingWasActive_ = active;
 
-  // Arrivals stay unacked while a greeting plays, so a crowd queues instead
-  // of restarting the pulse every tick.
+  // Arrivals stay unacked while a greeting plays, so each one plays through.
   if (active) return;
   context_->forEachArrival(5000, [this](const lamp::PeerView& p) {
     startGreeting(p);

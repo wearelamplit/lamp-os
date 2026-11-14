@@ -420,9 +420,9 @@ the pair, the third holds idle; ≥3 → the walk). It pulls stops via
 `renderZone()` (`lions_scene.cpp`), crossfading a switched zone over
 `kCrossfadeFrames` with `util/fade`. A settled scene allocates nothing per
 frame. The stop cache holds one entry per lion and never evicts a peer a lion
-shows. A query waits in one of three slots until its peer answers or
+shows. A query holds one of three shared slots until its peer answers or
 `kColorQueryRetryMs` passes, so a peer that never answers is asked once per
-window and at most three queries go out per window.
+window and at most three queries are outstanding at once.
 `LionsGreetingBehavior::startGreeting()` snaps all three lions to
 the newcomer's `peer.baseColor`, breathes `kPulses` times via the pure
 `pulseEnvelope()` (`lions_greeting.hpp`), eases into the ambient pixels

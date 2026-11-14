@@ -49,6 +49,8 @@ bool LionsAmbientBehavior::shown(const Mac& m) const {
 }
 
 void LionsAmbientBehavior::requestStops(const Mac& m, uint32_t nowMs) {
+  static_assert(kQuerySlots <= lamp::MeshLink::kColorQueryResendSlots,
+                "every query one control() sends must keep its resends");
   if (!meshLink_) return;
   PendingQuery* slot = nullptr;
   for (PendingQuery& q : pending_) {

@@ -451,6 +451,43 @@ void test_cache_keeps_shown_peers() {
   for (int z = 0; z < 3; ++z) TEST_ASSERT_EQUAL_UINT8(tags[z], fb.buffer[32 + z * 6].r);
 }
 
+// Seeding sends a query per lion in one control(); MeshLink's colour-query
+// ring keeps every one of them in flight for its resends, none overwritten.
+void test_seed_queries_all_keep_their_resends() {
+  FrameBuffer fb = makeFb();
+  BehaviorContext ctx;
+  LionsAmbientBehavior ambient(&fb);
+  ambient.setBehaviorContext(&ctx);
+  ambient.setMeshLink(&g_link);
+  for (uint8_t t = 1; t <= 3; ++t) g_nearby.push_back(makePeer(t, Color(), "crowd"));
+  ambient.control();
+  TEST_ASSERT_EQUAL_size_t(3, g_queryCount);
+
+  constexpr uint8_t kResendsEach = 2;
+  constexpr uint32_t kGap = 40;
+  MeshLink::ColorQueryResendRing ring;
+  const uint8_t self[6] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
+  for (size_t i = 0; i < g_queryCount; ++i) {
+    uint8_t target[6];
+    std::memset(target, g_queries[i].tag, 6);
+    uint8_t frame[lamp_protocol::COLOR_QUERY_SIZE];
+    const size_t n = lamp_protocol::buildColorQuery(frame, sizeof frame,
+                                                    static_cast<uint16_t>(i), self, target);
+    TEST_ASSERT_TRUE(ring.enqueue(frame, n, 0, kResendsEach, kGap));
+  }
+
+  int copies[256] = {};
+  for (uint32_t t = 0; t <= 10 * kGap; t += kGap / 2) {
+    ring.service(t, [&](const uint8_t* buf, size_t len) {
+      lamp_protocol::ParsedColorQuery q;
+      TEST_ASSERT_TRUE(lamp_protocol::parseColorQuery(buf, len, q));
+      ++copies[q.targetMac[0]];
+    });
+  }
+  for (size_t i = 0; i < g_queryCount; ++i)
+    TEST_ASSERT_EQUAL_INT(kResendsEach, copies[g_queries[i].tag]);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_ambient_draw_owns_only_lions_slice);
@@ -465,5 +502,6 @@ int main(int, char**) {
   RUN_TEST(test_answering_crowd_queries_track_switches);
   RUN_TEST(test_answer_frees_query_slot);
   RUN_TEST(test_cache_keeps_shown_peers);
+  RUN_TEST(test_seed_queries_all_keep_their_resends);
   return UNITY_END();
 }
