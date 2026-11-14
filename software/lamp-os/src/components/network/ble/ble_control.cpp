@@ -37,6 +37,7 @@
 #include "ble_gap.hpp"
 #include "crypto.hpp"
 #include "components/network/ble/ble_radio_gate.hpp"
+#include "components/network/ble/alloc_guarded_callbacks.hpp"
 #include "components/network/ble/nearby_list.hpp"
 #include "components/network/ble/social_view.hpp"
 #include "components/network/ble/section_page.hpp"
@@ -297,28 +298,8 @@ static bool decodeIncomingOp(const std::string& raw,
   return true;
 }
 
-// Wraps a characteristic's callbacks so a std::bad_alloc thrown on the host
-// task drops that write, or reads empty, instead of aborting the lamp.
-class AllocGuardedCallbacks : public NimBLECharacteristicCallbacks {
- public:
-  explicit AllocGuardedCallbacks(NimBLECharacteristicCallbacks* inner) : inner_(inner) {}
-  void onRead(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
-    if (!lamp::catchBadAlloc("BLE onRead", [&] { inner_->onRead(c, connInfo); })) {
-      c->setValue("");
-    }
-  }
-  void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
-    lamp::catchBadAlloc("BLE onWrite", [&] { inner_->onWrite(c, connInfo); });
-  }
-  void onSubscribe(NimBLECharacteristic* c, NimBLEConnInfo& connInfo,
-                   uint16_t subValue) override {
-    lamp::catchBadAlloc("BLE onSubscribe",
-                        [&] { inner_->onSubscribe(c, connInfo, subValue); });
-  }
-
- private:
-  NimBLECharacteristicCallbacks* inner_;
-};
+using AllocGuardedCallbacks =
+    AllocGuarded<NimBLECharacteristicCallbacks, NimBLECharacteristic, NimBLEConnInfo>;
 
 class ControlServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer* server, NimBLEConnInfo& connInfo) override {
