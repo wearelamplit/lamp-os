@@ -630,6 +630,16 @@ scale with the number of peers or the mesh's message rate, so each is bounded:
   that failed to build or copy out (`SectionCache::copyOut` false) reads as `!`
   over BLE, served from flash, never as a stale or empty section, and a failed
   build is retried on the next read.
+- **The task boundary.** A `std::bad_alloc` that no closer catch takes ends at
+  `catchBadAlloc` (`util/alloc_boundary.hpp`), which wraps each loop
+  iteration's `Lamp::tick` and every GATT characteristic callback: it logs
+  `[heap] bad_alloc caught in <stage>` at most every 5 s and drops the rest of
+  that tick, write or read (a read answers empty), where an uncaught one
+  aborts the lamp. The boundary cannot give back a lock the thrower held, so
+  a path that allocates under a lock (the wisp status and config cache
+  writes) catches inside the lock, and a hot path whose loss should not cost
+  the rest of the tick (the wisp-status merge on every entry, the state
+  notify payload, the colour-info drain) catches where it allocates.
 - **OTA sessions.** The receiver's chunk bitmap (up to 8 KB per OFFER) is
   allocated only when `heapCanSpare` allows it; otherwise the OFFER is declined
   busy and the sender retries.

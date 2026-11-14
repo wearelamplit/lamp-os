@@ -32,15 +32,17 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   The lamp now builds the list only while a Social, mesh or wisp screen is
   showing it, sized to the bytes it actually holds, and frees it the moment
   you leave the Social screen, or about 30 s after you leave a mesh or wisp
-  screen. The lamp also frees its copy of each section the app reads
-  as soon as the read ends, instead of holding the largest one until the
-  phone disconnects.
+  screen. The lamp also frees its copy of each large section the app reads
+  (the nearby list, a long expression list) as soon as the read ends,
+  instead of holding the largest one until the phone disconnects; small
+  sections keep their buffer, so reading them again never reports low
+  memory.
 - **A lamp short on memory no longer crashes while a wisp paints it.** With
   the app connected and a wisp nearby, building the wisp's status for the app
   could run out of memory and restart the lamp. The lamp now skips that one
-  update and logs it; the app keeps the status it last showed. The same goes
-  for the app's state updates, its wifi status and the expressions a lamp
-  sends its neighbours.
+  update and logs it; the app keeps the status it last showed. Any other
+  memory failure while the lamp runs, or while it answers the app, now
+  skips that one step and logs it instead of restarting the lamp.
 - **A lamp with a malformed firmware channel no longer blanks the nearby
   list.** A quote, backslash, control character or non-ASCII byte in a peer's
   channel broke the list's JSON, so the app could not read the list at all.

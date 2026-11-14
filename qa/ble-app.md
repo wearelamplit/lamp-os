@@ -88,8 +88,9 @@ EOF
   read waits up to 100 ms for the lamp to build it and reads empty if it
   could not; it is freed 30 s after the last read, or on the next loop tick
   once the app leaves Social (`editSession surface=0x08 closed`).
-- Every section's copy is freed by the read that returns the empty chunk, so
-  draining a section to the empty chunk leaves nothing held for it.
+- A section's copy over 1 KB (nearby, a big expr) is freed by the read that
+  returns the empty chunk; a smaller one keeps its buffer, so re-reading
+  lamp/base/shade/home on a tight heap serves the section, never `!`.
 
 H2 — schema version is 4 (`kGattSchemaVersion`, `gatt_layout.hpp`); reading
 it must work even later, after a password is set (it is the one un-gated
