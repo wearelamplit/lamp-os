@@ -1,15 +1,14 @@
 #pragma once
 
-#include <atomic>
 #include <cstdint>
 
 #include "util/high_water.hpp"
 #include "util/log_rate_limiter.hpp"
 
 // The Arduino loop task under the ESP-IDF task watchdog, from the start of
-// setup: a loop task that stops feeding for the watchdog's timeout panics, and
-// the crash record shows it as a task-watchdog reset. The task watchdog's
-// configuration has this one owner. See docs/dev/embedded-heap.md "Reading a
+// setup. A loop task that stops feeding for the watchdog's timeout panics, and
+// the crash record shows it as a task-watchdog reset. This is the one owner of
+// the task watchdog's configuration. See docs/dev/embedded-heap.md "Reading a
 // crash record".
 namespace lamp::loop_watchdog {
 
@@ -22,13 +21,15 @@ constexpr uint32_t kSetupTimeoutMs = 30000;
 constexpr uint32_t kLoopTimeoutMs = 5000;
 // Held while a firmware or filesystem image is received.
 constexpr uint32_t kWideTimeoutMs = 30000;
-// How long a backoff boot's loop task stays unsubscribed, from setup start.
-constexpr uint32_t kBackoffMs = 300000;
+// Held through a backoff boot until its loop runs to kStableUptimeMs.
+constexpr uint32_t kBackoffTimeoutMs = 300000;
 
 enum class Phase : uint8_t { Setup, Loop };
 
-constexpr uint32_t timeoutMs(Phase phase, bool wide) {
-  const uint32_t base = phase == Phase::Setup ? kSetupTimeoutMs : kLoopTimeoutMs;
+constexpr uint32_t timeoutMs(Phase phase, bool wide, bool backoff) {
+  const uint32_t base = backoff                ? kBackoffTimeoutMs
+                        : phase == Phase::Setup ? kSetupTimeoutMs
+                                                : kLoopTimeoutMs;
   return wide && base < kWideTimeoutMs ? kWideTimeoutMs : base;
 }
 
@@ -38,16 +39,16 @@ constexpr uint32_t idleCoreMask(bool checkCpu0, bool checkCpu1) {
 }
 
 // Call once, from the loop task, right after Serial.begin. Subscribes it at the
-// setup timeout, or, in a backoff boot, arms a timer that subscribes it
-// kBackoffMs later.
+// setup timeout, or at kBackoffTimeoutMs in a backoff boot.
 void beginSetup();
 
-// Call once, from the loop task, at the end of setup: the loop timeout.
+// Call once, from the loop task, at the end of setup. Sets the loop timeout,
+// unless the boot is still backing off.
 void beginLoop();
 
 // Resets the loop task's watchdog. Called between the steps of any loop-task
-// operation that can block for seconds. A no-op on any other task and while
-// the loop task is unsubscribed.
+// operation that can block for seconds. A no-op on any other task and before
+// the loop task is subscribed.
 void feed();
 
 // Marks the start of a loop iteration, then feed(). First thing in loop().
@@ -72,17 +73,16 @@ constexpr uint8_t bootStreak(bool stateValid, uint8_t prevStreak,
                                           : kResetStreakLimit;
 }
 
-// Normal: watched from setup start. Backoff: unsubscribed for kBackoffMs, or
-// until the loop runs to kStableUptimeMs, so a boot that stalls every time
-// resets slowly instead of looping fast.
+// Backoff holds kBackoffTimeoutMs until the loop runs to kStableUptimeMs, so a
+// boot that stalls every time resets slowly instead of looping fast.
 enum class Mode : uint8_t { Normal, Backoff };
 
 constexpr Mode modeFor(uint8_t streak) {
   return streak < kResetStreakLimit ? Mode::Normal : Mode::Backoff;
 }
 
-// True when a backoff boot's loop iteration at `uptimeMs` subscribes the loop
-// task ahead of the backoff timer.
+// True when a backoff boot's loop iteration at `uptimeMs` returns it to the
+// normal timeouts.
 constexpr bool rearmDue(Mode mode, uint32_t uptimeMs) {
   return mode == Mode::Backoff && reachedStable(uptimeMs);
 }
@@ -97,8 +97,8 @@ struct BootGuard {
   void markUptime(uint32_t uptimeMs);
 };
 
-// True when a feed from `current` resets the watchdog: the loop task is
-// subscribed, and `current` is that task.
+// True when a feed from `current` resets the watchdog, which takes the loop
+// task subscribed and `current` being that task.
 inline bool feedsFrom(const void* current, const void* subscribed) {
   return subscribed != nullptr && current == subscribed;
 }
@@ -107,18 +107,6 @@ inline bool feedsFrom(const void* current, const void* subscribed) {
 // the loop is watched. True when the iteration feeds the watchdog.
 bool markIteration(BootGuard& guard, uint32_t uptimeMs, const void* current,
                    const void* subscribed);
-
-// Lets exactly one of several racing callers through, once.
-class Once {
- public:
-  bool claim() {
-    bool expected = false;
-    return claimed_.compare_exchange_strong(expected, true);
-  }
-
- private:
-  std::atomic<bool> claimed_{false};
-};
 
 // Longest span between consecutive marks, held for report until taken, so a
 // new longest refused by a rate limit still prints later. Not thread-safe.

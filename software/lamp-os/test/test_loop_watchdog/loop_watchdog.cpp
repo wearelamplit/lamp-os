@@ -23,13 +23,12 @@ using lamp::loop_watchdog::markIteration;
 using lamp::loop_watchdog::reachedStable;
 using lamp::loop_watchdog::takeDueReport;
 using lamp::loop_watchdog::idleCoreMask;
-using lamp::loop_watchdog::kBackoffMs;
+using lamp::loop_watchdog::kBackoffTimeoutMs;
 using lamp::loop_watchdog::kLoopTimeoutMs;
 using lamp::loop_watchdog::kSetupTimeoutMs;
 using lamp::loop_watchdog::kWideTimeoutMs;
 using lamp::loop_watchdog::Mode;
 using lamp::loop_watchdog::modeFor;
-using lamp::loop_watchdog::Once;
 using lamp::loop_watchdog::Phase;
 using lamp::loop_watchdog::rearmDue;
 using lamp::loop_watchdog::timeoutMs;
@@ -212,7 +211,7 @@ void test_an_unsubscribed_iteration_still_marks_the_minute() {
   g.atBoot(true, true);
   TEST_ASSERT_FALSE(watchedAt(g, true, true));
   int loopTask = 0;
-  // Backing off, so nothing is subscribed yet and the iteration does not feed.
+  // Its subscribe failed, so the iteration does not feed, yet the minute counts.
   TEST_ASSERT_FALSE(markIteration(g, kStableUptimeMs, &loopTask, nullptr));
   TEST_ASSERT_TRUE(watchedAt(g, true, true));
 }
@@ -229,16 +228,30 @@ void test_a_watched_iteration_feeds_and_marks_the_minute() {
 }
 
 void test_each_phase_holds_its_timeout() {
-  TEST_ASSERT_EQUAL_UINT32(kSetupTimeoutMs, timeoutMs(Phase::Setup, false));
-  TEST_ASSERT_EQUAL_UINT32(kLoopTimeoutMs, timeoutMs(Phase::Loop, false));
-  TEST_ASSERT_EQUAL_UINT32(kWideTimeoutMs, timeoutMs(Phase::Loop, true));
+  TEST_ASSERT_EQUAL_UINT32(kSetupTimeoutMs, timeoutMs(Phase::Setup, false, false));
+  TEST_ASSERT_EQUAL_UINT32(kLoopTimeoutMs, timeoutMs(Phase::Loop, false, false));
+  TEST_ASSERT_EQUAL_UINT32(kWideTimeoutMs, timeoutMs(Phase::Loop, true, false));
   TEST_ASSERT_TRUE(kSetupTimeoutMs > kLoopTimeoutMs);
+}
+
+void test_a_backoff_boot_holds_the_backoff_timeout_throughout() {
+  for (const Phase p : {Phase::Setup, Phase::Loop}) {
+    for (const bool wide : {false, true}) {
+      TEST_ASSERT_EQUAL_UINT32(kBackoffTimeoutMs, timeoutMs(p, wide, true));
+    }
+  }
+  // Long enough to outlast an early stall and the minute that re-arms, and
+  // still finite.
+  TEST_ASSERT_TRUE(kBackoffTimeoutMs > kStableUptimeMs);
+  TEST_ASSERT_TRUE(kBackoffTimeoutMs > kWideTimeoutMs);
 }
 
 void test_widening_never_shortens_the_timeout() {
   for (const Phase p : {Phase::Setup, Phase::Loop}) {
-    TEST_ASSERT_TRUE(timeoutMs(p, true) >= timeoutMs(p, false));
-    TEST_ASSERT_TRUE(timeoutMs(p, true) >= kWideTimeoutMs);
+    for (const bool backoff : {false, true}) {
+      TEST_ASSERT_TRUE(timeoutMs(p, true, backoff) >= timeoutMs(p, false, backoff));
+      TEST_ASSERT_TRUE(timeoutMs(p, true, backoff) >= kWideTimeoutMs);
+    }
   }
 }
 
@@ -259,24 +272,16 @@ void test_a_boot_loop_backs_off_and_is_never_left_unwatched() {
   for (int i = 0; i < 10; ++i) {
     TEST_ASSERT_EQUAL(static_cast<int>(Mode::Backoff), static_cast<int>(g.atBoot(true, true)));
   }
-  TEST_ASSERT_TRUE(kBackoffMs > kStableUptimeMs);
 }
 
 void test_backoff_rearms_in_the_boot_at_the_stable_minute() {
   TEST_ASSERT_FALSE(rearmDue(Mode::Backoff, 0));
   TEST_ASSERT_FALSE(rearmDue(Mode::Backoff, kStableUptimeMs - 1));
   TEST_ASSERT_TRUE(rearmDue(Mode::Backoff, kStableUptimeMs));
-  TEST_ASSERT_TRUE(rearmDue(Mode::Backoff, kBackoffMs - 1));
-  // A normal boot is already subscribed.
+  TEST_ASSERT_TRUE(rearmDue(Mode::Backoff, kBackoffTimeoutMs - 1));
+  // A normal boot already holds the normal timeouts.
   TEST_ASSERT_FALSE(rearmDue(Mode::Normal, kStableUptimeMs));
-  TEST_ASSERT_FALSE(rearmDue(Mode::Normal, kBackoffMs));
-}
-
-void test_subscription_is_claimed_once() {
-  Once once;
-  TEST_ASSERT_TRUE(once.claim());
-  TEST_ASSERT_FALSE(once.claim());
-  TEST_ASSERT_FALSE(once.claim());
+  TEST_ASSERT_FALSE(rearmDue(Mode::Normal, kBackoffTimeoutMs));
 }
 
 int main(int, char**) {
@@ -299,10 +304,10 @@ int main(int, char**) {
   RUN_TEST(test_an_unsubscribed_iteration_still_marks_the_minute);
   RUN_TEST(test_a_watched_iteration_feeds_and_marks_the_minute);
   RUN_TEST(test_each_phase_holds_its_timeout);
+  RUN_TEST(test_a_backoff_boot_holds_the_backoff_timeout_throughout);
   RUN_TEST(test_widening_never_shortens_the_timeout);
   RUN_TEST(test_idle_mask_has_one_bit_per_checked_core);
   RUN_TEST(test_a_boot_loop_backs_off_and_is_never_left_unwatched);
   RUN_TEST(test_backoff_rearms_in_the_boot_at_the_stable_minute);
-  RUN_TEST(test_subscription_is_claimed_once);
   return UNITY_END();
 }

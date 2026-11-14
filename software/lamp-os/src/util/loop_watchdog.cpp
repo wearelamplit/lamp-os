@@ -1,11 +1,12 @@
 #include "util/loop_watchdog.hpp"
 
+#include <atomic>
+
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 #include <Arduino.h>
 #include <esp_attr.h>
 #include <esp_system.h>
 #include <esp_task_wdt.h>
-#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <sdkconfig.h>
@@ -77,13 +78,14 @@ struct RtcState {
 
 RTC_NOINIT_ATTR RtcState s_rtc;
 TaskHandle_t s_loopTask = nullptr;
-// Written by whichever of the loop task and the backoff timer subscribes.
+// Written by the loop task, read by any task that feeds.
 std::atomic<TaskHandle_t> s_subscribed{nullptr};
-Once s_subscribeOnce;
 Mode s_mode = Mode::Normal;
 Phase s_phase = Phase::Setup;
 bool s_wide = false;
-esp_timer_handle_t s_backoffTimer = nullptr;
+bool s_subscribeFailed = false;
+uint32_t s_lastSubscribeTryMs = 0;
+constexpr uint32_t kSubscribeRetryMs = 1000;
 
 #ifdef LAMP_DEBUG
 LongestGap s_unfed;
@@ -101,26 +103,23 @@ void report(LongestGap& gap, LogRateLimiter& log, const char* what) {
 
 void apply() {
   esp_task_wdt_config_t config = {
-      .timeout_ms = timeoutMs(s_phase, s_wide),
+      .timeout_ms = timeoutMs(s_phase, s_wide, s_mode == Mode::Backoff),
       .idle_core_mask = idleCoreMask(kCheckIdle0, kCheckIdle1),
       .trigger_panic = true,
   };
   esp_task_wdt_reconfigure(&config);
 }
 
-// True when this call subscribed the loop task.
-bool subscribe() {
-  if (!s_subscribeOnce.claim()) return false;
+// A failed subscribe is retried each second from the loop until it lands.
+void subscribe() {
+  if (s_subscribed.load() != nullptr) return;
   if (esp_task_wdt_add(s_loopTask) != ESP_OK) {
-    Serial.println("[loopwd] subscribe FAILED; loop unwatched");
-    return false;
+    if (!s_subscribeFailed) Serial.println("[loopwd] subscribe FAILED; retrying");
+    s_subscribeFailed = true;
+    return;
   }
   s_subscribed.store(s_loopTask);
-  return true;
-}
-
-void onBackoffEnd(void*) {
-  if (subscribe()) Serial.println("[loopwd] backoff over; loop watched");
+  if (s_subscribeFailed) Serial.println("[loopwd] subscribed");
 }
 
 }  // namespace
@@ -133,26 +132,18 @@ void beginSetup() {
   s_mode = s_rtc.guard.atBoot(stateValid, esp_reset_reason() == ESP_RST_TASK_WDT);
   s_phase = Phase::Setup;
   apply();
-  if (s_mode == Mode::Normal) {
-    subscribe();
-    return;
-  }
-  Serial.printf("[loopwd] %u watchdog resets in a row; loop unwatched for %u s "
-                "or until it runs a minute\n",
-                (unsigned)s_rtc.guard.streak, (unsigned)(kBackoffMs / 1000));
-  esp_timer_create_args_t args = {};
-  args.callback = onBackoffEnd;
-  args.name = "loopwd";
-  if (esp_timer_create(&args, &s_backoffTimer) != ESP_OK ||
-      esp_timer_start_once(s_backoffTimer, uint64_t{kBackoffMs} * 1000u) != ESP_OK) {
-    Serial.println("[loopwd] backoff timer FAILED; loop watched now");
-    subscribe();
+  subscribe();
+  if (s_mode == Mode::Backoff) {
+    Serial.printf("[loopwd] %u watchdog resets in a row; timeout %u s until the loop "
+                  "runs a minute\n",
+                  (unsigned)s_rtc.guard.streak, (unsigned)(kBackoffTimeoutMs / 1000));
   }
 }
 
 void beginLoop() {
   s_phase = Phase::Loop;
   apply();
+  subscribe();
 #ifdef LAMP_DEBUG
   s_unfed.start(millis());
   s_iteration.start(millis());
@@ -183,10 +174,13 @@ void startIteration() {
   const uint32_t nowMs = millis();
   if (rearmDue(s_mode, nowMs)) {
     s_mode = Mode::Normal;
-    if (subscribe()) {
-      esp_timer_stop(s_backoffTimer);
-      Serial.println("[loopwd] loop ran a minute; watched again");
-    }
+    apply();
+    Serial.printf("[loopwd] loop ran a minute; timeout back to %u s\n",
+                  (unsigned)(timeoutMs(s_phase, s_wide, false) / 1000));
+  }
+  if (s_subscribed.load() == nullptr && nowMs - s_lastSubscribeTryMs >= kSubscribeRetryMs) {
+    s_lastSubscribeTryMs = nowMs;
+    subscribe();
   }
   if (!markIteration(s_rtc.guard, nowMs, xTaskGetCurrentTaskHandle(),
                      s_subscribed.load())) {
