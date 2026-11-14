@@ -18,8 +18,8 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   as soon as the read ends, instead of holding the largest one until the
   phone disconnects.
 - **A lamp with a malformed firmware channel no longer blanks the nearby
-  list.** A quote or control character in a peer's channel broke the list's
-  JSON, so the app dropped every lamp in it.
+  list.** A quote or backslash in a peer's channel broke the list's JSON, so
+  the app could not read the list at all.
 - **A lamp low on memory no longer asks for its password.** When a lamp was
   too short of memory to send its settings, the app took the empty answer for
   a wrong password and showed the password prompt, or showed default colours
