@@ -157,13 +157,12 @@ tap, opened before the transfer so the open's reset lands on the old image.
     range: one on N+2, one on N (it needs N+1 too). Repeat row 8 without the
     hang (`--cmd` left out). Any OFFER reaching the peer before its `marked
     valid` line logs `[fw_receiver] OFFER while this image is unverified,
-    declining`, filesystem offers included, and no `ACCEPT` or `upfront erase`
-    follows before that line. The peer logs no `[fwdist] OFFER` to the N lamp
-    before that line either; after it, the peer may offer N+1 to it (the
-    source may get there first). The N+2 lamp may take up to its 10-minute
-    per-peer backoff to offer again. Filesystem offers show up in either
-    direction only when the lamps' web UIs differ, so this row checks a sent
-    firmware offer only.
+    declining`, and no `ACCEPT` or `upfront erase` follows before that line.
+    The peer logs no `[fwdist] OFFER` to the N lamp before that line either;
+    after it, the peer may offer N+1 to it (the source may get there first).
+    The N+2 lamp may take up to its 10-minute per-peer backoff to offer
+    again. Filesystem offers show up in either direction only when the lamps'
+    web UIs differ, so this row checks firmware offers only.
 
 11. **The web app in the window keeps the update.** Repeat row 8 without the
     hang. Right after `[ota] booted in PENDING_VERIFY`, join the peer's Wi-Fi
@@ -232,8 +231,8 @@ tap, opened before the transfer so the open's reset lands on the old image.
   natively tested in `test_ota_mark_valid`; the call it makes is not. The
   same goes for the halt on a malformed `HwConfig` (compiled in, so no bench
   build reaches it) and for the restart after IDF refuses a rollback.
-- A filesystem offer sent while unverified: `test_ota_offer` pins the gate;
-  the rig has no pair of lamps whose web UIs differ.
+- A filesystem offer sent or taken while unverified: `test_ota_offer` pins
+  the send gate, and the rig has no pair of lamps whose web UIs differ.
 - A hang in an updated lamp's setup: `loopwd.hangsetup` restarts the lamp as
   it arms, so the hang lands on the old image. Row 8's loop hang takes the
   same reset path.

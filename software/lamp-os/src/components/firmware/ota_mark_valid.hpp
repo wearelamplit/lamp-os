@@ -28,9 +28,8 @@ class MarkValidCheck {
   // The mark succeeded.
   void validated() { pending_ = false; }
 
-  // While true, the lamp takes no firmware or filesystem offer, since a
-  // firmware image is written raw over the slot a rollback returns to, and
-  // offers neither image to its peers.
+  // While true, the lamp takes no firmware or filesystem offer and offers
+  // neither image to its peers.
   bool pending() const { return pending_; }
 
  private:
