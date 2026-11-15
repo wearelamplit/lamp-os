@@ -10,6 +10,7 @@
 #include <string>
 
 #include "core/animated_behavior.cpp"
+#include "core/boot_history.cpp"
 #include "expressions/expression.cpp"
 #include "expressions/expression_manager.cpp"
 #include "expressions/recent_plays.cpp"
