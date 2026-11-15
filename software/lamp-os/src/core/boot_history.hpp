@@ -116,9 +116,8 @@ void append(History& h, uint32_t fwVersion, esp_reset_reason_t reason);
 // The running boot finished setup.
 void markSetupDone(History& h);
 
-// The running boot's image is unverified, or was just marked valid.
-void markUnverified(History& h);
-void markVerified(History& h);
+// Whether the running boot's image is still unverified.
+void setUnverified(History& h, bool unverified);
 
 // The ended entry `i` ran an image that was rolled back at its end.
 bool rolledBack(const History& h, size_t i);

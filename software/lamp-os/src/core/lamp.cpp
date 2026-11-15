@@ -616,6 +616,10 @@ void lamp::Lamp::setup() {
   // with a visible blink (recoverable only via re-flash).
   if (!validateHwConfig(hw_)) {
     Serial.println("[lamp] FATAL: malformed HwConfig — halting");
+    if (lamp::runningImagePendingVerify()) {
+      Serial.println("[ota] unverified image halted in setup; rolling back");
+      lamp::rollBackToPreviousImage();
+    }
     pinMode(LED_BUILTIN, OUTPUT);
     // A compiled-in HwConfig fails the same way every boot, so the halt feeds
     // the watchdog. A reset loop would only hide the blink.
@@ -889,7 +893,7 @@ void lamp::Lamp::setup() {
 
   {
     const bool pendingVerify = lamp::runningImagePendingVerify();
-    lamp::otaMarkValid.arm(pendingVerify, millis());
+    lamp::otaMarkValid.arm(pendingVerify, millis(), ble_control::isRunning());
     if (pendingVerify) Serial.println("[ota] booted in PENDING_VERIFY, 30s self-health check armed");
   }
   // Wire the cascade fan-out path. The manager only sends after this; before
@@ -1216,10 +1220,7 @@ void lamp::Lamp::tick() {
     }
     case lamp::MarkValidCheck::Step::RollBack:
       Serial.println("[ota] BLE never started; rolling back to the previous image");
-      Serial.flush();
-      Serial.printf("[ota] rollback failed: 0x%X\n",
-                    (unsigned)esp_ota_mark_app_invalid_rollback_and_reboot());
-      break;
+      lamp::rollBackToPreviousImage();
     case lamp::MarkValidCheck::Step::Wait:
       break;
   }

@@ -464,16 +464,16 @@ void test_the_widest_line_comes_out_whole() {
 
 void test_an_unverified_boot_is_marked_and_cleared_on_the_running_entry() {
   History h = historyOf(3);
-  markUnverified(h);
+  setUnverified(h, true);
   TEST_ASSERT_EQUAL_UINT8(kUnverified, h.entries[2].flags & kUnverified);
   TEST_ASSERT_EQUAL_UINT8(0, h.entries[1].flags & kUnverified);
   h.entries[2].flags |= kCounted;
-  markVerified(h);
+  setUnverified(h, false);
   TEST_ASSERT_EQUAL_UINT8(0, h.entries[2].flags & kUnverified);
   TEST_ASSERT_EQUAL_UINT8(kCounted, h.entries[2].flags);
   History empty{};
-  markUnverified(empty);
-  markVerified(empty);
+  setUnverified(empty, true);
+  setUnverified(empty, false);
   TEST_ASSERT_EQUAL_UINT16(0, empty.count);
 }
 
@@ -482,7 +482,7 @@ void test_an_unverified_boot_followed_by_other_firmware_was_rolled_back() {
   h.version = kVersion;
   append(h, fwOf(1, 3, 7), ESP_RST_POWERON);
   append(h, fwOf(1, 3, 8), ESP_RST_SW);
-  markUnverified(h);
+  setUnverified(h, true);
   append(h, fwOf(1, 3, 7), ESP_RST_TASK_WDT);
   append(h, fwOf(1, 3, 7), ESP_RST_POWERON);
   TEST_ASSERT_FALSE(rolledBack(h, 0));
@@ -503,7 +503,7 @@ void test_an_unverified_boot_on_the_same_firmware_was_not_rolled_back() {
   History h{};
   h.version = kVersion;
   append(h, fwOf(1, 3, 8), ESP_RST_SW);
-  markUnverified(h);
+  setUnverified(h, true);
   append(h, fwOf(1, 3, 8), ESP_RST_TASK_WDT);
   TEST_ASSERT_FALSE(rolledBack(h, 0));
   h.entries[1].fw[0] = 2;
@@ -513,12 +513,22 @@ void test_an_unverified_boot_on_the_same_firmware_was_not_rolled_back() {
   TEST_ASSERT_TRUE(rolledBack(h, 0));
 }
 
+void test_the_running_entry_is_never_judged_rolled_back() {
+  History h{};
+  h.version = kVersion;
+  append(h, fwOf(1, 3, 7), ESP_RST_POWERON);
+  append(h, fwOf(1, 3, 8), ESP_RST_SW);
+  setUnverified(h, true);
+  TEST_ASSERT_FALSE(rolledBack(h, 1));
+  TEST_ASSERT_FALSE(rolledBack(h, 2));
+}
+
 void test_a_verified_boot_followed_by_other_firmware_was_an_update() {
   History h{};
   h.version = kVersion;
   append(h, fwOf(1, 3, 7), ESP_RST_POWERON);
-  markUnverified(h);
-  markVerified(h);
+  setUnverified(h, true);
+  setUnverified(h, false);
   append(h, fwOf(1, 3, 8), ESP_RST_SW);
   TEST_ASSERT_FALSE(rolledBack(h, 0));
   char line[kLineCap];
@@ -631,6 +641,7 @@ int main(int, char**) {
   RUN_TEST(test_an_unverified_boot_is_marked_and_cleared_on_the_running_entry);
   RUN_TEST(test_an_unverified_boot_followed_by_other_firmware_was_rolled_back);
   RUN_TEST(test_an_unverified_boot_on_the_same_firmware_was_not_rolled_back);
+  RUN_TEST(test_the_running_entry_is_never_judged_rolled_back);
   RUN_TEST(test_a_verified_boot_followed_by_other_firmware_was_an_update);
   RUN_TEST(test_stage_names_round_trip);
   RUN_TEST(test_counters_saturate);

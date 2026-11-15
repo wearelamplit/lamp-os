@@ -145,14 +145,10 @@ void markSetupDone(History& h) {
   h.entries[h.count - 1].stage = static_cast<uint8_t>(Stage::Loop);
 }
 
-void markUnverified(History& h) {
+void setUnverified(History& h, bool unverified) {
   if (h.count == 0) return;
-  h.entries[h.count - 1].flags |= kUnverified;
-}
-
-void markVerified(History& h) {
-  if (h.count == 0) return;
-  h.entries[h.count - 1].flags &= static_cast<uint8_t>(~kUnverified);
+  uint8_t& flags = h.entries[h.count - 1].flags;
+  flags = unverified ? flags | kUnverified : flags & static_cast<uint8_t>(~kUnverified);
 }
 
 bool rolledBack(const History& h, size_t i) {
@@ -293,7 +289,7 @@ void boot(uint32_t fwVersion, bool unverified) {
   s_live.magic = kLiveMagic;
   s_live.live = freshLive(fwVersion, esp_reset_reason());
   append(s_history, fwVersion, esp_reset_reason());
-  if (unverified) markUnverified(s_history);
+  setUnverified(s_history, unverified);
   s_live.live.stored = save() ? 1 : 0;
 
   char line[kLineCap];
@@ -311,7 +307,7 @@ void reach(Stage stage) {
 }
 
 void imageVerified() {
-  markVerified(s_history);
+  setUnverified(s_history, false);
   if (save()) s_live.live.stored = 1;
 }
 
