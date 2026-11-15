@@ -746,12 +746,21 @@ Without `extern "C"` the override is an unrelated C++ symbol and rollback
 silently stays off; the symbol in the built ELF is the check.
 
 The 30 s window: the check arms at the end of setup, and 30 s later, once BLE
-is running, marks the image valid (`[ota] new partition marked valid`). A
-failed mark is asked again every 5 s. Without BLE it asks again every 5 s, and
-an image whose BLE is still down 120 s after the window is rolled back on
-purpose (`[ota] BLE never started; rolling back`), since the app could never
-reach it. A hang in that time resets through the watchdog (within 30 s in
-setup, 5 s in the loop) and the bootloader rolls back. The watchdog's
+has run at some point this boot, marks the image valid (`[ota] new partition
+marked valid`). A phone joining the lamp's Wi-Fi takes BLE down for the web
+app; BLE had run, so the image is still marked valid, though a phone that
+leaves inside the window reboots the lamp (to bring BLE back) and that reboot
+rolls back like any other. A failed mark is asked again every 5 s. Without BLE
+it asks again every 5 s, and an image whose BLE has not run 120 s after the
+window is rolled back on purpose (`[ota] BLE never started; rolling back`),
+since the app could never reach it. An unverified image whose setup halts on
+a malformed `HwConfig` rolls back the same way (`[ota] unverified image halted
+in setup; rolling back`). Both go through `rollBackToPreviousImage`, which
+restarts even when IDF refuses the rollback (on a lamp whose otadata was
+erased the previous slot reads as invalid, so IDF reports no app to return
+to); the bootloader then sets the unverified image aside and boots `ota_0`. A
+hang in that time resets through the watchdog (within 30 s in setup, 5 s in
+the loop) and the bootloader rolls back. The watchdog's
 boot-loop backoff cannot hold an unverified image: the first boot of an
 update follows the receiver's restart, which ends any streak, and the first
 reset of an unverified image is already the rollback. So does every other
@@ -773,9 +782,10 @@ the one place both firmware and filesystem offers start, holds its scan while
 
 A lamp whose bootloader predates rollback never boots an image as
 `PENDING_VERIFY` (it stays `NEW`), so the check never arms and it keeps every
-update as before. The bootloader built from this repo has rollback
-(`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` in `sdkconfig.defaults`); OTA never
-replaces a bootloader.
+update as before. The bootloader built from this repo has rollback:
+`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` is on in the Arduino core's prebuilt
+sdkconfig, which `custom_sdkconfig` in `platformio.ini` does not override. OTA
+never replaces a bootloader.
 
 The boot history marks the rolled-back boot (see below): `end <reset>
 rolledback` on the boot that ran the update, the next line on the previous

@@ -161,7 +161,15 @@ tap, opened before the transfer so the open's reset lands on the old image.
     follows before that line. The peer logs no `[fwdist] OFFER` to the N lamp
     before that line either; after it, the peer may offer N+1 to it (the
     source may get there first). The N+2 lamp may take up to its 10-minute
-    per-peer backoff to offer again.
+    per-peer backoff to offer again. Filesystem offers show up in either
+    direction only when the lamps' web UIs differ, so this row checks a sent
+    firmware offer only.
+
+11. **The web app in the window keeps the update.** Repeat row 8 without the
+    hang. Right after `[ota] booted in PENDING_VERIFY`, join the peer's Wi-Fi
+    from a phone, open the config page, and stay on it. Expect `[ble_control]
+    GATT control service stopped`, then `[ota] new partition marked valid`
+    about 30 s after the PENDING_VERIFY line, and no `BLE never started`.
 
 ## Indicator expectations
 
@@ -194,9 +202,10 @@ tap, opened before the transfer so the open's reset lands on the old image.
   bar/dim/pulse (silent by design) — a calm base settle is the pass, judged by
   `[fs_ota]`/chunk lines.
 - Peer's name/config identical across the OTA reboot.
-- Rollback (rows 8-10): a hang before `marked valid` boots version N with
+- Rollback (rows 8-11): a hang before `marked valid` boots version N with
   `rolledback` on the N+1 line, a reset after it keeps N+1 with no
-  `rolledback`, and no offer is accepted or sent before `marked valid`.
+  `rolledback`, no offer is accepted or firmware offer sent before `marked
+  valid`, and a phone on the web app in the window does not stop the mark.
 - Dev source: the `disabled (dev channel)` line, zero OFFERs.
 - Gated pair (step 6): zero OFFERs from the source; any receiver-side decline
   is logged, never a silent flash.
@@ -220,7 +229,11 @@ tap, opened before the transfer so the open's reset lands on the old image.
   gets incidental coverage only.
 - The rollback of an updated lamp whose BLE never starts (`[ota] BLE never
   started; rolling back`): the bench cannot stop BLE starting. The decision is
-  natively tested in `test_ota_mark_valid`; the call it makes is not.
+  natively tested in `test_ota_mark_valid`; the call it makes is not. The
+  same goes for the halt on a malformed `HwConfig` (compiled in, so no bench
+  build reaches it) and for the restart after IDF refuses a rollback.
+- A filesystem offer sent while unverified: `test_ota_offer` pins the gate;
+  the rig has no pair of lamps whose web UIs differ.
 - A hang in an updated lamp's setup: `loopwd.hangsetup` restarts the lamp as
   it arms, so the hang lands on the old image. Row 8's loop hang takes the
   same reset path.

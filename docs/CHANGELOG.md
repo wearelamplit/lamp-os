@@ -20,9 +20,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   Lamps were meant to undo a bad update but never did: every update was kept
   whatever it did. Now an updated lamp that hangs, crashes or restarts in its
   first ~30 s comes back on the firmware it had, and takes the update again
-  later. It also takes no other update, and no web-page update, until those
-  30 s have passed with Bluetooth up, and passes the update on to other lamps
-  only once it has proven it runs. A power cut in that window rolls back
+  later. It also takes no other update, and no web-page update, until it has
+  run those 30 s and its Bluetooth has started, and passes the update on to
+  other lamps only once it has proven it runs. A phone on the lamp's web page
+  in that window does not count against it. A power cut in that window rolls back
   too. The boot history marks a boot that was rolled back with `rolledback`.
 - **A lamp that hangs while starting up restarts itself.** A lamp could go
   dark during startup, after an update or not, and stay dark until it was
