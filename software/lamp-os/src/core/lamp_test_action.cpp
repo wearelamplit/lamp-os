@@ -38,6 +38,7 @@
 #include "core/compositor.hpp"
 #include "core/moments.hpp"
 #include "core/frame_buffer.hpp"
+#include "core/setup_stage.hpp"
 #include "core/override_aggregate.hpp"
 #include "core/personality_engine.hpp"
 #include "expressions/expression_invocation.hpp"
@@ -395,6 +396,29 @@ void runSerialCommand(char* line, size_t len) {
     volatile bool spin = true;
     while (spin) {
     }
+  }
+
+  // Arms a hang at a setup stage for the next boots, then restarts, so the
+  // setup watchdog and the boot-loop backoff can be seen on the rig.
+  if (strncmp(line, "loopwd.hangsetup ", 17) == 0) {
+    const char* arg = line + 17;
+    const char* space = std::strchr(arg, ' ');
+    const size_t nameLen = space ? static_cast<size_t>(space - arg) : std::strlen(arg);
+    char stageName[16] = {};
+    if (nameLen < sizeof(stageName)) std::memcpy(stageName, arg, nameLen);
+    char* end = nullptr;
+    const unsigned long boots = space ? std::strtoul(space + 1, &end, 10) : 1;
+    const lamp::boot_history::Stage stage = lamp::boot_history::stageFromName(stageName);
+    if (stage == lamp::boot_history::Stage::Unknown || stage == lamp::boot_history::Stage::Boot ||
+        (space && *end != '\0') || boots == 0 || boots > 255) {
+      Serial.println("[cmd] err loopwd.hangsetup <variant|config|wifi|ble|webapp|leds|"
+                     "behaviors|mesh|ota|loop> [boots 1..255]");
+      return;
+    }
+    lamp::setup_stage::armBenchHang(stage, static_cast<uint8_t>(boots));
+    Serial.printf("[cmd] ok loopwd.hangsetup %s %lu\n", lamp::boot_history::stageName(stage), boots);
+    Serial.flush();
+    esp_restart();
   }
 
   if (strcmp(line, "yawn") == 0 || strncmp(line, "yawn ", 5) == 0) {

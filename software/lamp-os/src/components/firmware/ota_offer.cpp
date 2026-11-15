@@ -5,6 +5,7 @@
 #include "components/firmware/firmware_distributor.hpp"
 #include "components/firmware/firmware_receiver.hpp"
 #include "components/firmware/fs_ota.hpp"
+#include "components/firmware/ota_mark_valid.hpp"
 #include "components/firmware/ota_quiet_mode.hpp"
 #include "version.hpp"
 
@@ -26,7 +27,8 @@ void tickOtaOffers(uint32_t nowMs, bool startupComplete) {
   const OtaOfferBusy busy =
       offerBusy(startupComplete, firmwareDistributor.isInProgress(),
                 ::firmwareReceiver.isInProgress(), fs_ota::fsPathBusy(),
-                ota_quiet_mode::holders(), firmwareDistributor.holdingIdleQuiet());
+                ota_quiet_mode::holders(), firmwareDistributor.holdingIdleQuiet(),
+                otaMarkValid.pending());
   if (!s_throttle.due(busy, nowMs)) return;
 
   const std::vector<MeshPeer>& peers = lampRoster.getMesh(LAMP_PRUNE_TIME_MS);

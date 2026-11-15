@@ -78,27 +78,39 @@ void test_startup_phase_holds_offers() {
 }
 
 void test_offer_busy_holds_until_startup_completes() {
-  TEST_ASSERT_TRUE(offerBusy(/*startupComplete=*/false, false, false, false, 0, false).any());
-  TEST_ASSERT_FALSE(offerBusy(/*startupComplete=*/true, false, false, false, 0, false).any());
+  TEST_ASSERT_TRUE(offerBusy(/*startupComplete=*/false, false, false, false, 0, false, false).any());
+  TEST_ASSERT_FALSE(offerBusy(/*startupComplete=*/true, false, false, false, 0, false, false).any());
 }
 
 void test_offer_busy_maps_each_source() {
-  TEST_ASSERT_TRUE(offerBusy(true, true, false, false, 0, false).firmwareSending);
-  TEST_ASSERT_TRUE(offerBusy(true, false, true, false, 0, false).firmwareReceiving);
-  TEST_ASSERT_TRUE(offerBusy(true, false, false, true, 0, false).fsBusy);
-  TEST_ASSERT_TRUE(offerBusy(true, false, false, false, 1, false).quiet);
+  TEST_ASSERT_TRUE(offerBusy(true, true, false, false, 0, false, false).firmwareSending);
+  TEST_ASSERT_TRUE(offerBusy(true, false, true, false, 0, false, false).firmwareReceiving);
+  TEST_ASSERT_TRUE(offerBusy(true, false, false, true, 0, false, false).fsBusy);
+  TEST_ASSERT_TRUE(offerBusy(true, false, false, false, 1, false, false).quiet);
+}
+
+void test_an_unverified_image_holds_every_offer_until_it_is_marked_valid() {
+  TEST_ASSERT_TRUE(offerBusy(true, false, false, false, 0, false, /*imageUnverified=*/true).any());
+  TEST_ASSERT_TRUE(offerBusy(true, false, false, false, 0, false, true).unverified);
+  TEST_ASSERT_TRUE(offerBusy(true, false, false, false, 1, /*quietIsOwnIdleHold=*/true, true).any());
+  OtaOfferThrottle t;
+  OtaOfferBusy unverified = offerBusy(true, false, false, false, 0, false, true);
+  for (uint32_t at = 5000; at < 5000 + 200000; at += 250) {
+    TEST_ASSERT_FALSE(t.due(unverified, at));
+  }
+  TEST_ASSERT_TRUE(t.due(offerBusy(true, false, false, false, 0, false, false), 205001));
 }
 
 void test_distributor_idle_hold_lets_the_scan_run() {
   TEST_ASSERT_FALSE(offerBusy(true, false, false, false, /*quietHolders=*/1,
-                              /*quietIsOwnIdleHold=*/true).any());
+                              /*quietIsOwnIdleHold=*/true, false).any());
 }
 
 void test_other_quiet_still_blocks_during_the_hold() {
   TEST_ASSERT_TRUE(offerBusy(true, false, false, false, /*quietHolders=*/2,
-                             /*quietIsOwnIdleHold=*/true).quiet);
+                             /*quietIsOwnIdleHold=*/true, false).quiet);
   TEST_ASSERT_TRUE(offerBusy(true, false, false, false, /*quietHolders=*/1,
-                             /*quietIsOwnIdleHold=*/false).quiet);
+                             /*quietIsOwnIdleHold=*/false, false).quiet);
 }
 
 void test_busy_tick_does_not_spend_the_interval() {
@@ -111,9 +123,9 @@ void test_busy_tick_does_not_spend_the_interval() {
 }
 
 void test_fs_walk_skipped_during_firmware_hold() {
-  TEST_ASSERT_FALSE(offerBusy(true, false, false, false, 1, /*quietIsOwnIdleHold=*/true)
+  TEST_ASSERT_FALSE(offerBusy(true, false, false, false, 1, /*quietIsOwnIdleHold=*/true, false)
                         .fsWalkAllowed());
-  TEST_ASSERT_TRUE(offerBusy(true, false, false, false, 0, false).fsWalkAllowed());
+  TEST_ASSERT_TRUE(offerBusy(true, false, false, false, 0, false, false).fsWalkAllowed());
 }
 
 void test_hold_is_inheritable_only_after_a_done_session() {
@@ -186,7 +198,7 @@ struct WaveSim {
       lastSessionEndAtQuietEndMs = lastSessionEndMs;
     }
     const OtaOfferBusy busy =
-        offerBusy(true, offerSent, false, false, quietHolders, hold.inheritable());
+        offerBusy(true, offerSent, false, false, quietHolders, hold.inheritable(), false);
     if (throttle.due(busy, nowMs)) {
       offerSent = true;
       offerAtMs = nowMs;
@@ -253,6 +265,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_startup_phase_holds_offers);
   RUN_TEST(test_offer_busy_holds_until_startup_completes);
   RUN_TEST(test_offer_busy_maps_each_source);
+  RUN_TEST(test_an_unverified_image_holds_every_offer_until_it_is_marked_valid);
   RUN_TEST(test_distributor_idle_hold_lets_the_scan_run);
   RUN_TEST(test_other_quiet_still_blocks_during_the_hold);
   RUN_TEST(test_busy_tick_does_not_spend_the_interval);

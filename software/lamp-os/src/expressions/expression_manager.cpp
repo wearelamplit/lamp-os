@@ -14,6 +14,7 @@
 #include "components/network/mesh/lamp_roster.hpp"
 #include "components/network/mesh/mesh_link.hpp"
 #include "core/behavior_context.hpp"
+#include "core/boot_history.hpp"
 #include "core/compositor.hpp"
 
 namespace lamp {
@@ -447,8 +448,11 @@ bool ExpressionManager::triggerInvocation(const ExpressionInvocation& inv,
   const uint32_t nowMs = millis();
   // A crowd of distinct senders would otherwise stack one transient pair per
   // sender, each a heap Expression plus its buffers.
-  const bool admitted = admitTransientAmong(transientExpressions_, targetCount, source,
-                                            heapCanSpare(kTransientHeapBytes * targetCount));
+  const bool heapOk = heapCanSpare(kTransientHeapBytes * targetCount);
+  const bool admitted = admitTransientAmong(transientExpressions_, targetCount, source, heapOk);
+  if (!admitted && !heapOk && source == TransientSource::Local) {
+    boot_history::noteLocalHeapRefusal();
+  }
   if (!admitted) {
     static uint64_t s_lastDropLogMs = 0;
     const uint64_t now = uptimeMs();

@@ -242,14 +242,14 @@ the same model's JSON, so every BLE section and the web document are
 byte-identical to what a JSON store gives (`test_config_settings_codec`,
 over 500 seeded models among others).
 
-Outside it, 171 entries (`systemKeys` in `test_config_records`):
+Outside it, 173 entries (`systemKeys` in `test_config_records`):
 
 - 5 namespace entries: `lamp`, `crash`, `phy`, `nvs.net80211`, `nimble_bond`.
 - PHY calibration: a 1904-byte blob (62), a 6-byte blob (3), a u32 (1): 66.
 - The WiFi driver's namespace: empty. The lamp keeps WiFi config in RAM and
   erases that namespace at boot.
 - The `crash` namespace: the crash record (`last`, an 80-byte blob, 5) and the
-  boot history (`boots`, a 64-byte blob, 4): 9.
+  boot history (`boots`, a 104-byte blob, 6): 11.
 - NimBLE's bond store (`ble_store_nvs.c`, `nimble_bond`; bonding and
   host-based privacy are on, so legacy bonds may be present): with
   `MAX_BONDS` 3, `MAX_CCCDS` 8 and `MAX_CSFCS` 1 (the connection count),
@@ -262,24 +262,24 @@ Outside it, 171 entries (`systemKeys` in `test_config_records`):
 The arithmetic, every case with at least 29 entries to spare
 (`test_config_records`, `kMargin`):
 
-- **Entries.** Live at the caps: 171 + 2 + 40 + 126 + 2 + 32 = 373.
+- **Entries.** Live at the caps: 173 + 2 + 40 + 126 + 2 + 32 = 375.
   Rewriting the largest blob, PHY calibration (62) or the settings blob (32),
-  peaks at 435 of 504: 69 spare.
+  peaks at 437 of 504: 67 spare.
 - **Strings.** The only strings are `xn` and `lampType` (2 entries each):
-  rewritten beside every key, 375 live against a bound of 4 x 124 + 3 = 499.
+  rewritten beside every key, 377 live against a bound of 4 x 124 + 3 = 499.
 - **Small blobs.** The largest is a dispositions blob just under 400 bytes
-  (33 peers), 14 entries, at 373 live: bound 451, 78 spare. A record (6) is smaller.
+  (33 peers), 14 entries, at 375 live: bound 451, 76 spare. A record (6) is smaller.
 - **The migration.** The first save over a 1.3.3 split store at its worst
   writes the settings blob beside every legacy key (records shared, `ko` 10,
-  the rest blob 59, the lamp-only `cfg` 13 and a staged `cfgl` 14): 437 live,
-  peak 469, 35 spare, once. Over a 1.3.3 whole store (at most 1759 bytes, 56
-  entries) it peaks at 429.
+  the rest blob 59, the lamp-only `cfg` 13 and a staged `cfgl` 14): 439 live,
+  peak 471, 33 spare, once. Over a 1.3.3 whole store (at most 1759 bytes, 56
+  entries) it peaks at 431.
 - **The first save after an update from an older release.** An older
   release's `cfg` string can hold 4,000 bytes (127 entries), beside its
   dispositions JSON (about 2.2 KB, 71 entries, migrated to the 40-entry blob
   at the first load). The first save keeps that string until the new keys
   land, but those keys copy only what the string held. Over every such shape
-  up to 4,000 bytes the page model leaves 95 entries spare at the tightest
+  up to 4,000 bytes the page model leaves 93 entries spare at the tightest
   (`test_the_first_save_after_an_update_fits`).
 
 Those bounds hold for any arrangement of entries across the pages. The
@@ -290,7 +290,7 @@ its worst, every store shape (empty, the largest 1.3.3 whole config, every
 escaped worst case, the standard variant's 18 full expressions) is saved in
 seeded order with system keys and dispositions rewritten between saves and
 29 padding entries beside them; every write must land and every save load
-back as saved, and the same churn still holds with 47 padding entries. The
+back as saved, and the same churn still holds with 45 padding entries. The
 budget sizes `disp` at `DispositionStore::kMaxBlobLen`, so a longer
 dispositions blob flows into every figure.
 
@@ -719,23 +719,116 @@ Feed `pc` and `bt` to `xtensa-esp32-elf-addr2line -e firmware.elf` for the build
 matching `fw` (packed `major<<16 | minor<<8 | patch`).
 
 A stalled loop task records as `reset` 6 with `core` 1. The loop task is on the
-ESP-IDF task watchdog from the end of `setup()` (`util/loop_watchdog.hpp`): it
-feeds before every loop iteration, and between the steps of its longest blocking
-work (each 64 KB block of the OTA upfront erase, the post-stream verify, the BLE
-teardown for the web config). The timeout is the task watchdog's 5 s, widened to
-30 s while a firmware or filesystem image is being received. The watchdog
-interrupts whatever is running on core 1: for a loop that spins, `pc` and `bt`
-point at the stall; for a loop blocked on a lock they point at the task that
-ran instead (often the idle task), and only the serial log names `loopTask`.
+ESP-IDF task watchdog from the start of `setup()`, right after `Serial.begin`
+(`util/loop_watchdog.hpp`, the one owner of the watchdog's configuration). In
+setup the timeout is 30 s per stage: each stage the boot history records
+(`core/setup_stage.hpp`) feeds it, so a hang anywhere in setup resets the lamp
+within 30 s of the last stage instead of leaving it dark. From the end of setup
+it feeds before every loop iteration and between the steps of its longest
+blocking work (each 64 KB block of the OTA upfront erase, the post-stream
+verify, the BLE teardown for the web config), at the task watchdog's 5 s,
+widened to 30 s while a firmware or filesystem image is being received. The
+timeout is global, so in setup the core 0 idle task is checked at 30 s too. The
+watchdog interrupts whatever is running on core 1: for a loop that spins, `pc`
+and `bt` point at the stall; for a loop blocked on a lock they point at the
+task that ran instead (often the idle task), and only the serial log names
+`loopTask`. A malformed compiled-in `HwConfig` halts with a blink and feeds the
+watchdog inside the halt, since a reset could only fail the same way again.
+
+The task watchdog was chosen over a setup-only watchdog and the RTC watchdog.
+It is the watchdog the loop already used, its panic goes through the crash
+record's handler (reset 6, `core`, `pc`, `bt`), and the boot-loop streak
+already counts it. The interrupt watchdog (1 s, both cores) covers a core with
+interrupts off, which the task watchdog cannot see. The RTC watchdog would add
+a bare `wdt` reset with no backtrace, timed on the inaccurate RC slow clock,
+and would catch nothing the two miss once the app has started; the
+bootloader's RTC watchdog is off before `setup()` (no
+`CONFIG_BOOTLOADER_WDT_DISABLE_IN_USER_CODE`), so the ESP-IDF and Arduino
+start-up before `setup()` is not watched.
+
 After 3 task-watchdog resets in a row, each from a boot whose loop never
-started an iteration 60 s into uptime, the next boot leaves the loop unwatched
-and prints `[loopwd] 3 watchdog resets in a row` on every build, so a loop that
-stalls on every boot freezes and stops resetting. The streak lives in RTC
-memory, and any other reset (a power cycle, an update, a web save's reboot)
-starts the watch again. A stall within 30 s of a firmware update's first boot
-makes the bootloader roll back, and the record's `fw` is then the version that
-booted after it. `setup()` runs unwatched: a hang there leaves the lamp dark
-with no record until a power cycle.
+started an iteration 60 s into uptime, the next boot backs off: it prints
+`[loopwd] 3 watchdog resets in a row; timeout 300 s until the loop runs a
+minute` on every build and holds the task watchdog at 300 s, through setup and
+the loop, until the loop's first iteration at 60 s of uptime puts the normal
+timeouts back (`[loopwd] loop ran a minute; timeout back to 5 s`). So a boot
+that hangs every time resets every 5 minutes or so and is never left dark
+until a power cycle, and a boot that only stalls early, for longer than 5 s
+but less than 300 s, gets through and is watched normally again in the same
+boot. The timeout is global, so until then a stall of the core 0 idle task is
+caught at 300 s too. A subscribe that fails (`[loopwd] subscribe FAILED;
+retrying`) is retried at most once a second from every loop-task feed, setup
+stages included. The streak lives in RTC
+memory; any other reset (a power cycle, an update, a web save's reboot) and any
+reset of a boot that reached 60 s start it again. A loop that stalls for more than
+5 s again and again, through the whole boot, cycles: three quick resets, then a
+backoff boot that gets the normal timeouts back at 60 s and resets at its next stall, which
+ends the streak. Each boot writes about 17 NVS entries (the boot history twice,
+the crash record once). An estimate of the worst case, a stall every few
+seconds from about 10 s into each boot: four boots about every 2 minutes, some
+2,900 boots and 49,000 entries a day, so each of the five NVS pages is erased
+about 80 times a day and the flash's 100,000 erase cycles last over three years
+of it nonstop.
+
+## Rollback after an update
+
+Rollback is on. An image the bootloader boots for the first time after an
+update (`ESP_OTA_IMG_PENDING_VERIFY`) stays unverified until the lamp marks it
+valid, and any reset before that boots the previous image instead. Arduino's
+`initArduino()` would mark it valid before `setup()` runs; the lamp overrides
+the core's weak C hook with `extern "C" bool verifyRollbackLater() { return
+true; }` in `components/firmware/ota_mark_valid.cpp`, so its own check
+(`MarkValidCheck` in `components/firmware/ota_mark_valid.hpp`) decides.
+Without `extern "C"` the override is an unrelated C++ symbol and rollback
+silently stays off; the symbol in the built ELF is the check.
+
+The 30 s window: the check arms at the end of setup, and 30 s later, once BLE
+has run at some point this boot, marks the image valid (`[ota] new partition
+marked valid`). A phone joining the lamp's Wi-Fi takes BLE down for the web
+app; BLE had run, so the image is still marked valid, though a phone that
+leaves inside the window reboots the lamp (to bring BLE back) and that reboot
+rolls back like any other. A failed mark is asked again every 5 s. Without BLE
+it asks again every 5 s, and an image whose BLE has not run 120 s after the
+window is rolled back on purpose (`[ota] BLE never started; rolling back`),
+since the app could never reach it. An unverified image whose setup halts on
+a malformed `HwConfig` rolls back the same way (`[ota] unverified image halted
+in setup; rolling back`). Both go through `rollBackToPreviousImage`, which
+restarts even when IDF refuses the rollback (on a lamp whose otadata was
+erased the previous slot reads as invalid, so IDF reports no app to return
+to); the bootloader then sets the unverified image aside and boots `ota_0`. A
+hang in that time resets through the watchdog (within 30 s in setup, 5 s in
+the loop) and the bootloader rolls back. The watchdog's
+boot-loop backoff cannot hold an unverified image: the first boot of an
+update follows the receiver's restart, which ends any streak, and the first
+reset of an unverified image is already the rollback. So does every other
+reset in that window: a brownout, a power cycle, a USB plug-in, or a restart
+the lamp asks for itself (a settings save that reboots). In each case the
+lamp comes back on its previous firmware, and the mesh offers the update
+again later.
+
+Until the mark, the receiver declines every OFFER, firmware and filesystem,
+mesh and BLE (`DeclineBusy`; a mesh sender backs off that lamp for 10
+minutes, and the app reports "Another update is already in progress on this
+lamp."). A firmware image is written raw
+into the other OTA slot, which holds the image a rollback returns to. A
+filesystem image waits too, so the web UI is never replaced for a firmware
+that may not stay. The lamp offers neither image to its peers until the mark
+either, so an update spreads only from lamps it has run on: `tickOtaOffers`,
+the one place both firmware and filesystem offers start, holds its scan while
+`offerBusy` (`components/firmware/ota_offer.hpp`) reads the image unverified.
+
+A lamp whose bootloader predates rollback never boots an image as
+`PENDING_VERIFY` (it stays `NEW`), so the check never arms and it keeps every
+update as before. The bootloader built from this repo has rollback:
+`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` is on in the Arduino core's prebuilt
+sdkconfig, which `custom_sdkconfig` in `platformio.ini` does not override. OTA
+never replaces a bootloader.
+
+The boot history marks the rolled-back boot (see below): `end <reset>
+rolledback` on the boot that ran the update, the next line on the previous
+firmware. The marker needs the rolled-back-to firmware to read this history
+layout, so a rollback to a firmware older than the one that added it shows
+only the history starting over.
 
 ## Reading the boot history
 
@@ -746,9 +839,9 @@ lamp:tap` resets it through the auto-reset circuit, so the history prints at
 once. One line per boot, oldest first, `-1` the boot before this one:
 
 ```
-[boots] -3 fw1.3.2 up 5h12m free 21480 big 1300 end panic
-[boots] -2 fw1.3.2 up >1h00m free 30112 big 18200 end power
-[boots] -1 fw1.3.2 up 42s free 40960 big 38000 end taskwdt
+[boots] -3 fw1.3.7 up 5h12m free 21480 big 1300 end panic refused 4 conn 2 connbig 1300
+[boots] -2 fw1.3.7 up >1h00m free 30112 big 18200 end power refused 0 conn 1 connbig 18200
+[boots] -1 fw1.3.7 up >0s free - big - end taskwdt setup mesh refused 0 conn 0 connbig -
 ```
 
 `up` is the uptime the boot reached, `free` its lowest free heap and `big` its
@@ -759,17 +852,53 @@ clean `esp_restart`: OTA, web reboot), `panic`, `intwdt`, `taskwdt`, `wdt`,
 `lamp:tap` cause reports as a power-on on the ESP32, so the boot they
 interrupt reads `end power`.
 
-The figures come from the crash record's RTC snapshot, sampled each second
-from the first loop iteration on: when it survives the reset they are those
-of the last sample, and after a panic or watchdog abort in a boot its loop
-had sampled, `up` is the uptime at the fault. When it does not (a power cut,
-often a brownout), the boot keeps the figures from the last milestone it
-reached, 1 min, 1 h or 1 day, and `up` reads `>` that milestone.
-`free - big -` means the boot died before any figure was taken: in `setup()`,
-in its first loop iteration, or in its first minute after a power cut. Past
-49.7 days the snapshot's uptime saturates and reads `>49d17h`. A boot writes
-the history once at start and once per milestone, so at most four NVS writes
-per boot.
+`setup <stage>` appears only on a boot that never finished setup, and names
+the last setup step it finished, in order: `boot` (the history opened),
+`variant`, `config`, `wifi`, `ble`, `webapp`, `leds` (the strips built and
+blanked), `behaviors`, `mesh`, `ota`, then `loop` (setup done, not printed). So
+`setup mesh` means it hung or crashed bringing up the OTA receiver and
+distributors. A `>` before the stage marks a lower bound: the RTC state did not
+survive the reset, so only what NVS holds is known, `>boot` while setup ran.
+
+`rolledback` after the reset marks a boot that ran an update the lamp never
+marked valid, followed by a boot of other firmware: the bootloader rolled it
+back at that reset (see "Rollback after an update"). The flag is set when the
+boot's entry is first written and cleared when the image is marked valid, so
+it is lost when that first write never lands. A USB reflash of other firmware
+during an update's first 30 s reads the same.
+
+`refused` counts this lamp's own one-shot expressions refused because the heap
+could not spare them (`[expr] transient drop ... (local`): the app's Tests, its
+greetings, a tired yawn, a copycat replay, the serial `yawn` command. A refusal
+for full slots does not count. `conn` counts the BLE client connects, and `connbig`
+the smallest largest free block sampled each second while a client was
+connected (`-` when none was). They saturate at 65535 and read `-` when they
+were never taken. Boots an older firmware recorded print without the stage and
+counters.
+
+The figures come from RTC memory (the crash record's snapshot, sampled each
+second from the first loop iteration on, and the history's own stage and
+counters): when it survives the reset they are those of the last sample, and
+after a panic or watchdog abort in a boot its loop had sampled, `up` is the
+uptime at the fault. When it does not (a power cut, often a brownout), the boot
+keeps the figures from the last milestone it reached, 1 min, 1 h or 1 day, and
+`up` reads `>` that milestone. `free - big -` means the boot died before any
+figure was taken: in `setup()`, in its first loop iteration, or in its first
+minute after a power cut. Past 49.7 days the snapshot's uptime saturates and
+reads `>49d17h`. A boot writes the history at start, at the end of setup, at
+each milestone and, on an update's first boot, when the image is marked
+valid, so at most six NVS writes per boot. When none of a boot's
+writes lands, the next boot rebuilds that boot's entry from the RTC state
+(firmware, the reset that started it, stage, counters) when it survived, so
+the boot before it keeps its own figures and end.
+
+A hang before the history opens (in `Serial.begin` or `initFlash`, the first
+steps of `setup()`) still resets through the watchdog, but leaves no entry of
+its own: the line before it reads `end taskwdt`, and the crash record folds the
+earlier boot's snapshot with that reset. A firmware that predates this layout
+(history version 2) cannot read it and starts its own, so
+reflashing or rolling back to one loses the lines that recorded the boot it
+replaced.
 
 ## Why it recurs
 

@@ -5,31 +5,70 @@
 #include "util/high_water.hpp"
 #include "util/log_rate_limiter.hpp"
 
-// The Arduino loop task under the ESP-IDF task watchdog: a loop task that
-// stops feeding for the watchdog's timeout panics, and the crash record
-// shows it as a task-watchdog reset. See docs/dev/embedded-heap.md "Reading a
+// The Arduino loop task under the ESP-IDF task watchdog, from the start of
+// setup. A loop task that stops feeding for the watchdog's timeout panics, and
+// the crash record shows it as a task-watchdog reset. This is the one owner of
+// the task watchdog's configuration. See docs/dev/embedded-heap.md "Reading a
 // crash record".
 namespace lamp::loop_watchdog {
-
-// Subscribes the calling task. Call once, from the loop task, at the end of
-// setup; setup itself runs unwatched. Skips subscribing after
-// kResetStreakLimit task-watchdog resets in a row, each from a boot whose loop
-// never started an iteration at kStableUptimeMs; any other reset subscribes
-// again.
-void begin();
-
-// Resets the loop task's watchdog. Called between the steps of any loop-task
-// operation that can block for seconds. A no-op on any other task and before
-// begin().
-void feed();
-
-// Marks the start of a loop iteration, then feed(). First thing in loop(),
-// whether or not the loop is watched.
-void startIteration();
 
 constexpr uint8_t kResetStreakLimit = 3;
 // A boot whose loop starts an iteration this far into uptime ends the streak.
 constexpr uint32_t kStableUptimeMs = 60000;
+// Longest one setup stage may run between feeds.
+constexpr uint32_t kSetupTimeoutMs = 30000;
+// The IDF default (CONFIG_ESP_TASK_WDT_TIMEOUT_S), held for every loop iteration.
+constexpr uint32_t kLoopTimeoutMs = 5000;
+// Held while a firmware or filesystem image is received.
+constexpr uint32_t kWideTimeoutMs = 30000;
+// Held through a backoff boot until its loop runs to kStableUptimeMs.
+constexpr uint32_t kBackoffTimeoutMs = 300000;
+constexpr uint32_t kSubscribeRetryMs = 1000;
+
+// Spaces subscribe attempts kSubscribeRetryMs apart, across the millis() wrap.
+class RetryClock {
+ public:
+  bool due(uint32_t nowMs) const { return nowMs - lastTryMs_ >= kSubscribeRetryMs; }
+  void tried(uint32_t nowMs) { lastTryMs_ = nowMs; }
+
+ private:
+  uint32_t lastTryMs_ = 0;
+};
+
+enum class Phase : uint8_t { Setup, Loop };
+
+constexpr uint32_t timeoutMs(Phase phase, bool wide, bool backoff) {
+  const uint32_t base = backoff                ? kBackoffTimeoutMs
+                        : phase == Phase::Setup ? kSetupTimeoutMs
+                                                : kLoopTimeoutMs;
+  return wide && base < kWideTimeoutMs ? kWideTimeoutMs : base;
+}
+
+// The idle tasks the task watchdog checks, as esp_task_wdt_config_t's mask.
+constexpr uint32_t idleCoreMask(bool checkCpu0, bool checkCpu1) {
+  return (checkCpu0 ? 1u : 0u) | (checkCpu1 ? 2u : 0u);
+}
+
+// Call once, from the loop task, right after Serial.begin. Subscribes it at the
+// setup timeout, or at kBackoffTimeoutMs in a backoff boot.
+void beginSetup();
+
+// Call once, from the loop task, at the end of setup. Sets the loop timeout,
+// unless the boot is still backing off.
+void beginLoop();
+
+// Resets the loop task's watchdog. Called between the steps of any loop-task
+// operation that can block for seconds. A no-op on any other task. On the loop
+// task before it is subscribed, retries a failed subscribe at most once each
+// kSubscribeRetryMs.
+void feed();
+
+// Marks the start of a loop iteration, then feed(). First thing in loop().
+void startIteration();
+
+// Holds the timeout at kWideTimeoutMs until restore(). Loop task only.
+void widen();
+void restore();
 
 constexpr bool reachedStable(uint32_t uptimeMs) {
   return uptimeMs >= kStableUptimeMs;
@@ -46,22 +85,32 @@ constexpr uint8_t bootStreak(bool stateValid, uint8_t prevStreak,
                                           : kResetStreakLimit;
 }
 
-constexpr bool watchesBoot(uint8_t streak) {
-  return streak < kResetStreakLimit;
+// Backoff holds kBackoffTimeoutMs until the loop runs to kStableUptimeMs, so a
+// boot that stalls every time resets slowly instead of looping fast.
+enum class Mode : uint8_t { Normal, Backoff };
+
+constexpr Mode modeFor(uint8_t streak) {
+  return streak < kResetStreakLimit ? Mode::Normal : Mode::Backoff;
+}
+
+// True when a backoff boot's loop iteration at `uptimeMs` returns it to the
+// normal timeouts.
+constexpr bool rearmDue(Mode mode, uint32_t uptimeMs) {
+  return mode == Mode::Backoff && reachedStable(uptimeMs);
 }
 
 // The boot-loop guard's state, kept across resets in RTC memory.
 struct BootGuard {
   uint8_t streak;
   uint8_t stableSeen;
-  // Folds in this boot's reset; true when the loop is watched this boot.
-  bool atBoot(bool stateValid, bool taskWdtReset);
+  // Folds in this boot's reset.
+  Mode atBoot(bool stateValid, bool taskWdtReset);
   // Each loop iteration, watched or not.
   void markUptime(uint32_t uptimeMs);
 };
 
-// True when a feed from `current` resets the watchdog: begin() has
-// subscribed a task, and `current` is that task.
+// True when a feed from `current` resets the watchdog. `subscribed` is the
+// loop task once subscribed, else null, and `current` must be it.
 inline bool feedsFrom(const void* current, const void* subscribed) {
   return subscribed != nullptr && current == subscribed;
 }

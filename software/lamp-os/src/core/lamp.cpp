@@ -61,8 +61,11 @@
 #include "core/compositor.hpp"
 #include "core/frame_buffer.hpp"
 #include "core/boot_recovery.hpp"
+#include "components/firmware/ota_mark_valid.hpp"
 #include "core/boot_history.hpp"
 #include "core/crash_record.hpp"
+#include "core/setup_stage.hpp"
+#include "util/loop_watchdog.hpp"
 #include "version.hpp"
 #include "core/power_governor.hpp"
 #include <lampos/blended_identity.hpp>
@@ -271,22 +274,6 @@ lamp::FirmwareReceiver    firmwareReceiver;
 // (extern decl in firmware_distributor.hpp) so the offer scan can reference
 // it as `lamp::firmwareDistributor` from any TU.
 
-// Post-OTA "mark this app valid" state.
-//
-// CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=1 ships in pioarduino's prebuilt
-// sdkconfig. After the first OTA reboot the new partition is in
-// ESP_OTA_IMG_PENDING_VERIFY state; a second esp_ota_begin against it
-// returns ESP_ERR_OTA_ROLLBACK_INVALID_STATE, so every subsequent OTA fails
-// until the new firmware calls esp_ota_mark_app_valid_cancel_rollback().
-//
-// A 30-second timer is armed in setup() iff booting in pending-verify state.
-// The loop tick checks it; on fire, re-confirm basic health (BLE running,
-// loop has iterated) and call mark_app_valid. Otherwise do nothing and the
-// bootloader reverts on the next reset. These globals are a framework
-// concern (OTA self-health), not per-variant state.
-bool g_pendingVerify = false;
-uint32_t g_markValidDeadlineMs = 0;
-
 // Local appliers shared between the slot drains (lamp_drains.cpp) and the
 // remote-op receive (lamp_remote_op.cpp):
 // apply a JSON colors array / expression op to configurator + advert +
@@ -442,10 +429,6 @@ void runExpressionOp(JsonObject doc, bool mutateConfig) {
   // always marks dirty, even on a parse failure where nothing changed.
 }
 }  // namespace lamp
-
-
-extern void lamp_register_panic_handler();
-
 
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
@@ -633,8 +616,15 @@ void lamp::Lamp::setup() {
   // with a visible blink (recoverable only via re-flash).
   if (!validateHwConfig(hw_)) {
     Serial.println("[lamp] FATAL: malformed HwConfig — halting");
+    if (lamp::runningImagePendingVerify()) {
+      Serial.println("[ota] unverified image halted in setup; rolling back");
+      lamp::rollBackToPreviousImage();
+    }
     pinMode(LED_BUILTIN, OUTPUT);
+    // A compiled-in HwConfig fails the same way every boot, so the halt feeds
+    // the watchdog. A reset loop would only hide the blink.
     for (;;) {
+      loop_watchdog::feed();
       digitalWrite(LED_BUILTIN, HIGH);
       delay(200);
       digitalWrite(LED_BUILTIN, LOW);
@@ -658,10 +648,6 @@ void lamp::Lamp::setup() {
     Serial.println(
         "[power] brownout reset — supply budget constants may be mis-sized");
   }
-  boot_history::boot(FIRMWARE_VERSION);
-  crash_record::boot(FIRMWARE_VERSION);
-  lamp_register_panic_handler();
-
   config = lamp::Config(&configStore);
   // Re-populate the in-memory lampType from NVS. Config::Config loads the
   // JSON blob, but lampType lives under its own NVS key.
@@ -706,6 +692,7 @@ void lamp::Lamp::setup() {
 #ifdef LAMP_DEBUG
   lamp::NvsConfigStore::logUsage();
 #endif
+  setup_stage::reach(boot_history::Stage::Config);
 
   // Space the radio bring-ups so their init inrush spikes don't stack into one
   // brownout-tripping surge on marginal USB power. Sub-100ms total, invisible
@@ -726,6 +713,7 @@ void lamp::Lamp::setup() {
   // Suspend WiFi background scans while the web config UI has a client: the
   // scan hops the radio off the softAP channel and stalls the HTTP server.
   wifi::setWebappActiveGetter([]() { return webapp::hasClient(); });
+  setup_stage::reach(boot_history::Stage::Wifi);
 
   delay(kRadioStaggerMs);
   const auto& baseStops = config.base.broadcastColors();
@@ -734,6 +722,7 @@ void lamp::Lamp::setup() {
            lampos::led::blendedIdentity(baseStops.data(), baseStops.size()),
            lampos::led::blendedIdentity(shadeStops.data(), shadeStops.size()),
            config.lamp.setup);
+  setup_stage::reach(boot_history::Stage::Ble);
 
 #if LAMP_WEBAPP_ENABLED
   if (lamp::any(featuresEnabled(), lamp::Features::WebApp) && config.lamp.webappEnabled) {
@@ -741,6 +730,7 @@ void lamp::Lamp::setup() {
     lamp::logHeap("webapp");
   }
 #endif
+  setup_stage::reach(boot_history::Stage::Webapp);
 
   const std::vector<uint8_t> stripPins =
       lamp::applySegmentPins(hw_, config.shade.segments, config.base.segments);
@@ -812,6 +802,7 @@ void lamp::Lamp::setup() {
   // strip runs at the NeoPixel full-bright default. Runs after the governor's
   // begin() so the boot-hold ceiling reaches the drivers here.
   applyEffectiveBrightness();
+  setup_stage::reach(boot_history::Stage::Leds);
 
   initBehaviors(featuresEnabled(), *this);
 
@@ -832,6 +823,7 @@ void lamp::Lamp::setup() {
     }
   }
   bt.activateGattServices(&config);
+  setup_stage::reach(boot_history::Stage::Behaviors);
 
   // Route inbound CONTROL_OP payloads (addressed to this lamp or broadcast)
   // into a pending slot. WiFi-task safe: pure memcpy under portMUX, no heap
@@ -869,6 +861,7 @@ void lamp::Lamp::setup() {
   lamp::formatBdAddr(ownMac, ownMacStr);
   config.setLampId(ownMacStr);
   lamp::logHeap("mesh");
+  setup_stage::reach(boot_history::Stage::Mesh);
   // Wire the ESP-NOW transport adapter onto the FirmwareReceiver. The
   // mesh path (wisp → lamp MSG_FW_*) emits via this transport. The BLE
   // transport is late-bound by ble_control::setFirmwareReceiver() below
@@ -896,28 +889,12 @@ void lamp::Lamp::setup() {
   // Launch the one streaming task shared by both distributors, now that both
   // have registered.
   lamp::FirmwareDistributor::startSharedStreaming();
+  setup_stage::reach(boot_history::Stage::Ota);
 
-  // Arm the post-OTA self-health timer. esp_ota_get_state_partition returns
-  // the ota-image-state of the running partition. A freshly-OTA'd image
-  // boots in ESP_OTA_IMG_PENDING_VERIFY, and the bootloader auto-rollbacks on
-  // the next reset unless the partition is explicitly marked valid. The lamp
-  // gets 30 seconds of steady-state runtime before being declared healthy,
-  // long enough to surface boot-time crashes that would justify a rollback.
-  //
-  // Without this, the SECOND OTA permanently fails (esp_ota_begin returns
-  // ESP_ERR_OTA_ROLLBACK_INVALID_STATE).
   {
-    esp_ota_img_states_t state;
-    const esp_partition_t* running = esp_ota_get_running_partition();
-    if (running && esp_ota_get_state_partition(running, &state) == ESP_OK) {
-      if (state == ESP_OTA_IMG_PENDING_VERIFY) {
-        g_pendingVerify = true;
-        g_markValidDeadlineMs = millis() + 30000;
-#ifdef LAMP_DEBUG
-        Serial.println("[ota] booted in PENDING_VERIFY, 30s self-health check armed");
-#endif
-      }
-    }
+    const bool pendingVerify = lamp::runningImagePendingVerify();
+    lamp::otaMarkValid.arm(pendingVerify, millis(), ble_control::isRunning());
+    if (pendingVerify) Serial.println("[ota] booted in PENDING_VERIFY, 30s self-health check armed");
   }
   // Wire the cascade fan-out path. The manager only sends after this; before
   // begin/setMeshLink, local triggers fire but never cascade.
@@ -1064,7 +1041,7 @@ void lamp::Lamp::tick() {
   }
 #endif
   crash_record::tick(millis(), [] { return lampRoster.size(); });
-  boot_history::tick(millis());
+  boot_history::tick(millis(), ble_control::isClientConnected());
 
   // Drain pending BLE actions on the loop task (Core 1). All heap allocation
   // (JsonDocument parse, std::vector, gradient construction) happens here,
@@ -1229,29 +1206,23 @@ void lamp::Lamp::tick() {
   lamp::firmwareDistributor.tick(millis());
   fs_ota::tick(millis());
   lamp::tickOtaOffers(millis(), compositor.startupComplete);
-  // Post-OTA self-health check. After 30 seconds of steady-state loop
-  // iteration, if BLE is up and the loop has been iterating (trivially true
-  // inside it), call mark_app_valid so the next OTA can succeed. If the lamp
-  // crashes before the deadline, the bootloader auto-rollbacks on the next
-  // reset.
-  if (g_pendingVerify && static_cast<int32_t>(millis() - g_markValidDeadlineMs) >= 0) {
-    if (ble_control::isRunning()) {
+  switch (lamp::otaMarkValid.poll(millis(), ble_control::isRunning())) {
+    case lamp::MarkValidCheck::Step::MarkValid: {
       const esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
       if (err == ESP_OK) {
-#ifdef LAMP_DEBUG
+        lamp::otaMarkValid.validated();
+        boot_history::imageVerified();
         Serial.println("[ota] new partition marked valid (post-OTA boot)");
-#endif
       } else {
-#ifdef LAMP_DEBUG
         Serial.printf("[ota] mark_app_valid failed: 0x%X\n", (unsigned)err);
-#endif
       }
-      g_pendingVerify = false;  // one-shot: even on failure don't retry
-    } else {
-      // BLE isn't running; defer another tick. If BLE never comes up,
-      // the lamp's broken anyway and rollback is the right move.
-      g_markValidDeadlineMs = millis() + 5000;  // re-check in 5s
+      break;
     }
+    case lamp::MarkValidCheck::Step::RollBack:
+      Serial.println("[ota] BLE never started; rolling back to the previous image");
+      lamp::rollBackToPreviousImage();
+    case lamp::MarkValidCheck::Step::Wait:
+      break;
   }
   // Rebuild + push any dirty section JSON to its NimBLE characteristic
   // so onRead callbacks (Core 0) hand back NimBLE's already-buffered

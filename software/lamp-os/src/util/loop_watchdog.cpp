@@ -1,10 +1,15 @@
 #include "util/loop_watchdog.hpp"
 
+#include <atomic>
+
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 #include <Arduino.h>
 #include <esp_attr.h>
 #include <esp_system.h>
 #include <esp_task_wdt.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <sdkconfig.h>
 
 #include "util/uptime.hpp"
 #endif
@@ -23,10 +28,10 @@ uint32_t LongestGap::takeReport() {
   return longest_.peek();
 }
 
-bool BootGuard::atBoot(bool stateValid, bool taskWdtReset) {
+Mode BootGuard::atBoot(bool stateValid, bool taskWdtReset) {
   streak = bootStreak(stateValid, streak, stableSeen != 0, taskWdtReset);
   stableSeen = 0;
-  return watchesBoot(streak);
+  return modeFor(streak);
 }
 
 void BootGuard::markUptime(uint32_t uptimeMs) {
@@ -50,6 +55,20 @@ bool takeDueReport(LongestGap& gap, LogRateLimiter& log, uint64_t nowMs,
 
 namespace {
 
+static_assert(kLoopTimeoutMs == CONFIG_ESP_TASK_WDT_TIMEOUT_S * 1000u,
+              "the loop timeout is the task watchdog's configured default");
+
+#ifdef CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0
+constexpr bool kCheckIdle0 = true;
+#else
+constexpr bool kCheckIdle0 = false;
+#endif
+#ifdef CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1
+constexpr bool kCheckIdle1 = true;
+#else
+constexpr bool kCheckIdle1 = false;
+#endif
+
 constexpr uint32_t kRtcMagic = 0x4c574447u;
 
 struct RtcState {
@@ -59,6 +78,13 @@ struct RtcState {
 
 RTC_NOINIT_ATTR RtcState s_rtc;
 TaskHandle_t s_loopTask = nullptr;
+// Written by the loop task, read by any task that feeds.
+std::atomic<TaskHandle_t> s_subscribed{nullptr};
+Mode s_mode = Mode::Normal;
+Phase s_phase = Phase::Setup;
+bool s_wide = false;
+bool s_subscribeFailed = false;
+RetryClock s_subscribeRetry;
 
 #ifdef LAMP_DEBUG
 LongestGap s_unfed;
@@ -74,52 +100,95 @@ void report(LongestGap& gap, LogRateLimiter& log, const char* what) {
 }
 #endif
 
+void apply() {
+  esp_task_wdt_config_t config = {
+      .timeout_ms = timeoutMs(s_phase, s_wide, s_mode == Mode::Backoff),
+      .idle_core_mask = idleCoreMask(kCheckIdle0, kCheckIdle1),
+      .trigger_panic = true,
+  };
+  esp_task_wdt_reconfigure(&config);
+}
+
+void subscribe() {
+  if (s_subscribed.load() != nullptr) return;
+  s_subscribeRetry.tried(millis());
+  if (esp_task_wdt_add(s_loopTask) != ESP_OK) {
+    if (!s_subscribeFailed) Serial.println("[loopwd] subscribe FAILED; retrying");
+    s_subscribeFailed = true;
+    return;
+  }
+  s_subscribed.store(s_loopTask);
+  if (s_subscribeFailed) Serial.println("[loopwd] subscribed");
+}
+
 }  // namespace
 
-void begin() {
+void beginSetup() {
   if (s_loopTask != nullptr) return;
+  s_loopTask = xTaskGetCurrentTaskHandle();
   const bool stateValid = s_rtc.magic == kRtcMagic;
   s_rtc.magic = kRtcMagic;
-  if (!s_rtc.guard.atBoot(stateValid,
-                          esp_reset_reason() == ESP_RST_TASK_WDT)) {
-    Serial.printf("[loopwd] %u watchdog resets in a row; loop unwatched "
-                  "until a reset that is not a task-watchdog reset within "
-                  "60 s of boot\n",
-                  (unsigned)s_rtc.guard.streak);
-    return;
+  s_mode = s_rtc.guard.atBoot(stateValid, esp_reset_reason() == ESP_RST_TASK_WDT);
+  s_phase = Phase::Setup;
+  apply();
+  subscribe();
+  if (s_mode == Mode::Backoff) {
+    Serial.printf("[loopwd] %u watchdog resets in a row; timeout %u s until the loop "
+                  "runs a minute\n",
+                  (unsigned)s_rtc.guard.streak, (unsigned)(kBackoffTimeoutMs / 1000));
   }
-  const TaskHandle_t self = xTaskGetCurrentTaskHandle();
-  if (esp_task_wdt_add(self) != ESP_OK) {
-#ifdef LAMP_DEBUG
-    Serial.println("[loopwd] subscribe FAILED; loop unwatched");
-#endif
-    return;
-  }
-  s_loopTask = self;
+}
+
+void beginLoop() {
+  s_phase = Phase::Loop;
+  apply();
+  subscribe();
 #ifdef LAMP_DEBUG
   s_unfed.start(millis());
   s_iteration.start(millis());
 #endif
 }
 
+void widen() {
+  s_wide = true;
+  apply();
+}
+
+void restore() {
+  s_wide = false;
+  apply();
+}
+
 void feed() {
-  if (!feedsFrom(xTaskGetCurrentTaskHandle(), s_loopTask)) return;
+  const TaskHandle_t self = xTaskGetCurrentTaskHandle();
+  if (s_loopTask == nullptr || self != s_loopTask) return;
+  const uint32_t nowMs = millis();
+  if (s_subscribed.load() == nullptr && s_subscribeRetry.due(nowMs)) {
+    subscribe();
+  }
+  if (!feedsFrom(self, s_subscribed.load())) return;
   esp_task_wdt_reset();
 #ifdef LAMP_DEBUG
-  const uint32_t nowMs = millis();
+  if (s_phase != Phase::Loop) return;
   s_unfed.mark(nowMs);
   report(s_unfed, s_unfedLog, "unfed span");
 #endif
 }
 
 void startIteration() {
-  if (!markIteration(s_rtc.guard, millis(), xTaskGetCurrentTaskHandle(),
-                     s_loopTask)) {
-    return;
+  const uint32_t nowMs = millis();
+  if (rearmDue(s_mode, nowMs)) {
+    s_mode = Mode::Normal;
+    apply();
+    Serial.printf("[loopwd] loop ran a minute; timeout back to %u s\n",
+                  (unsigned)(timeoutMs(s_phase, s_wide, false) / 1000));
   }
   feed();
+  if (!markIteration(s_rtc.guard, nowMs, xTaskGetCurrentTaskHandle(),
+                     s_subscribed.load())) {
+    return;
+  }
 #ifdef LAMP_DEBUG
-  const uint32_t nowMs = millis();
   s_iteration.mark(nowMs);
   report(s_iteration, s_iterationLog, "loop iteration");
 #endif

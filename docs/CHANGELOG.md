@@ -5,7 +5,15 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
-## Unreleased
+## 1.3.7
+
+### Added
+- **The boot history (`[boots]` on serial) shows more.** For a boot that
+  never finished starting up, the last startup step it got through. For every
+  boot, how many Tests and greetings were refused for lack of memory, how many
+  times a phone connected, and the least memory left in one piece while one
+  was connected. Older lamps' history carries over on update; reflashing an
+  older firmware starts its history over.
 
 ### Fixed
 - **Lamps hold less memory between home-presence scans and greetings.** A
@@ -39,6 +47,24 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 - **A lamp with a malformed firmware channel no longer blanks the nearby
   list.** A quote, backslash, control character or non-ASCII byte in a peer's
   channel broke the list's JSON, so the app could not read the list at all.
+- **An update that hangs or crashes goes back to the previous firmware.**
+  Lamps were meant to undo a bad update but never did: every update was kept
+  whatever it did. Now an updated lamp that hangs, crashes or restarts in its
+  first ~30 s comes back on the firmware it had, and takes the update again
+  later. It also takes no other update, and no web-page update, until it has
+  run those 30 s and its Bluetooth has started, and passes the update on to
+  other lamps only once it has proven it runs. A power cut in that window
+  rolls back too. The boot history marks a boot that was rolled back with
+  `rolledback`.
+- **A lamp that hangs while starting up restarts itself.** A lamp could go
+  dark during startup, after an update or not, and stay dark until it was
+  unplugged. The startup is now watched: a step that hangs restarts the lamp
+  within 30 s, and the boot history says which step it was.
+- **A lamp stuck in a restart loop no longer freezes for good.** After three
+  quick watchdog restarts in a row a lamp used to stop watching itself, so the
+  next hang froze it until it was unplugged. It now gives itself 5 minutes
+  before restarting, and goes back to normal once it has run a minute, so it
+  keeps trying without restarting every few seconds.
 
 ## 1.3.6
 
