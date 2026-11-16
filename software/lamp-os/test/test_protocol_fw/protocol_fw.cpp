@@ -626,6 +626,37 @@ void test_fw_chunk_shape_checks_for_session_source() {
       static_cast<uint8_t>(lp::checkFwChunk(skew, true, kWispMac, kSessionLen, kSessionChunk)));
 }
 
+// --- checkFwOfferPrecheck: the receiver's first decline-busy gates ---
+
+// An image not yet marked valid declines every offer, at every legal chunk
+// size, since an accepted one would overwrite the slot a rollback returns to.
+void test_fw_offer_precheck_declines_while_image_unverified() {
+  for (const uint16_t size : {uint16_t{1}, uint16_t{700}, lp::FW_CHUNK_SIZE_MAX}) {
+    TEST_ASSERT_EQUAL_UINT8(
+        static_cast<uint8_t>(lp::FwOfferPrecheck::ImageUnverified),
+        static_cast<uint8_t>(lp::checkFwOfferPrecheck(size, /*imageUnverified=*/true)));
+  }
+}
+
+void test_fw_offer_precheck_declines_chunk_size_out_of_range() {
+  for (const bool unverified : {false, true}) {
+    TEST_ASSERT_EQUAL_UINT8(
+        static_cast<uint8_t>(lp::FwOfferPrecheck::BadChunkSize),
+        static_cast<uint8_t>(lp::checkFwOfferPrecheck(0, unverified)));
+    TEST_ASSERT_EQUAL_UINT8(
+        static_cast<uint8_t>(lp::FwOfferPrecheck::BadChunkSize),
+        static_cast<uint8_t>(lp::checkFwOfferPrecheck(lp::FW_CHUNK_SIZE_MAX + 1, unverified)));
+  }
+}
+
+void test_fw_offer_precheck_passes_a_verified_image() {
+  for (const uint16_t size : {uint16_t{1}, uint16_t{700}, lp::FW_CHUNK_SIZE_MAX}) {
+    TEST_ASSERT_EQUAL_UINT8(
+        static_cast<uint8_t>(lp::FwOfferPrecheck::Proceed),
+        static_cast<uint8_t>(lp::checkFwOfferPrecheck(size, /*imageUnverified=*/false)));
+  }
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
@@ -642,6 +673,9 @@ int main(int argc, char** argv) {
   RUN_TEST(test_fw_accept_roundtrip);
   RUN_TEST(test_fw_accept_status_codes);
   RUN_TEST(test_fw_accept_too_short_rejected);
+  RUN_TEST(test_fw_offer_precheck_declines_while_image_unverified);
+  RUN_TEST(test_fw_offer_precheck_declines_chunk_size_out_of_range);
+  RUN_TEST(test_fw_offer_precheck_passes_a_verified_image);
 
   RUN_TEST(test_fw_chunk_roundtrip_min_payload);
   RUN_TEST(test_fw_chunk_roundtrip_baseline_payload);

@@ -248,25 +248,26 @@ void FirmwareReceiver::handleControlOnLoop(const PendingFirmwareControl& ctrl) {
 
 void FirmwareReceiver::onOfferOnLoop(const PendingFirmwareControl& ctrl,
                                      uint32_t nowMs) {
-  // Accept any chunkSize in 1..FW_CHUNK_SIZE_MAX so a v2 distributor's larger
-  // negotiated chunk clears this gate; 0 or oversize declines-busy.
-  // DeclineBusy signals the wisp to stop retrying.
-  if (ctrl.offer.chunkSize == 0 ||
-      ctrl.offer.chunkSize > lamp_protocol::FW_CHUNK_SIZE_MAX) {
+  // Any chunkSize in 1..FW_CHUNK_SIZE_MAX clears the gate so a v2
+  // distributor's larger negotiated chunk is taken. DeclineBusy signals the
+  // wisp to stop retrying.
+  switch (lamp_protocol::checkFwOfferPrecheck(ctrl.offer.chunkSize, otaMarkValid.pending())) {
+    case lamp_protocol::FwOfferPrecheck::BadChunkSize:
 #ifdef LAMP_DEBUG
-    Serial.printf("[fw_receiver] OFFER chunkSize=%u out of range (1..%u), declining\n",
-                  (unsigned)ctrl.offer.chunkSize,
-                  (unsigned)lamp_protocol::FW_CHUNK_SIZE_MAX);
+      Serial.printf("[fw_receiver] OFFER chunkSize=%u out of range (1..%u), declining\n",
+                    (unsigned)ctrl.offer.chunkSize,
+                    (unsigned)lamp_protocol::FW_CHUNK_SIZE_MAX);
 #endif
-    sendAccept(ctrl, lamp_protocol::FwAcceptStatus::DeclineBusy);
-    return;
-  }
-  if (otaMarkValid.pending()) {
+      sendAccept(ctrl, lamp_protocol::FwAcceptStatus::DeclineBusy);
+      return;
+    case lamp_protocol::FwOfferPrecheck::ImageUnverified:
 #ifdef LAMP_DEBUG
-    Serial.println("[fw_receiver] OFFER while this image is unverified, declining");
+      Serial.println("[fw_receiver] OFFER while this image is unverified, declining");
 #endif
-    sendAccept(ctrl, lamp_protocol::FwAcceptStatus::DeclineBusy);
-    return;
+      sendAccept(ctrl, lamp_protocol::FwAcceptStatus::DeclineBusy);
+      return;
+    case lamp_protocol::FwOfferPrecheck::Proceed:
+      break;
   }
   // Firmware: reject if otaAcceptable returns false (wrong channel, downgrade,
   // cross-variant, or stable<-beta). FS: the hook owns its own accept logic.

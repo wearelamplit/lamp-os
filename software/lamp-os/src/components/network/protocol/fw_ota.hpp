@@ -651,6 +651,21 @@ inline bool parseFwResult(const uint8_t* data, size_t len, ParsedFwResult& out,
   return true;
 }
 
+enum class FwOfferPrecheck : uint8_t {
+  Proceed,
+  BadChunkSize,
+  ImageUnverified,
+};
+
+// The receiver's first gates on an OFFER, both answered DeclineBusy: a chunk
+// size outside 1..FW_CHUNK_SIZE_MAX, then a running image not yet marked
+// valid, whose rollback slot an accepted offer would overwrite.
+inline FwOfferPrecheck checkFwOfferPrecheck(uint16_t chunkSize, bool imageUnverified) {
+  if (chunkSize == 0 || chunkSize > FW_CHUNK_SIZE_MAX) return FwOfferPrecheck::BadChunkSize;
+  if (imageUnverified) return FwOfferPrecheck::ImageUnverified;
+  return FwOfferPrecheck::Proceed;
+}
+
 // Pre-erase auth decision for a firmware OFFER. Pure: no flash, no state.
 // Called after chunkSize and channel checks pass; returns DeclineUnverified
 // when the offer's auth trailer is absent or its ed25519 verify failed,
