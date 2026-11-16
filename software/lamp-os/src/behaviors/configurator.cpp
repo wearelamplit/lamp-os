@@ -40,6 +40,10 @@ void ConfiguratorBehavior::showScene(const RoleScene& scene, uint32_t fadeMs) {
   install(scene.colors, fadeMs, scene.rotation, millis());
 }
 
+void ConfiguratorBehavior::showOnSavedRotation(const std::vector<Color>& stops) {
+  showScene(buildRoleScene(fb->pixelCount, stops, fb->defaultRotation), 0);
+}
+
 void ConfiguratorBehavior::install(const std::vector<Color>& targetColors,
                                    uint32_t fadeDurationMs,
                                    const ColorRotation& rotation, uint32_t now) {
