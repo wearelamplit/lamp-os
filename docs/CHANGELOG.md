@@ -5,6 +5,24 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## Unreleased
+
+### Fixed
+- **Lion heads and snafu pick up a visiting lamp's colours more reliably in a
+  crowd.** When two colour requests or two colour replies reached a lamp
+  between two passes of its main loop, the newer one replaced the older, and
+  a Lioness churning through answers could cut an earlier request's repeat
+  sends short. A lion head could sit on the lamp's main colour for up to 3
+  seconds, and a snafu could skip taking on the colours of the lamp it just
+  greeted. Requests and replies now wait their turn instead.
+- **A Lioness almost out of memory no longer asks for colours every frame.**
+  When it could not store a reply, it asked the same lamp again on the very
+  next frame; it now waits its usual 3 seconds.
+- **Leaving the expressions tab in the web config page no longer replays an
+  unsaved colour rotation.** If a rotation change in the app was never saved,
+  finishing an expression test in the web page spun the lamp with that
+  rotation for up to a minute. It now restores on the saved rotation.
+
 ## 1.3.7
 
 ### Added
