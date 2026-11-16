@@ -373,8 +373,9 @@ class ControlNotifier extends _$ControlNotifier {
   Future<ControlState> build(String deviceId) async {
     _deviceId = deviceId;
     // A rebuild keeps this instance and its held flags; the lamp clears them
-    // on the new connection.
-    _lampQuiet = null;
+    // on the new connection. A quiet report carries over so the new link
+    // holds them back until the lamp listens.
+    if (_lampQuiet == false) _lampQuiet = null;
     _flagsPending = true;
     _rereadPending = false;
     ref.listen(quietAfterPushProvider(deviceId), (_, _) {});

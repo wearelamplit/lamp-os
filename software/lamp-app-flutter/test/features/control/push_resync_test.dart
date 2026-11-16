@@ -928,6 +928,31 @@ void main() {
       expectEachOnce(r, listening);
     });
 
+    test('on a lamp last heard quiet mid-push, after a rebuild, only once it '
+        'listens', () async {
+      final r = await heldFlags();
+      r.notify(quiet: false);
+      r.firmware.emit(_streaming);
+      r.notify(quiet: true);
+      await _pump();
+      r.ble.quietOnSubscribe = true;
+      final mark = r.mark();
+      r.c.invalidate(controlNotifierProvider(_id));
+      await r.c.read(controlNotifierProvider(_id).future);
+      await _pump();
+      expect(r.payloadsSince(mark, BleUuids.homeModeFocus), isEmpty);
+      expect(r.payloadsSince(mark, BleUuids.editSession), [
+        [0x08, 1],
+      ]);
+
+      r.firmware.emit(_failed);
+      await _pump();
+      final listening = r.mark();
+      r.notify(quiet: false);
+      await _pump();
+      expectEachOnce(r, listening);
+    });
+
     test('on a lamp that reports listening on subscribe', () async {
       final r = await heldFlags();
       r.notify(quiet: false);
