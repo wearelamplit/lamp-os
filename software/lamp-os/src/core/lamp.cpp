@@ -648,15 +648,14 @@ void lamp::Lamp::setup() {
     Serial.println(
         "[power] brownout reset — supply budget constants may be mis-sized");
   }
-  config = lamp::Config(&configStore);
+  config = lamp::Config(&configStore, windingOf(hw_));
   // Re-populate the in-memory lampType from NVS. Config::Config loads the
   // JSON blob, but lampType lives under its own NVS key.
   config.loadLampType();
 
-  // Apply subclass defaults AFTER NVS load. Fields that NVS left at their
-  // factory value (e.g. name="stray", colors empty) get the subclass's
-  // preferred first-boot value. Fields the user has already saved in NVS are
-  // NOT touched; the NVS value is authoritative.
+  // Apply subclass defaults AFTER NVS load. Fields the store left unset (e.g.
+  // name="stray", and the colours of a lamp whose load found no config) get
+  // the subclass's first-boot value. A stored value is authoritative.
   config.applyDefaults(defaults());
 
   // First-ever-boot housekeeping, persisted once so it sticks across reboots

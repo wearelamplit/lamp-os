@@ -121,7 +121,8 @@ static std::string storedField(InMemoryConfigStore& s, const char* field) {
   ShadeSettings shade;
   ExpressionSettings expressions;
   HomeModeSettings homeMode;
-  config_codec::loadConfig(s, lamp, base, shade, expressions, homeMode, s_buf, sizeof(s_buf));
+  config_codec::loadConfig(s, lamp, base, shade, expressions, homeMode, s_buf, sizeof(s_buf),
+                           {});
   JsonDocument doc;
   config_codec::toJson(doc.to<JsonObject>(), lamp, base, shade, expressions, homeMode);
   return doc["lamp"][field].as<std::string>();

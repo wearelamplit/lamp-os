@@ -687,6 +687,21 @@ void test_knocked_out_pixels_stay_put() {
   assertFrame(undimmed, r.fb.buffer);
 }
 
+// A knockout map shorter than the strip (a stored base px under the
+// variant's strip count) dims the pixels it covers and leaves the rest lit.
+void test_short_knockout_map_leaves_the_rest_of_the_strip_lit() {
+  Rig r(Surface::Base);
+  KnockoutBehavior knockout(&r.fb, 0, true);
+  knockout.knockoutPixels = std::vector<uint8_t>(kPx / 2, 40);
+  knockout.knockoutPixels.shrink_to_fit();
+  for (size_t i = 0; i < kPx; ++i) r.fb.buffer[i] = Color(200, 100, 50, 10 + i);
+  const std::vector<Color> before = r.fb.buffer;
+  knockout.draw();
+  for (size_t i = 0; i < kPx; ++i) {
+    assertColor(i < kPx / 2 ? setColorBrightness(before[i], 40) : before[i], r.fb.buffer[i], i);
+  }
+}
+
 static constexpr uint32_t kPerMs5 = static_cast<uint32_t>((uint64_t{1} << 32) / 5000);
 
 // Quiet entry's reset puts the next frame at the settled position,
@@ -813,6 +828,7 @@ int main(int, char**) {
   RUN_TEST(test_rotation_off_while_playing_takes_the_static_path);
   RUN_TEST(test_scene_for_another_strip_never_rotates);
   RUN_TEST(test_knocked_out_pixels_stay_put);
+  RUN_TEST(test_short_knockout_map_leaves_the_rest_of_the_strip_lit);
   RUN_TEST(test_reset_resumes_from_the_settled_frame);
   RUN_TEST(test_home_mode_keeps_rotation_running);
   return UNITY_END();

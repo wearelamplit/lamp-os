@@ -23,32 +23,18 @@
 
 namespace lamp {
 
-// Seed every segment of a role from the variant defaults, but only while NVS
-// still holds the single class-default segment. A configured lamp (NVS parsed
-// its own segment list) keeps its saved segments untouched.
-static void seedRoleSegments(std::vector<SegmentSettings>& segs,
-                             const std::vector<Config::SegmentDefault>& seeds,
-                             const Color& factory) {
-  const bool factoryUnconfigured =
-      segs.size() == 1 && segs[0].colors.size() == 1 && segs[0].colors[0] == factory;
-  if (!factoryUnconfigured) return;
-  segs.clear();
-  for (const auto& s : seeds) {
-    segs.push_back({s.name, s.px, parseColorList(s.colors)});
-  }
-}
-
 // The stored config is read and written through this reserved buffer, so a
 // load or save never waits for a large free block. Loop task only: the load
 // runs in setup, and every save, the webapp's included (webapp::tick drains
 // it), runs there.
 static uint8_t s_settingsBuf[config_codec::kMaxSettingsBlobLen];
 
-Config::Config(ConfigStore* inStore) {
+Config::Config(ConfigStore* inStore, StripWinding winding) {
   store_ = inStore;
   dispositions_.attachStore(store_);
-  const config_codec::LoadedConfig loaded = config_codec::loadConfig(
-      *store_, lamp, base, shade, expressions, homeMode, s_settingsBuf, sizeof(s_settingsBuf));
+  const config_codec::LoadedConfig loaded =
+      config_codec::loadConfig(*store_, lamp, base, shade, expressions, homeMode, s_settingsBuf,
+                               sizeof(s_settingsBuf), winding);
   storeForm_ = loaded.form;
 
 #ifdef LAMP_DEBUG
@@ -422,10 +408,8 @@ void Config::invalidateAllSections() {
 }
 
 void Config::applyDefaults(const Defaults& d) {
-  // Called AFTER Config::Config(ConfigStore*) loads from NVS so that NVS
-  // values are authoritative and only truly-factory-default fields are
-  // overwritten. Subclass defaults() returns values that are used as
-  // first-boot baselines.
+  // Runs after Config::Config loads, so a stored value wins and the variant's
+  // defaults fill only what the store left unset.
   //
   // Name: resolve `named` (migrating pre-flag NVS from the stored name), then
   // substitute the variant default only for a lamp the user never named. A
@@ -438,36 +422,8 @@ void Config::applyDefaults(const Defaults& d) {
   if (!d.name.empty() && !lamp.named) {
     lamp.name = d.name;
   }
-  // Colors: apply the variant's injected default when the vector still holds
-  // only the single class-default entry. A user-configured lamp has a
-  // different saved color and won't match, so its choice is preserved. A
-  // multi-segment variant seeds its whole segment list instead of the scalar
-  // single-color path.
-  if (!d.baseSegments.empty()) {
-    seedRoleSegments(base.segments, d.baseSegments, kBaseDefaultColor);
-  } else if (!d.baseColor.empty() && base.broadcastColors().size() == 1 &&
-             base.broadcastColors()[0] == kBaseDefaultColor) {
-    base.broadcastColors() = parseColorList(d.baseColor);
-  }
-  if (!d.shadeSegments.empty()) {
-    seedRoleSegments(shade.segments, d.shadeSegments, kShadeDefaultColor);
-  } else if (!d.shadeColor.empty() && shade.broadcastColors().size() == 1 &&
-             shade.broadcastColors()[0] == kShadeDefaultColor) {
-    shade.broadcastColors() = parseColorList(d.shadeColor);
-  }
-  base.colorsEditable  = d.baseColorsEditable;
-  shade.colorsEditable = d.shadeColorsEditable;
-  base.rotationSupported = d.rotationSupported;
-  shade.rotationSupported = d.rotationSupported;
   if (d.setup) lamp.setup = true;
-
-  // Per-segment pixel count. A loaded px of 0 means "unset" (a fresh lamp, or
-  // a doc without the key). Fill those from the variant default; any real
-  // stored value wins, so a configured lamp's px is sacred. The scalar
-  // basePx/shadePx default seeds the role's first segment.
-  base.segments.front().px = resolveConfiguredPx(base.segments.front().px, d.basePx);
-  base.knockoutPixels.resize(base.sumPx(), 100);
-  shade.segments.front().px = resolveConfiguredPx(shade.segments.front().px, d.shadePx);
+  applyRoleDefaults(d, storeForm_, base, shade);
 }
 
 }  // namespace lamp
