@@ -287,6 +287,36 @@ void main() {
     expect(ble.paletteReads, readsBefore);
     expect(n.savedManualPalette, saved);
   });
+
+  test('a save stops sending once the wisp leaves Manual', () async {
+    const saved = [LampColor(r: 1, g: 2, b: 3, w: 0)];
+    const edit = [
+      LampColor(r: 1, g: 2, b: 3, w: 0),
+      LampColor(r: 90, g: 0, b: 40, w: 10),
+    ];
+    final ble = InMemoryBleClient();
+    seedPalette(ble, saved);
+    await ble.connect(_lampId);
+    await ble.write(_lampId, BleUuids.controlService, BleUuids.wispStatus,
+        _b(manualWith(saved)));
+    final c = makeContainer(ble);
+    c.listen(wispNotifierProvider(_lampId), (_, _) {});
+    await c.read(wispNotifierProvider(_lampId).future);
+    final n = c.read(wispNotifierProvider(_lampId).notifier);
+
+    n.setManualPaletteDraft(edit);
+    Object? err;
+    final save = n.setManualPalette().catchError((Object e) => err = e);
+    await pumpEventQueue();
+    expect(paletteOps(ble), hasLength(1));
+    notify(ble, '{"wispMac":"$_mac","source":"osc"}');
+    await save;
+
+    expect(err.toString(), contains('source changed'));
+    expect(paletteOps(ble), hasLength(1),
+        reason: 'the palette is moot once the wisp left Manual');
+    expect(n.manualPaletteWriteFailed, isTrue);
+  });
 }
 
 /// Holds every `wispconfig` read while [holdConfig] is set, so a test can

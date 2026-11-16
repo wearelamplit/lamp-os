@@ -1179,15 +1179,14 @@ class WispNotifier extends _$WispNotifier {
     final ok = await _sendConfirmed(
       send: () => _repo.setManualPalette(committed),
       confirm: () async {
-        // sourceChanged is terminal within a save. A later retry's timeout
-        // must not downgrade it to a generic notConfirmed.
-        if (outcome != PaletteConfirmOutcome.sourceChanged) {
-          outcome = await _confirmPaletteLanded(expectedHash, wispMac,
-              emittedAfter: emittedAfter);
-        }
+        outcome = await _confirmPaletteLanded(expectedHash, wispMac,
+            emittedAfter: emittedAfter);
         return outcome == PaletteConfirmOutcome.confirmed;
       },
-      isSuperseded: () => _paletteSaveEpoch != epoch,
+      // Once the wisp left Manual the palette is moot, so stop resending.
+      isSuperseded: () =>
+          _paletteSaveEpoch != epoch ||
+          outcome == PaletteConfirmOutcome.sourceChanged,
     );
     if (_disposed || _paletteSaveEpoch != epoch) return;
     _applyPaletteConfirm(committed, ok);
