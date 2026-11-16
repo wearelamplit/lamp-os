@@ -646,6 +646,25 @@ void main() {
       expect(r.frozen, isTrue);
     });
 
+    test('Home Mode left while the lamp is re-synced stays closed', () async {
+      final r = await _rig();
+      r.control.setEditSession(EditSurface.base, true);
+      r.control.setHomeModeFocus(true);
+      await _pump();
+      r.notify(quiet: true);
+      await _pump();
+      final gate = r.ble.held[BleUuids.editSession] = Completer<void>();
+      r.notify(quiet: false);
+      await _pump();
+      final mark = r.mark();
+      r.control.setHomeModeFocus(false);
+      gate.complete();
+      await _pump();
+      final focus = r.payloadsSince(mark, BleUuids.homeModeFocus);
+      expect(focus, isNotEmpty);
+      expect(focus, everyElement([0]), reason: 'the user left Home Mode');
+    });
+
     test(
       'a quiet report while the lamp is re-synced keeps the freeze',
       () async {
@@ -882,6 +901,29 @@ void main() {
         r.control.setEditSession(EditSurface.base, true);
         await r.control.setSocialViewActive(true);
         await seedControlBle(r.ble, deviceId: _id, brightness: 50);
+        final mark = r.mark();
+        r.c.invalidate(controlNotifierProvider(_id));
+        await r.c.read(controlNotifierProvider(_id).future);
+        await _pump();
+        r.notify();
+        await _pump();
+        expectEachOnce(r, mark);
+      },
+    );
+
+    test(
+      'on a lamp without quiet, after Retry from an error after a link drop',
+      () async {
+        final r = await heldFlags();
+        final base = await r.ble.readSection(_id, 'base');
+        r.ble.seedSection(_id, 'base', Uint8List.fromList([0x21]));
+        await r.reconnect();
+        await Future<void>.delayed(const Duration(seconds: 2));
+        expect(
+          r.c.read(controlNotifierProvider(_id)).error,
+          isA<LampBusyException>(),
+        );
+        r.ble.seedSection(_id, 'base', base);
         final mark = r.mark();
         r.c.invalidate(controlNotifierProvider(_id));
         await r.c.read(controlNotifierProvider(_id).future);

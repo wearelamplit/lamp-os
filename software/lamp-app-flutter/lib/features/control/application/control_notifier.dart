@@ -786,14 +786,15 @@ class ControlNotifier extends _$ControlNotifier {
     _quietBound?.cancel();
     _quietBound = null;
     try {
-      for (final MapEntry(key: (charUuid, _), :value)
-          in _heldFlags.entries.toList()) {
+      // Each flag is read as it goes out, so one the user changed while an
+      // earlier write was awaited never goes out stale after the change.
+      for (final key in _heldFlags.keys.toList()) {
         await _ble
             .write(
               _deviceId,
               BleUuids.controlService,
-              charUuid,
-              value,
+              key.$1,
+              _heldFlags[key]!,
               withoutResponse: true,
             )
             .catchError((_) {});
@@ -2045,6 +2046,9 @@ class ControlNotifier extends _$ControlNotifier {
     final cur = state.value;
     if (cur == null) return;
     if (isConnected && !cur.connected) {
+      // A build or a reboot-save reload is bringing this link up and begins
+      // its session itself.
+      if (state.isLoading) return;
       // fbp's connectionState emitted `true` mid-reconnect, but the
       // GATT services aren't necessarily discovered yet (observed on
       // hardware: a 4-second window where writes failed with
