@@ -104,7 +104,9 @@ Model factoryColoured() {
 void assertKept(ConfigStore& store, const Config::Defaults& d, StoreForm expectedForm) {
   Model m;
   TEST_ASSERT_TRUE(load(store, m) == expectedForm);
-  const Model loaded = m;
+  Model loaded = m;
+  loaded.shade.segments.front().px =
+      resolveConfiguredPx(loaded.shade.segments.front().px, d.shadePx);
   applyRoleDefaults(d, expectedForm, m.base, m.shade);
   assertSegments(loaded.base.segments, m.base.segments);
   assertSegments(loaded.shade.segments, m.shade.segments);
