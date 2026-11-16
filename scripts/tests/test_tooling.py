@@ -1,6 +1,6 @@
 """Static and stubbed checks for release workflows, the release-flash cache, build cache config and docs.
 Run: python3 -m unittest discover -s scripts/tests"""
-import configparser, os, re, signal, stat, subprocess, tempfile, time, unittest
+import configparser, os, re, shutil, signal, stat, subprocess, tempfile, time, unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -220,11 +220,42 @@ class BuildLock(unittest.TestCase):
             log = Path(d) / "log"
             job = f'echo start >> {log}; sleep 0.5; echo end >> {log}'
             env = dict(os.environ, LAMP_PIO_LOCK=str(Path(d) / "lock"))
+            first = subprocess.Popen(["bash", str(self.WRAP), "sh", "-c", job], env=env)
+            for _ in range(100):
+                if log.exists():
+                    break
+                time.sleep(0.05)
             ps = [subprocess.Popen(["bash", str(self.WRAP), "sh", "-c", job], env=env,
-                                   stderr=subprocess.PIPE, text=True) for _ in range(3)]
+                                   stderr=subprocess.PIPE, text=True) for _ in range(2)]
             errs = [p.communicate(timeout=30)[1] for p in ps]
+            first.wait(timeout=30)
             self.assertEqual(log.read_text().split(), ["start", "end"] * 3)
-            self.assertTrue(any("waiting for another lamp firmware build" in e for e in errs))
+            for e in errs:
+                self.assertIn("waiting for another firmware build", e)
+                self.assertNotIn("already locked", e)
+
+    def stub_run(self, name):
+        with tempfile.TemporaryDirectory() as d:
+            argv = Path(d) / "argv"
+            stub = Path(d) / name
+            stub.write_text(f'#!/bin/sh\necho "$@" >> {argv}\n'
+                            'for a; do shift; [ "$a" = "$LAMP_PIO_LOCK" ] && break; done\n'
+                            '[ "$1" = true ] && exit 0\nexec "$@"\n')
+            stub.chmod(0o755)
+            env = dict(os.environ, PATH=f"{d}:{os.environ['PATH']}", LAMP_PIO_LOCK=str(Path(d) / "lock"))
+            subprocess.run(["bash", str(self.WRAP), "true"], env=env, check=True)
+            return argv.read_text().split("\n")[:-1]
+
+    def test_flock_branch_closes_the_fd_for_the_child(self):
+        for line in self.stub_run("flock"):
+            self.assertIn("-o", line.split())
+
+    def test_lockf_branch_is_silent_and_keeps_the_file(self):
+        if shutil.which("flock", path=os.environ["PATH"]):
+            self.skipTest("real flock on PATH hides the lockf branch")
+        tries, hold = self.stub_run("lockf")
+        self.assertTrue({"-s", "-k"} <= set(tries.split()))
+        self.assertIn("-k", hold.split())
 
     def test_wrapper_passes_exit_status_and_args(self):
         with tempfile.TemporaryDirectory() as d:
@@ -232,13 +263,13 @@ class BuildLock(unittest.TestCase):
             r = subprocess.run(["bash", str(self.WRAP), "sh", "-c", 'test "$0" = a && exit 7', "a"], env=env)
             self.assertEqual(r.returncode, 7)
 
-    def test_every_lamp_pio_run_goes_through_the_lock(self):
+    def test_every_firmware_pio_run_goes_through_the_lock(self):
         lines = []
         for name, text in [("package.json", (ROOT / "package.json").read_text())] + [
                 (p.name, p.read_text()) for p in (ROOT / "scripts").glob("*.sh")]:
             lines += [(name, l) for l in text.splitlines() if re.search(r"\bpio run\b", l)]
-        lamp = [(n, l) for n, l in lines if "wisp" not in l and not l.lstrip().startswith("#")]
-        self.assertGreaterEqual(len(lamp), 5)
+        lamp = [(n, l) for n, l in lines if not l.lstrip().startswith("#")]
+        self.assertGreaterEqual(len(lamp), 7)
         for n, l in lamp:
             self.assertRegex(l, r"with_pio_lock\.sh\"? pio run", f"{n}: {l.strip()}")
 
