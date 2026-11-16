@@ -264,12 +264,13 @@ void main() {
     'a discover that throws is recorded as a failure and rethrown',
     () async {
       final cache = DiscoveryCache<int>();
+      final err = StateError('discover');
       await expectLater(
         cache.resolve('x', () async {
           clock.advance(15000);
-          throw StateError('discover');
+          throw err;
         }),
-        throwsStateError,
+        throwsA(same(err)),
       );
       expect(events.single.ok, isFalse);
       expect(events.single.ms, 15000);
