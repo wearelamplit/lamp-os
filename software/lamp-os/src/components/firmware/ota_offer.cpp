@@ -7,6 +7,7 @@
 #include "components/firmware/fs_ota.hpp"
 #include "components/firmware/ota_mark_valid.hpp"
 #include "components/firmware/ota_quiet_mode.hpp"
+#include "components/webapp/webapp.hpp"
 #include "version.hpp"
 
 // Defined at file scope in lamp.cpp; the receiver header exposes no extern.
@@ -24,11 +25,16 @@ OtaOfferThrottle s_throttle;
 // Only ESP-NOW peers are walked, since firmwareVersion arrives on the ESP-NOW
 // HELLO and a BLE-only sighting carries none.
 void tickOtaOffers(uint32_t nowMs, bool startupComplete) {
+#if LAMP_WEBAPP_ENABLED
+  const bool webClient = webapp::hasClient();
+#else
+  const bool webClient = false;
+#endif
   const OtaOfferBusy busy =
       offerBusy(startupComplete, firmwareDistributor.isInProgress(),
                 ::firmwareReceiver.isInProgress(), fs_ota::fsPathBusy(),
                 ota_quiet_mode::holders(), firmwareDistributor.holdingIdleQuiet(),
-                otaMarkValid.pending());
+                otaMarkValid.pending(), webClient);
   if (!s_throttle.due(busy, nowMs)) return;
 
   const std::vector<MeshPeer>& peers = lampRoster.getMesh(LAMP_PRUNE_TIME_MS);

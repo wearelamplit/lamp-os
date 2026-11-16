@@ -94,6 +94,25 @@ skew:
    this holds only when one happens; it is the one check on the
    `enforcePause` call in `ble_control::tick` and on `NimBleRadio::isAdvertising`
    reading true.
+   Web config softAP (set the src lamp's Web Config window to never expire, or
+   start inside its boot window): the src logs `[webapp] softAP down for OTA`
+   as it starts streaming, and `[webapp] softAP back after OTA` about 10 s after
+   `RESULT success` (the inter-session hold), and its `<name>-lamp` network is in
+   a phone's Wi-Fi list again. Repeat with a phone joined to the src's network
+   and the web config page open: the src logs no `[fwdist] ... → OFFER` while
+   the phone stays joined, and a settings save from the page answers. Leave the
+   network: the src reboots (its BLE comes back), then offers once it hears the
+   peer's HELLO again (up to 30 s). Then join a phone to the src's
+   network inside the 15 s between `→ OFFER` and the peer's accept: the send
+   goes ahead, the phone loses the network when streaming starts, and the
+   network is back after `softAP back after OTA`. Between `softAP down for
+   OTA` and `softAP back after OTA` the src logs no `[webapp] server up` and
+   does not reboot (a join landing on the same loop pass as the teardown
+   would show one of these; the window is narrow, so a clean run is weak
+   evidence and one such line is a fail). A
+   `softAP not restored after OTA` line is a fail unless a heap shortage shows
+   beside it. Note the `[heap]` largest block before the send and after the
+   restore.
 
 4. **NVS/config survives.** Before step 2, note the peer's
    `[cfg] loaded name=...` and `[cfg] expressions=...` boot lines. After the
@@ -194,6 +213,8 @@ tap, opened before the transfer so the open's reset lands on the old image.
 
 ## Pass criteria
 
+- The src's web config network back after the send (step 3), or the src
+  rebooted with BLE back when a page was open.
 - Full step-2 chain present on the taps, ending in `RESULT success` and a
   `== VERSION` transition; exactly one transfer (no OFFER/DONE thrash loop).
 - Firmware OTA: `[ota_ind]` lines + visible progress bar + base settle/pulse
@@ -213,11 +234,15 @@ tap, opened before the transfer so the open's reset lands on the old image.
 
 ## Not covered here
 
-- The BLE chunk path dropping a write into a mesh session. The drop rule
-  (`checkFwChunk`) is natively tested; its wiring (`FwChunkCallback` passing
-  `FirmwareTransportKind::Ble`) is not, and the stock app cannot reach it: the
+- The BLE chunk path dropping a write into a mesh session, or a chunk from a
+  second phone into a BLE session. The drop rule (`checkFwChunk`) is natively
+  tested; its wiring (`FwChunkCallback` passing `FirmwareTransportKind::Ble`
+  and the connection handle) is not, and the stock app cannot reach it: the
   lamp drops any phone link under the mesh pause, so a write can land only
-  between the session arming and the kick taking effect.
+  between the session arming and the kick taking effect, and the app streams
+  only after its own OFFER was accepted. If NimBLE gives the next connection
+  the same handle number, the connection check cannot tell the two phones
+  apart; the digest check at verify still refuses a mixed image.
 
 - True cross-variant gating (standard↔snafu) — needs a snafu lamp and a
   snafu-signed artifact; the channel-suffix row exercises the same

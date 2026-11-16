@@ -651,6 +651,21 @@ inline bool parseFwResult(const uint8_t* data, size_t len, ParsedFwResult& out,
   return true;
 }
 
+enum class FwOfferPrecheck : uint8_t {
+  Proceed,
+  BadChunkSize,
+  ImageUnverified,
+};
+
+// The receiver's first gates on an OFFER, both answered DeclineBusy: a chunk
+// size outside 1..FW_CHUNK_SIZE_MAX, then a running image not yet marked
+// valid, whose rollback slot an accepted offer would overwrite.
+inline FwOfferPrecheck checkFwOfferPrecheck(uint16_t chunkSize, bool imageUnverified) {
+  if (chunkSize == 0 || chunkSize > FW_CHUNK_SIZE_MAX) return FwOfferPrecheck::BadChunkSize;
+  if (imageUnverified) return FwOfferPrecheck::ImageUnverified;
+  return FwOfferPrecheck::Proceed;
+}
+
 // Pre-erase auth decision for a firmware OFFER. Pure: no flash, no state.
 // Called after chunkSize and channel checks pass; returns DeclineUnverified
 // when the offer's auth trailer is absent or its ed25519 verify failed,
@@ -672,14 +687,18 @@ enum class FwChunkVerdict : uint8_t {
 // Whether a CHUNK may be written into the open receive session.
 // sessionTransport is true when the chunk arrived over the transport (mesh or
 // BLE) that opened the session, and sessionSource is the accepted OFFER's
-// sourceMac: a chunk failing either is never written and never counts as
-// session activity. totalLen and chunkSize are the session's negotiated values;
-// the last chunk may be short. A Write verdict keeps the write inside the erased
-// image. Runs on the receiver because only it holds the session's chunkSize.
-inline FwChunkVerdict checkFwChunk(const ParsedFwChunk& c, bool sessionTransport,
-                                   const uint8_t sessionSource[6],
-                                   uint32_t totalLen, uint16_t chunkSize) {
-  if (!sessionTransport || std::memcmp(c.sourceMac, sessionSource, 6) != 0) {
+// sourceMac. Over BLE (overBle) the chunk must also come over the session's
+// connection: frameConn is the chunk's, sessionConn the OFFER's. A chunk failing
+// any of these is never written and never counts as session activity.
+// totalLen and chunkSize are the session's negotiated values; the last chunk
+// may be short. A Write verdict keeps the write inside the erased image. Runs
+// on the receiver because only it holds the session's chunkSize.
+inline FwChunkVerdict checkFwChunk(const ParsedFwChunk& c, bool sessionTransport, bool overBle,
+                                   const uint8_t sessionSource[6], uint16_t frameConn,
+                                   uint16_t sessionConn, uint32_t totalLen,
+                                   uint16_t chunkSize) {
+  if (!sessionTransport || std::memcmp(c.sourceMac, sessionSource, 6) != 0 ||
+      (overBle && frameConn != sessionConn)) {
     return FwChunkVerdict::ForeignSource;
   }
   // Compared without adding so an offset near UINT32_MAX can't wrap the sum.

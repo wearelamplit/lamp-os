@@ -160,11 +160,13 @@ void copyNearbyJson(std::string& out);
 void tick();
 
 /**
- * Send a state-change notification to all subscribed clients.
- *        Payload is `{"previewActive":<bool>}`, used by the app's Test
- *        button to debounce its label without an app-side timer.
+ * Send a state-change notification to the connected client, when it has
+ *        turned notifications on. Payload: docs/dev/networking.md
+ *        (CHAR_STATE_NOTIFY). False when nothing went out: no client, not
+ *        subscribed, no heap for the build, or NimBLE could not queue the
+ *        send.
  */
-void notifyStateChange();
+bool notifyStateChange();
 
 /**
  * Send a WiFi-state-change notification on CHAR_WIFI_STATE.

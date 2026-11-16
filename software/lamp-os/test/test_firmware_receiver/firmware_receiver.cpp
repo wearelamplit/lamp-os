@@ -235,8 +235,8 @@ class FirmwareReceiver {
 
   void handleChunk(const ParsedFwChunk& p, bool sessionTransport = true) {
     if (publishedHandle_ == 0) return;
-    if (lamp_protocol::checkFwChunk(p, sessionTransport, wispMac_, offerTotalLen_,
-                                    offerChunkSize_) !=
+    if (lamp_protocol::checkFwChunk(p, sessionTransport, /*overBle=*/false, wispMac_, 0, 0,
+                                    offerTotalLen_, offerChunkSize_) !=
         lamp_protocol::FwChunkVerdict::Write) {
       return;
     }

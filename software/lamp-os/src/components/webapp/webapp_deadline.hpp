@@ -57,4 +57,56 @@ inline bool webappRebootDue(uint32_t now, bool armed, uint32_t rebootAtMs, bool 
   return late >= 0 && (!otaQuiet || late >= static_cast<int32_t>(kRebootOtaWaitMaxMs));
 }
 
+// Whether the softAP should come back when an OTA radio pause ends: a served
+// page (the server is up) always gets it back, so its station can return and
+// the session's BLE-restore reboot can run; otherwise only while the webapp
+// would still keep it up.
+inline bool apWantedAfterOta(uint32_t now, uint32_t deadlineMs, bool neverExpire,
+                             bool serverUp) {
+  return serverUp || !webappShouldTeardown(now, deadlineMs, neverExpire);
+}
+
+// Whether the softAP is up. The loop (tick) and the OTA pausing task
+// (shutdownForOta) both take it down; exactly one caller runs the teardown.
+class SoftApState {
+ public:
+  bool up() const { return up_.load(); }
+  void markUp() { up_.store(true); }
+
+  // Runs `teardown` and returns true when this call took the AP from up to
+  // down. A concurrent or later caller returns false and runs nothing.
+  template <class Teardown>
+  bool tearDown(Teardown&& teardown) {
+    if (!up_.exchange(false)) return false;
+    teardown();
+    return true;
+  }
+
+ private:
+  std::atomic<bool> up_{false};
+};
+
+// Remembers whether an OTA radio pause took the softAP down, so the AP comes
+// back after it and an AP that was already down stays down.
+class OtaApFollower {
+ public:
+  // On a pause: true, and the AP owed back, when this pause took it down.
+  bool stop(bool radioPaused, bool apTakenDown) {
+    if (!radioPaused || !apTakenDown) return false;
+    stoppedForOta_ = true;
+    return true;
+  }
+
+  // True once, after the pause that took the AP down has ended, when the AP
+  // is still wanted (apWantedAfterOta).
+  bool restore(bool radioPaused, bool apWanted) {
+    if (radioPaused || !stoppedForOta_) return false;
+    stoppedForOta_ = false;
+    return apWanted;
+  }
+
+ private:
+  bool stoppedForOta_ = false;
+};
+
 }  // namespace webapp

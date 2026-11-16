@@ -23,7 +23,6 @@
 #include "behaviors/fade_out.hpp"
 #include "components/transient_override/brightness_override.hpp"
 #include "components/transient_override/color_override.hpp"
-#include "components/webapp/webapp.hpp"
 #include "util/color.hpp"
 #include "util/dropped_write_log.hpp"
 #include "util/alloc_boundary.hpp"
@@ -148,6 +147,8 @@ static std::function<lamp::GreetingState()> s_greetingStateProvider;
 // Set on Core 0 when the app enables CHAR_STATE_NOTIFY; tick() sends the
 // current state then, since a notify sent before the subscribe is lost.
 static std::atomic<bool>     s_stateSubscribed{false};
+// Whether the connected client has CHAR_STATE_NOTIFY notifications on.
+static std::atomic<bool>     s_stateNotifyOn{false};
 
 static constexpr uint16_t kTightMinUnits = 12;   //  15.0 ms (units of 1.25 ms)
 static constexpr uint16_t kTightMaxUnits = 24;   //  30.0 ms
@@ -358,6 +359,7 @@ class ControlServerCallbacks : public NimBLEServerCallbacks {
     lamp::overrides.base.reassertHold();
     lamp::overrides.shade.reassertHold();
     s_currentConnHandle = 0xFFFF;
+    s_stateNotifyOn.store(false);
     postPendingApplyEffectiveBrightness();
     // Force-flush dispositions so the user's final slider value persists
     // if the lamp loses power before the debounce window elapses.
@@ -404,14 +406,20 @@ class AuthCallback : public NimBLECharacteristicCallbacks {
 
 class BrightnessCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
-    if (!isAuthed(connInfo.getConnHandle())) return;
+    if (!isAuthed(connInfo.getConnHandle())) {
+      lamp::logDroppedWrite("brightness", "unauthenticated");
+      return;
+    }
     if (lamp::ota_quiet_mode::isQuiet()) {
       lamp::logDroppedWrite("brightness", "ota quiet");
       return;
     }
     noteAppWriteActivity();
     std::string val = c->getValue();
-    if (val.empty()) return;
+    if (val.empty()) {
+      lamp::logDroppedWrite("brightness", "empty");
+      return;
+    }
     uint8_t level = static_cast<uint8_t>(val[0]);
     if (level > 100) level = 100;
 #ifdef LAMP_DEBUG
@@ -428,9 +436,15 @@ static NearbyList s_nearby;
 
 class EditSessionCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
-    if (!isAuthed(connInfo.getConnHandle())) return;
+    if (!isAuthed(connInfo.getConnHandle())) {
+      lamp::logDroppedWrite("editSession", "unauthenticated");
+      return;
+    }
     std::string val = c->getValue();
-    if (val.size() < 2) return;
+    if (val.size() < 2) {
+      lamp::logDroppedWrite("editSession", "short");
+      return;
+    }
     const uint8_t surface = static_cast<uint8_t>(val[0]);
     const bool   open    = (val[1] != 0);
     const bool quiet = lamp::ota_quiet_mode::isQuiet();
@@ -453,13 +467,19 @@ class EditSessionCallback : public NimBLECharacteristicCallbacks {
 
 class HomeModeFocusCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
-    if (!isAuthed(connInfo.getConnHandle())) return;
+    if (!isAuthed(connInfo.getConnHandle())) {
+      lamp::logDroppedWrite("homeModeFocus", "unauthenticated");
+      return;
+    }
     if (lamp::ota_quiet_mode::isQuiet()) {
       lamp::logDroppedWrite("homeModeFocus", "ota quiet");
       return;
     }
     std::string val = c->getValue();
-    if (val.empty()) return;
+    if (val.empty()) {
+      lamp::logDroppedWrite("homeModeFocus", "empty");
+      return;
+    }
     const bool active = val[0] != 0;
     s_homeModePageActive = active;
     postPendingApplyEffectiveBrightness();
@@ -471,14 +491,20 @@ class HomeModeFocusCallback : public NimBLECharacteristicCallbacks {
 
 class BaseKnockoutCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
-    if (!isAuthed(connInfo.getConnHandle())) return;
+    if (!isAuthed(connInfo.getConnHandle())) {
+      lamp::logDroppedWrite("knockout", "unauthenticated");
+      return;
+    }
     if (lamp::ota_quiet_mode::isQuiet()) {
       lamp::logDroppedWrite("knockout", "ota quiet");
       return;
     }
     noteAppWriteActivity();
     std::string val = c->getValue();
-    if (val.size() < 2) return;
+    if (val.size() < 2) {
+      lamp::logDroppedWrite("knockout", "short");
+      return;
+    }
     uint8_t pixelIndex = static_cast<uint8_t>(val[0]);
     uint8_t brightness = static_cast<uint8_t>(val[1]);
     if (brightness > 100) brightness = 100;
@@ -525,13 +551,19 @@ class SocialDispositionsCallback : public NimBLECharacteristicCallbacks {
     logBleSectionOom("dispositions");
   }
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
-    if (!isAuthed(connInfo.getConnHandle())) return;
+    if (!isAuthed(connInfo.getConnHandle())) {
+      lamp::logDroppedWrite("socialDispositions", "unauthenticated");
+      return;
+    }
     if (lamp::ota_quiet_mode::isQuiet()) {
       lamp::logDroppedWrite("socialDispositions", "ota quiet");
       return;
     }
     std::string val = c->getValue();
-    if (val.size() > lamp::kPendingJsonOp) return;
+    if (val.size() > lamp::kPendingJsonOp) {
+      lamp::logDroppedWrite("socialDispositions", "oversize");
+      return;
+    }
 #ifdef LAMP_DEBUG
     Serial.printf("[ble_control] WRITE socialDispositions len=%u\n",
                   (unsigned)val.size());
@@ -660,7 +692,10 @@ class SettingsBlobCallback : public NimBLECharacteristicCallbacks {
     const std::string raw = c->getValue();
     // Anything larger than this cannot decode into a payload that fits the
     // pending slot. NimBLE enforces MTU on the link; this is a sanity ceiling.
-    if (raw.size() > lamp::kPendingSettingsBlob + lamp::crypto::WIRE_OVERHEAD) return;
+    if (raw.size() > lamp::kPendingSettingsBlob + lamp::crypto::WIRE_OVERHEAD) {
+      lamp::logDroppedWrite("settingsBlob", "oversize");
+      return;
+    }
     std::string json;
     bool authed = false;
     if (!decodeIncomingOp(raw, handle, uuid.data(), "settingsBlob", json, authed)) {
@@ -680,7 +715,10 @@ class SettingsBlobCallback : public NimBLECharacteristicCallbacks {
 #endif
       return;
     }
-    if (json.empty()) return;
+    if (json.empty()) {
+      lamp::logDroppedWrite("settingsBlob", "empty");
+      return;
+    }
 
 #ifdef LAMP_DEBUG
     Serial.printf("[ble_control] WRITE settingsBlob len=%u (decoded)\n", (unsigned)json.size());
@@ -774,9 +812,15 @@ static const std::array<SectionEntry, 11> kSections = {{
 class PageCtrlCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     const uint16_t handle = connInfo.getConnHandle();
-    if (!isAuthed(handle)) return;
+    if (!isAuthed(handle)) {
+      lamp::logDroppedWrite("pageCtrl", "unauthenticated");
+      return;
+    }
     const std::string name = c->getValue();
-    if (name.empty() || name.size() > 16) return;
+    if (name.empty() || name.size() > 16) {
+      lamp::logDroppedWrite("pageCtrl", name.empty() ? "empty" : "oversize");
+      return;
+    }
 
     ConnSlot* slot = findSlot(handle);
     if (!slot) return;
@@ -927,6 +971,7 @@ class FwControlCallback : public NimBLECharacteristicCallbacks {
 class StateNotifyCallback : public NimBLECharacteristicCallbacks {
   void onSubscribe(NimBLECharacteristic*, NimBLEConnInfo&,
                    uint16_t subValue) override {
+    s_stateNotifyOn.store(subValue != 0);
     if (subValue != 0) s_stateSubscribed.store(true);
   }
 };
@@ -944,7 +989,8 @@ class FwChunkCallback : public NimBLECharacteristicCallbacks {
     }
     // Direct call on the BLE host task; bounded ~0.5 ms (one OTA write +
     // bitmap set). A missed chunk triggers the receiver's REQ watchdog.
-    s_firmwareReceiver->handleChunkOnRecvTask(p, lamp::FirmwareTransportKind::Ble);
+    s_firmwareReceiver->handleChunkOnRecvTask(p, lamp::FirmwareTransportKind::Ble,
+                                              connInfo.getConnHandle());
   }
 };
 
@@ -994,9 +1040,11 @@ void tick() {
   // a client holds the link: a mesh cascade dirties the expressions section
   // with no reader, and a rebuild per cascade is pure heap churn.
   static StateNotifyTrigger s_stateNotifyTrigger;
-  if (s_stateNotifyTrigger.step(s_clientConnected,
-                                s_stateSubscribed.exchange(false))) {
-    notifyStateChange();
+  const uint32_t notifyNowMs = millis();
+  if (s_stateNotifyTrigger.step(s_clientConnected && s_stateNotifyOn.load(),
+                                s_stateSubscribed.exchange(false), notifyNowMs) &&
+      !notifyStateChange()) {
+    s_stateNotifyTrigger.failed(notifyNowMs);
   }
 
   if (!s_clientConnected) {
@@ -1015,12 +1063,12 @@ void setGreetingStateProvider(std::function<lamp::GreetingState()> fn) {
   s_greetingStateProvider = std::move(fn);
 }
 
-void notifyStateChange() {
+bool notifyStateChange() {
   // A greeting edge fires this with no phone attached; the payload has no
   // reader then, and a connecting client reads the state fresh.
-  if (!s_stateNotify || !s_clientConnected) return;
-  std::string payload;
-  const bool built = buildStateNotifyGuarded(
+  if (!s_stateNotify || !s_clientConnected) return false;
+  const StateNotifySend result = sendStateNotify(
+      s_stateNotifyOn.load(), s_currentConnHandle,
       [](StateNotifyFields& fields, lamp::GreetingState& greeting) {
         fields.previewActive = ::expressionManager.isAnyTestActive();
         if (s_greetingStateProvider) {
@@ -1029,13 +1077,11 @@ void notifyStateChange() {
         }
         fields.nearbyRev = s_nearby.rev();
       },
-      payload);
-  if (!built) {
-    logBleSectionOom("stateNotify");
-    return;
-  }
-  s_stateNotify->setValue(payload);
-  s_stateNotify->notify();
+      [](const uint8_t* data, size_t len, uint16_t connHandle) {
+        return s_stateNotify->notify(data, len, connHandle);
+      });
+  if (result == StateNotifySend::NoHeap) logBleSectionOom("stateNotify");
+  return result == StateNotifySend::Sent;
 }
 
 void disableBtModemSleep() {
@@ -1284,16 +1330,8 @@ void pauseRadioForOta() {
   // during BLE windows. Phone app loses connection briefly; reconnects
   // on resumeRadioAfterOta or after the OTA-driven reboot.
   if (!s_radioGate.pauseForOta()) return;
-  // Also tear down the boot-window SoftAP webapp. AP beacons fire every
-  // ~100 ms and contend with the ESP-NOW chunk stream for WiFi airtime;
-  // shutting the AP off frees the band for the OTA. The webapp is a
-  // first-boot config UI; it tears itself down after the 120 s boot
-  // window regardless, so this just brings the inevitable forward.
-#if LAMP_WEBAPP_ENABLED
-  webapp::shutdownForOta();
-#endif
 #ifdef LAMP_DEBUG
-  Serial.println("[ble_control] paused adv + scan + softAP for OTA");
+  Serial.println("[ble_control] paused adv + scan for OTA");
 #endif
 }
 

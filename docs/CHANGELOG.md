@@ -46,6 +46,30 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   unsaved colour rotation.** If a rotation change in the app was never saved,
   finishing an expression test in the web page spun the lamp with that
   rotation for up to a minute. It now restores on the saved rotation.
+- **Web Config comes back after a lamp passes on an update.** Sending or
+  receiving an update over the mesh switched off the lamp's setup Wi-Fi
+  network until the next restart. It now returns once the update ends, if
+  it would still be open. A lamp whose Web Config page was open while it
+  sent an update no longer drops out of reach until it is unplugged: it
+  restarts and the app can connect again.
+- **The app hears again that a lamp has left update mode.** A "quiet"
+  change the lamp had no memory to send, or that Bluetooth had no room to
+  queue, was never sent again, so the app could stay greyed out until its
+  75 s timeout. It is now retried.
+- **A lamp with its Web Config page open waits to pass on an update.**
+  A lamp that started sending an update switched off its setup Wi-Fi
+  network under an open page, so a save hung until the update ended. It
+  now offers updates only once no phone is joined to that network. A phone
+  that joins in the 15 s after an offer goes out does not stop the send: the
+  network drops for the transfer and comes back after it.
+- **Update data sent over Bluetooth must come over the connection that
+  started the update.** A second phone's data is refused, unless the lamp
+  hands the second phone the same connection number.
+
+### Changed
+- **More refused writes show on the debug serial.** Writes from the app
+  refused for missing sign-in, size or a failed decode, and a Web Config
+  social save refused during an update, now print a `[drop]` line.
 
 ## 1.3.7
 
