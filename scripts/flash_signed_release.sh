@@ -64,7 +64,10 @@ fi
 CACHED="$CACHE_DIR/$CACHED_NAME"
 PART="${CACHED}.part"
 HDRS="${CACHED}.hdr"
-cleanup() { rm -f "$APP0FILE" "$SPIFFSFILE" "$PART" "$HDRS"; }
+cleanup() {
+  rm -f "$APP0FILE" "$SPIFFSFILE"
+  [ -n "${IMAGE:-}" ] || rm -f "$PART" "$HDRS"
+}
 trap cleanup EXIT
 
 # otadata offset+size from the partition table, not hardcoded, so a repartition

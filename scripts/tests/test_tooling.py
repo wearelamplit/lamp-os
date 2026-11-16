@@ -115,12 +115,23 @@ class FlashCache(unittest.TestCase):
             if part.exists() and Path(str(img) + ".hdr").exists():
                 break
             time.sleep(0.1)
-        self.assertTrue(part.exists())
+        self.assertTrue(part.exists() and Path(str(img) + ".hdr").exists())
         os.killpg(p.pid, signal.SIGTERM)
         p.wait(timeout=10)
         self.assertFalse(part.exists())
         self.assertFalse(Path(str(img) + ".hdr").exists())
         self.assertEqual(img.read_bytes()[:1], b"A")
+
+    def test_local_image_run_leaves_cache_partials_alone(self):
+        self.cache.mkdir()
+        parts = [self.cache / f"release-standard-beta.bin.{e}" for e in ("part", "hdr")]
+        for q in parts:
+            q.write_text("other run")
+        img = Path(self.d.name) / "local.bin"
+        img.write_bytes(b"L" * 4194304)
+        self.run_flash("zzz", "B", IMAGE=str(img))
+        for q in parts:
+            self.assertEqual(q.read_text(), "other run", q.name)
 
     def test_local_image_leaves_siblings_alone(self):
         img = Path(self.d.name) / "local.bin"
