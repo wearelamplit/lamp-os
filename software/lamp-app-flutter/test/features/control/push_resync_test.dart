@@ -357,11 +357,12 @@ void main() {
       await _pump();
       r.firmware.emit(_failed);
       await _pump();
+      final mark = r.mark();
       await r.ble.connect(_id);
       await _pump();
       expect(r.connected, isTrue);
+      expect(r.focusSince(mark), isNull, reason: 'the lamp reported quiet');
 
-      final mark = r.mark();
       final reads = r.ble.sectionReads;
       r.notify(quiet: true);
       await _pump();
@@ -371,7 +372,13 @@ void main() {
       r.notify(quiet: false);
       await _pump();
       expect(r.frozen, isFalse);
-      expect(r.focusSince(mark), [1], reason: 'the reconnect cleared it');
+      expect(
+        r.payloadsSince(mark, BleUuids.homeModeFocus),
+        [
+          [1],
+        ],
+        reason: 'the reconnect cleared it, once the lamp listens',
+      );
       expect(r.ble.sectionReads, reads, reason: 'the reconnect re-read it');
     });
   });
@@ -406,23 +413,6 @@ void main() {
     await _pump();
     expect(r.c.read(controlNotifierProvider(_id)).value!.previewActive, isTrue);
   });
-
-  test(
-    'a reconnect sends Home Mode focus back once the lamp listens',
-    () async {
-      final r = await _rig();
-      r.notify(quiet: false);
-      r.control.setHomeModeFocus(true);
-      await _pump();
-      await r.reconnect();
-      final mark = r.mark();
-      final reads = r.ble.sectionReads;
-      r.notify(quiet: false);
-      await _pump();
-      expect(r.focusSince(mark), [1]);
-      expect(r.ble.sectionReads, reads);
-    },
-  );
 
   group('push boundaries', () {
     test(
@@ -590,8 +580,9 @@ void main() {
     },
   );
 
-  testWidgets('a rebuilt notifier sends Home Mode focus back once the lamp '
-      'listens', (tester) async {
+  testWidgets('a rebuilt notifier sends Home Mode focus back once', (
+    tester,
+  ) async {
     late _Rig r;
     await tester.runAsync(() async => r = await _rig());
     await tester.pumpWidget(
@@ -602,13 +593,18 @@ void main() {
     );
     await tester.pump();
     await tester.runAsync(() async {
+      r.ble.quietOnSubscribe = false;
+      final mark = r.mark();
       r.c.invalidate(controlNotifierProvider(_id));
       await r.c.read(controlNotifierProvider(_id).future);
       await _pump();
-      final mark = r.mark();
-      r.notify(quiet: false);
-      await _pump();
-      expect(r.focusSince(mark), [1], reason: 'Home Mode is still open');
+      expect(
+        r.payloadsSince(mark, BleUuids.homeModeFocus),
+        [
+          [1],
+        ],
+        reason: 'Home Mode is still open',
+      );
     });
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -740,7 +736,7 @@ void main() {
     });
 
     test(
-      'still sends flags the new link never got, without a re-read',
+      'sends nothing a new link already got, and re-reads nothing',
       () async {
         final r = await _rig();
         r.control.setHomeModeFocus(true);
@@ -751,7 +747,7 @@ void main() {
         final mark = r.mark();
         r.firmware.emit(_declined);
         await _pump();
-        expect(r.focusSince(mark), [1]);
+        expect(r.writesSince(mark), isEmpty);
         expect(r.ble.sectionReads, reads);
       },
     );
@@ -843,6 +839,89 @@ void main() {
     await rebuilt;
     await _pump();
     expect(r.focusSince(mark), [1]);
+  });
+
+  group('a new link sends each held session flag at once, once', () {
+    Future<_Rig> heldFlags() async {
+      final r = await _rig();
+      r.control.setHomeModeFocus(true);
+      r.control.setEditSession(EditSurface.base, true);
+      await r.control.setSocialViewActive(true);
+      await _pump();
+      return r;
+    }
+
+    void expectEachOnce(_Rig r, int mark) {
+      expect(r.payloadsSince(mark, BleUuids.homeModeFocus), [
+        [1],
+      ]);
+      expect(r.payloadsSince(mark, BleUuids.editSession), [
+        [0x01, 1],
+        [0x08, 1],
+      ]);
+    }
+
+    test('on a lamp without quiet, after a reconnect', () async {
+      final r = await heldFlags();
+      final mark = r.mark();
+      await r.reconnect();
+      r.notify();
+      await _pump();
+      expectEachOnce(r, mark);
+    });
+
+    test(
+      'on a lamp without quiet, after Retry from a failed connect',
+      () async {
+        final r = await _rig(baseBusy: true);
+        expect(
+          r.c.read(controlNotifierProvider(_id)).error,
+          isA<LampBusyException>(),
+        );
+        r.control.setHomeModeFocus(true);
+        r.control.setEditSession(EditSurface.base, true);
+        await r.control.setSocialViewActive(true);
+        await seedControlBle(r.ble, deviceId: _id, brightness: 50);
+        final mark = r.mark();
+        r.c.invalidate(controlNotifierProvider(_id));
+        await r.c.read(controlNotifierProvider(_id).future);
+        await _pump();
+        r.notify();
+        await _pump();
+        expectEachOnce(r, mark);
+      },
+    );
+
+    test('on a lamp that reports listening on subscribe', () async {
+      final r = await heldFlags();
+      r.notify(quiet: false);
+      await _pump();
+      r.ble.quietOnSubscribe = false;
+      final mark = r.mark();
+      await r.reconnect();
+      expectEachOnce(r, mark);
+    });
+
+    test('on a lamp that reports quiet on subscribe, then once more when it '
+        'listens, with nothing sent while it reports quiet', () async {
+      final r = await heldFlags();
+      r.notify(quiet: false);
+      await _pump();
+      r.ble.quietOnSubscribe = true;
+      final mark = r.mark();
+      await r.reconnect();
+      expectEachOnce(r, mark);
+
+      final quiet = r.mark();
+      r.notify(quiet: true);
+      await _pump();
+      expect(r.writesSince(quiet), isEmpty);
+
+      final listening = r.mark();
+      r.notify(quiet: false);
+      await _pump();
+      expectEachOnce(r, listening);
+    });
   });
 
   group('a new link sends a held Social open at once', () {
