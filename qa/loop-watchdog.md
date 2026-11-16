@@ -71,8 +71,8 @@ while a firmware or filesystem image is being received.
    timeout 300 s until the loop runs 60 s` and still resets within about 5 s
    of a hang at 90 s. The fifth shows `until the loop runs 120 s`: a hang at
    90 s now freezes the lamp and resets it about 300 s later, and the sixth
-   keeps 120 s. A hang once the loop has run its window doubles it on the next boot, up to
-   960 s.
+   keeps 120 s. A hang once the loop has run its window doubles it on the
+   next boot, up to 960 s.
 7. **Setup hang resets and names its stage.** For each of `wifi`, `mesh` and
    `ota`, run:
 
