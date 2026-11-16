@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <string>
 
 #include "expr_catalog.h"
@@ -462,16 +463,19 @@ static void startServer() {
 #endif
 }
 
+// SoftAP SSID is the lamp's name + "-lamp" so it's recognizable as a lamp's
+// setup network in a Wi-Fi scan.
+static bool startSoftAp() {
+  return wifi::startSoftAp(s_config->lamp.name + "-lamp", s_config->lamp.password);
+}
+
 // Stage 1: softAP only. The heavy server waits for a station to associate.
 void begin(lamp::Config& config) {
   if (s_apUp) return;
   s_config = &config;
   if (!s_webSaveDone) s_webSaveDone = xSemaphoreCreateBinary();
 
-  // SoftAP SSID is the lamp's name + "-lamp" so it's recognizable as a
-  // lamp's setup network in a Wi-Fi scan.
-  const std::string ssid = config.lamp.name + "-lamp";
-  if (!wifi::startSoftAp(ssid, config.lamp.password)) {
+  if (!startSoftAp()) {
 #ifdef LAMP_DEBUG
     Serial.println("[webapp] softAP failed; webapp not started");
 #endif
@@ -509,6 +513,33 @@ static void stopAp() {
   s_apUp = false;
 }
 
+// Serializes the pausing task's shutdownForOta with tick's restore.
+static std::mutex s_otaApMu;
+static OtaApFollower s_otaAp;
+
+// Never waits on the lock; the next pass looks again. Station flags from
+// around the pause are stale (a join would take BLE down for no station).
+static void restoreApAfterOta(uint32_t now) {
+  std::unique_lock<std::mutex> lock(s_otaApMu, std::try_to_lock);
+  if (!lock.owns_lock()) return;
+  const bool wanted = apWantedAfterOta(now, s_deadlineMs.load(), s_neverExpire, s_serverUp);
+  if (!s_otaAp.restore(lamp::ota_quiet_mode::radioTornDown(), wanted)) return;
+  s_pendingServerStart = false;
+  s_pendingServerStop = false;
+  if (!startSoftAp()) {
+    Serial.println("[webapp] softAP not restored after OTA");
+    if (ble_control::isDownForWebapp()) armReboot(now);  // no AP and no BLE: unreachable
+    return;
+  }
+  if (s_serverUp && MDNS.begin("lamp")) {
+    MDNS.addService("http", "tcp", kHttpPort);
+  }
+  s_apUp = true;
+#ifdef LAMP_DEBUG
+  Serial.println("[webapp] softAP back after OTA");
+#endif
+}
+
 static void rebootNow() {
   if (s_fadeOnReboot) {
     // FadeOutBehavior draws over everything, fades to black over
@@ -529,8 +560,8 @@ void tick() {
   drainWebSave();
   const uint32_t now = millis();
   holdPassedDeadline(s_deadlineMs, now, s_deadlineMs.load());
-  // An armed reboot fires even after the AP went down (an OTA's
-  // shutdownForOta): a landed web save freezes config saves until it. It
+  // An armed reboot fires even while an OTA holds the AP down
+  // (shutdownForOta): a landed web save freezes config saves until it. It
   // waits while OTA quiet mode is held. A received update's own reboot loads
   // the save too; a failed one, or a distribution to other lamps (which never
   // reboots this one), leaves quiet mode and this reboot follows. Past
@@ -541,6 +572,7 @@ void tick() {
     rebootNow();  // save path; restart frees the server, never delete s_server
     return;
   }
+  restoreApAfterOta(now);
   if (!s_apUp) return;
 
   // A BLE client's connect proves no station is associated (association takes
@@ -578,7 +610,12 @@ bool isActive() { return s_apUp; }
 bool hasClient() { return s_apUp && WiFi.softAPgetStationNum() > 0; }
 
 void shutdownForOta() {
+  std::lock_guard<std::mutex> lock(s_otaApMu);
+  if (!s_otaAp.stop(lamp::ota_quiet_mode::radioTornDown(), s_apUp)) return;
   stopAp();
+#ifdef LAMP_DEBUG
+  Serial.println("[webapp] softAP down for OTA");
+#endif
 }
 
 }  // namespace webapp

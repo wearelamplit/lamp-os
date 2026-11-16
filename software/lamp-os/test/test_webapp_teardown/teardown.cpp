@@ -119,6 +119,63 @@ void test_raise_never_lowers_a_later_write() {
   TEST_ASSERT_EQUAL_UINT32(9000, deadline.load());
 }
 
+// --- OtaApFollower: the softAP across an OTA radio pause ---
+
+using webapp::OtaApFollower;
+
+// The pause takes an AP that is up down, and its end brings it back, once.
+void test_ota_pause_stops_the_ap_and_its_end_restores_it() {
+  OtaApFollower f;
+  TEST_ASSERT_TRUE(f.stop(/*radioPaused=*/true, /*apUp=*/true));
+  TEST_ASSERT_FALSE(f.restore(/*radioPaused=*/true, /*apWanted=*/true));
+  TEST_ASSERT_TRUE(f.restore(false, true));
+  TEST_ASSERT_FALSE(f.restore(false, true));
+}
+
+// A second pause starting before the first one's restore ran finds the AP
+// already down; the AP still comes back after it.
+void test_reentered_pause_keeps_the_ap_owed() {
+  OtaApFollower f;
+  TEST_ASSERT_TRUE(f.stop(true, true));
+  TEST_ASSERT_FALSE(f.stop(true, false));
+  TEST_ASSERT_TRUE(f.restore(false, true));
+}
+
+// An AP that was already down when the pause began stays down after it.
+void test_ota_pause_leaves_a_down_ap_down() {
+  OtaApFollower f;
+  TEST_ASSERT_FALSE(f.stop(true, false));
+  TEST_ASSERT_FALSE(f.restore(false, true));
+}
+
+// An AP the webapp would have closed meanwhile is not brought back, and the
+// next pause, finding the AP down, owes nothing.
+void test_ota_pause_end_skips_an_ap_no_longer_wanted() {
+  OtaApFollower f;
+  TEST_ASSERT_TRUE(f.stop(true, true));
+  TEST_ASSERT_FALSE(f.restore(false, false));
+  TEST_ASSERT_FALSE(f.stop(true, false));
+  TEST_ASSERT_FALSE(f.restore(false, true));
+}
+
+// No pause, no AP change.
+void test_no_pause_no_stop() {
+  OtaApFollower f;
+  TEST_ASSERT_FALSE(f.stop(false, true));
+  TEST_ASSERT_FALSE(f.restore(false, true));
+}
+
+// A served page (BLE down for it) always gets its AP back; otherwise only a
+// window the webapp would still keep open does.
+void test_ap_wanted_after_ota() {
+  TEST_ASSERT_TRUE(webapp::apWantedAfterOta(5000, 9000, false, false));
+  TEST_ASSERT_FALSE(webapp::apWantedAfterOta(9000, 9000, false, false));
+  TEST_ASSERT_TRUE(webapp::apWantedAfterOta(9000, 9000, true, false));
+  TEST_ASSERT_TRUE(webapp::apWantedAfterOta(9000, 1000, false, true));
+  TEST_ASSERT_TRUE(webapp::apWantedAfterOta(0xFFFFFF80u, 0x00000100u, false, false));
+  TEST_ASSERT_FALSE(webapp::apWantedAfterOta(0x00000200u, 0x00000100u, false, false));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_never_expire_always_false);
@@ -133,5 +190,11 @@ int main(int, char**) {
   RUN_TEST(test_raise_between_load_and_hold_wins);
   RUN_TEST(test_raise_only_moves_the_deadline_later);
   RUN_TEST(test_raise_never_lowers_a_later_write);
+  RUN_TEST(test_ota_pause_stops_the_ap_and_its_end_restores_it);
+  RUN_TEST(test_reentered_pause_keeps_the_ap_owed);
+  RUN_TEST(test_ota_pause_leaves_a_down_ap_down);
+  RUN_TEST(test_ota_pause_end_skips_an_ap_no_longer_wanted);
+  RUN_TEST(test_no_pause_no_stop);
+  RUN_TEST(test_ap_wanted_after_ota);
   return UNITY_END();
 }

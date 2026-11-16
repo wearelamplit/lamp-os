@@ -4,15 +4,21 @@
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
 #include "components/network/ble/ble_control.hpp"
+#if LAMP_WEBAPP_ENABLED
+#include "components/webapp/webapp.hpp"
+#endif
 #endif
 
 namespace lamp {
 namespace ota_quiet_mode {
 
 // The radio teardown and its undo, injectable so a native test can stall them.
+// `afterPause` runs once per pause, on the pausing task, after the transition
+// lock is released.
 struct RadioOps {
   void (*pause)();
   void (*resume)();
+  void (*afterPause)() = [] {};
 };
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
@@ -20,7 +26,12 @@ static void pauseRadioAndKickClients() {
   ::ble_control::pauseRadioForOta();
   ::ble_control::disconnectGattClientsForOta();
 }
+#if LAMP_WEBAPP_ENABLED
+static RadioOps s_radio{pauseRadioAndKickClients, ::ble_control::resumeRadioAfterOta,
+                        ::webapp::shutdownForOta};
+#else
 static RadioOps s_radio{pauseRadioAndKickClients, ::ble_control::resumeRadioAfterOta};
+#endif
 #else
 static RadioOps s_radio{[] {}, [] {}};
 #endif
@@ -52,16 +63,17 @@ static std::atomic<bool> s_torndown{false};
 static std::atomic<bool> s_visible{true};
 
 void enterQuiet(bool tearDownRadio, bool visible) {
-  std::lock_guard<std::mutex> lock(s_transitionMu);
-  const int prev = s_quietCount.fetch_add(1, std::memory_order_acq_rel);
-  if (prev != 0) return;  // Already active; second-in is a no-op
-                          // beyond bumping the count.
-  s_visible.store(visible, std::memory_order_release);
-
-  if (tearDownRadio) {
+  {
+    std::lock_guard<std::mutex> lock(s_transitionMu);
+    const int prev = s_quietCount.fetch_add(1, std::memory_order_acq_rel);
+    if (prev != 0) return;  // Already active; second-in is a no-op
+                            // beyond bumping the count.
+    s_visible.store(visible, std::memory_order_release);
+    if (!tearDownRadio) return;
     s_radio.pause();
     s_torndown.store(true, std::memory_order_release);
   }
+  s_radio.afterPause();
 }
 
 void exitQuiet() {
@@ -84,6 +96,10 @@ bool isQuiet() {
 
 int holders() {
   return s_quietCount.load(std::memory_order_acquire);
+}
+
+bool radioTornDown() {
+  return s_torndown.load(std::memory_order_acquire);
 }
 
 bool visibleOtaActive() {

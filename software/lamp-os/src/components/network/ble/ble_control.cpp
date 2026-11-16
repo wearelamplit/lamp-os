@@ -23,7 +23,6 @@
 #include "behaviors/fade_out.hpp"
 #include "components/transient_override/brightness_override.hpp"
 #include "components/transient_override/color_override.hpp"
-#include "components/webapp/webapp.hpp"
 #include "util/color.hpp"
 #include "util/dropped_write_log.hpp"
 #include "util/alloc_boundary.hpp"
@@ -1311,16 +1310,8 @@ void pauseRadioForOta() {
   // during BLE windows. Phone app loses connection briefly; reconnects
   // on resumeRadioAfterOta or after the OTA-driven reboot.
   if (!s_radioGate.pauseForOta()) return;
-  // Also tear down the boot-window SoftAP webapp. AP beacons fire every
-  // ~100 ms and contend with the ESP-NOW chunk stream for WiFi airtime;
-  // shutting the AP off frees the band for the OTA. The webapp is a
-  // first-boot config UI; it tears itself down after the 120 s boot
-  // window regardless, so this just brings the inevitable forward.
-#if LAMP_WEBAPP_ENABLED
-  webapp::shutdownForOta();
-#endif
 #ifdef LAMP_DEBUG
-  Serial.println("[ble_control] paused adv + scan + softAP for OTA");
+  Serial.println("[ble_control] paused adv + scan for OTA");
 #endif
 }
 
