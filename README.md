@@ -187,4 +187,4 @@ npm run wisp:flash        # flash a connected wisp
 npm run wisp:monitor      # serial monitor
 ```
 
-The flash tasks upload to the first board PlatformIO finds. With multiple boards connected, target a specific one with the raw PlatformIO command and `--upload-port`, e.g. `cd software/lamp-os && pio run -e upesy_wroom_standard -t upload --upload-port /dev/cu.SLAB_USBtoUART` on macOS or `--upload-port COM5` on Windows.
+Flash tasks upload to the first board PlatformIO finds. With multiple boards connected, set `PORT`, e.g. `PORT=/dev/cu.SLAB_USBtoUART npm run lamp:flash` on macOS or `PORT=COM5` on Windows. `wisp:flash` takes no `PORT`; use the raw command with `--upload-port`: `cd software/wisp && bash ../../scripts/with_pio_lock.sh pio run -e seeed_xiao_esp32_c6 -t upload --upload-port <port>`.

@@ -59,12 +59,12 @@ A signed binary needs an explicit channel (`beta` or `stable`) plus the key; a
 bare build is `dev` (unsigned, `LAMP_DEBUG` on, OTA island).
 
 ```sh
-cd software/lamp-os && LAMP_FIRMWARE_CHANNEL=beta pio run -e upesy_wroom_standard
+cd software/lamp-os && LAMP_FIRMWARE_CHANNEL=beta bash ../../scripts/with_pio_lock.sh pio run -e upesy_wroom_standard
   # post-build sign_firmware.py appends the LSIG footer to firmware.bin and
   # writes firmware-signed.bin alongside it. This is what the app pushes over
   # BLE to seed gossip-OTA across the fleet.
 
-cd software/wisp && LAMP_FIRMWARE_CHANNEL=beta pio run -e seeed_xiao_esp32_c6
+cd software/wisp && LAMP_FIRMWARE_CHANNEL=beta bash ../../scripts/with_pio_lock.sh pio run -e seeed_xiao_esp32_c6
   # sign_firmware.py runs the same way. The signed wisp binary has no consumer
   # today (wisps don't gossip-OTA), but the hook stays for a future wisp
   # self-OTA path.
@@ -78,7 +78,7 @@ cd software/wisp && LAMP_FIRMWARE_CHANNEL=beta pio run -e seeed_xiao_esp32_c6
 (never signs, never sources OTA); `beta` and `stable` sign and require the key.
 
 ```sh
-LAMP_FIRMWARE_CHANNEL=beta pio run -e upesy_wroom_standard
+LAMP_FIRMWARE_CHANNEL=beta bash ../../scripts/with_pio_lock.sh pio run -e upesy_wroom_standard
 ```
 
 A `beta` lamp's OFFER carries `channel="…-beta"`; a `stable` peer silently

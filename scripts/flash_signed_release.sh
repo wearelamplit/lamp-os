@@ -20,14 +20,19 @@
 # Env vars:
 #   VARIANT      lamp variant: standard (default) or snafu
 #   PORT         esptool upload port (required if multiple boards attached)
-#   RELEASE_TAG  GitHub release tag to pull from: beta (default) or a version tag such as v1.3.0
+#   RELEASE_TAG  GitHub release tag to pull from: beta (default), stable or a version tag such as v1.3.0
 #   IMAGE        flash this local distribution.bin, skip the download (used for
 #                a locally-built signed variant with no release asset, e.g. loaf)
-#   CACHE_DIR    where downloads are cached and reused, one file per variant and
-#                release tag: release-<variant>-<tag>.bin, any "/" in the tag
-#                becomes "_" (default ~/.cache/lamp-os). The name stays clear of
-#                the distribution-*.bin local builds that flash_prebuilt.sh picks.
-#   REFRESH      set to force a re-download even if a cached image exists
+#   CACHE_DIR    where version-tag downloads are cached, one file per variant and
+#                tag: release-<variant>-<tag>.bin, any "/" in the tag becomes "_"
+#                (default ~/.cache/lamp-os). The name stays clear of the
+#                distribution-*.bin local builds that flash_prebuilt.sh picks.
+#   REFRESH      set to re-download a cached version-tag image; a failed refresh
+#                errors and keeps the cached image
+#
+# Rolling tags (anything not starting with v and a digit, e.g. beta and stable) are downloaded on every
+# run into a temporary file that is deleted on exit, and never fall back to an old
+# copy, so offline they fail. A vX.Y.Z image is immutable, so it is cached.
 #
 # For people WITHOUT the signing key: downloads a prebuilt image, never builds
 # or signs. Requires: curl, esptool (pip install esptool), dd.
@@ -39,12 +44,11 @@ RELEASE_TAG="${RELEASE_TAG:-beta}"
 ASSET="distribution-${VARIANT}.bin"
 REPO="wearelamplit/lamp-os"
 URL="https://github.com/${REPO}/releases/download/${RELEASE_TAG}/${ASSET}"
-# Cache the merged image so a re-flash (or an offline bench) reuses it instead of
-# re-pulling 4 MiB. IMAGE=<path> flashes a local image (e.g. a locally-built
-# signed loaf) and skips the network entirely.
 CACHE_DIR="${CACHE_DIR:-$HOME/.cache/lamp-os}"
-CACHED_NAME="release-${VARIANT}-${RELEASE_TAG//\//_}.bin"
-TMPFILE="${IMAGE:-$CACHE_DIR/$CACHED_NAME}"
+CACHED="$CACHE_DIR/release-${VARIANT}-${RELEASE_TAG//\//_}.bin"
+ROLLING=1
+case "$RELEASE_TAG" in v[0-9]*) ROLLING="" ;; esac
+DOWNLOAD=""
 APP0FILE="$(mktemp -t lamp-app0-XXXX.bin)"
 SPIFFSFILE="$(mktemp -t lamp-spiffs-XXXX.bin)"
 # Prefer the esptool binary on PATH, else the module form (pip installs the
@@ -56,7 +60,7 @@ else
   ESPTOOL=( python3 -m esptool )
 fi
 
-cleanup() { rm -f "$APP0FILE" "$SPIFFSFILE"; }
+cleanup() { rm -f "$APP0FILE" "$SPIFFSFILE" ${DOWNLOAD:+"$DOWNLOAD"}; }
 trap cleanup EXIT
 
 # otadata offset+size from the partition table, not hardcoded, so a repartition
@@ -70,47 +74,59 @@ if [ -z "${OTADATA_OFF:-}" ] || [ -z "${OTADATA_SIZE:-}" ]; then
   exit 1
 fi
 
-if [ -s "$TMPFILE" ]; then
-  if [ -n "${IMAGE:-}" ]; then
-    echo "[flash:release] using local image ${TMPFILE}"
-  elif [ -n "${REFRESH:-}" ]; then
-    rm -f "$TMPFILE"
-  else
-    echo "[flash:release] using cached image ${TMPFILE} (release '${RELEASE_TAG}'; REFRESH=1 to re-download)"
+# A short image would dd garbage past its end into the flashed regions.
+require_full_image() {
+  local size
+  size="$(wc -c < "$1")"
+  if [ "$size" -lt $((0x400000)) ]; then
+    echo "ERROR: image is ${size} bytes, expected at least 4 MiB (0x400000)." >&2
+    exit 1
   fi
-fi
+}
 
-if [ ! -s "$TMPFILE" ]; then
-  if [ -n "${IMAGE:-}" ]; then
+if [ -n "${IMAGE:-}" ]; then
+  if [ ! -s "$IMAGE" ]; then
     echo "ERROR: IMAGE=${IMAGE} not found or empty." >&2
     exit 1
   fi
+  IMG="$IMAGE"
+  echo "[flash:release] using local image ${IMG}"
+elif [ -z "$ROLLING" ] && [ -s "$CACHED" ] && [ -z "${REFRESH:-}" ]; then
+  IMG="$CACHED"
+  echo "[flash:release] using cached image ${IMG} (release '${RELEASE_TAG}'; REFRESH=1 to re-download)"
+else
   mkdir -p "$CACHE_DIR"
+  DOWNLOAD="$(mktemp "$CACHE_DIR/.download-XXXXXX")"
   echo "[flash:release] downloading ${ASSET} from release '${RELEASE_TAG}' (${REPO})"
-  if ! curl -fSL --retry 3 -o "${TMPFILE}" "${URL}"; then
-    rm -f "$TMPFILE"
-    echo "ERROR: asset '${ASSET}' not found in release '${RELEASE_TAG}'." >&2
-    echo "       Publish a release for tag '${RELEASE_TAG}' on GitHub, then retry." >&2
+  if ! curl -fSL --retry 3 -o "$DOWNLOAD" "$URL"; then
+    if [ -z "$ROLLING" ] && [ -n "${REFRESH:-}" ] && [ -s "$CACHED" ]; then
+      echo "ERROR: REFRESH download failed; the cached image was kept." >&2
+    else
+      echo "ERROR: asset '${ASSET}' not downloaded from release '${RELEASE_TAG}'." >&2
+      echo "       Publish a release for tag '${RELEASE_TAG}' on GitHub, check the network, then retry." >&2
+    fi
     exit 1
+  fi
+  require_full_image "$DOWNLOAD"
+  IMG="$DOWNLOAD"
+  if [ -z "$ROLLING" ]; then
+    mv "$DOWNLOAD" "$CACHED"
+    DOWNLOAD=""
+    IMG="$CACHED"
   fi
 fi
 
-if [ ! -s "$TMPFILE" ]; then
+if [ ! -s "$IMG" ]; then
   echo "ERROR: image is empty." >&2
   exit 1
 fi
 
-# A short image would dd garbage past its end into the flashed regions.
-IMG_SIZE="$(wc -c < "$TMPFILE")"
-if [ "$IMG_SIZE" -lt $((0x400000)) ]; then
-  echo "ERROR: image is ${IMG_SIZE} bytes, expected at least 4 MiB (0x400000)." >&2
-  exit 1
-fi
+require_full_image "$IMG"
 
 # Carve app0 (0x10000, len 0x1e0000) and spiffs (0x3d0000, len 0x30000) out of
 # the merged image, in 4096-byte blocks.
-dd if="$TMPFILE" of="$APP0FILE"   bs=4096 skip=16  count=480 2>/dev/null
-dd if="$TMPFILE" of="$SPIFFSFILE" bs=4096 skip=976 count=48  2>/dev/null
+dd if="$IMG" of="$APP0FILE"   bs=4096 skip=16  count=480 2>/dev/null
+dd if="$IMG" of="$SPIFFSFILE" bs=4096 skip=976 count=48  2>/dev/null
 
 echo "[flash:release] updating firmware (app0 @0x10000) + spiffs (@0x3d0000); NVS preserved..."
 PORT_ARG=()

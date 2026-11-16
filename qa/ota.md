@@ -18,7 +18,7 @@ mesh transport under it.
   - the published GitHub release (`beta` republishes on every `dev` push) via
     `npm run lamp:flash:release`;
   - a local signed build — no npm task exists; the key-holder runs pio directly
-    (`cd software/lamp-os && LAMP_FIRMWARE_CHANNEL=beta PLATFORMIO_UPLOAD_PORT=<port> pio run -e upesy_wroom_standard -t upload`) —
+    (`cd software/lamp-os && LAMP_FIRMWARE_CHANNEL=beta PLATFORMIO_UPLOAD_PORT=<port> bash ../../scripts/with_pio_lock.sh pio run -e upesy_wroom_standard -t upload`) —
     signing is automatic on a non-dev channel and requires both the firmware
     key at `~/.lamp-os-firmware-key.bin` and the command key
     (`LAMP_COMMAND_KEY_HEX` or `~/.lamp-os-command-key.hex`).
@@ -281,7 +281,7 @@ data behind the RSSI gate.
   a lamp into the bootloader (silent). `esptool --after hard_reset read_mac` runs it.
 - **A version delta needs a forced clean build** — the injected version define is
   not a tracked dependency, so a `VERSION`-only change flashes a cached binary.
-  Purge `.pio/build` + `.buildcache` first.
+  Purge `.pio/build` first.
 - **Do not touch `VERSION` while a build reads it** — the pre-build hook races.
 - **Tail read-only and attach before the transfer** — opening a port mid-OTA
   resets the lamp and aborts it. `bench_tap.py` (or a DTR-held read) holds the lines.

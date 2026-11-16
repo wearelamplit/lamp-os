@@ -59,7 +59,7 @@ All tasks run from the repo root.
 
 | Task | What it does |
 |---|---|
-| `npm run lamp:flash:release` | Download the CI-signed release and update the lamp over USB: firmware (app0) + web UI (spiffs), boot slot reset to app0, NVS kept (no build, no key). `RELEASE_TAG` picks the release (default `beta`; stable releases are tagged by version, e.g. `v1.3.0`); downloads are cached in `~/.cache/lamp-os` (`REFRESH=1` re-downloads) |
+| `npm run lamp:flash:release` | Download the CI-signed release and update the lamp over USB: firmware (app0) + web UI (spiffs), boot slot reset to app0, NVS kept (no build, no key). `RELEASE_TAG` picks the release (default `beta`; stable releases are tagged by version, e.g. `v1.3.0`); `beta`/`stable` are downloaded fresh on every run (offline they fail); a version-tag image is cached in `~/.cache/lamp-os` (`REFRESH=1` re-downloads it; a failed refresh errors and keeps the cache) |
 | `npm run lamp:flash` | Build unsigned locally + flash over USB (`VARIANT`/`CHANNEL`/`PORT` env params) — dev flashes; boots and meshes fine, can't source OTA |
 | `npm run lamp:build` | Build lamp firmware, unsigned (`VARIANT` env param) |
 | `npm run lamp:test` | Native firmware unit tests (the CI suite) |
@@ -80,13 +80,19 @@ npm run lamp:flash
 Unsigned dev flashes boot and mesh normally; they only can't *source* OTA.
 Needs the firmware toolchain (`pio`).
 
+Concurrent firmware builds (lamp and wisp) queue on one machine-wide lock (`scripts/with_pio_lock.sh`,
+`~/.platformio/lamp-build.lock`, override with `LAMP_PIO_LOCK`). The lamp build rewrites the
+shared PlatformIO framework libs and a wisp build reinstalls them, so two at once can link a
+half-written library. A second build prints that it is waiting, then runs. Native tests do not
+take it. Run a raw `pio run` through the same script.
+
 To flash the CI-signed release instead — a stock lamp with no build and no
 toolchain beyond `esptool` + `curl`:
 
 ```sh
 npm run lamp:flash:release
 # VARIANT / RELEASE_TAG / PORT env params (standard / beta / auto-detect)
-# RELEASE_TAG=v1.3.0 flashes a stable release; there is no "stable" tag
+# RELEASE_TAG=v1.3.0 flashes that version; RELEASE_TAG=stable is the rolling release from main
 ```
 
 ## Update the app on a phone

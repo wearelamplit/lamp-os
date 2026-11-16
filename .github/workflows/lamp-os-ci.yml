@@ -38,3 +38,5 @@ jobs:
         run: npm run wisp:build
       - name: Wisp native tests
         run: npm run wisp:test
+      - name: Tooling tests
+        run: npm run tooling:test

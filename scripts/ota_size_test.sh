@@ -32,10 +32,10 @@ grep -n 'FW_CHUNK_SIZE_MAX ' "$FW" | head -1
 
 build() { # $1 = version
   printf '%s' "$1" > "$WT/VERSION"
-  rm -rf "$LAMP/.pio/build/upesy_wroom_standard" "$LAMP/.buildcache"
+  rm -rf "$LAMP/.pio/build/upesy_wroom_standard"
   local flags="-D LAMP_DEBUG"
   [ -n "${TX_QDBM:-}" ] && flags="$flags -D LAMP_ESPNOW_TX_QDBM=$TX_QDBM"
-  ( cd "$LAMP" && LAMP_FIRMWARE_CHANNEL=beta PLATFORMIO_BUILD_FLAGS="$flags" pio run -e upesy_wroom_standard ) >/dev/null 2>&1
+  ( cd "$LAMP" && LAMP_FIRMWARE_CHANNEL=beta PLATFORMIO_BUILD_FLAGS="$flags" "$WT/scripts/with_pio_lock.sh" pio run -e upesy_wroom_standard ) >/dev/null 2>&1
   [ -f "$SIGNED" ] || { echo "BUILD FAIL v$1"; exit 1; }
 }
 flash() { # $1 = port — retries: esptool sync hiccups are transient
