@@ -98,7 +98,10 @@ with one colour, or with other than one segment, never rotates.
   `ConfiguratorBehavior::scene()`), so a rotating role resumes rotating from
   where the marker stopped it, even when RAM config holds an abandoned edit.
   An expression Test that completes restores the role scene, so it keeps
-  rotating.
+  rotating. When the completion carries colours (the web config page's
+  restore), they go up on the saved scene's rotation
+  (`ConfiguratorBehavior::showOnSavedRotation`), never a rotation an
+  abandoned app edit left in RAM config.
 
 ### Multi-segment roles
 

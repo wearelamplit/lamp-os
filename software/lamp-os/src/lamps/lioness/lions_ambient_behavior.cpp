@@ -58,7 +58,9 @@ void LionsAmbientBehavior::requestStops(const Mac& m, uint32_t nowMs) {
     if (busy && q.mac == m) return;
     if (!busy && !slot) slot = &q;
   }
-  if (!slot) return;
+  // An answer frees its slot inside the resend window, so a lion moving on
+  // can send faster than MeshLink drains resends; it waits for a free one.
+  if (!slot || !meshLink_->colorQueryResendFree()) return;
   meshLink_->sendColorQuery(m.data());  // fill via onColorInfo
   *slot = {m, nowMs};
 }
@@ -74,14 +76,17 @@ void LionsAmbientBehavior::onColorInfo(const uint8_t srcMac[6],
                                        std::span<const Color> baseStops,
                                        std::span<const Color> /*shadeStops*/) {
   Mac m{}; std::memcpy(m.data(), srcMac, 6);
-  for (PendingQuery& q : pending_) if (q.mac == m) q = {};
   Cached* slot = nullptr;
   for (Cached& c : stopCache_) if (c.mac == m) slot = &c;
   for (Cached& c : stopCache_) if (!slot && c.mac == kIdle) slot = &c;
   for (Cached& c : stopCache_) if (!slot && !shown(c.mac)) slot = &c;
-  if (!slot) return;
-  slot->baseStops.assign(baseStops.begin(), baseStops.end());
-  slot->mac = m;
+  if (slot) {
+    // A refused copy throws here and leaves the query busy, so a lamp out of
+    // memory does not re-ask every frame.
+    slot->baseStops.assign(baseStops.begin(), baseStops.end());
+    slot->mac = m;
+  }
+  for (PendingQuery& q : pending_) if (q.mac == m) q = {};
 }
 
 void LionsAmbientBehavior::triggerGreeting(const lamp::PeerView& peer) {

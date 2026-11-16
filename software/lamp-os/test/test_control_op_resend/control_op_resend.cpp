@@ -226,6 +226,41 @@ void test_unicast_enqueue_replaces_slot() {
   }
 }
 
+// idle() answers whether the next enqueue would cut an earlier frame's resends
+// short: false while the slot it takes still has copies to send, true once
+// that slot is spent, whatever the other slots hold.
+void test_idle_tracks_the_slot_the_next_enqueue_takes() {
+  ResendRing<lp::CONTROL_MAX_SIZE, 3> ring;
+  uint8_t frame[lp::CONTROL_MAX_SIZE];
+  const size_t n = lp::buildControlOp(frame, sizeof(frame), /*seq=*/1,
+                                      kBcast, kSrc, kPayload, sizeof(kPayload));
+  Capture cap;
+  TEST_ASSERT_TRUE(ring.idle());
+  ring.enqueue(frame, n, 1000, /*resends=*/1, kGapMs);
+  ring.enqueue(frame, n, 1000, /*resends=*/3, kGapMs);
+  TEST_ASSERT_TRUE(ring.idle());   // third slot still empty
+  ring.enqueue(frame, n, 1000, /*resends=*/2, kGapMs);
+  TEST_ASSERT_FALSE(ring.idle());  // all three in flight; next takes slot 0
+
+  ring.service(1000 + kGapMs, cap);   // slot 0 spends its single copy
+  TEST_ASSERT_TRUE(ring.idle());
+  ring.enqueue(frame, n, 1000 + kGapMs, /*resends=*/2, kGapMs);
+  TEST_ASSERT_FALSE(ring.idle());     // next is slot 1, 2 copies left
+
+  ring.service(1000 + 2 * kGapMs, cap);   // slot 1: 1 left, slot 2: spent
+  TEST_ASSERT_FALSE(ring.idle());
+  ring.service(1000 + 3 * kGapMs, cap);   // slot 1 spent
+  TEST_ASSERT_TRUE(ring.idle());
+
+  ResendRing<lp::CONTROL_MAX_SIZE, 1> one;
+  one.enqueue(frame, n, 0, kResends, kGapMs);
+  for (uint8_t k = 0; k < kResends; ++k) {
+    TEST_ASSERT_FALSE(one.idle());
+    one.service((k + 1) * kGapMs, cap);
+  }
+  TEST_ASSERT_TRUE(one.idle());
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
@@ -239,5 +274,6 @@ int main(int argc, char** argv) {
   RUN_TEST(test_command_ring_covers_384_rejects_385);
   RUN_TEST(test_unicast_resend_targets_embedded_mac);
   RUN_TEST(test_unicast_enqueue_replaces_slot);
+  RUN_TEST(test_idle_tracks_the_slot_the_next_enqueue_takes);
   return UNITY_END();
 }

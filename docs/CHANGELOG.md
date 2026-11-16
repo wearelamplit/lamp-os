@@ -31,6 +31,21 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   exactly the factory colour, such as white on the white LED only, came back
   with the lamp type's default colour (dim orange on a standard lamp) after a
   reboot. Saved colours are now kept as saved.
+- **Lion heads and snafu pick up a visiting lamp's colours more reliably in a
+  crowd.** When two colour requests or two colour replies reached a lamp
+  between two passes of its main loop, the newer one replaced the older, and
+  a Lioness churning through answers could cut an earlier request's repeat
+  sends short. A lion head could sit on the lamp's main colour for up to 3
+  seconds, and a snafu could miss the colours of the lamp it just greeted (one
+  possible cause of it skipping the borrowed colours afterwards). Requests and
+  replies now wait their turn instead.
+- **A Lioness almost out of memory no longer asks for colours every frame.**
+  When it could not store a reply, it asked the same lamp again on the very
+  next frame; it now waits its usual 3 seconds.
+- **Leaving the expressions tab in the web config page no longer replays an
+  unsaved colour rotation.** If a rotation change in the app was never saved,
+  finishing an expression test in the web page spun the lamp with that
+  rotation for up to a minute. It now restores on the saved rotation.
 
 ## 1.3.7
 

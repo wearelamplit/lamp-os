@@ -463,6 +463,61 @@ void test_zone_release_without_a_marker_changes_nothing() {
   r.rotate(scene, 100);
 }
 
+// The web config page's restore (test_expression_complete with colours)
+// while the scene on show runs on an abandoned edit's rotation: colours other
+// than the saved ones run on the saved scene's rotation, or stand still on a
+// static saved scene, for as long as the restore holds.
+void test_restore_runs_on_the_saved_rotation() {
+  const RoleScene edit = rotatingScene(stopsB(), 5, RotationDir::Down);
+  for (bool savedRotates : {true, false}) {
+    Rig r(Surface::Shade);
+    const RoleScene saved = savedRotates ? rotatingScene(stopsA(), 40, RotationDir::Up)
+                                         : buildRoleScene(kPx, stopsA(), ColorRotation{});
+    r.saveScene(saved);
+    r.cfg.colors = saved.colors;
+    r.tick(5000);
+    if (savedRotates) r.expect(saved, r.now);
+    r.write(edit, 0);
+    r.rotate(edit, 20);
+
+    set_mock_millis(r.now);
+    r.cfg.showOnSavedRotation(rgb());
+    r.cfg.lastWebSocketUpdateTimeMs = r.now;
+    const RoleScene want = buildRoleScene(kPx, rgb(), saved.rotation);
+    TEST_ASSERT_EQUAL(savedRotates, r.cfg.rotating());
+    for (int k = 0; k < 200; ++k) {
+      r.step();
+      assertFrame(savedRotates ? r.expect(want, r.now) : want.colors, r.fb.buffer);
+    }
+  }
+}
+
+// Restoring the saved colours puts the saved scene back as it runs, so the
+// edit window ending changes nothing on the strip.
+void test_restore_of_the_saved_colours_runs_on_past_the_edit_window() {
+  const RoleScene edit = rotatingScene(stopsB(), 5, RotationDir::Down);
+  for (bool savedRotates : {true, false}) {
+    Rig r(Surface::Base);
+    const RoleScene saved = savedRotates ? rotatingScene(stopsA(), 40, RotationDir::Up)
+                                         : buildRoleScene(kPx, stopsA(), ColorRotation{});
+    r.saveScene(saved);
+    r.cfg.colors = saved.colors;
+    r.tick(5000);
+    if (savedRotates) r.expect(saved, r.now);
+    r.write(edit, 0);
+    r.rotate(edit, 20);
+
+    set_mock_millis(r.now);
+    r.cfg.showOnSavedRotation(stopsA());
+    r.cfg.lastWebSocketUpdateTimeMs = r.now;
+    const uint32_t restored = r.now;
+    while (r.now <= restored + CONFIGURATOR_WEBSOCKET_TIMEOUT_MS + 2000) {
+      r.step();
+      assertFrame(savedRotates ? r.expect(saved, r.now) : saved.colors, r.fb.buffer);
+    }
+  }
+}
+
 // A rotating saved scene rotates from boot, from the frame the fade-in
 // ends on, and never stops.
 void test_saved_rotating_scene_rotates_from_boot() {
@@ -821,6 +876,8 @@ int main(int, char**) {
   RUN_TEST(test_zone_release_restores_the_scene_shown_after_an_abandoned_edit);
   RUN_TEST(test_zone_release_restores_the_edit_when_the_marker_goes_up_mid_edit);
   RUN_TEST(test_zone_release_without_a_marker_changes_nothing);
+  RUN_TEST(test_restore_runs_on_the_saved_rotation);
+  RUN_TEST(test_restore_of_the_saved_colours_runs_on_past_the_edit_window);
   RUN_TEST(test_saved_rotating_scene_rotates_from_boot);
   RUN_TEST(test_abandoned_preview_returns_to_the_rotating_saved_scene);
   RUN_TEST(test_abandoned_rotating_preview_settles_on_the_static_saved_scene);

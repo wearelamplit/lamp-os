@@ -219,7 +219,7 @@ CONTROL_OP does not carry `triggerExpression`; directed expression triggers ride
 
 Only wisp traffic uses CONTROL_OP between devices: a lamp unicasts the app's `wispOp` to its display wisp, and the wisp broadcasts `wispStatus` and `wispConfig`. A lamp never sends lamp settings to another lamp, and the app never routes them through one. A lamp still parses, dedups and relays every CONTROL_OP whatever its tag, so lamps of any version coexist, but from a mesh-received op it takes only `wispStatus` and `wispConfig` (`inboundControlOpKind`, `applyInboundControlOp`); any other tag (an older lamp's settings, a relayed `wispOp`) is relayed and dropped. The lamp-setting tags apply only to the app's own `CHAR_REMOTE_OP` write on the lamp it is connected to.
 
-The unacked broadcast types a lamp sends (`MSG_COMMAND`, `MSG_COLOR_QUERY`, `MSG_COLOR_INFO`) have no per-frame retry, so each send buffers the identical frame (same seq) in a per-type `ResendRing` and `MeshLink::tick()` re-broadcasts it `kResends` more times, `kResendGapMs` (40 ms) apart — spaced so the copies fall in different RX-scan gaps rather than one hole. The gap must exceed the ~15 ms scan window, which only holds because the lamp runs a uniform continuous 1.5% BLE scan with no periodic high-duty burst to black out RX. The rings are per-type (not one shared ring) so a command fan-out's replays don't crowd out a colour query's; a lamp's only control op, the unicast wispOp, has its own ring (`controlOpUnicastResend_`, below); a command's ring holds one slot per fan-out target so every peer's frame stays in flight, and a command frame with a payload larger than the ring's 358 B budget sends once; the colour-query ring holds `kColorQueryResendSlots` (3) slots so every query one tick sends (the Lioness's three lions at once) keeps its resends. `MSG_COMMAND` is how a cascade reaches each nearby lamp, so this is what makes a triggered-expression wave survive coex loss. The receiver's per-type `DedupRing` collapses the copies to one apply; receive-side state, no wire change.
+The unacked broadcast types a lamp sends (`MSG_COMMAND`, `MSG_COLOR_QUERY`, `MSG_COLOR_INFO`) have no per-frame retry, so each send buffers the identical frame (same seq) in a per-type `ResendRing` and `MeshLink::tick()` re-broadcasts it `kResends` more times, `kResendGapMs` (40 ms) apart — spaced so the copies fall in different RX-scan gaps rather than one hole. The gap must exceed the ~15 ms scan window, which only holds because the lamp runs a uniform continuous 1.5% BLE scan with no periodic high-duty burst to black out RX. The rings are per-type (not one shared ring) so a command fan-out's replays don't crowd out a colour query's; a lamp's only control op, the unicast wispOp, has its own ring (`controlOpUnicastResend_`, below); a command's ring holds one slot per fan-out target so every peer's frame stays in flight, and a command frame with a payload larger than the ring's 358 B budget sends once; the colour-query ring holds `kColorQueryResendSlots` (3) slots so the Lioness's three lions can query at once, each keeping its resends. A caller that may send more within the resend window (`kResends` × `kResendGapMs`) waits on `MeshLink::colorQueryResendFree()` (`ResendRing::idle()`: the slot the next enqueue takes has no copies left), and a lamp answers queries only while `colorInfoResendFree()`, so no reply's resends are cut short. LAMP_DEBUG logs `[resend.overwrite] buf=… slots=… lost=…` when an enqueue does cut one; the colour-query ring is `buf=18 slots=3`, and on the 1-slot control-op ring a replace is by design. `MSG_COMMAND` is how a cascade reaches each nearby lamp, so this is what makes a triggered-expression wave survive coex loss. The receiver's per-type `DedupRing` collapses the copies to one apply; receive-side state, no wire change.
 
 **Wisp envelopes** (plaintext JSON, broadcast):
 
@@ -473,7 +473,7 @@ The 32-byte key is baked in at build time from `LAMP_COMMAND_KEY_HEX` (a 64-char
 [header(6)] [sourceMac(6)] [targetMac(6)]
 ```
 
-Fixed 18 bytes; no payload. No gossip relay; addressedToUs filter on recv.
+Fixed 18 bytes; no payload. No gossip relay; addressedToUs filter on recv. A received query waits in a 4-deep queue (`pendingSlots.colorQuery`, a `PendingTypedQueue`) for the loop to answer, so two askers before one drain both get a reply; a query landing on a full queue is lost with its resends (LAMP_DEBUG `[queue.full]`).
 
 **`MSG_COLOR_INFO` (0x33)**, Directed reply to MSG_COLOR_QUERY carrying base + shade gradient stops.
 
@@ -482,7 +482,7 @@ Fixed 18 bytes; no payload. No gossip relay; addressedToUs filter on recv.
 ```
 
 - Each stop is 4 bytes RGBW (R, G, B, W). baseCount and shadeCount are each ≤ 8. Maximum frame size is 84 bytes.
-- No gossip relay; addressedToUs filter on recv.
+- No gossip relay; addressedToUs filter on recv. Replies queue the same way (`pendingSlots.colorInfo`, 4 deep) and the loop delivers every queued one each tick.
 
 ## BLE GATT characteristics (lamp ↔ phone)
 

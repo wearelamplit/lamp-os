@@ -1,21 +1,24 @@
 // software/lamp-os/src/core/pending_slot_aggregate.hpp
 //
-// Aggregates the PendingJsonSlot / PendingTypedSlot instances + the two
-// commit-flag volatiles. The Lamp base class owns the Core-0 → Core-1
+// Aggregates the PendingJsonSlot / PendingTypedSlot / PendingTypedQueue
+// instances + the two commit-flag volatiles. The Lamp base class owns the Core-0 → Core-1
 // hand-off pattern; subclasses inherit it.
 //
 // The slots themselves are templated in pending_json_slot.hpp /
-// pending_typed_slot.hpp; those headers stay where they are. This
+// pending_typed_slot.hpp / pending_typed_queue.hpp; those headers stay where they are. This
 // aggregate just bundles the production instances.
 
 #pragma once
 
 #include "core/pending_json_slot.hpp"
+#include "core/pending_typed_queue.hpp"
 #include "core/pending_typed_slot.hpp"
 #include "components/network/mesh/pending_slots.hpp"
 #include "components/firmware/firmware_receiver.hpp"
 
 namespace lamp {
+
+inline constexpr size_t kPendingColorDepth = 4;
 
 struct PendingSlotAggregate {
   // Commit flags, set by ble_control.cpp's CHAR_COMMIT path, drained by
@@ -52,9 +55,15 @@ struct PendingSlotAggregate {
   PendingTypedSlot<PendingWispState>          wispState;
   PendingTypedSlot<PendingCommand>            command;
   PendingTypedSlot<PendingEvent>              event;
-  PendingTypedSlot<PendingColorQuery>         colorQuery;
-  PendingTypedSlot<PendingColorInfo>          colorInfo;
   PendingTypedSlot<PendingFirmwareControl>    firmwareControl;
+
+  // Per-peer colour messages queue, so one landing before the loop drains the
+  // last is still delivered; queries also wait here while every colour-info
+  // resend slot is busy.
+  // ponytail: a frame landing on a full queue is lost with its resends, since
+  // dedup records it first; a dedup check-then-record would let a resend retry.
+  PendingTypedQueue<PendingColorQuery, kPendingColorDepth> colorQuery;
+  PendingTypedQueue<PendingColorInfo, kPendingColorDepth>  colorInfo;
 };
 
 // Single production instance, defined in pending_slot_aggregate.cpp.

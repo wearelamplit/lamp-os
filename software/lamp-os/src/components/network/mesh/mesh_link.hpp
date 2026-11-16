@@ -116,6 +116,11 @@ class MeshLink {
   bool sendEvent(const uint8_t* payloadJson, size_t len);
 
   bool sendColorQuery(const uint8_t targetMac[6]);
+  // False while a send would cut an earlier frame's resends short. A caller
+  // that sends more than kColorQueryResendSlots queries within the resend
+  // window (kResends * kResendGapMs) holds them back until this is true.
+  bool colorQueryResendFree() const { return colorQueryResend_.idle(); }
+  bool colorInfoResendFree() const { return colorInfoResend_.idle(); }
   bool sendColorInfo(const uint8_t targetMac[6],
                      const uint8_t* baseStops, uint8_t baseCount,
                      const uint8_t* shadeStops, uint8_t shadeCount);
@@ -154,8 +159,13 @@ class MeshLink {
   // after credits lost on a quiet link are reset).
   bool txReady(uint32_t nowMs) const { return EspNowLink::s_txCredit.available(nowMs); }
 
-  // Colour queries a caller may send in one tick with every one keeping its
-  // resends. A further query in the same tick takes over the oldest slot.
+  // Extra copies of an unacked broadcast. The gap must exceed the ~15 ms
+  // scan window, or the copies fall into the same RX hole.
+  static constexpr uint8_t kResends = 2;
+  static constexpr uint32_t kResendGapMs = 40;
+
+  // Colour queries that keep every resend while in flight together, within
+  // the resend window.
   static constexpr size_t kColorQueryResendSlots = 3;
   using ColorQueryResendRing =
       ResendRing<lamp_protocol::COLOR_QUERY_SIZE, kColorQueryResendSlots>;

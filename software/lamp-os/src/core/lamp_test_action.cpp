@@ -177,9 +177,10 @@ void dispatchLampAction(JsonDocument& doc, unsigned long updateTimeMs) {
     // app-supplied colors payload overwrites the restored baseline. An empty
     // payload leaves the pre-preview baseline standing so a preview can't stick.
     clearZonePreview();
-    // App may have edited saved colors during the test. Snap configurator
-    // to the new values + re-assert any active wisp paint so the new
-    // baseline doesn't briefly stomp it.
+    // The web config page sends the colours it shows. They go up on the
+    // saved rotation, since RAM config may still hold an abandoned app
+    // edit's. Then re-assert any active wisp paint so the new baseline doesn't
+    // briefly stomp it.
     lamp::stampConfiguratorActivity(millis());
 
     if (doc["shadeColors"]) {
@@ -189,10 +190,7 @@ void dispatchLampAction(JsonDocument& doc, unsigned long updateTimeMs) {
         for (JsonVariant shadeColor : shadeColors) {
           updatedColors.push_back(lamp::hexStringToColor(shadeColor));
         }
-        shadeConfiguratorBehavior.showScene(
-            lamp::buildRoleScene(shade.pixelCount, updatedColors,
-                                 config.shade.renderedRotation()),
-            0);
+        shadeConfiguratorBehavior.showOnSavedRotation(updatedColors);
       }
     }
     if (doc["baseColors"]) {
@@ -202,10 +200,7 @@ void dispatchLampAction(JsonDocument& doc, unsigned long updateTimeMs) {
         for (JsonVariant baseColor : baseColors) {
           updatedColors.push_back(lamp::hexStringToColor(baseColor));
         }
-        baseConfiguratorBehavior.showScene(
-            lamp::buildRoleScene(base.pixelCount, updatedColors,
-                                 config.base.renderedRotation()),
-            0);
+        baseConfiguratorBehavior.showOnSavedRotation(updatedColors);
       }
     }
     // If the wisp was painting either surface before the expression

@@ -426,7 +426,11 @@ the pair, the third holds idle; ≥3 → the walk). It pulls stops via
 frame. The stop cache holds one entry per lion and never evicts a peer a lion
 shows. A query holds one of three shared slots until its peer answers or
 `kColorQueryRetryMs` passes, so a peer that never answers is asked once per
-window and at most three queries are outstanding at once.
+window and at most three queries are outstanding at once. An answer whose stops
+the heap refuses to copy leaves its slot held. A lion sends only while
+`MeshLink::colorQueryResendFree()`, so an answer that frees a slot inside the
+resend window never costs an earlier query its resends; the held query goes
+out as soon as a resend slot frees.
 `LionsGreetingBehavior::startGreeting()` snaps all three lions to
 the newcomer's `peer.baseColor`, breathes `kPulses` times via the pure
 `pulseEnvelope()` (`lions_greeting.hpp`), eases into the ambient pixels

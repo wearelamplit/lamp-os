@@ -11,8 +11,8 @@ namespace lamp {
 // consumers that only need the payload shapes (e.g. the pending-slot
 // aggregate) don't have to pull in the whole ESP-NOW transport.
 //
-// POD-by-construction so PendingTypedSlot<T>'s portMUX-protected memcpy
-// post/drain has well-defined semantics across the WiFi-task -> loop-task
+// POD-by-construction so the portMUX-protected copy in PendingTypedSlot<T>
+// and PendingTypedQueue<T, N> post/drain has well-defined semantics across the WiFi-task -> loop-task
 // hand-off. MeshLink::handleRecv populates these on the WiFi task
 // (Core 0); standard_lamp's loop drain reads them on Core 1 and dispatches
 // into the ColorOverride / BrightnessOverride / LampRoster modules.
