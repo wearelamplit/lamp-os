@@ -8,7 +8,7 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 ## Unreleased
 
 ### Fixed
-- **Two lamp firmware builds at once no longer corrupt each other.** `lamp:build`, `lamp:flash`, `lamp:buildfs` and `lamp:flashfs` take a machine-wide lock; a second build waits (and says so) instead of linking a half-written framework library.
+- **Two firmware builds at once no longer corrupt each other.** `lamp:build`, `lamp:flash`, `lamp:buildfs`, `lamp:flashfs`, `wisp:build` and `wisp:flash` take a machine-wide lock; a second build waits (and says so) instead of linking a half-written framework library.
 - **Releases tagged from now on include the wisp image**, so `RELEASE_TAG=v1.3.x npm run wisp:flash:release` works for them (earlier tags still have none).
 - **`npm run lamp:flash:release` no longer flashes a stale `beta`.** Rolling tags (`beta`, `stable`) are downloaded fresh on every run and never reuse an old copy (offline they fail); version-tag images stay cached. The rolling `stable` release from `main` is now documented.
 - **The lamp build's compile cache is actually off.** The per-variant setting meant to disable it was ignored by PlatformIO.

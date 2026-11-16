@@ -80,10 +80,11 @@ npm run lamp:flash
 Unsigned dev flashes boot and mesh normally; they only can't *source* OTA.
 Needs the firmware toolchain (`pio`).
 
-Concurrent lamp builds queue on one machine-wide lock (`scripts/with_pio_lock.sh`,
+Concurrent firmware builds (lamp and wisp) queue on one machine-wide lock (`scripts/with_pio_lock.sh`,
 `~/.platformio/lamp-build.lock`, override with `LAMP_PIO_LOCK`). The lamp build rewrites the
-shared PlatformIO framework libs, so two at once can link a half-written library. A second
-build prints that it is waiting, then runs. Wisp builds and native tests do not take it.
+shared PlatformIO framework libs and a wisp build reinstalls them, so two at once can link a
+half-written library. A second build prints that it is waiting, then runs. Native tests do not
+take it. Run a raw `pio run` through the same script.
 
 To flash the CI-signed release instead — a stock lamp with no build and no
 toolchain beyond `esptool` + `curl`:

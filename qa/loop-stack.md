@@ -118,9 +118,9 @@ run, re-derive the worst-case chain from the current tree:
    ```sh
    cd software/lamp-os
    PLATFORMIO_BUILD_DIR=/tmp/su_lamp PLATFORMIO_BUILD_FLAGS="-fstack-usage" \
-     LAMP_FIRMWARE_CHANNEL=dev pio run -e upesy_wroom_standard
+     LAMP_FIRMWARE_CHANNEL=dev bash ../../scripts/with_pio_lock.sh pio run -e upesy_wroom_standard
    PLATFORMIO_BUILD_DIR=/tmp/su_snafu PLATFORMIO_BUILD_FLAGS="-fstack-usage" \
-     LAMP_FIRMWARE_CHANNEL=dev pio run -e upesy_wroom_snafu
+     LAMP_FIRMWARE_CHANNEL=dev bash ../../scripts/with_pio_lock.sh pio run -e upesy_wroom_snafu
    ```
 2. Rank frames, both variants:
    ```sh

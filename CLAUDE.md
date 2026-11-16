@@ -133,9 +133,10 @@ VARIANT=snafu npm run lamp:build   # any other variant, still unsigned
 npm run wisp:build         # wisp firmware
 ```
 
-Lamp firmware builds (`lamp:build`, `lamp:flash`, `lamp:buildfs`, `lamp:flashfs`) take a machine-wide lock
-(`scripts/with_pio_lock.sh`, `~/.platformio/lamp-build.lock`): the lamp build rewrites the shared
-PlatformIO framework libs, so a second concurrent build waits and prints that it is waiting.
+Firmware builds (`lamp:build`, `lamp:flash`, `lamp:buildfs`, `lamp:flashfs`, `wisp:build`, `wisp:flash`) take a
+machine-wide lock (`scripts/with_pio_lock.sh`, `~/.platformio/lamp-build.lock`): the lamp build rewrites the
+shared PlatformIO framework libs and a wisp build reinstalls them, so a second concurrent build waits and
+prints that it is waiting. Run raw `pio run` through the same script.
 
 One axis governs the build: **channel ∈ {dev, beta, stable}**
 (`LAMP_FIRMWARE_CHANNEL`). Everything derives — `signed ≡ channel != dev`,
@@ -150,7 +151,7 @@ lamp can't make signed peers loop re-offering it. Dev is an OTA island: the
 `dev` builds a signed `beta` release (`release-beta.yml`, keys from repo
 secrets), and `lamp:flash:release` flashes that signed image over USB. There is
 no local sign-and-flash npm task. To produce a signed binary locally, the
-key-holder runs `pio run` with `LAMP_FIRMWARE_CHANNEL=beta` (or `stable`), the
+key-holder runs `pio run` (through `scripts/with_pio_lock.sh`) with `LAMP_FIRMWARE_CHANNEL=beta` (or `stable`), the
 firmware key at `~/.lamp-os-firmware-key.bin`, and the command key
 (`LAMP_COMMAND_KEY_HEX` or `~/.lamp-os-command-key.hex`); `sign_firmware.py`
 appends the footer and `inject_command_key.py` bakes in the key. A beta/stable
