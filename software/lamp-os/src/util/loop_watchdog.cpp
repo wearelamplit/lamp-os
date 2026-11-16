@@ -29,13 +29,13 @@ uint32_t LongestGap::takeReport() {
 }
 
 Mode BootGuard::atBoot(bool stateValid, bool taskWdtReset) {
-  streak = bootStreak(stateValid, streak, stableSeen != 0, taskWdtReset);
-  stableSeen = 0;
+  streak = bootStreak(stateValid, streak, settledSeen != 0, taskWdtReset);
+  settledSeen = 0;
   return modeFor(streak);
 }
 
 void BootGuard::markUptime(uint32_t uptimeMs) {
-  if (reachedStable(uptimeMs)) stableSeen = 1;
+  if (reachedSettled(uptimeMs)) settledSeen = 1;
 }
 
 bool markIteration(BootGuard& guard, uint32_t uptimeMs, const void* current,
@@ -134,8 +134,9 @@ void beginSetup() {
   subscribe();
   if (s_mode == Mode::Backoff) {
     Serial.printf("[loopwd] %u watchdog resets in a row; timeout %u s until the loop "
-                  "runs a minute\n",
-                  (unsigned)s_rtc.guard.streak, (unsigned)(kBackoffTimeoutMs / 1000));
+                  "runs %u s\n",
+                  (unsigned)s_rtc.guard.streak, (unsigned)(kBackoffTimeoutMs / 1000),
+                  (unsigned)(backoffWindowMs(s_rtc.guard.streak) / 1000));
   }
 }
 
@@ -177,10 +178,11 @@ void feed() {
 
 void startIteration() {
   const uint32_t nowMs = millis();
-  if (rearmDue(s_mode, nowMs)) {
+  if (rearmDue(s_mode, s_rtc.guard.streak, nowMs)) {
     s_mode = Mode::Normal;
     apply();
-    Serial.printf("[loopwd] loop ran a minute; timeout back to %u s\n",
+    Serial.printf("[loopwd] loop ran %u s; timeout back to %u s\n",
+                  (unsigned)(backoffWindowMs(s_rtc.guard.streak) / 1000),
                   (unsigned)(timeoutMs(s_phase, s_wide, false) / 1000));
   }
   feed();
