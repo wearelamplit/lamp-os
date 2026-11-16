@@ -17,8 +17,18 @@ class FbpBleClient extends BleClient {
   /// slider drags. Cleared on disconnect so a reconnect gets a fresh discovery.
   final Map<String, List<fbp.BluetoothService>> _serviceCache = {};
 
+  // Also clears the cache when a link drops on its own: a caller woken by the
+  // next connected edge resolves before [connect] returns.
+  StreamSubscription<fbp.OnConnectionStateChangedEvent>? _dropWatch;
+
   @override
   Future<void> connect(String deviceId) async {
+    _dropWatch ??= fbp.FlutterBluePlus.events.onConnectionStateChanged
+        .listen((e) {
+      if (e.connectionState == fbp.BluetoothConnectionState.disconnected) {
+        _serviceCache.remove(e.device.remoteId.str);
+      }
+    });
     final device = fbp.BluetoothDevice(
       remoteId: fbp.DeviceIdentifier(deviceId),
     );
