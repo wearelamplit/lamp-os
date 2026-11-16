@@ -178,8 +178,8 @@ void dispatchLampAction(JsonDocument& doc, unsigned long updateTimeMs) {
     // payload leaves the pre-preview baseline standing so a preview can't stick.
     clearZonePreview();
     // The web config page sends the colours it shows. They go up on the
-    // saved rotation: RAM config may still hold an abandoned app edit's.
-    // Then re-assert any active wisp paint so the new baseline doesn't
+    // saved rotation, since RAM config may still hold an abandoned app
+    // edit's. Then re-assert any active wisp paint so the new baseline doesn't
     // briefly stomp it.
     lamp::stampConfiguratorActivity(millis());
 

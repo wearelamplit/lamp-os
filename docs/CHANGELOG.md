@@ -13,8 +13,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   between two passes of its main loop, the newer one replaced the older, and
   a Lioness churning through answers could cut an earlier request's repeat
   sends short. A lion head could sit on the lamp's main colour for up to 3
-  seconds, and a snafu could skip taking on the colours of the lamp it just
-  greeted. Requests and replies now wait their turn instead.
+  seconds, and a snafu could miss the colours of the lamp it just greeted (one
+  possible cause of it skipping the borrowed colours afterwards). Requests and
+  replies now wait their turn instead.
 - **A Lioness almost out of memory no longer asks for colours every frame.**
   When it could not store a reply, it asked the same lamp again on the very
   next frame; it now waits its usual 3 seconds.

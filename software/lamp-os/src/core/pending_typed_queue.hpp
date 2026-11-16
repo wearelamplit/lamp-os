@@ -13,7 +13,8 @@
 //                     call. fn may throw; the popped entry is then gone and the
 //                     rest stay queued.
 //
-// One task posts and one task drains. T must be trivially copyable (see
+// Plain C++ so the native tests build it, as PendingTypedSlot. One task posts
+// and one task drains. T must be trivially copyable (see
 // PendingTypedSlot).
 
 #include <cstddef>

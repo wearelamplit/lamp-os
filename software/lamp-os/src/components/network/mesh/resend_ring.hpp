@@ -27,7 +27,10 @@ class ResendRing {
     Slot& s = slots_[cursor_];
     cursor_ = (cursor_ + 1) % Count;
 #ifdef LAMP_DEBUG
-    if (s.remaining) Serial.printf("[resend.overwrite] lost=%u\n", (unsigned)s.remaining);
+    if (s.remaining) {
+      Serial.printf("[resend.overwrite] buf=%u slots=%u lost=%u\n", (unsigned)BufMax,
+                    (unsigned)Count, (unsigned)s.remaining);
+    }
 #endif
     std::memcpy(s.buf, frame, len);
     s.len = static_cast<uint16_t>(len);

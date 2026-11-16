@@ -1,11 +1,11 @@
 // software/lamp-os/src/core/pending_slot_aggregate.hpp
 //
-// Aggregates the PendingJsonSlot / PendingTypedSlot instances + the two
-// commit-flag volatiles. The Lamp base class owns the Core-0 → Core-1
+// Aggregates the PendingJsonSlot / PendingTypedSlot / PendingTypedQueue
+// instances + the two commit-flag volatiles. The Lamp base class owns the Core-0 → Core-1
 // hand-off pattern; subclasses inherit it.
 //
 // The slots themselves are templated in pending_json_slot.hpp /
-// pending_typed_slot.hpp; those headers stay where they are. This
+// pending_typed_slot.hpp / pending_typed_queue.hpp; those headers stay where they are. This
 // aggregate just bundles the production instances.
 
 #pragma once

@@ -159,11 +159,8 @@ class MeshLink {
   // after credits lost on a quiet link are reset).
   bool txReady(uint32_t nowMs) const { return EspNowLink::s_txCredit.available(nowMs); }
 
-  // The unacked broadcast types have no per-frame retry, and per-frame loss on
-  // a coex-contended link runs ~0.65 (correlated, not independent). 2 extra
-  // copies (3 total) spaced kResendGapMs apart give each receiver one copy per
-  // scan-listen gap; the gap must exceed the ~15 ms scan window so the copies
-  // don't share a hole. Dedup collapses the copies to one apply.
+  // Extra copies of an unacked broadcast. The gap must exceed the ~15 ms
+  // scan window, or the copies fall into the same RX hole.
   static constexpr uint8_t kResends = 2;
   static constexpr uint32_t kResendGapMs = 40;
 
