@@ -212,5 +212,36 @@ class FlashCache(unittest.TestCase):
         self.assertEqual(self.cache_files(), [])
 
 
+class BuildLock(unittest.TestCase):
+    WRAP = ROOT / "scripts/with_pio_lock.sh"
+
+    def test_concurrent_builds_never_overlap(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = Path(d) / "log"
+            job = f'echo start >> {log}; sleep 0.5; echo end >> {log}'
+            env = dict(os.environ, LAMP_PIO_LOCK=str(Path(d) / "lock"))
+            ps = [subprocess.Popen(["bash", str(self.WRAP), "sh", "-c", job], env=env,
+                                   stderr=subprocess.PIPE, text=True) for _ in range(3)]
+            errs = [p.communicate(timeout=30)[1] for p in ps]
+            self.assertEqual(log.read_text().split(), ["start", "end"] * 3)
+            self.assertEqual(sum("waiting for another lamp firmware build" in e for e in errs), 2)
+
+    def test_wrapper_passes_exit_status_and_args(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = dict(os.environ, LAMP_PIO_LOCK=str(Path(d) / "lock"))
+            r = subprocess.run(["bash", str(self.WRAP), "sh", "-c", 'test "$0" = a && exit 7', "a"], env=env)
+            self.assertEqual(r.returncode, 7)
+
+    def test_every_lamp_pio_run_goes_through_the_lock(self):
+        lines = []
+        for name, text in [("package.json", (ROOT / "package.json").read_text())] + [
+                (p.name, p.read_text()) for p in (ROOT / "scripts").glob("*.sh")]:
+            lines += [(name, l) for l in text.splitlines() if re.search(r"\bpio run\b", l)]
+        lamp = [(n, l) for n, l in lines if "wisp" not in l and not l.lstrip().startswith("#")]
+        self.assertGreaterEqual(len(lamp), 5)
+        for n, l in lamp:
+            self.assertRegex(l, r"with_pio_lock\.sh\"? pio run", f"{n}: {l.strip()}")
+
+
 if __name__ == "__main__":
     unittest.main()
