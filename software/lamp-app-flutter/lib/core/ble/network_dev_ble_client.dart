@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import '../utils/serial_by_key.dart';
 import 'ble_client.dart';
+import 'ble_timing.dart';
 import 'bridge_protocol.dart';
 import 'bridge_transport.dart';
 
@@ -24,6 +25,7 @@ class NetworkDevBleClient extends BleClient {
 
   void _setConnected(String deviceId, bool v) {
     _connected[deviceId] = v;
+    if (!v) bleTimings.linkDown(deviceId);
     _connCtrls[deviceId]?.add(v);
   }
 

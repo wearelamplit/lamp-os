@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
 
 import 'ble_client.dart';
+import 'ble_timing.dart';
+import 'discovery_cache.dart';
 import 'scan_pause.dart';
 
 /// Production [BleClient] backed by flutter_blue_plus. Each public method
@@ -15,7 +17,7 @@ class FbpBleClient extends BleClient {
   /// every BLE write would re-run a full service discovery on the radio,
   /// which is what tipped the lamp into LINK_SUPERVISION_TIMEOUT during rapid
   /// slider drags. Cleared on disconnect so a reconnect gets a fresh discovery.
-  final Map<String, List<fbp.BluetoothService>> _serviceCache = {};
+  final _serviceCache = DiscoveryCache<List<fbp.BluetoothService>>();
 
   @override
   Future<void> connect(String deviceId) async {
@@ -59,6 +61,7 @@ class FbpBleClient extends BleClient {
       remoteId: fbp.DeviceIdentifier(deviceId),
     );
     _serviceCache.remove(deviceId);
+    bleTimings.linkDown(deviceId);
     await device.disconnect();
   }
 
@@ -91,8 +94,8 @@ class FbpBleClient extends BleClient {
     // Reuse the cached service list when present. discoverServices() is a
     // multi-round-trip GATT exchange and re-running it per write floods the
     // link. Only call it on a cold cache (first I/O after connect).
-    final services = _serviceCache[deviceId] ??=
-        await device.discoverServices();
+    final services =
+        await _serviceCache.resolve(deviceId, device.discoverServices);
 
     final service = services.firstWhere(
       (s) => s.uuid.str128.toLowerCase() == serviceUuid.toLowerCase(),
@@ -195,6 +198,7 @@ class FbpBleClient extends BleClient {
     // Force-release any handles fbp holds on this device. Clears the
     // service cache too; re-discovers on the next connect.
     _serviceCache.remove(deviceId);
+    bleTimings.linkDown(deviceId);
     try {
       await device.disconnect();
     } catch (_) {

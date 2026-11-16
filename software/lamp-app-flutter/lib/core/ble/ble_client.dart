@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 
 import '../utils/serial_by_key.dart';
+import 'ble_timing.dart';
 import 'uuids.dart';
 
 
@@ -133,6 +134,7 @@ Future<Uint8List> readSectionVia(
   String deviceId,
   String name,
 ) {
+  final readStart = bleTimings.now();
   Future<Uint8List> run() => client
       .write(deviceId, BleUuids.controlService, BleUuids.pageCtrl,
           Uint8List.fromList(utf8.encode(name)))
@@ -141,7 +143,12 @@ Future<Uint8List> readSectionVia(
             () => client.read(deviceId, BleUuids.controlService, BleUuids.pageData),
           ));
 
-  return _pageSessions.run(deviceId, run);
+  final result = _pageSessions.run(deviceId, run);
+  result.then(
+    (_) => bleTimings.sectionRead(deviceId, name, readStart, ok: true),
+    onError: (_) => bleTimings.sectionRead(deviceId, name, readStart, ok: false),
+  );
+  return result;
 }
 
 abstract class BleClient {
