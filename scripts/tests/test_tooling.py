@@ -48,7 +48,15 @@ while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift;; esac; shift; done
 echo x >> "$STUB_LOG"
 [ "${STUB_GET_FAIL:-}" = 1 ] && { echo partial > "$out"; exit 18; }
 [ "${STUB_GET_SLEEP:-}" = 1 ] && { echo partial > "$out"; sleep 30; }
+[ "${STUB_SHORT:-}" = 1 ] && { echo short > "$out"; exit 0; }
 head -c 4194304 /dev/zero | tr '\\0' "$STUB_FILL" > "$out"
+"""
+
+
+ESPTOOL_STUB = """#!/bin/bash
+# stub: records the first byte of the file written at 0x10000 into $ESP_OUT
+while [ $# -gt 0 ]; do [ "$1" = 0x10000 ] && head -c1 "$2" > "$ESP_OUT"; shift; done
+exit 0
 """
 
 
@@ -57,7 +65,7 @@ class FlashCache(unittest.TestCase):
         self.d = tempfile.TemporaryDirectory()
         d = Path(self.d.name)
         (d / "bin").mkdir()
-        for n, body in (("curl", STUB_CURL), ("esptool", "#!/bin/bash\nexit 0\n")):
+        for n, body in (("curl", STUB_CURL), ("esptool", ESPTOOL_STUB)):
             f = d / "bin" / n
             f.write_text(body)
             f.chmod(f.stat().st_mode | stat.S_IEXEC)
@@ -70,7 +78,7 @@ class FlashCache(unittest.TestCase):
 
     def env(self, fill, tag, **extra):
         return dict(os.environ, PATH=f"{self.d.name}/bin:{os.environ['PATH']}", CACHE_DIR=str(self.cache),
-                    STUB_FILL=fill, STUB_LOG=str(self.log), RELEASE_TAG=tag, **extra)
+                    STUB_FILL=fill, STUB_LOG=str(self.log), ESP_OUT=str(Path(self.d.name) / "flashed"), RELEASE_TAG=tag, **extra)
 
     def run_flash(self, fill, tag="beta", ok=True, **extra):
         r = subprocess.run(["bash", str(ROOT / "scripts/flash_signed_release.sh")], env=self.env(fill, tag, **extra),
@@ -84,6 +92,9 @@ class FlashCache(unittest.TestCase):
     def curl_calls(self):
         return len(self.log.read_text().split())
 
+    def flashed(self):
+        return (Path(self.d.name) / "flashed").read_bytes()
+
     def seed(self, tag, byte=b"O"):
         self.cache.mkdir(exist_ok=True)
         f = self.cache / f"release-standard-{tag}.bin"
@@ -95,11 +106,12 @@ class FlashCache(unittest.TestCase):
         self.run_flash("N")
         self.assertEqual(self.curl_calls(), 1)
         self.assertEqual(old.read_bytes()[:1], b"O")
+        self.assertEqual(self.flashed(), b"N")
 
     def test_rolling_tag_flashes_the_fresh_download(self):
         self.seed("beta")
-        r = self.run_flash("N")
-        self.assertNotIn("cached", r.stdout)
+        self.run_flash("N")
+        self.assertEqual(self.flashed(), b"N")
 
     def test_rolling_tag_leaves_no_file_after_success(self):
         self.run_flash("N", tag="stable")
@@ -120,6 +132,18 @@ class FlashCache(unittest.TestCase):
         self.run_flash("B", tag="v1.3.0")
         self.assertEqual(self.curl_calls(), 1)
         self.assertEqual((self.cache / "release-standard-v1.3.0.bin").read_bytes()[:1], b"A")
+        self.assertEqual(self.flashed(), b"A")
+
+    def test_short_download_is_rejected_and_never_cached(self):
+        img = self.seed("v1.3.0", b"A")
+        r = self.run_flash("B", tag="v1.3.0", REFRESH="1", ok=False, STUB_SHORT="1")
+        self.assertIn("expected at least 4 MiB", r.stderr)
+        self.assertEqual(self.cache_files(), [img.name])
+        self.assertEqual(img.read_bytes()[:1], b"A")
+
+    def test_short_first_download_is_not_cached(self):
+        self.run_flash("B", tag="v1.3.0", STUB_SHORT="1", ok=False)
+        self.assertEqual(self.cache_files(), [])
 
     def test_version_tag_refresh_replaces_cache(self):
         self.run_flash("A", tag="v1.3.0")
@@ -142,14 +166,16 @@ class FlashCache(unittest.TestCase):
     def test_local_image_makes_no_curl_call_and_touches_nothing(self):
         img = Path(self.d.name) / "local.bin"
         img.write_bytes(b"L" * 4194304)
-        sibs = [Path(str(img) + e) for e in (".part", ".hdr", ".etag")]
+        sibs = [Path(str(img) + e) for e in (".part", ".hdr", ".etag", ".dl")]
         for q in sibs:
             q.write_text("keep")
+        before = sorted(os.listdir(self.d.name))
         for extra in ({}, {"REFRESH": "1"}):
             self.run_flash("B", IMAGE=str(img), **extra)
         self.assertEqual(img.read_bytes()[:1], b"L")
         self.assertEqual(self.curl_calls(), 0)
-        self.assertEqual(self.cache_files(), [])
+        self.assertFalse(self.cache.exists())
+        self.assertEqual(sorted(os.listdir(self.d.name)), sorted(before + ["flashed"]))
         for q in sibs:
             self.assertEqual(q.read_text(), "keep", q.name)
 

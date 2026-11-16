@@ -20,7 +20,7 @@
 # Env vars:
 #   VARIANT      lamp variant: standard (default) or snafu
 #   PORT         esptool upload port (required if multiple boards attached)
-#   RELEASE_TAG  GitHub release tag to pull from: beta (default) or a version tag such as v1.3.0
+#   RELEASE_TAG  GitHub release tag to pull from: beta (default), stable or a version tag such as v1.3.0
 #   IMAGE        flash this local distribution.bin, skip the download (used for
 #                a locally-built signed variant with no release asset, e.g. loaf)
 #   CACHE_DIR    where version-tag downloads are cached, one file per variant and
@@ -30,9 +30,9 @@
 #   REFRESH      set to re-download a cached version-tag image; a failed refresh
 #                errors and keeps the cached image
 #
-# Rolling tags (anything but vX.Y.Z, e.g. beta and stable) are downloaded on every
+# Rolling tags (anything not starting with v and a digit, e.g. beta and stable) are downloaded on every
 # run into a temporary file that is deleted on exit, and never fall back to an old
-# copy: offline, they fail. A vX.Y.Z image is immutable, so it is cached.
+# copy, so offline they fail. A vX.Y.Z image is immutable, so it is cached.
 #
 # For people WITHOUT the signing key: downloads a prebuilt image, never builds
 # or signs. Requires: curl, esptool (pip install esptool), dd.
@@ -74,6 +74,16 @@ if [ -z "${OTADATA_OFF:-}" ] || [ -z "${OTADATA_SIZE:-}" ]; then
   exit 1
 fi
 
+# A short image would dd garbage past its end into the flashed regions.
+require_full_image() {
+  local size
+  size="$(wc -c < "$1")"
+  if [ "$size" -lt $((0x400000)) ]; then
+    echo "ERROR: image is ${size} bytes, expected at least 4 MiB (0x400000)." >&2
+    exit 1
+  fi
+}
+
 if [ -n "${IMAGE:-}" ]; then
   if [ ! -s "$IMAGE" ]; then
     echo "ERROR: IMAGE=${IMAGE} not found or empty." >&2
@@ -97,6 +107,7 @@ else
     fi
     exit 1
   fi
+  require_full_image "$DOWNLOAD"
   IMG="$DOWNLOAD"
   if [ -z "$ROLLING" ]; then
     mv "$DOWNLOAD" "$CACHED"
@@ -110,12 +121,7 @@ if [ ! -s "$IMG" ]; then
   exit 1
 fi
 
-# A short image would dd garbage past its end into the flashed regions.
-IMG_SIZE="$(wc -c < "$IMG")"
-if [ "$IMG_SIZE" -lt $((0x400000)) ]; then
-  echo "ERROR: image is ${IMG_SIZE} bytes, expected at least 4 MiB (0x400000)." >&2
-  exit 1
-fi
+require_full_image "$IMG"
 
 # Carve app0 (0x10000, len 0x1e0000) and spiffs (0x3d0000, len 0x30000) out of
 # the merged image, in 4096-byte blocks.
