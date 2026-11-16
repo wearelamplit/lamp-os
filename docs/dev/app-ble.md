@@ -42,6 +42,34 @@ Callers:
 reboots, is a separate policy: it drops the stale handle, waits out the reboot
 and calls `BleClient.connect` directly with a per-attempt timeout.
 
+## Connect timing: `bleTimings`
+
+`bleTimings` (`core/ble/ble_timing.dart`) is the one recorder for how long
+each phase of getting to a lamp takes. It is a measurement for tuning, not a
+behaviour: it adds no awaits, retries or timeouts, and a sink that throws is
+swallowed. Each phase is one line, tagged `[ble_timing]`, sent to the sink
+(default `debugPrint`). Read a session off the phone with
+`adb logcat -s flutter | grep ble_timing`. Nothing is stored or shown in the
+app.
+
+| Line | Measures |
+|---|---|
+| `scanSeen ... scan_session=N ms=` | scan start to a lamp's first advert in that scan session |
+| `connect ... fail attempt=i/n ms=` | one failed `connectWithRetry` attempt |
+| `connect ... ok attempt=i/n ms= total_ms=` | `ms` is the winning attempt's `BleClient.connect` (scan stop, link, MTU and priority on Android); `total_ms` is call entry to link up, backoff included |
+| `discover ... ms=` | a cold `discoverServices` (`DiscoveryCache` miss; none on a bridge client) |
+| `firstRead ... section= ms= since_link_ms=` | the first `readSectionVia` after a `connectWithRetry` link. `since_link_ms` includes auth and the cold discover, since they run first. A busy answer counts as the first read |
+
+Every scan start or restart opens a new `scan_session` (counted from 1 per app
+run); a lamp is timed once per session from that session's own start, so a
+restarted scan shows a lamp again with a fresh, small `ms`.
+
+`firstRead` is armed by `connectWithRetry` and cleared by a disconnect, a
+`cycleAdapter` or a bridge-reported drop; a read that began before the link
+came up never consumes it. A reconnect that bypasses `connectWithRetry`
+(onboarding's verify) records no `firstRead`, and an unsolicited drop on the
+phone's own stack does not clear the arm until the next `disconnect`.
+
 ## Link ownership: `claimLink` / `ownsLink`
 
 A connect can outlive the screen that started it: the user backs out while an

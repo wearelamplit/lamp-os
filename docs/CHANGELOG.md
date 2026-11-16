@@ -5,6 +5,15 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## Unreleased
+
+### Added
+- **The app logs how long each part of a lamp connect takes.** Scan to first
+  sighting, each connect attempt (and which one worked), service discovery and
+  the first read, one `ble_timing` line each in the Android log
+  (`adb logcat -s flutter | grep ble_timing`). It is the before/after number for
+  tuning lamp advertising; connect behaviour is unchanged.
+
 ## 1.3.7
 
 ### Added
