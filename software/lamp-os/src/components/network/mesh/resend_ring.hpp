@@ -4,6 +4,10 @@
 #include <cstdint>
 #include <cstring>
 
+#if defined(ARDUINO) || defined(ESP_PLATFORM)
+#include <Arduino.h>
+#endif
+
 namespace lamp {
 
 // Spaced re-broadcast buffer for an unacked ESP-NOW frame: an unacked
@@ -22,6 +26,9 @@ class ResendRing {
     if (len == 0 || len > BufMax) return false;
     Slot& s = slots_[cursor_];
     cursor_ = (cursor_ + 1) % Count;
+#ifdef LAMP_DEBUG
+    if (s.remaining) Serial.printf("[resend.overwrite] lost=%u\n", (unsigned)s.remaining);
+#endif
     std::memcpy(s.buf, frame, len);
     s.len = static_cast<uint16_t>(len);
     s.remaining = resends;
@@ -29,6 +36,10 @@ class ResendRing {
     s.nextMs = nowMs + gapMs;
     return true;
   }
+
+  // True when the next enqueue takes a slot with no resends left, so it cuts
+  // no earlier frame's resends short.
+  bool idle() const { return slots_[cursor_].remaining == 0; }
 
   // Re-emit every slot whose gap has elapsed, one copy per due slot per call.
   // sendFn(buf, len) performs the broadcast.

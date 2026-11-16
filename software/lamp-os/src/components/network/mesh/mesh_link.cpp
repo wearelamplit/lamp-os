@@ -18,16 +18,6 @@
 
 namespace lamp {
 
-namespace {
-// The unacked broadcast types have no per-frame retry, and per-frame loss on
-// a coex-contended link runs ~0.65 (correlated, not independent). 2 extra
-// copies (3 total) spaced kResendGapMs apart give each receiver one copy per
-// scan-listen gap; the gap must exceed the ~15 ms scan window so the copies
-// don't share a hole. Dedup collapses the copies to one apply.
-constexpr uint8_t kResends = 2;
-constexpr uint32_t kResendGapMs = 40;
-}  // namespace
-
 MeshLink* MeshLink::s_instance = nullptr;
 
 void MeshLink::onRecv(const uint8_t* mac, const uint8_t* data, size_t len,
