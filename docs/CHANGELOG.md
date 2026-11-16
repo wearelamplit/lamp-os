@@ -21,7 +21,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 - **A lamp with its Web Config page open waits to pass on an update.**
   A lamp that started sending an update switched off its setup Wi-Fi
   network under an open page, so a save hung until the update ended. It
-  now offers updates only once no phone is joined to that network.
+  now offers updates only once no phone is joined to that network. A phone
+  that joins in the 15 s after an offer goes out does not stop the send: the
+  network drops for the transfer and comes back after it.
 - **Update data sent over Bluetooth must come over the connection that
   started the update.** A second phone's data is refused, unless the lamp
   hands the second phone the same connection number.
