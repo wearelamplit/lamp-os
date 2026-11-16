@@ -198,10 +198,13 @@ class _Rig {
   }
 }
 
-Future<_Rig> _rig() async {
+/// [baseBusy]: the lamp's `base` section reads busy, so the first build
+/// fails.
+Future<_Rig> _rig({bool baseBusy = false}) async {
   SharedPreferences.setMockInitialValues({});
   final ble = _CountingBle();
   await seedControlBle(ble, deviceId: _id, brightness: 50);
+  if (baseBusy) ble.seedSection(_id, 'base', Uint8List.fromList([0x21]));
   final c = ProviderContainer(
     overrides: [
       bleClientProvider.overrideWithValue(ble),
@@ -215,7 +218,11 @@ Future<_Rig> _rig() async {
       .add(const InventoryLamp(id: _id, name: 'jacko', controlPassword: ''));
   c.listen(controlNotifierProvider(_id), (_, _) {});
   c.listen(firmwareNotifierProvider(_id), (_, _) {});
-  await c.read(controlNotifierProvider(_id).future);
+  try {
+    await c.read(controlNotifierProvider(_id).future);
+  } on LampBusyException {
+    if (!baseBusy) rethrow;
+  }
   await _pump();
   return _Rig(c, ble);
 }
@@ -752,6 +759,27 @@ void main() {
     );
 
     r.ble.seedSection(_id, 'base', base);
+    r.ble.quietOnSubscribe = false;
+    final gate = r.ble.held[BleUuids.expressionTest] = Completer<void>();
+    final mark = r.mark();
+    r.c.invalidate(controlNotifierProvider(_id));
+    final rebuilt = r.c.read(controlNotifierProvider(_id).future);
+    await _pump();
+    gate.complete();
+    await rebuilt;
+    await _pump();
+    expect(r.focusSince(mark), [1]);
+  });
+
+  test('after Retry from a first connect that failed, Home Mode focus goes '
+      'back when the lamp reports on subscribe mid-rebuild', () async {
+    final r = await _rig(baseBusy: true);
+    expect(
+      r.c.read(controlNotifierProvider(_id)).error,
+      isA<LampBusyException>(),
+    );
+    r.control.setHomeModeFocus(true);
+    await seedControlBle(r.ble, deviceId: _id, brightness: 50);
     r.ble.quietOnSubscribe = false;
     final gate = r.ble.held[BleUuids.expressionTest] = Completer<void>();
     final mark = r.mark();
