@@ -13,13 +13,14 @@
 namespace lamp::loop_watchdog {
 
 constexpr uint8_t kResetStreakLimit = 3;
-// Watchdog resets in a row past kResetStreakLimit that each double the backoff
-// window, so a stall that recurs later in every boot resets ever less often.
+// Watchdog resets in a row past kResetStreakLimit, each from a backoff boot
+// that outlived its window, that each double the window, so a stall that
+// recurs later in every boot resets ever less often.
 constexpr uint8_t kBackoffDoublings = 4;
 constexpr uint8_t kStreakCap = kResetStreakLimit + kBackoffDoublings;
 // The first backoff boot's window: its long timeout holds until the loop
 // starts an iteration this far into uptime.
-constexpr uint32_t kStableUptimeMs = 60000;
+constexpr uint32_t kFirstBackoffWindowMs = 60000;
 // Longest one setup stage may run between feeds.
 constexpr uint32_t kSetupTimeoutMs = 30000;
 // The IDF default (CONFIG_ESP_TASK_WDT_TIMEOUT_S), held for every loop iteration.
@@ -77,9 +78,10 @@ void restore();
 
 // How far into uptime a backoff boot at `streak` holds kBackoffTimeoutMs.
 constexpr uint32_t backoffWindowMs(uint8_t streak) {
-  return streak <= kResetStreakLimit ? kStableUptimeMs
-         : kStableUptimeMs << ((streak < kStreakCap ? streak : kStreakCap) -
-                               kResetStreakLimit);
+  return streak <= kResetStreakLimit
+             ? kFirstBackoffWindowMs
+             : kFirstBackoffWindowMs << ((streak < kStreakCap ? streak : kStreakCap) -
+                                         kResetStreakLimit);
 }
 
 // A boot whose loop starts an iteration this far into uptime ends the streak.
@@ -90,15 +92,22 @@ constexpr bool reachedSettled(uint32_t uptimeMs) {
   return uptimeMs >= kSettledUptimeMs;
 }
 
+// How far a boot's loop ran: to the window its streak gives, then to
+// kSettledUptimeMs.
+enum class Reached : uint8_t { None, Window, Settled };
+
 // This boot's count of task-watchdog resets in a row, each from a boot whose
-// loop never started an iteration at kSettledUptimeMs, held at kStreakCap.
-// `prevStreak` and `prevSettled` are what the previous boot left; `stateValid`
+// loop never started an iteration at kSettledUptimeMs. Past kResetStreakLimit
+// it grows only on a reset after the boot's window, up to kStreakCap.
+// `prevStreak` and `prevReached` are what the previous boot left; `stateValid`
 // is false when they did not survive the reset.
-constexpr uint8_t bootStreak(bool stateValid, uint8_t prevStreak,
-                             bool prevSettled, bool taskWdtReset) {
-  return !stateValid || !taskWdtReset || prevSettled ? 0
-         : prevStreak < kStreakCap ? static_cast<uint8_t>(prevStreak + 1)
-                                   : kStreakCap;
+constexpr uint8_t bootStreak(bool stateValid, uint8_t prevStreak, Reached prevReached,
+                             bool taskWdtReset) {
+  return !stateValid || !taskWdtReset || prevReached == Reached::Settled ? 0
+         : prevStreak >= kStreakCap ? kStreakCap
+         : prevStreak < kResetStreakLimit || prevReached == Reached::Window
+             ? static_cast<uint8_t>(prevStreak + 1)
+             : prevStreak;
 }
 
 // Backoff holds kBackoffTimeoutMs until the loop runs to the boot's backoff
@@ -110,21 +119,21 @@ constexpr Mode modeFor(uint8_t streak) {
   return streak < kResetStreakLimit ? Mode::Normal : Mode::Backoff;
 }
 
-// True when a loop iteration at `uptimeMs` in a backoff boot at `streak`
-// returns it to the normal timeouts.
-constexpr bool rearmDue(Mode mode, uint8_t streak, uint32_t uptimeMs) {
-  return mode == Mode::Backoff && uptimeMs >= backoffWindowMs(streak);
-}
-
 // The boot-loop guard's state, kept across resets in RTC memory.
 struct BootGuard {
   uint8_t streak;
-  uint8_t settledSeen;
+  Reached reached;
   // Folds in this boot's reset.
   Mode atBoot(bool stateValid, bool taskWdtReset);
   // Each loop iteration, watched or not.
   void markUptime(uint32_t uptimeMs);
 };
+
+// True when a loop iteration at `uptimeMs` in a backoff boot returns it to the
+// normal timeouts.
+constexpr bool rearmDue(Mode mode, const BootGuard& guard, uint32_t uptimeMs) {
+  return mode == Mode::Backoff && uptimeMs >= backoffWindowMs(guard.streak);
+}
 
 // True when a feed from `current` resets the watchdog. `subscribed` is the
 // loop task once subscribed, else null, and `current` must be it.

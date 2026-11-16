@@ -21,7 +21,7 @@ using lamp::loop_watchdog::feedsFrom;
 using lamp::LogRateLimiter;
 using lamp::loop_watchdog::kResetStreakLimit;
 using lamp::loop_watchdog::kSettledUptimeMs;
-using lamp::loop_watchdog::kStableUptimeMs;
+using lamp::loop_watchdog::kFirstBackoffWindowMs;
 using lamp::loop_watchdog::kStreakCap;
 using lamp::loop_watchdog::markIteration;
 using lamp::loop_watchdog::reachedSettled;
@@ -35,6 +35,7 @@ using lamp::loop_watchdog::Mode;
 using lamp::loop_watchdog::modeFor;
 using lamp::loop_watchdog::Phase;
 using lamp::loop_watchdog::kSubscribeRetryMs;
+using lamp::loop_watchdog::Reached;
 using lamp::loop_watchdog::rearmDue;
 using lamp::loop_watchdog::RetryClock;
 using lamp::loop_watchdog::timeoutMs;
@@ -109,45 +110,60 @@ void test_feeds_only_from_the_subscribed_task() {
 }
 
 void test_consecutive_watchdog_resets_back_off_at_the_limit() {
-  uint8_t streak = 0;
-  for (uint8_t reset = 1; reset < kResetStreakLimit; ++reset) {
-    streak = bootStreak(true, streak, false, true);
-    TEST_ASSERT_EQUAL_UINT8(reset, streak);
-    TEST_ASSERT_TRUE(watchesBoot(streak));
-  }
-  streak = bootStreak(true, streak, false, true);
-  TEST_ASSERT_FALSE(watchesBoot(streak));
-  // Further watchdog resets hold it in backoff, at the cap, without overflowing.
-  for (int i = 0; i < 300; ++i) {
-    streak = bootStreak(true, streak, false, true);
+  for (const Reached reached : {Reached::None, Reached::Window}) {
+    uint8_t streak = 0;
+    for (uint8_t reset = 1; reset < kResetStreakLimit; ++reset) {
+      streak = bootStreak(true, streak, reached, true);
+      TEST_ASSERT_EQUAL_UINT8(reset, streak);
+      TEST_ASSERT_TRUE(watchesBoot(streak));
+    }
+    streak = bootStreak(true, streak, reached, true);
     TEST_ASSERT_FALSE(watchesBoot(streak));
+    // Further watchdog resets hold it in backoff without overflowing.
+    for (int i = 0; i < 300; ++i) {
+      streak = bootStreak(true, streak, reached, true);
+      TEST_ASSERT_FALSE(watchesBoot(streak));
+    }
+    // It climbs past the limit only on resets after the window.
+    TEST_ASSERT_EQUAL_UINT8(reached == Reached::Window ? kStreakCap : kResetStreakLimit,
+                            streak);
   }
-  TEST_ASSERT_EQUAL_UINT8(kStreakCap, streak);
+}
+
+void test_a_reset_inside_the_window_keeps_the_streak() {
+  for (uint8_t streak = kResetStreakLimit; streak <= kStreakCap; ++streak) {
+    TEST_ASSERT_EQUAL_UINT8(streak, bootStreak(true, streak, Reached::None, true));
+  }
+  TEST_ASSERT_EQUAL_UINT8(kResetStreakLimit + 2,
+                          bootStreak(true, kResetStreakLimit + 1, Reached::Window, true));
+  // A streak the RTC left out of range comes back to the cap.
+  TEST_ASSERT_EQUAL_UINT8(kStreakCap, bootStreak(true, 200, Reached::None, true));
+  TEST_ASSERT_EQUAL_UINT8(kStreakCap, bootStreak(true, 200, Reached::Window, true));
 }
 
 void test_any_other_reset_rearms() {
-  TEST_ASSERT_EQUAL_UINT8(0, bootStreak(true, kResetStreakLimit, false, false));
+  TEST_ASSERT_EQUAL_UINT8(0, bootStreak(true, kResetStreakLimit, Reached::Window, false));
   TEST_ASSERT_TRUE(
-      watchesBoot(bootStreak(true, kResetStreakLimit, false, false)));
+      watchesBoot(bootStreak(true, kResetStreakLimit, Reached::Window, false)));
 }
 
 void test_lost_state_rearms_even_after_a_watchdog_reset() {
   // RTC state that fails its magic check counts as no streak.
-  TEST_ASSERT_EQUAL_UINT8(0, bootStreak(false, kResetStreakLimit, false, true));
-  TEST_ASSERT_EQUAL_UINT8(0, bootStreak(false, 200, false, true));
+  TEST_ASSERT_EQUAL_UINT8(0, bootStreak(false, kResetStreakLimit, Reached::Window, true));
+  TEST_ASSERT_EQUAL_UINT8(0, bootStreak(false, 200, Reached::None, true));
 }
 
 void test_a_settled_boots_watchdog_reset_does_not_count() {
   // A stall after the boot reached kSettledUptimeMs, then two early ones.
-  uint8_t streak = bootStreak(true, 0, true, true);
+  uint8_t streak = bootStreak(true, 0, Reached::Settled, true);
   TEST_ASSERT_EQUAL_UINT8(0, streak);
-  streak = bootStreak(true, streak, false, true);
-  streak = bootStreak(true, streak, false, true);
+  streak = bootStreak(true, streak, Reached::None, true);
+  streak = bootStreak(true, streak, Reached::Window, true);
   TEST_ASSERT_EQUAL_UINT8(2, streak);
   TEST_ASSERT_TRUE(watchesBoot(streak));
   // A settled one mid-streak, or mid-backoff, ends it too.
-  TEST_ASSERT_EQUAL_UINT8(0, bootStreak(true, 2, true, true));
-  TEST_ASSERT_EQUAL_UINT8(0, bootStreak(true, kStreakCap, true, true));
+  TEST_ASSERT_EQUAL_UINT8(0, bootStreak(true, 2, Reached::Settled, true));
+  TEST_ASSERT_EQUAL_UINT8(0, bootStreak(true, kStreakCap, Reached::Settled, true));
 }
 
 void test_settled_from_the_threshold() {
@@ -186,7 +202,7 @@ void test_guard_backs_off_on_the_third_early_reset_in_a_row() {
   TEST_ASSERT_TRUE(watchedAt(g, false, false));  // first boot, RTC unreadable
   g.markUptime(5000);
   TEST_ASSERT_TRUE(watchedAt(g, true, true));
-  g.markUptime(kStableUptimeMs - 1);
+  g.markUptime(kFirstBackoffWindowMs - 1);
   TEST_ASSERT_TRUE(watchedAt(g, true, true));
   g.markUptime(12000);
   TEST_ASSERT_FALSE(watchedAt(g, true, true));
@@ -209,7 +225,11 @@ void test_a_boot_that_settled_breaks_the_streak() {
 void test_a_backoff_boot_that_settles_rearms_after_its_reset() {
   BootGuard g{};
   g.atBoot(false, false);
-  for (int i = 0; i < 10; ++i) g.atBoot(true, true);
+  // Each boot outlives its window, then resets.
+  for (int i = 0; i < 10; ++i) {
+    g.markUptime(backoffWindowMs(g.streak));
+    g.atBoot(true, true);
+  }
   TEST_ASSERT_EQUAL_UINT8(kStreakCap, g.streak);
   // Backing off at the widest window, the loop settles before its reset.
   g.markUptime(kSettledUptimeMs + 1000);
@@ -254,7 +274,7 @@ void test_a_backoff_boot_holds_the_backoff_timeout_throughout() {
   }
   // Long enough to outlast an early stall and the minute that re-arms, and
   // still finite.
-  TEST_ASSERT_TRUE(kBackoffTimeoutMs > kStableUptimeMs);
+  TEST_ASSERT_TRUE(kBackoffTimeoutMs > kFirstBackoffWindowMs);
   TEST_ASSERT_TRUE(kBackoffTimeoutMs > kWideTimeoutMs);
 }
 
@@ -286,24 +306,33 @@ void test_a_boot_loop_stays_in_backoff_while_it_stalls_early() {
   }
 }
 
-void test_first_backoff_boot_rearms_at_the_stable_minute() {
-  const uint8_t first = kResetStreakLimit;
-  TEST_ASSERT_FALSE(rearmDue(Mode::Backoff, first, 0));
-  TEST_ASSERT_FALSE(rearmDue(Mode::Backoff, first, kStableUptimeMs - 1));
-  TEST_ASSERT_TRUE(rearmDue(Mode::Backoff, first, kStableUptimeMs));
-  TEST_ASSERT_TRUE(rearmDue(Mode::Backoff, first, kBackoffTimeoutMs - 1));
+void test_first_backoff_boot_rearms_at_the_first_window() {
+  BootGuard g{};
+  g.atBoot(false, false);
+  for (uint8_t reset = 0; reset < kResetStreakLimit; ++reset) g.atBoot(true, true);
+  TEST_ASSERT_FALSE(rearmDue(Mode::Backoff, g, 0));
+  TEST_ASSERT_FALSE(rearmDue(Mode::Backoff, g, kFirstBackoffWindowMs - 1));
+  TEST_ASSERT_TRUE(rearmDue(Mode::Backoff, g, kFirstBackoffWindowMs));
+  TEST_ASSERT_TRUE(rearmDue(Mode::Backoff, g, kBackoffTimeoutMs - 1));
   // A normal boot already holds the normal timeouts.
   for (uint8_t streak = 0; streak <= kStreakCap; ++streak) {
-    TEST_ASSERT_FALSE(rearmDue(Mode::Normal, streak, kStableUptimeMs));
-    TEST_ASSERT_FALSE(rearmDue(Mode::Normal, streak, kSettledUptimeMs));
+    const BootGuard at{streak, Reached::None};
+    TEST_ASSERT_FALSE(rearmDue(Mode::Normal, at, kFirstBackoffWindowMs));
+    TEST_ASSERT_FALSE(rearmDue(Mode::Normal, at, kSettledUptimeMs));
   }
 }
 
-void test_each_further_reset_doubles_the_backoff_window_up_to_the_cap() {
-  for (uint8_t streak = kResetStreakLimit + 1; streak <= kStreakCap; ++streak) {
-    TEST_ASSERT_EQUAL_UINT32(2 * backoffWindowMs(streak - 1), backoffWindowMs(streak));
-    TEST_ASSERT_FALSE(rearmDue(Mode::Backoff, streak, backoffWindowMs(streak) - 1));
-    TEST_ASSERT_TRUE(rearmDue(Mode::Backoff, streak, backoffWindowMs(streak)));
+void test_each_reset_after_the_window_doubles_it_up_to_the_cap() {
+  BootGuard g{};
+  g.atBoot(false, false);
+  for (uint8_t reset = 0; reset < kResetStreakLimit; ++reset) g.atBoot(true, true);
+  for (int boot = 0; boot < kStreakCap - kResetStreakLimit; ++boot) {
+    const uint32_t windowMs = backoffWindowMs(g.streak);
+    TEST_ASSERT_FALSE(rearmDue(Mode::Backoff, g, windowMs - 1));
+    TEST_ASSERT_TRUE(rearmDue(Mode::Backoff, g, windowMs));
+    g.markUptime(windowMs + 1000);
+    g.atBoot(true, true);
+    TEST_ASSERT_EQUAL_UINT32(2 * windowMs, backoffWindowMs(g.streak));
   }
   // Past the cap, and on a streak the RTC left out of range, it stays bounded.
   TEST_ASSERT_EQUAL_UINT32(backoffWindowMs(kStreakCap), backoffWindowMs(kStreakCap + 1));
@@ -314,7 +343,7 @@ void test_each_further_reset_doubles_the_backoff_window_up_to_the_cap() {
 // and for less than kBackoffTimeoutMs, every `periodMs` of uptime.
 static uint32_t stallResetUptimeMs(const BootGuard& g, Mode mode, uint32_t periodMs) {
   uint32_t stallAtMs = periodMs;
-  while (mode == Mode::Backoff && !rearmDue(mode, g.streak, stallAtMs)) {
+  while (mode == Mode::Backoff && !rearmDue(mode, g, stallAtMs)) {
     stallAtMs += periodMs;
   }
   return stallAtMs;
@@ -364,11 +393,22 @@ void test_watchdog_resets_after_the_first_minute_still_back_off() {
   g.atBoot(false, false);
   // Each boot's loop runs past the first minute, then stalls the watchdog.
   for (uint8_t reset = 1; reset < kResetStreakLimit; ++reset) {
-    g.markUptime(kStableUptimeMs + 90000);
+    g.markUptime(kFirstBackoffWindowMs + 90000);
     TEST_ASSERT_TRUE(watchedAt(g, true, true));
   }
-  g.markUptime(kStableUptimeMs + 90000);
+  g.markUptime(kFirstBackoffWindowMs + 90000);
   TEST_ASSERT_FALSE(watchedAt(g, true, true));
+}
+
+void test_a_boot_loop_that_stalls_in_the_first_minute_keeps_the_first_window() {
+  BootGuard g{};
+  g.atBoot(false, false);
+  // Every boot stalls 20 s in, inside even the first backoff window.
+  for (int boot = 0; boot < 10; ++boot) {
+    g.markUptime(20000);
+    g.atBoot(true, true);
+  }
+  TEST_ASSERT_EQUAL_UINT32(kFirstBackoffWindowMs, backoffWindowMs(g.streak));
 }
 
 int main(int, char**) {
@@ -380,6 +420,7 @@ int main(int, char**) {
   RUN_TEST(test_span_across_millis_wrap);
   RUN_TEST(test_feeds_only_from_the_subscribed_task);
   RUN_TEST(test_consecutive_watchdog_resets_back_off_at_the_limit);
+  RUN_TEST(test_a_reset_inside_the_window_keeps_the_streak);
   RUN_TEST(test_any_other_reset_rearms);
   RUN_TEST(test_lost_state_rearms_even_after_a_watchdog_reset);
   RUN_TEST(test_a_settled_boots_watchdog_reset_does_not_count);
@@ -395,10 +436,11 @@ int main(int, char**) {
   RUN_TEST(test_widening_never_shortens_the_timeout);
   RUN_TEST(test_idle_mask_has_one_bit_per_checked_core);
   RUN_TEST(test_a_boot_loop_stays_in_backoff_while_it_stalls_early);
-  RUN_TEST(test_first_backoff_boot_rearms_at_the_stable_minute);
-  RUN_TEST(test_each_further_reset_doubles_the_backoff_window_up_to_the_cap);
+  RUN_TEST(test_first_backoff_boot_rearms_at_the_first_window);
+  RUN_TEST(test_each_reset_after_the_window_doubles_it_up_to_the_cap);
   RUN_TEST(test_a_stall_that_recurs_after_the_first_minute_resets_ever_less_often);
   RUN_TEST(test_a_failed_subscribe_is_retried_once_a_second_across_the_wrap);
   RUN_TEST(test_watchdog_resets_after_the_first_minute_still_back_off);
+  RUN_TEST(test_a_boot_loop_that_stalls_in_the_first_minute_keeps_the_first_window);
   return UNITY_END();
 }

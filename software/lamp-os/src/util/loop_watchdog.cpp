@@ -29,13 +29,17 @@ uint32_t LongestGap::takeReport() {
 }
 
 Mode BootGuard::atBoot(bool stateValid, bool taskWdtReset) {
-  streak = bootStreak(stateValid, streak, settledSeen != 0, taskWdtReset);
-  settledSeen = 0;
+  streak = bootStreak(stateValid, streak, reached, taskWdtReset);
+  reached = Reached::None;
   return modeFor(streak);
 }
 
 void BootGuard::markUptime(uint32_t uptimeMs) {
-  if (reachedSettled(uptimeMs)) settledSeen = 1;
+  if (reachedSettled(uptimeMs)) {
+    reached = Reached::Settled;
+  } else if (uptimeMs >= backoffWindowMs(streak) && reached == Reached::None) {
+    reached = Reached::Window;
+  }
 }
 
 bool markIteration(BootGuard& guard, uint32_t uptimeMs, const void* current,
@@ -178,7 +182,7 @@ void feed() {
 
 void startIteration() {
   const uint32_t nowMs = millis();
-  if (rearmDue(s_mode, s_rtc.guard.streak, nowMs)) {
+  if (rearmDue(s_mode, s_rtc.guard, nowMs)) {
     s_mode = Mode::Normal;
     apply();
     Serial.printf("[loopwd] loop ran %u s; timeout back to %u s\n",
