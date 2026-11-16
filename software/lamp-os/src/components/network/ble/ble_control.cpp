@@ -968,7 +968,8 @@ class FwChunkCallback : public NimBLECharacteristicCallbacks {
     }
     // Direct call on the BLE host task; bounded ~0.5 ms (one OTA write +
     // bitmap set). A missed chunk triggers the receiver's REQ watchdog.
-    s_firmwareReceiver->handleChunkOnRecvTask(p, lamp::FirmwareTransportKind::Ble);
+    s_firmwareReceiver->handleChunkOnRecvTask(p, lamp::FirmwareTransportKind::Ble,
+                                              connInfo.getConnHandle());
   }
 };
 

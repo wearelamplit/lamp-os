@@ -638,7 +638,8 @@ void FirmwareReceiver::onDoneOnLoop(const PendingFirmwareControl& ctrl,
 }
 
 void FirmwareReceiver::handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk& p,
-                                             FirmwareTransportKind via) {
+                                             FirmwareTransportKind via,
+                                             uint16_t bleConnHandle) {
   // Bump writesInFlight_ before reading the armed gate so Core 1's
   // verifyAndApply barrier sees this write. The acquire fetch_add pairs with
   // Core 1's exchange(0, acq_rel) on publishedOtaHandle_: observing armed!=0
@@ -673,8 +674,9 @@ void FirmwareReceiver::handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk&
     return;
   }
   const lamp_protocol::FwChunkVerdict verdict =
-      lamp_protocol::checkFwChunk(p, via == activeTransportKind_, wispMac_,
-                                  offerTotalLen_, offerChunkSize_);
+      lamp_protocol::checkFwChunk(p, via == activeTransportKind_,
+                                  via == FirmwareTransportKind::Ble, wispMac_, bleConnHandle,
+                                  activeBleConnHandle_, offerTotalLen_, offerChunkSize_);
   if (verdict == lamp_protocol::FwChunkVerdict::ForeignSource) return;
   // Bump the seen-stamp before the remaining checks; pairs with Core 1's
   // no-progress watchdog.
