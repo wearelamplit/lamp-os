@@ -58,7 +58,9 @@ void LionsAmbientBehavior::requestStops(const Mac& m, uint32_t nowMs) {
     if (busy && q.mac == m) return;
     if (!busy && !slot) slot = &q;
   }
-  if (!slot) return;
+  // An answer frees its slot inside the resend window, so a lion moving on
+  // can send faster than MeshLink drains resends; it waits for a free one.
+  if (!slot || !meshLink_->colorQueryResendFree()) return;
   meshLink_->sendColorQuery(m.data());  // fill via onColorInfo
   *slot = {m, nowMs};
 }
