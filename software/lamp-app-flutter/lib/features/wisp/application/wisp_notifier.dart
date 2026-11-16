@@ -307,6 +307,13 @@ class WispNotifier extends _$WispNotifier {
       '[wisp_notifier] build lamp=$lampId -- connected, subscribing + reading',
     );
 
+    // An untouched draft only repeats what an earlier visit read, and the
+    // wisp may have changed or emptied its palette since. Start this visit
+    // from nothing, as a first visit does, so its own read seeds the editor.
+    if (_palettesEqual(_draft, _savedManualPalette)) {
+      ref.read(manualPaletteDraftProvider(lampId).notifier).clear();
+    }
+
     // The lamp is unbonded, so its notify subscription dies with the link
     // and has to be renewed on every reconnect.
     var linkUp = true;

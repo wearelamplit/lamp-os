@@ -20,7 +20,8 @@ typedef ManualPaletteDraftState = ({
 /// WispNotifier writes on read survives until a widget watches it, and
 /// in-progress edits outlast a navigation away from the editor. The saved
 /// palette lives beside the draft so a WispNotifier built on a later visit
-/// to the lamp still tells an untouched draft from an edit.
+/// to the lamp can tell an untouched draft, which it clears, from an edit,
+/// which it keeps.
 @Riverpod(keepAlive: true, name: 'manualPaletteDraftProvider')
 class ManualPaletteDraft extends _$ManualPaletteDraft {
   @override
@@ -33,4 +34,6 @@ class ManualPaletteDraft extends _$ManualPaletteDraft {
 
   void setSaved(List<LampColor> saved) => state =
       (colors: state.colors, saved: List<LampColor>.unmodifiable(saved));
+
+  void clear() => state = build(lampId);
 }

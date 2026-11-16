@@ -17,7 +17,8 @@ part of 'manual_palette_draft.dart';
 /// WispNotifier writes on read survives until a widget watches it, and
 /// in-progress edits outlast a navigation away from the editor. The saved
 /// palette lives beside the draft so a WispNotifier built on a later visit
-/// to the lamp still tells an untouched draft from an edit.
+/// to the lamp can tell an untouched draft, which it clears, from an edit,
+/// which it keeps.
 
 @ProviderFor(ManualPaletteDraft)
 final manualPaletteDraftProvider = ManualPaletteDraftFamily._();
@@ -31,7 +32,8 @@ final manualPaletteDraftProvider = ManualPaletteDraftFamily._();
 /// WispNotifier writes on read survives until a widget watches it, and
 /// in-progress edits outlast a navigation away from the editor. The saved
 /// palette lives beside the draft so a WispNotifier built on a later visit
-/// to the lamp still tells an untouched draft from an edit.
+/// to the lamp can tell an untouched draft, which it clears, from an edit,
+/// which it keeps.
 final class ManualPaletteDraftProvider
     extends $NotifierProvider<ManualPaletteDraft, ManualPaletteDraftState> {
   /// In-flight manual-palette editor draft for one wisp, keyed by lampId, with
@@ -43,7 +45,8 @@ final class ManualPaletteDraftProvider
   /// WispNotifier writes on read survives until a widget watches it, and
   /// in-progress edits outlast a navigation away from the editor. The saved
   /// palette lives beside the draft so a WispNotifier built on a later visit
-  /// to the lamp still tells an untouched draft from an edit.
+  /// to the lamp can tell an untouched draft, which it clears, from an edit,
+  /// which it keeps.
   ManualPaletteDraftProvider._({
     required ManualPaletteDraftFamily super.from,
     required String super.argument,
@@ -89,7 +92,7 @@ final class ManualPaletteDraftProvider
 }
 
 String _$manualPaletteDraftHash() =>
-    r'28e3b28b042b3eff002bc09885003a65599f4bdc';
+    r'8e814ab1f54ed2dd4fe2a1f79e6c0230a60845c8';
 
 /// In-flight manual-palette editor draft for one wisp, keyed by lampId, with
 /// the last saved palette known for it.
@@ -100,7 +103,8 @@ String _$manualPaletteDraftHash() =>
 /// WispNotifier writes on read survives until a widget watches it, and
 /// in-progress edits outlast a navigation away from the editor. The saved
 /// palette lives beside the draft so a WispNotifier built on a later visit
-/// to the lamp still tells an untouched draft from an edit.
+/// to the lamp can tell an untouched draft, which it clears, from an edit,
+/// which it keeps.
 
 final class ManualPaletteDraftFamily extends $Family
     with
@@ -129,7 +133,8 @@ final class ManualPaletteDraftFamily extends $Family
   /// WispNotifier writes on read survives until a widget watches it, and
   /// in-progress edits outlast a navigation away from the editor. The saved
   /// palette lives beside the draft so a WispNotifier built on a later visit
-  /// to the lamp still tells an untouched draft from an edit.
+  /// to the lamp can tell an untouched draft, which it clears, from an edit,
+  /// which it keeps.
 
   ManualPaletteDraftProvider call(String lampId) =>
       ManualPaletteDraftProvider._(argument: lampId, from: this);
@@ -147,7 +152,8 @@ final class ManualPaletteDraftFamily extends $Family
 /// WispNotifier writes on read survives until a widget watches it, and
 /// in-progress edits outlast a navigation away from the editor. The saved
 /// palette lives beside the draft so a WispNotifier built on a later visit
-/// to the lamp still tells an untouched draft from an edit.
+/// to the lamp can tell an untouched draft, which it clears, from an edit,
+/// which it keeps.
 
 abstract class _$ManualPaletteDraft extends $Notifier<ManualPaletteDraftState> {
   late final _$args = ref.$arg as String;

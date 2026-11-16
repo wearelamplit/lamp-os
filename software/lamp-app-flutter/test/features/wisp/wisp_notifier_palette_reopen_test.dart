@@ -88,14 +88,17 @@ void main() {
     expect(notifier().manualPaletteDirty, isFalse);
   });
 
-  test('a palette emptied elsewhere does not light Save', () async {
+  test('a palette emptied elsewhere shows empty', () async {
     await leaveLamp(await openLamp());
 
     await wispHolds(const []);
     await openLamp();
 
-    expect(notifier().manualPaletteDirty, isFalse,
-        reason: 'Save would write the old palette back over the clear');
+    expect(draft(), isEmpty,
+        reason: 'Save from the old colours would write them back over the '
+            'clear');
+    expect(notifier().savedManualPalette, isEmpty);
+    expect(notifier().paletteLoading, isFalse);
   });
 
   test('an unsaved edit survives leaving the lamp', () async {
