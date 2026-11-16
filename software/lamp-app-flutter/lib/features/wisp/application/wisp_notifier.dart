@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../control/domain/lamp_color.dart';
+import '../../../core/ble/ble_client.dart';
 import '../../../core/ble/ble_client_provider.dart';
 import '../../../core/ble/uuids.dart';
 import '../data/wisp_password_store.dart';
@@ -303,30 +304,23 @@ class WispNotifier extends _$WispNotifier {
       '[wisp_notifier] build lamp=$lampId -- connected, subscribing + reading',
     );
 
+    // The lamp is unbonded, so its notify subscription dies with the link
+    // and has to be renewed on every reconnect.
+    var linkUp = true;
     _connSub = ble.watchConnected(lampId).listen((connected) {
-      if (!connected) _newestLampStamp = null;
+      if (!connected) {
+        linkUp = false;
+        _newestLampStamp = null;
+        return;
+      }
+      if (linkUp) return;
+      linkUp = true;
+      _subscribeStatus(ble);
     });
 
     // Subscribe before the initial read to never miss a notify that
     // fires between the read returning and the listener attaching.
-    _sub = ble
-        .subscribe(lampId, BleUuids.controlService, BleUuids.wispStatus)
-        .listen((bytes) {
-      if (_disposed) return;
-      final next = WispStatus.fromBytes(bytes);
-      if (next.configLastSeenMs != null) _repo.noteWispSections();
-      // An empty or MTU-truncated notify on a lamp that serves the status
-      // whole: re-read it there rather than drop the update.
-      if (!next.present && _repo.wispSectionsSupported) {
-        unawaited(_rereadStatusSection());
-        return;
-      }
-      _onIncoming(next);
-    }, onError: (Object e, StackTrace st) {
-      debugPrint('[wisp_notifier] notify-stream error lamp=$lampId: $e');
-    }, onDone: () {
-      debugPrint('[wisp_notifier] notify-stream done lamp=$lampId');
-    });
+    _subscribeStatus(ble);
 
     try {
       // The lamp gates the CHAR_WISP_STATUS read on the AES-GCM auth
@@ -391,6 +385,33 @@ class WispNotifier extends _$WispNotifier {
         'returning empty. err=$e',
       );
       return WispStatus.empty;
+    }
+  }
+
+  void _subscribeStatus(BleClient ble) {
+    _sub?.cancel();
+    try {
+      _sub = ble
+          .subscribe(lampId, BleUuids.controlService, BleUuids.wispStatus)
+          .listen((bytes) {
+        if (_disposed) return;
+        final next = WispStatus.fromBytes(bytes);
+        if (next.configLastSeenMs != null) _repo.noteWispSections();
+        // An empty or MTU-truncated notify on a lamp that serves the status
+        // whole: re-read it there rather than drop the update.
+        if (!next.present && _repo.wispSectionsSupported) {
+          unawaited(_rereadStatusSection());
+          return;
+        }
+        _onIncoming(next);
+      }, onError: (Object e, StackTrace st) {
+        debugPrint('[wisp_notifier] notify-stream error lamp=$lampId: $e');
+      }, onDone: () {
+        debugPrint('[wisp_notifier] notify-stream done lamp=$lampId');
+      });
+    } catch (e) {
+      _sub = null;
+      debugPrint('[wisp_notifier] subscribe failed lamp=$lampId: $e');
     }
   }
 
