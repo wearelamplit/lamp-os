@@ -892,6 +892,42 @@ void main() {
       },
     );
 
+    test('on a lamp without quiet, after a save reboots it', () async {
+      final r = await heldFlags();
+      final mark = r.mark();
+      await r.control.setLampPassword('');
+      r.ble.dropSubscriptions();
+      await Future<void>.delayed(const Duration(seconds: 3));
+      expect(r.connected, isTrue);
+      r.notify();
+      await _pump();
+      expectEachOnce(r, mark);
+    });
+
+    test('on a lamp last heard quiet mid-push, only once it listens', () async {
+      final r = await heldFlags();
+      r.notify(quiet: false);
+      r.firmware.emit(_streaming);
+      r.notify(quiet: true);
+      await _pump();
+      expect(r.frozen, isFalse, reason: 'a push in hand starts no freeze');
+      r.ble.quietOnSubscribe = true;
+      final mark = r.mark();
+      await r.reconnect();
+      expect(r.connected, isTrue);
+      expect(r.payloadsSince(mark, BleUuids.homeModeFocus), isEmpty);
+      expect(r.payloadsSince(mark, BleUuids.editSession), [
+        [0x08, 1],
+      ]);
+
+      r.firmware.emit(_failed);
+      await _pump();
+      final listening = r.mark();
+      r.notify(quiet: false);
+      await _pump();
+      expectEachOnce(r, listening);
+    });
+
     test('on a lamp that reports listening on subscribe', () async {
       final r = await heldFlags();
       r.notify(quiet: false);

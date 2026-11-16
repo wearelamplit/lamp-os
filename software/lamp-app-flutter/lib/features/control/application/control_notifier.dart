@@ -830,23 +830,20 @@ class ControlNotifier extends _$ControlNotifier {
   }
 
   /// The last step of bringing a link up; the lamp's first report arrives
-  /// after the connected state. The lamp holds none of [_heldFlags] and has
-  /// not yet said whether it is quiet, and firmware without `quiet` never
-  /// will, so each held open goes at once. A lamp that then reports quiet
-  /// gets them again when it listens. While a quiet freeze runs only the
-  /// Social open goes early: the lamp counts it even while quiet, so a later
-  /// close still ends its nearby hold.
+  /// after the connected state. The lamp holds none of [_heldFlags]. Each
+  /// held open goes at once unless the lamp was last heard quiet; see
+  /// docs/dev/networking.md (`CHAR_STATE_NOTIFY`).
   void _beginLinkSession(BleClient ble) {
+    final quiet = _quietBound != null || _lampQuiet == true;
     _lampQuiet = null;
     _rereadPending = false;
-    final frozen = _quietBound != null;
-    _flagsPending = frozen;
+    _flagsPending = quiet;
     for (final MapEntry(key: (charUuid, selector), :value)
         in _heldFlags.entries.toList()) {
       final open = value.last != 0;
       final social = charUuid == BleUuids.editSession &&
           selector == _editSurfaceSocialView;
-      if (!open || (frozen && !social)) continue;
+      if (!open || (quiet && !social)) continue;
       unawaited(
         ble
             .write(
