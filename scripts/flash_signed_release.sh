@@ -23,16 +23,16 @@
 #   RELEASE_TAG  GitHub release tag to pull from: beta (default) or a version tag such as v1.3.0
 #   IMAGE        flash this local distribution.bin, skip the download (used for
 #                a locally-built signed variant with no release asset, e.g. loaf)
-#   CACHE_DIR    where downloads are cached and reused, one file per variant and
-#                release tag: release-<variant>-<tag>.bin, any "/" in the tag
-#                becomes "_" (default ~/.cache/lamp-os). The name stays clear of
-#                the distribution-*.bin local builds that flash_prebuilt.sh picks.
-#   REFRESH      set to force a re-download even if a cached image exists
+#   CACHE_DIR    where version-tag downloads are cached, one file per variant and
+#                tag: release-<variant>-<tag>.bin, any "/" in the tag becomes "_"
+#                (default ~/.cache/lamp-os). The name stays clear of the
+#                distribution-*.bin local builds that flash_prebuilt.sh picks.
+#   REFRESH      set to re-download a cached version-tag image; a failed refresh
+#                errors and keeps the cached image
 #
-# A cached image for a rolling tag (anything but vX.Y.Z) is revalidated with one
-# HEAD request: the release asset's ETag is stored beside the image, and a
-# different ETag re-downloads. If the HEAD or the re-download fails (offline
-# bench) the cached image is reused with a warning; a failed REFRESH=1 errors and keeps it.
+# Rolling tags (anything but vX.Y.Z, e.g. beta and stable) are downloaded on every
+# run into a temporary file that is deleted on exit, and never fall back to an old
+# copy: offline, they fail. A vX.Y.Z image is immutable, so it is cached.
 #
 # For people WITHOUT the signing key: downloads a prebuilt image, never builds
 # or signs. Requires: curl, esptool (pip install esptool), dd.
@@ -44,12 +44,11 @@ RELEASE_TAG="${RELEASE_TAG:-beta}"
 ASSET="distribution-${VARIANT}.bin"
 REPO="wearelamplit/lamp-os"
 URL="https://github.com/${REPO}/releases/download/${RELEASE_TAG}/${ASSET}"
-# Cache the merged image so a re-flash (or an offline bench) reuses it instead of
-# re-pulling 4 MiB. IMAGE=<path> flashes a local image (e.g. a locally-built
-# signed loaf) and skips the network entirely.
 CACHE_DIR="${CACHE_DIR:-$HOME/.cache/lamp-os}"
-CACHED_NAME="release-${VARIANT}-${RELEASE_TAG//\//_}.bin"
-TMPFILE="${IMAGE:-$CACHE_DIR/$CACHED_NAME}"
+CACHED="$CACHE_DIR/release-${VARIANT}-${RELEASE_TAG//\//_}.bin"
+ROLLING=1
+case "$RELEASE_TAG" in v[0-9]*) ROLLING="" ;; esac
+DOWNLOAD=""
 APP0FILE="$(mktemp -t lamp-app0-XXXX.bin)"
 SPIFFSFILE="$(mktemp -t lamp-spiffs-XXXX.bin)"
 # Prefer the esptool binary on PATH, else the module form (pip installs the
@@ -61,13 +60,7 @@ else
   ESPTOOL=( python3 -m esptool )
 fi
 
-CACHED="$CACHE_DIR/$CACHED_NAME"
-PART="${CACHED}.part"
-HDRS="${CACHED}.hdr"
-cleanup() {
-  rm -f "$APP0FILE" "$SPIFFSFILE"
-  [ -n "${IMAGE:-}" ] || rm -f "$PART" "$HDRS"
-}
+cleanup() { rm -f "$APP0FILE" "$SPIFFSFILE" ${DOWNLOAD:+"$DOWNLOAD"}; }
 trap cleanup EXIT
 
 # otadata offset+size from the partition table, not hardcoded, so a repartition
@@ -81,72 +74,44 @@ if [ -z "${OTADATA_OFF:-}" ] || [ -z "${OTADATA_SIZE:-}" ]; then
   exit 1
 fi
 
-last_etag() { tr -d '\r' | awk 'tolower($1)=="etag:" { e=$2 } END { print e }'; }
-remote_etag() { curl -fsSIL --max-time 10 "$URL" 2>/dev/null | last_etag; }
-ETAG_FILE="${CACHED}.etag"
-STORE_ETAG=""
-REDOWNLOAD=""
-ROLLING=1
-case "$RELEASE_TAG" in v[0-9]*) ROLLING="" ;; esac
-if [ -z "${IMAGE:-}" ] && [ -z "${REFRESH:-}" ] && [ -s "$TMPFILE" ]; then
-  case "$ROLLING" in
-    "") ;;
-    *)
-      STORE_ETAG="$(remote_etag || true)"
-      if [ -n "$STORE_ETAG" ] && [ "$STORE_ETAG" != "$(cat "$ETAG_FILE" 2>/dev/null || true)" ]; then
-        echo "[flash:release] release '${RELEASE_TAG}' changed since the cached image; re-downloading"
-        REDOWNLOAD=1
-      fi
-      ;;
-  esac
-fi
-
-if [ -s "$TMPFILE" ]; then
-  if [ -n "${IMAGE:-}" ]; then
-    echo "[flash:release] using local image ${TMPFILE}"
-  elif [ -n "${REFRESH:-}" ]; then
-    REDOWNLOAD=1
-  elif [ -z "$REDOWNLOAD" ]; then
-    echo "[flash:release] using cached image ${TMPFILE} (release '${RELEASE_TAG}'; REFRESH=1 to re-download)"
-    if [ -n "$ROLLING" ] && [ -z "$STORE_ETAG" ]; then
-      echo "[flash:release] WARNING: could not check whether release '${RELEASE_TAG}' has a newer image; this one may be stale" >&2
-    fi
-  fi
-fi
-
-if [ ! -s "$TMPFILE" ] || [ -n "$REDOWNLOAD" ]; then
-  if [ -n "${IMAGE:-}" ]; then
+if [ -n "${IMAGE:-}" ]; then
+  if [ ! -s "$IMAGE" ]; then
     echo "ERROR: IMAGE=${IMAGE} not found or empty." >&2
     exit 1
   fi
+  IMG="$IMAGE"
+  echo "[flash:release] using local image ${IMG}"
+elif [ -z "$ROLLING" ] && [ -s "$CACHED" ] && [ -z "${REFRESH:-}" ]; then
+  IMG="$CACHED"
+  echo "[flash:release] using cached image ${IMG} (release '${RELEASE_TAG}'; REFRESH=1 to re-download)"
+else
   mkdir -p "$CACHE_DIR"
+  DOWNLOAD="$(mktemp "$CACHE_DIR/.download-XXXXXX")"
   echo "[flash:release] downloading ${ASSET} from release '${RELEASE_TAG}' (${REPO})"
-  if ! curl -fSL --retry 3 -D "$HDRS" -o "$PART" "${URL}"; then
-    if [ -n "$REDOWNLOAD" ] && [ -z "${REFRESH:-}" ]; then
-      echo "WARNING: re-download failed; flashing the cached image." >&2
-    elif [ -n "$REDOWNLOAD" ]; then
+  if ! curl -fSL --retry 3 -o "$DOWNLOAD" "$URL"; then
+    if [ -z "$ROLLING" ] && [ -n "${REFRESH:-}" ] && [ -s "$CACHED" ]; then
       echo "ERROR: REFRESH download failed; the cached image was kept." >&2
-      exit 1
     else
-      echo "ERROR: asset '${ASSET}' not found in release '${RELEASE_TAG}'." >&2
-      echo "       Publish a release for tag '${RELEASE_TAG}' on GitHub, then retry." >&2
-      exit 1
+      echo "ERROR: asset '${ASSET}' not downloaded from release '${RELEASE_TAG}'." >&2
+      echo "       Publish a release for tag '${RELEASE_TAG}' on GitHub, check the network, then retry." >&2
     fi
-  else
-    mv "$PART" "$TMPFILE"
-    STORE_ETAG="$(last_etag < "$HDRS")"
-    rm -f "$HDRS"
-    if [ -n "$STORE_ETAG" ]; then echo "$STORE_ETAG" > "$ETAG_FILE"; else rm -f "$ETAG_FILE"; fi
+    exit 1
+  fi
+  IMG="$DOWNLOAD"
+  if [ -z "$ROLLING" ]; then
+    mv "$DOWNLOAD" "$CACHED"
+    DOWNLOAD=""
+    IMG="$CACHED"
   fi
 fi
 
-if [ ! -s "$TMPFILE" ]; then
+if [ ! -s "$IMG" ]; then
   echo "ERROR: image is empty." >&2
   exit 1
 fi
 
 # A short image would dd garbage past its end into the flashed regions.
-IMG_SIZE="$(wc -c < "$TMPFILE")"
+IMG_SIZE="$(wc -c < "$IMG")"
 if [ "$IMG_SIZE" -lt $((0x400000)) ]; then
   echo "ERROR: image is ${IMG_SIZE} bytes, expected at least 4 MiB (0x400000)." >&2
   exit 1
@@ -154,8 +119,8 @@ fi
 
 # Carve app0 (0x10000, len 0x1e0000) and spiffs (0x3d0000, len 0x30000) out of
 # the merged image, in 4096-byte blocks.
-dd if="$TMPFILE" of="$APP0FILE"   bs=4096 skip=16  count=480 2>/dev/null
-dd if="$TMPFILE" of="$SPIFFSFILE" bs=4096 skip=976 count=48  2>/dev/null
+dd if="$IMG" of="$APP0FILE"   bs=4096 skip=16  count=480 2>/dev/null
+dd if="$IMG" of="$SPIFFSFILE" bs=4096 skip=976 count=48  2>/dev/null
 
 echo "[flash:release] updating firmware (app0 @0x10000) + spiffs (@0x3d0000); NVS preserved..."
 PORT_ARG=()

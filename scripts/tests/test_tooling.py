@@ -41,19 +41,13 @@ class Docs(unittest.TestCase):
 
 
 STUB_CURL = """#!/bin/bash
-# stub: -I prints headers (etag from $STUB_ETAG); otherwise writes a 4 MiB body to the -o target
-out=""; head=0; hdr=""
-while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift;; -D) hdr="$2"; shift;; -*I*) head=1;; esac; shift; done
+# stub: writes a 4 MiB body of $STUB_FILL to the -o target; STUB_GET_FAIL fails after a partial write,
+# STUB_GET_SLEEP stalls after one
+out=""
+while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift;; esac; shift; done
 echo x >> "$STUB_LOG"
-if [ "$head" = 1 ]; then
-  [ "${STUB_HEAD_FAIL:-}" = 1 ] && exit 22
-  printf 'HTTP/2 302\\r\\nlocation: x\\r\\n\\r\\nHTTP/2 200\\r\\nETag: "%s"\\r\\n\\r\\n' "$STUB_ETAG"
-  exit 0
-fi
-[ -n "$hdr" ] && echo partial > "$hdr"
 [ "${STUB_GET_FAIL:-}" = 1 ] && { echo partial > "$out"; exit 18; }
 [ "${STUB_GET_SLEEP:-}" = 1 ] && { echo partial > "$out"; sleep 30; }
-[ -n "$hdr" ] && printf 'HTTP/2 200\\r\\nETag: "%s"\\r\\n\\r\\n' "${STUB_GET_ETAG:-$STUB_ETAG}" > "$hdr"
 head -c 4194304 /dev/zero | tr '\\0' "$STUB_FILL" > "$out"
 """
 
@@ -74,123 +68,118 @@ class FlashCache(unittest.TestCase):
     def tearDown(self):
         self.d.cleanup()
 
-    def run_flash(self, etag, fill, tag="beta", _out=False, ok=True, **extra):
-        env = dict(os.environ, PATH=f"{self.d.name}/bin:{os.environ['PATH']}", CACHE_DIR=str(self.cache),
-                   STUB_ETAG=etag, STUB_FILL=fill, STUB_LOG=str(self.log), RELEASE_TAG=tag, **extra)
-        r = subprocess.run(["bash", str(ROOT / "scripts/flash_signed_release.sh")], env=env,
+    def env(self, fill, tag, **extra):
+        return dict(os.environ, PATH=f"{self.d.name}/bin:{os.environ['PATH']}", CACHE_DIR=str(self.cache),
+                    STUB_FILL=fill, STUB_LOG=str(self.log), RELEASE_TAG=tag, **extra)
+
+    def run_flash(self, fill, tag="beta", ok=True, **extra):
+        r = subprocess.run(["bash", str(ROOT / "scripts/flash_signed_release.sh")], env=self.env(fill, tag, **extra),
                            capture_output=True, text=True)
         self.assertEqual(r.returncode == 0, ok, r.stderr)
-        return r if _out else self.cache / f"release-standard-{tag}.bin"
+        return r
 
-    def test_newer_beta_replaces_cached_image(self):
-        self.run_flash("a", "A")
-        img = self.run_flash("b", "B")
-        self.assertEqual(img.read_bytes()[:1], b"B")
+    def cache_files(self):
+        return sorted(p.name for p in self.cache.iterdir()) if self.cache.exists() else []
 
-    def test_unchanged_beta_is_not_redownloaded(self):
-        self.run_flash("a", "A")
-        img = self.run_flash("a", "B")
-        self.assertEqual(img.read_bytes()[:1], b"A")
+    def curl_calls(self):
+        return len(self.log.read_text().split())
 
-    def test_offline_reuses_cache(self):
-        self.run_flash("a", "A")
-        img = self.run_flash("b", "B", STUB_HEAD_FAIL="1")
-        self.assertEqual(img.read_bytes()[:1], b"A")
+    def seed(self, tag, byte=b"O"):
+        self.cache.mkdir(exist_ok=True)
+        f = self.cache / f"release-standard-{tag}.bin"
+        f.write_bytes(byte * 4194304)
+        return f
 
-    def test_failed_redownload_keeps_cache(self):
-        self.run_flash("a", "A")
-        img = self.run_flash("b", "B", STUB_GET_FAIL="1")
-        self.assertEqual(img.read_bytes()[:1], b"A")
-        self.assertFalse(Path(str(img) + ".part").exists())
-        self.assertFalse(Path(str(img) + ".hdr").exists())
+    def test_rolling_tag_downloads_despite_cached_file(self):
+        old = self.seed("beta")
+        self.run_flash("N")
+        self.assertEqual(self.curl_calls(), 1)
+        self.assertEqual(old.read_bytes()[:1], b"O")
 
-    def test_interrupted_download_leaves_no_partials_and_keeps_cache(self):
-        img = self.run_flash("a", "A")
-        env = dict(os.environ, PATH=f"{self.d.name}/bin:{os.environ['PATH']}", CACHE_DIR=str(self.cache),
-                   STUB_ETAG="b", STUB_FILL="B", STUB_LOG=str(self.log), RELEASE_TAG="beta", STUB_GET_SLEEP="1")
-        p = subprocess.Popen(["bash", str(ROOT / "scripts/flash_signed_release.sh")], env=env,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-        part = Path(str(img) + ".part")
-        for _ in range(100):
-            if part.exists() and Path(str(img) + ".hdr").exists():
-                break
-            time.sleep(0.1)
-        self.assertTrue(part.exists() and Path(str(img) + ".hdr").exists())
-        os.killpg(p.pid, signal.SIGTERM)
-        p.wait(timeout=10)
-        self.assertFalse(part.exists())
-        self.assertFalse(Path(str(img) + ".hdr").exists())
-        self.assertEqual(img.read_bytes()[:1], b"A")
+    def test_rolling_tag_flashes_the_fresh_download(self):
+        self.seed("beta")
+        r = self.run_flash("N")
+        self.assertNotIn("cached", r.stdout)
 
-    def test_local_image_run_leaves_cache_partials_alone(self):
-        self.cache.mkdir()
-        parts = [self.cache / f"release-standard-beta.bin.{e}" for e in ("part", "hdr")]
-        for q in parts:
-            q.write_text("other run")
-        img = Path(self.d.name) / "local.bin"
-        img.write_bytes(b"L" * 4194304)
-        self.run_flash("zzz", "B", IMAGE=str(img))
-        for q in parts:
-            self.assertEqual(q.read_text(), "other run", q.name)
+    def test_rolling_tag_leaves_no_file_after_success(self):
+        self.run_flash("N", tag="stable")
+        self.assertEqual(self.cache_files(), [])
 
-    def test_local_image_leaves_siblings_alone(self):
+    def test_rolling_tag_failure_errors_and_leaves_no_file(self):
+        r = self.run_flash("N", ok=False, STUB_GET_FAIL="1")
+        self.assertIn("not downloaded", r.stderr)
+        self.assertEqual(self.cache_files(), [])
+
+    def test_rolling_tag_failure_never_falls_back_to_cache(self):
+        self.seed("beta")
+        self.run_flash("N", ok=False, STUB_GET_FAIL="1")
+
+    def test_version_tag_downloads_once_then_reuses_cache(self):
+        self.run_flash("A", tag="v1.3.0")
+        self.assertEqual(self.cache_files(), ["release-standard-v1.3.0.bin"])
+        self.run_flash("B", tag="v1.3.0")
+        self.assertEqual(self.curl_calls(), 1)
+        self.assertEqual((self.cache / "release-standard-v1.3.0.bin").read_bytes()[:1], b"A")
+
+    def test_version_tag_refresh_replaces_cache(self):
+        self.run_flash("A", tag="v1.3.0")
+        self.run_flash("B", tag="v1.3.0", REFRESH="1")
+        self.assertEqual((self.cache / "release-standard-v1.3.0.bin").read_bytes()[:1], b"B")
+        self.assertEqual(len(self.cache_files()), 1)
+
+    def test_failed_version_refresh_keeps_cache_and_errors(self):
+        self.run_flash("A", tag="v1.3.0")
+        r = self.run_flash("B", tag="v1.3.0", REFRESH="1", ok=False, STUB_GET_FAIL="1")
+        self.assertIn("cached image was kept", r.stderr)
+        self.assertEqual(self.cache_files(), ["release-standard-v1.3.0.bin"])
+        self.assertEqual((self.cache / "release-standard-v1.3.0.bin").read_bytes()[:1], b"A")
+
+    def test_failed_first_version_download_errors_and_leaves_no_file(self):
+        r = self.run_flash("A", tag="v1.3.0", ok=False, STUB_GET_FAIL="1")
+        self.assertIn("not downloaded", r.stderr)
+        self.assertEqual(self.cache_files(), [])
+
+    def test_local_image_makes_no_curl_call_and_touches_nothing(self):
         img = Path(self.d.name) / "local.bin"
         img.write_bytes(b"L" * 4194304)
         sibs = [Path(str(img) + e) for e in (".part", ".hdr", ".etag")]
-        for s in sibs:
-            s.write_text("keep")
-        self.run_flash("zzz", "B", IMAGE=str(img))
-        for s in sibs:
-            self.assertEqual(s.read_text(), "keep", s.name)
-
-    def test_etag_stored_is_the_downloaded_ones(self):
-        self.run_flash("new", "A", STUB_GET_ETAG="old")
-        img = self.run_flash("new", "B")
-        self.assertEqual(img.read_bytes()[:1], b"B")
-
-    def test_unchecked_cache_warns(self):
-        self.run_flash("a", "A")
-        r = self.run_flash("b", "B", STUB_HEAD_FAIL="1", _out=True)
-        self.assertIn("may be stale", r.stderr)
-
-    def test_local_image_is_never_touched(self):
-        img = Path(self.d.name) / "local.bin"
-        img.write_bytes(b"L" * 4194304)
-        self.run_flash("zzz", "B", IMAGE=str(img))
+        for q in sibs:
+            q.write_text("keep")
+        for extra in ({}, {"REFRESH": "1"}):
+            self.run_flash("B", IMAGE=str(img), **extra)
         self.assertEqual(img.read_bytes()[:1], b"L")
-        self.assertEqual(self.log.read_text(), "")
+        self.assertEqual(self.curl_calls(), 0)
+        self.assertEqual(self.cache_files(), [])
+        for q in sibs:
+            self.assertEqual(q.read_text(), "keep", q.name)
 
-    def test_failed_redownload_does_not_mark_fresh(self):
-        self.run_flash("a", "A")
-        self.run_flash("b", "B", STUB_GET_FAIL="1")
-        img = self.run_flash("b", "B")
-        self.assertEqual(img.read_bytes()[:1], b"B")
-
-    def test_failed_first_download_errors_with_message(self):
-        r = self.run_flash("a", "A", STUB_GET_FAIL="1", _out=True, ok=False)
-        self.assertIn("not found in release", r.stderr)
-
-    def test_failed_refresh_keeps_cache_and_errors(self):
-        img = self.run_flash("a", "A")
-        self.run_flash("a", "B", STUB_GET_FAIL="1", REFRESH="1", ok=False)
+    def test_interrupted_download_leaves_no_temp_file_and_keeps_cache(self):
+        img = self.seed("v1.3.0", b"A")
+        p = subprocess.Popen(["bash", str(ROOT / "scripts/flash_signed_release.sh")],
+                             env=self.env("B", "v1.3.0", STUB_GET_SLEEP="1", REFRESH="1"),
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        for _ in range(100):
+            if len(self.cache_files()) > 1:
+                break
+            time.sleep(0.1)
+        self.assertEqual(len(self.cache_files()), 2)
+        os.killpg(p.pid, signal.SIGTERM)
+        p.wait(timeout=10)
+        self.assertEqual(self.cache_files(), [img.name])
         self.assertEqual(img.read_bytes()[:1], b"A")
 
-    def test_image_with_refresh_is_never_touched(self):
-        img = Path(self.d.name) / "local.bin"
-        img.write_bytes(b"L" * 4194304)
-        self.run_flash("zzz", "B", IMAGE=str(img), REFRESH="1")
-        self.assertEqual(img.read_bytes()[:1], b"L")
-
-    def test_changed_release_does_not_claim_cache_use(self):
-        self.run_flash("a", "A")
-        r = self.run_flash("b", "B", _out=True)
-        self.assertNotIn("using cached image", r.stdout)
-
-    def test_version_tag_skips_the_check(self):
-        self.run_flash("a", "A", tag="v1.3.0")
-        n = len(self.log.read_text().split())
-        self.run_flash("b", "B", tag="v1.3.0")
-        self.assertEqual(len(self.log.read_text().split()), n)
+    def test_interrupted_rolling_download_leaves_no_temp_file(self):
+        p = subprocess.Popen(["bash", str(ROOT / "scripts/flash_signed_release.sh")],
+                             env=self.env("B", "beta", STUB_GET_SLEEP="1"),
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        for _ in range(100):
+            if self.cache_files():
+                break
+            time.sleep(0.1)
+        self.assertEqual(len(self.cache_files()), 1)
+        os.killpg(p.pid, signal.SIGTERM)
+        p.wait(timeout=10)
+        self.assertEqual(self.cache_files(), [])
 
 
 if __name__ == "__main__":
