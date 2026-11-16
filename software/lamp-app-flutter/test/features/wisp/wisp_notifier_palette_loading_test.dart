@@ -6,7 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
+import 'package:lamp_app/features/control/domain/lamp_color.dart';
 import 'package:lamp_app/features/wisp/application/wisp_notifier.dart';
+import 'package:lamp_app/features/wisp/data/wisp_repository.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../_support/in_memory_ble_client.dart';
@@ -82,6 +84,35 @@ void main() {
     final n = c.read(wispNotifierProvider(_lampId).notifier);
     expect(ble.paletteReads, greaterThan(0));
     expect(n.paletteLoading, isFalse);
+  });
+
+  test('a palette skipped behind a status re-read is read when that re-read '
+      'lands with the same palette id', () async {
+    const palette = [LampColor(r: 9, g: 80, b: 200, w: 0)];
+    final manual = '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual",'
+        '"paletteIdPrefix":"${WispRepository.paletteIdHash(palette)}"}';
+    final ble = _HeldReadsBle();
+    await ble.connect(_lampId);
+    ble.seedSection(_lampId, 'wispstatus', _b(manual));
+    ble.seedSection(_lampId, 'wisppalette',
+        Uint8List.fromList([for (final x in palette) ...[x.r, x.g, x.b, x.w]]));
+    ble.holdStatus = Completer<void>();
+    final c = makeContainer(ble);
+    c.listen(wispNotifierProvider(_lampId), (_, _) {});
+    final built = c.read(wispNotifierProvider(_lampId).future);
+    await pumpEventQueue();
+
+    // An empty notify from a lamp that serves the status whole starts a
+    // status re-read, held with build's own status read.
+    notify(ble, '{"configLastSeenMs":5}');
+    await pumpEventQueue();
+    ble.holdStatus!.complete();
+    await built;
+    await pumpEventQueue();
+
+    final n = c.read(wispNotifierProvider(_lampId).notifier);
+    expect(n.paletteLoading, isFalse);
+    expect(n.savedManualPalette, palette);
   });
 
   test('a palette never read is read on the next status, whatever its '
