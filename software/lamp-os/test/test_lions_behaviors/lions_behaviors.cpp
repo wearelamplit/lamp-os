@@ -103,10 +103,25 @@ void BehaviorContext::forEachArrival(uint32_t,
 bool ExpressionManager::triggerInvocation(const ExpressionInvocation&,
                                           const uint8_t*, bool,
                                           TransientSource) { return false; }
+// The real colour-query resend ring: a query is enqueued with MeshLink's
+// resend constants, and tick() re-emits due copies as production's does,
+// counting them per target.
+int g_copies[256];
+uint16_t g_seq = 0;
 bool MeshLink::sendColorQuery(const uint8_t* mac) {
   if (g_queryCount < sizeof g_queries / sizeof g_queries[0])
     g_queries[g_queryCount++] = {mac[0], millis()};
+  const uint8_t self[6] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
+  uint8_t frame[lamp_protocol::COLOR_QUERY_SIZE];
+  const size_t n = lamp_protocol::buildColorQuery(frame, sizeof frame, g_seq++, self, mac);
+  colorQueryResend_.enqueue(frame, n, millis(), kResends, kResendGapMs);
   return true;
+}
+void MeshLink::tick() {
+  colorQueryResend_.service(millis(), [](const uint8_t* buf, size_t len) {
+    lamp_protocol::ParsedColorQuery q;
+    if (lamp_protocol::parseColorQuery(buf, len, q)) ++g_copies[q.targetMac[0]];
+  });
 }
 }  // namespace lamp
 
@@ -118,6 +133,9 @@ void setUp() {
   g_nearby.clear();
   g_arrivals.clear();
   g_queryCount = 0;
+  g_seq = 0;
+  std::memset(g_copies, 0, sizeof g_copies);
+  g_link = MeshLink{};
   set_mock_millis(0);
 }
 void tearDown() { g_refuse = false; }
@@ -352,6 +370,7 @@ void test_silent_peer_queried_once_per_window() {
   const uint32_t span = 4 * window + window / 2;
   for (uint32_t t = 0; t <= span; t += 7) {
     set_mock_millis(t);
+    g_link.tick();
     ambient.control();
   }
 
@@ -373,6 +392,7 @@ void test_silent_crowd_bounded_per_window() {
   const uint32_t window = lamp::lioness::kColorQueryRetryMs;
   for (uint32_t t = 0; t <= 10 * window; t += 7) {
     set_mock_millis(t);
+    g_link.tick();
     ambient.control();
   }
 
@@ -401,6 +421,7 @@ void test_answering_crowd_queries_track_switches() {
   size_t answered = 0;
   for (uint32_t t = 0; t <= span; t += 16) {
     set_mock_millis(t);
+    g_link.tick();
     ambient.control();
     for (; answered < g_queryCount; ++answered) answer(ambient, g_queries[answered].tag);
   }
@@ -453,10 +474,10 @@ void test_cache_keeps_shown_peers() {
   for (int z = 0; z < 3; ++z) TEST_ASSERT_EQUAL_UINT8(tags[z], fb.buffer[32 + z * 6].r);
 }
 
-// An answer whose stops the heap cannot copy binds nothing, so the peer still
-// reads as uncached and its lion asks again; it never takes another peer's
-// stops, or none, as its own.
-void test_refused_answer_leaves_the_peer_uncached() {
+// An answer whose stops the heap cannot copy binds nothing and keeps its query
+// busy: the peer stays uncached, its lion asks again only once
+// kColorQueryRetryMs has passed, never on the next frames.
+void test_refused_answer_keeps_the_query_throttled() {
   FrameBuffer fb = makeFb();
   BehaviorContext ctx;
   LionsAmbientBehavior ambient(&fb);
@@ -464,10 +485,14 @@ void test_refused_answer_leaves_the_peer_uncached() {
   ambient.setMeshLink(&g_link);
   g_nearby = {makePeer(0xB7, Color(), "peer")};
 
+  ambient.control();
+  TEST_ASSERT_EQUAL_size_t(1, g_queryCount);
+
   uint8_t mac[6];
   std::memset(mac, 0xB7, 6);
   const std::vector<Color> stops = twoStops(0xB7);
   bool threw = false;
+  set_mock_millis(30);
   g_refuse = true;
   try {
     ambient.onColorInfo(mac, stops, {});
@@ -477,9 +502,18 @@ void test_refused_answer_leaves_the_peer_uncached() {
   g_refuse = false;
   TEST_ASSERT_TRUE(threw);
 
-  ambient.control();
+  const uint32_t window = lamp::lioness::kColorQueryRetryMs;
+  for (uint32_t t = 30; t < window; t += 16) {
+    set_mock_millis(t);
+    g_link.tick();
+    ambient.control();
+  }
   TEST_ASSERT_EQUAL_size_t(1, g_queryCount);
-  TEST_ASSERT_EQUAL_UINT8(0xB7, g_queries[0].tag);
+  set_mock_millis(window);
+  g_link.tick();
+  ambient.control();
+  TEST_ASSERT_EQUAL_size_t(2, g_queryCount);
+  TEST_ASSERT_EQUAL_UINT8(0xB7, g_queries[1].tag);
 }
 
 // Seeding sends a query per lion in one control(); MeshLink's colour-query
@@ -534,6 +568,6 @@ int main(int, char**) {
   RUN_TEST(test_answer_frees_query_slot);
   RUN_TEST(test_cache_keeps_shown_peers);
   RUN_TEST(test_seed_queries_all_keep_their_resends);
-  RUN_TEST(test_refused_answer_leaves_the_peer_uncached);
+  RUN_TEST(test_refused_answer_keeps_the_query_throttled);
   return UNITY_END();
 }
