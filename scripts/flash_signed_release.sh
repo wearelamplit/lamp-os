@@ -32,7 +32,7 @@
 # A cached image for a rolling tag (anything but vX.Y.Z) is revalidated with one
 # HEAD request: the release asset's ETag is stored beside the image, and a
 # different ETag re-downloads. If the HEAD or the re-download fails (offline
-# bench) the cached image is reused with a warning.
+# bench) the cached image is reused with a warning; a failed REFRESH=1 errors and keeps it.
 #
 # For people WITHOUT the signing key: downloads a prebuilt image, never builds
 # or signs. Requires: curl, esptool (pip install esptool), dd.
@@ -61,7 +61,9 @@ else
   ESPTOOL=( python3 -m esptool )
 fi
 
-cleanup() { rm -f "$APP0FILE" "$SPIFFSFILE"; }
+PART="${TMPFILE}.part"
+HDRS="${TMPFILE}.hdr"
+cleanup() { rm -f "$APP0FILE" "$SPIFFSFILE" "$PART" "$HDRS"; }
 trap cleanup EXIT
 
 # otadata offset+size from the partition table, not hardcoded, so a repartition
@@ -80,9 +82,11 @@ remote_etag() { curl -fsSIL --max-time 10 "$URL" 2>/dev/null | last_etag; }
 ETAG_FILE="${TMPFILE}.etag"
 STORE_ETAG=""
 REDOWNLOAD=""
+ROLLING=1
+case "$RELEASE_TAG" in v[0-9]*) ROLLING="" ;; esac
 if [ -z "${IMAGE:-}" ] && [ -z "${REFRESH:-}" ] && [ -s "$TMPFILE" ]; then
-  case "$RELEASE_TAG" in
-    v[0-9]*) ;;
+  case "$ROLLING" in
+    "") ;;
     *)
       STORE_ETAG="$(remote_etag || true)"
       if [ -n "$STORE_ETAG" ] && [ "$STORE_ETAG" != "$(cat "$ETAG_FILE" 2>/dev/null || true)" ]; then
@@ -97,11 +101,11 @@ if [ -s "$TMPFILE" ]; then
   if [ -n "${IMAGE:-}" ]; then
     echo "[flash:release] using local image ${TMPFILE}"
   elif [ -n "${REFRESH:-}" ]; then
-    rm -f "$TMPFILE"
-  else
+    REDOWNLOAD=1
+  elif [ -z "$REDOWNLOAD" ]; then
     echo "[flash:release] using cached image ${TMPFILE} (release '${RELEASE_TAG}'; REFRESH=1 to re-download)"
-    if [ "${RELEASE_TAG#v[0-9]}" = "$RELEASE_TAG" ] && [ -z "$STORE_ETAG" ]; then
-      echo "[flash:release] WARNING: could not check whether release '${RELEASE_TAG}' has a newer image; this one may be stale"
+    if [ -n "$ROLLING" ] && [ -z "$STORE_ETAG" ]; then
+      echo "[flash:release] WARNING: could not check whether release '${RELEASE_TAG}' has a newer image; this one may be stale" >&2
     fi
   fi
 fi
@@ -113,12 +117,13 @@ if [ ! -s "$TMPFILE" ] || [ -n "$REDOWNLOAD" ]; then
   fi
   mkdir -p "$CACHE_DIR"
   echo "[flash:release] downloading ${ASSET} from release '${RELEASE_TAG}' (${REPO})"
-  PART="${TMPFILE}.part"
-  HDRS="${TMPFILE}.hdr"
   if ! curl -fSL --retry 3 -D "$HDRS" -o "$PART" "${URL}"; then
     rm -f "$PART" "$HDRS"
-    if [ -n "$REDOWNLOAD" ]; then
+    if [ -n "$REDOWNLOAD" ] && [ -z "${REFRESH:-}" ]; then
       echo "WARNING: re-download failed; flashing the cached image." >&2
+    elif [ -n "$REDOWNLOAD" ]; then
+      echo "ERROR: REFRESH download failed; the cached image was kept." >&2
+      exit 1
     else
       echo "ERROR: asset '${ASSET}' not found in release '${RELEASE_TAG}'." >&2
       echo "       Publish a release for tag '${RELEASE_TAG}' on GitHub, then retry." >&2
