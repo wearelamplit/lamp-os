@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'ble_client.dart';
+import 'ble_timing.dart';
 
 /// The app's connect retry policy, shared by opening a lamp from My Lamps and
 /// by onboarding. Android throws GATT_ERROR(133) / a deviceIsDisconnected race
@@ -37,14 +38,17 @@ Future<bool> connectWithRetry(
     }
   }
 
+  final callStart = bleTimings.now();
   for (var i = 0; i < attempts; i++) {
     if (shouldAbort?.call() ?? false) {
       await release();
       return false;
     }
+    final attemptStart = bleTimings.now();
     try {
       await ble.connect(deviceId);
     } catch (_) {
+      bleTimings.connectFailed(deviceId, attemptStart, i + 1, attempts);
       if (i == attempts - 1) {
         await release();
         rethrow;
@@ -56,6 +60,8 @@ Future<bool> connectWithRetry(
       await release();
       return false;
     }
+    bleTimings.connectSucceeded(
+        deviceId, callStart, attemptStart, i + 1, attempts);
     return true;
   }
   return false;
