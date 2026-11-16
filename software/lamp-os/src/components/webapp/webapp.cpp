@@ -570,7 +570,7 @@ void tick() {
     rebootNow();  // save path; restart frees the server, never delete s_server
     return;
   }
-  // Never waits on the lock: a pass that finds the pausing task holding it
+  // Never waits on the lock; a pass that finds the pausing task holding it
   // skips its AP work, and the next pass looks again.
   std::unique_lock<std::mutex> apLock(s_otaApMu, std::try_to_lock);
   if (!apLock.owns_lock()) return;
