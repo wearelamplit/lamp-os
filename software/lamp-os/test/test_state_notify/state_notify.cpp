@@ -162,8 +162,8 @@ void test_repeated_failures_keep_the_notify_owed() {
   TEST_ASSERT_FALSE(t.step(true, false, now + 3 * StateNotifyTrigger::kRetryMs));
 }
 
-// A client that leaves is owed nothing; its next connect is due on its own.
-void test_disconnect_drops_the_owed_notify() {
+// Nothing is retried while no client is connected; the reconnect is due once.
+void test_no_retry_without_a_client() {
   StateNotifyTrigger t;
   TEST_ASSERT_TRUE(t.step(true, false, 0));
   t.failed(0);
@@ -241,7 +241,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_failed_quiet_edge_is_retried_after_the_spacing);
   RUN_TEST(test_failed_connect_notify_is_retried);
   RUN_TEST(test_repeated_failures_keep_the_notify_owed);
-  RUN_TEST(test_disconnect_drops_the_owed_notify);
+  RUN_TEST(test_no_retry_without_a_client);
   RUN_TEST(test_retry_spacing_across_a_millis_wrap);
   RUN_TEST(test_guarded_build_matches_and_refuses_on_heap_failure);
   return UNITY_END();

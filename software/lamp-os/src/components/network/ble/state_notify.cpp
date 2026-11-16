@@ -33,7 +33,7 @@ bool StateNotifyTrigger::step(bool clientConnected, bool subscribed, uint32_t no
   const bool retry = owed_ && static_cast<int32_t>(nowMs - retryAtMs_) >= 0;
   const bool due = clientConnected &&
                    (!wasConnected_ || subscribed || quiet != wasQuiet_ || retry);
-  if (due || !clientConnected) owed_ = false;
+  if (due) owed_ = false;
   wasConnected_ = clientConnected;
   wasQuiet_     = quiet;
   return due;

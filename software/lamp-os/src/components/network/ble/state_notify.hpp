@@ -47,8 +47,8 @@ bool buildStateNotifyGuarded(Fill&& fill, std::string& out) {
 // When tick() sends CHAR_STATE_NOTIFY on its own: on a new client connection,
 // when the client subscribes, and on every quiet-mode change while a client is
 // connected, so the app learns when its writes land again. A due notify that
-// did not go out is reported with failed() and is due again kRetryMs later,
-// until one goes out or the client leaves.
+// did not go out is reported with failed() and is due again kRetryMs later
+// while a client is connected, until one goes out.
 class StateNotifyTrigger {
  public:
   // Spaces the retries so a send that keeps failing does not build a payload
