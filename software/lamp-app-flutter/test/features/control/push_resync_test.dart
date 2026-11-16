@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -9,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/features/control/application/control_notifier.dart';
+import 'package:lamp_app/features/control/application/lamp_busy_exception.dart';
 import 'package:lamp_app/features/firmware/application/firmware_notifier.dart';
 import 'package:lamp_app/features/firmware/application/quiet_after_push.dart';
 import 'package:lamp_app/features/firmware/domain/firmware_state.dart';
@@ -46,10 +48,41 @@ class _CountingBle extends InMemoryBleClient {
   /// A reboot the fake never sees as a disconnect.
   void dropSubscriptions() => _link++;
 
+  /// The `quiet` the lamp reports to a new CHAR_STATE_NOTIFY subscriber on
+  /// its next loop tick, as the firmware does. Null reports nothing.
+  bool? quietOnSubscribe;
+
   @override
   Stream<Uint8List> subscribeNotifyOnly(String d, String s, String c) {
     final link = _link;
+    final quiet = quietOnSubscribe;
+    if (c == BleUuids.stateNotify && quiet != null) {
+      Timer.run(() => simulateNotify(d, s, c, _stateBytes(quiet: quiet)));
+    }
     return super.subscribeNotifyOnly(d, s, c).where((_) => link == _link);
+  }
+
+  /// Writes to a characteristic here wait until its completer completes.
+  final held = <String, Completer<void>>{};
+
+  @override
+  Future<void> write(
+    String d,
+    String s,
+    String c,
+    Uint8List v, {
+    bool withoutResponse = false,
+    bool allowLongWrite = false,
+  }) async {
+    await held[c]?.future;
+    return super.write(
+      d,
+      s,
+      c,
+      v,
+      withoutResponse: withoutResponse,
+      allowLongWrite: allowLongWrite,
+    );
   }
 
   /// Drops the link once the named section has been read.
@@ -86,6 +119,25 @@ const _failed = FirmwareFailed(
   failure: FirmwareFailure.linkLost,
 );
 
+const _declined = FirmwareFailed(reason: 'busy', failure: FirmwareFailure.busy);
+
+Uint8List _stateBytes({
+  bool? quiet,
+  bool previewActive = false,
+  String? greetPeer,
+}) => Uint8List.fromList(
+  utf8.encode(
+    jsonEncode({
+      'previewActive': previewActive,
+      'greeting': greetPeer == null
+          ? {'active': false}
+          : {'active': true, 'peer': greetPeer, 'kind': 'warm'},
+      'nearbyRev': 0,
+      'quiet': ?quiet,
+    }),
+  ),
+);
+
 Future<void> _pump() async {
   for (var i = 0; i < 10; i++) {
     await Future<void>.delayed(const Duration(milliseconds: 20));
@@ -112,17 +164,10 @@ class _Rig {
       _id,
       BleUuids.controlService,
       BleUuids.stateNotify,
-      Uint8List.fromList(
-        utf8.encode(
-          jsonEncode({
-            'previewActive': previewActive,
-            'greeting': greetPeer == null
-                ? {'active': false}
-                : {'active': true, 'peer': greetPeer, 'kind': 'warm'},
-            'nearbyRev': 0,
-            'quiet': ?quiet,
-          }),
-        ),
+      _stateBytes(
+        quiet: quiet,
+        previewActive: previewActive,
+        greetPeer: greetPeer,
       ),
     );
   }
@@ -401,6 +446,10 @@ void main() {
         await _pump();
         final reads = r.ble.sectionReads;
         r.firmware.emit(_streaming);
+        if (quiet == false) {
+          r.notify(quiet: true);
+          r.notify(quiet: false);
+        }
         await _pump();
         r.firmware.emit(
           FirmwareStreaming(footer: _footer, chunksSent: 4, totalChunks: 10),
@@ -556,4 +605,240 @@ void main() {
     });
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  group('a lamp that reports quiet with no push in hand', () {
+    test('freezes editing, then once it listens sends the held focus and '
+        "takes the lamp's word for an edit sent before the freeze", () async {
+      final r = await _rig();
+      r.control.setHomeModeFocus(true);
+      await r.control.setBrightness(90);
+      await _pump();
+      r.notify(quiet: true);
+      await _pump();
+      expect(r.frozen, isTrue);
+
+      final reads = r.ble.sectionReads;
+      final mark = r.mark();
+      r.notify(quiet: false);
+      await _pump();
+      expect(r.frozen, isFalse);
+      expect(r.focusSince(mark), [1]);
+      expect(r.brightness, 50, reason: 'the lamp dropped the write');
+      expect(r.ble.sectionReads, greaterThan(reads));
+    });
+
+    test('during a local verify that then fails, freezes once the verify '
+        'ends', () async {
+      final r = await _rig();
+      r.firmware.emit(const FirmwareVerifying());
+      r.notify(quiet: true);
+      await _pump();
+      r.firmware.emit(
+        const FirmwareFailed(
+          reason: 'bad image',
+          failure: FirmwareFailure.cacheUnverified,
+        ),
+      );
+      await _pump();
+      expect(r.frozen, isTrue);
+    });
+
+    test(
+      'a quiet report while the lamp is re-synced keeps the freeze',
+      () async {
+        final r = await _rig();
+        r.control.setHomeModeFocus(true);
+        r.notify(quiet: true);
+        await _pump();
+        final gate = r.ble.held[BleUuids.homeModeFocus] = Completer<void>();
+        r.notify(quiet: false);
+        await _pump();
+        r.notify(quiet: true);
+        await _pump();
+        gate.complete();
+        await _pump();
+        expect(r.frozen, isTrue);
+      },
+    );
+  });
+
+  group('a push the lamp never went quiet for', () {
+    test('sends and reads nothing on a lamp that reports quiet', () async {
+      final r = await _rig();
+      r.notify(quiet: false);
+      r.control.setHomeModeFocus(true);
+      await _pump();
+      final reads = r.ble.sectionReads;
+      final mark = r.mark();
+      r.firmware.emit(FirmwareOfferSent(footer: _footer));
+      await _pump();
+      r.firmware.emit(_declined);
+      await _pump();
+      expect(r.writesSince(mark), isEmpty);
+      expect(r.ble.sectionReads, reads);
+      expect(r.frozen, isFalse);
+    });
+
+    test(
+      'still sends flags the new link never got, without a re-read',
+      () async {
+        final r = await _rig();
+        r.control.setHomeModeFocus(true);
+        r.firmware.emit(FirmwareOfferSent(footer: _footer));
+        r.notify(quiet: false);
+        await _pump();
+        final reads = r.ble.sectionReads;
+        final mark = r.mark();
+        r.firmware.emit(_declined);
+        await _pump();
+        expect(r.focusSince(mark), [1]);
+        expect(r.ble.sectionReads, reads);
+      },
+    );
+
+    test('a declined offer re-reads nothing on a lamp without quiet, and '
+        'sends no focus ahead of brightness', () async {
+      final r = await _rig();
+      r.notify();
+      await _pump();
+      final reads = r.ble.sectionReads;
+      r.firmware.emit(FirmwareOfferSent(footer: _footer));
+      await _pump();
+      r.firmware.emit(_declined);
+      await _pump();
+      expect(r.ble.sectionReads, reads);
+      final mark = r.mark();
+      await r.control.setBrightness(60);
+      await _pump();
+      expect(r.writesSince(mark), [
+        [BleUuids.brightness, 60],
+      ]);
+    });
+
+    test(
+      'an offer left unanswered still re-reads a lamp without quiet',
+      () async {
+        final r = await _rig();
+        r.notify();
+        await _pump();
+        final reads = r.ble.sectionReads;
+        r.firmware.emit(FirmwareOfferSent(footer: _footer));
+        await _pump();
+        r.firmware.emit(
+          const FirmwareFailed(
+            reason: 'no accept',
+            failure: FirmwareFailure.noAnswer,
+          ),
+        );
+        await _pump();
+        expect(r.ble.sectionReads, greaterThan(reads));
+      },
+    );
+  });
+
+  test('after Retry from an error, Home Mode focus goes back when the lamp '
+      'reports on subscribe, mid-rebuild included', () async {
+    final r = await _rig();
+    r.notify(quiet: false);
+    r.control.setHomeModeFocus(true);
+    await _pump();
+    final base = await r.ble.readSection(_id, 'base');
+    r.ble.seedSection(_id, 'base', Uint8List.fromList([0x21]));
+    await r.reconnect();
+    await Future<void>.delayed(const Duration(seconds: 2));
+    expect(
+      r.c.read(controlNotifierProvider(_id)).error,
+      isA<LampBusyException>(),
+    );
+
+    r.ble.seedSection(_id, 'base', base);
+    r.ble.quietOnSubscribe = false;
+    final gate = r.ble.held[BleUuids.expressionTest] = Completer<void>();
+    final mark = r.mark();
+    r.c.invalidate(controlNotifierProvider(_id));
+    final rebuilt = r.c.read(controlNotifierProvider(_id).future);
+    await _pump();
+    gate.complete();
+    await rebuilt;
+    await _pump();
+    expect(r.focusSince(mark), [1]);
+  });
+
+  group('a new link sends a held Social open at once', () {
+    Future<_Rig> socialOpenThenQuiet() async {
+      final r = await _rig();
+      r.notify(quiet: false);
+      await r.control.setSocialViewActive(true);
+      r.firmware.emit(_streaming);
+      r.notify(quiet: true);
+      await _pump();
+      return r;
+    }
+
+    test('after a reconnect while the lamp is quiet', () async {
+      final r = await socialOpenThenQuiet();
+      await r.ble.disconnect(_id);
+      await _pump();
+      r.firmware.emit(_failed);
+      await _pump();
+      final mark = r.mark();
+      await r.ble.connect(_id);
+      await _pump();
+      expect(r.connected, isTrue);
+      expect(r.payloadsSince(mark, BleUuids.editSession), [
+        [0x08, 1],
+      ]);
+    });
+
+    test('after a rebuild', () async {
+      final r = await _rig();
+      await r.control.setSocialViewActive(true);
+      final mark = r.mark();
+      r.c.invalidate(controlNotifierProvider(_id));
+      await r.c.read(controlNotifierProvider(_id).future);
+      await _pump();
+      expect(r.payloadsSince(mark, BleUuids.editSession), [
+        [0x08, 1],
+      ]);
+    });
+
+    test('after a save reboots the lamp', () async {
+      final r = await _rig();
+      await r.control.setSocialViewActive(true);
+      final mark = r.mark();
+      await r.control.setLampPassword('');
+      r.ble.dropSubscriptions();
+      await Future<void>.delayed(const Duration(seconds: 3));
+      expect(r.connected, isTrue);
+      expect(r.payloadsSince(mark, BleUuids.editSession), [
+        [0x08, 1],
+      ]);
+    });
+
+    test('but not a held close', () async {
+      final r = await _rig();
+      await r.control.setSocialViewActive(true);
+      await r.control.setSocialViewActive(false);
+      final mark = r.mark();
+      await r.reconnect();
+      expect(r.connected, isTrue);
+      expect(r.payloadsSince(mark, BleUuids.editSession), isEmpty);
+    });
+  });
+
+  test(
+    'a notifier disposed mid-build leaves no state listener behind',
+    () async {
+      final r = await _rig();
+      final gate = r.ble.held[BleUuids.expressionTest] = Completer<void>();
+      r.c.invalidate(controlNotifierProvider(_id));
+      await _pump();
+      r.c.dispose();
+      await r.ble.connect(_id);
+      gate.complete();
+      await _pump();
+      r.notify(quiet: false);
+      await _pump();
+    },
+  );
 }
