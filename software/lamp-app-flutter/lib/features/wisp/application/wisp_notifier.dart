@@ -400,29 +400,24 @@ class WispNotifier extends _$WispNotifier {
 
   void _subscribeStatus(BleClient ble) {
     _sub?.cancel();
-    try {
-      _sub = ble
-          .subscribe(lampId, BleUuids.controlService, BleUuids.wispStatus)
-          .listen((bytes) {
-        if (_disposed) return;
-        final next = WispStatus.fromBytes(bytes);
-        if (next.configLastSeenMs != null) _repo.noteWispSections();
-        // An empty or MTU-truncated notify on a lamp that serves the status
-        // whole: re-read it there rather than drop the update.
-        if (!next.present && _repo.wispSectionsSupported) {
-          unawaited(_rereadStatusSection());
-          return;
-        }
-        _onIncoming(next);
-      }, onError: (Object e, StackTrace st) {
-        debugPrint('[wisp_notifier] notify-stream error lamp=$lampId: $e');
-      }, onDone: () {
-        debugPrint('[wisp_notifier] notify-stream done lamp=$lampId');
-      });
-    } catch (e) {
-      _sub = null;
-      debugPrint('[wisp_notifier] subscribe failed lamp=$lampId: $e');
-    }
+    _sub = ble
+        .subscribe(lampId, BleUuids.controlService, BleUuids.wispStatus)
+        .listen((bytes) {
+      if (_disposed) return;
+      final next = WispStatus.fromBytes(bytes);
+      if (next.configLastSeenMs != null) _repo.noteWispSections();
+      // An empty or MTU-truncated notify on a lamp that serves the status
+      // whole: re-read it there rather than drop the update.
+      if (!next.present && _repo.wispSectionsSupported) {
+        unawaited(_rereadStatusSection());
+        return;
+      }
+      _onIncoming(next);
+    }, onError: (Object e, StackTrace st) {
+      debugPrint('[wisp_notifier] notify-stream error lamp=$lampId: $e');
+    }, onDone: () {
+      debugPrint('[wisp_notifier] notify-stream done lamp=$lampId');
+    });
   }
 
   /// Read the wisp's manual palette from its dedicated section and seed the
