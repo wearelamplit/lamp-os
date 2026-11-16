@@ -182,7 +182,7 @@ void feed() {
 
 void startIteration() {
   const uint32_t nowMs = millis();
-  if (rearmDue(s_mode, s_rtc.guard, nowMs)) {
+  if (s_rtc.guard.rearmDue(s_mode, nowMs)) {
     s_mode = Mode::Normal;
     apply();
     Serial.printf("[loopwd] loop ran %u s; timeout back to %u s\n",

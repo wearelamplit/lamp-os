@@ -98,7 +98,8 @@ enum class Reached : uint8_t { None, Window, Settled };
 
 // This boot's count of task-watchdog resets in a row, each from a boot whose
 // loop never started an iteration at kSettledUptimeMs. Past kResetStreakLimit
-// it grows only on a reset after the boot's window, up to kStreakCap.
+// it grows only on a reset of a boot whose loop ran to its window, up to
+// kStreakCap.
 // `prevStreak` and `prevReached` are what the previous boot left; `stateValid`
 // is false when they did not survive the reset.
 constexpr uint8_t bootStreak(bool stateValid, uint8_t prevStreak, Reached prevReached,
@@ -127,13 +128,12 @@ struct BootGuard {
   Mode atBoot(bool stateValid, bool taskWdtReset);
   // Each loop iteration, watched or not.
   void markUptime(uint32_t uptimeMs);
+  // True when a loop iteration at `uptimeMs` in a backoff boot returns it to
+  // the normal timeouts.
+  constexpr bool rearmDue(Mode mode, uint32_t uptimeMs) const {
+    return mode == Mode::Backoff && uptimeMs >= backoffWindowMs(streak);
+  }
 };
-
-// True when a loop iteration at `uptimeMs` in a backoff boot returns it to the
-// normal timeouts.
-constexpr bool rearmDue(Mode mode, const BootGuard& guard, uint32_t uptimeMs) {
-  return mode == Mode::Backoff && uptimeMs >= backoffWindowMs(guard.streak);
-}
 
 // True when a feed from `current` resets the watchdog. `subscribed` is the
 // loop task once subscribed, else null, and `current` must be it.
