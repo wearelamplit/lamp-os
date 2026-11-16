@@ -43,6 +43,21 @@ expressions and password in the app match the screenshot. Pull power during
 a colour drag five times: every boot loads with no `UNREADABLE` line and no
 defaults. Zero `[nvs] save via=... failed` lines across the run.
 
+**C1c — update from the C firmware.** On a lamp running the C firmware with
+a multi-stop base gradient, base knockout set on a few pixels and home mode
+on with a known SSID, photograph the lamp lit, then flash this build over
+USB (`lamp:flash:release`, NVS kept). The first boot logs `[cfg] store
+whole`, `expressions=<n> from cfg json`, then `[cfg] store migrated from
+whole`. Side by side with the photo: the same hues, the gradient running the
+same way up the base, the same knocked-out pixels dimmed; mid-gradient a
+little darker is expected. The app shows Home Mode on with that SSID. A
+second boot logs `[cfg] store binary` and looks the same.
+
+**C1d — a white shade stays white.** Set the shade to pure white W
+(`#000000FF`) in the app, reboot twice: the shade stays white and the boot
+logs `[cfg] store binary`. A factory reset lamp still boots with random hues
+on both surfaces, as before.
+
 **C2 — persist across reboot.** `expr.set` a marker (dim pulse, long
 intervals per README conventions), reboot via
 `python3 scripts/bench_cmd.py <port> --reset --wait-ready '\[show\] ready'

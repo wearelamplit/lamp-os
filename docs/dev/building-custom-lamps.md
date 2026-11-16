@@ -70,7 +70,11 @@ lone `Base`). `pixelCount=0` means "resolve from `Config` at runtime" — the co
 roles do this; a fixed-geometry strip like snafu's dots states its own count.
 Exactly one strip per role may set `broadcast=1`: that's the representative
 segment whose color the lamp advertises to peers (snafu's `Stem`).
-`reversed=true` when pixel 0 is the far end of the winding.
+`reversed=true` when pixel 0 is the far end of the winding. The flag on each
+role's first strip also decides how a store the C firmware wrote migrates: that
+firmware drove pixel i from colour index i, so its stops and knockout pixels
+are mirrored onto a reversed strip ([embedded-heap.md](embedded-heap.md), "A
+store the C firmware wrote").
 `pin` is the default data GPIO. A lamp can override it per strip from the
 app's LED setup screen in advanced mode: the role's config segments pair with
 its strips in declaration order, and a segment's saved `pin` (0 = the

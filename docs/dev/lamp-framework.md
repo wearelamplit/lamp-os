@@ -47,10 +47,18 @@ Every lamp has two **core** slots, always present:
   controlled by `baseColorsEditable`.
 
 A slot with 2 or more colors renders a still gradient; with rotation on (below)
-they flow round a closed loop. First-boot
-randomization only touches surfaces whose variant left `baseColor` / `shadeColor`
-empty in `Config::Defaults`; a non-empty default survives randomization
-unchanged.
+they flow round a closed loop.
+
+The variant colours (`baseColor` / `shadeColor`, or the segment lists below)
+seed a lamp only when its store held no config (`applyRoleDefaults`, the
+`StoreForm::Empty` load). A stored colour is kept whatever it is, the class
+default included: a shade set to white W (`#000000FF`) stays white. Firmware
+up to 1.3.7 replaced a stored class-default colour with the variant colour at
+every boot, so a downgrade to one of those turns a stored white shade back to
+the variant colour, and its next save keeps that. After seeding, an unadopted
+lamp (not `setup`, not named, no password) whose colours still equal what the
+seed installed (`colorsAreFactoryDefault`) gets a random hue on both surfaces
+at first boot; `setup=true` in `Config::Defaults` skips that roll.
 
 ### Colour rotation
 
@@ -100,7 +108,10 @@ A role's colors can be a single scalar (`baseColor` / `shadeColor` + `basePx` /
 of `{name, px, "csv,of,hex,colors"}`); an empty vector takes the single-segment
 scalar path. Snafu drives its three shade dot-strips and the `Stem` base entirely
 through segments, one palette per segment, rendered by the segment-aware
-`DotsBehavior`.
+`DotsBehavior`. A stored segment list is kept as stored, even one that does not
+match the variant's strips (a reflash from another variant): rendering takes the
+broadcast segment's colours and each strip's own pixel count, and a base
+knockout map shorter than the base strip leaves the pixels past its end lit.
 
 `HwConfig.strips` lists every physical NeoPixel strip; each entry carries a
 `role` (`Surface::Shade` or `Surface::Base`), pin, byte order, pixel count, and

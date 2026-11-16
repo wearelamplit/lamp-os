@@ -5,6 +5,21 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## Unreleased
+
+### Fixed
+- **A lamp updated straight from the original firmware keeps its look.**
+  Its colours, the direction of its base gradient, its base knockout and its
+  Home Mode carry over, where they used to come out dimmer or a different
+  hue, run the other way, lose the knockout and turn Home Mode off.
+  Pixels between two colours may look a little darker. A lamp that already
+  updated to an earlier mesh release saved the old result and has to be set
+  again in the app.
+- **A pure white shade stays white.** A lamp whose shade (or base) was set to
+  exactly the factory colour, such as white on the white LED only, came back
+  with the lamp type's default colour (dim orange on a standard lamp) after a
+  reboot. Saved colours are now kept as saved.
+
 ## 1.3.7
 
 ### Added
