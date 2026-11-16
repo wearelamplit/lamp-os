@@ -31,7 +31,8 @@
 #
 # A cached image for a rolling tag (anything but vX.Y.Z) is revalidated with one
 # HEAD request: the release asset's ETag is stored beside the image, and a
-# different ETag re-downloads. If the HEAD fails (offline bench) the cache is reused.
+# different ETag re-downloads. If the HEAD or the re-download fails (offline
+# bench) the cached image is reused with a warning.
 #
 # For people WITHOUT the signing key: downloads a prebuilt image, never builds
 # or signs. Requires: curl, esptool (pip install esptool), dd.
@@ -74,12 +75,11 @@ if [ -z "${OTADATA_OFF:-}" ] || [ -z "${OTADATA_SIZE:-}" ]; then
   exit 1
 fi
 
-remote_etag() {
-  curl -fsSIL --max-time 10 "$URL" 2>/dev/null | tr -d '\r' \
-    | awk 'tolower($1)=="etag:" { e=$2 } END { print e }'
-}
+last_etag() { tr -d '\r' | awk 'tolower($1)=="etag:" { e=$2 } END { print e }'; }
+remote_etag() { curl -fsSIL --max-time 10 "$URL" 2>/dev/null | last_etag; }
 ETAG_FILE="${TMPFILE}.etag"
 STORE_ETAG=""
+REDOWNLOAD=""
 if [ -z "${IMAGE:-}" ] && [ -z "${REFRESH:-}" ] && [ -s "$TMPFILE" ]; then
   case "$RELEASE_TAG" in
     v[0-9]*) ;;
@@ -87,7 +87,7 @@ if [ -z "${IMAGE:-}" ] && [ -z "${REFRESH:-}" ] && [ -s "$TMPFILE" ]; then
       STORE_ETAG="$(remote_etag || true)"
       if [ -n "$STORE_ETAG" ] && [ "$STORE_ETAG" != "$(cat "$ETAG_FILE" 2>/dev/null || true)" ]; then
         echo "[flash:release] release '${RELEASE_TAG}' changed since the cached image; re-downloading"
-        rm -f "$TMPFILE"
+        REDOWNLOAD=1
       fi
       ;;
   esac
@@ -100,24 +100,36 @@ if [ -s "$TMPFILE" ]; then
     rm -f "$TMPFILE"
   else
     echo "[flash:release] using cached image ${TMPFILE} (release '${RELEASE_TAG}'; REFRESH=1 to re-download)"
+    if [ "${RELEASE_TAG#v[0-9]}" = "$RELEASE_TAG" ] && [ -z "$STORE_ETAG" ]; then
+      echo "[flash:release] WARNING: could not check whether release '${RELEASE_TAG}' has a newer image; this one may be stale"
+    fi
   fi
 fi
 
-if [ ! -s "$TMPFILE" ]; then
+if [ ! -s "$TMPFILE" ] || [ -n "$REDOWNLOAD" ]; then
   if [ -n "${IMAGE:-}" ]; then
     echo "ERROR: IMAGE=${IMAGE} not found or empty." >&2
     exit 1
   fi
   mkdir -p "$CACHE_DIR"
   echo "[flash:release] downloading ${ASSET} from release '${RELEASE_TAG}' (${REPO})"
-  if ! curl -fSL --retry 3 -o "${TMPFILE}" "${URL}"; then
-    rm -f "$TMPFILE"
-    echo "ERROR: asset '${ASSET}' not found in release '${RELEASE_TAG}'." >&2
-    echo "       Publish a release for tag '${RELEASE_TAG}' on GitHub, then retry." >&2
-    exit 1
+  PART="${TMPFILE}.part"
+  HDRS="${TMPFILE}.hdr"
+  if ! curl -fSL --retry 3 -D "$HDRS" -o "$PART" "${URL}"; then
+    rm -f "$PART" "$HDRS"
+    if [ -n "$REDOWNLOAD" ]; then
+      echo "WARNING: re-download failed; flashing the cached image." >&2
+    else
+      echo "ERROR: asset '${ASSET}' not found in release '${RELEASE_TAG}'." >&2
+      echo "       Publish a release for tag '${RELEASE_TAG}' on GitHub, then retry." >&2
+      exit 1
+    fi
+  else
+    mv "$PART" "$TMPFILE"
+    STORE_ETAG="$(last_etag < "$HDRS")"
+    rm -f "$HDRS"
+    if [ -n "$STORE_ETAG" ]; then echo "$STORE_ETAG" > "$ETAG_FILE"; else rm -f "$ETAG_FILE"; fi
   fi
-  [ -n "$STORE_ETAG" ] || STORE_ETAG="$(remote_etag || true)"
-  if [ -n "$STORE_ETAG" ]; then echo "$STORE_ETAG" > "$ETAG_FILE"; else rm -f "$ETAG_FILE"; fi
 fi
 
 if [ ! -s "$TMPFILE" ]; then
