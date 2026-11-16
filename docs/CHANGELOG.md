@@ -11,11 +11,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 - **The app's wisp screen keeps updating after the lamp reconnects.** It
   froze on what it showed before the lamp dropped out, and a palette or
   source saved after the reconnect showed "not saved" even when it landed.
-- **Reopening a lamp no longer offers to save an old wisp palette.** If the
-  wisp's palette was changed or emptied from another lamp or phone while you
-  were away, the editor showed your old colours as an unsaved edit, and Save
-  put them back. A palette changed elsewhere now shows as it is with Save
-  off, an emptied one leaves Save off, and edits you had not saved are kept.
+- **Reopening a lamp shows the wisp's palette as it is now.** If the wisp's
+  palette was changed or emptied from another lamp or phone while you were
+  away, the editor kept showing your old colours, and saving put them back.
+  Edits you had not saved are still kept.
 - **An empty wisp palette no longer sticks on "Reading palette from wisp…".**
 - **A wisp palette save stops resending once the wisp leaves Manual.** It
   kept sending the palette up to three more times.
