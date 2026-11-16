@@ -66,7 +66,6 @@ PART="${CACHED}.part"
 HDRS="${CACHED}.hdr"
 cleanup() { rm -f "$APP0FILE" "$SPIFFSFILE" "$PART" "$HDRS"; }
 trap cleanup EXIT
-trap 'exit 130' INT TERM
 
 # otadata offset+size from the partition table, not hardcoded, so a repartition
 # can't silently desync this erase.
