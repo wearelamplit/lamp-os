@@ -23,14 +23,15 @@ class Config {
   ConfigStore* store_ = nullptr;
 
  public:
-  // First-boot defaults a Lamp subclass injects before NVS load. Fields left
-  // empty/default are not applied; the existing NVS value (or the Config
-  // class-default) wins. colorsEditable is emitted in asBaseJson/asShadeJson
+  // First-boot defaults a Lamp subclass injects, applied after the NVS load.
+  // Fields left empty/default are not applied; the existing NVS value (or the
+  // Config class-default) wins. Colours seed only a lamp whose store held no
+  // config (applyRoleDefaults). colorsEditable is emitted in asBaseJson/asShadeJson
   // (the app hides the color picker when false).
   // Per-segment first-boot seed for a multi-segment role. Names the segment,
   // its pixel count, and a hex color list ("#RRGGBBWW,#…"). A variant supplies
   // one per physical strip; applyDefaults seeds the whole role's segment list
-  // when NVS is still factory.
+  // when the store held no config.
   struct SegmentDefault {
     std::string name;
     uint8_t px;
@@ -48,8 +49,7 @@ class Config {
     bool rotationSupported = false;
     // Per-surface pixel count for a first-boot lamp. 0 = no override
     // (leave whatever the loader / class default produced). When non-zero,
-    // applyDefaults only overwrites NVS-loaded values that still match a
-    // known factory baseline (same guard pattern as the color fields).
+    // it fills a role's first segment whose loaded px is 0 (unset).
     uint8_t basePx  = 0;
     uint8_t shadePx = 0;
     // Force the lamp adopted at boot, skipping onboarding and the first-boot
@@ -87,9 +87,9 @@ class Config {
     dispositions_.attachStore(s);
   }
 
-  // Apply first-boot defaults AFTER the NVS blob has been loaded. Only
-  // fields that NVS left at their factory value are overwritten;
-  // user-saved values are authoritative.
+  // Apply first-boot defaults AFTER the NVS blob has been loaded. A stored
+  // value is authoritative; the variant's defaults fill what the store left
+  // unset, and its colours only a lamp whose store held no config.
   void applyDefaults(const Defaults& d);
 
   // True when NVS held a non-empty config, or a blob holding part of it, that
@@ -304,4 +304,12 @@ class Config {
   bool namedKeyPresent_ = false;
   config_codec::StoreForm storeForm_ = config_codec::StoreForm::Empty;
 };
+
+// The role step of Config::applyDefaults. The variant's colours (scalar or
+// segment list) replace a role's only when the store held no config (`form`
+// Empty), so a stored colour, the class default included, is kept. Then each
+// role's first-segment px fills from the variant when unset, the knockout map
+// takes the base's pixel count, and the firmware-owned role flags are set.
+void applyRoleDefaults(const Config::Defaults& d, config_codec::StoreForm form,
+                       BaseSettings& base, ShadeSettings& shade);
 }  // namespace lamp

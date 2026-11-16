@@ -653,10 +653,9 @@ void lamp::Lamp::setup() {
   // JSON blob, but lampType lives under its own NVS key.
   config.loadLampType();
 
-  // Apply subclass defaults AFTER NVS load. Fields that NVS left at their
-  // factory value (e.g. name="stray", colors empty) get the subclass's
-  // preferred first-boot value. Fields the user has already saved in NVS are
-  // NOT touched; the NVS value is authoritative.
+  // Apply subclass defaults AFTER NVS load. Fields the store left unset (e.g.
+  // name="stray", and the colours of a lamp whose store held no config) get
+  // the subclass's first-boot value. A stored value is authoritative.
   config.applyDefaults(defaults());
 
   // First-ever-boot housekeeping, persisted once so it sticks across reboots
