@@ -99,9 +99,9 @@ skew:
    as it starts streaming, and `[webapp] softAP back after OTA` about 10 s after
    `RESULT success` (the inter-session hold), and its `<name>-lamp` network is in
    a phone's Wi-Fi list again. Repeat with a phone joined to the src's network
-   and the web config page open when the send starts: the page stops answering,
-   the network comes back after the send, and within the idle timeout (120 s)
-   the src reboots and its BLE is back (the app connects). A
+   and the web config page open: the src logs no `[fwdist] ... → OFFER` while
+   the phone stays joined, and a settings save from the page answers. Leave the
+   network: the src offers within a few seconds. A
    `softAP not restored after OTA` line is a fail unless a heap shortage shows
    beside it. Note the `[heap]` largest block before the send and after the
    restore.

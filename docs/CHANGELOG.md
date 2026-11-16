@@ -18,6 +18,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   change the lamp had no memory to send, or that Bluetooth had no room to
   queue, was never sent again, so the app could stay greyed out until its
   75 s timeout. It is now retried.
+- **A lamp with its Web Config page open waits to pass on an update.**
+  A lamp that started sending an update switched off its setup Wi-Fi
+  network under an open page, so a save hung until the update ended. It
+  now offers updates only once no phone is joined to that network.
 - **Update data sent over Bluetooth must come over the connection that
   started the update.** A second phone's data is refused, unless the lamp
   hands the second phone the same connection number.
