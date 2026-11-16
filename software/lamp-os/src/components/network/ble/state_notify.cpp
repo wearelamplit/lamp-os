@@ -28,13 +28,20 @@ void buildStateNotifyJson(const StateNotifyFields& f, std::string& out) {
   out += buf;
 }
 
-bool StateNotifyTrigger::step(bool clientConnected, bool subscribed) {
+bool StateNotifyTrigger::step(bool clientConnected, bool subscribed, uint32_t nowMs) {
   const bool quiet = lamp::ota_quiet_mode::isQuiet();
+  const bool retry = owed_ && static_cast<int32_t>(nowMs - retryAtMs_) >= 0;
   const bool due = clientConnected &&
-                   (!wasConnected_ || subscribed || quiet != wasQuiet_);
+                   (!wasConnected_ || subscribed || quiet != wasQuiet_ || retry);
+  if (due || !clientConnected) owed_ = false;
   wasConnected_ = clientConnected;
   wasQuiet_     = quiet;
   return due;
+}
+
+void StateNotifyTrigger::failed(uint32_t nowMs) {
+  owed_      = true;
+  retryAtMs_ = nowMs + kRetryMs;
 }
 
 }  // namespace ble_control

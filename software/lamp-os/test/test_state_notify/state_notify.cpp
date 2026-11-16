@@ -91,39 +91,95 @@ void test_greeting_absent_without_a_source() {
 
 void test_trigger_fires_on_each_quiet_change_while_connected() {
   StateNotifyTrigger t;
-  TEST_ASSERT_TRUE(t.step(true, false));   // connect
-  TEST_ASSERT_FALSE(t.step(true, false));
+  TEST_ASSERT_TRUE(t.step(true, false, 0));   // connect
+  TEST_ASSERT_FALSE(t.step(true, false, 0));
   enterQuiet(false, true);                 // push enters quiet
-  TEST_ASSERT_TRUE(t.step(true, false));
-  TEST_ASSERT_FALSE(t.step(true, false));
+  TEST_ASSERT_TRUE(t.step(true, false, 0));
+  TEST_ASSERT_FALSE(t.step(true, false, 0));
   enterQuiet(false, true);                 // a second holder is no change
-  TEST_ASSERT_FALSE(t.step(true, false));
+  TEST_ASSERT_FALSE(t.step(true, false, 0));
   exitQuiet();
-  TEST_ASSERT_FALSE(t.step(true, false));
+  TEST_ASSERT_FALSE(t.step(true, false, 0));
   exitQuiet();                             // quiet ends
-  TEST_ASSERT_TRUE(t.step(true, false));
-  TEST_ASSERT_FALSE(t.step(true, false));
+  TEST_ASSERT_TRUE(t.step(true, false, 0));
+  TEST_ASSERT_FALSE(t.step(true, false, 0));
 }
 
 void test_trigger_fires_on_subscribe() {
   StateNotifyTrigger t;
   enterQuiet(false, true);
-  t.step(true, false);
-  TEST_ASSERT_FALSE(t.step(true, false));
-  TEST_ASSERT_TRUE(t.step(true, true));
-  TEST_ASSERT_FALSE(t.step(true, false));
+  t.step(true, false, 0);
+  TEST_ASSERT_FALSE(t.step(true, false, 0));
+  TEST_ASSERT_TRUE(t.step(true, true, 0));
+  TEST_ASSERT_FALSE(t.step(true, false, 0));
 }
 
 void test_trigger_is_silent_without_a_client() {
   StateNotifyTrigger t;
   enterQuiet(false, true);
-  TEST_ASSERT_FALSE(t.step(false, false));
-  TEST_ASSERT_FALSE(t.step(false, true));
+  TEST_ASSERT_FALSE(t.step(false, false, 0));
+  TEST_ASSERT_FALSE(t.step(false, true, 0));
   exitQuiet();
-  TEST_ASSERT_FALSE(t.step(false, false));
+  TEST_ASSERT_FALSE(t.step(false, false, 0));
   // A quiet change while nobody is connected is carried by the next connect.
-  TEST_ASSERT_TRUE(t.step(true, false));
-  TEST_ASSERT_FALSE(t.step(true, false));
+  TEST_ASSERT_TRUE(t.step(true, false, 0));
+  TEST_ASSERT_FALSE(t.step(true, false, 0));
+}
+
+// A due notify that does not go out (no mbuf, no heap for the build) is due
+// again kRetryMs later, and only then; one that goes out is not repeated.
+void test_failed_quiet_edge_is_retried_after_the_spacing() {
+  StateNotifyTrigger t;
+  TEST_ASSERT_TRUE(t.step(true, false, 1000));  // connect
+  enterQuiet(false, true);
+  TEST_ASSERT_TRUE(t.step(true, false, 1300));
+  t.failed(1300);
+  TEST_ASSERT_FALSE(t.step(true, false, 1300));
+  TEST_ASSERT_FALSE(t.step(true, false, 1300 + StateNotifyTrigger::kRetryMs - 1));
+  TEST_ASSERT_TRUE(t.step(true, false, 1300 + StateNotifyTrigger::kRetryMs));
+  TEST_ASSERT_FALSE(t.step(true, false, 1300 + 5 * StateNotifyTrigger::kRetryMs));
+}
+
+void test_failed_connect_notify_is_retried() {
+  StateNotifyTrigger t;
+  TEST_ASSERT_TRUE(t.step(true, false, 50));
+  t.failed(50);
+  TEST_ASSERT_FALSE(t.step(true, false, 60));
+  TEST_ASSERT_TRUE(t.step(true, false, 50 + StateNotifyTrigger::kRetryMs + 7));
+}
+
+// Every failure re-arms; the retry keeps coming until one goes out.
+void test_repeated_failures_keep_the_notify_owed() {
+  StateNotifyTrigger t;
+  enterQuiet(false, true);
+  uint32_t now = 0;
+  TEST_ASSERT_TRUE(t.step(true, false, now));
+  for (int i = 0; i < 4; ++i) {
+    t.failed(now);
+    now += StateNotifyTrigger::kRetryMs;
+    TEST_ASSERT_TRUE(t.step(true, false, now));
+  }
+  TEST_ASSERT_FALSE(t.step(true, false, now + 3 * StateNotifyTrigger::kRetryMs));
+}
+
+// A client that leaves is owed nothing; its next connect is due on its own.
+void test_disconnect_drops_the_owed_notify() {
+  StateNotifyTrigger t;
+  TEST_ASSERT_TRUE(t.step(true, false, 0));
+  t.failed(0);
+  TEST_ASSERT_FALSE(t.step(false, false, 5 * StateNotifyTrigger::kRetryMs));
+  TEST_ASSERT_TRUE(t.step(true, false, 6 * StateNotifyTrigger::kRetryMs));
+  TEST_ASSERT_FALSE(t.step(true, false, 9 * StateNotifyTrigger::kRetryMs));
+}
+
+// The spacing is millis()-wrap-safe.
+void test_retry_spacing_across_a_millis_wrap() {
+  StateNotifyTrigger t;
+  const uint32_t at = 0xFFFFFFF0u;
+  TEST_ASSERT_TRUE(t.step(true, false, at));
+  t.failed(at);
+  TEST_ASSERT_FALSE(t.step(true, false, at + StateNotifyTrigger::kRetryMs - 1));
+  TEST_ASSERT_TRUE(t.step(true, false, at + StateNotifyTrigger::kRetryMs));
 }
 
 // The guarded build serves the same bytes; refuses, without running the fill,
@@ -182,6 +238,11 @@ int main(int argc, char** argv) {
   RUN_TEST(test_trigger_fires_on_each_quiet_change_while_connected);
   RUN_TEST(test_trigger_fires_on_subscribe);
   RUN_TEST(test_trigger_is_silent_without_a_client);
+  RUN_TEST(test_failed_quiet_edge_is_retried_after_the_spacing);
+  RUN_TEST(test_failed_connect_notify_is_retried);
+  RUN_TEST(test_repeated_failures_keep_the_notify_owed);
+  RUN_TEST(test_disconnect_drops_the_owed_notify);
+  RUN_TEST(test_retry_spacing_across_a_millis_wrap);
   RUN_TEST(test_guarded_build_matches_and_refuses_on_heap_failure);
   return UNITY_END();
 }

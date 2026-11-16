@@ -163,8 +163,10 @@ void tick();
  * Send a state-change notification to all subscribed clients.
  *        Payload is `{"previewActive":<bool>}`, used by the app's Test
  *        button to debounce its label without an app-side timer.
+ *        False when nothing went out: no client, no heap for the build,
+ *        or NimBLE refused the send.
  */
-void notifyStateChange();
+bool notifyStateChange();
 
 /**
  * Send a WiFi-state-change notification on CHAR_WIFI_STATE.

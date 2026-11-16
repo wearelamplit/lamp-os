@@ -994,9 +994,11 @@ void tick() {
   // a client holds the link: a mesh cascade dirties the expressions section
   // with no reader, and a rebuild per cascade is pure heap churn.
   static StateNotifyTrigger s_stateNotifyTrigger;
-  if (s_stateNotifyTrigger.step(s_clientConnected,
-                                s_stateSubscribed.exchange(false))) {
-    notifyStateChange();
+  const uint32_t notifyNowMs = millis();
+  if (s_stateNotifyTrigger.step(s_clientConnected, s_stateSubscribed.exchange(false),
+                                notifyNowMs) &&
+      !notifyStateChange()) {
+    s_stateNotifyTrigger.failed(notifyNowMs);
   }
 
   if (!s_clientConnected) {
@@ -1015,10 +1017,10 @@ void setGreetingStateProvider(std::function<lamp::GreetingState()> fn) {
   s_greetingStateProvider = std::move(fn);
 }
 
-void notifyStateChange() {
+bool notifyStateChange() {
   // A greeting edge fires this with no phone attached; the payload has no
   // reader then, and a connecting client reads the state fresh.
-  if (!s_stateNotify || !s_clientConnected) return;
+  if (!s_stateNotify || !s_clientConnected) return false;
   std::string payload;
   const bool built = buildStateNotifyGuarded(
       [](StateNotifyFields& fields, lamp::GreetingState& greeting) {
@@ -1032,10 +1034,10 @@ void notifyStateChange() {
       payload);
   if (!built) {
     logBleSectionOom("stateNotify");
-    return;
+    return false;
   }
   s_stateNotify->setValue(payload);
-  s_stateNotify->notify();
+  return s_stateNotify->notify();
 }
 
 void disableBtModemSleep() {

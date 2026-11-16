@@ -46,14 +46,23 @@ bool buildStateNotifyGuarded(Fill&& fill, std::string& out) {
 
 // When tick() sends CHAR_STATE_NOTIFY on its own: on a new client connection,
 // when the client subscribes, and on every quiet-mode change while a client is
-// connected, so the app learns when its writes land again.
+// connected, so the app learns when its writes land again. A due notify that
+// did not go out is reported with failed() and is due again kRetryMs later,
+// until one goes out or the client leaves.
 class StateNotifyTrigger {
  public:
-  bool step(bool clientConnected, bool subscribed);
+  // Spaces the retries so a send that keeps failing does not build a payload
+  // every loop pass.
+  static constexpr uint32_t kRetryMs = 100;
+
+  bool step(bool clientConnected, bool subscribed, uint32_t nowMs);
+  void failed(uint32_t nowMs);
 
  private:
-  bool wasConnected_ = false;
-  bool wasQuiet_     = false;
+  bool     wasConnected_ = false;
+  bool     wasQuiet_     = false;
+  bool     owed_         = false;
+  uint32_t retryAtMs_    = 0;
 };
 
 }  // namespace ble_control
