@@ -121,7 +121,8 @@ class _WispBodyState extends ConsumerState<_WispBody> {
   Widget _buildBody(BuildContext context, WispStatus status) {
     final notifier = ref.read(wispNotifierProvider(widget.lampId).notifier);
     final source = status.source;
-    final draft = ref.watch(manualPaletteDraftProvider(widget.lampId));
+    final draft = ref.watch(manualPaletteDraftProvider(widget.lampId)
+        .select((d) => d.colors));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

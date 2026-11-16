@@ -129,16 +129,19 @@ class WispNotifier extends _$WispNotifier {
 
   // Palette comes from the dedicated `wisppalette` page section, not the
   // status char (whose palette-less NOTIFY would clobber it). A changed
-  // `paletteIdPrefix` in a NOTIFY triggers a fresh section read.
-  // _savedManualPalette: last committed. The in-flight editor draft lives in
-  // manualPaletteDraftProvider so swatch edits rebuild watchers directly.
-  List<LampColor> _savedManualPalette = const <LampColor>[];
-
+  // `paletteIdPrefix` in a NOTIFY triggers a fresh section read. The editor
+  // draft and the saved palette live in manualPaletteDraftProvider, which
+  // outlives this notifier.
   bool _manualPaletteWriteFailed = false;
 
-  List<LampColor> get _draft => ref.read(manualPaletteDraftProvider(lampId));
+  List<LampColor> get _draft =>
+      ref.read(manualPaletteDraftProvider(lampId)).colors;
+  List<LampColor> get _savedManualPalette =>
+      ref.read(manualPaletteDraftProvider(lampId)).saved;
   void _setDraft(List<LampColor> colors) =>
       ref.read(manualPaletteDraftProvider(lampId).notifier).set(colors);
+  void _setSaved(List<LampColor> colors) =>
+      ref.read(manualPaletteDraftProvider(lampId).notifier).setSaved(colors);
 
   bool _currentPaletteKnown = false;
   String _lastPaletteIdPrefix = '';
@@ -182,8 +185,8 @@ class WispNotifier extends _$WispNotifier {
   /// no live color yet; callers fall back to predictTuple.
   Map<String, ({LampColor base, LampColor shade})> get livePaint => _livePaint;
 
-  /// The currently-saved manual palette (last committed). Empty before
-  /// the first save in a session.
+  /// The last manual palette known saved on the wisp for this lamp, from a
+  /// palette read or a confirmed save. Empty until either.
   List<LampColor> get savedManualPalette => _savedManualPalette;
 
   /// True when the last manual-palette write exhausted its retries without
@@ -447,9 +450,9 @@ class WispNotifier extends _$WispNotifier {
     if (palette.isEmpty) return;
     if (_palettesEqual(_savedManualPalette, palette)) return;
     final wasDraftPristine = _palettesEqual(_draft, _savedManualPalette);
-    _savedManualPalette = List<LampColor>.unmodifiable(palette);
+    _setSaved(palette);
     if (wasDraftPristine) {
-      _setDraft(_savedManualPalette);
+      _setDraft(palette);
     }
   }
 
@@ -1223,7 +1226,7 @@ class WispNotifier extends _$WispNotifier {
 
   void _applyPaletteConfirm(List<LampColor> committed, bool ok) {
     if (ok) {
-      _savedManualPalette = List<LampColor>.unmodifiable(committed);
+      _setSaved(committed);
       _currentPaletteKnown = true;
       _manualPaletteWriteFailed = false;
     } else {

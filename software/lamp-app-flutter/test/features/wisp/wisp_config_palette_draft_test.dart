@@ -107,7 +107,7 @@ void main() {
     await pumpScreen(tester, c);
 
     final n = c.read(wispNotifierProvider(_devId).notifier);
-    expect(c.read(manualPaletteDraftProvider(_devId)), _saved);
+    expect(c.read(manualPaletteDraftProvider(_devId)).colors, _saved);
     expect(n.manualPaletteDirty, isFalse);
   });
 
@@ -116,7 +116,7 @@ void main() {
     final c = await makeContainer();
     await pumpScreen(tester, c);
     final n = c.read(wispNotifierProvider(_devId).notifier);
-    expect(c.read(manualPaletteDraftProvider(_devId)), _saved);
+    expect(c.read(manualPaletteDraftProvider(_devId)).colors, _saved);
 
     n.setManualPaletteDraft(const []);
     Object? err;
@@ -124,7 +124,7 @@ void main() {
     // Frames before the wisp answers rebuild the screen around the pending
     // save.
     await settle(tester);
-    expect(c.read(manualPaletteDraftProvider(_devId)), isEmpty,
+    expect(c.read(manualPaletteDraftProvider(_devId)).colors, isEmpty,
         reason: 'a pending empty save is not refilled');
 
     ble.seedSection(_devId, 'wisppalette', Uint8List(0));
@@ -135,7 +135,7 @@ void main() {
 
     expect(err, isNull);
     expect(n.savedManualPalette, isEmpty);
-    expect(c.read(manualPaletteDraftProvider(_devId)), isEmpty);
+    expect(c.read(manualPaletteDraftProvider(_devId)).colors, isEmpty);
     expect(n.manualPaletteDirty, isFalse);
     expect(n.manualPaletteWriteFailed, isFalse);
   });
@@ -166,7 +166,7 @@ void main() {
             '"paletteIdPrefix":"${WispRepository.paletteIdHash(moved)}"}'));
     await settle(tester);
     expect(n.savedManualPalette, moved, reason: 'the read landed');
-    expect(c.read(manualPaletteDraftProvider(_devId)), isEmpty);
+    expect(c.read(manualPaletteDraftProvider(_devId)).colors, isEmpty);
 
     ble.seedSection(_devId, 'wisppalette', Uint8List(0));
     ble.simulateNotify(_devId, BleUuids.controlService, BleUuids.wispStatus,
@@ -174,7 +174,7 @@ void main() {
     await settle(tester);
     await save;
 
-    expect(c.read(manualPaletteDraftProvider(_devId)), isEmpty);
+    expect(c.read(manualPaletteDraftProvider(_devId)).colors, isEmpty);
     expect(n.manualPaletteDirty, isFalse);
   });
 }
