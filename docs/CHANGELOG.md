@@ -5,6 +5,17 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## Unreleased
+
+### Fixed
+- **A lamp that hangs a few minutes into every boot restarts less and less
+  often.** The restart-loop guard only counted hangs in a boot's first minute,
+  so a hang that came back later in every boot restarted the lamp on the same
+  short cycle forever. Now any hang within about half an hour of starting
+  counts: after three in a row the lamp waits up to 5 minutes before
+  restarting on a hang in its first minute, and each further hang doubles
+  that stretch, up to its first 16 minutes.
+
 ## 1.3.7
 
 ### Added
