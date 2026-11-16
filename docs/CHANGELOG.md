@@ -9,7 +9,7 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 
 ### Fixed
 - **Releases tagged from now on include the wisp image**, so `RELEASE_TAG=v1.3.x npm run wisp:flash:release` works for them (earlier tags still have none).
-- **`npm run lamp:flash:release` no longer flashes a stale `beta`.** A cached rolling-tag image (`beta`, `stable`) is re-downloaded when the release changes; the rolling `stable` release from `main` is now documented.
+- **`npm run lamp:flash:release` no longer flashes a stale `beta`.** Rolling tags (`beta`, `stable`) are downloaded fresh on every run and never reuse an old copy (offline they fail); version-tag images stay cached. The rolling `stable` release from `main` is now documented.
 - **The lamp build's compile cache is actually off.** The per-variant setting meant to disable it was ignored by PlatformIO.
 
 ## 1.3.7

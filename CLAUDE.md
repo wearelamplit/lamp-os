@@ -166,11 +166,12 @@ no key needed. Env params: `VARIANT` (default `standard`), `RELEASE_TAG`
 (default `beta`; stable releases are tagged by version, e.g. `v1.3.0`, and each
 push to `main` also replaces the rolling `stable` release (`release-main.yml`)),
 `PORT`, `IMAGE` (flash a local image, skip the download),
-`CACHE_DIR` and `REFRESH`. Downloads are cached per variant and tag as
+`CACHE_DIR` and `REFRESH`. Rolling tags (`beta`, `stable`) are downloaded on
+every run into a temporary file that is deleted on exit; they never reuse an old
+copy, so offline they fail. A `vX.Y.Z` image is cached per variant and tag as
 `$CACHE_DIR/release-<variant>-<tag>.bin` (default `~/.cache/lamp-os`);
-`REFRESH=1` re-downloads (a failed refresh errors and keeps the cache), and a cached rolling-tag image (`beta`, `stable`) is
-re-downloaded automatically when the release asset's ETag changes (offline reuses
-the cache). Every push to `dev` auto-publishes
+`REFRESH=1` re-downloads it, and a failed refresh errors and keeps the cache.
+Every push to `dev` auto-publishes
 a fresh `beta` release (`release-beta.yml`), built at whatever version the
 root `VERSION` file carries.
 
