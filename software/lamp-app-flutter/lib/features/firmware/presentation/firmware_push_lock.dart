@@ -12,15 +12,16 @@ import 'firmware_copy.dart';
 const double _frozenOpacity = 0.4;
 
 /// Watches whether the lamp drops writes because of a push: while the app
-/// pushes it firmware, and after a push until it reports it is listening.
+/// pushes it firmware, and while the lamp reports it is still quiet from one.
 /// A control that writes to the lamp outside [FirmwarePushLock] disables
 /// itself on this.
 bool watchFirmwarePushFrozen(WidgetRef ref, String lampId) =>
     ref.watch(firmwareNotifierProvider(lampId).select((s) => s.isBusy)) ||
     ref.watch(quietAfterPushProvider(lampId));
 
-/// Freezes [child] while the app pushes firmware to [lampId], and after a
-/// push until the lamp reports it is listening again. The lamp drops every
+/// Freezes [child] while the app pushes firmware to [lampId], and while the
+/// lamp reports it is still quiet from a push, up to
+/// ControlNotifier.quietAfterPushBound. The lamp drops every
 /// non-OTA write in that window, so its controls must not look live. Wrap
 /// every surface that writes to the lamp. Sheets and dialogs opened from a
 /// context inside [child] freeze with it and keep their draft until the

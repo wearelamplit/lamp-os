@@ -188,7 +188,12 @@ A drop after the restore climbs the ladder as usual, even when a try from
 before the save is still running: when that try stands down it arms the next
 step if the link is down and none is pending
 (`_resumeLadderAfterStandDown`). A reload that gives up leaves its error on
-screen; the ladder does not take over.
+screen; the ladder does not take over. A build (opening the lamp, or a Retry
+or other rebuild) owns its link the same way: a connected edge that arrives
+while the state is loading starts no try, and a try or a reload already in
+flight when a build starts stops at its next step for good (`_buildsStarted`),
+either resuming the ladder as above, so each link gets one link
+session (`_beginLinkSession`).
 
 ## Scan hold during a connect
 

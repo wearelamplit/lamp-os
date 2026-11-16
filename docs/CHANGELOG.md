@@ -85,6 +85,26 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   palette on.
 - **A wisp palette save stops resending once the wisp leaves Manual.** It
   kept sending the palette up to three more times.
+- **Reopening a lamp mid-update freezes editing until it is ready.** Leave a
+  lamp while the app updates it and open it again within the minute: the app
+  now greys the controls under "Giving <name> a moment to settle" until the
+  lamp listens again, then takes the lamp's word for any edit it ignored.
+  Before, the controls looked live and changes made then never reached the
+  lamp.
+- **Home Mode keeps the right brightness after a reconnect or Retry.** When
+  the link drops or you tap Retry on the Home Mode page, the app tells the
+  lamp again as soon as it is back that Home Mode is open, on any firmware, so
+  the Home brightness slider no longer changes the everyday brightness.
+- **Leaving Home Mode right as a lamp finishes updating sticks.** The app no
+  longer tells the lamp Home Mode is open again after you closed it, and a
+  Retry after a dropped link reconnects once instead of twice.
+- **A turned-down update no longer reloads the lamp.** When a lamp declines
+  an update, the app no longer re-sends its page markers and re-reads every
+  setting.
+- **Leaving Social after a reconnect mid-update frees the lamp's nearby
+  list.** The app tells the lamp Social is open as soon as it reconnects, so
+  leaving Social ends the lamp's nearby list straight away instead of about
+  30 s later.
 
 ### Changed
 - **More refused writes show on the debug serial.** Writes from the app
