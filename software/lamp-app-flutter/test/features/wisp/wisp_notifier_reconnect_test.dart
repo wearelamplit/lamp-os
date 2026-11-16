@@ -19,11 +19,16 @@ const _mac = 'AA:BB:CC:DD:EE:FF';
 
 Uint8List _b(String s) => Uint8List.fromList(utf8.encode(s));
 
-/// A lamp whose notify subscriptions die with the link, as on hardware: the
-/// lamp is unbonded, so a new connection starts with notifications off until
-/// the app subscribes again.
+/// Notify delivery as flutter_blue_plus gives it against an unbonded lamp: a
+/// new link starts with notifications off until the app subscribes again,
+/// and once it has, every listener on the characteristic receives, a
+/// listener left over from the old link included.
 class _LinkScopedBle extends InMemoryBleClient {
   int _link = 0;
+  int? _notifyingLink;
+
+  /// Live listeners on the wisp status notify.
+  int statusListeners = 0;
 
   @override
   Future<void> disconnect(String deviceId) {
@@ -33,8 +38,21 @@ class _LinkScopedBle extends InMemoryBleClient {
 
   @override
   Stream<Uint8List> subscribe(String d, String s, String c) {
-    final link = _link;
-    return super.subscribe(d, s, c).where((_) => _link == link);
+    final src = super.subscribe(d, s, c);
+    _notifyingLink = _link;
+    StreamSubscription<Uint8List>? sub;
+    late final StreamController<Uint8List> out;
+    out = StreamController<Uint8List>(
+      onListen: () {
+        statusListeners++;
+        sub = src.where((_) => _notifyingLink == _link).listen(out.add);
+      },
+      onCancel: () {
+        statusListeners--;
+        return sub?.cancel();
+      },
+    );
+    return out.stream;
   }
 }
 
@@ -81,6 +99,8 @@ void main() {
     await pumpEventQueue();
     expect(c.read(wispNotifierProvider(_lampId)).value!.source,
         WispSourceMode.osc);
+    expect(ble.statusListeners, 1,
+        reason: 'the old link\'s listener would hear every notify twice');
 
     notify(ble, manual);
     await pumpEventQueue();
