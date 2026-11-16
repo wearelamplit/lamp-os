@@ -101,7 +101,8 @@ skew:
    a phone's Wi-Fi list again. Repeat with a phone joined to the src's network
    and the web config page open: the src logs no `[fwdist] ... → OFFER` while
    the phone stays joined, and a settings save from the page answers. Leave the
-   network: the src offers within a few seconds. Then join a phone to the src's
+   network: the src reboots (its BLE comes back), then offers once it hears the
+   peer's HELLO again (up to 30 s). Then join a phone to the src's
    network inside the 15 s between `→ OFFER` and the peer's accept: the send
    goes ahead, the phone loses the network when streaming starts, and the
    network is back after `softAP back after OTA`. A

@@ -179,7 +179,6 @@ void test_ap_wanted_after_ota() {
   TEST_ASSERT_FALSE(webapp::apWantedAfterOta(0x00000200u, 0x00000100u, false, false));
 }
 
-// --- SoftApState: one teardown per up period, across tasks ---
 
 using webapp::SoftApState;
 

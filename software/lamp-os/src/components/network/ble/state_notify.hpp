@@ -62,9 +62,8 @@ StateNotifySend sendStateNotify(bool subscribed, uint16_t connHandle, Fill&& fil
 
 // When tick() sends CHAR_STATE_NOTIFY on its own: when a client becomes
 // reachable, when it subscribes, and on every quiet-mode change while it is
-// reachable, so the app learns when its writes land again. clientConnected is
-// "a client is connected with notifications on". A due notify that did not go
-// out is reported with failed() and is due again kRetryMs later while the
+// reachable, so the app learns when its writes land again. A due notify that did
+// not go out is reported with failed() and is due again kRetryMs later while the
 // client stays reachable, until one goes out.
 class StateNotifyTrigger {
  public:
@@ -72,7 +71,7 @@ class StateNotifyTrigger {
   // every loop pass.
   static constexpr uint32_t kRetryMs = 100;
 
-  bool step(bool clientConnected, bool subscribed, uint32_t nowMs);
+  bool step(bool clientReachable, bool subscribed, uint32_t nowMs);
   void failed(uint32_t nowMs);
 
  private:
