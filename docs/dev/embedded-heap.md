@@ -414,7 +414,8 @@ of the unchanged config at first boot must load whole at every cut.
   a role whose first strip is `reversed` (`windingOf`), each `{p, b}`
   knockout pair lands on pixel p (mirrored the same way; p past the base px
   dropped) at the level whose gamma-corrected scale is nearest b%, and
-  `lamp.homeMode` / `homeModeSSID` / `homeModeBrightness` (80 when absent)
+  the stored shade px is dropped (the C firmware ignored it and drove the
+  variant default), and `lamp.homeMode` / `homeModeSSID` / `homeModeBrightness` (80 when absent)
   become the home mode, network-bound when the SSID is set. Pixels between
   two stops and fades still render a little darker, and the strip level
   caps at 170 where the C firmware capped at 180. The string stays the authority until a save of the migrated model

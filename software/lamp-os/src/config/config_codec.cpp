@@ -1065,7 +1065,7 @@ static void migrateOldCRole(JsonObject node, std::vector<Color>& colors, bool re
   if (reversed) std::reverse(colors.begin(), colors.end());
 }
 
-// The knockout level whose gamma-corrected scale is nearest the C firmware's
+// The knockout level whose gamma-corrected scale best matches the C firmware's
 // raw b%.
 static uint8_t knockoutLevel(int b) {
   const int target = (255 * std::clamp(b, 0, 100) + 50) / 100;
@@ -1089,6 +1089,7 @@ static void migrateOldC(JsonObject root, StripWinding winding, BaseSettings& bas
                         HomeModeSettings& homeMode) {
   migrateOldCRole(root["base"], base.broadcastColors(), winding.base);
   migrateOldCRole(root["shade"], shade.broadcastColors(), winding.shade);
+  shade.segments.front().px = 0;
   for (ExpressionConfig& e : expressions.expressions) {
     for (Color& c : e.colors) c = inverseGamma(c);
   }

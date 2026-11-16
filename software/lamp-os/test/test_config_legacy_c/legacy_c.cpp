@@ -63,6 +63,13 @@ const char* kSeptember =
     R"("ac":0,"colors":["#40000d00","#781e050c"],"knockout":[{"p":1,"b":50}]},)"
     R"("shade":{"px":32,"colors":["#46006400"]}})";
 
+// A 2025-09 build stored the shade px 35 it then defaulted to; the C firmware
+// never read it and always drove 38.
+const char* kShadePx35 =
+    R"({"lamp":{"name":"nine","brightness":40,"homeMode":false},"base":{"px":36,)"
+    R"("ac":0,"colors":["#40000d00"]},"shade":{"px":35,"colors":["#46006400"]},)"
+    R"("expressions":[]})";
+
 uint8_t s_buf[config_codec::kMaxSettingsBlobLen];
 
 config_codec::LoadedConfig load(ConfigStore& store, Model& m, StripWinding winding) {
@@ -227,6 +234,18 @@ void test_september_shape_loads_whole() {
   TEST_ASSERT_TRUE(m.expressions.expressions.empty());
 }
 
+// The shade px a store carries is dropped so the variant default applies; the
+// base px was read by the C firmware and stays.
+void test_stored_shade_px_is_dropped_and_base_px_kept() {
+  for (const StripWinding w : kWindings) {
+    const Model m = loadCfg(kShadePx35, w);
+    constexpr uint8_t kVariantShadePx = 38;
+    TEST_ASSERT_EQUAL_UINT8(kVariantShadePx,
+                            resolveConfiguredPx(m.shade.segments.front().px, kVariantShadePx));
+    TEST_ASSERT_EQUAL_UINT8(36, m.base.segments.front().px);
+  }
+}
+
 // A store with no colours for a role keeps that role's class default as is.
 void test_role_without_colours_keeps_the_class_default() {
   const char* json =
@@ -337,6 +356,7 @@ int main(int, char**) {
   RUN_TEST(test_lamp_home_mode_keys_migrate);
   RUN_TEST(test_long_ssid_is_cut_to_the_cap);
   RUN_TEST(test_september_shape_loads_whole);
+  RUN_TEST(test_stored_shade_px_is_dropped_and_base_px_kept);
   RUN_TEST(test_role_without_colours_keeps_the_class_default);
   RUN_TEST(test_mesh_era_store_is_untouched);
   RUN_TEST(test_save_cut_short_keeps_the_old_store_authoritative);

@@ -12,7 +12,7 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   Its colours, the direction of its base gradient, its base knockout and its
   Home Mode carry over, where they used to come out dimmer or a different
   hue, run the other way, lose the knockout and turn Home Mode off.
-  Pixels between two colours may look a little darker. A lamp that already
+  The shade keeps all its pixels lit. Pixels between two colours may look a little darker. A lamp that already
   updated to an earlier mesh release saved the old result and has to be set
   again in the app.
 - **A pure white shade stays white.** A lamp whose shade (or base) was set to
