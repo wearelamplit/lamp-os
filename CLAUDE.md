@@ -133,6 +133,10 @@ VARIANT=snafu npm run lamp:build   # any other variant, still unsigned
 npm run wisp:build         # wisp firmware
 ```
 
+Lamp firmware builds (`lamp:build`, `lamp:flash`, `lamp:buildfs`, `lamp:flashfs`) take a machine-wide lock
+(`scripts/with_pio_lock.sh`, `~/.platformio/lamp-build.lock`): the lamp build rewrites the shared
+PlatformIO framework libs, so a second concurrent build waits and prints that it is waiting.
+
 One axis governs the build: **channel ∈ {dev, beta, stable}**
 (`LAMP_FIRMWARE_CHANNEL`). Everything derives — `signed ≡ channel != dev`,
 `LAMP_DEBUG ≡ channel == dev`, `key required ≡ channel != dev`. Local build and
