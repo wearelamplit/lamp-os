@@ -15,8 +15,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   sent an update no longer drops out of reach until it is unplugged: it
   restarts and the app can connect again.
 - **The app hears again that a lamp has left update mode.** A "quiet"
-  change the lamp had no memory to send was never sent again, so the app
-  could stay greyed out until its 75 s timeout. It is now retried.
+  change the lamp had no memory to send, or that Bluetooth had no room to
+  queue, was never sent again, so the app could stay greyed out until its
+  75 s timeout. It is now retried.
 - **Update data sent over Bluetooth must come over the connection that
   started the update.** A second phone's data is refused, unless the lamp
   hands the second phone the same connection number.

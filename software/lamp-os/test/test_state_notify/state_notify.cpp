@@ -126,7 +126,7 @@ void test_trigger_is_silent_without_a_client() {
   TEST_ASSERT_FALSE(t.step(true, false, 0));
 }
 
-// A due notify that does not go out (no heap for the build) is due
+// A due notify that does not go out (no heap, a refused send) is due
 // again kRetryMs later, and only then; one that goes out is not repeated.
 void test_failed_quiet_edge_is_retried_after_the_spacing() {
   StateNotifyTrigger t;
@@ -228,6 +228,92 @@ void test_guarded_build_matches_and_refuses_on_heap_failure() {
   TEST_ASSERT_TRUE(fresh.empty());
 }
 
+// A NimBLE send to one connection, as notify(data, len, connHandle) makes it.
+struct FakeSend {
+  bool ok = true;
+  int calls = 0;
+  uint16_t connHandle = 0;
+  std::string bytes;
+  bool operator()(const uint8_t* data, size_t len, uint16_t handle) {
+    ++calls;
+    connHandle = handle;
+    bytes.assign(reinterpret_cast<const char*>(data), len);
+    return ok;
+  }
+};
+
+static void fillRev7(StateNotifyFields& f, lamp::GreetingState&) { f.nearbyRev = 7; }
+
+// A send to one connection skips NimBLE's subscription check, so a client
+// that has not turned notifications on gets nothing, and nothing is built.
+void test_unsubscribed_client_gets_nothing() {
+  using ble_control::sendStateNotify;
+  using ble_control::StateNotifySend;
+  FakeSend send;
+  bool filled = false;
+  const StateNotifySend r = sendStateNotify(
+      /*subscribed=*/false, 3,
+      [&](StateNotifyFields&, lamp::GreetingState&) { filled = true; },
+      [&](const uint8_t* d, size_t n, uint16_t h) { return send(d, n, h); });
+  TEST_ASSERT_TRUE(r == StateNotifySend::NotSubscribed);
+  TEST_ASSERT_EQUAL(0, send.calls);
+  TEST_ASSERT_FALSE(filled);
+}
+
+// The subscribed client gets the built payload's bytes, on its own connection.
+void test_subscribed_client_gets_the_payload_on_its_connection() {
+  using ble_control::sendStateNotify;
+  using ble_control::StateNotifySend;
+  StateNotifyFields f;
+  f.nearbyRev = 7;
+  std::string expected;
+  buildStateNotifyJson(f, expected);
+  FakeSend send;
+  const StateNotifySend r = sendStateNotify(
+      true, 3, fillRev7, [&](const uint8_t* d, size_t n, uint16_t h) { return send(d, n, h); });
+  TEST_ASSERT_TRUE(r == StateNotifySend::Sent);
+  TEST_ASSERT_EQUAL(1, send.calls);
+  TEST_ASSERT_EQUAL_UINT16(3, send.connHandle);
+  TEST_ASSERT_EQUAL_STRING(expected.c_str(), send.bytes.c_str());
+}
+
+// A send NimBLE refuses (no mbuf) reads as not sent, so the trigger owes it
+// and it goes again kRetryMs later.
+void test_refused_send_is_retried() {
+  using ble_control::sendStateNotify;
+  using ble_control::StateNotifySend;
+  StateNotifyTrigger t;
+  FakeSend send;
+  send.ok = false;
+  auto attempt = [&](uint32_t now) {
+    if (!t.step(true, false, now)) return false;
+    const StateNotifySend r = sendStateNotify(
+        true, 3, fillRev7, [&](const uint8_t* d, size_t n, uint16_t h) { return send(d, n, h); });
+    if (r != StateNotifySend::Sent) t.failed(now);
+    return true;
+  };
+  TEST_ASSERT_TRUE(attempt(1000));
+  TEST_ASSERT_EQUAL(1, send.calls);
+  TEST_ASSERT_FALSE(attempt(1000 + StateNotifyTrigger::kRetryMs - 1));
+  send.ok = true;
+  TEST_ASSERT_TRUE(attempt(1000 + StateNotifyTrigger::kRetryMs));
+  TEST_ASSERT_EQUAL(2, send.calls);
+  TEST_ASSERT_FALSE(attempt(1000 + 4 * StateNotifyTrigger::kRetryMs));
+}
+
+// A refused build sends nothing and says why.
+void test_no_heap_sends_nothing() {
+  using ble_control::sendStateNotify;
+  using ble_control::StateNotifySend;
+  FakeSend send;
+  g_mock_largest_free_block = lamp::kHeapHeadroom;
+  const StateNotifySend r = sendStateNotify(
+      true, 3, fillRev7, [&](const uint8_t* d, size_t n, uint16_t h) { return send(d, n, h); });
+  g_mock_largest_free_block = 1 << 20;
+  TEST_ASSERT_TRUE(r == StateNotifySend::NoHeap);
+  TEST_ASSERT_EQUAL(0, send.calls);
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
@@ -244,5 +330,9 @@ int main(int argc, char** argv) {
   RUN_TEST(test_no_retry_without_a_client);
   RUN_TEST(test_retry_spacing_across_a_millis_wrap);
   RUN_TEST(test_guarded_build_matches_and_refuses_on_heap_failure);
+  RUN_TEST(test_unsubscribed_client_gets_nothing);
+  RUN_TEST(test_subscribed_client_gets_the_payload_on_its_connection);
+  RUN_TEST(test_refused_send_is_retried);
+  RUN_TEST(test_no_heap_sends_nothing);
   return UNITY_END();
 }

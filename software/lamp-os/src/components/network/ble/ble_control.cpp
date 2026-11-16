@@ -147,6 +147,8 @@ static std::function<lamp::GreetingState()> s_greetingStateProvider;
 // Set on Core 0 when the app enables CHAR_STATE_NOTIFY; tick() sends the
 // current state then, since a notify sent before the subscribe is lost.
 static std::atomic<bool>     s_stateSubscribed{false};
+// Whether the connected client has CHAR_STATE_NOTIFY notifications on.
+static std::atomic<bool>     s_stateNotifyOn{false};
 
 static constexpr uint16_t kTightMinUnits = 12;   //  15.0 ms (units of 1.25 ms)
 static constexpr uint16_t kTightMaxUnits = 24;   //  30.0 ms
@@ -357,6 +359,7 @@ class ControlServerCallbacks : public NimBLEServerCallbacks {
     lamp::overrides.base.reassertHold();
     lamp::overrides.shade.reassertHold();
     s_currentConnHandle = 0xFFFF;
+    s_stateNotifyOn.store(false);
     postPendingApplyEffectiveBrightness();
     // Force-flush dispositions so the user's final slider value persists
     // if the lamp loses power before the debounce window elapses.
@@ -968,6 +971,7 @@ class FwControlCallback : public NimBLECharacteristicCallbacks {
 class StateNotifyCallback : public NimBLECharacteristicCallbacks {
   void onSubscribe(NimBLECharacteristic*, NimBLEConnInfo&,
                    uint16_t subValue) override {
+    s_stateNotifyOn.store(subValue != 0);
     if (subValue != 0) s_stateSubscribed.store(true);
   }
 };
@@ -1037,8 +1041,8 @@ void tick() {
   // with no reader, and a rebuild per cascade is pure heap churn.
   static StateNotifyTrigger s_stateNotifyTrigger;
   const uint32_t notifyNowMs = millis();
-  if (s_stateNotifyTrigger.step(s_clientConnected, s_stateSubscribed.exchange(false),
-                                notifyNowMs) &&
+  if (s_stateNotifyTrigger.step(s_clientConnected && s_stateNotifyOn.load(),
+                                s_stateSubscribed.exchange(false), notifyNowMs) &&
       !notifyStateChange()) {
     s_stateNotifyTrigger.failed(notifyNowMs);
   }
@@ -1063,8 +1067,8 @@ bool notifyStateChange() {
   // A greeting edge fires this with no phone attached; the payload has no
   // reader then, and a connecting client reads the state fresh.
   if (!s_stateNotify || !s_clientConnected) return false;
-  std::string payload;
-  const bool built = buildStateNotifyGuarded(
+  const StateNotifySend result = sendStateNotify(
+      s_stateNotifyOn.load(), s_currentConnHandle,
       [](StateNotifyFields& fields, lamp::GreetingState& greeting) {
         fields.previewActive = ::expressionManager.isAnyTestActive();
         if (s_greetingStateProvider) {
@@ -1073,13 +1077,11 @@ bool notifyStateChange() {
         }
         fields.nearbyRev = s_nearby.rev();
       },
-      payload);
-  if (!built) {
-    logBleSectionOom("stateNotify");
-    return false;
-  }
-  s_stateNotify->setValue(payload);
-  return s_stateNotify->notify();
+      [](const uint8_t* data, size_t len, uint16_t connHandle) {
+        return s_stateNotify->notify(data, len, connHandle);
+      });
+  if (result == StateNotifySend::NoHeap) logBleSectionOom("stateNotify");
+  return result == StateNotifySend::Sent;
 }
 
 void disableBtModemSleep() {
