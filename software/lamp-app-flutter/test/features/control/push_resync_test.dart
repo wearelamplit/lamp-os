@@ -953,6 +953,28 @@ void main() {
       expectEachOnce(r, listening);
     });
 
+    test(
+      'on a lamp last heard listening, when a push ends mid-rebuild',
+      () async {
+        final r = await heldFlags();
+        r.notify(quiet: false);
+        r.firmware.emit(_streaming);
+        await _pump();
+        r.ble.quietOnSubscribe = false;
+        final gate = r.ble.held[BleUuids.expressionTest] = Completer<void>();
+        final mark = r.mark();
+        r.c.invalidate(controlNotifierProvider(_id));
+        final rebuilt = r.c.read(controlNotifierProvider(_id).future);
+        await _pump();
+        r.firmware.emit(_failed);
+        await _pump();
+        gate.complete();
+        await rebuilt;
+        await _pump();
+        expectEachOnce(r, mark);
+      },
+    );
+
     test('on a lamp that reports listening on subscribe', () async {
       final r = await heldFlags();
       r.notify(quiet: false);
