@@ -49,6 +49,7 @@ echo x >> "$STUB_LOG"
 [ "${STUB_GET_FAIL:-}" = 1 ] && { echo partial > "$out"; exit 18; }
 [ "${STUB_GET_SLEEP:-}" = 1 ] && { echo partial > "$out"; sleep 30; }
 [ "${STUB_SHORT:-}" = 1 ] && { echo short > "$out"; exit 0; }
+[ "${STUB_SHORT:-}" = 2 ] && { head -c 4194303 /dev/zero > "$out"; exit 0; }
 head -c 4194304 /dev/zero | tr '\\0' "$STUB_FILL" > "$out"
 """
 
@@ -140,6 +141,9 @@ class FlashCache(unittest.TestCase):
         self.assertIn("expected at least 4 MiB", r.stderr)
         self.assertEqual(self.cache_files(), [img.name])
         self.assertEqual(img.read_bytes()[:1], b"A")
+
+    def test_image_one_byte_short_of_4_mib_is_rejected(self):
+        self.run_flash("B", tag="v1.3.0", STUB_SHORT="2", ok=False)
 
     def test_short_first_download_is_not_cached(self):
         self.run_flash("B", tag="v1.3.0", STUB_SHORT="1", ok=False)
