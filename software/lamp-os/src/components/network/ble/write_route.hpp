@@ -17,9 +17,8 @@ using PostFn = void (*)(const char* data, size_t len);
 using AuthFn = bool (*)(uint16_t connHandle);
 
 // Decoder for the AES-GCM ciphertext path. Same signature as
-// decodeIncomingOp() in ble_control.cpp. When WriteRouter is instantiated
-// with needsDecode = true, it calls this on every write and replaces
-// `raw` with the decoded JSON before bounds-checking and posting.
+// decodeIncomingOp() in ble_control.cpp. A route given one decodes every
+// write and bounds-checks and posts the decoded JSON.
 using DecodeFn = bool (*)(const std::string& raw,
                           uint16_t handle,
                           const uint8_t* charUuidLE16,

@@ -17,8 +17,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 - **The app hears again that a lamp has left update mode.** A "quiet"
   change the lamp had no memory to send was never sent again, so the app
   could stay greyed out until its 75 s timeout. It is now retried.
-- **A second phone cannot write into another phone's update.** Update data
-  sent over Bluetooth must come over the same connection that started it.
+- **Update data sent over Bluetooth must come over the connection that
+  started the update.** A second phone's data is refused, unless the lamp
+  hands the second phone the same connection number.
 
 ### Changed
 - **More refused writes show on the debug serial.** Writes from the app

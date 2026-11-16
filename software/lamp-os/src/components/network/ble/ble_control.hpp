@@ -163,8 +163,9 @@ void tick();
  * Send a state-change notification to all subscribed clients.
  *        Payload is `{"previewActive":<bool>}`, used by the app's Test
  *        button to debounce its label without an app-side timer.
- *        False when nothing went out: no client, no heap for the build,
- *        or NimBLE refused the send.
+ *        False when nothing went out: no client, or no heap for the
+ *        build. NimBLE queues the send itself, so a send it drops later
+ *        still reads true.
  */
 bool notifyStateChange();
 

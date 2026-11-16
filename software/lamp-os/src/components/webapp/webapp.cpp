@@ -528,7 +528,7 @@ static void restoreApAfterOta(uint32_t now) {
   s_pendingServerStop = false;
   if (!startSoftAp()) {
     Serial.println("[webapp] softAP not restored after OTA");
-    if (ble_control::isDownForWebapp()) armReboot(now);  // no AP and no BLE: unreachable
+    if (ble_control::isDownForWebapp()) armReboot(now);  // the lamp has neither AP nor BLE
     return;
   }
   if (s_serverUp && MDNS.begin("lamp")) {

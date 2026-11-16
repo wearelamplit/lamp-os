@@ -126,7 +126,7 @@ void test_trigger_is_silent_without_a_client() {
   TEST_ASSERT_FALSE(t.step(true, false, 0));
 }
 
-// A due notify that does not go out (no mbuf, no heap for the build) is due
+// A due notify that does not go out (no heap for the build) is due
 // again kRetryMs later, and only then; one that goes out is not repeated.
 void test_failed_quiet_edge_is_retried_after_the_spacing() {
   StateNotifyTrigger t;

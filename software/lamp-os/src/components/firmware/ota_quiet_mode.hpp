@@ -12,9 +12,9 @@ namespace ota_quiet_mode {
 // tombstone, or success (just before reboot).
 //
 // `tearDownRadio` controls whether adv/scan also stop, any connected GATT
-// client is kicked, and the softAP goes down (webapp::shutdownForOta). The mesh OTA path passes true (the phone
-// isn't the transport, so kicking it just stops it from competing with chunk
-// RX for radio time). The BLE-pushed OTA path passes false (the phone IS the
+// client is kicked, and the softAP goes down (webapp::shutdownForOta). The
+// mesh OTA path passes true (the phone isn't the transport, so kicking it just
+// stops it from competing with chunk RX for radio time). The BLE-pushed OTA path passes false (the phone IS the
 // chunk transport, so kicking it kills the session).
 //
 // When quiet is active:
