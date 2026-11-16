@@ -22,6 +22,7 @@
     "//wisp:flash": "DEV/BENCH TESTING ONLY: builds + flashes an unsigned dev image. To flash a wisp with signed release firmware, use wisp:flash:release.",
     "wisp:flash": "cd software/wisp && LAMP_FIRMWARE_CHANNEL=dev pio run -e seeed_xiao_esp32_c6 -t upload",
     "wisp:flash:release": "bash scripts/flash_wisp_signed_release.sh",
+    "tooling:test": "python3 -m unittest discover -s scripts/tests",
     "wisp:test": "cd software/wisp && pio test -e native",
     "wisp:monitor": "cd software/wisp && pio device monitor -e seeed_xiao_esp32_c6",
     "app:run": "cd software/lamp-app-flutter && flutter run -d $(./scripts/android-id.sh)",

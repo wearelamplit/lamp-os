@@ -8,12 +8,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 ## Unreleased
 
 ### Fixed
-- **`vX.Y.Z` releases now include the wisp image**, so `RELEASE_TAG=v1.3.x npm run wisp:flash:release` works.
-- **`npm run lamp:flash:release` no longer flashes a stale `beta`.** A cached rolling-tag image is re-downloaded when the release changes.
-- **Local lamp builds match clean builds.** The ignored per-variant build-cache setting is gone, so the compile cache no longer feeds old-sdkconfig objects into a build.
-
-### Changed
-- Docs now say the rolling `stable` release from `main` exists.
+- **Releases tagged from now on include the wisp image**, so `RELEASE_TAG=v1.3.x npm run wisp:flash:release` works for them (earlier tags still have none).
+- **`npm run lamp:flash:release` no longer flashes a stale `beta`.** A cached rolling-tag image (`beta`, `stable`) is re-downloaded when the release changes; the rolling `stable` release from `main` is now documented.
+- **The lamp build's compile cache is actually off.** The per-variant setting meant to disable it was ignored by PlatformIO.
 
 ## 1.3.7
 

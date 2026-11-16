@@ -164,7 +164,8 @@ bootloader, partition table and NVS are never written, so name and config
 persist. A blank board needs the web installer at update.lamplit.ca. No build,
 no key needed. Env params: `VARIANT` (default `standard`), `RELEASE_TAG`
 (default `beta`; stable releases are tagged by version, e.g. `v1.3.0`, and each
-push to `main` also replaces the rolling `stable` release (`release-main.yml`)), `PORT`, `IMAGE` (flash a local image, skip the download),
+push to `main` also replaces the rolling `stable` release (`release-main.yml`)),
+`PORT`, `IMAGE` (flash a local image, skip the download),
 `CACHE_DIR` and `REFRESH`. Downloads are cached per variant and tag as
 `$CACHE_DIR/release-<variant>-<tag>.bin` (default `~/.cache/lamp-os`);
 `REFRESH=1` re-downloads, and a cached rolling-tag image (`beta`, `stable`) is
