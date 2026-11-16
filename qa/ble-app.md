@@ -166,7 +166,10 @@ and the grey stay up the whole time, then both go together when the lamp's
 indicator ends, with no message (a cancel says nothing). Open an expression in
 the editor during the hold: Test is greyed. Change the base colour after: the
 lamp follows. On a lamp running 1.3.1 the strip and the grey go the moment you
-cancel, and a colour change in the next minute does nothing on the lamp. The
+cancel, and a colour change in the next minute does nothing on the lamp.
+Cancel again, go back to My Lamps and reopen the lamp within the minute: the
+strip and the grey are back, and go when the lamp's indicator ends. Change the
+base colour after: the lamp follows. The
 Home Mode cases (a focus change dropped mid-update, a reconnect while Home Mode
 is open) can't be set up from the app's screens and are covered by
 push_resync_test.dart.
