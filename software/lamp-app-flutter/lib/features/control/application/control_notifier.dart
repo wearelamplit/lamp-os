@@ -197,8 +197,9 @@ class ControlNotifier extends _$ControlNotifier {
   /// heard listening.
   bool _flagsPending = false;
 
-  /// The lamp reported quiet while the screen could still send it edits; its
-  /// sections are re-read when it is next heard listening.
+  /// The lamp reported quiet with no quiet freeze running, so writes it
+  /// dropped may have gone out; its sections are re-read when it is next heard
+  /// listening.
   bool _rereadPending = false;
 
   /// Survives a rebuild, which keeps this instance; after a dispose it
@@ -828,8 +829,9 @@ class ControlNotifier extends _$ControlNotifier {
     ref.read(quietAfterPushProvider(_deviceId).notifier).set(quiet);
   }
 
-  /// Starts a session on a new link, once the connected state is set. The
-  /// lamp holds none of [_heldFlags] and has not yet said whether it is quiet.
+  /// The last step of bringing a link up; the lamp's first report arrives
+  /// after the connected state. The lamp holds none of [_heldFlags] and has
+  /// not yet said whether it is quiet.
   /// It counts a Social open even while quiet, so the open goes at once and a
   /// later close still ends its nearby hold.
   void _beginLinkSession(BleClient ble) {

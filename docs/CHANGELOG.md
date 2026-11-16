@@ -14,10 +14,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   lamp listens again, then takes the lamp's word for any edit it ignored.
   Before, the controls looked live and changes made then never reached the
   lamp.
-- **Home Mode keeps the right brightness after Retry.** After Retry from a
-  failed connect on the Home Mode page, the app tells the lamp again that Home
-  Mode is open, so the Home brightness slider no longer changes the everyday
-  brightness.
+- **Home Mode keeps the right brightness after Retry.** On a lamp running
+  1.3.5 or later, after Retry from a failed connect on the Home Mode page, the
+  app tells the lamp again that Home Mode is open, so the Home brightness
+  slider no longer changes the everyday brightness.
 - **A turned-down update no longer reloads the lamp.** When a lamp declines
   an update, the app no longer re-sends its page markers and re-reads every
   setting.

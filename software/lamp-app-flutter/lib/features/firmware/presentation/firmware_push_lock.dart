@@ -20,7 +20,8 @@ bool watchFirmwarePushFrozen(WidgetRef ref, String lampId) =>
     ref.watch(quietAfterPushProvider(lampId));
 
 /// Freezes [child] while the app pushes firmware to [lampId], and while the
-/// lamp reports it is still quiet from a push until it says it is listening. The lamp drops every
+/// lamp reports it is still quiet from a push, up to
+/// ControlNotifier.quietAfterPushBound. The lamp drops every
 /// non-OTA write in that window, so its controls must not look live. Wrap
 /// every surface that writes to the lamp. Sheets and dialogs opened from a
 /// context inside [child] freeze with it and keep their draft until the
