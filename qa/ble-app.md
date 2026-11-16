@@ -238,6 +238,17 @@ the lamp still goes into Home Mode within about a minute while the saved
 network is in range, and leaves it within about two once the network is gone.
 On a lamp running 1.3.5 the first open lists networks at once.
 
+P13 — **the wisp screen across a reconnect and a revisit.** Needs a wisp in
+Manual near the lamp and two phones. Open the lamp's wisp screen on phone A,
+power-cycle the lamp and let A reconnect. Change the wisp's source from phone
+B: A follows within a few seconds. Back in Manual, change a swatch on A and
+Save: it saves, with no "not saved" after 20 s. Leave the lamp on A, change
+the palette from B, then open the lamp on A again: the editor shows B's
+palette with Save off. Empty the palette from B and reopen on A: Save stays
+off (the old colours may still show until the wisp can report an empty
+palette). Open the lamp a few times on a wisp whose Manual palette is empty:
+"Reading palette from wisp…" never stays past a few seconds.
+
 ## Pass criteria
 
 - H1 completes: mfg-data scan finds the lamp, schema reads 4, section reads
@@ -262,6 +273,9 @@ On a lamp running 1.3.5 the first open lists networks at once.
   is greyed out, and a pin that clashes with a button is reported by name.
 - P12: the first picker open after a connect scans before it lists, a reopen
   lists at once, and home presence still follows the saved network.
+- P13: the wisp screen follows the wisp after a reconnect and a save then
+  confirms; a reopened lamp never lights Save for a palette changed or
+  emptied elsewhere; the palette editor never sticks on reading.
 
 ## Not covered here
 

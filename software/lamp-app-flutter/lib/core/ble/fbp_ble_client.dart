@@ -162,8 +162,8 @@ class FbpBleClient extends BleClient {
   Stream<Uint8List> subscribe(String d, String s, String c) async* {
     final ch = await _resolve(d, s, c);
     await ch.setNotifyValue(true);
-    // lastValueStream replays fbp's cached value on listen (the cache
-    // persists across disconnects) and echoes this app's own writes.
+    // lastValueStream replays fbp's cached value on listen (a disconnect
+    // clears the cache) and echoes this app's own writes.
     yield* capNotifyBytes(ch.lastValueStream);
   }
 
