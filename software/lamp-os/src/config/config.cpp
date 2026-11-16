@@ -44,11 +44,12 @@ static void seedRoleSegments(std::vector<SegmentSettings>& segs,
 // it), runs there.
 static uint8_t s_settingsBuf[config_codec::kMaxSettingsBlobLen];
 
-Config::Config(ConfigStore* inStore) {
+Config::Config(ConfigStore* inStore, StripWinding winding) {
   store_ = inStore;
   dispositions_.attachStore(store_);
-  const config_codec::LoadedConfig loaded = config_codec::loadConfig(
-      *store_, lamp, base, shade, expressions, homeMode, s_settingsBuf, sizeof(s_settingsBuf));
+  const config_codec::LoadedConfig loaded =
+      config_codec::loadConfig(*store_, lamp, base, shade, expressions, homeMode, s_settingsBuf,
+                               sizeof(s_settingsBuf), winding);
   storeForm_ = loaded.form;
 
 #ifdef LAMP_DEBUG

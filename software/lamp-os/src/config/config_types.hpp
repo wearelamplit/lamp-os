@@ -41,6 +41,14 @@ inline bool colorsAreFactoryDefault(const std::vector<Color>& baseColors,
          shadeColors.size() == 1 && shadeColors[0] == shadeDefault;
 }
 
+// Whether each role's first strip is wound back to front (StripSpec::reversed):
+// how a store the C firmware wrote, which drove pixel i from colour index i,
+// maps onto the variant's strips.
+struct StripWinding {
+  bool base = false;
+  bool shade = false;
+};
+
 // Name a fresh lamp loads from empty NVS, and the sentinel a variant replaces
 // with its own default in applyDefaults(). A stored name equal to this or the
 // variant default is treated as unconfigured by the pre-`named`-flag migration.

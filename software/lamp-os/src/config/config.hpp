@@ -73,8 +73,10 @@ class Config {
   /**
    * create a config, loading the persisted blob from the store
    * @param [in] inStore persistence backend for NVS-backed values
+   * @param [in] winding the variant's strip winding, which a store the C
+   *             firmware wrote migrates onto
    */
-  Config(ConfigStore* inStore);
+  Config(ConfigStore* inStore, StripWinding winding);
 
   // Attach a store to a default-constructed Config without running the
   // load constructor. Used by main.cpp to enable loadLampType() /

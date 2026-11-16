@@ -32,7 +32,7 @@ uint8_t s_buf[config_codec::kMaxSettingsBlobLen];
 
 config_codec::LoadedConfig load(ConfigStore& store, Model& m) {
   return config_codec::loadConfig(store, m.lamp, m.base, m.shade, m.expressions, m.homeMode,
-                                  s_buf, sizeof(s_buf));
+                                  s_buf, sizeof(s_buf), {});
 }
 
 // The load Config's constructor ran before the settings blob: the "cfg"

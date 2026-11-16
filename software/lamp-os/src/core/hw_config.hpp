@@ -7,6 +7,7 @@
 #include <lampos/led_types.hpp>
 
 #include "components/input/input_source.hpp"
+#include "config/config_types.hpp"
 
 namespace lamp {
 
@@ -88,6 +89,22 @@ inline bool validateHwConfig(const HwConfig& hw) {
     }
   }
   return true;
+}
+
+// The winding of each role's first strip in declaration order.
+inline StripWinding windingOf(const HwConfig& hw) {
+  StripWinding w;
+  bool baseSeen = false, shadeSeen = false;
+  for (const StripSpec& s : hw.strips) {
+    if (s.role == Surface::Base && !baseSeen) {
+      w.base = s.reversed;
+      baseSeen = true;
+    } else if (s.role == Surface::Shade && !shadeSeen) {
+      w.shade = s.reversed;
+      shadeSeen = true;
+    }
+  }
+  return w;
 }
 
 // True for an ESP32-WROOM GPIO that can drive a strip's data line. Excludes

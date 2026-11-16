@@ -203,10 +203,13 @@ struct LoadedConfig {
 // present (a save cut short) loads "st0". A settings blob that is present
 // but does not read or decode is reported unreadable, and the legacy load
 // runs for whatever is left. The blob is read into `buffer`, which holds
-// kMaxSettingsBlobLen bytes.
+// kMaxSettingsBlobLen bytes. A "cfg" string the C firmware wrote loads alone
+// and migrates onto the strips `winding` describes (docs/dev/embedded-heap.md,
+// "The migration").
 LoadedConfig loadConfig(ConfigStore& store, LampSettings& lamp, BaseSettings& base,
                         ShadeSettings& shade, ExpressionSettings& expressions,
-                        HomeModeSettings& homeMode, uint8_t* buffer, size_t bufferLen);
+                        HomeModeSettings& homeMode, uint8_t* buffer, size_t bufferLen,
+                        StripWinding winding);
 
 // Heap a raw save takes beside its document, bounded from the host
 // measurements in test_config_persist_validate (64-bit, so its slots and

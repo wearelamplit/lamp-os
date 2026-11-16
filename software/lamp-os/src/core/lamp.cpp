@@ -648,7 +648,7 @@ void lamp::Lamp::setup() {
     Serial.println(
         "[power] brownout reset — supply budget constants may be mis-sized");
   }
-  config = lamp::Config(&configStore);
+  config = lamp::Config(&configStore, windingOf(hw_));
   // Re-populate the in-memory lampType from NVS. Config::Config loads the
   // JSON blob, but lampType lives under its own NVS key.
   config.loadLampType();

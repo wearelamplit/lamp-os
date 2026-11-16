@@ -104,7 +104,7 @@ SaveResult save(ConfigStore& store, const Model& m) {
 Model load(ConfigStore& store) {
   Model m;
   config_codec::loadConfig(store, m.lamp, m.base, m.shade, m.expressions, m.homeMode, s_buf,
-                           sizeof(s_buf));
+                           sizeof(s_buf), {});
   return m;
 }
 
