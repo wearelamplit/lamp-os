@@ -59,7 +59,7 @@ All tasks run from the repo root.
 
 | Task | What it does |
 |---|---|
-| `npm run lamp:flash:release` | Download the CI-signed release and update the lamp over USB: firmware (app0) + web UI (spiffs), boot slot reset to app0, NVS kept (no build, no key). `RELEASE_TAG` picks the release (default `beta`; stable releases are tagged by version, e.g. `v1.3.0`); downloads are cached in `~/.cache/lamp-os` (`REFRESH=1` re-downloads) |
+| `npm run lamp:flash:release` | Download the CI-signed release and update the lamp over USB: firmware (app0) + web UI (spiffs), boot slot reset to app0, NVS kept (no build, no key). `RELEASE_TAG` picks the release (default `beta`; stable releases are tagged by version, e.g. `v1.3.0`); downloads are cached in `~/.cache/lamp-os` (`REFRESH=1` re-downloads; a rolling `beta`/`stable` image is re-downloaded when the release changes) |
 | `npm run lamp:flash` | Build unsigned locally + flash over USB (`VARIANT`/`CHANNEL`/`PORT` env params) — dev flashes; boots and meshes fine, can't source OTA |
 | `npm run lamp:build` | Build lamp firmware, unsigned (`VARIANT` env param) |
 | `npm run lamp:test` | Native firmware unit tests (the CI suite) |
@@ -86,7 +86,7 @@ toolchain beyond `esptool` + `curl`:
 ```sh
 npm run lamp:flash:release
 # VARIANT / RELEASE_TAG / PORT env params (standard / beta / auto-detect)
-# RELEASE_TAG=v1.3.0 flashes a stable release; there is no "stable" tag
+# RELEASE_TAG=v1.3.0 flashes that version; RELEASE_TAG=stable is the rolling release from main
 ```
 
 ## Update the app on a phone

@@ -29,6 +29,10 @@
 #                the distribution-*.bin local builds that flash_prebuilt.sh picks.
 #   REFRESH      set to force a re-download even if a cached image exists
 #
+# A cached image for a rolling tag (anything but vX.Y.Z) is revalidated with one
+# HEAD request: the release asset's ETag is stored beside the image, and a
+# different ETag re-downloads. If the HEAD fails (offline bench) the cache is reused.
+#
 # For people WITHOUT the signing key: downloads a prebuilt image, never builds
 # or signs. Requires: curl, esptool (pip install esptool), dd.
 
@@ -70,6 +74,25 @@ if [ -z "${OTADATA_OFF:-}" ] || [ -z "${OTADATA_SIZE:-}" ]; then
   exit 1
 fi
 
+remote_etag() {
+  curl -fsSIL --max-time 10 "$URL" 2>/dev/null | tr -d '\r' \
+    | awk 'tolower($1)=="etag:" { e=$2 } END { print e }'
+}
+ETAG_FILE="${TMPFILE}.etag"
+STORE_ETAG=""
+if [ -z "${IMAGE:-}" ] && [ -z "${REFRESH:-}" ] && [ -s "$TMPFILE" ]; then
+  case "$RELEASE_TAG" in
+    v[0-9]*) ;;
+    *)
+      STORE_ETAG="$(remote_etag || true)"
+      if [ -n "$STORE_ETAG" ] && [ "$STORE_ETAG" != "$(cat "$ETAG_FILE" 2>/dev/null || true)" ]; then
+        echo "[flash:release] release '${RELEASE_TAG}' changed since the cached image; re-downloading"
+        rm -f "$TMPFILE"
+      fi
+      ;;
+  esac
+fi
+
 if [ -s "$TMPFILE" ]; then
   if [ -n "${IMAGE:-}" ]; then
     echo "[flash:release] using local image ${TMPFILE}"
@@ -93,6 +116,8 @@ if [ ! -s "$TMPFILE" ]; then
     echo "       Publish a release for tag '${RELEASE_TAG}' on GitHub, then retry." >&2
     exit 1
   fi
+  [ -n "$STORE_ETAG" ] || STORE_ETAG="$(remote_etag || true)"
+  if [ -n "$STORE_ETAG" ]; then echo "$STORE_ETAG" > "$ETAG_FILE"; else rm -f "$ETAG_FILE"; fi
 fi
 
 if [ ! -s "$TMPFILE" ]; then
