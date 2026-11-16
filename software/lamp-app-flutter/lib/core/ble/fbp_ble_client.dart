@@ -19,8 +19,20 @@ class FbpBleClient extends BleClient {
   /// slider drags. Cleared on disconnect so a reconnect gets a fresh discovery.
   final _serviceCache = DiscoveryCache<List<fbp.BluetoothService>>();
 
+  // Also clears the cache when a link drops on its own, since a caller woken
+  // by the next connected edge resolves before [connect] returns. Lives as
+  // long as the client.
+  // ignore: cancel_subscriptions
+  StreamSubscription<fbp.OnConnectionStateChangedEvent>? _dropWatch;
+
   @override
   Future<void> connect(String deviceId) async {
+    _dropWatch ??= fbp.FlutterBluePlus.events.onConnectionStateChanged
+        .listen((e) {
+      if (e.connectionState == fbp.BluetoothConnectionState.disconnected) {
+        _serviceCache.remove(e.device.remoteId.str);
+      }
+    });
     final device = fbp.BluetoothDevice(
       remoteId: fbp.DeviceIdentifier(deviceId),
     );
@@ -165,8 +177,8 @@ class FbpBleClient extends BleClient {
   Stream<Uint8List> subscribe(String d, String s, String c) async* {
     final ch = await _resolve(d, s, c);
     await ch.setNotifyValue(true);
-    // lastValueStream replays fbp's cached value on listen (the cache
-    // persists across disconnects) and echoes this app's own writes.
+    // lastValueStream replays fbp's cached value on listen (a disconnect
+    // clears the cache) and echoes this app's own writes.
     yield* capNotifyBytes(ch.lastValueStream);
   }
 

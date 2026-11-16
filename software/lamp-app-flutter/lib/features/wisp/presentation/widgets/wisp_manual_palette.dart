@@ -21,7 +21,8 @@ class ManualPaletteEditor extends ConsumerWidget {
     // Watch the status for the loading transition, and the draft so a
     // swatch edit rebuilds the swatch bar.
     ref.watch(wispNotifierProvider(lampId));
-    final draft = ref.watch(manualPaletteDraftProvider(lampId));
+    final draft = ref.watch(
+        manualPaletteDraftProvider(lampId).select((d) => d.colors));
 
     if (notifier.paletteLoading) {
       return Padding(

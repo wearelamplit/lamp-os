@@ -72,6 +72,19 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 - **Update data sent over Bluetooth must come over the connection that
   started the update.** A second phone's data is refused, unless the lamp
   hands the second phone the same connection number.
+- **The app's wisp screen keeps updating after the lamp reconnects.** It
+  froze on what it showed before the lamp dropped out, and a palette or
+  source saved after the reconnect showed "not saved" even when it landed.
+- **Reopening a lamp shows the wisp's palette as it is now.** If the wisp's
+  palette was changed or emptied from another lamp or phone while you were
+  away, the editor kept showing your old colours, and saving put them back.
+  Edits you had not saved are still kept.
+- **An empty wisp palette no longer sticks on "Reading palette from wisp…".**
+  The editor also keeps showing that line, instead of an empty palette you
+  could save over the wisp's real one, while the lamp has not yet passed the
+  palette on.
+- **A wisp palette save stops resending once the wisp leaves Manual.** It
+  kept sending the palette up to three more times.
 
 ### Changed
 - **More refused writes show on the debug serial.** Writes from the app
