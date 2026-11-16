@@ -115,6 +115,54 @@ void main() {
     expect(n.savedManualPalette, palette);
   });
 
+  test('an empty status frame starts no palette read', () async {
+    final ble = _HeldReadsBle();
+    await ble.connect(_lampId);
+    final c = makeContainer(ble);
+    c.listen(wispNotifierProvider(_lampId), (_, _) {});
+    await c.read(wispNotifierProvider(_lampId).future);
+    await pumpEventQueue();
+
+    // flutter_blue_plus replays an empty value on subscribe after a
+    // disconnect, before the lamp answers reads.
+    ble.simulateNotify(
+        _lampId, BleUuids.controlService, BleUuids.wispStatus, Uint8List(0));
+    await pumpEventQueue();
+
+    expect(ble.paletteReads, 0);
+  });
+
+  test('an empty palette read for a status that names a palette leaves it '
+      'loading until a read returns it', () async {
+    const palette = [
+      LampColor(r: 200, g: 0, b: 30, w: 0),
+      LampColor(r: 0, g: 60, b: 90, w: 15),
+    ];
+    final manual = '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual",'
+        '"paletteIdPrefix":"${WispRepository.paletteIdHash(palette)}"}';
+    final ble = _HeldReadsBle();
+    await ble.connect(_lampId);
+    final c = makeContainer(ble);
+    c.listen(wispNotifierProvider(_lampId), (_, _) {});
+    await c.read(wispNotifierProvider(_lampId).future);
+    await pumpEventQueue();
+    final n = c.read(wispNotifierProvider(_lampId).notifier);
+
+    // The lamp answers the palette read empty, as before auth.
+    notify(ble, manual);
+    await pumpEventQueue();
+    expect(ble.paletteReads, 1);
+    expect(n.paletteLoading, isTrue,
+        reason: 'an empty editor would let Save overwrite the palette');
+
+    ble.seedSection(_lampId, 'wisppalette',
+        Uint8List.fromList([for (final x in palette) ...[x.r, x.g, x.b, x.w]]));
+    notify(ble, manual);
+    await pumpEventQueue();
+    expect(n.paletteLoading, isFalse);
+    expect(n.savedManualPalette, palette);
+  });
+
   test('a palette never read is read on the next status, whatever its '
       'palette id', () async {
     final ble = _HeldReadsBle();

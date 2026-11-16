@@ -437,7 +437,11 @@ class WispNotifier extends _$WispNotifier {
     try {
       final palette = await _repo.readManualPalette();
       if (_disposed) return;
-      _currentPaletteKnown = true;
+      // An empty read while the status names a palette was served before
+      // auth or failed, so the palette stays unread for the next status.
+      if (palette.isNotEmpty || _lastPaletteIdPrefix.isEmpty) {
+        _currentPaletteKnown = true;
+      }
       _ingestManualPalette(palette);
       if (bumpState) _bumpState();
     } finally {
@@ -654,14 +658,15 @@ class WispNotifier extends _$WispNotifier {
   // The small, reliable status NOTIFY carries paletteIdPrefix; a changed
   // prefix means the wisp's palette moved, so re-read the palette section.
   // Don't consume the prefix while a read is busy; retry on the next notify.
-  // Until a palette read completes, any status starts one, since an empty
-  // palette's prefix never changes.
+  // Until a palette read completes, any status from a present wisp starts
+  // one, since an empty palette's prefix never changes.
   void _maybeRereadForPalette(WispStatus next) {
     final prefix = next.paletteIdPrefix;
-    if (prefix == _lastPaletteIdPrefix && _currentPaletteKnown) return;
+    final unread = !_currentPaletteKnown && next.present;
+    if (prefix == _lastPaletteIdPrefix && !unread) return;
     // An empty prefix has no palette to read, but recording it lets the same
     // palette coming back register as a change.
-    if (prefix.isEmpty && _currentPaletteKnown) {
+    if (prefix.isEmpty && !unread) {
       _lastPaletteIdPrefix = prefix;
       return;
     }
@@ -1067,8 +1072,8 @@ class WispNotifier extends _$WispNotifier {
   /// is armed before [send] each attempt so a fast echo isn't missed.
   /// Returns true once confirmed, false when every attempt goes unconfirmed.
   /// [isSuperseded], when supplied and true at the top of an attempt, stops
-  /// resending immediately and returns false: a newer op now owns the state,
-  /// so a stale resend from this loop must not reach the wisp.
+  /// resending immediately and returns false. A newer op owns the state or
+  /// the op became moot, so a resend from this loop must not reach the wisp.
   Future<bool> _sendConfirmed({
     required Future<void> Function() send,
     required Future<bool> Function() confirm,
@@ -1100,21 +1105,23 @@ class WispNotifier extends _$WispNotifier {
   /// wisp confirms (incoming.source == pending) or the fallback window
   /// expires.
   WispStatus? _applySourceWriteGuard(WispStatus incoming) {
+    if (_pendingSourceMode == null) return incoming;
+    if (_isStaleSourceEcho(incoming)) return null;
+    _pendingSourceMode = null;
+    _pendingSourceUntil = null;
+    return incoming;
+  }
+
+  /// Whether [status] is a pre-write echo the source-write guard drops: a
+  /// [setSource] is pending, inside its window, and [status] reports another
+  /// source.
+  bool _isStaleSourceEcho(WispStatus status) {
     final pendingMode = _pendingSourceMode;
-    if (pendingMode == null) return incoming;
-    final now = DateTime.now();
     final until = _pendingSourceUntil;
-    if (until == null || now.isAfter(until)) {
-      _pendingSourceMode = null;
-      _pendingSourceUntil = null;
-      return incoming;
-    }
-    if (incoming.source == pendingMode) {
-      _pendingSourceMode = null;
-      _pendingSourceUntil = null;
-      return incoming;
-    }
-    return null;
+    return pendingMode != null &&
+        until != null &&
+        !DateTime.now().isAfter(until) &&
+        status.source != pendingMode;
   }
 
   // Each helper emits a fresh draft list so the provider's watchers rebuild.
@@ -1248,7 +1255,8 @@ class WispNotifier extends _$WispNotifier {
   ///
   /// If that wisp's `source` leaves Manual (or a local [_pendingSourceMode]
   /// already did) the palette write is moot and the outcome is
-  /// [PaletteConfirmOutcome.sourceChanged].
+  /// [PaletteConfirmOutcome.sourceChanged]. A status the source-write guard
+  /// drops as stale decides nothing.
   Future<PaletteConfirmOutcome> _confirmPaletteLanded(
     String expectedHash,
     String? wispMac, {
@@ -1263,6 +1271,7 @@ class WispNotifier extends _$WispNotifier {
               emittedAfter == null || _emittedSince(s, emittedAfter);
           return s.present &&
               s.wispMac == wispMac &&
+              !_isStaleSourceEcho(s) &&
               ((s.paletteIdPrefix == expectedHash && emittedSince) ||
                   s.source != WispSourceMode.manual);
         })

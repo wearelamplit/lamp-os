@@ -288,6 +288,40 @@ void main() {
     expect(n.savedManualPalette, saved);
   });
 
+  test('a stale pre-switch status during a save made right after choosing '
+      'Manual is not the wisp leaving Manual', () async {
+    const edit = [
+      LampColor(r: 1, g: 2, b: 3, w: 0),
+      LampColor(r: 90, g: 0, b: 40, w: 10),
+    ];
+    const off = '{"wispMac":"$_mac","source":"off"}';
+    final ble = InMemoryBleClient();
+    await ble.connect(_lampId);
+    await ble.write(
+        _lampId, BleUuids.controlService, BleUuids.wispStatus, _b(off));
+    final c = makeContainer(ble);
+    c.listen(wispNotifierProvider(_lampId), (_, _) {});
+    await c.read(wispNotifierProvider(_lampId).future);
+    final n = c.read(wispNotifierProvider(_lampId).notifier);
+
+    final source = n.setSource(WispSourceMode.manual);
+    await pumpEventQueue();
+    n.setManualPaletteDraft(edit);
+    Object? err;
+    final save = n.setManualPalette().catchError((Object e) => err = e);
+    await pumpEventQueue();
+    // The relay lamp still serves its cached Off status.
+    notify(ble, off);
+    await pumpEventQueue();
+    notify(ble, manualWith(edit));
+    await source;
+    await save;
+
+    expect(err, isNull);
+    expect(n.manualPaletteWriteFailed, isFalse);
+    expect(n.savedManualPalette, edit);
+  });
+
   test('a save stops sending once the wisp leaves Manual', () async {
     const saved = [LampColor(r: 1, g: 2, b: 3, w: 0)];
     const edit = [
