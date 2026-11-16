@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_blue_plus_platform_interface/flutter_blue_plus_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lamp_app/core/ble/ble_timing.dart';
 import 'package:lamp_app/core/ble/fbp_ble_client.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
 
@@ -108,6 +109,16 @@ void main() {
       'edge', () async {
     final lamp = _FakeLamp();
     FlutterBluePlusPlatform.instance = lamp;
+    final discovers = <BleTimingEvent>[];
+    final savedSink = bleTimings.sink;
+    bleTimings.sink = (e) {
+      if (e.phase == BleTimingPhase.discover) discovers.add(e);
+    };
+    addTearDown(() {
+      bleTimings
+        ..sink = savedSink
+        ..linkDown(_id);
+    });
     final client = FbpBleClient();
     await client.connect(_id);
     await client.read(_id, BleUuids.controlService, BleUuids.wispStatus);
@@ -129,5 +140,7 @@ void main() {
 
     expect(lamp.discoveries, 2,
         reason: 'the old link\'s services do not exist on the new one');
+    expect(discovers.length, 2,
+        reason: 'the rediscovery after a drop is timed as a cold discover');
   });
 }

@@ -415,7 +415,9 @@ of the unchanged config at first boot must load whole at every cut.
   knockout pair lands on pixel p (mirrored the same way; p past the base px
   dropped) at the level whose gamma-corrected scale best matches b%. The
   stored shade px is dropped (the last C firmware ignored it and drove the
-  variant default). `lamp.homeMode` / `homeModeSSID` / `homeModeBrightness`
+  variant default). A C-era board reflashed as a lioness or snafu with
+  its NVS kept would report shade px 0; no such board exists, so it stays
+  unfixed (owner ruling 2026-11-16). `lamp.homeMode` / `homeModeSSID` / `homeModeBrightness`
   (80 when absent) become the home mode, network-bound when the SSID is
   set. Pixels between
   two stops and fades still render a little darker, and the strip level
