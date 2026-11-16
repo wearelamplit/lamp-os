@@ -213,11 +213,15 @@ tap, opened before the transfer so the open's reset lands on the old image.
 
 ## Not covered here
 
-- The BLE chunk path dropping a write into a mesh session. The drop rule
-  (`checkFwChunk`) is natively tested; its wiring (`FwChunkCallback` passing
-  `FirmwareTransportKind::Ble`) is not, and the stock app cannot reach it: the
+- The BLE chunk path dropping a write into a mesh session, or a chunk from a
+  second phone into a BLE session. The drop rule (`checkFwChunk`) is natively
+  tested; its wiring (`FwChunkCallback` passing `FirmwareTransportKind::Ble`
+  and the connection handle) is not, and the stock app cannot reach it: the
   lamp drops any phone link under the mesh pause, so a write can land only
-  between the session arming and the kick taking effect.
+  between the session arming and the kick taking effect, and the app streams
+  only after its own OFFER was accepted. If NimBLE gives the next connection
+  the same handle number, the connection check cannot tell the two phones
+  apart; the digest check at verify still refuses a mixed image.
 
 - True cross-variant gating (standard↔snafu) — needs a snafu lamp and a
   snafu-signed artifact; the channel-suffix row exercises the same

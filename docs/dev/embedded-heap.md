@@ -809,7 +809,8 @@ again later.
 Until the mark, the receiver declines every OFFER, firmware and filesystem,
 mesh and BLE (`DeclineBusy`; a mesh sender backs off that lamp for 10
 minutes, and the app reports "Another update is already in progress on this
-lamp."). A firmware image is written raw
+lamp."). The receiver's gate is `checkFwOfferPrecheck`
+(`components/network/protocol/fw_ota.hpp`, natively tested). A firmware image is written raw
 into the other OTA slot, which holds the image a rollback returns to. A
 filesystem image waits too, so the web UI is never replaced for a firmware
 that may not stay. The lamp offers neither image to its peers until the mark
