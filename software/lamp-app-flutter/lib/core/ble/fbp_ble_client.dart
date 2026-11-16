@@ -18,7 +18,9 @@ class FbpBleClient extends BleClient {
   final Map<String, List<fbp.BluetoothService>> _serviceCache = {};
 
   // Also clears the cache when a link drops on its own: a caller woken by the
-  // next connected edge resolves before [connect] returns.
+  // next connected edge resolves before [connect] returns. Lives as long as
+  // the client.
+  // ignore: cancel_subscriptions
   StreamSubscription<fbp.OnConnectionStateChangedEvent>? _dropWatch;
 
   @override

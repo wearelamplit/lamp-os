@@ -47,9 +47,10 @@ class _LinkScopedBle extends InMemoryBleClient {
         statusListeners++;
         sub = src.where((_) => _notifyingLink == _link).listen(out.add);
       },
-      onCancel: () {
+      onCancel: () async {
         statusListeners--;
-        return sub?.cancel();
+        await sub?.cancel();
+        await out.close();
       },
     );
     return out.stream;
