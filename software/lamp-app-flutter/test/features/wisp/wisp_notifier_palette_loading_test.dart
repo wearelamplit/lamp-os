@@ -163,6 +163,63 @@ void main() {
     expect(n.savedManualPalette, palette);
   });
 
+  test('an Osc wisp with no manual palette reads it once', () async {
+    const osc = '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"osc",'
+        '"paletteIdPrefix":"0a1b2c3d"}';
+    final ble = _HeldReadsBle();
+    await ble.connect(_lampId);
+    ble.seedSection(_lampId, 'wispstatus', _b(osc));
+    final c = makeContainer(ble);
+    c.listen(wispNotifierProvider(_lampId), (_, _) {});
+    await c.read(wispNotifierProvider(_lampId).future);
+    await pumpEventQueue();
+    final n = c.read(wispNotifierProvider(_lampId).notifier);
+    expect(ble.paletteReads, 1);
+
+    for (var i = 0; i < 3; i++) {
+      notify(ble, osc);
+      await pumpEventQueue();
+    }
+
+    expect(n.paletteLoading, isFalse);
+    expect(ble.paletteReads, 1,
+        reason: 'a read per status would hold off the claims and config '
+            'reads');
+  });
+
+  test('a palette read empty in Off is read again when Manual names one',
+      () async {
+    const palette = [
+      LampColor(r: 10, g: 20, b: 30, w: 0),
+      LampColor(r: 250, g: 0, b: 5, w: 40),
+    ];
+    final manual = '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual",'
+        '"paletteIdPrefix":"${WispRepository.paletteIdHash(palette)}"}';
+    final ble = _HeldReadsBle();
+    await ble.connect(_lampId);
+    ble.seedSection(_lampId, 'wispstatus',
+        _b('{"wispMac":"AA:BB:CC:DD:EE:FF","source":"off"}'));
+    final c = makeContainer(ble);
+    c.listen(wispNotifierProvider(_lampId), (_, _) {});
+    await c.read(wispNotifierProvider(_lampId).future);
+    await pumpEventQueue();
+    final n = c.read(wispNotifierProvider(_lampId).notifier);
+    expect(n.paletteLoading, isFalse);
+
+    // The lamp's palette cache is still empty when the wisp goes Manual.
+    notify(ble, manual);
+    await pumpEventQueue();
+    expect(n.paletteLoading, isTrue,
+        reason: 'an empty editor would let Save overwrite the palette');
+
+    ble.seedSection(_lampId, 'wisppalette',
+        Uint8List.fromList([for (final x in palette) ...[x.r, x.g, x.b, x.w]]));
+    notify(ble, manual);
+    await pumpEventQueue();
+    expect(n.paletteLoading, isFalse);
+    expect(n.savedManualPalette, palette);
+  });
+
   test('a palette never read is read on the next status, whatever its '
       'palette id', () async {
     final ble = _HeldReadsBle();

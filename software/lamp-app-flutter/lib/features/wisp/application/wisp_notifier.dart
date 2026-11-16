@@ -361,7 +361,7 @@ class WispNotifier extends _$WispNotifier {
       // Palette rides its own reliable section read, decoupled from the
       // notify-clobbered status char. Awaited before _loadClaims so the two
       // BLE reads don't collide on FbpBleClient's lockless flow.
-      await _readManualPaletteSection(bumpState: false);
+      await _readManualPaletteSection(initial, bumpState: false);
       if (_disposed) return WispStatus.empty;
       if (initial.present && _repo.wispSectionsSupported) {
         await _readConfigSection(initial, emit: false);
@@ -421,27 +421,30 @@ class WispNotifier extends _$WispNotifier {
   }
 
   /// Read the wisp's manual palette from its dedicated section and seed the
-  /// editor. A completed read marks the palette known even when empty, so the
-  /// editor renders a populatable palette instead of hanging on "reading from
-  /// wisp" forever. An empty / absent / errored section (legacy lamp, coex gap)
-  /// leaves any prior palette intact; [WispRepository.readManualPalette] never
-  /// throws. Serialized against [_loadClaims] via the in-flight flags:
+  /// editor. A read marks the palette known, so the editor leaves "reading
+  /// from wisp", unless it comes back empty while [forStatus] is a Manual
+  /// status naming a palette: that read was served before auth or failed,
+  /// and the palette goes back to unread for the next status to retry. An
+  /// empty / absent / errored section (legacy lamp, coex gap) leaves any prior
+  /// palette intact; [WispRepository.readManualPalette] never throws. Serialized against [_loadClaims] via the in-flight flags:
   /// FbpBleClient has no internal lock, so two concurrent reads stall the flow.
   /// [bumpState] re-emits after ingesting so a notify-triggered re-read paints
   /// the new palette. Off during build: emitting there resolves the provider's
   /// future early, letting an optimistic write land before build's return
   /// clobbers it.
-  Future<void> _readManualPaletteSection({bool bumpState = true}) async {
+  Future<void> _readManualPaletteSection(
+    WispStatus forStatus, {
+    bool bumpState = true,
+  }) async {
     if (_readBusy || _disposed) return;
     _paletteRereadInFlight = true;
     try {
       final palette = await _repo.readManualPalette();
       if (_disposed) return;
-      // An empty read while the status names a palette was served before
-      // auth or failed, so the palette stays unread for the next status.
-      if (palette.isNotEmpty || _lastPaletteIdPrefix.isEmpty) {
-        _currentPaletteKnown = true;
-      }
+      // Outside Manual the prefix names the Osc palette, not this one.
+      final namesPalette = forStatus.source == WispSourceMode.manual &&
+          forStatus.paletteIdPrefix.isNotEmpty;
+      _currentPaletteKnown = palette.isNotEmpty || !namesPalette;
       _ingestManualPalette(palette);
       if (bumpState) _bumpState();
     } finally {
@@ -658,8 +661,8 @@ class WispNotifier extends _$WispNotifier {
   // The small, reliable status NOTIFY carries paletteIdPrefix; a changed
   // prefix means the wisp's palette moved, so re-read the palette section.
   // Don't consume the prefix while a read is busy; retry on the next notify.
-  // Until a palette read completes, any status from a present wisp starts
-  // one, since an empty palette's prefix never changes.
+  // While the palette is unread, any status from a present wisp starts a
+  // read, since an empty palette's prefix never changes.
   void _maybeRereadForPalette(WispStatus next) {
     final prefix = next.paletteIdPrefix;
     final unread = !_currentPaletteKnown && next.present;
@@ -672,7 +675,7 @@ class WispNotifier extends _$WispNotifier {
     }
     if (_readBusy) return;
     _lastPaletteIdPrefix = prefix;
-    unawaited(_readManualPaletteSection());
+    unawaited(_readManualPaletteSection(next));
   }
 
   /// Select the Straylight palette role. Optimistically updates local
@@ -1112,9 +1115,9 @@ class WispNotifier extends _$WispNotifier {
     return incoming;
   }
 
-  /// Whether [status] is a pre-write echo the source-write guard drops: a
-  /// [setSource] is pending, inside its window, and [status] reports another
-  /// source.
+  /// Whether [status] is a pre-write echo the source-write guard drops. That
+  /// is a [setSource] pending inside its window and a [status] reporting
+  /// another source.
   bool _isStaleSourceEcho(WispStatus status) {
     final pendingMode = _pendingSourceMode;
     final until = _pendingSourceUntil;
