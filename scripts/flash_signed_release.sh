@@ -61,10 +61,12 @@ else
   ESPTOOL=( python3 -m esptool )
 fi
 
-PART="${TMPFILE}.part"
-HDRS="${TMPFILE}.hdr"
+CACHED="$CACHE_DIR/$CACHED_NAME"
+PART="${CACHED}.part"
+HDRS="${CACHED}.hdr"
 cleanup() { rm -f "$APP0FILE" "$SPIFFSFILE" "$PART" "$HDRS"; }
 trap cleanup EXIT
+trap 'exit 130' INT TERM
 
 # otadata offset+size from the partition table, not hardcoded, so a repartition
 # can't silently desync this erase.
@@ -79,7 +81,7 @@ fi
 
 last_etag() { tr -d '\r' | awk 'tolower($1)=="etag:" { e=$2 } END { print e }'; }
 remote_etag() { curl -fsSIL --max-time 10 "$URL" 2>/dev/null | last_etag; }
-ETAG_FILE="${TMPFILE}.etag"
+ETAG_FILE="${CACHED}.etag"
 STORE_ETAG=""
 REDOWNLOAD=""
 ROLLING=1
@@ -118,7 +120,6 @@ if [ ! -s "$TMPFILE" ] || [ -n "$REDOWNLOAD" ]; then
   mkdir -p "$CACHE_DIR"
   echo "[flash:release] downloading ${ASSET} from release '${RELEASE_TAG}' (${REPO})"
   if ! curl -fSL --retry 3 -D "$HDRS" -o "$PART" "${URL}"; then
-    rm -f "$PART" "$HDRS"
     if [ -n "$REDOWNLOAD" ] && [ -z "${REFRESH:-}" ]; then
       echo "WARNING: re-download failed; flashing the cached image." >&2
     elif [ -n "$REDOWNLOAD" ]; then

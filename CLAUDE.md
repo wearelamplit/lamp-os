@@ -168,7 +168,7 @@ push to `main` also replaces the rolling `stable` release (`release-main.yml`)),
 `PORT`, `IMAGE` (flash a local image, skip the download),
 `CACHE_DIR` and `REFRESH`. Downloads are cached per variant and tag as
 `$CACHE_DIR/release-<variant>-<tag>.bin` (default `~/.cache/lamp-os`);
-`REFRESH=1` re-downloads, and a cached rolling-tag image (`beta`, `stable`) is
+`REFRESH=1` re-downloads (a failed refresh errors and keeps the cache), and a cached rolling-tag image (`beta`, `stable`) is
 re-downloaded automatically when the release asset's ETag changes (offline reuses
 the cache). Every push to `dev` auto-publishes
 a fresh `beta` release (`release-beta.yml`), built at whatever version the

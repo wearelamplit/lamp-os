@@ -1,6 +1,6 @@
 """Static and stubbed checks for release workflows, the release-flash cache, build cache config and docs.
 Run: python3 -m unittest discover -s scripts/tests"""
-import configparser, os, re, stat, subprocess, tempfile, unittest
+import configparser, os, re, signal, stat, subprocess, tempfile, time, unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -50,7 +50,9 @@ if [ "$head" = 1 ]; then
   printf 'HTTP/2 302\\r\\nlocation: x\\r\\n\\r\\nHTTP/2 200\\r\\nETag: "%s"\\r\\n\\r\\n' "$STUB_ETAG"
   exit 0
 fi
+[ -n "$hdr" ] && echo partial > "$hdr"
 [ "${STUB_GET_FAIL:-}" = 1 ] && { echo partial > "$out"; exit 18; }
+[ "${STUB_GET_SLEEP:-}" = 1 ] && { echo partial > "$out"; sleep 30; }
 [ -n "$hdr" ] && printf 'HTTP/2 200\\r\\nETag: "%s"\\r\\n\\r\\n' "${STUB_GET_ETAG:-$STUB_ETAG}" > "$hdr"
 head -c 4194304 /dev/zero | tr '\\0' "$STUB_FILL" > "$out"
 """
@@ -100,6 +102,35 @@ class FlashCache(unittest.TestCase):
         img = self.run_flash("b", "B", STUB_GET_FAIL="1")
         self.assertEqual(img.read_bytes()[:1], b"A")
         self.assertFalse(Path(str(img) + ".part").exists())
+        self.assertFalse(Path(str(img) + ".hdr").exists())
+
+    def test_interrupted_download_leaves_no_partials_and_keeps_cache(self):
+        img = self.run_flash("a", "A")
+        env = dict(os.environ, PATH=f"{self.d.name}/bin:{os.environ['PATH']}", CACHE_DIR=str(self.cache),
+                   STUB_ETAG="b", STUB_FILL="B", STUB_LOG=str(self.log), RELEASE_TAG="beta", STUB_GET_SLEEP="1")
+        p = subprocess.Popen(["bash", str(ROOT / "scripts/flash_signed_release.sh")], env=env,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        part = Path(str(img) + ".part")
+        for _ in range(100):
+            if part.exists() and Path(str(img) + ".hdr").exists():
+                break
+            time.sleep(0.1)
+        self.assertTrue(part.exists())
+        os.killpg(p.pid, signal.SIGTERM)
+        p.wait(timeout=10)
+        self.assertFalse(part.exists())
+        self.assertFalse(Path(str(img) + ".hdr").exists())
+        self.assertEqual(img.read_bytes()[:1], b"A")
+
+    def test_local_image_leaves_siblings_alone(self):
+        img = Path(self.d.name) / "local.bin"
+        img.write_bytes(b"L" * 4194304)
+        sibs = [Path(str(img) + e) for e in (".part", ".hdr", ".etag")]
+        for s in sibs:
+            s.write_text("keep")
+        self.run_flash("zzz", "B", IMAGE=str(img))
+        for s in sibs:
+            self.assertEqual(s.read_text(), "keep", s.name)
 
     def test_etag_stored_is_the_downloaded_ones(self):
         self.run_flash("new", "A", STUB_GET_ETAG="old")
