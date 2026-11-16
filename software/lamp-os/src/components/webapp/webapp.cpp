@@ -29,6 +29,7 @@
 #include "config/config_types.hpp"
 #include "core/pending_json_slot.hpp"
 #include "util/color.hpp"
+#include "util/dropped_write_log.hpp"
 #include "util/heap_guard.hpp"
 #include "util/heap_probe.hpp"
 
@@ -161,6 +162,7 @@ static void handlePutDispositions(AsyncWebServerRequest* req,
     return;
   }
   if (lamp::ota_quiet_mode::isQuiet()) {
+    lamp::logDroppedWrite("webDispositions", "ota quiet");
     req->send(503, "application/json", "{\"ok\":false}");
     return;
   }

@@ -404,14 +404,20 @@ class AuthCallback : public NimBLECharacteristicCallbacks {
 
 class BrightnessCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
-    if (!isAuthed(connInfo.getConnHandle())) return;
+    if (!isAuthed(connInfo.getConnHandle())) {
+      lamp::logDroppedWrite("brightness", "unauthenticated");
+      return;
+    }
     if (lamp::ota_quiet_mode::isQuiet()) {
       lamp::logDroppedWrite("brightness", "ota quiet");
       return;
     }
     noteAppWriteActivity();
     std::string val = c->getValue();
-    if (val.empty()) return;
+    if (val.empty()) {
+      lamp::logDroppedWrite("brightness", "empty");
+      return;
+    }
     uint8_t level = static_cast<uint8_t>(val[0]);
     if (level > 100) level = 100;
 #ifdef LAMP_DEBUG
@@ -428,9 +434,15 @@ static NearbyList s_nearby;
 
 class EditSessionCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
-    if (!isAuthed(connInfo.getConnHandle())) return;
+    if (!isAuthed(connInfo.getConnHandle())) {
+      lamp::logDroppedWrite("editSession", "unauthenticated");
+      return;
+    }
     std::string val = c->getValue();
-    if (val.size() < 2) return;
+    if (val.size() < 2) {
+      lamp::logDroppedWrite("editSession", "short");
+      return;
+    }
     const uint8_t surface = static_cast<uint8_t>(val[0]);
     const bool   open    = (val[1] != 0);
     const bool quiet = lamp::ota_quiet_mode::isQuiet();
@@ -453,13 +465,19 @@ class EditSessionCallback : public NimBLECharacteristicCallbacks {
 
 class HomeModeFocusCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
-    if (!isAuthed(connInfo.getConnHandle())) return;
+    if (!isAuthed(connInfo.getConnHandle())) {
+      lamp::logDroppedWrite("homeModeFocus", "unauthenticated");
+      return;
+    }
     if (lamp::ota_quiet_mode::isQuiet()) {
       lamp::logDroppedWrite("homeModeFocus", "ota quiet");
       return;
     }
     std::string val = c->getValue();
-    if (val.empty()) return;
+    if (val.empty()) {
+      lamp::logDroppedWrite("homeModeFocus", "empty");
+      return;
+    }
     const bool active = val[0] != 0;
     s_homeModePageActive = active;
     postPendingApplyEffectiveBrightness();
@@ -471,14 +489,20 @@ class HomeModeFocusCallback : public NimBLECharacteristicCallbacks {
 
 class BaseKnockoutCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
-    if (!isAuthed(connInfo.getConnHandle())) return;
+    if (!isAuthed(connInfo.getConnHandle())) {
+      lamp::logDroppedWrite("knockout", "unauthenticated");
+      return;
+    }
     if (lamp::ota_quiet_mode::isQuiet()) {
       lamp::logDroppedWrite("knockout", "ota quiet");
       return;
     }
     noteAppWriteActivity();
     std::string val = c->getValue();
-    if (val.size() < 2) return;
+    if (val.size() < 2) {
+      lamp::logDroppedWrite("knockout", "short");
+      return;
+    }
     uint8_t pixelIndex = static_cast<uint8_t>(val[0]);
     uint8_t brightness = static_cast<uint8_t>(val[1]);
     if (brightness > 100) brightness = 100;
