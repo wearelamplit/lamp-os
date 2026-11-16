@@ -252,6 +252,40 @@ void main() {
     expect(n.savedManualPalette, palette);
   });
 
+  test('choosing Manual keeps a palette already held, and re-tapping '
+      'Manual keeps an empty one', () async {
+    const palette = [LampColor(r: 5, g: 6, b: 7, w: 8)];
+    final ble = _HeldReadsBle();
+    await ble.connect(_lampId);
+    ble.seedSection(_lampId, 'wispstatus',
+        _b('{"wispMac":"AA:BB:CC:DD:EE:FF","source":"off"}'));
+    ble.seedSection(_lampId, 'wisppalette',
+        Uint8List.fromList([for (final x in palette) ...[x.r, x.g, x.b, x.w]]));
+    final c = makeContainer(ble);
+    c.listen(wispNotifierProvider(_lampId), (_, _) {});
+    await c.read(wispNotifierProvider(_lampId).future);
+    await pumpEventQueue();
+    final n = c.read(wispNotifierProvider(_lampId).notifier);
+    expect(n.savedManualPalette, palette);
+
+    unawaited(n.setSource(WispSourceMode.manual).catchError((Object _) {}));
+    expect(n.paletteLoading, isFalse, reason: 'the palette is held');
+
+    final empty = _HeldReadsBle();
+    await empty.connect(_lampId);
+    empty.seedSection(_lampId, 'wispstatus', _b(_emptyManual));
+    final c2 = makeContainer(empty);
+    c2.listen(wispNotifierProvider(_lampId), (_, _) {});
+    await c2.read(wispNotifierProvider(_lampId).future);
+    await pumpEventQueue();
+    final n2 = c2.read(wispNotifierProvider(_lampId).notifier);
+    expect(n2.paletteLoading, isFalse);
+
+    unawaited(n2.setSource(WispSourceMode.manual).catchError((Object _) {}));
+    expect(n2.paletteLoading, isFalse,
+        reason: 'the wisp is already Manual with an empty palette');
+  });
+
   test('a palette never read is read on the next status, whatever its '
       'palette id', () async {
     final ble = _HeldReadsBle();

@@ -1040,7 +1040,9 @@ class WispNotifier extends _$WispNotifier {
     );
     // An empty read outside Manual may predate the lamp caching the palette,
     // so Manual shows the loading line until a read for it lands.
-    if (mode == WispSourceMode.manual && _savedManualPalette.isEmpty) {
+    if (mode == WispSourceMode.manual &&
+        cur.source != WispSourceMode.manual &&
+        _savedManualPalette.isEmpty) {
       _currentPaletteKnown = false;
     }
     state = AsyncData(cur.copyWith(source: mode));

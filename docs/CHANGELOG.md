@@ -16,6 +16,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   away, the editor kept showing your old colours, and saving put them back.
   Edits you had not saved are still kept.
 - **An empty wisp palette no longer sticks on "Reading palette from wisp…".**
+  The editor also keeps showing that line, instead of an empty palette you
+  could save over the wisp's real one, while the lamp has not yet passed the
+  palette on.
 - **A wisp palette save stops resending once the wisp leaves Manual.** It
   kept sending the palette up to three more times.
 
