@@ -105,7 +105,11 @@ skew:
    peer's HELLO again (up to 30 s). Then join a phone to the src's
    network inside the 15 s between `→ OFFER` and the peer's accept: the send
    goes ahead, the phone loses the network when streaming starts, and the
-   network is back after `softAP back after OTA`. A
+   network is back after `softAP back after OTA`. Between `softAP down for
+   OTA` and `softAP back after OTA` the src logs no `[webapp] server up` and
+   does not reboot (a join landing on the same loop pass as the teardown
+   would show one of these; the window is narrow, so a clean run is weak
+   evidence and one such line is a fail). A
    `softAP not restored after OTA` line is a fail unless a heap shortage shows
    beside it. Note the `[heap]` largest block before the send and after the
    restore.

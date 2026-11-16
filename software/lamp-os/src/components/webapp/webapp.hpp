@@ -18,9 +18,9 @@ bool hasClient();
 
 // Takes the softAP down for an OTA radio pause, so its beacons leave the
 // airtime to the chunk stream. ota_quiet_mode calls it after each pause,
-// outside its transition lock, on the pausing task. tick() brings the AP
-// back once the pause ends if this took it down and the webapp would still
-// keep it up.
+// outside its transition lock, on the pausing task. Waits for any AP work a
+// tick() pass has in progress. tick() brings the AP back once the pause ends
+// if this took it down and the webapp would still keep it up.
 void shutdownForOta();
 
 }  // namespace webapp

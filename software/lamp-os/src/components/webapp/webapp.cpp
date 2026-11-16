@@ -513,15 +513,13 @@ static bool stopAp() {
   });
 }
 
-// Serializes the pausing task's shutdownForOta with tick's restore.
+// Serializes the pausing task's shutdownForOta with tick's AP work.
 static std::mutex s_otaApMu;
 static OtaApFollower s_otaAp;
 
-// Never waits on the lock; the next pass looks again. Station flags from
-// around the pause are stale (a join would take BLE down for no station).
+// Caller holds s_otaApMu. Station flags from around the pause are stale (a
+// join would take BLE down for no station).
 static void restoreApAfterOta(uint32_t now) {
-  std::unique_lock<std::mutex> lock(s_otaApMu, std::try_to_lock);
-  if (!lock.owns_lock()) return;
   const bool wanted = apWantedAfterOta(now, s_deadlineMs.load(), s_neverExpire, s_serverUp);
   if (!s_otaAp.restore(lamp::ota_quiet_mode::radioTornDown(), wanted)) return;
   s_pendingServerStart = false;
@@ -572,6 +570,10 @@ void tick() {
     rebootNow();  // save path; restart frees the server, never delete s_server
     return;
   }
+  // Never waits on the lock: a pass that finds the pausing task holding it
+  // skips its AP work, and the next pass looks again.
+  std::unique_lock<std::mutex> apLock(s_otaApMu, std::try_to_lock);
+  if (!apLock.owns_lock()) return;
   restoreApAfterOta(now);
   if (!s_ap.up()) return;
 
