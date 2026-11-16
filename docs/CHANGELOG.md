@@ -13,8 +13,8 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   so a hang that came back later in every boot restarted the lamp on the same
   short cycle forever. Now any hang within about half an hour of starting
   counts: after three in a row the lamp waits up to 5 minutes before
-  restarting on a hang in its first minute, and each further hang doubles
-  that stretch, up to its first 16 minutes.
+  restarting on a hang in its first minute, and each further hang after that
+  stretch doubles it, up to its first 16 minutes.
 
 ## 1.3.7
 

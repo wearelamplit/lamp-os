@@ -70,8 +70,9 @@ while a firmware or filesystem image is being received.
    within about 5 s of the hang. The fourth shows `3 watchdog resets in a row;
    timeout 300 s until the loop runs 60 s` and still resets within about 5 s
    of a hang at 90 s. The fifth shows `until the loop runs 120 s`: a hang at
-   90 s now freezes the lamp and resets it about 300 s later. Each further
-   boot's line doubles the window, up to 960 s.
+   90 s now freezes the lamp and resets it about 300 s later, and the sixth
+   keeps 120 s. A hang after the window doubles it on the next boot, up to
+   960 s.
 7. **Setup hang resets and names its stage.** For each of `wifi`, `mesh` and
    `ota`, run:
 
@@ -88,9 +89,9 @@ while a firmware or filesystem image is being received.
 8. **Setup hang every boot backs off.** Run `loopwd.hangsetup ble 4`. Three
    boots hang and reset about 30 s apart; the fourth prints the backoff line,
    hangs at `ble` and resets about 300 s after the hang. The fifth boots
-   normally, still backing off at `4 watchdog resets in a row; timeout 300 s
-   until the loop runs 120 s`, and prints `loop ran 120 s; timeout back to 5 s`
-   at 120 s. Its `[boots]` lines `-4` to `-1` all read `end taskwdt setup
+   normally, still backing off at `3 watchdog resets in a row; timeout 300 s
+   until the loop runs 60 s`, and prints `loop ran 60 s; timeout back to 5 s`
+   at 60 s. Its `[boots]` lines `-4` to `-1` all read `end taskwdt setup
    ble`.
 9. **Setup stages stay inside the watchdog.** Flash a blank board with the web
    installer, then `npm run lamp:flash` the dev build, and tap its first boot
