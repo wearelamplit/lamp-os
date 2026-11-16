@@ -306,13 +306,9 @@ void considerPeer(const uint8_t peerMac[6], uint32_t peerFwVersion,
       std::memcmp(peerFsDigest, s_localDigest, lp::FW_SHA256_PREFIX_LEN) == 0) {
     return;
   }
-  // Don't distribute while any OTA (FS or firmware) is mid-flow, or while a
-  // client is actively using this lamp's web UI. The stream itself tears the
-  // SoftAP down for coex via enterQuiet; gating on an idle boot-window AP would
-  // block distribution indefinitely on never-expire lamps.
-  if (firmwarePathBusy() || s_fsReceiver.isInProgress() || webapp::hasClient()) {
-    return;
-  }
+  // Don't distribute while any OTA (FS or firmware) is mid-flow. A station on
+  // the web UI holds the whole offer scan (OtaOfferBusy::webClient).
+  if (firmwarePathBusy() || s_fsReceiver.isInProgress()) return;
   s_fsDistributor.considerPeerForOta(peerMac, peerFwVersion,
                                      peerProtocolVersion, nowMs, peerFwChannel,
                                      /*peerMaxChunk=*/0, peerRssi);
