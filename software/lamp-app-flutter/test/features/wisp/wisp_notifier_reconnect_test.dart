@@ -30,6 +30,9 @@ class _LinkScopedBle extends InMemoryBleClient {
   /// Live listeners on the wisp status notify.
   int statusListeners = 0;
 
+  /// Subscribe calls, each one a notify enable on the lamp.
+  int subscribes = 0;
+
   @override
   Future<void> disconnect(String deviceId) {
     _link++;
@@ -39,6 +42,7 @@ class _LinkScopedBle extends InMemoryBleClient {
   @override
   Stream<Uint8List> subscribe(String d, String s, String c) {
     final src = super.subscribe(d, s, c);
+    subscribes++;
     _notifyingLink = _link;
     StreamSubscription<Uint8List>? sub;
     late final StreamController<Uint8List> out;
@@ -90,6 +94,8 @@ void main() {
     final n = c.read(wispNotifierProvider(_lampId).notifier);
     expect(c.read(wispNotifierProvider(_lampId)).value!.source,
         WispSourceMode.manual);
+    await pumpEventQueue();
+    expect(ble.subscribes, 1, reason: 'the link that was up at build');
 
     await ble.disconnect(_lampId);
     await pumpEventQueue();
@@ -100,6 +106,7 @@ void main() {
     await pumpEventQueue();
     expect(c.read(wispNotifierProvider(_lampId)).value!.source,
         WispSourceMode.osc);
+    expect(ble.subscribes, 2);
     expect(ble.statusListeners, 1,
         reason: 'the old link\'s listener would hear every notify twice');
 

@@ -104,7 +104,8 @@ void main() {
   test('an unsaved edit survives leaving the lamp', () async {
     const edit = [
       LampColor(r: 200, g: 10, b: 30, w: 0),
-      LampColor(r: 0, g: 0, b: 0, w: 255),
+      LampColor(r: 5, g: 90, b: 160, w: 0),
+      LampColor(r: 40, g: 41, b: 0, w: 70),
     ];
     final sub = await openLamp();
     notifier().setManualPaletteDraft(edit);

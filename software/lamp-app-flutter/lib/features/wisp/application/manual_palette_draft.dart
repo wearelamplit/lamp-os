@@ -4,8 +4,8 @@ import '../../control/domain/lamp_color.dart';
 
 part 'manual_palette_draft.g.dart';
 
-/// The editor draft and the saved palette it is measured against: the draft
-/// is an unsaved edit exactly when it differs from [saved].
+/// The editor draft and the saved palette it is measured against. The draft
+/// is an unsaved edit exactly when it differs from `saved`.
 typedef ManualPaletteDraftState = ({
   List<LampColor> colors,
   List<LampColor> saved,
