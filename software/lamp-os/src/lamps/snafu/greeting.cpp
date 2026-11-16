@@ -108,6 +108,9 @@ void Greeting::control() {
                                   animationState == PLAYING_ONCE ||
                                   animationState == STOPPING);
   if (!greetingNowActive && greetingWasActive_) {
+#ifdef LAMP_DEBUG
+    Serial.printf("[greet] hold stops=%u\n", (unsigned)greetedBaseStops_.size());
+#endif
     if (dots_ && greetedHasMac_ && !lamp::overrides.shade.operatorEditing()) {
       const uint32_t hold = personalityEngine.greetingFor(greetedLampId_).holdFrames;
       dots_->borrowColors(greetedBaseStops_, greetedShadeStops_,
