@@ -322,6 +322,7 @@ class ControlNotifier extends _$ControlNotifier {
       }
     } finally {
       _endRebootReload();
+      if (_buildsStarted != builds) _resumeLadderAfterStandDown();
       saveStatus.stop();
     }
   }
@@ -2256,11 +2257,12 @@ class ControlNotifier extends _$ControlNotifier {
     }
   }
 
-  /// A try that stood down for a reload or a build arms nothing, and a step
-  /// that fired while it ran returned on [_reconnectInFlight]. When that owner
-  /// has already handed the link back and the link has dropped since, nothing
-  /// else would climb the ladder. An owner still bringing the link up holds
-  /// the state in loading, and one that gave up leaves its error. Neither is
+  /// A try or a reload that stood down for another owner arms nothing, and a
+  /// step that fired while it ran returned early or was cancelled. When that
+  /// owner has already handed the link back and the link has dropped since,
+  /// nothing else would climb the ladder. A build still bringing the link up
+  /// holds the state in loading, a reload keeps the ladder off its link until
+  /// it returns, and an owner that gave up leaves its error. None is
   /// disturbed.
   void _resumeLadderAfterStandDown() {
     if (!ref.mounted) return;

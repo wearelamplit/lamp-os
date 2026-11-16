@@ -1009,6 +1009,18 @@ void main() {
       },
     );
 
+    test('a link that drops after a rebuild during a save that reboots the '
+        'lamp comes back', () async {
+      final r = await heldFlags();
+      await r.control.setLampPassword('');
+      r.c.invalidate(controlNotifierProvider(_id));
+      await r.c.read(controlNotifierProvider(_id).future);
+      await _pump();
+      await r.ble.disconnect(_id);
+      await Future<void>.delayed(const Duration(seconds: 5));
+      expect(r.connected, isTrue);
+    });
+
     test('on a lamp without quiet, after a save reboots it', () async {
       final r = await heldFlags();
       final mark = r.mark();

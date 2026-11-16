@@ -163,7 +163,7 @@ screen; the ladder does not take over. A build (opening the lamp, or a Retry
 or other rebuild) owns its link the same way: a connected edge that arrives
 while the state is loading starts no try, and a try or a reload already in
 flight when a build starts stops at its next step for good (`_buildsStarted`),
-a stood-down try resuming the ladder as above, so each link gets one link
+either resuming the ladder as above, so each link gets one link
 session (`_beginLinkSession`).
 
 ## Scan hold during a connect
