@@ -120,8 +120,8 @@ class ControlNotifier extends _$ControlNotifier {
   /// it runs leaves the link to the reload for good.
   int _rebootReloadsStarted = 0;
 
-  /// Builds started. A ladder try that sees this change while it runs leaves
-  /// the link to the build.
+  /// Builds started. A ladder try or a reboot-save reload that sees this
+  /// change while it runs leaves the link to the build.
   int _buildsStarted = 0;
   static const _reconnectDelays = [500, 1000, 2000, 4000, 8000]; // ms, capped
   /// Max consecutive reconnect attempts before giving up and surfacing an
@@ -247,7 +247,8 @@ class ControlNotifier extends _$ControlNotifier {
   /// Each attempt: `ble.connect` → `authenticate(password)` →
   /// `_readSections`. Transient disconnect-like errors retry. Non-
   /// transient errors and final-attempt failures surface as `AsyncError`.
-  /// The reconnect ladder stays out of it from the call until it returns.
+  /// The reconnect ladder stays out of it from the call until it returns. A
+  /// build that starts meanwhile takes the link over.
   Future<void> _awaitReconnectAndReload({
     required BleClient ble,
     required String password,
@@ -261,6 +262,8 @@ class ControlNotifier extends _$ControlNotifier {
     final saveStatus = ref.read(lampSaveStatusProvider(_deviceId).notifier);
     _rebootReloadOwnsLink = true;
     _rebootReloadsStarted++;
+    final builds = _buildsStarted;
+    bool standDown() => !ref.mounted || _buildsStarted != builds;
     try {
       // Initial grace: give the lamp a head start on the reboot so the
       // first attempt isn't guaranteed to race the disconnect. ~2s lets
@@ -271,12 +274,12 @@ class ControlNotifier extends _$ControlNotifier {
       Object? lastError;
       StackTrace? lastStack;
       for (var attempt = 0; attempt < maxAttempts; attempt++) {
-        if (!ref.mounted) return;
+        if (standDown()) return;
         try {
           if (!await connectWithRetry(ble, _deviceId,
               attempts: 1,
               owner: _linkOwner,
-              shouldAbort: () => !ref.mounted)) {
+              shouldAbort: standDown)) {
             return;
           }
           await AuthClient(ble: ble).authenticate(
@@ -300,7 +303,7 @@ class ControlNotifier extends _$ControlNotifier {
         }
       }
 
-      if (!ref.mounted) return;
+      if (standDown()) return;
       if (fresh == null) {
         state = AsyncError(
             lastError ?? Exception('lamp did not reconnect after save'),
@@ -2051,8 +2054,7 @@ class ControlNotifier extends _$ControlNotifier {
     final cur = state.value;
     if (cur == null) return;
     if (isConnected && !cur.connected) {
-      // A build or a reboot-save reload is bringing this link up and begins
-      // its session itself.
+      // A build is bringing this link up and begins its session itself.
       if (state.isLoading) return;
       // fbp's connectionState emitted `true` mid-reconnect, but the
       // GATT services aren't necessarily discovered yet (observed on
@@ -2248,22 +2250,25 @@ class ControlNotifier extends _$ControlNotifier {
       // explicitly; finally covers the success path (and any future
       // catch branch that forgets to).
       _reconnectInFlight = false;
-      if (_rebootReloadsStarted != reloads) _resumeLadderAfterStandDown();
+      if (_rebootReloadsStarted != reloads || _buildsStarted != builds) {
+        _resumeLadderAfterStandDown();
+      }
     }
   }
 
-  /// A try that stood down for a reload arms nothing, and a step that fired
-  /// while it ran returned on [_reconnectInFlight]. When that reload has
-  /// already handed the link back and the link has dropped since, nothing
-  /// else would climb the ladder. A try runs only after a drop, so a reload it
-  /// stood down for started disconnected and holds the state in loading until
-  /// it restores the link; one that gave up leaves its error. Neither is
+  /// A try that stood down for a reload or a build arms nothing, and a step
+  /// that fired while it ran returned on [_reconnectInFlight]. When that owner
+  /// has already handed the link back and the link has dropped since, nothing
+  /// else would climb the ladder. An owner still bringing the link up holds
+  /// the state in loading, and one that gave up leaves its error. Neither is
   /// disturbed.
   void _resumeLadderAfterStandDown() {
     if (!ref.mounted) return;
     if (_reconnectTimer?.isActive ?? false) return;
     final cur = state;
-    if (cur is AsyncData<ControlState> && !cur.value.connected) {
+    if (cur is AsyncData<ControlState> &&
+        !cur.isLoading &&
+        !cur.value.connected) {
       _scheduleReconnect();
     }
   }

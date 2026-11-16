@@ -91,9 +91,17 @@ class _CountingBle extends InMemoryBleClient {
   /// Reads of the `lamp` section wait until this completes.
   Completer<void>? lampReadHold;
 
+  /// The next read of the `lamp` section waits until this completes.
+  Completer<void>? nextLampReadHold;
+
   @override
   Future<Uint8List> readSection(String deviceId, String name) async {
-    if (name == 'lamp') await lampReadHold?.future;
+    if (name == 'lamp') {
+      final next = nextLampReadHold;
+      nextLampReadHold = null;
+      await next?.future;
+      await lampReadHold?.future;
+    }
     sectionReads++;
     final v = await super.readSection(deviceId, name);
     if (name == disconnectAfterReading) {
@@ -957,6 +965,47 @@ void main() {
         r.notify();
         await _pump();
         expectEachOnce(r, mark);
+      },
+    );
+
+    test(
+      'on a lamp without quiet, after a rebuild during a save that reboots it',
+      () async {
+        final r = await heldFlags();
+        final mark = r.mark();
+        await r.control.setLampPassword('');
+        r.ble.dropSubscriptions();
+        final hold = r.ble.lampReadHold = Completer<void>();
+        await Future<void>.delayed(const Duration(seconds: 3));
+        r.c.invalidate(controlNotifierProvider(_id));
+        final rebuilt = r.c.read(controlNotifierProvider(_id).future);
+        await _pump();
+        hold.complete();
+        await rebuilt;
+        await _pump();
+        r.notify();
+        await _pump();
+        expectEachOnce(r, mark);
+      },
+    );
+
+    test(
+      'a link that drops after a rebuild during a reconnect comes back',
+      () async {
+        final r = await heldFlags();
+        await r.ble.disconnect(_id);
+        await _pump();
+        final hold = r.ble.nextLampReadHold = Completer<void>();
+        await r.ble.connect(_id);
+        await _pump();
+        r.c.invalidate(controlNotifierProvider(_id));
+        await r.c.read(controlNotifierProvider(_id).future);
+        await _pump();
+        await r.ble.disconnect(_id);
+        await Future<void>.delayed(const Duration(seconds: 1));
+        hold.complete();
+        await Future<void>.delayed(const Duration(seconds: 3));
+        expect(r.connected, isTrue);
       },
     );
 
