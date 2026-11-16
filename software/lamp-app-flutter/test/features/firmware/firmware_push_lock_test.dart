@@ -350,11 +350,12 @@ void main() {
     await _tapBrightnessMax(tester);
     expect(rig.brightness, 50);
 
+    // About 1 s has passed since the report.
     await tester.pump(
-      ControlNotifier.quietAfterPushBound - const Duration(seconds: 1),
+      ControlNotifier.quietAfterPushBound - const Duration(seconds: 2),
     );
     expect(find.textContaining(_settling), findsOneWidget);
-    await tester.pump(const Duration(seconds: 2));
+    await tester.pump(const Duration(seconds: 3));
     await _settle(tester);
     expect(find.textContaining(_settling), findsNothing);
     await _tapBrightnessMax(tester);

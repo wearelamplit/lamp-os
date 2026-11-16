@@ -669,6 +669,59 @@ void main() {
     );
   });
 
+  test(
+    'an already-current answer while the lamp is quiet freezes editing',
+    () async {
+      final r = await _rig();
+      r.firmware.emit(FirmwareOfferSent(footer: _footer));
+      r.notify(quiet: true);
+      await _pump();
+      r.firmware.emit(FirmwareSucceeded(footer: _footer, alreadyCurrent: true));
+      await _pump();
+      expect(r.frozen, isTrue);
+    },
+  );
+
+  group('a lamp without quiet is not re-read when nothing reached it', () {
+    for (final (label, steps) in [
+      (
+        'a local verify that fails',
+        <FirmwareState>[
+          const FirmwareVerifying(),
+          const FirmwareFailed(
+            reason: 'bad image',
+            failure: FirmwareFailure.cacheUnverified,
+          ),
+        ],
+      ),
+      (
+        'an already-current answer',
+        <FirmwareState>[
+          FirmwareOfferSent(footer: _footer),
+          FirmwareSucceeded(footer: _footer, alreadyCurrent: true),
+        ],
+      ),
+    ]) {
+      test(label, () async {
+        final r = await _rig();
+        r.notify();
+        await _pump();
+        final reads = r.ble.sectionReads;
+        for (final s in steps) {
+          r.firmware.emit(s);
+          await _pump();
+        }
+        expect(r.ble.sectionReads, reads);
+        final mark = r.mark();
+        await r.control.setBrightness(60);
+        await _pump();
+        expect(r.writesSince(mark), [
+          [BleUuids.brightness, 60],
+        ]);
+      });
+    }
+  });
+
   group('a push the lamp never went quiet for', () {
     test('sends and reads nothing on a lamp that reports quiet', () async {
       final r = await _rig();

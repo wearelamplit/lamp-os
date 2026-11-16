@@ -197,19 +197,20 @@ class ControlNotifier extends _$ControlNotifier {
   /// heard listening.
   bool _flagsPending = false;
 
-  /// A push ended without a reboot; the lamp's sections are re-read when it
-  /// is next heard listening.
+  /// The lamp reported quiet while the screen could still send it edits; its
+  /// sections are re-read when it is next heard listening.
   bool _rereadPending = false;
 
   /// Survives a rebuild, which keeps this instance; after a dispose it
   /// fires into a no-op.
   Timer? _quietBound;
 
-  /// How long editing stays frozen after a push while the lamp has not said
-  /// it is listening: its receiver's no-progress abort (`kNoProgressAbortMs`,
-  /// 60 s) plus its inter-session quiet hold
-  /// (`InterSessionQuietHold::kHoldMs`, 10 s), plus 5 s for its
-  /// loop tick and the notify.
+  /// How long editing stays frozen, from a push ending or the lamp's latest
+  /// quiet report, while the lamp has not said it is listening. A push that
+  /// stops leaves the lamp quiet for at most its receiver's no-progress abort
+  /// (`kNoProgressAbortMs`, 60 s) plus its inter-session quiet hold
+  /// (`InterSessionQuietHold::kHoldMs`, 10 s); 5 s more covers its loop tick
+  /// and the notify.
   @visibleForTesting
   static const quietAfterPushBound = Duration(seconds: 75);
 
@@ -304,9 +305,7 @@ class ControlNotifier extends _$ControlNotifier {
 
       _endRebootReload();
       state = AsyncData(fresh);
-      _lampQuiet = null;
-      _flagsPending = true;
-      _subscribeStateNotify(ble);
+      _beginLinkSession(ble);
       try {
         await postReload(fresh);
       } catch (e, st) {
@@ -551,7 +550,6 @@ class ControlNotifier extends _$ControlNotifier {
       _probeTimer?.cancel();
     });
 
-    _subscribeStateNotify(ble);
     ref.onDispose(() => _stateNotifySub?.cancel());
 
     // Probe the BLE link whenever the app comes back to the foreground.
@@ -592,6 +590,8 @@ class ControlNotifier extends _$ControlNotifier {
     // when the configurators are already enabled.
     await _completeExpressionTest(ble);
 
+    if (!ref.mounted) return fresh;
+    _beginLinkSession(ble);
     return fresh;
   }
 
@@ -729,31 +729,44 @@ class ControlNotifier extends _$ControlNotifier {
   Uint8List _homeModeFocusByte() =>
       Uint8List.fromList([_homeModeFocus ? 1 : 0]);
 
-  /// A push that ends without a reboot leaves the lamp missing every write
-  /// sent while it was quiet. Once it reports it is listening the app sends
-  /// its session flags again and takes the lamp's word for everything else.
-  /// A lamp that never reports `quiet` gets the re-read at once instead.
+  /// The lamp drops every write while it reports quiet. Editing stays frozen
+  /// until it reports it is listening, then the app sends its session flags
+  /// again and, if the screen could have sent edits it dropped, takes the
+  /// lamp's word for everything else. A lamp that never reports `quiet` gets
+  /// the re-read when a push that reached it ends instead.
   void _onFirmwareState(FirmwareState? previous, FirmwareState next) {
-    if (!(previous?.isPushing ?? false) || next.isBusy) return;
-    if (next is FirmwareSucceeded) return;
-    final quiet = _lampQuiet;
-    if (quiet == null) {
-      _reassertHomeModeFocus = true;
-      unawaited(_rereadSections());
-      return;
+    if (!(previous?.isBusy ?? false) || next.isBusy) return;
+    if (next is FirmwareSucceeded && !next.alreadyCurrent) return;
+    switch (_lampQuiet) {
+      case null:
+        if (!previous!.isPushing ||
+            next is FirmwareSucceeded ||
+            next is FirmwareFailed && next.failure.declined) {
+          return;
+        }
+        _reassertHomeModeFocus = true;
+        unawaited(_rereadSections());
+      case true:
+        _freezeUntilListening();
+      case false:
+        _onLampListening();
     }
+  }
+
+  void _onLampQuiet() {
     _flagsPending = true;
-    _rereadPending = true;
-    if (quiet) {
-      _quietBound?.cancel();
-      _quietBound = Timer(quietAfterPushBound, () {
-        _quietBound = null;
-        _setQuietAfterPush(false);
-      });
-      _setQuietAfterPush(true);
-    } else {
-      unawaited(_resyncWithLamp());
-    }
+    if (_quietBound == null) _rereadPending = true;
+    if (ref.read(firmwareNotifierProvider(_deviceId)).isBusy) return;
+    _freezeUntilListening();
+  }
+
+  void _freezeUntilListening() {
+    _quietBound?.cancel();
+    _quietBound = Timer(quietAfterPushBound, () {
+      _quietBound = null;
+      _setQuietAfterPush(false);
+    });
+    _setQuietAfterPush(true);
   }
 
   void _onLampListening() {
@@ -785,7 +798,7 @@ class ControlNotifier extends _$ControlNotifier {
       }
       if (reread) await _rereadSections();
     } finally {
-      _setQuietAfterPush(false);
+      if (_quietBound == null) _setQuietAfterPush(false);
     }
   }
 
@@ -813,6 +826,31 @@ class ControlNotifier extends _$ControlNotifier {
   void _setQuietAfterPush(bool quiet) {
     if (!ref.mounted) return;
     ref.read(quietAfterPushProvider(_deviceId).notifier).set(quiet);
+  }
+
+  /// Starts a session on a new link, once the connected state is set. The
+  /// lamp holds none of [_heldFlags] and has not yet said whether it is quiet.
+  /// It counts a Social open even while quiet, so the open goes at once and a
+  /// later close still ends its nearby hold.
+  void _beginLinkSession(BleClient ble) {
+    _lampQuiet = null;
+    _flagsPending = true;
+    _rereadPending = false;
+    final social = _heldFlags[(BleUuids.editSession, _editSurfaceSocialView)];
+    if (social != null && social[1] != 0) {
+      unawaited(
+        ble
+            .write(
+              _deviceId,
+              BleUuids.controlService,
+              BleUuids.editSession,
+              social,
+              withoutResponse: true,
+            )
+            .catchError((_) {}),
+      );
+    }
+    _subscribeStateNotify(ble);
   }
 
   /// CHAR_STATE_NOTIFY: previewActive drives the expression editor's Test
@@ -1992,6 +2030,7 @@ class ControlNotifier extends _$ControlNotifier {
         cur.copyWith(previewActive: previewActive, greeting: greeting),
       );
     }
+    if (quiet == true) _onLampQuiet();
     if (quiet == false) _onLampListening();
   }
 
@@ -2164,12 +2203,8 @@ class ControlNotifier extends _$ControlNotifier {
       if (standDown()) return;
       _reconnectTimer?.cancel();
       _reassertHomeModeFocus = false;
-      _lampQuiet = null;
-      _flagsPending = true;
-      _rereadPending = false;
       state = AsyncData(fresh.copyWith(connected: true, reconnectAttempt: 0));
-      // The lamp dropped the subscription with the link.
-      _subscribeStateNotify(ble);
+      _beginLinkSession(ble);
     } catch (_) {
       // Bail if the notifier was disposed while awaiting; touching
       // `state` after dispose throws. This happens in tests that
