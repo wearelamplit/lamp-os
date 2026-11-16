@@ -242,8 +242,15 @@ class BuildLock(unittest.TestCase):
                             'for a; do shift; [ "$a" = "$LAMP_PIO_LOCK" ] && break; done\n'
                             '[ "$1" = true ] && exit 0\nexec "$@"\n')
             stub.chmod(0o755)
-            env = dict(os.environ, PATH=f"{d}:{os.environ['PATH']}", LAMP_PIO_LOCK=str(Path(d) / "lock"))
-            subprocess.run(["bash", str(self.WRAP), "true"], env=env, check=True)
+            path = f"{d}:{os.environ['PATH']}"
+            if name == "lockf":
+                tools = Path(d) / "tools"
+                tools.mkdir()
+                for tool in ("mkdir", "dirname"):
+                    (tools / tool).symlink_to(shutil.which(tool))
+                path = f"{d}:{tools}"
+            env = dict(os.environ, PATH=path, LAMP_PIO_LOCK=str(Path(d) / "lock"))
+            subprocess.run([shutil.which("bash"), str(self.WRAP), "true"], env=env, check=True)
             return argv.read_text().split("\n")[:-1]
 
     def test_flock_branch_closes_the_fd_for_the_child(self):
@@ -251,8 +258,6 @@ class BuildLock(unittest.TestCase):
             self.assertIn("-o", line.split())
 
     def test_lockf_branch_is_silent_and_keeps_the_file(self):
-        if shutil.which("flock", path=os.environ["PATH"]):
-            self.skipTest("real flock on PATH hides the lockf branch")
         tries, hold = self.stub_run("lockf")
         self.assertTrue({"-s", "-k"} <= set(tries.split()))
         self.assertIn("-k", hold.split())
