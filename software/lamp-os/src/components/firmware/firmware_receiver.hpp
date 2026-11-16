@@ -174,10 +174,11 @@ class FirmwareReceiver {
 
   // Called DIRECTLY from the chunk's transport task (WiFi recv on Core 0, or the
   // BLE host). Writes the chunk to flash and marks its bitmap bit when it came
-  // over `via` from the session's sender; a BLE chunk passes its connection
-  // handle. Bounded IO + bitmap set, no heap/JSON/blocking.
+  // over `via` from the session's sender. `bleConnHandle` is a BLE chunk's
+  // connection; mesh and FS chunks pass 0. Bounded IO + bitmap set, no
+  // heap/JSON/blocking.
   void handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk& p,
-                             FirmwareTransportKind via, uint16_t bleConnHandle = 0);
+                             FirmwareTransportKind via, uint16_t bleConnHandle);
 
   State state() const { return state_; }
 

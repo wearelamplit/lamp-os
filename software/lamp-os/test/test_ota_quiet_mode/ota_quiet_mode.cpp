@@ -20,7 +20,10 @@ using lamp::ota_quiet_mode::isQuiet;
 using lamp::ota_quiet_mode::visibleOtaActive;
 
 void setUp(void) {}
-void tearDown(void) {}
+void tearDown(void) {
+  while (holders() > 0) exitQuiet();
+  lamp::ota_quiet_mode::s_radio = {[] {}, [] {}};
+}
 
 // Firmware OTA (visible) fully wraps: visible while active, clean exit.
 void test_fw_session_reports_visible(void) {

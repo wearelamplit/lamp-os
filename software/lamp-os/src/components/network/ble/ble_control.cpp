@@ -548,13 +548,19 @@ class SocialDispositionsCallback : public NimBLECharacteristicCallbacks {
     logBleSectionOom("dispositions");
   }
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
-    if (!isAuthed(connInfo.getConnHandle())) return;
+    if (!isAuthed(connInfo.getConnHandle())) {
+      lamp::logDroppedWrite("socialDispositions", "unauthenticated");
+      return;
+    }
     if (lamp::ota_quiet_mode::isQuiet()) {
       lamp::logDroppedWrite("socialDispositions", "ota quiet");
       return;
     }
     std::string val = c->getValue();
-    if (val.size() > lamp::kPendingJsonOp) return;
+    if (val.size() > lamp::kPendingJsonOp) {
+      lamp::logDroppedWrite("socialDispositions", "oversize");
+      return;
+    }
 #ifdef LAMP_DEBUG
     Serial.printf("[ble_control] WRITE socialDispositions len=%u\n",
                   (unsigned)val.size());
@@ -683,7 +689,10 @@ class SettingsBlobCallback : public NimBLECharacteristicCallbacks {
     const std::string raw = c->getValue();
     // Anything larger than this cannot decode into a payload that fits the
     // pending slot. NimBLE enforces MTU on the link; this is a sanity ceiling.
-    if (raw.size() > lamp::kPendingSettingsBlob + lamp::crypto::WIRE_OVERHEAD) return;
+    if (raw.size() > lamp::kPendingSettingsBlob + lamp::crypto::WIRE_OVERHEAD) {
+      lamp::logDroppedWrite("settingsBlob", "oversize");
+      return;
+    }
     std::string json;
     bool authed = false;
     if (!decodeIncomingOp(raw, handle, uuid.data(), "settingsBlob", json, authed)) {
@@ -703,7 +712,10 @@ class SettingsBlobCallback : public NimBLECharacteristicCallbacks {
 #endif
       return;
     }
-    if (json.empty()) return;
+    if (json.empty()) {
+      lamp::logDroppedWrite("settingsBlob", "empty");
+      return;
+    }
 
 #ifdef LAMP_DEBUG
     Serial.printf("[ble_control] WRITE settingsBlob len=%u (decoded)\n", (unsigned)json.size());
@@ -797,9 +809,15 @@ static const std::array<SectionEntry, 11> kSections = {{
 class PageCtrlCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     const uint16_t handle = connInfo.getConnHandle();
-    if (!isAuthed(handle)) return;
+    if (!isAuthed(handle)) {
+      lamp::logDroppedWrite("pageCtrl", "unauthenticated");
+      return;
+    }
     const std::string name = c->getValue();
-    if (name.empty() || name.size() > 16) return;
+    if (name.empty() || name.size() > 16) {
+      lamp::logDroppedWrite("pageCtrl", name.empty() ? "empty" : "oversize");
+      return;
+    }
 
     ConnSlot* slot = findSlot(handle);
     if (!slot) return;

@@ -334,7 +334,7 @@ void handleControl(const lamp::PendingFirmwareControl& ctrl) {
 }
 
 void onChunk(const lp::ParsedFwChunk& c) {
-  s_fsReceiver.handleChunkOnRecvTask(c, lamp::FirmwareTransportKind::EspNow);
+  s_fsReceiver.handleChunkOnRecvTask(c, lamp::FirmwareTransportKind::EspNow, 0);
 }
 void onAccept(const lp::ParsedFwAccept& a) { s_fsDistributor.onAcceptOnRecvTask(a); }
 void onReq(const lp::ParsedFwReq& r)       { s_fsDistributor.onReqOnRecvTask(r); }
