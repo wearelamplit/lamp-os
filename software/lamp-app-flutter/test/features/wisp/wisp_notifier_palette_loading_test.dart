@@ -284,6 +284,21 @@ void main() {
     unawaited(n2.setSource(WispSourceMode.manual).catchError((Object _) {}));
     expect(n2.paletteLoading, isFalse,
         reason: 'the wisp is already Manual with an empty palette');
+
+    final osc = _HeldReadsBle();
+    await osc.connect(_lampId);
+    osc.seedSection(_lampId, 'wispstatus',
+        _b('{"wispMac":"AA:BB:CC:DD:EE:FF","source":"osc"}'));
+    final c3 = makeContainer(osc);
+    c3.listen(wispNotifierProvider(_lampId), (_, _) {});
+    await c3.read(wispNotifierProvider(_lampId).future);
+    await pumpEventQueue();
+    final n3 = c3.read(wispNotifierProvider(_lampId).notifier);
+    expect(n3.paletteLoading, isFalse);
+
+    unawaited(n3.setSource(WispSourceMode.off).catchError((Object _) {}));
+    expect(n3.paletteLoading, isFalse,
+        reason: 'only choosing Manual returns the palette to unread');
   });
 
   test('a palette never read is read on the next status, whatever its '
