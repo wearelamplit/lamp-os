@@ -5,7 +5,8 @@
 /**
  * selectively darken parts of the lamp to handle brightness of the
  *        leds in the lamp base
- * @property knockoutPixels - a list of knockout pixels to profile the lamp base
+ * @property knockoutPixels - a level per base pixel; pixels past its end are
+ *           left at full level
  */
 namespace lamp {
 class KnockoutBehavior : public AnimatedBehavior {
