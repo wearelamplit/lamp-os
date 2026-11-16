@@ -33,6 +33,19 @@ class _DrivenFirmware extends FirmwareNotifier {
   void emit(FirmwareState s) => state = s;
 }
 
+class _FailingNameInventory extends InventoryNotifier {
+  final gate = Completer<void>();
+  bool armed = false;
+
+  @override
+  Future<void> updateName(String id, String name) async {
+    if (!armed) return super.updateName(id, name);
+    armed = false;
+    await gate.future;
+    throw StateError('name sync failed');
+  }
+}
+
 class _CountingBle extends InMemoryBleClient {
   int sectionReads = 0;
 
@@ -212,7 +225,10 @@ class _Rig {
 
 /// [baseBusy]: the lamp's `base` section reads busy, so the first build
 /// fails.
-Future<_Rig> _rig({bool baseBusy = false}) async {
+Future<_Rig> _rig({
+  bool baseBusy = false,
+  InventoryNotifier Function()? inventory,
+}) async {
   SharedPreferences.setMockInitialValues({});
   final ble = _CountingBle();
   await seedControlBle(ble, deviceId: _id, brightness: 50);
@@ -221,6 +237,7 @@ Future<_Rig> _rig({bool baseBusy = false}) async {
     overrides: [
       bleClientProvider.overrideWithValue(ble),
       firmwareNotifierProvider.overrideWith2((_) => _DrivenFirmware()),
+      if (inventory != null) inventoryNotifierProvider.overrideWith(inventory),
     ],
   );
   addTearDown(c.dispose);
@@ -1018,6 +1035,22 @@ void main() {
       await _pump();
       await r.ble.disconnect(_id);
       await Future<void>.delayed(const Duration(seconds: 5));
+      expect(r.connected, isTrue);
+    });
+
+    test('a rebuild during a reboot save keeps its state when the save '
+        'housekeeping then fails', () async {
+      final inv = _FailingNameInventory();
+      final r = await _rig(inventory: () => inv);
+      inv.armed = true;
+      await r.control.setLampPassword('');
+      await Future<void>.delayed(const Duration(seconds: 4));
+      r.c.invalidate(controlNotifierProvider(_id));
+      await r.c.read(controlNotifierProvider(_id).future);
+      await _pump();
+      inv.gate.complete();
+      await _pump();
+      expect(r.c.read(controlNotifierProvider(_id)).hasError, isFalse);
       expect(r.connected, isTrue);
     });
 

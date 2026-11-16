@@ -318,7 +318,7 @@ class ControlNotifier extends _$ControlNotifier {
         await postReload(fresh);
       } catch (e, st) {
         // postReload is best-effort housekeeping.
-        if (ref.mounted) state = AsyncError(e, st);
+        if (!standDown()) state = AsyncError(e, st);
       }
     } finally {
       _endRebootReload();
