@@ -7,8 +7,8 @@
 
 namespace lamp {
 
-// The smallest byte whose Adafruit_NeoPixel::gamma8 output is nearest `v`:
-// what a colour shown raw must hold to show the same through the gamma the
+// The smallest byte whose Adafruit_NeoPixel::gamma8 output is nearest `v`,
+// which a colour shown raw must hold to show the same through the gamma the
 // LED output applies. Exact for v <= 66, within one above.
 inline uint8_t inverseGamma8(uint8_t v) {
   int best = 0;

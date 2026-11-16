@@ -654,7 +654,7 @@ void lamp::Lamp::setup() {
   config.loadLampType();
 
   // Apply subclass defaults AFTER NVS load. Fields the store left unset (e.g.
-  // name="stray", and the colours of a lamp whose store held no config) get
+  // name="stray", and the colours of a lamp whose load found no config) get
   // the subclass's first-boot value. A stored value is authoritative.
   config.applyDefaults(defaults());
 

@@ -16,11 +16,13 @@
 #include "config/config_store.hpp"
 #include "core/hw_config.hpp"
 #include "util/gamma.hpp"
+#include "util/levels.hpp"
 #include "../test_config_records/config_model.hpp"
 
 #include "../../src/util/color.cpp"
 #include "../../src/util/heap_guard.cpp"
 #include "../../src/util/json_writer.cpp"
+#include "../../src/util/levels.cpp"
 #include "../../src/config/config_codec.cpp"
 
 using namespace lamp;
@@ -45,13 +47,14 @@ const char* kLong =
 
 // Channels where a lower-bound or floor search misses the nearest input by 2
 // (189, 200, 207, 216, 221, 228, 233, 238), a two-stop shade, home mode on.
-// px 35 with knockout at p 40 (past the strip), b over 100 and p 3 twice.
+// px 35 with knockout at p 40 (past the strip), b over 100, p 3 twice, and
+// pairs with no usable p after the one for pixel 0.
 const char* kHome =
     R"({"lamp":{"name":"den","brightness":70,"homeMode":true,"homeModeSSID":"home-net",)"
     R"("homeModeBrightness":35},"base":{"px":35,"ac":0,)"
     R"("colors":["#bdc8cfd8","#dde4e9ee","#01020304","#42434445"],)"
     R"("knockout":[{"p":3,"b":90},{"p":0,"b":12},{"p":40,"b":20},{"p":34,"b":130},)"
-    R"({"p":20,"b":2000000000},{"p":3,"b":60}]},)"
+    R"({"p":20,"b":2000000000},{"p":3,"b":60},{"b":90},{"p":-2,"b":90}]},)"
     R"("shade":{"px":32,"colors":["#ff800000","#00102030"]},"expressions":[]})";
 
 // The first shipped shape: no home SSID or brightness, no expressions array.
@@ -116,20 +119,15 @@ void assertStops(const std::vector<Color>& loaded, const std::vector<Color>& old
   }
 }
 
-// The knockout level whose gamma-corrected scale is nearest old C's raw b%.
-uint8_t expectedLevel(int b) {
-  const int target = (255 * std::min(b, 100) + 50) / 100;
-  int best = 0;
-  int bestErr = 1 << 30;
-  for (int k = 0; k <= 100; ++k) {
-    const int err =
-        std::abs(int(Adafruit_NeoPixel::gamma8(uint8_t((255 * k + 50) / 100))) - target);
-    if (err < bestErr) {
-      best = k;
-      bestErr = err;
-    }
+// A knocked-out pixel at `level` shows every migrated channel within 7/255 of
+// what the C firmware showed for it at b%: the channel scaled raw.
+void assertKnockoutShowsLikeC(uint8_t level, int b) {
+  const int pct = std::min(b, 100);
+  for (int c = 0; c < 256; ++c) {
+    const int shown = Adafruit_NeoPixel::gamma8(
+        calculateBrightnessLevel(inverseGamma8(uint8_t(c)), level));
+    TEST_ASSERT_INT_WITHIN_MESSAGE(7, c * pct / 100, shown, "knockout level off");
   }
-  return uint8_t(best);
 }
 
 const StripWinding kWindings[] = {{false, false}, {true, false}, {false, true}, {true, true}};
@@ -161,20 +159,25 @@ void test_knockout_pairs_land_on_their_pixel() {
     JsonDocument doc = parse(c.json);
     for (const StripWinding w : kWindings) {
       const Model m = loadCfg(c.json, w);
-      std::vector<uint8_t> expected(c.px, 100);
+      // The C firmware's b% per pixel, -1 where no pair lands; a later pair
+      // for a pixel wins, and a pair with no pixel index lands nowhere.
+      std::vector<int> b(c.px, -1);
       for (JsonObjectConst pair : doc["base"]["knockout"].as<JsonArrayConst>()) {
+        if (!pair["p"].is<unsigned>()) continue;
         const size_t p = pair["p"].as<size_t>();
         if (p >= c.px) continue;
-        expected[w.base ? c.px - 1 - p : p] = expectedLevel(pair["b"].as<int>());
+        b[w.base ? c.px - 1 - p : p] = pair["b"].as<int>();
       }
       TEST_ASSERT_EQUAL(c.px, m.base.knockoutPixels.size());
-      TEST_ASSERT_EQUAL_UINT8_ARRAY(expected.data(), m.base.knockoutPixels.data(), c.px);
+      for (size_t i = 0; i < c.px; ++i) {
+        if (b[i] < 0) {
+          TEST_ASSERT_EQUAL_UINT8(100, m.base.knockoutPixels[i]);
+        } else {
+          assertKnockoutShowsLikeC(m.base.knockoutPixels[i], b[i]);
+        }
+      }
     }
   }
-  // The repeated p 3 keeps its last level, and b 130 loads as 100% would.
-  const Model m = loadCfg(kHome, {});
-  TEST_ASSERT_EQUAL_UINT8(expectedLevel(60), m.base.knockoutPixels[3]);
-  TEST_ASSERT_EQUAL_UINT8(100, m.base.knockoutPixels[34]);
 }
 
 void test_lamp_home_mode_keys_migrate() {
@@ -199,6 +202,14 @@ void test_lamp_home_mode_keys_migrate() {
   TEST_ASSERT_TRUE(off.homeMode.socialDisabled);
   TEST_ASSERT_EQUAL(1, off.homeMode.disabledExpressionTypes.size());
   TEST_ASSERT_EQUAL_STRING("glitchy", off.homeMode.disabledExpressionTypes[0].c_str());
+}
+
+void test_long_ssid_is_cut_to_the_cap() {
+  std::string json(kHome);
+  const std::string ssid(kMaxSsidLen + 8, 's');
+  json.replace(json.find("home-net"), 8, ssid);
+  const Model m = loadCfg(json.c_str(), {});
+  TEST_ASSERT_EQUAL_STRING(ssid.substr(0, kMaxSsidLen).c_str(), m.homeMode.ssid.c_str());
 }
 
 void test_september_shape_loads_whole() {
@@ -324,6 +335,7 @@ int main(int, char**) {
   RUN_TEST(test_colours_and_stop_order_migrate);
   RUN_TEST(test_knockout_pairs_land_on_their_pixel);
   RUN_TEST(test_lamp_home_mode_keys_migrate);
+  RUN_TEST(test_long_ssid_is_cut_to_the_cap);
   RUN_TEST(test_september_shape_loads_whole);
   RUN_TEST(test_role_without_colours_keeps_the_class_default);
   RUN_TEST(test_mesh_era_store_is_untouched);

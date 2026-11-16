@@ -50,8 +50,8 @@ A slot with 2 or more colors renders a still gradient; with rotation on (below)
 they flow round a closed loop.
 
 The variant colours (`baseColor` / `shadeColor`, or the segment lists below)
-seed a lamp only when its store held no config (`applyRoleDefaults`, the
-`StoreForm::Empty` load). A stored colour is kept whatever it is, the class
+seed a lamp only when its load found no config (`applyRoleDefaults`, the
+`StoreForm::Empty` load: nothing stored, or nothing that read as a config). A stored colour is kept whatever it is, the class
 default included: a shade set to white W (`#000000FF`) stays white. Firmware
 up to 1.3.7 replaced a stored class-default colour with the variant colour at
 every boot, so a downgrade to one of those turns a stored white shade back to

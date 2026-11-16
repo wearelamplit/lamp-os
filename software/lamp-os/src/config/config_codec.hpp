@@ -205,7 +205,7 @@ struct LoadedConfig {
 // runs for whatever is left. The blob is read into `buffer`, which holds
 // kMaxSettingsBlobLen bytes. A "cfg" string the C firmware wrote loads alone
 // and migrates onto the strips `winding` describes (docs/dev/embedded-heap.md,
-// "The migration").
+// "A store the C firmware wrote").
 LoadedConfig loadConfig(ConfigStore& store, LampSettings& lamp, BaseSettings& base,
                         ShadeSettings& shade, ExpressionSettings& expressions,
                         HomeModeSettings& homeMode, uint8_t* buffer, size_t bufferLen,

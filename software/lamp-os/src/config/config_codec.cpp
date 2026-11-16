@@ -1083,7 +1083,7 @@ static uint8_t knockoutLevel(int b) {
 }
 
 // Adjusts what fromJson loaded from a store the C firmware wrote
-// (docs/dev/embedded-heap.md, "The migration").
+// (docs/dev/embedded-heap.md, "A store the C firmware wrote").
 static void migrateOldC(JsonObject root, StripWinding winding, BaseSettings& base,
                         ShadeSettings& shade, ExpressionSettings& expressions,
                         HomeModeSettings& homeMode) {
