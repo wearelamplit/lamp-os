@@ -18,6 +18,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   the link drops or you tap Retry on the Home Mode page, the app tells the
   lamp again as soon as it is back that Home Mode is open, on any firmware, so
   the Home brightness slider no longer changes the everyday brightness.
+- **Leaving Home Mode right as a lamp finishes updating sticks.** The app no
+  longer tells the lamp Home Mode is open again after you closed it, and a
+  Retry after a dropped link reconnects once instead of twice.
 - **A turned-down update no longer reloads the lamp.** When a lamp declines
   an update, the app no longer re-sends its page markers and re-reads every
   setting.

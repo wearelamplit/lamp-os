@@ -119,6 +119,10 @@ class ControlNotifier extends _$ControlNotifier {
   /// Reboot-save reloads started. A ladder try that sees this change while
   /// it runs leaves the link to the reload for good.
   int _rebootReloadsStarted = 0;
+
+  /// Builds started. A ladder try that sees this change while it runs leaves
+  /// the link to the build.
+  int _buildsStarted = 0;
   static const _reconnectDelays = [500, 1000, 2000, 4000, 8000]; // ms, capped
   /// Max consecutive reconnect attempts before giving up and surfacing an
   /// error state instead of polling forever.
@@ -372,6 +376,7 @@ class ControlNotifier extends _$ControlNotifier {
   @override
   Future<ControlState> build(String deviceId) async {
     _deviceId = deviceId;
+    _buildsStarted++;
     // A rebuild keeps this instance and its held flags; the lamp clears them
     // on the new connection. A quiet report carries over so the new link
     // holds them back until the lamp listens.
@@ -2158,10 +2163,14 @@ class ControlNotifier extends _$ControlNotifier {
     }
     _reconnectInFlight = true;
     final ble = ref.read(bleClientProvider);
-    // A reboot-save reload that starts while this attempt awaits takes the
-    // link over; the attempt leaves it alone from then on.
+    // A reboot-save reload or a build that starts while this attempt awaits
+    // takes the link over; the attempt leaves it alone from then on.
     final reloads = _rebootReloadsStarted;
-    bool standDown() => !ref.mounted || _rebootReloadsStarted != reloads;
+    final builds = _buildsStarted;
+    bool standDown() =>
+        !ref.mounted ||
+        _rebootReloadsStarted != reloads ||
+        _buildsStarted != builds;
     try {
       final attempt = state.value?.reconnectAttempt ?? 0;
       // Tier 3: if soft reconnects have failed enough times, soft-cycle

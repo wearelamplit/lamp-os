@@ -88,8 +88,12 @@ class _CountingBle extends InMemoryBleClient {
   /// Drops the link once the named section has been read.
   String? disconnectAfterReading;
 
+  /// Reads of the `lamp` section wait until this completes.
+  Completer<void>? lampReadHold;
+
   @override
   Future<Uint8List> readSection(String deviceId, String name) async {
+    if (name == 'lamp') await lampReadHold?.future;
     sectionReads++;
     final v = await super.readSection(deviceId, name);
     if (name == disconnectAfterReading) {
@@ -927,6 +931,28 @@ void main() {
         final mark = r.mark();
         r.c.invalidate(controlNotifierProvider(_id));
         await r.c.read(controlNotifierProvider(_id).future);
+        await _pump();
+        r.notify();
+        await _pump();
+        expectEachOnce(r, mark);
+      },
+    );
+
+    test(
+      'on a lamp without quiet, after a rebuild during a reconnect',
+      () async {
+        final r = await heldFlags();
+        final mark = r.mark();
+        await r.ble.disconnect(_id);
+        await _pump();
+        final hold = r.ble.lampReadHold = Completer<void>();
+        await r.ble.connect(_id);
+        await _pump();
+        r.c.invalidate(controlNotifierProvider(_id));
+        final rebuilt = r.c.read(controlNotifierProvider(_id).future);
+        await _pump();
+        hold.complete();
+        await rebuilt;
         await _pump();
         r.notify();
         await _pump();
