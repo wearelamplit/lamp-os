@@ -3,7 +3,10 @@
 
 #include <unity.h>
 
+#include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <thread>
 
 #include "../../src/components/webapp/webapp_deadline.hpp"
 
@@ -126,7 +129,7 @@ using webapp::OtaApFollower;
 // The pause takes an AP that is up down, and its end brings it back, once.
 void test_ota_pause_stops_the_ap_and_its_end_restores_it() {
   OtaApFollower f;
-  TEST_ASSERT_TRUE(f.stop(/*radioPaused=*/true, /*apUp=*/true));
+  TEST_ASSERT_TRUE(f.stop(/*radioPaused=*/true, /*apTakenDown=*/true));
   TEST_ASSERT_FALSE(f.restore(/*radioPaused=*/true, /*apWanted=*/true));
   TEST_ASSERT_TRUE(f.restore(false, true));
   TEST_ASSERT_FALSE(f.restore(false, true));
@@ -176,6 +179,56 @@ void test_ap_wanted_after_ota() {
   TEST_ASSERT_FALSE(webapp::apWantedAfterOta(0x00000200u, 0x00000100u, false, false));
 }
 
+// --- SoftApState: one teardown per up period, across tasks ---
+
+using webapp::SoftApState;
+
+static void spinUntil(const std::atomic<bool>& flag, int timeoutMs) {
+  const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+  while (!flag.load() && std::chrono::steady_clock::now() < until) std::this_thread::yield();
+}
+
+// The loop and the OTA pausing task both take the AP down. A second caller
+// arriving while the first is still inside its teardown runs nothing.
+void test_ap_teardown_runs_once_across_two_tasks() {
+  SoftApState ap;
+  ap.markUp();
+  std::atomic<int> runs{0};
+  std::atomic<bool> firstInside{false};
+  std::atomic<bool> secondReturned{false};
+  bool firstClaimed = false;
+  std::thread first([&] {
+    firstClaimed = ap.tearDown([&] {
+      ++runs;
+      firstInside = true;
+      spinUntil(secondReturned, 500);
+    });
+  });
+  spinUntil(firstInside, 500);
+  const bool secondClaimed = ap.tearDown([&] { ++runs; });
+  secondReturned = true;
+  first.join();
+  TEST_ASSERT_TRUE(firstClaimed);
+  TEST_ASSERT_FALSE(secondClaimed);
+  TEST_ASSERT_EQUAL(1, runs.load());
+  TEST_ASSERT_FALSE(ap.up());
+}
+
+// A down AP has nothing to tear down; each up period gets one teardown.
+void test_ap_teardown_once_per_up_period() {
+  SoftApState ap;
+  int runs = 0;
+  TEST_ASSERT_FALSE(ap.up());
+  TEST_ASSERT_FALSE(ap.tearDown([&] { ++runs; }));
+  ap.markUp();
+  TEST_ASSERT_TRUE(ap.up());
+  TEST_ASSERT_TRUE(ap.tearDown([&] { ++runs; }));
+  TEST_ASSERT_FALSE(ap.tearDown([&] { ++runs; }));
+  ap.markUp();
+  TEST_ASSERT_TRUE(ap.tearDown([&] { ++runs; }));
+  TEST_ASSERT_EQUAL(2, runs);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_never_expire_always_false);
@@ -196,5 +249,7 @@ int main(int, char**) {
   RUN_TEST(test_ota_pause_end_skips_an_ap_no_longer_wanted);
   RUN_TEST(test_no_pause_no_stop);
   RUN_TEST(test_ap_wanted_after_ota);
+  RUN_TEST(test_ap_teardown_runs_once_across_two_tasks);
+  RUN_TEST(test_ap_teardown_once_per_up_period);
   return UNITY_END();
 }

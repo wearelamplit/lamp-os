@@ -66,7 +66,7 @@ static void armReboot(uint32_t atMs) {
 // Set only by the save path so rebootNow() fades to black first; the
 // browser-left / idle reboots stay a hard restart (no scene to fade).
 static bool s_fadeOnReboot = false;
-static bool s_apUp = false;
+static SoftApState s_ap;
 static bool s_serverUp = false;
 static bool s_neverExpire = false;
 
@@ -471,7 +471,7 @@ static bool startSoftAp() {
 
 // Stage 1: softAP only. The heavy server waits for a station to associate.
 void begin(lamp::Config& config) {
-  if (s_apUp) return;
+  if (s_ap.up()) return;
   s_config = &config;
   if (!s_webSaveDone) s_webSaveDone = xSemaphoreCreateBinary();
 
@@ -491,7 +491,7 @@ void begin(lamp::Config& config) {
   s_neverExpire = (bootMinutes == 0);
   s_deadlineMs = millis() + bootMinutes * 60000UL;
   s_rebootArmed = false;
-  s_apUp = true;
+  s_ap.markUp();
 
 #ifdef LAMP_DEBUG
   Serial.printf("[webapp] softAP up at %s  auth=%s bootWindow=%umin%s\n",
@@ -506,11 +506,11 @@ void begin(lamp::Config& config) {
 // in-flight lwip FIN/RST events reach the async task after a `delete s_server`
 // and dereference freed memory (LoadProhibited). A resident server is freed
 // only by a clean reboot.
-static void stopAp() {
-  if (!s_apUp) return;
-  MDNS.end();
-  wifi::stopSoftAp();
-  s_apUp = false;
+static bool stopAp() {
+  return s_ap.tearDown([] {
+    MDNS.end();
+    wifi::stopSoftAp();
+  });
 }
 
 // Serializes the pausing task's shutdownForOta with tick's restore.
@@ -534,7 +534,7 @@ static void restoreApAfterOta(uint32_t now) {
   if (s_serverUp && MDNS.begin("lamp")) {
     MDNS.addService("http", "tcp", kHttpPort);
   }
-  s_apUp = true;
+  s_ap.markUp();
 #ifdef LAMP_DEBUG
   Serial.println("[webapp] softAP back after OTA");
 #endif
@@ -573,7 +573,7 @@ void tick() {
     return;
   }
   restoreApAfterOta(now);
-  if (!s_apUp) return;
+  if (!s_ap.up()) return;
 
   // A BLE client's connect proves no station is associated (association takes
   // BLE down), so the heavy server cannot be up and stopAp() has no server to
@@ -605,14 +605,15 @@ void tick() {
   }
 }
 
-bool isActive() { return s_apUp; }
+bool isActive() { return s_ap.up(); }
 
-bool hasClient() { return s_apUp && WiFi.softAPgetStationNum() > 0; }
+bool hasClient() { return s_ap.up() && WiFi.softAPgetStationNum() > 0; }
 
 void shutdownForOta() {
   std::lock_guard<std::mutex> lock(s_otaApMu);
-  if (!s_otaAp.stop(lamp::ota_quiet_mode::radioTornDown(), s_apUp)) return;
-  stopAp();
+  // An AP tick took down for its own reason is not owed back after the OTA.
+  const bool paused = lamp::ota_quiet_mode::radioTornDown();
+  if (!s_otaAp.stop(paused, paused && stopAp())) return;
 #ifdef LAMP_DEBUG
   Serial.println("[webapp] softAP down for OTA");
 #endif
