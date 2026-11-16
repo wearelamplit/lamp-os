@@ -720,6 +720,7 @@ A mesh OTA in either direction enters quiet mode with the radio torn down (`ota_
 Known limits of the pause:
 - `BleRadioGate`'s mutex is held across NimBLE calls, which can block up to 2 s on a controller fault; the NimBLE host task's connect, disconnect and scan-end callbacks wait behind it. `s_transitionMu` is held across the same calls (the pause and the resume), so a quiet transition on the loop that collides with the distributor's first entry waits for them too.
 - The distributor's streaming task runs `shutdownForOta` before chunk 0, and it waits behind a loop pass's AP work. A pass that starts the server for a phone that just joined takes BLE and its controller down first, so the first chunk can wait for that.
+- The offer gate counts any joined station as a web client, open page or not. A phone that auto-joins a remembered lamp network holds that lamp's offers while it stays joined; with the Web Config window set to never expire, that can be indefinitely.
 
 ### Channel promotion
 
