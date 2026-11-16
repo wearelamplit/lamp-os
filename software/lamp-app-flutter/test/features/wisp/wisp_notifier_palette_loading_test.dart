@@ -9,6 +9,7 @@ import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/features/control/domain/lamp_color.dart';
 import 'package:lamp_app/features/wisp/application/wisp_notifier.dart';
 import 'package:lamp_app/features/wisp/data/wisp_repository.dart';
+import 'package:lamp_app/features/wisp/domain/wisp_source_mode.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../_support/in_memory_ble_client.dart';
@@ -215,6 +216,37 @@ void main() {
     ble.seedSection(_lampId, 'wisppalette',
         Uint8List.fromList([for (final x in palette) ...[x.r, x.g, x.b, x.w]]));
     notify(ble, manual);
+    await pumpEventQueue();
+    expect(n.paletteLoading, isFalse);
+    expect(n.savedManualPalette, palette);
+  });
+
+  test('choosing Manual after an empty read in Off shows the loading line '
+      'until a read for Manual lands', () async {
+    const palette = [
+      LampColor(r: 33, g: 0, b: 99, w: 0),
+      LampColor(r: 0, g: 140, b: 70, w: 25),
+    ];
+    final ble = _HeldReadsBle();
+    await ble.connect(_lampId);
+    ble.seedSection(_lampId, 'wispstatus',
+        _b('{"wispMac":"AA:BB:CC:DD:EE:FF","source":"off"}'));
+    final c = makeContainer(ble);
+    c.listen(wispNotifierProvider(_lampId), (_, _) {});
+    await c.read(wispNotifierProvider(_lampId).future);
+    await pumpEventQueue();
+    final n = c.read(wispNotifierProvider(_lampId).notifier);
+    expect(n.paletteLoading, isFalse);
+
+    final source = n.setSource(WispSourceMode.manual);
+    expect(n.paletteLoading, isTrue,
+        reason: 'an empty editor would let Save overwrite the palette');
+
+    ble.seedSection(_lampId, 'wisppalette',
+        Uint8List.fromList([for (final x in palette) ...[x.r, x.g, x.b, x.w]]));
+    notify(ble, '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual",'
+        '"paletteIdPrefix":"${WispRepository.paletteIdHash(palette)}"}');
+    await source;
     await pumpEventQueue();
     expect(n.paletteLoading, isFalse);
     expect(n.savedManualPalette, palette);

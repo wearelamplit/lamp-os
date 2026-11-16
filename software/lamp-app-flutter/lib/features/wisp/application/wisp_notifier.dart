@@ -423,11 +423,13 @@ class WispNotifier extends _$WispNotifier {
   /// Read the wisp's manual palette from its dedicated section and seed the
   /// editor. A read marks the palette known, so the editor leaves "reading
   /// from wisp", unless it comes back empty while [forStatus] is a Manual
-  /// status naming a palette: that read was served before auth or failed,
-  /// and the palette goes back to unread for the next status to retry. An
-  /// empty / absent / errored section (legacy lamp, coex gap) leaves any prior
-  /// palette intact; [WispRepository.readManualPalette] never throws. Serialized against [_loadClaims] via the in-flight flags:
-  /// FbpBleClient has no internal lock, so two concurrent reads stall the flow.
+  /// status naming a palette. Such a read was served before auth, failed, or
+  /// found the relay lamp's palette cache not yet filled, so the palette goes
+  /// back to unread for the next status to retry. An empty / absent / errored
+  /// section (legacy lamp, coex gap) leaves any prior palette intact;
+  /// [WispRepository.readManualPalette] never throws. Serialized against
+  /// [_loadClaims] via the in-flight flags, since FbpBleClient has no
+  /// internal lock and two concurrent reads stall the flow.
   /// [bumpState] re-emits after ingesting so a notify-triggered re-read paints
   /// the new palette. Off during build: emitting there resolves the provider's
   /// future early, letting an optimistic write land before build's return
@@ -441,7 +443,7 @@ class WispNotifier extends _$WispNotifier {
     try {
       final palette = await _repo.readManualPalette();
       if (_disposed) return;
-      // Outside Manual the prefix names the Osc palette, not this one.
+      // Outside Manual the prefix names the Osc palette.
       final namesPalette = forStatus.source == WispSourceMode.manual &&
           forStatus.paletteIdPrefix.isNotEmpty;
       _currentPaletteKnown = palette.isNotEmpty || !namesPalette;
@@ -1036,6 +1038,11 @@ class WispNotifier extends _$WispNotifier {
       'cur.wispMac=${cur.wispMac} cur.present=${cur.present} '
       'fellBackToEmpty=${state.value == null}',
     );
+    // An empty read outside Manual may predate the lamp caching the palette,
+    // so Manual shows the loading line until a read for it lands.
+    if (mode == WispSourceMode.manual && _savedManualPalette.isEmpty) {
+      _currentPaletteKnown = false;
+    }
     state = AsyncData(cur.copyWith(source: mode));
     _pendingSourceMode = mode;
     _pendingSourceUntil = DateTime.now().add(_sourceWriteGuard);
