@@ -411,6 +411,22 @@ void test_a_boot_loop_that_stalls_in_the_first_minute_keeps_the_first_window() {
   TEST_ASSERT_EQUAL_UINT32(kFirstBackoffWindowMs, backoffWindowMs(g.streak));
 }
 
+void test_a_wider_window_is_kept_by_a_reset_inside_it() {
+  BootGuard g{};
+  g.atBoot(false, false);
+  for (uint8_t reset = 0; reset < kResetStreakLimit; ++reset) g.atBoot(true, true);
+  for (int boot = 0; boot < 2; ++boot) {
+    g.markUptime(backoffWindowMs(g.streak) + 1000);
+    g.atBoot(true, true);
+  }
+  const uint32_t windowMs = backoffWindowMs(g.streak);
+  TEST_ASSERT_TRUE(windowMs > 2 * kFirstBackoffWindowMs);
+  // Past every narrower window, yet inside this boot's own.
+  g.markUptime(windowMs - 1000);
+  g.atBoot(true, true);
+  TEST_ASSERT_EQUAL_UINT32(windowMs, backoffWindowMs(g.streak));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_longest_is_the_widest_span_not_the_latest);
@@ -442,5 +458,6 @@ int main(int, char**) {
   RUN_TEST(test_a_failed_subscribe_is_retried_once_a_second_across_the_wrap);
   RUN_TEST(test_watchdog_resets_after_the_first_minute_still_back_off);
   RUN_TEST(test_a_boot_loop_that_stalls_in_the_first_minute_keeps_the_first_window);
+  RUN_TEST(test_a_wider_window_is_kept_by_a_reset_inside_it);
   return UNITY_END();
 }
