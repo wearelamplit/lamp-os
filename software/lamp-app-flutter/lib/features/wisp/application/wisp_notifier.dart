@@ -350,7 +350,10 @@ class WispNotifier extends _$WispNotifier {
       _noteStamp(initial);
       // Palette rides its own reliable section read, decoupled from the
       // notify-clobbered status char. Awaited before _loadClaims so the two
-      // BLE reads don't collide on FbpBleClient's lockless flow.
+      // BLE reads don't collide on FbpBleClient's lockless flow. A notify
+      // during the status read can have started a read of its own.
+      await _awaitReadsIdle();
+      if (_disposed) return WispStatus.empty;
       await _readManualPaletteSection(bumpState: false);
       if (_disposed) return WispStatus.empty;
       if (initial.present && _repo.wispSectionsSupported) {
@@ -649,12 +652,14 @@ class WispNotifier extends _$WispNotifier {
   // The small, reliable status NOTIFY carries paletteIdPrefix; a changed
   // prefix means the wisp's palette moved, so re-read the palette section.
   // Don't consume the prefix while a read is busy; retry on the next notify.
+  // Until a palette read completes, any status starts one, since an empty
+  // palette's prefix never changes.
   void _maybeRereadForPalette(WispStatus next) {
     final prefix = next.paletteIdPrefix;
-    if (prefix == _lastPaletteIdPrefix) return;
+    if (prefix == _lastPaletteIdPrefix && _currentPaletteKnown) return;
     // An empty prefix has no palette to read, but recording it lets the same
     // palette coming back register as a change.
-    if (prefix.isEmpty) {
+    if (prefix.isEmpty && _currentPaletteKnown) {
       _lastPaletteIdPrefix = prefix;
       return;
     }
