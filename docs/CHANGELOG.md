@@ -5,6 +5,26 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## Unreleased
+
+### Fixed
+- **Web Config comes back after a lamp passes on an update.** Sending or
+  receiving an update over the mesh switched off the lamp's setup Wi-Fi
+  network until the next restart. It now returns once the update ends, if
+  it would still be open. A lamp whose Web Config page was open while it
+  sent an update no longer drops out of reach until it is unplugged: it
+  restarts and the app can connect again.
+- **The app hears again that a lamp has left update mode.** A "quiet"
+  change the lamp had no memory to send was never sent again, so the app
+  could stay greyed out until its 75 s timeout. It is now retried.
+- **A second phone cannot write into another phone's update.** Update data
+  sent over Bluetooth must come over the same connection that started it.
+
+### Changed
+- **More refused writes show on the debug serial.** Writes from the app
+  refused for missing sign-in, size or a failed decode, and a Web Config
+  social save refused during an update, now print a `[drop]` line.
+
 ## 1.3.7
 
 ### Added

@@ -94,6 +94,17 @@ skew:
    this holds only when one happens; it is the one check on the
    `enforcePause` call in `ble_control::tick` and on `NimBleRadio::isAdvertising`
    reading true.
+   Web config softAP (set the src lamp's Web Config window to never expire, or
+   start inside its boot window): the src logs `[webapp] softAP down for OTA`
+   as it starts streaming, and `[webapp] softAP back after OTA` about 10 s after
+   `RESULT success` (the inter-session hold), and its `<name>-lamp` network is in
+   a phone's Wi-Fi list again. Repeat with a phone joined to the src's network
+   and the web config page open when the send starts: the page stops answering,
+   the network comes back after the send, and within the idle timeout (120 s)
+   the src reboots and its BLE is back (the app connects). A
+   `softAP not restored after OTA` line is a fail unless a heap shortage shows
+   beside it. Note the `[heap]` largest block before the send and after the
+   restore.
 
 4. **NVS/config survives.** Before step 2, note the peer's
    `[cfg] loaded name=...` and `[cfg] expressions=...` boot lines. After the
@@ -194,6 +205,8 @@ tap, opened before the transfer so the open's reset lands on the old image.
 
 ## Pass criteria
 
+- The src's web config network back after the send (step 3), or the src
+  rebooted with BLE back when a page was open.
 - Full step-2 chain present on the taps, ending in `RESULT success` and a
   `== VERSION` transition; exactly one transfer (no OFFER/DONE thrash loop).
 - Firmware OTA: `[ota_ind]` lines + visible progress bar + base settle/pulse
