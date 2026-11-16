@@ -53,7 +53,7 @@ class BleTimingEvent {
       if (section != null) 'section=$section',
       if (scanSession != null) 'scan_session=$scanSession',
       'ms=$ms',
-      if (note != null) note!,
+      ?note,
       if (totalMs != null) 'total_ms=$totalMs',
       if (sinceLinkMs != null) 'since_link_ms=$sinceLinkMs',
     ];

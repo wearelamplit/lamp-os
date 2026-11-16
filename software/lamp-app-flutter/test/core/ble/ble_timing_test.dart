@@ -313,7 +313,7 @@ void main() {
       final ble = InMemoryBleClient();
       final uncaught = <Object>[];
       await runZonedGuarded(() async {
-        readSectionVia(ble, 'x', 'lamp');
+        unawaited(readSectionVia(ble, 'x', 'lamp'));
         await Future<void>.delayed(const Duration(milliseconds: 20));
       }, (e, _) => uncaught.add(e));
       expect(uncaught, isEmpty);
