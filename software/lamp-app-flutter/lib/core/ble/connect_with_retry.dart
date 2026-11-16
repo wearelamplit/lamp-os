@@ -45,6 +45,7 @@ Future<bool> connectWithRetry(
       return false;
     }
     final attemptStart = bleTimings.now();
+    final wasUp = ble.isConnected(deviceId);
     try {
       await ble.connect(deviceId);
     } catch (_) {
@@ -57,11 +58,18 @@ Future<bool> connectWithRetry(
       continue;
     }
     if (shouldAbort?.call() ?? false) {
+      bleTimings.connectAborted(deviceId, attemptStart, i + 1, attempts);
       await release();
       return false;
     }
     bleTimings.connectSucceeded(
-        deviceId, callStart, attemptStart, i + 1, attempts);
+      deviceId,
+      callStart,
+      attemptStart,
+      i + 1,
+      attempts,
+      wasUp: wasUp,
+    );
     return true;
   }
   return false;

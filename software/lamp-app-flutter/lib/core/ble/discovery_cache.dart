@@ -9,7 +9,13 @@ class DiscoveryCache<S> {
     final hit = _byDevice[deviceId];
     if (hit != null) return hit;
     final started = bleTimings.now();
-    final found = await discover();
+    final S found;
+    try {
+      found = await discover();
+    } catch (_) {
+      bleTimings.discovered(deviceId, started, ok: false);
+      rethrow;
+    }
     bleTimings.discovered(deviceId, started);
     return _byDevice[deviceId] = found;
   }

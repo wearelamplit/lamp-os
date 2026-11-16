@@ -143,13 +143,12 @@ Future<Uint8List> readSectionVia(
             () => client.read(deviceId, BleUuids.controlService, BleUuids.pageData),
           ));
 
-  return _pageSessions.run(deviceId, run).then((bytes) {
-    bleTimings.sectionRead(deviceId, name, readStart, ok: true);
-    return bytes;
-  }, onError: (Object e, StackTrace st) {
-    bleTimings.sectionRead(deviceId, name, readStart, ok: false);
-    Error.throwWithStackTrace(e, st);
-  });
+  final result = _pageSessions.run(deviceId, run);
+  result.then(
+    (_) => bleTimings.sectionRead(deviceId, name, readStart, ok: true),
+    onError: (_) => bleTimings.sectionRead(deviceId, name, readStart, ok: false),
+  );
+  return result;
 }
 
 abstract class BleClient {

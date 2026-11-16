@@ -56,9 +56,10 @@ app.
 |---|---|
 | `scanSeen ... scan_session=N ms=` | scan start to a lamp's first advert in that scan session |
 | `connect ... fail attempt=i/n ms=` | one failed `connectWithRetry` attempt |
-| `connect ... ok attempt=i/n ms= total_ms=` | `ms` is the winning attempt's `BleClient.connect` (scan stop, link, MTU and priority on Android); `total_ms` is call entry to link up, backoff included |
-| `discover ... ms=` | a cold `discoverServices` (`DiscoveryCache` miss; none on a bridge client) |
-| `firstRead ... section= ms= since_link_ms=` | the first `readSectionVia` after a `connectWithRetry` link. `since_link_ms` includes auth and the cold discover, since they run first. A busy answer counts as the first read |
+| `connect ... ok attempt=i/n ms= aborted` | an attempt that reached link-up after its caller gave up; arms no `firstRead` |
+| `connect ... ok attempt=i/n ms= total_ms=` | `ms` is the winning attempt's `BleClient.connect` (scan stop, link, MTU and priority on Android); `total_ms` is call entry to link up, backoff included. `already_up` after `ms` means the stack still reported the lamp linked when the attempt began (a reconnect after a reboot with no disconnect first), so that `ms` is not a real link-up |
+| `discover ... ok\|fail ms=` | a cold `discoverServices`, success or failure (`DiscoveryCache` miss; none on a bridge client) |
+| `firstRead ... section= ms= since_link_ms=` | the first `readSectionVia` after a `connectWithRetry` link. `ms` is the read from the `readSectionVia` call, so it includes waiting behind an earlier section read on the same lamp. `since_link_ms` includes auth and the cold discover, since they run first. A busy answer counts as the first read |
 
 Every scan start or restart opens a new `scan_session` (counted from 1 per app
 run); a lamp is timed once per session from that session's own start, so a

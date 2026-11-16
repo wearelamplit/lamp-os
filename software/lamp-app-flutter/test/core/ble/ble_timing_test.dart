@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -5,6 +6,7 @@ import 'package:lamp_app/core/ble/ble_client.dart';
 import 'package:lamp_app/core/ble/ble_timing.dart';
 import 'package:lamp_app/core/ble/connect_with_retry.dart';
 import 'package:lamp_app/core/ble/discovery_cache.dart';
+import 'package:lamp_app/core/ble/fbp_ble_client.dart';
 import 'package:lamp_app/core/ble/network_dev_ble_client.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
 
@@ -126,21 +128,43 @@ void main() {
       },
     );
 
-    test('an abort after the link comes up records no ok line', () async {
-      final ble = _TimedClient(clock, [(ms: 300, fails: false)]);
-      var abort = false;
-      ble.whileConnecting = () => abort = true;
-      expect(
-        await connectWithRetry(
-          ble,
-          'x',
-          owner: Object(),
-          shouldAbort: () => abort,
-        ),
-        isFalse,
-      );
-      expect(events, isEmpty);
+    test('an attempt that began on an already-up link is flagged', () async {
+      final ble = _TimedClient(clock, [
+        (ms: 100, fails: false),
+        (ms: 5, fails: false),
+      ]);
+      await connectWithRetry(ble, 'x', owner: Object());
+      await connectWithRetry(ble, 'x', owner: Object());
+      expect(events[0].note, isNull);
+      expect(events[1].note, 'already_up');
     });
+
+    test(
+      'an abort after the link comes up records an aborted attempt',
+      () async {
+        final ble = _TimedClient(clock, [(ms: 7000, fails: false)]);
+        var abort = false;
+        ble.whileConnecting = () => abort = true;
+        expect(
+          await connectWithRetry(
+            ble,
+            'x',
+            owner: Object(),
+            shouldAbort: () => abort,
+          ),
+          isFalse,
+        );
+        expect(events.single.note, 'aborted');
+        expect(events.single.ms, 7000);
+        expect(events.single.totalMs, isNull);
+        bleTimings.sectionRead('x', 'lamp', Duration.zero, ok: true);
+        expect(
+          firstReads(),
+          isEmpty,
+          reason: 'an aborted attempt arms nothing',
+        );
+      },
+    );
   });
 
   group('first read', () {
@@ -236,24 +260,87 @@ void main() {
     });
   });
 
+  test(
+    'a discover that throws is recorded as a failure and rethrown',
+    () async {
+      final cache = DiscoveryCache<int>();
+      await expectLater(
+        cache.resolve('x', () async {
+          clock.advance(15000);
+          throw StateError('discover');
+        }),
+        throwsStateError,
+      );
+      expect(events.single.ok, isFalse);
+      expect(events.single.ms, 15000);
+      expect(
+        await cache.resolve('x', () async => 1),
+        1,
+        reason: 'a failure is not cached',
+      );
+    },
+  );
+
+  group('fbp client link drops', () {
+    test('disconnect disarms the first read', () async {
+      bleTimings.connectSucceeded('x', Duration.zero, Duration.zero, 1, 4);
+      try {
+        await FbpBleClient()
+            .disconnect('x')
+            .timeout(const Duration(seconds: 2));
+      } catch (_) {}
+      clock.advance(10);
+      bleTimings.sectionRead('x', 'lamp', clock.t, ok: true);
+      expect(firstReads(), isEmpty);
+    });
+
+    test('cycleAdapter disarms the first read', () async {
+      bleTimings.connectSucceeded('x', Duration.zero, Duration.zero, 1, 4);
+      try {
+        await FbpBleClient()
+            .cycleAdapter('x')
+            .timeout(const Duration(seconds: 2));
+      } catch (_) {}
+      clock.advance(10);
+      bleTimings.sectionRead('x', 'lamp', clock.t, ok: true);
+      expect(firstReads(), isEmpty);
+    });
+  });
+
+  test(
+    'a section read nobody awaits does not raise an uncaught error',
+    () async {
+      final ble = InMemoryBleClient();
+      final uncaught = <Object>[];
+      await runZonedGuarded(() async {
+        readSectionVia(ble, 'x', 'lamp');
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }, (e, _) => uncaught.add(e));
+      expect(uncaught, isEmpty);
+    },
+  );
+
+  test('a sighting before any scan start records nothing', () {
+    (BleTimings()..sink = events.add).sighting('x');
+    expect(events, isEmpty);
+  });
+
   group('scan seen', () {
     test('first sighting per lamp per scan session, from scan start', () {
       bleTimings.scanStarted();
-      final session = bleTimings.scanSessionForTest;
       clock.advance(900);
       bleTimings.sighting('x');
       clock.advance(600);
       bleTimings.sighting('x');
       bleTimings.sighting('y');
       expect(events.map((e) => (e.deviceId, e.ms, e.scanSession)), [
-        ('x', 900, session),
-        ('y', 1500, session),
+        ('x', 900, events[0].scanSession),
+        ('y', 1500, events[0].scanSession),
       ]);
     });
 
     test('a scan restart opens a new session timed from its own start', () {
       bleTimings.scanStarted();
-      final first = bleTimings.scanSessionForTest;
       clock.advance(400);
       bleTimings.sighting('x');
       clock.advance(10000);
@@ -261,8 +348,8 @@ void main() {
       clock.advance(250);
       bleTimings.sighting('x');
       expect(events.map((e) => (e.ms, e.scanSession)), [
-        (400, first),
-        (250, first + 1),
+        (400, events[0].scanSession),
+        (250, events[0].scanSession! + 1),
       ]);
     });
   });

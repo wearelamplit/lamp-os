@@ -14,6 +14,7 @@ class BleTimingEvent {
     this.sinceLinkMs,
     this.section,
     this.scanSession,
+    this.note,
   });
 
   final BleTimingPhase phase;
@@ -25,16 +26,21 @@ class BleTimingEvent {
   final int? attempt;
   final int? attempts;
 
-  /// connect ok: call entry to link up, backoff between attempts included.
+  /// Call entry to link up, backoff between attempts included.
   final int? totalMs;
 
-  /// firstRead: link up to the end of the read.
+  /// Link up to the end of the first read.
   final int? sinceLinkMs;
   final String? section;
 
-  /// scanSeen: the scan this sighting belongs to. Every scan (re)start opens a
-  /// new one, counted from 1 per app run.
+  /// The scan a sighting belongs to. Every scan (re)start opens a new one,
+  /// counted from 1 per app run.
   final int? scanSession;
+
+  /// `already_up` when the attempt began on a link the stack still reported
+  /// up, so its time is not a real link-up. `aborted` when the link came up
+  /// but the caller had given up.
+  final String? note;
 
   @override
   String toString() {
@@ -47,6 +53,7 @@ class BleTimingEvent {
       if (section != null) 'section=$section',
       if (scanSession != null) 'scan_session=$scanSession',
       'ms=$ms',
+      if (note != null) note!,
       if (totalMs != null) 'total_ms=$totalMs',
       if (sinceLinkMs != null) 'since_link_ms=$sinceLinkMs',
     ];
@@ -60,8 +67,7 @@ void _debugPrintEvent(BleTimingEvent e) => debugPrint(e.toString());
 /// each as one [BleTimingEvent] to [sink]. Read the default sink with
 /// `adb logcat -s flutter | grep ble_timing`.
 ///
-/// Recording only reads a clock and calls the sink synchronously; a throwing
-/// sink is swallowed so timing can never fail a connect.
+/// A throwing sink is swallowed so timing can never fail a connect.
 class BleTimings {
   void Function(BleTimingEvent) sink = _debugPrintEvent;
 
@@ -73,9 +79,6 @@ class BleTimings {
   final _seenInScan = <String>{};
   Duration? _scanStart;
   int _scanSession = 0;
-
-  @visibleForTesting
-  int get scanSessionForTest => _scanSession;
 
   void _emit(BleTimingEvent e) {
     try {
@@ -131,6 +134,28 @@ class BleTimings {
     Duration callStart,
     Duration attemptStart,
     int attempt,
+    int attempts, {
+    bool wasUp = false,
+  }) {
+    _emit(
+      BleTimingEvent(
+        BleTimingPhase.connect,
+        deviceId,
+        _since(attemptStart),
+        attempt: attempt,
+        attempts: attempts,
+        totalMs: _since(callStart),
+        note: wasUp ? 'already_up' : null,
+      ),
+    );
+    _linkUp[deviceId] = now();
+  }
+
+  /// An attempt reached link-up after its caller gave up. Arms nothing.
+  void connectAborted(
+    String deviceId,
+    Duration attemptStart,
+    int attempt,
     int attempts,
   ) {
     _emit(
@@ -140,17 +165,17 @@ class BleTimings {
         _since(attemptStart),
         attempt: attempt,
         attempts: attempts,
-        totalMs: _since(callStart),
+        note: 'aborted',
       ),
     );
-    _linkUp[deviceId] = now();
   }
 
   /// The link to [deviceId] went down; no first read is owed for it.
   void linkDown(String deviceId) => _linkUp.remove(deviceId);
 
-  void discovered(String deviceId, Duration started) =>
-      _emit(BleTimingEvent(BleTimingPhase.discover, deviceId, _since(started)));
+  void discovered(String deviceId, Duration started, {bool ok = true}) => _emit(
+    BleTimingEvent(BleTimingPhase.discover, deviceId, _since(started), ok: ok),
+  );
 
   /// A section read started at [readStart] finished. Counts as the first read
   /// only when the link it ran on came up before it started.
