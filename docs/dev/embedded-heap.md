@@ -762,8 +762,7 @@ normally again in the same boot. A stall that recurs later in every boot,
 the core 0 idle task starved two minutes in say, resets the lamp four or five
 times at its own cadence, then less often as the window grows past it. A
 stall shorter than 5 minutes then resets the lamp at most about every 16
-minutes; one that never clears resets it 5 minutes after it starts inside the
-window, or 5 s after it starts past it. The timeout is global, so inside the
+minutes. The timeout is global, so inside the
 window a stall of the core 0 idle task is caught at 300 s too. A subscribe that
 fails (`[loopwd] subscribe FAILED; retrying`) is retried at most once a second
 from every loop-task feed, setup stages included. The streak lives in RTC
