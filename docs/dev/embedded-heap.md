@@ -747,28 +747,36 @@ bootloader's RTC watchdog is off before `setup()` (no
 start-up before `setup()` is not watched.
 
 After 3 task-watchdog resets in a row, each from a boot whose loop never
-started an iteration 60 s into uptime, the next boot backs off: it prints
-`[loopwd] 3 watchdog resets in a row; timeout 300 s until the loop runs a
-minute` on every build and holds the task watchdog at 300 s, through setup and
-the loop, until the loop's first iteration at 60 s of uptime puts the normal
-timeouts back (`[loopwd] loop ran a minute; timeout back to 5 s`). So a boot
-that hangs every time resets every 5 minutes or so and is never left dark
-until a power cycle, and a boot that only stalls early, for longer than 5 s
-but less than 300 s, gets through and is watched normally again in the same
-boot. The timeout is global, so until then a stall of the core 0 idle task is
-caught at 300 s too. A subscribe that fails (`[loopwd] subscribe FAILED;
-retrying`) is retried at most once a second from every loop-task feed, setup
-stages included. The streak lives in RTC
+started an iteration 32 minutes into uptime (`kSettledUptimeMs`), the next
+boot backs off: it prints `[loopwd] 3 watchdog resets in a row; timeout 300 s
+until the loop runs 60 s` on every build and holds the task watchdog at 300 s,
+through setup and the loop, until the loop's first iteration at the end of its
+backoff window puts the normal timeouts back (`[loopwd] loop ran 60 s; timeout
+back to 5 s`). The window is 60 s (`kFirstBackoffWindowMs`) and doubles on
+each further reset of a boot whose loop ran to its window, up to 16 minutes
+(`backoffWindowMs`, `kBackoffDoublings`); a reset of a boot whose loop never
+got there keeps it. So a boot that hangs every time resets every 5 minutes
+or so and is never left dark until a power cycle, and a boot that only stalls
+early, for longer than 5 s but less than 300 s, gets through and is watched
+normally again in the same boot. A stall that recurs later in every boot,
+the core 0 idle task starved two minutes in say, resets the lamp four or five
+times at its own cadence, then less often as the window grows past it. A
+stall shorter than 5 minutes then resets the lamp at most about every 16
+minutes. The timeout is global, so inside the
+window a stall of the core 0 idle task is caught at 300 s too. A subscribe that
+fails (`[loopwd] subscribe FAILED; retrying`) is retried at most once a second
+from every loop-task feed, setup stages included. The streak lives in RTC
 memory; any other reset (a power cycle, an update, a web save's reboot) and any
-reset of a boot that reached 60 s start it again. A loop that stalls for more than
-5 s again and again, through the whole boot, cycles: three quick resets, then a
-backoff boot that gets the normal timeouts back at 60 s and resets at its next stall, which
-ends the streak. Each boot writes about 17 NVS entries (the boot history twice,
-the crash record once). An estimate of the worst case, a stall every few
-seconds from about 10 s into each boot: four boots about every 2 minutes, some
-2,900 boots and 49,000 entries a day, so each of the five NVS pages is erased
-about 80 times a day and the flash's 100,000 erase cycles last over three years
-of it nonstop.
+reset of a boot that ran 32 minutes start it again. A loop that stalls for more
+than 5 s again and again, through the whole boot, cycles: three quick resets,
+then backoff boots that each get the normal timeouts back at the end of their
+window and reset at their next stall, the window growing each time until it
+reaches 16 minutes and holding there.
+Each boot writes about 17 NVS entries (the boot history twice, the crash
+record once). An estimate of the worst case, a boot that hangs every time: a
+reset about every 5 minutes, some 280 boots and 4,800 entries a day, so each
+of the five NVS pages is erased about 8 times a day and the flash's 100,000
+erase cycles last decades of it nonstop.
 
 ## Rollback after an update
 

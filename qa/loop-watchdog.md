@@ -56,15 +56,24 @@ while a firmware or filesystem image is being received.
    boot reaches the app with `resetReason` 1 (power-on) and no new
    `lastCrash` entry.
 
-5. **Boot-loop backoff and re-arm.** Run row 1's `loopwd.hang` three times,
-   each within 60 s of the previous boot. After the third reset the boot log
-   shows `[loopwd] 3 watchdog resets in a row; timeout 300 s until the loop
-   runs a minute`. Leave it alone: at 60 s of uptime it prints `[loopwd] loop
-   ran a minute; timeout back to 5 s`, and a `loopwd.hang` then resets it
-   within about 5 s, with no power cycle. Repeat the three resets, then send
-   `loopwd.hang` straight after the backoff line, before 60 s: the lamp
-   freezes and resets about 300 s after the hang.
-6. **Setup hang resets and names its stage.** For each of `wifi`, `mesh` and
+5. **Boot-loop backoff and re-arm.** Power-cycle, then run row 1's
+   `loopwd.hang` three times, each within 60 s of the previous boot. After the
+   third reset the boot log shows `[loopwd] 3 watchdog resets in a row;
+   timeout 300 s until the loop runs 60 s`. Leave it alone: at 60 s of uptime
+   it prints `[loopwd] loop ran 60 s; timeout back to 5 s`, and a
+   `loopwd.hang` then resets it within about 5 s, with no power cycle. The
+   next boot shows `4 watchdog resets in a row; timeout 300 s until the loop
+   runs 120 s`; send `loopwd.hang` straight after that line: the lamp freezes
+   and resets about 300 s after the hang.
+6. **A stall after the first minute backs off too.** Power-cycle, then send
+   row 1's `loopwd.hang` about 90 s into each boot. The first three boots reset
+   within about 5 s of the hang. The fourth shows `3 watchdog resets in a row;
+   timeout 300 s until the loop runs 60 s` and still resets within about 5 s
+   of a hang at 90 s. The fifth shows `until the loop runs 120 s`: a hang at
+   90 s now freezes the lamp and resets it about 300 s later, and the sixth
+   keeps 120 s. A hang once the loop has run its window doubles it on the
+   next boot, up to 960 s.
+7. **Setup hang resets and names its stage.** For each of `wifi`, `mesh` and
    `ota`, run:
 
    ```sh
@@ -77,13 +86,14 @@ while a firmware or filesystem image is being received.
    `task_wdt: Task watchdog got triggered` naming `loopTask (CPU 1)`, a reboot,
    and a normal boot. Its `[boots] -1` line reads `end taskwdt setup mesh`,
    and the `lamp` section shows `resetReason` 6 and `lastCrash` one higher.
-7. **Setup hang every boot backs off.** Run `loopwd.hangsetup ble 4`. Three
+8. **Setup hang every boot backs off.** Run `loopwd.hangsetup ble 4`. Three
    boots hang and reset about 30 s apart; the fourth prints the backoff line,
    hangs at `ble` and resets about 300 s after the hang. The fifth boots
-   normally, still backing off, and prints `loop ran a minute; timeout back to
-   5 s` at 60 s. Its `[boots]` lines `-4` to `-1` all read `end taskwdt setup
+   normally, still backing off at `3 watchdog resets in a row; timeout 300 s
+   until the loop runs 60 s`, and prints `loop ran 60 s; timeout back to 5 s`
+   at 60 s. Its `[boots]` lines `-4` to `-1` all read `end taskwdt setup
    ble`.
-8. **Setup stages stay inside the watchdog.** Flash a blank board with the web
+9. **Setup stages stay inside the watchdog.** Flash a blank board with the web
    installer, then `npm run lamp:flash` the dev build, and tap its first boot
    (fresh NVS, PHY calibration). Then power-cycle and tap a normal boot. On
    both, every `[setup] <stage> +N ms` line must be at or under 15000 ms, half
@@ -96,4 +106,4 @@ ESP-IDF and Arduino start-up before `setup()` still leaves the lamp dark until
 a power cycle. A hang before the boot history opens (in `initFlash`) resets but
 leaves no `[boots]` entry of its own. The timeout is global, so a stall on
 core 0's idle task is caught at 30 s during setup, and at 300 s in a backoff
-boot until its loop has run a minute, rather than 5 s.
+boot until its loop has run its backoff window, rather than 5 s.

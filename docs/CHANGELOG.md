@@ -12,6 +12,13 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 - **Releases tagged from now on include the wisp image**, so `RELEASE_TAG=v1.3.x npm run wisp:flash:release` works for them (earlier tags still have none).
 - **`npm run lamp:flash:release` no longer flashes a stale `beta`.** Rolling tags (`beta`, `stable`) are downloaded fresh on every run and never reuse an old copy (offline they fail); version-tag images stay cached. The rolling `stable` release from `main` is now documented.
 - **The lamp build's compile cache is actually off.** The per-variant setting meant to disable it was ignored by PlatformIO.
+- **A lamp that hangs a few minutes into every boot restarts less and less
+  often.** The restart-loop guard only counted hangs in a boot's first minute,
+  so a hang that came back later in every boot restarted the lamp on the same
+  short cycle forever. Now any hang within about half an hour of starting
+  counts: after three in a row the lamp waits up to 5 minutes before
+  restarting on a hang in its first minute, and each further hang after that
+  stretch doubles it, up to its first 16 minutes.
 
 ## 1.3.7
 
