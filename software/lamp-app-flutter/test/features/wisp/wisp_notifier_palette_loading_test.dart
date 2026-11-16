@@ -56,8 +56,8 @@ void main() {
   void notify(InMemoryBleClient ble, String json) => ble.simulateNotify(
       _lampId, BleUuids.controlService, BleUuids.wispStatus, _b(json));
 
-  test('a read in flight at build delays the palette read instead of '
-      'skipping it', () async {
+  test('a notify during build reads the palette build may skip as busy',
+      () async {
     final ble = _HeldReadsBle();
     await ble.connect(_lampId);
     ble.seedSection(_lampId, 'wispstatus', _b(_emptyManual));
@@ -68,7 +68,8 @@ void main() {
     final built = c.read(wispNotifierProvider(_lampId).future);
     await pumpEventQueue();
 
-    // A notify during build's status read starts a claims read.
+    // A notify lands during build's status read. Unless it reads the palette
+    // itself, the claims read it starts makes build skip the palette read.
     notify(ble, _emptyManual);
     await pumpEventQueue();
     ble.holdStatus!.complete();

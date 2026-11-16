@@ -350,10 +350,7 @@ class WispNotifier extends _$WispNotifier {
       _noteStamp(initial);
       // Palette rides its own reliable section read, decoupled from the
       // notify-clobbered status char. Awaited before _loadClaims so the two
-      // BLE reads don't collide on FbpBleClient's lockless flow. A notify
-      // during the status read can have started a read of its own.
-      await _awaitReadsIdle();
-      if (_disposed) return WispStatus.empty;
+      // BLE reads don't collide on FbpBleClient's lockless flow.
       await _readManualPaletteSection(bumpState: false);
       if (_disposed) return WispStatus.empty;
       if (initial.present && _repo.wispSectionsSupported) {
