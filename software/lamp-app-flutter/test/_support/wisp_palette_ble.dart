@@ -41,8 +41,8 @@ Uint8List _bytes(List<LampColor> p) => Uint8List.fromList([
   for (final c in p) ...[c.r, c.g, c.b, c.w],
 ]);
 
-/// A lamp whose palette reads, palette writes and claims reads can be held
-/// open, and that counts palette reads.
+/// A lamp whose palette, status and claims reads and palette writes can be
+/// held open, and that counts palette reads.
 class PaletteBle extends InMemoryBleClient {
   PaletteBle(this.lampId);
   final String lampId;
@@ -51,6 +51,7 @@ class PaletteBle extends InMemoryBleClient {
   Completer<void>? holdPalette;
   Completer<void>? holdPaletteWrite;
   Completer<void>? holdClaims;
+  Completer<void>? holdStatusRead;
 
   @override
   Future<void> write(
@@ -86,6 +87,7 @@ class PaletteBle extends InMemoryBleClient {
       paletteReads++;
       await holdPalette?.future;
     }
+    if (name == 'wispstatus') await holdStatusRead?.future;
     return super.readSection(deviceId, name);
   }
 

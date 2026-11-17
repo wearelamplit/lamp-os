@@ -300,6 +300,15 @@ the value the lamp last heard from the wisp. With the wisp up, change drift,
 brightness and the LED strip once each: each still shows its new value 10 s
 later.
 
+P18 — **no Save over a palette the app has not read.** Same setup as P14. On
+the new wisp, open the palette sheet, edit a swatch, power-cycle the lamp, and
+tap Save in the open sheet once the app reconnects: the wisp's serial prints
+no `setManualPalette`, and the editor shows "Reading palette from wisp…", then
+"not saved" once the palette is read. Repeat with the sheet open while the
+lamp moves from the 1.3.8 wisp's zone to the new wisp's. Tap Manual from Osc
+with the palette shown, and within 20 s move the lamp to the other wisp's
+zone: the editor turns to "Reading palette from wisp…" with no tap.
+
 ## Pass criteria
 
 - H1 completes: mfg-data scan finds the lamp, schema reads 4, section reads
@@ -338,6 +347,9 @@ later.
   whole.
 - P17: a settings change the wisp never applied goes back to the wisp's value
   within about 5 s; one it applied stays.
+- P18: no `setManualPalette` leaves the app while the palette is unread, a
+  Save from a sheet left open then shows "not saved", and a display switch
+  shows the loading line with no tap.
 
 ## Not covered here
 

@@ -27,6 +27,13 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 - **A lamp that just booted or just found a new wisp shows "Reading palette
   from wisp…"** until the wisp's own status arrives, so Save can't write the
   lamp's empty palette over the wisp's.
+- **A wisp palette Save never writes over a palette the app hasn't read.**
+  While the editor shows "Reading palette from wisp…" (after a reconnect, a
+  new display wisp, or choosing Manual before the palette arrives) Save sends
+  nothing, and a save already resending stops; a palette sheet left open then
+  shows "not saved" once the palette is read. The wisp screen also redraws
+  when only the palette's state changes, so the loading line shows without
+  another tap.
 - **The wisp settings screen fills in even when the lamp missed the wisp's
   settings.** The app asks the wisp again and keeps reading until they
   arrive. Through a lamp older than 1.2.8 it asks you to update that lamp.

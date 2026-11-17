@@ -844,7 +844,7 @@ class WispNotifier extends _$WispNotifier {
   // A present status, before the source-write guard and the read-busy skip:
   // note the palette its wisp states, and return the palette to unknown when
   // it is not the one held from that wisp, when the lamp now relays another
-  // wisp and either one states its palette, or when the wisp did not send it.
+  // wisp, or when the wisp did not send it.
   void _notePaletteStatus(WispStatus status) {
     final mac = status.wispMac;
     if (mac == null) return;
@@ -858,10 +858,7 @@ class WispNotifier extends _$WispNotifier {
         _currentPaletteKnown = false;
       }
     }
-    final owner = _paletteMac;
-    if (owner != null &&
-        owner != mac &&
-        (_statesPalette(owner) || _statesPalette(mac))) {
+    if (_paletteMac != null && _paletteMac != mac) {
       _currentPaletteKnown = false;
     }
     _statusMac = mac;
@@ -1437,11 +1434,12 @@ class WispNotifier extends _$WispNotifier {
   /// which then stops resending and returns without touching the saved
   /// snapshot. A wisp that states its palette gets a `seq` with the op, the
   /// same on every resend, and confirms on its echo whatever its source mode.
-  /// While the latest status is the lamp's hello-only merge it sends nothing,
-  /// sets the flag and throws. A sheet left open across a display switch would
-  /// otherwise write over a palette the app has not read.
+  /// While [paletteLoading] it sends nothing, sets the flag and throws, and a
+  /// save in flight stops resending once it turns true. A sheet left open
+  /// across a display switch or a reconnect would otherwise write over a
+  /// palette the app has not read.
   Future<void> setManualPalette() async {
-    if ((state.value?.present ?? false) && !_statusFromWisp) {
+    if (paletteLoading) {
       _manualPaletteWriteFailed = true;
       _bumpState();
       throw StateError('wisp palette not read');
@@ -1483,6 +1481,7 @@ class WispNotifier extends _$WispNotifier {
       // Once the wisp left Manual the palette is moot, so stop resending.
       isSuperseded: () =>
           _paletteSaveEpoch != epoch ||
+          paletteLoading ||
           outcome == PaletteConfirmOutcome.sourceChanged,
     );
     if (_disposed || _paletteSaveEpoch != epoch) return;
@@ -1503,7 +1502,7 @@ class WispNotifier extends _$WispNotifier {
     final ok = await _sendConfirmed(
       send: () => _repo.setManualPalette(committed, seq: seq),
       confirm: () => _confirmPaletteEcho(wispMac, seq, expected),
-      isSuperseded: () => _paletteSaveEpoch != epoch,
+      isSuperseded: () => _paletteSaveEpoch != epoch || paletteLoading,
     );
     if (_disposed || _paletteSaveEpoch != epoch) return;
     // Before the write's ack, this wisp may have stated another palette, or

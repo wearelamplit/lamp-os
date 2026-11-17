@@ -288,14 +288,18 @@ void main() {
     expect(n.savedManualPalette, saved);
   });
 
+  // The palette is read while the wisp is in Off, so choosing Manual keeps it
+  // known and the save goes out.
   test('a stale pre-switch status during a save made right after choosing '
       'Manual is not the wisp leaving Manual', () async {
+    const saved = [LampColor(r: 1, g: 2, b: 3, w: 0)];
     const edit = [
       LampColor(r: 1, g: 2, b: 3, w: 0),
       LampColor(r: 90, g: 0, b: 40, w: 10),
     ];
     const off = '{"wispMac":"$_mac","source":"off"}';
     final ble = InMemoryBleClient();
+    seedPalette(ble, saved);
     await ble.connect(_lampId);
     await ble.write(
         _lampId, BleUuids.controlService, BleUuids.wispStatus, _b(off));
@@ -306,6 +310,7 @@ void main() {
 
     final source = n.setSource(WispSourceMode.manual);
     await pumpEventQueue();
+    expect(n.paletteLoading, isFalse);
     n.setManualPaletteDraft(edit);
     Object? err;
     final save = n.setManualPalette().catchError((Object e) => err = e);
