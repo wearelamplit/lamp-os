@@ -39,8 +39,8 @@ void main() {
       expect(WispRepository.paletteIdHash(palette), '999fdcbd');
     });
 
-    // 592 B unstripped; under the 512 B cap the last 20 colours lose W, so
-    // the hash pins the cap itself (511 B would strip 21).
+    // 592 B unstripped; under the 512 B cap the last 20 colours lose W, and
+    // both sides must hash what is left.
     test('over-cap palette strips trailing W before hashing', () {
       final palette = List<LampColor>.filled(
         30,

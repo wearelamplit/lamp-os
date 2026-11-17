@@ -51,6 +51,23 @@ void main() {
       expect((colors.last as List).length, 3);
     });
 
+    // One byte either side of the cap: a 512 B op keeps every W, a 513 B
+    // one loses the last W.
+    test('the cap is exactly 512 B', () {
+      final at512 = WispRepository.buildManualPaletteOp(
+        [...bright(25), const LampColor(r: 1, g: 1, b: 1, w: 1)],
+      );
+      expect(payloadBytes(at512), 512);
+      expect(withW(at512), 26);
+
+      final at513 = WispRepository.buildManualPaletteOp(
+        [...bright(25), const LampColor(r: 10, g: 1, b: 1, w: 1)],
+      );
+      expect(payloadBytes(at513), 511);
+      expect(withW(at513), 25);
+      expect((at513['colors'] as List).last, [10, 1, 1]);
+    });
+
     test('10-color all-bright RGB (w == 0) emits triples under the cap', () {
       final palette = List<LampColor>.filled(
         10,

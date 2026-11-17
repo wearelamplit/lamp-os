@@ -159,15 +159,16 @@ class WispRepository {
   /// is emitted as `[r,g,b,w]`, collapsed to `[r,g,b]` when w == 0. If the
   /// serialized payload exceeds [kWispOpPayloadCap] (from 26 colors that
   /// all carry W at full width), W is stripped from trailing colors until
-  /// it fits. A truncated write beats a silently dropped one, and the
-  /// wisp's palette echo re-syncs the UI to what was stored.
-  /// The cap aligns with `lamp_protocol::kMaxWispPaletteColors` on the
-  /// firmware side so the MSG_WISP_PALETTE broadcast that follows can
-  /// carry the whole palette without truncation.
+  /// it fits. A truncated write beats a failed one, and the wisp's palette
+  /// echo re-syncs the UI to what was stored. Past 32 full-width colors
+  /// even RGB alone is over the cap and the write fails; the editor holds
+  /// at most 10.
+  /// The 50-color clamp aligns with `lamp_protocol::kMaxWispPaletteColors`
+  /// on the firmware side so the MSG_WISP_PALETTE broadcast that follows
+  /// can carry the whole palette without truncation.
   ///
   /// Always plaintext, even when a password is set. Colors are low-value;
-  /// the proximity threat model accepts unauthenticated palette pushes
-  /// to keep the byte budget under one MTU.
+  /// the proximity threat model accepts unauthenticated palette pushes.
   Future<void> setManualPalette(List<LampColor> palette) async {
     // The wisp dispatcher caps at 50 even if more is sent; client-side
     // clamps too so a slightly stale UI doesn't waste wire bytes on
