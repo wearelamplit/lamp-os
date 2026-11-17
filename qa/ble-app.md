@@ -265,6 +265,10 @@ reconnects it shows "Reading palette from wisp…" until the wisp's next status
 (up to 30 s when idle), then B's palette, and never offers Save over the old
 one. Move the lamp from the new wisp's zone to the 1.3.8 wisp's: the editor
 shows the loading line, then the 1.3.8 wisp's palette, never the new wisp's.
+Power-cycle the lamp, and open it on A the moment it connects, on the new
+wisp and again on the 1.3.8 one: the editor shows "Reading palette from
+wisp…" with no Save until the lamp log's `[wisp_state] notify` preview
+carries `"source"`, then the wisp's palette.
 
 P15 — **a palette save confirms on the wisp's echo.** Same setup as P14. On
 the new wisp, edit and Save: the wisp's serial prints `[wisp.op]
@@ -280,6 +284,21 @@ Give the new wisp a rich config (20-character name, password, oscRole
 secondary, brightness 80) and note the lamp's `notify len=`: saves still
 confirm within a few seconds. Save on the 1.3.8 wisp with this app, and on
 the new wisp with a 1.3.8 app: both behave as on 1.3.8.
+
+P16 — **a Manual palette holds 16 colours.** Same setup as P14. In the
+editor add colours: the `+` stops at 16. Save 16 colours with white on each:
+the wisp's serial prints `setManualPalette colors=16`, the save confirms, and
+the wisp's ring shows all 16. A wisp holding more than 16 takes a raw
+`CHAR_WISP_OP` write, since no released app sends more than 10; the app and
+wisp tests cover that case (the editor shows the first 16 with a note and
+Save live, and the wisp loads a longer stored palette as its first 16).
+
+P17 — **a settings change the wisp never gets is read back.** Same setup as
+P14, the lamp on the new wisp. Open the Settings tab, move brightness, and
+within a second power the wisp off: about 5 s later the slider goes back to
+the value the lamp last heard from the wisp. With the wisp up, change drift,
+brightness and the LED strip once each: each keeps its new value, and the
+lamp log shows a `wispconfig` read about 5 s after each.
 
 ## Pass criteria
 
@@ -311,9 +330,14 @@ the new wisp with a 1.3.8 app: both behave as on 1.3.8.
 - P14: on a wisp from this branch the editor shows an empty palette as empty,
   never shows an empty or stale palette as the wisp's, and shows the loading
   line after a reconnect or a display switch until the wisp states its
-  palette.
+  palette; on any wisp, a lamp that just booted shows the loading line with
+  no Save until the wisp's own status arrives.
 - P15: a save on a wisp from this branch confirms only on its own echo, in any
   source mode, and never shows "saved" for a palette the wisp does not hold.
+- P16: the editor stops at 16 colours, and 16 white-heavy colours save
+  whole.
+- P17: a settings change the wisp never applied goes back to the wisp's value
+  within about 5 s; one it applied stays.
 
 ## Not covered here
 

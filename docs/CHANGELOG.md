@@ -20,11 +20,22 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   save.** The wisp echoes each save back, and the app waits for that echo,
   even if the wisp switched to Osc or Off meanwhile; an empty save no longer
   waits on an extra status read. Needs the wisp reflashed.
+- **A wisp setting that never reached the wisp stops showing.** A few
+  seconds after you change a wisp's drift, brightness or LED strip, the app
+  reads the wisp's settings back, so a change the wisp didn't get goes back
+  to what the wisp runs.
+- **A lamp that just booted or just found a new wisp shows "Reading palette
+  from wisp…"** until the wisp's own status arrives, so Save can't write the
+  lamp's empty palette over the wisp's.
 - **The wisp settings screen fills in even when the lamp missed the wisp's
   settings.** The app asks the wisp again and keeps reading until they
   arrive. Through a lamp older than 1.2.8 it asks you to update that lamp.
 
 ### Changed
+- **A wisp's Manual palette holds up to 16 colours**, the most a Straylight
+  palette carries (the editor held 10). A wisp holding a longer palette keeps
+  its first 16, and the editor says when it shows only the first 16 of one.
+  Needs the wisp reflashed.
 - **A wrong current password on a wisp takes up to 10 s to report.** The app
   waits that long for the wisp to confirm a password change.
 - **The wisp's status no longer repeats its settings**, which keeps it inside
