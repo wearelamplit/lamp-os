@@ -251,6 +251,21 @@ Change a swatch on A without saving, leave and reopen: the edit is still
 there. Open the lamp a few times on a wisp whose Manual palette is empty:
 "Reading palette from wisp…" never stays past a few seconds.
 
+P14 — **the palette editor shows the palette the wisp states.** Needs a wisp
+flashed from this branch (`npm run wisp:flash`), a second wisp on 1.3.8, two
+phones, and `npm run lamp:tap` on the lamp, opened once. With the new wisp in
+Manual and its palette empty, open the lamp: the editor shows empty within a
+second or two, and the lamp log's `[wisp_state] notify` preview carries
+`"manualId":""`. Put the new wisp in Osc with Straylight changing palettes and
+a non-empty Manual palette, then tap Manual: the loading line shows, then the
+real palette; never an empty editor with Save. Empty the palette from phone B
+while phone A is off the lamp, then open it on A: empty. Power-cycle the lamp
+while A has it open, and change the palette from B meanwhile: after A
+reconnects it shows "Reading palette from wisp…" until the wisp's next status
+(up to 30 s when idle), then B's palette, and never offers Save over the old
+one. Move the lamp from the new wisp's zone to the 1.3.8 wisp's: the editor
+shows the loading line, then the 1.3.8 wisp's palette, never the new wisp's.
+
 ## Pass criteria
 
 - H1 completes: mfg-data scan finds the lamp, schema reads 4, section reads
@@ -278,6 +293,10 @@ there. Open the lamp a few times on a wisp whose Manual palette is empty:
 - P13: the wisp screen follows the wisp after a reconnect and a save then
   confirms; a reopened lamp shows a palette changed or emptied elsewhere and
   keeps an unsaved edit; the palette editor never sticks on reading.
+- P14: on a wisp from this branch the editor shows an empty palette as empty,
+  never shows an empty or stale palette as the wisp's, and shows the loading
+  line after a reconnect or a display switch until the wisp states its
+  palette.
 
 ## Not covered here
 

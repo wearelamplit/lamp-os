@@ -10,6 +10,12 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 ### Fixed
 - **Saving a wisp palette with white on many colours keeps the white on all of
   them.** The last colour could lose its white before.
+- **The wisp palette editor never shows an empty or out-of-date palette as
+  the wisp's own.** The wisp now says which palette it stores, an empty one
+  included, and the editor waits for a read that matches. After the lamp
+  reconnects it shows "Reading palette from wisp…" until the wisp's next
+  status, since another phone may have changed the palette meanwhile. Needs
+  the wisp reflashed.
 - **The wisp settings screen fills in even when the lamp missed the wisp's
   settings.** The app asks the wisp again and keeps reading until they
   arrive. Through a lamp older than 1.2.8 it asks you to update that lamp.
