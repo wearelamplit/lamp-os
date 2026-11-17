@@ -261,4 +261,63 @@ void main() {
       expect(n.paletteLoading, isTrue);
     });
   }
+
+  // The wisp's first full status lands while the open's read, started for
+  // the HELLO-only status, is still in flight.
+  for (final (name, full) in [
+    ('a wisp that does not state its palette', _legacy),
+    ('a wisp that states its palette', _stating),
+  ]) {
+    test('$name: a read started for a HELLO-only status never counts',
+        () async {
+      final ble = _PaletteBle()..holdPalette = Completer<void>();
+      seedPalette(ble, const []);
+      await ble.connect(_lampId);
+      ble.seedSection(_lampId, 'wispstatus', _b(_helloOnly(_a)));
+      final c = ProviderContainer(
+        overrides: [bleClientProvider.overrideWithValue(ble)],
+      );
+      addTearDown(c.dispose);
+      c.listen(wispNotifierProvider(_lampId), (_, _) {});
+      final built = c.read(wispNotifierProvider(_lampId).future);
+      for (var i = 0; i < 50 && ble.paletteReads == 0; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(ble.paletteReads, 1, reason: 'the open read never started');
+
+      notify(ble, full(_a, _p));
+      await pumpEventQueue();
+      ble.holdPalette!.complete();
+      ble.holdPalette = null;
+      await built;
+      await pumpEventQueue();
+
+      final n = c.read(wispNotifierProvider(_lampId).notifier);
+      expect(n.paletteLoading, isTrue);
+    });
+  }
+
+  // The lamp switches display wisp while the palette sheet is open.
+  test('a save after a HELLO-only status sends nothing', () async {
+    final ble = _PaletteBle();
+    seedPalette(ble, _p);
+    final n = await open(ble, _legacy(_a, _p));
+    expect(n.paletteLoading, isFalse);
+    n.setManualPaletteDraft(_q);
+
+    notify(ble, _helloOnly(_bMac));
+    await pumpEventQueue();
+    final result = await n.setManualPalette().then<Object?>(
+      (_) => null,
+      onError: (Object e) => e,
+    );
+
+    expect(result, isNotNull);
+    expect(n.manualPaletteWriteFailed, isTrue);
+    expect(
+      ble.writesTo(_lampId, BleUuids.wispOp).where(
+          (w) => utf8.decode(w, allowMalformed: true).contains('setManualPalette')),
+      isEmpty,
+    );
+  });
 }

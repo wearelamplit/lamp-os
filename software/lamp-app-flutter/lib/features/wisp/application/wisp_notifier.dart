@@ -505,10 +505,13 @@ class WispNotifier extends _$WispNotifier {
       final read = await _repo.readManualPalette();
       if (_disposed) return;
       final mac = forStatus.wispMac;
+      // A read for a status the wisp did not send may have been served from
+      // an empty or stale lamp cache, whatever status lands meanwhile.
+      final counts = forStatus.fromWisp && _heardInFull(mac);
       if (_statesPalette(mac) || _statesPalette(_statusMac)) {
         final stated = _manualIds[mac];
         final known = read != null &&
-            _heardInFull(mac) &&
+            counts &&
             WispRepository.statusManualId(read) == stated;
         _currentPaletteKnown = known;
         if (known) {
@@ -521,7 +524,7 @@ class WispNotifier extends _$WispNotifier {
         final namesPalette = forStatus.source == WispSourceMode.manual &&
             forStatus.paletteIdPrefix.isNotEmpty;
         _currentPaletteKnown =
-            _heardInFull(mac) && (palette.isNotEmpty || !namesPalette);
+            counts && (palette.isNotEmpty || !namesPalette);
         if (_currentPaletteKnown) _paletteMac = mac;
         _ingestManualPalette(palette);
       }
@@ -1432,7 +1435,15 @@ class WispNotifier extends _$WispNotifier {
   /// which then stops resending and returns without touching the saved
   /// snapshot. A wisp that states its palette gets a `seq` with the op, the
   /// same on every resend, and confirms on its echo whatever its source mode.
+  /// While the latest status is the lamp's hello-only merge it sends nothing,
+  /// sets the flag and throws: a sheet left open across a display switch would
+  /// write over a palette the app has not read.
   Future<void> setManualPalette() async {
+    if ((state.value?.present ?? false) && !_statusFromWisp) {
+      _manualPaletteWriteFailed = true;
+      _bumpState();
+      throw StateError('wisp palette not read');
+    }
     final wispMac = state.value?.wispMac;
     if (_statesPalette(wispMac)) return _saveEchoed(wispMac!);
     final committed = List<LampColor>.from(_draft);
