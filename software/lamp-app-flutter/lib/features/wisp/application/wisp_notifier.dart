@@ -1438,9 +1438,10 @@ class WispNotifier extends _$WispNotifier {
       isSuperseded: () => _paletteSaveEpoch != epoch,
     );
     if (_disposed || _paletteSaveEpoch != epoch) return;
-    // A later status may have stated another palette before the write's ack.
+    // A later status, from this wisp or the next one the lamp relays, may
+    // have stated another palette before the write's ack.
     _applyPaletteConfirm(committed, ok, wispMac,
-        known: _manualIds[wispMac] == expected);
+        known: _statusMac == wispMac && _manualIds[wispMac] == expected);
     if (!ok) throw Exception('wisp manual palette write not confirmed');
   }
 

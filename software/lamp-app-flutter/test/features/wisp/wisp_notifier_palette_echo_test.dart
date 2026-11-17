@@ -194,6 +194,7 @@ void main() {
     notify(ble, _status(manualId: _id(_y), manualSeq: 31));
     expect(await result, isNull);
     expect(n.savedManualPalette, _y);
+    expect(n.paletteLoading, isFalse);
   });
 
   test('no pre-read: an empty save reads no status before it sends', () async {
@@ -361,6 +362,24 @@ void main() {
     ble.holdPaletteWrite!.complete();
     expect(await result, isNull);
     expect(n.savedManualPalette, _y);
+    expect(n.paletteLoading, isTrue);
+  });
+
+  test('a save confirmed after the lamp switched wisps leaves the palette '
+      'unknown', () async {
+    WispNotifier.debugSeqStart = () => 56;
+    final ble = _CountingBle()..holdPaletteWrite = Completer<void>();
+    final n = await open(ble, _status(manualId: _id(_x), prefix: _id(_x)));
+
+    final (_, result) = save(n, _y);
+    await pumpEventQueue();
+    notify(ble, _status(manualId: _id(_y), manualSeq: 56));
+    await pumpEventQueue();
+    // The lamp adopts another wisp before this write's ack returns.
+    notify(ble, '{"wispMac":"11:22:33:44:55:66","wispVersion":66048}');
+    await pumpEventQueue();
+    ble.holdPaletteWrite!.complete();
+    expect(await result, isNull);
     expect(n.paletteLoading, isTrue);
   });
 
