@@ -17,8 +17,7 @@ import '../domain/wisp_status.dart';
 ///
 /// When [password] is non-null and non-empty, ops are sealed via
 /// LampCrypto.encryptOp (salt = CHAR_WISP_OP uuid LE, info key = "wispOp").
-/// setManualPalette is always plaintext. It carries no secret and has a byte
-/// budget (see [kWispOpPayloadCap]).
+/// setManualPalette is always plaintext. It carries no secret.
 class WispRepository {
   WispRepository(this._ble, this._deviceId, {this._password});
 
@@ -149,24 +148,18 @@ class WispRepository {
 
   /// Payload budget for a wispOp: the lamp's BLE stack takes at most 512 B
   /// per attribute write (`BLE_ATT_ATTR_MAX_LEN`), under the 576 B its
-  /// MSG_CONTROL_OP relay carries. A larger write fails, so the palette
-  /// serializer must stay under this. The editor's largest palette is 244 B
-  /// with a `seq`.
+  /// MSG_CONTROL_OP relay carries. A larger write fails. The widest palette
+  /// op, [kManualPaletteMaxColors] colours with W and the widest `seq`, fits.
   static const int kWispOpPayloadCap = 512;
 
-  /// Manual palette. The wisp persists the (clamped to 50) color
-  /// list in NVS and, if currently in Manual mode, pushes it into
-  /// CurrentPalette so the lamps repaint without a mode flip. Each color
-  /// is emitted as `[r,g,b,w]`, collapsed to `[r,g,b]` when w == 0. If the
-  /// serialized payload exceeds [kWispOpPayloadCap] (from 26 colors that
-  /// all carry W at full width, 25 with a 5-digit [seq]), W is stripped
-  /// from trailing colors until it fits. A truncated write beats a failed
-  /// one, and the wisp's palette echo re-syncs the UI to what was stored.
-  /// Past 32 full-width colors even RGB alone is over the cap and the write
-  /// fails; the editor holds at most 10.
-  /// The 50-color clamp aligns with `lamp_protocol::kMaxWispPaletteColors`
-  /// on the firmware side so the MSG_WISP_PALETTE broadcast that follows
-  /// can carry the whole palette without truncation.
+  /// The most colours a Manual palette holds, as the wisp caps it: the most a
+  /// Straylight palette carries.
+  static const int kManualPaletteMaxColors = 16;
+
+  /// Manual palette: its first [kManualPaletteMaxColors] colours. The wisp
+  /// persists them in NVS and, if currently in Manual mode, pushes them into
+  /// CurrentPalette so the lamps repaint without a mode flip. Each color is
+  /// emitted as `[r,g,b,w]`, collapsed to `[r,g,b]` when w == 0.
   ///
   /// A [seq] (1..65535) rides the op as `seq`; a wisp that knows it echoes
   /// it as the status's `manualSeq` until the next save.
@@ -174,50 +167,33 @@ class WispRepository {
   /// Always plaintext, even when a password is set. Colors are low-value;
   /// the proximity threat model accepts unauthenticated palette pushes.
   Future<void> setManualPalette(List<LampColor> palette, {int? seq}) async {
-    // The wisp dispatcher caps at 50 even if more is sent; client-side
-    // clamps too so a slightly stale UI doesn't waste wire bytes on
-    // values that will be silently discarded.
-    final clamped = palette.take(50).toList();
-    await _writeOpPlaintext(buildManualPaletteOp(clamped, seq: seq));
+    await _writeOpPlaintext(buildManualPaletteOp(palette, seq: seq));
   }
 
-  /// Serialize the setManualPalette envelope, enforcing
-  /// [kWispOpPayloadCap]. Exposed for the byte-budget unit test.
+  /// Serialize the setManualPalette envelope for the first
+  /// [kManualPaletteMaxColors] colours of [palette].
   static Map<String, dynamic> buildManualPaletteOp(
     List<LampColor> palette, {
     int? seq,
-  }) {
-    final withW = List<bool>.generate(palette.length, (i) => palette[i].w != 0);
-    Map<String, dynamic> encode() => {
-          'char': 'wispOp',
-          'op': 'setManualPalette',
-          'colors': [
-            for (var i = 0; i < palette.length; i++)
-              withW[i]
-                  ? [palette[i].r, palette[i].g, palette[i].b, palette[i].w]
-                  : [palette[i].r, palette[i].g, palette[i].b],
-          ],
-          'seq': ?seq,
-        };
-    var op = encode();
-    for (var i = palette.length - 1;
-        i >= 0 && utf8.encode(jsonEncode(op)).length > kWispOpPayloadCap;
-        i--) {
-      if (!withW[i]) continue;
-      withW[i] = false;
-      op = encode();
-    }
-    return op;
-  }
+  }) =>
+      {
+        'char': 'wispOp',
+        'op': 'setManualPalette',
+        'colors': [
+          for (final c in palette.take(kManualPaletteMaxColors))
+            c.w != 0 ? [c.r, c.g, c.b, c.w] : [c.r, c.g, c.b],
+        ],
+        'seq': ?seq,
+      };
 
   /// Content hash of [palette] as the wisp stores it, over the canonical
   /// wire bytes the wisp stamps as its palette id: r,g,b per color, plus w
-  /// only when w != 0. Hashes the colors [buildManualPaletteOp] emits, so a
-  /// trailing-W strip under [kWispOpPayloadCap] counts. Returns 8 lowercase
-  /// hex chars; the notifier confirms a palette write by matching this
-  /// against the wisp's `paletteIdPrefix` on the status NOTIFY.
-  static String paletteIdHash(List<LampColor> palette) => manualPaletteId(
-      _opColors(buildManualPaletteOp(palette.take(50).toList())));
+  /// only when w != 0. Hashes the colors [buildManualPaletteOp] emits, its
+  /// first [kManualPaletteMaxColors]. Returns 8 lowercase hex chars; the
+  /// notifier confirms a palette write by matching this against the wisp's
+  /// `paletteIdPrefix` on the status NOTIFY.
+  static String paletteIdHash(List<LampColor> palette) =>
+      manualPaletteId(_opColors(buildManualPaletteOp(palette)));
 
   /// The wisp's `manualPaletteId` of [colors] exactly as given: 8 lowercase
   /// hex chars.
@@ -236,11 +212,9 @@ class WispRepository {
       colors.isEmpty ? '' : manualPaletteId(colors);
 
   /// The `manualId` a wisp reports after storing the op [setManualPalette]
-  /// sends for [palette] and [seq]: the colors that op carries, after any
-  /// strip.
+  /// sends for [palette] and [seq]: the colors that op carries.
   static String sentManualId(List<LampColor> palette, {int? seq}) =>
-      statusManualId(_opColors(
-          buildManualPaletteOp(palette.take(50).toList(), seq: seq)));
+      statusManualId(_opColors(buildManualPaletteOp(palette, seq: seq)));
 
   static List<LampColor> _opColors(Map<String, dynamic> op) => [
         for (final c in op['colors'] as List)

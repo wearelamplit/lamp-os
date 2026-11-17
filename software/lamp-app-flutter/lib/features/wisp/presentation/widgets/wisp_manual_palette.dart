@@ -10,6 +10,7 @@ import '../../../control/presentation/widgets/color_blocks_bar.dart';
 import '../../../control/presentation/widgets/color_stops_sheet.dart';
 import '../../application/manual_palette_draft.dart';
 import '../../application/wisp_notifier.dart';
+import '../../data/wisp_repository.dart';
 
 class ManualPaletteEditor extends ConsumerWidget {
   const ManualPaletteEditor({super.key, required this.lampId});
@@ -55,7 +56,7 @@ class ManualPaletteEditor extends ConsumerWidget {
               initial: draft,
               title: 'Manual palette',
               description: 'The wisp paints from these colors.',
-              max: 10,
+              max: WispRepository.kManualPaletteMaxColors,
               allowEmpty: true,
               reorderable: false,
               onChanged: notifier.setManualPaletteDraft,
@@ -68,6 +69,16 @@ class ManualPaletteEditor extends ConsumerWidget {
             ),
           ),
         ),
+        if (notifier.manualPaletteTrimmed)
+          Padding(
+            padding: const EdgeInsets.only(top: AppSpace.sm),
+            child: Text(
+              'The wisp holds ${notifier.savedManualPalette.length} colors. '
+              'The editor keeps the first '
+              '${WispRepository.kManualPaletteMaxColors}; save to store them.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
         if (notifier.manualPaletteWriteFailed)
           Padding(
             padding: const EdgeInsets.only(top: AppSpace.sm),

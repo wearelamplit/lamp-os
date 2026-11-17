@@ -103,20 +103,30 @@ void main() {
       expect(n.manualPaletteDirty, isTrue);
     });
 
-    test('caps the draft at 10 colors', () async {
+    test('caps the draft at 16 colors', () async {
       final ble = InMemoryBleClient();
       await primeStatus(ble, '{"wispMac":"AA:BB:CC:DD:EE:FF"}');
       final c = makeContainer(ble: ble);
 
       await c.read(wispNotifierProvider(lampId).future);
       final n = c.read(wispNotifierProvider(lampId).notifier);
+      final colors = [
+        for (var i = 0; i < 20; i++) LampColor(r: i, g: i, b: i, w: 0),
+      ];
 
-      for (var i = 0; i < 12; i++) {
-        n.appendManualPaletteColor(
-          LampColor(r: i, g: i, b: i, w: 0),
-        );
+      for (final color in colors.take(12)) {
+        n.appendManualPaletteColor(color);
       }
-      expect(n.draftManualPalette.length, 10);
+      expect(n.draftManualPalette, colors.take(12));
+      for (final color in colors.skip(12)) {
+        n.appendManualPaletteColor(color);
+      }
+      expect(n.draftManualPalette, colors.take(16));
+
+      n.setManualPaletteDraft(colors.take(12).toList());
+      expect(n.draftManualPalette, colors.take(12));
+      n.setManualPaletteDraft(colors);
+      expect(n.draftManualPalette, colors.take(16));
     });
 
     test('setManualPalette clears the dirty flag once the wisp echoes it',

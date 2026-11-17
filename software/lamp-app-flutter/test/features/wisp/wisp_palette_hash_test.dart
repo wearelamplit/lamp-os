@@ -6,9 +6,10 @@ import 'package:lamp_app/features/wisp/data/wisp_repository.dart';
 /// `test_palette_hash`. The wisp stamps `manualPaletteId()` as its palette id
 /// and the app confirms a write by matching the same hash on the status
 /// NOTIFY, so both sides must agree on the canonical wire bytes: r,g,b per
-/// color, plus w only when w != 0. The strip vector forces the trailing-W
-/// strip under [WispRepository.kWispOpPayloadCap] -- the exact path where the
-/// two sides could diverge.
+/// color, plus w only when w != 0. The 16-colour vector is the widest palette
+/// the app sends and the wisp stores.
+const _sixteenBright = 'bbc5c685';
+
 void main() {
   group('WispRepository.paletteIdHash golden vectors', () {
     test('W=0 palette hashes r,g,b only', () {
@@ -39,14 +40,17 @@ void main() {
       expect(WispRepository.paletteIdHash(palette), '999fdcbd');
     });
 
-    // 592 B unstripped; under the 512 B cap the last 20 colours lose W, and
-    // both sides must hash what is left.
-    test('over-cap palette strips trailing W before hashing', () {
+    // The app sends and the wisp stores the first 16, so both hash those.
+    test('a palette past 16 colours hashes its first 16', () {
       final palette = List<LampColor>.filled(
-        30,
+        20,
         const LampColor(r: 255, g: 255, b: 255, w: 255),
       );
-      expect(WispRepository.paletteIdHash(palette), '2eba5ad1');
+      expect(WispRepository.paletteIdHash(palette), _sixteenBright);
+      expect(
+        WispRepository.manualPaletteId(palette.take(16).toList()),
+        _sixteenBright,
+      );
     });
 
     test('empty palette is the FNV offset basis', () {

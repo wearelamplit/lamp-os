@@ -6,7 +6,8 @@ import 'package:lamp_app/features/wisp/data/wisp_repository.dart';
 
 /// setManualPalette rides a BLE long write to CHAR_WISP_OP, which the lamp's
 /// BLE stack caps at 512 B per attribute, and the lamp relays it as
-/// MSG_CONTROL_OP. These tests pin the serializer's worst case.
+/// MSG_CONTROL_OP. These tests pin the serializer's worst case and the
+/// 16-colour cap.
 void main() {
   int payloadBytes(Map<String, dynamic> op) =>
       utf8.encode(jsonEncode(op)).length;
@@ -30,42 +31,28 @@ void main() {
       }
     });
 
-    // 25 W-heavy colours are 502 B, 26 are 520 B: the strip first fires
-    // there, and only on trailing colours, never on RGB.
-    test('the W strip starts at the 26th colour, from the tail', () {
-      final op25 = WispRepository.buildManualPaletteOp(bright(25));
-      expect(withW(op25), 25);
-
-      final op26 = WispRepository.buildManualPaletteOp(bright(26));
+    // The widest op the app sends: 16 colours, W on every one, the widest
+    // seq. It fits the cap with room to spare, so nothing is ever stripped.
+    test('16 all-bright RGBW colours and the widest seq go out whole', () {
+      final op = WispRepository.buildManualPaletteOp(bright(16), seq: 65535);
       expect(
-        payloadBytes(op26),
+        payloadBytes(op),
         lessThanOrEqualTo(WispRepository.kWispOpPayloadCap),
       );
-      final colors = op26['colors'] as List;
-      expect(colors.length, 26);
-      expect(withW(op26), lessThan(26));
-      for (final c in colors) {
-        expect((c as List).sublist(0, 3), [255, 255, 255]);
-      }
-      expect((colors.first as List).length, 4);
-      expect((colors.last as List).length, 3);
+      expect(withW(op), 16);
     });
 
-    // One byte either side of the cap: a 512 B op keeps every W, a 513 B
-    // one loses the last W.
-    test('the cap is exactly 512 B', () {
-      final at512 = WispRepository.buildManualPaletteOp(
-        [...bright(25), const LampColor(r: 1, g: 1, b: 1, w: 1)],
-      );
-      expect(payloadBytes(at512), 512);
-      expect(withW(at512), 26);
-
-      final at513 = WispRepository.buildManualPaletteOp(
-        [...bright(25), const LampColor(r: 10, g: 1, b: 1, w: 1)],
-      );
-      expect(payloadBytes(at513), 511);
-      expect(withW(at513), 25);
-      expect((at513['colors'] as List).last, [10, 1, 1]);
+    test('a palette past 16 colours sends its first 16', () {
+      final palette = [
+        for (var i = 0; i < 20; i++)
+          LampColor(r: i + 1, g: 40 + i, b: 200 - i, w: i.isEven ? 0 : i),
+      ];
+      final op = WispRepository.buildManualPaletteOp(palette, seq: 9);
+      expect(op['colors'], [
+        for (final c in palette.take(16))
+          c.w == 0 ? [c.r, c.g, c.b] : [c.r, c.g, c.b, c.w],
+      ]);
+      expect(op['seq'], 9);
     });
 
     test('10-color all-bright RGB (w == 0) emits triples under the cap', () {

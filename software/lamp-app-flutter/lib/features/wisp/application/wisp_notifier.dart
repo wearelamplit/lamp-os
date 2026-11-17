@@ -220,6 +220,11 @@ class WispNotifier extends _$WispNotifier {
   /// should watch [manualPaletteDraftProvider] directly to rebuild on edit.
   List<LampColor> get draftManualPalette => _draft;
 
+  /// True when the wisp holds more than [WispRepository.kManualPaletteMaxColors]
+  /// colours, so the editor shows only the first ones.
+  bool get manualPaletteTrimmed =>
+      _savedManualPalette.length > WispRepository.kManualPaletteMaxColors;
+
   /// True when the editor has unsaved changes. Drives the save button's
   /// enabled state in the UI.
   bool get manualPaletteDirty {
@@ -365,7 +370,7 @@ class WispNotifier extends _$WispNotifier {
     // An untouched draft only repeats what an earlier visit read, and the
     // wisp may have changed or emptied its palette since. Start this visit
     // from nothing, as a first visit does, so its own read seeds the editor.
-    if (_palettesEqual(_draft, _savedManualPalette)) {
+    if (_draftUntouched) {
       ref.read(manualPaletteDraftProvider(lampId).notifier).clear();
     }
 
@@ -537,12 +542,20 @@ class WispNotifier extends _$WispNotifier {
   }) {
     if (palette.isEmpty && !emptyCounts) return;
     if (_palettesEqual(_savedManualPalette, palette)) return;
-    final wasDraftPristine = _palettesEqual(_draft, _savedManualPalette);
+    final wasDraftPristine = _draftUntouched;
     _setSaved(palette);
     if (wasDraftPristine) {
-      _setDraft(palette);
+      _setDraft(_editorSeed(palette));
     }
   }
+
+  // The draft the editor starts from for [saved]: its first colours, up to
+  // the cap.
+  static List<LampColor> _editorSeed(List<LampColor> saved) =>
+      saved.take(WispRepository.kManualPaletteMaxColors).toList();
+
+  bool get _draftUntouched =>
+      _palettesEqual(_draft, _editorSeed(_savedManualPalette));
 
   static bool _palettesEqual(List<LampColor> a, List<LampColor> b) {
     if (a.length != b.length) return false;
@@ -1361,18 +1374,20 @@ class WispNotifier extends _$WispNotifier {
   // [setManualPalette] (Save), never per edit.
 
   /// Replace the whole draft palette in one shot (the color-stops editor
-  /// streams the full list per edit). Caps at 10; extra swatches are dropped.
+  /// streams the full list per edit). Keeps the first
+  /// [WispRepository.kManualPaletteMaxColors].
   void setManualPaletteDraft(List<LampColor> colors) {
-    final capped = colors.length > 10 ? colors.sublist(0, 10) : colors;
+    final capped = _editorSeed(colors);
     if (_palettesEqual(_draft, capped)) return;
     _setDraft(capped);
   }
 
-  /// Append a swatch to the draft. Caps at 10 -- anything beyond is
-  /// silently ignored so the UI's `+` button can be permissive.
+  /// Append a swatch to the draft. Ignored once the draft holds
+  /// [WispRepository.kManualPaletteMaxColors], so the UI's `+` button can be
+  /// permissive.
   void appendManualPaletteColor(LampColor color) {
     final draft = _draft;
-    if (draft.length >= 10) return;
+    if (draft.length >= WispRepository.kManualPaletteMaxColors) return;
     _setDraft([...draft, color]);
   }
 

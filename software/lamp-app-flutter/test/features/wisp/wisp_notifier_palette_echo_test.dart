@@ -401,33 +401,13 @@ void main() {
       );
     });
 
-    test('the expected id is the colours the op carries, after any strip', () {
-      final palette = List<LampColor>.filled(
-        25,
-        const LampColor(r: 255, g: 255, b: 255, w: 255),
-      );
-      final op = WispRepository.buildManualPaletteOp(palette, seq: 65535);
-      expect(
-        utf8.encode(jsonEncode(op)).length,
-        lessThanOrEqualTo(WispRepository.kWispOpPayloadCap),
-      );
-      final sent = [
-        for (final c in op['colors'] as List)
-          LampColor(
-            r: (c as List)[0] as int,
-            g: c[1] as int,
-            b: c[2] as int,
-            w: c.length > 3 ? c[3] as int : 0,
-          ),
+    test('the expected id is the colours the op carries, its first 16', () {
+      final palette = [
+        for (var i = 0; i < 20; i++) LampColor(r: i, g: 2 * i, b: 9, w: i),
       ];
-      expect(sent.last.w, 0, reason: 'the seq costs the last colour its W');
       expect(
         WispRepository.sentManualId(palette, seq: 65535),
-        WispRepository.statusManualId(sent),
-      );
-      expect(
-        WispRepository.sentManualId(palette, seq: 65535),
-        isNot(WispRepository.statusManualId(palette)),
+        WispRepository.statusManualId(palette.take(16).toList()),
       );
     });
 

@@ -1,9 +1,8 @@
 // Golden vectors shared with the app's wisp_palette_hash_test.dart: the wisp
 // stamps manualPaletteId() as its palette id and the app confirms a write by
 // matching the same hash on the status NOTIFY, so both sides must agree on the
-// canonical wire bytes (r,g,b per color, plus w only when w != 0). The strip
-// vector exercises the app's trailing-W cap strip: the wisp stores what the
-// app sent, so its trailing colours arrive with w == 0.
+// canonical wire bytes (r,g,b per color, plus w only when w != 0). The
+// 16-colour vector is the widest palette the app sends and the wisp stores.
 
 #include <unity.h>
 
@@ -32,12 +31,9 @@ void test_ten_w_colours_arrive_whole(void) {
   TEST_ASSERT_EQUAL_STRING("999fdcbd", wisp::manualPaletteId(cols).c_str());
 }
 
-// The app's 30 x RGBW-255 strip vector as stored: the app's 512 B op cap
-// strips W from the last 20.
-void test_strip_palette_trailing_colours_arrive_without_w(void) {
-  std::vector<wisp::ManualPaletteColor> cols(10, {255, 255, 255, 255});
-  cols.insert(cols.end(), 20, {255, 255, 255, 0});
-  TEST_ASSERT_EQUAL_STRING("2eba5ad1", wisp::manualPaletteId(cols).c_str());
+void test_sixteen_w_colours_arrive_whole(void) {
+  std::vector<wisp::ManualPaletteColor> cols(16, {255, 255, 255, 255});
+  TEST_ASSERT_EQUAL_STRING("bbc5c685", wisp::manualPaletteId(cols).c_str());
 }
 
 void test_empty_palette_is_fnv_offset_basis(void) {
@@ -63,7 +59,7 @@ int main(int, char**) {
   RUN_TEST(test_w_zero_palette);
   RUN_TEST(test_w_present_palette);
   RUN_TEST(test_ten_w_colours_arrive_whole);
-  RUN_TEST(test_strip_palette_trailing_colours_arrive_without_w);
+  RUN_TEST(test_sixteen_w_colours_arrive_whole);
   RUN_TEST(test_empty_palette_is_fnv_offset_basis);
   RUN_TEST(test_status_manual_id_empty_is_empty_string);
   RUN_TEST(test_status_manual_id_is_the_palette_id);

@@ -41,7 +41,9 @@ Uint8List _b(String s) => Uint8List.fromList(utf8.encode(s));
 void main() {
   late InMemoryBleClient ble;
 
-  Future<ProviderContainer> makeContainer() async {
+  Future<ProviderContainer> makeContainer({
+    List<LampColor> held = _saved,
+  }) async {
     SharedPreferences.setMockInitialValues({});
     ble = InMemoryBleClient();
     await seedControlBle(ble, deviceId: _devId);
@@ -49,7 +51,7 @@ void main() {
       _devId,
       'wisppalette',
       Uint8List.fromList([
-        for (final c in _saved) ...[c.r, c.g, c.b, c.w],
+        for (final c in held) ...[c.r, c.g, c.b, c.w],
       ]),
     );
     await ble.connect(_devId);
@@ -58,7 +60,7 @@ void main() {
       BleUuids.controlService,
       BleUuids.wispStatus,
       _b('{"wispMac":"$_mac","source":"manual",'
-          '"paletteIdPrefix":"${WispRepository.paletteIdHash(_saved)}"}'),
+          '"paletteIdPrefix":"${WispRepository.manualPaletteId(held)}"}'),
     );
     final c = ProviderContainer(
       overrides: [
@@ -176,5 +178,26 @@ void main() {
 
     expect(c.read(manualPaletteDraftProvider(_devId)).colors, isEmpty);
     expect(n.manualPaletteDirty, isFalse);
+  });
+
+  // A wisp from before the 16-colour cap holds a longer palette.
+  testWidgets('a palette past 16 colours says the editor keeps 16',
+      (tester) async {
+    final held = [
+      for (var i = 0; i < 20; i++) LampColor(r: i, g: 100, b: 200 - i, w: 0),
+    ];
+    final c = await makeContainer(held: held);
+    await pumpScreen(tester, c);
+
+    expect(c.read(manualPaletteDraftProvider(_devId)).colors, held.take(16));
+    expect(find.textContaining('keeps the first 16'), findsOneWidget);
+  });
+
+  testWidgets('a palette of 16 colours or fewer says nothing of a cap',
+      (tester) async {
+    final c = await makeContainer();
+    await pumpScreen(tester, c);
+
+    expect(find.textContaining('keeps the first 16'), findsNothing);
   });
 }
