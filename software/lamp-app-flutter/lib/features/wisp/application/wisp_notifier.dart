@@ -152,9 +152,7 @@ class WispNotifier extends _$WispNotifier {
       ref.read(manualPaletteDraftProvider(lampId).notifier).setSaved(colors);
 
   bool _paletteKnown = false;
-  // Counts each time a known palette turns unknown. A save stops resending
-  // once it moves, even if a read has made the palette known again, since
-  // that read may be another wisp's palette, which a resend would overwrite.
+  // Moves each time a known palette turns unknown; see [setManualPalette].
   int _paletteLosses = 0;
   bool get _currentPaletteKnown => _paletteKnown;
   set _currentPaletteKnown(bool known) {
@@ -222,7 +220,7 @@ class WispNotifier extends _$WispNotifier {
 
   /// True when the last manual-palette write exhausted its retries without
   /// the wisp echoing it back. Drives the editor's "not saved" indicator;
-  /// cleared once a later write confirms or a fresh edit is scheduled.
+  /// cleared once a later write confirms.
   bool get manualPaletteWriteFailed => _manualPaletteWriteFailed;
 
   /// The in-flight editor draft. Mutates as the user adds, edits, reorders
@@ -1327,8 +1325,8 @@ class WispNotifier extends _$WispNotifier {
   /// Send an op, then wait for [confirm] to resolve true within its own
   /// timeout, resending up to [_writeConfirmAttempts] on a miss. [confirm]
   /// is armed before [send] each attempt so a fast echo isn't missed.
-  /// Returns true once confirmed, a confirm that lands while [send] reports an
-  /// error included, and false when every attempt goes unconfirmed.
+  /// Returns true once confirmed, a confirm that lands before [send] reports
+  /// an error included, and false when every attempt goes unconfirmed.
   /// [isSuperseded], when supplied and true at the top of an attempt, stops
   /// resending immediately and returns false. A newer op owns the state or
   /// the op became moot, so a resend from this loop must not reach the wisp.
@@ -1515,12 +1513,26 @@ class WispNotifier extends _$WispNotifier {
     final epoch = ++_paletteSaveEpoch;
     final seq = _mintSaveSeq(wispMac);
     final expected = WispRepository.sentManualId(committed, seq: seq);
-    final ok = await _sendConfirmed(
-      send: () => _repo.setManualPalette(committed, seq: seq),
-      confirm: () => _confirmPaletteEcho(wispMac, seq, expected),
-      isSuperseded: () =>
-          _paletteSaveEpoch != epoch || _paletteLosses != losses,
-    );
+    // The echo states a new palette, so it moves the losses count, but it is
+    // this save landing whenever it is heard.
+    var echoed = false;
+    final echoes = _incoming.stream.listen((s) {
+      if (_echoes(s, wispMac, seq, expected)) echoed = true;
+    });
+    final bool ok;
+    try {
+      ok = await _sendConfirmed(
+            send: () => _repo.setManualPalette(committed, seq: seq),
+            confirm: () => _confirmPaletteEcho(wispMac, seq, expected),
+            isSuperseded: () =>
+                _paletteSaveEpoch != epoch ||
+                echoed ||
+                _paletteLosses != losses,
+          ) ||
+          echoed;
+    } finally {
+      unawaited(echoes.cancel());
+    }
     if (_disposed || _paletteSaveEpoch != epoch) return;
     // Before the write's ack, this wisp may have stated another palette, or
     // the lamp may have moved on to another wisp.
@@ -1546,14 +1558,14 @@ class WispNotifier extends _$WispNotifier {
   /// wisp stores the palette in any mode.
   Future<bool> _confirmPaletteEcho(String wispMac, int seq, String manualId) {
     return _incoming.stream
-        .firstWhere((s) =>
-            s.wispMac == wispMac &&
-            s.manualSeq == seq &&
-            s.manualId == manualId)
+        .firstWhere((s) => _echoes(s, wispMac, seq, manualId))
         .timeout(_sourceConfirmTimeout)
         .then((_) => true)
         .catchError((_) => false);
   }
+
+  static bool _echoes(WispStatus s, String wispMac, int seq, String manualId) =>
+      s.wispMac == wispMac && s.manualSeq == seq && s.manualId == manualId;
 
   void _applyPaletteConfirm(
     List<LampColor> committed,
