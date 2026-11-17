@@ -37,7 +37,7 @@ class WifiNotifier extends _$WifiNotifier {
       }
       if (linkUp) return;
       linkUp = true;
-      _subscribeState(ble);
+      _subscribeState(ble, rereadOnFirstFrame: true);
       unawaited(_rereadState(ble));
     });
     ref.onDispose(() {
@@ -57,27 +57,40 @@ class WifiNotifier extends _$WifiNotifier {
     }
   }
 
-  void _subscribeState(BleClient ble) {
+  /// [rereadOnFirstFrame] reads the state again once the stream's first
+  /// frame arrives, which a client that replays its cached value emits only
+  /// after the notify is enabled.
+  void _subscribeState(BleClient ble, {bool rereadOnFirstFrame = false}) {
     _sub?.cancel();
+    var awaitingFirstFrame = rereadOnFirstFrame;
     _sub = ble
         .subscribe(_deviceId, BleUuids.controlService, BleUuids.wifiState)
         .listen(
-          _onNotify,
-          onError: (Object e) =>
-              debugPrint('[wifi_notifier] wifiState stream error: $e'),
-        );
+      (bytes) {
+        _onNotify(bytes);
+        if (!awaitingFirstFrame) return;
+        awaitingFirstFrame = false;
+        unawaited(_rereadState(ble));
+      },
+      onError: (Object e) =>
+          debugPrint('[wifi_notifier] wifiState stream error: $e'),
+    );
   }
 
   /// The lamp notifies only on a change, so a change made while the link
-  /// was down is recovered by reading.
+  /// was down is recovered by reading. The read on the reconnect edge can
+  /// run before the renewed notify is enabled; the first-frame read in
+  /// [_subscribeState] covers a change landing between the two.
   Future<void> _rereadState(BleClient ble) async {
+    final Uint8List bytes;
     try {
-      final bytes = await ble.read(
+      bytes = await ble.read(
           _deviceId, BleUuids.controlService, BleUuids.wifiState);
-      if (ref.mounted) _onNotify(bytes);
     } catch (e) {
       debugPrint('[wifi_notifier] wifiState re-read failed for $_deviceId: $e');
+      return;
     }
+    if (ref.mounted) _onNotify(bytes);
   }
 
   void _onNotify(Uint8List bytes) {

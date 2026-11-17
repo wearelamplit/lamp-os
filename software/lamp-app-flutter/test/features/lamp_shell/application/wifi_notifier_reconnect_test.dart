@@ -18,7 +18,9 @@ Uint8List _b(String s) => Uint8List.fromList(utf8.encode(s));
 /// Notify delivery as flutter_blue_plus gives it against an unbonded lamp: a
 /// new link starts with notifications off until the app subscribes again,
 /// and once it has, every listener on the characteristic receives, a
-/// listener left over from the old link included.
+/// listener left over from the old link included. A subscription enables
+/// the notify a turn after a read issued alongside it, then emits a first
+/// frame.
 class _LinkScopedBle extends InMemoryBleClient {
   int _link = 0;
   int? _notifyingLink;
@@ -32,6 +34,12 @@ class _LinkScopedBle extends InMemoryBleClient {
   /// Value a read returns once the link has dropped; null throws.
   Uint8List? readAfterDrop;
 
+  /// Lamp change pushed right after the next dropped-link read is served.
+  Uint8List? changeAfterRead;
+
+  /// Holds dropped-link reads until completed.
+  Completer<Uint8List>? readGate;
+
   @override
   Future<void> disconnect(String deviceId) {
     _link++;
@@ -41,8 +49,16 @@ class _LinkScopedBle extends InMemoryBleClient {
   @override
   Future<Uint8List> read(String d, String s, String c) {
     if (_link > 0) {
+      final gate = readGate;
+      if (gate != null) return gate.future;
       final v = readAfterDrop;
       if (v == null) throw StateError('read unavailable');
+      final change = changeAfterRead;
+      if (change != null) {
+        changeAfterRead = null;
+        readAfterDrop = change;
+        simulateNotify(d, s, c, change);
+      }
       return Future.value(v);
     }
     return super.read(d, s, c);
@@ -52,14 +68,18 @@ class _LinkScopedBle extends InMemoryBleClient {
   Stream<Uint8List> subscribe(String d, String s, String c) {
     final src = super.subscribe(d, s, c);
     subscribes++;
-    _notifyingLink = _link;
+    final link = _link;
     StreamSubscription<Uint8List>? sub;
     late final StreamController<Uint8List> out;
     out = StreamController<Uint8List>(
       onListen: () {
         listeners++;
         sub = src.where((_) => _notifyingLink == _link).listen(out.add);
-        if (_link > 0) out.add(Uint8List(0));
+        Future(() {
+          if (out.isClosed) return;
+          _notifyingLink = link;
+          if (link > 0) out.add(Uint8List(0));
+        });
       },
       onCancel: () async {
         listeners--;
@@ -142,6 +162,27 @@ void main() {
     final w = c.read(wifiNotifierProvider(_devId)).value!;
     expect(w.state, 'idle');
     expect(w.scanResults.single.ssid, 'home');
+  });
+
+  test('a change landing between the reconnect read and the notify enable '
+      'is read back', () async {
+    final (ble, c) = await openPicker('{"state":"scanning"}');
+    ble
+      ..readAfterDrop = _b('{"state":"idle"}')
+      ..changeAfterRead = _b('{"state":"connecting"}');
+    await bounce(ble);
+    expect(c.read(wifiNotifierProvider(_devId)).value!.state, 'connecting');
+  });
+
+  test('a re-read returning after the picker is disposed is dropped',
+      () async {
+    final (ble, c) = await openPicker('{"state":"scanning"}');
+    final gate = Completer<Uint8List>();
+    ble.readGate = gate;
+    await bounce(ble);
+    c.dispose();
+    gate.complete(_b('{"state":"idle"}'));
+    await pumpEventQueue();
   });
 
   test('disposing the picker stops the renewal on a later reconnect',
