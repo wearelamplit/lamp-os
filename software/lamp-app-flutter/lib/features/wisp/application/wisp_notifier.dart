@@ -614,6 +614,7 @@ class WispNotifier extends _$WispNotifier {
     if (_disposed) return;
     var next = _withHeldConfig(raw);
     _noteStamp(next);
+    final paletteWasKnown = _currentPaletteKnown;
     _notePaletteStatus(next);
     _incoming.add(next);
     _opSeqs.add(next.opSeq);
@@ -629,6 +630,7 @@ class WispNotifier extends _$WispNotifier {
         '[wisp_notifier] notify lamp=$lampId dropped stale source echo '
         'source=${next.source} pending=$_pendingSourceMode',
       );
+      if (paletteWasKnown && !_currentPaletteKnown) _bumpState();
       return;
     }
     next = guarded;
@@ -1609,6 +1611,16 @@ class WispNotifier extends _$WispNotifier {
     final wispAfter = after.wisp;
     return wispAfter == null || (stamp != null && stamp > wispAfter);
   }
+
+  /// Every emit reaches listeners, an equal status included. The screen reads
+  /// state held beside [state] (palette known, write failed, claims, live
+  /// paint), so an unchanged status can still carry a change.
+  @override
+  bool updateShouldNotify(
+    AsyncValue<WispStatus> previous,
+    AsyncValue<WispStatus> next,
+  ) =>
+      true;
 
   /// Re-emit the held [WispStatus] to nudge consumers of the field-backed
   /// claims / livePaint snapshot after an out-of-band update.
