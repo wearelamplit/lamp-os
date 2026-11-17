@@ -64,8 +64,8 @@ void main() {
 
     // The op reaches the wisp and its echo lands, but the write call reports
     // an error (a lost response).
-    test('setSource keeps the source the wisp echoed when its write then '
-        'reports an error', () async {
+    test('setSource sends no second copy of an op the wisp echoed before its '
+        'write reported an error', () async {
       final ble = PaletteBle(lampId);
       final (_, n) = await openWisp(ble, '{"wispMac":"$wispA","source":"osc"}');
 
@@ -82,6 +82,10 @@ void main() {
 
       expect(await result, isNull);
       expect(n.state.value!.source, WispSourceMode.off);
+      final sourceWrites = ble
+          .writesTo(lampId, BleUuids.wispOp)
+          .where((w) => utf8.decode(w).contains('setSource'));
+      expect(sourceWrites, hasLength(1), reason: 'the op landed; no resend');
     });
 
     test('setSource reverts source pill on BLE failure', () async {
