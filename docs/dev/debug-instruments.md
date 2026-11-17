@@ -42,6 +42,10 @@ source file is where the tag's format strings live.
 | `[roster]` | `components/network/mesh/lamp_roster.cpp` | Roster update dropped on mutex contention |
 | `[arrival]` | `core/arrival_notifier.cpp` | `onArrival` observer registry full |
 | `[moment]` | `core/moments.cpp`, `core/lamp_test_action.cpp` | Moments: `start`, `join`, `accept`, `end` with kind and seed, a Whisper hop or chain end, settle reason, a frame given up, a skip with its reason (every build); `moment_state` dumps, each Fireflies beat `ff k=.. d=..` and a refused render (debug builds). See [`moments.md`](moments.md) |
+| `[resend.overwrite]` | `components/network/mesh/resend_ring.hpp` | `buf=B slots=N lost=R`: an enqueue wrapped onto a ring slot still holding R unsent resends, which are lost (debug builds) |
+| `[queue.full]` | `core/pending_typed_queue.hpp` | `size=<sizeof T>`: a Core 0 post found the pending queue full and dropped the entry; the size tells which queue (debug builds) |
+| `[slot.overwrite]` | `core/pending_typed_slot.hpp` | `size=<sizeof T>`: a post landed on a slot whose previous event was not yet drained, so that event is lost; the size tells which slot (debug builds) |
+| `[greet]` | `lamps/snafu/greeting.cpp` | `hold stops=N`: the snafu greeting just ended with N base-colour stops captured, printed before the borrow-hold starts (debug builds) |
 | `[social]` | `behaviors/social.cpp` | Greet decision (`greet %s mode=.. frames=..`), introvert fatigue window |
 | `[ble]` | `components/network/ble/bluetooth.cpp`, `ble_control.cpp` | Advertising config (adv colors, central scan stop/restart) + brightness recv |
 | `[ble_control]` | `components/network/ble/ble_control.cpp` | GATT client connect / disconnect / auth, edit-session, home-mode focus, knockout write, settings_blob write, page CTRL/DATA, GATT binding + service start/stop, OTA pause/resume |

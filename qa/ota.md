@@ -77,8 +77,8 @@ skew:
    the peer logs `[ota_ind] t=... rxInProgress=1 rxTotal=... done=... total=...`
    and `paused adv + scan`; visually both strips show the OTA progress bar
    (sender's base color advancing over the receiver's dimmed base), and the base
-   surface settles to its configured colors then subtly pulses (≤20%) toward the
-   peer color. After the flow: `resumed adv + scan`. FS-image OTA runs this same
+   surface eases to its configured colors over 600 ms and holds. After the
+   flow: `resumed adv + scan`. FS-image OTA runs this same
    path but SILENT — see Indicator expectations. With the app connected to
    either lamp when the session starts, that lamp logs `kicked GATT client`
    and `Client disconnected`, then no `Client connected` that stays up until
@@ -193,11 +193,11 @@ tap, opened before the transfer so the open's reset lands on the old image.
 
 - **Firmware OTA** — a DIM full-shade fill (~16% physical, own base color when
   the roster is cold) + a peer-color progress band, plus the base surface
-  settling to its configured colors and subtly pulsing (≤20%) toward the peer
-  color. Reads as "the lamp dimmed with a calm base", not an obvious bar.
+  easing to its configured colors over 600 ms and holding. Reads as "the lamp
+  dimmed with a calm base", not an obvious bar.
   `[ota_ind] done=/total=` serial lines are the reliable signal. (Dim + band
-  verified 2026-07-15; base settle/pulse 2026-07-17, bench-pending.)
-- **FS-image OTA is visually SILENT** — no dim, no progress band, no pulse: the
+  verified 2026-07-15; base settle 2026-07-17, bench-pending.)
+- **FS-image OTA is visually SILENT** — no dim, no progress band: the
   base surface settles to its configured colors and holds, and the coex radio
   pause still applies. A silent FS catch-up is CORRECT, not a miss; judge it by
   `[fs_ota]`/chunk lines, never the strip. A ~0.5–1 s render freeze during the
@@ -217,9 +217,9 @@ tap, opened before the transfer so the open's reset lands on the old image.
   rebooted with BLE back when a page was open.
 - Full step-2 chain present on the taps, ending in `RESULT success` and a
   `== VERSION` transition; exactly one transfer (no OFFER/DONE thrash loop).
-- Firmware OTA: `[ota_ind]` lines + visible progress bar + base settle/pulse
+- Firmware OTA: `[ota_ind]` lines + visible progress bar + base settle
   during transfer; adv/scan pause + resume lines bracket it. FS-image OTA: NO
-  bar/dim/pulse (silent by design) — a calm base settle is the pass, judged by
+  bar/dim (silent by design) — a calm base settle is the pass, judged by
   `[fs_ota]`/chunk lines.
 - Peer's name/config identical across the OTA reboot.
 - Rollback (rows 8-11): a hang before `marked valid` boots version N with

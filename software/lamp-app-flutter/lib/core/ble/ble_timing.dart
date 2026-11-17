@@ -39,8 +39,8 @@ class BleTimingEvent {
 
   /// `already_up` when the attempt began while the stack still reported the
   /// lamp linked (a reboot it has not noticed, a disconnect still in flight, a
-  /// link left up), so `ms` may be a no-op connect or include a wait. `aborted` when the link came up
-  /// but the caller had given up.
+  /// link left up), so `ms` may be a no-op connect or include a wait. `aborted`
+  /// when the link came up but the caller had given up.
   final String? note;
 
   @override
