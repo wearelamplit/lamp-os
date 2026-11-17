@@ -5,6 +5,13 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## Unreleased
+
+### Fixed
+- **The wisp settings screen fills in even when the lamp missed the wisp's
+  settings.** The app asks the wisp again and keeps reading until they
+  arrive. Through a lamp older than 1.2.8 it asks you to update that lamp.
+
 ## 1.3.8
 
 ### Added
