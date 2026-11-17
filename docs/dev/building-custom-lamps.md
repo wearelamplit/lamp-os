@@ -243,10 +243,10 @@ rotated, even on a surface whose saved scene rotates. `setGradient` builds an
 open gradient and keeps the first 8 stops.
 
 **Brightness.** Two axes, both composing (never a raw strip write — a raw write
-would fight crowd-dim, the OTA pulse, and the wisp override):
+would fight crowd-dim and the wisp override):
 
 - `setBrightness(uint8_t level)` — master brightness, through the user-brightness
-  micro-fade. Stacks with crowd-dim and the OTA pulse.
+  micro-fade. Stacks with crowd-dim.
 - `setSurfaceBrightness(Surface, uint8_t level)` — a 0–100 percent per-surface
   trim riding *under* master. Scales one surface down without touching the
   other; `100` clears the trim.
