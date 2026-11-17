@@ -225,7 +225,7 @@ class WispNotifier extends _$WispNotifier {
   DateTime? _lastConfigPollAt;
 
   // A config read skipped while another read held the link; it runs as soon
-  // as the link is free instead of waiting for the next notify.
+  // as the link is free.
   bool _configReadOwed = false;
 
   // While a split status's wisp has no config held, re-poll and re-read on a
@@ -343,6 +343,7 @@ class WispNotifier extends _$WispNotifier {
       if (linkUp) return;
       linkUp = true;
       _subscribeStatus(ble);
+      _restartConfigRefill();
     });
 
     // Subscribe before the initial read to never miss a notify that
@@ -695,8 +696,15 @@ class WispNotifier extends _$WispNotifier {
       status != null &&
       status.present &&
       status.configSplit &&
-      !status.configKnown &&
-      _repo.wispSectionsSupported;
+      !status.configKnown;
+
+  void _restartConfigRefill() {
+    _configRefillTimer?.cancel();
+    _configRefillTimer = null;
+    _configRefillDelay = _configRefillFirst;
+    final cur = state.value;
+    if (cur != null) _scheduleConfigRefill(cur);
+  }
 
   void _scheduleConfigRefill(WispStatus status) {
     if (_disposed) return;
@@ -713,9 +721,16 @@ class WispNotifier extends _$WispNotifier {
       if (_disposed || !_configMissing(cur)) return;
       final next = _configRefillDelay * 2;
       _configRefillDelay = next > _configRefillMax ? _configRefillMax : next;
-      await pollConfig();
+      // Every build read can land before the auth handshake, and a lamp with
+      // no config cached merges no configLastSeenMs, so nothing else marks
+      // the sections. A lamp before 1.2.8 never serves them.
+      if (!_repo.wispSectionsSupported) await _rereadStatusSection();
       if (_disposed) return;
-      await _readConfigSection(state.value ?? cur!);
+      if (_repo.wispSectionsSupported) {
+        await pollConfig();
+        if (_disposed) return;
+        await _readConfigSection(state.value ?? cur!);
+      }
       final after = state.value;
       if (after != null) _scheduleConfigRefill(after);
     });
@@ -895,8 +910,8 @@ class WispNotifier extends _$WispNotifier {
     // opSeq rides the config: refresh it from the section first, waiting out
     // any read in flight, so the baseline is the wisp's current value. For a
     // split status nothing else carries it, so without a fresh read there is
-    // no baseline: a placeholder 0 or a stale held value would let a later
-    // opSeq confirm a rejected change.
+    // no baseline, and a placeholder 0 or a stale held value would let a
+    // later opSeq confirm a rejected change.
     final cur = state.value;
     WispConfig? fresh;
     if (cur != null && _repo.wispSectionsSupported) {

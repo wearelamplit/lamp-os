@@ -94,31 +94,119 @@ void main() {
     expect(ops(ble), contains('pollConfig'));
   });
 
-  // A new configLastSeenMs lands while another read holds the link; the read
-  // it owes runs once the link is free, not on the next notify.
-  test('skipped read retried once reads go idle', () async {
-    final ble = _HeldClaimsBle();
+  // A new configLastSeenMs lands while another read holds the link. The read
+  // it owes runs once the link is free, without another notify.
+  group('skipped config read retried once reads go idle', () {
+    Future<(_HeldBle, ProviderContainer)> heldBuild() async {
+      final ble = _HeldBle();
+      await ble.connect(_lampId);
+      ble.seedSection(
+          _lampId, 'wispstatus', _b(_split(configLastSeenMs: 100)));
+      ble.seedSection(_lampId, 'wispconfig', _b(_config(px: 60)));
+      final c = makeContainer(ble);
+      await built(c);
+      return (ble, c);
+    }
+
+    Future<void> releaseAndExpect44(_HeldBle ble, ProviderContainer c) async {
+      expect(ble.held, isTrue, reason: 'the read under test never started');
+      ble.seedSection(_lampId, 'wispconfig', _b(_config(px: 44)));
+      notify(ble, _split(configLastSeenMs: 300));
+      await settle();
+      ble.hold!.complete();
+      ble.hold = null;
+      for (var i = 0; i < 10; i++) {
+        await settle();
+      }
+      expect(c.read(wispNotifierProvider(_lampId)).value!.pixelCount, 44);
+    }
+
+    test('behind a claims read', () async {
+      final (ble, c) = await heldBuild();
+      ble.holdOn(BleUuids.wispClaims);
+      notify(ble, _split(configLastSeenMs: 100));
+      await settle();
+      await releaseAndExpect44(ble, c);
+    });
+
+    test('behind a palette read', () async {
+      final (ble, c) = await heldBuild();
+      ble.holdOn('wisppalette');
+      notify(
+        ble,
+        '{"wispMac":"$_mac","configSplit":true,"source":"manual",'
+        '"paletteIdPrefix":"abcdef12","configLastSeenMs":100}',
+      );
+      await settle();
+      await releaseAndExpect44(ble, c);
+    });
+
+    test('behind a status re-read', () async {
+      final (ble, c) = await heldBuild();
+      ble.holdOn('wispstatus');
+      notify(ble, '{"wispMac":"$_mac","sour');
+      await settle();
+      await releaseAndExpect44(ble, c);
+    });
+
+    // The read in flight serves the config from before the change.
+    test('behind an earlier config read', () async {
+      final (ble, c) = await heldBuild();
+      ble.seedSection(_lampId, 'wispconfig', _b(_config(px: 50)));
+      ble.holdOn('wispconfig');
+      notify(ble, _split(configLastSeenMs: 200));
+      await settle();
+      await releaseAndExpect44(ble, c);
+    });
+  });
+
+  // Every build read landed before the auth handshake, so nothing showed the
+  // lamp serves the sections, and a lamp holding no config merges no
+  // configLastSeenMs to show it later.
+  test('refill finds the sections when every build read missed them',
+      () async {
+    final ble = InMemoryBleClient();
     await ble.connect(_lampId);
-    ble.seedSection(_lampId, 'wispstatus', _b(_split(configLastSeenMs: 100)));
-    ble.seedSection(_lampId, 'wispconfig', _b(_config(px: 60)));
+    await ble.write(
+      _lampId,
+      BleUuids.controlService,
+      BleUuids.wispStatus,
+      _b(_split()),
+    );
     final c = makeContainer(ble);
     await built(c);
+    expect(c.read(wispNotifierProvider(_lampId)).value!.configKnown, isFalse);
 
-    ble.holdClaims = Completer<void>();
-    notify(ble, _split(configLastSeenMs: 100));
-    await settle();
-    expect(ble.claimsHeld, isTrue);
-
+    ble.seedSection(_lampId, 'wispstatus', _b(_split()));
     ble.seedSection(_lampId, 'wispconfig', _b(_config(px: 44)));
-    notify(ble, _split(configLastSeenMs: 200));
-    await settle();
-    expect(c.read(wispNotifierProvider(_lampId)).value!.pixelCount, 60);
-
-    ble.holdClaims!.complete();
-    ble.holdClaims = null;
-    for (var i = 0; i < 10; i++) {
-      await settle();
+    for (var i = 0;
+        i < 80 && !c.read(wispNotifierProvider(_lampId)).value!.configKnown;
+        i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
     }
+
+    expect(c.read(wispNotifierProvider(_lampId)).value!.pixelCount, 44);
+  });
+
+  // The refill backs off while the config stays missing (1 s, then 2 s, so
+  // reads at 1 s and 3 s), and a reconnect starts it again from 1 s.
+  test('refill backs off, and a reconnect restarts it', () async {
+    final ble = _HeldBle();
+    await ble.connect(_lampId);
+    ble.seedSection(_lampId, 'wispstatus', _b(_split()));
+    ble.seedSection(_lampId, 'wispconfig', _b('{}'));
+    final c = makeContainer(ble);
+    await built(c);
+    final atBuild = ble.configReads;
+
+    await Future<void>.delayed(const Duration(milliseconds: 3500));
+    expect(ble.configReads - atBuild, 2);
+
+    await ble.disconnect(_lampId);
+    await settle();
+    await ble.connect(_lampId);
+    ble.seedSection(_lampId, 'wispconfig', _b(_config(px: 44)));
+    await Future<void>.delayed(const Duration(milliseconds: 1500));
 
     expect(c.read(wispNotifierProvider(_lampId)).value!.pixelCount, 44);
   });
@@ -221,20 +309,46 @@ void main() {
   });
 }
 
-/// Holds every CHAR_WISP_CLAIMS read while [holdClaims] is set, so a test can
-/// leave a claims read in flight.
-class _HeldClaimsBle extends InMemoryBleClient {
-  Completer<void>? holdClaims;
-  bool claimsHeld = false;
+/// Holds the read of one section or characteristic while [hold] is set, so a
+/// test can leave that read in flight. The bytes are taken before the hold,
+/// as a read the lamp already answered. Counts `wispconfig` reads.
+class _HeldBle extends InMemoryBleClient {
+  Completer<void>? hold;
+  String? _target;
+  bool held = false;
+  int configReads = 0;
+
+  void holdOn(String target) {
+    _target = target;
+    hold = Completer<void>();
+  }
+
+  Future<T> _maybeHold<T>(String target, Future<T> Function() read) async {
+    T? value;
+    Object? error;
+    StackTrace? trace;
+    try {
+      value = await read();
+    } catch (e, st) {
+      error = e;
+      trace = st;
+    }
+    final h = hold;
+    if (h != null && target == _target) {
+      held = true;
+      await h.future;
+    }
+    if (error != null) Error.throwWithStackTrace(error, trace!);
+    return value as T;
+  }
 
   @override
-  Future<Uint8List> read(String d, String s, String c) async {
-    final hold = holdClaims;
-    if (c == BleUuids.wispClaims && hold != null) {
-      claimsHeld = true;
-      await hold.future;
-      claimsHeld = false;
-    }
-    return super.read(d, s, c);
+  Future<Uint8List> read(String d, String s, String c) =>
+      _maybeHold(c, () => super.read(d, s, c));
+
+  @override
+  Future<Uint8List> readSection(String deviceId, String name) {
+    if (name == 'wispconfig') configReads++;
+    return _maybeHold(name, () => super.readSection(deviceId, name));
   }
 }

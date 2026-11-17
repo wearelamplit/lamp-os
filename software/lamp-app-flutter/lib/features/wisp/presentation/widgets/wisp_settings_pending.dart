@@ -1,13 +1,13 @@
+import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/app_spacing.dart';
 import '../../../inventory/application/inventory_notifier.dart';
-import '../../../inventory/domain/inventory_lamp.dart';
 
 /// Lamp firmware from which the lamp serves the `wispconfig` section, packed
-/// as `(major << 16) | (minor << 8) | patch`. Through an older lamp the
-/// wisp's settings never arrive.
+/// as `(major << 16) | (minor << 8) | patch`. Through an older lamp a wisp
+/// that sends its settings only in `wispConfig` shows none.
 const int kWispConfigMinLampFw = 0x010208;
 
 /// Placeholder for a settings control while the wisp's real settings have
@@ -23,12 +23,9 @@ class WispSettingsPending extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final fw = ref.watch(
-      inventoryNotifierProvider.select<int?>((inv) {
-        for (final l in inv.value ?? const <InventoryLamp>[]) {
-          if (l.id == lampId) return l.fwVersion;
-        }
-        return null;
-      }),
+      inventoryNotifierProvider.select<int?>(
+        (inv) => inv.value?.firstWhereOrNull((l) => l.id == lampId)?.fwVersion,
+      ),
     );
     final style = Theme.of(
       context,
