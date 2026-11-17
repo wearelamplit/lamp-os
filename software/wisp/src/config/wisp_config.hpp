@@ -24,8 +24,10 @@ enum class WispSourceMode : uint8_t {
   Osc    = 3,
 };
 
-// Must not exceed lamp_protocol::kMaxWispPaletteColors; setManualPalette enforces this.
-inline constexpr size_t kManualPaletteMaxColors = 50;
+// The most a Straylight palette carries. Must not exceed
+// lamp_protocol::kMaxWispPaletteColors; setManualPalette and the NVS load
+// keep a longer palette's first colours.
+inline constexpr size_t kManualPaletteMaxColors = 16;
 
 // The stored Manual palette as wispStatus reports it.
 struct ManualPaletteStatus {

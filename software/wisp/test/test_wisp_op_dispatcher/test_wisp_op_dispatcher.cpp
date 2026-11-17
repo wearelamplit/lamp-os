@@ -229,6 +229,27 @@ void test_malformed_palette_op_keeps_echo() {
     TEST_ASSERT_EQUAL_UINT8(1, cfg.manualPalette()[0].r);
 }
 
+// A palette op with more than 16 colours stores its first 16.
+void test_set_manual_palette_keeps_the_first_16_colours() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    wisp::WispOpDispatcher d(cfg);
+    std::string op = R"({"char":"wispOp","op":"setManualPalette","colors":[)";
+    for (int i = 0; i < 20; ++i) {
+        if (i) op += ",";
+        op += "[" + std::to_string(i + 1) + "," + std::to_string(40 + i) +
+              "," + std::to_string(200 - i) + "]";
+    }
+    op += "]}";
+    auto result = dispatchJson(d, op.c_str());
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedManualPalette, (int)result);
+    const auto& pal = cfg.manualPalette();
+    TEST_ASSERT_EQUAL(16, (int)pal.size());
+    TEST_ASSERT_EQUAL_UINT8(1, pal[0].r);
+    TEST_ASSERT_EQUAL_UINT8(16, pal[15].r);
+    TEST_ASSERT_EQUAL_UINT8(55, pal[15].g);
+}
+
 void test_set_off_color_rgbw_tuple() {
     wisp::WispConfig cfg;
     cfg.begin();
@@ -660,6 +681,7 @@ int main(int, char**) {
     RUN_TEST(test_zone_ops_unknown);
     RUN_TEST(test_set_manual_palette_echoes_seq);
     RUN_TEST(test_set_manual_palette_without_valid_seq_clears_echo);
+    RUN_TEST(test_set_manual_palette_keeps_the_first_16_colours);
     RUN_TEST(test_malformed_palette_op_keeps_echo);
     return UNITY_END();
 }

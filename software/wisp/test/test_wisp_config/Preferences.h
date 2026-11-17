@@ -3,7 +3,9 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <string>
+#include <vector>
 
 // ponytail: flat array KV store, capped at 32 entries — covers test volume.
 namespace {
@@ -14,9 +16,12 @@ KvEntry s_kv[kKvCap];
 // The real NVS logs an error for each remove of a key that isn't there.
 int s_removeMissing = 0;
 
+std::map<std::string, std::vector<uint8_t>> s_blobs;
+
 static void kv_reset() {
   for (auto& e : s_kv) e.used = false;
   s_removeMissing = 0;
+  s_blobs.clear();
 }
 
 static KvEntry* kv_find(const char* k) {
@@ -72,11 +77,27 @@ class Preferences {
   uint16_t getUShort(const char* k, uint16_t def = 0) {
     const auto* e = kv_find(k); return e ? (uint16_t)strtoul(e->val, nullptr, 10) : def;
   }
-  size_t getBytesLength(const char*) { return 0; }
-  size_t getBytes(const char*, void*, size_t) { return 0; }
-  size_t putBytes(const char*, const void*, size_t) { return 0; }
-  bool   isKey(const char* k) { return kv_find(k) != nullptr; }
+  size_t getBytesLength(const char* k) {
+    const auto it = s_blobs.find(k);
+    return it == s_blobs.end() ? 0 : it->second.size();
+  }
+  size_t getBytes(const char* k, void* buf, size_t len) {
+    const auto it = s_blobs.find(k);
+    if (it == s_blobs.end()) return 0;
+    const size_t n = len < it->second.size() ? len : it->second.size();
+    memcpy(buf, it->second.data(), n);
+    return n;
+  }
+  size_t putBytes(const char* k, const void* buf, size_t len) {
+    const auto* p = static_cast<const uint8_t*>(buf);
+    s_blobs[k].assign(p, p + len);
+    return len;
+  }
+  bool   isKey(const char* k) {
+    return kv_find(k) != nullptr || s_blobs.count(k) != 0;
+  }
   bool   remove(const char* k) {
+    if (s_blobs.erase(k) != 0) return true;
     auto* e = kv_find(k);
     if (!e) { ++s_removeMissing; return false; }
     e->used = false;

@@ -229,6 +229,69 @@ void test_manual_palette_status_echoes_the_save_seq() {
   TEST_ASSERT_EQUAL_STRING("", cfg.manualPaletteStatus().id);
 }
 
+// 20 colours, each distinct in every channel, so a kept tail or a shifted
+// window shows.
+static std::vector<wisp::ManualPaletteColor> twentyColours() {
+  std::vector<wisp::ManualPaletteColor> out;
+  for (uint8_t i = 0; i < 20; ++i) {
+    out.push_back({static_cast<uint8_t>(i + 1), static_cast<uint8_t>(40 + i),
+                   static_cast<uint8_t>(200 - i), static_cast<uint8_t>(i * 3)});
+  }
+  return out;
+}
+
+static void assertFirstSixteen(const wisp::WispConfig& cfg) {
+  const auto all = twentyColours();
+  const auto& pal = cfg.manualPalette();
+  TEST_ASSERT_EQUAL(16, (int)pal.size());
+  for (size_t i = 0; i < pal.size(); ++i) {
+    TEST_ASSERT_EQUAL_UINT8(all[i].r, pal[i].r);
+    TEST_ASSERT_EQUAL_UINT8(all[i].g, pal[i].g);
+    TEST_ASSERT_EQUAL_UINT8(all[i].b, pal[i].b);
+    TEST_ASSERT_EQUAL_UINT8(all[i].w, pal[i].w);
+  }
+  const std::vector<wisp::ManualPaletteColor> first(all.begin(),
+                                                    all.begin() + 16);
+  TEST_ASSERT_EQUAL_STRING(wisp::statusManualId(first).c_str(),
+                           cfg.manualPaletteStatus().id);
+}
+
+// A Manual palette holds at most 16 colours, the most a Straylight palette
+// carries; a longer one keeps its first 16, in RAM and in NVS.
+void test_manual_palette_keeps_its_first_16_colours() {
+  wisp::WispConfig cfg;
+  cfg.begin();
+  cfg.setManualPalette(twentyColours());
+  assertFirstSixteen(cfg);
+
+  wisp::WispConfig reloaded;
+  reloaded.begin();
+  assertFirstSixteen(reloaded);
+}
+
+// A palette stored before the cap, RGBW or legacy RGB, loads as its first 16.
+void test_longer_stored_palette_loads_its_first_16_colours() {
+  const auto all = twentyColours();
+  Preferences prefs;
+  std::vector<uint8_t> rgbw;
+  for (const auto& c : all) rgbw.insert(rgbw.end(), {c.r, c.g, c.b, c.w});
+  prefs.putBytes("manualPal4", rgbw.data(), rgbw.size());
+  wisp::WispConfig cfg;
+  cfg.begin();
+  assertFirstSixteen(cfg);
+
+  kv_reset();
+  std::vector<uint8_t> rgb;
+  for (const auto& c : all) rgb.insert(rgb.end(), {c.r, c.g, c.b});
+  prefs.putBytes("manualPal", rgb.data(), rgb.size());
+  wisp::WispConfig legacy;
+  legacy.begin();
+  const auto& pal = legacy.manualPalette();
+  TEST_ASSERT_EQUAL(16, (int)pal.size());
+  TEST_ASSERT_EQUAL_UINT8(all[15].r, pal[15].r);
+  TEST_ASSERT_EQUAL_UINT8(all[15].b, pal[15].b);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_name_default_is_empty);
@@ -255,5 +318,7 @@ int main(int, char**) {
   RUN_TEST(test_clearing_unset_settings_removes_no_missing_key);
   RUN_TEST(test_manual_palette_status_reports_the_stored_palette);
   RUN_TEST(test_manual_palette_status_echoes_the_save_seq);
+  RUN_TEST(test_manual_palette_keeps_its_first_16_colours);
+  RUN_TEST(test_longer_stored_palette_loads_its_first_16_colours);
   return UNITY_END();
 }
