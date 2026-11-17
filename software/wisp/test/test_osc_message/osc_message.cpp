@@ -209,18 +209,18 @@ void test_classify_feed_packet(void) {
                                        "/straylight/", f, 150, n));
 }
 
-// The OSC palette cap, kOscPaletteMaxColors, is 50 colours. A 40-colour
-// Straylight palette decodes whole at that capacity and a 51-colour one is
-// refused whole.
+// The OSC palette cap, kOscPaletteMaxColors, is 50 colours, wider than the
+// Manual palette's. A 50-colour Straylight palette decodes whole at that
+// capacity and a 51-colour one is refused whole.
 void test_osc_cap_is_50_colours(void) {
-  const auto d = floatMessage(kPaletteAddr, 40 * 3);
+  const auto d = floatMessage(kPaletteAddr, 50 * 3);
   std::vector<float> f(wisp::kOscPaletteMaxColors * 3);
   size_t n = 0;
   TEST_ASSERT_EQUAL_INT((int)wisp::OscFeedPacket::Palette,
       (int)wisp::oscClassifyFeedPacket(d.data(), d.size(), kPaletteAddr,
                                        "/straylight/", f.data(), f.size(), n));
-  TEST_ASSERT_EQUAL_UINT(40 * 3, n);
-  TEST_ASSERT_EQUAL_FLOAT(119.0f / 120.0f, f[119]);
+  TEST_ASSERT_EQUAL_UINT(50 * 3, n);
+  TEST_ASSERT_EQUAL_FLOAT(149.0f / 150.0f, f[149]);
   const auto over = floatMessage(kPaletteAddr, 51 * 3);
   TEST_ASSERT_EQUAL_INT((int)wisp::OscFeedPacket::Other,
       (int)wisp::oscClassifyFeedPacket(over.data(), over.size(), kPaletteAddr,

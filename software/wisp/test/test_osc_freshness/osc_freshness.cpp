@@ -118,8 +118,8 @@ void test_feed_does_not_make_stale_live() {
 // again is not; a role change is.
 void test_memo_sees_white_and_role_changes() {
   wisp::OscPaletteMemo memo;
-  const wisp::PaletteColor warm[2] = {{1, 0, 0, 0.5f}, {0, 0, 1, 0}};
-  const wisp::PaletteColor warmer[2] = {{1, 0, 0, 1.0f}, {0, 0, 1, 0}};
+  const wisp::PaletteColor warm[2] = {{1, 0, 0, 0}, {0, 0, 1, 0.5f}};
+  const wisp::PaletteColor warmer[2] = {{1, 0, 0, 0}, {0, 0, 1, 1.0f}};
   TEST_ASSERT_TRUE(memo.hold(warm, 2, wisp::OscRole::Primary));
   TEST_ASSERT_FALSE(memo.hold(warm, 2, wisp::OscRole::Primary));
   TEST_ASSERT_TRUE(memo.hold(warmer, 2, wisp::OscRole::Primary));
