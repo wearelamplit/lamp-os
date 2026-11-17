@@ -125,10 +125,17 @@ class WifiNotifier extends _$WifiNotifier {
     ));
   }
 
+  /// A malformed frame throws a [FormatException] without the frame's
+  /// source, which carries nearby SSIDs, so callers can log it as is.
   WifiState _parse(Uint8List bytes) {
     if (bytes.isEmpty) return const WifiState();
-    return WifiState.fromJson(
-        jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>);
+    final Object? json;
+    try {
+      json = jsonDecode(utf8.decode(bytes));
+    } on FormatException catch (e) {
+      throw FormatException(e.message, null, e.offset);
+    }
+    return WifiState.fromJson(json as Map<String, dynamic>);
   }
 
   Future<void> scan() => _writeOp({'op': 'scan'});

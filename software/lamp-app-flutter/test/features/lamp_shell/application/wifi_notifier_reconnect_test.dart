@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
@@ -217,6 +218,24 @@ void main() {
     final w = c.read(wifiNotifierProvider(_devId)).value!;
     expect(w.state, 'idle');
     expect(w.scanResults.single.ssid, 'home');
+  });
+
+  test('a frame that fails to parse is logged without its scan data',
+      () async {
+    final (ble, _) = await openPicker('{"state":"scanning"}');
+    final logs = <String>[];
+    final saved = debugPrint;
+    debugPrint = (m, {wrapWidth}) => logs.add(m ?? '');
+    addTearDown(() => debugPrint = saved);
+    const cut = '{"state":"idle","scanResults":[{"ssid":"neighbour-wif';
+    await ble.write(
+        _devId, BleUuids.controlService, BleUuids.wifiState, _b(cut));
+    ble.simulateNotify(
+        _devId, BleUuids.controlService, BleUuids.wifiState, _b(cut));
+    await pumpEventQueue();
+    expect(logs.where((l) => l.contains('failed')), hasLength(2),
+        reason: 'the notify and its re-read both fail to parse');
+    expect(logs.where((l) => l.contains('neighbour')), isEmpty);
   });
 
   test('a re-read that fails to parse leaves the state', () async {
