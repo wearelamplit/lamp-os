@@ -209,9 +209,10 @@ void test_classify_feed_packet(void) {
                                        "/straylight/", f, 150, n));
 }
 
-// The OSC path keeps its own colour cap, wider than the Manual palette's 16:
-// a 40-colour Straylight palette decodes whole at the listener's capacity.
-void test_osc_cap_takes_a_40_colour_palette(void) {
+// The OSC palette cap, kOscPaletteMaxColors, is 50 colours. A 40-colour
+// Straylight palette decodes whole at that capacity and a 51-colour one is
+// refused whole.
+void test_osc_cap_is_50_colours(void) {
   const auto d = floatMessage(kPaletteAddr, 40 * 3);
   std::vector<float> f(wisp::kOscPaletteMaxColors * 3);
   size_t n = 0;
@@ -220,6 +221,10 @@ void test_osc_cap_takes_a_40_colour_palette(void) {
                                        "/straylight/", f.data(), f.size(), n));
   TEST_ASSERT_EQUAL_UINT(40 * 3, n);
   TEST_ASSERT_EQUAL_FLOAT(119.0f / 120.0f, f[119]);
+  const auto over = floatMessage(kPaletteAddr, 51 * 3);
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscFeedPacket::Other,
+      (int)wisp::oscClassifyFeedPacket(over.data(), over.size(), kPaletteAddr,
+                                       "/straylight/", f.data(), f.size(), n));
 }
 
 void test_slip_frame_with_escapes(void) {
@@ -335,7 +340,7 @@ int main(int, char**) {
   RUN_TEST(test_unknown_type_tag_rejected);
   RUN_TEST(test_address_prefix_found_in_bundle);
   RUN_TEST(test_classify_feed_packet);
-  RUN_TEST(test_osc_cap_takes_a_40_colour_palette);
+  RUN_TEST(test_osc_cap_is_50_colours);
   RUN_TEST(test_slip_frame_with_escapes);
   RUN_TEST(test_slip_back_to_back_and_oversize);
   RUN_TEST(test_slip_carries_straylight_bundle);

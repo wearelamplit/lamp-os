@@ -95,11 +95,8 @@ class WispController {
   bool haveAppliedMode_ = false;
   OscFreshness oscFresh_;
   RateGate oscPaintGate_{kOscPaintIntervalMs};
-  // Last applied palette and its role; an identical one only refreshes
-  // liveness. A role change applies the new role's first palette.
-  PaletteColor oscLast_[kOscPaletteMaxColors];
-  size_t oscLastCount_ = 0;
-  OscRole oscLastRole_ = OscRole::Primary;
+  // A role change applies the new role's first palette.
+  OscPaletteMemo oscLast_;
   uint32_t oscLastLogMs_ = 0;
   // Reused across changes so a streaming palette never reallocates.
   Palette oscScratch_;

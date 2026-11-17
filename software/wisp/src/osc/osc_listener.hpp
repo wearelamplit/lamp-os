@@ -39,6 +39,9 @@ class OscListener {
   uint32_t lastOpenAttemptMs_ = 0;
   bool attempted_ = false;
   uint8_t rx_[1500];
+  // Held off the 8 KB loop stack, since the palette path under handlePacket
+  // runs deep.
+  float rgb_[kOscPaletteMaxColors * 3];
 };
 
 }  // namespace wisp

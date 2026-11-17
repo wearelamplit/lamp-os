@@ -165,7 +165,7 @@ void WispController::applyLedConfig() {
 void WispController::resetOscStream() {
   oscFresh_.reset();
   oscPaintGate_.reset();
-  oscLastCount_ = 0;
+  oscLast_.clear();
   palette_.clear();
 }
 
@@ -305,7 +305,7 @@ void WispController::applyOpResult(DispatchResult res) {
 void WispController::onOscPalette(const PaletteColor* colours, size_t count,
                                   const char* via, uint32_t nowMs) {
   if (config_.sourceMode() != wisp::WispSourceMode::Osc) return;
-  if (count == 0) return;
+  if (count == 0 || count > kOscPaletteMaxColors) return;
   if (isBlankPalette(colours, count)) {
     if (oscFresh_.live()) {
       holdOscStream();
@@ -315,22 +315,15 @@ void WispController::onOscPalette(const PaletteColor* colours, size_t count,
     return;
   }
   const bool resumed = oscFresh_.onPalette(nowMs);
-  const OscRole role = config_.oscRole();
-  const size_t bytes = count * sizeof(PaletteColor);
-  if (!resumed && role == oscLastRole_ && count == oscLastCount_ &&
-      std::memcmp(colours, oscLast_, bytes) == 0) {
-    return;
-  }
-  std::memcpy(oscLast_, colours, bytes);
-  oscLastCount_ = count;
-  oscLastRole_ = role;
+  const bool changed = oscLast_.hold(colours, count, config_.oscRole());
+  if (!resumed && !changed) return;
 
   oscScratch_.colors.assign(colours, colours + count);
   // 8 hex chars fits SSO, so the id write never allocates.
   char id[9];
   std::snprintf(id, sizeof(id), "%08x",
                 (unsigned)wisp::fnv1a(reinterpret_cast<const uint8_t*>(colours),
-                                      bytes));
+                                      count * sizeof(PaletteColor)));
   oscScratch_.id = id;
   palette_.update(oscScratch_, nowMs);
   // The ring renders first because it re-opens the ArtNet gate on a resume;

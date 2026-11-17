@@ -67,10 +67,9 @@ void OscListener::poll(bool active, uint32_t nowMs) {
 
 void OscListener::handlePacket(const uint8_t* data, size_t len,
                                const char* via) {
-  float rgb[kOscPaletteMaxColors * 3];
   size_t n = 0;
   switch (oscClassifyFeedPacket(data, len, oscPaletteAddress(config_.oscRole()),
-                                kStraylightAddressPrefix, rgb,
+                                kStraylightAddressPrefix, rgb_,
                                 kOscPaletteMaxColors * 3, n)) {
     case OscFeedPacket::Palette:
       break;
@@ -84,9 +83,9 @@ void OscListener::handlePacket(const uint8_t* data, size_t len,
   const size_t count = n / 3;
   PaletteColor colours[kOscPaletteMaxColors];
   for (size_t i = 0; i < count; ++i) {
-    colours[i].r = rgb[i * 3 + 0];
-    colours[i].g = rgb[i * 3 + 1];
-    colours[i].b = rgb[i * 3 + 2];
+    colours[i].r = rgb_[i * 3 + 0];
+    colours[i].g = rgb_[i * 3 + 1];
+    colours[i].b = rgb_[i * 3 + 2];
   }
   controller_.onOscPalette(colours, count, via, millis());
 }

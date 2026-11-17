@@ -114,6 +114,32 @@ void test_feed_does_not_make_stale_live() {
   TEST_ASSERT_TRUE(f.onPalette(OscFreshness::kStaleMs + 2));
 }
 
+// A palette differing only in white is a change; the same palette and role
+// again is not; a role change is.
+void test_memo_sees_white_and_role_changes() {
+  wisp::OscPaletteMemo memo;
+  const wisp::PaletteColor warm[2] = {{1, 0, 0, 0.5f}, {0, 0, 1, 0}};
+  const wisp::PaletteColor warmer[2] = {{1, 0, 0, 1.0f}, {0, 0, 1, 0}};
+  TEST_ASSERT_TRUE(memo.hold(warm, 2, wisp::OscRole::Primary));
+  TEST_ASSERT_FALSE(memo.hold(warm, 2, wisp::OscRole::Primary));
+  TEST_ASSERT_TRUE(memo.hold(warmer, 2, wisp::OscRole::Primary));
+  TEST_ASSERT_TRUE(memo.hold(warmer, 2, wisp::OscRole::Fill));
+  TEST_ASSERT_TRUE(memo.hold(warmer, 1, wisp::OscRole::Fill));
+  memo.clear();
+  TEST_ASSERT_TRUE(memo.hold(warmer, 1, wisp::OscRole::Fill));
+}
+
+// More colours than the memo holds are refused and leave the held palette.
+void test_memo_refuses_an_oversized_palette() {
+  wisp::OscPaletteMemo memo;
+  const wisp::PaletteColor one[1] = {{0, 1, 0, 0}};
+  TEST_ASSERT_TRUE(memo.hold(one, 1, wisp::OscRole::Primary));
+  wisp::PaletteColor many[wisp::kOscPaletteMaxColors + 1] = {};
+  TEST_ASSERT_FALSE(memo.hold(many, wisp::kOscPaletteMaxColors + 1,
+                              wisp::OscRole::Primary));
+  TEST_ASSERT_FALSE(memo.hold(one, 1, wisp::OscRole::Primary));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_first_palette_is_live_edge);
@@ -125,6 +151,8 @@ int main(int, char**) {
   RUN_TEST(test_ten_second_restate_stays_live);
   RUN_TEST(test_blank_palette_detected);
   RUN_TEST(test_white_only_palette_is_not_blank);
+  RUN_TEST(test_memo_sees_white_and_role_changes);
+  RUN_TEST(test_memo_refuses_an_oversized_palette);
   RUN_TEST(test_feed_keeps_held_palette_live);
   RUN_TEST(test_feed_does_not_make_stale_live);
   return UNITY_END();
