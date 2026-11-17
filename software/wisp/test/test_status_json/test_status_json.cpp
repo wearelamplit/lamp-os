@@ -8,10 +8,9 @@
 
 constexpr size_t CAP = 230;
 
-// Guaranteed-core ceiling at worst-case field widths (148 B today). If this
-// grows past 198 the degrade-by-construction guarantee shrinks; re-derive the
-// slack before bumping.
-constexpr size_t CORE_PIN = 198;
+// The guaranteed core at worst-case field widths. Every other field sheds
+// before it, so a cap below it still yields this frame.
+constexpr size_t CORE_PIN = 148;
 
 // The widest lastSeenMs a wisp can send: esp_timer_get_time() / 1000 at the
 // top of its int64 range.
@@ -72,8 +71,7 @@ void test_core_worst_case_pinned_under_cap() {
   f.hasPassword = true;
   char out[256];
   size_t n = build(f, out, sizeof(out), CAP);
-  TEST_ASSERT_EQUAL_UINT32(148, n);
-  TEST_ASSERT_TRUE(n <= CORE_PIN);
+  TEST_ASSERT_EQUAL_UINT32(CORE_PIN, n);
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_EQUAL_STRING("wispStatus", d["char"].as<const char*>());
@@ -145,39 +143,40 @@ void test_fully_loaded_worst_case_never_fails() {
   TEST_ASSERT_TRUE(d["configSplit"].as<bool>());
 }
 
-// Priority: offColor, oscRole and paletteIdPrefix lead the live fields, so
-// a cap with room for only offColor and the prefix keeps them and sheds the
-// rest.
-void test_offcolor_and_prefix_outrank_the_rest() {
+// Priority: offColor, oscRole and paletteIdPrefix lead the live fields. The
+// cap fits exactly those three, and a short name would fit in place of any
+// one of them, so a name ranked above one drops it.
+void test_offcolor_role_and_prefix_outrank_the_rest() {
   wisp::WispStatusFields f = worstCase();
   f.source = "off";
-  f.oscRole = "primary";
+  f.oscRole = "fill";
+  f.name = "abc";
   char out[512];
-  const size_t cap = 196;  // Off core 145 + offColor 22 + paletteIdPrefix 29
+  const size_t cap = 213;  // Off core 145 + offColor 22 + oscRole 17 + prefix 29
   size_t n = build(f, out, sizeof(out), cap);
-  TEST_ASSERT_TRUE(n > 0 && n <= cap);
+  TEST_ASSERT_EQUAL_UINT32(cap, n);
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_EQUAL_STRING("ffffffff", d["offColor"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("fill", d["oscRole"].as<const char*>());
   TEST_ASSERT_EQUAL_STRING("abcdef12", d["paletteIdPrefix"].as<const char*>());
-  TEST_ASSERT_TRUE(d["oscRole"].isNull());
   TEST_ASSERT_TRUE(d["name"].isNull());
   TEST_ASSERT_TRUE(d["ethIp"].isNull());
 }
 
-// Priority: oscRole outranks the identity and network fields the same way.
-void test_osc_role_outranks_the_rest() {
+// The same in Manual, which carries no offColor.
+void test_osc_role_and_prefix_outrank_the_rest() {
+  wisp::WispStatusFields f = worstCase();
+  f.name = "abc";
   char out[512];
   const size_t cap = 199;  // core 148 + oscRole 22 + paletteIdPrefix 29
-  size_t n = build(worstCase(), out, sizeof(out), cap);
-  TEST_ASSERT_TRUE(n > 0 && n <= cap);
+  size_t n = build(f, out, sizeof(out), cap);
+  TEST_ASSERT_EQUAL_UINT32(cap, n);
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_EQUAL_STRING("secondary", d["oscRole"].as<const char*>());
   TEST_ASSERT_EQUAL_STRING("abcdef12", d["paletteIdPrefix"].as<const char*>());
-  TEST_ASSERT_TRUE(d["offColor"].isNull());
   TEST_ASSERT_TRUE(d["name"].isNull());
-  TEST_ASSERT_TRUE(d["ethIp"].isNull());
 }
 
 // oscRole is omitted at its "primary" default and rides in every mode off
@@ -280,7 +279,7 @@ void test_off_mode_emits_offcolor() {
   TEST_ASSERT_EQUAL_STRING("c8643219", d["offColor"].as<const char*>());
 }
 
-// Every status says it carries no settings, and carries none: the app reads
+// Every status says it carries no settings, and carries none. The app reads
 // them only from wispConfig.
 void test_every_status_is_config_split() {
   char out[1024];
@@ -297,8 +296,8 @@ void test_every_status_is_config_split() {
   }
 }
 
-// configSplit rides the core, so no cap sheds it: a status without it would
-// read on the app as carrying the settings at their defaults.
+// configSplit rides the core, so no cap sheds it. The app would read a status
+// without it as carrying the settings at their defaults.
 void test_config_split_survives_any_cap() {
   char out[256];
   size_t n = build(worstCase(), out, sizeof(out), /*cap=*/0);
@@ -421,8 +420,8 @@ int main(int, char**) {
   RUN_TEST(test_worst_case_untruncated_length);
   RUN_TEST(test_worst_case_fits_control_op_at_production_cap);
   RUN_TEST(test_fully_loaded_worst_case_never_fails);
-  RUN_TEST(test_offcolor_and_prefix_outrank_the_rest);
-  RUN_TEST(test_osc_role_outranks_the_rest);
+  RUN_TEST(test_offcolor_role_and_prefix_outrank_the_rest);
+  RUN_TEST(test_osc_role_and_prefix_outrank_the_rest);
   RUN_TEST(test_osc_role_omitted_at_default_and_emitted_in_every_mode);
   RUN_TEST(test_defaults_omitted);
   RUN_TEST(test_non_default_identity_fields_emitted);

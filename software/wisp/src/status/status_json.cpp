@@ -9,9 +9,9 @@ namespace wisp {
 
 namespace {
 
-// App-parser defaults (wisp_status.dart). A field at its default is omitted;
-// the parser reconstructs it.
+// wispConfig's ledType when the config holds none.
 constexpr char     kDefaultLedType[]       = "GRB";
+// The app parser's oscRole default (wisp_status.dart), omitted on the wire.
 constexpr char     kDefaultOscRole[]       = "primary";
 
 template <typename T>
