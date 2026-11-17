@@ -42,6 +42,15 @@ Future<ProviderContainer> _seeded(
   return c;
 }
 
+/// The lamp changes its wifiState and notifies it, so a read that follows
+/// the notify returns the same value.
+Future<void> _lampPush(InMemoryBleClient ble, String json) async {
+  final bytes = Uint8List.fromList(utf8.encode(json));
+  await ble.write(_devId, BleUuids.controlService, BleUuids.wifiState, bytes);
+  ble.simulateNotify(
+      _devId, BleUuids.controlService, BleUuids.wifiState, bytes);
+}
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
@@ -93,17 +102,10 @@ void main() {
     addTearDown(sub.close);
     await c.read(wifiNotifierProvider(_devId).future);
 
-    // Push a notify with state "connected" and NO scanResults. Use
-    // simulateNotify rather than write() because production fbp does
-    // NOT echo writes to subscribers.
+    // Push a notify with state "connected" and NO scanResults.
     final ble = c.read(bleClientProvider) as InMemoryBleClient;
-    ble.simulateNotify(
-      _devId,
-      BleUuids.controlService,
-      BleUuids.wifiState,
-      Uint8List.fromList(utf8.encode(
-          '{"state":"connected","ssid":"home","ip":"192.168.1.20"}')),
-    );
+    await _lampPush(
+        ble, '{"state":"connected","ssid":"home","ip":"192.168.1.20"}');
     // Let the listener fire.
     await Future<void>.delayed(Duration.zero);
 
@@ -126,13 +128,7 @@ void main() {
     await c.read(wifiNotifierProvider(_devId).future);
 
     final ble = c.read(bleClientProvider) as InMemoryBleClient;
-    ble.simulateNotify(
-      _devId,
-      BleUuids.controlService,
-      BleUuids.wifiState,
-      Uint8List.fromList(
-          utf8.encode('{"state":"failed","lastError":"auth"}')),
-    );
+    await _lampPush(ble, '{"state":"failed","lastError":"auth"}');
     await Future<void>.delayed(Duration.zero);
 
     final w = c.read(wifiNotifierProvider(_devId)).value!;

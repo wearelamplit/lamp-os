@@ -20,7 +20,7 @@ Uint8List _b(String s) => Uint8List.fromList(utf8.encode(s));
 /// and once it has, every listener on the characteristic receives, a
 /// listener left over from the old link included. A subscription enables
 /// the notify a turn after a read issued alongside it, then emits a first
-/// frame.
+/// frame, empty as flutter_blue_plus replays it once its cache is cleared.
 class _LinkScopedBle extends InMemoryBleClient {
   int _link = 0;
   int? _notifyingLink;
@@ -34,8 +34,9 @@ class _LinkScopedBle extends InMemoryBleClient {
   /// Value a read returns once the link has dropped; null throws.
   Uint8List? readAfterDrop;
 
-  /// Lamp change pushed right after the next dropped-link read is served.
-  Uint8List? changeAfterRead;
+  /// Lamp change pushed just before the next notify enable, so only a read
+  /// made after the enable sees it.
+  Uint8List? changeBeforeEnable;
 
   /// Holds dropped-link reads until completed.
   Completer<Uint8List>? readGate;
@@ -53,12 +54,6 @@ class _LinkScopedBle extends InMemoryBleClient {
       if (gate != null) return gate.future;
       final v = readAfterDrop;
       if (v == null) throw StateError('read unavailable');
-      final change = changeAfterRead;
-      if (change != null) {
-        changeAfterRead = null;
-        readAfterDrop = change;
-        simulateNotify(d, s, c, change);
-      }
       return Future.value(v);
     }
     return super.read(d, s, c);
@@ -75,10 +70,17 @@ class _LinkScopedBle extends InMemoryBleClient {
       onListen: () {
         listeners++;
         sub = src.where((_) => _notifyingLink == _link).listen(out.add);
-        Future(() {
+        Future(() async {
           if (out.isClosed) return;
+          final change = changeBeforeEnable;
+          if (change != null) {
+            changeBeforeEnable = null;
+            if (readAfterDrop != null) readAfterDrop = change;
+            await super.write(d, s, c, change);
+            simulateNotify(d, s, c, change);
+          }
           _notifyingLink = link;
-          if (link > 0) out.add(Uint8List(0));
+          out.add(Uint8List(0));
         });
       },
       onCancel: () async {
@@ -169,9 +171,32 @@ void main() {
     final (ble, c) = await openPicker('{"state":"scanning"}');
     ble
       ..readAfterDrop = _b('{"state":"idle"}')
-      ..changeAfterRead = _b('{"state":"connecting"}');
+      ..changeBeforeEnable = _b('{"state":"connecting"}');
     await bounce(ble);
     expect(c.read(wifiNotifierProvider(_devId)).value!.state, 'connecting');
+  });
+
+  test('a change landing between the first read and the notify enable is '
+      'read back', () async {
+    final ble = _LinkScopedBle()..changeBeforeEnable = _b('{"state":"connecting"}');
+    await ble.connect(_devId);
+    await ble.write(_devId, BleUuids.controlService, BleUuids.wifiState,
+        _b('{"state":"scanning"}'));
+    final c = ProviderContainer(
+      overrides: [bleClientProvider.overrideWithValue(ble)],
+    );
+    addTearDown(c.dispose);
+    c.listen(wifiNotifierProvider(_devId), (_, _) {});
+    await c.read(wifiNotifierProvider(_devId).future);
+    await pumpEventQueue();
+    expect(c.read(wifiNotifierProvider(_devId)).value!.state, 'connecting');
+  });
+
+  test('a re-read that fails to parse leaves the state', () async {
+    final (ble, c) = await openPicker('{"state":"scanning"}');
+    ble.readAfterDrop = _b('not json');
+    await bounce(ble);
+    expect(c.read(wifiNotifierProvider(_devId)).value!.state, 'scanning');
   });
 
   test('a re-read returning after the picker is disposed is dropped',

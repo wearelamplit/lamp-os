@@ -37,7 +37,7 @@ class WifiNotifier extends _$WifiNotifier {
       }
       if (linkUp) return;
       linkUp = true;
-      _subscribeState(ble, rereadOnFirstFrame: true);
+      _subscribeState(ble);
       unawaited(_rereadState(ble));
     });
     ref.onDispose(() {
@@ -57,12 +57,12 @@ class WifiNotifier extends _$WifiNotifier {
     }
   }
 
-  /// [rereadOnFirstFrame] reads the state again once the stream's first
-  /// frame arrives, which a client that replays its cached value emits only
-  /// after the notify is enabled.
-  void _subscribeState(BleClient ble, {bool rereadOnFirstFrame = false}) {
+  /// Reads the state again once the stream's first frame arrives, which a
+  /// client that replays its cached value emits only after the notify is
+  /// enabled, so a change landing before the enable is not lost.
+  void _subscribeState(BleClient ble) {
     _sub?.cancel();
-    var awaitingFirstFrame = rereadOnFirstFrame;
+    var awaitingFirstFrame = true;
     _sub = ble
         .subscribe(_deviceId, BleUuids.controlService, BleUuids.wifiState)
         .listen(
@@ -82,23 +82,27 @@ class WifiNotifier extends _$WifiNotifier {
   /// run before the renewed notify is enabled; the first-frame read in
   /// [_subscribeState] covers a change landing between the two.
   Future<void> _rereadState(BleClient ble) async {
-    final Uint8List bytes;
+    final WifiState? next;
     try {
-      bytes = await ble.read(
+      final bytes = await ble.read(
           _deviceId, BleUuids.controlService, BleUuids.wifiState);
+      next = bytes.isEmpty ? null : _parse(bytes);
     } catch (e) {
       debugPrint('[wifi_notifier] wifiState re-read failed for $_deviceId: $e');
       return;
     }
-    if (ref.mounted) _onNotify(bytes);
+    if (next != null && ref.mounted) _apply(next);
   }
 
   void _onNotify(Uint8List bytes) {
     // flutter_blue_plus replays an empty cached value when a subscription
     // starts after a reconnect.
     if (bytes.isEmpty) return;
+    _apply(_parse(bytes));
+  }
+
+  void _apply(WifiState next) {
     final cur = state.value ?? const WifiState();
-    final next = _parse(bytes);
     // Notifies for state transitions (connecting to connected to failed)
     // typically omit scanResults; preserve the last-known scan list across
     // those transitions so the UI doesn't blink the network list empty.
