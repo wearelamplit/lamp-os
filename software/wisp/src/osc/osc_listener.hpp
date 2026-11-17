@@ -15,6 +15,9 @@ class WispController;
 class WispConfig;
 
 inline constexpr uint16_t kOscUdpPort = 9000;
+// The most colours one OSC palette carries; a longer one is refused whole.
+// Its own limit, wider than the Manual palette's.
+inline constexpr size_t kOscPaletteMaxColors = 50;
 inline constexpr char kStraylightAddressPrefix[] = "/straylight/";
 
 class OscListener {

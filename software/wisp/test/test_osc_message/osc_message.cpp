@@ -8,6 +8,7 @@
 #include <cstring>
 #include <vector>
 
+#include "osc/osc_listener.hpp"
 #include "osc/osc_message.hpp"
 #include "osc/slip_decoder.hpp"
 
@@ -60,6 +61,25 @@ void assertGoldenPalette(const float* f, size_t n) {
   for (size_t k = 0; k < 48; ++k) {
     TEST_ASSERT_EQUAL_FLOAT(static_cast<float>(k / 47.0), f[k]);
   }
+}
+
+// One OSC message to `address` carrying `floats` f-tagged arguments, channel
+// k = k / floats.
+std::vector<uint8_t> floatMessage(const char* address, size_t floats) {
+  std::vector<uint8_t> out(address, address + std::strlen(address));
+  do out.push_back(0); while (out.size() % 4 != 0);
+  out.push_back(',');
+  for (size_t i = 0; i < floats; ++i) out.push_back('f');
+  do out.push_back(0); while (out.size() % 4 != 0);
+  for (size_t i = 0; i < floats; ++i) {
+    const float v = static_cast<float>(i) / static_cast<float>(floats);
+    uint32_t bits;
+    std::memcpy(&bits, &v, sizeof bits);
+    for (int shift = 24; shift >= 0; shift -= 8) {
+      out.push_back(static_cast<uint8_t>(bits >> shift));
+    }
+  }
+  return out;
 }
 
 struct Seen {
@@ -189,6 +209,19 @@ void test_classify_feed_packet(void) {
                                        "/straylight/", f, 150, n));
 }
 
+// The OSC path keeps its own colour cap, wider than the Manual palette's 16:
+// a 40-colour Straylight palette decodes whole at the listener's capacity.
+void test_osc_cap_takes_a_40_colour_palette(void) {
+  const auto d = floatMessage(kPaletteAddr, 40 * 3);
+  std::vector<float> f(wisp::kOscPaletteMaxColors * 3);
+  size_t n = 0;
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscFeedPacket::Palette,
+      (int)wisp::oscClassifyFeedPacket(d.data(), d.size(), kPaletteAddr,
+                                       "/straylight/", f.data(), f.size(), n));
+  TEST_ASSERT_EQUAL_UINT(40 * 3, n);
+  TEST_ASSERT_EQUAL_FLOAT(119.0f / 120.0f, f[119]);
+}
+
 void test_slip_frame_with_escapes(void) {
   static SlipDecoder slip;
   const uint8_t payload[] = {0x01, 0xC0, 0x02, 0xDB, 0x03};
@@ -302,6 +335,7 @@ int main(int, char**) {
   RUN_TEST(test_unknown_type_tag_rejected);
   RUN_TEST(test_address_prefix_found_in_bundle);
   RUN_TEST(test_classify_feed_packet);
+  RUN_TEST(test_osc_cap_takes_a_40_colour_palette);
   RUN_TEST(test_slip_frame_with_escapes);
   RUN_TEST(test_slip_back_to_back_and_oversize);
   RUN_TEST(test_slip_carries_straylight_bundle);

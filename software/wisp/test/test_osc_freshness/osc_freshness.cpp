@@ -76,12 +76,18 @@ void test_ten_second_restate_stays_live() {
 }
 
 void test_blank_palette_detected() {
-  const float zeros[6] = {0, 0, 0, 0, 0, 0};
-  TEST_ASSERT_TRUE(wisp::isBlankPalette(zeros, 6));
-  const float negative[3] = {-1.0f, 0.0f, -0.5f};
-  TEST_ASSERT_TRUE(wisp::isBlankPalette(negative, 3));
-  const float oneLit[6] = {0, 0, 0, 0, 0.01f, 0};
-  TEST_ASSERT_FALSE(wisp::isBlankPalette(oneLit, 6));
+  const wisp::PaletteColor zeros[2] = {};
+  TEST_ASSERT_TRUE(wisp::isBlankPalette(zeros, 2));
+  const wisp::PaletteColor negative[1] = {{-1.0f, 0.0f, -0.5f, 0.0f}};
+  TEST_ASSERT_TRUE(wisp::isBlankPalette(negative, 1));
+  const wisp::PaletteColor oneLit[2] = {{}, {0, 0.01f, 0, 0}};
+  TEST_ASSERT_FALSE(wisp::isBlankPalette(oneLit, 2));
+}
+
+// White drives the lamps' warm-white LED, so a palette lit only on w paints.
+void test_white_only_palette_is_not_blank() {
+  const wisp::PaletteColor whiteOnly[3] = {{}, {0, 0, 0, 1.0f}, {}};
+  TEST_ASSERT_FALSE(wisp::isBlankPalette(whiteOnly, 3));
 }
 
 // Over UDP the palette datagram can drop on every restate while the rest of
@@ -118,6 +124,7 @@ int main(int, char**) {
   RUN_TEST(test_reset_drops_live_without_edge);
   RUN_TEST(test_ten_second_restate_stays_live);
   RUN_TEST(test_blank_palette_detected);
+  RUN_TEST(test_white_only_palette_is_not_blank);
   RUN_TEST(test_feed_keeps_held_palette_live);
   RUN_TEST(test_feed_does_not_make_stale_live);
   return UNITY_END();

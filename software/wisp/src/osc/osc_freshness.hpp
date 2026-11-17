@@ -8,6 +8,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "paint/current_palette.hpp"
+
 namespace wisp {
 
 class OscFreshness {
@@ -48,11 +50,13 @@ class OscFreshness {
   uint32_t lastRxMs_ = 0;
 };
 
-// True when no channel is above zero (NaN included): the palette would paint
-// lamps black. Straylight sends zeros for a role with nothing bound to it.
-inline bool isBlankPalette(const float* rgb, size_t floats) {
-  for (size_t i = 0; i < floats; ++i) {
-    if (rgb[i] > 0.0f) return false;
+// True when no channel, white included, is above zero (NaN included): the
+// palette would paint lamps black. Straylight sends zeros for a role with
+// nothing bound to it.
+inline bool isBlankPalette(const PaletteColor* colours, size_t count) {
+  for (size_t i = 0; i < count; ++i) {
+    const PaletteColor& c = colours[i];
+    if (c.r > 0.0f || c.g > 0.0f || c.b > 0.0f || c.w > 0.0f) return false;
   }
   return true;
 }
