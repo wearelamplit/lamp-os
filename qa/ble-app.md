@@ -266,6 +266,21 @@ reconnects it shows "Reading palette from wisp…" until the wisp's next status
 one. Move the lamp from the new wisp's zone to the 1.3.8 wisp's: the editor
 shows the loading line, then the 1.3.8 wisp's palette, never the new wisp's.
 
+P15 — **a palette save confirms on the wisp's echo.** Same setup as P14. On
+the new wisp, edit and Save: the wisp's serial prints `[wisp.op]
+setManualPalette colors=N seq=S`, the lamp log's `[wisp_state] notify` preview
+carries `"manualSeq":S`, and no "not saved" shows. Save, then reset the wisp
+at once: either the save confirms once the wisp is back, or "not saved" shows
+and reopening the lamp shows what the wisp holds; never "saved" while the wisp
+holds something else. Save different palettes from two phones (Pixel and the
+emulator bridge) within a second of each other: both end showing the wisp's
+palette, and at most one shows "not saved". Save, then tap Osc at once: the
+save confirms with no "source changed", and back in Manual the palette shows.
+Give the new wisp a rich config (20-character name, password, oscRole
+secondary, brightness 80) and note the lamp's `notify len=`: saves still
+confirm within a few seconds. Save on the 1.3.8 wisp with this app, and on
+the new wisp with a 1.3.8 app: both behave as on 1.3.8.
+
 ## Pass criteria
 
 - H1 completes: mfg-data scan finds the lamp, schema reads 4, section reads
@@ -297,6 +312,8 @@ shows the loading line, then the 1.3.8 wisp's palette, never the new wisp's.
   never shows an empty or stale palette as the wisp's, and shows the loading
   line after a reconnect or a display switch until the wisp states its
   palette.
+- P15: a save on a wisp from this branch confirms only on its own echo, in any
+  source mode, and never shows "saved" for a palette the wisp does not hold.
 
 ## Not covered here
 

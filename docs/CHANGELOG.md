@@ -16,6 +16,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   reconnects it shows "Reading palette from wisp…" until the wisp's next
   status, since another phone may have changed the palette meanwhile. Needs
   the wisp reflashed.
+- **A wisp palette save shows saved only once the wisp has stored that
+  save.** The wisp echoes each save back, and the app waits for that echo,
+  even if the wisp switched to Osc or Off meanwhile; an empty save no longer
+  waits on an extra status read. Needs the wisp reflashed.
 - **The wisp settings screen fills in even when the lamp missed the wisp's
   settings.** The app asks the wisp again and keeps reading until they
   arrive. Through a lamp older than 1.2.8 it asks you to update that lamp.
