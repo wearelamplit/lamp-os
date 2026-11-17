@@ -15,6 +15,8 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   show.
 
 ### Fixed
+- **Saving a wisp palette with white on many colours keeps the white on all of
+  them.** The last colours could lose their white before.
 - **The wisp settings screen fills in even when the lamp missed the wisp's
   settings.** The app asks the wisp again and keeps reading until they
   arrive. Through a lamp older than 1.2.8 it asks you to update that lamp.
