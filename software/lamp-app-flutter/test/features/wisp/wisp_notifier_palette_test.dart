@@ -1037,7 +1037,8 @@ void main() {
         LampColor(r: 0, g: 128, b: 64, w: 0),
       ]);
       await primeStatus(ble,
-          '{"wispMac":"AA:BB:CC:DD:EE:FF","paletteIdPrefix":"abc12345"}');
+          '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"off",'
+          '"paletteIdPrefix":"abc12345"}');
       final c = makeContainer(ble: ble);
 
       await c.read(wispNotifierProvider(lampId).future);
@@ -1067,7 +1068,8 @@ void main() {
     test('present wisp, empty section → not loading, empty editor (no hang)',
         () async {
       final ble = InMemoryBleClient();
-      await primeStatus(ble, '{"wispMac":"AA:BB:CC:DD:EE:FF"}');
+      await primeStatus(
+          ble, '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"off"}');
       final c = makeContainer(ble: ble);
 
       await c.read(wispNotifierProvider(lampId).future);

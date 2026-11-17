@@ -204,6 +204,10 @@ class WispStatus {
   /// rebooted since, or the status does not carry it. Equality only.
   final int manualSeq;
 
+  /// True when the wisp sent this status. False for the lamp's hello-only
+  /// merge, which it serves while it holds no status from the wisp.
+  bool get fromWisp => carriesConfig || configSplit;
+
   /// Convenience: is either surface currently wisp-painted?
   bool get controlling => controllingBase || controllingShade;
 

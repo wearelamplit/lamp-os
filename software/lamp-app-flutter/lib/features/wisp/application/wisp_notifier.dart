@@ -161,10 +161,12 @@ class WispNotifier extends _$WispNotifier {
   final Map<String, String?> _manualIds = {};
   // The `manualSeq` each such wisp echoed last.
   final Map<String, int> _manualSeqs = {};
-  // The wisp the known palette belongs to, and the wisp of the latest
-  // present status.
+  // The wisp the known palette belongs to, the wisp of the latest present
+  // status, and whether the wisp sent that status (the lamp's hello-only
+  // merge did not).
   String? _paletteMac;
   String? _statusMac;
+  bool _statusFromWisp = false;
 
   Set<String>? _claimedMacs;
   Map<String, ({LampColor base, LampColor shade})> _livePaint = const {};
@@ -289,6 +291,7 @@ class WispNotifier extends _$WispNotifier {
     _manualSeqs.clear();
     _paletteMac = null;
     _statusMac = null;
+    _statusFromWisp = false;
 
     _claimedMacs = null;
     _livePaint = const {};
@@ -488,7 +491,7 @@ class WispNotifier extends _$WispNotifier {
       if (_statesPalette(mac) || _statesPalette(_statusMac)) {
         final stated = _manualIds[mac];
         final known = read != null &&
-            mac == _statusMac &&
+            _heardInFull(mac) &&
             WispRepository.statusManualId(read) == stated;
         _currentPaletteKnown = known;
         if (known) {
@@ -500,7 +503,8 @@ class WispNotifier extends _$WispNotifier {
         // Outside Manual the prefix names the Osc palette.
         final namesPalette = forStatus.source == WispSourceMode.manual &&
             forStatus.paletteIdPrefix.isNotEmpty;
-        _currentPaletteKnown = palette.isNotEmpty || !namesPalette;
+        _currentPaletteKnown =
+            _heardInFull(mac) && (palette.isNotEmpty || !namesPalette);
         if (_currentPaletteKnown) _paletteMac = mac;
         _ingestManualPalette(palette);
       }
@@ -788,13 +792,19 @@ class WispNotifier extends _$WispNotifier {
   bool _statesPalette(String? mac) =>
       mac != null && _manualIds.containsKey(mac);
 
+  // Whether the latest present status is one [mac] sent. Until then the
+  // lamp's palette cache may be empty or another wisp's.
+  bool _heardInFull(String? mac) =>
+      mac != null && mac == _statusMac && _statusFromWisp;
+
   // A present status, before the source-write guard and the read-busy skip:
   // note the palette its wisp states, and return the palette to unknown when
-  // it is not the one held from that wisp, or when the lamp now relays
-  // another wisp and either one states its palette.
+  // it is not the one held from that wisp, when the lamp now relays another
+  // wisp and either one states its palette, or when the wisp did not send it.
   void _notePaletteStatus(WispStatus status) {
     final mac = status.wispMac;
     if (mac == null) return;
+    if (!status.fromWisp) _currentPaletteKnown = false;
     final stated = status.manualId;
     if (stated != null) {
       _manualIds[mac] = stated;
@@ -811,6 +821,7 @@ class WispNotifier extends _$WispNotifier {
       _currentPaletteKnown = false;
     }
     _statusMac = mac;
+    _statusFromWisp = status.fromWisp;
   }
 
   // Another phone may have changed the palette while the link was down, so a
@@ -828,6 +839,7 @@ class WispNotifier extends _$WispNotifier {
   // docs/dev/networking.md (`manualId`, `paletteIdPrefix`). A read skipped
   // while another is busy waits for the next status.
   void _maybeRereadForPalette(WispStatus next) {
+    if (!next.fromWisp) return;
     final mac = next.wispMac;
     if (_statesPalette(mac)) {
       final stated = next.manualId;
@@ -835,8 +847,6 @@ class WispNotifier extends _$WispNotifier {
       if (!_currentPaletteKnown) unawaited(_readManualPaletteSection(next));
       return;
     }
-    final fromWisp = next.carriesConfig || next.configSplit;
-    if (_manualIds.isNotEmpty && !fromWisp) return;
     final prefix = next.paletteIdPrefix;
     final unread = !_currentPaletteKnown && next.present;
     if (prefix == _lastPaletteIdPrefix && !unread) return;
@@ -1418,7 +1428,7 @@ class WispNotifier extends _$WispNotifier {
           outcome == PaletteConfirmOutcome.sourceChanged,
     );
     if (_disposed || _paletteSaveEpoch != epoch) return;
-    _applyPaletteConfirm(committed, ok, wispMac);
+    _applyPaletteConfirm(committed, ok, wispMac, known: _heardInFull(wispMac));
     if (!ok) {
       if (outcome == PaletteConfirmOutcome.sourceChanged) {
         throw Exception('wisp manual palette write source changed');
@@ -1441,7 +1451,7 @@ class WispNotifier extends _$WispNotifier {
     // Before the write's ack, this wisp may have stated another palette, or
     // the lamp may have moved on to another wisp.
     _applyPaletteConfirm(committed, ok, wispMac,
-        known: _statusMac == wispMac && _manualIds[wispMac] == expected);
+        known: _heardInFull(wispMac) && _manualIds[wispMac] == expected);
     if (!ok) throw Exception('wisp manual palette write not confirmed');
   }
 
@@ -1475,7 +1485,7 @@ class WispNotifier extends _$WispNotifier {
     List<LampColor> committed,
     bool ok,
     String? wispMac, {
-    bool known = true,
+    required bool known,
   }) {
     if (ok) {
       _setSaved(committed);
