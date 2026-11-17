@@ -55,11 +55,19 @@ Uint8List _bytes(List<LampColor> p) => Uint8List.fromList([
 
 /// Counts `wisppalette` reads, holds them while [holdPalette] is set (the
 /// value served is the one seeded when the hold releases), and fails them
-/// while [failPalette] is set.
+/// while [failPalette] is set. Holds the claims read while [holdClaims] is
+/// set.
 class _PaletteBle extends InMemoryBleClient {
   int paletteReads = 0;
   Completer<void>? holdPalette;
+  Completer<void>? holdClaims;
   bool failPalette = false;
+
+  @override
+  Future<Uint8List> read(String d, String s, String c) async {
+    if (c == BleUuids.wispClaims) await holdClaims?.future;
+    return super.read(d, s, c);
+  }
 
   @override
   Future<Uint8List> readSection(String deviceId, String name) async {
@@ -348,5 +356,97 @@ void main() {
 
     expect(n.paletteLoading, isTrue);
     expect(n.savedManualPalette, isEmpty);
+  });
+
+  test('a new palette stated while another read is busy is not the one held',
+      () async {
+    final ble = _PaletteBle()..holdClaims = Completer<void>();
+    seedPalette(ble, _x);
+    final n = await open(ble,
+        initial: _status(manualId: _id(_x), prefix: _id(_x)));
+    expect(n.paletteLoading, isFalse);
+
+    // Another phone saved Y; its status lands while the claims read holds
+    // the link, so no palette read can start.
+    seedPalette(ble, _y);
+    notify(ble, _status(manualId: _id(_y), prefix: _id(_y)));
+    await pumpEventQueue();
+    expect(ble.paletteReads, 1);
+    expect(n.paletteLoading, isTrue);
+
+    ble.holdClaims!.complete();
+    ble.holdClaims = null;
+    await pumpEventQueue();
+    notify(ble, _status(manualId: _id(_y), prefix: _id(_y)));
+    await pumpEventQueue();
+    expect(n.paletteLoading, isFalse);
+    expect(n.savedManualPalette, _y);
+  });
+
+  test('a new palette stated in a status the source-write guard drops is not '
+      'the one held', () async {
+    final ble = _PaletteBle();
+    seedPalette(ble, _x);
+    final n = await open(ble,
+        initial: _status(manualId: _id(_x), prefix: _id(_x)));
+    expect(n.paletteLoading, isFalse);
+
+    unawaited(n.setSource(WispSourceMode.osc).catchError((Object _) {}));
+    await pumpEventQueue();
+    // Still Manual, so the guard drops it as a pre-write echo.
+    notify(ble, _status(manualId: _id(_y), prefix: _id(_y)));
+    await pumpEventQueue();
+    expect(n.paletteLoading, isTrue);
+  });
+
+  test('a read that lands after the lamp switched wisps does not count',
+      () async {
+    final ble = _PaletteBle();
+    final n = await open(ble);
+    seedPalette(ble, _x);
+    ble.holdPalette = Completer<void>();
+    notify(ble, _status(manualId: _id(_x), prefix: _id(_x)));
+    await pumpEventQueue();
+    expect(ble.paletteReads, 1);
+
+    notify(ble, _helloOnly(_bMac));
+    await pumpEventQueue();
+    ble.holdPalette!.complete();
+    ble.holdPalette = null;
+    await pumpEventQueue();
+
+    expect(n.paletteLoading, isTrue);
+    expect(n.savedManualPalette, isEmpty);
+  });
+
+  test('a read for a wisp that never stated its palette does not count once '
+      'the lamp relays one that does', () async {
+    final ble = _PaletteBle();
+    final n = await open(ble);
+    seedPalette(ble, _y);
+    ble.holdPalette = Completer<void>();
+    notify(ble, '{"wispMac":"$_bMac","source":"manual",'
+        '"paletteIdPrefix":"${WispRepository.paletteIdHash(_y)}"}');
+    await pumpEventQueue();
+    expect(ble.paletteReads, 1);
+
+    notify(ble, _status(manualId: _id(_x), prefix: _id(_x)));
+    await pumpEventQueue();
+    ble.holdPalette!.complete();
+    ble.holdPalette = null;
+    await pumpEventQueue();
+
+    expect(n.paletteLoading, isTrue);
+    expect(n.savedManualPalette, isEmpty);
+  });
+
+  test('choosing Manual keeps a stated empty palette known', () async {
+    final ble = _PaletteBle();
+    final n = await open(ble, initial: _status(source: 'off', manualId: ''));
+    expect(n.paletteLoading, isFalse);
+
+    unawaited(n.setSource(WispSourceMode.manual).catchError((Object _) {}));
+    expect(n.paletteLoading, isFalse,
+        reason: 'the wisp stated its Manual palette empty, and a read agreed');
   });
 }

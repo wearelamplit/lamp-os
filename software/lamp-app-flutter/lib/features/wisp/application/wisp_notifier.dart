@@ -464,19 +464,12 @@ class WispNotifier extends _$WispNotifier {
     });
   }
 
-  /// Read the wisp's manual palette from its dedicated section and seed the
-  /// editor. For a wisp that states its palette, the read marks the palette
-  /// known, and seeds the editor, empty included, only when it succeeded,
-  /// the status heard last is still from that wisp, and the read's id equals
-  /// the id that wisp stated last; otherwise the palette is unknown until a
-  /// later status reads it again. For any other wisp a read marks the
-  /// palette known, so the editor leaves "reading from wisp", unless it
-  /// comes back empty while [forStatus] is a Manual status naming a palette.
-  /// Such a read was served before auth, failed, or found the relay lamp's
-  /// palette cache not yet filled, so the palette goes back to unread for
-  /// the next status to retry; an empty read leaves any prior palette
-  /// intact. [WispRepository.readManualPalette] never throws. Serialized
-  /// against [_loadClaims] via the in-flight flags, since FbpBleClient has no
+  /// Read the wisp's manual palette from its dedicated section, decide
+  /// whether the palette is known, and seed the editor. The rules, for a wisp
+  /// that states its palette (`manualId`) and for one that does not, are in
+  /// docs/dev/networking.md (`manualId`, `paletteIdPrefix`).
+  /// [WispRepository.readManualPalette] never throws. Serialized against
+  /// [_loadClaims] via the in-flight flags, since FbpBleClient has no
   /// internal lock and two concurrent reads stall the flow.
   /// [bumpState] re-emits after ingesting so a notify-triggered re-read paints
   /// the new palette. Off during build: emitting there resolves the provider's
@@ -495,7 +488,6 @@ class WispNotifier extends _$WispNotifier {
       if (_statesPalette(mac) || _statesPalette(_statusMac)) {
         final stated = _manualIds[mac];
         final known = read != null &&
-            stated != null &&
             mac == _statusMac &&
             WispRepository.statusManualId(read) == stated;
         _currentPaletteKnown = known;
@@ -796,9 +788,10 @@ class WispNotifier extends _$WispNotifier {
   bool _statesPalette(String? mac) =>
       mac != null && _manualIds.containsKey(mac);
 
-  // A present status: note the palette its wisp states, and return the
-  // palette to unknown when the lamp now relays another wisp and either one
-  // states its palette.
+  // A present status, before the source-write guard and the read-busy skip:
+  // note the palette its wisp states, and return the palette to unknown when
+  // it is not the one held, or when the lamp now relays another wisp and
+  // either one states its palette.
   void _notePaletteStatus(WispStatus status) {
     final mac = status.wispMac;
     if (mac == null) return;
@@ -806,6 +799,10 @@ class WispNotifier extends _$WispNotifier {
     if (stated != null) {
       _manualIds[mac] = stated;
       _manualSeqs[mac] = status.manualSeq;
+      if (mac == _paletteMac &&
+          stated != WispRepository.statusManualId(_savedManualPalette)) {
+        _currentPaletteKnown = false;
+      }
     }
     final owner = _paletteMac;
     if (owner != null &&
@@ -827,16 +824,9 @@ class WispNotifier extends _$WispNotifier {
     _bumpState();
   }
 
-  // A wisp that states its palette: read while the palette is unknown or the
-  // saved palette is not the one stated. A status that states none (the
-  // lamp's HELLO-only merge) decides nothing, from that wisp or, once any
-  // wisp has stated its palette, from a wisp not yet heard stating it.
-  // Any other wisp: the small, reliable status NOTIFY carries
-  // paletteIdPrefix; a changed prefix means the wisp's palette moved, so
-  // re-read the palette section. Don't consume the prefix while a read is
-  // busy; retry on the next notify. While the palette is unread, any status
-  // from a present wisp starts a read, since an empty palette's prefix
-  // never changes.
+  // Start the palette read a status calls for, by the rules in
+  // docs/dev/networking.md (`manualId`, `paletteIdPrefix`). A read skipped
+  // while another is busy waits for the next status.
   void _maybeRereadForPalette(WispStatus next) {
     final mac = next.wispMac;
     if (_statesPalette(mac)) {
