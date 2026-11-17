@@ -94,13 +94,14 @@ void WispConfig::begin() {
   manualPalette_.clear();
   const size_t paletteLen = prefs_.getBytesLength(kKeyManualPalette);
   const size_t legacyLen  = prefs_.getBytesLength(kKeyManualPaletteRgb);
+  // getBytes reads nothing into a buffer shorter than the blob, and a palette
+  // stored before the cap can be longer, so read it whole.
   if (paletteLen > 0 && paletteLen % 4 == 0) {
     const size_t colorCount =
         std::min<size_t>(paletteLen / 4, kManualPaletteMaxColors);
-    uint8_t buf[kManualPaletteMaxColors * 4];
-    const size_t toRead = colorCount * 4;
-    const size_t got = prefs_.getBytes(kKeyManualPalette, buf, toRead);
-    if (got == toRead) {
+    std::vector<uint8_t> buf(paletteLen);
+    const size_t got = prefs_.getBytes(kKeyManualPalette, buf.data(), paletteLen);
+    if (got == paletteLen) {
       manualPalette_.reserve(colorCount);
       for (size_t i = 0; i < colorCount; ++i) {
         ManualPaletteColor c;
@@ -117,10 +118,9 @@ void WispConfig::begin() {
   } else if (legacyLen > 0 && legacyLen % 3 == 0) {
     const size_t colorCount =
         std::min<size_t>(legacyLen / 3, kManualPaletteMaxColors);
-    uint8_t buf[kManualPaletteMaxColors * 3];
-    const size_t toRead = colorCount * 3;
-    const size_t got = prefs_.getBytes(kKeyManualPaletteRgb, buf, toRead);
-    if (got == toRead) {
+    std::vector<uint8_t> buf(legacyLen);
+    const size_t got = prefs_.getBytes(kKeyManualPaletteRgb, buf.data(), legacyLen);
+    if (got == legacyLen) {
       manualPalette_.reserve(colorCount);
       for (size_t i = 0; i < colorCount; ++i) {
         ManualPaletteColor c;

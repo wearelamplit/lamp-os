@@ -81,12 +81,12 @@ class Preferences {
     const auto it = s_blobs.find(k);
     return it == s_blobs.end() ? 0 : it->second.size();
   }
+  // As on the device, a blob longer than the buffer reads nothing.
   size_t getBytes(const char* k, void* buf, size_t len) {
     const auto it = s_blobs.find(k);
-    if (it == s_blobs.end()) return 0;
-    const size_t n = len < it->second.size() ? len : it->second.size();
-    memcpy(buf, it->second.data(), n);
-    return n;
+    if (it == s_blobs.end() || it->second.size() > len) return 0;
+    memcpy(buf, it->second.data(), it->second.size());
+    return it->second.size();
   }
   size_t putBytes(const char* k, const void* buf, size_t len) {
     const auto* p = static_cast<const uint8_t*>(buf);

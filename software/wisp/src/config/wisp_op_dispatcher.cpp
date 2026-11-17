@@ -228,7 +228,6 @@ DispatchResult WispOpDispatcher::dispatchJson(const char* json, size_t len) {
         continue;
       }
       parsed.push_back(c);
-      if (parsed.size() >= kManualPaletteMaxColors) break;
     }
     // Anything but an integer in 1..65535 is no seq, which clears the echo.
     JsonVariantConst seqField = doc["seq"];
