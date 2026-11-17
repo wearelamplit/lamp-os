@@ -10,7 +10,7 @@ constexpr size_t CAP = 230;
 
 // The guaranteed core at worst-case field widths. Every other field sheds
 // before it, so a cap below it still yields this frame.
-constexpr size_t CORE_PIN = 148;
+constexpr size_t CORE_PIN = 170;
 
 // The widest lastSeenMs a wisp can send: esp_timer_get_time() / 1000 at the
 // top of its int64 range.
@@ -33,7 +33,7 @@ static wisp::WispStatusFields worstCase() {
       255, 255, 255, 255, true,
       /*name=*/"12345678901234567890", /*hasPassword=*/true,
       /*wifiChannelMismatch=*/true, /*wifiApChannel=*/11,
-      /*ethIp=*/"255.255.255.255" };
+      /*ethIp=*/"255.255.255.255", /*manualId=*/"abcdef12" };
 }
 
 // Defaults everywhere, Manual mode.
@@ -63,12 +63,13 @@ static wisp::WispConfigFields worstConfig() {
 }
 
 // Guaranteed core at pathological widths: 16-digit lastSeenMs, widest
-// source, both bools false (wider than true), hasPassword present. All
-// optional fields at their app defaults (omitted).
+// source, both bools false (wider than true), hasPassword present, a
+// non-empty manualId. All optional fields at their app defaults (omitted).
 void test_core_worst_case_pinned_under_cap() {
   wisp::WispStatusFields f = plain();
   setUptimeMs(kWidestStampMs);
   f.hasPassword = true;
+  f.manualId = "abcdef12";
   char out[256];
   size_t n = build(f, out, sizeof(out), CAP);
   TEST_ASSERT_EQUAL_UINT32(CORE_PIN, n);
@@ -81,6 +82,7 @@ void test_core_worst_case_pinned_under_cap() {
   TEST_ASSERT_FALSE(d["lastSeenMs"].isNull());
   TEST_ASSERT_TRUE(d["hasPassword"].as<bool>());
   TEST_ASSERT_TRUE(d["configSplit"].as<bool>());
+  TEST_ASSERT_EQUAL_STRING("abcdef12", d["manualId"].as<const char*>());
   TEST_ASSERT_TRUE(d["auroraConnected"].isNull());
   TEST_ASSERT_TRUE(d["currentZone"].isNull());
   TEST_ASSERT_TRUE(d["zoneSource"].isNull());
@@ -152,7 +154,7 @@ void test_offcolor_role_and_prefix_outrank_the_rest() {
   f.oscRole = "fill";
   f.name = "abc";
   char out[512];
-  const size_t cap = 213;  // Off core 145 + offColor 22 + oscRole 17 + prefix 29
+  const size_t cap = 235;  // Off core 167 + offColor 22 + oscRole 17 + prefix 29
   size_t n = build(f, out, sizeof(out), cap);
   TEST_ASSERT_EQUAL_UINT32(cap, n);
   JsonDocument d;
@@ -169,7 +171,7 @@ void test_osc_role_and_prefix_outrank_the_rest() {
   wisp::WispStatusFields f = worstCase();
   f.name = "abc";
   char out[512];
-  const size_t cap = 199;  // core 148 + oscRole 22 + paletteIdPrefix 29
+  const size_t cap = 221;  // core 170 + oscRole 22 + paletteIdPrefix 29
   size_t n = build(f, out, sizeof(out), cap);
   TEST_ASSERT_EQUAL_UINT32(cap, n);
   JsonDocument d;
@@ -308,10 +310,30 @@ void test_config_split_survives_any_cap() {
   TEST_ASSERT_TRUE(d["name"].isNull());
 }
 
+// manualId rides the core in every source mode, "" for an empty Manual
+// palette, so the app reads its absence as an older wisp and never as empty.
+void test_manual_id_rides_the_core_in_every_mode() {
+  const char* sources[] = {"off", "manual", "osc"};
+  const char* ids[] = {"", "abcdef12"};
+  char out[256];
+  for (const char* src : sources) {
+    for (const char* id : ids) {
+      wisp::WispStatusFields f = worstCase();
+      f.source = src;
+      f.manualId = id;
+      TEST_ASSERT_TRUE(build(f, out, sizeof(out), /*cap=*/0) > 0);
+      JsonDocument d;
+      TEST_ASSERT_FALSE(deserializeJson(d, out));
+      TEST_ASSERT_TRUE(d["manualId"].is<const char*>());
+      TEST_ASSERT_EQUAL_STRING(id, d["manualId"].as<const char*>());
+    }
+  }
+}
+
 // Absolute worst case, untruncated: Off mode (offColor outweighs the longer
 // "manual"), every live field widest, both mismatch fields, ethIp. It fits
 // CONTROL_MAX_PAYLOAD with room to spare, so at the production cap nothing
-// sheds. Manual mode is 301. The lamp's merge adds up to 301 B on top
+// sheds. Manual mode is 323. The lamp's merge adds up to 301 B on top
 // (test_wisp_status_merge), which is why the app recovers an over-512 status
 // through the wispstatus page section. ArduinoJson escapes '"', '\' and
 // \b \f \n \r \t to two bytes and passes other control bytes raw, so a name
@@ -321,13 +343,13 @@ void test_worst_case_untruncated_length() {
   wisp::WispStatusFields f = worstCase();
   f.source = "off";
   size_t n = build(f, out, sizeof(out), /*cap=*/4096);
-  TEST_ASSERT_EQUAL_UINT32(320, n);
+  TEST_ASSERT_EQUAL_UINT32(342, n);
   n = build(worstCase(), out, sizeof(out), /*cap=*/4096);
-  TEST_ASSERT_EQUAL_UINT32(301, n);
+  TEST_ASSERT_EQUAL_UINT32(323, n);
 
   f.name = "\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"";
   n = build(f, out, sizeof(out), /*cap=*/4096);
-  TEST_ASSERT_EQUAL_UINT32(340, n);
+  TEST_ASSERT_EQUAL_UINT32(362, n);
   TEST_ASSERT_TRUE(n <= lamp_protocol::CONTROL_MAX_PAYLOAD);
 }
 
@@ -338,7 +360,7 @@ void test_worst_case_fits_control_op_at_production_cap() {
   char json[1024];
   size_t jsonLen = build(worstCase(), json, sizeof(json),
                          lamp_protocol::CONTROL_MAX_PAYLOAD);
-  TEST_ASSERT_EQUAL_UINT32(301, jsonLen);
+  TEST_ASSERT_EQUAL_UINT32(323, jsonLen);
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, json));
   TEST_ASSERT_EQUAL_STRING("secondary", d["oscRole"].as<const char*>());
@@ -430,6 +452,7 @@ int main(int, char**) {
   RUN_TEST(test_off_mode_emits_offcolor);
   RUN_TEST(test_every_status_is_config_split);
   RUN_TEST(test_config_split_survives_any_cap);
+  RUN_TEST(test_manual_id_rides_the_core_in_every_mode);
   RUN_TEST(test_config_carries_every_field_at_defaults);
   RUN_TEST(test_config_worst_case_pinned);
   RUN_TEST(test_config_too_small_buffer_returns_zero);

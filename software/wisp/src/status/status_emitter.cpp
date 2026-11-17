@@ -145,7 +145,9 @@ void StatusEmitter::emitStatus() {
   bool hasOffColor = false;
   const char* wispName = "";
   bool hasPassword = false;
+  ManualPaletteStatus manual{};
   if (config_) {
+    manual = config_->manualPaletteStatus();
     const auto off = config_->offColor();
     offR = off.r; offG = off.g; offB = off.b; offW = off.w;
     hasOffColor = true;
@@ -155,7 +157,8 @@ void StatusEmitter::emitStatus() {
   const WispStatusFields fields{
       wifiConn, sourceLive, paletteIdPrefix,
       sourceName, oscRole, offR, offG, offB, offW, hasOffColor,
-      wispName, hasPassword, wifiChannelMismatch, wifiApChannel, ethIp };
+      wispName, hasPassword, wifiChannelMismatch, wifiApChannel, ethIp,
+      manual.id };
 
   char jsonBuf[kStatusJsonBufLen];
   const size_t jsonLen = buildWispStatusJson(

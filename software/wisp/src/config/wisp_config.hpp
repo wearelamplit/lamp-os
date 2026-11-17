@@ -27,6 +27,11 @@ enum class WispSourceMode : uint8_t {
 // Must not exceed lamp_protocol::kMaxWispPaletteColors; setManualPalette enforces this.
 inline constexpr size_t kManualPaletteMaxColors = 50;
 
+// The stored Manual palette as wispStatus reports it.
+struct ManualPaletteStatus {
+  char id[9];  // statusManualId: "" when empty, else 8 hex chars
+};
+
 class WispConfig {
  public:
   WispConfig();
@@ -62,6 +67,10 @@ class WispConfig {
   // StatusEmitter timer-service task.
   size_t copyManualPalette(uint8_t* outRgb, uint8_t* outW,
                            size_t maxColors) const;
+
+  // The stored Manual palette's status fields, whatever the source mode.
+  // Lock-guarded like copyManualPalette.
+  ManualPaletteStatus manualPaletteStatus() const;
 
   // Ring color in Off mode (PaintDistributor stays idle). Persisted as 4 NVS bytes.
   ManualPaletteColor offColor() const { return offColor_; }

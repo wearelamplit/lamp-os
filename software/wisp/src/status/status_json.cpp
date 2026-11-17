@@ -40,6 +40,8 @@ size_t buildWispStatusJson(const WispStatusFields& f, char* out,
   if (f.hasPassword) {
     doc["hasPassword"] = true;
   }
+  // Present in every status, "" included, so its absence names an older wisp.
+  doc["manualId"]      = f.manualId ? f.manualId : "";
 
   const bool isOff = f.source && std::strcmp(f.source, "off") == 0;
 

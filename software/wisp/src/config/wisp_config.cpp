@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "paint/palette_id.hpp"
 #include "status/status_ring.hpp"
 
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
@@ -331,6 +332,15 @@ size_t WispConfig::copyManualPalette(uint8_t* outRgb, uint8_t* outW,
   }
   xSemaphoreGive(asHandle(mutex_));
   return n;
+}
+
+ManualPaletteStatus WispConfig::manualPaletteStatus() const {
+  ManualPaletteStatus s{};
+  xSemaphoreTake(asHandle(mutex_), portMAX_DELAY);
+  const std::string id = statusManualId(manualPalette_);
+  xSemaphoreGive(asHandle(mutex_));
+  std::snprintf(s.id, sizeof(s.id), "%s", id.c_str());
+  return s;
 }
 
 }  // namespace wisp

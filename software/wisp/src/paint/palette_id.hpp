@@ -28,4 +28,11 @@ inline std::string manualPaletteId(const std::vector<ManualPaletteColor>& cols) 
   return std::string(buf);
 }
 
+// The Manual palette's id as wispStatus `manualId` carries it: "" for an
+// empty palette, else manualPaletteId. Matches the app's
+// WispRepository.statusManualId.
+inline std::string statusManualId(const std::vector<ManualPaletteColor>& cols) {
+  return cols.empty() ? std::string() : manualPaletteId(cols);
+}
+
 }  // namespace wisp

@@ -25,7 +25,7 @@ namespace {
 const char kWorstStatus[] =
     R"({"char":"wispStatus","source":"off","wifiConnected":false,)"
     R"("sourceLive":false,"lastSeenMs":9223372036854775,"configSplit":true,)"
-    R"("hasPassword":true,)"
+    R"("hasPassword":true,"manualId":"abcdef12",)"
     R"("offColor":"ffffffff","oscRole":"secondary","paletteIdPrefix":"abcdef12",)"
     R"("name":"12345678901234567890","ethIp":"255.255.255.255",)"
     R"("wifiChannelMismatch":true,"wifiApChannel":11})";
@@ -79,22 +79,24 @@ void test_config_stamp_merged_only_when_config_cached() {
 // The merge adds 301 B at worst, so the wisp's widest status overflows the
 // 512 B characteristic whole; the page section serves all of it.
 void test_uncapped_merge_of_worst_status_pinned() {
-  TEST_ASSERT_EQUAL_size_t(320, std::strlen(kWorstStatus));
+  TEST_ASSERT_EQUAL_size_t(342, std::strlen(kWorstStatus));
   const std::string out = mergeWispStatusJson(widestMerge(kWorstStatus), 0);
-  TEST_ASSERT_EQUAL_size_t(621, out.size());
+  TEST_ASSERT_EQUAL_size_t(643, out.size());
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_FALSE(d["helloPaletteIdPrefix"].isNull());
   TEST_ASSERT_FALSE(d["configLastSeenMs"].isNull());
 }
 
-// Capped for CHAR_WISP_STATUS, the diagnostics shed in order until the
-// document fits. Every field an app reads survives, configSplit among them,
-// since without it the app reads the settings as parser defaults.
-void test_capped_merge_sheds_diagnostics_to_fit() {
+// Capped for CHAR_WISP_STATUS, the diagnostics shed in order. The widest
+// status is still over 512 B with all four gone, so its notify goes blank
+// and the app re-reads the page section. Every field an app reads survives,
+// configSplit among them, since without it the app reads the settings as
+// parser defaults, and manualId, whose absence reads as an older wisp.
+void test_capped_merge_sheds_every_diagnostic() {
   const std::string out = mergeWispStatusJson(widestMerge(kWorstStatus),
                                               kWispStatusCharMaxLen);
-  TEST_ASSERT_EQUAL_size_t(511, out.size());
+  TEST_ASSERT_EQUAL_size_t(533, out.size());
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_TRUE(d["helloPaletteIdPrefix"].isNull());
@@ -107,17 +109,19 @@ void test_capped_merge_sheds_diagnostics_to_fit() {
   TEST_ASSERT_FALSE(d["shadeWispColor"].isNull());
   TEST_ASSERT_EQUAL_STRING("12345678901234567890", d["name"].as<const char*>());
   TEST_ASSERT_TRUE(d["configSplit"].as<bool>());
+  TEST_ASSERT_EQUAL_STRING("abcdef12", d["manualId"].as<const char*>());
 }
 
-// Manual's widest status fits once three diagnostics are gone, so the
-// shedding stops there and helloFlags stays.
+// A Manual status without Ethernet fits once three diagnostics are gone, so
+// the shedding stops there and helloFlags stays.
 void test_capped_merge_stops_shedding_once_it_fits() {
   std::string status(kWorstStatus);
   status.replace(status.find(R"("source":"off")"), 14, R"("source":"manual")");
   status.erase(status.find(R"("offColor":"ffffffff",)"), 22);
+  status.erase(status.find(R"("ethIp":"255.255.255.255",)"), 26);
   const std::string out =
       mergeWispStatusJson(widestMerge(status.c_str()), kWispStatusCharMaxLen);
-  TEST_ASSERT_EQUAL_size_t(509, out.size());
+  TEST_ASSERT_EQUAL_size_t(505, out.size());
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_TRUE(d["statusLastSeenMs"].isNull());
@@ -133,7 +137,7 @@ void test_capped_merge_keeps_config_split_when_still_over() {
                  R"(\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\")");
   const std::string out =
       mergeWispStatusJson(widestMerge(status.c_str()), kWispStatusCharMaxLen);
-  TEST_ASSERT_EQUAL_size_t(531, out.size());
+  TEST_ASSERT_EQUAL_size_t(553, out.size());
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_TRUE(d["helloFlags"].isNull());
@@ -188,7 +192,7 @@ int main(int, char**) {
   RUN_TEST(test_nothing_known_serves_empty_object);
   RUN_TEST(test_config_stamp_merged_only_when_config_cached);
   RUN_TEST(test_uncapped_merge_of_worst_status_pinned);
-  RUN_TEST(test_capped_merge_sheds_diagnostics_to_fit);
+  RUN_TEST(test_capped_merge_sheds_every_diagnostic);
   RUN_TEST(test_capped_merge_stops_shedding_once_it_fits);
   RUN_TEST(test_capped_merge_keeps_config_split_when_still_over);
   RUN_TEST(test_capped_merge_keeps_diagnostics_when_it_fits);

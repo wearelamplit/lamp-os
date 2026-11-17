@@ -19,6 +19,7 @@ struct WispStatusFields {
   bool         wifiChannelMismatch = false;
   int          wifiApChannel = 0;
   const char*  ethIp = nullptr;  // omitted when Ethernet is not up
+  const char*  manualId = "";    // statusManualId of the stored Manual palette
 };
 
 // Settings the app edits, plus opSeq, which confirms a sealed op landed.

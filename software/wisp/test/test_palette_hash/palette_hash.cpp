@@ -45,6 +45,19 @@ void test_empty_palette_is_fnv_offset_basis(void) {
   TEST_ASSERT_EQUAL_STRING("811c9dc5", wisp::manualPaletteId(cols).c_str());
 }
 
+// wispStatus manualId: "" for an empty palette, never the empty palette's
+// hash, so the app can tell an empty palette from an unknown one.
+void test_status_manual_id_empty_is_empty_string(void) {
+  std::vector<wisp::ManualPaletteColor> cols;
+  TEST_ASSERT_EQUAL_STRING("", wisp::statusManualId(cols).c_str());
+}
+
+void test_status_manual_id_is_the_palette_id(void) {
+  std::vector<wisp::ManualPaletteColor> cols = {{10, 20, 30, 0},
+                                                {40, 50, 60, 70}};
+  TEST_ASSERT_EQUAL_STRING("59a8ae37", wisp::statusManualId(cols).c_str());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_w_zero_palette);
@@ -52,5 +65,7 @@ int main(int, char**) {
   RUN_TEST(test_ten_w_colours_arrive_whole);
   RUN_TEST(test_strip_palette_trailing_colours_arrive_without_w);
   RUN_TEST(test_empty_palette_is_fnv_offset_basis);
+  RUN_TEST(test_status_manual_id_empty_is_empty_string);
+  RUN_TEST(test_status_manual_id_is_the_palette_id);
   return UNITY_END();
 }

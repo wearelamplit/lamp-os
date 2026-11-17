@@ -199,6 +199,23 @@ void test_clearing_unset_settings_removes_no_missing_key() {
   TEST_ASSERT_EQUAL_INT(0, s_removeMissing);
 }
 
+// The status reports the stored Manual palette in every source mode: "" when
+// it is empty, its id otherwise.
+void test_manual_palette_status_reports_the_stored_palette() {
+  wisp::WispConfig cfg;
+  cfg.begin();
+  const wisp::WispSourceMode modes[] = {wisp::WispSourceMode::Off,
+                                        wisp::WispSourceMode::Manual,
+                                        wisp::WispSourceMode::Osc};
+  for (const auto mode : modes) {
+    cfg.setSourceMode(mode);
+    cfg.setManualPalette({});
+    TEST_ASSERT_EQUAL_STRING("", cfg.manualPaletteStatus().id);
+    cfg.setManualPalette({{10, 20, 30, 0}, {40, 50, 60, 70}});
+    TEST_ASSERT_EQUAL_STRING("59a8ae37", cfg.manualPaletteStatus().id);
+  }
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_name_default_is_empty);
@@ -223,5 +240,6 @@ int main(int, char**) {
   RUN_TEST(test_corrupt_osc_role_loads_as_primary);
   RUN_TEST(test_osc_address_built_per_role);
   RUN_TEST(test_clearing_unset_settings_removes_no_missing_key);
+  RUN_TEST(test_manual_palette_status_reports_the_stored_palette);
   return UNITY_END();
 }
