@@ -7,19 +7,21 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 
 ## Unreleased
 
-### Changed
-- **The wisp's status no longer repeats its settings**, which keeps it inside
-  the lamp's Bluetooth limit. Apps read them from the wisp's settings message.
-  Update the app on every phone that opens a wisp first: an older app shows
-  default settings. Through a lamp older than 1.2.8 the wisp's settings don't
-  show.
-
 ### Fixed
 - **Saving a wisp palette with white on many colours keeps the white on all of
-  them.** The last colours could lose their white before.
+  them.** The last colour could lose its white before.
 - **The wisp settings screen fills in even when the lamp missed the wisp's
   settings.** The app asks the wisp again and keeps reading until they
   arrive. Through a lamp older than 1.2.8 it asks you to update that lamp.
+
+### Changed
+- **A wrong current password on a wisp takes up to 10 s to report.** The app
+  waits that long for the wisp to confirm a password change.
+- **The wisp's status no longer repeats its settings**, which keeps it inside
+  the lamp's Bluetooth limit. Apps read them from the wisp's settings message.
+  Update the app on every phone that opens a wisp first: an older app shows
+  default settings or never loads them. Through a lamp older than 1.2.8 the wisp's settings don't
+  show.
 
 ## 1.3.8
 
