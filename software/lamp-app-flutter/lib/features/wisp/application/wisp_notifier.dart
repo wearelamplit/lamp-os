@@ -1436,8 +1436,8 @@ class WispNotifier extends _$WispNotifier {
   /// snapshot. A wisp that states its palette gets a `seq` with the op, the
   /// same on every resend, and confirms on its echo whatever its source mode.
   /// While the latest status is the lamp's hello-only merge it sends nothing,
-  /// sets the flag and throws: a sheet left open across a display switch would
-  /// write over a palette the app has not read.
+  /// sets the flag and throws. A sheet left open across a display switch would
+  /// otherwise write over a palette the app has not read.
   Future<void> setManualPalette() async {
     if ((state.value?.present ?? false) && !_statusFromWisp) {
       _manualPaletteWriteFailed = true;

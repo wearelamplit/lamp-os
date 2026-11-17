@@ -271,7 +271,9 @@ void main() {
     test('$name: a read started for a HELLO-only status never counts',
         () async {
       final ble = _PaletteBle()..holdPalette = Completer<void>();
-      seedPalette(ble, const []);
+      // The cache already holds what the wisp then states, so only the
+      // read's own status can rule it out.
+      seedPalette(ble, _p);
       await ble.connect(_lampId);
       ble.seedSection(_lampId, 'wispstatus', _b(_helloOnly(_a)));
       final c = ProviderContainer(
