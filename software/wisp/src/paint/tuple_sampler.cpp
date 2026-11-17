@@ -158,7 +158,7 @@ ColorTuple sampleTupleForMac(const std::vector<RGBW>& colors,
   const uint32_t posA = hashMac(mac, 0u      ^ shuffleSeed);
   const uint32_t posB = hashMac(mac, kGolden ^ shuffleSeed);
   out = sampleTupleAtPositions(colors, posA, posB, style);
-  // Swatches never swap: base keeps the weight repetition gives it.
+  // Swatches never swap, so base keeps the weight repetition gives it.
   if (style == PaletteStyle::Swatches) return out;
 
   // Swap picks which position lands on base vs shade. Applied after gap

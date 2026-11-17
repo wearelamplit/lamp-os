@@ -107,7 +107,7 @@ void SerialConsole::handleCommand(const String& cmd) {
       return;
     }
     config_.setOscRole(role);
-    status_.triggerOnChange();
+    apply_(DispatchResult::AppliedOscRole);
     Serial.printf("[wisp.cmd] osc role = %s (%s)\n", oscRoleName(role),
                   oscPaletteAddress(role));
   } else if (cmd == "paint:swatches on" || cmd == "paint:swatches off") {
