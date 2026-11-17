@@ -196,17 +196,27 @@ void main() {
 
   test('a first frame that fails to parse still reads after the enable',
       () async {
-    late _LinkScopedBle ble;
-    late ProviderContainer c;
-    await runZonedGuarded(() async {
-      (ble, c) = await openPicker('{"state":"scanning"}');
-      ble
-        ..readAfterDrop = _b('{"state":"idle"}')
-        ..changeBeforeEnable = _b('{"state":"connecting"}')
-        ..firstFrame = _b('not json');
-      await bounce(ble);
-    }, (_, _) {});
+    final (ble, c) = await openPicker('{"state":"scanning"}');
+    ble
+      ..readAfterDrop = _b('{"state":"idle"}')
+      ..changeBeforeEnable = _b('{"state":"connecting"}')
+      ..firstFrame = _b('not json');
+    await bounce(ble);
     expect(c.read(wifiNotifierProvider(_devId)).value!.state, 'connecting');
+  });
+
+  test('a notify that fails to parse mid-session reads the state instead',
+      () async {
+    final (ble, c) = await openPicker('{"state":"scanning"}');
+    await ble.write(_devId, BleUuids.controlService, BleUuids.wifiState,
+        _b('{"state":"idle","scanResults":[{"ssid":"home","rssi":-50,'
+            '"encrypted":true}]}'));
+    ble.simulateNotify(_devId, BleUuids.controlService, BleUuids.wifiState,
+        _b('{"state":"idle","scanResults":[{"ssid":"ho'));
+    await pumpEventQueue();
+    final w = c.read(wifiNotifierProvider(_devId)).value!;
+    expect(w.state, 'idle');
+    expect(w.scanResults.single.ssid, 'home');
   });
 
   test('a re-read that fails to parse leaves the state', () async {

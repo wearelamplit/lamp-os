@@ -67,11 +67,11 @@ class WifiNotifier extends _$WifiNotifier {
         .subscribe(_deviceId, BleUuids.controlService, BleUuids.wifiState)
         .listen(
       (bytes) {
-        if (awaitingFirstFrame) {
+        final parsed = _onNotify(bytes);
+        if (awaitingFirstFrame || !parsed) {
           awaitingFirstFrame = false;
           unawaited(_rereadState(ble));
         }
-        _onNotify(bytes);
       },
       onError: (Object e) =>
           debugPrint('[wifi_notifier] wifiState stream error: $e'),
@@ -95,11 +95,23 @@ class WifiNotifier extends _$WifiNotifier {
     if (next != null && ref.mounted) _apply(next);
   }
 
-  void _onNotify(Uint8List bytes) {
+  /// Applies a notified frame. Returns false when the frame does not parse,
+  /// such as a scan list cut off at the notify size, so the caller reads the
+  /// full value instead.
+  bool _onNotify(Uint8List bytes) {
     // flutter_blue_plus replays an empty cached value when a subscription
     // starts after a reconnect.
-    if (bytes.isEmpty) return;
-    _apply(_parse(bytes));
+    if (bytes.isEmpty) return true;
+    final WifiState next;
+    try {
+      next = _parse(bytes);
+    } catch (e) {
+      debugPrint('[wifi_notifier] wifiState notify failed to parse for '
+          '$_deviceId: $e');
+      return false;
+    }
+    _apply(next);
+    return true;
   }
 
   void _apply(WifiState next) {
