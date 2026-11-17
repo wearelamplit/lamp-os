@@ -1438,7 +1438,9 @@ class WispNotifier extends _$WispNotifier {
       isSuperseded: () => _paletteSaveEpoch != epoch,
     );
     if (_disposed || _paletteSaveEpoch != epoch) return;
-    _applyPaletteConfirm(committed, ok, wispMac);
+    // A later status may have stated another palette before the write's ack.
+    _applyPaletteConfirm(committed, ok, wispMac,
+        known: _manualIds[wispMac] == expected);
     if (!ok) throw Exception('wisp manual palette write not confirmed');
   }
 
@@ -1471,11 +1473,12 @@ class WispNotifier extends _$WispNotifier {
   void _applyPaletteConfirm(
     List<LampColor> committed,
     bool ok,
-    String? wispMac,
-  ) {
+    String? wispMac, {
+    bool known = true,
+  }) {
     if (ok) {
       _setSaved(committed);
-      _currentPaletteKnown = true;
+      _currentPaletteKnown = known;
       _paletteMac = wispMac;
       _manualPaletteWriteFailed = false;
     } else {

@@ -47,9 +47,33 @@ Uint8List _bytes(List<LampColor> p) => Uint8List.fromList([
   for (final c in p) ...[c.r, c.g, c.b, c.w],
 ]);
 
-/// Counts `wispstatus` section reads.
+/// Counts `wispstatus` section reads, and holds the palette op's write
+/// while [holdPaletteWrite] is set.
 class _CountingBle extends InMemoryBleClient {
   int statusReads = 0;
+  Completer<void>? holdPaletteWrite;
+
+  @override
+  Future<void> write(
+    String d,
+    String s,
+    String c,
+    Uint8List v, {
+    bool withoutResponse = false,
+    bool allowLongWrite = false,
+  }) async {
+    await super.write(
+      d,
+      s,
+      c,
+      v,
+      withoutResponse: withoutResponse,
+      allowLongWrite: allowLongWrite,
+    );
+    if (utf8.decode(v, allowMalformed: true).contains('setManualPalette')) {
+      await holdPaletteWrite?.future;
+    }
+  }
 
   @override
   Future<Uint8List> readSection(String deviceId, String name) {
@@ -318,6 +342,25 @@ void main() {
       '"paletteIdPrefix":"${WispRepository.paletteIdHash(_y)}"}',
     );
     expect(await result, isNull);
+  });
+
+  test('a palette stated after the echo, before the write\'s ack, is not '
+      'taken as the one saved', () async {
+    WispNotifier.debugSeqStart = () => 55;
+    final ble = _CountingBle()..holdPaletteWrite = Completer<void>();
+    final n = await open(ble, _status(manualId: _id(_x), prefix: _id(_x)));
+
+    final (_, result) = save(n, _y);
+    await pumpEventQueue();
+    notify(ble, _status(manualId: _id(_y), manualSeq: 55));
+    await pumpEventQueue();
+    // Another phone saves X back before this write's ack returns.
+    notify(ble, _status(manualId: _id(_x), manualSeq: 9));
+    await pumpEventQueue();
+    ble.holdPaletteWrite!.complete();
+    expect(await result, isNull);
+    expect(n.savedManualPalette, _y);
+    expect(n.paletteLoading, isTrue);
   });
 
   group('the op and the status field', () {
