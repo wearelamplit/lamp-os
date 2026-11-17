@@ -153,8 +153,8 @@ class WispNotifier extends _$WispNotifier {
 
   bool _paletteKnown = false;
   // Counts each time a known palette turns unknown. A save stops resending
-  // once it moves, even if a read has made the palette known again: that
-  // read may be another wisp's palette, which a resend would overwrite.
+  // once it moves, even if a read has made the palette known again, since
+  // that read may be another wisp's palette, which a resend would overwrite.
   int _paletteLosses = 0;
   bool get _currentPaletteKnown => _paletteKnown;
   set _currentPaletteKnown(bool known) {
@@ -1327,7 +1327,8 @@ class WispNotifier extends _$WispNotifier {
   /// Send an op, then wait for [confirm] to resolve true within its own
   /// timeout, resending up to [_writeConfirmAttempts] on a miss. [confirm]
   /// is armed before [send] each attempt so a fast echo isn't missed.
-  /// Returns true once confirmed, false when every attempt goes unconfirmed.
+  /// Returns true once confirmed, a confirm that lands while [send] reports an
+  /// error included, and false when every attempt goes unconfirmed.
   /// [isSuperseded], when supplied and true at the top of an attempt, stops
   /// resending immediately and returns false. A newer op owns the state or
   /// the op became moot, so a resend from this loop must not reach the wisp.
@@ -1340,12 +1341,15 @@ class WispNotifier extends _$WispNotifier {
         attempt < _writeConfirmAttempts && !_disposed;
         attempt++) {
       if (isSuperseded != null && isSuperseded()) return false;
+      var landed = false;
       Future<bool>? confirmed;
       try {
-        confirmed = confirm();
+        confirmed = confirm().then((ok) => landed = ok);
         await send();
         if (await confirmed) return true;
       } catch (e, st) {
+        // A write whose response is lost can still have reached the wisp.
+        if (landed) return true;
         debugPrint('WispNotifier confirmed-op attempt failed: $e\n$st');
         if (confirmed != null) {
           unawaited(confirmed.then((_) {}, onError: (_) {}));

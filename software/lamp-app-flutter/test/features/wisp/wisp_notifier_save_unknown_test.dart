@@ -18,6 +18,8 @@ const _p = [
 const _q = [LampColor(r: 5, g: 6, b: 7, w: 0)];
 const _other = [LampColor(r: 90, g: 90, b: 0, w: 40)];
 
+final _defaultSeqStart = WispNotifier.debugSeqStart;
+
 typedef _Full = String Function(String mac, List<LampColor> p, {int? seq});
 
 String _legacy(String mac, List<LampColor> p, {int? seq}) =>
@@ -219,6 +221,36 @@ void main() {
     });
   }
 
+  // The op reaches the wisp and its echo lands, but the write call reports an
+  // error (a lost response).
+  for (final (kind, full) in _kinds) {
+    test('$kind: a save the wisp echoed confirms even when its write reports '
+        'an error', () async {
+      WispNotifier.debugSeqStart = () => 77;
+      addTearDown(() => WispNotifier.debugSeqStart = _defaultSeqStart);
+      final ble = PaletteBle(_lampId)..seedPalette(_p);
+      final (_, n) = await openWisp(ble, full(wispA, _p));
+      n.setManualPaletteDraft(_q);
+
+      ble.holdPaletteWrite = Completer<void>();
+      final result = n.setManualPalette().then<Object?>(
+        (_) => null,
+        onError: (Object e) => e,
+      );
+      await pumpEventQueue();
+      ble
+        ..seedPalette(_q)
+        ..notifyStatus(full(wispA, _q, seq: 77));
+      await pumpEventQueue();
+      ble.holdPaletteWrite!.completeError(Exception('response lost'));
+      ble.holdPaletteWrite = null;
+
+      expect(await result, isNull);
+      expect(n.manualPaletteWriteFailed, isFalse);
+      expect(ble.paletteWrites, hasLength(1));
+    });
+  }
+
   // An empty save first waits out the read in flight (here the claims read).
   // The lamp adopts wisp B meanwhile, and B's next status reads its palette
   // before the wait ends.
@@ -243,7 +275,7 @@ void main() {
       ..notifyStatus(legacyStatus(wispB, _other));
     await pumpEventQueue();
     ble.holdClaims!.complete();
-    // Microtasks only: a timer turn would let the save's idle wait end first.
+    // Microtasks only, so the save's idle wait cannot end first.
     for (var i = 0; i < 50; i++) {
       await Future<void>.microtask(() {});
     }
