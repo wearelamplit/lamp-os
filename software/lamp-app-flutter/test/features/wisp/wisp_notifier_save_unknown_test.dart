@@ -112,6 +112,34 @@ void main() {
     await expectRefused(ble, n);
   });
 
+  // An empty save waits out the read in flight before it sends, and that
+  // read lands meanwhile. The tap decides.
+  test('a save tapped while the palette is unread sends nothing once the '
+      'read lands', () async {
+    final ble = PaletteBle(_lampId)..seedPalette(_p);
+    final (_, n) = await openWisp(ble, helloOnlyStatus(wispA));
+    n.setManualPaletteDraft(const []);
+    ble
+      ..holdPalette = Completer<void>()
+      ..seedStatus(legacyStatus(wispA, _p))
+      ..notifyStatus(legacyStatus(wispA, _p));
+    await pumpEventQueue();
+    expect(n.paletteLoading, isTrue);
+
+    final result = n.setManualPalette().then<Object?>(
+      (_) => null,
+      onError: (Object e) => e,
+    );
+    await pumpEventQueue();
+    ble.holdPalette!.complete();
+    ble.holdPalette = null;
+    await pumpEventQueue();
+    expect(n.paletteLoading, isFalse);
+
+    expect(await result, isNotNull);
+    expect(ble.paletteWrites, isEmpty);
+  });
+
   // An empty save first re-reads the status; the lamp adopts wisp B and
   // serves its HELLO-only merge meanwhile.
   test('a save tapped as the palette goes unknown sends nothing', () async {
