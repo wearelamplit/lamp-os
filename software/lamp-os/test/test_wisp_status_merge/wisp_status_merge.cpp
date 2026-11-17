@@ -20,11 +20,12 @@ using lamp::WispStatusMergeInput;
 
 namespace {
 
-// The wisp's widest status once the config copy is gone (test_status_json's
-// status-only worst case on the wisp side): Off mode, every live field set.
+// The wisp's widest status (test_status_json's worst case on the wisp side):
+// Off mode, every live field set.
 const char kStatusOnlyWorst[] =
     R"({"char":"wispStatus","source":"off","wifiConnected":false,)"
-    R"("sourceLive":false,"lastSeenMs":9223372036854775,"hasPassword":true,)"
+    R"("sourceLive":false,"lastSeenMs":9223372036854775,"configSplit":true,)"
+    R"("hasPassword":true,)"
     R"("offColor":"ffffffff","oscRole":"secondary","paletteIdPrefix":"abcdef12",)"
     R"("name":"12345678901234567890","ethIp":"255.255.255.255",)"
     R"("wifiChannelMismatch":true,"wifiApChannel":11})";
@@ -75,12 +76,12 @@ void test_config_stamp_merged_only_when_config_cached() {
   TEST_ASSERT_EQUAL_STRING("osc", d2["source"].as<const char*>());
 }
 
-// The merge adds 301 B at worst, so even the wisp's status with no config copy
-// overflows the 512 B characteristic whole; the page section serves all of it.
+// The merge adds 301 B at worst, so the wisp's widest status overflows the
+// 512 B characteristic whole; the page section serves all of it.
 void test_uncapped_merge_of_status_only_worst_case_pinned() {
-  TEST_ASSERT_EQUAL_size_t(301, std::strlen(kStatusOnlyWorst));
+  TEST_ASSERT_EQUAL_size_t(320, std::strlen(kStatusOnlyWorst));
   const std::string out = mergeWispStatusJson(widestMerge(kStatusOnlyWorst), 0);
-  TEST_ASSERT_EQUAL_size_t(602, out.size());
+  TEST_ASSERT_EQUAL_size_t(621, out.size());
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_FALSE(d["helloPaletteIdPrefix"].isNull());
@@ -88,22 +89,24 @@ void test_uncapped_merge_of_status_only_worst_case_pinned() {
 }
 
 // Capped for CHAR_WISP_STATUS, the diagnostics shed in order until the
-// document fits; every field an app reads survives.
+// document fits; every field an app reads survives, configSplit among them,
+// since without it the app reads the settings as parser defaults.
 void test_capped_merge_sheds_diagnostics_to_fit() {
   const std::string out = mergeWispStatusJson(widestMerge(kStatusOnlyWorst),
                                               kWispStatusCharMaxLen);
-  TEST_ASSERT_EQUAL_size_t(509, out.size());
+  TEST_ASSERT_EQUAL_size_t(511, out.size());
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_TRUE(d["helloPaletteIdPrefix"].isNull());
   TEST_ASSERT_TRUE(d["helloLastSeenMs"].isNull());
   TEST_ASSERT_TRUE(d["statusLastSeenMs"].isNull());
   TEST_ASSERT_FALSE(d["configLastSeenMs"].isNull());
-  TEST_ASSERT_FALSE(d["helloFlags"].isNull());
+  TEST_ASSERT_TRUE(d["helloFlags"].isNull());
   TEST_ASSERT_EQUAL_STRING("AA:BB:CC:DD:EE:FF", d["wispMac"].as<const char*>());
   TEST_ASSERT_FALSE(d["wispVersion"].isNull());
   TEST_ASSERT_FALSE(d["shadeWispColor"].isNull());
   TEST_ASSERT_EQUAL_STRING("12345678901234567890", d["name"].as<const char*>());
+  TEST_ASSERT_TRUE(d["configSplit"].as<bool>());
 }
 
 // A document that already fits sheds nothing.

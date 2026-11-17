@@ -156,11 +156,10 @@ void StatusEmitter::emitStatus() {
       wifiConn, sourceLive, paletteIdPrefix,
       sourceName, oscRole, offR, offG, offB, offW, hasOffColor,
       wispName, hasPassword, wifiChannelMismatch, wifiApChannel, ethIp };
-  const WispConfigFields configCopy = configFields();
 
   char jsonBuf[kStatusJsonBufLen];
   const size_t jsonLen = buildWispStatusJson(
-      fields, &configCopy, jsonBuf, sizeof(jsonBuf),
+      fields, jsonBuf, sizeof(jsonBuf),
       lamp_protocol::CONTROL_MAX_PAYLOAD);
 
   // Emit palette first: a wispStatus build failure must not suppress it.

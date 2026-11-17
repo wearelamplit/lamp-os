@@ -11,11 +11,7 @@ namespace {
 
 // App-parser defaults (wisp_status.dart). A field at its default is omitted;
 // the parser reconstructs it.
-constexpr uint32_t kDefaultDriftIntervalMs = 120000;
-constexpr uint8_t  kDefaultDriftFadePct    = 50;
-constexpr uint16_t kDefaultPixelCount      = 30;
 constexpr char     kDefaultLedType[]       = "GRB";
-constexpr uint8_t  kDefaultBrightness      = 100;
 constexpr char     kDefaultOscRole[]       = "primary";
 
 template <typename T>
@@ -25,39 +21,9 @@ void addIfFits(JsonDocument& doc, size_t cap, const char* key,
   if (measureJson(doc) > cap) doc.remove(key);
 }
 
-void addConfigCopy(JsonDocument& doc, size_t cap, const WispConfigFields& c) {
-  // shuffleSeed drives the app's predictTuple() and opSeq confirms a sealed
-  // op landed, so both outrank the cosmetics below.
-  if (c.shuffleSeed != 0) {
-    addIfFits(doc, cap, "shuffleSeed", c.shuffleSeed);
-  }
-  if (c.opSeq != 0) {
-    addIfFits(doc, cap, "opSeq", c.opSeq);
-  }
-  // Drift rides in every mode: the app's drift form is on screen in Off too,
-  // and an omitted field there reads as the parser default.
-  if (c.driftIntervalMs != kDefaultDriftIntervalMs) {
-    addIfFits(doc, cap, "driftIntervalMs", c.driftIntervalMs);
-  }
-  if (c.driftFadePct != kDefaultDriftFadePct) {
-    addIfFits(doc, cap, "driftFadePct", c.driftFadePct);
-  }
-  if (c.ledType && c.ledType[0] != '\0' &&
-      std::strcmp(c.ledType, kDefaultLedType) != 0) {
-    addIfFits(doc, cap, "ledType", c.ledType);
-  }
-  if (c.pixelCount > 0 && c.pixelCount != kDefaultPixelCount) {
-    addIfFits(doc, cap, "px", c.pixelCount);
-  }
-  if (c.brightness != kDefaultBrightness) {
-    addIfFits(doc, cap, "brightness", c.brightness);
-  }
-}
-
 }  // namespace
 
-size_t buildWispStatusJson(const WispStatusFields& f,
-                           const WispConfigFields* configCopy, char* out,
+size_t buildWispStatusJson(const WispStatusFields& f, char* out,
                            size_t outCap, size_t cap) {
   JsonDocument doc;
   // Guaranteed core. Worst-case serialized width is pinned well under cap by
@@ -68,6 +34,9 @@ size_t buildWispStatusJson(const WispStatusFields& f,
   doc["wifiConnected"] = f.wifiConnected;
   doc["sourceLive"]    = f.sourceLive;
   doc["lastSeenMs"]    = uptimeMs();
+  // An app reads a status without it as carrying the settings at its parser
+  // defaults, so it rides the core.
+  doc["configSplit"]   = true;
   if (f.hasPassword) {
     doc["hasPassword"] = true;
   }
@@ -104,10 +73,6 @@ size_t buildWispStatusJson(const WispStatusFields& f,
     addIfFits(doc, cap, "wifiChannelMismatch", true);
     if (f.wifiApChannel > 0) addIfFits(doc, cap, "wifiApChannel", f.wifiApChannel);
   }
-  // TODO: drop configCopy and its parameter, and set "configSplit":true on
-  // the status, once the fleet's lamps carry wispConfig. That removal is what
-  // takes the config fields off the 30 s heartbeat; see docs/dev/networking.md.
-  if (configCopy) addConfigCopy(doc, cap, *configCopy);
   return serializeJson(doc, out, outCap);
 }
 

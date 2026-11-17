@@ -34,14 +34,13 @@ struct WispConfigFields {
 };
 
 // Serialize a wispStatus JSON into `out` (capacity `outCap`). A guaranteed
-// core always fits under `cap`; every other field is added only if the
-// document still fits (fields matching the app parser's defaults are
-// omitted). `configCopy`, when given, adds the config fields at the lowest
-// priority for lamps that predate wispConfig. lastSeenMs is the wisp's
-// uptime at the call (wisp::uptimeMs()). Never returns 0 when
-// outCap > cap. See docs/dev/networking.md for the field priority order.
-size_t buildWispStatusJson(const WispStatusFields& f,
-                           const WispConfigFields* configCopy, char* out,
+// core, `"configSplit":true` among it, always fits under `cap`; every other
+// field is added only if the document still fits (fields matching the app
+// parser's defaults are omitted). The settings never ride it; they go only
+// in wispConfig. lastSeenMs is the wisp's uptime at the call
+// (wisp::uptimeMs()). Never returns 0 when outCap > cap. See
+// docs/dev/networking.md for the field priority order.
+size_t buildWispStatusJson(const WispStatusFields& f, char* out,
                            size_t outCap, size_t cap);
 
 // Serialize a wispConfig JSON into `out`. Every field is always present, so
