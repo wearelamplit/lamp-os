@@ -34,8 +34,8 @@ class _LinkScopedBle extends InMemoryBleClient {
   /// Value a read returns once the link has dropped; null throws.
   Uint8List? readAfterDrop;
 
-  /// Lamp change pushed just before the next notify enable, so only a read
-  /// made after the enable sees it.
+  /// Lamp change made just before the next notify enable. The lamp sends no
+  /// notify for it, so only a read made after the enable sees it.
   Uint8List? changeBeforeEnable;
 
   /// Holds dropped-link reads until completed.
@@ -77,7 +77,6 @@ class _LinkScopedBle extends InMemoryBleClient {
             changeBeforeEnable = null;
             if (readAfterDrop != null) readAfterDrop = change;
             await super.write(d, s, c, change);
-            simulateNotify(d, s, c, change);
           }
           _notifyingLink = link;
           out.add(Uint8List(0));
