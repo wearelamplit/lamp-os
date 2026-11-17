@@ -67,10 +67,11 @@ class WifiNotifier extends _$WifiNotifier {
         .subscribe(_deviceId, BleUuids.controlService, BleUuids.wifiState)
         .listen(
       (bytes) {
+        if (awaitingFirstFrame) {
+          awaitingFirstFrame = false;
+          unawaited(_rereadState(ble));
+        }
         _onNotify(bytes);
-        if (!awaitingFirstFrame) return;
-        awaitingFirstFrame = false;
-        unawaited(_rereadState(ble));
       },
       onError: (Object e) =>
           debugPrint('[wifi_notifier] wifiState stream error: $e'),

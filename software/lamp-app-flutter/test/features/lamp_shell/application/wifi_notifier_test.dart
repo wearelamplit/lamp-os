@@ -15,6 +15,17 @@ import 'package:lamp_app/features/lamp_shell/application/wifi_notifier.dart';
 
 const _devId = 'lamp-x';
 
+/// Emits an empty first frame once a subscription is live, as
+/// flutter_blue_plus replays an empty cache.
+class _ReplayingBle extends InMemoryBleClient {
+  @override
+  Stream<Uint8List> subscribe(String d, String s, String c) async* {
+    final src = super.subscribe(d, s, c);
+    yield Uint8List(0);
+    yield* src;
+  }
+}
+
 /// Creates a [ProviderContainer] with an in-memory BLE client pre-seeded with
 /// [stateJson] for wifiState, and adds an [InventoryLamp] with
 /// [controlPassword] so that [WifiNotifier._writeOp] can find the lamp.
@@ -22,7 +33,7 @@ Future<ProviderContainer> _seeded(
   String stateJson, {
   String controlPassword = 'secret',
 }) async {
-  final ble = InMemoryBleClient();
+  final ble = _ReplayingBle();
   await ble.connect(_devId);
   await ble.write(
     _devId,
@@ -40,15 +51,6 @@ Future<ProviderContainer> _seeded(
             id: _devId, name: 'jacko', controlPassword: controlPassword),
       );
   return c;
-}
-
-/// The lamp changes its wifiState and notifies it, so a read that follows
-/// the notify returns the same value.
-Future<void> _lampPush(InMemoryBleClient ble, String json) async {
-  final bytes = Uint8List.fromList(utf8.encode(json));
-  await ble.write(_devId, BleUuids.controlService, BleUuids.wifiState, bytes);
-  ble.simulateNotify(
-      _devId, BleUuids.controlService, BleUuids.wifiState, bytes);
 }
 
 void main() {
@@ -102,10 +104,17 @@ void main() {
     addTearDown(sub.close);
     await c.read(wifiNotifierProvider(_devId).future);
 
-    // Push a notify with state "connected" and NO scanResults.
+    // Push a notify with state "connected" and NO scanResults. Use
+    // simulateNotify rather than write() because production fbp does
+    // NOT echo writes to subscribers.
     final ble = c.read(bleClientProvider) as InMemoryBleClient;
-    await _lampPush(
-        ble, '{"state":"connected","ssid":"home","ip":"192.168.1.20"}');
+    ble.simulateNotify(
+      _devId,
+      BleUuids.controlService,
+      BleUuids.wifiState,
+      Uint8List.fromList(utf8.encode(
+          '{"state":"connected","ssid":"home","ip":"192.168.1.20"}')),
+    );
     // Let the listener fire.
     await Future<void>.delayed(Duration.zero);
 
@@ -128,7 +137,13 @@ void main() {
     await c.read(wifiNotifierProvider(_devId).future);
 
     final ble = c.read(bleClientProvider) as InMemoryBleClient;
-    await _lampPush(ble, '{"state":"failed","lastError":"auth"}');
+    ble.simulateNotify(
+      _devId,
+      BleUuids.controlService,
+      BleUuids.wifiState,
+      Uint8List.fromList(
+          utf8.encode('{"state":"failed","lastError":"auth"}')),
+    );
     await Future<void>.delayed(Duration.zero);
 
     final w = c.read(wifiNotifierProvider(_devId)).value!;

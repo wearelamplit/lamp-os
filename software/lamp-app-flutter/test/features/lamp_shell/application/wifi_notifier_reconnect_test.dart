@@ -38,6 +38,9 @@ class _LinkScopedBle extends InMemoryBleClient {
   /// notify for it, so only a read made after the enable sees it.
   Uint8List? changeBeforeEnable;
 
+  /// First frame a subscription emits once enabled; null emits it empty.
+  Uint8List? firstFrame;
+
   /// Holds dropped-link reads until completed.
   Completer<Uint8List>? readGate;
 
@@ -79,7 +82,7 @@ class _LinkScopedBle extends InMemoryBleClient {
             await super.write(d, s, c, change);
           }
           _notifyingLink = link;
-          out.add(Uint8List(0));
+          out.add(firstFrame ?? Uint8List(0));
         });
       },
       onCancel: () async {
@@ -188,6 +191,21 @@ void main() {
     c.listen(wifiNotifierProvider(_devId), (_, _) {});
     await c.read(wifiNotifierProvider(_devId).future);
     await pumpEventQueue();
+    expect(c.read(wifiNotifierProvider(_devId)).value!.state, 'connecting');
+  });
+
+  test('a first frame that fails to parse still reads after the enable',
+      () async {
+    late _LinkScopedBle ble;
+    late ProviderContainer c;
+    await runZonedGuarded(() async {
+      (ble, c) = await openPicker('{"state":"scanning"}');
+      ble
+        ..readAfterDrop = _b('{"state":"idle"}')
+        ..changeBeforeEnable = _b('{"state":"connecting"}')
+        ..firstFrame = _b('not json');
+      await bounce(ble);
+    }, (_, _) {});
     expect(c.read(wifiNotifierProvider(_devId)).value!.state, 'connecting');
   });
 
