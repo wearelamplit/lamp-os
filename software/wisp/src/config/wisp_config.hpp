@@ -12,6 +12,7 @@
 #include <lampos/led_types.hpp>
 
 #include "config/manual_palette_color.hpp"
+#include "paint/current_palette.hpp"  // PaletteStyle
 #include "osc/osc_role.hpp"
 
 namespace wisp {
@@ -86,6 +87,10 @@ class WispConfig {
   uint8_t shuffleSeed() const { return shuffleSeed_; }
   void bumpShuffleSeed();
 
+  // How lamps take colours from the palette, in every source mode.
+  PaletteStyle paletteStyle() const { return paletteStyle_; }
+  void setPaletteStyle(PaletteStyle style);
+
   // Color drift interval (ms), and the Fade setting (0..100) that sets each
   // drift step's fade length (see driftFadeMs).
   uint32_t driftIntervalMs() const { return driftIntervalMs_; }
@@ -131,6 +136,7 @@ class WispConfig {
   uint16_t manualSeq_ = 0;
   ManualPaletteColor offColor_ = {255, 150, 50, 0};
   uint8_t shuffleSeed_ = 0;
+  PaletteStyle paletteStyle_ = PaletteStyle::Gradient;
   uint32_t driftIntervalMs_ = 120000;
   uint8_t driftFadePct_ = 50;
   String name_;

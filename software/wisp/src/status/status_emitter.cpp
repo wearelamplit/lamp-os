@@ -186,6 +186,7 @@ WispConfigFields StatusEmitter::configFields() const {
   c.driftFadePct = config_->driftFadePct();
   c.shuffleSeed = config_->shuffleSeed();
   c.opSeq = config_->opSeq();
+  c.swatches = config_->paletteStyle() == PaletteStyle::Swatches;
   // Never the softAP address: that network is the pre-mesh lamps', and OSC
   // senders belong on the venue LAN or the cable.
   eth::formatIp(c.ip, sizeof(c.ip));

@@ -5,7 +5,12 @@
 
 #include <unity.h>
 #include <cstring>
+#include <string>
 #include <vector>
+
+#include <mbedtls/gcm.h>
+#include <mbedtls/hkdf.h>
+#include <mbedtls/md.h>
 
 // CHAR_WISP_OP UUID 5f64f4e1-d6d9-4a44-9b3f-3a8d6f7e6b40, byte-reversed (LE).
 static const uint8_t kWispOpSaltLE[16] = {
@@ -605,6 +610,102 @@ void test_set_osc_role_plaintext_rejected_with_password() {
     TEST_ASSERT_EQUAL_INT((int)wisp::OscRole::Primary, (int)cfg.oscRole());
 }
 
+// Seal `json` as the app seals a wispOp: HKDF-SHA256 key from the password
+// (same salt and info as the vectors above), AES-256-GCM, every nonce byte
+// `nonceByte`.
+static std::vector<uint8_t> sealWispOp(const char* password, uint8_t nonceByte,
+                                       const char* json) {
+    static const char kInfo[] = "lamp-v1\0wispOp";
+    uint8_t key[32];
+    TEST_ASSERT_EQUAL_INT(0, mbedtls_hkdf(
+        mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), kWispOpSaltLE, 16,
+        reinterpret_cast<const uint8_t*>(password), strlen(password),
+        reinterpret_cast<const uint8_t*>(kInfo), sizeof(kInfo) - 1, key, 32));
+    const size_t len = strlen(json);
+    std::vector<uint8_t> out(1 + 12 + 16 + len);
+    out[0] = 0x02;
+    std::memset(out.data() + 1, nonceByte, 12);
+    mbedtls_gcm_context gcm;
+    mbedtls_gcm_init(&gcm);
+    TEST_ASSERT_EQUAL_INT(0, mbedtls_gcm_setkey(&gcm, MBEDTLS_CIPHER_ID_AES, key, 256));
+    TEST_ASSERT_EQUAL_INT(0, mbedtls_gcm_crypt_and_tag(
+        &gcm, MBEDTLS_GCM_ENCRYPT, len, out.data() + 1, 12, nullptr, 0,
+        reinterpret_cast<const uint8_t*>(json), out.data() + 29, 16,
+        out.data() + 13));
+    mbedtls_gcm_free(&gcm);
+    return out;
+}
+
+void test_set_swatches_applies_and_reloads() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    TEST_ASSERT_EQUAL_INT((int)wisp::PaletteStyle::Gradient, (int)cfg.paletteStyle());
+    wisp::WispOpDispatcher d(cfg);
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedSwatches,
+        (int)dispatchStr(d, R"({"char":"wispOp","op":"setSwatches","swatches":true})"));
+    TEST_ASSERT_EQUAL_INT((int)wisp::PaletteStyle::Swatches, (int)cfg.paletteStyle());
+    wisp::WispConfig reload;
+    reload.begin();
+    TEST_ASSERT_EQUAL_INT((int)wisp::PaletteStyle::Swatches, (int)reload.paletteStyle());
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedSwatches,
+        (int)dispatchStr(d, R"({"char":"wispOp","op":"setSwatches","swatches":false})"));
+    wisp::WispConfig reload2;
+    reload2.begin();
+    TEST_ASSERT_EQUAL_INT((int)wisp::PaletteStyle::Gradient, (int)reload2.paletteStyle());
+}
+
+// A stored value the wisp does not know loads as gradient.
+void test_unknown_stored_style_loads_as_gradient() {
+    Preferences prefs;
+    prefs.begin("wisp", false);
+    prefs.putUChar("swatches", 7);
+    wisp::WispConfig cfg;
+    cfg.begin();
+    TEST_ASSERT_EQUAL_INT((int)wisp::PaletteStyle::Gradient, (int)cfg.paletteStyle());
+}
+
+void test_set_swatches_needs_a_bool() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    wisp::WispOpDispatcher d(cfg);
+    const char* bad[] = {
+        R"({"char":"wispOp","op":"setSwatches"})",
+        R"({"char":"wispOp","op":"setSwatches","swatches":1})",
+        R"({"char":"wispOp","op":"setSwatches","swatches":"true"})",
+        R"({"char":"wispOp","op":"setSwatches","swatches":null})",
+    };
+    for (const char* op : bad) {
+        TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::Malformed, (int)dispatchStr(d, op));
+    }
+    TEST_ASSERT_EQUAL_INT((int)wisp::PaletteStyle::Gradient, (int)cfg.paletteStyle());
+}
+
+void test_set_swatches_plaintext_rejected_with_password() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    cfg.setPassword("testpass");
+    wisp::WispOpDispatcher d(cfg);
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::Rejected,
+        (int)dispatchStr(d, R"({"char":"wispOp","op":"setSwatches","swatches":true})"));
+    TEST_ASSERT_EQUAL_INT((int)wisp::PaletteStyle::Gradient, (int)cfg.paletteStyle());
+}
+
+// A sealed setSwatches counts as applied, so opSeq confirms it for the app.
+void test_set_swatches_sealed_bumps_op_seq() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    cfg.setPassword("testpass");
+    wisp::WispOpDispatcher d(cfg);
+    wisp::crypto::RecentNonces nonces;
+    d.setNonces(&nonces);
+    const auto sealed = sealWispOp("testpass", 0x03,
+        R"({"char":"wispOp","op":"setSwatches","swatches":true})");
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedSwatches,
+        (int)d.dispatch(sealed.data(), sealed.size()));
+    TEST_ASSERT_EQUAL_INT((int)wisp::PaletteStyle::Swatches, (int)cfg.paletteStyle());
+    TEST_ASSERT_EQUAL_UINT32(1, cfg.opSeq());
+}
+
 void test_zone_ops_unknown() {
     wisp::WispConfig cfg;
     cfg.begin();
@@ -683,5 +784,10 @@ int main(int, char**) {
     RUN_TEST(test_set_manual_palette_without_valid_seq_clears_echo);
     RUN_TEST(test_set_manual_palette_keeps_the_first_16_colours);
     RUN_TEST(test_malformed_palette_op_keeps_echo);
+    RUN_TEST(test_set_swatches_applies_and_reloads);
+    RUN_TEST(test_unknown_stored_style_loads_as_gradient);
+    RUN_TEST(test_set_swatches_needs_a_bool);
+    RUN_TEST(test_set_swatches_plaintext_rejected_with_password);
+    RUN_TEST(test_set_swatches_sealed_bumps_op_seq);
     return UNITY_END();
 }

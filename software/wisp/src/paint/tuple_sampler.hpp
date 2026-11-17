@@ -29,17 +29,20 @@ struct ColorTuple {
   }
 };
 
-// Pure function: same palette + mac + shuffleSeed always returns the same
-// tuple. Edge cases: empty palette → zeros; single color → both surfaces.
-ColorTuple sampleTupleForMac(const CurrentPalette& palette,
+// Pure function: same palette + mac + shuffleSeed + style always returns
+// the same tuple. Edge cases: empty palette → zeros; single color → both
+// surfaces. The app's predictTuple mirrors it byte for byte.
+ColorTuple sampleTupleForMac(const std::vector<RGBW>& colors,
                              const uint8_t mac[6],
-                             uint32_t shuffleSeed = 0);
+                             uint32_t shuffleSeed = 0,
+                             PaletteStyle style = PaletteStyle::Gradient);
 
-// Sample base/shade at two explicit gradient positions (full uint32 span).
-// Dedupes the palette, enforces the >= kMinGap base/shade separation on posB,
-// then samples. Empty palette → zeros. sampleTupleForMac and the random drift
-// path share this tail; feed it esp_random() for a fresh random pair.
+// Sample base/shade at two explicit positions (full uint32 span). Empty
+// palette → zeros. sampleTupleForMac and the random drift path share this
+// tail; feed it esp_random() for a fresh random pair. The sampling rule per
+// style is in docs/dev/networking.md (Wisp paints a lamp's base + shade).
 ColorTuple sampleTupleAtPositions(const std::vector<RGBW>& colors,
-                                  uint32_t posA, uint32_t posB);
+                                  uint32_t posA, uint32_t posB,
+                                  PaletteStyle style = PaletteStyle::Gradient);
 
 }  // namespace wisp

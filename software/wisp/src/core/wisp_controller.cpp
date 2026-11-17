@@ -90,7 +90,10 @@ void WispController::computeRingPixels(uint8_t* pixels, size_t px, bool off) {
       pixels[i * 3 + 1] = offG;
       pixels[i * 3 + 2] = offB;
     }
-  } else if (!wisp::computeRingGradient(stopsRgb, numStops, pixels, px)) {
+  } else if (!(config_.paletteStyle() == PaletteStyle::Swatches
+                   ? wisp::computeRingBlocks(stopsRgb, numStops, pixels, px)
+                   : wisp::computeRingGradient(stopsRgb, numStops, pixels,
+                                               px))) {
     wisp::fillRingWarmWhite(pixels, px);
   }
 }
@@ -257,6 +260,15 @@ void WispController::applyOpResult(DispatchResult res) {
     case wisp::DispatchResult::AppliedShuffle:
       paint_.setShuffleSeed(config_.shuffleSeed());
       paint_.onPaletteChanged();
+      status_.triggerOnChange();
+      break;
+    case wisp::DispatchResult::AppliedSwatches:
+      artnet_.setPaletteStyle(config_.paletteStyle());
+      if (paint_.setPaletteStyle(config_.paletteStyle())) {
+        paint_.onPaletteChanged();
+        artnet_.onPaletteChanged();
+        renderRing();
+      }
       status_.triggerOnChange();
       break;
     case wisp::DispatchResult::AppliedDriftChange:

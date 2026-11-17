@@ -34,6 +34,7 @@ struct WispConfigFields {
   uint8_t      shuffleSeed = 0;
   uint32_t     opSeq = 0;
   char         ip[16] = "";  // where an OSC sender reaches the wisp; "" for none
+  bool         swatches = false;
 };
 
 // Serialize a wispStatus JSON into `out` (capacity `outCap`). A guaranteed

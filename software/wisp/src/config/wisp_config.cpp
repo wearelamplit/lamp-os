@@ -42,6 +42,7 @@ constexpr const char* kKeyManualPaletteRgb = "manualPal";
 constexpr const char* kKeyManualPalette = "manualPal4";
 constexpr const char* kKeyOffColor      = "offColor";
 constexpr const char* kKeyShuffleSeed   = "shufSeed";
+constexpr const char* kKeySwatches      = "swatches";
 constexpr const char* kKeyDriftIntv     = "driftIntv";
 constexpr const char* kKeyDriftFade     = "driftFade";
 constexpr const char* kKeyName          = "wispName";
@@ -144,6 +145,11 @@ void WispConfig::begin() {
   }
 
   shuffleSeed_ = static_cast<uint8_t>(prefs_.getInt(kKeyShuffleSeed, 0) & 0xFF);
+  paletteStyle_ =
+      prefs_.getUChar(kKeySwatches, 0) ==
+              static_cast<uint8_t>(PaletteStyle::Swatches)
+          ? PaletteStyle::Swatches
+          : PaletteStyle::Gradient;
 
   driftIntervalMs_ = prefs_.getUInt(kKeyDriftIntv, 120000);
   driftFadePct_ = static_cast<uint8_t>(prefs_.getUChar(kKeyDriftFade, 50));
@@ -178,7 +184,7 @@ void WispConfig::begin() {
 
   Serial.printf("[wisp.cfg] loaded ssid='%s' pw=%s "
                 "srcMode=%d oscRole=%s manualColors=%u offColor=%u,%u,%u "
-                "shuffleSeed=%u "
+                "shuffleSeed=%u swatches=%d "
                 "driftIntv=%u ms driftFade=%u%% name='%s' hasPassword=%d\n",
                 wifiSsid_.c_str(),
                 wifiPw_.length() ? "<set>" : "<empty>",
@@ -186,6 +192,7 @@ void WispConfig::begin() {
                 (unsigned)manualPalette_.size(),
                 offColor_.r, offColor_.g, offColor_.b,
                 (unsigned)shuffleSeed_,
+                (int)(paletteStyle_ == PaletteStyle::Swatches),
                 (unsigned)driftIntervalMs_,
                 (unsigned)driftFadePct_,
                 name_.c_str(), (int)(password_.length() > 0));
@@ -268,6 +275,15 @@ void WispConfig::bumpShuffleSeed() {
     prefs_.putInt(kKeyShuffleSeed, shuffleSeed_);
   }
   Serial.printf("[wisp.cfg] shuffleSeed <= %u\n", (unsigned)shuffleSeed_);
+}
+
+void WispConfig::setPaletteStyle(PaletteStyle style) {
+  paletteStyle_ = style;
+  if (opened_) {
+    prefs_.putUChar(kKeySwatches, static_cast<uint8_t>(style));
+  }
+  Serial.printf("[wisp.cfg] swatches <= %d\n",
+                (int)(style == PaletteStyle::Swatches));
 }
 
 void WispConfig::setDrift(uint32_t intervalMs, uint8_t fadePct) {

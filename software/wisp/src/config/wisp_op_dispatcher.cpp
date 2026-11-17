@@ -30,6 +30,7 @@ static bool isApplied(DispatchResult r) {
     case DispatchResult::AppliedPasswordChange:
     case DispatchResult::AppliedLedStrip:
     case DispatchResult::AppliedBrightnessChange:
+    case DispatchResult::AppliedSwatches:
       return true;
     default:
       return false;
@@ -284,6 +285,17 @@ DispatchResult WispOpDispatcher::dispatchJson(const char* json, size_t len) {
     }
     config_.setBrightness(static_cast<uint8_t>(pct));
     return DispatchResult::AppliedBrightnessChange;
+  }
+
+  if (strcmp(op, "setSwatches") == 0) {
+    JsonVariantConst v = doc["swatches"];
+    if (!v.is<bool>()) {
+      Serial.println("[wisp.op] setSwatches missing/invalid 'swatches'");
+      return DispatchResult::Malformed;
+    }
+    config_.setPaletteStyle(v.as<bool>() ? PaletteStyle::Swatches
+                                         : PaletteStyle::Gradient);
+    return DispatchResult::AppliedSwatches;
   }
 
   if (strcmp(op, "pollStatus") == 0) {

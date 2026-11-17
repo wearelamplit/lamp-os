@@ -93,6 +93,7 @@ size_t buildWispConfigJson(const WispConfigFields& f, char* out,
   doc["shuffleSeed"]     = f.shuffleSeed;
   doc["opSeq"]           = f.opSeq;
   doc["ip"]              = f.ip;
+  doc["swatches"]        = f.swatches;
   if (measureJson(doc) >= outCap) return 0;
   return serializeJson(doc, out, outCap);
 }

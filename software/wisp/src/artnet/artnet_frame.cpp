@@ -11,8 +11,8 @@ constexpr size_t kDmxStart = 18;
 constexpr size_t kBytesPerFixture = 10;
 }  // namespace
 
-size_t buildArtnetDmxFrame(const CurrentPalette& palette, uint8_t seq,
-                           uint8_t* out, size_t outLen) {
+size_t buildArtnetDmxFrame(const std::vector<RGBW>& colors, uint8_t seq,
+                           uint8_t* out, size_t outLen, PaletteStyle style) {
   if (outLen < kArtnetFrameSize) return 0;
   std::memset(out, 0, kArtnetFrameSize);
 
@@ -45,7 +45,7 @@ size_t buildArtnetDmxFrame(const CurrentPalette& palette, uint8_t seq,
     // locally-administered bit so it can't collide with a real OUI.
     // 0x57 0x49 0x53 0x50 = "WISP".
     uint8_t mac[6] = {0x02, 0x57, 0x49, 0x53, 0x50, i};
-    ColorTuple t = sampleTupleForMac(palette, mac);
+    ColorTuple t = sampleTupleForMac(colors, mac, 0, style);
     uint8_t* f = out + kDmxStart + (i * kBytesPerFixture);
     // base = tuple[0], shade = tuple[1], matching PaintDistributor's mesh
     // path, which puts t[0] on OverrideSurface::Base. Without the swap a

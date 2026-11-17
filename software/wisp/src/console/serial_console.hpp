@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <functional>
 
+#include "config/wisp_op_dispatcher.hpp"  // DispatchResult
 #include "osc/slip_decoder.hpp"
 
 namespace wisp {
@@ -14,16 +15,15 @@ class StatusEmitter;
 class LampInventory;
 class OscListener;
 class WispConfig;
-enum class WispSourceMode : uint8_t;
 
 class SerialConsole {
 public:
-  using SourceTransitionFn = std::function<void(WispSourceMode)>;
+  // Applies a setting the console stored, as the matching wispOp would.
+  using ApplyFn = std::function<void(DispatchResult)>;
 
   SerialConsole(PaintDistributor& paint, WispConfig& config,
                 StageBeacon& stage, WifiLink& wifi, StatusEmitter& status,
-                LampInventory& inventory,
-                SourceTransitionFn onSourceTransition);
+                LampInventory& inventory, ApplyFn apply);
 
   // Read available serial bytes; SLIP frames go to the OSC sink, everything
   // else dispatches as text command lines.
@@ -44,7 +44,7 @@ private:
   WifiLink& wifi_;
   StatusEmitter& status_;
   LampInventory& inventory_;
-  SourceTransitionFn onSourceTransition_;
+  ApplyFn apply_;
 
   String buf_;
   OscListener* osc_ = nullptr;

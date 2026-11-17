@@ -61,6 +61,7 @@ static wisp::WispConfigFields worstConfig() {
   c.shuffleSeed = 255;
   c.opSeq = 4294967295u;
   std::strcpy(c.ip, "255.255.255.255");
+  c.swatches = false;  // "false" is wider than "true"
   return c;
 }
 
@@ -422,7 +423,9 @@ void test_config_carries_every_field_at_defaults() {
   TEST_ASSERT_EQUAL_UINT32(0, d["opSeq"].as<uint32_t>());
   TEST_ASSERT_TRUE(d["ip"].is<const char*>());
   TEST_ASSERT_EQUAL_STRING("", d["ip"].as<const char*>());
-  TEST_ASSERT_EQUAL_size_t(9, d.as<JsonObject>().size());
+  TEST_ASSERT_TRUE(d["swatches"].is<bool>());
+  TEST_ASSERT_FALSE(d["swatches"].as<bool>());
+  TEST_ASSERT_EQUAL_size_t(10, d.as<JsonObject>().size());
 }
 
 // The widest wispConfig. It must stay at most 255 B: the builder refuses
@@ -432,7 +435,7 @@ void test_config_worst_case_pinned() {
   wisp::WispConfigFields c = worstConfig();
   c.brightness = 100;
   size_t n = wisp::buildWispConfigJson(c, out, sizeof(out));
-  TEST_ASSERT_EQUAL_UINT32(174, n);
+  TEST_ASSERT_EQUAL_UINT32(191, n);
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_EQUAL_STRING("GRBW", d["ledType"].as<const char*>());
@@ -460,6 +463,16 @@ void test_builders_write_char_first() {
   TEST_ASSERT_EQUAL_INT(0, std::strncmp(out, "{\"char\":\"wispConfig\"", 20));
 }
 
+void test_config_reports_swatches_when_set() {
+  char out[256];
+  wisp::WispConfigFields c;
+  c.swatches = true;
+  TEST_ASSERT_TRUE(wisp::buildWispConfigJson(c, out, sizeof(out)) > 0);
+  JsonDocument d;
+  TEST_ASSERT_FALSE(deserializeJson(d, out));
+  TEST_ASSERT_TRUE(d["swatches"].as<bool>());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_core_worst_case_pinned_under_cap);
@@ -482,6 +495,7 @@ int main(int, char**) {
   RUN_TEST(test_manual_seq_rides_the_core_and_is_omitted_at_zero);
   RUN_TEST(test_config_carries_every_field_at_defaults);
   RUN_TEST(test_config_worst_case_pinned);
+  RUN_TEST(test_config_reports_swatches_when_set);
   RUN_TEST(test_config_too_small_buffer_returns_zero);
   RUN_TEST(test_builders_write_char_first);
   return UNITY_END();
