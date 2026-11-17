@@ -56,10 +56,11 @@ static wisp::WispConfigFields worstConfig() {
   c.ledType = "GRBW";
   c.pixelCount = 65535;
   c.brightness = 99;
-  c.driftIntervalMs = 3600000;
+  c.driftIntervalMs = 4294967295u;  // begin() loads it from NVS unclamped
   c.driftFadePct = 100;
   c.shuffleSeed = 255;
   c.opSeq = 4294967295u;
+  std::strcpy(c.ip, "255.255.255.255");
   return c;
 }
 
@@ -419,21 +420,24 @@ void test_config_carries_every_field_at_defaults() {
   TEST_ASSERT_EQUAL_INT(50, d["driftFadePct"].as<int>());
   TEST_ASSERT_EQUAL_INT(0, d["shuffleSeed"].as<int>());
   TEST_ASSERT_EQUAL_UINT32(0, d["opSeq"].as<uint32_t>());
-  TEST_ASSERT_EQUAL_size_t(8, d.as<JsonObject>().size());
+  TEST_ASSERT_TRUE(d["ip"].is<const char*>());
+  TEST_ASSERT_EQUAL_STRING("", d["ip"].as<const char*>());
+  TEST_ASSERT_EQUAL_size_t(9, d.as<JsonObject>().size());
 }
 
-// The widest wispConfig: 148 B, inside the lamp's 256 B ingest slot and the
-// emitter's buffer, a third of CONTROL_MAX_PAYLOAD.
+// The widest wispConfig. It must stay at most 255 B: the builder refuses
+// 256 B and the lamp's 256 B ingest slot is the hard ceiling.
 void test_config_worst_case_pinned() {
   char out[256];
   wisp::WispConfigFields c = worstConfig();
   c.brightness = 100;
   size_t n = wisp::buildWispConfigJson(c, out, sizeof(out));
-  TEST_ASSERT_EQUAL_UINT32(148, n);
+  TEST_ASSERT_EQUAL_UINT32(174, n);
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_EQUAL_STRING("GRBW", d["ledType"].as<const char*>());
   TEST_ASSERT_EQUAL_UINT32(4294967295u, d["opSeq"].as<uint32_t>());
+  TEST_ASSERT_EQUAL_STRING("255.255.255.255", d["ip"].as<const char*>());
 }
 
 // A buffer too small for the document yields 0, never a truncated frame.

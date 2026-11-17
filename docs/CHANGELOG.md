@@ -7,6 +7,11 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 
 ## Unreleased
 
+### Added
+- **The wisp reports the address an OSC sender should send to.** Its settings
+  now carry its Ethernet or WiFi address (never its own hotspot's), ready for
+  the app to show under the OSC source. Needs the wisp reflashed.
+
 ### Fixed
 - **Saving a wisp palette with white on many colours keeps the white on all of
   them.** The last colour could lose its white before.
