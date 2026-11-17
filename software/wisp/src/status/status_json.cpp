@@ -81,6 +81,17 @@ size_t buildWispStatusJson(const WispStatusFields& f, char* out,
   return serializeJson(doc, out, outCap);
 }
 
+void pickOscSendToIp(const char* ethIp, bool staConnected, const char* staIp,
+                     char* out, size_t outCap) {
+  const char* pick = "";
+  if (ethIp && ethIp[0] != '\0') {
+    pick = ethIp;
+  } else if (staConnected && staIp) {
+    pick = staIp;
+  }
+  std::snprintf(out, outCap, "%s", pick);
+}
+
 size_t buildWispConfigJson(const WispConfigFields& f, char* out,
                            size_t outCap) {
   JsonDocument doc;

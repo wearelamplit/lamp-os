@@ -22,10 +22,6 @@ constexpr int kPins[] = {WISP_ETH_SCK, WISP_ETH_MISO, WISP_ETH_MOSI,
 
 bool s_present = false;
 
-void formatAddr(const IPAddress& ip, char* out, size_t cap) {
-  std::snprintf(out, cap, "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
-}
-
 void logEvent(arduino_event_id_t event, arduino_event_info_t info) {
   switch (event) {
     case ARDUINO_EVENT_ETH_CONNECTED:
@@ -79,6 +75,10 @@ void begin(const char* name) {
 }
 
 bool up() { return s_present && ETH.connected() && ETH.hasIP(); }
+
+void formatAddr(const IPAddress& ip, char* out, size_t cap) {
+  std::snprintf(out, cap, "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+}
 
 void formatIp(char* out, size_t cap) {
   if (cap > 0) out[0] = '\0';

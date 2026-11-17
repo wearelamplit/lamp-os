@@ -428,8 +428,8 @@ void test_config_carries_every_field_at_defaults() {
   TEST_ASSERT_EQUAL_size_t(10, d.as<JsonObject>().size());
 }
 
-// The widest wispConfig. It must stay at most 255 B: the builder refuses
-// 256 B and the lamp's 256 B ingest slot is the hard ceiling.
+// The widest wispConfig. It must stay at most 255 B, since the builder
+// refuses 256 B and the lamp's 256 B ingest slot is the hard ceiling.
 void test_config_worst_case_pinned() {
   char out[256];
   wisp::WispConfigFields c = worstConfig();
@@ -473,6 +473,20 @@ void test_config_reports_swatches_when_set() {
   TEST_ASSERT_TRUE(d["swatches"].as<bool>());
 }
 
+// The send-to address is the Ethernet lease first, then the STA address while
+// the join holds, else empty.
+void test_send_to_ip_prefers_ethernet_then_sta() {
+  char out[16];
+  wisp::pickOscSendToIp("10.0.0.5", true, "192.168.1.42", out, sizeof(out));
+  TEST_ASSERT_EQUAL_STRING("10.0.0.5", out);
+  wisp::pickOscSendToIp("10.0.0.5", false, "", out, sizeof(out));
+  TEST_ASSERT_EQUAL_STRING("10.0.0.5", out);
+  wisp::pickOscSendToIp("", true, "192.168.1.42", out, sizeof(out));
+  TEST_ASSERT_EQUAL_STRING("192.168.1.42", out);
+  wisp::pickOscSendToIp("", false, "192.168.1.42", out, sizeof(out));
+  TEST_ASSERT_EQUAL_STRING("", out);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_core_worst_case_pinned_under_cap);
@@ -496,6 +510,7 @@ int main(int, char**) {
   RUN_TEST(test_config_carries_every_field_at_defaults);
   RUN_TEST(test_config_worst_case_pinned);
   RUN_TEST(test_config_reports_swatches_when_set);
+  RUN_TEST(test_send_to_ip_prefers_ethernet_then_sta);
   RUN_TEST(test_config_too_small_buffer_returns_zero);
   RUN_TEST(test_builders_write_char_first);
   return UNITY_END();

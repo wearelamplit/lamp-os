@@ -4,7 +4,6 @@
 #include <WiFi.h>
 #include <esp_heap_caps.h>
 #include <esp_system.h>
-#include <cstdio>
 #include <lampos/led_types.hpp>
 
 #include "paint/current_palette.hpp"
@@ -187,14 +186,12 @@ WispConfigFields StatusEmitter::configFields() const {
   c.shuffleSeed = config_->shuffleSeed();
   c.opSeq = config_->opSeq();
   c.swatches = config_->paletteStyle() == PaletteStyle::Swatches;
-  // Never the softAP address: that network is the pre-mesh lamps', and OSC
-  // senders belong on the venue LAN or the cable.
-  eth::formatIp(c.ip, sizeof(c.ip));
-  if (c.ip[0] == '\0' && WiFi.isConnected()) {
-    const IPAddress sta = WiFi.localIP();
-    std::snprintf(c.ip, sizeof(c.ip), "%u.%u.%u.%u", sta[0], sta[1], sta[2],
-                  sta[3]);
-  }
+  char ethIp[16];
+  eth::formatIp(ethIp, sizeof(ethIp));
+  const bool staConnected = WiFi.isConnected();
+  char staIp[16] = "";
+  if (staConnected) eth::formatAddr(WiFi.localIP(), staIp, sizeof(staIp));
+  pickOscSendToIp(ethIp, staConnected, staIp, c.ip, sizeof(c.ip));
   return c;
 }
 

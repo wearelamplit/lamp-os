@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <IPAddress.h>
 #include <Print.h>
 
 namespace wisp::eth {
@@ -22,6 +23,9 @@ bool up();
 // The leased address as dotted text into out (at least 16 B), empty while
 // !up().
 void formatIp(char* out, size_t cap);
+
+// `ip` as dotted text into out (at least 16 B).
+void formatAddr(const IPAddress& ip, char* out, size_t cap);
 
 // eth:show console line.
 void printStatus(Print& out);
