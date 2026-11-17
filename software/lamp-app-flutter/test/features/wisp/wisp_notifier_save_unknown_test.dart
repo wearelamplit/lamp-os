@@ -189,6 +189,64 @@ void main() {
     });
   }
 
+  // The lamp moves to wisp B while the first copy is out, B's palette read
+  // lands, and the copy fails, so the next attempt would go to B.
+  for (final (kind, full) in _kinds) {
+    test('$kind: a save sends no further copy after the palette went unknown, '
+        'even once it is known again', () async {
+      final ble = PaletteBle(_lampId)..seedPalette(_p);
+      final (_, n) = await openWisp(ble, full(wispA, _p));
+      n.setManualPaletteDraft(_q);
+
+      ble.holdPaletteWrite = Completer<void>();
+      final result = n.setManualPalette().then<Object?>(
+        (_) => null,
+        onError: (Object e) => e,
+      );
+      await pumpEventQueue();
+      expect(ble.paletteWrites, hasLength(1));
+      ble
+        ..seedPalette(_other)
+        ..notifyStatus(full(wispB, _other));
+      await pumpEventQueue();
+      expect(n.paletteLoading, isFalse, reason: "B's palette was read");
+      ble.holdPaletteWrite!.completeError(Exception('write lost'));
+      ble.holdPaletteWrite = null;
+
+      expect(await result, isNotNull);
+      expect(ble.paletteWrites, hasLength(1));
+      expect(n.manualPaletteWriteFailed, isTrue);
+    });
+  }
+
+  // An empty save re-reads the status before its first send; the lamp adopts
+  // wisp B meanwhile and B's palette is read before the send would go out.
+  test('an empty save sends nothing when the palette went unknown during its '
+      'status read', () async {
+    final ble = PaletteBle(_lampId)..seedPalette(_p);
+    final (_, n) = await openWisp(ble, legacyStatus(wispA, _p));
+    n.setManualPaletteDraft(const []);
+
+    ble.holdStatusRead = Completer<void>();
+    final result = n.setManualPalette().then<Object?>(
+      (_) => null,
+      onError: (Object e) => e,
+    );
+    await pumpEventQueue();
+    ble
+      ..seedPalette(_other)
+      ..seedStatus(legacyStatus(wispB, _other))
+      ..notifyStatus(legacyStatus(wispB, _other));
+    await pumpEventQueue();
+    ble.holdStatusRead!.complete();
+    ble.holdStatusRead = null;
+    await pumpEventQueue();
+    expect(n.paletteLoading, isFalse, reason: "B's palette was read");
+
+    expect(await result, isNotNull);
+    expect(ble.paletteWrites, isEmpty);
+  });
+
   // Another phone's palette reaches the wisp while this save's first write is
   // out, and the read it starts finds the lamp's palette cache not yet filled.
   test('a read landing during a save that leaves the palette unknown stops '
