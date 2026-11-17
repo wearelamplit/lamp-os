@@ -188,6 +188,27 @@ void main() {
     expect(c.read(wispNotifierProvider(_lampId)).value!.pixelCount, 44);
   });
 
+  // A lamp older than 1.2.8 serves no sections, so the refill only probes
+  // for them: no pollConfig goes out and no wispconfig read is made.
+  test('refill sends nothing through a lamp without the sections', () async {
+    final ble = _HeldBle();
+    await ble.connect(_lampId);
+    await ble.write(
+      _lampId,
+      BleUuids.controlService,
+      BleUuids.wispStatus,
+      _b(_split()),
+    );
+    final c = makeContainer(ble);
+    await built(c);
+
+    await Future<void>.delayed(const Duration(milliseconds: 3500));
+
+    expect(c.read(wispNotifierProvider(_lampId)).value!.configKnown, isFalse);
+    expect(ops(ble), isNot(contains('pollConfig')));
+    expect(ble.configReads, 0);
+  });
+
   // The refill backs off while the config stays missing (1 s, then 2 s, so
   // reads at 1 s and 3 s), and a reconnect starts it again from 1 s.
   test('refill backs off, and a reconnect restarts it', () async {

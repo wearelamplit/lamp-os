@@ -35,11 +35,11 @@ struct WispConfigFields {
 
 // Serialize a wispStatus JSON into `out` (capacity `outCap`). A guaranteed
 // core, `"configSplit":true` among it, is always written, whatever `cap`;
-// every other field is added only if the document still fits under `cap` (fields matching the app
-// parser's defaults are omitted). The settings never ride it; they go only
-// in wispConfig. lastSeenMs is the wisp's uptime at the call
-// (wisp::uptimeMs()). Never returns 0 when outCap > cap. See
-// docs/dev/networking.md for the field priority order.
+// every other field is added only if the document still fits under `cap`
+// (fields matching the app parser's defaults are omitted). The settings
+// never ride it; they go only in wispConfig. lastSeenMs is the wisp's
+// uptime at the call (wisp::uptimeMs()). Never returns 0 when
+// outCap > cap. See docs/dev/networking.md for the field priority order.
 size_t buildWispStatusJson(const WispStatusFields& f, char* out,
                            size_t outCap, size_t cap);
 
