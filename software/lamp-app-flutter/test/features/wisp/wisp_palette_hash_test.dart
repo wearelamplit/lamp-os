@@ -31,12 +31,22 @@ void main() {
       );
     });
 
-    test('over-cap palette strips trailing W before hashing', () {
+    test('10 colours with W on each keep every W', () {
       final palette = List<LampColor>.filled(
         10,
         const LampColor(r: 255, g: 255, b: 255, w: 255),
       );
-      expect(WispRepository.paletteIdHash(palette), '1e98da90');
+      expect(WispRepository.paletteIdHash(palette), '999fdcbd');
+    });
+
+    // 592 B unstripped; under the 512 B cap the last 20 colours lose W, so
+    // the hash pins the cap itself (511 B would strip 21).
+    test('over-cap palette strips trailing W before hashing', () {
+      final palette = List<LampColor>.filled(
+        30,
+        const LampColor(r: 255, g: 255, b: 255, w: 255),
+      );
+      expect(WispRepository.paletteIdHash(palette), '2eba5ad1');
     });
 
     test('empty palette is the FNV offset basis', () {

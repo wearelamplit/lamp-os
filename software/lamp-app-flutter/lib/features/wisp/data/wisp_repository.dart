@@ -17,8 +17,8 @@ import '../domain/wisp_status.dart';
 ///
 /// When [password] is non-null and non-empty, ops are sealed via
 /// LampCrypto.encryptOp (salt = CHAR_WISP_OP uuid LE, info key = "wispOp").
-/// setManualPalette is always plaintext. It carries no secret and the byte
-/// budget is tight (see [kWispOpPayloadCap]).
+/// setManualPalette is always plaintext. It carries no secret and has a byte
+/// budget (see [kWispOpPayloadCap]).
 class WispRepository {
   WispRepository(this._ble, this._deviceId, {this._password});
 
@@ -147,20 +147,19 @@ class WispRepository {
     });
   }
 
-  /// Payload budget for a wispOp once the lamp relays it as
-  /// MSG_CONTROL_OP (`CONTROL_MAX_PAYLOAD`). An oversized payload is
-  /// silently dropped at the relay, so the palette serializer must stay
-  /// under this.
-  static const int kWispOpPayloadCap = 230;
+  /// Payload budget for a wispOp: the lamp's BLE stack takes at most 512 B
+  /// per attribute write (`BLE_ATT_ATTR_MAX_LEN`), under the 576 B its
+  /// MSG_CONTROL_OP relay carries. A larger write fails, so the palette
+  /// serializer must stay under this. The editor's largest palette is 232 B.
+  static const int kWispOpPayloadCap = 512;
 
   /// Manual palette. The wisp persists the (clamped to 50) color
   /// list in NVS and, if currently in Manual mode, pushes it into
   /// CurrentPalette so the lamps repaint without a mode flip. Each color
-  /// is emitted as `[r,g,b,w]`, collapsed to `[r,g,b]` when w == 0 to
-  /// keep a full 10-color palette inside [kWispOpPayloadCap]. If the
-  /// serialized payload still exceeds the cap (every color carrying W at
-  /// pathological widths), W is stripped from trailing colors until it
-  /// fits. A truncated write beats a silently dropped one, and the
+  /// is emitted as `[r,g,b,w]`, collapsed to `[r,g,b]` when w == 0. If the
+  /// serialized payload exceeds [kWispOpPayloadCap] (from 26 colors that
+  /// all carry W at full width), W is stripped from trailing colors until
+  /// it fits. A truncated write beats a silently dropped one, and the
   /// wisp's palette echo re-syncs the UI to what was stored.
   /// The cap aligns with `lamp_protocol::kMaxWispPaletteColors` on the
   /// firmware side so the MSG_WISP_PALETTE broadcast that follows can

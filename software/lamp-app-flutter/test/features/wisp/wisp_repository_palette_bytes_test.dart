@@ -4,34 +4,51 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lamp_app/features/control/domain/lamp_color.dart';
 import 'package:lamp_app/features/wisp/data/wisp_repository.dart';
 
-/// setManualPalette rides a BLE write that the lamp relays as
-/// MSG_CONTROL_OP; a payload over CONTROL_MAX_PAYLOAD (230 B) is silently
-/// dropped at the relay. These tests pin the serializer's worst case.
+/// setManualPalette rides a BLE long write to CHAR_WISP_OP, which the lamp's
+/// BLE stack caps at 512 B per attribute, and the lamp relays it as
+/// MSG_CONTROL_OP. These tests pin the serializer's worst case.
 void main() {
   int payloadBytes(Map<String, dynamic> op) =>
       utf8.encode(jsonEncode(op)).length;
 
-  group('WispRepository.buildManualPaletteOp byte budget', () {
-    test('10-color all-bright RGBW stays under the 230 B relay cap', () {
-      final palette = List<LampColor>.filled(
-        10,
+  List<LampColor> bright(int n) => List<LampColor>.filled(
+        n,
         const LampColor(r: 255, g: 255, b: 255, w: 255),
       );
-      final op = WispRepository.buildManualPaletteOp(palette);
+
+  int withW(Map<String, dynamic> op) =>
+      (op['colors'] as List).where((c) => (c as List).length == 4).length;
+
+  group('WispRepository.buildManualPaletteOp byte budget', () {
+    // The editor's largest palette: 10 colours, W on every one.
+    test('10-color all-bright RGBW goes out whole, every W kept', () {
+      final op = WispRepository.buildManualPaletteOp(bright(10));
+      expect(payloadBytes(op), 232);
+      expect(withW(op), 10);
+      for (final c in op['colors'] as List) {
+        expect(c, [255, 255, 255, 255]);
+      }
+    });
+
+    // 25 W-heavy colours are 502 B, 26 are 520 B: the strip first fires
+    // there, and only on trailing colours, never on RGB.
+    test('the W strip starts at the 26th colour, from the tail', () {
+      final op25 = WispRepository.buildManualPaletteOp(bright(25));
+      expect(withW(op25), 25);
+
+      final op26 = WispRepository.buildManualPaletteOp(bright(26));
       expect(
-        payloadBytes(op),
+        payloadBytes(op26),
         lessThanOrEqualTo(WispRepository.kWispOpPayloadCap),
       );
-      final colors = op['colors'] as List;
-      expect(colors.length, 10);
-      // Cap pressure may strip W from trailing colors, never RGB.
+      final colors = op26['colors'] as List;
+      expect(colors.length, 26);
+      expect(withW(op26), lessThan(26));
       for (final c in colors) {
-        final tuple = c as List;
-        expect(tuple.length, anyOf(3, 4));
-        expect(tuple.sublist(0, 3), [255, 255, 255]);
+        expect((c as List).sublist(0, 3), [255, 255, 255]);
       }
-      // At most the last color loses its W in this worst case.
-      expect((colors[0] as List).length, 4);
+      expect((colors.first as List).length, 4);
+      expect((colors.last as List).length, 3);
     });
 
     test('10-color all-bright RGB (w == 0) emits triples under the cap', () {
