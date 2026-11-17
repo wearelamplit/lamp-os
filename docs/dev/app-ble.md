@@ -211,7 +211,7 @@ own scan around a connect, so the app does:
   service discovery run after the hold ends. The client drops a lamp's cached
   services on every disconnect event, not only in its own `connect`,
   `disconnect` and `cycleAdapter`, because a caller woken by the connected
-  edge (the wisp notifier renewing its notify subscription, nearby peers
+  edge (the wisp and Wi-Fi notifiers renewing their notify subscriptions, nearby peers
   restarting theirs) resolves before `connect` returns and has to discover on
   the new link. `connect` still clears the cache once it returns, so a
   discovery finished before then can run a second time.
