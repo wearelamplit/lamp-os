@@ -253,9 +253,19 @@ class WispNotifier extends _$WispNotifier {
   // backoff. No notify follows when the lamp already held that config, and the
   // next one may be the 30 s heartbeat.
   Timer? _configRefillTimer;
+
+  // Settings writes sent, and how many of them a config read has covered
+  // since. The wisp re-sends no config for a write it never applied, so the
+  // refill reads it back until the two match.
+  int _settingsWrites = 0;
+  int _settingsWritesReadBack = 0;
   Duration _configRefillDelay = _configRefillFirst;
   static const Duration _configRefillFirst = Duration(seconds: 1);
   static const Duration _configRefillMax = Duration(seconds: 30);
+
+  /// How long after a settings write the app reads the wisp's config back.
+  @visibleForTesting
+  static Duration debugConfigReadBackDelay = const Duration(seconds: 5);
 
   // Every status the wisp sent, config merged, ahead of the source-write
   // guard. The confirm waits listen here so a status that only a section
@@ -313,6 +323,8 @@ class WispNotifier extends _$WispNotifier {
     _configReadOwed = false;
     _configRefillTimer = null;
     _configRefillDelay = _configRefillFirst;
+    _settingsWrites = 0;
+    _settingsWritesReadBack = 0;
     final incoming = _incoming = StreamController<WispStatus>.broadcast();
     final opSeqs = _opSeqs = StreamController<int>.broadcast();
 
@@ -738,11 +750,11 @@ class WispNotifier extends _$WispNotifier {
     unawaited(_readConfigSection(cur));
   }
 
-  bool _configMissing(WispStatus? status) =>
+  bool _configToRead(WispStatus? status) =>
       status != null &&
       status.present &&
       status.configSplit &&
-      !status.configKnown;
+      (!status.configKnown || _settingsWrites != _settingsWritesReadBack);
 
   void _restartConfigRefill() {
     _configRefillTimer?.cancel();
@@ -754,7 +766,7 @@ class WispNotifier extends _$WispNotifier {
 
   void _scheduleConfigRefill(WispStatus status) {
     if (_disposed) return;
-    if (!_configMissing(status)) {
+    if (!_configToRead(status)) {
       _configRefillTimer?.cancel();
       _configRefillTimer = null;
       _configRefillDelay = _configRefillFirst;
@@ -764,7 +776,8 @@ class WispNotifier extends _$WispNotifier {
     _configRefillTimer = Timer(_configRefillDelay, () async {
       _configRefillTimer = null;
       final cur = state.value;
-      if (_disposed || !_configMissing(cur)) return;
+      if (_disposed || !_configToRead(cur)) return;
+      final writes = _settingsWrites;
       final next = _configRefillDelay * 2;
       _configRefillDelay = next > _configRefillMax ? _configRefillMax : next;
       // Every build read can land before the auth handshake, and a lamp with
@@ -775,11 +788,24 @@ class WispNotifier extends _$WispNotifier {
       if (_repo.wispSectionsSupported) {
         await pollConfig();
         if (_disposed) return;
-        await _readConfigSection(state.value ?? cur!);
+        final read = await _readConfigSection(state.value ?? cur!);
+        if (read != null) _settingsWritesReadBack = writes;
       }
       final after = state.value;
       if (after != null) _scheduleConfigRefill(after);
     });
+  }
+
+  // Read the config back once a settings write has had time to land, so a
+  // write the wisp never applied stops showing.
+  void _readBackAfterWrite() {
+    if (_disposed) return;
+    _settingsWrites++;
+    _configRefillTimer?.cancel();
+    _configRefillTimer = null;
+    _configRefillDelay = debugConfigReadBackDelay;
+    final cur = state.value;
+    if (cur != null) _scheduleConfigRefill(cur);
   }
 
   void _noteShuffleSeed(WispStatus status) {
@@ -1128,8 +1154,8 @@ class WispNotifier extends _$WispNotifier {
   }
 
   /// Configure the wisp LED strip byte order and pixel count. Optimistically
-  /// reflects in local state; the wisp echoes the applied config back through
-  /// the next wispStatus notify.
+  /// reflects in local state until the wisp's settings come back, at the
+  /// latest when the app reads them back a few seconds after the write.
   Future<void> setLedStrip(String ledType, int pixelCount) async {
     final cur = state.value ?? WispStatus.empty;
     state = AsyncData(cur.copyWith(ledType: ledType, pixelCount: pixelCount));
@@ -1139,6 +1165,7 @@ class WispNotifier extends _$WispNotifier {
     } catch (e, st) {
       debugPrint('WispNotifier.setLedStrip write failed: $e\n$st');
     }
+    _readBackAfterWrite();
   }
 
   /// Debounce slider drags to one write per [_driftDebounce] window.
@@ -1169,12 +1196,14 @@ class WispNotifier extends _$WispNotifier {
     } catch (e, st) {
       debugPrint('WispNotifier.setDrift write failed: $e\n$st');
     }
+    _readBackAfterWrite();
   }
 
   /// Set the space-brightness factor (0..100). Optimistically reflects in
   /// local state so the slider tracks the drag, then debounces the BLE write
-  /// at [_brightnessDebounce] to bound NVS wear. The wisp echoes the applied
-  /// value back through the next wispStatus notify.
+  /// at [_brightnessDebounce] to bound NVS wear. The wisp's settings replace
+  /// the value once they come back, at the latest when the app reads them
+  /// back a few seconds after the write.
   void setBrightness(int pct) {
     final cur = state.value ?? WispStatus.empty;
     state = AsyncData(cur.copyWith(brightness: pct));
@@ -1202,6 +1231,7 @@ class WispNotifier extends _$WispNotifier {
     } catch (e, st) {
       debugPrint('WispNotifier.setBrightness write failed: $e\n$st');
     }
+    _readBackAfterWrite();
   }
 
   /// Set the wisp source mode (Off / Manual / Osc).
