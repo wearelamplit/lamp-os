@@ -105,6 +105,23 @@ void main() {
     expect(n.manualPaletteTrimmed, isFalse);
   });
 
+  test('a palette changed elsewhere replaces an untouched trimmed draft',
+      () async {
+    final ble = InMemoryBleClient();
+    await ble.connect(_lampId);
+    final n = await open(ble, container(ble), _twenty);
+    final three = _twenty.skip(5).take(3).toList();
+
+    ble.seedSection(_lampId, 'wisppalette', _bytes(three));
+    ble.simulateNotify(_lampId, BleUuids.controlService, BleUuids.wispStatus,
+        _b(_status(three)));
+    await pumpEventQueue();
+
+    expect(n.savedManualPalette, three);
+    expect(n.draftManualPalette, three);
+    expect(n.manualPaletteDirty, isFalse);
+  });
+
   test('a save sends the first 16 and confirms on the wisp storing them',
       () async {
     final ble = InMemoryBleClient();
