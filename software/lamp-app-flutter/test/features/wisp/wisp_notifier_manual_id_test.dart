@@ -323,4 +323,30 @@ void main() {
     expect(n.paletteLoading, isFalse);
     expect(n.savedManualPalette, _x);
   });
+
+  test('reconnect: a read in flight across a reconnect does not count',
+      () async {
+    final ble = _PaletteBle()..failPalette = true;
+    final n = await open(ble,
+        initial: _status(manualId: _id(_x), prefix: _id(_x)));
+    expect(n.paletteLoading, isTrue);
+
+    ble.failPalette = false;
+    seedPalette(ble, _x);
+    ble.holdPalette = Completer<void>();
+    notify(ble, _status(manualId: _id(_x), prefix: _id(_x)));
+    await pumpEventQueue();
+    expect(ble.paletteReads, 2);
+
+    await ble.disconnect(_lampId);
+    await pumpEventQueue();
+    await ble.connect(_lampId);
+    await pumpEventQueue();
+    ble.holdPalette!.complete();
+    ble.holdPalette = null;
+    await pumpEventQueue();
+
+    expect(n.paletteLoading, isTrue);
+    expect(n.savedManualPalette, isEmpty);
+  });
 }
