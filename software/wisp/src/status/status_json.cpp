@@ -42,6 +42,9 @@ size_t buildWispStatusJson(const WispStatusFields& f, char* out,
   }
   // Present in every status, "" included, so its absence names an older wisp.
   doc["manualId"]      = f.manualId ? f.manualId : "";
+  if (f.manualSeq != 0) {
+    doc["manualSeq"] = f.manualSeq;
+  }
 
   const bool isOff = f.source && std::strcmp(f.source, "off") == 0;
 

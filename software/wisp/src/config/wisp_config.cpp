@@ -229,10 +229,11 @@ void WispConfig::setOscRole(OscRole role) {
 }
 
 void WispConfig::setManualPalette(
-    const std::vector<ManualPaletteColor>& colors) {
+    const std::vector<ManualPaletteColor>& colors, uint16_t seq) {
   const size_t n = std::min<size_t>(colors.size(), kManualPaletteMaxColors);
   xSemaphoreTake(asHandle(mutex_), portMAX_DELAY);
   manualPalette_.assign(colors.begin(), colors.begin() + n);
+  manualSeq_ = seq;
   xSemaphoreGive(asHandle(mutex_));
   if (opened_) {
     removeIfStored(prefs_, kKeyManualPaletteRgb);
@@ -338,6 +339,7 @@ ManualPaletteStatus WispConfig::manualPaletteStatus() const {
   ManualPaletteStatus s{};
   xSemaphoreTake(asHandle(mutex_), portMAX_DELAY);
   const std::string id = statusManualId(manualPalette_);
+  s.seq = manualSeq_;
   xSemaphoreGive(asHandle(mutex_));
   std::snprintf(s.id, sizeof(s.id), "%s", id.c_str());
   return s;

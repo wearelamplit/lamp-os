@@ -158,7 +158,7 @@ void StatusEmitter::emitStatus() {
       wifiConn, sourceLive, paletteIdPrefix,
       sourceName, oscRole, offR, offG, offB, offW, hasOffColor,
       wispName, hasPassword, wifiChannelMismatch, wifiApChannel, ethIp,
-      manual.id };
+      manual.id, manual.seq };
 
   char jsonBuf[kStatusJsonBufLen];
   const size_t jsonLen = buildWispStatusJson(

@@ -169,6 +169,66 @@ void test_set_manual_palette_mixed_rgb_rgbw_tuples() {
     TEST_ASSERT_EQUAL_UINT8(255, pal[1].g);
 }
 
+static wisp::DispatchResult dispatchJson(wisp::WispOpDispatcher& d,
+                                         const char* json) {
+    return d.dispatch(reinterpret_cast<const uint8_t*>(json), strlen(json));
+}
+
+// A palette op's seq is echoed beside the palette it stored, and a plaintext
+// palette op leaves opSeq alone.
+void test_set_manual_palette_echoes_seq() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    wisp::WispOpDispatcher d(cfg);
+    auto result = dispatchJson(d,
+        R"({"char":"wispOp","op":"setManualPalette","colors":[[1,2,3]],"seq":42})");
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedManualPalette, (int)result);
+    const auto status = cfg.manualPaletteStatus();
+    TEST_ASSERT_EQUAL_UINT16(42, status.seq);
+    TEST_ASSERT_EQUAL_STRING(wisp::statusManualId({{1, 2, 3, 0}}).c_str(), status.id);
+    TEST_ASSERT_EQUAL_UINT32(0, cfg.opSeq());
+}
+
+// No seq, or one that is not an integer in 1..65535, means none: the op
+// stores its palette and clears the previous echo.
+void test_set_manual_palette_without_valid_seq_clears_echo() {
+    const char* ops[] = {
+        R"({"char":"wispOp","op":"setManualPalette","colors":[[4,5,6]]})",
+        R"({"char":"wispOp","op":"setManualPalette","colors":[[4,5,6]],"seq":0})",
+        R"({"char":"wispOp","op":"setManualPalette","colors":[[4,5,6]],"seq":70000})",
+        R"({"char":"wispOp","op":"setManualPalette","colors":[[4,5,6]],"seq":-1})",
+        R"({"char":"wispOp","op":"setManualPalette","colors":[[4,5,6]],"seq":"42"})",
+        R"({"char":"wispOp","op":"setManualPalette","colors":[[4,5,6]],"seq":4.5})",
+    };
+    for (const char* op : ops) {
+        wisp::WispConfig cfg;
+        cfg.begin();
+        wisp::WispOpDispatcher d(cfg);
+        dispatchJson(d,
+            R"({"char":"wispOp","op":"setManualPalette","colors":[[1,2,3]],"seq":42})");
+        TEST_ASSERT_EQUAL_UINT16(42, cfg.manualPaletteStatus().seq);
+        auto result = dispatchJson(d, op);
+        TEST_ASSERT_EQUAL_INT_MESSAGE((int)wisp::DispatchResult::AppliedManualPalette,
+                                      (int)result, op);
+        TEST_ASSERT_EQUAL_UINT16_MESSAGE(0, cfg.manualPaletteStatus().seq, op);
+        TEST_ASSERT_EQUAL_UINT8(4, cfg.manualPalette()[0].r);
+    }
+}
+
+// A palette op that stores nothing leaves the echo of the last one that did.
+void test_malformed_palette_op_keeps_echo() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    wisp::WispOpDispatcher d(cfg);
+    dispatchJson(d,
+        R"({"char":"wispOp","op":"setManualPalette","colors":[[1,2,3]],"seq":42})");
+    auto result = dispatchJson(d,
+        R"({"char":"wispOp","op":"setManualPalette","seq":7})");
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::Malformed, (int)result);
+    TEST_ASSERT_EQUAL_UINT16(42, cfg.manualPaletteStatus().seq);
+    TEST_ASSERT_EQUAL_UINT8(1, cfg.manualPalette()[0].r);
+}
+
 void test_set_off_color_rgbw_tuple() {
     wisp::WispConfig cfg;
     cfg.begin();
@@ -598,5 +658,8 @@ int main(int, char**) {
     RUN_TEST(test_set_osc_role_invalid_malformed);
     RUN_TEST(test_set_osc_role_plaintext_rejected_with_password);
     RUN_TEST(test_zone_ops_unknown);
+    RUN_TEST(test_set_manual_palette_echoes_seq);
+    RUN_TEST(test_set_manual_palette_without_valid_seq_clears_echo);
+    RUN_TEST(test_malformed_palette_op_keeps_echo);
     return UNITY_END();
 }

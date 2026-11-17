@@ -216,6 +216,19 @@ void test_manual_palette_status_reports_the_stored_palette() {
   }
 }
 
+// The status echoes the seq of the save that stored the palette, and 0 once a
+// save without one replaces it.
+void test_manual_palette_status_echoes_the_save_seq() {
+  wisp::WispConfig cfg;
+  cfg.begin();
+  TEST_ASSERT_EQUAL_UINT16(0, cfg.manualPaletteStatus().seq);
+  cfg.setManualPalette({{1, 2, 3, 0}}, 42);
+  TEST_ASSERT_EQUAL_UINT16(42, cfg.manualPaletteStatus().seq);
+  cfg.setManualPalette({});
+  TEST_ASSERT_EQUAL_UINT16(0, cfg.manualPaletteStatus().seq);
+  TEST_ASSERT_EQUAL_STRING("", cfg.manualPaletteStatus().id);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_name_default_is_empty);
@@ -241,5 +254,6 @@ int main(int, char**) {
   RUN_TEST(test_osc_address_built_per_role);
   RUN_TEST(test_clearing_unset_settings_removes_no_missing_key);
   RUN_TEST(test_manual_palette_status_reports_the_stored_palette);
+  RUN_TEST(test_manual_palette_status_echoes_the_save_seq);
   return UNITY_END();
 }

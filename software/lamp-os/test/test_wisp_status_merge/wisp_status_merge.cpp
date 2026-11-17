@@ -25,7 +25,7 @@ namespace {
 const char kWorstStatus[] =
     R"({"char":"wispStatus","source":"off","wifiConnected":false,)"
     R"("sourceLive":false,"lastSeenMs":9223372036854775,"configSplit":true,)"
-    R"("hasPassword":true,"manualId":"abcdef12",)"
+    R"("hasPassword":true,"manualId":"abcdef12","manualSeq":65535,)"
     R"("offColor":"ffffffff","oscRole":"secondary","paletteIdPrefix":"abcdef12",)"
     R"("name":"12345678901234567890","ethIp":"255.255.255.255",)"
     R"("wifiChannelMismatch":true,"wifiApChannel":11})";
@@ -79,9 +79,9 @@ void test_config_stamp_merged_only_when_config_cached() {
 // The merge adds 301 B at worst, so the wisp's widest status overflows the
 // 512 B characteristic whole; the page section serves all of it.
 void test_uncapped_merge_of_worst_status_pinned() {
-  TEST_ASSERT_EQUAL_size_t(342, std::strlen(kWorstStatus));
+  TEST_ASSERT_EQUAL_size_t(360, std::strlen(kWorstStatus));
   const std::string out = mergeWispStatusJson(widestMerge(kWorstStatus), 0);
-  TEST_ASSERT_EQUAL_size_t(643, out.size());
+  TEST_ASSERT_EQUAL_size_t(661, out.size());
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_FALSE(d["helloPaletteIdPrefix"].isNull());
@@ -92,11 +92,12 @@ void test_uncapped_merge_of_worst_status_pinned() {
 // status is still over 512 B with all four gone, so its notify goes blank
 // and the app re-reads the page section. Every field an app reads survives,
 // configSplit among them, since without it the app reads the settings as
-// parser defaults, and manualId, whose absence reads as an older wisp.
+// parser defaults, and manualId and manualSeq, whose absence reads as an
+// older wisp or a save not yet applied.
 void test_capped_merge_sheds_every_diagnostic() {
   const std::string out = mergeWispStatusJson(widestMerge(kWorstStatus),
                                               kWispStatusCharMaxLen);
-  TEST_ASSERT_EQUAL_size_t(533, out.size());
+  TEST_ASSERT_EQUAL_size_t(551, out.size());
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_TRUE(d["helloPaletteIdPrefix"].isNull());
@@ -110,18 +111,20 @@ void test_capped_merge_sheds_every_diagnostic() {
   TEST_ASSERT_EQUAL_STRING("12345678901234567890", d["name"].as<const char*>());
   TEST_ASSERT_TRUE(d["configSplit"].as<bool>());
   TEST_ASSERT_EQUAL_STRING("abcdef12", d["manualId"].as<const char*>());
+  TEST_ASSERT_EQUAL_UINT32(65535, d["manualSeq"].as<uint32_t>());
 }
 
-// A Manual status without Ethernet fits once three diagnostics are gone, so
-// the shedding stops there and helloFlags stays.
+// A Manual status without Ethernet or a name fits once three diagnostics are
+// gone, so the shedding stops there and helloFlags stays.
 void test_capped_merge_stops_shedding_once_it_fits() {
   std::string status(kWorstStatus);
   status.replace(status.find(R"("source":"off")"), 14, R"("source":"manual")");
   status.erase(status.find(R"("offColor":"ffffffff",)"), 22);
   status.erase(status.find(R"("ethIp":"255.255.255.255",)"), 26);
+  status.erase(status.find(R"("name":"12345678901234567890",)"), 30);
   const std::string out =
       mergeWispStatusJson(widestMerge(status.c_str()), kWispStatusCharMaxLen);
-  TEST_ASSERT_EQUAL_size_t(505, out.size());
+  TEST_ASSERT_EQUAL_size_t(493, out.size());
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_TRUE(d["statusLastSeenMs"].isNull());
@@ -137,7 +140,7 @@ void test_capped_merge_keeps_config_split_when_still_over() {
                  R"(\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\")");
   const std::string out =
       mergeWispStatusJson(widestMerge(status.c_str()), kWispStatusCharMaxLen);
-  TEST_ASSERT_EQUAL_size_t(553, out.size());
+  TEST_ASSERT_EQUAL_size_t(571, out.size());
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_TRUE(d["helloFlags"].isNull());
