@@ -449,4 +449,17 @@ void main() {
     expect(n.paletteLoading, isFalse,
         reason: 'the wisp stated its Manual palette empty, and a read agreed');
   });
+
+  test('a palette known before any wisp was heard is not the first stating '
+      'wisp\'s', () async {
+    final ble = _PaletteBle()..holdClaims = Completer<void>();
+    final n = await open(ble, initial: '{}');
+
+    // The lamp's first wisp states Y while the claims read holds the link.
+    seedPalette(ble, _y);
+    notify(ble, _status(manualId: _id(_y), prefix: _id(_y)));
+    await pumpEventQueue();
+    expect(ble.paletteReads, 1);
+    expect(n.paletteLoading, isTrue);
+  }, timeout: const Timeout(Duration(seconds: 20)));
 }

@@ -790,8 +790,8 @@ class WispNotifier extends _$WispNotifier {
 
   // A present status, before the source-write guard and the read-busy skip:
   // note the palette its wisp states, and return the palette to unknown when
-  // it is not the one held, or when the lamp now relays another wisp and
-  // either one states its palette.
+  // it is not the one held from that wisp, or when the lamp now relays
+  // another wisp and either one states its palette.
   void _notePaletteStatus(WispStatus status) {
     final mac = status.wispMac;
     if (mac == null) return;
@@ -799,7 +799,7 @@ class WispNotifier extends _$WispNotifier {
     if (stated != null) {
       _manualIds[mac] = stated;
       _manualSeqs[mac] = status.manualSeq;
-      if (mac == _paletteMac &&
+      if (mac != _paletteMac ||
           stated != WispRepository.statusManualId(_savedManualPalette)) {
         _currentPaletteKnown = false;
       }
@@ -832,10 +832,7 @@ class WispNotifier extends _$WispNotifier {
     if (_statesPalette(mac)) {
       final stated = next.manualId;
       if (stated == null || _readBusy) return;
-      final current = _currentPaletteKnown &&
-          _paletteMac == mac &&
-          WispRepository.statusManualId(_savedManualPalette) == stated;
-      if (!current) unawaited(_readManualPaletteSection(next));
+      if (!_currentPaletteKnown) unawaited(_readManualPaletteSection(next));
       return;
     }
     final fromWisp = next.carriesConfig || next.configSplit;
