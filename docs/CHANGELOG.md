@@ -7,6 +7,13 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 
 ## Unreleased
 
+### Changed
+- **The wisp's status no longer repeats its settings**, which keeps it inside
+  the lamp's Bluetooth limit. Apps read them from the wisp's settings message.
+  Update the app on every phone that opens a wisp first: an older app shows
+  default settings. Through a lamp older than 1.2.8 the wisp's settings don't
+  show.
+
 ### Fixed
 - **The wisp settings screen fills in even when the lamp missed the wisp's
   settings.** The app asks the wisp again and keeps reading until they
