@@ -83,7 +83,11 @@ class PaintedLampsList extends ConsumerWidget {
     final notifier = ref.read(wispNotifierProvider(lampId).notifier);
     final status = ref.watch(wispNotifierProvider(lampId)).value;
     final shuffleSeed = status?.shuffleSeed ?? 0;
-    final palette = previewPaletteFor(status?.source, notifier.savedManualPalette);
+    // Until the settings arrive the seed is a placeholder, and a prediction
+    // from it shows colours the wisp never paints.
+    final palette = (status?.configKnown ?? false)
+        ? previewPaletteFor(status?.source, notifier.savedManualPalette)
+        : const <LampColor>[];
     final claimedMacs = notifier.claimedMacs;
     final livePaint = notifier.livePaint;
     final peersAsync = ref.watch(lampNearbyPeersNotifierProvider(lampId));

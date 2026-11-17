@@ -224,6 +224,18 @@ class WispNotifier extends _$WispNotifier {
   bool _statusRereadInFlight = false;
   DateTime? _lastConfigPollAt;
 
+  // A config read skipped while another read held the link; it runs as soon
+  // as the link is free instead of waiting for the next notify.
+  bool _configReadOwed = false;
+
+  // While a split status's wisp has no config held, re-poll and re-read on a
+  // backoff. No notify follows when the lamp already held that config, and the
+  // next one may be the 30 s heartbeat.
+  Timer? _configRefillTimer;
+  Duration _configRefillDelay = _configRefillFirst;
+  static const Duration _configRefillFirst = Duration(seconds: 1);
+  static const Duration _configRefillMax = Duration(seconds: 30);
+
   // Every status the wisp sent, config merged, ahead of the source-write
   // guard. The confirm waits listen here so a status that only a section
   // re-read could recover still confirms. Only wisp statuses land here. The
@@ -235,7 +247,8 @@ class WispNotifier extends _$WispNotifier {
 
   // FbpBleClient has no internal lock, so two concurrent characteristic
   // reads stall the GATT flow on Android; every read here skips while
-  // another is in flight and retries on the next notify.
+  // another is in flight. A skipped config read runs once the link is free;
+  // the others retry on the next notify.
   bool get _readBusy =>
       _paletteRereadInFlight ||
       _claimsReadInFlight ||
@@ -271,6 +284,9 @@ class WispNotifier extends _$WispNotifier {
     _configRereadInFlight = false;
     _statusRereadInFlight = false;
     _lastConfigPollAt = null;
+    _configReadOwed = false;
+    _configRefillTimer = null;
+    _configRefillDelay = _configRefillFirst;
     final incoming = _incoming = StreamController<WispStatus>.broadcast();
     final opSeqs = _opSeqs = StreamController<int>.broadcast();
 
@@ -284,6 +300,7 @@ class WispNotifier extends _$WispNotifier {
       _driftWriteTimer?.cancel();
       _brightnessWriteTimer?.cancel();
       _recalcFallbackTimer?.cancel();
+      _configRefillTimer?.cancel();
     });
 
     debugPrint('[wisp_notifier] build lamp=$lampId -- waiting for connect');
@@ -380,6 +397,7 @@ class WispNotifier extends _$WispNotifier {
         }
       }
       unawaited(_loadClaims());
+      _scheduleConfigRefill(initial);
       debugPrint(
         '[wisp_notifier] initial-read lamp=$lampId '
         'wispMac=${initial.wispMac} present=${initial.present} '
@@ -451,6 +469,7 @@ class WispNotifier extends _$WispNotifier {
       if (bumpState) _bumpState();
     } finally {
       _paletteRereadInFlight = false;
+      _onReadDone();
     }
   }
 
@@ -499,6 +518,7 @@ class WispNotifier extends _$WispNotifier {
       _bumpState();
     } finally {
       _claimsReadInFlight = false;
+      _onReadDone();
     }
   }
 
@@ -551,6 +571,7 @@ class WispNotifier extends _$WispNotifier {
       unawaited(_loadClaims());
     }
     state = AsyncData(next);
+    _scheduleConfigRefill(next);
     debugPrint(
       '[wisp_notifier] notify lamp=$lampId '
       'wispMac=${next.wispMac} present=${next.present} source=${next.source}',
@@ -586,6 +607,7 @@ class WispNotifier extends _$WispNotifier {
       return;
     } finally {
       _statusRereadInFlight = false;
+      _onReadDone();
     }
     if (_disposed || !status.present) return;
     _onIncoming(status);
@@ -618,8 +640,8 @@ class WispNotifier extends _$WispNotifier {
   static const Duration _readIdleTimeout = Duration(seconds: 3);
 
   // The lamp stamps configLastSeenMs when a wispConfig lands; a new stamp
-  // means the section holds something to read. Busy reads leave the stamp
-  // unconsumed so the next notify retries.
+  // means the section holds something to read. A busy read leaves the stamp
+  // unconsumed and is owed once reads go idle.
   void _maybeRereadConfig(WispStatus next) {
     final seen = next.configLastSeenMs;
     if (seen == null || seen == _lastConfigSeenMs) return;
@@ -628,29 +650,75 @@ class WispNotifier extends _$WispNotifier {
 
   /// Read the `wispconfig` section for the wisp [forStatus] describes and
   /// hold it. With [emit], re-publish the current status with it merged.
-  Future<void> _readConfigSection(
+  /// Returns the config read, or null when the read was skipped as busy (and
+  /// is then owed), failed, or found none.
+  Future<WispConfig?> _readConfigSection(
     WispStatus forStatus, {
     bool emit = true,
   }) async {
-    if (_readBusy || _disposed) return;
+    if (_disposed) return null;
+    if (_readBusy) {
+      _configReadOwed = true;
+      return null;
+    }
     _configRereadInFlight = true;
     final WispConfig? config;
     try {
       config = await _repo.readConfig();
     } finally {
       _configRereadInFlight = false;
+      _onReadDone();
     }
-    if (_disposed || config == null) return;
+    if (_disposed || config == null) return null;
     _config = config;
     _configMac = forStatus.wispMac;
     _lastConfigSeenMs = forStatus.configLastSeenMs;
-    if (!emit) return;
+    if (!emit) return config;
     final cur = state.value;
-    if (cur == null) return;
+    if (cur == null) return config;
     final merged = _withHeldConfig(cur);
     _noteShuffleSeed(merged);
     _opSeqs.add(merged.opSeq);
     state = AsyncData(merged);
+    return config;
+  }
+
+  void _onReadDone() {
+    if (!_configReadOwed || _readBusy || _disposed) return;
+    final cur = state.value;
+    if (cur == null) return;
+    _configReadOwed = false;
+    unawaited(_readConfigSection(cur));
+  }
+
+  bool _configMissing(WispStatus? status) =>
+      status != null &&
+      status.present &&
+      status.configSplit &&
+      !status.configKnown &&
+      _repo.wispSectionsSupported;
+
+  void _scheduleConfigRefill(WispStatus status) {
+    if (_disposed) return;
+    if (!_configMissing(status)) {
+      _configRefillTimer?.cancel();
+      _configRefillTimer = null;
+      _configRefillDelay = _configRefillFirst;
+      return;
+    }
+    if (_configRefillTimer != null) return;
+    _configRefillTimer = Timer(_configRefillDelay, () async {
+      _configRefillTimer = null;
+      final cur = state.value;
+      if (_disposed || !_configMissing(cur)) return;
+      final next = _configRefillDelay * 2;
+      _configRefillDelay = next > _configRefillMax ? _configRefillMax : next;
+      await pollConfig();
+      if (_disposed) return;
+      await _readConfigSection(state.value ?? cur!);
+      final after = state.value;
+      if (after != null) _scheduleConfigRefill(after);
+    });
   }
 
   void _noteShuffleSeed(WispStatus status) {
@@ -812,8 +880,10 @@ class WispNotifier extends _$WispNotifier {
 
   /// How long to wait for the wisp's `opSeq` to advance after a sealed
   /// password op. A wrong current password fails the seal on the wisp, so no
-  /// advance arrives and the window elapses.
-  static const Duration _opConfirmTimeout = Duration(seconds: 5);
+  /// advance arrives and the window elapses. Sized for `opSeq` arriving only
+  /// through a config read (status burst, config, notify, section read) with
+  /// about two lost frames on the way.
+  static const Duration _opConfirmTimeout = Duration(seconds: 10);
 
   /// Seal [sendOp] under [currentGuess] and wait for the wisp to confirm it
   /// applied by advancing `opSeq`. Restores the previously-cached password on
@@ -823,17 +893,19 @@ class WispNotifier extends _$WispNotifier {
     required Future<void> Function() sendOp,
   }) async {
     // opSeq rides the config: refresh it from the section first, waiting out
-    // any read in flight, so the baseline is the wisp's current value. A
-    // split status with no config to read has no baseline at all, and a
-    // placeholder 0 would let any later opSeq confirm a rejected change.
+    // any read in flight, so the baseline is the wisp's current value. For a
+    // split status nothing else carries it, so without a fresh read there is
+    // no baseline: a placeholder 0 or a stale held value would let a later
+    // opSeq confirm a rejected change.
     final cur = state.value;
+    WispConfig? fresh;
     if (cur != null && _repo.wispSectionsSupported) {
       await _awaitReadsIdle();
-      await _readConfigSection(state.value ?? cur);
+      fresh = await _readConfigSection(state.value ?? cur);
     }
     final now = state.value;
-    if (now != null && now.configSplit && !now.configKnown) {
-      throw StateError('wisp settings not loaded; opSeq baseline unknown');
+    if (now != null && now.configSplit && fresh == null) {
+      throw StateError('wisp settings not read; opSeq baseline unknown');
     }
     final baseline = now?.opSeq ?? 0;
     final prevCached = _cachedPassword;
@@ -959,6 +1031,10 @@ class WispNotifier extends _$WispNotifier {
   /// Debounce slider drags to one write per [_driftDebounce] window.
   void setDrift(int intervalMs, int fadePct) {
     _pendingDrift = (intervalMs, fadePct);
+    _config = _config?.copyWith(
+      driftIntervalMs: intervalMs,
+      driftFadePct: fadePct,
+    );
     _driftWriteTimer?.cancel();
     _driftWriteTimer = Timer(_driftDebounce, () => unawaited(_flushDrift()));
   }

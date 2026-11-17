@@ -92,7 +92,7 @@ class _SpaceBrightnessSliderState extends ConsumerState<SpaceBrightnessSlider> {
               ),
             ),
             if (!widget.status.configKnown)
-              const WispSettingsPending()
+              WispSettingsPending(lampId: widget.lampId)
             else
               Slider(
                 min: 0,
