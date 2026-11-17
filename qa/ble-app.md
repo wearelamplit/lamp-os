@@ -297,8 +297,8 @@ P17 — **a settings change the wisp never gets is read back.** Same setup as
 P14, the lamp on the new wisp. Open the Settings tab, move brightness, and
 within a second power the wisp off: about 5 s later the slider goes back to
 the value the lamp last heard from the wisp. With the wisp up, change drift,
-brightness and the LED strip once each: each keeps its new value, and the
-lamp log shows a `wispconfig` read about 5 s after each.
+brightness and the LED strip once each: each still shows its new value 10 s
+later.
 
 ## Pass criteria
 
