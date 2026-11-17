@@ -189,7 +189,7 @@ void main() {
   });
 
   // A lamp older than 1.2.8 serves no sections, so the refill only probes
-  // for them: no pollConfig goes out and no wispconfig read is made.
+  // for them. No pollConfig goes out and no wispconfig read is made.
   test('refill sends nothing through a lamp without the sections', () async {
     final ble = _HeldBle();
     await ble.connect(_lampId);
