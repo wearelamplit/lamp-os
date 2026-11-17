@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import '../../_support/in_memory_ble_client.dart';
+import '../../_support/wisp_palette_ble.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/features/wisp/application/wisp_notifier.dart';
@@ -58,6 +60,28 @@ void main() {
       final after = c.read(wispNotifierProvider(lampId)).value!;
       expect(after.oscRole, OscRole.secondary,
           reason: 'optimistic role flip reverted');
+    });
+
+    // The op reaches the wisp and its echo lands, but the write call reports
+    // an error (a lost response).
+    test('setSource keeps the source the wisp echoed when its write then '
+        'reports an error', () async {
+      final ble = PaletteBle(lampId);
+      final (_, n) = await openWisp(ble, '{"wispMac":"$wispA","source":"osc"}');
+
+      ble.holdSourceWrite = Completer<void>();
+      final result = n.setSource(WispSourceMode.off).then<Object?>(
+            (_) => null,
+            onError: (Object e) => e,
+          );
+      await pumpEventQueue();
+      ble.notifyStatus('{"wispMac":"$wispA","source":"off"}');
+      await pumpEventQueue();
+      ble.holdSourceWrite!.completeError(Exception('response lost'));
+      ble.holdSourceWrite = null;
+
+      expect(await result, isNull);
+      expect(n.state.value!.source, WispSourceMode.off);
     });
 
     test('setSource reverts source pill on BLE failure', () async {
