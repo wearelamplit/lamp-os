@@ -252,33 +252,39 @@ void main() {
   }
 
   // The write's ack takes longer than the confirm window, and the wisp's echo
-  // lands in between: the echo is the save landing, not the palette lost.
-  test('a save whose echo lands after its confirm window confirms', () async {
-    WispNotifier.debugSeqStart = () => 77;
-    addTearDown(() => WispNotifier.debugSeqStart = _defaultSeqStart);
-    final ble = PaletteBle(_lampId)..seedPalette(_p);
-    final (_, n) = await openWisp(ble, statingStatus(wispA, _p));
-    n.setManualPaletteDraft(_q);
+  // lands in between. A save of the palette already held states no new id.
+  for (final (label, draft) in [
+    ('a new palette', _q),
+    ('the palette already held', _p),
+  ]) {
+    test('a save of $label whose echo lands after its confirm window '
+        'confirms with no second copy', () async {
+      WispNotifier.debugSeqStart = () => 77;
+      addTearDown(() => WispNotifier.debugSeqStart = _defaultSeqStart);
+      final ble = PaletteBle(_lampId)..seedPalette(_p);
+      final (_, n) = await openWisp(ble, statingStatus(wispA, _p));
+      n.setManualPaletteDraft(draft);
 
-    ble.holdPaletteWrite = Completer<void>();
-    final result = n.setManualPalette().then<Object?>(
-      (_) => null,
-      onError: (Object e) => e,
-    );
-    await pumpEventQueue();
-    expect(ble.paletteWrites, hasLength(1));
-    await Future<void>.delayed(
-      WispNotifier.writeConfirmBudget ~/ 4 + const Duration(milliseconds: 200),
-    );
-    ble.notifyStatus(statingStatus(wispA, _q, seq: 77));
-    await pumpEventQueue();
-    ble.holdPaletteWrite!.complete();
-    ble.holdPaletteWrite = null;
+      ble.holdPaletteWrite = Completer<void>();
+      final result = n.setManualPalette().then<Object?>(
+        (_) => null,
+        onError: (Object e) => e,
+      );
+      await pumpEventQueue();
+      expect(ble.paletteWrites, hasLength(1));
+      await Future<void>.delayed(
+        WispNotifier.writeConfirmWindow + const Duration(milliseconds: 200),
+      );
+      ble.notifyStatus(statingStatus(wispA, draft, seq: 77));
+      await pumpEventQueue();
+      ble.holdPaletteWrite!.complete();
+      ble.holdPaletteWrite = null;
 
-    expect(await result, isNull);
-    expect(n.manualPaletteWriteFailed, isFalse);
-    expect(ble.paletteWrites, hasLength(1));
-  });
+      expect(await result, isNull);
+      expect(n.manualPaletteWriteFailed, isFalse);
+      expect(ble.paletteWrites, hasLength(1));
+    });
+  }
 
   // An empty save first waits out the read in flight (here the claims read).
   // The lamp adopts wisp B meanwhile, and B's next status reads its palette

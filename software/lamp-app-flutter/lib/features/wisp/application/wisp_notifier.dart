@@ -70,6 +70,10 @@ class WispNotifier extends _$WispNotifier {
   static Duration get writeConfirmBudget =>
       _sourceConfirmTimeout * _writeConfirmAttempts;
 
+  /// One attempt's confirm window.
+  @visibleForTesting
+  static Duration get writeConfirmWindow => _sourceConfirmTimeout;
+
   Timer? _offColorWriteTimer;
   Timer? _driftWriteTimer;
   Timer? _brightnessWriteTimer;
@@ -1513,8 +1517,8 @@ class WispNotifier extends _$WispNotifier {
     final epoch = ++_paletteSaveEpoch;
     final seq = _mintSaveSeq(wispMac);
     final expected = WispRepository.sentManualId(committed, seq: seq);
-    // The echo states a new palette, so it moves the losses count, but it is
-    // this save landing whenever it is heard.
+    // The echo is this save landing whenever it is heard, even when its new
+    // palette id has moved the losses count.
     var echoed = false;
     final echoes = _incoming.stream.listen((s) {
       if (_echoes(s, wispMac, seq, expected)) echoed = true;
