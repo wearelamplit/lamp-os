@@ -10,10 +10,8 @@ void tearDown() {}
 
 void test_a_resent_style_reports_no_change() {
   wisp::PaintDistributor paint;
-  TEST_ASSERT_EQUAL_INT((int)wisp::PaletteStyle::Gradient, (int)paint.paletteStyle());
   TEST_ASSERT_FALSE(paint.setPaletteStyle(wisp::PaletteStyle::Gradient));
   TEST_ASSERT_TRUE(paint.setPaletteStyle(wisp::PaletteStyle::Swatches));
-  TEST_ASSERT_EQUAL_INT((int)wisp::PaletteStyle::Swatches, (int)paint.paletteStyle());
   TEST_ASSERT_FALSE(paint.setPaletteStyle(wisp::PaletteStyle::Swatches));
   TEST_ASSERT_TRUE(paint.setPaletteStyle(wisp::PaletteStyle::Gradient));
 }

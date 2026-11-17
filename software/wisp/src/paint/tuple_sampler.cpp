@@ -81,9 +81,9 @@ constexpr uint32_t kGolden   = 0x9E3779B9u;  // posB salt (decorrelates from pos
 constexpr uint32_t kSwapSalt = 0xCAFEBABEu;  // independent third hash space
 constexpr uint32_t kMinGap   = 0x40000000u;  // 0.25 of the gradient span
 
-// Entry (pos * n) >> 32 of n: every entry owns an equal share of the span,
+// Entry (pos * n) >> 32 of n. Every entry owns an equal share of the span,
 // so an entry repeated k times is picked k / n of the time.
-uint32_t entryAt(uint32_t pos, size_t n) {
+uint32_t entryAt(uint32_t pos, uint32_t n) {
   return static_cast<uint32_t>((static_cast<uint64_t>(pos) * n) >> 32);
 }
 
@@ -104,14 +104,14 @@ ColorTuple sampleSwatches(const std::vector<RGBW>& colors, uint32_t posA,
                           uint32_t posB) {
   ColorTuple out;
   if (colors.empty()) return out;
-  const RGBW base = colors[entryAt(posA, colors.size())];
+  const RGBW base = colors[entryAt(posA, static_cast<uint32_t>(colors.size()))];
   size_t others = 0;
   for (const RGBW& c : colors) {
     if (!sameBytes(c, base)) ++others;
   }
   RGBW shade = base;
   if (others > 0) {
-    size_t k = entryAt(posB, others);
+    size_t k = entryAt(posB, static_cast<uint32_t>(others));
     for (const RGBW& c : colors) {
       if (sameBytes(c, base)) continue;
       if (k == 0) { shade = c; break; }

@@ -78,13 +78,12 @@ class PaintDistributor {
   void setShuffleSeed(uint8_t s) { shuffleSeed_ = s; }
 
   // Style TupleSampler assigns with. True when it changed, so the caller
-  // re-assigns lamps only then: a resend must not cut a drift fade.
+  // re-assigns lamps only then, and a resend cuts no drift fade.
   bool setPaletteStyle(PaletteStyle style) {
     if (style == style_) return false;
     style_ = style;
     return true;
   }
-  PaletteStyle paletteStyle() const { return style_; }
 
   // intervalMs: how often each lamp is re-colored [30000..3600000].
   // fadePct [0..100]: sets each re-color's fade length (see driftFadeMs).

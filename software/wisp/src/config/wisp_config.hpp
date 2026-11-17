@@ -12,7 +12,7 @@
 #include <lampos/led_types.hpp>
 
 #include "config/manual_palette_color.hpp"
-#include "paint/current_palette.hpp"  // PaletteStyle
+#include "paint/palette_style.hpp"
 #include "osc/osc_role.hpp"
 
 namespace wisp {

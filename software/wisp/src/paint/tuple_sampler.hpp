@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "paint/current_palette.hpp"
+#include "paint/palette_style.hpp"
 
 namespace wisp {
 
@@ -31,11 +32,10 @@ struct ColorTuple {
 
 // Pure function: same palette + mac + shuffleSeed + style always returns
 // the same tuple. Edge cases: empty palette → zeros; single color → both
-// surfaces. The app's predictTuple mirrors it byte for byte.
+// surfaces. The app's predictTuple must match it byte for byte.
 ColorTuple sampleTupleForMac(const std::vector<RGBW>& colors,
-                             const uint8_t mac[6],
-                             uint32_t shuffleSeed = 0,
-                             PaletteStyle style = PaletteStyle::Gradient);
+                             const uint8_t mac[6], uint32_t shuffleSeed,
+                             PaletteStyle style);
 
 // Sample base/shade at two explicit positions (full uint32 span). Empty
 // palette → zeros. sampleTupleForMac and the random drift path share this
@@ -43,6 +43,6 @@ ColorTuple sampleTupleForMac(const std::vector<RGBW>& colors,
 // style is in docs/dev/networking.md (Wisp paints a lamp's base + shade).
 ColorTuple sampleTupleAtPositions(const std::vector<RGBW>& colors,
                                   uint32_t posA, uint32_t posB,
-                                  PaletteStyle style = PaletteStyle::Gradient);
+                                  PaletteStyle style);
 
 }  // namespace wisp

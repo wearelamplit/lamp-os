@@ -238,7 +238,7 @@ static std::vector<wisp::RGBW> orangeGreen() {
 
 void test_at_positions_samples_base_at_posA(void) {
   // posA=0 on a 2-stop palette lands exactly on the first stop.
-  wisp::ColorTuple t = wisp::sampleTupleAtPositions(orangeGreen(), 0u, 0xFFFFFFFFu);
+  wisp::ColorTuple t = wisp::sampleTupleAtPositions(orangeGreen(), 0u, 0xFFFFFFFFu, wisp::PaletteStyle::Gradient);
   TEST_ASSERT_EQUAL_UINT8(255, t.r[0]);
   TEST_ASSERT_EQUAL_UINT8(128, t.g[0]);
   TEST_ASSERT_EQUAL_UINT8(0,   t.b[0]);
@@ -249,8 +249,8 @@ void test_at_positions_samples_base_at_posA(void) {
 }
 
 void test_at_positions_different_inputs_differ(void) {
-  wisp::ColorTuple a = wisp::sampleTupleAtPositions(orangeGreen(), 0u, 0xFFFFFFFFu);
-  wisp::ColorTuple b = wisp::sampleTupleAtPositions(orangeGreen(), 0x20000000u, 0xC0000000u);
+  wisp::ColorTuple a = wisp::sampleTupleAtPositions(orangeGreen(), 0u, 0xFFFFFFFFu, wisp::PaletteStyle::Gradient);
+  wisp::ColorTuple b = wisp::sampleTupleAtPositions(orangeGreen(), 0x20000000u, 0xC0000000u, wisp::PaletteStyle::Gradient);
   const bool differ = a.r[0] != b.r[0] || a.g[0] != b.g[0] || a.b[0] != b.b[0] ||
                       a.r[1] != b.r[1] || a.g[1] != b.g[1] || a.b[1] != b.b[1];
   TEST_ASSERT_TRUE_MESSAGE(differ,
@@ -260,7 +260,7 @@ void test_at_positions_different_inputs_differ(void) {
 void test_at_positions_gap_enforced_for_equal_inputs(void) {
   // Identical positions collapse to gap 0; the >= kMinGap separation must move
   // shade so base and shade stay visually distinct.
-  wisp::ColorTuple t = wisp::sampleTupleAtPositions(orangeGreen(), 0x80000000u, 0x80000000u);
+  wisp::ColorTuple t = wisp::sampleTupleAtPositions(orangeGreen(), 0x80000000u, 0x80000000u, wisp::PaletteStyle::Gradient);
   const bool separated = t.r[0] != t.r[1] || t.g[0] != t.g[1] || t.b[0] != t.b[1];
   TEST_ASSERT_TRUE_MESSAGE(separated,
       "base/shade must stay >= kMinGap apart even for identical positions");
@@ -274,7 +274,8 @@ void test_golden_parity_production(void) {
   const uint32_t posA = hashMac(mac, 0u);
   const uint32_t posB = hashMac(mac, kGolden);
   wisp::ColorTuple t =
-      wisp::sampleTupleAtPositions({{255, 128, 0, 0}, {0, 200, 80, 0}}, posA, posB);
+      wisp::sampleTupleAtPositions({{255, 128, 0, 0}, {0, 200, 80, 0}}, posA, posB,
+                                   wisp::PaletteStyle::Gradient);
   if ((hashMac(mac, kSwapSalt) & 1u) != 0u) {
     std::swap(t.r[0], t.r[1]); std::swap(t.g[0], t.g[1]);
     std::swap(t.b[0], t.b[1]); std::swap(t.w[0], t.w[1]);
@@ -291,7 +292,7 @@ void test_golden_parity_production(void) {
 
 void test_at_positions_empty_palette_returns_black(void) {
   std::vector<wisp::RGBW> empty;
-  wisp::ColorTuple t = wisp::sampleTupleAtPositions(empty, 123u, 456u);
+  wisp::ColorTuple t = wisp::sampleTupleAtPositions(empty, 123u, 456u, wisp::PaletteStyle::Gradient);
   for (int i = 0; i < 2; ++i) {
     TEST_ASSERT_EQUAL_UINT8(0, t.r[i]);
     TEST_ASSERT_EQUAL_UINT8(0, t.g[i]);
@@ -318,7 +319,7 @@ void test_tuple_rgbw_packs_w_per_surface(void) {
 // the local copy above.
 void test_golden_parity_for_mac_production(void) {
   const uint8_t mac[6] = {0x10, 0x20, 0x30, 0x40, 0x50, 0x60};
-  const wisp::ColorTuple t = wisp::sampleTupleForMac(orangeGreen(), mac, 0);
+  const wisp::ColorTuple t = wisp::sampleTupleForMac(orangeGreen(), mac, 0, wisp::PaletteStyle::Gradient);
   const uint8_t wantBase[4]  = {178, 149, 23, 0};
   const uint8_t wantShade[4] = {114, 167, 43, 0};
   uint8_t base[4];
@@ -329,8 +330,8 @@ void test_golden_parity_for_mac_production(void) {
   TEST_ASSERT_EQUAL_MEMORY(wantShade, shade, 4);
 }
 
-// Swatch vectors. The app's test/features/wisp/tuple_sampler_test.dart
-// (predictTuple) mirrors them case for case; change both together.
+// Swatch vectors. The app's predictTuple must reproduce them, case for case
+// in test/features/wisp/tuple_sampler_test.dart; change both together.
 
 using wisp::PaletteStyle;
 
@@ -458,6 +459,16 @@ void test_swatch_keeps_near_duplicates(void) {
   TEST_ASSERT_EQUAL_INT(0, entryOf(near, hi, 1));
 }
 
+// Entries that differ only in white are different swatches: each is the
+// other's shade.
+void test_swatch_white_only_difference_counts(void) {
+  const std::vector<wisp::RGBW> pair = {{200, 100, 0, 0}, {200, 100, 0, 255}};
+  const wisp::ColorTuple t = wisp::sampleTupleAtPositions(
+      pair, 0u, 0u, PaletteStyle::Swatches);
+  TEST_ASSERT_EQUAL_INT(0, entryOf(pair, t, 0));
+  TEST_ASSERT_EQUAL_INT(1, entryOf(pair, t, 1));
+}
+
 // Drift draws random positions; in swatches every draw is two different
 // palette entries exactly.
 void test_drift_draws_use_the_style(void) {
@@ -497,5 +508,6 @@ int main(int, char**) {
   RUN_TEST(test_swatch_shuffle_changes_picks);
   RUN_TEST(test_swatch_keeps_near_duplicates);
   RUN_TEST(test_drift_draws_use_the_style);
+  RUN_TEST(test_swatch_white_only_difference_counts);
   return UNITY_END();
 }

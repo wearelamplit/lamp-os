@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "paint/current_palette.hpp"
+#include "paint/palette_style.hpp"
 
 namespace wisp {
 

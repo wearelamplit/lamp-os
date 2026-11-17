@@ -618,8 +618,9 @@ An Off (or unclaim) eases the lamp home the moment the first fresh STATE omits
 it, and a paint-mode edge emits STATE out of cadence so that lands promptly.
 
 **Palette style** (`setSwatches`, `paint/tuple_sampler.cpp`). Every lamp's
-pair, drift steps and the ArtNet fixtures included, comes from one sampler
-the app's painted-lamps preview mirrors byte for byte (`predictTuple`). Per
+pair, drift steps and the ArtNet fixtures included, comes from one sampler,
+which the app's painted-lamps preview (`predictTuple`) must match byte for
+byte; an app without swatches predicts gradient only. Per
 lamp it draws two positions over the full `uint32` span, posA and posB, from
 the lamp's MAC hashed with `shuffleSeed` (a drift step draws them at random;
 ArtNet uses seed 0, so Shuffle never re-rolls ArtNet fixtures).
