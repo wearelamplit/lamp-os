@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
@@ -102,6 +103,13 @@ class WispNotifier extends _$WispNotifier {
   // Bumped on every setManualPalette, the same way [_setSourceEpoch] is.
   int _paletteSaveEpoch = 0;
 
+  /// The first palette save `seq` this notifier sends, 1..65535. Random, so
+  /// two phones rarely start on the same one.
+  @visibleForTesting
+  static int Function() debugSeqStart = () => Random().nextInt(_seqMax) + 1;
+  static const int _seqMax = 65535;
+  int? _lastSaveSeq;
+
   // Newest `lastSeenMs` heard from each wisp, keyed by wispMac. A lamp
   // re-serves its cached status with the wisp's stamp unchanged, so only a
   // larger stamp is a status emitted since.
@@ -151,6 +159,8 @@ class WispNotifier extends _$WispNotifier {
   // stated: null after a reconnect until it states one again. A wisp in here
   // gets the stated-palette rules; any other the prefix rules.
   final Map<String, String?> _manualIds = {};
+  // The `manualSeq` each such wisp echoed last.
+  final Map<String, int> _manualSeqs = {};
   // The wisp the known palette belongs to, and the wisp of the latest
   // present status.
   String? _paletteMac;
@@ -276,6 +286,7 @@ class WispNotifier extends _$WispNotifier {
     _lastPaletteIdPrefix = '';
     _paletteRereadInFlight = false;
     _manualIds.clear();
+    _manualSeqs.clear();
     _paletteMac = null;
     _statusMac = null;
 
@@ -792,7 +803,10 @@ class WispNotifier extends _$WispNotifier {
     final mac = status.wispMac;
     if (mac == null) return;
     final stated = status.manualId;
-    if (stated != null) _manualIds[mac] = stated;
+    if (stated != null) {
+      _manualIds[mac] = stated;
+      _manualSeqs[mac] = status.manualSeq;
+    }
     final owner = _paletteMac;
     if (owner != null &&
         owner != mac &&
@@ -1374,14 +1388,16 @@ class WispNotifier extends _$WispNotifier {
   /// caller fires this without awaiting the confirm, so the throw is swallowed
   /// and the failure surfaces via the flag. A later save supersedes this one,
   /// which then stops resending and returns without touching the saved
-  /// snapshot.
+  /// snapshot. A wisp that states its palette gets a `seq` with the op, the
+  /// same on every resend, and confirms on its echo whatever its source mode.
   Future<void> setManualPalette() async {
+    final wispMac = state.value?.wispMac;
+    if (_statesPalette(wispMac)) return _saveEchoed(wispMac!);
     final committed = List<LampColor>.from(_draft);
     // The wisp stores an empty palette and clears its palette id, so a later
     // Manual status without paletteIdPrefix confirms it.
     final expectedHash =
         committed.isEmpty ? '' : WispRepository.paletteIdHash(committed);
-    final wispMac = state.value?.wispMac;
     final epoch = ++_paletteSaveEpoch;
     final judgeByStamps = committed.isEmpty && wispMac != null;
     if (judgeByStamps) {
@@ -1422,6 +1438,47 @@ class WispNotifier extends _$WispNotifier {
       }
       throw Exception('wisp manual palette write not confirmed');
     }
+  }
+
+  Future<void> _saveEchoed(String wispMac) async {
+    final committed = List<LampColor>.from(_draft);
+    final epoch = ++_paletteSaveEpoch;
+    final seq = _mintSaveSeq(wispMac);
+    final expected = WispRepository.sentManualId(committed, seq: seq);
+    final ok = await _sendConfirmed(
+      send: () => _repo.setManualPalette(committed, seq: seq),
+      confirm: () => _confirmPaletteEcho(wispMac, seq, expected),
+      isSuperseded: () => _paletteSaveEpoch != epoch,
+    );
+    if (_disposed || _paletteSaveEpoch != epoch) return;
+    _applyPaletteConfirm(committed, ok, wispMac);
+    if (!ok) throw Exception('wisp manual palette write not confirmed');
+  }
+
+  // Steps from a random start through 1..65535, skipping the seq the wisp
+  // echoes now: a status already carrying it would confirm a save it never
+  // applied whenever the palette matched.
+  int _mintSaveSeq(String wispMac) {
+    final last = _lastSaveSeq;
+    var seq = last == null ? debugSeqStart() : last % _seqMax + 1;
+    if (seq == _manualSeqs[wispMac]) seq = seq % _seqMax + 1;
+    _lastSaveSeq = seq;
+    return seq;
+  }
+
+  /// Resolve true once a status from [wispMac] echoes [seq] with [manualId]
+  /// as its palette, emitted after the wisp stored this save, or false when
+  /// [_sourceConfirmTimeout] elapses. Its source mode does not matter: the
+  /// wisp stores the palette in any mode.
+  Future<bool> _confirmPaletteEcho(String wispMac, int seq, String manualId) {
+    return _incoming.stream
+        .firstWhere((s) =>
+            s.wispMac == wispMac &&
+            s.manualSeq == seq &&
+            s.manualId == manualId)
+        .timeout(_sourceConfirmTimeout)
+        .then((_) => true)
+        .catchError((_) => false);
   }
 
   void _applyPaletteConfirm(
