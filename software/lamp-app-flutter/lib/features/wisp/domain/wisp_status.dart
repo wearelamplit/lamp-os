@@ -53,6 +53,7 @@ class WispStatus {
     this.carriesConfig = false,
     this.configSplit = false,
     this.configLastSeenMs,
+    this.manualId,
   });
 
   /// Sentinel for "no wisp has been heard on this lamp yet" (lamp
@@ -191,6 +192,12 @@ class WispStatus {
   /// change means the `wispconfig` section holds something new.
   final int? configLastSeenMs;
 
+  /// The wisp's stored Manual palette, as `WispRepository.statusManualId`
+  /// computes it: `""` when the palette is empty, else its id, in every
+  /// source mode. Null when the status does not carry it: a wisp that
+  /// predates it, or the lamp's hello-only merge.
+  final String? manualId;
+
   /// Convenience: is either surface currently wisp-painted?
   bool get controlling => controllingBase || controllingShade;
 
@@ -322,6 +329,7 @@ class WispStatus {
       carriesConfig: carriesConfig,
       configSplit: configSplit,
       configLastSeenMs: asInt(json['configLastSeenMs']),
+      manualId: json['manualId'] is String ? json['manualId'] as String : null,
     );
   }
 
@@ -415,6 +423,7 @@ class WispStatus {
       carriesConfig: carriesConfig,
       configSplit: configSplit,
       configLastSeenMs: configLastSeenMs,
+      manualId: manualId,
     );
   }
 
@@ -454,7 +463,8 @@ class WispStatus {
           configKnown == other.configKnown &&
           carriesConfig == other.carriesConfig &&
           configSplit == other.configSplit &&
-          configLastSeenMs == other.configLastSeenMs;
+          configLastSeenMs == other.configLastSeenMs &&
+          manualId == other.manualId;
 
   @override
   int get hashCode => Object.hash(
@@ -482,7 +492,8 @@ class WispStatus {
           opSeq,
           brightness,
           configKnown,
-          Object.hash(carriesConfig, configSplit, configLastSeenMs),
+          Object.hash(
+              carriesConfig, configSplit, configLastSeenMs, manualId),
         ),
       );
 }

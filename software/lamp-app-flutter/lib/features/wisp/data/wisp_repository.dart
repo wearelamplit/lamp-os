@@ -83,15 +83,15 @@ class WispRepository {
 
   /// Read the wisp's stored manual palette from its dedicated page section.
   /// Kept off CHAR_WISP_STATUS, whose frequent palette-less NOTIFY clobbers a
-  /// palette-full value. A legacy lamp that predates the section, an empty
-  /// palette, or any read error all map to an empty list (never throws): the
-  /// caller treats that as "no palette yet" and leaves any prior palette intact.
-  Future<List<LampColor>> readManualPalette() async {
+  /// palette-full value. Null when the read fails; never throws. A legacy
+  /// lamp that predates the section, a read before the auth handshake and an
+  /// empty palette all read as an empty list.
+  Future<List<LampColor>?> readManualPalette() async {
     try {
       final bytes = await _ble.readSection(_deviceId, 'wisppalette');
       return decodeManualPalette(bytes);
     } catch (_) {
-      return const <LampColor>[];
+      return null;
     }
   }
 
@@ -202,23 +202,40 @@ class WispRepository {
     return op;
   }
 
-  /// Content hash of [palette] over the same canonical wire bytes the wisp
-  /// stamps as its palette id: r,g,b per color, plus w only when w != 0.
-  /// Built from [buildManualPaletteOp] so the hashed bytes match the wire
-  /// exactly (including the trailing-W strip under [kWispOpPayloadCap]).
-  /// Returns 8 lowercase hex chars; the notifier confirms a palette write by
-  /// matching this against the wisp's `paletteIdPrefix` on the status NOTIFY.
-  static String paletteIdHash(List<LampColor> palette) {
-    final op = buildManualPaletteOp(palette.take(50).toList());
+  /// Content hash of [palette] as the wisp stores it, over the canonical
+  /// wire bytes the wisp stamps as its palette id: r,g,b per color, plus w
+  /// only when w != 0. Hashes the colors [buildManualPaletteOp] emits, so a
+  /// trailing-W strip under [kWispOpPayloadCap] counts. Returns 8 lowercase
+  /// hex chars; the notifier confirms a palette write by matching this
+  /// against the wisp's `paletteIdPrefix` on the status NOTIFY.
+  static String paletteIdHash(List<LampColor> palette) => manualPaletteId(
+      _opColors(buildManualPaletteOp(palette.take(50).toList())));
+
+  /// The wisp's `manualPaletteId` of [colors] exactly as given: 8 lowercase
+  /// hex chars.
+  static String manualPaletteId(List<LampColor> colors) {
     final wire = <int>[];
-    for (final c in op['colors'] as List) {
-      for (final ch in c as List) {
-        wire.add(ch as int);
-      }
+    for (final c in colors) {
+      wire.addAll([c.r, c.g, c.b]);
+      if (c.w != 0) wire.add(c.w);
     }
-    final h = fnv1a(Uint8List.fromList(wire));
-    return h.toRadixString(16).padLeft(8, '0');
+    return fnv1a(Uint8List.fromList(wire)).toRadixString(16).padLeft(8, '0');
   }
+
+  /// [colors] as the wisp status's `manualId` names them: `""` when empty,
+  /// else [manualPaletteId].
+  static String statusManualId(List<LampColor> colors) =>
+      colors.isEmpty ? '' : manualPaletteId(colors);
+
+  static List<LampColor> _opColors(Map<String, dynamic> op) => [
+        for (final c in op['colors'] as List)
+          LampColor(
+            r: (c as List)[0] as int,
+            g: c[1] as int,
+            b: c[2] as int,
+            w: c.length > 3 ? c[3] as int : 0,
+          ),
+      ];
 
   /// Set the wisp password. Sealed under the CURRENT password when one is
   /// set; plaintext on a factory-fresh wisp (no shared secret yet).
