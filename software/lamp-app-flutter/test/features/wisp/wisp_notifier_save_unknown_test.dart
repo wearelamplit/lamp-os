@@ -219,15 +219,18 @@ void main() {
     });
   }
 
-  // An empty save re-reads the status before its first send; the lamp adopts
-  // wisp B meanwhile and B's palette is read before the send would go out.
-  test('an empty save sends nothing when the palette went unknown during its '
-      'status read', () async {
-    final ble = PaletteBle(_lampId)..seedPalette(_p);
+  // An empty save first waits out the read in flight (here the claims read).
+  // The lamp adopts wisp B meanwhile, and B's next status reads its palette
+  // before the wait ends.
+  test('an empty save sends nothing when the palette went unknown while it '
+      'waited, even once it is known again', () async {
+    final ble = PaletteBle(_lampId)
+      ..seedPalette(_p)
+      ..holdClaims = Completer<void>();
     final (_, n) = await openWisp(ble, legacyStatus(wispA, _p));
+    expect(n.paletteLoading, isFalse);
     n.setManualPaletteDraft(const []);
 
-    ble.holdStatusRead = Completer<void>();
     final result = n.setManualPalette().then<Object?>(
       (_) => null,
       onError: (Object e) => e,
@@ -236,10 +239,18 @@ void main() {
     ble
       ..seedPalette(_other)
       ..seedStatus(legacyStatus(wispB, _other))
+      ..holdPalette = Completer<void>()
       ..notifyStatus(legacyStatus(wispB, _other));
     await pumpEventQueue();
-    ble.holdStatusRead!.complete();
-    ble.holdStatusRead = null;
+    ble.holdClaims!.complete();
+    // Microtasks only: a timer turn would let the save's idle wait end first.
+    for (var i = 0; i < 50; i++) {
+      await Future<void>.microtask(() {});
+    }
+    ble.notifyStatus(legacyStatus(wispB, _other));
+    await pumpEventQueue();
+    ble.holdPalette!.complete();
+    ble.holdPalette = null;
     await pumpEventQueue();
     expect(n.paletteLoading, isFalse, reason: "B's palette was read");
 
