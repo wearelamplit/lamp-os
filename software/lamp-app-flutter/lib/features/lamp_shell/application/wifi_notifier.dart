@@ -38,6 +38,7 @@ class WifiNotifier extends _$WifiNotifier {
       if (linkUp) return;
       linkUp = true;
       _subscribeState(ble);
+      unawaited(_rereadState(ble));
     });
     ref.onDispose(() {
       connSub.cancel();
@@ -58,21 +59,31 @@ class WifiNotifier extends _$WifiNotifier {
 
   void _subscribeState(BleClient ble) {
     _sub?.cancel();
+    _sub = ble
+        .subscribe(_deviceId, BleUuids.controlService, BleUuids.wifiState)
+        .listen(
+          _onNotify,
+          onError: (Object e) =>
+              debugPrint('[wifi_notifier] wifiState stream error: $e'),
+        );
+  }
+
+  /// The lamp notifies only on a change, so a change made while the link
+  /// was down is recovered by reading.
+  Future<void> _rereadState(BleClient ble) async {
     try {
-      _sub = ble
-          .subscribe(_deviceId, BleUuids.controlService, BleUuids.wifiState)
-          .listen(
-            _onNotify,
-            onError: (Object e) =>
-                debugPrint('[wifi_notifier] wifiState stream error: $e'),
-          );
+      final bytes = await ble.read(
+          _deviceId, BleUuids.controlService, BleUuids.wifiState);
+      if (ref.mounted) _onNotify(bytes);
     } catch (e) {
-      _sub = null;
-      debugPrint('[wifi_notifier] subscribe failed for $_deviceId: $e');
+      debugPrint('[wifi_notifier] wifiState re-read failed for $_deviceId: $e');
     }
   }
 
   void _onNotify(Uint8List bytes) {
+    // flutter_blue_plus replays an empty cached value when a subscription
+    // starts after a reconnect.
+    if (bytes.isEmpty) return;
     final cur = state.value ?? const WifiState();
     final next = _parse(bytes);
     // Notifies for state transitions (connecting to connected to failed)

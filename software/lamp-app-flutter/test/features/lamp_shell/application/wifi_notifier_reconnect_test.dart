@@ -29,10 +29,23 @@ class _LinkScopedBle extends InMemoryBleClient {
   /// Subscribe calls, each one a notify enable on the lamp.
   int subscribes = 0;
 
+  /// Value a read returns once the link has dropped; null throws.
+  Uint8List? readAfterDrop;
+
   @override
   Future<void> disconnect(String deviceId) {
     _link++;
     return super.disconnect(deviceId);
+  }
+
+  @override
+  Future<Uint8List> read(String d, String s, String c) {
+    if (_link > 0) {
+      final v = readAfterDrop;
+      if (v == null) throw StateError('read unavailable');
+      return Future.value(v);
+    }
+    return super.read(d, s, c);
   }
 
   @override
@@ -46,6 +59,7 @@ class _LinkScopedBle extends InMemoryBleClient {
       onListen: () {
         listeners++;
         sub = src.where((_) => _notifyingLink == _link).listen(out.add);
+        if (_link > 0) out.add(Uint8List(0));
       },
       onCancel: () async {
         listeners--;
@@ -63,7 +77,7 @@ void main() {
 
   test('wifiState pushed after a reconnect reaches the picker, one listener '
       'per link', () async {
-    final ble = _LinkScopedBle();
+    final ble = _LinkScopedBle()..readAfterDrop = _b('{"state":"idle"}');
     await ble.connect(_devId);
     await ble.write(_devId, BleUuids.controlService, BleUuids.wifiState,
         _b('{"state":"idle"}'));
@@ -88,5 +102,56 @@ void main() {
     expect(ble.subscribes, 2);
     expect(ble.listeners, 1,
         reason: 'the old link\'s listener would hear every notify twice');
+  });
+
+  Future<(_LinkScopedBle, ProviderContainer)> openPicker(String json) async {
+    final ble = _LinkScopedBle();
+    await ble.connect(_devId);
+    await ble.write(
+        _devId, BleUuids.controlService, BleUuids.wifiState, _b(json));
+    final c = ProviderContainer(
+      overrides: [bleClientProvider.overrideWithValue(ble)],
+    );
+    addTearDown(c.dispose);
+    c.listen(wifiNotifierProvider(_devId), (_, _) {});
+    await c.read(wifiNotifierProvider(_devId).future);
+    await pumpEventQueue();
+    return (ble, c);
+  }
+
+  Future<void> bounce(_LinkScopedBle ble) async {
+    await ble.disconnect(_devId);
+    await pumpEventQueue();
+    await ble.connect(_devId);
+    await pumpEventQueue();
+  }
+
+  test('the empty value replayed on re-subscribe does not blank the state',
+      () async {
+    final (ble, c) = await openPicker('{"state":"scanning"}');
+    await bounce(ble);
+    expect(c.read(wifiNotifierProvider(_devId)).value!.state, 'scanning');
+  });
+
+  test('a change made while the link was down is read back on reconnect',
+      () async {
+    final (ble, c) = await openPicker('{"state":"scanning"}');
+    ble.readAfterDrop = _b(
+        '{"state":"idle","scanResults":[{"ssid":"home","rssi":-50,"encrypted":true}]}');
+    await bounce(ble);
+    final w = c.read(wifiNotifierProvider(_devId)).value!;
+    expect(w.state, 'idle');
+    expect(w.scanResults.single.ssid, 'home');
+  });
+
+  test('disposing the picker stops the renewal on a later reconnect',
+      () async {
+    final (ble, c) = await openPicker('{"state":"idle"}');
+    c.dispose();
+    await pumpEventQueue();
+    final before = ble.subscribes;
+    await bounce(ble);
+    expect(ble.subscribes, before);
+    expect(ble.listeners, 0);
   });
 }
