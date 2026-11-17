@@ -23,6 +23,8 @@ const _p = [
 ];
 const _q = [LampColor(r: 5, g: 6, b: 7, w: 0)];
 
+final _defaultSeqStart = WispNotifier.debugSeqStart;
+
 /// The lamp's merge when it holds a HELLO from [mac] and no status: no
 /// `source`, no settings, no `manualId`.
 String _helloOnly(String mac) =>
@@ -51,6 +53,29 @@ Uint8List _bytes(List<LampColor> p) => Uint8List.fromList([
 class _PaletteBle extends InMemoryBleClient {
   int paletteReads = 0;
   Completer<void>? holdPalette;
+  Completer<void>? holdPaletteWrite;
+
+  @override
+  Future<void> write(
+    String d,
+    String s,
+    String c,
+    Uint8List v, {
+    bool withoutResponse = false,
+    bool allowLongWrite = false,
+  }) async {
+    await super.write(
+      d,
+      s,
+      c,
+      v,
+      withoutResponse: withoutResponse,
+      allowLongWrite: allowLongWrite,
+    );
+    if (utf8.decode(v, allowMalformed: true).contains('setManualPalette')) {
+      await holdPaletteWrite?.future;
+    }
+  }
 
   @override
   Future<Uint8List> readSection(String deviceId, String name) async {
@@ -156,6 +181,76 @@ void main() {
       ble.holdPalette = null;
       await pumpEventQueue();
 
+      expect(n.paletteLoading, isTrue);
+    });
+  }
+
+  // The lamp relays wisp B's full status by the time a read started for A
+  // lands.
+  test('a read landing after a full status from another wisp does not count',
+      () async {
+    final ble = _PaletteBle();
+    seedPalette(ble, const []);
+    final n = await open(ble, _legacy(_a, const []));
+    expect(n.paletteLoading, isFalse);
+
+    seedPalette(ble, _p);
+    ble.holdPalette = Completer<void>();
+    notify(ble, _legacy(_a, _p));
+    await pumpEventQueue();
+    notify(ble, _legacy(_bMac, _q));
+    await pumpEventQueue();
+    ble.holdPalette!.complete();
+    ble.holdPalette = null;
+    await pumpEventQueue();
+
+    expect(n.paletteLoading, isTrue);
+  });
+
+  test('a HELLO-only status starts no palette read', () async {
+    final ble = _PaletteBle();
+    seedPalette(ble, _p);
+    final n = await open(ble, _legacy(_a, _p));
+    final reads = ble.paletteReads;
+
+    notify(ble, _helloOnly(_a));
+    await pumpEventQueue();
+
+    expect(n.paletteLoading, isTrue);
+    expect(ble.paletteReads, reads);
+  });
+
+  // The save's confirming status arrives, then the lamp loses that status
+  // and serves the wisp's HELLO only, before the write's ack.
+  for (final (name, full, seq) in [
+    ('a wisp that does not state its palette', _legacy, 0),
+    ('a wisp that states its palette', _stating, 77),
+  ]) {
+    test('$name: a save confirmed after a HELLO-only status leaves the '
+        'palette unknown', () async {
+      WispNotifier.debugSeqStart = () => 77;
+      addTearDown(() => WispNotifier.debugSeqStart = _defaultSeqStart);
+      final ble = _PaletteBle();
+      seedPalette(ble, _p);
+      final n = await open(ble, full(_a, _p));
+      expect(n.paletteLoading, isFalse);
+
+      ble.holdPaletteWrite = Completer<void>();
+      n.setManualPaletteDraft(_q);
+      final result = n.setManualPalette().then<Object?>(
+        (_) => null,
+        onError: (Object e) => e,
+      );
+      await pumpEventQueue();
+      final echo = jsonDecode(full(_a, _q)) as Map<String, dynamic>;
+      if (seq != 0) echo['manualSeq'] = seq;
+      notify(ble, jsonEncode(echo));
+      await pumpEventQueue();
+      notify(ble, _helloOnly(_a));
+      await pumpEventQueue();
+      ble.holdPaletteWrite!.complete();
+
+      expect(await result, isNull);
       expect(n.paletteLoading, isTrue);
     });
   }
