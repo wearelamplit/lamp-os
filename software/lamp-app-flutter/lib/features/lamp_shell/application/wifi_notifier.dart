@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
+import '../../../core/ble/ble_client.dart';
 import '../../../core/ble/ble_client_provider.dart';
 import '../../../core/ble/lamp_crypto.dart';
 import '../../../core/ble/uuids.dart';
@@ -25,14 +26,23 @@ class WifiNotifier extends _$WifiNotifier {
   Future<WifiState> build(String deviceId) async {
     _deviceId = deviceId;
     final ble = ref.read(bleClientProvider);
-    _sub = ble
-        .subscribe(deviceId, BleUuids.controlService, BleUuids.wifiState)
-        .listen(
-          _onNotify,
-          onError: (Object e) =>
-              debugPrint('[wifi_notifier] wifiState stream error: $e'),
-        );
-    ref.onDispose(() => _sub?.cancel());
+    _subscribeState(ble);
+    // The lamp is unbonded, so its notify subscription dies with the link
+    // and has to be renewed on every reconnect.
+    var linkUp = true;
+    final connSub = ble.watchConnected(deviceId).listen((connected) {
+      if (!connected) {
+        linkUp = false;
+        return;
+      }
+      if (linkUp) return;
+      linkUp = true;
+      _subscribeState(ble);
+    });
+    ref.onDispose(() {
+      connSub.cancel();
+      _sub?.cancel();
+    });
     // Legacy lamps predate the wifiState characteristic; the read throws
     // BleNotFound. Degrade to an empty state so the network picker renders
     // its "tap refresh" prompt instead of erroring the whole surface.
@@ -43,6 +53,22 @@ class WifiNotifier extends _$WifiNotifier {
     } catch (e) {
       debugPrint('[wifi_notifier] wifiState read failed for $deviceId: $e');
       return const WifiState();
+    }
+  }
+
+  void _subscribeState(BleClient ble) {
+    _sub?.cancel();
+    try {
+      _sub = ble
+          .subscribe(_deviceId, BleUuids.controlService, BleUuids.wifiState)
+          .listen(
+            _onNotify,
+            onError: (Object e) =>
+                debugPrint('[wifi_notifier] wifiState stream error: $e'),
+          );
+    } catch (e) {
+      _sub = null;
+      debugPrint('[wifi_notifier] subscribe failed for $_deviceId: $e');
     }
   }
 
