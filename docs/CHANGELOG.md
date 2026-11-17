@@ -5,112 +5,51 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
-## Unreleased
+## 1.3.8
 
 ### Added
 - **The app logs how long each part of a lamp connect takes.** Scan to first
-  sighting, each connect attempt (and which one worked), service discovery and
-  the first read, one `ble_timing` line each in the Android log
-  (`adb logcat -s flutter | grep ble_timing`). It is the before/after number for
-  tuning lamp advertising; connect behaviour is unchanged.
+  sighting, each connect attempt, service discovery and the first read, one
+  `ble_timing` line each in the Android log
+  (`adb logcat -s flutter | grep ble_timing`). Connect behaviour is unchanged.
 
 ### Fixed
-- **The Home Mode Wi-Fi picker keeps updating after the lamp reconnects.** The same picker in the Wisp pane too.
-- **Two firmware builds at once no longer corrupt each other.** `lamp:build`, `lamp:flash`, `lamp:buildfs`, `lamp:flashfs`, `wisp:build` and `wisp:flash` take a machine-wide lock; a second build waits (and says so) instead of linking a half-written framework library.
-- **Releases tagged from now on include the wisp image**, so `RELEASE_TAG=v1.3.x npm run wisp:flash:release` works for them (earlier tags still have none).
-- **`npm run lamp:flash:release` no longer flashes a stale `beta`.** Rolling tags (`beta`, `stable`) are downloaded fresh on every run and never reuse an old copy (offline they fail); version-tag images stay cached. The rolling `stable` release from `main` is now documented.
-- **The lamp build's compile cache is actually off.** The per-variant setting meant to disable it was ignored by PlatformIO.
+- **A lamp updated straight from the original firmware keeps its look.** Its
+  colours, base gradient direction, base knockout and Home Mode carry over,
+  and the shade keeps all its pixels lit. A lamp that already updated to an
+  earlier mesh release has to be set again in the app.
+- **A pure white shade stays white.** A shade or base set to exactly the
+  factory colour came back as the lamp type's default after a reboot.
 - **A lamp that hangs a few minutes into every boot restarts less and less
-  often.** The restart-loop guard only counted hangs in a boot's first minute,
-  so a hang that came back later in every boot restarted the lamp on the same
-  short cycle forever. Now any hang within about half an hour of starting
-  counts: after three in a row the lamp waits up to 5 minutes before
-  restarting on a hang in its first minute, and each further hang after that
-  stretch doubles it, up to its first 16 minutes.
-- **A lamp updated straight from the original firmware keeps its look.**
-  Its colours, the direction of its base gradient, its base knockout and its
-  Home Mode carry over, where they used to come out dimmer or a different
-  hue, run the other way, lose the knockout and turn Home Mode off.
-  The shade keeps all its pixels lit. Pixels between two colours may look
-  a little darker. A lamp that already
-  updated to an earlier mesh release saved the old result and has to be set
-  again in the app.
-- **A pure white shade stays white.** A lamp whose shade (or base) was set to
-  exactly the factory colour, such as white on the white LED only, came back
-  with the lamp type's default colour (dim orange on a standard lamp) after a
-  reboot. Saved colours are now kept as saved.
+  often**, instead of on the same short cycle forever.
 - **Lion heads and snafu pick up a visiting lamp's colours more reliably in a
-  crowd.** When two colour requests or two colour replies reached a lamp
-  between two passes of its main loop, the newer one replaced the older, and
-  a Lioness churning through answers could cut an earlier request's repeat
-  sends short. A lion head could sit on the lamp's main colour for up to 3
-  seconds, and a snafu could miss the colours of the lamp it just greeted (one
-  possible cause of it skipping the borrowed colours afterwards). Requests and
-  replies now wait their turn instead.
-- **A Lioness almost out of memory no longer asks for colours every frame.**
-  When it could not store a reply, it asked the same lamp again on the very
-  next frame; it now waits its usual 3 seconds.
-- **Leaving the expressions tab in the web config page no longer replays an
-  unsaved colour rotation.** If a rotation change in the app was never saved,
-  finishing an expression test in the web page spun the lamp with that
-  rotation for up to a minute. It now restores on the saved rotation.
-- **Web Config comes back after a lamp passes on an update.** Sending or
-  receiving an update over the mesh switched off the lamp's setup Wi-Fi
-  network until the next restart. It now returns once the update ends, if
-  it would still be open. A lamp whose Web Config page was open while it
-  sent an update no longer drops out of reach until it is unplugged: it
-  restarts and the app can connect again.
-- **The app hears again that a lamp has left update mode.** A "quiet"
-  change the lamp had no memory to send, or that Bluetooth had no room to
-  queue, was never sent again, so the app could stay greyed out until its
-  75 s timeout. It is now retried.
-- **A lamp with its Web Config page open waits to pass on an update.**
-  A lamp that started sending an update switched off its setup Wi-Fi
-  network under an open page, so a save hung until the update ended. It
-  now offers updates only once no phone is joined to that network. A phone
-  that joins in the 15 s after an offer goes out does not stop the send: the
-  network drops for the transfer and comes back after it.
+  crowd.** Colour requests and replies no longer overwrite each other, and a
+  Lioness low on memory no longer asks for colours every frame.
+- **Web Config comes back after a lamp passes on an update**, and a lamp with
+  its Web Config page open waits to pass one on.
+- **The app hears again that a lamp has left update mode**, instead of staying
+  greyed out until its 75 s timeout.
 - **Update data sent over Bluetooth must come over the connection that
-  started the update.** A second phone's data is refused, unless the lamp
-  hands the second phone the same connection number.
-- **The app's wisp screen keeps updating after the lamp reconnects.** It
-  froze on what it showed before the lamp dropped out, and a palette or
-  source saved after the reconnect showed "not saved" even when it landed.
-- **Reopening a lamp shows the wisp's palette as it is now.** If the wisp's
-  palette was changed or emptied from another lamp or phone while you were
-  away, the editor kept showing your old colours, and saving put them back.
-  Edits you had not saved are still kept.
-- **An empty wisp palette no longer sticks on "Reading palette from wisp…".**
-  The editor also keeps showing that line, instead of an empty palette you
-  could save over the wisp's real one, while the lamp has not yet passed the
-  palette on.
-- **A wisp palette save stops resending once the wisp leaves Manual.** It
-  kept sending the palette up to three more times.
-- **Reopening a lamp mid-update freezes editing until it is ready.** Leave a
-  lamp while the app updates it and open it again within the minute: the app
-  now greys the controls under "Giving <name> a moment to settle" until the
-  lamp listens again, then takes the lamp's word for any edit it ignored.
-  Before, the controls looked live and changes made then never reached the
-  lamp.
-- **Home Mode keeps the right brightness after a reconnect or Retry.** When
-  the link drops or you tap Retry on the Home Mode page, the app tells the
-  lamp again as soon as it is back that Home Mode is open, on any firmware, so
-  the Home brightness slider no longer changes the everyday brightness.
-- **Leaving Home Mode right as a lamp finishes updating sticks.** The app no
-  longer tells the lamp Home Mode is open again after you closed it, and a
-  Retry after a dropped link reconnects once instead of twice.
-- **A turned-down update no longer reloads the lamp.** When a lamp declines
-  an update, the app no longer re-sends its page markers and re-reads every
-  setting.
-- **Leaving Social after a reconnect mid-update frees the lamp's nearby
-  list.** The app tells the lamp Social is open as soon as it reconnects, so
-  leaving Social ends the lamp's nearby list straight away instead of about
-  30 s later.
+  started the update.**
+- **The wisp and Wi-Fi screens keep updating after a reconnect.** They froze
+  on what they showed before the lamp dropped out.
+- **The wisp palette editor shows the wisp's palette as it is now**, including
+  an empty one, which no longer sticks on "Reading palette from wisp…".
+- **Reopening a lamp mid-update freezes editing until it is ready**, under
+  "Giving <name> a moment to settle", so changes made then are not lost.
+- **Home Mode keeps the right brightness after a reconnect or Retry.**
+- **Smaller app and Web Config fixes:** leaving Home Mode as an update finishes
+  sticks; a turned-down update no longer reloads the lamp; leaving Social after
+  a reconnect frees the lamp's nearby list straight away; a wisp palette save
+  stops resending once the wisp leaves Manual; leaving the web expressions tab
+  no longer replays an unsaved colour rotation.
+- **Tooling:** two firmware builds at once no longer corrupt each other (a
+  machine-wide build lock); `lamp:flash:release` always downloads a fresh
+  `beta`/`stable`; release tags include the wisp image; the lamp build's
+  compile cache is actually off.
 
 ### Changed
-- **More refused writes show on the debug serial.** Writes from the app
-  refused for missing sign-in, size or a failed decode, and a Web Config
-  social save refused during an update, now print a `[drop]` line.
+- **More refused writes show on the debug serial** as `[drop]` lines.
 
 ## 1.3.7
 
