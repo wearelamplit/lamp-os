@@ -11,6 +11,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 - **The wisp reports the address an OSC sender should send to.** Its settings
   now carry its Ethernet or WiFi address (never its own hotspot's), ready for
   the app to show under the OSC source. Needs the wisp reflashed.
+- **Swatches on the wisp.** Besides today's gradient, the wisp can hand each
+  lamp two of the palette's own colours exactly, and a colour listed more
+  often goes to more lamps. Set it with `paint:swatches on|off` on the wisp's
+  console; the app's switch follows. Needs the wisp reflashed.
 
 ### Fixed
 - **Saving a wisp palette with white on many colours keeps the white on all of
