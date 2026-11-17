@@ -162,27 +162,34 @@ void main() {
 
   // A read started for a full status lands once the lamp serves only a
   // HELLO, from that wisp (the lamp lost its status) or another one.
-  for (final (name, mac) in [('the same wisp', _a), ('another wisp', _bMac)]) {
-    test('a read landing after a HELLO-only status from $name does not count',
-        () async {
-      final ble = _PaletteBle();
-      seedPalette(ble, const []);
-      final n = await open(ble, _legacy(_a, const []));
-      expect(n.paletteLoading, isFalse);
+  for (final (kind, full) in [
+    ('a wisp that does not state its palette', _legacy),
+    ('a wisp that states its palette', _stating),
+  ]) {
+    for (final (name, mac) in [('the same wisp', _a), ('another wisp', _bMac)]) {
+      test('$kind: a read landing after a HELLO-only status from $name does '
+          'not count', () async {
+        final ble = _PaletteBle();
+        seedPalette(ble, const []);
+        final n = await open(ble, full(_a, const []));
+        expect(n.paletteLoading, isFalse);
 
-      seedPalette(ble, _p);
-      ble.holdPalette = Completer<void>();
-      notify(ble, _legacy(_a, _p));
-      await pumpEventQueue();
+        seedPalette(ble, _p);
+        ble.holdPalette = Completer<void>();
+        final before = ble.paletteReads;
+        notify(ble, full(_a, _p));
+        await pumpEventQueue();
+        expect(ble.paletteReads, before + 1, reason: 'no read in flight');
 
-      notify(ble, _helloOnly(mac));
-      await pumpEventQueue();
-      ble.holdPalette!.complete();
-      ble.holdPalette = null;
-      await pumpEventQueue();
+        notify(ble, _helloOnly(mac));
+        await pumpEventQueue();
+        ble.holdPalette!.complete();
+        ble.holdPalette = null;
+        await pumpEventQueue();
 
-      expect(n.paletteLoading, isTrue);
-    });
+        expect(n.paletteLoading, isTrue);
+      });
+    }
   }
 
   // The lamp relays wisp B's full status by the time a read started for A
