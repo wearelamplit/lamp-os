@@ -280,20 +280,19 @@ void main() {
   );
 
   test('seqs stay in 1..65535 and step past 0', () async {
-    WispNotifier.debugSeqStart = () => 65535;
+    WispNotifier.debugSeqStart = () => 65534;
     final ble = _CountingBle();
     final n = await open(ble, _status(manualId: _id(_x), prefix: _id(_x)));
 
-    final (_, first) = save(n, _y);
-    await pumpEventQueue();
-    notify(ble, _status(manualId: _id(_y), manualSeq: 65535));
-    expect(await first, isNull);
-
-    final (_, second) = save(n, _x);
-    await pumpEventQueue();
-    expect(paletteOps(ble).last['seq'], 1);
-    notify(ble, _status(manualId: _id(_x), manualSeq: 1));
-    expect(await second, isNull);
+    var palette = _y;
+    for (final expected in [65534, 65535, 1]) {
+      final (_, result) = save(n, palette);
+      await pumpEventQueue();
+      expect(paletteOps(ble).last['seq'], expected);
+      notify(ble, _status(manualId: _id(palette), manualSeq: expected));
+      expect(await result, isNull);
+      palette = palette == _y ? _x : _y;
+    }
   });
 
   test('old wisp op: a save to a wisp that never stated its palette sends no '

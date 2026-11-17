@@ -1445,9 +1445,9 @@ class WispNotifier extends _$WispNotifier {
     if (!ok) throw Exception('wisp manual palette write not confirmed');
   }
 
-  // Steps from a random start through 1..65535, skipping the seq the wisp
-  // echoes now: a status already carrying it would confirm a save it never
-  // applied whenever the palette matched.
+  // Steps from a random start through 1..65535 and skips the seq the wisp
+  // echoes now. A status already carrying it would confirm a save the wisp
+  // never applied whenever the palette matched.
   int _mintSaveSeq(String wispMac) {
     final last = _lastSaveSeq;
     var seq = last == null ? debugSeqStart() : last % _seqMax + 1;
