@@ -358,7 +358,7 @@ void main() {
       await done;
 
       expect(error, isNotNull);
-      expect(_swatchOps(ble), [true, true, true, true]);
+      expect(_swatchOps(ble), [true], reason: 'no resend to the other wisp');
     });
 
     test('a failed source change keeps a pick still confirming', () async {

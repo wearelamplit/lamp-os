@@ -8,6 +8,11 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 ## Unreleased
 
 ### Added
+- **Mushrooms tint nearby lamps.** When a mushroom spores near a lamp, the
+  lamp sparkles in the strain's colour for 6 s, then the colour blooms over
+  its base, holds 20 s and fades back over up to 100 s. A lamp mid-tint
+  still sparkles at the next spore but doesn't tint again. Older lamps keep
+  playing it as a 2 s sparkle. No change to the mesh messages or the app.
 - **The app shows where to send OSC.** The third palette source is now called
   OSC, with the Straylight role picker under it, and shows the wisp's address
   and port 9000 with a copy button, or says the wisp has no address yet. Needs
@@ -24,6 +29,13 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   `osc:mode maestro` and `osc:slot <n>` on the wisp's console, then point the
   Maestro at the wisp's address, port 9000. Lamps keep the last Maestro
   palette when it goes quiet. Needs the wisp reflashed.
+- **Maestro under the OSC source, in the app.** A Straylight | Maestro switch
+  picks the sender; Maestro shows a palette slot picker (1 to 10) and says
+  what to set on the Maestro ("send palette slot 3 to 192.168.1.42, port
+  9000"), with the send-to address under both. A change shows at once and
+  goes back with "Couldn't reach the wisp." if the wisp never confirms it.
+  Needs the wisp reflashed with the Maestro firmware above; an older wisp
+  shows the Straylight role picker and asks to be updated.
 - **The wisp follows any OSC sender on a typed address.** A third OSC
   sub-mode, Custom, reads one address you type (up to 15 characters,
   starting with `/`), matched exactly, and works out the colour format from
@@ -37,6 +49,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   earlier one. Needs the wisp reflashed; an older app's pick works as before.
 
 ### Changed
+- **A one-off Shifty no longer ends in a Glitchy.** A Shifty played from the
+  app's Test with colours, or a mushroom's tint, fades back and stops; a
+  configured Shifty still chains into Glitchy.
 - **A failed `ble_timing` line now says why.** Failed connect, discover and
   first-read lines end with `reason=<Type>:<code>:<description>` (the Android
   status such as 133, or flutter_blue_plus's own code, when given), so a failed attempt can be told
