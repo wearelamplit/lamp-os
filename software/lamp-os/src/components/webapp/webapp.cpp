@@ -411,6 +411,13 @@ static void onWsEvent(AsyncWebSocket* /*srv*/, AsyncWebSocketClient* /*client*/,
 static void onApStaConnected(arduino_event_id_t) { s_pendingServerStart = true; }
 static void onApStaDisconnected(arduino_event_id_t) { s_pendingServerStop = true; }
 
+// Never auto-format: an FS-OTA'd image that mounts inconsistent must not be
+// silently wiped. A genuinely blank/corrupt partition just yields no UI (BLE
+// still works); production USB flash always lays down a valid image.
+static void mountUiFiles() {
+  SPIFFS.begin(/*formatOnFail=*/false, kUiFsBasePath);
+}
+
 // Stage 2: bring up the AsyncWebServer (spins the AsyncTCP task). Runs on the
 // loop task, never the WiFi event task. Idempotent.
 static void startServer() {
@@ -419,10 +426,7 @@ static void startServer() {
     s_deadlineMs = millis() + LAMP_WEBAPP_IDLE_TIMEOUT_MS;
   }
 
-  // Never auto-format: an FS-OTA'd image that mounts inconsistent must not be
-  // silently wiped. A genuinely blank/corrupt partition just yields no UI
-  // (BLE still works); production USB flash always lays down a valid image.
-  SPIFFS.begin(/*formatOnFail=*/false);
+  mountUiFiles();
 
   buildSettingsSnapshot();
 
@@ -610,7 +614,11 @@ bool isActive() { return s_ap.up(); }
 
 bool hasClient() { return s_ap.up() && WiFi.softAPgetStationNum() > 0; }
 
-bool serverUp() { return s_serverUp; }
+void remountUiFiles() {
+  if (!s_serverUp) return;
+  SPIFFS.end();
+  mountUiFiles();
+}
 
 void shutdownForOta() {
   std::lock_guard<std::mutex> lock(s_otaApMu);

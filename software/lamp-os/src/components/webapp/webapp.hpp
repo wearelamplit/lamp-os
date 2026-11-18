@@ -16,9 +16,14 @@ bool isActive();
 // AP is actively transmitting rather than just beaconing.
 bool hasClient();
 
-// True once the config web server is up. From then until the reboot that ends
-// the session it serves the web UI files from SPIFFS, which must stay mounted.
-bool serverUp();
+// Mount point of the web UI files (the SPIFFS partition, unlabelled). The web
+// server mounts it there while it serves; fs_ota mounts it there for a digest
+// pass and reuses the server's mount when one is up.
+constexpr char kUiFsBasePath[] = "/spiffs";
+
+// Call after the web UI partition is rewritten in place, on the loop task. A
+// web server that is up gets a fresh mount of the new files; otherwise no-op.
+void remountUiFiles();
 
 // Takes the softAP down for an OTA radio pause, so its beacons leave the
 // airtime to the chunk stream. ota_quiet_mode calls it after each pause,

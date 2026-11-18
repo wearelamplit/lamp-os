@@ -21,17 +21,23 @@ config page, so `ble_control::deinitForWebapp()` tears BLE (NimBLE host + BT
 controller) down on client-connect to give the serve headroom. BLE comes back
 only via a reboot on session end (`webapp::tick()`), never an in-place re-init.
 
-SPIFFS (the web UI files) is mounted only while something reads it. `fs_ota`
-mounts it for one digest pass (the boot digest, `fsVerify` after a web UI
-update over the mesh, the `fsFinalize` recompute) and unmounts it after
-(`DigestPassMount`), unless the web server is up: `startServer` mounts it and
-the server reads from it until the reboot that ends the session
-(`webapp::serverUp`). The mount holds ~4.4 KB, a 2.8 KB cache among it. The
-file walk (`enumerateManifest`) uses `opendir`/`readdir`/`stat` and never has
-two stdio `FILE`s open at once. A second open `FILE` makes newlib allocate a
-448 B glue block it never frees (rule 5), which at boot pins a hole in the
-largest free block. Each Arduino `File` also carries a 4 KB stdio buffer
-while open.
+SPIFFS (the web UI files, `webapp::kUiFsBasePath`) is mounted only while
+something reads it. The web server mounts it through Arduino's `SPIFFS` when it
+starts (`startServer`) and reads from it until the reboot that ends the
+session. `fs_ota`'s digest passes (the boot digest, `fsVerify` after a web UI
+update over the mesh, the `fsFinalize` recompute) mount it through IDF
+(`esp_vfs_spiffs_register`) for the pass and unregister it after
+(`DigestPassMount`), or reuse the server's mount when one is up. IDF frees all
+of its mount on unregister; Arduino's first `SPIFFS.begin` creates a mutex it
+never frees (rule 5), so only the web server, which runs after boot, mounts
+through Arduino. The pass reads files through `open`/`lseek`/`read` and walks
+with `opendir`/`readdir`/`stat`, so it opens no stdio `FILE`. A `FILE` carries
+a 4 KB buffer while open, and a second open `FILE` makes newlib allocate a
+448 B glue block it never frees (rule 5). Before a web UI update writes the
+partition raw, `fsRecvPartition` drops whichever mount holds it (`SPIFFS.end`
+unregisters the unlabelled SPIFFS mount, Arduino's or IDF's), and `fsVerify`
+gives a running server a fresh mount of the new files
+(`webapp::remountUiFiles`).
 
 ## The recurring anti-pattern
 
