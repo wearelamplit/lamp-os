@@ -269,11 +269,14 @@ void test_the_busy_window_survives_the_millis_wrap() {
   ExpressionInvocation tint;
   uint32_t afterMs = 0;
   const ExpressionInvocation spore = parse(kGolden);
-  const uint32_t start = UINT32_MAX - 1000;
+  // The busy window ends before millis() wraps; the next spore lands after it.
+  const uint32_t start = UINT32_MAX - TransientSlots::kMaxLifetimeMs - 60000;
   TEST_ASSERT_TRUE(t.follow(spore, start, tint, afterMs));
   TEST_ASSERT_FALSE(t.follow(spore, start + 5000, tint, afterMs));
   TEST_ASSERT_FALSE(t.follow(spore, start + 60000, tint, afterMs));
-  TEST_ASSERT_TRUE(t.follow(spore, start + TransientSlots::kMaxLifetimeMs + 10000, tint, afterMs));
+  const uint32_t afterWrap = start + TransientSlots::kMaxLifetimeMs + 70000;
+  TEST_ASSERT_TRUE(afterWrap < start);
+  TEST_ASSERT_TRUE(t.follow(spore, afterWrap, tint, afterMs));
 }
 
 int main(int, char**) {
