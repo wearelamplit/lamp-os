@@ -617,8 +617,8 @@ class WispNotifier extends _$WispNotifier {
     );
   }
 
-  // A build read, noted as `_onIncoming` notes a notify: before the
-  // source-write guard, so a status it holds off still names its wisp.
+  // A build read, noted before the source-write guard as `_onIncoming` notes
+  // a notify, so a status the guard holds off still names its wisp.
   Future<WispStatus?> _readStatusNoted() async {
     final raw = await _repo.readStatus();
     _notePaletteStatus(raw);
