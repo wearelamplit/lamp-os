@@ -1662,16 +1662,12 @@ class _ConfigPick<T extends Object> {
   int? seq;
   bool confirming = false;
   int epoch = 0;
-  // The seqs of earlier picks to [mac].
+  // The seqs of this phone's earlier picks.
   final Set<int> _superseded = {};
 
   void start(T value, String mac, int? seq) {
     final prior = this.seq;
-    if (mac != this.mac) {
-      _superseded.clear();
-    } else if (prior != null && prior != seq) {
-      _superseded.add(prior);
-    }
+    if (prior != null && prior != seq) _superseded.add(prior);
     this.value = value;
     this.mac = mac;
     this.seq = seq;

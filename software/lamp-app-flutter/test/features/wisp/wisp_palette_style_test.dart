@@ -502,6 +502,27 @@ void main() {
       expect(now.paletteStyle, PaletteStyle.swatches);
       await style;
     });
+
+    test('a late echo heard while another wisp is shown sends nothing',
+        () async {
+      final defaultSeqStart = WispNotifier.debugSeqStart;
+      WispNotifier.debugSeqStart = () => 100;
+      addTearDown(() => WispNotifier.debugSeqStart = defaultSeqStart);
+      final (ble, _, n) = await open();
+
+      final a = n.setPaletteStyle(PaletteStyle.swatches);
+      await pumpEventQueue();
+      final b = n.setPaletteStyle(PaletteStyle.gradient);
+      await pumpEventQueue();
+      _notify(ble, _status(seen: 200, echo: 101));
+      await Future.wait([a, b]);
+
+      _notify(ble, otherWisp(300));
+      await pumpEventQueue();
+      _notify(ble, _status(seen: 400, echo: 100));
+      await pumpEventQueue();
+      expect(_swatchSends(ble), hasLength(2));
+    });
   });
 
   group('palette style on screen', () {
