@@ -101,7 +101,7 @@ class WispConfig {
 
   // How lamps take colours from the palette, in every source mode. [seq] is
   // the app's setSwatches seq (1..65535) echoed in the status until the next
-  // style change; 0 for none. RAM-only.
+  // style pick, the held style included; 0 for none. RAM-only.
   PaletteStyle paletteStyle() const { return paletteStyle_; }
   uint16_t swatchesSeq() const { return swatchesSeq_; }
   void setPaletteStyle(PaletteStyle style, uint16_t seq = 0);

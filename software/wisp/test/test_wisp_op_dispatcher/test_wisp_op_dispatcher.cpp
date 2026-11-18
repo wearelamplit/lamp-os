@@ -723,7 +723,8 @@ static uint32_t statusSwatchesSeq(const wisp::WispConfig& cfg) {
 }
 
 // After pick A then pick B, the status names B; a late copy of A lands
-// as A's number, so a reader waiting on B tells the two apart.
+// as A's number, so a reader waiting on B tells the two apart. A pick of the
+// held style moves the echo too.
 void test_set_swatches_echoes_the_seq_of_the_last_applied_pick() {
     wisp::WispConfig cfg;
     cfg.begin();
@@ -738,6 +739,10 @@ void test_set_swatches_echoes_the_seq_of_the_last_applied_pick() {
     TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedSwatches, (int)dispatchStr(d, pickA));
     TEST_ASSERT_EQUAL_UINT32(41, statusSwatchesSeq(cfg));
     TEST_ASSERT_EQUAL_INT((int)wisp::PaletteStyle::Swatches, (int)cfg.paletteStyle());
+
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedSwatches, (int)dispatchStr(d,
+        R"({"char":"wispOp","op":"setSwatches","swatches":true,"seq":43})"));
+    TEST_ASSERT_EQUAL_UINT32(43, statusSwatchesSeq(cfg));
     TEST_ASSERT_EQUAL_UINT32(0, cfg.opSeq());
 }
 

@@ -71,8 +71,8 @@ static wisp::WispConfigFields worstConfig() {
 
 // Guaranteed core at pathological widths: 16-digit lastSeenMs, widest
 // source, both bools false (wider than true), hasPassword present, a
-// non-empty manualId, a 5-digit manualSeq and swatchesSeq. All optional fields at their app
-// defaults (omitted).
+// non-empty manualId, a 5-digit manualSeq and swatchesSeq. All optional
+// fields at their app defaults (omitted).
 void test_core_worst_case_pinned_under_cap() {
   wisp::WispStatusFields f = plain();
   setUptimeMs(kWidestStampMs);
