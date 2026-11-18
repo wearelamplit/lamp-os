@@ -78,21 +78,21 @@ so the app, `exprcat` and `test_builtin_descriptors` are unchanged:
 
 **Spore tint.** A mushroom's spore reaches nearby lamps as a `MSG_COMMAND`
 whose invocation is a tinted flicker burst that also carries `fadeDuration`
-(seconds), a key flicker does not read. Every lamp plays the burst; a lamp
-that knows the spore tint (`SporeTint`, `expressions/spore_tint.hpp`) then,
-250 ms after the burst ends (so the burst is reaped and its Remote slot is
-free), tints its base in the spore's colour: a transient `shifty`
-from the same sender, Bloom fill, 4 s fade in, 20 s hold, opacity 80 **(T)**,
-fading back over the command's `fadeDuration`, capped at 100 s so the whole
-tint finishes inside the 180 s transient lifetime (a static assert in
-`spore_tint.cpp` ties the two). Only a command that started its burst at once
-(no `delayMs`) is followed. While a tint waits for its burst (up to 1 s past
-its start time) or a peer's `shifty` transient is in flight, another spore
-still sparkles but tints nothing. A queued tint that never starts (home mode
-clears the queue, no Remote slot is free) holds nothing back. No lamp sends this shape: flicker is
-continuous, so the cascade and announce paths never send it, and Fireflies'
-beat carries no `fadeDuration`. Tests: `test/test_spore_tint/`,
-`test/test_shifty_one_shot/`.
+(seconds), a key flicker does not read. Every lamp plays the burst. A lamp
+that knows the spore tint (`SporeTint`, `expressions/spore_tint.hpp`) books a
+tint and starts it from the loop once the burst's length has passed and the
+burst has been reaped, so the tint takes the Remote slot the burst held. The
+tint is a transient `shifty` from the same sender on the base: Bloom fill, 4 s
+fade in, 20 s hold, opacity 80 **(T)**, fading back over the command's
+`fadeDuration`, capped at 100 s so the whole tint finishes inside the 180 s
+transient lifetime (a static assert in `spore_tint.cpp` ties the two). Only a
+command that started its burst at once (no `delayMs`) is followed. While a
+tint is booked or a peer's `shifty` transient is in flight, another spore
+still sparkles but tints nothing. A booked tint the manager refuses when its
+time comes (home mode, no Remote slot free) is dropped. No lamp sends this
+shape: flicker is continuous, so the cascade and announce paths never send
+it, and Fireflies' beat carries no `fadeDuration`. Tests:
+`test/test_spore_tint/`, `test/test_shifty_one_shot/`.
 
 **Colours.** Whisper's origin
 colour rides the frame as `c`, so a hop far from the origin still has it. Any

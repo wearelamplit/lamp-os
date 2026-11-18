@@ -30,6 +30,7 @@
 #include "core/power_governor.hpp"
 #include "expressions/expression_manager.hpp"
 #include "expressions/expression_observer.hpp"
+#include "expressions/spore_tint.hpp"
 #include "util/uptime.hpp"
 
 // Per-pixel knockout staging slot. Drain reads + clears, BLE callback
@@ -74,6 +75,7 @@ extern lamp::BluetoothComponent bt;
 extern lamp::FirmwareReceiver firmwareReceiver;
 extern lamp::MeshLink meshLink;
 extern lamp::ExpressionManager expressionManager;
+extern lamp::SporeTint sporeTint;
 extern lamp::ExpressionObserverRegistry expressionObserverRegistry;
 extern lamp::SocialEchoObserver socialEchoObserver;
 extern lamp::FondnessEngine fondnessEngine;

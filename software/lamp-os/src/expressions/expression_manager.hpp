@@ -299,8 +299,9 @@ class ExpressionManager {
   // fire or a transient, within windowMs before nowMs.
   bool playedWithin(const char* type, uint32_t windowMs, uint32_t nowMs) const;
 
-  // True while a peer's transient of `type` is in flight here, until reaped.
-  bool remoteTransientPlaying(const char* type) const;
+  // True while a peer's transient of `type` is in flight here, until reaped;
+  // from `srcMac` only, when given.
+  bool remoteTransientPlaying(const char* type, const uint8_t* srcMac = nullptr) const;
 
   /**
    * Garbage-collect transient one-shot expressions created by

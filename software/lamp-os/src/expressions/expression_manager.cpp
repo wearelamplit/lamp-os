@@ -236,9 +236,12 @@ void ExpressionManager::retireStale(uint32_t nowMs) {
   recentPlays_.retire(nowMs);
 }
 
-bool ExpressionManager::remoteTransientPlaying(const char* type) const {
+bool ExpressionManager::remoteTransientPlaying(const char* type, const uint8_t* srcMac) const {
   for (const auto& t : transientExpressions_) {
-    if (t.source == TransientSource::Remote && t.type == type) return true;
+    if (t.source == TransientSource::Remote && t.type == type &&
+        (!srcMac || std::memcmp(t.srcMac, srcMac, 6) == 0)) {
+      return true;
+    }
   }
   return false;
 }

@@ -1,9 +1,9 @@
 // A mushroom's spore command against the shipped ExpressionManager: the burst
 // plays at once, then the spore tint follows from the same sender once the
 // burst ends, one tint at a time. Commands shaped like a lamp's own never
-// book a tint. The compositor and mesh are link stubs; the delayed-trigger
-// queue is captured here and run in lamp.cpp's loop order, where due queued
-// invocations fire before the frame is drawn and finished transients reaped.
+// book a tint. The compositor and mesh are link stubs; the
+// loop runs in lamp.cpp's order: commands drain, the frame is drawn, finished
+// transients are reaped, then the spore tint ticks.
 
 #include <unity.h>
 
@@ -59,19 +59,6 @@ bool MeshLink::isOtaInProgress() const { return false; }
 void MeshLink::getMyMac(uint8_t* mac) const { std::memset(mac, 0, 6); }
 uint8_t Config::getDisposition(const uint8_t*) const { return 5; }
 
-struct Queued {
-  ExpressionInvocation inv;
-  uint8_t srcMac[6];
-  uint32_t delayMs;
-};
-std::vector<Queued> s_queued;
-void enqueueDelayedInvocation(const ExpressionInvocation& inv, const uint8_t srcMac[6],
-                              uint32_t delayMs) {
-  Queued& q = s_queued.emplace_back();
-  q.inv = inv;
-  std::memcpy(q.srcMac, srcMac, 6);
-  q.delayMs = delayMs;
-}
 }  // namespace lamp
 
 using namespace lamp;
@@ -114,14 +101,9 @@ struct Rig {
   ExpressionManager manager;
   SporeTint sporeTint;
   uint32_t now = 10000;
-  struct Due {
-    Queued q;
-    uint32_t fireAtMs;
-  };
-  std::vector<Due> due;
-  // Every queued tint that started, and the flicker transients running as it did.
+  // Each tint that started: when, and how many flicker bursts still ran then.
+  std::vector<uint32_t> tintStartsMs;
   std::vector<size_t> burstsAtTintStart;
-  size_t tintsRefused = 0;
 
   Rig() {
     for (FrameBuffer* fb : {&shade, &base}) {
@@ -129,7 +111,6 @@ struct Rig {
       fb->buffer.assign(24, Color(0, 0, 0, 100));
     }
     s_registered.clear();
-    s_queued.clear();
     manager.registry().add(ShimmerExpression::classDescriptor());
     manager.registry().add(ShiftyExpression::classDescriptor());
     manager.begin(&shade, &base);
@@ -137,35 +118,26 @@ struct Rig {
     set_mock_millis(now);
   }
   bool play(const ExpressionInvocation& inv, const uint8_t mac[6]) {
-    const size_t before = s_queued.size();
-    const bool played = playReceivedCommand(manager, sporeTint, inv, mac);
-    for (size_t i = before; i < s_queued.size(); ++i) {
-      due.push_back({s_queued[i], now + s_queued[i].delayMs});
-    }
-    return played;
+    return playReceivedCommand(manager, sporeTint, inv, mac);
   }
-  // One loop pass: due queued invocations fire, then a frame, then reaping.
+  void tick() {
+    const size_t tintsBefore = running("shifty");
+    const size_t bursts = running("flicker");
+    sporeTint.tick(manager, now);
+    if (running("shifty") > tintsBefore) {
+      tintStartsMs.push_back(now);
+      burstsAtTintStart.push_back(bursts);
+    }
+  }
   void pass() {
     now += kStepMs;
     set_mock_millis(now);
-    for (auto it = due.begin(); it != due.end();) {
-      if (static_cast<int32_t>(now - it->fireAtMs) < 0) {
-        ++it;
-        continue;
-      }
-      const size_t bursts = running("flicker");
-      if (manager.triggerInvocation(it->q.inv, it->q.srcMac)) {
-        burstsAtTintStart.push_back(bursts);
-      } else {
-        ++tintsRefused;
-      }
-      it = due.erase(it);
-    }
     for (AnimatedBehavior* b : std::vector<AnimatedBehavior*>(s_registered)) {
       b->control();
       b->draw();
     }
     manager.gcTransients();
+    tick();
   }
   void advance(uint32_t ms) {
     for (uint32_t end = now + ms; static_cast<int32_t>(now - end) < 0;) pass();
@@ -178,46 +150,78 @@ struct Rig {
     }
     return n;
   }
+  Expression* tintOnScreen() const {
+    for (AnimatedBehavior* b : s_registered) {
+      auto* e = static_cast<Expression*>(b);
+      if (std::strcmp(e->descriptor().id, "shifty") == 0) return e;
+    }
+    return nullptr;
+  }
 };
+
+uint32_t tintAfterMs(const ExpressionInvocation& burst) {
+  ExpressionInvocation tint;
+  uint32_t afterMs = 0;
+  TEST_ASSERT_TRUE(SporeTint::tintFor(burst, tint, afterMs));
+  return afterMs;
+}
 
 }  // namespace
 
 void setUp() {}
 void tearDown() {}
 
+void test_the_golden_spore_names_its_tint() {
+  ExpressionInvocation tint;
+  uint32_t afterMs = 0;
+  TEST_ASSERT_TRUE(SporeTint::tintFor(parse(kGolden), tint, afterMs));
+  TEST_ASSERT_EQUAL_STRING("shifty", tint.type.c_str());
+  TEST_ASSERT_EQUAL_UINT8(TARGET_BASE, tint.target);
+  TEST_ASSERT_EQUAL_size_t(1, tint.colors.size());
+  TEST_ASSERT_TRUE(tint.colors[0] == kSporeColour);
+  TEST_ASSERT_EQUAL_UINT32(kShiftyFillBloom, getParam(tint.parameters, "fillMode"));
+  TEST_ASSERT_EQUAL_UINT32(SporeTint::kFadeS, getParam(tint.parameters, "fadeDuration"));
+  TEST_ASSERT_EQUAL_UINT32(SporeTint::kHoldS, getParam(tint.parameters, "shiftDurationMin"));
+  TEST_ASSERT_EQUAL_UINT32(SporeTint::kHoldS, getParam(tint.parameters, "shiftDurationMax"));
+  TEST_ASSERT_EQUAL_UINT32(SporeTint::kOpacityPct, getParam(tint.parameters, "opacity"));
+  TEST_ASSERT_TRUE(afterMs >= 6000 && afterMs < 7000);
+}
+
+// The fade back follows the spore's fadeDuration up to the cap.
+void test_the_tint_fades_back_over_the_spores_fade_duration() {
+  for (uint32_t asked : {1u, 60u, SporeTint::kMaxFadeBackS, SporeTint::kMaxFadeBackS + 1, 600u}) {
+    ExpressionInvocation spore = parse(kGolden);
+    spore.parameters.set("fadeDuration", asked);
+    ExpressionInvocation tint;
+    uint32_t afterMs = 0;
+    TEST_ASSERT_TRUE(SporeTint::tintFor(spore, tint, afterMs));
+    TEST_ASSERT_EQUAL_UINT32(std::min(asked, SporeTint::kMaxFadeBackS),
+                             getParam(tint.parameters, "durationMax"));
+  }
+}
+
 void test_the_golden_spore_bursts_then_tints_from_its_sender() {
   Rig r;
+  const uint32_t start = r.now;
   TEST_ASSERT_TRUE(r.play(parse(kGolden), kMushroom));
   TEST_ASSERT_EQUAL_size_t(1, r.running("flicker"));
-  TEST_ASSERT_EQUAL_size_t(1, s_queued.size());
-  const Queued q = s_queued[0];
-  TEST_ASSERT_EQUAL_UINT8_ARRAY(kMushroom, q.srcMac, 6);
-  TEST_ASSERT_EQUAL_STRING("shifty", q.inv.type.c_str());
-  TEST_ASSERT_EQUAL_UINT8(TARGET_BASE, q.inv.target);
-  TEST_ASSERT_EQUAL_size_t(1, q.inv.colors.size());
-  TEST_ASSERT_TRUE(q.inv.colors[0] == kSporeColour);
-  TEST_ASSERT_EQUAL_UINT32(kShiftyFillBloom, getParam(q.inv.parameters, "fillMode"));
-  TEST_ASSERT_EQUAL_UINT32(SporeTint::kFadeS, getParam(q.inv.parameters, "fadeDuration"));
-  TEST_ASSERT_EQUAL_UINT32(SporeTint::kHoldS, getParam(q.inv.parameters, "shiftDurationMin"));
-  TEST_ASSERT_EQUAL_UINT32(SporeTint::kHoldS, getParam(q.inv.parameters, "shiftDurationMax"));
-  TEST_ASSERT_EQUAL_UINT32(SporeTint::kOpacityPct, getParam(q.inv.parameters, "opacity"));
+  r.advance(tintAfterMs(parse(kGolden)) + 2 * kStepMs);
 
-  // The tint starts once the 6 s burst is over, within a second of it.
-  TEST_ASSERT_TRUE(q.delayMs >= 6000 && q.delayMs < 7000);
-  r.advance(q.delayMs - kStepMs);
-  TEST_ASSERT_EQUAL_size_t(0, r.burstsAtTintStart.size());
-  r.advance(2 * kStepMs);
-  TEST_ASSERT_EQUAL_size_t(1, r.burstsAtTintStart.size());
+  // One tint, started once the 6 s burst was over and reaped, within a second.
+  TEST_ASSERT_EQUAL_size_t(1, r.tintStartsMs.size());
   TEST_ASSERT_EQUAL_size_t(0, r.burstsAtTintStart[0]);
-  TEST_ASSERT_EQUAL_size_t(1, r.running("shifty"));
-  for (AnimatedBehavior* b : s_registered) {
-    auto* e = static_cast<Expression*>(b);
-    if (std::strcmp(e->descriptor().id, "shifty") != 0) continue;
-    TEST_ASSERT_EQUAL_PTR(&r.base, e->fb);
-    TEST_ASSERT_TRUE(e->isTransient);
-  }
-  // The same sender's tint is in flight, so a copy of it coalesces.
-  TEST_ASSERT_FALSE(r.manager.triggerInvocation(q.inv, q.srcMac));
+  TEST_ASSERT_TRUE(r.tintStartsMs[0] - start >= 6000 && r.tintStartsMs[0] - start < 7000);
+  Expression* tint = r.tintOnScreen();
+  TEST_ASSERT_NOT_NULL(tint);
+  TEST_ASSERT_EQUAL_PTR(&r.base, tint->fb);
+  TEST_ASSERT_TRUE(tint->isTransient);
+  TEST_ASSERT_EQUAL_size_t(1, tint->getColors().size());
+  TEST_ASSERT_TRUE(tint->getColors()[0] == kSporeColour);
+  // From the spore's sender: a peer's shifty from that MAC coalesces with it.
+  ExpressionInvocation same;
+  same.type = "shifty";
+  same.target = TARGET_BASE;
+  TEST_ASSERT_FALSE(r.manager.triggerInvocation(same, kMushroom));
 }
 
 // With another peer's transient holding the second Remote slot, the tint
@@ -227,23 +231,19 @@ void test_the_tint_starts_beside_another_peers_transient() {
   TEST_ASSERT_TRUE(r.play(parse(kGolden), kMushroom));
   r.advance(1000);
   TEST_ASSERT_TRUE(r.play(parse(kGolden), kOtherMushroom));
-  TEST_ASSERT_EQUAL_size_t(1, s_queued.size());
   r.advance(6000);
-  TEST_ASSERT_EQUAL_size_t(0, r.tintsRefused);
-  TEST_ASSERT_EQUAL_size_t(1, r.burstsAtTintStart.size());
+  TEST_ASSERT_EQUAL_size_t(1, r.tintStartsMs.size());
   TEST_ASSERT_EQUAL_size_t(1, r.running("shifty"));
 }
 
 // The tint completes before the transient lifetime cap would reap it, even at
-// its longest fade back, and fires no glitchy.
+// its longest fade back.
 void test_the_tint_completes_inside_the_lifetime_cap() {
   Rig r;
   ExpressionInvocation spore = parse(kGolden);
   spore.parameters.set("fadeDuration", 600);
   TEST_ASSERT_TRUE(r.play(spore, kMushroom));
-  TEST_ASSERT_TRUE(getParam(s_queued[0].inv.parameters, "durationMax") <=
-                   SporeTint::kMaxFadeBackS);
-  r.advance(s_queued[0].delayMs + kStepMs);
+  r.advance(tintAfterMs(spore) + kStepMs);
   TEST_ASSERT_EQUAL_size_t(1, r.running("shifty"));
   const uint32_t start = r.now;
   while (r.running("shifty") > 0) {
@@ -257,7 +257,7 @@ void test_the_tint_completes_inside_the_lifetime_cap() {
 void test_a_second_spore_inside_the_tint_books_no_second_tint() {
   Rig r;
   TEST_ASSERT_TRUE(r.play(parse(kGolden), kMushroom));
-  r.advance(s_queued[0].delayMs + kStepMs);
+  r.advance(tintAfterMs(parse(kGolden)) + kStepMs);
   TEST_ASSERT_EQUAL_size_t(1, r.running("shifty"));
 
   // Mid-tint, another mushroom and the same one again: both sparkle, neither tints.
@@ -267,13 +267,15 @@ void test_a_second_spore_inside_the_tint_books_no_second_tint() {
   TEST_ASSERT_TRUE(r.play(parse(kGolden), kMushroom));
   r.advance(60000);
   TEST_ASSERT_TRUE(r.play(parse(kGolden), kOtherMushroom));
-  TEST_ASSERT_EQUAL_size_t(1, s_queued.size());
+  r.advance(10000);
+  TEST_ASSERT_EQUAL_size_t(1, r.tintStartsMs.size());
 
   // Once the first tint is over, the next spore tints again.
   while (r.running("shifty") > 0) r.advance(1000);
   r.advance(10000);
   TEST_ASSERT_TRUE(r.play(parse(kGolden), kOtherMushroom));
-  TEST_ASSERT_EQUAL_size_t(2, s_queued.size());
+  r.advance(tintAfterMs(parse(kGolden)) + kStepMs);
+  TEST_ASSERT_EQUAL_size_t(2, r.tintStartsMs.size());
 }
 
 // A second spore while the first's tint waits for its burst books none.
@@ -282,36 +284,56 @@ void test_a_second_spore_while_a_tint_waits_books_none() {
   TEST_ASSERT_TRUE(r.play(parse(kGolden), kMushroom));
   r.advance(5000);
   TEST_ASSERT_TRUE(r.play(parse(kGolden), kOtherMushroom));
-  r.advance(s_queued[0].delayMs);
-  TEST_ASSERT_EQUAL_size_t(1, s_queued.size());
+  r.advance(20000);
+  TEST_ASSERT_EQUAL_size_t(1, r.tintStartsMs.size());
 }
 
-// A queued tint that never starts (home mode clears the queue, or no slot is
-// free) frees the lamp to tint at the next spore once its start time passes.
-void test_a_tint_that_never_starts_does_not_block_the_next() {
+// The loop stalls past the tint's start time and a second spore drains on the
+// pass that ends the stall: the booked tint still starts alone.
+void test_a_stalled_loop_still_starts_one_tint() {
   Rig r;
   TEST_ASSERT_TRUE(r.play(parse(kGolden), kMushroom));
-  r.due.clear();
-  r.advance(s_queued[0].delayMs + SporeTint::kFireGraceMs + kStepMs);
-  TEST_ASSERT_EQUAL_size_t(0, r.running("shifty"));
+  r.advance(3000);
+  r.now += 5000;
+  set_mock_millis(r.now);
   TEST_ASSERT_TRUE(r.play(parse(kGolden), kOtherMushroom));
-  TEST_ASSERT_EQUAL_size_t(2, s_queued.size());
+  r.advance(30000);
+  TEST_ASSERT_EQUAL_size_t(1, r.tintStartsMs.size());
+}
+
+// A tint refused when its time comes (home mode refusing peers) is dropped and
+// holds off nothing: the next spore tints.
+void test_a_refused_tint_does_not_block_the_next() {
+  Rig r;
+  TEST_ASSERT_TRUE(r.play(parse(kGolden), kMushroom));
+  r.advance(tintAfterMs(parse(kGolden)) - 1000);
+  r.compositor.homeMode = true;
+  r.advance(2000);
+  r.compositor.homeMode = false;
+  r.advance(1000);
+  TEST_ASSERT_EQUAL_size_t(0, r.tintStartsMs.size());
+  TEST_ASSERT_TRUE(r.play(parse(kGolden), kOtherMushroom));
+  r.advance(tintAfterMs(parse(kGolden)) + kStepMs);
+  TEST_ASSERT_EQUAL_size_t(1, r.tintStartsMs.size());
 }
 
 // A burst that does not start (the same sender's burst still in flight, or
 // home mode refusing peers) books no tint.
 void test_a_spore_that_does_not_play_books_no_tint() {
-  Rig fresh;
-  TEST_ASSERT_TRUE(fresh.play(parse(kGolden), kMushroom));
-  fresh.advance(1000);
-  s_queued.clear();
-  TEST_ASSERT_FALSE(fresh.play(parse(kGolden), kMushroom));
-  TEST_ASSERT_EQUAL_size_t(0, s_queued.size());
+  Rig busy;
+  TEST_ASSERT_TRUE(busy.play(parse(kGolden), kMushroom));
+  busy.sporeTint = SporeTint{};
+  busy.advance(1000);
+  TEST_ASSERT_FALSE(busy.play(parse(kGolden), kMushroom));
+  busy.advance(20000);
+  TEST_ASSERT_EQUAL_size_t(0, busy.tintStartsMs.size());
 
   Rig home;
   home.compositor.homeMode = true;
   TEST_ASSERT_FALSE(home.play(parse(kGolden), kMushroom));
-  TEST_ASSERT_EQUAL_size_t(0, s_queued.size());
+  home.compositor.homeMode = false;
+  home.advance(20000);
+  TEST_ASSERT_EQUAL_size_t(0, home.tintStartsMs.size());
 }
 
 // Lamps never send a flicker burst carrying both a colour and fadeDuration, so
@@ -327,35 +349,11 @@ void test_lamp_shaped_commands_book_no_tint() {
   for (const ExpressionInvocation& inv : {firefliesBeat(), untinted, noBurst, otherType}) {
     Rig r;
     TEST_ASSERT_TRUE(r.play(inv, kMushroom));
-    TEST_ASSERT_EQUAL_size_t(0, s_queued.size());
+    const size_t shiftyAtPlay = r.running("shifty");
+    r.advance(20000);
+    TEST_ASSERT_EQUAL_size_t(0, r.tintStartsMs.size());
+    TEST_ASSERT_TRUE(r.running("shifty") <= shiftyAtPlay);
   }
-}
-
-void test_the_booking_ends_across_the_millis_wrap() {
-  SporeTint t;
-  ExpressionInvocation tint;
-  uint32_t afterMs = 0;
-  const ExpressionInvocation spore = parse(kGolden);
-  // The booking ends just before millis() wraps; the next spore lands after it.
-  const uint32_t start = UINT32_MAX - 8000;
-  TEST_ASSERT_TRUE(t.follow(spore, start, false, tint, afterMs));
-  TEST_ASSERT_TRUE(start + afterMs + SporeTint::kFireGraceMs > start);
-  TEST_ASSERT_FALSE(t.follow(spore, start + 5000, false, tint, afterMs));
-  const uint32_t afterWrap = start + 9000;
-  TEST_ASSERT_TRUE(afterWrap < start);
-  TEST_ASSERT_TRUE(t.follow(spore, afterWrap, false, tint, afterMs));
-}
-
-// A tint booked for now has not fired yet on this pass; it still holds the
-// booking, so a spore drained first in the same pass books no second tint.
-void test_a_tint_due_this_pass_still_holds_the_booking() {
-  Rig r;
-  TEST_ASSERT_TRUE(r.play(parse(kGolden), kMushroom));
-  r.advance(1000);
-  r.now = r.due[0].fireAtMs;
-  set_mock_millis(r.now);
-  TEST_ASSERT_TRUE(r.play(parse(kGolden), kOtherMushroom));
-  TEST_ASSERT_EQUAL_size_t(1, s_queued.size());
 }
 
 // Only a peer's shifty counts as a tint playing: a peer's flicker or the
@@ -372,30 +370,48 @@ void test_only_a_peers_shifty_holds_off_a_tint() {
   const uint8_t kOwn[6] = {};
   TEST_ASSERT_TRUE(r.manager.triggerInvocation(ownShifty, kOwn, false, TransientSource::Local));
   TEST_ASSERT_TRUE(r.play(parse(kGolden), kMushroom));
-  TEST_ASSERT_EQUAL_size_t(1, s_queued.size());
+  r.advance(tintAfterMs(parse(kGolden)) + kStepMs);
+  TEST_ASSERT_EQUAL_size_t(1, r.tintStartsMs.size());
 }
 
 void test_a_playing_tint_blocks_a_booking() {
   SporeTint t;
-  ExpressionInvocation tint;
-  uint32_t afterMs = 0;
-  TEST_ASSERT_FALSE(t.follow(parse(kGolden), 1000, true, tint, afterMs));
-  TEST_ASSERT_TRUE(t.follow(parse(kGolden), 1000, false, tint, afterMs));
+  TEST_ASSERT_FALSE(t.follow(parse(kGolden), kMushroom, 1000, true));
+  TEST_ASSERT_TRUE(t.follow(parse(kGolden), kMushroom, 1000, false));
+  TEST_ASSERT_FALSE(t.follow(parse(kGolden), kOtherMushroom, 1000, false));
+}
+
+// The tint's start time survives the millis() wrap: it starts once its wait
+// has passed, though the clock wrapped and its due time did not.
+void test_the_tint_start_survives_the_millis_wrap() {
+  Rig r;
+  const uint32_t afterMs = tintAfterMs(parse(kGolden));
+  const uint32_t start = UINT32_MAX - afterMs - 500;
+  r.now = start;
+  set_mock_millis(start);
+  TEST_ASSERT_TRUE(r.play(parse(kGolden), kMushroom));
+  r.advance(afterMs - kStepMs);
+  TEST_ASSERT_EQUAL_size_t(0, r.tintStartsMs.size());
+  r.advance(2000);
+  TEST_ASSERT_TRUE(r.now < start);
+  TEST_ASSERT_EQUAL_size_t(1, r.tintStartsMs.size());
 }
 
 int main(int, char**) {
   UNITY_BEGIN();
+  RUN_TEST(test_the_golden_spore_names_its_tint);
+  RUN_TEST(test_the_tint_fades_back_over_the_spores_fade_duration);
   RUN_TEST(test_the_golden_spore_bursts_then_tints_from_its_sender);
   RUN_TEST(test_the_tint_starts_beside_another_peers_transient);
   RUN_TEST(test_the_tint_completes_inside_the_lifetime_cap);
   RUN_TEST(test_a_second_spore_inside_the_tint_books_no_second_tint);
   RUN_TEST(test_a_second_spore_while_a_tint_waits_books_none);
-  RUN_TEST(test_a_tint_that_never_starts_does_not_block_the_next);
+  RUN_TEST(test_a_stalled_loop_still_starts_one_tint);
+  RUN_TEST(test_a_refused_tint_does_not_block_the_next);
   RUN_TEST(test_a_spore_that_does_not_play_books_no_tint);
   RUN_TEST(test_lamp_shaped_commands_book_no_tint);
-  RUN_TEST(test_the_booking_ends_across_the_millis_wrap);
-  RUN_TEST(test_a_tint_due_this_pass_still_holds_the_booking);
   RUN_TEST(test_only_a_peers_shifty_holds_off_a_tint);
   RUN_TEST(test_a_playing_tint_blocks_a_booking);
+  RUN_TEST(test_the_tint_start_survives_the_millis_wrap);
   return UNITY_END();
 }
